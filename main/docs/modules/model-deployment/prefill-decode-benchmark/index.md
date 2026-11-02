@@ -218,6 +218,11 @@ Update `pd-deployment.yaml` from the
 [TCP walkthrough](/gpustack-operator/main/docs/walkthroughs/model-deployment/prefill-decode/index.md#step-1-start-disaggregated-serving):
 
 ```diff
+ apiVersion: worker.gpustack.ai/v1
+ kind: ModelDeployment
+ metadata:
+   name: pd-arm2-pd
+   namespace: gpustack-bench
  spec:
 +  kvTransfer:
 +    protocol: RDMA

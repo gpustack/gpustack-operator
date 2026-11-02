@@ -37,7 +37,7 @@ no `.partitioned*` keys at all.
 ## Resource keys
 
 `<base>` is the manufacturer's device resource (`nvidia.com/gpu`, `huawei.com/npu`, … — see
-[Accelerator support](https://github.com/gpustack/gpustack-operator/blob/423fa74ffa1443814bfdf35a8994ae8b8a9c0b4f/README.md#accelerator-support)).
+[Accelerator support](https://github.com/gpustack/gpustack-operator/blob/26f985d9ff6a706b54e102977f74c2e3a8d93bdc/README.md#accelerator-support)).
 
 | Key | Served by | Eligible accelerators | Request value | `Node` value |
 |---|---|---|---|---|
@@ -71,17 +71,31 @@ All four are `Pod`s submitted on a pool's entrance `LocalQueue` (`kueue.x-k8s.io
 **Exclusive** — two whole accelerators:
 
 ```yaml
-resources:
-  limits:
-    nvidia.com/gpu: "2"
+apiVersion: v1
+kind: Pod
+metadata:
+  name: exclusive-pod
+spec:
+  containers:
+    - name: main
+      resources:
+        limits:
+          nvidia.com/gpu: "2"
 ```
 
 **Shared** — two accelerators on one node, one of each accelerator's 10 ownership shares:
 
 ```yaml
-resources:
-  limits:
-    nvidia.com/gpu.shared: "2"
+apiVersion: v1
+kind: Pod
+metadata:
+  name: shared-pod
+spec:
+  containers:
+    - name: main
+      resources:
+        limits:
+          nvidia.com/gpu.shared: "2"
 ```
 
 The value counts accelerators, never shares of one: `"2"` needs a node with two accelerators that each
@@ -98,32 +112,53 @@ Ten tokens per accelerator hide a node's accelerator count from Kueue and the sc
 **Logical slice** — half of one accelerator's VRAM, capped at 40% of its compute:
 
 ```yaml
-resources:
-  limits:
-    nvidia.com/gpu.sliced: "1"  # always exactly 1 accelerator
-    # per accelerator; or .sliced.memory-mib, never both
-    nvidia.com/gpu.sliced.memory-percentage: "50"
-    nvidia.com/gpu.sliced.cores-percentage: "40"  # per accelerator; defaults to 100 when omitted
-    # The webhook derives nvidia.com/gpu.sliced.units; do not set it.
+apiVersion: v1
+kind: Pod
+metadata:
+  name: sliced-pod
+spec:
+  containers:
+    - name: main
+      resources:
+        limits:
+          nvidia.com/gpu.sliced: "1"  # always exactly 1 accelerator
+          # per accelerator; or .sliced.memory-mib, never both
+          nvidia.com/gpu.sliced.memory-percentage: "50"
+          nvidia.com/gpu.sliced.cores-percentage: "40"  # per accelerator; defaults to 100 when omitted
+          # The webhook derives nvidia.com/gpu.sliced.units; do not set it.
 ```
 
 **Physical partition** — one MIG `3g.40gb` instance:
 
 ```yaml
-resources:
-  limits:
-    nvidia.com/gpu.partitioned: "1"              # always exactly 1 accelerator
-    nvidia.com/gpu.partitioned.mig-3g.40gb: "1"  # always exactly 1 instance
-    # The webhook derives nvidia.com/gpu.partitioned.units; do not set it.
+apiVersion: v1
+kind: Pod
+metadata:
+  name: partitioned-pod
+spec:
+  containers:
+    - name: main
+      resources:
+        limits:
+          nvidia.com/gpu.partitioned: "1"              # always exactly 1 accelerator
+          nvidia.com/gpu.partitioned.mig-3g.40gb: "1"  # always exactly 1 instance
+          # The webhook derives nvidia.com/gpu.partitioned.units; do not set it.
 ```
 
 **The SSH sidecar** sits outside the four families, so no family rule counts it. It requests the
 internal visibility resource for its workload container's accelerator count:
 
 ```yaml
-resources:
-  limits:
-    device.gpustack.ai/nvidia.visibility: "1"
+apiVersion: v1
+kind: Pod
+metadata:
+  name: ssh-sidecar
+spec:
+  containers:
+    - name: main
+      resources:
+        limits:
+          device.gpustack.ai/nvidia.visibility: "1"
 ```
 
 ## Request rules
@@ -224,10 +259,17 @@ A logical slice request must set `<base>.sliced` to `1`.
 Accepted: `nvidia.com/gpu.sliced: "1"`. Rejected:
 
 ```yaml
-resources:
-  limits:
-    nvidia.com/gpu.sliced: "2"
-    nvidia.com/gpu.sliced.memory-percentage: "50"
+apiVersion: v1
+kind: Pod
+metadata:
+  name: invalid-slice-count
+spec:
+  containers:
+    - name: main
+      resources:
+        limits:
+          nvidia.com/gpu.sliced: "2"
+          nvidia.com/gpu.sliced.memory-percentage: "50"
 ```
 
 > `spec.containers[0].resources.limits[nvidia.com/gpu.sliced]: Invalid value: "2": a logical slice
@@ -255,10 +297,17 @@ A partition request must set `<base>.partitioned` to `1`.
 Accepted: `nvidia.com/gpu.partitioned: "1"`. Rejected:
 
 ```yaml
-resources:
-  limits:
-    nvidia.com/gpu.partitioned: "2"
-    nvidia.com/gpu.partitioned.mig-1g.10gb: "1"
+apiVersion: v1
+kind: Pod
+metadata:
+  name: invalid-partition-count
+spec:
+  containers:
+    - name: main
+      resources:
+        limits:
+          nvidia.com/gpu.partitioned: "2"
+          nvidia.com/gpu.partitioned.mig-1g.10gb: "1"
 ```
 
 > `spec.containers[0].resources.limits[nvidia.com/gpu.partitioned]: Invalid value: "2": a partition
@@ -279,11 +328,18 @@ A `Pod` must request exactly one partition profile across all containers.
 Accepted: one per-profile key. Rejected:
 
 ```yaml
-resources:
-  limits:
-    nvidia.com/gpu.partitioned: "1"
-    nvidia.com/gpu.partitioned.mig-1g.10gb: "1"
-    nvidia.com/gpu.partitioned.mig-3g.40gb: "1"
+apiVersion: v1
+kind: Pod
+metadata:
+  name: invalid-partition-profiles
+spec:
+  containers:
+    - name: main
+      resources:
+        limits:
+          nvidia.com/gpu.partitioned: "1"
+          nvidia.com/gpu.partitioned.mig-1g.10gb: "1"
+          nvidia.com/gpu.partitioned.mig-3g.40gb: "1"
 ```
 
 > `spec: Forbidden: a Pod may request only one partition profile, found [1g.10gb 3g.40gb]`
@@ -298,10 +354,17 @@ Each per-profile resource key must have a value of `1`.
 Accepted: `nvidia.com/gpu.partitioned.mig-3g.40gb: "1"`. Rejected:
 
 ```yaml
-resources:
-  limits:
-    nvidia.com/gpu.partitioned: "1"
-    nvidia.com/gpu.partitioned.mig-3g.40gb: "2"
+apiVersion: v1
+kind: Pod
+metadata:
+  name: invalid-profile-count
+spec:
+  containers:
+    - name: main
+      resources:
+        limits:
+          nvidia.com/gpu.partitioned: "1"
+          nvidia.com/gpu.partitioned.mig-3g.40gb: "2"
 ```
 
 > `spec.containers[0].resources.limits[nvidia.com/gpu.partitioned.mig-3g.40gb]: Invalid value: "2": a
@@ -446,10 +509,17 @@ RoCE and for nothing else — see
 **Shared accelerator and RDMA interface in one container**, the shape a co-located workload uses:
 
 ```yaml
-resources:
-  limits:
-    nvidia.com/gpu.shared: "1"
-    device.gpustack.ai/rdma.shared: "1"  # one concurrent use of one RDMA interface
+apiVersion: v1
+kind: Pod
+metadata:
+  name: shared-rdma-pod
+spec:
+  containers:
+    - name: main
+      resources:
+        limits:
+          nvidia.com/gpu.shared: "1"
+          device.gpustack.ai/rdma.shared: "1"  # one concurrent use of one RDMA interface
 ```
 
 ## Co-location conditions
@@ -490,11 +560,38 @@ readable source named one, never a guess of the default. See
 An `Instance` expresses the same request families through *`spec.resources`*, and the controller shapes them
 into the keys above:
 
-| Field | Effect |
-|---|---|
-| `accelerator: "N"` | whole accelerators (exclusive) — may span accelerators |
-| `accelerator: "1"`<br/>*`acceleratorSlicedMemoryPercentage`*<br/>*`acceleratorSlicedCoresPercentage`* (optional) | one logical slice |
-| `accelerator: "1"`<br/>`acceleratorPartitionedProfile: "3g.40gb"` | one hardware partition of that profile |
+The following alternatives select whole accelerators, one logical slice, or one hardware partition.
+The slice percentages are optional.
+
+```yaml
+apiVersion: worker.gpustack.ai/v1
+kind: Instance
+metadata:
+  name: exclusive-instance
+spec:
+  type: gpustack--nvidia-h100-80gb-hbm3-linux-amd64
+  resources:
+    cpu: "8"
+    ram: 64Gi
+    localStorage: 100Gi
+    accelerator: "2"  # exclusive whole accelerators; may span devices
+```
+
+```yaml
+apiVersion: worker.gpustack.ai/v1
+kind: Instance
+metadata:
+  name: sliced-instance
+spec:
+  type: gpustack--nvidia-h100-80gb-hbm3-linux-amd64
+  resources:
+    cpu: "8"
+    ram: 64Gi
+    localStorage: 100Gi
+    accelerator: "1"  # one logical slice
+    acceleratorSlicedMemoryPercentage: 50
+    acceleratorSlicedCoresPercentage: 50
+```
 
 ```yaml
 apiVersion: worker.gpustack.ai/v1
@@ -504,8 +601,11 @@ metadata:
 spec:
   type: gpustack--nvidia-h100-80gb-hbm3-linux-amd64
   resources:
-    accelerator: "1"
-    acceleratorPartitionedProfile: 3g.40gb
+    cpu: "8"
+    ram: 64Gi
+    localStorage: 100Gi
+    accelerator: "1"  # one hardware partition
+    acceleratorPartitionedProfile: "3g.40gb"
 ```
 
 The webhook rejects these at admission rather than leaving the `Instance` Pending:

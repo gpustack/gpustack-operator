@@ -1540,6 +1540,30 @@ it on every start and every upgrade.</p>
 </span></span><span class="line"><span class="cl">kubectl -n gpustack-system get setting node-management-manual -o yaml
 </span></span><span class="line"><span class="cl">kubectl -n gpustack-system edit setting node-management-manual
 </span></span><span class="line"><span class="cl">kubectl -n gpustack-system patch setting instance-type-derived-from-node --type merge -p <span class="s1">&#39;{&#34;spec&#34;:{&#34;value&#34;:&#34;false&#34;}}&#39;</span></span></span></code></pre></div>
+</div><p>For example, editing <code>node-management-manual</code> can set its value to <code>true</code>:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>diff</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-diff" data-lang="diff"><span class="line"><span class="cl"> apiVersion: gpustack.ai/v1
+</span></span><span class="line"><span class="cl"> kind: Setting
+</span></span><span class="line"><span class="cl"> metadata:
+</span></span><span class="line"><span class="cl">   name: node-management-manual
+</span></span><span class="line"><span class="cl">   namespace: gpustack-system
+</span></span><span class="line"><span class="cl"> spec:
+</span></span><span class="line"><span class="cl"><span class="gd">-  value: &lt;current-value&gt;
+</span></span></span><span class="line"><span class="cl"><span class="gd"></span><span class="gi">+  value: &#34;true&#34;
+</span></span></span></code></pre></div>
+</div><p>The patch sets <code>instance-type-derived-from-node</code> to <code>false</code>:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>diff</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-diff" data-lang="diff"><span class="line"><span class="cl"> apiVersion: gpustack.ai/v1
+</span></span><span class="line"><span class="cl"> kind: Setting
+</span></span><span class="line"><span class="cl"> metadata:
+</span></span><span class="line"><span class="cl">   name: instance-type-derived-from-node
+</span></span><span class="line"><span class="cl">   namespace: gpustack-system
+</span></span><span class="line"><span class="cl"> spec:
+</span></span><span class="line"><span class="cl"><span class="gd">-  value: &lt;current-value&gt;
+</span></span></span><span class="line"><span class="cl"><span class="gd"></span><span class="gi">+  value: &#34;false&#34;
+</span></span></span></code></pre></div>
 </div><p><strong>Effect windows</strong> — <strong>Immediate</strong>: the change does its own work. A consuming controller watches the
 delegated settings <code>Secret</code> and reconciles what the <code>Setting</code> governs, or an admission webhook starts
 judging every call by the new value. Values reach a process through a thirty-second read cache, so
@@ -1801,7 +1825,8 @@ kubelet:</li>
 </ol>
 <div class="code-block">
   <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
-  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="c"># KubeletConfiguration</span><span class="w">
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">kubelet.config.k8s.io/v1beta1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">KubeletConfiguration</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">allowedUnsafeSysctls</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span>- <span class="l">net.ipv4.tcp_tw_reuse</span></span></span></code></pre></div>
 </div><p>The command-line form is <code>--allowed-unsafe-sysctls=net.ipv4.tcp_tw_reuse</code>. It is one list, so keep
@@ -1830,6 +1855,17 @@ configuration</a>
 <div class="code-block">
   <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">kubectl -n gpustack-system patch setting model-deployment-tcp-tw-reuse --type merge -p <span class="s1">&#39;{&#34;spec&#34;:{&#34;value&#34;:&#34;true&#34;}}&#39;</span></span></span></code></pre></div>
+</div><div class="code-block">
+  <div class="code-toolbar"><span>diff</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-diff" data-lang="diff"><span class="line"><span class="cl"> apiVersion: gpustack.ai/v1
+</span></span><span class="line"><span class="cl"> kind: Setting
+</span></span><span class="line"><span class="cl"> metadata:
+</span></span><span class="line"><span class="cl">   name: model-deployment-tcp-tw-reuse
+</span></span><span class="line"><span class="cl">   namespace: gpustack-system
+</span></span><span class="line"><span class="cl"> spec:
+</span></span><span class="line"><span class="cl"><span class="gd">-  value: &#34;false&#34;
+</span></span></span><span class="line"><span class="cl"><span class="gd"></span><span class="gi">+  value: &#34;true&#34;
+</span></span></span></code></pre></div>
 </div><p><strong>Flipping it recreates the <em>prefill</em> replicas it reaches</strong>, in either direction, because the sysctl
 is part of the <code>Pod</code> spec their fingerprint covers. Each deployment picks the value up on its next
 reconcile, and a setting change does not wake one. To apply it at once, delete one of the
@@ -1867,42 +1903,23 @@ Change it or remove it and your stored value stands at the next worker start. A 
 chart renders an empty one, and <code>helm upgrade</code>. A blank declaration claims nothing, so clearing the
 chart value is what hands the <code>Setting</code> back to you.</li>
 </ul>
-<table>
-  <thead>
-      <tr>
-          <th>Chart-rendered variable</th>
-          <th>Chart value that produces it</th>
-          <th>Chart default</th>
-      </tr>
-  </thead>
-  <tbody>
-      <tr>
-          <td><code>GPUSTACK_CONTAINER_REGISTRY</code></td>
-          <td><code>global.imageRegistry</code>, falling back to <code>global.hub</code></td>
-          <td><em>(empty)</em></td>
-      </tr>
-      <tr>
-          <td><code>GPUSTACK_CONTAINER_NAMESPACE</code></td>
-          <td><code>global.imageNamespace</code></td>
-          <td><em>(empty)</em></td>
-      </tr>
-      <tr>
-          <td><code>GPUSTACK_IMAGE_PULL_SECRETS</code></td>
-          <td><code>global.imagePullSecrets</code></td>
-          <td><em>(empty)</em></td>
-      </tr>
-      <tr>
-          <td><code>GPUSTACK_IMAGE_PULL_POLICY</code></td>
-          <td><code>global.imagePullPolicy</code>, falling back to <code>worker.image.pullPolicy</code> and then <em><code>image.pullPolicy</code></em></td>
-          <td><code>IfNotPresent</code></td>
-      </tr>
-      <tr>
-          <td><code>GPUSTACK_MODEL_ARTIFACT_DELIVERY_MODE</code></td>
-          <td><code>modelManager.enabled</code>, which renders <code>Node</code> while the plugin is deployed</td>
-          <td><em>(not rendered)</em></td>
-      </tr>
-  </tbody>
-</table>
+<div class="code-block">
+  <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">global</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">imageRegistry</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;&#34;</span><span class="w">  </span><span class="c"># GPUSTACK_CONTAINER_REGISTRY; falls back to global.hub.</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">hub</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">imageNamespace</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;&#34;</span><span class="w">  </span><span class="c"># GPUSTACK_CONTAINER_NAMESPACE.</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">imagePullSecrets</span><span class="p">:</span><span class="w"> </span><span class="p">[]</span><span class="w">  </span><span class="c"># GPUSTACK_IMAGE_PULL_SECRETS.</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">imagePullPolicy</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;&#34;</span><span class="w">  </span><span class="c"># GPUSTACK_IMAGE_PULL_POLICY; falls back to worker.image.pullPolicy.</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">worker</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">image</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">pullPolicy</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;&#34;</span><span class="w">  </span><span class="c"># Falls back to image.pullPolicy.</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">image</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">pullPolicy</span><span class="p">:</span><span class="w"> </span><span class="l">IfNotPresent </span><span class="w"> </span><span class="c"># Final pull policy fallback.</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">modelManager</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">enabled</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="w">  </span><span class="c"># Renders GPUSTACK_MODEL_ARTIFACT_DELIVERY_MODE=Node when deployed.</span></span></span></code></pre></div>
+</div><p>The image variables default to empty except for the final <code>IfNotPresent</code> pull policy.
+The delivery mode variable is otherwise not rendered.</p>
 <p>Setting the chart value to an empty string is the same as clearing it. With <code>modelManager.enabled: false</code>
 the chart stops rendering the delivery mode entirely, and the stored value is then nobody&rsquo;s to write.</p>
 <h3 id="edit-reverted-on-restart">Edit reverted on restart</h3>
@@ -1924,6 +1941,17 @@ made with <code>kubectl patch</code> holds until the next start, and reverts to 
   <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">kubectl -n gpustack-system patch setting kv-cache-backend-image --type merge <span class="se">\
 </span></span></span><span class="line"><span class="cl"><span class="se"></span>  -p <span class="s1">&#39;{&#34;spec&#34;:{&#34;value&#34;:&#34;mirror.example/kv-cache:1.2.3&#34;}}&#39;</span></span></span></code></pre></div>
+</div><div class="code-block">
+  <div class="code-toolbar"><span>diff</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-diff" data-lang="diff"><span class="line"><span class="cl"> apiVersion: gpustack.ai/v1
+</span></span><span class="line"><span class="cl"> kind: Setting
+</span></span><span class="line"><span class="cl"> metadata:
+</span></span><span class="line"><span class="cl">   name: kv-cache-backend-image
+</span></span><span class="line"><span class="cl">   namespace: gpustack-system
+</span></span><span class="line"><span class="cl"> spec:
+</span></span><span class="line"><span class="cl"><span class="gd">-  value: &lt;current-value&gt;
+</span></span></span><span class="line"><span class="cl"><span class="gd"></span><span class="gi">+  value: &#34;mirror.example/kv-cache:1.2.3&#34;
+</span></span></span></code></pre></div>
 </div><p>Untracking the <code>Setting</code> is the only thing that keeps the pin, and nothing else stands in for it: a
 variable set to an empty value is no declaration, and a default that is blank is never written at all.</p>
 <div class="code-block">
@@ -1933,6 +1961,18 @@ variable set to an empty value is no declaration, and a default that is blank is
 </span></span><span class="line"><span class="cl">kubectl -n gpustack-system get setting settings-default-tracking -o yaml
 </span></span><span class="line"><span class="cl">kubectl -n gpustack-system patch setting settings-default-tracking --type merge <span class="se">\
 </span></span></span><span class="line"><span class="cl"><span class="se"></span>  -p <span class="s1">&#39;{&#34;spec&#34;:{&#34;value&#34;:&#34;instance-ssh-server-image,kv-cache-backend-image,model-deployment-router-image,model-deployment-router-proxy-image,model-deployment-routing-sidecar-image&#34;}}&#39;</span></span></span></code></pre></div>
+</div><p>The second patch removes <code>model-prefetch-warmup-image</code> from the default-tracking list:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>diff</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-diff" data-lang="diff"><span class="line"><span class="cl"> apiVersion: gpustack.ai/v1
+</span></span><span class="line"><span class="cl"> kind: Setting
+</span></span><span class="line"><span class="cl"> metadata:
+</span></span><span class="line"><span class="cl">   name: settings-default-tracking
+</span></span><span class="line"><span class="cl">   namespace: gpustack-system
+</span></span><span class="line"><span class="cl"> spec:
+</span></span><span class="line"><span class="cl"><span class="gd">-  value: &lt;current-value&gt;
+</span></span></span><span class="line"><span class="cl"><span class="gd"></span><span class="gi">+  value: &#34;instance-ssh-server-image,kv-cache-backend-image,model-deployment-router-image,model-deployment-router-proxy-image,model-deployment-routing-sidecar-image&#34;
+</span></span></span></code></pre></div>
 </div><p>A pin that predates this behavior is replaced on the first worker start of the release that introduces
 it, and the log line names both values when it happens. Deleting the <code>Secret</code> has the same effect on the
 list, which comes back as its six default names.</p>
@@ -2370,7 +2410,7 @@ user-facing settings, listed for completeness.</p>
           
           
           <nav class="page-actions" aria-label="Page source">
-            <a href="https://github.com/gpustack/gpustack-operator/blob/423fa74ffa1443814bfdf35a8994ae8b8a9c0b4f/docs/reference/settings.md">View page source</a>
+            <a href="https://github.com/gpustack/gpustack-operator/blob/26f985d9ff6a706b54e102977f74c2e3a8d93bdc/docs/reference/settings.md">View page source</a>
             
             <a href="https://github.com/gpustack/gpustack-operator/edit/main/docs/reference/settings.md">Edit this page</a>
             

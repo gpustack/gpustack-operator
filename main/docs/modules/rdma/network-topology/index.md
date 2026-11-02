@@ -28,6 +28,17 @@ accelerator platforms the *RDMA*-capable port is not on the bus.
 Such an interface reports its own bus in `bus` and leaves every PCI field empty, so the absence
 reads as a **kind** of interface rather than as a failed lookup.
 
+The Device Manager also discovers verbs *host channel adapters (HCAs)* from
+`/sys/class/infiniband`, independently of `/sys/class/net`. Its local *RDMA* snapshot includes
+GPUStack-owned physical functions (PFs) and *SR-IOV* virtual functions (VFs), even without an IP over
+InfiniBand (IPoIB) or Ethernet netdev. These observations supplement the allocation inventory without
+adding synthetic netdevs to *`Devices.spec.interfaces`*.
+
+Netdev-free endpoints use the HCA name as their identity. A whole-function token is
+`<hca>:<hca>:0000`; a VF under a synthesized parent uses `<parentPCI>:<hca>:0000`.
+HCAs already associated with netdevs are not added again. Externally owned devices, such as `efa`,
+remain outside GPUStack allocation.
+
 **Every sysfs read is capped, and its resolved path is validated.** A sysfs path is a chain of
 symlinks, so a read resolves the chain and then checks where it lands: a path that ends outside the
 tree root is refused, and one attribute read is capped at 64 KiB.
@@ -159,8 +170,9 @@ silently, so `{0,1}` would publish as `01` and read as node 01.
 ## RDMA resource keys
 
 The inventory and the link verdict describe an *RDMA* endpoint. Three device-plugin resources make one
-allocatable: the interface inventory decides which endpoints each key serves, the link verdict
-decides their health, and every token carries its endpoint's *NUMA* affinity.
+allocatable: the combined interface and local verbs inventory decides which endpoints each key
+serves. Link verdicts and the active `DevicesRDMASelectionPolicy` determine token health, and each
+token carries its endpoint's known *NUMA* affinity.
 
 The keys are node-level and carry no
 manufacturer: a network interface belongs to the node rather than to a vendor.
@@ -193,10 +205,16 @@ allocation resolves to a character device, so an endpoint without one has nothin
 node whose *RDMA* tree exists but could not be read produces exactly that shape, an `Unverified`
 record with no device, and advertises zero.
 
-The link verdict above gates health, not existence: `OK`,
-`Unverified` and no record at all advertise `Healthy`; `Failed` advertises the endpoint's tokens
-`Unhealthy`. No verdict is not a verdict of failure: an endpoint reaches this gate only by carrying
-a bound device, so a missing link record is the `Unverified` case arriving by a different route.
+`ListAndWatch` marks an endpoint's tokens `Unhealthy` when its link verdict is `Failed` or its HCA
+is not selected. When selection resolves successfully, `OK`, `Unverified` and no link record
+advertise `Healthy` for selected endpoints. A missing link record does not establish failure: an
+endpoint reaches this gate only when it names an *RDMA* device.
+
+An invalid policy, conflicting policies or unknown resolution selects no HCAs. All *RDMA* tokens
+then report `Unhealthy`. Unselected endpoints retain their advertised IDs, just like failed endpoints.
+Policy updates change subsequent advertisements and allocation calls without draining the node or
+disrupting running containers. Read [Selection policy](/gpustack-operator/main/docs/modules/rdma/operations/index.md#selection-policy) for status
+and failure behavior.
 
 **A `Failed` endpoint keeps its tokens rather than dropping them.** The kubelet checkpoints the
 exact device IDs it offered a container, and withdrawing an advertised ID strands that checkpoint.
@@ -204,8 +222,13 @@ The holder keeps its allocation while new `Pod`s are granted none, and a contain
 while the link is down cannot re-establish its allocation, because the checkpoint check requires
 every offered ID still healthy. It stays stuck until the link heals.
 
-Every advertised token carries a `TopologyInfo` naming its endpoint's own *NUMA* node. A virtual
-function falls back to its parent's affinity when its own is blank (a blank reading is the kernel
+Shared tokens are interleaved in outer-round / inner-endpoint order. `GetPreferredAllocation`
+uses the same round-robin selection: it takes one available token per eligible endpoint before
+assigning a second token on any endpoint. Multi-unit `rdma.shared` requests therefore spread across
+distinct eligible HCAs first; repeated shares of one HCA still produce only one injected verbs node.
+
+Every advertised token with known affinity carries a `TopologyInfo` naming its endpoint's own
+*NUMA* node. A virtual function falls back to its parent's affinity when its own is blank (the kernel
 declining to answer), and when neither answers, **no hint is attached rather than one naming node
 0**: under `single-numa-node` the hint decides admission, so a stand-in value would place a
 container against a proximity nobody measured.
@@ -229,11 +252,10 @@ that means for a request pairing the two is stated with the request rules
 > two would draw on the same interfaces without decrementing each other, leaving neither count a
 > ceiling.
 
-Nothing an allocation does is written down: no entry in `Devices.status`, no `Pod` annotation, no
-in-process reservation. Every response is recomputed from `Devices.spec.interfaces[]`, so a fact
-the detector has since corrected cannot survive into a response built from an older one. The cost
-is that no cluster-level view maps a `Pod` to the interface it holds; the container itself is the
-record, through its injected device nodes and its `NCCL_IB_HCA` value.
+Allocations create no ledger entry in `Devices.status`, no `Pod` annotation and no in-process
+reservation. Each response uses the current interface inventory, local verbs snapshot and active
+selection. No cluster-level view maps a `Pod` to its granted interface; inspect the container's
+injected device nodes and `GPUSTACK_RDMA_DEVICES` value.
 
 The Device Manager registers one *RDMA* resource server per mode with kubelet, once per node.
 
@@ -247,21 +269,27 @@ families; exclusive is ungated.
 
 ## Allocation response
 
-A granted token is resolved back to its endpoint in `Devices.spec.interfaces[]` at allocation
-time, and the response hands the container three things:
+A granted token is resolved against one captured inventory combining *`Devices.spec.interfaces`*,
+local verbs observations and the active selection policy. The container receives:
 
 - the endpoint's own verbs character device, resolved from its *RDMA* device name;
 - the node-level connection-manager device (`rdma_cm`), once per response however many endpoints
   were granted, and only where the host has one;
-- `NCCL_IB_HCA`, naming the granted *RDMA* devices, comma-joined.
+- `GPUSTACK_RDMA_DEVICES`, the sorted, unique comma-joined HCA names without `=`, and an exact
+  `NCCL_IB_HCA` filter with one leading `=`, in all three modes
+  ([values and startup use](/gpustack-operator/main/docs/modules/rdma/operations/index.md#injected-devices)).
+
+When no granted endpoint remains eligible under the active selection policy, the response sets
+`GPUSTACK_RDMA_DEVICES=""` and `NCCL_IB_HCA=""` and injects no character device nodes. Existing
+containers are not rewritten.
 
 If the endpoint's verbs device cannot be resolved from the host's *RDMA* inventory, allocation
 fails with a diagnostic naming the locations checked.
 
-`Devices` are injected one endpoint at a time, never the whole `/dev/infiniband` directory: injecting
-a directory hands every container every adapter on the node, and degrades to handing it none with
-no error. A granted token that parses to no endpoint of the family is refused rather than silently
-dropped.
+Only granted HCA device nodes are injected. Repeated HCA names produce one device mapping in the
+response; this leaves advertised IDs, token counts and identity migration unchanged.
+A granted token that names no endpoint of its family is refused, and a missing required device
+node fails the whole allocation without partial output.
 
 Two limits, stated rather than omitted. The injected set is evidenced for RoCE and for nothing else:
 no reading behind this repository says what a classic InfiniBand fabric additionally needs, so a
@@ -271,7 +299,7 @@ host answers through has not been read yet.
 
 ## Scale-up fabric
 
-Everything above is the node's *Ethernet* view: interfaces the kernel enumerates, and *RDMA* over them.
+The network inventory includes kernel interfaces and Linux verbs *RDMA* devices.
 Beside it, several accelerator generations carry a **scale-up fabric** of their own: an interconnect
 over which accelerators address one another's memory directly, and which on the newest generations
 **spans machines**. That fabric is invisible to the interface inventory: it has no kernel interface,
@@ -279,15 +307,28 @@ no PCI function of its own, and no IP.
 
 It is recorded per accelerator, in *`spec.groups[].accelerators[].topology.fabric`*:
 
-| Field | Meaning |
-|---|---|
-| *`kind`* | the interconnect — `ub`, `nvlink` or `xgmi`. Part of every comparison: two ids from different interconnects share no namespace |
-| `id` | the domain's identity, **comparable across nodes** — which is the only reason publishing it is worth anything |
-| `type` | the domain's shape as a word (`pod-1d`, `server-8p`, `card-4p`) |
-| *`cliqueId`* | the subset that can actually address one another, where the domain is partitioned |
-| *`memberCount`* | how many members the domain reports |
-| *`nodeIndex`*, *`rackId`* | where this machine sits inside the domain, as the domain numbers them |
-| `endpoints` | this accelerator's own addresses on the fabric |
+The fragment illustrates fields from different manufacturers; no single manufacturer publishes them all:
+
+```yaml
+apiVersion: worker.gpustack.ai/v1
+kind: Devices
+metadata:
+  name: node-0
+spec:
+  groups:
+    - accelerators:
+        - topology:
+            fabric:
+              kind: ub  # ub, nvlink or xgmi; IDs do not share a namespace across kinds.
+              id: <domain-id>  # Domain identity, comparable across nodes.
+              type: pod-1d  # Shape, such as pod-1d, server-8p or card-4p.
+              cliqueId: <clique-id>  # Addressable subset when the domain is partitioned.
+              memberCount: 8  # Number of members reported by the domain.
+              nodeIndex: "0"  # Machine index as numbered by the domain.
+              rackId: "0"  # Rack as numbered by the domain.
+              endpoints:  # This accelerator's own fabric addresses.
+                - <endpoint>
+```
 
 **Four of these are published only for a super pod.** `id`, *`memberCount`*, *`nodeIndex`* and *`rackId`*
 are withheld on an Ascend node that is in none. The driver answers the super pod query even there,

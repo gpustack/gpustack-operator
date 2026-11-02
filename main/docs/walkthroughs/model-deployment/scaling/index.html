@@ -1715,34 +1715,64 @@ Capacity values below reproduce the benchmark&rsquo;s settings; tune them from m
 </table>
 <h3 id="token-throughput">Token throughput</h3>
 <div class="code-block">
-  <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
-  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">spec</span><span class="p">:</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">algorithm</span><span class="p">:</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l">TokenThroughput</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">tokenThroughput</span><span class="p">:</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">prefillTargetTokensPerSecond</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;1200&#34;</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">decodeTargetTokensPerSecond</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;300&#34;</span></span></span></code></pre></div>
-</div><p>This is a replacement fragment, not a complete resource. It works for both vLLM and SGLang targets;
+  <div class="code-toolbar"><span>diff</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-diff" data-lang="diff"><span class="line"><span class="cl"> apiVersion: worker.gpustack.ai/v1
+</span></span><span class="line"><span class="cl"> kind: ModelDeploymentScaler
+</span></span><span class="line"><span class="cl"> metadata:
+</span></span><span class="line"><span class="cl">   name: autoscale-vllm-pd
+</span></span><span class="line"><span class="cl">   namespace: gpustack-bench
+</span></span><span class="line"><span class="cl"> spec:
+</span></span><span class="line"><span class="cl">   algorithm:
+</span></span><span class="line"><span class="cl"><span class="gd">-    type: Proportional
+</span></span></span><span class="line"><span class="cl"><span class="gd">-    proportional:
+</span></span></span><span class="line"><span class="cl"><span class="gd">-      metric: RunningRequests
+</span></span></span><span class="line"><span class="cl"><span class="gd">-      tolerance: &#34;0.1&#34;
+</span></span></span><span class="line"><span class="cl"><span class="gd">-      roleTargets:
+</span></span></span><span class="line"><span class="cl"><span class="gd">-        - name: prefill
+</span></span></span><span class="line"><span class="cl"><span class="gd">-          target: &#34;3&#34;
+</span></span></span><span class="line"><span class="cl"><span class="gd">-        - name: decode
+</span></span></span><span class="line"><span class="cl"><span class="gd">-          target: &#34;3&#34;
+</span></span></span><span class="line"><span class="cl"><span class="gd"></span><span class="gi">+    type: TokenThroughput
+</span></span></span><span class="line"><span class="cl"><span class="gi">+    tokenThroughput:
+</span></span></span><span class="line"><span class="cl"><span class="gi">+      prefillTargetTokensPerSecond: &#34;1200&#34;
+</span></span></span><span class="line"><span class="cl"><span class="gi">+      decodeTargetTokensPerSecond: &#34;300&#34;
+</span></span></span></code></pre></div>
+</div><p>This replacement works for both vLLM and SGLang targets;
 the scaler reads the target engine. Establish valid counter windows before judging recommendations.
 Read the <a href="/gpustack-operator/main/docs/modules/model-deployment/engine-versions/#limitations">SGLang TCP limitation</a>
 
 before running sustained SGLang traffic.</p>
 <h3 id="predictive">Predictive</h3>
 <div class="code-block">
-  <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
-  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">spec</span><span class="p">:</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">algorithm</span><span class="p">:</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l">Predictive</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">predictive</span><span class="p">:</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">horizonSeconds</span><span class="p">:</span><span class="w"> </span><span class="m">30</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">minPoints</span><span class="p">:</span><span class="w"> </span><span class="m">2</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">qLevel</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;0.5&#34;</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">qTrend</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;0.3&#34;</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">prefillTokenCapacityPerReplica</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;2000&#34;</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">decodeTokenCapacityPerReplica</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;2000&#34;</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">tokenThroughput</span><span class="p">:</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">prefillTargetTokensPerSecond</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;1200&#34;</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">decodeTargetTokensPerSecond</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;300&#34;</span></span></span></code></pre></div>
+  <div class="code-toolbar"><span>diff</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-diff" data-lang="diff"><span class="line"><span class="cl"> apiVersion: worker.gpustack.ai/v1
+</span></span><span class="line"><span class="cl"> kind: ModelDeploymentScaler
+</span></span><span class="line"><span class="cl"> metadata:
+</span></span><span class="line"><span class="cl">   name: autoscale-vllm-pd
+</span></span><span class="line"><span class="cl">   namespace: gpustack-bench
+</span></span><span class="line"><span class="cl"> spec:
+</span></span><span class="line"><span class="cl">   algorithm:
+</span></span><span class="line"><span class="cl"><span class="gd">-    type: Proportional
+</span></span></span><span class="line"><span class="cl"><span class="gd">-    proportional:
+</span></span></span><span class="line"><span class="cl"><span class="gd">-      metric: RunningRequests
+</span></span></span><span class="line"><span class="cl"><span class="gd">-      tolerance: &#34;0.1&#34;
+</span></span></span><span class="line"><span class="cl"><span class="gd">-      roleTargets:
+</span></span></span><span class="line"><span class="cl"><span class="gd">-        - name: prefill
+</span></span></span><span class="line"><span class="cl"><span class="gd">-          target: &#34;3&#34;
+</span></span></span><span class="line"><span class="cl"><span class="gd">-        - name: decode
+</span></span></span><span class="line"><span class="cl"><span class="gd">-          target: &#34;3&#34;
+</span></span></span><span class="line"><span class="cl"><span class="gd"></span><span class="gi">+    type: Predictive
+</span></span></span><span class="line"><span class="cl"><span class="gi">+    predictive:
+</span></span></span><span class="line"><span class="cl"><span class="gi">+      horizonSeconds: 30
+</span></span></span><span class="line"><span class="cl"><span class="gi">+      minPoints: 2
+</span></span></span><span class="line"><span class="cl"><span class="gi">+      qLevel: &#34;0.5&#34;
+</span></span></span><span class="line"><span class="cl"><span class="gi">+      qTrend: &#34;0.3&#34;
+</span></span></span><span class="line"><span class="cl"><span class="gi">+      prefillTokenCapacityPerReplica: &#34;2000&#34;
+</span></span></span><span class="line"><span class="cl"><span class="gi">+      decodeTokenCapacityPerReplica: &#34;2000&#34;
+</span></span></span><span class="line"><span class="cl"><span class="gi">+      tokenThroughput:
+</span></span></span><span class="line"><span class="cl"><span class="gi">+        prefillTargetTokensPerSecond: &#34;1200&#34;
+</span></span></span><span class="line"><span class="cl"><span class="gi">+        decodeTargetTokensPerSecond: &#34;300&#34;
+</span></span></span></code></pre></div>
 </div><p>The nested token targets supply the fallback while the predictor warms up.
 Inspect <em><code>status.predictors</code></em> and the role reasons to distinguish fallback from predictive planning.
 Earlier growth alone does not prove a forecast caused it; token throughput also grew during baseline
@@ -1766,29 +1796,62 @@ canonical family <code>amd-mi325x</code> via the
 <a href="/gpustack-operator/main/docs/reference/instance-type-unit-resources/">Instance Type Unit Resources</a>
  family rules.</p>
 <p>The engine image matches by family, so no hand-computed digests or <code>@sha256</code> pinning are required.</p>
-<p>Omit <em><code>spec.router</code></em>, <em><code>spec.kvCache</code></em>, <em><code>spec.kvTransfer</code></em> and <em><code>Encode</code></em>. The fragment and
-command below are configuration examples, not captured output from a live cluster run:</p>
+<p>Omit <em><code>spec.router</code></em>, <em><code>spec.kvCache</code></em>, <em><code>spec.kvTransfer</code></em> and <em><code>Encode</code></em>. The following separate
+server target and scaler changes are examples, not captured output from a live cluster run. Replace
+<code>instanceType</code> for the intended cluster and check the target against the catalog before use:</p>
 <div class="code-block">
   <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
-  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">spec</span><span class="p">:</span><span class="w">
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">worker.gpustack.ai/v1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">ModelDeployment</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">metadata</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">catalog-server</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">namespace</span><span class="p">:</span><span class="w"> </span><span class="l">gpustack-bench</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">model</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">/models</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">artifactRef</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">qwen3-8b</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">engine</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">vLLM</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">image</span><span class="p">:</span><span class="w"> </span><span class="l">gpustack/runner:cuda13.0-vllm0.30.0</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">roles</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">server</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">minReplicas</span><span class="p">:</span><span class="w"> </span><span class="m">1</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">maxReplicas</span><span class="p">:</span><span class="w"> </span><span class="m">2</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">algorithm</span><span class="p">:</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l">Predictive</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">predictive</span><span class="p">:</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">horizonSeconds</span><span class="p">:</span><span class="w"> </span><span class="m">30</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">minPoints</span><span class="p">:</span><span class="w"> </span><span class="m">2</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">tokenThroughput</span><span class="p">:</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">serverTargetTokensPerSecond</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;1200&#34;</span><span class="w">  </span><span class="c"># explicit fallback override</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">ttftTargetMilliseconds</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;500&#34;</span><span class="w">        </span><span class="c"># required when Server uses Catalog</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">itlTargetMilliseconds</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;50&#34;</span><span class="w">          </span><span class="c"># required when Server uses Catalog</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">capacityPrior</span><span class="p">:</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">catalogRef</span><span class="p">:</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">autoscaling-priors</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">key</span><span class="p">:</span><span class="w"> </span><span class="l">priors.yaml</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">headroom</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;0.75&#34;</span></span></span></code></pre></div>
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">Server</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">replicas</span><span class="p">:</span><span class="w"> </span><span class="m">1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">size</span><span class="p">:</span><span class="w"> </span><span class="m">1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">instanceType</span><span class="p">:</span><span class="w"> </span><span class="l">gpustack--nvidia-h100-80gb-hbm3-linux-amd64</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">resources</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">accelerator</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;1&#34;</span></span></span></code></pre></div>
+</div><p>Configure a scaler targeting this server:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>diff</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-diff" data-lang="diff"><span class="line"><span class="cl"> apiVersion: worker.gpustack.ai/v1
+</span></span><span class="line"><span class="cl"> kind: ModelDeploymentScaler
+</span></span><span class="line"><span class="cl"> metadata:
+</span></span><span class="line"><span class="cl">   name: autoscale-server
+</span></span><span class="line"><span class="cl">   namespace: gpustack-bench
+</span></span><span class="line"><span class="cl"> spec:
+</span></span><span class="line"><span class="cl"><span class="gi">+  targetRef:
+</span></span></span><span class="line"><span class="cl"><span class="gi">+    name: catalog-server
+</span></span></span><span class="line"><span class="cl"><span class="gi"></span>   roles:
+</span></span><span class="line"><span class="cl">     - name: server
+</span></span><span class="line"><span class="cl">       minReplicas: 1
+</span></span><span class="line"><span class="cl">       maxReplicas: 2
+</span></span><span class="line"><span class="cl">   algorithm:
+</span></span><span class="line"><span class="cl"><span class="gi">+    type: Predictive
+</span></span></span><span class="line"><span class="cl"><span class="gi">+    predictive:
+</span></span></span><span class="line"><span class="cl"><span class="gi">+      horizonSeconds: 30
+</span></span></span><span class="line"><span class="cl"><span class="gi">+      minPoints: 2
+</span></span></span><span class="line"><span class="cl"><span class="gi">+      tokenThroughput:
+</span></span></span><span class="line"><span class="cl"><span class="gi">+        serverTargetTokensPerSecond: &#34;1200&#34;  # explicit fallback override
+</span></span></span><span class="line"><span class="cl"><span class="gi">+        ttftTargetMilliseconds: &#34;500&#34;        # required when Server uses Catalog
+</span></span></span><span class="line"><span class="cl"><span class="gi">+        itlTargetMilliseconds: &#34;50&#34;          # required when Server uses Catalog
+</span></span></span><span class="line"><span class="cl"><span class="gi">+    capacityPrior:
+</span></span></span><span class="line"><span class="cl"><span class="gi">+      catalogRef:
+</span></span></span><span class="line"><span class="cl"><span class="gi">+        name: autoscaling-priors
+</span></span></span><span class="line"><span class="cl"><span class="gi">+        key: priors.yaml
+</span></span></span><span class="line"><span class="cl"><span class="gi">+      headroom: &#34;0.75&#34;
+</span></span></span></code></pre></div>
 </div><p>In this <em>Server</em> partial override, <em><code>serverTargetTokensPerSecond</code></em> stays <code>Explicit</code> at <code>&quot;1200&quot;</code>
 while the omitted <em><code>serverTokenCapacityPerReplica</code></em> forecast capacity resolves from <code>Catalog</code> by
 the role&rsquo;s identity and multiplies its profile seed capacity by <em><code>headroom</code></em>. Both <code>&quot;1200&quot;</code> and
@@ -1797,6 +1860,45 @@ the role&rsquo;s identity and multiplies its profile seed capacity by <em><code>
 <p>When the target matches an embedded profile, drop the explicit fallback and the <code>ConfigMap</code>: the
 embedded catalog supplies the capacity and the identity resolves from the target.</p>
 <div class="code-block">
+  <div class="code-toolbar"><span>diff</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-diff" data-lang="diff"><span class="line"><span class="cl"> apiVersion: worker.gpustack.ai/v1
+</span></span><span class="line"><span class="cl"> kind: ModelDeploymentScaler
+</span></span><span class="line"><span class="cl"> metadata:
+</span></span><span class="line"><span class="cl">   name: autoscale-server
+</span></span><span class="line"><span class="cl">   namespace: gpustack-bench
+</span></span><span class="line"><span class="cl"> spec:
+</span></span><span class="line"><span class="cl">   algorithm:
+</span></span><span class="line"><span class="cl">     type: Predictive
+</span></span><span class="line"><span class="cl">     predictive:
+</span></span><span class="line"><span class="cl">       tokenThroughput:
+</span></span><span class="line"><span class="cl"><span class="gd">-        serverTargetTokensPerSecond: &#34;1200&#34;
+</span></span></span><span class="line"><span class="cl"><span class="gd"></span>         ttftTargetMilliseconds: &#34;500&#34;
+</span></span><span class="line"><span class="cl">         itlTargetMilliseconds: &#34;50&#34;
+</span></span><span class="line"><span class="cl">     capacityPrior:
+</span></span><span class="line"><span class="cl"><span class="gd">-      catalogRef:
+</span></span></span><span class="line"><span class="cl"><span class="gd">-        name: autoscaling-priors
+</span></span></span><span class="line"><span class="cl"><span class="gd">-        key: priors.yaml
+</span></span></span><span class="line"><span class="cl"><span class="gd"></span>       headroom: &#34;0.75&#34;
+</span></span></code></pre></div>
+</div><p>To return to manual mode, remove <code>capacityPrior</code> and supply the required manual capacities:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>diff</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-diff" data-lang="diff"><span class="line"><span class="cl"> apiVersion: worker.gpustack.ai/v1
+</span></span><span class="line"><span class="cl"> kind: ModelDeploymentScaler
+</span></span><span class="line"><span class="cl"> metadata:
+</span></span><span class="line"><span class="cl">   name: autoscale-server
+</span></span><span class="line"><span class="cl">   namespace: gpustack-bench
+</span></span><span class="line"><span class="cl"> spec:
+</span></span><span class="line"><span class="cl">   algorithm:
+</span></span><span class="line"><span class="cl">     type: Predictive
+</span></span><span class="line"><span class="cl">     predictive:
+</span></span><span class="line"><span class="cl"><span class="gi">+      serverTokenCapacityPerReplica: &#34;2000&#34;
+</span></span></span><span class="line"><span class="cl"><span class="gi"></span>       tokenThroughput:
+</span></span><span class="line"><span class="cl"><span class="gi">+        serverTargetTokensPerSecond: &#34;1200&#34;
+</span></span></span><span class="line"><span class="cl"><span class="gi"></span><span class="gd">-    capacityPrior:
+</span></span></span><span class="line"><span class="cl"><span class="gd">-      headroom: &#34;0.75&#34;
+</span></span></span></code></pre></div>
+</div><div class="code-block">
   <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">kubectl -n gpustack-bench get mds autoscale-vllm-server -o json <span class="se">\
 </span></span></span><span class="line"><span class="cl"><span class="se"></span>  <span class="p">|</span> jq <span class="s1">&#39;{priors: .status.resolvedCapacityPriors,
@@ -1814,7 +1916,14 @@ consistency) and stops new replica commits.</p>
 Provide bounds for every role and couple <em>encode</em> through a direct ratio.</p>
 <div class="code-block">
   <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
-  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">spec</span><span class="p">:</span><span class="w">
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">worker.gpustack.ai/v1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">ModelDeploymentScaler</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">metadata</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">qwen-scaler</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">namespace</span><span class="p">:</span><span class="w"> </span><span class="l">gpustack-bench</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">targetRef</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">epd-arm3-epd </span><span class="w"> </span><span class="c"># the EPD deployment the walkthrough above creates</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">roles</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">encode</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">minReplicas</span><span class="p">:</span><span class="w"> </span><span class="m">1</span><span class="w">
@@ -1825,6 +1934,11 @@ Provide bounds for every role and couple <em>encode</em> through a direct ratio.
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">decode</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">minReplicas</span><span class="p">:</span><span class="w"> </span><span class="m">1</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">maxReplicas</span><span class="p">:</span><span class="w"> </span><span class="m">2</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">algorithm</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l">TokenThroughput </span><span class="w"> </span><span class="c"># the ratios couple the encode count; no token-capacity target for encode</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">tokenThroughput</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">prefillTargetTokensPerSecond</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;2000&#34;</span><span class="w">  </span><span class="c"># prompt capacity per Prefill replica</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">decodeTargetTokensPerSecond</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;800&#34;</span><span class="w">   </span><span class="c"># generation capacity per Decode replica</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">ratios</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">numeratorRole</span><span class="p">:</span><span class="w"> </span><span class="l">prefill</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">denominatorRole</span><span class="p">:</span><span class="w"> </span><span class="l">decode</span><span class="w">
@@ -1976,15 +2090,27 @@ illustrative at a ~0.0115 MW eight-accelerator node, and interactivity is <code>
 <code>30.3 tokens/s/user</code> — configures as:</p>
 <div class="code-block">
   <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
-  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">algorithm</span><span class="p">:</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l">TokenThroughput</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">tokenThroughput</span><span class="p">:</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">latencyQuantile</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;0.90&#34;</span><span class="w">        </span><span class="c"># resolve the prior at P90, not the P95 default</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">ttftTargetMilliseconds</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;2000&#34;</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">itlTargetMilliseconds</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;33&#34;</span><span class="w">    </span><span class="c"># a 30.3 tokens/s/user floor</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="c"># serverTargetTokensPerSecond omitted: it resolves from the catalog</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">capacityPrior</span><span class="p">:</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">headroom</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;0.75&#34;</span><span class="w">                 </span><span class="c"># catalogRef omitted: the embedded catalog</span></span></span></code></pre></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">worker.gpustack.ai/v1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">ModelDeploymentScaler</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">metadata</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">deepseek-scaler</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">namespace</span><span class="p">:</span><span class="w"> </span><span class="l">gpustack-bench</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">targetRef</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">deepseek-server </span><span class="w"> </span><span class="c"># Server deployment matching the DeepSeek-R1-0528 MI325X TP8 profile above</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">roles</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">server</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">minReplicas</span><span class="p">:</span><span class="w"> </span><span class="m">1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">maxReplicas</span><span class="p">:</span><span class="w"> </span><span class="m">4</span><span class="w">  </span><span class="c"># the plan the resolver derives below must stay inside the bounds</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">algorithm</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l">TokenThroughput</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">tokenThroughput</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">latencyQuantile</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;0.90&#34;</span><span class="w">        </span><span class="c"># resolve the prior at P90, not the P95 default</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">ttftTargetMilliseconds</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;2000&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">itlTargetMilliseconds</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;33&#34;</span><span class="w">    </span><span class="c"># a 30.3 tokens/s/user floor</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="c"># serverTargetTokensPerSecond omitted: it resolves from the catalog</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">capacityPrior</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">headroom</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;0.75&#34;</span><span class="w">                 </span><span class="c"># catalogRef omitted: the embedded catalog</span></span></span></code></pre></div>
 </div><p>The resolver then:</p>
 <ol>
 <li>Matches the profile by the target&rsquo;s normalized <code>(role, model, quantization, engine, hardware, topology)</code> tuple — no profile identifier is configured.</li>
@@ -2142,7 +2268,7 @@ Keep shared prefetched artifacts and <code>default/bench-driver</code> when othe
           
           
           <nav class="page-actions" aria-label="Page source">
-            <a href="https://github.com/gpustack/gpustack-operator/blob/423fa74ffa1443814bfdf35a8994ae8b8a9c0b4f/docs/walkthroughs/model-deployment/scaling.md">View page source</a>
+            <a href="https://github.com/gpustack/gpustack-operator/blob/26f985d9ff6a706b54e102977f74c2e3a8d93bdc/docs/walkthroughs/model-deployment/scaling.md">View page source</a>
             
             <a href="https://github.com/gpustack/gpustack-operator/edit/main/docs/walkthroughs/model-deployment/scaling.md">Edit this page</a>
             

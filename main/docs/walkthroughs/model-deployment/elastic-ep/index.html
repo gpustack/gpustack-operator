@@ -1668,6 +1668,21 @@ A health response does not exercise generation. Keep these new checks distinct f
 </span></span><span class="line"><span class="cl">
 </span></span><span class="line"><span class="cl">kubectl -n gpustack-bench patch modeldeployment b2-elastic-ep --type<span class="o">=</span>json <span class="se">\
 </span></span></span><span class="line"><span class="cl"><span class="se"></span>  -p <span class="s1">&#39;[{&#34;op&#34;:&#34;test&#34;,&#34;path&#34;:&#34;/spec/roles/0/elasticEp/width&#34;,&#34;value&#34;:2},{&#34;op&#34;:&#34;replace&#34;,&#34;path&#34;:&#34;/spec/roles/0/elasticEp/width&#34;,&#34;value&#34;:4}]&#39;</span></span></span></code></pre></div>
+</div><p>The patch changes the target width and tests that its previous value is still 2:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>diff</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-diff" data-lang="diff"><span class="line"><span class="cl"> apiVersion: worker.gpustack.ai/v1
+</span></span><span class="line"><span class="cl"> kind: ModelDeployment
+</span></span><span class="line"><span class="cl"> metadata:
+</span></span><span class="line"><span class="cl">   name: b2-elastic-ep
+</span></span><span class="line"><span class="cl">   namespace: gpustack-bench
+</span></span><span class="line"><span class="cl"> spec:
+</span></span><span class="line"><span class="cl">   roles:
+</span></span><span class="line"><span class="cl">     - name: server
+</span></span><span class="line"><span class="cl">       elasticEp:
+</span></span><span class="line"><span class="cl"><span class="gd">-        width: 2
+</span></span></span><span class="line"><span class="cl"><span class="gd"></span><span class="gi">+        width: 4
+</span></span></span></code></pre></div>
 </div><p>Wait for the current generation&rsquo;s effective width. A spec edit or four running <code>Pod</code>s alone does not prove a native resize.
 Read the diagnostic observation belonging to this deployment:</p>
 <div class="code-block">
@@ -1865,7 +1880,7 @@ Environment changes apply to newly created <code>Pod</code>s; preserve logs befo
           
           
           <nav class="page-actions" aria-label="Page source">
-            <a href="https://github.com/gpustack/gpustack-operator/blob/423fa74ffa1443814bfdf35a8994ae8b8a9c0b4f/docs/walkthroughs/model-deployment/elastic-ep.md">View page source</a>
+            <a href="https://github.com/gpustack/gpustack-operator/blob/26f985d9ff6a706b54e102977f74c2e3a8d93bdc/docs/walkthroughs/model-deployment/elastic-ep.md">View page source</a>
             
             <a href="https://github.com/gpustack/gpustack-operator/edit/main/docs/walkthroughs/model-deployment/elastic-ep.md">Edit this page</a>
             

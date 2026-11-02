@@ -31,15 +31,35 @@ it is not a valid check here; use `rocminfo` instead.
 
 **Vendor GPU Operator** — the AMD GPU Operator, driven by a `DeviceConfig` CR the chart creates.
 
-| Component | Keep / disable | Mechanism |
-|---|---|---|
-| Driver | Keep | `DeviceConfig.spec.driver.enable` (default `true`) |
-| Metrics exporter (DCGM-class) | Keep | `DeviceConfig.spec.metricsExporter.enable` — **default `false`**, enable it |
-| Device plugin | Disable | `DeviceConfig.spec.devicePlugin.enableDevicePlugin: false` |
-| `Node` Labeller | Disable | `DeviceConfig.spec.devicePlugin.enableNodeLabeller: false` |
-| Bundled Node Feature Discovery | Disable | `--set node-feature-discovery.enabled=false` |
-| Bundled Kernel Module Management | Disable when the driver is pre-installed | `--set kmm.enabled=false --set kmm.watch=false` |
-| DRA driver | Leave enabled to test whole-card allocation | `DeviceConfig.spec.draDriver.enable` — mutually exclusive with `devicePlugin.enableDevicePlugin` on one CR |
+Keep the driver and metrics exporter. Disable the vendor device plugin, node labeller and bundled
+NFD. Disable Kernel Module Management when the driver is pre-installed. To test whole-card allocation,
+leave the DRA driver enabled; it is mutually exclusive with the device plugin on one `DeviceConfig`.
+
+```yaml
+apiVersion: amd.com/v1alpha1
+kind: DeviceConfig
+metadata:
+  name: default
+  namespace: kube-amd-gpu
+spec:
+  driver:
+    enable: true  # Default.
+  metricsExporter:
+    enable: true  # Enable; default false.
+  devicePlugin:
+    enableDevicePlugin: false
+    enableNodeLabeller: false
+  draDriver:
+    enable: true  # Alternative to the device plugin.
+```
+
+```yaml
+node-feature-discovery:
+  enabled: false
+kmm:
+  enabled: false  # When the driver is pre-installed.
+  watch: false
+```
 
 **Install it** — the chart's own switches cover the two bundled add-ons; the device plugin and the node
 labeller are `DeviceConfig` fields, so they are turned off on the CR the chart just created.
@@ -56,6 +76,26 @@ helm install amd-gpu-operator rocm/gpu-operator-charts \
 
 kubectl -n kube-amd-gpu patch deviceconfig <name> --type merge -p \
   '{"spec":{"devicePlugin":{"enableDevicePlugin":false,"enableNodeLabeller":false},"metricsExporter":{"enable":true}}}'
+```
+
+The patch above makes the following change to the chart-created `DeviceConfig`. Replace the name
+with that of the existing object:
+
+```diff
+ apiVersion: amd.com/v1alpha1
+ kind: DeviceConfig
+ metadata:
+   name: <name>
+   namespace: kube-amd-gpu
+ spec:
+   devicePlugin:
+-    enableDevicePlugin: true
+-    enableNodeLabeller: true
++    enableDevicePlugin: false
++    enableNodeLabeller: false
+   metricsExporter:
+-    enable: false
++    enable: true
 ```
 
 **Already installed** — the vendor plugin and GPUStack's plugin both advertise `amd.com/gpu`.
@@ -169,12 +209,24 @@ ships no container runtime of its own, so no container toolkit is required.
 **Vendor GPU Operator** — the DCU Operator, driven by a single `DeviceConfig` CR (`kubectl explain
 deviceconfig.spec`); every component below is a field under that one CR, not a separate CRD.
 
-| Component | Keep / disable | Mechanism |
-|---|---|---|
-| DCU-Exporter (metrics) | Keep | `DeviceConfig.spec.metricsExporter.enable` — disabled by default, enable it |
-| DCU-DCGM (diagnostics) | Keep | `DeviceConfig.spec.dcgm.enable` — disabled by default, enable it |
-| DCU-Device-Plugin | Disable | `DeviceConfig.spec.devicePlugin.enableDevicePlugin: false` |
-| DCU-Label-`Node` (NFD-equivalent) | Disable | `DeviceConfig.spec.devicePlugin.enableNodeLabeller: false` |
+Keep DCU-Exporter and DCU-DCGM; disable DCU-Device-Plugin and DCU-Label-`Node`.
+Replace the API version and name with those of the installed `DeviceConfig`:
+
+```yaml
+apiVersion: <existing-api-version>
+kind: DeviceConfig
+metadata:
+  name: device-config
+  namespace: kube-system
+spec:
+  metricsExporter:
+    enable: true  # Disabled by default.
+  dcgm:
+    enable: true  # Disabled by default.
+  devicePlugin:
+    enableDevicePlugin: false
+    enableNodeLabeller: false
+```
 
 **Install it** — the vendor's install chapter sits behind its authenticated documentation portal, so no
 install command is reproduced here. Whatever installs the operator, turn the two components off on the
@@ -183,6 +235,29 @@ install command is reproduced here. Whatever installs the operator, turn the two
 ```bash
 kubectl -n kube-system patch deviceconfig <name> --type merge -p \
   '{"spec":{"devicePlugin":{"enableDevicePlugin":false,"enableNodeLabeller":false},"metricsExporter":{"enable":true},"dcgm":{"enable":true}}}'
+```
+
+The patch above updates the existing `DeviceConfig`. Read its `apiVersion` and name from
+`kubectl get deviceconfig -n kube-system -o yaml` and substitute them in the header:
+
+```diff
+ apiVersion: <existing-api-version>
+ kind: DeviceConfig
+ metadata:
+   name: <name>
+   namespace: kube-system
+ spec:
+   devicePlugin:
+-    enableDevicePlugin: <current-value>
++    enableDevicePlugin: false
+-    enableNodeLabeller: <current-value>
++    enableNodeLabeller: false
+   metricsExporter:
+-    enable: <current-value>
++    enable: true
+   dcgm:
+-    enable: <current-value>
++    enable: true
 ```
 
 **Already installed** — the vendor plugin and GPUStack's plugin both advertise `hygon.com/dcu`.
@@ -210,12 +285,19 @@ for this manufacturer, or set `deviceManager.createRuntimeClasses=false` and att
 
 **Vendor GPU Operator** — the ix-GPU-Operator, a Helm chart with one switch per component.
 
-| Component | Keep / disable | Mechanism |
-|---|---|---|
-| Driver (`ix-driver`) | Disable when the driver is pre-installed | `ixDriver.enabled` — default `false` already |
-| ix-Exporter (metrics) | Keep | `ixExporter.enabled` (default `true`) |
-| ix-Device-Plugin | Disable | `--set ixDevicePlugin.enabled=false` |
-| ix-Feature-Discovery (NFD-equivalent) | Disable | `--set ixfd.enabled=false` — bundles upstream Node Feature Discovery under the release name |
+Keep ix-Exporter. Disable ix-Device-Plugin and ix-Feature-Discovery, which bundles upstream NFD.
+Disable ix-driver when the driver is pre-installed:
+
+```yaml
+ixDriver:
+  enabled: false  # Already the default.
+ixExporter:
+  enabled: true  # Default.
+ixDevicePlugin:
+  enabled: false
+ixfd:
+  enabled: false
+```
 
 **Install it** — the OCI chart, with the driver left to the node and the two competing components off.
 
@@ -308,15 +390,33 @@ Both can come from the operator's own `full` mode below.
 toggle. `full` is the `mt-gpu-operator` Helm chart pair; `core` is a `kubectl apply -f` of plain
 manifests carrying only the device plugin and the exporter.
 
-| Component | Keep / disable | Mechanism |
-|---|---|---|
-| Driver (`driverToolkit`) | Keep | `mtGpuClusterPolicyClusterpolicy.driverToolkit.enabled` (default `true`) |
-| Container toolkit | Keep | `mtGpuClusterPolicyClusterpolicy.containerToolkit.enabled` (default `true`) |
-| DCGM / DCGM exporter | Keep | `.dcgm.enabled` / `.dcgmExporter.enabled` |
-| Bundled NFD | Disable | `.nfd.enabled=false` |
-| sGPU scheduler + admission webhook | Disable | `.gpuScheduler.enabled` / `.gpuWebhook.enabled` — default `false` already |
-| `kured`, node-problem-detector, `aiOps` | Disable | `.kured.enabled=false`, `.nodeProblemDetector.enabled=false`, `.aiOps.enabled=false` |
-| Device plugin | No switch | it ships inside the operator's reconciliation loop under `full` mode |
+Keep the driver, container toolkit, DCGM and its exporter. Disable NFD, the sGPU scheduler and
+webhook, `kured`, node-problem-detector and `aiOps`. In `full` mode the device plugin ships
+inside the operator's reconciliation loop and has no disabling switch.
+
+```yaml
+mtGpuClusterPolicyClusterpolicy:
+  driverToolkit:
+    enabled: true  # Default.
+  containerToolkit:
+    enabled: true  # Default.
+  dcgm:
+    enabled: true
+  dcgmExporter:
+    enabled: true
+  nfd:
+    enabled: false
+  gpuScheduler:
+    enabled: false  # Default.
+  gpuWebhook:
+    enabled: false  # Default.
+  kured:
+    enabled: false
+  nodeProblemDetector:
+    enabled: false
+  aiOps:
+    enabled: false
+```
 
 **Install it** — from the chart directories the vendor's bundle unpacks, with the cluster-level add-ons
 off. No key disables the device plugin under `full` mode, so a node that must run GPUStack's device plugin is
@@ -365,16 +465,31 @@ that `Pod` so the runtime stops hiding the driver's MIG capabilities from it —
 
 **Vendor GPU Operator** — the NVIDIA GPU Operator, a Helm chart with one switch per component.
 
-| Component | Keep / disable | Mechanism |
-|---|---|---|
-| Driver | Keep | `driver.enabled` (default `true`) |
-| Container Toolkit | Keep | `toolkit.enabled` (default `true`) |
-| DCGM exporter | Keep | `dcgmExporter.enabled` (default `true`) |
-| Device plugin | Disable | `--set devicePlugin.enabled=false` |
-| GPU Feature Discovery | Keep | `gfd.enabled` (default `true`) |
-| Bundled Node Feature Discovery | Disable — or keep it and disable GPUStack's bundled NFD instead | `--set nfd.enabled=false`, or [hand the job over](#single-nfd-per-cluster) |
-| MIG Manager | Disable | `--set migManager.enabled=false` — it reconfigures MIG geometry from node labels and fights this operator's Allocate-time MIG actuation. One profile does not: [NVIDIA MIG](/gpustack-operator/main/docs/modules/devices/nvidia-mig/index.md#fleet-wide-mig-manager) |
-| CDI | Disable | `--set cdi.enabled=false` — default `true` from v25.10, see below |
+Keep the driver, toolkit, exporter and GPU Feature Discovery. Disable the device plugin, MIG Manager
+and CDI. Disable bundled NFD or [hand the job over](#single-nfd-per-cluster) and disable GPUStack's
+bundled NFD instead.
+
+```yaml
+driver:
+  enabled: true  # Default.
+toolkit:
+  enabled: true  # Default.
+dcgmExporter:
+  enabled: true  # Default.
+devicePlugin:
+  enabled: false
+gfd:
+  enabled: true  # Default.
+nfd:
+  enabled: false
+migManager:
+  enabled: false
+cdi:
+  enabled: false  # Default true from v25.10.
+```
+
+MIG Manager changes geometry from node labels and conflicts with Allocate-time MIG actuation.
+One profile is an exception; see [NVIDIA MIG](/gpustack-operator/main/docs/modules/devices/nvidia-mig/index.md#fleet-wide-mig-manager).
 
 **Check the node is not opted out.** Some GPU distributions ship their nodes already labelled
 `nvidia.com/gpu.deploy.operands=false`, which tells this operator to place nothing on them at all. Its

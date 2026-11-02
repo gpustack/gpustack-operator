@@ -1452,36 +1452,16 @@ node can materialize a resolved artifact while the hub is unreachable.</p>
 Set <code>modelManager.port</code> to <code>0</code> to disable peer serving and pulling while keeping node delivery
 and the model cache enabled. The standalone <code>model-manager</code> command keeps peer sync disabled
 until its port and peer authentication are configured.</p>
-<table>
-  <thead>
-      <tr>
-          <th>Layer</th>
-          <th>Field</th>
-          <th>Default</th>
-          <th>Meaning</th>
-      </tr>
-  </thead>
-  <tbody>
-      <tr>
-          <td>chart (<code>L1</code>)</td>
-          <td><code>modelManager.port</code></td>
-          <td><code>32445</code></td>
-          <td>the TCP port the peer endpoints answer on; <code>0</code> is off and is the master switch</td>
-      </tr>
-      <tr>
-          <td>chart (<code>L1</code>)</td>
-          <td><code>modelManager.peerSync.maxServingStreams</code> / <code>streamsPerSource</code></td>
-          <td><code>8</code> / <code>4</code></td>
-          <td>the serving and pulling concurrency limits</td>
-      </tr>
-      <tr>
-          <td><code>Setting</code>s (<code>L2</code>)</td>
-          <td><code>model-store-peer-sync</code></td>
-          <td><code>true</code></td>
-          <td>whether a node&rsquo;s plugin may pull from peers; <code>false</code> keeps the listener but pulls from the hub only</td>
-      </tr>
-  </tbody>
-</table>
+<p>Chart defaults:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">modelManager</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">port</span><span class="p">:</span><span class="w"> </span><span class="m">32445</span><span class="w">  </span><span class="c"># Peer TCP port; 0 disables serving and pulling.</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">peerSync</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">maxServingStreams</span><span class="p">:</span><span class="w"> </span><span class="m">8</span><span class="w">  </span><span class="c"># Serving concurrency limit.</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">streamsPerSource</span><span class="p">:</span><span class="w"> </span><span class="m">4</span><span class="w">  </span><span class="c"># Pulling concurrency limit.</span></span></span></code></pre></div>
+</div><p>The runtime <code>Setting</code> <code>model-store-peer-sync</code> defaults to <code>true</code>. Set it to <code>false</code> to keep
+the listener but pull from the hub only.</p>
 <h2 id="serving-cached-weights">Serving cached weights</h2>
 <p>A serving plugin answers a published tree&rsquo;s manifest (its digest and every file&rsquo;s path, size and
 digest, stored by the publish itself) and answers one file per request by HTTP byte ranges. Trees
@@ -1542,7 +1522,7 @@ on 2-vCPU nodes, plus the link&rsquo;s bandwidth); on GPU nodes this shares head
           
           
           <nav class="page-actions" aria-label="Page source">
-            <a href="https://github.com/gpustack/gpustack-operator/blob/423fa74ffa1443814bfdf35a8994ae8b8a9c0b4f/docs/modules/model-delivery/peer-sync.md">View page source</a>
+            <a href="https://github.com/gpustack/gpustack-operator/blob/26f985d9ff6a706b54e102977f74c2e3a8d93bdc/docs/modules/model-delivery/peer-sync.md">View page source</a>
             
             <a href="https://github.com/gpustack/gpustack-operator/edit/main/docs/modules/model-delivery/peer-sync.md">Edit this page</a>
             

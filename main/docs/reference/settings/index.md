@@ -126,6 +126,32 @@ kubectl -n gpustack-system edit setting node-management-manual
 kubectl -n gpustack-system patch setting instance-type-derived-from-node --type merge -p '{"spec":{"value":"false"}}'
 ```
 
+For example, editing `node-management-manual` can set its value to `true`:
+
+```diff
+ apiVersion: gpustack.ai/v1
+ kind: Setting
+ metadata:
+   name: node-management-manual
+   namespace: gpustack-system
+ spec:
+-  value: <current-value>
++  value: "true"
+```
+
+The patch sets `instance-type-derived-from-node` to `false`:
+
+```diff
+ apiVersion: gpustack.ai/v1
+ kind: Setting
+ metadata:
+   name: instance-type-derived-from-node
+   namespace: gpustack-system
+ spec:
+-  value: <current-value>
++  value: "false"
+```
+
 **Effect windows** — **Immediate**: the change does its own work. A consuming controller watches the
 delegated settings `Secret` and reconciles what the `Setting` governs, or an admission webhook starts
 judging every call by the new value. Values reach a process through a thirty-second read cache, so
@@ -247,7 +273,8 @@ so a kubelet refuses it until told otherwise. Add it to the kubelet configuratio
 kubelet:
 
 ```yaml
-# KubeletConfiguration
+apiVersion: kubelet.config.k8s.io/v1beta1
+kind: KubeletConfiguration
 allowedUnsafeSysctls:
   - net.ipv4.tcp_tw_reuse
 ```
@@ -274,6 +301,17 @@ these it takes effect on newly created nodes:
 
 ```bash
 kubectl -n gpustack-system patch setting model-deployment-tcp-tw-reuse --type merge -p '{"spec":{"value":"true"}}'
+```
+
+```diff
+ apiVersion: gpustack.ai/v1
+ kind: Setting
+ metadata:
+   name: model-deployment-tcp-tw-reuse
+   namespace: gpustack-system
+ spec:
+-  value: "false"
++  value: "true"
 ```
 
 **Flipping it recreates the *prefill* replicas it reaches**, in either direction, because the sysctl
@@ -322,13 +360,24 @@ The way out is the variable, not the `Secret`:
   chart renders an empty one, and `helm upgrade`. A blank declaration claims nothing, so clearing the
   chart value is what hands the `Setting` back to you.
 
-| Chart-rendered variable | Chart value that produces it | Chart default |
-|---|---|---|
-| `GPUSTACK_CONTAINER_REGISTRY` | `global.imageRegistry`, falling back to `global.hub` | *(empty)* |
-| `GPUSTACK_CONTAINER_NAMESPACE` | `global.imageNamespace` | *(empty)* |
-| `GPUSTACK_IMAGE_PULL_SECRETS` | `global.imagePullSecrets` | *(empty)* |
-| `GPUSTACK_IMAGE_PULL_POLICY` | `global.imagePullPolicy`, falling back to `worker.image.pullPolicy` and then *`image.pullPolicy`* | `IfNotPresent` |
-| `GPUSTACK_MODEL_ARTIFACT_DELIVERY_MODE` | `modelManager.enabled`, which renders `Node` while the plugin is deployed | *(not rendered)* |
+```yaml
+global:
+  imageRegistry: ""  # GPUSTACK_CONTAINER_REGISTRY; falls back to global.hub.
+  hub: ""
+  imageNamespace: ""  # GPUSTACK_CONTAINER_NAMESPACE.
+  imagePullSecrets: []  # GPUSTACK_IMAGE_PULL_SECRETS.
+  imagePullPolicy: ""  # GPUSTACK_IMAGE_PULL_POLICY; falls back to worker.image.pullPolicy.
+worker:
+  image:
+    pullPolicy: ""  # Falls back to image.pullPolicy.
+image:
+  pullPolicy: IfNotPresent  # Final pull policy fallback.
+modelManager:
+  enabled: true  # Renders GPUSTACK_MODEL_ARTIFACT_DELIVERY_MODE=Node when deployed.
+```
+
+The image variables default to empty except for the final `IfNotPresent` pull policy.
+The delivery mode variable is otherwise not rendered.
 
 Setting the chart value to an empty string is the same as clearing it. With `modelManager.enabled: false`
 the chart stops rendering the delivery mode entirely, and the stored value is then nobody's to write.
@@ -357,6 +406,17 @@ kubectl -n gpustack-system patch setting kv-cache-backend-image --type merge \
   -p '{"spec":{"value":"mirror.example/kv-cache:1.2.3"}}'
 ```
 
+```diff
+ apiVersion: gpustack.ai/v1
+ kind: Setting
+ metadata:
+   name: kv-cache-backend-image
+   namespace: gpustack-system
+ spec:
+-  value: <current-value>
++  value: "mirror.example/kv-cache:1.2.3"
+```
+
 Untracking the `Setting` is the only thing that keeps the pin, and nothing else stands in for it: a
 variable set to an empty value is no declaration, and a default that is blank is never written at all.
 
@@ -366,6 +426,19 @@ variable set to an empty value is no declaration, and a default that is blank is
 kubectl -n gpustack-system get setting settings-default-tracking -o yaml
 kubectl -n gpustack-system patch setting settings-default-tracking --type merge \
   -p '{"spec":{"value":"instance-ssh-server-image,kv-cache-backend-image,model-deployment-router-image,model-deployment-router-proxy-image,model-deployment-routing-sidecar-image"}}'
+```
+
+The second patch removes `model-prefetch-warmup-image` from the default-tracking list:
+
+```diff
+ apiVersion: gpustack.ai/v1
+ kind: Setting
+ metadata:
+   name: settings-default-tracking
+   namespace: gpustack-system
+ spec:
+-  value: <current-value>
++  value: "instance-ssh-server-image,kv-cache-backend-image,model-deployment-router-image,model-deployment-router-proxy-image,model-deployment-routing-sidecar-image"
 ```
 
 A pin that predates this behavior is replaced on the first worker start of the release that introduces

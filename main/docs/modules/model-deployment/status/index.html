@@ -2147,53 +2147,27 @@ ignores the fields the scaler owns.</p>
 of <code>Pod</code>s that form one logical serving replica of a role, and its identity is the role, the replica
 ordinal and the current sorted member UID set. A replaced member is a different set, so a previous
 qualification does not apply to the new one.</p>
-<table>
-  <thead>
-      <tr>
-          <th>Field</th>
-          <th>Meaning</th>
-      </tr>
-  </thead>
-  <tbody>
-      <tr>
-          <td><code>role</code></td>
-          <td>the role the group belongs to</td>
-      </tr>
-      <tr>
-          <td><code>ordinal</code></td>
-          <td>the replica slot the group occupies within its role</td>
-      </tr>
-      <tr>
-          <td><code>generation</code></td>
-          <td>the sorted member UID set the answers below were taken against</td>
-      </tr>
-      <tr>
-          <td><code>state</code></td>
-          <td>the group&rsquo;s eligibility state</td>
-      </tr>
-      <tr>
-          <td><code>reason</code></td>
-          <td>the fact that holds the group, or that it qualifies</td>
-      </tr>
-      <tr>
-          <td><code>members</code></td>
-          <td>the group&rsquo;s current members, ordered by seat</td>
-      </tr>
-      <tr>
-          <td><code>lastQualificationTime</code></td>
-          <td>when the group last entered <code>Eligible</code> for this generation</td>
-      </tr>
-      <tr>
-          <td><code>serving</code></td>
-          <td>the Router&rsquo;s answer for this group</td>
-      </tr>
-      <tr>
-          <td><code>servingReason</code></td>
-          <td>why that answer is what it is, when it is not a confirmation</td>
-      </tr>
-  </tbody>
-</table>
-<p>Each member entry carries the member <code>Pod</code>&rsquo;s <code>name</code> and <code>uid</code>, the <code>seat</code> it claims, and its <code>ready</code>
+<p>The following fragment illustrates the fields; it is not captured output:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">worker.gpustack.ai/v1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">ModelDeployment</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">metadata</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">example-model</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">status</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">roles</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">groups</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span>- <span class="nt">role</span><span class="p">:</span><span class="w"> </span><span class="l">server </span><span class="w"> </span><span class="c"># Role the group belongs to.</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="nt">ordinal</span><span class="p">:</span><span class="w"> </span><span class="m">0</span><span class="w">  </span><span class="c"># Replica slot within the role.</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="nt">generation</span><span class="p">:</span><span class="w"> </span><span class="l">&lt;member-uid-set&gt; </span><span class="w"> </span><span class="c"># Sorted member UID set for these answers.</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="nt">state</span><span class="p">:</span><span class="w"> </span><span class="l">Unknown </span><span class="w"> </span><span class="c"># Eligibility state.</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="nt">reason</span><span class="p">:</span><span class="w"> </span><span class="l">&lt;reason&gt; </span><span class="w"> </span><span class="c"># What holds the group, or that it qualifies.</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="nt">members</span><span class="p">:</span><span class="w"> </span><span class="p">[]</span><span class="w">  </span><span class="c"># Current members, ordered by seat.</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="nt">lastQualificationTime</span><span class="p">:</span><span class="w"> </span><span class="l">&lt;timestamp&gt; </span><span class="w"> </span><span class="c"># Last entry into Eligible for this generation.</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="nt">serving</span><span class="p">:</span><span class="w">  </span><span class="c"># Router&#39;s answer for this group.</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">            </span><span class="nt">state</span><span class="p">:</span><span class="w"> </span><span class="l">Unknown</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="nt">servingReason</span><span class="p">:</span><span class="w"> </span><span class="l">&lt;reason&gt; </span><span class="w"> </span><span class="c"># Why the Router&#39;s answer is not a confirmation.</span></span></span></code></pre></div>
+</div><p>Each member entry carries the member <code>Pod</code>&rsquo;s <code>name</code> and <code>uid</code>, the <code>seat</code> it claims, and its <code>ready</code>
 value: <code>True</code>, <code>False</code> or <code>Unknown</code>. A member nobody has reported on is <code>Unknown</code>, not <code>False</code>.</p>
 <p><strong>The group entry answers what the role&rsquo;s counts cannot.</strong> <em><code>endpoints.eligible</code></em> counts endpoints and
 <em><code>endpoints.serving</code></em> counts a Router&rsquo;s confirmation; the group entry names the members, the
@@ -2295,7 +2269,7 @@ a reader asks about when a rank fails.</p>
           
           
           <nav class="page-actions" aria-label="Page source">
-            <a href="https://github.com/gpustack/gpustack-operator/blob/423fa74ffa1443814bfdf35a8994ae8b8a9c0b4f/docs/modules/model-deployment/status.md">View page source</a>
+            <a href="https://github.com/gpustack/gpustack-operator/blob/26f985d9ff6a706b54e102977f74c2e3a8d93bdc/docs/modules/model-deployment/status.md">View page source</a>
             
             <a href="https://github.com/gpustack/gpustack-operator/edit/main/docs/modules/model-deployment/status.md">Edit this page</a>
             

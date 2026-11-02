@@ -1472,42 +1472,24 @@ mode cannot set it, so there the plugin only works with the standard <code>/var/
 only get, list and watch on <code>modelartifacts</code> and <code>nodemodelstores</code>, update on
 <code>nodemodelstores/status</code>, and <code>ConfigMap</code>s in the operator namespace. It reads no <code>Secret</code>: kubelet
 hands each mount its artifact&rsquo;s <code>Secret</code>.</p>
-<table>
-  <thead>
-      <tr>
-          <th>Value</th>
-          <th>Default</th>
-          <th>Meaning</th>
-      </tr>
-  </thead>
-  <tbody>
-      <tr>
-          <td><code>modelManager.rootPath</code></td>
-          <td><code>/var/lib/gpustack/models</code></td>
-          <td>the node&rsquo;s cache directory, a hostPath; mount a dedicated filesystem here</td>
-      </tr>
-      <tr>
-          <td><code>modelManager.kubeletDir</code></td>
-          <td><code>/var/lib/kubelet</code></td>
-          <td>kubelet&rsquo;s root; the plugin mounts its <code>pods</code> directory with <code>Bidirectional</code> propagation and its own plugin directory separately</td>
-      </tr>
-      <tr>
-          <td><code>modelManager.securePort</code></td>
-          <td><code>32444</code></td>
-          <td>metrics, readiness and liveness</td>
-      </tr>
-      <tr>
-          <td><code>modelManager.registrar.image</code></td>
-          <td><code>docker.io/gpustack/mirrored-csi-node-driver-registrar:v2.17.0</code></td>
-          <td>the sidecar that registers the plugin with kubelet</td>
-      </tr>
-      <tr>
-          <td><code>modelManager.nodeSelector</code>, <em><code>tolerations</code></em></td>
-          <td>every node, every taint</td>
-          <td>where it runs; a node without it cannot mount node-delivered weights</td>
-      </tr>
-  </tbody>
-</table>
+<p>The following chart values show the defaults:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">modelManager</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">enabled</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">rootPath</span><span class="p">:</span><span class="w"> </span><span class="l">/var/lib/gpustack/models </span><span class="w"> </span><span class="c"># Node cache hostPath; mount a dedicated filesystem here.</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">kubeletDir</span><span class="p">:</span><span class="w"> </span><span class="l">/var/lib/kubelet </span><span class="w"> </span><span class="c"># Kubelet root.</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">securePort</span><span class="p">:</span><span class="w"> </span><span class="m">32444</span><span class="w">  </span><span class="c"># Metrics, readiness and liveness.</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">registrar</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">image</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">repository</span><span class="p">:</span><span class="w"> </span><span class="l">docker.io/gpustack/mirrored-csi-node-driver-registrar</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">tag</span><span class="p">:</span><span class="w"> </span><span class="l">v2.17.0</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">nodeSelector</span><span class="p">:</span><span class="w"> </span>{}<span class="w">  </span><span class="c"># Every node by default.</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">tolerations</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">operator</span><span class="p">:</span><span class="w"> </span><span class="l">Exists </span><span class="w"> </span><span class="c"># Every taint by default.</span></span></span></code></pre></div>
+</div><p>The registrar sidecar registers the plugin with kubelet. The plugin mounts the kubelet <code>pods</code>
+directory with <code>Bidirectional</code> propagation and mounts its own plugin directory separately.
+A node without the plugin cannot mount node-delivered weights.</p>
 <table>
   <thead>
       <tr>
@@ -1588,6 +1570,18 @@ download starts.</p>
 <div class="code-block">
   <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">kubectl -n gpustack-system patch setting model-store-download-bandwidth --type merge -p <span class="s1">&#39;{&#34;spec&#34;:{&#34;value&#34;:&#34;200Mi&#34;}}&#39;</span></span></span></code></pre></div>
+</div><p>The patch sets the value to <code>200Mi</code>:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>diff</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-diff" data-lang="diff"><span class="line"><span class="cl"> apiVersion: gpustack.ai/v1
+</span></span><span class="line"><span class="cl"> kind: Setting
+</span></span><span class="line"><span class="cl"> metadata:
+</span></span><span class="line"><span class="cl">   name: model-store-download-bandwidth
+</span></span><span class="line"><span class="cl">   namespace: gpustack-system
+</span></span><span class="line"><span class="cl"> spec:
+</span></span><span class="line"><span class="cl"><span class="gd">-  value: &lt;current-value&gt;
+</span></span></span><span class="line"><span class="cl"><span class="gd"></span><span class="gi">+  value: &#34;200Mi&#34;
+</span></span></span></code></pre></div>
 </div><h3 id="pool-layer">Pool layer</h3>
 <p>A <a href="/gpustack-operator/main/docs/modules/model-delivery/prefetch/"><code>ModelStore</code></a>
  is a fourth layer above the cluster <code>Setting</code>s: a
@@ -1794,7 +1788,7 @@ patterns</li><li><a href="/gpustack-operator/main/docs/reference/settings/#setti
           
           
           <nav class="page-actions" aria-label="Page source">
-            <a href="https://github.com/gpustack/gpustack-operator/blob/423fa74ffa1443814bfdf35a8994ae8b8a9c0b4f/docs/modules/model-delivery/operations.md">View page source</a>
+            <a href="https://github.com/gpustack/gpustack-operator/blob/26f985d9ff6a706b54e102977f74c2e3a8d93bdc/docs/modules/model-delivery/operations.md">View page source</a>
             
             <a href="https://github.com/gpustack/gpustack-operator/edit/main/docs/modules/model-delivery/operations.md">Edit this page</a>
             

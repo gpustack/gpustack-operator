@@ -1698,51 +1698,24 @@ matching node. Two groups may select the same node (a DRAM group and a VRAM grou
 second medium exists for), and each still renders its own <code>DaemonSet</code>.</p>
 <p>The member&rsquo;s whole configuration renders as <strong>environment variables</strong>: no <code>ConfigMap</code>, no volume, no init
 container.</p>
-<table>
-  <thead>
-      <tr>
-          <th>config key</th>
-          <th>environment variable</th>
-      </tr>
-  </thead>
-  <tbody>
-      <tr>
-          <td><code>local_hostname</code></td>
-          <td><code>MOONCAKE_LOCAL_HOSTNAME</code> (the <strong><code>Pod</code> IP</strong>, from the downward API)</td>
-      </tr>
-      <tr>
-          <td><code>metadata_server</code></td>
-          <td><code>MOONCAKE_TE_META_DATA_SERVER</code></td>
-      </tr>
-      <tr>
-          <td><code>master_server_address</code></td>
-          <td><code>MOONCAKE_MASTER</code></td>
-      </tr>
-      <tr>
-          <td><em><code>protocol</code></em></td>
-          <td><code>MOONCAKE_PROTOCOL</code></td>
-      </tr>
-      <tr>
-          <td><code>global_segment_size</code></td>
-          <td><code>MOONCAKE_GLOBAL_SEGMENT_SIZE</code></td>
-      </tr>
-      <tr>
-          <td><code>local_buffer_size</code></td>
-          <td><code>MOONCAKE_LOCAL_BUFFER_SIZE</code></td>
-      </tr>
-      <tr>
-          <td><code>device_name</code></td>
-          <td><code>MOONCAKE_DEVICE</code> — <strong>deliberately left unset</strong>, see below</td>
-      </tr>
-  </tbody>
-</table>
-<p><strong><code>MOONCAKE_TE_META_DATA_SERVER</code> carries an underscore inside <code>META_DATA</code>.</strong> It is not
+<p>The Mooncake configuration keys map to the following environment variables. Values here describe
+their sources, not a YAML file mounted in the container.</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">local_hostname</span><span class="p">:</span><span class="w"> </span><span class="l">&lt;pod-ip&gt; </span><span class="w"> </span><span class="c"># MOONCAKE_LOCAL_HOSTNAME, from the downward API</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">metadata_server</span><span class="p">:</span><span class="w"> </span><span class="l">&lt;metadata-server&gt; </span><span class="w"> </span><span class="c"># MOONCAKE_TE_META_DATA_SERVER</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">master_server_address</span><span class="p">:</span><span class="w"> </span><span class="l">&lt;master-address&gt; </span><span class="w"> </span><span class="c"># MOONCAKE_MASTER</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">protocol</span><span class="p">:</span><span class="w"> </span><span class="l">&lt;protocol&gt; </span><span class="w"> </span><span class="c"># MOONCAKE_PROTOCOL</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">global_segment_size</span><span class="p">:</span><span class="w"> </span><span class="l">&lt;segment-size&gt; </span><span class="w"> </span><span class="c"># MOONCAKE_GLOBAL_SEGMENT_SIZE</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">local_buffer_size</span><span class="p">:</span><span class="w"> </span><span class="l">&lt;buffer-size&gt; </span><span class="w"> </span><span class="c"># MOONCAKE_LOCAL_BUFFER_SIZE</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="c"># device_name is deliberately unset: MOONCAKE_DEVICE</span></span></span></code></pre></div>
+</div><p><strong><code>MOONCAKE_TE_META_DATA_SERVER</code> carries an underscore inside <code>META_DATA</code>.</strong> It is not
 <code>MOONCAKE_TE_METADATA_SERVER</code>, and normalising it to the spelling that reads correctly <strong>silently
 degrades the metadata plane</strong> rather than erroring.</p>
 <p><strong><code>MOONCAKE_DEVICE</code> is left unset on purpose, and the documented value <code>auto-discovery</code> is a trap.</strong>
 The client splits that key on commas into a device filter and nothing special-cases the string, so
 setting it produces a filter matching a device no host has. <strong>Empty means &ldquo;use every device found&rdquo;.</strong></p>
-<p><strong><em><code>members[].extraArgs</code></em> is the exception to the table above: it renders into the container&rsquo;s
+<p><strong><em><code>members[].extraArgs</code></em> is the exception to the mapping above: it renders into the container&rsquo;s
 argv</strong>, as <code>-D key=value</code>, not into an environment variable. <em><code>leader.extraArgs</code></em> does the same on the
 leader, as <code>-key=value</code>.</p>
 <p><strong>Either way the value is world-readable, on three paths.</strong> It is stored verbatim on the
@@ -1875,32 +1848,33 @@ the first.</p>
 <p>A VRAM group&rsquo;s container needs the vendor&rsquo;s <strong>user-space driver</strong>, which is what the store&rsquo;s client
 loads to allocate a segment at all. That driver is the node&rsquo;s and is never in the image, so it has to
 be brought in. Nothing is inferred; every route is written on the group:</p>
-<table>
-  <thead>
-      <tr>
-          <th>Field</th>
-          <th>Purpose</th>
-      </tr>
-  </thead>
-  <tbody>
-      <tr>
-          <td><em><code>members[].extraEnv</code></em></td>
-          <td>The vendor runtime&rsquo;s own trigger, where one exists — <code>NVIDIA_VISIBLE_DEVICES: all</code> makes the NVIDIA toolkit inject the driver and every device. Ascend has no counterpart.</td>
-      </tr>
-      <tr>
-          <td><em><code>members[].runtimeClassName</code></em></td>
-          <td>The vendor container runtime named explicitly, for a cluster where it is not the default runtime.</td>
-      </tr>
-      <tr>
-          <td><em><code>members[].hostPaths[]</code></em></td>
-          <td>The driver tree taken from the node directly, for a cluster running no vendor runtime at all.</td>
-      </tr>
-      <tr>
-          <td><em><code>members[].securityContext</code></em></td>
-          <td>Privilege, when a mount alone is not enough to open what was mounted.</td>
-      </tr>
-  </tbody>
-</table>
+<div class="code-block">
+  <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">worker.gpustack.ai/v1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">KVCacheBackend</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">metadata</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">shared-cache</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">connection</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">managed</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">leader</span><span class="p">:</span><span class="w"> </span>{}<span class="w">  </span><span class="c"># replicas, allocationStrategy and multiTenancy default</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">members</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span>- <span class="nt">nodeSelector</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">            </span><span class="nt">kvcache-vram</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;true&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="nt">medium</span><span class="p">:</span><span class="w"> </span><span class="l">VRAM</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="nt">capacityPerMember</span><span class="p">:</span><span class="w"> </span><span class="l">8Gi</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="nt">extraEnv</span><span class="p">:</span><span class="w">  </span><span class="c"># NVIDIA toolkit trigger; Ascend has no counterpart.</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">            </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">NVIDIA_VISIBLE_DEVICES</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">              </span><span class="nt">value</span><span class="p">:</span><span class="w"> </span><span class="l">all </span><span class="w"> </span><span class="c"># Inject the driver and every device.</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="nt">runtimeClassName</span><span class="p">:</span><span class="w"> </span><span class="l">nvidia </span><span class="w"> </span><span class="c"># Explicit vendor runtime when it is not the default.</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="nt">hostPaths</span><span class="p">:</span><span class="w">  </span><span class="c"># Mount the driver tree directly when no vendor runtime runs.</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">            </span>- <span class="nt">path</span><span class="p">:</span><span class="w"> </span><span class="l">/usr/local/Ascend/driver</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">              </span><span class="nt">mountPath</span><span class="p">:</span><span class="w"> </span><span class="l">/usr/local/Ascend/driver</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">              </span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l">Directory</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">              </span><span class="nt">readOnly</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="nt">securityContext</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">            </span><span class="nt">privileged</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="w">  </span><span class="c"># When a mount alone cannot open what was mounted.</span></span></span></code></pre></div>
+</div><p>These fields illustrate alternative access routes; select the route for the node&rsquo;s vendor.</p>
 <p><strong>Privilege alone does not cover this.</strong> It opens the node&rsquo;s device tree under <code>/dev</code>, which is
 where the device nodes are and is <strong>not</strong> where the libraries are: Ascend&rsquo;s driver is under
 <code>/usr/local/Ascend/driver</code> with DCMI beside it, and NVIDIA&rsquo;s <code>libcuda.so</code> is injected by the
@@ -1920,16 +1894,24 @@ that can change later), or if it is this group&rsquo;s own <em><code>localDisks[
 driver once the variable tells it which devices to inject:</p>
 <div class="code-block">
   <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
-  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">members</span><span class="p">:</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w">  </span>- <span class="nt">nodeSelector</span><span class="p">:</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">kvcache-vram</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;true&#34;</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">medium</span><span class="p">:</span><span class="w"> </span><span class="l">VRAM</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">image</span><span class="p">:</span><span class="w"> </span><span class="l">gpustack/mirrored-mooncake:0.3.13.post1-cuda13.0</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="c"># Leave this memory free in the engine&#39;s GPU memory budget.</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">capacityPerMember</span><span class="p">:</span><span class="w"> </span><span class="l">8Gi</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">extraEnv</span><span class="p">:</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w">      </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">NVIDIA_VISIBLE_DEVICES</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">value</span><span class="p">:</span><span class="w"> </span><span class="l">all</span></span></span></code></pre></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">worker.gpustack.ai/v1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">KVCacheBackend</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">metadata</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">shared-cache</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">connection</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">managed</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">leader</span><span class="p">:</span><span class="w"> </span>{}<span class="w">  </span><span class="c"># replicas, allocationStrategy and multiTenancy default</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">members</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span>- <span class="nt">nodeSelector</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">            </span><span class="nt">kvcache-vram</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;true&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="nt">medium</span><span class="p">:</span><span class="w"> </span><span class="l">VRAM</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="nt">image</span><span class="p">:</span><span class="w"> </span><span class="l">gpustack/mirrored-mooncake:0.3.13.post1-cuda13.0</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="c"># Leave this memory free in the engine&#39;s GPU memory budget.</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="nt">capacityPerMember</span><span class="p">:</span><span class="w"> </span><span class="l">8Gi</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="nt">extraEnv</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">            </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">NVIDIA_VISIBLE_DEVICES</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">              </span><span class="nt">value</span><span class="p">:</span><span class="w"> </span><span class="l">all</span></span></span></code></pre></div>
 </div><p>That variable is honored only while the toolkit&rsquo;s
 <code>accept-nvidia-visible-devices-envvar-when-unprivileged</code> is on, which is its default and which
 NVIDIA&rsquo;s own hardening guidance turns <strong>off</strong>. On a cluster that turned it off, use
@@ -1938,25 +1920,33 @@ NVIDIA&rsquo;s own hardening guidance turns <strong>off</strong>. On a cluster t
 mounted from the node:</p>
 <div class="code-block">
   <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
-  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">members</span><span class="p">:</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w">  </span>- <span class="nt">nodeSelector</span><span class="p">:</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">kvcache-vram</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;true&#34;</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">medium</span><span class="p">:</span><span class="w"> </span><span class="l">VRAM</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">image</span><span class="p">:</span><span class="w"> </span><span class="l">gpustack/mirrored-mooncake:0.3.13.post1-cann9.1-910b</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">capacityPerMember</span><span class="p">:</span><span class="w"> </span><span class="l">32Gi</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">hostPaths</span><span class="p">:</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w">      </span>- <span class="nt">path</span><span class="p">:</span><span class="w"> </span><span class="l">/usr/local/Ascend/driver</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">mountPath</span><span class="p">:</span><span class="w"> </span><span class="l">/usr/local/Ascend/driver</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l">Directory</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">readOnly</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w">      </span>- <span class="nt">path</span><span class="p">:</span><span class="w"> </span><span class="l">/usr/local/dcmi</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">mountPath</span><span class="p">:</span><span class="w"> </span><span class="l">/usr/local/dcmi</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l">Directory</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">readOnly</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w">      </span>- <span class="nt">path</span><span class="p">:</span><span class="w"> </span><span class="l">/usr/local/bin/npu-smi</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">mountPath</span><span class="p">:</span><span class="w"> </span><span class="l">/usr/local/bin/npu-smi</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l">File</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">readOnly</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span></span></span></code></pre></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">worker.gpustack.ai/v1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">KVCacheBackend</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">metadata</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">shared-cache</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">connection</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">managed</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">leader</span><span class="p">:</span><span class="w"> </span>{}<span class="w">  </span><span class="c"># replicas, allocationStrategy and multiTenancy default</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">members</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span>- <span class="nt">nodeSelector</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">            </span><span class="nt">kvcache-vram</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;true&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="nt">medium</span><span class="p">:</span><span class="w"> </span><span class="l">VRAM</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="nt">image</span><span class="p">:</span><span class="w"> </span><span class="l">gpustack/mirrored-mooncake:0.3.13.post1-cann9.1-910b</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="nt">capacityPerMember</span><span class="p">:</span><span class="w"> </span><span class="l">32Gi</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="nt">hostPaths</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">            </span>- <span class="nt">path</span><span class="p">:</span><span class="w"> </span><span class="l">/usr/local/Ascend/driver</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">              </span><span class="nt">mountPath</span><span class="p">:</span><span class="w"> </span><span class="l">/usr/local/Ascend/driver</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">              </span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l">Directory</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">              </span><span class="nt">readOnly</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">            </span>- <span class="nt">path</span><span class="p">:</span><span class="w"> </span><span class="l">/usr/local/dcmi</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">              </span><span class="nt">mountPath</span><span class="p">:</span><span class="w"> </span><span class="l">/usr/local/dcmi</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">              </span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l">Directory</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">              </span><span class="nt">readOnly</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">            </span>- <span class="nt">path</span><span class="p">:</span><span class="w"> </span><span class="l">/usr/local/bin/npu-smi</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">              </span><span class="nt">mountPath</span><span class="p">:</span><span class="w"> </span><span class="l">/usr/local/bin/npu-smi</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">              </span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l">File</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">              </span><span class="nt">readOnly</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span></span></span></code></pre></div>
 </div><p><strong>A VRAM group may also carry a <a href="/gpustack-operator/main/docs/modules/kv-cache/local-disk-tier/">local disk tier</a>
 , and that combination is
 measured on NVIDIA.</strong> Objects written past a 256Mi device segment left memory for the tier and read
@@ -2184,6 +2174,12 @@ the endpoint.</p>
 </span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">spec</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">connection</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">managed</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">leader</span><span class="p">:</span><span class="w"> </span>{}<span class="w">  </span><span class="c"># replicas, allocationStrategy and multiTenancy default</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">members</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span>- <span class="nt">nodeSelector</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">            </span><span class="nt">kvcache-dram</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;true&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="nt">medium</span><span class="p">:</span><span class="w"> </span><span class="l">DRAM</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="nt">capacityPerMember</span><span class="p">:</span><span class="w"> </span><span class="l">64Gi</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">scaleIn</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">gracePeriodSeconds</span><span class="p">:</span><span class="w"> </span><span class="m">30</span><span class="w">  </span><span class="c"># 0 to 3600 seconds</span></span></span></code></pre></div>
 </div><p><strong>The <code>Pod</code>&rsquo;s termination window is derived from it</strong>, as <code>gracePeriodSeconds + 60</code>, rather than being
@@ -2365,7 +2361,7 @@ a quota on this store, and what a quota ceiling buys)</li><li><a href="/gpustack
           
           
           <nav class="page-actions" aria-label="Page source">
-            <a href="https://github.com/gpustack/gpustack-operator/blob/423fa74ffa1443814bfdf35a8994ae8b8a9c0b4f/docs/modules/kv-cache/backend.md">View page source</a>
+            <a href="https://github.com/gpustack/gpustack-operator/blob/26f985d9ff6a706b54e102977f74c2e3a8d93bdc/docs/modules/kv-cache/backend.md">View page source</a>
             
             <a href="https://github.com/gpustack/gpustack-operator/edit/main/docs/modules/kv-cache/backend.md">Edit this page</a>
             

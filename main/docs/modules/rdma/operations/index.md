@@ -10,6 +10,7 @@ placement. [Network Topology](/gpustack-operator/main/docs/modules/rdma/network-
 - [Choosing a key](#choosing-a-key)
 - [Endpoints per accelerator](#endpoints-per-accelerator)
 - [Injected devices](#injected-devices)
+- [Selection policy](#selection-policy)
 - [Example manifest](#example-manifest)
 - [Enabling NUMA alignment](#enabling-numa-alignment)
 - [Verification](#verification)
@@ -26,11 +27,11 @@ differences. Choose the key for your workload:
 
 | Key | Use when |
 |---|---|
-| `device.gpustack.ai/rdma` | the workload must be the adapter's only tenant |
+| `device.gpustack.ai/rdma` | each requested token must name a different endpoint within this family |
 | `device.gpustack.ai/rdma.shared` | everything else |
 | `device.gpustack.ai/rdma.partitioned` | the node's adapters are physical functions with virtual functions configured |
 
-**A node serves one branch or the other, and nothing in a manifest chooses it.** A *single-root I/O virtualization (SR-IOV)* physical
+**Each interface's configuration determines which families it serves.** A *single-root I/O virtualization (SR-IOV)* physical
 function with virtual functions configured serves the partitioned key **only**; every other
 interface serves the exclusive and shared keys ([which interface serves
 what](network-topology.md#rdma-resource-keys)).
@@ -43,11 +44,13 @@ kubectl get nodes -o json |
          | select(length > 0) | {node: $n} + .'
 ```
 
-Ask for the shared key unless the workload needs sole tenancy. An adapter carries far more
+Ask for the shared key unless the workload needs distinct exclusive-family endpoints. An adapter carries far more
 concurrent queue pairs than the tokens an endpoint is advertised for, and several processes on
 one adapter is ordinary *RDMA* practice: the isolation is the firmware's and the kernel's, not the
-token count's. Taking a whole adapter exclusively removes it from every other tenant on the node and
-buys nothing the hardware was not already doing.
+token count's.
+
+The exclusive and shared families account for allocations separately. An exclusive
+token reserves an endpoint within that family; the shared family can still grant the same HCA.
 
 For a managed `ModelDeployment`, set *`spec.roles[].resources.interface`* instead of naming the key
 in a `Pod` template. [Model Deployment](/gpustack-operator/main/docs/modules/model-deployment/deployment/index.md) states which key a
@@ -90,26 +93,190 @@ container ([what a label can carry](/gpustack-operator/main/docs/modules/rdma/ne
 
 ## Injected devices
 
+Each allocation response names its granted *host channel adapters (HCAs)* and exposes their devices:
+
 | Container contents | Count |
 |---|---|
-| the endpoint's verbs character device, `/dev/infiniband/uverbs<N>` | one per granted endpoint |
+| the granted HCA's verbs character device, `/dev/infiniband/uverbs<N>` | one per distinct granted HCA name |
 | the node-level connection-manager device, `/dev/infiniband/rdma_cm` | **one per response**, however many endpoints were granted, and only where the host has one |
-| the `NCCL_IB_HCA` environment variable | one, naming the granted *RDMA* devices, comma-joined |
+| `NCCL_IB_HCA` | sorted, unique granted HCA names, comma-joined with one leading `=` for exact matching |
+| `GPUSTACK_RDMA_DEVICES` | the same sorted, unique comma-joined names without `=` |
+
+All three resource keys, `device.gpustack.ai/rdma`, `device.gpustack.ai/rdma.shared` and
+`device.gpustack.ai/rdma.partitioned`, inject `GPUSTACK_RDMA_DEVICES` and `NCCL_IB_HCA`.
+Switching modes does not change the grant variable names.
 
 ```bash
-# inside the container: one uverbs entry per granted endpoint, and exactly one rdma_cm
+# Inside the container: granted uverbs nodes and rdma_cm when available.
 ls /dev/infiniband
-# the same devices by name, comma-joined
+# Exact NCCL filter; for example, =mlx5_1,mlx5_10.
 echo "$NCCL_IB_HCA"
+# Plain grant list in any mode; for example, mlx5_1,mlx5_10.
+echo "$GPUSTACK_RDMA_DEVICES"
 ```
 
-Two granted endpoints therefore show **two** `uverbs` entries, **one** `rdma_cm`, and two names in
-`NCCL_IB_HCA`. The single connection manager is the correct answer rather than a half grant: it
-belongs to the node, not to an endpoint, so it is injected once whatever was granted ([what an
-allocation hands over](network-topology.md#allocation-response)).
+The example values are illustrative. Repeated tokens or endpoints naming one HCA produce one name
+and one `uverbs` mapping. This response deduplication leaves advertised IDs and capacity unchanged.
+Allocation fails if a granted HCA's device node cannot be resolved; it returns no partial grant.
+
+When no HCA remains eligible for a grant, the response injects `GPUSTACK_RDMA_DEVICES=""` and
+`NCCL_IB_HCA=""` with no character device nodes. This can happen when the active
+`DevicesRDMASelectionPolicy` excludes every granted endpoint. Already-running containers remain
+untouched.
+
+A container requesting multiple families receives independent responses setting the same variable
+names; their merged values do not promise a union. An application startup adapter must build the
+selector its transport accepts. A `Pod`'s `env.value` cannot expand variables injected later by the
+device plugin.
+
+These values apply to new allocation responses; existing containers and cached responses are not
+rewritten. Generic grant variables do not configure HIXL, NIXL or another consumer automatically.
+Each consumer needs a supported startup adapter and separate runtime qualification.
 
 The injected set is evidenced for RoCE and for nothing else; what that leaves open on a classic
 InfiniBand fabric is [what an allocation hands over](/gpustack-operator/main/docs/modules/rdma/network-topology/index.md#allocation-response).
+
+## Selection policy
+
+`DevicesRDMASelectionPolicy` is a cluster-scoped configuration API at `worker.gpustack.ai/v1`.
+The Device Plugin controller evaluates it against the node's local *RDMA* inventory. Policy edits
+do not trigger hardware rescans in the Detector.
+
+A valid policy update takes effect immediately for subsequent `ListAndWatch` advertisements and
+`Allocate` / `GetPreferredAllocation` calls. Unselected endpoints retain their token IDs but report
+`Unhealthy`. No node drain is required, and already-allocated containers remain untouched.
+Continue to size requests from the node's actual allocatable resources.
+
+Consider an eight-GPU (`NVIDIA B300`) host that exposes 13 verbs devices under
+`/sys/class/infiniband`:
+
+- `mlx5_0` through `mlx5_3`: four 100 Gb/s InfiniBand adapters at `SYS` distance to all GPUs, with
+  no IPoIB netdev.
+- `mlx5_4` through `mlx5_11`: eight 800 Gb/s InfiniBand adapters paired `PIX` 1:1 with the eight
+  GPUs across *NUMA* 0 (`mlx5_8..mlx5_11`) and *NUMA* 1 (`mlx5_4..mlx5_7`), with no IPoIB netdev.
+- `mlx5_12`: one 400 Gb/s Ethernet adapter backing host `eth0`.
+
+To restrict workloads to the eight 800 Gb/s GPU-local compute adapters (`mlx5_4..mlx5_11`), create a
+policy with `include`. A policy can set at most one of `include` and `exclude`:
+
+```yaml
+apiVersion: worker.gpustack.ai/v1
+kind: DevicesRDMASelectionPolicy
+metadata:
+  name: b300-compute-hcas  # Cluster-scoped policy name.
+spec:
+  # Required, non-null Kubernetes label selector; {} matches every node.
+  nodeSelector:
+    matchLabels:
+      gpu.gpustack.ai/model: b300
+  # Exact HCA names to include; missing or null leaves inclusion unrestricted.
+  include:
+    - mlx5_4
+    - mlx5_5
+    - mlx5_6
+    - mlx5_7
+    - mlx5_8
+    - mlx5_9
+    - mlx5_10
+    - mlx5_11
+```
+
+Alternatively, configure the same selection with `exclude` to filter out the four 100 Gb/s adapters
+and the host Ethernet adapter. Remove `include` when switching to this form; do not apply both forms
+as separate matching policies:
+
+```yaml
+apiVersion: worker.gpustack.ai/v1
+kind: DevicesRDMASelectionPolicy
+metadata:
+  name: b300-compute-hcas
+spec:
+  nodeSelector:
+    matchLabels:
+      gpu.gpustack.ai/model: b300
+  # Exact HCA names to exclude; missing or null excludes none.
+  exclude:
+    - mlx5_0
+    - mlx5_1
+    - mlx5_2
+    - mlx5_3
+    - mlx5_12
+```
+
+To take `mlx5_11` out of rotation in the `include` form, update the policy manifest and apply it
+again:
+
+```diff
+ apiVersion: worker.gpustack.ai/v1
+ kind: DevicesRDMASelectionPolicy
+ metadata:
+   name: b300-compute-hcas
+ spec:
+   nodeSelector:
+     matchLabels:
+       gpu.gpustack.ai/model: b300
+   include:
+     - mlx5_4
+     - mlx5_5
+     - mlx5_6
+     - mlx5_7
+     - mlx5_8
+     - mlx5_9
+     - mlx5_10
+-    - mlx5_11
+```
+
+Read selection status on the node's `Devices` resource. This illustrative excerpt shows the result
+when `mlx5_4..mlx5_11` are selected:
+
+```yaml
+apiVersion: worker.gpustack.ai/v1
+kind: Devices
+metadata:
+  name: b300-node-0
+status:
+  interfaces:
+    rdmaSelectionPolicy:
+      policyRef:  # Policy name, UID and generation selected for resolution.
+        name: b300-compute-hcas
+        uid: example-policy-uid
+        generation: 1
+      excluded:  # HCAs excluded by the selection and their reasons.
+        - name: mlx5_0
+          reason: ExcludedByPolicy
+        - name: mlx5_1
+          reason: ExcludedByPolicy
+        - name: mlx5_2
+          reason: ExcludedByPolicy
+        - name: mlx5_3
+          reason: ExcludedByPolicy
+        - name: mlx5_12
+          reason: ExcludedByPolicy
+  conditions:
+    - type: RDMASelectionResolved  # Reports whether the node's selection is resolved.
+      status: "True"
+      reason: PolicyResolved
+```
+
+With no matching policy, successful resolution selects all otherwise eligible candidates.
+If a policy is invalid on the node, multiple policies match, or resolution is unknown, the node
+fails closed. It selects no HCA, and all *RDMA* tokens report `Unhealthy`. The
+`RDMASelectionResolved` condition is `False` or `Unknown`; no previous selection is retained.
+Already-allocated containers remain untouched.
+
+Names identify PF or VF HCAs independently. Wildcards, prefix matches and port suffixes are invalid.
+Setting both `include` and `exclude` is invalid, even when their names do not overlap. Naming an
+HCA in `include` or `exclude` that is absent from a matched node's complete verbs inventory is
+also invalid on that node and fails it closed, so a selector spanning nodes with different HCA sets
+must not name adapters missing on any matched node.
+
+Multiple policies matching a node conflict; no priority or merge rule selects one. A policy cannot
+override an externally owned device's boundary.
+
+The CRD schema requires each supplied list to contain at least one name. Omit a field or set it to
+null to remove its restriction. When both fields are absent or null, the policy imposes no HCA filter.
+Do not use an empty list: typed forwarding can omit it before the CRD validates the object. Generated
+apply builders also omit empty lists. Apply requests retain Kubernetes field ownership and conflict rules.
 
 ## Example manifest
 
@@ -134,11 +301,12 @@ Four details in this manifest are load-bearing:
 
 - **Both requests in one container.** The kubelet aligns per container by default, so a request
   split across two containers is aligned by nothing at all.
-- **One endpoint per accelerator**, for the reasons above, on the **exclusive** key. A shared-key
-  quantity above one does not promise distinct endpoints: the *RDMA* plugin offers no preferred
-  allocation, so kubelet may hand one container several shared tokens of the same endpoint, and
-  Allocate collapses them into that one endpoint; `rdma.shared: "8"` can report satisfied with
-  fewer than eight `uverbs` devices. The shared key is right for a container that needs one.
+- **One endpoint per accelerator**, for the reasons above, on the **exclusive** key. This key
+  reserves whole endpoints within the exclusive family. `rdma.shared` shares each HCA's token pool
+  across workloads. Its `GetPreferredAllocation` and advertised token order use outer rounds over
+  endpoints: each round takes one token per eligible endpoint before repeating an endpoint.
+  Requesting `N` shared units with `N` healthy, eligible HCAs therefore selects one token per HCA
+  first.
 - **A nodeSelector on a label you set yourself.** Nothing this operator publishes asserts "one
   adapter per accelerator, evenly split across *NUMA* nodes"; `rdma.capable` says only that at least
   one endpoint on the node is usable. Label the node pools whose shape you have verified, and select
@@ -157,10 +325,14 @@ are two independent picks.
 
 Two fields, in the kubelet's own `KubeletConfiguration`:
 
-| Field | Default | Set to |
-|---|---|---|
-| `topologyManagerPolicy` | `none` — the hint is discarded | **`restricted`**; [what each of the four does](/gpustack-operator/main/docs/modules/devices/preflight/index.md#reading-the-result) |
-| `topologyManagerScope` | `container` — each container is aligned on its own | leave it: the accelerator and the adapter already share a container |
+```yaml
+apiVersion: kubelet.config.k8s.io/v1beta1
+kind: KubeletConfiguration
+topologyManagerPolicy: restricted  # Recommended; default none discards the hint.
+topologyManagerScope: container  # Default; accelerator and adapter share a container.
+```
+
+See [what each policy does](/gpustack-operator/main/docs/modules/devices/preflight/index.md#reading-the-result).
 
 **Why `restricted` and not `single-numa-node`.** Both gate admission on the hint; they differ on a
 container too wide for one *NUMA* node:
@@ -350,7 +522,7 @@ verbs path fails creating its completion queue, as above.
 | Symptom | Signal | Check & Mitigation |
 |---|---|---|
 | no node advertises the key at all | Status: the key is absent from every node's allocatable | The node has no *RDMA*-capable interface, or that family is switched off on the Device Manager. Run the allocatable read above, and check the `--no-shared` and `--no-partitioned` switches |
-| the key is advertised, every token unhealthy | Status: endpoint link `Failed` | The node judged every endpoint's link `Failed`, which withholds nothing but marks the tokens. [Read it yourself](/gpustack-operator/main/docs/modules/rdma/network-topology/index.md#inspecting-the-record) |
+| the key is advertised, every token unhealthy | Status: endpoint link `Failed` or HCA unselected | Check link verdicts and the [selection policy status](#selection-policy). Failed or unselected endpoints retain their tokens but report `Unhealthy`. [Read the inventory](/gpustack-operator/main/docs/modules/rdma/network-topology/index.md#inspecting-the-record) |
 | the `Workload` is admitted and its `Pod` stays `Pending` | Status: `Pod` phase `Pending` | Over-subscription: nothing meters these keys. See [the section above](#kueue-and-rdma-keys) |
 | the `Pod` is scheduled, then refused on the node and not rescheduled | The kubelet refuses the `Pod` on the node | The node's totals sufficed but its devices sit on two *NUMA* nodes. Check the node's policy, and that both requests sit in one container |
 | the container starts with fewer devices than expected | Fewer `uverbs` entries than granted endpoints | One `rdma_cm` is correct — count the `uverbs` entries. See [the injected set](#injected-devices) |

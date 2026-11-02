@@ -67,6 +67,19 @@ kubectl -n gpustack-system patch setting model-deployment-kv-cache-dtype-owned \
   --type merge -p '{"spec":{"value":"false"}}'
 ```
 
+The patch changes the `Setting` as follows:
+
+```diff
+ apiVersion: gpustack.ai/v1
+ kind: Setting
+ metadata:
+   name: model-deployment-kv-cache-dtype-owned
+   namespace: gpustack-system
+ spec:
+-  value: "true"
++  value: "false"
+```
+
 Then move the workloads to a Binding with a spelling the engine accepts, and turn the `Setting` back on:
 
 1. Create a new Binding on the same pool with the corrected `dtype` and a new *`domain.name`*; the old

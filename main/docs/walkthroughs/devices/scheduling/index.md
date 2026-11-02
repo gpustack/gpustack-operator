@@ -800,7 +800,20 @@ exclusion are covered in [Stage 4: Kueue chain](/gpustack-operator/main/docs/mod
 | `Pod` rejected: `at most one container may request a slicing family, found N` | More than one container requests a slice or a partition | Keep one claiming container. See [rule 6](/gpustack-operator/main/docs/modules/devices/requests/index.md#rule-6-slicing-container-count) |
 | `Pod` rejected: `a restartable init container (a native sidecar) may not request an accelerator` | A native sidecar carries the accelerator request | Move the request to an app container. See [rule 7](/gpustack-operator/main/docs/modules/devices/requests/index.md#rule-7-native-sidecar-requests) |
 | A node's accelerators are missing from the `InstanceType` pool | The node's `NodeFeature` carries `gpustack.ai/managed: "false"`, or `node-management-manual` is `true` and no one labeled the node | Run `kubectl -n gpustack-system get nodefeature <node>-gpustack-worker -o yaml` and read *`spec.labels`*. See [Step 2](#step-2-remove-a-managed-node) |
-| `Instance` rejected: `privileged mode is not allowed: enable the "instance-privileged-allowed" setting to allow it` | The `instance-privileged-allowed` setting is `false` | Allow it only if the node boundary is acceptable: `kubectl -n gpustack-system patch setting instance-privileged-allowed --type merge -p '{"spec":{"value":"true"}}'`. See [Settings](/gpustack-operator/main/docs/reference/settings/index.md) |
+| `Instance` rejected: `privileged mode is not allowed: enable the "instance-privileged-allowed" setting to allow it` | The `instance-privileged-allowed` setting is `false` | Allow it only if the node boundary is acceptable; update the setting as shown below. See [Settings](/gpustack-operator/main/docs/reference/settings/index.md) |
+
+If the privileged-mode gate is disabled, the mitigation above changes it as follows:
+
+```diff
+ apiVersion: gpustack.ai/v1
+ kind: Setting
+ metadata:
+   name: instance-privileged-allowed
+   namespace: gpustack-system
+ spec:
+-  value: "false"
++  value: "true"
+```
 
 ---
 

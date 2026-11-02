@@ -1564,37 +1564,22 @@ plugin&rsquo;s own writes never trigger its next report, and a quiet node writes
   </tbody>
 </table>
 <h2 id="configuration-ownership">Configuration ownership</h2>
-<table>
-  <thead>
-      <tr>
-          <th>Part</th>
-          <th>Writer</th>
-          <th>Rule</th>
-      </tr>
-  </thead>
-  <tbody>
-      <tr>
-          <td>the object</td>
-          <td>worker</td>
-          <td>created when the node&rsquo;s <code>CSINode</code> lists <code>model.csi.gpustack.ai</code>; removed with the <code>Node</code>, and all of them while the <code>CSIDriver</code> object does not exist</td>
-      </tr>
-      <tr>
-          <td><em><code>spec</code></em></td>
-          <td>worker</td>
-          <td>the merge of the configuration layers, rewritten within a minute of a <code>Setting</code> change; never a value that fails its check</td>
-      </tr>
-      <tr>
-          <td><em><code>spec.kubelet</code></em></td>
-          <td>worker</td>
-          <td>the node&rsquo;s kubelet thresholds, read from kubelet&rsquo;s <code>configz</code> endpoint when the object is written and every 30 minutes; a failed read keeps the last reading, and a node never read has none. The plugin gets no <code>nodes/proxy</code> access</td>
-      </tr>
-      <tr>
-          <td><em><code>status</code></em></td>
-          <td>the plugin on that node</td>
-          <td>admitted only through the status webhook below</td>
-      </tr>
-  </tbody>
-</table>
+<p>The worker creates the object when the node&rsquo;s <code>CSINode</code> lists <code>model.csi.gpustack.ai</code>.
+It removes the object with the <code>Node</code>, and removes all objects while the <code>CSIDriver</code> is absent.</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">worker.gpustack.ai/v1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">NodeModelStore</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">metadata</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">worker-node-a</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">spec</span><span class="p">:</span><span class="w">  </span><span class="c"># Worker-owned merge of configuration layers; invalid values are never written.</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="c"># Worker reads kubelet configz when writing the object and every 30 minutes.</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="c"># A failed read keeps the last reading; a node never read has none.</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">kubelet</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">nodefsAvailable</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;10%&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">status</span><span class="p">:</span><span class="w">  </span><span class="c"># Node plugin-owned; admitted only through the status webhook below.</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">observedGeneration</span><span class="p">:</span><span class="w"> </span><span class="m">3</span></span></span></code></pre></div>
+</div><p>The worker rewrites <code>spec</code> within a minute of a <code>Setting</code> change. The plugin has no <code>nodes/proxy</code> access.</p>
 <p>The public <a href="/gpustack-operator/main/docs/modules/model-delivery/views/#resources">NodeModelStore API</a>
  supports reads and deletion. Its configuration
 and status are maintained by the worker and node plugin. The worker recreates a deleted object
@@ -1637,17 +1622,22 @@ tenant from making an artifact look resolved.</p>
 <p>A <code>ModelDeployment</code> under <code>Node</code> delivery and an <code>Instance</code> naming a Hugging Face or ModelScope artifact render:</p>
 <div class="code-block">
   <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
-  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">volumes</span><span class="p">:</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w">  </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">gpustack-model</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">csi</span><span class="p">:</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">driver</span><span class="p">:</span><span class="w"> </span><span class="l">model.csi.gpustack.ai</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">readOnly</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">volumeAttributes</span><span class="p">:</span><span class="w">  </span><span class="c"># hints; the plugin checks each against the API</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">artifact</span><span class="p">:</span><span class="w"> </span><span class="l">qwen-7b</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">artifactUID</span><span class="p">:</span><span class="w"> </span><span class="l">3f0c...</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">manifestDigest</span><span class="p">:</span><span class="w"> </span><span class="l">sha256:0f3c...</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">nodePublishSecretRef</span><span class="p">:</span><span class="w">  </span><span class="c"># the artifact&#39;s secretRef; absent without one</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">hf-token</span></span></span></code></pre></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">v1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">Pod</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">metadata</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">model-consumer</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">volumes</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">gpustack-model</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">csi</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">driver</span><span class="p">:</span><span class="w"> </span><span class="l">model.csi.gpustack.ai</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">readOnly</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">volumeAttributes</span><span class="p">:</span><span class="w">  </span><span class="c"># hints; the plugin checks each against the API</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="nt">artifact</span><span class="p">:</span><span class="w"> </span><span class="l">qwen-7b</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="nt">artifactUID</span><span class="p">:</span><span class="w"> </span><span class="l">3f0c...</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="nt">manifestDigest</span><span class="p">:</span><span class="w"> </span><span class="l">sha256:0f3c...</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">nodePublishSecretRef</span><span class="p">:</span><span class="w">  </span><span class="c"># the artifact&#39;s secretRef; absent without one</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">hf-token</span></span></span></code></pre></div>
 </div><p>A hand-written <code>Pod</code> may mount the same volume; it is held to the same rules. The <code>CSIDriver</code> has
 <code>attachRequired: false</code>, <code>podInfoOnMount: true</code>, an <code>Ephemeral</code> entry in <em><code>volumeLifecycleModes</code></em>, and
 <code>fsGroupPolicy: None</code>, so the tree keeps the plugin&rsquo;s ownership and is readable by any user.</p>
@@ -1868,7 +1858,7 @@ deliveries</li><li><a href="/gpustack-operator/main/docs/modules/model-delivery/
           
           
           <nav class="page-actions" aria-label="Page source">
-            <a href="https://github.com/gpustack/gpustack-operator/blob/423fa74ffa1443814bfdf35a8994ae8b8a9c0b4f/docs/modules/model-delivery/node-store.md">View page source</a>
+            <a href="https://github.com/gpustack/gpustack-operator/blob/26f985d9ff6a706b54e102977f74c2e3a8d93bdc/docs/modules/model-delivery/node-store.md">View page source</a>
             
             <a href="https://github.com/gpustack/gpustack-operator/edit/main/docs/modules/model-delivery/node-store.md">Edit this page</a>
             

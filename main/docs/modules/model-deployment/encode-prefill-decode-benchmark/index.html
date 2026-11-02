@@ -2356,7 +2356,12 @@ three-role <code>epd-arm3-epd</code> allocation with one GPU per role. <strong>A
 :</p>
 <div class="code-block">
   <div class="code-toolbar"><span>diff</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
-  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-diff" data-lang="diff"><span class="line"><span class="cl"> spec:
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-diff" data-lang="diff"><span class="line"><span class="cl"> apiVersion: worker.gpustack.ai/v1
+</span></span><span class="line"><span class="cl"> kind: ModelDeployment
+</span></span><span class="line"><span class="cl"> metadata:
+</span></span><span class="line"><span class="cl">   name: epd-arm3-epd
+</span></span><span class="line"><span class="cl">   namespace: gpustack-bench
+</span></span><span class="line"><span class="cl"> spec:
 </span></span><span class="line"><span class="cl"><span class="gi">+  kvTransfer:
 </span></span></span><span class="line"><span class="cl"><span class="gi">+    protocol: RDMA
 </span></span></span><span class="line"><span class="cl"><span class="gi"></span>   roles:
@@ -2649,7 +2654,7 @@ Neither capture measures cross-node placement or RDMA encoder-cache transfer.</p
           
           
           <nav class="page-actions" aria-label="Page source">
-            <a href="https://github.com/gpustack/gpustack-operator/blob/423fa74ffa1443814bfdf35a8994ae8b8a9c0b4f/docs/modules/model-deployment/encode-prefill-decode-benchmark.md">View page source</a>
+            <a href="https://github.com/gpustack/gpustack-operator/blob/26f985d9ff6a706b54e102977f74c2e3a8d93bdc/docs/modules/model-deployment/encode-prefill-decode-benchmark.md">View page source</a>
             
             <a href="https://github.com/gpustack/gpustack-operator/edit/main/docs/modules/model-deployment/encode-prefill-decode-benchmark.md">Edit this page</a>
             

@@ -1458,61 +1458,22 @@ other webhooks may write too.</p>
 <p>A <code>Pod</code> opts in with a <strong>label</strong> and configures the injection with <strong>annotations</strong>. The trigger is a
 label because a webhook&rsquo;s <em><code>objectSelector</code></em> can only match labels; a label value is capped at 63
 characters, so everything of unbounded length is an annotation.</p>
-<table>
-  <thead>
-      <tr>
-          <th>Kind</th>
-          <th>Key</th>
-          <th>Value</th>
-          <th>Required</th>
-      </tr>
-  </thead>
-  <tbody>
-      <tr>
-          <td>label</td>
-          <td><code>kvcache.gpustack.ai/inject</code></td>
-          <td><code>&quot;true&quot;</code></td>
-          <td>yes — the trigger</td>
-      </tr>
-      <tr>
-          <td>annotation</td>
-          <td><code>kvcache.gpustack.ai/binding</code></td>
-          <td>a <code>KVCachePoolBinding</code> name, in this <code>Pod</code>&rsquo;s namespace</td>
-          <td>yes</td>
-      </tr>
-      <tr>
-          <td>annotation</td>
-          <td><code>kvcache.gpustack.ai/engine</code></td>
-          <td><code>vLLM</code> | <code>SGLang</code></td>
-          <td>yes</td>
-      </tr>
-      <tr>
-          <td>annotation</td>
-          <td><code>kvcache.gpustack.ai/manufacturer</code></td>
-          <td><code>ascend</code></td>
-          <td>no — only with <code>engine: vLLM</code>; selects the vLLM-Ascend runtime</td>
-      </tr>
-      <tr>
-          <td>annotation</td>
-          <td><code>kvcache.gpustack.ai/role</code></td>
-          <td><em>Prefill</em> | <em>Decode</em>; omitted for a plain server</td>
-          <td>no — <strong>read by the vLLM family only</strong>; an SGLang <code>Pod</code> carrying one is admitted and injected exactly as without it</td>
-      </tr>
-      <tr>
-          <td>annotation</td>
-          <td><code>kvcache.gpustack.ai/container</code></td>
-          <td>a container name</td>
-          <td>only when the <code>Pod</code> has more than one container</td>
-      </tr>
-      <tr>
-          <td>annotation</td>
-          <td><code>kvcache.gpustack.ai/launch-args-forwarded</code></td>
-          <td><code>&quot;true&quot;</code></td>
-          <td>no — only when an unrecognised launcher, script, or image ENTRYPOINT forwards appended arguments to the declared engine</td>
-      </tr>
-  </tbody>
-</table>
-<p>For a plain server, one that is not half of a <em>prefill</em>/<em>decode</em> split, leave the role annotation off.
+<div class="code-block">
+  <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">v1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">Pod</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">metadata</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">labels</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">kvcache.gpustack.ai/inject</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;true&#34;</span><span class="w">  </span><span class="c"># Required trigger.</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">annotations</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">kvcache.gpustack.ai/binding</span><span class="p">:</span><span class="w"> </span><span class="l">chat </span><span class="w"> </span><span class="c"># Required Binding in this Pod&#39;s namespace.</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">kvcache.gpustack.ai/engine: vLLM  # Required</span><span class="p">:</span><span class="w"> </span><span class="l">vLLM or SGLang.</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">kvcache.gpustack.ai/manufacturer</span><span class="p">:</span><span class="w"> </span><span class="l">ascend </span><span class="w"> </span><span class="c"># Optional; vLLM only, selects vLLM-Ascend.</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">kvcache.gpustack.ai/role: Prefill  # Optional</span><span class="p">:</span><span class="w"> </span><span class="l">Prefill or Decode, read only by vLLM.</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">kvcache.gpustack.ai/container</span><span class="p">:</span><span class="w"> </span><span class="l">server </span><span class="w"> </span><span class="c"># Required only for a multi-container Pod.</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="c"># Optional: declare an unrecognised launcher, script or image ENTRYPOINT forwards arguments.</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">kvcache.gpustack.ai/launch-args-forwarded</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;true&#34;</span></span></span></code></pre></div>
+</div><p>For a plain server, one that is not half of a <em>prefill</em>/<em>decode</em> split, leave the role annotation off.
 <em>Server</em> is not in its value domain and a <code>Pod</code> carrying it is refused, while the same arrangement is
 spelled <em>Server</em> on <code>ModelDeployment.spec.roles[].kind</code>, which even defaults to it. The value that
 is correct there turns a <code>Pod</code> away here. An absent annotation renders the read-and-write
@@ -1625,62 +1586,35 @@ annotation. No <code>ConfigMap</code> is created, so the configuration&rsquo;s l
 <p>The values are the same on every engine; only the spellings differ. Both vLLM-family engines read
 the same file with the same key names. Where they differ is the connector selected alongside it,
 and which keys their readers know.</p>
-<table>
-  <thead>
-      <tr>
-          <th>Value</th>
-          <th>vLLM file key</th>
-          <th>SGLang variable</th>
-      </tr>
-  </thead>
-  <tbody>
-      <tr>
-          <td>the pool&rsquo;s <em><code>status.clientEndpoint</code></em></td>
-          <td><code>master_server_address</code></td>
-          <td><code>MOONCAKE_MASTER</code></td>
-      </tr>
-      <tr>
-          <td>the metadata plane, always the literal <code>P2PHANDSHAKE</code></td>
-          <td><code>metadata_server</code></td>
-          <td><code>MOONCAKE_TE_META_DATA_SERVER</code></td>
-      </tr>
-      <tr>
-          <td>the transport of the pool group the engine matched, always written</td>
-          <td><em><code>protocol</code></em></td>
-          <td><code>MOONCAKE_PROTOCOL</code></td>
-      </tr>
-      <tr>
-          <td>the RDMA device filter, always empty</td>
-          <td><code>device_name</code></td>
-          <td><code>MOONCAKE_DEVICE</code></td>
-      </tr>
-      <tr>
-          <td>the contributed storage segment, always <code>0</code></td>
-          <td><code>global_segment_size</code></td>
-          <td><code>MOONCAKE_GLOBAL_SEGMENT_SIZE</code></td>
-      </tr>
-      <tr>
-          <td>the pure-client topology</td>
-          <td><code>mode: standalone-store</code></td>
-          <td>no key — SGLang has none</td>
-      </tr>
-      <tr>
-          <td>the client staging buffer</td>
-          <td><code>local_buffer_size: 128 MiB</code></td>
-          <td>no key — SGLang hardcodes 16 MiB</td>
-      </tr>
-      <tr>
-          <td>the <code>Pod</code>&rsquo;s own address</td>
-          <td>no key — vLLM computes it</td>
-          <td><code>MOONCAKE_LOCAL_HOSTNAME</code>, a <em><code>fieldRef</code></em> to <em><code>status.podIP</code></em></td>
-      </tr>
-      <tr>
-          <td>the Binding&rsquo;s reuse domain</td>
-          <td><code>tenant_id</code></td>
-          <td><code>MOONCAKE_TENANT_ID</code></td>
-      </tr>
-  </tbody>
-</table>
+<p>The vLLM configuration file is JSON. This illustrative object shows its structure:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>json</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-json" data-lang="json"><span class="line"><span class="cl"><span class="p">{</span>
+</span></span><span class="line"><span class="cl">  <span class="nt">&#34;master_server_address&#34;</span><span class="p">:</span> <span class="s2">&#34;&lt;pool-client-endpoint&gt;&#34;</span><span class="p">,</span>
+</span></span><span class="line"><span class="cl">  <span class="nt">&#34;metadata_server&#34;</span><span class="p">:</span> <span class="s2">&#34;P2PHANDSHAKE&#34;</span><span class="p">,</span>
+</span></span><span class="line"><span class="cl">  <span class="nt">&#34;protocol&#34;</span><span class="p">:</span> <span class="s2">&#34;&lt;matched-group-transport&gt;&#34;</span><span class="p">,</span>
+</span></span><span class="line"><span class="cl">  <span class="nt">&#34;device_name&#34;</span><span class="p">:</span> <span class="s2">&#34;&#34;</span><span class="p">,</span>
+</span></span><span class="line"><span class="cl">  <span class="nt">&#34;global_segment_size&#34;</span><span class="p">:</span> <span class="mi">0</span><span class="p">,</span>
+</span></span><span class="line"><span class="cl">  <span class="nt">&#34;mode&#34;</span><span class="p">:</span> <span class="s2">&#34;standalone-store&#34;</span><span class="p">,</span>
+</span></span><span class="line"><span class="cl">  <span class="nt">&#34;local_buffer_size&#34;</span><span class="p">:</span> <span class="mi">134217728</span><span class="p">,</span>
+</span></span><span class="line"><span class="cl">  <span class="nt">&#34;tenant_id&#34;</span><span class="p">:</span> <span class="s2">&#34;&lt;binding-domain&gt;&#34;</span>
+</span></span><span class="line"><span class="cl"><span class="p">}</span></span></span></code></pre></div>
+</div><p>The endpoint is the pool&rsquo;s <code>status.clientEndpoint</code>; the protocol is always written from the
+matched group. The RDMA device filter is empty and the contributed storage segment is zero.
+<code>standalone-store</code> selects a pure client; the staging buffer is 128 MiB. The tenant is the
+Binding&rsquo;s reuse domain.</p>
+<p>SGLang receives these values as environment variables:</p>
+<ul>
+<li><code>master_server_address</code>: <code>MOONCAKE_MASTER</code>.</li>
+<li><code>metadata_server</code>: <code>MOONCAKE_TE_META_DATA_SERVER</code>.</li>
+<li><code>protocol</code>: <code>MOONCAKE_PROTOCOL</code>.</li>
+<li><code>device_name</code>: <code>MOONCAKE_DEVICE</code>.</li>
+<li><code>global_segment_size</code>: <code>MOONCAKE_GLOBAL_SEGMENT_SIZE</code>.</li>
+<li><code>tenant_id</code>: <code>MOONCAKE_TENANT_ID</code>.</li>
+</ul>
+<p>SGLang has no corresponding <code>mode</code> or <code>local_buffer_size</code> key and hardcodes a 16 MiB buffer.
+It also receives <code>MOONCAKE_LOCAL_HOSTNAME</code> from a <code>fieldRef</code> to <code>status.podIP</code>.
+vLLM computes the <code>Pod</code> address instead.</p>
 <blockquote>
 <p><strong>Why</strong> — every key is written explicitly rather than left to a default, because two of the
 defaults are GiB of host memory: 4 GiB per key on vLLM, 1 GiB on vLLM-Ascend. An absent
@@ -1951,45 +1885,21 @@ correctly, just with no cache at all.</p>
 </span></span><span class="line"><span class="cl"><span class="go">{&#34;binding&#34;:&#34;chat&#34;,&#34;engine&#34;:&#34;vllm&#34;,&#34;vehicle&#34;:&#34;file&#34;,&#34;domain&#34;:&#34;team-a-chat&#34;,
 </span></span></span><span class="line"><span class="cl"><span class="go"> &#34;tenantInjected&#34;:true,&#34;launchProgram&#34;:&#34;vllm&#34;,&#34;launchArgsForwarded&#34;:false}
 </span></span></span></code></pre></div>
-</div><table>
-  <thead>
-      <tr>
-          <th>Field</th>
-          <th>Meaning</th>
-      </tr>
-  </thead>
-  <tbody>
-      <tr>
-          <td><code>binding</code></td>
-          <td>which Binding this <code>Pod</code> named and the webhook resolved — <strong>not</strong> necessarily the one its writes are charged to; see <a href="#tenant-compatibility">tenant compatibility</a>
-</td>
-      </tr>
-      <tr>
-          <td><em><code>engine</code></em></td>
-          <td>what was configured</td>
-      </tr>
-      <tr>
-          <td><code>vehicle</code></td>
-          <td><code>file</code> or <code>environment</code></td>
-      </tr>
-      <tr>
-          <td><code>domain</code></td>
-          <td>the reuse domain the Binding declared</td>
-      </tr>
-      <tr>
-          <td><code>tenantInjected</code></td>
-          <td>whether a tenant was written into the container — an <strong>action</strong>, not an outcome</td>
-      </tr>
-      <tr>
-          <td><code>launchProgram</code></td>
-          <td>the executable left after transparent launcher prefixes were removed; empty only where there was no executable to read and forwarding was declared anyway — an image <code>ENTRYPOINT</code>, or a command line hidden in one argument</td>
-      </tr>
-      <tr>
-          <td><code>launchArgsForwarded</code></td>
-          <td>whether the author&rsquo;s <code>kvcache.gpustack.ai/launch-args-forwarded: &quot;true&quot;</code> declaration admitted a launch the webhook could not identify as an engine entry point</td>
-      </tr>
-  </tbody>
-</table>
+</div><p>The record is JSON. Its keys mean:</p>
+<ul>
+<li><code>binding</code>: the Binding the <code>Pod</code> named and the webhook resolved, not necessarily the one
+charged for writes. See <a href="#tenant-compatibility">tenant compatibility</a>
+.</li>
+<li><code>engine</code>: the configured engine.</li>
+<li><code>vehicle</code>: <code>file</code> or <code>environment</code>.</li>
+<li><code>domain</code>: the Binding&rsquo;s declared reuse domain.</li>
+<li><code>tenantInjected</code>: whether a tenant was written into the container, an action rather than an outcome.</li>
+<li><code>launchProgram</code>: the executable after transparent launcher prefixes are removed. It is empty only
+when no executable is readable and forwarding was declared, such as an image <code>ENTRYPOINT</code> or a
+command line hidden in one argument.</li>
+<li><code>launchArgsForwarded</code>: whether the author&rsquo;s forwarding declaration admitted a launch the webhook
+could not identify as an engine entry point.</li>
+</ul>
 <p><code>Pod</code>s admitted by an older operator may also carry <code>engineVersion</code>. New records omit it because it
 described the upstream source used when the injector was written, not the image in the <code>Pod</code>. Readers
 must ignore that legacy field and must not infer image compatibility from it.</p>
@@ -2140,7 +2050,7 @@ operator for.</div>
           
           
           <nav class="page-actions" aria-label="Page source">
-            <a href="https://github.com/gpustack/gpustack-operator/blob/423fa74ffa1443814bfdf35a8994ae8b8a9c0b4f/docs/modules/kv-cache/injection.md">View page source</a>
+            <a href="https://github.com/gpustack/gpustack-operator/blob/26f985d9ff6a706b54e102977f74c2e3a8d93bdc/docs/modules/kv-cache/injection.md">View page source</a>
             
             <a href="https://github.com/gpustack/gpustack-operator/edit/main/docs/modules/kv-cache/injection.md">Edit this page</a>
             

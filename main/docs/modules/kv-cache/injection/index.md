@@ -26,15 +26,21 @@ A `Pod` opts in with a **label** and configures the injection with **annotations
 label because a webhook's *`objectSelector`* can only match labels; a label value is capped at 63
 characters, so everything of unbounded length is an annotation.
 
-| Kind | Key | Value | Required |
-|---|---|---|---|
-| label | `kvcache.gpustack.ai/inject` | `"true"` | yes — the trigger |
-| annotation | `kvcache.gpustack.ai/binding` | a `KVCachePoolBinding` name, in this `Pod`'s namespace | yes |
-| annotation | `kvcache.gpustack.ai/engine` | `vLLM` \| `SGLang` | yes |
-| annotation | `kvcache.gpustack.ai/manufacturer` | `ascend` | no — only with `engine: vLLM`; selects the vLLM-Ascend runtime |
-| annotation | `kvcache.gpustack.ai/role` | *Prefill* \| *Decode*; omitted for a plain server | no — **read by the vLLM family only**; an SGLang `Pod` carrying one is admitted and injected exactly as without it |
-| annotation | `kvcache.gpustack.ai/container` | a container name | only when the `Pod` has more than one container |
-| annotation | `kvcache.gpustack.ai/launch-args-forwarded` | `"true"` | no — only when an unrecognised launcher, script, or image ENTRYPOINT forwards appended arguments to the declared engine |
+```yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  labels:
+    kvcache.gpustack.ai/inject: "true"  # Required trigger.
+  annotations:
+    kvcache.gpustack.ai/binding: chat  # Required Binding in this Pod's namespace.
+    kvcache.gpustack.ai/engine: vLLM  # Required: vLLM or SGLang.
+    kvcache.gpustack.ai/manufacturer: ascend  # Optional; vLLM only, selects vLLM-Ascend.
+    kvcache.gpustack.ai/role: Prefill  # Optional: Prefill or Decode, read only by vLLM.
+    kvcache.gpustack.ai/container: server  # Required only for a multi-container Pod.
+    # Optional: declare an unrecognised launcher, script or image ENTRYPOINT forwards arguments.
+    kvcache.gpustack.ai/launch-args-forwarded: "true"
+```
 
 For a plain server, one that is not half of a *prefill*/*decode* split, leave the role annotation off.
 *Server* is not in its value domain and a `Pod` carrying it is refused, while the same arrangement is
@@ -139,17 +145,38 @@ The values are the same on every engine; only the spellings differ. Both vLLM-fa
 the same file with the same key names. Where they differ is the connector selected alongside it,
 and which keys their readers know.
 
-| Value | vLLM file key | SGLang variable |
-|---|---|---|
-| the pool's *`status.clientEndpoint`* | `master_server_address` | `MOONCAKE_MASTER` |
-| the metadata plane, always the literal `P2PHANDSHAKE` | `metadata_server` | `MOONCAKE_TE_META_DATA_SERVER` |
-| the transport of the pool group the engine matched, always written | *`protocol`* | `MOONCAKE_PROTOCOL` |
-| the RDMA device filter, always empty | `device_name` | `MOONCAKE_DEVICE` |
-| the contributed storage segment, always `0` | `global_segment_size` | `MOONCAKE_GLOBAL_SEGMENT_SIZE` |
-| the pure-client topology | `mode: standalone-store` | no key — SGLang has none |
-| the client staging buffer | `local_buffer_size: 128 MiB` | no key — SGLang hardcodes 16 MiB |
-| the `Pod`'s own address | no key — vLLM computes it | `MOONCAKE_LOCAL_HOSTNAME`, a *`fieldRef`* to *`status.podIP`* |
-| the Binding's reuse domain | `tenant_id` | `MOONCAKE_TENANT_ID` |
+The vLLM configuration file is JSON. This illustrative object shows its structure:
+
+```json
+{
+  "master_server_address": "<pool-client-endpoint>",
+  "metadata_server": "P2PHANDSHAKE",
+  "protocol": "<matched-group-transport>",
+  "device_name": "",
+  "global_segment_size": 0,
+  "mode": "standalone-store",
+  "local_buffer_size": 134217728,
+  "tenant_id": "<binding-domain>"
+}
+```
+
+The endpoint is the pool's `status.clientEndpoint`; the protocol is always written from the
+matched group. The RDMA device filter is empty and the contributed storage segment is zero.
+`standalone-store` selects a pure client; the staging buffer is 128 MiB. The tenant is the
+Binding's reuse domain.
+
+SGLang receives these values as environment variables:
+
+- `master_server_address`: `MOONCAKE_MASTER`.
+- `metadata_server`: `MOONCAKE_TE_META_DATA_SERVER`.
+- `protocol`: `MOONCAKE_PROTOCOL`.
+- `device_name`: `MOONCAKE_DEVICE`.
+- `global_segment_size`: `MOONCAKE_GLOBAL_SEGMENT_SIZE`.
+- `tenant_id`: `MOONCAKE_TENANT_ID`.
+
+SGLang has no corresponding `mode` or `local_buffer_size` key and hardcodes a 16 MiB buffer.
+It also receives `MOONCAKE_LOCAL_HOSTNAME` from a `fieldRef` to `status.podIP`.
+vLLM computes the `Pod` address instead.
 
 > **Why** — every key is written explicitly rather than left to a default, because two of the
 > defaults are GiB of host memory: 4 GiB per key on vLLM, 1 GiB on vLLM-Ascend. An absent
@@ -351,15 +378,19 @@ $ kubectl get pod chat-0 -o jsonpath='{.metadata.annotations.kvcache\.gpustack\.
  "tenantInjected":true,"launchProgram":"vllm","launchArgsForwarded":false}
 ```
 
-| Field | Meaning |
-|---|---|
-| `binding` | which Binding this `Pod` named and the webhook resolved — **not** necessarily the one its writes are charged to; see [tenant compatibility](#tenant-compatibility) |
-| *`engine`* | what was configured |
-| `vehicle` | `file` or `environment` |
-| `domain` | the reuse domain the Binding declared |
-| `tenantInjected` | whether a tenant was written into the container — an **action**, not an outcome |
-| `launchProgram` | the executable left after transparent launcher prefixes were removed; empty only where there was no executable to read and forwarding was declared anyway — an image `ENTRYPOINT`, or a command line hidden in one argument |
-| `launchArgsForwarded` | whether the author's `kvcache.gpustack.ai/launch-args-forwarded: "true"` declaration admitted a launch the webhook could not identify as an engine entry point |
+The record is JSON. Its keys mean:
+
+- `binding`: the Binding the `Pod` named and the webhook resolved, not necessarily the one
+  charged for writes. See [tenant compatibility](#tenant-compatibility).
+- `engine`: the configured engine.
+- `vehicle`: `file` or `environment`.
+- `domain`: the Binding's declared reuse domain.
+- `tenantInjected`: whether a tenant was written into the container, an action rather than an outcome.
+- `launchProgram`: the executable after transparent launcher prefixes are removed. It is empty only
+  when no executable is readable and forwarding was declared, such as an image `ENTRYPOINT` or a
+  command line hidden in one argument.
+- `launchArgsForwarded`: whether the author's forwarding declaration admitted a launch the webhook
+  could not identify as an engine entry point.
 
 `Pod`s admitted by an older operator may also carry `engineVersion`. New records omit it because it
 described the upstream source used when the injector was written, not the image in the `Pod`. Readers

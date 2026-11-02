@@ -2293,12 +2293,24 @@ exclusion are covered in <a href="/gpustack-operator/main/docs/modules/devices/s
       <tr>
           <td><code>Instance</code> rejected: <code>privileged mode is not allowed: enable the &quot;instance-privileged-allowed&quot; setting to allow it</code></td>
           <td>The <code>instance-privileged-allowed</code> setting is <code>false</code></td>
-          <td>Allow it only if the node boundary is acceptable: <code>kubectl -n gpustack-system patch setting instance-privileged-allowed --type merge -p '{&quot;spec&quot;:{&quot;value&quot;:&quot;true&quot;}}'</code>. See <a href="/gpustack-operator/main/docs/reference/settings/">Settings</a>
+          <td>Allow it only if the node boundary is acceptable; update the setting as shown below. See <a href="/gpustack-operator/main/docs/reference/settings/">Settings</a>
 </td>
       </tr>
   </tbody>
 </table>
-<nav class="reading-footer" aria-label="Further reading">
+<p>If the privileged-mode gate is disabled, the mitigation above changes it as follows:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>diff</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-diff" data-lang="diff"><span class="line"><span class="cl"> apiVersion: gpustack.ai/v1
+</span></span><span class="line"><span class="cl"> kind: Setting
+</span></span><span class="line"><span class="cl"> metadata:
+</span></span><span class="line"><span class="cl">   name: instance-privileged-allowed
+</span></span><span class="line"><span class="cl">   namespace: gpustack-system
+</span></span><span class="line"><span class="cl"> spec:
+</span></span><span class="line"><span class="cl"><span class="gd">-  value: &#34;false&#34;
+</span></span></span><span class="line"><span class="cl"><span class="gd"></span><span class="gi">+  value: &#34;true&#34;
+</span></span></span></code></pre></div>
+</div><nav class="reading-footer" aria-label="Further reading">
     <section>
       <h2>See also</h2>
       <ul class="related-pages"><li><a href="/gpustack-operator/main/docs/modules/devices/requests/">Accelerator Requests</a>
@@ -2320,7 +2332,7 @@ exclusion are covered in <a href="/gpustack-operator/main/docs/modules/devices/s
           
           
           <nav class="page-actions" aria-label="Page source">
-            <a href="https://github.com/gpustack/gpustack-operator/blob/423fa74ffa1443814bfdf35a8994ae8b8a9c0b4f/docs/walkthroughs/devices/scheduling.md">View page source</a>
+            <a href="https://github.com/gpustack/gpustack-operator/blob/26f985d9ff6a706b54e102977f74c2e3a8d93bdc/docs/walkthroughs/devices/scheduling.md">View page source</a>
             
             <a href="https://github.com/gpustack/gpustack-operator/edit/main/docs/walkthroughs/devices/scheduling.md">Edit this page</a>
             

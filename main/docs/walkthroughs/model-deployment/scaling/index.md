@@ -228,36 +228,64 @@ Capacity values below reproduce the benchmark's settings; tune them from measure
 
 ### Token throughput
 
-```yaml
-spec:
-  algorithm:
-    type: TokenThroughput
-    tokenThroughput:
-      prefillTargetTokensPerSecond: "1200"
-      decodeTargetTokensPerSecond: "300"
+```diff
+ apiVersion: worker.gpustack.ai/v1
+ kind: ModelDeploymentScaler
+ metadata:
+   name: autoscale-vllm-pd
+   namespace: gpustack-bench
+ spec:
+   algorithm:
+-    type: Proportional
+-    proportional:
+-      metric: RunningRequests
+-      tolerance: "0.1"
+-      roleTargets:
+-        - name: prefill
+-          target: "3"
+-        - name: decode
+-          target: "3"
++    type: TokenThroughput
++    tokenThroughput:
++      prefillTargetTokensPerSecond: "1200"
++      decodeTargetTokensPerSecond: "300"
 ```
 
-This is a replacement fragment, not a complete resource. It works for both vLLM and SGLang targets;
+This replacement works for both vLLM and SGLang targets;
 the scaler reads the target engine. Establish valid counter windows before judging recommendations.
 Read the [SGLang TCP limitation](/gpustack-operator/main/docs/modules/model-deployment/engine-versions/index.md#limitations)
 before running sustained SGLang traffic.
 
 ### Predictive
 
-```yaml
-spec:
-  algorithm:
-    type: Predictive
-    predictive:
-      horizonSeconds: 30
-      minPoints: 2
-      qLevel: "0.5"
-      qTrend: "0.3"
-      prefillTokenCapacityPerReplica: "2000"
-      decodeTokenCapacityPerReplica: "2000"
-      tokenThroughput:
-        prefillTargetTokensPerSecond: "1200"
-        decodeTargetTokensPerSecond: "300"
+```diff
+ apiVersion: worker.gpustack.ai/v1
+ kind: ModelDeploymentScaler
+ metadata:
+   name: autoscale-vllm-pd
+   namespace: gpustack-bench
+ spec:
+   algorithm:
+-    type: Proportional
+-    proportional:
+-      metric: RunningRequests
+-      tolerance: "0.1"
+-      roleTargets:
+-        - name: prefill
+-          target: "3"
+-        - name: decode
+-          target: "3"
++    type: Predictive
++    predictive:
++      horizonSeconds: 30
++      minPoints: 2
++      qLevel: "0.5"
++      qTrend: "0.3"
++      prefillTokenCapacityPerReplica: "2000"
++      decodeTokenCapacityPerReplica: "2000"
++      tokenThroughput:
++        prefillTargetTokensPerSecond: "1200"
++        decodeTargetTokensPerSecond: "300"
 ```
 
 The nested token targets supply the fallback while the predictor warms up.
@@ -287,29 +315,63 @@ canonical family `amd-mi325x` via the
 
 The engine image matches by family, so no hand-computed digests or `@sha256` pinning are required.
 
-Omit *`spec.router`*, *`spec.kvCache`*, *`spec.kvTransfer`* and *`Encode`*. The fragment and
-command below are configuration examples, not captured output from a live cluster run:
+Omit *`spec.router`*, *`spec.kvCache`*, *`spec.kvTransfer`* and *`Encode`*. The following separate
+server target and scaler changes are examples, not captured output from a live cluster run. Replace
+`instanceType` for the intended cluster and check the target against the catalog before use:
 
 ```yaml
+apiVersion: worker.gpustack.ai/v1
+kind: ModelDeployment
+metadata:
+  name: catalog-server
+  namespace: gpustack-bench
 spec:
+  model:
+    name: /models
+    artifactRef:
+      name: qwen3-8b
+  engine:
+    name: vLLM
+    image: gpustack/runner:cuda13.0-vllm0.30.0
   roles:
     - name: server
-      minReplicas: 1
-      maxReplicas: 2
-  algorithm:
-    type: Predictive
-    predictive:
-      horizonSeconds: 30
-      minPoints: 2
-      tokenThroughput:
-        serverTargetTokensPerSecond: "1200"  # explicit fallback override
-        ttftTargetMilliseconds: "500"        # required when Server uses Catalog
-        itlTargetMilliseconds: "50"          # required when Server uses Catalog
-    capacityPrior:
-      catalogRef:
-        name: autoscaling-priors
-        key: priors.yaml
-      headroom: "0.75"
+      kind: Server
+      replicas: 1
+      size: 1
+      instanceType: gpustack--nvidia-h100-80gb-hbm3-linux-amd64
+      resources:
+        accelerator: "1"
+```
+
+Configure a scaler targeting this server:
+
+```diff
+ apiVersion: worker.gpustack.ai/v1
+ kind: ModelDeploymentScaler
+ metadata:
+   name: autoscale-server
+   namespace: gpustack-bench
+ spec:
++  targetRef:
++    name: catalog-server
+   roles:
+     - name: server
+       minReplicas: 1
+       maxReplicas: 2
+   algorithm:
++    type: Predictive
++    predictive:
++      horizonSeconds: 30
++      minPoints: 2
++      tokenThroughput:
++        serverTargetTokensPerSecond: "1200"  # explicit fallback override
++        ttftTargetMilliseconds: "500"        # required when Server uses Catalog
++        itlTargetMilliseconds: "50"          # required when Server uses Catalog
++    capacityPrior:
++      catalogRef:
++        name: autoscaling-priors
++        key: priors.yaml
++      headroom: "0.75"
 ```
 
 In this *Server* partial override, *`serverTargetTokensPerSecond`* stays `Explicit` at `"1200"`
@@ -320,6 +382,46 @@ the role's identity and multiplies its profile seed capacity by *`headroom`*. Bo
 
 When the target matches an embedded profile, drop the explicit fallback and the `ConfigMap`: the
 embedded catalog supplies the capacity and the identity resolves from the target.
+
+```diff
+ apiVersion: worker.gpustack.ai/v1
+ kind: ModelDeploymentScaler
+ metadata:
+   name: autoscale-server
+   namespace: gpustack-bench
+ spec:
+   algorithm:
+     type: Predictive
+     predictive:
+       tokenThroughput:
+-        serverTargetTokensPerSecond: "1200"
+         ttftTargetMilliseconds: "500"
+         itlTargetMilliseconds: "50"
+     capacityPrior:
+-      catalogRef:
+-        name: autoscaling-priors
+-        key: priors.yaml
+       headroom: "0.75"
+```
+
+To return to manual mode, remove `capacityPrior` and supply the required manual capacities:
+
+```diff
+ apiVersion: worker.gpustack.ai/v1
+ kind: ModelDeploymentScaler
+ metadata:
+   name: autoscale-server
+   namespace: gpustack-bench
+ spec:
+   algorithm:
+     type: Predictive
+     predictive:
++      serverTokenCapacityPerReplica: "2000"
+       tokenThroughput:
++        serverTargetTokensPerSecond: "1200"
+-    capacityPrior:
+-      headroom: "0.75"
+```
 
 ```bash
 kubectl -n gpustack-bench get mds autoscale-vllm-server -o json \
@@ -341,7 +443,14 @@ For a separate multimodal target, follow the
 Provide bounds for every role and couple *encode* through a direct ratio.
 
 ```yaml
+apiVersion: worker.gpustack.ai/v1
+kind: ModelDeploymentScaler
+metadata:
+  name: qwen-scaler
+  namespace: gpustack-bench
 spec:
+  targetRef:
+    name: epd-arm3-epd  # the EPD deployment the walkthrough above creates
   roles:
     - name: encode
       minReplicas: 1
@@ -352,6 +461,11 @@ spec:
     - name: decode
       minReplicas: 1
       maxReplicas: 2
+  algorithm:
+    type: TokenThroughput  # the ratios couple the encode count; no token-capacity target for encode
+    tokenThroughput:
+      prefillTargetTokensPerSecond: "2000"  # prompt capacity per Prefill replica
+      decodeTargetTokensPerSecond: "800"   # generation capacity per Decode replica
   ratios:
     - numeratorRole: prefill
       denominatorRole: decode
@@ -482,15 +596,27 @@ A `Server` role held to P90 *TTFT* of `2000` ms and P90 *ITL* of `33` ms — a f
 `30.3 tokens/s/user` — configures as:
 
 ```yaml
-algorithm:
-  type: TokenThroughput
-  tokenThroughput:
-    latencyQuantile: "0.90"        # resolve the prior at P90, not the P95 default
-    ttftTargetMilliseconds: "2000"
-    itlTargetMilliseconds: "33"    # a 30.3 tokens/s/user floor
-    # serverTargetTokensPerSecond omitted: it resolves from the catalog
-capacityPrior:
-  headroom: "0.75"                 # catalogRef omitted: the embedded catalog
+apiVersion: worker.gpustack.ai/v1
+kind: ModelDeploymentScaler
+metadata:
+  name: deepseek-scaler
+  namespace: gpustack-bench
+spec:
+  targetRef:
+    name: deepseek-server  # Server deployment matching the DeepSeek-R1-0528 MI325X TP8 profile above
+  roles:
+    - name: server
+      minReplicas: 1
+      maxReplicas: 4  # the plan the resolver derives below must stay inside the bounds
+  algorithm:
+    type: TokenThroughput
+    tokenThroughput:
+      latencyQuantile: "0.90"        # resolve the prior at P90, not the P95 default
+      ttftTargetMilliseconds: "2000"
+      itlTargetMilliseconds: "33"    # a 30.3 tokens/s/user floor
+      # serverTargetTokensPerSecond omitted: it resolves from the catalog
+    capacityPrior:
+      headroom: "0.75"                 # catalogRef omitted: the embedded catalog
 ```
 
 The resolver then:

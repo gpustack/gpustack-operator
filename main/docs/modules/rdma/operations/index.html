@@ -1441,6 +1441,8 @@ placement. <a href="/gpustack-operator/main/docs/modules/rdma/network-topology/"
 </li>
 <li><a href="#injected-devices">Injected devices</a>
 </li>
+<li><a href="#selection-policy">Selection policy</a>
+</li>
 <li><a href="#example-manifest">Example manifest</a>
 </li>
 <li><a href="#enabling-numa-alignment">Enabling NUMA alignment</a>
@@ -1470,7 +1472,7 @@ differences. Choose the key for your workload:</p>
   <tbody>
       <tr>
           <td><code>device.gpustack.ai/rdma</code></td>
-          <td>the workload must be the adapter&rsquo;s only tenant</td>
+          <td>each requested token must name a different endpoint within this family</td>
       </tr>
       <tr>
           <td><code>device.gpustack.ai/rdma.shared</code></td>
@@ -1482,7 +1484,7 @@ differences. Choose the key for your workload:</p>
       </tr>
   </tbody>
 </table>
-<p><strong>A node serves one branch or the other, and nothing in a manifest chooses it.</strong> A <em>single-root I/O virtualization (SR-IOV)</em> physical
+<p><strong>Each interface&rsquo;s configuration determines which families it serves.</strong> A <em>single-root I/O virtualization (SR-IOV)</em> physical
 function with virtual functions configured serves the partitioned key <strong>only</strong>; every other
 interface serves the exclusive and shared keys (<a href="/gpustack-operator/main/docs/modules/rdma/network-topology/#rdma-resource-keys">which interface serves
 what</a>
@@ -1494,11 +1496,12 @@ Read the fleet before writing the manifest:</p>
 </span></span><span class="line"><span class="cl">  jq -r <span class="s1">&#39;.items[] | .metadata.name as $n | .status.allocatable
 </span></span></span><span class="line"><span class="cl"><span class="s1">         | with_entries(select(.key | startswith(&#34;device.gpustack.ai/rdma&#34;)))
 </span></span></span><span class="line"><span class="cl"><span class="s1">         | select(length &gt; 0) | {node: $n} + .&#39;</span></span></span></code></pre></div>
-</div><p>Ask for the shared key unless the workload needs sole tenancy. An adapter carries far more
+</div><p>Ask for the shared key unless the workload needs distinct exclusive-family endpoints. An adapter carries far more
 concurrent queue pairs than the tokens an endpoint is advertised for, and several processes on
 one adapter is ordinary <em>RDMA</em> practice: the isolation is the firmware&rsquo;s and the kernel&rsquo;s, not the
-token count&rsquo;s. Taking a whole adapter exclusively removes it from every other tenant on the node and
-buys nothing the hardware was not already doing.</p>
+token count&rsquo;s.</p>
+<p>The exclusive and shared families account for allocations separately. An exclusive
+token reserves an endpoint within that family; the shared family can still grant the same HCA.</p>
 <p>For a managed <code>ModelDeployment</code>, set <em><code>spec.roles[].resources.interface</code></em> instead of naming the key
 in a <code>Pod</code> template. <a href="/gpustack-operator/main/docs/modules/model-deployment/deployment/">Model Deployment</a>
  states which key a
@@ -1537,6 +1540,7 @@ the whole node, so neither can say which accelerator ended up beside which adapt
 container (<a href="/gpustack-operator/main/docs/modules/rdma/network-topology/#three-node-labels">what a label can carry</a>
 ).</p>
 <h2 id="injected-devices">Injected devices</h2>
+<p>Each allocation response names its granted <em>host channel adapters (HCAs)</em> and exposes their devices:</p>
 <table>
   <thead>
       <tr>
@@ -1546,33 +1550,179 @@ container (<a href="/gpustack-operator/main/docs/modules/rdma/network-topology/#
   </thead>
   <tbody>
       <tr>
-          <td>the endpoint&rsquo;s verbs character device, <code>/dev/infiniband/uverbs&lt;N&gt;</code></td>
-          <td>one per granted endpoint</td>
+          <td>the granted HCA&rsquo;s verbs character device, <code>/dev/infiniband/uverbs&lt;N&gt;</code></td>
+          <td>one per distinct granted HCA name</td>
       </tr>
       <tr>
           <td>the node-level connection-manager device, <code>/dev/infiniband/rdma_cm</code></td>
           <td><strong>one per response</strong>, however many endpoints were granted, and only where the host has one</td>
       </tr>
       <tr>
-          <td>the <code>NCCL_IB_HCA</code> environment variable</td>
-          <td>one, naming the granted <em>RDMA</em> devices, comma-joined</td>
+          <td><code>NCCL_IB_HCA</code></td>
+          <td>sorted, unique granted HCA names, comma-joined with one leading <code>=</code> for exact matching</td>
+      </tr>
+      <tr>
+          <td><code>GPUSTACK_RDMA_DEVICES</code></td>
+          <td>the same sorted, unique comma-joined names without <code>=</code></td>
       </tr>
   </tbody>
 </table>
+<p>All three resource keys, <code>device.gpustack.ai/rdma</code>, <code>device.gpustack.ai/rdma.shared</code> and
+<code>device.gpustack.ai/rdma.partitioned</code>, inject <code>GPUSTACK_RDMA_DEVICES</code> and <code>NCCL_IB_HCA</code>.
+Switching modes does not change the grant variable names.</p>
 <div class="code-block">
   <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
-  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl"><span class="c1"># inside the container: one uverbs entry per granted endpoint, and exactly one rdma_cm</span>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl"><span class="c1"># Inside the container: granted uverbs nodes and rdma_cm when available.</span>
 </span></span><span class="line"><span class="cl">ls /dev/infiniband
-</span></span><span class="line"><span class="cl"><span class="c1"># the same devices by name, comma-joined</span>
-</span></span><span class="line"><span class="cl"><span class="nb">echo</span> <span class="s2">&#34;</span><span class="nv">$NCCL_IB_HCA</span><span class="s2">&#34;</span></span></span></code></pre></div>
-</div><p>Two granted endpoints therefore show <strong>two</strong> <code>uverbs</code> entries, <strong>one</strong> <code>rdma_cm</code>, and two names in
-<code>NCCL_IB_HCA</code>. The single connection manager is the correct answer rather than a half grant: it
-belongs to the node, not to an endpoint, so it is injected once whatever was granted (<a href="/gpustack-operator/main/docs/modules/rdma/network-topology/#allocation-response">what an
-allocation hands over</a>
-).</p>
+</span></span><span class="line"><span class="cl"><span class="c1"># Exact NCCL filter; for example, =mlx5_1,mlx5_10.</span>
+</span></span><span class="line"><span class="cl"><span class="nb">echo</span> <span class="s2">&#34;</span><span class="nv">$NCCL_IB_HCA</span><span class="s2">&#34;</span>
+</span></span><span class="line"><span class="cl"><span class="c1"># Plain grant list in any mode; for example, mlx5_1,mlx5_10.</span>
+</span></span><span class="line"><span class="cl"><span class="nb">echo</span> <span class="s2">&#34;</span><span class="nv">$GPUSTACK_RDMA_DEVICES</span><span class="s2">&#34;</span></span></span></code></pre></div>
+</div><p>The example values are illustrative. Repeated tokens or endpoints naming one HCA produce one name
+and one <code>uverbs</code> mapping. This response deduplication leaves advertised IDs and capacity unchanged.
+Allocation fails if a granted HCA&rsquo;s device node cannot be resolved; it returns no partial grant.</p>
+<p>When no HCA remains eligible for a grant, the response injects <code>GPUSTACK_RDMA_DEVICES=&quot;&quot;</code> and
+<code>NCCL_IB_HCA=&quot;&quot;</code> with no character device nodes. This can happen when the active
+<code>DevicesRDMASelectionPolicy</code> excludes every granted endpoint. Already-running containers remain
+untouched.</p>
+<p>A container requesting multiple families receives independent responses setting the same variable
+names; their merged values do not promise a union. An application startup adapter must build the
+selector its transport accepts. A <code>Pod</code>&rsquo;s <code>env.value</code> cannot expand variables injected later by the
+device plugin.</p>
+<p>These values apply to new allocation responses; existing containers and cached responses are not
+rewritten. Generic grant variables do not configure HIXL, NIXL or another consumer automatically.
+Each consumer needs a supported startup adapter and separate runtime qualification.</p>
 <p>The injected set is evidenced for RoCE and for nothing else; what that leaves open on a classic
 InfiniBand fabric is <a href="/gpustack-operator/main/docs/modules/rdma/network-topology/#allocation-response">what an allocation hands over</a>
 .</p>
+<h2 id="selection-policy">Selection policy</h2>
+<p><code>DevicesRDMASelectionPolicy</code> is a cluster-scoped configuration API at <code>worker.gpustack.ai/v1</code>.
+The Device Plugin controller evaluates it against the node&rsquo;s local <em>RDMA</em> inventory. Policy edits
+do not trigger hardware rescans in the Detector.</p>
+<p>A valid policy update takes effect immediately for subsequent <code>ListAndWatch</code> advertisements and
+<code>Allocate</code> / <code>GetPreferredAllocation</code> calls. Unselected endpoints retain their token IDs but report
+<code>Unhealthy</code>. No node drain is required, and already-allocated containers remain untouched.
+Continue to size requests from the node&rsquo;s actual allocatable resources.</p>
+<p>Consider an eight-GPU (<code>NVIDIA B300</code>) host that exposes 13 verbs devices under
+<code>/sys/class/infiniband</code>:</p>
+<ul>
+<li><code>mlx5_0</code> through <code>mlx5_3</code>: four 100 Gb/s InfiniBand adapters at <code>SYS</code> distance to all GPUs, with
+no IPoIB netdev.</li>
+<li><code>mlx5_4</code> through <code>mlx5_11</code>: eight 800 Gb/s InfiniBand adapters paired <code>PIX</code> 1:1 with the eight
+GPUs across <em>NUMA</em> 0 (<code>mlx5_8..mlx5_11</code>) and <em>NUMA</em> 1 (<code>mlx5_4..mlx5_7</code>), with no IPoIB netdev.</li>
+<li><code>mlx5_12</code>: one 400 Gb/s Ethernet adapter backing host <code>eth0</code>.</li>
+</ul>
+<p>To restrict workloads to the eight 800 Gb/s GPU-local compute adapters (<code>mlx5_4..mlx5_11</code>), create a
+policy with <code>include</code>. A policy can set at most one of <code>include</code> and <code>exclude</code>:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">worker.gpustack.ai/v1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">DevicesRDMASelectionPolicy</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">metadata</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">b300-compute-hcas </span><span class="w"> </span><span class="c"># Cluster-scoped policy name.</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="c"># Required, non-null Kubernetes label selector; {} matches every node.</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">nodeSelector</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">matchLabels</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">gpu.gpustack.ai/model</span><span class="p">:</span><span class="w"> </span><span class="l">b300</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="c"># Exact HCA names to include; missing or null leaves inclusion unrestricted.</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">include</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="l">mlx5_4</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="l">mlx5_5</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="l">mlx5_6</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="l">mlx5_7</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="l">mlx5_8</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="l">mlx5_9</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="l">mlx5_10</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="l">mlx5_11</span></span></span></code></pre></div>
+</div><p>Alternatively, configure the same selection with <code>exclude</code> to filter out the four 100 Gb/s adapters
+and the host Ethernet adapter. Remove <code>include</code> when switching to this form; do not apply both forms
+as separate matching policies:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">worker.gpustack.ai/v1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">DevicesRDMASelectionPolicy</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">metadata</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">b300-compute-hcas</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">nodeSelector</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">matchLabels</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">gpu.gpustack.ai/model</span><span class="p">:</span><span class="w"> </span><span class="l">b300</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="c"># Exact HCA names to exclude; missing or null excludes none.</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">exclude</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="l">mlx5_0</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="l">mlx5_1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="l">mlx5_2</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="l">mlx5_3</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="l">mlx5_12</span></span></span></code></pre></div>
+</div><p>To take <code>mlx5_11</code> out of rotation in the <code>include</code> form, update the policy manifest and apply it
+again:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>diff</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-diff" data-lang="diff"><span class="line"><span class="cl"> apiVersion: worker.gpustack.ai/v1
+</span></span><span class="line"><span class="cl"> kind: DevicesRDMASelectionPolicy
+</span></span><span class="line"><span class="cl"> metadata:
+</span></span><span class="line"><span class="cl">   name: b300-compute-hcas
+</span></span><span class="line"><span class="cl"> spec:
+</span></span><span class="line"><span class="cl">   nodeSelector:
+</span></span><span class="line"><span class="cl">     matchLabels:
+</span></span><span class="line"><span class="cl">       gpu.gpustack.ai/model: b300
+</span></span><span class="line"><span class="cl">   include:
+</span></span><span class="line"><span class="cl">     - mlx5_4
+</span></span><span class="line"><span class="cl">     - mlx5_5
+</span></span><span class="line"><span class="cl">     - mlx5_6
+</span></span><span class="line"><span class="cl">     - mlx5_7
+</span></span><span class="line"><span class="cl">     - mlx5_8
+</span></span><span class="line"><span class="cl">     - mlx5_9
+</span></span><span class="line"><span class="cl">     - mlx5_10
+</span></span><span class="line"><span class="cl"><span class="gd">-    - mlx5_11
+</span></span></span></code></pre></div>
+</div><p>Read selection status on the node&rsquo;s <code>Devices</code> resource. This illustrative excerpt shows the result
+when <code>mlx5_4..mlx5_11</code> are selected:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">worker.gpustack.ai/v1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">Devices</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">metadata</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">b300-node-0</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">status</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">interfaces</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">rdmaSelectionPolicy</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">policyRef</span><span class="p">:</span><span class="w">  </span><span class="c"># Policy name, UID and generation selected for resolution.</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">b300-compute-hcas</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">uid</span><span class="p">:</span><span class="w"> </span><span class="l">example-policy-uid</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">generation</span><span class="p">:</span><span class="w"> </span><span class="m">1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">excluded</span><span class="p">:</span><span class="w">  </span><span class="c"># HCAs excluded by the selection and their reasons.</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">mlx5_0</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="nt">reason</span><span class="p">:</span><span class="w"> </span><span class="l">ExcludedByPolicy</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">mlx5_1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="nt">reason</span><span class="p">:</span><span class="w"> </span><span class="l">ExcludedByPolicy</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">mlx5_2</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="nt">reason</span><span class="p">:</span><span class="w"> </span><span class="l">ExcludedByPolicy</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">mlx5_3</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="nt">reason</span><span class="p">:</span><span class="w"> </span><span class="l">ExcludedByPolicy</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">mlx5_12</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="nt">reason</span><span class="p">:</span><span class="w"> </span><span class="l">ExcludedByPolicy</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">conditions</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l">RDMASelectionResolved </span><span class="w"> </span><span class="c"># Reports whether the node&#39;s selection is resolved.</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">status</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;True&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">reason</span><span class="p">:</span><span class="w"> </span><span class="l">PolicyResolved</span></span></span></code></pre></div>
+</div><p>With no matching policy, successful resolution selects all otherwise eligible candidates.
+If a policy is invalid on the node, multiple policies match, or resolution is unknown, the node
+fails closed. It selects no HCA, and all <em>RDMA</em> tokens report <code>Unhealthy</code>. The
+<code>RDMASelectionResolved</code> condition is <code>False</code> or <code>Unknown</code>; no previous selection is retained.
+Already-allocated containers remain untouched.</p>
+<p>Names identify PF or VF HCAs independently. Wildcards, prefix matches and port suffixes are invalid.
+Setting both <code>include</code> and <code>exclude</code> is invalid, even when their names do not overlap. Naming an
+HCA in <code>include</code> or <code>exclude</code> that is absent from a matched node&rsquo;s complete verbs inventory is
+also invalid on that node and fails it closed, so a selector spanning nodes with different HCA sets
+must not name adapters missing on any matched node.</p>
+<p>Multiple policies matching a node conflict; no priority or merge rule selects one. A policy cannot
+override an externally owned device&rsquo;s boundary.</p>
+<p>The CRD schema requires each supplied list to contain at least one name. Omit a field or set it to
+null to remove its restriction. When both fields are absent or null, the policy imposes no HCA filter.
+Do not use an empty list: typed forwarding can omit it before the CRD validates the object. Generated
+apply builders also omit empty lists. Apply requests retain Kubernetes field ownership and conflict rules.</p>
 <h2 id="example-manifest">Example manifest</h2>
 <div class="code-block">
   <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
@@ -1594,11 +1744,12 @@ InfiniBand fabric is <a href="/gpustack-operator/main/docs/modules/rdma/network-
 <ul>
 <li><strong>Both requests in one container.</strong> The kubelet aligns per container by default, so a request
 split across two containers is aligned by nothing at all.</li>
-<li><strong>One endpoint per accelerator</strong>, for the reasons above, on the <strong>exclusive</strong> key. A shared-key
-quantity above one does not promise distinct endpoints: the <em>RDMA</em> plugin offers no preferred
-allocation, so kubelet may hand one container several shared tokens of the same endpoint, and
-Allocate collapses them into that one endpoint; <code>rdma.shared: &quot;8&quot;</code> can report satisfied with
-fewer than eight <code>uverbs</code> devices. The shared key is right for a container that needs one.</li>
+<li><strong>One endpoint per accelerator</strong>, for the reasons above, on the <strong>exclusive</strong> key. This key
+reserves whole endpoints within the exclusive family. <code>rdma.shared</code> shares each HCA&rsquo;s token pool
+across workloads. Its <code>GetPreferredAllocation</code> and advertised token order use outer rounds over
+endpoints: each round takes one token per eligible endpoint before repeating an endpoint.
+Requesting <code>N</code> shared units with <code>N</code> healthy, eligible HCAs therefore selects one token per HCA
+first.</li>
 <li><strong>A nodeSelector on a label you set yourself.</strong> Nothing this operator publishes asserts &ldquo;one
 adapter per accelerator, evenly split across <em>NUMA</em> nodes&rdquo;; <code>rdma.capable</code> says only that at least
 one endpoint on the node is usable. Label the node pools whose shape you have verified, and select
@@ -1615,28 +1766,14 @@ stable and enabled, but its policy field&rsquo;s default is <code>none</code>, w
 plugin publishes. Until somebody sets it, the accelerator and the adapter handed to one container
 are two independent picks.</p>
 <p>Two fields, in the kubelet&rsquo;s own <code>KubeletConfiguration</code>:</p>
-<table>
-  <thead>
-      <tr>
-          <th>Field</th>
-          <th>Default</th>
-          <th>Set to</th>
-      </tr>
-  </thead>
-  <tbody>
-      <tr>
-          <td><code>topologyManagerPolicy</code></td>
-          <td><code>none</code> — the hint is discarded</td>
-          <td><strong><code>restricted</code></strong>; <a href="/gpustack-operator/main/docs/modules/devices/preflight/#reading-the-result">what each of the four does</a>
-</td>
-      </tr>
-      <tr>
-          <td><code>topologyManagerScope</code></td>
-          <td><code>container</code> — each container is aligned on its own</td>
-          <td>leave it: the accelerator and the adapter already share a container</td>
-      </tr>
-  </tbody>
-</table>
+<div class="code-block">
+  <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">kubelet.config.k8s.io/v1beta1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">KubeletConfiguration</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">topologyManagerPolicy</span><span class="p">:</span><span class="w"> </span><span class="l">restricted </span><span class="w"> </span><span class="c"># Recommended; default none discards the hint.</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">topologyManagerScope</span><span class="p">:</span><span class="w"> </span><span class="l">container </span><span class="w"> </span><span class="c"># Default; accelerator and adapter share a container.</span></span></span></code></pre></div>
+</div><p>See <a href="/gpustack-operator/main/docs/modules/devices/preflight/#reading-the-result">what each policy does</a>
+.</p>
 <p><strong>Why <code>restricted</code> and not <code>single-numa-node</code>.</strong> Both gate admission on the hint; they differ on a
 container too wide for one <em>NUMA</em> node:</p>
 <ul>
@@ -1810,8 +1947,9 @@ verbs path fails creating its completion queue, as above.</p>
       </tr>
       <tr>
           <td>the key is advertised, every token unhealthy</td>
-          <td>Status: endpoint link <code>Failed</code></td>
-          <td>The node judged every endpoint&rsquo;s link <code>Failed</code>, which withholds nothing but marks the tokens. <a href="/gpustack-operator/main/docs/modules/rdma/network-topology/#inspecting-the-record">Read it yourself</a>
+          <td>Status: endpoint link <code>Failed</code> or HCA unselected</td>
+          <td>Check link verdicts and the <a href="#selection-policy">selection policy status</a>
+. Failed or unselected endpoints retain their tokens but report <code>Unhealthy</code>. <a href="/gpustack-operator/main/docs/modules/rdma/network-topology/#inspecting-the-record">Read the inventory</a>
 </td>
       </tr>
       <tr>
@@ -1865,7 +2003,7 @@ the bare host.</div>
           
           
           <nav class="page-actions" aria-label="Page source">
-            <a href="https://github.com/gpustack/gpustack-operator/blob/423fa74ffa1443814bfdf35a8994ae8b8a9c0b4f/docs/modules/rdma/operations.md">View page source</a>
+            <a href="https://github.com/gpustack/gpustack-operator/blob/26f985d9ff6a706b54e102977f74c2e3a8d93bdc/docs/modules/rdma/operations.md">View page source</a>
             
             <a href="https://github.com/gpustack/gpustack-operator/edit/main/docs/modules/rdma/operations.md">Edit this page</a>
             
@@ -1879,6 +2017,7 @@ the bare host.</div>
     <li><a href="#choosing-a-key">Choosing a key</a></li>
     <li><a href="#endpoints-per-accelerator">Endpoints per accelerator</a></li>
     <li><a href="#injected-devices">Injected devices</a></li>
+    <li><a href="#selection-policy">Selection policy</a></li>
     <li><a href="#example-manifest">Example manifest</a></li>
     <li><a href="#enabling-numa-alignment">Enabling NUMA alignment</a></li>
     <li><a href="#verification">Verification</a></li>

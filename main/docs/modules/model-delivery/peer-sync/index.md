@@ -23,11 +23,18 @@ Set `modelManager.port` to `0` to disable peer serving and pulling while keeping
 and the model cache enabled. The standalone `model-manager` command keeps peer sync disabled
 until its port and peer authentication are configured.
 
-| Layer | Field | Default | Meaning |
-|---|---|---|---|
-| chart (`L1`) | `modelManager.port` | `32445` | the TCP port the peer endpoints answer on; `0` is off and is the master switch |
-| chart (`L1`) | `modelManager.peerSync.maxServingStreams` / `streamsPerSource` | `8` / `4` | the serving and pulling concurrency limits |
-| `Setting`s (`L2`) | `model-store-peer-sync` | `true` | whether a node's plugin may pull from peers; `false` keeps the listener but pulls from the hub only |
+Chart defaults:
+
+```yaml
+modelManager:
+  port: 32445  # Peer TCP port; 0 disables serving and pulling.
+  peerSync:
+    maxServingStreams: 8  # Serving concurrency limit.
+    streamsPerSource: 4  # Pulling concurrency limit.
+```
+
+The runtime `Setting` `model-store-peer-sync` defaults to `true`. Set it to `false` to keep
+the listener but pull from the hub only.
 
 ## Serving cached weights
 

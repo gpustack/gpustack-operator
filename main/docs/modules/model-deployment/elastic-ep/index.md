@@ -21,9 +21,23 @@ The engine reconfigures while Kubernetes, Kueue, Ray and accelerator accounting 
 
 *`roles[].elasticEp`* selects this mode for a role. Its only field sets the target width:
 
-| Field | Meaning |
-|---|---|
-| *`width`* | Total GPU engines in the collective, counting the reserved master. Mutable, from 2 to 64. |
+```yaml
+apiVersion: worker.gpustack.ai/v1
+kind: ModelDeployment
+metadata:
+  name: deepseek-ep
+spec:
+  model:
+    name: deepseek-ai/DeepSeek-R1
+  engine:
+    name: vLLM
+    image: gpustack/runner:cuda13.0-vllm0.30.0
+  roles:
+    - name: server
+      instanceType: elastic-gpu
+      elasticEp:
+        width: 4  # Mutable target GPU engines, including the reserved master; 2 to 64.
+```
 
 *`width`* counts *data parallelism (DP)* engines, including the master. Each member has its own GPU `Pod`.
 Set *tensor parallelism (TP)* through the role's *`extraArgs`*, using the engine's `--tensor-parallel-size` argument.
@@ -137,9 +151,22 @@ Explicit quantities must equal the *TP* size. Each member's CPU and memory scale
 Starting with vLLM 0.30.0, set the largest planned width through *`extraArgs`* when creating the deployment:
 
 ```yaml
-extraArgs:
-  - --elastic-ep-max-dp-size
-  - "4"
+apiVersion: worker.gpustack.ai/v1
+kind: ModelDeployment
+metadata:
+  name: deepseek-ep
+spec:
+  model:
+    name: deepseek-ai/DeepSeek-V3
+  engine:
+    name: vLLM
+    image: gpustack/runner:cuda13.0-vllm0.30.0  # the 0.30.0 line this feature starts at
+  roles:
+    - name: server
+      instanceType: gpustack--nvidia-h200-sxm-linux-amd64
+      extraArgs:
+        - --elastic-ep-max-dp-size
+        - "4"
 ```
 
 This example permits widths up to 4. The maximum is fixed after creation.
@@ -152,6 +179,20 @@ Older vLLM releases do not accept this argument.
 Change only *`width`*. Starting at 2, this patch requests 4. Wait for the resize to complete before
 submitting another change. A patch that lowers the current width is rejected by the admission
 webhook in this release; it does not reach the engine.
+
+```diff
+ apiVersion: worker.gpustack.ai/v1
+ kind: ModelDeployment
+ metadata:
+   name: qwen3-ep
+   namespace: gpustack
+ spec:
+   roles:
+     - name: server
+       elasticEp:
+-        width: 2
++        width: 4
+```
 
 ```bash
 kubectl patch modeldeployment qwen3-ep -n gpustack --type=json \

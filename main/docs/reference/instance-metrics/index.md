@@ -37,16 +37,27 @@ per request; accelerator figures come from the Device Manager's latest sample.
 `InstanceMetrics` carries the `Instance`'s identity and one `sample`. Every figure is a
 **`Total`/`Used` pair**, so a percentage can be computed from the response alone:
 
-| Field | Unit | Meaning |
-|---|---|---|
-| *`sample.timestamp`* | RFC 3339 | when the CPU/memory/storage figures were measured |
-| *`sample.cpuTotalMilliCores`* | milli-cores | the `Instance`'s CPU limit |
-| *`sample.cpuUsedMilliCores`* | milli-cores | `Pod` CPU usage, averaged over the kubelet's sample window |
-| *`sample.memoryTotalMiB`* | MiB | the `Instance`'s memory limit |
-| *`sample.memoryUsedMiB`* | MiB | `Pod` working-set memory |
-| *`sample.storageTotalMiB`* | MiB | the `Instance`'s ephemeral-storage limit |
-| *`sample.storageUsedMiB`* | MiB | `Pod` ephemeral-storage usage: writable layers, logs and disk-backed `emptyDir` |
-| *`sample.accelerators[]`* | — | one entry per allocated accelerator |
+The API returns JSON. This YAML representation illustrates the response fields:
+
+```yaml
+apiVersion: worker.gpustack.ai/v1
+kind: InstanceMetrics
+metadata:
+  name: example
+  namespace: team-a
+  uid: <instance-uid>
+sample:
+  timestamp: <timestamp>  # RFC 3339; CPU, memory and storage measurement time.
+  cpuTotalMilliCores: 2000  # Instance CPU limit, milli-cores.
+  cpuUsedMilliCores: 500  # Pod CPU usage, milli-cores averaged over the kubelet sample window.
+  memoryTotalMiB: 4096  # Instance memory limit, MiB.
+  memoryUsedMiB: 1024  # Pod working set, MiB.
+  storageTotalMiB: 8192  # Instance ephemeral-storage limit, MiB.
+  storageUsedMiB: 128  # Pod writable layers, logs and disk-backed emptyDir, MiB.
+  accelerators:  # One entry per allocated accelerator, when available.
+    - id: <device-id>
+      mode: Exclusive
+```
 
 A **total is the `Instance`'s declaration** (the sum of its containers' limits, init containers
 excluded) and is always present. A **used figure is a measurement**, and is **absent rather
@@ -84,17 +95,26 @@ slice** (`Sliced`) or a **hardware partition** (`Partitioned`) reads that share'
 share's usage. So "how much memory is this `Instance` using, and how close is it to its ceiling" is the
 same two fields whatever the allocation did, and a consumer never has to know.
 
-| Field | Unit | Meaning |
-|---|---|---|
-| `id` | — | what the `Instance` holds: the device's identifier, or under `Partitioned` the **partition's own** — a MIG UUID rather than the parent card's |
-| `mode` | — | how the grant was made: `Exclusive`, `Shared`, `Sliced`, `Partitioned` or `Visibility`. The **name**, spelled the same here and on the `mode` label of every exporter family |
-| *`memoryTotalMiB`* | MiB | the memory granted: the device's own, a slice's quota, or a partition's own capacity |
-| *`memoryUsedMiB`* | MiB | the memory measured held **of that grant** |
-| *`memoryUtilizationPercent`* | 0–100 | *`memoryUsedMiB`* over *`memoryTotalMiB`* |
-| *`coresUtilizationPercent`* | 0–100 | how much of the `Instance`'s **own compute allowance** it was measured using |
-| *`temperatureCelsius`* | °C | the **whole device's** — a share has none of its own |
-| *`powerUsageWatts`* | W | the whole device's |
-| `unhealthy` | bool | the whole device's — an unhealthy card carries every share of it down |
+```yaml
+apiVersion: worker.gpustack.ai/v1
+kind: InstanceMetrics
+metadata:
+  name: example
+  namespace: team-a
+sample:
+  accelerators:
+    - id: <device-id>  # Partitioned grants use the partition's own ID, such as a MIG UUID.
+      mode: Exclusive  # Exclusive, Shared, Sliced, Partitioned or Visibility; also the exporter label.
+      memoryTotalMiB: 8192  # Granted memory, MiB: device, slice quota or partition capacity.
+      memoryUsedMiB: 1024  # Measured memory held from the grant, MiB.
+      memoryUtilizationPercent: 12  # Used over total, percent.
+      coresUtilizationPercent: 50  # Usage of this Instance's compute allowance, percent.
+      temperatureCelsius: 60  # Whole device temperature, °C.
+      powerUsageWatts: 200  # Whole device power, W.
+      unhealthy: false  # Whole device health; an unhealthy card affects every share.
+```
+
+Utilization is expressed as a percentage. The values can exceed 100 as described below.
 
 > **One entry per grant, not per card.** A card serves one grant in every mode but `Partitioned`,
 > where an `Instance` may hold several of its partitions at once (one per container). Each is its own

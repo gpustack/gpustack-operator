@@ -140,12 +140,21 @@ grant it observed can serve a write at all.
 
 Every field of *`spec.domain`* is rejected on update, and so is *`spec.poolRef`*:
 
-| Field | Reason |
-|---|---|
-| *`domain.name`* | the tenant id; changing it abandons the ledger entry and its bytes under the old name |
-| *`domain.blockSize`* | a warm cache is read back at the block size it was written at |
-| *`domain.dtype`* | same, one level down — reading fp8 blocks as bf16 is silent tensor corruption |
-| *`poolRef`* | re-pointing moves a namespace's grant without moving its bytes, which stay on the old store |
+```yaml
+apiVersion: worker.gpustack.ai/v1
+kind: KVCachePoolBinding
+metadata:
+  name: cache-binding
+spec:
+  poolRef:  # Moving the grant leaves its bytes on the old store.
+    name: cache-pool
+  quota:
+    ceiling: 50Gi  # Required; what this namespace may consume in its reuse domain.
+  domain:
+    name: tenant  # Changing the tenant ID abandons its ledger entry and bytes.
+    blockSize: 16  # A warm cache must be read at the block size it was written with.
+    dtype: bfloat16  # Reading fp8 blocks as bf16 silently corrupts tensors.
+```
 
 To change any of them, delete the Binding and create a new one; the cache under the old domain is
 not carried over.

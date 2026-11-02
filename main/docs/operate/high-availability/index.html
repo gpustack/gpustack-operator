@@ -1455,53 +1455,42 @@ component&rsquo;s <em><code>tolerations</code></em>.</p>
 <p>Earlier releases let the Kueue controller manager, the NFD master and the NFD gc tolerate every taint;
 an install that relied on that must set their three lists before upgrading. Upgrade with
 <code>--reset-then-reuse-values</code>, not <code>--reuse-values</code>, or the new lists never reach the release; see
-<a href="https://github.com/gpustack/gpustack-operator/blob/423fa74ffa1443814bfdf35a8994ae8b8a9c0b4f/deploy/gpustack-operator/chart/README.md#upgrading-the-chart">Upgrading the Chart</a>
+<a href="https://github.com/gpustack/gpustack-operator/blob/26f985d9ff6a706b54e102977f74c2e3a8d93bdc/deploy/gpustack-operator/chart/README.md#upgrading-the-chart">Upgrading the Chart</a>
 .</p>
 <h2 id="configuration">Configuration</h2>
-<table>
-  <thead>
-      <tr>
-          <th>Component</th>
-          <th>Replicas</th>
-          <th><code>PodDisruptionBudget</code></th>
-          <th><code>Node</code> spread</th>
-      </tr>
-  </thead>
-  <tbody>
-      <tr>
-          <td>Worker (control plane)</td>
-          <td><code>worker.replicas</code></td>
-          <td><code>worker.podDisruptionBudget.enabled</code> + <code>.minAvailable</code></td>
-          <td><code>worker.topologySpreadConstraints</code>, or <code>worker.affinity</code></td>
-      </tr>
-      <tr>
-          <td>Kueue controller manager</td>
-          <td><code>kueue.controllerManager.replicas</code></td>
-          <td><code>kueue.controllerManager.podDisruptionBudget.enabled</code> + <code>.minAvailable</code></td>
-          <td><code>kueue.controllerManager.topologySpreadConstraints</code></td>
-      </tr>
-      <tr>
-          <td>NFD master</td>
-          <td><code>node-feature-discovery.master.replicaCount</code></td>
-          <td><code>node-feature-discovery.master.podDisruptionBudget.enable</code> + <code>.minAvailable</code></td>
-          <td><code>node-feature-discovery.master.affinity</code> only</td>
-      </tr>
-      <tr>
-          <td>NFS CSI controller</td>
-          <td><code>csi-driver-nfs.controller.replicas</code></td>
-          <td>— none —</td>
-          <td><code>csi-driver-nfs.controller.topologySpreadConstraints</code> (vendored patch)</td>
-      </tr>
-      <tr>
-          <td>S3 CSI controller</td>
-          <td><code>csi-driver-s3.controller.replicas</code></td>
-          <td>— none —</td>
-          <td>— none —</td>
-      </tr>
-  </tbody>
-</table>
-<p>Those &ldquo;none&rdquo; and &ldquo;only&rdquo; cells are upstream chart limitations: each changes what three replicas get
-you, and each is spelled out below.</p>
+<p>The following values show the availability fields for each component. They are illustrative, not
+a complete placement configuration:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">worker</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">replicas</span><span class="p">:</span><span class="w"> </span><span class="m">3</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">podDisruptionBudget</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">enabled</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">minAvailable</span><span class="p">:</span><span class="w"> </span><span class="m">2</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">topologySpreadConstraints</span><span class="p">:</span><span class="w"> </span><span class="p">[]</span><span class="w">  </span><span class="c"># Or configure worker.affinity.</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">kueue</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">controllerManager</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">replicas</span><span class="p">:</span><span class="w"> </span><span class="m">3</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">podDisruptionBudget</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">enabled</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">minAvailable</span><span class="p">:</span><span class="w"> </span><span class="m">2</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">topologySpreadConstraints</span><span class="p">:</span><span class="w"> </span><span class="p">[]</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">node-feature-discovery</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">master</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">replicaCount</span><span class="p">:</span><span class="w"> </span><span class="m">3</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">podDisruptionBudget</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">enable</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">minAvailable</span><span class="p">:</span><span class="w"> </span><span class="m">2</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">affinity</span><span class="p">:</span><span class="w"> </span>{}<span class="w">  </span><span class="c"># NFD master supports affinity only.</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">csi-driver-nfs</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">controller</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">replicas</span><span class="p">:</span><span class="w"> </span><span class="m">2</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">topologySpreadConstraints</span><span class="p">:</span><span class="w"> </span><span class="p">[]</span><span class="w">  </span><span class="c"># Vendored patch.</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">csi-driver-s3</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">controller</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">replicas</span><span class="p">:</span><span class="w"> </span><span class="m">2</span></span></span></code></pre></div>
+</div><p>Neither CSI controller chart provides a <code>PodDisruptionBudget</code>; the S3 controller chart also
+provides no node spread field. These upstream limitations are explained below.</p>
 <h3 id="example-values">Example values</h3>
 <div class="code-block">
   <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
@@ -1659,7 +1648,7 @@ the object rather than a value here</li></ul>
           
           
           <nav class="page-actions" aria-label="Page source">
-            <a href="https://github.com/gpustack/gpustack-operator/blob/423fa74ffa1443814bfdf35a8994ae8b8a9c0b4f/docs/operate/high-availability.md">View page source</a>
+            <a href="https://github.com/gpustack/gpustack-operator/blob/26f985d9ff6a706b54e102977f74c2e3a8d93bdc/docs/operate/high-availability.md">View page source</a>
             
             <a href="https://github.com/gpustack/gpustack-operator/edit/main/docs/operate/high-availability.md">Edit this page</a>
             

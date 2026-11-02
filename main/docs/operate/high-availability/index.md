@@ -29,20 +29,45 @@ component's *`tolerations`*.
 Earlier releases let the Kueue controller manager, the NFD master and the NFD gc tolerate every taint;
 an install that relied on that must set their three lists before upgrading. Upgrade with
 `--reset-then-reuse-values`, not `--reuse-values`, or the new lists never reach the release; see
-[Upgrading the Chart](https://github.com/gpustack/gpustack-operator/blob/423fa74ffa1443814bfdf35a8994ae8b8a9c0b4f/deploy/gpustack-operator/chart/README.md#upgrading-the-chart).
+[Upgrading the Chart](https://github.com/gpustack/gpustack-operator/blob/26f985d9ff6a706b54e102977f74c2e3a8d93bdc/deploy/gpustack-operator/chart/README.md#upgrading-the-chart).
 
 ## Configuration
 
-| Component | Replicas | `PodDisruptionBudget` | `Node` spread |
-|---|---|---|---|
-| Worker (control plane) | `worker.replicas` | `worker.podDisruptionBudget.enabled` + `.minAvailable` | `worker.topologySpreadConstraints`, or `worker.affinity` |
-| Kueue controller manager | `kueue.controllerManager.replicas` | `kueue.controllerManager.podDisruptionBudget.enabled` + `.minAvailable` | `kueue.controllerManager.topologySpreadConstraints` |
-| NFD master | `node-feature-discovery.master.replicaCount` | `node-feature-discovery.master.podDisruptionBudget.enable` + `.minAvailable` | `node-feature-discovery.master.affinity` only |
-| NFS CSI controller | `csi-driver-nfs.controller.replicas` | — none — | `csi-driver-nfs.controller.topologySpreadConstraints` (vendored patch) |
-| S3 CSI controller | `csi-driver-s3.controller.replicas` | — none — | — none — |
+The following values show the availability fields for each component. They are illustrative, not
+a complete placement configuration:
 
-Those "none" and "only" cells are upstream chart limitations: each changes what three replicas get
-you, and each is spelled out below.
+```yaml
+worker:
+  replicas: 3
+  podDisruptionBudget:
+    enabled: true
+    minAvailable: 2
+  topologySpreadConstraints: []  # Or configure worker.affinity.
+kueue:
+  controllerManager:
+    replicas: 3
+    podDisruptionBudget:
+      enabled: true
+      minAvailable: 2
+    topologySpreadConstraints: []
+node-feature-discovery:
+  master:
+    replicaCount: 3
+    podDisruptionBudget:
+      enable: true
+      minAvailable: 2
+    affinity: {}  # NFD master supports affinity only.
+csi-driver-nfs:
+  controller:
+    replicas: 2
+    topologySpreadConstraints: []  # Vendored patch.
+csi-driver-s3:
+  controller:
+    replicas: 2
+```
+
+Neither CSI controller chart provides a `PodDisruptionBudget`; the S3 controller chart also
+provides no node spread field. These upstream limitations are explained below.
 
 ### Example values
 

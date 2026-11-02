@@ -243,6 +243,11 @@ Update `epd-deployment.yaml` from the
 [TCP walkthrough](/gpustack-operator/main/docs/walkthroughs/model-deployment/encode-prefill-decode/index.md#step-1-start-three-role-serving):
 
 ```diff
+ apiVersion: worker.gpustack.ai/v1
+ kind: ModelDeployment
+ metadata:
+   name: epd-arm3-epd
+   namespace: gpustack-bench
  spec:
 +  kvTransfer:
 +    protocol: RDMA

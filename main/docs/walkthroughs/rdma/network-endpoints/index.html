@@ -1451,9 +1451,10 @@ and configure multi-tenant and cache fabric interconnects.</p>
 </li>
 </ul>
 <h2 id="summary">Summary</h2>
-<p>Device Manager discovers <em>RDMA</em> NICs from <code>/sys/class/net</code>, resolves bound <em>RDMA</em> devices, verifies link
-status, and advertises three extended resource keys — shared, exclusive, and <em>single-root I/O virtualization (SR-IOV)</em> partitioned — so
-a workload can request network fabric beside its accelerators.</p>
+<p>Device Manager discovers network interfaces from <code>/sys/class/net</code> and verbs devices from
+<code>/sys/class/infiniband</code>, including devices without a netdev. It verifies link status and advertises
+shared, exclusive and <em>single-root I/O virtualization (SR-IOV)</em> partitioned resource keys.
+A workload can request network fabric beside its accelerators.</p>
 <p>When at least one endpoint is active, the node carries <code>feature.gpustack.ai/rdma.capable=true</code> (see
 <a href="/gpustack-operator/main/docs/modules/rdma/network-topology/">Network Topology</a>
  and
@@ -1545,11 +1546,20 @@ Name the entrance <code>LocalQueue</code> of the pool that holds the accelerator
 </span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">limits</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="nt">nvidia.com/gpu</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;1&#34;</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="nt">device.gpustack.ai/rdma.shared</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;1&#34;</span></span></span></code></pre></div>
-</div><p>The allocated container receives character devices and <code>NCCL_IB_HCA</code> configuration
-(see <a href="/gpustack-operator/main/docs/modules/rdma/operations/#injected-devices">Injected devices</a>
-).</p>
-<p>Prefer <code>device.gpustack.ai/rdma.shared</code> when a container needs a single endpoint. Use the exclusive
-key <code>device.gpustack.ai/rdma</code> when requesting multiple distinct network endpoints.</p>
+</div><p>The allocated container receives character devices, an exact <code>NCCL_IB_HCA</code> filter and
+<code>GPUSTACK_RDMA_DEVICES</code>, the plain list of granted HCA names in every resource mode.
+See <a href="/gpustack-operator/main/docs/modules/rdma/operations/#injected-devices">Injected devices</a>
+ for variable values,
+mixed-family limits and application startup requirements.</p>
+<p>Prefer <code>device.gpustack.ai/rdma.shared</code> unless the workload needs exclusive-family endpoint ownership.
+<code>GetPreferredAllocation</code> distributes shared tokens across distinct eligible HCAs in round-robin
+order before assigning a second token on one HCA. The exclusive key <code>device.gpustack.ai/rdma</code>
+reserves whole endpoints within its family; shared workloads can still use those HCAs.</p>
+<p>Fewer <code>uverbs</code> devices than requested shared units occur when the request exceeds the number of
+eligible HCAs, or when policy excludes granted endpoints. Inspect the
+<a href="/gpustack-operator/main/docs/modules/rdma/operations/#selection-policy">selection policy status</a>
+ if grants change
+after a policy update.</p>
 <h2 id="step-2-align-numa-with-kubelet">Step 2: Align NUMA with kubelet</h2>
 <p>Kubernetes does not pair specific accelerators with adjacent network adapters by default.
 Enable <em>NUMA</em> alignment by setting the TopologyManager policy in <code>/var/lib/kubelet/config.yaml</code>
@@ -1696,8 +1706,9 @@ and <a href="/gpustack-operator/main/docs/modules/devices/preflight/#reading-the
   <tbody>
       <tr>
           <td><em>RDMA</em> resource keys present but all <code>Unhealthy</code></td>
-          <td>Status: every port link <code>Failed</code> or unreadable</td>
-          <td>Inspect <code>kubectl get devices &lt;node&gt; -o json</code> for <code>.spec.interfaces[].link</code>; verify physical cable and subnet manager</td>
+          <td>Status: links <code>Failed</code> or HCAs unselected by policy</td>
+          <td>Inspect <code>kubectl get devices &lt;node&gt; -o json</code> for link verdicts and <a href="/gpustack-operator/main/docs/modules/rdma/operations/#selection-policy">selection policy status</a>
+; verify physical cable, subnet manager and policy filters</td>
       </tr>
       <tr>
           <td><code>Workload</code> admitted by Kueue but <code>Pod</code> remains <code>Pending</code></td>
@@ -1710,9 +1721,10 @@ and <a href="/gpustack-operator/main/docs/modules/devices/preflight/#reading-the
           <td>Ensure kubelet has <code>topologyManagerPolicy: restricted</code>; verify GPU and NIC requests are declared in the same container</td>
       </tr>
       <tr>
-          <td>Fewer <code>uverbs</code> devices inside container than expected</td>
-          <td>Shared tokens coalesced into duplicate endpoints</td>
-          <td>Requesting <code>rdma.shared: N</code> (N&gt;1) may merge tokens from the same NIC; use <code>device.gpustack.ai/rdma: N</code> for distinct adapters</td>
+          <td>Fewer <code>uverbs</code> devices inside container than requested shared units</td>
+          <td>Request exceeds eligible HCA count, or policy excludes granted endpoints</td>
+          <td><code>GetPreferredAllocation</code> spreads <code>rdma.shared</code> tokens across distinct eligible HCAs first, then repeats HCAs. Check eligible capacity and <a href="/gpustack-operator/main/docs/modules/rdma/operations/#selection-policy">policy status</a>
+. Use <code>device.gpustack.ai/rdma</code> for whole-endpoint ownership within the exclusive family</td>
       </tr>
       <tr>
           <td><code>Node</code> unexpectedly loses <code>feature.gpustack.ai/rdma.capable</code></td>
@@ -1752,7 +1764,7 @@ and <a href="/gpustack-operator/main/docs/modules/devices/preflight/#reading-the
           
           
           <nav class="page-actions" aria-label="Page source">
-            <a href="https://github.com/gpustack/gpustack-operator/blob/423fa74ffa1443814bfdf35a8994ae8b8a9c0b4f/docs/walkthroughs/rdma/network-endpoints.md">View page source</a>
+            <a href="https://github.com/gpustack/gpustack-operator/blob/26f985d9ff6a706b54e102977f74c2e3a8d93bdc/docs/walkthroughs/rdma/network-endpoints.md">View page source</a>
             
             <a href="https://github.com/gpustack/gpustack-operator/edit/main/docs/walkthroughs/rdma/network-endpoints.md">Edit this page</a>
             

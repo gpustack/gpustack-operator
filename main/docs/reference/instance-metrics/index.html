@@ -1471,58 +1471,27 @@ per request; accelerator figures come from the Device Manager&rsquo;s latest sam
 <h2 id="sample">Sample</h2>
 <p><code>InstanceMetrics</code> carries the <code>Instance</code>&rsquo;s identity and one <code>sample</code>. Every figure is a
 <strong><code>Total</code>/<code>Used</code> pair</strong>, so a percentage can be computed from the response alone:</p>
-<table>
-  <thead>
-      <tr>
-          <th>Field</th>
-          <th>Unit</th>
-          <th>Meaning</th>
-      </tr>
-  </thead>
-  <tbody>
-      <tr>
-          <td><em><code>sample.timestamp</code></em></td>
-          <td>RFC 3339</td>
-          <td>when the CPU/memory/storage figures were measured</td>
-      </tr>
-      <tr>
-          <td><em><code>sample.cpuTotalMilliCores</code></em></td>
-          <td>milli-cores</td>
-          <td>the <code>Instance</code>&rsquo;s CPU limit</td>
-      </tr>
-      <tr>
-          <td><em><code>sample.cpuUsedMilliCores</code></em></td>
-          <td>milli-cores</td>
-          <td><code>Pod</code> CPU usage, averaged over the kubelet&rsquo;s sample window</td>
-      </tr>
-      <tr>
-          <td><em><code>sample.memoryTotalMiB</code></em></td>
-          <td>MiB</td>
-          <td>the <code>Instance</code>&rsquo;s memory limit</td>
-      </tr>
-      <tr>
-          <td><em><code>sample.memoryUsedMiB</code></em></td>
-          <td>MiB</td>
-          <td><code>Pod</code> working-set memory</td>
-      </tr>
-      <tr>
-          <td><em><code>sample.storageTotalMiB</code></em></td>
-          <td>MiB</td>
-          <td>the <code>Instance</code>&rsquo;s ephemeral-storage limit</td>
-      </tr>
-      <tr>
-          <td><em><code>sample.storageUsedMiB</code></em></td>
-          <td>MiB</td>
-          <td><code>Pod</code> ephemeral-storage usage: writable layers, logs and disk-backed <code>emptyDir</code></td>
-      </tr>
-      <tr>
-          <td><em><code>sample.accelerators[]</code></em></td>
-          <td>—</td>
-          <td>one entry per allocated accelerator</td>
-      </tr>
-  </tbody>
-</table>
-<p>A <strong>total is the <code>Instance</code>&rsquo;s declaration</strong> (the sum of its containers&rsquo; limits, init containers
+<p>The API returns JSON. This YAML representation illustrates the response fields:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">worker.gpustack.ai/v1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">InstanceMetrics</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">metadata</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">example</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">namespace</span><span class="p">:</span><span class="w"> </span><span class="l">team-a</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">uid</span><span class="p">:</span><span class="w"> </span><span class="l">&lt;instance-uid&gt;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">sample</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">timestamp</span><span class="p">:</span><span class="w"> </span><span class="l">&lt;timestamp&gt; </span><span class="w"> </span><span class="c"># RFC 3339; CPU, memory and storage measurement time.</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">cpuTotalMilliCores</span><span class="p">:</span><span class="w"> </span><span class="m">2000</span><span class="w">  </span><span class="c"># Instance CPU limit, milli-cores.</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">cpuUsedMilliCores</span><span class="p">:</span><span class="w"> </span><span class="m">500</span><span class="w">  </span><span class="c"># Pod CPU usage, milli-cores averaged over the kubelet sample window.</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">memoryTotalMiB</span><span class="p">:</span><span class="w"> </span><span class="m">4096</span><span class="w">  </span><span class="c"># Instance memory limit, MiB.</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">memoryUsedMiB</span><span class="p">:</span><span class="w"> </span><span class="m">1024</span><span class="w">  </span><span class="c"># Pod working set, MiB.</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">storageTotalMiB</span><span class="p">:</span><span class="w"> </span><span class="m">8192</span><span class="w">  </span><span class="c"># Instance ephemeral-storage limit, MiB.</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">storageUsedMiB</span><span class="p">:</span><span class="w"> </span><span class="m">128</span><span class="w">  </span><span class="c"># Pod writable layers, logs and disk-backed emptyDir, MiB.</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">accelerators</span><span class="p">:</span><span class="w">  </span><span class="c"># One entry per allocated accelerator, when available.</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">id</span><span class="p">:</span><span class="w"> </span><span class="l">&lt;device-id&gt;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">mode</span><span class="p">:</span><span class="w"> </span><span class="l">Exclusive</span></span></span></code></pre></div>
+</div><p>A <strong>total is the <code>Instance</code>&rsquo;s declaration</strong> (the sum of its containers&rsquo; limits, init containers
 excluded) and is always present. A <strong>used figure is a measurement</strong>, and is <strong>absent rather
 than zero</strong> when no source could measure it: zero means measured-and-idle.</p>
 <p>Memory and storage are in <strong>MiB</strong> throughout: the kubelet measures bytes, the manufacturers'
@@ -1555,62 +1524,25 @@ reads the device&rsquo;s own figures, because the device is what it was granted;
 slice</strong> (<code>Sliced</code>) or a <strong>hardware partition</strong> (<code>Partitioned</code>) reads that share&rsquo;s quota and that
 share&rsquo;s usage. So &ldquo;how much memory is this <code>Instance</code> using, and how close is it to its ceiling&rdquo; is the
 same two fields whatever the allocation did, and a consumer never has to know.</p>
-<table>
-  <thead>
-      <tr>
-          <th>Field</th>
-          <th>Unit</th>
-          <th>Meaning</th>
-      </tr>
-  </thead>
-  <tbody>
-      <tr>
-          <td><code>id</code></td>
-          <td>—</td>
-          <td>what the <code>Instance</code> holds: the device&rsquo;s identifier, or under <code>Partitioned</code> the <strong>partition&rsquo;s own</strong> — a MIG UUID rather than the parent card&rsquo;s</td>
-      </tr>
-      <tr>
-          <td><code>mode</code></td>
-          <td>—</td>
-          <td>how the grant was made: <code>Exclusive</code>, <code>Shared</code>, <code>Sliced</code>, <code>Partitioned</code> or <code>Visibility</code>. The <strong>name</strong>, spelled the same here and on the <code>mode</code> label of every exporter family</td>
-      </tr>
-      <tr>
-          <td><em><code>memoryTotalMiB</code></em></td>
-          <td>MiB</td>
-          <td>the memory granted: the device&rsquo;s own, a slice&rsquo;s quota, or a partition&rsquo;s own capacity</td>
-      </tr>
-      <tr>
-          <td><em><code>memoryUsedMiB</code></em></td>
-          <td>MiB</td>
-          <td>the memory measured held <strong>of that grant</strong></td>
-      </tr>
-      <tr>
-          <td><em><code>memoryUtilizationPercent</code></em></td>
-          <td>0–100</td>
-          <td><em><code>memoryUsedMiB</code></em> over <em><code>memoryTotalMiB</code></em></td>
-      </tr>
-      <tr>
-          <td><em><code>coresUtilizationPercent</code></em></td>
-          <td>0–100</td>
-          <td>how much of the <code>Instance</code>&rsquo;s <strong>own compute allowance</strong> it was measured using</td>
-      </tr>
-      <tr>
-          <td><em><code>temperatureCelsius</code></em></td>
-          <td>°C</td>
-          <td>the <strong>whole device&rsquo;s</strong> — a share has none of its own</td>
-      </tr>
-      <tr>
-          <td><em><code>powerUsageWatts</code></em></td>
-          <td>W</td>
-          <td>the whole device&rsquo;s</td>
-      </tr>
-      <tr>
-          <td><code>unhealthy</code></td>
-          <td>bool</td>
-          <td>the whole device&rsquo;s — an unhealthy card carries every share of it down</td>
-      </tr>
-  </tbody>
-</table>
+<div class="code-block">
+  <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">worker.gpustack.ai/v1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">InstanceMetrics</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">metadata</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">example</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">namespace</span><span class="p">:</span><span class="w"> </span><span class="l">team-a</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">sample</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">accelerators</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">id</span><span class="p">:</span><span class="w"> </span><span class="l">&lt;device-id&gt; </span><span class="w"> </span><span class="c"># Partitioned grants use the partition&#39;s own ID, such as a MIG UUID.</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">mode</span><span class="p">:</span><span class="w"> </span><span class="l">Exclusive </span><span class="w"> </span><span class="c"># Exclusive, Shared, Sliced, Partitioned or Visibility; also the exporter label.</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">memoryTotalMiB: 8192  # Granted memory, MiB</span><span class="p">:</span><span class="w"> </span><span class="l">device, slice quota or partition capacity.</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">memoryUsedMiB</span><span class="p">:</span><span class="w"> </span><span class="m">1024</span><span class="w">  </span><span class="c"># Measured memory held from the grant, MiB.</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">memoryUtilizationPercent</span><span class="p">:</span><span class="w"> </span><span class="m">12</span><span class="w">  </span><span class="c"># Used over total, percent.</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">coresUtilizationPercent</span><span class="p">:</span><span class="w"> </span><span class="m">50</span><span class="w">  </span><span class="c"># Usage of this Instance&#39;s compute allowance, percent.</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">temperatureCelsius</span><span class="p">:</span><span class="w"> </span><span class="m">60</span><span class="w">  </span><span class="c"># Whole device temperature, °C.</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">powerUsageWatts</span><span class="p">:</span><span class="w"> </span><span class="m">200</span><span class="w">  </span><span class="c"># Whole device power, W.</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">unhealthy</span><span class="p">:</span><span class="w"> </span><span class="kc">false</span><span class="w">  </span><span class="c"># Whole device health; an unhealthy card affects every share.</span></span></span></code></pre></div>
+</div><p>Utilization is expressed as a percentage. The values can exceed 100 as described below.</p>
 <blockquote>
 <p><strong>One entry per grant, not per card.</strong> A card serves one grant in every mode but <code>Partitioned</code>,
 where an <code>Instance</code> may hold several of its partitions at once (one per container). Each is its own
@@ -2196,7 +2128,7 @@ Discovery</a>
           
           
           <nav class="page-actions" aria-label="Page source">
-            <a href="https://github.com/gpustack/gpustack-operator/blob/423fa74ffa1443814bfdf35a8994ae8b8a9c0b4f/docs/reference/instance-metrics.md">View page source</a>
+            <a href="https://github.com/gpustack/gpustack-operator/blob/26f985d9ff6a706b54e102977f74c2e3a8d93bdc/docs/reference/instance-metrics.md">View page source</a>
             
             <a href="https://github.com/gpustack/gpustack-operator/edit/main/docs/reference/instance-metrics.md">Edit this page</a>
             

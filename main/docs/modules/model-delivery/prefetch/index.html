@@ -1510,32 +1510,37 @@ unreferenced and past grace.</p>
 <h2 id="placement">Placement</h2>
 <p><em><code>spec.placement</code></em> picks the target set one of three ways, and admission and delivery share one
 expansion, so the two can never disagree about what a prefetch would warm:</p>
-<table>
-  <thead>
-      <tr>
-          <th>Form</th>
-          <th>Field</th>
-          <th>Target set</th>
-      </tr>
-  </thead>
-  <tbody>
-      <tr>
-          <td>by pool</td>
-          <td><em><code>placement.instanceTypes</code></em></td>
-          <td>every node carrying one of the named <code>InstanceType</code>s&rsquo; flavors</td>
-      </tr>
-      <tr>
-          <td>by node</td>
-          <td><em><code>placement.nodeSelector</code></em></td>
-          <td>every node the selector matches</td>
-      </tr>
-      <tr>
-          <td>derived</td>
-          <td>both absent</td>
-          <td>the <code>InstanceType</code>s of the namespace&rsquo;s deployments that reference the artifact</td>
-      </tr>
-  </tbody>
-</table>
+<div class="code-block">
+  <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">worker.gpustack.ai/v1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">ModelPrefetch</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">metadata</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">qwen-prefetch</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">artifactRef</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">qwen-7b </span><span class="w"> </span><span class="c"># A ModelArtifact in this namespace; its weights are what warms.</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">bindingRef</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">store-binding </span><span class="w"> </span><span class="c"># A ModelStoreBinding in this namespace; its budget pays for the bytes.</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">placement</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">instanceTypes</span><span class="p">:</span><span class="w">  </span><span class="c"># Every node carrying a named InstanceType&#39;s flavor.</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span>- <span class="l">gpu-pool</span></span></span></code></pre></div>
+</div><div class="code-block">
+  <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">worker.gpustack.ai/v1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">ModelPrefetch</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">metadata</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">qwen-prefetch</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">artifactRef</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">qwen-7b </span><span class="w"> </span><span class="c"># A ModelArtifact in this namespace; its weights are what warms.</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">bindingRef</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">store-binding </span><span class="w"> </span><span class="c"># A ModelStoreBinding in this namespace; its budget pays for the bytes.</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">placement</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">nodeSelector</span><span class="p">:</span><span class="w">  </span><span class="c"># Every node matching this selector.</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">matchLabels</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">accelerator</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;true&#34;</span></span></span></code></pre></div>
+</div><p>When both fields are absent, placement derives the <code>InstanceType</code>s from the namespace&rsquo;s
+deployments that reference the artifact.</p>
 <p><code>Setting</code> both kinds is refused; the schema cannot see it because neither field is required.</p>
 <h2 id="warm-up-pod">Warm-up Pod</h2>
 <p>Delivery is one warm-up <code>Pod</code> per target node, rendered by the prefetch controller. It mounts the
@@ -1614,7 +1619,7 @@ facts already live on the nodes&rsquo; reports, and the table prints who warms w
           
           
           <nav class="page-actions" aria-label="Page source">
-            <a href="https://github.com/gpustack/gpustack-operator/blob/423fa74ffa1443814bfdf35a8994ae8b8a9c0b4f/docs/modules/model-delivery/prefetch.md">View page source</a>
+            <a href="https://github.com/gpustack/gpustack-operator/blob/26f985d9ff6a706b54e102977f74c2e3a8d93bdc/docs/modules/model-delivery/prefetch.md">View page source</a>
             
             <a href="https://github.com/gpustack/gpustack-operator/edit/main/docs/modules/model-delivery/prefetch.md">Edit this page</a>
             

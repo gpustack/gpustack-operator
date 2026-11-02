@@ -1489,6 +1489,18 @@ without the flag:</p>
   <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">kubectl -n gpustack-system patch setting model-deployment-kv-cache-dtype-owned <span class="se">\
 </span></span></span><span class="line"><span class="cl"><span class="se"></span>  --type merge -p <span class="s1">&#39;{&#34;spec&#34;:{&#34;value&#34;:&#34;false&#34;}}&#39;</span></span></span></code></pre></div>
+</div><p>The patch changes the <code>Setting</code> as follows:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>diff</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-diff" data-lang="diff"><span class="line"><span class="cl"> apiVersion: gpustack.ai/v1
+</span></span><span class="line"><span class="cl"> kind: Setting
+</span></span><span class="line"><span class="cl"> metadata:
+</span></span><span class="line"><span class="cl">   name: model-deployment-kv-cache-dtype-owned
+</span></span><span class="line"><span class="cl">   namespace: gpustack-system
+</span></span><span class="line"><span class="cl"> spec:
+</span></span><span class="line"><span class="cl"><span class="gd">-  value: &#34;true&#34;
+</span></span></span><span class="line"><span class="cl"><span class="gd"></span><span class="gi">+  value: &#34;false&#34;
+</span></span></span></code></pre></div>
 </div><p>Then move the workloads to a Binding with a spelling the engine accepts, and turn the <code>Setting</code> back on:</p>
 <ol>
 <li>Create a new Binding on the same pool with the corrected <code>dtype</code> and a new <em><code>domain.name</code></em>; the old
@@ -1532,7 +1544,7 @@ because the operator owns that role&rsquo;s whole argv and folds every argument 
           
           
           <nav class="page-actions" aria-label="Page source">
-            <a href="https://github.com/gpustack/gpustack-operator/blob/423fa74ffa1443814bfdf35a8994ae8b8a9c0b4f/docs/operate/migration/kv-cache-dtype.md">View page source</a>
+            <a href="https://github.com/gpustack/gpustack-operator/blob/26f985d9ff6a706b54e102977f74c2e3a8d93bdc/docs/operate/migration/kv-cache-dtype.md">View page source</a>
             
             <a href="https://github.com/gpustack/gpustack-operator/edit/main/docs/operate/migration/kv-cache-dtype.md">Edit this page</a>
             
