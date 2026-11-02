@@ -108,12 +108,24 @@ status:  # observed state, maintained by the node plugin
 
 ## Configuration ownership
 
-| Part | Writer | Rule |
-| --- | --- | --- |
-| the object | worker | created when the node's `CSINode` lists `model.csi.gpustack.ai`; removed with the `Node`, and all of them while the `CSIDriver` object does not exist |
-| *`spec`* | worker | the merge of the configuration layers, rewritten within a minute of a `Setting` change; never a value that fails its check |
-| *`spec.kubelet`* | worker | the node's kubelet thresholds, read from kubelet's `configz` endpoint when the object is written and every 30 minutes; a failed read keeps the last reading, and a node never read has none. The plugin gets no `nodes/proxy` access |
-| *`status`* | the plugin on that node | admitted only through the status webhook below |
+The worker creates the object when the node's `CSINode` lists `model.csi.gpustack.ai`.
+It removes the object with the `Node`, and removes all objects while the `CSIDriver` is absent.
+
+```yaml
+apiVersion: worker.gpustack.ai/v1
+kind: NodeModelStore
+metadata:
+  name: worker-node-a
+spec:  # Worker-owned merge of configuration layers; invalid values are never written.
+  # Worker reads kubelet configz when writing the object and every 30 minutes.
+  # A failed read keeps the last reading; a node never read has none.
+  kubelet:
+    nodefsAvailable: "10%"
+status:  # Node plugin-owned; admitted only through the status webhook below.
+  observedGeneration: 3
+```
+
+The worker rewrites `spec` within a minute of a `Setting` change. The plugin has no `nodes/proxy` access.
 
 The public [NodeModelStore API](views.md#resources) supports reads and deletion. Its configuration
 and status are maintained by the worker and node plugin. The worker recreates a deleted object
@@ -146,17 +158,22 @@ tenant from making an artifact look resolved.
 A `ModelDeployment` under `Node` delivery and an `Instance` naming a Hugging Face or ModelScope artifact render:
 
 ```yaml
-volumes:
-  - name: gpustack-model
-    csi:
-      driver: model.csi.gpustack.ai
-      readOnly: true
-      volumeAttributes:  # hints; the plugin checks each against the API
-        artifact: qwen-7b
-        artifactUID: 3f0c...
-        manifestDigest: sha256:0f3c...
-      nodePublishSecretRef:  # the artifact's secretRef; absent without one
-        name: hf-token
+apiVersion: v1
+kind: Pod
+metadata:
+  name: model-consumer
+spec:
+  volumes:
+    - name: gpustack-model
+      csi:
+        driver: model.csi.gpustack.ai
+        readOnly: true
+        volumeAttributes:  # hints; the plugin checks each against the API
+          artifact: qwen-7b
+          artifactUID: 3f0c...
+          manifestDigest: sha256:0f3c...
+        nodePublishSecretRef:  # the artifact's secretRef; absent without one
+          name: hf-token
 ```
 
 A hand-written `Pod` may mount the same volume; it is held to the same rules. The `CSIDriver` has

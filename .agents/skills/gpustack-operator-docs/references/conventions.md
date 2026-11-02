@@ -348,7 +348,8 @@ capacity, timing or a safety limit.
 - **Break a wall of text into named subsections.** If a paragraph carries more than one rule, it is
   more than one paragraph — and past 5 lines it fails the paragraph cap. A `###` heading is cheap and
   becomes an anchor others can link to.
-- **Prefer a table for anything enumerable** — modes, keys, vendors, gates, settings.
+- **Prefer a table for enumerable topics** such as modes, vendors and gates. For CR fields, use
+  annotated Pretty YAML as required by [YAML examples](../SKILL.md#yaml-examples).
 - **Keep table headers short.** Use a precise noun or short phrase, such as `Resource`, `Scope` or
   `Default`. Put conditions and explanations in the cells or adjacent prose. Preserve technical names.
 - **Name code in contributor guides.** Give a source path when the reader is editing that code.

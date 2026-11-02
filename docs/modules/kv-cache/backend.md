@@ -272,15 +272,18 @@ second medium exists for), and each still renders its own `DaemonSet`.
 The member's whole configuration renders as **environment variables**: no `ConfigMap`, no volume, no init
 container.
 
-| config key | environment variable |
-|---|---|
-| `local_hostname` | `MOONCAKE_LOCAL_HOSTNAME` (the **`Pod` IP**, from the downward API) |
-| `metadata_server` | `MOONCAKE_TE_META_DATA_SERVER` |
-| `master_server_address` | `MOONCAKE_MASTER` |
-| *`protocol`* | `MOONCAKE_PROTOCOL` |
-| `global_segment_size` | `MOONCAKE_GLOBAL_SEGMENT_SIZE` |
-| `local_buffer_size` | `MOONCAKE_LOCAL_BUFFER_SIZE` |
-| `device_name` | `MOONCAKE_DEVICE` — **deliberately left unset**, see below |
+The Mooncake configuration keys map to the following environment variables. Values here describe
+their sources, not a YAML file mounted in the container.
+
+```yaml
+local_hostname: <pod-ip>  # MOONCAKE_LOCAL_HOSTNAME, from the downward API
+metadata_server: <metadata-server>  # MOONCAKE_TE_META_DATA_SERVER
+master_server_address: <master-address>  # MOONCAKE_MASTER
+protocol: <protocol>  # MOONCAKE_PROTOCOL
+global_segment_size: <segment-size>  # MOONCAKE_GLOBAL_SEGMENT_SIZE
+local_buffer_size: <buffer-size>  # MOONCAKE_LOCAL_BUFFER_SIZE
+# device_name is deliberately unset: MOONCAKE_DEVICE
+```
 
 **`MOONCAKE_TE_META_DATA_SERVER` carries an underscore inside `META_DATA`.** It is not
 `MOONCAKE_TE_METADATA_SERVER`, and normalising it to the spelling that reads correctly **silently
@@ -290,7 +293,7 @@ degrades the metadata plane** rather than erroring.
 The client splits that key on commas into a device filter and nothing special-cases the string, so
 setting it produces a filter matching a device no host has. **Empty means "use every device found".**
 
-***`members[].extraArgs`* is the exception to the table above: it renders into the container's
+***`members[].extraArgs`* is the exception to the mapping above: it renders into the container's
 argv**, as `-D key=value`, not into an environment variable. *`leader.extraArgs`* does the same on the
 leader, as `-key=value`.
 
@@ -451,12 +454,34 @@ A VRAM group's container needs the vendor's **user-space driver**, which is what
 loads to allocate a segment at all. That driver is the node's and is never in the image, so it has to
 be brought in. Nothing is inferred; every route is written on the group:
 
-| Field | Purpose |
-|---|---|
-| *`members[].extraEnv`* | The vendor runtime's own trigger, where one exists — `NVIDIA_VISIBLE_DEVICES: all` makes the NVIDIA toolkit inject the driver and every device. Ascend has no counterpart. |
-| *`members[].runtimeClassName`* | The vendor container runtime named explicitly, for a cluster where it is not the default runtime. |
-| *`members[].hostPaths[]`* | The driver tree taken from the node directly, for a cluster running no vendor runtime at all. |
-| *`members[].securityContext`* | Privilege, when a mount alone is not enough to open what was mounted. |
+```yaml
+apiVersion: worker.gpustack.ai/v1
+kind: KVCacheBackend
+metadata:
+  name: shared-cache
+spec:
+  connection:
+    managed:
+      leader: {}  # replicas, allocationStrategy and multiTenancy default
+      members:
+        - nodeSelector:
+            kvcache-vram: "true"
+          medium: VRAM
+          capacityPerMember: 8Gi
+          extraEnv:  # NVIDIA toolkit trigger; Ascend has no counterpart.
+            - name: NVIDIA_VISIBLE_DEVICES
+              value: all  # Inject the driver and every device.
+          runtimeClassName: nvidia  # Explicit vendor runtime when it is not the default.
+          hostPaths:  # Mount the driver tree directly when no vendor runtime runs.
+            - path: /usr/local/Ascend/driver
+              mountPath: /usr/local/Ascend/driver
+              type: Directory
+              readOnly: true
+          securityContext:
+            privileged: true  # When a mount alone cannot open what was mounted.
+```
+
+These fields illustrate alternative access routes; select the route for the node's vendor.
 
 **Privilege alone does not cover this.** It opens the node's device tree under `/dev`, which is
 where the device nodes are and is **not** where the libraries are: Ascend's driver is under
@@ -480,16 +505,24 @@ Two worked groups. The NVIDIA one needs no mounts at all, because the container 
 driver once the variable tells it which devices to inject:
 
 ```yaml
-members:
-  - nodeSelector:
-      kvcache-vram: "true"
-    medium: VRAM
-    image: gpustack/mirrored-mooncake:0.3.13.post1-cuda13.0
-    # Leave this memory free in the engine's GPU memory budget.
-    capacityPerMember: 8Gi
-    extraEnv:
-      - name: NVIDIA_VISIBLE_DEVICES
-        value: all
+apiVersion: worker.gpustack.ai/v1
+kind: KVCacheBackend
+metadata:
+  name: shared-cache
+spec:
+  connection:
+    managed:
+      leader: {}  # replicas, allocationStrategy and multiTenancy default
+      members:
+        - nodeSelector:
+            kvcache-vram: "true"
+          medium: VRAM
+          image: gpustack/mirrored-mooncake:0.3.13.post1-cuda13.0
+          # Leave this memory free in the engine's GPU memory budget.
+          capacityPerMember: 8Gi
+          extraEnv:
+            - name: NVIDIA_VISIBLE_DEVICES
+              value: all
 ```
 
 That variable is honored only while the toolkit's
@@ -501,25 +534,33 @@ The Ascend one has no such variable, and this cluster runs no vendor runtime, so
 mounted from the node:
 
 ```yaml
-members:
-  - nodeSelector:
-      kvcache-vram: "true"
-    medium: VRAM
-    image: gpustack/mirrored-mooncake:0.3.13.post1-cann9.1-910b
-    capacityPerMember: 32Gi
-    hostPaths:
-      - path: /usr/local/Ascend/driver
-        mountPath: /usr/local/Ascend/driver
-        type: Directory
-        readOnly: true
-      - path: /usr/local/dcmi
-        mountPath: /usr/local/dcmi
-        type: Directory
-        readOnly: true
-      - path: /usr/local/bin/npu-smi
-        mountPath: /usr/local/bin/npu-smi
-        type: File
-        readOnly: true
+apiVersion: worker.gpustack.ai/v1
+kind: KVCacheBackend
+metadata:
+  name: shared-cache
+spec:
+  connection:
+    managed:
+      leader: {}  # replicas, allocationStrategy and multiTenancy default
+      members:
+        - nodeSelector:
+            kvcache-vram: "true"
+          medium: VRAM
+          image: gpustack/mirrored-mooncake:0.3.13.post1-cann9.1-910b
+          capacityPerMember: 32Gi
+          hostPaths:
+            - path: /usr/local/Ascend/driver
+              mountPath: /usr/local/Ascend/driver
+              type: Directory
+              readOnly: true
+            - path: /usr/local/dcmi
+              mountPath: /usr/local/dcmi
+              type: Directory
+              readOnly: true
+            - path: /usr/local/bin/npu-smi
+              mountPath: /usr/local/bin/npu-smi
+              type: File
+              readOnly: true
 ```
 
 **A VRAM group may also carry a [local disk tier](local-disk-tier.md), and that combination is
@@ -765,6 +806,12 @@ metadata:
 spec:
   connection:
     managed:
+      leader: {}  # replicas, allocationStrategy and multiTenancy default
+      members:
+        - nodeSelector:
+            kvcache-dram: "true"
+          medium: DRAM
+          capacityPerMember: 64Gi
       scaleIn:
         gracePeriodSeconds: 30  # 0 to 3600 seconds
 ```

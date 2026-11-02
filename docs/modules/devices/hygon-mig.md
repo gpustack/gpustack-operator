@@ -107,13 +107,20 @@ rather than merely hide the record.
 A partition request names **both** the family and the profile, and asks for exactly one of each:
 
 ```yaml
-resources:
-  limits:
-    hygon.com/dcu.partitioned: "1"
-    hygon.com/dcu.partitioned.mig-2g.15gb: "1"
-  requests:
-    hygon.com/dcu.partitioned: "1"
-    hygon.com/dcu.partitioned.mig-2g.15gb: "1"
+apiVersion: v1
+kind: Pod
+metadata:
+  name: hygon-partition
+spec:
+  containers:
+    - name: main
+      resources:
+        limits:
+          hygon.com/dcu.partitioned: "1"
+          hygon.com/dcu.partitioned.mig-2g.15gb: "1"
+        requests:
+          hygon.com/dcu.partitioned: "1"
+          hygon.com/dcu.partitioned.mig-2g.15gb: "1"
 ```
 
 Naming only the profile allocates nothing; naming only the family is refused at admission with a

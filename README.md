@@ -101,13 +101,23 @@ The queue name is an example; use the `ENTRANCE` of your chosen pool. See
 To give that Pod a network endpoint, put both requests in the same container:
 
 ```yaml
-resources:
-  limits:
-    nvidia.com/gpu: "1"
-    device.gpustack.ai/rdma.shared: "1"
+apiVersion: v1
+kind: Pod
+metadata:
+  name: gpu-workload
+  namespace: team-a
+  labels:
+    kueue.x-k8s.io/queue-name: gpustack-fnv64-c4680bb149644f1c
+spec:
+  containers:
+    - name: worker
+      resources:
+        limits:
+          nvidia.com/gpu: "1"
+          device.gpustack.ai/rdma.shared: "1"
 ```
 
-This replaces the `resources` block above. A shared endpoint suits a container that needs one
+Replace the `resources` block in the Pod above with the one shown here. A shared endpoint suits a container that needs one
 interface; use an exclusive request when it must be the adapter's only tenant. The node needs a
 usable endpoint, and NUMA alignment depends on its kubelet policy. See
 [RDMA Operations](./docs/modules/rdma/operations.md) for the other resource keys and checks.
@@ -134,6 +144,8 @@ For a role whose replica spans multiple Pods, request one zone for each replica 
 ```yaml
 apiVersion: worker.gpustack.ai/v1
 kind: ModelDeployment
+metadata:
+  name: qwen3-8b
 spec:
   roles:
     - name: server

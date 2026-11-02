@@ -142,6 +142,21 @@ into block style with two-space indentation, one field or list item per line. Do
 JSON-style objects or arrays in YAML examples, including commented alternatives. Empty collections
 use `{}` or `[]`; removing their delimiters would change them to null.
 
+REQUIRED: in `docs/`, use annotated Pretty YAML to describe Kubernetes custom resource (CR) API,
+configuration and status fields. Do not use field-by-field Markdown tables for these structures.
+Every YAML block that represents a Kubernetes resource (`Pod`, `Instance`, `ModelDeployment`,
+`ModelDeploymentScaler`, `ModelArtifact`, `ModelPrefetch`, `NodeModelStore`, `KVCacheBackend`,
+`KVCachePool`, `KVCachePoolBinding`, `Devices`, `DevicesRDMASelectionPolicy`, vendor CRs, etc.)
+must include the complete resource header (`apiVersion`, `kind` and `metadata`) rather than starting
+at an inner fragment such as `spec:`, `status:`, `resources:` or `volumes:`. Typed Kubernetes
+component configuration objects (such as `KubeletConfiguration`) must also include their
+`apiVersion` and `kind`. Generated Helm chart documentation is excluded. Tables for other purposes
+remain allowed.
+
+REQUIRED: when showing a CR configuration change, use a `diff` code block with the complete YAML
+header (`apiVersion`, `kind` and `metadata`) and the changed `spec` fields. Do not substitute a
+partial YAML fragment or a field table for the change.
+
 When formatting is requested, preserve field order, values, scalar types, quoting and intentional
 invalid examples. Preserve the facts in comments. Correct stale comments only after checking the
 current API, defaults or rendering code. A string whose consumer requires JSON and a captured JSON
@@ -273,6 +288,10 @@ It still does **not** read prose: everything below is on you.
       Headings are short, plain and free of unnecessary `The`; numbered headings use a colon.
       Step headings state reader actions. Update Contents and every inbound anchor after renaming.
       For a full sweep, account for every authored page, including pages that need no edit.
+- [ ] CR API, configuration and status structures use annotated Pretty YAML, not field tables.
+      Every Kubernetes resource YAML block and CR configuration `diff` block includes full
+      `apiVersion`, `kind` and `metadata` headers (not inner fragments). Generated Helm chart
+      documentation is excluded.
 - [ ] YAML comments describe the correct fields and current contracts. Check indentation, local
       alignment and commented alternatives; compare parsed values when formatting examples.
 - [ ] Read the diff once for the prose tells in `references/conventions.md` (*Prose tells*): not-X-but-Y

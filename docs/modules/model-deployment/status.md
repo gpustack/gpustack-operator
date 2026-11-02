@@ -515,17 +515,27 @@ of `Pod`s that form one logical serving replica of a role, and its identity is t
 ordinal and the current sorted member UID set. A replaced member is a different set, so a previous
 qualification does not apply to the new one.
 
-| Field | Meaning |
-|---|---|
-| `role` | the role the group belongs to |
-| `ordinal` | the replica slot the group occupies within its role |
-| `generation` | the sorted member UID set the answers below were taken against |
-| `state` | the group's eligibility state |
-| `reason` | the fact that holds the group, or that it qualifies |
-| `members` | the group's current members, ordered by seat |
-| `lastQualificationTime` | when the group last entered `Eligible` for this generation |
-| `serving` | the Router's answer for this group |
-| `servingReason` | why that answer is what it is, when it is not a confirmation |
+The following fragment illustrates the fields; it is not captured output:
+
+```yaml
+apiVersion: worker.gpustack.ai/v1
+kind: ModelDeployment
+metadata:
+  name: example-model
+status:
+  roles:
+    - groups:
+        - role: server  # Role the group belongs to.
+          ordinal: 0  # Replica slot within the role.
+          generation: <member-uid-set>  # Sorted member UID set for these answers.
+          state: Unknown  # Eligibility state.
+          reason: <reason>  # What holds the group, or that it qualifies.
+          members: []  # Current members, ordered by seat.
+          lastQualificationTime: <timestamp>  # Last entry into Eligible for this generation.
+          serving:  # Router's answer for this group.
+            state: Unknown
+          servingReason: <reason>  # Why the Router's answer is not a confirmation.
+```
 
 Each member entry carries the member `Pod`'s `name` and `uid`, the `seat` it claims, and its `ready`
 value: `True`, `False` or `Unknown`. A member nobody has reported on is `Unknown`, not `False`.

@@ -58,11 +58,39 @@ unreferenced and past grace.
 *`spec.placement`* picks the target set one of three ways, and admission and delivery share one
 expansion, so the two can never disagree about what a prefetch would warm:
 
-| Form | Field | Target set |
-|---|---|---|
-| by pool | *`placement.instanceTypes`* | every node carrying one of the named `InstanceType`s' flavors |
-| by node | *`placement.nodeSelector`* | every node the selector matches |
-| derived | both absent | the `InstanceType`s of the namespace's deployments that reference the artifact |
+```yaml
+apiVersion: worker.gpustack.ai/v1
+kind: ModelPrefetch
+metadata:
+  name: qwen-prefetch
+spec:
+  artifactRef:
+    name: qwen-7b  # A ModelArtifact in this namespace; its weights are what warms.
+  bindingRef:
+    name: store-binding  # A ModelStoreBinding in this namespace; its budget pays for the bytes.
+  placement:
+    instanceTypes:  # Every node carrying a named InstanceType's flavor.
+      - gpu-pool
+```
+
+```yaml
+apiVersion: worker.gpustack.ai/v1
+kind: ModelPrefetch
+metadata:
+  name: qwen-prefetch
+spec:
+  artifactRef:
+    name: qwen-7b  # A ModelArtifact in this namespace; its weights are what warms.
+  bindingRef:
+    name: store-binding  # A ModelStoreBinding in this namespace; its budget pays for the bytes.
+  placement:
+    nodeSelector:  # Every node matching this selector.
+      matchLabels:
+        accelerator: "true"
+```
+
+When both fields are absent, placement derives the `InstanceType`s from the namespace's
+deployments that reference the artifact.
 
 `Setting` both kinds is refused; the schema cannot see it because neither field is required.
 

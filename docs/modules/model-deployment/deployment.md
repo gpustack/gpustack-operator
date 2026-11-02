@@ -1,12 +1,10 @@
 # Model Deployment Configuration
 
-A `ModelDeployment` defines one or more inference-engine roles, each with its own replicas. The
-roles can share cached prefixes through a KV cache pool, form a direct *prefill/decode* pair, or do
-both.
+A `ModelDeployment` defines one or more inference-engine roles, each with its own replicas. The roles can share cached
+prefixes through a KV cache pool, form a direct *prefill/decode* pair, or do both.
 
-The operator creates `Pod`s for those replicas. Its `ModelDeployment` webhook checks the transport
-of a new KV cache binding; the generated `Pod`s bypass KV cache `Pod` injection. Ordinary `Pod`
-admission still applies to every replica.
+The operator creates `Pod`s for those replicas. Its `ModelDeployment` webhook checks the transport of a new KV cache
+binding; the generated `Pod`s bypass KV cache `Pod` injection. Ordinary `Pod` admission still applies to every replica.
 
 ## Contents
 
@@ -71,10 +69,8 @@ fate-sharing: they start together, they are admitted together, and they are repl
 it when one instance genuinely spans hosts (tensor, pipeline, expert or sequence parallelism).
 
 ***`size`* is editable, and the edit replaces the role's instances.** An instance is never reshaped in
-place: each old instance and its `Workload` are deleted first, and the replacement created in that
-slot is admitted fresh before the next old instance may be deleted. See
-[Rollout behavior](#rollout-behavior) for the cadence and its costs. Scaling without replacement is
-what *`replicas`* is for, and it disturbs nothing already running.
+place: each old instance and its `Workload` are deleted first, and the replacement created in that slot is admitted fresh before the next old instance may be deleted. See
+[Rollout behavior](#rollout-behavior) for the cadence and its costs. Scaling without replacement is what *`replicas`* is for, and it disturbs nothing already running.
 
 Above 1, the operator names each `Pod` of an instance `<deployment>-<role>-r<replica>-m<member>` and
 publishes them behind a headless `Service` per instance, so every `Pod` can address the others by a name
@@ -90,11 +86,9 @@ index, through three variables the operator owns on every engine:
 | `GPUSTACK_REPLICA_SIZE` | the role's *`size`* | a literal |
 | `GPUSTACK_MEMBER_INDEX` | `0` for the leader, then `1`, `2`, … | the downward API, off a label |
 
-They appear **only above `size: 1`**. The three names are nonetheless reserved at **every** size: a
-role that sets one of them in *`env`* is refused rather than silently overridden, at `size: 1` as well,
-so that widening an instance later cannot turn a deployment that was accepted into one that is
-refused. The index is read from a label so that every member of an instance carries the same
-container spec and only the label value differs.
+They appear **only above `size: 1`**. The three names are nonetheless reserved at **every** size: a role that sets one of them in *`env`* is refused rather than silently
+overridden, at `size: 1` as well, so that widening an instance later cannot turn a deployment that was accepted into one that is refused. The index is read from a label so that
+every member of an instance carries the same container spec and only the label value differs.
 
 **What the engine does with those facts is yours.** The operator composes no
 `--tensor-parallel-size` or equivalent, because the degrees do not decompose from *`size`* alone and
@@ -110,10 +104,9 @@ preference: a deleted member of an admitted group is held on the API server unti
 read them, so an override able to shadow them would make the feasibility check read a ledger that
 does not match reality.
 
-The accelerator request of **one `Pod`** lives in *`roles[].resources`*, whose fields mirror
-[Accelerator Requests](../devices/requests.md); at `size: 1` the `Pod` and the instance are the
-same request. CPU, memory and ephemeral storage are **derived** from the `InstanceType`'s per-unit
-resources scaled by the card count, so they are not expressible here.
+The accelerator request of **one `Pod`** lives in *`roles[].resources`*, whose fields mirror [Accelerator Requests](../devices/requests.md); at `size: 1` the `Pod` and the
+instance are the same request. CPU, memory and ephemeral storage are **derived** from the `InstanceType`'s per-unit resources scaled by the card count, so they are not
+expressible here.
 
 An optional *`resources.interface`* requests a whole number of fabric interfaces per engine `Pod`.
 One RDMA interface uses `device.gpustack.ai/rdma.shared`; more than one uses that count of
@@ -131,12 +124,21 @@ for the allocation and topology limits.
 
 ## Prefill and decode
 
-Several roles in one deployment are admitted **atomically**: a pool that cannot fit all of them leaves
-all of them queued, instead of admitting the prefillers and stranding them waiting for decoders that
-never arrive. Every replica of every role is its own `Pod` group, so the set is held together by an
-admission check this operator runs, which holds every group until the whole set has reserved quota.
+Several roles in one deployment are admitted **atomically**: a pool that cannot fit all of them leaves all of them queued, instead of admitting the prefillers and stranding them
+waiting for decoders that never arrive. Every replica of every role is its own `Pod` group, so the set is held together by an admission check this operator runs, which holds
+every group until the whole set has reserved quota.
 
 ```yaml
+apiVersion: worker.gpustack.ai/v1
+kind: ModelDeployment
+metadata:
+  name: example-model
+spec:
+  model:
+    name: Qwen/Qwen3-8B
+  engine:
+    name: vLLM
+    image: example/engine:tag  # Editable.
   roles:
     - name: prefill
       kind: Prefill  # Server (default), Prefill, Decode or Encode
@@ -176,21 +178,40 @@ a role's own address.
 Kueue reads the group membership of a replica from the labels and annotations the operator sets on
 every `Pod`.
 
-| Key | Value | Purpose |
-|---|---|---|
-| label `kueue.x-k8s.io/pod-group-name` | `gpustack-fnv64-<hash>` over the namespace, deployment, role and ordinal — always the hashed form, in every configuration | membership: it is what makes a replica its own group. The name is unique, not parseable; the ordinal travels in its own label |
-| label `kueue.x-k8s.io/queue-name` | the *`status.entrance`* **published by** the role's `InstanceType` | unchanged; Kueue refuses a group whose `Pod`s disagree on it. Read from the type so this operator and the `LocalQueue` it creates cannot disagree about the queue |
-| annotation `kueue.x-k8s.io/pod-group-total-count` | the role's *`size`* | how many `Pod`s Kueue waits for before composing anything. A replica-count change moves no total any member carries — a resize is a trim, not a rebuild. A *`size`* edit never edits a running group's total either: it replaces whole groups, and each new group carries its own |
-| annotation `kueue.x-k8s.io/role-hash` | the role's `name` | names the single PodSet the replica's group composes, which is what lets status attribute a `Workload` back to the role that asked for it. Every replica of a role names the same PodSet |
-| annotation `kueue.x-k8s.io/pod-group-serving` | `"true"` | an inference deployment never finishes; without it Kueue reclaims the quota of a replica that exited |
-| annotation `kueue.x-k8s.io/podset-required-topology` | *`roles[].topology.requiredLevel`*, when non-empty | asks Kueue to fit this replica's whole PodSet in one domain at the named hierarchy level |
-| label `app.kubernetes.io/component` | the role's `name` | unchanged; what a `Service` selects on and what *`status.roles[]`* is attributed by |
-| label `modeldeployment.gpustack.ai/role-kind` | the role's effective kind mapped to the router's spelling, so `server` when the API field is unset | what something in front of the replicas selects on to tell a prefiller from a decoder. Rendered for every deployment, a lone `server` included, so "no prefiller is running" and "this deployment does not label its roles" are different answers |
-| label `modeldeployment.gpustack.ai/pod-ordinal` | the replica's slot within its role, from 0 up | the per-replica identity: the group name derives from it, and a scale-down sheds the highest ordinals first |
-| label `modeldeployment.gpustack.ai/member-index` | which `Pod` of its instance this is, from 0 up — rendered at **every** size, one `Pod` included | what tells two `Pod`s of one instance apart, and what a `Service` selector matches to front only the leader above `size: 1`. A container reads its own index through this label rather than from a rendered value, which is what keeps one `Pod` template per instance |
-| annotation `modeldeployment.gpustack.ai/pod-spec-hash` | SHA-256 hex digest of explicit `ModelDeployment` fields and resolved external bindings | tracks user-declared spec and binding changes independently of operator-synthesized flags or worker `Setting` values |
-| annotation `modeldeployment.gpustack.ai/render-version` | positive integer (`"1"`, `"2"`, ...) | records the operator rendering baseline that built the `Pod`; checked against the minimum supported baseline and `modeldeployment.gpustack.ai/min-render-version` |
-| *`spec.nodeSelector`* | no topology value is added | Kueue selects the concrete domain through the flavor's `Topology` and writes its assignment; the deployment requests a level, not a region, zone, rack, or host value |
+The following metadata is operator-written. Values marked with angle brackets are illustrative.
+
+```yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  labels:
+    # Hash of namespace, deployment, role and ordinal; unique but not parseable.
+    kueue.x-k8s.io/pod-group-name: gpustack-fnv64-<hash>
+    # InstanceType status.entrance; all Pods in a group must agree.
+    kueue.x-k8s.io/queue-name: <instance-type-entrance>
+    app.kubernetes.io/component: server  # Role name; Service selection and status attribution.
+    modeldeployment.gpustack.ai/role-kind: server  # Effective kind in router spelling; unset kind maps to server.
+    modeldeployment.gpustack.ai/pod-ordinal: "0"  # Replica slot; scale-down sheds highest first.
+    modeldeployment.gpustack.ai/member-index: "0"  # Member index, present even at size 1.
+  annotations:
+    kueue.x-k8s.io/pod-group-total-count: "1"  # Role size; Kueue waits for this many Pods.
+    kueue.x-k8s.io/role-hash: server  # Role name; the group's single PodSet.
+    kueue.x-k8s.io/pod-group-serving: "true"  # Retain quota for serving groups that exit.
+    # Present when roles[].topology.requiredLevel is non-empty.
+    kueue.x-k8s.io/podset-required-topology: <required-level>
+    # SHA-256 hex digest of explicit deployment fields and resolved external bindings.
+    modeldeployment.gpustack.ai/pod-spec-hash: <digest>
+    modeldeployment.gpustack.ai/render-version: "1"  # Positive integer rendering baseline.
+```
+
+The role-kind label is present on every deployment, including a lone server. A replica-count change leaves the group total unchanged. A size edit replaces groups, each with its
+own total. The queue name comes from the type so it agrees with the operator-created `LocalQueue`. A `Service` can use the member index to select the leader above size 1.
+Containers read their own index from the label, allowing one `Pod` template per instance.
+
+The hash tracks user-declared spec and binding changes, independently of synthesized flags or worker
+`Setting` values. The render version is checked against the supported minimum and
+`modeldeployment.gpustack.ai/min-render-version`. The operator adds no topology value to
+`spec.nodeSelector`: Kueue selects the concrete domain from the flavor's `Topology`.
 
 The `role-hash` annotation is load-bearing: status joins a `Workload`'s PodSets to the roles by this
 name. Without it Kueue names the PodSet after a digest of the `Pod` specification, and that join
@@ -241,31 +262,59 @@ The requested semantics:
 reads the attached domain off this object alone. A wrong *`blockSize`* or `dtype` is silent cache
 pollution: writes succeed, reads succeed, and the tensors are wrong.
 
-For an operator-managed role, the operator renders a non-empty Binding domain as the engine's tenant
-identifier. It does not inspect the engine image version or decide whether that build supports
-tenant isolation. The tenant variable is operator-owned, so supplying it in *`env`* or *`extraArgs`* is
-refused: it is a second path to a value [the API already refuses](#inherited-reuse-domain).
+For an operator-managed role, the operator renders a non-empty Binding domain as the engine's tenant identifier. It does not inspect the engine image version or decide whether
+that build supports tenant isolation. The tenant variable is operator-owned, so supplying it in *`env`* or *`extraArgs`* is refused: it is a second path to a value [the API
+already refuses](#inherited-reuse-domain).
 
 A rendered tenant identifier does not by itself prove isolation. The operator records what it
 rendered, never what the container did with it: whether the build inside the image reads the value
 is decided by the image, not by the render.
 
-Users who require tenant isolation must select a compatible engine image and verify it themselves; see
-[Tenant compatibility](../kv-cache/injection.md#tenant-compatibility) for what
-the image must consume. The API states the requested boundary, while the engine enforces it
-(the same caveat [KV Cache Pools and Bindings](../kv-cache/pool.md#limitations) states for
-capacity).
+Users who require tenant isolation must select a compatible engine image and verify it themselves; see [Tenant compatibility](../kv-cache/injection.md#tenant-compatibility) for
+what the image must consume. The API states the requested boundary, while the engine enforces it (the same caveat [KV Cache Pools and Bindings](../kv-cache/pool.md#limitations)
+states for capacity).
 
 ## Three override tiers
 
 The engine command line is the fastest-moving thing in this design, so it has three escape tiers.
 Without one, users patch the rendered `Pod` and the reconcile loop silently overwrites them.
 
-| Tier | Field | Semantics |
-|---|---|---|
-| append | *`roles[].extraArgs`*, *`roles[].env`* | appended **after** the operator-synthesized arguments; a key the operator owns is refused, never merged |
-| overlay | the role's own `Pod` fields — *`image`*, *`imagePullPolicy`*, *`imagePullSecrets`*, `privileged`, *`ports`*, *`additionalVolumes`*, *`shmSize`*, *`terminationGracePeriodSeconds`*, *`startupTimeoutSeconds`* | the operator renders first, then merges this overlay on top |
-| take over | *`roles[].command`* | the user owns the whole argv; the operator synthesizes **no** engine argument and **no** client environment |
+```yaml
+apiVersion: worker.gpustack.ai/v1
+kind: ModelDeployment
+metadata:
+  name: example-model
+spec:
+  model:
+    name: Qwen/Qwen3-8B
+  engine:
+    name: vLLM
+    image: example/engine:tag  # Editable.
+  roles:
+    - name: server
+      instanceType: gpustack--nvidia-h20-linux-amd64
+      # Append after operator-synthesized arguments; operator-owned keys are refused.
+      extraArgs:
+        - --enable-prefix-caching
+      env:
+        - name: EXAMPLE
+          value: "true"
+      # Overlay: the operator renders first, then merges these Pod fields on top.
+      image: example/engine:tag
+      imagePullPolicy: IfNotPresent
+      imagePullSecrets: []
+      privileged: false
+      ports: []
+      additionalVolumes: []
+      shmSize: 32Gi
+      terminationGracePeriodSeconds: 30
+      startupTimeoutSeconds: 1800
+      # Take over the entire argv; no engine arguments or client environment are synthesized.
+      command:
+        - /usr/local/bin/server
+```
+
+The take-over `command` is an alternative to the append tier's `extraArgs`.
 
 A role's `Pod` fields sit on the role itself, unlike the `Instance` that keeps its `Pod` configuration inside an
 `InstanceTemplate`, and they are **mutable** — which is what makes a rollout possible at all.
@@ -302,10 +351,9 @@ Where the operator builds the argv, that refusal is real enforcement: the user c
 a shell, so the environment is the only path left. Why the key is owned at all is stated under
 [Operator-owned keys](#operator-owned-keys).
 
-That is one instance of a wider exposure, not its boundary. The boundary is stated once, under
-[Limitations](../kv-cache/pool.md#limitations), and tracked at
-[#168](https://github.com/gpustack/gpustack-operator/issues/168), whose own void conditions include a
-webhook-level one, so nothing here should be read as a claim about how that issue can be closed.
+That is one instance of a wider exposure, not its boundary. The boundary is stated once, under [Limitations](../kv-cache/pool.md#limitations), and tracked at
+[#168](https://github.com/gpustack/gpustack-operator/issues/168), whose own void conditions include a webhook-level one, so nothing here should be read as a claim about how that
+issue can be closed.
 
 ### Shared memory
 
@@ -322,8 +370,14 @@ kind: ModelDeployment
 metadata:
   name: qwen-chat
 spec:
+  model:
+    name: Qwen/Qwen3-8B
+  engine:
+    name: vLLM
+    image: example/engine:tag  # Editable.
   roles:
     - name: server
+      instanceType: gpustack--nvidia-h20-linux-amd64
       shmSize: 32Gi
 ```
 
@@ -331,11 +385,9 @@ An explicit `/dev/shm` mount in *`additionalVolumes`* takes precedence, includin
 The operator preserves that mount's capacity and backing.
 The default is a project capacity choice, not a universal engine requirement.
 
-The capacity limit does not reserve RAM or increase the `Pod`'s memory request.
-Used shared memory counts toward the main container's memory limit.
-Budget memory for both shared memory and the engine heap.
-Ray's object store may need more than `16Gi`; size the volume for the configured workload.
-Kubelet lowers the mount size when the `Pod` memory limit or node allocatable memory is smaller.
+The capacity limit does not reserve RAM or increase the `Pod`'s memory request. Used shared memory counts toward the main container's memory limit. Budget memory for both shared
+memory and the engine heap. Ray's object store may need more than `16Gi`; size the volume for the configured workload. Kubelet lowers the mount size when the `Pod` memory limit
+or node allocatable memory is smaller.
 
 Changing the rendered capacity follows ordinary role rollout behavior.
 Existing Elastic members keep their mounts; new or replacement `Pod`s use the current value.
@@ -362,11 +414,9 @@ backed by `/var/lib/gpustack/cache/<manufacturer>-<engine>/<model-identity>/tp<T
 on the node, and defaults `VLLM_CACHE_ROOT=/var/lib/gpustack/cache` (`vLLM`) or
 `SGLANG_CACHE_DIR=/var/lib/gpustack/cache` (`SGLang`).
 
-The same mount carries the engine's other startup caches, because each of them otherwise defaults
-to the container's writable layer and the pod's ephemeral-storage limit measures that layer. The
-operator defaults seven more names into it. Each names a byte-heavy cache subtree alone: the Hugging
-Face token and its datasets cache stay under `HF_HOME` on the container's own filesystem, because
-the mount is a host-backed directory every pod mounting the same path can read:
+The same mount carries the engine's other startup caches, because each of them otherwise defaults to the container's writable layer and the pod's ephemeral-storage limit measures
+that layer. The operator defaults seven more names into it. Each names a byte-heavy cache subtree alone: the Hugging Face token and its datasets cache stay under `HF_HOME` on the
+container's own filesystem, because the mount is a host-backed directory every pod mounting the same path can read:
 
 | Name | Points at | Holds |
 |---|---|---|
@@ -384,10 +434,9 @@ omits the default `gpustack-compile-cache` `HostPath` volume while preserving th
 The seven cache names above follow the same rule. Take-over roles (*`roles[].command`* non-empty)
 receive neither the default cache volume nor the defaulted cache variables.
 
-The seven names are defaults, not ownership: an entry in *`roles[].env`* replaces any of them. Like
-every other operator-synthesized entry they reach a `Pod` through its
-[render version](#render-version-and-upgrades), so they apply to newly created or replaced `Pod`s
-and a deployment rolls onto them with *`modeldeployment.gpustack.ai/min-render-version`*.
+The seven names are defaults, not ownership: an entry in *`roles[].env`* replaces any of them. Like every other operator-synthesized entry they reach a `Pod` through its [render
+version](#render-version-and-upgrades), so they apply to newly created or replaced `Pod`s and a deployment rolls onto them with
+*`modeldeployment.gpustack.ai/min-render-version`*.
 
 *`spec.roles[].startupTimeoutSeconds`* sets the role's startup budget in seconds (default `1800`,
 range `10`..`86400`), scaling *`startupProbe.failureThreshold`* as `ceil(startupTimeoutSeconds / 10)`
@@ -471,19 +520,16 @@ publishes topic `kv@`.
 and reports `KVEventsPublishing=False/PublisherDisabled`. The condition reports configuration rather
 than live traffic, and SGLang's rendering carries no publisher configuration to report.
 
-The wildcard addresses are bind addresses only. The role's `Service` hostname with ports 5557 and
-5558 is the dialable form published in status, and both ports are declared on the producing
-container. A decode-only role does not need to publish. A role with *`roles[].command`* receives none
-of this configuration because the operator does not own its command line.
+The wildcard addresses are bind addresses only. The role's `Service` hostname with ports 5557 and 5558 is the dialable form published in status, and both ports are declared on
+the producing container. A decode-only role does not need to publish. A role with *`roles[].command`* receives none of this configuration because the operator does not own its
+command line.
 
 Nothing is created beside the `Pod`, no RBAC for one is needed, and the configuration's lifetime is
 exactly the replica's. It is also part of the `Pod`'s spec hash, which is what moves the replicas when
 the pool's published endpoint changes.
 
-It sits under `/etc` rather than in the image's workspace so that a role's own volumes are
-unlikely to collide, but an overlay that mounts over that path replaces the configuration silently,
-and the owned `MOONCAKE_CONFIG_PATH` cannot protect against it. SGLang gets no file at all; its
-configuration travels entirely in the environment.
+It sits under `/etc` rather than in the image's workspace so that a role's own volumes are unlikely to collide, but an overlay that mounts over that path replaces the
+configuration silently, and the owned `MOONCAKE_CONFIG_PATH` cannot protect against it. SGLang gets no file at all; its configuration travels entirely in the environment.
 
 ## Role images
 
@@ -522,19 +568,15 @@ answers by deleting the newer `Pod`, the replacement itself.
 A replacement is a **fresh admission**, not a rider on the reservation the departed replica held:
 freeing the slot deletes that replica's `Workload`, and the reservation goes with it.
 
-The cadence guard therefore turns a healthy replica over only when every replica the role declares holds an
-admitted `Workload`; on a full pool a rollout waits for capacity rather than shedding replicas it
-cannot re-reserve. That gate holds back deleting the next healthy replica, not the configuration
-already waiting in a replacement slot: a queued replacement is superseded by a newer edit and
-admitted once, with the newer configuration — the obsolete configuration need never be admitted.
+The cadence guard therefore turns a healthy replica over only when every replica the role declares holds an admitted `Workload`; on a full pool a rollout waits for capacity
+rather than shedding replicas it cannot re-reserve. That gate holds back deleting the next healthy replica, not the configuration already waiting in a replacement slot: a queued
+replacement is superseded by a newer edit and admitted once, with the newer configuration — the obsolete configuration need never be admitted.
 
 The slot is reused, but its obsolete `Pod`s and `Workload` are deleted and replaced with fresh objects.
 
-A complete group still waiting for its first admission can also be replaced after a configuration edit.
-It uses the same single replacement slot and fresh admission rules.
-The operator selects this queued group before deleting an admitted sibling.
-This exception requires every member to remain behind Kueue's admission gate.
-An eviction, preemption, or earlier execution does not qualify as first admission.
+A complete group still waiting for its first admission can also be replaced after a configuration edit. It uses the same single replacement slot and fresh admission rules. The
+operator selects this queued group before deleting an admitted sibling. This exception requires every member to remain behind Kueue's admission gate. An eviction, preemption, or
+earlier execution does not qualify as first admission.
 
 ### Changed role configuration
 
@@ -543,27 +585,23 @@ When a role's configuration changes, the operator replaces its replicas. *`size`
 `Pod` fields do not.
 
 **One unresolved replacement per role.** A replacement's fresh admission gates deleting the next
-old replica, so a role turns over one replica at a time no matter how many of its fields one edit
-moved: a patch changing *`size`*, *`resources`* and *`command`* together is one rollout, not three. The
-role remembers which replica it is replacing until that replacement is admitted, so an operator
-restart resumes the same rollout instead of selecting a second replica.
+old replica, so a role turns over one replica at a time no matter how many of its fields one edit moved: a patch changing *`size`*, *`resources`* and *`command`* together is one
+rollout, not three. The role remembers which replica it is replacing until that replacement is admitted, so an operator restart resumes the same rollout instead of selecting a
+second replica.
 
 **A broken replica does not jump the queue.** An old replica that loses a member while its role's
-replacement is unresolved waits behind that replacement, then is rebuilt whole before another
-healthy old replica is rolled. A replacement that itself loses a member is recovered in its own
-slot. Recovery never mixes members: an interrupted replacement is completed with its own
-configuration, and an old survivor is never filled with new-configuration members.
+replacement is unresolved waits behind that replacement, then is rebuilt whole before another healthy old replica is rolled. A replacement that itself loses a member is recovered
+in its own slot. Recovery never mixes members: an interrupted replacement is completed with its own configuration, and an old survivor is never filled with new-configuration
+members.
 
 **The old replicas run the configuration they were created with until each is deleted for
-replacement.** Nothing reshapes a running instance: an instance of two `Pod`s keeps its two members,
-its leader address and its rank layout until it leaves. Cache injection, the unmanaged marker and
-retirement read the deployed `Pod`s, so a role part-way through a *`command`* edit serves through
-replicas in both modes, and what status claims is what is actually deployed.
+replacement.** Nothing reshapes a running instance: an instance of two `Pod`s keeps its two members, its leader address and its rank layout until it leaves. Cache injection, the
+unmanaged marker and retirement read the deployed `Pod`s, so a role part-way through a *`command`* edit serves through replicas in both modes, and what status claims is what is
+actually deployed.
 
-A role moving between a managed command and a takeover keeps each running `Pod`'s own mode. A managed
-replica keeps its qualification rules. Once qualification is active, an Unknown observation keeps
-existing eligibility without granting new eligibility; a definite fault still withdraws it. A role
-whose qualification was never activated keeps its legacy readiness rule.
+A role moving between a managed command and a takeover keeps each running `Pod`'s own mode. A managed replica keeps its qualification rules. Once qualification is active, an
+Unknown observation keeps existing eligibility without granting new eligibility; a definite fault still withdraws it. A role whose qualification was never activated keeps its
+legacy readiness rule.
 
 A takeover replica keeps its legacy `Service` membership and stays `unmanaged: true`. Routing
 membership does not establish engine health or cache qualification.
@@ -594,11 +632,9 @@ uninterrupted inference.
 **Siblings are untouched unless the edit reaches them.** An edit to one role's configuration never rewrites
 another role's groups: their `Workload`s, admission, member names and DNS stay as they are.
 
-The exception is the shared transfer document: on the vLLM-Ascend path the parallel degrees one role
-declares render into the document both roles carry, so a degree edit — through *`extraArgs`* or
-through a replaced *`command`* — rolls the pair, and until both halves converge the pair can fail to
-complete a transfer. See [Prefill and Decode](prefill-decode.md#direct-transfer-transport) for what
-that window means.
+The exception is the shared transfer document: on the vLLM-Ascend path the parallel degrees one role declares render into the document both roles carry, so a degree edit —
+through *`extraArgs`* or through a replaced *`command`* — rolls the pair, and until both halves converge the pair can fail to complete a transfer. See [Prefill and
+Decode](prefill-decode.md#direct-transfer-transport) for what that window means.
 
 **Admission rejudges a moved dependency, not the world.** The interface and pool-transport checks
 re-run for a role whose own interface request, type or command presence moved, for the roles whose
@@ -609,10 +645,8 @@ admitted verdict, so a drifted store is repaired at the pool, not refused at the
 A role carrying *`elasticEp`* is excluded from all of this: the profile pins that role's configuration, and
 width is the only thing that moves ([Elastic EP](elastic-ep.md#changing-the-width)).
 
-The cost rides on the block lease described under
-[Workload impact](../kv-cache/injection.md#workload-impact): a lease survives a long queue and does **not**
-survive an interrupted heartbeat, which is what a departing replica is. A departing replica
-therefore costs its siblings the blocks it held.
+The cost rides on the block lease described under [Workload impact](../kv-cache/injection.md#workload-impact): a lease survives a long queue and does **not** survive an
+interrupted heartbeat, which is what a departing replica is. A departing replica therefore costs its siblings the blocks it held.
 
 The deployment records an event naming the replica and the lease window on each of three paths
 (`ReplicaEvicted`, `ReplicaLeaving`, `ReplicaRestarted`), so an operator correlating a burst of
@@ -629,10 +663,8 @@ rendering changes are evaluated separately:
 | `modeldeployment.gpustack.ai/render-version` (on `Pod`) | operator-synthesized flags (`--host`, `--port`, `--served-model-name`, connector flags), defaulted environment entries, probes, `preStop` drain hook, sidecars (`routing-proxy`, `wait-for-worker`), implicit labels/annotations, and worker `Setting` values | upgrading to an operator release with a newer rendering baseline | keeps running replicas in place while `render-version` meets the effective minimum floor; applies to newly created or replaced `Pod`s |
 | `modeldeployment.gpustack.ai/min-render-version` (on `ModelDeployment`) | per-deployment render-version floor, clamped to `[minSupportedRenderVersion, currentRenderVersion]` | setting or raising the annotation on `ModelDeployment.metadata.annotations` | rolls replicas whose `render-version` is below the effective floor, one per role per pass |
 
-Set `modeldeployment.gpustack.ai/min-render-version` on the `ModelDeployment` to roll running
-replicas onto a newer rendering baseline on your own schedule; see
-[Model Deployment Status](status.md#status) for how `ReplicasUpToDate` reports older compatible
-replicas:
+Set `modeldeployment.gpustack.ai/min-render-version` on the `ModelDeployment` to roll running replicas onto a newer rendering baseline on your own schedule; see [Model Deployment
+Status](status.md#status) for how `ReplicasUpToDate` reports older compatible replicas:
 
 ```yaml
 apiVersion: worker.gpustack.ai/v1
@@ -671,11 +703,9 @@ Who frees the slot depends on the cause. Kueue's own preemption evicts the depar
 `Workload`, and that eviction removes the `Pod` and releases the slot; the replacement then follows on
 its own.
 
-A delete that lands on the `Pod` alone (a drain, a kubelet eviction, `kubectl delete pod`) leaves
-that replica's `Workload` standing, and the `Workload` is what holds the slot: the `Pod` stays readable on
-the API server, and the slot is freed only when that `Workload` is deleted — which the deployment's
-controller does when it replaces the replica. The replacement is created once no `Pod` for that
-ordinal reads on the API server, on the terms the callout above states.
+A delete that lands on the `Pod` alone (a drain, a kubelet eviction, `kubectl delete pod`) leaves that replica's `Workload` standing, and the `Workload` is what holds the slot:
+the `Pod` stays readable on the API server, and the slot is freed only when that `Workload` is deleted — which the deployment's controller does when it replaces the replica. The
+replacement is created once no `Pod` for that ordinal reads on the API server, on the terms the callout above states.
 
 The gate reads the ordinal and nothing else, which is why a scale-up is immediate: an ordinal nothing
 ever occupied has no `Pod` to wait out, so its replica is created on the first pass that sees it.
@@ -706,15 +736,47 @@ role set cannot be edited at all; admission refuses it.
 
 Fields that identify the deployment are frozen. Fields that control how it runs are editable:
 
-| Frozen | Editable |
-|---|---|
-| `model`, *`engine.name`*, *`kvCache`* | *`engine.image`*, *`kvTransfer`* |
-| *`router.name`* in place — the router block itself may be added or removed | *`router.replicas`*, *`router.extraArgs`* |
-| the set of roles, and each role's `name` and *`kind`* | *`roles[].replicas`*, *`roles[].size`* |
-| on a role carrying *`elasticEp`*: its *`size`*, *`instanceType`*, *`resources`* and *`command`* | *`roles[].instanceType`*, *`roles[].resources`*, *`roles[].command`* |
-| | *`roles[].extraArgs`*, *`roles[].env`* |
-| | the role's own `Pod` fields — *`image`*, *`imagePullPolicy`*, *`imagePullSecrets`*, `privileged`, *`ports`*, *`additionalVolumes`*, *`shmSize`*, *`terminationGracePeriodSeconds`*, *`startupTimeoutSeconds`* |
-| | labels and annotations |
+```yaml
+apiVersion: worker.gpustack.ai/v1
+kind: ModelDeployment
+metadata:
+  name: example-model
+  labels: {}       # Editable.
+  annotations: {}  # Editable.
+spec:
+  model:
+    name: Qwen/Qwen3-8B  # Frozen.
+  engine:
+    name: vLLM     # Frozen.
+    image: example/engine:tag  # Editable.
+  kvCache:         # Frozen.
+    poolRef:
+      name: cache-binding
+  kvTransfer: {}   # Editable.
+  router:          # The block may be added or removed.
+    name: llm-d-router  # Frozen in place.
+    replicas: 1    # Editable.
+    extraArgs: []  # Editable.
+  roles:           # The role set is frozen.
+    - name: server # Frozen.
+      kind: Server # Frozen.
+      replicas: 1  # Editable.
+      size: 1  # Editable, except on an elasticEp role.
+      instanceType: gpu-pool  # Editable, except on an elasticEp role.
+      resources: {}  # Editable, except on an elasticEp role.
+      command: []  # Editable, except on an elasticEp role.
+      extraArgs: []  # Editable.
+      env: []  # Editable.
+      image: example/engine:tag  # Editable Pod field.
+      imagePullPolicy: IfNotPresent  # Editable Pod field.
+      imagePullSecrets: []  # Editable Pod field.
+      privileged: false  # Editable Pod field.
+      ports: []  # Editable Pod field.
+      additionalVolumes: []  # Editable Pod field.
+      shmSize: 32Gi  # Editable Pod field.
+      terminationGracePeriodSeconds: 30  # Editable Pod field.
+      startupTimeoutSeconds: 1800  # Editable Pod field.
+```
 
 The role's configuration fields — *`size`*, *`instanceType`*, *`resources`*, *`command`* — are editable on the same
 terms as the `Pod` fields: each edit replaces that role's replicas one at a time, deleting each old
@@ -744,7 +806,21 @@ choosing its update rule.
 > *`kind`* still binds too: a role restated without its *`kind`* picks up the default *Server*, so
 > restating a prefiller that way is refused as a kind change rather than silently converting it.
 >
-> Change one field with a JSON patch, or restate the role in full:
+> Change one field with a JSON patch, or restate the role in full. For example, a JSON patch
+> changes the size from 1 to 2:
+>
+> ```diff
+>  apiVersion: worker.gpustack.ai/v1
+>  kind: ModelDeployment
+>  metadata:
+>    name: qwen-chat
+>    namespace: team-a
+>  spec:
+>    roles:
+>      - name: server
+> -      size: 1
+> +      size: 2
+> ```
 >
 > ```bash
 > kubectl patch modeldeployment qwen-chat -n team-a --type=json \
@@ -753,6 +829,11 @@ choosing its update rule.
 >
 > ```yaml
 > # --type=merge --patch-file=role.yaml: the whole role, not the field
+> apiVersion: worker.gpustack.ai/v1
+> kind: ModelDeployment
+> metadata:
+>   name: qwen-chat
+>   namespace: team-a
 > spec:
 >   roles:
 >     - name: server
@@ -766,11 +847,9 @@ choosing its update rule.
 
 ### One group per replica
 
-The grouping key is the **replica**: every replica of every role forms its own `Pod` group, derived from
-the role and the replica's ordinal within it, and Kueue composes one `Workload` per group with a
-declared total equal to the role's *`size`*. Two roles naming the same *`instanceType`* share nothing:
-a queue name is derived from the *`instanceType`* and one `Workload` carries one queue name, so rather
-than forbid the configuration the roles are simply not made to share.
+The grouping key is the **replica**: every replica of every role forms its own `Pod` group, derived from the role and the replica's ordinal within it, and Kueue composes one
+`Workload` per group with a declared total equal to the role's *`size`*. Two roles naming the same *`instanceType`* share nothing: a queue name is derived from the
+*`instanceType`* and one `Workload` carries one queue name, so rather than forbid the configuration the roles are simply not made to share.
 
 **What an edit costs is therefore the replica, not the group it used to share.** Growing or shrinking
 *`replicas`* adds or removes whole groups and leaves every surviving replica's group, `Workload` and
@@ -833,15 +912,11 @@ half and the validating half alike. Such a rule refuses when the type is absent,
 would let a deleted `InstanceType` block the very update that clears the deployment's finalizer, an
 object its own teardown could never release.
 
-The price is named rather than hidden: an edit made while a deployment is being deleted can move a
-role onto a mode its type does not offer, and nothing renders the result. Why that trade is necessary
-rather than merely tidy is in
-[Update validation on deletion](../devices/admission.md#update-validation-on-deletion).
+The price is named rather than hidden: an edit made while a deployment is being deleted can move a role onto a mode its type does not offer, and nothing renders the result. Why
+that trade is necessary rather than merely tidy is in [Update validation on deletion](../devices/admission.md#update-validation-on-deletion).
 
-The render, not admission, is where a not-yet-converged `InstanceType` shows up. Sizing a replica
-needs the `InstanceType`'s OBSERVED detail, and `InstanceType.status` has not converged on a freshly
-created object, so the render fails rather than admission refusing a perfectly legal deployment for
-losing a race against the `InstanceType` reconciler.
+The render, not admission, is where a not-yet-converged `InstanceType` shows up. Sizing a replica needs the `InstanceType`'s OBSERVED detail, and `InstanceType.status` has not
+converged on a freshly created object, so the render fails rather than admission refusing a perfectly legal deployment for losing a race against the `InstanceType` reconciler.
 
 A render-time failure reaches a reader as a `RenderFailed` warning event carrying the renderer's
 own message, because a pass that cannot build a replica aborts before writing any status.
@@ -849,10 +924,9 @@ own message, because a pass that cannot build a replica aborts before writing an
 ## Operating notes
 
 **Two notes apply to every workload on a pool, replicas included, and are stated once under**
-[Workload impact](../kv-cache/injection.md#workload-impact): the transfer engine binds ports nobody
-configured, so a `NetworkPolicy` or port reservation has to be a range rather than a list; and the
-"Local segment descriptor not found" line the transfer engine logs at startup is an `ERROR` that is
-benign on a client mounting no segment of its own, which is what every replica here is.
+[Workload impact](../kv-cache/injection.md#workload-impact): the transfer engine binds ports nobody configured, so a `NetworkPolicy` or port reservation has to be a range rather
+than a list; and the "Local segment descriptor not found" line the transfer engine logs at startup is an `ERROR` that is benign on a client mounting no segment of its own, which
+is what every replica here is.
 
 **A replica serves on port 8000** unless the role names its own container port. The
 `Service` and *`status.endpoint`* keep that external port. On a managed native-vLLM decoder the routing
