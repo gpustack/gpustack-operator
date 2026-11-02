@@ -99,8 +99,8 @@ Each allocation response names its granted *host channel adapters (HCAs)* and ex
 |---|---|
 | the granted HCA's verbs character device, `/dev/infiniband/uverbs<N>` | one per distinct granted HCA name |
 | the node-level connection-manager device, `/dev/infiniband/rdma_cm` | **one per response**, however many endpoints were granted, and only where the host has one |
-| `NCCL_IB_HCA` | sorted, unique granted HCA names, comma-joined with one leading `=` for exact matching |
-| `GPUSTACK_RDMA_DEVICES` | the same sorted, unique comma-joined names without `=` |
+| `NCCL_IB_HCA` | sorted, unique granted HCA names, comma-joined with one leading `=` for exact matching; each name carries a `:<port>` suffix when the active selection policy pins a port |
+| `GPUSTACK_RDMA_DEVICES` | the same sorted, unique comma-joined names without `=`, never carrying a port suffix |
 
 All three resource keys, `device.gpustack.ai/rdma`, `device.gpustack.ai/rdma.shared` and
 `device.gpustack.ai/rdma.partitioned`, inject `GPUSTACK_RDMA_DEVICES` and `NCCL_IB_HCA`.
@@ -118,6 +118,10 @@ echo "$GPUSTACK_RDMA_DEVICES"
 The example values are illustrative. Repeated tokens or endpoints naming one HCA produce one name
 and one `uverbs` mapping. This response deduplication leaves advertised IDs and capacity unchanged.
 Allocation fails if a granted HCA's device node cannot be resolved; it returns no partial grant.
+
+When the active `DevicesRDMASelectionPolicy` pins a port, `NCCL_IB_HCA` names each granted HCA
+with that port, as in `=mlx5_1:1,mlx5_10:1`, while `GPUSTACK_RDMA_DEVICES` stays bare. NCCL then
+opens the port the policy selected rather than any port of the adapter.
 
 When no HCA remains eligible for a grant, the response injects `GPUSTACK_RDMA_DEVICES=""` and
 `NCCL_IB_HCA=""` with no character device nodes. This can happen when the active
@@ -226,6 +230,29 @@ again:
 -    - mlx5_11
 ```
 
+To pin every selected adapter to one physical port, add `port` to the same policy:
+
+```diff
+ apiVersion: worker.gpustack.ai/v1
+ kind: DevicesRDMASelectionPolicy
+ metadata:
+   name: b300-compute-hcas
+ spec:
+   nodeSelector:
+     matchLabels:
+       gpu.gpustack.ai/model: b300
+   include:
+     - mlx5_4
+     - mlx5_5
+     - mlx5_6
+     - mlx5_7
+     - mlx5_8
+     - mlx5_9
+     - mlx5_10
++  # 1-based physical port; every selected HCA must carry it on the node.
++  port: 1
+```
+
 Read selection status on the node's `Devices` resource. This illustrative excerpt shows the result
 when `mlx5_4..mlx5_11` are selected:
 
@@ -269,6 +296,16 @@ Setting both `include` and `exclude` is invalid, even when their names do not ov
 HCA in `include` or `exclude` that is absent from a matched node's complete verbs inventory is
 also invalid on that node and fails it closed, so a selector spanning nodes with different HCA sets
 must not name adapters missing on any matched node.
+
+An optional `port` further restricts the selection to one physical RDMA port per adapter. The
+number is 1-based; zero and negatives are refused at admission. Every HCA the policy selects must
+observe that port in the node's verbs inventory, so a policy whose selected devices do not carry
+it fails the node closed, like any other invalid resolution. Excluded and externally owned devices
+are never asked to carry the port.
+
+With `port` set, `GPUSTACK_RDMA_DEVICES` still lists bare HCA names, and the NCCL filter names
+each granted HCA with that port. Omit the field, or set it to null, to leave every active port of
+each selected HCA eligible.
 
 Multiple policies matching a node conflict; no priority or merge rule selects one. A policy cannot
 override an externally owned device's boundary.

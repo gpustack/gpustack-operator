@@ -1180,6 +1180,13 @@ func crd_gpustack_api_worker_v1alpha1_DevicesRDMASelectionPolicy() *v1.CustomRes
 											},
 											Nullable: true,
 										},
+										"port": {
+											Description: "Port restricts selected HCAs to this 1-based physical RDMA port.\nWhen omitted, all active ports on each selected HCA are eligible.",
+											Type:        "integer",
+											Format:      "int32",
+											Minimum:     ptr.To[float64](1),
+											Nullable:    true,
+										},
 									},
 									XValidations: []v1.ValidationRule{
 										{

@@ -18,6 +18,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/sets"
 	klog "k8s.io/klog/v2"
 	deviceplugin "k8s.io/kubelet/pkg/apis/deviceplugin/v1beta1"
+	"k8s.io/utils/ptr"
 	ctrlcli "sigs.k8s.io/controller-runtime/pkg/client"
 	ctrlfake "sigs.k8s.io/controller-runtime/pkg/client/fake"
 	ctrlintercept "sigs.k8s.io/controller-runtime/pkg/client/interceptor"
@@ -1160,5 +1161,75 @@ func TestRDMAServer_GetPreferredAllocation(t *testing.T) {
 			})
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "convert available device id")
+	})
+}
+
+// TestRDMAServer_ListAndWatch_PortPinnedHealth pins the advertisement under a selection that
+// pins a port: a record-carried HCA whose pinned port is down reports Unhealthy though the
+// record's own verdict reads OK, the same HCA under the other port pinned reports Healthy, and
+// a synthesized HCA with no observation of the pinned port stays Healthy on the unverified
+// record — nothing to read is not a verdict of failure. Tokens are always kept, never dropped.
+func TestRDMAServer_ListAndWatch_PortPinnedHealth(t *testing.T) {
+	const nodeName = "node-rdma-port-health"
+
+	inv := func() *device.RDMASnapshot {
+		return &device.RDMASnapshot{
+			Complete: true,
+			Revision: "rev-port",
+			Devices: []device.RDMADevice{
+				{Name: "mlx5_0", Owner: device.RDMADeviceOwnerGPUStack, Ports: []device.RDMAPort{
+					{Number: 1, State: "ACTIVE", PhysicalState: "LinkUp"},
+					{Number: 2, State: "DOWN", PhysicalState: "LinkDown"},
+				}},
+				{Name: "mlx5_9", Owner: device.RDMADeviceOwnerGPUStack, Ports: []device.RDMAPort{
+					{Number: 1, State: "ACTIVE", PhysicalState: "LinkUp"},
+				}},
+			},
+		}
+	}
+	// ib0's record verdict reads OK on both runs; only the pinned port differs.
+	rec := &DevicesReconciler{
+		NodeName: nodeName,
+		Client: nodeFixture(rdmaDevices(nodeName,
+			wholeFunctionIface("ib0", "0", "mlx5_0", &workercore.DeviceInterfaceLink{State: workercore.DeviceInterfaceLinkStateOK}),
+		)),
+		RDMAInterfaceInventory: inv,
+	}
+
+	t.Run("the pinned port down marks its HCAs unhealthy and keeps the rest", func(t *testing.T) {
+		rec.applyRDMASelection(RDMAPolicyResolution{
+			Status:   RDMAPolicyResolutionPolicy,
+			Selected: []string{"mlx5_0", "mlx5_9"},
+			Port:     ptr.To(int32(2)),
+		})
+		resp, err := rdmaTestServer(t, workercore.DeviceAllocationModeShared, rec).
+			getListAndWatchResponse(context.Background())
+		require.NoError(t, err)
+		require.Len(t, resp.Devices, 2*nodefeature.RDMAEndpointPoolSize)
+		for _, d := range resp.Devices {
+			switch {
+			case strings.HasPrefix(d.ID, "ib0:"):
+				assert.Equal(t, deviceplugin.Unhealthy, d.Health, "token %s", d.ID)
+			case strings.HasPrefix(d.ID, "mlx5_9:"):
+				assert.Equal(t, deviceplugin.Healthy, d.Health, "token %s: no observation of the pinned port is unverified, not failed", d.ID)
+			default:
+				t.Fatalf("unexpected token %s", d.ID)
+			}
+		}
+	})
+
+	t.Run("the other port pinned marks the same tokens healthy", func(t *testing.T) {
+		rec.applyRDMASelection(RDMAPolicyResolution{
+			Status:   RDMAPolicyResolutionPolicy,
+			Selected: []string{"mlx5_0", "mlx5_9"},
+			Port:     ptr.To(int32(1)),
+		})
+		resp, err := rdmaTestServer(t, workercore.DeviceAllocationModeShared, rec).
+			getListAndWatchResponse(context.Background())
+		require.NoError(t, err)
+		require.Len(t, resp.Devices, 2*nodefeature.RDMAEndpointPoolSize)
+		for _, d := range resp.Devices {
+			assert.Equal(t, deviceplugin.Healthy, d.Health, "token %s", d.ID)
+		}
 	})
 }

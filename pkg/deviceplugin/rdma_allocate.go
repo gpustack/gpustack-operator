@@ -80,10 +80,11 @@ func (s *rdmaServer) Allocate(ctx context.Context, req *AllocateRequest) (*Alloc
 // allocateContainer builds one container's response from the granted device IDs: the endpoints
 // they name under the family being served, the verbs character device each granted HCA resolves
 // to at this moment, the node-level connection manager where the host carries one, the NCCL
-// variable naming the granted HCAs as an exact filter, and the plain variable naming the same
-// HCAs. An endpoint whose HCA the active selection withholds — unselected or externally owned —
-// grants nothing, and a grant that then has nothing left to hand over is answered with the
-// variables carried empty rather than an error.
+// variable naming the granted HCAs as an exact filter — suffixed with the pinned port when the
+// active selection pins one — and the plain variable naming the same HCAs. An endpoint whose HCA
+// the active selection withholds — unselected or externally owned — grants nothing, and a grant
+// that then has nothing left to hand over is answered with the variables carried empty rather
+// than an error.
 //
 // The inventory is captured once and every grant is resolved against that one capture, so a
 // detector write landing mid-construction corrects the next response but cannot rearrange this
@@ -135,12 +136,25 @@ func (s *rdmaServer) allocateContainer(
 		}, nil
 	}
 
+	// The plain key always carries the bare HCA names. The NCCL filter carries them with the
+	// port the active selection pins, when it pins one: verbs addresses one port of an
+	// adapter as name:N, and a grant earned under a pinned port is a grant for that port, so
+	// a bare name would leave NCCL free to open another port of the same adapter. No pinned
+	// port keeps the filter bare, exactly as before.
 	names := strings.Join(grants, ",")
+	nccl := "=" + names
+	if snap.port != nil {
+		withPort := make([]string, 0, len(grants))
+		for _, name := range grants {
+			withPort = append(withPort, fmt.Sprintf("%s:%d", name, *snap.port))
+		}
+		nccl = "=" + strings.Join(withPort, ",")
+	}
 	ctrResp := &ContainerAllocateResponse{
 		Envs: map[string]string{
 			// The leading '=' switches NCCL to exact name matching, so mlx5_1 stops also
 			// matching mlx5_10; the plain key carries the names without it.
-			ncclIbHCAEnv:   "=" + names,
+			ncclIbHCAEnv:   nccl,
 			rdmaDevicesEnv: names,
 		},
 	}

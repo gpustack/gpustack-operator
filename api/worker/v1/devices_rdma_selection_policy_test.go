@@ -25,6 +25,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/validation/field"
 	celconfig "k8s.io/apiserver/pkg/apis/cel"
 	k8sapplymeta "k8s.io/client-go/applyconfigurations/meta/v1"
+	"k8s.io/utils/ptr"
 	smdfield "sigs.k8s.io/structured-merge-diff/v6/fieldpath"
 	smdmerge "sigs.k8s.io/structured-merge-diff/v6/merge"
 	smdtyped "sigs.k8s.io/structured-merge-diff/v6/typed"
@@ -33,29 +34,35 @@ import (
 	applyv1alpha1 "gpustack.ai/gpustack/pkg/kubeclients/applyconfiguration/worker/v1alpha1"
 )
 
-// These tests cover the wire contract for the selector and the two atomic HCA lists.
+// These tests cover the wire contract for the selector, the two atomic HCA lists, and the
+// optional 1-based port.
 
 type rdmaSelState struct {
 	selectorSet    bool
 	includePresent bool
 	names          []string
 	exclude        []string
+	port           *int32
 }
 
 func rdmaSelStateOfPublic(p *DevicesRDMASelectionPolicy) rdmaSelState {
-	return rdmaSelStateFrom(p.Spec.NodeSelector, p.Spec.Include, p.Spec.Exclude)
+	return rdmaSelStateFrom(p.Spec.NodeSelector, p.Spec.Include, p.Spec.Exclude, p.Spec.Port)
 }
 
 func rdmaSelStateOfInternal(p *workercore.DevicesRDMASelectionPolicy) rdmaSelState {
-	return rdmaSelStateFrom(p.Spec.NodeSelector, p.Spec.Include, p.Spec.Exclude)
+	return rdmaSelStateFrom(p.Spec.NodeSelector, p.Spec.Include, p.Spec.Exclude, p.Spec.Port)
 }
 
 func rdmaSelStateFrom(
 	selector *meta.LabelSelector,
 	include []string,
 	exclude []string,
+	port *int32,
 ) rdmaSelState {
-	return rdmaSelState{selectorSet: selector != nil, includePresent: len(include) > 0, names: include, exclude: exclude}
+	return rdmaSelState{
+		selectorSet: selector != nil, includePresent: len(include) > 0,
+		names: include, exclude: exclude, port: port,
+	}
 }
 
 func (s rdmaSelState) assertEqual(t *testing.T, want rdmaSelState, label string) {
@@ -64,6 +71,7 @@ func (s rdmaSelState) assertEqual(t *testing.T, want rdmaSelState, label string)
 	assert.Equal(t, want.includePresent, s.includePresent, "%s: include presence is the restriction switch", label)
 	assert.Equal(t, rdmaSelStringList(want.names), rdmaSelStringList(s.names), "%s: include names (nil equals empty)", label)
 	assert.Equal(t, rdmaSelStringList(want.exclude), rdmaSelStringList(s.exclude), "%s: exclude (nil equals empty)", label)
+	assert.Equal(t, want.port, s.port, "%s: port (nil equals unset, value otherwise)", label)
 }
 
 // rdmaSelStringList normalizes nil and empty slices for wire comparisons.
@@ -195,6 +203,44 @@ func rdmaWireCases() []rdmaWireCase {
 			want:      rdmaSelState{selectorSet: true, includePresent: true, names: []string{strings.Repeat("m", 65)}},
 			wantCRDOk: true,
 			wantCELOk: false,
+		},
+		{
+			name:      "port-set-is-accepted",
+			spec:      `{"nodeSelector":{},"port":2}`,
+			want:      rdmaSelState{selectorSet: true, port: ptr.To(int32(2))},
+			wantCRDOk: true,
+			wantCELOk: true,
+		},
+		{
+			name:      "port-null-is-unset",
+			spec:      `{"nodeSelector":{},"port":null}`,
+			want:      rdmaSelState{selectorSet: true},
+			wantCRDOk: true,
+			wantCELOk: true,
+		},
+		{
+			// The structural minimum is what refuses zero: the schema rejects the object
+			// before any rule runs, so CEL is never asked about it.
+			name:      "port-zero-rejected-by-schema",
+			spec:      `{"nodeSelector":{},"port":0}`,
+			want:      rdmaSelState{selectorSet: true, port: ptr.To(int32(0))},
+			wantCRDOk: false,
+			wantCELOk: true,
+		},
+		{
+			name:      "port-negative-rejected-by-schema",
+			spec:      `{"nodeSelector":{},"port":-1}`,
+			want:      rdmaSelState{selectorSet: true, port: ptr.To(int32(-1))},
+			wantCRDOk: false,
+			wantCELOk: true,
+		},
+		{
+			// The port rides beside either filter list without interacting with them.
+			name:      "port-beside-include-is-accepted",
+			spec:      `{"nodeSelector":{},"include":["mlx5_4"],"port":1}`,
+			want:      rdmaSelState{selectorSet: true, includePresent: true, names: []string{"mlx5_4"}, port: ptr.To(int32(1))},
+			wantCRDOk: true,
+			wantCELOk: true,
 		},
 	}
 }
@@ -372,6 +418,32 @@ func TestRDMASelectionPolicyWireProtobuf(t *testing.T) {
 				return rdmaSelState{selectorSet: true}
 			},
 		},
+		{
+			name: "port-set-survives",
+			build: func() *workercore.DevicesRDMASelectionPolicy {
+				return &workercore.DevicesRDMASelectionPolicy{Spec: workercore.DevicesRDMASelectionPolicySpec{
+					NodeSelector: &meta.LabelSelector{},
+					Port:         ptr.To(int32(2)),
+				}}
+			},
+			wantState: func(p *workercore.DevicesRDMASelectionPolicy) rdmaSelState {
+				return rdmaSelState{selectorSet: true, port: ptr.To(int32(2))}
+			},
+		},
+		{
+			// Proto2 optional presence: a stored pointer to zero round-trips as a pointer
+			// to zero, so forwarding cannot silently turn an explicit port into no port.
+			name: "port-zero-presence-survives",
+			build: func() *workercore.DevicesRDMASelectionPolicy {
+				return &workercore.DevicesRDMASelectionPolicy{Spec: workercore.DevicesRDMASelectionPolicySpec{
+					NodeSelector: &meta.LabelSelector{},
+					Port:         ptr.To(int32(0)),
+				}}
+			},
+			wantState: func(p *workercore.DevicesRDMASelectionPolicy) rdmaSelState {
+				return rdmaSelState{selectorSet: true, port: ptr.To(int32(0))}
+			},
+		},
 	}
 
 	for _, c := range cases {
@@ -420,6 +492,10 @@ func TestRDMASelectionPolicyWireConversion(t *testing.T) {
 		{selectorSet: true, exclude: []string{}},
 		{selectorSet: true, exclude: []string{"mlx5_5"}},
 		{selectorSet: true, includePresent: true, names: []string{"mlx5_4", "mlx5_5"}, exclude: []string{"mlx5_5"}},
+		{selectorSet: true, port: ptr.To(int32(2))},
+		{selectorSet: true, includePresent: true, names: []string{"mlx5_4"}, port: ptr.To(int32(1))},
+		// Presence, not just value: a stored explicit zero must survive the pair as zero.
+		{selectorSet: true, port: ptr.To(int32(0))},
 	}
 
 	for i, want := range cases {
@@ -433,6 +509,7 @@ func TestRDMASelectionPolicyWireConversion(t *testing.T) {
 				}(),
 				Include: want.names,
 				Exclude: want.exclude,
+				Port:    want.port,
 			}}
 
 			t.Run("internal-to-public", func(t *testing.T) {

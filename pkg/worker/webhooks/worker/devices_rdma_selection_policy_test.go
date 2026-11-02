@@ -7,6 +7,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/utils/ptr"
 
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
 	"gpustack.ai/gpustack/pkg/webhook"
@@ -102,6 +103,27 @@ func TestValidateDevicesRDMASelectionPolicy(t *testing.T) {
 		{name: "underscore and digit names are valid", edit: func(p *workercore.DevicesRDMASelectionPolicy) {
 			p.Spec.Include = []string{"mlx5_1", "mlx5_10", "hns1", "siw_0"}
 		}, valid: true},
+		{name: "port one is valid", edit: func(p *workercore.DevicesRDMASelectionPolicy) {
+			p.Spec.Port = ptr.To(int32(1))
+		}, valid: true},
+		{name: "port two beside include is valid", edit: func(p *workercore.DevicesRDMASelectionPolicy) {
+			p.Spec.Include = []string{"mlx5_4"}
+			p.Spec.Port = ptr.To(int32(2))
+		}, valid: true},
+		{name: "port two beside exclude is valid", edit: func(p *workercore.DevicesRDMASelectionPolicy) {
+			p.Spec.Exclude = []string{"mlx5_4"}
+			p.Spec.Port = ptr.To(int32(2))
+		}, valid: true},
+		{name: "port zero is invalid", edit: func(p *workercore.DevicesRDMASelectionPolicy) {
+			p.Spec.Port = ptr.To(int32(0))
+		}},
+		{name: "negative port is invalid", edit: func(p *workercore.DevicesRDMASelectionPolicy) {
+			p.Spec.Port = ptr.To(int32(-1))
+		}},
+		{name: "port zero beside include is invalid", edit: func(p *workercore.DevicesRDMASelectionPolicy) {
+			p.Spec.Include = []string{"mlx5_4"}
+			p.Spec.Port = ptr.To(int32(0))
+		}},
 	}
 
 	for _, tt := range tests {

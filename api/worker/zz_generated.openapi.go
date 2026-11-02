@@ -5515,6 +5515,14 @@ func schema_gpustack_api_worker_v1alpha1_DevicesRDMASelectionPolicySpec(ref comm
 							},
 						},
 					},
+					"port": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Port restricts selected HCAs to this 1-based physical RDMA port. When omitted, all active ports on each selected HCA are eligible.",
+							Minimum:     ptr.To[float64](1),
+							Type:        []string{"integer"},
+							Format:      "int32",
+						},
+					},
 				},
 				Required: []string{"nodeSelector"},
 			},

@@ -30,6 +30,7 @@ import (
 	"k8s.io/client-go/rest"
 	k8stesting "k8s.io/client-go/testing"
 	toolscache "k8s.io/client-go/tools/cache"
+	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
 	ctrlcache "sigs.k8s.io/controller-runtime/pkg/cache"
 	ctrlcli "sigs.k8s.io/controller-runtime/pkg/client"
@@ -1887,4 +1888,102 @@ func TestRDMASelectionObserver_StatusPublishFailureStillAppliesSelection(t *test
 	require.NotNil(t, got.Status.Interfaces)
 	require.NotNil(t, got.Status.Interfaces.RDMASelectionPolicy.PolicyRef)
 	assert.Equal(t, "uid-a", got.Status.Interfaces.RDMASelectionPolicy.PolicyRef.UID)
+}
+
+// TestRDMASelectionObserver_PinnedPortInventoryChangeNotifies pins that a pinned port's health
+// reaching the node wakes the RDMA streams even when the selected names and the policy port are
+// unchanged: port 1 failing and recovering advances the verbs observation revision alone, and
+// each advance is one notification whose rebuilt advertisement carries the new verdict. The
+// record's own interface verdict never moves — port 2 stays active throughout — so the
+// notification can only come from the tracked observation revision.
+func TestRDMASelectionObserver_PinnedPortInventoryChangeNotifies(t *testing.T) {
+	ctx := context.Background()
+	devs := observationDevices()
+	devs.Spec.Interfaces = []workercore.DeviceInterface{
+		wholeFunctionIface("ib0", "0", "mlx5_0", &workercore.DeviceInterfaceLink{State: workercore.DeviceInterfaceLinkStateOK}),
+	}
+	policy := selectionPolicy("compute-hcas", "uid-a", 3, func(p *workercore.DevicesRDMASelectionPolicy) {
+		p.Spec.Port = ptr.To(int32(1))
+	})
+	// The verbs observation is a holder the test flips in place, the way a detector pass
+	// replaces the facts behind the same pointer the observer and reconciler read.
+	snap := &device.RDMASnapshot{
+		Complete: true,
+		Revision: "rev-1",
+		Devices: []device.RDMADevice{{
+			Name:  "mlx5_0",
+			Owner: device.RDMADeviceOwnerGPUStack,
+			Ports: []device.RDMAPort{
+				{Number: 1, State: "ACTIVE", PhysicalState: "LinkUp"},
+				{Number: 2, State: "ACTIVE", PhysicalState: "LinkUp"},
+			},
+		}},
+	}
+	obs, _ := newSelectionObserver(t, nil, &observerClientOptions{}, devs, selectionNode(), policy)
+	obs.RDMAInterfaceInventory = func() *device.RDMASnapshot { return snap }
+	rec := &DevicesReconciler{
+		NodeName:               selectionNodeName,
+		Client:                 obs.Client,
+		RDMAInterfaceInventory: obs.RDMAInterfaceInventory,
+	}
+	obs.Reconciler = rec
+
+	notifier, release := rec.getReconcileNotifier(rdmaFamilyName, workercore.DeviceAllocationModeExclusive)
+	defer release()
+
+	advHealth := func(t *testing.T) string {
+		t.Helper()
+		srv := rdmaTestServer(t, workercore.DeviceAllocationModeExclusive, rec)
+		adv, err := srv.getListAndWatchResponse(ctx)
+		require.NoError(t, err)
+		require.Len(t, adv.Devices, 1)
+		return adv.Devices[0].Health
+	}
+	expectNotified := func(t *testing.T) {
+		t.Helper()
+		select {
+		case <-notifier:
+		case <-time.After(15 * time.Second):
+			t.Fatal("an observation the applied selection derives its health from advanced, but no RDMA ListAndWatch notification was sent")
+		}
+	}
+	expectQuiet := func(t *testing.T) {
+		t.Helper()
+		select {
+		case <-notifier:
+			t.Fatal("a reconcile over an unchanged selection and observation must not notify again")
+		default:
+		}
+	}
+
+	// The policy applies: one initial notification, and the pinned port 1 reads healthy.
+	_, err := reconcileSelection(t, obs)
+	require.NoError(t, err)
+	expectNotified(t)
+	assert.Equal(t, "Healthy", advHealth(t))
+
+	// Port 1 fails while port 2 stays active, so the record's own verdict never changes and
+	// the selected names and pinned port do not move either. The revision advance alone must
+	// wake the stream, and the rebuilt advertisement must withhold the HCA.
+	snap.Devices[0].Ports[0].State = "DOWN"
+	snap.Devices[0].Ports[0].PhysicalState = "LinkDown"
+	snap.Revision = "rev-2"
+	_, err = reconcileSelection(t, obs)
+	require.NoError(t, err)
+	expectNotified(t)
+	assert.Equal(t, "Unhealthy", advHealth(t))
+
+	// Port 1 recovers: the same wake path, and the advertisement returns to healthy.
+	snap.Devices[0].Ports[0].State = "ACTIVE"
+	snap.Devices[0].Ports[0].PhysicalState = "LinkUp"
+	snap.Revision = "rev-3"
+	_, err = reconcileSelection(t, obs)
+	require.NoError(t, err)
+	expectNotified(t)
+	assert.Equal(t, "Healthy", advHealth(t))
+
+	// A reconcile over an unchanged selection and observation notifies nothing further.
+	_, err = reconcileSelection(t, obs)
+	require.NoError(t, err)
+	expectQuiet(t)
 }

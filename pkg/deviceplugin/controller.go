@@ -18,6 +18,7 @@ import (
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/sets"
+	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
 	ctrlbuilder "sigs.k8s.io/controller-runtime/pkg/builder"
 	ctrlcli "sigs.k8s.io/controller-runtime/pkg/client"
@@ -677,32 +678,52 @@ func (r *DevicesReconciler) captureRDMAInterfaceSnapshot(devs *workercore.Device
 // RDMA ListAndWatch subscribers when the effective candidate set changes.
 //
 // When the resolution is Policy or Default, the resolved candidate set becomes active immediately
-// for subsequent advertisements and allocations. When the resolution is Invalid, Conflict, or
-// Unknown, the selection fails closed: any previously applied selection is replaced with an
-// empty set, so every HCA is withheld — advertisements turn unhealthy and new grants carry
-// nothing — until a valid resolution lands. Before the first applied selection, every
-// non-external candidate stays eligible under the default rules.
+// for subsequent advertisements and allocations, together with the resolved port restriction when
+// the policy pins one. When the resolution is Invalid, Conflict, or Unknown, the selection fails
+// closed: any previously applied selection is replaced with an empty set carrying no port, so
+// every HCA is withheld — advertisements turn unhealthy and new grants carry nothing — until a
+// valid resolution lands. Before the first applied selection, every non-external candidate stays
+// eligible under the default rules.
+//
+// The verbs observation the resolution was computed from is tracked alongside the set and the
+// port: a pinned port makes an existing interface's health a fact of that observation, so a
+// physical port failing or recovering can advance its revision while the selected names and the
+// policy port stay exactly as they were. Comparing the revision is what wakes the streams for
+// that change, without an extra API read the observer would otherwise need.
 func (r *DevicesReconciler) applyRDMASelection(resolution RDMAPolicyResolution) {
 	if r == nil {
 		return
 	}
 	var next map[string]struct{}
+	var nextPort *int32
+	nextRevision := resolution.InventoryRevision
 	switch resolution.Status {
 	case RDMAPolicyResolutionPolicy, RDMAPolicyResolutionDefault:
 		next = make(map[string]struct{}, len(resolution.Selected))
 		for _, name := range resolution.Selected {
 			next[name] = struct{}{}
 		}
+		// The resolver copies the port only after proving every selected HCA carries it,
+		// so an applied port is a fact about the whole set; Default carries none.
+		nextPort = resolution.Port
 	default:
 		// Invalid, Conflict, and Unknown fail closed: withhold every HCA rather than keep
-		// serving a selection that can no longer be proven.
+		// serving a selection that can no longer be proven. The port goes with it — a
+		// restriction about a set that names no HCA is nothing to enforce.
 		next = map[string]struct{}{}
 	}
 
 	var changed bool
 	r.rdmaSelectionMutex.Lock()
-	if r.rdmaSelection == nil || !maps.Equal(r.rdmaSelection.selected, next) {
-		r.rdmaSelection = &rdmaAppliedSelection{selected: next}
+	if r.rdmaSelection == nil ||
+		!maps.Equal(r.rdmaSelection.selected, next) ||
+		!ptr.Equal(r.rdmaSelection.port, nextPort) ||
+		r.rdmaSelection.inventoryRevision != nextRevision {
+		r.rdmaSelection = &rdmaAppliedSelection{
+			selected:          next,
+			port:              nextPort,
+			inventoryRevision: nextRevision,
+		}
 		changed = true
 	}
 	r.rdmaSelectionMutex.Unlock()

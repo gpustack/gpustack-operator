@@ -13,6 +13,16 @@ import (
 // rdmaAppliedSelection holds the active HCA candidate set resolved for this node.
 type rdmaAppliedSelection struct {
 	selected map[string]struct{}
+
+	// port is the 1-based physical port every selected HCA was resolved against, or nil
+	// when the active policy pins none.
+	port *int32
+
+	// inventoryRevision is the verbs observation revision the selection was resolved
+	// from. A pinned port makes an existing interface's health a fact of this
+	// observation, so the revision advancing with the selected set and port unchanged is
+	// still a reason for listeners to rebuild their responses.
+	inventoryRevision string
 }
 
 // clone returns a private copy of the applied selection.
@@ -21,7 +31,9 @@ func (s *rdmaAppliedSelection) clone() *rdmaAppliedSelection {
 		return nil
 	}
 	return &rdmaAppliedSelection{
-		selected: maps.Clone(s.selected),
+		selected:          maps.Clone(s.selected),
+		port:              s.port,
+		inventoryRevision: s.inventoryRevision,
 	}
 }
 
@@ -54,6 +66,11 @@ type rdmaInterfaceSnapshot struct {
 
 	// selectedHCAs is the set of HCA names eligible when selectionKnown is true.
 	selectedHCAs map[string]struct{}
+
+	// port is the 1-based physical port the active selection pins, or nil when none does.
+	// While set, an HCA's verdict is read from that port alone, and an allocation names
+	// granted HCAs to NCCL with this port as a suffix.
+	port *int32
 }
 
 // captureRDMAInterfaceSnapshot freezes the node's interface inventory from Devices.spec.interfaces
@@ -79,6 +96,18 @@ func captureRDMAInterfaceSnapshotFrom(
 
 	var externalHCAs map[string]struct{}
 	if inv != nil && inv.Complete {
+		// A selection that pins a port narrows every verdict this capture derives to that
+		// one port: a device whose other port is up is not up on the fabric the policy
+		// names. With no pinned port the rule reads the whole port list, exactly as before.
+		var pinnedPort uint32
+		linkFrom := rdmaLinkFromPorts
+		if sel != nil && sel.port != nil {
+			pinnedPort = uint32(*sel.port)
+			linkFrom = func(ports []device.RDMAPort) *workercore.DeviceInterfaceLink {
+				return rdmaLinkFromPortsForPort(ports, pinnedPort)
+			}
+		}
+
 		boundHCAs := make(map[string]struct{}, len(interfaces))
 		pfByPCI := make(map[string]int, len(interfaces))
 		for i := range interfaces {
@@ -132,7 +161,7 @@ func captureRDMAInterfaceSnapshotFrom(
 				CpuAffinity:  dev.CpuAffinity,
 				RDMA:         true,
 				RDMADevice:   dev.Name,
-				Link:         rdmaLinkFromPorts(dev.Ports),
+				Link:         linkFrom(dev.Ports),
 			})
 			boundHCAs[dev.Name] = struct{}{}
 			if dev.PciBusID != "" {
@@ -157,7 +186,7 @@ func captureRDMAInterfaceSnapshotFrom(
 				CpuAffinity:  dev.CpuAffinity,
 				RDMA:         true,
 				RDMADevice:   dev.Name,
-				Link:         rdmaLinkFromPorts(dev.Ports),
+				Link:         linkFrom(dev.Ports),
 			}
 			if dev.ParentPciBusID != "" {
 				if pfIdx, ok := pfByPCI[dev.ParentPciBusID]; ok {
@@ -184,6 +213,37 @@ func captureRDMAInterfaceSnapshotFrom(
 			}
 			boundHCAs[dev.Name] = struct{}{}
 		}
+
+		// Interfaces the record already carried keep the record's verdict, which is a fact
+		// about the interface's netdev, not about the pinned port. Where the observation
+		// knows the HCA, re-derive its verdict from the pinned port alone, for the physical
+		// functions and their virtual functions alike; an HCA the observation does not know
+		// keeps the record's verdict, there being no port fact to read.
+		if sel != nil && sel.port != nil {
+			invByName := make(map[string]*device.RDMADevice, len(inv.Devices))
+			for i := range inv.Devices {
+				if inv.Devices[i].Name != "" {
+					invByName[inv.Devices[i].Name] = &inv.Devices[i]
+				}
+			}
+			for i := range interfaces {
+				iface := &interfaces[i]
+				if iface.RDMADevice != "" {
+					if dev, ok := invByName[iface.RDMADevice]; ok {
+						iface.Link = linkFrom(dev.Ports)
+					}
+				}
+				for j := range iface.VirtualFunctions {
+					vf := &iface.VirtualFunctions[j]
+					if vf.RDMADevice == "" {
+						continue
+					}
+					if dev, ok := invByName[vf.RDMADevice]; ok {
+						vf.Link = linkFrom(dev.Ports)
+					}
+				}
+			}
+		}
 	}
 
 	snap := rdmaInterfaceSnapshot{
@@ -193,6 +253,7 @@ func captureRDMAInterfaceSnapshotFrom(
 	if sel != nil {
 		snap.selectionKnown = true
 		snap.selectedHCAs = maps.Clone(sel.selected)
+		snap.port = sel.port
 	}
 	return snap
 }
@@ -241,4 +302,18 @@ func rdmaLinkFromPorts(ports []device.RDMAPort) *workercore.DeviceInterfaceLink 
 	return &workercore.DeviceInterfaceLink{
 		State: workercore.DeviceInterfaceLinkStateFailed,
 	}
+}
+
+// rdmaLinkFromPortsForPort derives the link verdict from only the observed port with the given
+// number, applying the same rule rdmaLinkFromPorts applies to the whole list. No port carrying
+// the number filters down to an empty list, which is the unverified case — the same verdict a
+// device with no ports at all earns — and never a verdict of failure.
+func rdmaLinkFromPortsForPort(ports []device.RDMAPort, port uint32) *workercore.DeviceInterfaceLink {
+	var matching []device.RDMAPort
+	for i := range ports {
+		if ports[i].Number == port {
+			matching = append(matching, ports[i])
+		}
+	}
+	return rdmaLinkFromPorts(matching)
 }

@@ -10,8 +10,10 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/utils/ptr"
 
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
+	"gpustack.ai/gpustack/pkg/device"
 )
 
 // rdmaSnapshotFirstSeen is the first-seen time the fixture's failed verdict carries, and the exact
@@ -189,4 +191,128 @@ func TestRDMASnapshot_IsolatesEndpointsFromLaterInventoryChanges(t *testing.T) {
 				"%s: partitioned first-seen time value", c.name)
 		})
 	}
+}
+
+// TestRDMASnapshot_PortPinnedVerdicts pins what a selection that pins a port changes about the
+// capture: every HCA the inventory knows — a whole function the record carried, a virtual
+// function the record carried, and a netdev-free device the capture synthesizes — is judged on
+// the pinned port alone, so a device up on another port is not up on the policy's fabric. An HCA
+// the inventory does not know keeps the record's verdict, and with no pinned port every verdict
+// reads the whole port list exactly as before.
+func TestRDMASnapshot_PortPinnedVerdicts(t *testing.T) {
+	// The record's own verdicts all read OK, so any Failed under a pinned port came from the
+	// pinned port's observation, not from the record. mlx5_0 is up on port 1 and down on
+	// port 2; mlx5_1, a virtual function, is the reverse; mlx5_9 is netdev-free, up on
+	// port 1, and unknown to the record.
+	inv := func() *device.RDMASnapshot {
+		return &device.RDMASnapshot{
+			Complete: true,
+			Revision: "rev-1",
+			Devices: []device.RDMADevice{
+				{Name: "mlx5_0", Owner: device.RDMADeviceOwnerGPUStack, Ports: []device.RDMAPort{
+					{Number: 1, State: "ACTIVE", PhysicalState: "LinkUp"},
+					{Number: 2, State: "DOWN", PhysicalState: "LinkDown"},
+				}},
+				{
+					Name: "mlx5_1", Owner: device.RDMADeviceOwnerGPUStack, VirtualFunction: true,
+					ParentPciBusID: "0000:0b:00.0", Ports: []device.RDMAPort{
+						{Number: 1, State: "DOWN", PhysicalState: "LinkDown"},
+						{Number: 2, State: "ACTIVE", PhysicalState: "LinkUp"},
+					},
+				},
+				{Name: "mlx5_9", Owner: device.RDMADeviceOwnerGPUStack, Ports: []device.RDMAPort{
+					{Number: 1, State: "ACTIVE", PhysicalState: "LinkUp"},
+				}},
+			},
+		}
+	}
+	pf0 := sriovPF("pf0", "1", rdmaVF("vf0", "", "mlx5_1", &workercore.DeviceInterfaceLink{State: workercore.DeviceInterfaceLinkStateOK}))
+	pf0.Link = &workercore.DeviceInterfaceLink{State: workercore.DeviceInterfaceLinkStateOK}
+	devs := rdmaDevices("node-port",
+		wholeFunctionIface("ib0", "0", "mlx5_0", &workercore.DeviceInterfaceLink{State: workercore.DeviceInterfaceLinkStateOK}),
+		pf0,
+	)
+
+	// endpointLinkByHCA finds one endpoint's verdict by its HCA under the mode that serves it.
+	endpointLinkByHCA := func(t *testing.T, snap rdmaInterfaceSnapshot, hca string, mode workercore.DeviceAllocationMode) workercore.DeviceInterfaceLinkState {
+		t.Helper()
+		for i := range snap.interfaces {
+			for _, ep := range rdmaEndpoints(&snap.interfaces[i], mode) {
+				if ep.RDMADevice == hca {
+					require.NotNil(t, ep.Link, "%s carries a verdict", hca)
+					return ep.Link.State
+				}
+			}
+		}
+		t.Fatalf("no endpoint of %s serves %s", mode, hca)
+		return ""
+	}
+
+	cases := []struct {
+		name string
+		port *int32
+		// wantWholeFunction, wantVF and wantSynthesized are the expected verdict states.
+		wantWholeFunction workercore.DeviceInterfaceLinkState
+		wantVF            workercore.DeviceInterfaceLinkState
+		wantSynthesized   workercore.DeviceInterfaceLinkState
+	}{
+		{
+			name:              "port one judges each device on port 1 alone",
+			port:              ptr.To(int32(1)),
+			wantWholeFunction: workercore.DeviceInterfaceLinkStateOK,
+			wantVF:            workercore.DeviceInterfaceLinkStateFailed,
+			wantSynthesized:   workercore.DeviceInterfaceLinkStateOK,
+		},
+		{
+			name:              "port two judges each device on port 2 alone",
+			port:              ptr.To(int32(2)),
+			wantWholeFunction: workercore.DeviceInterfaceLinkStateFailed,
+			wantVF:            workercore.DeviceInterfaceLinkStateOK,
+			// mlx5_9 carries no port 2: nothing to read is unverified, not failed.
+			wantSynthesized: workercore.DeviceInterfaceLinkStateUnverified,
+		},
+		{
+			name:              "no pinned port reads the whole port list",
+			port:              nil,
+			wantWholeFunction: workercore.DeviceInterfaceLinkStateOK,
+			wantVF:            workercore.DeviceInterfaceLinkStateOK,
+			wantSynthesized:   workercore.DeviceInterfaceLinkStateOK,
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			sel := &rdmaAppliedSelection{selected: map[string]struct{}{"mlx5_0": {}, "mlx5_1": {}, "mlx5_9": {}}, port: c.port}
+			snap := captureRDMAInterfaceSnapshotFrom(devs, inv(), sel)
+
+			assert.Equal(t, c.port, snap.port, "the capture carries the pinned port")
+			assert.Equal(t, c.wantWholeFunction, endpointLinkByHCA(t, snap, "mlx5_0", workercore.DeviceAllocationModeExclusive),
+				"whole-function verdict")
+			assert.Equal(t, c.wantVF, endpointLinkByHCA(t, snap, "mlx5_1", workercore.DeviceAllocationModePartitioned),
+				"virtual-function verdict")
+			assert.Equal(t, c.wantSynthesized, endpointLinkByHCA(t, snap, "mlx5_9", workercore.DeviceAllocationModeShared),
+				"netdev-free synthesized verdict")
+		})
+	}
+
+	t.Run("an HCA the inventory does not know keeps the record verdict", func(t *testing.T) {
+		// pf0's own HCA name exists in no observation, so there is no port fact to read and
+		// the record's OK stands even with a port pinned.
+		sel := &rdmaAppliedSelection{selected: map[string]struct{}{"mlx5_bond": {}}, port: ptr.To(int32(1))}
+		snap := captureRDMAInterfaceSnapshotFrom(devs, inv(), sel)
+
+		for i := range snap.interfaces {
+			if snap.interfaces[i].RDMADevice != "mlx5_bond" {
+				continue
+			}
+			require.NotNil(t, snap.interfaces[i].Link)
+			assert.Equal(t, workercore.DeviceInterfaceLinkStateOK, snap.interfaces[i].Link.State,
+				"the record verdict survives a pinned port with no observation of the HCA")
+		}
+	})
+
+	t.Run("no selection pins nothing and restricts nothing", func(t *testing.T) {
+		snap := captureRDMAInterfaceSnapshotFrom(devs, inv(), nil)
+		assert.Nil(t, snap.port)
+		assert.False(t, snap.selectionKnown)
+	})
 }

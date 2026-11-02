@@ -11,6 +11,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	deviceplugin "k8s.io/kubelet/pkg/apis/deviceplugin/v1beta1"
+	"k8s.io/utils/ptr"
 	ctrlcli "sigs.k8s.io/controller-runtime/pkg/client"
 	ctrlfake "sigs.k8s.io/controller-runtime/pkg/client/fake"
 	ctrlintercept "sigs.k8s.io/controller-runtime/pkg/client/interceptor"
@@ -984,6 +985,76 @@ func TestRDMAServer_Allocate_MixedFamilyResponsesCarryTheUnifiedKey(t *testing.T
 			assert.Equal(t, want, deviceSpecsOf(ctrResp))
 		})
 	}
+}
+
+// TestRDMAServer_Allocate_PortPinnedEnv pins the environment under a selection that pins a
+// port: the plain variable always carries the bare HCA names, while the NCCL filter names each
+// granted HCA with the pinned port as its suffix, so NCCL opens the port the policy selected
+// rather than any port of the adapter. A grant fully withheld under the pinned port still earns
+// both variables empty, the port suffix never appearing on nothing.
+func TestRDMAServer_Allocate_PortPinnedEnv(t *testing.T) {
+	const nodeName = "node-rdma-port-env"
+
+	t.Run("grants carry the pinned port only in the NCCL filter", func(t *testing.T) {
+		f := newRdmaAllocateFixture(t)
+		f.mapVerbs("mlx5_0", "uverbs0")
+		f.mapVerbs("mlx5_1", "uverbs1")
+		f.writeNode("uverbs0")
+		f.writeNode("uverbs1")
+		f.writeNode("rdma_cm")
+
+		rec := &DevicesReconciler{NodeName: nodeName, Client: nodeFixture(rdmaDevices(nodeName,
+			wholeFunctionIface("ib0", "0", "mlx5_0", nil),
+			wholeFunctionIface("eth1", "1", "mlx5_1", nil),
+		))}
+		rec.applyRDMASelection(RDMAPolicyResolution{
+			Status:   RDMAPolicyResolutionPolicy,
+			Selected: []string{"mlx5_0", "mlx5_1"},
+			Port:     ptr.To(int32(1)),
+		})
+
+		resp, err := rdmaTestServer(t, workercore.DeviceAllocationModeShared, rec).
+			Allocate(context.Background(), allocateRequest("ib0:ib0:0000", "eth1:eth1:0000"))
+		require.NoError(t, err)
+		require.Len(t, resp.ContainerResponses, 1)
+
+		ctrResp := resp.ContainerResponses[0]
+		assert.Equal(t, map[string]string{
+			"NCCL_IB_HCA":           "=mlx5_0:1,mlx5_1:1",
+			"GPUSTACK_RDMA_DEVICES": "mlx5_0,mlx5_1",
+		}, ctrResp.Envs, "the plain key stays bare; only the NCCL filter names the port")
+	})
+
+	t.Run("a grant withheld under the pinned port carries both variables empty", func(t *testing.T) {
+		f := newRdmaAllocateFixture(t)
+		f.mapVerbs("mlx5_0", "uverbs0")
+		f.mapVerbs("mlx5_1", "uverbs1")
+		f.writeNode("uverbs0")
+		f.writeNode("uverbs1")
+		f.writeNode("rdma_cm")
+
+		rec := &DevicesReconciler{NodeName: nodeName, Client: nodeFixture(rdmaDevices(nodeName,
+			wholeFunctionIface("ib0", "0", "mlx5_0", nil),
+			wholeFunctionIface("eth1", "1", "mlx5_1", nil),
+		))}
+		rec.applyRDMASelection(RDMAPolicyResolution{
+			Status:   RDMAPolicyResolutionPolicy,
+			Selected: []string{"mlx5_1"},
+			Port:     ptr.To(int32(1)),
+		})
+
+		resp, err := rdmaTestServer(t, workercore.DeviceAllocationModeShared, rec).
+			Allocate(context.Background(), allocateRequest("ib0:ib0:0000"))
+		require.NoError(t, err)
+		require.Len(t, resp.ContainerResponses, 1)
+
+		ctrResp := resp.ContainerResponses[0]
+		assert.Equal(t, map[string]string{
+			"NCCL_IB_HCA":           "",
+			"GPUSTACK_RDMA_DEVICES": "",
+		}, ctrResp.Envs)
+		assert.Empty(t, deviceSpecsOf(ctrResp), "a withheld grant injects no device node")
+	})
 }
 
 // TestRDMAServer_Allocate_SelectionPolicyFiltering pins that a grant resolves only through the
