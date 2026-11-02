@@ -68,6 +68,28 @@ type Detector struct {
 	// and it stays in that state after a first pass whose enumeration failed.
 	reportedInterfacesKnown bool
 
+	// rdmaInterfaceSnapshot is this process's latest host verbs observation. Unlike the interface
+	// record it is published for other readers, so it lives in an atomic snapshot: a refresh
+	// stores a fresh private copy and RDMAInterfaceSnapshot hands out a copy per reader, so no
+	// stored state is reachable for mutation from outside the detect loop that writes it.
+	rdmaInterfaceSnapshot datax.Snapshot[device.RDMASnapshot]
+	// rdmaInterfaceReader overrides the sysfs reader for detector tests.
+	rdmaInterfaceReader func() ([]device.RDMADevice, error)
+	// reportedRDMAInterfacesRevision and reportedRDMAInterfacesComplete are the baseline the
+	// detect loop last reported through OnRDMAInterfacesChanged, so a change the monitor loop
+	// refreshed into the snapshot without reporting still differs from it on the next detect
+	// pass and is reported there. They mirror the fields rdmaInterfacesChanged reads off the
+	// stored snapshot, minus everything else a stored snapshot carries.
+	//
+	// Only the detect loop touches them, and it runs in one goroutine, so they carry no lock
+	// of their own.
+	reportedRDMAInterfacesRevision string
+	reportedRDMAInterfacesComplete bool
+	// OnRDMAInterfacesChanged is called when DetectRDMAInterfaces records an allocation-relevant
+	// change in the host verbs snapshot since the last outer pass, waking the RDMA selection
+	// observer without coupling the detector to policy.
+	OnRDMAInterfacesChanged func()
+
 	// podLister and procResolver are the two node-local reads the slice section needs: which Pods
 	// this node runs, and which of them a host process belongs to. They are fields rather than
 	// direct calls so the pass tests against a fake Pod list and a fake /proc tree.
@@ -245,12 +267,64 @@ type _DeviceKey struct {
 // endpoints forty times over for an answer that almost never differs.
 const detectEveryNMonitorRounds = 40
 
+func (d *Detector) readRDMAInterfaces() ([]device.RDMADevice, error) {
+	if d.rdmaInterfaceReader != nil {
+		return d.rdmaInterfaceReader()
+	}
+	return DetectRDMAInterfaces()
+}
+
+// DetectRDMAInterfaces reads the host verbs inventory, folds it into the local snapshot, and
+// reports an allocation-relevant change since the last outer pass by firing
+// OnRDMAInterfacesChanged. The comparison runs against what the last outer pass reported, not
+// against the stored snapshot: the monitor loop between the passes refreshes the snapshot
+// without reporting, and its change is still owed a callback here.
+func (d *Detector) DetectRDMAInterfaces(ctx context.Context) {
+	devices, err := d.readRDMAInterfaces()
+	if ctx.Err() != nil {
+		return
+	}
+	previous := d.rdmaInterfaceSnapshot.Load()
+	if err != nil && (previous == nil || previous.Complete) {
+		logger.Error(err, "could not enumerate RDMA devices", "consequence", "keeping the last successful observation")
+	}
+	reported := &device.RDMASnapshot{
+		Revision: d.reportedRDMAInterfacesRevision,
+		Complete: d.reportedRDMAInterfacesComplete,
+	}
+	changed := rdmaInterfacesChanged(reported, devices, err)
+	stored := d.refreshRDMAInterfaces(devices, err, time.Now())
+	if changed && d.OnRDMAInterfacesChanged != nil {
+		d.OnRDMAInterfacesChanged()
+	}
+	if stored != nil {
+		d.reportedRDMAInterfacesRevision = stored.Revision
+		d.reportedRDMAInterfacesComplete = stored.Complete
+	}
+}
+
+// MonitorRDMAInterfaces reads the host verbs inventory, folds it into the local snapshot, and
+// reports whether an allocation-relevant change was observed against the stored snapshot. It
+// fires no callback: the inner monitor loop takes a detect round on the change, and the outer
+// pass that follows reports it through DetectRDMAInterfaces.
+func (d *Detector) MonitorRDMAInterfaces(ctx context.Context) bool {
+	devices, err := d.readRDMAInterfaces()
+	if ctx.Err() != nil {
+		return false
+	}
+	previous := d.rdmaInterfaceSnapshot.Load()
+	changed := rdmaInterfacesChanged(previous, devices, err)
+	d.refreshRDMAInterfaces(devices, err, time.Now())
+	return changed
+}
+
 // Start starts the detector to detect and monitor the devices periodically until the context is canceled.
 func (d *Detector) Start(ctx context.Context) error {
 	holdUntilFirstDetected := !d.noFastFailed && d.manufacturers.Len() == 1
 
 	return waitx.RepeatUntilContextCancel(ctx, d.monitorPeriod, true, func(ctx context.Context) error {
 		logger.V(2).Info("detecting")
+		d.DetectRDMAInterfaces(ctx)
 
 		devicesGrpList, unmeasuredByDetect := d.DetectAccelerator(ctx)
 
@@ -313,6 +387,7 @@ func (d *Detector) Start(ctx context.Context) error {
 		rounds := 0
 		_ = waitx.RepeatUntilContextCancel(ctx, d.monitorPeriod, true, func(ctx context.Context) error {
 			logger.V(3).Info("monitoring")
+			rdmaChanged := d.MonitorRDMAInterfaces(ctx)
 
 			metricsGrpList, unmeasuredByMonitor := d.MonitorAccelerator(ctx)
 			if len(metricsGrpList) != 0 {
@@ -384,8 +459,21 @@ func (d *Detector) Start(ctx context.Context) error {
 				return waitx.ErrStopRetrying
 			}
 
-			// Everything above is edge-triggered, and the two edges it watches are the only ones a
-			// monitor pass can see: an accelerator key, and the network record. Neither carries the
+			// The RDMA class is compared on this cadence for the same reason the interface record
+			// is, and because neither of the two comparisons above can see it: the class carries
+			// verbs devices the netdev walk never enumerates, and its changes — a device or port
+			// appearing, an external owner arriving — belong to this loop's business even when no
+			// accelerator key and no interface moves. The change itself fires no callback here:
+			// taking the round ends this monitor stretch, and the detect pass that follows
+			// reports the change through OnRDMAInterfacesChanged. See rdmaInterfacesChanged
+			// for what counts.
+			if rdmaChanged {
+				logger.Info("rdma interfaces changed, going to detect again")
+				return waitx.ErrStopRetrying
+			}
+
+			// The comparisons above are edge-triggered: accelerator keys, network interfaces and
+			// RDMA inventory. None carries the
 			// scale-up fabric -- a node joining or leaving a super pod changes no accelerator id and
 			// no link -- and the monitor result has no fabric in it to compare, so a purely
 			// event-driven loop publishes `fabric.domain` on the round that detected it and then
