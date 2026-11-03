@@ -638,6 +638,11 @@ func (in *DevicesRDMASelectionPolicySpec) DeepCopyInto(out *DevicesRDMASelection
 		*out = make([]string, len(*in))
 		copy(*out, *in)
 	}
+	if in.Port != nil {
+		in, out := &in.Port, &out.Port
+		*out = new(int32)
+		**out = **in
+	}
 	return
 }
 

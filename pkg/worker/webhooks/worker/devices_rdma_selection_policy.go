@@ -73,6 +73,15 @@ func validateDevicesRDMASelectionPolicy(policy *workercore.DevicesRDMASelectionP
 			"include and exclude are mutually exclusive: specify at most one of them",
 		))
 	}
+
+	// Port is a 1-based physical port number. The schema's minimum already refuses zero and
+	// negatives; this re-checks the cached value so a policy stored before the schema gained
+	// the bound is still rejected at every admission, and so the resolver's own diagnostic
+	// never has to run on a port that names no port.
+	if policy.Spec.Port != nil && *policy.Spec.Port < 1 {
+		errs = append(errs, field.Invalid(specPath.Child("port"), *policy.Spec.Port,
+			"must be a positive 1-based RDMA port number"))
+	}
 	return errs
 }
 

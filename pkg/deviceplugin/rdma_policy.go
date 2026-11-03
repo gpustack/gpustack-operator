@@ -10,6 +10,7 @@ import (
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
+	"k8s.io/utils/ptr"
 
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
 	"gpustack.ai/gpustack/pkg/device"
@@ -99,6 +100,11 @@ type RDMAPolicyResolution struct {
 	// Policy and Default.
 	Excluded []RDMAPolicyExclusion
 
+	// Port is the 1-based physical port every selected HCA must carry, copied from the one
+	// targeting policy. Nil for Default and for every non-applied status: no policy, no
+	// port restriction.
+	Port *int32
+
 	// Message carries actionable diagnostics for Invalid and Unknown, and is empty
 	// otherwise.
 	Message string
@@ -173,9 +179,10 @@ func rdmaPolicySelectorScan(inputs RDMAPolicyInputs) ([]workercore.DevicesRDMASe
 //   - Conflict when more than one policy with a readable selector targets the node, whatever
 //     malformed selectors exist beside them.
 //   - Invalid when any cached policy carries a nil or unreadable selector, or when the
-//     one targeting policy names an unknown device or sets include and exclude together.
-//     A malformed selector never counts as a match; the invalid report names every
-//     malformed policy in name and UID order, and none of its diagnostics claims a match.
+//     one targeting policy names an unknown device, sets include and exclude together, or
+//     pins a port that a selected device does not carry. A malformed selector never counts
+//     as a match; the invalid report names every malformed policy in name and UID order,
+//     and none of its diagnostics claims a match.
 //   - Default when no policy targets the node.
 //   - Policy when exactly one policy targets the node.
 func ResolveRDMAPolicy(inputs RDMAPolicyInputs) RDMAPolicyResolution {
@@ -267,12 +274,16 @@ func ResolveRDMAPolicy(inputs RDMAPolicyInputs) RDMAPolicyResolution {
 	}
 	// Include and Exclude are mutually exclusive; a policy that sets both never applies.
 	bothLists := policySpec != nil && len(policySpec.Include) > 0 && len(policySpec.Exclude) > 0
-	if bothLists || len(unknownInclude) > 0 || len(unknownExclude) > 0 {
+	badPort := policySpec != nil && policySpec.Port != nil && *policySpec.Port < 1
+	if bothLists || badPort || len(unknownInclude) > 0 || len(unknownExclude) > 0 {
 		sort.Strings(unknownInclude)
 		sort.Strings(unknownExclude)
-		parts := make([]string, 0, 3)
+		parts := make([]string, 0, 4)
 		if bothLists {
 			parts = append(parts, "include and exclude are mutually exclusive")
+		}
+		if badPort {
+			parts = append(parts, fmt.Sprintf("port %d must be at least 1", *policySpec.Port))
 		}
 		if len(unknownInclude) > 0 {
 			parts = append(parts, fmt.Sprintf("include names the inventory does not know: %v", unknownInclude))
@@ -307,6 +318,36 @@ func ResolveRDMAPolicy(inputs RDMAPolicyInputs) RDMAPolicyResolution {
 	}
 	sort.Slice(res.Selected, func(i, j int) bool { return res.Selected[i] < res.Selected[j] })
 	sort.Slice(res.Excluded, func(i, j int) bool { return res.Excluded[i].Name < res.Excluded[j].Name })
+
+	// A port restriction must hold on every selected HCA: a selected device without that
+	// physical port cannot serve the policy's fabric. Excluded and externally owned devices
+	// owe nothing to the port, so their shape never invalidates the policy. The observation
+	// is a complete inventory — the unknown-name check above proved it — so a port absent
+	// from a device's ports is the device not carrying it, never the pass failing to read it.
+	if policySpec != nil && policySpec.Port != nil {
+		var missingPort []string
+		for _, name := range res.Selected {
+			dev := known[name]
+			carried := false
+			for i := range dev.Ports {
+				if dev.Ports[i].Number == uint32(*policySpec.Port) {
+					carried = true
+					break
+				}
+			}
+			if !carried {
+				missingPort = append(missingPort, name)
+			}
+		}
+		if len(missingPort) > 0 {
+			res.Status = RDMAPolicyResolutionInvalid
+			res.Selected = nil
+			res.Excluded = nil
+			res.Message = fmt.Sprintf("selected devices do not carry port %d: %v", *policySpec.Port, missingPort)
+			return res
+		}
+		res.Port = ptr.To(*policySpec.Port)
+	}
 	return res
 }
 

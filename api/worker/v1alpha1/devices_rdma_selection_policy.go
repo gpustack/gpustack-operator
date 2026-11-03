@@ -58,6 +58,12 @@ type DevicesRDMASelectionPolicySpec struct {
 	// +k8s:validation:cel[0]:rule="self.all(x, size(x) > 0 && size(x) <= 64)"
 	// +k8s:validation:cel[0]:message="each HCA name must be non-empty and at most 64 characters"
 	Exclude []string `json:"exclude,omitempty" protobuf:"bytes,3,rep,name=exclude"`
+
+	// Port restricts selected HCAs to this 1-based physical RDMA port.
+	// When omitted, all active ports on each selected HCA are eligible.
+	// +optional
+	// +k8s:validation:minimum=1
+	Port *int32 `json:"port,omitempty" protobuf:"varint,4,opt,name=port"`
 }
 
 // DevicesRDMASelectionPolicyList holds a list of DevicesRDMASelectionPolicy objects.

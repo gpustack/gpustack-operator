@@ -1921,6 +1921,11 @@ func (m *DevicesRDMASelectionPolicySpec) MarshalToSizedBuffer(dAtA []byte) (int,
 	_ = i
 	var l int
 	_ = l
+	if m.Port != nil {
+		i = encodeVarintGenerated(dAtA, i, uint64(*m.Port))
+		i--
+		dAtA[i] = 0x20
+	}
 	if len(m.Exclude) > 0 {
 		for iNdEx := len(m.Exclude) - 1; iNdEx >= 0; iNdEx-- {
 			i -= len(m.Exclude[iNdEx])
@@ -12588,6 +12593,9 @@ func (m *DevicesRDMASelectionPolicySpec) Size() (n int) {
 			n += 1 + l + sovGenerated(uint64(l))
 		}
 	}
+	if m.Port != nil {
+		n += 1 + sovGenerated(uint64(*m.Port))
+	}
 	return n
 }
 
@@ -16678,6 +16686,7 @@ func (this *DevicesRDMASelectionPolicySpec) String() string {
 		`NodeSelector:` + strings.Replace(fmt.Sprintf("%v", this.NodeSelector), "LabelSelector", "v1.LabelSelector", 1) + `,`,
 		`Include:` + fmt.Sprintf("%v", this.Include) + `,`,
 		`Exclude:` + fmt.Sprintf("%v", this.Exclude) + `,`,
+		`Port:` + valueToStringGenerated(this.Port) + `,`,
 		`}`,
 	}, "")
 	return s
@@ -24466,6 +24475,26 @@ func (m *DevicesRDMASelectionPolicySpec) Unmarshal(dAtA []byte) error {
 			}
 			m.Exclude = append(m.Exclude, string(dAtA[iNdEx:postIndex]))
 			iNdEx = postIndex
+		case 4:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Port", wireType)
+			}
+			var v int32
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowGenerated
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				v |= int32(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			m.Port = &v
 		default:
 			iNdEx = preIndex
 			skippy, err := skipGenerated(dAtA[iNdEx:])

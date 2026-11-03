@@ -26,6 +26,9 @@ type DevicesRDMASelectionPolicySpecApplyConfiguration struct {
 	// name length is bounded here because the CRD registration cost budget prices an unbounded
 	// string at its worst case; uniqueness stays with the webhook, which needs no budget.
 	Exclude []string `json:"exclude,omitempty"`
+	// Port restricts selected HCAs to this 1-based physical RDMA port.
+	// When omitted, all active ports on each selected HCA are eligible.
+	Port *int32 `json:"port,omitempty"`
 }
 
 // DevicesRDMASelectionPolicySpecApplyConfiguration constructs a declarative configuration of the DevicesRDMASelectionPolicySpec type for use with
@@ -59,5 +62,13 @@ func (b *DevicesRDMASelectionPolicySpecApplyConfiguration) WithExclude(values ..
 	for i := range values {
 		b.Exclude = append(b.Exclude, values[i])
 	}
+	return b
+}
+
+// WithPort sets the Port field in the declarative configuration to the given value
+// and returns the receiver, so that objects can be built by chaining "With" function invocations.
+// If called multiple times, the Port field is set to the value of the last call.
+func (b *DevicesRDMASelectionPolicySpecApplyConfiguration) WithPort(value int32) *DevicesRDMASelectionPolicySpecApplyConfiguration {
+	b.Port = &value
 	return b
 }

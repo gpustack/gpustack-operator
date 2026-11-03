@@ -8,6 +8,7 @@ import (
 	"github.com/stretchr/testify/require"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/utils/ptr"
 
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
 	"gpustack.ai/gpustack/pkg/device"
@@ -377,6 +378,7 @@ func assertRDMAResolution(t *testing.T, want, got RDMAPolicyResolution) {
 	}
 	assert.Equal(t, want.Selected, got.Selected)
 	assert.Equal(t, want.Excluded, got.Excluded)
+	assert.Equal(t, want.Port, got.Port)
 	assert.Equal(t, want.Message, got.Message)
 	assert.Equal(t, want.NodeName, got.NodeName)
 	assert.Equal(t, want.NodeUID, got.NodeUID)
@@ -804,5 +806,141 @@ func TestResolveRDMAPolicyBindingUpdates(t *testing.T) {
 			{Name: "mlx5_6", Reason: RDMAPolicyExclusionExcludedByPolicy},
 		}
 		assertRDMAResolution(t, want, got)
+	})
+}
+
+// TestResolveRDMAPolicyPort pins the port restriction: the resolved port is copied only
+// when every selected device carries that physical port, a selected device without it
+// fails the node closed naming the devices, and devices outside the selected set —
+// excluded or externally owned — are never asked to carry the port.
+func TestResolveRDMAPolicyPort(t *testing.T) {
+	node := rdmaFixtureNode()
+	fixtureRef := workercore.DevicesRDMASelectionPolicyReference{Name: "compute-hcas", UID: "uid-a", Generation: 3}
+	inventory := func() *device.RDMASnapshot {
+		return &device.RDMASnapshot{
+			Complete: true,
+			Revision: "rev-1",
+			Devices: []device.RDMADevice{
+				{
+					Name: "mlx5_0", Owner: device.RDMADeviceOwnerGPUStack,
+					Ports: []device.RDMAPort{{Number: 1, State: "ACTIVE", PhysicalState: "LinkUp"}},
+				},
+				{
+					Name: "mlx5_1", Owner: device.RDMADeviceOwnerGPUStack,
+					Ports: []device.RDMAPort{{Number: 2, State: "ACTIVE", PhysicalState: "LinkUp"}},
+				},
+				{
+					Name: "mlx5_2", Owner: device.RDMADeviceOwnerGPUStack,
+					Ports: []device.RDMAPort{{Number: 1, State: "DOWN", PhysicalState: "LinkDown"}},
+				},
+				{Name: "efa0", Owner: device.RDMADeviceOwnerExternal, Driver: "efa"},
+			},
+		}
+	}
+	policyWithPort := func(mutate func(*workercore.DevicesRDMASelectionPolicy)) workercore.DevicesRDMASelectionPolicy {
+		p := rdmaFixturePolicy("compute-hcas", "uid-a", 3, &metav1.LabelSelector{})
+		if mutate != nil {
+			mutate(&p)
+		}
+		return p
+	}
+	resolve := func(p workercore.DevicesRDMASelectionPolicy) RDMAPolicyResolution {
+		t.Helper()
+		return ResolveRDMAPolicy(RDMAPolicyInputs{
+			Synced:    true,
+			Node:      node,
+			Inventory: inventory(),
+			Policies:  []workercore.DevicesRDMASelectionPolicy{p},
+		})
+	}
+
+	t.Run("a port every selected device carries resolves and binds", func(t *testing.T) {
+		p := policyWithPort(func(p *workercore.DevicesRDMASelectionPolicy) {
+			p.Spec.Exclude = []string{"mlx5_1"}
+			p.Spec.Port = ptr.To(int32(1))
+		})
+		got := resolve(p)
+
+		want := RDMAPolicyResolution{
+			Status:    RDMAPolicyResolutionPolicy,
+			PolicyRef: &workercore.DevicesRDMASelectionPolicyReference{Name: "compute-hcas", UID: "uid-a", Generation: 3},
+			Selected:  []string{"mlx5_0", "mlx5_2"},
+			Excluded: []RDMAPolicyExclusion{
+				{Name: "efa0", Reason: RDMAPolicyExclusionExternallyOwned},
+				{Name: "mlx5_1", Reason: RDMAPolicyExclusionExcludedByPolicy},
+			},
+			Port:              ptr.To(int32(1)),
+			NodeName:          node.Name,
+			NodeUID:           node.UID,
+			InventoryRevision: "rev-1",
+		}
+		assertRDMAResolution(t, want, got)
+	})
+
+	t.Run("a selected device without the port fails the node closed", func(t *testing.T) {
+		// mlx5_0 and mlx5_2 carry port 1 only; pinning port 2 leaves mlx5_1 selected but
+		// the other two without the port.
+		p := policyWithPort(func(p *workercore.DevicesRDMASelectionPolicy) {
+			p.Spec.Port = ptr.To(int32(2))
+		})
+		got := resolve(p)
+
+		assert.Equal(t, RDMAPolicyResolutionInvalid, got.Status)
+		require.NotNil(t, got.PolicyRef)
+		assert.Equal(t, fixtureRef, *got.PolicyRef)
+		assert.Nil(t, got.Selected, "an invalid resolution selects nothing")
+		assert.Nil(t, got.Excluded, "an invalid resolution reports no exclusions")
+		assert.Nil(t, got.Port, "an unenforceable port is not reported as applied")
+		assert.Equal(t, "selected devices do not carry port 2: [mlx5_0 mlx5_2]", got.Message)
+	})
+
+	t.Run("a device outside the selected set is never asked to carry the port", func(t *testing.T) {
+		// mlx5_0 is excluded and efa0 is externally owned; neither carries port 2, and
+		// neither invalidates the policy, which mlx5_1 alone satisfies.
+		p := policyWithPort(func(p *workercore.DevicesRDMASelectionPolicy) {
+			p.Spec.Exclude = []string{"mlx5_0", "mlx5_2"}
+			p.Spec.Port = ptr.To(int32(2))
+		})
+		got := resolve(p)
+
+		want := RDMAPolicyResolution{
+			Status:    RDMAPolicyResolutionPolicy,
+			PolicyRef: &fixtureRef,
+			Selected:  []string{"mlx5_1"},
+			Excluded: []RDMAPolicyExclusion{
+				{Name: "efa0", Reason: RDMAPolicyExclusionExternallyOwned},
+				{Name: "mlx5_0", Reason: RDMAPolicyExclusionExcludedByPolicy},
+				{Name: "mlx5_2", Reason: RDMAPolicyExclusionExcludedByPolicy},
+			},
+			Port:              ptr.To(int32(2)),
+			NodeName:          node.Name,
+			NodeUID:           node.UID,
+			InventoryRevision: "rev-1",
+		}
+		assertRDMAResolution(t, want, got)
+	})
+
+	t.Run("a port below one is a configuration error", func(t *testing.T) {
+		p := policyWithPort(func(p *workercore.DevicesRDMASelectionPolicy) {
+			p.Spec.Port = ptr.To(int32(0))
+		})
+		got := resolve(p)
+
+		assert.Equal(t, RDMAPolicyResolutionInvalid, got.Status)
+		require.NotNil(t, got.PolicyRef)
+		assert.Equal(t, fixtureRef, *got.PolicyRef)
+		assert.Nil(t, got.Selected)
+		assert.Nil(t, got.Port)
+		assert.Equal(t, "port 0 must be at least 1", got.Message)
+	})
+
+	t.Run("the default selection carries no port", func(t *testing.T) {
+		got := ResolveRDMAPolicy(RDMAPolicyInputs{
+			Synced:    true,
+			Node:      node,
+			Inventory: inventory(),
+		})
+		require.Equal(t, RDMAPolicyResolutionDefault, got.Status)
+		assert.Nil(t, got.Port, "no policy, no port restriction")
 	})
 }

@@ -129,6 +129,7 @@ As a workload owner, I want a single `GPUSTACK_RDMA_DEVICES` environment variabl
 - Limit the policy to RDMA allocation candidates. Preserve ordinary and virtual interfaces in `Devices.spec.interfaces`; the policy does not configure host or Pod networking.
 - Without either filter, retain all candidates that meet the existing allocation and health rules, including netdev-free endpoints.
 - `spec.include` and `spec.exclude` are mutually exclusive; setting both is rejected at admission and treated as invalid at resolution.
+- An optional `spec.port` pins every selected HCA to one 1-based physical RDMA port; omission leaves every active port eligible. Admission refuses zero and negatives. Resolution fails a node closed when a selected HCA does not carry that port in its observed inventory; excluded and externally owned devices are never asked to carry it. Grants keep bare HCA names in `GPUSTACK_RDMA_DEVICES`, and `NCCL_IB_HCA` names each granted HCA with the pinned port.
 - Match names exactly: `mlx5_1` must not also match `mlx5_10`. Do not infer prefixes or patterns.
 - Reject malformed rules at admission. Report names absent from a complete node inventory as invalid on that node. An incomplete inventory leaves resolution unknown.
 - Fail closed on configuration or resolution errors: never fall back to all adapters or retain a stale previous selection. Whenever resolution is `Invalid`, `Conflict`, or `Unknown`, clear `excluded`, report `RDMASelectionResolved=False` (or `Unknown`), and mark all RDMA candidates unhealthy / unselected so zero HCAs are eligible for new allocations until the configuration is fixed.
@@ -168,6 +169,7 @@ Per-node resolution status belongs to `Devices.status.interfaces.rdmaSelectionPo
 | `spec.nodeSelector` | Required, non-null Kubernetes label selector. `{}` explicitly matches every node. |
 | `spec.include` | Optional list of exact HCA names. Mutually exclusive with `spec.exclude`. Absence or null means no inclusion restriction. |
 | `spec.exclude` | Optional list of exact HCA names. Mutually exclusive with `spec.include`. Absence or null excludes none. |
+| `spec.port` | Optional 1-based physical RDMA port. The schema carries `minimum: 1`; the webhook re-refuses zero and negatives. Resolution copies it into the applied selection only after every selected HCA carries it in the observed inventory, otherwise the node fails closed. Absence or null leaves every active port eligible. |
 
 Zero matching policies means the default selection after a successful policy list and complete inventory observation.
 One policy supplies the filters. More than one matching policy is a conflict, even if their rules are identical.
@@ -203,7 +205,7 @@ One policy supplies the filters. More than one matching policy is a conflict, ev
    - All three modes (`Exclusive`, `Shared`, `Partitioned`) emit `GPUSTACK_RDMA_DEVICES` and `NCCL_IB_HCA`.
    - When one or more selected HCAs are granted (`names = "mlx5_0,mlx5_1"`):
      - `GPUSTACK_RDMA_DEVICES`: `"mlx5_0,mlx5_1"`
-     - `NCCL_IB_HCA`: `"=mlx5_0,mlx5_1"`
+     - `NCCL_IB_HCA`: `"=mlx5_0,mlx5_1"`, or `"=mlx5_0:1,mlx5_1:1"` when the active selection pins port 1 — each granted HCA named with that port, so NCCL opens the selected port rather than any port of the adapter.
    - When no selected HCA can be picked (`len(grants) == 0`):
      - `GPUSTACK_RDMA_DEVICES`: `""`
      - `NCCL_IB_HCA`: `""`
