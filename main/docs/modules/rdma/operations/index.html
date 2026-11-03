@@ -1559,11 +1559,11 @@ container (<a href="/gpustack-operator/main/docs/modules/rdma/network-topology/#
       </tr>
       <tr>
           <td><code>NCCL_IB_HCA</code></td>
-          <td>sorted, unique granted HCA names, comma-joined with one leading <code>=</code> for exact matching</td>
+          <td>sorted, unique granted HCA names, comma-joined with one leading <code>=</code> for exact matching; each name carries a <code>:&lt;port&gt;</code> suffix when the active selection policy pins a port</td>
       </tr>
       <tr>
           <td><code>GPUSTACK_RDMA_DEVICES</code></td>
-          <td>the same sorted, unique comma-joined names without <code>=</code></td>
+          <td>the same sorted, unique comma-joined names without <code>=</code>, never carrying a port suffix</td>
       </tr>
   </tbody>
 </table>
@@ -1581,6 +1581,9 @@ Switching modes does not change the grant variable names.</p>
 </div><p>The example values are illustrative. Repeated tokens or endpoints naming one HCA produce one name
 and one <code>uverbs</code> mapping. This response deduplication leaves advertised IDs and capacity unchanged.
 Allocation fails if a granted HCA&rsquo;s device node cannot be resolved; it returns no partial grant.</p>
+<p>When the active <code>DevicesRDMASelectionPolicy</code> pins a port, <code>NCCL_IB_HCA</code> names each granted HCA
+with that port, as in <code>=mlx5_1:1,mlx5_10:1</code>, while <code>GPUSTACK_RDMA_DEVICES</code> stays bare. NCCL then
+opens the port the policy selected rather than any port of the adapter.</p>
 <p>When no HCA remains eligible for a grant, the response injects <code>GPUSTACK_RDMA_DEVICES=&quot;&quot;</code> and
 <code>NCCL_IB_HCA=&quot;&quot;</code> with no character device nodes. This can happen when the active
 <code>DevicesRDMASelectionPolicy</code> excludes every granted endpoint. Already-running containers remain
@@ -1677,6 +1680,28 @@ again:</p>
 </span></span><span class="line"><span class="cl">     - mlx5_10
 </span></span><span class="line"><span class="cl"><span class="gd">-    - mlx5_11
 </span></span></span></code></pre></div>
+</div><p>To pin every selected adapter to one physical port, add <code>port</code> to the same policy:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>diff</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-diff" data-lang="diff"><span class="line"><span class="cl"> apiVersion: worker.gpustack.ai/v1
+</span></span><span class="line"><span class="cl"> kind: DevicesRDMASelectionPolicy
+</span></span><span class="line"><span class="cl"> metadata:
+</span></span><span class="line"><span class="cl">   name: b300-compute-hcas
+</span></span><span class="line"><span class="cl"> spec:
+</span></span><span class="line"><span class="cl">   nodeSelector:
+</span></span><span class="line"><span class="cl">     matchLabels:
+</span></span><span class="line"><span class="cl">       gpu.gpustack.ai/model: b300
+</span></span><span class="line"><span class="cl">   include:
+</span></span><span class="line"><span class="cl">     - mlx5_4
+</span></span><span class="line"><span class="cl">     - mlx5_5
+</span></span><span class="line"><span class="cl">     - mlx5_6
+</span></span><span class="line"><span class="cl">     - mlx5_7
+</span></span><span class="line"><span class="cl">     - mlx5_8
+</span></span><span class="line"><span class="cl">     - mlx5_9
+</span></span><span class="line"><span class="cl">     - mlx5_10
+</span></span><span class="line"><span class="cl"><span class="gi">+  # 1-based physical port; every selected HCA must carry it on the node.
+</span></span></span><span class="line"><span class="cl"><span class="gi">+  port: 1
+</span></span></span></code></pre></div>
 </div><p>Read selection status on the node&rsquo;s <code>Devices</code> resource. This illustrative excerpt shows the result
 when <code>mlx5_4..mlx5_11</code> are selected:</p>
 <div class="code-block">
@@ -1717,6 +1742,14 @@ Setting both <code>include</code> and <code>exclude</code> is invalid, even when
 HCA in <code>include</code> or <code>exclude</code> that is absent from a matched node&rsquo;s complete verbs inventory is
 also invalid on that node and fails it closed, so a selector spanning nodes with different HCA sets
 must not name adapters missing on any matched node.</p>
+<p>An optional <code>port</code> further restricts the selection to one physical RDMA port per adapter. The
+number is 1-based; zero and negatives are refused at admission. Every HCA the policy selects must
+observe that port in the node&rsquo;s verbs inventory, so a policy whose selected devices do not carry
+it fails the node closed, like any other invalid resolution. Excluded and externally owned devices
+are never asked to carry the port.</p>
+<p>With <code>port</code> set, <code>GPUSTACK_RDMA_DEVICES</code> still lists bare HCA names, and the NCCL filter names
+each granted HCA with that port. Omit the field, or set it to null, to leave every active port of
+each selected HCA eligible.</p>
 <p>Multiple policies matching a node conflict; no priority or merge rule selects one. A policy cannot
 override an externally owned device&rsquo;s boundary.</p>
 <p>The CRD schema requires each supplied list to contain at least one name. Omit a field or set it to
@@ -2003,7 +2036,7 @@ the bare host.</div>
           
           
           <nav class="page-actions" aria-label="Page source">
-            <a href="https://github.com/gpustack/gpustack-operator/blob/26f985d9ff6a706b54e102977f74c2e3a8d93bdc/docs/modules/rdma/operations.md">View page source</a>
+            <a href="https://github.com/gpustack/gpustack-operator/blob/ff55d90bfcafb9c813f318857b6942092d788d0a/docs/modules/rdma/operations.md">View page source</a>
             
             <a href="https://github.com/gpustack/gpustack-operator/edit/main/docs/modules/rdma/operations.md">Edit this page</a>
             
