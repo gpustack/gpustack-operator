@@ -292,7 +292,8 @@ resource "nebius_billing_v1_pricing_policy" "this" {
   parent_id             = var.project_id
   name                  = "${local.vm_name}-spot"
   compute_instance_spec = { v1 = { platform = var.instance_type.platform } }
-  pricing               = { max_price_v1 = { max_price = local.effective_price } }
+  # Nebius returns normalized decimals; trim zeros without rounding the price limit.
+  pricing = { max_price_v1 = { max_price = local.effective_price == null ? null : trimsuffix(replace(replace(local.effective_price, "/^0+([0-9])/", "$1"), "/(\\.[0-9]*?)0+$/", "$1"), ".") } }
   lifecycle {
     replace_triggered_by = [null_resource.price]
     precondition {
