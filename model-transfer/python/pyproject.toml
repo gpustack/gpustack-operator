@@ -1,0 +1,53 @@
+[build-system]
+requires = ["hatchling", "hatch-vcs"]
+build-backend = "hatchling.build"
+
+[project]
+name = "gpustack-model-transfer"
+description = "GPUStack portable weight-transfer client, local reference reader, engine adapters, and acceptance runner."
+readme = "README.md"
+requires-python = ">=3.10"
+authors = [{name = "GPUStack Authors", email = "contact@gpustack.ai"}]
+license = "Apache-2.0"
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+]
+dependencies = []
+dynamic = ["version"]
+
+[project.entry-points."vllm.general_plugins"]
+model_transfer = "gpustack_model_transfer.adapters.vllm.plugin:register"
+gpustack_modelexpress = "gpustack_model_transfer.adapters.modelexpress.registration:register"
+
+[tool.hatch.build]
+artifacts = ["gpustack_model_transfer_autoload.pth"]
+
+[tool.hatch.build.force-include]
+"gpustack_model_transfer_autoload.pth" = "gpustack_model_transfer_autoload.pth"
+
+[tool.hatch.build.targets.wheel]
+packages = ["gpustack_model_transfer"]
+
+[project.optional-dependencies]
+# Vendor runtimes stay optional and are imported lazily by their own
+# subpackages only; a default import of gpustack_model_transfer needs neither.
+nixl = []
+hixl = []
+
+[project.urls]
+"Homepage" = "https://github.com/gpustack/gpustack"
+"Bug Tracker" = "https://github.com/gpustack/gpustack/issues"
+
+[dependency-groups]
+dev = [
+    "pyclean==3.4.0",
+    "pre-commit==4.5.0; python_version >= '3.11'",
+    "pytest==9.0.3",
+    "ruff>=0.6.0",
+    "hatchling",
+    "hatch-vcs",
+]
