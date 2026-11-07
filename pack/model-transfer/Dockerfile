@@ -37,6 +37,8 @@
 # nixl-rocm, with no CUDA backend packages or inference-engine image dependency.
 # The production source supervisor currently admits nvidia/nixl and ascend/hixl,
 # but not amd/nixl; ROCm packaging does not establish AMD source-worker support.
+# If overriding LD_LIBRARY_PATH for ROCm, retain /opt/nixl/lib, /opt/ucx/lib
+# and /opt/rocm/lib so the packaged native libraries remain loadable.
 # Package checks do not establish GPU, NPU or RDMA runtime acceptance.
 # See model-transfer/python/README.md for the packaged SDK and its runtime requirements.
 
