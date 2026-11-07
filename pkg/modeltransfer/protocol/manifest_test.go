@@ -28,7 +28,7 @@ func TestManifestRawByteBound(t *testing.T) {
 			raw := bytes.Repeat([]byte(" "), tt.size)
 			copy(raw, fixture)
 			require.NoError(t, os.WriteFile(path, raw, 0o600))
-			got, err := LoadManifest(path, "")
+			got, err := LoadManifest(t.Context(), path, "")
 			if tt.wantErr {
 				require.ErrorContains(t, err, "byte bound")
 				require.Equal(t, KindInvalidDescriptor, KindOf(err))
@@ -64,7 +64,7 @@ func loadFixtureManifest(t *testing.T) *Manifest {
 	t.Helper()
 	path := filepath.Join(fixtureDir, "manifest.json")
 	expected := strings.TrimSpace(tReadFile(t, filepath.Join(fixtureDir, "manifest.sha256")))
-	manifest, err := LoadManifest(path, expected)
+	manifest, err := LoadManifest(t.Context(), path, expected)
 	require.NoError(t, err)
 	return manifest
 }
@@ -103,7 +103,7 @@ func TestGoldenManifestLayoutMatchesFixture(t *testing.T) {
 
 func TestLoadManifestDigestMismatch(t *testing.T) {
 	path := filepath.Join(fixtureDir, "manifest.json")
-	_, err := LoadManifest(path, strings.Repeat("0", 64))
+	_, err := LoadManifest(t.Context(), path, strings.Repeat("0", 64))
 	require.Error(t, err)
 	assert.Equal(t, KindAuthentication, KindOf(err))
 }
@@ -115,7 +115,7 @@ func TestLoadManifestUnknownField(t *testing.T) {
 	require.NoError(t, err)
 	loose := strings.Replace(string(raw), "{", `{"extra":1,`, 1)
 	require.NoError(t, os.WriteFile(path, []byte(loose), 0o600))
-	_, err = LoadManifest(path, "")
+	_, err = LoadManifest(t.Context(), path, "")
 	require.Error(t, err)
 	assert.Equal(t, KindInvalidDescriptor, KindOf(err))
 }
@@ -131,7 +131,7 @@ func TestLoadManifestWrongContractVersion(t *testing.T) {
 	mutated, err := json.Marshal(fields)
 	require.NoError(t, err)
 	require.NoError(t, os.WriteFile(path, mutated, 0o600))
-	_, err = LoadManifest(path, "")
+	_, err = LoadManifest(t.Context(), path, "")
 	require.Error(t, err)
 	assert.Equal(t, KindContractVersion, KindOf(err))
 }
@@ -149,7 +149,7 @@ func TestLoadManifestTensorUnknownFile(t *testing.T) {
 	mutated, err := json.Marshal(fields)
 	require.NoError(t, err)
 	require.NoError(t, os.WriteFile(path, mutated, 0o600))
-	_, err = LoadManifest(path, "")
+	_, err = LoadManifest(t.Context(), path, "")
 	require.Error(t, err)
 	assert.Equal(t, KindInvalidDescriptor, KindOf(err))
 }
@@ -170,18 +170,18 @@ func TestLoadManifestOverlappingTensors(t *testing.T) {
 	mutated, err := json.Marshal(fields)
 	require.NoError(t, err)
 	require.NoError(t, os.WriteFile(path, mutated, 0o600))
-	_, err = LoadManifest(path, "")
+	_, err = LoadManifest(t.Context(), path, "")
 	require.Error(t, err)
 	assert.Equal(t, KindInvalidDescriptor, KindOf(err))
 }
 
 func TestManifestLookups(t *testing.T) {
 	manifest := loadFixtureManifest(t)
-	tensor, err := manifest.Tensor("model.norm.weight")
+	tensor, err := manifest.Tensor(t.Context(), "model.norm.weight")
 	require.NoError(t, err)
 	assert.Equal(t, "F32", tensor.Dtype)
 
-	_, err = manifest.Tensor("nope")
+	_, err = manifest.Tensor(t.Context(), "nope")
 	assert.Equal(t, KindInvalidDescriptor, KindOf(err))
 
 	file, err := manifest.File("checkpoint.safetensors")
@@ -200,7 +200,7 @@ func TestLoadManifestRejectsTrailingTokensAndMissingSections(t *testing.T) {
 		dir := t.TempDir()
 		path := filepath.Join(dir, "manifest.json")
 		require.NoError(t, os.WriteFile(path, append(append([]byte{}, raw...), []byte(`{"extra":1}`)...), 0o600))
-		_, err := LoadManifest(path, "")
+		_, err := LoadManifest(t.Context(), path, "")
 		require.Error(t, err)
 		assert.Equal(t, KindInvalidDescriptor, KindOf(err))
 	})
@@ -214,7 +214,7 @@ func TestLoadManifestRejectsTrailingTokensAndMissingSections(t *testing.T) {
 		mutated, err := json.Marshal(fields)
 		require.NoError(t, err)
 		require.NoError(t, os.WriteFile(path, mutated, 0o600))
-		_, err = LoadManifest(path, "")
+		_, err = LoadManifest(t.Context(), path, "")
 		require.Error(t, err)
 		assert.Equal(t, KindInvalidDescriptor, KindOf(err))
 	})
@@ -228,7 +228,7 @@ func TestLoadManifestRejectsTrailingTokensAndMissingSections(t *testing.T) {
 		mutated, err := json.Marshal(fields)
 		require.NoError(t, err)
 		require.NoError(t, os.WriteFile(path, mutated, 0o600))
-		_, err = LoadManifest(path, "")
+		_, err = LoadManifest(t.Context(), path, "")
 		require.Error(t, err)
 		assert.Equal(t, KindInvalidDescriptor, KindOf(err))
 	})

@@ -24,11 +24,11 @@ func TestBuildPagedPreservesPublishedLayout(t *testing.T) {
 	require.Empty(t, view.Manifest.Tensors)
 	path := filepath.Join(directory, "manifest.json")
 	require.NoError(t, os.WriteFile(path, view.Raw, 0o600))
-	loaded, err := protocol.LoadManifest(path, view.SHA256)
+	loaded, err := protocol.LoadManifest(t.Context(), path, view.SHA256)
 	require.NoError(t, err)
 	require.Equal(t, len(legacy.Manifest.Tensors), loaded.TensorCount())
 	for _, want := range legacy.Manifest.Tensors {
-		got, err := loaded.Tensor(want.Name)
+		got, err := loaded.Tensor(t.Context(), want.Name)
 		require.NoError(t, err)
 		require.Equal(t, want, got)
 	}

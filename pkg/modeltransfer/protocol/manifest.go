@@ -58,20 +58,6 @@ func (m *Manifest) File(path string) (FileDescriptor, error) {
 		"unknown file %q", path)
 }
 
-// Tensor returns one tensor without cancellation. Request paths use TensorContext.
-func (m *Manifest) Tensor(name string) (TensorDescriptor, error) {
-	if len(m.TensorPages) > 0 {
-		return m.TensorContext(context.Background(), name)
-	}
-	for _, tensor := range m.Tensors {
-		if tensor.Name == name {
-			return tensor, nil
-		}
-	}
-	return TensorDescriptor{}, New(KindInvalidDescriptor, "manifest.tensor",
-		"unknown tensor %q", name)
-}
-
 // Check validates the manifest structure: contract version, identity fields,
 // file and tensor descriptors, and per-file overlap. It does not verify the
 // manifest digest, which only the loader knows.
@@ -145,12 +131,7 @@ func (m *Manifest) Check() error {
 // when non-empty, must equal the sha256 of the manifest bytes; a mismatch
 // is an authentication failure, not a parse error. Unknown fields are
 // rejected so a newer manifest cannot silently drop fields.
-func LoadManifest(path, expectedSHA256 string) (*Manifest, error) {
-	return LoadManifestContext(context.Background(), path, expectedSHA256)
-}
-
-// LoadManifestContext verifies a local manifest and its pages within the caller context.
-func LoadManifestContext(ctx context.Context, path, expectedSHA256 string) (*Manifest, error) {
+func LoadManifest(ctx context.Context, path, expectedSHA256 string) (*Manifest, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}

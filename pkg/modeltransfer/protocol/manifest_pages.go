@@ -196,14 +196,19 @@ func (m *Manifest) page(ctx context.Context, number int) ([]TensorDescriptor, er
 	return tensors, nil
 }
 
-// TensorContext resolves one name using a bounded page cache. A hash collision
+// Tensor resolves one name using a bounded page cache. A hash collision
 // cannot select another name because the descriptor itself is checked again.
-func (m *Manifest) TensorContext(ctx context.Context, name string) (TensorDescriptor, error) {
+func (m *Manifest) Tensor(ctx context.Context, name string) (TensorDescriptor, error) {
 	if err := ctx.Err(); err != nil {
 		return TensorDescriptor{}, err
 	}
 	if len(m.TensorPages) == 0 {
-		return m.Tensor(name)
+		for _, tensor := range m.Tensors {
+			if tensor.Name == name {
+				return tensor, nil
+			}
+		}
+		return TensorDescriptor{}, New(KindInvalidDescriptor, "manifest.tensor", "unknown tensor %q", name)
 	}
 	if m.pageIndex == nil {
 		return TensorDescriptor{}, New(KindSourceUnavailable, "manifest.pages", "pages have not been verified")

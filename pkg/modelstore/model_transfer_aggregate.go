@@ -90,13 +90,17 @@ func AggregateModelTransferGenerations(
 }
 
 // GenerationLess orders generation identifiers deterministically: two
-// numeric identifiers compare as numbers (a node's tenth generation sorts
-// after its second), and anything else falls back to the plain name order.
+// numeric identifiers sort before nonnumeric identifiers and compare as numbers.
+// Equal numbers and nonnumeric identifiers use the plain name order.
 func GenerationLess(a, b string) bool {
 	av, aerr := strconv.ParseUint(a, 10, 64)
 	bv, berr := strconv.ParseUint(b, 10, 64)
 	if aerr == nil && berr == nil {
-		return av < bv
+		if av != bv {
+			return av < bv
+		}
+	} else if (aerr == nil) != (berr == nil) {
+		return aerr == nil
 	}
 
 	return a < b

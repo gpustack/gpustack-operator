@@ -200,10 +200,10 @@ func TestBuildBridgesAPublishedTreeIntoAPortableManifest(t *testing.T) {
 	// The manifest loads under its own digest, and under no other.
 	path := filepath.Join(t.TempDir(), "manifest.json")
 	require.NoError(t, os.WriteFile(path, view.Raw, 0o600))
-	loaded, err := protocol.LoadManifest(path, view.SHA256)
+	loaded, err := protocol.LoadManifest(t.Context(), path, view.SHA256)
 	require.NoError(t, err)
 	assert.Equal(t, view.Manifest.ContractVersion, loaded.ContractVersion)
-	_, err = protocol.LoadManifest(path, strings.Repeat("ab", 32))
+	_, err = protocol.LoadManifest(t.Context(), path, strings.Repeat("ab", 32))
 	require.Error(t, err)
 	assert.Equal(t, protocol.KindAuthentication, protocol.KindOf(err))
 

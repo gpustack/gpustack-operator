@@ -92,9 +92,9 @@ func PlanModelTransferSourceMemory(resolvedBytes, grantBytes int64) (ModelTransf
 
 	// The headroom the grant leaves for residency once the fill window and the
 	// declared runtime overhead are paid. The residency itself quarters into
-	// quarantine, so the headroom backs four fifths of its own size.
+	// quarantine. Divide before multiplying to avoid overflowing large grants.
 	available := grantBytes - fill - runtime
-	maxResident := available / 5 * 4
+	maxResident := available / (modelTransferQuarantineDivisor + 1) * modelTransferQuarantineDivisor
 
 	// The floor bounds what a grant can back, not what a checkpoint needs: a
 	// small checkpoint under a floor-capable grant reserves only its own size.

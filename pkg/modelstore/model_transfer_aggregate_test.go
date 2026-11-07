@@ -1,6 +1,7 @@
 package modelstore
 
 import (
+	"slices"
 	"strings"
 	"testing"
 
@@ -10,6 +11,29 @@ import (
 
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
 )
+
+func TestGenerationLessIsTransitive(t *testing.T) {
+	values := []string{"2", "10", "1zz", "02", "18446744073709551616", "g-nvidia-1"}
+	for _, a := range values {
+		for _, b := range values {
+			for _, c := range values {
+				if GenerationLess(a, b) && GenerationLess(b, c) {
+					assert.True(t, GenerationLess(a, c), "%q < %q < %q must be transitive", a, b, c)
+				}
+			}
+		}
+	}
+	slices.SortFunc(values, func(a, b string) int {
+		if GenerationLess(a, b) {
+			return -1
+		}
+		if GenerationLess(b, a) {
+			return 1
+		}
+		return 0
+	})
+	assert.Equal(t, []string{"02", "2", "10", "18446744073709551616", "1zz", "g-nvidia-1"}, values)
+}
 
 // modelTransferReport builds one store's model-transfer report with the given generation entries.
 func modelTransferReport(entries ...workercore.NodeModelStoreModelTransferGeneration) *workercore.NodeModelStoreModelTransferStatus {

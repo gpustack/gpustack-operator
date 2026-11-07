@@ -18,9 +18,9 @@ func TestPagedManifestLookup(t *testing.T) {
 		{{Name: "first", File: "weights.safetensors", Dtype: "U8", Shape: []int64{4}, DataBegin: 8, DataEnd: 12}},
 		{{Name: "last", File: "weights.safetensors", Dtype: "U8", Shape: []int64{4}, DataBegin: 12, DataEnd: 16}},
 	})
-	manifest, err := LoadManifest(path, "")
+	manifest, err := LoadManifest(t.Context(), path, "")
 	require.NoError(t, err)
-	got, err := manifest.Tensor("last")
+	got, err := manifest.Tensor(t.Context(), "last")
 	require.NoError(t, err)
 	require.Equal(t, int64(12), got.DataBegin)
 	require.Empty(t, manifest.Tensors, "paged loading must not assemble the whole tensor table")
@@ -39,7 +39,7 @@ func TestPagedManifestRejectsCrossPageCorruption(t *testing.T) {
 				{{Name: "first", File: "weights.safetensors", Dtype: "U8", Shape: []int64{4}, DataBegin: 8, DataEnd: 12}},
 				{{Name: tc.secondName, File: "weights.safetensors", Dtype: "U8", Shape: []int64{4}, DataBegin: tc.begin, DataEnd: tc.end}},
 			})
-			_, err := LoadManifest(path, "")
+			_, err := LoadManifest(t.Context(), path, "")
 			require.Error(t, err)
 		})
 	}
@@ -97,10 +97,10 @@ func TestManifestPagesLargerThanLegacyDocument(t *testing.T) {
 	require.Less(t, len(raw), 1<<20)
 	path := filepath.Join(directory, "manifest.json")
 	require.NoError(t, os.WriteFile(path, raw, 0o600))
-	loaded, err := LoadManifest(path, "")
+	loaded, err := LoadManifest(t.Context(), path, "")
 	require.NoError(t, err)
 	require.Equal(t, count, loaded.TensorCount())
-	got, err := loaded.Tensor(fmt.Sprintf("%06d", count-1) + strings.Repeat("x", 1024))
+	got, err := loaded.Tensor(t.Context(), fmt.Sprintf("%06d", count-1)+strings.Repeat("x", 1024))
 	require.NoError(t, err)
 	require.Equal(t, int64(count), got.DataEnd)
 	require.Empty(t, loaded.Tensors)
@@ -111,7 +111,7 @@ func TestPageReadDoesNotBlockUnrelatedLookup(t *testing.T) {
 		{{Name: "first", File: "weights.safetensors", Dtype: "U8", Shape: []int64{4}, DataBegin: 8, DataEnd: 12}},
 		{{Name: "last", File: "weights.safetensors", Dtype: "U8", Shape: []int64{4}, DataBegin: 12, DataEnd: 16}},
 	})
-	manifest, err := LoadManifest(path, "")
+	manifest, err := LoadManifest(t.Context(), path, "")
 	require.NoError(t, err)
 	reader := manifest.pageIndex.reader
 	entered, release := make(chan struct{}), make(chan struct{})
@@ -123,9 +123,9 @@ func TestPageReadDoesNotBlockUnrelatedLookup(t *testing.T) {
 		return reader(ctx, page)
 	}
 	firstDone, lastDone := make(chan error, 1), make(chan error, 1)
-	go func() { _, err := manifest.TensorContext(context.Background(), "first"); firstDone <- err }()
+	go func() { _, err := manifest.Tensor(context.Background(), "first"); firstDone <- err }()
 	<-entered
-	go func() { _, err := manifest.TensorContext(context.Background(), "last"); lastDone <- err }()
+	go func() { _, err := manifest.Tensor(context.Background(), "last"); lastDone <- err }()
 	select {
 	case err := <-lastDone:
 		close(release)
@@ -140,6 +140,6 @@ func TestPageReadDoesNotBlockUnrelatedLookup(t *testing.T) {
 func TestLoadManifestContextHonorsCancellation(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	_, err := LoadManifestContext(ctx, "unused", "")
+	_, err := LoadManifest(ctx, "unused", "")
 	require.ErrorIs(t, err, context.Canceled)
 }
