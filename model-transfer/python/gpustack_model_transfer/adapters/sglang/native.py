@@ -353,6 +353,7 @@ class NativeSGLangModelTransferLoader:
                 session.close()
                 session = None
         except BaseException:
+            # Even preflight refusal is fatal: peers may already be transferring.
             _process_unusable = True
             if session is not None:
                 with suppress(BaseException):

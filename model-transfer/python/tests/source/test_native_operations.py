@@ -549,3 +549,99 @@ def test_non_ascii_authorization_is_forbidden(tmp_path, method, path):
         server.shutdown()
         server.server_close()
         thread.join()
+
+
+def test_session_close_is_admitted_before_native_drain_starts():
+    source, controls, worker, _writer, body = setup()
+    registry = source.operations
+    from gpustack_model_transfer.source.transfer_service import _common
+
+    close = common(body)
+    key = _common(close)
+    calls = []
+    try:
+        controls["generation-1"].active = 1
+        eventually(lambda: worker.active_sessions == 1)
+        controls["generation-1"].action = "drain"
+        eventually(worker._drain_requested.is_set)
+        worker.backend.close_session_connections = calls.append
+        with registry.lock:
+            registry.sessions[key] = {
+                "state": "open",
+                "owner": owner(body),
+                "worker": worker,
+            }
+        assert registry.close_session(close) == {"state": "closed"}
+        assert calls == [key]
+        assert worker.native_operations == 0
+        assert not worker._drain_started
+    finally:
+        controls["generation-1"].active = 0
+        controls["generation-1"].action = "drain"
+        eventually(lambda: worker.state == "drained")
+
+
+@pytest.mark.parametrize("existing", [False, True])
+def test_late_session_close_cannot_enqueue_during_native_drain(existing):
+    source, controls, worker, _writer, body = setup()
+    registry = source.operations
+    from gpustack_model_transfer.source.transfer_service import _common
+
+    close = common(body)
+    key = _common(close)
+    entered, release = threading.Event(), threading.Event()
+    calls = []
+
+    def disconnect(_registration):
+        entered.set()
+        assert release.wait(3)
+
+    worker.backend.disconnect = disconnect
+    worker.backend.close_session_connections = calls.append
+    if existing:
+        with registry.lock:
+            registry.sessions[key] = {
+                "state": "open",
+                "owner": owner(body),
+                "worker": worker,
+            }
+    try:
+        controls["generation-1"].action = "drain"
+        assert entered.wait(3)
+        with pytest.raises(Refused, match="native drain in progress"):
+            registry.close_session(close)
+        assert worker.native_operations == 1
+        assert not registry._session_closes
+        assert (key in registry.sessions) is existing
+        if existing:
+            assert registry.sessions[key]["state"] == "open"
+    finally:
+        release.set()
+        eventually(lambda: worker.state == "drained")
+    assert worker.native_operations == 0
+    assert registry.close_session(close) == {"state": "closed"}
+    assert not calls
+    assert (key in registry.sessions) is existing
+    if existing:
+        assert registry.sessions[key]["worker"] is None
+
+
+def test_native_drain_preserves_unknown_close_receipt():
+    source, controls, worker, _writer, body = setup()
+    from gpustack_model_transfer.source.transfer_service import _common
+
+    close = common(body)
+    key = _common(close)
+    try:
+        with source.operations.lock:
+            source.operations.sessions[key] = {
+                "state": "unknown",
+                "owner": owner(body),
+                "worker": worker,
+            }
+        controls["generation-1"].action = "drain"
+        eventually(lambda: worker.state == "drained")
+        assert source.operations.close_session(close) == {"state": "closing"}
+        assert source.operations.sessions[key]["state"] == "unknown"
+    finally:
+        worker.close()

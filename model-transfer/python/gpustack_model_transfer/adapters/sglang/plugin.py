@@ -55,7 +55,12 @@ def register() -> None:
                 load_format_cls._value2member_map_["model-transfer"] = member
                 type.__setattr__(load_format_cls, "MODEL_TRANSFER", member)
     except Exception as exc:
-        _LOG.debug("SGLang enum registration unavailable (%s)", type(exc).__name__)
+        log = (
+            _LOG.debug
+            if isinstance(exc, ModuleNotFoundError) and exc.name == "sglang"
+            else _LOG.error
+        )
+        log("SGLang enum registration unavailable (%s)", type(exc).__name__)
 
     try:
         import sglang.srt.model_loader as ml_pkg

@@ -458,14 +458,23 @@ class OperationRegistry:
         _fields(body, _COMMON)
         worker = self._worker(body)
         common = _common(body)
-        with self.lock:
+        with self.lock, worker._lock:
+            session = self.sessions.get(common)
+            if session is not None:
+                if session["state"] == "closed":
+                    return {"state": "closed"}
+                if session["state"] == "unknown":
+                    return {"state": "closing"}
+            if worker._release_done and not worker._unknown_event.is_set():
+                if session is not None:
+                    session["state"] = "closed"
+                    session["worker"] = None
+                return {"state": "closed"}
+            if worker._drain_started:
+                raise Refused("native drain in progress")
             if common not in self.sessions and len(self.sessions) >= MAX_SESSIONS:
                 raise Refused("journal full")
             session = self.sessions.setdefault(common, {"state": "open", "owner": None})
-            if session["state"] == "closed":
-                return {"state": "closed"}
-            if session["state"] == "unknown":
-                return {"state": "closing"}
             if session["state"] == "open":
                 session["state"] = "closing"
             if any(
@@ -479,11 +488,10 @@ class OperationRegistry:
                 session["worker"] = None
                 return {"state": "closed"}
             if "close_event" not in session:
-                with worker._lock:
-                    if worker._unknown_event.is_set():
-                        session["state"] = "unknown"
-                        return {"state": "closing"}
-                    worker.native_operations += 1
+                if worker._unknown_event.is_set():
+                    session["state"] = "unknown"
+                    return {"state": "closing"}
+                worker.native_operations += 1
                 session["close_event"] = threading.Event()
                 session["worker"] = worker
                 self._session_closes.setdefault(worker, deque()).append(common)

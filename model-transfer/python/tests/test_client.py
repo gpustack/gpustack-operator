@@ -832,3 +832,29 @@ def test_native_rejects_device_work_on_prefetch_thread(monkeypatch):
     helper.start()
     helper.join(timeout=2)
     assert len(errors) == 4 and not events and not helper.is_alive()
+
+
+@pytest.mark.parametrize("failure_type", [RuntimeError, KeyboardInterrupt])
+@pytest.mark.parametrize("failed_index", [0, 1])
+def test_close_attempts_each_independent_native_owner(
+    make_pipeline, monkeypatch, failure_type, failed_index
+):
+    harness = make_pipeline()
+    for index in range(len(harness.tensors)):
+        harness.fill(index)
+    failed = harness.windows[failed_index]
+    attempted = []
+
+    def fail_close():
+        attempted.append(failed_index)
+        raise failure_type("release uncertain")
+
+    monkeypatch.setattr(failed, "close", fail_close)
+    with pytest.raises(SourceUnavailableError, match="target release outcome unknown"):
+        harness.session.close()
+    assert attempted == [failed_index]
+    assert not failed.closed
+    assert harness.windows[1 - failed_index].closed
+    assert harness.session.unknown and not harness.session.closed
+    assert harness.session in client._RETAINED
+    assert harness.close_phases == [False]

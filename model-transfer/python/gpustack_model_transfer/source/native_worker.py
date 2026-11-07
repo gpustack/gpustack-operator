@@ -84,6 +84,7 @@ class NativeSourceWorker:
         self._control_thread = None
         self._lock = threading.Lock()
         self._release_done = False
+        self._drain_started = False
         self._native_attempted = False
         self._retention = None
         self._blocks_idle = False
@@ -289,7 +290,8 @@ class NativeSourceWorker:
             ):
                 return
             # The broker drain action must prohibit new sessions before it reports zero.
-            self.native_operations = 1
+            self._drain_started = True
+            self.native_operations += 1
         try:
             if not self._release_done:
                 if self.registration is not None:
@@ -308,13 +310,15 @@ class NativeSourceWorker:
                 if self.allocator is not None and hasattr(self.allocator, "dispose"):
                     self._check_not_unknown()
                     self.allocator.dispose()
-                self._check_not_unknown()
-                self._release_done = True
+                with self._lock:
+                    self._check_not_unknown()
+                    self._release_done = True
         except BaseException as exc:
             self._quarantine(type(exc).__name__)
             return
         finally:
-            self.native_operations = 0
+            with self._lock:
+                self.native_operations -= 1
         try:
             self._retry(lambda: self.control.drain_ack(native_released=True))
         except ControlError as exc:
@@ -476,15 +480,21 @@ class NativeSourceWorker:
             raise RuntimeError("native state became unknown")
 
     def _quarantine(self, reason, stage=None):
-        self._unknown_event.set()
+        with self._lock:
+            self._unknown_event.set()
+            self._abort_fill_requested.set()
+            retain = self._native_attempted and not self._release_done
+            if retain and self._retention is None:
+                handles = getattr(self.registration, "handles", {})
+                self._retention = retain_source_state(
+                    handles, self.blocks, reason, owner=self, backend=self.backend
+                )
+            self.state = "quarantined" if retain else "stopped"
+            if not retain:
+                self._stop_event.set()
+                self._wake_event.set()
         if self.operations is not None:
             self.operations.mark_unknown(self)
-        if self._retention is None:
-            handles = getattr(self.registration, "handles", {})
-            self._retention = retain_source_state(
-                handles, self.blocks, reason, owner=self, backend=self.backend
-            )
-        self.state = "quarantined"
         with suppress(Exception):
             self.control.quarantine(_stage_reason(reason, stage))
 

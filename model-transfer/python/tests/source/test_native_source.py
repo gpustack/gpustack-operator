@@ -740,3 +740,60 @@ def test_unstarted_worker_cleanup_does_not_hold_supervisor_lock(monkeypatch):
     assert observed == [True]
     assert not s.workers
     assert not s.threads
+
+
+def test_pre_native_unknown_can_retire_without_consuming_generation_slots(monkeypatch):
+    from gpustack_model_transfer.source.backend import retained_source_states
+
+    entered, release = threading.Event(), threading.Event()
+    original_start = Control.native_start
+
+    def pause_before_native(self):
+        entered.set()
+        assert release.wait(3)
+        original_start(self)
+
+    monkeypatch.setattr(Control, "native_start", pause_before_native)
+    source, _controls, backends, allocators = supervisor([])
+    source.max_generations = 2
+    retained = retained_source_states()
+    for index in range(source.max_generations + 2):
+        entered.clear()
+        release.clear()
+        generation = f"generation-{index}"
+        source.bootstrap.orders = [order(generation)]
+        assert source.poll_once() == 1
+        worker = source.workers[generation]
+        try:
+            assert entered.wait(3)
+            assert not worker._native_attempted
+            worker.report_unknown("startup uncertain")
+        finally:
+            release.set()
+            source.threads[generation].join(timeout=3)
+        assert not source.threads[generation].is_alive()
+        assert worker.state == "stopped"
+        assert worker._retention is None
+        assert not backends and not allocators
+        source.bootstrap.orders = []
+        source.poll_once()
+        assert not source.workers
+    assert retained_source_states() == retained
+
+
+def test_unknown_after_native_attempt_still_retains_generation():
+    source, _controls, _backends, _allocators = supervisor([order()])
+    source.poll_once()
+    worker = source.workers["generation-1"]
+    eventually(lambda: worker.wait_until_filled(0))
+    try:
+        worker.report_unknown("post-start uncertainty")
+        source.threads["generation-1"].join(timeout=3)
+        source.bootstrap.orders = []
+        source.poll_once()
+        assert worker.state == "quarantined"
+        assert worker._retention is not None
+        assert source.workers["generation-1"] is worker
+        assert worker.blocks
+    finally:
+        worker._stop_event.set()

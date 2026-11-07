@@ -37,7 +37,10 @@ MIN_RESIDENT_BYTES = 1 << 30
 
 
 def resident_budget(total_bytes, admitted_bytes, backend):
-    """Resolve a source ceiling without enlarging the broker's admission."""
+    """Resolve a source ceiling without enlarging the broker's admission.
+
+    Zero adds no environment limit; positive values are clamped to the floor.
+    """
     envs = get_envs()
     raw = envs.GPUSTACK_MODEL_TRANSFER_SOURCE_RESIDENT_BUDGET_BYTES_RAW
     configured = envs.GPUSTACK_MODEL_TRANSFER_SOURCE_RESIDENT_BUDGET_BYTES
@@ -222,7 +225,7 @@ def parse_assignment(payload, *, backend: str, page_reader=None) -> Assignment:
         payload["sourceGeneration"], int
     ):
         raise InvalidDescriptorError("work order source generation must be an integer")
-    namespace = payload.get("namespace", "")
+    namespace = payload["namespace"]
     if (
         not isinstance(namespace, str)
         or len(namespace) > 253

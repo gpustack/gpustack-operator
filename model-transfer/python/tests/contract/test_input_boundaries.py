@@ -171,3 +171,41 @@ def test_modelexpress_metadata_checks_do_not_allocate_a_runtime():
     assert [result.status for result in results[:2]] == ["PASS", "PASS"]
     assert all(result.status == "NO-GO" for result in results[2:])
     assert len(calls) == len(results) - 2
+
+
+@pytest.mark.parametrize("engine", ["vllm", "sglang", "vllm_ascend"])
+def test_manifest_undeclared_file_is_rejected_before_header_io(engine, monkeypatch):
+    metadata = importlib.import_module(
+        f"gpustack_model_transfer.adapters.{engine}.metadata"
+    )
+    with closing(LocalFileReader(fixtureutil.manifest_path())) as reader:
+        tensors = list(reader.manifest.tensors)
+        tensors[0] = replace(tensors[0], file="undeclared.safetensors")
+        reader.manifest = replace(reader.manifest, tensors=tuple(tensors))
+        reads = []
+        monkeypatch.setattr(reader, "read_bytes", lambda *args: reads.append(args))
+        with pytest.raises(InvalidDescriptorError, match="references undeclared file"):
+            metadata.probe_checkpoint_metadata(reader)
+        assert not reads
+
+
+def test_sglang_store_uses_the_allocated_parameter_dtype():
+    from gpustack_model_transfer.adapters.sglang.torch_runtime import TorchRuntimeDriver
+
+    observed, copies = [], []
+    dtype = object()
+    raw = SimpleNamespace(reshape=lambda shape: ("reshaped", shape))
+
+    def frombuffer(payload, *, dtype):
+        observed.append((payload, dtype))
+        return raw
+
+    driver = TorchRuntimeDriver()
+    driver._torch = SimpleNamespace(frombuffer=frombuffer)
+    parameter = SimpleNamespace(dtype=dtype, shape=(1,), copy_=copies.append)
+    model = SimpleNamespace(parameters={"weight": parameter}, mutated=False)
+    entry = SimpleNamespace(tensor=SimpleNamespace(name="weight"))
+    assert driver.store(model, entry, b"abcd") == "owned"
+    assert observed == [(bytearray(b"abcd"), dtype)]
+    assert copies == [("reshaped", (1,))]
+    assert model.mutated

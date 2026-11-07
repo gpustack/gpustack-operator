@@ -1,6 +1,7 @@
 """Optional import hook for engines without entry-point plugin discovery (e.g. SGLang)."""
 
 import importlib.abc
+import importlib.machinery
 import logging
 import sys
 

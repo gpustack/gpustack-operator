@@ -26,6 +26,7 @@ gpustack_modelexpress = "gpustack_model_transfer.adapters.modelexpress.registrat
 [project.optional-dependencies]
 # Vendor runtimes stay optional and are imported lazily by their own
 # subpackages only; a default import of gpustack_model_transfer needs neither.
+# These extras are intentional no-ops: install vendor runtimes separately.
 nixl = []
 hixl = []
 

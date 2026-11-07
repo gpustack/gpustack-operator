@@ -202,15 +202,20 @@ def probe_checkpoint_metadata(
     check_supported_dtypes(sorted({tensor.dtype for tensor in manifest.tensors}))
     reject_unsupported_payload(names)
 
+    declared = {descriptor.path: set() for descriptor in manifest.files}
+    for tensor in manifest.tensors:
+        if tensor.file not in declared:
+            raise InvalidDescriptorError(
+                f"tensor {tensor.name!r} references undeclared file {tensor.file!r}"
+            )
+        declared[tensor.file].add(tensor.name)
+
     headers_by_file = {}
     for descriptor in manifest.files:
         headers_by_file[descriptor.path] = _parse_safetensors_header_with_base(
             reader, descriptor.path, max_chunk_bytes=max_chunk_bytes
         )
 
-    declared = {descriptor.path: set() for descriptor in manifest.files}
-    for tensor in manifest.tensors:
-        declared[tensor.file].add(tensor.name)
     ignored = {"__metadata__"}
     if tie_word_embeddings and "model.embed_tokens.weight" in names:
         ignored.add("lm_head.weight")
@@ -221,12 +226,7 @@ def probe_checkpoint_metadata(
             )
 
     for tensor in manifest.tensors:
-        parsed = headers_by_file.get(tensor.file)
-        if parsed is None:
-            raise InvalidDescriptorError(
-                f"tensor {tensor.name!r} references undeclared file {tensor.file!r}"
-            )
-        header, data_base = parsed
+        header, data_base = headers_by_file[tensor.file]
         entry = header.get(tensor.name)
         if entry is None:
             raise InvalidDescriptorError(

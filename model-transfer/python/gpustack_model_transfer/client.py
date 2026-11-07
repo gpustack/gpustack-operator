@@ -1435,8 +1435,15 @@ class EngineSession:
                 if self._windows:
                     for window in self._windows:
                         self._synchronize_window(window)
+                    failure = None
                     for native in self._native_owners:
-                        native.close()
+                        try:
+                            native.close()
+                        except BaseException as exc:  # noqa: PERF203
+                            if failure is None:
+                                failure = exc
+                    if failure is not None:
+                        raise failure
                 elif self.native is not None:
                     for target in self.targets:
                         self.native.synchronize(target)

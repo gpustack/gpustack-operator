@@ -348,15 +348,13 @@ def test_registry_step_without_stage_keeps_legacy_report():
 
 def _receipt_worker():
     sent = []
-    worker = object.__new__(NativeSourceWorker)
-    worker._unknown_event = threading.Event()
-    worker.operations = None
-    worker._retention = None
-    worker.registration = SimpleNamespace(handles={})
-    worker.blocks = []
-    worker.backend = "hixl"
-    worker.state = None
-    worker.control = SimpleNamespace(quarantine=lambda reason: sent.append(reason))
+    worker = NativeSourceWorker(
+        SimpleNamespace(quarantine=sent.append),
+        None,
+        backend="hixl",
+        allocator=None,
+        worker_instance_id="receipt-test",
+    )
     return worker, sent
 
 

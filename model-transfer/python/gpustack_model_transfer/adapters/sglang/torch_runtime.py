@@ -134,10 +134,9 @@ class TorchRuntimeDriver:
             # refuses a zero-byte buffer, and there is nothing to copy.
             model.mutated = True
             return "owned"
-        dtype = str(buffer.dtype).replace("torch.", "")
         # frombuffer exposes writable storage; copy the immutable payload before
         # giving Torch a view, then copy into the owned device parameter.
-        raw = torch.frombuffer(bytearray(payload), dtype=_torch_dtype(torch, dtype))
+        raw = torch.frombuffer(bytearray(payload), dtype=buffer.dtype)
         buffer.copy_(raw.reshape(buffer.shape))
         model.mutated = True
         return "owned"
@@ -163,16 +162,6 @@ class TorchRuntimeDriver:
 
     def profile_kv_capacity(self, model) -> int:
         raise PrerequisiteUnavailableError("KV profiling runs on the engine host")
-
-
-def _torch_dtype(torch, name: str):
-    mapping = {
-        "float32": torch.float32,
-        "float16": torch.float16,
-        "bfloat16": torch.bfloat16,
-        "int64": torch.int64,
-    }
-    return mapping[name]
 
 
 __all__ = [

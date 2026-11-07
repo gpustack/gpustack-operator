@@ -65,6 +65,8 @@ class Worker:
         self.worker_instance_id = "source-process"
         self._lock = threading.Lock()
         self._drain_requested = threading.Event()
+        self._drain_started = False
+        self._release_done = False
         self._unknown_event = threading.Event()
         self._blocks_idle = False
         self.woken = threading.Event()

@@ -407,3 +407,39 @@ def test_loader_registration_failure_is_observable(engine, monkeypatch, caplog):
     with caplog.at_level("WARNING"):
         register()
     assert "SGLang loader registration unavailable (TypeError)" in caplog.text
+
+
+@pytest.mark.parametrize("enum_type", [Enum, str])
+def test_aenum_free_registration_preserves_enum_operations(
+    engine, monkeypatch, enum_type
+):
+    import pickle
+
+    from gpustack_model_transfer.adapters.sglang.plugin import register
+
+    module = engine.load_config_mod
+    kwargs = {"type": str} if enum_type is str else {}
+    load_format = Enum("LoadFormat", {"AUTO": "auto"}, module=module.__name__, **kwargs)
+    monkeypatch.setattr(module, "LoadFormat", load_format)
+    monkeypatch.setitem(sys.modules, "aenum", None)
+    register()
+    member = load_format.MODEL_TRANSFER
+    assert list(load_format) == [load_format.AUTO, member]
+    assert load_format("model-transfer") is member
+    assert pickle.loads(pickle.dumps(member)) is member
+
+
+def test_present_engine_enum_extension_failure_is_an_error(engine, monkeypatch, caplog):
+    import logging
+    from enum import IntEnum
+
+    from gpustack_model_transfer.adapters.sglang.plugin import register
+
+    class NumericFormat(IntEnum):
+        AUTO = 0
+
+    monkeypatch.setattr(engine.load_config_mod, "LoadFormat", NumericFormat)
+    monkeypatch.setitem(sys.modules, "aenum", None)
+    with caplog.at_level(logging.ERROR):
+        register()
+    assert "SGLang enum registration unavailable (TypeError)" in caplog.text
