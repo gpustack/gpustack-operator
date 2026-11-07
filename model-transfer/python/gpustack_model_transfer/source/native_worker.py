@@ -261,18 +261,14 @@ class NativeSourceWorker:
                         self._wake_event.set()
                 delay = self.poll_interval
             except ControlError as exc:
-                if exc.kind == "stale-generation":
-                    self._unknown_event.set()
                 with self._lock:
                     self.active_sessions = self.unknown_sessions = None
-                    if exc.kind == "stale-generation":
-                        self._abort_fill_requested.set()
-                        retain = self._native_attempted and not self._release_done
-                        if not retain:
-                            self.state = "stopped"
-                if exc.kind == "stale-generation":
-                    if retain:
-                        self._quarantine("stale-generation")
+                if not exc.transport:
+                    self._quarantine(
+                        "stale-generation"
+                        if exc.kind == "stale-generation"
+                        else "heartbeat-refused"
+                    )
                     return
                 delay = min(max(delay * 2, 0.05), 2.0)
             self._stop_event.wait(delay)

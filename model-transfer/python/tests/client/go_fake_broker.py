@@ -212,17 +212,21 @@ class FakeTLSBroker:
                     self.send({"kind": "fixture-error"}, 409)
 
             def do_DELETE(self):
-                body = self.body()
-                session_id = self.path.split("/")[-1]
-                if (
-                    not self.authorized(
-                        session_id, body["podUID"], body["targetInstanceID"]
-                    )
-                    or body.get("targetReleased") is not True
-                ):
-                    self.send({"kind": "authentication"}, 403)
-                    return
-                self.send({"state": "closed"})
+                try:
+                    body = self.body()
+                    broker.calls.append((self.path, body))
+                    session_id = self.path.split("/")[-1]
+                    if (
+                        not self.authorized(
+                            session_id, body["podUID"], body["targetInstanceID"]
+                        )
+                        or body.get("targetReleased") is not True
+                    ):
+                        self.send({"kind": "authentication"}, 403)
+                        return
+                    self.send({"state": "closed"})
+                except Exception:
+                    self.send({"kind": "fixture-error"}, 409)
 
         self.cert = root / "cert.pem"
         key = root / "key.pem"

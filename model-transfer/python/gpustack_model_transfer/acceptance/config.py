@@ -78,6 +78,9 @@ def load_and_validate(
     the current UTC time. Returns a validated context with the parsed
     config, the resolved manifest path, and the loaded manifest. Raises
     RefusedError on any problem.
+
+    engine is retained for caller compatibility; the runner validates it
+    against the suite before dispatch. The config has no engine field.
     """
     if now is None:
         now = datetime.now(timezone.utc)

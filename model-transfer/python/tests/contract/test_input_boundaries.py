@@ -244,3 +244,25 @@ def test_reference_driver_keeps_only_current_model(engine):
     if engine != "vllm":
         second.mutated = True
         assert GpustackLoadPlugin._engine_mutated(SimpleNamespace(_driver=driver))
+
+
+@pytest.mark.parametrize("engine", ["vllm", "sglang", "vllm_ascend"])
+def test_device_fixture_requests_owned_fallback_before_copy(engine):
+    module_name = "npu_runtime" if engine == "vllm_ascend" else "torch_runtime"
+    module = importlib.import_module(
+        f"gpustack_model_transfer.adapters.{engine}.{module_name}"
+    )
+    ownership = importlib.import_module(
+        f"gpustack_model_transfer.adapters.{engine}.ownership"
+    )
+    driver = (
+        module.NPURuntimeDriver(device=0)
+        if engine == "vllm_ascend"
+        else module.TorchRuntimeDriver()
+    )
+    model = SimpleNamespace(mutated=False)
+    assert (
+        driver.store(model, None, b"payload", ownership.TensorOwnership.BORROWED)
+        == "fell-back-to-owned"
+    )
+    assert not model.mutated

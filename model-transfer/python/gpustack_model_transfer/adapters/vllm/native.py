@@ -311,7 +311,7 @@ class NativeModelTransferLoader(BaseModelLoader):
                     [False, str(exc)], src=src, group=group
                 )
                 raise
-        self._cached_descriptors = broadcast_descriptors(
+        broadcast_descriptors(
             result[1],
             lambda items: torch.distributed.broadcast_object_list(
                 items, src=src, group=group

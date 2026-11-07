@@ -842,3 +842,87 @@ def test_failed_hixl_initialize_keeps_owner_in_quarantine():
         assert not worker.blocks
     finally:
         worker._stop_event.set()
+
+
+@pytest.mark.parametrize(
+    "kind",
+    ["authentication", "capacity-exhausted", "stale-generation", "invalid-response"],
+)
+@pytest.mark.parametrize("native_attempted", [False, True])
+def test_permanent_heartbeat_refusal_stops_or_retains(kind, native_attempted):
+    from gpustack_model_transfer.source.native_worker import NativeSourceWorker
+
+    control = Control("generation-1")
+    calls, quarantines = [], []
+
+    def refuse(**kwargs):
+        calls.append(kwargs)
+        raise ControlError(403, kind, "private detail")
+
+    control.heartbeat = refuse
+    control.quarantine = quarantines.append
+    worker = NativeSourceWorker(
+        control,
+        parse_assignment(order(), backend="nixl"),
+        backend=None,
+        allocator=None,
+        worker_instance_id="instance-1",
+    )
+    worker._native_attempted = native_attempted
+    worker._control_loop()
+    assert len(calls) == 1
+    assert worker.state == ("quarantined" if native_attempted else "stopped")
+    assert (worker._retention is not None) == native_attempted
+    assert worker._abort_fill_requested.is_set()
+    assert worker._unknown_event.is_set()
+    assert quarantines == [
+        "stale-generation" if kind == "stale-generation" else "heartbeat-refused"
+    ]
+    assert control.ack_calls == 0
+
+
+def test_transport_heartbeat_failure_can_recover():
+    from gpustack_model_transfer.source.native_worker import NativeSourceWorker
+
+    control = Control("generation-1")
+    worker = NativeSourceWorker(
+        control,
+        parse_assignment(order(), backend="nixl"),
+        backend=None,
+        allocator=None,
+        worker_instance_id="instance-1",
+        poll_interval=0.001,
+    )
+    calls = []
+
+    def heartbeat(**kwargs):
+        calls.append(kwargs)
+        if len(calls) == 1:
+            raise ControlError(0, "unavailable", "lost response")
+        worker._stop_event.set()
+        return {"activeSessions": 0, "unknownSessions": 0, "action": "none"}
+
+    control.heartbeat = heartbeat
+    worker._control_loop()
+    assert len(calls) == 2
+    assert worker.state == "starting"
+    assert worker.active_sessions == worker.unknown_sessions == 0
+    assert not worker._unknown_event.is_set()
+    assert worker._retention is None
+
+
+def test_hixl_import_failure_reports_fixed_mount_hint(monkeypatch, caplog):
+    from gpustack_model_transfer.backends.hixl.runtime import RealHixlAPI
+    from gpustack_model_transfer.source.backend import HixlSourceBackend
+
+    failure = ImportError("private dependency detail")
+
+    def fail(self):
+        raise failure
+
+    monkeypatch.setattr(RealHixlAPI, "_require", fail)
+    with pytest.raises(ImportError) as caught:
+        HixlSourceBackend().start()
+    assert caught.value is failure
+    assert "Ascend driver/DCMI mounts" in caplog.text
+    assert "private dependency detail" not in caplog.text

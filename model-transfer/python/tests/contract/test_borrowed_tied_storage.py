@@ -38,6 +38,14 @@ def test_borrowed_alias_keeps_owned_embedding(adapter, loader_name, alias_first)
         ),
     )
     borrowed = set()
+    fenced, released, reads = [], [], []
+    read_bytes = reader.read_bytes
+
+    def record_read(name, begin, end):
+        reads.append((name, begin, end))
+        return read_bytes(name, begin, end)
+
+    reader.read_bytes = record_read
 
     class RecyclingRuntime(runtime.ReferenceRuntime):
         def store(self, model, entry, payload, ownership):
@@ -48,6 +56,7 @@ def test_borrowed_alias_keeps_owned_embedding(adapter, loader_name, alias_first)
     driver = RecyclingRuntime(root)
 
     def release(name):
+        released.append(name)
         if name == embed and name in borrowed:
             driver.last_model.parameters[embed].data[:] = bytes(
                 len(driver.last_model.parameters[embed].data)
@@ -65,11 +74,25 @@ def test_borrowed_alias_keeps_owned_embedding(adapter, loader_name, alias_first)
         ownership.LoadOptions(
             ownership=ownership.TensorOwnership.BORROWED,
             tie_word_embeddings=True,
-            borrowed=ownership.BorrowedContract("device:0", lambda _: None, release),
+            borrowed=ownership.BorrowedContract("device:0", fenced.append, release),
         ),
     )
     tensor = reader.manifest.tensor(embed)
     expected = (root / tensor.file).read_bytes()[tensor.data_begin : tensor.data_end]
     assert bytes(report.model.parameters[head].data) == expected
     assert report.model.parameters[head] is report.model.parameters[embed]
-    assert {head, embed}.issubset(report.borrowed_fallbacks)
+    assert embed in report.borrowed_fallbacks
+    assert head not in report.borrowed_fallbacks
+    assert head not in fenced and head not in released
+    assert embed in fenced and embed in released
+    head_tensor = reader.manifest.tensor(head)
+    assert not any(
+        name == head_tensor.file
+        and begin < head_tensor.data_end
+        and end > head_tensor.data_begin
+        for name, begin, end in reads
+    )
+    assert any(
+        name == tensor.file and begin < tensor.data_end and end > tensor.data_begin
+        for name, begin, end in reads
+    )

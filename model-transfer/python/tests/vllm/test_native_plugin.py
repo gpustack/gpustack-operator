@@ -471,7 +471,7 @@ def tp_distributed(engine, monkeypatch):
 
 
 def test_tp_coordinator_is_only_broker_reader(engine, monkeypatch, tp_distributed):
-    loader, config, model_config, provider = inputs(engine, monkeypatch)
+    loader, config, model_config, _provider = inputs(engine, monkeypatch)
     config.parallel_config.tensor_parallel_size = 2
     loader.download_model(model_config)
     loader.load_model(config, model_config)
@@ -483,7 +483,6 @@ def test_tp_coordinator_is_only_broker_reader(engine, monkeypatch, tp_distribute
     follower = engine.registry["model-transfer"](object())
     follower._reader = lambda: pytest.fail("non-coordinator accessed the Broker")
     follower.download_model(model_config)
-    assert follower._cached_descriptors == provider.descriptors
     follower.load_model(config, model_config)
     assert engine.events.count("start") == 1
     assert engine.events.count("close") == 1

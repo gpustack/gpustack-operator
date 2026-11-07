@@ -62,6 +62,15 @@ class FakeBroker:
         return f"{host}:{port}"
 
     def reply(self, path, body):
+        if path not in self.rules and path not in (
+            "/v1/register",
+            "/v1/native-start",
+            "/v1/heartbeat",
+            "/v1/filled",
+            "/v1/drain-ack",
+            "/v1/quarantine",
+        ):
+            return 404, {"kind": "unknown-path"}
         rule = self.rules.get(path, {})
         if callable(rule):
             return rule(body)

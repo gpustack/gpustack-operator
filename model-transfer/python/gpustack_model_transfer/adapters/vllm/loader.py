@@ -248,6 +248,9 @@ class ModelTransferModelLoader:
             model = driver.build_model(plan, options)
             tied_targets = {target for _, target in plan.tied_aliases}
             for entry in plan.entries:
+                if entry.role == _ROLE_TIED_ALIAS:
+                    loaded.append(entry.tensor.name)
+                    continue
                 output = session.read_tensor(entry.tensor.name)
                 if not output.complete:
                     raise InvalidDescriptorError(
@@ -260,12 +263,6 @@ class ModelTransferModelLoader:
                     engine_metadata[entry.tensor.name] = model.engine_metadata.get(
                         entry.tensor.name
                     )
-                elif entry.role == _ROLE_TIED_ALIAS:
-                    if options.ownership is TensorOwnership.BORROWED:
-                        options.borrowed.visibility_fence(entry.tensor.name)
-                        options.borrowed.release(entry.tensor.name)
-                        fallbacks.append(entry.tensor.name)
-                    loaded.append(entry.tensor.name)
                 else:
                     if options.ownership is TensorOwnership.BORROWED:
                         # Tied aliases share one storage but may release at different

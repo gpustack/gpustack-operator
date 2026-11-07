@@ -8,6 +8,8 @@ what is missing instead of crashing on the import.
 
 from dataclasses import dataclass
 
+from gpustack_model_transfer.adapters.vllm.ownership import TensorOwnership
+
 _DTYPE_TO_TORCH = {
     "F32": "float32",
     "F16": "float16",
@@ -118,6 +120,8 @@ class TorchRuntimeDriver:
         return model
 
     def store(self, model, entry, payload, ownership="owned") -> str:
+        if ownership is TensorOwnership.BORROWED:
+            return "fell-back-to-owned"
         torch = self._require_torch()
         buffer = model.parameters[entry.tensor.name]
         if payload:

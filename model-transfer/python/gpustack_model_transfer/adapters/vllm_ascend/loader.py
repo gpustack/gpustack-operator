@@ -254,14 +254,7 @@ class ModelTransferAscendLoader:
             tied_targets = {target for _, target in plan.tied_aliases}
             for entry in plan.entries:
                 if entry.role == _ROLE_TIED_ALIAS:
-                    # The alias IS the embedding's storage: the head's own
-                    # bytes are neither read nor staged, they would only be
-                    # discarded. A borrowed contract still fences and
-                    # releases the alias like any parameter.
-                    if options.ownership is TensorOwnership.BORROWED:
-                        options.borrowed.visibility_fence(entry.tensor.name)
-                        options.borrowed.release(entry.tensor.name)
-                        fallbacks.append(entry.tensor.name)
+                    # The alias shares the embedding; no separate payload is consumed.
                     loaded.append(entry.tensor.name)
                     continue
                 output = session.read_tensor(entry.tensor.name)

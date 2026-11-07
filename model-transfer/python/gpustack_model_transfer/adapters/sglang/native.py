@@ -232,7 +232,6 @@ class NativeSGLangModelTransferLoader:
         self.load_config = load_config
         self._provider = None
         self._provider_tp_size = None
-        self._cached_descriptors = None
 
     def _reader(self, tp_size=1):
         if self._provider is None:
@@ -267,7 +266,7 @@ class NativeSGLangModelTransferLoader:
                     [False, str(exc)], src=src, group=group
                 )
                 raise
-        self._cached_descriptors = broadcast_descriptors(
+        broadcast_descriptors(
             result[1],
             lambda items: torch.distributed.broadcast_object_list(
                 items, src=src, group=group

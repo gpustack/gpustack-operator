@@ -10,6 +10,8 @@ Readiness and the fixture's finalization counter are not model-load acceptance.
 
 from dataclasses import dataclass
 
+from gpustack_model_transfer.adapters.vllm_ascend.ownership import TensorOwnership
+
 _DTYPE_TO_TORCH = {
     "F32": "float32",
     "F16": "float16",
@@ -210,6 +212,8 @@ class NPURuntimeDriver:
         return model
 
     def store(self, model, entry, payload, ownership="owned") -> str:
+        if ownership is TensorOwnership.BORROWED:
+            return "fell-back-to-owned"
         torch = self._require_torch()
         buffer = model.parameters[entry.tensor.name]
         if not payload:

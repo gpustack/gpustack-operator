@@ -434,7 +434,14 @@ class HixlSourceBackend(_PagingBackend):
         if self._engine_factory is None:
             from gpustack_model_transfer.backends.hixl.runtime import RealHixlAPI
 
-            self._hixl = RealHixlAPI()._require()
+            try:
+                self._hixl = RealHixlAPI()._require()
+            except (ImportError, OSError):
+                logger.warning(
+                    "HIXL import failed; on CANN images check the host Ascend "
+                    "driver/DCMI mounts and shared-library search paths"
+                )
+                raise
             self._engine_factory = self._hixl.Hixl
         else:
             self._hixl = None

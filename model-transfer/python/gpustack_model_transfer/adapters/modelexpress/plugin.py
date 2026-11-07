@@ -71,6 +71,10 @@ class GpustackLoadPlugin:
     delivery policy. group, with rank, optionally attaches the loading
     group this rank belongs to: attached, every load is gated on the
     group's agreement before any parameter is mutated.
+
+    With a group attached, create a new plugin and coordinator for each load.
+    Reusing either rank's proposal is refused; one rank must not reset its
+    peers' agreement. Ungrouped plugins may be invoked more than once.
     """
 
     def __init__(

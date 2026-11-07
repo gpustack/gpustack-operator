@@ -298,14 +298,7 @@ class ModelTransferSGLangLoader:
             self.last_model = model
             for entry in plan.entries:
                 if entry.role == _ROLE_TIED_ALIAS:
-                    # The alias IS the embedding's storage: the head's own
-                    # bytes are neither read nor staged nor counted, they
-                    # would only be discarded. A borrowed contract still
-                    # fences and releases the alias like any parameter.
-                    if options.ownership is TensorOwnership.BORROWED:
-                        options.borrowed.visibility_fence(entry.tensor.name)
-                        options.borrowed.release(entry.tensor.name)
-                        fallbacks.append(entry.tensor.name)
+                    # The alias shares the embedding; no separate payload is consumed.
                     loaded.append(entry.tensor.name)
                     continue
                 payload, complete = self._read_entry(session, entry, shard)

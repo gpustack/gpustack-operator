@@ -39,8 +39,8 @@ def negotiate_contract_version(
 ) -> int:
     """Return the highest contract version supported by both client and server.
 
-    An older v1 client that omits client_versions defaults to (1,) so it
-    is refused by a layout-only v2 server.
+    An omitted or empty client_versions iterable defaults to legacy (1,),
+    so it is refused by a layout-only v2 server.
     """
     if client_versions is None:
         candidates = (1,)
