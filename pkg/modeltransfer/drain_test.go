@@ -231,7 +231,7 @@ func serveFixtureGeneration(t *testing.T, b *broker.Broker, st *store.Store, hex
 	require.NoError(t, attempt.Publish(store.Marker{
 		Digest: digest, SizeBytes: 7, ManifestFormat: "gpustack-model-transfer/v1", Source: store.SourceHub,
 	}))
-	admission, perr := b.AdmitFill(broker.FillRequest{
+	admission, perr := b.AdmitFill(t.Context(), broker.FillRequest{
 		Digest: digest, Namespace: "tenant", TotalBytes: 7,
 		Grant:    broker.Grant{Namespace: "tenant", Bytes: 512, Registrations: 4, Sessions: 4},
 		WorkerID: "pod",
@@ -239,7 +239,7 @@ func serveFixtureGeneration(t *testing.T, b *broker.Broker, st *store.Store, hex
 	require.Nil(t, perr)
 	lease, perr := b.RegisterWorker(admission.Generation, "pod", admission.WorkerSecret)
 	require.Nil(t, perr)
-	require.Nil(t, b.FillVerified(admission.Generation, "pod", lease.ID, admission.WorkerSecret, 1,
+	require.Nil(t, b.FillVerified(t.Context(), admission.Generation, "pod", lease.ID, admission.WorkerSecret, 1,
 		[]broker.RegistrationDescriptor{{
 			Name: "checkpoint.safetensors", Addr: 1, Length: 7,
 			MemoryType: "HOST", Backend: "nixl", WorkerUID: "pod",

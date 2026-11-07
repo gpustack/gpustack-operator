@@ -107,6 +107,9 @@ func (c *Config) Run(ctx context.Context) error {
 	}
 	ctx, cancelRun := context.WithCancel(ctx)
 	defer cancelRun()
+	if starter, ok := c.snapshot.(interface{ Start(context.Context) }); ok {
+		starter.Start(ctx)
+	}
 	live, err := c.LiveWorkers(ctx)
 	switch err {
 	case nil:

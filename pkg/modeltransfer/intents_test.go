@@ -240,7 +240,7 @@ func TestKubernetesIntentsAdmitRealPublishedArtifactAndHoldOnReadFailure(t *test
 		lease, perr := b.RegisterWorker(offer.Generation, "pod-uid", offer.WorkerSecret, instance)
 		require.Nil(t, perr)
 		require.Nil(t, b.NativeStart(offer.Generation, "pod-uid", lease.ID, offer.WorkerSecret, instance))
-		require.Nil(t, b.FillVerified(offer.Generation, "pod-uid", lease.ID, offer.WorkerSecret, 1,
+		require.Nil(t, b.FillVerified(t.Context(), offer.Generation, "pod-uid", lease.ID, offer.WorkerSecret, 1,
 			[]broker.RegistrationDescriptor{{Name: "checkpoint.safetensors", Addr: 4096, Length: int64(len(file)), MemoryType: "HOST", Backend: "nixl", WorkerUID: "pod-uid"}}, instance))
 		derived, resolveErr := b.ResolveManifest(context.Background(), "tenant", "artifact-uid", manifest.Digest, 1)
 		require.NoError(t, resolveErr)
@@ -278,7 +278,7 @@ func TestKubernetesIntentsAdmitRealPublishedArtifactAndHoldOnReadFailure(t *test
 		}
 		sessionID := answer["sessionID"].(string)
 		require.Nil(t, b.ClosePrivateSession(context.Background(), closeOwner, sessionID))
-		require.Nil(t, b.ReleaseSessionContext(context.Background(), closeOwner, sessionID))
+		require.Nil(t, b.ReleaseSession(context.Background(), closeOwner, sessionID))
 		currentPrefetch := &workercore.ModelPrefetch{}
 		require.NoError(t, client.Get(context.Background(), ctrlcli.ObjectKeyFromObject(pf), currentPrefetch))
 		cfg.invalidateLiveIntentCache()
@@ -400,7 +400,7 @@ func TestReconcileIntentsRecoversRecreatedBindingAndReclaimsDeletedTargetPodSess
 	lease, perr := b.RegisterWorker(firstOffer.Generation, "pod-uid", firstOffer.WorkerSecret, instance)
 	require.Nil(t, perr)
 	require.Nil(t, b.NativeStart(firstOffer.Generation, "pod-uid", lease.ID, firstOffer.WorkerSecret, instance))
-	require.Nil(t, b.FillVerified(firstOffer.Generation, "pod-uid", lease.ID, firstOffer.WorkerSecret, 1,
+	require.Nil(t, b.FillVerified(t.Context(), firstOffer.Generation, "pod-uid", lease.ID, firstOffer.WorkerSecret, 1,
 		[]broker.RegistrationDescriptor{{Name: "checkpoint.safetensors", Addr: 4096, Length: int64(len(file)), MemoryType: "HOST", Backend: "nixl", WorkerUID: "pod-uid"}}, instance))
 
 	handler := broker.NewSessionHandler(b, sessionTestAuthorizer{digest: manifest.Digest})
@@ -437,7 +437,7 @@ func TestReconcileIntentsRecoversRecreatedBindingAndReclaimsDeletedTargetPodSess
 		secondOffer = offer
 	}
 	assert.NotEqual(t, firstOffer.Generation, secondOffer.Generation)
-	require.Nil(t, b.DrainAckContext(context.Background(), firstOffer.Generation, "pod-uid", lease.ID, firstOffer.WorkerSecret, instance))
+	require.Nil(t, b.DrainAck(context.Background(), firstOffer.Generation, "pod-uid", lease.ID, firstOffer.WorkerSecret, instance))
 }
 
 func (a sessionTestAuthorizer) AuthenticateActivePod(ctx context.Context, req authorization.Request) (authorization.PodIdentity, *protocol.Error) {

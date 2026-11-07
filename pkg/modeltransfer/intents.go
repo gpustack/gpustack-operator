@@ -14,6 +14,7 @@ import (
 	core "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/labels"
 	ctrlcli "sigs.k8s.io/controller-runtime/pkg/client"
 	ctrllog "sigs.k8s.io/controller-runtime/pkg/log"
 
@@ -30,6 +31,44 @@ type kubernetesIntentSource struct {
 	config   *Config
 	client   ctrlcli.Client
 	eligible bool
+}
+
+// candidateSnapshot returns the synced candidate view a pass selects from,
+// or nothing when the caches are not ready, in which case the pass lists
+// the fleet live exactly as before.
+func (c *Config) candidateSnapshot() ([]core.Node, []workercore.ModelPrefetch, bool) {
+	if snap := c.snapshot; snap != nil && snap.Ready() {
+		return snap.Nodes(), snap.Prefetches(), true
+	}
+	return nil, nil, false
+}
+
+// placementCouldTarget reports, from cached placement facts alone, whether a
+// snapshot prefetch could still name this node, so a candidate the cached
+// placement provably excludes is never read live. A placement without a
+// source target set, an ambiguous one, and an unparsable nodeSelector
+// nominate nothing. An InstanceType-only placement cannot be excluded
+// without the pool resolution, so it stays a candidate and its placement is
+// resolved live. A stale negative waits for its watch event rather than
+// forcing a read; a nomination is never itself a positive — the live pass
+// still re-resolves the placement and re-targets the node before anything
+// is admitted.
+func placementCouldTarget(pf *workercore.ModelPrefetch, node *core.Node) bool {
+	placement := pf.Spec.Placement
+	switch {
+	case placement == nil || (len(placement.InstanceTypes) == 0 && placement.NodeSelector == nil):
+		return false
+	case len(placement.InstanceTypes) > 0 && placement.NodeSelector != nil:
+		return false
+	case placement.NodeSelector != nil:
+		selector, err := meta.LabelSelectorAsSelector(placement.NodeSelector)
+		if err != nil {
+			return false
+		}
+		return selector.Matches(labels.Set(node.Labels))
+	default:
+		return true
+	}
 }
 
 // ListIntents resolves explicit source placements and live grants. Any API
@@ -49,23 +88,42 @@ func (s *kubernetesIntentSource) ListIntents(ctx context.Context) (_ []broker.In
 		}
 		return nil, fmt.Errorf("read source Pod: %w", err)
 	}
-	var nodes core.NodeList
-	if err := s.client.List(ctx, &nodes); err != nil {
-		return nil, fmt.Errorf("list nodes: %w", err)
-	}
+	nodeItems, prefetchItems, snapshotted := c.candidateSnapshot()
 	var node *core.Node
-	for i := range nodes.Items {
-		if nodes.Items[i].Name == c.NodeName {
-			node = &nodes.Items[i]
-			break
+	if snapshotted {
+		// The live node answers every admission question about this node —
+		// presence, placement labels, and the grant's coverage target. The
+		// cached fleet only narrows which prefetches are worth reading.
+		node = &core.Node{}
+		if err := s.client.Get(ctx, ctrlcli.ObjectKey{Name: c.NodeName}, node); err != nil {
+			return nil, fmt.Errorf("read source node: %w", err)
 		}
-	}
-	if node == nil {
-		return nil, fmt.Errorf("source node disappeared during listing")
-	}
-	var prefetches workercore.ModelPrefetchList
-	if err := s.client.List(ctx, &prefetches); err != nil {
-		return nil, fmt.Errorf("list source prefetches: %w", err)
+		for i := range nodeItems {
+			if nodeItems[i].Name == c.NodeName {
+				nodeItems[i] = *node
+				break
+			}
+		}
+	} else {
+		var nodes core.NodeList
+		if err := s.client.List(ctx, &nodes); err != nil {
+			return nil, fmt.Errorf("list nodes: %w", err)
+		}
+		nodeItems = nodes.Items
+		for i := range nodeItems {
+			if nodeItems[i].Name == c.NodeName {
+				node = &nodeItems[i]
+				break
+			}
+		}
+		if node == nil {
+			return nil, fmt.Errorf("source node disappeared during listing")
+		}
+		var prefetches workercore.ModelPrefetchList
+		if err := s.client.List(ctx, &prefetches); err != nil {
+			return nil, fmt.Errorf("list source prefetches: %w", err)
+		}
+		prefetchItems = prefetches.Items
 	}
 	var intents []broker.Intent
 	defer func() {
@@ -78,10 +136,38 @@ func (s *kubernetesIntentSource) ListIntents(ctx context.Context) (_ []broker.In
 		}
 	}()
 	var cpuAware *bool
-	for i := range prefetches.Items {
-		pf := &prefetches.Items[i]
-		if pf.Spec.Source == nil || pf.DeletionTimestamp != nil || pf.UID == "" || pf.Generation < 1 {
+	for i := range prefetchItems {
+		cached := &prefetchItems[i]
+		if cached.Spec.Source == nil || cached.DeletionTimestamp != nil || cached.UID == "" || cached.Generation < 1 {
 			continue
+		}
+		pf := cached
+		if snapshotted {
+			// The cached fleet narrows which prefetches are worth reading:
+			// one whose cached placement provably excludes this node's live
+			// labels is skipped without a read. The exclusion is a
+			// stale-safe negative — a placement edit that would re-include
+			// this node arrives with its watch event and is then read and
+			// admitted.
+			if !placementCouldTarget(cached, node) {
+				continue
+			}
+			// The snapshot only nominates candidates. A prefetch whose
+			// live identity moved on — deleted, withdrawn, or a new
+			// generation — is skipped; the refreshed snapshot names it
+			// again once its watch event lands.
+			live := &workercore.ModelPrefetch{}
+			if err := s.client.Get(ctx, ctrlcli.ObjectKeyFromObject(cached), live); err != nil {
+				if apierrors.IsNotFound(err) {
+					continue
+				}
+				return nil, fmt.Errorf("read source prefetch: %w", err)
+			}
+			if string(live.UID) != string(cached.UID) || live.Generation != cached.Generation ||
+				live.DeletionTimestamp != nil || live.Spec.Source == nil {
+				continue
+			}
+			pf = live
 		}
 		var pools modelstore.InstanceTypeFlavorNames
 		if pf.Spec.Placement != nil && len(pf.Spec.Placement.InstanceTypes) > 0 {
@@ -102,7 +188,7 @@ func (s *kubernetesIntentSource) ListIntents(ctx context.Context) (_ []broker.In
 				return nil, fmt.Errorf("resolve placement: %w", err)
 			}
 		}
-		targets, err := modelstore.PrefetchSourceTargetNodes(pf, nodes.Items, pools)
+		targets, err := modelstore.PrefetchSourceTargetNodes(pf, nodeItems, pools)
 		if err != nil {
 			ctrllog.FromContext(ctx).Error(err, "skip source prefetch with invalid placement", "prefetch", ctrlcli.ObjectKeyFromObject(pf))
 			continue
@@ -199,7 +285,7 @@ func (s *kubernetesIntentSource) ListIntents(ctx context.Context) (_ []broker.In
 		}
 		token := hex.EncodeToString(nonce[:])
 		ref := buildRefPrefix(c.VendorScope) + token
-		claimed, err := c.Store.Claim(store.Ref{
+		claimed, err := c.Store.Claim(ctx, store.Ref{
 			VolumeID: ref, Hex: store.HexOf(resolved.ManifestDigest),
 			PodNamespace: c.WorkerNamespace, PodUID: c.WorkerID,
 		})

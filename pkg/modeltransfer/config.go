@@ -241,7 +241,11 @@ type Config struct {
 	// Authorizer admits engine sessions using the live cluster client.
 	Authorizer broker.SessionAuthorizer
 	// Intents resolves live Kubernetes source preparations for this node.
-	Intents          broker.IntentSource
+	Intents broker.IntentSource
+	// snapshot is the synced watch view the source pass and metadata
+	// authorization nominate candidates from. Nil keeps every discovery
+	// read live.
+	snapshot         sourceSnapshot
 	bootstrapToken   string
 	runtimeURL       string
 	metadataOnce     sync.Once
@@ -343,6 +347,11 @@ func (o *Options) complete(restCfg *rest.Config) (*Config, error) {
 		_ = b.Close()
 		return nil, fmt.Errorf("initialize authority inventory: %w", err)
 	}
+	discovery := newSourceDiscovery(client)
+	authorizer := &authorization.Authorizer{
+		Reader: reader, Reviewer: tokenReviewer{client: client}, Store: st, Resolver: b,
+		CacheTTL: 10 * time.Second, Coverage: discovery.coverage(),
+	}
 	cfg := &Config{
 		manifestPageRoot: manifestRoot,
 		NodeName:         o.NodeName, Store: st, Broker: b, RestConfig: cfgCopy, Client: client,
@@ -351,10 +360,11 @@ func (o *Options) complete(restCfg *rest.Config) (*Config, error) {
 		SessionAddr: o.SessionAddr, SessionTLSCert: o.SessionTLSCert,
 		SessionTLSKey: o.SessionTLSKey, BootstrapFile: o.BootstrapFile,
 		WorkerID: o.WorkerID, VendorScope: o.VendorScope,
-		Authorizer: &authorization.Authorizer{Reader: reader, Reviewer: tokenReviewer{client: client}, Store: st, Resolver: b, CacheTTL: 10 * time.Second},
+		Authorizer: authorizer,
 	}
 	b.SetAssignmentsFrozen(true)
 	cfg.runtimeURL = "http://127.0.0.1:9252/v1/runtime"
+	cfg.snapshot = discovery
 	cfg.Intents = &kubernetesIntentSource{config: cfg, client: reader}
 	b.SetIntentValidator(cfg.validateLiveIntent)
 	b.SetSessionPodChecker(cfg.isSessionPodLive)
