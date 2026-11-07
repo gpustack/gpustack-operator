@@ -2,7 +2,7 @@
 # Build targets:
 #   cuda: NIXL CUDA 12.9 wheels and Torch; linux/amd64.
 #   rocm: source-built NIXL and UCX with ROCm 7.2; linux/amd64.
-#   cann: CANN 9.2 with a patched HIXL host library; linux/amd64 or linux/arm64.
+#   cann: CANN 9.2 with a patched HIXL host library; linux/arm64 (amd64 is not qualified).
 # Select a target explicitly. The packaging script defaults to cuda; a direct
 # Docker build without --target reaches the final cann stage.
 #
