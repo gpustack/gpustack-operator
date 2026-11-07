@@ -8,6 +8,7 @@ typed, normalized access to environment variables without scattering
 
 from __future__ import annotations
 
+import math
 import os
 from collections.abc import Callable, Mapping
 from typing import TYPE_CHECKING, Any
@@ -110,6 +111,20 @@ def setdefault(key: str, value: str, env: dict[str, str] | None = None) -> str:
     return target.setdefault(key, value)
 
 
+def _transfer_timeout(raw):
+    from gpustack_model_transfer.core.errors import SourceUnavailableError
+
+    if raw is None or raw == "":
+        return 1800.0
+    try:
+        value = float(raw)
+    except (TypeError, ValueError, OverflowError):
+        raise SourceUnavailableError("invalid transfer timeout") from None
+    if isinstance(raw, bool) or not math.isfinite(value) or value <= 0:
+        raise SourceUnavailableError("invalid transfer timeout")
+    return value
+
+
 _VARIABLES: dict[str, Callable[[Mapping[str, str]], Any]] = {
     "GPUSTACK_MODEL_TRANSFER_BACKEND": lambda env: trim_str(
         getenv("GPUSTACK_MODEL_TRANSFER_BACKEND", None, env)
@@ -120,11 +135,13 @@ _VARIABLES: dict[str, Callable[[Mapping[str, str]], Any]] = {
     "GPUSTACK_MODEL_TRANSFER_TIMEOUT_RAW": lambda env: getenv(
         "GPUSTACK_MODEL_TRANSFER_TIMEOUT", None, env
     ),
-    "GPUSTACK_MODEL_TRANSFER_TIMEOUT_STR": lambda env: (
-        trim_str(getenv("GPUSTACK_MODEL_TRANSFER_TIMEOUT", "1800", env)) or "1800"
+    "GPUSTACK_MODEL_TRANSFER_TIMEOUT_STR": lambda env: str(
+        math.ceil(
+            _transfer_timeout(getenv("GPUSTACK_MODEL_TRANSFER_TIMEOUT", None, env))
+        )
     ),
-    "GPUSTACK_MODEL_TRANSFER_TIMEOUT": lambda env: (
-        to_float(getenv("GPUSTACK_MODEL_TRANSFER_TIMEOUT", None, env), 1800.0) or 1800.0
+    "GPUSTACK_MODEL_TRANSFER_TIMEOUT": lambda env: _transfer_timeout(
+        getenv("GPUSTACK_MODEL_TRANSFER_TIMEOUT", None, env)
     ),
     "GPUSTACK_MODEL_TRANSFER_WORKERS_RAW": lambda env: getenv(
         "GPUSTACK_MODEL_TRANSFER_WORKERS", None, env

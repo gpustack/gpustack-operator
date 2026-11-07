@@ -163,6 +163,9 @@ def broadcast_descriptors(descriptors, broadcast, *, coordinator):
 
     The caller broadcasts a failure instead of the first header when probing
     or planning fails. Later iteration failures occupy the next page slot.
+    A follower validation error aborts its rank; peer collectives rely on
+    the engine's process-group timeout and worker teardown. A follower must
+    not send a source-rank broadcast as an error signal.
     """
     header = [True, len(descriptors)] if coordinator else [None, None]
     broadcast(header)

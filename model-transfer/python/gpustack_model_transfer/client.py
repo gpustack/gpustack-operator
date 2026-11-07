@@ -52,24 +52,11 @@ _RETAINED = []
 _RETAINED_LOCK = threading.Lock()
 _SESSION_OWNERS = {}
 _MAX_SESSIONS = 1024
-_TIMEOUT = 1800.0
 
 
 def transfer_timeout(env=None):
-    """The transfer deadline in seconds: GPUSTACK_MODEL_TRANSFER_TIMEOUT, else 1800."""
-    raw = get_envs(env).GPUSTACK_MODEL_TRANSFER_TIMEOUT_RAW
-    if raw is None or raw == "":
-        return _TIMEOUT
-    try:
-        value = int(raw)
-    except (TypeError, ValueError):
-        try:
-            value = float(raw)
-        except (TypeError, ValueError):
-            raise SourceUnavailableError("invalid transfer timeout") from None
-    if not (value > 0):
-        raise SourceUnavailableError("invalid transfer timeout")
-    return float(value)
+    """Return the validated positive, finite transfer deadline in seconds."""
+    return get_envs(env).GPUSTACK_MODEL_TRANSFER_TIMEOUT
 
 
 def _process_instance():

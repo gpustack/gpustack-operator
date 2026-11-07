@@ -136,6 +136,8 @@ def _run_check(capability, check, context, api) -> CheckResult:
     AttributeError from a broken runtime call is a bug in the boundary,
     so it lands as NO-GO here, never as an unexposed-boundary UNRUN.
     """
+    had_mode = hasattr(api, "submit_mode")
+    previous_mode = getattr(api, "submit_mode", None)
     try:
         verdict = check(context, api)
         return CheckResult(capability, verdict.status, verdict.detail)
@@ -145,6 +147,12 @@ def _run_check(capability, check, context, api) -> CheckResult:
         )
     except Exception as exc:
         return CheckResult(capability, "NO-GO", f"{type(exc).__name__}: {exc}")
+
+    finally:
+        if had_mode:
+            api.submit_mode = previous_mode
+        elif hasattr(api, "submit_mode"):
+            del api.submit_mode
 
 
 def _register_disposable_buffer(api, size: int = 64):

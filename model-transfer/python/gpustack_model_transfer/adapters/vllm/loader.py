@@ -42,11 +42,6 @@ class LoadPlan:
     total_parameter_bytes: int
     tied_aliases: tuple = ()
 
-    def tied_alias_parameter(self) -> str:
-        for _, target in self.tied_aliases:
-            return target
-        return None
-
 
 def build_load_plan(
     manifest, budgets, capabilities, tie_word_embeddings: bool = False
@@ -67,6 +62,13 @@ def build_load_plan(
     entries = []
     total = 0
     for tensor in manifest.tensors:
+        if tied_aliases and tensor.name == head:
+            entries.append(
+                LoadPlanEntry(
+                    tensor=tensor, parameter=tensor.name, role=_ROLE_TIED_ALIAS
+                )
+            )
+            continue
         byte_size = tensor.byte_size
         if byte_size > budgets.owned_output_bytes:
             raise CapacityExhaustedError(
@@ -82,13 +84,6 @@ def build_load_plan(
         if tensor.name.startswith("metadata."):
             entries.append(
                 LoadPlanEntry(tensor=tensor, parameter="", role=_ROLE_ENGINE_METADATA)
-            )
-            continue
-        if tied_aliases and tensor.name == head:
-            entries.append(
-                LoadPlanEntry(
-                    tensor=tensor, parameter=tensor.name, role=_ROLE_TIED_ALIAS
-                )
             )
             continue
         entries.append(
@@ -174,6 +169,8 @@ class ModelTransferModelLoader:
         self._reader = reader
         self._capabilities = capabilities
         self._budgets = budgets
+        # A failed close remains accessible for an explicit fence and retry.
+        self.retained_session = None
 
     def _close_reader(self) -> None:
         close = getattr(self._reader, "close", None)
@@ -189,6 +186,8 @@ class ModelTransferModelLoader:
         qualified fence, because closing over a retained operation is
         exactly what the contract refuses.
         """
+        if self.retained_session is not None:
+            raise OperationStateError("a previous load session still needs cleanup")
         session = None
         model = None
         ledger = ResourceLedger(session_closed=False)
@@ -282,7 +281,7 @@ class ModelTransferModelLoader:
                     session.close()
                     ledger.session_closed = True
                 except Exception:
-                    pass
+                    self.retained_session = session
             else:
                 self._close_reader()
             raise

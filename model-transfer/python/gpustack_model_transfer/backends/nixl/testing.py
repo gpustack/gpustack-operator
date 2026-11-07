@@ -402,6 +402,8 @@ class FakeNixlAPI:
         else:
             marker = int(operation_id.rsplit("-", 1)[1])
             payload = bytes((marker * 7 + index) % 251 for index in range(length))
+        if len(payload) != length:
+            raise ValueError("source fixture is shorter than the requested range")
         window[:length] = payload
 
     def fence(self, operation_id: str, state: str) -> None:

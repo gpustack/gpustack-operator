@@ -162,7 +162,26 @@ class TestPerOperationStates(unittest.TestCase):
         op_id = next(
             op.op_id for op in reader.operations.values() if op.state == OpState.UNKNOWN
         )
-        reader.resolve(op_id, "failed", error_code="fence-confirmed")
+        from gpustack_model_transfer.backends.nixl.errors import FenceRequiredError
+
+        with self.assertRaises(FenceRequiredError):
+            reader.resolve(op_id, "failed")
+        self.assertEqual(reader.operations[op_id].state, OpState.UNKNOWN)
+        self.assertGreater(reader.ledger.active_bytes, 0)
+        self.assertEqual(api.released_operations, set())
+        with self.assertRaises(OperationStateError):
+            reader.resolve(
+                op_id, "cancelled", external_fence="injected-runtime test fence"
+            )
+        self.assertEqual(api.released_operations, set())
+        reader.resolve(
+            op_id,
+            "failed",
+            error_code="fence-confirmed",
+            external_fence="injected-runtime test fence",
+        )
+        self.assertEqual(api.released_operations, set(api.operations))
+        self.assertEqual(reader.ledger.active_bytes, 0)
         reader.close()
 
     def test_each_operation_keeps_its_own_state(self):

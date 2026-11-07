@@ -84,19 +84,17 @@ def qualify_endpoints(
 ) -> EndpointSelection:
     """Validate one selection against the environment it will run in.
 
-    env is the process environment as a plain mapping (read-only use); a
-    UCX_NET_DEVICES=all in it is refused, because an agent created inside
+    env is the process environment as a plain mapping (read-only use); an
+    inherited UCX_NET_DEVICES wildcard is refused, because an agent created inside
     that process may inherit it. live_contexts, when given, counts other
     engine or transport contexts alive in the process; with any, a
     selection that would need process-wide changes is refused rather than
     disturb them.
     """
     raw = str(env.get(_NET_DEVICES_VARIABLE, "")).strip()
-    if raw.lower() == "all":
-        raise UnqualifiedEndpointError(
-            "UCX_NET_DEVICES=all reaches every network plane a multi-plane "
-            "host carries; name the granted rails explicitly"
-        )
+    if raw:
+        for rail in raw.split(","):
+            _require_rail(rail.strip())
     if live_contexts is not None and live_contexts() > 0:
         for key in _AGENT_SETTING_KEYS:
             if key in env and key != _NET_DEVICES_VARIABLE:

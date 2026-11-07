@@ -23,15 +23,6 @@ dynamic = ["version"]
 model_transfer = "gpustack_model_transfer.adapters.vllm.plugin:register"
 gpustack_modelexpress = "gpustack_model_transfer.adapters.modelexpress.registration:register"
 
-[tool.hatch.build]
-artifacts = ["gpustack_model_transfer_autoload.pth"]
-
-[tool.hatch.build.force-include]
-"gpustack_model_transfer_autoload.pth" = "gpustack_model_transfer_autoload.pth"
-
-[tool.hatch.build.targets.wheel]
-packages = ["gpustack_model_transfer"]
-
 [project.optional-dependencies]
 # Vendor runtimes stay optional and are imported lazily by their own
 # subpackages only; a default import of gpustack_model_transfer needs neither.

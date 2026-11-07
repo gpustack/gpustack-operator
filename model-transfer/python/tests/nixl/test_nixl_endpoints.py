@@ -13,6 +13,14 @@ from gpustack_model_transfer.backends.nixl import (
 
 
 class TestQualifyEndpoints(unittest.TestCase):
+    def test_inherited_wildcards_are_refused(self):
+        for value in ("any", "mlx5_*", "mlx5_0:1,all", "mlx5_0:1,"):
+            with self.subTest(value=value):
+                with self.assertRaises(UnqualifiedEndpointError):
+                    qualify_endpoints(
+                        "tcp://10.0.0.1:9100", ["mlx5_0:1"], {"UCX_NET_DEVICES": value}
+                    )
+
     def test_an_explicit_selection_is_qualified(self):
         selection = qualify_endpoints(
             "tcp://10.0.0.1:9100", ["mlx5_0:1", "mlx5_1:1"], {}

@@ -101,12 +101,17 @@ def peer_replica_endpoints(env=None) -> tuple:
         with open(config_path, "rb") as handle:
             raw = handle.read((1 << 20) + 1)
         if len(raw) > 1 << 20:
+            _LOG.debug("ModelExpress peer configuration exceeds the size bound")
             return ()
         parsed = json.loads(raw)
         endpoints = parsed.get("endpoints") if isinstance(parsed, dict) else None
         if not isinstance(endpoints, list):
+            _LOG.debug("ModelExpress peer configuration has no endpoints list")
             return ()
-    except (OSError, ValueError, TypeError):
+    except (OSError, ValueError, TypeError) as exc:
+        _LOG.debug(
+            "ModelExpress peer configuration unavailable (%s)", type(exc).__name__
+        )
         return ()
     self_uid = cfg.KUBERNETES_POD_UID or ""
     self_ip = cfg.KUBERNETES_POD_IP or ""
@@ -314,7 +319,6 @@ class GpustackLoadStrategy(_BASE):
                 )
             validate_environment()
             _vllm_context(ctx)
-            ctx.p2p_enabled = False
         except Exception as exc:
             raise StrategyRecoveryError(
                 "ModelExpress remote entry is unavailable"
@@ -324,6 +328,7 @@ class GpustackLoadStrategy(_BASE):
     def prepare(self, result, ctx):
         try:
             self.is_available(ctx)
+            ctx.p2p_enabled = False
             if self._failed or self._prepared_result is not None:
                 raise StrategyRecoveryError("a ModelExpress strategy cannot be reused")
             if result.model is None or result.value is not result.model:

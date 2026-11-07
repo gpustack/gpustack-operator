@@ -35,8 +35,8 @@ class Operation:
     offset: int
     length: int
     state: OpState = OpState.PENDING
-    error_code: str = None
-    error_message: str = None
+    error_code: str | None = None
+    error_message: str | None = None
     retained: bool = field(default=False)
 
     def mark_succeeded(self) -> None:

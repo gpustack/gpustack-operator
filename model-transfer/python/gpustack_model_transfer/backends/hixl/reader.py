@@ -1,4 +1,8 @@
-"""The HIXL reader: registered windows in the consuming process.
+"""Reference HIXL reader over an injected qualification API.
+
+Production engine loads use client_native.TargetNative and the source
+backend, which supply real endpoints and address-based descriptors.
+This reference WRITE seam is not a default RealHixlAPI construction path.
 
 Target memory is registered where it is consumed — in this process — per
 the documented CANN ordering, and the session wraps the agent so register

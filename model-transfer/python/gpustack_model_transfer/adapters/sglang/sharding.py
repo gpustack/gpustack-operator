@@ -284,7 +284,6 @@ def load_group(
             close()
 
     unique = 0
-    names = {tensor.name for tensor in probe.manifest.tensors}
     head = "lm_head.weight"
     for tensor in probe.manifest.tensors:
         if tensor.name.startswith("metadata."):
@@ -293,7 +292,6 @@ def load_group(
             # The tied alias is the embedding's storage: counted once.
             continue
         unique += tensor.byte_size
-    _ = names
 
     reports = []
     drivers = []
@@ -346,7 +344,7 @@ def load_group(
             if reports[rank].model is not None:
                 reports[rank].model.mutated = True
                 tainted.append(rank)
-        elif drivers[rank].built:
+        elif getattr(drivers[rank], "last_model", None) is not None:
             tainted.append(rank)
     report = LoadGroupReport(
         world_size=world_size,

@@ -630,7 +630,12 @@ def check_post_submission_quarantine(
         )
     op = retained[-1]
     # The qualified fence: the backend resolved the operation out of band.
-    reader.resolve(op.op_id, "failed", error_code="fence-confirmed")
+    reader.resolve(
+        op.op_id,
+        "failed",
+        error_code="fence-confirmed",
+        external_fence="injected-runtime test fence",
+    )
     reader.close()
     return SafetyVerdict(
         capability="post-submission-quarantine",

@@ -146,6 +146,15 @@ class SourceSupervisor:
                 self._start_worker(assignment)
                 with self._lock:
                     self._order_hashes[assignment.generation] = fingerprint
+            except Exception as exc:
+                with self._lock:
+                    if assignment.generation not in self.workers:
+                        self._revisions.discard(revision)
+                logger.warning(
+                    "generation start failed (%s); unstarted assignments may retry",
+                    type(exc).__name__,
+                )
+                continue
             finally:
                 with self._lock:
                     self._starting -= 1
@@ -163,13 +172,11 @@ class SourceSupervisor:
             poll_interval=self.poll_interval,
         )
         worker.operations = self.operations
-        with self._lock:
-            self.workers[assignment.generation] = worker
 
         def run_generation():
             try:
                 worker.start()
-                worker.run(self._shutdown)
+                worker.run()
             except BaseException:
                 worker.report_unknown("worker-failure")
 
@@ -178,8 +185,19 @@ class SourceSupervisor:
             name=f"source-gen-{assignment.generation}",
             daemon=True,
         )
-        self.threads[assignment.generation] = thread
-        thread.start()
+        with self._lock:
+            self.workers[assignment.generation] = worker
+            self.threads[assignment.generation] = thread
+            try:
+                thread.start()
+            except Exception:
+                if thread.ident is None:
+                    del self.workers[assignment.generation]
+                    del self.threads[assignment.generation]
+                    worker.close()
+                else:
+                    worker.report_unknown("thread-start-outcome-unknown")
+                raise
         return worker
 
     def statuses(self) -> list:
@@ -188,14 +206,18 @@ class SourceSupervisor:
         return [worker.redacted_status() for worker in workers]
 
     def stop(self, timeout: float = 10.0) -> bool:
-        """Drain every worker and stop polling; quarantined holders keep
-        their memory. Return true only when every worker is drained or stopped."""
+        """Stop polling and wait for broker-authorized drains.
+
+        Shutdown does not authorize release of serving or unknown ownership.
+        Return true only when every worker is drained or stopped.
+        """
         self._shutdown.set()
-        for thread in list(self.threads.values()):
+        with self._lock:
+            threads = list(self.threads.values())
+            workers = list(self.workers.values())
+        for thread in threads:
             thread.join(timeout=timeout)
-        return all(
-            worker.state in ("drained", "stopped") for worker in self.workers.values()
-        )
+        return all(worker.state in ("drained", "stopped") for worker in workers)
 
 
 __all__ = ["SourceSupervisor"]

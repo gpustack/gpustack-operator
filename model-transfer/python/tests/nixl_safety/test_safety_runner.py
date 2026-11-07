@@ -158,26 +158,20 @@ class TestScaleEvidenceGate(unittest.TestCase):
             "no 8 GiB scale evidence", scale["scale-8gib-qualification"].detail
         )
 
-    def test_scale_evidence_below_the_gate_stays_unrun(self):
+    def test_configured_byte_counts_cannot_qualify_hardware(self):
         from gpustack_model_transfer.acceptance import nixl_backend_suite
 
-        context = nixlutil.default_context()
-        context["config"]["readiness"]["scale_8gib_verified"] = {"bytes_moved": 1 << 30}
-        results = nixl_backend_suite.run(context, runtime=FakeNixlAPI)
-        scale = next(r for r in results if r.capability == "scale-8gib-qualification")
-        self.assertEqual(scale.status, "UNRUN")
-        self.assertIn("below", scale.detail)
-
-    def test_supplied_scale_evidence_passes_the_gate(self):
-        from gpustack_model_transfer.acceptance import nixl_backend_suite
-
-        context = nixlutil.default_context()
-        context["config"]["readiness"]["scale_8gib_verified"] = {
-            "bytes_moved": 9 * 1024 * 1024 * 1024
-        }
-        results = nixl_backend_suite.run(context, runtime=FakeNixlAPI)
-        scale = next(r for r in results if r.capability == "scale-8gib-qualification")
-        self.assertEqual(scale.status, "PASS")
+        for byte_count in (1 << 30, 9 << 30):
+            with self.subTest(byte_count=byte_count):
+                context = nixlutil.default_context()
+                context["config"]["readiness"]["scale_8gib_verified"] = {
+                    "bytes_moved": byte_count
+                }
+                results = nixl_backend_suite.run(context, runtime=FakeNixlAPI)
+                scale = next(
+                    r for r in results if r.capability == "scale-8gib-qualification"
+                )
+                self.assertEqual(scale.status, "UNRUN")
 
 
 class TestSuitesAgainstARestrictedRuntime(unittest.TestCase):

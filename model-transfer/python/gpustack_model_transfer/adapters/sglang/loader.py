@@ -55,11 +55,6 @@ class LoadPlan:
     total_parameter_bytes: int
     tied_aliases: tuple = ()
 
-    def tied_alias_parameter(self) -> str:
-        for _, target in self.tied_aliases:
-            return target
-        return None
-
 
 def build_load_plan(
     manifest,
@@ -91,6 +86,13 @@ def build_load_plan(
     entries = []
     total = 0
     for tensor in manifest.tensors:
+        if tied_aliases and tensor.name == head:
+            entries.append(
+                LoadPlanEntry(
+                    tensor=tensor, parameter=tensor.name, role=_ROLE_TIED_ALIAS
+                )
+            )
+            continue
         view = tensor if views is None else views[tensor.name]
         byte_size = view.byte_size
         if byte_size > budgets.owned_output_bytes:
@@ -107,13 +109,6 @@ def build_load_plan(
         if tensor.name.startswith("metadata."):
             entries.append(
                 LoadPlanEntry(tensor=tensor, parameter="", role=_ROLE_ENGINE_METADATA)
-            )
-            continue
-        if tied_aliases and tensor.name == head:
-            entries.append(
-                LoadPlanEntry(
-                    tensor=tensor, parameter=tensor.name, role=_ROLE_TIED_ALIAS
-                )
             )
             continue
         entries.append(
@@ -203,6 +198,8 @@ class ModelTransferSGLangLoader:
         self._reader = reader
         self._capabilities = capabilities
         self._budgets = budgets
+        # A failed close remains accessible for an explicit fence and retry.
+        self.retained_session = None
 
     def _close_reader(self) -> None:
         close = getattr(self._reader, "close", None)
@@ -231,6 +228,8 @@ class ModelTransferSGLangLoader:
         finalize=False withholds the engine's finalization, so a load
         group can finalize every rank together or none at all.
         """
+        if self.retained_session is not None:
+            raise OperationStateError("a previous load session still needs cleanup")
         session = None
         model = None
         ledger = ResourceLedger(session_closed=False)
@@ -334,8 +333,8 @@ class ModelTransferSGLangLoader:
                 try:
                     session.close()
                     ledger.session_closed = True
-                except OperationStateError:
-                    pass
+                except Exception:
+                    self.retained_session = session
             else:
                 self._close_reader()
             raise

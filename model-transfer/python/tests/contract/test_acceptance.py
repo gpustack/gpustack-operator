@@ -74,6 +74,13 @@ def run(config, backend="local", suite="contract", engine=None, expect=None):
 
 
 class TestAcceptanceRefusals(unittest.TestCase):
+    def test_nonfinite_deadlines_are_refused(self):
+        for value in (float("nan"), float("inf"), float("-inf")):
+            with self.subTest(value=value):
+                config = base_config()
+                config["deadlines"]["operation_seconds"] = value
+                run(config, expect=2)
+
     def test_valid_local_contract_run_passes(self):
         _code, out = run(base_config(), expect=0)
         report = json.loads(out)

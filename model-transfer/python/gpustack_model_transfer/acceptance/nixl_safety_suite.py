@@ -75,6 +75,8 @@ def _run_check(capability, check, context, api) -> CheckResult:
     boundary — and the guards above make that explicit; this fallback
     keeps any hook they miss honest too.
     """
+    had_mode = hasattr(api, "submit_mode")
+    previous_mode = getattr(api, "submit_mode", None)
     try:
         verdict = check(context, api)
         return CheckResult(capability, verdict.status, verdict.detail)
@@ -90,6 +92,12 @@ def _run_check(capability, check, context, api) -> CheckResult:
         )
     except Exception as exc:
         return CheckResult(capability, "NO-GO", f"{type(exc).__name__}: {exc}")
+
+    finally:
+        if had_mode:
+            api.submit_mode = previous_mode
+        elif hasattr(api, "submit_mode"):
+            del api.submit_mode
 
 
 _RAW_HITCHES = (

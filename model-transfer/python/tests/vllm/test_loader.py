@@ -249,6 +249,11 @@ class TestFinalization(unittest.TestCase):
         with self.assertRaisesRegex(DeniedContentError, "engine refused"):
             loader.load(driver, LoadOptions())
         self.assertEqual(counting.close_calls, 1)
+        self.assertIsNotNone(loader.retained_session)
+        from gpustack_model_transfer.core.errors import OperationStateError
+
+        with self.assertRaises(OperationStateError):
+            loader.load(driver, LoadOptions())
 
     def test_failure_midway_taints_the_model(self):
         from gpustack_model_transfer.adapters.vllm import LoadOptions
@@ -431,3 +436,31 @@ class TestForwardEquivalence(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestTiedAliasBudget(unittest.TestCase):
+    def test_unused_head_bytes_do_not_refuse_the_plan(self):
+        import importlib
+        from dataclasses import replace
+        from types import SimpleNamespace
+
+        reader = _CountingReader()
+        self.addCleanup(reader.close)
+        head = next(t for t in reader.manifest.tensors if t.name == "lm_head.weight")
+        tensors = tuple(
+            replace(t, data_end=t.data_begin + 8192, shape=(2048,)) if t is head else t
+            for t in reader.manifest.tensors
+        )
+        manifest = SimpleNamespace(tensors=tensors)
+        for engine in ("vllm", "sglang", "vllm_ascend"):
+            with self.subTest(engine=engine):
+                build = importlib.import_module(
+                    f"gpustack_model_transfer.adapters.{engine}.loader"
+                ).build_load_plan
+                plan = build(
+                    manifest,
+                    default_budgets(),
+                    local_backend_capabilities(),
+                    tie_word_embeddings=True,
+                )
+                self.assertTrue(plan.tied_aliases)

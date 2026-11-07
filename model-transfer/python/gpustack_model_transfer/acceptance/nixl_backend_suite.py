@@ -34,11 +34,6 @@ CAPABILITIES = (
     "scale-8gib-qualification",
 )
 
-# The smallest scale a qualification run must have moved before the 8 GiB
-# capability may claim anything. Evidence below this stays UNRUN: missing
-# evidence is never averaged into a pass.
-SCALE_8GIB_BYTES = 8 * 1024 * 1024 * 1024
-
 
 def run(context, runtime=None) -> list:
     """Run every backend capability.
@@ -86,36 +81,12 @@ def run(context, runtime=None) -> list:
 
 
 def _check_scale_8gib(context) -> CheckResult:
-    """The 8 GiB scale gate: UNRUN unless scale evidence is on record.
-
-    A run over the small contract fixture alone says nothing about 8 GiB
-    windows, registrations, or renewal at that size. The evidence comes
-    from the acceptance configuration's readiness record: an
-    "scale_8gib_verified" entry naming the bytes a qualified run moved.
-    Nothing invents it, and its absence is reported, never waved through.
-    """
-    evidence = context["config"]["readiness"].get("scale_8gib_verified")
-    if not evidence:
-        return CheckResult(
-            "scale-8gib-qualification",
-            "UNRUN",
-            "no 8 GiB scale evidence was supplied; the contract fixture "
-            "alone does not qualify 8 GiB windows, registrations, or "
-            "renewal at that size",
-        )
-    moved = evidence.get("bytes_moved", 0) if isinstance(evidence, dict) else 0
-    if moved < SCALE_8GIB_BYTES:
-        return CheckResult(
-            "scale-8gib-qualification",
-            "UNRUN",
-            f"scale evidence records {moved} bytes moved, below the "
-            f"{SCALE_8GIB_BYTES} the capability asks for",
-        )
+    """The portable fixture does not perform an 8 GiB hardware transfer."""
     return CheckResult(
         "scale-8gib-qualification",
-        "PASS",
-        f"a qualified run moved {moved} bytes; evidence recorded in the "
-        "readiness configuration",
+        "UNRUN",
+        "no 8 GiB scale evidence is produced by this fixture; "
+        "use a separate hardware run to qualify windows and registrations",
     )
 
 
@@ -127,6 +98,8 @@ def _run_check(capability, check, context, api) -> CheckResult:
     missing-hook guards above keep that the explicit path, and this catch
     is the honest fallback for anything they miss.
     """
+    had_mode = hasattr(api, "submit_mode")
+    previous_mode = getattr(api, "submit_mode", None)
     try:
         detail = check(context, api)
         if isinstance(detail, CheckResult):
@@ -145,6 +118,12 @@ def _run_check(capability, check, context, api) -> CheckResult:
         )
     except Exception as exc:
         return CheckResult(capability, "NO-GO", f"{type(exc).__name__}: {exc}")
+
+    finally:
+        if had_mode:
+            api.submit_mode = previous_mode
+        elif hasattr(api, "submit_mode"):
+            del api.submit_mode
 
 
 def _compat_unrun(name: str, why: str) -> CheckResult:
@@ -328,9 +307,8 @@ def _check_per_operation_terminal_states(context, api):
             poll_deadline_seconds=0.0,
         )
 
-    refusing = api
-    refusing.submit_mode = SUBMIT_REFUSE_PRE
-    reader = open_reader(refusing)
+    api.submit_mode = SUBMIT_REFUSE_PRE
+    reader = open_reader(api)
     try:
         reader.read_bytes(tensor.file, span[0], span[1])
     except Refused as exc:
@@ -340,10 +318,9 @@ def _check_per_operation_terminal_states(context, api):
     else:
         raise AssertionError("the pre-submission refusal was not raised")
 
-    hanging = type(api).__new__(type(api))
-    hanging.__dict__.update(api.__dict__)
-    hanging.submit_mode = SUBMIT_NONTERMINAL
-    reader = open_reader(hanging)
+    reader.close()
+    api.submit_mode = SUBMIT_NONTERMINAL
+    reader = open_reader(api)
     try:
         reader.read_bytes(tensor.file, span[0], span[1])
     except AmbiguousReadError as exc:
@@ -360,7 +337,12 @@ def _check_per_operation_terminal_states(context, api):
             pass
         else:
             raise AssertionError("the reader closed over a retained UNKNOWN")
-        reader.resolve(unknown[-1].op_id, "failed", error_code="fence")
+        reader.resolve(
+            unknown[-1].op_id,
+            "failed",
+            error_code="fence",
+            external_fence="injected-runtime test fence",
+        )
         reader.close()
     else:
         raise AssertionError("a nonterminal submission completed")
@@ -440,6 +422,8 @@ def _check_counter_attribution(context, api):
             "counter attribution",
             "the runtime does not expose port counters in this environment",
         )
+    from gpustack_model_transfer.backends.nixl.memory import MemoryAccountingError
+
     counters = CounterAttribution(rail="mlx5_0:1", counters=raw_counters)
     counters.validate()
     if not counters.counters:
@@ -448,7 +432,7 @@ def _check_counter_attribution(context, api):
         CounterAttribution(
             rail="mlx5_0:1", counters=counters.counters, proves_transfer_path=True
         ).validate()
-    except Exception:
+    except MemoryAccountingError:
         return (
             "counters attribute traffic to the selected rail; a record "
             "claiming they prove the transfer path is refused"

@@ -22,6 +22,9 @@ class LocalFileReader:
         self.manifest = load_manifest(manifest_path, expected_sha256)
         self._root = os.path.dirname(os.fspath(manifest_path))
         self._handles = {}
+        self._files = {
+            descriptor.path: descriptor for descriptor in self.manifest.files
+        }
         try:
             for descriptor in self.manifest.files:
                 self._open_file(descriptor)
@@ -47,7 +50,10 @@ class LocalFileReader:
 
     def read_bytes(self, file_path: str, begin: int, end: int) -> bytes:
         """Return the bytes at [begin, end) of file_path, freshly read."""
-        descriptor = self.manifest.file(file_path)
+        try:
+            descriptor = self._files[file_path]
+        except KeyError:
+            raise InvalidDescriptorError(f"unknown file: {file_path!r}") from None
         if begin < 0 or end < begin:
             raise RangeOverflowError(
                 f"invalid range [{begin}, {end}) for {file_path!r}"

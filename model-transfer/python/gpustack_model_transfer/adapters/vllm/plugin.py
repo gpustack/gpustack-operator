@@ -7,8 +7,8 @@ def register() -> None:
     from gpustack_model_transfer.envs import ENVS
     from vllm.model_executor.model_loader import register_model_loader
 
-    timeout_str = ENVS.GPUSTACK_MODEL_TRANSFER_TIMEOUT_STR
     if ENVS.GPUSTACK_MODEL_TRANSFER_BACKEND == "hixl":
+        timeout_str = ENVS.GPUSTACK_MODEL_TRANSFER_TIMEOUT_STR
         # The collective stream must outlive a full remote fill: a broadcast
         # whose ranks queue faster than the coordinator transfers hits the
         # collective timeout unless it matches the transfer timeout.

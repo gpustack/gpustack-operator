@@ -672,3 +672,45 @@ def test_work_order_source_generation_requires_integer(value):
 
     with pytest.raises(InvalidDescriptorError, match="source generation"):
         parse_assignment(payload, backend="nixl")
+
+
+@pytest.mark.parametrize(
+    "namespace", [None, {}, "x" * 254, "bad\nnamespace", "bad\x7fnamespace"]
+)
+def test_workorder_namespace_is_log_safe(namespace):
+    from gpustack_model_transfer.core.errors import InvalidDescriptorError
+
+    payload = order()
+    payload["namespace"] = namespace
+    with pytest.raises(InvalidDescriptorError):
+        parse_assignment(payload, backend="nixl")
+
+
+def test_failed_start_does_not_starve_other_assignments_or_retries():
+    s, controls, _, _ = supervisor([order("one"), order("two")])
+    original = s._control_factory
+    attempts = []
+
+    def failing_once(assignment):
+        attempts.append(assignment.generation)
+        if assignment.generation == "one" and attempts.count("one") == 1:
+            raise RuntimeError("temporary factory failure")
+        return original(assignment)
+
+    s._control_factory = failing_once
+    try:
+        s.poll_once()
+        assert "one" not in s.workers
+        assert "two" in s.workers
+        s.poll_once()
+        eventually(
+            lambda: (
+                len(s.workers) == 2
+                and all(w.wait_until_filled(0) for w in s.workers.values())
+            )
+        )
+        assert attempts.count("one") == 2
+    finally:
+        for control in controls.values():
+            control.action = "drain"
+        assert s.stop()

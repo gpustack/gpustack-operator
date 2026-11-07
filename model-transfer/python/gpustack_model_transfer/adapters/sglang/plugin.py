@@ -1,12 +1,16 @@
 """Lazy SGLang plugin registration for --load-format model-transfer."""
 
+import logging
+
 from gpustack_model_transfer.envs import ENVS
+
+_LOG = logging.getLogger(__name__)
 
 
 def register() -> None:
     """Register the model-transfer load format with SGLang's model_loader."""
-    timeout_str = ENVS.GPUSTACK_MODEL_TRANSFER_TIMEOUT_STR
     if ENVS.GPUSTACK_MODEL_TRANSFER_BACKEND == "hixl":
+        timeout_str = ENVS.GPUSTACK_MODEL_TRANSFER_TIMEOUT_STR
         ENVS.setdefault("HCCL_EXEC_TIMEOUT", timeout_str)
         ENVS.setdefault("HCCL_CONNECT_TIMEOUT", timeout_str)
 
@@ -19,8 +23,8 @@ def register() -> None:
                 add_choices(["model-transfer"])
             except TypeError:
                 add_choices("model-transfer")
-    except Exception:
-        pass
+    except Exception as exc:
+        _LOG.debug("SGLang choices registration unavailable (%s)", type(exc).__name__)
 
     try:
         from enum import Enum
@@ -50,8 +54,8 @@ def register() -> None:
                 load_format_cls._member_names_.append("MODEL_TRANSFER")
                 load_format_cls._value2member_map_["model-transfer"] = member
                 type.__setattr__(load_format_cls, "MODEL_TRANSFER", member)
-    except Exception:
-        pass
+    except Exception as exc:
+        _LOG.debug("SGLang enum registration unavailable (%s)", type(exc).__name__)
 
     try:
         import sglang.srt.model_loader as ml_pkg
@@ -86,5 +90,5 @@ def register() -> None:
             )
             if lmu_mod is not None and hasattr(lmu_mod, "get_model_loader"):
                 lmu_mod.get_model_loader = _wrapped_get_model_loader
-    except Exception:
-        pass
+    except Exception as exc:
+        _LOG.debug("SGLang loader registration unavailable (%s)", type(exc).__name__)

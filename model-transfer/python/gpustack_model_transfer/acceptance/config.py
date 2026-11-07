@@ -9,6 +9,7 @@ replayed runs never depend on the real date.
 
 import hashlib
 import json
+import math
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -168,6 +169,7 @@ def load_and_validate(
     if (
         isinstance(operation_seconds, bool)
         or not isinstance(operation_seconds, (int, float))
+        or not math.isfinite(operation_seconds)
         or operation_seconds <= 0
     ):
         raise RefusedError("deadlines.operation_seconds must be positive")

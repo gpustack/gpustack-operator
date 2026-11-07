@@ -9,6 +9,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import fixtureutil
+import pytest
 
 from gpustack_model_transfer.acceptance import (
     ep_coexistence_suite,
@@ -816,3 +817,31 @@ def test_missing_cann_gate_is_unrun():
         r for r in results if r.capability == "source-npu-grant-and-recovery-gate"
     )
     assert gate.status == "UNRUN"
+
+
+@pytest.mark.parametrize(
+    "suite_name",
+    [
+        "hixl_backend_suite",
+        "hixl_safety_suite",
+        "nixl_backend_suite",
+        "nixl_safety_suite",
+    ],
+)
+@pytest.mark.parametrize("present", [False, True])
+def test_fault_check_restores_missing_or_none_mode(suite_name, present):
+    import importlib
+    from types import SimpleNamespace
+
+    suite = importlib.import_module("gpustack_model_transfer.acceptance." + suite_name)
+    api = SimpleNamespace(submit_mode=None) if present else SimpleNamespace()
+
+    def check(context, runtime):
+        runtime.submit_mode = "injected-fault"
+        raise RuntimeError("injected failure")
+
+    result = suite._run_check("test-capability", check, {}, api)
+    assert result.status == "NO-GO"
+    assert hasattr(api, "submit_mode") is present
+    if present:
+        assert api.submit_mode is None

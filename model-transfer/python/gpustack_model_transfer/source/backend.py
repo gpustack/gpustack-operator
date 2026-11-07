@@ -350,8 +350,17 @@ class NixlSourceBackend(_PagingBackend):
 
     def post_write(self, registration, name, offset, length, target):
         """Connect to target metadata and post a bounded source WRITE."""
+        try:
+            metadata = base64.b64decode(target["metadata"], validate=True)
+            remote = {
+                "addr": target["address"],
+                "len": target["length"],
+                "mem_type": "DRAM",
+                "device_id": 0,
+            }
+        except (KeyError, TypeError, ValueError):
+            raise SourcePrePostError("invalid target metadata") from None
         self._prepare_write(registration, name, offset, length, target)
-        metadata = base64.b64decode(target["metadata"], validate=True)
         connection = self._api.connect_peer(self._agent, metadata)
         self._peers.append(connection)
         # Keep the connection even if the post raises after submission.
@@ -363,12 +372,7 @@ class NixlSourceBackend(_PagingBackend):
                 registration.native,
                 connection,
                 name,
-                {
-                    "addr": target["address"],
-                    "len": target["length"],
-                    "mem_type": "DRAM",
-                    "device_id": 0,
-                },
+                remote,
                 length,
                 local_offset=offset,
             )
@@ -613,10 +617,10 @@ class HixlSourceBackend(_PagingBackend):
     def _post_write(self, registration, name, offset, length, target, owner=None):
         if self._uncertain_connections:
             raise SourceUnavailableError("HIXL connection release remains unknown")
-        block = self._prepare_write(registration, name, offset, length, target)
         hixl = self._hixl
         if hixl is None:
-            raise SourceUnavailableError("HIXL source API is unavailable")
+            raise SourcePrePostError("HIXL source API is unavailable")
+        block = self._prepare_write(registration, name, offset, length, target)
         endpoint = target["endpoint"]
         cached = self._cached_peers.get(owner)
         if cached is None:

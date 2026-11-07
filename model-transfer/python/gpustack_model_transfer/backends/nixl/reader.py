@@ -113,6 +113,7 @@ class NixlReader:
 
         self._slots = WindowSlots(budgets.max_inflight)
         self.operations: dict[str, Operation] = {}
+        self._op_handles = {}
         self._op_windows: dict[str, TransferWindow] = {}
         self._op_active_bytes: dict[str, int] = {}
         self._closed = False
@@ -169,13 +170,38 @@ class NixlReader:
         target: str,
         error_code: str | None = None,
         error_message: str | None = None,
+        *,
+        external_fence: str | None = None,
     ) -> None:
-        """Resolve a retained UNKNOWN operation through a qualified fence."""
+        """Release the native handle after a documented external fence.
+
+        A failed native release leaves the operation and window UNKNOWN.
+        """
         operation = self.operations.get(op_id)
         if operation is None:
             raise OperationStateError(f"unknown operation: {op_id!r}")
+        try:
+            target_state = OpState(target)
+        except ValueError:
+            raise OperationStateError("unknown resolution target") from None
+        if operation.state != OpState.UNKNOWN or target_state not in (
+            OpState.SUCCEEDED,
+            OpState.FAILED,
+        ):
+            raise OperationStateError(
+                "resolution requires UNKNOWN and a terminal target"
+            )
+        handle = self._op_handles.get(op_id)
+        if handle is not None:
+            release = getattr(self._api, "release_operation", None)
+            if not callable(release):
+                raise OperationStateError(
+                    "runtime cannot release the retained native handle"
+                )
+            release(self._agent, handle, external_fence=external_fence)
+            del self._op_handles[op_id]
         operation.resolve_unknown(
-            OpState(target), error_code=error_code, error_message=error_message
+            target_state, error_code=error_code, error_message=error_message
         )
         self._deactivate(op_id)
         self._release_window(op_id)
@@ -207,7 +233,9 @@ class NixlReader:
         try:
             op_handle = self._submit(window, file_path, begin, length)
             submitted = True
+            self._op_handles[operation.op_id] = op_handle
             outcome = self._await(operation, op_handle)
+            self._op_handles.pop(operation.op_id, None)
         except AmbiguousReadError:
             # _await already marked the operation UNKNOWN and it is
             # retained: nothing here may release or re-mark it.

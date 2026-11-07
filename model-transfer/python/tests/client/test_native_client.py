@@ -1405,3 +1405,25 @@ def test_session_requests_share_absolute_transport_deadlines(
             assert reader.pending_closes and reader.poisoned
     finally:
         broker.close()
+
+
+@pytest.mark.parametrize(
+    "raw", ["0", "-1", "18O0", "NaN", "Infinity", "-Infinity", True]
+)
+def test_transfer_timeout_rejects_invalid_values(raw):
+    from gpustack_model_transfer.client import transfer_timeout
+    from gpustack_model_transfer.core.errors import SourceUnavailableError
+
+    with pytest.raises(SourceUnavailableError):
+        transfer_timeout({"GPUSTACK_MODEL_TRANSFER_TIMEOUT": raw})
+
+
+@pytest.mark.parametrize(
+    "raw,seconds,hccl", [(None, 1800, "1800"), ("0.5", 0.5, "1"), ("2.1", 2.1, "3")]
+)
+def test_transfer_timeout_and_collective_timeout_agree(raw, seconds, hccl):
+    from gpustack_model_transfer.envs import get_envs
+
+    env = get_envs({"GPUSTACK_MODEL_TRANSFER_TIMEOUT": raw})
+    assert seconds == env.GPUSTACK_MODEL_TRANSFER_TIMEOUT
+    assert hccl == env.GPUSTACK_MODEL_TRANSFER_TIMEOUT_STR

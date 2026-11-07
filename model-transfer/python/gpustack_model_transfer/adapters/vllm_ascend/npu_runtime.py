@@ -93,7 +93,9 @@ def default_visibility_fence(stream: str = "npu:0"):
         try:
             device = int(stream.rsplit(":", 1)[1])
         except ValueError:
-            device = 0
+            raise ValueError("malformed NPU stream device") from None
+        if device < 0:
+            raise ValueError("NPU stream device must be non-negative")
 
     def fence(name: str) -> None:
         # The host-side wait that orders the transfer's writes ahead of the
@@ -126,7 +128,7 @@ class NPURuntimeDriver:
 
     Every vendor import happens inside a method, so constructing or probing
     this module on a CPU-only host costs nothing and refuses cleanly. The
-    The fixture does not perform engine-specific postprocessing or inference.
+    fixture does not perform engine-specific postprocessing or inference.
     """
 
     def __init__(self, device: int | None = None):

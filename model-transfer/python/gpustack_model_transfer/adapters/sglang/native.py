@@ -227,8 +227,6 @@ def _synchronize_device(device) -> None:
 class NativeSGLangModelTransferLoader:
     """SGLang runtime loader that streams verified remote tensors into model.load_weights."""
 
-    preloaded_weights_bytes: int = 0
-
     def __init__(self, load_config):
         self.load_config = load_config
         self._provider = None

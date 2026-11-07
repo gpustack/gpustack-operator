@@ -176,7 +176,11 @@ class _Names(Mapping):
         return (tensor.name for tensor in self.table)
 
     def __getitem__(self, name):
-        result = next(self.table._rows("WHERE name=?", (name,)), None)
+        rows = self.table._rows("WHERE name=?", (name,))
+        try:
+            result = next(rows, None)
+        finally:
+            rows.close()
         if result is None:
             raise KeyError(name)
         return result

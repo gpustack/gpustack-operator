@@ -11,10 +11,8 @@ gate is checked too: any missing source grant, binding, allocation, or
 reclamation rule disables CANN remote delivery without blocking
 qualified CUDA support.
 
-The harness contract, one hook per observable:
-
-    The harness contract, one hook per observable, cross-checked against
-    the validated context: the metadata target's manifest digest must
+The harness contract, one hook per observable, cross-checked against
+the validated context: the metadata target's manifest digest must
     equal context['config']['artifact']['manifest_sha256'], and every
     reader budget must stay within context['config']['limits'] where the
     lifecycle suite reads them.

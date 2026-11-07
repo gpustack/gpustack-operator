@@ -82,7 +82,8 @@ def _open_session(context, reader=None, budgets=None):
 def _check_version_identity(context):
     manifest = context["manifest"]
     versioning.check_contract_version(manifest.contract_version)
-    assert versioning.contract_identity() == "gpustack-model-transfer/reader/2"
+    if versioning.contract_identity() != "gpustack-model-transfer/reader/2":
+        raise AssertionError("reader contract identity differs")
     return "manifest binds to supported contract version 2"
 
 

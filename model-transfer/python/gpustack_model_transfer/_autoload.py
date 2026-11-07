@@ -1,12 +1,13 @@
 """Optional import hook for engines without entry-point plugin discovery (e.g. SGLang)."""
 
 import importlib.abc
+import logging
 import sys
-from contextlib import suppress
 
 from gpustack_model_transfer.envs import ENVS
 
 _INSTALLED = False
+_LOG = logging.getLogger(__name__)
 
 _SGLANG_TARGETS = frozenset(
     {
@@ -25,10 +26,16 @@ def _patch_server_args(mod) -> None:
         try:
             add_choices(["model-transfer"])
         except TypeError:
-            with suppress(Exception):
+            try:
                 add_choices("model-transfer")
-        except Exception:
-            pass
+            except Exception as exc:
+                _LOG.debug(
+                    "SGLang choices registration unavailable (%s)", type(exc).__name__
+                )
+        except Exception as exc:
+            _LOG.debug(
+                "SGLang choices registration unavailable (%s)", type(exc).__name__
+            )
     choices_list = getattr(mod, "LOAD_FORMAT_CHOICES", None)
     if isinstance(choices_list, list) and "model-transfer" not in choices_list:
         choices_list.append("model-transfer")

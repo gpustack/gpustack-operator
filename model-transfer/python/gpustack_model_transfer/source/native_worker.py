@@ -526,7 +526,8 @@ class NativeSourceWorker:
             self._stop_event.wait(delay)
         return self.state
 
-    def run(self, stop_event):
+    def run(self):
+        """Serve until the broker authorizes drain or ownership is quarantined."""
         while self.state not in ("drained", "stopped", "quarantined"):
             self.once()
         return self.state

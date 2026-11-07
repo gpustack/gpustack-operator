@@ -221,8 +221,12 @@ class ReaderSession:
     ) -> None:
         """Resolve a retained UNKNOWN operation through a qualified fence."""
         operation = self._require_operation(op_id)
+        try:
+            target_state = OpState(target)
+        except ValueError:
+            raise OperationStateError("unknown resolution target") from None
         operation.resolve_unknown(
-            OpState(target), error_code=error_code, error_message=error_message
+            target_state, error_code=error_code, error_message=error_message
         )
         self._finish_slot(operation)
 

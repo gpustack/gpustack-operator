@@ -222,11 +222,18 @@ def parse_assignment(payload, *, backend: str, page_reader=None) -> Assignment:
         payload["sourceGeneration"], int
     ):
         raise InvalidDescriptorError("work order source generation must be an integer")
+    namespace = payload.get("namespace", "")
+    if (
+        not isinstance(namespace, str)
+        or len(namespace) > 253
+        or any(ord(char) < 32 or ord(char) == 127 for char in namespace)
+    ):
+        raise InvalidDescriptorError("work order namespace must be a bounded string")
     assignment = Assignment(
         generation=generation,
         worker_secret=secret,
         digest=digest,
-        namespace=payload.get("namespace", ""),
+        namespace=namespace,
         artifact_uid=payload["artifactUID"],
         source_generation=payload["sourceGeneration"],
         manifest_sha256=manifest_sha256,

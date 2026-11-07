@@ -400,3 +400,18 @@ def test_hixl_target_registration_failure_retains_handle_and_owner(monkeypatch):
         and target.agent is not None
         and target.block is not None
     )
+
+
+@pytest.mark.parametrize(
+    "target", [{}, {"metadata": "!!!", "address": 1000, "length": 8}]
+)
+def test_nixl_invalid_metadata_is_refused_before_file_acquisition(target):
+    from gpustack_model_transfer.source.backend import (
+        NixlSourceBackend,
+        SourcePrePostError,
+    )
+
+    backend = NixlSourceBackend()
+    with pytest.raises(SourcePrePostError):
+        backend.post_write(None, "file", 0, 4, target)
+    assert not backend.has_active_peers()

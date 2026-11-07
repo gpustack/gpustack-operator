@@ -86,6 +86,7 @@ class TorchRuntimeDriver:
     def __init__(self):
         self._torch = None
         self._models = {}
+        self.last_model = None
 
     def _require_torch(self):
         if self._torch is None:
@@ -122,6 +123,7 @@ class TorchRuntimeDriver:
         if options.engine_config is not None:
             model.connector_config = options.engine_config
         self._models[id(model)] = model
+        self.last_model = model
         return model
 
     def store(self, model, entry, payload, ownership="owned") -> str:
