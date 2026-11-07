@@ -238,11 +238,15 @@ class TestFinalization(unittest.TestCase):
         from gpustack_model_transfer.adapters.vllm import LoadOptions
 
         class CloseFailure(_CountingReader):
+            fail_close = True
+
             def close(self):
                 super().close()
-                raise RuntimeError("cleanup failed")
+                if self.fail_close:
+                    raise RuntimeError("cleanup failed")
 
-        loader, counting = make_loader(reader=CloseFailure())
+        counting = CloseFailure()
+        loader, _ = make_loader(reader=counting)
         driver = make_driver(
             fail_store_after=0, store_error=DeniedContentError("engine refused")
         )
@@ -254,6 +258,13 @@ class TestFinalization(unittest.TestCase):
 
         with self.assertRaises(OperationStateError):
             loader.load(driver, LoadOptions())
+        retained = loader.retained_session
+        with self.assertRaisesRegex(RuntimeError, "cleanup failed"):
+            loader.close()
+        self.assertIs(loader.retained_session, retained)
+        counting.fail_close = False
+        loader.close()
+        self.assertIsNone(loader.retained_session)
 
     def test_failure_midway_taints_the_model(self):
         from gpustack_model_transfer.adapters.vllm import LoadOptions

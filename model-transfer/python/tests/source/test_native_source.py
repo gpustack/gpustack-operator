@@ -714,3 +714,29 @@ def test_failed_start_does_not_starve_other_assignments_or_retries():
         for control in controls.values():
             control.action = "drain"
         assert s.stop()
+
+
+def test_unstarted_worker_cleanup_does_not_hold_supervisor_lock(monkeypatch):
+    from gpustack_model_transfer.source.native_worker import NativeSourceWorker
+
+    s, _, _, _ = supervisor([order()])
+    start = threading.Thread.start
+    observed = []
+
+    def fail_generation(thread):
+        if thread.name.startswith("source-gen-"):
+            raise RuntimeError("cannot start generation")
+        return start(thread)
+
+    def close(worker):
+        observer = threading.Thread(target=s.statuses)
+        observer.start()
+        observer.join(timeout=1)
+        observed.append(not observer.is_alive())
+
+    monkeypatch.setattr(threading.Thread, "start", fail_generation)
+    monkeypatch.setattr(NativeSourceWorker, "close", close)
+    assert s.poll_once() == 0
+    assert observed == [True]
+    assert not s.workers
+    assert not s.threads

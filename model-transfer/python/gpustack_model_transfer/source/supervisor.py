@@ -185,19 +185,22 @@ class SourceSupervisor:
             name=f"source-gen-{assignment.generation}",
             daemon=True,
         )
-        with self._lock:
-            self.workers[assignment.generation] = worker
-            self.threads[assignment.generation] = thread
-            try:
+        try:
+            with self._lock:
+                self.workers[assignment.generation] = worker
+                self.threads[assignment.generation] = thread
                 thread.start()
-            except Exception:
-                if thread.ident is None:
+        except Exception:
+            with self._lock:
+                unstarted = thread.ident is None
+                if unstarted:
                     del self.workers[assignment.generation]
                     del self.threads[assignment.generation]
-                    worker.close()
-                else:
-                    worker.report_unknown("thread-start-outcome-unknown")
-                raise
+            if unstarted:
+                worker.close()
+            else:
+                worker.report_unknown("thread-start-outcome-unknown")
+            raise
         return worker
 
     def statuses(self) -> list:

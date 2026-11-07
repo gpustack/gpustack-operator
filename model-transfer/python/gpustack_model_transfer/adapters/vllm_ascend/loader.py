@@ -4,6 +4,7 @@ The shared vLLM native module registers the real engine loader. This fixture's
 model, finalization counter, and KV profiling do not establish engine behavior.
 """
 
+import logging
 from dataclasses import dataclass, field
 
 from gpustack_model_transfer.adapters.vllm_ascend.metadata import (
@@ -20,6 +21,8 @@ from gpustack_model_transfer.core.errors import (
     OperationStateError,
 )
 from gpustack_model_transfer.core.session import ReaderSession
+
+_LOG = logging.getLogger(__name__)
 
 _ROLE_PARAMETER = "parameter"
 _ROLE_TIED_ALIAS = "tied-alias"
@@ -177,6 +180,19 @@ class ModelTransferAscendLoader:
         # A failed close remains accessible for an explicit fence and retry.
         self.retained_session = None
 
+    def close(self) -> None:
+        """Retry cleanup after the caller resolves any retained operations.
+
+        This never supplies a fence or releases UNKNOWN ownership. A failed
+        close keeps the session reachable for another cleanup attempt. Use a
+        new reader and loader for another model load after cleanup succeeds.
+        """
+        if self.retained_session is not None:
+            self.retained_session.close()
+            self.retained_session = None
+        else:
+            self._close_reader()
+
     def _close_reader(self) -> None:
         close = getattr(self._reader, "close", None)
         if callable(close):
@@ -290,8 +306,12 @@ class ModelTransferAscendLoader:
                 try:
                     session.close()
                     ledger.session_closed = True
-                except Exception:
+                except Exception as close_error:
                     self.retained_session = session
+                    _LOG.warning(
+                        "load session cleanup remains pending (%s)",
+                        type(close_error).__name__,
+                    )
             else:
                 self._close_reader()
             raise

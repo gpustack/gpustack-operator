@@ -104,7 +104,11 @@ def test_hixl_source_runtime_initialization_does_not_need_torch(monkeypatch):
             return None
 
     fake_module = SimpleNamespace(Hixl=Engine)
-    monkeypatch.setattr(runtime, "_hixl_version", lambda: runtime.PINNED_VERSION)
+
+    def refuse_version_check():
+        raise AssertionError("source startup must not inspect the version")
+
+    monkeypatch.setattr(runtime, "_hixl_version", refuse_version_check)
     monkeypatch.setattr(runtime.RealHixlAPI, "_require", lambda self: fake_module)
     monkeypatch.setitem(sys.modules, "torch", None)
     monkeypatch.setitem(sys.modules, "torch_npu", None)

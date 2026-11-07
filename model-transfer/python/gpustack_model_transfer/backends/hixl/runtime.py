@@ -1,4 +1,4 @@
-"""The HIXL runtime seam: lazy, version-pinned, fail-closed.
+"""The HIXL runtime seam: lazy, API-checked, fail-closed.
 
 Nothing in this module imports hixl, torch, or torch_npu at module scope,
 so the wheel stays pure Python (py3-none-any) and installs anywhere: a
@@ -24,16 +24,9 @@ from gpustack_model_transfer.backends.hixl.errors import (
 )
 from gpustack_model_transfer.backends.hixl.memory import AlignedHostBuffer
 
-# The pinned baseline. The gate identifies the wheel by its installed
-# distribution version, exactly as the NIXL gate does: the reviewed wheel
-# built from commit cd4c5e86 is hixl 0.0.1. The CANN 9.2.0 release the
-# review ran against lives in the commit and the build provenance, not in
-# a module attribute (the pinned binding exposes no __version__). A
-# caller that has qualified another release passes it in; nothing
-# accepts an unqualified one silently.
+# Source-review provenance only; runtime admission does not compare versions.
 PINNED_VERSION = "0.0.1"
 PINNED_COMMIT = "cd4c5e86f5ca5a654226b0a677eb07915540e03c"
-SUPPORTED_VERSIONS = frozenset({PINNED_VERSION})
 
 # The pieces the real-host path needs. torch must be imported before
 # torch_npu (the npu backend registers onto the running torch), and hixl
@@ -211,10 +204,7 @@ def probe_runtime() -> RuntimeReadiness:
     if not hixl_available:
         missing.append("hixl")
     else:
-        try:
-            version = _hixl_version()
-        except Exception as exc:  # a present-but-unverifiable runtime is missing
-            missing.append(f"hixl version: {exc}")
+        version = _hixl_version()
     if not torch_available:
         missing.append("torch")
     if not torch_npu_available:
@@ -240,35 +230,17 @@ def probe_runtime() -> RuntimeReadiness:
     )
 
 
-def load_runtime(api=None, supported_versions=None) -> HixlAPI:
-    """Return the HIXL API, failing closed when the stack is absent or its
-    version is not the pinned one.
+def load_runtime(api=None) -> HixlAPI:
+    """Return the lazy runtime without a version-number gate.
 
-    api, when given, is an already-constructed implementation (the
-    injected fake in tests); its version is validated the same way.
+    Vendor methods validate the required API surface before native use.
+    Source-review versions describe provenance, not runtime admission.
     """
-    supported = SUPPORTED_VERSIONS
-    if supported_versions is not None:
-        supported = frozenset(supported_versions)
     if api is not None:
-        _check_version(api.version, supported)
         return api
-    readiness = probe_runtime()
-    if not readiness.hixl_available:
-        raise RuntimeUnavailableError(
-            "the hixl stack is unavailable: " + ", ".join(readiness.missing)
-        )
-    _check_version(readiness.version, supported)
+    if not _importable("hixl"):
+        raise RuntimeUnavailableError("the hixl runtime is unavailable")
     return RealHixlAPI()
-
-
-def _check_version(version: str, supported: frozenset) -> None:
-    if version not in supported:
-        raise VersionMismatchError(
-            f"hixl runtime version {version!r} is not the pinned baseline "
-            f"(pinned: {', '.join(sorted(supported))}, commit "
-            f"{PINNED_COMMIT[:12]})"
-        )
 
 
 def _importable(name: str) -> bool:
@@ -279,24 +251,13 @@ def _importable(name: str) -> bool:
 
 
 def _hixl_version() -> str:
-    """The installed wheel's distribution version.
+    """Return diagnostic distribution metadata, or empty when unavailable."""
 
-    The pinned binding exposes no module __version__, so the identity is
-    the installed distribution's metadata. Absent or broken metadata is a
-    refusal, never a silent fallback: an unverifiable wheel must read as
-    missing, not as matching the pin.
-    """
     try:
         return str(metadata.version("hixl"))
-    except metadata.PackageNotFoundError as exc:
-        raise RuntimeError(
-            "the hixl distribution's version metadata is missing; "
-            "refusing an unverifiable wheel"
-        ) from exc
-    except Exception as exc:
-        raise RuntimeError(
-            f"the hixl distribution's version metadata is unreadable: {exc}"
-        ) from exc
+    except Exception:
+        # Version metadata is optional and never controls native admission.
+        return ""
 
 
 def _address_of(buffer) -> int:
@@ -468,8 +429,8 @@ class RealHixlAPI:
             missing = ["Hixl"]
         if missing:
             raise VersionMismatchError(
-                "the installed hixl binding lacks the pinned surface "
-                f"({', '.join(missing)}); pinned: {PINNED_VERSION} "
+                "the installed hixl binding lacks the required API surface "
+                f"({', '.join(missing)}); source-review baseline: {PINNED_VERSION} "
                 f"commit {PINNED_COMMIT[:12]}"
             )
 
@@ -744,7 +705,6 @@ class RealHixlAPI:
 __all__ = [
     "PINNED_COMMIT",
     "PINNED_VERSION",
-    "SUPPORTED_VERSIONS",
     "HixlAPI",
     "RealHixlAPI",
     "RuntimeReadiness",

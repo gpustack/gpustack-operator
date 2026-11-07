@@ -1,4 +1,4 @@
-"""The NIXL runtime seam: lazy, with explicit version qualification.
+"""The NIXL runtime seam: lazy, with explicit API validation.
 
 Nothing in this module imports nixl or torch at module scope. A CPU-only
 host probes the runtime (learning what is missing instead of crashing on
@@ -22,10 +22,9 @@ does not exist to call, and a UCX selection the agent configuration
 cannot scope per agent is refused (the server environment stays
 authoritative).
 
-The source-review pin describes the reviewed API surface. Injected runtimes
-and explicit supported_versions use strict version checks. The default
-installed-runtime path accepts a reported version; this is compatibility,
-not evidence that every installed version has passed hardware qualification.
+Source-review pins describe the reviewed API surface. Runtime admission
+checks required APIs rather than version numbers. Compatibility does not
+establish hardware qualification for another vendor build.
 """
 
 import importlib.util
@@ -41,14 +40,9 @@ from gpustack_model_transfer.backends.nixl.errors import (
     VersionMismatchError,
 )
 
-# The pinned route: the NIXL release the source review and the transfer
-# evidence were taken against. The commit is the v1.5.0 tag of
-# ai-dynamo/nixl; the repository HEAD examined alongside it (9e7800fc) is
-# newer and was NOT assumed to match. This is the default allowlist for
-# injected runtimes; real-host version enforcement is an explicit opt-in.
+# Source-review provenance only; runtime admission does not compare versions.
 DEFAULT_VERSION = "1.5.0"
 PINNED_COMMIT = "1683cf3b7f3d11674c03c5e861cea22339876c96"
-SUPPORTED_VERSIONS = frozenset({DEFAULT_VERSION})
 
 # The pieces the real-host path needs beyond the transport itself. They are
 # probed, never imported eagerly.
@@ -417,10 +411,7 @@ def probe_runtime() -> RuntimeReadiness:
     if not nixl_available:
         missing.append("nixl")
     else:
-        try:
-            version = _nixl_version()
-        except Exception as exc:  # a present-but-broken runtime is missing
-            missing.append(f"nixl import: {exc}")
+        version = _nixl_version()
     if not device_module_available:
         missing.append("device module (torch)")
     return RuntimeReadiness(
@@ -431,36 +422,17 @@ def probe_runtime() -> RuntimeReadiness:
     )
 
 
-def load_runtime(api=None, supported_versions=None) -> NixlAPI:
-    """Return the lazy API, refusing an absent or unversioned runtime.
+def load_runtime(api=None) -> NixlAPI:
+    """Return the lazy runtime without a version-number gate.
 
-    Injected APIs use the source-review allowlist by default. The installed
-    runtime enforces a version allowlist only when supported_versions is
-    supplied; accepting a version does not qualify its hardware behavior.
+    Vendor methods validate the required API surface before native use.
+    Source-review versions describe provenance, not runtime admission.
     """
-    supported = SUPPORTED_VERSIONS
-    if supported_versions is not None:
-        supported = frozenset(supported_versions)
     if api is not None:
-        _check_version(api.version, supported)
         return api
-    readiness = probe_runtime()
-    if not readiness.nixl_available:
-        raise RuntimeUnavailableError(
-            "the nixl runtime is unavailable: " + ", ".join(readiness.missing)
-        )
-    if supported_versions is not None or not readiness.version:
-        _check_version(readiness.version, supported)
+    if not _importable("nixl"):
+        raise RuntimeUnavailableError("the nixl runtime is unavailable")
     return RealNixlAPI()
-
-
-def _check_version(version: str, supported: frozenset) -> None:
-    if version not in supported:
-        raise VersionMismatchError(
-            f"nixl runtime version {version!r} is not one this backend "
-            f"was pinned against (pinned: {', '.join(sorted(supported))}, "
-            f"commit {PINNED_COMMIT[:12]})"
-        )
 
 
 def _importable(name: str) -> bool:
@@ -471,26 +443,14 @@ def _importable(name: str) -> bool:
 
 
 def _nixl_version() -> str:
-    """The installed distribution's version.
+    """Return diagnostic distribution metadata, or empty when unavailable."""
+    from importlib import metadata
 
-    The nixl meta package does not reliably expose __version__, so the
-    gate reads the distribution's metadata. Absent or broken metadata is
-    a refusal, never a silent fallback: an unverifiable install must read
-    as missing, not as matching the pin.
-    """
     try:
-        from importlib import metadata
-
         return str(metadata.version("nixl"))
-    except metadata.PackageNotFoundError as exc:
-        raise RuntimeError(
-            "the nixl distribution's version metadata is missing; "
-            "refusing an unverifiable install"
-        ) from exc
-    except Exception as exc:
-        raise RuntimeError(
-            f"the nixl distribution's version metadata is unreadable: {exc}"
-        ) from exc
+    except Exception:
+        # Version metadata is optional and never controls native admission.
+        return ""
 
 
 # The nixl_agent_config knobs the pinned release can scope to one agent,
@@ -779,8 +739,8 @@ class RealNixlAPI:
             ]
         if missing:
             raise VersionMismatchError(
-                "the installed nixl binding lacks the pinned surface "
-                f"({', '.join(missing)}); pinned: {DEFAULT_VERSION} "
+                "the installed nixl binding lacks the required API surface "
+                f"({', '.join(missing)}); source-review baseline: {DEFAULT_VERSION} "
                 f"commit {PINNED_COMMIT[:12]}"
             )
 
@@ -1296,7 +1256,6 @@ class RealNixlAPI:
 __all__ = [
     "DEFAULT_VERSION",
     "PINNED_COMMIT",
-    "SUPPORTED_VERSIONS",
     "AmbiguousPostError",
     "NixlAPI",
     "RealNixlAPI",

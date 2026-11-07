@@ -11,7 +11,7 @@ from gpustack_model_transfer.acceptance.report import CheckResult
 from gpustack_model_transfer.backends.hixl.runtime import probe_runtime
 
 CAPABILITIES = (
-    "runtime-pin",
+    "runtime-availability",
     "transport-negotiation",
     "session-order",
     "source-context",
@@ -168,29 +168,12 @@ def _open_reader(context, api, ledger=None, transport_options=(), **kwargs):
     )
 
 
-def _check_runtime_pin(context, api):
-    from gpustack_model_transfer.backends.hixl.runtime import (
-        PINNED_COMMIT,
-        VersionMismatchError,
-        load_runtime,
-    )
+def _check_runtime_availability(context, api):
+    from gpustack_model_transfer.backends.hixl.runtime import load_runtime
 
-    load_runtime(api=api)
-
-    class Bumped:
-        version = "8.0.0"
-
-        def __getattr__(self, name):
-            return getattr(api, name)
-
-    try:
-        load_runtime(api=Bumped())
-    except VersionMismatchError as exc:
-        if PINNED_COMMIT[:12] not in str(exc):
-            raise AssertionError("the refusal does not name the pinned commit") from exc
-    else:
-        raise AssertionError("a version mismatch was not refused")  # pragma: no cover
-    return f"runtime pinned and validated at {api.version} ({PINNED_COMMIT[:12]})"
+    if load_runtime(api=api) is not api:
+        raise AssertionError("the supplied runtime was not retained")
+    return "runtime available; version metadata is diagnostic only"
 
 
 def _check_transport_negotiation(context, api):
@@ -451,7 +434,7 @@ def _check_read_direction_available(context, api):
 
 
 _CHECKS = (
-    ("runtime-pin", _check_runtime_pin),
+    ("runtime-availability", _check_runtime_availability),
     ("transport-negotiation", _check_transport_negotiation),
     ("session-order", _check_session_order),
     ("source-context", _check_source_context),

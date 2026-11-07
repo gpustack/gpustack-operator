@@ -17,7 +17,7 @@ class RuntimeUnavailableError(ModelTransferError):
 
 
 class VersionMismatchError(ModelTransferError):
-    """The runtime's version is not one this backend was pinned against."""
+    """The vendor API surface lacks methods required by this backend."""
 
     code = "version-mismatch"
 

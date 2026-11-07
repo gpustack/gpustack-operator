@@ -22,7 +22,7 @@ from gpustack_model_transfer.backends.nixl.runtime import probe_runtime
 POLL_DEADLINE_SECONDS = 1.0
 
 CAPABILITIES = (
-    "runtime-pin",
+    "runtime-availability",
     "endpoint-selection",
     "service-memlock",
     "fixed-window-reuse",
@@ -131,23 +131,12 @@ def _compat_unrun(name: str, why: str) -> CheckResult:
     return CheckResult(name, "UNRUN", why)
 
 
-def _check_runtime_pin(context, api):
-    from gpustack_model_transfer.backends.nixl.runtime import (
-        SUPPORTED_VERSIONS,
-        VersionMismatchError,
-        load_runtime,
-    )
+def _check_runtime_availability(context, api):
+    from gpustack_model_transfer.backends.nixl.runtime import load_runtime
 
-    pinned = load_runtime(api=api)
-    if pinned.version not in SUPPORTED_VERSIONS:
-        raise AssertionError("an unpinned runtime was accepted")
-    try:
-        load_runtime(api=_BumpedVersionAPI(api), supported_versions={"9.9.9"})
-    except VersionMismatchError:
-        pass
-    else:
-        raise AssertionError("a version mismatch was not refused")  # pragma: no cover
-    return f"runtime pinned and validated at {api.version}"
+    if load_runtime(api=api) is not api:
+        raise AssertionError("the supplied runtime was not retained")
+    return "runtime available; version metadata is diagnostic only"
 
 
 def _check_endpoint_selection(context, api):
@@ -529,19 +518,8 @@ def _check_registration_renewal(context, api):
     )
 
 
-class _BumpedVersionAPI:
-    """A wrapper reporting a version outside any qualified set."""
-
-    def __init__(self, inner):
-        self._inner = inner
-        self.version = "8.8.8"
-
-    def __getattr__(self, name):
-        return getattr(self._inner, name)
-
-
 _CHECKS = (
-    ("runtime-pin", _check_runtime_pin),
+    ("runtime-availability", _check_runtime_availability),
     ("endpoint-selection", _check_endpoint_selection),
     ("service-memlock", _check_service_memlock),
     ("fixed-window-reuse", _check_fixed_window_reuse),

@@ -1,8 +1,8 @@
 """Typed HIXL backend errors, each naming its own rule.
 
 Every refusal a caller must distinguish carries its own class and code:
-the vendor stack being absent, a version this route was not pinned
-against, a transport option the binding rejected, a session used out of
+the vendor stack being absent, a required API the binding does not expose,
+a transport option the binding rejected, a session used out of
 its documented order, and a transfer the backend refused.
 """
 
@@ -16,7 +16,7 @@ class RuntimeUnavailableError(ModelTransferError):
 
 
 class VersionMismatchError(ModelTransferError):
-    """The runtime's version is not the one this route was pinned against."""
+    """The vendor API surface lacks methods required by this backend."""
 
     code = "version-mismatch"
 

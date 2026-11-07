@@ -1,60 +1,56 @@
-"""Tests for the HIXL runtime seam: version gate, addressing, mapping."""
+"""Tests for the HIXL runtime seam: runtime loading, addressing, mapping."""
 
 import unittest
 
 
-class TestVersionPin(unittest.TestCase):
-    def test_the_pinned_baseline_is_the_reviewed_release(self):
-        from gpustack_model_transfer.backends.hixl import (
-            PINNED_COMMIT,
-            PINNED_VERSION,
-            SUPPORTED_VERSIONS,
-        )
+class TestRuntimeAvailability(unittest.TestCase):
+    def test_source_review_pin_is_provenance_only(self):
+        from gpustack_model_transfer.backends.hixl import PINNED_COMMIT, PINNED_VERSION
 
-        # The gate certifies the wheel by its installed distribution
-        # version (0.0.1, built from the pinned commit); the CANN release
-        # the review ran against lives in the commit, not in an attribute.
-        self.assertEqual(PINNED_VERSION, "0.0.1")
-        self.assertEqual(PINNED_COMMIT, "cd4c5e86f5ca5a654226b0a677eb07915540e03c")
-        self.assertEqual(SUPPORTED_VERSIONS, frozenset({"0.0.1"}))
+        self.assertTrue(PINNED_VERSION)
+        self.assertEqual(len(PINNED_COMMIT), 40)
 
-    def test_a_matching_version_loads(self):
+    def test_injected_versions_do_not_control_admission(self):
         from gpustack_model_transfer.backends.hixl import load_runtime
         from gpustack_model_transfer.backends.hixl.testing import FakeHixlAPI
 
-        api = load_runtime(api=FakeHixlAPI())
-        self.assertEqual(api.version, "0.0.1")
-
-    def test_a_mismatched_version_is_a_typed_refusal(self):
-        from gpustack_model_transfer.backends.hixl import (
-            PINNED_COMMIT,
-            VersionMismatchError,
-            load_runtime,
-        )
-        from gpustack_model_transfer.backends.hixl.testing import FakeHixlAPI
-
-        for version in ("0.0.2", "9.2.0", "1.0.0"):
+        for version in ("", "0.0.0", "9.9.9", "development"):
             with self.subTest(version=version):
-                with self.assertRaises(VersionMismatchError) as caught:
-                    load_runtime(api=FakeHixlAPI(version=version))
-                self.assertIn(PINNED_COMMIT[:12], str(caught.exception))
+                api = FakeHixlAPI(version=version)
+                self.assertIs(load_runtime(api=api), api)
 
-    def test_a_missing_stack_is_a_typed_refusal(self):
-        from gpustack_model_transfer.backends.hixl import (
-            RuntimeUnavailableError,
-            load_runtime,
-        )
+    def test_installed_runtime_does_not_read_version_for_admission(self):
+        from unittest.mock import patch
 
-        with self.assertRaises(RuntimeUnavailableError):
-            load_runtime()
+        from gpustack_model_transfer.backends.hixl import runtime
 
-    def test_probe_reports_what_is_missing_on_this_host(self):
-        from gpustack_model_transfer.backends.hixl import probe_runtime
+        with (
+            patch.object(runtime, "_importable", return_value=True),
+            patch.object(
+                runtime, "_hixl_version", side_effect=AssertionError("version gate")
+            ),
+        ):
+            self.assertIsInstance(runtime.load_runtime(), runtime.RealHixlAPI)
 
-        readiness = probe_runtime()
-        if "hixl" in readiness.missing:
-            self.assertFalse(readiness.ready)
-            self.assertFalse(readiness.npu_available)
+    def test_missing_version_metadata_is_unknown(self):
+        from importlib import metadata
+        from unittest.mock import patch
+
+        from gpustack_model_transfer.backends.hixl import runtime
+
+        with patch.object(
+            metadata, "version", side_effect=metadata.PackageNotFoundError
+        ):
+            self.assertEqual(runtime._hixl_version(), "")
+
+    def test_missing_runtime_is_a_typed_refusal(self):
+        from unittest.mock import patch
+
+        from gpustack_model_transfer.backends.hixl import runtime
+
+        with patch.object(runtime, "_importable", return_value=False):
+            with self.assertRaises(runtime.RuntimeUnavailableError):
+                runtime.load_runtime()
 
 
 class TestAddressOf(unittest.TestCase):

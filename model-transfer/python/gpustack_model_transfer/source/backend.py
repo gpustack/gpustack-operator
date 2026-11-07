@@ -425,14 +425,8 @@ class HixlSourceBackend(_PagingBackend):
     def start(self, engine_address: str = "") -> object:
         engine_address = engine_address or self.engine_address
         if self._engine_factory is None:
-            from gpustack_model_transfer.backends.hixl.runtime import (
-                SUPPORTED_VERSIONS,
-                RealHixlAPI,
-                _check_version,
-                _hixl_version,
-            )
+            from gpustack_model_transfer.backends.hixl.runtime import RealHixlAPI
 
-            _check_version(_hixl_version(), SUPPORTED_VERSIONS)
             self._hixl = RealHixlAPI()._require()
             self._engine_factory = self._hixl.Hixl
         else:

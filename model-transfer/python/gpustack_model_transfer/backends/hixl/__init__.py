@@ -1,9 +1,9 @@
-"""The HIXL transport backend for CANN: pinned, ordered, fail-closed.
+"""The HIXL transport backend for CANN: API-checked, ordered, fail-closed.
 
 Importing this package imports no vendor stack: hixl, torch, and
 torch_npu are reached through the runtime seam, inside methods, so the
 wheel is pure Python and installs anywhere. The pinned baseline is the
-reviewed HIXL release and commit; another version is a typed refusal.
+reviewed HIXL release and commit, not a runtime version allowlist.
 
 The route enforces the documented session order (register before
 connect, disconnect before deregister) with the relaxed fabric mode an
@@ -35,7 +35,6 @@ from gpustack_model_transfer.backends.hixl.reader import (
 from gpustack_model_transfer.backends.hixl.runtime import (
     PINNED_COMMIT,
     PINNED_VERSION,
-    SUPPORTED_VERSIONS,
     HixlAPI,
     RealHixlAPI,
     RuntimeReadiness,
@@ -74,7 +73,6 @@ __all__ = [
     "PASS",
     "PINNED_COMMIT",
     "PINNED_VERSION",
-    "SUPPORTED_VERSIONS",
     "UNRUN",
     "FabricMemRelaxation",
     "HixlAPI",

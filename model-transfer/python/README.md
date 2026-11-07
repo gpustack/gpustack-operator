@@ -36,7 +36,7 @@ Remote weight delivery separates **checkpoint metadata** from **tensor payload s
 | Module | Description |
 | --- | --- |
 | `gpustack_model_transfer.core` | Wire protocol validation, `ArtifactIdentity`, `TensorDescriptor`, `ReadBudgets`, `LocalFileReader`, and `ReaderSession`. |
-| `gpustack_model_transfer.backends.nixl` | Version-pinned NVIDIA NIXL transfer backend, IB port counter attribution, read-only source guard, and failure fence. |
+| `gpustack_model_transfer.backends.nixl` | API-checked NVIDIA NIXL transfer backend, IB port counter attribution, read-only source guard, and failure fence. |
 | `gpustack_model_transfer.backends.hixl` | Ascend CANN HIXL transfer binding/native bridge, explicit transport negotiation, and quarantine fence. |
 | `gpustack_model_transfer.source` | `ControlClient` and generation-bound `SourceWorker` speaking to the node-local `model-transfer` broker. |
 | `gpustack_model_transfer.adapters.vllm` | Native vLLM weight-loader plugin and pre-KV-profiling release hook. |
@@ -52,6 +52,9 @@ Remote weight delivery separates **checkpoint metadata** from **tensor payload s
 ### 1. Installation in Engine Containers
 
 `gpustack-model-transfer` is built as a universal pure-Python wheel (`gpustack_model_transfer-<version>-py3-none-any.whl`) with zero hard runtime dependencies in `pyproject.toml`; vendor libraries (`torch`, `torch_npu`, `nixl`, `hixl`, `vllm`, `sglang`) are imported lazily only by their respective subpackages.
+
+HIXL and NIXL runtime loading does not compare vendor version numbers. Required API methods are checked before native use; missing or incompatible APIs still refuse. Distribution versions are diagnostic metadata, and an unavailable version remains unknown. Image builds pin their dependency versions and source commits for reproducibility; those pins do not make other vendor builds hardware-qualified.
+
 
 In a GPUStack-managed cluster, `device-manager` stages the wheel on the host at `/var/lib/gpustack/operator/lib/model-transfer`, and the `ModelDeployment` controller mounts and installs it offline before starting the engine:
 

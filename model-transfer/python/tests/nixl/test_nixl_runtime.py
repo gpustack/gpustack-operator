@@ -44,59 +44,54 @@ class TestLazyImports(unittest.TestCase):
         )
 
 
-class TestVersionPin(unittest.TestCase):
-    def test_default_pin_is_the_reviewed_release(self):
-        from gpustack_model_transfer.backends.nixl import (
-            DEFAULT_VERSION,
-            SUPPORTED_VERSIONS,
-        )
+class TestRuntimeAvailability(unittest.TestCase):
+    def test_source_review_pin_is_provenance_only(self):
+        from gpustack_model_transfer.backends.nixl import DEFAULT_VERSION, PINNED_COMMIT
 
-        self.assertEqual(DEFAULT_VERSION, "1.5.0")
-        self.assertEqual(SUPPORTED_VERSIONS, frozenset({"1.5.0"}))
+        self.assertTrue(DEFAULT_VERSION)
+        self.assertEqual(len(PINNED_COMMIT), 40)
 
-    def test_the_pinned_commit_is_the_v150_tag(self):
-        # Verified at the primary source: `git rev-parse v1.5.0` in the
-        # ai-dynamo/nixl checkout answers exactly this commit; the
-        # repository HEAD examined alongside it (9e7800fc) is newer and
-        # was not assumed to match.
-        self.assertEqual(PINNED_COMMIT, "1683cf3b7f3d11674c03c5e861cea22339876c96")
-
-    def test_matching_version_loads(self):
+    def test_injected_versions_do_not_control_admission(self):
         from gpustack_model_transfer.backends.nixl import load_runtime
         from gpustack_model_transfer.backends.nixl.testing import FakeNixlAPI
 
-        api = load_runtime(api=FakeNixlAPI(version="1.5.0"))
-        self.assertEqual(api.version, "1.5.0")
+        for version in ("", "0.0.0", "9.9.9", "development"):
+            with self.subTest(version=version):
+                api = FakeNixlAPI(version=version)
+                self.assertIs(load_runtime(api=api), api)
 
-    def test_mismatched_version_is_a_typed_refusal(self):
-        from gpustack_model_transfer.backends.nixl import (
-            VersionMismatchError,
-            load_runtime,
-        )
-        from gpustack_model_transfer.backends.nixl.testing import FakeNixlAPI
+    def test_installed_runtime_does_not_read_version_for_admission(self):
+        from unittest.mock import patch
 
-        with self.assertRaises(VersionMismatchError):
-            load_runtime(api=FakeNixlAPI(version="1.4.2"))
-        with self.assertRaises(VersionMismatchError):
-            load_runtime(api=FakeNixlAPI(version="2.0.0"))
+        from gpustack_model_transfer.backends.nixl import runtime
 
-    def test_an_explicitly_qualified_version_is_accepted(self):
-        from gpustack_model_transfer.backends.nixl import load_runtime
-        from gpustack_model_transfer.backends.nixl.testing import FakeNixlAPI
+        with (
+            patch.object(runtime, "_importable", return_value=True),
+            patch.object(
+                runtime, "_nixl_version", side_effect=AssertionError("version gate")
+            ),
+        ):
+            self.assertIsInstance(runtime.load_runtime(), runtime.RealNixlAPI)
 
-        api = load_runtime(
-            api=FakeNixlAPI(version="1.6.0"), supported_versions={"1.6.0"}
-        )
-        self.assertEqual(api.version, "1.6.0")
+    def test_missing_version_metadata_is_unknown(self):
+        from importlib import metadata
+        from unittest.mock import patch
+
+        from gpustack_model_transfer.backends.nixl import runtime
+
+        with patch.object(
+            metadata, "version", side_effect=metadata.PackageNotFoundError
+        ):
+            self.assertEqual(runtime._nixl_version(), "")
 
     def test_missing_runtime_is_a_typed_refusal(self):
-        from gpustack_model_transfer.backends.nixl import (
-            RuntimeUnavailableError,
-            load_runtime,
-        )
+        from unittest.mock import patch
 
-        with self.assertRaises(RuntimeUnavailableError):
-            load_runtime()
+        from gpustack_model_transfer.backends.nixl import runtime
+
+        with patch.object(runtime, "_importable", return_value=False):
+            with self.assertRaises(runtime.RuntimeUnavailableError):
+                runtime.load_runtime()
 
 
 class TestProbeRuntime(unittest.TestCase):

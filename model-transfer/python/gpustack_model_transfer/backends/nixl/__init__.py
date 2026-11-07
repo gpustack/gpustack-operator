@@ -1,9 +1,9 @@
-"""The NIXL transport backend: version-pinned, lazily loaded, fail-closed.
+"""The NIXL transport backend: API-checked, lazily loaded, fail-closed.
 
 Importing this package imports no vendor runtime: nixl and torch are
 reached through the runtime seam, inside methods, so the wheel installs
 and runs anywhere and works across vendor builds (nixl-cu12, nixl-cu13).
-The pinned route is explicit and validated; a runtime with another version
+The required API surface is validated; a runtime with missing methods
 is a typed refusal, never a surprise.
 
 The route refuses to guess a network: control and payload rails are named
@@ -48,7 +48,6 @@ from gpustack_model_transfer.backends.nixl.reader import NixlReader, TransferWin
 from gpustack_model_transfer.backends.nixl.runtime import (
     DEFAULT_VERSION,
     PINNED_COMMIT,
-    SUPPORTED_VERSIONS,
     AmbiguousPostError,
     NixlAPI,
     RealNixlAPI,
@@ -80,7 +79,6 @@ __all__ = [
     "NO_GO",
     "PASS",
     "PINNED_COMMIT",
-    "SUPPORTED_VERSIONS",
     "UNRUN",
     "AmbiguousPostError",
     "CounterAttribution",
