@@ -280,10 +280,17 @@ func (c *Collector) collect(ctx context.Context, incoming int64) (Result, error)
 		if c.Now().Sub(lastUsed) < c.grace() {
 			continue
 		}
-		// The store checks live references under the lock a mount claims its tree with.
-		removed, refErr := c.Store.RemoveUnreferenced(cand.hex)
-		if res.Skipped = unreadableReferences(refErr); res.Skipped != "" {
-			break
+		// The store checks live references under the lock a mount claims its tree with, and
+		// answers a caller whose context is done before it touches anything.
+		removed, refErr := c.Store.RemoveUnreferenced(ctx, cand.hex)
+		if refErr != nil {
+			// The caller's own cancellation is the collection's outcome, not a reason to skip.
+			if ctxErr := ctx.Err(); ctxErr != nil {
+				return res, ctxErr
+			}
+			if res.Skipped = unreadableReferences(refErr); res.Skipped != "" {
+				break
+			}
 		}
 		if !removed {
 			continue

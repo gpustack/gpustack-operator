@@ -176,9 +176,12 @@ type Broker struct {
 	assignmentSizes  map[string]int
 	assignmentCursor int
 	privateSource    PrivateSource
-	operations       map[string]*OperationRecord
-	operationBytes   int64
-	operationsReady  bool
+	// pageReader replaces the manifest page reader in tests only; nil is
+	// production's LocalPageReader.
+	pageReader      func(directory string) protocol.PageReader
+	operations      map[string]*OperationRecord
+	operationBytes  int64
+	operationsReady bool
 	// sourceQualified controls supported-backend admission. Production opens
 	// this gate; the cluster delivery policy requires explicit administrator
 	// opt-in. This flag does not record hardware or safety acceptance.
@@ -188,6 +191,14 @@ type Broker struct {
 	reservationAuthorities map[types.UID]*ReservationAuthority
 	reservationGrants      map[types.UID]func(ctx context.Context) (ReservationGrant, error)
 	manifestCache          map[string]*cachedManifest
+	// intentAdmissions holds one open channel per intent revision whose
+	// prepare is running without the broker mutex; concurrent callers of
+	// the same revision wait on it instead of preparing a duplicate.
+	intentAdmissions map[string]chan struct{}
+	// sessionAdmissionWaits counts admissions whose authority CAS is
+	// running without the broker mutex; the session retry pass skips
+	// those prepared records until the admission settles.
+	sessionAdmissionWaits map[string]int
 }
 
 // SessionRecord is one admitted reader, bound to the authenticated owner
@@ -309,6 +320,27 @@ func (b *Broker) SetMemInfoPath(path string) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	b.meminfoPath = path
+}
+
+// setPageReader replaces the local manifest page reader, for tests. The
+// nil default is production's LocalPageReader over the record's own
+// authenticated pages directory; only a test file in this package writes
+// the override, so page reads can be gated deterministically.
+func (b *Broker) setPageReader(reader func(directory string) protocol.PageReader) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.pageReader = reader
+}
+
+// pageReaderFor returns the page reader for one authenticated pages
+// directory. Callers must not hold the broker mutex.
+func (b *Broker) pageReaderFor(directory string) protocol.PageReader {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.pageReader != nil {
+		return b.pageReader(directory)
+	}
+	return protocol.LocalPageReader(directory)
 }
 
 // SetMaxSessions moves the node's concurrent session cap online. A raise
@@ -444,8 +476,8 @@ func reserveBytes(total int64) int64 { return total + total/reserveOverhead }
 // refusal is typed: an unpublished or unverified source, a missing or empty
 // grant, an unknown byte total, or an exhausted budget never masquerade as
 // one another.
-func (b *Broker) AdmitFill(req FillRequest) (*Admission, *protocol.Error) {
-	return b.admit(req, "")
+func (b *Broker) AdmitFill(ctx context.Context, req FillRequest) (*Admission, *protocol.Error) {
+	return b.admit(ctx, req, "")
 }
 
 // AdmitIntentFill admits one resolved intent: the generation record and
@@ -454,13 +486,7 @@ func (b *Broker) AdmitFill(req FillRequest) (*Admission, *protocol.Error) {
 // can leave the admission fully present or fully absent — never an
 // identityless generation that a later pass would duplicate. The same
 // intent revision always answers the same admission.
-func (b *Broker) AdmitIntentFill(intent Intent) (*Assignment, *protocol.Error) {
-	return b.AdmitIntentFillContext(context.Background(), intent)
-}
-
-// AdmitIntentFillContext admits one source intent with cancellable global
-// authority operations. An interrupted transaction retains its durable charge.
-func (b *Broker) AdmitIntentFillContext(ctx context.Context, intent Intent) (*Assignment, *protocol.Error) {
+func (b *Broker) AdmitIntentFill(ctx context.Context, intent Intent) (*Assignment, *protocol.Error) {
 	if err := b.syncIntentGrant(intent); err != nil {
 		return nil, protocol.New(protocol.KindSourceUnavailable, "fill",
 			"the admitted generation's grant could not follow its Binding: %v", err)
@@ -483,6 +509,15 @@ func (b *Broker) AdmitIntentFillContext(ctx context.Context, intent Intent) (*As
 	if err := b.recordAuthorityIdentity(intent, authority.pin); err != nil {
 		return nil, protocol.New(protocol.KindSourceUnavailable, "fill", "the authority inventory is unavailable")
 	}
+	// One prepare per intent revision at a time: a concurrent caller of the
+	// same revision waits for the in-flight prepare to settle and then
+	// adopts its record, exactly as the serialized broker answered.
+	releaseAdmission, err := b.claimIntentAdmission(ctx, intent.Key)
+	if err != nil {
+		return nil, protocol.New(protocol.KindSourceUnavailable, "fill",
+			"the intent's admission was interrupted: %v", err)
+	}
+	defer releaseAdmission()
 	req := FillRequest{
 		Digest:       intent.Digest,
 		Namespace:    intent.Namespace,
@@ -493,10 +528,10 @@ func (b *Broker) AdmitIntentFillContext(ctx context.Context, intent Intent) (*As
 		ManifestPath: intent.ManifestPath,
 	}
 
-	// Phase one, under the ledger lock: deduplicate and prepare. The
-	// prepared record carries the intent key and the locally minted
-	// reservation ID but no secret, so nothing is exposed and no worker
-	// can register; a crashed sibling is adopted with its own identity.
+	// Phase one, deduplication: adopt a live assignment, reuse a prepared
+	// record, or refuse a revision whose prior generation is draining or
+	// quarantined. The slow preparation that follows runs without the
+	// broker mutex; publication rechecks the dedup facts under it.
 	b.mu.Lock()
 	prepared := ""
 	var adopted *Assignment
@@ -517,22 +552,30 @@ func (b *Broker) AdmitIntentFillContext(ctx context.Context, intent Intent) (*As
 			prepared = rec.Generation
 		}
 	}
-	var perr *protocol.Error
 	if adopted != nil {
 		b.mu.Unlock()
 		return adopted, nil
 	}
+	b.mu.Unlock()
+
 	if prepared == "" {
-		prepared, perr = b.prepareIntentRecord(ctx, req, intent.Key, intent)
+		generation, perr := b.prepareIntentRecord(ctx, req, intent.Key, intent)
 		if perr != nil {
-			b.mu.Unlock()
 			return nil, perr
 		}
+		prepared = generation
 	}
-	reservationID := b.records[prepared].ReservationID
-	reservationBytes := b.records[prepared].TotalBytes
-	if b.records[prepared].ResidentBudgetBytes > 0 {
-		reservationBytes = b.records[prepared].ReservedBytes
+	b.mu.Lock()
+	rec := b.records[prepared]
+	if rec == nil {
+		b.mu.Unlock()
+		return nil, protocol.New(protocol.KindSourceUnavailable, "fill",
+			"the prepared generation vanished before its reservation")
+	}
+	reservationID := rec.ReservationID
+	reservationBytes := rec.TotalBytes
+	if rec.ResidentBudgetBytes > 0 {
+		reservationBytes = rec.ReservedBytes
 	}
 	b.mu.Unlock()
 
@@ -587,7 +630,7 @@ func (b *Broker) AdmitIntentFillContext(ctx context.Context, intent Intent) (*As
 			"the reservation could not be confirmed: %v", merr)
 	}
 	b.mu.Lock()
-	rec := b.records[prepared]
+	rec = b.records[prepared]
 	if rec == nil {
 		b.mu.Unlock()
 		return nil, protocol.New(protocol.KindSourceUnavailable, "fill",
@@ -693,10 +736,46 @@ func (b *Broker) syncIntentGrant(intent Intent) error {
 	return nil
 }
 
+// claimIntentAdmission serializes one intent revision's admission. A caller
+// that finds another prepare in flight waits for it to settle and retries;
+// the returned release function must run when the admission settles.
+func (b *Broker) claimIntentAdmission(ctx context.Context, key string) (func(), error) {
+	for {
+		b.mu.Lock()
+		if b.intentAdmissions == nil {
+			b.intentAdmissions = map[string]chan struct{}{}
+		}
+		if done, busy := b.intentAdmissions[key]; busy {
+			b.mu.Unlock()
+			select {
+			case <-done:
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			}
+			continue
+		}
+		done := make(chan struct{})
+		b.intentAdmissions[key] = done
+		b.mu.Unlock()
+		var releaseOnce sync.Once
+		return func() {
+			releaseOnce.Do(func() {
+				b.mu.Lock()
+				delete(b.intentAdmissions, key)
+				b.mu.Unlock()
+				close(done)
+			})
+		}, nil
+	}
+}
+
 // prepareIntentRecord mints and durably writes one intent-bound generation
 // record without its admission secret: the record is the crash-safe
 // prepared identity, visible to deduplication and adoption, exposed to
-// nothing.
+// nothing. The store reads, the manifest parse, and the manifest
+// publication block on disk, so they run without the broker mutex; the
+// budget check and the record's durable publication share one critical
+// section, so competing admissions can never oversell a budget.
 func (b *Broker) prepareIntentRecord(ctx context.Context, req FillRequest, intentKey string,
 	intent Intent,
 ) (string, *protocol.Error) {
@@ -731,7 +810,7 @@ func (b *Broker) prepareIntentRecord(ctx context.Context, req FillRequest, inten
 	}
 	resident, perr := b.sourceResidentBytes(req, nil, intent.Backend)
 	if perr != nil && intent.ManifestJSON != "" {
-		manifest, err := parseDerivedManifestContext(ctx, &GenerationRecord{
+		manifest, err := b.parseDerivedManifest(ctx, &GenerationRecord{
 			ManifestJSON: intent.ManifestJSON, ManifestSHA256: intent.ManifestSHA256, ManifestPagesPath: intent.ManifestPagesPath,
 			ArtifactUID: intent.ArtifactUID, SourceGeneration: intent.SourceGeneration,
 		})
@@ -744,15 +823,25 @@ func (b *Broker) prepareIntentRecord(ctx context.Context, req FillRequest, inten
 		return "", perr
 	}
 	reserve := reserveBytes(resident)
+	b.mu.Lock()
+	// An early budget read refuses a definitively exhausted budget before
+	// the slow claim and publication; the authoritative check re-runs with
+	// the publication below.
 	if reason, denied := b.admissionDenied(req, reserve); denied {
+		b.mu.Unlock()
 		return "", reason
 	}
+	var pin AuthorityPin
+	if authority := b.reservationAuthorities[types.UID(intent.BindingUID)]; authority != nil {
+		pin = authority.pin
+	}
 	generation, err := b.ledger.nextGeneration()
+	b.mu.Unlock()
 	if err != nil {
 		return "", protocol.New(protocol.KindSourceUnavailable, "fill",
 			"the durable generation counter failed: %v", err)
 	}
-	claimed, err := b.store.Claim(store.Ref{
+	claimed, err := b.store.Claim(ctx, store.Ref{
 		VolumeID: refVolumeID(b.scope, generation), Hex: hexDigest,
 		PodUID: req.WorkerID,
 	})
@@ -765,10 +854,6 @@ func (b *Broker) prepareIntentRecord(ctx context.Context, req FillRequest, inten
 			"the verified published tree vanished while admitting")
 	}
 	now := b.now()
-	var pin AuthorityPin
-	if authority := b.reservationAuthorities[types.UID(intent.BindingUID)]; authority != nil {
-		pin = authority.pin
-	}
 	rec := &GenerationRecord{
 		Generation: generation, Digest: req.Digest, Namespace: req.Namespace,
 		WorkerID: req.WorkerID, NodeName: intent.NodeName, State: StateFilling,
@@ -795,9 +880,15 @@ func (b *Broker) prepareIntentRecord(ctx context.Context, req FillRequest, inten
 		Backend:             intent.Backend,
 		Created:             now, Updated: now,
 	}
-	if err := b.storeManifestLocked(ctx, rec); err != nil {
+	if err := b.storeManifest(ctx, rec); err != nil {
 		_ = b.store.RemoveRef(refVolumeID(b.scope, generation))
 		return "", protocol.New(protocol.KindSourceUnavailable, "fill", "immutable manifest publication failed: %v", err)
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if reason, denied := b.admissionDenied(req, reserve); denied {
+		_ = b.store.RemoveRef(refVolumeID(b.scope, generation))
+		return "", reason
 	}
 	if err := b.ledger.write(rec); err != nil {
 		_ = b.store.RemoveRef(refVolumeID(b.scope, generation))
@@ -808,7 +899,7 @@ func (b *Broker) prepareIntentRecord(ctx context.Context, req FillRequest, inten
 	return generation, nil
 }
 
-func (b *Broker) admit(req FillRequest, intentKey string) (*Admission, *protocol.Error) {
+func (b *Broker) admit(ctx context.Context, req FillRequest, intentKey string) (*Admission, *protocol.Error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	// The intent deduplication happens under the same lock the admission
@@ -860,7 +951,7 @@ func (b *Broker) admit(req FillRequest, intentKey string) (*Admission, *protocol
 
 	resident, perr := b.sourceResidentBytes(req, nil, "")
 	if perr != nil && req.ManifestPath != "" {
-		manifest, err := protocol.LoadManifest(req.ManifestPath, req.Digest)
+		manifest, err := protocol.LoadManifest(ctx, req.ManifestPath, req.Digest)
 		if err != nil {
 			return nil, protocol.New(protocol.KindInvalidDescriptor, "fill", "the source manifest is invalid")
 		}
@@ -886,7 +977,7 @@ func (b *Broker) admit(req FillRequest, intentKey string) (*Admission, *protocol
 	// The durable source reference is claimed before the reservation is
 	// recorded, so a fill that started can never lose its tree to the
 	// collector, and independently of any CSI mount reference.
-	claimed, err := b.store.Claim(store.Ref{
+	claimed, err := b.store.Claim(ctx, store.Ref{
 		VolumeID: refVolumeID(b.scope, generation), Hex: hexDigest,
 		PodUID: req.WorkerID,
 	})
@@ -1007,6 +1098,7 @@ func (b *Broker) RegisterWorker(generation, workerID, secret string, instances .
 		}
 		if rec.NativeStarted && rec.NativeInstance != instance {
 			rec.State = StateQuarantined
+			rec.Updated = b.now()
 			if err := b.ledger.write(rec); err != nil {
 				rec.quarantineUnpersisted = true
 				return nil, protocol.New(protocol.KindSourceUnavailable, "worker", "cannot persist quarantine: %v", err)
@@ -1167,28 +1259,88 @@ func (b *Broker) Heartbeat(generation, workerID, leaseID, secret string,
 // so it is refused rather than served to sessions. The resident charge
 // becomes the registered bytes actually held, never the reservation's
 // overhead estimate.
-func (b *Broker) FillVerified(generation, workerID, leaseID, secret string,
+//
+// The manifest reads that bind each descriptor run without the broker
+// mutex, bracketed by an authenticated snapshot and a revalidation that
+// refuses to publish when the generation's admission identity moved
+// while the plan was checked.
+func (b *Broker) FillVerified(ctx context.Context, generation, workerID, leaseID, secret string,
 	registrations int32, descriptors []RegistrationDescriptor, instances ...string,
 ) *protocol.Error {
 	b.mu.Lock()
-	defer b.mu.Unlock()
 	current, err := b.mutable(generation)
 	if err != nil {
+		b.mu.Unlock()
 		return err
 	}
 	updated := *current
 	rec := &updated
 	if !workerMatches(rec, workerID, secret) || rec.LeaseID != leaseID {
+		b.mu.Unlock()
 		return protocol.New(protocol.KindAuthentication, "worker",
 			"the control message does not match the admitted worker")
 	}
 	if len(instances) > 0 && (instances[0] == "" || rec.WorkerInstanceID != instances[0] || !rec.NativeStarted || rec.NativeInstance != instances[0]) {
+		b.mu.Unlock()
 		return protocol.New(protocol.KindAuthentication, "worker", "native start has not been recorded for this instance")
 	}
 	if len(instances) > 0 && !b.now().Before(rec.LeaseExpires) {
+		b.mu.Unlock()
 		return protocol.New(protocol.KindAuthentication, "worker", "the worker lease has expired")
 	}
 	switch rec.State {
+	case StateServing:
+		b.mu.Unlock()
+		return nil
+	case StateFilling:
+	default:
+		b.mu.Unlock()
+		return protocol.New(protocol.KindOperationState, "worker",
+			"only a filling generation starts serving")
+	}
+	if registrations <= 0 {
+		b.mu.Unlock()
+		return protocol.New(protocol.KindInvalidDescriptor, "worker",
+			"becoming Serving requires at least one real backend registration")
+	}
+	if err := b.checkNamespaceRegistrations(rec, registrations); err != nil {
+		b.mu.Unlock()
+		return err
+	}
+	if int32(len(descriptors)) != registrations {
+		b.mu.Unlock()
+		return protocol.New(protocol.KindAuthentication, "worker",
+			"each reported registration carries exactly one native descriptor")
+	}
+	plan := descriptorPlanOf(rec)
+	b.mu.Unlock()
+
+	if perr := b.validateDescriptorPlan(ctx, plan, workerID, descriptors); perr != nil {
+		return perr
+	}
+
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	current, err = b.mutable(generation)
+	if err != nil {
+		return err
+	}
+	if !workerMatches(current, workerID, secret) || current.LeaseID != leaseID {
+		return protocol.New(protocol.KindAuthentication, "worker",
+			"the control message does not match the admitted worker")
+	}
+	// The manifest reads above can take arbitrarily long; the publication
+	// re-runs the entry checks exactly, including native-start proof and
+	// lease freshness, so a lease that expired while a page read was gated
+	// cannot publish Serving.
+	if len(instances) > 0 && (instances[0] == "" || current.WorkerInstanceID != instances[0] ||
+		!current.NativeStarted || current.NativeInstance != instances[0]) {
+		return protocol.New(protocol.KindAuthentication, "worker", "native start has not been recorded for this instance")
+	}
+	if len(instances) > 0 && !b.now().Before(current.LeaseExpires) {
+		return protocol.New(protocol.KindAuthentication, "worker", "the worker lease has expired")
+	}
+	switch current.State {
 	case StateServing:
 		return nil
 	case StateFilling:
@@ -1196,36 +1348,34 @@ func (b *Broker) FillVerified(generation, workerID, leaseID, secret string,
 		return protocol.New(protocol.KindOperationState, "worker",
 			"only a filling generation starts serving")
 	}
-	if registrations <= 0 {
+	if !descriptorPlanMatches(current, plan) {
 		return protocol.New(protocol.KindInvalidDescriptor, "worker",
-			"becoming Serving requires at least one real backend registration")
+			"the generation's admission changed while its registration plan was verified")
 	}
-	if err := b.checkNamespaceRegistrations(rec, registrations); err != nil {
-		return err
-	}
-	if int32(len(descriptors)) != registrations {
+	if registrations <= 0 || int32(len(descriptors)) != registrations {
 		return protocol.New(protocol.KindAuthentication, "worker",
 			"each reported registration carries exactly one native descriptor")
 	}
-	if perr := b.validateDescriptors(rec, workerID, descriptors); perr != nil {
-		return perr
+	if err := b.checkNamespaceRegistrations(current, registrations); err != nil {
+		return err
 	}
+	next := *current
 	var resident int64
 	for _, descriptor := range descriptors {
-		resident += sourceAllocationBytes(descriptor.Length, rec.Backend)
+		resident += sourceAllocationBytes(descriptor.Length, next.Backend)
 	}
-	rec.State = StateServing
-	rec.ResidentBytes = resident
-	if !rec.NativeStartEnforced {
-		rec.Registrations = registrations
+	next.State = StateServing
+	next.ResidentBytes = resident
+	if !next.NativeStartEnforced {
+		next.Registrations = registrations
 	}
-	rec.Descriptors = descriptors
-	rec.Updated = b.now()
-	if err := b.ledger.write(rec); err != nil {
+	next.Descriptors = descriptors
+	next.Updated = b.now()
+	if err := b.ledger.write(&next); err != nil {
 		return protocol.New(protocol.KindSourceUnavailable, "worker",
 			"the state could not be recorded: %v", err)
 	}
-	*current = updated
+	*current = next
 	return nil
 }
 
@@ -1249,24 +1399,21 @@ type SessionOwner struct {
 // session cap bounds the namespace's admitted readers, and a refusal is
 // counted on the generation. The owner travels with the session: only
 // that identity may later read or release it.
-func (b *Broker) AdmitSession(owner SessionOwner, namespace, generation string) (*Session, *protocol.Error) {
-	return b.AdmitSessionContext(context.Background(), owner, namespace, generation)
-}
-
-// AdmitSessionContext admits a session using its Binding-wide authority.
-func (b *Broker) AdmitSessionContext(ctx context.Context, owner SessionOwner, namespace, generation string) (*Session, *protocol.Error) {
+func (b *Broker) AdmitSession(ctx context.Context, owner SessionOwner, namespace, generation string) (*Session, *protocol.Error) {
 	b.mu.Lock()
-	defer b.mu.Unlock()
 	rec, err := b.mutable(generation)
 	if err != nil {
+		b.mu.Unlock()
 		return nil, err
 	}
 	if rec.Namespace != namespace {
+		b.mu.Unlock()
 		return nil, protocol.New(protocol.KindDeniedContent, "session",
 			"the generation belongs to another namespace")
 	}
 	if !b.serving(rec) {
 		b.countRefusal(rec)
+		b.mu.Unlock()
 		return nil, protocol.New(protocol.KindStaleGeneration, "session",
 			"the generation is not serving new readers")
 	}
@@ -1275,15 +1422,32 @@ func (b *Broker) AdmitSessionContext(ctx context.Context, owner SessionOwner, na
 	// charge, named and unknown alike, bounds the next admission.
 	if b.limits.MaxSessions > 0 && b.nodeActiveSessionsLocked() >= b.limits.MaxSessions {
 		b.countRefusal(rec)
+		b.mu.Unlock()
 		return nil, protocol.New(protocol.KindCapacityExhausted, "session",
 			"the node session limit is reached")
 	}
-	if rec.BindingUID != "" {
-		return b.admitGlobalSessionLocked(ctx, rec, owner)
+	if rec.BindingUID == "" {
+		session, perr := b.admitLocalSessionLocked(rec, owner)
+		b.mu.Unlock()
+		return session, perr
 	}
+	validator := b.intentValidator
+	authority := b.reservationAuthorities[types.UID(rec.BindingUID)]
+	intent := liveIntentOf(rec)
+	inventoryRequired := b.inventoryRequired
+	frozen := b.assignmentsFrozen
+	b.mu.Unlock()
+	return b.admitGlobalSession(ctx, authority, validator, inventoryRequired, frozen,
+		intent, namespace, generation, owner)
+}
+
+// admitLocalSessionLocked admits a session on a generation without a
+// Binding-wide authority. The broker mutex is held by the caller; the
+// path touches only local memory and local durable state.
+func (b *Broker) admitLocalSessionLocked(rec *GenerationRecord, owner SessionOwner) (*Session, *protocol.Error) {
 	var namespaceSessions int32
 	for _, other := range b.records {
-		if other.Namespace == namespace {
+		if other.Namespace == rec.Namespace {
 			namespaceSessions += other.ActiveSessions
 		}
 	}
@@ -1300,7 +1464,7 @@ func (b *Broker) AdmitSessionContext(ctx context.Context, owner SessionOwner, na
 	session := newSessionID()
 	rec.Updated = b.now()
 	b.sessions[session] = &SessionRecord{
-		Generation: generation, OwnerUID: owner.PodUID,
+		Generation: rec.Generation, OwnerUID: owner.PodUID,
 		Namespace: owner.Namespace, ArtifactUID: owner.ArtifactUID,
 		Digest: owner.Digest,
 	}
@@ -1322,7 +1486,7 @@ func (b *Broker) AdmitSessionContext(ctx context.Context, owner SessionOwner, na
 		return nil, protocol.New(protocol.KindSourceUnavailable, "session",
 			"the session could not be recorded: %v", err)
 	}
-	return &Session{ID: session, Generation: generation}, nil
+	return &Session{ID: session, Generation: rec.Generation}, nil
 }
 
 // ReleaseSession releases one admitted reader under its authenticated
@@ -1330,37 +1494,59 @@ func (b *Broker) AdmitSessionContext(ctx context.Context, owner SessionOwner, na
 // mismatched owner is an authentication refusal, not a release. Releasing
 // a session twice is an error, not a credit: a released slot never eases
 // a later admission.
-func (b *Broker) ReleaseSession(owner SessionOwner, sessionID string) *protocol.Error {
-	return b.ReleaseSessionContext(context.Background(), owner, sessionID)
-}
-
-// ReleaseSessionContext removes the exact owner's Binding-wide session slot.
-func (b *Broker) ReleaseSessionContext(ctx context.Context, owner SessionOwner, sessionID string) *protocol.Error {
+func (b *Broker) ReleaseSession(ctx context.Context, owner SessionOwner, sessionID string) *protocol.Error {
 	b.mu.Lock()
-	defer b.mu.Unlock()
 	record, ok := b.sessions[sessionID]
 	if !ok {
+		b.mu.Unlock()
 		return protocol.New(protocol.KindOperationState, "session",
 			"the session is not admitted")
 	}
 	if record.OwnerUID != owner.PodUID || record.Namespace != owner.Namespace ||
 		record.ArtifactUID != owner.ArtifactUID || record.Digest != owner.Digest {
+		b.mu.Unlock()
 		return protocol.New(protocol.KindAuthentication, "session",
 			"the caller is not the session's admitted owner")
 	}
 	if record.TargetInstanceID != "" && record.TargetInstanceID != owner.TargetInstanceID {
+		b.mu.Unlock()
 		return protocol.New(protocol.KindAuthentication, "session", "the caller is not the session's target instance")
 	}
 	rec := b.records[record.Generation]
 	if record.RequestID != "" && rec == nil {
 		if record.Phase == "released" && record.CloseRequestID == owner.CloseRequestID && owner.TargetReleased {
+			b.mu.Unlock()
 			return nil
 		}
+		b.mu.Unlock()
 		return protocol.New(protocol.KindSourceUnavailable, "session", "the session generation is unavailable")
 	}
 	if rec != nil && rec.BindingUID != "" {
-		return b.releaseGlobalSessionLocked(ctx, rec, sessionID, record, owner)
+		authority := b.reservationAuthorities[types.UID(rec.BindingUID)]
+		release, perr := b.prepareGlobalSessionReleaseLocked(rec, sessionID, record, owner, authority)
+		if perr != nil {
+			b.mu.Unlock()
+			return perr
+		}
+		if release == nil {
+			b.mu.Unlock()
+			return nil
+		}
+		b.mu.Unlock()
+		if err := b.finishGlobalSessionRelease(ctx, release); err != nil {
+			return protocol.New(protocol.KindSourceUnavailable, "session", "the session release remains pending")
+		}
+		return nil
 	}
+	perr := b.releaseLocalSessionLocked(record, sessionID)
+	b.mu.Unlock()
+	return perr
+}
+
+// releaseLocalSessionLocked removes one non-Binding session and its
+// generation charge. The broker mutex is held by the caller.
+func (b *Broker) releaseLocalSessionLocked(record *SessionRecord, sessionID string) *protocol.Error {
+	rec := b.records[record.Generation]
 	delete(b.sessions, sessionID)
 	if err := b.persistSessionsLocked(); err != nil {
 		b.sessions[sessionID] = record
@@ -1369,25 +1555,22 @@ func (b *Broker) ReleaseSessionContext(ctx context.Context, owner SessionOwner, 
 	}
 	if rec != nil {
 		rec.Updated = b.now()
+		b.recountSessions(rec)
 		if err := b.ledger.write(rec); err != nil {
 			// The generation record lost the release: put the session
 			// back, both in memory and on disk, so the charge stays
 			// truthful and a retry is safe.
 			b.sessions[sessionID] = record
+			b.recountSessions(rec)
 			if persistErr := b.persistSessionsLocked(); persistErr != nil {
 				return protocol.New(protocol.KindSourceUnavailable, "session",
 					"the session release could not be recorded: %v", err)
 			}
-			b.recountSessions(rec)
 			if restoreErr := b.ledger.write(rec); restoreErr != nil {
 				klog.ErrorS(restoreErr, "Restore generation session accounting", "generation", rec.Generation)
 			}
 			return protocol.New(protocol.KindSourceUnavailable, "session",
 				"the session release could not be recorded: %v", err)
-		}
-		b.recountSessions(rec)
-		if err := b.ledger.write(rec); err != nil {
-			return protocol.New(protocol.KindSourceUnavailable, "session", "session released but generation accounting could not be recorded: %v", err)
 		}
 	}
 	return nil
@@ -1423,48 +1606,53 @@ func (b *Broker) Drain(generation string) *protocol.Error {
 // disconnect, and with no sessions left the generation is released together
 // with its source reference and its budget charge. Sessions still in flight
 // keep it held.
-func (b *Broker) DrainAck(generation, workerID, leaseID, secret string, instances ...string) *protocol.Error {
-	return b.DrainAckContext(context.Background(), generation, workerID, leaseID, secret, instances...)
-}
-
-// DrainAckContext records native release before returning Binding-wide quota.
-func (b *Broker) DrainAckContext(ctx context.Context, generation, workerID, leaseID, secret string, instances ...string) *protocol.Error {
+func (b *Broker) DrainAck(ctx context.Context, generation, workerID, leaseID, secret string, instances ...string) *protocol.Error {
 	b.mu.Lock()
-	defer b.mu.Unlock()
 	rec, err := b.mutable(generation)
 	if err != nil {
+		b.mu.Unlock()
 		return err
 	}
 	if !workerMatches(rec, workerID, secret) {
+		b.mu.Unlock()
 		return protocol.New(protocol.KindAuthentication, "worker",
 			"the control message does not match the admitted worker")
 	}
 	if len(instances) > 0 && (instances[0] == "" || rec.WorkerInstanceID != instances[0]) {
+		b.mu.Unlock()
 		return protocol.New(protocol.KindAuthentication, "worker", "the worker instance does not match")
 	}
 	if rec.LeaseID == "" || rec.LeaseID != leaseID {
+		b.mu.Unlock()
 		return protocol.New(protocol.KindAuthentication, "worker",
 			"the lease is unknown")
 	}
 	if rec.State == StateReleased {
 		if err := b.store.RemoveRef(refVolumeID(b.scope, rec.Generation)); err != nil {
+			b.mu.Unlock()
 			return protocol.New(protocol.KindSourceUnavailable, "drain", "cache claim release remains pending")
 		}
+		b.mu.Unlock()
 		return nil
 	}
 	if rec.State != StateDraining {
+		b.mu.Unlock()
 		return protocol.New(protocol.KindOperationState, "drain",
 			"the generation is not draining")
 	}
 	b.recountSessions(rec)
 	if rec.ActiveSessions > 0 || rec.UnknownSessions > 0 {
+		b.mu.Unlock()
 		return protocol.New(protocol.KindOperationState, "drain",
 			"the generation still holds admitted sessions")
 	}
 	if rec.BindingUID != "" {
-		return b.releaseGlobalGenerationLocked(ctx, rec)
+		b.mu.Unlock()
+		return b.releaseGlobalGeneration(ctx, generation)
 	}
-	return b.release(rec)
+	perr := b.release(rec)
+	b.mu.Unlock()
+	return perr
 }
 
 // quarantineStageReasons are the only quarantine reasons that carry a

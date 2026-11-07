@@ -11,35 +11,90 @@ import (
 	"gpustack.ai/gpustack/pkg/modeltransfer/protocol"
 )
 
-func (b *Broker) releaseGlobalGenerationLocked(ctx context.Context, rec *GenerationRecord) *protocol.Error {
+// releaseGlobalGeneration retires one drained Binding-bound generation.
+// Each authority CAS runs without the broker mutex between durable
+// checkpoints — native release proof, the global drain mark, the global
+// release, and the local released record — so a slow authority never
+// blocks unrelated control traffic. A generation that stops draining
+// between steps (quarantined, or charged again) holds the remaining
+// release, and a lost CAS response replays idempotently through the
+// generation release pass.
+func (b *Broker) releaseGlobalGeneration(ctx context.Context, generation string) *protocol.Error {
+	// Checkpoint one: durable native-release proof and the release identity.
+	b.mu.Lock()
+	rec, err := b.mutable(generation)
+	if err != nil {
+		b.mu.Unlock()
+		return protocol.New(protocol.KindSourceUnavailable, "drain", "the global drain remains pending")
+	}
+	if rec.BindingUID == "" || rec.State != StateDraining {
+		b.mu.Unlock()
+		return protocol.New(protocol.KindSourceUnavailable, "drain", "the global drain remains pending")
+	}
+	b.recountSessions(rec)
+	if rec.ActiveSessions > 0 || rec.UnknownSessions > 0 {
+		b.mu.Unlock()
+		return protocol.New(protocol.KindOperationState, "drain", "the generation still holds admitted sessions")
+	}
 	if !rec.NativeReleased {
 		next := *rec
 		next.NativeReleased = true
 		next.Updated = b.now()
 		if err := b.ledger.write(&next); err != nil {
+			b.mu.Unlock()
 			return protocol.New(protocol.KindSourceUnavailable, "drain", "native release proof could not be persisted")
 		}
 		*rec = next
 	}
 	authority := b.reservationAuthorities[types.UID(rec.BindingUID)]
 	if authority == nil {
+		b.mu.Unlock()
 		return protocol.New(protocol.KindSourceUnavailable, "drain", "the Binding authority is unavailable")
 	}
+	reservationID, bindingUID := rec.ReservationID, rec.BindingUID
+	b.mu.Unlock()
+
+	// Checkpoint two: the global drain mark.
 	requestCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
+	if err := authority.MarkDrained(requestCtx, reservationID, b.scope, b.ledger.identity); err != nil {
+		return protocol.New(protocol.KindSourceUnavailable, "drain", "the global drain remains pending")
+	}
+	b.mu.Lock()
+	rec = b.records[generation]
+	if rec == nil || rec.BindingUID != bindingUID || rec.ReservationID != reservationID ||
+		rec.State != StateDraining || !rec.NativeReleased {
+		b.mu.Unlock()
+		return protocol.New(protocol.KindSourceUnavailable, "drain", "the global drain remains pending")
+	}
+	b.recountSessions(rec)
+	if rec.ActiveSessions > 0 || rec.UnknownSessions > 0 {
+		b.mu.Unlock()
+		return protocol.New(protocol.KindSourceUnavailable, "drain", "the global drain remains pending")
+	}
 	if !rec.AuthorityDrained {
-		if err := authority.MarkDrained(requestCtx, rec.ReservationID, b.scope, b.ledger.identity); err != nil {
-			return protocol.New(protocol.KindSourceUnavailable, "drain", "the global drain remains pending")
-		}
 		next := *rec
 		next.AuthorityDrained = true
 		next.Updated = b.now()
 		if err := b.ledger.write(&next); err != nil {
+			b.mu.Unlock()
 			return protocol.New(protocol.KindSourceUnavailable, "drain", "the global drain confirmation could not be persisted")
 		}
 		*rec = next
 	}
-	if err := authority.ReleaseDrainedIfPresent(requestCtx, rec.ReservationID, b.scope, b.ledger.identity); err != nil {
+	b.mu.Unlock()
+
+	// Checkpoint three: the global release.
+	if err := authority.ReleaseDrainedIfPresent(requestCtx, reservationID, b.scope, b.ledger.identity); err != nil {
+		return protocol.New(protocol.KindSourceUnavailable, "drain", "the global release remains pending")
+	}
+
+	// Checkpoint four: the local released record and the cache reference.
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	rec = b.records[generation]
+	if rec == nil || rec.BindingUID != bindingUID || rec.ReservationID != reservationID ||
+		rec.State != StateDraining || !rec.NativeReleased || !rec.AuthorityDrained {
 		return protocol.New(protocol.KindSourceUnavailable, "drain", "the global release remains pending")
 	}
 	next := *rec
@@ -134,14 +189,15 @@ func (b *Broker) compactReleasedGenerationsLocked() error {
 }
 
 // RetryGenerationReleases retries only generations with durable native release
-// evidence, never one inferred from a lost Pod or expired lease. The pass
-// ends with best-effort reclamation: released records and the terminal
-// sessions and receipts behind them leave the ledger, and the released
-// trees' cache references are swept.
+// evidence, never one inferred from a lost Pod or expired lease. The
+// authority CAS runs without the broker mutex per generation; the pass ends
+// with best-effort reclamation: released records and the terminal sessions
+// and receipts behind them leave the ledger, and the released trees' cache
+// references are swept.
 func (b *Broker) RetryGenerationReleases(ctx context.Context) error {
 	b.mu.Lock()
-	defer b.mu.Unlock()
-	for _, rec := range b.records {
+	var candidates []string
+	for generation, rec := range b.records {
 		if rec.BindingUID == "" || rec.State != StateDraining || !rec.NativeReleased {
 			continue
 		}
@@ -149,10 +205,19 @@ func (b *Broker) RetryGenerationReleases(ctx context.Context) error {
 		if rec.ActiveSessions != 0 || rec.UnknownSessions != 0 {
 			continue
 		}
-		if err := b.releaseGlobalGenerationLocked(ctx, rec); err != nil {
+		candidates = append(candidates, generation)
+	}
+	b.mu.Unlock()
+	for _, generation := range candidates {
+		if err := ctx.Err(); err != nil {
 			return err
 		}
+		if perr := b.releaseGlobalGeneration(ctx, generation); perr != nil {
+			return perr
+		}
 	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
 	if err := b.compactSessionsLocked(); err != nil {
 		return err
 	}

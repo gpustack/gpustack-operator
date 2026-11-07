@@ -132,9 +132,9 @@ func (d *Driver) publishModelTransferVolume(ctx context.Context, req *csi.NodePu
 		PodNamespace: namespace, PodName: vc[attrPodName], PodUID: vc[attrPodUID],
 	}
 	if d.Store.IsPublished(hex) {
-		published, err := d.Store.Claim(ref)
+		published, err := d.Store.Claim(ctx, ref)
 		if err != nil {
-			return nil, status.Errorf(codes.Internal, "record the reference: %v", err)
+			return nil, recordReferenceError(err)
 		}
 		if !published {
 			return nil, status.Error(codes.FailedPrecondition,

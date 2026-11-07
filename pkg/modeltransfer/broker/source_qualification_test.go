@@ -110,13 +110,13 @@ func gateFixture(t *testing.T) (*Broker, string, SessionOwner, *gateSource) {
 		ReservationID: "gate-reservation", Registrations: 1, Backend: "nixl",
 		ManifestJSON: string(raw), ManifestSHA256: hex.EncodeToString(sum[:]),
 	}
-	assignment, perr := b.AdmitIntentFill(intent)
+	assignment, perr := b.AdmitIntentFill(t.Context(), intent)
 	require.Nil(t, perr)
 	instance := strings.Repeat("a", 32)
 	lease, perr := b.RegisterWorker(assignment.Generation, "source", assignment.WorkerSecret, instance)
 	require.Nil(t, perr)
 	require.Nil(t, b.NativeStart(assignment.Generation, "source", lease.ID, assignment.WorkerSecret, instance))
-	require.Nil(t, b.FillVerified(assignment.Generation, "source", lease.ID, assignment.WorkerSecret, 1,
+	require.Nil(t, b.FillVerified(t.Context(), assignment.Generation, "source", lease.ID, assignment.WorkerSecret, 1,
 		[]RegistrationDescriptor{{
 			Name: "weight.safetensors", Addr: 1, Length: 12,
 			MemoryType: "HOST", Backend: "nixl", WorkerUID: "source",
@@ -166,7 +166,7 @@ func (a gateAuthorizer) AuthenticatePod(_ context.Context, req authorization.Req
 func TestSourceGateRefusesNewSessionWhileNoBackendIsQualified(t *testing.T) {
 	b, generation, owner, _ := gateFixture(t)
 	closeTestSource(t, b)
-	session, perr := b.AdmitSessionContext(context.Background(), owner, "tenant", generation)
+	session, perr := b.AdmitSession(context.Background(), owner, "tenant", generation)
 	require.NotNil(t, perr, "a broker with no qualified backend must refuse a new remote session")
 	assert.Equal(t, protocol.KindSourceUnavailable, perr.Kind)
 	assert.Nil(t, session)
@@ -180,13 +180,13 @@ func TestSourceGateRefusesNewSessionWhileNoBackendIsQualified(t *testing.T) {
 func TestSourceGateKeepsAdmittedSessionAndRefusesNewOne(t *testing.T) {
 	b, generation, owner, _ := gateFixture(t)
 	qualifyTestSource(t, b)
-	session, perr := b.AdmitSessionContext(context.Background(), owner, "tenant", generation)
+	session, perr := b.AdmitSession(context.Background(), owner, "tenant", generation)
 	require.Nil(t, perr)
 	closeTestSource(t, b)
 
 	other := owner
 	other.PodUID, other.RequestID = "other-owner", strings.Repeat("d", 32)
-	refused, perr := b.AdmitSessionContext(context.Background(), other, "tenant", generation)
+	refused, perr := b.AdmitSession(context.Background(), other, "tenant", generation)
 	require.NotNil(t, perr)
 	assert.Equal(t, protocol.KindSourceUnavailable, perr.Kind)
 	assert.Nil(t, refused)
@@ -199,7 +199,7 @@ func TestSourceGateKeepsAdmittedSessionAndRefusesNewOne(t *testing.T) {
 	closeOwner.CloseRequestID = strings.Repeat("9", 32)
 	require.Nil(t, b.ClosePrivateSession(context.Background(), closeOwner, session.ID))
 	closeOwner.TargetReleased = true
-	require.Nil(t, b.ReleaseSessionContext(context.Background(), closeOwner, session.ID))
+	require.Nil(t, b.ReleaseSession(context.Background(), closeOwner, session.ID))
 }
 
 // TestSourceGateRefusesSessionOverHTTPWithoutDescriptors shows what a remote
@@ -443,7 +443,7 @@ func TestSessionRefusalKindMatchesTheProtocolError(t *testing.T) {
 func TestSourceGateRefusesNewTransferAndKeepsInFlightOperations(t *testing.T) {
 	b, generation, owner, private := gateFixture(t)
 	qualifyTestSource(t, b)
-	session, perr := b.AdmitSessionContext(context.Background(), owner, "tenant", generation)
+	session, perr := b.AdmitSession(context.Background(), owner, "tenant", generation)
 	require.Nil(t, perr)
 	instance := strings.Repeat("a", 32)
 	request := gateTransferRequest(session.ID, generation, instance)
@@ -481,7 +481,7 @@ func TestSourceGateRefusesNewTransferAndKeepsInFlightOperations(t *testing.T) {
 func TestSourceGateRefusesPreparedOperationRepost(t *testing.T) {
 	b, generation, owner, private := gateFixture(t)
 	qualifyTestSource(t, b)
-	session, perr := b.AdmitSessionContext(context.Background(), owner, "tenant", generation)
+	session, perr := b.AdmitSession(context.Background(), owner, "tenant", generation)
 	require.Nil(t, perr)
 	instance := strings.Repeat("a", 32)
 	request := gateTransferRequest(session.ID, generation, instance)
@@ -508,7 +508,7 @@ func TestSourceGateRefusesPreparedOperationRepost(t *testing.T) {
 func TestSourceGateRefusesConcurrentNewTransfers(t *testing.T) {
 	b, generation, owner, private := gateFixture(t)
 	qualifyTestSource(t, b)
-	session, perr := b.AdmitSessionContext(context.Background(), owner, "tenant", generation)
+	session, perr := b.AdmitSession(context.Background(), owner, "tenant", generation)
 	require.Nil(t, perr)
 	instance := strings.Repeat("a", 32)
 	request := gateTransferRequest(session.ID, generation, instance)

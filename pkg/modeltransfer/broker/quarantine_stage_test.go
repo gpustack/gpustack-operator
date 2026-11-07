@@ -27,7 +27,7 @@ func quarantineStageFixture(t *testing.T) (*httptest.Server, *Broker, string, st
 	})
 	require.Equal(t, http.StatusOK, status)
 	leaseID := body["leaseID"].(string)
-	require.Nil(t, b.FillVerified(generation, "source-worker-a", leaseID, secret, 1,
+	require.Nil(t, b.FillVerified(t.Context(), generation, "source-worker-a", leaseID, secret, 1,
 		[]RegistrationDescriptor{{
 			Name: "model.norm.weight", Addr: 4096, Length: 6,
 			MemoryType: "HOST", Backend: "nixl", WorkerUID: "source-worker-a",

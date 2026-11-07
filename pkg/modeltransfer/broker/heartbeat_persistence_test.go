@@ -29,7 +29,7 @@ func TestHeartbeatWriteFailurePreservesState(t *testing.T) {
 func TestFillWriteFailureDoesNotAdmitReaders(t *testing.T) {
 	b, _, digest := newBroker(t, defaultLimits())
 	req := fill("tenant-a", digest, 12)
-	admitted, perr := b.AdmitFill(req)
+	admitted, perr := b.AdmitFill(t.Context(), req)
 	require.Nil(t, perr)
 	lease, perr := b.RegisterWorker(admitted.Generation, req.WorkerID, admitted.WorkerSecret)
 	require.Nil(t, perr)
@@ -37,14 +37,14 @@ func TestFillWriteFailureDoesNotAdmitReaders(t *testing.T) {
 	blocked := filepath.Join(b.root, recordsDir, admitted.Generation+".json.tmp")
 	require.NoError(t, os.Mkdir(blocked, 0o700))
 	descriptors := []RegistrationDescriptor{{Name: "weights", Addr: 1, Length: 12, MemoryType: "HOST", Backend: "nixl", WorkerUID: req.WorkerID}}
-	perr = b.FillVerified(admitted.Generation, req.WorkerID, lease.ID, admitted.WorkerSecret, 1, descriptors)
+	perr = b.FillVerified(t.Context(), admitted.Generation, req.WorkerID, lease.ID, admitted.WorkerSecret, 1, descriptors)
 	require.NotNil(t, perr)
 	require.Equal(t, before, *b.records[admitted.Generation])
-	_, perr = b.AdmitSession(testOwner("tenant-a"), "tenant-a", admitted.Generation)
+	_, perr = b.AdmitSession(t.Context(), testOwner("tenant-a"), "tenant-a", admitted.Generation)
 	require.NotNil(t, perr)
 	require.NoError(t, os.Remove(blocked))
-	require.Nil(t, b.FillVerified(admitted.Generation, req.WorkerID, lease.ID, admitted.WorkerSecret, 1, descriptors))
-	_, perr = b.AdmitSession(testOwner("tenant-a"), "tenant-a", admitted.Generation)
+	require.Nil(t, b.FillVerified(t.Context(), admitted.Generation, req.WorkerID, lease.ID, admitted.WorkerSecret, 1, descriptors))
+	_, perr = b.AdmitSession(t.Context(), testOwner("tenant-a"), "tenant-a", admitted.Generation)
 	require.Nil(t, perr)
 }
 

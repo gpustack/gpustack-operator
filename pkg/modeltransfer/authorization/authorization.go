@@ -107,6 +107,13 @@ type Authorizer struct {
 	Store *store.Store
 	// Resolver reads a manifest already derived and pinned by the broker.
 	Resolver ManifestResolver
+	// Coverage nominates the Bindings whose grant could cover a node out of
+	// the watch caches, so metadata admission reads only the grants it must
+	// prove live. It is a candidate filter, never an authority: a stale
+	// cache may still nominate a Binding whose grant is gone, so every
+	// selected Binding and store is re-read live, and an empty selection
+	// denies. Nil keeps every binding read live.
+	Coverage *Coverage
 	// CacheTTL bounds positive authorization reuse. Zero disables caching.
 	CacheTTL      time.Duration
 	cacheMu       sync.Mutex
@@ -189,6 +196,9 @@ func (a *Authorizer) AuthorizeMetadata(ctx context.Context, req Request, nodeNam
 	if err := a.Reader.Get(ctx, ctrlcli.ObjectKey{Name: nodeName}, node); err != nil {
 		return protocol.New(protocol.KindSourceUnavailable, "source", "source node cannot be read")
 	}
+	if a.Coverage.Ready() {
+		return a.authorizeMetadataCovered(ctx, req, node)
+	}
 	var bindings workercore.ModelStoreBindingList
 	if err := a.Reader.List(ctx, &bindings, ctrlcli.InNamespace(req.PodNamespace)); err != nil {
 		return protocol.New(protocol.KindSourceUnavailable, "source", "bindings cannot be read")
@@ -210,6 +220,37 @@ func (a *Authorizer) AuthorizeMetadata(ctx context.Context, req Request, nodeNam
 		}
 	}
 	return protocol.New(protocol.KindDeniedContent, "source", "no live binding grants source access on this node")
+}
+
+// authorizeMetadataCovered proves the cached candidates live: a selected
+// Binding must still exist under its identity, not be deleting, and still
+// cover the node through its current stores before metadata is allowed. A
+// candidate that fails live proof gives way to the next; one that cannot be
+// read is an unavailable source, never a quiet no, and only the selected
+// grants and their stores are read.
+func (a *Authorizer) authorizeMetadataCovered(ctx context.Context, req Request, node *core.Node) *protocol.Error {
+	denied := protocol.New(protocol.KindDeniedContent, "source", "no live binding grants source access on this node")
+	candidates := a.Coverage.Candidates(req.PodNamespace, node.Labels)
+	for _, candidate := range candidates {
+		live := &workercore.ModelStoreBinding{}
+		if err := a.Reader.Get(ctx, ctrlcli.ObjectKey{Namespace: candidate.Namespace, Name: candidate.Name}, live); err != nil {
+			if kerrors.IsNotFound(err) {
+				continue
+			}
+			return protocol.New(protocol.KindSourceUnavailable, "source", "source coverage cannot be read")
+		}
+		if live.UID != candidate.UID || live.DeletionTimestamp != nil {
+			continue
+		}
+		covered, err := modelstore.BindingCoversNode(ctx, a.Reader, live, node)
+		if err != nil {
+			return protocol.New(protocol.KindSourceUnavailable, "source", "source coverage cannot be read")
+		}
+		if covered {
+			return nil
+		}
+	}
+	return denied
 }
 
 // authenticate reviews the token against Audience, extracts the bound Pod
@@ -409,7 +450,7 @@ func (a *Authorizer) validateRange(ctx context.Context, req Request, sourceGener
 			return protocol.TensorDescriptor{}, "", err
 		}
 	}
-	tensor, err := manifest.TensorContext(ctx, req.Tensor)
+	tensor, err := manifest.Tensor(ctx, req.Tensor)
 	if err != nil {
 		return protocol.TensorDescriptor{}, "", protocol.New(protocol.KindInvalidDescriptor,
 			"range", "unknown tensor %q", req.Tensor)
@@ -439,7 +480,7 @@ func (a *Authorizer) buildManifest(ctx context.Context, req Request, sourceGener
 			"source", "cannot create a cache claim")
 	}
 	ref := "model-transfer.auth." + hex.EncodeToString(id[:])
-	claimed, err := a.Store.Claim(store.Ref{VolumeID: ref, Hex: hexDigest})
+	claimed, err := a.Store.Claim(ctx, store.Ref{VolumeID: ref, Hex: hexDigest})
 	if err != nil || !claimed {
 		return nil, protocol.New(protocol.KindSourceUnavailable,
 			"source", "cannot claim the verified published tree")

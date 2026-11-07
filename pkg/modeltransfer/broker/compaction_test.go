@@ -208,12 +208,12 @@ func TestRetrySessionTransactionsSharesLivenessAcrossSessionsAndToleratesLookupF
 			IntentUID: "prefetch-uid", IntentGeneration: 1, BindingUID: "binding-uid-1",
 			ReservationID: "shared-liveness-reservation", Registrations: 1, ArtifactUID: "artifact-uid-1", SourceGeneration: 1,
 		}
-		assignment, perr := b.AdmitIntentFill(intent)
+		assignment, perr := b.AdmitIntentFill(t.Context(), intent)
 		require.Nil(t, perr)
 		lease, perr := b.RegisterWorker(assignment.Generation, intent.WorkerID, assignment.WorkerSecret, "instance-a")
 		require.Nil(t, perr)
 		require.Nil(t, b.NativeStart(assignment.Generation, intent.WorkerID, lease.ID, assignment.WorkerSecret, "instance-a"))
-		require.Nil(t, b.FillVerified(assignment.Generation, intent.WorkerID, lease.ID, assignment.WorkerSecret, 1,
+		require.Nil(t, b.FillVerified(t.Context(), assignment.Generation, intent.WorkerID, lease.ID, assignment.WorkerSecret, 1,
 			[]RegistrationDescriptor{{Name: "file", Addr: 1, Length: 12, MemoryType: "HOST", Backend: "nixl", WorkerUID: intent.WorkerID}}, "instance-a"))
 		return b, intent, assignment.Generation
 	}
@@ -221,9 +221,9 @@ func TestRetrySessionTransactionsSharesLivenessAcrossSessionsAndToleratesLookupF
 	t.Run("one owner's sessions share one liveness read", func(t *testing.T) {
 		b, intent, generation := build(t)
 		owner := SessionOwner{PodUID: "target-pod", Namespace: intent.Namespace, ArtifactUID: intent.ArtifactUID, Digest: intent.Digest}
-		first, perr := b.AdmitSessionContext(context.Background(), owner, intent.Namespace, generation)
+		first, perr := b.AdmitSession(context.Background(), owner, intent.Namespace, generation)
 		require.Nil(t, perr)
-		second, perr := b.AdmitSessionContext(context.Background(), owner, intent.Namespace, generation)
+		second, perr := b.AdmitSession(context.Background(), owner, intent.Namespace, generation)
 		require.Nil(t, perr)
 		checks := 0
 		b.SetSessionPodChecker(func(context.Context, string, string) (bool, error) {
@@ -239,7 +239,7 @@ func TestRetrySessionTransactionsSharesLivenessAcrossSessionsAndToleratesLookupF
 	t.Run("a failed liveness read holds the session and the pass", func(t *testing.T) {
 		b, intent, generation := build(t)
 		owner := SessionOwner{PodUID: "target-pod", Namespace: intent.Namespace, ArtifactUID: intent.ArtifactUID, Digest: intent.Digest}
-		session, perr := b.AdmitSessionContext(context.Background(), owner, intent.Namespace, generation)
+		session, perr := b.AdmitSession(context.Background(), owner, intent.Namespace, generation)
 		require.Nil(t, perr)
 		b.SetSessionPodChecker(func(context.Context, string, string) (bool, error) {
 			return false, errors.New("the API server is unreachable")
@@ -260,15 +260,15 @@ func TestMissingWorkerPodRetainsNativeOwnershipAcrossRestart(t *testing.T) {
 		IntentUID: "prefetch-uid", IntentGeneration: 1, BindingUID: "binding-uid-1",
 		ReservationID: "fence-reservation", Registrations: 1, ArtifactUID: "artifact-uid-1", SourceGeneration: 1,
 	}
-	assignment, perr := b.AdmitIntentFill(intent)
+	assignment, perr := b.AdmitIntentFill(t.Context(), intent)
 	require.Nil(t, perr)
 	lease, perr := b.RegisterWorker(assignment.Generation, intent.WorkerID, assignment.WorkerSecret, "instance-a")
 	require.Nil(t, perr)
 	require.Nil(t, b.NativeStart(assignment.Generation, intent.WorkerID, lease.ID, assignment.WorkerSecret, "instance-a"))
-	require.Nil(t, b.FillVerified(assignment.Generation, intent.WorkerID, lease.ID, assignment.WorkerSecret, 1,
+	require.Nil(t, b.FillVerified(t.Context(), assignment.Generation, intent.WorkerID, lease.ID, assignment.WorkerSecret, 1,
 		[]RegistrationDescriptor{{Name: "file", Addr: 1, Length: 12, MemoryType: "HOST", Backend: "nixl", WorkerUID: intent.WorkerID}}, "instance-a"))
 	owner := SessionOwner{PodUID: "target-pod", Namespace: intent.Namespace, ArtifactUID: intent.ArtifactUID, Digest: digest}
-	session, perr := b.AdmitSessionContext(context.Background(), owner, intent.Namespace, assignment.Generation)
+	session, perr := b.AdmitSession(context.Background(), owner, intent.Namespace, assignment.Generation)
 	require.Nil(t, perr)
 	opID := strings.Repeat("d", 32)
 	b.mu.Lock()
@@ -360,7 +360,7 @@ func TestFenceReplacedWorkerPodsSparesLiveAndCurrentWorkers(t *testing.T) {
 
 func TestReconstructReleasesOnlyProvenNeverStartedFill(t *testing.T) {
 	b, _, digest := newBroker(t, defaultLimits())
-	assignment, perr := b.AdmitIntentFill(Intent{
+	assignment, perr := b.AdmitIntentFill(t.Context(), Intent{
 		Key: "never-started", Namespace: "tenant-a", Digest: digest, TotalBytes: 12,
 		Grant: grant("tenant-a", 10000), WorkerID: "old-source",
 		IntentUID: "prefetch-uid", IntentGeneration: 1, BindingUID: "binding-uid-1",

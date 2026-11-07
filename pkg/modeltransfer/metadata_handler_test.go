@@ -26,6 +26,7 @@ import (
 	"gpustack.ai/gpustack/pkg/modelmanager/store"
 	"gpustack.ai/gpustack/pkg/modeltransfer/authorization"
 	"gpustack.ai/gpustack/pkg/modeltransfer/broker"
+	"gpustack.ai/gpustack/pkg/modeltransfer/metadata"
 	"gpustack.ai/gpustack/pkg/modeltransfer/protocol"
 )
 
@@ -52,15 +53,46 @@ func TestMetadataRecoveryOnlyRemovesOwnedTransientClaims(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(dir, owned.VolumeID), []byte("tmp"), 0o600))
 	require.NoError(t, os.WriteFile(filepath.Join(dir, scopedOldMetadata.VolumeID), []byte("tmp"), 0o600))
 	require.NoError(t, os.WriteFile(filepath.Join(dir, other.VolumeID), []byte("tmp"), 0o600))
-	// A crashed view build leaves a staging directory behind; recovery
-	// removes it while a finished view stays untouched.
+	// A crashed view build leaves its staging directory, ownership lock,
+	// and published marker behind; recovery reclaims them only while the
+	// lock can be taken and the marker matches the held file. A lock
+	// another builder still holds, staging whose lock carries no published
+	// marker, and staging that predates the protocol survive untouched, as
+	// do published views. The proof fixtures are built through the actual
+	// builder helper.
 	viewsDir := filepath.Join(st.Root(), "model-transfer", "views")
-	require.NoError(t, os.MkdirAll(filepath.Join(viewsDir, ".staging-crashed"), 0o700))
-	require.NoError(t, os.WriteFile(filepath.Join(viewsDir, ".staging-crashed", "view.bin"), []byte("partial"), 0o600))
+	require.NoError(t, os.MkdirAll(viewsDir, 0o755))
+	crashed, err := metadata.NewStaging(viewsDir)
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(filepath.Join(crashed.Dir(), "view.bin"), []byte("partial"), 0o600))
+	crashed.Abandon()
+	active, err := metadata.NewStaging(viewsDir)
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(filepath.Join(active.Dir(), "view.bin"), []byte("partial"), 0o600))
+	t.Cleanup(func() { active.Release() })
+	require.NoError(t, os.MkdirAll(filepath.Join(viewsDir, ".staging-unowned"), 0o700))
+	require.NoError(t, os.WriteFile(filepath.Join(viewsDir, ".staging-unowned.lock"), []byte{}, 0o600))
+	require.NoError(t, os.MkdirAll(filepath.Join(viewsDir, ".staging-legacy"), 0o700))
+	published := filepath.Join(viewsDir, strings.Repeat("9", 64))
+	require.NoError(t, os.MkdirAll(published, 0o700))
 	require.NoError(t, os.MkdirAll(filepath.Join(viewsDir, "finished-view"), 0o700))
 	require.NoError(t, cleanupMetadataRequests(st, "pod-a", "nvidia"))
-	assert.NoDirExists(t, filepath.Join(viewsDir, ".staging-crashed"),
+	assert.NoDirExists(t, crashed.Dir(),
 		"a crashed view build's staging directory is recovered")
+	assert.NoFileExists(t, crashed.LockPath(),
+		"a reclaimed staging's ownership lock goes with it")
+	assert.DirExists(t, active.Dir(),
+		"a staging tree whose ownership lock another builder holds survives")
+	assert.FileExists(t, active.LockPath(),
+		"an active builder's ownership lock survives")
+	assert.DirExists(t, filepath.Join(viewsDir, ".staging-unowned"),
+		"staging whose lock carries no published marker cannot be proven owned and is preserved")
+	assert.FileExists(t, filepath.Join(viewsDir, ".staging-unowned.lock"),
+		"an unmarked lock file survives with its staging")
+	assert.DirExists(t, filepath.Join(viewsDir, ".staging-legacy"),
+		"staging without an ownership lock cannot be proven inactive and is preserved")
+	assert.DirExists(t, published,
+		"a published view is never touched by recovery")
 	assert.DirExists(t, filepath.Join(viewsDir, "finished-view"),
 		"a finished view is never touched by recovery")
 	for _, removed := range []store.Ref{owned, scopedOldMetadata, scopedOldBuild} {
@@ -79,6 +111,43 @@ func TestMetadataRecoveryOnlyRemovesOwnedTransientClaims(t *testing.T) {
 	assert.True(t, os.IsNotExist(err))
 	_, err = os.Stat(filepath.Join(dir, other.VolumeID))
 	assert.NoError(t, err)
+}
+
+func TestMetadataRecoveryReclaimsViewStagingWithoutMetadataTemp(t *testing.T) {
+	st, err := store.Open(t.TempDir())
+	require.NoError(t, err)
+	// metadata-temp has never been created: recovery must still reach the
+	// view root, which a missing directory does not exempt.
+	viewsDir := filepath.Join(st.Root(), "model-transfer", "views")
+	require.NoError(t, os.MkdirAll(viewsDir, 0o755))
+	crashed, err := metadata.NewStaging(viewsDir)
+	require.NoError(t, err)
+	crashed.Abandon()
+	require.NoError(t, os.MkdirAll(filepath.Join(viewsDir, ".staging-legacy"), 0o700))
+	published := filepath.Join(viewsDir, strings.Repeat("8", 64))
+	require.NoError(t, os.MkdirAll(published, 0o700))
+	require.NoError(t, cleanupMetadataRequests(st, "pod-a", "nvidia"))
+	assert.NoDirExists(t, crashed.Dir(),
+		"recovery reclaims an abandoned staging even without metadata-temp")
+	assert.NoFileExists(t, crashed.LockPath())
+	assert.DirExists(t, filepath.Join(viewsDir, ".staging-legacy"),
+		"staging without an ownership lock is preserved")
+	assert.DirExists(t, published,
+		"a published view is never touched by recovery")
+}
+
+func TestMetadataRecoveryToleratesMissingDirectories(t *testing.T) {
+	st, err := store.Open(t.TempDir())
+	require.NoError(t, err)
+	require.NoError(t, cleanupMetadataRequests(st, "pod-a", "nvidia"),
+		"neither metadata-temp nor the view root exists yet")
+	require.NoError(t, st.WriteRef(store.Ref{
+		VolumeID: metadataPrefix("pod-b", "ascend") + "other", PodUID: "pod-b", Hex: strings.Repeat("a", 64),
+	}))
+	require.NoError(t, cleanupMetadataRequests(st, "pod-a", "nvidia"))
+	_, exists, err := st.ReadRef(metadataPrefix("pod-b", "ascend") + "other")
+	require.NoError(t, err)
+	assert.True(t, exists, "recovery still resolves claims with nothing to sweep")
 }
 
 func TestMetadataRequestCapacityIsBounded(t *testing.T) {
@@ -131,7 +200,8 @@ func TestMetadataHandlerVerifiesSourceAndExportsHeaders(t *testing.T) {
 	ds := &apps.DaemonSet{ObjectMeta: meta.ObjectMeta{Name: "transfer", Namespace: "operator", UID: "ds-uid", Labels: labels}, Spec: apps.DaemonSetSpec{Template: core.PodTemplateSpec{Spec: core.PodSpec{Containers: []core.Container{{Name: "worker", Image: "worker:v1"}}}}}}
 	pod := &core.Pod{ObjectMeta: meta.ObjectMeta{Name: "source", Namespace: "operator", UID: "pod-uid", Labels: labels, OwnerReferences: []meta.OwnerReference{{APIVersion: "apps/v1", Kind: "DaemonSet", Name: "transfer", UID: "ds-uid", Controller: ptr.To(true)}}}, Spec: core.PodSpec{NodeName: "node-1", Containers: []core.Container{{Name: "worker", Image: "worker:v1"}}}}
 	node := &core.Node{ObjectMeta: meta.ObjectMeta{Name: "node-1"}}
-	cfg := &Config{Store: st, Client: kubefake.NewSimpleClientset(ds, pod, node), NodeName: "node-1", WorkerNamespace: "operator", WorkerID: "pod-uid", VendorScope: "nvidia", Authorizer: metadataTestAuth{}}
+	client := kubefake.NewSimpleClientset(ds, pod, node)
+	cfg := &Config{Store: st, Client: client, NodeName: "node-1", WorkerNamespace: "operator", WorkerID: "pod-uid", VendorScope: "nvidia", Authorizer: metadataTestAuth{}}
 	body, err := json.Marshal(map[string]any{"podNamespace": "tenant", "podName": "engine", "podUID": "engine-uid", "artifactName": "model", "artifactUID": "artifact", "manifestDigest": digest, "sourcePodUID": "pod-uid", "required": []string{"config.json", "manifest.json"}})
 	require.NoError(t, err)
 	request := httptest.NewRequest(http.MethodPost, "/v1/metadata", bytes.NewReader(body))
@@ -139,6 +209,13 @@ func TestMetadataHandlerVerifiesSourceAndExportsHeaders(t *testing.T) {
 	response := httptest.NewRecorder()
 	cfg.metadataHandler().ServeHTTP(response, request)
 	require.Equal(t, http.StatusOK, response.Code, response.Body.String())
+	daemonReads := 0
+	for _, action := range client.Actions() {
+		if action.GetVerb() == "get" && action.GetResource().Resource == "daemonsets" {
+			daemonReads++
+		}
+	}
+	assert.Equal(t, 1, daemonReads, "one source identity check reuses its validated DaemonSet")
 	assert.Equal(t, "pod-uid", response.Header().Get("X-GPUStack-Source-Pod-UID"))
 	archive := tar.NewReader(response.Body)
 	for {

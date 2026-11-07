@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	apps "k8s.io/api/apps/v1"
 	core "k8s.io/api/core/v1"
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
 
@@ -81,10 +82,7 @@ func cleanupMetadataRequests(st *store.Store, workerID string, vendorScope ...st
 	}
 	dir := filepath.Join(st.Root(), "model-transfer", "metadata-temp")
 	entries, err := os.ReadDir(dir)
-	if os.IsNotExist(err) {
-		return nil
-	}
-	if err != nil {
+	if err != nil && !os.IsNotExist(err) {
 		return err
 	}
 	for _, entry := range entries {
@@ -99,44 +97,37 @@ func cleanupMetadataRequests(st *store.Store, workerID string, vendorScope ...st
 			}
 		}
 	}
-	// A crashed metadata view build leaves its staging directory behind;
-	// removing it at recovery keeps the view root from growing without
-	// bound. Only staging entries are touched.
-	viewsDir := filepath.Join(st.Root(), "model-transfer", "views")
-	viewEntries, err := os.ReadDir(viewsDir)
-	if os.IsNotExist(err) {
-		return nil
-	}
-	if err != nil {
-		return err
-	}
-	for _, entry := range viewEntries {
-		if !strings.HasPrefix(entry.Name(), ".staging-") {
-			continue
-		}
-		if err := os.RemoveAll(filepath.Join(viewsDir, entry.Name())); err != nil {
-			return err
-		}
-	}
-	return nil
+	// A crashed metadata view build leaves its staging directory and its
+	// ownership lock behind; recovery reclaims exactly the staging whose
+	// lock can be taken: a builder holds that lock, without release, for
+	// the whole life of its staging, so an uncontended take is proof the
+	// staging is inactive. A lock another process still held proves its
+	// tree active, and staging without a lock predates the protocol and is
+	// preserved. A missing metadata-temp never skips this sweep.
+	return metadata.ReclaimAbandonedStaging(filepath.Join(st.Root(), "model-transfer", "views"))
 }
 
-// sourcePod verifies the live Pod and its controller before using the
+// localSourcePod verifies the live Pod and its controller before using the
 // downward-API identity as the source of a metadata response.
 func (c *Config) localSourcePod(ctx context.Context) (*core.Pod, error) {
+	pod, _, err := c.localSourcePodAndDaemonSet(ctx)
+	return pod, err
+}
+
+func (c *Config) localSourcePodAndDaemonSet(ctx context.Context) (*core.Pod, *apps.DaemonSet, error) {
 	if c.Client == nil || c.WorkerNamespace == "" || c.WorkerID == "" || c.NodeName == "" || c.VendorScope == "" {
-		return nil, errSourceIneligible
+		return nil, nil, errSourceIneligible
 	}
 	pods, err := c.Client.CoreV1().Pods(c.WorkerNamespace).List(ctx, meta.ListOptions{LabelSelector: SourceWorkerLabel.String()})
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	node, err := c.Client.CoreV1().Nodes().Get(ctx, c.NodeName, meta.GetOptions{})
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if modelstore.NodeSourceManufacturer(node) != c.VendorScope {
-		return nil, errSourceIneligible
+		return nil, nil, errSourceIneligible
 	}
 	for i := range pods.Items {
 		pod := &pods.Items[i]
@@ -151,33 +142,25 @@ func (c *Config) localSourcePod(ctx context.Context) (*core.Pod, error) {
 		}
 		ds, err := c.Client.AppsV1().DaemonSets(c.WorkerNamespace).Get(ctx, owner.Name, meta.GetOptions{})
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		if ds.UID != owner.UID || ds.DeletionTimestamp != nil ||
 			ds.Labels["app.kubernetes.io/component"] != SourceWorkerComponent ||
 			ds.Labels["gpustack.ai/manufacturer"] != c.VendorScope {
 			continue
 		}
-		return pod, nil
+		return pod, ds, nil
 	}
-	return nil, errSourceIneligible
+	return nil, nil, errSourceIneligible
 }
 
 func (c *Config) sourcePod(ctx context.Context) error {
-	pod, err := c.localSourcePod(ctx)
+	pod, ds, err := c.localSourcePodAndDaemonSet(ctx)
 	if err != nil {
 		return err
 	}
 	if pod.Annotations["model-transfer.gpustack.ai/drain-for"] != "" {
 		return errSourceIneligible
-	}
-	owner := meta.GetControllerOf(pod)
-	if owner == nil {
-		return errSourceIneligible
-	}
-	ds, err := c.Client.AppsV1().DaemonSets(c.WorkerNamespace).Get(ctx, owner.Name, meta.GetOptions{})
-	if err != nil {
-		return err
 	}
 	var desiredImage string
 	for _, container := range ds.Spec.Template.Spec.Containers {
@@ -281,7 +264,7 @@ func (c *Config) metadataHandler() http.Handler {
 			return
 		}
 		ref := metadataPrefix(c.WorkerID, c.VendorScope) + hex.EncodeToString(id[:])
-		claimed, err := c.Store.Claim(store.Ref{VolumeID: ref, Hex: hexDigest, PodUID: c.WorkerID})
+		claimed, err := c.Store.Claim(r.Context(), store.Ref{VolumeID: ref, Hex: hexDigest, PodUID: c.WorkerID})
 		if err != nil || !claimed {
 			http.Error(w, "source unavailable", http.StatusServiceUnavailable)
 			return

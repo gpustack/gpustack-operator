@@ -3,6 +3,7 @@ package store
 import (
 	"bufio"
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -24,11 +25,23 @@ func TestCacheClaimProcess(t *testing.T) {
 	var changed bool
 	switch mode {
 	case "claim":
-		changed, err = s.Claim(Ref{VolumeID: "child", Hex: testHex})
+		changed, err = s.Claim(t.Context(), Ref{VolumeID: "child", Hex: testHex})
 	case "rebuild":
-		_, err = s.Rebuild(nil, "9:9")
+		_, err = s.Rebuild(t.Context(), nil, "9:9")
+	case "claim-deadline":
+		ctx, cancel := context.WithTimeout(context.Background(), 400*time.Millisecond)
+		defer cancel()
+		_, err = s.Claim(ctx, Ref{VolumeID: "child", Hex: testHex})
+		if errors.Is(err, context.DeadlineExceeded) {
+			fmt.Println("deadline")
+			return
+		}
+	case "claim-wait":
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		changed, err = s.Claim(ctx, Ref{VolumeID: "child", Hex: testHex})
 	default:
-		changed, err = s.RemoveUnreferenced(testHex)
+		changed, err = s.RemoveUnreferenced(t.Context(), testHex)
 	}
 	require.NoError(t, err)
 	fmt.Println(changed)
@@ -39,7 +52,7 @@ func TestCacheClaimCollectionAcrossProcesses(t *testing.T) {
 		t.Run(mode, func(t *testing.T) {
 			s := openTestStore(t)
 			publishTestTree(t, s, testHex)
-			unlock, err := s.lockClaims()
+			unlock, err := s.lockClaims(context.Background())
 			require.NoError(t, err)
 			t.Cleanup(unlock)
 			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -93,4 +106,67 @@ func TestCacheClaimCollectionAcrossProcesses(t *testing.T) {
 			assert.False(t, found)
 		})
 	}
+}
+
+// startClaimChild runs one TestCacheClaimProcess child against this store's root and answers a
+// line reader of its stdout.
+func startClaimChild(t *testing.T, s *Store, mode string, budget time.Duration) (*exec.Cmd, *bufio.Scanner, context.CancelFunc) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), budget)
+	cmd := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestCacheClaimProcess$")
+	cmd.Env = append(os.Environ(), "GPUSTACK_TEST_CACHE_CLAIM_MODE="+mode, "GPUSTACK_TEST_CACHE_CLAIM_ROOT="+s.Root())
+	stdout, err := cmd.StdoutPipe()
+	require.NoError(t, err)
+	cmd.Stderr = os.Stderr
+	require.NoError(t, cmd.Start())
+	t.Cleanup(func() { _ = cmd.Process.Kill(); _ = cmd.Wait() })
+
+	return cmd, bufio.NewScanner(stdout), cancel
+}
+
+func TestCacheClaimWaitHonorsDeadlineAcrossProcesses(t *testing.T) {
+	s := openTestStore(t)
+	publishTestTree(t, s, testHex)
+	unlock, err := s.lockClaims(context.Background())
+	require.NoError(t, err)
+	t.Cleanup(unlock)
+
+	cmd, scanner, cancel := startClaimChild(t, s, "claim-deadline", 15*time.Second)
+	defer cancel()
+	require.True(t, scanner.Scan())
+	require.Equal(t, "ready", scanner.Text())
+
+	start := time.Now()
+	require.True(t, scanner.Scan(), "the child stopped before reporting its deadline")
+	assert.Equal(t, "deadline", scanner.Text())
+	assert.Less(t, time.Since(start), 10*time.Second, "the child gave up promptly")
+	require.NoError(t, scanner.Err())
+	require.NoError(t, cmd.Wait())
+
+	_, found, err := s.ReadRef("child")
+	require.NoError(t, err)
+	assert.False(t, found, "a claim that gave up records nothing")
+}
+
+func TestCacheClaimWaitSucceedsAfterHolderReleases(t *testing.T) {
+	s := openTestStore(t)
+	publishTestTree(t, s, testHex)
+	unlock, err := s.lockClaims(context.Background())
+	require.NoError(t, err)
+
+	cmd, scanner, cancel := startClaimChild(t, s, "claim-wait", 20*time.Second)
+	defer cancel()
+	require.True(t, scanner.Scan())
+	require.Equal(t, "ready", scanner.Text())
+
+	time.Sleep(200 * time.Millisecond)
+	unlock()
+	require.True(t, scanner.Scan(), "the child never claimed after the holder released")
+	assert.Equal(t, "true", scanner.Text())
+	require.NoError(t, scanner.Err())
+	require.NoError(t, cmd.Wait())
+
+	_, found, err := s.ReadRef("child")
+	require.NoError(t, err)
+	assert.True(t, found, "a claim that succeeded records its reference")
 }

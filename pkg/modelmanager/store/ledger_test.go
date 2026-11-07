@@ -92,7 +92,7 @@ func TestClaimAndRemoveUnreferenced(t *testing.T) {
 				publishTestTree(t, s, testHex)
 			}
 			if c.claim {
-				claimed, err := s.Claim(r)
+				claimed, err := s.Claim(t.Context(), r)
 				require.NoError(t, err)
 				assert.Equal(t, c.wantClaimed, claimed)
 				_, found, err := s.ReadRef("csi-1")
@@ -103,7 +103,7 @@ func TestClaimAndRemoveUnreferenced(t *testing.T) {
 				require.NoError(t, os.WriteFile(filepath.Join(s.Root(), ledgerDir, refsDir, "csi-9.json"), []byte("{"), workingFileMode))
 			}
 
-			removed, err := s.RemoveUnreferenced(testHex)
+			removed, err := s.RemoveUnreferenced(t.Context(), testHex)
 			if c.wantErr {
 				require.Error(t, err)
 			} else {
@@ -250,7 +250,7 @@ func TestRebuild(t *testing.T) {
 		{Device: testDevice, Root: "/var/lib/gpustack/models/partial/" + testHex + "/1/tree", MountPoint: testTarget("uid-6", "weights")},
 	}
 
-	got, err := s.Rebuild(mounts, testDevice)
+	got, err := s.Rebuild(t.Context(), mounts, testDevice)
 	require.NoError(t, err)
 	assert.Equal(t, []Ref{modelTransferRef, kept}, got.Kept)
 	corrected.Hex = otherHex
@@ -319,7 +319,7 @@ func TestRebuildKeepsMetadataViewMounts(t *testing.T) {
 			MountPoint: testTarget("uid-9", "weights"),
 		},
 	}
-	got, err := s.Rebuild(mounts, testDevice)
+	got, err := s.Rebuild(t.Context(), mounts, testDevice)
 	require.NoError(t, err)
 
 	assert.Contains(t, got.Kept, kept, "a matching view ref is kept")
@@ -348,7 +348,7 @@ func TestRebuildRetainsScopedModelTransferReferences(t *testing.T) {
 		PodNamespace: "team-a", PodName: "source-worker-a",
 	}
 	require.NoError(t, s.WriteRef(scoped))
-	kept, err := s.Rebuild(nil, "9:9")
+	kept, err := s.Rebuild(t.Context(), nil, "9:9")
 	require.NoError(t, err)
 	found := false
 	for _, ref := range kept.Kept {
@@ -376,7 +376,7 @@ func TestRebuildRefusesUnrecoverableMountedView(t *testing.T) {
 				require.NoError(t, os.MkdirAll(viewDir, 0o755))
 				require.NoError(t, os.WriteFile(filepath.Join(viewDir, "view.json"), []byte(tc.record), 0o600))
 			}
-			_, err := s.Rebuild([]Mount{{
+			_, err := s.Rebuild(t.Context(), []Mount{{
 				Device: testDevice, Root: "/model-transfer/views/" + viewID,
 				MountPoint: testTarget("uid-9", "weights"),
 			}}, testDevice)

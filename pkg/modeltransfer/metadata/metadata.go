@@ -197,11 +197,12 @@ func Build(
 	if err := os.MkdirAll(filepath.Dir(viewDir), 0o755); err != nil {
 		return nil, err
 	}
-	staging, err := os.MkdirTemp(filepath.Dir(viewDir), filepath.Base(viewDir)+".staging-*")
+	stage, err := newStaging(filepath.Dir(viewDir), filepath.Base(viewDir)+stagingPrefix)
 	if err != nil {
 		return nil, err
 	}
-	defer func() { _ = os.RemoveAll(staging) }()
+	defer stage.Release()
+	staging := stage.Dir()
 
 	var files []ViewFile
 	// Whole files first: the required set plus known optional files present.

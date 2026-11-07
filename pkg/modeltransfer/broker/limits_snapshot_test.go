@@ -11,7 +11,7 @@ import (
 )
 
 // The authority grant closures a recovery registers read the node's limits
-// while an admission holds the broker mutex: AdmitSessionContext locks the
+// while an admission holds the broker mutex: AdmitSession locks the
 // mutex and the authority's ReserveSessionSlot resolves the grant on the
 // same goroutine. A snapshot that re-enters the mutex deadlocks the
 // admission it serves, so these tests pin the lock-free read and the exact

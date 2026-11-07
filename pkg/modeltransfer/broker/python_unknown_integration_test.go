@@ -66,7 +66,7 @@ func TestPythonUnknownTransferHoldsAcrossRestarts(t *testing.T) {
 		ReservationID: "unknown-reservation", Registrations: item.Registrations, ArtifactUID: item.ArtifactUID,
 		SourceGeneration: item.SourceGeneration, ManifestSHA256: item.ManifestSHA256, ManifestJSON: item.ManifestJSON, TreePath: item.TreePath, Backend: "nixl",
 	}
-	assignment, perr := b.AdmitIntentFill(intent)
+	assignment, perr := b.AdmitIntentFill(t.Context(), intent)
 	require.Nil(t, perr)
 	authority := b.reservationAuthorities[types.UID(intent.BindingUID)]
 	ledgerID := b.ledger.identity

@@ -128,7 +128,7 @@ func ReconcileIntents(ctx context.Context, b *Broker, src IntentSource) error {
 		// AdmitIntentFill is the crash-idempotent admission: the record
 		// and its assignment are one durable transaction, and the same
 		// revision always answers the same admission.
-		if _, perr := b.AdmitIntentFillContext(ctx, intent); perr != nil {
+		if _, perr := b.AdmitIntentFill(ctx, intent); perr != nil {
 			// Refused admission (exhausted budget, missing grant, unknown
 			// artifact) is a per-intent outcome, not a loop failure.
 			continue

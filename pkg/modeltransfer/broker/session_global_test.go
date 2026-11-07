@@ -20,12 +20,12 @@ func TestBindingSessionAndDrainRecoverLostResponses(t *testing.T) {
 		IntentUID: "prefetch-uid", IntentGeneration: 1, BindingUID: "binding-uid-1",
 		ReservationID: "session-reservation", Registrations: 1, ArtifactUID: "artifact-uid-1", SourceGeneration: 1,
 	}
-	assignment, err := b.AdmitIntentFill(intent)
+	assignment, err := b.AdmitIntentFill(t.Context(), intent)
 	require.Nil(t, err)
 	lease, err := b.RegisterWorker(assignment.Generation, intent.WorkerID, assignment.WorkerSecret, "instance-a")
 	require.Nil(t, err)
 	require.Nil(t, b.NativeStart(assignment.Generation, intent.WorkerID, lease.ID, assignment.WorkerSecret, "instance-a"))
-	require.Nil(t, b.FillVerified(assignment.Generation, intent.WorkerID, lease.ID, assignment.WorkerSecret, 1,
+	require.Nil(t, b.FillVerified(t.Context(), assignment.Generation, intent.WorkerID, lease.ID, assignment.WorkerSecret, 1,
 		[]RegistrationDescriptor{{Name: "file", Addr: 1024, Length: 12, MemoryType: "HOST", Backend: "nixl", WorkerUID: intent.WorkerID}}, "instance-a"))
 	entries := b.Snapshot()
 	require.Len(t, entries, 1)
@@ -35,21 +35,21 @@ func TestBindingSessionAndDrainRecoverLostResponses(t *testing.T) {
 	require.NotNil(t, entries[0].LeaseExpiresAt)
 	assert.True(t, entries[0].LeaseExpiresAt.Time.Equal(lease.Expires))
 	owner := SessionOwner{PodUID: "pod", Namespace: intent.Namespace, ArtifactUID: intent.ArtifactUID, Digest: digest}
-	session, err := b.AdmitSessionContext(context.Background(), owner, intent.Namespace, assignment.Generation)
+	session, err := b.AdmitSession(context.Background(), owner, intent.Namespace, assignment.Generation)
 	require.Nil(t, err)
 	authority := b.reservationAuthorities[types.UID(intent.BindingUID)]
 	wrapper := &failingMaps{ConfigMapInterface: authority.maps.(coreclient.ConfigMapInterface)}
 	authority.maps = wrapper
 	wrapper.failOnUpdate.Store(true)
-	require.NotNil(t, b.ReleaseSessionContext(context.Background(), owner, session.ID))
+	require.NotNil(t, b.ReleaseSession(context.Background(), owner, session.ID))
 	assert.Equal(t, "releasing", b.sessions[session.ID].Phase)
 	wrapper.failOnUpdate.Store(false)
 	require.NoError(t, b.RetrySessionTransactions(context.Background()))
 	assert.Equal(t, "released", b.sessions[session.ID].Phase)
-	require.Nil(t, b.ReleaseSessionContext(context.Background(), owner, session.ID))
+	require.Nil(t, b.ReleaseSession(context.Background(), owner, session.ID))
 	require.Nil(t, b.Drain(assignment.Generation))
-	require.Nil(t, b.DrainAckContext(context.Background(), assignment.Generation, intent.WorkerID, lease.ID, assignment.WorkerSecret, "instance-a"))
-	require.Nil(t, b.DrainAckContext(context.Background(), assignment.Generation, intent.WorkerID, lease.ID, assignment.WorkerSecret, "instance-a"))
+	require.Nil(t, b.DrainAck(context.Background(), assignment.Generation, intent.WorkerID, lease.ID, assignment.WorkerSecret, "instance-a"))
+	require.Nil(t, b.DrainAck(context.Background(), assignment.Generation, intent.WorkerID, lease.ID, assignment.WorkerSecret, "instance-a"))
 	assert.Equal(t, StateReleased, b.records[assignment.Generation].State)
 	reserved, readErr := authority.Adopt(context.Background(), b.scope, b.ledger.identity)
 	require.NoError(t, readErr)
@@ -66,30 +66,30 @@ func TestBindingSessionOpenReplayAndTargetRelease(t *testing.T) {
 		IntentUID: "prefetch", IntentGeneration: 1, BindingUID: "binding-uid-1",
 		ReservationID: "replay-reservation", Registrations: 1, ArtifactUID: "artifact-uid-1", SourceGeneration: 1,
 	}
-	assignment, perr := b.AdmitIntentFill(intent)
+	assignment, perr := b.AdmitIntentFill(t.Context(), intent)
 	require.Nil(t, perr)
 	lease, perr := b.RegisterWorker(assignment.Generation, intent.WorkerID, assignment.WorkerSecret, "instance")
 	require.Nil(t, perr)
 	require.Nil(t, b.NativeStart(assignment.Generation, intent.WorkerID, lease.ID, assignment.WorkerSecret, "instance"))
-	require.Nil(t, b.FillVerified(assignment.Generation, intent.WorkerID, lease.ID, assignment.WorkerSecret, 1,
+	require.Nil(t, b.FillVerified(t.Context(), assignment.Generation, intent.WorkerID, lease.ID, assignment.WorkerSecret, 1,
 		[]RegistrationDescriptor{{Name: "file", Addr: 1, Length: 12, MemoryType: "HOST", Backend: "nixl", WorkerUID: intent.WorkerID}}, "instance"))
 	owner := SessionOwner{
 		PodUID: "pod", Namespace: intent.Namespace, ArtifactUID: intent.ArtifactUID, Digest: digest,
 		RequestID: strings.Repeat("a", 32), TargetInstanceID: strings.Repeat("b", 32),
 	}
-	first, perr := b.AdmitSessionContext(context.Background(), owner, intent.Namespace, assignment.Generation)
+	first, perr := b.AdmitSession(context.Background(), owner, intent.Namespace, assignment.Generation)
 	require.Nil(t, perr)
-	second, perr := b.AdmitSessionContext(context.Background(), owner, intent.Namespace, assignment.Generation)
+	second, perr := b.AdmitSession(context.Background(), owner, intent.Namespace, assignment.Generation)
 	require.Nil(t, perr)
 	assert.Equal(t, first.ID, second.ID)
 	closeOwner := owner
 	closeOwner.CloseRequestID = strings.Repeat("c", 32)
 	require.Nil(t, b.ClosePrivateSession(context.Background(), closeOwner, first.ID))
 	require.Nil(t, b.ClosePrivateSession(context.Background(), closeOwner, first.ID))
-	require.NotNil(t, b.ReleaseSessionContext(context.Background(), closeOwner, first.ID))
+	require.NotNil(t, b.ReleaseSession(context.Background(), closeOwner, first.ID))
 	closeOwner.TargetReleased = true
-	require.Nil(t, b.ReleaseSessionContext(context.Background(), closeOwner, first.ID))
-	require.Nil(t, b.ReleaseSessionContext(context.Background(), closeOwner, first.ID))
+	require.Nil(t, b.ReleaseSession(context.Background(), closeOwner, first.ID))
+	require.Nil(t, b.ReleaseSession(context.Background(), closeOwner, first.ID))
 	assert.EqualValues(t, 0, b.records[assignment.Generation].ActiveSessions)
 }
 
@@ -114,19 +114,19 @@ func TestRetrySessionTransactionsReclaimsTerminatedPodOnlyWithoutUnacknowledgedO
 				IntentUID: "prefetch-uid", IntentGeneration: 1, BindingUID: "binding-uid-1",
 				ReservationID: "terminated-pod-reservation", Registrations: 1, ArtifactUID: "artifact-uid-1", SourceGeneration: 1,
 			}
-			assignment, perr := b.AdmitIntentFill(intent)
+			assignment, perr := b.AdmitIntentFill(t.Context(), intent)
 			require.Nil(t, perr)
 			lease, perr := b.RegisterWorker(assignment.Generation, intent.WorkerID, assignment.WorkerSecret, "instance-a")
 			require.Nil(t, perr)
 			require.Nil(t, b.NativeStart(assignment.Generation, intent.WorkerID, lease.ID, assignment.WorkerSecret, "instance-a"))
-			require.Nil(t, b.FillVerified(assignment.Generation, intent.WorkerID, lease.ID, assignment.WorkerSecret, 1,
+			require.Nil(t, b.FillVerified(t.Context(), assignment.Generation, intent.WorkerID, lease.ID, assignment.WorkerSecret, 1,
 				[]RegistrationDescriptor{{Name: "file", Addr: 1, Length: 12, MemoryType: "HOST", Backend: "nixl", WorkerUID: intent.WorkerID}}, "instance-a"))
 
 			owner := SessionOwner{
 				PodUID: "target-pod-uid", Namespace: intent.Namespace, ArtifactUID: intent.ArtifactUID, Digest: digest,
 				RequestID: strings.Repeat("a", 32), TargetInstanceID: strings.Repeat("b", 32),
 			}
-			session, perr := b.AdmitSessionContext(context.Background(), owner, intent.Namespace, assignment.Generation)
+			session, perr := b.AdmitSession(context.Background(), owner, intent.Namespace, assignment.Generation)
 			require.Nil(t, perr)
 
 			opID := strings.Repeat("c", 32)
@@ -211,7 +211,7 @@ func TestRetrySessionTransactionsReclaimsTerminatedPodOnlyWithoutUnacknowledgedO
 					assert.Equal(t, tc.wantActive, b.records[assignment.Generation].ActiveSessions)
 					if tc.wantDrainable {
 						require.Nil(t, b.Drain(assignment.Generation))
-						require.Nil(t, b.DrainAckContext(context.Background(), assignment.Generation, intent.WorkerID, lease.ID, assignment.WorkerSecret, "instance-a"))
+						require.Nil(t, b.DrainAck(context.Background(), assignment.Generation, intent.WorkerID, lease.ID, assignment.WorkerSecret, "instance-a"))
 						assert.Equal(t, StateReleased, b.records[assignment.Generation].State)
 					}
 				})

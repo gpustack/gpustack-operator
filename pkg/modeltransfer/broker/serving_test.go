@@ -1,6 +1,7 @@
 package broker
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -68,7 +69,8 @@ func TestValidateDescriptorsMatchesReferencedFiles(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			rec := record
 			rec.Registrations = tc.registrations
-			perr := (&Broker{}).validateDescriptors(&rec, worker, tc.descriptors)
+			b := &Broker{}
+			perr := b.validateDescriptorPlan(context.Background(), descriptorPlanOf(&rec), worker, tc.descriptors)
 			if tc.wantValid {
 				assert.Nil(t, perr)
 			} else {
@@ -89,7 +91,8 @@ func TestValidateDescriptorsMatchesReferencedFiles(t *testing.T) {
 		rec.ManifestJSON = string(raw)
 		rec.ManifestSHA256 = hex.EncodeToString(sum[:])
 		rec.Registrations = 1
-		perr := (&Broker{}).validateDescriptors(&rec, worker, []RegistrationDescriptor{ancillary})
+		b := &Broker{}
+		perr := b.validateDescriptorPlan(context.Background(), descriptorPlanOf(&rec), worker, []RegistrationDescriptor{ancillary})
 		require.NotNil(t, perr)
 		assert.Equal(t, protocol.KindInvalidDescriptor, perr.Kind)
 	})

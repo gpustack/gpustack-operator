@@ -139,7 +139,7 @@ func (m *Manager) Start(ctx context.Context) error {
 		if err := m.Manager.WaitForReady(ctx); err != nil {
 			return fmt.Errorf("wait for manager ready: %w", err)
 		}
-		if err := m.rebuild(); err != nil {
+		if err := m.rebuild(ctx); err != nil {
 			return fmt.Errorf("rebuild references: %w", err)
 		}
 		// Every mount reads its artifact from this informer: started and synced here, before the
@@ -201,8 +201,12 @@ func (m *Manager) newReporter(
 }
 
 // rebuild reconstructs the references from the node's mounts and the ledger, and removes what an
-// interrupted removal left.
-func (m *Manager) rebuild() error {
+// interrupted removal left. A caller whose context is done stops waiting for the claim locks and
+// rewrites nothing; once the rewrite begins it runs to completion or fails on its own I/O errors.
+func (m *Manager) rebuild(ctx context.Context) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	if err := m.Store.EmptyTrash(); err != nil {
 		return err
 	}
@@ -219,7 +223,7 @@ func (m *Manager) rebuild() error {
 	if err != nil {
 		return err
 	}
-	rebuilt, err := m.Store.Rebuild(mounts, device)
+	rebuilt, err := m.Store.Rebuild(ctx, mounts, device)
 	if err != nil {
 		return err
 	}

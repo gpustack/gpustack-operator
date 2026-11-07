@@ -83,28 +83,28 @@ func TestNodeSessionLimit(t *testing.T) {
 
 	b.SetMaxSessions(1)
 	owner := testOwner("tenant-a")
-	first, perr := b.AdmitSessionContext(context.Background(), owner, "tenant-a", generation)
+	first, perr := b.AdmitSession(context.Background(), owner, "tenant-a", generation)
 	require.Nil(t, perr)
 
-	_, perr = b.AdmitSessionContext(context.Background(), testOwner("tenant-b"), "tenant-a", generation)
+	_, perr = b.AdmitSession(context.Background(), testOwner("tenant-b"), "tenant-a", generation)
 	require.NotNil(t, perr, "the node cap bounds the second admission")
 	assert.Equal(t, protocol.KindCapacityExhausted, perr.Kind)
 	assert.Contains(t, perr.Error(), "the node session limit is reached")
 
 	// A release frees the node charge; a raise admits again; the sessions
 	// already admitted under the old cap stay observable.
-	require.Nil(t, b.ReleaseSession(owner, first.ID))
-	_, perr = b.AdmitSessionContext(context.Background(), owner, "tenant-a", generation)
+	require.Nil(t, b.ReleaseSession(t.Context(), owner, first.ID))
+	_, perr = b.AdmitSession(context.Background(), owner, "tenant-a", generation)
 	require.Nil(t, perr)
 	b.SetMaxSessions(2)
-	_, perr = b.AdmitSessionContext(context.Background(), testOwner("tenant-b"), "tenant-a", generation)
+	_, perr = b.AdmitSession(context.Background(), testOwner("tenant-b"), "tenant-a", generation)
 	require.Nil(t, perr)
-	_, perr = b.AdmitSessionContext(context.Background(), testOwner("tenant-c"), "tenant-a", generation)
+	_, perr = b.AdmitSession(context.Background(), testOwner("tenant-c"), "tenant-a", generation)
 	require.NotNil(t, perr, "the raised cap bounds the next admission again")
 	assert.Equal(t, protocol.KindCapacityExhausted, perr.Kind)
 
 	b.SetMaxSessions(0)
-	_, perr = b.AdmitSessionContext(context.Background(), testOwner("tenant-d"), "tenant-a", generation)
+	_, perr = b.AdmitSession(context.Background(), testOwner("tenant-d"), "tenant-a", generation)
 	require.Nil(t, perr, "a zero cap disables the node limit")
 }
 
@@ -159,7 +159,7 @@ func TestSessionRetryAfterAndSourceWindowOverHTTP(t *testing.T) {
 	// One admitted session fills the node's cap of one: the next open is a
 	// capacity refusal that names its wait.
 	b.SetMaxSessions(1)
-	_, perr := b.AdmitSessionContext(context.Background(), owner, "tenant", generation)
+	_, perr := b.AdmitSession(context.Background(), owner, "tenant", generation)
 	require.Nil(t, perr)
 
 	body := gateSessionRequest(t, digest, strings.Repeat("d", 32), "weight")

@@ -120,14 +120,14 @@ func TestAdmissionUsesRefusalReserveHeadroom(t *testing.T) {
 		ReservationID: "headroom-reservation", Registrations: 1,
 		ArtifactUID: "artifact-uid-1", SourceGeneration: 1,
 	}
-	assignment, perr := b.AdmitIntentFill(intent)
+	assignment, perr := b.AdmitIntentFill(t.Context(), intent)
 	require.Nil(t, perr)
 	lease, perr := b.RegisterWorker(assignment.Generation, intent.WorkerID,
 		assignment.WorkerSecret, "instance")
 	require.Nil(t, perr)
 	require.Nil(t, b.NativeStart(assignment.Generation, intent.WorkerID,
 		lease.ID, assignment.WorkerSecret, "instance"))
-	require.Nil(t, b.FillVerified(assignment.Generation, intent.WorkerID,
+	require.Nil(t, b.FillVerified(t.Context(), assignment.Generation, intent.WorkerID,
 		lease.ID, assignment.WorkerSecret, 1,
 		[]RegistrationDescriptor{{
 			Name: "file", Addr: 1, Length: 12,
@@ -147,7 +147,7 @@ func TestAdmissionUsesRefusalReserveHeadroom(t *testing.T) {
 		TargetInstanceID: strings.Repeat("f", 32),
 		OpenFingerprint:  "fingerprint-fresh",
 	}
-	session, perr := b.AdmitSessionContext(context.Background(), fresh,
+	session, perr := b.AdmitSession(context.Background(), fresh,
 		"tenant-a", assignment.Generation)
 	require.Nil(t, perr)
 	require.NotEmpty(t, session.ID)

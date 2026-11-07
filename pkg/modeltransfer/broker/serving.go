@@ -256,15 +256,47 @@ func (b *Broker) RetireIntentAssignment(intentKey string) error {
 	return nil
 }
 
-// validateDescriptors checks each registration against the admitted worker
-// and the generation's manifest. Derived manifests require one complete HOST
-// registration for each file referenced by a tensor.
-func (b *Broker) validateDescriptors(rec *GenerationRecord, workerID string,
-	descriptors []RegistrationDescriptor,
+// descriptorPlan is the snapshot of a record's immutable descriptor-binding
+// facts, copied under the broker mutex so the manifest reads that validate
+// a registration plan run without it. The reporting worker travels with the
+// authenticated call, not the snapshot.
+type descriptorPlan struct {
+	manifest            manifestSource
+	digest              string
+	manifestPath        string
+	backend             string
+	registrations       int32
+	residentBudgetBytes int64
+}
+
+func descriptorPlanOf(rec *GenerationRecord) descriptorPlan {
+	return descriptorPlan{
+		manifest:            manifestSourceOf(rec),
+		digest:              rec.Digest,
+		manifestPath:        rec.ManifestPath,
+		backend:             rec.Backend,
+		registrations:       rec.Registrations,
+		residentBudgetBytes: rec.ResidentBudgetBytes,
+	}
+}
+
+// descriptorPlanMatches reports whether the record still carries the
+// snapshot's descriptor-binding facts.
+func descriptorPlanMatches(rec *GenerationRecord, plan descriptorPlan) bool {
+	return descriptorPlanOf(rec) == plan
+}
+
+// validateDescriptorPlan checks a reported registration plan against the
+// generation's manifest snapshot and the reporting worker named by the
+// authenticated call. It reads manifest bytes — derived pages or the
+// legacy verified file — without the broker mutex; the caller revalidates
+// the snapshot and the worker binding before applying the plan.
+func (b *Broker) validateDescriptorPlan(ctx context.Context, plan descriptorPlan,
+	workerID string, descriptors []RegistrationDescriptor,
 ) *protocol.Error {
 	ranges := map[string]int64{}
-	if rec.ManifestJSON != "" {
-		cm, err := b.cachedDerivedManifestLocked(rec)
+	if plan.manifest.rawJSON != "" {
+		cm, err := b.derivedManifest(ctx, plan.manifest)
 		if err != nil {
 			return protocol.New(protocol.KindInvalidDescriptor, "worker", "the generation's derived manifest is invalid")
 		}
@@ -274,11 +306,11 @@ func (b *Broker) validateDescriptors(rec *GenerationRecord, workerID string,
 			}
 			ranges[file.Path] = file.Size
 		}
-		if (rec.ResidentBudgetBytes == 0 && len(ranges) != len(descriptors)) || int32(len(ranges)) != rec.Registrations {
+		if (plan.residentBudgetBytes == 0 && len(ranges) != len(descriptors)) || int32(len(ranges)) != plan.registrations {
 			return protocol.New(protocol.KindInvalidDescriptor, "worker", "the registration count does not match the manifest")
 		}
-	} else if rec.ManifestPath != "" {
-		manifest, err := protocol.LoadManifest(rec.ManifestPath, rec.Digest)
+	} else if plan.manifestPath != "" {
+		manifest, err := protocol.LoadManifest(ctx, plan.manifestPath, plan.digest)
 		if err != nil {
 			return protocol.New(protocol.KindInvalidDescriptor, "worker",
 				"the generation's verified manifest could not be read: %v", err)
@@ -300,20 +332,20 @@ func (b *Broker) validateDescriptors(rec *GenerationRecord, workerID string,
 				"descriptor %q names unknown memory class %q",
 				descriptor.Name, descriptor.MemoryType)
 		}
-		if rec.ManifestJSON != "" {
+		if plan.manifest.rawJSON != "" {
 			extent, ok := ranges[descriptor.Name]
-			if !ok || descriptor.Addr == 0 || descriptor.Length != extent || descriptor.MemoryType != "HOST" || descriptor.Backend != rec.Backend {
+			if !ok || descriptor.Addr == 0 || descriptor.Length != extent || descriptor.MemoryType != "HOST" || descriptor.Backend != plan.backend {
 				return protocol.New(protocol.KindInvalidDescriptor, "worker", "descriptor %q does not match the registered file", descriptor.Name)
 			}
-			allocation := sourceAllocationBytes(descriptor.Length, rec.Backend)
-			if rec.ResidentBudgetBytes > 0 && allocation > rec.ResidentBudgetBytes-resident {
+			allocation := sourceAllocationBytes(descriptor.Length, plan.backend)
+			if plan.residentBudgetBytes > 0 && allocation > plan.residentBudgetBytes-resident {
 				return protocol.New(protocol.KindInvalidDescriptor, "worker", "registered bytes exceed the resident admission")
 			}
 			resident += allocation
 			delete(ranges, descriptor.Name)
 			continue
 		}
-		if rec.ManifestPath == "" {
+		if plan.manifestPath == "" {
 			continue
 		}
 		extent, ok := ranges[descriptor.Name]
@@ -341,24 +373,100 @@ type cachedManifest struct {
 	tensorsByFile map[string][]protocol.TensorDescriptor
 }
 
-func (b *Broker) cachedDerivedManifestLocked(rec *GenerationRecord) (*cachedManifest, error) {
-	return b.cachedDerivedManifestContextLocked(context.Background(), rec)
+// manifestSource is a record's immutable manifest identity, copied under
+// the broker mutex so the page-bearing parse runs without it: a live
+// record's mutable fields move under the mutex, but this identity is
+// fixed at admission and cleared only at release.
+type manifestSource struct {
+	generation       string
+	artifactUID      string
+	sourceGeneration int64
+	sha256           string
+	rawJSON          string
+	pagesPath        string
 }
 
-func (b *Broker) cachedDerivedManifestContextLocked(ctx context.Context, rec *GenerationRecord) (*cachedManifest, error) {
+func manifestSourceOf(rec *GenerationRecord) manifestSource {
+	return manifestSource{
+		generation:       rec.Generation,
+		artifactUID:      rec.ArtifactUID,
+		sourceGeneration: rec.SourceGeneration,
+		sha256:           rec.ManifestSHA256,
+		rawJSON:          rec.ManifestJSON,
+		pagesPath:        rec.ManifestPagesPath,
+	}
+}
+
+// manifestSourceMatches reports whether the record still carries the
+// snapshot's manifest identity; any difference means the source identity
+// moved while the caller held no lock.
+func manifestSourceMatches(rec *GenerationRecord, src manifestSource) bool {
+	return manifestSourceOf(rec) == src
+}
+
+// liveIntentOf copies the identity fields the live entitlement check reads,
+// all immutable while the generation serves.
+func liveIntentOf(rec *GenerationRecord) LiveIntent {
+	return LiveIntent{
+		Namespace: rec.Namespace, IntentName: rec.IntentName, IntentUID: rec.IntentUID,
+		IntentGeneration: rec.IntentGeneration, BindingName: rec.BindingName, BindingUID: rec.BindingUID,
+		ArtifactName: rec.ArtifactName, ArtifactUID: rec.ArtifactUID, SourceGeneration: rec.SourceGeneration,
+		Digest: rec.Digest, NodeName: rec.NodeName, WorkerID: rec.WorkerID,
+	}
+}
+
+// manifestCacheGet returns the cached manifest for a snapshot identity, or
+// nil. Callers must not hold the broker mutex.
+func (b *Broker) manifestCacheGet(src manifestSource) *cachedManifest {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.manifestCache == nil {
+		return nil
+	}
+	cm := b.manifestCache[src.generation]
+	if cm != nil && cm.artifactUID == src.artifactUID && cm.generation == src.sourceGeneration &&
+		cm.sha256 == src.sha256 && cm.rawJSON == src.rawJSON {
+		return cm
+	}
+	return nil
+}
+
+// manifestCachePut stores one parsed manifest under its generation token.
+// Callers must not hold the broker mutex.
+func (b *Broker) manifestCachePut(generation string, cm *cachedManifest) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.manifestCache == nil {
+		b.manifestCache = map[string]*cachedManifest{}
+	}
+	if len(b.manifestCache) >= 2 {
+		for cached := range b.manifestCache {
+			delete(b.manifestCache, cached)
+			break
+		}
+	}
+	b.manifestCache[generation] = cm
+}
+
+// derivedManifest resolves the snapshot identity's parsed derived manifest,
+// parsing and binding pages without the broker mutex: page reads block on
+// disk, and holding the mutex across them head-of-line blocks unrelated
+// control traffic. Callers must not hold the broker mutex. The snapshot
+// must be revalidated against the live record before anything the parse
+// produced is published or served.
+func (b *Broker) derivedManifest(ctx context.Context, src manifestSource) (*cachedManifest, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	if b.manifestCache != nil {
-		if cm := b.manifestCache[rec.Generation]; cm != nil &&
-			cm.artifactUID == rec.ArtifactUID &&
-			cm.generation == rec.SourceGeneration &&
-			cm.sha256 == rec.ManifestSHA256 &&
-			cm.rawJSON == rec.ManifestJSON {
-			return cm, nil
-		}
+	if cm := b.manifestCacheGet(src); cm != nil {
+		return cm, nil
 	}
-	manifest, err := parseDerivedManifestContext(ctx, rec)
+	rec := &GenerationRecord{
+		Generation: src.generation, ArtifactUID: src.artifactUID,
+		SourceGeneration: src.sourceGeneration, ManifestSHA256: src.sha256,
+		ManifestJSON: src.rawJSON, ManifestPagesPath: src.pagesPath,
+	}
+	manifest, err := b.parseDerivedManifest(ctx, rec)
 	if err != nil {
 		return nil, err
 	}
@@ -377,27 +485,21 @@ func (b *Broker) cachedDerivedManifestContextLocked(ctx context.Context, rec *Ge
 	}
 	cm := &cachedManifest{
 		manifest:      manifest,
-		artifactUID:   rec.ArtifactUID,
-		generation:    rec.SourceGeneration,
-		sha256:        rec.ManifestSHA256,
-		rawJSON:       rec.ManifestJSON,
+		artifactUID:   src.artifactUID,
+		generation:    src.sourceGeneration,
+		sha256:        src.sha256,
+		rawJSON:       src.rawJSON,
 		tensorsByName: byName,
 		tensorsByFile: byFile,
 	}
-	if b.manifestCache == nil {
-		b.manifestCache = map[string]*cachedManifest{}
-	}
-	if len(b.manifestCache) >= 2 {
-		for generation := range b.manifestCache {
-			delete(b.manifestCache, generation)
-			break
-		}
-	}
-	b.manifestCache[rec.Generation] = cm
+	b.manifestCachePut(src.generation, cm)
 	return cm, nil
 }
 
-func parseDerivedManifestContext(ctx context.Context, rec *GenerationRecord) (*protocol.Manifest, error) {
+// parseDerivedManifest parses and fully verifies one generation's derived
+// manifest, binding its pages through the broker's page reader. Callers
+// must not hold the broker mutex.
+func (b *Broker) parseDerivedManifest(ctx context.Context, rec *GenerationRecord) (*protocol.Manifest, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -432,7 +534,7 @@ func parseDerivedManifestContext(ctx context.Context, rec *GenerationRecord) (*p
 		if rec.ManifestPagesPath == "" {
 			return nil, fmt.Errorf("manifest pages are unavailable")
 		}
-		if err := manifest.BindPages(ctx, protocol.LocalPageReader(rec.ManifestPagesPath)); err != nil {
+		if err := manifest.BindPages(ctx, b.pageReaderFor(rec.ManifestPagesPath)); err != nil {
 			return nil, err
 		}
 	}
@@ -440,19 +542,36 @@ func parseDerivedManifestContext(ctx context.Context, rec *GenerationRecord) (*p
 }
 
 // ResolveManifest returns a live source's exact previously derived manifest.
+// The serving lookup and identity revalidation bracket a page-bearing parse
+// that runs without the broker mutex.
 func (b *Broker) ResolveManifest(ctx context.Context, namespace, artifactUID, digest string, generation int64) (*protocol.Manifest, error) {
 	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	b.mu.Lock()
+	var src manifestSource
+	found := false
+	for _, rec := range b.records {
+		if rec.Namespace == namespace && rec.ArtifactUID == artifactUID && rec.Digest == digest &&
+			rec.SourceGeneration == generation && b.serving(rec) {
+			src = manifestSourceOf(rec)
+			found = true
+			break
+		}
+	}
+	b.mu.Unlock()
+	if !found {
+		return nil, fmt.Errorf("no matching serving source")
+	}
+	cm, err := b.derivedManifest(ctx, src)
+	if err != nil {
 		return nil, err
 	}
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	for _, rec := range b.records {
 		if rec.Namespace == namespace && rec.ArtifactUID == artifactUID && rec.Digest == digest &&
-			rec.SourceGeneration == generation && b.serving(rec) {
-			cm, err := b.cachedDerivedManifestContextLocked(ctx, rec)
-			if err != nil {
-				return nil, err
-			}
+			rec.SourceGeneration == generation && b.serving(rec) && manifestSourceMatches(rec, src) {
 			return cm.manifest, nil
 		}
 	}

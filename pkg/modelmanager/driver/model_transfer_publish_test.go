@@ -6,16 +6,92 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/container-storage-interface/spec/lib/go/csi"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"golang.org/x/sys/unix"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
 	"gpustack.ai/gpustack/pkg/modelmanager/store"
 	"gpustack.ai/gpustack/pkg/modeltransfer/metadata"
 )
+
+// holdClaimLock takes the store's cross-process claim lock the way another process would hold it,
+// so a mount waits inside its claim until its context ends. Cleanup releases the lock.
+func holdClaimLock(t *testing.T, st *store.Store) {
+	t.Helper()
+	lock, err := os.OpenFile(filepath.Join(st.Root(), "ledger", "claims.lock"), os.O_CREATE|os.O_RDWR, 0o600)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = lock.Close() })
+	require.NoError(t, unix.Flock(int(lock.Fd()), unix.LOCK_EX|unix.LOCK_NB))
+}
+
+// TestNodePublishKeepsTheCallerCancellationTyped pins that a claim the caller gave up on leaves
+// the CSI call with the caller's own gRPC code, not an internal fault kubelet cannot tell from a
+// real failure.
+func TestNodePublishKeepsTheCallerCancellationTyped(t *testing.T) {
+	hex := strings.Repeat("a", 64)
+	attrs := func(delivery bool) map[string]string {
+		vc := map[string]string{AttrArtifact: "model", AttrArtifactUID: "uid-ma", AttrManifestDigest: "sha256:" + hex}
+		if delivery {
+			vc[attrModelTransferDelivery] = modelTransferDeliveryMetadata
+		}
+
+		return vc
+	}
+	cases := []struct {
+		name     string
+		delivery bool
+		deadline bool
+		wantCode codes.Code
+	}{
+		{
+			name:     "a deadlined complete-tree claim answers DeadlineExceeded",
+			deadline: true,
+			wantCode: codes.DeadlineExceeded,
+		},
+		{
+			name:     "a canceled complete-tree claim answers Canceled",
+			wantCode: codes.Canceled,
+		},
+		{
+			name:     "a deadlined metadata-view claim answers DeadlineExceeded",
+			delivery: true,
+			deadline: true,
+			wantCode: codes.DeadlineExceeded,
+		},
+		{
+			name:     "a canceled metadata-view claim answers Canceled",
+			delivery: true,
+			wantCode: codes.Canceled,
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			env := newModelTransferEnv(t, hex)
+			holdClaimLock(t, env.d.Store)
+			var ctx context.Context
+			var cancel context.CancelFunc
+			if c.deadline {
+				ctx, cancel = context.WithTimeout(context.Background(), 50*time.Millisecond)
+			} else {
+				ctx, cancel = context.WithCancel(context.Background())
+				timer := time.AfterFunc(50*time.Millisecond, cancel)
+				t.Cleanup(func() { timer.Stop() })
+			}
+			defer cancel()
+			_, err := env.d.NodePublishVolume(ctx, modelTransferRequest(env.target("typed"), attrs(c.delivery)))
+			require.Error(t, err)
+			assert.Equal(t, c.wantCode, status.Code(err), err)
+			_, found, err := env.d.Store.ReadRef("csi-vol-1")
+			require.NoError(t, err)
+			assert.False(t, found, "a claim that gave up records nothing")
+		})
+	}
+}
 
 // publishFullTree publishes a complete tree for hex with the metadata files
 // the model-transfer view needs.

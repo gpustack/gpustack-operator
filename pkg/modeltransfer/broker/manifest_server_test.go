@@ -124,13 +124,13 @@ func manifestPageFixture(t *testing.T, count, padding int) (*Broker, manifestPag
 		SourceGeneration: 1, BindingUID: "binding-uid-1", BindingName: "binding", ReservationID: "operation-reservation",
 		Registrations: 1, Backend: "nixl", ManifestJSON: string(raw), ManifestSHA256: hex.EncodeToString(sum[:]), ManifestPagesPath: pagesDir,
 	}
-	assignment, perr := b.AdmitIntentFill(intent)
+	assignment, perr := b.AdmitIntentFill(t.Context(), intent)
 	require.Nil(t, perr)
 	instance := strings.Repeat("a", 32)
 	lease, perr := b.RegisterWorker(assignment.Generation, "source", assignment.WorkerSecret, instance)
 	require.Nil(t, perr)
 	require.Nil(t, b.NativeStart(assignment.Generation, "source", lease.ID, assignment.WorkerSecret, instance))
-	require.Nil(t, b.FillVerified(assignment.Generation, "source", lease.ID, assignment.WorkerSecret, 1,
+	require.Nil(t, b.FillVerified(t.Context(), assignment.Generation, "source", lease.ID, assignment.WorkerSecret, 1,
 		[]RegistrationDescriptor{{Name: "weight.safetensors", Addr: 1, Length: int64(count + 2), MemoryType: "HOST", Backend: "nixl", WorkerUID: "source"}}, instance))
 
 	targetInstance := strings.Repeat("b", 32)
@@ -138,7 +138,7 @@ func manifestPageFixture(t *testing.T, count, padding int) (*Broker, manifestPag
 		Namespace: "tenant-a", PodUID: "pod-uid-tenant-a", ArtifactUID: "artifact", Digest: digest,
 		RequestID: strings.Repeat("c", 32), TargetInstanceID: targetInstance,
 	}
-	session, perr := b.AdmitSessionContext(context.Background(), owner, "tenant-a", assignment.Generation)
+	session, perr := b.AdmitSession(context.Background(), owner, "tenant-a", assignment.Generation)
 	require.Nil(t, perr)
 
 	pod := authorization.PodIdentity{Namespace: "tenant-a", Name: "engine-1", UID: "pod-uid-tenant-a", IP: "127.0.0.1"}

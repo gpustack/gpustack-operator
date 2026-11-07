@@ -203,9 +203,9 @@ func (d *Driver) NodePublishVolume(ctx context.Context, req *csi.NodePublishVolu
 	// a tree is claimed while it is still published, and a mount whose reference cannot be written
 	// fails rather than serve a tree the collector does not know is mounted.
 	result := metrics.MountHit
-	published, err := d.Store.Claim(ref)
+	published, err := d.Store.Claim(ctx, ref)
 	if err != nil {
-		return nil, status.Errorf(codes.Internal, "record the reference: %v", err)
+		return nil, recordReferenceError(err)
 	}
 	if !published {
 		p := d.Materializer.Ensure(ctx, Request{Hex: hex, Artifact: ma, Token: req.GetSecrets()[secretTokenKey]})
@@ -214,8 +214,8 @@ func (d *Driver) NodePublishVolume(ctx context.Context, req *csi.NodePublishVolu
 			return nil, status.Error(p.Code, p.Message)
 		}
 		result = metrics.MountMaterialized
-		if published, err = d.Store.Claim(ref); err != nil {
-			return nil, status.Errorf(codes.Internal, "record the reference: %v", err)
+		if published, err = d.Store.Claim(ctx, ref); err != nil {
+			return nil, recordReferenceError(err)
 		}
 		if !published {
 			metrics.Mounts.WithLabelValues(metrics.MountPending).Inc()
@@ -237,6 +237,20 @@ func (d *Driver) NodePublishVolume(ctx context.Context, req *csi.NodePublishVolu
 	}
 
 	return &csi.NodePublishVolumeResponse{}, nil
+}
+
+// recordReferenceError maps a failed reference record: the call's own cancellation keeps its gRPC
+// code, so kubelet sees the call it gave up on rather than an internal fault, and anything else is
+// an internal fault.
+func recordReferenceError(err error) error {
+	switch {
+	case errors.Is(err, context.Canceled):
+		return status.Error(codes.Canceled, "record the reference: the call was canceled")
+	case errors.Is(err, context.DeadlineExceeded):
+		return status.Error(codes.DeadlineExceeded, "record the reference: the call ran out of time")
+	default:
+		return status.Errorf(codes.Internal, "record the reference: %v", err)
+	}
 }
 
 // dropRef removes the reference of a mount that did not happen, so the tree is not kept for it.

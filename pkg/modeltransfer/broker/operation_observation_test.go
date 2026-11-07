@@ -22,7 +22,7 @@ func observationFixture(t *testing.T) (*Broker, TransferRequest, http.Handler) {
 	t.Helper()
 	b, generation, owner, _ := gateFixture(t)
 	qualifyTestSource(t, b)
-	session, perr := b.AdmitSessionContext(context.Background(), owner, "tenant", generation)
+	session, perr := b.AdmitSession(context.Background(), owner, "tenant", generation)
 	require.Nil(t, perr)
 	request := gateTransferRequest(session.ID, generation, strings.Repeat("a", 32))
 	return b, request, NewSessionHandler(b, gateAuthorizer{digest: owner.Digest})

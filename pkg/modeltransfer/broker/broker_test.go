@@ -166,12 +166,12 @@ func fill(namespace, digest string, total int64) FillRequest {
 // generation with a live lease.
 func admitServe(t *testing.T, b *Broker, digest string, generation, secret *string) {
 	t.Helper()
-	admission, err := b.AdmitFill(fill("tenant-a", digest, 12))
+	admission, err := b.AdmitFill(t.Context(), fill("tenant-a", digest, 12))
 	require.Nil(t, err)
 	*generation, *secret = admission.Generation, admission.WorkerSecret
 	lease, err := b.RegisterWorker(*generation, "source-worker-a", *secret)
 	require.Nil(t, err)
-	require.Nil(t, b.FillVerified(*generation, "source-worker-a", lease.ID, *secret, 2,
+	require.Nil(t, b.FillVerified(t.Context(), *generation, "source-worker-a", lease.ID, *secret, 2,
 		servedDescriptors("source-worker-a")))
 }
 
@@ -196,12 +196,12 @@ func TestAdmitFillRequiresVerifiedPublishedSource(t *testing.T) {
 	_, digest := fixtureDigest(t)
 
 	// A digest this node never published is refused before any reservation.
-	_, err := b.AdmitFill(fill("tenant-a", "sha256:"+strings.Repeat("f", 64), 12))
+	_, err := b.AdmitFill(t.Context(), fill("tenant-a", "sha256:"+strings.Repeat("f", 64), 12))
 	require.NotNil(t, err)
 	assert.Equal(t, protocol.KindSourceUnavailable, err.Kind)
 
 	// An unresolved byte total is a zero-cost reservation in disguise.
-	stored, err := b.AdmitFill(fill("tenant-a", digest, 0))
+	stored, err := b.AdmitFill(t.Context(), fill("tenant-a", digest, 0))
 	assert.Nil(t, stored)
 	require.NotNil(t, err)
 	assert.Equal(t, protocol.KindInvalidDescriptor, err.Kind)
@@ -213,13 +213,13 @@ func TestAdmitFillRequiresExplicitGrant(t *testing.T) {
 	// No grant at all: no permission, whatever the filesystem quota is.
 	req := fill("tenant-a", digest, 12)
 	req.Grant = Grant{}
-	_, err := b.AdmitFill(req)
+	_, err := b.AdmitFill(t.Context(), req)
 	require.NotNil(t, err)
 	assert.Equal(t, protocol.KindDeniedContent, err.Kind)
 
 	// A zero grant grants nothing.
 	req.Grant = grant("tenant-a", 0)
-	_, err = b.AdmitFill(req)
+	_, err = b.AdmitFill(t.Context(), req)
 	require.NotNil(t, err)
 	assert.Equal(t, protocol.KindCapacityExhausted, err.Kind)
 }
@@ -241,7 +241,7 @@ func TestAdmitFillReservesBothBudgetsAtomically(t *testing.T) {
 			req := fill("tenant-a", digest, 4000)
 			req.Grant.Bytes = 5000 // one reserve of 4000 + overhead fits, two do not
 			req.WorkerID = fmt.Sprintf("worker-%d", worker)
-			admission, err := b.AdmitFill(req)
+			admission, err := b.AdmitFill(t.Context(), req)
 			if err != nil {
 				lost <- err
 				return
@@ -268,16 +268,16 @@ func TestAdmitFillChargesActualBuffersWithoutSharedBacking(t *testing.T) {
 	limits.PhysicalBytes = 20
 	b, _, digest := newBroker(t, limits)
 
-	first, err := b.AdmitFill(fill("tenant-a", digest, 12))
+	first, err := b.AdmitFill(t.Context(), fill("tenant-a", digest, 12))
 	require.Nil(t, err)
-	second, err := b.AdmitFill(fill("tenant-b", digest, 12))
+	second, err := b.AdmitFill(t.Context(), fill("tenant-b", digest, 12))
 	require.NotNil(t, err)
 	assert.Equal(t, protocol.KindCapacityExhausted, err.Kind)
 	assert.NotEqual(t, first.Generation, "")
 	assert.Nil(t, second)
 
 	// A distinct digest is refused the same way.
-	_, err = b.AdmitFill(fill("tenant-c", "sha256:"+strings.Repeat("c", 64), 12))
+	_, err = b.AdmitFill(t.Context(), fill("tenant-c", "sha256:"+strings.Repeat("c", 64), 12))
 	require.NotNil(t, err)
 	assert.Equal(t, protocol.KindCapacityExhausted, err.Kind)
 }
@@ -293,21 +293,21 @@ func TestAdmitFillRefusesAnOverflowingReservation(t *testing.T) {
 	publishTree(t, st, hexDigest, "d", int64(1)<<62+1)
 
 	huge := int64(1)<<62 + 1
-	_, err := b.AdmitFill(fill("tenant-a", "sha256:"+hexDigest, huge))
+	_, err := b.AdmitFill(t.Context(), fill("tenant-a", "sha256:"+hexDigest, huge))
 	require.NotNil(t, err)
 	assert.Equal(t, protocol.KindCapacityExhausted, err.Kind)
 }
 
 func TestFillVerifiedRequiresRealRegistrationsAndHonestResidentBytes(t *testing.T) {
 	b, _, digest := newBroker(t, defaultLimits())
-	admission, err := b.AdmitFill(fill("tenant-a", digest, 12))
+	admission, err := b.AdmitFill(t.Context(), fill("tenant-a", digest, 12))
 	require.Nil(t, err)
 	lease, regErr := b.RegisterWorker(admission.Generation, "source-worker-a",
 		admission.WorkerSecret)
 	require.Nil(t, regErr)
 
 	// Zero registrations never become Serving.
-	refused := b.FillVerified(admission.Generation, "source-worker-a", lease.ID,
+	refused := b.FillVerified(t.Context(), admission.Generation, "source-worker-a", lease.ID,
 		admission.WorkerSecret, 0, nil)
 	require.NotNil(t, refused)
 
@@ -316,7 +316,7 @@ func TestFillVerifiedRequiresRealRegistrationsAndHonestResidentBytes(t *testing.
 		Name: "model.norm.weight", Addr: 0x1000, Length: 12,
 		MemoryType: "HOST", Backend: "hixl", WorkerUID: "someone-else",
 	}}
-	mismatched := b.FillVerified(admission.Generation, "source-worker-a", lease.ID,
+	mismatched := b.FillVerified(t.Context(), admission.Generation, "source-worker-a", lease.ID,
 		admission.WorkerSecret, 1, foreign)
 	require.NotNil(t, mismatched)
 
@@ -326,7 +326,7 @@ func TestFillVerifiedRequiresRealRegistrationsAndHonestResidentBytes(t *testing.
 		Name: "model.norm.weight", Addr: 0x1000, Length: 12,
 		MemoryType: "HOST", Backend: "hixl", WorkerUID: "source-worker-a",
 	}}
-	require.Nil(t, b.FillVerified(admission.Generation, "source-worker-a", lease.ID,
+	require.Nil(t, b.FillVerified(t.Context(), admission.Generation, "source-worker-a", lease.ID,
 		admission.WorkerSecret, 1, descriptors))
 	b.mu.Lock()
 	record := b.records[admission.Generation]
@@ -352,7 +352,7 @@ func TestLedgerRoundTripsScopedTokensAndKeepsLegacyRecords(t *testing.T) {
 		BindingUID: "binding-uid-1", ReservationID: "res-concurrent",
 		Registrations: 1,
 	}
-	admission, perr := b.AdmitIntentFill(intent)
+	admission, perr := b.AdmitIntentFill(t.Context(), intent)
 	require.Nil(t, perr)
 	// The token is scoped and opaque: the test knows its shape, nothing else.
 	require.Regexp(t, `^g-testvendor-[0-9a-f]{32}-[1-9][0-9]*$`, admission.Generation)
@@ -377,7 +377,7 @@ func TestLedgerRoundTripsScopedTokensAndKeepsLegacyRecords(t *testing.T) {
 
 	// Both records survive the round trip, and the same intent revision
 	// answers the same admission across the restart.
-	_, perr = reopened.AdmitIntentFill(intent)
+	_, perr = reopened.AdmitIntentFill(t.Context(), intent)
 	require.Nil(t, perr)
 	assignment, ok := reopened.AssignmentForIntent("uid-1/rev-1")
 	require.True(t, ok)
@@ -403,7 +403,7 @@ func TestAdmitIntentFillFollowsAnOnlineGrantEdit(t *testing.T) {
 		BindingUID: "binding-uid-1", ReservationID: "res-grant-edit",
 		Registrations: 1,
 	}
-	admission, perr := b.AdmitIntentFill(intent)
+	admission, perr := b.AdmitIntentFill(t.Context(), intent)
 	require.Nil(t, perr)
 
 	// The Binding's session cap drops online from 4 to 2: same revision,
@@ -411,7 +411,7 @@ func TestAdmitIntentFillFollowsAnOnlineGrantEdit(t *testing.T) {
 	lowered := intent
 	lowered.Grant = grant("tenant-a", 10000)
 	lowered.Grant.Sessions = 2
-	replay, perr := b.AdmitIntentFill(lowered)
+	replay, perr := b.AdmitIntentFill(t.Context(), lowered)
 	require.Nil(t, perr)
 	assert.Equal(t, admission.Generation, replay.Generation)
 	assert.Equal(t, admission.WorkerSecret, replay.WorkerSecret)
@@ -424,7 +424,7 @@ func TestAdmitIntentFillFollowsAnOnlineGrantEdit(t *testing.T) {
 	shrunk := intent
 	shrunk.Grant = grant("tenant-a", 12)
 	shrunk.Grant.Sessions = 0
-	_, perr = b.AdmitIntentFill(shrunk)
+	_, perr = b.AdmitIntentFill(t.Context(), shrunk)
 	require.Nil(t, perr)
 	b.mu.Lock()
 	snapshot := b.records[admission.Generation].Grant
@@ -448,7 +448,7 @@ func TestOpenRefusesACorruptCounter(t *testing.T) {
 	b, _, _ := newBroker(t, defaultLimits())
 	hexDigest := strings.Repeat("e", 64)
 	publishTree(t, b.store, hexDigest, "cccc", 12)
-	_, perr := b.AdmitFill(fill("tenant-a", "sha256:"+hexDigest, 12))
+	_, perr := b.AdmitFill(t.Context(), fill("tenant-a", "sha256:"+hexDigest, 12))
 	require.Nil(t, perr)
 	require.NoError(t, b.Close())
 	require.NoError(t, os.WriteFile(filepath.Join(b.root, "next-generation"),
@@ -479,7 +479,7 @@ func TestOpenRefusesACorruptCounter(t *testing.T) {
 
 func TestOpenRefusesAMissingCounterWithRecords(t *testing.T) {
 	b, _, digest := newBroker(t, defaultLimits())
-	_, perr := b.AdmitFill(fill("tenant-a", digest, 12))
+	_, perr := b.AdmitFill(t.Context(), fill("tenant-a", digest, 12))
 	require.Nil(t, perr)
 	require.NoError(t, b.Close())
 	require.NoError(t, os.Remove(filepath.Join(b.root, "next-generation")))
@@ -503,7 +503,7 @@ func TestOpenRefusesAMismatchedLedgerIdentity(t *testing.T) {
 
 func TestRestartRestoresSessionOwnersAndUnknownCounts(t *testing.T) {
 	b, _, digest := newBroker(t, defaultLimits())
-	admission, perr := b.AdmitFill(fill("tenant-a", digest, 12))
+	admission, perr := b.AdmitFill(t.Context(), fill("tenant-a", digest, 12))
 	require.Nil(t, perr)
 	lease, regErr := b.RegisterWorker(admission.Generation, "source-worker-a",
 		admission.WorkerSecret)
@@ -512,10 +512,10 @@ func TestRestartRestoresSessionOwnersAndUnknownCounts(t *testing.T) {
 		Name: "model.norm.weight", Addr: 0x1000, Length: 12,
 		MemoryType: "HOST", Backend: "hixl", WorkerUID: "source-worker-a",
 	}}
-	require.Nil(t, b.FillVerified(admission.Generation, "source-worker-a",
+	require.Nil(t, b.FillVerified(t.Context(), admission.Generation, "source-worker-a",
 		lease.ID, admission.WorkerSecret, 1, descriptors))
 	owner := testOwner("tenant-a")
-	session, serr := b.AdmitSession(owner, "tenant-a", admission.Generation)
+	session, serr := b.AdmitSession(t.Context(), owner, "tenant-a", admission.Generation)
 	require.Nil(t, serr)
 
 	// Two sessions the session file cannot explain (a legacy ledger
@@ -542,14 +542,14 @@ func TestRestartRestoresSessionOwnersAndUnknownCounts(t *testing.T) {
 	view, verr := reopened.SessionView(session.ID)
 	require.Nil(t, verr)
 	assert.Equal(t, admission.Generation, view.Generation)
-	_, perr = reopened.AdmitSession(testOwner("tenant-b"), "tenant-b", admission.Generation)
+	_, perr = reopened.AdmitSession(t.Context(), testOwner("tenant-b"), "tenant-b", admission.Generation)
 	require.NotNil(t, perr)
 	stranger := SessionOwner{
 		PodUID: "other", Namespace: "tenant-a",
 		ArtifactUID: owner.ArtifactUID,
 	}
-	require.NotNil(t, reopened.ReleaseSession(stranger, session.ID))
-	require.Nil(t, reopened.ReleaseSession(owner, session.ID))
+	require.NotNil(t, reopened.ReleaseSession(t.Context(), stranger, session.ID))
+	require.Nil(t, reopened.ReleaseSession(t.Context(), owner, session.ID))
 	reopened.mu.Lock()
 	count = reopened.records[admission.Generation].ActiveSessions
 	reopened.mu.Unlock()
@@ -568,7 +568,7 @@ func TestAdmitIntentFillSurvivesInterruption(t *testing.T) {
 		BindingUID: "binding-uid-1", ReservationID: "res-concurrent",
 		Registrations: 1,
 	}
-	first, perr := b.AdmitIntentFill(intent)
+	first, perr := b.AdmitIntentFill(t.Context(), intent)
 	require.Nil(t, perr)
 
 	// A crash after the record write is the fault boundary: the record
@@ -579,7 +579,7 @@ func TestAdmitIntentFillSurvivesInterruption(t *testing.T) {
 		func() time.Time { return testNow })
 	require.NoError(t, openErr)
 	defer reopened.Close()
-	second, perr := reopened.AdmitIntentFill(intent)
+	second, perr := reopened.AdmitIntentFill(t.Context(), intent)
 	require.Nil(t, perr)
 	assert.Equal(t, first.Generation, second.Generation)
 	assert.Equal(t, first.WorkerSecret, second.WorkerSecret)
@@ -605,7 +605,7 @@ func TestRetireIntentAssignmentHoldsAStartedFill(t *testing.T) {
 		BindingUID: "binding-uid-1", ReservationID: "res-concurrent",
 		Registrations: 1,
 	}
-	first, perr := b.AdmitIntentFill(intent)
+	first, perr := b.AdmitIntentFill(t.Context(), intent)
 	require.Nil(t, perr)
 	lease, regErr := b.RegisterWorker(first.Generation, "source-worker-a",
 		first.WorkerSecret)
@@ -713,9 +713,9 @@ func (f *fakeIntents) ListIntents(ctx context.Context) ([]Intent, error) {
 
 func TestGenerationTokensAreMonotonicAndNeverRecycled(t *testing.T) {
 	b, _, digest := newBroker(t, defaultLimits())
-	first, err := b.AdmitFill(fill("tenant-a", digest, 12))
+	first, err := b.AdmitFill(t.Context(), fill("tenant-a", digest, 12))
 	require.Nil(t, err)
-	second, err := b.AdmitFill(fill("tenant-a", digest, 12))
+	second, err := b.AdmitFill(t.Context(), fill("tenant-a", digest, 12))
 	require.Nil(t, err)
 	assert.Less(t, first.Generation, second.Generation)
 
@@ -729,14 +729,14 @@ func TestGenerationTokensAreMonotonicAndNeverRecycled(t *testing.T) {
 	require.NoError(t, b.Close())
 	reopened, openErr := Open(root, testScope, st, limits, now)
 	require.NoError(t, openErr)
-	third, fillErr := reopened.AdmitFill(fill("tenant-a", digest, 12))
+	third, fillErr := reopened.AdmitFill(t.Context(), fill("tenant-a", digest, 12))
 	require.Nil(t, fillErr)
 	assert.Less(t, second.Generation, third.Generation)
 }
 
 func TestWorkerLeasesAndForeignControlMessages(t *testing.T) {
 	b, _, digest := newBroker(t, defaultLimits())
-	admission, err := b.AdmitFill(fill("tenant-a", digest, 12))
+	admission, err := b.AdmitFill(t.Context(), fill("tenant-a", digest, 12))
 	require.Nil(t, err)
 
 	// Registration binds the admitted worker identity and its secret.
@@ -799,33 +799,33 @@ func TestSessionsAdmitAgainstServingGenerationOnly(t *testing.T) {
 	// The grant's session cap freezes at admission: two sessions at once.
 	req := fill("tenant-a", digest, 12)
 	req.Grant.Sessions = 2
-	admission, err := b.AdmitFill(req)
+	admission, err := b.AdmitFill(t.Context(), req)
 	require.Nil(t, err)
 	lease, err := b.RegisterWorker(admission.Generation, "source-worker-a",
 		admission.WorkerSecret)
 	require.Nil(t, err)
-	require.Nil(t, b.FillVerified(admission.Generation, "source-worker-a",
+	require.Nil(t, b.FillVerified(t.Context(), admission.Generation, "source-worker-a",
 		lease.ID, admission.WorkerSecret, 2, servedDescriptors("source-worker-a")))
 	generation := admission.Generation
 
-	session, err := b.AdmitSession(testOwner("tenant-a"), "tenant-a", generation)
+	session, err := b.AdmitSession(t.Context(), testOwner("tenant-a"), "tenant-a", generation)
 	require.Nil(t, err)
 	assert.NotEmpty(t, session.ID)
 
 	// Another namespace may not read this generation's sessions.
-	_, err = b.AdmitSession(testOwner("tenant-b"), "tenant-b", generation)
+	_, err = b.AdmitSession(t.Context(), testOwner("tenant-b"), "tenant-b", generation)
 	require.NotNil(t, err)
 	assert.Equal(t, protocol.KindDeniedContent, err.Kind)
 
 	// A superseded generation is stale.
-	_, err = b.AdmitSession(testOwner("tenant-a"), "tenant-a", "999")
+	_, err = b.AdmitSession(t.Context(), testOwner("tenant-a"), "tenant-a", "999")
 	require.NotNil(t, err)
 	assert.Equal(t, protocol.KindStaleGeneration, err.Kind)
 
 	// The grant's session cap is enforced and the refusal is counted.
-	_, err = b.AdmitSession(testOwner("tenant-a"), "tenant-a", generation)
+	_, err = b.AdmitSession(t.Context(), testOwner("tenant-a"), "tenant-a", generation)
 	require.Nil(t, err)
-	_, err = b.AdmitSession(testOwner("tenant-a"), "tenant-a", generation)
+	_, err = b.AdmitSession(t.Context(), testOwner("tenant-a"), "tenant-a", generation)
 	require.NotNil(t, err)
 	assert.Equal(t, protocol.KindCapacityExhausted, err.Kind)
 	snapshot := b.Snapshot()
@@ -834,8 +834,8 @@ func TestSessionsAdmitAgainstServingGenerationOnly(t *testing.T) {
 	assert.EqualValues(t, 2, snapshot[0].ActiveSessions)
 
 	// Release frees the slot.
-	require.Nil(t, b.ReleaseSession(testOwner("tenant-a"), session.ID))
-	_, err = b.AdmitSession(testOwner("tenant-a"), "tenant-a", generation)
+	require.Nil(t, b.ReleaseSession(t.Context(), testOwner("tenant-a"), session.ID))
+	_, err = b.AdmitSession(t.Context(), testOwner("tenant-a"), "tenant-a", generation)
 	require.Nil(t, err)
 }
 
@@ -847,20 +847,20 @@ func TestDrainStopsNewSessionsAndPreservesOthers(t *testing.T) {
 	// A second, independent generation stays untouched by the first's drain.
 	req := fill("tenant-a", digest, 12)
 	req.WorkerID = "source-worker-b"
-	second, err := b.AdmitFill(req)
+	second, err := b.AdmitFill(t.Context(), req)
 	require.Nil(t, err)
 	lease, err := b.RegisterWorker(second.Generation, "source-worker-b",
 		second.WorkerSecret)
 	require.Nil(t, err)
-	require.Nil(t, b.FillVerified(second.Generation, "source-worker-b", lease.ID,
+	require.Nil(t, b.FillVerified(t.Context(), second.Generation, "source-worker-b", lease.ID,
 		second.WorkerSecret, 1, servedDescriptors("source-worker-b")[:1]))
 
 	require.Nil(t, b.Drain(first))
-	_, err = b.AdmitSession(testOwner("tenant-a"), "tenant-a", first)
+	_, err = b.AdmitSession(t.Context(), testOwner("tenant-a"), "tenant-a", first)
 	require.NotNil(t, err)
 	assert.Equal(t, protocol.KindStaleGeneration, err.Kind)
 
-	_, err = b.AdmitSession(testOwner("tenant-a"), "tenant-a", second.Generation)
+	_, err = b.AdmitSession(t.Context(), testOwner("tenant-a"), "tenant-a", second.Generation)
 	require.Nil(t, err)
 }
 
@@ -884,7 +884,7 @@ func TestUnknownOutcomeQuarantinesAndRetainsBudget(t *testing.T) {
 	// physical budget is refused.
 	limits := defaultLimits()
 	_ = limits
-	_, err = b.AdmitFill(fill("tenant-a", "sha256:"+strings.Repeat("e", 64), 12))
+	_, err = b.AdmitFill(t.Context(), fill("tenant-a", "sha256:"+strings.Repeat("e", 64), 12))
 	require.NotNil(t, err)
 
 	// Quarantine is idempotent.
@@ -892,7 +892,7 @@ func TestUnknownOutcomeQuarantinesAndRetainsBudget(t *testing.T) {
 		"unknown operation outcome"))
 
 	// A quarantined generation never admits readers.
-	_, err = b.AdmitSession(testOwner("tenant-a"), "tenant-a", generation)
+	_, err = b.AdmitSession(t.Context(), testOwner("tenant-a"), "tenant-a", generation)
 	require.NotNil(t, err)
 	assert.Equal(t, protocol.KindStaleGeneration, err.Kind)
 }
@@ -911,7 +911,7 @@ func TestQuarantineCapsRefuseNewFills(t *testing.T) {
 
 	req := fill("tenant-a", digest, 12)
 	req.WorkerID = "source-worker-b"
-	_, err = b.AdmitFill(req)
+	_, err = b.AdmitFill(t.Context(), req)
 	require.NotNil(t, err)
 	assert.Equal(t, protocol.KindCapacityExhausted, err.Kind)
 }
@@ -923,26 +923,26 @@ func TestDrainAckReleasesOnlyWithoutSessions(t *testing.T) {
 	hexDigest, _ := fixtureDigest(t)
 
 	// The source reference keeps the tree while the generation lives.
-	removed, err := st.RemoveUnreferenced(hexDigest)
+	removed, err := st.RemoveUnreferenced(t.Context(), hexDigest)
 	require.NoError(t, err)
 	assert.False(t, removed)
 
 	lease, err := b.RegisterWorker(generation, "source-worker-a", secret)
 	require.Nil(t, err)
-	session, err := b.AdmitSession(testOwner("tenant-a"), "tenant-a", generation)
+	session, err := b.AdmitSession(t.Context(), testOwner("tenant-a"), "tenant-a", generation)
 	require.Nil(t, err)
 
 	require.Nil(t, b.Drain(generation))
-	denied := b.DrainAck(generation, "source-worker-a", lease.ID, secret)
+	denied := b.DrainAck(t.Context(), generation, "source-worker-a", lease.ID, secret)
 	require.NotNil(t, denied)
 	assert.Equal(t, protocol.KindOperationState, denied.Kind)
 
-	require.Nil(t, b.ReleaseSession(testOwner("tenant-a"), session.ID))
-	require.Nil(t, b.DrainAck(generation, "source-worker-a", lease.ID, secret))
+	require.Nil(t, b.ReleaseSession(t.Context(), testOwner("tenant-a"), session.ID))
+	require.Nil(t, b.DrainAck(t.Context(), generation, "source-worker-a", lease.ID, secret))
 
 	// Released: the reference is gone and the collector may take the tree.
 	assert.Empty(t, b.Snapshot())
-	removed, err = st.RemoveUnreferenced(hexDigest)
+	removed, err = st.RemoveUnreferenced(t.Context(), hexDigest)
 	require.NoError(t, err)
 	assert.True(t, removed)
 }
@@ -953,12 +953,12 @@ func TestReconstructAfterCrash(t *testing.T) {
 	admitServe(t, b, digest, &serving, &servingSecret)
 
 	// A second fill that never completed, whose worker is gone.
-	stuck, err := b.AdmitFill(fill("tenant-a", digest, 12))
+	stuck, err := b.AdmitFill(t.Context(), fill("tenant-a", digest, 12))
 	require.Nil(t, err)
 	// And a fill whose worker is still admitted, under its own identity.
 	liveReq := fill("tenant-a", digest, 12)
 	liveReq.WorkerID = "source-worker-c"
-	live, err := b.AdmitFill(liveReq)
+	live, err := b.AdmitFill(t.Context(), liveReq)
 	require.Nil(t, err)
 
 	// A daemon restart: the broker reconstructs from the durable ledger and
@@ -984,7 +984,7 @@ func TestReconstructAfterCrash(t *testing.T) {
 
 func TestReconstructRequiresReadableWorkerSet(t *testing.T) {
 	b, _, digest := newBroker(t, defaultLimits())
-	_, err := b.AdmitFill(fill("tenant-a", digest, 12))
+	_, err := b.AdmitFill(t.Context(), fill("tenant-a", digest, 12))
 	require.Nil(t, err)
 	// An unreadable worker set is an error, never an empty set in disguise:
 	// empty would release every filling reservation.
@@ -1033,14 +1033,14 @@ func TestPriorSuccessNeverEasesLaterRefusal(t *testing.T) {
 	b, _, digest := newBroker(t, defaultLimits())
 	var generation, secret string
 	admitServe(t, b, digest, &generation, &secret)
-	first, err := b.AdmitSession(testOwner("tenant-a"), "tenant-a", generation)
+	first, err := b.AdmitSession(t.Context(), testOwner("tenant-a"), "tenant-a", generation)
 	require.Nil(t, err)
-	require.Nil(t, b.ReleaseSession(testOwner("tenant-a"), first.ID))
+	require.Nil(t, b.ReleaseSession(t.Context(), testOwner("tenant-a"), first.ID))
 
-	second, err := b.AdmitSession(testOwner("tenant-a"), "tenant-a", generation)
+	second, err := b.AdmitSession(t.Context(), testOwner("tenant-a"), "tenant-a", generation)
 	require.Nil(t, err)
-	require.Nil(t, b.ReleaseSession(testOwner("tenant-a"), second.ID))
-	require.NotNil(t, b.ReleaseSession(testOwner("tenant-a"), second.ID), "release is not a credit")
+	require.Nil(t, b.ReleaseSession(t.Context(), testOwner("tenant-a"), second.ID))
+	require.NotNil(t, b.ReleaseSession(t.Context(), testOwner("tenant-a"), second.ID), "release is not a credit")
 }
 
 func TestHeartbeatNeverLowersTheSessionChargeAndDrainAckFollowsTruth(t *testing.T) {
@@ -1049,15 +1049,15 @@ func TestHeartbeatNeverLowersTheSessionChargeAndDrainAckFollowsTruth(t *testing.
 	// broker's own named sessions plus the persisted unknown charge, and
 	// the drain acknowledgement follows that truth.
 	b, _, digest := newBroker(t, defaultLimits())
-	admission, err := b.AdmitFill(fill("tenant-a", digest, 12))
+	admission, err := b.AdmitFill(t.Context(), fill("tenant-a", digest, 12))
 	require.Nil(t, err)
 	lease, err := b.RegisterWorker(admission.Generation, "source-worker-a", admission.WorkerSecret)
 	require.Nil(t, err)
-	require.Nil(t, b.FillVerified(admission.Generation, "source-worker-a", lease.ID, admission.WorkerSecret, 1,
+	require.Nil(t, b.FillVerified(t.Context(), admission.Generation, "source-worker-a", lease.ID, admission.WorkerSecret, 1,
 		servedDescriptors("source-worker-a")[:1]))
 
 	owner := testOwner("tenant-a")
-	session, serr := b.AdmitSession(owner, "tenant-a", admission.Generation)
+	session, serr := b.AdmitSession(t.Context(), owner, "tenant-a", admission.Generation)
 	require.Nil(t, serr)
 
 	// A heartbeat reporting zero sessions cannot free the named session.
@@ -1075,11 +1075,11 @@ func TestHeartbeatNeverLowersTheSessionChargeAndDrainAckFollowsTruth(t *testing.
 
 	// The drain acknowledgement is refused while the named session lives;
 	// the owner's own authenticated release is what frees it.
-	refused := b.DrainAck(admission.Generation, "source-worker-a", lease.ID, admission.WorkerSecret)
+	refused := b.DrainAck(t.Context(), admission.Generation, "source-worker-a", lease.ID, admission.WorkerSecret)
 	require.NotNil(t, refused)
 	assert.Equal(t, protocol.KindOperationState, refused.Kind)
-	require.Nil(t, b.ReleaseSession(owner, session.ID))
-	require.Nil(t, b.DrainAck(admission.Generation, "source-worker-a", lease.ID, admission.WorkerSecret))
+	require.Nil(t, b.ReleaseSession(t.Context(), owner, session.ID))
+	require.Nil(t, b.DrainAck(t.Context(), admission.Generation, "source-worker-a", lease.ID, admission.WorkerSecret))
 }
 
 func TestRegistrationsCapAndSnapshotNumericOrder(t *testing.T) {
@@ -1091,25 +1091,25 @@ func TestRegistrationsCapAndSnapshotNumericOrder(t *testing.T) {
 	// Registration cap is enforced across multi-registration fills.
 	req := fill("tenant-a", digest, 12)
 	req.Grant.Registrations = 3
-	first, err := b.AdmitFill(req)
+	first, err := b.AdmitFill(t.Context(), req)
 	require.Nil(t, err)
 	lease, err := b.RegisterWorker(first.Generation, "source-worker-a", first.WorkerSecret)
 	require.Nil(t, err)
 	// Exceeding the namespace's 3-registration grant in FillVerified is refused.
-	denied := b.FillVerified(first.Generation, "source-worker-a", lease.ID, first.WorkerSecret, 4, nil)
+	denied := b.FillVerified(t.Context(), first.Generation, "source-worker-a", lease.ID, first.WorkerSecret, 4, nil)
 	require.NotNil(t, denied)
 	assert.Equal(t, protocol.KindCapacityExhausted, denied.Kind)
-	require.Nil(t, b.FillVerified(first.Generation, "source-worker-a", lease.ID, first.WorkerSecret, 2,
+	require.Nil(t, b.FillVerified(t.Context(), first.Generation, "source-worker-a", lease.ID, first.WorkerSecret, 2,
 		servedDescriptors("source-worker-a")))
 
 	// With 2 of 3 registrations used, one more 1-registration fill fits, and a third is refused.
-	second, err := b.AdmitFill(req)
+	second, err := b.AdmitFill(t.Context(), req)
 	require.Nil(t, err)
 	secondLease, err := b.RegisterWorker(second.Generation, "source-worker-a", second.WorkerSecret)
 	require.Nil(t, err)
-	require.Nil(t, b.FillVerified(second.Generation, "source-worker-a", secondLease.ID, second.WorkerSecret, 1,
+	require.Nil(t, b.FillVerified(t.Context(), second.Generation, "source-worker-a", secondLease.ID, second.WorkerSecret, 1,
 		servedDescriptors("source-worker-a")[:1]))
-	_, err = b.AdmitFill(req)
+	_, err = b.AdmitFill(t.Context(), req)
 	require.NotNil(t, err)
 	assert.Equal(t, protocol.KindCapacityExhausted, err.Kind)
 
@@ -1123,11 +1123,11 @@ func TestRegistrationsCapAndSnapshotNumericOrder(t *testing.T) {
 		otherReq := fill("tenant-b", digest, 12)
 		otherReq.Grant.Registrations = 16
 		otherReq.WorkerID = fmt.Sprintf("worker-b-%d", i)
-		adm, admErr := b.AdmitFill(otherReq)
+		adm, admErr := b.AdmitFill(t.Context(), otherReq)
 		require.Nil(t, admErr)
 		l, regErr := b.RegisterWorker(adm.Generation, otherReq.WorkerID, adm.WorkerSecret)
 		require.Nil(t, regErr)
-		require.Nil(t, b.FillVerified(adm.Generation, otherReq.WorkerID, l.ID, adm.WorkerSecret, 1,
+		require.Nil(t, b.FillVerified(t.Context(), adm.Generation, otherReq.WorkerID, l.ID, adm.WorkerSecret, 1,
 			servedDescriptors(otherReq.WorkerID)[:1]))
 		issued = append(issued, adm.Generation)
 	}
@@ -1161,7 +1161,7 @@ func TestAFreshLedgerAdmitsAndNeverReusesTokens(t *testing.T) {
 	b, openErr := Open(filepath.Join(root, "broker"), testScope, st,
 		defaultLimits(), func() time.Time { return testNow })
 	require.NoError(t, openErr)
-	admission, perr := b.AdmitFill(fill("tenant-a", digest, 12))
+	admission, perr := b.AdmitFill(t.Context(), fill("tenant-a", digest, 12))
 	require.Nil(t, perr)
 	lease, regErr := b.RegisterWorker(admission.Generation, "source-worker-a",
 		admission.WorkerSecret)
@@ -1177,10 +1177,10 @@ func TestAFreshLedgerAdmitsAndNeverReusesTokens(t *testing.T) {
 		Name: "model.norm.weight", Addr: 0x1000, Length: 12,
 		MemoryType: "HOST", Backend: "hixl", WorkerUID: "source-worker-a",
 	}}
-	require.Nil(t, reopened.FillVerified(admission.Generation, "source-worker-a",
+	require.Nil(t, reopened.FillVerified(t.Context(), admission.Generation, "source-worker-a",
 		lease.ID, admission.WorkerSecret, 1, descriptors))
 	require.Nil(t, reopened.Drain(admission.Generation))
-	require.Nil(t, reopened.DrainAck(admission.Generation, "source-worker-a",
+	require.Nil(t, reopened.DrainAck(t.Context(), admission.Generation, "source-worker-a",
 		lease.ID, admission.WorkerSecret))
 	require.NoError(t, reopened.Close())
 
@@ -1189,7 +1189,7 @@ func TestAFreshLedgerAdmitsAndNeverReusesTokens(t *testing.T) {
 		func() time.Time { return testNow })
 	require.NoError(t, openErr)
 	defer third.Close()
-	second, perr := third.AdmitFill(fill("tenant-a", digest, 12))
+	second, perr := third.AdmitFill(t.Context(), fill("tenant-a", digest, 12))
 	require.Nil(t, perr)
 	assert.NotEqual(t, admission.Generation, second.Generation)
 }
@@ -1210,7 +1210,7 @@ func TestAZeroHealthHeartbeatNeverFreesUnknownSessions(t *testing.T) {
 	// healthy heartbeat that reports zero sessions must not wipe it, and
 	// the drain acknowledgement must stay refused until a qualified fence.
 	b, _, digest := newBroker(t, defaultLimits())
-	admission, perr := b.AdmitFill(fill("tenant-a", digest, 12))
+	admission, perr := b.AdmitFill(t.Context(), fill("tenant-a", digest, 12))
 	require.Nil(t, perr)
 	lease, regErr := b.RegisterWorker(admission.Generation, "source-worker-a",
 		admission.WorkerSecret)
@@ -1219,7 +1219,7 @@ func TestAZeroHealthHeartbeatNeverFreesUnknownSessions(t *testing.T) {
 		Name: "model.norm.weight", Addr: 0x1000, Length: 12,
 		MemoryType: "HOST", Backend: "hixl", WorkerUID: "source-worker-a",
 	}}
-	require.Nil(t, b.FillVerified(admission.Generation, "source-worker-a",
+	require.Nil(t, b.FillVerified(t.Context(), admission.Generation, "source-worker-a",
 		lease.ID, admission.WorkerSecret, 1, descriptors))
 	b.mu.Lock()
 	record := b.records[admission.Generation]
@@ -1244,7 +1244,7 @@ func TestAZeroHealthHeartbeatNeverFreesUnknownSessions(t *testing.T) {
 	assert.EqualValues(t, 2, count)
 	assert.EqualValues(t, 2, unknown)
 
-	refused := reopened.DrainAck(admission.Generation, "source-worker-a",
+	refused := reopened.DrainAck(t.Context(), admission.Generation, "source-worker-a",
 		lease.ID, admission.WorkerSecret)
 	require.NotNil(t, refused)
 	assert.Equal(t, protocol.KindOperationState, refused.Kind)
@@ -1254,7 +1254,7 @@ func TestAZeroHealthHeartbeatNeverFreesUnknownSessions(t *testing.T) {
 	require.Nil(t, reopened.ClearUnknownSessions(admission.Generation,
 		"trained-harness fence receipt abc123"))
 	require.Nil(t, reopened.Drain(admission.Generation))
-	refused = reopened.DrainAck(admission.Generation, "source-worker-a",
+	refused = reopened.DrainAck(t.Context(), admission.Generation, "source-worker-a",
 		lease.ID, admission.WorkerSecret)
 	require.Nil(t, refused)
 }
@@ -1278,7 +1278,7 @@ func TestConcurrentAdmitIntentFillMintsOneGeneration(t *testing.T) {
 	for i := 0; i < callers; i++ {
 		go func() {
 			start.Wait()
-			admission, perr := b.AdmitIntentFill(intent)
+			admission, perr := b.AdmitIntentFill(t.Context(), intent)
 			if perr != nil {
 				results <- "ERR:" + perr.Error()
 				return
@@ -1319,7 +1319,7 @@ func TestAdmissionDoesNotExposeFailedLocalConfirmation(t *testing.T) {
 			}
 		},
 	}
-	assignment, err := b.AdmitIntentFill(intent)
+	assignment, err := b.AdmitIntentFill(t.Context(), intent)
 	require.NotNil(t, err)
 	require.Nil(t, assignment)
 	assert.Empty(t, b.OfferedAssignments())
@@ -1335,7 +1335,7 @@ func TestAdmissionDoesNotExposeFailedLocalConfirmation(t *testing.T) {
 	}
 	require.NoError(t, os.Remove(blocked))
 	intent.ReservationID = "new-caller-attempt"
-	assignment, err = b.AdmitIntentFill(intent)
+	assignment, err = b.AdmitIntentFill(t.Context(), intent)
 	require.Nil(t, err)
 	require.NotNil(t, assignment)
 	assert.Equal(t, generation, assignment.Generation)

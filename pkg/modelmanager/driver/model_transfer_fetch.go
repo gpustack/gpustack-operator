@@ -15,6 +15,7 @@ import (
 	"github.com/container-storage-interface/spec/lib/go/csi"
 	apps "k8s.io/api/apps/v1"
 	core "k8s.io/api/core/v1"
+	kerrors "k8s.io/apimachinery/pkg/api/errors"
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
 	ctrlcli "sigs.k8s.io/controller-runtime/pkg/client"
 	ctrllog "sigs.k8s.io/controller-runtime/pkg/log"
@@ -31,6 +32,21 @@ const modelTransferMetadataAttempts = 16
 
 var errModelTransferMetadataUnavailable = errors.New("no authenticated source supplied the required metadata view")
 
+// metadataAPIReadError sorts a failed live read: a caller whose context is done gets that back, a
+// name the live reader answered with NotFound is the request's claim being false and stays a
+// refusal, and any other read failure is a live API the next call can still answer, so it reports
+// the source as unavailable rather than an internal fault.
+func metadataAPIReadError(ctx context.Context, err error, refusal string) error {
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return ctxErr
+	}
+	if kerrors.IsNotFound(err) {
+		return errors.New(refusal)
+	}
+
+	return errModelTransferMetadataUnavailable
+}
+
 func (d *Driver) fetchModelTransferMetadata(ctx context.Context, req *csi.NodePublishVolumeRequest,
 	digest string, required []string,
 ) (string, error) {
@@ -43,7 +59,7 @@ func (d *Driver) fetchModelTransferMetadata(ctx context.Context, req *csi.NodePu
 	pod := new(core.Pod)
 	if err := d.APIReader.Get(ctx, ctrlcli.ObjectKey{Namespace: vc[attrPodNamespace], Name: vc[attrPodName]}, pod); err != nil {
 		ctrllog.FromContext(ctx).Error(err, "read metadata workload identity")
-		return "", errors.New("metadata workload identity is unavailable")
+		return "", metadataAPIReadError(ctx, err, "metadata workload identity does not exist")
 	}
 	if string(pod.UID) != vc[attrPodUID] || pod.UID == "" || pod.DeletionTimestamp != nil ||
 		pod.Spec.NodeName != d.NodeID || pod.Status.Phase == core.PodSucceeded || pod.Status.Phase == core.PodFailed {
@@ -59,7 +75,7 @@ func (d *Driver) fetchModelTransferMetadata(ctx context.Context, req *csi.NodePu
 		Name:      vc[modelstore.ModelTransferClientConfigAttribute],
 	}, cm); err != nil {
 		ctrllog.FromContext(ctx).Error(err, "read public source discovery")
-		return "", errors.New("public source discovery is unavailable")
+		return "", metadataAPIReadError(ctx, err, "public source discovery does not exist")
 	}
 	cmOwner := meta.GetControllerOf(cm)
 	if cmOwner == nil || cmOwner.UID != owner.UID || cmOwner.Kind != owner.Kind || cmOwner.Name != owner.Name ||

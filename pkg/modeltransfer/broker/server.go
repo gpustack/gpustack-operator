@@ -132,7 +132,7 @@ func NewControlHandlerWithInstanceHook(b *Broker, hook func(context.Context, str
 		if !decode(w, r, &req) {
 			return
 		}
-		if refuse(w, b.FillVerified(req.Generation, req.WorkerID, req.LeaseID,
+		if refuse(w, b.FillVerified(r.Context(), req.Generation, req.WorkerID, req.LeaseID,
 			req.Secret, req.Registrations, req.Descriptors, req.WorkerInstanceID)) {
 			return
 		}
@@ -168,7 +168,7 @@ func NewControlHandlerWithInstanceHook(b *Broker, hook func(context.Context, str
 			refuse(w, protocol.New(protocol.KindOperationState, "drain", "native release is required"))
 			return
 		}
-		if refuse(w, b.DrainAckContext(r.Context(), req.Generation, req.WorkerID, req.LeaseID,
+		if refuse(w, b.DrainAck(r.Context(), req.Generation, req.WorkerID, req.LeaseID,
 			req.Secret, req.WorkerInstanceID)) {
 			return
 		}
@@ -398,7 +398,7 @@ func NewSessionHandler(b *Broker, authorizer SessionAuthorizer) http.Handler {
 		}
 		owner := brokerSessionOwner(req.ArtifactUID, result)
 		owner.RequestID, owner.TargetInstanceID, owner.OpenFingerprint = req.RequestID, req.TargetInstanceID, refusalOwner.OpenFingerprint
-		session, serr := b.AdmitSessionContext(r.Context(), owner, req.PodNamespace, generation)
+		session, serr := b.AdmitSession(r.Context(), owner, req.PodNamespace, generation)
 		if serr != nil && (serr.Kind == protocol.KindSourceUnavailable || serr.Kind == protocol.KindCapacityExhausted) && refuseUnadmitted(serr) {
 			return
 		}
@@ -489,7 +489,7 @@ func NewSessionHandler(b *Broker, authorizer SessionAuthorizer) http.Handler {
 			answer(w, map[string]any{"state": "closing"})
 			return
 		}
-		if refuse(w, b.ReleaseSessionContext(r.Context(), owner, sessionID)) {
+		if refuse(w, b.ReleaseSession(r.Context(), owner, sessionID)) {
 			return
 		}
 		answer(w, map[string]any{"state": "closed"})

@@ -25,9 +25,9 @@ func (b *Broker) sourceGate(where, backend string) *protocol.Error {
 	}
 	if backend == "" {
 		return protocol.New(protocol.KindSourceUnavailable, where,
-			"the generation names no transfer backend, so the source cannot prove an accepted backend")
+			"the source-transfer admission policy is disabled")
 	}
 	return protocol.New(protocol.KindSourceUnavailable, where,
-		"the source has no safety acceptance record for the %q transfer backend, so it refuses new remote work",
+		"the source-transfer admission policy is disabled or the %q transfer backend is unsupported",
 		backend)
 }

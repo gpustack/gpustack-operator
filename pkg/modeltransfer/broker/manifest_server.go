@@ -25,11 +25,17 @@ type manifestPageRequest struct {
 	PageSHA256       string `json:"pageSHA256"`
 }
 
-func (b *Broker) manifestPageLocked(ctx context.Context, rec *GenerationRecord, rootDigest, pageDigest string) ([]byte, error) {
-	if rec.ManifestSHA256 != rootDigest || rec.ManifestPagesPath == "" {
+// manifestPageFor reads one page's bytes for a manifest identity snapshot
+// without the broker mutex: the derived-manifest parse binds every page on
+// disk and the page read verifies its digest, and both block, so both stay
+// outside the critical section the broker's other callers need. The
+// snapshot must be revalidated against the live record before the bytes
+// are served.
+func (b *Broker) manifestPageFor(ctx context.Context, src manifestSource, rootDigest, pageDigest string) ([]byte, error) {
+	if src.sha256 != rootDigest || src.pagesPath == "" {
 		return nil, fmt.Errorf("manifest identity mismatch")
 	}
-	cached, err := b.cachedDerivedManifestContextLocked(ctx, rec)
+	cached, err := b.derivedManifest(ctx, src)
 	if err != nil {
 		return nil, err
 	}
@@ -37,7 +43,7 @@ func (b *Broker) manifestPageLocked(ctx context.Context, rec *GenerationRecord, 
 		if page.SHA256 != pageDigest {
 			continue
 		}
-		raw, err := protocol.LocalPageReader(rec.ManifestPagesPath)(ctx, page)
+		raw, err := b.pageReaderFor(src.pagesPath)(ctx, page)
 		if err != nil {
 			return nil, err
 		}
@@ -55,38 +61,61 @@ func (b *Broker) workerManifestPage(ctx context.Context, token string, req manif
 		return nil, protocol.New(protocol.KindAuthentication, "page", "worker authentication failed")
 	}
 	b.mu.Lock()
-	defer b.mu.Unlock()
 	rec := b.records[req.Generation]
 	if rec == nil || !liveAssignment(rec) || b.assignmentsFrozen {
+		b.mu.Unlock()
 		return nil, fmt.Errorf("source assignment is unavailable")
 	}
-	return b.manifestPageLocked(ctx, rec, req.ManifestSHA256, req.PageSHA256)
-}
-
-func (b *Broker) sessionManifestPage(ctx context.Context, req manifestPageRequest, pod authorization.PodIdentity) ([]byte, error) {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	_, rec, err := b.sessionOwnerLocked(TransferRequest{
-		PodNamespace: req.PodNamespace, PodName: req.PodName, PodUID: req.PodUID,
-		SessionID: req.SessionID, TargetInstanceID: req.TargetInstanceID, SourcePodUID: req.SourcePodUID,
-		WorkerInstanceID: req.WorkerInstanceID, Generation: req.Generation,
-	}, pod)
+	src := manifestSourceOf(rec)
+	b.mu.Unlock()
+	raw, err := b.manifestPageFor(ctx, src, req.ManifestSHA256, req.PageSHA256)
 	if err != nil {
 		return nil, err
 	}
-	if b.intentValidator == nil {
-		return nil, fmt.Errorf("live source entitlement validator is unavailable")
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	rec = b.records[req.Generation]
+	if rec == nil || !liveAssignment(rec) || b.assignmentsFrozen || !manifestSourceMatches(rec, src) {
+		return nil, fmt.Errorf("source assignment is unavailable")
 	}
+	return raw, nil
+}
+
+func (b *Broker) sessionManifestPage(ctx context.Context, req manifestPageRequest, pod authorization.PodIdentity) ([]byte, error) {
+	ownerReq := TransferRequest{
+		PodNamespace: req.PodNamespace, PodName: req.PodName, PodUID: req.PodUID,
+		SessionID: req.SessionID, TargetInstanceID: req.TargetInstanceID, SourcePodUID: req.SourcePodUID,
+		WorkerInstanceID: req.WorkerInstanceID, Generation: req.Generation,
+	}
+	b.mu.Lock()
+	_, rec, err := b.sessionOwnerLocked(ownerReq, pod)
+	if err != nil {
+		b.mu.Unlock()
+		return nil, err
+	}
+	validator := b.intentValidator
+	intent := liveIntentOf(rec)
+	src := manifestSourceOf(rec)
+	b.mu.Unlock()
 	checkCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
-	if err := b.intentValidator(checkCtx, LiveIntent{
-		Namespace: rec.Namespace, IntentName: rec.IntentName, IntentUID: rec.IntentUID, IntentGeneration: rec.IntentGeneration,
-		BindingName: rec.BindingName, BindingUID: rec.BindingUID, ArtifactName: rec.ArtifactName, ArtifactUID: rec.ArtifactUID,
-		SourceGeneration: rec.SourceGeneration, Digest: rec.Digest, NodeName: rec.NodeName, WorkerID: rec.WorkerID,
-	}); err != nil {
+	if err := validator(checkCtx, intent); err != nil {
 		return nil, fmt.Errorf("live source entitlement is unavailable")
 	}
-	return b.manifestPageLocked(ctx, rec, req.ManifestSHA256, req.PageSHA256)
+	raw, err := b.manifestPageFor(ctx, src, req.ManifestSHA256, req.PageSHA256)
+	if err != nil {
+		return nil, err
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	_, rec, err = b.sessionOwnerLocked(ownerReq, pod)
+	if err != nil {
+		return nil, err
+	}
+	if !manifestSourceMatches(rec, src) || liveIntentOf(rec) != intent {
+		return nil, fmt.Errorf("source generation is unavailable")
+	}
+	return raw, nil
 }
 
 // registerManifestPages limits concurrent page encodings as well as each page.

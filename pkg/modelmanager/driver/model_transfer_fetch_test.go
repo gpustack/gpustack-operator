@@ -10,6 +10,7 @@ import (
 	"crypto/x509/pkix"
 	"encoding/json"
 	"encoding/pem"
+	"errors"
 	"fmt"
 	"math/big"
 	"net"
@@ -22,6 +23,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 	apps "k8s.io/api/apps/v1"
 	core "k8s.io/api/core/v1"
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -29,6 +32,7 @@ import (
 	"k8s.io/utils/ptr"
 	ctrlcli "sigs.k8s.io/controller-runtime/pkg/client"
 	ctrlfake "sigs.k8s.io/controller-runtime/pkg/client/fake"
+	ctrlintercept "sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
 	"gpustack.ai/gpustack/pkg/kubeclients/kubernetes/scheme"
@@ -37,6 +41,84 @@ import (
 	"gpustack.ai/gpustack/pkg/modeltransfer/metadata"
 	"gpustack.ai/gpustack/pkg/setting"
 )
+
+func TestModelTransferMetadataAPIReadErrorsClassify(t *testing.T) {
+	consumer := &core.Pod{ObjectMeta: meta.ObjectMeta{
+		Namespace: "team-a", Name: "p", UID: "uid-p",
+		OwnerReferences: []meta.OwnerReference{{
+			APIVersion: workercore.SchemeGroupVersion.String(), Kind: "ModelDeployment",
+			Name: "consumer", UID: "deployment-uid", Controller: ptr.To(true),
+		}},
+	}, Spec: core.PodSpec{NodeName: "node-1"}}
+	transient := errors.New("informer cache not synced")
+	cases := []struct {
+		name     string
+		havePod  bool
+		podErr   error
+		cmErr    error
+		wantCode codes.Code
+	}{
+		{name: "a workload read that fails transiently answers Unavailable", podErr: transient, wantCode: codes.Unavailable},
+		{name: "a discovery read that fails transiently answers Unavailable", havePod: true, cmErr: transient, wantCode: codes.Unavailable},
+		{name: "a workload the live reader cannot name is refused", wantCode: codes.Internal},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			env := newTestEnv(t, testArtifact("team-a", "model", "uid-ma", testDigest, true))
+			var objects []ctrlcli.Object
+			if c.havePod {
+				objects = append(objects, consumer)
+			}
+			env.d.APIReader = ctrlfake.NewClientBuilder().WithScheme(scheme.Scheme).
+				WithObjects(objects...).
+				WithInterceptorFuncs(ctrlintercept.Funcs{
+					Get: func(ctx context.Context, cli ctrlcli.WithWatch, key ctrlcli.ObjectKey,
+						obj ctrlcli.Object, opts ...ctrlcli.GetOption,
+					) error {
+						switch obj.(type) {
+						case *core.Pod:
+							if c.podErr != nil {
+								return c.podErr
+							}
+						case *core.ConfigMap:
+							if c.cmErr != nil {
+								return c.cmErr
+							}
+						}
+						return cli.Get(ctx, key, obj, opts...)
+					},
+				}).Build()
+			_, err := env.d.NodePublishVolume(context.Background(), modelTransferRequest(env.target("remote"), map[string]string{
+				AttrArtifact: "model", AttrArtifactUID: "uid-ma", AttrManifestDigest: testDigest,
+				attrModelTransferDelivery:                     modelTransferDeliveryMetadata,
+				modelstore.ModelTransferClientConfigAttribute: "discovery",
+				"csi.storage.k8s.io/serviceAccount.tokens":    `{"gpustack-model-transfer":{"token":"workload-only-token"}}`,
+			}))
+			require.Error(t, err)
+			assert.Equal(t, c.wantCode, status.Code(err), err)
+		})
+	}
+}
+
+func TestFetchModelTransferMetadataKeepsAGivenUpCaller(t *testing.T) {
+	env := newTestEnv(t, testArtifact("team-a", "model", "uid-ma", testDigest, true))
+	env.d.APIReader = ctrlfake.NewClientBuilder().WithScheme(scheme.Scheme).
+		WithInterceptorFuncs(ctrlintercept.Funcs{
+			Get: func(ctx context.Context, cli ctrlcli.WithWatch, key ctrlcli.ObjectKey,
+				obj ctrlcli.Object, opts ...ctrlcli.GetOption,
+			) error {
+				return fmt.Errorf("read: %w", context.Canceled)
+			},
+		}).Build()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	cancel()
+	req := modelTransferRequest("unused", map[string]string{
+		modelstore.ModelTransferClientConfigAttribute: "discovery",
+	})
+	_, err := env.d.fetchModelTransferMetadata(ctx, req, testHex, metadata.DefaultRequiredFiles)
+	require.ErrorIs(t, err, context.Canceled)
+}
 
 func TestModelTransferCSITokenAudience(t *testing.T) {
 	cases := []struct {

@@ -202,32 +202,119 @@ func (b *Broker) RecordUnadmitted(owner SessionOwner) bool {
 	return true
 }
 
-// admitGlobalSessionLocked persists the local owner before the global CAS,
-// and persists its admitted phase before exposing the session to a caller.
-func (b *Broker) admitGlobalSessionLocked(ctx context.Context, rec *GenerationRecord, owner SessionOwner) (*Session, *protocol.Error) {
-	if owner.PodUID == "" || owner.Namespace != rec.Namespace || owner.ArtifactUID == "" ||
-		owner.ArtifactUID != rec.ArtifactUID || owner.Digest != rec.Digest {
-		return nil, protocol.New(protocol.KindDeniedContent, "session", "the session owner does not match the generation")
-	}
-	if b.inventoryRequired {
-		if b.assignmentsFrozen || b.intentValidator == nil {
+// admitGlobalSession admits a Binding-bound session. The live entitlement
+// check and the authority CAS run without the broker mutex, bracketed by
+// snapshot revalidation: a generation that drains, retires, quarantines,
+// or moves its identity while the caller waits is refused without
+// publishing an admission, and a prepared record left behind by a failed
+// CAS is reclaimed by the session transaction pass.
+func (b *Broker) admitGlobalSession(ctx context.Context, authority *ReservationAuthority,
+	validator func(context.Context, LiveIntent) error, inventoryRequired, frozen bool,
+	intent LiveIntent, namespace, generation string, owner SessionOwner,
+) (*Session, *protocol.Error) {
+	if inventoryRequired {
+		if frozen || validator == nil {
 			return nil, protocol.New(protocol.KindSourceUnavailable, "session", "the live source entitlement is unavailable")
 		}
 		checkCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
-		err := b.intentValidator(checkCtx, LiveIntent{
-			Namespace: rec.Namespace, IntentName: rec.IntentName, IntentUID: rec.IntentUID,
-			IntentGeneration: rec.IntentGeneration, BindingName: rec.BindingName, BindingUID: rec.BindingUID,
-			ArtifactName: rec.ArtifactName, ArtifactUID: rec.ArtifactUID, SourceGeneration: rec.SourceGeneration,
-			Digest: rec.Digest, NodeName: rec.NodeName, WorkerID: rec.WorkerID,
-		})
+		err := validator(checkCtx, intent)
 		cancel()
 		if err != nil {
 			return nil, protocol.New(protocol.KindSourceUnavailable, "session", "the live source entitlement is unavailable")
 		}
 	}
-	authority := b.reservationAuthorities[types.UID(rec.BindingUID)]
 	if authority == nil {
 		return nil, protocol.New(protocol.KindSourceUnavailable, "session", "the Binding authority is unavailable")
+	}
+
+	// Prepare the local durable owner while the mutex is held, then
+	// release it across the global CAS.
+	b.mu.Lock()
+	rec, err := b.mutable(generation)
+	if err != nil {
+		b.mu.Unlock()
+		return nil, err
+	}
+	if rec.Namespace != namespace || !b.serving(rec) || rec.BindingUID == "" ||
+		b.assignmentsFrozen || liveIntentOf(rec) != intent {
+		b.countRefusal(rec)
+		b.mu.Unlock()
+		return nil, protocol.New(protocol.KindStaleGeneration, "session",
+			"the generation is not serving new readers")
+	}
+	if b.limits.MaxSessions > 0 && b.nodeActiveSessionsLocked() >= b.limits.MaxSessions {
+		b.countRefusal(rec)
+		b.mu.Unlock()
+		return nil, protocol.New(protocol.KindCapacityExhausted, "session",
+			"the node session limit is reached")
+	}
+	id, session, perr := b.prepareGlobalSessionRecordLocked(rec, owner)
+	if perr != nil {
+		b.mu.Unlock()
+		return nil, perr
+	}
+	snapshot := sessionReservation(id, session)
+	reservationID := rec.ReservationID
+	if b.sessionAdmissionWaits == nil {
+		b.sessionAdmissionWaits = map[string]int{}
+	}
+	b.sessionAdmissionWaits[id]++
+	b.mu.Unlock()
+	defer func() {
+		b.mu.Lock()
+		if b.sessionAdmissionWaits != nil {
+			b.sessionAdmissionWaits[id]--
+			if b.sessionAdmissionWaits[id] <= 0 {
+				delete(b.sessionAdmissionWaits, id)
+			}
+		}
+		b.mu.Unlock()
+	}()
+
+	requestCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	if err := authority.ReserveSessionSlot(requestCtx, reservationID, snapshot); err != nil {
+		if errors.Is(err, errReservationCapacity) {
+			return nil, protocol.New(protocol.KindCapacityExhausted, "session", "the Binding's session grant is exhausted")
+		}
+		return nil, protocol.New(protocol.KindSourceUnavailable, "session", "the global session slot is unavailable")
+	}
+
+	// Publish the admitted phase only when the session's identity and its
+	// generation's reservation both still match the snapshot.
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	session = b.sessions[id]
+	if session == nil || sessionReservation(id, session) != snapshot {
+		return nil, protocol.New(protocol.KindStaleGeneration, "session", "the request is no longer open")
+	}
+	rec = b.records[generation]
+	if rec == nil || rec.BindingUID == "" || rec.ReservationID != reservationID ||
+		!b.serving(rec) || liveIntentOf(rec) != intent {
+		return nil, protocol.New(protocol.KindStaleGeneration, "session", "the request is no longer open")
+	}
+	switch session.Phase {
+	case "admitted":
+		return &Session{ID: id, Generation: rec.Generation}, nil
+	case "prepared":
+	default:
+		return nil, protocol.New(protocol.KindStaleGeneration, "session", "the request is no longer open")
+	}
+	session.Phase = "admitted"
+	if err := b.persistSessionsLocked(); err != nil {
+		b.operationsReady = false
+		return nil, protocol.New(protocol.KindSourceUnavailable, "session", "the admitted owner could not be persisted")
+	}
+	return &Session{ID: id, Generation: rec.Generation}, nil
+}
+
+// prepareGlobalSessionRecordLocked answers an idempotent replay, records an
+// immutable refusal, or creates the session's durable prepared record. The
+// broker mutex is held by the caller; no authority call runs here.
+func (b *Broker) prepareGlobalSessionRecordLocked(rec *GenerationRecord, owner SessionOwner) (string, *SessionRecord, *protocol.Error) {
+	if owner.PodUID == "" || owner.Namespace != rec.Namespace || owner.ArtifactUID == "" ||
+		owner.ArtifactUID != rec.ArtifactUID || owner.Digest != rec.Digest {
+		return "", nil, protocol.New(protocol.KindDeniedContent, "session", "the session owner does not match the generation")
 	}
 	id := newSessionID()
 	if owner.RequestID != "" && owner.TargetInstanceID != "" {
@@ -242,13 +329,13 @@ func (b *Broker) admitGlobalSessionLocked(ctx context.Context, rec *GenerationRe
 		// and fingerprint binding refuses it. The refusal never becomes an
 		// admission, whatever the gate does.
 		if !session.sameRefusal(owner) {
-			return nil, protocol.New(protocol.KindAuthentication, "session",
+			return "", nil, protocol.New(protocol.KindAuthentication, "session",
 				"the request identity is bound to another request")
 		}
 		if err := b.sourceGate("session", rec.Backend); err != nil {
-			return nil, err
+			return "", nil, err
 		}
-		return nil, protocol.New(protocol.KindStaleGeneration, "session", "the request is no longer open")
+		return "", nil, protocol.New(protocol.KindStaleGeneration, "session", "the request is no longer open")
 	}
 	if session != nil {
 		if session.Generation != rec.Generation || session.OwnerUID != owner.PodUID || session.Namespace != owner.Namespace ||
@@ -256,10 +343,10 @@ func (b *Broker) admitGlobalSessionLocked(ctx context.Context, rec *GenerationRe
 			session.RequestID != owner.RequestID || session.TargetInstanceID != owner.TargetInstanceID ||
 			session.OpenFingerprint != owner.OpenFingerprint || session.SourcePodUID != rec.WorkerID ||
 			session.SourceInstanceID != rec.NativeInstance || session.SourceLeaseID != rec.LeaseID {
-			return nil, protocol.New(protocol.KindAuthentication, "session", "the request is bound to another owner")
+			return "", nil, protocol.New(protocol.KindAuthentication, "session", "the request is bound to another owner")
 		}
 		if session.Phase != "prepared" && session.Phase != "admitted" {
-			return nil, protocol.New(protocol.KindStaleGeneration, "session", "the request is no longer open")
+			return "", nil, protocol.New(protocol.KindStaleGeneration, "session", "the request is no longer open")
 		}
 	}
 	// An admitted session is an observation of memory already exposed: its
@@ -267,7 +354,7 @@ func (b *Broker) admitGlobalSessionLocked(ctx context.Context, rec *GenerationRe
 	// expose the source's memory, so the gate refuses it.
 	if session == nil || session.Phase != "admitted" {
 		if err := b.sourceGate("session", rec.Backend); err != nil {
-			return nil, err
+			return "", nil, err
 		}
 	}
 	if session == nil {
@@ -280,7 +367,7 @@ func (b *Broker) admitGlobalSessionLocked(ctx context.Context, rec *GenerationRe
 			_ = b.compactReleasedSessionsLocked()
 		}
 		if len(b.sessions) >= 4096 {
-			return nil, protocol.New(protocol.KindCapacityExhausted, "session", "the session journal is full")
+			return "", nil, protocol.New(protocol.KindCapacityExhausted, "session", "the session journal is full")
 		}
 		active := 0
 		for _, existing := range b.sessions {
@@ -289,7 +376,7 @@ func (b *Broker) admitGlobalSessionLocked(ctx context.Context, rec *GenerationRe
 			}
 		}
 		if active >= 1024 {
-			return nil, protocol.New(protocol.KindCapacityExhausted, "session", "the active session bound is reached")
+			return "", nil, protocol.New(protocol.KindCapacityExhausted, "session", "the active session bound is reached")
 		}
 		session = &SessionRecord{
 			Generation: rec.Generation, OwnerUID: owner.PodUID, Namespace: owner.Namespace,
@@ -302,64 +389,110 @@ func (b *Broker) admitGlobalSessionLocked(ctx context.Context, rec *GenerationRe
 		if err := b.persistSessionsLocked(); err != nil {
 			b.operationsReady = false
 			delete(b.sessions, id)
-			return nil, protocol.New(protocol.KindSourceUnavailable, "session", "the prepared owner could not be persisted")
+			return "", nil, protocol.New(protocol.KindSourceUnavailable, "session", "the prepared owner could not be persisted")
 		}
 		b.recountSessions(rec)
 		if err := b.ledger.write(rec); err != nil {
-			return nil, protocol.New(protocol.KindSourceUnavailable, "session", "the prepared charge could not be persisted")
+			return "", nil, protocol.New(protocol.KindSourceUnavailable, "session", "the prepared charge could not be persisted")
 		}
 	}
-	requestCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
-	defer cancel()
-	if err := authority.ReserveSessionSlot(requestCtx, rec.ReservationID, sessionReservation(id, session)); err != nil {
-		if errors.Is(err, errReservationCapacity) {
-			return nil, protocol.New(protocol.KindCapacityExhausted, "session", "the Binding's session grant is exhausted")
-		}
-		return nil, protocol.New(protocol.KindSourceUnavailable, "session", "the global session slot is unavailable")
-	}
-	session.Phase = "admitted"
-	if err := b.persistSessionsLocked(); err != nil {
-		b.operationsReady = false
-		return nil, protocol.New(protocol.KindSourceUnavailable, "session", "the admitted owner could not be persisted")
-	}
-	return &Session{ID: id, Generation: rec.Generation}, nil
+	return id, session, nil
 }
 
-func (b *Broker) releaseGlobalSessionLocked(
-	ctx context.Context, rec *GenerationRecord, id string, session *SessionRecord, owner SessionOwner,
-) *protocol.Error {
+// globalSessionRelease is one prepared session release: the authority, the
+// reservation identity, and the exact owner snapshot, captured under the
+// broker mutex so the CAS runs without it.
+type globalSessionRelease struct {
+	authority     *ReservationAuthority
+	reservationID string
+	sessionID     string
+	generation    string
+	owner         SessionReservation
+}
+
+// prepareGlobalSessionReleaseLocked confirms the authenticated release
+// intent and persists the releasing phase before the authority CAS. The
+// broker mutex is held by the caller. A nil release with a nil error means
+// the session was already released under the same close request.
+func (b *Broker) prepareGlobalSessionReleaseLocked(rec *GenerationRecord,
+	id string, session *SessionRecord, owner SessionOwner, authority *ReservationAuthority,
+) (*globalSessionRelease, *protocol.Error) {
+	if authority == nil {
+		return nil, protocol.New(protocol.KindSourceUnavailable, "session", "the Binding authority is unavailable")
+	}
 	if session.Phase == "released" {
 		if session.RequestID != "" && (session.CloseRequestID != owner.CloseRequestID || !owner.TargetReleased) {
-			return protocol.New(protocol.KindAuthentication, "session", "the close request does not match")
+			return nil, protocol.New(protocol.KindAuthentication, "session", "the close request does not match")
 		}
-		return nil
+		return nil, nil
 	}
 	if session.RequestID != "" && (session.CloseRequestID == "" || session.CloseRequestID != owner.CloseRequestID || !owner.TargetReleased) {
-		return protocol.New(protocol.KindOperationState, "session", "the target release has not been confirmed")
+		return nil, protocol.New(protocol.KindOperationState, "session", "the target release has not been confirmed")
 	}
 	if session.RequestID != "" && !session.SourceClosed {
-		return protocol.New(protocol.KindOperationState, "session", "the source session has not closed")
+		return nil, protocol.New(protocol.KindOperationState, "session", "the source session has not closed")
 	}
 	for _, op := range b.operations {
 		if op.Request.SessionID == id && op.State != "acknowledged" {
-			return protocol.New(protocol.KindOperationState, "session", "an operation remains outstanding")
+			return nil, protocol.New(protocol.KindOperationState, "session", "an operation remains outstanding")
 		}
 	}
 	if session.Phase != "admitted" && session.Phase != "closing" && session.Phase != "releasing" {
-		return protocol.New(protocol.KindOperationState, "session", "the session was not exposed")
+		return nil, protocol.New(protocol.KindOperationState, "session", "the session was not exposed")
 	}
 	if session.Phase == "admitted" || session.Phase == "closing" {
 		previous := session.Phase
 		session.Phase = "releasing"
 		if err := b.persistSessionsLocked(); err != nil {
 			session.Phase = previous
-			return protocol.New(protocol.KindSourceUnavailable, "session", "the release intent could not be persisted")
+			return nil, protocol.New(protocol.KindSourceUnavailable, "session", "the release intent could not be persisted")
 		}
 	}
-	if err := b.finishSessionReleaseLocked(ctx, rec, id, session); err != nil {
-		return protocol.New(protocol.KindSourceUnavailable, "session", "the session release remains pending")
+	return &globalSessionRelease{
+		authority:     authority,
+		reservationID: rec.ReservationID,
+		sessionID:     id,
+		generation:    session.Generation,
+		owner:         sessionReservation(id, session),
+	}, nil
+}
+
+// finishGlobalSessionRelease completes one prepared release without the
+// broker mutex across the authority CAS. The durable releasing phase
+// already stands: an uncertain authority outcome returns an error that
+// keeps the charge, and the session transaction pass replays the release
+// idempotently.
+func (b *Broker) finishGlobalSessionRelease(ctx context.Context, release *globalSessionRelease) error {
+	requestCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	if err := release.authority.ReleaseSessionSlotIfPresent(
+		requestCtx, release.reservationID, b.scope, b.ledger.identity, release.owner,
+	); err != nil {
+		return err
 	}
-	return nil
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	session := b.sessions[release.sessionID]
+	if session == nil || session.Phase == "released" {
+		return nil
+	}
+	if sessionReservation(release.sessionID, session) != release.owner || session.Phase != "releasing" {
+		return fmt.Errorf("the session release is no longer owned by this release")
+	}
+	oldPhase := session.Phase
+	session.Phase = "released"
+	if err := b.persistSessionsLocked(); err != nil {
+		session.Phase = oldPhase
+		return err
+	}
+	rec := b.records[release.generation]
+	if rec == nil {
+		// The generation is gone; the released slot above was this
+		// session's remaining charge and the journal now says so.
+		return nil
+	}
+	b.recountSessions(rec)
+	return b.ledger.write(rec)
 }
 
 // BeginSessionClose records the authenticated target's request to stop the
@@ -451,28 +584,6 @@ func (b *Broker) ClosePrivateSession(ctx context.Context, owner SessionOwner, id
 	return nil
 }
 
-func (b *Broker) finishSessionReleaseLocked(ctx context.Context, rec *GenerationRecord, id string, session *SessionRecord) error {
-	authority := b.reservationAuthorities[types.UID(rec.BindingUID)]
-	if authority == nil {
-		return fmt.Errorf("binding authority unavailable")
-	}
-	requestCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
-	defer cancel()
-	if err := authority.ReleaseSessionSlotIfPresent(
-		requestCtx, rec.ReservationID, b.scope, b.ledger.identity, sessionReservation(id, session),
-	); err != nil {
-		return err
-	}
-	oldPhase := session.Phase
-	session.Phase = "released"
-	if err := b.persistSessionsLocked(); err != nil {
-		session.Phase = oldPhase
-		return err
-	}
-	b.recountSessions(rec)
-	return b.ledger.write(rec)
-}
-
 // RetrySessionTransactions completes unexposed preparations, requested
 // releases, and idle sessions whose target Pod has terminated, without
 // granting access or releasing any session with an unacknowledged operation.
@@ -481,8 +592,19 @@ func (b *Broker) finishSessionReleaseLocked(ctx context.Context, rec *Generation
 // API hiccup cannot stall the pass or drain a live session.
 func (b *Broker) RetrySessionTransactions(ctx context.Context) error {
 	b.mu.Lock()
+	type pendingRelease struct {
+		id      string
+		release *globalSessionRelease
+	}
+	var pending []pendingRelease
 	for id, session := range b.sessions {
 		if session.Phase != "prepared" && session.Phase != "releasing" {
+			continue
+		}
+		// An admission whose authority CAS is still running owns this
+		// prepared record; reclaiming it now would free a slot the
+		// admission is about to confirm.
+		if b.sessionAdmissionWaits[id] > 0 {
 			continue
 		}
 		rec := b.records[session.Generation]
@@ -490,13 +612,45 @@ func (b *Broker) RetrySessionTransactions(ctx context.Context) error {
 			b.mu.Unlock()
 			return fmt.Errorf("the session's generation is unavailable")
 		}
-		if err := b.finishSessionReleaseLocked(ctx, rec, id, session); err != nil {
+		authority := b.reservationAuthorities[types.UID(rec.BindingUID)]
+		if authority == nil {
 			b.mu.Unlock()
+			return fmt.Errorf("binding authority unavailable")
+		}
+		// Claim the release transaction before the mutex is released: a
+		// durable prepared record becomes releasing here, so an admission
+		// that starts after this critical section refuses the non-open
+		// phase instead of publishing over a release whose CAS is about
+		// to remove its slot. A crash after the claim replays through
+		// this same pass; an uncertain CAS keeps the releasing charge.
+		if session.Phase == "prepared" {
+			session.Phase = "releasing"
+			if err := b.persistSessionsLocked(); err != nil {
+				b.operationsReady = false
+				session.Phase = "prepared"
+				b.mu.Unlock()
+				return err
+			}
+		}
+		pending = append(pending, pendingRelease{id: id, release: &globalSessionRelease{
+			authority:     authority,
+			reservationID: rec.ReservationID,
+			sessionID:     id,
+			generation:    session.Generation,
+			owner:         sessionReservation(id, session),
+		}})
+	}
+	b.mu.Unlock()
+	for _, item := range pending {
+		if err := b.finishGlobalSessionRelease(ctx, item.release); err != nil {
 			return err
 		}
 	}
+	b.mu.Lock()
 	checker := b.sessionPodChecker
-	if checker == nil || (b.privateSource != nil && !b.operationsReady) {
+	private := b.privateSource
+	operationsReady := b.operationsReady
+	if checker == nil || (private != nil && !operationsReady) {
 		_ = b.compactSessionsLocked()
 		b.mu.Unlock()
 		return nil
@@ -628,7 +782,9 @@ func (b *Broker) reclaimTerminatedPodSession(ctx context.Context, id string) err
 		b.mu.Unlock()
 		reply, err := private.Call(ctx, "/v1/sessions/close", body)
 		if err != nil || reply.State != "closed" {
-			return nil
+			// An inconclusive close read proves nothing about the session:
+			// it is left for the next pass instead of failing the reclaim.
+			return nil //nolint:nilerr // an inconclusive close is held, not failed
 		}
 		b.mu.Lock()
 		session = b.sessions[id]
@@ -659,6 +815,18 @@ func (b *Broker) reclaimTerminatedPodSession(ctx context.Context, id string) err
 			return err
 		}
 	}
-	defer b.mu.Unlock()
-	return b.finishSessionReleaseLocked(ctx, rec, id, session)
+	authority := b.reservationAuthorities[types.UID(rec.BindingUID)]
+	if authority == nil {
+		b.mu.Unlock()
+		return fmt.Errorf("binding authority unavailable")
+	}
+	release := &globalSessionRelease{
+		authority:     authority,
+		reservationID: rec.ReservationID,
+		sessionID:     id,
+		generation:    session.Generation,
+		owner:         sessionReservation(id, session),
+	}
+	b.mu.Unlock()
+	return b.finishGlobalSessionRelease(ctx, release)
 }

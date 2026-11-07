@@ -22,13 +22,16 @@ func (l *ledger) manifestDirectory(digest string) (string, error) {
 	return filepath.Join(l.root, manifestsDir, digest), nil
 }
 
-// storeManifestLocked publishes immutable metadata before the generation can
-// become durable. A failed publication exposes no work order or native owner.
-func (b *Broker) storeManifestLocked(ctx context.Context, rec *GenerationRecord) error {
+// storeManifest publishes immutable metadata before the generation can
+// become durable. It runs without the broker mutex — the parse reads every
+// page and a fresh publication writes and syncs them — and mutates only
+// the caller's record copy, which the admission then publishes under the
+// mutex. A failed publication exposes no work order or native owner.
+func (b *Broker) storeManifest(ctx context.Context, rec *GenerationRecord) error {
 	if rec.ManifestPagesPath == "" {
 		return nil
 	}
-	manifest, err := parseDerivedManifestContext(ctx, rec)
+	manifest, err := b.parseDerivedManifest(ctx, rec)
 	if err != nil {
 		return err
 	}
@@ -41,7 +44,7 @@ func (b *Broker) storeManifestLocked(ctx context.Context, rec *GenerationRecord)
 		return err
 	}
 	if _, err := os.Stat(destination); err == nil {
-		if _, err := protocol.LoadManifestContext(ctx, filepath.Join(destination, "manifest.json"), rec.ManifestSHA256); err != nil {
+		if _, err := protocol.LoadManifest(ctx, filepath.Join(destination, "manifest.json"), rec.ManifestSHA256); err != nil {
 			return err
 		}
 	} else if !os.IsNotExist(err) {
@@ -56,7 +59,7 @@ func (b *Broker) storeManifestLocked(ctx context.Context, rec *GenerationRecord)
 		if err := os.Mkdir(pages, 0o700); err != nil {
 			return err
 		}
-		reader := protocol.LocalPageReader(rec.ManifestPagesPath)
+		reader := b.pageReaderFor(rec.ManifestPagesPath)
 		for _, page := range manifest.TensorPages {
 			raw, err := reader(ctx, page)
 			if err != nil {
@@ -74,15 +77,21 @@ func (b *Broker) storeManifestLocked(ctx context.Context, rec *GenerationRecord)
 			return err
 		}
 		if err := os.Rename(stage, destination); err != nil {
-			return err
-		}
-		directory, err := os.Open(parent)
-		if err != nil {
-			return err
-		}
-		defer directory.Close()
-		if err := directory.Sync(); err != nil {
-			return err
+			// Two admissions of one manifest publish the same immutable
+			// directory; whichever rename lands, an identical verified copy
+			// serves equally well and the staged copy is discarded.
+			if _, loadErr := protocol.LoadManifest(ctx, filepath.Join(destination, "manifest.json"), rec.ManifestSHA256); loadErr != nil {
+				return err
+			}
+		} else {
+			directory, err := os.Open(parent)
+			if err != nil {
+				return err
+			}
+			defer directory.Close()
+			if err := directory.Sync(); err != nil {
+				return err
+			}
 		}
 	}
 	rec.ManifestPagesPath = filepath.Join(destination, "pages")

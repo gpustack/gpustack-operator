@@ -56,21 +56,23 @@ func EnsureView(st *store.Store, viewRoot, hex, digest string,
 			ErrStaleDigest, marker.Digest, digest)
 	}
 
-	// Build into a private staging directory of the view root, then move
-	// it under its content address: concurrent builds of the same view
-	// both succeed, and a view directory is either absent or whole.
-	staging, err := os.MkdirTemp(viewRoot, ".staging-*")
+	// Build into a private staging directory of the view root, owned by a
+	// lock the builder holds from before the directory exists until after
+	// promotion: concurrent builds of the same view both succeed, a view
+	// directory is either absent or whole, and recovery can prove a
+	// staging abandoned instead of guessing.
+	stage, err := NewStaging(viewRoot)
 	if err != nil {
 		return "", err
 	}
-	defer func() { _ = os.RemoveAll(staging) }()
-	view, err := Build(st.PublishedTree(hex), staging, digest, required,
+	defer stage.Release()
+	view, err := Build(st.PublishedTree(hex), stage.Dir(), digest, required,
 		st.PublishedManifestPath(hex))
 	if err != nil {
 		return "", err
 	}
 	final := filepath.Join(viewRoot, view.ID())
-	if err := publishView(staging, final, digest, required); err != nil {
+	if err := publishView(stage.Dir(), final, digest, required); err != nil {
 		return "", err
 	}
 	return final, nil

@@ -65,7 +65,7 @@ func TestSessionCleanupAuthenticatesPersistedOwner(t *testing.T) {
 			admitServe(t, b, digest, &generation, &secret)
 			owner := testOwner("tenant-a")
 			owner.Digest = digest
-			session, err := b.AdmitSession(owner, owner.Namespace, generation)
+			session, err := b.AdmitSession(t.Context(), owner, owner.Namespace, generation)
 			require.Nil(t, err)
 			pod := &core.Pod{
 				ObjectMeta: meta.ObjectMeta{Namespace: owner.Namespace, Name: "engine-1", UID: types.UID(owner.PodUID)},
@@ -132,7 +132,7 @@ func TestSessionCleanupRejectsMalformedBody(t *testing.T) {
 func newControl(t *testing.T) (*httptest.Server, *Broker, string, string) {
 	t.Helper()
 	b, _, digest := newBroker(t, defaultLimits())
-	admission, err := b.AdmitFill(fill("tenant-a", digest, 12))
+	admission, err := b.AdmitFill(t.Context(), fill("tenant-a", digest, 12))
 	require.Nil(t, err)
 	server := httptest.NewServer(NewControlHandler(b))
 	t.Cleanup(server.Close)
@@ -216,7 +216,7 @@ func TestControlRegisterAndHeartbeat(t *testing.T) {
 	assert.Equal(t, ActionNone, body["action"])
 
 	// A reader is in flight while the generation drains.
-	session, err := b.AdmitSession(testOwner("tenant-a"), "tenant-a", generation)
+	session, err := b.AdmitSession(t.Context(), testOwner("tenant-a"), "tenant-a", generation)
 	require.Nil(t, err)
 	status, body = post(t, server.URL, "/v1/heartbeat", map[string]any{
 		"workerID": "source-worker-a", "generation": generation,
@@ -233,7 +233,7 @@ func TestControlRegisterAndHeartbeat(t *testing.T) {
 	assert.Equal(t, http.StatusConflict, status)
 	assert.Equal(t, string(protocol.KindOperationState), body["kind"])
 
-	require.Nil(t, b.ReleaseSession(testOwner("tenant-a"), session.ID))
+	require.Nil(t, b.ReleaseSession(t.Context(), testOwner("tenant-a"), session.ID))
 	status, _ = post(t, server.URL, "/v1/drain-ack", map[string]any{
 		"workerID": "source-worker-a", "generation": generation,
 		"leaseID": leaseID, "secret": secret,
@@ -248,7 +248,7 @@ func TestControlQuarantineAndUnknownPaths(t *testing.T) {
 	})
 	require.Equal(t, http.StatusOK, status)
 	leaseID := body["leaseID"].(string)
-	require.Nil(t, b.FillVerified(generation, "source-worker-a", leaseID, secret, 1,
+	require.Nil(t, b.FillVerified(t.Context(), generation, "source-worker-a", leaseID, secret, 1,
 		[]RegistrationDescriptor{{
 			Name: "model.norm.weight", Addr: 4096, Length: 6,
 			MemoryType: "HOST", Backend: "nixl", WorkerUID: "source-worker-a",

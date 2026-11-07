@@ -125,9 +125,13 @@ func (b *Broker) sessionOwnerLocked(req TransferRequest, pod authorization.PodId
 }
 
 // SubmitTransfer durably prepares and marks dispatch before the single private POST.
+// The manifest reads and the live entitlement check run without the broker
+// mutex, bracketed by owner and identity revalidation before anything is
+// durably prepared; a source that moved while the caller waited is refused
+// without publishing an operation.
 func (b *Broker) SubmitTransfer(ctx context.Context, req TransferRequest, pod authorization.PodIdentity) (OperationRecord, error) {
 	b.mu.Lock()
-	session, rec, err := b.operationOwnerLocked(req, pod)
+	_, rec, err := b.operationOwnerLocked(req, pod)
 	if err != nil {
 		b.mu.Unlock()
 		return OperationRecord{}, err
@@ -136,30 +140,39 @@ func (b *Broker) SubmitTransfer(ctx context.Context, req TransferRequest, pod au
 		b.mu.Unlock()
 		return OperationRecord{}, errors.New("target window is invalid")
 	}
-	cm, err := b.cachedDerivedManifestContextLocked(ctx, rec)
+	validator := b.intentValidator
+	src := manifestSourceOf(rec)
+	intent := liveIntentOf(rec)
+	b.mu.Unlock()
+
+	cm, err := b.derivedManifest(ctx, src)
+	if err != nil {
+		return OperationRecord{}, err
+	}
+	tensor, tensorErr := cm.manifest.Tensor(ctx, req.Tensor)
+	if tensorErr != nil {
+		return OperationRecord{}, errors.New("tensor is unavailable")
+	}
+	if req.Length <= 0 || !cm.manifest.ValidTensorSpan(ctx, tensor, req.TensorOffset, req.Length) {
+		return OperationRecord{}, errors.New("tensor range is invalid")
+	}
+	checkCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	err = validator(checkCtx, intent)
+	cancel()
+	if err != nil {
+		return OperationRecord{}, errors.New("live source entitlement is unavailable")
+	}
+
+	b.mu.Lock()
+	var session *SessionRecord
+	session, rec, err = b.operationOwnerLocked(req, pod)
 	if err != nil {
 		b.mu.Unlock()
 		return OperationRecord{}, err
 	}
-	tensor, tensorErr := cm.manifest.TensorContext(ctx, req.Tensor)
-	if tensorErr != nil {
+	if !manifestSourceMatches(rec, src) || liveIntentOf(rec) != intent {
 		b.mu.Unlock()
-		return OperationRecord{}, errors.New("tensor is unavailable")
-	}
-	if req.Length <= 0 || !cm.manifest.ValidTensorSpan(ctx, tensor, req.TensorOffset, req.Length) {
-		b.mu.Unlock()
-		return OperationRecord{}, errors.New("tensor range is invalid")
-	}
-	checkCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
-	err = b.intentValidator(checkCtx, LiveIntent{
-		Namespace: rec.Namespace, IntentName: rec.IntentName, IntentUID: rec.IntentUID,
-		IntentGeneration: rec.IntentGeneration, BindingName: rec.BindingName, BindingUID: rec.BindingUID, ArtifactName: rec.ArtifactName,
-		ArtifactUID: rec.ArtifactUID, SourceGeneration: rec.SourceGeneration, Digest: rec.Digest, NodeName: rec.NodeName, WorkerID: rec.WorkerID,
-	})
-	cancel()
-	if err != nil {
-		b.mu.Unlock()
-		return OperationRecord{}, errors.New("live source entitlement is unavailable")
+		return OperationRecord{}, errors.New("source generation is unavailable")
 	}
 	if prior := b.operations[req.RequestID]; prior != nil {
 		if prior.Request != req || prior.SourceLeaseID != session.SourceLeaseID || prior.ArtifactUID != session.ArtifactUID ||

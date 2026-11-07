@@ -291,7 +291,7 @@ func TestPythonConcurrentSessionsHoldDrainAndRetireIndependently(t *testing.T) {
 			SourceGeneration: item.SourceGeneration, ManifestSHA256: item.ManifestSHA256, ManifestJSON: item.ManifestJSON,
 			TreePath: item.TreePath, Backend: "nixl",
 		}
-		assignment, perr := b.AdmitIntentFill(intent)
+		assignment, perr := b.AdmitIntentFill(t.Context(), intent)
 		require.Nil(t, perr)
 		generations[item.Namespace] = assignment.Generation
 		secrets[item.Namespace] = assignment.WorkerSecret

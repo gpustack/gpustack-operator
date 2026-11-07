@@ -2,6 +2,7 @@ package store
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -114,7 +115,10 @@ func isModelTransferSourceRef(r Ref) bool {
 // source-pool references (model-transfer.<generation>) are owned by the source broker and kept across
 // CSI mount rebuilds. Metadata view mounts are kept too: their digest comes from the view's own
 // record, and keeping them never marks the full checkpoint published.
-func (s *Store) Rebuild(mounts []Mount, device string) (Rebuilt, error) {
+// Cancellation stops waiting for the claim locks before any ledger rewrite.
+// Once the locks are held, per-reference writes and removals finish or return an I/O error;
+// the rewrite is not one atomic transaction.
+func (s *Store) Rebuild(ctx context.Context, mounts []Mount, device string) (Rebuilt, error) {
 	mounted := map[string]string{}
 	mountedViews := map[string]string{}
 	for _, m := range mounts {
@@ -130,9 +134,11 @@ func (s *Store) Rebuild(mounts []Mount, device string) (Rebuilt, error) {
 		}
 	}
 
-	s.claimMu.Lock()
-	defer s.claimMu.Unlock()
-	unlock, err := s.lockClaims()
+	if err := s.lockClaimMu(ctx); err != nil {
+		return Rebuilt{}, err
+	}
+	defer s.unlockClaimMu()
+	unlock, err := s.lockClaims(ctx)
 	if err != nil {
 		return Rebuilt{}, err
 	}

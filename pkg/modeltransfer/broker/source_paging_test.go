@@ -102,7 +102,7 @@ func TestPagedIntentReservationAndResidentReports(t *testing.T) {
 				Registrations: 3, ArtifactUID: "artifact", SourceGeneration: 1,
 				ManifestJSON: raw, ManifestSHA256: sum, Backend: backend,
 			}
-			assignment, perr := b.AdmitIntentFill(intent)
+			assignment, perr := b.AdmitIntentFill(t.Context(), intent)
 			require.Nil(t, perr)
 			require.Equal(t, int64(4<<30), assignment.ResidentBudgetBytes)
 			rec := b.records[assignment.Generation]
@@ -115,7 +115,7 @@ func TestPagedIntentReservationAndResidentReports(t *testing.T) {
 			require.NoError(t, err)
 			require.Len(t, doc.Entries, 1)
 			require.Equal(t, rec.ReservedBytes, doc.Entries[0].Bytes)
-			again, perr := b.AdmitIntentFill(intent)
+			again, perr := b.AdmitIntentFill(t.Context(), intent)
 			require.Nil(t, perr)
 			require.Equal(t, assignment, again)
 
@@ -124,7 +124,7 @@ func TestPagedIntentReservationAndResidentReports(t *testing.T) {
 			require.Nil(t, perr)
 			require.Nil(t, b.NativeStart(rec.Generation, "source", lease.ID, assignment.WorkerSecret, instance))
 			descriptor := RegistrationDescriptor{Name: "a.safetensors", Addr: 1, Length: 2 << 30, MemoryType: "HOST", Backend: backend, WorkerUID: "source"}
-			require.Nil(t, b.FillVerified(rec.Generation, "source", lease.ID, assignment.WorkerSecret, 1, []RegistrationDescriptor{descriptor}, instance))
+			require.Nil(t, b.FillVerified(t.Context(), rec.Generation, "source", lease.ID, assignment.WorkerSecret, 1, []RegistrationDescriptor{descriptor}, instance))
 			require.Equal(t, sourceAllocationBytes(2<<30, backend), rec.ResidentBytes)
 			require.Equal(t, int32(3), rec.Registrations)
 			require.Equal(t, int32(3), recordAssignment(rec).Registrations)
@@ -171,7 +171,8 @@ func TestPagedDescriptorsRemainManifestBound(t *testing.T) {
 		{"partial", []RegistrationDescriptor{partial}, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			err := (&Broker{}).validateDescriptors(rec, "source", tc.descriptors)
+			b := &Broker{}
+			err := b.validateDescriptorPlan(context.Background(), descriptorPlanOf(rec), "source", tc.descriptors)
 			require.Equal(t, tc.valid, err == nil)
 		})
 	}

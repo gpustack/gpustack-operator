@@ -187,7 +187,7 @@ func TestPythonEngineSourceOverRealBrokerTLS(t *testing.T) {
 			ReservationID: fmt.Sprintf("reservation-%d", i), Registrations: item.Registrations, ArtifactUID: item.ArtifactUID,
 			SourceGeneration: item.SourceGeneration, ManifestSHA256: item.ManifestSHA256, ManifestJSON: item.ManifestJSON, TreePath: item.TreePath, Backend: "nixl",
 		}
-		_, perr := b.AdmitIntentFill(intent)
+		_, perr := b.AdmitIntentFill(t.Context(), intent)
 		require.Nil(t, perr)
 	}
 	source := startPythonFixture(t)

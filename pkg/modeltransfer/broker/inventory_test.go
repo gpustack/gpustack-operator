@@ -163,7 +163,7 @@ func TestAuthorityInventoryPrunesDeletedReleasedBindingAndSweepsOrphanedGenerati
 		TreePath:         "/cache/tree",
 		Backend:          "nixl",
 	}
-	assignment, perr := b.AdmitIntentFill(intent)
+	assignment, perr := b.AdmitIntentFill(t.Context(), intent)
 	require.Nil(t, perr)
 	require.NotNil(t, assignment)
 
