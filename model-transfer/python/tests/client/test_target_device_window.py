@@ -78,6 +78,30 @@ def _install_hixl_runtime(monkeypatch, runtime):
     monkeypatch.setattr(client_native, "BorrowedAclOwner", FakeBorrowedAclOwner)
 
 
+@pytest.mark.parametrize("error", [None, PermissionError, ValueError])
+def test_memlock_raise_is_best_effort_before_native_start(monkeypatch, error):
+    runtime = FakeHixlRuntime()
+    _install_hixl_runtime(monkeypatch, runtime)
+    native = TargetNative("hixl", "127.0.0.1", 4 << 20)
+    calls = []
+
+    def setrlimit(kind, limits):
+        assert native.block is None
+        assert not runtime.initialize_attempts
+        calls.append((kind, limits))
+        if error is not None:
+            raise error("cannot raise memlock")
+
+    resource = SimpleNamespace(RLIMIT_MEMLOCK=8, RLIM_INFINITY=-1, setrlimit=setrlimit)
+    monkeypatch.setitem(sys.modules, "resource", resource)
+    try:
+        assert native.start() is native
+        assert calls == [(resource.RLIMIT_MEMLOCK, (-1, -1))]
+        assert len(runtime.registrations) == 1
+    finally:
+        native.close()
+
+
 def test_hixl_endpoint_initialization_retries_a_lost_port_race(monkeypatch):
     runtime = FakeHixlRuntime(initialize_failures=2)
     _install_hixl_runtime(monkeypatch, runtime)
