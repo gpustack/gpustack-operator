@@ -137,7 +137,6 @@ RUN --mount=type=bind,src=pack/model-transfer/rootfs,target=/rootfs <<EOF
         --index-url https://download.pytorch.org/whl/cu129 \
         "torch==${NIXL_TORCH_VERSION}"
     python3 -m pip install --no-cache-dir \
-        "torch==${NIXL_TORCH_VERSION}" \
         "nixl==${NIXL_VERSION}" \
         "nixl-cu12==${NIXL_VERSION}" \
         /tmp/wheels/gpustack_model_transfer-*-py3-none-any.whl
@@ -273,7 +272,6 @@ RUN --mount=type=bind,src=pack/model-transfer/rootfs,target=/rootfs <<EOF
         --index-url https://download.pytorch.org/whl/rocm7.2 \
         "torch==${NIXL_ROCM_TORCH_VERSION}"
     python3 -m pip install --no-cache-dir \
-        "torch==${NIXL_ROCM_TORCH_VERSION}" \
         /tmp/nixl-wheels/*.whl \
         /tmp/wheels/gpustack_model_transfer-*-py3-none-any.whl
     rm -rf /tmp/wheels /tmp/nixl-wheels
@@ -373,6 +371,7 @@ COPY --from=hixl-host-builder /out/hixl /tmp/hixl-host
 
 RUN --mount=type=bind,src=pack/model-transfer/rootfs,target=/rootfs <<EOF
     set -exo pipefail
+    test -f /usr/local/Ascend/cann/lib64/libcann_hixl.so
     install -m 0644 /tmp/hixl-host/libcann_hixl.so \
         "$(readlink -f /usr/local/Ascend/cann/lib64/libcann_hixl.so)"
     install -Dm644 /tmp/hixl-host/LICENSE /usr/local/share/licenses/hixl/LICENSE
