@@ -2,6 +2,7 @@ package worker
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"slices"
 	"time"
@@ -13,6 +14,7 @@ import (
 	ctrlbuilder "sigs.k8s.io/controller-runtime/pkg/builder"
 	ctrlcli "sigs.k8s.io/controller-runtime/pkg/client"
 	ctrlhandler "sigs.k8s.io/controller-runtime/pkg/handler"
+	ctrllog "sigs.k8s.io/controller-runtime/pkg/log"
 	ctrlpredicate "sigs.k8s.io/controller-runtime/pkg/predicate"
 	ctrlreconcile "sigs.k8s.io/controller-runtime/pkg/reconcile"
 
@@ -61,15 +63,21 @@ func (r *ModelTransferImageReconciler) Reconcile(ctx context.Context, _ ctrl.Req
 		}
 	}
 	pending := false
+	var failures []error
 	for vendor, matches := range byVendor {
 		if len(matches) != 1 {
-			return ctrl.Result{}, fmt.Errorf("ambiguous model-transfer DaemonSets for %s", vendor)
+			failures = append(failures, fmt.Errorf("ambiguous model-transfer DaemonSets for %s", vendor))
+			continue
 		}
 		done, err := r.reconcileFleet(ctx, matches[0])
 		if err != nil {
-			return ctrl.Result{}, err
+			failures = append(failures, err)
+			continue
 		}
 		pending = pending || !done
+	}
+	if len(failures) > 0 {
+		return ctrl.Result{}, errors.Join(failures...)
 	}
 	if pending {
 		return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
@@ -108,6 +116,8 @@ func (r *ModelTransferImageReconciler) reconcileFleet(ctx context.Context, ds *a
 			continue
 		}
 		if p.UID == "" || p.Spec.NodeName == "" || nodes[p.Spec.NodeName] {
+			ctrllog.FromContext(ctx).V(1).Info("model-transfer fleet rollout is blocked by an unidentified, unscheduled or duplicate-node Pod",
+				"daemonSet", ds.Name, "pod", p.Name, "node", p.Spec.NodeName)
 			return false, nil
 		}
 		nodes[p.Spec.NodeName] = true

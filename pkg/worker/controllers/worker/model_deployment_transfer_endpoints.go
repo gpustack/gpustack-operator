@@ -37,6 +37,26 @@ func modelTransferDiscoveryPredicate() ctrlpredicate.Predicate {
 	})
 }
 
+// modelTransferSourceDaemonSetChanged ignores status-only controller updates.
+func modelTransferSourceDaemonSetChanged() ctrlpredicate.Predicate {
+	selected := modelTransferDiscoveryPredicate()
+	return ctrlpredicate.Funcs{
+		CreateFunc:  selected.Create,
+		DeleteFunc:  selected.Delete,
+		GenericFunc: selected.Generic,
+		UpdateFunc: func(e ctrlevent.UpdateEvent) bool {
+			old, oldOK := e.ObjectOld.(*apps.DaemonSet)
+			next, nextOK := e.ObjectNew.(*apps.DaemonSet)
+			if !oldOK || !nextOK || (!selected.Create(ctrlevent.CreateEvent{Object: old}) && !selected.Update(e)) {
+				return false
+			}
+			return old.UID != next.UID || !maps.Equal(old.Labels, next.Labels) ||
+				!kubemeta.DeepEqual(old.DeletionTimestamp, next.DeletionTimestamp) ||
+				!kubemeta.DeepEqual(old.Spec, next.Spec)
+		},
+	}
+}
+
 // modelTransferSourcePodChanged ignores probe and container-status churn.
 func modelTransferSourcePodChanged() ctrlpredicate.Predicate {
 	selected := modelTransferDiscoveryPredicate()

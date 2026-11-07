@@ -393,24 +393,30 @@ func (r *ModelPrefetchReconciler) observeSource(ctx context.Context, pf *workerc
 		return obs, nil //nolint:nilerr // an unreadable runtime fleet is recorded on obs.authorityUnknown rather than returned as an error
 	}
 	qualified := make([]workercore.NodeModelStore, 0, len(stores))
+	coverageNodes := make([]core.Node, 0, len(stores))
+	nodeByName := make(map[string]*core.Node, len(nodes))
+	for i := range nodes {
+		nodeByName[nodes[i].Name] = &nodes[i]
+	}
+	for i := range stores {
+		if !targetSet[stores[i].Name] || stores[i].Status.ModelTransfer == nil {
+			continue
+		}
+		if node := nodeByName[stores[i].Name]; node != nil {
+			coverageNodes = append(coverageNodes, *node)
+		}
+	}
+	var coverageReader ctrlcli.Reader = r.Client
+	if coverageReader == nil {
+		coverageReader = r.reader()
+	}
+	coverage, err := modelstore.BindingCoversNodes(ctx, coverageReader, binding, coverageNodes)
+	if err != nil {
+		return nil, err
+	}
 	for i := range stores {
 		store := stores[i]
-		if !targetSet[store.Name] || store.Status.ModelTransfer == nil {
-			continue
-		}
-		index := slices.IndexFunc(nodes, func(node core.Node) bool { return node.Name == store.Name })
-		if index < 0 {
-			continue
-		}
-		var coverageReader ctrlcli.Reader = r.Client
-		if coverageReader == nil {
-			coverageReader = r.reader()
-		}
-		covered, err := modelstore.BindingCoversNode(ctx, coverageReader, binding, &nodes[index])
-		if err != nil {
-			return nil, err
-		}
-		if !covered {
+		if !coverage[store.Name] {
 			continue
 		}
 		filtered := store.DeepCopy()
@@ -918,8 +924,8 @@ func (r *ModelPrefetchReconciler) writeStatus(
 			"placement.instanceTypes, or drop spec.source to warm wherever this namespace's deployments run"
 	case source != nil && source.missingGrant:
 		progressing.Status, progressing.Reason = meta.ConditionFalse, "SourceGrantMissing"
-		progressing.Message = "the namespace's Binding carries no sourceMemory grant, so no source is " +
-			"prepared: the disk quota and allowPinned never grant memory; the disk delivery is unaffected"
+		progressing.Message = "the referenced Binding does not exist, so no source is prepared; " +
+			"the disk delivery is unaffected"
 	case source != nil && source.unsized:
 		progressing.Status, progressing.Reason = meta.ConditionFalse, "SourceSizeUnresolved"
 		progressing.Message = "the artifact's resolved size is not measured, so no allocation is authorized"
@@ -1306,9 +1312,7 @@ func (r *ModelPrefetchReconciler) SetupController(_ context.Context, opts contro
 		).
 		Watches(
 			&apps.DaemonSet{}, ctrlhandler.EnqueueRequestsFromMapFunc(r.enqueueAllPrefetches),
-			ctrlbuilder.WithPredicates(ctrlpredicate.NewPredicateFuncs(func(o ctrlcli.Object) bool {
-				return o.GetNamespace() == setting.DelegatedSecretNamespace && o.GetLabels()["app.kubernetes.io/component"] == "model-transfer"
-			})),
+			ctrlbuilder.WithPredicates(modelTransferSourceDaemonSetChanged()),
 		).
 		Watches(
 			&core.ConfigMap{}, ctrlhandler.EnqueueRequestsFromMapFunc(r.enqueueAllPrefetches),
