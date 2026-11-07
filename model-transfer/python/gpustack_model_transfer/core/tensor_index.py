@@ -85,9 +85,11 @@ class TensorIndex(Sequence):
             except BaseException as exc:
                 self._connection.rollback()
                 self._counts, self._count = counts, count
-                if isinstance(exc, sqlite3.IntegrityError) and getattr(
-                    exc, "sqlite_errorname", ""
-                ) in ("SQLITE_CONSTRAINT_PRIMARYKEY", "SQLITE_CONSTRAINT_UNIQUE"):
+                if isinstance(exc, sqlite3.IntegrityError) and (
+                    getattr(exc, "sqlite_errorname", "")
+                    in ("SQLITE_CONSTRAINT_PRIMARYKEY", "SQLITE_CONSTRAINT_UNIQUE")
+                    or str(exc) == "UNIQUE constraint failed: tensors.name"
+                ):
                     raise InvalidDescriptorError(
                         "duplicate tensor name in manifest"
                     ) from exc

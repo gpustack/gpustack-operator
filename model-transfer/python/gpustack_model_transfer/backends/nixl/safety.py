@@ -565,7 +565,11 @@ def check_pre_submission_fault(reader, file_path: str, span: tuple) -> SafetyVer
             evidence=(),
         )
     last = operations[-1]
-    if last.state != OpState.FAILED:
+    if (
+        last.state != OpState.FAILED
+        or reader._slots.slot_of(last.op_id) is not None
+        or reader.ledger.active_bytes != 0
+    ):
         return SafetyVerdict(
             capability="pre-submission-fault",
             status=NO_GO,

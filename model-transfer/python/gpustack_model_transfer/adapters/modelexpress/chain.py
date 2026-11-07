@@ -39,17 +39,11 @@ def build_chain(enabled: dict) -> tuple:
     """
     plugin = "gpustack"
     chain = []
-    inserted = False
     for name in BUILTIN_CHAIN:
-        if name == INSERT_BEFORE and not inserted:
+        if name == INSERT_BEFORE:
             chain.append(plugin)
-            inserted = True
         if enabled.get(name, False):
             chain.append(name)
-    if not inserted:
-        # "rdma" missing from the chain: insert at the end, still before
-        # nothing, which the later-strategy rules then judge.
-        chain.append(plugin)
     return tuple(chain)
 
 

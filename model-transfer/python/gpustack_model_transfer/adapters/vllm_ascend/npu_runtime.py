@@ -274,12 +274,6 @@ class NPURuntimeDriver:
     def profile_kv_capacity(self, model) -> int:
         raise PrerequisiteUnavailableError("KV profiling runs on the engine host")
 
-    def _require_stack(self):
-        torch = self._require_torch()
-        torch_npu = self._require_torch_npu()
-
-        return torch, torch_npu
-
 
 def _torch_dtype(torch, name: str):
     mapping = {

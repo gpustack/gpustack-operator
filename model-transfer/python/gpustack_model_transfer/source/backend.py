@@ -361,7 +361,12 @@ class NixlSourceBackend(_PagingBackend):
         except (KeyError, TypeError, ValueError):
             raise SourcePrePostError("invalid target metadata") from None
         self._prepare_write(registration, name, offset, length, target)
-        connection = self._api.connect_peer(self._agent, metadata)
+        try:
+            connection = self._api.connect_peer(self._agent, metadata)
+        except BaseException:
+            # No write was submitted, so no operation owns this file reference.
+            self._release_file(name)
+            raise
         self._peers.append(connection)
         # Keep the connection even if the post raises after submission.
         from gpustack_model_transfer.backends.nixl.errors import TransferRefusedError

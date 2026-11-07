@@ -249,7 +249,12 @@ class AclHostOwner:
         self._loader = loader
         self._uncertain_allocations = []
         self._runtime = _acquire_acl_runtime(self._device_id, loader)
-        self.bind()
+        try:
+            self.bind()
+        except BaseException:
+            _release_acl_runtime(self._runtime)
+            self._runtime = None
+            raise
 
     def bind(self):
         status = int(

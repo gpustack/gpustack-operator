@@ -756,18 +756,25 @@ class PrivateHandler(BaseHTTPRequestHandler):
     def log_message(self, *args):
         pass
 
+    def _authorized(self, *, bearer=False):
+        with open(self.server.bootstrap_file, encoding="utf-8") as handle:
+            token = handle.read(513).strip()
+        supplied = self.headers.get("Authorization", "")
+        if (
+            not token
+            or len(token) > 512
+            or not token.isascii()
+            or not supplied.isascii()
+        ):
+            return False
+        expected = "Bearer " + token if bearer else token
+        return hmac.compare_digest(expected, supplied)
+
     def do_GET(self):
         try:
             if self.path != "/v1/runtime":
                 raise Refused("unknown path")
-            with open(self.server.bootstrap_file, encoding="utf-8") as handle:
-                token = handle.read(513).strip()
-            supplied = self.headers.get("Authorization", "")
-            if (
-                not token
-                or len(token) > 512
-                or not hmac.compare_digest("Bearer " + token, supplied)
-            ):
+            if not self._authorized(bearer=True):
                 self.send_error(403)
                 return
             raw = json.dumps(
@@ -784,14 +791,7 @@ class PrivateHandler(BaseHTTPRequestHandler):
 
     def _freeze_runtime(self):
         try:
-            with open(self.server.bootstrap_file, encoding="utf-8") as handle:
-                token = handle.read(513).strip()
-            supplied = self.headers.get("Authorization", "")
-            if (
-                not token
-                or len(token) > 512
-                or not hmac.compare_digest("Bearer " + token, supplied)
-            ):
+            if not self._authorized(bearer=True):
                 self.send_error(403)
                 return
             length = int(self.headers.get("Content-Length", "0"))
@@ -814,14 +814,7 @@ class PrivateHandler(BaseHTTPRequestHandler):
             self._freeze_runtime()
             return
         try:
-            with open(self.server.bootstrap_file, encoding="utf-8") as handle:
-                token = handle.read(513).strip()
-            supplied = self.headers.get("Authorization", "")
-            if (
-                not token
-                or len(token) > 512
-                or not hmac.compare_digest(token, supplied)
-            ):
+            if not self._authorized():
                 self.send_error(403)
                 return
             length = int(self.headers.get("Content-Length", "0"))

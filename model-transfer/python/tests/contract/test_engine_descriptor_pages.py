@@ -94,3 +94,45 @@ def test_descriptor_batch_failure_rolls_back_rows_and_positions(failure):
         assert [row.name for row in index] == ["first", "partial"]
     finally:
         index.close()
+
+
+@pytest.mark.parametrize("table_kind", ["descriptors", "tensors"])
+def test_duplicate_first_batch_recovers_without_sqlite_errorname(table_kind):
+    import sqlite3
+
+    from gpustack_model_transfer.adapters.descriptor_pages import DescriptorIndex
+    from gpustack_model_transfer.core.descriptors import (
+        TensorDescriptor as StoredTensor,
+    )
+    from gpustack_model_transfer.core.errors import InvalidDescriptorError
+    from gpustack_model_transfer.core.tensor_index import TensorIndex
+
+    table = DescriptorIndex() if table_kind == "descriptors" else TensorIndex()
+    connection = table._connection
+
+    class LegacyConnection:
+        def execute(self, *args):
+            try:
+                return connection.execute(*args)
+            except sqlite3.IntegrityError as exc:
+                raise sqlite3.IntegrityError(str(exc)) from None
+
+        def __getattr__(self, name):
+            return getattr(connection, name)
+
+    table._connection = LegacyConnection()
+    row = (
+        ("first", (4,), "U8")
+        if table_kind == "descriptors"
+        else StoredTensor("first", "weights", "U8", (4,), 0, 4)
+    )
+    error = ValueError if table_kind == "descriptors" else InvalidDescriptorError
+    try:
+        assert not connection.in_transaction
+        with pytest.raises(error, match="duplicate"):
+            table.add([row, row])
+        assert len(table) == 0
+        table.add([row])
+        assert len(table) == 1
+    finally:
+        table.close()

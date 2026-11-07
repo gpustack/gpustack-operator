@@ -63,9 +63,9 @@ class DescriptorIndex(Sequence):
         except BaseException as exc:
             self._connection.rollback()
             self._count = count
-            if (
-                isinstance(exc, sqlite3.IntegrityError)
-                and getattr(exc, "sqlite_errorname", "") == "SQLITE_CONSTRAINT_UNIQUE"
+            if isinstance(exc, sqlite3.IntegrityError) and (
+                getattr(exc, "sqlite_errorname", "") == "SQLITE_CONSTRAINT_UNIQUE"
+                or str(exc) == "UNIQUE constraint failed: descriptors.name"
             ):
                 raise ValueError("duplicate checkpoint tensor names") from exc
             raise

@@ -520,7 +520,7 @@ class NativeSourceWorker:
             delay = 0
         elif self.operations is not None and self.operations.has_pending(self):
             delay = min(delay, 0.002)
-        if isinstance(self._stop_event, threading.Event) and wake is not None:
+        if wake is not None:
             wake.wait(delay)
         else:
             self._stop_event.wait(delay)

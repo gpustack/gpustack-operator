@@ -59,8 +59,8 @@ class LoadOptions:
 
     ownership: TensorOwnership = TensorOwnership.OWNED
     tie_word_embeddings: bool = False
-    borrowed: BorrowedContract = None
-    engine_config: dict = None
+    borrowed: BorrowedContract | None = None
+    engine_config: dict | None = None
 
     def validate(self) -> None:
         if not isinstance(self.ownership, TensorOwnership):

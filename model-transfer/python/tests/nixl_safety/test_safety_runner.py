@@ -9,6 +9,7 @@ from datetime import datetime, timezone
 from io import StringIO
 
 import nixlutil
+import pytest
 
 from gpustack_model_transfer.acceptance.__main__ import main
 from gpustack_model_transfer.backends.nixl import NixlReader, qualify_endpoints
@@ -359,3 +360,31 @@ class TestSuitesAgainstTheInjectedRuntime(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+@pytest.mark.parametrize("held_slot,active_bytes", [(0, 0), (None, 8)])
+def test_refused_operation_is_not_safe_while_resources_remain(
+    monkeypatch, held_slot, active_bytes
+):
+    from types import SimpleNamespace
+
+    reader = open_reader(FakeNixlAPI(submit_mode=SUBMIT_REFUSE_PRE))
+    read = reader.read_bytes
+    original_slots, original_ledger = reader._slots, reader.ledger
+
+    def refuse_with_leak(*args):
+        try:
+            read(*args)
+        finally:
+            reader._slots = SimpleNamespace(slot_of=lambda _: held_slot)
+            reader.ledger = SimpleNamespace(active_bytes=active_bytes)
+
+    monkeypatch.setattr(reader, "read_bytes", refuse_with_leak)
+    try:
+        file_path, span = first_span()
+        verdict = check_pre_submission_fault(reader, file_path, span)
+        assert verdict.status == NO_GO
+        assert "slot-released" not in verdict.evidence
+    finally:
+        reader._slots, reader.ledger = original_slots, original_ledger
+        reader.close()

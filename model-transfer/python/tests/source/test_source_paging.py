@@ -685,3 +685,49 @@ def test_page_swap_reuses_overlapping_published_blocks(paged_worker, monkeypatch
     assert worker.blocks["5.safetensors"] is retained
     assert opened == ["4.safetensors"]
     assert storage.peak <= worker.assignment.resident_budget_bytes
+
+
+@pytest.mark.parametrize("paged_worker", ["nixl"], indirect=True)
+def test_failed_peer_connection_does_not_pin_the_resident_file(
+    paged_worker, monkeypatch
+):
+    worker, runtime, _ = paged_worker
+    original = runtime.connect_peer
+
+    def fail(*args):
+        raise RuntimeError("metadata import failed")
+
+    monkeypatch.setattr(runtime, "connect_peer", fail)
+    name = next(iter(worker.registration.blocks))
+    with pytest.raises(RuntimeError, match="metadata import failed"):
+        transfer(worker, name)
+    assert not worker.backend.has_active_peers()
+    monkeypatch.setattr(runtime, "connect_peer", original)
+    operation = transfer(worker, name)
+    worker.backend.close_write(operation)
+    worker.release_idle_blocks()
+    assert not worker.blocks
+
+
+@pytest.mark.parametrize("existing_owner", [False, True])
+def test_failed_acl_bind_releases_only_its_runtime_reference(
+    monkeypatch, existing_owner
+):
+    from gpustack_model_transfer.core.errors import SourceUnavailableError
+
+    monkeypatch.setattr(memory, "_ACL_RUNTIME", None)
+    monkeypatch.setattr(memory, "_ACL_BROKEN", None)
+    library = AclLibrary(Storage())
+    first = memory.AclHostOwner(loader=lambda _: library) if existing_owner else None
+    library.aclrtSetCurrentContext = Function(lambda _: 1)
+    try:
+        with pytest.raises(SourceUnavailableError, match="aclrtSetCurrentContext"):
+            memory.AclHostOwner(loader=lambda _: library)
+        if first is None:
+            assert memory._ACL_RUNTIME is None
+        else:
+            assert memory._ACL_RUNTIME is first._runtime
+            assert first._runtime.references == 1
+    finally:
+        if first is not None:
+            first.dispose()

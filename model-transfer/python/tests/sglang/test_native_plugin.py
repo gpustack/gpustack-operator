@@ -10,6 +10,18 @@ import pytest
 from gpustack_model_transfer.adapters.engine_reader import TensorDescriptor
 
 
+def test_present_engine_registration_failure_is_an_error(engine, monkeypatch, caplog):
+    import logging
+
+    from gpustack_model_transfer.adapters.sglang.plugin import register
+
+    module = sys.modules["sglang.srt.model_loader.loader"]
+    monkeypatch.setattr(module, "get_model_loader", None)
+    with caplog.at_level(logging.ERROR):
+        register()
+    assert "SGLang loader registration unavailable (TypeError)" in caplog.text
+
+
 @pytest.fixture
 def engine(monkeypatch):
     events = []

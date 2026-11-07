@@ -246,6 +246,7 @@ class ModelTransferModelLoader:
             fallbacks = []
             engine_metadata = {}
             model = driver.build_model(plan, options)
+            tied_targets = {target for _, target in plan.tied_aliases}
             for entry in plan.entries:
                 output = session.read_tensor(entry.tensor.name)
                 if not output.complete:
@@ -262,17 +263,23 @@ class ModelTransferModelLoader:
                 elif entry.role == _ROLE_TIED_ALIAS:
                     if options.ownership is TensorOwnership.BORROWED:
                         options.borrowed.visibility_fence(entry.tensor.name)
-                        if not options.borrowed.release(entry.tensor.name):
-                            fallbacks.append(entry.tensor.name)
+                        options.borrowed.release(entry.tensor.name)
+                        fallbacks.append(entry.tensor.name)
                     loaded.append(entry.tensor.name)
                 else:
                     if options.ownership is TensorOwnership.BORROWED:
+                        # Tied aliases share one storage but may release at different
+                        # times. Keep that storage owned for every consumer.
+                        tied = entry.tensor.name in tied_targets
+                        ownership = TensorOwnership.OWNED if tied else options.ownership
                         outcome = driver.store(
-                            model, entry, output.payload, ownership=options.ownership
+                            model, entry, output.payload, ownership=ownership
                         )
                         options.borrowed.visibility_fence(entry.tensor.name)
                         released = options.borrowed.release(entry.tensor.name)
-                        if outcome == "fell-back-to-owned" or not released:
+                        if tied:
+                            outcome = "fell-back-to-owned"
+                        elif outcome == "fell-back-to-owned" or not released:
                             driver.copy_to_owned(model, entry, output.payload)
                             outcome = "fell-back-to-owned"
                     else:

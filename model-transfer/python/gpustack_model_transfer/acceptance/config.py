@@ -142,7 +142,9 @@ def load_and_validate(
     if not isinstance(expires, str):
         raise RefusedError("readiness.expires must be an ISO-8601 string")
     try:
-        expires_at = datetime.fromisoformat(expires)
+        expires_at = datetime.fromisoformat(
+            expires[:-1] + "+00:00" if expires.endswith("Z") else expires
+        )
     except ValueError:
         raise RefusedError(f"readiness.expires is not ISO-8601: {expires!r}") from None
     if expires_at.tzinfo is None:

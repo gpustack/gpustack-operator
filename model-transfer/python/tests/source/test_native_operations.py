@@ -526,3 +526,26 @@ def test_hixl_unknown_failures_emit_distinct_fixed_stage_logs(caplog):
         assert "peer" not in logs[0] and "2000" not in logs[0] and "777" not in logs[0]
         stages.append(logs[0].rsplit("stage ", 1)[-1])
     assert stages == ["connect", "submit", "connect"]
+
+
+@pytest.mark.parametrize(
+    "method,path",
+    [("GET", "/v1/runtime"), ("POST", "/v1/runtime/drain"), ("POST", "/v1/operations")],
+)
+def test_non_ascii_authorization_is_forbidden(tmp_path, method, path):
+    token = tmp_path / "bootstrap"
+    token.write_text("private-token")
+    server = PrivateServer(None, str(token), ("127.0.0.1", 0))
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    connection = http.client.HTTPConnection(*server.server_address)
+    try:
+        connection.request(method, path, headers={"Authorization": "Bearer café"})
+        response = connection.getresponse()
+        assert response.status == 403
+        response.read()
+    finally:
+        connection.close()
+        server.shutdown()
+        server.server_close()
+        thread.join()

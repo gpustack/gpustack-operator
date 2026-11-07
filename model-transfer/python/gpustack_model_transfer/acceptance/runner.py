@@ -98,7 +98,9 @@ def _parse_now(value):
     if value is None:
         return None
     try:
-        instant = datetime.fromisoformat(value)
+        instant = datetime.fromisoformat(
+            value[:-1] + "+00:00" if value.endswith("Z") else value
+        )
     except ValueError:
         return _INVALID_NOW
     if instant.tzinfo is None:

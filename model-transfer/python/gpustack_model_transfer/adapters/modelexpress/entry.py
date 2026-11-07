@@ -426,13 +426,17 @@ class GpustackLoadStrategy(_BASE):
             self._native = None
 
     def abort(self, result, ctx):
-        # Native loading already aborted its session and retained unknown DMA.
+        # Abort leaves no proof that this process can safely load another model.
+        global _process_unusable
+        _process_unusable = True
         self._failed = True
         self._native = None
         result.publishable = False
         ctx.p2p_enabled = False
 
     def rollback(self, ctx):
+        global _process_unusable
+        _process_unusable = True
         self._failed = True
         self._native = None
 

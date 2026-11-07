@@ -135,6 +135,8 @@ class TorchRuntimeDriver:
             model.mutated = True
             return "owned"
         dtype = str(buffer.dtype).replace("torch.", "")
+        # frombuffer exposes writable storage; copy the immutable payload before
+        # giving Torch a view, then copy into the owned device parameter.
         raw = torch.frombuffer(bytearray(payload), dtype=_torch_dtype(torch, dtype))
         buffer.copy_(raw.reshape(buffer.shape))
         model.mutated = True

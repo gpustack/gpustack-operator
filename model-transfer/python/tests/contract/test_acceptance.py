@@ -268,3 +268,23 @@ class TestAcceptanceExecution(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def test_utc_z_timestamps_work_with_legacy_iso_parser(tmp_path, monkeypatch):
+    from gpustack_model_transfer.acceptance import config, runner
+
+    class LegacyDatetime:
+        @staticmethod
+        def fromisoformat(value):
+            if value.endswith("Z"):
+                raise ValueError("Python 3.10 does not accept Z")
+            return datetime.fromisoformat(value)
+
+    monkeypatch.setattr(config, "datetime", LegacyDatetime)
+    monkeypatch.setattr(runner, "datetime", LegacyDatetime)
+    assert runner._parse_now("2030-01-01T00:00:00Z") == FIXED_NOW
+    data = base_config()
+    data["readiness"]["expires"] = "2031-01-01T00:00:00Z"
+    path = tmp_path / "acceptance.json"
+    path.write_text(json.dumps(data))
+    config.load_and_validate(str(path), "local", "contract", None, now=FIXED_NOW)

@@ -90,4 +90,9 @@ def register() -> None:
             if lmu_mod is not None and hasattr(lmu_mod, "get_model_loader"):
                 lmu_mod.get_model_loader = _wrapped_get_model_loader
     except Exception as exc:
-        _LOG.warning("SGLang loader registration unavailable (%s)", type(exc).__name__)
+        log = (
+            _LOG.debug
+            if isinstance(exc, ModuleNotFoundError) and exc.name == "sglang"
+            else _LOG.error
+        )
+        log("SGLang loader registration unavailable (%s)", type(exc).__name__)

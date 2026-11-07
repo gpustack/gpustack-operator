@@ -182,3 +182,25 @@ class TestStrategySurface(EnvSnapshotTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def test_abort_and_rollback_prevent_another_strategy_in_the_same_process(monkeypatch):
+    from types import SimpleNamespace
+
+    import pytest
+
+    from gpustack_model_transfer.adapters.modelexpress import entry
+
+    monkeypatch.setattr(entry, "validate_environment", lambda: None)
+    monkeypatch.setattr(entry, "_vllm_context", lambda ctx: ctx)
+    monkeypatch.setattr(entry, "_process_unusable", False)
+    for method in ("abort", "rollback"):
+        monkeypatch.setattr(entry, "_process_unusable", False)
+        strategy = entry.GpustackLoadStrategy()
+        ctx = SimpleNamespace(p2p_enabled=True)
+        if method == "abort":
+            strategy.abort(SimpleNamespace(publishable=True), ctx)
+        else:
+            strategy.rollback(ctx)
+        with pytest.raises(entry.StrategyRecoveryError):
+            entry.GpustackLoadStrategy().is_available(ctx)
