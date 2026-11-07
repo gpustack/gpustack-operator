@@ -1400,6 +1400,163 @@
       "title": "modelManager",
       "type": "object"
     },
+    "modelTransfer": {
+      "description": "Remote weight delivery (model-transfer): the source runtime's identity and\npolicy, the per-manufacturer broker+worker DaemonSets, their serving\ncertificates and headless Services. Remote delivery stays\nOFF until an administrator turns it on here — `modelTransfer.enabled=false` ships\nnothing and declares nothing, so a cluster that never opts in keeps every Pod,\ncondition and status field exactly as it was. Rollback is the same switch read\nbackwards: back to `Disabled`, and the worker reasserts it on its next start.",
+      "properties": {
+        "brokerResources": {
+          "description": "The broker container's resources.",
+          "properties": {
+            "limits": {
+              "properties": {
+                "memory": {
+                  "default": "512Mi",
+                  "title": "memory",
+                  "type": "string"
+                }
+              },
+              "required": [],
+              "title": "limits",
+              "type": "object"
+            },
+            "requests": {
+              "properties": {
+                "cpu": {
+                  "default": "100m",
+                  "title": "cpu",
+                  "type": "string"
+                },
+                "memory": {
+                  "default": "128Mi",
+                  "title": "memory",
+                  "type": "string"
+                }
+              },
+              "required": [],
+              "title": "requests",
+              "type": "object"
+            }
+          },
+          "required": [],
+          "title": "brokerResources",
+          "type": "object"
+        },
+        "enabled": {
+          "default": false,
+          "description": "Deploy the remote delivery source runtime: a ServiceAccount and the minimal RBAC\na source broker runs under, one broker+worker DaemonSet per manufacturer named in\n`images`, the session serving certificate each broker's TLS-only listener serves\nunder, and a headless Service per manufacturer an engine resolves exact source\nendpoints through. Nothing here grants a device, a cache path, or a tenant secret,\nand a disk-only warm-up Pod never uses this identity. With `images` empty the\nidentity ships and no source runtime does; with `enabled=false` none of it renders.",
+          "title": "enabled",
+          "type": "boolean"
+        },
+        "env": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "description": "Environment entries on the source broker and worker, layered after image\ndefaults and before managed identity. `GPUSTACK_MODEL_TRANSFER_HIXL_RESIDENT_BUDGET_BYTES`\nsets the HIXL registration paging threshold and budget (default 16 GiB;\nnonzero values below 1 GiB resolve up to 1 GiB, while zero uses the default).\n`GPUSTACK_MODEL_TRANSFER_SOURCE_MAX_MEMORY_BYTES`\nand `GPUSTACK_MODEL_TRANSFER_SOURCE_MIN_MEMORY_BYTES` are managed by the chart\nfrom `source.maxMemoryBytes` and `source.minMemoryBytes`. The engine reader\nreads `GPUSTACK_MODEL_TRANSFER_MAX_WINDOW_BYTES` from its own environment\n(default 8 GiB; the legal range is 1 GiB through 1 TiB); this map does not\nconfigure serving engines. These windows do not replace the Binding grant or\nthe node ceiling.",
+          "required": [],
+          "title": "env",
+          "type": "object"
+        },
+        "extraArgs": {
+          "description": "Extra argument lines appended verbatim to the source broker's command,\nafter the chart's own arguments. Each entry is one argument word.",
+          "items": {
+            "type": "string"
+          },
+          "title": "extraArgs",
+          "type": "array"
+        },
+        "images": {
+          "additionalProperties": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "description": "Manufacturer-to-image map for the remote delivery source DaemonSets (`amd`,\n`ascend`, `nvidia`). Values are full image references, for example\n{nvidia: \"gpustack/model-transfer:v0.0.1-cuda12.9\",\namd: \"gpustack/model-transfer:v0.0.1-rocm7.2\",\nascend: \"gpustack/model-transfer:v0.0.1-cann9.2-a5\"}, used as supplied — no\n`global` registry, namespace or tag rewrite applies, and a missing manufacturer\nships no source runtime for itself. Each supported key maps to its\n`global.manufacturers` row: the row's PCI vendor is the DaemonSet's placement\nrequirement (`nodeSelector`) and its runtime fields decide driver injection.\nDefaults cover NVIDIA, AMD and Ascend A5. Disk warm-up retains its separate\nlightweight Python Alpine image.",
+          "properties": {
+            "amd": {
+              "default": "gpustack/model-transfer:v0.0.1-rocm7.2",
+              "title": "amd",
+              "type": "string"
+            },
+            "ascend": {
+              "default": "gpustack/model-transfer:v0.0.1-cann9.2-a5",
+              "title": "ascend",
+              "type": "string"
+            },
+            "nvidia": {
+              "default": "gpustack/model-transfer:v0.0.1-cuda12.9",
+              "title": "nvidia",
+              "type": "string"
+            }
+          },
+          "required": [],
+          "title": "images",
+          "type": "object"
+        },
+        "nodeSelector": {
+          "description": "Node selector for the per-vendor source DaemonSets, merged under each\nmanufacturer's mandatory PCI label; it narrows which selected nodes run a\nvendor's source Pod.",
+          "required": [],
+          "title": "nodeSelector",
+          "type": "object"
+        },
+        "policy": {
+          "default": "Disabled",
+          "description": "The cluster's remote delivery policy the chart declares on the worker, the\nsame way `modelManager.enabled` declares the delivery mode: Disabled, the\ndelivery is off; Require, a qualified replica's startup holds until a\nprepared source serves the weights and never falls back; Prefer, remote\ndelivery is used when a prepared source is available and the declared\nidentity-preserving fallback otherwise. Declared only while `enabled`; Require\nand Prefer additionally need the model-manager plugin installed, which the\nworker's Setting admission enforces independently of this value.",
+          "enum": [
+            "Disabled",
+            "Require",
+            "Prefer"
+          ],
+          "required": [],
+          "title": "policy"
+        },
+        "serviceAccount": {
+          "description": "The source workers' ServiceAccount name; an empty name derives\n`\u003cfullname\u003e-model-transfer`.",
+          "properties": {
+            "name": {
+              "default": "",
+              "title": "name",
+              "type": "string"
+            }
+          },
+          "required": [],
+          "title": "serviceAccount",
+          "type": "object"
+        },
+        "source": {
+          "description": "The source broker's node memory window and session policy. `maxMemoryBytes`\nis the transfer buffer ceiling: `0` derives one sixteenth of the node's total\nRAM at node start, floored at `minMemoryBytes`, and a positive value below\n`minMemoryBytes` silently resolves up to it. `minMemoryBytes` defaults to\n1 GiB (1073741824); a lower value resolves up to 1 GiB. The worker checks\navailable RAM before initial allocation when it can read the figure.\n`maxSessions` caps concurrent source sessions; zero resolves to 64. Negative\nvalues are rejected by chart validation.",
+          "properties": {
+            "maxMemoryBytes": {
+              "type": "integer"
+            },
+            "maxSessions": {
+              "type": "integer"
+            },
+            "minMemoryBytes": {
+              "type": "integer"
+            }
+          },
+          "required": [],
+          "title": "source",
+          "type": "object"
+        },
+        "tolerations": {
+          "description": "Tolerations for the per-vendor source DaemonSets. Defaults tolerate every\ntaint, so every node carrying the matching accelerator can serve its weights\nremotely.",
+          "items": {
+            "required": [],
+            "type": "object"
+          },
+          "title": "tolerations",
+          "type": "array"
+        },
+        "workerResources": {
+          "description": "The source worker container's resources. Empty by default, which renders\nno resources block so the worker sizes its transfer buffer from the node's\nRAM via `/proc/meminfo` without a container cgroup memory cap. Set explicit\nrequests and limits here when you want Kubernetes resource bounds on the\nworker container.",
+          "required": [],
+          "title": "workerResources",
+          "type": "object"
+        }
+      },
+      "required": [],
+      "title": "modelTransfer",
+      "type": "object"
+    },
     "nameOverride": {
       "default": "",
       "description": "Override the chart name used in resource names.",

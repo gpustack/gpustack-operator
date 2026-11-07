@@ -97,7 +97,7 @@ def _discover_harness(context):
     if not spec:
         return None, (
             "no lifecycle harness on this host: this suite runs on an "
-            "approved source plus target hosts through testing/model-transfer or "
+            "approved source plus target hosts through a configured harness or "
             f"against a harness injected as runtime=; set {HARNESS_VARIABLE} "
             'to "module:factory" on the cluster host'
         )

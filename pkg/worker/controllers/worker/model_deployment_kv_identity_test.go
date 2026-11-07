@@ -82,7 +82,7 @@ func TestModelDeploymentKVIdentityReachesTheEngine(t *testing.T) {
 			}
 			cli := newModelDeploymentClient(md, newRenderInstanceType(), artifactFixture("", true, true))
 			r := &ModelDeploymentReconciler{Client: cli}
-			weights, err := r.resolveModelDeploymentWeights(context.Background(), md)
+			weights, err := r.resolveModelDeploymentWeights(context.Background(), md, nil)
 			require.NoError(t, err)
 			var conn *ModelDeploymentConnectorInput
 			if c.store {

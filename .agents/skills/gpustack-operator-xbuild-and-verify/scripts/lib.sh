@@ -50,6 +50,9 @@ XB_PTY_CHUNK="${XB_PTY_CHUNK:-1024}"
 
 _xb_filter() { grep -avE "${XB_BANNER_RE}" || true; }
 
+# Quote an argument for the target shell, including paths containing apostrophes.
+_xb_quote() { printf "'%s'" "${1//\'/\'\\\'\'}"; }
+
 _xb_check() {
   if { [ "${XB_MODE}" = ssh ] || [ "${XB_MODE}" = pty ]; } && [ -z "${XB_HOST}" ]; then
     echo "lib.sh: XB_MODE=${XB_MODE} requires XB_HOST" >&2
@@ -97,15 +100,18 @@ _xb_pty_feed() {
 # buffer and drops it SILENTLY — which is why the callers verify the result by digest instead of
 # by exit status.
 _xb_pty_put_cmds() {
-  local src="$1" dst="$2" chunk
-  printf 'mkdir -p "$(dirname %s)"\n: > %s\n' "'${dst}'" "'${dst}.b64'"
+  local src="$1" dst="$2" chunk quoted_dst quoted_encoded
+  quoted_dst="$(_xb_quote "${dst}")"
+  quoted_encoded="$(_xb_quote "${dst}.b64")"
+  # shellcheck disable=SC2016 # dirname is evaluated on the target.
+  printf 'mkdir -p "$(dirname %s)"\n: > %s\n' "${quoted_dst}" "${quoted_encoded}"
   # The `echo` re-terminates the stream `tr` just unterminated: `fold` emits its last piece
   # without a newline otherwise, and `read` discards an unterminated line — which silently
   # dropped the whole payload of any file small enough to be one chunk.
   { base64 < "${src}" | tr -d '\n'; echo; } | fold -w "${XB_PTY_CHUNK}" | while IFS= read -r chunk; do
-    [ -n "${chunk}" ] && printf "printf '%%s' '%s' >> '%s'\n" "${chunk}" "${dst}.b64"
+    [ -n "${chunk}" ] && printf "printf '%%s' '%s' >> %s\n" "${chunk}" "${quoted_encoded}"
   done
-  printf "base64 -d < '%s' > '%s' && rm -f '%s'\n" "${dst}.b64" "${dst}" "${dst}.b64"
+  printf 'base64 -d < %s > %s && rm -f %s\n' "${quoted_encoded}" "${quoted_dst}" "${quoted_encoded}"
 }
 
 # _xb_pty_send <setup> <command> [teardown] — run <setup> (its output is discarded), then
@@ -186,7 +192,12 @@ _xb_md5() {
 # xput <local> <remote/dest> — place a file on the target.
 xput() {
   _xb_check || return 2
-  local src="$1" dst="$2"
+  local src="$1" dst="$2" quoted_dst
+  quoted_dst="$(_xb_quote "${dst}")"
+  if [ ! -f "${src}" ] || [ ! -r "${src}" ]; then
+    echo "lib.sh: cannot read source file: ${src}" >&2
+    return 1
+  fi
   if [ "${XB_MODE}" = pty ]; then
     local want got
     want="$(_xb_md5 "${src}")"
@@ -194,7 +205,7 @@ xput() {
     # spellings are not interchangeable and a rented instance is not guaranteed to carry the GNU
     # one. Hardcoding md5sum here would report a file that arrived perfectly well as corrupt.
     got="$(_xb_pty_send "$(_xb_pty_put_cmds "${src}" "${dst}")" \
-             "if command -v md5sum >/dev/null 2>&1; then md5sum < '${dst}' | cut -d' ' -f1; else md5 -q '${dst}'; fi")" \
+             "if command -v md5sum >/dev/null 2>&1; then md5sum < ${quoted_dst} | cut -d' ' -f1; else md5 -q ${quoted_dst}; fi")" \
       || return 1
     got="$(printf '%s\n' "${got}" | tr -d '[:space:]')"
     if [ "${got}" != "${want}" ]; then
@@ -204,11 +215,11 @@ xput() {
     return 0
   fi
   if [ "${XB_MODE}" = ssh ]; then
-    # shellcheck disable=SC2086  # XB_SSH_OPTS is word-split on purpose
-    ssh ${XB_SSH_OPTS} "${XB_HOST}" "mkdir -p \"\$(dirname '${dst}')\"" >/dev/null 2>&1
-    # shellcheck disable=SC2086
-    base64 < "${src}" | ssh ${XB_SSH_OPTS} "${XB_HOST}" "base64 -d > '${dst}'" >/dev/null 2>&1
-    return "${PIPESTATUS[1]}"
+    # shellcheck disable=SC2086,SC2029 # Options split locally; the destination is shell-quoted.
+    ssh ${XB_SSH_OPTS} "${XB_HOST}" "mkdir -p \"\$(dirname ${quoted_dst})\"" >/dev/null 2>&1 || return 1
+    # shellcheck disable=SC2086,SC2029
+    base64 < "${src}" | ssh ${XB_SSH_OPTS} "${XB_HOST}" "base64 -d > ${quoted_dst}" >/dev/null 2>&1
+    return $?
   fi
   mkdir -p "$(dirname "${dst}")" && cp "${src}" "${dst}"
 }

@@ -9,6 +9,9 @@ import (
 
 	grpccodes "google.golang.org/grpc/codes"
 	grpcstatus "google.golang.org/grpc/status"
+
+	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
+	"gpustack.ai/gpustack/pkg/nodefeature"
 )
 
 // Host trees the allocation response reads. They are vars rather than consts for the reason this
@@ -24,6 +27,12 @@ var (
 	// response's existence check runs against that directory rather than a compiled-in string,
 	// which is what lets a fixture stand the nodes it wants a host to carry.
 	rdmaDevNodesDir = devInfinibandDir
+
+	// ascendDriverDir is where the node's Ascend driver tree lives on the host. HIXL and HCCL
+	// read it directly -- hccn_tool and the driver libraries among it -- and ascend-docker-runtime
+	// does not mount it in full, so an Ascend node's RDMA response carries it read-only. A var
+	// for the same fixture reason as the two roots above: a test cannot create the real path.
+	ascendDriverDir = "/usr/local/Ascend/driver"
 )
 
 // rdmaCmName is the node-level RDMA connection-manager character device. It belongs to the host
@@ -187,7 +196,42 @@ func (s *rdmaServer) allocateContainer(
 		ctrResp.Devices = append(ctrResp.Devices, cm)
 	}
 
+	// An Ascend node's containers read the driver tree directly, and the vendor runtime does not
+	// mount it in full, so the response carries it read-only. The mount is a node fact like the
+	// connection manager is, and it is subject to the same tolerated absence: a host that carries
+	// no driver tree (a non-Ascend accelerator, or one whose runtime lays the driver down itself)
+	// gets a response with no mount rather than an error.
+	if hasAscendAccelerator(devs) {
+		if m := NewROMount(ascendDriverDir); m != nil {
+			ctrResp.Mounts = append(ctrResp.Mounts, m)
+		}
+	}
+
 	return ctrResp, nil
+}
+
+// hasAscendAccelerator reports whether the inventory names this node an Ascend accelerator node.
+// The detector records the manufacturer on every group it profiles, and the node labels carry the
+// same fact for the scheduler; either source naming Ascend is enough, and both are read because a
+// pass mid-flight can have converged one before the other.
+func hasAscendAccelerator(devs *workercore.Devices) bool {
+	for i := range devs.Spec.Groups {
+		if devs.Spec.Groups[i].Manufacturer == nodefeature.ManufacturerAscend {
+			return true
+		}
+	}
+	for i := range devs.Status.Groups {
+		if devs.Status.Groups[i].Manufacturer == nodefeature.ManufacturerAscend {
+			return true
+		}
+	}
+	prefix := nodefeature.AcceleratableFeatureLabelPrefix + nodefeature.ManufacturerAscend
+	for label := range devs.Labels {
+		if strings.HasPrefix(label, prefix) {
+			return true
+		}
+	}
+	return false
 }
 
 // grantedEndpoints resolves each granted device ID to the RDMA endpoint it names under the family

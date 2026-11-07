@@ -29,10 +29,10 @@ func TestInvalidateCacheIsCalledOnlyFromTests(t *testing.T) {
 			return err
 		}
 		if d.IsDir() {
-			// ".claude" holds agent worktrees that embed full copies of this repository
-			// (gitignored, so never part of the build); scanning them flags the copies.
+			// Ignored worktrees and build caches can contain copies of this repository
+			// and upstream modules; they are not production sources for this package.
 			switch d.Name() {
-			case ".git", ".claude", "staging", "vendor", ".sbin":
+			case ".git", ".claude", ".dist", "staging", "vendor", ".sbin":
 				return fs.SkipDir
 			}
 

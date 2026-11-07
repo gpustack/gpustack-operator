@@ -58,8 +58,41 @@ const (
 // A nil one is a deployment that names no artifact, which renders exactly what it rendered before
 // the field existed.
 type ModelDeploymentArtifactRender struct {
-	// Delivery is PVC, Engine, Node or Image.
+	// Delivery is PVC, Engine, Node, Image or Remote.
 	Delivery workercore.ModelDeploymentModelDelivery
+
+	// ModelTransferFallback is the declared identity-preserving fallback of a Remote
+	// delivery: Node or Engine, per the cluster's delivery mode, with the
+	// verified-node-only restriction applied. Empty for every other
+	// delivery.
+	ModelTransferFallback workercore.ModelDeploymentModelDelivery
+
+	// ModelTransferPolicy is the cluster policy the Remote delivery was resolved
+	// under, echoed into the deployment status's remote view.
+	ModelTransferPolicy string
+
+	// ModelTransferBackend is the transfer backend the role's pool qualifies for,
+	// stamped per role at render (nixl on NVIDIA, hixl on Ascend) and read
+	// by the adapter through the environment. It is a hardware fact, not a
+	// spec fact, so it never takes part in a Pod's identity hash.
+	ModelTransferBackend string
+	// ModelTransferConfigMap holds public source endpoints and trust anchors in
+	// the workload namespace. Its name stays stable as source Pods change.
+	ModelTransferConfigMap string
+
+	// SourceReady says a prepared source — a node's source runtime serving
+	// a generation for the manifest digest — was seen on the pass that
+	// resolved this render. It is the observation the status publishes and
+	// the gate a Prefer deployment reads; under Require it is information,
+	// never permission.
+	SourceReady bool
+
+	// VerifiedNodeOnly says the artifact can only be delivered honestly by
+	// the node: it carries an expected digest or file patterns, which an
+	// engine download can neither anchor-verify nor filter. A Remote
+	// delivery over such an artifact falls back to Node and never weakens
+	// to an engine download.
+	VerifiedNodeOnly bool
 
 	// ArtifactName, ArtifactUID and ManifestDigest are what a node-delivered volume names, as hints
 	// the node's plugin checks against the API before it mounts anything.
@@ -92,8 +125,8 @@ type ModelDeploymentArtifactRender struct {
 	NoProxy    string
 }
 
-// model is what the engine command names as the model: the fixed mount path for a claim or a
-// node-delivered artifact, the repository for an engine download.
+// model is what the engine command names as the model: the fixed mount path for a claim, a
+// node-delivered artifact, or a remote metadata view; the repository for an engine download.
 func (a *ModelDeploymentArtifactRender) model() string {
 	if a.Delivery == workercore.ModelDeploymentModelDeliveryEngine {
 		return a.Repository
@@ -102,7 +135,9 @@ func (a *ModelDeploymentArtifactRender) model() string {
 	return ModelDeploymentModelMountPath
 }
 
-// args are the owned arguments that follow the engine's base command.
+// args are the owned arguments that follow the engine's base command. A remote delivery pins no
+// revision — its view is addressed by the manifest digest — and its load format is applied with
+// the container decorations, not here.
 func (a *ModelDeploymentArtifactRender) args() []string {
 	if a.Delivery != workercore.ModelDeploymentModelDeliveryEngine {
 		return nil
@@ -113,9 +148,12 @@ func (a *ModelDeploymentArtifactRender) args() []string {
 
 // volumes are the weights' volumes and the main container's mounts of them. A role that replaced
 // its command line gets the claim, and nothing for an engine download: its command's author
-// downloads the weights.
+// downloads the weights. A remote delivery mounts the metadata-only view, the broker token, and
+// the staged wheel directory.
 func (a *ModelDeploymentArtifactRender) volumes(takeOver bool) ([]core.Volume, []core.VolumeMount) {
 	switch {
+	case a.Delivery == workercore.ModelDeploymentModelDeliveryRemote:
+		return a.modelTransferVolumes()
 	case a.Delivery == workercore.ModelDeploymentModelDeliveryNode:
 		return []core.Volume{{
 			Name: modelDeploymentModelVolumeName, VolumeSource: a.nodeVolumeSource(),

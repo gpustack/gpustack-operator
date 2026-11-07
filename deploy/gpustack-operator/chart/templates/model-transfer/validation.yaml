@@ -1,0 +1,61 @@
+{{- /*
+Render-time validation for the model-transfer source runtime. Like the
+topograph validation, this file renders nothing: it fails the release early,
+with the reason, instead of shipping a DaemonSet whose figures the broker
+cannot read. Zero is the legitimate "follow the node's RAM" answer for the
+ceiling, and an empty `workerResources` the legitimate "size the worker
+yourself" answer, so the only failures are figures that are negative or not
+byte counts at all — everything below the floors is the broker's own silent
+resolution at start.
+*/}}
+{{- if .Values.modelTransfer.enabled }}
+{{- if gt (len .Values.modelTransfer.images) 0 }}
+{{- range $manufacturer, $image := .Values.modelTransfer.images }}
+{{- if not (hasKey $.Values.global.manufacturers $manufacturer) }}
+{{- fail (printf "modelTransfer.images names manufacturer %q, which global.manufacturers does not carry; a source DaemonSet without its PCI vendor identity would schedule on no node or on the wrong ones" $manufacturer) }}
+{{- end }}
+{{- if not (has $manufacturer (list "amd" "ascend" "nvidia")) }}
+{{- fail (printf "modelTransfer.images names manufacturer %q; only amd, ascend, and nvidia are supported by model-transfer" $manufacturer) }}
+{{- end }}
+{{- if not ($image | toString) }}
+{{- fail (printf "modelTransfer.images[%q] is empty; remove the manufacturer from the map instead, which disables its source runtime" $manufacturer) }}
+{{- end }}
+{{- end }}
+{{- $sourceCfg := $.Values.modelTransfer.source | default dict }}
+{{- range $figure := list
+    (dict "name" "source.maxMemoryBytes" "value" $sourceCfg.maxMemoryBytes)
+    (dict "name" "source.minMemoryBytes" "value" $sourceCfg.minMemoryBytes)
+}}
+{{- /* A --set number arrives as a float64 whose string form is scientific; a
+       YAML integer is an int. Normalize both to a plain integer string before
+       the byte-count check, and leave strings alone. */}}
+{{- $raw := $figure.value | toString }}
+{{- if kindIs "float64" $figure.value }}
+{{-   $raw = int64 $figure.value | toString }}
+{{- end }}
+{{- if or (eq $raw "") (eq $raw "0") (regexMatch "^0+\\.?0*$" $raw) }}
+{{- /* Zero, or unset, is the follow-the-node answer; nothing to check. */}}
+{{- else if regexMatch "^-" $raw }}
+{{- fail (printf "modelTransfer.%s %q is negative; a negative memory figure is a misconfiguration, and zero is the follow-the-node answer" $figure.name $raw) }}
+{{- else if not (regexMatch "^[0-9]+$" $raw) }}
+{{- fail (printf "modelTransfer.%s %q is not a plain byte count; the broker's memory flags read plain integers" $figure.name $raw) }}
+{{- end }}
+{{- end }}
+{{- $sessionsValue := $sourceCfg.maxSessions }}
+{{- if kindIs "float64" $sessionsValue }}
+{{-   $sessionsValue = int64 $sessionsValue }}
+{{- end }}
+{{- $sessionsRaw := $sessionsValue | toString }}
+{{- if and (ne $sessionsRaw "") (ne $sessionsRaw "0") (not (regexMatch "^[0-9]+$" $sessionsRaw)) }}
+{{- fail (printf "modelTransfer.source.maxSessions %q is not a plain non-negative integer; a figure below one resolves to the broker's default of 64" $sessionsRaw) }}
+{{- end }}
+{{- $workerResources := $.Values.modelTransfer.workerResources | default dict }}
+{{- $workerMemory := "" }}
+{{- if and (kindIs "map" $workerResources) $workerResources.limits }}
+{{-   $workerMemory = $workerResources.limits.memory | default "" | toString }}
+{{- end }}
+{{- if and (ne $workerMemory "") (eq (include "gpustack-operator.memoryBytes" $workerMemory) "") }}
+{{- fail (printf "modelTransfer.workerResources.limits.memory %q is not a plain Kubernetes memory quantity; an explicit worker limit must be a quantity the cluster can schedule" $workerMemory) }}
+{{- end }}
+{{- end }}
+{{- end }}

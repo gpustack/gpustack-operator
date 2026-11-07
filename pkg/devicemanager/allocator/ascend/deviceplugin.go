@@ -27,6 +27,13 @@ import (
 
 const Manufacturer = nodefeature.ManufacturerAscend
 
+// ascendDriverHostPath is where the node's Ascend driver tree lives on the host. HIXL and HCCL
+// read it directly -- hccn_tool and the driver libraries among it -- and ascend-docker-runtime
+// does not mount it in full, so the responder mounts the whole tree read-only into every
+// container it serves. A var rather than a const for the same reason this package's other host
+// paths are: a test cannot create /usr/local/Ascend/driver, so it redirects this to a fixture.
+var ascendDriverHostPath = "/usr/local/Ascend/driver"
+
 func New(opts device.AllocatorOptions) device.Allocator {
 	logger := opts.Logger.WithName(Manufacturer)
 	// Every mode that can put a second container on one accelerator drives the same
@@ -155,6 +162,13 @@ func (s *server) GetContainerAllocateResponse(
 	// the node rather than of the injection: a sliced container on an A5 reads the same fabric a
 	// whole-accelerator one does.
 	s.setHcclTopoFilePath(resp, accelerators)
+	// The driver tree rides along on the same terms: it is a node fact every mode reads, not a
+	// property of any one injection. A host without the directory gets no mount, which is the
+	// tolerated absence this responder already extends to the connection manager and the
+	// topology file -- the container keeps whatever driver path its runtime lays down itself.
+	if m := deviceplugin.NewROMount(ascendDriverHostPath); m != nil {
+		resp.Mounts = append(resp.Mounts, m)
+	}
 
 	return resp, nil
 }

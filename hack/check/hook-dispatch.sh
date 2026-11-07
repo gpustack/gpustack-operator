@@ -142,6 +142,7 @@ expect_vendor_note() {
 # a covering set in agents_shell_lint() that is not the gate plus the "skills" rows.
 LINTSH="$ROOT/hack/lint.sh"
 CLASSIFY=(
+  "build-pipeline-selftest|skills"
   "gpustack::lint::run|none"
   "symbols-selftest|none"
   "symbols|skills"
@@ -300,6 +301,11 @@ expect "a clean tree runs no target" ""
 build
 printf 'image: changed\n' > "$TREE/deploy/gpustack-operator/chart/values.yaml"
 expect "a chart source runs the chart targets and the code gate" "generate chart,lint,lint chart"
+
+build
+mkdir -p "$TREE/model-transfer/python/gpustack_model_transfer"
+printf 'x = 1\n' > "$TREE/model-transfer/python/gpustack_model_transfer/mod.py"
+expect "a Python source runs the Python ruff gate and the code gate" "lint,lint python"
 
 # --- the vendoring warning, whose test is anchored ---------------------------
 

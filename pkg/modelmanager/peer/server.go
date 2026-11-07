@@ -230,6 +230,7 @@ func Listen(port int, auth AuthOptions) (net.Listener, error) {
 func (s *Server) Serve(ctx context.Context, lis net.Listener) error {
 	srv := &http.Server{
 		Handler:           s.Handler(),
+		ErrorLog:          klog.NewStandardLogger("WARNING"),
 		ReadHeaderTimeout: 30 * time.Second,
 	}
 	gp := gox.GroupWithContextIn(ctx)

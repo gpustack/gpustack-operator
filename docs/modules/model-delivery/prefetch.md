@@ -43,6 +43,13 @@ namespace a *`quota.bytes`* budget and, with *`allowPinned`*, the right to pin. 
 (there is no default pool a binding falls back to) and frozen: *`storeRefs`* cannot move, the budget
 can only grow, and *`allowPinned`* only turns on.
 
+Optional *`spec.sourceMemory`* caps source reservations shared by this Binding's prefetches
+across nodes and manufacturers. Omit or remove it to use node limits. While present, bytes and
+registrations can only grow; sessions can change in either direction.
+
+The [source-memory examples](remote.md#source-memory-examples) use `Qwen3-8B` and
+`Qwen3.6-35B-A3B` to distinguish node capacity, per-model windows and a shared Binding grant.
+
 > **Why** — a grant that shrank under consumption would retroactively make an admitted prefetch
 > over budget, and a re-pointed grant would strand the accounting of everything admitted before the
 > edit. Both rules are admission-time refusals, so the namespace sees the refusal at the moment of

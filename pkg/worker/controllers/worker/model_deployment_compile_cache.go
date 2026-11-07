@@ -221,7 +221,9 @@ func modelDeploymentCompileCacheRenderIdentity(in ModelDeploymentCompileCacheInp
 	a := in.Artifact
 
 	switch a.Delivery {
-	case workercore.ModelDeploymentModelDeliveryNode, workercore.ModelDeploymentModelDeliveryEngine:
+	case workercore.ModelDeploymentModelDeliveryNode,
+		workercore.ModelDeploymentModelDeliveryEngine,
+		workercore.ModelDeploymentModelDeliveryRemote:
 		switch {
 		case a.ManifestDigest != "":
 			hexDigits := strings.ToLower(strings.TrimPrefix(

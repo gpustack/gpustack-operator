@@ -6,9 +6,11 @@ package v1alpha1
 // with apply.
 //
 // ModelStoreBindingSpec is the grant. EVERY FIELD IS IMMUTABLE, webhook-enforced, except
-// AllowPinned going false to true and Quota.Bytes growing: re-pointing the grant would strand the
-// old accounting, and shrinking a budget under existing consumption would retroactively make an
-// admitted prefetch over budget.
+// AllowPinned going false to true, Quota.Bytes growing, and SourceMemory being granted for the
+// first time or growing: re-pointing the grant would strand the old accounting, and shrinking a
+// budget under existing consumption would retroactively make an admitted prefetch over budget.
+// Taking a SourceMemory grant away is what DELETING the Binding is for, which is an audited
+// event rather than a quiet edit.
 type ModelStoreBindingSpecApplyConfiguration struct {
 	// StoreRefs names the ModelStores this namespace may prefetch into, at least one of them.
 	// Prefetch admission refuses a prefetch whose target set falls outside every granted store.
@@ -21,6 +23,18 @@ type ModelStoreBindingSpecApplyConfiguration struct {
 	// the only path to pinning: pinning is an admin-granted capability, never a tenant default.
 	//
 	AllowPinned *bool `json:"allowPinned,omitempty"`
+	// SourceMemory grants the registered memory this namespace's source preparation may hold: the
+	// ceiling its admitted reservations draw on, the registration count, and the admitted read
+	// sessions it may run. It is the whole grant and it is SEPARATE from the disk one —
+	// quota.bytes counts filesystem usage and allowPinned grants pinning, and neither authorizes
+	// a byte of memory.
+	//
+	// Absent means source preparation follows the node's configured source capacity.
+	// While present, bytes and registrations may grow but cannot shrink. Sessions may
+	// change online; existing sessions finish before a lower limit admits new ones.
+	// Removing the section returns to node capacity without releasing existing charges.
+	//
+	SourceMemory *ModelStoreBindingSourceMemoryApplyConfiguration `json:"sourceMemory,omitempty"`
 }
 
 // ModelStoreBindingSpecApplyConfiguration constructs a declarative configuration of the ModelStoreBindingSpec type for use with
@@ -55,5 +69,13 @@ func (b *ModelStoreBindingSpecApplyConfiguration) WithQuota(value *ModelStoreBin
 // If called multiple times, the AllowPinned field is set to the value of the last call.
 func (b *ModelStoreBindingSpecApplyConfiguration) WithAllowPinned(value bool) *ModelStoreBindingSpecApplyConfiguration {
 	b.AllowPinned = &value
+	return b
+}
+
+// WithSourceMemory sets the SourceMemory field in the declarative configuration to the given value
+// and returns the receiver, so that objects can be built by chaining "With" function invocations.
+// If called multiple times, the SourceMemory field is set to the value of the last call.
+func (b *ModelStoreBindingSpecApplyConfiguration) WithSourceMemory(value *ModelStoreBindingSourceMemoryApplyConfiguration) *ModelStoreBindingSpecApplyConfiguration {
+	b.SourceMemory = value
 	return b
 }

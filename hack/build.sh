@@ -6,6 +6,7 @@ set -o pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 source "${ROOT_DIR}/hack/lib/init.sh"
+cd "${ROOT_DIR}"
 
 BUILD_DIR="${ROOT_DIR}/.dist/build"
 mkdir -p "${BUILD_DIR}"
@@ -47,16 +48,20 @@ function build() {
 
       local opts=(
         "-trimpath"
+        "-buildvcs=false"
         "-ldflags=${ldflags[*]}${extldflags}"
         "-o=${output}"
       )
       if [[ ${#BUILD_TAGS[@]} -gt 0 ]]; then
-        opts+=("-tags=\"${BUILD_TAGS[*]}\"")
+        opts+=("-tags=${BUILD_TAGS[*]}")
       fi
-      set -x
-      GOOS=${target_os} GOARCH=${target_arch} CGO_ENABLED=1 \
-        go build "${opts[@]}" "${ROOT_DIR}/cmd/${task}"
-      set +x
+      (
+        gpustack::build::setup_env "${target_os}" "${target_arch}"
+        set -x
+        GOOS=${target_os} GOARCH=${target_arch} go build "${opts[@]}" "${ROOT_DIR}/cmd/${task}"
+        set +x
+        gpustack::build::verify_binary "${output}" "${target_os}" "${target_arch}"
+      )
     done
   done
 }

@@ -945,7 +945,8 @@ func (r *InstanceReconciler) resolveInstanceModelVolumes(
 		}
 		// One Pod mounts it, so a claim that cannot be shared still serves.
 		// An Instance has no engine to download a hub artifact, so the node delivers it.
-		w, err := resolveModelArtifactWeights(ctx, r.Client, inst.Namespace, av.Model.ArtifactRef.Name, 1, true)
+		// An Instance serves no remote delivery, so it carries no remote state.
+		w, err := resolveModelArtifactWeights(ctx, r.Client, inst.Namespace, av.Model.ArtifactRef.Name, 1, true, nil)
 		if err != nil {
 			return nil, "", err
 		}

@@ -26,9 +26,21 @@ type ModelDeploymentModelStatusApplyConfiguration struct {
 	// Delivery is how the weights reach the engine: "PVC", the claim mounted read-only at a fixed
 	// path; "Engine", the engine downloading the pinned commit itself; "Node", the node's
 	// model-manager plugin materializing the verified files and mounting them read-only at the same
-	// fixed path; or "Image", kubelet pulling the pinned OCI image into a read-only image volume.
+	// fixed path; "Image", kubelet pulling the pinned OCI image into a read-only image volume; or
+	// "Remote", the weights arriving from a prepared in-memory source over a qualified transfer,
+	// with no complete checkpoint on this filesystem.
+	//
+	// "Remote" is the configured outcome, and it does not summarize the replicas: the delivery
+	// each replica actually uses right now — including which took the declared fallback — is in
+	// status.model.remote, and that view is what a reader of a half-rolled-out fallback trusts.
 	//
 	Delivery *workerv1alpha1.ModelDeploymentModelDelivery `json:"delivery,omitempty"`
+	// Remote is the remote-delivery view, present when the weights are configured to arrive from
+	// a prepared source. It is ABSENT for every legacy delivery, so a consumer that has never
+	// heard of remote delivery keeps reading delivery alone, and an absent view never reads as a
+	// remote delivery that silently changed its mind.
+	//
+	Remote *ModelDeploymentModelRemoteStatusApplyConfiguration `json:"remote,omitempty"`
 }
 
 // ModelDeploymentModelStatusApplyConfiguration constructs a declarative configuration of the ModelDeploymentModelStatus type for use with
@@ -66,5 +78,13 @@ func (b *ModelDeploymentModelStatusApplyConfiguration) WithManifestDigest(value 
 // If called multiple times, the Delivery field is set to the value of the last call.
 func (b *ModelDeploymentModelStatusApplyConfiguration) WithDelivery(value workerv1alpha1.ModelDeploymentModelDelivery) *ModelDeploymentModelStatusApplyConfiguration {
 	b.Delivery = &value
+	return b
+}
+
+// WithRemote sets the Remote field in the declarative configuration to the given value
+// and returns the receiver, so that objects can be built by chaining "With" function invocations.
+// If called multiple times, the Remote field is set to the value of the last call.
+func (b *ModelDeploymentModelStatusApplyConfiguration) WithRemote(value *ModelDeploymentModelRemoteStatusApplyConfiguration) *ModelDeploymentModelStatusApplyConfiguration {
+	b.Remote = value
 	return b
 }

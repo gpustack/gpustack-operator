@@ -181,6 +181,71 @@ app.kubernetes.io/name: {{ include "gpustack-operator.modelManager.fullname" . }
 {{- end -}}
 
 {{/*
+Model-transfer resource name: "<fullname>-model-transfer". The per-manufacturer
+resources suffix it: "<name>-<manufacturer>". Both the DaemonSet names and the
+serving-certificate Secret names are derived from this one helper, so the Go
+renderer that has to find a vendor's public CA can derive the same names.
+*/}}
+{{- define "gpustack-operator.modelTransfer.fullname" -}}
+{{- printf "%s-model-transfer" (include "gpustack-operator.fullname" .) | trunc 63 | trimSuffix "-" -}}
+{{- end -}}
+
+{{/*
+Model-transfer metadata labels.
+*/}}
+{{- define "gpustack-operator.modelTransfer.labels" -}}
+{{ include "gpustack-operator.commonLabels" . }}
+app.kubernetes.io/component: model-transfer
+app.kubernetes.io/name: {{ include "gpustack-operator.modelTransfer.fullname" . }}
+{{- end -}}
+
+{{/*
+Model-transfer selector labels. Kept minimal and stable across upgrades; the
+per-manufacturer `gpustack.ai/manufacturer` label is added beside these in the
+DaemonSet's selector, matching the device-manager's identity pattern.
+*/}}
+{{- define "gpustack-operator.modelTransfer.selectorLabels" -}}
+app.kubernetes.io/part-of: gpustack-operator
+app.kubernetes.io/component: model-transfer
+app.kubernetes.io/name: {{ include "gpustack-operator.modelTransfer.fullname" . }}
+{{- end -}}
+
+{{/*
+Parse a Kubernetes memory quantity into a whole number of bytes, so a rendered
+limit can be checked against a rendered byte budget instead of silently
+coexisting with it. Accepts the plain-integer and the binary (KiEi) and decimal
+(kE) suffix spellings a quantity accepts; anything else returns an empty string
+and the caller decides whether that is fatal. Helm has no quantity type, so the
+check runs on strings and a mis-spelled value must not quietly pass as zero.
+*/}}
+{{- define "gpustack-operator.memoryBytes" -}}
+{{- $quantity := toString . -}}
+{{- $match := regexFind "^[0-9]+(\\.[0-9]+)?" $quantity -}}
+{{- if $match -}}
+{{- $suffix := trimPrefix $match $quantity -}}
+{{- $factor := 0.0 -}}
+{{- if eq $suffix "Ki" -}}{{- $factor = 1024.0 -}}
+{{- else if eq $suffix "Mi" -}}{{- $factor = 1048576.0 -}}
+{{- else if eq $suffix "Gi" -}}{{- $factor = 1073741824.0 -}}
+{{- else if eq $suffix "Ti" -}}{{- $factor = 1099511627776.0 -}}
+{{- else if eq $suffix "Pi" -}}{{- $factor = 1125899906842624.0 -}}
+{{- else if eq $suffix "Ei" -}}{{- $factor = 1152921504606846976.0 -}}
+{{- else if eq $suffix "k" -}}{{- $factor = 1000.0 -}}
+{{- else if eq $suffix "K" -}}{{- $factor = 1000.0 -}}
+{{- else if eq $suffix "M" -}}{{- $factor = 1000000.0 -}}
+{{- else if eq $suffix "G" -}}{{- $factor = 1000000000.0 -}}
+{{- else if eq $suffix "T" -}}{{- $factor = 1000000000000.0 -}}
+{{- else if eq $suffix "P" -}}{{- $factor = 1000000000000000.0 -}}
+{{- else if eq $suffix "E" -}}{{- $factor = 1000000000000000000.0 -}}
+{{- else if eq $suffix "" -}}{{- $factor = 1.0 -}}
+{{- end -}}
+{{- if gt $factor 0.0 -}}
+{{- mulf (float64 $match) $factor | int64 -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
 Kueue's "resources.transformations": every accelerator resource key mapped onto its
 manufacturer's single credits resource, so a ClusterQueue can advertise one credit budget
 instead of one per allocation mode. Derived from global.manufacturers rather than stated, so a

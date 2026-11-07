@@ -2,6 +2,7 @@ package worker
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"maps"
 	"slices"
@@ -9,10 +10,10 @@ import (
 	"strings"
 	"time"
 
+	apps "k8s.io/api/apps/v1"
 	core "k8s.io/api/core/v1"
 	kerrors "k8s.io/apimachinery/pkg/api/errors"
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
 	ctrlbuilder "sigs.k8s.io/controller-runtime/pkg/builder"
@@ -22,17 +23,14 @@ import (
 	ctrllog "sigs.k8s.io/controller-runtime/pkg/log"
 	ctrlpredicate "sigs.k8s.io/controller-runtime/pkg/predicate"
 	ctrlreconcile "sigs.k8s.io/controller-runtime/pkg/reconcile"
-	kueue "sigs.k8s.io/kueue/apis/kueue/v1beta2"
 
 	gpustack "gpustack.ai/gpustack/api/v1"
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
 	"gpustack.ai/gpustack/pkg/controller"
 	"gpustack.ai/gpustack/pkg/kubemeta"
 	"gpustack.ai/gpustack/pkg/modelstore"
-	"gpustack.ai/gpustack/pkg/nodefeature"
+	"gpustack.ai/gpustack/pkg/modeltransfer/broker"
 	"gpustack.ai/gpustack/pkg/setting"
-	"gpustack.ai/gpustack/pkg/systemmeta"
-	"gpustack.ai/gpustack/pkg/utils/mapx"
 	"gpustack.ai/gpustack/pkg/utils/stringx"
 	"gpustack.ai/gpustack/pkg/worker/settings"
 )
@@ -58,6 +56,9 @@ const (
 	ModelPrefetchConditionLapsed = "Lapsed"
 )
 
+// modelTransferSourcePodLabel identifies legacy inert source-holder Pods for migration.
+const modelTransferSourcePodLabel = "worker.gpustack.ai/model-transfer-source"
+
 // ModelPrefetchReconciler turns a prefetch's residency intent into one warm-up Pod per target
 // node, reads the delivery's progress from the target nodes' own reports, and pins what its
 // retention asks to keep.
@@ -68,10 +69,18 @@ const (
 // queue-name label, so neither Kueue nor the operator's Pod webhook has anything to say about it.
 type ModelPrefetchReconciler struct {
 	Client ctrlcli.Client
+	Reader ctrlcli.Reader
 	Now    func() time.Time
 }
 
 var _ ctrlreconcile.Reconciler = (*ModelPrefetchReconciler)(nil)
+
+func (r *ModelPrefetchReconciler) reader() ctrlcli.Reader {
+	if r.Reader != nil {
+		return r.Reader
+	}
+	return r.Client
+}
 
 func (r *ModelPrefetchReconciler) now() time.Time {
 	if r.Now != nil {
@@ -85,7 +94,7 @@ func (r *ModelPrefetchReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 	logger := ctrllog.FromContext(ctx)
 
 	pf := new(workercore.ModelPrefetch)
-	switch err := r.Client.Get(ctx, req.NamespacedName, pf); {
+	switch err := r.reader().Get(ctx, req.NamespacedName, pf); {
 	case kerrors.IsNotFound(err):
 		// A deleted prefetch is gone from the list, so the union recompute is what releases its
 		// pins; running here covers the case where the deleted one was the only prefetch.
@@ -98,6 +107,10 @@ func (r *ModelPrefetchReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 		// The warm-up Pods go with the object through their owner references; the pins leave with
 		// the union recompute, which no longer sees this prefetch.
 		return ctrl.Result{}, r.recomputePinned(ctx)
+	}
+
+	if err := r.removeLegacySourceHolders(ctx, pf); err != nil {
+		return ctrl.Result{}, err
 	}
 
 	// The target set comes first: it is computable before the artifact resolves, and the status's
@@ -117,15 +130,16 @@ func (r *ModelPrefetchReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 	targets, err := prefetchTargetNodes(pf, nodes.Items, deps.Items, pools)
 	if err != nil {
 		// An unparseable selector is a spec the API server's schema should have refused; report it
-		// as degraded and wait for the next generation.
+		// as degraded and wait for the next generation. No source observation exists without a
+		// target set, so the transfer view stays off.
 		logger.Error(err, "the prefetch's placement does not parse")
 		before := pf.Status.DeepCopy()
-		r.writeStatus(pf, prefetchProgress{}, err, false)
+		r.writeStatus(pf, prefetchProgress{}, err, false, nil, modelPrefetchFromRemote(ctx))
 		return ctrl.Result{}, r.commitStatus(ctx, pf, before)
 	}
 
 	artifact := new(workercore.ModelArtifact)
-	artifactErr := r.Client.Get(ctx,
+	artifactErr := r.reader().Get(ctx,
 		ctrlcli.ObjectKey{Namespace: pf.Namespace, Name: pf.Spec.ArtifactRef.Name}, artifact)
 	artifactMissing := kerrors.IsNotFound(artifactErr)
 	if artifactErr != nil && !artifactMissing {
@@ -144,6 +158,22 @@ func (r *ModelPrefetchReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 		return ctrl.Result{}, err
 	}
 	entries := modelstore.NodeEntries(stores.Items, digest)
+
+	// A source intent adds the registered-memory half: the grant's reach, the admitted
+	// generations' health and configured images. Its observations run over the target
+	// nodes only — a generation on a node this prefetch no longer names is another prefetch's
+	// business, not this status's.
+	var source *sourceObservation
+	if pf.Spec.Source != nil || pf.Status.Transfer != nil {
+		workers, planErr := r.readSourceWorkerPlan(ctx, nodes.Items, targets)
+		if planErr != nil {
+			return ctrl.Result{}, planErr
+		}
+		source, err = r.observeSource(ctx, pf, artifact, artifactMissing, digest, targets, nodes.Items, stores.Items, workers)
+		if err != nil {
+			return ctrl.Result{}, err
+		}
+	}
 
 	progress := prefetchProgress{desired: int32(len(targets))}
 	expired := map[string]bool{}
@@ -178,7 +208,7 @@ func (r *ModelPrefetchReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 	}
 
 	before := pf.Status.DeepCopy()
-	r.writeStatus(pf, progress, err, artifactMissing)
+	r.writeStatus(pf, progress, err, artifactMissing, source, modelPrefetchFromRemote(ctx))
 	if err := r.commitStatus(ctx, pf, before); err != nil {
 		return ctrl.Result{}, err
 	}
@@ -189,6 +219,17 @@ func (r *ModelPrefetchReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 		return ctrl.Result{}, err
 	}
 
+	if pf.Spec.Source != nil || pf.Status.Transfer != nil {
+		// Refresh at the first reported lease expiry, bounded by the retry interval.
+		delay := 10 * time.Second
+		if source != nil && source.nextLease > 0 && source.nextLease < delay {
+			delay = source.nextLease
+		}
+		if requeue.Requeue || (requeue.RequeueAfter > 0 && requeue.RequeueAfter < delay) {
+			return requeue, nil
+		}
+		return ctrl.Result{RequeueAfter: delay}, nil
+	}
 	if pf.Spec.Retention.TTLAfterLastUse != nil {
 		// TTL expiry is hourly by the node's own report; an hourly look keeps it enforced without
 		// pretending to be finer than the facts.
@@ -209,96 +250,282 @@ type prefetchProgress struct {
 	lapsed int32
 }
 
-// prefetchTargetNodes resolves the placement into sorted node names: the named InstanceTypes'
-// nodes, or the selector's matches, or — with no placement at all — the InstanceTypes of the
-// namespace's deployments that reference the artifact.
+// modelPrefetchFromRemote is the cluster's remote delivery policy as a
+// ModelPrefetch's reconcile reads it. It is a variable so a test can choose a
+// policy without a Settings store.
+var modelPrefetchFromRemote = func(ctx context.Context) bool {
+	return settings.ModelArtifactRemoteDeliveryPolicy.ShouldValueFromRemote(ctx) ==
+		settings.ModelArtifactRemoteDeliveryRequire
+}
+
+// sourceObservation is one pass's reading of a prefetch's source half: the grant's reach, what
+// the admission has to say, and the target nodes' generation reports. A refusal — no grant, no
+// placement, an unsized artifact, or a residency window under the floor — keeps the disk delivery
+// running and reports no transfer view.
+type sourceObservation struct {
+	grant *workercore.ModelStoreBindingSourceMemory
+
+	missingGrant     bool
+	placementMissing bool
+	unsized          bool
+	belowFloor       bool
+	authorityUnknown bool
+
+	// imageMissing says a target node has no configured source image.
+	imageMissing bool
+	nextLease    time.Duration
+
+	// admitted says the pinned authority holds a reservation for this source intent.
+	// charge is the namespace's own reservation; live generation reports separately
+	// establish whether any source is ready to serve.
+	admitted bool
+	charge   int64
+	// generations are the target nodes' reports, aggregated per generation in name order.
+	generations []workercore.ModelPrefetchTransferGeneration
+}
+
+// observeSource reads the source half through the identities it already has: the Binding grants,
+// the artifact sizes, and the target nodes' own model-transfer reports. Nothing here writes.
+func (r *ModelPrefetchReconciler) observeSource(ctx context.Context, pf *workercore.ModelPrefetch,
+	artifact *workercore.ModelArtifact, artifactMissing bool, digest string, targets []string,
+	nodes []core.Node, stores []workercore.NodeModelStore, workers sourceWorkerPlan,
+) (*sourceObservation, error) {
+	obs := &sourceObservation{}
+
+	// A source names its target set; the derived-from-deployments default an ordinary prefetch
+	// keeps is not available to it, so a missing placement is a refusal, not an expansion.
+	placement := pf.Spec.Placement
+	if placement == nil || (len(placement.InstanceTypes) == 0 && placement.NodeSelector == nil) {
+		obs.placementMissing = true
+	}
+
+	binding := new(workercore.ModelStoreBinding)
+	switch err := r.reader().Get(ctx,
+		ctrlcli.ObjectKey{Namespace: pf.Namespace, Name: pf.Spec.BindingRef.Name}, binding); {
+	case kerrors.IsNotFound(err):
+		obs.missingGrant = true
+	case err != nil:
+		return nil, err
+	default:
+		// A Binding without a sourceMemory section is a valid shape: the
+		// node's own modelTransfer.source.* capacity governs what its
+		// sources draw, so a missing section is not a missing grant.
+		obs.grant = binding.Spec.SourceMemory
+	}
+	if err := r.observeSourceCharges(ctx, pf, obs); err != nil {
+		return nil, err
+	}
+	if pf.Spec.Source == nil {
+		obs.placementMissing, obs.missingGrant = false, false
+	}
+	if pf.Spec.Source == nil || obs.placementMissing || obs.missingGrant || obs.authorityUnknown {
+		return obs, nil
+	}
+
+	// An unresolved or unsized artifact authorizes no allocation: a stale zero-size figure must
+	// never become a zero-cost Pod.
+	if artifactMissing || artifact == nil || artifact.Status.Resolved == nil ||
+		artifact.Status.Resolved.ManifestDigest == "" || artifact.Status.Resolved.SizeBytes <= 0 ||
+		artifact.Status.ObservedGeneration != artifact.Generation {
+		obs.unsized = true
+
+		return obs, nil
+	}
+	size := artifact.Status.Resolved.SizeBytes
+	// The floor check is a Binding-grant check: without a sourceMemory
+	// section there is no grant figure to check the plan against, and the
+	// node's own broker-side ceiling and floor decide at fill time.
+	if obs.grant != nil && obs.grant.Bytes.Sign() > 0 {
+		_, err := modelstore.PlanModelTransferSourceMemory(size, obs.grant.Bytes.Value())
+		switch {
+		case errors.Is(err, modelstore.ErrSourceWindowBelowFloor):
+			// The grant's headroom cannot back even the minimum source window. The
+			// policy decides: a Prefer deployment falls back to Node-to-Node Peer
+			// Sync or the local CSI disk load, and a Require deployment keeps
+			// waiting for the source node to free capacity.
+			obs.belowFloor = true
+
+			return obs, nil
+		case err != nil:
+			return nil, err
+		}
+	}
+
+	for _, node := range targets {
+		if _, _, configured := workers.Resolve(node); !configured {
+			obs.imageMissing = true
+		}
+	}
+	entries, err := broker.ReadPinnedAuthority(ctx, r.reader(), setting.DelegatedSecretNamespace, binding)
+	if err != nil || pf.UID == "" || pf.Generation < 1 || artifact.UID == "" || artifact.Generation < 1 {
+		obs.authorityUnknown = true
+		return obs, nil //nolint:nilerr // an unreadable authority is recorded on obs.authorityUnknown rather than returned as an error
+	}
+	targetSet := make(map[string]bool, len(targets))
+	for _, node := range targets {
+		targetSet[node] = true
+	}
+	own := map[string]broker.ReservationEntry{}
+	for _, entry := range entries {
+		if entry.IntentUID != string(pf.UID) || entry.IntentGeneration != pf.Generation || entry.Namespace != pf.Namespace {
+			continue
+		}
+		if entry.NodeName == "" || entry.ArtifactUID == "" || entry.SourceGeneration < 1 || entry.SourcePodUID == "" {
+			obs.authorityUnknown = true
+			return obs, nil
+		}
+		if !targetSet[entry.NodeName] || entry.ArtifactUID != string(artifact.UID) ||
+			entry.SourceGeneration != artifact.Generation || entry.Digest != digest {
+			continue
+		}
+		if _, duplicate := own[entry.Generation]; duplicate {
+			obs.authorityUnknown = true
+			return obs, nil
+		}
+		own[entry.Generation] = entry
+	}
+	if len(own) == 0 {
+		return obs, nil
+	}
+	pods, err := r.sourceRuntimePods(ctx, nodes, targets, workers)
+	if err != nil {
+		obs.authorityUnknown = true
+		return obs, nil //nolint:nilerr // an unreadable runtime fleet is recorded on obs.authorityUnknown rather than returned as an error
+	}
+	qualified := make([]workercore.NodeModelStore, 0, len(stores))
+	coverageNodes := make([]core.Node, 0, len(stores))
+	nodeByName := make(map[string]*core.Node, len(nodes))
+	for i := range nodes {
+		nodeByName[nodes[i].Name] = &nodes[i]
+	}
+	for i := range stores {
+		if !targetSet[stores[i].Name] || stores[i].Status.ModelTransfer == nil {
+			continue
+		}
+		if node := nodeByName[stores[i].Name]; node != nil {
+			coverageNodes = append(coverageNodes, *node)
+		}
+	}
+	var coverageReader ctrlcli.Reader = r.Client
+	if coverageReader == nil {
+		coverageReader = r.reader()
+	}
+	coverage, err := modelstore.BindingCoversNodes(ctx, coverageReader, binding, coverageNodes)
+	if err != nil {
+		return nil, err
+	}
+	for i := range stores {
+		store := stores[i]
+		if !coverage[store.Name] {
+			continue
+		}
+		filtered := store.DeepCopy()
+		filtered.Status.ModelTransfer.Generations = nil
+		for _, generation := range store.Status.ModelTransfer.Generations {
+			entry, ok := own[generation.Generation]
+			if !ok || entry.NodeName != store.Name || entry.Digest != generation.Digest || entry.State != "admitted" {
+				continue
+			}
+			if generation.SourcePodUID != entry.SourcePodUID || generation.SourceGeneration != artifact.Generation ||
+				generation.SourceInstanceID == "" || generation.LeaseExpiresAt == nil ||
+				!generation.LeaseExpiresAt.After(r.now()) {
+				continue
+			}
+			pod := pods[generation.SourcePodUID]
+			if pod == nil || pod.Spec.NodeName != store.Name ||
+				pod.Labels["gpustack.ai/manufacturer"] != entry.NodeScope ||
+				pod.Annotations[transferWorkerInstance] != generation.SourceInstanceID {
+				continue
+			}
+			if remaining := generation.LeaseExpiresAt.Sub(r.now()); obs.nextLease == 0 || remaining < obs.nextLease {
+				obs.nextLease = remaining
+			}
+			filtered.Status.ModelTransfer.Generations = append(filtered.Status.ModelTransfer.Generations, generation)
+		}
+		qualified = append(qualified, *filtered)
+	}
+	for _, agg := range modelstore.AggregateModelTransferGenerations(qualified, digest) {
+		obs.generations = append(obs.generations, workercore.ModelPrefetchTransferGeneration{
+			Generation: agg.Generation, ReadyNodes: agg.ReadyNodes, DrainingNodes: agg.DrainingNodes,
+			ResidentBytes: agg.ResidentBytes, Registrations: agg.Registrations,
+			ActiveSessions: agg.ActiveSessions, RejectedAdmissions: agg.RejectedAdmissions,
+		})
+	}
+
+	return obs, nil
+}
+
+// sourceRuntimePods returns only Pods owned by an unambiguous chart fleet with the configured image.
+// Pod state is not a serving signal; it merely binds a separately reported native lease to its worker.
+func (r *ModelPrefetchReconciler) sourceRuntimePods(ctx context.Context, nodes []core.Node, targets []string,
+	workers sourceWorkerPlan,
+) (map[string]*core.Pod, error) {
+	sets := new(apps.DaemonSetList)
+	if err := r.reader().List(ctx, sets, ctrlcli.InNamespace(setting.DelegatedSecretNamespace), ctrlcli.MatchingLabels{
+		"app.kubernetes.io/component": "model-transfer", "app.kubernetes.io/part-of": "gpustack-operator",
+	}); err != nil {
+		return nil, err
+	}
+	byVendor := map[string][]*apps.DaemonSet{}
+	for i := range sets.Items {
+		ds := &sets.Items[i]
+		if ds.UID == "" || ds.DeletionTimestamp != nil || ds.Labels["app.kubernetes.io/managed-by"] != "Helm" ||
+			ds.Labels["app.kubernetes.io/instance"] == "" || ds.Spec.UpdateStrategy.Type != apps.OnDeleteDaemonSetStrategyType {
+			continue
+		}
+		byVendor[ds.Labels["gpustack.ai/manufacturer"]] = append(byVendor[ds.Labels["gpustack.ai/manufacturer"]], ds)
+	}
+	vendors := map[string]string{}
+	for i := range nodes {
+		vendors[nodes[i].Name] = modelstore.NodeSourceManufacturer(&nodes[i])
+	}
+	target := map[string]bool{}
+	for _, name := range targets {
+		target[name] = true
+	}
+	list := new(core.PodList)
+	if err := r.reader().List(ctx, list, ctrlcli.InNamespace(setting.DelegatedSecretNamespace),
+		ctrlcli.MatchingLabels{"app.kubernetes.io/component": "model-transfer"}); err != nil {
+		return nil, err
+	}
+	result := map[string]*core.Pod{}
+	for i := range list.Items {
+		p := &list.Items[i]
+		vendor := vendors[p.Spec.NodeName]
+		image, _, configured := workers.Resolve(p.Spec.NodeName)
+		sets := byVendor[vendor]
+		if !target[p.Spec.NodeName] || !configured || len(sets) != 1 || p.UID == "" ||
+			p.DeletionTimestamp != nil || p.Status.Phase == core.PodFailed || p.Status.Phase == core.PodSucceeded ||
+			p.Labels["gpustack.ai/manufacturer"] != vendor || p.Annotations[transferDrainFor] != "" {
+			continue
+		}
+		owner := meta.GetControllerOf(p)
+		if owner == nil || owner.Kind != "DaemonSet" || owner.UID != sets[0].UID {
+			continue
+		}
+		index := slices.IndexFunc(p.Spec.Containers, func(c core.Container) bool { return c.Name == "worker" })
+		if index < 0 || p.Spec.Containers[index].Image != image {
+			continue
+		}
+		result[string(p.UID)] = p
+	}
+	return result, nil
+}
+
+// prefetchTargetNodes resolves the placement into sorted node names. The rule lives in
+// modelstore beside the pool resolution it consumes; this wrapper keeps the package's internal
+// call sites and tests unchanged.
 func prefetchTargetNodes(
 	pf *workercore.ModelPrefetch, nodes []core.Node, deps []workercore.ModelDeployment,
 	pools InstanceTypeFlavorNames,
 ) ([]string, error) {
-	placement := pf.Spec.Placement
-	if placement != nil && len(placement.InstanceTypes) > 0 && placement.NodeSelector != nil {
-		return nil, ErrPrefetchPlacementAmbiguous
-	}
-	typeNames := prefetchPlacementTypeNames(pf, deps)
-	if placement != nil && placement.NodeSelector != nil {
-		sel, err := meta.LabelSelectorAsSelector(placement.NodeSelector)
-		if err != nil {
-			return nil, err
-		}
-		var out []string
-		for i := range nodes {
-			if sel.Matches(labels.Set(nodes[i].Labels)) {
-				out = append(out, nodes[i].Name)
-			}
-		}
-		sort.Strings(out)
-
-		return out, nil
-	}
-
-	// The named InstanceTypes' target set is every node carrying one of the types' flavors: the
-	// pool flavors each named type selects, resolved by the schedule labels its spec derives.
-	// An InstanceType's own name is never a flavor name — flavor names are topology-qualified
-	// and count-suffixed — so comparing it against one matches nothing.
-	wanted := map[string]bool{}
-	for _, name := range typeNames {
-		for _, flavorName := range pools[name] {
-			wanted[flavorName] = true
-		}
-	}
-	var out []string
-	for i := range nodes {
-		for flavorName := range wanted {
-			if matchNodeFlavor(&nodes[i], flavorName) != nil {
-				out = append(out, nodes[i].Name)
-				break
-			}
-		}
-	}
-	sort.Strings(out)
-
-	return out, nil
-}
-
-// prefetchPlacementTypeNames returns the InstanceType names a prefetch's placement selects, or
-// the ones its namespace's deployments serve the artifact on. An empty result means the
-// placement's nodeSelector owns the target set, or that there is nothing to derive it from.
-func prefetchPlacementTypeNames(
-	pf *workercore.ModelPrefetch, deps []workercore.ModelDeployment,
-) []string {
-	placement := pf.Spec.Placement
-	switch {
-	case placement != nil && len(placement.InstanceTypes) > 0 && placement.NodeSelector != nil:
-		return nil
-	case placement != nil && len(placement.InstanceTypes) > 0:
-		return placement.InstanceTypes
-	case placement != nil && placement.NodeSelector != nil:
-		return nil
-	default:
-		// The derived set: every InstanceType the namespace's own deployments serve these weights
-		// on, so warming follows serving without a second place to say where.
-		return deploymentInstanceTypes(deps, pf.Spec.ArtifactRef.Name)
-	}
+	return modelstore.PrefetchTargetNodes(pf, nodes, deps, pools)
 }
 
 // deploymentInstanceTypes collects the InstanceType names the namespace's deployments serve the
-// artifact's weights on.
+// artifact's weights on; owned by modelstore, wrapped for this package's tests.
 func deploymentInstanceTypes(deps []workercore.ModelDeployment, artifactName string) []string {
-	var out []string
-	for i := range deps {
-		ref := deps[i].Spec.Model.ArtifactRef
-		if ref == nil || ref.Name != artifactName {
-			continue
-		}
-		for _, role := range deps[i].Spec.Roles {
-			if role.InstanceType != "" {
-				out = append(out, role.InstanceType)
-			}
-		}
-	}
-
-	return out
+	return modelstore.DeploymentInstanceTypes(deps, artifactName)
 }
 
 // deliver keeps one live warm-up Pod per target node, in bounded batches, and removes the ones
@@ -349,6 +576,15 @@ func (r *ModelPrefetchReconciler) deliver(ctx context.Context, pf *workercore.Mo
 	requeue := ctrl.Result{}
 	removed := map[string]bool{}
 	for _, pod := range pods.Items {
+		if pod.Labels[modelTransferSourcePodLabel] != "" {
+			if legacySourceHolder(&pod, pf) && pod.DeletionTimestamp == nil {
+				if err := r.Client.Delete(ctx, &pod, ctrlcli.Preconditions{UID: &pod.UID}); ctrlcli.IgnoreNotFound(err) != nil {
+					return ctrl.Result{}, err
+				}
+			}
+			removed[pod.Name] = true
+			continue
+		}
 		_, onTarget := want[pod.Spec.NodeName]
 		// A pod mounting a digest the artifact no longer resolves to is stale the moment it is
 		// seen: keeping it would hold the node on the old weights for as long as it lives.
@@ -362,18 +598,18 @@ func (r *ModelPrefetchReconciler) deliver(ctx context.Context, pf *workercore.Mo
 				return ctrl.Result{}, err
 			}
 			removed[pod.Name] = true
+			continue
 		}
 	}
 
-	// A deleted pod lingers as Terminating for its grace period, so this pass's own list is what
-	// says whether a node runs an attempt: every listed pod not just deleted is live. Keying the
-	// check on the list instead of the pod's name keeps a terminating dead attempt from blocking
-	// its replacement until the next reconcile.
+	// A deleted pod can linger while terminating, so skip attempts removed in this pass.
 	live := map[string]bool{}
 	for i := range pods.Items {
-		if !removed[pods.Items[i].Name] {
-			live[pods.Items[i].Spec.NodeName] = true
+		if removed[pods.Items[i].Name] {
+			continue
 		}
+		node := pods.Items[i].Spec.NodeName
+		live[node] = true
 	}
 
 	for _, node := range targets {
@@ -453,20 +689,22 @@ func (r *ModelPrefetchReconciler) recomputePinned(ctx context.Context) error {
 		artifactByKey[a.Namespace+"/"+a.Name] = a
 	}
 
-	// desired[node] = the digests to pin there, from every prefetch whose retention still holds.
+	// desired[node] = the digests to pin there. Two independent voices pin:
+	// the DISK RETENTION (spec.retention.pinned under the binding's
+	// allowPinned, while the TTL holds, from live prefetches only), and the
+	// SOURCE-FILE RETENTION — a published tree an admitted generation reads
+	// is pinned for as long as that generation stands, whatever the intent,
+	// the TTL, or the prefetch's deletion say, because the fill and every
+	// refill re-verify against that tree and unpinning it under a live
+	// generation strands the next drain-and-refill.
+	storeByName := make(map[string]*workercore.NodeModelStore, len(stores.Items))
+	for i := range stores.Items {
+		storeByName[stores.Items[i].Name] = &stores.Items[i]
+	}
 	desired := map[string]map[string]bool{}
 	for i := range pfs.Items {
 		pf := &pfs.Items[i]
-		if pf.DeletionTimestamp != nil || !pf.Spec.Retention.Pinned {
-			continue
-		}
-		binding := bindingByKey[pf.Namespace+"/"+pf.Spec.BindingRef.Name]
-		if binding == nil {
-			continue // the grant is gone; nothing is pinned on its say-so
-		}
-		if !bindingAllowsPinned(binding) {
-			continue
-		}
+		deleting := pf.DeletionTimestamp != nil
 
 		artifact := artifactByKey[pf.Namespace+"/"+pf.Spec.ArtifactRef.Name]
 		if artifact == nil || artifact.Status.Resolved == nil {
@@ -476,19 +714,54 @@ func (r *ModelPrefetchReconciler) recomputePinned(ctx context.Context) error {
 		if digest == "" {
 			continue
 		}
+		// A source intent pins no set it did not name: the derived-from-deployments default is
+		// the disk half's, and a source without a placement is refused before it renders.
+		if pf.Spec.Source != nil &&
+			(pf.Spec.Placement == nil ||
+				(len(pf.Spec.Placement.InstanceTypes) == 0 && pf.Spec.Placement.NodeSelector == nil)) {
+			continue
+		}
+		binding := bindingByKey[pf.Namespace+"/"+pf.Spec.BindingRef.Name]
+		retentionPin := !deleting && pf.Spec.Retention.Pinned &&
+			binding != nil && bindingAllowsPinned(binding)
+		if !retentionPin && pf.Spec.Source == nil {
+			sourceHeld := false
+			for _, store := range storeByName {
+				if modelstore.ModelTransferAdmittedOnNode(store, digest) {
+					sourceHeld = true
+					break
+				}
+			}
+			if !sourceHeld {
+				continue
+			}
+		}
 		pools, err := ResolveInstanceTypeFlavorNames(ctx, r.Client, pf, depsByNS[pf.Namespace])
 		if err != nil {
-			return err
+			if !deleting {
+				return err
+			}
+
+			continue
 		}
 		targets, err := prefetchTargetNodes(pf, nodes.Items, depsByNS[pf.Namespace], pools)
 		if err != nil {
 			continue // the placement is broken; the prefetch's own status carries it
 		}
 		entries := modelstore.NodeEntries(stores.Items, digest)
+
 		for _, node := range targets {
 			entry, ok := entries[node]
-			entryReady := ok && entry.State == workercore.NodeModelStoreModelStateReady && !r.ttlExpired(pf, entry)
-			if !entryReady {
+			treeReady := ok && entry.State == workercore.NodeModelStoreModelStateReady
+			if !treeReady {
+				continue
+			}
+			ttlHolds := retentionPin && !r.ttlExpired(pf, entry)
+			// The source-file retention needs no grant, no pinned flag, and
+			// no living prefetch: the generation holding the memory is the
+			// reader, and the tree is what its next refill verifies against.
+			sourceHolds := modelstore.ModelTransferAdmittedOnNode(storeByName[node], digest)
+			if !ttlHolds && !sourceHolds {
 				continue
 			}
 			if desired[node] == nil {
@@ -538,12 +811,33 @@ func (r *ModelPrefetchReconciler) ttlExpired(pf *workercore.ModelPrefetch, entry
 // prefetch names to disappear, which stops the delivery rather than leaving it fetching forever.
 // Lapsed says when a shortfall below MinReady is the retention TTL's doing: it turns True only
 // when the lapsed copies alone account for the gap, so a warm-up or a failure keeps its own voice.
+//
+// A source intent adds current eligible generations beside disk progress. Retained reservations
+// remain visible while old generations drain, even when the desired intent changes or is removed.
 func (r *ModelPrefetchReconciler) writeStatus(
 	pf *workercore.ModelPrefetch, progress prefetchProgress, broken error, artifactMissing bool,
+	source *sourceObservation, fromRemote bool,
 ) {
 	pf.Status.DesiredNodes = progress.desired
 	pf.Status.ReadyNodes = int32(len(progress.ready))
 	pf.Status.DownloadingNodes = progress.downloading
+
+	if source != nil && source.admitted {
+		// The view exists when something is observed: an admitted generation, its figures, the
+		// namespace's charge, and — when the Binding names one — the grant echoed as applied.
+		// Deliverable-but-unadmitted is absent, never present and empty.
+		transfer := &workercore.ModelPrefetchTransferStatus{
+			ReservedBytes: source.charge,
+			Generations:   source.generations,
+		}
+		if source.grant != nil {
+			transfer.Limits = modelstore.TransferLimits(source.grant)
+		}
+		pf.Status.Transfer = transfer
+	} else {
+		// Nothing retained: omit the view once verified authority reports no reservations.
+		pf.Status.Transfer = nil
+	}
 
 	required := requiredNodes(pf, progress.desired)
 	delivered := int32(len(progress.ready)) >= required
@@ -619,6 +913,39 @@ func (r *ModelPrefetchReconciler) writeStatus(
 		progressing.Message = "some target nodes are still fetching or waiting on the artifact"
 	}
 
+	// A source refusal speaks on Progressing and only there: it says why the source half is not
+	// being prepared. The disk half's own answer — Available above, delivered or not — keeps its
+	// voice, because a refusal that never touches disk delivery must not drag a fully delivered
+	// prefetch back to NotEnoughNodes.
+	switch {
+	case source != nil && source.placementMissing:
+		progressing.Status, progressing.Reason = meta.ConditionFalse, "SourcePlacementMissing"
+		progressing.Message = "the source intent names no target set: set placement.nodeSelector or " +
+			"placement.instanceTypes, or drop spec.source to warm wherever this namespace's deployments run"
+	case source != nil && source.missingGrant:
+		progressing.Status, progressing.Reason = meta.ConditionFalse, "SourceGrantMissing"
+		progressing.Message = "the referenced Binding does not exist, so no source is prepared; " +
+			"the disk delivery is unaffected"
+	case source != nil && source.unsized:
+		progressing.Status, progressing.Reason = meta.ConditionFalse, "SourceSizeUnresolved"
+		progressing.Message = "the artifact's resolved size is not measured, so no allocation is authorized"
+	case source != nil && source.belowFloor && fromRemote:
+		progressing.Status, progressing.Reason = meta.ConditionFalse, "SourceWindowBelowFloor"
+		progressing.Message = "the grant's headroom cannot back even the minimum source window under the " +
+			"Require policy; the source keeps waiting for the source node to free capacity"
+	case source != nil && source.belowFloor:
+		progressing.Status, progressing.Reason = meta.ConditionTrue, "SourceWindowFallback"
+		progressing.Message = "the grant's headroom cannot back even the minimum source window under the " +
+			"Prefer policy; the deployment falls back to Node-to-Node Peer Sync or the local CSI disk load"
+	case source != nil && source.imageMissing:
+		progressing.Status, progressing.Reason = meta.ConditionFalse, "SourceWorkerImageMissing"
+		progressing.Message = "no source-worker DaemonSet is deployed for every pool the target set names: configure " +
+			"modelTransfer.images in the Helm chart for the target manufacturers; the disk delivery is unaffected"
+	case source != nil && source.authorityUnknown:
+		progressing.Status, progressing.Reason = meta.ConditionFalse, "SourceAuthorityUnknown"
+		progressing.Message = "the source reservation cannot be verified; admission and readiness are unknown"
+	}
+
 	if progress.failed > 0 {
 		degraded.Status, degraded.Reason = meta.ConditionTrue, "NodeFailed"
 		degraded.Message = "one or more target nodes reported the delivery failed; their reasons are on the nodes' reports"
@@ -661,6 +988,50 @@ func (r *ModelPrefetchReconciler) warmupImage(ctx context.Context) (string, erro
 	}
 
 	return settings.ModelPrefetchWarmupImage.DefaultValue(), nil
+}
+
+// sourceWorkerPlan selects source images independently from disk warm-up images.
+// Manufacturers come from node features, never from host runtime versions. The mapping lives in
+// modelstore; the worker contributes the Setting's parsed image map and keeps the secret
+// acquisition.
+type sourceWorkerPlan = modelstore.SourceWorkerPlan
+
+// readSourceWorkerPlan reads the chart-rendered source DaemonSets and the target nodes' manufacturers.
+// Nodes without accelerators retain the NVIDIA host-memory source path.
+// Mixed-manufacturer nodes have no implicit selection and are refused.
+func (r *ModelPrefetchReconciler) readSourceWorkerPlan(ctx context.Context, nodes []core.Node,
+	targets []string,
+) (sourceWorkerPlan, error) {
+	sets := new(apps.DaemonSetList)
+	if err := r.reader().List(ctx, sets, ctrlcli.InNamespace(setting.DelegatedSecretNamespace), ctrlcli.MatchingLabels{
+		"app.kubernetes.io/component": "model-transfer", "app.kubernetes.io/part-of": "gpustack-operator",
+	}); err != nil {
+		return sourceWorkerPlan{}, err
+	}
+	byVendor := map[string][]*apps.DaemonSet{}
+	for i := range sets.Items {
+		ds := &sets.Items[i]
+		if ds.UID == "" || ds.DeletionTimestamp != nil || ds.Labels["app.kubernetes.io/managed-by"] != "Helm" ||
+			ds.Labels["app.kubernetes.io/instance"] == "" || ds.Spec.UpdateStrategy.Type != apps.OnDeleteDaemonSetStrategyType {
+			continue
+		}
+		v := ds.Labels["gpustack.ai/manufacturer"]
+		if v == "amd" || v == "ascend" || v == "nvidia" {
+			byVendor[v] = append(byVendor[v], ds)
+		}
+	}
+	images := map[string]string{}
+	for vendor, matches := range byVendor {
+		if len(matches) != 1 {
+			continue
+		}
+		idx := slices.IndexFunc(matches[0].Spec.Template.Spec.Containers, func(c core.Container) bool { return c.Name == "worker" })
+		if idx >= 0 && matches[0].Spec.Template.Spec.Containers[idx].Image != "" {
+			images[vendor] = matches[0].Spec.Template.Spec.Containers[idx].Image
+		}
+	}
+
+	return modelstore.PlanSourceWorkers(images, nodes, targets), nil
 }
 
 // warmupPod is the delivery operation rendered as a Pod: the artifact's own volume, the node
@@ -730,6 +1101,36 @@ func podWarmDigest(pod *core.Pod) string {
 	return ""
 }
 
+func (r *ModelPrefetchReconciler) removeLegacySourceHolders(ctx context.Context, pf *workercore.ModelPrefetch) error {
+	pods := new(core.PodList)
+	if err := r.Client.List(ctx, pods, ctrlcli.InNamespace(pf.Namespace), ctrlcli.MatchingLabels{modelTransferSourcePodLabel: pf.Name}); err != nil {
+		return err
+	}
+	for i := range pods.Items {
+		pod := &pods.Items[i]
+		if legacySourceHolder(pod, pf) && pod.DeletionTimestamp == nil {
+			if err := r.Client.Delete(ctx, pod, ctrlcli.Preconditions{UID: &pod.UID}); ctrlcli.IgnoreNotFound(err) != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+// legacySourceHolder recognizes only the inert Pod rendered by the former controller.
+func legacySourceHolder(pod *core.Pod, pf *workercore.ModelPrefetch) bool {
+	owner := meta.GetControllerOf(pod)
+	if owner == nil || owner.UID != pf.UID || owner.Kind != "ModelPrefetch" ||
+		pod.Labels[modelTransferSourcePodLabel] != pf.Name || len(pod.Spec.Containers) != 1 ||
+		len(pod.Spec.InitContainers) != 0 || len(pod.Spec.EphemeralContainers) != 0 {
+		return false
+	}
+	c := pod.Spec.Containers[0]
+	return c.Name == "source" && slices.Equal(c.Command, []string{"sh", "-c", "exec sleep infinity"}) &&
+		len(c.Args) == 0 && len(pod.Spec.Volumes) == 1 && pod.Spec.Volumes[0].CSI != nil &&
+		pod.Spec.Volumes[0].CSI.Driver == modelstore.DriverName
+}
+
 // warmDigestLabel folds a digest into a label value the API server accepts: label values stop at
 // 63 characters and a full digest is 64 hex, so the first half carries the identity here. The
 // authoritative digest match is the volume attribute, which keeps the whole value.
@@ -768,79 +1169,38 @@ func requeueOr(chosen, fallback ctrl.Result) ctrl.Result {
 }
 
 // InstanceTypeFlavorNames carries, per InstanceType name, the ResourceFlavor names the type's
-// pool selects. A type resolving to no flavors — unknown, or no synced flavor yet — maps to an
-// empty entry, which leaves its target set empty rather than erroring: the placement contract
-// is "every node carrying the type's flavors", and a type with none carries none.
-type InstanceTypeFlavorNames map[string][]string
+// pool selects; owned by modelstore beside the resolution that fills it.
+type InstanceTypeFlavorNames = modelstore.InstanceTypeFlavorNames
 
 // ResolveInstanceTypeFlavorNames resolves the InstanceType names a prefetch's placement — or, in
 // its default form, the type names its namespace's deployments serve the artifact on — into the
 // ResourceFlavor names each type's pool selects: the flavors carrying the schedule labels the
 // type's spec derives, the same reverse-lookup the type's backing ClusterQueue and its status
 // Detail run. Flavor names are topology-qualified and count-suffixed, so an InstanceType's
-// object name is never itself a flavor name and cannot be compared against one.
+// object name is never itself a flavor name and cannot be compared against one. The rule lives
+// in modelstore; this wrapper is where the worker reads its CPU-manufacturer awareness setting,
+// which the shared resolver takes as an explicit input.
 func ResolveInstanceTypeFlavorNames(
 	ctx context.Context, r ctrlcli.Reader, pf *workercore.ModelPrefetch, deps []workercore.ModelDeployment,
 ) (InstanceTypeFlavorNames, error) {
-	typeNames := prefetchPlacementTypeNames(pf, deps)
-	if len(typeNames) == 0 {
-		return nil, nil
-	}
-	// One list serves every named type: a cluster carries a handful of operator-owned flavors,
-	// and a type's pool is a label containment over the shared set.
-	flavors := new(kueue.ResourceFlavorList)
-	if err := r.List(ctx, flavors,
-		systemmeta.GetResourcesLabelSetOfType[ctrlcli.MatchingLabels](_ResourceFlavorResType),
-		ctrlcli.UnsafeDisableDeepCopy); err != nil {
-		return nil, err
-	}
-	cpuAware := settings.InstanceTypeAwareCPUManufacturer.ShouldValueBool(ctx)
-	pools := InstanceTypeFlavorNames{}
-	for _, name := range typeNames {
-		if _, resolved := pools[name]; resolved {
-			continue
-		}
-		it := new(workercore.InstanceType)
-		err := r.Get(ctx, ctrlcli.ObjectKey{Name: name}, it)
-		if kerrors.IsNotFound(err) {
-			pools[name] = nil
-			continue
-		}
-		if err != nil {
-			return nil, err
-		}
-		sched := nodefeature.PoolScheduleLabels(
-			it.Spec.Acceleratable, cpuAware,
-			it.Spec.GeneralGroup, it.Spec.AcceleratorGroup,
-			it.Spec.OS, it.Spec.Arch,
-		)
-		var flavorNames []string
-		for i := range flavors.Items {
-			if mapx.Contain(flavors.Items[i].Labels, sched) {
-				flavorNames = append(flavorNames, flavors.Items[i].Name)
-			}
-		}
-		sort.Strings(flavorNames)
-		pools[name] = flavorNames
-	}
-
-	return pools, nil
+	return modelstore.ResolveInstanceTypeFlavorNames(ctx, r, pf, deps,
+		settings.InstanceTypeAwareCPUManufacturer.ShouldValueBool(ctx))
 }
 
 // PrefetchTargetNodes resolves a prefetch's placement into node names. It is the controller's own
 // expansion, shared with the admission webhook so admission and delivery can never disagree about
 // what a prefetch would warm. The pools carry the named InstanceTypes' flavor resolution from
-// ResolveInstanceTypeFlavorNames.
+// ResolveInstanceTypeFlavorNames; the rule lives in modelstore.
 func PrefetchTargetNodes(
 	pf *workercore.ModelPrefetch, nodes []core.Node, deps []workercore.ModelDeployment,
 	pools InstanceTypeFlavorNames,
 ) ([]string, error) {
-	return prefetchTargetNodes(pf, nodes, deps, pools)
+	return modelstore.PrefetchTargetNodes(pf, nodes, deps, pools)
 }
 
 // The placement refusal the webhook shares: both kinds set is ambiguous, and the schema cannot
 // see it because neither field is required.
-var ErrPrefetchPlacementAmbiguous = fmt.Errorf("placement sets both instanceTypes and nodeSelector")
+var ErrPrefetchPlacementAmbiguous = modelstore.ErrPrefetchPlacementAmbiguous
 
 // artifactResolutionChanged enqueues only when an artifact's resolution moved — the fact both the
 // accounting and the prefetch delivery read. Description and label churn is nobody's feed here.
@@ -862,9 +1222,10 @@ var artifactResolutionChanged = ctrlpredicate.Funcs{
 	GenericFunc: func(ctrlevent.GenericEvent) bool { return false },
 }
 
-// nodeReportChanged enqueues only when a node's report changed in a way a prefetch reads: the
-// per-digest entries and the pin list. Watermark bookkeeping the plugin writes alongside is
-// another object's feed.
+// nodeReportChanged enqueues only when a node's report changed in a way a prefetch or a grant's
+// accounting reads: the per-digest entries and the pin list, and the node's model-transfer report — the
+// source generations' health, whose change is exactly what invalidates transfer readiness. The
+// plugin's other bookkeeping is another object's feed.
 var nodeReportChanged = ctrlpredicate.Funcs{
 	CreateFunc: func(ctrlevent.CreateEvent) bool { return true },
 	DeleteFunc: func(ctrlevent.DeleteEvent) bool { return true },
@@ -879,7 +1240,8 @@ var nodeReportChanged = ctrlpredicate.Funcs{
 		}
 
 		return !kubemeta.DeepEqual(o.Status.Models, n.Status.Models) ||
-			!kubemeta.DeepEqual(o.Spec.Pinned, n.Spec.Pinned)
+			!kubemeta.DeepEqual(o.Spec.Pinned, n.Spec.Pinned) ||
+			!kubemeta.DeepEqual(o.Status.ModelTransfer, n.Status.ModelTransfer)
 	},
 	GenericFunc: func(ctrlevent.GenericEvent) bool { return false },
 }
@@ -910,10 +1272,20 @@ var nodeLabelsChanged = ctrlpredicate.Funcs{
 // the targets, and the nodes' reports are the readiness.
 func (r *ModelPrefetchReconciler) SetupController(_ context.Context, opts controller.SetupOptions) error {
 	r.Client = opts.Manager.GetClient()
+	r.Reader = opts.Manager.GetAPIReader()
 
 	return ctrl.NewControllerManagedBy(opts.Manager).
 		Named("modelprefetch").
 		For(&workercore.ModelPrefetch{}, ctrlbuilder.WithPredicates(ctrlpredicate.GenerationChangedPredicate{})).
+		// The warm-up Pods are this controller's own
+		// writes: a Pod reaching a terminal phase (or vanishing) is the
+		// event that replaces a dead attempt.
+		Owns(&core.Pod{}).
+		Watches(
+			&workercore.ModelStoreBinding{},
+			ctrlhandler.EnqueueRequestsFromMapFunc(r.enqueuePrefetchesForBinding),
+			ctrlbuilder.WithPredicates(bindingGrantChanged),
+		).
 		Watches(
 			&workercore.ModelArtifact{},
 			ctrlhandler.EnqueueRequestsFromMapFunc(r.enqueuePrefetchesInNamespace),
@@ -933,6 +1305,20 @@ func (r *ModelPrefetchReconciler) SetupController(_ context.Context, opts contro
 			&workercore.NodeModelStore{},
 			ctrlhandler.EnqueueRequestsFromMapFunc(r.enqueueAllPrefetches),
 			ctrlbuilder.WithPredicates(nodeReportChanged),
+		).
+		Watches(
+			&core.Pod{}, ctrlhandler.EnqueueRequestsFromMapFunc(r.enqueueAllPrefetches),
+			ctrlbuilder.WithPredicates(modelTransferSourcePodChanged()),
+		).
+		Watches(
+			&apps.DaemonSet{}, ctrlhandler.EnqueueRequestsFromMapFunc(r.enqueueAllPrefetches),
+			ctrlbuilder.WithPredicates(modelTransferSourceDaemonSetChanged()),
+		).
+		Watches(
+			&core.ConfigMap{}, ctrlhandler.EnqueueRequestsFromMapFunc(r.enqueueAllPrefetches),
+			ctrlbuilder.WithPredicates(ctrlpredicate.NewPredicateFuncs(func(o ctrlcli.Object) bool {
+				return o.GetNamespace() == setting.DelegatedSecretNamespace && strings.HasPrefix(o.GetName(), "model-transfer-resv-")
+			})),
 		).
 		Watches(
 			&core.Secret{},
@@ -956,6 +1342,54 @@ func (r *ModelPrefetchReconciler) enqueueAllPrefetches(ctx context.Context, _ ct
 
 	reqs := make([]ctrlreconcile.Request, 0, len(pfs.Items))
 	for i := range pfs.Items {
+		reqs = append(reqs, ctrlreconcile.Request{NamespacedName: ctrlcli.ObjectKey{
+			Namespace: pfs.Items[i].Namespace, Name: pfs.Items[i].Name,
+		}})
+	}
+
+	return reqs
+}
+
+// bindingGrantChanged wakes the prefetches when a grant's say-so moved: the grant appearing or
+// growing resolves a SourceGrantMissing or SourceOverGrant refusal, the binding going away ends
+// the source half, and allowPinned moves the disk retention. A binding's status churn decides
+// none of those and wakes nobody.
+var bindingGrantChanged = ctrlpredicate.Funcs{
+	CreateFunc: func(ctrlevent.CreateEvent) bool { return true },
+	DeleteFunc: func(ctrlevent.DeleteEvent) bool { return true },
+	UpdateFunc: func(e ctrlevent.UpdateEvent) bool {
+		o, ok := e.ObjectOld.(*workercore.ModelStoreBinding)
+		if !ok {
+			return false
+		}
+		n, ok := e.ObjectNew.(*workercore.ModelStoreBinding)
+		if !ok {
+			return false
+		}
+
+		return o.Generation != n.Generation ||
+			o.Annotations[broker.AuthorityAnnotation] != n.Annotations[broker.AuthorityAnnotation] ||
+			!o.DeletionTimestamp.Equal(n.DeletionTimestamp)
+	},
+	GenericFunc: func(ctrlevent.GenericEvent) bool { return false },
+}
+
+// enqueuePrefetchesForBinding enqueues the prefetches bound to the changed grant: its memory
+// grant and its existence are exactly their source half's inputs, so a grant that appears, grows,
+// or dies must reach them without waiting on an unrelated node event.
+func (r *ModelPrefetchReconciler) enqueuePrefetchesForBinding(ctx context.Context, obj ctrlcli.Object) []ctrlreconcile.Request {
+	pfs := new(workercore.ModelPrefetchList)
+	if err := r.Client.List(ctx, pfs, ctrlcli.InNamespace(obj.GetNamespace())); err != nil {
+		ctrllog.FromContext(ctx).Error(err, "list model prefetches")
+
+		return nil
+	}
+
+	reqs := make([]ctrlreconcile.Request, 0, len(pfs.Items))
+	for i := range pfs.Items {
+		if pfs.Items[i].Spec.BindingRef.Name != obj.GetName() {
+			continue
+		}
 		reqs = append(reqs, ctrlreconcile.Request{NamespacedName: ctrlcli.ObjectKey{
 			Namespace: pfs.Items[i].Namespace, Name: pfs.Items[i].Name,
 		}})

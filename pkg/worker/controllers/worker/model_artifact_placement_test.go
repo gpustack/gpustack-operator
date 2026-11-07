@@ -945,3 +945,34 @@ func TestModelDeploymentArtifactImageDelivery(t *testing.T) {
 	require.NotNil(t, md.Status.Model)
 	assert.Equal(t, workercore.ModelDeploymentModelDeliveryImage, md.Status.Model.Delivery)
 }
+
+func TestModelTransferReportFiltersProgress(t *testing.T) {
+	now := time.Now()
+	for _, tc := range []struct {
+		name                  string
+		oldExpiry, nextExpiry time.Time
+		nextState             workercore.NodeModelStoreModelTransferGenerationState
+		nextPod               string
+		want                  bool
+	}{
+		{name: "progress and renewal", oldExpiry: now.Add(time.Minute), nextExpiry: now.Add(2 * time.Minute), nextState: workercore.NodeModelStoreModelTransferGenerationStateServing, nextPod: "pod"},
+		{name: "lease expires", oldExpiry: now.Add(time.Minute), nextExpiry: now.Add(-time.Minute), nextState: workercore.NodeModelStoreModelTransferGenerationStateServing, nextPod: "pod", want: true},
+		{name: "lease recovers", oldExpiry: now.Add(-time.Minute), nextExpiry: now.Add(time.Minute), nextState: workercore.NodeModelStoreModelTransferGenerationStateServing, nextPod: "pod", want: true},
+		{name: "source changes", oldExpiry: now.Add(time.Minute), nextExpiry: now.Add(time.Minute), nextState: workercore.NodeModelStoreModelTransferGenerationStateServing, nextPod: "other", want: true},
+		{name: "source drains", oldExpiry: now.Add(time.Minute), nextExpiry: now.Add(time.Minute), nextState: workercore.NodeModelStoreModelTransferGenerationStateDraining, nextPod: "pod", want: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			old := &workercore.NodeModelStore{Status: workercore.NodeModelStoreStatus{
+				ModelTransfer: &workercore.NodeModelStoreModelTransferStatus{Generations: []workercore.NodeModelStoreModelTransferGeneration{{
+					Generation: "generation", Digest: testArtifactDigest, SourcePodUID: "pod",
+					State: workercore.NodeModelStoreModelTransferGenerationStateServing, LeaseExpiresAt: &meta.Time{Time: tc.oldExpiry},
+				}}},
+			}}
+			next := old.DeepCopy()
+			generation := &next.Status.ModelTransfer.Generations[0]
+			generation.State, generation.SourcePodUID, generation.LeaseExpiresAt = tc.nextState, tc.nextPod, &meta.Time{Time: tc.nextExpiry}
+			generation.ResidentBytes, generation.Registrations, generation.ActiveSessions, generation.RejectedAdmissions = 1024, 2, 3, 4
+			assert.Equal(t, tc.want, nodeModelStoreModelsChanged().Update(ctrlevent.UpdateEvent{ObjectOld: old, ObjectNew: next}))
+		})
+	}
+}

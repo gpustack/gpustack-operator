@@ -66,6 +66,15 @@ spec:
             - --kubelet-dir={{ $kubeletDir }}
             - --cache-root={{ $rootPath }}
             - --csi-socket={{ $pluginDir }}/csi.sock
+            {{- with .Values.modelTransfer.enabled }}
+            {{- /*
+              The source brokers' ledger parent, read-only: the reporter reads each vendor's
+              durable root beneath it to write the NodeModelStore's ModelTransfer status. The
+              brokers own every write; this plugin is the only path through which their state
+              reaches that status, and a read-only mount is the whole of its access.
+            */}}
+            - --model-transfer-state-root=/var/lib/gpustack/model-transfer
+            {{- end }}
             {{- if $peerSync }}
             {{- /* The other nodes' plugins pull this node's published trees over the peer port,
               each other authenticated by the plugin's projected ServiceAccount token. */}}
@@ -140,6 +149,11 @@ spec:
               mountPropagation: Bidirectional
             - name: cache-root
               mountPath: {{ $rootPath }}
+            {{- with .Values.modelTransfer.enabled }}
+            - name: model-transfer-state
+              mountPath: /var/lib/gpustack/model-transfer
+              readOnly: true
+            {{- end }}
             - name: tmp-dir
               mountPath: /tmp
             {{- if $peerSync }}
@@ -178,6 +192,12 @@ spec:
           hostPath:
             path: {{ $rootPath }}
             type: DirectoryOrCreate
+        {{- with .Values.modelTransfer.enabled }}
+        - name: model-transfer-state
+          hostPath:
+            path: /var/lib/gpustack/model-transfer
+            type: DirectoryOrCreate
+        {{- end }}
         - name: plugin-dir
           hostPath:
             path: {{ $pluginDir }}

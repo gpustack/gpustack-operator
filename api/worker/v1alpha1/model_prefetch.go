@@ -1,6 +1,7 @@
 package v1alpha1
 
 import (
+	"k8s.io/apimachinery/pkg/api/resource"
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 
@@ -76,7 +77,34 @@ type ModelPrefetchSpec struct {
 	//
 	// +optional
 	Retention ModelPrefetchRetention `json:"retention,omitempty" protobuf:"bytes,5,opt,name=retention"`
+
+	// Source opts this prefetch into source preparation for remote weight loading, beside the
+	// disk residency it always asked for. With it, the target nodes may fill a registered-memory
+	// source from this artifact, and the prefetch reports that readiness in status.transfer,
+	// separately from the disk figures above.
+	//
+	// IT REQUIRES AN EXPLICIT PLACEMENT. A source is memory a node holds against a known target
+	// set, so the derived-from-deployments default an ordinary prefetch falls back to — which
+	// follows this namespace's consumers around — would prepare whatever machines happen to
+	// serve the model this week. A source intent on a prefetch whose placement names no
+	// instanceTypes and no nodeSelector is refused at admission, and the two out together stay
+	// refused for the ambiguity they already were.
+	//
+	// The optional Binding sourceMemory grant bounds memory independently of disk quota.
+	// Without it, source preparation uses the node's configured source capacity.
+	//
+	// Absent means a prefetch that warms the node cache only, exactly as this object has always
+	// meant, with the same placement defaults, warm-up behavior and status meaning as before.
+	//
+	// +optional
+	Source *ModelPrefetchSource `json:"source,omitempty" protobuf:"bytes,6,opt,name=source"`
 }
+
+// ModelPrefetchSource is the source-preparation intent, and its presence is the opt-in. It
+// carries no settings of its own: the target set is the placement's, the memory it may hold is
+// bounded by node capacity and the optional Binding grant. Readiness is reported in status.transfer.
+// An object an older client wrote has no source and keeps its meaning unchanged.
+type ModelPrefetchSource struct{}
 
 // ModelPrefetchArtifactReference names an artifact in the prefetch's own namespace.
 type ModelPrefetchArtifactReference struct {
@@ -151,6 +179,125 @@ type ModelPrefetchStatus struct {
 	// +listType=map
 	// +listMapKey=type
 	Conditions []gpustack.Condition `json:"conditions,omitempty" patchStrategy:"merge" patchMergeKey:"type" protobuf:"bytes,4,rep,name=conditions"` // nolint: lll
+
+	// Transfer reports the source preparation spec.source asks for, aggregated from the target
+	// nodes' reports. It is ABSENT without spec.source — the intent is what turns it on — and
+	// absent while nothing has been observed, rather than present and empty, for the same reason
+	// the disk figures above are zero rather than missing only when measured.
+	//
+	// It is deliberately separate from the disk figures above, and neither implies the other:
+	// readyNodes counts complete published trees, which survive a daemon restart, while the
+	// transfer entries are scoped to a generation held in memory, and a generation that stops
+	// being served does not un-publish the tree beneath it.
+	//
+	// +optional
+	Transfer *ModelPrefetchTransferStatus `json:"transfer,omitempty" protobuf:"bytes,5,opt,name=transfer"`
+}
+
+// ModelPrefetchTransferStatus is the transfer half of a source-preparing prefetch, aggregated
+// from the target nodes' reports for this artifact's digest. The bytes are observed figures the
+// nodes reported as exact integer bytes; quantity comparisons use resource.Quantity.Value().
+// The limits echo the admitted grant policy.
+type ModelPrefetchTransferStatus struct {
+	// ReservedBytes is the memory this prefetch's admitted generations hold reserved against the
+	// namespace's grant. It is charged to this namespace even when the physical bytes are shared
+	// with another namespace's reservation, so it can exceed the residency any one node reports.
+	//
+	// +optional
+	ReservedBytes int64 `json:"reservedBytes,omitempty" protobuf:"varint,1,opt,name=reservedBytes"`
+
+	// Limits echoes the policy the source applies to this namespace's read sessions: the grant's
+	// limits as they were admitted, which a later edit of the Binding cannot reach back and
+	// change. Absent until a generation is admitted.
+	//
+	// +optional
+	Limits *ModelPrefetchTransferLimits `json:"limits,omitempty" protobuf:"bytes,2,opt,name=limits"`
+
+	// Generations is one entry per source generation the target nodes currently report for this
+	// digest, so a window in which one node has drained and another filled reads as two entries
+	// with their own figures rather than one average that describes neither.
+	//
+	// +optional
+	// +listType=map
+	// +listMapKey=generation
+	// +k8s:validation:maxItems=16
+	Generations []ModelPrefetchTransferGeneration `json:"generations,omitempty" protobuf:"bytes,3,rep,name=generations"` // nolint: lll
+}
+
+// ModelPrefetchTransferLimits is the applied source policy, echoed where it was admitted so a
+// reader can see what is enforced without reading the grant and guessing what admission made of
+// it.
+type ModelPrefetchTransferLimits struct {
+	// Bytes is the registered-memory ceiling the namespace's admitted reservations draw on.
+	//
+	// +required
+	Bytes resource.Quantity `json:"bytes" protobuf:"bytes,1,name=bytes"`
+
+	// Registrations is the live registration count the source allows the namespace.
+	//
+	// +required
+	// +k8s:validation:minimum=1
+	Registrations int32 `json:"registrations" protobuf:"varint,2,opt,name=registrations"`
+
+	// Sessions is the concurrent admitted read sessions the source allows the namespace.
+	//
+	// +required
+	// +k8s:validation:minimum=1
+	Sessions int32 `json:"sessions" protobuf:"varint,3,opt,name=sessions"`
+}
+
+// ModelPrefetchTransferGeneration is one source generation's standing across the target nodes.
+type ModelPrefetchTransferGeneration struct {
+	// Generation is the source's identity for this registered content: an opaque token assigned
+	// when the fill has verified, and the only thing the figures beside it are true of. A drain,
+	// a refill or a daemon restart supersedes it; a new generation never inherits the old one's
+	// figures. It names no tenant and carries no key.
+	//
+	// +required
+	// +k8s:validation:minLength=1
+	// +k8s:validation:maxLength=128
+	Generation string `json:"generation" protobuf:"bytes,1,opt,name=generation"`
+
+	// ReadyNodes is how many target nodes hold this generation registered and admit readers
+	// against it. It is NOT readyNodes, and neither implies the other: a node whose daemon
+	// restarted stops counting here while the published tree beneath it stays disk-ready.
+	//
+	// +optional
+	ReadyNodes int32 `json:"readyNodes,omitempty" protobuf:"varint,2,opt,name=readyNodes"`
+
+	// DrainingNodes is how many target nodes hold this generation past admission — they have
+	// stopped admitting new sessions and are fencing their in-flight work, or their completion
+	// could not be proven and they hold the registration until a qualified fence applies. Their
+	// memory is still held.
+	//
+	// +optional
+	DrainingNodes int32 `json:"drainingNodes,omitempty" protobuf:"varint,3,opt,name=drainingNodes"`
+
+	// ResidentBytes sums what the target nodes hold registered for this generation, serving and
+	// draining alike, because a draining generation's memory is still held. The bytes are
+	// physical, so a copy two namespaces share counts once here and once in each namespace's
+	// reservation.
+	//
+	// +optional
+	ResidentBytes int64 `json:"residentBytes,omitempty" protobuf:"varint,4,opt,name=residentBytes"`
+
+	// Registrations is the live registration count the nodes hold for this generation.
+	//
+	// +optional
+	Registrations int32 `json:"registrations,omitempty" protobuf:"varint,5,opt,name=registrations"`
+
+	// ActiveSessions is how many read sessions the nodes have admitted against this generation.
+	//
+	// +optional
+	ActiveSessions int32 `json:"activeSessions,omitempty" protobuf:"varint,6,opt,name=activeSessions"`
+
+	// RejectedAdmissions counts the admission refusals the nodes have reported since this
+	// generation started — over the memory grant, out of registrations, past the session limit —
+	// so a capacity shortfall is visible where it was made rather than only as a replica that
+	// never starts.
+	//
+	// +optional
+	RejectedAdmissions int64 `json:"rejectedAdmissions,omitempty" protobuf:"varint,7,opt,name=rejectedAdmissions"` // nolint: lll
 }
 
 // ModelPrefetchList holds the list of ModelPrefetch.

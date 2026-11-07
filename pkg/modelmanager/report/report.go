@@ -6,9 +6,12 @@ package report
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"math"
 	"net/http"
+	"os"
+	"path/filepath"
 	"sort"
 	"sync"
 	"time"
@@ -29,6 +32,7 @@ import (
 	"gpustack.ai/gpustack/pkg/modelmanager/metrics"
 	"gpustack.ai/gpustack/pkg/modelmanager/store"
 	"gpustack.ai/gpustack/pkg/modelstore"
+	"gpustack.ai/gpustack/pkg/modeltransfer/broker"
 )
 
 // The status conditions and their reasons.
@@ -78,9 +82,15 @@ type Reporter struct {
 	NodeName  string
 	Namespace string
 
-	Store       *store.Store
-	Collector   *gc.Collector
-	Downloading func() map[string]bool
+	Store *store.Store
+	// ModelTransferStateRoot, when not empty, is the source broker's durable ledger
+	// root: the reporter reads it and writes Status.ModelTransfer from it, staying
+	// this object's single writer while the transport workers, in their own
+	// process, own the ledger. Empty means the node runs no source runtime
+	// and no ModelTransfer status is written at all.
+	ModelTransferStateRoot string
+	Collector              *gc.Collector
+	Downloading            func() map[string]bool
 	// Progress is how far each running download is, by digest; nil reports no progress.
 	Progress   func() map[string]materialize.DownloadProgress
 	Downloader *download.Downloader
@@ -269,7 +279,7 @@ func (r *Reporter) Run(ctx context.Context) error {
 				break wait
 			case <-pt.C:
 				// Only a running download has progress to report.
-				if len(r.Downloading()) > 0 {
+				if len(r.Downloading()) > 0 || r.ModelTransferStateRoot != "" {
 					break wait
 				}
 			}
@@ -439,6 +449,11 @@ func (r *Reporter) status(nms *workercore.NodeModelStore, res gc.Result) (worker
 	metrics.StoredBytes.Set(float64(stored))
 	metrics.CapacityBytes.Set(float64(res.Usage.Total))
 
+	modelTransfer, err := r.modelTransfer()
+	// Invalid source state removes its advertisement while disk reporting continues.
+	// It does not release a reservation or certify a native fence.
+	sourceErr := err
+
 	r.mu.Lock()
 	specErr, capNote := r.specErr, r.capNote
 	r.mu.Unlock()
@@ -454,6 +469,15 @@ func (r *Reporter) status(nms *workercore.NodeModelStore, res gc.Result) (worker
 		low = condition(ConditionCapacityLow, meta.ConditionTrue, ReasonCapacityLow,
 			"the cache's filesystem is above the high watermark and every model on it is in use")
 	}
+	conditions := []gpustack.Condition{ready, low}
+	if r.ModelTransferStateRoot != "" {
+		sourceReady := condition("ModelTransferReady", meta.ConditionTrue, "SourceStateObserved", "")
+		if sourceErr != nil {
+			sourceReady = condition("ModelTransferReady", meta.ConditionFalse, "SourceStateUnavailable",
+				"source state could not be read; registered-memory availability is unknown")
+		}
+		conditions = append(conditions, sourceReady)
+	}
 
 	return workercore.NodeModelStoreStatus{
 		ObservedGeneration: nms.Generation,
@@ -462,9 +486,76 @@ func (r *Reporter) status(nms *workercore.NodeModelStore, res gc.Result) (worker
 			StoredBytes: stored,
 			UsedPercent: int32(math.Floor(res.Usage.Percent()/5) * 5),
 		},
-		Models:     models,
-		Conditions: carryTransitions(nms.Status.Conditions, []gpustack.Condition{ready, low}, r.now()),
+		Models:        models,
+		ModelTransfer: modelTransfer,
+		Conditions:    carryTransitions(nms.Status.Conditions, conditions, r.now()),
 	}, nil
+}
+
+// modelTransfer reads the source broker's durable ledger and derives the ModelTransfer status
+// from it. The reporter is the NodeModelStore's single writer: transport
+// workers never write this object, and their process owns only the ledger.
+// An empty node reports no ModelTransfer at all, because the absence is the
+// invalidation; a serving generation whose lease expired reads as draining,
+// so a dead source runtime never reads as ready.
+func (r *Reporter) modelTransfer() (*workercore.NodeModelStoreModelTransferStatus, error) {
+	if r.ModelTransferStateRoot == "" {
+		return nil, nil
+	}
+	entries, err := r.sourceGenerations()
+	if err != nil {
+		return nil, fmt.Errorf("read the source generations: %w", err)
+	}
+	if len(entries) == 0 {
+		return nil, nil
+	}
+	return &workercore.NodeModelStoreModelTransferStatus{Generations: entries}, nil
+}
+
+// sourceGenerations reads the separate vendor ledgers under the mounted parent.
+// A direct ledger remains readable during migration; duplicate identities and a
+// damaged child invalidate the view instead of publishing a partial answer.
+func (r *Reporter) sourceGenerations() ([]workercore.NodeModelStoreModelTransferGeneration, error) {
+	root := r.ModelTransferStateRoot
+	children, err := os.ReadDir(root)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	if len(children) > 64 {
+		return nil, errors.New("source ledger directory exceeds its bound")
+	}
+	entries, err := broker.ReadSnapshot(root, r.now())
+	if err != nil {
+		return nil, err
+	}
+	for _, child := range children {
+		if child.Type()&os.ModeSymlink != 0 {
+			return nil, errors.New("source ledger directory contains a symlink")
+		}
+		if !child.IsDir() || child.Name() == "generations" {
+			continue
+		}
+		vendor, readErr := broker.ReadSnapshot(filepath.Join(root, child.Name()), r.now())
+		if readErr != nil {
+			return nil, readErr
+		}
+		entries = append(entries, vendor...)
+	}
+	if len(entries) > 64 {
+		return nil, errors.New("source generations exceed the status bound")
+	}
+	seen := make(map[string]bool, len(entries))
+	for _, entry := range entries {
+		if seen[entry.Generation] {
+			return nil, errors.New("source generation identity appears in multiple ledgers")
+		}
+		seen[entry.Generation] = true
+	}
+	sort.Slice(entries, func(i, j int) bool { return entries[i].Generation < entries[j].Generation })
+	return entries, nil
 }
 
 // models lists what the node holds, keeping the referenced and then the most recently used when more

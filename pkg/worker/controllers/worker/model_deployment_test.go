@@ -29,6 +29,7 @@ import (
 	ctrlreconcile "sigs.k8s.io/controller-runtime/pkg/reconcile"
 	kueue "sigs.k8s.io/kueue/apis/kueue/v1beta2"
 	kueuectrlconst "sigs.k8s.io/kueue/pkg/controller/constants"
+	kueuepod "sigs.k8s.io/kueue/pkg/controller/jobs/pod"
 	kueuepodconst "sigs.k8s.io/kueue/pkg/controller/jobs/pod/constants"
 
 	worker "gpustack.ai/gpustack/api/worker/v1"
@@ -82,6 +83,22 @@ func newModelDeploymentClient(objs ...ctrlcli.Object) ctrlcli.Client {
 			}
 
 			return []string{pod.Spec.NodeName}
+		}).
+		// Kueue composes a group's Workload by listing the Pods that carry the group label, and
+		// the fake client can only answer that lookup when the field is indexed. The index is
+		// registered here so a fixture can reach the admitted steady state a real cluster has,
+		// which is where a rollout actually acts on a replica.
+		WithIndex(&core.Pod{}, kueuepod.PodGroupNameCacheKey, func(obj ctrlcli.Object) []string {
+			pod, ok := obj.(*core.Pod)
+			if !ok {
+				return nil
+			}
+			group := pod.Labels[kueuepodconst.GroupNameLabel]
+			if group == "" {
+				return nil
+			}
+
+			return []string{group}
 		}).
 		// The Binding is here because the deployment writes its usedBy through the status
 		// subresource. Left out, the claim would be written as a whole-object update, and the

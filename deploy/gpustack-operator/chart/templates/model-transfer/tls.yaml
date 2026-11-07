@@ -1,0 +1,123 @@
+{{- if .Values.modelTransfer.enabled }}
+{{- $root := . }}
+{{- $certmanager := eq (include "gpustack-operator.certmanager.enabled" .) "true" }}
+{{- range $manufacturer := list "amd" "ascend" "nvidia" }}
+{{- if hasKey $root.Values.modelTransfer.images $manufacturer }}
+{{- $name := include "gpustack-operator.modelTransfer.fullname" $ }}
+{{- $namespace := include "gpustack-operator.namespace" $ }}
+{{- /*
+  One serving identity per vendor. The headless Service of the same name is what clients
+  verify against: an engine picks one Pod endpoint and dials it with this DNS name as the
+  TLS ServerName, so the certificate never needs a Pod name — a DaemonSet Pod's name is
+  Helm-unknowable — while the Service name is deterministic, and so is the Secret the
+  certificate lands in. The Go renderer that mirrors the public CA into tenant namespaces
+  finds it there, under exactly this name, carrying exactly the labels below.
+*/}}
+{{- $svc := printf "%s-%s" $name $manufacturer }}
+{{- $secretName := printf "%s-cert" $svc }}
+{{- $dnsNames := list
+      (printf "%s.%s.svc.cluster.local" $svc $namespace)
+      (printf "%s.%s.svc" $svc $namespace)
+      (printf "%s.%s" $svc $namespace)
+      $svc
+      (printf "*.%s.%s.svc.cluster.local" $svc $namespace) }}
+{{- if $certmanager }}
+{{- if not $root.Values.global.certmanager.issuer.name }}
+---
+apiVersion: cert-manager.io/v1
+kind: Issuer
+metadata:
+  name: {{ $svc }}-selfsigned-issuer
+  namespace: {{ $namespace }}
+  labels:
+    {{- include "gpustack-operator.modelTransfer.labels" $ | nindent 4 }}
+    gpustack.ai/manufacturer: {{ $manufacturer }}
+  {{- with $root.Values.commonAnnotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  selfSigned: {}
+{{- end }}
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: {{ $svc }}-cert
+  namespace: {{ $namespace }}
+  labels:
+    {{- include "gpustack-operator.modelTransfer.labels" $ | nindent 4 }}
+    gpustack.ai/manufacturer: {{ $manufacturer }}
+  {{- with $root.Values.commonAnnotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  secretName: {{ $secretName }}
+  secretTemplate:
+    labels:
+      app.kubernetes.io/component: model-transfer
+      gpustack.ai/manufacturer: {{ $manufacturer }}
+  issuerRef:
+    {{- if $root.Values.global.certmanager.issuer.name }}
+    name: {{ $root.Values.global.certmanager.issuer.name }}
+    kind: {{ $root.Values.global.certmanager.issuer.kind }}
+    {{- else }}
+    name: {{ $svc }}-selfsigned-issuer
+    kind: Issuer
+    {{- end }}
+  commonName: {{ printf "%s.%s.svc.cluster.local" $svc $namespace | quote }}
+  dnsNames:
+    {{- range $dnsNames }}
+    - {{ . | quote }}
+    {{- end }}
+{{- else }}
+{{- /*
+  No cert-manager: the chart mints the pair itself. `lookup` keeps the generated key pair
+  across upgrades — a plain `helm upgrade` re-reads the Secret and re-renders it
+  byte-for-byte — but there is no rotator behind this path, so the pair is issued once per
+  release and lives as long as it does; its lifetime is set to the 10-year ceiling rather
+  than a shorter one that would silently expire under an unattended release. The pair is
+  self-signed and its trust anchor is itself: `ca.crt` carries the same certificate the
+  broker serves, which is what the managed renderer (the worker's model-transfer
+  controller, a later change) mirrors into tenant namespaces, since a cross-namespace
+  Secret cannot be mounted directly. Offline GitOps renderers also bypass lookup and should
+  use cert-manager to keep a stable trust anchor. `helm template | kubectl apply` bypasses lookup
+  and mints a fresh pair on every run; install this chart with `helm install`/
+  `helm upgrade`, as every other lookup-managed Secret in Helm's ecosystem assumes.
+*/}}
+{{- $srvSecret := lookup "v1" "Secret" $namespace $secretName }}
+{{- $tlsCrt := "" }}
+{{- $tlsKey := "" }}
+{{- if $srvSecret }}
+{{- $tlsCrt = index $srvSecret.data "tls.crt" }}
+{{- $tlsKey = index $srvSecret.data "tls.key" }}
+{{- else }}
+{{- $leaf := genSelfSignedCert (printf "%s.%s.svc.cluster.local" $svc $namespace) (list) $dnsNames 3650 }}
+{{- $tlsCrt = $leaf.Cert | b64enc }}
+{{- $tlsKey = $leaf.Key | b64enc }}
+{{- end }}
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ $secretName }}
+  namespace: {{ $namespace }}
+  labels:
+    {{- include "gpustack-operator.modelTransfer.labels" $ | nindent 4 }}
+    gpustack.ai/manufacturer: {{ $manufacturer }}
+  {{- with $root.Values.commonAnnotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+type: kubernetes.io/tls
+data:
+  tls.crt: {{ $tlsCrt }}
+  tls.key: {{ $tlsKey }}
+  # The trust anchor, mirrored by the worker's renderer into the namespaces that consume
+  # it; a cross-namespace Secret reference cannot be mounted directly.
+  ca.crt: {{ $tlsCrt }}
+{{- end }}
+{{- end }}
+{{- end }}
+{{- end }}

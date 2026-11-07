@@ -148,7 +148,7 @@ func TestModelDeploymentEnumSpellings(t *testing.T) {
 		{"engine name", []string{"spec", "engine", "name"}, []string{`"vLLM"`, `"SGLang"`}, []string{`"vllm"`, `"sglang"`}, ""},
 		{"cache connector", []string{"spec", "kvCache", "connector"}, []string{`"Mooncake"`}, []string{`"mooncake"`}, `"Mooncake"`},
 		{"direct protocol", []string{"spec", "kvTransfer", "protocol"}, []string{`"Auto"`, `"TCP"`, `"RDMA"`, `"EFA"`, `"CANN"`, `"ROCM"`}, []string{`"auto"`, `"tcp"`, `"rdma"`, `"efa"`, `"cann"`, `"rocm"`, `"MUSA"`, `"MACA"`}, ""},
-		{"model delivery", []string{"status", "model", "delivery"}, []string{`"PVC"`, `"Engine"`, `"Node"`, `"Image"`}, []string{`"Pvc"`}, ""},
+		{"model delivery", []string{"status", "model", "delivery"}, []string{`"PVC"`, `"Engine"`, `"Node"`, `"Image"`, `"Remote"`}, []string{`"Pvc"`}, ""},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -233,18 +233,26 @@ func TestModelDeploymentStatusDeliveryAdmitsEveryDelivery(t *testing.T) {
 	model, ok := status.Properties["model"]
 	require.True(t, ok, "the schema has no status.model")
 
-	deliveries := make([]string, 0, 4)
+	deliveries := make([]string, 0, 5)
 	for _, d := range []ModelDeploymentModelDelivery{
 		ModelDeploymentModelDeliveryPVC,
 		ModelDeploymentModelDeliveryEngine,
 		ModelDeploymentModelDeliveryNode,
 		ModelDeploymentModelDeliveryImage,
+		ModelDeploymentModelDeliveryRemote,
 	} {
 		deliveries = append(deliveries, fmt.Sprintf("%q", d))
 	}
 
 	assert.ElementsMatch(t, deliveries, enumValues(t, model, "delivery"),
 		"every delivery the controller can write must be a value the status enum admits")
+
+	remote, ok := model.Properties["remote"]
+	require.True(t, ok, "the schema has no status.model.remote")
+	assert.NotContains(t, model.Required, "remote",
+		"the remote view is present only when remote delivery is configured, never by default")
+	assert.NotContains(t, enumValues(t, remote, "policy"), `"Node"`,
+		"the remote view's policy is the delivery policy, not a delivery outcome")
 }
 
 // TestModelDeploymentStatusEligibilityWireSurvivesJSONRoundTrip pins the distinctions the

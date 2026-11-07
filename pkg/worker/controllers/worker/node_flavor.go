@@ -25,6 +25,7 @@ import (
 	"gpustack.ai/gpustack/pkg/controller"
 	"gpustack.ai/gpustack/pkg/kubeclientset"
 	"gpustack.ai/gpustack/pkg/kubemeta"
+	"gpustack.ai/gpustack/pkg/modelstore"
 	"gpustack.ai/gpustack/pkg/nodefeature"
 	"gpustack.ai/gpustack/pkg/systemmeta"
 	"gpustack.ai/gpustack/pkg/systemname"
@@ -75,8 +76,9 @@ const (
 )
 
 // _ResourceFlavorResType is the systemmeta resource type carried by the
-// ResourceFlavors this reconciler owns.
-const _ResourceFlavorResType = "nodes"
+// ResourceFlavors this reconciler owns; the shared pool resolution in modelstore
+// reads the same mark, so the const has one owner.
+const _ResourceFlavorResType = modelstore.ResourceFlavorResourceType
 
 func (r *NodeFlavorReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	logger := ctrllog.FromContext(ctx)
@@ -465,23 +467,15 @@ func syncNodeFlavorNotes(rf *kueue.ResourceFlavor, want map[string]string) bool 
 }
 
 // matchNodeFlavor returns the node's flavor whose name equals flavorName, or nil
-// when the node contributes no such flavor.
+// when the node contributes no such flavor. The rule lives in nodefeature beside
+// the topology label and the qualified naming it rests on; this wrapper keeps the
+// package's call sites and tests unchanged.
 func matchNodeFlavor(nd *core.Node, flavorName string) *nodefeature.NodeFlavor {
-	profile := nd.Labels[TopologyProfileLabel]
-	if profile == "" {
-		return nil
-	}
-	for _, f := range nodefeature.ExtractNodeFlavors(nd) {
-		if topologyQualifiedFlavorName(f.Name, profile) == flavorName {
-			matched := f
-			return &matched
-		}
-	}
-	return nil
+	return nodefeature.MatchNodeFlavor(nd, flavorName)
 }
 
 func topologyQualifiedFlavorName(flavorName, profile string) string {
-	return flavorName + "-" + profile
+	return nodefeature.TopologyQualifiedFlavorName(flavorName, profile)
 }
 
 // featureKeyLabel returns the "<general.|acceleratable.>feature.gpustack.ai/<key>"

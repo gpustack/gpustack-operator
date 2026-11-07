@@ -15,6 +15,8 @@ Follow the [Model Prefetch Walkthrough](../../walkthroughs/model-delivery/prefet
 
 [Model Artifact](artifact.md) covers resolution, validation and the delivery
 choices. [Model Image Source](image-source.md) covers image-backed weights.
+[Remote Weight Delivery](remote.md) covers loading weights from a prepared
+source node without a local checkpoint.
 
 ## Cache operations
 

@@ -17,6 +17,8 @@ func TestOptionsValidate(t *testing.T) {
 		{name: "no node name", edit: func(*Options) {}, wantErr: "--node-name"},
 		{name: "a relative kubelet directory", edit: func(o *Options) { o.NodeName = "n"; o.KubeletDir = "kubelet" }, wantErr: "--kubelet-dir"},
 		{name: "a relative cache root", edit: func(o *Options) { o.NodeName = "n"; o.CacheRoot = "models" }, wantErr: "--cache-root"},
+		{name: "a relative model-transfer state root", edit: func(o *Options) { o.NodeName = "n"; o.ModelTransferStateRoot = "model-transfer" }, wantErr: "--model-transfer-state-root"},
+		{name: "an absolute model-transfer state root", edit: func(o *Options) { o.NodeName = "n"; o.ModelTransferStateRoot = "/var/lib/gpustack/model-transfer" }},
 		{name: "a relative socket", edit: func(o *Options) { o.NodeName = "n"; o.CSISocket = "csi.sock" }, wantErr: "--csi-socket"},
 	}
 	for _, c := range cases {
