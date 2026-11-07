@@ -177,9 +177,8 @@ jobs:
           #     linux/amd64 only (there is no arm64 ROCm build; upstream Mooncake's own
           #     ROCm release job builds amd64-only too, and gpustack/runner's ROCm
           #     Dockerfile builds with --platform=linux/amd64).
-          #   - model-transfer: CUDA uses the x86-64 NIXL wheels; the
-          #     source-built HIXL pair has only been built for arm64. These are
-          #     build inputs, not a claim of runtime qualification.
+          #   - model-transfer target rocm: the ROCm base image is amd64-only.
+          #     CUDA and CANN build for both amd64 and arm64.
           #
           # The manifest job derives its platform list from this output, so it follows
           # automatically.
@@ -193,9 +192,7 @@ jobs:
           AMD64='{"runner":"ubuntu-24.04'"${SUFFIX}"'","platform":"linux/amd64"}'
           ARM64='{"runner":"ubuntu-24.04-arm'"${SUFFIX}"'","platform":"linux/arm64"}'
           case "${INPUT_REPOSITORY}:${INPUT_TARGET}" in
-            model-transfer:cuda) ENTRIES="${AMD64}" ;;
             model-transfer:rocm) ENTRIES="${AMD64}" ;;
-            model-transfer:cann) ENTRIES="${ARM64}" ;;
             thead-ppu-devel:*) ENTRIES="${AMD64}" ;;
             mirrored-mooncake:rocm*) ENTRIES="${AMD64}" ;;
             *) ENTRIES="${AMD64},${ARM64}" ;;

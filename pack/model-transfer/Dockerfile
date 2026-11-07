@@ -1,8 +1,8 @@
 # Vendor source-worker runtimes for remote model weight delivery.
 # Build targets:
-#   cuda: NIXL CUDA 12.9 wheels and Torch; linux/amd64.
+#   cuda: NIXL CUDA 12.9 wheels and Torch; linux/amd64 and linux/arm64.
 #   rocm: source-built NIXL and UCX with ROCm 7.2; linux/amd64.
-#   cann: CANN 9.2 with a patched HIXL host library; linux/arm64 (amd64 is not qualified).
+#   cann: CANN 9.2 with a patched HIXL host library; linux/amd64 and linux/arm64.
 # Select a target explicitly. The packaging script defaults to cuda; a direct
 # Docker build without --target reaches the final cann stage.
 #
@@ -129,10 +129,6 @@ COPY --from=wheel-builder /out/wheels /tmp/wheels
 
 RUN --mount=type=bind,src=pack/model-transfer/rootfs,target=/rootfs <<EOF
     set -exo pipefail
-    if [[ "$(uname -m)" != "x86_64" ]]; then
-        echo "The CUDA NIXL target requires linux/amd64 (found $(uname -m))." >&2
-        exit 1
-    fi
     python3 -m pip install --no-cache-dir \
         --index-url https://download.pytorch.org/whl/cu129 \
         "torch==${NIXL_TORCH_VERSION}"
