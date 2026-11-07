@@ -2,7 +2,7 @@ terraform {
   required_providers {
     nebius = {
       source  = "nebius/nebius"
-      version = "0.6.67"
+      version = "0.6.80"
     }
     external = {
       source  = "hashicorp/external"

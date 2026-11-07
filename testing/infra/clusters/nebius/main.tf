@@ -185,7 +185,7 @@ data "external" "gpu_compat" {
     for tool in jq nebius; do
       command -v "$tool" >/dev/null || { echo "$tool is required to resolve os/drivers_preset and check allow_gpu_clustering; install it" >&2; exit 1; }
     done
-    eval "$(jq -r '@sh "PROJECT=\(.project_id) REL=\(.release) PLAT=\(.platform) PRESET=\(.preset) WANTS=\(.wants_cluster)"')"
+    eval "$(jq -r '@sh "PROJECT=\(.project_id) REL=\(.release) GROUP=\(.group_name) PLAT=\(.platform) PRESET=\(.preset) PREEMPT=\(.preemptible) COUNT=\(.node_count) FABRIC=\(.infiniband_fabric) CLUSTER_ID=\(.gpu_cluster_id) WANTS=\(.wants_cluster)"')"
     matrix="$(nebius mk8s node-group get-compatibility-matrix \
       --cluster-kubernetes-version "$REL" --platform "$PLAT" --format json)"
     platforms="$(nebius compute platform list --parent-id "$PROJECT" --format json)"
@@ -213,22 +213,117 @@ data "external" "gpu_compat" {
       fi
       exit 1
     fi
-    jq -n --argjson od "$os_drivers" --arg allow "$allow" '$od + {allow_gpu_clustering: $allow}'
+    capacity_ok="true"
+    capacity_msg=""
+    if nebius capacity resource-advice list --help 2>/dev/null | grep -q -- '--parent-id'; then
+      proj_json="$(nebius iam project get --id "$PROJECT" --format json 2>/dev/null || true)"
+      tenant="$(printf '%s' "$proj_json" | jq -r '.metadata.parent_id // .metadata.parentId // empty' 2>/dev/null || true)"
+      region="$(printf '%s' "$proj_json" | jq -r '.spec.region // empty' 2>/dev/null || true)"
+      eff_fabric="$FABRIC"
+      if [ -z "$eff_fabric" ] && [ -n "$CLUSTER_ID" ]; then
+        eff_fabric="$(nebius compute gpu-cluster get --id "$CLUSTER_ID" --format json 2>/dev/null | jq -r '.spec.infiniband_fabric // .spec.infinibandFabric // empty' 2>/dev/null || true)"
+      fi
+      if [ -n "$tenant" ] && [ -n "$region" ]; then
+        advice_json="$(nebius capacity resource-advice list --parent-id "$tenant" --all --format json 2>/dev/null || true)"
+        inst_json="$(nebius compute instance list --parent-id "$PROJECT" --format json 2>/dev/null || true)"
+        if [ -n "$advice_json" ]; then
+          active_count=0
+          # Only the current root's exact node group can offset its requested capacity.
+          # Missing state or unrecognized instance names earn no existing-node credit.
+          own_group="$(terraform state pull 2>/dev/null | jq -r --arg project "$PROJECT" --arg group "$GROUP" '
+            [.resources[]? | select(.mode == "managed" and (.module // "") == "")] as $resources
+            | [$resources[] | select(.type == "nebius_mk8s_v1_cluster" and .name == "this")
+               | .instances[]? | .attributes | select(.parent_id == $project) | .id] as $clusters
+            | [$resources[] | select(.type == "nebius_mk8s_v1_node_group" and .name == "this")
+               | .instances[]? | select(.index_key == $group and .deposed == null)
+               | .attributes | select(.parent_id as $parent | $clusters | index($parent))
+               | .id | select(type == "string" and startswith("mk8snodegroup-"))]
+            | if length == 1 then .[0] else "" end' 2>/dev/null || true)"
+          if [ -n "$inst_json" ] && [ -n "$own_group" ]; then
+            active_count="$(printf '%s' "$inst_json" | jq -r \
+              --arg plat "$PLAT" --arg preset "$PRESET" --arg preempt "$PREEMPT" --arg cid "$CLUSTER_ID" --arg own "$own_group" '
+              [.items[]?
+               | select((.status.state == "RUNNING" or .status.state == "STARTING")
+                        and (.metadata.name // "" | startswith($own + "-"))
+                        and (.spec.resources.platform == $plat)
+                        and (.spec.resources.preset == $preset)
+                        and (((.spec.preemptible != null) | tostring) == $preempt)
+                        and ($cid == "" or (.spec.gpu_cluster.id // "") == $cid))
+              ] | length' 2>/dev/null || echo 0)"
+          fi
+          verdict="$(printf '%s' "$advice_json" | jq -r \
+            --arg region "$region" --arg group "$GROUP" --arg plat "$PLAT" --arg preset "$PRESET" \
+            --arg preempt "$PREEMPT" --arg fabric "$eff_fabric" --argjson count "$COUNT" --argjson active "$active_count" '
+            ($count - $active | if . < 0 then 0 else . end) as $needed
+            | [.items[]?
+               | select(.spec.region == $region
+                        and (.spec.compute_instance.platform // .spec.computeInstance.platform) == $plat
+                        and (.spec.compute_instance.preset.name // .spec.computeInstance.preset.name) == $preset)] as $rows
+            | if ($rows | length) == 0 or $needed == 0 then
+                {ok: "true", msg: ""}
+              else
+                ([$rows[] | "\(.spec.fabric // "default")(preemptible=\(.status.preemptible.available // 0), on_demand=\((.status.on_demand // .status.onDemand).available // 0))"] | sort | join(", ")) as $summary
+                | (if $preempt == "true" then "preemptible" else "on_demand" end) as $mode
+                | (if $fabric != "" and $fabric != "auto" then
+                     [$rows[] | select(.spec.fabric == $fabric)]
+                   else
+                     $rows
+                   end) as $matched
+                | if ($matched | length) == 0 then
+                    {ok: "true", msg: ""}
+                  else
+                    ([$matched[] | (if $preempt == "true" then .status.preemptible else (.status.on_demand // .status.onDemand) end)]
+                     | map(select((.data_state // .dataState) == "DATA_STATE_FRESH"))) as $fresh
+                    | if ($fresh | length) == 0 then
+                        {ok: "true", msg: ""}
+                      else
+                        ([$fresh[] | (.available // 0)] | max) as $avail
+                        | if $avail >= $needed then
+                            {ok: "true", msg: ""}
+                          else
+                            {
+                              ok: "false",
+                              msg: "Insufficient live Nebius \($mode) capacity for group \u0027\($group)\u0027 (region=\($region), platform=\($plat), preset=\($preset), fabric=\(if $fabric == "" then "any" else $fabric end)): requested \($count) node(s) (\($needed) net new), live available=\($avail). Region inventory by fabric: \($summary)."
+                            }
+                          end
+                      end
+                  end
+              end
+            | @json' 2>/dev/null || echo '{"ok":"true","msg":""}')"
+          capacity_ok="$(printf '%s' "$verdict" | jq -r '.ok // "true"')"
+          capacity_msg="$(printf '%s' "$verdict" | jq -r '.msg // ""')"
+        fi
+      fi
+    fi
+    jq -n --argjson od "$os_drivers" --arg allow "$allow" --arg ok "$capacity_ok" --arg msg "$capacity_msg" \
+      '$od + {allow_gpu_clustering: $allow, capacity_ok: $ok, capacity_message: $msg}'
   EOT
   ]
 
   query = {
-    project_id    = var.project_id
-    release       = var.release
-    platform      = each.value.platform
-    preset        = each.value.preset
-    wants_cluster = (each.value.infiniband_fabric != null || each.value.gpu_cluster_id != null) ? "true" : "false"
+    project_id        = var.project_id
+    release           = var.release
+    group_name        = each.key
+    platform          = each.value.platform
+    preset            = each.value.preset
+    preemptible       = tostring(each.value.preemptible)
+    node_count        = tostring(each.value.node_count)
+    infiniband_fabric = try(coalesce(try(var.nebius_resolved.bindings[each.key].fabric, null), each.value.infiniband_fabric), "")
+    gpu_cluster_id    = try(coalesce(try(var.nebius_resolved.bindings[each.key].cluster_id, null), each.value.gpu_cluster_id), "")
+    wants_cluster     = (each.value.infiniband_fabric != null || each.value.gpu_cluster_id != null) ? "true" : "false"
   }
 }
 
 resource "nebius_vpc_v1_network" "this" {
   parent_id = var.project_id
   name      = local.cluster_name
+
+  lifecycle {
+    precondition {
+      condition     = alltrue([for k in keys(var.gpu_instance_types) : try(data.external.gpu_compat[k].result.capacity_ok, "true") == "true"])
+      error_message = join("; ", compact([for k in keys(var.gpu_instance_types) : try(data.external.gpu_compat[k].result.capacity_ok, "true") == "true" ? "" : try(data.external.gpu_compat[k].result.capacity_message, "Insufficient live GPU capacity for ${k}.")]))
+    }
+  }
 }
 
 resource "nebius_vpc_v1_subnet" "this" {
@@ -369,6 +464,10 @@ resource "nebius_mk8s_v1_node_group" "this" {
     precondition {
       condition     = each.value.spot_pricing_policy_id == null ? true : (data.nebius_billing_v1_pricing_policy.external[each.key].parent_id == var.project_id && data.nebius_billing_v1_pricing_policy.external[each.key].compute_instance_spec.v1.platform == each.value.instance_type.platform)
       error_message = "The pricing policy must belong to this project and platform."
+    }
+    precondition {
+      condition     = each.value.gpu == null || try(data.external.gpu_compat[each.key].result.capacity_ok, "true") == "true"
+      error_message = try(data.external.gpu_compat[each.key].result.capacity_message, "Insufficient live GPU capacity in Nebius Resource Advice.")
     }
   }
 
@@ -561,7 +660,8 @@ resource "nebius_billing_v1_pricing_policy" "this" {
   parent_id             = var.project_id
   name                  = "${local.cluster_name}-${each.key}-spot"
   compute_instance_spec = { v1 = { platform = each.value.platform } }
-  pricing               = { max_price_v1 = { max_price = local.node_groups[each.key].spot_max_price } }
+  # Nebius returns normalized decimals; trim zeros without rounding the price limit.
+  pricing = { max_price_v1 = { max_price = local.node_groups[each.key].spot_max_price == null ? null : trimsuffix(replace(replace(local.node_groups[each.key].spot_max_price, "/^0+([0-9])/", "$1"), "/(\\.[0-9]*?)0+$/", "$1"), ".") } }
   lifecycle {
     replace_triggered_by = [null_resource.price[each.key]]
     precondition {

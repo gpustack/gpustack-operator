@@ -117,5 +117,28 @@ class PrepareTest(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertEqual(self.snapshot.read_bytes(), before)
 
+    def test_insufficient_fabric_capacity_rejected_with_inventory(self):
+        self.group['infiniband_fabric'] = 'fabric-2'
+        self.group['node_count'] = 3
+        (self.work / 'terraform.tfstate').write_text(json.dumps({'resources': []}))
+        result = self.prepare()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("insufficient live preemptible capacity on fabric 'fabric-2'", result.stderr)
+        self.assertIn("requested 3 node(s), available 2", result.stderr)
+        self.assertIn("fabric-2(preemptible=2, on_demand=0)", result.stderr)
+
+    def test_auto_fabric_skips_under_sized_fabric(self):
+        self.group['infiniband_fabric'] = 'auto'
+        self.group['node_count'] = 3
+        result = self.prepare(CAPACITY='3')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        snapshot = json.loads(self.snapshot.read_text())['nebius_resolved']
+        self.assertEqual(snapshot['bindings']['gpu']['fabric'], 'fabric-3')
+        self.group['fabric_selection_revision'] = 'too-big'
+        self.group['node_count'] = 4
+        fail = self.prepare(CAPACITY='3')
+        self.assertNotEqual(fail.returncode, 0)
+        self.assertIn("no fresh capacity >= 4 for automatic fabric selection", fail.stderr)
+
 if __name__ == '__main__':
     unittest.main()

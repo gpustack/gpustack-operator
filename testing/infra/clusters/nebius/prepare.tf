@@ -1,5 +1,5 @@
 locals {
-  prepare_input       = { project_id = var.project_id, groups = { for name, cfg in var.gpu_instance_types : name => { platform = cfg.platform, preset = cfg.preset, preemptible = cfg.preemptible, infiniband_fabric = cfg.infiniband_fabric, gpu_cluster_id = cfg.gpu_cluster_id, reuse_gpu_cluster = cfg.reuse_gpu_cluster, fabric_selection_revision = cfg.fabric_selection_revision, spot_price_from_history = cfg.spot_price_from_history, spot_price_ceiling = cfg.spot_price_ceiling } } }
+  prepare_input       = { project_id = var.project_id, groups = { for name, cfg in var.gpu_instance_types : name => { platform = cfg.platform, preset = cfg.preset, node_count = cfg.node_count, preemptible = cfg.preemptible, infiniband_fabric = cfg.infiniband_fabric, gpu_cluster_id = cfg.gpu_cluster_id, reuse_gpu_cluster = cfg.reuse_gpu_cluster, fabric_selection_revision = cfg.fabric_selection_revision, spot_price_from_history = cfg.spot_price_from_history, spot_price_ceiling = cfg.spot_price_ceiling } } }
   prepare_fingerprint = sha256(jsonencode(local.prepare_input))
   snapshot_valid      = try(var.nebius_resolved.fingerprint == local.prepare_fingerprint, false)
 }
@@ -106,7 +106,10 @@ resource "null_resource" "prepare" {
                   presets = [p for platform in platforms if platform.get('metadata', {}).get('name') == group['platform'] for p in platform.get('spec', {}).get('presets', []) if p.get('name') == group['preset']]
                   if len(presets) != 1 or not field(presets[0], 'allow_gpu_clustering', 'allowGpuClustering'):
                       raise ValueError('platform/preset does not allow GPU clustering for ' + name)
+                  needed = int(group.get('node_count') or 1)
                   identity = {k: group.get(k) for k in ('platform', 'preset', 'infiniband_fabric', 'gpu_cluster_id', 'reuse_gpu_cluster', 'preemptible', 'fabric_selection_revision')}
+                  if group.get('node_count') is not None:
+                      identity['node_count'] = needed
                   identity['project_id'] = config['project_id']
                   key = hashlib.sha256(json.dumps(identity, sort_keys=True).encode()).hexdigest()
                   previous = old.get('bindings', {}).get(name, {}) if old.get('project_id') == config['project_id'] and old.get('region') == region else {}
@@ -120,6 +123,7 @@ resource "null_resource" "prepare" {
                           raise ValueError('GPU cluster belongs to another project for ' + name)
                       fabric = field(cluster['spec'], 'infiniband_fabric', 'infinibandFabric')
                   matching = []
+                  summary_parts = []
                   if advice is not None:
                       for row in advice:
                           spec = row.get('spec', {})
@@ -127,14 +131,18 @@ resource "null_resource" "prepare" {
                           if spec.get('region') != region or instance.get('platform') != group['platform'] or (instance.get('preset') or {}).get('name') != group['preset']:
                               continue
                           status = row.get('status', {})
+                          pre_avail = int((status.get('preemptible') or {}).get('available') or 0)
+                          od_avail = int((field(status, 'on_demand', 'onDemand') or {}).get('available') or 0)
+                          summary_parts.append(f"{spec.get('fabric') or 'default'}(preemptible={pre_avail}, on_demand={od_avail})")
                           availability = status.get('preemptible', {}) if group.get('preemptible') else field(status, 'on_demand', 'onDemand') or {}
                           matching.append((spec.get('fabric'), availability))
+                  summary_str = ', '.join(sorted(summary_parts)) or 'none'
                   if fabric == 'auto':
                       if advice is None:
                           raise RuntimeError('automatic fabric selection requires Resource Advice; upgrade Nebius CLI and check tenant access')
-                      candidates = [(f, a) for f, a in matching if f and field(a, 'data_state', 'dataState') == 'DATA_STATE_FRESH' and a.get('available') is not None and int(a['available']) > 0]
+                      candidates = [(f, a) for f, a in matching if f and field(a, 'data_state', 'dataState') == 'DATA_STATE_FRESH' and a.get('available') is not None and int(a['available']) >= needed]
                       if not candidates:
-                          raise ValueError('no fresh positive capacity for automatic fabric selection for ' + name)
+                          raise ValueError(f'no fresh capacity >= {needed} for automatic fabric selection for {name} (region={region} inventory: {summary_str})')
                       fabric = sorted(candidates, key=lambda pair: (-int(pair[1]['available']), pair[0]))[0][0]
                   elif advice is None or not any(f == fabric for f, _ in matching):
                       print('Resource Advice could not verify fabric ' + str(fabric) + ' for ' + name, file=sys.stderr)
@@ -144,6 +152,9 @@ resource "null_resource" "prepare" {
                       candidates = [c.get('metadata', {}).get('id') for c in clusters if field(c.get('spec', {}), 'infiniband_fabric', 'infinibandFabric') == fabric and c.get('metadata', {}).get('id') not in own_ids]
                       selected = sorted(x for x in candidates if x)[0] if candidates else None
                   selected_advice = next((a for f, a in matching if f == fabric), {})
+                  if field(selected_advice, 'data_state', 'dataState') == 'DATA_STATE_FRESH' and int(selected_advice.get('available') or 0) < needed:
+                      mode = 'preemptible' if group.get('preemptible') else 'on_demand'
+                      raise ValueError(f"insufficient live {mode} capacity on fabric '{fabric}' for {name}: requested {needed} node(s), available {int(selected_advice.get('available') or 0)} (region={region} inventory: {summary_str})")
                   bindings[name] = {'key': key, 'fabric': fabric, 'cluster_id': selected, 'advice_state': field(selected_advice, 'data_state', 'dataState') or 'UNKNOWN', 'advice_available': selected_advice.get('available'), 'advice_effective_at': field(selected_advice, 'effective_at', 'effectiveAt'), 'advice_limit': selected_advice.get('limit'), 'advice_level': field(selected_advice, 'availability_level', 'availabilityLevel'), 'queried_at': dt.datetime.now(dt.timezone.utc).isoformat()}
           history_groups = {k: v for k, v in config['groups'].items() if v.get('spot_price_from_history')}
           results = {}
