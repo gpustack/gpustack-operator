@@ -92,6 +92,8 @@ from packaging.version import InvalidVersion, Version
 try:
     print(Version(sys.argv[1]))
 except InvalidVersion:
+    print("warning: GPUSTACK_GIT_VERSION is not a Python package version; "
+          "using 0.0.0 for the SDK wheel", file=sys.stderr)
     print("0.0.0")
 ' "${GPUSTACK_GIT_VERSION}")"
     export SETUPTOOLS_SCM_PRETEND_VERSION="${version}"
