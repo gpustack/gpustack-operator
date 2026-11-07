@@ -31,13 +31,6 @@ PHASE_CONNECTED = "connected"
 PHASE_DISCONNECTED = "disconnected"
 PHASE_DEREGISTERED = "deregistered"
 
-_ORDER = (
-    (PHASE_CREATED, PHASE_REGISTERED),
-    (PHASE_REGISTERED, PHASE_CONNECTED),
-    (PHASE_CONNECTED, PHASE_DISCONNECTED),
-    (PHASE_DISCONNECTED, PHASE_DEREGISTERED),
-)
-
 
 @dataclass(frozen=True)
 class FabricMemRelaxation:

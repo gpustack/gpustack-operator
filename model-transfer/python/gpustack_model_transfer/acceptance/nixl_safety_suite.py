@@ -263,7 +263,10 @@ def _check_pre_submission_fault_release(context, api):
         qualify_endpoints("tcp://source:9100", ["mlx5_0:1"], {}),
     )
     span = (tensor.data_begin, min(tensor.data_end, tensor.data_begin + 8))
-    return check_pre_submission_fault(reader, tensor.file, span)
+    try:
+        return check_pre_submission_fault(reader, tensor.file, span)
+    finally:
+        reader.close()
 
 
 def _check_post_submission_unknown_quarantine(context, api):
@@ -301,7 +304,10 @@ def _check_post_submission_unknown_quarantine(context, api):
         poll_deadline_seconds=0.0,
     )
     span = (tensor.data_begin, min(tensor.data_end, tensor.data_begin + 8))
-    return check_post_submission_quarantine(reader, tensor.file, span)
+    try:
+        return check_post_submission_quarantine(reader, tensor.file, span)
+    finally:
+        reader.close()
 
 
 _CHECKS = (

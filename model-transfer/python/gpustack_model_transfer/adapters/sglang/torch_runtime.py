@@ -85,7 +85,6 @@ class TorchRuntimeDriver:
 
     def __init__(self):
         self._torch = None
-        self._models = {}
         self.last_model = None
 
     def _require_torch(self):
@@ -122,11 +121,11 @@ class TorchRuntimeDriver:
                 model.parameters[alias_name] = storages[target]
         if options.engine_config is not None:
             model.connector_config = options.engine_config
-        self._models[id(model)] = model
         self.last_model = model
         return model
 
     def store(self, model, entry, payload, ownership="owned") -> str:
+        """Accept the driver interface's ownership request and always copy to owned storage."""
         torch = self._require_torch()
         buffer = model.parameters[entry.tensor.name]
         if not payload:

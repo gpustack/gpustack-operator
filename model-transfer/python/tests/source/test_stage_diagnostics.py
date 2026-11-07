@@ -387,3 +387,31 @@ def test_native_worker_forged_stage_is_not_trusted():
     assert sent == ["unknown"], (
         "a forged stage outside the vocabulary must not reach the wire"
     )
+
+
+@pytest.mark.parametrize(
+    "mode,error",
+    [
+        ("status", None),
+        ("raise", RuntimeError("connect failed")),
+        ("raise", KeyboardInterrupt("interrupted")),
+    ],
+)
+def test_hixl_connect_failure_balances_file_reference(mode, error):
+    backend, registration = _headroom_backend(_Engine("connect", mode, error))
+    with pytest.raises(BaseException) as failure:
+        _drive(backend, registration, "connect")
+    if error is not None:
+        assert failure.value is error
+    assert not backend._in_use_counts
+    assert not backend._peers
+
+
+def test_hixl_submit_failure_keeps_file_reference():
+    backend, registration = _headroom_backend(
+        _Engine("submit", "raise", RuntimeError("submit uncertain"))
+    )
+    with pytest.raises(RuntimeError, match="submit uncertain"):
+        _drive(backend, registration, "submit")
+    assert backend._in_use_counts == {"file": 1}
+    assert backend._peers == ["endpoint-red"]

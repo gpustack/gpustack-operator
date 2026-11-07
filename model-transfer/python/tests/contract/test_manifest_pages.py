@@ -90,3 +90,40 @@ def test_tensor_batch_failure_rolls_back_rows_and_file_positions(failure):
         assert index.file_index[("weights", "second")] == 1
     finally:
         index.close()
+
+
+def test_tensor_index_commit_failure_restores_positions_and_rows():
+    import sqlite3
+
+    from gpustack_model_transfer.core.descriptors import TensorDescriptor
+    from gpustack_model_transfer.core.tensor_index import TensorIndex
+
+    index = TensorIndex()
+    real = index._connection
+
+    class FailCommitOnce:
+        failing = True
+
+        def __getattr__(self, name):
+            return getattr(real, name)
+
+        def commit(self):
+            if self.failing:
+                self.failing = False
+                raise sqlite3.OperationalError("injected commit failure")
+            return real.commit()
+
+    first = TensorDescriptor("first", "weights", "U8", (1,), 0, 1)
+    second = TensorDescriptor("second", "weights", "U8", (1,), 1, 2)
+    try:
+        index.add([first])
+        index._connection = FailCommitOnce()
+        with pytest.raises(InvalidDescriptorError, match="storage limit or IO failure"):
+            index.add([second])
+        assert len(index) == 1
+        assert list(index) == [first]
+        index.add([second])
+        assert list(index.by_file["weights"]) == [first, second]
+        assert index.file_index[("weights", "second")] == 1
+    finally:
+        index.close()

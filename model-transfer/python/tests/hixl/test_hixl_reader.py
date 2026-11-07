@@ -415,3 +415,31 @@ def test_terminal_operation_history_is_bounded():
         assert not reader._slots._terminal_ops
     finally:
         reader.close()
+
+
+def test_unknown_operation_survives_a_later_read():
+    import pytest
+
+    from gpustack_model_transfer.backends.hixl.testing import SUBMIT_OK
+
+    api = FakeHixlAPI(submit_mode=SUBMIT_NONTERMINAL)
+    reader = open_reader(api=api, max_inflight=2, poll_deadline_seconds=0)
+    tensor = reader.manifest.tensors[0]
+    with pytest.raises(AmbiguousReadError):
+        reader.read_bytes(tensor.file, tensor.data_begin, tensor.data_end)
+    flight = next(iter(reader.in_flight.values()))
+    api.submit_mode = SUBMIT_OK
+    try:
+        reader.read_bytes(tensor.file, tensor.data_begin, tensor.data_end)
+        assert reader.in_flight[flight.operation.op_id] is flight
+        assert flight.operation.state == OpState.UNKNOWN
+        with pytest.raises(OperationStateError):
+            reader.close()
+    finally:
+        reader.resolve(flight.operation.op_id, "failed", error_code="test-fence")
+        reader.close()
+
+
+def test_fake_unknown_operation_is_pending():
+    api = FakeHixlAPI()
+    assert api.poll(None, "absent-operation").state == "pending"

@@ -845,3 +845,33 @@ def test_fault_check_restores_missing_or_none_mode(suite_name, present):
     assert hasattr(api, "submit_mode") is present
     if present:
         assert api.submit_mode is None
+
+
+@pytest.mark.parametrize("present", [False, True])
+@pytest.mark.parametrize("fail", [False, True])
+def test_nixl_check_restores_all_injected_settings(present, fail):
+    from types import SimpleNamespace
+
+    from gpustack_model_transfer.acceptance import nixl_backend_suite
+
+    original = {
+        "submit_mode": None,
+        "source_files": {"old": b"data"},
+        "expire_registration_after": None,
+        "_submissions_since_renewal": 7,
+        "_expired_once": True,
+    }
+    api = SimpleNamespace(**original) if present else SimpleNamespace()
+
+    def check(context, runtime):
+        for name in original:
+            setattr(runtime, name, "injected")
+        if fail:
+            raise RuntimeError("injected failure")
+        return "checked"
+
+    result = nixl_backend_suite._run_check("probe", check, {}, api)
+    assert result.status == ("NO-GO" if fail else "PASS")
+    assert vars(api) == (original if present else {})
+    if present:
+        assert api.source_files is original["source_files"]

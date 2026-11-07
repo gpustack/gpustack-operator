@@ -77,7 +77,6 @@ class TorchRuntimeDriver:
 
     def __init__(self):
         self._torch = None
-        self._models = {}
         # Mutation bookkeeping, kept exactly as the reference runtime
         # keeps it: a fallback decision reads these counters to decide
         # whether the engine's parameters were already touched.
@@ -115,7 +114,6 @@ class TorchRuntimeDriver:
                 model.parameters[alias_name] = storages[target]
         if options.engine_config is not None:
             model.connector_config = options.engine_config
-        self._models[id(model)] = model
         self.last_model = model
         return model
 

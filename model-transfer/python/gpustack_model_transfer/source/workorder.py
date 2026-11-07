@@ -177,7 +177,7 @@ def parse_assignment(payload, *, backend: str, page_reader=None) -> Assignment:
             f"work order backend must be nixl or hixl, got {backend!r}"
         )
     secret = payload["workerSecret"]
-    if not isinstance(secret, str) or not _SECRET_PATTERN.match(secret):
+    if not isinstance(secret, str) or not _SECRET_PATTERN.fullmatch(secret):
         raise InvalidDescriptorError("work order secret has an unusable shape")
     digest = payload["digest"]
     if not isinstance(digest, str) or not re.fullmatch(r"sha256:[0-9a-f]{64}", digest):
@@ -289,7 +289,7 @@ def parse_assignment(payload, *, backend: str, page_reader=None) -> Assignment:
             "backend": backend,
             "workerUID": "x" * 128,
         }
-        for f in registered_files(manifest)
+        for f in files
     ]
     if len(json.dumps(descriptors).encode()) > 768 * 1024:
         raise InvalidDescriptorError("registration descriptors exceed wire bound")

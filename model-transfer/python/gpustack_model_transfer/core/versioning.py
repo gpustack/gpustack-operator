@@ -42,7 +42,7 @@ def negotiate_contract_version(
     An older v1 client that omits client_versions defaults to (1,) so it
     is refused by a layout-only v2 server.
     """
-    if client_versions is None or client_versions == () or client_versions == []:
+    if client_versions is None:
         candidates = (1,)
     else:
         if isinstance(client_versions, (str, bytes)) or not hasattr(

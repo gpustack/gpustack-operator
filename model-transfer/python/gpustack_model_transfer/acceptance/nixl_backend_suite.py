@@ -98,8 +98,17 @@ def _run_check(capability, check, context, api) -> CheckResult:
     missing-hook guards above keep that the explicit path, and this catch
     is the honest fallback for anything they miss.
     """
-    had_mode = hasattr(api, "submit_mode")
-    previous_mode = getattr(api, "submit_mode", None)
+    missing = object()
+    injected = {
+        name: getattr(api, name, missing)
+        for name in (
+            "submit_mode",
+            "source_files",
+            "expire_registration_after",
+            "_submissions_since_renewal",
+            "_expired_once",
+        )
+    }
     try:
         detail = check(context, api)
         if isinstance(detail, CheckResult):
@@ -120,10 +129,11 @@ def _run_check(capability, check, context, api) -> CheckResult:
         return CheckResult(capability, "NO-GO", f"{type(exc).__name__}: {exc}")
 
     finally:
-        if had_mode:
-            api.submit_mode = previous_mode
-        elif hasattr(api, "submit_mode"):
-            del api.submit_mode
+        for name, previous in injected.items():
+            if previous is not missing:
+                setattr(api, name, previous)
+            elif hasattr(api, name):
+                delattr(api, name)
 
 
 def _compat_unrun(name: str, why: str) -> CheckResult:

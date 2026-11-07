@@ -185,19 +185,13 @@ class FakeHixlAPI:
         )
 
     def poll(self, agent, operation_id: str) -> TransferOutcome:
-        state = self.operations.get(operation_id, "pending")
+        state = self.operations.get(operation_id, SUBMIT_NONTERMINAL)
         if state == SUBMIT_NONTERMINAL:
             return TransferOutcome(state="pending", detail="still in flight")
         if state == SUBMIT_OK:
             self._land_payload(operation_id)
             return TransferOutcome(state="succeeded", detail="ok")
         return TransferOutcome(state="failed", detail=state)
-
-    def fence(self, operation_id: str, state: str) -> None:
-        """A qualified fence resolves one submitted operation out of band."""
-        if operation_id not in self.operations:
-            raise KeyError(operation_id)
-        self.operations[operation_id] = state
 
     def _land_payload(self, operation_id: str) -> None:
         """Land the transfer's real bytes into its registered window.

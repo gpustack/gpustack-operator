@@ -134,7 +134,7 @@ class NPURuntimeDriver:
     def __init__(self, device: int | None = None):
         self._torch = None
         self._torch_npu = None
-        self._models = {}
+        self.last_model = None
         # The NPU this driver allocates on: the caller's assignment when
         # given, else the device visibility the process arrived with, else
         # 0. It is resolved once and honored everywhere.
@@ -206,7 +206,7 @@ class NPURuntimeDriver:
                 model.parameters[alias_name] = storages[target]
         if options.engine_config is not None:
             model.connector_config = options.engine_config
-        self._models[id(model)] = model
+        self.last_model = model
         return model
 
     def store(self, model, entry, payload, ownership="owned") -> str:

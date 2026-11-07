@@ -261,7 +261,6 @@ class TestMutationDetection(EnvSnapshotTestCase):
         driver = TorchRuntimeDriver()
         self.assertEqual(driver.stores_done, 0)
         self.assertIsNone(driver.last_model)
-        self.assertEqual(driver._models, {})
         plugin = GpustackLoadPlugin.__new__(GpustackLoadPlugin)
         plugin._driver = driver
         self.assertFalse(plugin._engine_mutated())

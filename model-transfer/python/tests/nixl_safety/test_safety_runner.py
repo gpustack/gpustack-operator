@@ -388,3 +388,47 @@ def test_refused_operation_is_not_safe_while_resources_remain(
     finally:
         reader._slots, reader.ledger = original_slots, original_ledger
         reader.close()
+
+
+@pytest.mark.parametrize("phase", ["pre", "post"])
+@pytest.mark.parametrize("fail", [False, True])
+def test_safety_suite_closes_reader_on_every_probe_exit(monkeypatch, phase, fail):
+    from gpustack_model_transfer.acceptance import nixl_safety_suite as suite
+    from gpustack_model_transfer.backends.nixl import reader as reader_module
+    from gpustack_model_transfer.backends.nixl import safety
+
+    readers = []
+
+    class Reader:
+        def __init__(self, *args, **kwargs):
+            self.closed = False
+            readers.append(self)
+
+        def close(self):
+            self.closed = True
+
+    def probe(*args):
+        if fail:
+            raise RuntimeError("probe failed")
+        return "checked"
+
+    probe_name = (
+        "check_pre_submission_fault"
+        if phase == "pre"
+        else "check_post_submission_quarantine"
+    )
+    monkeypatch.setattr(reader_module, "NixlReader", Reader)
+    monkeypatch.setattr(safety, probe_name, probe)
+    check = (
+        suite._check_pre_submission_fault_release
+        if phase == "pre"
+        else suite._check_post_submission_unknown_quarantine
+    )
+    if fail:
+        with pytest.raises(RuntimeError, match="probe failed"):
+            check(nixlutil.default_context(suite="safety"), FakeNixlAPI())
+    else:
+        assert (
+            check(nixlutil.default_context(suite="safety"), FakeNixlAPI()) == "checked"
+        )
+    assert len(readers) == 1 and readers[0].closed

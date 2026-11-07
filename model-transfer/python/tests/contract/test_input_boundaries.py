@@ -209,3 +209,38 @@ def test_sglang_store_uses_the_allocated_parameter_dtype():
     assert observed == [(bytearray(b"abcd"), dtype)]
     assert copies == [("reshaped", (1,))]
     assert model.mutated
+
+
+@pytest.mark.parametrize("engine", ["vllm", "sglang", "vllm_ascend"])
+def test_reference_driver_keeps_only_current_model(engine):
+    import gc
+    import weakref
+
+    from gpustack_model_transfer.adapters.modelexpress.plugin import GpustackLoadPlugin
+
+    module_name = "npu_runtime" if engine == "vllm_ascend" else "torch_runtime"
+    module = importlib.import_module(
+        f"gpustack_model_transfer.adapters.{engine}.{module_name}"
+    )
+    driver = (
+        module.NPURuntimeDriver(device=0)
+        if engine == "vllm_ascend"
+        else module.TorchRuntimeDriver()
+    )
+    driver._torch = SimpleNamespace()
+    if engine == "vllm_ascend":
+        driver._torch_npu = SimpleNamespace(
+            npu=SimpleNamespace(set_device=lambda device: None)
+        )
+    plan = SimpleNamespace(entries=())
+    options = SimpleNamespace(tie_word_embeddings=False, engine_config=None)
+    first = driver.build_model(plan, options)
+    reference = weakref.ref(first)
+    del first
+    second = driver.build_model(plan, options)
+    gc.collect()
+    assert reference() is None
+    assert driver.last_model is second
+    if engine != "vllm":
+        second.mutated = True
+        assert GpustackLoadPlugin._engine_mutated(SimpleNamespace(_driver=driver))

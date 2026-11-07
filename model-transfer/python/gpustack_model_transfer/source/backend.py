@@ -407,7 +407,9 @@ class HixlSourceBackend(_PagingBackend):
     holder's options; the ACL runtime reference is held for the
     backend's whole life, so a generation's teardown never finalizes a
     context another generation or a quarantine retainment still holds.
-    register-and-hold never touches metadata APIs.
+    register-and-hold never touches metadata APIs. An injected engine_factory
+    supports registration tests; transfer tests must also supply the matching
+    API object. Production resolves both from the installed HIXL runtime.
     """
 
     backend_name = "hixl"
@@ -437,6 +439,7 @@ class HixlSourceBackend(_PagingBackend):
         else:
             self._hixl = None
         engine = self._engine_factory()
+        # Keep the owner if initialize fails; the worker quarantines this backend.
         self._engine = engine
         options = {"BufferPool": "0:0"}
         status = int(engine.initialize(engine_address, options))
@@ -444,7 +447,6 @@ class HixlSourceBackend(_PagingBackend):
             raise SourceUnavailableError(
                 f"hixl engine initialize failed with status {status}"
             )
-        self._engine = engine
         return engine
 
     def _register_one(self, engine, block):
@@ -623,7 +625,12 @@ class HixlSourceBackend(_PagingBackend):
         endpoint = target["endpoint"]
         cached = self._cached_peers.get(owner)
         if cached is None:
-            self._connect_peer(endpoint)
+            try:
+                self._connect_peer(endpoint)
+            except BaseException:
+                # No write was submitted; preserve the connection failure itself.
+                self._release_file(name)
+                raise
             if owner is not None:
                 cached = {
                     "identity": (endpoint, target["address"], target["length"]),

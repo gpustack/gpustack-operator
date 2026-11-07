@@ -797,3 +797,48 @@ def test_unknown_after_native_attempt_still_retains_generation():
         assert worker.blocks
     finally:
         worker._stop_event.set()
+
+
+@pytest.mark.parametrize(
+    "secret", ["abc\n", "abc\r\n", "abc\r", "abc\x00", "", "é", "a" * 513]
+)
+def test_work_order_refuses_unusable_header_secrets(secret):
+    from gpustack_model_transfer.core.errors import InvalidDescriptorError
+
+    with pytest.raises(InvalidDescriptorError, match="unusable shape"):
+        parse_assignment(dict(order(), workerSecret=secret), backend="nixl")
+
+
+@pytest.mark.parametrize("secret", ["abc", "a._~+/=-0", "a" * 512])
+def test_work_order_accepts_bounded_header_secrets(secret):
+    assert (
+        parse_assignment(
+            dict(order(), workerSecret=secret), backend="nixl"
+        ).worker_secret
+        == secret
+    )
+
+
+def test_failed_hixl_initialize_keeps_owner_in_quarantine():
+    from gpustack_model_transfer.source.backend import HixlSourceBackend
+
+    class Engine:
+        def initialize(self, address, options):
+            return 1
+
+        def register_mem(self, *args):
+            raise AssertionError("failed initialization must not register")
+
+    engine = Engine()
+    backend = HixlSourceBackend(engine_factory=lambda: engine)
+    source, _controls, _backends, _allocators = supervisor([order()])
+    source._backend_factory = lambda assignment: backend
+    source.poll_once()
+    worker = source.workers["generation-1"]
+    try:
+        eventually(lambda: worker.state == "quarantined")
+        assert backend._engine is engine
+        assert worker._retention.backend is backend
+        assert not worker.blocks
+    finally:
+        worker._stop_event.set()
