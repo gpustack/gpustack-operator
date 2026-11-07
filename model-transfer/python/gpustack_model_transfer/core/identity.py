@@ -28,11 +28,11 @@ class ArtifactIdentity:
     source_generation: int
 
     def validate(self) -> None:
-        if not isinstance(self.artifact_uid, str) or not _UID_PATTERN.match(
+        if not isinstance(self.artifact_uid, str) or not _UID_PATTERN.fullmatch(
             self.artifact_uid
         ):
             raise IdentityError(f"invalid artifact uid: {self.artifact_uid!r}")
-        if not isinstance(self.manifest_sha256, str) or not _DIGEST_PATTERN.match(
+        if not isinstance(self.manifest_sha256, str) or not _DIGEST_PATTERN.fullmatch(
             self.manifest_sha256
         ):
             raise IdentityError("manifest digest must be 64 lowercase hex characters")

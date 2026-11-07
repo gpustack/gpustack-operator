@@ -552,3 +552,14 @@ def test_explicit_registration_rejects_missing_mx_loader(upstream, monkeypatch):
     )
     with pytest.raises(ModuleNotFoundError):
         registration.register()
+
+
+def test_launcher_normalizes_plugin_names(upstream, monkeypatch):
+    launcher = importlib.import_module(
+        "gpustack_model_transfer.adapters.modelexpress.launch"
+    )
+    monkeypatch.setenv("VLLM_PLUGINS", " other_plugin, gpustack_modelexpress , ")
+    launcher.validate_launch(["--load-format", "gpustack-modelexpress"])
+    import os
+
+    assert os.environ["VLLM_PLUGINS"] == "other_plugin,gpustack_modelexpress"

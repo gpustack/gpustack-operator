@@ -77,6 +77,7 @@ class SourceSupervisor:
             for item in assignments
             if isinstance(item, dict) and isinstance(item.get("generation"), str)
         }
+        retired = []
         with self._lock:
             for generation, worker in list(self.workers.items()):
                 thread = self.threads[generation]
@@ -87,11 +88,13 @@ class SourceSupervisor:
                 ):
                     if not self.operations.retire(worker):
                         continue
-                    worker.close()
                     del self.workers[generation]
                     del self.threads[generation]
                     self._order_hashes.pop(generation, None)
                     self._revisions.discard(worker.assignment.revision())
+                    retired.append(worker)
+        for worker in retired:
+            worker.close()
         started = 0
         for payload in assignments:
             try:

@@ -419,3 +419,36 @@ def test_nixl_invalid_metadata_is_refused_before_file_acquisition(target):
     with pytest.raises(SourcePrePostError):
         backend.post_write(None, "file", 0, 4, target)
     assert not backend.has_active_peers()
+
+
+@pytest.mark.parametrize("failed_call", [1, 2])
+def test_nixl_descriptor_refusal_does_not_post(failed_call):
+    from gpustack_model_transfer.backends.nixl.runtime import TransferRefusedError
+
+    calls = []
+
+    class Agent:
+        def get_xfer_descs(self, data, kind):
+            calls.append("descriptor")
+            if len(calls) == failed_call:
+                raise RuntimeError("invalid descriptor")
+            return data
+
+        def initialize_xfer(self, *args, **kwargs):
+            pytest.fail("descriptor failure must not initialize a transfer")
+
+        def transfer(self, *args):
+            pytest.fail("descriptor failure must not post")
+
+    api = RealNixlAPI()
+    api._nixl_api = object()
+    agent = Agent()
+    registration = SimpleNamespace(
+        windows={"file": {"addr": 1000, "len": 100, "dev_id": 0, "mem_type": "DRAM"}},
+        buffers={},
+        agent=agent,
+    )
+    remote = {"addr": 2000, "len": 32, "mem_type": "DRAM", "device_id": 0}
+    with pytest.raises(TransferRefusedError):
+        api.submit_source_write(agent, registration, b"target", "file", remote, 12)
+    assert len(calls) == failed_call

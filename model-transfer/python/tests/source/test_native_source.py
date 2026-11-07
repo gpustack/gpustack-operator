@@ -926,3 +926,47 @@ def test_hixl_import_failure_reports_fixed_mount_hint(monkeypatch, caplog):
     assert caught.value is failure
     assert "Ascend driver/DCMI mounts" in caplog.text
     assert "private dependency detail" not in caplog.text
+
+
+def test_retired_worker_close_does_not_block_runtime_query(monkeypatch):
+    s, controls, _, _ = supervisor([order("one")])
+    s.poll_once()
+    worker = s.workers["one"]
+    assert worker.wait_until_filled(3)
+    controls["one"].action = "drain"
+    eventually(lambda: worker.state == "drained")
+    s.threads["one"].join(3)
+    assert not s.threads["one"].is_alive()
+    s.bootstrap.orders = []
+    closing, release, queried = threading.Event(), threading.Event(), threading.Event()
+    original = worker.close
+
+    def close():
+        closing.set()
+        assert release.wait(3)
+        original()
+
+    monkeypatch.setattr(worker, "close", close)
+    polling = threading.Thread(target=s.poll_once)
+
+    def query_runtime():
+        from gpustack_model_transfer.source.transfer_service import Refused
+
+        try:
+            s.operations.runtime()
+        except Refused as exc:
+            assert str(exc) == "runtime snapshot is unavailable"
+            queried.set()
+
+    query = threading.Thread(target=query_runtime)
+    polling.start()
+    try:
+        assert closing.wait(3)
+        query.start()
+        assert queried.wait(1), "runtime query waited for native cleanup"
+        assert "one" not in s.workers
+    finally:
+        release.set()
+        polling.join(3)
+        if query.ident is not None:
+            query.join(3)

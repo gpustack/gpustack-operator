@@ -730,7 +730,8 @@ class RealNixlAPI:
         missing = [
             name
             for name in self._PINNED_MODULE_NAMES
-            if not hasattr(nixl_api, name) and not hasattr(bind, name)
+            if not hasattr(nixl_api, name)
+            and (name != "nixl_thread_sync_t" or not hasattr(bind, name))
         ]
         agent = getattr(nixl_api, "nixl_agent", None)
         if agent is not None:
@@ -837,9 +838,8 @@ class RealNixlAPI:
                 )
         except BaseException:
             # A later failure must not leak the earlier handles: roll the
-            # completed registrations back. The rollback owns its own
-            # bookkeeping copies, so the caller's dicts are never
-            # mutated; a refused rollback cannot be undone, so the exact
+            # completed registrations back. Rollback removes successfully
+            # released handles from this attempt's bookkeeping; the exact
             # still-owned handles, buffers, and the agent move into the
             # quarantine owner and the typed error carries them to the
             # source service — naming a leak retains nothing.
@@ -974,21 +974,21 @@ class RealNixlAPI:
                 f"the transfer of {length} bytes exceeds the peer's "
                 f"published region ({remote_region['len']} bytes)"
             )
-        local_descs = agent.get_xfer_descs(
-            [(window["addr"] + local_offset, length, window["dev_id"])],
-            window["mem_type"],
-        )
-        remote_descs = agent.get_xfer_descs(
-            [
-                (
-                    remote_region["addr"],
-                    length,
-                    remote_region["dev_id"],
-                )
-            ],
-            remote_region["mem_type"],
-        )
         try:
+            local_descs = agent.get_xfer_descs(
+                [(window["addr"] + local_offset, length, window["dev_id"])],
+                window["mem_type"],
+            )
+            remote_descs = agent.get_xfer_descs(
+                [
+                    (
+                        remote_region["addr"],
+                        length,
+                        remote_region["dev_id"],
+                    )
+                ],
+                remote_region["mem_type"],
+            )
             handle = agent.initialize_xfer(
                 direction, local_descs, remote_descs, connection, notif_msg=b""
             )

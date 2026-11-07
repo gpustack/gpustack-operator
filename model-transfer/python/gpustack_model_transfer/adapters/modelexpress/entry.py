@@ -2,6 +2,7 @@
 
 import logging
 import os
+from contextlib import suppress
 
 from gpustack_model_transfer.adapters.modelexpress.plugin import (
     STRATEGY_NAME,
@@ -152,27 +153,32 @@ def build_plugin(env=None):
     manifest, digest, policy = artifact_environment(source)
     workers = transfer_workers(source)
     reader = LocalFileReader(manifest, expected_sha256=digest)
-    loader = ModelTransferModelLoader(
-        reader=reader,
-        capabilities=local_backend_capabilities(),
-        budgets=ReadBudgets(
-            window_bytes=MAX_WINDOW_BYTES,
-            max_inflight=workers,
-            owned_output_bytes=4 << 30,
-        ),
-    )
-    peer_p2p = source.GPUSTACK_MODEL_TRANSFER_PEER_P2P
-    composition = {
-        "enabled": {"p2p": peer_p2p, "rdma": True, "server_cache": False},
-        "authorized": {"p2p": True} if peer_p2p else {},
-    }
-    return GpustackLoadPlugin(
-        loader,
-        TorchRuntimeDriver(),
-        composition,
-        policy,
-        publishable=peer_p2p,
-    )
+    try:
+        loader = ModelTransferModelLoader(
+            reader=reader,
+            capabilities=local_backend_capabilities(),
+            budgets=ReadBudgets(
+                window_bytes=MAX_WINDOW_BYTES,
+                max_inflight=workers,
+                owned_output_bytes=4 << 30,
+            ),
+        )
+        peer_p2p = source.GPUSTACK_MODEL_TRANSFER_PEER_P2P
+        composition = {
+            "enabled": {"p2p": peer_p2p, "rdma": True, "server_cache": False},
+            "authorized": {"p2p": True} if peer_p2p else {},
+        }
+        return GpustackLoadPlugin(
+            loader,
+            TorchRuntimeDriver(),
+            composition,
+            policy,
+            publishable=peer_p2p,
+        )
+    except BaseException:
+        with suppress(Exception):
+            reader.close()
+        raise
 
 
 _BASE = object if _STRATEGY_BASE is None else _STRATEGY_BASE

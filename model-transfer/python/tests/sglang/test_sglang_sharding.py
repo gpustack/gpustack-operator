@@ -524,3 +524,38 @@ def test_failed_rank_taint_does_not_require_driver_last_model():
     )
     assert group.group_state == "failed"
     assert group.tainted_ranks == (0,)
+
+
+def test_rank_factory_failure_reports_group_and_taints_loaded_ranks():
+    from gpustack_model_transfer.adapters.sglang.runtime import ReferenceRuntime
+    from gpustack_model_transfer.adapters.sglang.sharding import load_group
+    from gpustack_model_transfer.core.local_reader import LocalFileReader
+
+    for failure in ("driver", "reader"):
+        reads = 0
+
+        def reader_factory(failure=failure):
+            nonlocal reads
+            reads += 1
+            if failure == "reader" and reads == 3:
+                raise RuntimeError("reader factory failed")
+            return LocalFileReader(fixtureutil.manifest_path())
+
+        def driver_factory(rank, failure=failure):
+            if failure == "driver" and rank == 1:
+                raise RuntimeError("driver factory failed")
+            return ReferenceRuntime(fixtureutil.manifest_dir())
+
+        group = load_group(
+            reader_factory=reader_factory,
+            driver_factory=driver_factory,
+            world_size=2,
+            budgets=ReadBudgets(
+                window_bytes=32, max_inflight=2, owned_output_bytes=4096
+            ),
+            raise_on_failure=False,
+        )
+        assert group.group_state == "failed"
+        assert group.tainted_ranks == (0,)
+        assert group.rank_reports[0].finalization_count == 0
+        assert "rank 1" in group.failure

@@ -204,3 +204,37 @@ def test_abort_and_rollback_prevent_another_strategy_in_the_same_process(monkeyp
             strategy.rollback(ctx)
         with pytest.raises(entry.StrategyRecoveryError):
             entry.GpustackLoadStrategy().is_available(ctx)
+
+
+def test_plugin_construction_failure_closes_reader(monkeypatch):
+    import pytest
+
+    from gpustack_model_transfer.adapters.modelexpress import entry
+    from gpustack_model_transfer.core import local_reader
+
+    closed = []
+    original = local_reader.LocalFileReader.close
+
+    def close(reader):
+        closed.append(reader)
+        original(reader)
+
+    def refuse(*args, **kwargs):
+        raise RuntimeError("plugin construction failed")
+
+    monkeypatch.setattr(local_reader.LocalFileReader, "close", close)
+    monkeypatch.setattr(entry, "GpustackLoadPlugin", refuse)
+    manifest = (
+        Path(__file__).resolve().parents[3]
+        / "contracts/fixtures/tiny_dense/manifest.json"
+    )
+    import hashlib
+
+    env = {
+        ENV_MANIFEST: str(manifest),
+        ENV_MANIFEST_SHA256: hashlib.sha256(manifest.read_bytes()).hexdigest(),
+        ENV_POLICY: "require",
+    }
+    with pytest.raises(RuntimeError, match="plugin construction failed"):
+        entry.build_plugin(env)
+    assert len(closed) == 1

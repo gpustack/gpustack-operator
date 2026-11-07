@@ -1,7 +1,6 @@
 """Shared helpers for the source worker tests: fixture location and a fake
 broker implementing the control wire the Go server serves."""
 
-import hashlib
 import json
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -16,10 +15,6 @@ def fixture_dir() -> Path:
     if not FIXTURE_DIR.is_dir():
         raise AssertionError(f"missing fixture directory: {FIXTURE_DIR}")
     return FIXTURE_DIR
-
-
-def manifest_digest() -> str:
-    return hashlib.sha256((fixture_dir() / "manifest.json").read_bytes()).hexdigest()
 
 
 class FakeBroker:

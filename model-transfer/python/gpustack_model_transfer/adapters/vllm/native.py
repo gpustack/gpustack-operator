@@ -129,12 +129,8 @@ def _tp_coordination(vllm_config=None):
             ) from None
     if expected is not None:
         raise UnsupportedEngineLayout("tensor-parallel device group is unavailable")
-    return (
-        True,
-        distributed.get_rank() == 0,
-        distributed.group.WORLD,
-        0,
-        distributed.get_world_size(),
+    raise UnsupportedEngineLayout(
+        "tensor-parallel group is unavailable; WORLD may span pipeline stages"
     )
 
 

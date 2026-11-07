@@ -138,7 +138,7 @@ class LoadReport:
     borrowed_fallbacks: tuple = ()
     session_released: bool = False
     manifest_consumed: bool = False
-    engine_config: dict = None
+    engine_config: dict | None = None
 
 
 def profile_kv_capacity(driver, model, ledger: ResourceLedger) -> int:

@@ -1498,3 +1498,25 @@ class TestRealPeerMetadata(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def test_surface_requires_agent_and_config_on_api_module():
+    from types import SimpleNamespace
+
+    import pytest
+
+    from gpustack_model_transfer.backends.nixl.runtime import (
+        RealNixlAPI,
+        VersionMismatchError,
+    )
+
+    for missing in ("nixl_agent", "nixl_agent_config"):
+        values = {
+            name: getattr(StubNixlApiModule, name)
+            for name in ("nixl_agent", "nixl_agent_config", "nixl_thread_sync_t")
+        }
+        bind = SimpleNamespace(**values)
+        del values[missing]
+        module = SimpleNamespace(**values, nixlBind=bind)
+        with pytest.raises(VersionMismatchError, match=missing):
+            RealNixlAPI()._check_surface(module)

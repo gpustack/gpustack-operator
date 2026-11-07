@@ -465,6 +465,11 @@ def tp_distributed(engine, monkeypatch):
         broadcast=broadcast,
     )
     monkeypatch.setattr(engine.native.torch, "distributed", distributed, raising=False)
+    state = types.ModuleType("vllm.distributed.parallel_state")
+    state.get_tp_group = lambda: types.SimpleNamespace(
+        world_size=2, rank_in_group=rank[0], device_group=group, ranks=[0, 1]
+    )
+    monkeypatch.setitem(sys.modules, "vllm.distributed.parallel_state", state)
     return types.SimpleNamespace(
         rank=rank, objects=objects, broadcasts=broadcasts, group=group
     )
@@ -753,3 +758,28 @@ def test_non_dtype_torch_attributes_are_refused(engine, monkeypatch, name):
         engine.native.UnsupportedEngineLayout, match="unsupported dtype"
     ):
         engine.native._torch_dtype(name)
+
+
+@pytest.mark.parametrize("missing", ["absent", "raises", "no-device-group"])
+def test_unknown_tp_group_refuses_before_world_collective(
+    engine, tp_distributed, monkeypatch, missing
+):
+    state = sys.modules["vllm.distributed.parallel_state"]
+    if missing == "absent":
+        monkeypatch.delattr(state, "get_tp_group")
+    elif missing == "raises":
+
+        def refuse():
+            raise RuntimeError("TP unavailable")
+
+        monkeypatch.setattr(state, "get_tp_group", refuse)
+    else:
+        monkeypatch.setattr(
+            state,
+            "get_tp_group",
+            lambda: types.SimpleNamespace(
+                world_size=2, rank_in_group=0, device_group=None, ranks=[0, 1]
+            ),
+        )
+    with pytest.raises(engine.native.UnsupportedEngineLayout):
+        engine.native._tp_coordination()

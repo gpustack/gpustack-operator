@@ -27,8 +27,13 @@ def validate_launch(args):
             "select exactly one --load-format gpustack-modelexpress"
         )
     selected = os.environ.get("VLLM_PLUGINS")
-    if selected is not None and "gpustack_modelexpress" not in selected.split(","):
-        raise StrategyRecoveryError("VLLM_PLUGINS must include gpustack_modelexpress")
+    if selected is not None:
+        plugins = [item.strip() for item in selected.split(",") if item.strip()]
+        if "gpustack_modelexpress" not in plugins:
+            raise StrategyRecoveryError(
+                "VLLM_PLUGINS must include gpustack_modelexpress"
+            )
+        os.environ["VLLM_PLUGINS"] = ",".join(plugins)
     validate_plugin()
 
 

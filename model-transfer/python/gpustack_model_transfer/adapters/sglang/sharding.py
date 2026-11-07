@@ -298,12 +298,13 @@ def load_group(
     failure = ""
     failed_rank = None
     for rank in range(world_size):
-        driver = driver_factory(rank)
-        drivers.append(driver)
-        loader = ModelTransferSGLangLoader(
-            reader=reader_factory(), capabilities=capabilities, budgets=budgets
-        )
+        loader = None
         try:
+            driver = driver_factory(rank)
+            drivers.append(driver)
+            loader = ModelTransferSGLangLoader(
+                reader=reader_factory(), capabilities=capabilities, budgets=budgets
+            )
             report = loader.load(
                 driver,
                 options,
@@ -344,7 +345,7 @@ def load_group(
             if reports[rank].model is not None:
                 reports[rank].model.mutated = True
                 tainted.append(rank)
-        elif loader.last_model is not None:
+        elif loader is not None and loader.last_model is not None:
             tainted.append(rank)
     report = LoadGroupReport(
         world_size=world_size,

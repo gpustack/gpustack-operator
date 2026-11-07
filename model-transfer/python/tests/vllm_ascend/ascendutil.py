@@ -48,13 +48,6 @@ def tensor_payload(name: str) -> bytes:
     return blob[t["data_begin"] : t["data_end"]]
 
 
-def tensor_entry(name: str) -> dict:
-    for t in manifest_dict()["tensors"]:
-        if t["name"] == name:
-            return t
-    raise AssertionError(f"unknown fixture tensor: {name!r}")
-
-
 def parameter_names() -> list:
     return sorted(
         t["name"]

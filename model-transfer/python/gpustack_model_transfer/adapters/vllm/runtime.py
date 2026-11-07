@@ -71,7 +71,7 @@ class ModelHandle:
     mutated: bool = False
     finalization_count: int = 0
     engine_metadata: dict = field(default_factory=dict)
-    connector_config: dict = None
+    connector_config: dict | None = None
     built_by: str = "model-transfer"
 
 

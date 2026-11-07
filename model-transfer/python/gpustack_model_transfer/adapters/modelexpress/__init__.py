@@ -1,7 +1,8 @@
 """The optional ModelExpress inference-strategy adapter.
 
-Importing this package needs neither ModelExpress nor torch: the plugin
-drives the qualified native engine adapter (the vLLM ModelTransferModelLoader),
+Missing ModelExpress and torch packages are tolerated. When ModelExpress is
+installed, importing the entry discovers its strategy base and may import
+transitive dependencies. The plugin drives the qualified native engine adapter (the vLLM ModelTransferModelLoader),
 the runtime probe reports what a host is missing, and the pinned image
 integration lives in constants. The portable reader stays independent of
 ModelExpress internal context types — nothing in gpustack_model_transfer.core

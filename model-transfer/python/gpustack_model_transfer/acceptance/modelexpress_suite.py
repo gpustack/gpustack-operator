@@ -66,10 +66,10 @@ def run(context, runtime=None, backend=None) -> list:
     the host entry is probed and, under a requested remote backend, the
     backend runtime is probed too: a missing piece on either side, or an
     unqualified (backend, entry) pair such as hixl, UNRUNs every
-    capability. A ready host runs the real pair — the vLLM
-    ModelTransferModelLoader over the verified artifact reader with the
-    TorchRuntimeDriver — through the same checks, so the acceptance
-    command can pass on the approved image rather than UNRUN forever.
+    capability. The current default driver probe deliberately returns UNRUN:
+    the portable Torch driver is a reference fixture, not a native ModelExpress
+    qualification driver. Injected runtimes exercise these checks in tests;
+    enabling a real-host route requires a qualified driver and failure hooks.
     """
     if runtime is None:
         from gpustack_model_transfer.adapters.modelexpress.runtime import probe_entry
