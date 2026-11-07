@@ -1,0 +1,67 @@
+# Aligned with gpustack/runner/ruff.toml.
+
+exclude = [
+    ".git",
+    ".git-rewrite",
+    ".hg",
+    "__pycache__",
+    "build",
+    "_build",
+    "dist",
+    ".venv",
+    "venv",
+    ".mypy_cache",
+    ".pytest_cache",
+    ".eggs",
+    "*.egg",
+    "*.egg-info",
+    ".tox",
+    ".nox",
+    ".ruff_cache",
+]
+
+[lint]
+select = [
+    "F",      # Pyflakes - syntax errors and undefined/unused names.
+    "E",      # Pycodestyle errors.
+    "W",      # Pycodestyle warnings.
+    "C90",    # McCabe complexity.
+    "I",      # isort - import ordering.
+    "UP",     # Pyupgrade - modern Python syntax.
+    "B",      # Flake8-bugbear - common bug patterns.
+    "A",      # Flake8-builtins - builtin shadowing.
+    "C4",     # Flake8-comprehensions.
+    "T10",    # Flake8-debugger.
+    "ISC",    # Flake8-implicit-str-concat.
+    "PIE",    # Flake8-pie.
+    "PT",     # Flake8-pytest-style.
+    "Q",      # Flake8-quotes.
+    "RSE",    # Flake8-raise.
+    "RET",    # Flake8-return.
+    "SIM",    # Flake8-simplify.
+    "TID",    # Flake8-tidy-imports.
+    "PLE",    # Pylint errors.
+    "PERF",   # Perflint.
+    "FURB",   # Refurb.
+    "RUF",    # Ruff-specific rules.
+]
+
+ignore = [
+    "E501",    # Pycodestyle - line too long (handled by ruff format).
+    "RET504",  # Flake8-return - unnecessary assignment before return.
+    "PERF401", # Perflint - manual list-append loop clarity.
+]
+
+[lint.flake8-pytest-style]
+parametrize-names-type = "csv"
+
+[lint.per-file-ignores]
+"tests/**/*.py" = ["B017", "PT", "SIM117"]
+
+[lint.mccabe]
+max-complexity = 50
+
+[format]
+indent-style = "space"
+docstring-code-format = true
+quote-style = "double"

@@ -1,0 +1,25 @@
+[version]
+source = "vcs"
+fallback-version = "0.1.0"
+
+[version.raw-options]
+root = "../.."
+# setuptools_scm reads SETUPTOOLS_SCM_PRETEND_VERSION_FOR_GPUSTACK_MODEL_TRANSFER only when
+# it knows this project's dist name; without it a build outside a .git checkout
+# silently falls back to fallback-version even on a tagged release.
+dist_name = "gpustack-model-transfer"
+version_scheme = "guess-next-dev"
+local_scheme = "no-local-version"
+
+[build.force-include]
+"gpustack_model_transfer_autoload.pth" = "gpustack_model_transfer_autoload.pth"
+
+[build.targets.sdist]
+exclude = [
+    "/.venv",
+    "/dist",
+]
+
+[build.targets.wheel]
+macos-max-compat = true
+packages = ["gpustack_model_transfer"]

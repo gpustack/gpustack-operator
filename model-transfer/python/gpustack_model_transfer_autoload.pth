@@ -1,0 +1,1 @@
+import gpustack_model_transfer._autoload; gpustack_model_transfer._autoload.install()

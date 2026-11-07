@@ -75,6 +75,34 @@ function pack() {
       extra_args+=("--build-arg" "PPU_SDK_URL=${PPU_SDK_URL}")
     fi
     tag="${PACKAGE_NAMESPACE}/${task}:${PACKAGE_TAG}"
+    if [[ "${task}" == "model-transfer" ]]; then
+      local model_transfer_flavor="${MODEL_TRANSFER_BUILD_FLAVOR:-cuda}"
+      local model_transfer_suffix
+      local model_transfer_arg
+      local -a model_transfer_args=(UBUNTU_IMAGE)
+      case "${model_transfer_flavor}" in
+        cuda)
+          model_transfer_suffix="cuda${CUDA_VERSION:-12.9}${MODEL_TRANSFER_VARIANT:+-${MODEL_TRANSFER_VARIANT}}"
+          model_transfer_args+=(CUDA_RUNTIME_IMAGE NIXL_VERSION NIXL_TORCH_VERSION)
+          ;;
+        rocm)
+          model_transfer_suffix="rocm${ROCM_VERSION:-7.2}${MODEL_TRANSFER_VARIANT:+-${MODEL_TRANSFER_VARIANT}}"
+          model_transfer_args+=(ROCM_RUNTIME_IMAGE NIXL_ROCM_VERSION NIXL_ROCM_REF NIXL_ROCM_UCX_REF NIXL_ROCM_TORCH_VERSION)
+          ;;
+        cann)
+          model_transfer_suffix="cann${CANN_VERSION:-9.2}-${MODEL_TRANSFER_VARIANT:-a5}"
+          model_transfer_args+=(CANN_RUNTIME_IMAGE HIXL_COMMIT HIXL_CMAKE_COMMIT CMAKE_MAX_JOBS)
+          ;;
+        *) gpustack::log::fatal "Unknown model-transfer build flavor: ${model_transfer_flavor}"; return 1 ;;
+      esac
+      for model_transfer_arg in "${model_transfer_args[@]}"; do
+        if [[ -n "${!model_transfer_arg:-}" ]]; then
+          extra_args+=("--build-arg" "${model_transfer_arg}=${!model_transfer_arg}")
+        fi
+      done
+      extra_args+=("--target" "${model_transfer_flavor}")
+      tag="${tag}-${model_transfer_suffix}"
+    fi
     gpustack::log::info "Building '${tag}' platform 'linux/${PACKAGE_ARCH}'"
     set -x
     docker buildx build \

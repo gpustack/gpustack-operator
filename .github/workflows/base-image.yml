@@ -19,6 +19,7 @@ on:
         required: true
         type: choice
         options:
+          - model-transfer
           - llm-router
           - mirrored-mooncake
           - ssh-server
@@ -92,6 +93,12 @@ jobs:
           # duplicated from the cache-ref step in _image.yml, fallback included; keep
           # the two in sync.
           #
+          if [[ "${INPUT_REPOSITORY}" == "model-transfer" ]]; then
+            case "${INPUT_TARGET}" in
+              cuda | rocm | cann) ;;
+              *) echo "[ERROR] model-transfer requires target cuda, rocm, or cann." >&2; exit 1 ;;
+            esac
+          fi
           if [[ -n "${INPUT_TARGET}" ]]; then
             TARGET_SLUG="$(tr '[:upper:]' '[:lower:]' <<<"${INPUT_TARGET}" | tr -c 'a-z0-9.-' '-' | tr -s '-' | sed 's/^[.-]*//; s/[.-]*$//')"
             [[ -n "${TARGET_SLUG}" ]] || TARGET_SLUG="variant"
@@ -170,6 +177,8 @@ jobs:
           #     linux/amd64 only (there is no arm64 ROCm build; upstream Mooncake's own
           #     ROCm release job builds amd64-only too, and gpustack/runner's ROCm
           #     Dockerfile builds with --platform=linux/amd64).
+          #   - model-transfer target rocm: the ROCm base image is amd64-only.
+          #     CUDA and CANN build for both amd64 and arm64.
           #
           # The manifest job derives its platform list from this output, so it follows
           # automatically.
@@ -183,6 +192,7 @@ jobs:
           AMD64='{"runner":"ubuntu-24.04'"${SUFFIX}"'","platform":"linux/amd64"}'
           ARM64='{"runner":"ubuntu-24.04-arm'"${SUFFIX}"'","platform":"linux/arm64"}'
           case "${INPUT_REPOSITORY}:${INPUT_TARGET}" in
+            model-transfer:rocm) ENTRIES="${AMD64}" ;;
             thead-ppu-devel:*) ENTRIES="${AMD64}" ;;
             mirrored-mooncake:rocm*) ENTRIES="${AMD64}" ;;
             *) ENTRIES="${AMD64},${ARM64}" ;;

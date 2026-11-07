@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "backend": "local",
+  "suite": "contract",
+  "artifact": {
+    "manifest_path": "fixtures/tiny_dense/manifest.json",
+    "manifest_sha256": "ab7d7cc41b340424482ad0d69ebd1b72e3b052985a6fd908d4c98d719bfbe655"
+  },
+  "readiness": {
+    "source_generation": 1,
+    "expires": "2031-01-01T00:00:00+00:00"
+  },
+  "limits": {
+    "window_bytes": 32,
+    "max_inflight": 2,
+    "owned_output_bytes": 4096
+  },
+  "deadlines": {
+    "operation_seconds": 30
+  }
+}
