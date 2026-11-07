@@ -801,3 +801,18 @@ class TestRunnerWiring(HarnessEnvTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def test_missing_cann_gate_is_unrun():
+    class MissingGate(ReferenceStartupHarness):
+        cann_gate = None
+
+    results = managed_startup_suite.run(
+        make_context("hixl", "managed-startup", "vllm-ascend"),
+        runtime=MissingGate,
+        engine="vllm-ascend",
+    )
+    gate = next(
+        r for r in results if r.capability == "source-npu-grant-and-recovery-gate"
+    )
+    assert gate.status == "UNRUN"

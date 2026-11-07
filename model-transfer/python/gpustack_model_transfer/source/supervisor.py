@@ -85,6 +85,8 @@ class SourceSupervisor:
                     and worker.state in ("drained", "stopped")
                     and not thread.is_alive()
                 ):
+                    if not self.operations.retire(worker):
+                        continue
                     worker.close()
                     del self.workers[generation]
                     del self.threads[generation]
@@ -185,9 +187,9 @@ class SourceSupervisor:
             workers = list(self.workers.values())
         return [worker.redacted_status() for worker in workers]
 
-    def stop(self, timeout: float = 10.0) -> None:
+    def stop(self, timeout: float = 10.0) -> bool:
         """Drain every worker and stop polling; quarantined holders keep
-        their memory — a stop never frees what cannot be proven."""
+        their memory. Return true only when every worker is drained or stopped."""
         self._shutdown.set()
         for thread in list(self.threads.values()):
             thread.join(timeout=timeout)

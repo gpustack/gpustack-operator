@@ -44,6 +44,7 @@ class DescriptorIndex(Sequence):
         self._count = 0
 
     def add(self, rows):
+        count = self._count
         try:
             for name, shape, dtype in rows:
                 if self._count >= MAX_MANIFEST_TENSORS:
@@ -59,8 +60,15 @@ class DescriptorIndex(Sequence):
                 )
                 self._count += 1
             self._connection.commit()
-        except sqlite3.IntegrityError:
-            raise ValueError("duplicate checkpoint tensor names") from None
+        except BaseException as exc:
+            self._connection.rollback()
+            self._count = count
+            if (
+                isinstance(exc, sqlite3.IntegrityError)
+                and getattr(exc, "sqlite_errorname", "") == "SQLITE_CONSTRAINT_UNIQUE"
+            ):
+                raise ValueError("duplicate checkpoint tensor names") from exc
+            raise
 
     def close(self):
         self._cleanup()

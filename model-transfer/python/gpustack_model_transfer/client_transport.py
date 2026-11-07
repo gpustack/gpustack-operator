@@ -178,9 +178,6 @@ class BrokerTransport:
         self._context = ssl.create_default_context(cafile=ca_file)
         self._token_file = token_file
         self._timeout = timeout
-        self._token_lock = threading.Lock()
-        self._cached_token = None
-        self._cached_token_stat = None
         self._tls_local = threading.local()
 
     def _get_connection(self, deadline=None):
@@ -216,23 +213,12 @@ class BrokerTransport:
 
     def _read_token(self):
         try:
-            stat_res = os.stat(self._token_file)
-            stat_key = (stat_res.st_mtime_ns, stat_res.st_size)
-            with self._token_lock:
-                if (
-                    self._cached_token is not None
-                    and self._cached_token_stat == stat_key
-                ):
-                    return self._cached_token
             with open(self._token_file, encoding="utf-8") as handle:
                 token = handle.read(32769).strip()
         except (OSError, UnicodeError):
             raise WireRefused("projected token unavailable") from None
         if not token or len(token) > 32768 or "\n" in token or "\r" in token:
             raise WireRefused("invalid projected token")
-        with self._token_lock:
-            self._cached_token = token
-            self._cached_token_stat = stat_key
         return token
 
     def request(self, method, path, payload=None, *, deadline=None):

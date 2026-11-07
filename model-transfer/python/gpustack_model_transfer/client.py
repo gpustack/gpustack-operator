@@ -270,7 +270,7 @@ class EngineReader:
         ):
             raise SourceUnavailableError("model path differs from metadata view")
 
-    def _open(self, tensor, generation):
+    def _open(self, tensor, generation, *, deadline):
         request_id = uuid.uuid4().hex
         request = {
             "requestID": request_id,
@@ -305,7 +305,9 @@ class EngineReader:
         # Session-open replay must use the same request ID even if its response was lost.
         for attempt in range(3):
             try:
-                response = self.transport.request("POST", "/v1/sessions", request)
+                response = self.transport.request(
+                    "POST", "/v1/sessions", request, deadline=deadline
+                )
                 session_id = response.get("sessionID")
                 if isinstance(session_id, str) and session_id:
                     old_request = self._session_requests.get(session_id)
@@ -333,11 +335,12 @@ class EngineReader:
                 raise
             except WireUnknown:
                 self.pending_may_have_posted.add(request_id)
-                if attempt == 2:
+                remaining = deadline - time.monotonic()
+                if attempt == 2 or remaining <= 0:
                     self.poisoned = True
                     _retain(self)
                     raise
-                time.sleep(min(0.05 * (2**attempt), 0.2))
+                time.sleep(min(remaining, 0.05 * (2**attempt), 0.2))
             except BaseException:
                 self.pending_may_have_posted.add(request_id)
                 self.poisoned = True
@@ -345,7 +348,7 @@ class EngineReader:
                 raise
         raise SourceUnavailableError("session opening failed")
 
-    def _validate(self, response, layouts, hashes, listing_verified):
+    def _validate(self, response, layouts, hashes, listing_verified, *, deadline=None):
         if not isinstance(response, dict):
             raise SourceUnavailableError("invalid session response")
         if any(
@@ -400,7 +403,9 @@ class EngineReader:
         manifest = parse_manifest(
             raw,
             response["manifestSHA256"],
-            page_reader=lambda page: self._manifest_page(response, page),
+            page_reader=lambda page: self._manifest_page(
+                response, page, deadline=deadline
+            ),
         )
         if (
             len(manifest.files) > MAX_MANIFEST_FILES
@@ -432,7 +437,7 @@ class EngineReader:
         )
         return manifest, identity
 
-    def _manifest_page(self, response, page):
+    def _manifest_page(self, response, page, *, deadline=None):
         payload = {
             "podNamespace": self.pod_namespace,
             "podName": self.pod_name,
@@ -445,7 +450,9 @@ class EngineReader:
             "manifestSHA256": response["manifestSHA256"],
             "pageSHA256": page["sha256"],
         }
-        answer = self.transport.request("POST", "/v1/manifest-pages", payload)
+        answer = self.transport.request(
+            "POST", "/v1/manifest-pages", payload, deadline=deadline
+        )
         if (
             answer.get("manifestSHA256") != response["manifestSHA256"]
             or answer.get("pageSHA256") != page["sha256"]
@@ -479,6 +486,7 @@ class EngineReader:
                     "DELETE" if finalize else "POST",
                     path,
                     self._close_body(request_id, target_released=finalize),
+                    deadline=deadline,
                 )
                 expected = ("closed", "released") if finalize else ("closing",)
                 if answer.get("state") not in expected:
@@ -548,7 +556,7 @@ class EngineReader:
                         except (OSError, ValueError, SourceUnavailableError):
                             continue
                     try:
-                        response = self._open(first, 0)
+                        response = self._open(first, 0, deadline=deadline)
                         break
                     except WirePreAdmission as exc:
                         if exc.retry_after is not None:
@@ -575,7 +583,7 @@ class EngineReader:
             session_id = response.get("sessionID")
             try:
                 manifest, identity = self._validate(
-                    response, layouts, hashes, listing_verified
+                    response, layouts, hashes, listing_verified, deadline=deadline
                 )
             finally:
                 if isinstance(session_id, str) and session_id:
@@ -640,7 +648,9 @@ class EngineReader:
                         except (OSError, ValueError, SourceUnavailableError):
                             continue
                     try:
-                        response = self._open(first, self.identity[3])
+                        response = self._open(
+                            first, self.identity[3], deadline=deadline
+                        )
                         break
                     except WirePreAdmission as exc:
                         if exc.retry_after is not None:
@@ -663,7 +673,7 @@ class EngineReader:
             session_id = response.get("sessionID")
             try:
                 manifest, identity = self._validate(
-                    response, layouts, hashes, listing_verified
+                    response, layouts, hashes, listing_verified, deadline=deadline
                 )
                 # Verified content hashes bind the tensor pages; independent
                 # disk indexes need not be the same Python object.

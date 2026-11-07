@@ -140,8 +140,6 @@ class TensorDescriptor:
             and 0 <= self.data_begin <= self.data_end <= MAX_INT64
         ):
             return self.data_end - self.data_begin
-        if self.dtype in DTYPE_SIZES:
-            return count * DTYPE_SIZES[self.dtype]
         return 0
 
     def validate(self, file_size: int) -> None:

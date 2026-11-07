@@ -278,10 +278,14 @@ class HixlReader:
                 f"cannot close the reader: retained UNKNOWN operations "
                 f"{retained} hold their windows until a qualified fence"
             )
-        self._api.disconnect(self._session_agent, self._connection)
-        self.session.disconnect(self._connection)
-        self._api.deregister(self._session_agent, self._registration)
-        self.session.deregister(self._registration)
+        if self._connection is not None:
+            self._api.disconnect(self._session_agent, self._connection)
+            self.session.disconnect(self._connection)
+            self._connection = None
+        if self._registration is not None:
+            self._api.deregister(self._session_agent, self._registration)
+            self.session.deregister(self._registration)
+            self._registration = None
         self.ledger.release_reservation(self._reserved_bytes)
         self._closed = True
 
@@ -311,6 +315,11 @@ class HixlReader:
             offset=begin,
             length=length,
         )
+        self.in_flight = {
+            key: value
+            for key, value in self.in_flight.items()
+            if not value.operation.state.terminal
+        }
         slot = self._slots.acquire()
         window = self.windows[slot]
         self._slots.bind(slot, operation.op_id)
@@ -328,10 +337,10 @@ class HixlReader:
             raise
         except Exception as exc:
             if submitted:
-                operation.mark_unknown(
-                    f"post-submission failure: {type(exc).__name__}: {exc}"
-                )
-                raise
+                operation.mark_unknown(f"post-submission failure: {type(exc).__name__}")
+                raise AmbiguousReadError(
+                    "post-submission operation is retained as UNKNOWN"
+                ) from exc
             flight.mark_failed("pre-submission", str(exc))
             self._release_window(operation.op_id)
             raise

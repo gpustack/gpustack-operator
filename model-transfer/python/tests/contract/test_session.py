@@ -408,6 +408,26 @@ class TestSessionAlignmentAndMaxRequest(TrackedReadersTestCase):
         self.assertEqual(len(out.payload), 16)
         self.assertGreater(fake.read_count, 0)
 
+    def test_full_tensor_enforces_the_same_alignment_as_range(self):
+        from dataclasses import replace
+
+        reader = _track(LocalFileReader(FIXTURE_DIR / "manifest.json"))
+        fake = FakeReader(reader.manifest)
+        tensor = next(t for t in reader.manifest.tensors if t.byte_size % 16)
+        s = ReaderSession(
+            identity=identity(),
+            capabilities=replace(local_backend_capabilities(), alignment_bytes=16),
+            budgets=budgets(),
+            reader=fake,
+        )
+        for read in (
+            lambda: s.read_tensor(tensor.name),
+            lambda: s.read_range(tensor.name, 0, tensor.byte_size),
+        ):
+            with self.assertRaises(errors.InvalidDescriptorError):
+                read()
+        self.assertEqual(fake.read_count, 0)
+
     def test_request_above_max_request_bytes_rejected_before_read(self):
         from dataclasses import replace
 

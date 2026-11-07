@@ -188,9 +188,8 @@ def effective_window_bytes(
 class ReadBudgets:
     """The three session budgets.
 
-    window_bytes bounds one transfer window (at most 1 GiB per slot),
-    max_inflight bounds concurrent operations (at most two in the initial
-    reader), and owned_output_bytes bounds one owned output tensor.
+    window_bytes bounds one transfer window (up to MAX_WINDOW_BYTES per slot),
+    max_inflight bounds concurrent operations (up to MAX_INFLIGHT_OPERATIONS), and owned_output_bytes bounds one owned output tensor.
     """
 
     window_bytes: int
@@ -259,6 +258,7 @@ class WindowSlots:
                     f"slot {slot} is not reusable until operation {op_id!r} is terminal"
                 )
             del self._binding[slot]
+            self._terminal_ops.discard(op_id)
             self._free.add(slot)
             return True
 

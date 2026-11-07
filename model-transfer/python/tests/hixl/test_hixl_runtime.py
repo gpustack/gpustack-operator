@@ -641,3 +641,41 @@ class TestRealApiSurface(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestPartialRollbackOwnership(unittest.TestCase):
+    def test_only_outstanding_handles_are_retained(self):
+        from gpustack_model_transfer.backends.hixl.runtime import (
+            RegistrationRetainedError,
+            release_retained,
+        )
+
+        for raises in (False, True):
+            with self.subTest(raises=raises):
+
+                class Partial(StubHixlModule):
+                    class Hixl(StubHixlModule.Hixl):
+                        def register_mem(self, desc, mem_type):
+                            self.next_handle += 1
+                            if self.next_handle == 1004:
+                                return (2, 0)
+                            return (StubHixlModule.SUCCESS, self.next_handle)
+
+                        def deregister_mem(self, handle, raises=raises):
+                            if handle == 1002:
+                                if raises:
+                                    raise RuntimeError("native failure")
+                                return 9
+                            return StubHixlModule.SUCCESS
+
+                api = real_hixl_api_on(Partial)
+                agent = api.create_agent("reader", {"local_engine": "reader@node"})
+                with self.assertRaises(RegistrationRetainedError) as caught:
+                    api.register_memory(
+                        agent, {f"w{i}": bytearray(16) for i in range(4)}
+                    )
+                retained = caught.exception.retainment
+                try:
+                    self.assertEqual(retained.handles, {"w0": 1001, "w1": 1002})
+                finally:
+                    release_retained(retained)

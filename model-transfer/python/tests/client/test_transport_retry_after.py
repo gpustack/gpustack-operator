@@ -40,3 +40,21 @@ def test_a_plain_refusal_defaults_the_wait_and_the_kind():
     exc = WirePreAdmission("broker refused before admission", authoritative=True)
     assert exc.retry_after is None
     assert exc.kind is None
+
+
+def test_projected_token_rotation_with_same_size_and_mtime(tmp_path):
+    import os
+
+    from gpustack_model_transfer.client_transport import BrokerTransport
+
+    path = tmp_path / "token"
+    path.write_text("first")
+    original = path.stat()
+    transport = BrokerTransport.__new__(BrokerTransport)
+    transport._token_file = path
+    assert transport._read_token() == "first"
+    replacement = tmp_path / "replacement"
+    replacement.write_text("other")
+    os.utime(replacement, ns=(original.st_atime_ns, original.st_mtime_ns))
+    replacement.replace(path)
+    assert transport._read_token() == "other"

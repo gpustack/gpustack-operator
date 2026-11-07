@@ -212,24 +212,16 @@ def _synchronize_device(device) -> None:
         and hasattr(torch, "cuda")
         and hasattr(torch.cuda, "synchronize")
     ):
-        with suppress(Exception):
-            torch.cuda.synchronize(device)
-            return
-    if (
-        dtype_name == "hip"
-        and hasattr(torch, "hip")
-        and hasattr(torch.hip, "synchronize")
-    ):
-        with suppress(Exception):
-            torch.hip.synchronize(device)
-            return
+        torch.cuda.synchronize(device)
+        return
     if (
         dtype_name in ("npu", "privateuseone")
         and hasattr(torch, "npu")
         and hasattr(torch.npu, "synchronize")
     ):
-        with suppress(Exception):
-            torch.npu.synchronize(device)
+        torch.npu.synchronize(device)
+        return
+    raise UnsupportedEngineLayout("device has no supported completion fence")
 
 
 class NativeSGLangModelTransferLoader:
@@ -240,12 +232,18 @@ class NativeSGLangModelTransferLoader:
     def __init__(self, load_config):
         self.load_config = load_config
         self._provider = None
+        self._provider_tp_size = None
         self._cached_descriptors = None
 
     def _reader(self, tp_size=1):
         if self._provider is None:
             self._provider = engine_reader.create_reader_provider(
                 self.load_config, tp_size=tp_size
+            )
+            self._provider_tp_size = tp_size
+        elif self._provider_tp_size != tp_size:
+            raise UnsupportedEngineLayout(
+                "tensor-parallel size changed after reader creation"
             )
         return self._provider
 

@@ -350,3 +350,14 @@ class TestSuitesAgainstARestrictedRuntime(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def test_backend_suite_isolated_faults_with_shared_runtime():
+    from gpustack_model_transfer.acceptance import hixl_backend_suite
+
+    api = FakeHixlAPI()
+    original_mode = api.submit_mode
+    results = hixl_backend_suite.run(hixlutil.default_context(), runtime=lambda: api)
+    for result in results:
+        assert result.status == "PASS", (result.capability, result.detail)
+    assert api.submit_mode == original_mode

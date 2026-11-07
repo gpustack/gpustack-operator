@@ -49,6 +49,7 @@ def engine(monkeypatch):
     modules[
         "vllm.model_executor.model_loader.base_loader"
     ].BaseModelLoader = BaseModelLoader
+    modules["torch"].cuda = types.SimpleNamespace(synchronize=lambda device: None)
     modules["torch"].empty = lambda shape, dtype, device: Tensor(
         shape, dtype, device.type, getattr(device, "index", None)
     )
@@ -693,3 +694,49 @@ def test_initialized_model_consumer_must_exhaust_iterator(engine, monkeypatch):
             consume_weights=lambda weights: next(weights),
         )
     assert engine.events[-1] == "abort"
+
+
+@pytest.mark.parametrize("device", ["cuda", "hip", "npu", "privateuseone"])
+def test_device_synchronization_failure_propagates(engine, monkeypatch, device):
+    def fail(device):
+        raise RuntimeError("device fence failed")
+
+    for namespace in ("cuda", "hip", "npu"):
+        monkeypatch.setattr(
+            engine.native.torch,
+            namespace,
+            types.SimpleNamespace(synchronize=fail),
+            raising=False,
+        )
+    with pytest.raises(RuntimeError, match="device fence failed"):
+        engine.native._synchronize_device(types.SimpleNamespace(type=device))
+
+
+def test_missing_device_fence_is_refused(engine):
+    with pytest.raises(engine.native.UnsupportedEngineLayout, match="completion fence"):
+        engine.native._synchronize_device(types.SimpleNamespace(type="unsupported"))
+
+
+def test_failed_collective_fence_aborts_and_poison_load(
+    engine, monkeypatch, tp_distributed
+):
+    loader, config, model_config, _ = inputs(engine, monkeypatch)
+    config.parallel_config.tensor_parallel_size = 2
+
+    def fail(device):
+        raise RuntimeError("collective failed")
+
+    monkeypatch.setattr(engine.native.torch.cuda, "synchronize", fail)
+    with pytest.raises(RuntimeError, match="collective failed"):
+        loader.load_model(config, model_config)
+    assert engine.events[-1] == "abort"
+    assert "finalize" not in engine.events
+    assert engine.native._process_unusable
+
+
+def test_cached_provider_refuses_changed_tp_size(engine, monkeypatch):
+    loader, _, _, provider = inputs(engine, monkeypatch)
+    assert loader._reader(tp_size=1) is provider
+    with pytest.raises(engine.native.UnsupportedEngineLayout, match="size changed"):
+        loader._reader(tp_size=2)
+    assert loader._reader(tp_size=1) is provider

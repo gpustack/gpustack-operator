@@ -1,8 +1,12 @@
-"""The NIXL reader: fixed windows over the NixlAPI seam.
+"""Reference reader for injected NIXL window and safety qualification.
+
+Production engine transfers use client_native.TargetNative and published
+address descriptors. This file-path WRITE seam requires an injected API;
+RealNixlAPI deliberately refuses file-path writes and per-agent UCX settings.
 
 One reader serves a verified manifest's byte ranges through fixed,
 reusable, registered windows: window_bytes sized, at most max_inflight
-(1 or 2, the contract's ceiling) outstanding, a window reused only after
+outstanding, a window reused only after
 its operation reached a terminal state, registrations renewed when the
 backend reports them expired.
 
@@ -185,8 +189,13 @@ class NixlReader:
             offset=begin,
             length=length,
         )
-        self.operations[operation.op_id] = operation
+        self.operations = {
+            key: value
+            for key, value in self.operations.items()
+            if not value.state.terminal
+        }
         slot = self._slots.acquire()
+        self.operations[operation.op_id] = operation
         window = self.windows[slot]
         self._slots.bind(slot, operation.op_id)
         self._op_windows[operation.op_id] = window

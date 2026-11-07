@@ -120,12 +120,6 @@ class ReaderSession:
                 f"range [{offset}, +{length}) exceeds tensor byte size "
                 f"{tensor.byte_size}"
             )
-        alignment = self.capabilities.alignment_bytes
-        if alignment > 1 and (offset % alignment != 0 or length % alignment != 0):
-            raise InvalidDescriptorError(
-                f"range [{offset}, +{length}) for {name!r} is not aligned "
-                f"to {alignment} bytes"
-            )
         covers_all = offset == 0 and length == tensor.byte_size
         return self._read(
             "read_range",
@@ -140,6 +134,12 @@ class ReaderSession:
     ) -> ReadOutput:
         if self._closed:
             raise OperationStateError("session is closed")
+        alignment = self.capabilities.alignment_bytes
+        if alignment > 1 and (offset % alignment != 0 or length % alignment != 0):
+            raise InvalidDescriptorError(
+                f"range [{offset}, +{length}) for {tensor.name!r} is not aligned "
+                f"to {alignment} bytes"
+            )
         if length > self.budgets.owned_output_bytes:
             # Refuse before any read or allocation: the owned-output budget,
             # separate from the window budget, bounds the tensor.

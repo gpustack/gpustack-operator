@@ -23,11 +23,16 @@ def test_manifest_raw_byte_boundary(tmp_path, excess):
 
 
 @pytest.mark.parametrize(
-    ("field", "value"),
-    [("files", None), ("tensors", {}), ("files", [None] * 3), ("tensors", [None] * 3)],
+    ("field", "value", "message"),
+    [
+        ("files", None, "must be lists"),
+        ("tensors", {}, "must be lists"),
+        ("files", [None] * 3, "count exceeds"),
+        ("tensors", [None] * 3, "count exceeds"),
+    ],
 )
 def test_manifest_counts_rejected_before_descriptor_construction(
-    monkeypatch, field, value
+    monkeypatch, field, value, message
 ):
     monkeypatch.setattr(manifest, "MAX_MANIFEST_FILES", 2)
     monkeypatch.setattr(manifest, "MAX_MANIFEST_TENSORS", 2)
@@ -35,7 +40,7 @@ def test_manifest_counts_rejected_before_descriptor_construction(
     document["files"] = []
     document["tensors"] = []
     document[field] = value
-    with pytest.raises(errors.InvalidDescriptorError, match="count exceeds"):
+    with pytest.raises(errors.InvalidDescriptorError, match=message):
         manifest.parse_manifest(json.dumps(document).encode())
 
 

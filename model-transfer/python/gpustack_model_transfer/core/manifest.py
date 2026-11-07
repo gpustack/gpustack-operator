@@ -152,10 +152,10 @@ def parse_manifest(
     _require_exact_keys(
         data, _TOP_KEYS | {"tensor_pages"} if paged else _TOP_KEYS, "manifest"
     )
+    if not isinstance(data["files"], list) or not isinstance(data["tensors"], list):
+        raise InvalidDescriptorError("manifest files and tensors must be lists")
     if (
-        not isinstance(data["files"], list)
-        or not isinstance(data["tensors"], list)
-        or len(data["files"]) > MAX_MANIFEST_FILES
+        len(data["files"]) > MAX_MANIFEST_FILES
         or len(data["tensors"]) > MAX_MANIFEST_TENSORS
     ):
         raise InvalidDescriptorError("manifest count exceeds bound")
@@ -169,14 +169,14 @@ def parse_manifest(
     identity.validate()
 
     files = []
-    seen_paths = set()
+    seen_paths = {}
     for entry in data["files"]:
         _require_exact_keys(entry, _FILE_KEYS, "file entry")
         descriptor = FileDescriptor(path=entry["path"], size=entry["size"])
         descriptor.validate()
         if descriptor.path in seen_paths:
             raise InvalidDescriptorError(f"duplicate file entry: {descriptor.path!r}")
-        seen_paths.add(descriptor.path)
+        seen_paths[descriptor.path] = descriptor.size
         files.append(descriptor)
 
     if paged:
@@ -217,9 +217,7 @@ def parse_manifest(
             )
         by_path.setdefault(tensor.file, []).append(tensor)
     for path, path_tensors in by_path.items():
-        validate_file_tensors(
-            path_tensors, next(f for f in files if f.path == path).size
-        )
+        validate_file_tensors(path_tensors, seen_paths[path])
 
     names = [t.name for t in tensors]
     if len(set(names)) != len(names):

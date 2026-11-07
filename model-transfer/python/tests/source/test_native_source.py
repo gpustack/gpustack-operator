@@ -121,6 +121,8 @@ class Control:
         self.native_ack = True
 
     def heartbeat(self, **kwargs):
+        if kwargs.get("drain_requested"):
+            self.action = "drain"
         self.heartbeat_calls += 1
         if self.stale:
             raise ControlError(409, "stale-generation", "stale")
@@ -620,3 +622,53 @@ def test_hixl_source_factory_requires_no_torch(monkeypatch):
         }
     )
     assert backend == "hixl"
+
+
+@pytest.mark.parametrize("outcome", ["recover", "drain", "close"])
+def test_memory_refusal_keeps_generation_retriable_and_drainable(monkeypatch, outcome):
+    from gpustack_model_transfer.source.native_worker import NativeSourceWorker
+
+    available = threading.Event()
+    checked = threading.Event()
+
+    def admit(worker):
+        checked.set()
+        return available.is_set()
+
+    monkeypatch.setattr(NativeSourceWorker, "_admit_dynamic_window", admit)
+    source, controls, backends, allocators = supervisor([order()])
+    source.poll_once()
+    worker = source.workers["generation-1"]
+    try:
+        assert checked.wait(2)
+        assert worker.state == "starting"
+        assert source.threads["generation-1"].is_alive()
+        assert not backends and not allocators
+        assert controls["generation-1"].start_calls == 0
+        if outcome == "close":
+            worker.close()
+            eventually(lambda: worker.state == "stopped")
+            assert controls["generation-1"].ack_calls == 0
+            return
+        if outcome == "recover":
+            available.set()
+            eventually(lambda: worker.state == "serving")
+            assert controls["generation-1"].start_calls == 1
+        controls["generation-1"].action = "drain"
+        eventually(lambda: worker.state == "drained")
+        assert controls["generation-1"].ack_calls == 1
+    finally:
+        controls["generation-1"].action = "drain"
+        worker._abort_fill_requested.set()
+        source.stop(timeout=2)
+        worker.close()
+
+
+@pytest.mark.parametrize("value", [True, 1.0, "1", [], None])
+def test_work_order_source_generation_requires_integer(value):
+    payload = order()
+    payload["sourceGeneration"] = value
+    from gpustack_model_transfer.core.errors import InvalidDescriptorError
+
+    with pytest.raises(InvalidDescriptorError, match="source generation"):
+        parse_assignment(payload, backend="nixl")

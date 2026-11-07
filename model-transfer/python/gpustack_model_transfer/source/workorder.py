@@ -218,6 +218,10 @@ def parse_assignment(payload, *, backend: str, page_reader=None) -> Assignment:
     ):
         raise InvalidDescriptorError("invalid admitted source resident budget")
 
+    if isinstance(payload["sourceGeneration"], bool) or not isinstance(
+        payload["sourceGeneration"], int
+    ):
+        raise InvalidDescriptorError("work order source generation must be an integer")
     assignment = Assignment(
         generation=generation,
         worker_secret=secret,

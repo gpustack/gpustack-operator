@@ -569,6 +569,15 @@ def check_pre_submission_timeout(
                 "FAILED with its slot released",
                 evidence=(f"state={last.state.value}",),
             )
+        if (
+            reader._slots.slot_of(last.op_id) is not None
+            or reader.ledger.active_bytes != 0
+        ):
+            return SafetyVerdict(
+                capability="pre-submission-timeout",
+                status=NO_GO,
+                detail="the refused operation still owns a slot or active bytes",
+            )
         return SafetyVerdict(
             capability="pre-submission-timeout",
             status=PASS,

@@ -545,7 +545,15 @@ class RealHixlAPI:
             # move into the quarantine owner and the typed error carries
             # it to the source service — naming a leak retains nothing.
             for name, handle in reversed(list(handles.items())):
-                rollback = agent.client.deregister_mem(handle)
+                try:
+                    rollback = agent.client.deregister_mem(handle)
+                except BaseException:
+                    retainment = retain_registration(
+                        handles, buffers, "hixl registration rollback raised"
+                    )
+                    raise RegistrationRetainedError(
+                        retainment, "hixl rollback failed; registrations retained"
+                    ) from None
                 if rollback != hixl.SUCCESS:
                     retainment = retain_registration(
                         handles,
@@ -558,6 +566,7 @@ class RealHixlAPI:
                         f"(status {rollback}); {len(handles)} registration(s) "
                         "and their buffers are retained for a qualified fence",
                     ) from None
+                handles.pop(name)
             raise
         return _RealRegistration(
             handles=handles, windows=windows, buffers=dict(buffers)

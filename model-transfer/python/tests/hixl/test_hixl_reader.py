@@ -361,3 +361,57 @@ class TestLedgerAccounting(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestTeardownAndPollRecovery(unittest.TestCase):
+    def test_close_resumes_after_deregistration_failure(self):
+        api = FakeHixlAPI()
+        reader = open_reader(api=api)
+        original = api.deregister
+
+        def refuse(*args):
+            raise RuntimeError("retained")
+
+        api.deregister = refuse
+        with self.assertRaises(RuntimeError):
+            reader.close()
+        self.assertEqual(api.disconnects, 1)
+        self.assertGreater(reader.ledger.reserved_bytes, 0)
+        api.deregister = original
+        reader.close()
+        reader.close()
+        self.assertEqual(api.disconnects, 1)
+        self.assertEqual(api.deregistrations, 1)
+        self.assertEqual(reader.ledger.reserved_bytes, 0)
+
+    def test_poll_exception_is_observable_as_retained_unknown(self):
+        api = FakeHixlAPI()
+        reader = open_reader(api=api)
+
+        def fail_poll(*args, **kwargs):
+            raise RuntimeError("status unavailable")
+
+        api.poll = fail_poll
+        tensor = reader.manifest.tensors[0]
+        with self.assertRaises(AmbiguousReadError):
+            reader.read_bytes(tensor.file, tensor.data_begin, tensor.data_end)
+        flight = next(iter(reader.in_flight.values()))
+        self.assertEqual(flight.operation.state, OpState.UNKNOWN)
+        self.assertGreater(reader.ledger.active_bytes, 0)
+        with self.assertRaises(OperationStateError):
+            reader.close()
+        reader.resolve(flight.operation.op_id, "failed")
+        reader.close()
+        self.assertEqual(reader.ledger.reserved_bytes, 0)
+
+
+def test_terminal_operation_history_is_bounded():
+    reader = open_reader()
+    tensor = reader.manifest.tensors[0]
+    try:
+        for _ in range(20):
+            reader.read_bytes(tensor.file, tensor.data_begin, tensor.data_end)
+        assert len(reader.in_flight) == 1
+        assert not reader._slots._terminal_ops
+    finally:
+        reader.close()

@@ -234,6 +234,22 @@ class TestFinalization(unittest.TestCase):
         self.assertEqual(report.finalization_count, 1)
         self.assertEqual(driver.model_finalization_count(report.model), 1)
 
+    def test_cleanup_failure_preserves_original_load_failure(self):
+        from gpustack_model_transfer.adapters.vllm import LoadOptions
+
+        class CloseFailure(_CountingReader):
+            def close(self):
+                super().close()
+                raise RuntimeError("cleanup failed")
+
+        loader, counting = make_loader(reader=CloseFailure())
+        driver = make_driver(
+            fail_store_after=0, store_error=DeniedContentError("engine refused")
+        )
+        with self.assertRaisesRegex(DeniedContentError, "engine refused"):
+            loader.load(driver, LoadOptions())
+        self.assertEqual(counting.close_calls, 1)
+
     def test_failure_midway_taints_the_model(self):
         from gpustack_model_transfer.adapters.vllm import LoadOptions
 

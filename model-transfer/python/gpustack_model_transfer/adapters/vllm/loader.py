@@ -281,7 +281,7 @@ class ModelTransferModelLoader:
                 try:
                     session.close()
                     ledger.session_closed = True
-                except OperationStateError:
+                except Exception:
                     pass
             else:
                 self._close_reader()

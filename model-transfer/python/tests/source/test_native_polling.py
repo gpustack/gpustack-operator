@@ -91,3 +91,43 @@ def test_registry_reports_progress_and_pending_native_completion():
     assert worker.native_operations == 0
     assert registry.job_bytes == 0
     assert not registry.windows
+
+
+@pytest.mark.parametrize(
+    "state,released,job_state,session_state,expected",
+    [
+        ("serving", False, "acknowledged", "closed", False),
+        ("quarantine", False, "unknown", "unknown", False),
+        ("drained", False, "acknowledged", "closed", False),
+        ("drained", True, "unknown", "closed", False),
+        ("drained", True, "acknowledged", "open", False),
+        ("drained", True, "acknowledged", "closed", True),
+    ],
+)
+def test_retirement_keeps_unknown_ownership_and_evicts_finished_manifest(
+    state, released, job_state, session_state, expected
+):
+    class Worker:
+        pass
+
+    worker = Worker()
+    worker.state = state
+    worker._native_attempted = True
+    worker._release_done = released
+    worker.control = SimpleNamespace(generation="generation")
+    manifest = object()
+    worker.assignment = SimpleNamespace(manifest=manifest)
+    registry = OperationRegistry(None)
+    key = ("pod", "incarnation", "generation", "lease", "session")
+    other = ("pod", "incarnation", "other-generation", "lease", "session")
+    registry.jobs["job"] = {"common": key, "state": job_state}
+    registry.jobs["other"] = {"common": other, "state": "unknown"}
+    registry.sessions[key] = {"state": session_state}
+    registry.queues[worker] = deque()
+    registry._manifest_tables[id(manifest)] = (manifest,)
+    assert registry.retire(worker) is expected
+    assert ("job" not in registry.jobs) is expected
+    assert (key not in registry.sessions) is expected
+    assert (id(manifest) not in registry._manifest_tables) is expected
+    assert (worker not in registry.queues) is expected
+    assert registry.jobs["other"]["state"] == "unknown"

@@ -74,6 +74,7 @@ def _run_check(capability, check, context, api) -> CheckResult:
     AttributeError from a broken runtime call is a bug in the boundary,
     so it lands as NO-GO here, never as an unexposed-boundary UNRUN.
     """
+    previous_mode = getattr(api, "submit_mode", None)
     try:
         detail = check(context, api)
         if isinstance(detail, CheckResult):
@@ -86,6 +87,9 @@ def _run_check(capability, check, context, api) -> CheckResult:
         )
     except Exception as exc:
         return CheckResult(capability, "NO-GO", f"{type(exc).__name__}: {exc}")
+    finally:
+        if previous_mode is not None:
+            api.submit_mode = previous_mode
 
 
 def _compat_unrun(name: str, why: str) -> CheckResult:
@@ -328,6 +332,7 @@ def _check_per_operation_terminal_states(context, api):
     else:
         raise AssertionError("the pre-submission timeout was not raised")
 
+    reader.close()
     api.submit_mode = SUBMIT_NONTERMINAL
     reader = _open_reader(context, api)
     try:
@@ -429,7 +434,7 @@ def _check_read_direction_available(context, api):
     expected = _file_bytes(context, tensor.file)[tensor.data_begin : tensor.data_end]
     if payload != expected:
         raise AssertionError("the read direction served no bytes")
-    submission = api.agents[0].submissions[-1]
+    submission = reader._session_agent.submissions[-1]
     if submission["direction"] != "read":
         raise AssertionError("the read direction submitted a write")
     if "addr" not in submission["source"]:

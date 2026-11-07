@@ -15,7 +15,6 @@ from gpustack_model_transfer.adapters.vllm.constants import (
     SUPPORTED_DTYPES,
 )
 from gpustack_model_transfer.core import versioning
-from gpustack_model_transfer.core.descriptors import MAX_INT64
 from gpustack_model_transfer.core.errors import (
     DeniedContentError,
     InvalidDescriptorError,
@@ -91,10 +90,6 @@ def _parse_safetensors_header_with_base(
     if length < 2 or length > MAX_HEADER_BYTES:
         raise InvalidDescriptorError(
             f"{file_path!r} has an implausible safetensors header length {length}"
-        )
-    if length > MAX_INT64 - 8:
-        raise InvalidDescriptorError(
-            f"{file_path!r} header length exceeds the int64 range"
         )
     raw = _read_span(8, 8 + length)
 

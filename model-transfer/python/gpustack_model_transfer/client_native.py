@@ -158,15 +158,6 @@ class TargetNative:
 
     def start(self):
         self.thread_id = threading.get_ident()
-        try:
-            import resource
-
-            resource.setrlimit(
-                resource.RLIMIT_MEMLOCK,
-                (resource.RLIM_INFINITY, resource.RLIM_INFINITY),
-            )
-        except Exception:
-            pass
         if self.backend == "nixl":
             from gpustack_model_transfer.backends.nixl.runtime import load_runtime
 

@@ -341,3 +341,15 @@ class TestFakeSourceTargetFlow(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def test_terminal_operation_history_is_bounded():
+    reader, _, _ = open_reader()
+    tensor = reader.manifest.tensors[0]
+    try:
+        for _ in range(20):
+            reader.read_bytes(tensor.file, tensor.data_begin, tensor.data_end)
+        assert len(reader.operations) == 1
+        assert not reader._slots._terminal_ops
+    finally:
+        reader.close()

@@ -255,24 +255,16 @@ def _synchronize_device(device) -> None:
         and hasattr(torch, "cuda")
         and hasattr(torch.cuda, "synchronize")
     ):
-        with suppress(Exception):
-            torch.cuda.synchronize(device)
-            return
-    if (
-        dtype_name == "hip"
-        and hasattr(torch, "hip")
-        and hasattr(torch.hip, "synchronize")
-    ):
-        with suppress(Exception):
-            torch.hip.synchronize(device)
-            return
+        torch.cuda.synchronize(device)
+        return
     if (
         dtype_name in ("npu", "privateuseone")
         and hasattr(torch, "npu")
         and hasattr(torch.npu, "synchronize")
     ):
-        with suppress(Exception):
-            torch.npu.synchronize(device)
+        torch.npu.synchronize(device)
+        return
+    raise UnsupportedEngineLayout("device has no supported completion fence")
 
 
 class NativeModelTransferLoader(BaseModelLoader):
@@ -281,6 +273,7 @@ class NativeModelTransferLoader(BaseModelLoader):
     def __init__(self, load_config):
         super().__init__(load_config)
         self._provider = None
+        self._provider_tp_size = None
         self._topology_checked = False
         self._external_vllm_config = None
 
@@ -288,6 +281,11 @@ class NativeModelTransferLoader(BaseModelLoader):
         if self._provider is None:
             self._provider = engine_reader.create_reader_provider(
                 self.load_config, tp_size=tp_size
+            )
+            self._provider_tp_size = tp_size
+        elif self._provider_tp_size != tp_size:
+            raise UnsupportedEngineLayout(
+                "tensor-parallel size changed after reader creation"
             )
         return self._provider
 

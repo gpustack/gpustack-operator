@@ -3,6 +3,7 @@ source worker."""
 
 import hashlib
 import json
+import threading
 import time
 from dataclasses import replace
 from pathlib import Path
@@ -255,13 +256,24 @@ def test_a_window_under_the_floor_refuses_the_rdma_source(monkeypatch):
     worker, control, _allocator, backend = new_worker(
         monkeypatch, avail_ram=GIB, max_memory_bytes=8 * GIB
     )
+    thread = threading.Thread(target=worker.start, daemon=True)
     try:
-        worker.start()
-        assert worker.state == "stopped", "the floor is refused at 1 GiB available"
+        thread.start()
+        eventually(lambda: worker.active_sessions == 0)
+        assert worker.state == "starting", "the floor waits at 1 GiB available"
+        assert thread.is_alive()
         assert not worker.blocks
         assert control.filled_data is None
         assert backend.registrations == 0
+        control.action = "drain"
+        thread.join(timeout=2)
+        assert not thread.is_alive()
+        worker.once()
+        assert worker.state == "drained"
+        assert control.acks == [True]
     finally:
+        worker._abort_fill_requested.set()
+        thread.join(timeout=2)
         worker.close()
 
 

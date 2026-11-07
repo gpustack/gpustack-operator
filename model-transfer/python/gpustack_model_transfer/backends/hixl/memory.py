@@ -70,7 +70,6 @@ class MemoryLedger:
         _require_non_negative("reserve", byte_count)
         self.reserved_bytes += byte_count
         self._peak_reserved = max(self._peak_reserved, self.reserved_bytes)
-        self.peak_bytes = max(self.peak_bytes, self.active_bytes)
 
     def release_reservation(self, byte_count: int) -> None:
         _require_non_negative("release_reservation", byte_count)

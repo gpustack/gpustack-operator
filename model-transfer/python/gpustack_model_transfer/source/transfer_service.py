@@ -131,6 +131,32 @@ class OperationRegistry:
         self._page_waiters = {}
         self._manifest_tables = {}
 
+    def retire(self, worker):
+        """Reclaim receipts only after the broker retired this native generation."""
+        if worker.state not in ("drained", "stopped") or (
+            worker._native_attempted and not worker._release_done
+        ):
+            return False
+        generation = worker.control.generation
+        with self.lock:
+            jobs = [
+                key for key, job in self.jobs.items() if job["common"][2] == generation
+            ]
+            sessions = [key for key in self.sessions if key[2] == generation]
+            if any(self.jobs[key]["state"] != "acknowledged" for key in jobs) or any(
+                self.sessions[key]["state"] != "closed" for key in sessions
+            ):
+                return False
+            for key in jobs:
+                del self.jobs[key]
+            for key in sessions:
+                del self.sessions[key]
+            self.queues.pop(worker, None)
+            self._session_closes.pop(worker, None)
+            self._page_waiters.pop(worker, None)
+            self._manifest_tables.pop(id(worker.assignment.manifest), None)
+            return True
+
     def _tables(self, manifest):
         key = id(manifest)
         cached = self._manifest_tables.get(key)
@@ -149,12 +175,12 @@ class OperationRegistry:
         )
         return by_name, by_file, index_by_file, file_sizes
 
-    def _valid_source_range(self, manifest, tensor, offset, length):
+    @staticmethod
+    def _valid_source_range(tensor, offset, length, by_file, index_by_file):
         if offset <= tensor.byte_size and length <= tensor.byte_size - offset:
             return True
         if offset != 0 or length <= tensor.byte_size:
             return False
-        _, by_file, index_by_file, _ = self._tables(manifest)
         items = by_file.get(tensor.file, ())
         idx = index_by_file.get((tensor.file, tensor.name), -1)
         if idx < 0:
@@ -311,7 +337,12 @@ class OperationRegistry:
         if target["backend"] != worker.assignment.backend:
             raise Refused("backend mismatch")
         try:
-            by_name, _, _, file_sizes = self._tables(worker.assignment.manifest)
+            with self.lock:
+                if worker.state in ("drained", "stopped"):
+                    raise Refused("source is not accepting operations")
+                by_name, by_file, index_by_file, file_sizes = self._tables(
+                    worker.assignment.manifest
+                )
             tensor = by_name[tensor_name]
             with worker._lock:
                 block = worker.blocks.get(file_name)
@@ -327,7 +358,7 @@ class OperationRegistry:
         if (
             tensor.file != file_name
             or not self._valid_source_range(
-                worker.assignment.manifest, tensor, offset, length
+                tensor, offset, length, by_file, index_by_file
             )
             or file_offset != tensor.data_begin + offset
             or file_offset > block_size

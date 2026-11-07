@@ -900,7 +900,7 @@ def test_may_have_admitted_then_connect_failure_never_fails_over(tmp_path):
         def __init__(self, endpoint, token_file):
             attempts.append(("construct", endpoint["podName"]))
 
-        def request(self, method, path, body):
+        def request(self, method, path, body, *, deadline=None):
             attempts.append(("post", body["requestID"]))
             if len([entry for entry in attempts if entry[0] == "post"]) == 1:
                 raise WireUnknown("lost response")
@@ -1352,5 +1352,56 @@ def test_target_storage_size_rejected_before_native_allocation(tmp_path):
             session.fill(descriptor, target)
         assert not any(path == "/v1/transfers" for path, _ in broker.calls)
         session.close()
+    finally:
+        broker.close()
+
+
+@pytest.mark.parametrize("phase", ["open", "page", "closing", "release"])
+def test_session_requests_share_absolute_transport_deadlines(
+    tmp_path, monkeypatch, phase
+):
+    import gpustack_model_transfer.client as client
+    from gpustack_model_transfer.client_transport import WireUnknown
+
+    reader, broker, _, _ = make_reader(tmp_path)
+    now, calls = [0.0], []
+    reader.timeout = 1.0
+
+    def sleep(delay):
+        now[0] += delay
+
+    def request(method, path, body, *, deadline=None):
+        calls.append((path, deadline))
+        assert deadline == 1.0
+        now[0] = deadline
+        raise WireUnknown("response deadline")
+
+    monkeypatch.setattr(
+        client, "time", SimpleNamespace(monotonic=lambda: now[0], sleep=sleep)
+    )
+    reader.transport = SimpleNamespace(request=request)
+    try:
+        with pytest.raises(WireUnknown):
+            if phase == "open":
+                reader._open("weight", 0, deadline=1.0)
+            elif phase == "page":
+                reader._manifest_page(
+                    {
+                        "sessionID": "session",
+                        "sourcePodUID": "source",
+                        "workerInstanceID": "worker",
+                        "generation": "generation",
+                        "manifestSHA256": "manifest",
+                    },
+                    {"sha256": "page"},
+                    deadline=1.0,
+                )
+            else:
+                reader._close_phase("session", "close", finalize=phase == "release")
+        assert now[0] == 1.0 and len(calls) == 1
+        if phase == "open":
+            assert reader.pending_opens and reader.poisoned
+        elif phase != "page":
+            assert reader.pending_closes and reader.poisoned
     finally:
         broker.close()

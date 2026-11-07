@@ -70,3 +70,27 @@ def test_duplicate_descriptors_across_pages_are_refused():
 
     with pytest.raises(ValueError, match="duplicate"):
         checked_descriptors(repeated())
+
+
+@pytest.mark.parametrize("failure", ["duplicate", "invalid", "generator"])
+def test_descriptor_batch_failure_rolls_back_rows_and_positions(failure):
+    from gpustack_model_transfer.adapters.descriptor_pages import DescriptorIndex
+
+    index = DescriptorIndex()
+    index.add([("first", (1,), "U8")])
+
+    def batch():
+        yield ("partial", (1,), "U8")
+        if failure == "generator":
+            raise RuntimeError("producer failed")
+        yield ("first" if failure == "duplicate" else "", (1,), "U8")
+
+    try:
+        with pytest.raises((ValueError, RuntimeError)):
+            index.add(batch())
+        assert len(index) == 1
+        assert [row.name for row in index] == ["first"]
+        index.add([("partial", (1,), "U8")])
+        assert [row.name for row in index] == ["first", "partial"]
+    finally:
+        index.close()

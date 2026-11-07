@@ -56,8 +56,8 @@ def resolve_tree_file(tree_path: str, relative: str) -> int:
     """Open one manifest file inside the verified tree, safely.
 
     The path must be relative, must not climb out by name, must not
-    escape by symlink at any component (O_NOFOLLOW on the leaf, and a
-    realpath containment check on the whole path), and must be a regular
+    escape by symlink at any component (dir_fd traversal with O_NOFOLLOW
+    on every component, including the leaf), and must be a regular
     file. The caller owns the returned descriptor.
     """
     if not tree_path or not relative:

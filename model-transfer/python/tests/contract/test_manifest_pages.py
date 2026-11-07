@@ -62,3 +62,31 @@ def test_paged_manifest_lookup(tmp_path):
 def test_paged_manifest_cross_page_corruption(tmp_path, duplicate, overlap):
     with pytest.raises(InvalidDescriptorError):
         load_manifest(write_pages(tmp_path, duplicate=duplicate, overlap=overlap))
+
+
+@pytest.mark.parametrize("failure", ["duplicate", "generator"])
+def test_tensor_batch_failure_rolls_back_rows_and_file_positions(failure):
+    from gpustack_model_transfer.core.descriptors import TensorDescriptor
+    from gpustack_model_transfer.core.tensor_index import TensorIndex
+
+    first = TensorDescriptor("first", "weights", "U8", (1,), 0, 1)
+    second = TensorDescriptor("second", "weights", "U8", (1,), 1, 2)
+    index = TensorIndex()
+    index.add([first])
+
+    def batch():
+        yield second
+        if failure == "generator":
+            raise RuntimeError("producer failed")
+        yield first
+
+    try:
+        with pytest.raises((InvalidDescriptorError, RuntimeError)):
+            index.add(batch())
+        assert len(index) == 1
+        assert list(index) == [first]
+        index.add([second])
+        assert list(index.by_file["weights"]) == [first, second]
+        assert index.file_index[("weights", "second")] == 1
+    finally:
+        index.close()

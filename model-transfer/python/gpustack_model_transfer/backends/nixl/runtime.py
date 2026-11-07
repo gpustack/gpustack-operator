@@ -1,4 +1,4 @@
-"""The NIXL runtime seam: lazy, version-pinned, fail-closed.
+"""The NIXL runtime seam: lazy, with explicit version qualification.
 
 Nothing in this module imports nixl or torch at module scope. A CPU-only
 host probes the runtime (learning what is missing instead of crashing on
@@ -22,9 +22,10 @@ does not exist to call, and a UCX selection the agent configuration
 cannot scope per agent is refused (the server environment stays
 authoritative).
 
-The version pin is a fact this backend was built and reviewed against, not
-a guess: a runtime with another version is refused with a typed error, and
-a caller that has qualified another version passes it explicitly.
+The source-review pin describes the reviewed API surface. Injected runtimes
+and explicit supported_versions use strict version checks. The default
+installed-runtime path accepts a reported version; this is compatibility,
+not evidence that every installed version has passed hardware qualification.
 """
 
 import importlib.util
@@ -43,8 +44,8 @@ from gpustack_model_transfer.backends.nixl.errors import (
 # The pinned route: the NIXL release the source review and the transfer
 # evidence were taken against. The commit is the v1.5.0 tag of
 # ai-dynamo/nixl; the repository HEAD examined alongside it (9e7800fc) is
-# newer and was NOT assumed to match. A caller qualifying a different
-# release passes it in; nothing silently accepts an unqualified one.
+# newer and was NOT assumed to match. This is the default allowlist for
+# injected runtimes; real-host version enforcement is an explicit opt-in.
 DEFAULT_VERSION = "1.5.0"
 PINNED_COMMIT = "1683cf3b7f3d11674c03c5e861cea22339876c96"
 SUPPORTED_VERSIONS = frozenset({DEFAULT_VERSION})
@@ -431,12 +432,11 @@ def probe_runtime() -> RuntimeReadiness:
 
 
 def load_runtime(api=None, supported_versions=None) -> NixlAPI:
-    """Return the NIXL API, failing closed when the runtime is absent or
-    its version is not one this backend was pinned against.
+    """Return the lazy API, refusing an absent or unversioned runtime.
 
-    api, when given, is an already-constructed implementation (the injected
-    fake in tests, or a qualified host wrapper); its version is validated
-    the same as the real package's.
+    Injected APIs use the source-review allowlist by default. The installed
+    runtime enforces a version allowlist only when supported_versions is
+    supplied; accepting a version does not qualify its hardware behavior.
     """
     supported = SUPPORTED_VERSIONS
     if supported_versions is not None:

@@ -18,13 +18,6 @@ _SGLANG_TARGETS = frozenset(
 )
 
 
-class _SGLangImportHook(importlib.abc.MetaPathFinder):
-    def find_spec(self, fullname, path, target=None):
-        if fullname in _SGLANG_TARGETS and fullname not in sys.modules:
-            return
-        return
-
-
 def _patch_server_args(mod) -> None:
     """Allow --load-format model-transfer in SGLang ServerArgs CLI choices if present."""
     add_choices = getattr(mod, "add_load_format_choices", None)

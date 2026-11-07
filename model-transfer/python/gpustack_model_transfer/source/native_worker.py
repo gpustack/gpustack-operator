@@ -129,7 +129,7 @@ class NativeSourceWorker:
             max_bytes = max(align_down_2m((total // 16) if total else 0), min_bytes)
         _window, ok = compute_dynamic_source_buffer(avail, max_bytes, min_bytes)
         if not ok:
-            logger.info(
+            logger.debug(
                 "generation %s: available RAM cannot back the %s byte "
                 "source floor; refusing the RDMA source so clients "
                 "fall back",
@@ -146,10 +146,13 @@ class NativeSourceWorker:
                 target=self._control_loop, daemon=True
             )
             self._control_thread.start()
+            while not self._admit_dynamic_window():
+                if self._stop_event.is_set():
+                    self.state = "stopped"
+                    return
+                if self._abort_fill_requested.wait(max(self.poll_interval, 1.0)):
+                    return
             self._retry(self.control.native_start)
-            if not self._admit_dynamic_window():
-                self.state = "stopped"
-                return
             with self._lock:
                 if self._abort_fill_requested.is_set():
                     return

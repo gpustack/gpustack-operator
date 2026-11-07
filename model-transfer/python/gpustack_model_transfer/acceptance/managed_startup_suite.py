@@ -35,6 +35,9 @@ The harness contract, one hook per observable:
       role.connector_status() -> {"ec", "kv"}
   stale_identity(target) -> {"refused", "reason"}
   lose_source(role) -> role
+  cann_gate() -> {"safe_binding", "source_grant", "device_allocation",
+                  "network_allocation", "reclamation_rule", "cann_enabled",
+                  "cuda_support_blocked"}
 
 Without a harness every capability is UNRUN: a missing cluster fails
 the run, never a skipped pass. A harness is injected as runtime= (a
@@ -105,6 +108,9 @@ def _run_check(capability, check, context, harness) -> CheckResult:
     """One capability's verdict: a failed check is NO-GO, never a skip."""
     try:
         detail = check(context, harness)
+        if isinstance(detail, CheckResult):
+            detail.capability = capability
+            return detail
         return CheckResult(capability, "PASS", detail)
     except Exception as exc:
         return CheckResult(capability, "NO-GO", f"{type(exc).__name__}: {exc}")
@@ -316,6 +322,12 @@ def _check_connector_continuity(context, harness):
 
 
 def _check_cann_gate(context, harness):
+    if not callable(getattr(harness, "cann_gate", None)):
+        return CheckResult(
+            "source-npu-grant-and-recovery-gate",
+            "UNRUN",
+            "the harness exposes no CANN gate record",
+        )
     target = harness.metadata_target()
     role = harness.start_role(target, "require")
     if role.serving_status()["phase"] != "serving":

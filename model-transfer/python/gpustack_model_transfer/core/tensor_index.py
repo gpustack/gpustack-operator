@@ -63,6 +63,7 @@ class TensorIndex(Sequence):
     def add(self, tensors):
         """Append a bounded batch in per-file offset order; reject duplicate names."""
         with self._lock:
+            counts, count = self._counts.copy(), self._count
             try:
                 for tensor in tensors:
                     position = self._counts.get(tensor.file, 0)
@@ -81,14 +82,20 @@ class TensorIndex(Sequence):
                     self._counts[tensor.file] = position + 1
                     self._count += 1
                 self._connection.commit()
-            except sqlite3.IntegrityError:
-                raise InvalidDescriptorError(
-                    "duplicate tensor name in manifest"
-                ) from None
-            except sqlite3.DatabaseError:
-                raise InvalidDescriptorError(
-                    "tensor index storage limit or IO failure"
-                ) from None
+            except BaseException as exc:
+                self._connection.rollback()
+                self._counts, self._count = counts, count
+                if isinstance(exc, sqlite3.IntegrityError) and getattr(
+                    exc, "sqlite_errorname", ""
+                ) in ("SQLITE_CONSTRAINT_PRIMARYKEY", "SQLITE_CONSTRAINT_UNIQUE"):
+                    raise InvalidDescriptorError(
+                        "duplicate tensor name in manifest"
+                    ) from exc
+                if isinstance(exc, sqlite3.DatabaseError):
+                    raise InvalidDescriptorError(
+                        "tensor index storage limit or IO failure"
+                    ) from exc
+                raise
 
     def close(self):
         self._cleanup()

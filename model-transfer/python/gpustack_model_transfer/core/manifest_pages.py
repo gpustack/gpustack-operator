@@ -110,7 +110,6 @@ def read_paged_tensors(pages, files, reader):
                     data_begin=entry["data_begin"],
                     data_end=entry["data_end"],
                 )
-                tensor.validate(sizes[page["file"]])
                 if (
                     tensor.file != page["file"]
                     or tensor.data_begin < end
@@ -119,6 +118,7 @@ def read_paged_tensors(pages, files, reader):
                     raise InvalidDescriptorError(
                         "page file, order or beginning mismatch"
                     )
+                tensor.validate(sizes[page["file"]])
                 end = tensor.data_end
                 tensors.append(tensor)
             if end != page["end"]:
