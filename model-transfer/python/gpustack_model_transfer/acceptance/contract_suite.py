@@ -221,7 +221,7 @@ def _check_operation_completion(context):
             )
         raise AssertionError("UNKNOWN operation was releasable")
     finally:
-        counting.close()
+        session.close()
 
 
 def _check_cancel_release(context):

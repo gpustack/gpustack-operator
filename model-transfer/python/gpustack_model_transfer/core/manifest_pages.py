@@ -11,6 +11,7 @@ from gpustack_model_transfer.core.descriptors import TensorDescriptor
 from gpustack_model_transfer.core.errors import (
     AuthenticationError,
     InvalidDescriptorError,
+    SourceUnavailableError,
 )
 from gpustack_model_transfer.core.tensor_index import TensorIndex
 
@@ -24,8 +25,16 @@ _PAGE_KEYS = {"sha256", "size", "count", "file", "begin", "end"}
 def local_page_reader(directory):
     def read(page):
         path = Path(directory) / (page["sha256"] + ".json")
-        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
-        with os.fdopen(fd, "rb") as handle:
+        try:
+            fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
+        except OSError as exc:
+            raise SourceUnavailableError("cannot open a manifest page") from exc
+        try:
+            handle = os.fdopen(fd, "rb")
+        except BaseException:
+            os.close(fd)
+            raise
+        with handle:
             info = os.fstat(handle.fileno())
             if not stat.S_ISREG(info.st_mode) or info.st_size != page["size"]:
                 raise InvalidDescriptorError(

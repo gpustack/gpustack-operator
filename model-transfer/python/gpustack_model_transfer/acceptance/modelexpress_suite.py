@@ -102,7 +102,11 @@ def run(context, runtime=None, backend=None) -> list:
     results = []
     for capability, check in _CHECKS:
         try:
-            pair = runtime()
+            pair = (
+                None
+                if check in (_check_plugin_route, _check_chain_composition)
+                else runtime()
+            )
         except Exception as exc:
             # A factory that cannot build its pair is a failed capability,
             # never a crash of the run.

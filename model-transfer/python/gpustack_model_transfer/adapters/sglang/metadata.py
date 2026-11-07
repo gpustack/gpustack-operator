@@ -15,7 +15,6 @@ from gpustack_model_transfer.adapters.sglang.constants import (
     SUPPORTED_DTYPES,
 )
 from gpustack_model_transfer.core import versioning
-from gpustack_model_transfer.core.descriptors import MAX_INT64
 from gpustack_model_transfer.core.errors import (
     DeniedContentError,
     InvalidDescriptorError,
@@ -91,10 +90,6 @@ def _parse_safetensors_header_with_base(
     if length < 2 or length > MAX_HEADER_BYTES:
         raise InvalidDescriptorError(
             f"{file_path!r} has an implausible safetensors header length {length}"
-        )
-    if length > MAX_INT64 - 8:
-        raise InvalidDescriptorError(
-            f"{file_path!r} header length exceeds the int64 range"
         )
     raw = _read_span(8, 8 + length)
 
@@ -212,6 +207,18 @@ def probe_checkpoint_metadata(
         headers_by_file[descriptor.path] = _parse_safetensors_header_with_base(
             reader, descriptor.path, max_chunk_bytes=max_chunk_bytes
         )
+
+    declared = {descriptor.path: set() for descriptor in manifest.files}
+    for tensor in manifest.tensors:
+        declared[tensor.file].add(tensor.name)
+    ignored = {"__metadata__"}
+    if tie_word_embeddings and "model.embed_tokens.weight" in names:
+        ignored.add("lm_head.weight")
+    for file_path, (header, _data_base) in headers_by_file.items():
+        if set(header) - ignored - declared[file_path]:
+            raise InvalidDescriptorError(
+                f"safetensors header for {file_path!r} contains undeclared tensors"
+            )
 
     for tensor in manifest.tensors:
         parsed = headers_by_file.get(tensor.file)

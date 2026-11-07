@@ -112,7 +112,7 @@ def main(argv=None, now=None) -> int:
         args = _parse_args(argv)
     except SystemExit as exc:
         # argparse already explained itself on stderr.
-        return int(exc.code or EXIT_REFUSED)
+        return exc.code if isinstance(exc.code, int) else EXIT_REFUSED
 
     if args.now is not None and now is not None:
         return _refuse(

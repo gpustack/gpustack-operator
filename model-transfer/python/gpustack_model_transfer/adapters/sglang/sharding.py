@@ -344,7 +344,7 @@ def load_group(
             if reports[rank].model is not None:
                 reports[rank].model.mutated = True
                 tainted.append(rank)
-        elif getattr(drivers[rank], "last_model", None) is not None:
+        elif loader.last_model is not None:
             tainted.append(rank)
     report = LoadGroupReport(
         world_size=world_size,

@@ -65,8 +65,9 @@ def _torch_dtype(descriptor_dtype: str):
     if attr is not None and hasattr(torch, attr):
         return getattr(torch, attr)
     lower = descriptor_dtype.lower()
-    if hasattr(torch, lower):
-        return getattr(torch, lower)
+    candidate = getattr(torch, lower, None)
+    if isinstance(candidate, torch.dtype):
+        return candidate
     with suppress(Exception):
         from safetensors.torch import _getdtype
 

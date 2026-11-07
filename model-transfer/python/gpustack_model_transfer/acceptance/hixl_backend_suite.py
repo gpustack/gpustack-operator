@@ -196,18 +196,20 @@ def _check_transport_negotiation(context, api):
     # binding did not answer are rejections there too, and the reader
     # stays functional-only instead of claiming the required path.
     reader = _open_reader(context, api, transport_options=("hixl_rdma", "tcp"))
-    reader.capabilities.validate()
-    record = reader.capabilities.negotiation
-    if record.requested_transport_options != ("hixl_rdma", "tcp"):
-        raise AssertionError("the reader lost its requested options")
-    answered = getattr(reader._session_agent, "applied_transport_options", ())
-    if tuple(answered) != record.applied_transport_options:
-        raise AssertionError(
-            "the reader's applied options are not the binding's answer"
-        )
-    if not reader.functional_only:
-        raise AssertionError("the reader claimed the required transport path")
-    reader.close()
+    try:
+        reader.capabilities.validate()
+        record = reader.capabilities.negotiation
+        if record.requested_transport_options != ("hixl_rdma", "tcp"):
+            raise AssertionError("the reader lost its requested options")
+        answered = getattr(reader._session_agent, "applied_transport_options", ())
+        if tuple(answered) != record.applied_transport_options:
+            raise AssertionError(
+                "the reader's applied options are not the binding's answer"
+            )
+        if not reader.functional_only:
+            raise AssertionError("the reader claimed the required transport path")
+    finally:
+        reader.close()
     return (
         "requested, applied, and effective answers kept apart at the record "
         "and on the reader; the rejected option is reported and the record "
@@ -259,21 +261,25 @@ def _check_fixed_window_reuse(context, api):
     import hashlib
 
     reader = _open_reader(context, api)
-    manifest = context["manifest"]
-    tensor = max(manifest.tensors, key=lambda t: t.byte_size)
-    if tensor.byte_size <= context["config"]["limits"]["window_bytes"]:
-        raise AssertionError("the fixture exercises no multi-window tensor")
-    first = reader.read_bytes(tensor.file, tensor.data_begin, tensor.data_end)
-    second = reader.read_bytes(tensor.file, tensor.data_begin, tensor.data_end)
-    expected = _file_bytes(context, tensor.file)[tensor.data_begin : tensor.data_end]
-    if first != expected or second != expected:
-        raise AssertionError("the windows did not serve the fixture's bytes")
-    if hashlib.sha256(first).hexdigest() != hashlib.sha256(expected).hexdigest():
-        raise AssertionError("the served bytes do not digest to the slice's digest")
-    short = reader.read_bytes(tensor.file, tensor.data_begin, tensor.data_begin + 8)
-    if short != expected[:8]:
-        raise AssertionError("a short read leaked stale tail bytes")
-    reader.close()
+    try:
+        manifest = context["manifest"]
+        tensor = max(manifest.tensors, key=lambda t: t.byte_size)
+        if tensor.byte_size <= context["config"]["limits"]["window_bytes"]:
+            raise AssertionError("the fixture exercises no multi-window tensor")
+        first = reader.read_bytes(tensor.file, tensor.data_begin, tensor.data_end)
+        second = reader.read_bytes(tensor.file, tensor.data_begin, tensor.data_end)
+        expected = _file_bytes(context, tensor.file)[
+            tensor.data_begin : tensor.data_end
+        ]
+        if first != expected or second != expected:
+            raise AssertionError("the windows did not serve the fixture's bytes")
+        if hashlib.sha256(first).hexdigest() != hashlib.sha256(expected).hexdigest():
+            raise AssertionError("the served bytes do not digest to the slice's digest")
+        short = reader.read_bytes(tensor.file, tensor.data_begin, tensor.data_begin + 8)
+        if short != expected[:8]:
+            raise AssertionError("a short read leaked stale tail bytes")
+    finally:
+        reader.close()
     return (
         f"a {tensor.byte_size}-byte tensor served byte-exact through "
         f"{context['config']['limits']['window_bytes']}-byte windows, twice, "
@@ -306,41 +312,51 @@ def _check_per_operation_terminal_states(context, api):
     api.submit_mode = SUBMIT_TIMEOUT_PRE
     reader = _open_reader(context, api)
     try:
-        reader.read_bytes(tensor.file, span[0], span[1])
-    except TransferRefusedError as exc:
-        flight = list(reader.in_flight.values())[-1]
-        if flight.operation.state.value != "failed":
-            raise AssertionError("a pre-submission timeout left no FAILED op") from exc
-        if flight.operation.error_code != "pre-submission":
-            raise AssertionError("the error code names the wrong boundary") from exc
-        if reader.ledger.active_bytes != 0:
-            raise AssertionError("the refused operation kept active bytes") from exc
-    else:
-        raise AssertionError("the pre-submission timeout was not raised")
-
-    reader.close()
+        try:
+            reader.read_bytes(tensor.file, span[0], span[1])
+        except TransferRefusedError as exc:
+            flight = list(reader.in_flight.values())[-1]
+            if flight.operation.state.value != "failed":
+                raise AssertionError(
+                    "a pre-submission timeout left no FAILED op"
+                ) from exc
+            if flight.operation.error_code != "pre-submission":
+                raise AssertionError("the error code names the wrong boundary") from exc
+            if reader.ledger.active_bytes != 0:
+                raise AssertionError("the refused operation kept active bytes") from exc
+        else:
+            raise AssertionError("the pre-submission timeout was not raised")
+    finally:
+        reader.close()
     api.submit_mode = SUBMIT_NONTERMINAL
     reader = _open_reader(context, api)
     try:
-        reader.read_bytes(tensor.file, span[0], span[1])
-    except AmbiguousReadError as exc:
-        retained = [
-            f for f in reader.in_flight.values() if f.operation.state.value == "unknown"
-        ]
-        if not retained or not retained[-1].operation.retained:
-            raise AssertionError(
-                "a nonterminal op was not retained as UNKNOWN"
-            ) from exc
         try:
+            reader.read_bytes(tensor.file, span[0], span[1])
+        except AmbiguousReadError as exc:
+            retained = [
+                f
+                for f in reader.in_flight.values()
+                if f.operation.state.value == "unknown"
+            ]
+            if not retained or not retained[-1].operation.retained:
+                raise AssertionError(
+                    "a nonterminal op was not retained as UNKNOWN"
+                ) from exc
+            try:
+                reader.close()
+            except OperationStateError:
+                pass
+            else:
+                raise AssertionError(
+                    "the reader closed over a retained UNKNOWN"
+                ) from None
+            reader.resolve(retained[-1].operation.op_id, "failed", error_code="fence")
             reader.close()
-        except OperationStateError:
-            pass
         else:
-            raise AssertionError("the reader closed over a retained UNKNOWN") from None
-        reader.resolve(retained[-1].operation.op_id, "failed", error_code="fence")
+            raise AssertionError("a nonterminal submission completed")
+    finally:
         reader.close()
-    else:
-        raise AssertionError("a nonterminal submission completed")
     return (
         "every operation owns its state: a pre-submission timeout FAILED "
         "and released cleanly; a nonterminal submission stayed UNKNOWN and "
@@ -363,11 +379,13 @@ def _check_memory_accounting(context, api):
     ledger = MemoryLedger()
     limits = context["config"]["limits"]
     reader = _open_reader(context, api, ledger=ledger)
-    manifest = context["manifest"]
-    tensor = manifest.tensors[0]
-    reader.read_bytes(tensor.file, tensor.data_begin, tensor.data_end)
-    ledger.observe_device_runtime(api.device_memory_bytes(reader._session_agent))
-    reader.close()
+    try:
+        manifest = context["manifest"]
+        tensor = manifest.tensors[0]
+        reader.read_bytes(tensor.file, tensor.data_begin, tensor.data_end)
+        ledger.observe_device_runtime(api.device_memory_bytes(reader._session_agent))
+    finally:
+        reader.close()
     if ledger.reserved_bytes != 0:
         raise AssertionError("a closed reader kept its reservation")
     if ledger.peak_bytes <= 0:
@@ -382,19 +400,23 @@ def _check_memory_accounting(context, api):
 
 def _check_registration_in_consuming_process(context, api):
     reader = _open_reader(context, api)
-    manifest = context["manifest"]
-    tensor = manifest.tensors[0]
-    payload = reader.read_bytes(tensor.file, tensor.data_begin, tensor.data_end)
-    expected = _file_bytes(context, tensor.file)[tensor.data_begin : tensor.data_end]
-    if payload != expected:
-        raise AssertionError("the consuming-process registration served no bytes")
-    # The construction order already proved register-before-connect and
-    # close proves disconnect-before-deregister; recorded here as one
-    # capability with its evidence.
-    registration = reader._registration
-    if registration not in reader.session.registrations:
-        raise AssertionError("the window registration left the session")
-    reader.close()
+    try:
+        manifest = context["manifest"]
+        tensor = manifest.tensors[0]
+        payload = reader.read_bytes(tensor.file, tensor.data_begin, tensor.data_end)
+        expected = _file_bytes(context, tensor.file)[
+            tensor.data_begin : tensor.data_end
+        ]
+        if payload != expected:
+            raise AssertionError("the consuming-process registration served no bytes")
+        # The construction order already proved register-before-connect and
+        # close proves disconnect-before-deregister; recorded here as one
+        # capability with its evidence.
+        registration = reader._registration
+        if registration not in reader.session.registrations:
+            raise AssertionError("the window registration left the session")
+    finally:
+        reader.close()
     if reader.session.phase != "deregistered":
         raise AssertionError("close did not complete the documented teardown")
     return (
@@ -413,19 +435,23 @@ def _check_read_direction_available(context, api):
             "direction is not observable here; only the served bytes are",
         )
     reader = _open_reader(context, api)
-    reader._direction = DIRECTION_READ
-    manifest = context["manifest"]
-    tensor = manifest.tensors[0]
-    payload = reader.read_bytes(tensor.file, tensor.data_begin, tensor.data_end)
-    expected = _file_bytes(context, tensor.file)[tensor.data_begin : tensor.data_end]
-    if payload != expected:
-        raise AssertionError("the read direction served no bytes")
-    submission = reader._session_agent.submissions[-1]
-    if submission["direction"] != "read":
-        raise AssertionError("the read direction submitted a write")
-    if "addr" not in submission["source"]:
-        raise AssertionError("the submission was not address-based")
-    reader.close()
+    try:
+        reader._direction = DIRECTION_READ
+        manifest = context["manifest"]
+        tensor = manifest.tensors[0]
+        payload = reader.read_bytes(tensor.file, tensor.data_begin, tensor.data_end)
+        expected = _file_bytes(context, tensor.file)[
+            tensor.data_begin : tensor.data_end
+        ]
+        if payload != expected:
+            raise AssertionError("the read direction served no bytes")
+        submission = reader._session_agent.submissions[-1]
+        if submission["direction"] != "read":
+            raise AssertionError("the read direction submitted a write")
+        if "addr" not in submission["source"]:
+            raise AssertionError("the submission was not address-based")
+    finally:
+        reader.close()
     return (
         "the target-initiated READ direction is present, submits the "
         "peer's published address, and serves the fixture bytes; its "

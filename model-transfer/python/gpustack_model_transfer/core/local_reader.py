@@ -68,8 +68,7 @@ class LocalFileReader:
         try:
             if os.fstat(handle.fileno()).st_size != descriptor.size:
                 raise SourceUnavailableError("file extent differs from manifest")
-            handle.seek(begin)
-            payload = handle.read(end - begin)
+            payload = os.pread(handle.fileno(), end - begin, begin)
         except OSError as exc:
             raise SourceUnavailableError(
                 f"read failed for {file_path!r}: {exc}"

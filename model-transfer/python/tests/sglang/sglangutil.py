@@ -66,20 +66,6 @@ def element_size(dtype: str) -> int:
     return {"F32": 4, "F16": 2, "BF16": 2, "I64": 8, "I32": 4, "I8": 1}[dtype]
 
 
-def tensor_values(name: str) -> list:
-    import struct
-
-    entry = tensor_entry(name)
-    payload = tensor_payload(name)
-    if entry["dtype"] == "F32":
-        return list(struct.unpack(f"<{len(payload) // 4}f", payload))
-    if entry["dtype"] == "F16":
-        return list(struct.unpack(f"<{len(payload) // 2}e", payload))
-    if entry["dtype"] == "I64":
-        return list(struct.unpack(f"<{len(payload) // 8}q", payload))
-    raise AssertionError(f"unexpected dtype {entry['dtype']}")
-
-
 def tied_manifest_dir(tmp_dir, *, drop_lm_head: bool = False):
     """A fixture copy whose manifest may omit lm_head.weight (tied models)."""
     import shutil

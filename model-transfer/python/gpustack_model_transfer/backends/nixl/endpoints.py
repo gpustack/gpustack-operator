@@ -186,7 +186,7 @@ def _require_rail(rail: str) -> None:
             f"payload rail {rail!r} is not an explicit qualified endpoint; "
             "a wildcard or unnamed device is not a selection"
         )
-    if rail.lower() in ("all", "any"):
+    if rail.split(":", 1)[0].lower() in ("all", "any"):
         raise UnqualifiedEndpointError(
             f"payload rail {rail!r} is a wildcard, not a granted rail"
         )

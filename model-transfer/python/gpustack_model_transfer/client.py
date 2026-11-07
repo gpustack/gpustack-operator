@@ -333,6 +333,8 @@ class EngineReader:
                 self.poisoned = True
                 _retain(self)
                 raise
+
+        # Defensive termination for static checking; the last retry always raises.
         raise SourceUnavailableError("session opening failed")
 
     def _validate(self, response, layouts, hashes, listing_verified, *, deadline=None):

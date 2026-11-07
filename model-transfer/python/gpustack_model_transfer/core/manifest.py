@@ -146,7 +146,7 @@ def parse_manifest(
         )
     try:
         data = json.loads(raw, object_pairs_hook=_reject_duplicate_keys)
-    except json.JSONDecodeError as exc:
+    except (json.JSONDecodeError, UnicodeDecodeError) as exc:
         raise InvalidDescriptorError(f"manifest is not valid JSON: {exc}") from None
     paged = isinstance(data, dict) and "tensor_pages" in data
     _require_exact_keys(

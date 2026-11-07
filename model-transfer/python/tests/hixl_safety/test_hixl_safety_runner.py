@@ -361,3 +361,63 @@ def test_backend_suite_isolated_faults_with_shared_runtime():
     for result in results:
         assert result.status == "PASS", (result.capability, result.detail)
     assert api.submit_mode == original_mode
+
+
+class TestSuiteReaderCleanup(unittest.TestCase):
+    def test_safety_checks_close_terminal_readers(self):
+        from unittest.mock import patch
+
+        from gpustack_model_transfer.acceptance import hixl_safety_suite
+
+        for name in ("_check_pre_submission_timeout", "_check_submitted_nonterminal"):
+            with self.subTest(check=name):
+                api = FakeHixlAPI()
+                readers = []
+                original = hixl_safety_suite._open_reader
+
+                def tracked(*args, original=original, readers=readers, **kwargs):
+                    reader = original(*args, **kwargs)
+                    readers.append(reader)
+                    return reader
+
+                with patch.object(hixl_safety_suite, "_open_reader", tracked):
+                    verdict = getattr(hixl_safety_suite, name)(
+                        hixlutil.default_context(), api
+                    )
+                self.assertEqual(verdict.status, PASS)
+                self.assertTrue(readers[0]._closed)
+                self.assertEqual(readers[0].ledger.reserved_bytes, 0)
+
+    def test_backend_assertion_failure_closes_terminal_readers(self):
+        from unittest.mock import patch
+
+        from gpustack_model_transfer.acceptance import hixl_backend_suite
+        from gpustack_model_transfer.core.errors import SourceUnavailableError
+
+        for name in (
+            "_check_fixed_window_reuse",
+            "_check_memory_accounting",
+            "_check_registration_in_consuming_process",
+            "_check_read_direction_available",
+        ):
+            with self.subTest(check=name):
+                api = FakeHixlAPI()
+                readers = []
+                original = hixl_backend_suite._open_reader
+
+                def refuse_read(*args):
+                    raise SourceUnavailableError("injected terminal failure")
+
+                def tracked(*args, original=original, readers=readers, **kwargs):
+                    reader = original(*args, **kwargs)
+                    reader.read_bytes = refuse_read
+                    readers.append(reader)
+                    return reader
+
+                with patch.object(hixl_backend_suite, "_open_reader", tracked):
+                    with self.assertRaises(SourceUnavailableError):
+                        getattr(hixl_backend_suite, name)(
+                            hixlutil.default_context(), api
+                        )
+                self.assertTrue(readers[0]._closed)
+                self.assertEqual(readers[0].ledger.reserved_bytes, 0)

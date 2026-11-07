@@ -122,9 +122,10 @@ class TorchRuntimeDriver:
     def store(self, model, entry, payload, ownership="owned") -> str:
         torch = self._require_torch()
         buffer = model.parameters[entry.tensor.name]
-        dtype = str(buffer.dtype).replace("torch.", "")
-        raw = torch.frombuffer(bytearray(payload), dtype=_torch_dtype(torch, dtype))
-        buffer.copy_(raw.reshape(buffer.shape))
+        if payload:
+            dtype = str(buffer.dtype).replace("torch.", "")
+            raw = torch.frombuffer(bytearray(payload), dtype=_torch_dtype(torch, dtype))
+            buffer.copy_(raw.reshape(buffer.shape))
         model.mutated = True
         self.stores_done += 1
         self.last_model = model

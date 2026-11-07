@@ -495,3 +495,32 @@ class TestGroupFinalizationAndTaint(unittest.TestCase):
         self.assertNotEqual(group.bytes_read_across_ranks, 0)
         self.assertNotEqual(head, 0, "the fixture's head carries bytes")
         self.assertEqual(group.traffic_amplification, 1.0)
+
+
+def test_failed_rank_taint_does_not_require_driver_last_model():
+    from gpustack_model_transfer.adapters.sglang.runtime import ReferenceRuntime
+    from gpustack_model_transfer.adapters.sglang.sharding import load_group
+    from gpustack_model_transfer.core.local_reader import LocalFileReader
+
+    class Driver:
+        def __init__(self):
+            self.inner = ReferenceRuntime(fixtureutil.manifest_dir())
+
+        def build_model(self, plan, options):
+            return self.inner.build_model(plan, options)
+
+        def store(self, *args, **kwargs):
+            raise RuntimeError("store failed")
+
+        def store_engine_metadata(self, *args, **kwargs):
+            return self.inner.store_engine_metadata(*args, **kwargs)
+
+    group = load_group(
+        reader_factory=lambda: LocalFileReader(fixtureutil.manifest_path()),
+        driver_factory=lambda rank: Driver(),
+        world_size=2,
+        budgets=ReadBudgets(window_bytes=32, max_inflight=2, owned_output_bytes=4096),
+        raise_on_failure=False,
+    )
+    assert group.group_state == "failed"
+    assert group.tainted_ranks == (0,)

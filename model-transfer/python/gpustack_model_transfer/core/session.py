@@ -152,6 +152,7 @@ class ReaderSession:
                 f"tensor {tensor.name!r} needs {length} bytes above backend "
                 f"max_request_bytes {self.capabilities.max_request_bytes}"
             )
+        slot = self._slots.acquire()
         operation = Operation(
             op_id=uuid.uuid4().hex,
             kind=kind,
@@ -160,7 +161,6 @@ class ReaderSession:
             length=length,
         )
         self._operations[operation.op_id] = operation
-        slot = self._slots.acquire()
         self._slots.bind(slot, operation.op_id)
         chunks = []
         try:
@@ -231,6 +231,11 @@ class ReaderSession:
         self._finish_slot(operation)
 
     def release(self, op_id: str) -> None:
+        """Validate release, retaining terminal records for this load attempt.
+
+        Payload slots are freed at completion. Records remain inspectable and
+        keep repeated release/cancel calls idempotent for the session lifetime.
+        """
         operation = self._require_operation(op_id)
         if operation.state == OpState.UNKNOWN or operation.retained:
             raise OperationStateError(

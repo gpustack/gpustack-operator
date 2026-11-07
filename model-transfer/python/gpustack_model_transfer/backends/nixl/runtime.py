@@ -1212,7 +1212,6 @@ class RealNixlAPI:
         try:
             agent.release_xfer_handle(operation.handle)
         except Exception as exc:
-            operation.released = False
             retain_operation(
                 operation,
                 f"nixl release_xfer_handle refused: {exc}",

@@ -8,8 +8,7 @@ SRCDIR := $(patsubst %/,%,$(dir $(abspath $(lastword $(MAKEFILE_LIST)))))
 
 deps:
 	@echo "+++ $@ +++"
-	uv sync --all-packages
-	uv lock
+	uv sync --all-packages --locked
 	@echo "--- $@ ---"
 
 clean:

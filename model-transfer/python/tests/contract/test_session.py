@@ -189,6 +189,20 @@ class TestSessionReads(TrackedReadersTestCase):
 
 
 class TestSessionOperations(TrackedReadersTestCase):
+    def test_full_window_refuses_without_a_phantom_operation(self):
+        s, fake = fake_session(max_inflight=1)
+        fake.ambiguous = True
+        with self.assertRaises(errors.AmbiguousReadError):
+            s.read_tensor("model.norm.weight")
+        original = s.operations
+        with self.assertRaises(errors.CapacityExhaustedError):
+            s.read_tensor("model.norm.weight")
+        self.assertEqual(s.operations, original)
+        self.assertEqual(len(s.operations), 1)
+        for op_id in s.operations:
+            s.resolve(op_id, "failed", error_code="fixture-fence")
+        s.close()
+
     def test_every_submitted_operation_gets_terminal_state(self):
         s = session()
         s.read_tensor("model.norm.weight")

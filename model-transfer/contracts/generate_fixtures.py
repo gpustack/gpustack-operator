@@ -73,7 +73,7 @@ def main() -> int:
 
     tensors = []
     base = 8 + int.from_bytes(blob[:8], "little")
-    for index, (name, dtype, shape) in enumerate(TENSORS):
+    for name, dtype, shape in TENSORS:
         entry = header[name]
         begin, end = entry["data_offsets"]
         absolute_begin = base + begin
@@ -84,7 +84,6 @@ def main() -> int:
             "shape": shape,
             "data_begin": absolute_begin,
             "data_end": base + end,
-
         })
 
     manifest = {
@@ -94,7 +93,6 @@ def main() -> int:
         "files": [{
             "path": "checkpoint.safetensors",
             "size": len(blob),
-
         }],
         "tensors": tensors,
     }

@@ -65,7 +65,9 @@ def register() -> None:
         )
 
         orig_get_model_loader = getattr(loader_mod, "get_model_loader", None)
-        if callable(orig_get_model_loader) and not getattr(
+        if not callable(orig_get_model_loader):
+            raise TypeError("SGLang get_model_loader is not callable")
+        if not getattr(
             orig_get_model_loader, "_gpustack_model_transfer_wrapped", False
         ):
 
@@ -76,10 +78,7 @@ def register() -> None:
                     return NativeSGLangModelTransferLoader(load_config)
                 return orig_get_model_loader(load_config, *args, **kwargs)
 
-            _wrapped_get_model_transfer_flag = True
-            _wrapped_get_model_loader._gpustack_model_transfer_wrapped = (
-                _wrapped_get_model_transfer_flag
-            )
+            _wrapped_get_model_loader._gpustack_model_transfer_wrapped = True
             loader_mod.get_model_loader = _wrapped_get_model_loader
             if hasattr(ml_pkg, "get_model_loader"):
                 ml_pkg.get_model_loader = _wrapped_get_model_loader
@@ -91,4 +90,4 @@ def register() -> None:
             if lmu_mod is not None and hasattr(lmu_mod, "get_model_loader"):
                 lmu_mod.get_model_loader = _wrapped_get_model_loader
     except Exception as exc:
-        _LOG.debug("SGLang loader registration unavailable (%s)", type(exc).__name__)
+        _LOG.warning("SGLang loader registration unavailable (%s)", type(exc).__name__)

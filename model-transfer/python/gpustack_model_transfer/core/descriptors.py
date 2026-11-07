@@ -1,10 +1,10 @@
 """Immutable file and tensor descriptors with bounds and overflow checks.
 
-A descriptor is validated before any tensor is exposed: known dtype,
-non-negative shape, offsets inside the file, byte span equal to the shape
-times the dtype size, and no element count or byte size above the int64
-range. Values past that range are range-overflow errors, never wrapped or
-silently truncated.
+A descriptor is validated before any tensor is exposed: non-empty dtype,
+non-negative shape, offsets inside the file, and int64 range bounds. Known
+dtypes also require a byte span equal to shape times dtype size. Other dtypes
+use the declared byte span for opaque transport; engine adapters own dtype
+support checks. Values past int64 are range-overflow errors, never truncated.
 """
 
 import itertools

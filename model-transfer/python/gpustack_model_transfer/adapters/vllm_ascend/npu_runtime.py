@@ -248,11 +248,14 @@ class NPURuntimeDriver:
 
     def _run_finalization_hook(self, model, hook: str) -> None:
         torch_npu = self._require_torch_npu()
+        replacements = {}
         for name, buffer in model.parameters.items():
             if hook == "contiguous" and not buffer.is_contiguous():
                 # contiguous() returns a new tensor; the replacement must
                 # be written back or the parameter stays non-contiguous.
-                model.parameters[name] = buffer.contiguous()
+                if id(buffer) not in replacements:
+                    replacements[id(buffer)] = buffer.contiguous()
+                model.parameters[name] = replacements[id(buffer)]
             elif hook == "cast":
                 # Storage dtypes were already the engine's compute dtypes;
                 # the cast pass is a no-op unless the plan says otherwise.

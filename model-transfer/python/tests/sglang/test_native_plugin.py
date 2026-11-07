@@ -76,6 +76,7 @@ def engine(monkeypatch):
     modules["torch"].empty = lambda shape, dtype, device: Tensor(
         shape, dtype, device.type, getattr(device, "index", None)
     )
+    modules["torch"].dtype = type("dtype", (), {})
     modules["torch"].float32 = "torch.float32"
     modules["torch"].float16 = "torch.float16"
     modules["torch"].bfloat16 = "torch.bfloat16"
@@ -372,3 +373,25 @@ def test_cached_provider_refuses_changed_tp_size(engine, monkeypatch):
     with pytest.raises(engine.native.UnsupportedEngineLayout, match="size changed"):
         loader._reader(tp_size=2)
     assert loader._reader(tp_size=1) is provider
+
+
+@pytest.mark.parametrize("name", ["tensor", "device"])
+def test_non_dtype_torch_attributes_are_refused(engine, monkeypatch, name):
+    class Dtype:
+        pass
+
+    monkeypatch.setattr(engine.native.torch, "dtype", Dtype, raising=False)
+    monkeypatch.setattr(engine.native.torch, name, object(), raising=False)
+    with pytest.raises(
+        engine.native.UnsupportedEngineLayout, match="unsupported dtype"
+    ):
+        engine.native._torch_dtype(name)
+
+
+def test_loader_registration_failure_is_observable(engine, monkeypatch, caplog):
+    from gpustack_model_transfer.adapters.sglang.plugin import register
+
+    monkeypatch.setattr(engine.loader_mod, "get_model_loader", None)
+    with caplog.at_level("WARNING"):
+        register()
+    assert "SGLang loader registration unavailable (TypeError)" in caplog.text

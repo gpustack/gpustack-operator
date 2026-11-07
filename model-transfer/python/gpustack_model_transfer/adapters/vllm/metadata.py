@@ -208,6 +208,18 @@ def probe_checkpoint_metadata(
             reader, descriptor.path, max_chunk_bytes=max_chunk_bytes
         )
 
+    declared = {descriptor.path: set() for descriptor in manifest.files}
+    for tensor in manifest.tensors:
+        declared[tensor.file].add(tensor.name)
+    ignored = {"__metadata__"}
+    if tie_word_embeddings and "model.embed_tokens.weight" in names:
+        ignored.add("lm_head.weight")
+    for file_path, (header, _data_base) in headers_by_file.items():
+        if set(header) - ignored - declared[file_path]:
+            raise InvalidDescriptorError(
+                f"safetensors header for {file_path!r} contains undeclared tensors"
+            )
+
     for tensor in manifest.tensors:
         parsed = headers_by_file.get(tensor.file)
         if parsed is None:

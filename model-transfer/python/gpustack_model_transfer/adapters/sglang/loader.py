@@ -184,7 +184,7 @@ def profile_kv_capacity(driver, model, ledger: ResourceLedger) -> int:
         )
     if not ledger.session_closed:
         raise OperationStateError("release reader session before KV profiling")
-    if getattr(model, "finalization_count", 1) != 1:
+    if getattr(model, "finalization_count", None) != 1:
         raise OperationStateError(
             "model must be finalized exactly once before KV profiling"
         )
@@ -203,6 +203,7 @@ class ModelTransferSGLangLoader:
         self._budgets = budgets
         # A failed close remains accessible for an explicit fence and retry.
         self.retained_session = None
+        self.last_model = None
 
     def close(self) -> None:
         """Retry cleanup after the caller resolves any retained operations.
@@ -248,6 +249,7 @@ class ModelTransferSGLangLoader:
             raise OperationStateError("a previous load session still needs cleanup")
         session = None
         model = None
+        self.last_model = None
         ledger = ResourceLedger(session_closed=False)
         try:
             options = options or LoadOptions()
@@ -292,6 +294,7 @@ class ModelTransferSGLangLoader:
             payload_bytes_read = 0
             engine_metadata = {}
             model = driver.build_model(plan, options)
+            self.last_model = model
             for entry in plan.entries:
                 if entry.role == _ROLE_TIED_ALIAS:
                     # The alias IS the embedding's storage: the head's own

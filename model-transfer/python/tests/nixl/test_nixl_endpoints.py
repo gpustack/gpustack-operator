@@ -36,7 +36,15 @@ class TestQualifyEndpoints(unittest.TestCase):
             )
 
     def test_wildcard_and_unnamed_rails_are_refused(self):
-        for rails in (("all",), ("any",), ("mlx5_*",), ("",), ()):
+        for rails in (
+            ("all",),
+            ("any",),
+            ("all:1",),
+            ("ANY:2",),
+            ("mlx5_*",),
+            ("",),
+            (),
+        ):
             with self.subTest(rails=rails):
                 with self.assertRaises(UnqualifiedEndpointError):
                     qualify_endpoints("tcp://10.0.0.1:9100", rails, {})

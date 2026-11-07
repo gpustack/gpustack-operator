@@ -337,7 +337,10 @@ def _check_pre_submission_timeout(context, api):
     api.submit_mode = SUBMIT_TIMEOUT_PRE
     reader = _open_reader(context, api)
     file_path, span = _first_span(context)
-    return check_pre_submission_timeout(reader, file_path, span)
+    try:
+        return check_pre_submission_timeout(reader, file_path, span)
+    finally:
+        reader.close()
 
 
 def _check_submitted_nonterminal(context, api):
@@ -356,7 +359,10 @@ def _check_submitted_nonterminal(context, api):
     api.submit_mode = SUBMIT_NONTERMINAL
     reader = _open_reader(context, api)
     file_path, span = _first_span(context)
-    return check_submitted_nonterminal_quarantine(reader, file_path, span)
+    try:
+        return check_submitted_nonterminal_quarantine(reader, file_path, span)
+    finally:
+        reader.close()
 
 
 _CHECKS = (
