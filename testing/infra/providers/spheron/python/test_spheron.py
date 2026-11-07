@@ -515,6 +515,71 @@ class ClientTests(unittest.TestCase):
                     with self.assertRaises(APIError):
                         client.validate_offer(request_body() | body)
 
+    def test_offer_capability_handles_non_object_extras(self):
+        for extras in [None, [], "invalid", 3, {}, {"live_spot_price": True}]:
+            with self.subTest(extras=extras):
+                page = catalog_page([offer_fixture(extras=extras)], gpu="h100-sxm5")
+                client = Client("secret", opener=Opener([page]))
+                if isinstance(extras, dict) and extras.get("live_spot_price") is True:
+                    self.assertEqual(
+                        client.validate_offer(request_body(maxHourlyRate=20))[
+                            "offerId"
+                        ],
+                        "offer",
+                    )
+                else:
+                    with self.assertRaises(APIError) as caught:
+                        client.validate_offer(request_body(maxHourlyRate=20))
+                    self.assertEqual(caught.exception.code, "unsupported_option")
+
+    def test_missing_operation_fields_remain_input_errors(self):
+        for operation in [
+            "validate",
+            "create",
+            "get",
+            "can-terminate",
+            "delete",
+            "wait",
+        ]:
+            with self.subTest(operation=operation):
+                opener = Opener([])
+                with self.assertRaises(APIError) as caught:
+                    dispatch(Client("secret", opener=opener), operation, {})
+                self.assertEqual(caught.exception.code, "invalid_input")
+                self.assertEqual(opener.requests, [])
+
+    def test_cli_distinguishes_input_and_internal_errors(self):
+        for name, raw, failure, code in [
+            ("invalid JSON", "{", None, "invalid_input"),
+            ("missing request", "{}", None, "invalid_input"),
+            ("dispatch type error", "{}", TypeError("test-secret"), "internal_error"),
+            ("dispatch value error", "{}", ValueError("test-secret"), "internal_error"),
+            ("dispatch OS error", "{}", OSError("test-secret"), "internal_error"),
+            (
+                "API error",
+                "{}",
+                APIError("offer_unavailable", "Unavailable", 503),
+                "offer_unavailable",
+            ),
+        ]:
+            with self.subTest(name=name):
+                stderr = io.StringIO()
+                with (
+                    patch.dict("os.environ", {"SPHERON_API_KEY": "test-secret"}),
+                    patch("sys.argv", ["spheron", "validate"]),
+                    patch("sys.stdin", io.StringIO(raw)),
+                    patch("sys.stderr", stderr),
+                ):
+                    if failure is None:
+                        self.assertEqual(main(), 1)
+                    else:
+                        with patch("spheron.dispatch", side_effect=failure):
+                            self.assertEqual(main(), 1)
+                error = json.loads(stderr.getvalue())
+                self.assertEqual(error["code"], code)
+                self.assertNotIn("test-secret", stderr.getvalue())
+                self.assertNotIn("Traceback", stderr.getvalue())
+
     def test_delete_requires_eligibility(self):
         for allowed in [True, False]:
             with self.subTest(allowed=allowed):

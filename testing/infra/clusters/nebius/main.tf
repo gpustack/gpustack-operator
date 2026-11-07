@@ -228,12 +228,23 @@ data "external" "gpu_compat" {
         inst_json="$(nebius compute instance list --parent-id "$PROJECT" --format json 2>/dev/null || true)"
         if [ -n "$advice_json" ]; then
           active_count=0
-          if [ -n "$inst_json" ]; then
+          # Only the current root's exact node group can offset its requested capacity.
+          # Missing state or unrecognized instance names earn no existing-node credit.
+          own_group="$(terraform state pull 2>/dev/null | jq -r --arg project "$PROJECT" --arg group "$GROUP" '
+            [.resources[]? | select(.mode == "managed" and (.module // "") == "")] as $resources
+            | [$resources[] | select(.type == "nebius_mk8s_v1_cluster" and .name == "this")
+               | .instances[]? | .attributes | select(.parent_id == $project) | .id] as $clusters
+            | [$resources[] | select(.type == "nebius_mk8s_v1_node_group" and .name == "this")
+               | .instances[]? | select(.index_key == $group and .deposed == null)
+               | .attributes | select(.parent_id as $parent | $clusters | index($parent))
+               | .id | select(type == "string" and startswith("mk8snodegroup-"))]
+            | if length == 1 then .[0] else "" end' 2>/dev/null || true)"
+          if [ -n "$inst_json" ] && [ -n "$own_group" ]; then
             active_count="$(printf '%s' "$inst_json" | jq -r \
-              --arg plat "$PLAT" --arg preset "$PRESET" --arg preempt "$PREEMPT" --arg cid "$CLUSTER_ID" '
+              --arg plat "$PLAT" --arg preset "$PRESET" --arg preempt "$PREEMPT" --arg cid "$CLUSTER_ID" --arg own "$own_group" '
               [.items[]?
                | select((.status.state == "RUNNING" or .status.state == "STARTING")
-                        and (.metadata.name // "" | startswith("mk8snodegroup-"))
+                        and (.metadata.name // "" | startswith($own + "-"))
                         and (.spec.resources.platform == $plat)
                         and (.spec.resources.preset == $preset)
                         and (((.spec.preemptible != null) | tostring) == $preempt)

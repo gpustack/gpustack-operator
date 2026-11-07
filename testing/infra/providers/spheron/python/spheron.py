@@ -427,10 +427,10 @@ class Client:
             raise APIError(
                 "unsupported_option", "This offer does not support cloudInit"
             )
-        if (
-            "maxHourlyRate" in body
-            and offer.get("extras", {}).get("live_spot_price") is not True
-        ):
+        extras = offer.get("extras")
+        if not isinstance(extras, dict):
+            extras = {}
+        if "maxHourlyRate" in body and extras.get("live_spot_price") is not True:
             raise APIError(
                 "unsupported_option", "This offer does not enforce maxHourlyRate"
             )
@@ -565,16 +565,16 @@ def dispatch(client, operation, data):
     if operation == "ssh-keys":
         return client.request("GET", "/api/ssh-keys")
     if operation == "validate":
-        validate_create(data["request"])
-        return client.validate_offer(data["request"])
+        validate_create(data.get("request"))
+        return client.validate_offer(data.get("request"))
     if operation == "create":
-        return client.create(data["request"], data["request_key"])
+        return client.create(data.get("request"), data.get("request_key"))
     if operation == "get":
-        return client.deployment(data["id"])
+        return client.deployment(data.get("id"))
     if operation == "can-terminate":
-        return client.request("GET", deployment_path(data["id"]) + "/can-terminate")
+        return client.request("GET", deployment_path(data.get("id")) + "/can-terminate")
     if operation == "delete":
-        return client.delete(data["id"])
+        return client.delete(data.get("id"))
     if operation == "wait":
         target = data.get("target", "running")
         timeout = data.get("timeout", 1800)
@@ -588,7 +588,7 @@ def dispatch(client, operation, data):
                 "invalid_input",
                 "wait requires a running/terminated target and a 0-86400 second timeout",
             )
-        return client.wait(data["id"], target, timeout)
+        return client.wait(data.get("id"), target, timeout)
     raise APIError("invalid_input", "Unknown operation")
 
 
@@ -630,14 +630,19 @@ def main():
     )
     args = parser.parse_args()
     try:
-        if args.input == "-":
-            raw = sys.stdin.read(1024 * 1024 + 1)
-        else:
-            with open(args.input, encoding="utf-8") as stream:
-                raw = stream.read(1024 * 1024 + 1)
-        if len(raw) > 1024 * 1024:
-            raise APIError("invalid_input", "Input exceeded 1 MiB")
-        data = json.loads(raw) if raw.strip() else {}
+        try:
+            if args.input == "-":
+                raw = sys.stdin.read(1024 * 1024 + 1)
+            else:
+                with open(args.input, encoding="utf-8") as stream:
+                    raw = stream.read(1024 * 1024 + 1)
+            if len(raw) > 1024 * 1024:
+                raise APIError("invalid_input", "Input exceeded 1 MiB")
+            data = json.loads(raw) if raw.strip() else {}
+        except (ValueError, OSError):
+            raise APIError(
+                "invalid_input", "Invalid JSON input or inaccessible input file"
+            ) from None
         if not isinstance(data, dict):
             raise APIError("invalid_input", "Input must be a JSON object")
         result = dispatch(Client(), args.operation, data)
@@ -650,13 +655,13 @@ def main():
             file=sys.stderr,
         )
         return 1
-    except (ValueError, KeyError, TypeError, OSError):
+    except Exception as exc:
         print(
             json.dumps(
                 {
-                    "code": "invalid_input",
+                    "code": "internal_error",
                     "status": 0,
-                    "message": "Invalid JSON input or inaccessible input file",
+                    "message": f"Unexpected {type(exc).__name__} while processing the operation",
                 }
             ),
             file=sys.stderr,
