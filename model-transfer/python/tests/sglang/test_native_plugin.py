@@ -424,8 +424,15 @@ def test_aenum_free_registration_preserves_enum_operations(
     monkeypatch.setitem(sys.modules, "aenum", None)
     register()
     member = load_format.MODEL_TRANSFER
-    assert list(load_format) == [load_format.AUTO, member]
+    assert list(load_format) == [
+        load_format.AUTO,
+        member,
+        load_format.MODELEXPRESS,
+        load_format.MX,
+    ]
     assert load_format("model-transfer") is member
+    assert load_format("modelexpress") is load_format.MODELEXPRESS
+    assert load_format("mx") is load_format.MX
     assert pickle.loads(pickle.dumps(member)) is member
 
 
