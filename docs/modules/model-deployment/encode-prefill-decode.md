@@ -4,6 +4,16 @@ A deployment with *Encode*, *Prefill* and *Decode* roles runs visual encoding an
 in separate `Pod`s. [Model Deployment Configuration](deployment.md) describes the base role fields and
 admission rules.
 
+![Multimodal and text-only request flows](../../assets/diagrams/model-deployment-epd.svg)
+
+<!--
+flowchart LR
+    CLIENT["Client requests"] -> ROUTER["llm-d-router and decode sidecar"]
+    ROUTER -> ENCODE["Encode: multimodal only"] -> CACHE["Encoder cache connector"] -> PREFILL["Prefill"]
+    ROUTER -> PREFILL
+    PREFILL -> DECODE["Decode: KV state"] -> CLIENT
+-->
+
 ## Contents
 
 - [Roles and request flow](#roles-and-request-flow)
@@ -245,7 +255,7 @@ A deployment with an *Encode* role renders a soft co-location preference on ever
 term scores placement by node hostname and none is a requirement, so a cluster too tight to
 co-locate a pair still schedules it across hosts.
 
-| Replica | Prefers on the same node | Weight |
+| Replica | Co-location preference | Weight |
 |---|---|---|
 | *Prefill* | *Decode* | 100 |
 | *Decode* | *Prefill* | 100 |

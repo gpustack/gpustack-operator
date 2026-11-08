@@ -111,7 +111,7 @@ server only.
 The table matches each GPUStack server capability to the API surface that covers it; the gap
 column names what is missing and who owns it.
 
-| GPUStack server | This API | Gap and owner |
+| GPUStack server | Operator API | Gap and owner |
 | --- | --- | --- |
 | A source: Hugging Face repository, ModelScope model, local path | `ModelArtifact.spec.source`: *`huggingFace`* or *`modelScope`*; a local path is a *`persistentVolumeClaim`* source | none |
 | One file of a repository (`huggingface_filename`, a GGUF) | *`allowPatterns`* with a single `<file>` entry | none |

@@ -12,6 +12,21 @@ admits: vLLM `v0.30.0` on NVIDIA *H100* behind the `vllm-router` binary of
 `sglang-gateway` binary of `gpustack/llm-router:v0.3.1`. Other versions must be re-verified
 before they inherit a claim on this page.
 
+![External DP router and rank endpoints](../../assets/diagrams/model-deployment-external-dp.svg)
+
+<!--
+flowchart TD
+    CLIENT["Client"] -> ROUTER["Managed router: round robin"]
+    ROUTER -> R0["Rank 0 HTTP"]
+    ROUTER -> R1["Rank 1 HTTP"]
+    ROUTER -> R2["Rank 2 HTTP"]
+    ROUTER -> R3["Rank 3 HTTP"]
+    R0 -> EP["Cross-Pod expert collective"]
+    R1 -> EP
+    R2 -> EP
+    R3 -> EP
+-->
+
 ## Contents
 
 - [Overview and selection](#overview-and-selection)
@@ -107,8 +122,14 @@ spec:
           value: "19500"  # keeps candidate ports below the ephemeral source-port range
 ```
 
-When the cluster provides an *RDMA* fabric, add `interface: "2"` under *`resources`* so cross-`Pod`
-expert collectives run over InfiniBand or RoCE instead of TCP.
+- **Group**: One *Server* replica contains four members.
+- **Resources**: Each member requests two accelerators.
+- **Rank**: The operator supplies *`GPUSTACK_MEMBER_INDEX`* to each member.
+- **Router**: `vllm-router` directs requests to rank endpoints.
+
+To request two *RDMA* endpoints per member, add `interface: "2"` under *`resources`*.
+A device grant does not establish which transport the collective uses. See
+[RDMA Operations](../rdma/operations.md) for allocation and verification.
 
 ### SGLang shape
 
@@ -161,6 +182,11 @@ spec:
           value: "1"
 ```
 
+- **Group**: One *Server* replica contains two members.
+- **Resources**: Each member requests one accelerator.
+- **Rank**: The operator supplies *`GPUSTACK_MEMBER_INDEX`* to each member.
+- **Router**: `sglang-gateway` directs requests to member endpoints.
+
 `--node-rank` is the only argument that differs between members. It carries
 `$(GPUSTACK_MEMBER_INDEX)` verbatim, and Kubernetes expands the reference in the container
 arguments against the member's own environment — the same mechanism the vLLM example above uses
@@ -194,7 +220,7 @@ Three consequences follow, and they are the honest cost of the shape:
 
 An SGLang role derives *External* only when **all** of these hold:
 
-| Condition | Why it is necessary |
+| Condition | Purpose |
 |---|---|
 | `--attn-dp-size` (or `--attention-data-parallel-size`) ≥ 2 | More than one attention group exists |
 | `--nnodes` ≥ 2 | The groups are on different members |
@@ -252,7 +278,7 @@ The *TP*, *DP*, rank and address arguments stay in *`extraArgs`*; the operator d
 *`size`* or GPU requests. On the recorded vLLM run, these arguments could be omitted because the
 engine derives them from `--data-parallel-rank`:
 
-| Omitted argument | Why it is unnecessary |
+| Omitted argument | Rationale |
 |---|---|
 | `--data-parallel-external-lb` | An explicit `--data-parallel-rank` selects *external load balancing (External LB)* |
 | `--data-parallel-size-local 1` | *External LB* runs one local *DP* rank per member |
@@ -389,7 +415,7 @@ measured requests plus 48 warm-ups and 1 calibration probe). Both configurations
 
 In the initial TCP recording at concurrency 64, *time to first token (TTFT)* p50 crossed in favor of *External DP*:
 
-| Prompt/output target | Wide *TP* = 8 (ms) | *DP* = 4, *TP* = 2 (ms) | Median reduction |
+| Prompt/output target | Wide TP (ms) | DP4 TP2 (ms) | Median reduction |
 |---|---:|---:|---:|
 | `1024/256` | 4,798.411 | **1,863.100** | **2.58×** |
 | `4096/128` | 3,814.139 | **3,094.017** | **1.23×** |
@@ -416,7 +442,7 @@ workers leaving the gateway's worker set after 482 s in one run and 310 s in the
 
 The gateway's worker set covered at most one worker per group in both runs — two healthy
 workers for two groups in one run and one in the other; the registration boundary and its image
-floor are under [Routing](routing.md#which-pods-receive-traffic).
+floor are under [Routing](routing.md#traffic-targets).
 
 After the scale-down the surviving group never republished `Eligible` within the case's 900 s
 budget while the retired group read `Withdrawn`, so a surviving group's recovery from a

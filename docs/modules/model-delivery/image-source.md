@@ -15,6 +15,8 @@ image read-only for the workload; packaging and pulling it adds disk and registr
 
 ## Source and digest contract
 
+Replace the abbreviated reference with the image's full SHA-256 manifest digest before applying it.
+
 ```yaml
 apiVersion: worker.gpustack.ai/v1
 kind: ModelArtifact
@@ -25,6 +27,10 @@ spec:
     image:
       reference: registry.example.com/team/qwen@sha256:669ed7b1...48  # digest-pinned, required
 ```
+
+- **Reference**: Pin the image manifest by digest.
+- **Patterns**: Omit allow and ignore patterns for image sources.
+- **Version**: See [Prerequisites](#prerequisites) for the required Kubernetes and runtime floors.
 
 The reference **must pin a digest**. A tag is mutable, so one artifact could deliver different
 weights on different pulls, and the identity a frozen reference pins would be nothing; admission
@@ -82,7 +88,7 @@ the diagnostic path.
 
 ## Prerequisites
 
-| Component | Floor | Why |
+| Component | Floor | Reason |
 | --- | --- | --- |
 | apiserver | 1.35 | the `ImageVolume` feature gate is beta **on by default** from 1.35, GA in 1.36; below that the gate must be opened on the apiserver, which this version does not opt into, and a 1.32 or older apiserver refuses the source at admission |
 | kubelet | 1.35 | it mounts the volume; the same gate line applies, checked per pinned node |

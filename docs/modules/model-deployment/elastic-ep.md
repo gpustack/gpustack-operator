@@ -4,20 +4,34 @@ An *elastic expert parallelism (Elastic EP)* deployment keeps one vLLM serving i
 while it runs. The operator adds GPU members inside one Ray cluster.
 The engine reconfigures while Kubernetes, Kueue, Ray and accelerator accounting converge.
 
+![Elastic EP collective expansion](../../assets/diagrams/model-deployment-elastic-ep.svg)
+
+<!--
+flowchart TD
+    HEAD["CPU Ray head and Service"] -> MASTER["Member 0: HTTP master"]
+    HEAD -> WORKER1["Member 1: worker"]
+    HEAD -> WORKER2["Member 2: joining worker"]
+    HEAD -> WORKER3["Member 3: joining worker"]
+    MASTER -> COLLECTIVE["Live DP and EP collective"]
+    WORKER1 -> COLLECTIVE
+    WORKER2 -> COLLECTIVE
+    WORKER3 -> COLLECTIVE
+-->
+
 ## Contents
 
-- [What the profile means](#what-the-profile-means)
+- [Profile contract](#profile-contract)
 - [Prerequisites](#prerequisites)
 - [Shared memory](#shared-memory)
 - [Configuration](#configuration)
 - [Changing the width](#changing-the-width)
 - [Resize observations](#resize-observations)
-- [When a resize holds](#when-a-resize-holds)
+- [Resize hold conditions](#resize-hold-conditions)
 - [Interruption scope](#interruption-scope)
 - [Troubleshooting](#troubleshooting)
 - [Limitations](#limitations)
 
-## What the profile means
+## Profile contract
 
 *`roles[].elasticEp`* selects this mode for a role. Its only field sets the target width:
 
@@ -212,7 +226,7 @@ without interrupting what is already running.
 
 The operator observes these values separately:
 
-| Observation | Question it answers |
+| Observation | Meaning |
 |---|---|
 | desired | What width the spec asks for |
 | admitted | How many members Kubernetes admitted |
@@ -234,7 +248,7 @@ Native resize makes the engine answer 503 on its endpoints for the length of the
 `Pod`'s liveness probe accepts 200 and 503 so the kubelet does not restart an engine that is
 mid-resize. Readiness still withdraws, which is how traffic is kept away from the window.
 
-## When a resize holds
+## Resize hold conditions
 
 The operator records its intent before it sends one request to the engine. After that, a `500`, a
 `408`, a timeout or a controller restart is not a reason to send another. An unanswered request and
