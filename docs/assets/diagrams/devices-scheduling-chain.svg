@@ -1,0 +1,77 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 356" role="img" aria-labelledby="title desc">
+<title id="title">Devices Scheduling Chain</title>
+<desc id="desc">Cluster &amp; Node Inventory Inputs; Worker Reconciliation Controllers.</desc>
+<style>
+:root{color-scheme:light dark;--bg:#fff;--card:#fff;--text:#0f172a;--muted:#334155;--blue:#2563eb;--purple:#7c3aed;--teal:#0f766e;--amber:#b45309;--blue-bg:#eff6ff;--purple-bg:#f5f3ff;--teal-bg:#f0fdfa;--amber-bg:#fffbeb;--border:#94a3b8}
+@media(prefers-color-scheme:dark){:root{--bg:#0f172a;--card:#1e293b;--text:#f8fafc;--muted:#e2e8f0;--blue:#60a5fa;--purple:#a78bfa;--teal:#2dd4bf;--amber:#fbbf24;--blue-bg:#172554;--purple-bg:#1e1b4b;--teal-bg:#042f2e;--amber-bg:#451a03;--border:#94a3b8}}
+.layer{fill:var(--tint);stroke:var(--accent);stroke-width:1.5;stroke-dasharray:6 4}
+.card{fill:var(--card);stroke:var(--accent);stroke-width:1.4}
+.layer-title{font:700 14px system-ui,-apple-system,sans-serif;fill:var(--accent)}
+.card-title{font:700 14px system-ui,-apple-system,sans-serif;fill:var(--text)}
+.detail{font:12px system-ui,-apple-system,sans-serif;fill:var(--muted)}
+.legend{font:600 11.5px system-ui,-apple-system,sans-serif;fill:var(--muted)}
+.link{stroke:var(--blue);stroke-width:2;fill:none}
+.sublink{stroke:var(--accent);stroke-width:1.8;fill:none}
+.pulse{fill:var(--blue)}
+.subpulse{fill:var(--accent)}
+@media(prefers-reduced-motion:reduce){.pulse,.subpulse{display:none}}
+</style>
+<defs>
+<marker id="arrow" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0 0.5 L9 5 L0 9.5z" fill="var(--blue)"/></marker>
+</defs>
+<g style="--accent:var(--blue);--tint:var(--blue-bg)">
+<rect class="layer" x="18" y="12.0" width="924" height="124" rx="12"/>
+<text class="layer-title" x="34" y="35.0">Cluster &amp; Node Inventory Inputs</text>
+<rect class="card" x="32.0" y="46.0" width="288.0" height="76" rx="8"/>
+<text class="card-title" x="50.0" y="71.0">Managed Node</text>
+<text class="detail" x="50.0" y="90.0">Capacity labels and managed status</text>
+<text class="detail" x="50.0" y="107.0">Hardware identity and topology profile</text>
+<rect class="card" x="336.0" y="46.0" width="288.0" height="76" rx="8"/>
+<text class="card-title" x="354.0" y="71.0">Devices CR · Per-Node Ledger</text>
+<text class="detail" x="354.0" y="90.0">Accelerator inventory and allocation records</text>
+<text class="detail" x="354.0" y="107.0">Reports capacity and per-card fit</text>
+<rect class="card" x="640.0" y="46.0" width="288.0" height="76" rx="8"/>
+<text class="card-title" x="658.0" y="71.0">Workload Namespace</text>
+<text class="detail" x="658.0" y="90.0">Non-system tenant namespace</text>
+<text class="detail" x="658.0" y="107.0">Receives generated LocalQueue entrances</text>
+</g>
+<path class="link" d="M 480 136.0 V 190.0" marker-end="url(#arrow)"/>
+<circle class="pulse" cx="0" cy="0" r="3.5"><animateMotion path="M 480 136.0 V 190.0" dur="1.8s" begin="-0.0s" repeatCount="indefinite"/></circle>
+<text class="legend" x="494" y="167.0">Reconciles inventory</text>
+<g style="--accent:var(--purple);--tint:var(--purple-bg)">
+<rect class="layer" x="18" y="192.0" width="924" height="124" rx="12"/>
+<text class="layer-title" x="34" y="215.0">Worker Reconciliation Controllers</text>
+<rect class="card" x="32.0" y="226.0" width="156.8" height="76" rx="8"/>
+<text class="card-title" x="50.0" y="251.0">ResourceFlavor</text>
+<text class="detail" x="50.0" y="270.0">Pins compatible nodes</text>
+<text class="detail" x="50.0" y="287.0">References topology</text>
+<path class="sublink" d="M 188.8 264.0 H 214.8" marker-end="url(#arrow)"/>
+<circle class="subpulse" cx="0" cy="0" r="3"><animateMotion path="M 188.8 264.0 H 214.8" dur="1.8s" begin="-0.0s" repeatCount="indefinite"/></circle>
+<rect class="card" x="216.8" y="226.0" width="156.8" height="76" rx="8"/>
+<text class="card-title" x="234.8" y="251.0">InstanceType</text>
+<text class="detail" x="234.8" y="270.0">Pool catalog and status</text>
+<text class="detail" x="234.8" y="287.0">EX / SH / SL / PT views</text>
+<path class="sublink" d="M 373.6 264.0 H 399.6" marker-end="url(#arrow)"/>
+<circle class="subpulse" cx="0" cy="0" r="3"><animateMotion path="M 373.6 264.0 H 399.6" dur="1.8s" begin="-0.4s" repeatCount="indefinite"/></circle>
+<rect class="card" x="401.6" y="226.0" width="156.8" height="76" rx="8"/>
+<text class="card-title" x="419.6" y="251.0">AdmissionCheck</text>
+<text class="detail" x="419.6" y="270.0">Checks per-card fit</text>
+<text class="detail" x="419.6" y="287.0">Reads Devices ledger</text>
+<path class="sublink" d="M 558.4 264.0 H 584.4" marker-end="url(#arrow)"/>
+<circle class="subpulse" cx="0" cy="0" r="3"><animateMotion path="M 558.4 264.0 H 584.4" dur="1.8s" begin="-0.8s" repeatCount="indefinite"/></circle>
+<rect class="card" x="586.4" y="226.0" width="156.8" height="76" rx="8"/>
+<text class="card-title" x="604.4" y="251.0">ClusterQueue</text>
+<text class="detail" x="604.4" y="270.0">Isolated pool quota</text>
+<text class="detail" x="604.4" y="287.0">Stop policy follows state</text>
+<path class="sublink" d="M 743.2 264.0 H 769.2" marker-end="url(#arrow)"/>
+<circle class="subpulse" cx="0" cy="0" r="3"><animateMotion path="M 743.2 264.0 H 769.2" dur="1.8s" begin="-1.2s" repeatCount="indefinite"/></circle>
+<rect class="card" x="771.2" y="226.0" width="156.8" height="76" rx="8"/>
+<text class="card-title" x="789.2" y="251.0">LocalQueue</text>
+<text class="detail" x="789.2" y="270.0">Namespace entrance</text>
+<text class="detail" x="789.2" y="287.0">Select by queue-name</text>
+</g>
+<path class="link" d="M 32 340 h 36" marker-end="url(#arrow)"/>
+<text class="legend" x="78" y="344">Layer relationship / runtime flow</text>
+<path d="M 310 340 h 36" fill="none" stroke="var(--border)" stroke-width="1.8" stroke-dasharray="6 4"/>
+<text class="legend" x="356" y="344">Layered plane boundary (optional capabilities noted in cards)</text>
+</svg>

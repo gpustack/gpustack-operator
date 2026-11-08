@@ -102,9 +102,10 @@ moved (the address is still the operator's own), and the kubelet does not verify
 certificate on a probe, so a self-signed pair is graded like any other.
 
 **Three configurations carry no gates at all**: a role that replaces the command through
-*`roles[].command`*; a role that moves where its engine listens, with `--host` or `--port`, or that
-demands a client certificate a probe has none to present, with `--ssl-cert-reqs` set to anything but
-`0` or `1` **alongside a certificate or key**; and a role declaring its port as `UDP` or `SCTP`.
+*`roles[].command`*; a role that sets `--host`, conflicts with its declared port, or demands a client
+certificate with `--ssl-cert-reqs` other than `0` or `1` **alongside a certificate or key**; and a
+role declaring its port as `UDP` or `SCTP`. A role's `--port` alone does not remove its gates.
+The probes follow the selected serving port.
 
 The `--ssl-cert-reqs` values: that flag is an integer, and only `0` (`CERT_NONE`, the default) and
 `1` (`CERT_OPTIONAL`) let a certificate-less probe through, so a role passing either keeps all three
@@ -199,7 +200,7 @@ answered its engine's health route), `GroupForward` (each member's forward path 
 carry a request), `NoPlannedRetirement` (no retirement operation holds the replica) and
 `NoPendingReplacement` (nothing is already on its way to replace it).
 
-| Criterion result | What it does |
+| Criterion result | Effect |
 |---|---|
 | verified | passes; the replica contributes to *`endpoints.eligible`* |
 | failed | revokes the replica from the list immediately, whether or not the other criteria passed |

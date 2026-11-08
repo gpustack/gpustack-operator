@@ -13,6 +13,17 @@ The node's effective configuration is still `NodeModelStore`: the store layer me
 cluster defaults under [Model Store Operations](operations.md), and the plugin side of
 every field is in the [Node Model Store](node-store.md).
 
+![Model prefetch peer sync and external download flow](../../assets/diagrams/model-delivery-prefetch.svg)
+
+<!--
+flowchart TD
+    PREFETCH["ModelPrefetch configured for selected nodes"]
+    PEER_HIT["Peer already has model -> in-cluster TCP sync to all selected nodes"]
+    PEER_MISS["No peer has model -> download from external hub + sync to selected nodes"]
+    PREFETCH -> PEER_HIT
+    PREFETCH -> PEER_MISS
+-->
+
 ## Contents
 
 - [Cache resources](#cache-resources)
@@ -47,6 +58,51 @@ Optional *`spec.sourceMemory`* caps source reservations shared by this Binding's
 across nodes and manufacturers. Omit or remove it to use node limits. While present, bytes and
 registrations can only grow; sessions can change in either direction.
 
+The following store and binding use the same shape as the
+[Model Prefetch Walkthrough](../../walkthroughs/model-delivery/prefetch.md). Create the
+`gpustack-elastic` namespace first. Replace the hostname with the target node's label.
+
+```yaml
+apiVersion: worker.gpustack.ai/v1
+kind: ModelStore
+metadata:
+  name: rtx6000-models
+spec:
+  nodeSelector:  # Required; selects the cache nodes.
+    matchLabels:
+      kubernetes.io/hostname: gpu-node
+  # Optional overrides; omitted fields use cluster settings.
+  # watermarks:
+  #   highPercent: 80
+  #   lowPercent: 70
+  # download:
+  #   concurrency: 8
+  #   bytesPerSecond: 0  # Zero means unlimited.
+---
+apiVersion: worker.gpustack.ai/v1
+kind: ModelStoreBinding
+metadata:
+  name: rtx6000-models
+  namespace: gpustack-elastic
+spec:
+  storeRefs:  # Required; immutable store grant.
+    - name: rtx6000-models
+  quota:
+    bytes: 64Gi  # Required; the budget may grow but cannot shrink.
+```
+
+- **Selector**: A store selects nodes. Avoid overlapping store selectors.
+- **Overrides**: Omitted watermarks and download limits use cluster settings.
+- **Store references**: Grant one to eight stores. The list is immutable.
+- **Quota**: Set a positive byte budget. It can grow, but cannot shrink.
+- **Pinning**: *`allowPinned`* defaults to false. It can be enabled, but not disabled later.
+
+| Condition | Reason | Resolution |
+|---|---|---|
+| Stores select the same node | Their policies overlap | Change the selectors to avoid overlap. |
+| A prefetch targets nodes outside the grant | No granted store covers those nodes | Adjust placement or create another binding. |
+| A quota update reduces the budget | Admitted prefetches may depend on the grant | Keep or increase the budget. |
+
 The [source-memory examples](remote.md#source-memory-examples) use `Qwen3-8B` and
 `Qwen3.6-35B-A3B` to distinguish node capacity, per-model windows and a shared Binding grant.
 
@@ -71,14 +127,18 @@ kind: ModelPrefetch
 metadata:
   name: qwen-prefetch
 spec:
-  artifactRef:
-    name: qwen-7b  # A ModelArtifact in this namespace; its weights are what warms.
-  bindingRef:
-    name: store-binding  # A ModelStoreBinding in this namespace; its budget pays for the bytes.
+  artifactRef:  # Required; the artifact is in this namespace.
+    name: qwen-7b
+  bindingRef:  # Required; the binding is in this namespace.
+    name: store-binding
   placement:
-    instanceTypes:  # Every node carrying a named InstanceType's flavor.
+    instanceTypes:  # Optional; every node carrying a named InstanceType's flavor.
       - gpu-pool
 ```
+
+- **Artifact**: Reference a `ModelArtifact` in the same namespace.
+- **Binding**: Reference a `ModelStoreBinding` that covers the target nodes.
+- **Placement**: Set either *`instanceTypes`* or *`nodeSelector`*, or omit both.
 
 ```yaml
 apiVersion: worker.gpustack.ai/v1
@@ -86,20 +146,24 @@ kind: ModelPrefetch
 metadata:
   name: qwen-prefetch
 spec:
-  artifactRef:
-    name: qwen-7b  # A ModelArtifact in this namespace; its weights are what warms.
-  bindingRef:
-    name: store-binding  # A ModelStoreBinding in this namespace; its budget pays for the bytes.
+  artifactRef:  # Required; the artifact is in this namespace.
+    name: qwen-7b
+  bindingRef:  # Required; the binding is in this namespace.
+    name: store-binding
   placement:
-    nodeSelector:  # Every node matching this selector.
+    nodeSelector:  # Optional; every node matching this selector.
       matchLabels:
         accelerator: "true"
 ```
 
-When both fields are absent, placement derives the `InstanceType`s from the namespace's
-deployments that reference the artifact.
+- **Node selector**: Select nodes with labels that are present in the cluster.
+- **Default placement**: Omit both fields to derive types from deployments that reference the artifact.
+- **Source preparation**: Explicit placement is required when *`source`* is set.
 
-`Setting` both kinds is refused; the schema cannot see it because neither field is required.
+| Condition | Reason | Resolution |
+|---|---|---|
+| Both placement fields are set | The choices are mutually exclusive | Keep one placement field. |
+| Source preparation has no explicit placement | Source memory needs a fixed target selection | Set one placement field. |
 
 ## Warm-up Pod
 

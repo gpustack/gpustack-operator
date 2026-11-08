@@ -113,8 +113,18 @@ Kueue *TAS* admits the replica only when a single zone contains enough unallocat
 
 ## Step 3: Publish an inventory snapshot
 
-In private data centers without cloud labels, publish rack hierarchies using a versioned snapshot
-stored in a `ConfigMap`:
+Before changing sources, plan for queue draining and possible workload interruption. See
+[Change a live hierarchy](../../modules/topology/operations.md#change-a-live-hierarchy).
+Remove `cloud-zones` before selecting the same nodes with the snapshot source:
+
+```bash
+kubectl delete topologysource cloud-zones
+```
+
+Without a single Ready source, nodes fall back to the
+[hostname-only profile](../../modules/topology/scheduling.md#hierarchy-profiles).
+In private data centers without cloud labels, publish a versioned rack snapshot in a `ConfigMap`.
+Save this manifest as `topology-inventory.yaml`. Replace the node names and labels with your inventory:
 
 ```yaml
 apiVersion: v1
@@ -156,7 +166,16 @@ spec:
 ```
 
 The operator validates the snapshot atomically, creates NFD `NodeFeature` resources, and writes the
-custom labels to each node.
+custom labels to each node. Apply the saved manifest, then inspect the source and queues:
+
+```bash
+kubectl apply -f topology-inventory.yaml
+kubectl get topologysource data-center -o yaml
+kubectl get clusterqueues.kueue.x-k8s.io -o yaml
+```
+
+Wait for the source to become Ready and the managed queues to report `TopologyReady=True`.
+See [Verification](../../modules/topology/operations.md#verification) for the node and flavor checks.
 
 ## Step 4: Request rack placement
 

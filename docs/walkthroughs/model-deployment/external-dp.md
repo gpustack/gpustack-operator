@@ -45,7 +45,7 @@ Use [External DP Benchmark](../../modules/model-deployment/external-dp-benchmark
 
 ## Environment
 
-| Item | Captured setup |
+| Item | Value |
 |---|---|
 | Cluster | One CPU node and one GPU node with eight free NVIDIA H100 80 GB HBM3 SXM5 GPUs |
 | Kubernetes | v1.35.7 |

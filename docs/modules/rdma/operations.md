@@ -8,7 +8,6 @@ placement. [Network Topology](network-topology.md) explains how endpoints become
 ## Contents
 
 - [Choosing a key](#choosing-a-key)
-- [Endpoints per accelerator](#endpoints-per-accelerator)
 - [Injected devices](#injected-devices)
 - [Selection policy](#selection-policy)
 - [Example manifest](#example-manifest)
@@ -25,7 +24,7 @@ one endpoint carries. [Network
 Topology](network-topology.md#rdma-resource-keys) describes those
 differences. Choose the key for your workload:
 
-| Key | Use when |
+| Key | Target scenario |
 |---|---|
 | `device.gpustack.ai/rdma` | each requested token must name a different endpoint within this family |
 | `device.gpustack.ai/rdma.shared` | everything else |
@@ -61,7 +60,7 @@ count selects, and the mixed-fabric refusal. The field allocates a device to eac
 carries; see [what an EFA path needs from the engine
 image](#efa-engine-images).
 
-## Endpoints per accelerator
+### Endpoints per accelerator
 
 **Ask for one *RDMA* endpoint per accelerator the container requests.** A host built for collective
 traffic carries one adapter beside each accelerator, so `N` accelerators and `N` endpoints is the
@@ -161,7 +160,8 @@ Consider an eight-GPU (`NVIDIA B300`) host that exposes 13 verbs devices under
 - `mlx5_12`: one 400 Gb/s Ethernet adapter backing host `eth0`.
 
 To restrict workloads to the eight 800 Gb/s GPU-local compute adapters (`mlx5_4..mlx5_11`), create a
-policy with `include`. A policy can set at most one of `include` and `exclude`:
+policy with `include`. Replace the example node label with a label present on each intended node.
+A policy can set at most one of `include` and `exclude`:
 
 ```yaml
 apiVersion: worker.gpustack.ai/v1
@@ -184,6 +184,17 @@ spec:
     - mlx5_10
     - mlx5_11
 ```
+
+- **`nodeSelector`**: Required and non-null; an empty selector matches every node.
+- **`include`**: Optional; list exact HCA names present on each selected node.
+- **`exclude`**: Optional; list exact HCA names present on each selected node.
+- **`port`**: Optional; select a positive physical port present on each selected HCA.
+
+| Condition | Reason | Resolution |
+|---|---|---|
+| Both `include` and `exclude` are set | The filters are mutually exclusive | Supply only one filter. |
+| More than one policy matches a node | Policies do not merge | Adjust selectors so one policy matches. |
+| A named HCA or selected port is absent | The policy cannot resolve on that node | Correct the names, port, or selector. |
 
 Alternatively, configure the same selection with `exclude` to filter out the four 100 Gb/s adapters
 and the host Ethernet adapter. Remove `include` when switching to this form; do not apply both forms
@@ -253,8 +264,15 @@ To pin every selected adapter to one physical port, add `port` to the same polic
 +  port: 1
 ```
 
-Read selection status on the node's `Devices` resource. This illustrative excerpt shows the result
-when `mlx5_4..mlx5_11` are selected:
+Read the policy and each node's `Devices` resource:
+
+```shell
+kubectl get rdmasel b300-compute-hcas -o yaml
+kubectl get devices <node-name> -o yaml
+```
+
+Confirm that `RDMASelectionResolved=True`. Compare *`policyRef`* name, UID and generation with the
+policy's metadata. This illustrative excerpt shows `mlx5_4..mlx5_11` selected:
 
 ```yaml
 apiVersion: worker.gpustack.ai/v1
@@ -355,12 +373,16 @@ Four details in this manifest are load-bearing:
 
 ## Enabling NUMA alignment
 
+### Step 1: Check the policy
+
 Do not assume a cluster already has it: no Kubernetes release turns it on. The TopologyManager is
 stable and enabled, but its policy field's default is `none`, which discards every hint a device
 plugin publishes. Until somebody sets it, the accelerator and the adapter handed to one container
 are two independent picks.
 
-Two fields, in the kubelet's own `KubeletConfiguration`:
+### Step 2: Configure alignment
+
+Drain the node before changing its kubelet policy. Set two fields in `KubeletConfiguration`:
 
 ```yaml
 apiVersion: kubelet.config.k8s.io/v1beta1
@@ -397,6 +419,8 @@ Where those fields go depends on the distribution, and there are three shapes:
 - **The kubelet command line**, `--topology-manager-policy=`. Some distributions expose it as a
   pass-through argument in their own configuration file rather than as a kubelet field.
 
+### Step 3: Drain and restart
+
 **Drain the node before changing it.** The policy decides what the kubelet admits, and the
 containers already running were admitted under the old one; a node restarted into a stricter policy
 can refuse `Pod`s it was happily running.
@@ -407,6 +431,8 @@ failure is silent: the `Pod` is admitted, the two sides are picked independently
 throughput says so.
 
 ## Verification
+
+### Verify the kubelet policy
 
 Editing a file is not the kubelet running what it says. Read it back from the kubelet itself, which
 needs permission on the `nodes/proxy` subresource:

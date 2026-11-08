@@ -50,13 +50,14 @@ spec:
     dtype: fp8_e4m3
 ```
 
-The object split mirrors the scheduling chain: **`ClusterQueue` : `LocalQueue`**.
-A cluster-scoped object owns the capacity and an administrator manages it; a namespaced object is how
-a namespace draws on that capacity, and it is the object RBAC can be written against.
+The object split mirrors the scheduling chain: **`ClusterQueue` : `LocalQueue`**. A cluster-scoped
+`KVCachePool` owns capacity, while a namespaced `KVCachePoolBinding` grants namespace quota and RBAC
+scope.
 
-*`spec.backends`* is validated as **length exactly 1**. Quota lands on a single store's per-tenant
-ledger, and one store cannot account for bytes held in another. A pool spanning two backends could
-not answer the question the pool exists to answer.
+- **Pool *`spec.backends`***: Required single-item list naming one `KVCacheBackend`; a pool cannot span multiple stores.
+- **Binding *`spec.poolRef.name`***: Required target `KVCachePool` name that grants capacity to the Binding namespace.
+- **Binding *`spec.quota.ceiling`***: Required requested ceiling in bytes. The effective grant can be lower; enforcement requires a tenant ledger.
+- **Binding *`spec.domain`***: Required immutable reuse domain (`name`, `blockSize`, `dtype`) registered as the store tenant ID.
 
 ## Capacity grants
 
@@ -149,14 +150,14 @@ spec:
   poolRef:  # Moving the grant leaves its bytes on the old store.
     name: cache-pool
   quota:
-    ceiling: 50Gi  # Required; what this namespace may consume in its reuse domain.
+    ceiling: 50Gi  # Required requested ceiling; the effective grant may be lower.
   domain:
     name: tenant  # Changing the tenant ID abandons its ledger entry and bytes.
     blockSize: 16  # A warm cache must be read at the block size it was written with.
     dtype: bfloat16  # Reading fp8 blocks as bf16 silently corrupts tensors.
 ```
 
-To change any of them, delete the Binding and create a new one; the cache under the old domain is
+To change any immutable field, delete the Binding and create a new one; the cache under the old domain is
 not carried over.
 
 ### Engine dtype

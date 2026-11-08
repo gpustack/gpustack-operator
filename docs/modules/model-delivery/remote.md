@@ -5,16 +5,13 @@ copying the complete checkpoint to the serving node. The source registers weight
 its node cache, and the target mounts a metadata-only view. A cluster-wide policy enables delivery;
 the deployment's model block does not.
 
-```mermaid
-flowchart LR
-    subgraph SOURCE["Source node"]
-        CACHE["Verified checkpoint<br/>on local disk"] -->|"Read"| SOURCE_RAM["Host RAM"]
-    end
-    subgraph TARGET["Target node"]
-        TARGET_RAM["Host RAM"] -->|"Local H2D copy"| DEVICE["GPU / NPU memory"]
-    end
-    SOURCE_RAM -->|"HIXL / NIXL<br/>remote H2H transfer"| TARGET_RAM
-```
+![Remote weight transfer between nodes](../../assets/diagrams/model-delivery-remote.svg)
+
+<!--
+flowchart TD
+    TCP_SRC["Default TCP: node-01 source disk"] -> TCP_DISK["node-02: write to local disk"] -> TCP_DRAM["node-02: load from disk into Device DRAM"]
+    HIXL_SRC["HIXL / NIXL: node-01 source Host RAM"] -> HIXL_RAM["node-02: stream directly into Host RAM"] -> HIXL_DRAM["node-02: transfer from Host RAM into Device DRAM"]
+-->
 
 *H2H* means Host-to-Host; *H2D* means Host-to-Device. Host-memory windows are bounded and reused,
 so the successful remote path does not store a complete checkpoint on the target filesystem.
@@ -38,15 +35,11 @@ One `Setting` chooses the cluster's policy, and the chart ships it:
 
 | `Setting`                               | Default    | Values                          |
 | --------------------------------------- | ---------- | ------------------------------- |
-| `model-artifact-remote-delivery-policy` | `Disabled` | `Disabled`, `Require`, `Prefer` |
+| **`model-artifact-remote-delivery-policy`** | **`Disabled`** | `Disabled`, `Require`, `Prefer` |
 
 
-- **`Disabled`** changes nothing: no `Pod`, condition or status field differs from a cluster that
-never opted in. This is the default, and the worker reasserts it on every start when the chart
-does not declare the variable.
-- **`Require` and `Prefer` need the model-manager plugin installed.** A remote replica mounts a
-metadata-only view that the plugin serves, so admission refuses the value while the `CSIDriver`
-`model.csi.gpustack.ai` does not exist.
+- **`Disabled`**: Default policy; leaves `Pod` specs, conditions, and status fields unchanged.
+- **`Require` and `Prefer`**: Require the `model.csi.gpustack.ai` `CSIDriver` so remote replicas can mount metadata views.
 
 ```bash
 kubectl -n gpustack-system patch setting model-artifact-remote-delivery-policy \
@@ -268,7 +261,7 @@ spec:
 ```
 
 
-| Model           | Checkpoint storage in benchmark | Effect of a 16 GiB HIXL ceiling                                   |
+| Model           | Benchmark checkpoint storage | 16 GiB ceiling                                                    |
 | --------------- | ------------------------------- | ----------------------------------------------------------------- |
 | Qwen3-8B        | 15.27 GiB                       | Fits in full if admission grants enough space for native backing. |
 | Qwen3.6-35B-A3B | 66.99 GiB                       | Uses successive resident batches; the largest shard must fit.     |
@@ -586,7 +579,7 @@ to the tested 80B configurations; payload *RDMA* qualification and production ac
 The policy names what an eligible replica may do when its source is missing, slow or fails:
 
 
-| Policy    | An allowlisted role with a source | An allowlisted role without one                                                                 | A combination outside the allowlist                                                                            | An ineligible role                                          |
+| Policy    | Allowlisted, source available | Allowlisted, source unavailable                                                                 | Outside allowlist                                                                                              | Ineligible role                                             |
 | --------- | --------------------------------- | ----------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------- |
 | `Require` | loads remote                      | holds before its load starts, visible in status, never downloads                                | blocked with `UnqualifiedTransferBackend`, no new `Pod`                                                        | blocked with `RoleIneligibleForModelTransfer`, no new `Pod` |
 | `Prefer`  | loads remote                      | uses the declared local delivery if no remote replica holds it; otherwise holds remote delivery | falls back to the declared local delivery, or is blocked when that fallback would roll a loaded remote replica | falls back to the declared local delivery                   |

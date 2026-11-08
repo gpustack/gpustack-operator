@@ -19,7 +19,7 @@ between them.
 
 ## Summary
 
-| Command | Alias | Shape | Who runs it |
+| Command | Alias | Shape | Operator |
 |---|---|---|---|
 | `worker` | `w` | service | the operator `Deployment`, one per cluster |
 | `worker-gateway` | `wg` | service | a sidecar beside `worker` |

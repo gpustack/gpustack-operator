@@ -441,9 +441,10 @@ per-manufacturer overrides and vendor toolkit paths.
 
 ## `docs/getting-started/vendor-prerequisites.md`
 
-**Owns** — what to install on a node before GPUStack, per manufacturer; which of a vendor GPU
-Operator's components conflict with GPUStack's components and the switch that turns each off; what to change when one
-is already installed.
+**Owns** — the unified Third-Party Dependencies table (NFD, Kueue, Topograph, Mooncake, CSI, serving
+engines, vendor drivers); what to install on a node before GPUStack, per manufacturer; which of a
+vendor GPU Operator's components conflict with GPUStack's components and the switch that turns each
+off; what to change when one is already installed.
 
 **Never** — how GPUStack's allocator picks or renders a channel (device discovery owns that), the
 `GPUSTACK_*` variable that names one (settings owns it), or a vendor's own install procedure beyond
@@ -566,5 +567,8 @@ prefetch, and node-store output. Model-serving walkthroughs link here before cre
 
 ## `docs/walkthroughs/_index.md`
 
-**Owns** — the walkthrough entry point and module choices. Each module keeps its examples under
-its own directory; capability guides link to the relevant example.
+**Owns** — the walkthrough entry point, module choices, and multi-module configuration linkages
+(for example, combining `ModelArtifact`, `ModelPrefetch`, `KVCachePoolBinding`, `ModelDeployment`,
+and `ModelDeploymentScaler`). Each capability module under `docs/modules/<module>/` covers its four
+functional areas (`Overview`, `Configuration`, `Operations`, `Troubleshooting`) and links here for
+cross-module examples.

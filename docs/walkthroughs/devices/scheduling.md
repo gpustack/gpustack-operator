@@ -48,7 +48,7 @@ under `PT` throughout means none is in a partitioning mode. For the all-partitio
 
 The captured run used this cluster, settings and hardware:
 
-| Item | Captured setup |
+| Item | Value |
 |---|---|
 | Cluster | four `linux/amd64` nodes, all operator-managed |
 | Settings | the defaults: `instance-type-derived-from-node=true` auto-derives the pool objects, and `instance-type-aware-cpu-manufacturer=false` keeps the CPU manufacturer out of the aggregation layer until Step 5 flips it on |

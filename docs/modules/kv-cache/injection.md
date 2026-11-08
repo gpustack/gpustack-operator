@@ -439,7 +439,7 @@ another `ascend` to Ascend nodes) through the same per-group *`transport.protoco
 Admission imposes no rule on that combination; the per-engine check above is untouched. Whether
 cross-vendor *sharing* then works is a property of the engine's cache key, not of the transport:
 
-| Engine | Cross-vendor sharing | Why |
+| Engine | Cross-vendor sharing | Reason |
 |---|---|---|
 | `SGLang` | possible in principle | its Mooncake key is vendor-neutral — no vendor, dtype, device or engine id in the key, and no platform branch in the `mooncake` backend |
 | `vLLM` | not applicable | the key embeds `model`, `tp_rank`, `pcp`, `dcp` and `pp_rank`, so the key itself is heterogeneous across two vendors |

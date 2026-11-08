@@ -124,6 +124,9 @@ Use `Verification` for checks of a configured capability; name the object in its
 Benchmark summaries use `Benefits` and `Trade-offs` for observed gains and costs. Keep the
 measurement boundaries in `Limitations`; do not create competing `Limitations` headings on one page.
 
+In README and docs, exclude `what`, `where`, `when`, `how`, `which`, `why`, `who`, `whose` and
+`whom` from all headings, regardless of case. Use concise topic names instead.
+
 Keep every H2–H6 heading to at most four words and 32 visible characters. Exclude a numbered prefix
 such as `Step 2:` or `Rule 3:` from both counts. Count hyphenated parts as separate words. This is a
 hard limit, including in `--report` mode. Move conditions, quantities and explanations into the
@@ -350,8 +353,10 @@ capacity, timing or a safety limit.
   becomes an anchor others can link to.
 - **Prefer a table for enumerable topics** such as modes, vendors and gates. For CR fields, use
   annotated Pretty YAML as required by [YAML examples](../SKILL.md#yaml-examples).
-- **Keep table headers short.** Use a precise noun or short phrase, such as `Resource`, `Scope` or
-  `Default`. Put conditions and explanations in the cells or adjacent prose. Preserve technical names.
+- **Keep table headers short.** Every column header must contain 1 to 3 words and must not use `a`,
+  `an`, `the`, `this`, `that`, `these`, `those`, `what`, `where`, `when`, `how`, `which`, `why`,
+  `who`, `whose`, or `whom`, regardless of case. Use precise names such as `Resource`, `Scope` or
+  `Default`. Put conditions and explanations in cells or adjacent prose. Preserve technical names.
 - **Name code in contributor guides.** Give a source path when the reader is editing that code.
   User guides state the behavior and link to the owning spec for its implementation.
 - **No symbol-numbered cross-references** (`switch ①`, "gate-2 above"). Use the heading name and a
@@ -362,6 +367,45 @@ capacity, timing or a safety limit.
   empty collections, comments and preserving values when formatting.
 - **Links are relative** (`../settings.md`, `architecture/admission.md`), never absolute GitHub URLs —
   the exception is the chart README, which is rendered outside the repo on Artifact Hub.
+
+## Short sentences and visual expression
+
+Follow 80% ASD-STE100 controlled-English discipline (`~/.agents/skills/my-workflow/references/writing-style.md`)
+across `README.md`, `docs/` and site content:
+
+- **Short sentences**: Keep procedural sentences to at most 20 words and descriptive sentences to at
+  most 25 words. Express one thought per sentence using active voice and concrete verbs.
+- **No redundant code commentary**: State only facts backed by recorded runs or repository source
+  (`api/`, `pkg/`). When Go struct comments or code logic already explain internal implementation
+  details that do not affect user configuration or operations, omit them from `docs/`.
+- **Single-dimension logic (Bullets)**: Express single-dimension lists as bullets with a bold short
+  lead-in followed by an explanation of **at most 20 words**:
+  `- **<Short lead-in>**: <Explanation in <=20 words>.`
+- **Two-dimension logic (Uniform tables)**: Express two-dimension comparisons or mappings as Markdown
+  tables. Tables of the same category across modules must share identical column headers (for example,
+  `| Value | Meaning | Constraints |`, `| Condition | Reason | Resolution |`, or
+  `| Component | Role | Source | Required |`) and consistent cell phrasing. To emphasize a meaningful
+  comparison row, bold its first cell and a key verdict or value in another cell. The site highlights
+  that row, including its sticky first cell; bold text also conveys emphasis in Markdown exports.
+- **Multi-step or multi-component logic (SVG flowcharts)**: Express three or more interacting
+  components, controllers or lifecycle transitions as a clean directional SVG under
+  `docs/assets/diagrams/` or `site/assets/images/`, with labeled edges and clear group boundaries.
+  Place the matching Mermaid `flowchart LR` or `flowchart TD` in an HTML comment immediately
+  below the image, separated by a blank line, for LLM readers and Markdown exports. In the comment,
+  write `->` in place of `-->` and `..>` in place of `-.->` so HTML does not close the comment
+  early; restore Mermaid arrows before rendering the graph. Keep all nodes, edges and labels
+  consistent between the SVG and the comment. Use generous node padding
+  and never trap text in tight pill borders. Use a bordered canvas, tinted domain containers with
+  bold colored header bands, and high-contrast node cards with colored accent bars. Use cobalt
+  for discovery, violet for scheduling, teal for delivery and cache, and amber for workloads.
+  Support light and dark themes, reduced motion and crisp connector lines. Use architecture,
+  swimlane, feedback, transfer and hierarchy layouts when they clarify verified relationships.
+  Pair complex diagrams with a numbered step list or lookup table below the diagram.
+- **Macro and micro CR configuration**: Pair every CR configuration block with:
+  1. A **macro** complete Pretty YAML resource (`apiVersion`, `kind`, `metadata`) with inline `#`
+     comments (`# required`, `# optional, default: ...`, `# enum: ...`).
+  2. A **micro** breakdown immediately below using `<=20`-word bullets for required/optional/immutability
+     rules and uniform Markdown tables for enum values, admission gates or webhook validations.
 
 ## Prose tells
 

@@ -12,7 +12,7 @@ FENCE = re.compile(r"^ {0,3}(`{3,}|~{3,})")
 
 
 class ProseHTML(HTMLParser):
-    """Only attribute-free line breaks may appear as raw HTML in published prose."""
+    """Only attribute-free line breaks and HTML comments may appear as raw HTML in published prose."""
 
     def __init__(self, source, errors):
         super().__init__()
@@ -32,7 +32,7 @@ class ProseHTML(HTMLParser):
         self.reject(f"</{tag}>")
 
     def handle_comment(self, data):
-        self.reject("HTML comment")
+        pass
 
     def handle_decl(self, decl):
         self.reject(f"<!{decl}>")
@@ -46,8 +46,9 @@ class ProseHTML(HTMLParser):
 
 def check_prose_html(text, source, errors):
     fence = ""
+    comment = False
     lines = []
-    for line in text.splitlines():
+    for lineno, line in enumerate(text.splitlines(), 1):
         marker = FENCE.match(line)
         if marker and not fence:
             # Backticks in a backtick fence's info string make it ordinary prose.
@@ -62,6 +63,26 @@ def check_prose_html(text, source, errors):
                 fence = ""
             lines.append("")
         else:
+            stripped = line.strip()
+            if comment:
+                if stripped == "-->":
+                    comment = False
+                elif "-->" in stripped:
+                    errors.append(f"{source}:{lineno}: HTML comment body must not contain '-->' (use '->' for flowgraph arrows so HTML/Markdown parsers do not close the comment early)")
+                lines.append("")
+                continue
+            if stripped.startswith("<!--"):
+                body = stripped[4:]
+                if body.endswith("-->"):
+                    inner = body[:-3]
+                    if "-->" in inner:
+                        errors.append(f"{source}:{lineno}: HTML comment body must not contain '-->' (use '->' for flowgraph arrows)")
+                else:
+                    if "-->" in body:
+                        errors.append(f"{source}:{lineno}: HTML comment body must not contain '-->' (use '->' for flowgraph arrows)")
+                    comment = True
+                lines.append("")
+                continue
             lines.append(line)
     prose = "\n".join(lines)
     # Inline code and Markdown autolinks are examples/text, not raw HTML.
@@ -82,6 +103,7 @@ def section(text, title):
 
 def prose_links(text):
     fence = ""
+    comment = False
     for line in text.splitlines():
         marker = FENCE.match(line)
         if marker:
@@ -91,11 +113,21 @@ def prose_links(text):
             elif marker[0] == fence[0] and len(marker) >= len(fence):
                 fence = ""
         elif not fence:
+            stripped = line.lstrip()
+            if comment:
+                if "-->" in line:
+                    comment = False
+                continue
+            if stripped.startswith("<!--"):
+                if "-->" not in line:
+                    comment = True
+                continue
             yield from LINK.findall(line)
 
 
 def without_link_urls(text):
     fence = ""
+    comment = False
     lines = []
     for line in text.splitlines():
         marker = FENCE.match(line)
@@ -106,7 +138,15 @@ def without_link_urls(text):
             elif marker[0] == fence[0] and len(marker) >= len(fence):
                 fence = ""
         elif not fence:
-            line = LINK.sub(lambda match: match[0].replace(f"({match[2]})", "(URL)"), line)
+            stripped = line.lstrip()
+            if comment:
+                if "-->" in line:
+                    comment = False
+            elif stripped.startswith("<!--"):
+                if "-->" not in line:
+                    comment = True
+            else:
+                line = LINK.sub(lambda match: match[0].replace(f"({match[2]})", "(URL)"), line)
         lines.append(line)
     return "\n".join(lines).strip()
 

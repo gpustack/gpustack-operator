@@ -1,21 +1,44 @@
 {{ define "main" }}
-  <p class="section-label">Documentation</p>
-  <h1>GPUStack Operator</h1>
+  <p class="section-label">GPUStack Operator</p>
+  <h1>Accelerator workloads, from discovery to serving</h1>
   {{ .Content }}
-  <h2 id="start-here">Start here</h2>
+  <p><a href="#installation">Get started</a> · <a href="{{ "docs/getting-started/architecture/" | relLangURL }}">Read the architecture</a></p>
+
+  <h2 id="architecture">Architecture</h2>
+  {{ with resources.Get "images/architecture-flow.svg" }}<img src="{{ .RelPermalink }}" alt="Four stages from hardware discovery to workload serving" width="1272" height="560" style="width: 100%; height: auto; display: block; margin: 1.25rem 0;">{{ end }}
+  <ol>
+    <li><strong>Discover:</strong> NFD and Device Manager identify accelerators and RDMA interfaces.</li>
+    <li><strong>Schedule:</strong> The worker builds pools and InstanceTypes; Kueue and admission checks place workloads.</li>
+    <li><strong>Deliver:</strong> Optional model prefetch and shared KV cache support workloads.</li>
+    <li><strong>Run:</strong> Model deployments and instances serve workloads.</li>
+  </ol>
+
+  <h2 id="features">Features</h2>
   <div class="directory">
-    <div><a href="{{ "docs/getting-started/architecture/" | relLangURL }}">Architecture</a><p>See how discovery, capacity, and admission fit together.</p></div>
-    <div><a href="{{ "docs/walkthroughs/" | relLangURL }}">Walkthroughs</a><p>Run a complete example and inspect its results.</p></div>
-    <div><a href="{{ "docs/operate/installation-modes/" | relLangURL }}">Installation modes</a><p>Choose how the operator and its dependencies are deployed.</p></div>
+    <div><a href="{{ "docs/modules/devices/" | relLangURL }}">Heterogeneous devices</a><p>Discover and allocate whole, shared, sliced, or partitioned accelerators.</p></div>
+    <div><a href="{{ "docs/modules/rdma/" | relLangURL }}">RDMA networking</a><p>Give workloads network interfaces alongside accelerators.</p></div>
+    <div><a href="{{ "docs/modules/topology/" | relLangURL }}">Topology</a><p>Place workloads within requested location or network domains.</p></div>
+    <div><a href="{{ "docs/modules/kv-cache/" | relLangURL }}">KV cache</a><p>Share inference cache across compatible workloads.</p></div>
+    <div><a href="{{ "docs/modules/model-delivery/" | relLangURL }}">Model delivery</a><p>Resolve, verify, and deliver model weights to workloads.</p></div>
+    <div><a href="{{ "docs/modules/model-deployment/" | relLangURL }}">Model deployment</a><p>Run serving replicas with routing and optional prefill/decode roles.</p></div>
+    <div><a href="{{ "docs/modules/instances/" | relLangURL }}">GPU instances</a><p>Work in accelerator-backed containers over SSH.</p></div>
   </div>
-  <h2 id="capabilities">Capabilities</h2>
+
+  <h2 id="installation">Installation</h2>
+  <p>Use Kubernetes 1.29 or newer for scheduling and node model delivery, Helm 3.8 or newer, and cluster-admin access. Install the accelerator drivers and any required container toolkit first.</p>
+  <pre><code>helm repo add gpustack https://docs.gpustack.ai/gpustack-operator/charts
+helm install gpustack-operator gpustack/gpustack-operator \
+  --namespace gpustack-system --create-namespace</code></pre>
+  <p>See <a href="{{ "docs/getting-started/vendor-prerequisites/" | relLangURL }}">vendor prerequisites</a> and <a href="{{ "docs/operate/installation-modes/" | relLangURL }}">installation modes</a> for dependencies and deployment choices.</p>
+
+  <h2 id="usage">Usage</h2>
+  <p>Choose a scenario for complete configuration and verification steps.</p>
   <div class="directory">
-    <div><a href="{{ "docs/modules/devices/" | relLangURL }}">Heterogeneous Devices</a><p>Discover, slice, and allocate accelerators.</p></div>
-    <div><a href="{{ "docs/modules/rdma/" | relLangURL }}">RDMA Networking</a><p>Give workloads network interfaces alongside accelerators.</p></div>
-    <div><a href="{{ "docs/modules/topology/" | relLangURL }}">Topology</a><p>Place workloads within the requested network or location domain.</p></div>
-    <div><a href="{{ "docs/modules/kv-cache/" | relLangURL }}">KV Cache</a><p>Share inference cache across workloads.</p></div>
-    <div><a href="{{ "docs/modules/model-delivery/" | relLangURL }}">Model Delivery</a><p>Fetch and cache model weights before workloads need them.</p></div>
-    <div><a href="{{ "docs/modules/model-deployment/" | relLangURL }}">Model Deployment</a><p>Run serving replicas with routing and prefill/decode roles.</p></div>
-    <div><a href="{{ "docs/modules/instances/" | relLangURL }}">GPU Instances</a><p>Work in an accelerator-backed container over SSH.</p></div>
+    <div><a href="{{ "docs/walkthroughs/devices/scheduling/" | relLangURL }}">Schedule an accelerator workload</a><p>Request a device and follow its admission and allocation.</p></div>
+    <div><a href="{{ "docs/walkthroughs/rdma/network-endpoints/" | relLangURL }}">Add RDMA networking</a><p>Request a network endpoint alongside an accelerator.</p></div>
+    <div><a href="{{ "docs/walkthroughs/model-delivery/prefetch/" | relLangURL }}">Prefetch model weights</a><p>Warm a node cache before a workload starts.</p></div>
+    <div><a href="{{ "docs/walkthroughs/model-deployment/prefill-decode/" | relLangURL }}">Serve a model</a><p>Deploy prefill and decode roles and verify inference.</p></div>
+    <div><a href="{{ "docs/walkthroughs/kv-cache/shared-cache/" | relLangURL }}">Share a KV cache</a><p>Create a backend, pool, and namespace binding.</p></div>
+    <div><a href="{{ "docs/modules/instances/" | relLangURL }}">Start a GPU workspace</a><p>Configure an accelerator-backed instance with SSH access.</p></div>
   </div>
 {{ end }}

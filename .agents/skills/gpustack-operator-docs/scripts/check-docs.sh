@@ -16,19 +16,23 @@
 #   8. an index label in docs/README.md that differs from the page's own H1;
 #   9. a docs path named in a skill that no longer exists;
 #  10. an authored H2-H6 heading over four words or 32 visible characters, or a lowercase first
-#      word after a numbered heading prefix.
+#      word after a numbered heading prefix;
+#  11. a table header outside the 1 to 3 word limit or containing an article, demonstrative or interrogative;
+#  12. an interrogative word in a docs or README heading.
 #
 # Usage: bash .claude/skills/gpustack-operator-docs/scripts/check-docs.sh [--report] [repo-root]
 #
 # --report downgrades rules 5-8 to warnings and prints the per-page metrics, so one page can be
-# measured while the rest of the corpus is still unrefined. Rules 1-4 and 10 are fatal in both modes.
+# measured while the rest of the corpus is still unrefined. Rules 1-4 and 9-11 are fatal in both modes.
 set -euo pipefail
 
 REPORT=0
+SELFTEST=0
 ROOT=""
 for arg in "$@"; do
   case "$arg" in
     --report) REPORT=1 ;;
+    --selftest) SELFTEST=1 ;;
     -*) echo "unknown flag: $arg" >&2; exit 2 ;;
     *) ROOT="$arg" ;;
   esac
@@ -154,6 +158,8 @@ anchors_of() {
     { fl = fence_line($0)
       if (fl != "") { if (!fence) { fence = 1; fopen = fl } else if (fence_closes(fl, fopen)) fence = 0; next } }
     fence  { next }
+    html_comment { if ($0 ~ /^[ \t]*-->[ \t]*$/) html_comment = 0; next }
+    /^[ \t]*<!--/ { if ($0 !~ /-->[ \t]*$/) html_comment = 1; next }
     /^#{1,6} / {
       sub(/^#+ +/, "")
       a = slug($0)
@@ -169,6 +175,8 @@ h2_anchors_of() {
     { fl = fence_line($0)
       if (fl != "") { if (!fence) { fence = 1; fopen = fl } else if (fence_closes(fl, fopen)) fence = 0; next } }
     fence  { next }
+    html_comment { if ($0 ~ /^[ \t]*-->[ \t]*$/) html_comment = 0; next }
+    /^[ \t]*<!--/ { if ($0 !~ /-->[ \t]*$/) html_comment = 1; next }
     /^## / {
       sub(/^## +/, "")
       if ($0 == "Contents") next
@@ -183,6 +191,8 @@ toc_anchors_of() {
     { fl = fence_line($0)
       if (fl != "") { if (!fence) { fence = 1; fopen = fl } else if (fence_closes(fl, fopen)) fence = 0; next } }
     fence  { next }
+    html_comment { if ($0 ~ /^[ \t]*-->[ \t]*$/) html_comment = 0; next }
+    /^[ \t]*<!--/ { if ($0 !~ /-->[ \t]*$/) html_comment = 1; next }
     /^## Contents/ { intoc = 1; next }
     intoc && /^#{1,6} / { intoc = 0 }
     intoc && /^- \[/ {
@@ -197,6 +207,8 @@ links_of() {
     { fl = fence_line($0)
       if (fl != "") { if (!fence) { fence = 1; fopen = fl } else if (fence_closes(fl, fopen)) fence = 0; next } }
     fence  { next }
+    html_comment { if ($0 ~ /^[ \t]*-->[ \t]*$/) html_comment = 0; next }
+    /^[ \t]*<!--/ { if ($0 !~ /-->[ \t]*$/) html_comment = 1; next }
     {
       line = $0
       while (match(line, /\]\([^)]+\)/)) {
@@ -227,6 +239,8 @@ h2_count_of() {
     { fl = fence_line($0)
       if (fl != "") { if (!fence) { fence = 1; fopen = fl } else if (fence_closes(fl, fopen)) fence = 0; next } }
     fence  { next }
+    html_comment { if ($0 ~ /^[ \t]*-->[ \t]*$/) html_comment = 0; next }
+    /^[ \t]*<!--/ { if ($0 !~ /-->[ \t]*$/) html_comment = 1; next }
     /^## /  { if ($0 != "## Contents") c++ }
     END     { print c + 0 }
   ' "$1"
@@ -246,6 +260,8 @@ long_paragraphs_of() {
     { fl = fence_line($0)
       if (fl != "") { flush(); if (!fence) { fence = 1; fopen = fl } else if (fence_closes(fl, fopen)) fence = 0; next } }
     fence                            { next }
+    html_comment                     { if ($0 ~ /^[ \t]*-->[ \t]*$/) html_comment = 0; next }
+    /^[ \t]*<!--/                    { flush(); if ($0 !~ /-->[ \t]*$/) html_comment = 1; next }
     /^[ \t]*$/                       { flush(); next }
     # Four spaces or a tab is an indented code block in Markdown, not prose.
     /^(    |\t)/                     { flush(); next }
@@ -270,7 +286,7 @@ long_paragraphs_of() {
 # split hyphenated terms. Numbered headings use an initial capital after the colon, except for
 # official names whose canonical spelling begins with a lowercase letter.
 heading_issues_of() {
-  awk -v wcap="$HEADING_WORD_CAP" -v ccap="$HEADING_CHAR_CAP" "$AWK_LIB"'
+  awk -v wcap="$HEADING_WORD_CAP" -v ccap="$HEADING_CHAR_CAP" -v interrogatives="${2:-0}" "$AWK_LIB"'
     function trim(t) {
       sub(/^[[:space:]]+/, "", t)
       sub(/[[:space:]]+$/, "", t)
@@ -288,7 +304,10 @@ heading_issues_of() {
     { fl = fence_line($0)
       if (fl != "") { if (!fence) { fence = 1; fopen = fl } else if (fence_closes(fl, fopen)) fence = 0; next } }
     fence { next }
-    /^#{2,6} / {
+    html_comment { if ($0 ~ /^[ \t]*-->[ \t]*$/) html_comment = 0; next }
+    /^[ \t]*<!--/ { if ($0 !~ /-->[ \t]*$/) html_comment = 1; next }
+    /^#{1,6} / {
+      level = $0; sub(/ .*/, "", level)
       raw = $0
       sub(/^#+ +/, "", raw)
       sub(/[[:space:]]+#+[[:space:]]*$/, "", raw)
@@ -296,6 +315,17 @@ heading_issues_of() {
       gsub(/`|\*|~/, "", visible)
       sub(/^__/, "", visible); sub(/__$/, "", visible)
       visible = trim(visible)
+      if (interrogatives) {
+        bad = tolower(visible)
+        gsub(/[^[:alnum:]]+/, " ", bad)
+        n = split(bad, tokens, /[[:space:]]+/)
+        for (i = 1; i <= n; i++)
+          if (tokens[i] ~ /^(what|where|when|how|which|why|who|whose|whom)$/) {
+            printf "%d\tword\t%s\t%s\n", FNR, tokens[i], visible
+            break
+          }
+      }
+      if (length(level) == 1) next
       topic = visible
       if (sub(/^(Step|Stage|Gate|Rule|Suite|State|Path)[[:space:]]+[[:alnum:].-]+:[[:space:]]*/, "", topic)) {
         topic = trim(topic)
@@ -311,6 +341,105 @@ heading_issues_of() {
     }
   ' "$1"
 }
+
+# Table header findings as line number, issue and visible cell text. Fences and HTML comments
+# do not contribute table rows; comments embedded within a line are removed before detection.
+table_header_issues_of() {
+  awk "$AWK_LIB"'
+    function uncomment(line,   start, end, out) {
+      out = ""
+      while (length(line)) {
+        if (comment) {
+          end = index(line, "-->")
+          if (!end) return out
+          line = substr(line, end + 3)
+          comment = 0
+        } else {
+          start = index(line, "<!--")
+          if (!start) return out line
+          out = out substr(line, 1, start - 1)
+          line = substr(line, start + 4)
+          comment = 1
+        }
+      }
+      return out
+    }
+    function inspect(header, at,   n, cells, i, cell, words, count, tokens, j, word, bad, escaped_pipe) {
+      sub(/^[[:space:]]*\|/, "", header)
+      sub(/\|[[:space:]]*$/, "", header)
+      escaped_pipe = sprintf("%c", 28)
+      gsub(/\\\|/, escaped_pipe, header)
+      n = split(header, cells, /\|/)
+      for (i = 1; i <= n; i++) {
+        cell = strip_links(cells[i])
+        gsub(escaped_pipe, "|", cell)
+        gsub(/[*_`]/, "", cell)
+        sub(/^[[:space:]]+/, "", cell); sub(/[[:space:]]+$/, "", cell)
+        count = cell == "" ? 0 : split(cell, words, /[[:space:]]+/)
+        if (count < 1 || count > 3)
+          printf "%d\tlength\t%d words\t%s\n", at, count, cell
+        bad = tolower(cell)
+        gsub(/[^[:alnum:]]+/, " ", bad)
+        split(bad, tokens, /[[:space:]]+/)
+        for (j in tokens) {
+          word = tokens[j]
+          if (word ~ /^(a|an|the|this|that|these|those|what|where|when|how|which|why|who|whose|whom)$/) {
+            printf "%d\tword\t%s\t%s\n", at, word, cell
+            break
+          }
+        }
+      }
+    }
+    {
+      line = $0
+      if (!comment) {
+        fl = fence_line(line)
+        if (fl != "") {
+          if (!fence) { fence = 1; fopen = fl }
+          else if (fence_closes(fl, fopen)) fence = 0
+          previous = ""; next
+        }
+      }
+      if (fence) { previous = ""; next }
+      line = uncomment(line)
+      if (previous ~ /\|/ && line ~ /^[[:space:]]*\|?[[:space:]]*:?-+(:?[[:space:]]*\|[[:space:]]*:?-+)+[[:space:]]*\|?[[:space:]]*$/)
+        inspect(previous, FNR - 1)
+      previous = line
+    }
+  ' "$1"
+}
+
+# Exercise both checks independently of the repository content.
+run_selftest() {
+  cat > "$WORK/style-self-test.md" <<'STYLE_TEST'
+# WHAT is included
+## Why now
+| Valid | Which mode | The value |
+|---|---|---|
+```
+# Where ignored
+| Who ignored |
+|---|
+```
+<!--
+## When ignored
+-->
+STYLE_TEST
+  heading_issues_of "$WORK/style-self-test.md" 1 > "$WORK/heading-test.out"
+  table_header_issues_of "$WORK/style-self-test.md" > "$WORK/table-test.out"
+  [ "$(wc -l < "$WORK/heading-test.out" | tr -d ' ')" -eq 2 ] &&
+    grep -q 'word.*what' "$WORK/heading-test.out" &&
+    grep -q 'word.*why' "$WORK/heading-test.out" &&
+    [ "$(wc -l < "$WORK/table-test.out" | tr -d ' ')" -eq 2 ] &&
+    grep -q 'word.*which' "$WORK/table-test.out" &&
+    grep -q 'word.*the' "$WORK/table-test.out"
+}
+
+if [ "$SELFTEST" -eq 1 ]; then
+  if run_selftest; then echo "OK: documentation style self-test passed."; exit 0; fi
+  echo "FAIL: documentation style self-test failed." >&2
+  exit 1
+fi
 
 # The "## All pages" rows of the index, as "path<TAB>label".
 index_labels() {
@@ -452,12 +581,47 @@ done < <(grep -RhoE 'docs/[[:alnum:]_./-]+\.md' .agents/skills --include='*.md' 
 echo "==> heading limits and numbered heading case"
 for f in $HEADING_PAGES; do
   [ -f "$f" ] || continue
+  check_interrogatives=0
+  case "$f" in README.md|docs/*) check_interrogatives=1 ;; esac
   while IFS="$(printf '\t')" read -r at kind detail title; do
     case "$kind" in
       case) err "$f:$at: capitalize the first word after the numbered prefix: '$title'" ;;
       length) err "$f:$at: heading topic is $detail; cap is ${HEADING_WORD_CAP} words / ${HEADING_CHAR_CAP} characters: '$title'" ;;
+      word) err "$f:$at: heading contains interrogative word '$detail': '$title'" ;;
     esac
-  done < <(heading_issues_of "$f")
+  done < <(heading_issues_of "$f" "$check_interrogatives")
+done
+
+# --- 11. table header limits -----------------------------------------------
+echo "==> table header limits"
+cat > "$WORK/table-self-test.md" <<'TABLE_TEST'
+| Four word header here | The value | [This](https://example.com) | **Valid** |
+|---|---|---|---|
+| Escaped \| pipe | [Safe label](https://example.com/the) |
+|---|---|
+```
+| The ignored header | Four ignored words here |
+|---|---|
+```
+<!--
+| The ignored header | Four ignored words here |
+|---|---|
+-->
+TABLE_TEST
+table_header_issues_of "$WORK/table-self-test.md" > "$WORK/table-self-test.out"
+if [ "$(wc -l < "$WORK/table-self-test.out" | tr -d ' ')" -ne 3 ] || \
+   ! grep -q 'length.*4 words' "$WORK/table-self-test.out" || \
+   ! grep -q 'word.*the' "$WORK/table-self-test.out" || \
+   ! grep -q 'word.*this' "$WORK/table-self-test.out"; then
+  err "table header checker self-test failed"
+fi
+for f in README.md $PAGES; do
+  while IFS="$(printf '\t')" read -r at kind detail cell; do
+    case "$kind" in
+      length) err "$f:$at: table header has $detail; expected 1 to 3: '$cell'" ;;
+      word) err "$f:$at: table header contains forbidden word '$detail': '$cell'" ;;
+    esac
+  done < <(table_header_issues_of "$f")
 done
 
 if [ "$REPORT" -eq 1 ]; then

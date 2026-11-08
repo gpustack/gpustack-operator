@@ -13,8 +13,7 @@ Queues created by a previously published version are outside that transition pat
 - [Request a level](#request-a-level)
 - [Verification](#verification)
 - [Change a live hierarchy](#change-a-live-hierarchy)
-- [Diagnose Pending workloads](#diagnose-pending-workloads)
-- [Temporary EKS validation](#temporary-eks-validation)
+- [Troubleshooting](#troubleshooting)
 
 ## Choose the inventory path
 
@@ -92,13 +91,18 @@ spec:
   nodeLabels: {}
 ```
 
+- **Selector**: An empty *`nodeSelector`* selects every node.
+- **Levels**: List the published labels from broadest to narrowest.
+- **Inventory**: *`nodeLabels`* reads existing labels without modifying them.
+
 Do not copy a tier list from another cluster; inspect the labels actually published on these `Node`s.
 The [profile rules](scheduling.md#hierarchy-profiles)
 define tier normalization.
 
 ## Observe existing Node labels
 
-Use *`nodeLabels`* when another trusted component already owns the values. It validates the hierarchy
+Configure the chosen inventory path with *`nodeLabels`* below, [a ConfigMap snapshot](#publish-a-configmap-snapshot),
+or [a webhook](#publish-by-webhook). Use *`nodeLabels`* when another trusted component already owns the values. It validates the hierarchy
 but never modifies those labels:
 
 ```yaml
@@ -110,17 +114,23 @@ spec:
   nodeSelector:
     matchLabels:
       node-role.kubernetes.io/worker: ""
-  levels:
+  levels:  # Ordered from the broadest domain to the narrowest.
     - topology.kubernetes.io/region
     - topology.kubernetes.io/zone
-  nodeLabels: {}
+  nodeLabels: {}  # Read labels already present on the selected nodes.
 ```
 
-`levels` takes 1 to 16 entries, each a label key named once: admission refuses a key listed twice,
-since a repeated level would describe one `Node` label as two tiers of the hierarchy.
-`kubernetes.io/hostname` is always appended and must not appear in `levels`. A `Node` may omit a fine
-suffix and receive a shorter profile, but it may not carry a child level without every declared
-parent.
+- **`nodeSelector`**: Required; select the nodes that provide the hierarchy.
+- **`levels`**: Required; list one to 16 unique label keys in hierarchy order.
+- **`nodeLabels`**: Selects the read-only inventory path.
+
+| Condition | Reason | Resolution |
+|---|---|---|
+| A level is repeated | Each level must name a distinct label | Remove the duplicate key. |
+| A child has no declared parent | The hierarchy must have a complete parent chain | Add the parent label or remove the child. |
+| `kubernetes.io/hostname` is listed | The operator appends this level | Remove it from `levels`. |
+
+A `Node` may omit a fine suffix and receive a shorter profile, as long as every child level has its declared parent chain.
 
 ## Publish a ConfigMap snapshot
 
@@ -162,6 +172,10 @@ spec:
     key: snapshot.yaml
     maxStaleness: 10m
 ```
+
+- **Selector**: Choose the nodes covered by the snapshot.
+- **ConfigMap**: Reference a snapshot in the worker namespace.
+- **Staleness**: Expiry removes the last valid `NodeFeature` after a read failure.
 
 The snapshot is atomic: one unknown `Node`, undeclared level, invalid value, broken parent chain, or
 contradictory child rejects the whole revision. The source reconciles one NFD `NodeFeature` per
@@ -205,6 +219,10 @@ spec:
       name: topology-inventory-token
 ```
 
+- **URL**: Use an absolute HTTPS endpoint.
+- **Credentials**: Provide exactly one bearer token or client certificate.
+- **Timing**: Set positive durations. The timeout must not exceed the polling interval.
+
 The CA `ConfigMap` key is `ca.crt`; the bearer `Secret` key is `token`. For mTLS, replace the bearer
 reference with *`tlsClientCertificateSecretRef`*; that `Secret` uses `tls.crt` and `tls.key`. All
 references are restricted to the worker namespace.
@@ -216,20 +234,20 @@ three durations must be positive.
 
 ## Request a level
 
-Set *`requiredLevel`* on a role to require each replica's `Pod` group to fit in one domain at that level:
+Set *`requiredLevel`* on an existing role to require each replica's `Pod` group to fit in one domain:
 
-```yaml
-apiVersion: worker.gpustack.ai/v1
-kind: ModelDeployment
-metadata:
-  name: zoned-deployment
-spec:
-  roles:
-    - name: decode
-      replicas: 2
-      size: 4
-      topology:
-        requiredLevel: topology.kubernetes.io/zone
+```diff
+ apiVersion: worker.gpustack.ai/v1
+ kind: ModelDeployment
+ metadata:
+   name: zoned-deployment
+ spec:
+   roles:
+     - name: decode
+       replicas: 2
+       size: 4
++      topology:
++        requiredLevel: topology.kubernetes.io/zone
 ```
 
 The value is a label key, not `region`, `zone`, or a concrete zone name. Valid examples include
@@ -298,7 +316,9 @@ anything else. A missing replacement flavor, immutable object drift, too many re
 or quota that cannot be conserved leaves the last complete queue plan in place. An old non-*TAS* queue
 from a previous release is not adopted; use fresh managed objects.
 
-## Diagnose Pending workloads
+## Troubleshooting
+
+### Diagnose Pending workloads
 
 Pending is the safe result when no single domain satisfies the full PodSet. Check in this order:
 
@@ -322,7 +342,7 @@ If the [flavor limit](scheduling.md#capacity-and-lifecycle-limits)
 is exceeded, reduce profile fragmentation or hardware identity variants, then let reconciliation
 retry the complete plan.
 
-## Temporary EKS validation
+### Temporary EKS validation
 
 The repository EKS fixture can create two CPU node groups pinned to different availability zones.
 Use two inexpensive `Node`s per zone to prove both positive and negative placement: a size-two PodSet

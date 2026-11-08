@@ -7,6 +7,18 @@ decode](deployment.md#prefill-and-decode) describes the role fields and admissio
 The recorded runs apply to vLLM `v0.30.0` and SGLang `0.5.22`. Other versions must be re-verified
 before they inherit a claim on this page.
 
+![Prefill and decode request and KV transfer flow](../../assets/diagrams/model-deployment-pd.svg)
+
+<!--
+flowchart LR
+    CLIENT["Client"] -> ROUTER["llm-d-router"] -> SIDECAR["Decode routing sidecar"]
+    SIDECAR -> PREFILL["Prefill role"]
+    PREFILL -> DECODE["Decode role: direct KV blocks"] -> CLIENT
+    SIDECAR -> DECODE
+    PREFILL ..> POOL["Optional shared KV pool"]
+    DECODE ..> POOL
+-->
+
 ## Contents
 
 - [Pair connections](#pair-connections)
@@ -252,7 +264,7 @@ role's *`extraArgs`*.
 
 What the declared configuration decides:
 
-| Declared roles | How the router counts tokens | `--enable-scale-out` needed | What the render gives today |
+| Declared roles | Token counting | Flag needed | Rendered flag |
 | --- | --- | --- | --- |
 | *Encode*, *Prefill*, *Decode* | the router's built-in estimator; no HTTP call | no | no flag, which is correct |
 | *Prefill*, *Decode* | a call to the engine's render endpoint | yes | nothing |
@@ -304,7 +316,7 @@ it needs.
 The `llm-d-router` plus vLLM requirement and supported floors are documented under
 [Counting engine tokens](#counting-engine-tokens). The other router paths are:
 
-| Router and engine configuration | `--enable-scale-out` status | Configuration path |
+| Router and engine | `--enable-scale-out` status | Configuration path |
 |---|---|---|
 | `vllm-router` with vLLM | No equivalent requirement is established here | The router uses its own *PD* mode and endpoint selectors; *encode/prefill/decode (EPD)* uses operator-rendered [`--epd-config`](routing.md#encode-stage-routing) |
 | `sglang-gateway` with SGLang | Not applicable | SGLang uses its own disaggregation arguments; `--enable-scale-out` is a vLLM flag |

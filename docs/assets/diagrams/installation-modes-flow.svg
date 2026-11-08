@@ -1,0 +1,72 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 476" role="img" aria-labelledby="title desc">
+<title id="title">Installation modes</title>
+<desc id="desc">Chart mode and image mode use a shared worker-applied foundation and exclusive release ownership.</desc>
+<style>
+:root{color-scheme:light dark;--bg:#fff;--card:#fff;--text:#0f172a;--muted:#334155;--blue:#2563eb;--purple:#7c3aed;--teal:#0f766e;--amber:#b45309;--blue-bg:#eff6ff;--purple-bg:#f5f3ff;--teal-bg:#f0fdfa;--amber-bg:#fffbeb;--border:#94a3b8}
+@media(prefers-color-scheme:dark){:root{--bg:#0f172a;--card:#1e293b;--text:#f8fafc;--muted:#e2e8f0;--blue:#60a5fa;--purple:#a78bfa;--teal:#2dd4bf;--amber:#fbbf24;--blue-bg:#172554;--purple-bg:#1e1b4b;--teal-bg:#042f2e;--amber-bg:#451a03;--border:#94a3b8}}
+.layer{fill:var(--tint);stroke:var(--accent);stroke-width:1.5;stroke-dasharray:6 4}
+.card{fill:var(--card);stroke:var(--accent);stroke-width:1.4}
+.layer-title{font:700 14px system-ui,-apple-system,sans-serif;fill:var(--accent)}
+.card-title{font:700 14px system-ui,-apple-system,sans-serif;fill:var(--text)}
+.detail{font:12px system-ui,-apple-system,sans-serif;fill:var(--muted)}
+.legend{font:600 11.5px system-ui,-apple-system,sans-serif;fill:var(--muted)}
+.link{stroke:var(--blue);stroke-width:2;fill:none}
+.sublink{stroke:var(--accent);stroke-width:1.8;fill:none}
+.pulse{fill:var(--blue)}
+.subpulse{fill:var(--accent)}
+@media(prefers-reduced-motion:reduce){.pulse,.subpulse{display:none}}
+</style>
+<defs>
+<marker id="arrow" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0 0.5 L9 5 L0 9.5z" fill="var(--blue)"/></marker>
+</defs>
+<g style="--accent:var(--blue);--tint:var(--blue-bg)">
+<rect class="layer" x="18" y="12" width="438" height="244" rx="12"/>
+<text class="layer-title" x="34" y="35">Chart Mode · Default</text>
+<rect class="card" x="32" y="46" width="410" height="76" rx="8"/>
+<text class="card-title" x="50" y="71">User Helm Install</text>
+<text class="detail" x="50" y="90">Unified values.yaml configuration</text>
+<text class="detail" x="50" y="107">Full subchart parameter overrides</text>
+<rect class="card" x="32" y="166" width="410" height="76" rx="8"/>
+<text class="card-title" x="50" y="191">Single Helm Release</text>
+<text class="detail" x="50" y="210">Renders Worker and node DaemonSets</text>
+<text class="detail" x="50" y="227">Includes enabled bundled subcharts</text>
+<path class="sublink" d="M 237 122 V 164" marker-end="url(#arrow)"/>
+<circle class="subpulse" cx="0" cy="0" r="3"><animateMotion path="M 237 122 V 164" dur="1.8s" repeatCount="indefinite"/></circle>
+</g>
+<g style="--accent:var(--purple);--tint:var(--purple-bg)">
+<rect class="layer" x="504" y="12" width="438" height="244" rx="12"/>
+<text class="layer-title" x="520" y="35">Image Mode · External Worker</text>
+<rect class="card" x="518" y="46" width="410" height="76" rx="8"/>
+<text class="card-title" x="536" y="71">Worker Outside Chart Release</text>
+<text class="detail" x="536" y="90">Runs from binary or standalone image</text>
+<text class="detail" x="536" y="107">Reads packaged operator chart</text>
+<rect class="card" x="518" y="166" width="410" height="76" rx="8"/>
+<text class="card-title" x="536" y="191">Managed Device Manager Release</text>
+<text class="detail" x="536" y="210">Installs enabled applications at runtime</text>
+<text class="detail" x="536" y="227">Flag-derived overlay; Topograph excluded</text>
+<path class="sublink" d="M 723 122 V 164" marker-end="url(#arrow)"/>
+<circle class="subpulse" cx="0" cy="0" r="3"><animateMotion path="M 723 122 V 164" dur="1.8s" repeatCount="indefinite"/></circle>
+</g>
+<path class="link" d="M 237 256 V 310" marker-end="url(#arrow)"/>
+<circle class="pulse" cx="0" cy="0" r="3.5"><animateMotion path="M 237 256 V 310" dur="1.8s" repeatCount="indefinite"/></circle>
+<text class="legend" x="251" y="287">Applies</text>
+<path class="link" d="M 723 256 V 310" marker-end="url(#arrow)"/>
+<circle class="pulse" cx="0" cy="0" r="3.5"><animateMotion path="M 723 256 V 310" dur="1.8s" begin="-0.6s" repeatCount="indefinite"/></circle>
+<text class="legend" x="737" y="287">Applies</text>
+<g style="--accent:var(--teal);--tint:var(--teal-bg)">
+<rect class="layer" x="18" y="312" width="924" height="124" rx="12"/>
+<text class="layer-title" x="34" y="335">Shared Foundation &amp; Exclusive Ownership</text>
+<rect class="card" x="32" y="346" width="440" height="76" rx="8"/>
+<text class="card-title" x="50" y="371">Worker-Applied NodeFeatureRule</text>
+<text class="detail" x="50" y="390">gpustack-cpu-info is applied by the Worker</text>
+<text class="detail" x="50" y="407">Required independently of application switches</text>
+<rect class="card" x="488" y="346" width="440" height="76" rx="8"/>
+<text class="card-title" x="506" y="371">Exclusive Helm Release Ownership</text>
+<text class="detail" x="506" y="390">Same fullnameOverride gives objects the same names</text>
+<text class="detail" x="506" y="407">Do not mix modes on the same cluster</text>
+</g>
+<path class="link" d="M 32 460 h 36" marker-end="url(#arrow)"/>
+<text class="legend" x="78" y="464">Layer relationship / runtime flow</text>
+<path d="M 310 460 h 36" fill="none" stroke="var(--border)" stroke-width="1.8" stroke-dasharray="6 4"/>
+<text class="legend" x="356" y="464">Layered plane boundary (optional capabilities noted in cards)</text>
+</svg>

@@ -11,7 +11,7 @@ with the steps below; [Node Model Store](node-store.md) explains each mount.
 - [Read a node](#read-a-node)
 - [Capacity rule](#capacity-rule)
 - [Switch delivery](#switch-delivery)
-- [Where replicas land](#where-replicas-land)
+- [Replica placement](#replica-placement)
 - [Upgrade notes](#upgrade-notes)
 - [Removal and cache migration](#removal-and-cache-migration)
 - [Troubleshooting](#troubleshooting)
@@ -58,7 +58,7 @@ The registrar sidecar registers the plugin with kubelet. The plugin mounts the k
 directory with `Bidirectional` propagation and mounts its own plugin directory separately.
 A node without the plugin cannot mount node-delivered weights.
 
-| Layer | Carrier | Who changes it | What |
+| Layer | Carrier | Owner | Scope |
 | --- | --- | --- | --- |
 | Deploy time | chart values; in image mode the worker's overlay, which sets only the switch | installer | the switch, the cache root, the kubelet directory, images, resources and placement, the delivery mode |
 | Cluster runtime | [Settings](../../reference/settings.md#settings) in the operator namespace | administrator | delivery mode, Hub endpoint, proxy, no-proxy, CA bundle, watermarks, download concurrency and bandwidth |
@@ -200,7 +200,7 @@ uses the plugin for a hub artifact, whatever the `Setting` says.
 qualified replica does inside the delivery the `Setting` above already admits, and it never changes
 what `Engine` and `Node` mean.
 
-## Where replicas land
+## Replica placement
 
 A node-delivered `Pod` prefers the nodes holding its digest when they can take it; the mechanism is in
 [Topology-Aware Scheduling](../topology/scheduling.md#node-delivered-model-placement).
@@ -246,7 +246,7 @@ queue whose author wrote a preferred node affinity is now ranked by it, where be
 ignored. If you override `controllerManagerConfigYaml`, your string keeps its own gates: add the
 line to get the preference.
 
-What the gate is, and how to turn it off, is in [Where replicas land](#where-replicas-land).
+What the gate is, and how to turn it off, is in [Replica placement](#replica-placement).
 
 **Rolling the plugin.** The `DaemonSet` rolls one node at a time. Mounted `Pod`s keep running and reading
 throughout: a mount is a kernel bind mount. A mount asked for while a node's plugin restarts fails,

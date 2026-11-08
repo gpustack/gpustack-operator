@@ -44,7 +44,7 @@ See [Prefill and Decode Benchmark](../../modules/model-deployment/prefill-decode
 
 The deployment and probe below were captured on this cluster:
 
-| Item | Captured setup |
+| Item | Value |
 |---|---|
 | Cluster | Kubernetes 1.35.7; one CPU node and one GPU node (`gpu-node-0`) |
 | GPUs | 8 × NVIDIA H100 80 GB HBM3 SXM5; six GPUs assigned to serving |
@@ -61,7 +61,7 @@ NVLink carried *TP* = 2 traffic inside each `Pod`.
 ## Step 1: Start disaggregated serving
 
 Enable [node model delivery](../../modules/model-delivery/operations.md) and follow the
-[model prefetch procedure](../model-delivery/prefetch.md) with namespace `gpustack-bench`.
+[model prefetch procedure](../model-delivery/prefetch.md#step-1-create-artifact-and-prefetch) with namespace `gpustack-bench`.
 Create `ModelArtifact` `qwen3-32b` from `Qwen/Qwen3-32B` at revision
 `9216db5781bf21249d130ec9da846c4624c16137`, then prefetch it onto the H100 node.
 Use that artifact and namespace throughout the procedure instead of its DeepSeek example.

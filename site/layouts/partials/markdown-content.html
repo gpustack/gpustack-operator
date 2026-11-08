@@ -1,5 +1,6 @@
 {{- $lines := slice -}}
 {{- $fence := "" -}}
+{{- $comment := false -}}
 {{- range split .RawContent "\n" -}}
   {{- $line := . -}}
   {{- $markers := findRE "^ {0,3}(`{3,}|~{3,})" $line 1 -}}
@@ -11,10 +12,21 @@
       {{- $fence = "" -}}
     {{- end -}}
   {{- else if eq $fence "" -}}
-    {{- range findRE `!?\[[^\]\n]*\]\([^\)\n]+\)` $line -}}
-      {{- $target := replaceRE `^!?\[[^\]]*\]\(([^\)]+)\)$` "$1" . -}}
-      {{- $destination := partial "link-destination.html" (dict "page" $ "destination" $target "markdown" true) -}}
-      {{- $line = replace $line . (replace . (printf "(%s)" $target) (printf "(%s)" $destination)) -}}
+    {{- /* Mirrors without_link_urls() in hack/check/agent-index.py; check_prose_html() forbids prose on comment lines. */ -}}
+    {{- if $comment -}}
+      {{- if in $line "-->" -}}
+        {{- $comment = false -}}
+      {{- end -}}
+    {{- else if hasPrefix (strings.TrimSpace $line) "<!--" -}}
+      {{- if not (in $line "-->") -}}
+        {{- $comment = true -}}
+      {{- end -}}
+    {{- else -}}
+      {{- range findRE `!?\[[^\]\n]*\]\([^\)\n]+\)` $line -}}
+        {{- $target := replaceRE `^!?\[[^\]]*\]\(([^\)]+)\)$` "$1" . -}}
+        {{- $destination := partial "link-destination.html" (dict "page" $ "destination" $target "markdown" true) -}}
+        {{- $line = replace $line . (replace . (printf "(%s)" $target) (printf "(%s)" $destination)) -}}
+      {{- end -}}
     {{- end -}}
   {{- end -}}
   {{- $lines = $lines | append $line -}}

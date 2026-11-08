@@ -210,7 +210,7 @@ $ kubectl get pod -l mooncake.io/store-role=leader
 **Both roles get a `ServiceAccount`, and they are different accounts.** The operator renders a
 `ServiceAccount`, `Role` and `RoleBinding` per role in its own namespace, and names them on the `Pod`s:
 
-| role | grant | why |
+| Role | Grant | Purpose |
 |---|---|---|
 | leader | `leases`: `create`, `get`, `update`; `pods`: `patch` | takes the `Lease`, and labels its own `Pod` |
 | member | `leases`: `get` | follows an explicit `Lease` address, and nothing more |
