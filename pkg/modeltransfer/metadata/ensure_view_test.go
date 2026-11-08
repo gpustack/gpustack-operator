@@ -1,10 +1,12 @@
 package metadata
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -214,6 +216,49 @@ func TestEnsureViewRepairsCorruptDirectory(t *testing.T) {
 	repaired, err := EnsureView(st, viewRoot, hex, digest, nil)
 	require.NoError(t, err)
 	require.Equal(t, dir, repaired)
+	_, err = Verify(repaired)
+	require.NoError(t, err)
+}
+
+func TestEnsureViewPreservesReferencedFinalViewAndRepairsOnlyWithSelfRef(t *testing.T) {
+	st, err := store.Open(t.TempDir())
+	require.NoError(t, err)
+	other, err := store.Open(st.Root())
+	require.NoError(t, err)
+	hex := strings.Repeat("b", 64)
+	digest := "sha256:" + hex
+	publishFixtureTree(t, st, hex, true)
+	viewRoot := st.ViewsRoot()
+
+	dir, err := EnsureView(st, viewRoot, hex, digest, nil)
+	require.NoError(t, err)
+
+	// Another holder acquires a reference to hex before the view fails verification.
+	require.NoError(t, other.Acquire(context.Background(), store.Ref{VolumeID: "csi-mounted", Hex: hex}))
+	require.NoError(t, os.Chmod(filepath.Join(dir, "config.json"), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "config.json"), []byte("corrupt"), 0o644))
+	beforeInfo, err := os.Stat(dir)
+	require.NoError(t, err)
+	beforeIno := beforeInfo.Sys().(*syscall.Stat_t).Ino
+
+	// A new caller with its own pre-resolution reference cannot replace the
+	// directory while csi-mounted still holds hex.
+	require.NoError(t, st.Acquire(context.Background(), store.Ref{VolumeID: "csi-new", Hex: hex}))
+	_, err = EnsureView(st, viewRoot, hex, digest, nil, "csi-new")
+	require.Error(t, err)
+	afterInfo, err := os.Stat(dir)
+	require.NoError(t, err)
+	assert.Equal(t, beforeIno, afterInfo.Sys().(*syscall.Stat_t).Ino,
+		"a referenced final view must not be unlinked or replaced in place")
+
+	// Once the other holder releases its reference, the caller's own self-ref
+	// does not block repairing the corrupt directory, even if view.json itself is corrupt.
+	require.NoError(t, other.RemoveRef("csi-mounted"))
+	require.NoError(t, os.Chmod(filepath.Join(dir, viewFile), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, viewFile), []byte("{corrupt"), 0o644))
+	repaired, err := EnsureView(st, viewRoot, hex, digest, nil, "csi-new")
+	require.NoError(t, err)
+	assert.Equal(t, dir, repaired)
 	_, err = Verify(repaired)
 	require.NoError(t, err)
 }

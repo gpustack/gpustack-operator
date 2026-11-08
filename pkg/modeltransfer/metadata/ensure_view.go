@@ -1,6 +1,7 @@
 package metadata
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -22,7 +23,7 @@ import (
 // sealed tree does not carry it. No download is ever started: a
 // metadata-only request materializes nothing but the view.
 func EnsureView(st *store.Store, viewRoot, hex, digest string,
-	required []string,
+	required []string, selfVolumeID ...string,
 ) (string, error) {
 	if required == nil {
 		required = DefaultRequiredFiles
@@ -72,7 +73,7 @@ func EnsureView(st *store.Store, viewRoot, hex, digest string,
 		return "", err
 	}
 	final := filepath.Join(viewRoot, view.ID())
-	if err := publishView(stage.Dir(), final, digest, required); err != nil {
+	if err := publishStoreView(context.Background(), st, stage.Dir(), final, hex, digest, required, selfVolumeID...); err != nil {
 		return "", err
 	}
 	return final, nil

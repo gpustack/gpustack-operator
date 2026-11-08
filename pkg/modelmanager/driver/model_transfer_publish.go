@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"os"
-	"path/filepath"
 	"strings"
 
 	"github.com/container-storage-interface/spec/lib/go/csi"
@@ -38,15 +37,18 @@ type MetadataViews interface {
 // storeMetadataViews serves views under the store's root, beside and never
 // inside the published layout.
 type storeMetadataViews struct {
-	store *store.Store
+	store        *store.Store
+	selfVolumeID string
 }
 
 // Ensure implements MetadataViews.
 func (v *storeMetadataViews) Ensure(_ context.Context, hex, digest string,
 	required []string,
 ) (string, error) {
-	root := filepath.Join(v.store.Root(), "model-transfer", "views")
-	return metadata.EnsureView(v.store, root, hex, digest, required)
+	if v.selfVolumeID != "" {
+		return metadata.EnsureView(v.store, v.store.ViewsRoot(), hex, digest, required, v.selfVolumeID)
+	}
+	return metadata.EnsureView(v.store, v.store.ViewsRoot(), hex, digest, required)
 }
 
 // publishModelTransferVolume serves a volume the complete-tree contract must never
@@ -104,44 +106,36 @@ func (d *Driver) publishModelTransferVolume(ctx context.Context, req *csi.NodePu
 			"the target was mounted writable and is unmounted; the next call mounts it read-only")
 	}
 
-	// Resolve the view before any reference is recorded: a destination
-	// node without a full checkpoint serves a pre-staged view here, so the
-	// published-tree claim must not come first. The refusal mapping keeps
-	// the causes distinguishable: a bad request name is the caller's, a
-	// missing or stale source is the node's.
+	// Acquire before anything is resolved: the reference is what a removal
+	// pass reads under the claim lock, so registering it there first is
+	// what keeps the view — and the tree a build reads — under the mount.
+	// A pass that held the lock an instant earlier has already retired the
+	// view; this call then fails its resolution, undoes the reference, and
+	// kubelet's next call resolves again. Nothing resolves, builds or
+	// fetches before the reference exists, and the publication check
+	// stays advisory: it only picks the remote-fetch fallback, never
+	// gates the reference — a pre-staged view without a checkpoint
+	// acquires the same way.
+	ref := store.Ref{
+		VolumeID: req.GetVolumeId(), TargetPath: target, Hex: hex,
+		PodNamespace: namespace, PodName: vc[attrPodName], PodUID: vc[attrPodUID],
+	}
+	if err := d.Store.Acquire(ctx, ref); err != nil {
+		return nil, recordReferenceError(err)
+	}
+
 	views := d.MetadataViews
 	if views == nil {
-		views = &storeMetadataViews{store: d.Store}
+		views = &storeMetadataViews{store: d.Store, selfVolumeID: req.GetVolumeId()}
 	}
 	viewDir, err := views.Ensure(ctx, hex, attrs.Digest, required)
 	if err != nil && !d.Store.IsPublished(hex) && vc[modelstore.ModelTransferClientConfigAttribute] != "" {
 		viewDir, err = d.fetchModelTransferMetadata(ctx, req, attrs.Digest, required)
 	}
 	if err != nil {
+		d.dropRef(ref)
 		metrics.Mounts.WithLabelValues(metrics.MountDenied).Inc()
 		return nil, d.refuseViewError(err)
-	}
-
-	// The view derives from a published tree when one exists, so the tree
-	// is referenced for as long as the mount lives: the collector cannot
-	// remove the source of a mounted view, exactly as it cannot remove a
-	// mounted tree. Without a published tree the reference still records
-	// the mount, so Unpublish can release it and the rebuild can keep it.
-	ref := store.Ref{
-		VolumeID: req.GetVolumeId(), TargetPath: target, Hex: hex,
-		PodNamespace: namespace, PodName: vc[attrPodName], PodUID: vc[attrPodUID],
-	}
-	if d.Store.IsPublished(hex) {
-		published, err := d.Store.Claim(ctx, ref)
-		if err != nil {
-			return nil, recordReferenceError(err)
-		}
-		if !published {
-			return nil, status.Error(codes.FailedPrecondition,
-				"the published tree vanished while mounting its metadata view; the next call resolves a view again")
-		}
-	} else if err := d.Store.WriteRef(ref); err != nil {
-		return nil, status.Errorf(codes.Internal, "record the reference: %v", err)
 	}
 
 	if err := os.MkdirAll(target, 0o750); err != nil {

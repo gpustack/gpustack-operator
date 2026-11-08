@@ -136,6 +136,124 @@ func modelTransferRequest(target string, attrs map[string]string) *csi.NodePubli
 	return publishRequest(target, kubeletVolumeContext(attrs, "team-a"))
 }
 
+// holdClaimsFlock takes the store's cross-process claim lock and returns
+// its releaser, the way a removal pass holds it while it reads the
+// references and retires content.
+func holdClaimsFlock(t *testing.T, st *store.Store) func() {
+	t.Helper()
+	lock, err := os.OpenFile(filepath.Join(st.Root(), "ledger", "claims.lock"),
+		os.O_CREATE|os.O_RDWR, 0o600)
+	require.NoError(t, err)
+	require.NoError(t, unix.Flock(int(lock.Fd()), unix.LOCK_EX|unix.LOCK_NB))
+
+	return func() {
+		_ = unix.Flock(int(lock.Fd()), unix.LOCK_UN)
+		_ = lock.Close()
+	}
+}
+
+// preStageVerifiedView promotes a verified view of digest into the store's
+// views root without publishing any tree, the way a remote metadata
+// delivery or a previous source leaves it.
+func preStageVerifiedView(t *testing.T, st *store.Store, digest string) string {
+	t.Helper()
+	viewRoot := st.ViewsRoot()
+	require.NoError(t, os.MkdirAll(viewRoot, 0o755))
+	fixture := filepath.Join("..", "..", "..", "model-transfer", "contracts", "fixtures", "tiny_dense")
+	tree := t.TempDir()
+	manifest, err := os.ReadFile(filepath.Join(fixture, "manifest.json"))
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(filepath.Join(tree, "manifest.json"), manifest, 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(tree, "config.json"),
+		[]byte(`{"architectures":["TinyForCausalLM"]}`), 0o644))
+	checkpoint, err := os.ReadFile(filepath.Join(fixture, "checkpoint.safetensors"))
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(filepath.Join(tree, "checkpoint.safetensors"), checkpoint, 0o644))
+	staging := filepath.Join(t.TempDir(), "staging")
+	view, err := metadata.Build(tree, staging, digest, nil)
+	require.NoError(t, err)
+	final := filepath.Join(viewRoot, view.ID())
+	require.NoError(t, os.Rename(staging, final))
+	// A promoted view carries its promotion time; age it so a collector's
+	// grace is behind it, the way a pre-staged view's is.
+	stale := time.Now().Add(-time.Hour)
+	require.NoError(t, os.Chtimes(final, stale, stale))
+
+	return final
+}
+
+// TestNodePublishAcquiresBeforeItResolves pins the mount-side ordering that
+// closes the success-after-delete window: a mount registers its reference
+// under the claim lock before it resolves anything, so a removal that
+// holds the lock cannot be outrun. While the pass holds the lock, the
+// mount has written no reference; when the pass retires the view on its
+// snapshot and lets go, the mount fails its resolution, undoes its
+// reference, and answers nothing like success. A retry against a view that
+// a rebuild or fetch brings back mounts, and its reference cleans up at
+// unmount.
+func TestNodePublishAcquiresBeforeItResolves(t *testing.T) {
+	hex := strings.Repeat("e", 64)
+	digest := "sha256:" + hex
+	artifacts := testArtifact("team-a", "model", "uid-ma", digest, true)
+	env := newTestEnv(t, artifacts) // nothing published for this hex
+	viewDir := preStageVerifiedView(t, env.d.Store, digest)
+	attrs := map[string]string{
+		AttrArtifact: "model", AttrArtifactUID: "uid-ma", AttrManifestDigest: digest,
+		attrModelTransferDelivery: modelTransferDeliveryMetadata,
+	}
+
+	release := holdClaimsFlock(t, env.d.Store)
+	published := make(chan error, 1)
+	go func() {
+		_, err := env.d.NodePublishVolume(context.Background(),
+			modelTransferRequest(env.target("pod-1"), attrs))
+		published <- err
+	}()
+	// While the pass holds the lock, the mount has registered nothing:
+	// its acquisition waits for this lock, and its resolution comes only
+	// after.
+	require.Never(t, func() bool {
+		refs, err := env.d.Store.Refs()
+		return err == nil && len(refs) > 0
+	}, 150*time.Millisecond, 10*time.Millisecond,
+		"the mount wrote a reference while a removal held the claim lock")
+
+	// The pass retires the view on its snapshot and lets go.
+	require.NoError(t, os.RemoveAll(viewDir))
+	release()
+
+	require.Error(t, <-published,
+		"a mount whose view the removal retired must not answer success")
+	refs, err := env.d.Store.Refs()
+	require.NoError(t, err)
+	assert.Empty(t, refs, "the failed mount leaves no reference behind")
+	_, bound := env.mounter.mounted[env.target("pod-1")]
+	assert.False(t, bound, "nothing stays bound to a retired view")
+
+	// A retry against a view that a rebuild or fetch brought back mounts.
+	preStageVerifiedView(t, env.d.Store, digest)
+	_, err = env.d.NodePublishVolume(context.Background(),
+		modelTransferRequest(env.target("pod-1"), attrs))
+	require.NoError(t, err)
+	ref, found, err := env.d.Store.ReadRef("csi-vol-1")
+	require.NoError(t, err)
+	require.True(t, found)
+	assert.Equal(t, hex, ref.Hex)
+	mountedView := env.mounter.mounted[env.target("pod-1")]
+	gone, err := env.d.Store.RemoveUnreferencedView(context.Background(), mountedView, hex)
+	require.NoError(t, err)
+	assert.False(t, gone, "the collector keeps a mounted view's directory")
+
+	// Unmount releases the reference, and the view is terminal again.
+	_, err = env.d.NodeUnpublishVolume(context.Background(), &csi.NodeUnpublishVolumeRequest{
+		VolumeId: "csi-vol-1", TargetPath: env.target("pod-1"),
+	})
+	require.NoError(t, err)
+	gone, err = env.d.Store.RemoveUnreferencedView(context.Background(), mountedView, hex)
+	require.NoError(t, err)
+	assert.True(t, gone, "an unmounted view is reclaimable again")
+}
+
 func TestNodePublishModelTransferMetadataMountsTheView(t *testing.T) {
 	hex := strings.Repeat("a", 64)
 	env := newModelTransferEnv(t, hex)

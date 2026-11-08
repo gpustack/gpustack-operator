@@ -70,7 +70,7 @@ var (
 	// metadataViewRootPattern is a bind mount of a metadata view: the view directory under the
 	// cache root's model-transfer/views/, named by the view's content address. A view mount never implies
 	// a published tree; its digest is recovered from the view's own record.
-	metadataViewRootPattern = regexp.MustCompile(`/model-transfer/views/([0-9a-f]{64})$`)
+	metadataViewRootPattern = regexp.MustCompile(`/` + viewsSubpath + `/([0-9a-f]{64})$`)
 	// csiTargetPattern is kubelet's target of a CSI volume,
 	// <kubelet>/pods/<pod UID>/volumes/kubernetes.io~csi/<volume>/mount.
 	csiTargetPattern = regexp.MustCompile(`/pods/([^/]+)/volumes/kubernetes\.io~csi/([^/]+)/mount$`)
@@ -231,7 +231,7 @@ func (s *Store) Rebuild(ctx context.Context, mounts []Mount, device string) (Reb
 // root and returns the artifact digest's hexadecimal part. fallback is the
 // ledger's word, returned when the record cannot be read.
 func (s *Store) viewDigest(viewID, fallback string) string {
-	raw, err := os.ReadFile(filepath.Join(s.root, "model-transfer", "views", viewID, "view.json"))
+	raw, err := os.ReadFile(filepath.Join(s.ViewsRoot(), viewID, "view.json"))
 	if err != nil {
 		klog.ErrorS(err, "read mounted metadata view", "view", viewID)
 		return fallback

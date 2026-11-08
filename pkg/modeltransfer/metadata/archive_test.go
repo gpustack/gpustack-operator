@@ -11,10 +11,13 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"gpustack.ai/gpustack/pkg/modelmanager/store"
 )
 
 func TestMetadataArchiveRoundTripWithoutCheckpoint(t *testing.T) {
@@ -149,5 +152,46 @@ func TestImportViewUsesOwnedRecoverableStaging(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, input.checked)
 	_, err = Verify(imported)
+	require.NoError(t, err)
+}
+
+func TestImportStoreViewPreservesReferencedFinalAndRepairsUnreferenced(t *testing.T) {
+	view, dir := buildView(t)
+	var archive bytes.Buffer
+	require.NoError(t, ExportView(t.Context(), dir, &archive))
+
+	st, err := store.Open(t.TempDir())
+	require.NoError(t, err)
+	hex := store.HexOf(view.ArtifactDigest)
+
+	imported, err := ImportStoreView(t.Context(), st, bytes.NewReader(archive.Bytes()), view.ArtifactDigest, DefaultRequiredFiles)
+	require.NoError(t, err)
+
+	// Corrupt the published view while an active reference protects hex.
+	require.NoError(t, st.Acquire(t.Context(), store.Ref{VolumeID: "csi-mounted", Hex: hex}))
+	require.NoError(t, os.Chmod(filepath.Join(imported, "config.json"), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(imported, "config.json"), []byte("corrupt"), 0o644))
+	beforeInfo, err := os.Stat(imported)
+	require.NoError(t, err)
+	beforeIno := beforeInfo.Sys().(*syscall.Stat_t).Ino
+
+	// Both standalone ImportView and ImportStoreView with another live ref must
+	// refuse to replace the referenced directory.
+	_, err = ImportView(t.Context(), bytes.NewReader(archive.Bytes()), st.ViewsRoot(), view.ArtifactDigest, DefaultRequiredFiles)
+	require.Error(t, err)
+	require.NoError(t, st.Acquire(t.Context(), store.Ref{VolumeID: "csi-fetching", Hex: hex}))
+	_, err = ImportStoreView(t.Context(), st, bytes.NewReader(archive.Bytes()), view.ArtifactDigest, DefaultRequiredFiles, "csi-fetching")
+	require.Error(t, err)
+	afterInfo, err := os.Stat(imported)
+	require.NoError(t, err)
+	assert.Equal(t, beforeIno, afterInfo.Sys().(*syscall.Stat_t).Ino,
+		"ImportView must never replace a referenced final view directory")
+
+	// Once csi-mounted unmounts, csi-fetching's own pre-mount reference repairs the view.
+	require.NoError(t, st.RemoveRef("csi-mounted"))
+	repaired, err := ImportStoreView(t.Context(), st, bytes.NewReader(archive.Bytes()), view.ArtifactDigest, DefaultRequiredFiles, "csi-fetching")
+	require.NoError(t, err)
+	assert.Equal(t, imported, repaired)
+	_, err = Verify(repaired)
 	require.NoError(t, err)
 }

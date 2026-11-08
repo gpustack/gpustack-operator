@@ -209,5 +209,5 @@ func (d *Driver) fetchMetadataEndpoint(ctx context.Context, req *csi.NodePublish
 	if response.StatusCode != http.StatusOK || response.Header.Get("X-GPUStack-Source-Pod-UID") != endpoint.PodUID {
 		return "", errors.New("source metadata identity was refused")
 	}
-	return metadata.ImportView(ctx, response.Body, filepath.Join(d.Store.Root(), "model-transfer", "views"), digest, required)
+	return metadata.ImportStoreView(ctx, d.Store, response.Body, digest, required, req.GetVolumeId())
 }

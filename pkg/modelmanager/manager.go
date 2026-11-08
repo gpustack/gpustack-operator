@@ -83,13 +83,7 @@ func (m *Manager) Start(ctx context.Context) error {
 	downloader := download.New(nil, 1, 0)
 	downloader.Received = func(n int64) { metrics.DownloadBytes.WithLabelValues("hub").Add(float64(n)) }
 	materializer := &materialize.Materializer{Store: m.Store, Now: time.Now, Base: ctx}
-	collector := &gc.Collector{
-		Store:       m.Store,
-		Usage:       func() (gc.Usage, error) { return gc.Statfs(m.Store.Root()) },
-		Referenced:  m.referenced,
-		Downloading: materializer.Downloading,
-		Now:         time.Now,
-	}
+	collector := m.newCollector(materializer)
 	kubeletCap, err := m.kubeletCap()
 	if err != nil {
 		return err
@@ -247,6 +241,21 @@ func (m *Manager) referenced() (map[string]bool, error) {
 	}
 
 	return set, nil
+}
+
+// newCollector builds the collector Start serves. It sweeps the published
+// layout and the store's canonical metadata-view root — the directory the
+// mounts resolve and the metadata endpoint exports from — so a finished
+// view's files do not outlive the store that holds them.
+func (m *Manager) newCollector(materializer *materialize.Materializer) *gc.Collector {
+	return &gc.Collector{
+		Store:       m.Store,
+		Usage:       func() (gc.Usage, error) { return gc.Statfs(m.Store.Root()) },
+		Referenced:  m.referenced,
+		Downloading: materializer.Downloading,
+		ViewRoot:    m.Store.ViewsRoot(),
+		Now:         time.Now,
+	}
 }
 
 // kubeletCap returns the high watermark's cap when the cache shares kubelet's pods filesystem, and nil

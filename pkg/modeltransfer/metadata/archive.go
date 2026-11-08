@@ -9,6 +9,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"gpustack.ai/gpustack/pkg/modelmanager/store"
 )
 
 // MaxArchiveBytes bounds one metadata delivery, including tokenizer files and
@@ -63,6 +65,21 @@ func exportFile(ctx context.Context, writer *tar.Writer, name string, file *os.F
 // of the source is the caller's TLS and workload-authorization responsibility.
 // It never creates a cache publication marker or calls a checkpoint downloader.
 func ImportView(ctx context.Context, input io.Reader, viewRoot, digest string, required []string) (string, error) {
+	return importView(ctx, nil, input, viewRoot, digest, required)
+}
+
+// ImportStoreView stages and publishes a bounded metadata archive into st's
+// canonical views root, retiring a corrupt existing view only when no other
+// reference in st names the digest.
+func ImportStoreView(
+	ctx context.Context, st *store.Store, input io.Reader, digest string, required []string, selfVolumeID ...string,
+) (string, error) {
+	return importView(ctx, st, input, st.ViewsRoot(), digest, required, selfVolumeID...)
+}
+
+func importView(
+	ctx context.Context, st *store.Store, input io.Reader, viewRoot, digest string, required []string, selfVolumeID ...string,
+) (string, error) {
 	if err := ValidateRequired(required); err != nil {
 		return "", err
 	}
@@ -131,7 +148,7 @@ func ImportView(ctx context.Context, input io.Reader, viewRoot, digest string, r
 		return "", ErrStaleDigest
 	}
 	final := filepath.Join(viewRoot, view.ID())
-	if err := publishView(stage, final, digest, required); err != nil {
+	if err := publishStoreView(ctx, st, stage, final, store.HexOf(digest), digest, required, selfVolumeID...); err != nil {
 		return "", err
 	}
 	return final, nil
