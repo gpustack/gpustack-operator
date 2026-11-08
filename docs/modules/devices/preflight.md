@@ -342,7 +342,7 @@ and the CLI is pointed at the socket that was resolved rather than at its own de
 A container step that cannot be taken is **printed complete**, and the row says it was emitted. That
 is an answer, not a failure of the node, and it does not affect the exit code. Whether it runs as
 printed depends on the case: the two below that write nothing to the host name what you have to put
-there first, and the `ctr` row names a CLI this host does not have. Five cases reach it:
+there first, and the `ctr` row names a CLI this host does not have. The following cases reach it:
 
 | Case | Printed output |
 |---|---|
@@ -556,7 +556,7 @@ the figure is the evidence, and a cap near the card's own size could be read as 
 
 ## Reading the result
 
-One YAML document goes to stdout, with **three sections**. This outline uses `...` for omitted
+One YAML document goes to stdout, with the following sections. This outline uses `...` for omitted
 values and rows:
 
 ```yaml
@@ -611,7 +611,7 @@ it](../rdma/operations.md#enabling-numa-alignment).
 
 **A policy that no readable configuration names is reported as `unknown`, never as the kubelet's
 default.** Reporting `none` because nothing was found would publish a value nobody read. An
-`unknown` always carries a `note` saying which of the four reasons applies: nothing the kubelet
+`unknown` always carries a `note` saying which reason applies: nothing the kubelet
 reads named one, a file could not be read, two distribution trees name different policies, or the
 host's process table was not visible.
 
@@ -644,7 +644,7 @@ was killed mid-measurement reports as unable to slice. A second run therefore re
 sweeps anything, reports every manufacturer `unavailable` naming the lock, and exits non-zero.
 `--dry-run` is exempt: it starts nothing and writes nothing.
 
-**A failed detection stops that manufacturer's other two questions.** Detection is the floor the rest
+**A failed detection stops that manufacturer's remaining questions.** Detection is the floor the rest
 stands on, so when it reads `unavailable` (the container cannot see hardware the host reports, or the
 accelerators answered but could not be named) the group carries its detection block, no rows, and a
 `note` saying the remaining questions are unanswerable. Fix what the detection *`reason`* names and run

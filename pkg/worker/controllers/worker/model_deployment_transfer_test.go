@@ -12,9 +12,11 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	appsv1 "k8s.io/api/apps/v1"
 	core "k8s.io/api/core/v1"
 	storage "k8s.io/api/storage/v1"
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/apimachinery/pkg/util/sets"
 	ctrlcli "sigs.k8s.io/controller-runtime/pkg/client"
 	ctrlfake "sigs.k8s.io/controller-runtime/pkg/client/fake"
@@ -447,7 +449,7 @@ func TestModelDeploymentModelTransferRemotePodRendering(t *testing.T) {
 		Name:    modelDeploymentMainContainerName,
 		Command: []string{"vllm", "serve", "org/model"},
 	}
-	render.applyModelTransfer(container)
+	render.applyModelTransfer(container, workercore.ModelDeploymentEngineVLLM)
 
 	require.Len(t, container.Command, 7)
 	assert.Equal(t, "sh", container.Command[0])
@@ -477,7 +479,7 @@ func TestModelDeploymentModelTransferRemotePodRendering(t *testing.T) {
 		Command: []string{"vllm", "serve", "org/model"},
 		Args:    []string{"--load-format", modelDeploymentModelTransferLoadFormat},
 	}
-	render.applyModelTransfer(preconfigured)
+	render.applyModelTransfer(preconfigured, workercore.ModelDeploymentEngineVLLM)
 	assert.Equal(t, []string{"--load-format", modelDeploymentModelTransferLoadFormat}, preconfigured.Args,
 		"an existing --load-format model-transfer is not duplicated")
 
@@ -492,7 +494,7 @@ func TestModelDeploymentModelTransferRemotePodRendering(t *testing.T) {
 
 	other := &core.Container{Name: modelDeploymentMainContainerName, Command: []string{"vllm", "serve", "m"}}
 	nodeRender := &ModelDeploymentArtifactRender{Delivery: workercore.ModelDeploymentModelDeliveryNode}
-	nodeRender.applyModelTransfer(other)
+	nodeRender.applyModelTransfer(other, workercore.ModelDeploymentEngineVLLM)
 	assert.Equal(t, []string{"vllm", "serve", "m"}, other.Command,
 		"a non-remote delivery is decorated by nothing")
 }
@@ -926,7 +928,7 @@ func TestModelDeploymentModelTransferBackendEnv(t *testing.T) {
 	container := &core.Container{
 		Name: modelDeploymentMainContainerName, Command: []string{"vllm", "serve", "m"},
 	}
-	render.applyModelTransfer(container)
+	render.applyModelTransfer(container, workercore.ModelDeploymentEngineVLLM)
 
 	found := false
 	for _, e := range container.Env {
@@ -941,7 +943,7 @@ func TestModelDeploymentModelTransferBackendEnv(t *testing.T) {
 	plainContainer := &core.Container{
 		Name: modelDeploymentMainContainerName, Command: []string{"vllm", "serve", "m"},
 	}
-	plain.applyModelTransfer(plainContainer)
+	plain.applyModelTransfer(plainContainer, workercore.ModelDeploymentEngineVLLM)
 	for _, e := range plainContainer.Env {
 		assert.NotEqual(t, modelDeploymentModelTransferEnvBackend, e.Name,
 			"no qualified backend means no backend claim")
@@ -2336,4 +2338,493 @@ func TestModelTransferIneligibleRoleHoldsALoadedRemoteReplica(t *testing.T) {
 	assert.Nil(t, got, "an ineligible fallback must not roll a replica that already loaded remotely")
 	assert.Equal(t, modelDeploymentModelTransferReasonRoleIneligible, reason)
 	assert.Contains(t, message, "roll")
+}
+
+// ---------------------------------------------------------------------------
+// The ModelExpress delivery: recognition, the sidecar objects, and the staging.
+// ---------------------------------------------------------------------------
+
+// modelExpressHubRender is a hub artifact render for a ModelExpress role: the weights'
+// hub identity is what a published source identity names.
+func modelExpressHubRender() *ModelDeploymentArtifactRender {
+	return &ModelDeploymentArtifactRender{
+		Delivery:       workercore.ModelDeploymentModelDeliveryNode,
+		Hub:            modelDeploymentHubHuggingFace,
+		ArtifactName:   "weights",
+		ArtifactUID:    "artifact-uid-1",
+		ManifestDigest: modelTransferTestDigest,
+	}
+}
+
+func TestModelDeploymentModelExpressLoadFormatRecognition(t *testing.T) {
+	cases := []struct {
+		name   string
+		engine string
+		argv   []string
+		want   string
+	}{
+		{name: "none", engine: workercore.ModelDeploymentEngineVLLM, argv: []string{"vllm", "serve", "m"}, want: ""},
+		{name: "two token form", engine: workercore.ModelDeploymentEngineVLLM, argv: []string{"vllm", "--load-format", "modelexpress"}, want: "modelexpress"},
+		{name: "equals form", engine: workercore.ModelDeploymentEngineVLLM, argv: []string{"vllm", "--load-format=mx"}, want: "mx"},
+		{name: "underscore spelling on vLLM", engine: workercore.ModelDeploymentEngineVLLM, argv: []string{"vllm", "--load_format", "Modelexpress "}, want: "modelexpress"},
+		{name: "underscore spelling is not a flag on SGLang", engine: workercore.ModelDeploymentEngineSGLang, argv: []string{"python", "--load_format", "modelexpress"}, want: ""},
+		{name: "unique prefix abbreviation", engine: workercore.ModelDeploymentEngineVLLM, argv: []string{"vllm", "--load-form=mx"}, want: "mx"},
+		{name: "double dash ends option scanning", engine: workercore.ModelDeploymentEngineVLLM, argv: []string{"vllm", "--", "--load-format", "modelexpress"}, want: ""},
+		{name: "the last flag wins", engine: workercore.ModelDeploymentEngineVLLM, argv: []string{"vllm", "--load-format", "auto", "--load-format", "mx"}, want: "mx"},
+		{name: "a dangling flag names nothing", engine: workercore.ModelDeploymentEngineVLLM, argv: []string{"vllm", "--load-format"}, want: ""},
+		{name: "a value with dashes is not an alias", engine: workercore.ModelDeploymentEngineVLLM, argv: []string{"vllm", "--load-format=modelexpressx"}, want: "modelexpressx"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			assert.Equal(t, c.want, extractLoadFormatFromArgs(c.engine, c.argv))
+		})
+	}
+
+	for _, tc := range []struct {
+		name string
+		role workercore.ModelDeploymentRole
+		want bool
+	}{
+		{
+			name: "managed extra args select modelexpress",
+			role: workercore.ModelDeploymentRole{ExtraArgs: []string{"--load-format", "modelexpress"}},
+			want: true,
+		},
+		{
+			name: "managed extra args select the shorthand",
+			role: workercore.ModelDeploymentRole{ExtraArgs: []string{"--load-format=mx"}},
+			want: true,
+		},
+		{
+			name: "a take-over command selects modelexpress",
+			role: workercore.ModelDeploymentRole{Command: []string{"python", "-m", "x", "--load-format=Modelexpress"}},
+			want: true,
+		},
+		{
+			name: "auto is not model express",
+			role: workercore.ModelDeploymentRole{ExtraArgs: []string{"--load-format=auto"}},
+			want: false,
+		},
+		{
+			name: "no format at all",
+			role: workercore.ModelDeploymentRole{ExtraArgs: []string{"--served-model-name", "qwen"}},
+			want: false,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			role := tc.role
+			assert.Equal(t, tc.want, modelDeploymentRoleUsesModelExpress(workercore.ModelDeploymentEngineVLLM, &role))
+		})
+	}
+	assert.False(t, modelDeploymentRoleUsesModelExpress(workercore.ModelDeploymentEngineVLLM, nil), "no role is no claim")
+}
+
+func TestModelDeploymentModelExpressResourceNameAndAddress(t *testing.T) {
+	short := &workercore.ModelDeployment{
+		ObjectMeta: meta.ObjectMeta{Name: "qwen", Namespace: "team-a"},
+	}
+	assert.Equal(t, "qwen-modelexpress", modelDeploymentModelExpressResourceName(short))
+	assert.Equal(t, "qwen-modelexpress.team-a.svc:8001", modelDeploymentModelExpressServerAddress(short))
+
+	long := &workercore.ModelDeployment{
+		ObjectMeta: meta.ObjectMeta{Name: strings.Repeat("q", 80), Namespace: "team-a"},
+	}
+	name := modelDeploymentModelExpressResourceName(long)
+	assert.LessOrEqual(t, len(name), 63, "the name must fit a DNS label")
+	assert.True(t, strings.HasPrefix(name, strings.Repeat("q", 80)[:20]))
+	assert.NotContains(t, name, "modelexpress", "a truncated name settles by digest, not by a cut suffix")
+	assert.Equal(t, name, modelDeploymentModelExpressResourceName(long), "the digest settles one name")
+}
+
+func TestRenderModelDeploymentModelExpressObjects(t *testing.T) {
+	modelexpressRole := func() workercore.ModelDeploymentRole {
+		return workercore.ModelDeploymentRole{
+			Name: "server", ExtraArgs: []string{"--load-format", "modelexpress"},
+		}
+	}
+	cases := []struct {
+		name    string
+		md      *workercore.ModelDeployment
+		wantAny bool
+	}{
+		{
+			name: "a role selecting modelexpress renders the pair",
+			md: &workercore.ModelDeployment{
+				ObjectMeta: meta.ObjectMeta{Name: "qwen", Namespace: "team-a"},
+				Spec:       workercore.ModelDeploymentSpec{Roles: []workercore.ModelDeploymentRole{modelexpressRole()}},
+			},
+			wantAny: true,
+		},
+		{
+			name: "the mx shorthand renders the pair",
+			md: &workercore.ModelDeployment{
+				ObjectMeta: meta.ObjectMeta{Name: "qwen", Namespace: "team-a"},
+				Spec: workercore.ModelDeploymentSpec{Roles: []workercore.ModelDeploymentRole{{
+					Name: "server", ExtraArgs: []string{"--load-format=mx"},
+				}}},
+			},
+			wantAny: true,
+		},
+		{
+			name: "a plain role renders nothing",
+			md: &workercore.ModelDeployment{
+				ObjectMeta: meta.ObjectMeta{Name: "qwen", Namespace: "team-a"},
+				Spec: workercore.ModelDeploymentSpec{Roles: []workercore.ModelDeploymentRole{{
+					Name: "server", ExtraArgs: []string{"--load-format=auto"},
+				}}},
+			},
+		},
+		{
+			name: "a deleted deployment renders nothing",
+			md: func() *workercore.ModelDeployment {
+				now := meta.Now()
+				return &workercore.ModelDeployment{
+					ObjectMeta: meta.ObjectMeta{
+						Name: "qwen", Namespace: "team-a", DeletionTimestamp: &now,
+					},
+					Spec: workercore.ModelDeploymentSpec{Roles: []workercore.ModelDeploymentRole{modelexpressRole()}},
+				}
+			}(),
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			deploy, service := renderModelDeploymentModelExpressObjects(context.Background(), c.md)
+			if !c.wantAny {
+				assert.Nil(t, deploy)
+				assert.Nil(t, service)
+				return
+			}
+			require.NotNil(t, deploy)
+			require.NotNil(t, service)
+
+			require.Len(t, deploy.Spec.Template.Spec.Containers, 1)
+			server := deploy.Spec.Template.Spec.Containers[0]
+			assert.Equal(t, appsv1.RecreateDeploymentStrategyType, deploy.Spec.Strategy.Type,
+				"two servers at once would split the replicas' registrations")
+			assert.Equal(t, int32(1), *deploy.Spec.Replicas)
+			assert.Equal(t, []string{"modelexpress-server"}, server.Command)
+			assert.Equal(t, "gpustack/mirrored-modelexpress-server:v0.7.0",
+				strings.TrimSpace(server.Image))
+			env := map[string]string{}
+			for _, e := range server.Env {
+				env[e.Name] = e.Value
+			}
+			assert.Equal(t, "memory", env["MX_METADATA_BACKEND"])
+			assert.Equal(t, "8001", env["MODEL_EXPRESS_SERVER_PORT"])
+			require.Len(t, server.Ports, 1)
+			assert.Equal(t, int32(8001), server.Ports[0].ContainerPort)
+			require.NotNil(t, server.ReadinessProbe)
+			require.NotNil(t, server.ReadinessProbe.TCPSocket)
+			assert.Equal(t, intstr.FromInt32(8001), server.ReadinessProbe.TCPSocket.Port)
+			require.NotNil(t, server.LivenessProbe)
+			require.NotNil(t, server.LivenessProbe.TCPSocket)
+			assert.Equal(t, intstr.FromInt32(8001), server.LivenessProbe.TCPSocket.Port)
+
+			assert.Equal(t, core.ServiceTypeClusterIP, service.Spec.Type)
+			require.Len(t, service.Spec.Ports, 1)
+			assert.Equal(t, "grpc", service.Spec.Ports[0].Name)
+			assert.Equal(t, int32(8001), service.Spec.Ports[0].Port)
+			assert.Equal(t, intstr.FromInt32(8001), service.Spec.Ports[0].TargetPort)
+			assert.Equal(t, core.ProtocolTCP, service.Spec.Ports[0].Protocol)
+		})
+	}
+}
+
+func TestModelDeploymentModelTransferRoleKeepsModelexpressFormat(t *testing.T) {
+	// The three delivered formats are the operator's own vocabulary: a role selecting one
+	// of them is not in conflict with the operator, and a role selecting anything else is.
+	vllm := workercore.ModelDeploymentEngineVLLM
+	for _, format := range []string{"model-transfer", "modelexpress", "mx", "MX", " Modelexpress "} {
+		assert.False(t, modelDeploymentRoleHasConflictingLoadFormat(vllm, []string{"--load-format", format}),
+			"%q is a delivered format", format)
+		assert.False(t, modelDeploymentRoleHasConflictingLoadFormat(vllm, []string{"--load-format=" + format}),
+			"%q is a delivered format", format)
+	}
+	for _, format := range []string{"auto", "safetensors", ""} {
+		assert.True(t, modelDeploymentRoleHasConflictingLoadFormat(vllm, []string{"--load-format", format}),
+			"%q is not a delivered format", format)
+	}
+	assert.True(t, modelDeploymentRoleHasConflictingLoadFormat(
+		vllm, []string{"--load-format", "--enforce-eager"},
+	), "a flag followed by another option has no consumable value and is a conflict")
+	assert.True(t, modelDeploymentRoleHasConflictingLoadFormat(
+		vllm, []string{"--load-format", "modelexpress", "--load-format", "mx"},
+	),
+		"two selections are one conflict whatever the values")
+
+	// A remote delivery defers to the role's own selection instead of appending its own.
+	render := modelTransferRemoteRender()
+	container := &core.Container{
+		Name:    modelDeploymentMainContainerName,
+		Command: []string{"vllm", "serve", "m", "--load-format", "modelexpress"},
+	}
+	render.applyModelTransfer(container, workercore.ModelDeploymentEngineVLLM)
+	joined := strings.Join(append(slices.Clone(container.Command), container.Args...), " ")
+	assert.Contains(t, joined, "--load-format modelexpress")
+	assert.NotContains(t, joined, "--load-format model-transfer",
+		"the operator never appends a second selection beside the role's own")
+	assert.Equal(t, 1, strings.Count(joined, "--load-format"),
+		"the effective selection stays the role's own")
+}
+
+// modelExpressPodFixture renders one managed vLLM role selecting modelexpress against a
+// hub artifact, under the given delivery and policy, and hands back the pod.
+func modelExpressPodFixture(t *testing.T, delivery workercore.ModelDeploymentModelDelivery,
+	policy string,
+) *core.Pod {
+	t.Helper()
+	modelTransferPolicyStub(t, policy)
+	md := newRenderDeployment()
+	md.Spec.Roles[0].ExtraArgs = []string{"--load-format", "modelexpress"}
+	render := modelExpressHubRender()
+	render.Delivery = delivery
+	if delivery == workercore.ModelDeploymentModelDeliveryRemote {
+		render.ModelTransferFallback = workercore.ModelDeploymentModelDeliveryNode
+		render.ModelTransferPolicy = policy
+	}
+	render.ModelTransferConfigMap = "model-transfer-endpoints"
+	pod, err := renderModelDeploymentPodTemplate(context.Background(), ModelDeploymentRenderInput{
+		Deployment:   md,
+		Role:         &md.Spec.Roles[0],
+		InstanceType: newRenderInstanceType(),
+		Artifact:     render,
+	})
+	require.NoError(t, err)
+
+	return pod
+}
+
+func modelExpressEnvOf(pod *core.Pod) map[string]string {
+	env := map[string]string{}
+	for _, e := range pod.Spec.Containers[0].Env {
+		if e.Value != "" {
+			env[e.Name] = e.Value
+		}
+	}
+
+	return env
+}
+
+// assertModelDeploymentPodValid is what the API server would refuse a Pod over, checked
+// before any field-level expectation: every mount names a declared volume, no volume is
+// declared twice, and within one container no mount path repeats or lands inside another.
+// Two containers sharing one mount path is legal, so the path checks stay per container.
+func assertModelDeploymentPodValid(t *testing.T, pod *core.Pod) {
+	t.Helper()
+	declared := sets.New[string]()
+	for i, volume := range pod.Spec.Volumes {
+		require.NotEmpty(t, volume.Name, "volume %d names nothing", i)
+		require.False(t, declared.Has(volume.Name),
+			"volume %q is declared twice", volume.Name)
+		declared.Insert(volume.Name)
+	}
+	for _, c := range append(slices.Clone(pod.Spec.InitContainers), pod.Spec.Containers...) {
+		mounts := make([]core.VolumeMount, 0, len(c.VolumeMounts))
+		paths := sets.New[string]()
+		for _, mount := range c.VolumeMounts {
+			require.True(t, declared.Has(mount.Name),
+				"container %q mounts undeclared volume %q", c.Name, mount.Name)
+			require.False(t, paths.Has(mount.MountPath),
+				"container %q mounts path %q twice", c.Name, mount.MountPath)
+			paths.Insert(mount.MountPath)
+			mounts = append(mounts, mount)
+		}
+		// Nesting is checked over every unordered pair in both directions, so it
+		// holds whatever order the mounts are declared in.
+		for i, outer := range mounts {
+			for _, inner := range mounts[i+1:] {
+				require.False(t, strings.HasPrefix(inner.MountPath, outer.MountPath+"/"),
+					"container %q mounts %q nested inside %q",
+					c.Name, inner.MountPath, outer.MountPath)
+				require.False(t, strings.HasPrefix(outer.MountPath, inner.MountPath+"/"),
+					"container %q mounts %q nested inside %q",
+					c.Name, outer.MountPath, inner.MountPath)
+			}
+		}
+	}
+}
+
+// TestModelDeploymentModelExpressPodPerDelivery renders a --load-format modelexpress
+// role under BOTH deliveries and asserts the pod is valid and complete: one command
+// wrap, the client env under either delivery, and the weights volume that answers to
+// the delivery.
+func TestModelDeploymentModelExpressPodPerDelivery(t *testing.T) {
+	cases := []struct {
+		name     string
+		delivery workercore.ModelDeploymentModelDelivery
+		policy   string
+	}{
+		{
+			name:     "Node delivery carries the seed replica",
+			delivery: workercore.ModelDeploymentModelDeliveryNode,
+			policy:   settings.ModelArtifactRemoteDeliveryPrefer,
+		},
+		{
+			name:     "Remote delivery carries the metadata view",
+			delivery: workercore.ModelDeploymentModelDeliveryRemote,
+			policy:   settings.ModelArtifactRemoteDeliveryRequire,
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			pod := modelExpressPodFixture(t, c.delivery, c.policy)
+			assertModelDeploymentPodValid(t, pod)
+
+			ctr := pod.Spec.Containers[0]
+			// ONE command wrap under either delivery: the bootstrap installs the
+			// host-staged wheel once, and a doubly nested sh -c would run it twice.
+			require.GreaterOrEqual(t, len(ctr.Command), 4)
+			assert.Equal(t, "sh", ctr.Command[0])
+			assert.Equal(t, "-c", ctr.Command[1])
+			assert.Equal(t, modelDeploymentModelTransferBootstrapScript, ctr.Command[2])
+			assert.Equal(t, "sh", ctr.Command[3])
+			require.Greater(t, len(ctr.Command), 4)
+			assert.NotEqual(t, "sh", ctr.Command[4], "the engine argv is not wrapped again")
+			assert.Contains(t, strings.Join(ctr.Command, " "), "--load-format modelexpress",
+				"the role's own selection survives the staging")
+
+			// The client env is complete under either delivery: a Node-rendered seed
+			// replica reaches a source that becomes ready later through the same env a
+			// remote replica reads.
+			env := modelExpressEnvOf(pod)
+			assert.Equal(t, "qwen-modelexpress.team-a.svc:8001",
+				env[modelDeploymentModelExpressEnvServerAddress])
+			assert.Equal(t, "1", env[modelDeploymentModelExpressEnvArtifactTransfer])
+			assert.Equal(t, "gpustack", env[modelDeploymentModelExpressEnvLoadPlugin])
+			assert.Equal(t, "server-cache", env[modelDeploymentModelExpressEnvLoadPluginBefore])
+			assert.Equal(t, c.policy, env[modelDeploymentModelTransferEnvDeliveryPolicy])
+			assert.Equal(t, "nixl", env[modelDeploymentModelTransferEnvBackend],
+				"the client dials the pool's backend under either delivery")
+			assert.Equal(t, modelTransferClientMount+"/endpoints.json",
+				env["GPUSTACK_MODEL_TRANSFER_CONFIG"])
+			assert.Equal(t, modelDeploymentModelTransferDefaultTimeoutSeconds,
+				env[modelDeploymentModelTransferEnvTimeout])
+			assert.Equal(t, modelDeploymentModelExpressLoadFormat,
+				env[modelDeploymentModelTransferEnvLoadFormat],
+				"the load-format env names the adapter this role reads")
+			assert.Len(t, env[modelDeploymentModelExpressEnvCompileDigest], 16,
+				"the compile-config digest covers the whole cache identity")
+			assert.Contains(t, env[modelDeploymentModelExpressEnvArtifactReadyURL],
+				"http://127.0.0.1:", "the ready hook grades the replica's own engine over plain HTTP")
+			for _, identity := range []string{
+				"KUBERNETES_POD_UID", "KUBERNETES_POD_NAME", "KUBERNETES_POD_NAMESPACE", "KUBERNETES_POD_IP",
+			} {
+				found := false
+				for _, e := range ctr.Env {
+					if e.Name == identity {
+						require.NotNil(t, e.ValueFrom)
+						require.NotNil(t, e.ValueFrom.FieldRef)
+						found = true
+					}
+				}
+				assert.True(t, found, "the pod identity env %q is rendered", identity)
+			}
+			workerHost := false
+			for _, e := range ctr.Env {
+				if e.Name == modelDeploymentModelExpressEnvWorkerHost {
+					require.NotNil(t, e.ValueFrom)
+					require.NotNil(t, e.ValueFrom.FieldRef)
+					assert.Equal(t, "status.podIP", e.ValueFrom.FieldRef.FieldPath)
+					workerHost = true
+				}
+			}
+			assert.True(t, workerHost, "the worker host is the pod's own IP")
+
+			// The weights volume answers to the delivery; the client volumes are the
+			// same trio under either delivery.
+			weightsVolume := core.Volume{}
+			for _, v := range pod.Spec.Volumes {
+				if v.Name == modelDeploymentModelVolumeName {
+					weightsVolume = v
+				}
+			}
+			require.NotNil(t, weightsVolume.CSI)
+			if c.delivery == workercore.ModelDeploymentModelDeliveryRemote {
+				assert.Equal(t, modelDeploymentModelTransferDeliveryMetadata,
+					weightsVolume.CSI.VolumeAttributes[modelDeploymentModelTransferVolumeAttrDelivery],
+					"the remote view is metadata-only")
+			} else {
+				assert.Empty(t,
+					weightsVolume.CSI.VolumeAttributes[modelDeploymentModelTransferVolumeAttrDelivery],
+					"the node view materializes the tree the seed loads from")
+			}
+			declared := sets.New[string]()
+			for _, v := range pod.Spec.Volumes {
+				declared.Insert(v.Name)
+			}
+			for _, wanted := range []string{
+				modelDeploymentModelTransferTokenVolumeName,
+				modelDeploymentModelTransferWheelVolumeName,
+				"gpustack-model-transfer-config",
+			} {
+				assert.True(t, declared.Has(wanted), "the client volume %q is mounted", wanted)
+			}
+
+			// The security context carries the pair the transfer needs.
+			require.NotNil(t, ctr.SecurityContext)
+			require.NotNil(t, ctr.SecurityContext.Capabilities)
+			assert.Contains(t, ctr.SecurityContext.Capabilities.Add, core.Capability("IPC_LOCK"))
+			assert.Contains(t, ctr.SecurityContext.Capabilities.Add, core.Capability("SYS_RESOURCE"))
+		})
+	}
+
+	// A pre-existing GPUSTACK_MODEL_TRANSFER_LOAD_FORMAT in role.env under Remote delivery
+	// must never leave a second trailing model-transfer entry after ModelExpress staging
+	// settles the load format to modelexpress.
+	modelTransferPolicyStub(t, settings.ModelArtifactRemoteDeliveryRequire)
+	md := newRenderDeployment()
+	md.Spec.Roles[0].ExtraArgs = []string{"--load-format", "modelexpress"}
+	md.Spec.Roles[0].Env = []workercore.ModelDeploymentEnvVar{
+		{Name: modelDeploymentModelTransferEnvLoadFormat, Value: modelDeploymentModelTransferLoadFormat},
+	}
+	render := modelExpressHubRender()
+	render.Delivery = workercore.ModelDeploymentModelDeliveryRemote
+	render.ModelTransferFallback = workercore.ModelDeploymentModelDeliveryNode
+	render.ModelTransferPolicy = settings.ModelArtifactRemoteDeliveryRequire
+	render.ModelTransferConfigMap = "model-transfer-endpoints"
+	pod, err := renderModelDeploymentPodTemplate(context.Background(), ModelDeploymentRenderInput{
+		Deployment:   md,
+		Role:         &md.Spec.Roles[0],
+		InstanceType: newRenderInstanceType(),
+		Artifact:     render,
+	})
+	require.NoError(t, err)
+	var loadFormatValues []string
+	for _, e := range pod.Spec.Containers[0].Env {
+		if e.Name == modelDeploymentModelTransferEnvLoadFormat {
+			loadFormatValues = append(loadFormatValues, e.Value)
+		}
+	}
+	assert.Equal(t, []string{modelDeploymentModelExpressLoadFormat}, loadFormatValues,
+		"exactly one GPUSTACK_MODEL_TRANSFER_LOAD_FORMAT entry survives and names modelexpress")
+}
+
+func TestModelDeploymentModelExpressEndpointsConfigMapAlwaysReconciled(t *testing.T) {
+	modelTransferPolicyStub(t, settings.ModelArtifactRemoteDeliveryPrefer)
+	md := newRenderDeployment()
+	md.Spec.Roles[0].ExtraArgs = []string{"--load-format", "modelexpress"}
+	cli := modelTransferTestEnv(t)
+	r := &ModelDeploymentReconciler{Client: cli}
+
+	// A Node delivery with a ModelExpress role still reconciles the discovery view.
+	weights := &modelArtifactWeights{Render: modelExpressHubRender()}
+	require.NoError(t, r.reconcileModelTransferClientConfig(context.Background(), md, weights))
+	require.NotEmpty(t, weights.Render.ModelTransferConfigMap,
+		"the staging mounts the view the reconciler wrote")
+	cm := new(core.ConfigMap)
+	require.NoError(t, cli.Get(context.Background(),
+		ctrlcli.ObjectKey{Namespace: md.Namespace, Name: weights.Render.ModelTransferConfigMap}, cm))
+	var discovery struct {
+		Endpoints []modelTransferEndpoint `json:"endpoints"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(cm.Data["endpoints.json"]), &discovery))
+	assert.Empty(t, discovery.Endpoints, "no ready source is an honest empty view")
+
+	// A plain deployment under a Node delivery reconciles nothing.
+	plain := newRenderDeployment()
+	plainWeights := &modelArtifactWeights{Render: modelExpressHubRender()}
+	require.NoError(t, r.reconcileModelTransferClientConfig(context.Background(), plain, plainWeights))
+	assert.Empty(t, plainWeights.Render.ModelTransferConfigMap,
+		"no ModelExpress role means no discovery view to mount")
 }

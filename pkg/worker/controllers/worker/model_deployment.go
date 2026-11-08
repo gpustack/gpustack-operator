@@ -1495,6 +1495,13 @@ func (r *ModelDeploymentReconciler) convergeModelDeployment(
 	if routerErr != nil {
 		logger.Error(routerErr, "sync router")
 	}
+	// The ModelExpress sidecar sync keeps the same shape: a deployment whose roles load
+	// no weights through ModelExpress owns none of its objects, and a sync failure is
+	// logged here and surfaced after the status write.
+	modelExpressErr := r.syncModelDeploymentModelExpress(ctx, md)
+	if modelExpressErr != nil {
+		logger.Error(modelExpressErr, "sync modelexpress server")
+	}
 
 	// Read the replicas back rather than reusing the list this pass started from: status must
 	// describe what exists now, not the snapshot the convergence decided against.
@@ -1523,6 +1530,10 @@ func (r *ModelDeploymentReconciler) convergeModelDeployment(
 
 	if routerErr != nil {
 		return ctrl.Result{}, routerErr
+	}
+
+	if modelExpressErr != nil {
+		return ctrl.Result{}, modelExpressErr
 	}
 
 	if requeue {
@@ -3078,7 +3089,8 @@ func modelDeploymentOwnedResource(obj ctrlcli.Object) bool {
 	}
 
 	return systemmeta.DescribeResourceNote(obj, ModelDeploymentResourceNoteRole) != "" ||
-		systemmeta.DescribeResourceNote(obj, modelDeploymentResourceNoteRouter) != ""
+		systemmeta.DescribeResourceNote(obj, modelDeploymentResourceNoteRouter) != "" ||
+		systemmeta.DescribeResourceNote(obj, modelDeploymentResourceNoteModelExpress) != ""
 }
 
 func (r *ModelDeploymentReconciler) SetupController(ctx context.Context, opts controller.SetupOptions) error {

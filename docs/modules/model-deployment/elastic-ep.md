@@ -312,7 +312,7 @@ number of deployments present says nothing about routing.
    failures.
 2. Read the deployment-owned observation `ConfigMap`. Its *`reason`* names an elastic hold.
    A layer with `Known` false carries its own `Reason`. Check the observed generation against the deployment.
-3. Compare the five layers. A width that never became effective, with Ray holding the target width,
+3. Compare the layers. A width that never became effective, with Ray holding the target width,
    points at the engine. An admitted count that never moved points at quota or scheduling. A Ray
    count that never moved points at members that have not joined.
 4. On a hold after an ambiguous send, do not resend. Confirm the engine's own reported width first.

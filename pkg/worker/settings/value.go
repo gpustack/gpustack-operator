@@ -94,6 +94,7 @@ var (
 		setting.InitializeFrom(
 			"instance-ssh-server-image,"+
 				"kv-cache-backend-image,"+
+				"model-deployment-modelexpress-server-image,"+
 				"model-deployment-router-image,"+
 				"model-deployment-router-proxy-image,"+
 				"model-deployment-routing-sidecar-image,"+
@@ -506,6 +507,23 @@ var (
 			"It carries every router this operator supports; the rendered command chooses which "+
 			"binary runs.",
 		setting.InitializeFromEnv("gpustack/llm-router:v0.4.0"),
+		setting.AllowContainerImageReference(),
+	)
+
+	// ModelDeploymentModelExpressServerImage is the metadata server a ModelDeployment whose roles
+	// load weights through the ModelExpress load format runs, one per deployment.
+	//
+	// It has no field on the API to override it: the deployment's engines are told the server's
+	// address by this operator, and the server's own configuration is rendered by this operator,
+	// so the setting exists for registry redirection and for pinning, not for running a different
+	// implementation. The default is pinned to the mirrored build of the reviewed upstream
+	// commit, not a moving tag, so two clusters installed months apart serve one rendezvous
+	// contract to their engines.
+	ModelDeploymentModelExpressServerImage = settings.NewEditable(
+		"model-deployment-modelexpress-server-image",
+		"Indicates the ModelExpress metadata server image a ModelDeployment runs when one of its "+
+			"roles loads weights through the ModelExpress load format.",
+		setting.InitializeFromEnv("gpustack/mirrored-modelexpress-server:v0.7.0"),
 		setting.AllowContainerImageReference(),
 	)
 

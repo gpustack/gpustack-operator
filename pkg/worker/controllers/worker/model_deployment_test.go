@@ -311,6 +311,9 @@ func TestModelDeploymentOwnedResourceRequiresAResourceNote(t *testing.T) {
 	router := new(core.Pod)
 	systemmeta.NoteResource(router, ModelDeploymentResourceType,
 		map[string]string{modelDeploymentResourceNoteRouter: "llm-d-router"})
+	modelExpress := new(core.Service)
+	systemmeta.NoteResource(modelExpress, ModelDeploymentResourceType,
+		map[string]string{modelDeploymentResourceNoteModelExpress: "qwen"})
 	withoutNote := new(core.Pod)
 	systemmeta.NoteResource(withoutNote, ModelDeploymentResourceType, nil)
 	wrongType := role.DeepCopy()
@@ -320,6 +323,7 @@ func TestModelDeploymentOwnedResourceRequiresAResourceNote(t *testing.T) {
 
 	assert.True(t, modelDeploymentOwnedResource(role))
 	assert.True(t, modelDeploymentOwnedResource(router))
+	assert.True(t, modelDeploymentOwnedResource(modelExpress))
 	assert.True(t, modelDeploymentOwnedResource(elasticOperation))
 	assert.True(t, modelDeploymentOwnedResource(elasticObservation))
 	assert.False(t, modelDeploymentOwnedResource(withoutNote))

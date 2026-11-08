@@ -276,7 +276,7 @@ local verbs observations and the active selection policy. The container receives
 - the node-level connection-manager device (`rdma_cm`), once per response however many endpoints
   were granted, and only where the host has one;
 - `GPUSTACK_RDMA_DEVICES`, the sorted, unique comma-joined HCA names without `=`, and an exact
-  `NCCL_IB_HCA` filter with one leading `=`, in all three modes
+  `NCCL_IB_HCA` filter with one leading `=`, in all modes
   ([values and startup use](operations.md#injected-devices)).
 
 When no granted endpoint remains eligible under the active selection policy, the response sets

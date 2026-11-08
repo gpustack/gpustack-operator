@@ -39,7 +39,7 @@ func ModelDeploymentDirectInterfaceProtocol(
 			artifact[0].Delivery == workercore.ModelDeploymentModelDeliveryRemote
 	}
 	if remoteDelivery &&
-		!modelDeploymentRoleHasConflictingLoadFormat(role.ExtraArgs) &&
+		!modelDeploymentRoleHasConflictingLoadFormat(md.Spec.Engine.Name, role.ExtraArgs) &&
 		modelDeploymentModelTransferCandidateBackend(manufacturer, md.Spec.Engine.Name) == "nixl" {
 		return "rdma"
 	}

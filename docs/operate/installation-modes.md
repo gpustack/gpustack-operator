@@ -1,6 +1,6 @@
 # Installation Modes
 
-The operator installs its dependencies two ways. Chart mode renders them as subcharts in one Helm
+The operator installs its dependencies in chart or image mode. Chart mode renders them as subcharts in one Helm
 release; image mode has the worker install them at runtime. Choose one mode per cluster; both read
 the operator chart's `values.yaml`.
 
@@ -35,7 +35,7 @@ flowchart TD
 
 Kueue, NFD, Topograph and the two CSI drivers are vendored subcharts of the operator chart
 (`deploy/gpustack-operator/chart/charts/`), each behind an `enabled` switch. Their one configuration
-surface is the chart's `values.yaml`, reachable two ways:
+surface is the chart's `values.yaml`, reachable through:
 
 | Mode | Installation |
 | --- | --- |

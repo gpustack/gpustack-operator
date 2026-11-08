@@ -88,11 +88,23 @@ type modelTransferEndpoint = modelstore.ModelTransferEndpoint
 // reconcileModelTransferClientConfig mirrors public trust and exact Pod endpoints
 // into a ConfigMap owned by the deployment. A stable mount lets later loads read
 // fresh discovery without rolling replicas that already own their weights.
+//
+// A ModelExpress deployment reconciles it UNDER EVERY DELIVERY, not only the remote
+// one: its engine reads the discovery view to find a ready source to subscribe to, and
+// a seed replica without one still publishes itself into it. An empty view is the
+// honest answer a seed replica can read.
 func (r *ModelDeploymentReconciler) reconcileModelTransferClientConfig(ctx context.Context,
 	md *workercore.ModelDeployment, weights *modelArtifactWeights,
 ) error {
-	if weights == nil || weights.Render == nil || weights.Render.Delivery != workercore.ModelDeploymentModelDeliveryRemote {
-		return nil
+	remote := weights != nil && weights.Render != nil &&
+		weights.Render.Delivery == workercore.ModelDeploymentModelDeliveryRemote
+	if !remote {
+		modelExpress := modelDeploymentUsesModelExpress(md) &&
+			weights != nil && weights.Render != nil &&
+			weights.Render.Hub == modelDeploymentHubHuggingFace
+		if !modelExpress {
+			return nil
+		}
 	}
 	services := new(core.ServiceList)
 	if err := r.Client.List(ctx, services, ctrlcli.InNamespace(setting.DelegatedSecretNamespace),

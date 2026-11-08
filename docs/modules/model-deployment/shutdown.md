@@ -101,7 +101,7 @@ The withdrawal budget expires after 30 seconds and retirement ends as `Aborted`,
 `Workload` and capacity. Removing the `Service` endpoint does not prove those connections have ended.
 Groups that never executed or received admission follow their separate cleanup path.
 
-Two mechanisms are involved and they answer different questions. The protocol decides **whether the
+The mechanisms involved answer different questions. The protocol decides **whether the
 `Pod` may be deleted**; the [drain window](#drain-window) above decides **how long the engine
 takes to exit once it is**, on the kubelet's grace clock after the delete. A replica passes the
 first and still spends the second.
@@ -224,7 +224,7 @@ ordinary retirement instead.
 - **A request still running at `G` − 5 is cut**, 25 s after the delete at the default. vLLM aborts it
   when SIGTERM arrives; SGLang keeps draining it on its own until the kill at `G`. No supported
   router moves a running request to another replica: the SGLang gateway retries only while the
-  response has not started, and the other two routers do not retry.
+  response has not started, and the other routers do not retry.
 - **An SGLang *prefill* or *decode* replica whose hook returns later than `G` − 20 is killed at `G`**,
   since its engine then has less than the 20 s it takes to exit: 10 s after the delete at the
   default, 25 s at 45. The replica is idle by that point, or its hook gave up on it, so the kill cuts

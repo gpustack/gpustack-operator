@@ -338,8 +338,8 @@ safetensors headers, never the complete checkpoint. This lets the engine inspect
 configuration before loading. A target without a checkpoint fetches this bounded view through
 an authenticated source endpoint using the workload's CSI token.
 - **A projected ServiceAccount token** for audience `gpustack-model-transfer`, rotated within its hour.
-- **The wheel, staged on the host.** The operator image ships the universal `gpustack_model_transfer` wheel
-and `device-manager` stages it to `/var/lib/gpustack/operator/lib/model-transfer`; the engine container
+- **The wheel, staged on the host.** The vendor `model-transfer` image ships the universal `gpustack_model_transfer` wheel
+and the `model-transfer` DaemonSet stages it to `/var/lib/gpustack/operator/lib/model-transfer`; the engine container
 installs it offline before start, only if it is not importable already.
 
 The engine starts with `--load-format model-transfer` and `GPUSTACK_MODEL_TRANSFER_*` environment
@@ -450,129 +450,295 @@ serving its own loaded weights.
 
 ### Case scope
 
-The current benchmark covers two environments: **Ascend/HIXL** with `Qwen3-8B`,
-`Qwen3.6-35B-A3B` and `Qwen3-235B-A22B-W8A8`, and **NVIDIA/NIXL** with
-`Qwen3-Next-80B-A3B-Instruct-FP8` and `Qwen3-235B-A22B-Instruct-2507-FP8`.
+The benchmark covers **Ascend/HIXL** (`Qwen3-8B`, `Qwen3.6-35B-A3B` and `Qwen3-235B-A22B-W8A8`),
+**NVIDIA/NIXL** (`Qwen3-Next-80B-A3B-Instruct-FP8` and `Qwen3-235B-A22B-Instruct-2507-FP8`), and
+**NVIDIA/ModelExpress** peer D2D with compile-cache sharing on `Qwen3-235B-A22B-Instruct-2507-FP8`.
 
-The comparison covers a new model on the target: TCP sync to local disk and engine loading
-versus cross-node remote loading. SGLang retains functional coverage; the tables contain
-vLLM/vLLM-Ascend results.
+The comparison evaluates a cold target node: TCP sync to local disk plus engine loading versus
+cross-node remote loading and peer D2D scale-out. SGLang retains functional coverage; the tables
+report vLLM and vLLM-Ascend results.
 
 ### Measurement contract
 
-The baseline adds **TCP peer sync and local loading**. Remote loading includes network
-transfer from prepared source RAM. Both exclude source preparation, scheduling and service warm-up;
-the baseline is a sum of phases rather than a continuous startup measurement.
+The baseline sums **TCP peer sync and local loading**. Remote loading measures network transfer
+from prepared source RAM or a peer replica. Both exclude source preparation, scheduling and service
+warm-up; the baseline is a phase sum rather than a continuous startup trace.
 
-**Weight Transfer Time** is the slowest rank's model-loading time. The speedup is the baseline
-sum divided by remote loading time. These are single-run comparisons with differing cache and
-SDK conditions, so the ratios describe the measured cases.
+**Weight Transfer Time** is the slowest rank's model-loading time. Speedup is the baseline sum
+divided by the remote loading time. Because single runs can differ in cache residency or SDK build,
+ratios describe the measured configurations.
 
-**Source RAM** and **Target RAM** cover transfer buffers, excluding model device memory and other
-process memory. **Target Storage** is the model storage required on target disk; remote rows show
-`0 GiB`, omitting the negligible metadata files. Unrelated engine caches are excluded.
+**Source RAM** and **Target RAM** report host transfer buffers, excluding device memory and other
+process allocations. **Target Storage** is checkpoint disk usage on the target node; remote rows
+report `0 GiB`, omitting small metadata files and unrelated engine caches.
 
-TP2, TP4 and TP8 use two, four and eight devices. In `TP0 + broadcast`, rank 0 loads the weights
-and broadcasts them to the group; in `TP all`, every rank loads remotely. Single-model remote runs cross nodes.
+TP2, TP4 and TP8 use two, four and eight devices. In `TP0 + broadcast`, rank 0 reads remotely and
+broadcasts tensors to the group; in `TP all`, every rank opens its own remote session. Single-model
+remote runs cross nodes.
 
 ### Ascend (HIXL)
 
-The runs used two Ascend 910B2 nodes, vLLM-Ascend `cann9.2-910b-vllm0.30.0`, eager mode
-and host transfer buffers. Source weights were prepared before loading. These tests used an
-isolated qualification configuration; HIXL remains outside the managed routing allowlist.
+The runs used two Ascend 910B2 nodes, vLLM-Ascend `cann9.2-910b-vllm0.30.0`, eager mode and host
+transfer buffers with pre-warmed source weights. These runs used an isolated qualification setup;
+HIXL remains outside the managed routing allowlist.
 
 The source host had 2014 GiB of total RAM and approximately 1514 GiB available. With
-*`source.maxMemoryBytes: 0`*, the default node Source budget is `2014 / 16`, or approximately
-125.88 GiB. This calculation uses total RAM; available RAM can reduce the admitted window.
+*`source.maxMemoryBytes: 0`*, the default node Source budget is `2014 / 16` (`125.88 GiB`), subject
+to available RAM and 10% reservation overhead.
 
-HIXL also defaults to a 16 GiB window per generation. Unmarked remote rows use that limit;
-rows marked *enlarged source window* use 80 GiB for 35B and 256 GiB for 235B. Node and Binding
-budgets include 10% reservation overhead, so the node ceiling is not itself a resident-memory
-measurement.
+HIXL defaults to a 16 GiB source window per generation and an 8 GiB target group budget; the `Mode`
+column states `(X GiB source, Y GiB target)` for each remote row. Each reading rank (`1` in
+`TP0 + broadcast`, `tp_size` in `TP all`) caps its host window at the smaller of its per-rank budget
+and one safetensors shard (`3.72 GiB` on 8B/35B, `4.00 GiB` on 235B).
 
 `8B` means `Qwen/Qwen3-8B`; `35B` means `Qwen/Qwen3.6-35B-A3B`; and `235B` means
 `vllm-ascend/Qwen3-235B-A22B-W8A8`. The 35B and 235B runs used TP8 with *expert parallelism (EP)*.
 Remote times are the slowest rank's `load_model` seconds.
 
 
-| Model           | Mode                                    | Source RAM | Target RAM | Target Storage | Weight Transfer Time          |
-| --------------- | --------------------------------------- | ---------- | ---------- | -------------- | ----------------------------- |
-| 8B (TP2)        | TCP peer sync + local load (sum)        | 0 GiB      | 0 GiB      | 15.27 GiB      | 82.90 s (baseline)            |
-| 8B (TP2)        | TP0 + broadcast                         | 15.26 GiB  | 3.72 GiB   | 0 GiB          | 15.31 s (5.41×, −81.5% time)  |
-| 8B (TP2)        | TP all                 | 15.26 GiB  | 7.45 GiB   | 0 GiB          | 10.78 s (7.69×, −87.0% time)  |
-| 35B (TP8 + EP)  | TCP peer sync + local load (sum)        | 0 GiB      | 0 GiB      | 66.99 GiB      | 282.60 s (baseline)           |
-| 35B (TP8 + EP)  | TP0 + broadcast                         | 15.66 GiB  | 3.72 GiB   | 0 GiB          | 66.33 s (4.26×, −76.5% time)  |
-| 35B (TP8 + EP)  | TP all  | 15.66 GiB  | 8.00 GiB   | 0 GiB          | 101.39 s (2.79×, −64.1% time) |
-| 35B (TP8 + EP)  | TP all (enlarged source window, 80 GiB) | 67.05 GiB  | 29.81 GiB  | 0 GiB          | 46.39 s (6.09×, −83.6% time)  |
-| 235B (TP8 + EP) | TCP peer sync + local load (sum)        | 0 GiB      | 0 GiB      | 220.54 GiB     | 599.05 s (baseline)           |
-| 235B (TP8 + EP) | TP0 + broadcast         | 15.99 GiB  | 4.00 GiB   | 0 GiB          | 452.83 s (1.32×, −24.4% time) |
-| 235B (TP8 + EP) | TP0 + broadcast (enlarged source window, 256 GiB)        | 220.67 GiB | 4.00 GiB   | 0 GiB          | 253.58 s (2.36×, −57.7% time) |
-| 235B (TP8 + EP) | TP all (enlarged source window, 256 GiB)                 | 220.67 GiB | 32.00 GiB  | 0 GiB          | 232.93 s (2.57×, −61.1% time) |
+| Model           | Mode                                             | Source RAM | Target RAM | Target Storage | Weight Transfer Time          |
+| --------------- | ------------------------------------------------ | ---------- | ---------- | -------------- | ----------------------------- |
+| 8B (TP2)        | TCP peer sync + local load (sum)                 | 0 GiB      | 0 GiB      | 15.27 GiB      | 82.90 s (baseline)            |
+| 8B (TP2)        | TP0 + broadcast (16 GiB source, 8 GiB target)    | 15.26 GiB  | 3.72 GiB   | 0 GiB          | 15.31 s (5.41×, −81.5% time)  |
+| 8B (TP2)        | TP all (16 GiB source, 8 GiB target)             | 15.26 GiB  | 7.45 GiB   | 0 GiB          | 10.78 s (7.69×, −87.0% time)  |
+| 35B (TP8 + EP)  | TCP peer sync + local load (sum)                 | 0 GiB      | 0 GiB      | 66.99 GiB      | 282.60 s (baseline)           |
+| 35B (TP8 + EP)  | TP0 + broadcast (16 GiB source, 8 GiB target)    | 15.66 GiB  | 3.72 GiB   | 0 GiB          | 66.33 s (4.26×, −76.5% time)  |
+| 35B (TP8 + EP)  | TP all (16 GiB source, 8 GiB target)             | 15.66 GiB  | 8.00 GiB   | 0 GiB          | 101.39 s (2.79×, −64.1% time) |
+| 35B (TP8 + EP)  | TP all (80 GiB source, 64 GiB target)            | 67.05 GiB  | 29.81 GiB  | 0 GiB          | 46.39 s (6.09×, −83.6% time)  |
+| 235B (TP8 + EP) | TCP peer sync + local load (sum)                 | 0 GiB      | 0 GiB      | 220.54 GiB     | 599.05 s (baseline)           |
+| 235B (TP8 + EP) | TP0 + broadcast (16 GiB source, 8 GiB target)    | 15.99 GiB  | 4.00 GiB   | 0 GiB          | 452.83 s (1.32×, −24.4% time) |
+| 235B (TP8 + EP) | TP0 + broadcast (256 GiB source, 32 GiB target)  | 220.67 GiB | 4.00 GiB   | 0 GiB          | 253.58 s (2.36×, −57.7% time) |
+| 235B (TP8 + EP) | TP all (256 GiB source, 32 GiB target)           | 220.67 GiB | 32.00 GiB  | 0 GiB          | 232.93 s (2.57×, −61.1% time) |
 
 
-The 235B paged-source run held 7.3% of its weights in source RAM and loaded in 452.83 s.
-With the full model resident, broadcast and all-rank loading took 253.58 s and 232.93 s.
-These samples used different SDK builds; the difference does not isolate source-window size.
+When a checkpoint fits the 16 GiB source window (`8B` at 15.27 GiB), `TP all` (10.78 s, `7.69×`)
+beats `TP0 + broadcast` (15.31 s, `5.41×`) by parallelizing rank transfers (`7.45 GiB` target RAM).
+When the checkpoint exceeds the 16 GiB source window (`35B` and `235B`), `TP0 + broadcast` streams
+sequential shards with 3.72–4.00 GiB of target RAM (66.33 s on 35B, 452.83 s on 235B), whereas 35B
+`TP all` slows to 101.39 s under cross-rank page contention.
 
-Detailed window sweeps, SDK comparisons, concurrent loading and lifecycle checks are retained in
-the [acceptance record](../../../specs/2026-10-28-model-artifact-remote-weight-loading.md#ascend-memory-and-loading).
+Sizing the source window to hold the full model (`80 GiB` on 35B, `256 GiB` on 235B) removes source
+paging and makes `TP all` fastest again: 46.39 s (`6.09×`) on 35B and 232.93 s (`2.57×`) on 235B
+(versus 253.58 s for full-resident broadcast; the 235B paged and full-resident samples used
+different SDK builds). Detailed sweeps and lifecycle checks are in the
+[acceptance record](../../../specs/2026-10-28-model-artifact-remote-weight-loading.md#ascend-memory-and-loading).
 
 ### NVIDIA (NIXL)
 
-The runs used Nebius H100 80 GB nodes and vLLM 0.30.0 in eager mode. Source weights were prepared before
-loading. Every loading case below reached `Ready` and passed inference probes.
-
-The source host reported 1574.84 GiB of total RAM and approximately 1554.06 GiB available in
-a pre-load snapshot. With *`source.maxMemoryBytes: 0`*, the default node Source budget is
-`1574.84 / 16`, or approximately 98.43 GiB. This calculation uses total RAM; available RAM,
-Binding limits and the 10% reservation overhead can reduce the admitted resident window.
-
-Unmarked remote rows use the default. The *reduced source window* rows use 32 GiB; the
-*enlarged source window* row uses a 256 GiB source budget.
-
-`80B` means `Qwen/Qwen3-Next-80B-A3B-Instruct-FP8` (TP4); `235B` means
-`Qwen/Qwen3-235B-A22B-Instruct-2507-FP8` (TP8). Remote times are the slowest rank's
-`Model loading took` seconds.
-
-The source and target used different NIXL, UCX and PyTorch builds. The
-[NVIDIA evidence record](../../../specs/2026-10-28-model-artifact-remote-weight-loading.md#nvidia-loading)
+The runs used Nebius H100 80 GB nodes and vLLM 0.30.0 in eager mode with pre-warmed source weights.
+Every case below reached `Ready` and passed inference probes. The
+[NVIDIA evidence record](../../../specs/2026-11-09-modelexpress-peer-d2d-and-cache-sharing.md#benchmarks-and-verification-results)
 retains the tested artifacts and measurement limits.
 
+The source host reported 1574.84 GiB of total RAM and approximately 1554.06 GiB available. With
+*`source.maxMemoryBytes: 0`*, the default node Source budget is `1574.84 / 16` (`98.43 GiB`),
+bounded by available RAM, Binding limits and the 10% reservation overhead.
 
-| Model      | Mode                                  | Source RAM | Target RAM   | Target Storage | Weight Transfer Time         |
-| ---------- | ------------------------------------- | ---------- | ------------ | -------------- | ---------------------------- |
-| 80B (TP4)  | TCP peer sync + local load (sum)      | 0 GiB      | 0 GiB        | 76.45 GiB      | 393.14 s (baseline)          |
-| 80B (TP4)  | TP all | 76.42 GiB  | ≈40 GiB | 0 GiB          | 86.81 s (4.53×, −77.9% time) |
-| 80B (TP4)  | TP all (32 GiB source, 8 GiB target budget) | 30.01 GiB  | 8.00 GiB     | 0 GiB          | 164.37 s (2.39×, −58.2% time) |
-| 80B (TP4)  | TP all (32 GiB source, 64 GiB target budget) | 30.01 GiB  | 40.00 GiB    | 0 GiB          | 122.74 s (3.20×, −68.8% time) |
-| 235B (TP8) | TCP peer sync + local load (sum)      | 0 GiB      | 0 GiB        | 220.21 GiB     | 1121.30 s (baseline)         |
-| 235B (TP8) | TP0 + broadcast (enlarged source window, 256 GiB)     | 220.19 GiB | 9.31 GiB (rank 0) | 0 GiB     | 108.89 s (10.30×, −90.3% time) |
+Each remote row states `(X GiB source, Y GiB target)` in `Mode`. Each reading rank (`1` in
+`TP0 + broadcast`, `tp_size` in `TP all`) bounds its host window by the smaller of its per-rank
+budget and one safetensors shard (`10.00 GiB` on 80B, `9.31 GiB` on 235B).
+
+`80B` means `Qwen/Qwen3-Next-80B-A3B-Instruct-FP8` (TP4); `235B` means
+`Qwen/Qwen3-235B-A22B-Instruct-2507-FP8` (TP8 with *EP*). Remote times are the slowest rank's
+`Model loading took` seconds.
 
 
-With all weights resident in source RAM, the 80B and 235B remote runs took 77.9% and 90.3%
-less time than their recorded baselines, with no target checkpoint storage. The full-resident
-80B source budget was the default `1/16` of host RAM, or 98.43 GiB; the 235B run enlarged it
-to 256 GiB.
+| Model           | Mode                                            | Source RAM | Target RAM | Target Storage | Weight Transfer Time             |
+| --------------- | ----------------------------------------------- | ---------- | ---------- | -------------- | -------------------------------- |
+| 80B (TP4)       | TCP peer sync + local load (sum)                | 0 GiB      | 0 GiB      | 76.45 GiB      | 393.14 s (baseline)              |
+| 80B (TP4)       | TP0 + broadcast (16 GiB source, 8 GiB target)   | 16.00 GiB  | 8.00 GiB   | 0 GiB          | 160.59 s (2.45×, −59.2% time)    |
+| 80B (TP4)       | TP all (16 GiB source, 8 GiB target)            | 16.00 GiB  | 8.00 GiB   | 0 GiB          | 1380.52 s (0.28×, +251.2% time)  |
+| 80B (TP4)       | TP all (80 GiB source, 64 GiB target)           | 76.42 GiB  | 40.00 GiB  | 0 GiB          | 81.16 s (4.84×, −79.4% time)     |
+| 235B (TP8 + EP) | TCP peer sync + local load (sum)                | 0 GiB      | 0 GiB      | 220.21 GiB     | 1121.30 s (baseline)             |
+| 235B (TP8 + EP) | TP0 + broadcast (16 GiB source, 8 GiB target)   | 16.00 GiB  | 8.00 GiB   | 0 GiB          | 287.97 s (3.89×, −74.3% time)    |
+| 235B (TP8 + EP) | TP0 + broadcast (256 GiB source, 64 GiB target) | 220.19 GiB | 9.31 GiB   | 0 GiB          | 108.89 s (10.30×, −90.3% time)   |
+| 235B (TP8 + EP) | TP all (256 GiB source, 32 GiB target)          | 220.19 GiB | 32.00 GiB  | 0 GiB          | 69.16 s (16.21×, −93.8% time)    |
 
-Both paged 80B runs used a 32 GiB source budget and reached sampled resident peaks
-of 30.01 GiB. With target budgets of 8 GiB and 64 GiB across the TP group, loading took
-164.37 s and 122.74 s respectively; both passed inference and native resource release.
 
-The full-resident 80B run reused bounded transfer buffers on each rank, with a configured
-64 GiB budget across the TP group. Its ≈40 GiB reference value uses the paged run's measured
-10 GiB per rank under the same target budget and TP4 configuration.
+Under a 16 GiB source window (one resident shard at a time: 10.00 GiB on 80B, 9.31 GiB on 235B),
+`TP0 + broadcast` streams shards sequentially in 160.59 s (`2.45×`) on 80B and 287.97 s (`3.89×`) on
+235B using 8.00 GiB of target RAM. Under the same 16 GiB window, 80B `TP all` thrashes the
+single-shard source window across four concurrent ranks (1380.52 s, `0.28×`); use `TP0 + broadcast`
+whenever source RAM cannot hold the full checkpoint.
 
-The paged runs measured simultaneous live transfer-buffer peaks
-of 8 GiB and 40 GiB across all four ranks, or 2 GiB and 10 GiB per rank respectively.
-These values exclude pinned allocator cache.
+Sizing the source window for full residency (`80 GiB` on 80B, `256 GiB` on 235B) removes source
+paging (108.89 s, `10.30×` with `TP0 + broadcast` on 235B). Pairing full source residency with
+`TP all` lets all ranks pull concurrently, reaching 81.16 s (`4.84×`, 40.00 GiB target RAM) on 80B
+and 69.16 s (`16.21×`, 32.00 GiB target RAM) on 235B with zero target disk usage.
 
-The 235B run loaded through rank 0 and broadcast weights to the remaining ranks.
-The rank-0 probe observed a 9.31 GiB peak in its live transfer buffers.
+### NVIDIA (ModelExpress)
 
-The original 80B full-resident and baseline cases ran alongside another workload. The paged 80B
-and remote 235B cases ran alone, with warm or unknown page-cache state. The ratios compare the
-recorded times; they do not isolate the speedup due to remote loading. Paging coverage is limited
-to the tested 80B configurations; payload *RDMA* qualification and production acceptance remain separate.
+ModelExpress lets vLLM and SGLang replicas share GPU tensors over NIXL device-to-device (D2D)
+transfers and reuse compiled `torch.compile` and Triton caches across replicas. Hardware
+qualification remains separate.
+
+![ModelExpress peer and source delivery](../../assets/diagrams/model-delivery-modelexpress.svg)
+
+<!--
+flowchart LR
+    subgraph SOURCE["ModelPrefetch source"]
+        HOST["Source host memory"]
+    end
+    subgraph DEPLOYMENT["ModelDeployment"]
+        SERVER["In-memory gRPC metadata server"]
+        subgraph SEED["Seed replica (Replica 0)"]
+            PGPU["Device DRAM (GPU tensors)"]
+            PCACHE["Compile cache (torch.compile / Triton)"]
+        end
+        subgraph PEER["Peer replica (Replica 1)"]
+            TGPU["Device DRAM (GPU tensors)"]
+            TCACHE["Compile cache (torch.compile / Triton)"]
+        end
+    end
+    SEED ->|"Tensor descriptors and cache manifests"| SERVER
+    SERVER ->|"Peer and cache discovery"| PEER
+    PGPU ->|"RdmaStrategy: NIXL D2D tensor stream"| TGPU
+    PCACHE ->|"NIXL compile cache transfer"| TCACHE
+    HOST ..>|"Seed replica or restart fallback: GpustackLoadStrategy (NIXL H2H + H2D)"| SEED
+    HOST ..>|"Seed replica or restart fallback: GpustackLoadStrategy (NIXL H2H + H2D)"| PEER
+-->
+
+The metadata server discovers peers and cache manifests while NIXL transfers both GPU tensors (D2D)
+and compiled cache archives between replicas. When no ready peer is available (seed replica or
+after a metadata-server restart), `GpustackLoadStrategy` reads the `ModelPrefetch` source over NIXL
+H2H and H2D. ModelExpress peer D2D over HIXL is outside this design.
+
+The runs below measured `235B (TP8 + EP)` (`Qwen/Qwen3-235B-A22B-Instruct-2507-FP8`) on two Nebius
+H100 80 GB nodes with vLLM 0.30.0 in graph mode, comparing the NIXL `TCP peer sync + local load`
+baseline against the seed replica, a scale-out peer replica, and a replica launched after a
+metadata-server restart (detailed sweeps and verification logs are in the
+[ModelExpress benchmark record](../../../specs/2026-11-09-modelexpress-peer-d2d-and-cache-sharing.md#benchmarks-and-verification-results)):
+
+
+| Model           | Mode                                                                | Source RAM | Target RAM | Target Storage | Weight Transfer Time            |
+| --------------- | ------------------------------------------------------------------- | ---------- | ---------- | -------------- | ------------------------------- |
+| 235B (TP8 + EP) | TCP peer sync + local load (sum)                                    | 0 GiB      | 0 GiB      | 220.21 GiB     | 1121.30 s (baseline)            |
+| 235B (TP8 + EP) | Seed replica: `GpustackLoadStrategy` (256 GiB source, 8 GiB target) | 220.19 GiB | 8.00 GiB   | 0 GiB          | 232.10 s (4.83×, −79.3% time)   |
+| 235B (TP8 + EP) | Peer replica: `RdmaStrategy` (NIXL D2D + compile cache)             | 0 GiB      | 0 GiB      | 0 GiB          | 16.78 s (66.82×, −98.5% time)   |
+| 235B (TP8 + EP) | Restart fallback: `GpustackLoadStrategy` (256 GiB source, 8 GiB target) | 220.19 GiB | 8.00 GiB | 0 GiB          | 109.08 s (10.28×, −90.3% time)  |
+
+
+The seed replica (`GpustackLoadStrategy`) loads from the `ModelPrefetch` source in 232.10 s (`4.83×`
+versus baseline), runs cold `torch.compile` (77.67 s) and CUDA Graph capture (112 s, 296.82 s total
+engine init), and publishes GPU tensor descriptors plus 386.07 MiB of compiled caches
+(`torch.compile`, Triton, DeepGEMM and FlashInfer) to the metadata server.
+
+The scale-out peer replica (`RdmaStrategy`) streams pre-sharded weights directly between GPUs over
+NIXL D2D in 16.78 s (`66.82×` versus baseline, `13.83×` versus seed) with `0 GiB` host transfer RAM
+and `0 GiB` target disk. Restoring the shared compile caches over NIXL cuts `torch.compile` from
+77.67 s to 0.28 s (`277.39×`) and reduces total engine initialization from 296.82 s to 90.25 s (`3.29×`).
+
+After a metadata-server restart empties in-memory peer registrations, a new replica falls back to
+`GpustackLoadStrategy` (109.08 s from the resident 220.19 GiB source window, `10.28×` versus
+baseline) and republishes its descriptors once ready.
+
+#### Role configuration
+
+Select the load format on a `ModelDeployment` role. The example uses a Hugging Face artifact and a
+cluster-specific runner image and instance type.
+
+```yaml
+apiVersion: worker.gpustack.ai/v1
+kind: ModelDeployment
+metadata:
+  name: qwen-chat
+  namespace: team-a
+spec:
+  model:
+    name: Qwen/Qwen3-8B  # required
+    artifactRef:
+      name: qwen-weights  # required for the prepared source
+  engine:
+    name: vLLM  # required; vLLM or SGLang
+    image: example/engine:tag  # required; use a compatible runner image
+  roles:
+    - name: server
+      replicas: 2
+      instanceType: gpustack--nvidia-a10g-linux-amd64
+      resources:
+        accelerator: 1
+      extraArgs:
+        - --load-format=modelexpress  # required; mx is also accepted
+```
+
+- **Load format**: Select `modelexpress` or `mx` in the role's command or extra arguments.
+- **Artifact**: ModelExpress integration requires a Hugging Face artifact.
+- **Overrides**: Role environment values override injected defaults (set `MX_ARTIFACT_TRANSFER: "0"` to disable cache transfer).
+- **Layout**: Peer replicas need matching tensor-parallel and pipeline-parallel layouts.
+
+The Operator injects these defaults into eligible role containers. This illustrative Pod excerpt
+shows the rendered environment. The actual Pod includes additional fields.
+
+```yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: qwen-chat-server
+  namespace: team-a
+spec:
+  containers:
+    - name: server
+      image: example/engine:tag
+      env:
+        - name: MX_SERVER_ADDRESS
+          value: qwen-chat-modelexpress.team-a.svc:8001  # metadata Service
+        - name: MX_WORKER_HOST
+          valueFrom:
+            fieldRef:
+              fieldPath: status.podIP  # replica Pod IP
+        - name: MX_ARTIFACT_TRANSFER
+          value: "1"  # enable artifact transfer
+        - name: MX_ARTIFACT_COMPILE_CONFIG_DIGEST
+          value: <role-digest>  # compile-cache identity, when available
+        - name: MX_ARTIFACT_READY_URL
+          value: http://127.0.0.1:8000/health  # when engine health is available
+        - name: MX_LOAD_PLUGIN
+          value: gpustack  # GPUStack loading strategy
+        - name: MX_LOAD_PLUGIN_BEFORE
+          value: server-cache  # strategy insertion point
+```
+
+- **Server address**: Long deployment names produce a shortened Service name.
+- **Digest**: The Operator omits the digest when no compile-cache identity is available.
+- **Health URL**: The Operator injects a URL only when it can grade the engine and its port is known.
+
+#### Strategy and policy
+
+| Value | Meaning | Constraints |
+|---|---|---|
+| `RdmaStrategy` | Loads tensors from a ready peer over NIXL D2D. | Tried first; peer layouts must match. |
+| `GpustackLoadStrategy` | Loads from a ready `ModelPrefetch` source. | Tried after peer delivery. |
+| Other cache and `DefaultStrategy` | Load from eligible local cache or engine volume. | Available under `Prefer`. |
+| `Require` | Allows peer and prefetch source delivery. | Failure of both permitted strategies is terminal; no local checkpoint fallback. |
+| `Prefer` | Allows peer, prefetch source and eligible local delivery. | Local strategies follow the remote strategies. |
+
+Tensor-parallel ranks select `RdmaStrategy` independently before the source strategy. One rank can
+use a peer while another uses the source. After a source or local load, a replica publishes tensor
+descriptors and compile-cache manifests for later replicas.
+
+#### Metadata server
+
+The Operator creates an in-memory gRPC server and Service for each deployment with a ModelExpress
+role. Both use the name `<md-name>-modelexpress`, shortened for long names. The server is an
+unauthenticated rendezvous service in the deployment namespace. Restrict its network access to
+trusted Pods.
+
+The worker `Setting` selects the server image. The Operator exposes it in the system namespace:
+
+```yaml
+apiVersion: gpustack.ai/v1
+kind: Setting
+metadata:
+  name: model-deployment-modelexpress-server-image
+  namespace: gpustack-system  # use the system namespace
+spec:
+  value: gpustack/mirrored-modelexpress-server:v0.7.0  # default image
+```
+
+- **Image**: Use the [Setting](../../reference/settings.md) for registry redirection or image pinning.
+- **Restart**: Server replacement loses in-memory registrations; existing replicas keep serving.
+- **Recovery**: A new replica loads from a ready source or an eligible local path and publishes metadata.
+- **Scale from zero**: The first replica has no ready peer.
 
 ## Require and Prefer
 

@@ -227,7 +227,7 @@ entry per name rather than two.
 The two observability toggles above are the exception: they change no result, so a value you set is
 kept.
 
-Two kinds of key are **refused at admission** instead of overwritten, because overwriting them
+The following kinds of key are **refused at admission** instead of overwritten, because overwriting them
 would not help.
 
 `MOONCAKE_CONFIG_PATH` and `--kv-transfer-config` select the **mechanism**. A second one is an
@@ -531,7 +531,7 @@ Its [host pool](#sglang-host-memory-tier) is the one host allocation it adds the
 
 **See also** — [KV Cache Pools and Bindings](pool.md) (namespace grants and reuse domains) ·
 [KV Cache Backend](backend.md) (the store the pool draws from) ·
-[Admission](../devices/admission.md) (where this webhook sits relative to the five gates)
+[Admission](../devices/admission.md) (where this webhook sits relative to the admission gates)
 
 **Next** → [Accelerator Requests](../devices/requests.md) — the other thing a `Pod` asks this
 operator for.

@@ -352,7 +352,7 @@ Every non-system `Namespace` gets one `LocalQueue`, so workloads can submit from
 
 ### Per-accelerator admission check
 
-The per-accelerator **`AdmissionCheck`**, third of the five gates; its behavior is in
+The per-accelerator **`AdmissionCheck`**, part of the admission chain; its behavior is in
 [Admission](admission.md#gate-3-per-accelerator-admissioncheck).
 
 ---
@@ -362,4 +362,4 @@ The per-accelerator **`AdmissionCheck`**, third of the five gates; its behavior 
 [Walkthrough](../../walkthroughs/devices/scheduling.md) (the same objects on a live cluster) ·
 [Settings](../../reference/settings.md#settings)
 
-**Next** → [Admission](admission.md) — the five gates a request passes.
+**Next** → [Admission](admission.md) — the gates a request passes.

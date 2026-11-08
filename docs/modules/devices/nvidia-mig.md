@@ -67,7 +67,7 @@ Profiles](https://docs.nvidia.com/datacenter/tesla/mig-user-guide/supported-mig-
 "GPU Instance Profiles" table for your product before planning a node: its Instances column is the
 maximum a GPU can host, and its placement column is what the rules below act on.
 
-Three rules govern what reaches GPUStack from that set, and all three are shared with the other two
+The following rules govern what reaches GPUStack from that set; they are shared with the other
 partitioning manufacturers:
 
 > **The `+me` / `+me.all` / `+gfx` variants are not supported.** A Kubernetes resource name may not contain
@@ -585,7 +585,7 @@ Deleting the `Pod` releases the credits immediately; the hardware and the profil
 
 #### Capacity accounting
 
-Four kinds of number count that one carved GPU, and they disagree, deliberately.
+Different numbers count that one carved GPU, and they disagree, deliberately.
 
 **Per GPU it is interval overlap, nothing more.** A profile may only start at one of its
 [hardcoded slots](#partition-profile-discovery), and an instance fits when its interval overlaps nothing already
