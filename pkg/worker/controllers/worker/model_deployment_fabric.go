@@ -33,8 +33,13 @@ func ModelDeploymentDirectInterfaceProtocol(
 		manufacturer == "" || manufacturer == nodefeature.ManufacturerAscend {
 		return ""
 	}
-	if len(artifact) > 0 && artifact[0] != nil &&
-		artifact[0].Delivery == workercore.ModelDeploymentModelDeliveryRemote &&
+	remoteDelivery := md.Spec.Model.ArtifactRef != nil
+	if len(artifact) > 0 {
+		remoteDelivery = artifact[0] != nil &&
+			artifact[0].Delivery == workercore.ModelDeploymentModelDeliveryRemote
+	}
+	if remoteDelivery &&
+		!modelDeploymentRoleHasConflictingLoadFormat(role.ExtraArgs) &&
 		modelDeploymentModelTransferCandidateBackend(manufacturer, md.Spec.Engine.Name) == "nixl" {
 		return "rdma"
 	}

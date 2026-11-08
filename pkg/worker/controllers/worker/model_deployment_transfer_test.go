@@ -2307,3 +2307,33 @@ func TestModelTransferQualifiedRolesOwnTheirRender(t *testing.T) {
 	require.Equal(t, "nixl", first.ModelTransferBackend)
 	require.Empty(t, base.ModelTransferBackend)
 }
+
+func TestModelTransferIneligibleRoleHoldsALoadedRemoteReplica(t *testing.T) {
+	md := &workercore.ModelDeployment{
+		Spec: workercore.ModelDeploymentSpec{
+			Engine: workercore.ModelDeploymentEngine{Name: workercore.ModelDeploymentEngineVLLM},
+		},
+		Status: workercore.ModelDeploymentStatus{
+			Model: &workercore.ModelDeploymentModelStatus{
+				Remote: &workercore.ModelDeploymentModelRemoteStatus{
+					Policy: workercore.ModelDeploymentRemotePolicyPrefer,
+					Roles: []workercore.ModelDeploymentRemoteRoleStatus{{
+						Role: "s0",
+						Replicas: []workercore.ModelDeploymentRemoteReplicaStatus{{
+							Ordinal: 0, Delivery: workercore.ModelDeploymentModelDeliveryRemote,
+							Load: workercore.ModelDeploymentRemoteLoadStateLoaded,
+						}},
+					}},
+				},
+			},
+		},
+	}
+
+	got, reason, message := modelTransferRemoteRender().modelTransferForRole(
+		md, &workercore.ModelDeploymentRole{Name: "s0", ExtraArgs: []string{"--load-format=safetensors"}},
+		nodefeature.ManufacturerNVIDIA, false,
+	)
+	assert.Nil(t, got, "an ineligible fallback must not roll a replica that already loaded remotely")
+	assert.Equal(t, modelDeploymentModelTransferReasonRoleIneligible, reason)
+	assert.Contains(t, message, "roll")
+}

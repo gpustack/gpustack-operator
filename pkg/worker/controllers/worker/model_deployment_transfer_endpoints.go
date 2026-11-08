@@ -185,6 +185,14 @@ func (r *ModelDeploymentReconciler) reconcileModelTransferClientConfig(ctx conte
 		return err
 	}
 	data["endpoints.json"] = string(raw)
+	const maxClientConfigBytes = 900 << 10
+	var totalBytes int
+	for k, v := range data {
+		totalBytes += len(k) + len(v)
+		if totalBytes > maxClientConfigBytes {
+			return errors.New("model-transfer source discovery ConfigMap exceeds its byte bound")
+		}
+	}
 	name := "model-transfer-" + stringx.SumBySHA256(string(md.UID))[:24]
 	next := &core.ConfigMap{ObjectMeta: meta.ObjectMeta{Name: name, Namespace: md.Namespace}, Data: data}
 	kubemeta.ControlOn(next, md, workercore.SchemeGroupVersion.WithKind("ModelDeployment"))

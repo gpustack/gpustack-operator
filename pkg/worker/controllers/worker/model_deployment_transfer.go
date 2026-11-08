@@ -470,6 +470,14 @@ func (a *ModelDeploymentArtifactRender) modelTransferForRole(
 			role.Name, manufacturer, md.Spec.Engine.Name, workercore.ModelDeploymentRemotePolicyRequire,
 		)
 	}
+	if servesRemote || modelDeploymentModelTransferRoleCarriesRemote(md, role.Name) {
+		return nil, modelDeploymentModelTransferReasonRoleIneligible, fmt.Sprintf(
+			"role %q on a %s pool runs %s, which is ineligible for remote weight transfer, "+
+				"and the declared fallback would roll the replica that already loaded: the delivery is held "+
+				"and no remote replica starts",
+			role.Name, manufacturer, md.Spec.Engine.Name,
+		)
+	}
 
 	return fallback, "", ""
 }

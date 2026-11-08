@@ -430,7 +430,7 @@ func (r *ModelPrefetchReconciler) observeSource(ctx context.Context, pf *workerc
 		filtered.Status.ModelTransfer.Generations = nil
 		for _, generation := range store.Status.ModelTransfer.Generations {
 			entry, ok := own[generation.Generation]
-			if !ok || entry.NodeName != store.Name || entry.Digest != generation.Digest || entry.State != "admitted" {
+			if !ok || entry.NodeName != store.Name || entry.Digest != generation.Digest || entry.State != broker.ReservationStateAdmitted {
 				continue
 			}
 			if generation.SourcePodUID != entry.SourcePodUID || generation.SourceGeneration != artifact.Generation ||
@@ -761,14 +761,14 @@ func (r *ModelPrefetchReconciler) recomputePinned(ctx context.Context) error {
 		}
 		// A source intent pins no set it did not name: the derived-from-deployments default is
 		// the disk half's, and a source without a placement is refused before it renders.
-		if pf.Spec.Source != nil &&
-			(pf.Spec.Placement == nil ||
-				(len(pf.Spec.Placement.InstanceTypes) == 0 && pf.Spec.Placement.NodeSelector == nil)) {
-			continue
-		}
+		hasSourcePlacement := pf.Spec.Source != nil && pf.Spec.Placement != nil &&
+			(len(pf.Spec.Placement.InstanceTypes) > 0 || pf.Spec.Placement.NodeSelector != nil)
 		binding := bindingByKey[pf.Namespace+"/"+pf.Spec.BindingRef.Name]
 		retentionPin := !deleting && pf.Spec.Retention.Pinned &&
 			binding != nil && bindingAllowsPinned(binding)
+		if !retentionPin && (pf.Spec.Source != nil && !hasSourcePlacement) {
+			continue
+		}
 		if !retentionPin && pf.Spec.Source == nil && !admittedSourceDigests[digest] {
 			continue
 		}
@@ -796,7 +796,8 @@ func (r *ModelPrefetchReconciler) recomputePinned(ctx context.Context) error {
 			// The source-file retention needs no grant, no pinned flag, and
 			// no living prefetch: the generation holding the memory is the
 			// reader, and the tree is what its next refill verifies against.
-			sourceHolds := modelstore.ModelTransferAdmittedOnNode(storeByName[node], digest)
+			sourceHolds := (pf.Spec.Source == nil || hasSourcePlacement) &&
+				modelstore.ModelTransferAdmittedOnNode(storeByName[node], digest)
 			if !ttlHolds && !sourceHolds {
 				continue
 			}

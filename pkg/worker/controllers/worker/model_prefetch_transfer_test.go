@@ -932,3 +932,41 @@ func TestModelPrefetchAuthorityEventsIgnoreMetadataChurn(t *testing.T) {
 		})
 	}
 }
+
+func TestRecomputePinnedKeepsDiskRetentionWhenSourcePlacementOmitted(t *testing.T) {
+	recent := hourAgo(0)
+	gpu := newManagedAccelNodeOf("gpu-node-1", 8, "nvidia-h100-80gb-hbm3", "NVIDIA-H100-80GB-HBM3")
+	cli := newPrefetchInstanceTypeEnv(t, []*core.Node{gpu}, testElasticInstanceType())
+
+	nms := testNodeModelStoreEntry("gpu-node-1", "Ready", recent, []string{})
+	binding := testSourceGrantBinding()
+	allow := true
+	binding.Spec.AllowPinned = &allow
+	pf := testSourcePrefetch("warm", func(pf *workercore.ModelPrefetch) {
+		pf.Spec.Placement = nil
+		pf.Spec.Retention.Pinned = true
+	})
+	dep := &workercore.ModelDeployment{
+		ObjectMeta: meta.ObjectMeta{Name: "serving", Namespace: "team-a"},
+		Spec: workercore.ModelDeploymentSpec{
+			Model: workercore.ModelDeploymentModel{ArtifactRef: &core.LocalObjectReference{Name: "model"}},
+			Roles: []workercore.ModelDeploymentRole{{Name: "s0", InstanceType: "elastic-cpu-gpu"}},
+		},
+	}
+	for _, obj := range []ctrlcli.Object{
+		testResolvedArtifactSized("model", 5<<30),
+		binding,
+		nms,
+		pf,
+		dep,
+	} {
+		require.NoError(t, cli.Create(context.Background(), obj))
+	}
+	r := &ModelPrefetchReconciler{Client: cli, Now: func() time.Time { return testNow }}
+	require.NoError(t, r.recomputePinned(context.Background()))
+
+	got := new(workercore.NodeModelStore)
+	require.NoError(t, cli.Get(context.Background(), ctrlcli.ObjectKey{Name: "gpu-node-1"}, got))
+	assert.Contains(t, got.Spec.Pinned, testDigest,
+		"disk retention.pinned still pins derived deployment targets when source placement is omitted")
+}
