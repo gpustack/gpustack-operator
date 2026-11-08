@@ -166,7 +166,7 @@ term.
 A `Pod` carrying `kueue.x-k8s.io/podset-preferred-topology` gets no term: with `TASBalancedPlacement`
 on, as the chart has it, such a PodSet loses its affinity score. No `Pod` GPUStack renders carries it.
 `Engine` delivery and claim artifacts get no term either. Reading placements and turning the
-preference off are in [Model Store Operations](/gpustack-operator/main/docs/modules/model-delivery/operations/index.md#where-replicas-land).
+preference off are in [Model Store Operations](/gpustack-operator/main/docs/modules/model-delivery/operations/index.md#replica-placement).
 
 ## Capacity and lifecycle limits
 

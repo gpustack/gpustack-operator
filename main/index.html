@@ -11,6 +11,9 @@
         const theme = localStorage.getItem("theme");
         if (theme === "light" || theme === "dark") document.documentElement.dataset.theme = theme;
         document.documentElement.dataset.themeChoice = theme === "light" || theme === "dark" ? theme : "system";
+        if (localStorage.getItem("sidebar-collapsed") === "true") {
+          document.documentElement.dataset.sidebarCollapsed = "true";
+        }
       } catch {
         document.documentElement.dataset.themeChoice = "system";
       }
@@ -25,7 +28,7 @@
   <link rel="alternate" type="text/markdown" href="/gpustack-operator/main/index.md">
   
   <link rel="describedby" href="/gpustack-operator/main/llms.txt">
-  <link rel="stylesheet" href="/gpustack-operator/main/css/site.ea544478884ee4c46c0d82a26985cad564c8f892cccad0c8ffcefe846c62a4a0.css">
+  <link rel="stylesheet" href="/gpustack-operator/main/css/site.1a0de63fe646aba4ed6541fe0a6383c2ed5ca649b1593a98595ba53430bcf032.css">
   <link rel="stylesheet" href="/gpustack-operator/main/css/code.d2570c1cc6480f9c62bc31ec538eef2578ce80980588c469638a5f95416bfc7b.css">
 </head>
 <body class="home">
@@ -96,6 +99,13 @@
   <div class="layout">
     <aside class="sidebar" aria-label="Documentation navigation">
       <button class="nav-toggle" type="button" aria-controls="docs-navigation" aria-expanded="false">Browse documentation</button>
+      <button class="sidebar-toggle" type="button" aria-controls="docs-navigation" aria-expanded="true" aria-label="Collapse sidebar" title="Collapse sidebar">
+        <svg class="sidebar-toggle-icon" aria-hidden="true" viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="2" y="2.5" width="12" height="11" rx="2"/>
+          <line x1="6" y1="2.5" x2="6" y2="13.5"/>
+          <polyline class="sidebar-icon-arrow" points="10.5 6 8.5 8 10.5 10"/>
+        </svg>
+      </button>
       <nav id="docs-navigation" class="sidebar-inner">
         <div class="nav-title">Documentation</div>
         <a class="nav-home" href="/gpustack-operator/main/" aria-current="page">Overview</a>
@@ -1432,26 +1442,49 @@
       
       <article>
         
-  <p class="section-label">Documentation</p>
-  <h1>GPUStack Operator</h1>
-  <p>GPUStack Operator discovers hardware, shapes accelerator capacity, and helps Kubernetes place
-workloads where that capacity is available.</p>
+  <p class="section-label">GPUStack Operator</p>
+  <h1>Accelerator workloads, from discovery to serving</h1>
+  <p>GPUStack Operator discovers accelerators, organizes capacity into pools, and schedules Kubernetes
+workloads for interactive use and model serving.</p>
 
-  <h2 id="start-here">Start here</h2>
+  <p><a href="#installation">Get started</a> · <a href="/gpustack-operator/main/docs/getting-started/architecture/">Read the architecture</a></p>
+
+  <h2 id="architecture">Architecture</h2>
+  <img src="/gpustack-operator/main/images/architecture-flow.svg" alt="Four stages from hardware discovery to workload serving" width="1272" height="560" style="width: 100%; height: auto; display: block; margin: 1.25rem 0;">
+  <ol>
+    <li><strong>Discover:</strong> NFD and Device Manager identify accelerators and RDMA interfaces.</li>
+    <li><strong>Schedule:</strong> The worker builds pools and InstanceTypes; Kueue and admission checks place workloads.</li>
+    <li><strong>Deliver:</strong> Optional model prefetch and shared KV cache support workloads.</li>
+    <li><strong>Run:</strong> Model deployments and instances serve workloads.</li>
+  </ol>
+
+  <h2 id="features">Features</h2>
   <div class="directory">
-    <div><a href="/gpustack-operator/main/docs/getting-started/architecture/">Architecture</a><p>See how discovery, capacity, and admission fit together.</p></div>
-    <div><a href="/gpustack-operator/main/docs/walkthroughs/">Walkthroughs</a><p>Run a complete example and inspect its results.</p></div>
-    <div><a href="/gpustack-operator/main/docs/operate/installation-modes/">Installation modes</a><p>Choose how the operator and its dependencies are deployed.</p></div>
+    <div><a href="/gpustack-operator/main/docs/modules/devices/">Heterogeneous devices</a><p>Discover and allocate whole, shared, sliced, or partitioned accelerators.</p></div>
+    <div><a href="/gpustack-operator/main/docs/modules/rdma/">RDMA networking</a><p>Give workloads network interfaces alongside accelerators.</p></div>
+    <div><a href="/gpustack-operator/main/docs/modules/topology/">Topology</a><p>Place workloads within requested location or network domains.</p></div>
+    <div><a href="/gpustack-operator/main/docs/modules/kv-cache/">KV cache</a><p>Share inference cache across compatible workloads.</p></div>
+    <div><a href="/gpustack-operator/main/docs/modules/model-delivery/">Model delivery</a><p>Resolve, verify, and deliver model weights to workloads.</p></div>
+    <div><a href="/gpustack-operator/main/docs/modules/model-deployment/">Model deployment</a><p>Run serving replicas with routing and optional prefill/decode roles.</p></div>
+    <div><a href="/gpustack-operator/main/docs/modules/instances/">GPU instances</a><p>Work in accelerator-backed containers over SSH.</p></div>
   </div>
-  <h2 id="capabilities">Capabilities</h2>
+
+  <h2 id="installation">Installation</h2>
+  <p>Use Kubernetes 1.29 or newer for scheduling and node model delivery, Helm 3.8 or newer, and cluster-admin access. Install the accelerator drivers and any required container toolkit first.</p>
+  <pre><code>helm repo add gpustack https://docs.gpustack.ai/gpustack-operator/charts
+helm install gpustack-operator gpustack/gpustack-operator \
+  --namespace gpustack-system --create-namespace</code></pre>
+  <p>See <a href="/gpustack-operator/main/docs/getting-started/vendor-prerequisites/">vendor prerequisites</a> and <a href="/gpustack-operator/main/docs/operate/installation-modes/">installation modes</a> for dependencies and deployment choices.</p>
+
+  <h2 id="usage">Usage</h2>
+  <p>Choose a scenario for complete configuration and verification steps.</p>
   <div class="directory">
-    <div><a href="/gpustack-operator/main/docs/modules/devices/">Heterogeneous Devices</a><p>Discover, slice, and allocate accelerators.</p></div>
-    <div><a href="/gpustack-operator/main/docs/modules/rdma/">RDMA Networking</a><p>Give workloads network interfaces alongside accelerators.</p></div>
-    <div><a href="/gpustack-operator/main/docs/modules/topology/">Topology</a><p>Place workloads within the requested network or location domain.</p></div>
-    <div><a href="/gpustack-operator/main/docs/modules/kv-cache/">KV Cache</a><p>Share inference cache across workloads.</p></div>
-    <div><a href="/gpustack-operator/main/docs/modules/model-delivery/">Model Delivery</a><p>Fetch and cache model weights before workloads need them.</p></div>
-    <div><a href="/gpustack-operator/main/docs/modules/model-deployment/">Model Deployment</a><p>Run serving replicas with routing and prefill/decode roles.</p></div>
-    <div><a href="/gpustack-operator/main/docs/modules/instances/">GPU Instances</a><p>Work in an accelerator-backed container over SSH.</p></div>
+    <div><a href="/gpustack-operator/main/docs/walkthroughs/devices/scheduling/">Schedule an accelerator workload</a><p>Request a device and follow its admission and allocation.</p></div>
+    <div><a href="/gpustack-operator/main/docs/walkthroughs/rdma/network-endpoints/">Add RDMA networking</a><p>Request a network endpoint alongside an accelerator.</p></div>
+    <div><a href="/gpustack-operator/main/docs/walkthroughs/model-delivery/prefetch/">Prefetch model weights</a><p>Warm a node cache before a workload starts.</p></div>
+    <div><a href="/gpustack-operator/main/docs/walkthroughs/model-deployment/prefill-decode/">Serve a model</a><p>Deploy prefill and decode roles and verify inference.</p></div>
+    <div><a href="/gpustack-operator/main/docs/walkthroughs/kv-cache/shared-cache/">Share a KV cache</a><p>Create a backend, pool, and namespace binding.</p></div>
+    <div><a href="/gpustack-operator/main/docs/modules/instances/">Start a GPU workspace</a><p>Configure an accelerator-backed instance with SSH access.</p></div>
   </div>
 
       </article>
@@ -1463,7 +1496,7 @@ workloads where that capacity is available.</p>
           
           
           <nav class="page-actions" aria-label="Page source">
-            <a href="https://github.com/gpustack/gpustack-operator/blob/8c5186108e620a8044164d9c4c114dd7376092f4/site/content/_index.md">View page source</a>
+            <a href="https://github.com/gpustack/gpustack-operator/blob/91dc7c8d650bac133dd4ea3b29b35d62bd1ee2b1/site/content/_index.md">View page source</a>
             
             <a href="https://github.com/gpustack/gpustack-operator/edit/main/site/content/_index.md">Edit this page</a>
             
@@ -1471,12 +1504,12 @@ workloads where that capacity is available.</p>
         
         
           <div class="toc-title">On this page</div>
-          <nav><ul><li><a href="#start-here">Start here</a></li><li><a href="#capabilities">Capabilities</a></li></ul></nav>
+          <nav><div class="toc-indicator" aria-hidden="true"></div><ul><li><a href="#architecture">Architecture</a></li><li><a href="#features">Features</a></li><li><a href="#installation">Installation</a></li><li><a href="#usage">Usage</a></li></ul></nav>
         
       </div>
     </aside>
   </div>
   
-  <script src="/gpustack-operator/main/js/site.1ec84fdfb2bec16dbb83a64abad1abe2d27d8d3f7fc54c2cfa45fe4d64303b3c.js" defer></script>
+  <script src="/gpustack-operator/main/js/site.e362041170f1762d2935c1ef4d8ca5f494983b230101e1b6536544c195645f10.js" defer></script>
 </body>
 </html>

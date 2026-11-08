@@ -15,7 +15,7 @@ The H100 walkthroughs distinguish recorded deployments from configuration exampl
 The *DP* width counts data-parallel ranks; the *EP* world size counts GPU workers in the expert-parallel collective.
 With *internal load balancing (Internal LB)*, the master distributes requests to its *DP* ranks.
 
-| Walkthrough | Serving configuration | What it covers |
+| Walkthrough | Serving configuration | Scope |
 |---|---|---|
 | [Prefill and Decode](/gpustack-operator/main/docs/walkthroughs/model-deployment/prefill-decode/index.md) | Disaggregated roles fronted by Router | Recorded H100 deployment with one *Prefill* and two *Decode* replicas, *TP* = 2, TCP KV transfer, and a linked [benchmark](/gpustack-operator/main/docs/modules/model-deployment/prefill-decode-benchmark/index.md). |
 | [Encode, Prefill and Decode](/gpustack-operator/main/docs/walkthroughs/model-deployment/encode-prefill-decode/index.md) | Disaggregated multimodal roles fronted by Router | Recorded H100 deployment with one *Encode*, one *Prefill* and one *Decode* replica, NIXL encoder transfer, and a linked [benchmark](/gpustack-operator/main/docs/modules/model-deployment/encode-prefill-decode-benchmark/index.md). |

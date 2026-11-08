@@ -10,6 +10,9 @@
         const theme = localStorage.getItem("theme");
         if (theme === "light" || theme === "dark") document.documentElement.dataset.theme = theme;
         document.documentElement.dataset.themeChoice = theme === "light" || theme === "dark" ? theme : "system";
+        if (localStorage.getItem("sidebar-collapsed") === "true") {
+          document.documentElement.dataset.sidebarCollapsed = "true";
+        }
       } catch {
         document.documentElement.dataset.themeChoice = "system";
       }
@@ -24,7 +27,7 @@
   <link rel="alternate" type="text/markdown" href="/gpustack-operator/main/docs/modules/model-deployment/scaling/index.md">
   
   <link rel="describedby" href="/gpustack-operator/main/llms.txt">
-  <link rel="stylesheet" href="/gpustack-operator/main/css/site.ea544478884ee4c46c0d82a26985cad564c8f892cccad0c8ffcefe846c62a4a0.css">
+  <link rel="stylesheet" href="/gpustack-operator/main/css/site.1a0de63fe646aba4ed6541fe0a6383c2ed5ca649b1593a98595ba53430bcf032.css">
   <link rel="stylesheet" href="/gpustack-operator/main/css/code.d2570c1cc6480f9c62bc31ec538eef2578ce80980588c469638a5f95416bfc7b.css">
 </head>
 <body class="docs-page">
@@ -95,6 +98,13 @@
   <div class="layout">
     <aside class="sidebar" aria-label="Documentation navigation">
       <button class="nav-toggle" type="button" aria-controls="docs-navigation" aria-expanded="false">Browse documentation</button>
+      <button class="sidebar-toggle" type="button" aria-controls="docs-navigation" aria-expanded="true" aria-label="Collapse sidebar" title="Collapse sidebar">
+        <svg class="sidebar-toggle-icon" aria-hidden="true" viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="2" y="2.5" width="12" height="11" rx="2"/>
+          <line x1="6" y1="2.5" x2="6" y2="13.5"/>
+          <polyline class="sidebar-icon-arrow" points="10.5 6 8.5 8 10.5 10"/>
+        </svg>
+      </button>
       <nav id="docs-navigation" class="sidebar-inner">
         <div class="nav-title">Documentation</div>
         <a class="nav-home" href="/gpustack-operator/main/" >Overview</a>
@@ -1444,6 +1454,14 @@
   <h1 id="model-deployment-scaling">Model Deployment Scaling</h1>
 <p>A <code>ModelDeploymentScaler</code> plans replica counts for one <code>ModelDeployment</code> from engine metrics. It reports its observations and recommendations in <em><code>status</code></em>. In <code>Active</code> mode, it
 also writes <em><code>spec.roles[].replicas</code></em> on the target. The <code>ModelDeployment</code> reconciler creates and retires the serving instances that count requires.</p>
+<p><span class="diagram-scroll"><img src="/gpustack-operator/main/docs/assets/diagrams/model-deployment-scaling.svg" alt="Model deployment scaling flow" decoding="async"></span></p>
+<!--
+flowchart LR
+    PODS["Serving replicas"] -> METRICS["Queue, throughput and latency metrics"]
+    METRICS -> ALGORITHM["Selected scaling algorithm and optional priors"] -> GUARDS["Bounds, pacing and safety guards"]
+    GUARDS -> SHADOW["Shadow status recommendations"]
+    GUARDS -> ACTIVE["Active binding and term fence"] -> REPLICAS["Replica count and retirement"] -> PODS
+-->
 <h2 id="contents">Contents</h2>
 <ul>
 <li><a href="#resource">Resource</a>
@@ -1471,7 +1489,7 @@ also writes <em><code>spec.roles[].replicas</code></em> on the target. The <code
 <div class="code-block">
   <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">worker.gpustack.ai/v1</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">ModelDeploymentScaler </span><span class="w"> </span><span class="c"># namespaced, short name mds</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">ModelDeploymentScaler </span><span class="w"> </span><span class="c"># required; namespaced, short name mds</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">metadata</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">llm-serving</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">spec</span><span class="p">:</span><span class="w">
@@ -1531,7 +1549,13 @@ also writes <em><code>spec.roles[].replicas</code></em> on the target. The <code
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="c">#   value: 10      # required, nonnegative; zero prevents scale-down</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">rebalance</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">policy</span><span class="p">:</span><span class="w"> </span><span class="l">Opposing </span><span class="w"> </span><span class="c"># default; Opposing, Priority or Disabled</span></span></span></code></pre></div>
-</div><p><em><code>targetRef.name</code></em> selects a target in the scaler&rsquo;s namespace. A scaler can precede its target;
+</div><ul>
+<li><strong>Target</strong>: Set <em><code>targetRef.name</code></em> to a <code>ModelDeployment</code> in the same namespace; the reference is immutable.</li>
+<li><strong>Roles</strong>: Provide bounds for every target role; each role name must be unique.</li>
+<li><strong>Algorithm</strong>: Select one algorithm and provide only its matching parameter block.</li>
+<li><strong>Mode</strong>: <code>Shadow</code> plans changes; <code>Active</code> commits recommendations after acquiring the binding.</li>
+</ul>
+<p><em><code>targetRef.name</code></em> selects a target in the scaler&rsquo;s namespace. A scaler can precede its target;
 admission skips target-dependent checks while it is absent. The controller reports <code>TargetNotFound</code>
 until the target appears. Retargeting requires a new scaler because the reference is immutable.</p>
 <p><code>Shadow</code> computes recommendations without owning the target or writing replica counts.
@@ -1573,8 +1597,8 @@ Deployment Scaling Simulation</a>
           <td>Bursts and changing capacity can make the target inaccurate.</td>
       </tr>
       <tr>
-          <td><code>TokenThroughput</code></td>
-          <td>Two sliding windows (<em><code>stableWindowSeconds</code></em>, <em><code>panicWindowSeconds</code></em>) over prefix-cache-adjusted prompt and generation token rates, a <em><code>panicThreshold</code></em> burst mode, and p95 <em>time to first token (TTFT)</em> and <em>inter-token latency (ITL)</em> guards.</td>
+          <td><strong><code>TokenThroughput</code></strong></td>
+          <td><strong>Default</strong> when admission does not infer another type. Two sliding windows (<em><code>stableWindowSeconds</code></em>, <em><code>panicWindowSeconds</code></em>) over prefix-cache-adjusted prompt and generation token rates, a <em><code>panicThreshold</code></em> burst mode, and p95 <em>time to first token (TTFT)</em> and <em>inter-token latency (ITL)</em> guards.</td>
           <td>General LLM and <em>prefill/decode (PD)</em>-disaggregated serving with variable prompt and output lengths and prefix caching, where request count alone misstates compute load.</td>
           <td>Sampling windows react after demand changes.</td>
       </tr>
@@ -1645,42 +1669,35 @@ It also works with vLLM: the scaler reads the target engine and needs no engine 
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">ttftTargetMilliseconds</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;500&#34;</span><span class="w">  </span><span class="c"># default; positive quantity</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">itlTargetMilliseconds</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;50&#34;</span><span class="w">    </span><span class="c"># default; positive quantity</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">latencyQuantile</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;0.95&#34;</span><span class="w">       </span><span class="c"># default; P95</span></span></span></code></pre></div>
-</div><p>The three token target fields describe the capacity of one replica of their role kind. A <em>prefill</em> replica serves cache-missed prompt tokens; a <em>decode</em> replica serves generation
-tokens. A <em>server</em> replica serves both. Supply a positive capacity for every scaled non-<em>encode</em> kind. An <em>encode</em> role needs a direct ratio to a <em>prefill</em> or <em>decode</em> role, in
-either direction.</p>
-<p>The algorithm averages demand over <em><code>stableWindowSeconds</code></em> and <em><code>panicWindowSeconds</code></em> separately. It divides each average by the per-replica capacity and rounds up. Panic starts
-when the recent rate reaches <em><code>panicThreshold</code></em> times the ready replicas&rsquo; capacity. During panic, it uses the larger recommendation and prevents scale-down. A threshold at or
-below <code>1</code> starts panic at or before capacity.</p>
-<p>Keep the panic window shorter than the stable window to react to bursts sooner. Admission validates each window&rsquo;s range but does not enforce their order. The latency guard also
-checks <em>TTFT</em> for <em>prefill</em> and <em>ITL</em> for <em>decode</em>. A <em>server</em> role checks both and uses the larger relative breach.</p>
-<p><em><code>latencyQuantile</code></em> selects the quantile used for online TTFT and ITL observations and for any capacity prior. It
-accepts a quantity in <code>(0, 1]</code>: for example, <code>&quot;0.25&quot;</code> is P25, <code>&quot;0.9&quot;</code> is P90, and <code>&quot;0.99&quot;</code> is P99. When omitted, it defaults to P95. <code>Predictive</code> uses the same field inside its
-nested <em><code>tokenThroughput</code></em> configuration. Quantities resolve to nanounit precision; values with finer precision are rounded by Kubernetes before the scaler uses them.</p>
-<p>A latency above its target prevents scale-down. Above <code>1.2</code> times the target, the guard recommends at least one more replica. Missing latency holds scale-down while allowing a
-throughput-driven increase. Bounds, ratios and pacing still constrain every recommendation.</p>
-<p>The stable and panic windows with their panic threshold follow the <a href="https://github.com/vllm-project/aibrix/blob/52b8834e6223eac7ca5c050b44486aa29b44a1a6/pkg/controller/podautoscaler/algorithm/kpa.go">vLLM AIBrix
-KPA</a>
- and the <a href="https://github.com/knative/serving/blob/knative-v1.23.0/pkg/autoscaler/scaling/autoscaler.go">Knative Serving
-KPA</a>
+</div><ul>
+<li><strong>Token targets</strong>: Set positive per-replica capacities for each scaled non-<em>encode</em> role.</li>
+<li><strong>Role capacity</strong>: Set prompt capacity for <em>prefill</em>, generation for <em>decode</em>, and combined capacity for <em>server</em>.</li>
+<li><strong>Encode</strong>: Couple <em>encode</em> to another role with a ratio.</li>
+<li><strong>Windows</strong>: Keep <em><code>panicWindowSeconds</code></em> shorter than <em><code>stableWindowSeconds</code></em>. Admission validates each range independently without enforcing their order.</li>
+<li><strong>Panic</strong>: Demand at <em><code>panicThreshold</code></em> times ready capacity starts panic and blocks scale-down. A value at or below <code>1</code> triggers panic at or before capacity.</li>
+<li><strong>Latency quantile</strong>: Set <em><code>latencyQuantile</code></em> in <code>(0, 1]</code>. It defaults to P95 (<code>0.95</code>), with nanounit precision.</li>
+<li><strong>Latency guard</strong>: A <em>TTFT</em> or <em>ITL</em> breach holds scale-down. Above 1.2 times the target, it recommends growth.</li>
+</ul>
+<p>The window design draws on <a href="https://github.com/vllm-project/aibrix/blob/52b8834e6223eac7ca5c050b44486aa29b44a1a6/pkg/controller/podautoscaler/algorithm/kpa.go">AIBrix KPA</a>
+,
+<a href="https://github.com/knative/serving/blob/knative-v1.23.0/pkg/autoscaler/scaling/autoscaler.go">Knative KPA</a>
+,
+<a href="https://arxiv.org/abs/2508.19559">HeteroScale</a>
+, and <a href="https://arxiv.org/abs/2512.03416">TokenScale</a>
 .</p>
-<p><a href="https://arxiv.org/abs/2508.19559">HeteroScale</a>
- scales the <em>prefill</em> and <em>decode</em> pools from cache-missed prefill throughput, decode throughput and a latency guard.
-<a href="https://arxiv.org/abs/2512.03416">TokenScale</a>
- uses a per-stage token rate as a leading indicator of backpressure.</p>
 <h3 id="engine-signals">Engine signals</h3>
-<p>Both engines report running and waiting requests; a <em>decode</em> role also includes
-<code>sglang:num_decode_transfer_queue_reqs</code> in its waiting count.</p>
-<p>Both engines supply prompt and generation token counters. The scaler calculates rates from counter deltas between samples. For vLLM, it subtracts prefix-cache hit deltas from
-prompt-token deltas and clamps the result at zero. Prefix-cache queries do not cap the hits used in this calculation.</p>
-<p>For SGLang, the preferred prompt demand is the <code>mode=&quot;input&quot;</code> delta of
-<code>sglang:prefill_effective_tokens_total</code>. Without that counter in both samples, it subtracts the
-<code>device_hit</code>, <code>host_hit</code> and <code>storage_hit</code> deltas when available. Without cache accounting, it uses
-the prompt-token delta. A warm cache therefore reduces measured prompt demand when hits are reported.</p>
-<p>Latency uses the engine histogram deltas across the sampled replicas. The scaler selects the bucket boundary covering the ninety-fifth percentile. If buckets are absent or that
-percentile falls in the infinite bucket, it uses the histogram mean. <em><code>kvCacheUsage</code></em> averages the reported fractions.</p>
-<p>Only rank-zero or unlabelled series contribute. A restarted container or a decreasing counter invalidates the rate window until a new baseline exists. See <a href="/gpustack-operator/main/docs/modules/model-deployment/metrics/">Model Deployment
-Metrics</a>
- for the engine series and scrape configuration.</p>
+<ul>
+<li><strong>Queue depth</strong>: Both engines report running and waiting requests.</li>
+<li><strong>SGLang decode</strong>: The waiting count includes <code>sglang:num_decode_transfer_queue_reqs</code>.</li>
+<li><strong>SGLang prefill</strong>: The waiting count includes <code>sglang:num_prefill_inflight_queue_reqs</code>.</li>
+<li><strong>Prompt rate</strong>: Uses rank-0 effective-prefill deltas when available. Otherwise, it subtracts prefix-cache hits from prompt deltas.</li>
+<li><strong>Generation rate</strong>: Uses rank-0 generation counter deltas without subtracting cache hits.</li>
+<li><strong>Latency</strong>: Reads histogram bucket deltas at the configured quantile. When buckets are absent or the quantile lands in <code>+Inf</code>, the reading is unavailable without mean fallback.</li>
+<li><strong>KV usage</strong>: Averages <em><code>kvCacheUsage</code></em>. See <a href="/gpustack-operator/main/docs/modules/model-deployment/metrics/">Model Deployment Metrics</a>
+.</li>
+</ul>
+<p>SGLang reports <em><code>sglang:prefill_effective_tokens_total</code></em> with an <code>input</code> mode. Its hit modes are
+<code>device_hit</code>, <code>host_hit</code> and <code>storage_hit</code>.</p>
 <h3 id="predictive">Predictive</h3>
 <p>This example forecasts the same <em>prefill</em> and <em>decode</em> demand. The nested <em><code>tokenThroughput</code></em> block accepts all the fields described under <a href="#token-throughput">Token throughput</a>
 ,
@@ -1716,19 +1733,15 @@ with the same defaults and rules. Both fallback targets and forecast capacities 
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">qTrend</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;0.1&#34;</span><span class="w">           </span><span class="c"># default process noise for demand trend</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">measurementNoise</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;10&#34;</span><span class="w">  </span><span class="c"># default observation noise</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">minPoints</span><span class="p">:</span><span class="w"> </span><span class="m">6</span><span class="w">  </span><span class="c"># default; 1 to 64 observations</span></span></span></code></pre></div>
-</div><p><code>Predictive</code> uses a causal Kalman filter with a local linear trend. It forecasts demand over
-<em><code>horizonSeconds</code></em> and divides that forecast by the role kind&rsquo;s per-replica forecast capacity.
-The recommendation is at least the token-throughput result. Until <em><code>minPoints</code></em> observations arrive,
-it reports <code>PredictorWarmingUp</code> in the role&rsquo;s <em><code>reason</code></em> and uses that fallback result.</p>
-<p><em><code>qLevel</code></em> and <em><code>qTrend</code></em> control process noise for the demand level and trend. Higher values let those estimates change
-faster. <em><code>measurementNoise</code></em> describes uncertainty in new observations; higher values reduce their influence. Positive
-values tune the filter; omitted or nonpositive values use <code>1</code>, <code>0.1</code> and <code>10</code>, respectively.</p>
-<p>After warm-up, panic or a latency breach above <code>1.2</code> times the target requests at least one extra replica. Consolidation also requires that removing one replica would leave the
-others carrying no more than 80% of their per-replica capacity. The scale-down step policy and other guards still apply.</p>
-<p>The forecast follows the <a href="https://github.com/ai-dynamo/dynamo/blob/4f42be7bebd96ea0199088840549397809f80a92/docs/fern/pages/developer-guide/knowledge-base/modular-components/planner/planner-design.md">NVIDIA Dynamo
-Planner</a>
-.
-Its Kalman predictor estimates a local linear trend, and its load-based loop reacts to live metrics below the predicted capacity.</p>
+</div><ul>
+<li><strong>Kalman forecast</strong>: Forecasts demand over <em><code>horizonSeconds</code></em> (<a href="https://github.com/ai-dynamo/dynamo/blob/4f42be7bebd96ea0199088840549397809f80a92/docs/fern/pages/developer-guide/knowledge-base/modular-components/planner/planner-design.md">Dynamo Planner</a>
+), bounded below by the token-throughput fallback (<code>PredictorWarmingUp</code> until <em><code>minPoints</code></em> samples).</li>
+<li><strong>Noise tuning</strong>: Positive <em><code>qLevel</code></em> (default <code>1</code>), <em><code>qTrend</code></em> (<code>0.1</code>), and <em><code>measurementNoise</code></em> (<code>10</code>) tune level, trend, and observation weights.</li>
+<li><strong>Panic guard</strong>: After warm-up, panic recommends at least one replica above the current count.</li>
+<li><strong>Warm-up</strong>: Before enough samples, panic uses the token-throughput recommendation and blocks scale-down.</li>
+<li><strong>Latency guard</strong>: Latency above 1.2 times the target recommends at least one additional replica.</li>
+<li><strong>Consolidation</strong>: Scale-down requires surviving replicas to stay at or below 80% capacity.</li>
+</ul>
 <h3 id="capacity-priors">Capacity priors</h3>
 <p><em><code>spec.algorithm.capacityPrior</code></em> resolves missing token capacities for <code>TokenThroughput</code> and
 <code>Predictive</code> from an immutable catalog of measured profiles. Admission rejects <em><code>capacityPrior</code></em>
@@ -1759,7 +1772,39 @@ positive token capacities. Catalog resolution fails closed, with no online fallb
 </span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">capacity-priors </span><span class="w"> </span><span class="c"># Same-namespace ConfigMap; sole source, no merge or fallback.</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">key</span><span class="p">:</span><span class="w"> </span><span class="l">priors.yaml </span><span class="w"> </span><span class="c"># Default; the parser accepts YAML and JSON.</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">headroom</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;0.75&#34;</span><span class="w">  </span><span class="c"># Default when capacityPrior is present; quantity in (0, 1].</span></span></span></code></pre></div>
-</div><p>The catalog may resolve missing capacity fields for <code>TokenThroughput</code> and <code>Predictive</code>. Explicit capacities win; headroom multiplies only catalog seed capacity. The default is an
+</div><ul>
+<li><strong>Target</strong>: Reference a deployment in the scaler&rsquo;s namespace.</li>
+<li><strong>Catalog</strong>: Omit <em><code>catalogRef</code></em> to use the embedded catalog.</li>
+<li><strong>Headroom</strong>: Set a value in <code>(0, 1]</code>; the default is <code>0.75</code>.</li>
+<li><strong>Capacity</strong>: Explicit values override catalog values.</li>
+</ul>
+<table>
+  <thead>
+      <tr>
+          <th>Value</th>
+          <th>Meaning</th>
+          <th>Constraints</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td><code>TokenThroughput</code></td>
+          <td>Token demand scaling</td>
+          <td>Supports capacity priors.</td>
+      </tr>
+      <tr>
+          <td><code>Predictive</code></td>
+          <td>Forecast-based scaling</td>
+          <td>Supports capacity priors.</td>
+      </tr>
+      <tr>
+          <td><code>Proportional</code></td>
+          <td>Single-metric scaling</td>
+          <td>Rejects capacity priors.</td>
+      </tr>
+  </tbody>
+</table>
+<p>The catalog may resolve missing capacity fields for <code>TokenThroughput</code> and <code>Predictive</code>. Explicit capacities win; headroom multiplies only catalog seed capacity. The default is an
 initial configurable engineering margin, not a universal optimum. <a href="/gpustack-operator/main/docs/modules/model-deployment/scaling-benchmark/#suite-2-capacity-priors">Scaling Benchmark</a>
  compares <code>0.75</code> catalog headroom against
 unmargined manual capacities on H200 hardware, with no warranty.</p>
@@ -1888,7 +1933,7 @@ refused. The pins — source URLs, capture dates, artifact digests and refusal r
       <tr>
           <th>Data point</th>
           <th>Requirement</th>
-          <th>Handling when optional, missing or non-standard</th>
+          <th>Fallback handling</th>
       </tr>
   </thead>
   <tbody>
@@ -1953,7 +1998,7 @@ specs, identity annotations, effective algorithm, catalog digest, latency target
 prior quantities by semantic <code>Quantity</code> equality, keep the 256-sample <code>RingBuffer</code> in memory, and
 suppress <code>status</code> writes until control-plane state changes or a predictor advances by 16 samples.</p>
 <h3 id="local-evaluation">Local evaluation</h3>
-<p>The <a href="https://github.com/gpustack/gpustack-operator/blob/8c5186108e620a8044164d9c4c114dd7376092f4/specs/2026-10-26-inferencex-model-deployment-scaling.md">capacity priors and local evaluation spec</a>
+<p>The <a href="https://github.com/gpustack/gpustack-operator/blob/91dc7c8d650bac133dd4ea3b29b35d62bd1ee2b1/specs/2026-10-26-inferencex-model-deployment-scaling.md">capacity priors and local evaluation spec</a>
  records 48 deterministic synthetic result rows across eight
 tuning traces (<code>manual</code>, <code>resolved</code> and one <code>passive</code> candidate at seed factor <code>1</code>) plus two open-loop versus closed-loop examples.</p>
 <p>It also evaluates two held-out traces (<code>heldout_bursts</code> and <code>heldout_length_cache_shift</code>, 11 rows each across <code>manual</code> at factor <code>1</code> plus <code>resolved</code> and one <code>passive</code> candidate
@@ -2484,7 +2529,7 @@ and conditions)</li><li><a href="/gpustack-operator/main/docs/modules/model-depl
           
           
           <nav class="page-actions" aria-label="Page source">
-            <a href="https://github.com/gpustack/gpustack-operator/blob/8c5186108e620a8044164d9c4c114dd7376092f4/docs/modules/model-deployment/scaling.md">View page source</a>
+            <a href="https://github.com/gpustack/gpustack-operator/blob/91dc7c8d650bac133dd4ea3b29b35d62bd1ee2b1/docs/modules/model-deployment/scaling.md">View page source</a>
             
             <a href="https://github.com/gpustack/gpustack-operator/edit/main/docs/modules/model-deployment/scaling.md">Edit this page</a>
             
@@ -2534,6 +2579,6 @@ and conditions)</li><li><a href="/gpustack-operator/main/docs/modules/model-depl
     </aside>
   </div>
   
-  <script src="/gpustack-operator/main/js/site.1ec84fdfb2bec16dbb83a64abad1abe2d27d8d3f7fc54c2cfa45fe4d64303b3c.js" defer></script>
+  <script src="/gpustack-operator/main/js/site.e362041170f1762d2935c1ef4d8ca5f494983b230101e1b6536544c195645f10.js" defer></script>
 </body>
 </html>

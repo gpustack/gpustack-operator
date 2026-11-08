@@ -83,14 +83,17 @@ Operations](thead-mig.md#partition-profile-discovery).
 | Manufacturer | Slices per accelerator | Compute |
 |---|---|---|
 | NVIDIA | 128 | time-shared, so overcommittable |
+| AMD | 128 | time-shared, so overcommittable |
+| T-Head | 128 | time-shared, so overcommittable |
+| Iluvatar | 100 | time-shared, so overcommittable |
 | Ascend | 63 | time-shared, so overcommittable |
 | Cambricon | 16 | not overcommittable |
 | Hygon | 4 | not overcommittable — a hard spatial partition (`vdev.conf` assigns each slice a disjoint CU bitmask, so the sum stays within one accelerator) |
 | MThreads | 16 | not overcommittable — `cores%` is a best-effort relative weight, not a hard partition |
 | MetaX | 16 | not overcommittable |
 
-Each count is the maximum the Device Manager records on **each accelerator's** status, bounded by the
-manufacturer runtime's per-device user-process limit; the group aggregates them per model. A
+Each count is the maximum the Device Manager records on **each accelerator's** status. Some counts
+reflect runtime limits; AMD and T-Head use loose token pools. The group aggregates them per model. A
 MIG-enabled accelerator reports zero logical count and its physical MIG profiles instead.
 
 An overcommittable manufacturer advertises `.sliced.cores-percentage = Σ slice count × 100`, each slice
@@ -226,29 +229,20 @@ Two discriminators keep the pools clean, and one annotation carries the raw CPU 
 
 The worker keeps five sets of objects converged:
 
-```mermaid
-flowchart LR
-    NODE["Node<br/>(capacity labels + gpustack.ai/managed)"]
-    DEV["Devices<br/>(per-accelerator allocation ledger)"]
+![Device scheduling chain](/gpustack-operator/main/docs/assets/diagrams/devices-scheduling-chain.svg)
 
-    subgraph controllers["worker controllers"]
-        RF["ResourceFlavor"]
-        IT["InstanceType"]
-        CQ["ClusterQueue<br/>(isolated, no cohort)"]
-        LQ["LocalQueue"]
-        AC["AdmissionCheck"]
-    end
-
-    NODE -- "one flavor per<br/>(key, os, arch, count)" --> RF
-    RF -- "authors the pool's InstanceType,<br/>create-only" --> IT
-    DEV -- "drives the status" --> IT
-    IT -- "keeps the queue existing and<br/>stopped only as configured" --> CQ
-    RF -- "fills resource groups" --> CQ
-    CQ --> LQ
-    NS["Namespace (non-system)"] -- "one per namespace" --> LQ
-    DEV -- "per-accelerator feasibility" --> AC
-    AC --> CQ
-```
+<!--
+flowchart TD
+    NODE["Managed Node and capacity labels"] -> FLAVOR["ResourceFlavor and topology"]
+    DEVICES["Devices inventory and ledger"] -> TYPE["InstanceType capacity views"]
+    NODE -> TYPE
+    DEVICES -> CHECK["Per-device AdmissionCheck"]
+    FLAVOR -> CQ["Isolated ClusterQueue"]
+    TYPE -> CQ
+    CHECK -> CQ
+    NAMESPACE["Tenant namespace"] -> LQ["LocalQueue"]
+    CQ -> LQ
+-->
 
 ### Capacity flavors
 

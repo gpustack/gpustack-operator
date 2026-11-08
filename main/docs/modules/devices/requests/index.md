@@ -37,7 +37,7 @@ no `.partitioned*` keys at all.
 ## Resource keys
 
 `<base>` is the manufacturer's device resource (`nvidia.com/gpu`, `huawei.com/npu`, … — see
-[Accelerator support](https://github.com/gpustack/gpustack-operator/blob/8c5186108e620a8044164d9c4c114dd7376092f4/README.md#accelerator-support)).
+[Accelerator support](https://github.com/gpustack/gpustack-operator/blob/91dc7c8d650bac133dd4ea3b29b35d62bd1ee2b1/README.md#accelerator-support)).
 
 | Key | Served by | Eligible accelerators | Request value | `Node` value |
 |---|---|---|---|---|
@@ -67,6 +67,7 @@ Two things the table does not say:
 ## Worked example per family
 
 All four are `Pod`s submitted on a pool's entrance `LocalQueue` (`kueue.x-k8s.io/queue-name`).
+Replace `<local-queue>` with the `ENTRANCE` of an available `InstanceType` in the same namespace.
 
 **Exclusive** — two whole accelerators:
 
@@ -75,9 +76,15 @@ apiVersion: v1
 kind: Pod
 metadata:
   name: exclusive-pod
+  labels:
+    kueue.x-k8s.io/queue-name: <local-queue>
 spec:
   containers:
     - name: main
+      image: ubuntu:24.04
+      command:
+        - sleep
+        - "3600"
       resources:
         limits:
           nvidia.com/gpu: "2"
@@ -90,9 +97,15 @@ apiVersion: v1
 kind: Pod
 metadata:
   name: shared-pod
+  labels:
+    kueue.x-k8s.io/queue-name: <local-queue>
 spec:
   containers:
     - name: main
+      image: ubuntu:24.04
+      command:
+        - sleep
+        - "3600"
       resources:
         limits:
           nvidia.com/gpu.shared: "2"
@@ -116,9 +129,15 @@ apiVersion: v1
 kind: Pod
 metadata:
   name: sliced-pod
+  labels:
+    kueue.x-k8s.io/queue-name: <local-queue>
 spec:
   containers:
     - name: main
+      image: ubuntu:24.04
+      command:
+        - sleep
+        - "3600"
       resources:
         limits:
           nvidia.com/gpu.sliced: "1"  # always exactly 1 accelerator
@@ -135,9 +154,15 @@ apiVersion: v1
 kind: Pod
 metadata:
   name: partitioned-pod
+  labels:
+    kueue.x-k8s.io/queue-name: <local-queue>
 spec:
   containers:
     - name: main
+      image: ubuntu:24.04
+      command:
+        - sleep
+        - "3600"
       resources:
         limits:
           nvidia.com/gpu.partitioned: "1"              # always exactly 1 accelerator
@@ -162,6 +187,9 @@ spec:
 ```
 
 ## Request rules
+
+The snippets below show only the resource fields under test; include the `Pod` fields shown in
+[Worked example per family](#worked-example-per-family) before applying one.
 
 The rules are scoped by a container's lifetime group, not by the field it sits in:
 
@@ -240,8 +268,8 @@ spec:
 > spec.initContainers must give up its request, because its devices are held for the Pod's whole life while
 > the scheduler charges the Pod only once`
 
-Needs a device in two phases? Keep the claim on the app container: its device is the same hardware the
-init container would have held.
+A device grant belongs to the container that requests it. An app-container request does not grant
+the device to an init container. This API does not support requesting an accelerator in both groups.
 
 > **Why** — two independent reasons, and one group makes charge and consumption agree by construction.
 >

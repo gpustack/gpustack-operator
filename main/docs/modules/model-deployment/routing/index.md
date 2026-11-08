@@ -5,7 +5,7 @@ endpoint selection and SGLang's tested DP routing modes.
 
 ## Contents
 
-- [Which Pods receive traffic](#which-pods-receive-traffic)
+- [Traffic targets](#traffic-targets)
 - [Encode stage routing](#encode-stage-routing)
 - [Each router's default](#each-routers-default)
 - [Prefix affinity](#prefix-affinity)
@@ -14,7 +14,7 @@ endpoint selection and SGLang's tested DP routing modes.
 - [Serving observations](#serving-observations)
 - [Per-worker routing metrics](#per-worker-routing-metrics)
 
-## Which Pods receive traffic
+## Traffic targets
 
 The serving mode decides which `Pod`s are candidates; the router decides which candidate a
 request lands on, and a policy such as `round_robin` never changes the selector.
@@ -86,7 +86,7 @@ Admission rejects vLLM's MultiPort mode because it starts endpoints on additiona
 A decoder proxy's internal backend port remains separate from its published HTTP port.
 See the [External DP walkthrough](/gpustack-operator/main/docs/walkthroughs/model-deployment/external-dp/index.md) for a minimal per-rank configuration.
 
-### How groups are excluded
+### Group exclusion
 
 A managed protected group is excluded through its `Pod` set, not through a selector that loses a term.
 The requirement stays in the selector from the first enable, decided or not, and only the members whose
@@ -118,7 +118,7 @@ requirement would withhold the other's members.
 How the encoder is reached depends on the engine and router. Send requests to
 *`status.endpoint`* in every case.
 
-| Router | Engine | How the encoder is reached |
+| Router | Engine | Encoder routing |
 |---|---|---|
 | `llm-d-router` | `vLLM` | The router picks an encoder for requests with media, then the *decode* sidecar coordinates the transfer |
 | `vllm-router` | `vLLM` | The router receives the encoder `Service` URL via `--epd-config` and drives *encode*, *prefill* and *decode* directly without a *decode* sidecar |
@@ -178,7 +178,7 @@ Measured on two server replicas, each on its own GPU, with serial chat requests 
 same text of about 500 characters and end in a question of their own, streaming and non-streaming in
 turn. No request failed:
 
-| Router | Engine | Requests on each replica |
+| Router | Engine | Requests per replica |
 |---|---|---|
 | `vllm-router` | vLLM `0.29.0` | 354 and 0 |
 | `sglang-gateway` | SGLang `0.5.18` | 406 and 0 |
@@ -267,7 +267,7 @@ serving-observation contract [`status.roles[].endpoints`](status.md#status) defi
 
 **Three bounds apply, and they serve different purposes.**
 
-| Bound | Value | What it covers |
+| Bound | Value | Scope |
 |---|---|---|
 | Fetch deadline | 2 seconds | one read of one Router's view |
 | Collection budget | 14 seconds | one collection, across every Router it reads |

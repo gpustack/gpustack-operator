@@ -84,9 +84,8 @@ declared, because that figure is **capacity, not usage** (see
 
 This is what [issue #200](https://github.com/gpustack/gpustack-operator/issues/200) tracks.
 
-**The operator renders a smaller pair of its own**, so a modest backend closes buckets. They are
-**not in the API** and *`extraEnv`* refuses them: moving them is a tuning decision that would need a
-field, not an escape hatch that silently defines the same variable twice.
+The operator renders thresholds of 16 MiB or 64 keys per bucket, so a modest backend closes buckets.
+They are **not in the API** and *`extraEnv`* refuses them: moving them needs a field.
 
 Three bounds follow from the bucket being the unit, all enforced at apply time, all naming the same
 figure:
@@ -134,7 +133,7 @@ of data and the gauge remains `0` past that delay, the tier is not taking writes
 
 *`localDisks[].eviction`* is one choice with two outcomes, not a set of settings:
 
-| `eviction` | Behavior when full |
+| `eviction` | Full-disk behavior |
 |---|---|
 | unset | whatever the store does by default |
 | `enabled: true` (the default when the block is present) | drops what it holds and goes on accepting writes |
@@ -148,7 +147,7 @@ of data and the gauge remains `0` past that delay, the tier is not taking writes
 Four combinations are refused at apply time, each because the store would accept them and then not
 act on them:
 
-| Refused | Why |
+| Refused | Reason |
 |---|---|
 | `enabled: false` with a `policy` | there is no order in which nothing leaves |
 | `enabled: false` with a `watermark` | there is nothing for the marks to start and stop |
@@ -278,7 +277,7 @@ filesystem there.
 before the member starts, and it runs `sh -c`; an image without a shell keeps the member from
 starting. The store images this project ships have one.
 
-### When cleanup is disabled
+### Disabled cleanup
 
 A later backend pointed at the same `path` starts on whatever the previous one left. The store
 claims those buckets, so a key the new backend has written can read back as the **old backend's

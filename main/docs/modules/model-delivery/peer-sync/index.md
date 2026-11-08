@@ -7,6 +7,20 @@ grows with node count and a hub outage stalls every cold node.
 publishes: the **hub delivers one copy's worth of bytes for any number of nodes**, and a cold
 node can materialize a resolved artifact while the hub is unreachable.
 
+![Node-to-node peer sync over TCP](/gpustack-operator/main/docs/assets/diagrams/model-delivery-peer-sync.svg)
+
+<!--
+flowchart TD
+    HUB["Upstream model hub (1x download)"]
+    SEED["node-01: seed cache"]
+    PEER2["node-02: peer cache over TCP :32445"]
+    PEER3["node-03: peer cache over TCP :32445"]
+    HUB -> SEED
+    SEED -> PEER2
+    SEED -> PEER3
+    PEER2 -> PEER3
+-->
+
 ## Contents
 
 - [Configuration](#configuration)

@@ -19,9 +19,8 @@ The output below was captured with node model delivery enabled.
 ## Summary
 
 `NodeModelStore`, `ModelArtifact` and `ModelPrefetch` verify and cache Hugging Face weights on the
-node's disk before a serving `Pod` starts, so the rollout finds warm, checksum-verified weights and
-does not wait on a hub download.
-This shared preparation serves both the Elastic EP and External DP walkthroughs.
+node's disk before a serving `Pod` starts. A serving `Pod` on that node can use the verified cache
+while the weights remain available. This preparation serves the Elastic EP and External DP walkthroughs.
 
 | Object | Scope | Creator | Purpose |
 |---|---|---|---|
@@ -35,7 +34,7 @@ This shared preparation serves both the Elastic EP and External DP walkthroughs.
 
 The captured run used this setup:
 
-| Item | Captured setup |
+| Item | Value |
 |---|---|
 | Cluster | Kubernetes with GPUStack, node model delivery enabled |
 | Node | one GPU node, named `gpu-node` in the manifests, with disk for the weights |
@@ -43,13 +42,15 @@ The captured run used this setup:
 
 ## Step 1: Create artifact and prefetch
 
-Enable [node model delivery](/gpustack-operator/main/docs/modules/model-delivery/operations/index.md) and select the GPU node
-before applying the manifest (`kubectl`, `jq`, access to cluster-scoped model stores, and enough
-disk for the weights are required).
+Enable [node model delivery](/gpustack-operator/main/docs/modules/model-delivery/operations/index.md) and select the GPU node.
+Before applying the manifest, ensure you have `kubectl`, `jq` and access to cluster-scoped model stores.
+The node also needs enough disk space for the weights.
 
 Save the following as `model-delivery.yaml`. Replace both `gpu-node` values with your GPU node's
 `kubernetes.io/hostname` label. The store grant and the prefetch placement must select that same node.
 The fixed file list resolves to 12 files and 31,418,807,311 bytes.
+For another model, remove the DeepSeek-specific *`allowPatterns`* or replace them with a complete file list.
+Size the binding quota and node disk space for the resolved weights.
 
 ```yaml
 apiVersion: v1

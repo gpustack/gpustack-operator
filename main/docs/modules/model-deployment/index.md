@@ -5,8 +5,25 @@ its own replicas and resources.
 
 ## Contents
 
+- [Overview](#overview)
 - [Deployment configuration](#deployment-configuration)
 - [Service operations](#service-operations)
+- [Troubleshooting](#troubleshooting)
+
+## Overview
+
+![Model deployment serving flow](/gpustack-operator/main/docs/assets/diagrams/model-deployment-flow.svg)
+
+<!--
+flowchart TD
+    ARTIFACT["Optional ModelArtifact"] -> CTRL["ModelDeployment role controller"]
+    CACHE["Optional KVCachePoolBinding"] -> CTRL
+    POOL["InstanceType and topology"] -> CTRL
+    SCALER["Optional ModelDeploymentScaler"] -> CTRL
+    CTRL -> ROUTER["Managed traffic router"]
+    CTRL -> PODS["Aggregated, encode, prefill and decode replicas"]
+    ROUTER -> PODS
+-->
 
 ## Deployment configuration
 
@@ -53,6 +70,17 @@ with one HTTP endpoint per rank and checks managed Router coverage.
 
 [External DP Benchmark](/gpustack-operator/main/docs/modules/model-deployment/external-dp-benchmark/index.md) compares that group with a
 monolithic wide tensor-parallel group on the same GPUs.
+
+## Troubleshooting
+
+If a deployment does not become ready, inspect its phase, conditions and role status:
+
+```shell
+kubectl -n <namespace> get modeldeployment <name> -o yaml
+```
+
+Compare the result with [Model Deployment Status](/gpustack-operator/main/docs/modules/model-deployment/status/index.md). For scaling problems, see the
+[Scaling Walkthrough](/gpustack-operator/main/docs/walkthroughs/model-deployment/scaling/index.md#troubleshooting).
 
 ---
 

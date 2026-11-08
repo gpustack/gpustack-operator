@@ -26,7 +26,7 @@ its grace window.
 `G` below is the role's grace: *`roles[].terminationGracePeriodSeconds`*, 30 when unset, written to
 the `Pod`'s field of the same name.
 
-| From the delete | At the default | Action |
+| From deletion | Default timing | Action |
 |---|---|---|
 | 0 s | 0 s | the routers drop the replica, and the kubelet starts the engine container's preStop hook |
 | 0–5 s | 0–5 s | the engine keeps serving normally, including a request routed to it just before the delete |
@@ -142,7 +142,7 @@ Every one of these holds the replica in place, and the *`reason`* on the reserva
 applied. They are the ordinary outcomes of a replica that is busy, loading, or outside
 the configurations the protocol can measure.
 
-| The member | Verdict | Why |
+| Member | Verdict | Reason |
 |---|---|---|
 | still serving requests | held | there is work in flight, which is what the read is for |
 | answers with some gauges missing | held | a partial envelope is not evidence of an empty queue, and a reader cannot sum what it did not find |
@@ -232,8 +232,8 @@ ordinary retirement instead.
 - **A take-over role** (one that sets *`command`*) gets no hook, because the operator cannot claim
   that container serves the gauges. Its `Pod` gets the role's *`terminationGracePeriodSeconds`* as given,
   and keeps the Kubernetes default when the role sets none.
-- **A role that moves the engine with its own `--port`** gets only the first 5 s: nothing answers the
-  hook on the port the operator rendered.
+- **A stored role with a conflicting declared port and `--port`** gets only the first 5 s if the
+  hook cannot reach the engine. A role without a declared port uses its `--port` for the hook.
 - **A replica of several `Pod`s drains through its leader, and every member is still deleted.** The
   other members serve no metrics, so their hooks return after the first 5 s, and they receive SIGTERM
   while the leader is still draining. The protocol reads the members whose answer stands for the whole

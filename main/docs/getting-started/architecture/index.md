@@ -1,9 +1,9 @@
 # Architecture
 
-GPUStack Operator manages accelerator-backed workloads on Kubernetes. It discovers devices, turns
-node capacity into schedulable pools, and runs GPU `Instance`s and model deployments against those
-pools. Model delivery resolves and supplies model weights. Topology placement, *remote direct memory
-access (RDMA)* networking and shared KV cache support locality, fast transfers and reusable inference state.
+GPUStack Operator manages accelerator-backed workloads on Kubernetes. It discovers devices and turns
+node capacity into schedulable pools. GPU `Instance`s and model deployments use those pools.
+Model delivery resolves and supplies weights. Topology placement supports locality. *Remote direct
+memory access (RDMA)* networking supports fast transfers. Shared KV cache stores reusable inference state.
 
 ## Contents
 
@@ -38,33 +38,20 @@ GPU `Instance`s provide containers with optional SSH access. Model deployments r
 and, where configured, routers or *prefill*/*decode* groups. Both use the same device capacity and
 admission chain. Model delivery and KV cache are optional services alongside that chain.
 
-```mermaid
-flowchart TB
-    REQUEST["GPU Instances<br/>ModelDeployment / Pods"]
-    WORKER["Worker"]
-    DEVICES["Device Manager<br/>Accelerators / RDMA"]
-    TOPOLOGY["Topology"]
-    QUEUES["Kueue<br/>Pools and queues"]
-    ARTIFACT["Model Delivery<br/>ModelArtifact"]
-    MODELS["Model Manager<br/>Node cache"]
-    CACHE["KV Cache<br/>Backends and pools"]
-    STORE["Cache service"]
-    PODS["Workload Pods<br/>SSH / inference"]
+![Workload and scheduling flow](/gpustack-operator/main/docs/assets/diagrams/architecture-overview.svg)
 
-    REQUEST --> WORKER
-    WORKER --> QUEUES
-    DEVICES -- "capacity" --> QUEUES
-    TOPOLOGY -- "placement" --> QUEUES
-    QUEUES -- "admission" --> PODS
-    DEVICES -- "device access" --> PODS
-    REQUEST -- "artifact reference" --> ARTIFACT
-    WORKER -- "resolution and authorization" --> ARTIFACT
-    ARTIFACT -- "node delivery" --> MODELS
-    MODELS -- "weights" --> PODS
-    ARTIFACT -- "Engine / claim / image delivery" --> PODS
-    CACHE --> STORE
-    STORE -. "optional KV reuse" .-> PODS
-```
+<!--
+flowchart TD
+    REQUESTS["ModelDeployments, Instances and Pods"] -> WORKER["Worker controllers"]
+    NFD["NFD and topology sources"] -> WORKER
+    DM["Device Manager and Devices ledger"] -> WORKER
+    WORKER -> QUEUES["Pool flavors, isolated queues and topology admission"]
+    QUEUES -> PODS["Admitted workload Pods"]
+    DM -> PODS
+    ARTIFACT["ModelArtifact"] -> CSI["Optional node cache and CSI delivery"]
+    CSI -> PODS
+    CACHE["Optional KV pool and binding"] -> PODS
+-->
 
 The diagram shows the main dependencies. It does not require every workload to use a model artifact,
 RDMA, a topology source or a shared cache. An ordinary `Pod` can request device resources directly.
@@ -87,17 +74,16 @@ Device scheduling follows this chain:
 
 ## Model delivery
 
-Model delivery separates model weights and access credentials from workload configuration. A
-`ModelArtifact` resolves and pins a Hugging Face repository, ModelScope repository, container image,
-or `PersistentVolumeClaim`; workloads reference the artifact rather than repeating its source and
-credentials.
+Model delivery separates model weights and credentials from workload configuration. A `ModelArtifact`
+resolves and pins a Hugging Face repository, ModelScope repository, container image or
+`PersistentVolumeClaim`. Workloads reference the artifact instead of repeating its source and credentials.
 
 Depending on the delivery mode, weights are fetched in the workload `Pod` (`Engine`), cached and
 mounted read-only on the node by the Model Manager's CSI driver (`Node`), or mounted from an
 existing volume or image.
 
-`ModelStore` and `ModelStoreBinding` manage pool cache budgets and namespace grants,
-`NodeModelStore` tracks per-node cache state, and `ModelPrefetch` pre-warms weights — all
+`ModelStore` and `ModelStoreBinding` manage cache budgets and namespace grants. `NodeModelStore`
+tracks per-node cache state. `ModelPrefetch` warms weights before use. These resources operate
 independently of GPU admission. See [Model Delivery](/gpustack-operator/main/docs/modules/model-delivery/index.md),
 [Model Artifact](/gpustack-operator/main/docs/modules/model-delivery/artifact/index.md), and the
 [Model Prefetch Walkthrough](/gpustack-operator/main/docs/walkthroughs/model-delivery/prefetch/index.md).
@@ -105,8 +91,8 @@ independently of GPU admission. See [Model Delivery](/gpustack-operator/main/doc
 ## KV cache
 
 A shared KV cache stores reusable inference state. A backend runs the cache service or points to an
-external one; pools and namespace bindings provide access and quota grants. Compatible workloads
-receive the cache configuration when their `Pod`s are created. This service is optional, and its quota
+external one. Pools and namespace bindings provide access and quota grants. Compatible workloads
+receive the cache configuration when their `Pod`s are created. The service is optional. Its quota
 is separate from accelerator quota. See [KV Cache](/gpustack-operator/main/docs/modules/kv-cache/index.md).
 
 [Model Deployment](/gpustack-operator/main/docs/modules/model-deployment/index.md) brings these services together with engine,
@@ -154,6 +140,6 @@ The hardware terms Device, Accelerator and Resource are defined in
 ---
 
 **See also** — [Accelerator Requests](/gpustack-operator/main/docs/modules/devices/requests/index.md) ·
-[Settings](/gpustack-operator/main/docs/reference/settings/index.md) · [All documentation](https://github.com/gpustack/gpustack-operator/blob/8c5186108e620a8044164d9c4c114dd7376092f4/docs/README.md)
+[Settings](/gpustack-operator/main/docs/reference/settings/index.md) · [All documentation](https://github.com/gpustack/gpustack-operator/blob/91dc7c8d650bac133dd4ea3b29b35d62bd1ee2b1/docs/README.md)
 
 **Next** → [Walkthrough](/gpustack-operator/main/docs/walkthroughs/devices/scheduling/index.md) — follow a workload from submission to allocation.

@@ -23,15 +23,15 @@ binding; the generated `Pod`s bypass KV cache `Pod` injection. Ordinary `Pod` ad
 
 ```yaml
 apiVersion: worker.gpustack.ai/v1
-kind: ModelDeployment  # namespaced, short name md
+kind: ModelDeployment  # required; namespaced, short name md
 metadata:
   name: qwen-chat
   namespace: team-a
 spec:
   model:
-    name: Qwen/Qwen2.5-72B-Instruct  # served, never provisioned
+    name: Qwen/Qwen2.5-72B-Instruct  # required; served, never provisioned
   engine:
-    name: vLLM  # vLLM or SGLang
+    name: vLLM  # required; enum: vLLM or SGLang
     image: <a runner image your cluster can pull>  # required runner image
   kvCache:  # optional; omit to run without a shared pool
     poolRef:
@@ -44,6 +44,11 @@ spec:
       resources:
         accelerator: 2  # cards per Pod
 ```
+
+- **Model**: *`model.name`* identifies the served model; select its weight source separately.
+- **Engine**: Set a runner image that the cluster can pull.
+- **Pool**: Omit *`kvCache`* to run without a shared pool.
+- **Roles**: Configure 1 to 10 roles and set each role's replica count and resources.
 
 *`model.name`* is what the engine serves. The weights come from the engine's own hub client, a role's
 volumes, or a `ModelArtifact` named by *`model.artifactRef`*; see the
@@ -115,8 +120,12 @@ One RDMA interface uses `device.gpustack.ai/rdma.shared`; more than one uses tha
 An unset or zero count adds no device request.
 
 The key follows the bound cache backend's effective group protocol and any direct *prefill/decode*
-transport the engine actually renders. Different backend-group protocols or an RDMA and EFA mix
-are refused for a positive count.
+transport the engine actually renders. A managed, non-Ascend vLLM Server collective can select RDMA
+when it has multiple members or Elastic EP. Eligible NIXL-based remote weight delivery can also select
+RDMA. See [Remote Weight Delivery](/gpustack-operator/main/docs/modules/model-delivery/remote/index.md) for its qualification limits.
+
+A device grant does not establish that a transport has been validated. Different backend-group
+protocols or an RDMA and EFA mix are refused for a positive count.
 
 A count with no managed RDMA or EFA transfer path is also refused, whenever the request, the
 transfer settings or the pool the roles name change. See [RDMA Operations](/gpustack-operator/main/docs/modules/rdma/operations/index.md)
@@ -594,70 +603,26 @@ replacement is unresolved waits behind that replacement, then is rebuilt whole b
 in its own slot. Recovery never mixes members: an interrupted replacement is completed with its own configuration, and an old survivor is never filled with new-configuration
 members.
 
-**The old replicas run the configuration they were created with until each is deleted for
-replacement.** Nothing reshapes a running instance: an instance of two `Pod`s keeps its two members, its leader address and its rank layout until it leaves. Cache injection, the
-unmanaged marker and retirement read the deployed `Pod`s, so a role part-way through a *`command`* edit serves through replicas in both modes, and what status claims is what is
-actually deployed.
-
-A role moving between a managed command and a takeover keeps each running `Pod`'s own mode. A managed replica keeps its qualification rules. Once qualification is active, an
-Unknown observation keeps existing eligibility without granting new eligibility; a definite fault still withdraws it. A role whose qualification was never activated keeps its
-legacy readiness rule.
-
-A takeover replica keeps its legacy `Service` membership and stays `unmanaged: true`. Routing
-membership does not establish engine health or cache qualification.
-
-**Mixed configurations can appear across instances, never within one.** A replacement is created only
-after the instance it replaces has left — members and `Workload` — so no ordinal holds old and
-new members at once.
-
-Replicas not yet selected keep serving their old configuration beside replicas
-already replaced onto the new one; above `size: 1` each configuration's leader is picked by the
-member-index label, so a leader of each configuration can answer the same `Service` during that window.
-
-Peer DNS is per instance — one headless `Service` per replica — so the old and the new members
-resolve peers with their own configuration and never each other's. Each instance keeps its peer `Service` until
-its members have left, so a terminating replica's members can still resolve one another.
-
-Each deployed configuration also selects endpoints by its own mode while both serve: a leader-served replica through its
-leader, an *external data parallelism (External DP)* replica through its rank-carrying members.
-
-**A one-replica role has a gap.** Its only instance must leave before its replacement is admitted,
-so serving stops until the replacement is ready. The replacement's Kueue admission gates the next
-old replica's departure. Admission does not wait for engine readiness, so the next old replica may
-leave while the previous replacement is still starting.
-
-A multi-replica role can temporarily have no serving capacity. Replacement does not guarantee
-uninterrupted inference.
-
-**Siblings are untouched unless the edit reaches them.** An edit to one role's configuration never rewrites
-another role's groups: their `Workload`s, admission, member names and DNS stay as they are.
-
-The exception is the shared transfer document: on the vLLM-Ascend path the parallel degrees one role declares render into the document both roles carry, so a degree edit —
-through *`extraArgs`* or through a replaced *`command`* — rolls the pair, and until both halves converge the pair can fail to complete a transfer. See [Prefill and
-Decode](prefill-decode.md#direct-transfer-transport) for what that window means.
-
-**Admission rejudges a moved dependency, not the world.** The interface and pool-transport checks
-re-run for a role whose own interface request, type or command presence moved, for the roles whose
-rendered direct-transfer path a router or transfer edit actually changes — a router fronting no
-*prefill/decode* pair renders none — and on a type move for the moved role. Everything else keeps its
-admitted verdict, so a drifted store is repaired at the pool, not refused at the next edit.
-
-A role carrying *`elasticEp`* is excluded from all of this: the profile pins that role's configuration, and
-width is the only thing that moves ([Elastic EP](/gpustack-operator/main/docs/modules/model-deployment/elastic-ep/index.md#changing-the-width)).
-
-The cost rides on the block lease described under [Workload impact](/gpustack-operator/main/docs/modules/kv-cache/injection/index.md#workload-impact): a lease survives a long queue and does **not** survive an
-interrupted heartbeat, which is what a departing replica is. A departing replica therefore costs its siblings the blocks it held.
-
-The deployment records an event naming the replica and the lease window on each of three paths
-(`ReplicaEvicted`, `ReplicaLeaving`, `ReplicaRestarted`), so an operator correlating a burst of
-failed requests with a replica that went away has the correlation written down rather than inferred.
+- **Running replicas**: Nothing reshapes a running instance; it keeps its members, leader address and rank layout, and cache injection, `unmanaged` markers and retirement read the deployed `Pod`s until replacement.
+- **Takeover mode**: Replicas keep their running mode across *`command`* transitions. A takeover replica keeps legacy `Service` membership (`unmanaged: true`) without engine health or cache qualification.
+- **Replacement**: The old instance's `Pod`s and `Workload` leave before its replacement is created.
+- **Peer DNS**: Each replica has a headless `Service` until all its members terminate.
+- **Single-replica roles**: The sole instance exits before replacement admission; replacement admission gates the next departure without waiting for engine readiness.
+- **Multi-replica roles**: Service can pause while replacements start, and during a mixed rollout above `size: 1`, each configuration's leader (`member-index` label) can answer the shared `Service`.
+- **Sibling roles**: Editing one role leaves others intact, except for shared parallel-degree edits on vLLM-Ascend.
+  See [Prefill and Decode](/gpustack-operator/main/docs/modules/model-deployment/prefill-decode/index.md#direct-transfer-transport).
+- **Admission**: Interface and pool-transport checks run again only when a role's interface, type, command, router or transfer path changes.
+- **Elastic EP**: A role with *`elasticEp`* pins its member configuration and only resizes width.
+  See [Elastic EP](/gpustack-operator/main/docs/modules/model-deployment/elastic-ep/index.md#changing-the-width).
+- **Departure**: A departing replica drops its block heartbeat and emits `ReplicaEvicted`, `ReplicaLeaving` or `ReplicaRestarted`.
+  See [Workload impact](/gpustack-operator/main/docs/modules/kv-cache/injection/index.md#workload-impact).
 
 ### Render version and upgrades
 
 Each replica `Pod` carries two currency annotations so user-declared changes and operator-internal
 rendering changes are evaluated separately:
 
-| Annotation | Scope | What changes it | Default rollout behavior |
+| Annotation | Scope | Trigger | Default rollout behavior |
 |---|---|---|---|
 | `modeldeployment.gpustack.ai/pod-spec-hash` (on `Pod`) | explicit `ModelDeployment` fields (`model`, *`engine`*, *`router`*, *`kvCache.poolRef`*, *`kvTransfer`*, and the role's configuration) plus resolved external bindings (`InstanceType` entrance/manufacturer/resources, `KVCachePoolBinding` endpoint/domain/dtype, `ModelArtifact` source/digest, fabric interface key, `RuntimeClassName`, and seat `ordinal`/`member`) | editing any covered `ModelDeployment` field or changing a bound external resource | rolls affected replicas one per role per pass |
 | `modeldeployment.gpustack.ai/render-version` (on `Pod`) | operator-synthesized flags (`--host`, `--port`, `--served-model-name`, connector flags), defaulted environment entries, probes, `preStop` drain hook, sidecars (`routing-proxy`, `wait-for-worker`), implicit labels/annotations, and worker `Setting` values | upgrading to an operator release with a newer rendering baseline | keeps running replicas in place while `render-version` meets the effective minimum floor; applies to newly created or replaced `Pod`s |
@@ -692,7 +657,7 @@ spec:
 
 Most departures are not a spec change, and none of them touches a sibling:
 
-| Cause | Who initiates it |
+| Cause | Initiator |
 |---|---|
 | **Kueue preempting** the deployment for a higher-priority workload | the scheduler |
 | **a node being drained**, cordoned or replaced | the cluster |
@@ -873,7 +838,7 @@ depends on the `InstanceType` the role names.
 | more than 10 roles | the bound as **this operator's own role-count limit**, not an upstream number — every role renders its own replicas, `Service`s and queue references |
 | a role whose members could not be named | the longest name the declared *`replicas`* and *`size`* would produce, its length and why it is not a hostname, and the three ways out — shorten the role, shorten the deployment, or declare fewer replicas |
 | two roles sharing a `name` | the duplicate — refused by the **schema**, since *`roles`* is a list keyed on `name`, so this one never reaches the webhook |
-| an edit to an identity field — `model`, *`engine.name`*, *`kvCache`*, or the role configuration | the field path, and that a different value describes a different **deployment**, which is created rather than edited. See [Deployment identity fields](#deployment-identity-fields) |
+| an edit to an identity field — `model`, *`engine.name`*, *`kvCache`*, the role set, or a role's *`kind`* | the field path, and that a different value describes a different **deployment**, which is created rather than edited. See [Deployment identity fields](#deployment-identity-fields) |
 | a resource mode the named `InstanceType` does not offer | the mode and the type — a slice on a type that offers no slicing, a partition profile on a type that cannot partition, or one outside its profile inventory, with the offered list |
 | a whole-accelerator count over the type's whole-accelerator capacity | the capacity itself, not only that the request was too large, so the next attempt is not a guess. The bound is the pool's total, not what is free, so a deployment submitted while every accelerator is held is admitted and waits in its queue; one above the largest node but within the total is admitted and stays queued — see [Accelerator Requests](/gpustack-operator/main/docs/modules/devices/requests/index.md#limitations) |
 | a negative or fractional *`resources.interface`*, or one with no effective RDMA/EFA path | the role's interface field and the protocol that prevents allocation; mixed backend groups and mixed fabric paths are rejected |

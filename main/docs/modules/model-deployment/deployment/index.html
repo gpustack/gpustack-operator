@@ -10,6 +10,9 @@
         const theme = localStorage.getItem("theme");
         if (theme === "light" || theme === "dark") document.documentElement.dataset.theme = theme;
         document.documentElement.dataset.themeChoice = theme === "light" || theme === "dark" ? theme : "system";
+        if (localStorage.getItem("sidebar-collapsed") === "true") {
+          document.documentElement.dataset.sidebarCollapsed = "true";
+        }
       } catch {
         document.documentElement.dataset.themeChoice = "system";
       }
@@ -24,7 +27,7 @@
   <link rel="alternate" type="text/markdown" href="/gpustack-operator/main/docs/modules/model-deployment/deployment/index.md">
   
   <link rel="describedby" href="/gpustack-operator/main/llms.txt">
-  <link rel="stylesheet" href="/gpustack-operator/main/css/site.ea544478884ee4c46c0d82a26985cad564c8f892cccad0c8ffcefe846c62a4a0.css">
+  <link rel="stylesheet" href="/gpustack-operator/main/css/site.1a0de63fe646aba4ed6541fe0a6383c2ed5ca649b1593a98595ba53430bcf032.css">
   <link rel="stylesheet" href="/gpustack-operator/main/css/code.d2570c1cc6480f9c62bc31ec538eef2578ce80980588c469638a5f95416bfc7b.css">
 </head>
 <body class="docs-page">
@@ -95,6 +98,13 @@
   <div class="layout">
     <aside class="sidebar" aria-label="Documentation navigation">
       <button class="nav-toggle" type="button" aria-controls="docs-navigation" aria-expanded="false">Browse documentation</button>
+      <button class="sidebar-toggle" type="button" aria-controls="docs-navigation" aria-expanded="true" aria-label="Collapse sidebar" title="Collapse sidebar">
+        <svg class="sidebar-toggle-icon" aria-hidden="true" viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="2" y="2.5" width="12" height="11" rx="2"/>
+          <line x1="6" y1="2.5" x2="6" y2="13.5"/>
+          <polyline class="sidebar-icon-arrow" points="10.5 6 8.5 8 10.5 10"/>
+        </svg>
+      </button>
       <nav id="docs-navigation" class="sidebar-inner">
         <div class="nav-title">Documentation</div>
         <a class="nav-home" href="/gpustack-operator/main/" >Overview</a>
@@ -1473,15 +1483,15 @@ binding; the generated <code>Pod</code>s bypass KV cache <code>Pod</code> inject
 <div class="code-block">
   <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">worker.gpustack.ai/v1</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">ModelDeployment </span><span class="w"> </span><span class="c"># namespaced, short name md</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">ModelDeployment </span><span class="w"> </span><span class="c"># required; namespaced, short name md</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">metadata</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">qwen-chat</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">namespace</span><span class="p">:</span><span class="w"> </span><span class="l">team-a</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">spec</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">model</span><span class="p">:</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">Qwen/Qwen2.5-72B-Instruct </span><span class="w"> </span><span class="c"># served, never provisioned</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">Qwen/Qwen2.5-72B-Instruct </span><span class="w"> </span><span class="c"># required; served, never provisioned</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">engine</span><span class="p">:</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">vLLM </span><span class="w"> </span><span class="c"># vLLM or SGLang</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">name: vLLM  # required; enum</span><span class="p">:</span><span class="w"> </span><span class="l">vLLM or SGLang</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">image</span><span class="p">:</span><span class="w"> </span><span class="l">&lt;a runner image your cluster can pull&gt; </span><span class="w"> </span><span class="c"># required runner image</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">kvCache</span><span class="p">:</span><span class="w">  </span><span class="c"># optional; omit to run without a shared pool</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">poolRef</span><span class="p">:</span><span class="w">
@@ -1493,7 +1503,13 @@ binding; the generated <code>Pod</code>s bypass KV cache <code>Pod</code> inject
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">instanceType</span><span class="p">:</span><span class="w"> </span><span class="l">gpustack--nvidia-a10g-linux-amd64</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">resources</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">accelerator</span><span class="p">:</span><span class="w"> </span><span class="m">2</span><span class="w">  </span><span class="c"># cards per Pod</span></span></span></code></pre></div>
-</div><p><em><code>model.name</code></em> is what the engine serves. The weights come from the engine&rsquo;s own hub client, a role&rsquo;s
+</div><ul>
+<li><strong>Model</strong>: <em><code>model.name</code></em> identifies the served model; select its weight source separately.</li>
+<li><strong>Engine</strong>: Set a runner image that the cluster can pull.</li>
+<li><strong>Pool</strong>: Omit <em><code>kvCache</code></em> to run without a shared pool.</li>
+<li><strong>Roles</strong>: Configure 1 to 10 roles and set each role&rsquo;s replica count and resources.</li>
+</ul>
+<p><em><code>model.name</code></em> is what the engine serves. The weights come from the engine&rsquo;s own hub client, a role&rsquo;s
 volumes, or a <code>ModelArtifact</code> named by <em><code>model.artifactRef</code></em>; see the
 <a href="/gpustack-operator/main/docs/modules/model-delivery/artifact/">Model Artifact</a>
 .</p>
@@ -1573,8 +1589,12 @@ One RDMA interface uses <code>device.gpustack.ai/rdma.shared</code>; more than o
 .
 An unset or zero count adds no device request.</p>
 <p>The key follows the bound cache backend&rsquo;s effective group protocol and any direct <em>prefill/decode</em>
-transport the engine actually renders. Different backend-group protocols or an RDMA and EFA mix
-are refused for a positive count.</p>
+transport the engine actually renders. A managed, non-Ascend vLLM Server collective can select RDMA
+when it has multiple members or Elastic EP. Eligible NIXL-based remote weight delivery can also select
+RDMA. See <a href="/gpustack-operator/main/docs/modules/model-delivery/remote/">Remote Weight Delivery</a>
+ for its qualification limits.</p>
+<p>A device grant does not establish that a transport has been validated. Different backend-group
+protocols or an RDMA and EFA mix are refused for a positive count.</p>
 <p>A count with no managed RDMA or EFA transfer path is also refused, whenever the request, the
 transfer settings or the pool the roles name change. See <a href="/gpustack-operator/main/docs/modules/rdma/operations/">RDMA Operations</a>
 
@@ -2038,52 +2058,24 @@ second replica.</p>
 replacement is unresolved waits behind that replacement, then is rebuilt whole before another healthy old replica is rolled. A replacement that itself loses a member is recovered
 in its own slot. Recovery never mixes members: an interrupted replacement is completed with its own configuration, and an old survivor is never filled with new-configuration
 members.</p>
-<p><strong>The old replicas run the configuration they were created with until each is deleted for
-replacement.</strong> Nothing reshapes a running instance: an instance of two <code>Pod</code>s keeps its two members, its leader address and its rank layout until it leaves. Cache injection, the
-unmanaged marker and retirement read the deployed <code>Pod</code>s, so a role part-way through a <em><code>command</code></em> edit serves through replicas in both modes, and what status claims is what is
-actually deployed.</p>
-<p>A role moving between a managed command and a takeover keeps each running <code>Pod</code>&rsquo;s own mode. A managed replica keeps its qualification rules. Once qualification is active, an
-Unknown observation keeps existing eligibility without granting new eligibility; a definite fault still withdraws it. A role whose qualification was never activated keeps its
-legacy readiness rule.</p>
-<p>A takeover replica keeps its legacy <code>Service</code> membership and stays <code>unmanaged: true</code>. Routing
-membership does not establish engine health or cache qualification.</p>
-<p><strong>Mixed configurations can appear across instances, never within one.</strong> A replacement is created only
-after the instance it replaces has left — members and <code>Workload</code> — so no ordinal holds old and
-new members at once.</p>
-<p>Replicas not yet selected keep serving their old configuration beside replicas
-already replaced onto the new one; above <code>size: 1</code> each configuration&rsquo;s leader is picked by the
-member-index label, so a leader of each configuration can answer the same <code>Service</code> during that window.</p>
-<p>Peer DNS is per instance — one headless <code>Service</code> per replica — so the old and the new members
-resolve peers with their own configuration and never each other&rsquo;s. Each instance keeps its peer <code>Service</code> until
-its members have left, so a terminating replica&rsquo;s members can still resolve one another.</p>
-<p>Each deployed configuration also selects endpoints by its own mode while both serve: a leader-served replica through its
-leader, an <em>external data parallelism (External DP)</em> replica through its rank-carrying members.</p>
-<p><strong>A one-replica role has a gap.</strong> Its only instance must leave before its replacement is admitted,
-so serving stops until the replacement is ready. The replacement&rsquo;s Kueue admission gates the next
-old replica&rsquo;s departure. Admission does not wait for engine readiness, so the next old replica may
-leave while the previous replacement is still starting.</p>
-<p>A multi-replica role can temporarily have no serving capacity. Replacement does not guarantee
-uninterrupted inference.</p>
-<p><strong>Siblings are untouched unless the edit reaches them.</strong> An edit to one role&rsquo;s configuration never rewrites
-another role&rsquo;s groups: their <code>Workload</code>s, admission, member names and DNS stay as they are.</p>
-<p>The exception is the shared transfer document: on the vLLM-Ascend path the parallel degrees one role declares render into the document both roles carry, so a degree edit —
-through <em><code>extraArgs</code></em> or through a replaced <em><code>command</code></em> — rolls the pair, and until both halves converge the pair can fail to complete a transfer. See <a href="/gpustack-operator/main/docs/modules/model-deployment/prefill-decode/#direct-transfer-transport">Prefill and
-Decode</a>
- for what that window means.</p>
-<p><strong>Admission rejudges a moved dependency, not the world.</strong> The interface and pool-transport checks
-re-run for a role whose own interface request, type or command presence moved, for the roles whose
-rendered direct-transfer path a router or transfer edit actually changes — a router fronting no
-<em>prefill/decode</em> pair renders none — and on a type move for the moved role. Everything else keeps its
-admitted verdict, so a drifted store is repaired at the pool, not refused at the next edit.</p>
-<p>A role carrying <em><code>elasticEp</code></em> is excluded from all of this: the profile pins that role&rsquo;s configuration, and
-width is the only thing that moves (<a href="/gpustack-operator/main/docs/modules/model-deployment/elastic-ep/#changing-the-width">Elastic EP</a>
-).</p>
-<p>The cost rides on the block lease described under <a href="/gpustack-operator/main/docs/modules/kv-cache/injection/#workload-impact">Workload impact</a>
-: a lease survives a long queue and does <strong>not</strong> survive an
-interrupted heartbeat, which is what a departing replica is. A departing replica therefore costs its siblings the blocks it held.</p>
-<p>The deployment records an event naming the replica and the lease window on each of three paths
-(<code>ReplicaEvicted</code>, <code>ReplicaLeaving</code>, <code>ReplicaRestarted</code>), so an operator correlating a burst of
-failed requests with a replica that went away has the correlation written down rather than inferred.</p>
+<ul>
+<li><strong>Running replicas</strong>: Nothing reshapes a running instance; it keeps its members, leader address and rank layout, and cache injection, <code>unmanaged</code> markers and retirement read the deployed <code>Pod</code>s until replacement.</li>
+<li><strong>Takeover mode</strong>: Replicas keep their running mode across <em><code>command</code></em> transitions. A takeover replica keeps legacy <code>Service</code> membership (<code>unmanaged: true</code>) without engine health or cache qualification.</li>
+<li><strong>Replacement</strong>: The old instance&rsquo;s <code>Pod</code>s and <code>Workload</code> leave before its replacement is created.</li>
+<li><strong>Peer DNS</strong>: Each replica has a headless <code>Service</code> until all its members terminate.</li>
+<li><strong>Single-replica roles</strong>: The sole instance exits before replacement admission; replacement admission gates the next departure without waiting for engine readiness.</li>
+<li><strong>Multi-replica roles</strong>: Service can pause while replacements start, and during a mixed rollout above <code>size: 1</code>, each configuration&rsquo;s leader (<code>member-index</code> label) can answer the shared <code>Service</code>.</li>
+<li><strong>Sibling roles</strong>: Editing one role leaves others intact, except for shared parallel-degree edits on vLLM-Ascend.
+See <a href="/gpustack-operator/main/docs/modules/model-deployment/prefill-decode/#direct-transfer-transport">Prefill and Decode</a>
+.</li>
+<li><strong>Admission</strong>: Interface and pool-transport checks run again only when a role&rsquo;s interface, type, command, router or transfer path changes.</li>
+<li><strong>Elastic EP</strong>: A role with <em><code>elasticEp</code></em> pins its member configuration and only resizes width.
+See <a href="/gpustack-operator/main/docs/modules/model-deployment/elastic-ep/#changing-the-width">Elastic EP</a>
+.</li>
+<li><strong>Departure</strong>: A departing replica drops its block heartbeat and emits <code>ReplicaEvicted</code>, <code>ReplicaLeaving</code> or <code>ReplicaRestarted</code>.
+See <a href="/gpustack-operator/main/docs/modules/kv-cache/injection/#workload-impact">Workload impact</a>
+.</li>
+</ul>
 <h3 id="render-version-and-upgrades">Render version and upgrades</h3>
 <p>Each replica <code>Pod</code> carries two currency annotations so user-declared changes and operator-internal
 rendering changes are evaluated separately:</p>
@@ -2092,7 +2084,7 @@ rendering changes are evaluated separately:</p>
       <tr>
           <th>Annotation</th>
           <th>Scope</th>
-          <th>What changes it</th>
+          <th>Trigger</th>
           <th>Default rollout behavior</th>
       </tr>
   </thead>
@@ -2147,7 +2139,7 @@ Status</a>
   <thead>
       <tr>
           <th>Cause</th>
-          <th>Who initiates it</th>
+          <th>Initiator</th>
       </tr>
   </thead>
   <tbody>
@@ -2337,7 +2329,7 @@ depends on the <code>InstanceType</code> the role names.</p>
           <td>the duplicate — refused by the <strong>schema</strong>, since <em><code>roles</code></em> is a list keyed on <code>name</code>, so this one never reaches the webhook</td>
       </tr>
       <tr>
-          <td>an edit to an identity field — <code>model</code>, <em><code>engine.name</code></em>, <em><code>kvCache</code></em>, or the role configuration</td>
+          <td>an edit to an identity field — <code>model</code>, <em><code>engine.name</code></em>, <em><code>kvCache</code></em>, the role set, or a role&rsquo;s <em><code>kind</code></em></td>
           <td>the field path, and that a different value describes a different <strong>deployment</strong>, which is created rather than edited. See <a href="#deployment-identity-fields">Deployment identity fields</a>
 </td>
       </tr>
@@ -2542,7 +2534,7 @@ structured snapshot and <code>Pod</code> scrape endpoints.</li></ul>
           
           
           <nav class="page-actions" aria-label="Page source">
-            <a href="https://github.com/gpustack/gpustack-operator/blob/8c5186108e620a8044164d9c4c114dd7376092f4/docs/modules/model-deployment/deployment.md">View page source</a>
+            <a href="https://github.com/gpustack/gpustack-operator/blob/91dc7c8d650bac133dd4ea3b29b35d62bd1ee2b1/docs/modules/model-deployment/deployment.md">View page source</a>
             
             <a href="https://github.com/gpustack/gpustack-operator/edit/main/docs/modules/model-deployment/deployment.md">Edit this page</a>
             
@@ -2593,6 +2585,6 @@ structured snapshot and <code>Pod</code> scrape endpoints.</li></ul>
     </aside>
   </div>
   
-  <script src="/gpustack-operator/main/js/site.1ec84fdfb2bec16dbb83a64abad1abe2d27d8d3f7fc54c2cfa45fe4d64303b3c.js" defer></script>
+  <script src="/gpustack-operator/main/js/site.e362041170f1762d2935c1ef4d8ca5f494983b230101e1b6536544c195645f10.js" defer></script>
 </body>
 </html>

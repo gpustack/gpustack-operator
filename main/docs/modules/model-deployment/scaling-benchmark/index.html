@@ -10,6 +10,9 @@
         const theme = localStorage.getItem("theme");
         if (theme === "light" || theme === "dark") document.documentElement.dataset.theme = theme;
         document.documentElement.dataset.themeChoice = theme === "light" || theme === "dark" ? theme : "system";
+        if (localStorage.getItem("sidebar-collapsed") === "true") {
+          document.documentElement.dataset.sidebarCollapsed = "true";
+        }
       } catch {
         document.documentElement.dataset.themeChoice = "system";
       }
@@ -24,7 +27,7 @@
   <link rel="alternate" type="text/markdown" href="/gpustack-operator/main/docs/modules/model-deployment/scaling-benchmark/index.md">
   
   <link rel="describedby" href="/gpustack-operator/main/llms.txt">
-  <link rel="stylesheet" href="/gpustack-operator/main/css/site.ea544478884ee4c46c0d82a26985cad564c8f892cccad0c8ffcefe846c62a4a0.css">
+  <link rel="stylesheet" href="/gpustack-operator/main/css/site.1a0de63fe646aba4ed6541fe0a6383c2ed5ca649b1593a98595ba53430bcf032.css">
   <link rel="stylesheet" href="/gpustack-operator/main/css/code.d2570c1cc6480f9c62bc31ec538eef2578ce80980588c469638a5f95416bfc7b.css">
 </head>
 <body class="docs-page">
@@ -95,6 +98,13 @@
   <div class="layout">
     <aside class="sidebar" aria-label="Documentation navigation">
       <button class="nav-toggle" type="button" aria-controls="docs-navigation" aria-expanded="false">Browse documentation</button>
+      <button class="sidebar-toggle" type="button" aria-controls="docs-navigation" aria-expanded="true" aria-label="Collapse sidebar" title="Collapse sidebar">
+        <svg class="sidebar-toggle-icon" aria-hidden="true" viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="2" y="2.5" width="12" height="11" rx="2"/>
+          <line x1="6" y1="2.5" x2="6" y2="13.5"/>
+          <polyline class="sidebar-icon-arrow" points="10.5 6 8.5 8 10.5 10"/>
+        </svg>
+      </button>
       <nav id="docs-navigation" class="sidebar-inner">
         <div class="nav-title">Documentation</div>
         <a class="nav-home" href="/gpustack-operator/main/" >Overview</a>
@@ -1490,8 +1500,8 @@ retirement recovery.</p>
   <thead>
       <tr>
           <th>Item</th>
-          <th>Suite 1 (H100 single-node)</th>
-          <th>Suite 2 (H200 multi-node)</th>
+          <th>Suite 1 (H100)</th>
+          <th>Suite 2 (H200)</th>
       </tr>
   </thead>
   <tbody>
@@ -2206,18 +2216,19 @@ between <code>c = 16</code> (<code>11477.608</code> tok/s) and <code>c = 24</cod
 <p>Eighteen serial rounds (<code>3</code> alternating repeats per arm for <code>TokenThroughput</code> and <code>3</code> for
 <code>Predictive</code>) compared <code>frozen-manual</code> (<code>20000</code> tok/s), <code>tuned-manual</code> (<code>17135.159</code> tok/s) and
 <code>catalog</code> (<code>12851.37</code> effective tok/s from the sweep <code>ConfigMap</code>) across <code>baseline</code> (<code>30</code> s,
-<code>c = 2</code>), <code>ramp</code> (<code>45</code> s, <code>c = 24</code>), <code>sustain</code> (<code>45</code> s, <code>c = 24</code>) and <code>cooldown</code> (<code>30</code> s, <code>c = 0</code>):</p>
+<code>c = 2</code>), <code>ramp</code> (<code>45</code> s, <code>c = 24</code>), <code>sustain</code> (<code>45</code> s, <code>c = 24</code>) and <code>cooldown</code> (<code>30</code> s, <code>c = 0</code>).
+Latency columns show p50/p99:</p>
 <table>
   <thead>
       <tr>
           <th>Algorithm</th>
           <th>Arm</th>
           <th style="text-align: right">Valid repeats</th>
-          <th>Ready replica-s (median / min–max)</th>
+          <th>Ready replica-s (median/min–max)</th>
           <th style="text-align: right">Peak Ready</th>
-          <th>Ramp <em>TTFT</em> p50 / p99 (ms)</th>
-          <th>Sustain <em>TTFT</em> p50 / p99 (ms)</th>
-          <th>Sustain <em>ITL</em> p50 / p99 (ms)</th>
+          <th>Ramp <em>TTFT</em> (ms)</th>
+          <th>Sustain <em>TTFT</em> (ms)</th>
+          <th>Sustain <em>ITL</em> (ms)</th>
       </tr>
   </thead>
   <tbody>
@@ -2575,7 +2586,7 @@ or served a request. A count already above one at ramp start is reported as zero
       <tr>
           <th>Configuration</th>
           <th style="text-align: right">Lead (s)</th>
-          <th>Above one before ramp</th>
+          <th>Pre-ramp count &gt;1</th>
           <th>Maximum desired counts</th>
           <th>Maximum Ready counts</th>
       </tr>
@@ -2768,7 +2779,7 @@ examples from captured lifecycle evidence.</p>
           
           
           <nav class="page-actions" aria-label="Page source">
-            <a href="https://github.com/gpustack/gpustack-operator/blob/8c5186108e620a8044164d9c4c114dd7376092f4/docs/modules/model-deployment/scaling-benchmark.md">View page source</a>
+            <a href="https://github.com/gpustack/gpustack-operator/blob/91dc7c8d650bac133dd4ea3b29b35d62bd1ee2b1/docs/modules/model-deployment/scaling-benchmark.md">View page source</a>
             
             <a href="https://github.com/gpustack/gpustack-operator/edit/main/docs/modules/model-deployment/scaling-benchmark.md">Edit this page</a>
             
@@ -2826,6 +2837,6 @@ examples from captured lifecycle evidence.</p>
     
     <script src="/gpustack-operator/main/vendor/mermaid/mermaid.min.70137e77bb273bb2ef972b86e8b0400cca8be53cb25bfc45911a186dc98665de.js" integrity="sha256-cBN&#43;d7snO7LvlyuG6LBADMqL5TyyW/xFkRoYbcmGZd4=" defer></script>
   
-  <script src="/gpustack-operator/main/js/site.1ec84fdfb2bec16dbb83a64abad1abe2d27d8d3f7fc54c2cfa45fe4d64303b3c.js" defer></script>
+  <script src="/gpustack-operator/main/js/site.e362041170f1762d2935c1ef4d8ca5f494983b230101e1b6536544c195645f10.js" defer></script>
 </body>
 </html>

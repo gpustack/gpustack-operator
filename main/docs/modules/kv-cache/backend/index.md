@@ -32,7 +32,8 @@ spec:
   image: docker.io/kvcacheai/mooncake:0.3.13
   connection:
     managed:  # exactly one of managed or external
-      leader: {}  # replicas, allocationStrategy and multiTenancy default
+      leader:
+        electionBackend: None  # The upstream image has no Kubernetes Lease backend.
       members:
         - nodeSelector:
             kubernetes.io/os: linux
@@ -40,30 +41,24 @@ spec:
           capacityPerMember: 4Gi
 ```
 
-The example uses Mooncake `0.3.13`, which is compatible with the documented vLLM client. SGLang
-requires a different version; check [Engine Compatibility](/gpustack-operator/main/docs/modules/model-deployment/engine-versions/index.md) before
-choosing *`spec.image`*.
+- **Connection:** Set exactly one of *`connection.managed`* or *`connection.external`*.
+- **Groups:** Multiple member groups are allowed. At most one may have a [local disk tier](/gpustack-operator/main/docs/modules/kv-cache/local-disk-tier/index.md).
+- **Medium:** *`members[].medium`* is immutable. Use separate groups for host and device memory.
+- **Image:** Check [Engine Compatibility](/gpustack-operator/main/docs/modules/model-deployment/engine-versions/index.md) before choosing *`spec.image`*.
+- **Election:** The upstream image needs *`electionBackend: None`* and one leader.
 
-*`connection.managed`* and *`connection.external`* are both optional pointers and **exactly one** must be
-set; neither and both are refused at admission with a message naming the two. Several member groups
-are allowed; at most one of them may carry a [local disk tier](/gpustack-operator/main/docs/modules/kv-cache/local-disk-tier/index.md).
+The example's Mooncake `0.3.13` is compatible with the documented vLLM client. SGLang needs another version.
+See [Members](#members) for the resulting Pod configuration.
 
-***`members[].medium`* takes two values, `DRAM` and `VRAM`**: host memory or device memory. The
-renderer treats the two differently. On a `DRAM` group the segment is host memory, so the operator
-adds *`capacityPerMember`* to the member `Pod`'s host memory request. On a `VRAM` group the segment is
-device memory, so the `Pod` request carries nothing for it: the member claims its slice by allocating
-it.
-
-One binary is one medium, so a node contributing both does so as two groups selecting it. See
-[Members](#members) for the renderings each value produces.
-
-The field is **immutable**: a segment already mounted cannot change the kind of memory underneath
-the data it holds, so an edit is refused and the choice is made when the group is declared.
+| Value | Meaning | Constraints |
+|---|---|---|
+| `DRAM` | Host memory segment | The Pod's host memory request includes *`capacityPerMember`*. |
+| `VRAM` | Device memory segment | The member allocates its slice; the Pod's host memory request excludes it. |
 
 An earlier shape offered five values. Four of them named things that are **not member groups**, and
 each is reached another way:
 
-| Former `medium` value | What it is | Location |
+| Former `medium` value | Backing tier | Location |
 |---|---|---|
 | `LocalDisk` | a tier on the members that already hold the memory replica | [`members[].localDisks`](local-disk-tier.md) |
 | `NoF` | an NVMe-oF target coordinate, registered once, with no node affinity and no `Pod` | no API surface; it is not a member group |
@@ -103,57 +98,37 @@ does not enforce access to the store; see [Limitations](/gpustack-operator/main/
 
 ## Image
 
-***`spec.image`* is explicit and never derived from the operator's own image**, which breaks
-deliberately with how the Device Manager image is derived from the worker image. Leave it unset and
-the cluster-wide `kv-cache-backend-image` `Setting` supplies it. That `Setting` ships a default, so a
-backend naming no image runs this project's own build; unset in both places (which takes an
-administrator clearing the `Setting`) is refused at admission, naming both.
+*`spec.image`* is not derived from the operator image. If unset, the `kv-cache-backend-image` `Setting`
+supplies the image. Its default is the project's build. Admission rejects an empty image when both are unset.
 
-**Clearing that `Setting` later does not strand a backend admitted under it.** Admission re-asks for a
-fallback only when an update moves *`spec.image`* itself. Every other update is admitted whatever the
-`Setting` says now. That includes the reconciler's own removal of the finalizer, which would otherwise
-leave an object that owns nothing and cannot be deleted.
+Clearing the `Setting` does not block unrelated updates or finalizer removal. Admission checks the
+fallback again only when *`spec.image`* changes.
 
 > **Why** — the master's link-time dependencies differ per published vendor variant, so no single
 > derivation is correct. On a CUDA-less host, for example, the base (CUDA 12) master build needs
 > `libcuda.so.1` and `libcudart.so.12` and cannot load, while the `-rocm` and `-npu` builds need no
 > accelerator library at all and load cleanly.
 
-The client side is where the vendor lives, and it lives in the published engine wheel rather than in
-this image: which transports a client can drive is a property of the wheel the engine image carries,
-not of *`spec.image`*.
+The engine image's client wheel determines which transports the client can use.
+The master needs no accelerator runtime; a member needs the runtime for its transport.
+An `-npu` master can run on an all-NVIDIA cluster. An `ascend` member needs CANN (`libascendcl.so`).
+A missing CANN library produces a loader error in *`status.phaseMessage`*.
 
-**The master image needs no accelerator runtime; a member image needs the runtime of the transport it
-uses.** An `-npu`-built master on an all-NVIDIA cluster is legitimate, because the master is a pure
-metadata service. A member on `ascend`, by contrast, needs CANN (`libascendcl.so`) in its container,
-and a CANN-less image fails as a loader error whose own message reaches *`status.phaseMessage`*.
+An `EFA` member needs libfabric that supports the node's adapter. `mirrored-mooncake` installs AWS's
+libfabric ahead of the distribution copy in its loader cache.
 
-A member on `EFA` needs libfabric in its image, and one that can drive the node's adapter, not the
-distro build. `mirrored-mooncake` installs AWS's, ahead of that copy in its loader cache.
-
-Nothing has to be built to run this **without high availability**.
-The example image above is published for amd64 and arm64 and carries **both** `mooncake_master` and
-`mc_store_rest_server`, so one *`spec.image`* serves the leader and the members.
-It runs on a host with no GPU: its `libcuda.so.1` is a stub and its `libcudart.so.12` is the real
-library, and neither reaches a driver.
-
-**[High availability](/gpustack-operator/main/docs/modules/kv-cache/leader/index.md#high-availability) needs a different image, and for both roles.** That
-section carries which build, why no published one will do, and what each role does when handed one
-that cannot.
+Without high availability, the example image serves both roles on amd64 and arm64. It contains
+`mooncake_master` and `mc_store_rest_server`. It runs without a GPU: `libcuda.so.1` is a stub and
+`libcudart.so.12` is the real library; neither reaches a driver.
+[High availability](/gpustack-operator/main/docs/modules/kv-cache/leader/index.md#high-availability) requires a different image for both roles.
 
 > **Why the stub/real split matters** — the stub alone is enough for the master, but the Python client
 > needs a versioned `cudaFreeHost` from a real runtime. An image carrying two stubs runs the master and
 > fails every member.
 
-**That split is what the `kv-cache-backend-image` default cannot cover.** Its value is this project's
-own CPU build, carrying TCP, RDMA and EFA over DRAM, and one value cannot be right for every backend
-at once: which build a member needs depends on the transport its backend asks for and the hardware
-its group selects. A backend on a vendor fabric names its *`spec.image`*, which always wins over the
-`Setting`.
-
-The failure mode moved with the default, and that is what having one costs. Blank made a mismatch an
-admission refusal naming both places to fix; a default makes a wrong image a loader error at runtime,
-which is quieter and further from whoever can fix it. Clearing the `Setting` restores the refusal.
+The `kv-cache-backend-image` default is the CPU build. It supports TCP, RDMA and EFA over DRAM.
+For a vendor fabric, set *`spec.image`*; it overrides the `Setting`. An incompatible default can
+cause a runtime loader error. Clearing the `Setting` restores admission refusal when no image is set.
 
 ### GPUStack build variants
 
@@ -179,20 +154,12 @@ has always run.
 variants carry the vendor transfer engine without them), so a VRAM group always names a
 `0.3.13.post1` variant tag.
 
-Nothing refuses a VRAM group that names no image: the default is an administrator-editable `Setting`,
-so this paragraph is the guidance rather than a gate. A group names its image through
-*`members[].image`*, which wins over the backend's *`spec.image`*, which wins over the `Setting`.
+Admission does not refuse a VRAM group without an image. *`members[].image`* overrides
+*`spec.image`*, which overrides the `Setting`.
 
-**The other direction fails at startup, on purpose.** A build with VRAM segments compiled in takes
-device memory whenever it can reach a device, whatever medium the group declared. So a DRAM group is
-rendered with every vendor's visibility variable set to `void`, which keeps the accelerators out of
-its containers: such an image then finds no device and refuses to start, against the group that
-asked for a medium it does not implement.
-
-Without that, the failure was silent and landed elsewhere. The group consumed device memory no `Pod`
-had requested, so neither the scheduler nor the quota chain knew it was gone, and what an operator
-saw was an unrelated deployment crash-looping on a figure nobody had configured. Pick the image that
-matches the medium; whether an image implements one is a fact about the image.
+A VRAM build allocates device memory whenever it can reach a device, regardless of the declared medium.
+For a DRAM group, the operator sets every vendor visibility variable to `void`. A VRAM build then
+finds no device and fails to start. Choose an image that implements the group's medium.
 
 **A private registry needs *`spec.imagePullSecrets`***, and an explicit policy needs
 *`spec.imagePullPolicy`*. Both are backend-wide: they apply to the leader and to every member group,
@@ -724,19 +691,13 @@ read from the `Pod`'s own status, and a *`status.capacity.total`* of zero, repor
 `DaemonSet` places a `Pod` on each newly matching node; every existing `Pod` keeps its UID and its restart
 count, leader included.
 
-The `DaemonSet` is left on `OnDelete`, and restarts are decided from a
-comparison over the whole `Pod` template except the node selector: a widening matches that comparison,
-while an image, argv, environment, resource or fabric change fails it and every member is recreated.
+The `DaemonSet` uses `OnDelete`. Widening the selector preserves the other Pod template fields.
+An image, argv, environment, resource or fabric change recreates every member.
 
-**A `Pod` runs the template it was created from, so a setting cannot protect the same edit that
-removes it.** Anything rendered into the member `Pod` (the shutdown hook, its grace, the environment)
-reaches a member only when that member is recreated. A departing member leaves with what it started
-with.
-
-To make such a setting apply to a shrink, do it in **two steps**: change only the setting and wait
-for members to be recreated with it (their pod-spec-hash annotation moves), then narrow the selector
-or remove the group. *`scaleIn.gracePeriodSeconds`* below is the case this bites today; the property
-belongs to the `Pod` template, not to that field.
+A departing `Pod` uses its original template, including its shutdown hook, grace and environment.
+To apply a setting before a shrink, change it first and wait for member recreation.
+Check that the pod-spec-hash annotation changes. Then narrow the selector or remove the group.
+This sequence applies to *`scaleIn.gracePeriodSeconds`*.
 
 **Existing objects are not rebalanced.** How fast the cluster converges onto a new member depends on
 *`allocationStrategy`*: `FreeRatioFirst` (the default) biases new writes toward the emptier member,
@@ -744,12 +705,9 @@ belongs to the `Pod` template, not to that field.
 
 ### Group identity by position
 
-A group has **no name**. Its position in *`members`* is what the `DaemonSet`'s name, its immutable
-selector labels and its members' HTTP port are all derived from, so moving an entry in that list
-leaves every one of those in place and changes only the spec underneath it.
-
-**Moving a group to another position is refused at apply time.** The refusal names both positions.
-Two shapes reach it:
+A group has no name. Its position in *`members`* determines its `DaemonSet` name, selector labels
+and HTTP port. Moving an entry changes its spec without moving those identifiers.
+Admission refuses recognized group moves and names both positions:
 
 | Edit | Outcome |
 |---|---|
@@ -759,11 +717,9 @@ Two shapes reach it:
 | removing from the **end** of the list | allowed |
 | editing a group in place, including widening its *`nodeSelector`* | allowed |
 
-**To take a group out of service without removing it, narrow its *`nodeSelector`* until it matches no
-node.** The group keeps its position, every later group keeps its `DaemonSet`, and nothing is rebuilt.
-Positions are used instead of names because a `DaemonSet`'s selector cannot change after creation: a
-name free enough to make reordering possible would force every member `DaemonSet` to be deleted and
-recreated, and the entire cache would go with them.
+To take a group out of service, narrow its *`nodeSelector`* until it matches no node.
+The group keeps its position, later groups keep their `DaemonSet`s, and nothing is rebuilt.
+A `DaemonSet` selector is immutable; changing it requires recreation and loses its cache.
 
 **The rule recognises a group that arrived unchanged at a position another group left; it does not
 recognise every reorder.** Without a name there is nothing else to recognise a group by, so two shapes
@@ -777,9 +733,7 @@ are knowingly admitted:
   it would forbid the operation recommended above. `[A, B, C]` to `[A, C]`, with no look-alike to
   arrive in the gap, is still refused.
 
-Both admitted shapes leave one trace: the resulting *`members`* holds **two identical groups**. What
-the rule buys is that the mechanical reorder (the one a rewritten manifest produces) is reported
-instead of silently rebuilding members against another group's spec.
+Both admitted shapes leave two identical groups in *`members`*. A plain reorder is refused.
 
 Shrinking a group discards the cache held by the removed members. Narrowing the selector or
 removing a node immediately unmounts its segment; the operator does not migrate its cached data.

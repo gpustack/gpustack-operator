@@ -10,6 +10,9 @@
         const theme = localStorage.getItem("theme");
         if (theme === "light" || theme === "dark") document.documentElement.dataset.theme = theme;
         document.documentElement.dataset.themeChoice = theme === "light" || theme === "dark" ? theme : "system";
+        if (localStorage.getItem("sidebar-collapsed") === "true") {
+          document.documentElement.dataset.sidebarCollapsed = "true";
+        }
       } catch {
         document.documentElement.dataset.themeChoice = "system";
       }
@@ -24,7 +27,7 @@
   <link rel="alternate" type="text/markdown" href="/gpustack-operator/main/docs/modules/kv-cache/backend/index.md">
   
   <link rel="describedby" href="/gpustack-operator/main/llms.txt">
-  <link rel="stylesheet" href="/gpustack-operator/main/css/site.ea544478884ee4c46c0d82a26985cad564c8f892cccad0c8ffcefe846c62a4a0.css">
+  <link rel="stylesheet" href="/gpustack-operator/main/css/site.1a0de63fe646aba4ed6541fe0a6383c2ed5ca649b1593a98595ba53430bcf032.css">
   <link rel="stylesheet" href="/gpustack-operator/main/css/code.d2570c1cc6480f9c62bc31ec538eef2578ce80980588c469638a5f95416bfc7b.css">
 </head>
 <body class="docs-page">
@@ -95,6 +98,13 @@
   <div class="layout">
     <aside class="sidebar" aria-label="Documentation navigation">
       <button class="nav-toggle" type="button" aria-controls="docs-navigation" aria-expanded="false">Browse documentation</button>
+      <button class="sidebar-toggle" type="button" aria-controls="docs-navigation" aria-expanded="true" aria-label="Collapse sidebar" title="Collapse sidebar">
+        <svg class="sidebar-toggle-icon" aria-hidden="true" viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="2" y="2.5" width="12" height="11" rx="2"/>
+          <line x1="6" y1="2.5" x2="6" y2="13.5"/>
+          <polyline class="sidebar-icon-arrow" points="10.5 6 8.5 8 10.5 10"/>
+        </svg>
+      </button>
       <nav id="docs-navigation" class="sidebar-inner">
         <div class="nav-title">Documentation</div>
         <a class="nav-home" href="/gpustack-operator/main/" >Overview</a>
@@ -1479,37 +1489,53 @@ For managed backends, <em><code>members[].medium</code></em> chooses host memory
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">image</span><span class="p">:</span><span class="w"> </span><span class="l">docker.io/kvcacheai/mooncake:0.3.13</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">connection</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">managed</span><span class="p">:</span><span class="w">  </span><span class="c"># exactly one of managed or external</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">leader</span><span class="p">:</span><span class="w"> </span>{}<span class="w">  </span><span class="c"># replicas, allocationStrategy and multiTenancy default</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">leader</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">electionBackend</span><span class="p">:</span><span class="w"> </span><span class="l">None </span><span class="w"> </span><span class="c"># The upstream image has no Kubernetes Lease backend.</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">members</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">        </span>- <span class="nt">nodeSelector</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">            </span><span class="nt">kubernetes.io/os</span><span class="p">:</span><span class="w"> </span><span class="l">linux</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="nt">medium: DRAM  # memory segment medium</span><span class="p">:</span><span class="w"> </span><span class="l">DRAM or VRAM</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="nt">capacityPerMember</span><span class="p">:</span><span class="w"> </span><span class="l">4Gi</span></span></span></code></pre></div>
-</div><p>The example uses Mooncake <code>0.3.13</code>, which is compatible with the documented vLLM client. SGLang
-requires a different version; check <a href="/gpustack-operator/main/docs/modules/model-deployment/engine-versions/">Engine Compatibility</a>
- before
-choosing <em><code>spec.image</code></em>.</p>
-<p><em><code>connection.managed</code></em> and <em><code>connection.external</code></em> are both optional pointers and <strong>exactly one</strong> must be
-set; neither and both are refused at admission with a message naming the two. Several member groups
-are allowed; at most one of them may carry a <a href="/gpustack-operator/main/docs/modules/kv-cache/local-disk-tier/">local disk tier</a>
-.</p>
-<p><strong><em><code>members[].medium</code></em> takes two values, <code>DRAM</code> and <code>VRAM</code></strong>: host memory or device memory. The
-renderer treats the two differently. On a <code>DRAM</code> group the segment is host memory, so the operator
-adds <em><code>capacityPerMember</code></em> to the member <code>Pod</code>&rsquo;s host memory request. On a <code>VRAM</code> group the segment is
-device memory, so the <code>Pod</code> request carries nothing for it: the member claims its slice by allocating
-it.</p>
-<p>One binary is one medium, so a node contributing both does so as two groups selecting it. See
-<a href="#members">Members</a>
- for the renderings each value produces.</p>
-<p>The field is <strong>immutable</strong>: a segment already mounted cannot change the kind of memory underneath
-the data it holds, so an edit is refused and the choice is made when the group is declared.</p>
+</div><ul>
+<li><strong>Connection:</strong> Set exactly one of <em><code>connection.managed</code></em> or <em><code>connection.external</code></em>.</li>
+<li><strong>Groups:</strong> Multiple member groups are allowed. At most one may have a <a href="/gpustack-operator/main/docs/modules/kv-cache/local-disk-tier/">local disk tier</a>
+.</li>
+<li><strong>Medium:</strong> <em><code>members[].medium</code></em> is immutable. Use separate groups for host and device memory.</li>
+<li><strong>Image:</strong> Check <a href="/gpustack-operator/main/docs/modules/model-deployment/engine-versions/">Engine Compatibility</a>
+ before choosing <em><code>spec.image</code></em>.</li>
+<li><strong>Election:</strong> The upstream image needs <em><code>electionBackend: None</code></em> and one leader.</li>
+</ul>
+<p>The example&rsquo;s Mooncake <code>0.3.13</code> is compatible with the documented vLLM client. SGLang needs another version.
+See <a href="#members">Members</a>
+ for the resulting Pod configuration.</p>
+<table>
+  <thead>
+      <tr>
+          <th>Value</th>
+          <th>Meaning</th>
+          <th>Constraints</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td><code>DRAM</code></td>
+          <td>Host memory segment</td>
+          <td>The Pod&rsquo;s host memory request includes <em><code>capacityPerMember</code></em>.</td>
+      </tr>
+      <tr>
+          <td><code>VRAM</code></td>
+          <td>Device memory segment</td>
+          <td>The member allocates its slice; the Pod&rsquo;s host memory request excludes it.</td>
+      </tr>
+  </tbody>
+</table>
 <p>An earlier shape offered five values. Four of them named things that are <strong>not member groups</strong>, and
 each is reached another way:</p>
 <table>
   <thead>
       <tr>
           <th>Former <code>medium</code> value</th>
-          <th>What it is</th>
+          <th>Backing tier</th>
           <th>Location</th>
       </tr>
   </thead>
@@ -1569,52 +1595,35 @@ This mirrors Kueue&rsquo;s <code>ClusterQueue</code> and <code>LocalQueue</code>
 does not enforce access to the store; see <a href="/gpustack-operator/main/docs/modules/kv-cache/pool/#limitations">Limitations</a>
 .</p>
 <h2 id="image">Image</h2>
-<p><strong><em><code>spec.image</code></em> is explicit and never derived from the operator&rsquo;s own image</strong>, which breaks
-deliberately with how the Device Manager image is derived from the worker image. Leave it unset and
-the cluster-wide <code>kv-cache-backend-image</code> <code>Setting</code> supplies it. That <code>Setting</code> ships a default, so a
-backend naming no image runs this project&rsquo;s own build; unset in both places (which takes an
-administrator clearing the <code>Setting</code>) is refused at admission, naming both.</p>
-<p><strong>Clearing that <code>Setting</code> later does not strand a backend admitted under it.</strong> Admission re-asks for a
-fallback only when an update moves <em><code>spec.image</code></em> itself. Every other update is admitted whatever the
-<code>Setting</code> says now. That includes the reconciler&rsquo;s own removal of the finalizer, which would otherwise
-leave an object that owns nothing and cannot be deleted.</p>
+<p><em><code>spec.image</code></em> is not derived from the operator image. If unset, the <code>kv-cache-backend-image</code> <code>Setting</code>
+supplies the image. Its default is the project&rsquo;s build. Admission rejects an empty image when both are unset.</p>
+<p>Clearing the <code>Setting</code> does not block unrelated updates or finalizer removal. Admission checks the
+fallback again only when <em><code>spec.image</code></em> changes.</p>
 <blockquote>
 <p><strong>Why</strong> — the master&rsquo;s link-time dependencies differ per published vendor variant, so no single
 derivation is correct. On a CUDA-less host, for example, the base (CUDA 12) master build needs
 <code>libcuda.so.1</code> and <code>libcudart.so.12</code> and cannot load, while the <code>-rocm</code> and <code>-npu</code> builds need no
 accelerator library at all and load cleanly.</p>
 </blockquote>
-<p>The client side is where the vendor lives, and it lives in the published engine wheel rather than in
-this image: which transports a client can drive is a property of the wheel the engine image carries,
-not of <em><code>spec.image</code></em>.</p>
-<p><strong>The master image needs no accelerator runtime; a member image needs the runtime of the transport it
-uses.</strong> An <code>-npu</code>-built master on an all-NVIDIA cluster is legitimate, because the master is a pure
-metadata service. A member on <code>ascend</code>, by contrast, needs CANN (<code>libascendcl.so</code>) in its container,
-and a CANN-less image fails as a loader error whose own message reaches <em><code>status.phaseMessage</code></em>.</p>
-<p>A member on <code>EFA</code> needs libfabric in its image, and one that can drive the node&rsquo;s adapter, not the
-distro build. <code>mirrored-mooncake</code> installs AWS&rsquo;s, ahead of that copy in its loader cache.</p>
-<p>Nothing has to be built to run this <strong>without high availability</strong>.
-The example image above is published for amd64 and arm64 and carries <strong>both</strong> <code>mooncake_master</code> and
-<code>mc_store_rest_server</code>, so one <em><code>spec.image</code></em> serves the leader and the members.
-It runs on a host with no GPU: its <code>libcuda.so.1</code> is a stub and its <code>libcudart.so.12</code> is the real
-library, and neither reaches a driver.</p>
-<p><strong><a href="/gpustack-operator/main/docs/modules/kv-cache/leader/#high-availability">High availability</a>
- needs a different image, and for both roles.</strong> That
-section carries which build, why no published one will do, and what each role does when handed one
-that cannot.</p>
+<p>The engine image&rsquo;s client wheel determines which transports the client can use.
+The master needs no accelerator runtime; a member needs the runtime for its transport.
+An <code>-npu</code> master can run on an all-NVIDIA cluster. An <code>ascend</code> member needs CANN (<code>libascendcl.so</code>).
+A missing CANN library produces a loader error in <em><code>status.phaseMessage</code></em>.</p>
+<p>An <code>EFA</code> member needs libfabric that supports the node&rsquo;s adapter. <code>mirrored-mooncake</code> installs AWS&rsquo;s
+libfabric ahead of the distribution copy in its loader cache.</p>
+<p>Without high availability, the example image serves both roles on amd64 and arm64. It contains
+<code>mooncake_master</code> and <code>mc_store_rest_server</code>. It runs without a GPU: <code>libcuda.so.1</code> is a stub and
+<code>libcudart.so.12</code> is the real library; neither reaches a driver.
+<a href="/gpustack-operator/main/docs/modules/kv-cache/leader/#high-availability">High availability</a>
+ requires a different image for both roles.</p>
 <blockquote>
 <p><strong>Why the stub/real split matters</strong> — the stub alone is enough for the master, but the Python client
 needs a versioned <code>cudaFreeHost</code> from a real runtime. An image carrying two stubs runs the master and
 fails every member.</p>
 </blockquote>
-<p><strong>That split is what the <code>kv-cache-backend-image</code> default cannot cover.</strong> Its value is this project&rsquo;s
-own CPU build, carrying TCP, RDMA and EFA over DRAM, and one value cannot be right for every backend
-at once: which build a member needs depends on the transport its backend asks for and the hardware
-its group selects. A backend on a vendor fabric names its <em><code>spec.image</code></em>, which always wins over the
-<code>Setting</code>.</p>
-<p>The failure mode moved with the default, and that is what having one costs. Blank made a mismatch an
-admission refusal naming both places to fix; a default makes a wrong image a loader error at runtime,
-which is quieter and further from whoever can fix it. Clearing the <code>Setting</code> restores the refusal.</p>
+<p>The <code>kv-cache-backend-image</code> default is the CPU build. It supports TCP, RDMA and EFA over DRAM.
+For a vendor fabric, set <em><code>spec.image</code></em>; it overrides the <code>Setting</code>. An incompatible default can
+cause a runtime loader error. Clearing the <code>Setting</code> restores admission refusal when no image is set.</p>
 <h3 id="gpustack-build-variants">GPUStack build variants</h3>
 <p>Beside the <code>-cpu</code> default, this project publishes <code>mirrored-mooncake</code> in one build target per vendor
 (<code>cuda</code>, <code>cann</code>, <code>rocm</code>), whose base images are dispatch-time build arguments. Tags carry the
@@ -1634,18 +1643,11 @@ has always run.</p>
 <code>-cpu</code> default is not one.</strong> VRAM segments exist only on the <code>0.3.13</code> line (the <code>0.3.10.post2</code>
 variants carry the vendor transfer engine without them), so a VRAM group always names a
 <code>0.3.13.post1</code> variant tag.</p>
-<p>Nothing refuses a VRAM group that names no image: the default is an administrator-editable <code>Setting</code>,
-so this paragraph is the guidance rather than a gate. A group names its image through
-<em><code>members[].image</code></em>, which wins over the backend&rsquo;s <em><code>spec.image</code></em>, which wins over the <code>Setting</code>.</p>
-<p><strong>The other direction fails at startup, on purpose.</strong> A build with VRAM segments compiled in takes
-device memory whenever it can reach a device, whatever medium the group declared. So a DRAM group is
-rendered with every vendor&rsquo;s visibility variable set to <code>void</code>, which keeps the accelerators out of
-its containers: such an image then finds no device and refuses to start, against the group that
-asked for a medium it does not implement.</p>
-<p>Without that, the failure was silent and landed elsewhere. The group consumed device memory no <code>Pod</code>
-had requested, so neither the scheduler nor the quota chain knew it was gone, and what an operator
-saw was an unrelated deployment crash-looping on a figure nobody had configured. Pick the image that
-matches the medium; whether an image implements one is a fact about the image.</p>
+<p>Admission does not refuse a VRAM group without an image. <em><code>members[].image</code></em> overrides
+<em><code>spec.image</code></em>, which overrides the <code>Setting</code>.</p>
+<p>A VRAM build allocates device memory whenever it can reach a device, regardless of the declared medium.
+For a DRAM group, the operator sets every vendor visibility variable to <code>void</code>. A VRAM build then
+finds no device and fails to start. Choose an image that implements the group&rsquo;s medium.</p>
 <p><strong>A private registry needs <em><code>spec.imagePullSecrets</code></em></strong>, and an explicit policy needs
 <em><code>spec.imagePullPolicy</code></em>. Both are backend-wide: they apply to the leader and to every member group,
 including a group that names its own <em><code>image</code></em>. Left unset, the policy is <strong>resolved from the image
@@ -2096,26 +2098,19 @@ read from the <code>Pod</code>&rsquo;s own status, and a <em><code>status.capaci
 <p><strong>Widening <em><code>members[].nodeSelector</code></em> adds members without restarting the ones already running.</strong> The
 <code>DaemonSet</code> places a <code>Pod</code> on each newly matching node; every existing <code>Pod</code> keeps its UID and its restart
 count, leader included.</p>
-<p>The <code>DaemonSet</code> is left on <code>OnDelete</code>, and restarts are decided from a
-comparison over the whole <code>Pod</code> template except the node selector: a widening matches that comparison,
-while an image, argv, environment, resource or fabric change fails it and every member is recreated.</p>
-<p><strong>A <code>Pod</code> runs the template it was created from, so a setting cannot protect the same edit that
-removes it.</strong> Anything rendered into the member <code>Pod</code> (the shutdown hook, its grace, the environment)
-reaches a member only when that member is recreated. A departing member leaves with what it started
-with.</p>
-<p>To make such a setting apply to a shrink, do it in <strong>two steps</strong>: change only the setting and wait
-for members to be recreated with it (their pod-spec-hash annotation moves), then narrow the selector
-or remove the group. <em><code>scaleIn.gracePeriodSeconds</code></em> below is the case this bites today; the property
-belongs to the <code>Pod</code> template, not to that field.</p>
+<p>The <code>DaemonSet</code> uses <code>OnDelete</code>. Widening the selector preserves the other Pod template fields.
+An image, argv, environment, resource or fabric change recreates every member.</p>
+<p>A departing <code>Pod</code> uses its original template, including its shutdown hook, grace and environment.
+To apply a setting before a shrink, change it first and wait for member recreation.
+Check that the pod-spec-hash annotation changes. Then narrow the selector or remove the group.
+This sequence applies to <em><code>scaleIn.gracePeriodSeconds</code></em>.</p>
 <p><strong>Existing objects are not rebalanced.</strong> How fast the cluster converges onto a new member depends on
 <em><code>allocationStrategy</code></em>: <code>FreeRatioFirst</code> (the default) biases new writes toward the emptier member,
 <code>Random</code> does not.</p>
 <h3 id="group-identity-by-position">Group identity by position</h3>
-<p>A group has <strong>no name</strong>. Its position in <em><code>members</code></em> is what the <code>DaemonSet</code>&rsquo;s name, its immutable
-selector labels and its members&rsquo; HTTP port are all derived from, so moving an entry in that list
-leaves every one of those in place and changes only the spec underneath it.</p>
-<p><strong>Moving a group to another position is refused at apply time.</strong> The refusal names both positions.
-Two shapes reach it:</p>
+<p>A group has no name. Its position in <em><code>members</code></em> determines its <code>DaemonSet</code> name, selector labels
+and HTTP port. Moving an entry changes its spec without moving those identifiers.
+Admission refuses recognized group moves and names both positions:</p>
 <table>
   <thead>
       <tr>
@@ -2146,11 +2141,9 @@ Two shapes reach it:</p>
       </tr>
   </tbody>
 </table>
-<p><strong>To take a group out of service without removing it, narrow its <em><code>nodeSelector</code></em> until it matches no
-node.</strong> The group keeps its position, every later group keeps its <code>DaemonSet</code>, and nothing is rebuilt.
-Positions are used instead of names because a <code>DaemonSet</code>&rsquo;s selector cannot change after creation: a
-name free enough to make reordering possible would force every member <code>DaemonSet</code> to be deleted and
-recreated, and the entire cache would go with them.</p>
+<p>To take a group out of service, narrow its <em><code>nodeSelector</code></em> until it matches no node.
+The group keeps its position, later groups keep their <code>DaemonSet</code>s, and nothing is rebuilt.
+A <code>DaemonSet</code> selector is immutable; changing it requires recreation and loses its cache.</p>
 <p><strong>The rule recognises a group that arrived unchanged at a position another group left; it does not
 recognise every reorder.</strong> Without a name there is nothing else to recognise a group by, so two shapes
 are knowingly admitted:</p>
@@ -2163,9 +2156,7 @@ position 2, which is how the second of two look-alike groups is taken out of ser
 it would forbid the operation recommended above. <code>[A, B, C]</code> to <code>[A, C]</code>, with no look-alike to
 arrive in the gap, is still refused.</li>
 </ul>
-<p>Both admitted shapes leave one trace: the resulting <em><code>members</code></em> holds <strong>two identical groups</strong>. What
-the rule buys is that the mechanical reorder (the one a rewritten manifest produces) is reported
-instead of silently rebuilding members against another group&rsquo;s spec.</p>
+<p>Both admitted shapes leave two identical groups in <em><code>members</code></em>. A plain reorder is refused.</p>
 <p>Shrinking a group discards the cache held by the removed members. Narrowing the selector or
 removing a node immediately unmounts its segment; the operator does not migrate its cached data.
 The termination grace period gives the process time to finish shutdown and does not preserve
@@ -2376,7 +2367,7 @@ a quota on this store, and what a quota ceiling buys)</li><li><a href="/gpustack
           
           
           <nav class="page-actions" aria-label="Page source">
-            <a href="https://github.com/gpustack/gpustack-operator/blob/8c5186108e620a8044164d9c4c114dd7376092f4/docs/modules/kv-cache/backend.md">View page source</a>
+            <a href="https://github.com/gpustack/gpustack-operator/blob/91dc7c8d650bac133dd4ea3b29b35d62bd1ee2b1/docs/modules/kv-cache/backend.md">View page source</a>
             
             <a href="https://github.com/gpustack/gpustack-operator/edit/main/docs/modules/kv-cache/backend.md">Edit this page</a>
             
@@ -2419,6 +2410,6 @@ a quota on this store, and what a quota ceiling buys)</li><li><a href="/gpustack
     </aside>
   </div>
   
-  <script src="/gpustack-operator/main/js/site.1ec84fdfb2bec16dbb83a64abad1abe2d27d8d3f7fc54c2cfa45fe4d64303b3c.js" defer></script>
+  <script src="/gpustack-operator/main/js/site.e362041170f1762d2935c1ef4d8ca5f494983b230101e1b6536544c195645f10.js" defer></script>
 </body>
 </html>

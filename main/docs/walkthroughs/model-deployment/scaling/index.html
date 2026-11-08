@@ -10,6 +10,9 @@
         const theme = localStorage.getItem("theme");
         if (theme === "light" || theme === "dark") document.documentElement.dataset.theme = theme;
         document.documentElement.dataset.themeChoice = theme === "light" || theme === "dark" ? theme : "system";
+        if (localStorage.getItem("sidebar-collapsed") === "true") {
+          document.documentElement.dataset.sidebarCollapsed = "true";
+        }
       } catch {
         document.documentElement.dataset.themeChoice = "system";
       }
@@ -24,7 +27,7 @@
   <link rel="alternate" type="text/markdown" href="/gpustack-operator/main/docs/walkthroughs/model-deployment/scaling/index.md">
   
   <link rel="describedby" href="/gpustack-operator/main/llms.txt">
-  <link rel="stylesheet" href="/gpustack-operator/main/css/site.ea544478884ee4c46c0d82a26985cad564c8f892cccad0c8ffcefe846c62a4a0.css">
+  <link rel="stylesheet" href="/gpustack-operator/main/css/site.1a0de63fe646aba4ed6541fe0a6383c2ed5ca649b1593a98595ba53430bcf032.css">
   <link rel="stylesheet" href="/gpustack-operator/main/css/code.d2570c1cc6480f9c62bc31ec538eef2578ce80980588c469638a5f95416bfc7b.css">
 </head>
 <body class="docs-page">
@@ -95,6 +98,13 @@
   <div class="layout">
     <aside class="sidebar" aria-label="Documentation navigation">
       <button class="nav-toggle" type="button" aria-controls="docs-navigation" aria-expanded="false">Browse documentation</button>
+      <button class="sidebar-toggle" type="button" aria-controls="docs-navigation" aria-expanded="true" aria-label="Collapse sidebar" title="Collapse sidebar">
+        <svg class="sidebar-toggle-icon" aria-hidden="true" viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="2" y="2.5" width="12" height="11" rx="2"/>
+          <line x1="6" y1="2.5" x2="6" y2="13.5"/>
+          <polyline class="sidebar-icon-arrow" points="10.5 6 8.5 8 10.5 10"/>
+        </svg>
+      </button>
       <nav id="docs-navigation" class="sidebar-inner">
         <div class="nav-title">Documentation</div>
         <a class="nav-home" href="/gpustack-operator/main/" >Overview</a>
@@ -1442,10 +1452,10 @@
       <article>
         
   <h1 id="model-deployment-scaling-walkthrough">Model Deployment Scaling Walkthrough</h1>
-<p>Configure a <code>ModelDeploymentScaler</code> in <code>Shadow</code> mode, inspect its recommendations, then permit
-replica changes with <code>Active</code>. The examples use a vLLM <em>prefill/decode (PD)</em> pair and explain how to
-adapt the scaler for <em>encode/prefill/decode (EPD)</em> serving. Captured lifecycle observations are labeled
-separately from the reusable configuration.</p>
+<p>Configure a <code>ModelDeploymentScaler</code> in <code>Shadow</code> mode and inspect its recommendations. Then permit
+replica changes with <code>Active</code> mode. The examples use a vLLM <em>prefill/decode (PD)</em> pair. They also
+explain how to adapt the scaler for <em>encode/prefill/decode (EPD)</em> serving. Captured lifecycle
+observations are labeled separately from reusable configuration.</p>
 <h2 id="contents">Contents</h2>
 <ul>
 <li><a href="#summary">Summary</a>
@@ -1547,9 +1557,10 @@ was executed in the recorded benchmark.</p>
 <h3 id="prerequisites">Prerequisites</h3>
 <p>Follow <a href="/gpustack-operator/main/docs/walkthroughs/model-deployment/#prepare-the-cluster">cluster preparation</a>
  and
-<a href="/gpustack-operator/main/docs/walkthroughs/model-delivery/prefetch/">model prefetch</a>
+<a href="/gpustack-operator/main/docs/walkthroughs/model-delivery/prefetch/#step-1-create-artifact-and-prefetch">model prefetch</a>
  with namespace <code>gpustack-bench</code> and artifact
-<code>qwen3-8b</code>. Use a build that includes <code>ModelDeploymentScaler</code>, its controller and admission webhook.</p>
+<code>qwen3-8b</code>.
+Use a build that includes <code>ModelDeploymentScaler</code>, its controller and admission webhook.</p>
 <p>Confirm that no other scaler owns the target. See
 <a href="/gpustack-operator/main/docs/modules/model-deployment/scaling/">Model Deployment Scaling</a>
  for algorithm contracts and
@@ -1706,7 +1717,7 @@ Capacity values below reproduce the benchmark&rsquo;s settings; tune them from m
   <thead>
       <tr>
           <th>Choice</th>
-          <th>When to use</th>
+          <th>Target scenario</th>
           <th>Configuration guidance</th>
       </tr>
   </thead>
@@ -1837,42 +1848,50 @@ server target and scaler changes are examples, not captured output from a live c
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">instanceType</span><span class="p">:</span><span class="w"> </span><span class="l">gpustack--nvidia-h100-80gb-hbm3-linux-amd64</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">resources</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">accelerator</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;1&#34;</span></span></span></code></pre></div>
-</div><p>Configure a scaler targeting this server:</p>
+</div><p>Create a reviewed <code>ConfigMap</code> named <code>autoscaling-priors</code> in <code>gpustack-bench</code>. Its <code>priors.yaml</code>
+key must contain a <a href="/gpustack-operator/main/docs/modules/model-deployment/scaling/#capacity-priors">profile matching the target</a>
+.
+Then create a separate scaler targeting this server:</p>
 <div class="code-block">
-  <div class="code-toolbar"><span>diff</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
-  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-diff" data-lang="diff"><span class="line"><span class="cl"> apiVersion: worker.gpustack.ai/v1
-</span></span><span class="line"><span class="cl"> kind: ModelDeploymentScaler
-</span></span><span class="line"><span class="cl"> metadata:
-</span></span><span class="line"><span class="cl">   name: autoscale-server
-</span></span><span class="line"><span class="cl">   namespace: gpustack-bench
-</span></span><span class="line"><span class="cl"> spec:
-</span></span><span class="line"><span class="cl"><span class="gi">+  targetRef:
-</span></span></span><span class="line"><span class="cl"><span class="gi">+    name: catalog-server
-</span></span></span><span class="line"><span class="cl"><span class="gi"></span>   roles:
-</span></span><span class="line"><span class="cl">     - name: server
-</span></span><span class="line"><span class="cl">       minReplicas: 1
-</span></span><span class="line"><span class="cl">       maxReplicas: 2
-</span></span><span class="line"><span class="cl">   algorithm:
-</span></span><span class="line"><span class="cl"><span class="gi">+    type: Predictive
-</span></span></span><span class="line"><span class="cl"><span class="gi">+    predictive:
-</span></span></span><span class="line"><span class="cl"><span class="gi">+      horizonSeconds: 30
-</span></span></span><span class="line"><span class="cl"><span class="gi">+      minPoints: 2
-</span></span></span><span class="line"><span class="cl"><span class="gi">+      tokenThroughput:
-</span></span></span><span class="line"><span class="cl"><span class="gi">+        serverTargetTokensPerSecond: &#34;1200&#34;  # explicit fallback override
-</span></span></span><span class="line"><span class="cl"><span class="gi">+        ttftTargetMilliseconds: &#34;500&#34;        # required when Server uses Catalog
-</span></span></span><span class="line"><span class="cl"><span class="gi">+        itlTargetMilliseconds: &#34;50&#34;          # required when Server uses Catalog
-</span></span></span><span class="line"><span class="cl"><span class="gi">+    capacityPrior:
-</span></span></span><span class="line"><span class="cl"><span class="gi">+      catalogRef:
-</span></span></span><span class="line"><span class="cl"><span class="gi">+        name: autoscaling-priors
-</span></span></span><span class="line"><span class="cl"><span class="gi">+        key: priors.yaml
-</span></span></span><span class="line"><span class="cl"><span class="gi">+      headroom: &#34;0.75&#34;
-</span></span></span></code></pre></div>
+  <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">worker.gpustack.ai/v1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">ModelDeploymentScaler</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">metadata</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">autoscale-server</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">namespace</span><span class="p">:</span><span class="w"> </span><span class="l">gpustack-bench</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">targetRef</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">catalog-server</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">roles</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">server</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">minReplicas</span><span class="p">:</span><span class="w"> </span><span class="m">1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">maxReplicas</span><span class="p">:</span><span class="w"> </span><span class="m">2</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">algorithm</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l">Predictive</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">predictive</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">horizonSeconds</span><span class="p">:</span><span class="w"> </span><span class="m">30</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">minPoints</span><span class="p">:</span><span class="w"> </span><span class="m">2</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">tokenThroughput</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">serverTargetTokensPerSecond</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;1200&#34;</span><span class="w">  </span><span class="c"># explicit fallback override</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">ttftTargetMilliseconds</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;500&#34;</span><span class="w">        </span><span class="c"># required when Server uses Catalog</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">itlTargetMilliseconds</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;50&#34;</span><span class="w">          </span><span class="c"># required when Server uses Catalog</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">capacityPrior</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">catalogRef</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">autoscaling-priors</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">key</span><span class="p">:</span><span class="w"> </span><span class="l">priors.yaml</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">headroom</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;0.75&#34;</span></span></span></code></pre></div>
 </div><p>In this <em>Server</em> partial override, <em><code>serverTargetTokensPerSecond</code></em> stays <code>Explicit</code> at <code>&quot;1200&quot;</code>
 while the omitted <em><code>serverTokenCapacityPerReplica</code></em> forecast capacity resolves from <code>Catalog</code> by
 the role&rsquo;s identity and multiplies its profile seed capacity by <em><code>headroom</code></em>. Both <code>&quot;1200&quot;</code> and
 <code>&quot;0.75&quot;</code> are illustrative configuration values rather than measured hardware capacities; removing
 <em><code>capacityPrior</code></em> restores manual capacity validation.</p>
-<p>When the target matches an embedded profile, drop the explicit fallback and the <code>ConfigMap</code>: the
+<p>Inspect the scaler&rsquo;s resolved priors and conditions:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">kubectl -n gpustack-bench get mds autoscale-server -o json <span class="se">\
+</span></span></span><span class="line"><span class="cl"><span class="se"></span>  <span class="p">|</span> jq <span class="s1">&#39;{priors: .status.resolvedCapacityPriors,
+</span></span></span><span class="line"><span class="cl"><span class="s1">         conditions: [.status.conditions[] | select(.type == &#34;CapacityPriorsReady&#34; or .type == &#34;Blocked&#34;)]}&#39;</span></span></span></code></pre></div>
+</div><p>When the target matches an embedded profile, drop the explicit fallback and the <code>ConfigMap</code>: the
 embedded catalog supplies the capacity and the identity resolves from the target.</p>
 <div class="code-block">
   <div class="code-toolbar"><span>diff</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
@@ -1913,11 +1932,6 @@ embedded catalog supplies the capacity and the identity resolves from the target
 </span></span></span><span class="line"><span class="cl"><span class="gi"></span><span class="gd">-    capacityPrior:
 </span></span></span><span class="line"><span class="cl"><span class="gd">-      headroom: &#34;0.75&#34;
 </span></span></span></code></pre></div>
-</div><div class="code-block">
-  <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
-  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">kubectl -n gpustack-bench get mds autoscale-vllm-server -o json <span class="se">\
-</span></span></span><span class="line"><span class="cl"><span class="se"></span>  <span class="p">|</span> jq <span class="s1">&#39;{priors: .status.resolvedCapacityPriors,
-</span></span></span><span class="line"><span class="cl"><span class="s1">         conditions: [.status.conditions[] | select(.type == &#34;CapacityPriorsReady&#34; or .type == &#34;Blocked&#34;)]}&#39;</span></span></span></code></pre></div>
 </div><p>When the target exists, <code>CREATE</code> rejects an unresolved catalog prior. <code>UPDATE</code> admission returns a
 warning without writing <code>status</code> so you can suspend the scaler, switch to <code>Shadow</code>, remove
 <em><code>capacityPrior</code></em> or supply explicit capacities; the controller then sets
@@ -2283,7 +2297,7 @@ Keep shared prefetched artifacts and <code>default/bench-driver</code> when othe
           
           
           <nav class="page-actions" aria-label="Page source">
-            <a href="https://github.com/gpustack/gpustack-operator/blob/8c5186108e620a8044164d9c4c114dd7376092f4/docs/walkthroughs/model-deployment/scaling.md">View page source</a>
+            <a href="https://github.com/gpustack/gpustack-operator/blob/91dc7c8d650bac133dd4ea3b29b35d62bd1ee2b1/docs/walkthroughs/model-deployment/scaling.md">View page source</a>
             
             <a href="https://github.com/gpustack/gpustack-operator/edit/main/docs/walkthroughs/model-deployment/scaling.md">Edit this page</a>
             
@@ -2327,6 +2341,6 @@ Keep shared prefetched artifacts and <code>default/bench-driver</code> when othe
     </aside>
   </div>
   
-  <script src="/gpustack-operator/main/js/site.1ec84fdfb2bec16dbb83a64abad1abe2d27d8d3f7fc54c2cfa45fe4d64303b3c.js" defer></script>
+  <script src="/gpustack-operator/main/js/site.e362041170f1762d2935c1ef4d8ca5f494983b230101e1b6536544c195645f10.js" defer></script>
 </body>
 </html>

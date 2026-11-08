@@ -10,6 +10,9 @@
         const theme = localStorage.getItem("theme");
         if (theme === "light" || theme === "dark") document.documentElement.dataset.theme = theme;
         document.documentElement.dataset.themeChoice = theme === "light" || theme === "dark" ? theme : "system";
+        if (localStorage.getItem("sidebar-collapsed") === "true") {
+          document.documentElement.dataset.sidebarCollapsed = "true";
+        }
       } catch {
         document.documentElement.dataset.themeChoice = "system";
       }
@@ -24,7 +27,7 @@
   <link rel="alternate" type="text/markdown" href="/gpustack-operator/main/docs/getting-started/architecture/index.md">
   
   <link rel="describedby" href="/gpustack-operator/main/llms.txt">
-  <link rel="stylesheet" href="/gpustack-operator/main/css/site.ea544478884ee4c46c0d82a26985cad564c8f892cccad0c8ffcefe846c62a4a0.css">
+  <link rel="stylesheet" href="/gpustack-operator/main/css/site.1a0de63fe646aba4ed6541fe0a6383c2ed5ca649b1593a98595ba53430bcf032.css">
   <link rel="stylesheet" href="/gpustack-operator/main/css/code.d2570c1cc6480f9c62bc31ec538eef2578ce80980588c469638a5f95416bfc7b.css">
 </head>
 <body class="docs-page">
@@ -95,6 +98,13 @@
   <div class="layout">
     <aside class="sidebar" aria-label="Documentation navigation">
       <button class="nav-toggle" type="button" aria-controls="docs-navigation" aria-expanded="false">Browse documentation</button>
+      <button class="sidebar-toggle" type="button" aria-controls="docs-navigation" aria-expanded="true" aria-label="Collapse sidebar" title="Collapse sidebar">
+        <svg class="sidebar-toggle-icon" aria-hidden="true" viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="2" y="2.5" width="12" height="11" rx="2"/>
+          <line x1="6" y1="2.5" x2="6" y2="13.5"/>
+          <polyline class="sidebar-icon-arrow" points="10.5 6 8.5 8 10.5 10"/>
+        </svg>
+      </button>
       <nav id="docs-navigation" class="sidebar-inner">
         <div class="nav-title">Documentation</div>
         <a class="nav-home" href="/gpustack-operator/main/" >Overview</a>
@@ -1442,10 +1452,10 @@
       <article>
         
   <h1 id="architecture">Architecture</h1>
-<p>GPUStack Operator manages accelerator-backed workloads on Kubernetes. It discovers devices, turns
-node capacity into schedulable pools, and runs GPU <code>Instance</code>s and model deployments against those
-pools. Model delivery resolves and supplies model weights. Topology placement, <em>remote direct memory
-access (RDMA)</em> networking and shared KV cache support locality, fast transfers and reusable inference state.</p>
+<p>GPUStack Operator manages accelerator-backed workloads on Kubernetes. It discovers devices and turns
+node capacity into schedulable pools. GPU <code>Instance</code>s and model deployments use those pools.
+Model delivery resolves and supplies weights. Topology placement supports locality. <em>Remote direct
+memory access (RDMA)</em> networking supports fast transfers. Shared KV cache stores reusable inference state.</p>
 <h2 id="contents">Contents</h2>
 <ul>
 <li><a href="#components">Components</a>
@@ -1510,40 +1520,20 @@ for the deployment choices and <a href="/gpustack-operator/main/docs/contribute/
 <p>GPU <code>Instance</code>s provide containers with optional SSH access. Model deployments run inference engines
 and, where configured, routers or <em>prefill</em>/<em>decode</em> groups. Both use the same device capacity and
 admission chain. Model delivery and KV cache are optional services alongside that chain.</p>
-<div class="diagram-block">
-  <div class="mermaid-diagram" role="img" aria-label="Diagram" aria-busy="true"></div>
-  <p class="diagram-status" role="status">Rendering diagram…</p>
-  <details class="diagram-source"><summary>Mermaid source</summary>
-    <div class="code-block">
-      <div class="code-toolbar"><span>mermaid</span><button class="copy-code" type="button" aria-label="Copy diagram source">Copy</button></div>
-      <pre><code>flowchart TB
-    REQUEST[&#34;GPU Instances&lt;br/&gt;ModelDeployment / Pods&#34;]
-    WORKER[&#34;Worker&#34;]
-    DEVICES[&#34;Device Manager&lt;br/&gt;Accelerators / RDMA&#34;]
-    TOPOLOGY[&#34;Topology&#34;]
-    QUEUES[&#34;Kueue&lt;br/&gt;Pools and queues&#34;]
-    ARTIFACT[&#34;Model Delivery&lt;br/&gt;ModelArtifact&#34;]
-    MODELS[&#34;Model Manager&lt;br/&gt;Node cache&#34;]
-    CACHE[&#34;KV Cache&lt;br/&gt;Backends and pools&#34;]
-    STORE[&#34;Cache service&#34;]
-    PODS[&#34;Workload Pods&lt;br/&gt;SSH / inference&#34;]
-
-    REQUEST --&gt; WORKER
-    WORKER --&gt; QUEUES
-    DEVICES -- &#34;capacity&#34; --&gt; QUEUES
-    TOPOLOGY -- &#34;placement&#34; --&gt; QUEUES
-    QUEUES -- &#34;admission&#34; --&gt; PODS
-    DEVICES -- &#34;device access&#34; --&gt; PODS
-    REQUEST -- &#34;artifact reference&#34; --&gt; ARTIFACT
-    WORKER -- &#34;resolution and authorization&#34; --&gt; ARTIFACT
-    ARTIFACT -- &#34;node delivery&#34; --&gt; MODELS
-    MODELS -- &#34;weights&#34; --&gt; PODS
-    ARTIFACT -- &#34;Engine / claim / image delivery&#34; --&gt; PODS
-    CACHE --&gt; STORE
-    STORE -. &#34;optional KV reuse&#34; .-&gt; PODS</code></pre>
-    </div>
-  </details>
-</div><p>The diagram shows the main dependencies. It does not require every workload to use a model artifact,
+<p><span class="diagram-scroll"><img src="/gpustack-operator/main/docs/assets/diagrams/architecture-overview.svg" alt="Workload and scheduling flow" decoding="async"></span></p>
+<!--
+flowchart TD
+    REQUESTS["ModelDeployments, Instances and Pods"] -> WORKER["Worker controllers"]
+    NFD["NFD and topology sources"] -> WORKER
+    DM["Device Manager and Devices ledger"] -> WORKER
+    WORKER -> QUEUES["Pool flavors, isolated queues and topology admission"]
+    QUEUES -> PODS["Admitted workload Pods"]
+    DM -> PODS
+    ARTIFACT["ModelArtifact"] -> CSI["Optional node cache and CSI delivery"]
+    CSI -> PODS
+    CACHE["Optional KV pool and binding"] -> PODS
+-->
+<p>The diagram shows the main dependencies. It does not require every workload to use a model artifact,
 RDMA, a topology source or a shared cache. An ordinary <code>Pod</code> can request device resources directly.</p>
 <h2 id="device-scheduling">Device scheduling</h2>
 <p>Device scheduling follows this chain:</p>
@@ -1564,15 +1554,14 @@ profiles constrain placement, and admission checks verify whether individual acc
 <a href="/gpustack-operator/main/docs/modules/topology/scheduling/">Topology-Aware Scheduling</a>
  explains placement domains.</p>
 <h2 id="model-delivery">Model delivery</h2>
-<p>Model delivery separates model weights and access credentials from workload configuration. A
-<code>ModelArtifact</code> resolves and pins a Hugging Face repository, ModelScope repository, container image,
-or <code>PersistentVolumeClaim</code>; workloads reference the artifact rather than repeating its source and
-credentials.</p>
+<p>Model delivery separates model weights and credentials from workload configuration. A <code>ModelArtifact</code>
+resolves and pins a Hugging Face repository, ModelScope repository, container image or
+<code>PersistentVolumeClaim</code>. Workloads reference the artifact instead of repeating its source and credentials.</p>
 <p>Depending on the delivery mode, weights are fetched in the workload <code>Pod</code> (<code>Engine</code>), cached and
 mounted read-only on the node by the Model Manager&rsquo;s CSI driver (<code>Node</code>), or mounted from an
 existing volume or image.</p>
-<p><code>ModelStore</code> and <code>ModelStoreBinding</code> manage pool cache budgets and namespace grants,
-<code>NodeModelStore</code> tracks per-node cache state, and <code>ModelPrefetch</code> pre-warms weights — all
+<p><code>ModelStore</code> and <code>ModelStoreBinding</code> manage cache budgets and namespace grants. <code>NodeModelStore</code>
+tracks per-node cache state. <code>ModelPrefetch</code> warms weights before use. These resources operate
 independently of GPU admission. See <a href="/gpustack-operator/main/docs/modules/model-delivery/">Model Delivery</a>
 ,
 <a href="/gpustack-operator/main/docs/modules/model-delivery/artifact/">Model Artifact</a>
@@ -1581,8 +1570,8 @@ independently of GPU admission. See <a href="/gpustack-operator/main/docs/module
 .</p>
 <h2 id="kv-cache">KV cache</h2>
 <p>A shared KV cache stores reusable inference state. A backend runs the cache service or points to an
-external one; pools and namespace bindings provide access and quota grants. Compatible workloads
-receive the cache configuration when their <code>Pod</code>s are created. This service is optional, and its quota
+external one. Pools and namespace bindings provide access and quota grants. Compatible workloads
+receive the cache configuration when their <code>Pod</code>s are created. The service is optional. Its quota
 is separate from accelerator quota. See <a href="/gpustack-operator/main/docs/modules/kv-cache/">KV Cache</a>
 .</p>
 <p><a href="/gpustack-operator/main/docs/modules/model-deployment/">Model Deployment</a>
@@ -1690,7 +1679,7 @@ request and its resulting Kubernetes resources.</p>
           
           
           <nav class="page-actions" aria-label="Page source">
-            <a href="https://github.com/gpustack/gpustack-operator/blob/8c5186108e620a8044164d9c4c114dd7376092f4/docs/getting-started/architecture.md">View page source</a>
+            <a href="https://github.com/gpustack/gpustack-operator/blob/91dc7c8d650bac133dd4ea3b29b35d62bd1ee2b1/docs/getting-started/architecture.md">View page source</a>
             
             <a href="https://github.com/gpustack/gpustack-operator/edit/main/docs/getting-started/architecture.md">Edit this page</a>
             
@@ -1716,11 +1705,6 @@ request and its resulting Kubernetes resources.</p>
     </aside>
   </div>
   
-    
-    
-    
-    <script src="/gpustack-operator/main/vendor/mermaid/mermaid.min.70137e77bb273bb2ef972b86e8b0400cca8be53cb25bfc45911a186dc98665de.js" integrity="sha256-cBN&#43;d7snO7LvlyuG6LBADMqL5TyyW/xFkRoYbcmGZd4=" defer></script>
-  
-  <script src="/gpustack-operator/main/js/site.1ec84fdfb2bec16dbb83a64abad1abe2d27d8d3f7fc54c2cfa45fe4d64303b3c.js" defer></script>
+  <script src="/gpustack-operator/main/js/site.e362041170f1762d2935c1ef4d8ca5f494983b230101e1b6536544c195645f10.js" defer></script>
 </body>
 </html>

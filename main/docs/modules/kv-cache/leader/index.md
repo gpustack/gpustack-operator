@@ -147,7 +147,7 @@ availability is a compile-time switch and every option ships **off**:
 | leader | answers `UNAVAILABLE_IN_CURRENT_MODE`, runs as a permanent standby |
 | member | answers `Invalid HA backend entry`, exits, CrashLoopBackOffs |
 
-Use an image built from [`pack/mirrored-mooncake`](https://github.com/gpustack/gpustack-operator/blob/8c5186108e620a8044164d9c4c114dd7376092f4/pack/mirrored-mooncake/Dockerfile) for
+Use an image built from [`pack/mirrored-mooncake`](https://github.com/gpustack/gpustack-operator/blob/91dc7c8d650bac133dd4ea3b29b35d62bd1ee2b1/pack/mirrored-mooncake/Dockerfile) for
 *`spec.image`* **and for every *`members[].image`***, on Mooncake 0.3.12 or later: an electing leader is
 also rendered `-pod_name` and `-pod_namespace` to label the winner, and a 0.3.11 master exits on both.
 
@@ -210,7 +210,7 @@ $ kubectl get pod -l mooncake.io/store-role=leader
 **Both roles get a `ServiceAccount`, and they are different accounts.** The operator renders a
 `ServiceAccount`, `Role` and `RoleBinding` per role in its own namespace, and names them on the `Pod`s:
 
-| role | grant | why |
+| Role | Grant | Purpose |
 |---|---|---|
 | leader | `leases`: `create`, `get`, `update`; `pods`: `patch` | takes the `Lease`, and labels its own `Pod` |
 | member | `leases`: `get` | follows an explicit `Lease` address, and nothing more |

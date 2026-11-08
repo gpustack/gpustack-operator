@@ -6,6 +6,7 @@ Each module has its own directory. Configuration contracts remain in the capabil
 ## Contents
 
 - [Choose a walkthrough](#choose-a-walkthrough)
+- [Connect configurations](#connect-configurations)
 - [Read the evidence](#read-the-evidence)
 
 ## Choose a walkthrough
@@ -26,6 +27,20 @@ The [Model Deployment guides](/gpustack-operator/main/docs/modules/model-deploym
 | Model Deployment | [Elastic EP](/gpustack-operator/main/docs/walkthroughs/model-deployment/elastic-ep/index.md) | Grow *DP* width 2 → 4 with *TP* = 2. |
 | Model Deployment | [External DP](/gpustack-operator/main/docs/walkthroughs/model-deployment/external-dp/index.md) | Deploy four fixed H100 *DP* ranks and verify captured per-rank inference and Router coverage. |
 | Model Deployment | [Multi-Host](/gpustack-operator/main/docs/walkthroughs/model-deployment/multi-host/index.md) | Deploy distributed model instances across multiple GPU hosts. |
+| Model Deployment | [Scaling](/gpustack-operator/main/docs/walkthroughs/model-deployment/scaling/index.md) | Observe and activate scaling for a deployment. |
+
+## Connect configurations
+
+These walkthroughs connect resources from more than one module. Follow each page's prerequisites and
+limitations; its example does not establish that other combinations have been tested.
+
+| Configuration | Walkthrough | Linkage |
+|---|---|---|
+| Model delivery and serving | [Model Prefetch](/gpustack-operator/main/docs/walkthroughs/model-delivery/prefetch/index.md) | A store binding grants cache access; a deployment references the artifact. |
+| Shared cache and serving | [Shared Cache](/gpustack-operator/main/docs/walkthroughs/kv-cache/shared-cache/index.md) | A backend supplies a pool; a namespace binding grants a deployment access. |
+| RDMA and shared cache | [RDMA Networking](/gpustack-operator/main/docs/walkthroughs/rdma/network-endpoints/index.md#step-4-kv-cache-over-rdma) | The cache backend uses an RDMA fabric and requests interfaces. |
+| Delivery, serving and scaling | [Scaling](/gpustack-operator/main/docs/walkthroughs/model-deployment/scaling/index.md) | A deployment references an artifact; a scaler controls its replica counts. |
+| Topology and serving | [Hierarchical Placement](/gpustack-operator/main/docs/walkthroughs/topology/hierarchical-placement/index.md) | Topology inventory supplies domains that constrain replica placement. |
 
 ## Read the evidence
 

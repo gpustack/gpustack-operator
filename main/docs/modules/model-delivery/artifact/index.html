@@ -10,6 +10,9 @@
         const theme = localStorage.getItem("theme");
         if (theme === "light" || theme === "dark") document.documentElement.dataset.theme = theme;
         document.documentElement.dataset.themeChoice = theme === "light" || theme === "dark" ? theme : "system";
+        if (localStorage.getItem("sidebar-collapsed") === "true") {
+          document.documentElement.dataset.sidebarCollapsed = "true";
+        }
       } catch {
         document.documentElement.dataset.themeChoice = "system";
       }
@@ -24,7 +27,7 @@
   <link rel="alternate" type="text/markdown" href="/gpustack-operator/main/docs/modules/model-delivery/artifact/index.md">
   
   <link rel="describedby" href="/gpustack-operator/main/llms.txt">
-  <link rel="stylesheet" href="/gpustack-operator/main/css/site.ea544478884ee4c46c0d82a26985cad564c8f892cccad0c8ffcefe846c62a4a0.css">
+  <link rel="stylesheet" href="/gpustack-operator/main/css/site.1a0de63fe646aba4ed6541fe0a6383c2ed5ca649b1593a98595ba53430bcf032.css">
   <link rel="stylesheet" href="/gpustack-operator/main/css/code.d2570c1cc6480f9c62bc31ec538eef2578ce80980588c469638a5f95416bfc7b.css">
 </head>
 <body class="docs-page">
@@ -95,6 +98,13 @@
   <div class="layout">
     <aside class="sidebar" aria-label="Documentation navigation">
       <button class="nav-toggle" type="button" aria-controls="docs-navigation" aria-expanded="false">Browse documentation</button>
+      <button class="sidebar-toggle" type="button" aria-controls="docs-navigation" aria-expanded="true" aria-label="Collapse sidebar" title="Collapse sidebar">
+        <svg class="sidebar-toggle-icon" aria-hidden="true" viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="2" y="2.5" width="12" height="11" rx="2"/>
+          <line x1="6" y1="2.5" x2="6" y2="13.5"/>
+          <polyline class="sidebar-icon-arrow" points="10.5 6 8.5 8 10.5 10"/>
+        </svg>
+      </button>
       <nav id="docs-navigation" class="sidebar-inner">
         <div class="nav-title">Documentation</div>
         <a class="nav-home" href="/gpustack-operator/main/" >Overview</a>
@@ -1469,6 +1479,8 @@ Neither workload needs its own URI, revision or token.</p>
 </li>
 </ul>
 <h2 id="resource">Resource</h2>
+<p>The status values below illustrate the fields; they are not a recorded resolution of this source.
+Omit <code>status</code> when creating an artifact. Supply an expected digest only for the exact revision and filters.</p>
 <div class="code-block">
   <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">worker.gpustack.ai/v1</span><span class="w">
@@ -1500,8 +1512,8 @@ Neither workload needs its own URI, revision or token.</p>
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="s2">&#34;tokenizer*&#34;</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">ignorePatterns</span><span class="p">:</span><span class="w">  </span><span class="c"># optional; wins over allowPatterns</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="s2">&#34;original/&#34;</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="c"># Optional for hub sources; the resolved digest must match this value.</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">expectedDigest</span><span class="p">:</span><span class="w"> </span><span class="l">sha256:669ed7b128b6ad1658d735326bd172a33497ecdb8bbd72dd0b23c98b58469448</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="c"># Optional for hub sources; replace with the exact resolved manifest digest.</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="c"># expectedDigest: sha256:&lt;64-lowercase-hex-characters&gt;</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">status</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">resolved</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">revision</span><span class="p">:</span><span class="w"> </span><span class="l">7ae557604adf67be50417f59c2c2f167def9a775</span><span class="w">
@@ -1522,47 +1534,71 @@ Neither workload needs its own URI, revision or token.</p>
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">status</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;False&#34;</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">reason</span><span class="p">:</span><span class="w"> </span><span class="l">Healthy</span></span></span></code></pre></div>
 </div><ul>
-<li><strong>The spec is immutable.</strong> An artifact is an identity: other weights, or another revision, are a
-new artifact. That is also what lets a deployment&rsquo;s frozen reference pin anything.</li>
-<li><strong>The <code>Secret</code> and the claim need not exist yet.</strong> Admission does not read them; their absence is a
-reason in status (<code>SecretNotFound</code>, <code>ClaimNotFound</code>).</li>
-<li><strong>A <em><code>modelScope</code></em> member is a second hub.</strong> Its repository and revision rules are the Hugging Face
-ones, the revision defaults to <code>master</code>, and the patterns apply to it the same way. What differs
-is <a href="#resolution-and-revalidation">how it resolves</a>
- and the <a href="#engine-delivery">engine
-environment</a>
- an Engine download reads.</li>
-<li><strong>An <em><code>image</code></em> member delivers weights already in a registry.</strong> A digest-pinned reference is the
-artifact&rsquo;s whole identity; kubelet pulls and mounts it through an image volume, outside the node
-cache. The digest contract, the build, the floors and the costs are on the
-<a href="/gpustack-operator/main/docs/modules/model-delivery/image-source/">Model Image Source</a>
-.</li>
-<li><strong>Patterns select the files.</strong> They follow Python&rsquo;s <code>fnmatch.fnmatchcase</code>: case-sensitive, <code>*</code>
-and <code>?</code> cross <code>/</code>, a trailing <code>/</code> means everything under it, an empty allow list keeps every file,
-and an ignored file is dropped even when allowed. At most 32 per list, 1 to 256 characters each,
-refused on claim and image sources. A filter that keeps no file is <code>Resolved=False</code>,
-<code>EmptyManifest</code>, and a filtered artifact needs
-<a href="#reference-from-a-modeldeployment">Node delivery</a>
-.</li>
-<li><strong><em><code>expectedDigest</code></em> asserts what must resolve.</strong> Optional, immutable with the spec, <code>&quot;sha256:&quot;</code> and
-64 lowercase hex: the manifest digest, exactly what <em><code>status.resolved.manifestDigest</code></em>
-carries. Admission accepts it on a hub source only. A claim&rsquo;s content is whatever the volume
-holds at mount time (dynamically provisioned claims differ per provisioning), and its identity is
-the claim itself, which the user confirms; an image&rsquo;s identity is its reference&rsquo;s digest. What the
-assertion does is under <a href="#resolution-and-revalidation">Resolution and revalidation</a>
-.</li>
-<li><strong><em><code>status.nodes</code></em> counts the nodes reporting the digest.</strong> <code>Node</code>s whose <code>NodeModelStore</code> lists the
-digest <code>Ready</code>, <code>Downloading</code> or <code>Failed</code>; artifacts with the same digest see the same nodes, and
-only numbers cross namespaces. The mean covers the downloading nodes only, each a whole copy. It
-is written on the <a href="/gpustack-operator/main/docs/modules/model-delivery/node-store/#resource">thresholds</a>
- the nodes store progress on. The
-<a href="/gpustack-operator/main/docs/modules/model-delivery/views/#progress-subresource">progress</a>
- answers the same at full
-precision.</li>
-<li><strong>Deletion waits for the last reference.</strong> The finalizer <code>worker.gpustack.ai/model-artifact-protection</code>
-holds a referenced artifact in <code>Terminating</code> until no <code>ModelDeployment</code> or <code>Instance</code> in the
-namespace names it. Running <code>Pod</code>s are never affected.</li>
+<li><strong>Spec:</strong> Immutable. Create another artifact for different weights or a different revision.</li>
+<li><strong>Source:</strong> Select exactly one source.</li>
+<li><strong>Secrets and claims:</strong> Admission does not require the referenced objects to exist yet.</li>
+<li><strong>Patterns:</strong> Use only with hub sources. Each list accepts at most 32 patterns.</li>
+<li><strong>Digest:</strong> <em><code>expectedDigest</code></em> is optional and accepted only for hub sources.</li>
 </ul>
+<table>
+  <thead>
+      <tr>
+          <th>Value</th>
+          <th>Meaning</th>
+          <th>Constraints</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td><code>huggingFace</code></td>
+          <td>Hugging Face repository</td>
+          <td>Revision defaults to <code>main</code>.</td>
+      </tr>
+      <tr>
+          <td><code>modelScope</code></td>
+          <td>ModelScope repository</td>
+          <td>Revision defaults to <code>master</code>.</td>
+      </tr>
+      <tr>
+          <td><code>persistentVolumeClaim</code></td>
+          <td>Weights in a claim</td>
+          <td>The claim is in the artifact&rsquo;s namespace.</td>
+      </tr>
+      <tr>
+          <td><code>image</code></td>
+          <td>Weights in an image</td>
+          <td>The reference must be digest-pinned.</td>
+      </tr>
+  </tbody>
+</table>
+<p>A missing <code>Secret</code> or claim appears in status as <code>SecretNotFound</code> or <code>ClaimNotFound</code>.
+ModelScope uses the same repository, revision and pattern rules as Hugging Face. Its
+<a href="#resolution-and-revalidation">resolution</a>
+ and <a href="#engine-delivery">engine environment</a>
+ differ.
+Kubelet pulls and mounts an image source outside the node cache. See
+<a href="/gpustack-operator/main/docs/modules/model-delivery/image-source/">Model Image Source</a>
+ for its digest contract, requirements and costs.</p>
+<p>Patterns use Python&rsquo;s case-sensitive <code>fnmatch.fnmatchcase</code>. Both <code>*</code> and <code>?</code> cross <code>/</code>.
+A trailing <code>/</code> matches everything under it. An empty allow list keeps every file.
+Ignore patterns take precedence. Each pattern is 1 to 256 characters long.
+A filter that keeps no file sets <code>Resolved=False</code> with reason <code>EmptyManifest</code>.
+Filtered artifacts need <a href="#reference-from-a-modeldeployment">Node delivery</a>
+.</p>
+<p><em><code>expectedDigest</code></em> contains <code>sha256:</code> followed by 64 lowercase hexadecimal characters.
+It must match <em><code>status.resolved.manifestDigest</code></em>. A claim&rsquo;s identity is the claim itself; its
+content is the volume&rsquo;s content at mount time. Dynamically provisioned claims can differ.
+An image&rsquo;s identity is its reference digest. See <a href="#resolution-and-revalidation">Resolution and revalidation</a>
+.</p>
+<p><em><code>status.nodes</code></em> counts nodes whose <code>NodeModelStore</code> reports the digest <code>Ready</code>, <code>Downloading</code> or
+<code>Failed</code>. Artifacts with the same digest see the same nodes; only counts cross namespaces.
+The mean includes only downloading nodes. Each node represents a whole copy. See the
+<a href="/gpustack-operator/main/docs/modules/model-delivery/node-store/#resource">progress thresholds</a>
+ and the full-precision <a href="/gpustack-operator/main/docs/modules/model-delivery/views/#progress-subresource">progress view</a>
+.</p>
+<p>The <code>worker.gpustack.ai/model-artifact-protection</code> finalizer holds a referenced artifact in
+<code>Terminating</code>. It waits until no <code>ModelDeployment</code> or <code>Instance</code> in the namespace references it.
+Running <code>Pod</code>s are unaffected.</p>
 <h2 id="resolution-and-revalidation">Resolution and revalidation</h2>
 <p>A Hugging Face source is resolved <strong>once</strong>, with the namespace&rsquo;s own token: the revision is pinned
 to the commit it names at resolution time, an annotated tag is peeled to that commit, and the
@@ -1716,7 +1752,7 @@ deployment once):</p>
 <table>
   <thead>
       <tr>
-          <th></th>
+          <th>Content</th>
           <th>Claim source (<code>Pvc</code>)</th>
           <th>Hub source, <code>Engine</code></th>
           <th>Hub source, <code>Node</code></th>
@@ -1897,7 +1933,7 @@ class; page caches dropped before every read):</p>
       <tr>
           <th>Source</th>
           <th>Cold read, 7B</th>
-          <th>Weight loading, vLLM 7B</th>
+          <th>vLLM 7B loading</th>
           <th>Warm read</th>
       </tr>
   </thead>
@@ -2108,7 +2144,7 @@ prefixes</li><li><a href="/gpustack-operator/main/docs/modules/model-deployment/
           
           
           <nav class="page-actions" aria-label="Page source">
-            <a href="https://github.com/gpustack/gpustack-operator/blob/8c5186108e620a8044164d9c4c114dd7376092f4/docs/modules/model-delivery/artifact.md">View page source</a>
+            <a href="https://github.com/gpustack/gpustack-operator/blob/91dc7c8d650bac133dd4ea3b29b35d62bd1ee2b1/docs/modules/model-delivery/artifact.md">View page source</a>
             
             <a href="https://github.com/gpustack/gpustack-operator/edit/main/docs/modules/model-delivery/artifact.md">Edit this page</a>
             
@@ -2136,6 +2172,6 @@ prefixes</li><li><a href="/gpustack-operator/main/docs/modules/model-deployment/
     </aside>
   </div>
   
-  <script src="/gpustack-operator/main/js/site.1ec84fdfb2bec16dbb83a64abad1abe2d27d8d3f7fc54c2cfa45fe4d64303b3c.js" defer></script>
+  <script src="/gpustack-operator/main/js/site.e362041170f1762d2935c1ef4d8ca5f494983b230101e1b6536544c195645f10.js" defer></script>
 </body>
 </html>

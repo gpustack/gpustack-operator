@@ -1,8 +1,8 @@
 # Shared Cache Walkthrough
 
-Create a store, a pool, a namespace grant and a workload in that order, replacing the node selector,
-namespace, instance type and model name in the manifests below. The serving replicas then reuse each
-other's prefix KV blocks.
+Create a store, a pool, a namespace grant and a workload in that order. Replace the node selector,
+namespace, instance type and model name in the manifests below. The serving replicas can then reuse
+prefix KV blocks.
 
 ## Contents
 
@@ -19,9 +19,8 @@ other's prefix KV blocks.
 
 ## Summary
 
-A shared Mooncake cache pool lets serving replicas reuse each other's prefix KV blocks and spill
-blocks across DRAM and local-disk tiers, so a replica answering prompts another replica already
-processed skips the recompute.
+A shared Mooncake cache pool lets serving replicas reuse prefix KV blocks. It can spill blocks
+across DRAM and local-disk tiers. Reuse avoids recomputing blocks another replica already processed.
 
 | Object | Scope | Creator | Purpose |
 |---|---|---|---|
@@ -30,13 +29,12 @@ processed skips the recompute.
 | `KVCachePoolBinding` | namespace | administrator | that THIS namespace may draw on it, and up to what |
 | `ModelDeployment` | namespace | user | a workload that attaches to the grant |
 
-The order is fixed because each object names the one above it, so creating them the other way round
-leaves references that resolve to nothing. Why the two scopes split this way is on
-[KV Cache Pools and Bindings](/gpustack-operator/main/docs/modules/kv-cache/pool/index.md#two-kinds-by-scope).
+Create the objects in order. Each object names the one above it. Otherwise, its reference cannot
+resolve. [KV Cache Pools and Bindings](/gpustack-operator/main/docs/modules/kv-cache/pool/index.md#two-kinds-by-scope) explains
+the scope of each object.
 
-**The Binding is the authorization point.** A namespace gets access to a store when an administrator
-creates a Binding in it. A user naming a pool is not a path this API has: *`poolRef`* is a
-same-namespace reference, so the name it accepts is a Binding's.
+**The binding grants access.** An administrator creates a binding in the namespace. The workload's
+*`poolRef`* names that binding, not the pool.
 
 ## Environment
 

@@ -10,6 +10,9 @@
         const theme = localStorage.getItem("theme");
         if (theme === "light" || theme === "dark") document.documentElement.dataset.theme = theme;
         document.documentElement.dataset.themeChoice = theme === "light" || theme === "dark" ? theme : "system";
+        if (localStorage.getItem("sidebar-collapsed") === "true") {
+          document.documentElement.dataset.sidebarCollapsed = "true";
+        }
       } catch {
         document.documentElement.dataset.themeChoice = "system";
       }
@@ -24,7 +27,7 @@
   <link rel="alternate" type="text/markdown" href="/gpustack-operator/main/docs/modules/rdma/operations/index.md">
   
   <link rel="describedby" href="/gpustack-operator/main/llms.txt">
-  <link rel="stylesheet" href="/gpustack-operator/main/css/site.ea544478884ee4c46c0d82a26985cad564c8f892cccad0c8ffcefe846c62a4a0.css">
+  <link rel="stylesheet" href="/gpustack-operator/main/css/site.1a0de63fe646aba4ed6541fe0a6383c2ed5ca649b1593a98595ba53430bcf032.css">
   <link rel="stylesheet" href="/gpustack-operator/main/css/code.d2570c1cc6480f9c62bc31ec538eef2578ce80980588c469638a5f95416bfc7b.css">
 </head>
 <body class="docs-page">
@@ -95,6 +98,13 @@
   <div class="layout">
     <aside class="sidebar" aria-label="Documentation navigation">
       <button class="nav-toggle" type="button" aria-controls="docs-navigation" aria-expanded="false">Browse documentation</button>
+      <button class="sidebar-toggle" type="button" aria-controls="docs-navigation" aria-expanded="true" aria-label="Collapse sidebar" title="Collapse sidebar">
+        <svg class="sidebar-toggle-icon" aria-hidden="true" viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="2" y="2.5" width="12" height="11" rx="2"/>
+          <line x1="6" y1="2.5" x2="6" y2="13.5"/>
+          <polyline class="sidebar-icon-arrow" points="10.5 6 8.5 8 10.5 10"/>
+        </svg>
+      </button>
       <nav id="docs-navigation" class="sidebar-inner">
         <div class="nav-title">Documentation</div>
         <a class="nav-home" href="/gpustack-operator/main/" >Overview</a>
@@ -1452,8 +1462,6 @@ placement. <a href="/gpustack-operator/main/docs/modules/rdma/network-topology/"
 <ul>
 <li><a href="#choosing-a-key">Choosing a key</a>
 </li>
-<li><a href="#endpoints-per-accelerator">Endpoints per accelerator</a>
-</li>
 <li><a href="#injected-devices">Injected devices</a>
 </li>
 <li><a href="#selection-policy">Selection policy</a>
@@ -1481,7 +1489,7 @@ differences. Choose the key for your workload:</p>
   <thead>
       <tr>
           <th>Key</th>
-          <th>Use when</th>
+          <th>Target scenario</th>
       </tr>
   </thead>
   <tbody>
@@ -1526,7 +1534,7 @@ count selects, and the mixed-fabric refusal. The field allocates a device to eac
 carries; see <a href="#efa-engine-images">what an EFA path needs from the engine
 image</a>
 .</p>
-<h2 id="endpoints-per-accelerator">Endpoints per accelerator</h2>
+<h3 id="endpoints-per-accelerator">Endpoints per accelerator</h3>
 <p><strong>Ask for one <em>RDMA</em> endpoint per accelerator the container requests.</strong> A host built for collective
 traffic carries one adapter beside each accelerator, so <code>N</code> accelerators and <code>N</code> endpoints is the
 count that matches the machine. Fewer puts several accelerators behind one adapter&rsquo;s bandwidth; more
@@ -1631,7 +1639,8 @@ GPUs across <em>NUMA</em> 0 (<code>mlx5_8..mlx5_11</code>) and <em>NUMA</em> 1 (
 <li><code>mlx5_12</code>: one 400 Gb/s Ethernet adapter backing host <code>eth0</code>.</li>
 </ul>
 <p>To restrict workloads to the eight 800 Gb/s GPU-local compute adapters (<code>mlx5_4..mlx5_11</code>), create a
-policy with <code>include</code>. A policy can set at most one of <code>include</code> and <code>exclude</code>:</p>
+policy with <code>include</code>. Replace the example node label with a label present on each intended node.
+A policy can set at most one of <code>include</code> and <code>exclude</code>:</p>
 <div class="code-block">
   <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">worker.gpustack.ai/v1</span><span class="w">
@@ -1653,7 +1662,39 @@ policy with <code>include</code>. A policy can set at most one of <code>include<
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="l">mlx5_9</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="l">mlx5_10</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="l">mlx5_11</span></span></span></code></pre></div>
-</div><p>Alternatively, configure the same selection with <code>exclude</code> to filter out the four 100 Gb/s adapters
+</div><ul>
+<li><strong><code>nodeSelector</code></strong>: Required and non-null; an empty selector matches every node.</li>
+<li><strong><code>include</code></strong>: Optional; list exact HCA names present on each selected node.</li>
+<li><strong><code>exclude</code></strong>: Optional; list exact HCA names present on each selected node.</li>
+<li><strong><code>port</code></strong>: Optional; select a positive physical port present on each selected HCA.</li>
+</ul>
+<table>
+  <thead>
+      <tr>
+          <th>Condition</th>
+          <th>Reason</th>
+          <th>Resolution</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td>Both <code>include</code> and <code>exclude</code> are set</td>
+          <td>The filters are mutually exclusive</td>
+          <td>Supply only one filter.</td>
+      </tr>
+      <tr>
+          <td>More than one policy matches a node</td>
+          <td>Policies do not merge</td>
+          <td>Adjust selectors so one policy matches.</td>
+      </tr>
+      <tr>
+          <td>A named HCA or selected port is absent</td>
+          <td>The policy cannot resolve on that node</td>
+          <td>Correct the names, port, or selector.</td>
+      </tr>
+  </tbody>
+</table>
+<p>Alternatively, configure the same selection with <code>exclude</code> to filter out the four 100 Gb/s adapters
 and the host Ethernet adapter. Remove <code>include</code> when switching to this form; do not apply both forms
 as separate matching policies:</p>
 <div class="code-block">
@@ -1717,8 +1758,13 @@ again:</p>
 </span></span><span class="line"><span class="cl"><span class="gi">+  # 1-based physical port; every selected HCA must carry it on the node.
 </span></span></span><span class="line"><span class="cl"><span class="gi">+  port: 1
 </span></span></span></code></pre></div>
-</div><p>Read selection status on the node&rsquo;s <code>Devices</code> resource. This illustrative excerpt shows the result
-when <code>mlx5_4..mlx5_11</code> are selected:</p>
+</div><p>Read the policy and each node&rsquo;s <code>Devices</code> resource:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>shell</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-shell" data-lang="shell"><span class="line"><span class="cl">kubectl get rdmasel b300-compute-hcas -o yaml
+</span></span><span class="line"><span class="cl">kubectl get devices &lt;node-name&gt; -o yaml</span></span></code></pre></div>
+</div><p>Confirm that <code>RDMASelectionResolved=True</code>. Compare <em><code>policyRef</code></em> name, UID and generation with the
+policy&rsquo;s metadata. This illustrative excerpt shows <code>mlx5_4..mlx5_11</code> selected:</p>
 <div class="code-block">
   <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">worker.gpustack.ai/v1</span><span class="w">
@@ -1809,11 +1855,13 @@ interface</a>
 .</li>
 </ul>
 <h2 id="enabling-numa-alignment">Enabling NUMA alignment</h2>
+<h3 id="step-1-check-the-policy">Step 1: Check the policy</h3>
 <p>Do not assume a cluster already has it: no Kubernetes release turns it on. The TopologyManager is
 stable and enabled, but its policy field&rsquo;s default is <code>none</code>, which discards every hint a device
 plugin publishes. Until somebody sets it, the accelerator and the adapter handed to one container
 are two independent picks.</p>
-<p>Two fields, in the kubelet&rsquo;s own <code>KubeletConfiguration</code>:</p>
+<h3 id="step-2-configure-alignment">Step 2: Configure alignment</h3>
+<p>Drain the node before changing its kubelet policy. Set two fields in <code>KubeletConfiguration</code>:</p>
 <div class="code-block">
   <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">kubelet.config.k8s.io/v1beta1</span><span class="w">
@@ -1846,6 +1894,7 @@ contents it copies in; a file written into the generated tree is gone at the nex
 <li><strong>The kubelet command line</strong>, <code>--topology-manager-policy=</code>. Some distributions expose it as a
 pass-through argument in their own configuration file rather than as a kubelet field.</li>
 </ul>
+<h3 id="step-3-drain-and-restart">Step 3: Drain and restart</h3>
 <p><strong>Drain the node before changing it.</strong> The policy decides what the kubelet admits, and the
 containers already running were admitted under the old one; a node restarted into a stricter policy
 can refuse <code>Pod</code>s it was happily running.</p>
@@ -1854,6 +1903,7 @@ it. A managed Kubernetes offering commonly does not expose the kubelet&rsquo;s c
 failure is silent: the <code>Pod</code> is admitted, the two sides are picked independently, and only the
 throughput says so.</p>
 <h2 id="verification">Verification</h2>
+<h3 id="verify-the-kubelet-policy">Verify the kubelet policy</h3>
 <p>Editing a file is not the kubelet running what it says. Read it back from the kubelet itself, which
 needs permission on the <code>nodes/proxy</code> subresource:</p>
 <div class="code-block">
@@ -2051,7 +2101,7 @@ the bare host.</div>
           
           
           <nav class="page-actions" aria-label="Page source">
-            <a href="https://github.com/gpustack/gpustack-operator/blob/8c5186108e620a8044164d9c4c114dd7376092f4/docs/modules/rdma/operations.md">View page source</a>
+            <a href="https://github.com/gpustack/gpustack-operator/blob/91dc7c8d650bac133dd4ea3b29b35d62bd1ee2b1/docs/modules/rdma/operations.md">View page source</a>
             
             <a href="https://github.com/gpustack/gpustack-operator/edit/main/docs/modules/rdma/operations.md">Edit this page</a>
             
@@ -2062,13 +2112,26 @@ the bare host.</div>
           <nav id="TableOfContents">
   <ul>
     <li><a href="#contents">Contents</a></li>
-    <li><a href="#choosing-a-key">Choosing a key</a></li>
-    <li><a href="#endpoints-per-accelerator">Endpoints per accelerator</a></li>
+    <li><a href="#choosing-a-key">Choosing a key</a>
+      <ul>
+        <li><a href="#endpoints-per-accelerator">Endpoints per accelerator</a></li>
+      </ul>
+    </li>
     <li><a href="#injected-devices">Injected devices</a></li>
     <li><a href="#selection-policy">Selection policy</a></li>
     <li><a href="#example-manifest">Example manifest</a></li>
-    <li><a href="#enabling-numa-alignment">Enabling NUMA alignment</a></li>
-    <li><a href="#verification">Verification</a></li>
+    <li><a href="#enabling-numa-alignment">Enabling NUMA alignment</a>
+      <ul>
+        <li><a href="#step-1-check-the-policy">Step 1: Check the policy</a></li>
+        <li><a href="#step-2-configure-alignment">Step 2: Configure alignment</a></li>
+        <li><a href="#step-3-drain-and-restart">Step 3: Drain and restart</a></li>
+      </ul>
+    </li>
+    <li><a href="#verification">Verification</a>
+      <ul>
+        <li><a href="#verify-the-kubelet-policy">Verify the kubelet policy</a></li>
+      </ul>
+    </li>
     <li><a href="#kueue-and-rdma-keys">Kueue and RDMA keys</a></li>
     <li><a href="#efa-engine-images">EFA engine images</a>
       <ul>
@@ -2087,6 +2150,6 @@ the bare host.</div>
     </aside>
   </div>
   
-  <script src="/gpustack-operator/main/js/site.1ec84fdfb2bec16dbb83a64abad1abe2d27d8d3f7fc54c2cfa45fe4d64303b3c.js" defer></script>
+  <script src="/gpustack-operator/main/js/site.e362041170f1762d2935c1ef4d8ca5f494983b230101e1b6536544c195645f10.js" defer></script>
 </body>
 </html>

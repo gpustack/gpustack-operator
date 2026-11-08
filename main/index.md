@@ -1,4 +1,4 @@
 # GPUStack Operator
 
-GPUStack Operator discovers hardware, shapes accelerator capacity, and helps Kubernetes place
-workloads where that capacity is available.
+GPUStack Operator discovers accelerators, organizes capacity into pools, and schedules Kubernetes
+workloads for interactive use and model serving.

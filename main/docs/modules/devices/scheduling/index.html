@@ -10,6 +10,9 @@
         const theme = localStorage.getItem("theme");
         if (theme === "light" || theme === "dark") document.documentElement.dataset.theme = theme;
         document.documentElement.dataset.themeChoice = theme === "light" || theme === "dark" ? theme : "system";
+        if (localStorage.getItem("sidebar-collapsed") === "true") {
+          document.documentElement.dataset.sidebarCollapsed = "true";
+        }
       } catch {
         document.documentElement.dataset.themeChoice = "system";
       }
@@ -24,7 +27,7 @@
   <link rel="alternate" type="text/markdown" href="/gpustack-operator/main/docs/modules/devices/scheduling/index.md">
   
   <link rel="describedby" href="/gpustack-operator/main/llms.txt">
-  <link rel="stylesheet" href="/gpustack-operator/main/css/site.ea544478884ee4c46c0d82a26985cad564c8f892cccad0c8ffcefe846c62a4a0.css">
+  <link rel="stylesheet" href="/gpustack-operator/main/css/site.1a0de63fe646aba4ed6541fe0a6383c2ed5ca649b1593a98595ba53430bcf032.css">
   <link rel="stylesheet" href="/gpustack-operator/main/css/code.d2570c1cc6480f9c62bc31ec538eef2578ce80980588c469638a5f95416bfc7b.css">
 </head>
 <body class="docs-page">
@@ -95,6 +98,13 @@
   <div class="layout">
     <aside class="sidebar" aria-label="Documentation navigation">
       <button class="nav-toggle" type="button" aria-controls="docs-navigation" aria-expanded="false">Browse documentation</button>
+      <button class="sidebar-toggle" type="button" aria-controls="docs-navigation" aria-expanded="true" aria-label="Collapse sidebar" title="Collapse sidebar">
+        <svg class="sidebar-toggle-icon" aria-hidden="true" viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="2" y="2.5" width="12" height="11" rx="2"/>
+          <line x1="6" y1="2.5" x2="6" y2="13.5"/>
+          <polyline class="sidebar-icon-arrow" points="10.5 6 8.5 8 10.5 10"/>
+        </svg>
+      </button>
       <nav id="docs-navigation" class="sidebar-inner">
         <div class="nav-title">Documentation</div>
         <a class="nav-home" href="/gpustack-operator/main/" >Overview</a>
@@ -1567,6 +1577,21 @@ Operations</a>
           <td>time-shared, so overcommittable</td>
       </tr>
       <tr>
+          <td>AMD</td>
+          <td>128</td>
+          <td>time-shared, so overcommittable</td>
+      </tr>
+      <tr>
+          <td>T-Head</td>
+          <td>128</td>
+          <td>time-shared, so overcommittable</td>
+      </tr>
+      <tr>
+          <td>Iluvatar</td>
+          <td>100</td>
+          <td>time-shared, so overcommittable</td>
+      </tr>
+      <tr>
           <td>Ascend</td>
           <td>63</td>
           <td>time-shared, so overcommittable</td>
@@ -1593,8 +1618,8 @@ Operations</a>
       </tr>
   </tbody>
 </table>
-<p>Each count is the maximum the Device Manager records on <strong>each accelerator&rsquo;s</strong> status, bounded by the
-manufacturer runtime&rsquo;s per-device user-process limit; the group aggregates them per model. A
+<p>Each count is the maximum the Device Manager records on <strong>each accelerator&rsquo;s</strong> status. Some counts
+reflect runtime limits; AMD and T-Head use loose token pools. The group aggregates them per model. A
 MIG-enabled accelerator reports zero logical count and its physical MIG profiles instead.</p>
 <p>An overcommittable manufacturer advertises <code>.sliced.cores-percentage = Σ slice count × 100</code>, each slice
 able to claim a full 100%; the others cap it at <code>count × 100</code>.</p>
@@ -1731,36 +1756,20 @@ only when awareness is on. The defaulting webhook folds it back into the type&rs
 </ul>
 <h2 id="controllers">Controllers</h2>
 <p>The worker keeps five sets of objects converged:</p>
-<div class="diagram-block">
-  <div class="mermaid-diagram" role="img" aria-label="Diagram" aria-busy="true"></div>
-  <p class="diagram-status" role="status">Rendering diagram…</p>
-  <details class="diagram-source"><summary>Mermaid source</summary>
-    <div class="code-block">
-      <div class="code-toolbar"><span>mermaid</span><button class="copy-code" type="button" aria-label="Copy diagram source">Copy</button></div>
-      <pre><code>flowchart LR
-    NODE[&#34;Node&lt;br/&gt;(capacity labels &#43; gpustack.ai/managed)&#34;]
-    DEV[&#34;Devices&lt;br/&gt;(per-accelerator allocation ledger)&#34;]
-
-    subgraph controllers[&#34;worker controllers&#34;]
-        RF[&#34;ResourceFlavor&#34;]
-        IT[&#34;InstanceType&#34;]
-        CQ[&#34;ClusterQueue&lt;br/&gt;(isolated, no cohort)&#34;]
-        LQ[&#34;LocalQueue&#34;]
-        AC[&#34;AdmissionCheck&#34;]
-    end
-
-    NODE -- &#34;one flavor per&lt;br/&gt;(key, os, arch, count)&#34; --&gt; RF
-    RF -- &#34;authors the pool&#39;s InstanceType,&lt;br/&gt;create-only&#34; --&gt; IT
-    DEV -- &#34;drives the status&#34; --&gt; IT
-    IT -- &#34;keeps the queue existing and&lt;br/&gt;stopped only as configured&#34; --&gt; CQ
-    RF -- &#34;fills resource groups&#34; --&gt; CQ
-    CQ --&gt; LQ
-    NS[&#34;Namespace (non-system)&#34;] -- &#34;one per namespace&#34; --&gt; LQ
-    DEV -- &#34;per-accelerator feasibility&#34; --&gt; AC
-    AC --&gt; CQ</code></pre>
-    </div>
-  </details>
-</div><h3 id="capacity-flavors">Capacity flavors</h3>
+<p><span class="diagram-scroll"><img src="/gpustack-operator/main/docs/assets/diagrams/devices-scheduling-chain.svg" alt="Device scheduling chain" decoding="async"></span></p>
+<!--
+flowchart TD
+    NODE["Managed Node and capacity labels"] -> FLAVOR["ResourceFlavor and topology"]
+    DEVICES["Devices inventory and ledger"] -> TYPE["InstanceType capacity views"]
+    NODE -> TYPE
+    DEVICES -> CHECK["Per-device AdmissionCheck"]
+    FLAVOR -> CQ["Isolated ClusterQueue"]
+    TYPE -> CQ
+    CHECK -> CQ
+    NAMESPACE["Tenant namespace"] -> LQ["LocalQueue"]
+    CQ -> LQ
+-->
+<h3 id="capacity-flavors">Capacity flavors</h3>
 <p>One controller indexes managed nodes by <code>(key, os, arch, count, topology profile)</code>, one
 <code>ResourceFlavor</code> per group. <em><code>spec.nodeLabels</code></em> pins workloads — the feature key
 <code>{general.|acceleratable.}feature.gpustack.ai/${key}=true</code>, full <code>kubernetes.io/os|arch</code>, and
@@ -1883,7 +1892,7 @@ A drained queue also stops its running <code>Instance</code>s — see <a href="/
           
           
           <nav class="page-actions" aria-label="Page source">
-            <a href="https://github.com/gpustack/gpustack-operator/blob/8c5186108e620a8044164d9c4c114dd7376092f4/docs/modules/devices/scheduling.md">View page source</a>
+            <a href="https://github.com/gpustack/gpustack-operator/blob/91dc7c8d650bac133dd4ea3b29b35d62bd1ee2b1/docs/modules/devices/scheduling.md">View page source</a>
             
             <a href="https://github.com/gpustack/gpustack-operator/edit/main/docs/modules/devices/scheduling.md">Edit this page</a>
             
@@ -1923,11 +1932,6 @@ A drained queue also stops its running <code>Instance</code>s — see <a href="/
     </aside>
   </div>
   
-    
-    
-    
-    <script src="/gpustack-operator/main/vendor/mermaid/mermaid.min.70137e77bb273bb2ef972b86e8b0400cca8be53cb25bfc45911a186dc98665de.js" integrity="sha256-cBN&#43;d7snO7LvlyuG6LBADMqL5TyyW/xFkRoYbcmGZd4=" defer></script>
-  
-  <script src="/gpustack-operator/main/js/site.1ec84fdfb2bec16dbb83a64abad1abe2d27d8d3f7fc54c2cfa45fe4d64303b3c.js" defer></script>
+  <script src="/gpustack-operator/main/js/site.e362041170f1762d2935c1ef4d8ca5f494983b230101e1b6536544c195645f10.js" defer></script>
 </body>
 </html>

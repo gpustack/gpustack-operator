@@ -19,6 +19,9 @@ Neither workload needs its own URI, revision or token.
 
 ## Resource
 
+The status values below illustrate the fields; they are not a recorded resolution of this source.
+Omit `status` when creating an artifact. Supply an expected digest only for the exact revision and filters.
+
 ```yaml
 apiVersion: worker.gpustack.ai/v1
 kind: ModelArtifact  # namespaced, short name mart
@@ -49,8 +52,8 @@ spec:  # immutable after creation
     - "tokenizer*"
   ignorePatterns:  # optional; wins over allowPatterns
     - "original/"
-  # Optional for hub sources; the resolved digest must match this value.
-  expectedDigest: sha256:669ed7b128b6ad1658d735326bd172a33497ecdb8bbd72dd0b23c98b58469448
+  # Optional for hub sources; replace with the exact resolved manifest digest.
+  # expectedDigest: sha256:<64-lowercase-hex-characters>
 status:
   resolved:
     revision: 7ae557604adf67be50417f59c2c2f167def9a775
@@ -72,39 +75,44 @@ status:
       reason: Healthy
 ```
 
-- **The spec is immutable.** An artifact is an identity: other weights, or another revision, are a
-  new artifact. That is also what lets a deployment's frozen reference pin anything.
-- **The `Secret` and the claim need not exist yet.** Admission does not read them; their absence is a
-  reason in status (`SecretNotFound`, `ClaimNotFound`).
-- **A *`modelScope`* member is a second hub.** Its repository and revision rules are the Hugging Face
-  ones, the revision defaults to `master`, and the patterns apply to it the same way. What differs
-  is [how it resolves](#resolution-and-revalidation) and the [engine
-  environment](#engine-delivery) an Engine download reads.
-- **An *`image`* member delivers weights already in a registry.** A digest-pinned reference is the
-  artifact's whole identity; kubelet pulls and mounts it through an image volume, outside the node
-  cache. The digest contract, the build, the floors and the costs are on the
-  [Model Image Source](/gpustack-operator/main/docs/modules/model-delivery/image-source/index.md).
-- **Patterns select the files.** They follow Python's `fnmatch.fnmatchcase`: case-sensitive, `*`
-  and `?` cross `/`, a trailing `/` means everything under it, an empty allow list keeps every file,
-  and an ignored file is dropped even when allowed. At most 32 per list, 1 to 256 characters each,
-  refused on claim and image sources. A filter that keeps no file is `Resolved=False`,
-  `EmptyManifest`, and a filtered artifact needs
-  [Node delivery](#reference-from-a-modeldeployment).
-- ***`expectedDigest`* asserts what must resolve.** Optional, immutable with the spec, `"sha256:"` and
-  64 lowercase hex: the manifest digest, exactly what *`status.resolved.manifestDigest`*
-  carries. Admission accepts it on a hub source only. A claim's content is whatever the volume
-  holds at mount time (dynamically provisioned claims differ per provisioning), and its identity is
-  the claim itself, which the user confirms; an image's identity is its reference's digest. What the
-  assertion does is under [Resolution and revalidation](#resolution-and-revalidation).
-- ***`status.nodes`* counts the nodes reporting the digest.** `Node`s whose `NodeModelStore` lists the
-  digest `Ready`, `Downloading` or `Failed`; artifacts with the same digest see the same nodes, and
-  only numbers cross namespaces. The mean covers the downloading nodes only, each a whole copy. It
-  is written on the [thresholds](/gpustack-operator/main/docs/modules/model-delivery/node-store/index.md#resource) the nodes store progress on. The
-  [progress](/gpustack-operator/main/docs/modules/model-delivery/views/index.md#progress-subresource) answers the same at full
-  precision.
-- **Deletion waits for the last reference.** The finalizer `worker.gpustack.ai/model-artifact-protection`
-  holds a referenced artifact in `Terminating` until no `ModelDeployment` or `Instance` in the
-  namespace names it. Running `Pod`s are never affected.
+- **Spec:** Immutable. Create another artifact for different weights or a different revision.
+- **Source:** Select exactly one source.
+- **Secrets and claims:** Admission does not require the referenced objects to exist yet.
+- **Patterns:** Use only with hub sources. Each list accepts at most 32 patterns.
+- **Digest:** *`expectedDigest`* is optional and accepted only for hub sources.
+
+| Value | Meaning | Constraints |
+|---|---|---|
+| `huggingFace` | Hugging Face repository | Revision defaults to `main`. |
+| `modelScope` | ModelScope repository | Revision defaults to `master`. |
+| `persistentVolumeClaim` | Weights in a claim | The claim is in the artifact's namespace. |
+| `image` | Weights in an image | The reference must be digest-pinned. |
+
+A missing `Secret` or claim appears in status as `SecretNotFound` or `ClaimNotFound`.
+ModelScope uses the same repository, revision and pattern rules as Hugging Face. Its
+[resolution](#resolution-and-revalidation) and [engine environment](#engine-delivery) differ.
+Kubelet pulls and mounts an image source outside the node cache. See
+[Model Image Source](/gpustack-operator/main/docs/modules/model-delivery/image-source/index.md) for its digest contract, requirements and costs.
+
+Patterns use Python's case-sensitive `fnmatch.fnmatchcase`. Both `*` and `?` cross `/`.
+A trailing `/` matches everything under it. An empty allow list keeps every file.
+Ignore patterns take precedence. Each pattern is 1 to 256 characters long.
+A filter that keeps no file sets `Resolved=False` with reason `EmptyManifest`.
+Filtered artifacts need [Node delivery](#reference-from-a-modeldeployment).
+
+*`expectedDigest`* contains `sha256:` followed by 64 lowercase hexadecimal characters.
+It must match *`status.resolved.manifestDigest`*. A claim's identity is the claim itself; its
+content is the volume's content at mount time. Dynamically provisioned claims can differ.
+An image's identity is its reference digest. See [Resolution and revalidation](#resolution-and-revalidation).
+
+*`status.nodes`* counts nodes whose `NodeModelStore` reports the digest `Ready`, `Downloading` or
+`Failed`. Artifacts with the same digest see the same nodes; only counts cross namespaces.
+The mean includes only downloading nodes. Each node represents a whole copy. See the
+[progress thresholds](/gpustack-operator/main/docs/modules/model-delivery/node-store/index.md#resource) and the full-precision [progress view](/gpustack-operator/main/docs/modules/model-delivery/views/index.md#progress-subresource).
+
+The `worker.gpustack.ai/model-artifact-protection` finalizer holds a referenced artifact in
+`Terminating`. It waits until no `ModelDeployment` or `Instance` in the namespace references it.
+Running `Pod`s are unaffected.
 
 ## Resolution and revalidation
 
@@ -244,7 +252,7 @@ delivery the
 the node plugin ([switching it](/gpustack-operator/main/docs/modules/model-delivery/operations/index.md#switch-delivery) rolls each such
 deployment once):
 
-| | Claim source (`Pvc`) | Hub source, `Engine` | Hub source, `Node` | Image source (`Image`) |
+| Content | Claim source (`Pvc`) | Hub source, `Engine` | Hub source, `Node` | Image source (`Image`) |
 | --- | --- | --- | --- | --- |
 | Weights | the claim, read-only, at `/var/lib/gpustack/model`, *`subPath`* = `path` | downloaded by the engine into `/var/lib/gpustack/model-cache` | the node's verified copy, read-only, at `/var/lib/gpustack/model` | the image, read-only, at `/var/lib/gpustack/model` |
 | vLLM | `vllm serve /var/lib/gpustack/model` | `vllm serve <repository> --revision <commit>` | as a claim | as a claim |
@@ -341,7 +349,7 @@ Measured throughput, for choosing a claim (one node with one 48 GB accelerator a
 SSD boot disk; object-storage and NFS servers on CPU nodes with 2 TiB network disks of the default
 class; page caches dropped before every read):
 
-| Source | Cold read, 7B | Weight loading, vLLM 7B | Warm read |
+| Source | Cold read, 7B | vLLM 7B loading | Warm read |
 | --- | --- | --- | --- |
 | S3 CSI (geesefs) | 467 MB/s | 32.6 s | about 455 MB/s: no page-cache benefit |
 | The node's boot disk | 479 MB/s | 34.8–35.7 s | 7.4–7.8 GB/s |

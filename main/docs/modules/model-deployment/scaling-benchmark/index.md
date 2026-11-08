@@ -38,7 +38,7 @@ retirement recovery.
 
 ## Environment
 
-| Item | Suite 1 (H100 single-node) | Suite 2 (H200 multi-node) |
+| Item | Suite 1 (H100) | Suite 2 (H200) |
 |---|---|---|
 | Cluster | Kubernetes v1.35.7; one CPU node and one GPU node | Kubernetes v1.35.7; one CPU node (`4` vCPU, `16` GB) and four GPU nodes |
 | Hardware | 8 × NVIDIA H100 80 GB SXM GPUs; 128 vCPUs, 1600 GB RAM | 4 × NVIDIA H200 140 GB SXM GPUs (`1` GPU, `16` vCPUs, `200` GB RAM per node) |
@@ -330,9 +330,10 @@ between `c = 16` (`11477.608` tok/s) and `c = 24` (`14527.811` tok/s).
 Eighteen serial rounds (`3` alternating repeats per arm for `TokenThroughput` and `3` for
 `Predictive`) compared `frozen-manual` (`20000` tok/s), `tuned-manual` (`17135.159` tok/s) and
 `catalog` (`12851.37` effective tok/s from the sweep `ConfigMap`) across `baseline` (`30` s,
-`c = 2`), `ramp` (`45` s, `c = 24`), `sustain` (`45` s, `c = 24`) and `cooldown` (`30` s, `c = 0`):
+`c = 2`), `ramp` (`45` s, `c = 24`), `sustain` (`45` s, `c = 24`) and `cooldown` (`30` s, `c = 0`).
+Latency columns show p50/p99:
 
-| Algorithm | Arm | Valid repeats | Ready replica-s (median / min–max) | Peak Ready | Ramp *TTFT* p50 / p99 (ms) | Sustain *TTFT* p50 / p99 (ms) | Sustain *ITL* p50 / p99 (ms) |
+| Algorithm | Arm | Valid repeats | Ready replica-s (median/min–max) | Peak Ready | Ramp *TTFT* (ms) | Sustain *TTFT* (ms) | Sustain *ITL* (ms) |
 |---|---|---:|---|---:|---|---|---|
 | `TokenThroughput` | `frozen-manual` | 3 / 3 | 237.239 (232.445–309.809) | 1 | 350.355 / 551.351 | 319.235 / 529.512 | 6.349 / 9.931 |
 | `TokenThroughput` | `tuned-manual` | 3 / 3 | 237.094 (234.374–304.551) | 1 | 348.907 / 548.91 | 321.352 / 517.771 | 6.345 / 9.776 |
@@ -468,7 +469,7 @@ Scale-out lead measures the interval from ramp start to the first sampled desire
 It uses deployment status, so it does not measure when a newly added replica first became Ready
 or served a request. A count already above one at ramp start is reported as zero with an explicit flag.
 
-| Configuration | Lead (s) | Above one before ramp | Maximum desired counts | Maximum Ready counts |
+| Configuration | Lead (s) | Pre-ramp count >1 | Maximum desired counts | Maximum Ready counts |
 |---|---:|---|---|---|
 | `vllm-pd-proportional` (H100) | 30 | No | *Prefill* 2, *decode* 2 | *Prefill* 2, *decode* 2 |
 | `vllm-pd-token-throughput` (H100) | 0 | Yes | *Prefill* 2, *decode* 2 | *Prefill* 2, *decode* 2 |

@@ -7,8 +7,24 @@ Check the cited artifact and version for each manufacturer.
 
 ## Contents
 
+- [Third-party dependencies](#third-party-dependencies)
 - [Manufacturer guides](#manufacturer-guides)
 - [Shared coexistence rules](#shared-coexistence-rules)
+
+## Third-party dependencies
+
+Check these dependencies before installation and when selecting a workload configuration.
+Installation options and ownership are in [Installation Modes](/gpustack-operator/main/docs/operate/installation-modes/index.md).
+
+| Dependency | Role | Requirement or configuration |
+|---|---|---|
+| Node Feature Discovery (NFD) | Labels nodes and publishes hardware features. | Run one NFD installation per cluster. See [Single NFD per cluster](#single-nfd-per-cluster). |
+| Kueue | Manages workload admission and quota. | The chart includes Kueue; see [Installation Modes](/gpustack-operator/main/docs/operate/installation-modes/index.md). |
+| Topograph | Supplies topology inventory from a configured provider. | Optional and disabled by default. See [Topology Operations](/gpustack-operator/main/docs/modules/topology/operations/index.md). |
+| Mooncake | Supplies cache services and transfer support for compatible engines. | Optional. Match the engine, client, store and transport using [Engine Compatibility](/gpustack-operator/main/docs/modules/model-deployment/engine-versions/index.md). |
+| CSI drivers | Mount NFS or S3 volumes, or deliver cached model weights. | NFS and S3 drivers are bundled subcharts. Node model delivery uses the Model Manager CSI driver. See [Model Store Operations](/gpustack-operator/main/docs/modules/model-delivery/operations/index.md). |
+| Serving engines | Run inference workloads. | Choose a compatible engine image and configuration. See [Engine Compatibility](/gpustack-operator/main/docs/modules/model-deployment/engine-versions/index.md). |
+| Vendor drivers and toolkits | Provide accelerator access on each node. | Install the driver and any required toolkit. See the [manufacturer guides](#manufacturer-guides) below. |
 
 ## Manufacturer guides
 

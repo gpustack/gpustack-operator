@@ -1,9 +1,9 @@
 # Model Deployment Scaling Walkthrough
 
-Configure a `ModelDeploymentScaler` in `Shadow` mode, inspect its recommendations, then permit
-replica changes with `Active`. The examples use a vLLM *prefill/decode (PD)* pair and explain how to
-adapt the scaler for *encode/prefill/decode (EPD)* serving. Captured lifecycle observations are labeled
-separately from the reusable configuration.
+Configure a `ModelDeploymentScaler` in `Shadow` mode and inspect its recommendations. Then permit
+replica changes with `Active` mode. The examples use a vLLM *prefill/decode (PD)* pair. They also
+explain how to adapt the scaler for *encode/prefill/decode (EPD)* serving. Captured lifecycle
+observations are labeled separately from reusable configuration.
 
 ## Contents
 
@@ -48,8 +48,9 @@ was executed in the recorded benchmark.
 ### Prerequisites
 
 Follow [cluster preparation](/gpustack-operator/main/docs/walkthroughs/model-deployment/index.md#prepare-the-cluster) and
-[model prefetch](/gpustack-operator/main/docs/walkthroughs/model-delivery/prefetch/index.md) with namespace `gpustack-bench` and artifact
-`qwen3-8b`. Use a build that includes `ModelDeploymentScaler`, its controller and admission webhook.
+[model prefetch](/gpustack-operator/main/docs/walkthroughs/model-delivery/prefetch/index.md#step-1-create-artifact-and-prefetch) with namespace `gpustack-bench` and artifact
+`qwen3-8b`.
+Use a build that includes `ModelDeploymentScaler`, its controller and admission webhook.
 
 Confirm that no other scaler owns the target. See
 [Model Deployment Scaling](/gpustack-operator/main/docs/modules/model-deployment/scaling/index.md) for algorithm contracts and
@@ -220,7 +221,7 @@ Replace the complete *`spec.algorithm`* mapping in `scaling-policy.yaml` when ch
 Only the block matching *`type`* is accepted. Apply the edited file while it remains in `Shadow`.
 Capacity values below reproduce the benchmark's settings; tune them from measured per-replica capacity.
 
-| Choice | When to use | Configuration guidance |
+| Choice | Target scenario | Configuration guidance |
 |---|---|---|
 | `Predictive` + *`capacityPrior`* | Latency-sensitive online serving and traffic ramps where engine startup (~76 s on H200) must begin before sustained peak load arrives. | Set *`horizonSeconds`* above replica startup time (`180–300` s), keep *`headroom: "0.75"`*, and bound slope spikes with *`behavior.scaleUp.maxStepReplicas`*. |
 | `TokenThroughput` + *`capacityPrior`* | General serving with variable prompt lengths and prefix caching when GPU replica-seconds must track sustained token demand. | Use *`capacityPrior`* (`"0.75"` headroom) or set manual targets at 70–75% of single-replica saturation; unmargined saturation targets fail to trigger before *TTFT* climbs. |
@@ -343,35 +344,37 @@ spec:
         accelerator: "1"
 ```
 
-Configure a scaler targeting this server:
+Create a reviewed `ConfigMap` named `autoscaling-priors` in `gpustack-bench`. Its `priors.yaml`
+key must contain a [profile matching the target](/gpustack-operator/main/docs/modules/model-deployment/scaling/index.md#capacity-priors).
+Then create a separate scaler targeting this server:
 
-```diff
- apiVersion: worker.gpustack.ai/v1
- kind: ModelDeploymentScaler
- metadata:
-   name: autoscale-server
-   namespace: gpustack-bench
- spec:
-+  targetRef:
-+    name: catalog-server
-   roles:
-     - name: server
-       minReplicas: 1
-       maxReplicas: 2
-   algorithm:
-+    type: Predictive
-+    predictive:
-+      horizonSeconds: 30
-+      minPoints: 2
-+      tokenThroughput:
-+        serverTargetTokensPerSecond: "1200"  # explicit fallback override
-+        ttftTargetMilliseconds: "500"        # required when Server uses Catalog
-+        itlTargetMilliseconds: "50"          # required when Server uses Catalog
-+    capacityPrior:
-+      catalogRef:
-+        name: autoscaling-priors
-+        key: priors.yaml
-+      headroom: "0.75"
+```yaml
+apiVersion: worker.gpustack.ai/v1
+kind: ModelDeploymentScaler
+metadata:
+  name: autoscale-server
+  namespace: gpustack-bench
+spec:
+  targetRef:
+    name: catalog-server
+  roles:
+    - name: server
+      minReplicas: 1
+      maxReplicas: 2
+  algorithm:
+    type: Predictive
+    predictive:
+      horizonSeconds: 30
+      minPoints: 2
+      tokenThroughput:
+        serverTargetTokensPerSecond: "1200"  # explicit fallback override
+        ttftTargetMilliseconds: "500"        # required when Server uses Catalog
+        itlTargetMilliseconds: "50"          # required when Server uses Catalog
+    capacityPrior:
+      catalogRef:
+        name: autoscaling-priors
+        key: priors.yaml
+      headroom: "0.75"
 ```
 
 In this *Server* partial override, *`serverTargetTokensPerSecond`* stays `Explicit` at `"1200"`
@@ -379,6 +382,14 @@ while the omitted *`serverTokenCapacityPerReplica`* forecast capacity resolves f
 the role's identity and multiplies its profile seed capacity by *`headroom`*. Both `"1200"` and
 `"0.75"` are illustrative configuration values rather than measured hardware capacities; removing
 *`capacityPrior`* restores manual capacity validation.
+
+Inspect the scaler's resolved priors and conditions:
+
+```bash
+kubectl -n gpustack-bench get mds autoscale-server -o json \
+  | jq '{priors: .status.resolvedCapacityPriors,
+         conditions: [.status.conditions[] | select(.type == "CapacityPriorsReady" or .type == "Blocked")]}'
+```
 
 When the target matches an embedded profile, drop the explicit fallback and the `ConfigMap`: the
 embedded catalog supplies the capacity and the identity resolves from the target.
@@ -421,12 +432,6 @@ To return to manual mode, remove `capacityPrior` and supply the required manual 
 +        serverTargetTokensPerSecond: "1200"
 -    capacityPrior:
 -      headroom: "0.75"
-```
-
-```bash
-kubectl -n gpustack-bench get mds autoscale-vllm-server -o json \
-  | jq '{priors: .status.resolvedCapacityPriors,
-         conditions: [.status.conditions[] | select(.type == "CapacityPriorsReady" or .type == "Blocked")]}'
 ```
 
 When the target exists, `CREATE` rejects an unresolved catalog prior. `UPDATE` admission returns a

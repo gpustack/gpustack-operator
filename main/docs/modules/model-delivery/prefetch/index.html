@@ -10,6 +10,9 @@
         const theme = localStorage.getItem("theme");
         if (theme === "light" || theme === "dark") document.documentElement.dataset.theme = theme;
         document.documentElement.dataset.themeChoice = theme === "light" || theme === "dark" ? theme : "system";
+        if (localStorage.getItem("sidebar-collapsed") === "true") {
+          document.documentElement.dataset.sidebarCollapsed = "true";
+        }
       } catch {
         document.documentElement.dataset.themeChoice = "system";
       }
@@ -24,7 +27,7 @@
   <link rel="alternate" type="text/markdown" href="/gpustack-operator/main/docs/modules/model-delivery/prefetch/index.md">
   
   <link rel="describedby" href="/gpustack-operator/main/llms.txt">
-  <link rel="stylesheet" href="/gpustack-operator/main/css/site.ea544478884ee4c46c0d82a26985cad564c8f892cccad0c8ffcefe846c62a4a0.css">
+  <link rel="stylesheet" href="/gpustack-operator/main/css/site.1a0de63fe646aba4ed6541fe0a6383c2ed5ca649b1593a98595ba53430bcf032.css">
   <link rel="stylesheet" href="/gpustack-operator/main/css/code.d2570c1cc6480f9c62bc31ec538eef2578ce80980588c469638a5f95416bfc7b.css">
 </head>
 <body class="docs-page">
@@ -95,6 +98,13 @@
   <div class="layout">
     <aside class="sidebar" aria-label="Documentation navigation">
       <button class="nav-toggle" type="button" aria-controls="docs-navigation" aria-expanded="false">Browse documentation</button>
+      <button class="sidebar-toggle" type="button" aria-controls="docs-navigation" aria-expanded="true" aria-label="Collapse sidebar" title="Collapse sidebar">
+        <svg class="sidebar-toggle-icon" aria-hidden="true" viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="2" y="2.5" width="12" height="11" rx="2"/>
+          <line x1="6" y1="2.5" x2="6" y2="13.5"/>
+          <polyline class="sidebar-icon-arrow" points="10.5 6 8.5 8 10.5 10"/>
+        </svg>
+      </button>
       <nav id="docs-navigation" class="sidebar-inner">
         <div class="nav-title">Documentation</div>
         <a class="nav-home" href="/gpustack-operator/main/" >Overview</a>
@@ -1479,6 +1489,15 @@ cluster defaults under <a href="/gpustack-operator/main/docs/modules/model-deliv
 , and the plugin side of
 every field is in the <a href="/gpustack-operator/main/docs/modules/model-delivery/node-store/">Node Model Store</a>
 .</p>
+<p><span class="diagram-scroll"><img src="/gpustack-operator/main/docs/assets/diagrams/model-delivery-prefetch.svg" alt="Model prefetch peer sync and external download flow" decoding="async"></span></p>
+<!--
+flowchart TD
+    PREFETCH["ModelPrefetch configured for selected nodes"]
+    PEER_HIT["Peer already has model -> in-cluster TCP sync to all selected nodes"]
+    PEER_MISS["No peer has model -> download from external hub + sync to selected nodes"]
+    PREFETCH -> PEER_HIT
+    PREFETCH -> PEER_MISS
+-->
 <h2 id="contents">Contents</h2>
 <ul>
 <li><a href="#cache-resources">Cache resources</a>
@@ -1515,6 +1534,71 @@ can only grow, and <em><code>allowPinned</code></em> only turns on.</p>
 <p>Optional <em><code>spec.sourceMemory</code></em> caps source reservations shared by this Binding&rsquo;s prefetches
 across nodes and manufacturers. Omit or remove it to use node limits. While present, bytes and
 registrations can only grow; sessions can change in either direction.</p>
+<p>The following store and binding use the same shape as the
+<a href="/gpustack-operator/main/docs/walkthroughs/model-delivery/prefetch/">Model Prefetch Walkthrough</a>
+. Create the
+<code>gpustack-elastic</code> namespace first. Replace the hostname with the target node&rsquo;s label.</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">worker.gpustack.ai/v1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">ModelStore</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">metadata</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">rtx6000-models</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">nodeSelector</span><span class="p">:</span><span class="w">  </span><span class="c"># Required; selects the cache nodes.</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">matchLabels</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">kubernetes.io/hostname</span><span class="p">:</span><span class="w"> </span><span class="l">gpu-node</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="c"># Optional overrides; omitted fields use cluster settings.</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="c"># watermarks:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="c">#   highPercent: 80</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="c">#   lowPercent: 70</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="c"># download:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="c">#   concurrency: 8</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="c">#   bytesPerSecond: 0  # Zero means unlimited.</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nn">---</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">worker.gpustack.ai/v1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">ModelStoreBinding</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">metadata</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">rtx6000-models</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">namespace</span><span class="p">:</span><span class="w"> </span><span class="l">gpustack-elastic</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">storeRefs</span><span class="p">:</span><span class="w">  </span><span class="c"># Required; immutable store grant.</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">rtx6000-models</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">quota</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">bytes</span><span class="p">:</span><span class="w"> </span><span class="l">64Gi </span><span class="w"> </span><span class="c"># Required; the budget may grow but cannot shrink.</span></span></span></code></pre></div>
+</div><ul>
+<li><strong>Selector</strong>: A store selects nodes. Avoid overlapping store selectors.</li>
+<li><strong>Overrides</strong>: Omitted watermarks and download limits use cluster settings.</li>
+<li><strong>Store references</strong>: Grant one to eight stores. The list is immutable.</li>
+<li><strong>Quota</strong>: Set a positive byte budget. It can grow, but cannot shrink.</li>
+<li><strong>Pinning</strong>: <em><code>allowPinned</code></em> defaults to false. It can be enabled, but not disabled later.</li>
+</ul>
+<table>
+  <thead>
+      <tr>
+          <th>Condition</th>
+          <th>Reason</th>
+          <th>Resolution</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td>Stores select the same node</td>
+          <td>Their policies overlap</td>
+          <td>Change the selectors to avoid overlap.</td>
+      </tr>
+      <tr>
+          <td>A prefetch targets nodes outside the grant</td>
+          <td>No granted store covers those nodes</td>
+          <td>Adjust placement or create another binding.</td>
+      </tr>
+      <tr>
+          <td>A quota update reduces the budget</td>
+          <td>Admitted prefetches may depend on the grant</td>
+          <td>Keep or increase the budget.</td>
+      </tr>
+  </tbody>
+</table>
 <p>The <a href="/gpustack-operator/main/docs/modules/model-delivery/remote/#source-memory-examples">source-memory examples</a>
  use <code>Qwen3-8B</code> and
 <code>Qwen3.6-35B-A3B</code> to distinguish node capacity, per-model windows and a shared Binding grant.</p>
@@ -1538,31 +1622,59 @@ expansion, so the two can never disagree about what a prefetch would warm:</p>
 </span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">metadata</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">qwen-prefetch</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">spec</span><span class="p">:</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">artifactRef</span><span class="p">:</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">qwen-7b </span><span class="w"> </span><span class="c"># A ModelArtifact in this namespace; its weights are what warms.</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">bindingRef</span><span class="p">:</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">store-binding </span><span class="w"> </span><span class="c"># A ModelStoreBinding in this namespace; its budget pays for the bytes.</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">artifactRef</span><span class="p">:</span><span class="w">  </span><span class="c"># Required; the artifact is in this namespace.</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">qwen-7b</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">bindingRef</span><span class="p">:</span><span class="w">  </span><span class="c"># Required; the binding is in this namespace.</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">store-binding</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">placement</span><span class="p">:</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">instanceTypes</span><span class="p">:</span><span class="w">  </span><span class="c"># Every node carrying a named InstanceType&#39;s flavor.</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">instanceTypes</span><span class="p">:</span><span class="w">  </span><span class="c"># Optional; every node carrying a named InstanceType&#39;s flavor.</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span>- <span class="l">gpu-pool</span></span></span></code></pre></div>
-</div><div class="code-block">
+</div><ul>
+<li><strong>Artifact</strong>: Reference a <code>ModelArtifact</code> in the same namespace.</li>
+<li><strong>Binding</strong>: Reference a <code>ModelStoreBinding</code> that covers the target nodes.</li>
+<li><strong>Placement</strong>: Set either <em><code>instanceTypes</code></em> or <em><code>nodeSelector</code></em>, or omit both.</li>
+</ul>
+<div class="code-block">
   <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">worker.gpustack.ai/v1</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">ModelPrefetch</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">metadata</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">qwen-prefetch</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">spec</span><span class="p">:</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">artifactRef</span><span class="p">:</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">qwen-7b </span><span class="w"> </span><span class="c"># A ModelArtifact in this namespace; its weights are what warms.</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">bindingRef</span><span class="p">:</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">store-binding </span><span class="w"> </span><span class="c"># A ModelStoreBinding in this namespace; its budget pays for the bytes.</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">artifactRef</span><span class="p">:</span><span class="w">  </span><span class="c"># Required; the artifact is in this namespace.</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">qwen-7b</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">bindingRef</span><span class="p">:</span><span class="w">  </span><span class="c"># Required; the binding is in this namespace.</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">store-binding</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">placement</span><span class="p">:</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">nodeSelector</span><span class="p">:</span><span class="w">  </span><span class="c"># Every node matching this selector.</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">nodeSelector</span><span class="p">:</span><span class="w">  </span><span class="c"># Optional; every node matching this selector.</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">matchLabels</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">accelerator</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;true&#34;</span></span></span></code></pre></div>
-</div><p>When both fields are absent, placement derives the <code>InstanceType</code>s from the namespace&rsquo;s
-deployments that reference the artifact.</p>
-<p><code>Setting</code> both kinds is refused; the schema cannot see it because neither field is required.</p>
+</div><ul>
+<li><strong>Node selector</strong>: Select nodes with labels that are present in the cluster.</li>
+<li><strong>Default placement</strong>: Omit both fields to derive types from deployments that reference the artifact.</li>
+<li><strong>Source preparation</strong>: Explicit placement is required when <em><code>source</code></em> is set.</li>
+</ul>
+<table>
+  <thead>
+      <tr>
+          <th>Condition</th>
+          <th>Reason</th>
+          <th>Resolution</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td>Both placement fields are set</td>
+          <td>The choices are mutually exclusive</td>
+          <td>Keep one placement field.</td>
+      </tr>
+      <tr>
+          <td>Source preparation has no explicit placement</td>
+          <td>Source memory needs a fixed target selection</td>
+          <td>Set one placement field.</td>
+      </tr>
+  </tbody>
+</table>
 <h2 id="warm-up-pod">Warm-up Pod</h2>
 <p>Delivery is one warm-up <code>Pod</code> per target node, rendered by the prefetch controller. It mounts the
 artifact&rsquo;s own CSI volume (the same volume a consumer mounts, with the same artifact, UID and
@@ -1670,7 +1782,7 @@ facts already live on the nodes&rsquo; reports, and the table prints who warms w
           
           
           <nav class="page-actions" aria-label="Page source">
-            <a href="https://github.com/gpustack/gpustack-operator/blob/8c5186108e620a8044164d9c4c114dd7376092f4/docs/modules/model-delivery/prefetch.md">View page source</a>
+            <a href="https://github.com/gpustack/gpustack-operator/blob/91dc7c8d650bac133dd4ea3b29b35d62bd1ee2b1/docs/modules/model-delivery/prefetch.md">View page source</a>
             
             <a href="https://github.com/gpustack/gpustack-operator/edit/main/docs/modules/model-delivery/prefetch.md">Edit this page</a>
             
@@ -1694,6 +1806,6 @@ facts already live on the nodes&rsquo; reports, and the table prints who warms w
     </aside>
   </div>
   
-  <script src="/gpustack-operator/main/js/site.1ec84fdfb2bec16dbb83a64abad1abe2d27d8d3f7fc54c2cfa45fe4d64303b3c.js" defer></script>
+  <script src="/gpustack-operator/main/js/site.e362041170f1762d2935c1ef4d8ca5f494983b230101e1b6536544c195645f10.js" defer></script>
 </body>
 </html>

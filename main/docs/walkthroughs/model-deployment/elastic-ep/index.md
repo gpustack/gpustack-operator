@@ -40,7 +40,7 @@ Use [Elastic EP Benchmark](/gpustack-operator/main/docs/modules/model-deployment
 
 ## Environment
 
-| Item | Captured setup |
+| Item | Value |
 |---|---|
 | Cluster | Kubernetes v1.35.7; one CPU node and one GPU node (`gpu-node-0`) |
 | Hardware | 8 × NVIDIA H100 80 GB HBM3 SXM5; physical NVLink bandwidth 900 GB/s |
@@ -336,7 +336,7 @@ Use [Elastic EP Benchmark](/gpustack-operator/main/docs/modules/model-deployment
 |---|---|---|
 | Added members stay Pending | Status: member `Pod` phase `Pending` | Read Kueue `Workload`s, queue quota, `Pod` events and free `Devices` capacity. Width 4 with *TP* = 2 needs eight GPUs. |
 | Four members run but effective width is unknown | Status: `effective.Known` false in the diagnostic observation | Read the diagnostic observation and master logs. Allocated GPU capacity alone does not establish native width. |
-| `ElasticResize=False/ScaleRefused` | Condition: `ElasticResize=False`, Reason: `ScaleRefused` | Read the last engine refusal and the [resize hold rules](/gpustack-operator/main/docs/modules/model-deployment/elastic-ep/index.md#when-a-resize-holds). |
+| `ElasticResize=False/ScaleRefused` | Condition: `ElasticResize=False`, Reason: `ScaleRefused` | Read the last engine refusal and the [resize hold rules](/gpustack-operator/main/docs/modules/model-deployment/elastic-ep/index.md#resize-hold-conditions). |
 | `ElasticResize=Unknown/WorldUnprovable` | Condition: `ElasticResize=Unknown`, Reason: `WorldUnprovable` | Keep observing the current operation. An unanswered resize must not be resent manually. |
 | Inference stalls | Streaming requests stop returning tokens | Inspect the master and Ray worker logs, actual GPU visibility, `/dev/shm` capacity and node memory. |
 

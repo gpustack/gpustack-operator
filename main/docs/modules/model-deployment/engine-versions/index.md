@@ -106,7 +106,7 @@ override and the engine is handed. A **direct** cell is *`spec.kvTransfer.protoc
 *prefill/decode* pair. The first column gives the API and Mooncake spellings. `Auto` renders
 `tcp` on either path; the direct path also renders `tcp` when the field is unset.
 
-| Transport (API / Mooncake) | Engine | Store path | Direct path |
+| Transport (API/Mooncake) | Engine | Store path | Direct path |
 |---|---|---|---|
 | `Auto`, `TCP` / `tcp` | vLLM | **Works**, default images; beside a direct path it keeps its store connections open too and did not [run out of ports](#limitations) where measured | **Works**, default images; it keeps its connections open and did not [run out of ports](#limitations) where measured |
 | `TCP` / `tcp` | SGLang | **Works**, with a published store image on [its client's line](#minimum-versions), named by hand; beside a direct path, [it runs out of ports](#limitations) unless [`model-deployment-tcp-tw-reuse`](/gpustack-operator/main/docs/reference/settings/index.md#sglang-time-wait-reuse) is on | **Works**, default images; under sustained load [it runs out of ports](#limitations), and [`model-deployment-tcp-tw-reuse`](/gpustack-operator/main/docs/reference/settings/index.md#sglang-time-wait-reuse) is the remedy, run so far only beside a store |

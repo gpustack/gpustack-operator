@@ -10,6 +10,9 @@
         const theme = localStorage.getItem("theme");
         if (theme === "light" || theme === "dark") document.documentElement.dataset.theme = theme;
         document.documentElement.dataset.themeChoice = theme === "light" || theme === "dark" ? theme : "system";
+        if (localStorage.getItem("sidebar-collapsed") === "true") {
+          document.documentElement.dataset.sidebarCollapsed = "true";
+        }
       } catch {
         document.documentElement.dataset.themeChoice = "system";
       }
@@ -24,7 +27,7 @@
   <link rel="alternate" type="text/markdown" href="/gpustack-operator/main/docs/modules/instances/index.md">
   
   <link rel="describedby" href="/gpustack-operator/main/llms.txt">
-  <link rel="stylesheet" href="/gpustack-operator/main/css/site.ea544478884ee4c46c0d82a26985cad564c8f892cccad0c8ffcefe846c62a4a0.css">
+  <link rel="stylesheet" href="/gpustack-operator/main/css/site.1a0de63fe646aba4ed6541fe0a6383c2ed5ca649b1593a98595ba53430bcf032.css">
   <link rel="stylesheet" href="/gpustack-operator/main/css/code.d2570c1cc6480f9c62bc31ec538eef2578ce80980588c469638a5f95416bfc7b.css">
 </head>
 <body class="docs-page">
@@ -95,6 +98,13 @@
   <div class="layout">
     <aside class="sidebar" aria-label="Documentation navigation">
       <button class="nav-toggle" type="button" aria-controls="docs-navigation" aria-expanded="false">Browse documentation</button>
+      <button class="sidebar-toggle" type="button" aria-controls="docs-navigation" aria-expanded="true" aria-label="Collapse sidebar" title="Collapse sidebar">
+        <svg class="sidebar-toggle-icon" aria-hidden="true" viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="2" y="2.5" width="12" height="11" rx="2"/>
+          <line x1="6" y1="2.5" x2="6" y2="13.5"/>
+          <polyline class="sidebar-icon-arrow" points="10.5 6 8.5 8 10.5 10"/>
+        </svg>
+      </button>
       <nav id="docs-navigation" class="sidebar-inner">
         <div class="nav-title">Documentation</div>
         <a class="nav-home" href="/gpustack-operator/main/" >Overview</a>
@@ -1440,12 +1450,14 @@
       <article>
         
   <h1 id="gpu-instances">GPU Instances</h1>
-<p>An <code>Instance</code> is a container workspace backed by a Kubernetes <code>Pod</code>. It can use a whole, shared,
-sliced or partitioned accelerator. With an SSH public key, the operator adds a sidecar that lets
+<p>An <code>Instance</code> is a container workspace backed by a Kubernetes <code>Pod</code>. It can use a whole, sliced
+or partitioned accelerator. With an SSH public key, the operator adds a sidecar that lets
 the user enter the workload container.</p>
 <h2 id="contents">Contents</h2>
 <ul>
-<li><a href="#instance-configuration">Instance configuration</a>
+<li><a href="#overview">Overview</a>
+</li>
+<li><a href="#configuration">Configuration</a>
 </li>
 <li><a href="#device-access">Device access</a>
 </li>
@@ -1453,13 +1465,55 @@ the user enter the workload container.</p>
 </li>
 <li><a href="#network-isolation">Network isolation</a>
 </li>
+<li><a href="#operations">Operations</a>
+</li>
+<li><a href="#troubleshooting">Troubleshooting</a>
+</li>
 </ul>
-<h2 id="instance-configuration">Instance configuration</h2>
-<p>The <a href="https://github.com/gpustack/gpustack-operator/blob/8c5186108e620a8044164d9c4c114dd7376092f4/README.md#usage">Usage</a>
- example creates a sliced <code>Instance</code>. <a href="/gpustack-operator/main/docs/modules/devices/requests/#instance-api-requests">Accelerator
-Requests</a>
- explains how
-<em><code>spec.resources</code></em> maps to the accelerator resource families.</p>
+<h2 id="overview">Overview</h2>
+<p><span class="diagram-scroll"><img src="/gpustack-operator/main/docs/assets/diagrams/instances-flow.svg" alt="Instance creation and access flow" decoding="async"></span></p>
+<!--
+flowchart TD
+    TYPE["InstanceType pool"] -> INSTANCE["Instance workspace specification"]
+    KEY["Optional InstanceSSHPublicKey"] -> INSTANCE
+    INSTANCE -> POD["Workspace Pod and volume reconciliation"]
+    INSTANCE -> SERVICE["Configured NodePort and optional isolation"]
+    POD -> ADMISSION["Kueue admission and device allocation"]
+    ADMISSION -> WORKSPACE["Running accelerator workspace"]
+    SERVICE -> WORKSPACE
+-->
+<h2 id="configuration">Configuration</h2>
+<h3 id="instance-configuration">Instance configuration</h3>
+<p>This minimal example requests one accelerator and exposes a service port. For the
+<code>InstanceSSHPublicKey</code> manifest and SSH login commands, see <a href="https://github.com/gpustack/gpustack-operator/blob/91dc7c8d650bac133dd4ea3b29b35d62bd1ee2b1/README.md#usage">Usage</a>
+.</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">worker.gpustack.ai/v1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">Instance</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">metadata</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">workspace-demo</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">namespace</span><span class="p">:</span><span class="w"> </span><span class="l">team-a</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l">gpustack--nvidia-a10g-linux-amd64 </span><span class="w"> </span><span class="c"># Select an available InstanceType.</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">image</span><span class="p">:</span><span class="w"> </span><span class="l">ubuntu:24.04</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">command</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="l">sleep</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="l">infinity</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">resources</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">accelerator</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;1&#34;</span><span class="w">  </span><span class="c"># one accelerator; see Accelerator Requests for slice percentages</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">ports</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">http</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">port</span><span class="p">:</span><span class="w"> </span><span class="m">8080</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">volume</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">ephemeral</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">capacity</span><span class="p">:</span><span class="w"> </span><span class="l">1Gi</span></span></span></code></pre></div>
+</div><ul>
+<li><strong>Type:</strong> Select an <code>InstanceType</code> with available capacity.</li>
+<li><strong>Resources:</strong> Request one accelerator family. See <a href="/gpustack-operator/main/docs/modules/devices/requests/#instance-api-requests">Accelerator Requests</a>
+.</li>
+<li><strong>Ports:</strong> Optional; each entry allocates a node port on the instance <code>Service</code>.</li>
+</ul>
 <h2 id="device-access">Device access</h2>
 <p>The workload container owns the accelerator request. The optional SSH sidecar uses a separate
 visibility resource to enter the same workspace without acquiring a second accelerator. See
@@ -1487,11 +1541,10 @@ rendered and <code>Instance</code> networking stays untouched.</p>
 <p>When the Setting names the cluster&rsquo;s pod CIDRs, the operator renders one <code>NetworkPolicy</code> named
 <code>gpustack-instance-isolation</code> in every namespace that holds an <code>Instance</code>, selecting the
 instance <code>Pod</code>s by their <code>resource.gpustack.ai/type: instances</code> label.</p>
-<p>The policy allows traffic to and from <code>Pod</code>s of the same namespace, and to and from anywhere
-outside the pod CIDRs the Setting names, which is how external clients arrive through the NodePort
-<code>Service</code>. It blocks traffic to and from <code>Pod</code>s of every other namespace in both directions, so a
-shell inside one <code>Instance</code> cannot scan or reach another tenant&rsquo;s <code>Instance</code>s. DNS (port 53) stays
-open.</p>
+<p>The policy allows traffic to and from <code>Pod</code>s in the same namespace and addresses outside the
+configured pod CIDRs. It permits egress to any destination on TCP or UDP port 53 for DNS.
+Other policies selecting the same <code>Pod</code>s can add permissions. Do not treat this policy alone as a
+complete tenant isolation boundary.</p>
 <p>The pod CIDRs cannot be learned reliably for every CNI — a node&rsquo;s pod CIDR and what the CNI&rsquo;s own
 IPAM allocates routinely disagree — so the Setting is the one source. Find the values with
 <code>kubectl get ippools.crd.projectcalico.org</code> on a Calico-IPAM cluster, or
@@ -1507,6 +1560,28 @@ itself, never a same-named one written by hand.</p>
 non-enforcing CNI the object renders but filters nothing. The Kubernetes policy contract always
 allows traffic from the node hosting a <code>Pod</code>, so a client inside one <code>Instance</code> can still reach
 another tenant&rsquo;s <code>Service</code> through the hosting node&rsquo;s address and node port.</p>
+<h2 id="operations">Operations</h2>
+<h3 id="step-1-create-workspace">Step 1: Create workspace</h3>
+<p>Replace the example values. Save the manifest as <code>instance.yaml</code>, then apply it:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>shell</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-shell" data-lang="shell"><span class="line"><span class="cl">kubectl apply -f instance.yaml</span></span></code></pre></div>
+</div><h3 id="step-2-check-workspace">Step 2: Check workspace</h3>
+<div class="code-block">
+  <div class="code-toolbar"><span>shell</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-shell" data-lang="shell"><span class="line"><span class="cl">kubectl -n team-a <span class="nb">wait</span> --for<span class="o">=</span><span class="nv">jsonpath</span><span class="o">=</span><span class="s1">&#39;{.status.phase}&#39;</span><span class="o">=</span>Ready instance/workspace-demo --timeout<span class="o">=</span>5m
+</span></span><span class="line"><span class="cl">kubectl get instancetypes</span></span></code></pre></div>
+</div><p><strong>Verification:</strong> The wait completes when the <code>Instance</code> phase is <code>Ready</code>. The <code>InstanceType</code> reports remaining capacity.
+See <a href="/gpustack-operator/main/docs/reference/instance-metrics/">Instance Metrics</a>
+ for utilization.</p>
+<h2 id="troubleshooting">Troubleshooting</h2>
+<p>If an <code>Instance</code> remains pending, inspect its phase message:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>shell</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-shell" data-lang="shell"><span class="line"><span class="cl">kubectl -n team-a get instance workspace-demo -o <span class="nv">jsonpath</span><span class="o">=</span><span class="s1">&#39;{.status.phaseMessage}&#39;</span></span></span></code></pre></div>
+</div><p>For Kueue <code>Workload</code> inspection, capacity checks and admission fixes, see the
+<a href="/gpustack-operator/main/docs/walkthroughs/devices/scheduling/#troubleshooting">walkthrough troubleshooting</a>
+.</p>
 <nav class="reading-footer" aria-label="Further reading">
     <section>
       <h2>See also</h2>
@@ -1515,7 +1590,7 @@ another tenant&rsquo;s <code>Service</code> through the hosting node&rsquo;s add
  (mounting model weights)</li></ul>
     </section><section class="next-page">
         <h2>Next</h2>
-        <div><a href="https://github.com/gpustack/gpustack-operator/blob/8c5186108e620a8044164d9c4c114dd7376092f4/README.md#usage">Usage</a>
+        <div><a href="https://github.com/gpustack/gpustack-operator/blob/91dc7c8d650bac133dd4ea3b29b35d62bd1ee2b1/README.md#usage">Usage</a>
  — launch a sliced <code>Instance</code>.</div>
       </section></nav>
   
@@ -1529,7 +1604,7 @@ another tenant&rsquo;s <code>Service</code> through the hosting node&rsquo;s add
           
           
           <nav class="page-actions" aria-label="Page source">
-            <a href="https://github.com/gpustack/gpustack-operator/blob/8c5186108e620a8044164d9c4c114dd7376092f4/docs/modules/instances/_index.md">View page source</a>
+            <a href="https://github.com/gpustack/gpustack-operator/blob/91dc7c8d650bac133dd4ea3b29b35d62bd1ee2b1/docs/modules/instances/_index.md">View page source</a>
             
             <a href="https://github.com/gpustack/gpustack-operator/edit/main/docs/modules/instances/_index.md">Edit this page</a>
             
@@ -1540,10 +1615,22 @@ another tenant&rsquo;s <code>Service</code> through the hosting node&rsquo;s add
           <nav id="TableOfContents">
   <ul>
     <li><a href="#contents">Contents</a></li>
-    <li><a href="#instance-configuration">Instance configuration</a></li>
+    <li><a href="#overview">Overview</a></li>
+    <li><a href="#configuration">Configuration</a>
+      <ul>
+        <li><a href="#instance-configuration">Instance configuration</a></li>
+      </ul>
+    </li>
     <li><a href="#device-access">Device access</a></li>
     <li><a href="#service-lifecycle">Service lifecycle</a></li>
     <li><a href="#network-isolation">Network isolation</a></li>
+    <li><a href="#operations">Operations</a>
+      <ul>
+        <li><a href="#step-1-create-workspace">Step 1: Create workspace</a></li>
+        <li><a href="#step-2-check-workspace">Step 2: Check workspace</a></li>
+      </ul>
+    </li>
+    <li><a href="#troubleshooting">Troubleshooting</a></li>
   </ul>
 </nav>
         
@@ -1551,6 +1638,6 @@ another tenant&rsquo;s <code>Service</code> through the hosting node&rsquo;s add
     </aside>
   </div>
   
-  <script src="/gpustack-operator/main/js/site.1ec84fdfb2bec16dbb83a64abad1abe2d27d8d3f7fc54c2cfa45fe4d64303b3c.js" defer></script>
+  <script src="/gpustack-operator/main/js/site.e362041170f1762d2935c1ef4d8ca5f494983b230101e1b6536544c195645f10.js" defer></script>
 </body>
 </html>

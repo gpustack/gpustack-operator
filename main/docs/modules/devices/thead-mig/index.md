@@ -269,9 +269,8 @@ hardware called out where they bite.
 3. Restart the node's Device Manager `Pod` (`gpustack-operator-device-manager-thead`) to re-detect. As with
    NVIDIA, you need neither to delete the node's `Devices` object — the detector rewrites the group's
    capability in place — nor to pre-create instances: the operator materializes them on demand.
-4. Verify the `Devices` capability now reports the PPU's partition profiles. Unlike NVIDIA, an
-   unpartitioned T-Head PPU reports **no** slicing capability at all (there is no logical slicing to fall
-   back to), so nothing has to go to zero — only the profiles have to appear.
+4. Verify that `Devices` reports the PPU's partition profiles. A mode-enabled PPU no longer
+   reports logical slicing; an unpartitioned PPU advertises logical slices.
 
 ## Disabling partitioning
 

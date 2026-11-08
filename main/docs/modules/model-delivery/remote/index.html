@@ -10,6 +10,9 @@
         const theme = localStorage.getItem("theme");
         if (theme === "light" || theme === "dark") document.documentElement.dataset.theme = theme;
         document.documentElement.dataset.themeChoice = theme === "light" || theme === "dark" ? theme : "system";
+        if (localStorage.getItem("sidebar-collapsed") === "true") {
+          document.documentElement.dataset.sidebarCollapsed = "true";
+        }
       } catch {
         document.documentElement.dataset.themeChoice = "system";
       }
@@ -24,7 +27,7 @@
   <link rel="alternate" type="text/markdown" href="/gpustack-operator/main/docs/modules/model-delivery/remote/index.md">
   
   <link rel="describedby" href="/gpustack-operator/main/llms.txt">
-  <link rel="stylesheet" href="/gpustack-operator/main/css/site.ea544478884ee4c46c0d82a26985cad564c8f892cccad0c8ffcefe846c62a4a0.css">
+  <link rel="stylesheet" href="/gpustack-operator/main/css/site.1a0de63fe646aba4ed6541fe0a6383c2ed5ca649b1593a98595ba53430bcf032.css">
   <link rel="stylesheet" href="/gpustack-operator/main/css/code.d2570c1cc6480f9c62bc31ec538eef2578ce80980588c469638a5f95416bfc7b.css">
 </head>
 <body class="docs-page">
@@ -95,6 +98,13 @@
   <div class="layout">
     <aside class="sidebar" aria-label="Documentation navigation">
       <button class="nav-toggle" type="button" aria-controls="docs-navigation" aria-expanded="false">Browse documentation</button>
+      <button class="sidebar-toggle" type="button" aria-controls="docs-navigation" aria-expanded="true" aria-label="Collapse sidebar" title="Collapse sidebar">
+        <svg class="sidebar-toggle-icon" aria-hidden="true" viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="2" y="2.5" width="12" height="11" rx="2"/>
+          <line x1="6" y1="2.5" x2="6" y2="13.5"/>
+          <polyline class="sidebar-icon-arrow" points="10.5 6 8.5 8 10.5 10"/>
+        </svg>
+      </button>
       <nav id="docs-navigation" class="sidebar-inner">
         <div class="nav-title">Documentation</div>
         <a class="nav-home" href="/gpustack-operator/main/" >Overview</a>
@@ -1446,23 +1456,13 @@
 copying the complete checkpoint to the serving node. The source registers weights verified by
 its node cache, and the target mounts a metadata-only view. A cluster-wide policy enables delivery;
 the deployment&rsquo;s model block does not.</p>
-<div class="diagram-block">
-  <div class="mermaid-diagram" role="img" aria-label="Diagram" aria-busy="true"></div>
-  <p class="diagram-status" role="status">Rendering diagram…</p>
-  <details class="diagram-source"><summary>Mermaid source</summary>
-    <div class="code-block">
-      <div class="code-toolbar"><span>mermaid</span><button class="copy-code" type="button" aria-label="Copy diagram source">Copy</button></div>
-      <pre><code>flowchart LR
-    subgraph SOURCE[&#34;Source node&#34;]
-        CACHE[&#34;Verified checkpoint&lt;br/&gt;on local disk&#34;] --&gt;|&#34;Read&#34;| SOURCE_RAM[&#34;Host RAM&#34;]
-    end
-    subgraph TARGET[&#34;Target node&#34;]
-        TARGET_RAM[&#34;Host RAM&#34;] --&gt;|&#34;Local H2D copy&#34;| DEVICE[&#34;GPU / NPU memory&#34;]
-    end
-    SOURCE_RAM --&gt;|&#34;HIXL / NIXL&lt;br/&gt;remote H2H transfer&#34;| TARGET_RAM</code></pre>
-    </div>
-  </details>
-</div><p><em>H2H</em> means Host-to-Host; <em>H2D</em> means Host-to-Device. Host-memory windows are bounded and reused,
+<p><span class="diagram-scroll"><img src="/gpustack-operator/main/docs/assets/diagrams/model-delivery-remote.svg" alt="Remote weight transfer between nodes" decoding="async"></span></p>
+<!--
+flowchart TD
+    TCP_SRC["Default TCP: node-01 source disk"] -> TCP_DISK["node-02: write to local disk"] -> TCP_DRAM["node-02: load from disk into Device DRAM"]
+    HIXL_SRC["HIXL / NIXL: node-01 source Host RAM"] -> HIXL_RAM["node-02: stream directly into Host RAM"] -> HIXL_DRAM["node-02: transfer from Host RAM into Device DRAM"]
+-->
+<p><em>H2H</em> means Host-to-Host; <em>H2D</em> means Host-to-Device. Host-memory windows are bounded and reused,
 so the successful remote path does not store a complete checkpoint on the target filesystem.</p>
 <h2 id="contents">Contents</h2>
 <ul>
@@ -1497,19 +1497,15 @@ so the successful remote path does not store a complete checkpoint on the target
   </thead>
   <tbody>
       <tr>
-          <td><code>model-artifact-remote-delivery-policy</code></td>
-          <td><code>Disabled</code></td>
+          <td><strong><code>model-artifact-remote-delivery-policy</code></strong></td>
+          <td><strong><code>Disabled</code></strong></td>
           <td><code>Disabled</code>, <code>Require</code>, <code>Prefer</code></td>
       </tr>
   </tbody>
 </table>
 <ul>
-<li><strong><code>Disabled</code></strong> changes nothing: no <code>Pod</code>, condition or status field differs from a cluster that
-never opted in. This is the default, and the worker reasserts it on every start when the chart
-does not declare the variable.</li>
-<li><strong><code>Require</code> and <code>Prefer</code> need the model-manager plugin installed.</strong> A remote replica mounts a
-metadata-only view that the plugin serves, so admission refuses the value while the <code>CSIDriver</code>
-<code>model.csi.gpustack.ai</code> does not exist.</li>
+<li><strong><code>Disabled</code></strong>: Default policy; leaves <code>Pod</code> specs, conditions, and status fields unchanged.</li>
+<li><strong><code>Require</code> and <code>Prefer</code></strong>: Require the <code>model.csi.gpustack.ai</code> <code>CSIDriver</code> so remote replicas can mount metadata views.</li>
 </ul>
 <div class="code-block">
   <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
@@ -1709,8 +1705,8 @@ see <a href="/gpustack-operator/main/docs/modules/model-delivery/artifact/#manif
   <thead>
       <tr>
           <th>Model</th>
-          <th>Checkpoint storage in benchmark</th>
-          <th>Effect of a 16 GiB HIXL ceiling</th>
+          <th>Benchmark checkpoint storage</th>
+          <th>16 GiB ceiling</th>
       </tr>
   </thead>
   <tbody>
@@ -1772,7 +1768,7 @@ version <code>1</code> readers and manifests are refused.</p>
 <code>4 MiB</code>, with at most <code>512 MiB</code> of pages and <code>1,048,576</code> tensors overall. Load and source journals
 cap operations at <code>1,048,576</code>; byte limits can refuse work sooner. Proven acknowledgements can
 be compacted; unknown receipts remain charged.</p>
-<p>See <a href="https://github.com/gpustack/gpustack-operator/blob/8c5186108e620a8044164d9c4c114dd7376092f4/specs/2026-10-28-model-artifact-remote-weight-loading.md#source-budget-calculations">source budget calculations</a>
+<p>See <a href="https://github.com/gpustack/gpustack-operator/blob/91dc7c8d650bac133dd4ea3b29b35d62bd1ee2b1/specs/2026-10-28-model-artifact-remote-weight-loading.md#source-budget-calculations">source budget calculations</a>
 
 for admission arithmetic and available-memory sizing.</p>
 <h2 id="replica-startup">Replica startup</h2>
@@ -2013,7 +2009,7 @@ Remote times are the slowest rank&rsquo;s <code>load_model</code> seconds.</p>
 With the full model resident, broadcast and all-rank loading took 253.58 s and 232.93 s.
 These samples used different SDK builds; the difference does not isolate source-window size.</p>
 <p>Detailed window sweeps, SDK comparisons, concurrent loading and lifecycle checks are retained in
-the <a href="https://github.com/gpustack/gpustack-operator/blob/8c5186108e620a8044164d9c4c114dd7376092f4/specs/2026-10-28-model-artifact-remote-weight-loading.md#ascend-memory-and-loading">acceptance record</a>
+the <a href="https://github.com/gpustack/gpustack-operator/blob/91dc7c8d650bac133dd4ea3b29b35d62bd1ee2b1/specs/2026-10-28-model-artifact-remote-weight-loading.md#ascend-memory-and-loading">acceptance record</a>
 .</p>
 <h3 id="nvidia-nixl">NVIDIA (NIXL)</h3>
 <p>The runs used Nebius H100 80 GB nodes and vLLM 0.30.0 in eager mode. Source weights were prepared before
@@ -2028,7 +2024,7 @@ Binding limits and the 10% reservation overhead can reduce the admitted resident
 <code>Qwen/Qwen3-235B-A22B-Instruct-2507-FP8</code> (TP8). Remote times are the slowest rank&rsquo;s
 <code>Model loading took</code> seconds.</p>
 <p>The source and target used different NIXL, UCX and PyTorch builds. The
-<a href="https://github.com/gpustack/gpustack-operator/blob/8c5186108e620a8044164d9c4c114dd7376092f4/specs/2026-10-28-model-artifact-remote-weight-loading.md#nvidia-loading">NVIDIA evidence record</a>
+<a href="https://github.com/gpustack/gpustack-operator/blob/91dc7c8d650bac133dd4ea3b29b35d62bd1ee2b1/specs/2026-10-28-model-artifact-remote-weight-loading.md#nvidia-loading">NVIDIA evidence record</a>
 
 retains the tested artifacts and measurement limits.</p>
 <table>
@@ -2118,10 +2114,10 @@ to the tested 80B configurations; payload <em>RDMA</em> qualification and produc
   <thead>
       <tr>
           <th>Policy</th>
-          <th>An allowlisted role with a source</th>
-          <th>An allowlisted role without one</th>
-          <th>A combination outside the allowlist</th>
-          <th>An ineligible role</th>
+          <th>Allowlisted, source available</th>
+          <th>Allowlisted, source unavailable</th>
+          <th>Outside allowlist</th>
+          <th>Ineligible role</th>
       </tr>
   </thead>
   <tbody>
@@ -2295,7 +2291,7 @@ on disk.</p>
           
           
           <nav class="page-actions" aria-label="Page source">
-            <a href="https://github.com/gpustack/gpustack-operator/blob/8c5186108e620a8044164d9c4c114dd7376092f4/docs/modules/model-delivery/remote.md">View page source</a>
+            <a href="https://github.com/gpustack/gpustack-operator/blob/91dc7c8d650bac133dd4ea3b29b35d62bd1ee2b1/docs/modules/model-delivery/remote.md">View page source</a>
             
             <a href="https://github.com/gpustack/gpustack-operator/edit/main/docs/modules/model-delivery/remote.md">Edit this page</a>
             
@@ -2338,11 +2334,6 @@ on disk.</p>
     </aside>
   </div>
   
-    
-    
-    
-    <script src="/gpustack-operator/main/vendor/mermaid/mermaid.min.70137e77bb273bb2ef972b86e8b0400cca8be53cb25bfc45911a186dc98665de.js" integrity="sha256-cBN&#43;d7snO7LvlyuG6LBADMqL5TyyW/xFkRoYbcmGZd4=" defer></script>
-  
-  <script src="/gpustack-operator/main/js/site.1ec84fdfb2bec16dbb83a64abad1abe2d27d8d3f7fc54c2cfa45fe4d64303b3c.js" defer></script>
+  <script src="/gpustack-operator/main/js/site.e362041170f1762d2935c1ef4d8ca5f494983b230101e1b6536544c195645f10.js" defer></script>
 </body>
 </html>

@@ -10,6 +10,9 @@
         const theme = localStorage.getItem("theme");
         if (theme === "light" || theme === "dark") document.documentElement.dataset.theme = theme;
         document.documentElement.dataset.themeChoice = theme === "light" || theme === "dark" ? theme : "system";
+        if (localStorage.getItem("sidebar-collapsed") === "true") {
+          document.documentElement.dataset.sidebarCollapsed = "true";
+        }
       } catch {
         document.documentElement.dataset.themeChoice = "system";
       }
@@ -24,7 +27,7 @@
   <link rel="alternate" type="text/markdown" href="/gpustack-operator/main/docs/modules/model-deployment/elastic-ep/index.md">
   
   <link rel="describedby" href="/gpustack-operator/main/llms.txt">
-  <link rel="stylesheet" href="/gpustack-operator/main/css/site.ea544478884ee4c46c0d82a26985cad564c8f892cccad0c8ffcefe846c62a4a0.css">
+  <link rel="stylesheet" href="/gpustack-operator/main/css/site.1a0de63fe646aba4ed6541fe0a6383c2ed5ca649b1593a98595ba53430bcf032.css">
   <link rel="stylesheet" href="/gpustack-operator/main/css/code.d2570c1cc6480f9c62bc31ec538eef2578ce80980588c469638a5f95416bfc7b.css">
 </head>
 <body class="docs-page">
@@ -95,6 +98,13 @@
   <div class="layout">
     <aside class="sidebar" aria-label="Documentation navigation">
       <button class="nav-toggle" type="button" aria-controls="docs-navigation" aria-expanded="false">Browse documentation</button>
+      <button class="sidebar-toggle" type="button" aria-controls="docs-navigation" aria-expanded="true" aria-label="Collapse sidebar" title="Collapse sidebar">
+        <svg class="sidebar-toggle-icon" aria-hidden="true" viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="2" y="2.5" width="12" height="11" rx="2"/>
+          <line x1="6" y1="2.5" x2="6" y2="13.5"/>
+          <polyline class="sidebar-icon-arrow" points="10.5 6 8.5 8 10.5 10"/>
+        </svg>
+      </button>
       <nav id="docs-navigation" class="sidebar-inner">
         <div class="nav-title">Documentation</div>
         <a class="nav-home" href="/gpustack-operator/main/" >Overview</a>
@@ -1445,9 +1455,21 @@
 <p>An <em>elastic expert parallelism (Elastic EP)</em> deployment keeps one vLLM serving instance and changes its GPU collective
 while it runs. The operator adds GPU members inside one Ray cluster.
 The engine reconfigures while Kubernetes, Kueue, Ray and accelerator accounting converge.</p>
+<p><span class="diagram-scroll"><img src="/gpustack-operator/main/docs/assets/diagrams/model-deployment-elastic-ep.svg" alt="Elastic EP collective expansion" decoding="async"></span></p>
+<!--
+flowchart TD
+    HEAD["CPU Ray head and Service"] -> MASTER["Member 0: HTTP master"]
+    HEAD -> WORKER1["Member 1: worker"]
+    HEAD -> WORKER2["Member 2: joining worker"]
+    HEAD -> WORKER3["Member 3: joining worker"]
+    MASTER -> COLLECTIVE["Live DP and EP collective"]
+    WORKER1 -> COLLECTIVE
+    WORKER2 -> COLLECTIVE
+    WORKER3 -> COLLECTIVE
+-->
 <h2 id="contents">Contents</h2>
 <ul>
-<li><a href="#what-the-profile-means">What the profile means</a>
+<li><a href="#profile-contract">Profile contract</a>
 </li>
 <li><a href="#prerequisites">Prerequisites</a>
 </li>
@@ -1459,7 +1481,7 @@ The engine reconfigures while Kubernetes, Kueue, Ray and accelerator accounting 
 </li>
 <li><a href="#resize-observations">Resize observations</a>
 </li>
-<li><a href="#when-a-resize-holds">When a resize holds</a>
+<li><a href="#resize-hold-conditions">Resize hold conditions</a>
 </li>
 <li><a href="#interruption-scope">Interruption scope</a>
 </li>
@@ -1468,7 +1490,7 @@ The engine reconfigures while Kubernetes, Kueue, Ray and accelerator accounting 
 <li><a href="#limitations">Limitations</a>
 </li>
 </ul>
-<h2 id="what-the-profile-means">What the profile means</h2>
+<h2 id="profile-contract">Profile contract</h2>
 <p><em><code>roles[].elasticEp</code></em> selects this mode for a role. Its only field sets the target width:</p>
 <div class="code-block">
   <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
@@ -1640,7 +1662,7 @@ without interrupting what is already running.</p>
   <thead>
       <tr>
           <th>Observation</th>
-          <th>Question it answers</th>
+          <th>Meaning</th>
       </tr>
   </thead>
   <tbody>
@@ -1677,7 +1699,7 @@ status.</p>
 <p>Native resize makes the engine answer 503 on its endpoints for the length of the window. The master
 <code>Pod</code>&rsquo;s liveness probe accepts 200 and 503 so the kubelet does not restart an engine that is
 mid-resize. Readiness still withdraws, which is how traffic is kept away from the window.</p>
-<h2 id="when-a-resize-holds">When a resize holds</h2>
+<h2 id="resize-hold-conditions">Resize hold conditions</h2>
 <p>The operator records its intent before it sends one request to the engine. After that, a <code>500</code>, a
 <code>408</code>, a timeout or a controller restart is not a reason to send another. An unanswered request and
 a request that was never sent look identical from outside, and resending against an engine that
@@ -1818,7 +1840,7 @@ profile, as described above.</li>
           
           
           <nav class="page-actions" aria-label="Page source">
-            <a href="https://github.com/gpustack/gpustack-operator/blob/8c5186108e620a8044164d9c4c114dd7376092f4/docs/modules/model-deployment/elastic-ep.md">View page source</a>
+            <a href="https://github.com/gpustack/gpustack-operator/blob/91dc7c8d650bac133dd4ea3b29b35d62bd1ee2b1/docs/modules/model-deployment/elastic-ep.md">View page source</a>
             
             <a href="https://github.com/gpustack/gpustack-operator/edit/main/docs/modules/model-deployment/elastic-ep.md">Edit this page</a>
             
@@ -1829,7 +1851,7 @@ profile, as described above.</li>
           <nav id="TableOfContents">
   <ul>
     <li><a href="#contents">Contents</a></li>
-    <li><a href="#what-the-profile-means">What the profile means</a></li>
+    <li><a href="#profile-contract">Profile contract</a></li>
     <li><a href="#prerequisites">Prerequisites</a></li>
     <li><a href="#shared-memory">Shared memory</a></li>
     <li><a href="#configuration">Configuration</a>
@@ -1839,7 +1861,7 @@ profile, as described above.</li>
     </li>
     <li><a href="#changing-the-width">Changing the width</a></li>
     <li><a href="#resize-observations">Resize observations</a></li>
-    <li><a href="#when-a-resize-holds">When a resize holds</a></li>
+    <li><a href="#resize-hold-conditions">Resize hold conditions</a></li>
     <li><a href="#interruption-scope">Interruption scope</a></li>
     <li><a href="#troubleshooting">Troubleshooting</a>
       <ul>
@@ -1854,6 +1876,6 @@ profile, as described above.</li>
     </aside>
   </div>
   
-  <script src="/gpustack-operator/main/js/site.1ec84fdfb2bec16dbb83a64abad1abe2d27d8d3f7fc54c2cfa45fe4d64303b3c.js" defer></script>
+  <script src="/gpustack-operator/main/js/site.e362041170f1762d2935c1ef4d8ca5f494983b230101e1b6536544c195645f10.js" defer></script>
 </body>
 </html>

@@ -10,6 +10,9 @@
         const theme = localStorage.getItem("theme");
         if (theme === "light" || theme === "dark") document.documentElement.dataset.theme = theme;
         document.documentElement.dataset.themeChoice = theme === "light" || theme === "dark" ? theme : "system";
+        if (localStorage.getItem("sidebar-collapsed") === "true") {
+          document.documentElement.dataset.sidebarCollapsed = "true";
+        }
       } catch {
         document.documentElement.dataset.themeChoice = "system";
       }
@@ -24,7 +27,7 @@
   <link rel="alternate" type="text/markdown" href="/gpustack-operator/main/docs/modules/kv-cache/pool/index.md">
   
   <link rel="describedby" href="/gpustack-operator/main/llms.txt">
-  <link rel="stylesheet" href="/gpustack-operator/main/css/site.ea544478884ee4c46c0d82a26985cad564c8f892cccad0c8ffcefe846c62a4a0.css">
+  <link rel="stylesheet" href="/gpustack-operator/main/css/site.1a0de63fe646aba4ed6541fe0a6383c2ed5ca649b1593a98595ba53430bcf032.css">
   <link rel="stylesheet" href="/gpustack-operator/main/css/code.d2570c1cc6480f9c62bc31ec538eef2578ce80980588c469638a5f95416bfc7b.css">
 </head>
 <body class="docs-page">
@@ -95,6 +98,13 @@
   <div class="layout">
     <aside class="sidebar" aria-label="Documentation navigation">
       <button class="nav-toggle" type="button" aria-controls="docs-navigation" aria-expanded="false">Browse documentation</button>
+      <button class="sidebar-toggle" type="button" aria-controls="docs-navigation" aria-expanded="true" aria-label="Collapse sidebar" title="Collapse sidebar">
+        <svg class="sidebar-toggle-icon" aria-hidden="true" viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="2" y="2.5" width="12" height="11" rx="2"/>
+          <line x1="6" y1="2.5" x2="6" y2="13.5"/>
+          <polyline class="sidebar-icon-arrow" points="10.5 6 8.5 8 10.5 10"/>
+        </svg>
+      </button>
       <nav id="docs-navigation" class="sidebar-inner">
         <div class="nav-title">Documentation</div>
         <a class="nav-home" href="/gpustack-operator/main/" >Overview</a>
@@ -1497,12 +1507,15 @@ namespace a quota on it under one reuse domain.</p>
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">qwen-72b-v2 </span><span class="w"> </span><span class="c"># optional; defaults to &#34;default&#34;</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">blockSize</span><span class="p">:</span><span class="w"> </span><span class="m">64</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">dtype</span><span class="p">:</span><span class="w"> </span><span class="l">fp8_e4m3</span></span></span></code></pre></div>
-</div><p>The object split mirrors the scheduling chain: <strong><code>ClusterQueue</code> : <code>LocalQueue</code></strong>.
-A cluster-scoped object owns the capacity and an administrator manages it; a namespaced object is how
-a namespace draws on that capacity, and it is the object RBAC can be written against.</p>
-<p><em><code>spec.backends</code></em> is validated as <strong>length exactly 1</strong>. Quota lands on a single store&rsquo;s per-tenant
-ledger, and one store cannot account for bytes held in another. A pool spanning two backends could
-not answer the question the pool exists to answer.</p>
+</div><p>The object split mirrors the scheduling chain: <strong><code>ClusterQueue</code> : <code>LocalQueue</code></strong>. A cluster-scoped
+<code>KVCachePool</code> owns capacity, while a namespaced <code>KVCachePoolBinding</code> grants namespace quota and RBAC
+scope.</p>
+<ul>
+<li><strong>Pool <em><code>spec.backends</code></em></strong>: Required single-item list naming one <code>KVCacheBackend</code>; a pool cannot span multiple stores.</li>
+<li><strong>Binding <em><code>spec.poolRef.name</code></em></strong>: Required target <code>KVCachePool</code> name that grants capacity to the Binding namespace.</li>
+<li><strong>Binding <em><code>spec.quota.ceiling</code></em></strong>: Required requested ceiling in bytes. The effective grant can be lower; enforcement requires a tenant ledger.</li>
+<li><strong>Binding <em><code>spec.domain</code></em></strong>: Required immutable reuse domain (<code>name</code>, <code>blockSize</code>, <code>dtype</code>) registered as the store tenant ID.</li>
+</ul>
 <h2 id="capacity-grants">Capacity grants</h2>
 <p><strong>A namespace without a Binding has no quota on the pool.</strong> An administrator creating the Binding is
 the act that provisions the two things a namespace needs, a ceiling and a registered reuse domain,
@@ -1586,12 +1599,12 @@ grant it observed can serve a write at all.</p>
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">poolRef</span><span class="p">:</span><span class="w">  </span><span class="c"># Moving the grant leaves its bytes on the old store.</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">cache-pool</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">quota</span><span class="p">:</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">ceiling</span><span class="p">:</span><span class="w"> </span><span class="l">50Gi </span><span class="w"> </span><span class="c"># Required; what this namespace may consume in its reuse domain.</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">ceiling</span><span class="p">:</span><span class="w"> </span><span class="l">50Gi </span><span class="w"> </span><span class="c"># Required requested ceiling; the effective grant may be lower.</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">domain</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">tenant </span><span class="w"> </span><span class="c"># Changing the tenant ID abandons its ledger entry and bytes.</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">blockSize</span><span class="p">:</span><span class="w"> </span><span class="m">16</span><span class="w">  </span><span class="c"># A warm cache must be read at the block size it was written with.</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">dtype</span><span class="p">:</span><span class="w"> </span><span class="l">bfloat16 </span><span class="w"> </span><span class="c"># Reading fp8 blocks as bf16 silently corrupts tensors.</span></span></span></code></pre></div>
-</div><p>To change any of them, delete the Binding and create a new one; the cache under the old domain is
+</div><p>To change any immutable field, delete the Binding and create a new one; the cache under the old domain is
 not carried over.</p>
 <h3 id="engine-dtype">Engine dtype</h3>
 <p><em><code>domain.dtype</code></em> is rendered as <code>--kv-cache-dtype &lt;dtype&gt;</code>, <strong>verbatim</strong>, on every engine attached
@@ -1836,7 +1849,7 @@ runs on.</div>
           
           
           <nav class="page-actions" aria-label="Page source">
-            <a href="https://github.com/gpustack/gpustack-operator/blob/8c5186108e620a8044164d9c4c114dd7376092f4/docs/modules/kv-cache/pool.md">View page source</a>
+            <a href="https://github.com/gpustack/gpustack-operator/blob/91dc7c8d650bac133dd4ea3b29b35d62bd1ee2b1/docs/modules/kv-cache/pool.md">View page source</a>
             
             <a href="https://github.com/gpustack/gpustack-operator/edit/main/docs/modules/kv-cache/pool.md">Edit this page</a>
             
@@ -1875,6 +1888,6 @@ runs on.</div>
     </aside>
   </div>
   
-  <script src="/gpustack-operator/main/js/site.1ec84fdfb2bec16dbb83a64abad1abe2d27d8d3f7fc54c2cfa45fe4d64303b3c.js" defer></script>
+  <script src="/gpustack-operator/main/js/site.e362041170f1762d2935c1ef4d8ca5f494983b230101e1b6536544c195645f10.js" defer></script>
 </body>
 </html>

@@ -97,7 +97,7 @@ spec:
           set -euo pipefail
           if [ "${GPUSTACK_MEMBER_INDEX}" -eq 0 ]; then
             ray start --head --port=6379 --disable-usage-stats
-            exec vllm serve /models --served-model-name deepseek-v2-lite-chat \
+            exec vllm serve /var/lib/gpustack/model --served-model-name deepseek-v2-lite-chat \
               --host 0.0.0.0 --port 8000 \
               --tensor-parallel-size 8 \
               --pipeline-parallel-size "${GPUSTACK_REPLICA_SIZE}" \

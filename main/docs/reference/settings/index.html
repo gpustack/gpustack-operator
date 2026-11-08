@@ -10,6 +10,9 @@
         const theme = localStorage.getItem("theme");
         if (theme === "light" || theme === "dark") document.documentElement.dataset.theme = theme;
         document.documentElement.dataset.themeChoice = theme === "light" || theme === "dark" ? theme : "system";
+        if (localStorage.getItem("sidebar-collapsed") === "true") {
+          document.documentElement.dataset.sidebarCollapsed = "true";
+        }
       } catch {
         document.documentElement.dataset.themeChoice = "system";
       }
@@ -24,7 +27,7 @@
   <link rel="alternate" type="text/markdown" href="/gpustack-operator/main/docs/reference/settings/index.md">
   
   <link rel="describedby" href="/gpustack-operator/main/llms.txt">
-  <link rel="stylesheet" href="/gpustack-operator/main/css/site.ea544478884ee4c46c0d82a26985cad564c8f892cccad0c8ffcefe846c62a4a0.css">
+  <link rel="stylesheet" href="/gpustack-operator/main/css/site.1a0de63fe646aba4ed6541fe0a6383c2ed5ca649b1593a98595ba53430bcf032.css">
   <link rel="stylesheet" href="/gpustack-operator/main/css/code.d2570c1cc6480f9c62bc31ec538eef2578ce80980588c469638a5f95416bfc7b.css">
 </head>
 <body class="docs-page pin-table-first-col">
@@ -95,6 +98,13 @@
   <div class="layout">
     <aside class="sidebar" aria-label="Documentation navigation">
       <button class="nav-toggle" type="button" aria-controls="docs-navigation" aria-expanded="false">Browse documentation</button>
+      <button class="sidebar-toggle" type="button" aria-controls="docs-navigation" aria-expanded="true" aria-label="Collapse sidebar" title="Collapse sidebar">
+        <svg class="sidebar-toggle-icon" aria-hidden="true" viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="2" y="2.5" width="12" height="11" rx="2"/>
+          <line x1="6" y1="2.5" x2="6" y2="13.5"/>
+          <polyline class="sidebar-icon-arrow" points="10.5 6 8.5 8 10.5 10"/>
+        </svg>
+      </button>
       <nav id="docs-navigation" class="sidebar-inner">
         <div class="nav-title">Documentation</div>
         <a class="nav-home" href="/gpustack-operator/main/" >Overview</a>
@@ -1449,7 +1459,7 @@ at runtime, and environment variables, which the worker reads when it starts.</p
 process environment is a standing declaration rather than a one-time default: while it holds a
 non-blank value, the worker writes it to the <code>Setting</code> on every start and the stored value loses. A
 <code>Setting</code> named in <code>settings-default-tracking</code> is written with the operator&rsquo;s built-in default on every
-start. Every other <code>Setting</code> keeps the value you stored. <a href="#who-owns-a-value">Who owns a value</a>
+start. Every other <code>Setting</code> keeps the value you stored. <a href="#value-ownership">Value ownership</a>
  states
 the four rules in the order they run, and <a href="#finding-the-owning-rule">Finding the owning
 rule</a>
@@ -1457,7 +1467,7 @@ rule</a>
 </blockquote>
 <h2 id="contents">Contents</h2>
 <ul>
-<li><a href="#who-owns-a-value">Who owns a value</a>
+<li><a href="#value-ownership">Value ownership</a>
 </li>
 <li><a href="#settings">Settings</a>
 </li>
@@ -1466,7 +1476,7 @@ rule</a>
 <li><a href="#deployment-environment-variables">Deployment environment variables</a>
 </li>
 </ul>
-<h2 id="who-owns-a-value">Who owns a value</h2>
+<h2 id="value-ownership">Value ownership</h2>
 <p>Every registered <code>Setting</code> lives as one key of a single delegated <code>Secret</code>, <code>gpustack-settings</code> in the
 system namespace. The worker aligns that <code>Secret</code> once per worker start and asks one question about each
 key: does the operator own this value, or does the administrator? A value the operator owns is written
@@ -1542,7 +1552,7 @@ applies is the Effect window on each row. Fixed means the resource serves
 <code>get,list,watch,apply,update,patch</code> and no create/delete: you edit a <code>Setting</code>&rsquo;s <strong>value</strong>, not its existence.</p>
 <p>The name in parentheses beside a <code>Setting</code> is the variable it reads. Every one of them is
 authoritative on every worker start while the variable is present and holds a non-blank value, whether
-the chart renders it or you add it yourself (<a href="#who-owns-a-value">who owns a value</a>
+the chart renders it or you add it yourself (<a href="#value-ownership">who owns a value</a>
 ). A variable marked
 <em>chart-rendered</em> is one the chart writes onto the worker <code>Deployment</code> itself, so the chart re-asserts
 it on every start and every upgrade.</p>
@@ -1766,7 +1776,7 @@ request that reaches a webhook. Neither window needs a restart.</p>
       </tr>
       <tr>
           <td><code>settings-default-tracking</code></td>
-          <td>Effect window: Next trigger<br/>Default: <code>instance-ssh-server-image</code>, <code>kv-cache-backend-image</code>, <code>model-deployment-router-image</code>, <code>model-deployment-router-proxy-image</code>, <code>model-deployment-routing-sidecar-image</code>, <code>model-prefetch-warmup-image</code><br/>Usage: Comma-separated names of the <code>Setting</code>s the operator rewrites with its built-in default on every worker start, so that a default shipped in a later release reaches a cluster that never chose a value. A name in the list makes its <code>Setting</code> follow rule 3 (<a href="#who-owns-a-value">who owns a value</a>
+          <td>Effect window: Next trigger<br/>Default: <code>instance-ssh-server-image</code>, <code>kv-cache-backend-image</code>, <code>model-deployment-router-image</code>, <code>model-deployment-router-proxy-image</code>, <code>model-deployment-routing-sidecar-image</code>, <code>model-prefetch-warmup-image</code><br/>Usage: Comma-separated names of the <code>Setting</code>s the operator rewrites with its built-in default on every worker start, so that a default shipped in a later release reaches a cluster that never chose a value. A name in the list makes its <code>Setting</code> follow rule 3 (<a href="#value-ownership">who owns a value</a>
 ); removing a name is what keeps an image pin across an operator upgrade (<a href="#keeping-an-image-pin">keeping a pin</a>
 ). An empty value tracks nothing, and whitespace, duplicates and unregistered names are dropped (<a href="#tracking-list">the tracking list</a>
 ). No environment variable reads this <code>Setting</code>, so nothing on the <code>Deployment</code> can take the list over.</td>
@@ -2020,7 +2030,7 @@ list, which comes back as its six default names.</p>
 <p>These environment variables are read when the process starts, so changing one means restarting or
 redeploying the affected component.
 A variable a <code>Setting</code> reads is re-read on each of those starts rather than applied once
-(<a href="#who-owns-a-value">who owns a value</a>
+(<a href="#value-ownership">who owns a value</a>
 ); the rest are plain process configuration.</p>
 <p>The Worker (WK) copies every <code>GPUSTACK_</code>-prefixed variable from its own <code>Pod</code> spec onto the Device Manager
 (DM) <code>DaemonSet</code>s, so setting one on the Worker <code>Deployment</code> reaches the DMs automatically.</p>
@@ -2195,9 +2205,9 @@ variable alone leaves those stale; the next render overwrites it.</p>
 <ul>
 <li><code>GPUSTACK_${MANUFACTURER}_PARTITION_KIND</code> — the manufacturer&rsquo;s own name for hardware partitioning, which becomes the segment prefix of its per-profile resource key.</li>
 </ul>
-<p><code>nvidia</code> is the only one with a default: <code>mig</code>, giving <code>nvidia.com/gpu.partitioned.mig-${profile}</code>.
-Elsewhere the variable does nothing: without hardware partitioning there is no <code>.partitioned</code> family, so
-no key segment to rename.</p>
+<p>NVIDIA, T-Head and Hygon default to <code>mig</code>. For NVIDIA this gives
+<code>nvidia.com/gpu.partitioned.mig-${profile}</code>. Other manufacturers have no partitioned family, so
+there is no key segment to rename.</p>
 <p>A fifth override is per manufacturer, and today only NVIDIA reads it:</p>
 <ul>
 <li><code>GPUSTACK_${MANUFACTURER}_DEVICE_INJECTION_STRATEGY</code> — which channel that manufacturer&rsquo;s allocator
@@ -2450,7 +2460,7 @@ user-facing settings, listed for completeness.</p>
           
           
           <nav class="page-actions" aria-label="Page source">
-            <a href="https://github.com/gpustack/gpustack-operator/blob/8c5186108e620a8044164d9c4c114dd7376092f4/docs/reference/settings.md">View page source</a>
+            <a href="https://github.com/gpustack/gpustack-operator/blob/91dc7c8d650bac133dd4ea3b29b35d62bd1ee2b1/docs/reference/settings.md">View page source</a>
             
             <a href="https://github.com/gpustack/gpustack-operator/edit/main/docs/reference/settings.md">Edit this page</a>
             
@@ -2461,7 +2471,7 @@ user-facing settings, listed for completeness.</p>
           <nav id="TableOfContents">
   <ul>
     <li><a href="#contents">Contents</a></li>
-    <li><a href="#who-owns-a-value">Who owns a value</a>
+    <li><a href="#value-ownership">Value ownership</a>
       <ul>
         <li><a href="#every-override-is-logged">Every override is logged</a></li>
         <li><a href="#tracking-list">Tracking list</a></li>
@@ -2498,6 +2508,6 @@ user-facing settings, listed for completeness.</p>
     </aside>
   </div>
   
-  <script src="/gpustack-operator/main/js/site.1ec84fdfb2bec16dbb83a64abad1abe2d27d8d3f7fc54c2cfa45fe4d64303b3c.js" defer></script>
+  <script src="/gpustack-operator/main/js/site.e362041170f1762d2935c1ef4d8ca5f494983b230101e1b6536544c195645f10.js" defer></script>
 </body>
 </html>

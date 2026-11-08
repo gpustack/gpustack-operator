@@ -10,6 +10,9 @@
         const theme = localStorage.getItem("theme");
         if (theme === "light" || theme === "dark") document.documentElement.dataset.theme = theme;
         document.documentElement.dataset.themeChoice = theme === "light" || theme === "dark" ? theme : "system";
+        if (localStorage.getItem("sidebar-collapsed") === "true") {
+          document.documentElement.dataset.sidebarCollapsed = "true";
+        }
       } catch {
         document.documentElement.dataset.themeChoice = "system";
       }
@@ -24,7 +27,7 @@
   <link rel="alternate" type="text/markdown" href="/gpustack-operator/main/docs/walkthroughs/topology/hierarchical-placement/index.md">
   
   <link rel="describedby" href="/gpustack-operator/main/llms.txt">
-  <link rel="stylesheet" href="/gpustack-operator/main/css/site.ea544478884ee4c46c0d82a26985cad564c8f892cccad0c8ffcefe846c62a4a0.css">
+  <link rel="stylesheet" href="/gpustack-operator/main/css/site.1a0de63fe646aba4ed6541fe0a6383c2ed5ca649b1593a98595ba53430bcf032.css">
   <link rel="stylesheet" href="/gpustack-operator/main/css/code.d2570c1cc6480f9c62bc31ec538eef2578ce80980588c469638a5f95416bfc7b.css">
 </head>
 <body class="docs-page">
@@ -95,6 +98,13 @@
   <div class="layout">
     <aside class="sidebar" aria-label="Documentation navigation">
       <button class="nav-toggle" type="button" aria-controls="docs-navigation" aria-expanded="false">Browse documentation</button>
+      <button class="sidebar-toggle" type="button" aria-controls="docs-navigation" aria-expanded="true" aria-label="Collapse sidebar" title="Collapse sidebar">
+        <svg class="sidebar-toggle-icon" aria-hidden="true" viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="2" y="2.5" width="12" height="11" rx="2"/>
+          <line x1="6" y1="2.5" x2="6" y2="13.5"/>
+          <polyline class="sidebar-icon-arrow" points="10.5 6 8.5 8 10.5 10"/>
+        </svg>
+      </button>
       <nav id="docs-navigation" class="sidebar-inner">
         <div class="nav-title">Documentation</div>
         <a class="nav-home" href="/gpustack-operator/main/" >Overview</a>
@@ -1593,8 +1603,18 @@ request placement within a single availability zone:</p>
 2 <code>Pod</code>s. If capacity is scattered across zones without filling any single zone, the workload waits in
 <code>Pending</code> rather than stranding split <code>Pod</code>s.</p>
 <h2 id="step-3-publish-an-inventory-snapshot">Step 3: Publish an inventory snapshot</h2>
-<p>In private data centers without cloud labels, publish rack hierarchies using a versioned snapshot
-stored in a <code>ConfigMap</code>:</p>
+<p>Before changing sources, plan for queue draining and possible workload interruption. See
+<a href="/gpustack-operator/main/docs/modules/topology/operations/#change-a-live-hierarchy">Change a live hierarchy</a>
+.
+Remove <code>cloud-zones</code> before selecting the same nodes with the snapshot source:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">kubectl delete topologysource cloud-zones</span></span></code></pre></div>
+</div><p>Without a single Ready source, nodes fall back to the
+<a href="/gpustack-operator/main/docs/modules/topology/scheduling/#hierarchy-profiles">hostname-only profile</a>
+.
+In private data centers without cloud labels, publish a versioned rack snapshot in a <code>ConfigMap</code>.
+Save this manifest as <code>topology-inventory.yaml</code>. Replace the node names and labels with your inventory:</p>
 <div class="code-block">
   <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">v1</span><span class="w">
@@ -1634,7 +1654,15 @@ stored in a <code>ConfigMap</code>:</p>
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">key</span><span class="p">:</span><span class="w"> </span><span class="l">snapshot.yaml</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">maxStaleness</span><span class="p">:</span><span class="w"> </span><span class="l">10m</span></span></span></code></pre></div>
 </div><p>The operator validates the snapshot atomically, creates NFD <code>NodeFeature</code> resources, and writes the
-custom labels to each node.</p>
+custom labels to each node. Apply the saved manifest, then inspect the source and queues:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">kubectl apply -f topology-inventory.yaml
+</span></span><span class="line"><span class="cl">kubectl get topologysource data-center -o yaml
+</span></span><span class="line"><span class="cl">kubectl get clusterqueues.kueue.x-k8s.io -o yaml</span></span></code></pre></div>
+</div><p>Wait for the source to become Ready and the managed queues to report <code>TopologyReady=True</code>.
+See <a href="/gpustack-operator/main/docs/modules/topology/operations/#verification">Verification</a>
+ for the node and flavor checks.</p>
 <h2 id="step-4-request-rack-placement">Step 4: Request rack placement</h2>
 <p>With rack labels published, narrow the workload constraint from zone-level to rack-level:</p>
 <div class="code-block">
@@ -1761,7 +1789,7 @@ and <a href="/gpustack-operator/main/docs/modules/topology/operations/#change-a-
           
           
           <nav class="page-actions" aria-label="Page source">
-            <a href="https://github.com/gpustack/gpustack-operator/blob/8c5186108e620a8044164d9c4c114dd7376092f4/docs/walkthroughs/topology/hierarchical-placement.md">View page source</a>
+            <a href="https://github.com/gpustack/gpustack-operator/blob/91dc7c8d650bac133dd4ea3b29b35d62bd1ee2b1/docs/walkthroughs/topology/hierarchical-placement.md">View page source</a>
             
             <a href="https://github.com/gpustack/gpustack-operator/edit/main/docs/walkthroughs/topology/hierarchical-placement.md">Edit this page</a>
             
@@ -1788,6 +1816,6 @@ and <a href="/gpustack-operator/main/docs/modules/topology/operations/#change-a-
     </aside>
   </div>
   
-  <script src="/gpustack-operator/main/js/site.1ec84fdfb2bec16dbb83a64abad1abe2d27d8d3f7fc54c2cfa45fe4d64303b3c.js" defer></script>
+  <script src="/gpustack-operator/main/js/site.e362041170f1762d2935c1ef4d8ca5f494983b230101e1b6536544c195645f10.js" defer></script>
 </body>
 </html>

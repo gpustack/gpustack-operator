@@ -368,6 +368,9 @@ One column to keep in mind: `kubectl get instancetypes` shows the accelerator fo
 from the first three groups to the fourth rather than adding to it. The first three are credit-based (each
 GPU's credit budget); `PT` counts hardware instances the GPUs can still host.
 
+The captured `PT` first values reflect an older calculation; see
+[Four-view status](/gpustack-operator/main/docs/modules/devices/admission/index.md#four-view-status) for the current *`onceMaxRequest`* rule.
+
 ### All-logical configuration
 
 Every GPU offers logical slicing and none offers partitions: three logical views populated, partition view

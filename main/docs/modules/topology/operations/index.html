@@ -10,6 +10,9 @@
         const theme = localStorage.getItem("theme");
         if (theme === "light" || theme === "dark") document.documentElement.dataset.theme = theme;
         document.documentElement.dataset.themeChoice = theme === "light" || theme === "dark" ? theme : "system";
+        if (localStorage.getItem("sidebar-collapsed") === "true") {
+          document.documentElement.dataset.sidebarCollapsed = "true";
+        }
       } catch {
         document.documentElement.dataset.themeChoice = "system";
       }
@@ -24,7 +27,7 @@
   <link rel="alternate" type="text/markdown" href="/gpustack-operator/main/docs/modules/topology/operations/index.md">
   
   <link rel="describedby" href="/gpustack-operator/main/llms.txt">
-  <link rel="stylesheet" href="/gpustack-operator/main/css/site.ea544478884ee4c46c0d82a26985cad564c8f892cccad0c8ffcefe846c62a4a0.css">
+  <link rel="stylesheet" href="/gpustack-operator/main/css/site.1a0de63fe646aba4ed6541fe0a6383c2ed5ca649b1593a98595ba53430bcf032.css">
   <link rel="stylesheet" href="/gpustack-operator/main/css/code.d2570c1cc6480f9c62bc31ec538eef2578ce80980588c469638a5f95416bfc7b.css">
 </head>
 <body class="docs-page">
@@ -95,6 +98,13 @@
   <div class="layout">
     <aside class="sidebar" aria-label="Documentation navigation">
       <button class="nav-toggle" type="button" aria-controls="docs-navigation" aria-expanded="false">Browse documentation</button>
+      <button class="sidebar-toggle" type="button" aria-controls="docs-navigation" aria-expanded="true" aria-label="Collapse sidebar" title="Collapse sidebar">
+        <svg class="sidebar-toggle-icon" aria-hidden="true" viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="2" y="2.5" width="12" height="11" rx="2"/>
+          <line x1="6" y1="2.5" x2="6" y2="13.5"/>
+          <polyline class="sidebar-icon-arrow" points="10.5 6 8.5 8 10.5 10"/>
+        </svg>
+      </button>
       <nav id="docs-navigation" class="sidebar-inner">
         <div class="nav-title">Documentation</div>
         <a class="nav-home" href="/gpustack-operator/main/" >Overview</a>
@@ -1462,9 +1472,7 @@ Queues created by a previously published version are outside that transition pat
 </li>
 <li><a href="#change-a-live-hierarchy">Change a live hierarchy</a>
 </li>
-<li><a href="#diagnose-pending-workloads">Diagnose Pending workloads</a>
-</li>
-<li><a href="#temporary-eks-validation">Temporary EKS validation</a>
+<li><a href="#troubleshooting">Troubleshooting</a>
 </li>
 </ul>
 <h2 id="choose-the-inventory-path">Choose the inventory path</h2>
@@ -1552,12 +1560,20 @@ Kueue. This example combines Kubernetes cloud labels with a Topograph fabric tie
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="l">fabric.topograph.run/tier-2</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="l">fabric.topograph.run/tier-1</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">nodeLabels</span><span class="p">:</span><span class="w"> </span>{}</span></span></code></pre></div>
-</div><p>Do not copy a tier list from another cluster; inspect the labels actually published on these <code>Node</code>s.
+</div><ul>
+<li><strong>Selector</strong>: An empty <em><code>nodeSelector</code></em> selects every node.</li>
+<li><strong>Levels</strong>: List the published labels from broadest to narrowest.</li>
+<li><strong>Inventory</strong>: <em><code>nodeLabels</code></em> reads existing labels without modifying them.</li>
+</ul>
+<p>Do not copy a tier list from another cluster; inspect the labels actually published on these <code>Node</code>s.
 The <a href="/gpustack-operator/main/docs/modules/topology/scheduling/#hierarchy-profiles">profile rules</a>
 
 define tier normalization.</p>
 <h2 id="observe-existing-node-labels">Observe existing Node labels</h2>
-<p>Use <em><code>nodeLabels</code></em> when another trusted component already owns the values. It validates the hierarchy
+<p>Configure the chosen inventory path with <em><code>nodeLabels</code></em> below, <a href="#publish-a-configmap-snapshot">a ConfigMap snapshot</a>
+,
+or <a href="#publish-by-webhook">a webhook</a>
+. Use <em><code>nodeLabels</code></em> when another trusted component already owns the values. It validates the hierarchy
 but never modifies those labels:</p>
 <div class="code-block">
   <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
@@ -1569,15 +1585,42 @@ but never modifies those labels:</p>
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">nodeSelector</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">matchLabels</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">node-role.kubernetes.io/worker</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;&#34;</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">levels</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">levels</span><span class="p">:</span><span class="w">  </span><span class="c"># Ordered from the broadest domain to the narrowest.</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="l">topology.kubernetes.io/region</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="l">topology.kubernetes.io/zone</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">nodeLabels</span><span class="p">:</span><span class="w"> </span>{}</span></span></code></pre></div>
-</div><p><code>levels</code> takes 1 to 16 entries, each a label key named once: admission refuses a key listed twice,
-since a repeated level would describe one <code>Node</code> label as two tiers of the hierarchy.
-<code>kubernetes.io/hostname</code> is always appended and must not appear in <code>levels</code>. A <code>Node</code> may omit a fine
-suffix and receive a shorter profile, but it may not carry a child level without every declared
-parent.</p>
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">nodeLabels</span><span class="p">:</span><span class="w"> </span>{}<span class="w">  </span><span class="c"># Read labels already present on the selected nodes.</span></span></span></code></pre></div>
+</div><ul>
+<li><strong><code>nodeSelector</code></strong>: Required; select the nodes that provide the hierarchy.</li>
+<li><strong><code>levels</code></strong>: Required; list one to 16 unique label keys in hierarchy order.</li>
+<li><strong><code>nodeLabels</code></strong>: Selects the read-only inventory path.</li>
+</ul>
+<table>
+  <thead>
+      <tr>
+          <th>Condition</th>
+          <th>Reason</th>
+          <th>Resolution</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td>A level is repeated</td>
+          <td>Each level must name a distinct label</td>
+          <td>Remove the duplicate key.</td>
+      </tr>
+      <tr>
+          <td>A child has no declared parent</td>
+          <td>The hierarchy must have a complete parent chain</td>
+          <td>Add the parent label or remove the child.</td>
+      </tr>
+      <tr>
+          <td><code>kubernetes.io/hostname</code> is listed</td>
+          <td>The operator appends this level</td>
+          <td>Remove it from <code>levels</code>.</td>
+      </tr>
+  </tbody>
+</table>
+<p>A <code>Node</code> may omit a fine suffix and receive a shorter profile, as long as every child level has its declared parent chain.</p>
 <h2 id="publish-a-configmap-snapshot">Publish a ConfigMap snapshot</h2>
 <p>The <code>ConfigMap</code> and its <code>TopologySource</code> reference must be in the worker namespace. The snapshot key
 contains YAML or JSON with this schema:</p>
@@ -1614,7 +1657,12 @@ contains YAML or JSON with this schema:</p>
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">topology-inventory</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">key</span><span class="p">:</span><span class="w"> </span><span class="l">snapshot.yaml</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">maxStaleness</span><span class="p">:</span><span class="w"> </span><span class="l">10m</span></span></span></code></pre></div>
-</div><p>The snapshot is atomic: one unknown <code>Node</code>, undeclared level, invalid value, broken parent chain, or
+</div><ul>
+<li><strong>Selector</strong>: Choose the nodes covered by the snapshot.</li>
+<li><strong>ConfigMap</strong>: Reference a snapshot in the worker namespace.</li>
+<li><strong>Staleness</strong>: Expiry removes the last valid <code>NodeFeature</code> after a read failure.</li>
+</ul>
+<p>The snapshot is atomic: one unknown <code>Node</code>, undeclared level, invalid value, broken parent chain, or
 contradictory child rejects the whole revision. The source reconciles one NFD <code>NodeFeature</code> per
 described <code>Node</code>; NFD publishes its writable labels onto the <code>Node</code>. On read failure, the last valid
 <code>NodeFeature</code> remains until <em><code>maxStaleness</code></em>; after expiry it is removed.</p>
@@ -1651,7 +1699,12 @@ exactly one of bearer-token or client-certificate authentication.</p>
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">bearerTokenSecretRef</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">namespace</span><span class="p">:</span><span class="w"> </span><span class="l">gpustack-system</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">topology-inventory-token</span></span></span></code></pre></div>
-</div><p>The CA <code>ConfigMap</code> key is <code>ca.crt</code>; the bearer <code>Secret</code> key is <code>token</code>. For mTLS, replace the bearer
+</div><ul>
+<li><strong>URL</strong>: Use an absolute HTTPS endpoint.</li>
+<li><strong>Credentials</strong>: Provide exactly one bearer token or client certificate.</li>
+<li><strong>Timing</strong>: Set positive durations. The timeout must not exceed the polling interval.</li>
+</ul>
+<p>The CA <code>ConfigMap</code> key is <code>ca.crt</code>; the bearer <code>Secret</code> key is <code>token</code>. For mTLS, replace the bearer
 reference with <em><code>tlsClientCertificateSecretRef</code></em>; that <code>Secret</code> uses <code>tls.crt</code> and <code>tls.key</code>. All
 references are restricted to the worker namespace.</p>
 <p>Only a cluster administrator should create a <code>TopologySource</code> or its credentials. Restrict RBAC for
@@ -1659,20 +1712,21 @@ these objects, allow egress only to the intended endpoint and DNS path, and rota
 <code>Secret</code>s without embedding credentials in the URL. <code>timeout</code> must not exceed <em><code>pollInterval</code></em>, and all
 three durations must be positive.</p>
 <h2 id="request-a-level">Request a level</h2>
-<p>Set <em><code>requiredLevel</code></em> on a role to require each replica&rsquo;s <code>Pod</code> group to fit in one domain at that level:</p>
+<p>Set <em><code>requiredLevel</code></em> on an existing role to require each replica&rsquo;s <code>Pod</code> group to fit in one domain:</p>
 <div class="code-block">
-  <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
-  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">worker.gpustack.ai/v1</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">ModelDeployment</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">metadata</span><span class="p">:</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">zoned-deployment</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">spec</span><span class="p">:</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">roles</span><span class="p">:</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">decode</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">replicas</span><span class="p">:</span><span class="w"> </span><span class="m">2</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">size</span><span class="p">:</span><span class="w"> </span><span class="m">4</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">topology</span><span class="p">:</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">requiredLevel</span><span class="p">:</span><span class="w"> </span><span class="l">topology.kubernetes.io/zone</span></span></span></code></pre></div>
+  <div class="code-toolbar"><span>diff</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-diff" data-lang="diff"><span class="line"><span class="cl"> apiVersion: worker.gpustack.ai/v1
+</span></span><span class="line"><span class="cl"> kind: ModelDeployment
+</span></span><span class="line"><span class="cl"> metadata:
+</span></span><span class="line"><span class="cl">   name: zoned-deployment
+</span></span><span class="line"><span class="cl"> spec:
+</span></span><span class="line"><span class="cl">   roles:
+</span></span><span class="line"><span class="cl">     - name: decode
+</span></span><span class="line"><span class="cl">       replicas: 2
+</span></span><span class="line"><span class="cl">       size: 4
+</span></span><span class="line"><span class="cl"><span class="gi">+      topology:
+</span></span></span><span class="line"><span class="cl"><span class="gi">+        requiredLevel: topology.kubernetes.io/zone
+</span></span></span></code></pre></div>
 </div><p>The value is a label key, not <code>region</code>, <code>zone</code>, or a concrete zone name. Valid examples include
 <code>topology.kubernetes.io/zone</code>, <code>topology.gpustack.ai/rack</code>, and a selected Topograph tier. Omit the
 field for unconstrained <em>topology-aware scheduling (TAS)</em> placement; the <a href="/gpustack-operator/main/docs/modules/model-deployment/deployment/#topology-placement">field contract</a>
@@ -1724,7 +1778,8 @@ interruption. Old flavors and their <code>Topology</code> disappear only after r
 anything else. A missing replacement flavor, immutable object drift, too many required flavors,
 or quota that cannot be conserved leaves the last complete queue plan in place. An old non-<em>TAS</em> queue
 from a previous release is not adopted; use fresh managed objects.</p>
-<h2 id="diagnose-pending-workloads">Diagnose Pending workloads</h2>
+<h2 id="troubleshooting">Troubleshooting</h2>
+<h3 id="diagnose-pending-workloads">Diagnose Pending workloads</h3>
 <p>Pending is the safe result when no single domain satisfies the full PodSet. Check in this order:</p>
 <ol>
 <li>Read the <code>ModelDeployment</code> progress message for the role and replica.</li>
@@ -1746,7 +1801,7 @@ the other roles are the ones short of a domain. Free their capacity or delete th
 
 is exceeded, reduce profile fragmentation or hardware identity variants, then let reconciliation
 retry the complete plan.</p>
-<h2 id="temporary-eks-validation">Temporary EKS validation</h2>
+<h3 id="temporary-eks-validation">Temporary EKS validation</h3>
 <p>The repository EKS fixture can create two CPU node groups pinned to different availability zones.
 Use two inexpensive <code>Node</code>s per zone to prove both positive and negative placement: a size-two PodSet
 fits one zone, while a size-three PodSet remains Pending although total cluster capacity is four.</p>
@@ -1781,7 +1836,7 @@ roles that consume topology-aware admission.</div>
           
           
           <nav class="page-actions" aria-label="Page source">
-            <a href="https://github.com/gpustack/gpustack-operator/blob/8c5186108e620a8044164d9c4c114dd7376092f4/docs/modules/topology/operations.md">View page source</a>
+            <a href="https://github.com/gpustack/gpustack-operator/blob/91dc7c8d650bac133dd4ea3b29b35d62bd1ee2b1/docs/modules/topology/operations.md">View page source</a>
             
             <a href="https://github.com/gpustack/gpustack-operator/edit/main/docs/modules/topology/operations.md">Edit this page</a>
             
@@ -1800,8 +1855,12 @@ roles that consume topology-aware admission.</div>
     <li><a href="#request-a-level">Request a level</a></li>
     <li><a href="#verification">Verification</a></li>
     <li><a href="#change-a-live-hierarchy">Change a live hierarchy</a></li>
-    <li><a href="#diagnose-pending-workloads">Diagnose Pending workloads</a></li>
-    <li><a href="#temporary-eks-validation">Temporary EKS validation</a></li>
+    <li><a href="#troubleshooting">Troubleshooting</a>
+      <ul>
+        <li><a href="#diagnose-pending-workloads">Diagnose Pending workloads</a></li>
+        <li><a href="#temporary-eks-validation">Temporary EKS validation</a></li>
+      </ul>
+    </li>
   </ul>
 </nav>
         
@@ -1809,6 +1868,6 @@ roles that consume topology-aware admission.</div>
     </aside>
   </div>
   
-  <script src="/gpustack-operator/main/js/site.1ec84fdfb2bec16dbb83a64abad1abe2d27d8d3f7fc54c2cfa45fe4d64303b3c.js" defer></script>
+  <script src="/gpustack-operator/main/js/site.e362041170f1762d2935c1ef4d8ca5f494983b230101e1b6536544c195645f10.js" defer></script>
 </body>
 </html>

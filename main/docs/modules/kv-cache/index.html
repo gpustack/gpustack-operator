@@ -10,6 +10,9 @@
         const theme = localStorage.getItem("theme");
         if (theme === "light" || theme === "dark") document.documentElement.dataset.theme = theme;
         document.documentElement.dataset.themeChoice = theme === "light" || theme === "dark" ? theme : "system";
+        if (localStorage.getItem("sidebar-collapsed") === "true") {
+          document.documentElement.dataset.sidebarCollapsed = "true";
+        }
       } catch {
         document.documentElement.dataset.themeChoice = "system";
       }
@@ -24,7 +27,7 @@
   <link rel="alternate" type="text/markdown" href="/gpustack-operator/main/docs/modules/kv-cache/index.md">
   
   <link rel="describedby" href="/gpustack-operator/main/llms.txt">
-  <link rel="stylesheet" href="/gpustack-operator/main/css/site.ea544478884ee4c46c0d82a26985cad564c8f892cccad0c8ffcefe846c62a4a0.css">
+  <link rel="stylesheet" href="/gpustack-operator/main/css/site.1a0de63fe646aba4ed6541fe0a6383c2ed5ca649b1593a98595ba53430bcf032.css">
   <link rel="stylesheet" href="/gpustack-operator/main/css/code.d2570c1cc6480f9c62bc31ec538eef2578ce80980588c469638a5f95416bfc7b.css">
 </head>
 <body class="docs-page">
@@ -95,6 +98,13 @@
   <div class="layout">
     <aside class="sidebar" aria-label="Documentation navigation">
       <button class="nav-toggle" type="button" aria-controls="docs-navigation" aria-expanded="false">Browse documentation</button>
+      <button class="sidebar-toggle" type="button" aria-controls="docs-navigation" aria-expanded="true" aria-label="Collapse sidebar" title="Collapse sidebar">
+        <svg class="sidebar-toggle-icon" aria-hidden="true" viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="2" y="2.5" width="12" height="11" rx="2"/>
+          <line x1="6" y1="2.5" x2="6" y2="13.5"/>
+          <polyline class="sidebar-icon-arrow" points="10.5 6 8.5 8 10.5 10"/>
+        </svg>
+      </button>
       <nav id="docs-navigation" class="sidebar-inner">
         <div class="nav-title">Documentation</div>
         <a class="nav-home" href="/gpustack-operator/main/" >Overview</a>
@@ -1440,31 +1450,90 @@
       <article>
         
   <h1 id="kv-cache">KV Cache</h1>
-<p>A backend runs the cache store. A pool and binding decide which workloads may use it and how much
-capacity they receive.</p>
+<p>A shared KV cache lets compatible inference workloads reuse cached state. A backend runs the store.
+Pools and bindings grant capacity to namespaces. Cache quota is separate from accelerator quota.</p>
 <h2 id="contents">Contents</h2>
 <ul>
-<li><a href="#quick-start">Quick start</a>
+<li><a href="#overview">Overview</a>
 </li>
-<li><a href="#cache-configuration">Cache configuration</a>
+<li><a href="#configuration">Configuration</a>
+</li>
+<li><a href="#operations">Operations</a>
+</li>
+<li><a href="#troubleshooting">Troubleshooting</a>
 </li>
 </ul>
-<h2 id="quick-start">Quick start</h2>
-<p><a href="/gpustack-operator/main/docs/walkthroughs/kv-cache/shared-cache/">Shared Cache Walkthrough</a>
- creates the backend, pool, binding and
-deployment in order. A plain <code>Pod</code> can also use a binding through <a href="/gpustack-operator/main/docs/modules/kv-cache/injection/">KV Cache
-Injection</a>
+<h2 id="overview">Overview</h2>
+<p><span class="diagram-scroll"><img src="/gpustack-operator/main/docs/assets/diagrams/kv-cache-flow.svg" alt="KV cache backend and workload flow" decoding="async"></span></p>
+<!--
+flowchart TD
+    MASTER["Mooncake leader and optional tenant ledger"] -> BACKEND["Backend storage members"]
+    BACKEND -> POOL["KVCachePool capacity"]
+    POOL -> BINDING["Namespace KVCachePoolBinding"]
+    BINDING -> WEBHOOK["Cache injection admission"]
+    WEBHOOK -> PODS["Serving Pods and compatible prefix reuse"]
+    PODS -> BACKEND
+-->
+<p>A binding grants capacity only; read the
+<a href="/gpustack-operator/main/docs/modules/kv-cache/pool/#limitations">isolation limitations</a>
+ before sharing a backend between tenants.</p>
+<h2 id="configuration">Configuration</h2>
+<p>Start with the annotated <a href="/gpustack-operator/main/docs/modules/kv-cache/backend/#connection-and-medium">backend example</a>
+ and its constraints.
+Configure <a href="/gpustack-operator/main/docs/modules/kv-cache/pool/">pools and bindings</a>
+ for quotas and reuse domains.
+<a href="/gpustack-operator/main/docs/modules/kv-cache/injection/">KV Cache Injection</a>
+ defines the Pod labels, annotations and engine settings.</p>
+<p>For an end-to-end configuration, follow the
+<a href="/gpustack-operator/main/docs/walkthroughs/kv-cache/shared-cache/">Shared Cache Walkthrough</a>
 .</p>
-<h2 id="cache-configuration">Cache configuration</h2>
-<p>Read <a href="/gpustack-operator/main/docs/modules/kv-cache/backend/">KV Cache Backend</a>
- for the store and <a href="/gpustack-operator/main/docs/modules/kv-cache/pool/">KV Cache Pools and Bindings</a>
-
-for grants and quotas. The <a href="/gpustack-operator/main/docs/modules/kv-cache/leader/">leader</a>
- and <a href="/gpustack-operator/main/docs/modules/kv-cache/local-disk-tier/">local disk
-tier</a>
- have separate operating details.
-<a href="/gpustack-operator/main/docs/modules/kv-cache/disk-heavy-nodes/">Disk-Heavy Nodes</a>
- covers cache placement on storage nodes.</p>
+<h2 id="operations">Operations</h2>
+<h3 id="step-1-configure-storage">Step 1: Configure storage</h3>
+<p>Select memory and optional disk tiers. See <a href="/gpustack-operator/main/docs/modules/kv-cache/backend/">KV Cache Backend</a>
+,
+<a href="/gpustack-operator/main/docs/modules/kv-cache/local-disk-tier/">Local Disk Tier</a>
+ and <a href="/gpustack-operator/main/docs/modules/kv-cache/disk-heavy-nodes/">Disk-Heavy Nodes</a>
+.</p>
+<h3 id="step-2-check-status">Step 2: Check status</h3>
+<p>Inspect the backend and its conditions:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>shell</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-shell" data-lang="shell"><span class="line"><span class="cl">kubectl get kvcb
+</span></span><span class="line"><span class="cl">kubectl describe kvcb &lt;backend-name&gt;</span></span></code></pre></div>
+</div><p><strong>Verification:</strong> Check the phase and conditions against <a href="/gpustack-operator/main/docs/modules/kv-cache/backend/#status-and-conditions">Backend Status</a>
+.
+For leader health and metrics, see <a href="/gpustack-operator/main/docs/modules/kv-cache/leader/#health-checks">KV Cache Election and Failover</a>
+.</p>
+<h2 id="troubleshooting">Troubleshooting</h2>
+<p>If a workload cannot use the cache, inspect backend, pool and binding status.</p>
+<table>
+  <thead>
+      <tr>
+          <th>Condition</th>
+          <th>Reason</th>
+          <th>Resolution</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td><code>MembersMounted=False</code></td>
+          <td><code>AmbiguousMemberIdentity</code></td>
+          <td>Use node selectors that place the groups on different nodes.</td>
+      </tr>
+      <tr>
+          <td>Writes fail with <code>RPC_FAIL (-900)</code></td>
+          <td>Possible store and client minor-line mismatch</td>
+          <td>Check <a href="/gpustack-operator/main/docs/modules/kv-cache/backend/#version-compatibility">version compatibility</a>
+.</td>
+      </tr>
+  </tbody>
+</table>
+<p>Use <a href="/gpustack-operator/main/docs/modules/kv-cache/injection/#refusals-and-fixes">Injection Refusals</a>
+ for webhook messages and fixes.
+For quota and domain failures, see <a href="/gpustack-operator/main/docs/modules/kv-cache/pool/#operating-notes">Pool Operating Notes</a>
+.
+For backend failures, check <a href="/gpustack-operator/main/docs/modules/kv-cache/backend/#status-and-conditions">Backend Status</a>
+.</p>
 <nav class="reading-footer" aria-label="Further reading">
     <section>
       <h2>See also</h2>
@@ -1487,7 +1556,7 @@ tier</a>
           
           
           <nav class="page-actions" aria-label="Page source">
-            <a href="https://github.com/gpustack/gpustack-operator/blob/8c5186108e620a8044164d9c4c114dd7376092f4/docs/modules/kv-cache/_index.md">View page source</a>
+            <a href="https://github.com/gpustack/gpustack-operator/blob/91dc7c8d650bac133dd4ea3b29b35d62bd1ee2b1/docs/modules/kv-cache/_index.md">View page source</a>
             
             <a href="https://github.com/gpustack/gpustack-operator/edit/main/docs/modules/kv-cache/_index.md">Edit this page</a>
             
@@ -1498,8 +1567,15 @@ tier</a>
           <nav id="TableOfContents">
   <ul>
     <li><a href="#contents">Contents</a></li>
-    <li><a href="#quick-start">Quick start</a></li>
-    <li><a href="#cache-configuration">Cache configuration</a></li>
+    <li><a href="#overview">Overview</a></li>
+    <li><a href="#configuration">Configuration</a></li>
+    <li><a href="#operations">Operations</a>
+      <ul>
+        <li><a href="#step-1-configure-storage">Step 1: Configure storage</a></li>
+        <li><a href="#step-2-check-status">Step 2: Check status</a></li>
+      </ul>
+    </li>
+    <li><a href="#troubleshooting">Troubleshooting</a></li>
   </ul>
 </nav>
         
@@ -1507,6 +1583,6 @@ tier</a>
     </aside>
   </div>
   
-  <script src="/gpustack-operator/main/js/site.1ec84fdfb2bec16dbb83a64abad1abe2d27d8d3f7fc54c2cfa45fe4d64303b3c.js" defer></script>
+  <script src="/gpustack-operator/main/js/site.e362041170f1762d2935c1ef4d8ca5f494983b230101e1b6536544c195645f10.js" defer></script>
 </body>
 </html>

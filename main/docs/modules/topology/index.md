@@ -1,30 +1,60 @@
 # Topology
 
-GPUStack can describe domains such as zones and racks, then let Kueue account for capacity within
-those domains.
+GPUStack describes domains such as zones and racks. Kueue accounts for capacity within those domains.
 
 ## Contents
 
-- [Placement and scheduling](#placement-and-scheduling)
-- [Topology sources](#topology-sources)
+- [Overview](#overview)
+- [Configuration](#configuration)
+- [Operations](#operations)
+- [Troubleshooting](#troubleshooting)
 
-## Placement and scheduling
+## Overview
 
-[Topology-Aware Scheduling](/gpustack-operator/main/docs/modules/topology/scheduling/index.md) explains topology
-profiles, Kueue `Topology` resources and how a replica asks to stay in one domain.
+### Placement and scheduling
 
-Follow [Hierarchical Placement Walkthrough](/gpustack-operator/main/docs/walkthroughs/topology/hierarchical-placement/index.md) to
-place serving replicas across zones and physical racks.
+A `TopologySource` can select an inventory path and hierarchy. Without a source, GPUStack uses the
+default profile. GPUStack publishes profiles and Kueue `Topology` resources for placement.
 
-## Topology sources
+![Topology discovery and placement flow](/gpustack-operator/main/docs/assets/diagrams/topology-flow.svg)
 
-[Topology-Aware Scheduling Operations](/gpustack-operator/main/docs/modules/topology/operations/index.md) covers inventory
-sources, verification and diagnosis of a Pending group.
+<!--
+flowchart TD
+    LABELS["Existing Node labels"] -> PROFILE["Topology profile builder"]
+    CONFIG["ConfigMap snapshot via NFD"] -> PROFILE
+    WEBHOOK["HTTPS inventory via NFD"] -> PROFILE
+    PROFILE -> FLAVOR["Kueue Topology and ResourceFlavor"]
+    FLAVOR -> CQ["TAS-enabled ClusterQueue"]
+    REQUEST["Role replica topology request"] -> CQ
+    CQ -> PODS["Domain placement for each replica PodSet"]
+-->
+
+## Configuration
+
+### Topology sources
+
+Choose an inventory path in [Topology Operations](/gpustack-operator/main/docs/modules/topology/operations/index.md#choose-the-inventory-path), then
+configure [Node labels](/gpustack-operator/main/docs/modules/topology/operations/index.md#observe-existing-node-labels), a
+[ConfigMap snapshot](/gpustack-operator/main/docs/modules/topology/operations/index.md#publish-a-configmap-snapshot), or a
+[webhook](/gpustack-operator/main/docs/modules/topology/operations/index.md#publish-by-webhook). [Topology-Aware Scheduling](/gpustack-operator/main/docs/modules/topology/scheduling/index.md) defines the placement contract.
+
+## Operations
+
+1. **Step 1: Choose a source.** Select the inventory path that matches your cluster.
+2. **Step 2: Configure the source.** Apply the `TopologySource` manifest and any backing snapshot or webhook.
+3. **Step 3: Verify the objects.** Check the source, queue, assignment and `Pod` nodes, then [request a level](/gpustack-operator/main/docs/modules/topology/operations/index.md#request-a-level).
+
+Use [Verification](/gpustack-operator/main/docs/modules/topology/operations/index.md#verification) for commands and expected status. Follow the
+[hierarchical placement walkthrough](/gpustack-operator/main/docs/walkthroughs/topology/hierarchical-placement/index.md) for an example.
+
+## Troubleshooting
+
+For a Pending group, follow [diagnosis](/gpustack-operator/main/docs/modules/topology/operations/index.md#diagnose-pending-workloads). Compare the
+requested domain with the queue, topology and available capacity.
 
 ---
 
 **See also** — [RDMA Networking](/gpustack-operator/main/docs/modules/rdma/index.md) (network endpoints) ·
 [Model Deployment](/gpustack-operator/main/docs/modules/model-deployment/index.md) (multi-`Pod` inference)
 
-**Next** → [Topology-Aware Scheduling Operations](/gpustack-operator/main/docs/modules/topology/operations/index.md) —
-publish and verify a topology.
+**Next** → [Topology-Aware Scheduling Operations](/gpustack-operator/main/docs/modules/topology/operations/index.md) — publish and verify a topology.

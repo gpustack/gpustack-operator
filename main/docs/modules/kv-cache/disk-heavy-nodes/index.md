@@ -40,6 +40,8 @@ spec:
   image: docker.io/kvcacheai/mooncake:0.3.13
   connection:
     managed:
+      leader:
+        electionBackend: None  # The upstream image has no Kubernetes Lease backend.
       members:
         - nodeSelector:
             kvcache: "true"

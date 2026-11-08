@@ -242,7 +242,7 @@ stay for a resume.
 
 ## Failure reasons
 
-| Reason | Meaning | What happens |
+| Reason | Meaning | Runtime effect |
 | --- | --- | --- |
 | `InvalidRequest` | the configuration cannot be executed: an invalid endpoint, proxy or CA | waits for the configuration to change |
 | `AccessDenied` | the Hub refused the credential | backoff |

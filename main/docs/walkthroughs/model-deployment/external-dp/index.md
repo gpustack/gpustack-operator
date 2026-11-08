@@ -45,7 +45,7 @@ Use [External DP Benchmark](/gpustack-operator/main/docs/modules/model-deploymen
 
 ## Environment
 
-| Item | Captured setup |
+| Item | Value |
 |---|---|
 | Cluster | One CPU node and one GPU node with eight free NVIDIA H100 80 GB HBM3 SXM5 GPUs |
 | Kubernetes | v1.35.7 |

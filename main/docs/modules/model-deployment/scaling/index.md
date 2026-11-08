@@ -3,6 +3,16 @@
 A `ModelDeploymentScaler` plans replica counts for one `ModelDeployment` from engine metrics. It reports its observations and recommendations in *`status`*. In `Active` mode, it
 also writes *`spec.roles[].replicas`* on the target. The `ModelDeployment` reconciler creates and retires the serving instances that count requires.
 
+![Model deployment scaling flow](/gpustack-operator/main/docs/assets/diagrams/model-deployment-scaling.svg)
+
+<!--
+flowchart LR
+    PODS["Serving replicas"] -> METRICS["Queue, throughput and latency metrics"]
+    METRICS -> ALGORITHM["Selected scaling algorithm and optional priors"] -> GUARDS["Bounds, pacing and safety guards"]
+    GUARDS -> SHADOW["Shadow status recommendations"]
+    GUARDS -> ACTIVE["Active binding and term fence"] -> REPLICAS["Replica count and retirement"] -> PODS
+-->
+
 ## Contents
 
 - [Resource](#resource)
@@ -20,7 +30,7 @@ also writes *`spec.roles[].replicas`* on the target. The `ModelDeployment` recon
 
 ```yaml
 apiVersion: worker.gpustack.ai/v1
-kind: ModelDeploymentScaler  # namespaced, short name mds
+kind: ModelDeploymentScaler  # required; namespaced, short name mds
 metadata:
   name: llm-serving
 spec:
@@ -82,6 +92,11 @@ spec:
     policy: Opposing  # default; Opposing, Priority or Disabled
 ```
 
+- **Target**: Set *`targetRef.name`* to a `ModelDeployment` in the same namespace; the reference is immutable.
+- **Roles**: Provide bounds for every target role; each role name must be unique.
+- **Algorithm**: Select one algorithm and provide only its matching parameter block.
+- **Mode**: `Shadow` plans changes; `Active` commits recommendations after acquiring the binding.
+
 *`targetRef.name`* selects a target in the scaler's namespace. A scaler can precede its target;
 admission skips target-dependent checks while it is absent. The controller reports `TargetNotFound`
 until the target appears. Retargeting requires a new scaler because the reference is immutable.
@@ -112,7 +127,7 @@ Deployment Scaling Simulation](scaling-simulation.md). For H100 and H200 hardwar
 | Algorithm | Mechanism | Suitable workload | Main constraint |
 |---|---|---|---|
 | `Proportional` | One instantaneous metric (`QueueDepth`, `RunningRequests`, `WaitingRequests` or a token rate) over a fixed per-replica target, with a *`tolerance`* deadband. | Uniform-length requests (fixed-template classification, extraction, short chat) whose concurrency maps predictably to GPU load, or simple single-metric scaling. | Bursts and changing capacity can make the target inaccurate. |
-| `TokenThroughput` | Two sliding windows (*`stableWindowSeconds`*, *`panicWindowSeconds`*) over prefix-cache-adjusted prompt and generation token rates, a *`panicThreshold`* burst mode, and p95 *time to first token (TTFT)* and *inter-token latency (ITL)* guards. | General LLM and *prefill/decode (PD)*-disaggregated serving with variable prompt and output lengths and prefix caching, where request count alone misstates compute load. | Sampling windows react after demand changes. |
+| **`TokenThroughput`** | **Default** when admission does not infer another type. Two sliding windows (*`stableWindowSeconds`*, *`panicWindowSeconds`*) over prefix-cache-adjusted prompt and generation token rates, a *`panicThreshold`* burst mode, and p95 *time to first token (TTFT)* and *inter-token latency (ITL)* guards. | General LLM and *prefill/decode (PD)*-disaggregated serving with variable prompt and output lengths and prefix caching, where request count alone misstates compute load. | Sampling windows react after demand changes. |
 | `Predictive` | A causal local-linear-trend Kalman filter forecasting token demand *`horizonSeconds`* ahead, taking the larger of the forecast count and the `TokenThroughput` fallback. | Sustained traffic ramps (scheduled business peaks, batch onset, multi-minute climbs) where replica initialization and weight loading ahead of the peak arrival offsets cold-start latency. | A new predictor uses the token result until enough observations arrive. |
 
 ### Proportional
@@ -180,49 +195,30 @@ spec:
       latencyQuantile: "0.95"       # default; P95
 ```
 
-The three token target fields describe the capacity of one replica of their role kind. A *prefill* replica serves cache-missed prompt tokens; a *decode* replica serves generation
-tokens. A *server* replica serves both. Supply a positive capacity for every scaled non-*encode* kind. An *encode* role needs a direct ratio to a *prefill* or *decode* role, in
-either direction.
+- **Token targets**: Set positive per-replica capacities for each scaled non-*encode* role.
+- **Role capacity**: Set prompt capacity for *prefill*, generation for *decode*, and combined capacity for *server*.
+- **Encode**: Couple *encode* to another role with a ratio.
+- **Windows**: Keep *`panicWindowSeconds`* shorter than *`stableWindowSeconds`*. Admission validates each range independently without enforcing their order.
+- **Panic**: Demand at *`panicThreshold`* times ready capacity starts panic and blocks scale-down. A value at or below `1` triggers panic at or before capacity.
+- **Latency quantile**: Set *`latencyQuantile`* in `(0, 1]`. It defaults to P95 (`0.95`), with nanounit precision.
+- **Latency guard**: A *TTFT* or *ITL* breach holds scale-down. Above 1.2 times the target, it recommends growth.
 
-The algorithm averages demand over *`stableWindowSeconds`* and *`panicWindowSeconds`* separately. It divides each average by the per-replica capacity and rounds up. Panic starts
-when the recent rate reaches *`panicThreshold`* times the ready replicas' capacity. During panic, it uses the larger recommendation and prevents scale-down. A threshold at or
-below `1` starts panic at or before capacity.
-
-Keep the panic window shorter than the stable window to react to bursts sooner. Admission validates each window's range but does not enforce their order. The latency guard also
-checks *TTFT* for *prefill* and *ITL* for *decode*. A *server* role checks both and uses the larger relative breach.
-
-*`latencyQuantile`* selects the quantile used for online TTFT and ITL observations and for any capacity prior. It
-accepts a quantity in `(0, 1]`: for example, `"0.25"` is P25, `"0.9"` is P90, and `"0.99"` is P99. When omitted, it defaults to P95. `Predictive` uses the same field inside its
-nested *`tokenThroughput`* configuration. Quantities resolve to nanounit precision; values with finer precision are rounded by Kubernetes before the scaler uses them.
-
-A latency above its target prevents scale-down. Above `1.2` times the target, the guard recommends at least one more replica. Missing latency holds scale-down while allowing a
-throughput-driven increase. Bounds, ratios and pacing still constrain every recommendation.
-
-The stable and panic windows with their panic threshold follow the [vLLM AIBrix
-KPA](https://github.com/vllm-project/aibrix/blob/52b8834e6223eac7ca5c050b44486aa29b44a1a6/pkg/controller/podautoscaler/algorithm/kpa.go) and the [Knative Serving
-KPA](https://github.com/knative/serving/blob/knative-v1.23.0/pkg/autoscaler/scaling/autoscaler.go).
-
-[HeteroScale](https://arxiv.org/abs/2508.19559) scales the *prefill* and *decode* pools from cache-missed prefill throughput, decode throughput and a latency guard.
-[TokenScale](https://arxiv.org/abs/2512.03416) uses a per-stage token rate as a leading indicator of backpressure.
+The window design draws on [AIBrix KPA](https://github.com/vllm-project/aibrix/blob/52b8834e6223eac7ca5c050b44486aa29b44a1a6/pkg/controller/podautoscaler/algorithm/kpa.go),
+[Knative KPA](https://github.com/knative/serving/blob/knative-v1.23.0/pkg/autoscaler/scaling/autoscaler.go),
+[HeteroScale](https://arxiv.org/abs/2508.19559), and [TokenScale](https://arxiv.org/abs/2512.03416).
 
 ### Engine signals
 
-Both engines report running and waiting requests; a *decode* role also includes
-`sglang:num_decode_transfer_queue_reqs` in its waiting count.
+- **Queue depth**: Both engines report running and waiting requests.
+- **SGLang decode**: The waiting count includes `sglang:num_decode_transfer_queue_reqs`.
+- **SGLang prefill**: The waiting count includes `sglang:num_prefill_inflight_queue_reqs`.
+- **Prompt rate**: Uses rank-0 effective-prefill deltas when available. Otherwise, it subtracts prefix-cache hits from prompt deltas.
+- **Generation rate**: Uses rank-0 generation counter deltas without subtracting cache hits.
+- **Latency**: Reads histogram bucket deltas at the configured quantile. When buckets are absent or the quantile lands in `+Inf`, the reading is unavailable without mean fallback.
+- **KV usage**: Averages *`kvCacheUsage`*. See [Model Deployment Metrics](/gpustack-operator/main/docs/modules/model-deployment/metrics/index.md).
 
-Both engines supply prompt and generation token counters. The scaler calculates rates from counter deltas between samples. For vLLM, it subtracts prefix-cache hit deltas from
-prompt-token deltas and clamps the result at zero. Prefix-cache queries do not cap the hits used in this calculation.
-
-For SGLang, the preferred prompt demand is the `mode="input"` delta of
-`sglang:prefill_effective_tokens_total`. Without that counter in both samples, it subtracts the
-`device_hit`, `host_hit` and `storage_hit` deltas when available. Without cache accounting, it uses
-the prompt-token delta. A warm cache therefore reduces measured prompt demand when hits are reported.
-
-Latency uses the engine histogram deltas across the sampled replicas. The scaler selects the bucket boundary covering the ninety-fifth percentile. If buckets are absent or that
-percentile falls in the infinite bucket, it uses the histogram mean. *`kvCacheUsage`* averages the reported fractions.
-
-Only rank-zero or unlabelled series contribute. A restarted container or a decreasing counter invalidates the rate window until a new baseline exists. See [Model Deployment
-Metrics](metrics.md) for the engine series and scrape configuration.
+SGLang reports *`sglang:prefill_effective_tokens_total`* with an `input` mode. Its hit modes are
+`device_hit`, `host_hit` and `storage_hit`.
 
 ### Predictive
 
@@ -261,21 +257,12 @@ spec:
       minPoints: 6  # default; 1 to 64 observations
 ```
 
-`Predictive` uses a causal Kalman filter with a local linear trend. It forecasts demand over
-*`horizonSeconds`* and divides that forecast by the role kind's per-replica forecast capacity.
-The recommendation is at least the token-throughput result. Until *`minPoints`* observations arrive,
-it reports `PredictorWarmingUp` in the role's *`reason`* and uses that fallback result.
-
-*`qLevel`* and *`qTrend`* control process noise for the demand level and trend. Higher values let those estimates change
-faster. *`measurementNoise`* describes uncertainty in new observations; higher values reduce their influence. Positive
-values tune the filter; omitted or nonpositive values use `1`, `0.1` and `10`, respectively.
-
-After warm-up, panic or a latency breach above `1.2` times the target requests at least one extra replica. Consolidation also requires that removing one replica would leave the
-others carrying no more than 80% of their per-replica capacity. The scale-down step policy and other guards still apply.
-
-The forecast follows the [NVIDIA Dynamo
-Planner](https://github.com/ai-dynamo/dynamo/blob/4f42be7bebd96ea0199088840549397809f80a92/docs/fern/pages/developer-guide/knowledge-base/modular-components/planner/planner-design.md).
-Its Kalman predictor estimates a local linear trend, and its load-based loop reacts to live metrics below the predicted capacity.
+- **Kalman forecast**: Forecasts demand over *`horizonSeconds`* ([Dynamo Planner](https://github.com/ai-dynamo/dynamo/blob/4f42be7bebd96ea0199088840549397809f80a92/docs/fern/pages/developer-guide/knowledge-base/modular-components/planner/planner-design.md)), bounded below by the token-throughput fallback (`PredictorWarmingUp` until *`minPoints`* samples).
+- **Noise tuning**: Positive *`qLevel`* (default `1`), *`qTrend`* (`0.1`), and *`measurementNoise`* (`10`) tune level, trend, and observation weights.
+- **Panic guard**: After warm-up, panic recommends at least one replica above the current count.
+- **Warm-up**: Before enough samples, panic uses the token-throughput recommendation and blocks scale-down.
+- **Latency guard**: Latency above 1.2 times the target recommends at least one additional replica.
+- **Consolidation**: Scale-down requires surviving replicas to stay at or below 80% capacity.
 
 ### Capacity priors
 
@@ -309,6 +296,17 @@ spec:
         key: priors.yaml  # Default; the parser accepts YAML and JSON.
       headroom: "0.75"  # Default when capacityPrior is present; quantity in (0, 1].
 ```
+
+- **Target**: Reference a deployment in the scaler's namespace.
+- **Catalog**: Omit *`catalogRef`* to use the embedded catalog.
+- **Headroom**: Set a value in `(0, 1]`; the default is `0.75`.
+- **Capacity**: Explicit values override catalog values.
+
+| Value | Meaning | Constraints |
+|---|---|---|
+| `TokenThroughput` | Token demand scaling | Supports capacity priors. |
+| `Predictive` | Forecast-based scaling | Supports capacity priors. |
+| `Proportional` | Single-metric scaling | Rejects capacity priors. |
 
 The catalog may resolve missing capacity fields for `TokenThroughput` and `Predictive`. Explicit capacities win; headroom multiplies only catalog seed capacity. The default is an
 initial configurable engineering margin, not a universal optimum. [Scaling Benchmark](/gpustack-operator/main/docs/modules/model-deployment/scaling-benchmark/index.md#suite-2-capacity-priors) compares `0.75` catalog headroom against
@@ -435,7 +433,7 @@ Public benchmark sources (InferenceX and similar) qualify into *`priors.yaml`* u
 refused. The pins — source URLs, capture dates, artifact digests and refusal records — live in the `gpustack-operator-priors` skill's provenance records
 (`.agents/skills/gpustack-operator-priors/references/records.md`), not inside the catalog file.
 
-| Data point | Requirement | Handling when optional, missing or non-standard |
+| Data point | Requirement | Fallback handling |
 |---|---|---|
 | Model and hardware identity | Verified Hugging Face repository; canonical accelerator `Family` | Normalized by the [identity normalization](#identity-normalization) rules; source slugs, mirror orgs and vendor checkpoints adapt to the canonical identity. |
 | Load points | `concurrency`, per-replica `tokens/s` throughput and latency quantiles in milliseconds | Quantiles the source did not publish stay absent; chunk-gap percentiles normalize to per-token *ITL* at import. |
@@ -498,7 +496,7 @@ suppress `status` writes until control-plane state changes or a predictor advanc
 
 ### Local evaluation
 
-The [capacity priors and local evaluation spec](https://github.com/gpustack/gpustack-operator/blob/8c5186108e620a8044164d9c4c114dd7376092f4/specs/2026-10-26-inferencex-model-deployment-scaling.md) records 48 deterministic synthetic result rows across eight
+The [capacity priors and local evaluation spec](https://github.com/gpustack/gpustack-operator/blob/91dc7c8d650bac133dd4ea3b29b35d62bd1ee2b1/specs/2026-10-26-inferencex-model-deployment-scaling.md) records 48 deterministic synthetic result rows across eight
 tuning traces (`manual`, `resolved` and one `passive` candidate at seed factor `1`) plus two open-loop versus closed-loop examples.
 
 It also evaluates two held-out traces (`heldout_bursts` and `heldout_length_cache_shift`, 11 rows each across `manual` at factor `1` plus `resolved` and one `passive` candidate

@@ -10,6 +10,9 @@
         const theme = localStorage.getItem("theme");
         if (theme === "light" || theme === "dark") document.documentElement.dataset.theme = theme;
         document.documentElement.dataset.themeChoice = theme === "light" || theme === "dark" ? theme : "system";
+        if (localStorage.getItem("sidebar-collapsed") === "true") {
+          document.documentElement.dataset.sidebarCollapsed = "true";
+        }
       } catch {
         document.documentElement.dataset.themeChoice = "system";
       }
@@ -24,7 +27,7 @@
   <link rel="alternate" type="text/markdown" href="/gpustack-operator/main/docs/modules/model-deployment/external-dp/index.md">
   
   <link rel="describedby" href="/gpustack-operator/main/llms.txt">
-  <link rel="stylesheet" href="/gpustack-operator/main/css/site.ea544478884ee4c46c0d82a26985cad564c8f892cccad0c8ffcefe846c62a4a0.css">
+  <link rel="stylesheet" href="/gpustack-operator/main/css/site.1a0de63fe646aba4ed6541fe0a6383c2ed5ca649b1593a98595ba53430bcf032.css">
   <link rel="stylesheet" href="/gpustack-operator/main/css/code.d2570c1cc6480f9c62bc31ec538eef2578ce80980588c469638a5f95416bfc7b.css">
 </head>
 <body class="docs-page">
@@ -95,6 +98,13 @@
   <div class="layout">
     <aside class="sidebar" aria-label="Documentation navigation">
       <button class="nav-toggle" type="button" aria-controls="docs-navigation" aria-expanded="false">Browse documentation</button>
+      <button class="sidebar-toggle" type="button" aria-controls="docs-navigation" aria-expanded="true" aria-label="Collapse sidebar" title="Collapse sidebar">
+        <svg class="sidebar-toggle-icon" aria-hidden="true" viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="2" y="2.5" width="12" height="11" rx="2"/>
+          <line x1="6" y1="2.5" x2="6" y2="13.5"/>
+          <polyline class="sidebar-icon-arrow" points="10.5 6 8.5 8 10.5 10"/>
+        </svg>
+      </button>
       <nav id="docs-navigation" class="sidebar-inner">
         <div class="nav-title">Documentation</div>
         <a class="nav-home" href="/gpustack-operator/main/" >Overview</a>
@@ -1453,6 +1463,19 @@ admits: vLLM <code>v0.30.0</code> on NVIDIA <em>H100</em> behind the <code>vllm-
 <code>gpustack/llm-router:v0.3.1</code> under <code>--policy round_robin</code>, and SGLang <code>0.5.22</code> behind the
 <code>sglang-gateway</code> binary of <code>gpustack/llm-router:v0.3.1</code>. Other versions must be re-verified
 before they inherit a claim on this page.</p>
+<p><span class="diagram-scroll"><img src="/gpustack-operator/main/docs/assets/diagrams/model-deployment-external-dp.svg" alt="External DP router and rank endpoints" decoding="async"></span></p>
+<!--
+flowchart TD
+    CLIENT["Client"] -> ROUTER["Managed router: round robin"]
+    ROUTER -> R0["Rank 0 HTTP"]
+    ROUTER -> R1["Rank 1 HTTP"]
+    ROUTER -> R2["Rank 2 HTTP"]
+    ROUTER -> R3["Rank 3 HTTP"]
+    R0 -> EP["Cross-Pod expert collective"]
+    R1 -> EP
+    R2 -> EP
+    R3 -> EP
+-->
 <h2 id="contents">Contents</h2>
 <ul>
 <li><a href="#overview-and-selection">Overview and selection</a>
@@ -1579,8 +1602,16 @@ bounded the measured transport; host NVLink did not carry cross-<code>Pod</code>
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">env</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">        </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">VLLM_PORT</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="nt">value</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;19500&#34;</span><span class="w">  </span><span class="c"># keeps candidate ports below the ephemeral source-port range</span></span></span></code></pre></div>
-</div><p>When the cluster provides an <em>RDMA</em> fabric, add <code>interface: &quot;2&quot;</code> under <em><code>resources</code></em> so cross-<code>Pod</code>
-expert collectives run over InfiniBand or RoCE instead of TCP.</p>
+</div><ul>
+<li><strong>Group</strong>: One <em>Server</em> replica contains four members.</li>
+<li><strong>Resources</strong>: Each member requests two accelerators.</li>
+<li><strong>Rank</strong>: The operator supplies <em><code>GPUSTACK_MEMBER_INDEX</code></em> to each member.</li>
+<li><strong>Router</strong>: <code>vllm-router</code> directs requests to rank endpoints.</li>
+</ul>
+<p>To request two <em>RDMA</em> endpoints per member, add <code>interface: &quot;2&quot;</code> under <em><code>resources</code></em>.
+A device grant does not establish which transport the collective uses. See
+<a href="/gpustack-operator/main/docs/modules/rdma/operations/">RDMA Operations</a>
+ for allocation and verification.</p>
 <h3 id="sglang-shape">SGLang shape</h3>
 <p>The SGLang configuration is the same shape on the SGLang engine, declared through SGLang&rsquo;s own
 launch arguments. One instance is <strong>one SGLang distributed launch spanning <code>size</code> member <code>Pod</code>s</strong>,
@@ -1627,7 +1658,13 @@ tensor-parallel group spanning both members.</p>
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">env</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">        </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">SGLANG_RUST_SERVER</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="nt">value</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;1&#34;</span></span></span></code></pre></div>
-</div><p><code>--node-rank</code> is the only argument that differs between members. It carries
+</div><ul>
+<li><strong>Group</strong>: One <em>Server</em> replica contains two members.</li>
+<li><strong>Resources</strong>: Each member requests one accelerator.</li>
+<li><strong>Rank</strong>: The operator supplies <em><code>GPUSTACK_MEMBER_INDEX</code></em> to each member.</li>
+<li><strong>Router</strong>: <code>sglang-gateway</code> directs requests to member endpoints.</li>
+</ul>
+<p><code>--node-rank</code> is the only argument that differs between members. It carries
 <code>$(GPUSTACK_MEMBER_INDEX)</code> verbatim, and Kubernetes expands the reference in the container
 arguments against the member&rsquo;s own environment — the same mechanism the vLLM example above uses
 for <code>--data-parallel-rank</code>. The operator stamps the member index per member and the leader&rsquo;s DNS
@@ -1659,7 +1696,7 @@ only when every member is qualified again.</li>
   <thead>
       <tr>
           <th>Condition</th>
-          <th>Why it is necessary</th>
+          <th>Purpose</th>
       </tr>
   </thead>
   <tbody>
@@ -1747,7 +1784,7 @@ engine derives them from <code>--data-parallel-rank</code>:</p>
   <thead>
       <tr>
           <th>Omitted argument</th>
-          <th>Why it is unnecessary</th>
+          <th>Rationale</th>
       </tr>
   </thead>
   <tbody>
@@ -1906,8 +1943,8 @@ measured requests plus 48 warm-ups and 1 calibration probe). Both configurations
   <thead>
       <tr>
           <th>Prompt/output target</th>
-          <th style="text-align: right">Wide <em>TP</em> = 8 (ms)</th>
-          <th style="text-align: right"><em>DP</em> = 4, <em>TP</em> = 2 (ms)</th>
+          <th style="text-align: right">Wide TP (ms)</th>
+          <th style="text-align: right">DP4 TP2 (ms)</th>
           <th style="text-align: right">Median reduction</th>
       </tr>
   </thead>
@@ -1947,7 +1984,7 @@ both runs. The scale-down held the disaggregated handoff grace window, the withd
 workers leaving the gateway&rsquo;s worker set after 482 s in one run and 310 s in the other.</p>
 <p>The gateway&rsquo;s worker set covered at most one worker per group in both runs — two healthy
 workers for two groups in one run and one in the other; the registration boundary and its image
-floor are under <a href="/gpustack-operator/main/docs/modules/model-deployment/routing/#which-pods-receive-traffic">Routing</a>
+floor are under <a href="/gpustack-operator/main/docs/modules/model-deployment/routing/#traffic-targets">Routing</a>
 .</p>
 <p>After the scale-down the surviving group never republished <code>Eligible</code> within the case&rsquo;s 900 s
 budget while the retired group read <code>Withdrawn</code>, so a surviving group&rsquo;s recovery from a
@@ -1976,7 +2013,7 @@ monolithic wide tensor-parallel group)</li></ul>
           
           
           <nav class="page-actions" aria-label="Page source">
-            <a href="https://github.com/gpustack/gpustack-operator/blob/8c5186108e620a8044164d9c4c114dd7376092f4/docs/modules/model-deployment/external-dp.md">View page source</a>
+            <a href="https://github.com/gpustack/gpustack-operator/blob/91dc7c8d650bac133dd4ea3b29b35d62bd1ee2b1/docs/modules/model-deployment/external-dp.md">View page source</a>
             
             <a href="https://github.com/gpustack/gpustack-operator/edit/main/docs/modules/model-deployment/external-dp.md">Edit this page</a>
             
@@ -2014,6 +2051,6 @@ monolithic wide tensor-parallel group)</li></ul>
     </aside>
   </div>
   
-  <script src="/gpustack-operator/main/js/site.1ec84fdfb2bec16dbb83a64abad1abe2d27d8d3f7fc54c2cfa45fe4d64303b3c.js" defer></script>
+  <script src="/gpustack-operator/main/js/site.e362041170f1762d2935c1ef4d8ca5f494983b230101e1b6536544c195645f10.js" defer></script>
 </body>
 </html>

@@ -10,6 +10,9 @@
         const theme = localStorage.getItem("theme");
         if (theme === "light" || theme === "dark") document.documentElement.dataset.theme = theme;
         document.documentElement.dataset.themeChoice = theme === "light" || theme === "dark" ? theme : "system";
+        if (localStorage.getItem("sidebar-collapsed") === "true") {
+          document.documentElement.dataset.sidebarCollapsed = "true";
+        }
       } catch {
         document.documentElement.dataset.themeChoice = "system";
       }
@@ -24,7 +27,7 @@
   <link rel="alternate" type="text/markdown" href="/gpustack-operator/main/docs/modules/devices/index.md">
   
   <link rel="describedby" href="/gpustack-operator/main/llms.txt">
-  <link rel="stylesheet" href="/gpustack-operator/main/css/site.ea544478884ee4c46c0d82a26985cad564c8f892cccad0c8ffcefe846c62a4a0.css">
+  <link rel="stylesheet" href="/gpustack-operator/main/css/site.1a0de63fe646aba4ed6541fe0a6383c2ed5ca649b1593a98595ba53430bcf032.css">
   <link rel="stylesheet" href="/gpustack-operator/main/css/code.d2570c1cc6480f9c62bc31ec538eef2578ce80980588c469638a5f95416bfc7b.css">
 </head>
 <body class="docs-page">
@@ -95,6 +98,13 @@
   <div class="layout">
     <aside class="sidebar" aria-label="Documentation navigation">
       <button class="nav-toggle" type="button" aria-controls="docs-navigation" aria-expanded="false">Browse documentation</button>
+      <button class="sidebar-toggle" type="button" aria-controls="docs-navigation" aria-expanded="true" aria-label="Collapse sidebar" title="Collapse sidebar">
+        <svg class="sidebar-toggle-icon" aria-hidden="true" viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="2" y="2.5" width="12" height="11" rx="2"/>
+          <line x1="6" y1="2.5" x2="6" y2="13.5"/>
+          <polyline class="sidebar-icon-arrow" points="10.5 6 8.5 8 10.5 10"/>
+        </svg>
+      </button>
       <nav id="docs-navigation" class="sidebar-inner">
         <div class="nav-title">Documentation</div>
         <a class="nav-home" href="/gpustack-operator/main/" >Overview</a>
@@ -1440,38 +1450,66 @@
       <article>
         
   <h1 id="heterogeneous-devices">Heterogeneous Devices</h1>
-<p>GPUStack uses one request model for GPUs, NPUs, MLUs, DCUs and PPUs. The resource name and the
-runtime isolation method depend on the manufacturer.</p>
+<p>GPUStack makes GPUs, NPUs, MLUs, DCUs and PPUs available to workloads. The manufacturer
+controls the resource name and runtime isolation method.</p>
 <h2 id="contents">Contents</h2>
 <ul>
-<li><a href="#accelerator-requests">Accelerator requests</a>
+<li><a href="#overview">Overview</a>
 </li>
-<li><a href="#device-operations">Device operations</a>
+<li><a href="#configuration">Configuration</a>
+</li>
+<li><a href="#operations">Operations</a>
+</li>
+<li><a href="#troubleshooting">Troubleshooting</a>
 </li>
 </ul>
-<h2 id="accelerator-requests">Accelerator requests</h2>
-<p><a href="/gpustack-operator/main/docs/modules/devices/requests/">Accelerator Requests</a>
- explains whole, shared, logically sliced and
-physically partitioned requests. <a href="/gpustack-operator/main/docs/modules/devices/discovery/">Device Discovery</a>
- explains
-how the per-node <code>Devices</code> record connects discovery to allocation.</p>
-<p>Follow <a href="/gpustack-operator/main/docs/walkthroughs/devices/scheduling/">Heterogeneous Devices Walkthrough</a>
- for
-end-to-end device allocation and Kueue queuing.</p>
-<h2 id="device-operations">Device operations</h2>
-<p>Check a node before installation with <a href="/gpustack-operator/main/docs/modules/devices/preflight/">Preflight Checks</a>
-. If you
-use hardware partitioning, follow the runbook for <a href="/gpustack-operator/main/docs/modules/devices/nvidia-mig/">NVIDIA</a>
-,
-<a href="/gpustack-operator/main/docs/modules/devices/thead-mig/">T-Head</a>
- or <a href="/gpustack-operator/main/docs/modules/devices/hygon-mig/">Hygon</a>
-.</p>
+<h2 id="overview">Overview</h2>
+<p>Device Manager detects hardware and publishes capacity. Kueue admits requests against the resulting
+queues. The device plugin allocates devices to containers.</p>
+<p><span class="diagram-scroll"><img src="/gpustack-operator/main/docs/assets/diagrams/devices-flow.svg" alt="Device discovery and allocation flow" decoding="async"></span></p>
+<!--
+flowchart TD
+    HARDWARE["Accelerators and node hardware"] -> NFD["NFD NodeFeatureRule"]
+    HARDWARE -> DM["Device Manager inventory and ledger"]
+    NFD -> PROFILER["Worker capacity profiler"]
+    DM -> PROFILER
+    PROFILER -> QUEUES["InstanceType, ResourceFlavor and isolated queues"]
+    QUEUES -> GATES["Webhook, quota, per-device fit, scheduler and plugin"]
+    GATES -> CONTAINER["Device access and supported slicing or MIG"]
+-->
+<h2 id="configuration">Configuration</h2>
+<h3 id="accelerator-requests">Accelerator requests</h3>
+<p>Choose a resource family in <a href="/gpustack-operator/main/docs/modules/devices/requests/#resource-keys">Accelerator Requests</a>
+. The guide includes
+request examples and validation rules. <a href="/gpustack-operator/main/docs/modules/devices/discovery/">Device Discovery</a>
+ explains the inventory and
+allocation boundary.</p>
+<h2 id="operations">Operations</h2>
+<h3 id="device-operations">Device operations</h3>
+<ol>
+<li><strong>Step 1: Check the node.</strong> Run <a href="/gpustack-operator/main/docs/modules/devices/preflight/">Preflight Checks</a>
+ before installation.</li>
+<li><strong>Step 2: Request devices.</strong> Follow the <a href="/gpustack-operator/main/docs/walkthroughs/devices/scheduling/">device walkthrough</a>
+.</li>
+<li><strong>Step 3: Verify allocation.</strong> Check the <code>Workload</code>, <code>Pod</code> and device inventory in the walkthrough.</li>
+</ol>
+<p>For physical partitions, use the <a href="/gpustack-operator/main/docs/modules/devices/nvidia-mig/">NVIDIA</a>
+, <a href="/gpustack-operator/main/docs/modules/devices/thead-mig/">T-Head</a>
+, or
+<a href="/gpustack-operator/main/docs/modules/devices/hygon-mig/">Hygon</a>
+ runbook. The <a href="/gpustack-operator/main/docs/modules/devices/scheduling/">scheduling chain</a>
+ describes queue status.</p>
+<h2 id="troubleshooting">Troubleshooting</h2>
+<p>For a rejected request, check the <a href="/gpustack-operator/main/docs/modules/devices/admission/#five-gates">admission gates</a>
+ and request rules.
+For node checks and their results, see <a href="/gpustack-operator/main/docs/modules/devices/preflight/#reading-the-result">Preflight Checks</a>
+.
+For partition recovery, use the runbook for the manufacturer.</p>
 <nav class="reading-footer" aria-label="Further reading">
     <section>
       <h2>See also</h2>
       <ul class="related-pages"><li><a href="/gpustack-operator/main/docs/modules/instances/">GPU Instances</a>
- (a container workspace using an
-accelerator)</li><li><a href="/gpustack-operator/main/docs/getting-started/architecture/">Architecture</a>
+ (accelerator workspaces)</li><li><a href="/gpustack-operator/main/docs/getting-started/architecture/">Architecture</a>
  (the scheduling chain)</li></ul>
     </section><section class="next-page">
         <h2>Next</h2>
@@ -1489,7 +1527,7 @@ accelerator)</li><li><a href="/gpustack-operator/main/docs/getting-started/archi
           
           
           <nav class="page-actions" aria-label="Page source">
-            <a href="https://github.com/gpustack/gpustack-operator/blob/8c5186108e620a8044164d9c4c114dd7376092f4/docs/modules/devices/_index.md">View page source</a>
+            <a href="https://github.com/gpustack/gpustack-operator/blob/91dc7c8d650bac133dd4ea3b29b35d62bd1ee2b1/docs/modules/devices/_index.md">View page source</a>
             
             <a href="https://github.com/gpustack/gpustack-operator/edit/main/docs/modules/devices/_index.md">Edit this page</a>
             
@@ -1500,8 +1538,18 @@ accelerator)</li><li><a href="/gpustack-operator/main/docs/getting-started/archi
           <nav id="TableOfContents">
   <ul>
     <li><a href="#contents">Contents</a></li>
-    <li><a href="#accelerator-requests">Accelerator requests</a></li>
-    <li><a href="#device-operations">Device operations</a></li>
+    <li><a href="#overview">Overview</a></li>
+    <li><a href="#configuration">Configuration</a>
+      <ul>
+        <li><a href="#accelerator-requests">Accelerator requests</a></li>
+      </ul>
+    </li>
+    <li><a href="#operations">Operations</a>
+      <ul>
+        <li><a href="#device-operations">Device operations</a></li>
+      </ul>
+    </li>
+    <li><a href="#troubleshooting">Troubleshooting</a></li>
   </ul>
 </nav>
         
@@ -1509,6 +1557,6 @@ accelerator)</li><li><a href="/gpustack-operator/main/docs/getting-started/archi
     </aside>
   </div>
   
-  <script src="/gpustack-operator/main/js/site.1ec84fdfb2bec16dbb83a64abad1abe2d27d8d3f7fc54c2cfa45fe4d64303b3c.js" defer></script>
+  <script src="/gpustack-operator/main/js/site.e362041170f1762d2935c1ef4d8ca5f494983b230101e1b6536544c195645f10.js" defer></script>
 </body>
 </html>
