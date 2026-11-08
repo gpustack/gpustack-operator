@@ -653,11 +653,13 @@ func bindingAllowsPinned(binding *workercore.ModelStoreBinding) bool {
 	return binding.Spec.AllowPinned != nil && *binding.Spec.AllowPinned
 }
 
-// recomputePinned rewrites every node's spec.pinned to the union of what the surviving prefetches
-// pin: a digest lands on the nodes whose delivery is ready and whose TTL has not expired, and a
-// digest two namespaces pin stays for both. This controller is the field's only writer, so the
-// whole list is replaced rather than merged — there is no second opinion to lose, and a pin that
-// vanished from the desired set is gone by the end of the pass.
+// recomputePinned rewrites every node's spec.pinned to the union of two voices: the surviving
+// prefetches' disk retention — a digest lands on the nodes whose delivery is ready and whose TTL
+// has not expired, and a digest two namespaces pin stays for both — and the nodes' own reports,
+// which pin every admitted generation's tree on its own node whatever the prefetches say. This
+// controller is the field's only writer, so the whole list is replaced rather than merged — there
+// is no second opinion to lose, and a pin that vanished from the desired set is gone by the end
+// of the pass.
 func (r *ModelPrefetchReconciler) recomputePinned(ctx context.Context) error {
 	pfs := new(workercore.ModelPrefetchList)
 	if err := r.Client.List(ctx, pfs); err != nil {
@@ -724,6 +726,27 @@ func (r *ModelPrefetchReconciler) recomputePinned(ctx context.Context) error {
 		}
 	}
 	desired := map[string]map[string]bool{}
+	// The node's own report is the source-file pin's source: a generation
+	// keeps reading its tree after the prefetch that named it was
+	// retargeted, re-resolved to another revision, or deleted, so prefetch
+	// membership cannot decide whether the tree stays pinned. Every
+	// reported generation pins its digest on its own node, before any
+	// prefetch loop runs; the reports' own departure removes the pin.
+	for i := range stores.Items {
+		store := &stores.Items[i]
+		if store.Status.ModelTransfer == nil {
+			continue
+		}
+		for _, generation := range store.Status.ModelTransfer.Generations {
+			if generation.Digest == "" {
+				continue
+			}
+			if desired[store.Name] == nil {
+				desired[store.Name] = map[string]bool{}
+			}
+			desired[store.Name][generation.Digest] = true
+		}
+	}
 	for i := range pfs.Items {
 		pf := &pfs.Items[i]
 		deleting := pf.DeletionTimestamp != nil
@@ -1409,13 +1432,17 @@ func modelPrefetchSourceAuthorityChanged() ctrlpredicate.Predicate {
 }
 
 // enqueueAllPrefetches enqueues every prefetch: nodes and their reports are cluster-wide facts any
-// of them may read.
+// of them may read. When no prefetch exists, a sentinel request still runs the NotFound branch so
+// admitted-generation pins on NodeModelStores are recomputed as generations appear and exit.
 func (r *ModelPrefetchReconciler) enqueueAllPrefetches(ctx context.Context, _ ctrlcli.Object) []ctrlreconcile.Request {
 	pfs := new(workercore.ModelPrefetchList)
 	if err := r.Client.List(ctx, pfs); err != nil {
 		ctrllog.FromContext(ctx).Error(err, "list model prefetches")
 
 		return nil
+	}
+	if len(pfs.Items) == 0 {
+		return []ctrlreconcile.Request{{NamespacedName: ctrlcli.ObjectKey{Name: "__pinned__"}}}
 	}
 
 	reqs := make([]ctrlreconcile.Request, 0, len(pfs.Items))
