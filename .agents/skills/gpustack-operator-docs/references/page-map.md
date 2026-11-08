@@ -243,6 +243,17 @@ map.
 **Never** — what the underlying fields mean. A view's semantics live on `artifact.md` and
 `node-store.md`; this page says how they are read and by whom.
 
+## `docs/modules/model-delivery/remote.md`
+
+**Owns** — remote weight delivery: the `Require` and `Prefer` policies and their fallback rules,
+source preparation (the prefetch `source` opt-in and the `ModelStoreBinding` `sourceMemory`
+grant), the metadata-only mount, model-transfer session credentials, control and payload networks, the
+remote status view, and its troubleshooting and rollback.
+
+**Never** — the per-engine adapter qualification state (`engine-versions.md` owns that table), the
+artifact identity a source serves (`artifact.md`), or the node cache's own operations
+(`operations.md`); support status stays a pointer to the hardware acceptance gates.
+
 ## `docs/modules/model-delivery/operations.md`
 
 **Owns** — the administrator's procedure for node delivery: enabling the plugin, its configuration

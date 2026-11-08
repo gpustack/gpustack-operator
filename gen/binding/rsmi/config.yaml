@@ -61,6 +61,7 @@ TRANSLATOR:
     - { target: "^rsmi", default: "raw" }
   Rules:
     const:
+      - { action: ignore, from: "^RSMI_MAX_NUM_POWER_PROFILES$" }
       - { action: accept, from: "^RSMI_" }
       - { action: accept, from: "^rsmi_" }
       - { action: replace, from: "^RSMI_" }

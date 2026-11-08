@@ -187,7 +187,7 @@ changes:
 [values.yaml](../deploy/gpustack-operator/chart/values.yaml), the comment above the variable in
 [deployment.yaml](../deploy/gpustack-operator/chart/templates/worker/deployment.yaml), which says a stored value
 always wins, and the comment in
-[model_store.go](../pkg/worker/settings/model_store.go), which says a seed fills only a key the store does not have
+[value.go](../pkg/worker/settings/value.go), which says a seed fills only a key the store does not have
 yet. The template renders the same variable and the same value; only its comment changes. The
 `model-artifact-delivery-mode` row of the Settings table carries the same promise and is restated by the task
 that owns that page.

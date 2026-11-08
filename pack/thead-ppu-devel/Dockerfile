@@ -1,3 +1,10 @@
+# Build target: thead-ppu-devel (default final stage).
+# Platform: linux/amd64 only.
+# Run from the repository root with the SDK URL provided in the environment:
+#   PACKAGE_ARCH=amd64 PACKAGE_TAG=dev make package thead-ppu-devel
+# PPU_SDK_URL is required and is forwarded by hack/package.sh.
+# Set PACKAGE_NAMESPACE to select the image namespace; PACKAGE_PUSH=true publishes.
+
 # THead PPU SDK development base image.
 #
 # WHAT: a build-time base carrying the T-Head PPU SDK (HGGC toolchain, headers and
@@ -11,7 +18,7 @@
 # an image once per SDK release instead of re-downloading per build.
 #
 # AMD64 ONLY: the SDK ships targets/x86_64-linux and nothing else. Do not add this
-# image to an arm64 build matrix — see .github/workflows/pack.yml.
+# image to an arm64 build matrix — see .github/workflows/base-image.yml.
 #
 # PPU_SDK_URL: T-Head ships the SDK only as a presigned Aliyun OSS link (~7-day
 # expiry); there is no public registry or stable download URL. Pass it at build time
@@ -19,7 +26,7 @@
 #
 #   PPU_SDK_URL='<presigned url>' make package thead-ppu-devel
 #
-# In CI it arrives through the pack workflow's build-argument override input
+# In CI it arrives through the Base Image workflow's build-argument override input
 # ("args: PPU_SDK_URL=<presigned url>"). Once the archive is mirrored to a stable
 # internal location, point PPU_SDK_URL at that instead and the expiry problem is gone.
 

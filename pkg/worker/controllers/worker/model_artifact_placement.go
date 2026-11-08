@@ -11,6 +11,8 @@ import (
 	core "k8s.io/api/core/v1"
 	storage "k8s.io/api/storage/v1"
 	kerrors "k8s.io/apimachinery/pkg/api/errors"
+	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/client-go/util/workqueue"
 	ctrlcli "sigs.k8s.io/controller-runtime/pkg/client"
 	ctrlevent "sigs.k8s.io/controller-runtime/pkg/event"
@@ -45,6 +47,9 @@ const (
 	modelWeightsReasonAnchorNeedsNode  = "AnchorNeedsNodeDelivery"
 	modelWeightsReasonMaterializing    = "Materializing"
 	modelWeightsReasonMaterializeFail  = "MaterializationFailed"
+	modelWeightsReasonAwaitingSource   = "AwaitingSource"
+	modelWeightsReasonLoading          = "Loading"
+	modelWeightsReasonLoaded           = "Loaded"
 
 	// modelArtifactNoProvisioner is the provisioner a static local-volume class names.
 	modelArtifactNoProvisioner = "kubernetes.io/no-provisioner"
@@ -66,6 +71,18 @@ type modelArtifactWeights struct {
 	Blocked bool
 	Reason  string
 	Message string
+	// LiveRemoteOrdinals names the replicas a live Pod still renders on the remote
+	// delivery. It is read from the Pods the pass listed, not from the deployment's
+	// own remote view: that view is a report of an earlier pass and can name no
+	// replica while one still serves.
+	LiveRemoteOrdinals sets.Set[string]
+	// sourceReadyUntil schedules a fresh observation before its lease proof expires.
+	sourceReadyUntil time.Time
+}
+
+// liveRemoteReplica says a live Pod still renders a replica on the remote delivery.
+func (w *modelArtifactWeights) liveRemoteReplica(role string, ordinal int) bool {
+	return w != nil && w.LiveRemoteOrdinals.Has(modelDeploymentModelTransferReplicaKey(role, ordinal))
 }
 
 func blockedModelArtifactWeights(reason, message string) *modelArtifactWeights {
@@ -86,12 +103,15 @@ var modelArtifactDeliveryMode = func(ctx context.Context) string {
 // the claim lets its Pods run. pods is how many Pods would mount the weights at once, which is
 // what a claim that is not shared cannot serve beyond one. nodeOnly says the consumer has no engine
 // to download a hub artifact, so node delivery is its only one whatever the delivery Setting says.
+// remote says what the consumer still serves remotely, and is nil for a consumer that serves no
+// remote delivery at all.
 //
 // NOTHING HERE IS A REFUSAL. Every state that stops new Pods is one that changes by itself or by
 // a user creating something, so the consumer waits and says why, and its Pods are created the pass
 // after the state clears.
 func resolveModelArtifactWeights(
 	ctx context.Context, cli ctrlcli.Reader, namespace, name string, pods int, nodeOnly bool,
+	remote *modelArtifactRemoteState,
 ) (*modelArtifactWeights, error) {
 	ma := new(workercore.ModelArtifact)
 	if err := cli.Get(ctx, ctrlcli.ObjectKey{Namespace: namespace, Name: name}, ma); err != nil {
@@ -109,7 +129,7 @@ func resolveModelArtifactWeights(
 		)), nil
 	}
 
-	w := &modelArtifactWeights{}
+	w := &modelArtifactWeights{LiveRemoteOrdinals: remote.liveRemoteOrdinals()}
 	switch source := ma.Spec.Source; {
 	case source.PersistentVolumeClaim != nil:
 		w.Render = &ModelDeploymentArtifactRender{
@@ -164,6 +184,9 @@ func resolveModelArtifactWeights(
 	default:
 		return blockedModelArtifactWeights(modelWeightsReasonArtifactUnready,
 			fmt.Sprintf("ModelArtifact %q has a source this version does not deliver", name)), nil
+	}
+	if err := applyModelDeploymentModelTransferPolicy(ctx, cli, w, ma, remote); err != nil {
+		return nil, err
 	}
 	w.KVIdentity = modelArtifactKVIdentity(ma)
 	w.Status = &workercore.ModelDeploymentModelStatus{
@@ -347,9 +370,10 @@ func injectModelArtifactAffinity(pod *core.Pod, required *core.NodeSelector) {
 }
 
 // resolveModelDeploymentWeights resolves the weights spec.model.artifactRef names, or nil for a
-// deployment naming none.
+// deployment naming none. liveRemote names the replicas a live Pod still renders on the remote
+// delivery.
 func (r *ModelDeploymentReconciler) resolveModelDeploymentWeights(
-	ctx context.Context, md *workercore.ModelDeployment,
+	ctx context.Context, md *workercore.ModelDeployment, liveRemote sets.Set[string],
 ) (*modelArtifactWeights, error) {
 	name := ModelDeploymentArtifactName(md)
 	if name == "" {
@@ -362,7 +386,18 @@ func (r *ModelDeploymentReconciler) resolveModelDeploymentWeights(
 		pods += int(md.Spec.Roles[i].Replicas) * modelDeploymentRoleSize(&md.Spec.Roles[i])
 	}
 
-	return resolveModelArtifactWeights(ctx, r.Client, md.Namespace, name, pods, false)
+	var carried *workercore.ModelDeploymentModelRemoteStatus
+	if md.Status.Model != nil {
+		carried = md.Status.Model.Remote
+	}
+	remote := &modelArtifactRemoteState{Carried: carried, LiveRemote: liveRemote}
+
+	return resolveModelArtifactWeights(ctx, r.Client, md.Namespace, name, pods, false, remote)
+}
+
+func modelDeploymentModelTransferSameArtifact(previous, next *workercore.ModelDeploymentModelStatus) bool {
+	return previous != nil && next != nil && previous.Artifact == next.Artifact &&
+		previous.Revision == next.Revision && previous.ManifestDigest == next.ManifestDigest
 }
 
 // observeModelDeploymentWeights writes status.model and the WeightsReady condition. nodeModels is
@@ -384,9 +419,31 @@ func observeModelDeploymentWeights(
 		return
 	}
 
-	holder.Status.Model = weights.Status
+	// The remote view's carried history is read BEFORE the model is
+	// replaced: the fallback attempts a replica spent live on the status,
+	// and replacing the whole model with the fresh resolution must not
+	// wipe them out from under the observation below.
+	var carriedRemote *workercore.ModelDeploymentModelRemoteStatus
+	if modelDeploymentModelTransferSameArtifact(holder.Status.Model, weights.Status) {
+		carriedRemote = holder.Status.Model.Remote
+	}
+	holder.Status.Model = weights.Status.DeepCopy()
 	if weights.Blocked {
+		// A blocked remote delivery keeps the history its served replicas
+		// still own: the condition says why nothing new starts, and the
+		// per-replica view says what is still running.
+		if carriedRemote != nil && weights.Render != nil &&
+			weights.Render.Delivery == workercore.ModelDeploymentModelDeliveryRemote {
+			holder.Status.Model.Remote = carriedRemote
+		}
 		ModelDeploymentConditionWeightsReady.False(holder, weights.Reason, weights.Message)
+		return
+	}
+
+	if weights.Render.Delivery == workercore.ModelDeploymentModelDeliveryRemote {
+		modelDeploymentModelTransferObserveStatus(holder, pods, weights, carriedRemote, weights.Render.SourceReady)
+		modelDeploymentModelTransferWeightsVoice(holder, pods, weights)
+
 		return
 	}
 
@@ -537,16 +594,23 @@ func (r *ModelDeploymentReconciler) mapModelDeploymentClaim(ctx context.Context,
 	return r.modelDeploymentsReferencing(ctx, obj.GetNamespace(), names...)
 }
 
-// mapModelDeploymentNodeModelStore enqueues the node-delivered deployments whose digest the node
-// lists.
+// mapModelDeploymentNodeModelStore enqueues the deployments whose digest the node names, on
+// either of the two ledgers a delivery reads: the disk models a Node delivery mounts, and the
+// model-transfer generations a Remote delivery loads from — a generation arriving is what unblocks an
+// AwaitingSource replica, and one draining is what a lost source must reach the deployment for.
 func (r *ModelDeploymentReconciler) mapModelDeploymentNodeModelStore(ctx context.Context, obj ctrlcli.Object) []ctrlreconcile.Request {
 	nms, ok := obj.(*workercore.NodeModelStore)
-	if !ok || len(nms.Status.Models) == 0 {
+	if !ok || (len(nms.Status.Models) == 0 && (nms.Status.ModelTransfer == nil || len(nms.Status.ModelTransfer.Generations) == 0)) {
 		return nil
 	}
 	digests := make(map[string]bool, len(nms.Status.Models))
 	for i := range nms.Status.Models {
 		digests[nms.Status.Models[i].Digest] = true
+	}
+	if nms.Status.ModelTransfer != nil {
+		for i := range nms.Status.ModelTransfer.Generations {
+			digests[nms.Status.ModelTransfer.Generations[i].Digest] = true
+		}
 	}
 	mds := new(workercore.ModelDeploymentList)
 	if err := r.Client.List(ctx, mds); err != nil {
@@ -556,7 +620,12 @@ func (r *ModelDeploymentReconciler) mapModelDeploymentNodeModelStore(ctx context
 	var reqs []ctrlreconcile.Request
 	for i := range mds.Items {
 		m := mds.Items[i].Status.Model
-		if m != nil && m.Delivery == workercore.ModelDeploymentModelDeliveryNode && digests[m.ManifestDigest] {
+		if m == nil || !digests[m.ManifestDigest] {
+			continue
+		}
+		if m.Delivery == workercore.ModelDeploymentModelDeliveryNode ||
+			m.Delivery == workercore.ModelDeploymentModelDeliveryRemote ||
+			(m.Remote != nil && m.Remote.Policy == workercore.ModelDeploymentRemotePolicyPrefer) {
 			reqs = append(reqs, ctrlreconcile.Request{NamespacedName: ctrlcli.ObjectKeyFromObject(&mds.Items[i])})
 		}
 	}
@@ -564,18 +633,46 @@ func (r *ModelDeploymentReconciler) mapModelDeploymentNodeModelStore(ctx context
 	return reqs
 }
 
-// nodeModelStoreModelsChanged passes a NodeModelStore update only when its models changed. A
-// deployment reads nothing else from the node, and the capacity and conditions move during every
-// download without changing what any deployment sees.
+// nodeModelStoreModelsChanged passes a NodeModelStore update when its models OR its model-transfer
+// generations changed. A deployment reads both: the disk entries are what a Node delivery mounts,
+// and the model-transfer entries are what a Remote delivery's readiness and its placement preference are
+// made of. The capacity and conditions move during every download without changing what any
+// deployment sees, and a download progress line moves without meaning either.
 func nodeModelStoreModelsChanged() ctrlpredicate.Predicate {
-	// A download's progress moves on every threshold the node writes, and no deployment reads it.
 	return ctrlpredicate.Funcs{
 		UpdateFunc: func(e ctrlevent.UpdateEvent) bool {
 			o, okOld := e.ObjectOld.(*workercore.NodeModelStore)
 			n, okNew := e.ObjectNew.(*workercore.NodeModelStore)
-			return !okOld || !okNew || !kubemeta.DeepEqual(modelsWithoutProgress(o), modelsWithoutProgress(n))
+			if !okOld || !okNew {
+				return false
+			}
+
+			now := time.Now()
+			return !kubemeta.DeepEqual(modelsWithoutProgress(o), modelsWithoutProgress(n)) ||
+				!kubemeta.DeepEqual(modelTransferWithoutProgress(o, now), modelTransferWithoutProgress(n, now))
 		},
 	}
+}
+
+// modelTransferWithoutProgress retains identity, state and lease validity.
+func modelTransferWithoutProgress(nms *workercore.NodeModelStore, now time.Time) *workercore.NodeModelStoreModelTransferStatus {
+	transfer := nms.Status.ModelTransfer.DeepCopy()
+	if transfer == nil {
+		return nil
+	}
+	for i := range transfer.Generations {
+		generation := &transfer.Generations[i]
+		generation.ResidentBytes = 0
+		generation.Registrations = 0
+		generation.ActiveSessions = 0
+		generation.RejectedAdmissions = 0
+		valid := generation.LeaseExpiresAt != nil && generation.LeaseExpiresAt.After(now)
+		generation.LeaseExpiresAt = nil
+		if valid {
+			generation.LeaseExpiresAt = &meta.Time{}
+		}
+	}
+	return transfer
 }
 
 // modelsWithoutProgress is the node's entries with the download progress left out.

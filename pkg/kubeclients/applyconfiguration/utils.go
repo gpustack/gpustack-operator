@@ -1540,6 +1540,8 @@ func ForKind(kind schema.GroupVersionKind) interface{} {
 		return &applyconfigurationworkerv1alpha1.ModelDeploymentKVTransferApplyConfiguration{}
 	case workerv1alpha1.SchemeGroupVersion.WithKind("ModelDeploymentModel"):
 		return &applyconfigurationworkerv1alpha1.ModelDeploymentModelApplyConfiguration{}
+	case workerv1alpha1.SchemeGroupVersion.WithKind("ModelDeploymentModelRemoteStatus"):
+		return &applyconfigurationworkerv1alpha1.ModelDeploymentModelRemoteStatusApplyConfiguration{}
 	case workerv1alpha1.SchemeGroupVersion.WithKind("ModelDeploymentModelStatus"):
 		return &applyconfigurationworkerv1alpha1.ModelDeploymentModelStatusApplyConfiguration{}
 	case workerv1alpha1.SchemeGroupVersion.WithKind("ModelDeploymentParallelismDeclaredStatus"):
@@ -1548,6 +1550,10 @@ func ForKind(kind schema.GroupVersionKind) interface{} {
 		return &applyconfigurationworkerv1alpha1.ModelDeploymentParallelismSourceStatusApplyConfiguration{}
 	case workerv1alpha1.SchemeGroupVersion.WithKind("ModelDeploymentPort"):
 		return &applyconfigurationworkerv1alpha1.ModelDeploymentPortApplyConfiguration{}
+	case workerv1alpha1.SchemeGroupVersion.WithKind("ModelDeploymentRemoteReplicaStatus"):
+		return &applyconfigurationworkerv1alpha1.ModelDeploymentRemoteReplicaStatusApplyConfiguration{}
+	case workerv1alpha1.SchemeGroupVersion.WithKind("ModelDeploymentRemoteRoleStatus"):
+		return &applyconfigurationworkerv1alpha1.ModelDeploymentRemoteRoleStatusApplyConfiguration{}
 	case workerv1alpha1.SchemeGroupVersion.WithKind("ModelDeploymentRetirementStatus"):
 		return &applyconfigurationworkerv1alpha1.ModelDeploymentRetirementStatusApplyConfiguration{}
 	case workerv1alpha1.SchemeGroupVersion.WithKind("ModelDeploymentRole"):
@@ -1658,12 +1664,22 @@ func ForKind(kind schema.GroupVersionKind) interface{} {
 		return &applyconfigurationworkerv1alpha1.ModelPrefetchSpecApplyConfiguration{}
 	case workerv1alpha1.SchemeGroupVersion.WithKind("ModelPrefetchStatus"):
 		return &applyconfigurationworkerv1alpha1.ModelPrefetchStatusApplyConfiguration{}
+	case workerv1alpha1.SchemeGroupVersion.WithKind("ModelPrefetchTransferGeneration"):
+		return &applyconfigurationworkerv1alpha1.ModelPrefetchTransferGenerationApplyConfiguration{}
+	case workerv1alpha1.SchemeGroupVersion.WithKind("ModelPrefetchTransferLimits"):
+		return &applyconfigurationworkerv1alpha1.ModelPrefetchTransferLimitsApplyConfiguration{}
+	case workerv1alpha1.SchemeGroupVersion.WithKind("ModelPrefetchTransferServing"):
+		return &applyconfigurationworkerv1alpha1.ModelPrefetchTransferServingApplyConfiguration{}
+	case workerv1alpha1.SchemeGroupVersion.WithKind("ModelPrefetchTransferStatus"):
+		return &applyconfigurationworkerv1alpha1.ModelPrefetchTransferStatusApplyConfiguration{}
 	case workerv1alpha1.SchemeGroupVersion.WithKind("ModelStore"):
 		return &applyconfigurationworkerv1alpha1.ModelStoreApplyConfiguration{}
 	case workerv1alpha1.SchemeGroupVersion.WithKind("ModelStoreBinding"):
 		return &applyconfigurationworkerv1alpha1.ModelStoreBindingApplyConfiguration{}
 	case workerv1alpha1.SchemeGroupVersion.WithKind("ModelStoreBindingQuota"):
 		return &applyconfigurationworkerv1alpha1.ModelStoreBindingQuotaApplyConfiguration{}
+	case workerv1alpha1.SchemeGroupVersion.WithKind("ModelStoreBindingSourceMemory"):
+		return &applyconfigurationworkerv1alpha1.ModelStoreBindingSourceMemoryApplyConfiguration{}
 	case workerv1alpha1.SchemeGroupVersion.WithKind("ModelStoreBindingSpec"):
 		return &applyconfigurationworkerv1alpha1.ModelStoreBindingSpecApplyConfiguration{}
 	case workerv1alpha1.SchemeGroupVersion.WithKind("ModelStoreBindingStatus"):
@@ -1690,6 +1706,10 @@ func ForKind(kind schema.GroupVersionKind) interface{} {
 		return &applyconfigurationworkerv1alpha1.NodeModelStoreKubeletApplyConfiguration{}
 	case workerv1alpha1.SchemeGroupVersion.WithKind("NodeModelStoreModel"):
 		return &applyconfigurationworkerv1alpha1.NodeModelStoreModelApplyConfiguration{}
+	case workerv1alpha1.SchemeGroupVersion.WithKind("NodeModelStoreModelTransferGeneration"):
+		return &applyconfigurationworkerv1alpha1.NodeModelStoreModelTransferGenerationApplyConfiguration{}
+	case workerv1alpha1.SchemeGroupVersion.WithKind("NodeModelStoreModelTransferStatus"):
+		return &applyconfigurationworkerv1alpha1.NodeModelStoreModelTransferStatusApplyConfiguration{}
 	case workerv1alpha1.SchemeGroupVersion.WithKind("NodeModelStoreSpec"):
 		return &applyconfigurationworkerv1alpha1.NodeModelStoreSpecApplyConfiguration{}
 	case workerv1alpha1.SchemeGroupVersion.WithKind("NodeModelStoreStatus"):

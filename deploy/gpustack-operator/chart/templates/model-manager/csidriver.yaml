@@ -21,4 +21,10 @@ spec:
   volumeLifecycleModes:
     - Ephemeral
   fsGroupPolicy: None
+  {{- if .Values.modelTransfer.enabled }}
+  requiresRepublish: true
+  tokenRequests:
+    - audience: gpustack-model-transfer
+      expirationSeconds: 3600
+  {{- end }}
 {{- end }}

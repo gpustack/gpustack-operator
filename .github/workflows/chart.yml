@@ -111,6 +111,7 @@ jobs:
       - name: Restore BuildX Cache
         uses: reproducible-containers/buildkit-cache-dance@v3
         with:
+          scratch-dir: ${{ runner.temp }}/buildkit-cache-dance
           builder: ${{ steps.setup-buildx.outputs.name }}
           cache-map: |-
             {

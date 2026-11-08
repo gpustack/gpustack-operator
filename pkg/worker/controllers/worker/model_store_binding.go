@@ -2,6 +2,7 @@ package worker
 
 import (
 	"context"
+	"math"
 	"time"
 
 	core "k8s.io/api/core/v1"
@@ -20,6 +21,8 @@ import (
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
 	"gpustack.ai/gpustack/pkg/controller"
 	"gpustack.ai/gpustack/pkg/kubemeta"
+	"gpustack.ai/gpustack/pkg/modeltransfer/broker"
+	"gpustack.ai/gpustack/pkg/setting"
 )
 
 // Conditions of a ModelStoreBinding's status.
@@ -40,8 +43,9 @@ const (
 // figure absent rather than half a number: a usedBytes that silently excluded a prefetch would
 // read as headroom the namespace does not have.
 type ModelStoreBindingReconciler struct {
-	Client ctrlcli.Client
-	Now    func() time.Time
+	Client    ctrlcli.Client
+	APIReader ctrlcli.Reader
+	Now       func() time.Time
 }
 
 var _ ctrlreconcile.Reconciler = (*ModelStoreBindingReconciler)(nil)
@@ -100,15 +104,18 @@ func (r *ModelStoreBindingReconciler) Reconcile(ctx context.Context, req ctrl.Re
 		artifactByName[artifacts.Items[i].Name] = &artifacts.Items[i]
 	}
 
-	// charged[digest] is the subset of its holders the grant is charged for: the target nodes of a
-	// prefetch that names the digest. Nodes holding it for other reasons — a workload's ordinary
-	// mount elsewhere — are the watermarks' business.
+	// The disk loop answers only for prefetches this grant owns and that are still alive: a
+	// prefetch bound to another grant in the namespace is that grant's ledger line, and a
+	// deleting prefetch's pods are going away.
 	charged := map[string]map[string]bool{}
 	sizes := map[string]int64{}
 	var used int64
 	measured := true
 	for i := range pfs.Items {
 		pf := &pfs.Items[i]
+		if pf.DeletionTimestamp != nil || pf.Spec.BindingRef.Name != binding.Name {
+			continue
+		}
 		artifact, ok := artifactByName[pf.Spec.ArtifactRef.Name]
 		if !ok {
 			// The prefetch's own status carries the missing artifact; the accounting keeps the
@@ -148,12 +155,28 @@ func (r *ModelStoreBindingReconciler) Reconcile(ctx context.Context, req ctrl.Re
 		used += sizes[digest] * int64(len(nodesCharged))
 	}
 
+	result := ctrl.Result{}
+	if binding.Annotations[broker.AuthorityAnnotation] != "" {
+		result.RequeueAfter = 30 * time.Second
+	}
 	before := binding.Status.DeepCopy()
 	if measured {
 		u := resource.NewQuantity(used, resource.BinarySI)
 		binding.Status.UsedBytes = u
 	} else {
 		binding.Status.UsedBytes = nil
+	}
+
+	// Source memory follows the pinned authority, including filling and retained
+	// generations whose desired prefetch or placement has since changed.
+	reserved, reservedMeasured := r.sourceReservation(ctx, binding)
+	// Missing authority is not release proof; keep the last observed charge.
+	if reservedMeasured {
+		if reserved > 0 {
+			binding.Status.ReservedMemory = resource.NewQuantity(reserved, resource.BinarySI)
+		} else {
+			binding.Status.ReservedMemory = nil
+		}
 	}
 
 	quota := binding.Spec.Quota.Bytes.Value()
@@ -202,13 +225,13 @@ func (r *ModelStoreBindingReconciler) Reconcile(ctx context.Context, req ctrl.Re
 	binding.Status.Conditions = carryConditionTransitions(binding.Status.Conditions,
 		[]gpustack.Condition{ready, over}, r.nowOrNow())
 	if kubemeta.DeepEqual(before, &binding.Status) {
-		return ctrl.Result{}, nil
+		return result, nil
 	}
 
 	logger.V(2).Info("accounted the namespace's warm footprint",
 		"binding", binding.Name, "usedBytes", used, "measured", measured, "storeMissing", storeMissing)
 
-	return ctrl.Result{}, r.Client.Status().Update(ctx, binding)
+	return result, r.Client.Status().Update(ctx, binding)
 }
 
 // bindingStatusPhase summarizes the two conditions for `.status.phase` and its print column, most
@@ -225,6 +248,31 @@ func bindingStatusPhase(ready, over meta.ConditionStatus) string {
 	return "Error"
 }
 
+// sourceReservation measures this binding's retained authority charges. Failure
+// leaves the measurement unknown instead of estimating it from checkpoint sizes.
+func (r *ModelStoreBindingReconciler) sourceReservation(ctx context.Context, binding *workercore.ModelStoreBinding) (int64, bool) {
+	if binding.Annotations[broker.AuthorityAnnotation] == "" {
+		return 0, false
+	}
+	reader := r.APIReader
+	if reader == nil {
+		reader = r.Client
+	}
+	entries, err := broker.ReadPinnedAuthority(ctx, reader, setting.DelegatedSecretNamespace, binding)
+	if err != nil {
+		ctrllog.FromContext(ctx).Error(err, "read source reservation charges", "binding", ctrlcli.ObjectKeyFromObject(binding))
+		return 0, false
+	}
+	var reserved int64
+	for _, entry := range entries {
+		if entry.Namespace != binding.Namespace || entry.Bytes < 0 || reserved > math.MaxInt64-entry.Bytes {
+			return 0, false
+		}
+		reserved += entry.Bytes
+	}
+	return reserved, true
+}
+
 func (r *ModelStoreBindingReconciler) nowOrNow() time.Time {
 	if r.Now != nil {
 		return r.Now()
@@ -235,10 +283,11 @@ func (r *ModelStoreBindingReconciler) nowOrNow() time.Time {
 
 func (r *ModelStoreBindingReconciler) SetupController(_ context.Context, opts controller.SetupOptions) error {
 	r.Client = opts.Manager.GetClient()
+	r.APIReader = opts.Manager.GetAPIReader()
 
 	return ctrl.NewControllerManagedBy(opts.Manager).
 		Named("modelstorebinding").
-		For(&workercore.ModelStoreBinding{}, ctrlbuilder.WithPredicates(ctrlpredicate.GenerationChangedPredicate{})).
+		For(&workercore.ModelStoreBinding{}, ctrlbuilder.WithPredicates(bindingGrantChanged)).
 		Watches(
 			&workercore.ModelPrefetch{},
 			ctrlhandler.EnqueueRequestsFromMapFunc(r.enqueueAllBindings),

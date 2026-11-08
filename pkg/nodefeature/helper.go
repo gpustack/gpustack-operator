@@ -102,6 +102,13 @@ func ExtractAcceleratableNodeKeys(node *core.Node) []string {
 	return ExtractAcceleratableKeys(node.Labels)
 }
 
+// AcceleratableManufacturer returns the manufacturer segment of an acceleratable
+// key formatted as "${manufacturer}-${id}".
+func AcceleratableManufacturer(key string) string {
+	manufacturer, _, _ := strings.Cut(key, "-")
+	return manufacturer
+}
+
 // ExtractAcceleratableKeys returns the acceleratable keys, each in the format
 // "${manufacturer}-${id}", that the given labels pin. It reads any label map — a Node's, or the
 // spec.nodeLabels a ResourceFlavor pins — so the one predicate that decides what an acceleratable

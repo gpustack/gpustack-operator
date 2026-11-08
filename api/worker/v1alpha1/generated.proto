@@ -3729,6 +3729,31 @@ message ModelDeploymentModel {
   optional .k8s.io.api.core.v1.LocalObjectReference artifactRef = 2;
 }
 
+// ModelDeploymentModelRemoteStatus is the remote-delivery view of the model's weights: the
+// effective policy and, per role and replica, the delivery each replica actually uses.
+//
+// THE ENTRIES ARE THE OBSERVED TRUTH AND THE AGGREGATE IS THE CONFIGURED ANSWER. delivery above
+// names the path the weights were configured to take; a replica that took a declared fallback
+// reads Node or Engine in the entries here while it uses them, which is exactly the mixing one
+// aggregate string cannot say. A reader asking what a replica is doing reads the entries; a
+// reader asking how the deployment is configured reads delivery.
+message ModelDeploymentModelRemoteStatus {
+  // Policy is the effective policy in force for this deployment's remote delivery.
+  //
+  // +required
+  // +k8s:validation:enum=["Require","Prefer"]
+  optional string policy = 1;
+
+  // Roles is one entry per role that loads weights, so a mixed deployment — a role half rolled
+  // over to its fallback, or two roles on different outcomes — is described by its entries
+  // rather than compressed into the aggregate above.
+  //
+  // +optional
+  // +listType=map
+  // +listMapKey=role
+  repeated ModelDeploymentRemoteRoleStatus roles = 2;
+}
+
 // ModelDeploymentModelStatus is the resolved weight identity a deployment serves.
 //
 // Every field is READ FROM THE MODELARTIFACT, never declared here, so reading which commit and which
@@ -3752,11 +3777,25 @@ message ModelDeploymentModelStatus {
   // Delivery is how the weights reach the engine: "PVC", the claim mounted read-only at a fixed
   // path; "Engine", the engine downloading the pinned commit itself; "Node", the node's
   // model-manager plugin materializing the verified files and mounting them read-only at the same
-  // fixed path; or "Image", kubelet pulling the pinned OCI image into a read-only image volume.
+  // fixed path; "Image", kubelet pulling the pinned OCI image into a read-only image volume; or
+  // "Remote", the weights arriving from a prepared in-memory source over a qualified transfer,
+  // with no complete checkpoint on this filesystem.
+  //
+  // "Remote" is the configured outcome, and it does not summarize the replicas: the delivery
+  // each replica actually uses right now — including which took the declared fallback — is in
+  // status.model.remote, and that view is what a reader of a half-rolled-out fallback trusts.
   //
   // +required
-  // +k8s:validation:enum=["PVC","Engine","Node","Image"]
+  // +k8s:validation:enum=["PVC","Engine","Node","Image","Remote"]
   optional string delivery = 4;
+
+  // Remote is the remote-delivery view, present when the weights are configured to arrive from
+  // a prepared source. It is ABSENT for every legacy delivery, so a consumer that has never
+  // heard of remote delivery keeps reading delivery alone, and an absent view never reads as a
+  // remote delivery that silently changed its mind.
+  //
+  // +optional
+  optional ModelDeploymentModelRemoteStatus remote = 5;
 }
 
 // ModelDeploymentParallelismDeclaredStatus carries the degrees a role's arguments declare.
@@ -3843,6 +3882,67 @@ message ModelDeploymentPort {
   // +k8s:validation:enum=["TCP","UDP","SCTP"]
   // +k8s:validation:default="TCP"
   optional string protocol = 2;
+}
+
+// ModelDeploymentRemoteReplicaStatus is one replica's effective delivery and its load progress.
+message ModelDeploymentRemoteReplicaStatus {
+  // Ordinal is the replica's position within its role. Zero is a real position, the first
+  // replica, and is always encoded rather than omitted.
+  //
+  // +required
+  optional int32 ordinal = 1;
+
+  // Delivery is the outcome this replica currently uses: Remote while it loads from the source,
+  // or the declared fallback it visibly took, with the reason below saying why. A fallback is
+  // Node or Engine — never a claim or an image delivery, which are different artifacts and not
+  // identity-preserving — and it is recorded as a fallback here rather than relabeled as the
+  // configured outcome.
+  //
+  // +required
+  // +k8s:validation:enum=["Remote","Node","Engine"]
+  optional string delivery = 2;
+
+  // Load is how far the replica's remote load has got, and it keeps the observations the
+  // startup path makes distinct: metadata supplied, source available, an attempt under way,
+  // weights loaded. Serving readiness is deliberately not here — it stays with the readiness
+  // this deployment already publishes, whose meanings this view does not change — so a loaded
+  // weight set and a serving replica remain two observations, and a source that later drains
+  // does not retract a load that already confirmed.
+  //
+  // +required
+  // +k8s:validation:enum=["Unknown","AwaitingMetadata","AwaitingSource","Loading","Loaded"]
+  optional string load = 3;
+
+  // Reason names what holds the load at its state, or why the replica is on the delivery it is
+  // on. It is empty while nothing needs saying, and a quota, authorization or integrity failure
+  // names its own kind here rather than collapsing into a generic wait.
+  //
+  // +optional
+  optional string reason = 4;
+
+  // FallbackAttempts is how many bounded fallback attempts this replica has consumed. A count
+  // past the declared budget is a visible overrun a reader can act on, not a state the next
+  // render quietly resets.
+  //
+  // +optional
+  optional int32 fallbackAttempts = 5;
+}
+
+// ModelDeploymentRemoteRoleStatus is one role's per-replica delivery split.
+message ModelDeploymentRemoteRoleStatus {
+  // Role is the role this entry describes.
+  //
+  // +required
+  optional string role = 1;
+
+  // Replicas is one entry per replica of the role, ordered by ordinal. It is an ordinary list,
+  // not a map: like the groups above, a replica's observed delivery changes without its
+  // identity changing, so a map keyed on the ordinal would replace the whole entry on the very
+  // change a reader came to see.
+  //
+  // +optional
+  // +listType=atomic
+  repeated ModelDeploymentRemoteReplicaStatus replicas = 2;
 }
 
 // ModelDeploymentRetirementStatus is the persisted reservation of one retirement operation.
@@ -6224,6 +6324,13 @@ message ModelPrefetchRetention {
   optional .k8s.io.apimachinery.pkg.apis.meta.v1.Duration ttlAfterLastUse = 2;
 }
 
+// ModelPrefetchSource is the source-preparation intent, and its presence is the opt-in. It
+// carries no settings of its own: the target set is the placement's, the memory it may hold is
+// bounded by node capacity and the optional Binding grant. Readiness is reported in status.transfer.
+// An object an older client wrote has no source and keeps its meaning unchanged.
+message ModelPrefetchSource {
+}
+
 // ModelPrefetchSpec is the residency intent.
 message ModelPrefetchSpec {
   // ArtifactRef names the ModelArtifact in this namespace whose weights warm the target set. It
@@ -6257,6 +6364,27 @@ message ModelPrefetchSpec {
   //
   // +optional
   optional ModelPrefetchRetention retention = 5;
+
+  // Source opts this prefetch into source preparation for remote weight loading, beside the
+  // disk residency it always asked for. With it, the target nodes may fill a registered-memory
+  // source from this artifact, and the prefetch reports that readiness in status.transfer,
+  // separately from the disk figures above.
+  //
+  // IT REQUIRES AN EXPLICIT PLACEMENT. A source is memory a node holds against a known target
+  // set, so the derived-from-deployments default an ordinary prefetch falls back to — which
+  // follows this namespace's consumers around — would prepare whatever machines happen to
+  // serve the model this week. A source intent on a prefetch whose placement names no
+  // instanceTypes and no nodeSelector is refused at admission, and the two out together stay
+  // refused for the ambiguity they already were.
+  //
+  // The optional Binding sourceMemory grant bounds memory independently of disk quota.
+  // Without it, source preparation uses the node's configured source capacity.
+  //
+  // Absent means a prefetch that warms the node cache only, exactly as this object has always
+  // meant, with the same placement defaults, warm-up behavior and status meaning as before.
+  //
+  // +optional
+  optional ModelPrefetchSource source = 6;
 }
 
 // ModelPrefetchStatus is the prefetch's own view of its delivery, aggregated from the target
@@ -6285,6 +6413,158 @@ message ModelPrefetchStatus {
   // +listType=map
   // +listMapKey=type
   repeated .gpustack.ai.gpustack.api.v1.Condition conditions = 4;
+
+  // Transfer reports the source preparation spec.source asks for, aggregated from the target
+  // nodes' reports. It is ABSENT without spec.source — the intent is what turns it on — and
+  // absent while nothing has been observed, rather than present and empty, for the same reason
+  // the disk figures above are zero rather than missing only when measured.
+  //
+  // It is deliberately separate from the disk figures above, and neither implies the other:
+  // readyNodes counts complete published trees, which survive a daemon restart, while the
+  // transfer entries are scoped to a generation held in memory, and a generation that stops
+  // being served does not un-publish the tree beneath it.
+  //
+  // +optional
+  optional ModelPrefetchTransferStatus transfer = 5;
+}
+
+// ModelPrefetchTransferGeneration is one source generation's standing across the target nodes.
+message ModelPrefetchTransferGeneration {
+  // Generation is the source's identity for this registered content: an opaque token assigned
+  // when the fill has verified, and the only thing the figures beside it are true of. A drain,
+  // a refill or a daemon restart supersedes it; a new generation never inherits the old one's
+  // figures. It names no tenant and carries no key.
+  //
+  // +required
+  // +k8s:validation:minLength=1
+  // +k8s:validation:maxLength=128
+  optional string generation = 1;
+
+  // ReadyNodes is how many target nodes hold this generation registered and admit readers
+  // against it. It is NOT readyNodes, and neither implies the other: a node whose daemon
+  // restarted stops counting here while the published tree beneath it stays disk-ready.
+  //
+  // +optional
+  optional int32 readyNodes = 2;
+
+  // DrainingNodes is how many target nodes hold this generation past admission — they have
+  // stopped admitting new sessions and are fencing their in-flight work, or their completion
+  // could not be proven and they hold the registration until a qualified fence applies. Their
+  // memory is still held.
+  //
+  // +optional
+  optional int32 drainingNodes = 3;
+
+  // ResidentBytes sums what the target nodes hold registered for this generation, serving and
+  // draining alike, because a draining generation's memory is still held. The bytes are
+  // physical, so a copy two namespaces share counts once here and once in each namespace's
+  // reservation.
+  //
+  // +optional
+  optional int64 residentBytes = 4;
+
+  // Registrations is the live registration count the nodes hold for this generation.
+  //
+  // +optional
+  optional int32 registrations = 5;
+
+  // ActiveSessions is how many read sessions the nodes have admitted against this generation.
+  //
+  // +optional
+  optional int32 activeSessions = 6;
+
+  // RejectedAdmissions counts the admission refusals the nodes have reported since this
+  // generation started — over the memory grant, out of registrations, past the session limit —
+  // so a capacity shortfall is visible where it was made rather than only as a replica that
+  // never starts.
+  //
+  // +optional
+  optional int64 rejectedAdmissions = 7;
+}
+
+// ModelPrefetchTransferLimits is the applied source policy, echoed where it was admitted so a
+// reader can see what is enforced without reading the grant and guessing what admission made of
+// it.
+message ModelPrefetchTransferLimits {
+  // Bytes is the registered-memory ceiling the namespace's admitted reservations draw on.
+  //
+  // +required
+  optional .k8s.io.apimachinery.pkg.api.resource.Quantity bytes = 1;
+
+  // Registrations is the live registration count the source allows the namespace.
+  //
+  // +required
+  // +k8s:validation:minimum=1
+  optional int32 registrations = 2;
+
+  // Sessions is the concurrent admitted read sessions the source allows the namespace.
+  //
+  // +required
+  // +k8s:validation:minimum=1
+  optional int32 sessions = 3;
+}
+
+// ModelPrefetchTransferServing identifies the source readiness a prefetch observed.
+message ModelPrefetchTransferServing {
+  // ArtifactUID identifies the artifact whose source was observed.
+  //
+  // +required
+  // +k8s:validation:minLength=1
+  optional string artifactUID = 1;
+
+  // ArtifactGeneration is the artifact revision the source serves.
+  //
+  // +required
+  // +k8s:validation:minimum=1
+  optional int64 artifactGeneration = 2;
+
+  // Digest is the resolved content identity the source serves.
+  //
+  // +required
+  // +k8s:validation:minLength=1
+  optional string digest = 3;
+
+  // ReadyLeaseExpiresAt bounds how long this readiness observation is usable.
+  //
+  // +required
+  optional .k8s.io.apimachinery.pkg.apis.meta.v1.Time readyLeaseExpiresAt = 4;
+}
+
+// ModelPrefetchTransferStatus is the transfer half of a source-preparing prefetch, aggregated
+// from the target nodes' reports for this artifact's digest. The bytes are observed figures the
+// nodes reported as exact integer bytes; quantity comparisons use resource.Quantity.Value().
+// The limits echo the admitted grant policy.
+message ModelPrefetchTransferStatus {
+  // ReservedBytes is the memory this prefetch's admitted generations hold reserved against the
+  // namespace's grant. It is charged to this namespace even when the physical bytes are shared
+  // with another namespace's reservation, so it can exceed the residency any one node reports.
+  //
+  // +optional
+  optional int64 reservedBytes = 1;
+
+  // Limits echoes the policy the source applies to this namespace's read sessions: the grant's
+  // limits as they were admitted, which a later edit of the Binding cannot reach back and
+  // change. Absent until a generation is admitted.
+  //
+  // +optional
+  optional ModelPrefetchTransferLimits limits = 2;
+
+  // Generations summarizes at most 16 source generations, with serving entries first
+  // and generation identity order within each group. The SourceSummaryTruncated condition
+  // reports omitted entries. Accounting and source readiness use the complete observation.
+  //
+  // +optional
+  // +listType=map
+  // +listMapKey=generation
+  // +k8s:validation:maxItems=16
+  repeated ModelPrefetchTransferGeneration generations = 3;
+
+  // Serving binds SourceReady to the current artifact revision and the earliest
+  // lease expiry among its serving generations. It is an observation, not an
+  // authorization; absent or expired proof grants no source readiness.
+  //
+  // +optional
+  optional ModelPrefetchTransferServing serving = 4;
 }
 
 // ModelStore is the schema for worker.gpustack.ai.
@@ -6337,6 +6617,7 @@ message ModelStore {
 // +k8s:crd-gen:resource:scope="Namespaced",categories=["gpustack"],shortName=["msb"],subResources=["status"]
 // +k8s:crd-gen:printcolumn:name="Quota",type="string",jsonPath=".spec.quota.bytes"
 // +k8s:crd-gen:printcolumn:name="AllowPinned",type="boolean",jsonPath=".spec.allowPinned"
+// +k8s:crd-gen:printcolumn:name="SourceMemory",type="string",jsonPath=".spec.sourceMemory.bytes"
 // +k8s:crd-gen:printcolumn:name="Used",type="string",jsonPath=".status.usedBytes"
 // +k8s:crd-gen:printcolumn:name="Phase",type="string",jsonPath=".status.phase"
 // +k8s:crd-gen:printcolumn:name="Age",type="date",jsonPath=".metadata.creationTimestamp"
@@ -6368,10 +6649,36 @@ message ModelStoreBindingQuota {
   optional .k8s.io.apimachinery.pkg.api.resource.Quantity bytes = 1;
 }
 
-// ModelStoreBindingSpec is the grant. EVERY FIELD IS IMMUTABLE, webhook-enforced, except
-// AllowPinned going false to true and Quota.Bytes growing: re-pointing the grant would strand the
-// old accounting, and shrinking a budget under existing consumption would retroactively make an
-// admitted prefetch over budget.
+// ModelStoreBindingSourceMemory is the registered-memory grant source preparation draws on. All
+// three limits are administrator-set, because a limit nobody set would be a default pretending to
+// be a capacity answer: the memory a checkpoint needs is the artifact's, not the chart's.
+message ModelStoreBindingSourceMemory {
+  // Bytes is the registered-memory ceiling this namespace's admitted reservations draw on. It
+  // is a memory budget, not a second disk quota: filesystem usage never consumes it, and
+  // registered bytes never consume quota.bytes.
+  //
+  // +required
+  optional .k8s.io.apimachinery.pkg.api.resource.Quantity bytes = 1;
+
+  // Registrations is how many live registrations the namespace's source generations may hold at
+  // once.
+  //
+  // +required
+  // +k8s:validation:minimum=1
+  optional int32 registrations = 2;
+
+  // Sessions is how many read sessions the namespace may hold admitted at once. Read-session
+  // admission is deliberately its own limit and never inferred from prefetch retention: a
+  // namespace whose prefetches pin content has not thereby bought its engines unlimited reads.
+  //
+  // +required
+  // +k8s:validation:minimum=1
+  optional int32 sessions = 3;
+}
+
+// ModelStoreBindingSpec is the grant. StoreRefs is immutable, AllowPinned may be enabled,
+// and Quota.Bytes may grow. SourceMemory follows its field's online update rules;
+// existing reservations remain accounted when the grant changes or is removed.
 message ModelStoreBindingSpec {
   // StoreRefs names the ModelStores this namespace may prefetch into, at least one of them.
   // Prefetch admission refuses a prefetch whose target set falls outside every granted store.
@@ -6392,6 +6699,20 @@ message ModelStoreBindingSpec {
   //
   // +optional
   optional bool allowPinned = 3;
+
+  // SourceMemory grants the registered memory this namespace's source preparation may hold: the
+  // ceiling its admitted reservations draw on, the registration count, and the admitted read
+  // sessions it may run. It is the whole grant and it is SEPARATE from the disk one —
+  // quota.bytes counts filesystem usage and allowPinned grants pinning, and neither authorizes
+  // a byte of memory.
+  //
+  // Absent means source preparation follows the node's configured source capacity.
+  // While present, bytes and registrations may grow but cannot shrink. Sessions may
+  // change online; existing sessions finish before a lower limit admits new ones.
+  // Removing the section returns to node capacity without releasing existing charges.
+  //
+  // +optional
+  optional ModelStoreBindingSourceMemory sourceMemory = 4;
 }
 
 // ModelStoreBindingStatus is the namespace's own view of its grant: what it is using and whether
@@ -6421,6 +6742,14 @@ message ModelStoreBindingStatus {
   //
   // +optional
   optional .k8s.io.apimachinery.pkg.api.resource.Quantity usedBytes = 4;
+
+  // ReservedMemory is this binding's retained source-memory charge in the pinned authority,
+  // including filling and draining generations and their runtime overhead. Physical bytes
+  // shared with another namespace still charge each reservation separately. It is absent
+  // while no retained charge is measured or the authority cannot be read.
+  //
+  // +optional
+  optional .k8s.io.apimachinery.pkg.api.resource.Quantity reservedMemory = 5;
 }
 
 // ModelStoreBindingStoreReference names a cluster-scoped ModelStore this namespace is granted.
@@ -6720,6 +7049,86 @@ message NodeModelStoreModel {
   optional .k8s.io.apimachinery.pkg.apis.meta.v1.Time retryTime = 8;
 }
 
+// NodeModelStoreModelTransferGeneration is one source generation on this node, as the node
+// currently serves it. An entry names a digest and a generation and never a tenant: the
+// namespace's own view of what it may draw is on the Binding, not here.
+message NodeModelStoreModelTransferGeneration {
+  // Generation is the source's identity for this registered content: an opaque token assigned
+  // when the fill has verified, and the only thing the figures beside it are true of. A new
+  // generation never inherits the old one's figures. It carries no key.
+  //
+  // +required
+  // +k8s:validation:minLength=1
+  // +k8s:validation:maxLength=128
+  optional string generation = 1;
+
+  // Digest is the manifest digest the generation serves.
+  //
+  // +required
+  // +k8s:validation:minLength=1
+  optional string digest = 2;
+
+  // State is how this node is serving the generation. Serving admits readers; Draining has
+  // stopped admitting and is fencing its in-flight work; Quarantined holds its registration
+  // because its completion could not be proven, and nothing recycles its memory while it
+  // stands.
+  //
+  // +required
+  // +k8s:validation:enum=["Serving","Draining","Quarantined"]
+  optional string state = 3;
+
+  // ResidentBytes is what this node holds registered for this generation, serving and draining
+  // alike, because a draining generation's memory is still held.
+  //
+  // +optional
+  optional int64 residentBytes = 4;
+
+  // Registrations is this node's live registration count for this generation.
+  //
+  // +optional
+  optional int32 registrations = 5;
+
+  // ActiveSessions is how many read sessions this node has admitted against this generation.
+  //
+  // +optional
+  optional int32 activeSessions = 6;
+
+  // RejectedAdmissions counts the admission refusals this node has reported since this
+  // generation started, so a capacity shortfall is visible where it was made.
+  //
+  // +optional
+  optional int64 rejectedAdmissions = 7;
+
+  // SourcePodUID identifies the source Pod that owns this generation.
+  // +optional
+  optional string sourcePodUID = 8;
+
+  // SourceInstanceID identifies the native worker boot holding this generation.
+  // +optional
+  optional string sourceInstanceID = 9;
+
+  // SourceGeneration is the ModelArtifact specification generation served.
+  // +optional
+  optional int64 sourceGeneration = 10;
+
+  // LeaseExpiresAt is the source worker lease's expiry.
+  // +optional
+  optional .k8s.io.apimachinery.pkg.apis.meta.v1.Time leaseExpiresAt = 11;
+}
+
+// NodeModelStoreModelTransferStatus is the node's source generations for remote weight loading.
+message NodeModelStoreModelTransferStatus {
+  // Generations is one entry per source generation this node currently holds registered. Two
+  // entries for one digest are the drain-and-refill window, not a duplicate: each carries its
+  // own figures, and neither borrows the other's.
+  //
+  // +optional
+  // +listType=map
+  // +listMapKey=generation
+  // +k8s:validation:maxItems=64
+  repeated NodeModelStoreModelTransferGeneration generations = 1;
+}
+
 // NodeModelStoreSpec is the node's effective configuration, the worker's merge of the Settings.
 //
 // No tenant-writable object feeds it: a tenant who could choose where a privileged node process
@@ -6813,6 +7222,23 @@ message NodeModelStoreStatus {
   // +listType=map
   // +listMapKey=type
   repeated .gpustack.ai.gpustack.api.v1.Condition conditions = 4;
+
+  // ModelTransfer is the node's registered-memory source state for remote weight loading, one
+  // entry per source generation this node currently holds. It is ABSENT while the node runs no
+  // source runtime or holds no generation, and a generation the source stops serving leaves
+  // this report rather than turning into a zero — the absence IS the invalidation, because a
+  // registration nobody serves must not read as one ready to serve.
+  //
+  // It is deliberately separate from the models above, and neither implies the other: a
+  // generation that drains keeps its published tree disk-ready, and a daemon restart drops the
+  // entries without un-publishing anything.
+  //
+  // The plugin writes it, as it writes every status figure here; the transport workers report
+  // their health to the plugin and never write this object, which is what keeps this object
+  // single-writer.
+  //
+  // +optional
+  optional NodeModelStoreModelTransferStatus modelTransfer = 5;
 }
 
 // NodeModelStoreWatermarks are percentages of the cache filesystem's usage by everything on it.

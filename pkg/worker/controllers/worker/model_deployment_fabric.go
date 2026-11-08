@@ -27,10 +27,23 @@ func modelDeploymentRequestsInterfaces(md *workercore.ModelDeployment) bool {
 // select a device grant.
 func ModelDeploymentDirectInterfaceProtocol(
 	md *workercore.ModelDeployment, role *workercore.ModelDeploymentRole, manufacturer string,
+	artifact ...*ModelDeploymentArtifactRender,
 ) string {
 	if len(role.Command) > 0 ||
-		md.Spec.Engine.Name != workercore.ModelDeploymentEngineVLLM ||
 		manufacturer == "" || manufacturer == nodefeature.ManufacturerAscend {
+		return ""
+	}
+	remoteDelivery := md.Spec.Model.ArtifactRef != nil
+	if len(artifact) > 0 {
+		remoteDelivery = artifact[0] != nil &&
+			artifact[0].Delivery == workercore.ModelDeploymentModelDeliveryRemote
+	}
+	if remoteDelivery &&
+		!modelDeploymentRoleHasConflictingLoadFormat(role.ExtraArgs) &&
+		modelDeploymentModelTransferCandidateBackend(manufacturer, md.Spec.Engine.Name) == "nixl" {
+		return "rdma"
+	}
+	if md.Spec.Engine.Name != workercore.ModelDeploymentEngineVLLM {
 		return ""
 	}
 	// Managed multi-Pod Server collective legs (size > 1 or elasticEp) select the operator's

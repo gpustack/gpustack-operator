@@ -23,6 +23,7 @@ var setups = []controller.Setup{
 	new(worker.ModelStoreReconciler),
 	new(worker.ModelStoreBindingReconciler),
 	new(worker.ModelPrefetchReconciler),
+	new(worker.ModelTransferImageReconciler),
 	new(worker.NodeQueueReconciler),
 	new(worker.NodeQueueEntranceReconciler),
 	new(worker.TopologySourceReconciler),

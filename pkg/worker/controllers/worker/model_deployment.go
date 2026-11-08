@@ -2,6 +2,7 @@ package worker
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"maps"
 	"slices"
@@ -252,7 +253,7 @@ func (r *ModelDeploymentReconciler) teardownModelDeployment(
 // keeps a controller that runs on every Pod event from rewriting the world.
 func (r *ModelDeploymentReconciler) convergeModelDeployment(
 	ctx context.Context, md *workercore.ModelDeployment,
-) (ctrl.Result, error) {
+) (reconcileResult ctrl.Result, reconcileErr error) {
 	logger := ctrllog.FromContext(ctx)
 
 	// Resolved first, and its verdict deliberately does NOT gate the convergence below. A Binding
@@ -293,25 +294,37 @@ func (r *ModelDeploymentReconciler) convergeModelDeployment(
 		}
 	}
 
+	// The replicas are listed here, before the weights are resolved, because the remote
+	// delivery's own decision needs them: the deployment's own remote view is a report of an
+	// earlier pass, and a report can name no replica while one still serves.
+	replicas, listErr := r.listModelDeploymentPods(ctx, md)
+	if listErr != nil {
+		logger.Error(listErr, "list replicas")
+		return ctrl.Result{}, listErr
+	}
+	liveRemote := modelDeploymentModelTransferLiveRemote(replicas)
+
 	// The weights are resolved before anything is rendered, because an artifact that has never
 	// resolved leaves nothing to render: no commit to pin, no claim to mount. That pass touches no
 	// replica at all -- a deployment waiting for its first resolution has none, and one whose
 	// artifact went away is protected by the artifact's finalizer -- and only says why it waits.
-	weights, err := r.resolveModelDeploymentWeights(ctx, md)
+	weights, err := r.resolveModelDeploymentWeights(ctx, md, liveRemote)
 	if err != nil {
 		logger.Error(err, "resolve model artifact")
 		return ctrl.Result{}, err
 	}
+	if weights != nil && !weights.sourceReadyUntil.IsZero() {
+		defer func() {
+			if reconcileErr == nil {
+				reconcileResult = modelTransferSourceLeaseRequeue(reconcileResult, weights.sourceReadyUntil, r.modelDeploymentNow())
+			}
+		}()
+	}
 	if weights != nil && weights.Render == nil {
-		pods, listErr := r.listModelDeploymentPods(ctx, md)
-		if listErr != nil {
-			return ctrl.Result{}, listErr
-		}
-
 		// The weights are still resolving, so this pass has not reached the replicas and makes no
 		// qualification claim; the endpoint answer stays unobserved until a pass that has.
 		if err = r.syncModelDeploymentStatus(
-			ctx, md, pods, domain, nil, weights, modelDeploymentPassObservation{
+			ctx, md, replicas, domain, nil, weights, modelDeploymentPassObservation{
 				Serving: modelDeploymentServingUnobserved(md, "the weights are still resolving"),
 			},
 		); err != nil {
@@ -321,6 +334,43 @@ func (r *ModelDeploymentReconciler) convergeModelDeployment(
 		}
 
 		return ctrl.Result{}, nil
+	}
+
+	if weights != nil && weights.Status != nil &&
+		!modelDeploymentModelTransferSameArtifact(md.Status.Model, weights.Status) {
+		md.Status.Model = weights.Status.DeepCopy()
+	}
+
+	// THE REMOTE-TO-FALLBACK TRANSITION RUNS BEFORE THE RENDER, so a
+	// replica swept onto its declared fallback is rendered with it on this
+	// very pass: a remote Pod is never mutated into a delivery it was not
+	// created for, a replica with any member already serving is never a
+	// candidate, and the Kueue Workload holding the swept members'
+	// finalizers goes with them or the replacement waits behind it forever.
+	var swept []core.Pod
+	if weights != nil && weights.Render != nil &&
+		weights.Render.Delivery == workercore.ModelDeploymentModelDeliveryRemote {
+		swept, err = modelDeploymentModelTransferSweep(ctx, r.Client, md, replicas,
+			modelDeploymentModelTransferPolicy(ctx), weights.Render.ModelTransferFallback)
+		if err != nil {
+			return ctrl.Result{}, errors.Join(err, r.deleteModelDeploymentGroupWorkload(ctx, md, swept))
+		}
+		// The sweep owns the replicas it deleted: they are on their way out and
+		// are recreated on the fallback, so they are no longer the replicas a
+		// live Pod renders remotely, and their fallback is what the render
+		// below must apply. A replica falls back only when every member of it
+		// failed its load, and a failed member is no live remote replica, so a
+		// swept replica has no live member left to hold the delivery.
+		for i := range swept {
+			liveRemote.Delete(modelDeploymentModelTransferReplicaKeyOf(&swept[i]))
+		}
+		if len(swept) > 0 {
+			logger.V(2).Info("remote replicas are falling back", "deployment", md.Name,
+				"replicas", len(swept))
+			if err = r.deleteModelDeploymentGroupWorkload(ctx, md, swept); err != nil {
+				return ctrl.Result{}, err
+			}
+		}
 	}
 
 	desired, err := r.renderModelDeploymentPods(ctx, md, connection, interfaceProtocols, weights)
@@ -1483,7 +1533,18 @@ func (r *ModelDeploymentReconciler) convergeModelDeployment(
 	// looked at again on its own, so a missed event or a Settings read that was still cached costs a
 	// minute rather than the rest of the deployment's life.
 	if weights != nil && weights.Blocked && (weights.Reason == modelWeightsReasonNodeUnavailable ||
-		weights.Reason == modelWeightsReasonFilterNeedsNode) {
+		weights.Reason == modelWeightsReasonFilterNeedsNode ||
+		weights.Reason == modelDeploymentModelTransferReasonRoleIneligible ||
+		weights.Reason == modelDeploymentModelTransferReasonUnqualifiedBackend) {
+		return ctrl.Result{RequeueAfter: modelDeploymentDeliveryRecheck}, nil
+	}
+	// A remote delivery whose source is not prepared rechecks on its own: a
+	// generation arriving on some node's report is the event that unblocks
+	// an AwaitingSource replica, and the model-transfer-aware watch delivers it —
+	// this requeue covers a report nothing matched on the way past.
+	if weights != nil && weights.Render != nil &&
+		weights.Render.Delivery == workercore.ModelDeploymentModelDeliveryRemote &&
+		!weights.Render.SourceReady {
 		return ctrl.Result{RequeueAfter: modelDeploymentDeliveryRecheck}, nil
 	}
 
@@ -2237,6 +2298,9 @@ func (r *ModelDeploymentReconciler) renderModelDeploymentPods(
 	ctx context.Context, md *workercore.ModelDeployment,
 	connection *ModelDeploymentConnectorInput, interfaceProtocols []string, weights *modelArtifactWeights,
 ) (map[string]map[int][]*core.Pod, error) {
+	if err := r.reconcileModelTransferClientConfig(ctx, md, weights); err != nil {
+		return nil, err
+	}
 	if ModelDeploymentElasticRole(md) != nil {
 		return r.renderModelDeploymentElasticPods(ctx, md, connection, interfaceProtocols, weights)
 	}
@@ -2296,6 +2360,26 @@ func (r *ModelDeploymentReconciler) renderModelDeploymentRolePods(
 		}
 		if weights != nil {
 			in.Artifact = weights.Render
+		}
+		// A remote delivery resolves per role: a qualified managed role keeps
+		// the remote render, an unqualified one takes Prefer's declared
+		// fallback, and a role that cannot take one at all falls back under
+		// Prefer too. A refusal holds creation across the deployment, and the status
+		// carries the reason, instead of a render error that would say nothing.
+		manufacturer := instType.Status.Detail.Manufacturer
+		if weights != nil && weights.Render != nil &&
+			weights.Render.Delivery == workercore.ModelDeploymentModelDeliveryRemote {
+			effective, modelTransferReason, modelTransferMessage := weights.Render.modelTransferForRole(
+				md, role, manufacturer, modelDeploymentModelTransferRoleLive(weights.LiveRemoteOrdinals, role.Name),
+			)
+			if modelTransferReason != "" {
+				weights.Blocked = true
+				weights.Reason = modelTransferReason
+				weights.Message = modelTransferMessage + "; creation is held across the deployment"
+			} else {
+				effective.ModelTransferBackend = modelDeploymentModelTransferQualifiedBackend(manufacturer, md.Spec.Engine.Name)
+				in.Artifact = effective
+			}
 		}
 
 		// The connector is synthesized PER ROLE even though its connection is per deployment,
@@ -2404,7 +2488,7 @@ func (r *ModelDeploymentReconciler) renderModelDeploymentRolePods(
 				protocols = interfaceProtocols
 			}
 			in.InterfaceResource, err = ModelDeploymentInterfaceResource(protocols,
-				ModelDeploymentDirectInterfaceProtocol(md, role, instType.Status.Detail.Manufacturer), count)
+				ModelDeploymentDirectInterfaceProtocol(md, role, instType.Status.Detail.Manufacturer, in.Artifact), count)
 			if err != nil {
 				return nil, fmt.Errorf("role %q interface request: %w", role.Name, err)
 			}
@@ -2414,13 +2498,49 @@ func (r *ModelDeploymentReconciler) renderModelDeploymentRolePods(
 		if err != nil {
 			return nil, err
 		}
+		// The delivery the replicas of this role actually render under is
+		// stamped where the status and the fallback sweep read it.
+		if in.Artifact != nil {
+			if template.Annotations == nil {
+				template.Annotations = make(map[string]string, 1)
+			}
+			template.Annotations[modelDeploymentModelTransferDeliveryAnnotation] = string(in.Artifact.Delivery)
+		}
 
 		size := modelDeploymentRoleSize(role)
 		rolePods := make(map[int][]*core.Pod, role.Replicas)
 		for ordinal := range int(role.Replicas) {
+			// A replica the sweep moved renders on ITS fallback, at its own
+			// ordinal: the healthy remote replicas around it keep their
+			// template, their delivery and their identity hash, and nothing
+			// serving is rolled by a neighbor's failure.
+			ordinalTemplate := template
+			override := modelDeploymentModelTransferReplicaOverride(md, role.Name, ordinal)
+			// A replica a live Pod still renders on the remote delivery keeps
+			// that delivery. The override records the sweep's move, and the
+			// sweep moves a replica by deleting its Pod: a Pod that is still
+			// there renders the delivery the status cannot take from it.
+			if override != "" && !weights.liveRemoteReplica(role.Name, ordinal) {
+				if weights != nil && weights.Render != nil {
+					if fallbackRender := weights.Render.modelTransferFallbackRenderFor(override); fallbackRender != nil {
+						saved := in.Artifact
+						in.Artifact = fallbackRender
+						fallbackTemplate, renderErr := renderModelDeploymentPodTemplate(ctx, in)
+						in.Artifact = saved
+						if renderErr != nil {
+							return nil, renderErr
+						}
+						if fallbackTemplate.Annotations == nil {
+							fallbackTemplate.Annotations = make(map[string]string, 1)
+						}
+						fallbackTemplate.Annotations[modelDeploymentModelTransferDeliveryAnnotation] = string(fallbackRender.Delivery)
+						ordinalTemplate = fallbackTemplate
+					}
+				}
+			}
 			members := make([]*core.Pod, 0, size)
 			for member := range size {
-				pod := template.DeepCopy()
+				pod := ordinalTemplate.DeepCopy()
 				stampModelDeploymentPod(pod, md, role, ordinal, member)
 				members = append(members, pod)
 			}
@@ -2965,6 +3085,10 @@ func (r *ModelDeploymentReconciler) SetupController(ctx context.Context, opts co
 	r.Client = opts.Manager.GetClient()
 	r.APIReader = opts.Manager.GetAPIReader()
 	r.Recorder = opts.Manager.GetEventRecorderFor("modeldeployment")
+	if err := opts.Manager.GetFieldIndexer().IndexField(ctx, &workercore.ModelDeployment{},
+		modelDeploymentArtifactIndex, modelDeploymentArtifactIndexValues); err != nil {
+		return fmt.Errorf("index deployments by artifact for source observation: %w", err)
+	}
 
 	// The drain reader resolves one member by its UID, and a UID is not a field the cache can be
 	// asked for without an index. Registering it here, before the manager is started, is what keeps
@@ -3130,6 +3254,35 @@ func (r *ModelDeploymentReconciler) SetupController(ctx context.Context, opts co
 			&workercore.NodeModelStore{},
 			ctrlhandler.EnqueueRequestsFromMapFunc(r.mapModelDeploymentNodeModelStore),
 			ctrlbuilder.WithPredicates(nodeModelStoreModelsChanged()),
+		).
+		Watches(
+			&workercore.ModelPrefetch{},
+			enqueueDeliveryChange(r.mapModelDeploymentSourcePrefetch, 0),
+			ctrlbuilder.WithPredicates(modelPrefetchSourceReadinessChanged()),
+		).
+		Watches(
+			&core.Service{},
+			enqueueDeliveryChange(r.mapModelDeploymentTransferSources, 0),
+			ctrlbuilder.WithPredicates(modelTransferDiscoveryPredicate()),
+		).
+		Watches(
+			&app.DaemonSet{},
+			enqueueDeliveryChange(r.mapModelDeploymentTransferSources, 0),
+			ctrlbuilder.WithPredicates(modelTransferSourceDaemonSetChanged()),
+		).
+		Watches(
+			&core.Pod{},
+			enqueueDeliveryChange(r.mapModelDeploymentTransferSources, 0),
+			ctrlbuilder.WithPredicates(modelTransferSourcePodChanged()),
+		).
+		Watches(
+			&core.Secret{},
+			enqueueDeliveryChange(r.mapModelDeploymentTransferSources, 0),
+			ctrlbuilder.WithPredicates(ctrlpredicate.NewPredicateFuncs(func(o ctrlcli.Object) bool {
+				secret, ok := o.(*core.Secret)
+				return ok && secret.Namespace == setting.DelegatedSecretNamespace && secret.Type == core.SecretTypeTLS &&
+					secret.Labels["app.kubernetes.io/component"] == "model-transfer"
+			})),
 		).
 		Watches(
 			// Kueue's verdict on a replica is written to the replica's Workload and nowhere else: the

@@ -49,6 +49,10 @@ type Manager struct {
 	NodeName   string
 	KubeletDir string
 	CSISocket  string
+	// ModelTransferStateRoot is the source broker's ledger root, read by the reporter
+	// to write the NodeModelStore's ModelTransfer status. The source runtime is a
+	// separate process from this plugin.
+	ModelTransferStateRoot string
 
 	// PeerSync, when not nil, serves this node's published trees to the other nodes' plugins and
 	// lets the materializer pull from theirs.
@@ -79,13 +83,7 @@ func (m *Manager) Start(ctx context.Context) error {
 	downloader := download.New(nil, 1, 0)
 	downloader.Received = func(n int64) { metrics.DownloadBytes.WithLabelValues("hub").Add(float64(n)) }
 	materializer := &materialize.Materializer{Store: m.Store, Now: time.Now, Base: ctx}
-	collector := &gc.Collector{
-		Store:       m.Store,
-		Usage:       func() (gc.Usage, error) { return gc.Statfs(m.Store.Root()) },
-		Referenced:  m.referenced,
-		Downloading: materializer.Downloading,
-		Now:         time.Now,
-	}
+	collector := m.newCollector(materializer)
 	kubeletCap, err := m.kubeletCap()
 	if err != nil {
 		return err
@@ -113,6 +111,7 @@ func (m *Manager) Start(ctx context.Context) error {
 		KubeletDir:   m.KubeletDir,
 		Store:        m.Store,
 		Artifacts:    cm.GetCache(),
+		APIReader:    cm.GetAPIReader(),
 		Ready:        m.ready.Load,
 		Mounter:      driver.HostMounter{},
 		Materializer: materializer,
@@ -134,7 +133,7 @@ func (m *Manager) Start(ctx context.Context) error {
 		if err := m.Manager.WaitForReady(ctx); err != nil {
 			return fmt.Errorf("wait for manager ready: %w", err)
 		}
-		if err := m.rebuild(); err != nil {
+		if err := m.rebuild(ctx); err != nil {
 			return fmt.Errorf("rebuild references: %w", err)
 		}
 		// Every mount reads its artifact from this informer: started and synced here, before the
@@ -189,14 +188,19 @@ func (m *Manager) newReporter(
 ) *report.Reporter {
 	return &report.Reporter{
 		Reader: cm.GetAPIReader(), Client: cm.GetClient(), NodeName: m.NodeName, Namespace: systemname.NamespaceName,
-		Store: m.Store, Collector: collector, Downloading: materializer.Downloading, Progress: materializer.Progress, Downloader: downloader,
+		Store: m.Store, ModelTransferStateRoot: m.ModelTransferStateRoot, Collector: collector,
+		Downloading: materializer.Downloading, Progress: materializer.Progress, Downloader: downloader,
 		KubeletCap: kubeletCap, Now: time.Now,
 	}
 }
 
 // rebuild reconstructs the references from the node's mounts and the ledger, and removes what an
-// interrupted removal left.
-func (m *Manager) rebuild() error {
+// interrupted removal left. A caller whose context is done stops waiting for the claim locks and
+// rewrites nothing; once the rewrite begins it runs to completion or fails on its own I/O errors.
+func (m *Manager) rebuild(ctx context.Context) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	if err := m.Store.EmptyTrash(); err != nil {
 		return err
 	}
@@ -213,7 +217,7 @@ func (m *Manager) rebuild() error {
 	if err != nil {
 		return err
 	}
-	rebuilt, err := m.Store.Rebuild(mounts, device)
+	rebuilt, err := m.Store.Rebuild(ctx, mounts, device)
 	if err != nil {
 		return err
 	}
@@ -237,6 +241,21 @@ func (m *Manager) referenced() (map[string]bool, error) {
 	}
 
 	return set, nil
+}
+
+// newCollector builds the collector Start serves. It sweeps the published
+// layout and the store's canonical metadata-view root — the directory the
+// mounts resolve and the metadata endpoint exports from — so a finished
+// view's files do not outlive the store that holds them.
+func (m *Manager) newCollector(materializer *materialize.Materializer) *gc.Collector {
+	return &gc.Collector{
+		Store:       m.Store,
+		Usage:       func() (gc.Usage, error) { return gc.Statfs(m.Store.Root()) },
+		Referenced:  m.referenced,
+		Downloading: materializer.Downloading,
+		ViewRoot:    m.Store.ViewsRoot(),
+		Now:         time.Now,
+	}
 }
 
 // kubeletCap returns the high watermark's cap when the cache shares kubelet's pods filesystem, and nil

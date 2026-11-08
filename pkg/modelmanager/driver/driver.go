@@ -7,10 +7,12 @@ import (
 	"context"
 	"errors"
 	"io/fs"
+	"net"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 
 	"github.com/container-storage-interface/spec/lib/go/csi"
 	"google.golang.org/grpc/codes"
@@ -82,12 +84,21 @@ type Driver struct {
 	Store *store.Store
 	// Artifacts reads ModelArtifacts from the informer cache, never with a GET per call.
 	Artifacts ctrlcli.Reader
+	// APIReader verifies live Pod ownership and public source discovery for a
+	// metadata-only mount. It never borrows the plugin's credential for source HTTP.
+	APIReader ctrlcli.Reader
 	// Ready reports whether the caches synced and references were rebuilt; until then every mount
 	// answers Unavailable rather than a refusal the cache could not yet back.
 	Ready        func() bool
 	Mounter      Mounter
 	Materializer Materializer
 	Events       Events
+	// MetadataViews builds the metadata-only views a model-transfer delivery mounts.
+	// Nil serves content-addressed views out of the store's own root.
+	MetadataViews MetadataViews
+
+	metadataEndpointCursor atomic.Uint64
+	metadataDialContext    func(context.Context, string, string) (net.Conn, error)
 
 	targetsMu sync.Mutex
 	targets   map[string]*targetLock // target path -> its lock, while a call holds or waits for it
@@ -146,6 +157,12 @@ func (d *Driver) NodePublishVolume(ctx context.Context, req *csi.NodePublishVolu
 	unlock := d.lockTarget(target)
 	defer unlock()
 
+	// A metadata-only model-transfer delivery is a contract of its own: it never sees
+	// the complete-tree materializer and never mounts a published tree.
+	if vc[attrModelTransferDelivery] != "" {
+		return d.publishModelTransferVolume(ctx, req, vc, target)
+	}
+
 	namespace, attrs := vc[attrPodNamespace], attributesOf(vc)
 	ma, err := d.artifact(ctx, namespace, attrs.Artifact)
 	if err != nil {
@@ -186,9 +203,9 @@ func (d *Driver) NodePublishVolume(ctx context.Context, req *csi.NodePublishVolu
 	// a tree is claimed while it is still published, and a mount whose reference cannot be written
 	// fails rather than serve a tree the collector does not know is mounted.
 	result := metrics.MountHit
-	published, err := d.Store.Claim(ref)
+	published, err := d.Store.Claim(ctx, ref)
 	if err != nil {
-		return nil, status.Errorf(codes.Internal, "record the reference: %v", err)
+		return nil, recordReferenceError(err)
 	}
 	if !published {
 		p := d.Materializer.Ensure(ctx, Request{Hex: hex, Artifact: ma, Token: req.GetSecrets()[secretTokenKey]})
@@ -197,8 +214,8 @@ func (d *Driver) NodePublishVolume(ctx context.Context, req *csi.NodePublishVolu
 			return nil, status.Error(p.Code, p.Message)
 		}
 		result = metrics.MountMaterialized
-		if published, err = d.Store.Claim(ref); err != nil {
-			return nil, status.Errorf(codes.Internal, "record the reference: %v", err)
+		if published, err = d.Store.Claim(ctx, ref); err != nil {
+			return nil, recordReferenceError(err)
 		}
 		if !published {
 			metrics.Mounts.WithLabelValues(metrics.MountPending).Inc()
@@ -220,6 +237,20 @@ func (d *Driver) NodePublishVolume(ctx context.Context, req *csi.NodePublishVolu
 	}
 
 	return &csi.NodePublishVolumeResponse{}, nil
+}
+
+// recordReferenceError maps a failed reference record: the call's own cancellation keeps its gRPC
+// code, so kubelet sees the call it gave up on rather than an internal fault, and anything else is
+// an internal fault.
+func recordReferenceError(err error) error {
+	switch {
+	case errors.Is(err, context.Canceled):
+		return status.Error(codes.Canceled, "record the reference: the call was canceled")
+	case errors.Is(err, context.DeadlineExceeded):
+		return status.Error(codes.DeadlineExceeded, "record the reference: the call ran out of time")
+	default:
+		return status.Errorf(codes.Internal, "record the reference: %v", err)
+	}
 }
 
 // dropRef removes the reference of a mount that did not happen, so the tree is not kept for it.

@@ -137,7 +137,8 @@ func (d *nvmlMigDriver) InstanceProcesses(cardUUID string, inst migInstance) (in
 		}
 		if mig == nil {
 			return 0, fmt.Errorf(
-				"card %s: mig device handle %d is absent though the driver reported success", cardUUID, i)
+				"card %s: mig device handle %d is absent though the driver reported success", cardUUID, i,
+			)
 		}
 		giID, ret := mig.GetGpuInstanceId()
 		if !ret.IsSuccess() {
@@ -150,7 +151,8 @@ func (d *nvmlMigDriver) InstanceProcesses(cardUUID string, inst migInstance) (in
 		procs, ret := mig.GetComputeRunningProcesses()
 		if !ret.IsSuccess() {
 			return 0, fmt.Errorf(
-				"card %s: list compute processes on gpu instance %d: %w", cardUUID, inst.GiID, ret)
+				"card %s: list compute processes on gpu instance %d: %w", cardUUID, inst.GiID, ret,
+			)
 		}
 		if len(procs) > 0 {
 			return len(procs), nil
@@ -158,7 +160,8 @@ func (d *nvmlMigDriver) InstanceProcesses(cardUUID string, inst migInstance) (in
 	}
 	if !addressed {
 		return 0, fmt.Errorf(
-			"card %s: gpu instance %d: %w", cardUUID, inst.GiID, errNoAddressableDevice)
+			"card %s: gpu instance %d: %w", cardUUID, inst.GiID, errNoAddressableDevice,
+		)
 	}
 	return 0, nil
 }
@@ -244,7 +247,8 @@ func (d *nvmlMigDriver) migUUIDs(dev nvml.Device, cardUUID string) (map[uint32]s
 		}
 		if mig == nil {
 			return nil, fmt.Errorf(
-				"card %s: mig device handle %d is absent though the driver reported success", cardUUID, i)
+				"card %s: mig device handle %d is absent though the driver reported success", cardUUID, i,
+			)
 		}
 		// Read the owning GPU-instance id directly from the MIG device handle; resolving
 		// the full instance needs the parent device and fails (INVALID_ARGUMENT) here.
@@ -259,7 +263,8 @@ func (d *nvmlMigDriver) migUUIDs(dev nvml.Device, cardUUID string) (map[uint32]s
 		if prev, dup := out[giID]; dup {
 			return nil, fmt.Errorf(
 				"card %s: gpu instance %d owns more than one mig device (%s and %s): refusing to address it by either",
-				cardUUID, giID, prev, uuid)
+				cardUUID, giID, prev, uuid,
+			)
 		}
 		out[giID] = uuid
 	}
@@ -310,7 +315,8 @@ func liveInstances(
 			if gi.ProfileId != info.Id {
 				return nil, fmt.Errorf(
 					"card %s: gpu instance %d reports profile %d while enumerated under profile %d: fail closed",
-					cardUUID, gi.Id, gi.ProfileId, info.Id)
+					cardUUID, gi.Id, gi.ProfileId, info.Id,
+				)
 			}
 			live = append(live, migInstance{
 				GiID:          gi.Id,
@@ -512,7 +518,8 @@ func (d *nvmlMigDriver) DestroyInstance(cardUUID string, inst migInstance) error
 			cis, ret := gis[j].GetComputeInstances(ciIDs.ComputeInstanceProfileID)
 			if !ret.IsSuccess() && !driverReportsAbsent(ret) {
 				return fmt.Errorf(
-					"card %s: list compute instances on gpu instance %d: %w", cardUUID, inst.GiID, ret)
+					"card %s: list compute instances on gpu instance %d: %w", cardUUID, inst.GiID, ret,
+				)
 			}
 			for k := range cis {
 				if r := cis[k].Destroy(); !r.IsSuccess() {
@@ -545,14 +552,16 @@ func verifyInstanceIdentity(
 	if liveUUID != inst.UUID {
 		return fmt.Errorf(
 			"card %s: gpu instance %d now carries mig device %q, not the recorded %q: refusing to destroy",
-			cardUUID, inst.GiID, liveUUID, inst.UUID)
+			cardUUID, inst.GiID, liveUUID, inst.UUID,
+		)
 	}
 	if int32(live.Placement.Start) != inst.Placement.Start || int32(live.Placement.Size) != inst.Placement.Length {
 		return fmt.Errorf(
 			"card %s: gpu instance %d now occupies slices [%d,%d), not the recorded [%d,%d): refusing to destroy",
 			cardUUID, inst.GiID,
 			live.Placement.Start, live.Placement.Start+live.Placement.Size,
-			inst.Placement.Start, inst.Placement.Start+inst.Placement.Length)
+			inst.Placement.Start, inst.Placement.Start+inst.Placement.Length,
+		)
 	}
 	return nil
 }

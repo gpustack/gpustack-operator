@@ -1079,7 +1079,7 @@ func modelDeploymentGroupForwardPairProbe(
 		if err != nil {
 			return "", 0, err.Error()
 		}
-		input.TransferID = "xfer-" + requestID
+		input.TransferID = "model-transfer-" + requestID
 		legs, err = engine.Heads(input)
 		if err != nil {
 			return "", 0, "the pair's requests could not be rendered: " + err.Error()

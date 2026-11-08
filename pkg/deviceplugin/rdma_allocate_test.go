@@ -618,6 +618,140 @@ func TestRDMAServer_Allocate_WritesNothing(t *testing.T) {
 	assert.Empty(t, rec.reservations, "the allocation recorded an in-process reservation")
 }
 
+// mountSpecsOf renders the mounts a response carries as comparable plain values: each mount's
+// read-only flag and host path, in order.
+func mountSpecsOf(ctrResp *ContainerAllocateResponse) []string {
+	specs := make([]string, 0, len(ctrResp.Mounts))
+	for _, m := range ctrResp.Mounts {
+		readOnly := "rw"
+		if m.ReadOnly {
+			readOnly = "ro"
+		}
+		specs = append(specs, readOnly+":"+m.HostPath)
+	}
+	return specs
+}
+
+// TestRDMAServer_Allocate_InjectsAscendDriver pins the driver-tree mount as a node fact: an
+// inventory naming an Ascend accelerator earns the read-only /usr/local/Ascend/driver mount
+// beside the endpoint grant — HIXL and HCCL read it directly and ascend-docker-runtime does not
+// mount it in full — while a non-Ascend inventory earns none, and an Ascend inventory on a host
+// without the tree earns no mount rather than an error. The Ascend fact is read wherever the
+// inventory records it: a spec group, a status group, or the node label.
+func TestRDMAServer_Allocate_InjectsAscendDriver(t *testing.T) {
+	const nodeName = "node-rdma-ascend"
+
+	cases := []struct {
+		name string
+		// mutate stands the Ascend fact into the inventory the response is built from.
+		mutate func(t *testing.T, devs *workercore.Devices)
+		// withTree stands the driver tree on the host; wantMount is the response's answer.
+		withTree  bool
+		wantMount bool
+	}{
+		{
+			name: "a spec group naming ascend carries the driver tree",
+			mutate: func(t *testing.T, devs *workercore.Devices) {
+				t.Helper()
+				devs.Spec.Groups = []workercore.DevicesGroup{{
+					ID:           "910b2",
+					Manufacturer: nodefeature.ManufacturerAscend,
+					Accelerators: []workercore.Accelerator{{ID: "accel-0", Index: 0}},
+				}}
+			},
+			withTree:  true,
+			wantMount: true,
+		},
+		{
+			name: "a status group naming ascend carries the driver tree",
+			mutate: func(t *testing.T, devs *workercore.Devices) {
+				t.Helper()
+				devs.Status.Groups = []workercore.DevicesAllocationGroup{{
+					ID:           "910b2",
+					Manufacturer: nodefeature.ManufacturerAscend,
+				}}
+			},
+			withTree:  true,
+			wantMount: true,
+		},
+		{
+			name: "the node label naming ascend carries the driver tree",
+			mutate: func(t *testing.T, devs *workercore.Devices) {
+				t.Helper()
+				devs.Labels = map[string]string{
+					nodefeature.AcceleratableFeatureLabelPrefix + nodefeature.ManufacturerAscend: "true",
+				}
+			},
+			withTree:  true,
+			wantMount: true,
+		},
+		{
+			name: "an nvidia inventory carries no driver mount",
+			mutate: func(t *testing.T, devs *workercore.Devices) {
+				t.Helper()
+				devs.Spec.Groups = []workercore.DevicesGroup{{
+					ID:           "tesla-t4",
+					Manufacturer: nodefeature.ManufacturerNVIDIA,
+					Accelerators: []workercore.Accelerator{{ID: "accel-0", Index: 0}},
+				}}
+			},
+			withTree:  true,
+			wantMount: false,
+		},
+		{
+			name: "an ascend inventory on a host without the tree carries no mount",
+			mutate: func(t *testing.T, devs *workercore.Devices) {
+				t.Helper()
+				devs.Spec.Groups = []workercore.DevicesGroup{{
+					ID:           "910b2",
+					Manufacturer: nodefeature.ManufacturerAscend,
+					Accelerators: []workercore.Accelerator{{ID: "accel-0", Index: 0}},
+				}}
+			},
+			withTree:  false,
+			wantMount: false,
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			f := newRdmaAllocateFixture(t)
+			f.mapVerbs("mlx5_0", "uverbs1")
+			f.writeNode("uverbs1")
+			f.writeNode("rdma_cm")
+
+			driverDir := filepath.Join(t.TempDir(), "driver")
+			if c.withTree {
+				require.NoError(t, os.MkdirAll(driverDir, 0o755))
+			}
+			origDriver := ascendDriverDir
+			ascendDriverDir = driverDir
+			t.Cleanup(func() { ascendDriverDir = origDriver })
+
+			devs := rdmaDevices(nodeName, wholeFunctionIface("ib0", "0", "mlx5_0", nil))
+			c.mutate(t, devs)
+			rec := &DevicesReconciler{NodeName: nodeName, Client: nodeFixture(devs)}
+
+			resp, err := rdmaTestServer(t, workercore.DeviceAllocationModeShared, rec).
+				Allocate(context.Background(), allocateRequest("ib0:ib0:0000"))
+			require.NoError(t, err)
+			require.Len(t, resp.ContainerResponses, 1)
+
+			ctrResp := resp.ContainerResponses[0]
+			if c.wantMount {
+				assert.Equal(t, []string{"ro:" + driverDir}, mountSpecsOf(ctrResp))
+			} else {
+				assert.Empty(t, ctrResp.Mounts)
+			}
+			// The mount rides beside the grant, never instead of it.
+			assert.Equal(t, map[string]string{
+				"NCCL_IB_HCA":           "=mlx5_0",
+				"GPUSTACK_RDMA_DEVICES": "mlx5_0",
+			}, ctrResp.Envs)
+			assert.NotEmpty(t, deviceSpecsOf(ctrResp))
+		})
+	}
+}
+
 // TestRDMAServer_AdvertisedIDsAllocate closes the loop the rest of this file leaves open: every
 // other case hands Allocate an ID written by hand, so both sides of the contract are authored here
 // and a numbering that advertised strings the allocation path cannot resolve would pass them all.

@@ -1,3 +1,12 @@
+# OpenSSH sidecar with a static SFTP server for access to a workload container.
+# Build target: the default final stage; sftp-server is an intermediate builder.
+# Platforms: linux/amd64 and linux/arm64.
+# Run from the repository root:
+#   PACKAGE_ARCH=amd64 PACKAGE_TAG=dev make package ssh-server
+# Set PACKAGE_NAMESPACE to select the image namespace; PACKAGE_PUSH=true publishes.
+# The entrypoint receives the workload container's namespaces and authorized keys
+# through the mounts and environment configured by the operator.
+
 ARG GO_VERSION="1.27.3"
 FROM --platform=$BUILDPLATFORM golang:${GO_VERSION}-alpine3.24 AS sftp-server
 

@@ -35,6 +35,13 @@ in mind while reviewing.
 - Identify the spec source, in this order: the PR description → linked issues → a
   file under `specs/` matching the feature. If none exists, note "no spec
   available" and limit the Spec axis to obvious internal inconsistencies.
+- Read the connected code, not only the diff: callers of every changed function,
+  the functions it calls, and the tests. When a signature, return value, or shared
+  wire contract (`model-transfer/contracts/`, `pkg/modeltransfer`, `model-transfer/python`) changes, grep
+  every caller across Go and Python.
+- Every finding needs a concrete case: "this input or runtime situation leads to
+  this wrong result". Re-read the lines and confirm the caller exists, the value
+  can really be empty/`None`, or the resource really leaks before reporting.
 
 ### 2. Review the tests first
 
@@ -42,8 +49,9 @@ Tests reveal intent better than implementation:
 
 - Do tests exist for changed runtime behavior? A bug fix without a regression test is a finding.
   Documentation uses existing lint checks; do not require tests that read Markdown.
-- Are they table-driven with a shared execution loop, declarative cases, fixtures
-  built through helpers?
+- For Go (`*_test.go`), are they table-driven with a shared execution loop, declarative cases,
+  fixtures built through helpers? For Python (`model-transfer/python/tests/`), do they run cleanly under
+  `uv run pytest -W error::ResourceWarning` with zero leaked handles and deterministic fixtures?
 - Do they assert observable final state (not implementation details), use fake
   clients, and stay deterministic (no time-, ordering-, or randomness-dependence)?
 - Would they catch a regression if the implementation changed?
@@ -61,6 +69,27 @@ Walk each changed file with these checks:
 - `Devices` ledger accounting stays consistent — every allocation path has a
   matching release path; nothing reads or writes allocation state outside the ledger.
 - Edge cases: nil/empty inputs, boundary values, not-found objects, requeue behavior.
+- Python (`model-transfer/python/**`) correctness and boundary handling:
+  - Mutable default arguments (`def f(x=[])`, `def f(x={})`), unintended class-level
+    mutable attributes, or module-level mutable globals mutated across sessions or threads.
+  - Empty inputs assumed non-empty (`xs[0]`, `max()`/`min()` on empty iterables),
+    off-by-one slice bounds, `None` reaching code that assumes a value, exact float
+    equality with `==` instead of `math.isclose`, or `is`/`is not` used on string/number/tuple
+    literals instead of `==` (reserve `is` for singletons/sentinels like `None`).
+  - Exception handling: bare `except:`, overly broad `except Exception:` masking
+    unexpected bugs, silent swallowing (`pass`), lost tracebacks instead of
+    `raise NewError(...) from err`, or `assert` used for runtime validation of
+    external inputs (stripped under `python -O`).
+  - Resource management: files, sockets, `mmap` buffers, locks, or `gpustack_model_transfer`
+    readers/sessions opened without a `with` statement or leaked when preflight,
+    refusal, or cancellation exits early.
+  - `gpustack_model_transfer` adapter & reader invariants: safetensors header probes must read
+    only header bytes (`8 + header_len`) and cross-check dtype/shape/offsets against
+    the verified manifest; loaders must preflight the entire plan and owned-output
+    budget before mutating any model parameter and never claim clean fallback after
+    partial model mutation; borrowed-storage views require an explicit lifetime
+    owner and completion fence; `finalize()` must release all load-only windows and
+    registrations before KV cache profiling and enforce single-call / load-group fences.
 
 **Readability**
 
@@ -75,23 +104,43 @@ Walk each changed file with these checks:
 - The change lives in the layer that owns the concept: label algebra in
   `pkg/nodefeature`, device detection/allocation in `pkg/devicemanager`,
   scheduling-chain materialization in `pkg/worker` controllers, admission rules in
-  the webhooks / AdmissionCheck controllers. Flag feature logic leaking into shared
+  the webhooks / AdmissionCheck controllers, remote weight transfer control plane
+  in `pkg/modeltransfer`, shared wire schemas in `model-transfer/contracts`, and portable Python
+  reader/adapters/backends in `model-transfer/python`. Flag feature logic leaking into shared
   or general-purpose packages.
+- `model-transfer/python` packaging contract: `gpustack_model_transfer` ships as a single universal
+  pure-Python wheel (`py3-none-any.whl`) staged by DeviceManager and installed
+  offline on demand when `gpustack_model_transfer` is not already present. Core
+  `dependencies` in `model-transfer/python/pyproject.toml` must stay empty (`[]`); vendor and
+  engine packages (`torch`, `torch_npu`, `nixl`, `hixl`, `vllm`, `sglang`) and C
+  runtimes (`libascendcl.so`, `libcudart.so`) must be imported lazily at runtime or
+  accessed via `ctypes` so one wheel works across CUDA 12/13 and CANN 910B(A2)/A3/950(A5).
 - Pool isolation invariants hold: one ClusterQueue per pool, no cross-pool
   borrowing.
 - The credits model stays integer (`M = 1,600,000` per accelerator); flag any
   floating-point or percentage arithmetic that erodes it.
 - API changes stay backward compatible; `spec` and `status` remain strictly separated.
+- `model-transfer` client-server wire compatibility: because workload images may carry a
+  pre-installed older `gpustack_model_transfer` client while the cluster upgrades `gpustack-operator`
+  (`model-transfer` server / source worker), flag any change in `pkg/modeltransfer`,
+  `model-transfer/contracts`, or `model-transfer/python` that breaks an older `gpustack_model_transfer` client
+  talking to a newer `model-transfer` server (renaming/removing fields or endpoints,
+  changing `gpustack-xfer/derived-tensor/v1` preimages, requiring new request fields
+  without server-side defaults, or failing on unknown additive server response fields).
 - Does a refactor reduce the number of concepts a reader must hold, or just
   relocate them? Relocation is not simplification.
 
 **Security**
 
 - Webhook and API inputs are validated before use; external data (labels, CR
-  fields, node metadata) is treated as untrusted.
+  fields, node metadata, model-transfer descriptors, manifest paths) is treated as untrusted.
 - No secrets in code, logs, or fixtures.
 - CGO boundaries (`binding/`, `csrc/` callers) handle C-returned memory and error
   codes correctly; injected preload shims keep paths and values quoted/escaped.
+- Python (`model-transfer/python/**`) security: no `eval`/`exec`/`compile` on untrusted input,
+  no `subprocess` with `shell=True` on unsanitized input, no `pickle`/`marshal`/`yaml.load`
+  without `SafeLoader` on untrusted data, and no unvalidated file path joins that
+  permit path traversal (`..` or symlink escape outside the verified tree).
 
 **Performance**
 
@@ -99,6 +148,11 @@ Walk each changed file with these checks:
   belong in a cache, no work proportional to cluster size in a per-object reconcile.
 - Watches/informers are scoped to resources that actually affect desired state;
   flag broad watches that would trigger reconcile storms.
+- Python (`model-transfer/python/**`) scale and hot paths: flag check-then-act races on shared
+  state without a `Lock`, blocking synchronous I/O or `time.sleep` inside `async def`,
+  unawaited `asyncio` tasks, CPU-bound loops parallelized with `threading` under the
+  GIL, repeated `list` membership scans where a `set`/`dict` turns O(n) into O(1),
+  string `+=` in loops, and eager f-strings in `logging` calls on hot paths.
 
 ### 4. Check the repo's hard invariants
 
@@ -112,6 +166,9 @@ Each of these is a **required** finding, not a judgement call:
   instead of patch files under `hack/`.
 - Doc changes that break the docs contract (page header, Contents list, footer,
   `docs/README.md` index) — `make lint docs` must pass.
+- `model-transfer/contracts/` changes without matching updates in both `pkg/modeltransfer` and
+  `model-transfer/python/gpustack_model_transfer/contract`, or `model-transfer/python/` changes that fail
+  `uv run ruff check .`, `uv run ruff format --check .`, or `uv run pytest -W error::ResourceWarning`.
 
 ### 5. Over-engineering pass
 
@@ -120,12 +177,14 @@ belong to step 3, never here. One line per finding: location, tag, what to cut,
 what replaces it. The diff's best outcome is getting shorter.
 
 - `delete:` dead code, unused flexibility, speculative features. Replacement: nothing.
-- `stdlib:` hand-rolled logic that the Go standard library or an already-imported
+- `reuse:` the repo already has this helper (name the path).
+- `stdlib:` hand-rolled logic that the Go or Python standard library or an already-imported
   dependency (apimachinery, klog, controller-runtime) ships. Name the function.
 - `native:` code reimplementing what Kubernetes/controller-runtime already does
   (finalizers, owner references, rate limiters, workqueues). Name the feature.
 - `yagni:` an abstraction with one implementation, a knob nobody sets, a layer
   with one caller. Inline it until a second user exists.
+- `merge:` near-copies that must change together.
 - `shrink:` same logic in fewer lines. Show the shorter form.
 
 End the pass with `net: -N lines possible`. If there is nothing to cut, write

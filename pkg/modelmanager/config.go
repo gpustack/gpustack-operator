@@ -26,6 +26,8 @@ type Config struct {
 	KubeletDir string
 	CacheRoot  string
 	CSISocket  string
+	// ModelTransferStateRoot is the source broker's ledger root the reporter reads.
+	ModelTransferStateRoot string
 
 	// PeerSync, when not nil, serves this node's published trees to the other nodes' plugins and
 	// pulls from theirs.
@@ -57,11 +59,12 @@ func (c *Config) Apply(ctx context.Context) (*Manager, error) {
 	}
 
 	return &Manager{
-		Manager:    mgr,
-		Store:      st,
-		NodeName:   c.NodeName,
-		KubeletDir: c.KubeletDir,
-		CSISocket:  c.CSISocket,
-		PeerSync:   c.PeerSync,
+		Manager:                mgr,
+		Store:                  st,
+		NodeName:               c.NodeName,
+		KubeletDir:             c.KubeletDir,
+		CSISocket:              c.CSISocket,
+		ModelTransferStateRoot: c.ModelTransferStateRoot,
+		PeerSync:               c.PeerSync,
 	}, nil
 }

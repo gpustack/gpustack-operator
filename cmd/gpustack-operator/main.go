@@ -8,6 +8,7 @@ import (
 	"gpustack.ai/gpustack/cmd"
 	"gpustack.ai/gpustack/pkg/devicemanager"
 	"gpustack.ai/gpustack/pkg/modelmanager"
+	"gpustack.ai/gpustack/pkg/modeltransfer"
 	"gpustack.ai/gpustack/pkg/utils/signalx"
 	"gpustack.ai/gpustack/pkg/worker"
 	"gpustack.ai/gpustack/pkg/workergateway"
@@ -23,6 +24,7 @@ func main() {
 	c.AddCommand(workergateway.NewCommand())
 	c.AddCommand(devicemanager.NewCommand())
 	c.AddCommand(modelmanager.NewCommand())
+	c.AddCommand(modeltransfer.NewCommand())
 	c = cmd.Harness(c)
 
 	if err := c.ExecuteContext(signalx.Handler()); err != nil {

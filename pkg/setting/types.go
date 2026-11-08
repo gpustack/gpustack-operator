@@ -72,6 +72,11 @@ func (s Setting) Private() bool {
 	return s.props&PropPrivate == PropPrivate
 }
 
+// Validate runs the setting's admission against val with an empty previous value.
+func (s Setting) Validate(ctx context.Context, val string) error {
+	return s.admit(ctx, "", val)
+}
+
 // Configure configures the value of the setting.
 func (s Setting) Configure(ctx context.Context, newVal string) error {
 	lpCli := system.LoopbackKubeClient.Get()

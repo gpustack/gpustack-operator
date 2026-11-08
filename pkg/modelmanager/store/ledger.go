@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -61,9 +62,18 @@ func (s *Store) WriteRef(r Ref) error {
 // whether it is. It holds the lock RemoveUnreferenced does, so the tree a claim finds stays until the
 // reference is removed. A mount claims before it binds: a reference that cannot be written fails the
 // mount instead of leaving a mounted tree the collector cannot see.
-func (s *Store) Claim(r Ref) (bool, error) {
-	s.claimMu.Lock()
-	defer s.claimMu.Unlock()
+// Cancellation stops waiting for the claim locks without recording a reference.
+// Once the locks are held, the ledger write finishes or returns its own I/O error.
+func (s *Store) Claim(ctx context.Context, r Ref) (bool, error) {
+	if err := s.lockClaimMu(ctx); err != nil {
+		return false, err
+	}
+	defer s.unlockClaimMu()
+	unlock, err := s.lockClaims(ctx)
+	if err != nil {
+		return false, err
+	}
+	defer unlock()
 
 	if !s.IsPublished(r.Hex) {
 		return false, nil
@@ -131,7 +141,12 @@ func (s *Store) Refs() ([]Ref, error) {
 		}
 		refs = append(refs, r)
 	}
-	sort.Slice(refs, func(i, j int) bool { return refs[i].TargetPath < refs[j].TargetPath })
+	sort.Slice(refs, func(i, j int) bool {
+		if refs[i].TargetPath != refs[j].TargetPath {
+			return refs[i].TargetPath < refs[j].TargetPath
+		}
+		return refs[i].VolumeID < refs[j].VolumeID
+	})
 
 	return refs, nil
 }

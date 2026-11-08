@@ -2,6 +2,10 @@
 
 package v1alpha1
 
+import (
+	workerv1alpha1 "gpustack.ai/gpustack/api/worker/v1alpha1"
+)
+
 // ModelPrefetchSpecApplyConfiguration represents a declarative configuration of the ModelPrefetchSpec type for use
 // with apply.
 //
@@ -27,6 +31,25 @@ type ModelPrefetchSpecApplyConfiguration struct {
 	// Retention decides what happens to the content after it has landed.
 	//
 	Retention *ModelPrefetchRetentionApplyConfiguration `json:"retention,omitempty"`
+	// Source opts this prefetch into source preparation for remote weight loading, beside the
+	// disk residency it always asked for. With it, the target nodes may fill a registered-memory
+	// source from this artifact, and the prefetch reports that readiness in status.transfer,
+	// separately from the disk figures above.
+	//
+	// IT REQUIRES AN EXPLICIT PLACEMENT. A source is memory a node holds against a known target
+	// set, so the derived-from-deployments default an ordinary prefetch falls back to — which
+	// follows this namespace's consumers around — would prepare whatever machines happen to
+	// serve the model this week. A source intent on a prefetch whose placement names no
+	// instanceTypes and no nodeSelector is refused at admission, and the two out together stay
+	// refused for the ambiguity they already were.
+	//
+	// The optional Binding sourceMemory grant bounds memory independently of disk quota.
+	// Without it, source preparation uses the node's configured source capacity.
+	//
+	// Absent means a prefetch that warms the node cache only, exactly as this object has always
+	// meant, with the same placement defaults, warm-up behavior and status meaning as before.
+	//
+	Source *workerv1alpha1.ModelPrefetchSource `json:"source,omitempty"`
 }
 
 // ModelPrefetchSpecApplyConfiguration constructs a declarative configuration of the ModelPrefetchSpec type for use with
@@ -72,5 +95,13 @@ func (b *ModelPrefetchSpecApplyConfiguration) WithMinReady(value int32) *ModelPr
 // If called multiple times, the Retention field is set to the value of the last call.
 func (b *ModelPrefetchSpecApplyConfiguration) WithRetention(value *ModelPrefetchRetentionApplyConfiguration) *ModelPrefetchSpecApplyConfiguration {
 	b.Retention = value
+	return b
+}
+
+// WithSource sets the Source field in the declarative configuration to the given value
+// and returns the receiver, so that objects can be built by chaining "With" function invocations.
+// If called multiple times, the Source field is set to the value of the last call.
+func (b *ModelPrefetchSpecApplyConfiguration) WithSource(value workerv1alpha1.ModelPrefetchSource) *ModelPrefetchSpecApplyConfiguration {
+	b.Source = &value
 	return b
 }

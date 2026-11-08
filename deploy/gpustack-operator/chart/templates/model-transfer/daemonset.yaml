@@ -1,0 +1,341 @@
+{{- if .Values.modelTransfer.enabled }}
+{{- /*
+  One source Pod per vendor per selected node: the broker container runs the operator's
+  model-transfer command over the node's cache, and the worker container runs this vendor's
+  model-transfer source image beside it. The broker's session listener is TLS only, served
+  under the certificate templates/model-transfer/tls.yaml provisions; the worker's control
+  wire stays on the Pod's loopback, and the two containers share nothing but the Pod-local
+  bootstrap credential and the model cache. A DaemonSet renders per key of
+  modelTransfer.images — an empty map ships no source runtime at all, and a manufacturer
+  absent from the map ships none for itself; the images are used as supplied, with no
+  registry, namespace or tag rewrite, because a vendor source image is not an operator
+  image and the `global` registry settings name the operator's mirrors. The global
+  imagePullPolicy still applies to both broker and vendor containers.
+*/}}
+{{- $root := . }}
+{{- $mtName := include "gpustack-operator.modelTransfer.fullname" . }}
+{{- $brokerImage := include "gpustack-operator.image" (dict "root" . "overrides" (dict)) }}
+{{- $brokerPullPolicy := include "gpustack-operator.imagePullPolicy" (dict "root" . "overrides" (dict)) }}
+{{- $sourcePullPolicy := include "gpustack-operator.imagePullPolicy" (dict "root" . "overrides" (dict)) }}
+{{- $cacheRoot := .Values.modelManager.rootPath | trimSuffix "/" }}
+{{- $tlsMount := "/var/run/gpustack/model-transfer/tls" }}
+{{- /*
+  The node's source memory window: `source.maxMemoryBytes` is the broker's transfer
+  buffer ceiling, where `0` means one sixteenth of the node's total RAM at start.
+  The broker floors it at `--min-memory-bytes`; the template only passes figures through, and
+  every correction below the 1 GiB floor is the broker's own silent resolution.
+  The worker container renders a `resources` block only when `workerResources` is
+  explicitly configured.
+*/}}
+{{- $sourceCfg := $root.Values.modelTransfer.source | default dict }}
+{{- $maxMemoryBytes := int ($sourceCfg.maxMemoryBytes | default 0) }}
+{{- $minMemoryBytes := int ($sourceCfg.minMemoryBytes | default 1073741824) }}
+{{- if lt $minMemoryBytes 1073741824 }}
+{{-   $minMemoryBytes = 1073741824 }}
+{{- end }}
+{{- $maxSessions := int ($sourceCfg.maxSessions | default 64) }}
+{{- if lt $maxSessions 1 }}
+{{-   $maxSessions = 64 }}
+{{- end }}
+{{- $workerResources := $root.Values.modelTransfer.workerResources | default dict }}
+{{- range $manufacturer := list "amd" "ascend" "nvidia" }}
+{{- if hasKey $root.Values.modelTransfer.images $manufacturer }}
+{{- $image := index $root.Values.modelTransfer.images $manufacturer }}
+{{- $identity := index $root.Values.global.manufacturers $manufacturer }}
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: {{ $mtName }}-{{ $manufacturer }}
+  namespace: {{ include "gpustack-operator.namespace" $root }}
+  labels:
+    {{- include "gpustack-operator.modelTransfer.labels" $root | nindent 4 }}
+    gpustack.ai/manufacturer: {{ $manufacturer }}
+  {{- with $root.Values.commonAnnotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  updateStrategy:
+    # The controller replaces a worker only after its native drain acknowledgement.
+    type: OnDelete
+  revisionHistoryLimit: 5
+  selector:
+    matchLabels:
+      {{- include "gpustack-operator.modelTransfer.selectorLabels" $root | nindent 6 }}
+      gpustack.ai/manufacturer: {{ $manufacturer }}
+  template:
+    metadata:
+      labels:
+        {{- include "gpustack-operator.modelTransfer.labels" $root | nindent 8 }}
+        gpustack.ai/manufacturer: {{ $manufacturer }}
+    spec:
+      {{- with $root.Values.global.imagePullSecrets }}
+      imagePullSecrets:
+        {{- range . }}
+        - name: {{ if kindIs "string" . }}{{ . }}{{ else }}{{ .name }}{{ end }}
+        {{- end }}
+      {{- end }}
+      {{- /*
+        A manufacturer whose user-space driver reaches a container only through its container
+        runtime runs its source worker under that runtime, exactly as its device-manager does;
+        the vendor image links the driver, and nothing else puts it there. A manufacturer that
+        injects device nodes but not the driver (Ascend) reads its driver from the hostPath
+        mounts below instead and needs no class.
+      */}}
+      {{- if $identity.runtimeInjectsDriver }}
+      runtimeClassName: {{ $identity.runtimeName }}
+      {{- end }}
+      {{- /*
+        Rely on NFD to label nodes carrying this manufacturer's PCI vendor, and merge
+        `global.nodeSelector` and the component selector under that entry rather than after
+        it: the PCI label is a requirement, so it wins, and one map means a global or
+        component key naming it cannot land as a duplicate whose later value silently
+        inverts the constraint.
+      */}}
+      {{- $placement := dict (printf "feature.node.kubernetes.io/pci-%s.present" $identity.pciVendorID) "true" }}
+      nodeSelector:
+        {{- merge $placement (deepCopy ($root.Values.modelTransfer.nodeSelector | default dict)) (deepCopy ($root.Values.global.nodeSelector | default dict)) | toYaml | nindent 8 }}
+      serviceAccountName: {{ $root.Values.modelTransfer.serviceAccount.name | default $mtName }}
+      priorityClassName: system-node-critical
+      {{- with $root.Values.modelTransfer.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        {{- /*
+          The broker: the operator binary's model-transfer command, in a process of its own so
+          a vendor failure never reaches a mount. Its listener for engines is TLS only; its
+          worker control wire binds the Pod's loopback. The engine listener is reachable
+          through the Pod network; two vendor Pods on one node cannot collide.
+        */}}
+        - name: broker
+          image: {{ $brokerImage | quote }}
+          imagePullPolicy: {{ $brokerPullPolicy }}
+          args:
+            - gpustack-operator
+            - model-transfer
+            - -v=2
+            - --node-name=$(KUBERNETES_NODE_NAME)
+            - --vendor-scope={{ $manufacturer }}
+            - --worker-id=$(KUBERNETES_POD_UID)
+            - --worker-namespace=$(KUBERNETES_POD_NAMESPACE)
+            - --cache-root={{ $cacheRoot }}
+            # The ledger is this broker's own durable root, one per vendor under the shared
+            # parent the model-manager reporter reads; two vendors never share a ledger and
+            # never contend for its lock.
+            - --broker-root=/var/lib/gpustack/model-transfer/{{ $manufacturer }}
+            # Zero means the broker derives the ceiling from the node's total RAM at
+            # start; a positive figure is the ceiling, silently floored at
+            # --min-memory-bytes.
+            - --physical-bytes={{ $maxMemoryBytes }}
+            - --max-memory-bytes={{ $maxMemoryBytes }}
+            # The smallest buffer the broker still serves; a figure below 1 GiB
+            # resolves up to it.
+            - --min-memory-bytes={{ $minMemoryBytes }}
+            # The node's concurrent source-session cap; a figure below one
+            # resolves to the broker's default of 64.
+            - --max-sessions={{ $maxSessions }}
+            - --control-addr=127.0.0.1:9250
+            - --session-addr=:9251
+            - --bootstrap-file=/run/model-transfer/bootstrap
+            # Sessions are never served in plaintext, so the pair is passed unconditionally;
+            # templates/model-transfer/tls.yaml always provisions it alongside this
+            # DaemonSet.
+            - --session-tls-cert={{ $tlsMount }}/tls.crt
+            - --session-tls-key={{ $tlsMount }}/tls.key
+            {{- with $root.Values.modelTransfer.extraArgs }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          resources:
+            {{- toYaml $root.Values.modelTransfer.brokerResources | nindent 12 }}
+          env:
+            {{- /*
+              User-supplied env first, so a misconfiguration can never shadow the managed
+              identity below (last value wins); the image's own ENV sits underneath both as
+              the backend defaults layer.
+            */}}
+            {{- range $key, $value := $root.Values.modelTransfer.env }}
+            - name: {{ $key }}
+              value: {{ $value | quote }}
+            {{- end }}
+            - name: KUBERNETES_POD_UID
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.uid
+            - name: KUBERNETES_POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: KUBERNETES_POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            - name: KUBERNETES_NODE_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+            - name: KUBERNETES_POD_IP
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.podIP
+          ports:
+            - name: sessions
+              containerPort: 9251
+          volumeMounts:
+            - name: cache
+              mountPath: {{ $cacheRoot }}
+            - name: ledger
+              mountPath: /var/lib/gpustack/model-transfer/{{ $manufacturer }}
+            - name: bootstrap
+              mountPath: /run/model-transfer
+            - name: session-tls
+              mountPath: {{ $tlsMount }}
+              readOnly: true
+        {{- /*
+          The source worker: this vendor's image, running the source runtime module. The
+          backend it configures — its transports, its engine rendezvous — is the Python
+          slice's contract; the chart hands it the broker's loopback address, the bootstrap
+          file both containers share, and the identity it registers under, and adds no
+          engine-port or rendezvous default of its own.
+        */}}
+        - name: worker
+          image: {{ $image | quote }}
+          imagePullPolicy: {{ $sourcePullPolicy }}
+          args:
+            - python3
+            - -m
+            - gpustack_model_transfer.source
+          {{- /*
+            Privileged with the host's /dev and /sys: the source worker's transport opens the
+            accelerator and InfiniBand character devices directly, and enumerating an RDMA
+            fabric means reading sysfs — the whole trees, not an inventory of node paths,
+            because a per-device list is a guess that breaks on the next host shape.
+          */}}
+          securityContext:
+            privileged: true
+          {{- /*
+            The worker's resources: only an explicit `workerResources` map renders a
+            `resources` block; when empty, no container cgroup memory cap is placed on the
+            worker, and both the broker and the worker size the transfer buffer against the
+            node's RAM from `/proc/meminfo`.
+          */}}
+          {{- if and (kindIs "map" $workerResources) (gt (len $workerResources) 0) }}
+          resources:
+            {{- toYaml $workerResources | nindent 12 }}
+          {{- end }}
+          env:
+            {{- range $key, $value := $root.Values.modelTransfer.env }}
+            - name: {{ $key }}
+              value: {{ $value | quote }}
+            {{- end }}
+            {{- if eq $manufacturer "amd" }}
+            - name: AMD_VISIBLE_DEVICES
+              value: "all"
+            {{- else if eq $manufacturer "nvidia" }}
+            - name: NVIDIA_VISIBLE_DEVICES
+              value: "all"
+            - name: NVIDIA_DRIVER_CAPABILITIES
+              value: "compute,utility"
+            {{- end }}
+            - name: KUBERNETES_POD_UID
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.uid
+            - name: KUBERNETES_POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: KUBERNETES_POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            - name: KUBERNETES_NODE_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+            - name: KUBERNETES_POD_IP
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.podIP
+            - name: GPUSTACK_MODEL_TRANSFER_BROKER_ADDRESS
+              value: 127.0.0.1:9250
+            - name: GPUSTACK_MODEL_TRANSFER_BOOTSTRAP_FILE
+              value: /run/model-transfer/bootstrap
+            - name: GPUSTACK_MODEL_TRANSFER_VENDOR_SCOPE
+              value: {{ $manufacturer | quote }}
+            # The worker's own window policy: the same ceiling and floor the broker
+            # resolves, so the source refuses to build an RDMA transfer the node's
+            # available RAM cannot back and engines fall back to a local path.
+            - name: GPUSTACK_MODEL_TRANSFER_SOURCE_MAX_MEMORY_BYTES
+              value: {{ $maxMemoryBytes | quote }}
+            - name: GPUSTACK_MODEL_TRANSFER_SOURCE_MIN_MEMORY_BYTES
+              value: {{ $minMemoryBytes | quote }}
+          volumeMounts:
+            # Read-only: the cache is the node's published record, and a source worker that
+            # could write it could serve a tree it verified against nothing.
+            - name: cache
+              mountPath: {{ $cacheRoot }}
+              readOnly: true
+            # Written by the broker only; mounted read-only here so the credential is
+            # readable and nothing else about the handshake is writable from this side.
+            - name: bootstrap
+              mountPath: /run/model-transfer
+              readOnly: true
+            - name: dev-dir
+              mountPath: /dev
+            - name: sys-dir
+              mountPath: /sys
+            {{- if eq $manufacturer "ascend" }}
+            {{- /*
+              Host DRIVER libraries and management tools only: the image's own CANN
+              installation stays visible and is never shadowed by the host's, which is why
+              the whole /usr/local/Ascend is not mounted.
+            */}}
+            - name: ascend-driver
+              mountPath: /usr/local/Ascend/driver
+              readOnly: true
+            - name: ascend-dcmi
+              mountPath: /usr/local/dcmi
+              readOnly: true
+            {{- end }}
+      volumes:
+        - name: cache
+          hostPath:
+            path: {{ $cacheRoot }}
+            type: DirectoryOrCreate
+        # Per-vendor, so two brokers on one node never share a ledger, and durable, so a
+        # restart re-adopts the reservations workers are filling under.
+        - name: ledger
+          hostPath:
+            path: /var/lib/gpustack/model-transfer/{{ $manufacturer }}
+            type: DirectoryOrCreate
+        # Pod-local memory only: the bootstrap credential authorizes this Pod's worker on
+        # this Pod's loopback, and must not outlive the Pod it was minted for.
+        - name: bootstrap
+          emptyDir:
+            medium: Memory
+        - name: session-tls
+          secret:
+            secretName: {{ $mtName }}-{{ $manufacturer }}-cert
+        - name: dev-dir
+          hostPath:
+            path: /dev
+            type: Directory
+        - name: sys-dir
+          hostPath:
+            path: /sys
+            type: Directory
+        {{- if eq $manufacturer "ascend" }}
+        - name: ascend-driver
+          hostPath:
+            path: /usr/local/Ascend/driver
+            type: DirectoryOrCreate
+        - name: ascend-dcmi
+          hostPath:
+            path: /usr/local/dcmi
+            type: DirectoryOrCreate
+        {{- end }}
+{{- end }}
+{{- end }}
+{{- end }}

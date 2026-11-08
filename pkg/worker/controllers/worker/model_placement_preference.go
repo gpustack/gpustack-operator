@@ -53,10 +53,70 @@ func (w *modelArtifactWeights) placementPreference(ctx context.Context, cli ctrl
 	switch w.Render.Delivery {
 	case workercore.ModelDeploymentModelDeliveryNode:
 		return modelPlacementPreference(ctx, cli, w.Render.ManifestDigest)
+	case workercore.ModelDeploymentModelDeliveryRemote:
+		// A remote replica's locality answer is the SOURCE's: the nodes whose source runtime
+		// serves the digest are the ones its transfer reads from, so preferring them is the same
+		// placement gain the disk preference gives a node-delivered mount.
+		return modelPlacementModelTransferPreference(ctx, cli, w.Render.ManifestDigest)
 	case workercore.ModelDeploymentModelDeliveryImage:
 		return modelPlacementImagePreference(ctx, cli, w.Render.ImageReference)
 	}
 	return nil
+}
+
+// modelPlacementModelTransferPreference returns the preferred node-affinity term naming the nodes whose
+// source runtime currently serves the digest — an admitted generation in the node's model-transfer report.
+// It is a preference, never a filter, for the same reasons the disk preference is one: the
+// transfer reads from whatever prepared node the replica lands on, and a stale entry costs at
+// most a longer transfer.
+func modelPlacementModelTransferPreference(ctx context.Context, cli ctrlcli.Reader, digest string) *core.PreferredSchedulingTerm {
+	logger := ctrllog.FromContext(ctx)
+
+	stores := new(workercore.NodeModelStoreList)
+	if err := cli.List(ctx, stores); err != nil {
+		logger.Error(err, "list node model stores for a model-transfer placement preference; none is added")
+		return nil
+	}
+
+	var hostnames []string
+	for i := range stores.Items {
+		nms := &stores.Items[i]
+		if !nodeModelStoreReady(nms) || nms.Status.ModelTransfer == nil {
+			continue
+		}
+		serving := slices.ContainsFunc(nms.Status.ModelTransfer.Generations, func(g workercore.NodeModelStoreModelTransferGeneration) bool {
+			return g.Digest == digest && g.State == workercore.NodeModelStoreModelTransferGenerationStateServing
+		})
+		if !serving {
+			continue
+		}
+		node := new(core.Node)
+		if err := cli.Get(ctx, ctrlcli.ObjectKey{Name: nms.Name}, node); err != nil {
+			if ctrlcli.IgnoreNotFound(err) != nil {
+				logger.Error(err, "read a Node for a model-transfer placement preference; the node is left out", "node", nms.Name)
+			}
+			continue
+		}
+		hostname := node.Labels[core.LabelHostname]
+		if hostname == "" {
+			continue
+		}
+		hostnames = append(hostnames, hostname)
+	}
+	if len(hostnames) == 0 {
+		return nil
+	}
+	slices.Sort(hostnames)
+	if len(hostnames) > modelPlacementMaxNodes {
+		hostnames = hostnames[:modelPlacementMaxNodes]
+	}
+
+	return &core.PreferredSchedulingTerm{
+		Weight: modelPlacementPreferenceWeight,
+		Preference: core.NodeSelectorTerm{MatchExpressions: []core.NodeSelectorRequirement{
+			{Key: core.LabelHostname, Operator: core.NodeSelectorOpIn, Values: hostnames},
+		}},
+	}
 }
 
 // modelPlacementImagePreference returns the preferred node-affinity term naming the nodes kubelet

@@ -25,6 +25,17 @@ type ModelPrefetchStatusApplyConfiguration struct {
 	// MinReady bar; Degraded says a target node gave up, and the message says why.
 	//
 	Conditions []v1.ConditionApplyConfiguration `json:"conditions,omitempty"`
+	// Transfer reports the source preparation spec.source asks for, aggregated from the target
+	// nodes' reports. It is ABSENT without spec.source — the intent is what turns it on — and
+	// absent while nothing has been observed, rather than present and empty, for the same reason
+	// the disk figures above are zero rather than missing only when measured.
+	//
+	// It is deliberately separate from the disk figures above, and neither implies the other:
+	// readyNodes counts complete published trees, which survive a daemon restart, while the
+	// transfer entries are scoped to a generation held in memory, and a generation that stops
+	// being served does not un-publish the tree beneath it.
+	//
+	Transfer *ModelPrefetchTransferStatusApplyConfiguration `json:"transfer,omitempty"`
 }
 
 // ModelPrefetchStatusApplyConfiguration constructs a declarative configuration of the ModelPrefetchStatus type for use with
@@ -67,5 +78,13 @@ func (b *ModelPrefetchStatusApplyConfiguration) WithConditions(values ...*v1.Con
 		}
 		b.Conditions = append(b.Conditions, *values[i])
 	}
+	return b
+}
+
+// WithTransfer sets the Transfer field in the declarative configuration to the given value
+// and returns the receiver, so that objects can be built by chaining "With" function invocations.
+// If called multiple times, the Transfer field is set to the value of the last call.
+func (b *ModelPrefetchStatusApplyConfiguration) WithTransfer(value *ModelPrefetchTransferStatusApplyConfiguration) *ModelPrefetchStatusApplyConfiguration {
+	b.Transfer = value
 	return b
 }

@@ -19,6 +19,10 @@
 #        BUILD_DATE  -  The build date of the version.
 
 function gpustack::version::get_version_vars() {
+  local version_override="${VERSION:-${GIT_VERSION:-}}"
+  local commit_override="${COMMIT:-${GIT_COMMIT:-}}"
+  local git_status git_tag
+  # shellcheck disable=SC2034 # These variables are consumed by the sourcing build scripts.
   BUILD_DATE=$(date -u '+%Y-%m-%dT%H:%M:%SZ')
   GIT_TREE_STATE="unknown"
   GIT_COMMIT="unknown"
@@ -38,31 +42,35 @@ function gpustack::version::get_version_vars() {
       GIT_VERSION="${GIT_COMMIT:0:7}"
     fi
     # respect specified version.
-    GIT_VERSION="${VERSION:-${GIT_VERSION}}"
+    GIT_VERSION="${version_override:-${GIT_VERSION}}"
+    GIT_COMMIT="${commit_override:-${GIT_COMMIT}}"
     return
   fi
 
   # return directly if not found git client.
   if [[ -z "$(command -v git)" ]]; then
     # respect specified version.
-    GIT_VERSION=${VERSION:-${GIT_VERSION}}
+    GIT_VERSION=${version_override:-${GIT_VERSION}}
+    GIT_COMMIT=${commit_override:-${GIT_COMMIT}}
     return
   fi
 
   # find out git info via git client. The assignment below lands even when the command fails,
   # leaving GIT_COMMIT empty rather than the "unknown" it started as, so restore that before
   # anything reads it.
-  if GIT_COMMIT=$(git rev-parse "HEAD^{commit}" 2>/dev/null); then
+  if GIT_COMMIT=$(git -C "${ROOT_DIR:-.}" rev-parse "HEAD^{commit}" 2>/dev/null); then
     # specify as dirty if the tree is not clean.
-    if git_status=$(git status --porcelain 2>/dev/null) && [[ -n ${git_status} ]]; then
-      GIT_TREE_STATE="dirty"
-    else
-      GIT_TREE_STATE="clean"
+    if git_status=$(git -C "${ROOT_DIR:-.}" status --porcelain 2>/dev/null); then
+      if [[ -n ${git_status} ]]; then
+        GIT_TREE_STATE="dirty"
+      else
+        GIT_TREE_STATE="clean"
+      fi
     fi
 
     # specify with the tag if the head is tagged.
-    if GIT_VERSION="$(git rev-parse --abbrev-ref HEAD 2>/dev/null)"; then
-      if git_tag=$(git tag -l --contains HEAD 2>/dev/null | head -n 1 2>/dev/null) && [[ -n ${git_tag} ]]; then
+    if GIT_VERSION="$(git -C "${ROOT_DIR:-.}" rev-parse --abbrev-ref HEAD 2>/dev/null)"; then
+      if git_tag=$(git -C "${ROOT_DIR:-.}" describe --tags --exact-match 2>/dev/null) && [[ -n ${git_tag} ]]; then
         GIT_VERSION="${git_tag}"
       fi
     fi
@@ -75,11 +83,7 @@ function gpustack::version::get_version_vars() {
     fi
   fi
 
-  # respect the specified version and commit, whether or not the repository could be read.
-  # Leaving this inside the branch above dropped values handed in on purpose — the image build
-  # passes both as build-args — whenever git was present but could not read the tree, as it
-  # cannot from a worktree checkout, and stamped the binary "unknown ()" instead. The two paths
-  # that return earlier honour the version, so this one has to as well.
-  GIT_VERSION=${VERSION:-${GIT_VERSION}}
-  GIT_COMMIT=${COMMIT:-${GIT_COMMIT:-unknown}}
+  # Build arguments take precedence even in archives and inaccessible worktrees.
+  GIT_VERSION=${version_override:-${GIT_VERSION:-unknown}}
+  GIT_COMMIT=${commit_override:-${GIT_COMMIT:-unknown}}
 }
