@@ -1656,7 +1656,16 @@ func (b *Broker) DrainAck(ctx context.Context, generation, workerID, leaseID, se
 	}
 	if rec.BindingUID != "" {
 		b.mu.Unlock()
-		return b.releaseGlobalGeneration(ctx, generation)
+		if err := b.releaseGlobalGeneration(ctx, generation); err != nil {
+			// The release path answers in protocol verdicts; a wrapped local
+			// proof failure keeps its verdict through the unwrap.
+			var perr *protocol.Error
+			if errors.As(err, &perr) {
+				return perr
+			}
+			return protocol.New(protocol.KindInternal, "drain", "%v", err)
+		}
+		return nil
 	}
 	perr := b.release(rec)
 	b.mu.Unlock()

@@ -2,6 +2,7 @@ package broker
 
 import (
 	"context"
+	"errors"
 	"sort"
 	"strings"
 	"time"
@@ -11,6 +12,15 @@ import (
 	"gpustack.ai/gpustack/pkg/modeltransfer/protocol"
 )
 
+// localProofError marks a failure to read or persist the local record:
+// the durable proof state of that record is uncertain, so work that would
+// treat it as released must not continue. The protocol error keeps the
+// verdict callers already map.
+type localProofError struct{ perr *protocol.Error }
+
+func (e *localProofError) Error() string { return e.perr.Error() }
+func (e *localProofError) Unwrap() error { return e.perr }
+
 // releaseGlobalGeneration retires one drained Binding-bound generation.
 // Each authority CAS runs without the broker mutex between durable
 // checkpoints — native release proof, the global drain mark, the global
@@ -19,7 +29,11 @@ import (
 // between steps (quarantined, or charged again) holds the remaining
 // release, and a lost CAS response replays idempotently through the
 // generation release pass.
-func (b *Broker) releaseGlobalGeneration(ctx context.Context, generation string) *protocol.Error {
+//
+// A failure to read or persist the local record comes back wrapped in
+// localProofError: the record's durable state is uncertain, unlike an
+// authority or admission failure, which holds this generation alone.
+func (b *Broker) releaseGlobalGeneration(ctx context.Context, generation string) error {
 	// Checkpoint one: durable native-release proof and the release identity.
 	b.mu.Lock()
 	rec, err := b.mutable(generation)
@@ -42,7 +56,7 @@ func (b *Broker) releaseGlobalGeneration(ctx context.Context, generation string)
 		next.Updated = b.now()
 		if err := b.ledger.write(&next); err != nil {
 			b.mu.Unlock()
-			return protocol.New(protocol.KindSourceUnavailable, "drain", "native release proof could not be persisted")
+			return &localProofError{protocol.New(protocol.KindSourceUnavailable, "drain", "native release proof could not be persisted")}
 		}
 		*rec = next
 	}
@@ -78,7 +92,7 @@ func (b *Broker) releaseGlobalGeneration(ctx context.Context, generation string)
 		next.Updated = b.now()
 		if err := b.ledger.write(&next); err != nil {
 			b.mu.Unlock()
-			return protocol.New(protocol.KindSourceUnavailable, "drain", "the global drain confirmation could not be persisted")
+			return &localProofError{protocol.New(protocol.KindSourceUnavailable, "drain", "the global drain confirmation could not be persisted")}
 		}
 		*rec = next
 	}
@@ -108,7 +122,7 @@ func (b *Broker) releaseGlobalGeneration(ctx context.Context, generation string)
 	next.Descriptors = nil
 	next.Updated = b.now()
 	if err := b.ledger.write(&next); err != nil {
-		return protocol.New(protocol.KindSourceUnavailable, "drain", "the released generation could not be persisted")
+		return &localProofError{protocol.New(protocol.KindSourceUnavailable, "drain", "the released generation could not be persisted")}
 	}
 	*rec = next
 	delete(b.assignmentSizes, generation)
@@ -196,10 +210,14 @@ func (b *Broker) compactReleasedGenerationsLocked() error {
 
 // RetryGenerationReleases retries only generations with durable native release
 // evidence, never one inferred from a lost Pod or expired lease. The
-// authority CAS runs without the broker mutex per generation; the pass ends
-// with best-effort reclamation: released records and the terminal sessions
-// and receipts behind them leave the ledger, and the released trees' cache
-// references are swept.
+// authority CAS runs without the broker mutex per generation. An authority,
+// admission-hold, or stale-state failure holds its generation alone: the
+// pass keeps releasing the other candidates and still runs the terminal
+// reclamation — released records and the terminal sessions and receipts
+// behind them leave the ledger, and the released trees' cache references
+// are swept — then reports the first failure it met. A failure to read or
+// persist a record's local proof returns at once, with no terminal sweep:
+// cleanup past an uncertain proof state could fabricate release evidence.
 func (b *Broker) RetryGenerationReleases(ctx context.Context) error {
 	b.mu.Lock()
 	var candidates []string
@@ -214,13 +232,24 @@ func (b *Broker) RetryGenerationReleases(ctx context.Context) error {
 		candidates = append(candidates, generation)
 	}
 	b.mu.Unlock()
+	var held error
 	for _, generation := range candidates {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		if perr := b.releaseGlobalGeneration(ctx, generation); perr != nil {
-			return perr
+		if err := b.releaseGlobalGeneration(ctx, generation); err != nil {
+			var proof *localProofError
+			if errors.As(err, &proof) {
+				return err
+			}
+			if held == nil {
+				held = err
+			}
+			continue
 		}
+	}
+	if err := ctx.Err(); err != nil {
+		return err
 	}
 	b.mu.Lock()
 	defer b.mu.Unlock()
@@ -230,5 +259,8 @@ func (b *Broker) RetryGenerationReleases(ctx context.Context) error {
 	if err := b.compactReleasedGenerationsLocked(); err != nil {
 		return err
 	}
-	return b.sweepReleasedRefsLocked()
+	if err := b.sweepReleasedRefsLocked(); err != nil {
+		return err
+	}
+	return held
 }
