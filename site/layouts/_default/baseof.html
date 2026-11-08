@@ -10,6 +10,9 @@
         const theme = localStorage.getItem("theme");
         if (theme === "light" || theme === "dark") document.documentElement.dataset.theme = theme;
         document.documentElement.dataset.themeChoice = theme === "light" || theme === "dark" ? theme : "system";
+        if (localStorage.getItem("sidebar-collapsed") === "true") {
+          document.documentElement.dataset.sidebarCollapsed = "true";
+        }
       } catch {
         document.documentElement.dataset.themeChoice = "system";
       }
@@ -53,6 +56,13 @@
   <div class="layout">
     <aside class="sidebar" aria-label="Documentation navigation">
       <button class="nav-toggle" type="button" aria-controls="docs-navigation" aria-expanded="false">Browse documentation</button>
+      <button class="sidebar-toggle" type="button" aria-controls="docs-navigation" aria-expanded="true" aria-label="Collapse sidebar" title="Collapse sidebar">
+        <svg class="sidebar-toggle-icon" aria-hidden="true" viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="2" y="2.5" width="12" height="11" rx="2"/>
+          <line x1="6" y1="2.5" x2="6" y2="13.5"/>
+          <polyline class="sidebar-icon-arrow" points="10.5 6 8.5 8 10.5 10"/>
+        </svg>
+      </button>
       <nav id="docs-navigation" class="sidebar-inner">
         <div class="nav-title">Documentation</div>
         <a class="nav-home" href="{{ .Site.Home.RelPermalink }}" {{ if .IsHome }}aria-current="page"{{ end }}>Overview</a>
@@ -92,7 +102,7 @@
         {{ end }}
         {{ if .IsHome }}
           <div class="toc-title">On this page</div>
-          <nav><ul><li><a href="#start-here">Start here</a></li><li><a href="#capabilities">Capabilities</a></li></ul></nav>
+          <nav><div class="toc-indicator" aria-hidden="true"></div><ul><li><a href="#architecture">Architecture</a></li><li><a href="#features">Features</a></li><li><a href="#installation">Installation</a></li><li><a href="#usage">Usage</a></li></ul></nav>
         {{ else if gt (len (findRE `<li>` .TableOfContents)) 0 }}
           <div class="toc-title">On this page</div>
           {{ .TableOfContents }}

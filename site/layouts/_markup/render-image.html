@@ -1,0 +1,6 @@
+{{- $destination := partial "link-destination.html" (dict "page" .Page "destination" .Destination "markdown" false) -}}
+{{- if strings.HasSuffix (lower $destination) ".svg" -}}
+<span class="diagram-scroll"><img src="{{ $destination }}" alt="{{ .Text }}"{{ with .Title }} title="{{ . }}"{{ end }} decoding="async"></span>
+{{- else -}}
+<img src="{{ $destination }}" alt="{{ .Text }}"{{ with .Title }} title="{{ . }}"{{ end }} loading="lazy" decoding="async">
+{{- end -}}

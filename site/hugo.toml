@@ -66,7 +66,10 @@ disableLanguages = ["zh"]
   [[module.mounts]]
     source = "../docs"
     target = "content/docs"
-    excludeFiles = ["README.md"]
+    excludeFiles = ["README.md", "assets/**"]
+  [[module.mounts]]
+    source = "../docs/assets"
+    target = "static/docs/assets"
   [[module.mounts]]
     source = "layouts"
     target = "layouts"
