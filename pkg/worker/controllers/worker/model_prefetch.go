@@ -319,7 +319,11 @@ func (r *ModelPrefetchReconciler) observeSource(ctx context.Context, pf *workerc
 		return nil, err
 	}
 	if pf.Spec.Source == nil {
-		obs.placementMissing, obs.missingGrant = false, false
+		// A prefetch that no longer requests a source has no source intent:
+		// its placement, grant or authority refusals are not its refusals.
+		// The retained charges stay observed; an authority that cannot be
+		// read only governs a source that exists.
+		obs.placementMissing, obs.missingGrant, obs.authorityUnknown = false, false, false
 	}
 	if pf.Spec.Source == nil || obs.placementMissing || obs.missingGrant || obs.authorityUnknown {
 		return obs, nil

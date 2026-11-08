@@ -323,6 +323,49 @@ func TestModelPrefetchDeliveredDiskKeepsAvailableThroughSourceRefusal(t *testing
 	assert.Nil(t, pf.Status.Transfer)
 }
 
+// TestModelPrefetchDiskOnlyKeepsDiskVoiceOverLeftoverTransfer pins the
+// source-removal transition: a prefetch that no longer requests a source
+// keeps the disk delivery's own conditions, and the retained reservation
+// figure stays visible until verified authority proves it released.
+func TestModelPrefetchDiskOnlyKeepsDiskVoiceOverLeftoverTransfer(t *testing.T) {
+	old := hourAgo(1)
+
+	r, cli := newModelTransferTestEnv(t,
+		testModelNodeLabeled("node-1", map[string]string{"pool": "h100"}),
+		testResolvedArtifactSized("model", 5<<30),
+		testSourceGrantBinding(),
+		testNodeModelStoreEntry("node-1", "Ready", old),
+	)
+	leftover := testPrefetch("warm", nil)
+	// The API server assigns the UID the charges observation reads; the fake
+	// client does not mint one.
+	leftover.UID = "prefetch-uid"
+	require.NoError(t, cli.Create(context.Background(), leftover))
+	// A leftover transfer view from the generations that had a source: the
+	// status subresource is how the last reconcile persisted it.
+	leftover.Status.Transfer = &workercore.ModelPrefetchTransferStatus{ReservedBytes: 5 << 30}
+	require.NoError(t, cli.Status().Update(context.Background(), leftover))
+
+	reconcileModelPrefetch(t, r, "team-a", "warm")
+
+	pf := getPrefetch(t, cli, "team-a", "warm")
+	progressing := testCondition(pf.Status.Conditions, ModelPrefetchConditionProgressing)
+	require.NotNil(t, progressing)
+	assert.Equal(t, "Delivered", progressing.Reason,
+		"the disk delivery's own answer stands once the source request is gone")
+	available := testCondition(pf.Status.Conditions, ModelPrefetchConditionAvailable)
+	require.NotNil(t, available)
+	assert.Equal(t, meta.ConditionTrue, available.Status,
+		"the disk delivery is delivered, whatever the leftover transfer says")
+	require.NotNil(t, pf.Status.Transfer)
+	assert.Equal(t, int64(5<<30), pf.Status.Transfer.ReservedBytes,
+		"removing a source request is not release proof: the last known charge stays")
+	ready := testCondition(pf.Status.Conditions, ModelPrefetchConditionSourceReady)
+	require.NotNil(t, ready)
+	assert.Equal(t, "SourceDisabled", ready.Reason,
+		"a prefetch without a source request reports the source disabled")
+}
+
 // TestModelPrefetchSourceRetainsTreeWithoutRetentionPinned pins the retention split: an admitted
 // generation keeps its published tree pinned through the source grant alone — retention.pinned
 // and allowPinned are the disk TTL's levers, not the source's.
