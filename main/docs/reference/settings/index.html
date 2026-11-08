@@ -745,6 +745,9 @@
   
   
 
+  
+  
+
 
 
   
@@ -755,6 +758,8 @@
         
       
     
+  
+
   
 
   
@@ -834,6 +839,16 @@
         
         
           <a title="Node-to-Node Sync" href="/gpustack-operator/main/docs/modules/model-delivery/peer-sync/" >Node-to-Node Sync</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Remote Weight Delivery" href="/gpustack-operator/main/docs/modules/model-delivery/remote/" >Remote Delivery</a>
           
           
         
@@ -1690,6 +1705,11 @@ request that reaches a webhook. Neither window needs a restart.</p>
           <td>Effect window: Next trigger<br/>Default: <em>(blank)</em><br/>Usage: Comma-separated hosts that bypass <code>model-artifact-https-proxy</code>, for the node plugin too, given to engines as <code>NO_PROXY</code> on the same terms.</td>
       </tr>
       <tr>
+          <td><code>model-artifact-remote-delivery-policy</code><br/>(<code>GPUSTACK_MODEL_ARTIFACT_REMOTE_DELIVERY_POLICY</code>, <em>chart-rendered</em>)</td>
+          <td>Effect window: Immediate<br/>Default: <code>Disabled</code><br/>Usage: Cluster policy for <a href="/gpustack-operator/main/docs/modules/model-delivery/remote/">remote weight delivery</a>
+: <code>Disabled</code> keeps remote delivery off; <code>Require</code> mounts a metadata-only view and waits for a prepared source without falling back; <code>Prefer</code> uses remote delivery when a prepared source is ready and falls back to the base delivery otherwise. <code>Require</code> and <code>Prefer</code> are refused while the <code>CSIDriver</code> <code>model.csi.gpustack.ai</code> does not exist. The chart declares <code>modelTransfer.policy</code> while <code>modelTransfer.enabled: true</code>.</td>
+      </tr>
+      <tr>
           <td><code>model-artifact-revalidate-interval</code><br/>(<code>GPUSTACK_MODEL_ARTIFACT_REVALIDATE_INTERVAL</code>)</td>
           <td>Effect window: Next trigger<br/>Default: <code>24h</code><br/>Usage: How often a resolved hub artifact&rsquo;s access is checked again, at least <code>1m</code>; a <code>Secret</code> change checks it at once. What a refusal does is under <a href="/gpustack-operator/main/docs/modules/model-delivery/artifact/#resolution-and-revalidation">Resolution and revalidation</a>
 .</td>
@@ -1899,7 +1919,7 @@ declaration claimed the <code>Setting</code>.</p>
 Change it or remove it and your stored value stands at the next worker start. A hand-edited
 <code>Deployment</code> is outside the chart&rsquo;s record, so a rollback or an upgrade run with
 <code>--reset-then-reuse-values</code> drops it; a variable meant to last belongs in a chart value.</li>
-<li>A variable the chart renders, the five rows marked above. Change the chart value, or clear it so the
+<li>A variable the chart renders, the rows marked above. Change the chart value, or clear it so the
 chart renders an empty one, and <code>helm upgrade</code>. A blank declaration claims nothing, so clearing the
 chart value is what hands the <code>Setting</code> back to you.</li>
 </ul>
@@ -1917,9 +1937,29 @@ chart value is what hands the <code>Setting</code> back to you.</li>
 </span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">image</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">pullPolicy</span><span class="p">:</span><span class="w"> </span><span class="l">IfNotPresent </span><span class="w"> </span><span class="c"># Final pull policy fallback.</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">modelManager</span><span class="p">:</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">enabled</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="w">  </span><span class="c"># Renders GPUSTACK_MODEL_ARTIFACT_DELIVERY_MODE=Node when deployed.</span></span></span></code></pre></div>
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">enabled</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="w">  </span><span class="c"># Renders GPUSTACK_MODEL_ARTIFACT_DELIVERY_MODE=Node when deployed.</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">modelTransfer</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">enabled</span><span class="p">:</span><span class="w"> </span><span class="kc">false</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="c"># Renders GPUSTACK_MODEL_ARTIFACT_REMOTE_DELIVERY_POLICY only while enabled.</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">policy</span><span class="p">:</span><span class="w"> </span><span class="l">Disabled</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="c"># Source images by manufacturer; set an entry to null to omit that DaemonSet.</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">images</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">nvidia</span><span class="p">:</span><span class="w"> </span><span class="l">gpustack/model-transfer:v0.0.1-cuda12.9</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">amd</span><span class="p">:</span><span class="w"> </span><span class="l">gpustack/model-transfer:v0.0.1-rocm7.2</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">ascend</span><span class="p">:</span><span class="w"> </span><span class="l">gpustack/model-transfer:v0.0.1-cann9.2-a5</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">source</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">maxMemoryBytes</span><span class="p">:</span><span class="w"> </span><span class="m">0</span><span class="w">  </span><span class="c"># Derive the node ceiling from total RAM.</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">minMemoryBytes</span><span class="p">:</span><span class="w"> </span><span class="m">1073741824</span><span class="w">  </span><span class="c"># 1 GiB minimum buffer.</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">maxSessions</span><span class="p">:</span><span class="w"> </span><span class="m">64</span><span class="w">  </span><span class="c"># Concurrent sessions per source DaemonSet Pod.</span></span></span></code></pre></div>
 </div><p>The image variables default to empty except for the final <code>IfNotPresent</code> pull policy.
-The delivery mode variable is otherwise not rendered.</p>
+The delivery mode variable is otherwise not rendered.
+The remote delivery policy variable is not rendered while <code>modelTransfer.enabled: false</code>.
+<code>modelTransfer.images</code> selects source images; it does not declare a worker <code>Setting</code>.</p>
+<p>The <code>modelTransfer.source</code> values configure the source runtime, not worker <code>Setting</code>s. See
+<a href="/gpustack-operator/main/docs/modules/model-delivery/remote/#source-preparation">Remote Weight Delivery</a>
+ for their limits
+and <a href="/gpustack-operator/main/docs/modules/model-delivery/remote/#replica-startup">Replica startup</a>
+ for engine variables.</p>
 <p>Setting the chart value to an empty string is the same as clearing it. With <code>modelManager.enabled: false</code>
 the chart stops rendering the delivery mode entirely, and the stored value is then nobody&rsquo;s to write.</p>
 <h3 id="edit-reverted-on-restart">Edit reverted on restart</h3>
@@ -2410,7 +2450,7 @@ user-facing settings, listed for completeness.</p>
           
           
           <nav class="page-actions" aria-label="Page source">
-            <a href="https://github.com/gpustack/gpustack-operator/blob/bb172b707de5ea5aafa25ca5416988d2ed92713e/docs/reference/settings.md">View page source</a>
+            <a href="https://github.com/gpustack/gpustack-operator/blob/8c5186108e620a8044164d9c4c114dd7376092f4/docs/reference/settings.md">View page source</a>
             
             <a href="https://github.com/gpustack/gpustack-operator/edit/main/docs/reference/settings.md">Edit this page</a>
             

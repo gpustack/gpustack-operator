@@ -745,6 +745,9 @@
   
   
 
+  
+  
+
 
 
   
@@ -755,6 +758,8 @@
         
       
     
+  
+
   
 
   
@@ -834,6 +839,16 @@
         
         
           <a title="Node-to-Node Sync" href="/gpustack-operator/main/docs/modules/model-delivery/peer-sync/" >Node-to-Node Sync</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Remote Weight Delivery" href="/gpustack-operator/main/docs/modules/model-delivery/remote/" >Remote Delivery</a>
           
           
         
@@ -1539,6 +1554,11 @@ writes chooses where a node connects. The <code>Setting</code>s this adds:</p>
           <td><code>Engine</code> or <code>Node</code>; <code>Node</code> needs the <code>CSIDriver</code></td>
       </tr>
       <tr>
+          <td><code>model-artifact-remote-delivery-policy</code></td>
+          <td><code>Disabled</code>; the chart declares the configured policy with its <code>modelTransfer</code> section, and the worker reasserts it</td>
+          <td><code>Disabled</code>, <code>Require</code> or <code>Prefer</code>; <code>Require</code> and <code>Prefer</code> need the <code>CSIDriver</code></td>
+      </tr>
+      <tr>
           <td><code>model-store-high-watermark</code></td>
           <td><code>80</code></td>
           <td>integer, above the low watermark, at most <code>95</code></td>
@@ -1668,6 +1688,10 @@ from the environment or a plugin removed later, leaves consumers with <code>Weig
 <li><strong>A filtered artifact needs <code>Node</code>.</strong> Under <code>Engine</code>, a deployment on an artifact with
 <em><code>allowPatterns</code></em> or <em><code>ignorePatterns</code></em> creates no <code>Pod</code> and reports <code>FilterNeedsNodeDelivery</code>.</li>
 </ul>
+<p><a href="/gpustack-operator/main/docs/modules/model-delivery/remote/">Remote weight delivery</a>
+ is a second, opt-in policy beside this one: it chooses what a
+qualified replica does inside the delivery the <code>Setting</code> above already admits, and it never changes
+what <code>Engine</code> and <code>Node</code> mean.</p>
 <h2 id="where-replicas-land">Where replicas land</h2>
 <p>A node-delivered <code>Pod</code> prefers the nodes holding its digest when they can take it; the mechanism is in
 <a href="/gpustack-operator/main/docs/modules/topology/scheduling/#node-delivered-model-placement">Topology-Aware Scheduling</a>
@@ -1788,7 +1812,7 @@ patterns</li><li><a href="/gpustack-operator/main/docs/reference/settings/#setti
           
           
           <nav class="page-actions" aria-label="Page source">
-            <a href="https://github.com/gpustack/gpustack-operator/blob/bb172b707de5ea5aafa25ca5416988d2ed92713e/docs/modules/model-delivery/operations.md">View page source</a>
+            <a href="https://github.com/gpustack/gpustack-operator/blob/8c5186108e620a8044164d9c4c114dd7376092f4/docs/modules/model-delivery/operations.md">View page source</a>
             
             <a href="https://github.com/gpustack/gpustack-operator/edit/main/docs/modules/model-delivery/operations.md">Edit this page</a>
             

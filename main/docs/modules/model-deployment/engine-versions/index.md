@@ -11,6 +11,7 @@ on an older engine release.
 - [Minimum versions](#minimum-versions)
 - [Reading the table](#reading-the-table)
 - [Transport compatibility](#transport-compatibility)
+- [Remote weight loading](#remote-weight-loading)
 - [Limitations](#limitations)
 
 ## Minimum versions
@@ -144,6 +145,37 @@ refused at admission.
 
 On AWS the `RDMA` rows do not apply; [choose `EFA` or
 `TCP`](../rdma/operations.md#rdma-on-aws).
+
+## Remote weight loading
+
+The `--load-format model-transfer` value selects an engine's model-transfer adapter, the loader that reads weights from
+a prepared source instead of a local checkpoint. The engine keeps its own parameter mapping,
+sharding and finalization; the adapter supplies verified tensors and proves its finalization
+before the engine profiles KV memory. Configuration and behavior live in
+[Remote Weight Delivery](/gpustack-operator/main/docs/modules/model-delivery/remote/index.md); the table gives the state per engine:
+
+| Engine | Adapter entry | Qualification state |
+| --- | --- | --- |
+| vLLM | `NativeModelTransferLoader`, `--load-format model-transfer` on CUDA | H100 loading and inference observed for full-resident and paged 80B sources and full-resident 235B broadcast; production qualification remains open |
+| vLLM-Ascend | `NativeModelTransferLoader` through the vLLM general plugin, with `vllm_ascend` (requires CANN 9.2+ runner image with Python `hixl`, such as `cann9.2-910b-vllm0.30.0`) | loading and inference measured on two Ascend 910B2 nodes for Qwen3-8B, Qwen3.6-35B-A3B and Qwen3-235B-A22B-W8A8; managed HIXL routing and production qualification remain closed |
+| SGLang | `NativeSGLangModelTransferLoader`, `--load-format model-transfer` via `.pth` CLI and `LoadFormat` enum hooks (requires CANN 9.2+ runner image on Ascend for Python `hixl`) | H100 80B loading and inference observed; Ascend evidence covers CLI, `LoadFormat`, probe and session-open, with full loading qualification still open |
+
+Recorded loading and inference establish only the listed configuration. Each engine's hardware
+and safety gates must pass on its own platform before production qualification; a CUDA result
+qualifies no Ascend or ROCm row. An unqualified combination is
+refused or falls back by the delivery policy: under `Require`, a role whose engine and pool name
+no qualified backend is blocked rather than rewritten.
+
+The adapter uses vLLM's general load-format plugin for vLLM and vLLM-Ascend. SGLang uses `.pth` CLI
+and `LoadFormat` extension hooks.
+
+### Ascend (HIXL)
+
+The [Ascend benchmark](/gpustack-operator/main/docs/modules/model-delivery/remote/index.md#ascend-hixl) compares same-node and
+cross-node loading. On Ascend (`hixl`), CANN 9.2 introduces the Python `hixl` package
+(`/usr/local/Ascend/cann-9.2.0/python/site-packages/hixl`) alongside `libcann_hixl.so`. CANN 9.0
+images install only `llm_datadist` and C++ `libcann_hixl.so`, so `load_runtime()` fails closed with
+`RuntimeUnavailableError` when a CANN 9.0 runner image is used.
 
 ## Limitations
 

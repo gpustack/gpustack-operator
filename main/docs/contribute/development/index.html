@@ -745,6 +745,9 @@
   
   
 
+  
+  
+
 
 
   
@@ -755,6 +758,8 @@
         
       
     
+  
+
   
 
   
@@ -834,6 +839,16 @@
         
         
           <a title="Node-to-Node Sync" href="/gpustack-operator/main/docs/modules/model-delivery/peer-sync/" >Node-to-Node Sync</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Remote Weight Delivery" href="/gpustack-operator/main/docs/modules/model-delivery/remote/" >Remote Delivery</a>
           
           
         
@@ -1457,7 +1472,7 @@ before changing the operator&rsquo;s behavior.</p>
 <ul>
 <li><code>make deps</code> — vendor patched k8s staging modules into <code>staging/</code> <strong>and</strong> upstream Helm charts into <code>deploy/gpustack-operator/chart/charts/</code>, then <code>go mod tidy &amp;&amp; go mod download</code>; <code>make deps update</code> adds <code>go get -u ./...</code>.</li>
 <li><code>make generate</code> — the <code>gen/api</code> generators: deepcopy, register, apiservice, CRDs, conversion, protobuf, webhooks. <code>make generate binding</code> regenerates the CGO bindings in <code>binding/</code> via c-for-go.</li>
-<li><code>make lint</code> — golangci-lint (<code>.golangci.yaml</code>); <code>make lint dirty</code> also fails on a dirty tree. <code>make lint docs</code> checks documentation and spec structure, shared routing and the generated Hugo site, with no cluster; see <a href="https://github.com/gpustack/gpustack-operator/blob/bb172b707de5ea5aafa25ca5416988d2ed92713e/.claude/skills/gpustack-operator-docs/SKILL.md">the docs skill</a>
+<li><code>make lint</code> — golangci-lint (<code>.golangci.yaml</code>); <code>make lint dirty</code> also fails on a dirty tree. <code>make lint docs</code> checks documentation and spec structure, shared routing and the generated Hugo site, with no cluster; see <a href="https://github.com/gpustack/gpustack-operator/blob/8c5186108e620a8044164d9c4c114dd7376092f4/.claude/skills/gpustack-operator-docs/SKILL.md">the docs skill</a>
 .</li>
 <li><code>make build</code> — cross-build <code>cmd/gpustack-operator</code> into <code>.dist/build/</code>, version ldflag-injected into <code>pkg/utils/version</code>; <code>VERSION=vX.y.z+l.m make build</code> sets it, <code>BUILD_PLATFORMS=&quot;linux/amd64 linux/arm64&quot;</code> cross-compiles.</li>
 <li><code>make test</code> — <code>go test -v -failfast -race -cover -shuffle=on -timeout=30m ./...</code>, coverage to <code>.dist/test/coverage.out</code>. The order is shuffled on every run so an order-dependent test cannot hide behind the fixed one; a failure banner prints the seed, and <code>go test -shuffle=&lt;seed&gt;</code> reproduces that exact order. Trailing args are regexes of packages to <strong>exclude</strong>. <code>RACE=false make test</code> drops <code>-race</code> and changes nothing else.</li>
@@ -1465,6 +1480,22 @@ before changing the operator&rsquo;s behavior.</p>
 </ul>
 <p>CI (<code>hack/ci.sh</code>) runs <code>make generate &amp;&amp; make deps &amp;&amp; make lint &amp;&amp; make build</code> inside the image build. The unit tests run
 separately, in <code>test.yml</code>, as <code>RACE=false make test</code> on linux/amd64 and linux/arm64.</p>
+<p>Linux builds and tests use GNU C17 and lazy symbol binding for the vendor CGO bindings.
+Cross-compilation needs a target C compiler: set <code>CC</code> or install <code>aarch64-linux-gnu-gcc</code> or
+<code>x86_64-linux-gnu-gcc</code>. Linux builds require <code>readelf</code>, <code>llvm-readelf</code>, <code>greadelf</code> or an explicit
+<code>READELF</code>; failed inspection and eager binding fail the build. Native builds also execute <code>--version</code>.
+Non-login shells discover <code>/usr/local/go/bin</code> and <code>$HOME/go/bin</code> without replacing a selected toolchain.</p>
+<p>Keep <code>-Wl,-z,lazy</code> in the build environment and final linker flags. Go rejects it inside
+<code>#cgo LDFLAGS</code> directives; generated bindings use only flags accepted by the Go toolchain.</p>
+<p><code>VERSION</code> and <code>COMMIT</code> override <code>GIT_VERSION</code> and <code>GIT_COMMIT</code>; all four work without a readable
+<code>.git</code>. The package target forwards the resolved values into the image build. Wheel builds preserve
+valid release, prerelease and development versions; an unversioned development tree uses <code>0.0.0</code>.
+Run <code>bash hack/check/build-pipeline-selftest.sh</code> for isolated build, stamp, linker and image-load
+regressions. Both <code>make lint</code> and <code>make lint agents-shell</code> run it; Python 3 and <code>packaging</code> are required.</p>
+<p>The E2E build helper requires a known SSH host key and rsync with <code>--protect-args</code> for remote builds.
+It synchronizes tracked and nonignored new files, preserves remote-only state, and verifies the pushed
+digest. Local mode loads the selected namespace and always disables pushing. Unknown runtimes and
+failed imports return an error.</p>
 <p>An image built from a git worktree carries the worktree&rsquo;s <code>.git</code> pointer file but not the gitdir it names, so git cannot read
 the tree inside the build. There the <code>.agents</code> shell gate, <code>hack/check/agents-shell.sh</code>, reports itself skipped with its reason
 instead of failing the build: in local mode it checks only uncommitted changes, so inside an image its set is empty even from a
@@ -1563,7 +1594,7 @@ script and license are bundled under <code>site/assets/vendor/mermaid/</code>, s
 <p>Edit documentation under <code>docs/</code>, navigation labels and order in <code>site/data/navigation.yaml</code>, and
 layouts and styles under <code>site/</code>. Run <code>make lint docs</code> before committing to check source links,
 page structure, index entries and rendered site links. CI runs the same gate.</p>
-<p>The <a href="https://github.com/gpustack/gpustack-operator/blob/bb172b707de5ea5aafa25ca5416988d2ed92713e/docs/README.md#module-map">shared module map</a>
+<p>The <a href="https://github.com/gpustack/gpustack-operator/blob/8c5186108e620a8044164d9c4c114dd7376092f4/docs/README.md#module-map">shared module map</a>
  connects guides, specs, code and skills for code
 changes. Update its routing in the same PR when those entry points or associations change.
 <code>make site</code> also generates <code>/llms.txt</code> from that index and <em><code>index.md</code></em> beside each article&rsquo;s HTML.
@@ -1785,7 +1816,7 @@ are under <code>hack/deploy/</code>.</p>
           
           
           <nav class="page-actions" aria-label="Page source">
-            <a href="https://github.com/gpustack/gpustack-operator/blob/bb172b707de5ea5aafa25ca5416988d2ed92713e/docs/contribute/development.md">View page source</a>
+            <a href="https://github.com/gpustack/gpustack-operator/blob/8c5186108e620a8044164d9c4c114dd7376092f4/docs/contribute/development.md">View page source</a>
             
             <a href="https://github.com/gpustack/gpustack-operator/edit/main/docs/contribute/development.md">Edit this page</a>
             

@@ -745,6 +745,9 @@
   
   
 
+  
+  
+
 
 
   
@@ -755,6 +758,8 @@
         
       
     
+  
+
   
 
   
@@ -834,6 +839,16 @@
         
         
           <a title="Node-to-Node Sync" href="/gpustack-operator/main/docs/modules/model-delivery/peer-sync/" >Node-to-Node Sync</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Remote Weight Delivery" href="/gpustack-operator/main/docs/modules/model-delivery/remote/" >Remote Delivery</a>
           
           
         
@@ -1439,6 +1454,8 @@ on an older engine release.</p>
 </li>
 <li><a href="#transport-compatibility">Transport compatibility</a>
 </li>
+<li><a href="#remote-weight-loading">Remote weight loading</a>
+</li>
 <li><a href="#limitations">Limitations</a>
 </li>
 </ul>
@@ -1743,6 +1760,53 @@ refused at admission.</p>
 <p>On AWS the <code>RDMA</code> rows do not apply; <a href="/gpustack-operator/main/docs/modules/rdma/operations/#rdma-on-aws">choose <code>EFA</code> or
 <code>TCP</code></a>
 .</p>
+<h2 id="remote-weight-loading">Remote weight loading</h2>
+<p>The <code>--load-format model-transfer</code> value selects an engine&rsquo;s model-transfer adapter, the loader that reads weights from
+a prepared source instead of a local checkpoint. The engine keeps its own parameter mapping,
+sharding and finalization; the adapter supplies verified tensors and proves its finalization
+before the engine profiles KV memory. Configuration and behavior live in
+<a href="/gpustack-operator/main/docs/modules/model-delivery/remote/">Remote Weight Delivery</a>
+; the table gives the state per engine:</p>
+<table>
+  <thead>
+      <tr>
+          <th>Engine</th>
+          <th>Adapter entry</th>
+          <th>Qualification state</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td>vLLM</td>
+          <td><code>NativeModelTransferLoader</code>, <code>--load-format model-transfer</code> on CUDA</td>
+          <td>H100 loading and inference observed for full-resident and paged 80B sources and full-resident 235B broadcast; production qualification remains open</td>
+      </tr>
+      <tr>
+          <td>vLLM-Ascend</td>
+          <td><code>NativeModelTransferLoader</code> through the vLLM general plugin, with <code>vllm_ascend</code> (requires CANN 9.2+ runner image with Python <code>hixl</code>, such as <code>cann9.2-910b-vllm0.30.0</code>)</td>
+          <td>loading and inference measured on two Ascend 910B2 nodes for Qwen3-8B, Qwen3.6-35B-A3B and Qwen3-235B-A22B-W8A8; managed HIXL routing and production qualification remain closed</td>
+      </tr>
+      <tr>
+          <td>SGLang</td>
+          <td><code>NativeSGLangModelTransferLoader</code>, <code>--load-format model-transfer</code> via <code>.pth</code> CLI and <code>LoadFormat</code> enum hooks (requires CANN 9.2+ runner image on Ascend for Python <code>hixl</code>)</td>
+          <td>H100 80B loading and inference observed; Ascend evidence covers CLI, <code>LoadFormat</code>, probe and session-open, with full loading qualification still open</td>
+      </tr>
+  </tbody>
+</table>
+<p>Recorded loading and inference establish only the listed configuration. Each engine&rsquo;s hardware
+and safety gates must pass on its own platform before production qualification; a CUDA result
+qualifies no Ascend or ROCm row. An unqualified combination is
+refused or falls back by the delivery policy: under <code>Require</code>, a role whose engine and pool name
+no qualified backend is blocked rather than rewritten.</p>
+<p>The adapter uses vLLM&rsquo;s general load-format plugin for vLLM and vLLM-Ascend. SGLang uses <code>.pth</code> CLI
+and <code>LoadFormat</code> extension hooks.</p>
+<h3 id="ascend-hixl">Ascend (HIXL)</h3>
+<p>The <a href="/gpustack-operator/main/docs/modules/model-delivery/remote/#ascend-hixl">Ascend benchmark</a>
+ compares same-node and
+cross-node loading. On Ascend (<code>hixl</code>), CANN 9.2 introduces the Python <code>hixl</code> package
+(<code>/usr/local/Ascend/cann-9.2.0/python/site-packages/hixl</code>) alongside <code>libcann_hixl.so</code>. CANN 9.0
+images install only <code>llm_datadist</code> and C++ <code>libcann_hixl.so</code>, so <code>load_runtime()</code> fails closed with
+<code>RuntimeUnavailableError</code> when a CANN 9.0 runner image is used.</p>
 <h2 id="limitations">Limitations</h2>
 <ul>
 <li>
@@ -1793,7 +1857,7 @@ connections open instead of opening one per transfer, and held at most nine sock
           
           
           <nav class="page-actions" aria-label="Page source">
-            <a href="https://github.com/gpustack/gpustack-operator/blob/bb172b707de5ea5aafa25ca5416988d2ed92713e/docs/modules/model-deployment/engine-versions.md">View page source</a>
+            <a href="https://github.com/gpustack/gpustack-operator/blob/8c5186108e620a8044164d9c4c114dd7376092f4/docs/modules/model-deployment/engine-versions.md">View page source</a>
             
             <a href="https://github.com/gpustack/gpustack-operator/edit/main/docs/modules/model-deployment/engine-versions.md">Edit this page</a>
             
@@ -1807,6 +1871,11 @@ connections open instead of opening one per transfer, and held at most nine sock
     <li><a href="#minimum-versions">Minimum versions</a></li>
     <li><a href="#reading-the-table">Reading the table</a></li>
     <li><a href="#transport-compatibility">Transport compatibility</a></li>
+    <li><a href="#remote-weight-loading">Remote weight loading</a>
+      <ul>
+        <li><a href="#ascend-hixl">Ascend (HIXL)</a></li>
+      </ul>
+    </li>
     <li><a href="#limitations">Limitations</a></li>
   </ul>
 </nav>

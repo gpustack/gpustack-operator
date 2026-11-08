@@ -15,6 +15,8 @@ Follow the [Model Prefetch Walkthrough](/gpustack-operator/main/docs/walkthrough
 
 [Model Artifact](/gpustack-operator/main/docs/modules/model-delivery/artifact/index.md) covers resolution, validation and the delivery
 choices. [Model Image Source](/gpustack-operator/main/docs/modules/model-delivery/image-source/index.md) covers image-backed weights.
+[Remote Weight Delivery](/gpustack-operator/main/docs/modules/model-delivery/remote/index.md) covers loading weights from a prepared
+source node without a local checkpoint.
 
 ## Cache operations
 
