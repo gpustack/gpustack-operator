@@ -312,7 +312,7 @@ and the CLI is pointed at the socket that was resolved rather than at its own de
 
 **The run writes to the host in four places, and only the first two outlive it:**
 
-| Write | Where | Removed when |
+| Write | Location | Removal trigger |
 |---|---|---|
 | the manufacturer's preload-library tree, copied out of this image | `/var/lib/gpustack/operator/lib/<manufacturer>` | **never** — it is what a Device Manager init container normally stages, and a probe container has none |
 | whatever the allocator's own responder rendered for a container | `/var/lib/gpustack/operator/preflight/` | at the end of the pass. What lands here is the responder's own business: Ascend writes an `npu_info.config`, Hygon a `vdev.conf`, and a manufacturer whose responder renders nothing writes nothing |
@@ -444,7 +444,7 @@ Before reading those rows, check the following:
 
 ### Full table
 
-| Manufacturer | Detection reads | Host cross-check | Driver-read row | For which mode | Container probe |
+| Manufacturer | Detection reads | Host cross-check | Driver-read row | Target mode | Container probe |
 |---|---|---|---|---|---|
 | NVIDIA | NVML | `nvidia-smi -L` | `mig-partitioning` | `partitioned` | Yes |
 | Ascend | DCMI | `npu-smi info -l` | `container-share` | `sliced` | Yes |
@@ -529,7 +529,7 @@ Read the following from the table rather than inferring them:
 Manufacturers with a container probe start one container per sliceable accelerator.
 Use the probe image and runtime that match the manufacturer:
 
-| Manufacturer | Probe image | Vendor runtime | Reader inside | Where the cap is |
+| Manufacturer | Probe image | Vendor runtime | Reader inside | Cap location |
 |---|---|---|---|---|
 | NVIDIA | `nvidia/cuda:<CUDA major>` | `--runtime nvidia` (docker) · `--gpus all` (nerdctl) | `nvidia-smi --query-gpu=memory.total` | `CUDA_DEVICE_MEMORY_LIMIT_<i>` |
 | Ascend | `quay.io/ascend/cann:<CANN major>-<family>` | `--runtime ascend` (docker only) | `enpu-monitor` | `npu_info.config`, key `memory-quota` |
@@ -699,7 +699,7 @@ same for `nerdctl` with `--namespace gpustack-preflight`), then run it again.
 **Not every unhappy sweep is one of these.** The sweep lists by label and then removes what it found,
 and the two are told apart:
 
-| What failed | On which runtime | Reported as |
+| Failure | Runtime | Reported condition |
 |---|---|---|
 | the removal | any | a failure — the container was seen and would not go away |
 | the listing | the one this run drives | a failure — the probes are about to run through a runtime that cannot be asked what it holds |
