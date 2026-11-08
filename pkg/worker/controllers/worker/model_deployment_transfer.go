@@ -322,7 +322,7 @@ const (
 func modelDeploymentModelTransferRoleQualification(
 	md *workercore.ModelDeployment, role *workercore.ModelDeploymentRole, manufacturer string,
 ) modelTransferQualification {
-	if len(role.Command) > 0 {
+	if len(role.Command) > 0 || modelDeploymentRoleHasConflictingLoadFormat(role.ExtraArgs) {
 		return modelTransferRoleIneligible
 	}
 	if modelDeploymentModelTransferCandidateBackend(manufacturer, md.Spec.Engine.Name) == "" {
@@ -333,6 +333,43 @@ func modelDeploymentModelTransferRoleQualification(
 	}
 
 	return modelTransferTupleQualified
+}
+
+// modelDeploymentRoleHasConflictingLoadFormat reports whether args set a
+// --load-format other than model-transfer, or repeat the flag.
+func modelDeploymentRoleHasConflictingLoadFormat(args []string) bool {
+	count := 0
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		if arg == "--load-format" {
+			count++
+			if i+1 >= len(args) || args[i+1] != modelDeploymentModelTransferLoadFormat {
+				return true
+			}
+			i++
+			continue
+		}
+		if val, ok := strings.CutPrefix(arg, "--load-format="); ok {
+			count++
+			if val != modelDeploymentModelTransferLoadFormat {
+				return true
+			}
+		}
+	}
+
+	return count > 1
+}
+
+// modelDeploymentArgsHaveLoadFormat reports whether args already specify
+// --load-format in either two-token or --load-format=value form.
+func modelDeploymentArgsHaveLoadFormat(args []string) bool {
+	for _, arg := range args {
+		if arg == "--load-format" || strings.HasPrefix(arg, "--load-format=") {
+			return true
+		}
+	}
+
+	return false
 }
 
 // modelDeploymentModelTransferReplicaKey names a role and its replica ordinal.
@@ -522,7 +559,9 @@ func (a *ModelDeploymentArtifactRender) applyModelTransfer(c *core.Container) {
 		return
 	}
 	c.Command = modelTransferWrapCommand(c.Command)
-	c.Args = append(c.Args, "--load-format", modelDeploymentModelTransferLoadFormat)
+	if !modelDeploymentArgsHaveLoadFormat(c.Args) {
+		c.Args = append(c.Args, "--load-format", modelDeploymentModelTransferLoadFormat)
+	}
 	c.Env = append(c.Env, a.modelTransferEnv()...)
 	has := false
 	for i := range c.Env {

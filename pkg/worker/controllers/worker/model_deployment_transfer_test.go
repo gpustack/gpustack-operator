@@ -287,6 +287,24 @@ func TestModelDeploymentModelTransferEligibility(t *testing.T) {
 	assert.Equal(t, modelTransferTupleQualified, modelDeploymentModelTransferRoleQualification(
 		managed, &workercore.ModelDeploymentRole{}, nodefeature.ManufacturerNVIDIA,
 	))
+	assert.Equal(t, modelTransferTupleQualified, modelDeploymentModelTransferRoleQualification(
+		managed, &workercore.ModelDeploymentRole{ExtraArgs: []string{"--load-format", "model-transfer"}},
+		nodefeature.ManufacturerNVIDIA,
+	), "an explicit model-transfer load format remains eligible")
+	assert.Equal(t, modelTransferTupleQualified, modelDeploymentModelTransferRoleQualification(
+		managed, &workercore.ModelDeploymentRole{ExtraArgs: []string{"--load-format=model-transfer"}},
+		nodefeature.ManufacturerNVIDIA,
+	), "an explicit --load-format=model-transfer remains eligible")
+	for _, extraArgs := range [][]string{
+		{"--load-format", "safetensors"},
+		{"--load-format=runai_streamer"},
+		{"--load-format"},
+		{"--load-format", "model-transfer", "--load-format", "model-transfer"},
+	} {
+		assert.Equal(t, modelTransferRoleIneligible, modelDeploymentModelTransferRoleQualification(
+			managed, &workercore.ModelDeploymentRole{ExtraArgs: extraArgs}, nodefeature.ManufacturerNVIDIA,
+		), "conflicting or duplicate --load-format in ExtraArgs (%v) is ineligible for remote delivery", extraArgs)
+	}
 	assert.Equal(t, modelTransferTupleUnqualified, modelDeploymentModelTransferRoleQualification(
 		managed, &workercore.ModelDeploymentRole{}, nodefeature.ManufacturerAscend,
 	),
@@ -451,6 +469,17 @@ func TestModelDeploymentModelTransferRemotePodRendering(t *testing.T) {
 		}
 	}
 	assert.True(t, found, "the engine is told to load through the model-transfer adapter")
+
+	// Calling applyModelTransfer when --load-format model-transfer is already
+	// present in Args does not append a duplicate flag.
+	preconfigured := &core.Container{
+		Name:    modelDeploymentMainContainerName,
+		Command: []string{"vllm", "serve", "org/model"},
+		Args:    []string{"--load-format", modelDeploymentModelTransferLoadFormat},
+	}
+	render.applyModelTransfer(preconfigured)
+	assert.Equal(t, []string{"--load-format", modelDeploymentModelTransferLoadFormat}, preconfigured.Args,
+		"an existing --load-format model-transfer is not duplicated")
 
 	env := map[string]string{}
 	for _, e := range container.Env {
