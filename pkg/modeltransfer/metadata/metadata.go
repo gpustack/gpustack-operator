@@ -184,6 +184,12 @@ func newBuildStage(viewDir string) (*Staging, error) {
 func Build(
 	srcDir, viewDir, artifactDigest string, required []string, manifestSource ...string,
 ) (*View, error) {
+	return buildContext(context.Background(), srcDir, viewDir, artifactDigest, required, manifestSource...)
+}
+
+func buildContext(
+	ctx context.Context, srcDir, viewDir, artifactDigest string, required []string, manifestSource ...string,
+) (*View, error) {
 	if required == nil {
 		required = DefaultRequiredFiles
 	}
@@ -218,6 +224,9 @@ func Build(
 	// not a second copy.
 	copied := map[string]bool{}
 	for _, name := range required {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		if copied[name] {
 			continue
 		}
@@ -233,6 +242,9 @@ func Build(
 		return nil, err
 	}
 	for _, name := range optional {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		if copied[name] || !knownFiles[name] {
 			continue
 		}
@@ -254,8 +266,14 @@ func Build(
 	// Then one header stub per safetensors file in the tree.
 	stubs := 0
 	err = filepath.WalkDir(srcDir, func(path string, e fs.DirEntry, err error) error {
-		if err != nil || path == srcDir || !strings.HasSuffix(e.Name(), ".safetensors") {
+		if err != nil {
 			return err
+		}
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return ctxErr
+		}
+		if path == srcDir || !strings.HasSuffix(e.Name(), ".safetensors") {
+			return nil
 		}
 		if !e.Type().IsRegular() {
 			return fmt.Errorf("%w: %s", ErrNotRegularFile, e.Name())
@@ -295,7 +313,7 @@ func Build(
 	if err := writeSealed(filepath.Join(staging, viewFile), raw); err != nil {
 		return nil, err
 	}
-	if err := publishView(context.Background(), staging, viewDir, artifactDigest, required); err != nil {
+	if err := publishView(ctx, staging, viewDir, artifactDigest, required); err != nil {
 		return nil, err
 	}
 	return Verify(viewDir)

@@ -95,6 +95,10 @@ func (r *ModelPrefetchReconciler) now() time.Time {
 func (r *ModelPrefetchReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	logger := ctrllog.FromContext(ctx)
 
+	if req.Namespace == "" && req.Name == "__pinned__" {
+		return ctrl.Result{}, r.recomputePinned(ctx)
+	}
+
 	pf := new(workercore.ModelPrefetch)
 	switch err := r.reader().Get(ctx, req.NamespacedName, pf); {
 	case kerrors.IsNotFound(err):

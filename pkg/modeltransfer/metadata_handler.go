@@ -284,21 +284,25 @@ func (c *Config) metadataHandler() http.Handler {
 		defer func() { _ = c.Store.RemoveRef(ref.VolumeID) }()
 		view, err := metadata.EnsureViewContext(r.Context(), c.Store, c.Store.ViewsRoot(), hexDigest, req.ManifestDigest, req.Required, ref.VolumeID)
 		if err != nil {
+			ctrllog.FromContext(r.Context()).Error(err, "resolve metadata view", "digest", req.ManifestDigest)
 			http.Error(w, "metadata unavailable", http.StatusServiceUnavailable)
 			return
 		}
 		tempDir := filepath.Join(c.Store.Root(), "model-transfer", "metadata-temp")
 		if err := os.MkdirAll(tempDir, 0o700); err != nil {
+			ctrllog.FromContext(r.Context()).Error(err, "create metadata temp directory")
 			http.Error(w, "metadata unavailable", http.StatusServiceUnavailable)
 			return
 		}
 		archive, err := os.CreateTemp(tempDir, metadataPrefix(c.WorkerID, c.VendorScope))
 		if err != nil {
+			ctrllog.FromContext(r.Context()).Error(err, "create metadata temp archive")
 			http.Error(w, "metadata unavailable", http.StatusServiceUnavailable)
 			return
 		}
 		defer func() { _ = archive.Close(); _ = os.Remove(archive.Name()) }()
 		if err := metadata.ExportView(r.Context(), view, archive); err != nil {
+			ctrllog.FromContext(r.Context()).Error(err, "export metadata view", "digest", req.ManifestDigest)
 			http.Error(w, "metadata unavailable", http.StatusServiceUnavailable)
 			return
 		}

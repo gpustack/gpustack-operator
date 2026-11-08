@@ -130,6 +130,10 @@ func (r *ModelDeploymentReconciler) reconcileModelTransferClientConfig(ctx conte
 			}
 			return err
 		}
+		if secret.Labels["app.kubernetes.io/component"] != "model-transfer" ||
+			secret.Labels["gpustack.ai/manufacturer"] != vendor {
+			continue
+		}
 		ca := secret.Data["ca.crt"]
 		if len(ca) == 0 {
 			ca = secret.Data[core.TLSCertKey]

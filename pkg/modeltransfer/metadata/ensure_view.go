@@ -75,7 +75,7 @@ func EnsureViewContext(ctx context.Context, st *store.Store, viewRoot, hex, dige
 		return "", err
 	}
 	defer stage.Release()
-	view, err := Build(st.PublishedTree(hex), stage.Dir(), digest, required,
+	view, err := buildContext(ctx, st.PublishedTree(hex), stage.Dir(), digest, required,
 		st.PublishedManifestPath(hex))
 	if err != nil {
 		return "", err

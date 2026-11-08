@@ -21,11 +21,13 @@ import (
 func TestModelTransferDiscoveryIsolatesInvalidTrustAnchors(t *testing.T) {
 	_, ca, _ := newClientCertificate(t)
 	for _, tc := range []struct {
-		name  string
-		badCA []byte
+		name      string
+		badCA     []byte
+		badLabels map[string]string
 	}{
 		{name: "invalid PEM", badCA: []byte("invalid")},
 		{name: "oversized", badCA: []byte(strings.Repeat("x", (256<<10)+1))},
+		{name: "unlabeled secret", badCA: ca, badLabels: map[string]string{}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			ns := setting.DelegatedSecretNamespace
@@ -34,16 +36,21 @@ func TestModelTransferDiscoveryIsolatesInvalidTrustAnchors(t *testing.T) {
 			for _, source := range []struct {
 				name, vendor string
 				ca           []byte
+				secretLabels map[string]string
 			}{
 				{name: "good", vendor: "nvidia", ca: ca},
-				{name: "bad", vendor: "ascend", ca: tc.badCA},
+				{name: "bad", vendor: "ascend", ca: tc.badCA, secretLabels: tc.badLabels},
 			} {
 				labels := map[string]string{"app.kubernetes.io/component": "model-transfer", "gpustack.ai/manufacturer": source.vendor}
+				secLabels := labels
+				if source.secretLabels != nil {
+					secLabels = source.secretLabels
+				}
 				ds := &apps.DaemonSet{ObjectMeta: meta.ObjectMeta{Name: source.name, Namespace: ns, UID: types.UID(source.name), Labels: labels}}
 				svc := &core.Service{ObjectMeta: meta.ObjectMeta{Name: source.name, Namespace: ns, Labels: labels}, Spec: core.ServiceSpec{
 					ClusterIP: core.ClusterIPNone, Selector: labels, Ports: []core.ServicePort{{Name: "sessions", Port: 9251}},
 				}}
-				secret := &core.Secret{ObjectMeta: meta.ObjectMeta{Name: source.name + "-cert", Namespace: ns}, Data: map[string][]byte{"ca.crt": source.ca}}
+				secret := &core.Secret{ObjectMeta: meta.ObjectMeta{Name: source.name + "-cert", Namespace: ns, Labels: secLabels}, Data: map[string][]byte{"ca.crt": source.ca}}
 				pod := &core.Pod{
 					ObjectMeta: meta.ObjectMeta{
 						Name: source.name, Namespace: ns, UID: types.UID(source.name + "-pod"), Labels: labels,
@@ -82,7 +89,7 @@ func TestModelTransferClientDiscoveryAndTrust(t *testing.T) {
 		},
 	}
 	secret := &core.Secret{
-		ObjectMeta: meta.ObjectMeta{Name: "source-cert", Namespace: ns}, Type: core.SecretTypeTLS,
+		ObjectMeta: meta.ObjectMeta{Name: "source-cert", Namespace: ns, Labels: labels}, Type: core.SecretTypeTLS,
 		Data: map[string][]byte{"ca.crt": ca, "tls.key": []byte("PRIVATE-KEY-NEVER-MIRRORED")},
 	}
 	owner := meta.NewControllerRef(ds, apps.SchemeGroupVersion.WithKind("DaemonSet"))
@@ -168,7 +175,7 @@ func TestModelTransferDiscoveryReusesPodInventory(t *testing.T) {
 		service := &core.Service{ObjectMeta: meta.ObjectMeta{Name: name, Namespace: ns, Labels: labels}, Spec: core.ServiceSpec{
 			ClusterIP: core.ClusterIPNone, Selector: labels, Ports: []core.ServicePort{{Name: "sessions", Port: 9251}},
 		}}
-		secret := &core.Secret{ObjectMeta: meta.ObjectMeta{Name: name + "-cert", Namespace: ns}, Data: map[string][]byte{"ca.crt": ca}}
+		secret := &core.Secret{ObjectMeta: meta.ObjectMeta{Name: name + "-cert", Namespace: ns, Labels: labels}, Data: map[string][]byte{"ca.crt": ca}}
 		pod := &core.Pod{
 			ObjectMeta: meta.ObjectMeta{
 				Name: name, Namespace: ns, UID: types.UID(name + "-pod"), Labels: labels,
