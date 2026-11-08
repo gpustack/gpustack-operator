@@ -10,8 +10,9 @@ import (
 )
 
 const (
-	sourceResidentBudgetEnv = "GPUSTACK_MODEL_TRANSFER_SOURCE_RESIDENT_BUDGET_BYTES"
-	hixlMemoryAlignment     = int64(2 << 20)
+	sourceResidentBudgetEnv     = "GPUSTACK_MODEL_TRANSFER_SOURCE_RESIDENT_BUDGET_BYTES"
+	hixlSourceResidentBudgetEnv = "GPUSTACK_MODEL_TRANSFER_HIXL_RESIDENT_BUDGET_BYTES"
+	hixlMemoryAlignment         = int64(2 << 20)
 )
 
 // sourceAllocationBytes includes backing space for aligned HIXL addresses and extents.
@@ -34,9 +35,17 @@ func sourceResidentLimits() (int64, int64, error) {
 			resident = max(AlignDown2M(resident), 1<<30)
 		}
 	}
+	// An empty or zero HIXL budget keeps the 16 GiB ceiling; a negative or
+	// non-integer value fails fast like the primary resident budget.
 	hixl := int64(16 << 30)
-	if value, err := strconv.ParseInt(os.Getenv("GPUSTACK_MODEL_TRANSFER_HIXL_RESIDENT_BUDGET_BYTES"), 10, 64); err == nil && value != 0 {
-		hixl = max(AlignDown2M(value), 1<<30)
+	if raw := os.Getenv(hixlSourceResidentBudgetEnv); raw != "" {
+		value, err := strconv.ParseInt(raw, 10, 64)
+		if err != nil || value < 0 {
+			return 0, 0, fmt.Errorf("%s must be a non-negative integer", hixlSourceResidentBudgetEnv)
+		}
+		if value > 0 {
+			hixl = max(AlignDown2M(value), 1<<30)
+		}
 	}
 	return resident, hixl, nil
 }

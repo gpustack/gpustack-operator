@@ -180,26 +180,33 @@ func TestPagedDescriptorsRemainManifestBound(t *testing.T) {
 
 func TestSourceResidentEnvironment(t *testing.T) {
 	for _, tc := range []struct {
-		value string
-		want  int64
-		valid bool
+		name      string
+		value     string
+		hixlValue string
+		want      int64
+		wantHIXL  int64
+		valid     bool
 	}{
-		{"", 0, true},
-		{"0", 0, true},
-		{"2147483648", 2 << 30, true},
-		{"-1", 0, false},
-		{"typo", 0, false},
-		{"1048576", 1 << 30, true},
-		{"1073741825", 1 << 30, true},
+		{name: "empty", value: "", hixlValue: "0", want: 0, wantHIXL: 16 << 30, valid: true},
+		{name: "zero", value: "0", hixlValue: "", want: 0, wantHIXL: 16 << 30, valid: true},
+		{name: "2GiB", value: "2147483648", hixlValue: "0", want: 2 << 30, wantHIXL: 16 << 30, valid: true},
+		{name: "negative primary", value: "-1", hixlValue: "0", valid: false},
+		{name: "typo primary", value: "typo", hixlValue: "0", valid: false},
+		{name: "clamped 1MiB", value: "1048576", hixlValue: "0", want: 1 << 30, wantHIXL: 16 << 30, valid: true},
+		{name: "aligned down", value: "1073741825", hixlValue: "0", want: 1 << 30, wantHIXL: 16 << 30, valid: true},
+		{name: "hixl 4GiB", value: "0", hixlValue: "4294967296", want: 0, wantHIXL: 4 << 30, valid: true},
+		{name: "hixl clamped 1MiB", value: "0", hixlValue: "1048576", want: 0, wantHIXL: 1 << 30, valid: true},
+		{name: "negative hixl", value: "0", hixlValue: "-1", valid: false},
+		{name: "typo hixl", value: "0", hixlValue: "typo", valid: false},
 	} {
-		t.Run(tc.value, func(t *testing.T) {
+		t.Run(tc.name, func(t *testing.T) {
 			t.Setenv(sourceResidentBudgetEnv, tc.value)
-			t.Setenv("GPUSTACK_MODEL_TRANSFER_HIXL_RESIDENT_BUDGET_BYTES", "0")
+			t.Setenv(hixlSourceResidentBudgetEnv, tc.hixlValue)
 			got, hixl, err := sourceResidentLimits()
 			require.Equal(t, tc.valid, err == nil)
 			if tc.valid {
 				require.Equal(t, tc.want, got)
-				require.Equal(t, int64(16<<30), hixl)
+				require.Equal(t, tc.wantHIXL, hixl)
 			}
 		})
 	}
