@@ -105,7 +105,7 @@ func cleanupMetadataRequests(st *store.Store, workerID string, vendorScope ...st
 	// staging is inactive. A lock another process still held proves its
 	// tree active, and staging without a lock predates the protocol and is
 	// preserved. A missing metadata-temp never skips this sweep.
-	return metadata.ReclaimAbandonedStaging(filepath.Join(st.Root(), "model-transfer", "views"))
+	return metadata.ReclaimAbandonedStaging(st.ViewsRoot())
 }
 
 // localSourcePod verifies the live Pod and its controller before using the
@@ -264,14 +264,25 @@ func (c *Config) metadataHandler() http.Handler {
 			http.Error(w, "source unavailable", http.StatusServiceUnavailable)
 			return
 		}
-		ref := metadataPrefix(c.WorkerID, c.VendorScope) + hex.EncodeToString(id[:])
-		claimed, err := c.Store.Claim(r.Context(), store.Ref{VolumeID: ref, Hex: hexDigest, PodUID: c.WorkerID})
-		if err != nil || !claimed {
+		ref := store.Ref{
+			VolumeID: metadataPrefix(c.WorkerID, c.VendorScope) + hex.EncodeToString(id[:]),
+			Hex:      hexDigest, PodUID: c.WorkerID,
+		}
+		// The export's reference exists before the view is resolved, so a
+		// pre-staged view — a source node may hold the view without the
+		// complete checkpoint — is protected for the whole export once the
+		// reference stands. This write takes no claim lock, so a removal
+		// that read the references an instant earlier can still retire the
+		// view first; this request then fails before any success, and the
+		// caller's retry rebuilds or refetches. That is a promise of
+		// retryability, not of recovery once every source of the view is
+		// gone.
+		if err := c.Store.WriteRef(ref); err != nil {
 			http.Error(w, "source unavailable", http.StatusServiceUnavailable)
 			return
 		}
-		defer func() { _ = c.Store.RemoveRef(ref) }()
-		view, err := metadata.EnsureView(c.Store, filepath.Join(c.Store.Root(), "model-transfer", "views"), hexDigest, req.ManifestDigest, req.Required)
+		defer func() { _ = c.Store.RemoveRef(ref.VolumeID) }()
+		view, err := metadata.EnsureView(c.Store, c.Store.ViewsRoot(), hexDigest, req.ManifestDigest, req.Required, ref.VolumeID)
 		if err != nil {
 			http.Error(w, "metadata unavailable", http.StatusServiceUnavailable)
 			return
