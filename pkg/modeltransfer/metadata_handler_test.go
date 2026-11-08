@@ -255,6 +255,15 @@ func TestMetadataHandlerVerifiesSourceAndExportsHeaders(t *testing.T) {
 	response = httptest.NewRecorder()
 	cfg.metadataHandler().ServeHTTP(response, request)
 	assert.Equal(t, http.StatusServiceUnavailable, response.Code)
+
+	unauthClient := kubefake.NewSimpleClientset(ds, pod, node)
+	cfg.Client = unauthClient
+	request = httptest.NewRequest(http.MethodPost, "/v1/metadata", bytes.NewReader(body))
+	request.Header.Set("Authorization", "Bearer bad-token")
+	response = httptest.NewRecorder()
+	cfg.metadataHandler().ServeHTTP(response, request)
+	assert.Equal(t, http.StatusForbidden, response.Code)
+	assert.Empty(t, unauthClient.Actions(), "unauthorized metadata requests must not trigger sourcePod API reads")
 }
 
 func (a metadataTestAuth) AuthenticateActivePod(ctx context.Context, req authorization.Request) (authorization.PodIdentity, *protocol.Error) {

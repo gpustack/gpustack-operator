@@ -25,6 +25,14 @@ import (
 func EnsureView(st *store.Store, viewRoot, hex, digest string,
 	required []string, selfVolumeID ...string,
 ) (string, error) {
+	return EnsureViewContext(context.Background(), st, viewRoot, hex, digest, required, selfVolumeID...)
+}
+
+// EnsureViewContext is EnsureView with a caller-supplied context for lock
+// acquisition and unreferenced view retirement.
+func EnsureViewContext(ctx context.Context, st *store.Store, viewRoot, hex, digest string,
+	required []string, selfVolumeID ...string,
+) (string, error) {
 	if required == nil {
 		required = DefaultRequiredFiles
 	}
@@ -73,7 +81,7 @@ func EnsureView(st *store.Store, viewRoot, hex, digest string,
 		return "", err
 	}
 	final := filepath.Join(viewRoot, view.ID())
-	if err := publishStoreView(context.Background(), st, stage.Dir(), final, hex, digest, required, selfVolumeID...); err != nil {
+	if err := publishStoreView(ctx, st, stage.Dir(), final, hex, digest, required, selfVolumeID...); err != nil {
 		return "", err
 	}
 	return final, nil
@@ -95,7 +103,7 @@ func findView(root, digest string, required []string) (string, bool) {
 		if err != nil || !viewSatisfies(view, digest, required) {
 			continue
 		}
-		view, err = Verify(dir)
+		view, err = verifyTransferView(dir)
 		if err != nil || !viewSatisfies(view, digest, required) {
 			continue
 		}

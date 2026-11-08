@@ -42,13 +42,13 @@ type storeMetadataViews struct {
 }
 
 // Ensure implements MetadataViews.
-func (v *storeMetadataViews) Ensure(_ context.Context, hex, digest string,
+func (v *storeMetadataViews) Ensure(ctx context.Context, hex, digest string,
 	required []string,
 ) (string, error) {
 	if v.selfVolumeID != "" {
-		return metadata.EnsureView(v.store, v.store.ViewsRoot(), hex, digest, required, v.selfVolumeID)
+		return metadata.EnsureViewContext(ctx, v.store, v.store.ViewsRoot(), hex, digest, required, v.selfVolumeID)
 	}
-	return metadata.EnsureView(v.store, v.store.ViewsRoot(), hex, digest, required)
+	return metadata.EnsureViewContext(ctx, v.store, v.store.ViewsRoot(), hex, digest, required)
 }
 
 // publishModelTransferVolume serves a volume the complete-tree contract must never

@@ -12,6 +12,7 @@
 package metadata
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -273,6 +274,14 @@ func Build(
 		return nil, err
 	}
 
+	var totalBytes int64
+	for _, file := range files {
+		if file.Size < 0 || file.Size > MaxArchiveBytes-totalBytes {
+			return nil, errors.New("metadata view exceeds its byte bound")
+		}
+		totalBytes += file.Size
+	}
+
 	sort.Slice(files, func(i, j int) bool { return files[i].Name < files[j].Name })
 	view := &View{
 		Kind: ViewKind, ArtifactDigest: artifactDigest,
@@ -286,7 +295,7 @@ func Build(
 	if err := writeSealed(filepath.Join(staging, viewFile), raw); err != nil {
 		return nil, err
 	}
-	if err := publishView(staging, viewDir, artifactDigest, required); err != nil {
+	if err := publishView(context.Background(), staging, viewDir, artifactDigest, required); err != nil {
 		return nil, err
 	}
 	return Verify(viewDir)

@@ -1,6 +1,7 @@
 package metadata
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -12,6 +13,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"golang.org/x/sys/unix"
 )
 
 // buildSourceTree writes a small verified-tree-like source directory: the
@@ -589,4 +591,17 @@ func TestBuildCreatesMissingViewParents(t *testing.T) {
 	verified, err := Verify(viewDir)
 	require.NoError(t, err)
 	assert.Equal(t, view.ID(), verified.ID())
+}
+
+func TestPublishViewHonorsContextCancellation(t *testing.T) {
+	root := t.TempDir()
+	lock, err := os.OpenFile(filepath.Join(root, ".publish.lock"), os.O_CREATE|os.O_RDWR, 0o600)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = lock.Close() })
+	require.NoError(t, unix.Flock(int(lock.Fd()), unix.LOCK_EX|unix.LOCK_NB))
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	err = publishView(ctx, filepath.Join(root, "stage"), filepath.Join(root, "final"), "sha256:"+repeatHex('a'), nil)
+	require.ErrorIs(t, err, context.Canceled)
 }

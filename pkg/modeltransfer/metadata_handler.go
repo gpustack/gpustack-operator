@@ -229,10 +229,6 @@ func (c *Config) metadataHandler() http.Handler {
 			http.Error(w, "metadata capacity unavailable", http.StatusServiceUnavailable)
 			return
 		}
-		if err := c.sourcePod(r.Context()); err != nil {
-			http.Error(w, "source unavailable", http.StatusServiceUnavailable)
-			return
-		}
 		auth, ok := c.Authorizer.(metadataAuthorizer)
 		if !ok {
 			http.Error(w, "source unavailable", http.StatusServiceUnavailable)
@@ -259,6 +255,10 @@ func (c *Config) metadataHandler() http.Handler {
 			http.Error(w, "source unavailable", http.StatusServiceUnavailable)
 			return
 		}
+		if err := c.sourcePod(r.Context()); err != nil {
+			http.Error(w, "source unavailable", http.StatusServiceUnavailable)
+			return
+		}
 		var id [16]byte
 		if _, err := rand.Read(id[:]); err != nil {
 			http.Error(w, "source unavailable", http.StatusServiceUnavailable)
@@ -282,7 +282,7 @@ func (c *Config) metadataHandler() http.Handler {
 			return
 		}
 		defer func() { _ = c.Store.RemoveRef(ref.VolumeID) }()
-		view, err := metadata.EnsureView(c.Store, c.Store.ViewsRoot(), hexDigest, req.ManifestDigest, req.Required, ref.VolumeID)
+		view, err := metadata.EnsureViewContext(r.Context(), c.Store, c.Store.ViewsRoot(), hexDigest, req.ManifestDigest, req.Required, ref.VolumeID)
 		if err != nil {
 			http.Error(w, "metadata unavailable", http.StatusServiceUnavailable)
 			return

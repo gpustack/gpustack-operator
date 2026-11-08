@@ -7,6 +7,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"time"
 
 	"golang.org/x/sys/unix"
 
@@ -18,20 +19,28 @@ import (
 // 64-hex directory exists on disk, only Store.RemoveUnreferencedView may
 // retire it under the claim locks. The persistent lock file must not be
 // removed while the root is in use.
-func publishView(stage, final, digest string, required []string) error {
+func publishView(ctx context.Context, stage, final, digest string, required []string) error {
 	lock, err := os.OpenFile(filepath.Join(filepath.Dir(final), ".publish.lock"), os.O_CREATE|os.O_RDWR, 0o600)
 	if err != nil {
 		return err
 	}
 	defer lock.Close()
 	for {
-		err = unix.Flock(int(lock.Fd()), unix.LOCK_EX)
-		if !errors.Is(err, unix.EINTR) {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		err = unix.Flock(int(lock.Fd()), unix.LOCK_EX|unix.LOCK_NB)
+		if err == nil {
 			break
 		}
-	}
-	if err != nil {
-		return err
+		if !errors.Is(err, unix.EWOULDBLOCK) && !errors.Is(err, unix.EAGAIN) && !errors.Is(err, unix.EINTR) {
+			return err
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(10 * time.Millisecond):
+		}
 	}
 	existing, verifyErr := Verify(final)
 	if verifyErr == nil && viewSatisfies(existing, digest, required) {
@@ -61,8 +70,8 @@ func publishView(stage, final, digest string, required []string) error {
 func publishStoreView(
 	ctx context.Context, st *store.Store, stage, final, hex, digest string, required []string, selfVolumeID ...string,
 ) error {
-	err := publishView(stage, final, digest, required)
-	if err == nil || st == nil || hex == "" {
+	err := publishView(ctx, stage, final, digest, required)
+	if err == nil || st == nil || hex == "" || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 		return err
 	}
 	retired, rerr := st.RemoveUnreferencedView(ctx, final, hex, selfVolumeID...)
@@ -78,5 +87,5 @@ func publishStoreView(
 		}
 		return err
 	}
-	return publishView(stage, final, digest, required)
+	return publishView(ctx, stage, final, digest, required)
 }
