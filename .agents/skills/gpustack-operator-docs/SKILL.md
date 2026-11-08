@@ -103,8 +103,8 @@ the owning deep page, then link to it. Add a deep page when no existing page own
 | Instance resource-use metrics | `docs/reference/instance-metrics.md` |
 | A subcommand, one of its flags, its exit codes, its invocation | `docs/reference/commands.md` |
 | A user-visible capability, a vendor's slicing support, the install flow | `README.md` |
-| Vendor prerequisites, vendor GPU Operator coexistence | `docs/getting-started/vendor-prerequisites.md` |
-| A recorded run with real output | `docs/walkthroughs/devices/scheduling.md`, or the walkthrough section of `docs/modules/devices/nvidia-mig.md` |
+| Vendor prerequisites, third-party dependencies, vendor GPU Operator coexistence | `docs/getting-started/vendor-prerequisites.md` |
+| A recorded run or cross-module configuration example | `docs/walkthroughs/**`, or the walkthrough section of `docs/modules/devices/nvidia-mig.md` |
 
 A decision *record* — why an approach was chosen over another — belongs in `specs/`, not in `docs/`.
 The docs state the rule that resulted; a `> **Why**` note carries only as much rationale as a reader
@@ -113,12 +113,35 @@ needs to not undo it.
 Full routing, including what does **not** belong on a page, is in
 [references/page-map.md](references/page-map.md).
 
+## Capability module structure
+
+Every capability module under `docs/modules/<module>/` (`devices`, `rdma`, `topology`, `kv-cache`,
+`model-delivery`, `model-deployment`, `instances`) must cover four functional areas across its
+`_index.md` and subordinate pages while preserving existing file paths and URLs:
+
+- **Overview**: Open with a concise value proposition, scope boundaries, and a directional SVG flowchart showing component and resource relationships, paired with its hidden
+  Mermaid flowgraph source.
+- **Configuration**: Present a macro annotated Pretty YAML example paired with micro constraint
+  bullets (`<=20` words each) and uniform enum or validation tables.
+- **Operations**: Provide ordered imperatives (`Step N: <short imperative>`), `Verification` checks
+  with expected output, and monitoring or metrics pointers.
+- **Troubleshooting**: List observable failure symptoms, diagnostic commands, webhook or status
+  error messages, and recovery actions.
+
+Converge any scenario that links configuration across multiple capability modules (for example,
+`ModelArtifact` + `ModelPrefetch` + `KVCachePoolBinding` + `ModelDeployment` +
+`ModelDeploymentScaler`) into `docs/walkthroughs/`. Module pages link to the walkthrough instead of
+duplicating multi-module setup sequences.
+
 ## Tested facts and configuration combinations
 
 REQUIRED: a page states only what a recorded run or the source establishes. Do not write about
 behaviour nobody has tested: no untested scenarios, no "should" or "would" narrations, no PoC
-anecdotes standing in for verified results. When a capability is unverified, either say so in the
-page's Summary or Limitations with the versions that were verified, or leave the topic out.
+anecdotes standing in for verified results. When Go struct comments or code logic already explain
+internal implementation details that do not affect user configuration or operations, omit them from
+`docs/` and document only the operational logic and configuration contract. When a capability is
+unverified, either say so in the page's Summary or Limitations with the versions that were verified,
+or leave the topic out.
 
 REQUIRED: a feature whose value comes from a combination of configurable parts — engines paired
 with routers, backends with protocols, modes with policies — is documented as the whole
@@ -143,8 +166,18 @@ into block style with two-space indentation, one field or list item per line. Do
 JSON-style objects or arrays in YAML examples, including commented alternatives. Empty collections
 use `{}` or `[]`; removing their delimiters would change them to null.
 
-REQUIRED: in `docs/`, use annotated Pretty YAML to describe Kubernetes custom resource (CR) API,
-configuration and status fields. Do not use field-by-field Markdown tables for these structures.
+REQUIRED: in `docs/`, pair a **macro** annotated Pretty YAML example with a **micro** constraint
+breakdown whenever documenting a Kubernetes custom resource (CR):
+
+- **Macro configuration**: Provide a complete, runnable Pretty YAML resource (`apiVersion`, `kind`,
+  and `metadata` included) with inline `#` comments marking required fields, optional defaults, and
+  immutability (`# required`, `# optional, default: ...`, `# enum: ...`). Never use field-by-field
+  Markdown tables to duplicate full CR schemas.
+- **Micro configuration**: Immediately beneath the Pretty YAML, list required/optional/immutability
+  rules as short bullets (`- **<Field or rule>**: <Explanation in <=20 words>`) and document enum
+  values, admission gates, or webhook validations in uniform Markdown tables (`| Value | Meaning | Constraints |`
+  or `| Condition | Reason | Resolution |`).
+
 Every YAML block that represents a Kubernetes resource (`Pod`, `Instance`, `ModelDeployment`,
 `ModelDeploymentScaler`, `ModelArtifact`, `ModelPrefetch`, `NodeModelStore`, `KVCacheBackend`,
 `KVCachePool`, `KVCachePoolBinding`, `Devices`, `DevicesRDMASelectionPolicy`, vendor CRs, etc.)
@@ -153,6 +186,9 @@ at an inner fragment such as `spec:`, `status:`, `resources:` or `volumes:`. Typ
 component configuration objects (such as `KubeletConfiguration`) must also include their
 `apiVersion` and `kind`. Generated Helm chart documentation is excluded. Tables for other purposes
 remain allowed.
+
+Every table column header must contain 1 to 3 words and must not use `a`, `an`, `the`, `this`,
+`that`, `these`, or `those`.
 
 REQUIRED: when showing a CR configuration change, use a `diff` code block with the complete YAML
 header (`apiVersion`, `kind` and `metadata`) and the changed `spec` fields. Do not substitute a
@@ -183,11 +219,22 @@ that technical input. A guide must not become a source-file walkthrough.
 
 ## Site rendering
 
-Keep diagrams in fenced `mermaid` blocks so GitHub and the Hugo site render the same source.
-The site shows the diagram with an expandable source block. `docs/README.md` remains the agent
-index and is excluded from the site; link site readers to the module landing pages.
+Module and architecture flowcharts use clean SVGs under `docs/assets/diagrams/` or
+`site/assets/images/`. Place the directional Mermaid flowgraph in an HTML comment immediately below each image, separated
+by a blank line, so Markdown exports preserve it for LLMs. Inside the comment, replace Mermaid
+`-->` with `->` and `-.->` with `..>`: HTML treats `-->` as the end of the comment. Restore the
+original arrow syntax before rendering the graph with Mermaid.
+Give SVG nodes generous padding; never enclose text in tight pill borders. Keep graph nodes,
+labeled edges and subgraph boundaries consistent with the SVG. Use high-contrast light and dark
+themes with a bordered outer canvas, tinted domain containers with colored header bands, and white
+or dark node cards with colored accent bars. Use cobalt for discovery, violet for scheduling, teal
+for delivery and cache, and amber for workloads. Choose an architecture, swimlane, feedback loop,
+transfer or hierarchy diagram when it explains the verified relationships more clearly. Other Mermaid charts may remain
+in fenced blocks. `docs/README.md` remains the agent index and is excluded from the site; link
+site readers to the module landing pages.
 `make lint docs` checks source links, page structure and the rendered site's internal links.
-Published Markdown allows raw HTML only for attribute-free `<br>` or `<br/>` line breaks. Keep
+Published Markdown allows hidden flowgraph comments and raw HTML only for attribute-free
+`<br>` or `<br/>` line breaks. Keep
 HTML examples inside fenced or inline code. The existing site gate checks this allowlist;
 link templates retain automatic URL escaping.
 When adding a page, add its order and short menu label to `site/data/navigation.yaml`. Put setup
@@ -222,7 +269,9 @@ use one name for each section purpose, concise plain headings and `Step N: <shor
 for ordered operations. Keep every H2–H6 heading within four words and 32 visible characters,
 excluding a numbered prefix such as `Step 2:`. In numbered headings, capitalize the first word after
 the colon and use sentence case for the rest. Preserve the meaning of architecture stages, admission
-gates and request rules.
+gates and request rules. In README and docs, exclude interrogative words (`what`, `where`, `when`,
+`how`, `which`, `why`, `who`, `whose`, `whom`) from headings and table headers, regardless of case.
+Table headers also contain 1 to 3 words and exclude articles and demonstratives.
 Apply its [terminology and numbers](references/conventions.md#terminology-and-numbers) rules to
 guides, operations, benchmarks and reference pages as well as walkthroughs. Expand unfamiliar
 abbreviations, italicize the defined concept terms, roles and fields, and use consistent degree and unit notation.
@@ -260,7 +309,9 @@ It verifies relative links and `#anchor`s across `README.md`, `AGENTS.md`, `docs
 label there against the page's H1, and the size caps for paragraphs, page length, section count and
 H2–H6 heading length (see `references/conventions.md`). The heading word and character limits and
 numbered-heading capitalization apply to all authored Markdown under `docs/` and `site/content/`,
-plus `README.md`, `ADOPTERS.md` and the two csrc READMEs. They remain fatal under `--report`.
+plus `README.md`, `ADOPTERS.md` and the two csrc READMEs. Interrogative words are forbidden in
+README and docs H1–H6 headings and table headers; table headers also have word and article limits.
+These checks remain fatal under `--report`; `--selftest` exercises the heading and table checks.
 `--report` demotes the paragraph, page-length, section-count and index-label checks to warnings and
 prints the per-page metrics. The gate also resolves literal `docs/*.md` paths named across skills,
 so a moved page cannot leave a skill reading a missing file.
@@ -289,10 +340,27 @@ It still does **not** read prose: everything below is on you.
       Headings are short, plain and free of unnecessary `The`; numbered headings use a colon.
       Step headings state reader actions. Update Contents and every inbound anchor after renaming.
       For a full sweep, account for every authored page, including pages that need no edit.
-- [ ] CR API, configuration and status structures use annotated Pretty YAML, not field tables.
+- [ ] CR API, configuration and status structures use annotated Pretty YAML (macro view) paired with
+      `<=20`-word constraint bullets and uniform enum/validation tables (micro view), not full field tables.
       Every Kubernetes resource YAML block and CR configuration `diff` block includes full
       `apiVersion`, `kind` and `metadata` headers (not inner fragments). Generated Helm chart
       documentation is excluded.
+- [ ] Capability modules cover all four functional areas (`Overview`, `Configuration`, `Operations`,
+      `Troubleshooting`), and multi-module configuration linkages converge in `docs/walkthroughs/`.
+- [ ] Prose follows 80% ASD-STE100 short-sentence discipline (`<=20` words for instructions, `<=25`
+      words for descriptions) and the visual expression rules in `references/conventions.md` (1-logic
+      bullets `<=20` words, 2-logic uniform tables, multi-logic SVG flowcharts with hidden Mermaid flowgraphs).
+- [ ] Check diagram edges against each source and mode. Mark optional actions and verify named gates.
+      Avoid broad claims that apply only to one transport or configuration.
+- [ ] Check that admission examples reach the intended webhook. Include the required selector labels.
+- [ ] Check commands against asynchronous reconciliation. Do not wait on a resource before it exists.
+      Troubleshooting commands must read the object that owns each listed condition.
+- [ ] Check isolation claims for additive policies, protocol exceptions and independent allocation families.
+- [ ] When adapting a manifest, check model-specific filters, digest anchors, referenced names and placement.
+      Check that each image supports the resource's defaulted features.
+- [ ] Keep captured output intact. Explain when its interpretation differs from the current API.
+- [ ] For site diagrams, inspect desktop and mobile in both themes. Verify motion and reduced motion,
+      keyboard access and readable content, including horizontally scrollable diagrams.
 - [ ] YAML comments describe the correct fields and current contracts. Check indentation, local
       alignment and commented alternatives; compare parsed values when formatting examples.
 - [ ] Read the diff once for the prose tells in `references/conventions.md` (*Prose tells*): not-X-but-Y
