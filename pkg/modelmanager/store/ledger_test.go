@@ -381,6 +381,19 @@ func TestRebuildRefusesUnrecoverableMountedView(t *testing.T) {
 				MountPoint: testTarget("uid-9", "weights"),
 			}}, testDevice)
 			require.ErrorContains(t, err, "no recoverable artifact digest")
+
+			target := testTarget("uid-10", "weights")
+			require.NoError(t, s.WriteRef(Ref{
+				VolumeID: EphemeralVolumeID("uid-10", "weights"), TargetPath: target, PodUID: "uid-10",
+			}))
+			_, err = s.Rebuild(t.Context(), []Mount{{
+				Device: testDevice, Root: "/model-transfer/views/" + viewID,
+				MountPoint: target,
+			}}, testDevice)
+			require.ErrorContains(t, err, "no recoverable artifact digest")
+			refs, refErr := s.Refs()
+			require.NoError(t, refErr)
+			require.Len(t, refs, 1, "a mounted view's pre-resolution ref must not be dropped on unreadable view.json")
 		})
 	}
 }

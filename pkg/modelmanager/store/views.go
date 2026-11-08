@@ -80,12 +80,12 @@ func (s *Store) Acquire(ctx context.Context, r Ref) error {
 // published tree's, so a crash midway leaves only trash for the next start.
 func (s *Store) RemoveUnreferencedView(ctx context.Context, path, hex string, ignoreVolumeID ...string) (bool, error) {
 	trash, err := s.trashUnreferencedView(ctx, path, hex, ignoreVolumeID...)
-	if err != nil || trash == "" {
+	if trash == "" {
 		return false, err
 	}
 	beforeViewRemove()
 
-	return true, removeAllWritable(trash)
+	return true, errors.Join(err, removeAllWritable(trash))
 }
 
 // trashUnreferencedView renames the view at path into trash/ unless a
@@ -94,7 +94,7 @@ func (s *Store) RemoveUnreferencedView(ctx context.Context, path, hex string, ig
 // or it is already gone. The claim locks end when it returns.
 func (s *Store) trashUnreferencedView(ctx context.Context, path, hex string, ignoreVolumeID ...string) (string, error) {
 	if err := s.lockClaimMu(ctx); err != nil {
-		if ctxErr := ctx.Err(); ctxErr != nil {
+		if ctxErr := ctx.Err(); ctxErr != nil && errors.Is(err, ctxErr) {
 			return "", ctxErr
 		}
 		return "", &referenceReadError{err: err}
@@ -102,7 +102,7 @@ func (s *Store) trashUnreferencedView(ctx context.Context, path, hex string, ign
 	defer s.unlockClaimMu()
 	unlock, err := s.lockClaims(ctx)
 	if err != nil {
-		if ctxErr := ctx.Err(); ctxErr != nil {
+		if ctxErr := ctx.Err(); ctxErr != nil && errors.Is(err, ctxErr) {
 			return "", ctxErr
 		}
 		return "", &referenceReadError{err: err}
@@ -126,7 +126,7 @@ func (s *Store) trashUnreferencedView(ctx context.Context, path, hex string, ign
 		return "", err
 	}
 	if err := syncDir(filepath.Dir(path)); err != nil {
-		return "", err
+		return dst, err
 	}
 
 	return dst, nil

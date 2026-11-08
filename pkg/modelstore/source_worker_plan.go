@@ -1,8 +1,6 @@
 package modelstore
 
 import (
-	"strings"
-
 	core "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 
@@ -22,7 +20,7 @@ const ManufacturerMixed = "mixed"
 func NodeSourceManufacturer(node *core.Node) string {
 	manufacturer := ""
 	for _, key := range nodefeature.ExtractAcceleratableNodeKeys(node) {
-		manu, _, _ := strings.Cut(key, "-")
+		manu := nodefeature.AcceleratableManufacturer(key)
 		if manufacturer != "" && manufacturer != manu {
 			return ManufacturerMixed
 		}

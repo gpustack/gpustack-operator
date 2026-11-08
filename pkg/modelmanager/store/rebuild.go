@@ -162,9 +162,13 @@ func (s *Store) Rebuild(ctx context.Context, mounts []Mount, device string) (Reb
 		if isView {
 			// The view's own record names the digest the mount serves; an
 			// unreadable record leaves the ledger's word standing, since the
-			// mount is what the consumer sees either way.
+			// mount is what the consumer sees either way. If neither names a
+			// digest, recovery aborts rather than dropping a live mount's ref.
 			hex = s.viewDigest(viewID, r.Hex)
-			ok = hex != ""
+			if hex == "" {
+				return out, fmt.Errorf("mounted metadata view %s at %s has no recoverable artifact digest", viewID, r.TargetPath)
+			}
+			ok = true
 		} else {
 			hex, ok = mounted[r.TargetPath]
 		}
