@@ -50,7 +50,7 @@ See [Encode, Prefill and Decode Benchmark](../../modules/model-deployment/encode
 
 The recorded run used this cluster and model setup:
 
-| Item | Captured setup |
+| Item | Value |
 |---|---|
 | Cluster | Kubernetes v1.35.7; one CPU node and one GPU node (`gpu-node-0`) |
 | GPUs | 8 × NVIDIA H100 80 GB HBM3 SXM5; three GPUs assigned to roles |
@@ -61,7 +61,7 @@ The recorded run used this cluster and model setup:
 ## Step 1: Start three-role serving
 
 Create `ModelArtifact` `qwen2-5-vl-7b-instruct` for `Qwen/Qwen2.5-VL-7B-Instruct` in `gpustack-bench`
-and prefetch it onto the H100 node using the [model prefetch walkthrough](../model-delivery/prefetch.md)
+and prefetch it onto the H100 node using the [model prefetch walkthrough](../model-delivery/prefetch.md#step-1-create-artifact-and-prefetch)
 (substituting `qwen2-5-vl-7b-instruct` and `gpustack-bench` for its DeepSeek example).
 
 Save the following manifest as `epd-deployment.yaml`. It uses the discovered H100 `InstanceType`
@@ -374,7 +374,7 @@ The host's NVLink fabric was not used between roles.
 Every replica `Pod` also carries soft co-location terms toward its peers. The weights pair the roles
 that exchange the most data:
 
-| Replica | Prefers on the same node | Weight |
+| Replica | Preferred colocation | Weight |
 |---|---|---|
 | *Encode* | *Prefill* | 50 |
 | *Prefill* | *Decode* | 100 |

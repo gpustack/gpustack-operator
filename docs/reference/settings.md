@@ -11,18 +11,18 @@ at runtime, and environment variables, which the worker reads when it starts.
 > process environment is a standing declaration rather than a one-time default: while it holds a
 > non-blank value, the worker writes it to the `Setting` on every start and the stored value loses. A
 > `Setting` named in `settings-default-tracking` is written with the operator's built-in default on every
-> start. Every other `Setting` keeps the value you stored. [Who owns a value](#who-owns-a-value) states
+> start. Every other `Setting` keeps the value you stored. [Value ownership](#value-ownership) states
 > the four rules in the order they run, and [Finding the owning
 > rule](#finding-the-owning-rule) tells you which of them owns yours.
 
 ## Contents
 
-- [Who owns a value](#who-owns-a-value)
+- [Value ownership](#value-ownership)
 - [Settings](#settings)
 - [Troubleshooting](#troubleshooting)
 - [Deployment environment variables](#deployment-environment-variables)
 
-## Who owns a value
+## Value ownership
 
 Every registered `Setting` lives as one key of a single delegated `Secret`, `gpustack-settings` in the
 system namespace. The worker aligns that `Secret` once per worker start and asks one question about each
@@ -116,7 +116,7 @@ applies is the Effect window on each row. Fixed means the resource serves
 
 The name in parentheses beside a `Setting` is the variable it reads. Every one of them is
 authoritative on every worker start while the variable is present and holds a non-blank value, whether
-the chart renders it or you add it yourself ([who owns a value](#who-owns-a-value)). A variable marked
+the chart renders it or you add it yourself ([who owns a value](#value-ownership)). A variable marked
 *chart-rendered* is one the chart writes onto the worker `Deployment` itself, so the chart re-asserts
 it on every start and every upgrade.
 
@@ -204,7 +204,7 @@ request that reaches a webhook. Neither window needs a restart.
 | `model-store-high-watermark`<br/>(`GPUSTACK_MODEL_STORE_HIGH_WATERMARK`) | Effect window: Immediate<br/>Default: `80`<br/>Usage: The node cache filesystem's usage percent above which the plugin removes content no `Pod` mounts; above the low watermark, at most `95`. On a filesystem shared with kubelet the plugin caps it below kubelet's thresholds ([the capacity rule](../modules/model-delivery/operations.md#capacity-rule)). |
 | `model-store-low-watermark`<br/>(`GPUSTACK_MODEL_STORE_LOW_WATERMARK`) | Effect window: Immediate<br/>Default: `70`<br/>Usage: The usage percent a collection removes down to; at least `1`, below the high watermark. |
 | `model-store-peer-sync`<br/>(`GPUSTACK_MODEL_STORE_PEER_SYNC`) | Effect window: Immediate<br/>Default: `true`<br/>Usage: Whether a node's plugin may pull a model's content from the plugins of other nodes that hold it published, instead of the hub. |
-| `settings-default-tracking` | Effect window: Next trigger<br/>Default: `instance-ssh-server-image`, `kv-cache-backend-image`, `model-deployment-router-image`, `model-deployment-router-proxy-image`, `model-deployment-routing-sidecar-image`, `model-prefetch-warmup-image`<br/>Usage: Comma-separated names of the `Setting`s the operator rewrites with its built-in default on every worker start, so that a default shipped in a later release reaches a cluster that never chose a value. A name in the list makes its `Setting` follow rule 3 ([who owns a value](#who-owns-a-value)); removing a name is what keeps an image pin across an operator upgrade ([keeping a pin](#keeping-an-image-pin)). An empty value tracks nothing, and whitespace, duplicates and unregistered names are dropped ([the tracking list](#tracking-list)). No environment variable reads this `Setting`, so nothing on the `Deployment` can take the list over. |
+| `settings-default-tracking` | Effect window: Next trigger<br/>Default: `instance-ssh-server-image`, `kv-cache-backend-image`, `model-deployment-router-image`, `model-deployment-router-proxy-image`, `model-deployment-routing-sidecar-image`, `model-prefetch-warmup-image`<br/>Usage: Comma-separated names of the `Setting`s the operator rewrites with its built-in default on every worker start, so that a default shipped in a later release reaches a cluster that never chose a value. A name in the list makes its `Setting` follow rule 3 ([who owns a value](#value-ownership)); removing a name is what keeps an image pin across an operator upgrade ([keeping a pin](#keeping-an-image-pin)). An empty value tracks nothing, and whitespace, duplicates and unregistered names are dropped ([the tracking list](#tracking-list)). No environment variable reads this `Setting`, so nothing on the `Deployment` can take the list over. |
 | `workload-fit-affinity`<br/>(`GPUSTACK_WORKLOAD_FIT_AFFINITY`) | Effect window: Immediate<br/>Default: `true`<br/>Usage: Whether the `Workload` webhook pins a logical slice, or a shared request of two or more accelerators, on an operator queue to nodes whose [fit labels](../modules/devices/scheduling.md#per-card-fit-labels) show that one accelerator can still host it. When `true`, Kueue's topology-aware scheduling skips a fragmented node; when `false`, `Workload`s pass unchanged while the fit labels are still published, so the pin can be switched off on its own. Read on every webhook call, so a change takes up to 30s to reach it, and it applies to `Workload`s created or updated after that. |
 
 ### Authoring the InstanceType
@@ -474,7 +474,7 @@ list, which comes back as its six default names.
 These environment variables are read when the process starts, so changing one means restarting or
 redeploying the affected component.
 A variable a `Setting` reads is re-read on each of those starts rather than applied once
-([who owns a value](#who-owns-a-value)); the rest are plain process configuration.
+([who owns a value](#value-ownership)); the rest are plain process configuration.
 
 The Worker (WK) copies every `GPUSTACK_`-prefixed variable from its own `Pod` spec onto the Device Manager
 (DM) `DaemonSet`s, so setting one on the Worker `Deployment` reaches the DMs automatically.
@@ -557,9 +557,9 @@ A fourth override applies only to a manufacturer that has hardware partitioning 
 
 - `GPUSTACK_${MANUFACTURER}_PARTITION_KIND` — the manufacturer's own name for hardware partitioning, which becomes the segment prefix of its per-profile resource key.
 
-`nvidia` is the only one with a default: `mig`, giving `nvidia.com/gpu.partitioned.mig-${profile}`.
-Elsewhere the variable does nothing: without hardware partitioning there is no `.partitioned` family, so
-no key segment to rename.
+NVIDIA, T-Head and Hygon default to `mig`. For NVIDIA this gives
+`nvidia.com/gpu.partitioned.mig-${profile}`. Other manufacturers have no partitioned family, so
+there is no key segment to rename.
 
 A fifth override is per manufacturer, and today only NVIDIA reads it:
 

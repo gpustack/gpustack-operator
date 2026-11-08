@@ -21,21 +21,31 @@ version requirement for Kubernetes and the container runtime.
 
 ## Chart and image modes
 
+![Chart mode and image mode](../assets/diagrams/installation-modes-flow.svg)
+
+<!--
+flowchart TD
+    CHART["Chart mode: user Helm install -> single Helm release"]
+    IMAGE["Image mode: external worker -> managed release"]
+    COMMON["Worker NodeFeatureRule and exclusive ownership"]
+    CHART -> COMMON
+    IMAGE -> COMMON
+-->
+
+
 Kueue, NFD, Topograph and the two CSI drivers are vendored subcharts of the operator chart
 (`deploy/gpustack-operator/chart/charts/`), each behind an `enabled` switch. Their one configuration
 surface is the chart's `values.yaml`, reachable two ways:
 
-- Chart mode (the default): Helm renders the worker, the Device Manager `DaemonSet`s and the four
-  subcharts in one release; the worker starts with `--disable-applications=*`
-  (`worker.disableApplications`, default `["*"]`) and installs nothing at runtime.
-- Image mode: no Helm release deploys the worker. It runs from a checkout or outside the cluster and
-  installs the chart packaged into its own image
-  (`${GPUSTACK_CONF_DIR:-/etc/gpustack}/charts/gpustack-operator-<version>.tgz`) as release
-  `gpustack-operator-device-manager`.
+| Mode | Installation |
+| --- | --- |
+| **Chart mode** | **Default.** Helm renders the worker, Device Manager `DaemonSet`s and four subcharts in one release. The worker starts with `--disable-applications=*` (`worker.disableApplications`, default `["*"]`) and installs nothing at runtime. |
+| Image mode | No Helm release deploys the worker. It runs from a checkout or outside the cluster and installs the chart packaged in its own image (`${GPUSTACK_CONF_DIR:-/etc/gpustack}/charts/gpustack-operator-<version>.tgz`) as release `gpustack-operator-device-manager`. |
 
-  Its overlay is the whole values surface, so an override like `kueue.controllerManager.replicas`
-  cannot be expressed. The overlay comes from the worker's own flags and settings: `worker.enabled=false`,
-  `fullnameOverride: gpustack-operator`, one `enabled` per component, and the manufacturer map.
+In image mode, the overlay is the whole values surface, so an override like
+`kueue.controllerManager.replicas` cannot be expressed. The overlay comes from the worker's flags
+and settings: `worker.enabled=false`, `fullnameOverride: gpustack-operator`, one `enabled` per
+component, and the manufacturer map.
 
 > **Why that release name** — earlier versions gave it to the release that deployed only the Device Manager; keeping it
 > spares existing clusters a release migration.

@@ -6,6 +6,7 @@ Each module has its own directory. Configuration contracts remain in the capabil
 ## Contents
 
 - [Choose a walkthrough](#choose-a-walkthrough)
+- [Connect configurations](#connect-configurations)
 - [Read the evidence](#read-the-evidence)
 
 ## Choose a walkthrough
@@ -26,6 +27,20 @@ The [Model Deployment guides](../modules/model-deployment/_index.md) explain the
 | Model Deployment | [Elastic EP](model-deployment/elastic-ep.md) | Grow *DP* width 2 → 4 with *TP* = 2. |
 | Model Deployment | [External DP](model-deployment/external-dp.md) | Deploy four fixed H100 *DP* ranks and verify captured per-rank inference and Router coverage. |
 | Model Deployment | [Multi-Host](model-deployment/multi-host.md) | Deploy distributed model instances across multiple GPU hosts. |
+| Model Deployment | [Scaling](model-deployment/scaling.md) | Observe and activate scaling for a deployment. |
+
+## Connect configurations
+
+These walkthroughs connect resources from more than one module. Follow each page's prerequisites and
+limitations; its example does not establish that other combinations have been tested.
+
+| Configuration | Walkthrough | Linkage |
+|---|---|---|
+| Model delivery and serving | [Model Prefetch](model-delivery/prefetch.md) | A store binding grants cache access; a deployment references the artifact. |
+| Shared cache and serving | [Shared Cache](kv-cache/shared-cache.md) | A backend supplies a pool; a namespace binding grants a deployment access. |
+| RDMA and shared cache | [RDMA Networking](rdma/network-endpoints.md#step-4-kv-cache-over-rdma) | The cache backend uses an RDMA fabric and requests interfaces. |
+| Delivery, serving and scaling | [Scaling](model-deployment/scaling.md) | A deployment references an artifact; a scaler controls its replica counts. |
+| Topology and serving | [Hierarchical Placement](topology/hierarchical-placement.md) | Topology inventory supplies domains that constrain replica placement. |
 
 ## Read the evidence
 

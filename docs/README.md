@@ -9,6 +9,10 @@ The capability guides are [Heterogeneous Devices](modules/devices/_index.md),
 [Model Deployment](modules/model-deployment/_index.md) and
 [GPU Instances](modules/instances/_index.md).
 
+Each capability module is organized around four areas: **Overview**, **Configuration** (macro Pretty
+YAML paired with micro constraints), **Operations**, and **Troubleshooting**. Cross-module
+configuration scenarios converge under [Walkthroughs](walkthroughs/_index.md).
+
 ## Reading paths
 
 For a first workload, follow [Usage](../README.md#usage), then use
@@ -17,7 +21,7 @@ For a first workload, follow [Usage](../README.md#usage), then use
 Workloads that need RDMA also need the [RDMA Operations](modules/rdma/operations.md).
 
 For cluster operations, read [Architecture](getting-started/architecture.md) and [Installation Modes](operate/installation-modes.md) first. The [settings](reference/settings.md), [vendor
-prerequisites](getting-started/vendor-prerequisites.md) and
+prerequisites](getting-started/vendor-prerequisites.md) (including the third-party dependency matrix) and
 [preflight](modules/devices/preflight.md) pages cover installation decisions.
 
 Use the [topology](modules/topology/operations.md),
@@ -163,7 +167,7 @@ A skill link names a procedure; the entry's other fields carry shared facts.
 | Page | Description |
 |---|---|
 | [Architecture](getting-started/architecture.md) | See the operator’s four-stage path. |
-| [Vendor Prerequisites](getting-started/vendor-prerequisites.md) | Prepare each manufacturer’s driver. |
+| [Vendor Prerequisites](getting-started/vendor-prerequisites.md) | Review third-party dependencies and prepare each manufacturer’s driver. |
 
 ### Walkthroughs
 

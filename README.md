@@ -14,20 +14,37 @@ workloads when a pool has room.
 Read the [architecture overview](./docs/getting-started/architecture.md) to see how the pieces fit
 together, or browse the [documentation](./docs/README.md).
 
+## Architecture
+
+![Four stages from hardware discovery to workload serving](./site/assets/images/architecture-flow.svg)
+<!--
+flowchart LR
+  Discover["01 · Discover: NFD + Device Manager (Accelerators & RDMA)"] -> Schedule["02 · Schedule: Worker Pools, Kueue Queues, TAS & 5 Admission Gates"]
+  Schedule -> Deliver["03 · Deliver: ModelArtifact Node/CSI Cache & Shared KVCachePool"]
+  Deliver -> Run["04 · Run: ModelDeployment, ModelDeploymentScaler & GPU Instances"]
+-->
+
+1. **Discover:** NFD and Device Manager identify accelerators and RDMA interfaces. See [Device Discovery](./docs/modules/devices/discovery.md).
+2. **Schedule:** The worker builds pools and `InstanceType`s; Kueue and admission checks place workloads. See [Admission](./docs/modules/devices/admission.md).
+3. **Deliver:** Optional model prefetch and shared KV cache support workloads. See [Model Delivery](./docs/modules/model-delivery/_index.md) and [KV Cache](./docs/modules/kv-cache/_index.md).
+4. **Run:** Model deployments and instances serve workloads. See [Model Deployment](./docs/modules/model-deployment/_index.md) and [GPU Instances](./docs/modules/instances/_index.md).
+
+See the [architecture overview](./docs/getting-started/architecture.md) for the complete flow.
+
 ## Features
 
-- [Heterogeneous Devices](./docs/modules/devices/_index.md) — discover accelerators across
+- **[Heterogeneous Devices](./docs/modules/devices/_index.md)** — discover accelerators across
   manufacturers and allocate whole devices, shared devices, logical slices or hardware partitions.
-- [RDMA Networking](./docs/modules/rdma/_index.md) — give workloads RDMA network interfaces
+- **[RDMA Networking](./docs/modules/rdma/_index.md)** — give workloads RDMA network interfaces
   alongside their accelerators.
-- [Topology](./docs/modules/topology/_index.md) — place related workloads within the
+- **[Topology](./docs/modules/topology/_index.md)** — place related workloads within the
   requested network or location domain.
-- [KV Cache](./docs/modules/kv-cache/_index.md) — share inference cache across workloads.
-- [Model Delivery](./docs/modules/model-delivery/_index.md) — fetch, verify and cache model weights
+- **[KV Cache](./docs/modules/kv-cache/_index.md)** — share inference cache across workloads.
+- **[Model Delivery](./docs/modules/model-delivery/_index.md)** — fetch, verify and cache model weights
   on nodes before workloads need them.
-- [Model Deployment](./docs/modules/model-deployment/_index.md) — run model serving replicas with
+- **[Model Deployment](./docs/modules/model-deployment/_index.md)** — run model serving replicas with
   routing and optional prefill/decode roles.
-- [GPU Instances](./docs/modules/instances/_index.md) — enter accelerator-backed container
+- **[GPU Instances](./docs/modules/instances/_index.md)** — enter accelerator-backed container
   workspaces over SSH.
 
 ## Installation
@@ -69,6 +86,13 @@ names with values from `kubectl get instancetypes` before applying a workload.
 
 ### Heterogeneous Devices
 
+![Hardware discovery, pool admission and GPU allocation](./docs/assets/diagrams/devices-flow.svg)
+<!--
+flowchart LR
+  Devices["Node Hardware & Devices CR: kubectl get devices"] -> Queue["Pool Queue: InstanceType ENTRANCE gpustack-fnv64-..."]
+  Queue -> Admission["Kueue & Admission"] -> Pod["Pod Container: nvidia.com/gpu: 1"]
+-->
+
 `kubectl get devices` shows the discovered hardware. The `ENTRANCE` column of
 `kubectl get instancetypes` gives the queue name for a Pod. This one asks for a whole NVIDIA GPU:
 
@@ -93,10 +117,18 @@ spec:
           nvidia.com/gpu: "1"
 ```
 
-The queue name is an example; use the `ENTRANCE` of your chosen pool. See
-[Accelerator Requests](./docs/modules/devices/requests.md) for shared, sliced and partitioned Pods.
+The queue name is an example; use the `ENTRANCE` of your chosen pool. The default NVIDIA injection
+requires a configured NVIDIA runtime. See [NVIDIA prerequisites](./docs/getting-started/vendor-prerequisites.md#nvidia)
+and [Accelerator Requests](./docs/modules/devices/requests.md) for other request modes.
 
 ### RDMA Networking
+
+![GPU and RDMA endpoint allocation for a container](./docs/assets/diagrams/rdma-flow.svg)
+<!--
+flowchart LR
+  Request["Pod Container Request: nvidia.com/gpu: 1 and device.gpustack.ai/rdma.shared: 1"] -> Kubelet["Kubelet & Device Plugin: NUMA alignment depends on policy; endpoint selection"]
+  Kubelet -> Allocated["Co-allocated GPU + RDMA HCA Endpoint"] -> Workload["Workload"]
+-->
 
 To give that Pod a network endpoint, put both requests in the same container:
 
@@ -118,11 +150,19 @@ spec:
 ```
 
 Replace the `resources` block in the Pod above with the one shown here. A shared endpoint suits a container that needs one
-interface; use an exclusive request when it must be the adapter's only tenant. The node needs a
-usable endpoint, and NUMA alignment depends on its kubelet policy. See
+interface. An exclusive request reserves the endpoint only within the exclusive family; shared
+requests can still use it. The node needs a usable endpoint, and NUMA alignment depends on its kubelet policy. See
 [RDMA Operations](./docs/modules/rdma/operations.md) for the other resource keys and checks.
 
 ### Topology
+
+![Topology-aware scheduling with two example replica placements](./docs/assets/diagrams/topology-flow.svg)
+<!--
+flowchart LR
+  Source["TopologySource cloud-zones: region to zone"] -> TAS["Kueue TAS Domain"] -> Deployment["ModelDeployment qwen3-8b: replicas 2, size 4, requiredLevel zone"]
+  Deployment -> A["Example Zone A: Replica 0, 4 Pods"]
+  Deployment -> B["Example Zone B: Replica 1, 4 Pods"]
+-->
 
 When nodes already carry region and zone labels, an administrator can publish their hierarchy:
 
@@ -139,27 +179,34 @@ spec:
   nodeLabels: {}
 ```
 
-For a role whose replica spans multiple Pods, request one zone for each replica group:
+For a role whose replica spans multiple Pods, add a zone requirement to its existing deployment:
 
-```yaml
-apiVersion: worker.gpustack.ai/v1
-kind: ModelDeployment
-metadata:
-  name: qwen3-8b
-spec:
-  roles:
-    - name: server
-      replicas: 2
-      size: 4
-      topology:
-        requiredLevel: topology.kubernetes.io/zone
+```diff
+ apiVersion: worker.gpustack.ai/v1
+ kind: ModelDeployment
+ metadata:
+   name: qwen3-8b
+ spec:
+   roles:
+     - name: server
+       replicas: 2
+       size: 4
++      topology:
++        requiredLevel: topology.kubernetes.io/zone
 ```
 
-This is a role fragment; the engine still needs its own distributed execution settings. Use
+The engine still needs its own distributed execution settings. Use
 [Topology Operations](./docs/modules/topology/operations.md) to verify the source and the Kueue
 topology before depending on that placement.
 
 ### KV Cache
+
+![Shared KV cache backend, pool, binding and serving Pods](./docs/assets/diagrams/kv-cache-flow.svg)
+<!--
+flowchart LR
+  Backend["KVCacheBackend mooncake-dram: DRAM 8Gi"] -> Pool["KVCachePool shared-dram: total 8Gi"]
+  Pool -> Binding["KVCachePoolBinding qwen-cache in team-a: ceiling 4Gi, bfloat16, block 64"] -> Pods["Serving Pods reuse shared KV blocks"]
+-->
 
 An administrator creates the store, its capacity pool and a grant for `team-a`, in that order:
 
@@ -210,6 +257,13 @@ The [Shared Cache Walkthrough](./docs/walkthroughs/kv-cache/shared-cache.md) exp
 
 ### Model Delivery
 
+![Model weights from Hugging Face through the node cache to a serving Pod](./docs/assets/diagrams/model-delivery-flow.svg)
+<!--
+flowchart LR
+  Source["Hugging Face: Qwen/Qwen2.5-7B-Instruct at main"] -> Artifact["ModelArtifact qwen-7b: resolved digest and revision"]
+  Artifact -> Cache["Node Cache: NodeModelStore and CSI driver"] -> Pod["Serving Pod: read-only weight mount"]
+-->
+
 A `ModelArtifact` names the weights that the serving workload will use:
 
 ```yaml
@@ -230,6 +284,15 @@ the serving Pods. [Model Artifact](./docs/modules/model-delivery/artifact.md) co
 sources; [Model Store Operations](./docs/modules/model-delivery/operations.md) covers node delivery.
 
 ### Model Deployment
+
+![Model, cache and accelerator inputs to a serving deployment](./docs/assets/diagrams/model-deployment-flow.svg)
+<!--
+flowchart LR
+  Artifact["ModelArtifact qwen-7b"] -> Deployment["ModelDeployment qwen-chat: vLLM"]
+  Binding["KVCachePoolBinding qwen-cache"] -> Deployment
+  InstanceType["InstanceType nvidia-a10g"] -> Deployment
+  Deployment -> Replica["Serving Replica Pod: accelerator 1"] -> Inference["Inference"]
+-->
 
 This deployment uses the artifact and cache binding above. Replace `instanceType` with one from your
 cluster:
@@ -264,6 +327,14 @@ For a standalone serving example, read
 Decode](./docs/modules/model-deployment/prefill-decode.md) shows how to split the serving roles.
 
 ### GPU Instances
+
+![Slice-backed GPU instance and interactive SSH access](./docs/assets/diagrams/instances-flow.svg)
+<!--
+flowchart LR
+  Key["InstanceSSHPublicKey workspace-key"] -> Instance["Instance sliced-demo: 20% memory, 100% cores, 1Gi volume"]
+  Type["InstanceType: SL slice capacity"] -> Instance
+  Instance -> Forward["kubectl port-forward 2222:22"] -> SSH["ssh -p 2222 root@127.0.0.1: interactive workspace"]
+-->
 
 Choose an `InstanceType` from the pool list whose `SL` capacity has room for a slice. Replace
 `spec.type` with that name and `spec.data` with your SSH public key. This workspace gives you SSH
