@@ -44,6 +44,7 @@
 
 ARG UBUNTU_IMAGE="ubuntu:24.04"
 ARG GPUSTACK_GIT_VERSION="0.0.0"
+ARG GPUSTACK_LIB_DIR="/etc/gpustack/lib"
 
 # CUDA 12.9 packages.
 ARG CUDA_RUNTIME_IMAGE="nvidia/cuda:12.9.1-runtime-ubuntu24.04"
@@ -111,6 +112,7 @@ EOF
 FROM ${CUDA_RUNTIME_IMAGE} AS cuda
 SHELL ["/bin/bash", "-c"]
 
+ARG GPUSTACK_LIB_DIR
 ARG NIXL_VERSION
 ARG NIXL_TORCH_VERSION
 ENV DEBIAN_FRONTEND=noninteractive \
@@ -129,7 +131,7 @@ RUN <<EOF
     rm -rf /var/lib/apt/lists/*
 EOF
 
-COPY --from=wheel-builder /out/wheels /tmp/wheels
+COPY --from=wheel-builder /out/wheels ${GPUSTACK_LIB_DIR}/model-transfer
 
 RUN --mount=type=bind,src=pack/model-transfer/rootfs,target=/rootfs <<EOF
     set -exo pipefail
@@ -139,8 +141,8 @@ RUN --mount=type=bind,src=pack/model-transfer/rootfs,target=/rootfs <<EOF
     python3 -m pip install --no-cache-dir \
         "nixl==${NIXL_VERSION}" \
         "nixl-cu12==${NIXL_VERSION}" \
-        /tmp/wheels/gpustack_model_transfer-*-py3-none-any.whl
-    rm -rf /tmp/wheels
+        ${GPUSTACK_LIB_DIR}/model-transfer/gpustack_model_transfer-*-py3-none-any.whl
+    install -m 0755 /rootfs/usr/bin/copy-dir.sh /usr/bin/copy-dir.sh
     install -m 0755 /rootfs/usr/bin/entrypoint.sh /usr/bin/entrypoint.sh
     python3 -m pip check
     python3 - "${NIXL_VERSION}" "${NIXL_TORCH_VERSION}" <<'PY'
@@ -236,6 +238,7 @@ EOF
 FROM ${ROCM_RUNTIME_IMAGE} AS rocm
 SHELL ["/bin/bash", "-c"]
 
+ARG GPUSTACK_LIB_DIR
 ARG NIXL_ROCM_VERSION
 ARG NIXL_ROCM_TORCH_VERSION
 ENV DEBIAN_FRONTEND=noninteractive \
@@ -255,7 +258,7 @@ RUN <<EOF
     rm -rf /var/lib/apt/lists/*
 EOF
 
-COPY --from=wheel-builder /out/wheels /tmp/wheels
+COPY --from=wheel-builder /out/wheels ${GPUSTACK_LIB_DIR}/model-transfer
 COPY --from=nixl-rocm-builder /out/wheels /tmp/nixl-wheels
 COPY --from=nixl-rocm-builder /opt/nixl/lib /opt/nixl/lib
 COPY --from=nixl-rocm-builder /opt/nixl/share/licenses /opt/nixl/share/licenses
@@ -273,8 +276,9 @@ RUN --mount=type=bind,src=pack/model-transfer/rootfs,target=/rootfs <<EOF
         "torch==${NIXL_ROCM_TORCH_VERSION}"
     python3 -m pip install --no-cache-dir \
         /tmp/nixl-wheels/*.whl \
-        /tmp/wheels/gpustack_model_transfer-*-py3-none-any.whl
-    rm -rf /tmp/wheels /tmp/nixl-wheels
+        ${GPUSTACK_LIB_DIR}/model-transfer/gpustack_model_transfer-*-py3-none-any.whl
+    rm -rf /tmp/nixl-wheels
+    install -m 0755 /rootfs/usr/bin/copy-dir.sh /usr/bin/copy-dir.sh
     install -m 0755 /rootfs/usr/bin/entrypoint.sh /usr/bin/entrypoint.sh
     python3 -m pip check
     python3 - "${NIXL_ROCM_VERSION}" "${NIXL_ROCM_TORCH_VERSION}" <<'PY'
@@ -358,6 +362,7 @@ EOF
 FROM ${CANN_RUNTIME_IMAGE} AS cann
 SHELL ["/bin/bash", "-c"]
 
+ARG GPUSTACK_LIB_DIR
 ENV DEBIAN_FRONTEND=noninteractive \
     PIP_BREAK_SYSTEM_PACKAGES=1 \
     PYTHONUNBUFFERED=1 \
@@ -366,7 +371,7 @@ ENV DEBIAN_FRONTEND=noninteractive \
     LD_LIBRARY_PATH="/usr/local/Ascend/driver/lib64/driver:/usr/local/Ascend/driver/lib64/common:/usr/local/dcmi:/usr/local/Ascend/cann/lib64:/usr/local/Ascend/ascend-toolkit/latest/lib64:/usr/local/Ascend/ascend-toolkit/latest/runtime/lib64" \
     GPUSTACK_MODEL_TRANSFER_BACKEND="hixl"
 
-COPY --from=wheel-builder /out/wheels /tmp/wheels
+COPY --from=wheel-builder /out/wheels ${GPUSTACK_LIB_DIR}/model-transfer
 COPY --from=hixl-host-builder /out/hixl /tmp/hixl-host
 
 RUN --mount=type=bind,src=pack/model-transfer/rootfs,target=/rootfs <<EOF
@@ -381,8 +386,8 @@ RUN --mount=type=bind,src=pack/model-transfer/rootfs,target=/rootfs <<EOF
         pip_flags+=(--break-system-packages)
     fi
     python3 -m pip install "${pip_flags[@]}" \
-        /tmp/wheels/gpustack_model_transfer-*-py3-none-any.whl
-    rm -rf /tmp/wheels
+        ${GPUSTACK_LIB_DIR}/model-transfer/gpustack_model_transfer-*-py3-none-any.whl
+    install -m 0755 /rootfs/usr/bin/copy-dir.sh /usr/bin/copy-dir.sh
     install -m 0755 /rootfs/usr/bin/entrypoint.sh /usr/bin/entrypoint.sh
     test -f /usr/local/Ascend/cann/lib64/libcann_hixl.so
     python3 -c 'import importlib.metadata; print("HIXL Python package:", importlib.metadata.version("hixl"))'

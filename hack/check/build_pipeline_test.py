@@ -258,7 +258,10 @@ printf '%s' "$PATH"
                     assert f"const {go_name} = C.{macro}" in authored.read_text()
 
     def test_wheel_version_without_git(self):
-        for name in ("gpustack-operator", "model-transfer"):
+        assert "model-transfer-wheel" not in (
+            ROOT / "pack/gpustack-operator/Dockerfile"
+        ).read_text()
+        for name in ("model-transfer",):
             dockerfile = (ROOT / "pack" / name / "Dockerfile").read_text()
             code = re.search(
                 r'version=".*?export PIP_BREAK_SYSTEM_PACKAGES=1', dockerfile, re.DOTALL
