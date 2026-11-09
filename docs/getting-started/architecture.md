@@ -103,7 +103,7 @@ containers and SSH access using the same accelerator allocation.
 
 The `Pod` webhook validates an accelerator request before Kueue reserves quota. Admission checks
 confirm that devices can satisfy it, and the scheduler, kubelet and allocator complete the
-allocation. [Admission](../modules/devices/admission.md#five-gates) owns the gate sequence and
+allocation. [Admission](../modules/devices/admission.md#gates) owns the gate sequence and
 its failure behavior.
 
 `InstanceType` status reports the remaining capacity as workloads allocate and release devices. Use

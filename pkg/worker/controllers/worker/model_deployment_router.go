@@ -847,6 +847,10 @@ func alignModelDeploymentRouterDeployment(actual, expected *app.Deployment) (cha
 		actual.Spec.Replicas = expected.Spec.Replicas
 		changed = true
 	}
+	if expected.Spec.Strategy.Type != "" && actual.Spec.Strategy.Type != expected.Spec.Strategy.Type {
+		actual.Spec.Strategy = expected.Spec.Strategy
+		changed = true
+	}
 	actualPod, expectedPod := &actual.Spec.Template, &expected.Spec.Template
 	if !kubemeta.DeepEqual(actualPod.Labels, expectedPod.Labels) {
 		actualPod.Labels = expectedPod.Labels

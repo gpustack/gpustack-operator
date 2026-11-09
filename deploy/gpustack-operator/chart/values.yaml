@@ -546,9 +546,9 @@ modelTransfer:
     name: ""
   # -- Manufacturer-to-image map for the remote delivery source DaemonSets (`amd`,
   # `ascend`, `nvidia`). Values are full image references, for example
-  # {nvidia: "gpustack/model-transfer:v0.0.1-cuda12.9",
-  # amd: "gpustack/model-transfer:v0.0.1-rocm7.2",
-  # ascend: "gpustack/model-transfer:v0.0.1-cann9.2-a5"}, used as supplied — no
+  # {nvidia: "gpustack/model-transfer:v0.1.0-cuda12.9",
+  # amd: "gpustack/model-transfer:v0.1.0-rocm7.2",
+  # ascend: "gpustack/model-transfer:v0.1.0-cann9.2-a5"}, used as supplied — no
   # `global` registry, namespace or tag rewrite applies, and a missing manufacturer
   # ships no source runtime for itself. Each supported key maps to its
   # `global.manufacturers` row: the row's PCI vendor is the DaemonSet's placement
@@ -562,9 +562,9 @@ modelTransfer:
   #   minLength: 1
   # @schema
   images:
-    nvidia: gpustack/model-transfer:v0.0.1-cuda12.9
-    amd: gpustack/model-transfer:v0.0.1-rocm7.2
-    ascend: gpustack/model-transfer:v0.0.1-cann9.2-a5
+    nvidia: gpustack/model-transfer:v0.1.0-cuda12.9
+    amd: gpustack/model-transfer:v0.1.0-rocm7.2
+    ascend: gpustack/model-transfer:v0.1.0-cann9.2-a5
   # -- The source broker's node memory window and session policy. `maxMemoryBytes`
   # is the transfer buffer ceiling: `0` derives one sixteenth of the node's total
   # RAM at node start, floored at `minMemoryBytes`, and a positive value below

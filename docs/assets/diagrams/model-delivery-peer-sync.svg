@@ -1,5 +1,5 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 760" role="img" aria-labelledby="title desc">
-  <title id="title">Node-to-node peer sync</title>
+  <title id="title">Node-To-Node Peer Sync</title>
   <desc id="desc">One node downloads model weights from the upstream model hub, and nodes inside the Kubernetes cluster transfer cached weights to each other over TCP with animated storage bars.</desc>
   <defs>
     <style>
@@ -97,7 +97,7 @@
 
   <!-- Header -->
   <text class="kicker" x="32" y="42">GPUSTACK OPERATOR / MODEL DELIVERY</text>
-  <text class="h1" x="32" y="74">Node-to-node peer sync</text>
+  <text class="h1" x="32" y="74">Node-To-Node Peer Sync</text>
   <text class="sub" x="32" y="98">One node downloads model weights from the upstream hub, then nodes inside the cluster sync over TCP</text>
   <rect x="1132" y="44" width="36" height="36" rx="10" fill="var(--blue)"/>
   <text x="1150" y="68" text-anchor="middle" style="font-size:17px;font-weight:800;fill:#fff">G</text>

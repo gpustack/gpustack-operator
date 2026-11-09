@@ -1,5 +1,5 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1272 560" role="img" aria-labelledby="title desc">
-<title id="title">GPUStack Operator architecture</title>
+<title id="title">GPUStack Operator Architecture</title>
 <desc id="desc">Four stages: discover hardware, schedule capacity, deliver weights and cache, and run workloads.</desc>
 <defs><marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M 0 1 L 8 5 L 0 9 z" fill="var(--border)"/></marker></defs>
 <style>
@@ -21,7 +21,7 @@
   .pulse { fill:var(--teal); }
   @media (prefers-reduced-motion: reduce) { .pulse { display:none; } }
 </style>
-<text class="title" x="26" y="36">GPUStack Operator architecture</text>
+<text class="title" x="26" y="36">GPUStack Operator Architecture</text>
 <text class="subtitle" x="26" y="61">Kubernetes-native hardware discovery, Kueue pool admission, model weight &amp; KV-cache delivery, and disaggregated inference</text>
 <rect class="panel discover" style="fill:var(--discover-bg)" x="24" y="88" width="270" height="448" rx="12"/>
 <circle cx="50" cy="114" r="4" fill="var(--sky)"/>

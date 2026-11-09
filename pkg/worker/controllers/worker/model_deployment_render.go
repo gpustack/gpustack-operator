@@ -554,6 +554,9 @@ func renderModelDeploymentPodTemplate(ctx context.Context, in ModelDeploymentRen
 		vols = append(vols, artifactVols...)
 		mounts = append(mounts, artifactMounts...)
 	}
+	// compileCacheSubPath is the role's compilation identity, hoisted so the ModelExpress
+	// delivery can read the same digest a mount was skipped for.
+	var compileCacheSubPath string
 	if !takeOver {
 		vols = append(vols, in.Connector.Volumes...)
 		mounts = append(mounts, in.Connector.VolumeMounts...)
@@ -570,7 +573,7 @@ func renderModelDeploymentPodTemplate(ctx context.Context, in ModelDeploymentRen
 		// it has nothing in common with is the collision this separation exists to prevent, so the
 		// render refuses instead.
 		if !modelDeploymentCompileCacheMountOverridden(mounts) {
-			compileCacheSubPath, err := BuildModelDeploymentCompileCacheSubPath(
+			compileCacheSubPath, err = BuildModelDeploymentCompileCacheSubPath(
 				ModelDeploymentCompileCacheInput{
 					Deployment:   md,
 					Role:         role,
@@ -587,6 +590,42 @@ func renderModelDeploymentPodTemplate(ctx context.Context, in ModelDeploymentRen
 			vols = append(vols, cacheVolume)
 			mounts = append(mounts, cacheMount)
 		}
+	}
+	// A MODEL EXPRESS ROLE STAGES ITS DELIVERY BESIDE THE CACHE COMPUTATION, because one
+	// input is shared: the compile-config digest that binds a published source identity to
+	// this role's configuration is the same digest that separates its compilation cache
+	// from every other role's. A role whose mount was overridden never computed a path for
+	// the volume, but its identity is computed here all the same, because the digest is
+	// about the configuration and not about where the cache lives.
+	modelExpressStaged := modelDeploymentRoleUsesModelExpress(md.Spec.Engine.Name, role) &&
+		in.Artifact != nil && in.Artifact.Hub == modelDeploymentHubHuggingFace
+	var staging *modelExpressStaging
+	if modelExpressStaged {
+		if compileCacheSubPath == "" {
+			compileCacheSubPath, err = BuildModelDeploymentCompileCacheSubPath(
+				ModelDeploymentCompileCacheInput{
+					Deployment:   md,
+					Role:         role,
+					InstanceType: in.InstanceType,
+					Artifact:     in.Artifact,
+				},
+			)
+			if err != nil {
+				return nil, fmt.Errorf(
+					"role %q cannot name its compile-config identity: %w", role.Name, err,
+				)
+			}
+		}
+		staging = modelExpressStagingFor(ctx, md, role, in.Artifact,
+			modelDeploymentModelExpressCompileConfigDigest(compileCacheSubPath),
+			scheme, enginePort, gradable,
+			// The backend the client dials when a source becomes ready later: the
+			// pool's manufacturer and the engine name it, and a Node-rendered seed
+			// replica reads the same env a remote replica does.
+			modelDeploymentModelTransferCandidateBackend(
+				strings.ToLower(strings.TrimSpace(in.InstanceType.Status.Detail.Manufacturer)),
+				md.Spec.Engine.Name,
+			))
 	}
 	vols, mounts = modelDeploymentSharedMemoryVolumes(role, vols, mounts)
 
@@ -630,7 +669,13 @@ func renderModelDeploymentPodTemplate(ctx context.Context, in ModelDeploymentRen
 		// that installs the staged wheel before the engine starts, the
 		// load format that selects the model-transfer adapter, and the env the
 		// adapter reads.
-		in.Artifact.applyModelTransfer(&mainC)
+		in.Artifact.applyModelTransfer(&mainC, md.Spec.Engine.Name)
+	}
+	// The ModelExpress staging lands after the remote decoration, which defers to the
+	// role's own load format: a role that selected modelexpress keeps that selection, and
+	// what the staging adds is the server address, the policy, and the staging mounts.
+	if staging != nil {
+		staging.applyToContainer(&mainC)
 	}
 	if role.Resources != nil && role.Resources.Interface != nil && role.Resources.Interface.Sign() > 0 {
 		if in.InterfaceResource == "" {
@@ -640,7 +685,11 @@ func renderModelDeploymentPodTemplate(ctx context.Context, in ModelDeploymentRen
 	}
 	if role.Privileged {
 		mainC.SecurityContext = &core.SecurityContext{Privileged: ptr.To(true)}
-	} else if modelDeploymentRoleNeedsCapabilities(md.Spec.Engine.Name, role, command, in.Artifact) {
+	} else if modelDeploymentRoleNeedsCapabilities(md.Spec.Engine.Name, role, command, in.Artifact) ||
+		// The ModelExpress staging registers host memory and raises the
+		// locked-memory limit from the same wheel the transfer runs, so a
+		// role that stages it carries the pair under every delivery.
+		staging != nil {
 		mainC.SecurityContext = &core.SecurityContext{
 			Capabilities: &core.Capabilities{
 				// IPC_LOCK pins the host memory an Engram table or RDMA fabric registers, and
@@ -681,6 +730,12 @@ func renderModelDeploymentPodTemplate(ctx context.Context, in ModelDeploymentRen
 			Volumes:          vols,
 			Containers:       []core.Container{mainC},
 		},
+	}
+	// The ModelExpress staging's pod-level parts land here, where the pod exists: the
+	// transfer client volumes the container's mounts name when the base delivery did not
+	// already add them.
+	if staging != nil {
+		staging.applyToPod(pod)
 	}
 	// The co-location preference is part of the template, so every replica of the role carries the
 	// same terms and the spec hash covers them. It composes with the node-level terms injected at

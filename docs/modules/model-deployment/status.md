@@ -101,7 +101,7 @@ value, and the operator adds only the one that is absent.
 moved (the address is still the operator's own), and the kubelet does not verify the server
 certificate on a probe, so a self-signed pair is graded like any other.
 
-**Three configurations carry no gates at all**: a role that replaces the command through
+**The following configurations carry no gates at all**: a role that replaces the command through
 *`roles[].command`*; a role that sets `--host`, conflicts with its declared port, or demands a client
 certificate with `--ssl-cert-reqs` other than `0` or `1` **alongside a certificate or key**; and a
 role declaring its port as `UDP` or `SCTP`. A role's `--port` alone does not remove its gates.
@@ -233,8 +233,7 @@ against, and the target member `Pod` and `Workload` UIDs its deletions carry as 
 *`lastConsumedRetryToken`* is the retry directive token already consumed, persisted before the
 annotation that carried it is cleared.
 
-**Three kinds of removal start an operation, and they are the ones that take capacity away from a
-role the spec still declares.** A *`replicas`* reduction starts one for the ordinals it no longer
+**The following removals start an operation because they take capacity away from the deployment.** A *`replicas`* reduction starts one for the ordinals it no longer
 declares, a shed of surplus replicas starts one for the whole set at once, and a replica of a role
 the spec has dropped — by a scale-away or a role rename — starts one.
 
@@ -270,8 +269,8 @@ described in [Model Deployment Shutdown](shutdown.md#retirement-protocol).
 
 ### Conditions
 
-Ten conditions describe states that a single phase cannot represent. They are independent: "quota reserved but
-cache not attached" is a real and actionable state. Nine are described below; `WeightsReady` is
+Conditions describe states that a single phase cannot represent. They are independent: "quota reserved but
+cache not attached" is a real and actionable state. Most conditions are described below; `WeightsReady` is
 described with the artifact it reports on, in [Model Artifact](../model-delivery/artifact.md#status).
 
 #### DomainRegistered
@@ -545,7 +544,7 @@ value: `True`, `False` or `Unknown`. A member nobody has reported on is `Unknown
 *`endpoints.serving`* counts a Router's confirmation; the group entry names the members, the
 generation those answers were taken against, and the fact that holds the group.
 
-**The eight states are the operator's own.**
+**These states are the operator's own.**
 
 | State | Meaning |
 |---|---|

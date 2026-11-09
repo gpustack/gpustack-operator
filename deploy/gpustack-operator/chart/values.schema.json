@@ -1468,20 +1468,20 @@
             "minLength": 1,
             "type": "string"
           },
-          "description": "Manufacturer-to-image map for the remote delivery source DaemonSets (`amd`,\n`ascend`, `nvidia`). Values are full image references, for example\n{nvidia: \"gpustack/model-transfer:v0.0.1-cuda12.9\",\namd: \"gpustack/model-transfer:v0.0.1-rocm7.2\",\nascend: \"gpustack/model-transfer:v0.0.1-cann9.2-a5\"}, used as supplied — no\n`global` registry, namespace or tag rewrite applies, and a missing manufacturer\nships no source runtime for itself. Each supported key maps to its\n`global.manufacturers` row: the row's PCI vendor is the DaemonSet's placement\nrequirement (`nodeSelector`) and its runtime fields decide driver injection.\nDefaults cover NVIDIA, AMD and Ascend A5. Disk warm-up retains its separate\nlightweight Python Alpine image.",
+          "description": "Manufacturer-to-image map for the remote delivery source DaemonSets (`amd`,\n`ascend`, `nvidia`). Values are full image references, for example\n{nvidia: \"gpustack/model-transfer:v0.1.0-cuda12.9\",\namd: \"gpustack/model-transfer:v0.1.0-rocm7.2\",\nascend: \"gpustack/model-transfer:v0.1.0-cann9.2-a5\"}, used as supplied — no\n`global` registry, namespace or tag rewrite applies, and a missing manufacturer\nships no source runtime for itself. Each supported key maps to its\n`global.manufacturers` row: the row's PCI vendor is the DaemonSet's placement\nrequirement (`nodeSelector`) and its runtime fields decide driver injection.\nDefaults cover NVIDIA, AMD and Ascend A5. Disk warm-up retains its separate\nlightweight Python Alpine image.",
           "properties": {
             "amd": {
-              "default": "gpustack/model-transfer:v0.0.1-rocm7.2",
+              "default": "gpustack/model-transfer:v0.1.0-rocm7.2",
               "title": "amd",
               "type": "string"
             },
             "ascend": {
-              "default": "gpustack/model-transfer:v0.0.1-cann9.2-a5",
+              "default": "gpustack/model-transfer:v0.1.0-cann9.2-a5",
               "title": "ascend",
               "type": "string"
             },
             "nvidia": {
-              "default": "gpustack/model-transfer:v0.0.1-cuda12.9",
+              "default": "gpustack/model-transfer:v0.1.0-cuda12.9",
               "title": "nvidia",
               "type": "string"
             }

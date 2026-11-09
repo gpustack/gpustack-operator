@@ -78,12 +78,13 @@ func TestInstanceHostAccessSettings(t *testing.T) {
 	}
 }
 
-// TestModelDeploymentImageSettings pins the two images a ModelDeployment's own roles run when the
-// object names none: the router, and the sidecar a decoder runs to accept a remote prefill handoff.
-// Neither runs a model, so neither links an accelerator runtime and one default is safe for every
-// cluster; both stay editable so an air-gapped cluster can redirect them at its own registry and a
-// broken upstream release can be pinned back without rebuilding the operator. Pinning the tags
-// here is what makes a default bump a reviewed change rather than a silent one.
+// TestModelDeploymentImageSettings pins the three images a ModelDeployment's own roles or server
+// run when the object names none: the router, the ModelExpress metadata server, and the sidecar a
+// decoder runs to accept a remote prefill handoff. None runs a model, so none links an accelerator
+// runtime and one default is safe for every cluster; all stay editable so an air-gapped cluster can
+// redirect them at its own registry and a broken upstream release can be pinned back without
+// rebuilding the operator. Pinning the tags here is what makes a default bump a reviewed change
+// rather than a silent one.
 func TestModelDeploymentImageSettings(t *testing.T) {
 	cases := []struct {
 		s           setting.Setting
@@ -96,6 +97,12 @@ func TestModelDeploymentImageSettings(t *testing.T) {
 			"model-deployment-router-image",
 			"GPUSTACK_MODEL_DEPLOYMENT_ROUTER_IMAGE",
 			"gpustack/llm-router:v0.4.0",
+		},
+		{
+			ModelDeploymentModelExpressServerImage,
+			"model-deployment-modelexpress-server-image",
+			"GPUSTACK_MODEL_DEPLOYMENT_MODELEXPRESS_SERVER_IMAGE",
+			"gpustack/mirrored-modelexpress-server:v0.7.0",
 		},
 		{
 			ModelDeploymentRoutingSidecarImage,
@@ -187,18 +194,19 @@ func TestInstancePersistentVolumePlacementSetting(t *testing.T) {
 var trackedImageSettings = []string{
 	"instance-ssh-server-image",
 	"kv-cache-backend-image",
+	"model-deployment-modelexpress-server-image",
 	"model-deployment-router-image",
 	"model-deployment-router-proxy-image",
 	"model-deployment-routing-sidecar-image",
 	"model-prefetch-warmup-image",
 }
 
-// TestSettingsDefaultTracking_DefaultValue pins the built-in list: the six image Settings, in this
+// TestSettingsDefaultTracking_DefaultValue pins the built-in list: the image Settings, in this
 // order. The order is the documentation order an administrator reads, so a change to it is a change
 // to what an upgrade writes back.
 func TestSettingsDefaultTracking_DefaultValue(t *testing.T) {
 	assert.Equal(t, trackedImageSettings, strings.Split(DefaultTracking.DefaultValue(), ","),
-		"the built-in list is the six image Settings, in this order")
+		"the built-in list is the image Settings, in this order")
 }
 
 // TestSettingsDefaultTracking_IsRegistered pins that the registry carries this Setting under the name
@@ -298,7 +306,7 @@ func TestSettingsDefaultTracking_AppliesOnThePassThatBackfillsItsKey(t *testing.
 	for _, name := range trackedImageSettings {
 		envName := "GPUSTACK_" + stringx.UnderscoreUpper(name)
 		if _, declared := os.LookupEnv(envName); declared {
-			t.Skipf("%s is declared in this process environment, so the env rule claims the six "+
+			t.Skipf("%s is declared in this process environment, so the env rule claims the list "+
 				"ahead of the tracking list and this case cannot observe the built-in list", envName)
 		}
 	}

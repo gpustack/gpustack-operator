@@ -102,6 +102,21 @@ spec:
       tolerations:
         {{- toYaml . | nindent 8 }}
       {{- end }}
+      initContainers:
+        # Stage the universal gpustack_model_transfer wheel baked into the vendor
+        # image at /etc/gpustack/lib/model-transfer onto the host, idempotently
+        # (checksum guarded), so remote-delivery engine containers can install it
+        # offline from /var/lib/gpustack/operator/lib/model-transfer.
+        - name: stage-libs
+          image: {{ $image | quote }}
+          imagePullPolicy: {{ $sourcePullPolicy }}
+          command:
+            - copy-dir.sh
+            - /etc/gpustack/lib/model-transfer
+            - /var/lib/gpustack/operator/lib/model-transfer
+          volumeMounts:
+            - name: gpustack-lib-dir
+              mountPath: /var/lib/gpustack/operator/lib/model-transfer
       containers:
         {{- /*
           The broker: the operator binary's model-transfer command, in a process of its own so
@@ -300,6 +315,10 @@ spec:
               readOnly: true
             {{- end }}
       volumes:
+        - name: gpustack-lib-dir
+          hostPath:
+            path: /var/lib/gpustack/operator/lib/model-transfer
+            type: DirectoryOrCreate
         - name: cache
           hostPath:
             path: {{ $cacheRoot }}

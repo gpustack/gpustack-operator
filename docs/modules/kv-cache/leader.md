@@ -104,7 +104,7 @@ Readiness and liveness use different HTTP endpoints.
 `/health` answers 200 in every state, so using it for readiness is the same as having no readiness
 probe. Using a gated route for **liveness** would kill a leader that is slow to activate.
 
-The health document has four fields that matter:
+The health document has these important fields:
 
 ```json
 {"status":"ok","role":"leader","ha_state":"serving","service_ready":true}

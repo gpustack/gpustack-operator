@@ -26,8 +26,8 @@ import (
 const (
 	// modelDeploymentModelTransferWheelVolumeName names the host-staged wheel volume.
 	modelDeploymentModelTransferWheelVolumeName = "gpustack-model-transfer-wheel"
-	// modelDeploymentModelTransferWheelHostPath is the host directory device-manager
-	// stages the universal gpustack_model_transfer wheel into at startup (populated
+	// modelDeploymentModelTransferWheelHostPath is the host directory the model-transfer
+	// DaemonSet stages the universal gpustack_model_transfer wheel into at startup (populated
 	// from /etc/gpustack/lib/model-transfer by the stage-libs initContainer).
 	modelDeploymentModelTransferWheelHostPath = "/var/lib/gpustack/operator/lib/model-transfer"
 	// modelDeploymentModelTransferWheelContainerPath is where that directory is
@@ -322,7 +322,7 @@ const (
 func modelDeploymentModelTransferRoleQualification(
 	md *workercore.ModelDeployment, role *workercore.ModelDeploymentRole, manufacturer string,
 ) modelTransferQualification {
-	if len(role.Command) > 0 || modelDeploymentRoleHasConflictingLoadFormat(role.ExtraArgs) {
+	if len(role.Command) > 0 || modelDeploymentRoleHasConflictingLoadFormat(md.Spec.Engine.Name, role.ExtraArgs) {
 		return modelTransferRoleIneligible
 	}
 	if modelDeploymentModelTransferCandidateBackend(manufacturer, md.Spec.Engine.Name) == "" {
@@ -336,40 +336,41 @@ func modelDeploymentModelTransferRoleQualification(
 }
 
 // modelDeploymentRoleHasConflictingLoadFormat reports whether args set a
-// --load-format other than model-transfer, or repeat the flag.
-func modelDeploymentRoleHasConflictingLoadFormat(args []string) bool {
-	count := 0
-	for i := 0; i < len(args); i++ {
-		arg := args[i]
-		if arg == "--load-format" {
-			count++
-			if i+1 >= len(args) || args[i+1] != modelDeploymentModelTransferLoadFormat {
-				return true
-			}
-			i++
-			continue
-		}
-		if val, ok := strings.CutPrefix(arg, "--load-format="); ok {
-			count++
-			if val != modelDeploymentModelTransferLoadFormat {
-				return true
-			}
-		}
+// --load-format other than the three the operator delivers adapters for
+// (model-transfer, modelexpress and its mx shorthand), or repeat the flag.
+func modelDeploymentRoleHasConflictingLoadFormat(engine string, args []string) bool {
+	values := modelDeploymentLoadFormats(engine, args)
+	if len(values) > 1 {
+		return true
 	}
-
-	return count > 1
-}
-
-// modelDeploymentArgsHaveLoadFormat reports whether args already specify
-// --load-format in either two-token or --load-format=value form.
-func modelDeploymentArgsHaveLoadFormat(args []string) bool {
-	for _, arg := range args {
-		if arg == "--load-format" || strings.HasPrefix(arg, "--load-format=") {
+	for _, value := range values {
+		if !modelDeploymentDeliveredLoadFormat(value) {
 			return true
 		}
 	}
 
 	return false
+}
+
+// modelDeploymentDeliveredLoadFormat says whether a --load-format value names an adapter
+// this operator delivers: the model-transfer adapter, or the ModelExpress one under
+// either of its spellings. Values are matched the way the engine reads them, ignoring
+// case and surrounding blanks.
+func modelDeploymentDeliveredLoadFormat(value string) bool {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case modelDeploymentModelTransferLoadFormat,
+		modelDeploymentModelExpressLoadFormat,
+		modelDeploymentModelExpressLoadFormatAlias:
+		return true
+	default:
+		return false
+	}
+}
+
+// modelDeploymentArgsHaveLoadFormat reports whether args already specify
+// --load-format in any spelling the engine's parser resolves to it.
+func modelDeploymentArgsHaveLoadFormat(engine string, args []string) bool {
+	return len(modelDeploymentLoadFormats(engine, args)) > 0
 }
 
 // modelDeploymentModelTransferReplicaKey names a role and its replica ordinal.
@@ -562,28 +563,29 @@ func (a *ModelDeploymentArtifactRender) modelTransferFallbackRenderFor(
 // bootstrap that installs the staged wheel before the engine starts, the
 // load format that selects the model-transfer adapter, and the env the adapter reads.
 // It is a no-op for every other delivery.
-func (a *ModelDeploymentArtifactRender) applyModelTransfer(c *core.Container) {
+func (a *ModelDeploymentArtifactRender) applyModelTransfer(c *core.Container, engine string) {
 	if a.Delivery != workercore.ModelDeploymentModelDeliveryRemote {
 		return
 	}
+	eng := workercore.ModelDeploymentEngineVLLM
+	if engine != "" {
+		eng = engine
+	}
 	c.Command = modelTransferWrapCommand(c.Command)
-	if !modelDeploymentArgsHaveLoadFormat(c.Args) {
+	// THE ROLE'S OWN SELECTION DEFERS THE OPERATOR'S. A role whose argv already names a
+	// load format — model-transfer of its own, or the ModelExpress one — keeps it: the
+	// engine reads Command and Args as one argv, and a second flag would quietly override
+	// the selection the role wrote.
+	if !modelDeploymentArgsHaveLoadFormat(eng, c.Args) && !modelDeploymentArgsHaveLoadFormat(eng, c.Command) {
 		c.Args = append(c.Args, "--load-format", modelDeploymentModelTransferLoadFormat)
 	}
-	c.Env = append(c.Env, a.modelTransferEnv()...)
-	has := false
-	for i := range c.Env {
-		if c.Env[i].Name == modelDeploymentModelTransferEnvTimeout {
-			has = true
-			break
-		}
+	for _, e := range a.modelTransferEnv() {
+		c.Env = setModelDeploymentEnvVar(c.Env, e)
 	}
-	if !has {
-		c.Env = append(c.Env, core.EnvVar{
-			Name:  modelDeploymentModelTransferEnvTimeout,
-			Value: modelDeploymentModelTransferDefaultTimeoutSeconds,
-		})
-	}
+	c.Env = appendModelDeploymentEnvIfAbsent(c.Env, []core.EnvVar{{
+		Name:  modelDeploymentModelTransferEnvTimeout,
+		Value: modelDeploymentModelTransferDefaultTimeoutSeconds,
+	}})
 }
 
 // modelDeploymentModelTransferBootstrapScript installs the staged wheel before the
@@ -655,24 +657,43 @@ const (
 )
 
 // modelTransferVolumes is what a remote replica mounts: the node plugin's
-// METADATA-ONLY view of the weights — never the complete tree — the
-// ServiceAccount token the source broker reviews, and the host-staged wheel
-// directory the bootstrap installs from. All read-only.
+// METADATA-ONLY view of the weights — never the complete tree — and the client
+// volumes the transfer session needs. All read-only.
 func (a *ModelDeploymentArtifactRender) modelTransferVolumes() ([]core.Volume, []core.VolumeMount) {
-	volumes := []core.Volume{
-		{
-			Name: modelDeploymentModelVolumeName,
-			VolumeSource: core.VolumeSource{CSI: &core.CSIVolumeSource{
-				Driver:   modelstore.DriverName,
-				ReadOnly: ptr.To(true),
-				VolumeAttributes: map[string]string{
-					modelArtifactVolumeAttrArtifact:                a.ArtifactName,
-					modelArtifactVolumeAttrArtifactUID:             a.ArtifactUID,
-					modelArtifactVolumeAttrDigest:                  a.ManifestDigest,
-					modelDeploymentModelTransferVolumeAttrDelivery: modelDeploymentModelTransferDeliveryMetadata,
-				},
-			}},
+	clientVolumes, clientMounts := modelTransferClientVolumes(a.ModelTransferConfigMap)
+	volumes := make([]core.Volume, 0, 1+len(clientVolumes))
+	mounts := make([]core.VolumeMount, 0, 1+len(clientMounts))
+	weights := core.VolumeSource{CSI: &core.CSIVolumeSource{
+		Driver:   modelstore.DriverName,
+		ReadOnly: ptr.To(true),
+		VolumeAttributes: map[string]string{
+			modelArtifactVolumeAttrArtifact:                a.ArtifactName,
+			modelArtifactVolumeAttrArtifactUID:             a.ArtifactUID,
+			modelArtifactVolumeAttrDigest:                  a.ManifestDigest,
+			modelDeploymentModelTransferVolumeAttrDelivery: modelDeploymentModelTransferDeliveryMetadata,
 		},
+	}}
+	if a.ModelTransferConfigMap != "" {
+		// The node plugin reads its discovery from the same view the client mounts,
+		// through the volume attribute rather than the pod's environment.
+		weights.CSI.VolumeAttributes[modelstore.ModelTransferClientConfigAttribute] = a.ModelTransferConfigMap
+	}
+	volumes = append(volumes, core.Volume{Name: modelDeploymentModelVolumeName, VolumeSource: weights})
+	mounts = append(mounts, core.VolumeMount{
+		Name: modelDeploymentModelVolumeName, MountPath: ModelDeploymentModelMountPath, ReadOnly: true,
+	})
+
+	return append(volumes, clientVolumes...), append(mounts, clientMounts...)
+}
+
+// modelTransferClientVolumes is everything a model-transfer replica mounts BESIDES its
+// weights volume: the ServiceAccount token the source broker reviews, the host-staged
+// wheel directory the bootstrap installs from, and the discovery view the later loads
+// read. One definition is the whole point — the ModelExpress staging under a Node or
+// Engine delivery mounts the SAME trio under the SAME names and paths, so the two
+// decorations cannot drift apart. All read-only.
+func modelTransferClientVolumes(configMap string) ([]core.Volume, []core.VolumeMount) {
+	volumes := []core.Volume{
 		{
 			Name: modelDeploymentModelTransferTokenVolumeName,
 			VolumeSource: core.VolumeSource{Projected: &core.ProjectedVolumeSource{
@@ -695,11 +716,6 @@ func (a *ModelDeploymentArtifactRender) modelTransferVolumes() ([]core.Volume, [
 	}
 	mounts := []core.VolumeMount{
 		{
-			Name:      modelDeploymentModelVolumeName,
-			MountPath: ModelDeploymentModelMountPath,
-			ReadOnly:  true,
-		},
-		{
 			Name:      modelDeploymentModelTransferTokenVolumeName,
 			MountPath: modelDeploymentModelTransferTokenPath,
 			ReadOnly:  true,
@@ -710,10 +726,9 @@ func (a *ModelDeploymentArtifactRender) modelTransferVolumes() ([]core.Volume, [
 			ReadOnly:  true,
 		},
 	}
-	if a.ModelTransferConfigMap != "" {
-		volumes[0].CSI.VolumeAttributes[modelstore.ModelTransferClientConfigAttribute] = a.ModelTransferConfigMap
+	if configMap != "" {
 		volumes = append(volumes, core.Volume{Name: "gpustack-model-transfer-config", VolumeSource: core.VolumeSource{
-			ConfigMap: &core.ConfigMapVolumeSource{LocalObjectReference: core.LocalObjectReference{Name: a.ModelTransferConfigMap}},
+			ConfigMap: &core.ConfigMapVolumeSource{LocalObjectReference: core.LocalObjectReference{Name: configMap}},
 		}})
 		mounts = append(mounts, core.VolumeMount{Name: "gpustack-model-transfer-config", MountPath: modelTransferClientMount, ReadOnly: true})
 	}

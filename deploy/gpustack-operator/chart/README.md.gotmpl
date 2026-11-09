@@ -136,8 +136,8 @@ ships nothing until an administrator turns it on:
    writable for the broker, read-only for the worker; the two share the Pod-local
    bootstrap credential and nothing else. The universal
    `gpustack_model_transfer` wheel a remote replica's engine installs is staged
-   on every node by device-manager
-   (`pack/gpustack-operator/Dockerfile` stages it under `/etc/gpustack/lib/model-transfer`;
+   on every node by the source DaemonSet
+   (`pack/model-transfer/Dockerfile` stages it under `/etc/gpustack/lib/model-transfer`;
    the `stage-libs` initContainer copies it to `/var/lib/gpustack/operator/lib/model-transfer`).
 
 The default `modelTransfer.images` references cover NVIDIA, AMD and Ascend A5.
@@ -153,9 +153,9 @@ modelTransfer:
   env:
     GPUSTACK_MODEL_TRANSFER_HIXL_RESIDENT_BUDGET_BYTES: "17179869184"
   images:
-    nvidia: gpustack/model-transfer:v0.0.1-cuda12.9
-    amd: gpustack/model-transfer:v0.0.1-rocm7.2
-    ascend: gpustack/model-transfer:v0.0.1-cann9.2-a5
+    nvidia: gpustack/model-transfer:v0.1.0-cuda12.9
+    amd: gpustack/model-transfer:v0.1.0-rocm7.2
+    ascend: gpustack/model-transfer:v0.1.0-cann9.2-a5
 ```
 
 These explicit references are used as supplied, including registry and

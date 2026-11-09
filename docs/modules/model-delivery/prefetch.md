@@ -118,7 +118,7 @@ unreferenced and past grace.
 
 ## Placement
 
-*`spec.placement`* picks the target set one of three ways, and admission and delivery share one
+*`spec.placement`* picks the target set using the options below, and admission and delivery share one
 expansion, so the two can never disagree about what a prefetch would warm:
 
 ```yaml

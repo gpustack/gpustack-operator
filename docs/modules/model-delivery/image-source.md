@@ -122,7 +122,7 @@ blobs and does not pay the snapshot copy; do not take that as the fleet default.
 
 ## Image GC
 
-Three rules, verified on 1.35.7 / 2.2.6:
+The following rules were verified on 1.35.7 / 2.2.6:
 
 1. **In use, not collected.** While any *running* container mounts the image, kubelet's image GC
    passes over it (the protection needs kubelet ≥ 1.31 and containerd ≥ 2.1). A completed `Pod`

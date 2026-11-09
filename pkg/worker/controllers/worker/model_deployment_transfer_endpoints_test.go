@@ -141,7 +141,7 @@ func TestModelTransferClientDiscoveryAndTrust(t *testing.T) {
 	assert.Equal(t, modelTransferClientMount, mounts[len(mounts)-1].MountPath)
 	assert.True(t, mounts[len(mounts)-1].ReadOnly)
 	container := new(core.Container)
-	weights.Render.applyModelTransfer(container)
+	weights.Render.applyModelTransfer(container, workercore.ModelDeploymentEngineVLLM)
 	identities := map[string]string{}
 	for _, env := range container.Env {
 		if env.ValueFrom != nil && env.ValueFrom.FieldRef != nil {

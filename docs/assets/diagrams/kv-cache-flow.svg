@@ -1,4 +1,4 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 940" role="img" aria-labelledby="title desc"><title id="title">Distributed shared KV cache</title><desc id="desc">Reuse compatible prompt prefixes across serving replicas with dynamic tiered DRAM and NVMe storage bars.</desc><style>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 940" role="img" aria-labelledby="title desc"><title id="title">Distributed Shared KV Cache</title><desc id="desc">Reuse compatible prompt prefixes across serving replicas with dynamic tiered DRAM and NVMe storage bars.</desc><style>
 :root{color-scheme:light dark;--bg:#f8fbff;--card:#fff;--ink:#12233d;--muted:#52677f;--line:#c9d9e7;--blue:#2563eb;--purple:#7c3aed;--teal:#0d9488;--amber:#d97706;--emerald:#059669;--soft:#edf5fc;--grid:#dfeaf3}
 @media(prefers-color-scheme:dark){:root{--bg:#101d30;--card:#1a2c43;--ink:#f1f6ff;--muted:#bdcde0;--line:#526b83;--blue:#80adff;--purple:#c4a4ff;--teal:#58d6c8;--amber:#ffc273;--emerald:#5ce2af;--soft:#213b55;--grid:#29425b}}
 text{font-family:system-ui,-apple-system,BlinkMacSystemFont,sans-serif;fill:var(--ink)}
@@ -20,7 +20,7 @@ text{font-family:system-ui,-apple-system,BlinkMacSystemFont,sans-serif;fill:var(
 @media(prefers-reduced-motion:reduce){.dot,.anim{display:none}}
 </style><defs><pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse"><path d="M40 0H0V40" fill="none" stroke="var(--grid)" stroke-width="1"/></pattern></defs><rect width="1200" height="940" fill="var(--bg)"/><rect width="1200" height="940" fill="url(#grid)" opacity=".65"/>
 <text class="label" x="32" y="32">GPUSTACK OPERATOR  /  CAPABILITY OVERVIEW</text>
-<text class="title" x="32" y="70">Distributed shared KV cache</text>
+<text class="title" x="32" y="70">Distributed Shared KV Cache</text>
 <text class="sub" x="32" y="94">Reuse compatible prompt prefixes across serving replicas</text>
 <rect x="1092" y="32" width="38" height="38" rx="9" fill="var(--blue)"/>
 <text class="headline" x="1111" y="59" text-anchor="middle" fill="white" style="fill:white">G</text>

@@ -99,13 +99,13 @@ A skill link names a procedure; the entry's other fields carry shared facts.
 ### Model Delivery
 
 - ID: `model-delivery`
-- Use for: giving model weights a stable identity; node caching and delivery; prefetch, peer sync, remote weight loading, progress views and cache operations.
-- Aliases: `ModelArtifact`, `NodeModelStore`, `ModelStore`, `ModelPrefetch`, `model cache`, `Hugging Face`
+- Use for: giving model weights a stable identity; node caching and delivery; prefetch, peer sync, remote weight loading, ModelExpress peer delivery, progress views and cache operations.
+- Aliases: `ModelArtifact`, `NodeModelStore`, `ModelStore`, `ModelPrefetch`, `model cache`, `Hugging Face`, `ModelExpress`
 - Guides: [Model Delivery](modules/model-delivery/_index.md); the artifact contract in [Model Artifact](modules/model-delivery/artifact.md); the node cache in [Node Model Store](modules/model-delivery/node-store.md); the runbook in [Model Store Operations](modules/model-delivery/operations.md); remote loading in [Remote Weight Delivery](modules/model-delivery/remote.md); a measured example in [Model Prefetch Walkthrough](walkthroughs/model-delivery/prefetch.md).
-- Specs: [model artifact](../specs/2026-09-25-model-artifact.md) · [node model store](../specs/2026-09-25-node-model-store.md) · [prefetch](../specs/2026-09-27-model-prefetch.md) · [peer sync](../specs/2026-09-27-model-peer-sync.md) · [image source](../specs/2026-09-27-model-image-source.md) · [remote weight loading](../specs/2026-10-28-model-artifact-remote-weight-loading.md) · [settings sync semantics](../specs/2026-10-19-settings-env-sync-and-default-tracking.md)
-- Code: Hub resolution in [pkg/modelartifact](../pkg/modelartifact/) · the per-node plugin and cache in [pkg/modelmanager](../pkg/modelmanager/) · shared cache, placement and Binding eligibility in [pkg/modelstore](../pkg/modelstore/) · published-cache transfer layouts in [pkg/modeltransfer/artifact](../pkg/modeltransfer/artifact/) · prefetch serving observations and artifact consumer indexes in [model_deployment_transfer_source.go](../pkg/worker/controllers/worker/model_deployment_transfer_source.go) · the source broker in [pkg/modeltransfer](../pkg/modeltransfer/) and native workers and engine adapters in [model-transfer/python](../model-transfer/python/) · loader entry points in [pyproject.toml](../model-transfer/python/pyproject.toml) · vendor image targets in [pack/model-transfer](../pack/model-transfer/) · acceptance checks in [model-transfer/python/gpustack_model_transfer/acceptance](../model-transfer/python/gpustack_model_transfer/acceptance/)
+- Specs: [model artifact](../specs/2026-09-25-model-artifact.md) · [node model store](../specs/2026-09-25-node-model-store.md) · [prefetch](../specs/2026-09-27-model-prefetch.md) · [peer sync](../specs/2026-09-27-model-peer-sync.md) · [image source](../specs/2026-09-27-model-image-source.md) · [remote weight loading](../specs/2026-10-28-model-artifact-remote-weight-loading.md) · [ModelExpress peer delivery](../specs/2026-11-09-modelexpress-peer-d2d-and-cache-sharing.md) · [settings sync semantics](../specs/2026-10-19-settings-env-sync-and-default-tracking.md)
+- Code: Hub resolution in [pkg/modelartifact](../pkg/modelartifact/) · the per-node plugin and cache in [pkg/modelmanager](../pkg/modelmanager/) · shared cache, placement and Binding eligibility in [pkg/modelstore](../pkg/modelstore/) · published-cache transfer layouts in [pkg/modeltransfer/artifact](../pkg/modeltransfer/artifact/) · prefetch serving observations and artifact consumer indexes in [model_deployment_transfer_source.go](../pkg/worker/controllers/worker/model_deployment_transfer_source.go) · ModelExpress reconciliation in [model_deployment_modelexpress.go](../pkg/worker/controllers/worker/model_deployment_modelexpress.go) · the metadata server image in [pack/mirrored-modelexpress-server](../pack/mirrored-modelexpress-server/) · the source broker in [pkg/modeltransfer](../pkg/modeltransfer/) and native workers and engine adapters in [model-transfer/python](../model-transfer/python/) · loader entry points in [pyproject.toml](../model-transfer/python/pyproject.toml) · vendor image targets in [pack/model-transfer](../pack/model-transfer/) · acceptance checks in [model-transfer/python/gpustack_model_transfer/acceptance](../model-transfer/python/gpustack_model_transfer/acceptance/)
 - Related: [Model Deployment](#model-deployment) (deployments mount or download artifacts) · [RDMA Networking](#rdma-networking) (client endpoint selection; the remote weight-loading spec owns server deployment and backend overrides) · [KV Cache](#kv-cache) (the weight identity enters KV keys) · [GPU Instances](#gpu-instances) (an Instance can mount weights)
-- Skills: [gpustack-operator-e2e](../.agents/skills/gpustack-operator-e2e/SKILL.md) (node-delivery cases) · [gpustack-operator-benchmark](../.agents/skills/gpustack-operator-benchmark/SKILL.md) (Ascend/HIXL and NVIDIA/NIXL cross-node loading and peer-sync cases; reads the remote guide and owning spec)
+- Skills: [gpustack-operator-e2e](../.agents/skills/gpustack-operator-e2e/SKILL.md) (node-delivery cases) · [gpustack-operator-benchmark](../.agents/skills/gpustack-operator-benchmark/SKILL.md) (Ascend/HIXL and NVIDIA/NIXL cross-node loading, peer-sync and ModelExpress peer-delivery cases; reads the remote guide and owning spec)
 
 ### Model Deployment
 
@@ -166,7 +166,7 @@ A skill link names a procedure; the entry's other fields carry shared facts.
 
 | Page | Description |
 |---|---|
-| [Architecture](getting-started/architecture.md) | See the operator’s four-stage path. |
+| [Architecture](getting-started/architecture.md) | See the operator’s scheduling path. |
 | [Vendor Prerequisites](getting-started/vendor-prerequisites.md) | Review third-party dependencies and prepare each manufacturer’s driver. |
 
 ### Walkthroughs
@@ -196,7 +196,7 @@ A skill link names a procedure; the entry's other fields carry shared facts.
 | [Device Discovery](modules/devices/discovery.md) | Trace hardware detection and allocation. |
 | [Accelerator Requests](modules/devices/requests.md) | Look up resource keys and valid requests. |
 | [Scheduling Chain](modules/devices/scheduling.md) | Follow capacity from labels to queues. |
-| [Admission](modules/devices/admission.md) | Understand the five request checks. |
+| [Admission](modules/devices/admission.md) | Understand the request checks. |
 | [NVIDIA MIG Operations](modules/devices/nvidia-mig.md) | Enable and recover NVIDIA partitions. |
 | [Hygon MIG Operations](modules/devices/hygon-mig.md) | Enable and recover Hygon partitions. |
 | [T-Head MIG Operations](modules/devices/thead-mig.md) | Enable and recover T-Head partitions. |

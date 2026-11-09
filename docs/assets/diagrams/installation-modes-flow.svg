@@ -1,5 +1,5 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 476" role="img" aria-labelledby="title desc">
-<title id="title">Installation modes</title>
+<title id="title">Installation Modes</title>
 <desc id="desc">Chart mode and image mode use a shared worker-applied foundation and exclusive release ownership.</desc>
 <style>
 :root{color-scheme:light dark;--bg:#fff;--card:#fff;--text:#0f172a;--muted:#334155;--blue:#2563eb;--purple:#7c3aed;--teal:#0f766e;--amber:#b45309;--blue-bg:#eff6ff;--purple-bg:#f5f3ff;--teal-bg:#f0fdfa;--amber-bg:#fffbeb;--border:#94a3b8}

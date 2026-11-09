@@ -12,7 +12,7 @@ at runtime, and environment variables, which the worker reads when it starts.
 > non-blank value, the worker writes it to the `Setting` on every start and the stored value loses. A
 > `Setting` named in `settings-default-tracking` is written with the operator's built-in default on every
 > start. Every other `Setting` keeps the value you stored. [Value ownership](#value-ownership) states
-> the four rules in the order they run, and [Finding the owning
+> the rules in the order they run, and [Finding the owning
 > rule](#finding-the-owning-rule) tells you which of them owns yours.
 
 ## Contents
@@ -34,7 +34,7 @@ present in the worker process environment, and the built-in default when the var
 variable present with an empty value yields a blank seed rather than the built-in default, and `{}` and
 `[]` read as blank too.
 
-The alignment applies four rules, in this order:
+The alignment applies the following rules in order:
 
 1. **Backfill.** A key the `Secret` does not carry is added with its seed. A blank seed is a key like any
    other, so a `Setting` with a blank default still appears in `kubectl get settings`.
@@ -53,7 +53,7 @@ you stored. Only backfill writes a blank, and it runs first so that a newly regi
 in the same pass that decides whether the operator owns it.
 
 Deleting the `Secret` is the case with nothing to preserve: the next worker start creates it again from
-every seed, and `settings-default-tracking` returns to the six names it ships with.
+every seed, and `settings-default-tracking` returns to the built-in names it ships with.
 
 ### Every override is logged
 
@@ -81,7 +81,7 @@ kubectl -n gpustack-system logs deploy/gpustack-operator-worker | grep 'setting 
 ### Tracking list
 
 `settings-default-tracking` holds a comma-separated list of `Setting` names. The worker reads it from the
-`Secret`, and the backfill has already written the six names the operator ships into a `Secret` that carries
+`Secret`, and the backfill has already written the built-in names the operator ships into a `Secret` that carries
 no such key, so a cluster that predates the `Setting` is tracked from the first start that backfills the
 key.
 
@@ -92,7 +92,7 @@ tracking its own membership would reconcile that membership against itself.
 
 ### Finding the owning rule
 
-Two checks place any `Setting` you did not write yourself, and they are the two the rules read:
+The following checks place any `Setting` you did not write yourself; the rules read their results:
 
 ```bash
 # 1. Does the worker Deployment render a variable for it, and with what value?
@@ -194,7 +194,8 @@ request that reaches a webhook. Neither window needs a restart.
 | `model-artifact-remote-delivery-policy`<br/>(`GPUSTACK_MODEL_ARTIFACT_REMOTE_DELIVERY_POLICY`, *chart-rendered*) | Effect window: Immediate<br/>Default: `Disabled`<br/>Usage: Cluster policy for [remote weight delivery](../modules/model-delivery/remote.md): `Disabled` keeps remote delivery off; `Require` mounts a metadata-only view and waits for a prepared source without falling back; `Prefer` uses remote delivery when a prepared source is ready and falls back to the base delivery otherwise. `Require` and `Prefer` are refused while the `CSIDriver` `model.csi.gpustack.ai` does not exist. The chart declares `modelTransfer.policy` while `modelTransfer.enabled: true`. |
 | `model-artifact-revalidate-interval`<br/>(`GPUSTACK_MODEL_ARTIFACT_REVALIDATE_INTERVAL`) | Effect window: Next trigger<br/>Default: `24h`<br/>Usage: How often a resolved hub artifact's access is checked again, at least `1m`; a `Secret` change checks it at once. What a refusal does is under [Resolution and revalidation](../modules/model-delivery/artifact.md#resolution-and-revalidation). |
 | `model-deployment-kv-cache-dtype-owned`<br/>(`GPUSTACK_MODEL_DEPLOYMENT_KV_CACHE_DTYPE_OWNED`) | Effect window: Next trigger<br/>Default: `true`<br/>Usage: Hand every `KVCachePoolBinding`'s *`spec.domain.dtype`* to the engines attached through it as `--kv-cache-dtype`, verbatim, and refuse a pool-attached role or injected `Pod` naming that flag itself, and a new Binding declaring `auto` — see [The dtype is handed to the engine](../modules/kv-cache/pool.md#engine-dtype). **It is the escape from a Binding whose spelling the engine rejects**, which makes every new `Pod` fail argument parsing: `false` renders and refuses nothing, as before the flag was owned. Flipping it recreates every pool-attached replica at its next reconcile. The recovery is under [Upgrading to an enforced Binding dtype](../operate/migration/kv-cache-dtype.md). |
-| `model-deployment-router-image`<br/>(`GPUSTACK_MODEL_DEPLOYMENT_ROUTER_IMAGE`) | Effect window: Next trigger<br/>Default: `gpustack/llm-router:v0.4.0`<br/>Usage: Image a managed router runs when the `ModelDeployment` does not name one in *`spec.router.image`*. **It carries every router this operator supports, and which binary runs is decided by the rendered command rather than by the image** — *`spec.router.name`* picks the binary, and this setting only says where the binaries come from. Its default is safe for every cluster at once in a way `kv-cache-backend-image`'s is not: it runs no model, so it links no accelerator runtime and cannot be paired with the wrong one. The default is this project's own build rather than an upstream tag, because the three routers are compiled from three separate sources and one of them carries a patch this repository ships, so no upstream image holds them together. An image named on the object is used verbatim and is never redirected to the cluster mirror, because it is the user's own reference. |
+| `model-deployment-modelexpress-server-image`<br/>(`GPUSTACK_MODEL_DEPLOYMENT_MODELEXPRESS_SERVER_IMAGE`) | Effect window: Next trigger<br/>Default: `gpustack/mirrored-modelexpress-server:v0.7.0`<br/>Usage: Image for the per-deployment [ModelExpress metadata server](../modules/model-delivery/remote.md#nvidia-modelexpress); use this setting for registry redirection or pinning. |
+| `model-deployment-router-image`<br/>(`GPUSTACK_MODEL_DEPLOYMENT_ROUTER_IMAGE`) | Effect window: Next trigger<br/>Default: `gpustack/llm-router:v0.4.0`<br/>Usage: Image a managed router runs when the `ModelDeployment` does not name one in *`spec.router.image`*. **It carries every router this operator supports, and which binary runs is decided by the rendered command rather than by the image** — *`spec.router.name`* picks the binary, and this setting only says where the binaries come from. Its default is safe for every cluster at once in a way `kv-cache-backend-image`'s is not: it runs no model, so it links no accelerator runtime and cannot be paired with the wrong one. The default is this project's own build rather than an upstream tag, because the routers are compiled from separate sources and one of them carries a patch this repository ships, so no upstream image holds them together. An image named on the object is used verbatim and is never redirected to the cluster mirror, because it is the user's own reference. |
 | `model-deployment-router-proxy-image`<br/>(`GPUSTACK_MODEL_DEPLOYMENT_ROUTER_PROXY_IMAGE`) | Effect window: Next trigger<br/>Default: `gpustack/mirrored-envoy:distroless-v1.33.2`<br/>Usage: Proxy fronting a managed router's endpoint picker. It has **no field on the API** to override it: this operator renders the proxy's configuration against one proxy's configuration schema, so swapping the binary would mean swapping that configuration too. The setting exists for registry redirection and for pinning a release back, not for running a different proxy. |
 | `model-deployment-routing-sidecar-image`<br/>(`GPUSTACK_MODEL_DEPLOYMENT_ROUTING_SIDECAR_IMAGE`) | Effect window: Next trigger<br/>Default: `gpustack/mirrored-llm-d-router-disagg-sidecar:v0.11.0`<br/>Usage: Sidecar a decoder runs to accept a remote *prefill* handoff. Same terms as the proxy above: this operator renders its arguments, so the setting is for redirection and pinning rather than for a different implementation. |
 | `model-deployment-tcp-tw-reuse`<br/>(`GPUSTACK_MODEL_DEPLOYMENT_TCP_TW_REUSE`) | Effect window: Next trigger<br/>Default: `false`<br/>Usage: Render `net.ipv4.tcp_tw_reuse=1` on the *prefill* half of every SGLang *prefill*/*decode* pair, which otherwise [runs out of local ports](../modules/model-deployment/engine-versions.md#limitations) under sustained load. **Allow the sysctl on the kubelet of every node that can run such a `Pod` before turning it on**: without that the `Pod` fails with `SysctlForbidden`, and so does every replacement. The steps, which `Pod`s it reaches and how to confirm the refusal are under [SGLang TIME-WAIT reuse](#sglang-time-wait-reuse). |
@@ -204,7 +205,7 @@ request that reaches a webhook. Neither window needs a restart.
 | `model-store-high-watermark`<br/>(`GPUSTACK_MODEL_STORE_HIGH_WATERMARK`) | Effect window: Immediate<br/>Default: `80`<br/>Usage: The node cache filesystem's usage percent above which the plugin removes content no `Pod` mounts; above the low watermark, at most `95`. On a filesystem shared with kubelet the plugin caps it below kubelet's thresholds ([the capacity rule](../modules/model-delivery/operations.md#capacity-rule)). |
 | `model-store-low-watermark`<br/>(`GPUSTACK_MODEL_STORE_LOW_WATERMARK`) | Effect window: Immediate<br/>Default: `70`<br/>Usage: The usage percent a collection removes down to; at least `1`, below the high watermark. |
 | `model-store-peer-sync`<br/>(`GPUSTACK_MODEL_STORE_PEER_SYNC`) | Effect window: Immediate<br/>Default: `true`<br/>Usage: Whether a node's plugin may pull a model's content from the plugins of other nodes that hold it published, instead of the hub. |
-| `settings-default-tracking` | Effect window: Next trigger<br/>Default: `instance-ssh-server-image`, `kv-cache-backend-image`, `model-deployment-router-image`, `model-deployment-router-proxy-image`, `model-deployment-routing-sidecar-image`, `model-prefetch-warmup-image`<br/>Usage: Comma-separated names of the `Setting`s the operator rewrites with its built-in default on every worker start, so that a default shipped in a later release reaches a cluster that never chose a value. A name in the list makes its `Setting` follow rule 3 ([who owns a value](#value-ownership)); removing a name is what keeps an image pin across an operator upgrade ([keeping a pin](#keeping-an-image-pin)). An empty value tracks nothing, and whitespace, duplicates and unregistered names are dropped ([the tracking list](#tracking-list)). No environment variable reads this `Setting`, so nothing on the `Deployment` can take the list over. |
+| `settings-default-tracking` | Effect window: Next trigger<br/>Default: `instance-ssh-server-image`, `kv-cache-backend-image`, `model-deployment-modelexpress-server-image`, `model-deployment-router-image`, `model-deployment-router-proxy-image`, `model-deployment-routing-sidecar-image`, `model-prefetch-warmup-image`<br/>Usage: Comma-separated names of the `Setting`s the operator rewrites with its built-in default on every worker start, so that a default shipped in a later release reaches a cluster that never chose a value. A name in the list makes its `Setting` follow rule 3 ([who owns a value](#value-ownership)); removing a name is what keeps an image pin across an operator upgrade ([keeping a pin](#keeping-an-image-pin)). An empty value tracks nothing, and whitespace, duplicates and unregistered names are dropped ([the tracking list](#tracking-list)). No environment variable reads this `Setting`, so nothing on the `Deployment` can take the list over. |
 | `workload-fit-affinity`<br/>(`GPUSTACK_WORKLOAD_FIT_AFFINITY`) | Effect window: Immediate<br/>Default: `true`<br/>Usage: Whether the `Workload` webhook pins a logical slice, or a shared request of two or more accelerators, on an operator queue to nodes whose [fit labels](../modules/devices/scheduling.md#per-card-fit-labels) show that one accelerator can still host it. When `true`, Kueue's topology-aware scheduling skips a fragmented node; when `false`, `Workload`s pass unchanged while the fit labels are still published, so the pin can be switched off on its own. Read on every webhook call, so a change takes up to 30s to reach it, and it applies to `Workload`s created or updated after that. |
 
 ### Authoring the InstanceType
@@ -385,9 +386,9 @@ modelTransfer:
   policy: Disabled
   # Source images by manufacturer; set an entry to null to omit that DaemonSet.
   images:
-    nvidia: gpustack/model-transfer:v0.0.1-cuda12.9
-    amd: gpustack/model-transfer:v0.0.1-rocm7.2
-    ascend: gpustack/model-transfer:v0.0.1-cann9.2-a5
+    nvidia: gpustack/model-transfer:v0.1.0-cuda12.9
+    amd: gpustack/model-transfer:v0.1.0-rocm7.2
+    ascend: gpustack/model-transfer:v0.1.0-cann9.2-a5
   source:
     maxMemoryBytes: 0  # Derive the node ceiling from total RAM.
     minMemoryBytes: 1073741824  # 1 GiB minimum buffer.
@@ -420,7 +421,7 @@ a crash, a restart and an upgrade each start a worker, so each of them applies t
 
 ### Keeping an image pin
 
-An image pin does not survive an operator upgrade: the six image `Setting`s are tracked by default, so
+An image pin does not survive an operator upgrade: the built-in image `Setting`s are tracked by default, so
 the operator writes each of them with its built-in
 default on **every** worker start, not only on the start where a release changes that default. A pin
 made with `kubectl patch` holds until the next start, and reverts to the default at that one:
@@ -446,10 +447,10 @@ variable set to an empty value is no declaration, and a default that is blank is
 
 ```bash
 # Read the list, drop the one name whose Setting you want to keep your own value for,
-# and write the rest back. This removes model-prefetch-warmup-image and tracks the other five.
+# and write the rest back. This removes model-prefetch-warmup-image and keeps the remaining names.
 kubectl -n gpustack-system get setting settings-default-tracking -o yaml
 kubectl -n gpustack-system patch setting settings-default-tracking --type merge \
-  -p '{"spec":{"value":"instance-ssh-server-image,kv-cache-backend-image,model-deployment-router-image,model-deployment-router-proxy-image,model-deployment-routing-sidecar-image"}}'
+  -p '{"spec":{"value":"instance-ssh-server-image,kv-cache-backend-image,model-deployment-modelexpress-server-image,model-deployment-router-image,model-deployment-router-proxy-image,model-deployment-routing-sidecar-image"}}'
 ```
 
 The second patch removes `model-prefetch-warmup-image` from the default-tracking list:
@@ -462,12 +463,12 @@ The second patch removes `model-prefetch-warmup-image` from the default-tracking
    namespace: gpustack-system
  spec:
 -  value: <current-value>
-+  value: "instance-ssh-server-image,kv-cache-backend-image,model-deployment-router-image,model-deployment-router-proxy-image,model-deployment-routing-sidecar-image"
++  value: "instance-ssh-server-image,kv-cache-backend-image,model-deployment-modelexpress-server-image,model-deployment-router-image,model-deployment-router-proxy-image,model-deployment-routing-sidecar-image"
 ```
 
 A pin that predates this behavior is replaced on the first worker start of the release that introduces
 it, and the log line names both values when it happens. Deleting the `Secret` has the same effect on the
-list, which comes back as its six default names.
+list, which comes back as its built-in default names.
 
 ## Deployment environment variables
 
@@ -580,7 +581,7 @@ an engine that does not and the request is simply ignored: no variable is set ei
 starts with no accelerator and no error, which is the failure this setting exists to remove. `auto` reads
 the engine first and keeps the variable when the answer is no.
 
-Two independent questions decide which value a runtime wants: does the engine resolve CDI
+Independent questions decide which value a runtime wants: does the engine resolve CDI
 requests at all, and can `auto` tell that it does? `auto` reads both answers out of containerd's
 `config.toml`, so a runtime that keeps them anywhere else is invisible to it. That file is where the
 detection looks; it is not something the channel itself needs.

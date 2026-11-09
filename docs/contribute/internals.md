@@ -37,7 +37,7 @@ configs → settings → applications → the `gpustack-cpu-info` `NodeFeatureRu
 In `Start`, the controller manager starts only after the extension API services report ready, so
 controllers can index extension-API resources. Preserve this ordering when adding steps.
 
-The last three steps each retry for up to 5 minutes while their CRD becomes available. A worker
+The `NodeFeatureRule` and `AdmissionCheck` steps each retry for up to 5 minutes while their CRD becomes available. A worker
 starting alongside NFD and Kueue can reach these steps before their CRDs are served. The worker
 applies the resources in both installation modes; see [Installation
 Modes](../operate/installation-modes.md#deployed-and-applied-resources).

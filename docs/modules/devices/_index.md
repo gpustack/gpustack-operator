@@ -49,7 +49,7 @@ For physical partitions, use the [NVIDIA](nvidia-mig.md), [T-Head](thead-mig.md)
 
 ## Troubleshooting
 
-For a rejected request, check the [admission gates](admission.md#five-gates) and request rules.
+For a rejected request, check the [admission gates](admission.md#gates) and request rules.
 For node checks and their results, see [Preflight Checks](preflight.md#reading-the-result).
 For partition recovery, use the runbook for the manufacturer.
 

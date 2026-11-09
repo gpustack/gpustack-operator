@@ -836,7 +836,7 @@ depends on the `InstanceType` the role names.
 | Refused | Message names |
 |---|---|
 | more than 10 roles | the bound as **this operator's own role-count limit**, not an upstream number — every role renders its own replicas, `Service`s and queue references |
-| a role whose members could not be named | the longest name the declared *`replicas`* and *`size`* would produce, its length and why it is not a hostname, and the three ways out — shorten the role, shorten the deployment, or declare fewer replicas |
+| a role whose members could not be named | the longest name the declared *`replicas`* and *`size`* would produce, its length and why it is not a hostname, and the ways out — shorten the role, shorten the deployment, or declare fewer replicas |
 | two roles sharing a `name` | the duplicate — refused by the **schema**, since *`roles`* is a list keyed on `name`, so this one never reaches the webhook |
 | an edit to an identity field — `model`, *`engine.name`*, *`kvCache`*, the role set, or a role's *`kind`* | the field path, and that a different value describes a different **deployment**, which is created rather than edited. See [Deployment identity fields](#deployment-identity-fields) |
 | a resource mode the named `InstanceType` does not offer | the mode and the type — a slice on a type that offers no slicing, a partition profile on a type that cannot partition, or one outside its profile inventory, with the offered list |

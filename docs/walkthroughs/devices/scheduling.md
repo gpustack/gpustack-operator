@@ -817,6 +817,6 @@ If the privileged-mode gate is disabled, the mitigation above changes it as foll
 
 ---
 
-**See also** — [Accelerator Requests](../../modules/devices/requests.md) (the contract behind Step 3) · [NVIDIA MIG Operations](../../modules/devices/nvidia-mig.md#three-mig-configurations) (hardware partitioning) · [Settings](../../reference/settings.md#settings) (the two gates)
+**See also** — [Accelerator Requests](../../modules/devices/requests.md) (the contract behind Step 3) · [NVIDIA MIG Operations](../../modules/devices/nvidia-mig.md#three-mig-configurations) (hardware partitioning) · [Settings](../../reference/settings.md#settings) (the relevant gates)
 
 **Next** → [RDMA Networking Walkthrough](../rdma/network-endpoints.md) — request and verify RDMA endpoints with NUMA alignment.

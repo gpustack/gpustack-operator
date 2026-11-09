@@ -107,7 +107,7 @@ for manufacturer in amd ascend nvidia; do
   fi
 done
 amd_doc="$(awk '/^---$/{on=0} /^  name: gpustack-operator-model-transfer-amd$/{on=1} on' <<<"${default_fleets}")"
-if ! grep -Fq 'image: "gpustack/model-transfer:v0.0.1-rocm7.2"' <<<"${amd_doc}" \
+if ! grep -Fq 'image: "gpustack/model-transfer:v0.1.0-rocm7.2"' <<<"${amd_doc}" \
   || ! grep -q '^            - name: AMD_VISIBLE_DEVICES$' <<<"${amd_doc}"; then
   echo 'amd: the default fleet must use the published ROCm image and AMD device environment' >&2
   exit 1
@@ -120,6 +120,12 @@ daemonsets="$(render "${enabled[@]}" --show-only templates/model-transfer/daemon
 assert_vendor_documents DaemonSet "${daemonsets}"
 if [[ "$(grep -c '^kind: DaemonSet$' <<<"${daemonsets}")" -ne 2 ]]; then
   echo "enabled: expected 2 source DaemonSets" >&2
+  exit 1
+fi
+if [[ "$(grep -c '^        - name: stage-libs$' <<<"${daemonsets}")" -ne 2 ]] \
+  || [[ "$(grep -c '^            - /etc/gpustack/lib/model-transfer$' <<<"${daemonsets}")" -ne 2 ]] \
+  || [[ "$(grep -c '^            path: /var/lib/gpustack/operator/lib/model-transfer$' <<<"${daemonsets}")" -ne 2 ]]; then
+  echo 'enabled: each source DaemonSet must stage the model-transfer wheel onto the host' >&2
   exit 1
 fi
 if [[ "$(grep -c '^        - name: broker$' <<<"${daemonsets}")" -ne 2 ]] \
@@ -356,13 +362,13 @@ if ! grep -Eq '^          image: "reg\.local/mirror/gpustack-operator:' <<<"${ov
   echo 'overrides: the broker image must follow the global image settings' >&2
   exit 1
 fi
-if [[ "$(grep -cF "image: \"${image_nvidia}\"" <<<"${overridden}")" -ne 1 ]] \
-  || [[ "$(grep -cF "image: \"${image_ascend}\"" <<<"${overridden}")" -ne 1 ]]; then
-  echo 'overrides: vendor image references are used as supplied, never rewritten' >&2
+if [[ "$(grep -cF "image: \"${image_nvidia}\"" <<<"${overridden}")" -ne 2 ]] \
+  || [[ "$(grep -cF "image: \"${image_ascend}\"" <<<"${overridden}")" -ne 2 ]]; then
+  echo 'overrides: vendor image references are used as supplied on stage-libs and worker, never rewritten' >&2
   exit 1
 fi
-if [[ "$(grep -c '^          imagePullPolicy: Always$' <<<"${overridden}")" -ne 4 ]]; then
-  echo 'overrides: the global pull policy reaches every container' >&2
+if [[ "$(grep -c '^          imagePullPolicy: Always$' <<<"${overridden}")" -ne 6 ]]; then
+  echo 'overrides: the global pull policy reaches every initContainer and container' >&2
   exit 1
 fi
 
