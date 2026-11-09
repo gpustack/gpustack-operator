@@ -347,14 +347,27 @@ func TestChartCertManagerPathsAgree(t *testing.T) {
 				"Issuer/" + SystemNamespaceName + "/gpustack-operator-worker-selfsigned-issuer",
 				"Certificate/" + SystemNamespaceName + "/kueue-serving-cert",
 				"Issuer/" + SystemNamespaceName + "/kueue-selfsigned-issuer",
+				"Certificate/" + SystemNamespaceName + "/gpustack-operator-model-transfer-amd-cert",
+				"Issuer/" + SystemNamespaceName + "/gpustack-operator-model-transfer-amd-selfsigned-issuer",
+				"Certificate/" + SystemNamespaceName + "/gpustack-operator-model-transfer-ascend-cert",
+				"Issuer/" + SystemNamespaceName + "/gpustack-operator-model-transfer-ascend-selfsigned-issuer",
+				"Certificate/" + SystemNamespaceName + "/gpustack-operator-model-transfer-nvidia-cert",
+				"Issuer/" + SystemNamespaceName + "/gpustack-operator-model-transfer-nvidia-selfsigned-issuer",
 			} {
 				_, ok := objects[key]
 				assert.Equal(t, tc.certManager, ok, "%s is rendered only for cert-manager", key)
 			}
 
-			// The certificate Kueue generates itself, which is the path it takes instead.
-			_, ok := objects["Secret/"+SystemNamespaceName+"/kueue-webhook-server-cert"]
-			assert.Equal(t, !tc.certManager, ok, "Kueue's self-managed certificate")
+			// The certificates Kueue and model-transfer generate themselves when cert-manager is off.
+			for _, key := range []string{
+				"Secret/" + SystemNamespaceName + "/kueue-webhook-server-cert",
+				"Secret/" + SystemNamespaceName + "/gpustack-operator-model-transfer-amd-cert",
+				"Secret/" + SystemNamespaceName + "/gpustack-operator-model-transfer-ascend-cert",
+				"Secret/" + SystemNamespaceName + "/gpustack-operator-model-transfer-nvidia-cert",
+			} {
+				_, ok := objects[key]
+				assert.Equal(t, !tc.certManager, ok, "%s self-managed certificate", key)
+			}
 			assert.Equal(t, !tc.certManager,
 				renderKueueConfig(t, values).InternalCertManagement.Enable,
 				"Kueue manages its own certificate exactly when cert-manager is not used")
@@ -398,8 +411,35 @@ func TestChartDefaultsMatchImageModeOverlay(t *testing.T) {
 	assert.Empty(t, sorted(wantKeys.Difference(gotKeys)), "objects the overlay drops")
 
 	for _, k := range sorted(wantKeys.Intersection(gotKeys)) {
-		assert.Equal(t, atDefaults[k].manifest, fromOverlay[k].manifest, "%s must render alike", k)
+		wantManifest := normalizeRenderedManifest(t, k, atDefaults[k])
+		gotManifest := normalizeRenderedManifest(t, k, fromOverlay[k])
+		assert.Equal(t, wantManifest, gotManifest, "%s must render alike", k)
 	}
+}
+
+var tlsSecretDataFieldRE = regexp.MustCompile(`(?m)^(\s*(?:tls\.crt|tls\.key|ca\.crt):\s*).+$`)
+
+// normalizeRenderedManifest scrubs the per-render random key material genSelfSignedCert emits
+// on model-transfer fallback TLS Secrets during an offline render (where lookup returns nil),
+// after verifying that all three keys are present and non-empty.
+func normalizeRenderedManifest(t *testing.T, key string, obj renderedObject) string {
+	t.Helper()
+
+	if obj.component != "model-transfer" || !strings.HasPrefix(key, "Secret/") {
+		return obj.manifest
+	}
+
+	var secret struct {
+		Type string            `yaml:"type"`
+		Data map[string]string `yaml:"data"`
+	}
+	require.NoError(t, yaml.Unmarshal([]byte(obj.manifest), &secret))
+	assert.Equal(t, "kubernetes.io/tls", secret.Type, "%s type", key)
+	assert.NotEmpty(t, secret.Data["tls.crt"], "%s tls.crt", key)
+	assert.NotEmpty(t, secret.Data["tls.key"], "%s tls.key", key)
+	assert.Equal(t, secret.Data["tls.crt"], secret.Data["ca.crt"], "%s ca.crt matches self-signed leaf", key)
+
+	return tlsSecretDataFieldRE.ReplaceAllString(obj.manifest, "${1}<redacted>")
 }
 
 // TestChartImageTagDefaultsToAppVersion holds the chart's default image tag to exactly one "v",
@@ -537,8 +577,13 @@ func TestChartNodeSelectorRequirementsOutrankTheGlobalOne(t *testing.T) {
 		assert.Equal(t, "linux", selectors[name].nodeSelector["kubernetes.io/os"],
 			"%s keeps its OS requirement", name)
 	}
-	assert.Equal(t, "true", selectors["gpustack-operator-device-manager-nvidia"].nodeSelector[present],
-		"the device manager keeps the PCI-presence requirement")
+	for _, name := range []string{
+		"gpustack-operator-device-manager-nvidia",
+		"gpustack-operator-model-transfer-nvidia",
+	} {
+		assert.Equal(t, "true", selectors[name].nodeSelector[present],
+			"%s keeps the PCI-presence requirement", name)
+	}
 }
 
 // TestChartComponentNodeSelectorReplacesTheGlobalOne pins the other half of the documented

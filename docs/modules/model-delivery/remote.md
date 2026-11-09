@@ -46,11 +46,11 @@ kubectl -n gpustack-system patch setting model-artifact-remote-delivery-policy \
   --type merge -p '{"spec":{"value":"Require"}}'
 ```
 
-The chart declares the variable only while `modelTransfer.enabled: true`, taking the policy from
-`modelTransfer.policy`; see the chart README's remote weight delivery section. With the section
-disabled the worker has no key at all, and its default `Disabled` applies.
-Enabling the policy is an administrator decision. The backend and engine routing allowlists
-do not certify hardware or source safety; the recorded acceptance limits still apply.
+The chart deploys the source runtime by default (`modelTransfer.enabled: true`) while keeping
+`modelTransfer.policy: Disabled`. It declares `GPUSTACK_MODEL_ARTIFACT_REMOTE_DELIVERY_POLICY` on the
+worker only when `modelTransfer.policy` is set to `Require` or `Prefer`; while `Disabled`, the `Setting`
+remains editable at runtime. Enabling the policy is an administrator decision: the routing allowlists do
+not certify hardware or source safety, and the recorded acceptance limits still apply.
 
 The source broker's `ServiceAccount` can review audience-scoped tokens and read live workload,
 artifact, placement and grant state. It pins each Binding's quota authority and updates that
@@ -132,7 +132,8 @@ containers access host devices and InfiniBand; Ascend also mounts the host drive
 The image supplies CANN and HIXL. Preparing a model creates no exclusive device reservation.
 Vendor device use and production qualification remain separate acceptance requirements.
 
-Vendor image references are used verbatim; *`global.imagePullPolicy`* still applies to them.
+*`global.imageRegistry`* (or *`global.hub`*), *`global.imageNamespace`* and *`global.imagePullPolicy`*
+apply to vendor image references as well.
 The source identity can update Binding annotations across namespaces to pin reservation authority.
 Treat source Pods and their vendor images as trusted cluster infrastructure.
 
@@ -837,9 +838,9 @@ Source loss does not change replicas that already loaded. Replicas still loading
 
 ## Rollback
 
-To roll back, set the `Setting` to `Disabled` or disable the chart's `modelTransfer` section. When
-the chart does not declare the policy, the worker reasserts `Disabled` on its next start. New
-replicas use the base delivery mode (`model-artifact-delivery-mode`, Node or Engine).
+To roll back, patch the `model-artifact-remote-delivery-policy` `Setting` to `Disabled` (and reset
+`modelTransfer.policy` to `Disabled` if it was set in chart values). New replicas use the base
+delivery mode (`model-artifact-delivery-mode`, Node or Engine).
 
 Replicas already loaded keep serving their weights until their next roll. A checkpoint that
 `Require` refused to materialize was not written to the target; rollback does not migrate files

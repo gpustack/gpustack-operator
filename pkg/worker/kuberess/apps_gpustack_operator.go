@@ -300,6 +300,9 @@ deviceManager:
 modelManager:
   enabled: {{ index $.ComponentSwitches "modelManager" }}
 
+modelTransfer:
+  enabled: {{ index $.ComponentSwitches "modelTransfer" }}
+
 kueue:
   enabled: {{ index $.ComponentSwitches "kueue" }}
 

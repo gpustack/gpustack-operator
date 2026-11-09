@@ -109,22 +109,24 @@ fetches nothing beyond the chart itself. Each is pinned at the version shown and
 By default, a `ModelDeployment`'s weights reach the engine the way they always
 have — the node's model-manager plugin materializes them on the node's cache
 (`modelManager`, Node delivery) or the engine downloads them itself (Engine
-delivery). **Remote weight delivery is off**, and everything in `modelTransfer`
-ships nothing until an administrator turns it on:
+delivery). The source runtime (`modelTransfer.enabled=true`) is deployed by
+default on accelerator nodes, while **remote weight delivery policy is off**
+(`modelTransfer.policy: Disabled`) until an administrator turns it on:
 
-1. `modelTransfer.enabled=true` ships the source runtime's identity and policy: a
+1. `modelTransfer.enabled=true` (default) ships the source runtime's identity: a
    ServiceAccount whose RBAC is what a source broker runs under (TokenReview to
    admit a session's bearer token, the read side of the prefetch, artifact,
    binding, store, instance-type, pool and settings surface the shared
    eligibility check resolves against, the Binding's initial annotation, and a
    Role scoped to the operator namespace's ConfigMaps where the Binding-wide
-   reservation authority lives — no devices, no cache paths, no tenant secrets),
-   and the chart-owned `GPUSTACK_MODEL_ARTIFACT_REMOTE_DELIVERY_POLICY` on the
-   worker.
+   reservation authority lives — no devices, no cache paths, no tenant secrets).
 2. `modelTransfer.policy` chooses the policy: `Disabled` (default), `Require`, or
-   `Prefer`. Require and Prefer additionally need the model-manager plugin
-   installed, which the worker's Setting admission enforces independently of
-   this value.
+   `Prefer`. While `Disabled`, no `GPUSTACK_MODEL_ARTIFACT_REMOTE_DELIVERY_POLICY`
+   variable is rendered on the worker, so the Setting stays at `Disabled` and
+   remains editable at runtime; setting `Require` or `Prefer` declares the
+   variable on the worker. Require and Prefer additionally need the
+   model-manager plugin installed, which the worker's Setting admission enforces
+   independently of this value.
 3. `modelTransfer.images` turns the source runtime on, one DaemonSet per named
    manufacturer, each Pod carrying two containers: the operator image runs the
    `model-transfer` broker (its engine session listener on :9251 is TLS only,
@@ -158,8 +160,9 @@ modelTransfer:
     ascend: gpustack/model-transfer:v0.1.0-cann9.2-a5
 ```
 
-These explicit references are used as supplied, including registry and
-namespace — no `global` image rewrite applies. Missing entries ship no source
+`global.imageRegistry` (or `global.hub`) and `global.imageNamespace` rewrite the
+registry and namespace segments of these references when set, while keeping each
+entry's own tag intact. Missing entries ship no source
 runtime for that manufacturer. Helm merges map overrides with the defaults; set
 `modelTransfer.images.<manufacturer>: null` to remove a default entry. Each DaemonSet schedules only on nodes NFD
 labelled with the manufacturer's PCI vendor, merged under whatever
@@ -251,12 +254,13 @@ Removing a manufacturer entry or disabling the source runtime lets Helm delete t
 corresponding DaemonSet directly, without waiting for that drain acknowledgement.
 Perform this maintenance when the affected workload is stable.
 
-Rolling back is turning the policy back: set `modelTransfer.policy=Disabled` (or
-`modelTransfer.enabled=false`) and the worker reasserts `Disabled` on its next
-start. Replicas already loaded keep serving; new replicas are admitted on the
-base delivery mode exactly as before remote delivery existed, and no
-destination checkpoint a Require deployment refused to materialize was ever
-written.
+Rolling back is turning the policy back: patch the
+`model-artifact-remote-delivery-policy` `Setting` to `Disabled` (and if
+`modelTransfer.policy` was set to `Require` or `Prefer` in values, reset
+`modelTransfer.policy=Disabled`). Replicas already loaded keep serving; new
+replicas are admitted on the base delivery mode exactly as before remote
+delivery existed, and no destination checkpoint a Require deployment refused to
+materialize was ever written.
 
 {{ template "chart.valuesSection" . }}
 

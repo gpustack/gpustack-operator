@@ -100,6 +100,55 @@ image tag no registry serves.
 {{- end -}}
 
 {{/*
+Resolved image reference "{registry/}{namespace/}repository{:tag|@digest}" for a full image
+string (such as an entry of `modelTransfer.images`). Applies `global.imageNamespace` and
+`global.imageRegistry` (or `global.hub`) with the same rules as `gpustack-operator.image`, while
+preserving the reference's own tag or digest verbatim.
+Pass a dict: (dict "root" $ "ref" $image).
+*/}}
+{{- define "gpustack-operator.imageRef" -}}
+{{- $root := .root -}}
+{{- $ref := .ref | toString -}}
+{{- $repository := $ref -}}
+{{- $suffix := "" -}}
+{{- if contains "@" $ref -}}
+{{- $parts := splitList "@" $ref -}}
+{{- $repository = first $parts -}}
+{{- $suffix = printf "@%s" (join "@" (rest $parts)) -}}
+{{- else -}}
+{{- $slashParts := splitList "/" $ref -}}
+{{- $lastSeg := last $slashParts -}}
+{{- if contains ":" $lastSeg -}}
+{{- $colonParts := splitList ":" $lastSeg -}}
+{{- $tag := last $colonParts -}}
+{{- $nameOnly := join ":" (initial $colonParts) -}}
+{{- if gt (len $slashParts) 1 -}}
+{{- $repository = printf "%s/%s" (join "/" (initial $slashParts)) $nameOnly -}}
+{{- else -}}
+{{- $repository = $nameOnly -}}
+{{- end -}}
+{{- $suffix = printf ":%s" $tag -}}
+{{- end -}}
+{{- end -}}
+{{- $registry := "" -}}
+{{- $segments := splitList "/" $repository -}}
+{{- if and (gt (len $segments) 1) (or (contains "." (first $segments)) (contains ":" (first $segments))) -}}
+{{- $registry = first $segments -}}
+{{- $repository = join "/" (rest $segments) -}}
+{{- end -}}
+{{- with $root.Values.global.imageNamespace -}}
+{{- $repository = printf "%s/%s" . (last (splitList "/" $repository)) -}}
+{{- end -}}
+{{- with (coalesce $root.Values.global.imageRegistry $root.Values.global.hub) -}}
+{{- $registry = trimSuffix "/" . -}}
+{{- end -}}
+{{- with $registry -}}
+{{- $repository = printf "%s/%s" . $repository -}}
+{{- end -}}
+{{- printf "%s%s" $repository $suffix -}}
+{{- end -}}
+
+{{/*
 Resolved image pull policy for a component, overlaying its `image` overrides on
 the chart-level `image` defaults. A non-empty global.imagePullPolicy outranks both,
 so that one value governs this chart's workloads and its subcharts' alike. It has to
