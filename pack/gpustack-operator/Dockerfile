@@ -402,59 +402,6 @@ WORKDIR /out
 FROM xbuild-amd-rocm-${TARGETARCH} AS xbuild-amd-rocm
 
 # =============================================================================
-# Stage: model-transfer-wheel
-# Build the universal gpustack_model_transfer wheel. Pure Python (py3-none-any), one
-# artifact for every arch and accelerator runtime: the vendor imports --
-# torch, torch_npu, nixl, hixl -- stay lazy inside the adapters, so the same
-# wheel installs on x86_64/arm64, CUDA 12/13 and CANN 910B/Atlas A2,
-# 910C/Atlas A3 and 950/Atlas A5 alike.
-#
-# The build context carries no .git, so hatch-vcs cannot derive a version: the
-# operator's Git version is injected, normalized to a PEP 440 release (a bare
-# "dev" from a non-tag build would break packaging.version) and exported under
-# both spellings setuptools_scm reads, with 0.0.0 for anything else. The build
-# runs with --no-build-isolation against the apt-packaged build backends,
-# because Ubuntu 24.04's pip cannot create the isolation venv (PEP 668, no
-# python3-venv ensurepip) and would fetch hatchling from the network instead.
-# Staged under ${GPUSTACK_LIB_DIR}/model-transfer beside the logical-slicing preload
-# libraries below, so device-manager's stage-libs initContainer (copy-dir.sh
-# /etc/gpustack/lib /var/lib/gpustack/operator/lib) places it on the host for
-# the remote delivery's offline install.
-# =============================================================================
-FROM ${UBUNTU_IMAGE} AS model-transfer-wheel
-SHELL ["/bin/bash", "-c"]
-ARG GPUSTACK_GIT_VERSION
-
-RUN apt-get update -y \
-    && apt-get install -y --no-install-recommends \
-        ca-certificates python3 python3-venv python3-pip \
-        python3-hatchling python3-hatch-vcs \
-    && rm -rf /var/lib/apt/lists/*
-
-COPY model-transfer/python /build/model-transfer/python
-
-RUN <<EOF
-    set -exo pipefail
-
-    cd /build/model-transfer/python
-    # Preserve release and development versions without requiring .git in the context.
-    version="$(python3 -c '
-import sys
-from packaging.version import InvalidVersion, Version
-try:
-    print(Version(sys.argv[1]))
-except InvalidVersion:
-    print("0.0.0")
-' "${GPUSTACK_GIT_VERSION}")"
-    export SETUPTOOLS_SCM_PRETEND_VERSION="${version}"
-    export SETUPTOOLS_SCM_PRETEND_VERSION_FOR_GPUSTACK_MODEL_TRANSFER="${version}"
-    export PIP_BREAK_SYSTEM_PACKAGES=1
-    python3 -m pip wheel --no-deps --no-build-isolation --wheel-dir /out/model-transfer .
-    test -n "$(ls /out/model-transfer/gpustack_model_transfer-*-py3-none-any.whl 2>/dev/null)"
-    ls -la /out/model-transfer/
-EOF
-
-# =============================================================================
 # Stage: gpustack (final)
 # Ubuntu 24.04 with only runtime packages — no Go, no build toolchain, no
 # download utilities, no -dev headers. Compiled binaries and CLI tools are
@@ -545,13 +492,6 @@ COPY --from=xbuild-thead-ppu /out ${GPUSTACK_LIB_DIR}/thead
 ## Flat, with no ROCm-version subdirectory: the library links no ROCm object, so one build
 ## serves every runtime the workload brings. Empty on arm64, by design.
 COPY --from=xbuild-amd-rocm /out ${GPUSTACK_LIB_DIR}/amd
-
-## Copy the universal gpustack_model_transfer wheel. Flat, and universal by design: one pure-Python
-## artifact for every arch and accelerator runtime, with the vendor imports lazy inside the
-## adapters. device-manager's stage-libs initContainer (copy-dir.sh /etc/gpustack/lib
-## /var/lib/gpustack/operator/lib) places it on the host, where the remote delivery's
-## pre-start install reads it offline (--no-deps --no-index --find-links).
-COPY --from=model-transfer-wheel /out/model-transfer ${GPUSTACK_LIB_DIR}/model-transfer
 
 ## Copy CLI binaries from the build stages
 

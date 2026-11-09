@@ -21,6 +21,7 @@ on:
         options:
           - model-transfer
           - llm-router
+          - mirrored-modelexpress-server
           - mirrored-mooncake
           - ssh-server
           - thead-ppu-devel
@@ -37,9 +38,10 @@ on:
         type: string
         default: ""
       # Allow passing build arguments at pack time, for an image input that must not be
-      # committed. Required by thead-ppu-devel: "PPU_SDK_URL=<presigned url>".
+      # committed. Required by thead-ppu-devel: "PPU_SDK_URL=<presigned url>". Optional for
+      # mirrored-modelexpress-server: "MODELEXPRESS_COMMIT=<sha>" re-pins the review build.
       args:
-        description: 'Build arguments (space-separated KEY=VALUE), e.g. PPU_SDK_URL=<presigned url>.'
+        description: 'Build arguments (space-separated KEY=VALUE), e.g. PPU_SDK_URL=<presigned url> or MODELEXPRESS_COMMIT=<sha>.'
         required: false
         type: string
         default: ""
@@ -149,9 +151,12 @@ jobs:
           #     parallelism is bounded by memory rather than by cores.
           #   - llm-router: compiles three routers from three separate upstream sources, two of them
           #     Rust release builds, so it is the sum of three from-source builds rather than one.
+          #   - mirrored-modelexpress-server: compiles one Rust release build from source, so it is
+          #     the llm-router shape at one third the width.
           #
           case "${INPUT_REPOSITORY}" in
             llm-router) HEAVY="true" ;;
+            mirrored-modelexpress-server) HEAVY="true" ;;
             mirrored-mooncake) HEAVY="true" ;;
           esac
           CHANGED="$(git show --name-only --format='' HEAD)"
