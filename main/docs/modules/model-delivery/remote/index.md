@@ -325,7 +325,7 @@ Inline manifests are limited to `64 MiB` raw JSON. Paged manifests use roots and
 cap operations at `1,048,576`; byte limits can refuse work sooner. Proven acknowledgements can
 be compacted; unknown receipts remain charged.
 
-See [source budget calculations](https://github.com/gpustack/gpustack-operator/blob/f00a16ff56a954208e67ae83f360519b44000177/specs/2026-10-28-model-artifact-remote-weight-loading.md#source-budget-calculations)
+See [source budget calculations](https://github.com/gpustack/gpustack-operator/blob/6e89f9655775b1dbc51589e6b63106fa96589212/specs/2026-10-28-model-artifact-remote-weight-loading.md#source-budget-calculations)
 for admission arithmetic and available-memory sizing.
 
 ## Replica startup
@@ -515,7 +515,7 @@ With the full model resident, broadcast and all-rank loading took 253.58 s and 2
 These samples used different SDK builds; the difference does not isolate source-window size.
 
 Detailed window sweeps, SDK comparisons, concurrent loading and lifecycle checks are retained in
-the [acceptance record](https://github.com/gpustack/gpustack-operator/blob/f00a16ff56a954208e67ae83f360519b44000177/specs/2026-10-28-model-artifact-remote-weight-loading.md#ascend-memory-and-loading).
+the [acceptance record](https://github.com/gpustack/gpustack-operator/blob/6e89f9655775b1dbc51589e6b63106fa96589212/specs/2026-10-28-model-artifact-remote-weight-loading.md#ascend-memory-and-loading).
 
 ### NVIDIA (NIXL)
 
@@ -535,7 +535,7 @@ Unmarked remote rows use the default. The *reduced source window* rows use 32 Gi
 `Model loading took` seconds.
 
 The source and target used different NIXL, UCX and PyTorch builds. The
-[NVIDIA evidence record](https://github.com/gpustack/gpustack-operator/blob/f00a16ff56a954208e67ae83f360519b44000177/specs/2026-10-28-model-artifact-remote-weight-loading.md#nvidia-loading)
+[NVIDIA evidence record](https://github.com/gpustack/gpustack-operator/blob/6e89f9655775b1dbc51589e6b63106fa96589212/specs/2026-10-28-model-artifact-remote-weight-loading.md#nvidia-loading)
 retains the tested artifacts and measurement limits.
 
 
