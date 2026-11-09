@@ -9,7 +9,9 @@
 #     sha256 checksum differs from the source.
 #
 # The checksum guard keeps the copy idempotent and avoids rewriting a wheel
-# file that an engine container is concurrently reading.
+# file that an engine container is concurrently reading: a differing file is
+# copied to a sibling temp file and renamed into place, so a concurrent reader
+# observes either the old or the new file in full, never a truncated one.
 #
 set -euo pipefail
 
@@ -42,5 +44,7 @@ while IFS= read -r -d "" rel; do
         fi
     fi
     mkdir -p "$(dirname "${d}")"
-    cp -f --preserve=mode,timestamps "${s}" "${d}"
+    tmp="${d}.tmp.$$"
+    cp -f --preserve=mode,timestamps "${s}" "${tmp}"
+    mv -f "${tmp}" "${d}"
 done < <(cd "${src}" && find . -type f -printf "%P\0")
