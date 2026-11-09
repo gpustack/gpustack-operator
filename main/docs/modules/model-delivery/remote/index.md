@@ -46,11 +46,11 @@ kubectl -n gpustack-system patch setting model-artifact-remote-delivery-policy \
   --type merge -p '{"spec":{"value":"Require"}}'
 ```
 
-The chart declares the variable only while `modelTransfer.enabled: true`, taking the policy from
-`modelTransfer.policy`; see the chart README's remote weight delivery section. With the section
-disabled the worker has no key at all, and its default `Disabled` applies.
-Enabling the policy is an administrator decision. The backend and engine routing allowlists
-do not certify hardware or source safety; the recorded acceptance limits still apply.
+The chart deploys the source runtime by default (`modelTransfer.enabled: true`) while keeping
+`modelTransfer.policy: Disabled`. It declares `GPUSTACK_MODEL_ARTIFACT_REMOTE_DELIVERY_POLICY` on the
+worker only when `modelTransfer.policy` is set to `Require` or `Prefer`; while `Disabled`, the `Setting`
+remains editable at runtime. Enabling the policy is an administrator decision: the routing allowlists do
+not certify hardware or source safety, and the recorded acceptance limits still apply.
 
 The source broker's `ServiceAccount` can review audience-scoped tokens and read live workload,
 artifact, placement and grant state. It pins each Binding's quota authority and updates that
@@ -132,7 +132,8 @@ containers access host devices and InfiniBand; Ascend also mounts the host drive
 The image supplies CANN and HIXL. Preparing a model creates no exclusive device reservation.
 Vendor device use and production qualification remain separate acceptance requirements.
 
-Vendor image references are used verbatim; *`global.imagePullPolicy`* still applies to them.
+*`global.imageRegistry`* (or *`global.hub`*), *`global.imageNamespace`* and *`global.imagePullPolicy`*
+apply to vendor image references as well.
 The source identity can update Binding annotations across namespaces to pin reservation authority.
 Treat source Pods and their vendor images as trusted cluster infrastructure.
 
@@ -325,7 +326,7 @@ Inline manifests are limited to `64 MiB` raw JSON. Paged manifests use roots and
 cap operations at `1,048,576`; byte limits can refuse work sooner. Proven acknowledgements can
 be compacted; unknown receipts remain charged.
 
-See [source budget calculations](https://github.com/gpustack/gpustack-operator/blob/8e360b85906e14da2876a57ca352adabce08286d/specs/2026-10-28-model-artifact-remote-weight-loading.md#source-budget-calculations)
+See [source budget calculations](https://github.com/gpustack/gpustack-operator/blob/8201eeab65db2036ef95f1d8acdb65375f029f24/specs/2026-10-28-model-artifact-remote-weight-loading.md#source-budget-calculations)
 for admission arithmetic and available-memory sizing.
 
 ## Replica startup
@@ -521,13 +522,13 @@ Sizing the source window to hold the full model (`80 GiB` on 35B, `256 GiB` on 2
 paging and makes `TP all` fastest again: 46.39 s (`6.09×`) on 35B and 232.93 s (`2.57×`) on 235B
 (versus 253.58 s for full-resident broadcast; the 235B paged and full-resident samples used
 different SDK builds). Detailed sweeps and lifecycle checks are in the
-[acceptance record](https://github.com/gpustack/gpustack-operator/blob/8e360b85906e14da2876a57ca352adabce08286d/specs/2026-10-28-model-artifact-remote-weight-loading.md#ascend-memory-and-loading).
+[acceptance record](https://github.com/gpustack/gpustack-operator/blob/8201eeab65db2036ef95f1d8acdb65375f029f24/specs/2026-10-28-model-artifact-remote-weight-loading.md#ascend-memory-and-loading).
 
 ### NVIDIA (NIXL)
 
 The runs used Nebius H100 80 GB nodes and vLLM 0.30.0 in eager mode with pre-warmed source weights.
 Every case below reached `Ready` and passed inference probes. The
-[NVIDIA evidence record](https://github.com/gpustack/gpustack-operator/blob/8e360b85906e14da2876a57ca352adabce08286d/specs/2026-11-09-modelexpress-peer-d2d-and-cache-sharing.md#benchmarks-and-verification-results)
+[NVIDIA evidence record](https://github.com/gpustack/gpustack-operator/blob/8201eeab65db2036ef95f1d8acdb65375f029f24/specs/2026-11-09-modelexpress-peer-d2d-and-cache-sharing.md#benchmarks-and-verification-results)
 retains the tested artifacts and measurement limits.
 
 The source host reported 1574.84 GiB of total RAM and approximately 1554.06 GiB available. With
@@ -607,7 +608,7 @@ The runs below measured `235B (TP8 + EP)` (`Qwen/Qwen3-235B-A22B-Instruct-2507-F
 H100 80 GB nodes with vLLM 0.30.0 in graph mode, comparing the NIXL `TCP peer sync + local load`
 baseline against the seed replica, a scale-out peer replica, and a replica launched after a
 metadata-server restart (detailed sweeps and verification logs are in the
-[ModelExpress benchmark record](https://github.com/gpustack/gpustack-operator/blob/8e360b85906e14da2876a57ca352adabce08286d/specs/2026-11-09-modelexpress-peer-d2d-and-cache-sharing.md#benchmarks-and-verification-results)):
+[ModelExpress benchmark record](https://github.com/gpustack/gpustack-operator/blob/8201eeab65db2036ef95f1d8acdb65375f029f24/specs/2026-11-09-modelexpress-peer-d2d-and-cache-sharing.md#benchmarks-and-verification-results)):
 
 
 | Model           | Mode                                                                | Source RAM | Target RAM | Target Storage | Weight Transfer Time            |
@@ -837,9 +838,9 @@ Source loss does not change replicas that already loaded. Replicas still loading
 
 ## Rollback
 
-To roll back, set the `Setting` to `Disabled` or disable the chart's `modelTransfer` section. When
-the chart does not declare the policy, the worker reasserts `Disabled` on its next start. New
-replicas use the base delivery mode (`model-artifact-delivery-mode`, Node or Engine).
+To roll back, patch the `model-artifact-remote-delivery-policy` `Setting` to `Disabled` (and reset
+`modelTransfer.policy` to `Disabled` if it was set in chart values). New replicas use the base
+delivery mode (`model-artifact-delivery-mode`, Node or Engine).
 
 Replicas already loaded keep serving their weights until their next roll. A checkpoint that
 `Require` refused to materialize was not written to the target; rollback does not migrate files

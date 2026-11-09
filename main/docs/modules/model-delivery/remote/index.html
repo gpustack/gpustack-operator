@@ -1511,11 +1511,11 @@ so the successful remote path does not store a complete checkpoint on the target
   <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">kubectl -n gpustack-system patch setting model-artifact-remote-delivery-policy <span class="se">\
 </span></span></span><span class="line"><span class="cl"><span class="se"></span>  --type merge -p <span class="s1">&#39;{&#34;spec&#34;:{&#34;value&#34;:&#34;Require&#34;}}&#39;</span></span></span></code></pre></div>
-</div><p>The chart declares the variable only while <code>modelTransfer.enabled: true</code>, taking the policy from
-<code>modelTransfer.policy</code>; see the chart README&rsquo;s remote weight delivery section. With the section
-disabled the worker has no key at all, and its default <code>Disabled</code> applies.
-Enabling the policy is an administrator decision. The backend and engine routing allowlists
-do not certify hardware or source safety; the recorded acceptance limits still apply.</p>
+</div><p>The chart deploys the source runtime by default (<code>modelTransfer.enabled: true</code>) while keeping
+<code>modelTransfer.policy: Disabled</code>. It declares <code>GPUSTACK_MODEL_ARTIFACT_REMOTE_DELIVERY_POLICY</code> on the
+worker only when <code>modelTransfer.policy</code> is set to <code>Require</code> or <code>Prefer</code>; while <code>Disabled</code>, the <code>Setting</code>
+remains editable at runtime. Enabling the policy is an administrator decision: the routing allowlists do
+not certify hardware or source safety, and the recorded acceptance limits still apply.</p>
 <p>The source broker&rsquo;s <code>ServiceAccount</code> can review audience-scoped tokens and read live workload,
 artifact, placement and grant state. It pins each Binding&rsquo;s quota authority and updates that
 authority&rsquo;s ConfigMap in the operator namespace. It can also acknowledge drain on source Pods in
@@ -1584,7 +1584,8 @@ Both NIXL and HIXL page checkpoints larger than the admitted window. The window 
 containers access host devices and InfiniBand; Ascend also mounts the host driver directory.
 The image supplies CANN and HIXL. Preparing a model creates no exclusive device reservation.
 Vendor device use and production qualification remain separate acceptance requirements.</p>
-<p>Vendor image references are used verbatim; <em><code>global.imagePullPolicy</code></em> still applies to them.
+<p><em><code>global.imageRegistry</code></em> (or <em><code>global.hub</code></em>), <em><code>global.imageNamespace</code></em> and <em><code>global.imagePullPolicy</code></em>
+apply to vendor image references as well.
 The source identity can update Binding annotations across namespaces to pin reservation authority.
 Treat source Pods and their vendor images as trusted cluster infrastructure.</p>
 <h3 id="source-memory-examples">Source memory examples</h3>
@@ -1768,7 +1769,7 @@ version <code>1</code> readers and manifests are refused.</p>
 <code>4 MiB</code>, with at most <code>512 MiB</code> of pages and <code>1,048,576</code> tensors overall. Load and source journals
 cap operations at <code>1,048,576</code>; byte limits can refuse work sooner. Proven acknowledgements can
 be compacted; unknown receipts remain charged.</p>
-<p>See <a href="https://github.com/gpustack/gpustack-operator/blob/8e360b85906e14da2876a57ca352adabce08286d/specs/2026-10-28-model-artifact-remote-weight-loading.md#source-budget-calculations">source budget calculations</a>
+<p>See <a href="https://github.com/gpustack/gpustack-operator/blob/8201eeab65db2036ef95f1d8acdb65375f029f24/specs/2026-10-28-model-artifact-remote-weight-loading.md#source-budget-calculations">source budget calculations</a>
 
 for admission arithmetic and available-memory sizing.</p>
 <h2 id="replica-startup">Replica startup</h2>
@@ -2015,12 +2016,12 @@ sequential shards with 3.72–4.00 GiB of target RAM (66.33 s on 35B, 452.83 s o
 paging and makes <code>TP all</code> fastest again: 46.39 s (<code>6.09×</code>) on 35B and 232.93 s (<code>2.57×</code>) on 235B
 (versus 253.58 s for full-resident broadcast; the 235B paged and full-resident samples used
 different SDK builds). Detailed sweeps and lifecycle checks are in the
-<a href="https://github.com/gpustack/gpustack-operator/blob/8e360b85906e14da2876a57ca352adabce08286d/specs/2026-10-28-model-artifact-remote-weight-loading.md#ascend-memory-and-loading">acceptance record</a>
+<a href="https://github.com/gpustack/gpustack-operator/blob/8201eeab65db2036ef95f1d8acdb65375f029f24/specs/2026-10-28-model-artifact-remote-weight-loading.md#ascend-memory-and-loading">acceptance record</a>
 .</p>
 <h3 id="nvidia-nixl">NVIDIA (NIXL)</h3>
 <p>The runs used Nebius H100 80 GB nodes and vLLM 0.30.0 in eager mode with pre-warmed source weights.
 Every case below reached <code>Ready</code> and passed inference probes. The
-<a href="https://github.com/gpustack/gpustack-operator/blob/8e360b85906e14da2876a57ca352adabce08286d/specs/2026-11-09-modelexpress-peer-d2d-and-cache-sharing.md#benchmarks-and-verification-results">NVIDIA evidence record</a>
+<a href="https://github.com/gpustack/gpustack-operator/blob/8201eeab65db2036ef95f1d8acdb65375f029f24/specs/2026-11-09-modelexpress-peer-d2d-and-cache-sharing.md#benchmarks-and-verification-results">NVIDIA evidence record</a>
 
 retains the tested artifacts and measurement limits.</p>
 <p>The source host reported 1574.84 GiB of total RAM and approximately 1554.06 GiB available. With
@@ -2155,7 +2156,7 @@ H2H and H2D. ModelExpress peer D2D over HIXL is outside this design.</p>
 H100 80 GB nodes with vLLM 0.30.0 in graph mode, comparing the NIXL <code>TCP peer sync + local load</code>
 baseline against the seed replica, a scale-out peer replica, and a replica launched after a
 metadata-server restart (detailed sweeps and verification logs are in the
-<a href="https://github.com/gpustack/gpustack-operator/blob/8e360b85906e14da2876a57ca352adabce08286d/specs/2026-11-09-modelexpress-peer-d2d-and-cache-sharing.md#benchmarks-and-verification-results">ModelExpress benchmark record</a>
+<a href="https://github.com/gpustack/gpustack-operator/blob/8201eeab65db2036ef95f1d8acdb65375f029f24/specs/2026-11-09-modelexpress-peer-d2d-and-cache-sharing.md#benchmarks-and-verification-results">ModelExpress benchmark record</a>
 ):</p>
 <table>
   <thead>
@@ -2497,9 +2498,9 @@ alone do not enqueue every artifact consumer. Endpoint discovery still checks so
 <p>Source loss does not change replicas that already loaded. Replicas still loading can wait in
 <code>AwaitingSource</code>. Under <code>Prefer</code>, a replica can fall back if its load fails outright.</p>
 <h2 id="rollback">Rollback</h2>
-<p>To roll back, set the <code>Setting</code> to <code>Disabled</code> or disable the chart&rsquo;s <code>modelTransfer</code> section. When
-the chart does not declare the policy, the worker reasserts <code>Disabled</code> on its next start. New
-replicas use the base delivery mode (<code>model-artifact-delivery-mode</code>, Node or Engine).</p>
+<p>To roll back, patch the <code>model-artifact-remote-delivery-policy</code> <code>Setting</code> to <code>Disabled</code> (and reset
+<code>modelTransfer.policy</code> to <code>Disabled</code> if it was set in chart values). New replicas use the base
+delivery mode (<code>model-artifact-delivery-mode</code>, Node or Engine).</p>
 <p>Replicas already loaded keep serving their weights until their next roll. A checkpoint that
 <code>Require</code> refused to materialize was not written to the target; rollback does not migrate files
 on disk.</p>
@@ -2526,7 +2527,7 @@ on disk.</p>
           
           
           <nav class="page-actions" aria-label="Page source">
-            <a href="https://github.com/gpustack/gpustack-operator/blob/8e360b85906e14da2876a57ca352adabce08286d/docs/modules/model-delivery/remote.md">View page source</a>
+            <a href="https://github.com/gpustack/gpustack-operator/blob/8201eeab65db2036ef95f1d8acdb65375f029f24/docs/modules/model-delivery/remote.md">View page source</a>
             
             <a href="https://github.com/gpustack/gpustack-operator/edit/main/docs/modules/model-delivery/remote.md">Edit this page</a>
             
