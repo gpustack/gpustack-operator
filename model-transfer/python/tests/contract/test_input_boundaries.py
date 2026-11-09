@@ -168,6 +168,9 @@ def test_modelexpress_metadata_checks_do_not_allocate_a_runtime():
         raise RuntimeError("runtime unavailable")
 
     results = modelexpress_suite.run({}, runtime=unavailable)
+    # The plugin-route and chain-composition checks read metadata only;
+    # every runtime-backed check NO-GOs when the runtime factory cannot
+    # build a pair.
     assert [result.status for result in results[:2]] == ["PASS", "PASS"]
     assert all(result.status == "NO-GO" for result in results[2:])
     assert len(calls) == len(results) - 2
@@ -216,8 +219,6 @@ def test_reference_driver_keeps_only_current_model(engine):
     import gc
     import weakref
 
-    from gpustack_model_transfer.adapters.modelexpress.plugin import GpustackLoadPlugin
-
     module_name = "npu_runtime" if engine == "vllm_ascend" else "torch_runtime"
     module = importlib.import_module(
         f"gpustack_model_transfer.adapters.{engine}.{module_name}"
@@ -241,9 +242,6 @@ def test_reference_driver_keeps_only_current_model(engine):
     gc.collect()
     assert reference() is None
     assert driver.last_model is second
-    if engine != "vllm":
-        second.mutated = True
-        assert GpustackLoadPlugin._engine_mutated(SimpleNamespace(_driver=driver))
 
 
 @pytest.mark.parametrize("engine", ["vllm", "sglang", "vllm_ascend"])

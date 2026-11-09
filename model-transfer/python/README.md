@@ -14,20 +14,26 @@ Remote weight delivery separates **checkpoint metadata** from **tensor payload s
    The node-local `model-manager` CSI plugin mounts a digest-verified metadata view containing `manifest.json`, `config.json`, tokenizer assets, and `.safetensors` header-only stubs (without tensor payload bytes). Engine configuration and model initialization run against this verified metadata view before any weight mutation occurs.
 
 2. **Authorized Source Generations & Read-Only Protection**
-   On source nodes prepared by `ModelPrefetch` (`spec.source: {}`), the node-local `model-transfer` broker admits a pinned-memory reservation under the namespace's `ModelStoreBinding.spec.sourceMemory` grant and issues an immutable generation token. The `SourceWorker` verifies the published checkpoint tree, registers read-only source memory, and maintains a generation-scoped health lease. Remote consumers authenticate via `TokenReview`-backed bearer tokens and cannot mutate source memory (`T19` / `T20` read-only protection).
+   On source nodes prepared by `ModelPrefetch` (`spec.source: {}`), the node-local `model-transfer` broker admits a pinned-memory reservation against the node's source capacity or the namespace's optional `ModelStoreBinding.spec.sourceMemory` grant and issues an immutable generation token. The source worker verifies the checkpoint tree, registers source memory, and maintains a generation-scoped health lease. Remote consumers authenticate via `TokenReview`-backed bearer tokens and cannot mutate source memory.
 
 3. **Bounded-Window Streaming & Separate Memory Accounting**
    Target adapters open a `ReaderSession` parameterized by explicit `ReadBudgets`:
-   - `window_bytes` (up to `1 GiB`): size of each reusable transfer-window slot (`WindowSlots`). Tensors larger than `window_bytes` are streamed across multiple window reads.
-   - `max_inflight` (`1` or `2`): maximum concurrent in-flight transfer operations per session.
-   - `owned_output_bytes`: per-tensor owned-output ceiling verified during `build_load_plan` preflight before any model parameter is mutated.
+   - `window_bytes` bounds each reusable transfer window. The configured maximum
+     defaults to 8 GiB, has a 1 GiB floor and a 1 TiB ceiling, and values below
+     the floor resolve to 1 GiB. Tensors larger than one window use multiple
+     reads. The lower-level `ReadBudgets` API accepts 1 byte through 1 TiB.
+   - `max_inflight` bounds concurrent operations and accepts 1 through 256.
+     The client defaults to the available CPU thread count, capped at 256,
+     or 4 if the count cannot be detected.
+   - `owned_output_bytes` bounds a single owned output tensor and is checked
+     before reading or mutating model parameters.
    Reusable transfer windows and assembled model tensors are accounted separately so transfer buffers never inflate long-lived model allocations.
 
 4. **Explicit Transport Negotiation (`nixl` / `hixl`)**
    Each backend reports `requested`, `applied`, and `effective` transport capabilities alongside hardware port counter attribution (InfiniBand HCA counters on CUDA/NIXL; RoCE counters on CANN/HIXL). If hardware transport counters cannot be established, the backend reports `functional_only` rather than silently claiming RDMA over a TCP fallback.
 
 5. **Pre-KV-Profiling Completion & Release Fence**
-   Every transfer operation reaches an explicit terminal state (`COMPLETED`, `FAILED`, `CANCELLED`, or `UNKNOWN`). If an operation ends in `UNKNOWN`, its buffers and registrations remain quarantined until a qualified completion fence applies. On normal completion, `session.close()` and adapter `finalize()` release all transfer windows and memory registrations **before** the inference engine profiles available accelerator memory for KV cache allocation.
+   Transfer operations can complete, fail, or be cancelled; an unobservable outcome is `UNKNOWN`. Buffers and registrations for an `UNKNOWN` operation remain quarantined until a qualified completion fence applies. On normal completion, `session.close()` and adapter `finalize()` release all transfer windows and memory registrations **before** the inference engine profiles available accelerator memory for KV cache allocation.
 
 ---
 
@@ -43,7 +49,7 @@ Remote weight delivery separates **checkpoint metadata** from **tensor payload s
 | `gpustack_model_transfer.adapters.vllm_ascend` | Independent vLLM-Ascend weight-loader adapter preserving NPU format/contiguous finalization. |
 | `gpustack_model_transfer.adapters.sglang` | SGLang single-rank and sharded load-group adapter with rank-ordered deterministic planning. |
 | `gpustack_model_transfer.adapters.modelexpress` | Optional `GpustackLoadStrategy` adapter for ModelExpress-enabled images. |
-| `gpustack_model_transfer.acceptance` | Fail-closed hardware and cluster acceptance runner (`backend`, `model-load`, `managed-startup`, `lifecycle`, `ep-coexistence`). |
+| `gpustack_model_transfer.acceptance` | Fail-closed acceptance runner for local, hardware, and cluster checks. |
 
 ---
 
@@ -74,40 +80,70 @@ from gpustack_model_transfer.core.session import ReaderSession
 
 reader = LocalFileReader(Path("/model/manifest.json"))
 try:
-    with ReaderSession(
+    session = ReaderSession(
         identity=reader.identity(),
         capabilities=local_backend_capabilities(),
         budgets=ReadBudgets(
-            window_bytes=16 * 1024 * 1024,
+            window_bytes=1024 * 1024 * 1024,
             max_inflight=2,
             owned_output_bytes=64 * 1024 * 1024,
         ),
         reader=reader,
-    ) as session:
+    )
+    try:
         for desc in session.descriptors:
             result = session.read_range(desc.name, offset=0, length=desc.byte_size)
             payload = result.payload
+    finally:
+        session.close()
 finally:
     reader.close()
 ```
 
 ### 3. Engine Adapters
 
-When remote weight delivery is enabled for a `ModelDeployment` role, the controller injects the `GPUSTACK_MODEL_TRANSFER_*` environment variables (`GPUSTACK_MODEL_TRANSFER_MANIFEST_PATH`, `GPUSTACK_MODEL_TRANSFER_ARTIFACT_ID`, `GPUSTACK_MODEL_TRANSFER_MANIFEST_DIGEST`, `GPUSTACK_MODEL_TRANSFER_WINDOW_BYTES`, `GPUSTACK_MODEL_TRANSFER_MAX_INFLIGHT`, `GPUSTACK_MODEL_TRANSFER_OWNED_OUTPUT_BYTES`) and configures the engine to load weights through the matching adapter:
+When remote weight delivery is enabled for a `ModelDeployment` role, the
+controller configures the engine with `--load-format model-transfer` and injects
+the artifact identity, model path, token path, backend, and endpoint configuration.
+The client reads these variables: `GPUSTACK_MODEL_TRANSFER_ARTIFACT`,
+`GPUSTACK_MODEL_TRANSFER_ARTIFACT_UID`, `GPUSTACK_MODEL_TRANSFER_MANIFEST_DIGEST`,
+`GPUSTACK_MODEL_TRANSFER_MODEL_PATH`, `GPUSTACK_MODEL_TRANSFER_TOKEN`,
+`GPUSTACK_MODEL_TRANSFER_BACKEND`, and `GPUSTACK_MODEL_TRANSFER_CONFIG`. It also
+reads Pod identity variables injected by the controller. Optional settings include
+`GPUSTACK_MODEL_TRANSFER_WORKERS`, `GPUSTACK_MODEL_TRANSFER_MAX_WINDOW_BYTES`,
+and `GPUSTACK_MODEL_TRANSFER_TIMEOUT`.
 
-- **vLLM (`CUDA` / `NIXL`)**: `gpustack_model_transfer.adapters.vllm.plugin:register` (`--load-format gpustack_model_transfer`)
-- **vLLM-Ascend (`CANN` / `HIXL`)**: `gpustack_model_transfer.adapters.vllm_ascend.plugin:register` (`--load-format gpustack_model_transfer_ascend`)
-- **SGLang (`CUDA` / `NIXL`)**: `gpustack_model_transfer.adapters.sglang.loader:GpustackModelTransferModelLoader`
-- **ModelExpress (`CUDA` / `NIXL`, optional)**: `gpustack_model_transfer.adapters.modelexpress.entry:GpustackLoadStrategy`
+- **vLLM and vLLM-Ascend**: the general plugin entry point is
+  `gpustack_model_transfer.adapters.vllm.plugin:register`.
+- **SGLang**: the native loader is
+  `gpustack_model_transfer.adapters.sglang.native:NativeSGLangModelTransferLoader`.
+- **ModelExpress**: the optional strategy is
+  `gpustack_model_transfer.adapters.modelexpress.entry:GpustackLoadStrategy`.
+
+#### ModelExpress peer delivery and source fallback
+
+For vLLM and SGLang, select `--load-format modelexpress` or `--load-format mx`.
+The integration defaults `MX_LOAD_PLUGIN=gpustack` and `MX_LOAD_PLUGIN_BEFORE=server-cache`;
+when `MX_SERVER_ADDRESS` is configured, it also defaults `MX_ARTIFACT_TRANSFER=1`.
+
+The load chain tries a ready peer over RDMA first, then the GPUStack source,
+then local cache or engine-volume fallbacks. Under `Prefer`, local fallbacks
+remain available. Under `Require`, local fallbacks are removed and loading
+fails if peer and source delivery fail. An unrecognized explicit
+`GPUSTACK_MODEL_TRANSFER_DELIVERY_POLICY` value also fails closed as `Require`.
 
 ### 4. Running the Acceptance Suite
 
-Hardware and cluster qualification suites consume a validated private configuration file (`GPUSTACK_MODEL_TRANSFER_ACCEPTANCE_CONFIG`):
+The runner reads a validated private configuration file passed with `--config`.
+The recognized suite names are `contract`, `backend`, `model-load`,
+`managed-startup`, `lifecycle`, `safety`, and `ep-coexistence`. Supported
+backend and engine combinations vary by suite; unimplemented combinations are
+refused. For example, with a suitable configuration file:
 
 ```sh
 cd model-transfer/python
 uv run python -m gpustack_model_transfer.acceptance \
-  --config "$GPUSTACK_MODEL_TRANSFER_ACCEPTANCE_CONFIG" \
+  --config /path/to/acceptance.json \
   --backend nixl \
   --engine vllm \
   --suite managed-startup

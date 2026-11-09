@@ -1,14 +1,15 @@
 """The ModelExpress model-load suite: the strategy path, fail-closed.
 
 This suite exercises what the native model-load suite does — through the
-ModelExpress entry: the plugin drives the qualified native engine
-adapter, the composition rules hold, the terminal error survives the
-wrapper, the group agrees, and the result is never publishable. Without
-the ModelExpress entry on the host (the package, the plugin hook, torch,
-CUDA) every capability is UNRUN: this optional path fails closed, and a
-missing prerequisite is never a skipped pass. The native and
-ModelExpress entry paths are tested separately; one passing never
-qualifies the other.
+ModelExpress entry: the strategy drives the qualified native engine
+adapter through the topology-checked load entry, the delivery policy
+shapes the chain, the terminal error survives the wrapper, the loading
+group agrees, and a completed load publishes for Peer D2D while a
+failed one never does. Without the ModelExpress entry on the host (the
+package, the plugin hook, torch, CUDA) every capability is UNRUN: this
+optional path fails closed, and a missing prerequisite is never a
+skipped pass. The native and ModelExpress entry paths are tested
+separately; one passing never qualifies the other.
 """
 
 from gpustack_model_transfer.acceptance.report import CheckResult
@@ -21,14 +22,14 @@ CAPABILITIES = (
     "prefer-routed-downgrade",
     "terminal-error-preservation",
     "loading-group-agreement",
-    "non-publication",
+    "publication-after-load",
     "accelerator-claims",
 )
 
 
 # The remote backends that may carry the ModelExpress entry. The
-# reviewed entry is a CUDA qualification target: it provides no CANN
-# accelerator adapter, so hixl is refused rather than audited.
+# entry's P2P plane rides NIXL; HIXL engines keep the model-transfer
+# native transport through the same strategy.
 _QUALIFIED_BACKENDS = {"nixl"}
 
 
@@ -40,8 +41,8 @@ def _backend_reason(backend) -> str:
 
     if backend not in _QUALIFIED_BACKENDS:
         return (
-            f"the ModelExpress entry is a CUDA qualification target "
-            f"({PINNED_COMMIT}); backend {backend!r} is not a qualified pair"
+            f"the ModelExpress entry's P2P plane is NIXL-qualified "
+            f"({PINNED_COMMIT}); backend {backend!r} has no reviewed P2P pair"
         )
     try:
         module = importlib.import_module(
@@ -174,23 +175,6 @@ def _run_check(capability, check, context, pair) -> CheckResult:
                 close()
 
 
-def _clean_composition():
-    from gpustack_model_transfer.adapters.modelexpress.chain import check_composition
-
-    return check_composition({"p2p": False, "rdma": True, "server_cache": False})
-
-
-def _open_plugin(pair, policy):
-    from gpustack_model_transfer.adapters.modelexpress import GpustackLoadPlugin
-
-    loader, driver = pair
-    composition = {
-        "enabled": {"p2p": False, "rdma": True, "server_cache": False},
-        "authorized": {},
-    }
-    return GpustackLoadPlugin(loader, driver, composition, policy)
-
-
 def _check_plugin_route(context, pair):
     import json
 
@@ -206,6 +190,8 @@ def _check_plugin_route(context, pair):
         raise AssertionError("the pinned commit moved out of the metadata")
     if metadata["hook"] != LOAD_PLUGIN_VARIABLE:
         raise AssertionError("the hook moved out of the metadata")
+    if metadata["insert-before"] != "server-cache":
+        raise AssertionError("the insertion point moved out of the metadata")
     return (
         f"external strategy registered through {LOAD_PLUGIN_VARIABLE} at "
         f"{PINNED_COMMIT}"
@@ -213,67 +199,250 @@ def _check_plugin_route(context, pair):
 
 
 def _check_chain_composition(context, pair):
-    from gpustack_model_transfer.adapters.modelexpress import check_composition
-    from gpustack_model_transfer.adapters.modelexpress.chain import CompositionError
+    from gpustack_model_transfer.adapters.modelexpress import (
+        build_chain,
+        check_composition,
+    )
 
-    chain = _clean_composition()
-    if chain.index("gpustack") > chain.index("rdma"):
-        raise AssertionError("the plugin is not inserted before rdma")
-    # Every bypassing composition is refused, each with its cause named.
-    for enabled in (
-        {"p2p": True, "rdma": True, "server_cache": False},
-        {"p2p": False, "rdma": True, "server_cache": True},
-    ):
-        try:
-            check_composition(enabled)
-        except CompositionError:
-            continue
-        raise AssertionError(f"the composition {enabled} was accepted")
-    return "the composition refuses reachable earlier and later bypasses"
+    # Peer D2D first, the GPUStack delivery second, the local strategies
+    # behind them — under either spelling of the cache strategy's name.
+    chain = check_composition(build_chain({"rdma": True, "server_cache": True}))
+    if chain.index("rdma") > chain.index("gpustack"):
+        raise AssertionError("Peer D2D does not run first")
+    if chain.index("server-cache") < chain.index("gpustack"):
+        raise AssertionError("a local fallback runs ahead of the delivery")
+    chain = check_composition(build_chain({"rdma": True, "server-cache": True}))
+    if chain.index("server-cache") < chain.index("gpustack"):
+        raise AssertionError("a local fallback runs ahead of the delivery")
+    return "Peer D2D, then the delivery, then the local fallbacks"
+
+
+class _StrategyPair:
+    """One check's strategy fixtures: the driver owns the model.
+
+    The adapter double stands in for the pinned upstream engine adapter,
+    the native loader stub records which entries ran, and the delivery
+    policy is set for the duration of the check.
+    """
+
+    def __init__(self, pair, policy):
+        import os
+        from types import SimpleNamespace
+
+        _, driver = pair
+        self.driver = driver
+        self.events = []
+        self.model_calls = []
+        self.adapter = SimpleNamespace(
+            engine_name="vllm",
+            vllm_config=SimpleNamespace(),
+            load_config=SimpleNamespace(),
+            model_config=SimpleNamespace(model="tiny"),
+            finalize_ran=False,
+        )
+        self.adapter.after_native_load = self._after_native_load
+        # A fixture model the consume hook can drive without a torch
+        # runtime: the record is what the checks read.
+        self.model = SimpleNamespace(
+            load_weights=lambda weights_iter: self.model_calls.append(
+                "model.load_weights"
+            )
+        )
+        self._native = self._stub_native_module()
+        self._saved_env = dict(os.environ)
+        os.environ["GPUSTACK_MODEL_TRANSFER_DELIVERY_POLICY"] = policy
+
+    def _after_native_load(self, result):
+        self.events.append("after_native_load")
+        self.adapter.finalize_ran = True
+        # The driver's finalization bookkeeping lives on the model, the
+        # same record the real runtime driver reads.
+        model = result.model
+        model.finalization_count = getattr(model, "finalization_count", 0) + 1
+        return result
+
+    def _stub_native_module(self):
+        import sys
+        import types
+
+        events = self.events
+
+        class StubVllmLoader:
+            probe_error = None
+            preload_error = None
+            write_error = None
+
+            def __init__(self, load_config):
+                self.load_config = load_config
+
+            def download_model(self, model_config):
+                events.append("probe")
+                if StubVllmLoader.probe_error is not None:
+                    raise StubVllmLoader.probe_error
+
+            def load_initialized_model(
+                self, model, vllm_config, model_config, *, consume_weights=None
+            ):
+                events.append("load_initialized_model")
+                if consume_weights is None:
+                    raise AssertionError("the topology-checked entry ran bare")
+                if StubVllmLoader.preload_error is not None:
+                    # Mirror the real native loader: a pre-write failure
+                    # poisons the process itself, so the strategy's
+                    # restore path is what must clear it.
+                    module._process_unusable = True
+                    raise StubVllmLoader.preload_error
+                consume_weights(iter(()))
+                if StubVllmLoader.write_error is not None:
+                    raise StubVllmLoader.write_error
+
+            def load_weights(self, model, model_config):
+                events.append("load_weights")
+
+        module = types.ModuleType("gpustack_model_transfer.adapters.vllm.native")
+        module.NativeModelTransferLoader = StubVllmLoader
+        module._process_unusable = False
+        self._saved_module = sys.modules.get(module.__name__)
+        sys.modules[module.__name__] = module
+        self._stub_module = module
+        self._stub = StubVllmLoader
+        return module
+
+    def close(self):
+        import os
+        import sys
+
+        os.environ.clear()
+        os.environ.update(self._saved_env)
+        # Restore the prior sys.modules entry instead of popping: removing
+        # an already-imported real module would re-execute its body on the
+        # next import and discard its module-level state mid-suite.
+        if self._saved_module is not None:
+            sys.modules[self._stub_module.__name__] = self._saved_module
+        else:
+            sys.modules.pop(self._stub_module.__name__, None)
+
+
+def _open_strategy(pair, policy):
+    """The strategy, its context, and its fixtures for one check."""
+    from types import SimpleNamespace
+
+    from gpustack_model_transfer.adapters.modelexpress.plugin import (
+        GpustackLoadStrategy,
+    )
+
+    fixtures = _StrategyPair(pair, policy)
+    try:
+        strategy = GpustackLoadStrategy()
+        ctx = SimpleNamespace(
+            adapter=fixtures.adapter,
+            result=SimpleNamespace(model=fixtures.model),
+            p2p_enabled=True,
+            nixl_manager=None,
+        )
+        return strategy, ctx, fixtures
+    except Exception:
+        # The policy variable the fixture wrote must not outlive a failed
+        # construction: a later check would silently run under the leak.
+        fixtures.close()
+        raise
 
 
 def _check_native_adapter_exactly_once(context, pair):
-    plugin = _open_plugin(pair, "require")
-    result = plugin.load(None)
-    if result.model is None:
-        raise AssertionError("no model was loaded")
-    if not result.finalize_ran:
-        raise AssertionError("the engine adapter did not finalize exactly once")
-    driver = pair[1]
-    if driver.model_finalization_count(result.model) != 1:
-        raise AssertionError("finalization did not run exactly once")
-    plugin.finalize(result)
+    from gpustack_model_transfer.core.errors import DeniedContentError
+
+    strategy, ctx, fixtures = _open_strategy(pair, "require")
+    try:
+        fixtures._stub.probe_error = None
+        result = strategy.load(ctx.result, ctx)
+        if result.model is None:
+            raise AssertionError("no model was loaded")
+        if not fixtures.adapter.finalize_ran:
+            raise AssertionError("the engine adapter did not finalize exactly once")
+        driver = fixtures.driver
+        if driver.model_finalization_count(result.model) != 1:
+            raise AssertionError("finalization did not run exactly once")
+        if fixtures.events != ["probe", "load_initialized_model", "after_native_load"]:
+            raise AssertionError(f"the load path ran {fixtures.events}")
+        # A write-time failure reports mutation exactly once. The raised
+        # class is the upstream StrategyFailed when modelexpress is
+        # importable and the local fallback otherwise, so the check
+        # classifies by the mutated flag rather than the class identity.
+        fixtures._stub.write_error = DeniedContentError("engine refused mid-load")
+        fixtures.adapter.finalize_ran = False
+        raised = False
+        try:
+            strategy.load(ctx.result, ctx)
+        except Exception as exc:
+            if getattr(exc, "mutated", None) is None:
+                raise AssertionError(
+                    f"the load terminated with {type(exc).__name__!r}, "
+                    "not the chain's expected miss"
+                ) from exc
+            raised = True
+            if not exc.mutated:
+                raise AssertionError(
+                    "a write-time failure reported no mutation"
+                ) from exc
+        if not raised:
+            raise AssertionError("a write-time failure did not terminate the load")
+    finally:
+        fixtures.close()
     return "tensor application and postprocessing ran through the native adapter once"
 
 
 def _check_require_terminal(context, pair):
-    from gpustack_model_transfer.adapters.modelexpress import StrategyRecoveryError
-    from gpustack_model_transfer.core.errors import DeniedContentError
+    from gpustack_model_transfer.core.errors import SourceUnavailableError
 
-    loader, driver = pair
-    driver.fail_store_after = 0
-    driver.store_error = DeniedContentError("engine refused mid-load")
-    plugin = _open_plugin((loader, driver), "require")
+    strategy, ctx, fixtures = _open_strategy(pair, "require")
     try:
-        plugin.load(None)
-    except StrategyRecoveryError as exc:
-        return f"Require remote terminated the chain: {exc}"
-    raise AssertionError("Require remote fell through to another strategy")
+        fixtures._stub.probe_error = SourceUnavailableError("no ready source")
+        try:
+            strategy.load(ctx.result, ctx)
+        except Exception as exc:
+            if getattr(exc, "mutated", None) is None:
+                raise AssertionError(
+                    f"the load terminated with {type(exc).__name__!r}, "
+                    "not the chain's expected miss"
+                ) from exc
+            if exc.mutated:
+                raise AssertionError("a probe miss reported mutation") from exc
+            return "Require's terminal miss carries no mutation"
+        raise AssertionError("Require fell through without the expected miss")
+    finally:
+        fixtures.close()
 
 
 def _check_prefer_downgrade(context, pair):
-    from gpustack_model_transfer.core.errors import DeniedContentError
+    from gpustack_model_transfer.core.errors import SourceUnavailableError
 
-    loader, driver = pair
-    driver.fail_store_after = 0
-    driver.store_error = DeniedContentError("engine refused pre-mutation")
-    plugin = _open_plugin((loader, driver), "prefer")
-    result = plugin.load(None)
-    if result.routed_fallback != "verified-node-delivery":
-        raise AssertionError(f"the downgrade routed through {result.routed_fallback!r}")
-    return (
-        "the permitted downgrade routed through the declared verified-delivery policy"
-    )
+    strategy, ctx, fixtures = _open_strategy(pair, "prefer")
+    try:
+        # The miss happens after the probe but before the first tensor
+        # write, so the process-usability restore path genuinely runs and
+        # the poison assertion below is exercisable.
+        fixtures._stub.probe_error = None
+        fixtures._stub.preload_error = SourceUnavailableError(
+            "the source vanished after the probe"
+        )
+        try:
+            strategy.load(ctx.result, ctx)
+        except Exception as exc:
+            if getattr(exc, "mutated", None) is None:
+                raise AssertionError(
+                    f"the load terminated with {type(exc).__name__!r}, "
+                    "not the chain's expected miss"
+                ) from exc
+            if exc.mutated:
+                raise AssertionError("a pre-mutation miss reported mutation") from exc
+            if fixtures._native._process_unusable:
+                raise AssertionError(
+                    "a pre-mutation miss poisoned the process"
+                ) from exc
+            return "the permitted downgrade is a clean miss the chain routes"
+        raise AssertionError("Prefer did not report the expected miss")
+    finally:
+        fixtures.close()
 
 
 def _check_terminal_preservation(context, pair):
@@ -317,40 +486,57 @@ def _check_group_agreement(context, pair):
     try:
         coordinator.agree()
     except GroupDisagreementError:
-        return "the group agrees on backend and strategy, and refuses disagreement"
+        return (
+            "the group agrees on backend and strategy, and refuses "
+            "disagreement; TP-group coordination belongs to the native "
+            "load path"
+        )
     raise AssertionError("a disagreeing group was allowed to proceed")
 
 
-def _check_non_publication(context, pair):
+def _check_publication_after_load(context, pair):
     from gpustack_model_transfer.adapters.modelexpress import (
+        PluginResult,
         PublicationRefusedError,
         WriterRefitFence,
+        publication_allowed,
         refuse_publication,
     )
 
-    plugin = _open_plugin(pair, "require")
-    result = plugin.load(None)
-    fence = WriterRefitFence()
+    strategy, ctx, fixtures = _open_strategy(pair, "prefer")
     try:
-        refuse_publication(result, fence)
-    except PublicationRefusedError:
-        return "the loaded model is never an external Stage-2 source"
-    raise AssertionError("a live loaded model was publishable")
+        result = strategy.load(ctx.result, ctx)
+        # Peer publication authorized, no writer active: the fence's
+        # publishable state, so the completed load is what the gate reads.
+        fence = WriterRefitFence(allow_peer_publication=True)
+        if not result.publishable:
+            raise AssertionError("a completed strategy load is not publishable")
+        if not publication_allowed(
+            PluginResult(model=result.model, publishable=result.publishable), fence
+        ):
+            raise AssertionError("a completed load was refused publication")
+        try:
+            refuse_publication(PluginResult(model=result.model), fence)
+        except PublicationRefusedError:
+            return "a completed load publishes; an unloaded result never does"
+        raise AssertionError("an unloaded result was publishable")
+    finally:
+        fixtures.close()
 
 
 def _check_accelerator_claims(context, pair):
     from gpustack_model_transfer.adapters.modelexpress import (
-        accelerator_claimed,
-        refuse_cann,
+        QUALIFIED_ACCELERATORS,
+        image_integration_metadata,
     )
 
-    if not accelerator_claimed("cuda") or accelerator_claimed("cann"):
-        raise AssertionError("the accelerator claim set is wrong")
-    try:
-        refuse_cann()
-    except ValueError as exc:
-        return f"CANN claims are refused: {exc}"
-    raise AssertionError("a CANN claim was accepted")
+    metadata = image_integration_metadata()
+    if metadata["accelerators"] != ",".join(QUALIFIED_ACCELERATORS):
+        raise AssertionError("the qualification record moved out of the metadata")
+    return (
+        "the entry records its qualification targets; the native transport "
+        "follows the engine's backend"
+    )
 
 
 _CHECKS = (
@@ -361,7 +547,7 @@ _CHECKS = (
     ("prefer-routed-downgrade", _check_prefer_downgrade),
     ("terminal-error-preservation", _check_terminal_preservation),
     ("loading-group-agreement", _check_group_agreement),
-    ("non-publication", _check_non_publication),
+    ("publication-after-load", _check_publication_after_load),
     ("accelerator-claims", _check_accelerator_claims),
 )
 

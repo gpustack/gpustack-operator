@@ -9,6 +9,7 @@ from gpustack_model_transfer.adapters.modelexpress import (
     StrategyRecoveryError,
     WriterRefitFence,
     decide_fallback,
+    delivery_policy,
     route_downgrade,
 )
 
@@ -85,6 +86,65 @@ class TestWriterRefitFence(unittest.TestCase):
         self.assertFalse(fence.readable())
         fence.finish("rank-0")
         self.assertTrue(fence.readable())
+
+
+_POLICY_LOGGER = "gpustack_model_transfer.adapters.modelexpress.policy"
+
+
+class TestDeliveryPolicyReading(unittest.TestCase):
+    """The environment reader: Require closes, every other value opens."""
+
+    def setUp(self):
+        import os
+
+        self._saved = dict(os.environ)
+        os.environ.pop("GPUSTACK_MODEL_TRANSFER_DELIVERY_POLICY", None)
+
+    def tearDown(self):
+        import os
+
+        os.environ.clear()
+        os.environ.update(self._saved)
+
+    def test_require_closes_the_fallback_path(self):
+        import os
+
+        os.environ["GPUSTACK_MODEL_TRANSFER_DELIVERY_POLICY"] = " Require "
+        policy = delivery_policy()
+        self.assertEqual(policy.name, POLICY_REQUIRE)
+        self.assertFalse(policy.allow_fallback)
+
+    def test_an_unset_variable_is_silent_prefer(self):
+        policy = delivery_policy()
+        self.assertEqual(policy.name, POLICY_PREFER)
+        self.assertTrue(policy.allow_fallback)
+
+    def test_a_blank_value_is_silent_prefer(self):
+        import os
+
+        os.environ["GPUSTACK_MODEL_TRANSFER_DELIVERY_POLICY"] = "   "
+        policy = delivery_policy()
+        self.assertEqual(policy.name, POLICY_PREFER)
+
+    def test_an_unknown_explicit_value_warns_and_fails_closed(self):
+        import os
+
+        os.environ["GPUSTACK_MODEL_TRANSFER_DELIVERY_POLICY"] = "requre"
+        with self.assertLogs(_POLICY_LOGGER, level="WARNING") as captured:
+            policy = delivery_policy()
+        self.assertEqual(policy.name, POLICY_REQUIRE)
+        self.assertFalse(policy.allow_fallback)
+        self.assertTrue(
+            any("requre" in line for line in captured.output), captured.output
+        )
+
+    def test_an_unknown_value_in_an_injected_mapping_fails_closed_too(self):
+        with self.assertLogs(_POLICY_LOGGER, level="WARNING"):
+            policy = delivery_policy(
+                env={"GPUSTACK_MODEL_TRANSFER_DELIVERY_POLICY": "strict"}
+            )
+        self.assertEqual(policy.name, POLICY_REQUIRE)
+        self.assertFalse(policy.allow_fallback)
 
 
 if __name__ == "__main__":

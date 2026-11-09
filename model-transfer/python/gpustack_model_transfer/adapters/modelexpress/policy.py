@@ -14,11 +14,17 @@ mutated model is not clean fallback state, and reporting it as one is
 the lie this module exists to prevent.
 """
 
+import logging
+import os
 from dataclasses import dataclass
 
 from gpustack_model_transfer.adapters.modelexpress.constants import (
+    DELIVERY_POLICY_VARIABLE,
+    POLICY_PREFER,
     POLICY_REQUIRE,
 )
+
+_LOG = logging.getLogger(__name__)
 
 # Where ModelExpress's own terminal error may live, in the order the
 # pinned tree was reviewed against. The first module that defines a
@@ -204,11 +210,65 @@ class WriterRefitFence:
         return self._allow_peer_publication and self.readable()
 
 
+@dataclass(frozen=True)
+class DeliveryPolicy:
+    """What the cluster's delivery policy permits the load chain to do.
+
+    allow_fallback is False under Require: the chain may use Peer D2D
+    (rdma) and the GPUStack source delivery (gpustack) only, and a
+    failure of both is a terminal load failure. allow_fallback is True
+    under Prefer: the built-in local strategies stay reachable, so a
+    seed replica without a ready peer or ready source loads from the
+    local cache and then publishes itself as a source.
+    """
+
+    allow_fallback: bool = True
+
+    @property
+    def name(self) -> str:
+        return POLICY_PREFER if self.allow_fallback else POLICY_REQUIRE
+
+
+def delivery_policy(env: dict | None = None) -> DeliveryPolicy:
+    """Read the delivery policy from the environment.
+
+    Only "Require" (case-insensitive) closes the fallback path by name;
+    every other value, including an unset variable, opens it. An
+    unrecognized explicit value fails closed instead: the operator set
+    the variable to something, and the value that most plausibly
+    intended — forbidding the local fallbacks that download full
+    checkpoints past GPUStack's verified source identity — is the
+    strictest reading, so the warning names the value and the accepted
+    spellings and the chain runs as Require until the spelling is
+    fixed. The route-request gate keeps that strictness off any process
+    that never asked for the route at all.
+    """
+    source = os.environ if env is None else env
+    raw = str(source.get(DELIVERY_POLICY_VARIABLE, "") or "").strip().lower()
+    if raw == POLICY_REQUIRE:
+        return DeliveryPolicy(allow_fallback=False)
+    if raw == POLICY_PREFER:
+        return DeliveryPolicy(allow_fallback=True)
+    if raw:
+        _LOG.warning(
+            "unrecognized %s=%r; expected %r or %r; failing closed as %r",
+            DELIVERY_POLICY_VARIABLE,
+            raw,
+            POLICY_REQUIRE,
+            POLICY_PREFER,
+            POLICY_REQUIRE,
+        )
+        return DeliveryPolicy(allow_fallback=False)
+    return DeliveryPolicy(allow_fallback=True)
+
+
 __all__ = [
+    "DeliveryPolicy",
     "FallbackDecision",
     "PluginUnavailableError",
     "StrategyRecoveryError",
     "WriterRefitFence",
     "decide_fallback",
+    "delivery_policy",
     "route_downgrade",
 ]

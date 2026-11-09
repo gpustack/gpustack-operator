@@ -22,9 +22,7 @@ from gpustack_model_transfer.adapters.modelexpress import (
     refuse_publication,
 )
 from gpustack_model_transfer.adapters.modelexpress.runtime import (
-    accelerator_claimed,
     probe_entry,
-    refuse_cann,
 )
 
 
@@ -92,7 +90,7 @@ class TestLoadGroupCoordinator(unittest.TestCase):
 
 
 class TestPublicationGate(unittest.TestCase):
-    def test_a_loaded_model_is_never_a_stage_two_source(self):
+    def test_an_unpublished_result_is_never_a_stage_two_source(self):
         result = PluginResult(model=object())
         fence = WriterRefitFence()
         self.assertFalse(publication_allowed(result, fence))
@@ -112,13 +110,6 @@ class TestPublicationGate(unittest.TestCase):
 
 
 class TestRuntimeStanding(unittest.TestCase):
-    def test_cuda_is_claimable_and_cann_is_not(self):
-        self.assertTrue(accelerator_claimed("cuda"))
-        self.assertFalse(accelerator_claimed("cann"))
-        with self.assertRaises(ValueError) as caught:
-            refuse_cann()
-        self.assertIn("no CANN accelerator adapter", str(caught.exception))
-
     def test_the_probe_reports_a_host_without_modelexpress(self):
         readiness = probe_entry(env={}, cuda_available=False)
         self.assertFalse(readiness.ready)
@@ -176,7 +167,6 @@ def _ready_nixl():
 
 class TestAcceptanceWiring(unittest.TestCase):
     def run_main(self):
-        import json
         import os
         import tempfile
         from contextlib import redirect_stdout
@@ -215,44 +205,6 @@ class TestAcceptanceWiring(unittest.TestCase):
         self.assertGreater(report["summary"]["unrun"], 0)
         self.assertEqual(report["summary"]["pass"], 0)
 
-    def test_the_suite_passes_against_the_injected_reference_pair(self):
-        import os
-
-        from gpustack_model_transfer.acceptance import modelexpress_suite
-
-        # The reference pair loads under Require, which holds the
-        # offline guards in the process environment; no test may leak
-        # that outward.
-        saved_env = dict(os.environ)
-        self.addCleanup(lambda: (os.environ.clear(), os.environ.update(saved_env)))
-
-        def reference_pair():
-            from gpustack_model_transfer.adapters.vllm import ModelTransferModelLoader
-            from gpustack_model_transfer.adapters.vllm.runtime import ReferenceRuntime
-            from gpustack_model_transfer.core.budgets import ReadBudgets
-            from gpustack_model_transfer.core.capabilities import (
-                local_backend_capabilities,
-            )
-            from gpustack_model_transfer.core.local_reader import LocalFileReader
-
-            reader = LocalFileReader(str(mxutil.manifest_path()))
-            loader = ModelTransferModelLoader(
-                reader=reader,
-                capabilities=local_backend_capabilities(),
-                budgets=ReadBudgets(
-                    window_bytes=32, max_inflight=2, owned_output_bytes=4096
-                ),
-            )
-            return loader, ReferenceRuntime(str(mxutil.fixture_dir()))
-
-        context = mxutil.load_context()
-        results = modelexpress_suite.run(context, runtime=reference_pair)
-        statuses = {r.capability: r.status for r in results}
-        for capability in modelexpress_suite.CAPABILITIES:
-            self.assertEqual(
-                statuses.get(capability), "PASS", (capability, statuses.get(capability))
-            )
-
     def test_a_ready_host_with_an_unready_engine_reports_its_reason(self):
         from unittest.mock import patch
 
@@ -285,46 +237,33 @@ class TestAcceptanceWiring(unittest.TestCase):
             self.assertEqual(result.status, "UNRUN", result.capability)
             self.assertIn("missing prerequisites: vllm", result.detail)
 
-    def test_a_ready_host_runs_the_checks_through_the_real_factory(self):
-        from unittest.mock import patch
+    def test_an_injected_runtime_passes_the_suite_and_leaves_no_fixtures(self):
+        """Every capability passes and the checks restore what they replaced."""
+        import os
+        from types import SimpleNamespace
 
         from gpustack_model_transfer.acceptance import modelexpress_suite
-        from gpustack_model_transfer.adapters.modelexpress.runtime import EntryReadiness
-        from gpustack_model_transfer.adapters.vllm.torch_runtime import (
-            TorchRuntimeDriver,
-        )
 
-        ready = EntryReadiness(
-            modelexpress_available=True,
-            plugin_hook_exposed=True,
-            torch_available=True,
-            cuda_available=True,
-            missing=(),
-        )
-        with (
-            patch(
-                "gpustack_model_transfer.adapters.modelexpress.runtime.probe_entry",
-                return_value=ready,
-            ),
-            patch(
-                "gpustack_model_transfer.backends.nixl.runtime.probe_runtime",
-                return_value=_ready_nixl(),
-            ),
-            patch(
-                "gpustack_model_transfer.adapters.vllm.torch_runtime.probe_host_driver",
-                return_value=(TorchRuntimeDriver(), ""),
-            ),
-        ):
-            results = modelexpress_suite.run(mxutil.load_context())
-        statuses = {r.capability: r.status for r in results}
+        native_name = "gpustack_model_transfer.adapters.vllm.native"
+        native_before = sys.modules.get(native_name)
+        os.environ.pop("GPUSTACK_MODEL_TRANSFER_DELIVERY_POLICY", None)
+
+        class Driver:
+            # The suite reads the finalization record the model carries.
+            def model_finalization_count(self, model):
+                return getattr(model, "finalization_count", 0)
+
+        def runtime():
+            return SimpleNamespace(_close_reader=lambda: None), Driver()
+
+        results = modelexpress_suite.run({}, runtime=runtime)
         self.assertEqual(len(results), len(modelexpress_suite.CAPABILITIES))
-        # The checks really ran: the metadata and composition checks
-        # pass without torch, and the load checks fail against the real
-        # driver on this torch-less host instead of blanket-UNRUNning.
-        self.assertEqual(statuses["plugin-route"], "PASS")
-        self.assertEqual(statuses["chain-composition"], "PASS")
-        self.assertEqual(statuses["native-adapter-exactly-once"], "NO-GO")
-        self.assertNotIn("UNRUN", statuses.values(), statuses)
+        for result in results:
+            self.assertEqual(result.status, "PASS", result.detail)
+        # The stubbed native module is gone and the delivery policy env
+        # the fixtures set is restored.
+        self.assertIs(sys.modules.get(native_name), native_before)
+        self.assertNotIn("GPUSTACK_MODEL_TRANSFER_DELIVERY_POLICY", os.environ)
 
 
 if __name__ == "__main__":
