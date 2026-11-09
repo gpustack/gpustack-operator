@@ -402,7 +402,7 @@ Read against **MT GPU Operator v2.1.0** (KUAE Cloud Native) —
 injection](#allocator-injection), GPUStack's allocator emits `MTHREADS_VISIBLE_DEVICES` and no device node.
 Both can come from the operator's own `full` mode below.
 
-**Vendor GPU Operator** — the MT GPU Operator, installed in one of two modes rather than by a single
+**Vendor GPU Operator** — the MT GPU Operator, installed in `full` or `core` mode rather than by a single
 toggle. `full` is the `mt-gpu-operator` Helm chart pair; `core` is a `kubectl apply -f` of plain
 manifests carrying only the device plugin and the exporter.
 

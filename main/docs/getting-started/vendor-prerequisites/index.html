@@ -1890,7 +1890,7 @@ is nothing narrower to turn off.</li>
 injection</a>
 , GPUStack&rsquo;s allocator emits <code>MTHREADS_VISIBLE_DEVICES</code> and no device node.
 Both can come from the operator&rsquo;s own <code>full</code> mode below.</p>
-<p><strong>Vendor GPU Operator</strong> — the MT GPU Operator, installed in one of two modes rather than by a single
+<p><strong>Vendor GPU Operator</strong> — the MT GPU Operator, installed in <code>full</code> or <code>core</code> mode rather than by a single
 toggle. <code>full</code> is the <code>mt-gpu-operator</code> Helm chart pair; <code>core</code> is a <code>kubectl apply -f</code> of plain
 manifests carrying only the device plugin and the exporter.</p>
 <p>Keep the driver, container toolkit, DCGM and its exporter. Disable NFD, the sGPU scheduler and
@@ -2232,7 +2232,7 @@ worker applies.</div>
           
           
           <nav class="page-actions" aria-label="Page source">
-            <a href="https://github.com/gpustack/gpustack-operator/blob/6e89f9655775b1dbc51589e6b63106fa96589212/docs/getting-started/vendor-prerequisites.md">View page source</a>
+            <a href="https://github.com/gpustack/gpustack-operator/blob/8e360b85906e14da2876a57ca352adabce08286d/docs/getting-started/vendor-prerequisites.md">View page source</a>
             
             <a href="https://github.com/gpustack/gpustack-operator/edit/main/docs/getting-started/vendor-prerequisites.md">Edit this page</a>
             

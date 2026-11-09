@@ -1754,7 +1754,7 @@ the <code>Pod</code> or source and the reason: an absent metric, an unreadable e
 first counter sample, a reset, incompatible request and error windows, or a window with no queries.
 A successful <code>Pod</code> remains in the result when another fails. If no owned <code>Pod</code> can be read, the
 subresource returns <code>Service Unavailable</code>.</p>
-<p>Three kinds of <em><code>missing[]</code></em> entry leave <em><code>partial</code></em> unset. Each is listed with its reason, and none is
+<p>The following kinds of <em><code>missing[]</code></em> entry leave <em><code>partial</code></em> unset. Each is listed with its reason, and none is
 reported as zero. The first is a labeled counter that exports nothing before its first increment,
 absent while the same scrape read its pair: a router&rsquo;s error counter or the vLLM router&rsquo;s
 retries-exhausted counter beside the router&rsquo;s request counter, and SGLang&rsquo;s transfer failure
@@ -1803,7 +1803,7 @@ annotation. The operator installs no <code>PodMonitor</code> or <code>ServiceMon
           
           
           <nav class="page-actions" aria-label="Page source">
-            <a href="https://github.com/gpustack/gpustack-operator/blob/6e89f9655775b1dbc51589e6b63106fa96589212/docs/modules/model-deployment/metrics.md">View page source</a>
+            <a href="https://github.com/gpustack/gpustack-operator/blob/8e360b85906e14da2876a57ca352adabce08286d/docs/modules/model-deployment/metrics.md">View page source</a>
             
             <a href="https://github.com/gpustack/gpustack-operator/edit/main/docs/modules/model-deployment/metrics.md">Edit this page</a>
             

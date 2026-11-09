@@ -1587,7 +1587,7 @@ role&rsquo;s <code>Service</code>. An admitted, running replica stays held durin
 The withdrawal budget expires after 30 seconds and retirement ends as <code>Aborted</code>, retaining its <code>Pod</code>s,
 <code>Workload</code> and capacity. Removing the <code>Service</code> endpoint does not prove those connections have ended.
 Groups that never executed or received admission follow their separate cleanup path.</p>
-<p>Two mechanisms are involved and they answer different questions. The protocol decides <strong>whether the
+<p>The mechanisms involved answer different questions. The protocol decides <strong>whether the
 <code>Pod</code> may be deleted</strong>; the <a href="#drain-window">drain window</a>
  above decides <strong>how long the engine
 takes to exit once it is</strong>, on the kubelet&rsquo;s grace clock after the delete. A replica passes the
@@ -1739,7 +1739,7 @@ ordinary retirement instead.</p>
 <li><strong>A request still running at <code>G</code> − 5 is cut</strong>, 25 s after the delete at the default. vLLM aborts it
 when SIGTERM arrives; SGLang keeps draining it on its own until the kill at <code>G</code>. No supported
 router moves a running request to another replica: the SGLang gateway retries only while the
-response has not started, and the other two routers do not retry.</li>
+response has not started, and the other routers do not retry.</li>
 <li><strong>An SGLang <em>prefill</em> or <em>decode</em> replica whose hook returns later than <code>G</code> − 20 is killed at <code>G</code></strong>,
 since its engine then has less than the 20 s it takes to exit: 10 s after the delete at the
 default, 25 s at 45. The replica is idle by that point, or its hook gave up on it, so the kill cuts
@@ -1790,7 +1790,7 @@ reads.</li></ul>
           
           
           <nav class="page-actions" aria-label="Page source">
-            <a href="https://github.com/gpustack/gpustack-operator/blob/6e89f9655775b1dbc51589e6b63106fa96589212/docs/modules/model-deployment/shutdown.md">View page source</a>
+            <a href="https://github.com/gpustack/gpustack-operator/blob/8e360b85906e14da2876a57ca352adabce08286d/docs/modules/model-deployment/shutdown.md">View page source</a>
             
             <a href="https://github.com/gpustack/gpustack-operator/edit/main/docs/modules/model-deployment/shutdown.md">Edit this page</a>
             

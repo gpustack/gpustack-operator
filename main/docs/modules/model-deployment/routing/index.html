@@ -1559,7 +1559,7 @@ SGLang. The matrix&rsquo;s counts were recorded on vLLM <code>0.29.0</code> and 
 of <code>gpustack/llm-router:v0.3.1</code>; newer builds must be re-verified before they inherit a claim.</p>
 <p><em>Encode</em> <code>Pod</code>s are never part of the deployment&rsquo;s answering set. Under <code>llm-d-router</code> they are
 discovered for stage routing, and under <code>vllm-router</code> their <code>Service</code> endpoint is passed through
-<code>--epd-config</code>, while the deployment <code>Service</code> never targets them. All three routers (<code>llm-d-router</code>,
+<code>--epd-config</code>, while the deployment <code>Service</code> never targets them. The supported routers (<code>llm-d-router</code>,
 <code>vllm-router</code> and <code>sglang-gateway</code>) are admitted with an <em>Encode</em> role for their supported engine
 and platform combinations. See <a href="#encode-stage-routing">Encode stage routing</a>
 .</p>
@@ -1954,7 +1954,7 @@ classes served through the gateway with zero failures.</p>
           
           
           <nav class="page-actions" aria-label="Page source">
-            <a href="https://github.com/gpustack/gpustack-operator/blob/6e89f9655775b1dbc51589e6b63106fa96589212/docs/modules/model-deployment/routing.md">View page source</a>
+            <a href="https://github.com/gpustack/gpustack-operator/blob/8e360b85906e14da2876a57ca352adabce08286d/docs/modules/model-deployment/routing.md">View page source</a>
             
             <a href="https://github.com/gpustack/gpustack-operator/edit/main/docs/modules/model-deployment/routing.md">Edit this page</a>
             

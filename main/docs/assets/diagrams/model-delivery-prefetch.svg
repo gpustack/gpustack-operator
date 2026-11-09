@@ -1,5 +1,5 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 780" role="img" aria-labelledby="title desc">
-  <title id="title">Model prefetch workflow</title>
+  <title id="title">Model Prefetch Workflow</title>
   <desc id="desc">After configuring ModelPrefetch, if a peer node already has the model, it syncs directly across all selected nodes inside the cluster; if no peer node has the model yet, it downloads from the external model hub and syncs to the selected nodes.</desc>
   <defs>
     <style>
@@ -105,7 +105,7 @@
 
   <!-- Header -->
   <text class="kicker" x="32" y="42">GPUSTACK OPERATOR / MODEL DELIVERY</text>
-  <text class="h1" x="32" y="74">Model prefetch</text>
+  <text class="h1" x="32" y="74">Model Prefetch</text>
   <text class="sub" x="32" y="98">Sync from an existing cluster peer to all selected nodes, or download from the external hub when no peer has the model</text>
   <rect x="1132" y="44" width="36" height="36" rx="10" fill="var(--blue)"/>
   <text x="1150" y="68" text-anchor="middle" style="font-size:17px;font-weight:800;fill:#fff">G</text>

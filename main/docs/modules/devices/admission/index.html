@@ -1452,11 +1452,11 @@
       <article>
         
   <h1 id="admission">Admission</h1>
-<p>A workload passes five admission gates before a container receives a device. Kueue accounts for
+<p>A workload passes admission gates before a container receives a device. Kueue accounts for
 pool capacity, while GPUStack checks whether individual accelerators can satisfy the request.</p>
 <h2 id="contents">Contents</h2>
 <ul>
-<li><a href="#five-gates">Five gates</a>
+<li><a href="#gates">Gates</a>
 </li>
 <li><a href="#ledger-beneath-the-gates">Ledger beneath the gates</a>
 </li>
@@ -1475,8 +1475,8 @@ pool capacity, while GPUStack checks whether individual accelerators can satisfy
 <li><a href="#deployed-kueue-configuration">Deployed Kueue Configuration</a>
 </li>
 </ul>
-<h2 id="five-gates">Five gates</h2>
-<p>A layered five-gate admission model: Kueue is a coarse gate, and the per-accelerator ledger is the
+<h2 id="gates">Gates</h2>
+<p>The admission model has layers: Kueue is a coarse gate, and the per-accelerator ledger is the
 fine one. Each gate produces or consumes the <code>.sliced.*</code> / <code>.partitioned.*</code> values at a distinct
 point on the path.</p>
 <table>
@@ -1535,7 +1535,7 @@ so a <code>3g.40gb</code> partition costs what a same-VRAM slice costs.</li>
 <p>Memory thus reaches the <code>credits</code> fold-down before Kueue scores it. The webhook defaults
 <code>.sliced.cores-percentage</code> to 100, prefers <code>.sliced.memory-percentage</code> over <code>.sliced.memory-mib</code>, and
 always recomputes the fold, since no trusted path sets it.</p>
-<p>It then validates the <a href="/gpustack-operator/main/docs/modules/devices/requests/#request-rules">seven request rules</a>
+<p>It then validates the <a href="/gpustack-operator/main/docs/modules/devices/requests/#request-rules">request rules</a>
 . Each rule includes
 an accepted and a rejected example.</p>
 <p>The divisor is the operator-owned <strong><code>InstanceType</code></strong>&rsquo;s <em><code>spec.memory</code></em>, found via the
@@ -1835,7 +1835,7 @@ cores come from one node and <code>InstanceType.status</code> carries no per-nod
 <h2 id="kv-cache-injection-webhook">KV cache injection webhook</h2>
 <p>A second mutating webhook on <code>Pod</code>s writes the client configuration an inference engine needs to use a
 <a href="/gpustack-operator/main/docs/modules/kv-cache/injection/">KV cache pool</a>
-. It sits <strong>outside</strong> the five gates:</p>
+. It sits <strong>outside</strong> the admission gates:</p>
 <ul>
 <li>It admits or refuses on its own inputs, consumes no <code>.sliced.*</code> or <code>.partitioned.*</code> value, produces
 none, and never touches <em><code>resources</code></em>.</li>
@@ -1926,7 +1926,7 @@ resource, so nothing is checked, the <code>Workload</code> gets no flavor, and w
           
           
           <nav class="page-actions" aria-label="Page source">
-            <a href="https://github.com/gpustack/gpustack-operator/blob/6e89f9655775b1dbc51589e6b63106fa96589212/docs/modules/devices/admission.md">View page source</a>
+            <a href="https://github.com/gpustack/gpustack-operator/blob/8e360b85906e14da2876a57ca352adabce08286d/docs/modules/devices/admission.md">View page source</a>
             
             <a href="https://github.com/gpustack/gpustack-operator/edit/main/docs/modules/devices/admission.md">Edit this page</a>
             
@@ -1937,7 +1937,7 @@ resource, so nothing is checked, the <code>Workload</code> gets no flavor, and w
           <nav id="TableOfContents">
   <ul>
     <li><a href="#contents">Contents</a></li>
-    <li><a href="#five-gates">Five gates</a>
+    <li><a href="#gates">Gates</a>
       <ul>
         <li><a href="#gate-1-pod-webhook">Gate 1: Pod webhook</a></li>
         <li><a href="#gate-2-kueue-credits">Gate 2: Kueue credits</a></li>

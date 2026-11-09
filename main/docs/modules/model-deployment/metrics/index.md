@@ -195,7 +195,7 @@ first counter sample, a reset, incompatible request and error windows, or a wind
 A successful `Pod` remains in the result when another fails. If no owned `Pod` can be read, the
 subresource returns `Service Unavailable`.
 
-Three kinds of *`missing[]`* entry leave *`partial`* unset. Each is listed with its reason, and none is
+The following kinds of *`missing[]`* entry leave *`partial`* unset. Each is listed with its reason, and none is
 reported as zero. The first is a labeled counter that exports nothing before its first increment,
 absent while the same scrape read its pair: a router's error counter or the vLLM router's
 retries-exhausted counter beside the router's request counter, and SGLang's transfer failure

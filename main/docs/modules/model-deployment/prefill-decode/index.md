@@ -233,7 +233,7 @@ serves the whole request itself. Unset renders the value the picker already used
 
 **Zero disables splitting entirely** rather than meaning "always split" (the decider returns "do not
 disaggregate" on a zero threshold before reading anything else), and it is accepted because it is a
-value upstream defines. It is **refused** on the other two routers rather than ignored: they have no
+value upstream defines. It is **refused** on the other routers rather than ignored: they have no
 per-request decision to threshold, and a field that is legal to write and renders nothing is a configuration
 this API has rejected before.
 
@@ -241,7 +241,7 @@ The proxy under `llm-d-router` also writes **one access log**: a JSON object per
 container's standard output, carrying the response code, the response flags, the response code
 details, the duration, the endpoint the picker selected, the method, the path, the request id and the
 byte counts. It is not a field: the gap it fills is that nothing is logged at all, so there is no
-value to choose. The other two routers log whatever their own flags say.
+value to choose. The other routers log whatever their own flags say.
 
 **Two flags are fixed.** The router runs with
 `--secure-serving=false` and `--metrics-endpoint-auth=false`, where upstream defaults both to
@@ -399,7 +399,7 @@ there is no second group to repeat anything.
 
 **Two roles on different manufacturers cannot share KV through their pool.** The deployment is
 admitted and both halves serve; what fails is the sharing, and it fails silently: reads from the
-shared store miss, and nothing on the deployment reports it. Three independent reasons stand
+shared store miss, and nothing on the deployment reports it. Independent reasons stand
 between the halves:
 
 - **This operator's own refusal is the one an administrator meets.** On a pool left at its default

@@ -1524,7 +1524,7 @@ Profiles</a>
 . Read the
 &ldquo;GPU Instance Profiles&rdquo; table for your product before planning a node: its Instances column is the
 maximum a GPU can host, and its placement column is what the rules below act on.</p>
-<p>Three rules govern what reaches GPUStack from that set, and all three are shared with the other two
+<p>The following rules govern what reaches GPUStack from that set; they are shared with the other
 partitioning manufacturers:</p>
 <blockquote>
 <p><strong>The <code>+me</code> / <code>+me.all</code> / <code>+gfx</code> variants are not supported.</strong> A Kubernetes resource name may not contain
@@ -2109,7 +2109,7 @@ to disappear — see <a href="#limitations">Limitations</a>
 .</p>
 </blockquote>
 <h4 id="capacity-accounting">Capacity accounting</h4>
-<p>Four kinds of number count that one carved GPU, and they disagree, deliberately.</p>
+<p>Different numbers count that one carved GPU, and they disagree, deliberately.</p>
 <p><strong>Per GPU it is interval overlap, nothing more.</strong> A profile may only start at one of its
 <a href="#partition-profile-discovery">hardcoded slots</a>
 , and an instance fits when its interval overlaps nothing already
@@ -2399,7 +2399,7 @@ is back at <a href="#all-logical-configuration">All-logical configuration</a>
           
           
           <nav class="page-actions" aria-label="Page source">
-            <a href="https://github.com/gpustack/gpustack-operator/blob/6e89f9655775b1dbc51589e6b63106fa96589212/docs/modules/devices/nvidia-mig.md">View page source</a>
+            <a href="https://github.com/gpustack/gpustack-operator/blob/8e360b85906e14da2876a57ca352adabce08286d/docs/modules/devices/nvidia-mig.md">View page source</a>
             
             <a href="https://github.com/gpustack/gpustack-operator/edit/main/docs/modules/devices/nvidia-mig.md">Edit this page</a>
             

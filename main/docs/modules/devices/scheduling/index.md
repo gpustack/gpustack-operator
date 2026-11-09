@@ -352,7 +352,7 @@ Every non-system `Namespace` gets one `LocalQueue`, so workloads can submit from
 
 ### Per-accelerator admission check
 
-The per-accelerator **`AdmissionCheck`**, third of the five gates; its behavior is in
+The per-accelerator **`AdmissionCheck`**, part of the admission chain; its behavior is in
 [Admission](/gpustack-operator/main/docs/modules/devices/admission/index.md#gate-3-per-accelerator-admissioncheck).
 
 ---
@@ -362,4 +362,4 @@ The per-accelerator **`AdmissionCheck`**, third of the five gates; its behavior 
 [Walkthrough](/gpustack-operator/main/docs/walkthroughs/devices/scheduling/index.md) (the same objects on a live cluster) ·
 [Settings](/gpustack-operator/main/docs/reference/settings/index.md#settings)
 
-**Next** → [Admission](/gpustack-operator/main/docs/modules/devices/admission/index.md) — the five gates a request passes.
+**Next** → [Admission](/gpustack-operator/main/docs/modules/devices/admission/index.md) — the gates a request passes.

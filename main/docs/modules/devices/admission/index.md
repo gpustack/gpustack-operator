@@ -1,11 +1,11 @@
 # Admission
 
-A workload passes five admission gates before a container receives a device. Kueue accounts for
+A workload passes admission gates before a container receives a device. Kueue accounts for
 pool capacity, while GPUStack checks whether individual accelerators can satisfy the request.
 
 ## Contents
 
-- [Five gates](#five-gates)
+- [Gates](#gates)
 - [Ledger beneath the gates](#ledger-beneath-the-gates)
 - [Four-view status](#four-view-status)
 - [Capability versus availability](#capability-versus-availability)
@@ -15,9 +15,9 @@ pool capacity, while GPUStack checks whether individual accelerators can satisfy
 - [Running-instance stop](#running-instance-stop)
 - [Deployed Kueue Configuration](#deployed-kueue-configuration)
 
-## Five gates
+## Gates
 
-A layered five-gate admission model: Kueue is a coarse gate, and the per-accelerator ledger is the
+The admission model has layers: Kueue is a coarse gate, and the per-accelerator ledger is the
 fine one. Each gate produces or consumes the `.sliced.*` / `.partitioned.*` values at a distinct
 point on the path.
 
@@ -44,7 +44,7 @@ Memory thus reaches the `credits` fold-down before Kueue scores it. The webhook 
 `.sliced.cores-percentage` to 100, prefers `.sliced.memory-percentage` over `.sliced.memory-mib`, and
 always recomputes the fold, since no trusted path sets it.
 
-It then validates the [seven request rules](/gpustack-operator/main/docs/modules/devices/requests/index.md#request-rules). Each rule includes
+It then validates the [request rules](/gpustack-operator/main/docs/modules/devices/requests/index.md#request-rules). Each rule includes
 an accepted and a rejected example.
 
 The divisor is the operator-owned **`InstanceType`**'s *`spec.memory`*, found via the
@@ -338,7 +338,7 @@ edit touches only the `InstanceType`, never a `Node` or the `ClusterQueue` notes
 ## KV cache injection webhook
 
 A second mutating webhook on `Pod`s writes the client configuration an inference engine needs to use a
-[KV cache pool](/gpustack-operator/main/docs/modules/kv-cache/injection/index.md). It sits **outside** the five gates:
+[KV cache pool](/gpustack-operator/main/docs/modules/kv-cache/injection/index.md). It sits **outside** the admission gates:
 
 - It admits or refuses on its own inputs, consumes no `.sliced.*` or `.partitioned.*` value, produces
   none, and never touches *`resources`*.

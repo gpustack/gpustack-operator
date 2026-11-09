@@ -1536,7 +1536,7 @@ value, and the operator adds only the one that is absent.</p>
 <p><strong>A role that enables TLS is still gated</strong>, over HTTPS, on the criterion above. Only the transport
 moved (the address is still the operator&rsquo;s own), and the kubelet does not verify the server
 certificate on a probe, so a self-signed pair is graded like any other.</p>
-<p><strong>Three configurations carry no gates at all</strong>: a role that replaces the command through
+<p><strong>The following configurations carry no gates at all</strong>: a role that replaces the command through
 <em><code>roles[].command</code></em>; a role that sets <code>--host</code>, conflicts with its declared port, or demands a client
 certificate with <code>--ssl-cert-reqs</code> other than <code>0</code> or <code>1</code> <strong>alongside a certificate or key</strong>; and a
 role declaring its port as <code>UDP</code> or <code>SCTP</code>. A role&rsquo;s <code>--port</code> alone does not remove its gates.
@@ -1661,8 +1661,7 @@ against, and the target member <code>Pod</code> and <code>Workload</code> UIDs i
 <em><code>startedAt</code></em>/<code>deadline</code>/<em><code>phaseStartedAt</code></em> carry the budgets across a controller restart.
 <em><code>lastConsumedRetryToken</code></em> is the retry directive token already consumed, persisted before the
 annotation that carried it is cleared.</p>
-<p><strong>Three kinds of removal start an operation, and they are the ones that take capacity away from a
-role the spec still declares.</strong> A <em><code>replicas</code></em> reduction starts one for the ordinals it no longer
+<p><strong>The following removals start an operation because they take capacity away from the deployment.</strong> A <em><code>replicas</code></em> reduction starts one for the ordinals it no longer
 declares, a shed of surplus replicas starts one for the whole set at once, and a replica of a role
 the spec has dropped — by a scale-away or a role rename — starts one.</p>
 <p>Everything else that deletes a replica deletes it without an operation, including the rollout that
@@ -1712,8 +1711,8 @@ operation occupies.</p>
 described in <a href="/gpustack-operator/main/docs/modules/model-deployment/shutdown/#retirement-protocol">Model Deployment Shutdown</a>
 .</p>
 <h3 id="conditions">Conditions</h3>
-<p>Ten conditions describe states that a single phase cannot represent. They are independent: &ldquo;quota reserved but
-cache not attached&rdquo; is a real and actionable state. Nine are described below; <code>WeightsReady</code> is
+<p>Conditions describe states that a single phase cannot represent. They are independent: &ldquo;quota reserved but
+cache not attached&rdquo; is a real and actionable state. Most conditions are described below; <code>WeightsReady</code> is
 described with the artifact it reports on, in <a href="/gpustack-operator/main/docs/modules/model-delivery/artifact/#status">Model Artifact</a>
 .</p>
 <h4 id="domainregistered">DomainRegistered</h4>
@@ -2198,7 +2197,7 @@ value: <code>True</code>, <code>False</code> or <code>Unknown</code>. A member n
 <p><strong>The group entry answers what the role&rsquo;s counts cannot.</strong> <em><code>endpoints.eligible</code></em> counts endpoints and
 <em><code>endpoints.serving</code></em> counts a Router&rsquo;s confirmation; the group entry names the members, the
 generation those answers were taken against, and the fact that holds the group.</p>
-<p><strong>The eight states are the operator&rsquo;s own.</strong></p>
+<p><strong>These states are the operator&rsquo;s own.</strong></p>
 <table>
   <thead>
       <tr>
@@ -2295,7 +2294,7 @@ a reader asks about when a rank fails.</p>
           
           
           <nav class="page-actions" aria-label="Page source">
-            <a href="https://github.com/gpustack/gpustack-operator/blob/6e89f9655775b1dbc51589e6b63106fa96589212/docs/modules/model-deployment/status.md">View page source</a>
+            <a href="https://github.com/gpustack/gpustack-operator/blob/8e360b85906e14da2876a57ca352adabce08286d/docs/modules/model-deployment/status.md">View page source</a>
             
             <a href="https://github.com/gpustack/gpustack-operator/edit/main/docs/modules/model-deployment/status.md">Edit this page</a>
             

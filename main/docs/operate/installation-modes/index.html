@@ -1452,7 +1452,7 @@
       <article>
         
   <h1 id="installation-modes">Installation Modes</h1>
-<p>The operator installs its dependencies two ways. Chart mode renders them as subcharts in one Helm
+<p>The operator installs its dependencies in chart or image mode. Chart mode renders them as subcharts in one Helm
 release; image mode has the worker install them at runtime. Choose one mode per cluster; both read
 the operator chart&rsquo;s <code>values.yaml</code>.</p>
 <h2 id="contents">Contents</h2>
@@ -1486,7 +1486,7 @@ flowchart TD
 -->
 <p>Kueue, NFD, Topograph and the two CSI drivers are vendored subcharts of the operator chart
 (<code>deploy/gpustack-operator/chart/charts/</code>), each behind an <code>enabled</code> switch. Their one configuration
-surface is the chart&rsquo;s <code>values.yaml</code>, reachable two ways:</p>
+surface is the chart&rsquo;s <code>values.yaml</code>, reachable through:</p>
 <table>
   <thead>
       <tr>
@@ -1622,7 +1622,7 @@ Operations</a>
           
           
           <nav class="page-actions" aria-label="Page source">
-            <a href="https://github.com/gpustack/gpustack-operator/blob/6e89f9655775b1dbc51589e6b63106fa96589212/docs/operate/installation-modes.md">View page source</a>
+            <a href="https://github.com/gpustack/gpustack-operator/blob/8e360b85906e14da2876a57ca352adabce08286d/docs/operate/installation-modes.md">View page source</a>
             
             <a href="https://github.com/gpustack/gpustack-operator/edit/main/docs/operate/installation-modes.md">Edit this page</a>
             

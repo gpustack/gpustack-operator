@@ -321,7 +321,7 @@ kubectl get crd -o custom-columns=NAME:.metadata.name,DELETING:.metadata.deletio
 
 ---
 
-**See also** — [Installation Modes](/gpustack-operator/main/docs/operate/installation-modes/index.md) (what the two modes own after the
+**See also** — [Installation Modes](/gpustack-operator/main/docs/operate/installation-modes/index.md) (what the installation modes own after the
 transfer) · [High Availability Operations](/gpustack-operator/main/docs/operate/high-availability/index.md) (the replica settings now live in one
 `values.yaml`) · [Migrating from v0.5.x](/gpustack-operator/main/docs/operate/migration/from-v0.5/index.md) · [Migration Troubleshooting](/gpustack-operator/main/docs/operate/migration/troubleshooting/index.md)
 (when the transfer wedges)

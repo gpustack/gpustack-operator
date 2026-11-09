@@ -194,7 +194,7 @@ That objection is about ownership, so it reaches creating the directory and not 
 content needs no uid. Emptying is a switch, and it is
 [below](#cleanup-on-deletion).
 
-Five rules the path has to satisfy, all enforced at apply time:
+The path must satisfy the following rules, all enforced at apply time:
 
 - It must be **absolute**.
 - It must not be the **root directory**.
@@ -231,11 +231,11 @@ one entry, so that group cannot be removed, and replacing it in place is the for
 the `KVCacheBackend` is what is left, and it takes the leader and every member with it. Put a tier on
 the last group if you want to be able to take it off.
 
-**Three failure modes, all loud:**
+**Failure modes are all loud:**
 
 | Symptom | Signal | Check & Mitigation |
 |---|---|---|
-| Refused at `kubectl apply` | Admission refusal message | The path breaks one of the five rules above, or the tier was added, removed or repathed on a running group. Fix the path, or leave the tier alone; the message names which rule |
+| Refused at `kubectl apply` | Admission refusal message | The path breaks one of the rules above, or the tier was added, removed or repathed on a running group. Fix the path, or leave the tier alone; the message names which rule |
 | Member `Pod` stuck | Event: `FailedMount ... hostPath type check failed` | The directory does not exist on that node; create it as above |
 | Member `Pod` runs but never becomes Ready | Log: `FileStorageConfig: no write permission on directory: <path>` and `Store startup failed (attempt N): Invalid FileStorage configuration` | The directory exists but the image's user cannot write to it; `chown` it to the uid above |
 

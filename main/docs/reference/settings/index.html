@@ -1461,7 +1461,7 @@ non-blank value, the worker writes it to the <code>Setting</code> on every start
 <code>Setting</code> named in <code>settings-default-tracking</code> is written with the operator&rsquo;s built-in default on every
 start. Every other <code>Setting</code> keeps the value you stored. <a href="#value-ownership">Value ownership</a>
  states
-the four rules in the order they run, and <a href="#finding-the-owning-rule">Finding the owning
+the rules in the order they run, and <a href="#finding-the-owning-rule">Finding the owning
 rule</a>
  tells you which of them owns yours.</p>
 </blockquote>
@@ -1485,7 +1485,7 @@ on that start and logged; a value it does not own is left exactly as it was stor
 present in the worker process environment, and the built-in default when the variable is absent. A
 variable present with an empty value yields a blank seed rather than the built-in default, and <code>{}</code> and
 <code>[]</code> read as blank too.</p>
-<p>The alignment applies four rules, in this order:</p>
+<p>The alignment applies the following rules in order:</p>
 <ol>
 <li><strong>Backfill.</strong> A key the <code>Secret</code> does not carry is added with its seed. A blank seed is a key like any
 other, so a <code>Setting</code> with a blank default still appears in <code>kubectl get settings</code>.</li>
@@ -1502,7 +1502,7 @@ to the empty string takes a <code>Setting</code> over nothing and a tracked <cod
 you stored. Only backfill writes a blank, and it runs first so that a newly registered <code>Setting</code> appears
 in the same pass that decides whether the operator owns it.</p>
 <p>Deleting the <code>Secret</code> is the case with nothing to preserve: the next worker start creates it again from
-every seed, and <code>settings-default-tracking</code> returns to the six names it ships with.</p>
+every seed, and <code>settings-default-tracking</code> returns to the built-in names it ships with.</p>
 <h3 id="every-override-is-logged">Every override is logged</h3>
 <p>A start that changes a value writes one line per <code>Setting</code> to the worker log, naming the <code>Setting</code>, the
 value it replaced, the value it wrote and the rule that fired:</p>
@@ -1522,7 +1522,7 @@ sets it on a <code>Setting</code> whose value should not appear in a log at all.
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">kubectl -n gpustack-system logs deploy/gpustack-operator-worker <span class="p">|</span> grep <span class="s1">&#39;setting overridden on start&#39;</span></span></span></code></pre></div>
 </div><h3 id="tracking-list">Tracking list</h3>
 <p><code>settings-default-tracking</code> holds a comma-separated list of <code>Setting</code> names. The worker reads it from the
-<code>Secret</code>, and the backfill has already written the six names the operator ships into a <code>Secret</code> that carries
+<code>Secret</code>, and the backfill has already written the built-in names the operator ships into a <code>Secret</code> that carries
 no such key, so a cluster that predates the <code>Setting</code> is tracked from the first start that backfills the
 key.</p>
 <p>A stored value cannot silently change what is tracked. Each segment is trimmed, and a segment left
@@ -1530,7 +1530,7 @@ empty, a duplicate, the list&rsquo;s own name and a name this operator does not 
 logged once at verbosity 4. A write that names the list itself is refused outright, because a <code>Setting</code>
 tracking its own membership would reconcile that membership against itself.</p>
 <h3 id="finding-the-owning-rule">Finding the owning rule</h3>
-<p>Two checks place any <code>Setting</code> you did not write yourself, and they are the two the rules read:</p>
+<p>The following checks place any <code>Setting</code> you did not write yourself; the rules read their results:</p>
 <div class="code-block">
   <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl"><span class="c1"># 1. Does the worker Deployment render a variable for it, and with what value?</span>
@@ -1731,8 +1731,13 @@ request that reaches a webhook. Neither window needs a restart.</p>
 .</td>
       </tr>
       <tr>
+          <td><code>model-deployment-modelexpress-server-image</code><br/>(<code>GPUSTACK_MODEL_DEPLOYMENT_MODELEXPRESS_SERVER_IMAGE</code>)</td>
+          <td>Effect window: Next trigger<br/>Default: <code>gpustack/mirrored-modelexpress-server:v0.7.0</code><br/>Usage: Image for the per-deployment <a href="/gpustack-operator/main/docs/modules/model-delivery/remote/#nvidia-modelexpress">ModelExpress metadata server</a>
+; use this setting for registry redirection or pinning.</td>
+      </tr>
+      <tr>
           <td><code>model-deployment-router-image</code><br/>(<code>GPUSTACK_MODEL_DEPLOYMENT_ROUTER_IMAGE</code>)</td>
-          <td>Effect window: Next trigger<br/>Default: <code>gpustack/llm-router:v0.4.0</code><br/>Usage: Image a managed router runs when the <code>ModelDeployment</code> does not name one in <em><code>spec.router.image</code></em>. <strong>It carries every router this operator supports, and which binary runs is decided by the rendered command rather than by the image</strong> — <em><code>spec.router.name</code></em> picks the binary, and this setting only says where the binaries come from. Its default is safe for every cluster at once in a way <code>kv-cache-backend-image</code>&rsquo;s is not: it runs no model, so it links no accelerator runtime and cannot be paired with the wrong one. The default is this project&rsquo;s own build rather than an upstream tag, because the three routers are compiled from three separate sources and one of them carries a patch this repository ships, so no upstream image holds them together. An image named on the object is used verbatim and is never redirected to the cluster mirror, because it is the user&rsquo;s own reference.</td>
+          <td>Effect window: Next trigger<br/>Default: <code>gpustack/llm-router:v0.4.0</code><br/>Usage: Image a managed router runs when the <code>ModelDeployment</code> does not name one in <em><code>spec.router.image</code></em>. <strong>It carries every router this operator supports, and which binary runs is decided by the rendered command rather than by the image</strong> — <em><code>spec.router.name</code></em> picks the binary, and this setting only says where the binaries come from. Its default is safe for every cluster at once in a way <code>kv-cache-backend-image</code>&rsquo;s is not: it runs no model, so it links no accelerator runtime and cannot be paired with the wrong one. The default is this project&rsquo;s own build rather than an upstream tag, because the routers are compiled from separate sources and one of them carries a patch this repository ships, so no upstream image holds them together. An image named on the object is used verbatim and is never redirected to the cluster mirror, because it is the user&rsquo;s own reference.</td>
       </tr>
       <tr>
           <td><code>model-deployment-router-proxy-image</code><br/>(<code>GPUSTACK_MODEL_DEPLOYMENT_ROUTER_PROXY_IMAGE</code>)</td>
@@ -1776,7 +1781,7 @@ request that reaches a webhook. Neither window needs a restart.</p>
       </tr>
       <tr>
           <td><code>settings-default-tracking</code></td>
-          <td>Effect window: Next trigger<br/>Default: <code>instance-ssh-server-image</code>, <code>kv-cache-backend-image</code>, <code>model-deployment-router-image</code>, <code>model-deployment-router-proxy-image</code>, <code>model-deployment-routing-sidecar-image</code>, <code>model-prefetch-warmup-image</code><br/>Usage: Comma-separated names of the <code>Setting</code>s the operator rewrites with its built-in default on every worker start, so that a default shipped in a later release reaches a cluster that never chose a value. A name in the list makes its <code>Setting</code> follow rule 3 (<a href="#value-ownership">who owns a value</a>
+          <td>Effect window: Next trigger<br/>Default: <code>instance-ssh-server-image</code>, <code>kv-cache-backend-image</code>, <code>model-deployment-modelexpress-server-image</code>, <code>model-deployment-router-image</code>, <code>model-deployment-router-proxy-image</code>, <code>model-deployment-routing-sidecar-image</code>, <code>model-prefetch-warmup-image</code><br/>Usage: Comma-separated names of the <code>Setting</code>s the operator rewrites with its built-in default on every worker start, so that a default shipped in a later release reaches a cluster that never chose a value. A name in the list makes its <code>Setting</code> follow rule 3 (<a href="#value-ownership">who owns a value</a>
 ); removing a name is what keeps an image pin across an operator upgrade (<a href="#keeping-an-image-pin">keeping a pin</a>
 ). An empty value tracks nothing, and whitespace, duplicates and unregistered names are dropped (<a href="#tracking-list">the tracking list</a>
 ). No environment variable reads this <code>Setting</code>, so nothing on the <code>Deployment</code> can take the list over.</td>
@@ -1954,9 +1959,9 @@ chart value is what hands the <code>Setting</code> back to you.</li>
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">policy</span><span class="p">:</span><span class="w"> </span><span class="l">Disabled</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="c"># Source images by manufacturer; set an entry to null to omit that DaemonSet.</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">images</span><span class="p">:</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">nvidia</span><span class="p">:</span><span class="w"> </span><span class="l">gpustack/model-transfer:v0.0.1-cuda12.9</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">amd</span><span class="p">:</span><span class="w"> </span><span class="l">gpustack/model-transfer:v0.0.1-rocm7.2</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">ascend</span><span class="p">:</span><span class="w"> </span><span class="l">gpustack/model-transfer:v0.0.1-cann9.2-a5</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">nvidia</span><span class="p">:</span><span class="w"> </span><span class="l">gpustack/model-transfer:v0.1.0-cuda12.9</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">amd</span><span class="p">:</span><span class="w"> </span><span class="l">gpustack/model-transfer:v0.1.0-rocm7.2</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">ascend</span><span class="p">:</span><span class="w"> </span><span class="l">gpustack/model-transfer:v0.1.0-cann9.2-a5</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">source</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">maxMemoryBytes</span><span class="p">:</span><span class="w"> </span><span class="m">0</span><span class="w">  </span><span class="c"># Derive the node ceiling from total RAM.</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">minMemoryBytes</span><span class="p">:</span><span class="w"> </span><span class="m">1073741824</span><span class="w">  </span><span class="c"># 1 GiB minimum buffer.</span><span class="w">
@@ -1983,7 +1988,7 @@ from that list is the way out.</li>
 <p>Your edit holds until the next worker start, and nothing reverts it while the worker runs. A node drain,
 a crash, a restart and an upgrade each start a worker, so each of them applies the rules again.</p>
 <h3 id="keeping-an-image-pin">Keeping an image pin</h3>
-<p>An image pin does not survive an operator upgrade: the six image <code>Setting</code>s are tracked by default, so
+<p>An image pin does not survive an operator upgrade: the built-in image <code>Setting</code>s are tracked by default, so
 the operator writes each of them with its built-in
 default on <strong>every</strong> worker start, not only on the start where a release changes that default. A pin
 made with <code>kubectl patch</code> holds until the next start, and reverts to the default at that one:</p>
@@ -2007,10 +2012,10 @@ variable set to an empty value is no declaration, and a default that is blank is
 <div class="code-block">
   <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl"><span class="c1"># Read the list, drop the one name whose Setting you want to keep your own value for,</span>
-</span></span><span class="line"><span class="cl"><span class="c1"># and write the rest back. This removes model-prefetch-warmup-image and tracks the other five.</span>
+</span></span><span class="line"><span class="cl"><span class="c1"># and write the rest back. This removes model-prefetch-warmup-image and keeps the remaining names.</span>
 </span></span><span class="line"><span class="cl">kubectl -n gpustack-system get setting settings-default-tracking -o yaml
 </span></span><span class="line"><span class="cl">kubectl -n gpustack-system patch setting settings-default-tracking --type merge <span class="se">\
-</span></span></span><span class="line"><span class="cl"><span class="se"></span>  -p <span class="s1">&#39;{&#34;spec&#34;:{&#34;value&#34;:&#34;instance-ssh-server-image,kv-cache-backend-image,model-deployment-router-image,model-deployment-router-proxy-image,model-deployment-routing-sidecar-image&#34;}}&#39;</span></span></span></code></pre></div>
+</span></span></span><span class="line"><span class="cl"><span class="se"></span>  -p <span class="s1">&#39;{&#34;spec&#34;:{&#34;value&#34;:&#34;instance-ssh-server-image,kv-cache-backend-image,model-deployment-modelexpress-server-image,model-deployment-router-image,model-deployment-router-proxy-image,model-deployment-routing-sidecar-image&#34;}}&#39;</span></span></span></code></pre></div>
 </div><p>The second patch removes <code>model-prefetch-warmup-image</code> from the default-tracking list:</p>
 <div class="code-block">
   <div class="code-toolbar"><span>diff</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
@@ -2021,11 +2026,11 @@ variable set to an empty value is no declaration, and a default that is blank is
 </span></span><span class="line"><span class="cl">   namespace: gpustack-system
 </span></span><span class="line"><span class="cl"> spec:
 </span></span><span class="line"><span class="cl"><span class="gd">-  value: &lt;current-value&gt;
-</span></span></span><span class="line"><span class="cl"><span class="gd"></span><span class="gi">+  value: &#34;instance-ssh-server-image,kv-cache-backend-image,model-deployment-router-image,model-deployment-router-proxy-image,model-deployment-routing-sidecar-image&#34;
+</span></span></span><span class="line"><span class="cl"><span class="gd"></span><span class="gi">+  value: &#34;instance-ssh-server-image,kv-cache-backend-image,model-deployment-modelexpress-server-image,model-deployment-router-image,model-deployment-router-proxy-image,model-deployment-routing-sidecar-image&#34;
 </span></span></span></code></pre></div>
 </div><p>A pin that predates this behavior is replaced on the first worker start of the release that introduces
 it, and the log line names both values when it happens. Deleting the <code>Secret</code> has the same effect on the
-list, which comes back as its six default names.</p>
+list, which comes back as its built-in default names.</p>
 <h2 id="deployment-environment-variables">Deployment environment variables</h2>
 <p>These environment variables are read when the process starts, so changing one means restarting or
 redeploying the affected component.
@@ -2225,7 +2230,7 @@ resolves CDI requests (containerd 2.x does; containerd 1.7 only with <code>enabl
 an engine that does not and the request is simply ignored: no variable is set either, and the container
 starts with no accelerator and no error, which is the failure this setting exists to remove. <code>auto</code> reads
 the engine first and keeps the variable when the answer is no.</p>
-<p>Two independent questions decide which value a runtime wants: does the engine resolve CDI
+<p>Independent questions decide which value a runtime wants: does the engine resolve CDI
 requests at all, and can <code>auto</code> tell that it does? <code>auto</code> reads both answers out of containerd&rsquo;s
 <code>config.toml</code>, so a runtime that keeps them anywhere else is invisible to it. That file is where the
 detection looks; it is not something the channel itself needs.</p>
@@ -2460,7 +2465,7 @@ user-facing settings, listed for completeness.</p>
           
           
           <nav class="page-actions" aria-label="Page source">
-            <a href="https://github.com/gpustack/gpustack-operator/blob/6e89f9655775b1dbc51589e6b63106fa96589212/docs/reference/settings.md">View page source</a>
+            <a href="https://github.com/gpustack/gpustack-operator/blob/8e360b85906e14da2876a57ca352adabce08286d/docs/reference/settings.md">View page source</a>
             
             <a href="https://github.com/gpustack/gpustack-operator/edit/main/docs/reference/settings.md">Edit this page</a>
             

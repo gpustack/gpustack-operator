@@ -103,7 +103,7 @@ containers and SSH access using the same accelerator allocation.
 
 The `Pod` webhook validates an accelerator request before Kueue reserves quota. Admission checks
 confirm that devices can satisfy it, and the scheduler, kubelet and allocator complete the
-allocation. [Admission](/gpustack-operator/main/docs/modules/devices/admission/index.md#five-gates) owns the gate sequence and
+allocation. [Admission](/gpustack-operator/main/docs/modules/devices/admission/index.md#gates) owns the gate sequence and
 its failure behavior.
 
 `InstanceType` status reports the remaining capacity as workloads allocate and release devices. Use
@@ -140,6 +140,6 @@ The hardware terms Device, Accelerator and Resource are defined in
 ---
 
 **See also** — [Accelerator Requests](/gpustack-operator/main/docs/modules/devices/requests/index.md) ·
-[Settings](/gpustack-operator/main/docs/reference/settings/index.md) · [All documentation](https://github.com/gpustack/gpustack-operator/blob/6e89f9655775b1dbc51589e6b63106fa96589212/docs/README.md)
+[Settings](/gpustack-operator/main/docs/reference/settings/index.md) · [All documentation](https://github.com/gpustack/gpustack-operator/blob/8e360b85906e14da2876a57ca352adabce08286d/docs/README.md)
 
 **Next** → [Walkthrough](/gpustack-operator/main/docs/walkthroughs/devices/scheduling/index.md) — follow a workload from submission to allocation.

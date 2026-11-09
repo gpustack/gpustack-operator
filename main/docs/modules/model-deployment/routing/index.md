@@ -47,7 +47,7 @@ of `gpustack/llm-router:v0.3.1`; newer builds must be re-verified before they in
 
 *Encode* `Pod`s are never part of the deployment's answering set. Under `llm-d-router` they are
 discovered for stage routing, and under `vllm-router` their `Service` endpoint is passed through
-`--epd-config`, while the deployment `Service` never targets them. All three routers (`llm-d-router`,
+`--epd-config`, while the deployment `Service` never targets them. The supported routers (`llm-d-router`,
 `vllm-router` and `sglang-gateway`) are admitted with an *Encode* role for their supported engine
 and platform combinations. See [Encode stage routing](#encode-stage-routing).
 

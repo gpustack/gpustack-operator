@@ -1495,7 +1495,7 @@ configs → settings → applications → the <code>gpustack-cpu-info</code> <co
 <code>gpustack-node-devices</code> <code>AdmissionCheck</code> → the <code>gpustack-model-deployment-joint</code> <code>AdmissionCheck</code>).</p>
 <p>In <code>Start</code>, the controller manager starts only after the extension API services report ready, so
 controllers can index extension-API resources. Preserve this ordering when adding steps.</p>
-<p>The last three steps each retry for up to 5 minutes while their CRD becomes available. A worker
+<p>The <code>NodeFeatureRule</code> and <code>AdmissionCheck</code> steps each retry for up to 5 minutes while their CRD becomes available. A worker
 starting alongside NFD and Kueue can reach these steps before their CRDs are served. The worker
 applies the resources in both installation modes; see <a href="/gpustack-operator/main/docs/operate/installation-modes/#deployed-and-applied-resources">Installation
 Modes</a>
@@ -1729,7 +1729,7 @@ Check this limit for any name that flows into a label value.</p>
           
           
           <nav class="page-actions" aria-label="Page source">
-            <a href="https://github.com/gpustack/gpustack-operator/blob/6e89f9655775b1dbc51589e6b63106fa96589212/docs/contribute/internals.md">View page source</a>
+            <a href="https://github.com/gpustack/gpustack-operator/blob/8e360b85906e14da2876a57ca352adabce08286d/docs/contribute/internals.md">View page source</a>
             
             <a href="https://github.com/gpustack/gpustack-operator/edit/main/docs/contribute/internals.md">Edit this page</a>
             

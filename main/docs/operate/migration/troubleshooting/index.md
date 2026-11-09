@@ -219,7 +219,7 @@ kubectl delete ns "$NS"
 **See also** — [Migrating to Bundled Subcharts](/gpustack-operator/main/docs/operate/migration/to-subcharts/index.md) (the ownership transfer whose
 interruption the CrashLoop section repairs) · [Migrating from v0.5.x](/gpustack-operator/main/docs/operate/migration/from-v0.5/index.md) (the Kueue
 finalizer deadlock behind a stuck CRD) · [Installation Modes](/gpustack-operator/main/docs/operate/installation-modes/index.md)
-(the two modes the commands mark at each step)
+(the modes the commands mark at each step)
 
 **Next** → [High Availability Operations](/gpustack-operator/main/docs/operate/high-availability/index.md) — the replica settings a
 recovered install is worth revisiting.

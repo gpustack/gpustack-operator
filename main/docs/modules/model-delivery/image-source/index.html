@@ -1604,7 +1604,7 @@ GB (~2.26× apart). Size a node&rsquo;s disk from the table, never from <code>ku
 <p>A node image that ships <code>discard_unpacked_layers = true</code> (the local kind images do) keeps only the
 blobs and does not pay the snapshot copy; do not take that as the fleet default.</p>
 <h2 id="image-gc">Image GC</h2>
-<p>Three rules, verified on 1.35.7 / 2.2.6:</p>
+<p>The following rules were verified on 1.35.7 / 2.2.6:</p>
 <ol>
 <li>
 <p><strong>In use, not collected.</strong> While any <em>running</em> container mounts the image, kubelet&rsquo;s image GC
@@ -1657,7 +1657,7 @@ warm.</li></ul>
           
           
           <nav class="page-actions" aria-label="Page source">
-            <a href="https://github.com/gpustack/gpustack-operator/blob/6e89f9655775b1dbc51589e6b63106fa96589212/docs/modules/model-delivery/image-source.md">View page source</a>
+            <a href="https://github.com/gpustack/gpustack-operator/blob/8e360b85906e14da2876a57ca352adabce08286d/docs/modules/model-delivery/image-source.md">View page source</a>
             
             <a href="https://github.com/gpustack/gpustack-operator/edit/main/docs/modules/model-delivery/image-source.md">Edit this page</a>
             

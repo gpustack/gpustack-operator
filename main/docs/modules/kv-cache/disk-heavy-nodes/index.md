@@ -101,7 +101,7 @@ keeps the value from being free to raise later.
 
 The tier's own ceilings carry a matching floor, and a disk-heavy node is nowhere near it. `capacity`
 sits far above one bucket, and the example leaves *`keyLimit`* unset, so the store's own applies and
-there is no declared ceiling to be near. Those two rules belong to
+there is no declared ceiling to be near. Those rules belong to
 [bucket writes](/gpustack-operator/main/docs/modules/kv-cache/local-disk-tier/index.md#bucket-writes); the
 floor that binds here is the memory one above.
 

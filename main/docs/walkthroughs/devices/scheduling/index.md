@@ -817,6 +817,6 @@ If the privileged-mode gate is disabled, the mitigation above changes it as foll
 
 ---
 
-**See also** — [Accelerator Requests](/gpustack-operator/main/docs/modules/devices/requests/index.md) (the contract behind Step 3) · [NVIDIA MIG Operations](/gpustack-operator/main/docs/modules/devices/nvidia-mig/index.md#three-mig-configurations) (hardware partitioning) · [Settings](/gpustack-operator/main/docs/reference/settings/index.md#settings) (the two gates)
+**See also** — [Accelerator Requests](/gpustack-operator/main/docs/modules/devices/requests/index.md) (the contract behind Step 3) · [NVIDIA MIG Operations](/gpustack-operator/main/docs/modules/devices/nvidia-mig/index.md#three-mig-configurations) (hardware partitioning) · [Settings](/gpustack-operator/main/docs/reference/settings/index.md#settings) (the relevant gates)
 
 **Next** → [RDMA Networking Walkthrough](/gpustack-operator/main/docs/walkthroughs/rdma/network-endpoints/index.md) — request and verify RDMA endpoints with NUMA alignment.

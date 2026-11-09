@@ -1701,14 +1701,14 @@ cache</strong> make a request worth splitting between a prefiller and a decoder;
 serves the whole request itself. Unset renders the value the picker already used.</p>
 <p><strong>Zero disables splitting entirely</strong> rather than meaning &ldquo;always split&rdquo; (the decider returns &ldquo;do not
 disaggregate&rdquo; on a zero threshold before reading anything else), and it is accepted because it is a
-value upstream defines. It is <strong>refused</strong> on the other two routers rather than ignored: they have no
+value upstream defines. It is <strong>refused</strong> on the other routers rather than ignored: they have no
 per-request decision to threshold, and a field that is legal to write and renders nothing is a configuration
 this API has rejected before.</p>
 <p>The proxy under <code>llm-d-router</code> also writes <strong>one access log</strong>: a JSON object per request on the
 container&rsquo;s standard output, carrying the response code, the response flags, the response code
 details, the duration, the endpoint the picker selected, the method, the path, the request id and the
 byte counts. It is not a field: the gap it fills is that nothing is logged at all, so there is no
-value to choose. The other two routers log whatever their own flags say.</p>
+value to choose. The other routers log whatever their own flags say.</p>
 <p><strong>Two flags are fixed.</strong> The router runs with
 <code>--secure-serving=false</code> and <code>--metrics-endpoint-auth=false</code>, where upstream defaults both to
 <strong>true</strong>. The inversion is deliberate: a router manages <strong>east-west</strong> traffic, picking which replica
@@ -1895,7 +1895,7 @@ refuses a second resource group repeating a covered resource within one queue. W
 there is no second group to repeat anything.</p>
 <p><strong>Two roles on different manufacturers cannot share KV through their pool.</strong> The deployment is
 admitted and both halves serve; what fails is the sharing, and it fails silently: reads from the
-shared store miss, and nothing on the deployment reports it. Three independent reasons stand
+shared store miss, and nothing on the deployment reports it. Independent reasons stand
 between the halves:</p>
 <ul>
 <li><strong>This operator&rsquo;s own refusal is the one an administrator meets.</strong> On a pool left at its default
@@ -1963,7 +1963,7 @@ comparison of a disaggregated pair with an aggregated group on equal GPUs.</li><
           
           
           <nav class="page-actions" aria-label="Page source">
-            <a href="https://github.com/gpustack/gpustack-operator/blob/6e89f9655775b1dbc51589e6b63106fa96589212/docs/modules/model-deployment/prefill-decode.md">View page source</a>
+            <a href="https://github.com/gpustack/gpustack-operator/blob/8e360b85906e14da2876a57ca352adabce08286d/docs/modules/model-deployment/prefill-decode.md">View page source</a>
             
             <a href="https://github.com/gpustack/gpustack-operator/edit/main/docs/modules/model-deployment/prefill-decode.md">Edit this page</a>
             

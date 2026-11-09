@@ -95,7 +95,7 @@ GPU-instance profiles the driver reports for the PPU in front of it.
   device id, and a GPU instance subdivided into several compute instances has several (a share of the
   compute each, all on the same memory), so it is refused rather than half-addressed.
 
-All three rules are shared with NVIDIA.
+These rules are shared with NVIDIA.
 
 What a PPU offers:
 
@@ -279,7 +279,7 @@ remains and flip the mode back.
 
 **Destroy the Compute Instance before its GPU Instance.** The driver refuses otherwise — `GPU instance <G>
 is in use, please destory related compute instances then try again` (the manufacturer's own spelling), with
-a non-zero exit. The reclaim does this in order; by hand it is two steps:
+a non-zero exit. The reclaim does this in order; follow these steps by hand:
 
 ```console
 $ ppu-smi mig -i <N> -gi <G> -ci <C> -dci

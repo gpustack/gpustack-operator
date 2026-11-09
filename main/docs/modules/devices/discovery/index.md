@@ -410,7 +410,7 @@ reads when a workload lands. It drives each manufacturer's own responder with a 
 allocation request rather than a copy of it, so a preflight answer and the allocation it predicts
 cannot disagree. The runbook is [Preflight Checks](/gpustack-operator/main/docs/modules/devices/preflight/index.md).
 
-It asks three questions per manufacturer, in order, and each is answerable on its own:
+It asks the following questions per manufacturer, in order, and each is answerable on its own:
 
 1. **are the devices detected** — the detect pass, cross-checked against the host's own vendor CLI
    where one is established (NVIDIA, Ascend and AMD); for manufacturers without a host reader the detect pass answers alone,
@@ -423,7 +423,7 @@ It asks three questions per manufacturer, in order, and each is answerable on it
    resource](#ssh-instances-and-visibility)); and *co-tenancy*, two independent
    slices on one accelerator each seeing its own quota.
 
-Every answer is one of three states, exhaustive and mutually exclusive, each with a different
+Every answer is one of the following exhaustive and mutually exclusive states, each with a different
 consequence for the allocation it guards:
 
 | State | Meaning | Allocation effect |
@@ -503,7 +503,7 @@ ledger](#container-identification) and vcann-rt's `memory-quota` limit.
 
 A missing container-share entry point refuses allocation; no `npu-smi` command can add that API.
 For the [V2 generation](#ascend-dcmi-generations), which declares no such flag, the
-allocator allows all three tenanted modes and logs the accelerator. Whether V2 enforces an
+allocator allows the tenanted modes listed above and logs the accelerator. Whether V2 enforces an
 equivalent guard by another mechanism remains unmeasured.
 
 Other read failures still lead to an attempt to enable the flag. If that write also fails, the

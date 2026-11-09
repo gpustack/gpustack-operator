@@ -264,7 +264,7 @@ setting it produces a filter matching a device no host has. **Empty means "use e
 argv**, as `-D key=value`, not into an environment variable. *`leader.extraArgs`* does the same on the
 leader, as `-key=value`.
 
-**Either way the value is world-readable, on three paths.** It is stored verbatim on the
+**Either way the value is world-readable through these paths.** It is stored verbatim on the
 `KVCacheBackend` (which is cluster-scoped, so reading it needs no access to any workload), and it is
 rendered into the container's argv, readable again from the `Pod` and from the `DaemonSet` or `Deployment`
 carrying it. **Do not put a credential in *`extraArgs`*.** Nothing refuses one at admission.
@@ -570,7 +570,7 @@ NAME            TYPE       PHASE   ENDPOINT                                     
 mooncake-dram   Mooncake   Ready   mooncake-dram-leader.gpustack-system.svc:50051  12Gi
 ```
 
-Five phases: `Provisioning`, `Ready`, `Degraded`, `Error`, `Deleting`. `Ready` carries no
+Phases: `Provisioning`, `Ready`, `Degraded`, `Error`, `Deleting`. `Ready` carries no
 *`phaseMessage`*; every other phase carries one.
 
 Conditions report independent aspects of backend health: `LeaderAvailable`, `MembersMounted`, `CapacityObserved`, `PoolWrites`, `Deletable` and
@@ -648,7 +648,7 @@ row carries the leader's *`segmentID`*, *`clientID`* and advertised *`segmentNam
 unique segment ID because several members may legitimately share a name.
 
 The leader is what allocation goes through, so a running member `Pod` it does not list holds nothing
-and is counted in `MembersMounted`'s message instead. The two fields the listing cannot supply
+and is counted in `MembersMounted`'s message instead. The fields the listing cannot supply
 (node name and medium) are joined in from the member `Pod` behind that segment, and left **empty**
 rather than guessed when nothing matches.
 

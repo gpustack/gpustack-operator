@@ -1553,7 +1553,7 @@ standbys do not have to wait for scheduling or image pulls.</p>
 </table>
 <p><code>/health</code> answers 200 in every state, so using it for readiness is the same as having no readiness
 probe. Using a gated route for <strong>liveness</strong> would kill a leader that is slow to activate.</p>
-<p>The health document has four fields that matter:</p>
+<p>The health document has these important fields:</p>
 <div class="code-block">
   <div class="code-toolbar"><span>json</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-json" data-lang="json"><span class="line"><span class="cl"><span class="p">{</span><span class="nt">&#34;status&#34;</span><span class="p">:</span><span class="s2">&#34;ok&#34;</span><span class="p">,</span><span class="nt">&#34;role&#34;</span><span class="p">:</span><span class="s2">&#34;leader&#34;</span><span class="p">,</span><span class="nt">&#34;ha_state&#34;</span><span class="p">:</span><span class="s2">&#34;serving&#34;</span><span class="p">,</span><span class="nt">&#34;service_ready&#34;</span><span class="p">:</span><span class="kc">true</span><span class="p">}</span></span></span></code></pre></div>
@@ -1601,7 +1601,7 @@ availability is a compile-time switch and every option ships <strong>off</strong
       </tr>
   </tbody>
 </table>
-<p>Use an image built from <a href="https://github.com/gpustack/gpustack-operator/blob/6e89f9655775b1dbc51589e6b63106fa96589212/pack/mirrored-mooncake/Dockerfile"><code>pack/mirrored-mooncake</code></a>
+<p>Use an image built from <a href="https://github.com/gpustack/gpustack-operator/blob/8e360b85906e14da2876a57ca352adabce08286d/pack/mirrored-mooncake/Dockerfile"><code>pack/mirrored-mooncake</code></a>
  for
 <em><code>spec.image</code></em> <strong>and for every <em><code>members[].image</code></em></strong>, on Mooncake 0.3.12 or later: an electing leader is
 also rendered <code>-pod_name</code> and <code>-pod_namespace</code> to label the winner, and a 0.3.11 master exits on both.</p>
@@ -1763,7 +1763,7 @@ from.</div>
           
           
           <nav class="page-actions" aria-label="Page source">
-            <a href="https://github.com/gpustack/gpustack-operator/blob/6e89f9655775b1dbc51589e6b63106fa96589212/docs/modules/kv-cache/leader.md">View page source</a>
+            <a href="https://github.com/gpustack/gpustack-operator/blob/8e360b85906e14da2876a57ca352adabce08286d/docs/modules/kv-cache/leader.md">View page source</a>
             
             <a href="https://github.com/gpustack/gpustack-operator/edit/main/docs/modules/kv-cache/leader.md">Edit this page</a>
             

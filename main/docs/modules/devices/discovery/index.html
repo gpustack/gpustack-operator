@@ -1934,7 +1934,7 @@ reads when a workload lands. It drives each manufacturer&rsquo;s own responder w
 allocation request rather than a copy of it, so a preflight answer and the allocation it predicts
 cannot disagree. The runbook is <a href="/gpustack-operator/main/docs/modules/devices/preflight/">Preflight Checks</a>
 .</p>
-<p>It asks three questions per manufacturer, in order, and each is answerable on its own:</p>
+<p>It asks the following questions per manufacturer, in order, and each is answerable on its own:</p>
 <ol>
 <li><strong>are the devices detected</strong> — the detect pass, cross-checked against the host&rsquo;s own vendor CLI
 where one is established (NVIDIA, Ascend and AMD); for manufacturers without a host reader the detect pass answers alone,
@@ -1948,7 +1948,7 @@ resource</a>
 ); and <em>co-tenancy</em>, two independent
 slices on one accelerator each seeing its own quota.</li>
 </ol>
-<p>Every answer is one of three states, exhaustive and mutually exclusive, each with a different
+<p>Every answer is one of the following exhaustive and mutually exclusive states, each with a different
 consequence for the allocation it guards:</p>
 <table>
   <thead>
@@ -2099,7 +2099,7 @@ ledger</a>
 <p>A missing container-share entry point refuses allocation; no <code>npu-smi</code> command can add that API.
 For the <a href="#ascend-dcmi-generations">V2 generation</a>
 , which declares no such flag, the
-allocator allows all three tenanted modes and logs the accelerator. Whether V2 enforces an
+allocator allows the tenanted modes listed above and logs the accelerator. Whether V2 enforces an
 equivalent guard by another mechanism remains unmeasured.</p>
 <p>Other read failures still lead to an attempt to enable the flag. If that write also fails, the
 error reports both failures and the remedy.</p>
@@ -2348,7 +2348,7 @@ objects.</div>
           
           
           <nav class="page-actions" aria-label="Page source">
-            <a href="https://github.com/gpustack/gpustack-operator/blob/6e89f9655775b1dbc51589e6b63106fa96589212/docs/modules/devices/discovery.md">View page source</a>
+            <a href="https://github.com/gpustack/gpustack-operator/blob/8e360b85906e14da2876a57ca352adabce08286d/docs/modules/devices/discovery.md">View page source</a>
             
             <a href="https://github.com/gpustack/gpustack-operator/edit/main/docs/modules/devices/discovery.md">Edit this page</a>
             

@@ -336,7 +336,7 @@ at all, which is a declared single-tenant topology rather than a fault: `QuotaLe
 
 ## Operating notes
 
-**A Binding's deletion is held for three different reasons, and the condition says which.** Read the
+**A Binding's deletion can be held for several reasons, and the condition says which.** Read the
 reason on `Releasable=False` before acting. They need different remedies:
 
 - `HeldByWorkloads` — a workload in the namespace still references the Binding (it is in
@@ -366,7 +366,7 @@ leader that never started does not hold them. On any other backend the pool may 
 the master; while the master does not answer, the pool stays `Deleting` with `Releasable=False`,
 reason `LedgerNotReleased`, and the pass is retried every 30 seconds.
 
-**There are two ways out of that hold.** Restore the master, so that it answers on its admin address,
+**To clear that hold**, restore the master, so that it answers on its admin address,
 and the next pass completes the release. Or, once the master's ledger is known to be gone or its
 entries no longer matter, remove the finalizer by hand:
 

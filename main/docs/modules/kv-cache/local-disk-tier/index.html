@@ -1708,7 +1708,7 @@ runs, so the command above is the preparation.</p>
 content needs no uid. Emptying is a switch, and it is
 <a href="#cleanup-on-deletion">below</a>
 .</p>
-<p>Five rules the path has to satisfy, all enforced at apply time:</p>
+<p>The path must satisfy the following rules, all enforced at apply time:</p>
 <ul>
 <li>It must be <strong>absolute</strong>.</li>
 <li>It must not be the <strong>root directory</strong>.</li>
@@ -1742,7 +1742,7 @@ about which group it means.</p>
 one entry, so that group cannot be removed, and replacing it in place is the forbidden edit. Deleting
 the <code>KVCacheBackend</code> is what is left, and it takes the leader and every member with it. Put a tier on
 the last group if you want to be able to take it off.</p>
-<p><strong>Three failure modes, all loud:</strong></p>
+<p><strong>Failure modes are all loud:</strong></p>
 <table>
   <thead>
       <tr>
@@ -1755,7 +1755,7 @@ the last group if you want to be able to take it off.</p>
       <tr>
           <td>Refused at <code>kubectl apply</code></td>
           <td>Admission refusal message</td>
-          <td>The path breaks one of the five rules above, or the tier was added, removed or repathed on a running group. Fix the path, or leave the tier alone; the message names which rule</td>
+          <td>The path breaks one of the rules above, or the tier was added, removed or repathed on a running group. Fix the path, or leave the tier alone; the message names which rule</td>
       </tr>
       <tr>
           <td>Member <code>Pod</code> stuck</td>
@@ -1900,7 +1900,7 @@ memory floor that makes this tier reachable.</div>
           
           
           <nav class="page-actions" aria-label="Page source">
-            <a href="https://github.com/gpustack/gpustack-operator/blob/6e89f9655775b1dbc51589e6b63106fa96589212/docs/modules/kv-cache/local-disk-tier.md">View page source</a>
+            <a href="https://github.com/gpustack/gpustack-operator/blob/8e360b85906e14da2876a57ca352adabce08286d/docs/modules/kv-cache/local-disk-tier.md">View page source</a>
             
             <a href="https://github.com/gpustack/gpustack-operator/edit/main/docs/modules/kv-cache/local-disk-tier.md">Edit this page</a>
             

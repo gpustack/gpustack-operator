@@ -1824,7 +1824,7 @@ before it can clean up costs a later allocation nothing.</p>
 <p>A container step that cannot be taken is <strong>printed complete</strong>, and the row says it was emitted. That
 is an answer, not a failure of the node, and it does not affect the exit code. Whether it runs as
 printed depends on the case: the two below that write nothing to the host name what you have to put
-there first, and the <code>ctr</code> row names a CLI this host does not have. Five cases reach it:</p>
+there first, and the <code>ctr</code> row names a CLI this host does not have. The following cases reach it:</p>
 <table>
   <thead>
       <tr>
@@ -2257,7 +2257,7 @@ describes what that costs and what the probe image has to carry.</p>
 reports: a 24564 MiB card caps at 12282, a 65536 MiB one at 32768. Half rather than a sliver because
 the figure is the evidence, and a cap near the card&rsquo;s own size could be read as the card.</p>
 <h2 id="reading-the-result">Reading the result</h2>
-<p>One YAML document goes to stdout, with <strong>three sections</strong>. This outline uses <code>...</code> for omitted
+<p>One YAML document goes to stdout, with the following sections. This outline uses <code>...</code> for omitted
 values and rows:</p>
 <div class="code-block">
   <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
@@ -2307,7 +2307,7 @@ it</a>
 .</p>
 <p><strong>A policy that no readable configuration names is reported as <code>unknown</code>, never as the kubelet&rsquo;s
 default.</strong> Reporting <code>none</code> because nothing was found would publish a value nobody read. An
-<code>unknown</code> always carries a <code>note</code> saying which of the four reasons applies: nothing the kubelet
+<code>unknown</code> always carries a <code>note</code> saying which reason applies: nothing the kubelet
 reads named one, a file could not be read, two distribution trees name different policies, or the
 host&rsquo;s process table was not visible.</p>
 <p><strong>That last one reports &ldquo;not read&rdquo;, not a value.</strong> Without the host&rsquo;s <code>/proc</code> nothing can say which
@@ -2334,7 +2334,7 @@ second run&rsquo;s stale sweep would remove the first run&rsquo;s live probes, a
 was killed mid-measurement reports as unable to slice. A second run therefore refuses before it
 sweeps anything, reports every manufacturer <code>unavailable</code> naming the lock, and exits non-zero.
 <code>--dry-run</code> is exempt: it starts nothing and writes nothing.</p>
-<p><strong>A failed detection stops that manufacturer&rsquo;s other two questions.</strong> Detection is the floor the rest
+<p><strong>A failed detection stops that manufacturer&rsquo;s remaining questions.</strong> Detection is the floor the rest
 stands on, so when it reads <code>unavailable</code> (the container cannot see hardware the host reports, or the
 accelerators answered but could not be named) the group carries its detection block, no rows, and a
 <code>note</code> saying the remaining questions are unanswerable. Fix what the detection <em><code>reason</code></em> names and run
@@ -2469,7 +2469,7 @@ never creates.</div>
           
           
           <nav class="page-actions" aria-label="Page source">
-            <a href="https://github.com/gpustack/gpustack-operator/blob/6e89f9655775b1dbc51589e6b63106fa96589212/docs/modules/devices/preflight.md">View page source</a>
+            <a href="https://github.com/gpustack/gpustack-operator/blob/8e360b85906e14da2876a57ca352adabce08286d/docs/modules/devices/preflight.md">View page source</a>
             
             <a href="https://github.com/gpustack/gpustack-operator/edit/main/docs/modules/devices/preflight.md">Edit this page</a>
             

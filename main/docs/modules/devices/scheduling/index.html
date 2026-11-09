@@ -1867,7 +1867,7 @@ A drained queue also stops its running <code>Instance</code>s — see <a href="/
 <code>ClusterQueue</code> names may be longer, so it is named <code>gpustack-fnv64-${fnv64a(ClusterQueue name)}</code> — always
 31 characters — and records the full name in the <code>schedule.gpustack.ai/queue</code> annotation.</p>
 <h3 id="per-accelerator-admission-check">Per-accelerator admission check</h3>
-<p>The per-accelerator <strong><code>AdmissionCheck</code></strong>, third of the five gates; its behavior is in
+<p>The per-accelerator <strong><code>AdmissionCheck</code></strong>, part of the admission chain; its behavior is in
 <a href="/gpustack-operator/main/docs/modules/devices/admission/#gate-3-per-accelerator-admissioncheck">Admission</a>
 .</p>
 <nav class="reading-footer" aria-label="Further reading">
@@ -1880,7 +1880,7 @@ A drained queue also stops its running <code>Instance</code>s — see <a href="/
     </section><section class="next-page">
         <h2>Next</h2>
         <div><a href="/gpustack-operator/main/docs/modules/devices/admission/">Admission</a>
- — the five gates a request passes.</div>
+ — the gates a request passes.</div>
       </section></nav>
 
       </article>
@@ -1892,7 +1892,7 @@ A drained queue also stops its running <code>Instance</code>s — see <a href="/
           
           
           <nav class="page-actions" aria-label="Page source">
-            <a href="https://github.com/gpustack/gpustack-operator/blob/6e89f9655775b1dbc51589e6b63106fa96589212/docs/modules/devices/scheduling.md">View page source</a>
+            <a href="https://github.com/gpustack/gpustack-operator/blob/8e360b85906e14da2876a57ca352adabce08286d/docs/modules/devices/scheduling.md">View page source</a>
             
             <a href="https://github.com/gpustack/gpustack-operator/edit/main/docs/modules/devices/scheduling.md">Edit this page</a>
             

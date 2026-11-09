@@ -2,13 +2,13 @@
 
 > GPUStack Operator discovers accelerators, organizes capacity into pools, and schedules Kubernetes workloads for interactive use and model serving.
 
-Documentation version: main. Source revision: 6e89f9655775b1dbc51589e6b63106fa96589212.
+Documentation version: main. Source revision: 8e360b85906e14da2876a57ca352adabce08286d.
 These pages come from the repository's docs/ sources. For version-specific behavior, use the
 documentation and code for your release. This index routes questions; follow its links for evidence.
 
 ## Getting Started
 
-- [Architecture](https://docs.gpustack.ai/gpustack-operator/main/docs/getting-started/architecture/index.md): See the operator’s four-stage path.
+- [Architecture](https://docs.gpustack.ai/gpustack-operator/main/docs/getting-started/architecture/index.md): See the operator’s scheduling path.
 - [Vendor Prerequisites](https://docs.gpustack.ai/gpustack-operator/main/docs/getting-started/vendor-prerequisites/index.md): Review third-party dependencies and prepare each manufacturer’s driver.
 
 ## Walkthroughs
@@ -34,7 +34,7 @@ documentation and code for your release. This index routes questions; follow its
 - [Device Discovery](https://docs.gpustack.ai/gpustack-operator/main/docs/modules/devices/discovery/index.md): Trace hardware detection and allocation.
 - [Accelerator Requests](https://docs.gpustack.ai/gpustack-operator/main/docs/modules/devices/requests/index.md): Look up resource keys and valid requests.
 - [Scheduling Chain](https://docs.gpustack.ai/gpustack-operator/main/docs/modules/devices/scheduling/index.md): Follow capacity from labels to queues.
-- [Admission](https://docs.gpustack.ai/gpustack-operator/main/docs/modules/devices/admission/index.md): Understand the five request checks.
+- [Admission](https://docs.gpustack.ai/gpustack-operator/main/docs/modules/devices/admission/index.md): Understand the request checks.
 - [NVIDIA MIG Operations](https://docs.gpustack.ai/gpustack-operator/main/docs/modules/devices/nvidia-mig/index.md): Enable and recover NVIDIA partitions.
 - [Hygon MIG Operations](https://docs.gpustack.ai/gpustack-operator/main/docs/modules/devices/hygon-mig/index.md): Enable and recover Hygon partitions.
 - [T-Head MIG Operations](https://docs.gpustack.ai/gpustack-operator/main/docs/modules/devices/thead-mig/index.md): Enable and recover T-Head partitions.
@@ -119,7 +119,7 @@ documentation and code for your release. This index routes questions; follow its
 
 ## Optional
 
-- [Repository navigation](https://github.com/gpustack/gpustack-operator/blob/6e89f9655775b1dbc51589e6b63106fa96589212/docs/README.md): Module relationships, design records, code entry points and applicable skills for contributors.
+- [Repository navigation](https://github.com/gpustack/gpustack-operator/blob/8e360b85906e14da2876a57ca352adabce08286d/docs/README.md): Module relationships, design records, code entry points and applicable skills for contributors.
 - [Development](https://docs.gpustack.ai/gpustack-operator/main/docs/contribute/development/index.md): Build, generate and lint the project.
 - [Local Cluster Setup](https://docs.gpustack.ai/gpustack-operator/main/docs/contribute/local-cluster-setup/index.md): Install kind and provide a cluster for development tests.
 - [Internals](https://docs.gpustack.ai/gpustack-operator/main/docs/contribute/internals/index.md): Review startup and naming constraints.

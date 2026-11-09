@@ -1545,7 +1545,7 @@ GPU instance plus a single compute instance covering all of it. GPUStack address
 device id, and a GPU instance subdivided into several compute instances has several (a share of the
 compute each, all on the same memory), so it is refused rather than half-addressed.</li>
 </ul>
-<p>All three rules are shared with NVIDIA.</p>
+<p>These rules are shared with NVIDIA.</p>
 <p>What a PPU offers:</p>
 <div class="code-block">
   <div class="code-toolbar"><span>console</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
@@ -1732,7 +1732,7 @@ reports logical slicing; an unpartitioned PPU advertises logical slices.</p>
 <p>Run the inverse: let every <code>Pod</code> using the PPU&rsquo;s partitions go and reclaim, then remove any instance that
 remains and flip the mode back.</p>
 <p><strong>Destroy the Compute Instance before its GPU Instance.</strong> The driver refuses otherwise — <code>GPU instance &lt;G&gt; is in use, please destory related compute instances then try again</code> (the manufacturer&rsquo;s own spelling), with
-a non-zero exit. The reclaim does this in order; by hand it is two steps:</p>
+a non-zero exit. The reclaim does this in order; follow these steps by hand:</p>
 <div class="code-block">
   <div class="code-toolbar"><span>console</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-console" data-lang="console"><span class="line"><span class="cl"><span class="gp">$</span> ppu-smi mig -i &lt;N&gt; -gi &lt;G&gt; -ci &lt;C&gt; -dci
@@ -1807,7 +1807,7 @@ partition is placed and reclaimed)</li></ul>
           
           
           <nav class="page-actions" aria-label="Page source">
-            <a href="https://github.com/gpustack/gpustack-operator/blob/6e89f9655775b1dbc51589e6b63106fa96589212/docs/modules/devices/thead-mig.md">View page source</a>
+            <a href="https://github.com/gpustack/gpustack-operator/blob/8e360b85906e14da2876a57ca352adabce08286d/docs/modules/devices/thead-mig.md">View page source</a>
             
             <a href="https://github.com/gpustack/gpustack-operator/edit/main/docs/modules/devices/thead-mig.md">Edit this page</a>
             

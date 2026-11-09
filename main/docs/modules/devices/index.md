@@ -49,7 +49,7 @@ For physical partitions, use the [NVIDIA](/gpustack-operator/main/docs/modules/d
 
 ## Troubleshooting
 
-For a rejected request, check the [admission gates](/gpustack-operator/main/docs/modules/devices/admission/index.md#five-gates) and request rules.
+For a rejected request, check the [admission gates](/gpustack-operator/main/docs/modules/devices/admission/index.md#gates) and request rules.
 For node checks and their results, see [Preflight Checks](/gpustack-operator/main/docs/modules/devices/preflight/index.md#reading-the-result).
 For partition recovery, use the runbook for the manufacturer.
 

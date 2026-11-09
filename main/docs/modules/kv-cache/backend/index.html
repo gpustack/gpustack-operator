@@ -1735,7 +1735,7 @@ setting it produces a filter matching a device no host has. <strong>Empty means 
 <p><strong><em><code>members[].extraArgs</code></em> is the exception to the mapping above: it renders into the container&rsquo;s
 argv</strong>, as <code>-D key=value</code>, not into an environment variable. <em><code>leader.extraArgs</code></em> does the same on the
 leader, as <code>-key=value</code>.</p>
-<p><strong>Either way the value is world-readable, on three paths.</strong> It is stored verbatim on the
+<p><strong>Either way the value is world-readable through these paths.</strong> It is stored verbatim on the
 <code>KVCacheBackend</code> (which is cluster-scoped, so reading it needs no access to any workload), and it is
 rendered into the container&rsquo;s argv, readable again from the <code>Pod</code> and from the <code>DaemonSet</code> or <code>Deployment</code>
 carrying it. <strong>Do not put a credential in <em><code>extraArgs</code></em>.</strong> Nothing refuses one at admission.</p>
@@ -1998,7 +1998,7 @@ must discover its current endpoint rather than reuse a previous connection addre
 </span></span><span class="line"><span class="cl"><span class="go">NAME            TYPE       PHASE   ENDPOINT                                        CAPACITY
 </span></span></span><span class="line"><span class="cl"><span class="go">mooncake-dram   Mooncake   Ready   mooncake-dram-leader.gpustack-system.svc:50051  12Gi
 </span></span></span></code></pre></div>
-</div><p>Five phases: <code>Provisioning</code>, <code>Ready</code>, <code>Degraded</code>, <code>Error</code>, <code>Deleting</code>. <code>Ready</code> carries no
+</div><p>Phases: <code>Provisioning</code>, <code>Ready</code>, <code>Degraded</code>, <code>Error</code>, <code>Deleting</code>. <code>Ready</code> carries no
 <em><code>phaseMessage</code></em>; every other phase carries one.</p>
 <p>Conditions report independent aspects of backend health: <code>LeaderAvailable</code>, <code>MembersMounted</code>, <code>CapacityObserved</code>, <code>PoolWrites</code>, <code>Deletable</code> and
 <code>RolloutComplete</code>. Two more appear only where they have something to judge: <code>ElectionObserved</code>
@@ -2066,7 +2066,7 @@ zero is indistinguishable at the parser from a genuinely empty cache. Publishing
 row carries the leader&rsquo;s <em><code>segmentID</code></em>, <em><code>clientID</code></em> and advertised <em><code>segmentName</code></em>; the list is keyed by the
 unique segment ID because several members may legitimately share a name.</p>
 <p>The leader is what allocation goes through, so a running member <code>Pod</code> it does not list holds nothing
-and is counted in <code>MembersMounted</code>&rsquo;s message instead. The two fields the listing cannot supply
+and is counted in <code>MembersMounted</code>&rsquo;s message instead. The fields the listing cannot supply
 (node name and medium) are joined in from the member <code>Pod</code> behind that segment, and left <strong>empty</strong>
 rather than guessed when nothing matches.</p>
 <p><strong>Two ready host-network member <code>Pod</code>s that share an address make <code>Pod</code> attribution ambiguous.</strong> Their
@@ -2367,7 +2367,7 @@ a quota on this store, and what a quota ceiling buys)</li><li><a href="/gpustack
           
           
           <nav class="page-actions" aria-label="Page source">
-            <a href="https://github.com/gpustack/gpustack-operator/blob/6e89f9655775b1dbc51589e6b63106fa96589212/docs/modules/kv-cache/backend.md">View page source</a>
+            <a href="https://github.com/gpustack/gpustack-operator/blob/8e360b85906e14da2876a57ca352adabce08286d/docs/modules/kv-cache/backend.md">View page source</a>
             
             <a href="https://github.com/gpustack/gpustack-operator/edit/main/docs/modules/kv-cache/backend.md">Edit this page</a>
             
