@@ -1401,7 +1401,7 @@
       "type": "object"
     },
     "modelTransfer": {
-      "description": "Remote weight delivery (model-transfer): the source runtime's identity and\npolicy, the per-manufacturer broker+worker DaemonSets, their serving\ncertificates and headless Services. Remote delivery stays\nOFF until an administrator turns it on here — `modelTransfer.enabled=false` ships\nnothing and declares nothing, so a cluster that never opts in keeps every Pod,\ncondition and status field exactly as it was. Rollback is the same switch read\nbackwards: back to `Disabled`, and the worker reasserts it on its next start.",
+      "description": "Remote weight delivery (model-transfer): the source runtime's identity and\npolicy, the per-manufacturer broker+worker DaemonSets, their serving\ncertificates and headless Services. Remote delivery policy stays\nOFF (`policy: Disabled`) until an administrator turns it on — a cluster at\ndefaults keeps every Pod, condition and status field unchanged until `policy`\nor the `model-artifact-remote-delivery-policy` Setting is enabled.",
       "properties": {
         "brokerResources": {
           "description": "The broker container's resources.",
@@ -1441,7 +1441,7 @@
           "type": "object"
         },
         "enabled": {
-          "default": false,
+          "default": true,
           "description": "Deploy the remote delivery source runtime: a ServiceAccount and the minimal RBAC\na source broker runs under, one broker+worker DaemonSet per manufacturer named in\n`images`, the session serving certificate each broker's TLS-only listener serves\nunder, and a headless Service per manufacturer an engine resolves exact source\nendpoints through. Nothing here grants a device, a cache path, or a tenant secret,\nand a disk-only warm-up Pod never uses this identity. With `images` empty the\nidentity ships and no source runtime does; with `enabled=false` none of it renders.",
           "title": "enabled",
           "type": "boolean"
@@ -1468,7 +1468,7 @@
             "minLength": 1,
             "type": "string"
           },
-          "description": "Manufacturer-to-image map for the remote delivery source DaemonSets (`amd`,\n`ascend`, `nvidia`). Values are full image references, for example\n{nvidia: \"gpustack/model-transfer:v0.1.0-cuda12.9\",\namd: \"gpustack/model-transfer:v0.1.0-rocm7.2\",\nascend: \"gpustack/model-transfer:v0.1.0-cann9.2-a5\"}, used as supplied — no\n`global` registry, namespace or tag rewrite applies, and a missing manufacturer\nships no source runtime for itself. Each supported key maps to its\n`global.manufacturers` row: the row's PCI vendor is the DaemonSet's placement\nrequirement (`nodeSelector`) and its runtime fields decide driver injection.\nDefaults cover NVIDIA, AMD and Ascend A5. Disk warm-up retains its separate\nlightweight Python Alpine image.",
+          "description": "Manufacturer-to-image map for the remote delivery source DaemonSets (`amd`,\n`ascend`, `nvidia`). Values are full image references, for example\n{nvidia: \"gpustack/model-transfer:v0.1.0-cuda12.9\",\namd: \"gpustack/model-transfer:v0.1.0-rocm7.2\",\nascend: \"gpustack/model-transfer:v0.1.0-cann9.2-a5\"}; `global.imageRegistry` (or\n`global.hub`) and `global.imageNamespace` rewrite the registry and namespace\nsegments when set while preserving the image's own tag, and a missing manufacturer\nships no source runtime for itself. Each supported key maps to its\n`global.manufacturers` row: the row's PCI vendor is the DaemonSet's placement\nrequirement (`nodeSelector`) and its runtime fields decide driver injection.\nDefaults cover NVIDIA, AMD and Ascend A5. Disk warm-up retains its separate\nlightweight Python Alpine image.",
           "properties": {
             "amd": {
               "default": "gpustack/model-transfer:v0.1.0-rocm7.2",
@@ -1498,7 +1498,7 @@
         },
         "policy": {
           "default": "Disabled",
-          "description": "The cluster's remote delivery policy the chart declares on the worker, the\nsame way `modelManager.enabled` declares the delivery mode: Disabled, the\ndelivery is off; Require, a qualified replica's startup holds until a\nprepared source serves the weights and never falls back; Prefer, remote\ndelivery is used when a prepared source is available and the declared\nidentity-preserving fallback otherwise. Declared only while `enabled`; Require\nand Prefer additionally need the model-manager plugin installed, which the\nworker's Setting admission enforces independently of this value.",
+          "description": "The cluster's remote delivery policy the chart declares on the worker when set to\n`Require` or `Prefer`: Disabled (default), the delivery is off and no worker env var\nis declared so the Setting remains editable at runtime; Require, a qualified replica's\nstartup holds until a prepared source serves the weights and never falls back; Prefer,\nremote delivery is used when a prepared source is available and the declared\nidentity-preserving fallback otherwise. Declared only while `enabled` and not\n`Disabled`; Require and Prefer additionally need the model-manager plugin installed,\nwhich the worker's Setting admission enforces independently of this value.",
           "enum": [
             "Disabled",
             "Require",
@@ -2262,7 +2262,7 @@
           "type": "string"
         },
         "disableApplications": {
-          "description": "Applications the worker must not install at runtime, or `*` for all of them. This chart\ndeploys every one of them itself, so the default takes the worker out of that business\nentirely. Keep the wildcard: whenever this chart deploys the worker, anything left off the\nlist makes the worker install a SECOND release of this same chart, whose render overlaps this\none's. Helm refuses an object another release owns, so that install fails and the worker's\nstartup with it. Handing a component back would mean disabling it here and in this chart's\nown switch for it, in step, through every upgrade — nothing checks that, which is why the\nsupported split is all or nothing. The worker installs applications only where no chart\ndeploys it, see\n[Installation Modes](https://github.com/gpustack/gpustack-operator/blob/main/docs/operate/installation-modes.md).\nThe value is templated rather than appended through `extraArgs` because the flag accumulates across\noccurrences, so a second one could only ever disable more. Accepted names: `*`, `kueue`,\n`node-feature-discovery`, `csi-driver-nfs`, `csi-driver-s3`, `device-manager`, `model-manager`.",
+          "description": "Applications the worker must not install at runtime, or `*` for all of them. This chart\ndeploys every one of them itself, so the default takes the worker out of that business\nentirely. Keep the wildcard: whenever this chart deploys the worker, anything left off the\nlist makes the worker install a SECOND release of this same chart, whose render overlaps this\none's. Helm refuses an object another release owns, so that install fails and the worker's\nstartup with it. Handing a component back would mean disabling it here and in this chart's\nown switch for it, in step, through every upgrade — nothing checks that, which is why the\nsupported split is all or nothing. The worker installs applications only where no chart\ndeploys it, see\n[Installation Modes](https://github.com/gpustack/gpustack-operator/blob/main/docs/operate/installation-modes.md).\nThe value is templated rather than appended through `extraArgs` because the flag accumulates across\noccurrences, so a second one could only ever disable more. Accepted names: `*`, `kueue`,\n`node-feature-discovery`, `csi-driver-nfs`, `csi-driver-s3`, `device-manager`, `model-manager`,\n`model-transfer`.",
           "items": {
             "anyOf": [
               {

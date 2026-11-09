@@ -267,7 +267,8 @@ for entry in \
   "deploy/csi-nfs-controller|required" \
   "deploy/csi-s3-controller|required" \
   "daemonset/gpustack-operator-device-manager-${MANUFACTURER}|required" \
-  "daemonset/gpustack-operator-model-manager|required"; do
+  "daemonset/gpustack-operator-model-manager|required" \
+  "daemonset/gpustack-operator-model-transfer-${MANUFACTURER}|required"; do
   obj="${entry%|*}"
   if ! kubectl -n "$NS" get "$obj" >/dev/null 2>&1; then
     record FAIL "in the worker's own release" "$obj missing"
@@ -304,6 +305,13 @@ if [ "$mm_img" = "$IMAGE" ]; then
   record PASS "model-manager image == worker image" "$mm_img"
 else
   record FAIL "model-manager image == worker image" "model-manager [${mm_img:-none}] != worker [${IMAGE}]"
+fi
+mt_img=$(kubectl -n "$NS" get "daemonset/gpustack-operator-model-transfer-${MANUFACTURER}" \
+           -o jsonpath='{.spec.template.spec.containers[0].image}' 2>/dev/null)
+if [ "$mt_img" = "$IMAGE" ]; then
+  record PASS "model-transfer broker image == worker image" "$mt_img"
+else
+  record FAIL "model-transfer broker image == worker image" "model-transfer broker [${mt_img:-none}] != worker [${IMAGE}]"
 fi
 
 # And it stayed one release: no per-application releases came back alongside it.

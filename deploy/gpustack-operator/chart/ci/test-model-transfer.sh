@@ -86,16 +86,30 @@ function assert_vendor_documents() {
 
 enabled=(--set modelTransfer.images.amd=null --set modelTransfer.enabled=true --set "modelTransfer.source.maxMemoryBytes=${budget_bytes}" --set "modelTransfer.images.nvidia=${image_nvidia}" --set "modelTransfer.images.ascend=${image_ascend}")
 
-# Off by default, and nothing else in the release changes: not a Pod, not a
-# policy variable, not a mount on the model-manager.
-disabled="$(render)"
+# Enabled by default while keeping the remote delivery policy Disabled (no
+# worker policy env var rendered until policy is Require or Prefer); setting
+# modelTransfer.enabled=false turns the whole source runtime and model-manager
+# handoff off.
+disabled="$(render --set modelTransfer.enabled=false)"
 if grep -q 'model-transfer' <<<"${disabled}"; then
   echo 'disabled: model-transfer resources rendered' >&2
   exit 1
 fi
 
-# The published defaults render all three source fleets when explicitly enabled.
-default_fleets="$(render --set modelTransfer.enabled=true --show-only templates/model-transfer/daemonset.yaml)"
+worker_default="$(render --show-only templates/worker/deployment.yaml)"
+if grep -q 'GPUSTACK_MODEL_ARTIFACT_REMOTE_DELIVERY_POLICY' <<<"${worker_default}"; then
+  echo 'defaults: Disabled policy must not render GPUSTACK_MODEL_ARTIFACT_REMOTE_DELIVERY_POLICY on the worker' >&2
+  exit 1
+fi
+worker_prefer="$(render --set modelTransfer.policy=Prefer --show-only templates/worker/deployment.yaml)"
+if ! grep -Fq 'name: GPUSTACK_MODEL_ARTIFACT_REMOTE_DELIVERY_POLICY' <<<"${worker_prefer}" \
+  || ! grep -Fq 'value: "Prefer"' <<<"${worker_prefer}"; then
+  echo 'policy: Prefer must render GPUSTACK_MODEL_ARTIFACT_REMOTE_DELIVERY_POLICY=Prefer on the worker' >&2
+  exit 1
+fi
+
+# The published defaults render all three source fleets out of the box.
+default_fleets="$(render --show-only templates/model-transfer/daemonset.yaml)"
 if [[ "$(grep -c '^kind: DaemonSet$' <<<"${default_fleets}")" -ne 3 ]]; then
   echo 'defaults: expected AMD, Ascend and NVIDIA source DaemonSets' >&2
   exit 1
@@ -348,8 +362,8 @@ if [[ "$(grep -c 'fieldPath: status.podIP' <<<"${layered}")" -ne 4 ]]; then
   exit 1
 fi
 
-# Release, namespace and image overrides: the operator half follows the global
-# image settings, the vendor reference is used as supplied.
+# Release, namespace and image overrides: both the broker and the vendor source
+# references follow the global image settings.
 overridden="$(render --namespace ops-ns --set namespaceOverride=real-ops \
   "${enabled[@]}" \
   --set global.imageRegistry=reg.local --set global.imageNamespace=mirror --set global.imagePullPolicy=Always \
@@ -362,13 +376,26 @@ if ! grep -Eq '^          image: "reg\.local/mirror/gpustack-operator:' <<<"${ov
   echo 'overrides: the broker image must follow the global image settings' >&2
   exit 1
 fi
-if [[ "$(grep -cF "image: \"${image_nvidia}\"" <<<"${overridden}")" -ne 2 ]] \
-  || [[ "$(grep -cF "image: \"${image_ascend}\"" <<<"${overridden}")" -ne 2 ]]; then
-  echo 'overrides: vendor image references are used as supplied on stage-libs and worker, never rewritten' >&2
+if [[ "$(grep -cF 'image: "reg.local/mirror/model-transfer:v1-cuda12"' <<<"${overridden}")" -ne 2 ]] \
+  || [[ "$(grep -cF 'image: "reg.local/mirror/model-transfer:v1-cann9"' <<<"${overridden}")" -ne 2 ]]; then
+  echo 'overrides: vendor image references must follow the global registry and namespace settings on stage-libs and worker' >&2
   exit 1
 fi
 if [[ "$(grep -c '^          imagePullPolicy: Always$' <<<"${overridden}")" -ne 6 ]]; then
   echo 'overrides: the global pull policy reaches every initContainer and container' >&2
+  exit 1
+fi
+
+digest_ref="registry.example:5000/custom/model-transfer@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+overridden_digest="$(render \
+  --set modelTransfer.images.amd=null \
+  --set modelTransfer.images.ascend=null \
+  --set "modelTransfer.images.nvidia=${digest_ref}" \
+  --set global.imageRegistry=reg.local:5000 \
+  --set global.imageNamespace=mirror \
+  --show-only templates/model-transfer/daemonset.yaml)"
+if [[ "$(grep -cF 'image: "reg.local:5000/mirror/model-transfer@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"' <<<"${overridden_digest}")" -ne 2 ]]; then
+  echo 'overrides: digest-pinned vendor image with registry port must rewrite registry and namespace while keeping digest' >&2
   exit 1
 fi
 
@@ -505,7 +532,7 @@ if ! grep -q -- '--model-transfer-state-root=/var/lib/gpustack/model-transfer' <
   echo 'handoff: the model-manager must read the ledger parent read-only' >&2
   exit 1
 fi
-manager_off="$(render --show-only templates/model-manager/daemonset.yaml)"
+manager_off="$(render --set modelTransfer.enabled=false --show-only templates/model-manager/daemonset.yaml)"
 if grep -q 'model-transfer' <<<"${manager_off}"; then
   echo 'handoff: with the feature off, the model-manager renders untouched' >&2
   exit 1

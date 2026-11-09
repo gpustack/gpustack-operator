@@ -7,10 +7,8 @@
   wire stays on the Pod's loopback, and the two containers share nothing but the Pod-local
   bootstrap credential and the model cache. A DaemonSet renders per key of
   modelTransfer.images — an empty map ships no source runtime at all, and a manufacturer
-  absent from the map ships none for itself; the images are used as supplied, with no
-  registry, namespace or tag rewrite, because a vendor source image is not an operator
-  image and the `global` registry settings name the operator's mirrors. The global
-  imagePullPolicy still applies to both broker and vendor containers.
+  absent from the map ships none for itself; the global registry, namespace and
+  imagePullPolicy settings apply to both broker and vendor containers.
 */}}
 {{- $root := . }}
 {{- $mtName := include "gpustack-operator.modelTransfer.fullname" . }}
@@ -40,7 +38,7 @@
 {{- $workerResources := $root.Values.modelTransfer.workerResources | default dict }}
 {{- range $manufacturer := list "amd" "ascend" "nvidia" }}
 {{- if hasKey $root.Values.modelTransfer.images $manufacturer }}
-{{- $image := index $root.Values.modelTransfer.images $manufacturer }}
+{{- $image := include "gpustack-operator.imageRef" (dict "root" $root "ref" (index $root.Values.modelTransfer.images $manufacturer)) }}
 {{- $identity := index $root.Values.global.manufacturers $manufacturer }}
 ---
 apiVersion: apps/v1

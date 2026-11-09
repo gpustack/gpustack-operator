@@ -51,7 +51,7 @@ component, and the manufacturer map.
 > spares existing clusters a release migration.
 
 `--disable-applications` accepts `*` plus `kueue`, `node-feature-discovery`, `csi-driver-nfs`,
-`csi-driver-s3`, `device-manager`, `model-manager`, validated at flag-parse against `pkg/worker/kuberess`'s map, which
+`csi-driver-s3`, `device-manager`, `model-manager`, `model-transfer`, validated at flag-parse against `pkg/worker/kuberess`'s map, which
 also renders the overlay's switches.
 
 `gpustack-cpu-info` is in neither set: that `NodeFeatureRule` has **no `enabled` switch**, since the chain
@@ -91,6 +91,9 @@ These switches change what a mode installs:
   switch was how the worker came to install them.
 - `modelManager.enabled=false` — no Model Manager `DaemonSet` and no `CSIDriver`, and the worker
   then seeds no `Node` delivery; see [Model Store Operations](../modules/model-delivery/operations.md#prerequisites).
+- `modelTransfer.enabled=false` — no remote weight delivery source `DaemonSet`s, `Service`s, RBAC or
+  TLS `Secret`s, and the Model Manager omits the source ledger mount and CSI token request; see
+  [Remote Weight Delivery](../modules/model-delivery/remote.md#configuration).
 - `worker.enabled=false` — the chart deploys only the applications, what image mode's overlay sets.
 
 ## Deployed and applied resources

@@ -218,8 +218,18 @@ done
 #    Delete by exact name, never a label sweep, so a co-located standalone GPUStack app's
 #    own Secrets are untouched.
 worker_cert_secret="${2:-gpustack-operator-worker-cert}"
+fullname_prefix="${worker_cert_secret%-worker-cert}"
+if [ "${fullname_prefix}" = "${worker_cert_secret}" ] || [ -z "${fullname_prefix}" ]; then
+  fullname_prefix="gpustack-operator"
+fi
 for s in "${worker_cert_secret}" gpustack-settings \
-  kueue-webhook-server-cert kueue-metrics-server-cert kueue-visibility-server-cert; do
+  kueue-webhook-server-cert kueue-metrics-server-cert kueue-visibility-server-cert \
+  "${fullname_prefix}-model-transfer-amd-cert" \
+  "${fullname_prefix}-model-transfer-ascend-cert" \
+  "${fullname_prefix}-model-transfer-nvidia-cert" \
+  gpustack-operator-model-transfer-amd-cert \
+  gpustack-operator-model-transfer-ascend-cert \
+  gpustack-operator-model-transfer-nvidia-cert; do
   kubectl -n "${NS}" delete secret "${s}" --ignore-not-found 2>/dev/null || true
 done
 

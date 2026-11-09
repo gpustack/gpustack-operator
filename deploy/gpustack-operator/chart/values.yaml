@@ -278,7 +278,8 @@ worker:
   # [Installation Modes](https://github.com/gpustack/gpustack-operator/blob/main/docs/operate/installation-modes.md).
   # The value is templated rather than appended through `extraArgs` because the flag accumulates across
   # occurrences, so a second one could only ever disable more. Accepted names: `*`, `kueue`,
-  # `node-feature-discovery`, `csi-driver-nfs`, `csi-driver-s3`, `device-manager`, `model-manager`.
+  # `node-feature-discovery`, `csi-driver-nfs`, `csi-driver-s3`, `device-manager`, `model-manager`,
+  # `model-transfer`.
   disableApplications:
     - "*"
   # -- The IPv4 pod CIDRs the Instance namespace-isolation NetworkPolicy carves out of its
@@ -514,11 +515,10 @@ modelManager:
 
 # -- Remote weight delivery (model-transfer): the source runtime's identity and
 # policy, the per-manufacturer broker+worker DaemonSets, their serving
-# certificates and headless Services. Remote delivery stays
-# OFF until an administrator turns it on here — `modelTransfer.enabled=false` ships
-# nothing and declares nothing, so a cluster that never opts in keeps every Pod,
-# condition and status field exactly as it was. Rollback is the same switch read
-# backwards: back to `Disabled`, and the worker reasserts it on its next start.
+# certificates and headless Services. Remote delivery policy stays
+# OFF (`policy: Disabled`) until an administrator turns it on — a cluster at
+# defaults keeps every Pod, condition and status field unchanged until `policy`
+# or the `model-artifact-remote-delivery-policy` Setting is enabled.
 modelTransfer:
   # -- Deploy the remote delivery source runtime: a ServiceAccount and the minimal RBAC
   # a source broker runs under, one broker+worker DaemonSet per manufacturer named in
@@ -527,15 +527,15 @@ modelTransfer:
   # endpoints through. Nothing here grants a device, a cache path, or a tenant secret,
   # and a disk-only warm-up Pod never uses this identity. With `images` empty the
   # identity ships and no source runtime does; with `enabled=false` none of it renders.
-  enabled: false
-  # -- The cluster's remote delivery policy the chart declares on the worker, the
-  # same way `modelManager.enabled` declares the delivery mode: Disabled, the
-  # delivery is off; Require, a qualified replica's startup holds until a
-  # prepared source serves the weights and never falls back; Prefer, remote
-  # delivery is used when a prepared source is available and the declared
-  # identity-preserving fallback otherwise. Declared only while `enabled`; Require
-  # and Prefer additionally need the model-manager plugin installed, which the
-  # worker's Setting admission enforces independently of this value.
+  enabled: true
+  # -- The cluster's remote delivery policy the chart declares on the worker when set to
+  # `Require` or `Prefer`: Disabled (default), the delivery is off and no worker env var
+  # is declared so the Setting remains editable at runtime; Require, a qualified replica's
+  # startup holds until a prepared source serves the weights and never falls back; Prefer,
+  # remote delivery is used when a prepared source is available and the declared
+  # identity-preserving fallback otherwise. Declared only while `enabled` and not
+  # `Disabled`; Require and Prefer additionally need the model-manager plugin installed,
+  # which the worker's Setting admission enforces independently of this value.
   # @schema
   # enum: ["Disabled", "Require", "Prefer"]
   # @schema
@@ -548,8 +548,9 @@ modelTransfer:
   # `ascend`, `nvidia`). Values are full image references, for example
   # {nvidia: "gpustack/model-transfer:v0.1.0-cuda12.9",
   # amd: "gpustack/model-transfer:v0.1.0-rocm7.2",
-  # ascend: "gpustack/model-transfer:v0.1.0-cann9.2-a5"}, used as supplied — no
-  # `global` registry, namespace or tag rewrite applies, and a missing manufacturer
+  # ascend: "gpustack/model-transfer:v0.1.0-cann9.2-a5"}; `global.imageRegistry` (or
+  # `global.hub`) and `global.imageNamespace` rewrite the registry and namespace
+  # segments when set while preserving the image's own tag, and a missing manufacturer
   # ships no source runtime for itself. Each supported key maps to its
   # `global.manufacturers` row: the row's PCI vendor is the DaemonSet's placement
   # requirement (`nodeSelector`) and its runtime fields decide driver injection.
