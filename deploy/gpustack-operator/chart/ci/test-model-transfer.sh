@@ -86,25 +86,26 @@ function assert_vendor_documents() {
 
 enabled=(--set modelTransfer.images.amd=null --set modelTransfer.enabled=true --set "modelTransfer.source.maxMemoryBytes=${budget_bytes}" --set "modelTransfer.images.nvidia=${image_nvidia}" --set "modelTransfer.images.ascend=${image_ascend}")
 
-# Enabled by default while keeping the remote delivery policy Disabled (no
-# worker policy env var rendered until policy is Require or Prefer); setting
+# Enabled by default with the built-in Prefer policy (no worker policy env var
+# rendered while enabled so the Setting stays editable at runtime); setting
 # modelTransfer.enabled=false turns the whole source runtime and model-manager
-# handoff off.
+# handoff off and declares GPUSTACK_MODEL_ARTIFACT_REMOTE_DELIVERY_POLICY=Disabled
+# on the worker.
 disabled="$(render --set modelTransfer.enabled=false)"
 if grep -q 'model-transfer' <<<"${disabled}"; then
   echo 'disabled: model-transfer resources rendered' >&2
   exit 1
 fi
+worker_module_disabled="$(render --set modelTransfer.enabled=false --show-only templates/worker/deployment.yaml)"
+if ! grep -Fq 'name: GPUSTACK_MODEL_ARTIFACT_REMOTE_DELIVERY_POLICY' <<<"${worker_module_disabled}" \
+  || ! grep -Fq 'value: "Disabled"' <<<"${worker_module_disabled}"; then
+  echo 'enabled=false: must render GPUSTACK_MODEL_ARTIFACT_REMOTE_DELIVERY_POLICY=Disabled on the worker' >&2
+  exit 1
+fi
 
 worker_default="$(render --show-only templates/worker/deployment.yaml)"
 if grep -q 'GPUSTACK_MODEL_ARTIFACT_REMOTE_DELIVERY_POLICY' <<<"${worker_default}"; then
-  echo 'defaults: Disabled policy must not render GPUSTACK_MODEL_ARTIFACT_REMOTE_DELIVERY_POLICY on the worker' >&2
-  exit 1
-fi
-worker_prefer="$(render --set modelTransfer.policy=Prefer --show-only templates/worker/deployment.yaml)"
-if ! grep -Fq 'name: GPUSTACK_MODEL_ARTIFACT_REMOTE_DELIVERY_POLICY' <<<"${worker_prefer}" \
-  || ! grep -Fq 'value: "Prefer"' <<<"${worker_prefer}"; then
-  echo 'policy: Prefer must render GPUSTACK_MODEL_ARTIFACT_REMOTE_DELIVERY_POLICY=Prefer on the worker' >&2
+  echo 'defaults: enabled module must not render GPUSTACK_MODEL_ARTIFACT_REMOTE_DELIVERY_POLICY on the worker' >&2
   exit 1
 fi
 

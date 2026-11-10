@@ -386,7 +386,7 @@ func TestModelStoreSettingsDefaults(t *testing.T) {
 		wantDefault string
 	}{
 		{ModelArtifactDeliveryMode, "model-artifact-delivery-mode", "Engine"},
-		{ModelArtifactRemoteDeliveryPolicy, "model-artifact-remote-delivery-policy", ModelArtifactRemoteDeliveryDisabled},
+		{ModelArtifactRemoteDeliveryPolicy, "model-artifact-remote-delivery-policy", ModelArtifactRemoteDeliveryPrefer},
 		{ModelStoreHighWatermark, "model-store-high-watermark", "80"},
 		{ModelStoreLowWatermark, "model-store-low-watermark", "70"},
 		{ModelStoreDownloadConcurrency, "model-store-download-concurrency", "8"},

@@ -26,9 +26,9 @@ const (
 	ModelArtifactDeliveryNode = "Node"
 )
 
-// The values of ModelArtifactRemoteDeliveryPolicy. The policy is OFF until an administrator
-// names it: a cluster that never opt-in keeps every Pod, condition and status field exactly as
-// it was, and the values spell the two delivery policies the ModelDeployment status echoes.
+// The values of ModelArtifactRemoteDeliveryPolicy. The default is Prefer: a cluster without a
+// prepared source keeps every Pod, condition and status field unchanged, and preparing a source
+// via ModelPrefetch lets eligible deployments use remote delivery with local fallback.
 const (
 	// ModelArtifactRemoteDeliveryDisabled keeps remote weight delivery off entirely.
 	ModelArtifactRemoteDeliveryDisabled = "Disabled"
@@ -421,18 +421,19 @@ var (
 	)
 
 	// ModelArtifactRemoteDeliveryPolicy is the cluster's remote weight delivery policy, and it
-	// defaults to Disabled: nothing about a cluster that does not opt in changes. Require and
-	// Prefer need the model-manager plugin's CSIDriver, because the metadata-only view a remote
-	// replica mounts is the plugin's to serve. The workercore side spells the two delivery
-	// policies the deployment status echoes back.
+	// defaults to Prefer: a cluster without a prepared ModelPrefetch source keeps every Pod,
+	// condition and status field unchanged, while preparing a source enables remote delivery with
+	// identity-preserving fallback. Require and Prefer need the model-manager plugin's CSIDriver,
+	// because the metadata-only view a remote replica mounts is the plugin's to serve. The
+	// workercore side spells the two delivery policies the deployment status echoes back.
 	ModelArtifactRemoteDeliveryPolicy = settings.NewEditable(
 		"model-artifact-remote-delivery-policy",
-		"Indicates the cluster's remote weight delivery policy for qualified hub artifacts: Disabled, the "+
-			"delivery is off; Require, a qualified replica's startup holds until a prepared source serves the "+
-			"weights and never falls back; Prefer, remote delivery is used when a prepared source is available "+
-			"and the declared identity-preserving fallback otherwise. Require and Prefer need the "+
+		"Indicates the cluster's remote weight delivery policy for qualified hub artifacts: Prefer (default), "+
+			"remote delivery is used when a prepared source is available and the declared identity-preserving "+
+			"fallback otherwise; Disabled, the delivery is off; Require, a qualified replica's startup holds "+
+			"until a prepared source serves the weights and never falls back. Require and Prefer need the "+
 			"model-manager plugin installed.",
-		setting.InitializeFromEnv(ModelArtifactRemoteDeliveryDisabled),
+		setting.InitializeFromEnv(ModelArtifactRemoteDeliveryPrefer),
 		setting.AllowEnum(
 			ModelArtifactRemoteDeliveryDisabled,
 			ModelArtifactRemoteDeliveryRequire,

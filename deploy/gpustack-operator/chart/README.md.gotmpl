@@ -109,9 +109,11 @@ fetches nothing beyond the chart itself. Each is pinned at the version shown and
 By default, a `ModelDeployment`'s weights reach the engine the way they always
 have — the node's model-manager plugin materializes them on the node's cache
 (`modelManager`, Node delivery) or the engine downloads them itself (Engine
-delivery). The source runtime (`modelTransfer.enabled=true`) is deployed by
-default on accelerator nodes, while **remote weight delivery policy is off**
-(`modelTransfer.policy: Disabled`) until an administrator turns it on:
+delivery) — unless a `ModelPrefetch` in the same namespace prepares a host-memory
+source. The source runtime (`modelTransfer.enabled=true`) is deployed by default
+on accelerator nodes, and the worker's built-in
+`model-artifact-remote-delivery-policy` `Setting` defaults to `Prefer` (editable
+at runtime to `Disabled`, `Require`, or `Prefer`):
 
 1. `modelTransfer.enabled=true` (default) ships the source runtime's identity: a
    ServiceAccount whose RBAC is what a source broker runs under (TokenReview to
@@ -120,14 +122,11 @@ default on accelerator nodes, while **remote weight delivery policy is off**
    eligibility check resolves against, the Binding's initial annotation, and a
    Role scoped to the operator namespace's ConfigMaps where the Binding-wide
    reservation authority lives — no devices, no cache paths, no tenant secrets).
-2. `modelTransfer.policy` chooses the policy: `Disabled` (default), `Require`, or
-   `Prefer`. While `Disabled`, no `GPUSTACK_MODEL_ARTIFACT_REMOTE_DELIVERY_POLICY`
-   variable is rendered on the worker, so the Setting stays at `Disabled` and
-   remains editable at runtime; setting `Require` or `Prefer` declares the
-   variable on the worker. Require and Prefer additionally need the
-   model-manager plugin installed, which the worker's Setting admission enforces
-   independently of this value.
-3. `modelTransfer.images` turns the source runtime on, one DaemonSet per named
+   While enabled, no `GPUSTACK_MODEL_ARTIFACT_REMOTE_DELIVERY_POLICY` variable
+   is rendered on the worker, so the `Setting` remains editable at runtime.
+   Setting `modelTransfer.enabled=false` omits the source runtime and declares
+   `GPUSTACK_MODEL_ARTIFACT_REMOTE_DELIVERY_POLICY=Disabled` on the worker.
+2. `modelTransfer.images` turns the source runtime on, one DaemonSet per named
    manufacturer, each Pod carrying two containers: the operator image runs the
    `model-transfer` broker (its engine session listener on :9251 is TLS only,
    its worker control wire stays on the Pod's loopback at 127.0.0.1:9250), and
@@ -255,12 +254,10 @@ corresponding DaemonSet directly, without waiting for that drain acknowledgement
 Perform this maintenance when the affected workload is stable.
 
 Rolling back is turning the policy back: patch the
-`model-artifact-remote-delivery-policy` `Setting` to `Disabled` (and if
-`modelTransfer.policy` was set to `Require` or `Prefer` in values, reset
-`modelTransfer.policy=Disabled`). Replicas already loaded keep serving; new
-replicas are admitted on the base delivery mode exactly as before remote
-delivery existed, and no destination checkpoint a Require deployment refused to
-materialize was ever written.
+`model-artifact-remote-delivery-policy` `Setting` to `Disabled` (or set
+`modelTransfer.enabled=false` in values). Replicas already loaded keep serving;
+new replicas are admitted on the base delivery mode, and no destination
+checkpoint a Require deployment refused to materialize was ever written.
 
 {{ template "chart.valuesSection" . }}
 

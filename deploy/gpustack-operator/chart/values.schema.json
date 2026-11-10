@@ -1401,7 +1401,7 @@
       "type": "object"
     },
     "modelTransfer": {
-      "description": "Remote weight delivery (model-transfer): the source runtime's identity and\npolicy, the per-manufacturer broker+worker DaemonSets, their serving\ncertificates and headless Services. Remote delivery policy stays\nOFF (`policy: Disabled`) until an administrator turns it on — a cluster at\ndefaults keeps every Pod, condition and status field unchanged until `policy`\nor the `model-artifact-remote-delivery-policy` Setting is enabled.",
+      "description": "Remote weight delivery (model-transfer): the source runtime's identity,\nthe per-manufacturer broker+worker DaemonSets, their serving certificates and\nheadless Services. Remote delivery policy defaults to `Prefer` via the\nworker's built-in `model-artifact-remote-delivery-policy` Setting — a cluster\nwithout a prepared `ModelPrefetch` source keeps every Pod, condition and\nstatus field unchanged, and preparing a source enables remote delivery with\nlocal fallback.",
       "properties": {
         "brokerResources": {
           "description": "The broker container's resources.",
@@ -1442,7 +1442,7 @@
         },
         "enabled": {
           "default": true,
-          "description": "Deploy the remote delivery source runtime: a ServiceAccount and the minimal RBAC\na source broker runs under, one broker+worker DaemonSet per manufacturer named in\n`images`, the session serving certificate each broker's TLS-only listener serves\nunder, and a headless Service per manufacturer an engine resolves exact source\nendpoints through. Nothing here grants a device, a cache path, or a tenant secret,\nand a disk-only warm-up Pod never uses this identity. With `images` empty the\nidentity ships and no source runtime does; with `enabled=false` none of it renders.",
+          "description": "Deploy the remote delivery source runtime: a ServiceAccount and the minimal RBAC\na source broker runs under, one broker+worker DaemonSet per manufacturer named in\n`images`, the session serving certificate each broker's TLS-only listener serves\nunder, and a headless Service per manufacturer an engine resolves exact source\nendpoints through. Nothing here grants a device, a cache path, or a tenant secret,\nand a disk-only warm-up Pod never uses this identity. With `images` empty the\nidentity ships and no source runtime does; with `enabled=false` none of it renders\nand the chart declares `GPUSTACK_MODEL_ARTIFACT_REMOTE_DELIVERY_POLICY=Disabled` on\nthe worker.",
           "title": "enabled",
           "type": "boolean"
         },
@@ -1495,17 +1495,6 @@
           "required": [],
           "title": "nodeSelector",
           "type": "object"
-        },
-        "policy": {
-          "default": "Disabled",
-          "description": "The cluster's remote delivery policy the chart declares on the worker when set to\n`Require` or `Prefer`: Disabled (default), the delivery is off and no worker env var\nis declared so the Setting remains editable at runtime; Require, a qualified replica's\nstartup holds until a prepared source serves the weights and never falls back; Prefer,\nremote delivery is used when a prepared source is available and the declared\nidentity-preserving fallback otherwise. Declared only while `enabled` and not\n`Disabled`; Require and Prefer additionally need the model-manager plugin installed,\nwhich the worker's Setting admission enforces independently of this value.",
-          "enum": [
-            "Disabled",
-            "Require",
-            "Prefer"
-          ],
-          "required": [],
-          "title": "policy"
         },
         "serviceAccount": {
           "description": "The source workers' ServiceAccount name; an empty name derives\n`\u003cfullname\u003e-model-transfer`.",

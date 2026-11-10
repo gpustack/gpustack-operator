@@ -191,7 +191,7 @@ request that reaches a webhook. Neither window needs a restart.
 | `model-artifact-huggingface-endpoint`<br/>(`GPUSTACK_MODEL_ARTIFACT_HUGGINGFACE_ENDPOINT`) | Effect window: Next trigger<br/>Default: `https://huggingface.co`<br/>Usage: The Hugging Face Hub a [`ModelArtifact`](../modules/model-delivery/artifact.md) resolves and revalidates against, and the `HF_ENDPOINT` an engine downloading the weights is given; the node plugin downloads from it too. What changing it does is under [Engine delivery](../modules/model-delivery/artifact.md#engine-delivery). |
 | `model-artifact-modelscope-endpoint`<br/>(`GPUSTACK_MODEL_ARTIFACT_MODELSCOPE_ENDPOINT`) | Effect window: Next trigger<br/>Default: `https://www.modelscope.cn`<br/>Usage: The ModelScope hub a [`ModelArtifact`](../modules/model-delivery/artifact.md) resolves and revalidates against and the node plugin downloads from; an engine downloading the weights gets its host as `MODELSCOPE_DOMAIN` — the runners' SDK takes a bare host. What changing it does is under [Engine delivery](../modules/model-delivery/artifact.md#engine-delivery). |
 | `model-artifact-no-proxy`<br/>(`GPUSTACK_MODEL_ARTIFACT_NO_PROXY`) | Effect window: Next trigger<br/>Default: *(blank)*<br/>Usage: Comma-separated hosts that bypass `model-artifact-https-proxy`, for the node plugin too, given to engines as `NO_PROXY` on the same terms. |
-| `model-artifact-remote-delivery-policy`<br/>(`GPUSTACK_MODEL_ARTIFACT_REMOTE_DELIVERY_POLICY`, *chart-rendered*) | Effect window: Immediate<br/>Default: `Disabled`<br/>Usage: Cluster policy for [remote weight delivery](../modules/model-delivery/remote.md): `Disabled` keeps remote delivery off; `Require` mounts a metadata-only view and waits for a prepared source without falling back; `Prefer` uses remote delivery when a prepared source is ready and falls back to the base delivery otherwise. `Require` and `Prefer` are refused while the `CSIDriver` `model.csi.gpustack.ai` does not exist. The chart declares `modelTransfer.policy` when `modelTransfer.enabled: true` and `modelTransfer.policy` is set to `Require` or `Prefer`. |
+| `model-artifact-remote-delivery-policy`<br/>(`GPUSTACK_MODEL_ARTIFACT_REMOTE_DELIVERY_POLICY`, *chart-rendered*) | Effect window: Immediate<br/>Default: `Prefer`<br/>Usage: Cluster policy for [remote weight delivery](../modules/model-delivery/remote.md): `Prefer` uses remote delivery when a prepared source is ready and falls back to the base delivery otherwise; `Disabled` keeps remote delivery off; `Require` mounts a metadata-only view and waits for a prepared source without falling back. `Require` and `Prefer` are refused while the `CSIDriver` `model.csi.gpustack.ai` does not exist. The chart omits the variable while `modelTransfer.enabled: true` and declares `Disabled` when `modelTransfer.enabled: false`. |
 | `model-artifact-revalidate-interval`<br/>(`GPUSTACK_MODEL_ARTIFACT_REVALIDATE_INTERVAL`) | Effect window: Next trigger<br/>Default: `24h`<br/>Usage: How often a resolved hub artifact's access is checked again, at least `1m`; a `Secret` change checks it at once. What a refusal does is under [Resolution and revalidation](../modules/model-delivery/artifact.md#resolution-and-revalidation). |
 | `model-deployment-kv-cache-dtype-owned`<br/>(`GPUSTACK_MODEL_DEPLOYMENT_KV_CACHE_DTYPE_OWNED`) | Effect window: Next trigger<br/>Default: `true`<br/>Usage: Hand every `KVCachePoolBinding`'s *`spec.domain.dtype`* to the engines attached through it as `--kv-cache-dtype`, verbatim, and refuse a pool-attached role or injected `Pod` naming that flag itself, and a new Binding declaring `auto` — see [The dtype is handed to the engine](../modules/kv-cache/pool.md#engine-dtype). **It is the escape from a Binding whose spelling the engine rejects**, which makes every new `Pod` fail argument parsing: `false` renders and refuses nothing, as before the flag was owned. Flipping it recreates every pool-attached replica at its next reconcile. The recovery is under [Upgrading to an enforced Binding dtype](../operate/migration/kv-cache-dtype.md). |
 | `model-deployment-modelexpress-server-image`<br/>(`GPUSTACK_MODEL_DEPLOYMENT_MODELEXPRESS_SERVER_IMAGE`) | Effect window: Next trigger<br/>Default: `gpustack/mirrored-modelexpress-server:v0.7.0`<br/>Usage: Image for the per-deployment [ModelExpress metadata server](../modules/model-delivery/remote.md#nvidia-modelexpress); use this setting for registry redirection or pinning. |
@@ -381,9 +381,7 @@ image:
 modelManager:
   enabled: true  # Renders GPUSTACK_MODEL_ARTIFACT_DELIVERY_MODE=Node when deployed.
 modelTransfer:
-  enabled: true
-  # Renders GPUSTACK_MODEL_ARTIFACT_REMOTE_DELIVERY_POLICY when enabled and set to Require or Prefer.
-  policy: Disabled
+  enabled: true  # When false, renders GPUSTACK_MODEL_ARTIFACT_REMOTE_DELIVERY_POLICY=Disabled.
   # Source images by manufacturer; set an entry to null to omit that DaemonSet.
   images:
     nvidia: gpustack/model-transfer:v0.1.0-cuda12.9
@@ -397,7 +395,7 @@ modelTransfer:
 
 The image variables default to empty except for the final `IfNotPresent` pull policy.
 The delivery mode variable is otherwise not rendered.
-The remote delivery policy variable is not rendered while `modelTransfer.policy: Disabled` or `modelTransfer.enabled: false`.
+The remote delivery policy variable is not rendered while `modelTransfer.enabled: true`; `modelTransfer.enabled: false` renders `Disabled`.
 `modelTransfer.images` selects source images; it does not declare a worker `Setting`.
 
 The `modelTransfer.source` values configure the source runtime, not worker `Setting`s. See
