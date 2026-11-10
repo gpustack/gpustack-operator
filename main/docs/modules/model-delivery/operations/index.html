@@ -1565,7 +1565,7 @@ writes chooses where a node connects. The <code>Setting</code>s this adds:</p>
       </tr>
       <tr>
           <td><code>model-artifact-remote-delivery-policy</code></td>
-          <td><code>Disabled</code>; the chart declares the configured policy with its <code>modelTransfer</code> section, and the worker reasserts it</td>
+          <td><code>Prefer</code>; the chart declares <code>Disabled</code> only when <code>modelTransfer.enabled: false</code></td>
           <td><code>Disabled</code>, <code>Require</code> or <code>Prefer</code>; <code>Require</code> and <code>Prefer</code> need the <code>CSIDriver</code></td>
       </tr>
       <tr>
@@ -1822,7 +1822,7 @@ patterns</li><li><a href="/gpustack-operator/main/docs/reference/settings/#setti
           
           
           <nav class="page-actions" aria-label="Page source">
-            <a href="https://github.com/gpustack/gpustack-operator/blob/8201eeab65db2036ef95f1d8acdb65375f029f24/docs/modules/model-delivery/operations.md">View page source</a>
+            <a href="https://github.com/gpustack/gpustack-operator/blob/0c0ef23e7aca705b517b9adda92ac2b386b610f2/docs/modules/model-delivery/operations.md">View page source</a>
             
             <a href="https://github.com/gpustack/gpustack-operator/edit/main/docs/modules/model-delivery/operations.md">Edit this page</a>
             

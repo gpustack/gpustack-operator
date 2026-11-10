@@ -1716,8 +1716,8 @@ request that reaches a webhook. Neither window needs a restart.</p>
       </tr>
       <tr>
           <td><code>model-artifact-remote-delivery-policy</code><br/>(<code>GPUSTACK_MODEL_ARTIFACT_REMOTE_DELIVERY_POLICY</code>, <em>chart-rendered</em>)</td>
-          <td>Effect window: Immediate<br/>Default: <code>Disabled</code><br/>Usage: Cluster policy for <a href="/gpustack-operator/main/docs/modules/model-delivery/remote/">remote weight delivery</a>
-: <code>Disabled</code> keeps remote delivery off; <code>Require</code> mounts a metadata-only view and waits for a prepared source without falling back; <code>Prefer</code> uses remote delivery when a prepared source is ready and falls back to the base delivery otherwise. <code>Require</code> and <code>Prefer</code> are refused while the <code>CSIDriver</code> <code>model.csi.gpustack.ai</code> does not exist. The chart declares <code>modelTransfer.policy</code> when <code>modelTransfer.enabled: true</code> and <code>modelTransfer.policy</code> is set to <code>Require</code> or <code>Prefer</code>.</td>
+          <td>Effect window: Immediate<br/>Default: <code>Prefer</code><br/>Usage: Cluster policy for <a href="/gpustack-operator/main/docs/modules/model-delivery/remote/">remote weight delivery</a>
+: <code>Prefer</code> uses remote delivery when a prepared source is ready and falls back to the base delivery otherwise; <code>Disabled</code> keeps remote delivery off; <code>Require</code> mounts a metadata-only view and waits for a prepared source without falling back. <code>Require</code> and <code>Prefer</code> are refused while the <code>CSIDriver</code> <code>model.csi.gpustack.ai</code> does not exist. The chart omits the variable while <code>modelTransfer.enabled: true</code> and declares <code>Disabled</code> when <code>modelTransfer.enabled: false</code>.</td>
       </tr>
       <tr>
           <td><code>model-artifact-revalidate-interval</code><br/>(<code>GPUSTACK_MODEL_ARTIFACT_REVALIDATE_INTERVAL</code>)</td>
@@ -1954,9 +1954,7 @@ chart value is what hands the <code>Setting</code> back to you.</li>
 </span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">modelManager</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">enabled</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="w">  </span><span class="c"># Renders GPUSTACK_MODEL_ARTIFACT_DELIVERY_MODE=Node when deployed.</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">modelTransfer</span><span class="p">:</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">enabled</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="c"># Renders GPUSTACK_MODEL_ARTIFACT_REMOTE_DELIVERY_POLICY when enabled and set to Require or Prefer.</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">policy</span><span class="p">:</span><span class="w"> </span><span class="l">Disabled</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">enabled</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="w">  </span><span class="c"># When false, renders GPUSTACK_MODEL_ARTIFACT_REMOTE_DELIVERY_POLICY=Disabled.</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="c"># Source images by manufacturer; set an entry to null to omit that DaemonSet.</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">images</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">nvidia</span><span class="p">:</span><span class="w"> </span><span class="l">gpustack/model-transfer:v0.1.0-cuda12.9</span><span class="w">
@@ -1968,7 +1966,7 @@ chart value is what hands the <code>Setting</code> back to you.</li>
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">maxSessions</span><span class="p">:</span><span class="w"> </span><span class="m">64</span><span class="w">  </span><span class="c"># Concurrent sessions per source DaemonSet Pod.</span></span></span></code></pre></div>
 </div><p>The image variables default to empty except for the final <code>IfNotPresent</code> pull policy.
 The delivery mode variable is otherwise not rendered.
-The remote delivery policy variable is not rendered while <code>modelTransfer.policy: Disabled</code> or <code>modelTransfer.enabled: false</code>.
+The remote delivery policy variable is not rendered while <code>modelTransfer.enabled: true</code>; <code>modelTransfer.enabled: false</code> renders <code>Disabled</code>.
 <code>modelTransfer.images</code> selects source images; it does not declare a worker <code>Setting</code>.</p>
 <p>The <code>modelTransfer.source</code> values configure the source runtime, not worker <code>Setting</code>s. See
 <a href="/gpustack-operator/main/docs/modules/model-delivery/remote/#source-preparation">Remote Weight Delivery</a>
@@ -2465,7 +2463,7 @@ user-facing settings, listed for completeness.</p>
           
           
           <nav class="page-actions" aria-label="Page source">
-            <a href="https://github.com/gpustack/gpustack-operator/blob/8201eeab65db2036ef95f1d8acdb65375f029f24/docs/reference/settings.md">View page source</a>
+            <a href="https://github.com/gpustack/gpustack-operator/blob/0c0ef23e7aca705b517b9adda92ac2b386b610f2/docs/reference/settings.md">View page source</a>
             
             <a href="https://github.com/gpustack/gpustack-operator/edit/main/docs/reference/settings.md">Edit this page</a>
             

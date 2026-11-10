@@ -1551,7 +1551,8 @@ switch was how the worker came to install them.</li>
 then seeds no <code>Node</code> delivery; see <a href="/gpustack-operator/main/docs/modules/model-delivery/operations/#prerequisites">Model Store Operations</a>
 .</li>
 <li><code>modelTransfer.enabled=false</code> — no remote weight delivery source <code>DaemonSet</code>s, <code>Service</code>s, RBAC or
-TLS <code>Secret</code>s, and the Model Manager omits the source ledger mount and CSI token request; see
+TLS <code>Secret</code>s, the Model Manager omits the source ledger mount and CSI token request, and the chart
+declares <code>GPUSTACK_MODEL_ARTIFACT_REMOTE_DELIVERY_POLICY=Disabled</code> on the worker; see
 <a href="/gpustack-operator/main/docs/modules/model-delivery/remote/#configuration">Remote Weight Delivery</a>
 .</li>
 <li><code>worker.enabled=false</code> — the chart deploys only the applications, what image mode&rsquo;s overlay sets.</li>
@@ -1626,7 +1627,7 @@ Operations</a>
           
           
           <nav class="page-actions" aria-label="Page source">
-            <a href="https://github.com/gpustack/gpustack-operator/blob/8201eeab65db2036ef95f1d8acdb65375f029f24/docs/operate/installation-modes.md">View page source</a>
+            <a href="https://github.com/gpustack/gpustack-operator/blob/0c0ef23e7aca705b517b9adda92ac2b386b610f2/docs/operate/installation-modes.md">View page source</a>
             
             <a href="https://github.com/gpustack/gpustack-operator/edit/main/docs/operate/installation-modes.md">Edit this page</a>
             

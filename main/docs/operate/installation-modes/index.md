@@ -92,7 +92,8 @@ These switches change what a mode installs:
 - `modelManager.enabled=false` — no Model Manager `DaemonSet` and no `CSIDriver`, and the worker
   then seeds no `Node` delivery; see [Model Store Operations](/gpustack-operator/main/docs/modules/model-delivery/operations/index.md#prerequisites).
 - `modelTransfer.enabled=false` — no remote weight delivery source `DaemonSet`s, `Service`s, RBAC or
-  TLS `Secret`s, and the Model Manager omits the source ledger mount and CSI token request; see
+  TLS `Secret`s, the Model Manager omits the source ledger mount and CSI token request, and the chart
+  declares `GPUSTACK_MODEL_ARTIFACT_REMOTE_DELIVERY_POLICY=Disabled` on the worker; see
   [Remote Weight Delivery](/gpustack-operator/main/docs/modules/model-delivery/remote/index.md#configuration).
 - `worker.enabled=false` — the chart deploys only the applications, what image mode's overlay sets.
 
