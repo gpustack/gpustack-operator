@@ -164,7 +164,7 @@ spec:
 For the `RDMA` protocol, the operator translates `interface: 1` into `device.gpustack.ai/rdma.shared: 1`.
 When `interface` is greater than 1, it renders `device.gpustack.ai/rdma: N`.
 Each allocated endpoint then corresponds to an independent physical adapter
-(see [A minimal deployment](../../modules/model-deployment/deployment.md#minimal-deployment)).
+(see [A minimal deployment](../../modules/model-deployment/configuration.md#minimal-deployment)).
 
 The same request without *`router`*, *`kvTransfer`* or a cache backend that uses *RDMA* fails at admission with
 `no effective RDMA or EFA transfer leg uses the requested interfaces`.

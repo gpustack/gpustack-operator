@@ -16,12 +16,13 @@ Check the cited artifact and version for each manufacturer.
 Check these dependencies before installation and when selecting a workload configuration.
 Installation options and ownership are in [Installation Modes](../operate/installation-modes.md).
 
-| Dependency | Role | Requirement or configuration |
+| Dependency | Role | Configuration |
 |---|---|---|
 | Node Feature Discovery (NFD) | Labels nodes and publishes hardware features. | Run one NFD installation per cluster. See [Single NFD per cluster](#single-nfd-per-cluster). |
 | Kueue | Manages workload admission and quota. | The chart includes Kueue; see [Installation Modes](../operate/installation-modes.md). |
 | Topograph | Supplies topology inventory from a configured provider. | Optional and disabled by default. See [Topology Operations](../modules/topology/operations.md). |
 | Mooncake | Supplies cache services and transfer support for compatible engines. | Optional. Match the engine, client, store and transport using [Engine Compatibility](../modules/model-deployment/engine-versions.md). |
+| ModelExpress | Coordinates NVIDIA peer tensor transfer and compile-cache sharing. | Optional; the operator creates a per-deployment metadata service. See [ModelExpress](../modules/model-delivery/remote.md#nvidia-modelexpress). |
 | CSI drivers | Mount NFS or S3 volumes, or deliver cached model weights. | NFS and S3 drivers are bundled subcharts. Node model delivery uses the Model Manager CSI driver. See [Model Store Operations](../modules/model-delivery/operations.md). |
 | Serving engines | Run inference workloads. | Choose a compatible engine image and configuration. See [Engine Compatibility](../modules/model-deployment/engine-versions.md). |
 | Vendor drivers and toolkits | Provide accelerator access on each node. | Install the driver and any required toolkit. See the [manufacturer guides](#manufacturer-guides) below. |

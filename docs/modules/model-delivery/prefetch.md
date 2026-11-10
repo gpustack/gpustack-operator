@@ -260,7 +260,7 @@ status:
       reason: CompleteSummary
 ```
 
-The [ModelPrefetch API](views.md) supports resource operations and adds no subresource: the per-node
+The [ModelPrefetch API](artifact-api.md#resources) supports resource operations and adds no subresource: the per-node
 facts already live on the nodes' reports, and the table prints who warms what and how far.
 
 ---

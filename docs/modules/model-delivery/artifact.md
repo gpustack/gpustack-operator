@@ -108,7 +108,7 @@ An image's identity is its reference digest. See [Resolution and revalidation](#
 *`status.nodes`* counts nodes whose `NodeModelStore` reports the digest `Ready`, `Downloading` or
 `Failed`. Artifacts with the same digest see the same nodes; only counts cross namespaces.
 The mean includes only downloading nodes. Each node represents a whole copy. See the
-[progress thresholds](node-store.md#resource) and the full-precision [progress view](views.md#progress-subresource).
+[progress thresholds](node-store.md#resource) and the full-precision [progress view](artifact-api.md#progress-subresource).
 
 The `worker.gpustack.ai/model-artifact-protection` finalizer holds a referenced artifact in
 `Terminating`. It waits until no `ModelDeployment` or `Instance` in the namespace references it.
@@ -472,9 +472,9 @@ waits instead when that node cannot run one, naming the node and the floor
 
 ---
 
-**See also** — [Model Deployment](../model-deployment/deployment.md) for the rest of the deployment
+**See also** — [Model Deployment](../model-deployment/configuration.md) for the rest of the deployment
 contract · [Node Model Store](node-store.md) for `Node` delivery ·
-[Model Artifact API](views.md) for resource status and `progress` · [KV Cache Injection Reference](../kv-cache/injection.md) for the store connector this
+[Model Artifact API](artifact-api.md) for resource status and `progress` · [KV Cache Injection Reference](../kv-cache/injection.md) for the store connector this
 prefixes · [Model Deployment Status](../model-deployment/status.md) for the other conditions.
 
 **Next** → [Model Deployment Status](../model-deployment/status.md)

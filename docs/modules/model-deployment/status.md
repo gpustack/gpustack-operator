@@ -25,7 +25,7 @@ Ready instances by kind: `R` is managed router `Pod`s, `S` is ordinary servers, 
 servers; `1R1E1P1D` means one Ready router, one Ready encoder, one Ready prefiller and one Ready decoder.
 
 **During a replacement, status combines desired and observed fields.** See
-[Rollout behavior](deployment.md#rollout-behavior). `desired` and *`parallelism`* describe the current
+[Rollout behavior](configuration.md#rollout-behavior). `desired` and *`parallelism`* describe the current
 spec; they can differ from running replicas while replacement waits. `ready` counts replicas still
 serving their deployed configuration. `unmanaged` and cache conditions read deployed command mode.
 
@@ -598,10 +598,10 @@ a reader asks about when a rank fails.
 
 ---
 
-**See also** — [Model Deployment Configuration](deployment.md) (the contract this status reports on) ·
+**See also** — [Model Deployment Configuration](configuration.md) (the contract this status reports on) ·
 [Model Deployment Scaling](scaling.md) (the scaler that owns a bound replica count) ·
 [Prefill and Decode](prefill-decode.md) (pairing *prefill* and *decode* roles) ·
 [Encode, Prefill and Decode](encode-prefill-decode.md) (*encode*, *prefill* and *decode* disaggregation) ·
 [KV Cache Election and Failover](../kv-cache/leader.md) (the leader process the conditions distinguish from the operator's own).
 
-**Next** → [Model Deployment Configuration](deployment.md)
+**Next** → [Model Deployment Configuration](configuration.md)

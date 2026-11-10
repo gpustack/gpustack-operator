@@ -47,21 +47,21 @@ Follow [Model Store Operations](operations.md#configuration) to configure node d
 
 Inspect the artifact and node stores:
 
-```shell
+```bash
 kubectl -n <namespace> get modelartifact <artifact-name> -o yaml
 kubectl get nodemodelstores
 ```
 
 **Verification:** Check the artifact's `Resolved` condition and the node cache status.
 See [Model Artifact Status](artifact.md#status) and [Node Model Store](node-store.md#resource).
-The [Model Artifact API](views.md) describes progress views.
-[Node-to-Node Sync](peer-sync.md) describes peer status and metrics.
+The [Model Artifact API](artifact-api.md) describes progress views.
+[Node-to-Node Sync](node-to-node-sync.md) describes peer status and metrics.
 
 ## Troubleshooting
 
 If weights do not reach a deployment, inspect the artifact and deployment conditions:
 
-```shell
+```bash
 kubectl -n <namespace> describe modelartifact <artifact-name>
 kubectl -n <namespace> get modeldeployment <deployment-name> -o yaml
 ```

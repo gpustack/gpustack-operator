@@ -65,7 +65,7 @@ helm install gpustack-operator gpustack/gpustack-operator \
 The chart includes Node Feature Discovery, Kueue and the storage drivers. See
 [Installation Modes](./docs/operate/installation-modes.md) if your cluster already runs any of them.
 For upgrades from v0.7.x or earlier, follow the
-[subchart migration guide](./docs/operate/migration/to-subcharts.md).
+[subchart migration guide](./docs/operate/migration/bundled-subcharts.md).
 
 ### Uninstallation
 
@@ -323,7 +323,7 @@ spec:
 ```
 
 For a standalone serving example, read
-[Model Deployment](./docs/modules/model-deployment/deployment.md). [Prefill and
+[Model Deployment](./docs/modules/model-deployment/configuration.md). [Prefill and
 Decode](./docs/modules/model-deployment/prefill-decode.md) shows how to split the serving roles.
 
 ### GPU Instances
@@ -375,12 +375,12 @@ spec:
 Save it as `instance.yaml`, then run `kubectl apply -f instance.yaml`. Once the Pod is ready,
 forward its SSH port in one terminal and connect with the matching private key in another:
 
-```shell
+```bash
 kubectl -n team-a wait --for=condition=Ready pod/sliced-demo --timeout=5m
 kubectl -n team-a port-forward pod/sliced-demo 2222:22
 ```
 
-```shell
+```bash
 ssh -i ~/.ssh/id_ed25519 -p 2222 root@127.0.0.1
 ```
 

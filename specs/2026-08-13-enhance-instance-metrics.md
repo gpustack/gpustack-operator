@@ -45,7 +45,7 @@ declared totals and measured-zero usage and performs no upstream read.
   Device Manager log. The subresource omits the field without a reason — an explicit decision, not an
   oversight: see Alternatives.
 
-`docs/reference/instance-metrics.md` states the gap in its own Limits section — "*Whole accelerators
+`docs/modules/instances/metrics.md` states the gap in its own Limits section — "*Whole accelerators
 only. A shared or sliced allocation shows the whole accelerator's figures; per-pod GPU attribution
 does not exist.*" That sentence is the feature request. `InstanceMetricsHandler.OnGet` never looks at
 the Instance's phase: it guards three *backing-state* conditions and answers `503` for each, while
@@ -359,7 +359,7 @@ and entry point.
 
 #### F9 — Documentation
 
-`docs/reference/instance-metrics.md` states the one-entry-per-grant expression and what each field
+`docs/modules/instances/metrics.md` states the one-entry-per-grant expression and what each field
 means in every mode, the per-manufacturer availability matrix naming which manufacturers are
 hardware-verified and which are not, the capability probe and its reasons, the started-container gate
 replacing the three backing-state `503`s in *Degradation rules*, the exporter's Pod-less gap, the
@@ -572,7 +572,7 @@ pkg/kubemetrics/
   accelerator.go                               # the grants index; one entry, resolved once
 pkg/worker/extensionapis/worker/
   instance.metrics.go                          # the gate, and the entry resolution
-docs/reference/instance-metrics.md
+docs/modules/instances/metrics.md
 ```
 
 ### Code Style

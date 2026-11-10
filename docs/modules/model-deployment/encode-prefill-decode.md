@@ -1,7 +1,7 @@
 # Encode, Prefill and Decode
 
 A deployment with *Encode*, *Prefill* and *Decode* roles runs visual encoding and language generation
-in separate `Pod`s. [Model Deployment Configuration](deployment.md) describes the base role fields and
+in separate `Pod`s. [Model Deployment Configuration](configuration.md) describes the base role fields and
 admission rules.
 
 ![Multimodal and text-only request flows](../../assets/diagrams/model-deployment-epd.svg)
@@ -229,7 +229,7 @@ spelling the engine reads. On vLLM that is `--ec-transfer-config`; `ECCPUConnect
 `VLLM_USE_V2_MODEL_RUNNER` and the two side-channel variables.
 
 SGLang owns `--encoder-only`, `--language-only`, `--encoder-urls` and
-`--encoder-bootstrap-port`. See [Operator-owned keys](deployment.md#operator-owned-keys).
+`--encoder-bootstrap-port`. See [Operator-owned keys](configuration.md#operator-owned-keys).
 
 Four flags the operator renders on the encoder are defaults, so a role's own value wins:
 `--enforce-eager`, `--no-enable-prefix-caching`, `--max-num-batched-tokens` and `--mm-encoder-only`.
@@ -309,6 +309,6 @@ hardware and when *EPD* helps.
 
 ---
 
-**See also** — [Model Deployment Configuration](deployment.md) (base fields and admission rules) · [Prefill and Decode](prefill-decode.md) (pairing *prefill* and *decode* roles) · [Encode, Prefill and Decode Benchmark](encode-prefill-decode-benchmark.md) (measured latency and throughput across three configurations) · [Engine Compatibility](engine-versions.md) (supported version floors) · [Model Deployment Routing](routing.md) (router selection and deciders) · [Model Deployment Status](status.md) (status conditions and role summaries) · [EPD Walkthrough](../../walkthroughs/model-deployment/encode-prefill-decode.md) (a recorded live run).
+**See also** — [Model Deployment Configuration](configuration.md) (base fields and admission rules) · [Prefill and Decode](prefill-decode.md) (pairing *prefill* and *decode* roles) · [Encode, Prefill and Decode Benchmark](encode-prefill-decode-benchmark.md) (measured latency and throughput across three configurations) · [Engine Compatibility](engine-versions.md) (supported version floors) · [Model Deployment Routing](routing.md) (router selection and deciders) · [Model Deployment Status](status.md) (status conditions and role summaries) · [EPD Walkthrough](../../walkthroughs/model-deployment/encode-prefill-decode.md) (a recorded live run).
 
 **Next** → [Model Deployment Routing](routing.md) — choose a routing policy and inspect candidate endpoints.

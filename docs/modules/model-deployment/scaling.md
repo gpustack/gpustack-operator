@@ -964,7 +964,7 @@ outage does not allow unchecked writes through the binding fence.
 
 ---
 
-**See also** — [Configuration](deployment.md) (roles and counts) · [Benchmark](scaling-benchmark.md) (H100 and H200 results) ·
+**See also** — [Configuration](configuration.md) (roles and counts) · [Benchmark](scaling-benchmark.md) (H100 and H200 results) ·
 [Simulation](scaling-simulation.md) (synthetic comparison) · [Walkthrough](../../walkthroughs/model-deployment/scaling.md) (configure and observe) · [Status](status.md) (phase
 and conditions) · [Shutdown](shutdown.md) (retirement) · [Metrics](metrics.md) (engine signals).
 

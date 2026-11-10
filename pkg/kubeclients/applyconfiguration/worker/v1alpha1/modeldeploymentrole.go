@@ -40,10 +40,8 @@ import (
 // its role and its ordinal, so edits to one role's running configuration do not rename a sibling
 // role's groups.
 //
-// A DEPARTURE THIS OPERATOR DID NOT INITIATE IS NOT A ROLLOUT. The replica that left is replaced on
-// its own, under a new name, while its siblings keep serving — see
-// docs/modules/model-deployment/deployment.md under "One group per replica" and "Rollout is a rolling
-// replacement".
+// A departure this operator did not initiate is not a rollout. The departed replica is replaced
+// under a new name while its siblings keep serving.
 type ModelDeploymentRoleApplyConfiguration struct {
 	// Name identifies the role, and it is also the name of the Kueue PodSet the role becomes.
 	//

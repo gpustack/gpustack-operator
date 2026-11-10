@@ -132,7 +132,7 @@ kubectl get nodemodelstores.v1.worker.gpustack.ai  # Ready, Used, Models, Downlo
   `Pod` mounts it; a download's *`downloadedBytes`* [moves in steps](node-store.md#resource).
   It names no tenant: find a deployment's digest in its *`status.model.manifestDigest`*, and an
   artifact's nodes in its *`status.nodes`* or its
-  [progress](views.md#progress-subresource).
+  [progress](artifact-api.md#progress-subresource).
 - **A `Failed` digest** carries its reason and *`retryTime`*. Mounts of it do not download again
   before then; fix the cause (the `Secret`, the proxy, the CA) and the next attempt after *`retryTime`*
   picks it up.

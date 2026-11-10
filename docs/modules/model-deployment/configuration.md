@@ -1,4 +1,4 @@
-# Model Deployment Configuration
+# Configuration
 
 A `ModelDeployment` defines one or more inference-engine roles, each with its own replicas. The roles can share cached
 prefixes through a KV cache pool, form a direct *prefill/decode* pair, or do both.
@@ -429,12 +429,12 @@ container's own filesystem, because the mount is a host-backed directory every p
 
 | Name | Points at | Holds |
 |---|---|---|
-| `HF_HUB_CACHE` | `/var/lib/gpustack/cache/hf-hub` | The model weights and tokenizer files huggingface_hub downloads, the cache whose growth onto the writable layer drove the recorded evictions |
-| `HF_XET_CACHE` | `/var/lib/gpustack/cache/xet` | The Xet chunk cache, which hf_xet reads ahead of `HF_HOME` so the chunks join the hub cache on the mount while the token stays local |
+| `HF_HUB_CACHE` | `/var/lib/gpustack/cache/hf-hub` | Model weights and tokenizer files downloaded by huggingface_hub |
+| `HF_XET_CACHE` | `/var/lib/gpustack/cache/xet` | Xet chunks read by hf_xet; credentials stay under `HF_HOME` |
 | `PIP_CACHE_DIR` | `/var/lib/gpustack/cache/pip` | pip's download and wheel cache |
 | `TORCH_HOME` | `/var/lib/gpustack/cache/torch` | torch's hub checkpoints and cached state |
-| `FLASHINFER_WORKSPACE_BASE` | `/var/lib/gpustack/cache/flashinfer` | The FlashInfer JIT workspace, which holds the generated sources and the compiled kernels of the attention backend. FlashInfer appends its own `.cache/flashinfer` to the base, so the tree lands under `/var/lib/gpustack/cache/flashinfer/.cache/flashinfer` |
-| `TORCHINDUCTOR_CACHE_DIR` | `/var/lib/gpustack/cache/inductor` | The kernels torch's inductor compiles, whose default is a directory under the temporary directory |
+| `FLASHINFER_WORKSPACE_BASE` | `/var/lib/gpustack/cache/flashinfer` | FlashInfer JIT sources and kernels.<br/>FlashInfer appends `.cache/flashinfer` to this path |
+| `TORCHINDUCTOR_CACHE_DIR` | `/var/lib/gpustack/cache/inductor` | Torch Inductor compiled kernels |
 | `TRITON_CACHE_DIR` | `/var/lib/gpustack/cache/triton` | triton's compiled kernels, whose default is under the home directory |
 
 An explicit `/var/lib/gpustack/cache` mount in *`additionalVolumes`* takes precedence: the operator

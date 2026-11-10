@@ -101,8 +101,8 @@ figure:
 
 **Read `master_allocated_file_size_bytes` to see what the tier holds:**
 
-```console
-$ kubectl exec -n gpustack-system deploy/<backend>-leader -- \
+```bash
+kubectl exec -n gpustack-system deploy/<backend>-leader -- \
     python3 -c "import urllib.request;print([l for l in \
     urllib.request.urlopen('http://127.0.0.1:9003/metrics').read().decode().splitlines() \
     if l.startswith('master_allocated_file_size_bytes')])"
@@ -175,15 +175,20 @@ cannot write to it. *`fsGroup`* does not help, because it does not apply to *`ho
 **The uid depends on the image**, since *`members[].image`* may put a different vendor's build on a
 group. Read it off the image you are using:
 
-```console
-$ docker run --rm --entrypoint id <your-member-image>
+```bash
+docker run --rm --entrypoint id <your-member-image>
+```
+
+Captured output:
+
+```text
 uid=65532 gid=0(root) groups=0(root)
 ```
 
 Then create the directory on each node with that uid:
 
-```console
-$ install -d -o 65532 -g 0 -m 0750 /var/lib/kvcache
+```bash
+install -d -o 65532 -g 0 -m 0750 /var/lib/kvcache
 ```
 
 There is **no switch that makes the operator create the directory for you.** An init container would
@@ -288,8 +293,8 @@ it first starts records it in *`status.conditions`* as `TierWasEmpty=False`, nam
 number of entries found, and emits one warning event beside it. Nothing is removed and nothing is
 blocked.
 
-```console
-$ kubectl get kvcachebackend <name> -o jsonpath='{.status.conditions[?(@.type=="TierWasEmpty")]}'
+```bash
+kubectl get kvcachebackend <name> -o jsonpath='{.status.conditions[?(@.type=="TierWasEmpty")]}'
 ```
 
 **The condition is written once and then left alone**, unlike everything else in that status. After
@@ -352,8 +357,8 @@ with it. A removal already under way when the path becomes shared is **stopped**
 > what the second event reports. Closing the window entirely needs an atomic claim on the path,
 > which this operator does not take.
 
-```console
-$ kubectl describe node <node> | grep -E 'KVCacheTierNotCleaned|KVCacheTierSharedPath|KVCacheTierPartlyEmptied'
+```bash
+kubectl describe node <node> | grep -E 'KVCacheTierNotCleaned|KVCacheTierSharedPath|KVCacheTierPartlyEmptied'
 ```
 
 ## Unaccounted disk usage

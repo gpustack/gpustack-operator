@@ -63,15 +63,15 @@ order:
     - disk-heavy-nodes
   /docs/modules/model-delivery/:
     - artifact
-    - views
+    - artifact-api
     - image-source
     - prefetch
     - node-store
-    - peer-sync
+    - node-to-node-sync
     - remote
     - operations
   /docs/modules/model-deployment/:
-    - deployment
+    - configuration
     - engine-versions
     - prefill-decode
     - prefill-decode-benchmark
@@ -88,29 +88,30 @@ order:
     - metrics
     - status
     - shutdown
+  /docs/modules/instances/:
+    - metrics
   /docs/operate/:
     - installation-modes
     - high-availability
     - migration
   /docs/operate/migration/:
     - from-v0.5
-    - to-subcharts
-    - kv-cache-dtype
+    - bundled-subcharts
+    - enforced-binding-dtype
     - troubleshooting
   /docs/reference/:
     - commands
     - settings
     - instance-type-unit-resources
-    - instance-metrics
   /docs/contribute/:
     - development
-    - kind
+    - local-cluster-setup
     - internals
 overview_labels:
   /docs/walkthroughs/model-deployment/: Preparation and Choices
 children:
   /docs/modules/model-delivery/artifact/:
-    - views
+    - artifact-api
   /docs/modules/model-deployment/scaling/:
     - scaling-simulation
     - scaling-benchmark
@@ -153,18 +154,18 @@ labels:
   /docs/modules/kv-cache/backend/: Backends
   /docs/modules/kv-cache/pool/: Pools and Bindings
   /docs/modules/kv-cache/injection/: Pod Injection
-  /docs/modules/kv-cache/leader/: Election and Failover
+  /docs/modules/kv-cache/leader/: Leader Election
   /docs/modules/kv-cache/local-disk-tier/: Local Disk Tier
   /docs/modules/kv-cache/disk-heavy-nodes/: Disk-Heavy Nodes
   /docs/modules/model-delivery/artifact/: Artifact
-  /docs/modules/model-delivery/views/: API
+  /docs/modules/model-delivery/artifact-api/: API
   /docs/modules/model-delivery/image-source/: Image Source
   /docs/modules/model-delivery/prefetch/: Prefetch
   /docs/modules/model-delivery/node-store/: Node Store
-  /docs/modules/model-delivery/peer-sync/: Node-to-Node Sync
+  /docs/modules/model-delivery/node-to-node-sync/: Node-to-Node Sync
   /docs/modules/model-delivery/remote/: Remote Delivery
   /docs/modules/model-delivery/operations/: Operations
-  /docs/modules/model-deployment/deployment/: Configuration
+  /docs/modules/model-deployment/configuration/: Configuration
   /docs/modules/model-deployment/scaling/: Scaling
   /docs/modules/model-deployment/scaling-simulation/: Simulation
   /docs/modules/model-deployment/scaling-benchmark/: Benchmark
@@ -176,7 +177,7 @@ labels:
   /docs/modules/model-deployment/elastic-ep-benchmark/: Benchmark
   /docs/modules/model-deployment/external-dp/: External DP
   /docs/modules/model-deployment/external-dp-benchmark/: Benchmark
-  /docs/modules/model-deployment/engine-versions/: Compatibility
+  /docs/modules/model-deployment/engine-versions/: Engine Versions
   /docs/modules/model-deployment/routing/: Routing
   /docs/modules/model-deployment/metrics/: Metrics
   /docs/modules/model-deployment/status/: Status
@@ -185,13 +186,13 @@ labels:
   /docs/operate/high-availability/: High Availability
   /docs/operate/migration/: Upgrades
   /docs/operate/migration/from-v0.5/: From v0.5.x
-  /docs/operate/migration/to-subcharts/: Bundled Subcharts
-  /docs/operate/migration/kv-cache-dtype/: Enforced Binding Dtype
+  /docs/operate/migration/bundled-subcharts/: Bundled Subcharts
+  /docs/operate/migration/enforced-binding-dtype/: Enforced Binding Dtype
   /docs/operate/migration/troubleshooting/: Troubleshooting
   /docs/reference/commands/: Commands
   /docs/reference/settings/: Settings
   /docs/reference/instance-type-unit-resources/: Resource Presets
-  /docs/reference/instance-metrics/: Instance Metrics
+  /docs/modules/instances/metrics/: Metrics
   /docs/contribute/development/: Development
   /docs/contribute/local-cluster-setup/: Local Cluster Setup
   /docs/contribute/internals/: Internals

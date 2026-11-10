@@ -1,0 +1,6 @@
+{{- $lang := .lang | default "text" -}}
+{{- $ariaLabel := .ariaLabel | default "Copy code" -}}
+<div class="code-block">
+  <div class="code-toolbar"><span>{{ $lang }}</span><button class="copy-code" type="button" aria-label="{{ $ariaLabel }}">Copy</button></div>
+  {{ .content }}
+</div>

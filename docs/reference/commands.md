@@ -13,6 +13,7 @@ between them.
 - [worker-gateway](#worker-gateway)
 - [device-manager serve](#device-manager-serve)
 - [model-manager](#model-manager)
+- [model-transfer](#model-transfer)
 - [device-manager detect](#device-manager-detect)
 - [device-manager monitor](#device-manager-monitor)
 - [device-manager preflight](#device-manager-preflight)
@@ -25,6 +26,7 @@ between them.
 | `worker-gateway` | `wg` | service | a sidecar beside `worker` |
 | `device-manager serve` | `dm serve` | service | the Device Manager `DaemonSet`, one per node |
 | `model-manager` | `mm` | service | the Model Manager `DaemonSet`, one per node |
+| `model-transfer` | `mx` | service | a vendor source `DaemonSet` on eligible nodes |
 | `device-manager detect` | `dm detect` | one-shot | a person, on a node |
 | `device-manager monitor` | `dm monitor` | one-shot | a person, on a node |
 | `device-manager preflight` | `dm preflight` | one-shot | a person, on a node |
@@ -164,6 +166,47 @@ comes from its node's `NodeModelStore.spec`, not from flags.
 gpustack-operator model-manager --node-name="$(hostname)" --cache-root=/mnt/models
 ```
 
+## model-transfer
+
+The source runtime serves authorized remote weight delivery sessions and coordinates the local
+vendor transport worker. It runs in a source `DaemonSet`; see [Remote Weight Delivery](../modules/model-delivery/remote.md).
+
+| Flag | Default | Effect |
+|---|---|---|
+| `--node-name`, `--worker-namespace` | — | Required node and source-worker namespace. |
+| `--worker-id`, `--vendor-scope` | — | Required worker and vendor identities. |
+| `--cache-root` | `/var/lib/gpustack/models` | Published model cache root. |
+| `--broker-root` | `/var/lib/gpustack/model-transfer` | Durable broker ledger directory. |
+| `--control-addr` | `127.0.0.1:9250` | Local worker control listener. |
+| `--session-addr` | `:9251` | TLS session listener. |
+| `--session-tls-cert`, `--session-tls-key` | — | Required serving certificate and key paths. |
+| `--bootstrap-file` | `/run/model-transfer/bootstrap` | Pod-local worker credential path. |
+| `--physical-bytes`, `--max-memory-bytes` | `0` | Source memory ceiling; zero derives one sixteenth of node RAM. |
+| `--min-memory-bytes` | `1073741824` | Source memory floor, at least 1 GiB. |
+| `--max-sessions` | `64` | Concurrent session limit; values below one resolve to 64. |
+| `--max-generations`, `--max-quarantined` | `8`, `2` | Limits on live and quarantined generations. |
+| `--quarantine-bytes` | `8589934592` | Quarantined generation byte limit. |
+| `--lease-ttl` | `30s` | Worker health lease duration. |
+| `--kube-conn-timeout`, `--kube-conn-qps`, `--kube-conn-burst` | `5m`, `200`, `400` | Kubernetes client limits. |
+| `--kube-content-type` | — | Kubernetes request encoding override. |
+
+The command returns exit code `1` for invalid configuration or a runtime failure. Context cancellation
+stops the service normally. Kubernetes configuration uses the standard client loader, including
+`KUBECONFIG`.
+
+Flags can also be supplied through environment variables. The command harness uses the literal
+prefix `GPUSTACK_MODEL-TRANSFER_` and replaces underscores in the remaining name with hyphens; an
+explicit flag takes precedence. For example, `GPUSTACK_MODEL-TRANSFER_NODE_NAME` supplies `--node-name`.
+The hyphen in the prefix requires an environment launcher such as `env`.
+
+| Environment | Default | Effect |
+|---|---|---|
+| `GPUSTACK_MODEL_TRANSFER_SOURCE_RESIDENT_BUDGET_BYTES` | `0` | Optional source resident window limit. |
+| `GPUSTACK_MODEL_TRANSFER_HIXL_RESIDENT_BUDGET_BYTES` | `17179869184` | HIXL resident window limit; zero retains the default. |
+
+Both budgets require non-negative integers. Positive values are aligned down to 2 MiB and have a
+minimum of 1 GiB. See [Remote Weight Delivery](../modules/model-delivery/remote.md) for source setup.
+
 ## device-manager detect
 
 Runs one detect pass and prints the result. It is a pure read: nothing is written, nothing is
@@ -242,7 +285,7 @@ docker run --rm --privileged -v /dev:/dev -v /sys:/sys \
 ```
 
 The same figures reach a cluster through the `Instance` metrics surfaces; see [Instance
-Metrics](instance-metrics.md).
+Metrics](../modules/instances/metrics.md).
 
 ## device-manager preflight
 

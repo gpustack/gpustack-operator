@@ -146,7 +146,7 @@ make build
 - `pkg/worker/controllers/worker/model_deployment_replacement_slot.go`: partial-group fill and replacement slot matching and supersession rules across render versions.
 - `pkg/worker/controllers/worker/model_deployment_rollout.go`: `ReplicasUpToDate` condition message for older compatible render versions.
 - `pkg/worker/controllers/worker/model_deployment_render_test.go`, `pkg/worker/controllers/worker/model_deployment_legacy_render_test.go`, `pkg/worker/controllers/worker/testdata/legacy-render/`, `pkg/worker/controllers/worker/model_deployment_rollout_test.go`, `pkg/worker/controllers/worker/model_deployment_replacement_slot_test.go`, and `pkg/worker/controllers/worker/model_deployment_test.go`: unit, golden tripwire, replacement-slot, status, and multi-version coexistence tests.
-- `docs/modules/model-deployment/deployment.md`, `docs/modules/model-deployment/status.md`, and `docs/README.md`: rollout contract, `min-render-version` annotation, `ReplicasUpToDate` message, and module map registration.
+- `docs/modules/model-deployment/configuration.md`, `docs/modules/model-deployment/status.md`, and `docs/README.md`: rollout contract, `min-render-version` annotation, `ReplicasUpToDate` message, and module map registration.
 
 ### Code Style
 
@@ -207,9 +207,9 @@ Pre-compute the role-template's explicit hash inside [`renderModelDeploymentPodT
 
 - [x] **T5: Update `ModelDeployment` documentation and verify repo-wide lint and docs gates**
   - Blocked by: [T3]
-  - Owns: `docs/modules/model-deployment/deployment.md`, `docs/modules/model-deployment/status.md`, `docs/README.md`
+  - Owns: `docs/modules/model-deployment/configuration.md`, `docs/modules/model-deployment/status.md`, `docs/README.md`
   - Acceptance:
-    - `docs/modules/model-deployment/deployment.md` and `docs/modules/model-deployment/status.md` document the split between `pod-spec-hash` and `render-version`, the `modeldeployment.gpustack.ai/min-render-version` annotation, `Settings` non-rollout semantics, and the `ReplicasUpToDate` older-baseline message.
+    - `docs/modules/model-deployment/configuration.md` and `docs/modules/model-deployment/status.md` document the split between `pod-spec-hash` and `render-version`, the `modeldeployment.gpustack.ai/min-render-version` annotation, `Settings` non-rollout semantics, and the `ReplicasUpToDate` older-baseline message.
     - `docs/README.md` indexes `specs/2026-10-18-model-deployment-render-version.md` under `Model Deployment`, and `make lint` and `make lint docs` pass.
   - Verify: `make lint && make lint docs`
 

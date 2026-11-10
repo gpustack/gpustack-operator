@@ -203,8 +203,8 @@ failover briefly shows `2` ready as the old leader steps down; both readings are
 
 To see which `Pod` is serving, read the label the store itself sets when it wins:
 
-```console
-$ kubectl get pod -l mooncake.io/store-role=leader
+```bash
+kubectl get pod -l mooncake.io/store-role=leader
 ```
 
 **Both roles get a `ServiceAccount`, and they are different accounts.** The operator renders a

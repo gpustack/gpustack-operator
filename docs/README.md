@@ -34,7 +34,7 @@ For complete examples, use the [Walkthroughs](walkthroughs/_index.md) entry poin
 For replica autoscaling, follow the [Scaling Walkthrough](walkthroughs/model-deployment/scaling.md)
 and read the measured [Scaling Benchmark](modules/model-deployment/scaling-benchmark.md).
 
-Start an upgrade with the relevant page under [migration](operate/migration/to-subcharts.md).
+Start an upgrade with the relevant page under [migration](operate/migration/bundled-subcharts.md).
 
 For code changes, read [Architecture](getting-started/architecture.md), then use the
 [module map](#module-map) to find the relevant guide. [Internals](contribute/internals.md) covers startup constraints, and
@@ -112,7 +112,7 @@ A skill link names a procedure; the entry's other fields carry shared facts.
 - ID: `model-deployment`
 - Use for: describing a serving workload's model, engine and roles; prefill/decode pairing; replica routing, status and metrics; planning a deployment's replica count from its own signals.
 - Aliases: `ModelDeployment`, `ModelDeploymentScaler`, `scaler`, `autoscaling`, `prefill`, `decode`, `router`, `vLLM`, `SGLang`, `replica`, `EPD`, `encode`
-- Guides: [Model Deployment](modules/model-deployment/_index.md); the role contract in [Model Deployment Configuration](modules/model-deployment/deployment.md); replica-count planning in [Model Deployment Scaling](modules/model-deployment/scaling.md); the synthetic algorithm-dynamics comparison in [Model Deployment Scaling Simulation](modules/model-deployment/scaling-simulation.md); measured algorithm behavior in [Model Deployment Scaling Benchmark](modules/model-deployment/scaling-benchmark.md); configuring and observing the scaler in [Model Deployment Scaling Walkthrough](walkthroughs/model-deployment/scaling.md); engine and transport compatibility in [Engine Compatibility](modules/model-deployment/engine-versions.md); pairing in [Prefill and Decode](modules/model-deployment/prefill-decode.md); multimodal disaggregation in [Encode, Prefill and Decode](modules/model-deployment/encode-prefill-decode.md); its measured latency and throughput in [Encode, Prefill and Decode Benchmark](modules/model-deployment/encode-prefill-decode-benchmark.md); the disaggregated-versus-aggregated comparison in [Prefill and Decode Benchmark](modules/model-deployment/prefill-decode-benchmark.md); the measured live width change in [Elastic EP Benchmark](modules/model-deployment/elastic-ep-benchmark.md); the measured External DP crossover in [External DP Benchmark](modules/model-deployment/external-dp-benchmark.md); replica selection and Router observation in [Routing](modules/model-deployment/routing.md); what a status field means in [Status](modules/model-deployment/status.md); retirement and drain in [Shutdown](modules/model-deployment/shutdown.md); in-place collective resize in [Elastic EP](modules/model-deployment/elastic-ep.md); fixed per-rank HTTP serving in [External DP](modules/model-deployment/external-dp.md); disaggregated serving in [Prefill and Decode Walkthrough](walkthroughs/model-deployment/prefill-decode.md); a recorded multimodal disaggregation run in [Encode, Prefill and Decode Walkthrough](walkthroughs/model-deployment/encode-prefill-decode.md); a recorded run in [Elastic EP Walkthrough](walkthroughs/model-deployment/elastic-ep.md); a recorded four-rank External DP run in [External DP Walkthrough](walkthroughs/model-deployment/external-dp.md); multi-node serving in [Multi-Host Serving Walkthrough](walkthroughs/model-deployment/multi-host.md).
+- Guides: [Model Deployment](modules/model-deployment/_index.md); the role contract in [Model Deployment Configuration](modules/model-deployment/configuration.md); replica-count planning in [Model Deployment Scaling](modules/model-deployment/scaling.md); the synthetic algorithm-dynamics comparison in [Model Deployment Scaling Simulation](modules/model-deployment/scaling-simulation.md); measured algorithm behavior in [Model Deployment Scaling Benchmark](modules/model-deployment/scaling-benchmark.md); configuring and observing the scaler in [Model Deployment Scaling Walkthrough](walkthroughs/model-deployment/scaling.md); engine and transport compatibility in [Engine Compatibility](modules/model-deployment/engine-versions.md); pairing in [Prefill and Decode](modules/model-deployment/prefill-decode.md); multimodal disaggregation in [Encode, Prefill and Decode](modules/model-deployment/encode-prefill-decode.md); its measured latency and throughput in [Encode, Prefill and Decode Benchmark](modules/model-deployment/encode-prefill-decode-benchmark.md); the disaggregated-versus-aggregated comparison in [Prefill and Decode Benchmark](modules/model-deployment/prefill-decode-benchmark.md); the measured live width change in [Elastic EP Benchmark](modules/model-deployment/elastic-ep-benchmark.md); the measured External DP crossover in [External DP Benchmark](modules/model-deployment/external-dp-benchmark.md); replica selection and Router observation in [Routing](modules/model-deployment/routing.md); what a status field means in [Status](modules/model-deployment/status.md); retirement and drain in [Shutdown](modules/model-deployment/shutdown.md); in-place collective resize in [Elastic EP](modules/model-deployment/elastic-ep.md); fixed per-rank HTTP serving in [External DP](modules/model-deployment/external-dp.md); disaggregated serving in [Prefill and Decode Walkthrough](walkthroughs/model-deployment/prefill-decode.md); a recorded multimodal disaggregation run in [Encode, Prefill and Decode Walkthrough](walkthroughs/model-deployment/encode-prefill-decode.md); a recorded run in [Elastic EP Walkthrough](walkthroughs/model-deployment/elastic-ep.md); a recorded four-rank External DP run in [External DP Walkthrough](walkthroughs/model-deployment/external-dp.md); multi-node serving in [Multi-Host Serving Walkthrough](walkthroughs/model-deployment/multi-host.md).
 - Specs: [consolidation](../specs/2026-09-18-kvcache-and-model-deployment-consolidation.md) · [role replica admission](../specs/2026-09-19-role-replica-admission-unit.md) · [role configuration mutability](../specs/2026-10-08-model-deployment-role-mutability.md) · [P/D pairing and router](../specs/2026-09-12-model-deployment-pd-pairing-and-router.md) · [router implementations](../specs/2026-09-19-model-deployment-router-implementations.md) · [router qualification and drain](../specs/2026-10-01-s1-router-qualification-and-drain.md) · [elastic EP resize](../specs/2026-10-01-s2-elastic-ep-resize.md) · [EPD disaggregation](../specs/2026-10-13-model-deployment-epd-disaggregation.md) · [unified port 8000](../specs/2026-10-18-model-deployment-unify-port-8000.md) · [render version](../specs/2026-10-18-model-deployment-render-version.md) · [compilation cache and startup timeout](../specs/2026-10-19-compilation-cache-and-startup-timeout.md) · [docs and benchmarks](../specs/2026-10-19-model-deployment-docs-and-benchmarks.md) · [scaler](../specs/2026-10-21-model-deployment-scaler.md) · [capacity priors and evaluation](../specs/2026-10-26-inferencex-model-deployment-scaling.md) · [DP group router supervisor](../specs/2026-10-22-dp-group-router-supervisor.md)
 - Code: `model_deployment_*.go` reconcilers (including `model_deployment_compile_cache.go`) under [pkg/worker/controllers/worker](../pkg/worker/controllers/worker/) · the scaler planner, priors, constraints and rebalance in `model_deployment_scaler_*.go`, the algorithms and prior catalog under [pkg/worker/scaling](../pkg/worker/scaling/) and the catalog generator in [gen/priors](../gen/priors/) · native resize client in [pkg/worker/elasticengine](../pkg/worker/elasticengine/) · webhooks in [pkg/worker/webhooks/worker](../pkg/worker/webhooks/worker/) · router image under [pack/llm-router](../pack/llm-router/)
 - Related: [KV Cache](#kv-cache) (a deployment can attach a shared cache) · [Model Delivery](#model-delivery) (weights reach replicas through an artifact) · [Topology](#topology) (the placement field constrains replicas)
@@ -123,7 +123,7 @@ A skill link names a procedure; the entry's other fields carry shared facts.
 - ID: `instances`
 - Use for: launching an accelerator-backed container workspace; SSH access; node pinning and instance metrics.
 - Aliases: `Instance`, `InstanceType`, `SSH`, `workspace`
-- Guides: [GPU Instances](modules/instances/_index.md); the request form in [Accelerator Requests](modules/devices/requests.md); utilization in [Instance Metrics Reference](reference/instance-metrics.md).
+- Guides: [GPU Instances](modules/instances/_index.md); the request form in [Accelerator Requests](modules/devices/requests.md); utilization in [Instance Metrics Reference](modules/instances/metrics.md).
 - Specs: [SSH instance slicing](../specs/2026-07-04-ssh-instance-accelerator-slicing.md) · [sidecar partition visibility](../specs/2026-07-26-ssh-sidecar-partition-visibility.md) · [node pinning and additional volumes](../specs/2026-07-31-instance-node-pinning-and-additional-volumes.md) · [utilization metrics](../specs/2026-08-07-instance-utilization-metrics.md) · [Service preserved across stop](../specs/2026-10-19-preserve-instance-service-across-stop.md)
 - Code: `instance*.go` reconcilers under [pkg/worker/controllers/worker](../pkg/worker/controllers/worker/) · API handlers in [pkg/worker/extensionapis/worker](../pkg/worker/extensionapis/worker/) · gauges in [pkg/devicemanager/exporter](../pkg/devicemanager/exporter/) and [pkg/kubemetrics](../pkg/kubemetrics/)
 - Related: [Heterogeneous Devices](#heterogeneous-devices) (the request families and the admission chain) · [Model Delivery](#model-delivery) (mounting weights into an Instance)
@@ -134,7 +134,7 @@ A skill link names a procedure; the entry's other fields carry shared facts.
 - ID: `api`
 - Use for: which version a manifest or call targets. User-facing resources are `worker.gpustack.ai/v1`; `worker.gpustack.ai/v1alpha1` is internal controller storage behind the public API, not a version users switch between. The layers: public types, the handlers that proxy them onto internal storage, code generation, and the RBAC that grants access.
 - Aliases: `worker.gpustack.ai/v1`, `v1alpha1`, `CRD`, `aggregated apiserver`
-- Guides: the version table in [Development](contribute/development.md); a public surface example with its grants in [Model Artifact API](modules/model-delivery/views.md).
+- Guides: the version table in [Development](contribute/development.md); a public surface example with its grants in [Model Artifact API](modules/model-delivery/artifact-api.md).
 - Code: public types in [api/worker/v1](../api/worker/v1/) and internal storage in [api/worker/v1alpha1](../api/worker/v1alpha1/) · handlers and proxies in [pkg/worker/extensionapis](../pkg/worker/extensionapis/) over the [pkg/extensionapi](../pkg/extensionapi/) plumbing · the routing objects the extension API services are fronted by in [pkg/systemkuberess](../pkg/systemkuberess/) · generators in [gen/api](../gen/api/) · worker RBAC in [deploy/gpustack-operator/chart/templates/worker/serviceaccount.yaml](../deploy/gpustack-operator/chart/templates/worker/serviceaccount.yaml)
 - Related: [Development](#development) (`make generate` regenerates the API surface) · [GPU Instances](#gpu-instances) (Instance and InstanceType are the main public resources)
 - Skills: [gpustack-operator-generate](../.agents/skills/gpustack-operator-generate/SKILL.md) (regenerate after type or webhook edits)
@@ -144,7 +144,7 @@ A skill link names a procedure; the entry's other fields carry shared facts.
 - ID: `installation`
 - Use for: choosing chart or image mode; vendored subcharts and their patches; vendor prerequisites; upgrade and migration paths.
 - Aliases: `Helm chart`, `subchart`, `chart mode`, `image mode`, `values.yaml`
-- Guides: choices in [Installation Modes](operate/installation-modes.md); node drivers in [Vendor Prerequisites](getting-started/vendor-prerequisites.md); transfer in [Migrating to Bundled Subcharts](operate/migration/to-subcharts.md).
+- Guides: choices in [Installation Modes](operate/installation-modes.md); node drivers in [Vendor Prerequisites](getting-started/vendor-prerequisites.md); transfer in [Migrating to Bundled Subcharts](operate/migration/bundled-subcharts.md).
 - Specs: [bundled apps subchart split](../specs/2026-07-28-bundled-apps-subchart-split.md) · [settings sync semantics](../specs/2026-10-19-settings-env-sync-and-default-tracking.md)
 - Code: [deploy/gpustack-operator/chart](../deploy/gpustack-operator/chart/) · vendoring in [hack/deps.sh](../hack/deps.sh) · image-mode in-cluster install in [pkg/worker/kuberess](../pkg/worker/kuberess/) · the settings sync on every worker start in [pkg/setting](../pkg/setting/) and [pkg/worker/settings](../pkg/worker/settings/)
 - Related: [Development](#development) (chart targets and subchart patches) · [Heterogeneous Devices](#heterogeneous-devices) (the Device Manager DaemonSets the chart deploys)
@@ -235,11 +235,11 @@ A skill link names a procedure; the entry's other fields carry shared facts.
 |---|---|
 | [Model Delivery](modules/model-delivery/_index.md) | Choose how weights reach workloads. |
 | [Model Artifact](modules/model-delivery/artifact.md) | Resolve and verify model weights. |
-| [Model Artifact API](modules/model-delivery/views.md) | Read artifact and node cache status. |
+| [Model Artifact API](modules/model-delivery/artifact-api.md) | Read artifact and node cache status. |
 | [Model Image Source](modules/model-delivery/image-source.md) | Package weights in an image. |
 | [Model Prefetch](modules/model-delivery/prefetch.md) | Warm weights before a workload starts. |
 | [Node Model Store](modules/model-delivery/node-store.md) | Understand node cache state and collection. |
-| [Node-to-Node Sync](modules/model-delivery/peer-sync.md) | Move cached weights between nodes. |
+| [Node-to-Node Sync](modules/model-delivery/node-to-node-sync.md) | Move cached weights between nodes. |
 | [Remote Weight Delivery](modules/model-delivery/remote.md) | Load weights from a prepared source. |
 | [Model Store Operations](modules/model-delivery/operations.md) | Operate the node model cache. |
 
@@ -248,7 +248,7 @@ A skill link names a procedure; the entry's other fields carry shared facts.
 | Page | Description |
 |---|---|
 | [Model Deployment](modules/model-deployment/_index.md) | Start with managed model serving. |
-| [Model Deployment Configuration](modules/model-deployment/deployment.md) | Configure serving roles and overrides. |
+| [Configuration](modules/model-deployment/configuration.md) | Configure serving roles and overrides. |
 | [Engine Compatibility](modules/model-deployment/engine-versions.md) | Check engine releases, client and store requirements, and transport support. |
 | [Prefill and Decode](modules/model-deployment/prefill-decode.md) | Pair serving roles. |
 | [Prefill and Decode Benchmark](modules/model-deployment/prefill-decode-benchmark.md) | Compare equal-GPU H100 aggregated and disaggregated serving across fixed shapes and mixed traffic. |
@@ -271,6 +271,7 @@ A skill link names a procedure; the entry's other fields carry shared facts.
 | Page | Description |
 |---|---|
 | [GPU Instances](modules/instances/_index.md) | Start an accelerator-backed workspace. |
+| [Instance Metrics Reference](modules/instances/metrics.md) | Read an Instance’s resource use. |
 
 ### Operations
 
@@ -279,8 +280,8 @@ A skill link names a procedure; the entry's other fields carry shared facts.
 | [Installation Modes](operate/installation-modes.md) | Choose chart or image installation. |
 | [High Availability Operations](operate/high-availability.md) | Set replica counts for control-plane parts. |
 | [Migrating from v0.5.x](operate/migration/from-v0.5.md) | Upgrade across the queue refactor. |
-| [Migrating to Bundled Subcharts](operate/migration/to-subcharts.md) | Transfer chart ownership. |
-| [Upgrading to an Enforced Binding Dtype](operate/migration/kv-cache-dtype.md) | Check dtype before upgrading. |
+| [Migrating to Bundled Subcharts](operate/migration/bundled-subcharts.md) | Transfer chart ownership. |
+| [Upgrading to an Enforced Binding Dtype](operate/migration/enforced-binding-dtype.md) | Check dtype before upgrading. |
 | [Migration Troubleshooting](operate/migration/troubleshooting.md) | Recover a stuck upgrade. |
 
 ### Reference
@@ -290,7 +291,6 @@ A skill link names a procedure; the entry's other fields carry shared facts.
 | [Command Reference](reference/commands.md) | Look up binary commands and flags. |
 | [Settings & Environment Variables](reference/settings.md) | Look up operator configuration. |
 | [Instance Type Unit Resources Reference](reference/instance-type-unit-resources.md) | Look up CPU and memory presets. |
-| [Instance Metrics Reference](reference/instance-metrics.md) | Read an Instance’s resource use. |
 
 ### Contribution
 

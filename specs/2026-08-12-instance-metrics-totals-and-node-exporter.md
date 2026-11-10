@@ -288,7 +288,7 @@ cluster.
 
 **F5 — Documentation and e2e**
 
-- AC5.1: `docs/reference/instance-metrics.md` documents the new field pairs, the corrected
+- AC5.1: `docs/modules/instances/metrics.md` documents the new field pairs, the corrected
   disk semantics (including why `rootfs` is gone), the exporter's names, labels and units,
   the deliberate deviation from Prometheus base-unit convention, the single-exporter rule,
   the accelerator-free node gap, the scrape configuration an operator actually needs
@@ -472,7 +472,7 @@ kubectl -n <ns> exec <any-pod> -- \
 - `pkg/devicemanager/{manager,option,config}.go` — wire the poller and collector.
 - `deploy/gpustack-operator/chart/templates/device-manager/networkpolicy.yaml` (new) and
   `values.yaml` — the policy and its values; `service.yaml` — the annotation fix.
-- `docs/reference/instance-metrics.md` — field pairs, corrected disk semantics, exporter and
+- `docs/modules/instances/metrics.md` — field pairs, corrected disk semantics, exporter and
   NetworkPolicy reference.
 - `.claude/skills/gpustack-operator-e2e/cases/case-{37,38,39}.sh` — renames; `case-40.sh`
   (new) — the exporter case.
