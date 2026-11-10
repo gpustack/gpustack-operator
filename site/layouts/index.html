@@ -26,12 +26,10 @@
 
   <h2 id="installation">Installation</h2>
   <p>Use Kubernetes 1.29 or newer for scheduling and node model delivery, Helm 3.8 or newer, and cluster-admin access. Install the accelerator drivers and any required container toolkit first.</p>
-  <div class="code-block">
-    <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
-    {{ highlight `helm repo add gpustack https://docs.gpustack.ai/gpustack-operator/charts
+  {{ $installCmd := `helm repo add gpustack https://docs.gpustack.ai/gpustack-operator/charts
 helm install gpustack-operator gpustack/gpustack-operator \
-  --namespace gpustack-system --create-namespace` "bash" "" }}
-  </div>
+  --namespace gpustack-system --create-namespace` }}
+  {{ partial "code-block.html" (dict "lang" "bash" "content" (highlight $installCmd "bash" "")) }}
   <p>See <a href="{{ "docs/getting-started/vendor-prerequisites/" | relLangURL }}">vendor prerequisites</a> and <a href="{{ "docs/operate/installation-modes/" | relLangURL }}">installation modes</a> for dependencies and deployment choices.</p>
 
   <h2 id="usage">Usage</h2>

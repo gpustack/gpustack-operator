@@ -65,7 +65,7 @@ helm install gpustack-operator gpustack/gpustack-operator \
 The chart includes Node Feature Discovery, Kueue and the storage drivers. See
 [Installation Modes](./docs/operate/installation-modes.md) if your cluster already runs any of them.
 For upgrades from v0.7.x or earlier, follow the
-[subchart migration guide](docs/operate/migration/bundled-subcharts.md).
+[subchart migration guide](./docs/operate/migration/bundled-subcharts.md).
 
 ### Uninstallation
 
@@ -323,7 +323,7 @@ spec:
 ```
 
 For a standalone serving example, read
-[Model Deployment](docs/modules/model-deployment/configuration.md). [Prefill and
+[Model Deployment](./docs/modules/model-deployment/configuration.md). [Prefill and
 Decode](./docs/modules/model-deployment/prefill-decode.md) shows how to split the serving roles.
 
 ### GPU Instances

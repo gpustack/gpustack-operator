@@ -261,15 +261,8 @@ afterwards.
    ```bash
    # one GPU by index
    nvidia-smi -i <id> -mig 1
-   ```
 
-   Captured output:
-
-   ```text
    # all GPUs
-   ```
-
-   ```bash
    nvidia-smi -mig 1
    ```
 

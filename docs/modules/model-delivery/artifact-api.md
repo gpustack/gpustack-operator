@@ -18,23 +18,25 @@ stores nothing.
 | Resource | Scope | Verbs | Printer columns |
 | --- | --- | --- | --- |
 | `modelartifacts.v1.worker.gpustack.ai` | namespaced | create, get, list, watch, update, patch, delete; subresource `progress` | Name, Source, Revision (12 characters), Size, Ready, Downloading, Resolved; Age with `-o wide` |
+| `modelprefetches.v1.worker.gpustack.ai` | namespaced | create, get, list, watch, update, patch, delete | Name, Artifact, Binding, Ready, Desired, Available; Age with `-o wide` |
 | `nodemodelstores.v1.worker.gpustack.ai` | cluster | `get`, `list`, `watch`, `delete` | Name, Ready, Used, Models, Downloading; Age with `-o wide` |
 
 ```bash
-kubectl get modelartifacts.v1.worker.gpustack.ai -n team-a
+kubectl get modelartifacts.v1.worker.gpustack.ai,modelprefetches.v1.worker.gpustack.ai -n team-a
 kubectl get nodemodelstores.v1.worker.gpustack.ai
 ```
 
 `worker.gpustack.ai/v1` is the public API. A bare `kubectl get nms` or
 `kubectl get modelartifacts.worker.gpustack.ai` uses it.
 
-- `ModelArtifact` exposes no writable *`status`* subresource. The worker owns its status, which is
-  used to authorize model mounts. Updating the main resource preserves the stored status.
+- `ModelArtifact` and `ModelPrefetch` expose no writable *`status`* subresource. The worker owns their
+  status; updating either main resource preserves its stored status, and `ModelPrefetch` adds no
+  `progress` subresource because per-node facts already live on `NodeModelStore`.
 - `NodeModelStore` supports reads and deletion. The worker manages its *`spec`*, and each node's plugin
   reports *`status`*. Deletion supports Kubernetes garbage collection; the worker recreates the object
   while its node runs the plugin.
-- Resource fields are described in [Model Artifact](artifact.md#resource) and
-  [Node Model Store](node-store.md#resource).
+- Resource fields are described in [Model Artifact](artifact.md#resource),
+  [Model Prefetch](prefetch.md), and [Node Model Store](node-store.md#resource).
 
 ## Progress subresource
 
