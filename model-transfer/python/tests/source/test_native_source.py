@@ -495,8 +495,10 @@ if __name__ == "__main__":
         fake_process_smoke()
 
 
-def test_real_nixl_registration_adapter_uses_owned_full_extent():
+def test_real_nixl_registration_adapter_uses_owned_full_extent(monkeypatch):
     import ctypes
+
+    monkeypatch.setenv("GPUSTACK_MODEL_TRANSFER_NIXL_BACKEND", "UCX")
 
     from gpustack_model_transfer.backends.nixl.runtime import RealNixlAPI
     from gpustack_model_transfer.source.backend import NixlSourceBackend
@@ -528,7 +530,7 @@ def test_real_nixl_registration_adapter_uses_owned_full_extent():
             self.agent = Agent()
 
         def create_agent(self, name, settings):
-            assert settings == {"enable_listen_thread": False}
+            assert settings == {"enable_listen_thread": False, "backends": ["UCX"]}
             return self.agent
 
     api = API()

@@ -24,6 +24,8 @@ if TYPE_CHECKING:
     GPUSTACK_MODEL_TRANSFER_SOURCE_RESIDENT_BUDGET_BYTES_RAW: str | None = None
     GPUSTACK_MODEL_TRANSFER_BACKEND: str | None = None
     GPUSTACK_MODEL_TRANSFER_VENDOR_SCOPE: str | None = None
+    GPUSTACK_MODEL_TRANSFER_NIXL_BACKEND_RAW: str | None = None
+    GPUSTACK_MODEL_TRANSFER_NIXL_BACKEND: str = "UCX"
     GPUSTACK_MODEL_TRANSFER_TIMEOUT: float = 1800.0
     GPUSTACK_MODEL_TRANSFER_TIMEOUT_STR: str = "1800"
     GPUSTACK_MODEL_TRANSFER_WORKERS: str | None = None
@@ -119,6 +121,67 @@ def setdefault(key: str, value: str, env: dict[str, str] | None = None) -> str:
     return target.setdefault(key, value)
 
 
+def resolve_nixl_backend(
+    env: Mapping[str, str] | None = None,
+    sysfs_root: str = "/sys/class/infiniband",
+) -> str:
+    """Resolve the NIXL transport plugin the agents on this host create with.
+
+    An explicit GPUSTACK_MODEL_TRANSFER_NIXL_BACKEND names the plugin. The
+    accepted spellings are UCX and LIBFABRIC, compared case-insensitively
+    around surrounding whitespace; any other non-empty value is refused
+    rather than mapped to a default, because a misspelled plugin would
+    otherwise surface as an agent that initializes and transfers nothing.
+
+    Unset or empty, the plugin follows the host. An AWS EFA device under
+    sysfs_root is reachable only through LIBFABRIC, so a host whose
+    InfiniBand class carries EFA devices and no conventional NIC selects
+    it; every other host -- including one carrying an EFA device beside a
+    conventional one, where UCX still reaches the conventional fabric --
+    keeps UCX, the plugin the NIXL default installs. An unreadable or
+    missing sysfs_root is a host with no answerable fabric question, and
+    it keeps UCX too. In heterogeneous clusters that mix EFA-only nodes
+    with conventional or dual-fabric nodes, pin
+    GPUSTACK_MODEL_TRANSFER_NIXL_BACKEND uniformly across source and
+    target hosts so both peers initialize with the same plugin.
+    """
+    from gpustack_model_transfer.core.errors import SourceUnavailableError
+
+    raw = trim_str(getenv("GPUSTACK_MODEL_TRANSFER_NIXL_BACKEND", None, env))
+    if raw:
+        plugin = raw.upper()
+        if plugin not in ("UCX", "LIBFABRIC"):
+            raise SourceUnavailableError(
+                f"unsupported GPUSTACK_MODEL_TRANSFER_NIXL_BACKEND {raw!r}; "
+                "supported: UCX, LIBFABRIC"
+            )
+        return plugin
+
+    try:
+        entries = os.listdir(sysfs_root)
+    except OSError:
+        return "UCX"
+    has_efa = False
+    has_other = False
+    for dev_name in entries:
+        if dev_name.startswith(("rdmap", "efa_")):
+            has_efa = True
+            continue
+        vendor_path = os.path.join(sysfs_root, dev_name, "device", "vendor")
+        try:
+            with open(vendor_path, encoding="ascii") as handle:
+                vendor = handle.read().strip().lower()
+        except OSError:
+            vendor = ""
+        if vendor == "0x1d0f":
+            has_efa = True
+        else:
+            has_other = True
+    if has_efa and not has_other:
+        return "LIBFABRIC"
+    return "UCX"
+
+
 def _transfer_timeout(raw):
     from gpustack_model_transfer.core.errors import SourceUnavailableError
 
@@ -140,6 +203,10 @@ _VARIABLES: dict[str, Callable[[Mapping[str, str]], Any]] = {
     "GPUSTACK_MODEL_TRANSFER_VENDOR_SCOPE": lambda env: trim_str(
         getenv("GPUSTACK_MODEL_TRANSFER_VENDOR_SCOPE", None, env)
     ),
+    "GPUSTACK_MODEL_TRANSFER_NIXL_BACKEND_RAW": lambda env: getenv(
+        "GPUSTACK_MODEL_TRANSFER_NIXL_BACKEND", None, env
+    ),
+    "GPUSTACK_MODEL_TRANSFER_NIXL_BACKEND": lambda env: resolve_nixl_backend(env),
     "GPUSTACK_MODEL_TRANSFER_TIMEOUT_RAW": lambda env: getenv(
         "GPUSTACK_MODEL_TRANSFER_TIMEOUT", None, env
     ),
@@ -318,6 +385,7 @@ __all__ = [
     "choice",
     "get_envs",
     "getenv",
+    "resolve_nixl_backend",
     "setdefault",
     "to_bool",
     "to_float",
