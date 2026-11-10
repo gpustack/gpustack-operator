@@ -573,14 +573,14 @@ func TestModelDeploymentUsesKVTransfer(t *testing.T) {
 			manufacturer: nodefeature.ManufacturerAscend, want: true,
 		},
 		{
-			// The vLLM router drives its pairs itself and speaks a handshake vocabulary the
-			// Ascend connector rejects, so the pair keeps the shape Ascend always had: no leg
-			// rather than a dead one.
+			// The vLLM router relays the same handshake the picker's decode proxy does, so the
+			// Ascend pair renders its leg under it the way it does under the picker -- the old
+			// no-leg shape is gone, not preserved.
 			name:         "on Ascend under the vllm router",
 			router:       workercore.ModelDeploymentRouterVLLM,
 			engine:       workercore.ModelDeploymentEngineVLLM,
 			kind:         workercore.ModelDeploymentRoleKindPrefill,
-			manufacturer: nodefeature.ManufacturerAscend,
+			manufacturer: nodefeature.ManufacturerAscend, want: true,
 		},
 		{
 			// SGLang runs its own bootstrap registry rather than vLLM-Ascend's MooncakeConnectorV1,
@@ -618,7 +618,7 @@ func TestModelDeploymentUsesKVTransfer(t *testing.T) {
 				md.Spec.Roles = append(md.Spec.Roles, other)
 			}
 			assert.Equal(t, c.want,
-				modelDeploymentUsesKVTransfer(md, &md.Spec.Roles[0], c.manufacturer))
+				modelDeploymentUsesKVTransfer(md, &md.Spec.Roles[0]))
 		})
 	}
 
@@ -626,7 +626,7 @@ func TestModelDeploymentUsesKVTransfer(t *testing.T) {
 		workercore.ModelDeploymentEngineVLLM, workercore.ModelDeploymentRoleKindPrefill)
 	unrouted.Spec.Router = nil
 	assert.False(t, modelDeploymentUsesKVTransfer(
-		unrouted, &unrouted.Spec.Roles[0], nodefeature.ManufacturerNVIDIA,
+		unrouted, &unrouted.Spec.Roles[0],
 	),
 		"a half with nothing routing between the halves has nobody to pair with either")
 }
@@ -1693,6 +1693,47 @@ func TestModelDeploymentOwnedAndDefaultedCannotDisagree(t *testing.T) {
 			})
 		}
 	}
+
+	// Exercise the valid NIXL, HIXL, and EFA combinations so backend-specific owned and
+	// defaulted variables are verified alongside the Mooncake rows above.
+	backendCarriers := []struct {
+		engine, manufacturer, backend string
+		efa                           bool
+	}{
+		{workercore.ModelDeploymentEngineVLLM, nodefeature.ManufacturerNVIDIA, inject.KVTransferBackendMooncake, false},
+		{workercore.ModelDeploymentEngineVLLM, nodefeature.ManufacturerNVIDIA, inject.KVTransferBackendNIXL, false},
+		{workercore.ModelDeploymentEngineVLLM, nodefeature.ManufacturerNVIDIA, inject.KVTransferBackendNIXL, true},
+		{workercore.ModelDeploymentEngineVLLM, nodefeature.ManufacturerAscend, inject.KVTransferBackendHIXL, false},
+		{workercore.ModelDeploymentEngineVLLM, nodefeature.ManufacturerAscend, inject.KVTransferBackendHIXL, true},
+		{workercore.ModelDeploymentEngineSGLang, nodefeature.ManufacturerNVIDIA, inject.KVTransferBackendMooncake, false},
+		{workercore.ModelDeploymentEngineSGLang, nodefeature.ManufacturerNVIDIA, inject.KVTransferBackendNIXL, false},
+		{workercore.ModelDeploymentEngineSGLang, nodefeature.ManufacturerNVIDIA, inject.KVTransferBackendNIXL, true},
+		{workercore.ModelDeploymentEngineSGLang, nodefeature.ManufacturerAscend, inject.KVTransferBackendHIXL, false},
+	}
+	for _, bc := range backendCarriers {
+		backend := bc.backend
+		efa := bc.efa
+		for _, kind := range kinds[1:] {
+			t.Run(bc.engine+"_on_"+bc.manufacturer+"_backend_"+backend+"_efa_"+boolWord(efa)+"_as_"+string(kind), func(t *testing.T) {
+				in := connectorInputForKind(bc.engine, bc.manufacturer, kind)
+				if bc.engine == workercore.ModelDeploymentEngineSGLang && bc.manufacturer == nodefeature.ManufacturerAscend {
+					in.Protocols = []string{"tcp"}
+				}
+				in.KVTransfer = true
+				in.KVTransferBackend = backend
+				in.KVTransferEFA = efa
+				assertOwnedAndDefaultedAgree(t, in)
+			})
+		}
+	}
+}
+
+// boolWord spells a boolean for a test name, so the axis reads in the failure output.
+func boolWord(v bool) string {
+	if v {
+		return "efa"
+	}
+	return "ucx"
 }
 
 func assertOwnedAndDefaultedAgree(t *testing.T, in ModelDeploymentConnectorInput) {
@@ -1959,4 +2000,251 @@ func TestModelDeploymentConnectorFieldIsInert(t *testing.T) {
 
 	assert.Equal(t, unset, mooncake,
 		"the connector value is read by nothing; a difference here means somebody wired it in")
+}
+
+// TestModelDeploymentEffectiveKVTransferBackend pins the resolver one row per input: the pair
+// gate, the unset and Auto defaults per manufacturer and engine, and the three explicit
+// backends. The Ascend rows are the load-bearing ones -- SGLang Ascend has always run the Ascend
+// data plane, so Auto resolves to HIXL there, while vLLM Ascend keeps empty, because the
+// endpoint-exchange variable the HIXL backend defaults must not appear on a render that named no
+// backend.
+func TestModelDeploymentEffectiveKVTransferBackend(t *testing.T) {
+	deployment := func(engine, backend string, bothHalves bool) *workercore.ModelDeployment {
+		return newRenderDeployment(func(md *workercore.ModelDeployment) {
+			md.Spec.Engine.Name = engine
+			md.Spec.Router = &workercore.ModelDeploymentRouter{Name: workercore.ModelDeploymentRouterVLLM}
+			md.Spec.Roles[0].Kind = workercore.ModelDeploymentRoleKindPrefill
+			if bothHalves {
+				md.Spec.Roles = append(md.Spec.Roles, workercore.ModelDeploymentRole{
+					Name: "decode", Kind: workercore.ModelDeploymentRoleKindDecode,
+				})
+			}
+			if backend != "nil" {
+				md.Spec.KVTransfer = &workercore.ModelDeploymentKVTransfer{Backend: backend}
+			}
+		})
+	}
+
+	for _, tc := range []struct {
+		name         string
+		engine       string
+		backend      string
+		bothHalves   bool
+		manufacturer string
+		want         string
+	}{
+		{
+			name: "a lone half resolves nothing", bothHalves: false,
+			engine: workercore.ModelDeploymentEngineVLLM, backend: workercore.ModelDeploymentKVTransferBackendNIXL,
+			manufacturer: nodefeature.ManufacturerNVIDIA, want: "",
+		},
+		{
+			name: "no kvTransfer block resolves nothing", bothHalves: true, backend: "nil",
+			engine:       workercore.ModelDeploymentEngineVLLM,
+			manufacturer: nodefeature.ManufacturerNVIDIA, want: "",
+		},
+		{
+			name: "unset on non-Ascend resolves nothing", bothHalves: true, backend: "",
+			engine:       workercore.ModelDeploymentEngineVLLM,
+			manufacturer: nodefeature.ManufacturerNVIDIA, want: "",
+		},
+		{
+			name: "auto on non-Ascend resolves nothing", bothHalves: true, backend: workercore.ModelDeploymentKVTransferBackendAuto,
+			engine:       workercore.ModelDeploymentEngineVLLM,
+			manufacturer: nodefeature.ManufacturerNVIDIA, want: "",
+		},
+		{
+			name: "unset on Ascend vLLM resolves nothing", bothHalves: true, backend: "",
+			engine:       workercore.ModelDeploymentEngineVLLM,
+			manufacturer: nodefeature.ManufacturerAscend, want: "",
+		},
+		{
+			name: "auto on Ascend vLLM resolves nothing", bothHalves: true, backend: workercore.ModelDeploymentKVTransferBackendAuto,
+			engine:       workercore.ModelDeploymentEngineVLLM,
+			manufacturer: nodefeature.ManufacturerAscend, want: "",
+		},
+		{
+			name: "auto on Ascend SGLang resolves HIXL", bothHalves: true, backend: workercore.ModelDeploymentKVTransferBackendAuto,
+			engine:       workercore.ModelDeploymentEngineSGLang,
+			manufacturer: nodefeature.ManufacturerAscend, want: inject.KVTransferBackendHIXL,
+		},
+		{
+			name: "mooncake resolves mooncake", bothHalves: true, backend: workercore.ModelDeploymentKVTransferBackendMooncake,
+			engine:       workercore.ModelDeploymentEngineVLLM,
+			manufacturer: nodefeature.ManufacturerNVIDIA, want: inject.KVTransferBackendMooncake,
+		},
+		{
+			name: "nixl resolves nixl", bothHalves: true, backend: workercore.ModelDeploymentKVTransferBackendNIXL,
+			engine:       workercore.ModelDeploymentEngineVLLM,
+			manufacturer: nodefeature.ManufacturerNVIDIA, want: inject.KVTransferBackendNIXL,
+		},
+		{
+			name: "hixl resolves hixl", bothHalves: true, backend: workercore.ModelDeploymentKVTransferBackendHIXL,
+			engine:       workercore.ModelDeploymentEngineVLLM,
+			manufacturer: nodefeature.ManufacturerAscend, want: inject.KVTransferBackendHIXL,
+		},
+		{
+			name: "an unknown value resolves nothing", bothHalves: true, backend: "TensorRT",
+			engine:       workercore.ModelDeploymentEngineVLLM,
+			manufacturer: nodefeature.ManufacturerNVIDIA, want: "",
+		},
+		{
+			name: "an unobserved manufacturer behaves as non-Ascend", bothHalves: true, backend: "",
+			engine:       workercore.ModelDeploymentEngineSGLang,
+			manufacturer: "", want: "",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			md := deployment(tc.engine, tc.backend, tc.bothHalves)
+			assert.Equal(t, tc.want,
+				ModelDeploymentEffectiveKVTransferBackend(md, tc.manufacturer))
+		})
+	}
+}
+
+// TestSynthesizeModelDeploymentConnector_TransferBackends pins the rendered connector per
+// backend, at synthesis level rather than at the renderer's, because the resolver and the
+// threading between them are this package's to prove: the backend arrives resolved, the render
+// names the connector the backend selected, and the side-channel PAIR is armed on both halves of
+// a vLLM NIXL leg.
+func TestSynthesizeModelDeploymentConnector_TransferBackends(t *testing.T) {
+	input := func(engine, manufacturer, backend string, efa bool) ModelDeploymentConnectorInput {
+		in := connectorInputForKind(engine, manufacturer, workercore.ModelDeploymentRoleKindPrefill)
+		in.KVTransfer = true
+		in.KVTransferBackend = backend
+		in.KVTransferEFA = efa
+		return in
+	}
+
+	t.Run("vllm nixl arms the side channel and names UCX", func(t *testing.T) {
+		got, err := SynthesizeModelDeploymentConnector(
+			input(workercore.ModelDeploymentEngineVLLM, nodefeature.ManufacturerNVIDIA, inject.KVTransferBackendNIXL, false),
+		)
+		require.NoError(t, err)
+
+		require.Len(t, got.Args, 2)
+		assert.Equal(t, "--kv-transfer-config", got.Args[0])
+		assert.JSONEq(t, `{
+			"kv_connector":"MultiConnector",
+			"kv_role":"kv_producer",
+			"kv_connector_extra_config":{"connectors":[
+				{"kv_connector":"NixlConnector","kv_role":"kv_producer",
+				 "kv_connector_extra_config":{"backends":["UCX"]}},
+				{"kv_connector":"MooncakeStoreConnector","kv_role":"kv_both"}
+			]}
+		}`, got.Args[1])
+
+		host := envByName(got.Env, inject.VLLMNIXLSideChannelHostEnv)
+		require.NotNil(t, host, "the side-channel host is owned and rendered on the prefiller")
+		require.NotNil(t, host.ValueFrom)
+		require.NotNil(t, host.ValueFrom.FieldRef)
+		assert.Equal(t, "status.podIP", host.ValueFrom.FieldRef.FieldPath)
+		assert.Contains(t, got.DefaultedEnv, core.EnvVar{
+			Name: inject.VLLMNIXLSideChannelPortEnv, Value: "5600",
+		})
+		assert.Contains(t, got.Ports, core.ContainerPort{
+			Name: "nixl-side", Protocol: core.ProtocolTCP, ContainerPort: inject.VLLMNIXLSideChannelPort,
+		})
+
+		decode := input(workercore.ModelDeploymentEngineVLLM, nodefeature.ManufacturerNVIDIA, inject.KVTransferBackendNIXL, false)
+		decode.Kind = workercore.ModelDeploymentRoleKindDecode
+		decodeRender, err := SynthesizeModelDeploymentConnector(decode)
+		require.NoError(t, err)
+		require.NotNil(t, envByName(decodeRender.Env, inject.VLLMNIXLSideChannelHostEnv),
+			"the side channel is a pair of listeners, so the consumer arms it too")
+		assert.Contains(t, decodeRender.Ports, core.ContainerPort{
+			Name: "nixl-side", Protocol: core.ProtocolTCP, ContainerPort: inject.VLLMNIXLSideChannelPort,
+		})
+	})
+
+	t.Run("vllm nixl names LIBFABRIC on the EFA report", func(t *testing.T) {
+		got, err := SynthesizeModelDeploymentConnector(
+			input(workercore.ModelDeploymentEngineVLLM, nodefeature.ManufacturerNVIDIA, inject.KVTransferBackendNIXL, true),
+		)
+		require.NoError(t, err)
+		assert.Contains(t, got.Args[1], `"backends":["LIBFABRIC"]`,
+			"the EFA report switches the NIXL transport plugin")
+		assert.NotContains(t, got.Args[1], `"backends":["UCX"]`)
+	})
+
+	t.Run("ascend hixl defaults the endpoint exchange and the roce constraint", func(t *testing.T) {
+		in := input(workercore.ModelDeploymentEngineVLLM, nodefeature.ManufacturerAscend, inject.KVTransferBackendHIXL, false)
+		in.KVTransferProtocol = "RDMA"
+		got, err := SynthesizeModelDeploymentConnector(in)
+		require.NoError(t, err)
+
+		assert.Contains(t, got.Args[1], `"kv_connector":"MooncakeConnectorV1"`,
+			"the HIXL backend names variables, not a different connector")
+		assert.Contains(t, got.DefaultedEnv, core.EnvVar{Name: inject.AscendAutoConnectEnv, Value: "1"})
+		assert.Contains(t, got.DefaultedEnv, core.EnvVar{
+			Name:  inject.AscendGlobalResourceConfigEnv,
+			Value: `{"comm_resource_config.protocol_desc":"roce:device"}`,
+		})
+		assert.Contains(t, got.DefaultedEnv, core.EnvVar{Name: inject.HCCLIntraRoCEEnableEnv, Value: "1"})
+	})
+
+	t.Run("ascend vllm without a backend defaults no ascend variable", func(t *testing.T) {
+		got, err := SynthesizeModelDeploymentConnector(
+			input(workercore.ModelDeploymentEngineVLLM, nodefeature.ManufacturerAscend, "", false),
+		)
+		require.NoError(t, err)
+		require.NotEmpty(t, got.Args, "the Ascend leg itself still renders")
+		for _, env := range got.DefaultedEnv {
+			assert.NotContains(t, env.Name, "ASCEND_",
+				"the Ascend variables follow the named backend, and no backend was named")
+			assert.NotEqual(t, inject.HCCLIntraRoCEEnableEnv, env.Name)
+		}
+	})
+
+	t.Run("sglang nixl defaults UCX and LIBFABRIC on EFA", func(t *testing.T) {
+		ucx, err := SynthesizeModelDeploymentConnector(
+			input(workercore.ModelDeploymentEngineSGLang, nodefeature.ManufacturerNVIDIA, inject.KVTransferBackendNIXL, false),
+		)
+		require.NoError(t, err)
+		assert.Contains(t, ucx.Args, "--disaggregation-transfer-backend")
+		assert.Contains(t, ucx.Args, "nixl")
+		assert.Contains(t, ucx.DefaultedEnv, core.EnvVar{
+			Name: inject.SGLangDisaggregationNIXLBackendEnv, Value: "UCX",
+		})
+
+		lib, err := SynthesizeModelDeploymentConnector(
+			input(workercore.ModelDeploymentEngineSGLang, nodefeature.ManufacturerNVIDIA, inject.KVTransferBackendNIXL, true),
+		)
+		require.NoError(t, err)
+		assert.Contains(t, lib.DefaultedEnv, core.EnvVar{
+			Name: inject.SGLangDisaggregationNIXLBackendEnv, Value: "LIBFABRIC",
+		})
+	})
+
+	t.Run("the binding fingerprints the backend beside the leg alone", func(t *testing.T) {
+		got, err := SynthesizeModelDeploymentConnector(
+			input(workercore.ModelDeploymentEngineVLLM, nodefeature.ManufacturerNVIDIA, inject.KVTransferBackendNIXL, true),
+		)
+		require.NoError(t, err)
+		require.NotNil(t, got.binding)
+		assert.Equal(t, inject.KVTransferBackendNIXL, got.binding.KVTransferBackend)
+		assert.True(t, got.binding.KVTransferEFA)
+
+		// The same inputs on a role the leg does not render: the fingerprint stays empty, so an
+		// edited backend on a deployment whose pair renders no leg changes no Pod spec hash.
+		store := connectorInputForKind(workercore.ModelDeploymentEngineVLLM, nodefeature.ManufacturerNVIDIA,
+			workercore.ModelDeploymentRoleKindServer)
+		store.KVTransferBackend = inject.KVTransferBackendNIXL
+		store.KVTransferEFA = true
+		storeRender, err := SynthesizeModelDeploymentConnector(store)
+		require.NoError(t, err)
+		require.NotNil(t, storeRender.binding)
+		assert.Empty(t, storeRender.binding.KVTransferBackend)
+		assert.False(t, storeRender.binding.KVTransferEFA)
+	})
+}
+
+// envByName returns a rendered variable by name, or nil when the render carried none.
+func envByName(env []core.EnvVar, name string) *core.EnvVar {
+	for i := range env {
+		if env[i].Name == name {
+			return &env[i]
+		}
+	}
+	return nil
 }

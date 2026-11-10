@@ -166,8 +166,8 @@ type KVCacheBackendManaged struct {
 // one value. It arrives when there are two; widening an enum is not a breaking change.
 type KVCacheBackendScaleIn struct {
 	// GracePeriodSeconds is the wait the operator asks a departing member for, after that member
-	// deregisters its local disk tier. It renders into the preStop hook as the endpoint's
-	// grace_period_seconds and nothing else reads it. A plain int32, because unset and zero mean the
+	// deregisters its local disk tier. It renders into the preStop hook as the storage engine's
+	// lease grace period and nothing else reads it. A plain int32, because unset and zero mean the
 	// same thing here: deregister the tier, then do not wait.
 	//
 	//   - The TIER is the only thing deregistered on the way out. A memory segment is dropped rather
@@ -344,7 +344,7 @@ type KVCacheBackendLeader struct {
 	// KVCachePool over a backend with no ledger to write quota into is admitted with a warning that
 	// no per-tenant quota is in force, withdrawing the flag from a backend a pool already holds is
 	// refused, and a webhook reading an unschema'd "true", "1" or "True" would be judging a value
-	// domain that belongs to whoever typed it. The store's global -quota_bytes flag stays in
+	// domain that belongs to whoever typed it. The storage engine's global quota flag stays in
 	// extraArgs for the converse reason: no other API needs to interpret it.
 	//
 	// IT DEFAULTS TO TRUE, because the ledger is what makes the rest of this API mean what it says:
@@ -411,10 +411,10 @@ type KVCacheBackendTransport struct {
 	// Protocol is the transport the members are ASKED to use. Auto resolves to TCP.
 	//
 	// THESE VALUES ARE NOT THE STORE'S OWN SPELLINGS. What is written here is translated before it
-	// reaches a member, and two of the eight change word entirely: CANN renders as ascend and ROCM
-	// as hip. So a member's environment, its logs, and status.members[].protocol below all report
-	// the store's lowercase spelling rather than the one written here, and comparing the two as
-	// strings finds a difference that is not one.
+	// reaches a member, and two of the eight change word entirely: CANN and ROCM render as the
+	// pool's hardware-native RDMA or fabric transport. So a member's environment, its logs, and
+	// status.members[].protocol below all report the store's lowercase spelling rather than the
+	// one written here, and comparing the two as strings finds a difference that is not one.
 	//
 	//   - TCP is the universal fallback. RDMA, EFA, CANN, ROCM, MUSA and MACA are peers of one
 	//     another, each a fabric- or vendor-specific fast path rather than a spelling of TCP: EFA in
@@ -528,8 +528,8 @@ type KVCacheBackendMember struct {
 
 	// ExtraArgs passes config keys this API does not enumerate straight through to the member. An
 	// entry is written as its own flag token, "-key=value", and renders as the entrypoint's own
-	// "-D key=value" override with the dashes gone — one namespace per side, each the one its own
-	// binary documents. A key that collides with one derived from a field above is refused at
+	// engine-specific key/value flag override with the dashes gone — one namespace per side, each
+	// the one its own binary documents. A key that collides with one derived from a field above is refused at
 	// admission.
 	//
 	// EVERY VALUE HERE IS WORLD-READABLE: stored verbatim on this cluster-scoped object, then
@@ -544,7 +544,8 @@ type KVCacheBackendMember struct {
 	// member container.
 	//
 	//   - It is NOT a second spelling of ExtraArgs: the two reach different places. ExtraArgs renders
-	//     as the entrypoint's "-D key=value" config override, while a whole family of this store's
+	//     as the entrypoint's engine-specific key/value flag override, while a whole family of this
+	//     store's
 	//     settings — the local disk tier's flush thresholds, its promotion behavior, the rest of its
 	//     eviction knobs — has no config key at all and is read from the ENVIRONMENT only.
 	//   - A name this operator already renders is REFUSED at admission, for the same reason a
@@ -590,7 +591,8 @@ type KVCacheBackendMember struct {
 	//     leader routes an offload task to the client that owns the key's memory replica, so a member
 	//     holding no memory segment is never chosen and would report a cold tier that never fills.
 	//   - To check what the tier actually holds rather than what it declared, read the leader's own
-	//     master_allocated_file_size_bytes; status.capacity reports the declared CAPACITY only.
+	//     the storage engine's allocated disk capacity metric on the leader; status.capacity
+	//     reports the declared CAPACITY only.
 	//   - At most ONE entry, and the bound is the status contract rather than any one renderer's
 	//     reach: status.capacity is a single pair of figures for the whole backend and cannot
 	//     attribute a tier's bytes to one disk, so two entries would describe neither. The same

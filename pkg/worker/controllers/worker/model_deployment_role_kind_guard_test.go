@@ -312,7 +312,7 @@ func TestModelDeploymentRoleKindGuard(t *testing.T) {
 						},
 					},
 				}
-				got := modelDeploymentUsesKVTransfer(md, &md.Spec.Roles[2], nodefeature.ManufacturerNVIDIA)
+				got := modelDeploymentUsesKVTransfer(md, &md.Spec.Roles[2])
 				assert.Equal(t, want.UsesKVTransfer, got,
 					"the transfer leg must match the expectation row")
 			})

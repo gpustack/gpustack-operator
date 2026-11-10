@@ -77,8 +77,8 @@ type AcceleratorAllocationApplyConfiguration struct {
 	AllocatedPhysicalID *string `json:"allocatedPhysicalID,omitempty"`
 	// AllocatedLogicalPlacements is the per-Pod annotation TRANSPORT of the logical-slice
 	// ledger: the compute geometry the Pod's logical slice holds on this accelerator, in the
-	// manufacturer's own compute units (on AMD, CU-mask bit indexes exactly as they appear in
-	// HSA_CU_MASK). The device-plugin Allocate records it so a later placement decision reads
+	// manufacturer's own compute units (for example, runtime compute-unit bitmasks). The
+	// device-plugin Allocate records it so a later placement decision reads
 	// what the node's live slices already occupy. Empty (omitted) in the aggregated
 	// Devices.Status, and for a manufacturer whose logical slice has no position.
 	//

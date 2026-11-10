@@ -41,33 +41,19 @@ type ModelDeploymentSpecApplyConfiguration struct {
 	// reason to refuse one. Several prefillers with several decoders is another. A rule admitting only
 	// one prefiller and one decoder would describe a pairer rather than this field.
 	//
-	// ON ASCEND HARDWARE THE PREFILL/DECODE TRANSFER LEG RENDERS BEHIND EITHER MANAGED ROUTER:
-	// "llm-d-router", whose decode proxy relays the per-request handshake with
-	// --kv-connector=nixlv2, and "vllm-router", which selects the same vocabulary with
-	// --kv-connector=nixl. "sglang-gateway" is refused in front of this engine before any of
-	// that applies.
+	// Both llm-d-router and vllm-router support vLLM prefill/decode transfer across Ascend and
+	// non-Ascend pools. sglang-gateway is only valid when engine.name is SGLang.
 	//
 	// Absent means no router, and that stays a supported shape rather than a broken one: the roles are
 	// individually addressable through their own Services either way, so a deployment written before
 	// this field existed serves exactly as it did.
 	//
 	Router *ModelDeploymentRouterApplyConfiguration `json:"router,omitempty"`
-	// KVTransfer tunes the engine-to-engine KV transfer leg of a managed prefill/decode
-	// pair.
-	//
-	// THIS FIELD AND KVCache ABOVE ARE TWO ORTHOGONAL AXES, NOT TWO BRANCHES OF ONE CHOICE, and
-	// both may be set at once. The gate that turns this leg on — every admitted router-and-engine
-	// pair (on Ascend hardware, "llm-d-router" or "vllm-router" alike; Router above names each
-	// combination) and a role kind of prefill or decode — reads none of
-	// spec.kvCache, and when both are set the two are synthesized into ONE connector and one
-	// --kv-transfer-config: a deployment may share a pool for its blocks AND hand them from prefill
-	// to decode directly, at the same time.
-	//
-	// THE LEG THIS COVERS NEVER TRAVERSES THE STORE, and that is why the value does not come from
-	// the KVCacheBackend: spec.transport there defines the data plane the store MEMBERS run, this
-	// one is engine to engine, and the two planes declare separately. A deployment can render
-	// this leg with no pool attached at all, which is another reason the field cannot live under
-	// KVCache.
+	// KVTransfer configures the direct prefill-to-decode KV transfer leg when Roles declares
+	// both a prefill role and a decode role. Ignored on single-role Server deployments. When
+	// both KVCache and KVTransfer are active, the operator composes the shared-pool attachment
+	// and the direct prefill-to-decode transfer leg into each role's synthesized engine
+	// configuration.
 	//
 	KVTransfer *ModelDeploymentKVTransferApplyConfiguration `json:"kvTransfer,omitempty"`
 }

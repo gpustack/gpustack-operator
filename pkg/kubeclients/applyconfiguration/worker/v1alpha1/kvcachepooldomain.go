@@ -8,7 +8,7 @@ package v1alpha1
 // KVCachePoolDomain is one reuse identity registered against this pool: what it is, who declared it,
 // and what the master reports about it.
 type KVCachePoolDomainApplyConfiguration struct {
-	// Name is the reuse identity, and it is the storage layer's tenant_id.
+	// Name is the reuse identity, and it is the storage layer's tenant identifier.
 	//
 	Name *string `json:"name,omitempty"`
 	// Binding is the object that declared this domain. It is the only place a domain can be

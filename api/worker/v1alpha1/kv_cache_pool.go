@@ -175,7 +175,7 @@ type KVCachePoolUsage struct {
 // KVCachePoolDomain is one reuse identity registered against this pool: what it is, who declared it,
 // and what the master reports about it.
 type KVCachePoolDomain struct {
-	// Name is the reuse identity, and it is the storage layer's tenant_id.
+	// Name is the reuse identity, and it is the storage layer's tenant identifier.
 	//
 	// +required
 	// +k8s:validation:maxLength=63

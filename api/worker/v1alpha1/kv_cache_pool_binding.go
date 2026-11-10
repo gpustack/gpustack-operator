@@ -55,15 +55,14 @@ type KVCachePoolBindingSpec struct {
 	// +required
 	PoolRef KVCachePoolBindingPoolReference `json:"poolRef" protobuf:"bytes,1,name=poolRef"`
 
-	// Domain is the reuse identity this Binding registers, and it is REQUIRED. Its name maps to the
-	// storage layer's tenant_id and to nothing else, so registering a domain creates a tenant with a
-	// quota ledger of its own.
+	// Domain is the reuse identity this Binding registers, and it is REQUIRED. Its name maps to
+	// the storage layer's tenant identifier and to nothing else, so registering a domain creates
+	// a tenant with a quota ledger of its own.
 	//
-	// IT IS NOT A KEY PREFIX. Inside one tenant the store key is formed by the engine from its model
-	// name and token-block hashes; blockSize and dtype are not part of that key. Where a prefix is
-	// rendered at all, it is the weights identity of a ModelDeployment that references a
-	// ModelArtifact, rendered as cache_prefix for vLLM and extra_backend_tag for SGLang, and never
-	// this name.
+	// IT IS NOT A KEY PREFIX. Inside one tenant the store key is formed by the engine from its
+	// model name and token-block hashes; blockSize and dtype are not part of that key. Where a
+	// prefix is rendered at all, it is the weights identity of a ModelDeployment that references
+	// a ModelArtifact, rendered as the inference engine's cache key prefix, and never this name.
 	//
 	// EXACTLY ONE DOMAIN AND NOT A LIST, deliberately, so the cardinality is enforced by the schema
 	// and not by a webhook rule: one Binding is one tenant, every figure in Status is a single series
@@ -119,7 +118,7 @@ type KVCachePoolBindingPoolReference struct {
 // KVCachePoolBindingDomain is the reuse identity: what the cache isolates on, and what its blocks
 // are shaped like.
 type KVCachePoolBindingDomain struct {
-	// Name is the domain, and it becomes the storage layer's tenant_id verbatim.
+	// Name is the domain, and it becomes the storage layer's tenant identifier verbatim.
 	//
 	//   - Left unset, it is "default", filled in by the API server before the object is stored. That
 	//     is the tenant the store itself assigns to a writer that names none, so an omitted name and
@@ -132,7 +131,7 @@ type KVCachePoolBindingDomain struct {
 	//     master rather than per pool because one master can serve several pools and the tenant space
 	//     is master-global; it is not cluster-wide because two masters hold two ledgers.
 	//   - The accepted shape is a DNS-1123 label, checked by the webhook. That is strictly inside
-	//     what the master accepts as a tenant_id and is what a Kubernetes object name already looks
+	//     what the master accepts as a tenant identifier and is what a Kubernetes object name already looks
 	//     like, so nobody learns a second naming rule. This is the ONLY place the shape is judged;
 	//     every consumer downstream copies the name rather than re-judging it.
 	//

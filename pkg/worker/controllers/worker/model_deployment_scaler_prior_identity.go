@@ -14,6 +14,7 @@ import (
 
 	workerapi "gpustack.ai/gpustack/api/worker/v1"
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
+	"gpustack.ai/gpustack/pkg/worker/kvcache/inject"
 	"gpustack.ai/gpustack/pkg/worker/scaling/priors"
 )
 
@@ -801,6 +802,13 @@ var modelDeploymentScalerCapacityNeutralEnvNames = []string{
 	"MC_TE_METRIC", "MC_FORCE_TCP", "MC_TCP_MAX_QUEUED_TRANSFERS_PER_PEER",
 	"MC_TCP_MAX_PENDING_ADMISSIONS_PER_PEER", "MC_TCP_LANES_PER_PEER",
 	"MC_TCP_ADMISSION_TIMEOUT_MS",
+	// Transfer-backend transport and port variables do not affect serving capacity.
+	inject.VLLMNIXLSideChannelPortEnv,
+	inject.SGLangDisaggregationNIXLBackendEnv,
+	inject.AscendAutoConnectEnv,
+	inject.AscendGlobalResourceConfigEnv,
+	inject.HCCLIntraRoCEEnableEnv,
+	inject.AscendMFTransferProtocolEnv,
 	"HF_TOKEN", "HF_ENDPOINT", "HF_HOME",
 	"MODELSCOPE_API_TOKEN", "MODELSCOPE_DOMAIN", "MODELSCOPE_CACHE",
 	"VLLM_USE_MODELSCOPE", "SGLANG_USE_MODELSCOPE",

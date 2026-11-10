@@ -24,7 +24,8 @@ func modelDeploymentRequestsInterfaces(md *workercore.ModelDeployment) bool {
 // ModelDeploymentDirectInterfaceProtocol returns the protocol a managed direct-transfer or
 // multi-member Server collective leg actually renders. A role with a user-owned command, an absent
 // pair or collective, or an engine that ignores the declared protocol cannot use that declaration to
-// select a device grant.
+// select a device grant. It covers routed prefill/decode pairs on vLLM and SGLang, managed multi-Pod
+// vLLM Server roles, and NIXL remote weight delivery (preferring EFA when declared or active on the pool).
 func ModelDeploymentDirectInterfaceProtocol(
 	md *workercore.ModelDeployment, role *workercore.ModelDeploymentRole, manufacturer string,
 	artifact ...*ModelDeploymentArtifactRender,
@@ -41,18 +42,30 @@ func ModelDeploymentDirectInterfaceProtocol(
 	if remoteDelivery &&
 		!modelDeploymentRoleHasConflictingLoadFormat(md.Spec.Engine.Name, role.ExtraArgs) &&
 		modelDeploymentModelTransferCandidateBackend(manufacturer, md.Spec.Engine.Name) == "nixl" {
+		// The declared protocol or an EFA-bound cache pool outranks the RDMA default here: a
+		// deployment whose transfer leg or cache store runs over EFA must resolve its weight
+		// delivery to the same fabric, or the two legs would request conflicting device grants
+		// on one role.
+		if (md.Spec.KVTransfer != nil && mooncake.TransportProtocol(md.Spec.KVTransfer.Protocol) == "efa") ||
+			(len(artifact) > 0 && artifact[0] != nil && artifact[0].ModelTransferEFA) {
+			return "efa"
+		}
 		return "rdma"
 	}
-	if md.Spec.Engine.Name != workercore.ModelDeploymentEngineVLLM {
+	if md.Spec.Engine.Name != workercore.ModelDeploymentEngineVLLM &&
+		md.Spec.Engine.Name != workercore.ModelDeploymentEngineSGLang {
 		return ""
 	}
 	// Managed multi-Pod Server collective legs (size > 1 or elasticEp) select the operator's
 	// RDMA device key ("rdma"); spec.kvTransfer applies only to routed prefill/decode pairs.
-	if ModelDeploymentEffectiveRoleKind(role) == workercore.ModelDeploymentRoleKindServer &&
+	// The collective shape is vLLM's alone: SGLang multi-member Server roles are not a leg this
+	// answer grants devices for, so they fall through to the pair check and stop there.
+	if md.Spec.Engine.Name == workercore.ModelDeploymentEngineVLLM &&
+		ModelDeploymentEffectiveRoleKind(role) == workercore.ModelDeploymentRoleKindServer &&
 		(modelDeploymentRoleSize(role) > 1 || role.ElasticEP != nil) {
 		return "rdma"
 	}
-	if !modelDeploymentUsesKVTransfer(md, role, manufacturer) {
+	if !modelDeploymentUsesKVTransfer(md, role) {
 		return ""
 	}
 	if md.Spec.KVTransfer != nil && md.Spec.KVTransfer.Protocol != "" {

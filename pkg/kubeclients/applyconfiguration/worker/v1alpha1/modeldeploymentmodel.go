@@ -21,9 +21,8 @@ import (
 type ModelDeploymentModelApplyConfiguration struct {
 	// Name is the identifier the engine serves, e.g. "Qwen/Qwen2.5-72B-Instruct".
 	//
-	// It stays the SERVED NAME whether or not ArtifactRef is set: routers, the router's tokenizer
-	// calls and the metrics' model label all match on it, so a managed role's own
-	// --served-model-name must equal it, admission-enforced.
+	// Serving name exposed by the inference engine. When a role leaves its command unset, any
+	// explicit served-model-name argument in that role's ExtraArgs must equal Name.
 	//
 	Name *string `json:"name,omitempty"`
 	// ArtifactRef names a ModelArtifact IN THIS NAMESPACE holding the weights. The type is a

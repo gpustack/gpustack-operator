@@ -756,9 +756,16 @@ func renderModelDeploymentPodTemplate(ctx context.Context, in ModelDeploymentRen
 	}
 	if directDecode {
 		manufacturer := in.InstanceType.Status.Detail.Manufacturer
+		// The sidecar's handshake reads the same resolved backend the engine half was
+		// synthesized from, so the two halves of one decode Pod cannot answer the question
+		// "which vocabulary does this pair speak" differently.
+		sidecarBackend := ""
+		if in.Connector.binding != nil {
+			sidecarBackend = in.Connector.binding.KVTransferBackend
+		}
 		sidecar := renderModelDeploymentRoutingSidecar(
 			ctx, role, enginePort, scheme, md.Spec.Engine.Name, in.NativeSidecar,
-			manufacturer, in.ECConnector,
+			manufacturer, in.ECConnector, sidecarBackend,
 		)
 		if in.NativeSidecar {
 			pod.Spec.InitContainers = []core.Container{sidecar}
@@ -1097,7 +1104,9 @@ func modelDeploymentCommandPort(engine string, command []string) (int32, error) 
 // kv_transfer_params, and the sidecar's nixlv2 mode relays exactly that document
 // (llm-d/llm-d-router@v0.10.0 `pkg/sidecar/proxy/connector_nixlv2.go:162-170,405`). The connector
 // value is the sidecar's own constant vocabulary (`pkg/sidecar/constants/constants.go:21`,
-// KVConnectorNIXLV2), spelled here rather than derived from anything the engine names.
+// KVConnectorNIXLV2), spelled here rather than derived from anything the engine names. On vLLM,
+// Ascend pairs and resolved NIXL or HIXL backends render --kv-connector=nixlv2 without a bootstrap
+// port, while Mooncake keeps --kv-connector=mooncake and SGLang always uses --kv-connector=sglang.
 // The encoder-cache connectors the decode sidecar pulls embeddings through. These are the
 // sidecar's own words, NOT the engine connector names they correspond to: the engine runs
 // ECCPUConnector or ECExampleConnector, while the sidecar either pulls the encoder's output over
@@ -1121,7 +1130,7 @@ const (
 func renderModelDeploymentRoutingSidecar(
 	ctx context.Context,
 	role *workercore.ModelDeploymentRole, enginePort int32, engineScheme core.URIScheme,
-	engine string, native bool, manufacturer, ecConnector string,
+	engine string, native bool, manufacturer, ecConnector, kvTransferBackend string,
 ) core.Container {
 	externalPort := modelDeploymentServicePort(role)
 	args := []string{
@@ -1141,7 +1150,9 @@ func renderModelDeploymentRoutingSidecar(
 			Name:  "SGLANG_BOOTSTRAP_PORT",
 			Value: strconv.Itoa(int(inject.SGLangBootstrapPort)),
 		})
-	case manufacturer == nodefeature.ManufacturerAscend:
+	case manufacturer == nodefeature.ManufacturerAscend ||
+		kvTransferBackend == inject.KVTransferBackendNIXL ||
+		kvTransferBackend == inject.KVTransferBackendHIXL:
 		args = append(args, "--kv-connector=nixlv2")
 	default:
 		args = append(args,

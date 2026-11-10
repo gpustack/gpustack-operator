@@ -81,11 +81,8 @@ type ModelDeploymentSpec struct {
 	// reason to refuse one. Several prefillers with several decoders is another. A rule admitting only
 	// one prefiller and one decoder would describe a pairer rather than this field.
 	//
-	// ON ASCEND HARDWARE THE PREFILL/DECODE TRANSFER LEG RENDERS BEHIND EITHER MANAGED ROUTER:
-	// "llm-d-router", whose decode proxy relays the per-request handshake with
-	// --kv-connector=nixlv2, and "vllm-router", which selects the same vocabulary with
-	// --kv-connector=nixl. "sglang-gateway" is refused in front of this engine before any of
-	// that applies.
+	// Both llm-d-router and vllm-router support vLLM prefill/decode transfer across Ascend and
+	// non-Ascend pools. sglang-gateway is only valid when engine.name is SGLang.
 	//
 	// Absent means no router, and that stays a supported shape rather than a broken one: the roles are
 	// individually addressable through their own Services either way, so a deployment written before
@@ -94,22 +91,11 @@ type ModelDeploymentSpec struct {
 	// +optional
 	Router *ModelDeploymentRouter `json:"router,omitempty" protobuf:"bytes,5,opt,name=router"`
 
-	// KVTransfer tunes the engine-to-engine KV transfer leg of a managed prefill/decode
-	// pair.
-	//
-	// THIS FIELD AND KVCache ABOVE ARE TWO ORTHOGONAL AXES, NOT TWO BRANCHES OF ONE CHOICE, and
-	// both may be set at once. The gate that turns this leg on — every admitted router-and-engine
-	// pair (on Ascend hardware, "llm-d-router" or "vllm-router" alike; Router above names each
-	// combination) and a role kind of prefill or decode — reads none of
-	// spec.kvCache, and when both are set the two are synthesized into ONE connector and one
-	// --kv-transfer-config: a deployment may share a pool for its blocks AND hand them from prefill
-	// to decode directly, at the same time.
-	//
-	// THE LEG THIS COVERS NEVER TRAVERSES THE STORE, and that is why the value does not come from
-	// the KVCacheBackend: spec.transport there defines the data plane the store MEMBERS run, this
-	// one is engine to engine, and the two planes declare separately. A deployment can render
-	// this leg with no pool attached at all, which is another reason the field cannot live under
-	// KVCache.
+	// KVTransfer configures the direct prefill-to-decode KV transfer leg when Roles declares
+	// both a prefill role and a decode role. Ignored on single-role Server deployments. When
+	// both KVCache and KVTransfer are active, the operator composes the shared-pool attachment
+	// and the direct prefill-to-decode transfer leg into each role's synthesized engine
+	// configuration.
 	//
 	// +optional
 	KVTransfer *ModelDeploymentKVTransfer `json:"kvTransfer,omitempty" protobuf:"bytes,6,opt,name=kvTransfer"`
@@ -138,9 +124,8 @@ const (
 type ModelDeploymentModel struct {
 	// Name is the identifier the engine serves, e.g. "Qwen/Qwen2.5-72B-Instruct".
 	//
-	// It stays the SERVED NAME whether or not ArtifactRef is set: routers, the router's tokenizer
-	// calls and the metrics' model label all match on it, so a managed role's own
-	// --served-model-name must equal it, admission-enforced.
+	// Serving name exposed by the inference engine. When a role leaves its command unset, any
+	// explicit served-model-name argument in that role's ExtraArgs must equal Name.
 	//
 	// +required
 	// +k8s:validation:minLength=1
@@ -251,50 +236,33 @@ type ModelDeploymentKVCache struct {
 // one: both legs may be configured on one deployment, and the synthesized connector carries the
 // pair together.
 type ModelDeploymentKVTransfer struct {
-	// Protocol is the transport both ends of the direct leg are told to use. It uses the
-	// KVCacheBackend transport values and their Mooncake mapping, except MUSA and MACA:
-	// those are intra-node IPC transports, while prefill and decode may run on different nodes.
+	// Protocol selects the wire transport for the direct prefill-to-decode
+	// KV transfer leg across the deployment. Both prefill and decode roles
+	// share one wire transport; each engine's transfer injector translates
+	// the selected protocol and pool hardware manufacturer into the engine's
+	// transport configuration.
 	//
-	//   - IT IS DEPLOYMENT-WIDE ON PURPOSE. The protocol is a property of the link, not of either
-	//     end, so a per-role field could only express a contradiction -- two ends naming different
-	//     values for one connection, which fails at transfer time rather than at admission.
-	//   - THE VALUE IS DECLARED, NOT DISCOVERED. The enum names supported transport families;
-	//     the engine image must still carry the matching Mooncake build. CANN renders as
-	//     "ascend" and ROCM as "hip", using the same mapping as KVCacheBackend members.
-	//   - Auto selects TCP and renders "tcp"; it does not inspect the worker's fabric.
-	//   - UNSET RENDERS "tcp", the transport every Mooncake build carries. The default lives in
-	//     the renderer rather than in this schema, so the stored object holds exactly what was
-	//     asked.
-	//   - TCP IS ENFORCED, NOT ONLY REQUESTED, because the transfer engine selects its transport
-	//     from the host's hardware and does not read the requested one. On vLLM the leg also gets
-	//     MC_FORCE_TCP=1, and a role's own value wins. On SGLang the value maps onto the engine's
-	//     transfer backend: TCP renders "mooncake_tcp", any other value renders "mooncake", and
-	//     the value itself is not passed through. Neither pin renders while the deployment's store
-	//     runs a transport other than tcp, because it is process-wide and would leave the store
-	//     client without its fabric; the leg then keeps the engine's own selection.
-	//   - IT IS READ ONLY ON THE POINT-TO-POINT LEG: the prefill/decode roles of every admitted
-	//     router-and-engine pair, behind either managed router. Where no leg renders -- no
-	//     router -- the value is accepted and renders nothing. On Ascend the engines' transfer
-	//     legs pick their own transport, so the value renders only where it names a switch:
-	//     SGLang takes it as its MemFabric protocol, and vLLM-Ascend takes "RDMA" as a Device
-	//     RoCE constraint when Backend is "HIXL". Each silence is stated
-	//     here because an accepted field that quietly does nothing is a promise broken quietly.
-	//   - IT IS EDITABLE, and an edit RESTARTS EVERY ROLE: the value renders into both ends'
-	//     argv, so a change rebuilds every Kueue pod group of the deployment. With roles split
-	//     across InstanceTypes the groups rebuild independently, and a mixed-protocol window
-	//     between a prefiller and a decoder exists until both converge -- the same window an
-	//     engine image edit already opens.
+	// Allowed values are Auto, TCP, RDMA, EFA, CANN, and ROCM. When unset or
+	// Auto, the operator defaults the wire transport to TCP so fresh
+	// deployments run on clusters without RDMA or vendor high-speed fabric
+	// configured. Set RDMA, EFA, CANN, or ROCM explicitly to enable
+	// zero-copy RDMA, AWS EFA, or vendor high-speed fabric transport on the
+	// prefill/decode leg.
+	//
+	// Editing Protocol re-renders every role's transfer configuration and
+	// rolls every role's replicas together.
 	//
 	// +optional
 	// +k8s:validation:enum=["Auto","TCP","RDMA","EFA","CANN","ROCM"]
 	Protocol string `json:"protocol,omitempty" protobuf:"bytes,1,opt,name=protocol"`
 
-	// Backend selects the point-to-point KV transfer backend for a prefill/decode pair.
-	// Omitting the field or setting Auto selects the default backend for the role's
-	// hardware and engine (Mooncake on non-Ascend pools, MooncakeConnectorV1 over ADXL/HIXL
-	// on vLLM-Ascend, and ascend MemFabric on SGLang Ascend). NIXL selects NixlConnector on
-	// vLLM and nixl on SGLang. HIXL explicitly selects the Ascend HIXL data plane on Ascend
-	// pools.
+	// Backend selects the KV transfer backend used on the direct
+	// prefill-to-decode leg.
+	//
+	// Allowed values are Auto, Mooncake, NIXL, and HIXL. When unset or Auto,
+	// the operator selects the default transfer backend for the role's pool
+	// hardware manufacturer and inference engine. HIXL is only valid on
+	// Ascend pools, and NIXL is only valid on non-Ascend pools.
 	//
 	// +optional
 	// +k8s:validation:enum=["Auto","Mooncake","NIXL","HIXL"]
@@ -324,8 +292,8 @@ const (
 //
 // EDITING A CONTAINER FIELD ROLLS THIS ROLE'S REPLICAS, and only this role's -- with one
 // exception. The declared parallel degrees of a prefill or decode role -- the degree flags in
-// ExtraArgs, and vLLM's VLLM_DP_SIZE environment entry -- are the one container field that can
-// render into a document BOTH roles carry: the vLLM-Ascend transfer leg writes the same
+// ExtraArgs and any data-parallel degree declared in Env -- are the one container field that
+// can render into a document BOTH roles carry: the Ascend transfer leg writes the same
 // parallel blocks into both roles' Pods, so on that leg editing one role's degrees rewrites
 // the other role's Pods too, and the edit rolls the pair. Where no shared document renders
 // them, a degree edit stays this role's own like every other container-field edit: every

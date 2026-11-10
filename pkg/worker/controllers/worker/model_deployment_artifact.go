@@ -76,6 +76,12 @@ type ModelDeploymentArtifactRender struct {
 	// by the adapter through the environment. It is a hardware fact, not a
 	// spec fact, so it never takes part in a Pod's identity hash.
 	ModelTransferBackend string
+
+	// ModelTransferEFA reports that AWS EFA (vpc.amazonaws.com/efa) is the fabric the role's
+	// transfer legs resolved to, stamped per role beside ModelTransferBackend. On the nixl
+	// backend it selects the LIBFABRIC transport plugin over UCX; every other backend reads
+	// nothing from it.
+	ModelTransferEFA bool
 	// ModelTransferConfigMap holds public source endpoints and trust anchors in
 	// the workload namespace. Its name stays stable as source Pods change.
 	ModelTransferConfigMap string

@@ -63,8 +63,8 @@ type KVCacheBackendMemberApplyConfiguration struct {
 	LocalBufferSize *resource.Quantity `json:"localBufferSize,omitempty"`
 	// ExtraArgs passes config keys this API does not enumerate straight through to the member. An
 	// entry is written as its own flag token, "-key=value", and renders as the entrypoint's own
-	// "-D key=value" override with the dashes gone — one namespace per side, each the one its own
-	// binary documents. A key that collides with one derived from a field above is refused at
+	// engine-specific key/value flag override with the dashes gone — one namespace per side, each
+	// the one its own binary documents. A key that collides with one derived from a field above is refused at
 	// admission.
 	//
 	// EVERY VALUE HERE IS WORLD-READABLE: stored verbatim on this cluster-scoped object, then
@@ -77,7 +77,8 @@ type KVCacheBackendMemberApplyConfiguration struct {
 	// member container.
 	//
 	// - It is NOT a second spelling of ExtraArgs: the two reach different places. ExtraArgs renders
-	// as the entrypoint's "-D key=value" config override, while a whole family of this store's
+	// as the entrypoint's engine-specific key/value flag override, while a whole family of this
+	// store's
 	// settings — the local disk tier's flush thresholds, its promotion behavior, the rest of its
 	// eviction knobs — has no config key at all and is read from the ENVIRONMENT only.
 	// - A name this operator already renders is REFUSED at admission, for the same reason a
@@ -118,7 +119,8 @@ type KVCacheBackendMemberApplyConfiguration struct {
 	// leader routes an offload task to the client that owns the key's memory replica, so a member
 	// holding no memory segment is never chosen and would report a cold tier that never fills.
 	// - To check what the tier actually holds rather than what it declared, read the leader's own
-	// master_allocated_file_size_bytes; status.capacity reports the declared CAPACITY only.
+	// the storage engine's allocated disk capacity metric on the leader; status.capacity
+	// reports the declared CAPACITY only.
 	// - At most ONE entry, and the bound is the status contract rather than any one renderer's
 	// reach: status.capacity is a single pair of figures for the whole backend and cannot
 	// attribute a tier's bytes to one disk, so two entries would describe neither. The same

@@ -104,6 +104,17 @@ type ModelDeploymentConnectorInput struct {
 	// the accepted set belongs to the engine image's mooncake build, not to this operator.
 	KVTransferProtocol string
 
+	// KVTransferBackend is the point-to-point transfer connector the pair runs, already resolved
+	// by ModelDeploymentEffectiveKVTransferBackend from the API value, the pool manufacturer and
+	// the engine. Empty renders each engine's existing Mooncake rendering unchanged; the renderer
+	// refuses a value its engine has no connector for.
+	KVTransferBackend string
+
+	// KVTransferEFA reports that AWS EFA (vpc.amazonaws.com/efa) is active on the direct transfer
+	// leg, resolved by the caller from the role's interface resource, the declared protocol and
+	// the interface protocols. It switches the NIXL transport plugin from UCX to LIBFABRIC.
+	KVTransferEFA bool
+
 	// Parallelism is the declared parallel shape of BOTH halves of the prefill/decode pair,
 	// resolved off each role's own books by the caller. It travels as one value because the
 	// transfer document asserts on the pair: two roles synthesizing from two resolutions could
@@ -214,6 +225,8 @@ type modelDeploymentConnectorBinding struct {
 	Protocol            string                 `json:"protocol,omitempty"`
 	KVTransfer          bool                   `json:"kvTransfer,omitempty"`
 	KVTransferProtocol  string                 `json:"kvTransferProtocol,omitempty"`
+	KVTransferBackend   string                 `json:"kvTransferBackend,omitempty"`
+	KVTransferEFA       bool                   `json:"kvTransferEFA,omitempty"`
 	PublishKVEvents     bool                   `json:"publishKVEvents,omitempty"`
 	KVEventsHost        string                 `json:"kvEventsHost,omitempty"`
 	RoutingSidecar      bool                   `json:"routingSidecar,omitempty"`
@@ -276,28 +289,45 @@ func ModelDeploymentDeclaresBothHalves(md *workercore.ModelDeployment) bool {
 	return prefill && decode
 }
 
+// ModelDeploymentEffectiveKVTransferBackend resolves the point-to-point transfer backend for
+// a prefill/decode pair from spec.kvTransfer.backend, pool manufacturer, and engine. It
+// returns empty unless both halves are declared. Unset or Auto returns empty (preserving
+// existing Mooncake rendering), except on SGLang Ascend where Auto resolves to HIXL. Explicit
+// Mooncake, NIXL, and HIXL map to their respective backend constants.
+func ModelDeploymentEffectiveKVTransferBackend(md *workercore.ModelDeployment, manufacturer string) string {
+	if !ModelDeploymentDeclaresBothHalves(md) {
+		return ""
+	}
+	backend := ""
+	if md.Spec.KVTransfer != nil {
+		backend = md.Spec.KVTransfer.Backend
+	}
+	switch backend {
+	case "", workercore.ModelDeploymentKVTransferBackendAuto:
+		if manufacturer == nodefeature.ManufacturerAscend {
+			if md.Spec.Engine.Name == workercore.ModelDeploymentEngineSGLang {
+				return inject.KVTransferBackendHIXL
+			}
+			return ""
+		}
+		return ""
+	case workercore.ModelDeploymentKVTransferBackendMooncake:
+		return inject.KVTransferBackendMooncake
+	case workercore.ModelDeploymentKVTransferBackendNIXL:
+		return inject.KVTransferBackendNIXL
+	case workercore.ModelDeploymentKVTransferBackendHIXL:
+		return inject.KVTransferBackendHIXL
+	default:
+		return ""
+	}
+}
+
 // modelDeploymentUsesKVTransfer reports whether this role runs the engine side of a routed
-// prefill/decode pair.
-//
-// ON ASCEND IT NAMES A ROUTER, and the exception is the handshake rather than the leg: the
-// connector vLLM-Ascend registers wants the prefiller's host, port, block ids and engine id
-// relayed per request, and the one driver wired for that here is the llm-d-router's decode
-// proxy. The vLLM router drives its pairs itself and speaks a vocabulary the Ascend connector
-// rejects, so a pair under it renders no leg rather than a dead one -- the shape Ascend always
-// had, not a regression.
-//
-// THE LEG FOLLOWS THE PAIR, NOT THE HALF: a role that is one half of nothing has nobody to hand
-// blocks to, and the router in front of it is already routing it as the undivided shape. Rendering
-// the leg anyway would start an engine that waits for a counterpart no router ever assigns.
+// prefill/decode pair. Both halves and a managed router must be declared before the leg renders.
 func modelDeploymentUsesKVTransfer(
-	md *workercore.ModelDeployment, role *workercore.ModelDeploymentRole, manufacturer string,
+	md *workercore.ModelDeployment, role *workercore.ModelDeploymentRole,
 ) bool {
 	if md.Spec.Router == nil {
-		return false
-	}
-	if manufacturer == nodefeature.ManufacturerAscend &&
-		md.Spec.Engine.Name == workercore.ModelDeploymentEngineVLLM &&
-		md.Spec.Router.Name != workercore.ModelDeploymentRouterLLMD {
 		return false
 	}
 	if !ModelDeploymentDeclaresBothHalves(md) {
@@ -363,8 +393,10 @@ var modelDeploymentOwnedKeys = map[string]struct {
 	workercore.ModelDeploymentEngineVLLM: {
 		Args: append([]string{"--kv-transfer-config", "--kv-events-config"},
 			modelDeploymentEncoderCacheOwnedArgs()...),
-		Env: append([]string{"MOONCAKE_CONFIG_PATH", "VLLM_MOONCAKE_BOOTSTRAP_PORT"},
-			modelDeploymentEncoderCacheOwnedEnv()...),
+		Env: append([]string{
+			"MOONCAKE_CONFIG_PATH", "VLLM_MOONCAKE_BOOTSTRAP_PORT",
+			inject.VLLMNIXLSideChannelHostEnv,
+		}, modelDeploymentEncoderCacheOwnedEnv()...),
 	},
 	// SGLang is configured through the environment, so its owned set covers both the variables it
 	// actually reads AND the two keys that would divert it onto a different loader. Ownership here
@@ -629,6 +661,12 @@ var modelDeploymentDefaultedEnvNames = slices.Concat([]string{
 	inject.MooncakeTCPMaxPendingAdmissionsPerPeerEnv,
 	inject.MooncakeTCPLanesPerPeerEnv,
 	inject.MooncakeTCPAdmissionTimeoutMsEnv,
+	inject.VLLMNIXLSideChannelPortEnv,
+	inject.SGLangDisaggregationNIXLBackendEnv,
+	inject.AscendAutoConnectEnv,
+	inject.AscendGlobalResourceConfigEnv,
+	inject.HCCLIntraRoCEEnableEnv,
+	inject.AscendMFTransferProtocolEnv,
 	"VLLM_CACHE_ROOT",
 	"SGLANG_CACHE_DIR",
 }, modelDeploymentRuntimeCacheEnvNames)
@@ -751,8 +789,9 @@ func ModelDeploymentArgName(arg string) string {
 // SynthesizeModelDeploymentConnector renders the engine argument, the environment and the client
 // JSON that attach one role's replicas to the cache.
 //
-// It is PURE: same input, same output, no client and no clock. Everything it needs about the pool
-// and the domain arrives as values.
+// It is pure: same input, same output, with no client or clock. It maps Engine, Manufacturer,
+// KVCache, KVTransfer, KVTransferBackend, and KVTransferEFA to the engine's owned and defaulted
+// arguments, environment variables, ports, and volume mounts.
 func SynthesizeModelDeploymentConnector(in ModelDeploymentConnectorInput) (ModelDeploymentConnectorRender, error) {
 	engine, err := ModelDeploymentInjectEngine(in.Engine, in.Manufacturer)
 	if err != nil {
@@ -788,6 +827,24 @@ func SynthesizeModelDeploymentConnector(in ModelDeploymentConnectorInput) (Model
 			return ModelDeploymentConnectorRender{}, fmt.Errorf("unsupported KV transfer protocol %q", in.KVTransferProtocol)
 		}
 	}
+	if in.KVTransfer && (role == inject.RolePrefill || role == inject.RoleDecode) {
+		switch in.KVTransferBackend {
+		case inject.KVTransferBackendHIXL:
+			if in.Manufacturer != nodefeature.ManufacturerAscend {
+				return ModelDeploymentConnectorRender{}, fmt.Errorf(
+					"KVTransferBackend %q requires an Ascend InstanceType, got manufacturer %q",
+					in.KVTransferBackend, in.Manufacturer,
+				)
+			}
+		case inject.KVTransferBackendNIXL:
+			if in.Manufacturer == nodefeature.ManufacturerAscend {
+				return ModelDeploymentConnectorRender{}, fmt.Errorf(
+					"KVTransferBackend %q is not supported on an Ascend InstanceType",
+					in.KVTransferBackend,
+				)
+			}
+		}
+	}
 
 	res, err := inject.Render(inject.Input{
 		Engine: engine,
@@ -813,6 +870,8 @@ func SynthesizeModelDeploymentConnector(in ModelDeploymentConnectorInput) (Model
 		KVTransfer:      in.KVTransfer,
 		// The renderer owns the unset default; only a declared API value is mapped here.
 		KVTransferProtocol: kvTransferProtocol,
+		KVTransferBackend:  in.KVTransferBackend,
+		KVTransferEFA:      in.KVTransferEFA,
 		// The pair is threaded rather than resolved here for the same reason the role is: the
 		// resolution reads every role of the deployment, and synthesis sees one role's input.
 		Parallelism: in.Parallelism,
@@ -824,6 +883,14 @@ func SynthesizeModelDeploymentConnector(in ModelDeploymentConnectorInput) (Model
 	var parallelism inject.ParallelismPair
 	if engine == inject.EngineVLLMAscend && res.KVTransfer {
 		parallelism = in.Parallelism
+	}
+
+	// The binding fingerprint carries the backend only where the leg rendered: an edited
+	// backend on a deployment whose pair renders no leg changes nothing, and omitempty keeps
+	// the unset pair out of every existing Mooncake hash.
+	backendFingerprint, efaFingerprint := "", false
+	if res.KVTransfer {
+		backendFingerprint, efaFingerprint = in.KVTransferBackend, in.KVTransferEFA
 	}
 
 	return ModelDeploymentConnectorRender{
@@ -852,6 +919,8 @@ func SynthesizeModelDeploymentConnector(in ModelDeploymentConnectorInput) (Model
 			Protocol:            protocol,
 			KVTransfer:          res.KVTransfer,
 			KVTransferProtocol:  kvTransferProtocol,
+			KVTransferBackend:   backendFingerprint,
+			KVTransferEFA:       efaFingerprint,
 			PublishKVEvents:     in.PublishKVEvents,
 			KVEventsHost:        in.KVEventsHost,
 			RoutingSidecar:      in.RoutingSidecar,

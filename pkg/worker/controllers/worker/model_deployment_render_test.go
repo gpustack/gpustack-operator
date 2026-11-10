@@ -426,7 +426,7 @@ func TestRenderModelDeploymentRoutingSidecar_HandshakeFollowsTheEngine(t *testin
 	t.Run("vllm speaks the mooncake handshake", func(t *testing.T) {
 		sidecar := renderModelDeploymentRoutingSidecar(
 			context.Background(), sidecarRole(), 8200, core.URISchemeHTTP,
-			workercore.ModelDeploymentEngineVLLM, true, nodefeature.ManufacturerNVIDIA, "",
+			workercore.ModelDeploymentEngineVLLM, true, nodefeature.ManufacturerNVIDIA, "", "",
 		)
 
 		assert.Contains(t, sidecar.Args, "--kv-connector=mooncake")
@@ -443,7 +443,7 @@ func TestRenderModelDeploymentRoutingSidecar_HandshakeFollowsTheEngine(t *testin
 	t.Run("vllm on ascend relays through nixlv2", func(t *testing.T) {
 		sidecar := renderModelDeploymentRoutingSidecar(
 			context.Background(), sidecarRole(), 8200, core.URISchemeHTTP,
-			workercore.ModelDeploymentEngineVLLM, true, nodefeature.ManufacturerAscend, "",
+			workercore.ModelDeploymentEngineVLLM, true, nodefeature.ManufacturerAscend, "", "",
 		)
 
 		assert.Contains(t, sidecar.Args, "--kv-connector=nixlv2",
@@ -457,7 +457,7 @@ func TestRenderModelDeploymentRoutingSidecar_HandshakeFollowsTheEngine(t *testin
 	t.Run("sglang speaks the sglang handshake", func(t *testing.T) {
 		sidecar := renderModelDeploymentRoutingSidecar(
 			context.Background(), sidecarRole(), 8200, core.URISchemeHTTP,
-			workercore.ModelDeploymentEngineSGLang, true, nodefeature.ManufacturerNVIDIA, "",
+			workercore.ModelDeploymentEngineSGLang, true, nodefeature.ManufacturerNVIDIA, "", "",
 		)
 
 		assert.Contains(t, sidecar.Args, "--kv-connector=sglang")
@@ -507,7 +507,7 @@ func TestRenderModelDeploymentRoutingSidecar_SGLangBootstrapPortPairsWithThePref
 
 	sidecar := renderModelDeploymentRoutingSidecar(
 		context.Background(), sidecarRole(), 8200, core.URISchemeHTTP,
-		workercore.ModelDeploymentEngineSGLang, true, nodefeature.ManufacturerNVIDIA, "",
+		workercore.ModelDeploymentEngineSGLang, true, nodefeature.ManufacturerNVIDIA, "", "",
 	)
 	sidecarEnv := argEnvValue(t, sidecar.Env, "SGLANG_BOOTSTRAP_PORT")
 
@@ -1401,7 +1401,7 @@ func TestModelDeploymentDirectInterfaceProtocol(t *testing.T) {
 		{name: "native vLLM", engine: workercore.ModelDeploymentEngineVLLM, manufacturer: nodefeature.ManufacturerNVIDIA, want: "efa"},
 		{name: "Ascend ignores declaration", engine: workercore.ModelDeploymentEngineVLLM, manufacturer: nodefeature.ManufacturerAscend},
 		{name: "unobserved manufacturer cannot select device", engine: workercore.ModelDeploymentEngineVLLM},
-		{name: "SGLang ignores declaration", engine: workercore.ModelDeploymentEngineSGLang, manufacturer: nodefeature.ManufacturerNVIDIA},
+		{name: "SGLang pair resolves the declared protocol", engine: workercore.ModelDeploymentEngineSGLang, manufacturer: nodefeature.ManufacturerNVIDIA, want: "efa"},
 		{name: "user command owns transfer", engine: workercore.ModelDeploymentEngineVLLM, manufacturer: nodefeature.ManufacturerNVIDIA, command: []string{"custom"}},
 		{name: "multi-member Server role selects RDMA", engine: workercore.ModelDeploymentEngineVLLM, manufacturer: nodefeature.ManufacturerNVIDIA, serverSize: 2, want: "rdma"},
 		{name: "elastic EP Server role selects RDMA", engine: workercore.ModelDeploymentEngineVLLM, manufacturer: nodefeature.ManufacturerNVIDIA, serverSize: 1, elasticEP: &workercore.ModelDeploymentRoleElasticEP{Width: 2}, want: "rdma"},
