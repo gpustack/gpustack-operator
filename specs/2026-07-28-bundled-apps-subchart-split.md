@@ -683,7 +683,7 @@ pre-install/pre-upgrade hooks execute.
 - `docs/contribute/development.md`: `make deps` now vendors charts; how to add/refresh a chart patch; the
   mirrored-image prerequisite when bumping a pinned version.
 - New `docs/operate/high-availability.md` (including the single-URL webhook topology
-  restriction) and `docs/operate/migration/to-subcharts.md` (the `--take-ownership` command, the
+  restriction) and `docs/operate/migration/bundled-subcharts.md` (the `--take-ownership` command, the
   required release name, and the widened uninstall blast radius).
 - `docs/reference/settings.md`: `GPUSTACK_PCI_CLASS_PREFIXES` is now **DM-only** — T12 deleted the WK reader
   that injected it into the NFD chart and the NodeFeatureRule, but `binding/helper_linux.go` still
@@ -1560,7 +1560,7 @@ the baseline.
       both `csi-driver-*.controller`), the values to give them, the node count a hard spread needs,
       and what each subchart cannot do (no spread for NFD, no PDB or spread for the CSI
       controllers, `Recreate` by default) — including the
-      single-URL webhook restriction; and `docs/operate/migration/to-subcharts.md` (the
+      single-URL webhook restriction; and `docs/operate/migration/bundled-subcharts.md` (the
       `--take-ownership` command, the required release name **and namespace** — Kueue's
       `managedJobsNamespaceSelector` hard-codes `gpustack-system` because Helm cannot template a
       subchart value — and the widened uninstall blast radius). Chart README regenerated, never hand-edited.
@@ -1687,7 +1687,7 @@ the baseline.
       namespace, because chart-testing only creates the ones it generates and `--helm-extra-args`
       cannot carry `--create-namespace` (the same string reaches `helm delete`, which has no such
       flag — measured). `make test chart` then passes. The **product** half stays open with T20: this
-      chart is installable into `gpustack-system` alone, which `docs/operate/migration/to-subcharts.md`
+      chart is installable into `gpustack-system` alone, which `docs/operate/migration/bundled-subcharts.md`
       states, and T20's Kueue patch is what can make the selector follow `.Release.Namespace`.
 
 - [x] **T23 · The device-manager sees the host's processes and IPC**
@@ -1707,7 +1707,7 @@ the baseline.
       Owns: `deploy/gpustack-operator/chart/values.yaml`,
       `deploy/gpustack-operator/chart/templates/**`, `pkg/worker/kuberess/chart_test.go`,
       `pkg/worker/kuberess/apps_gpustack_operator.go`, `docs/reference/settings.md`, `docs/getting-started/architecture.md`,
-      `docs/operate/migration/to-subcharts.md`
+      `docs/operate/migration/bundled-subcharts.md`
       Gate: review
       Acceptance: F11's map. `manufacturers` stops being a name→PCI-vendor-ID map and becomes
       `global.manufacturers`, a map of objects carrying `pciVendorID`, `resourceName`,
@@ -1733,7 +1733,7 @@ the baseline.
       `runtimeName`. Also rewrites the sentences T17 wrote about this map in `docs/reference/settings.md`
       (the `GPUSTACK_<MFR>_PCI_VENDOR_ID` row's "set the `manufacturers` value instead", now true
       of four variables) and `docs/getting-started/architecture.md`, and records the values rename in
-      `docs/operate/migration/to-subcharts.md`.
+      `docs/operate/migration/bundled-subcharts.md`.
       Verify: `make generate chart` idempotent; `go test ./pkg/worker/kuberess/...`; and the check
       that matters — the default render differs from before the shape change **only** by the four
       added RuntimeClasses and the fanned-out environment variables, so the migration is a
@@ -1767,7 +1767,7 @@ the baseline.
       anywhere else crash-loops the controller (`managedJobsNamespaceSelector: Invalid value ...:
       should not match the "<ns>" namespace`), and `ct install`, which picks a random namespace,
       cannot pass at all. Rendered through the parent's helper, that selector follows
-      `.Release.Namespace` and the limitation `docs/operate/migration/to-subcharts.md` documents goes away.
+      `.Release.Namespace` and the limitation `docs/operate/migration/bundled-subcharts.md` documents goes away.
       The CI half landed with T22 (`ct install --namespace gpustack-system`); this task removes
       that pin again, and `ct install` passing on its own random namespace is what proves the fix.
       Verify: `make generate chart` idempotent (and no longer running a generator);
@@ -1893,7 +1893,7 @@ the baseline.
 
 - [x] **T27 · Say what turning cert-manager back off actually costs**
       Blocked by: T21
-      Owns: `deploy/gpustack-operator/chart/values.yaml`, `docs/operate/migration/to-subcharts.md`
+      Owns: `deploy/gpustack-operator/chart/values.yaml`, `docs/operate/migration/bundled-subcharts.md`
       Acceptance: T21's migration note offered `global.certmanager.enabled: "false"` as a plain
       way out for a cluster that has cert-manager. Verifying it on a cluster disproved that, so
       the values comment and the migration doc state the real cost instead. Turning cert-manager
@@ -1947,7 +1947,7 @@ source, and the two findings deliberately left are recorded under Open Questions
       Blocked by: T19
       Owns: `deploy/gpustack-operator/chart/templates/device-manager/runtimeclass.yaml`,
       `deploy/gpustack-operator/chart/values.yaml`, `pkg/worker/kuberess/chart_test.go`,
-      `docs/getting-started/architecture.md`, `docs/operate/migration/to-subcharts.md`
+      `docs/getting-started/architecture.md`, `docs/operate/migration/bundled-subcharts.md`
       Acceptance: T19 gated creation on a row stating a `runtimeName`, which took the chart from
       two RuntimeClasses to six. That conflates "this vendor's runtime uses that handler name"
       with "this cluster runs that runtime". `InstanceReconciler` attaches a RuntimeClass whenever

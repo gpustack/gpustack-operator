@@ -26,7 +26,7 @@ With *internal load balancing (Internal LB)*, the master distributes requests to
 
 A Router can front the *Internal LB* and *External LB* configurations.
 The engine's *load-balancing* mode determines which `Pod`s accept inference requests.
-Increasing *`roles[].replicas`* adds complete groups; see [role scaling](../../modules/model-deployment/deployment.md#rollout-behavior).
+Increasing *`roles[].replicas`* adds complete groups; see [role scaling](../../modules/model-deployment/configuration.md#rollout-behavior).
 The [Scaling Walkthrough](scaling.md) links a recorded single-role lifecycle check and distinguishes
 its observed replica changes from reusable configuration examples.
 

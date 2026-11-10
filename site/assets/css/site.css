@@ -312,7 +312,7 @@ html[data-sidebar-collapsed="true"] .sidebar-icon-arrow {
   width: 17.5rem;
   max-height: calc(100vh - var(--topbar-h));
   overflow-y: auto;
-  padding: 2rem 1.35rem 3rem;
+  padding: 3.7rem 1.35rem 3rem;
   scrollbar-color: var(--scrollbar-thumb) transparent;
   transition: opacity .2s ease, transform .25s cubic-bezier(.4, 0, .2, 1);
 }
@@ -398,9 +398,9 @@ article pre { overflow-x: auto; max-width: 100%; margin: 1.2rem 0; padding: .85r
 article pre code { white-space: pre; }
 article :not(pre) > code { padding: .08rem .2rem; border-radius: .18rem; background: var(--bg-subtle); font-size: .85em; overflow-wrap: anywhere; }
 article table { display: block; width: 100%; max-width: 100%; overflow-x: auto; border-collapse: collapse; font-size: .82rem; line-height: 1.45; }
-article th, article td { padding: .45rem .65rem; border: 1px solid var(--line); text-align: left; vertical-align: top; }
+article th, article td { min-width: 8rem; padding: .45rem .65rem; border: 1px solid var(--line); text-align: left; vertical-align: top; }
 article th { background: var(--bg-subtle); }
-article th:first-child, article td:first-child { position: sticky; left: 0; background: var(--bg); }
+article th:first-child, article td:first-child { position: sticky; left: 0; min-width: 10rem; background: var(--bg); }
 article th:first-child { background: var(--bg-subtle); }
 article tbody tr:hover > td { background: var(--row-hover-bg); }
 article tbody tr.is-emphasized > td,

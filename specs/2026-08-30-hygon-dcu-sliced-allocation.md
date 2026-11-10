@@ -271,7 +271,7 @@ the adapter's own doc comment instead.
 acceptance is the *observable* path — a logically sliced Instance read through the subresource, the
 exporter and `/monitor/snapshot`, `coresUtilizationPercent` present-and-plausible or absent-with-a-
 reason but never zero, `gpustack_accelerator_process_capability` publishing a reason that matches
-what the driver answered, and the "On hardware" column of `docs/reference/instance-metrics.md`
+what the driver answered, and the "On hardware" column of `docs/modules/instances/metrics.md`
 updated. What is established here is the layer beneath all of them: the library resolves, answers,
 and answers correctly. The matrix therefore still reads `—` for Hygon, which is right until an
 Instance has been run on such a node.

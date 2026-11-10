@@ -67,7 +67,7 @@ spec:
 The workload container owns the accelerator request. The optional SSH sidecar uses a separate
 visibility resource to enter the same workspace without acquiring a second accelerator. See
 [Device Discovery](../devices/discovery.md#ssh-instances-and-visibility).
-[Instance Metrics](../../reference/instance-metrics.md) explains the reported utilization.
+[Instance Metrics](metrics.md) explains the reported utilization.
 
 ## Service lifecycle
 
@@ -126,25 +126,25 @@ another tenant's `Service` through the hosting node's address and node port.
 
 Replace the example values. Save the manifest as `instance.yaml`, then apply it:
 
-```shell
+```bash
 kubectl apply -f instance.yaml
 ```
 
 ### Step 2: Check workspace
 
-```shell
+```bash
 kubectl -n team-a wait --for=jsonpath='{.status.phase}'=Ready instance/workspace-demo --timeout=5m
 kubectl get instancetypes
 ```
 
 **Verification:** The wait completes when the `Instance` phase is `Ready`. The `InstanceType` reports remaining capacity.
-See [Instance Metrics](../../reference/instance-metrics.md) for utilization.
+See [Instance Metrics](metrics.md) for utilization.
 
 ## Troubleshooting
 
 If an `Instance` remains pending, inspect its phase message:
 
-```shell
+```bash
 kubectl -n team-a get instance workspace-demo -o jsonpath='{.status.phaseMessage}'
 ```
 

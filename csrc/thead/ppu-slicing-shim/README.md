@@ -302,8 +302,13 @@ zero quota with a non-zero `accounted` cannot happen — both are written under 
 
 `tools/ppu-monitor` prints the same figures per card, so nobody has to keep the offsets in their head:
 
-```console
-$ ppu-monitor
+```bash
+ppu-monitor
+```
+
+Captured output:
+
+```text
 region path=/dev/shm/vppu-ledger version=1 cards=64 procs=32
 card=0 mem_quota_mib=4096 mem_used_mib=1024 mem_free_mib=3072 sm_limit_pct=25 sm_util_pct=7 allow_us=18460 lock_pid=0 mem_quota_bytes=4294967296 mem_used_bytes=1073741824
   proc pid=4242 mem_mib=1024 mem_bytes=1073741824

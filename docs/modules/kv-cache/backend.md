@@ -564,8 +564,13 @@ must discover its current endpoint rather than reuse a previous connection addre
 
 ## Status and conditions
 
-```console
-$ kubectl get kvcb
+```bash
+kubectl get kvcb
+```
+
+Captured output:
+
+```text
 NAME            TYPE       PHASE   ENDPOINT                                        CAPACITY
 mooncake-dram   Mooncake   Ready   mooncake-dram-leader.gpustack-system.svc:50051  12Gi
 ```
@@ -857,7 +862,7 @@ backend object**, so two Bindings reaching one leader through two objects are bo
    other's blocks.** The reuse identity an engine is handed is the domain **name alone**. Each
    Binding hands its own [`dtype`](pool.md#engine-dtype) to its own
    engines, and *`blockSize`* reaches no engine at all. So two differently-shaped caches land under
-   one identity, which is [the silent cache pollution](../model-deployment/deployment.md#inherited-reuse-domain)
+   one identity, which is [the silent cache pollution](../model-deployment/configuration.md#inherited-reuse-domain)
    a wrong *`blockSize`* or `dtype` causes, reached here without either value being wrong.
 
 If you point two objects at one leader, either keep their pools' Bindings on **different**

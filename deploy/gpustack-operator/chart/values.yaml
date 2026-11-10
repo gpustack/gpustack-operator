@@ -112,7 +112,7 @@ global:
     # Turning it ON later is a plain `helm upgrade`. Turning it OFF again is not: cert-manager
     # owns the Secret Kueue's chart wants to template and writes CA bundles Helm never recorded,
     # so `helm upgrade` refuses the Secret before it starts, and forcing past that fails
-    # mid-apply on the visibility APIServices. docs/operate/migration/to-subcharts.md carries the
+    # mid-apply on the visibility APIServices. docs/operate/migration/bundled-subcharts.md carries the
     # sequence that does work. The same applies when cert-manager is uninstalled from a cluster
     # while this is "auto", which flips the answer without anyone editing a value.
     enabled: auto

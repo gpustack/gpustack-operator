@@ -27,7 +27,7 @@ flowchart TD
 
 ## Deployment configuration
 
-[Model Deployment Configuration](deployment.md) starts with a minimal manifest and explains
+[Model Deployment Configuration](configuration.md) starts with a minimal manifest and explains
 the role contract. [Prefill and Decode](prefill-decode.md) covers split roles, and
 [Encode, Prefill and Decode](encode-prefill-decode.md) covers multimodal disaggregation.
 [Engine Compatibility](engine-versions.md) lists minimum releases, client and store requirements,
@@ -75,7 +75,7 @@ monolithic wide tensor-parallel group on the same GPUs.
 
 If a deployment does not become ready, inspect its phase, conditions and role status:
 
-```shell
+```bash
 kubectl -n <namespace> get modeldeployment <name> -o yaml
 ```
 
@@ -87,4 +87,4 @@ Compare the result with [Model Deployment Status](status.md). For scaling proble
 **See also** — [KV Cache](../kv-cache/_index.md) (shared prefix reuse) ·
 [Model Delivery](../model-delivery/_index.md) (weights)
 
-**Next** → [Model Deployment Configuration](deployment.md) — create a serving workload.
+**Next** → [Model Deployment Configuration](configuration.md) — create a serving workload.

@@ -115,7 +115,7 @@ Production multi-host engines typically use Ray (`--distributed-executor-backend
 Member `m0` initializes the Ray head cluster and serves the API; subordinate members join the Ray cluster
 with `ray start --address=... --block`. A role with *`command`* reports `status.roles[].unmanaged: true`,
 because the operator renders no engine argument for it. See
-[Three override tiers](../../modules/model-deployment/deployment.md#three-override-tiers).
+[Three override tiers](../../modules/model-deployment/configuration.md#three-override-tiers).
 
 Apply the deployment manifest:
 
@@ -204,7 +204,7 @@ A role with one replica therefore stops serving during the replacement.
 
 The script reads `GPUSTACK_REPLICA_SIZE`, so the *PP* size follows *`size`*.
 The *TP* size is fixed at 8, so it must still match the accelerators per member.
-See [Rollout behavior](../../modules/model-deployment/deployment.md#rollout-behavior).
+See [Rollout behavior](../../modules/model-deployment/configuration.md#rollout-behavior).
 
 ## Step 5: Release the application
 
@@ -245,7 +245,7 @@ the role stops serving while its replacement is rebuilt.
 
 ---
 
-**See also** — [Model Deployment Configuration](../../modules/model-deployment/deployment.md) (role fields and scaling) ·
+**See also** — [Model Deployment Configuration](../../modules/model-deployment/configuration.md) (role fields and scaling) ·
 [Prefill and Decode Walkthrough](prefill-decode.md) (disaggregated serving) ·
 [Elastic EP Walkthrough](elastic-ep.md) (collective expansion) ·
 [External DP Walkthrough](external-dp.md) (fixed per-rank serving)

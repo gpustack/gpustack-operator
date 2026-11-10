@@ -29,7 +29,7 @@ var _ device.AcceleratorProcessDetector = (*hygon)(nil)
 // returns — on this revision.
 //
 // A later run carried it up through the subresource, the exporter, /monitor/snapshot and the
-// capability gauge on a held slice allocation, so `docs/reference/instance-metrics.md` now marks
+// capability gauge on a held slice allocation, so `docs/modules/instances/metrics.md` now marks
 // Hygon run in its "On hardware" column. That run also showed the two figures are not corroborated
 // to the same depth, and the page says so: memory agreed exactly with both the vendor's hy-smi and
 // the kernel's vram_<gpuid>, while nothing BUT the kernel publishes a per-process compute figure to

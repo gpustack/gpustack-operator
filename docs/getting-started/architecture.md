@@ -22,9 +22,10 @@ The `gpustack-operator` binary provides these subcommands:
 
 | Component | Deployment | Role |
 |---|---|---|
-| `worker` | Control-plane `Deployment` | Serves the public APIs and manages workloads, queues and supporting resources. |
-| `device-manager` | One `DaemonSet` per manufacturer | Discovers accelerators and network interfaces, reports available capacity and allocates devices to containers. |
+| `worker` | Control-plane `Deployment` | Serves APIs and manages workloads, queues and supporting resources. |
+| `device-manager` | Vendor `DaemonSet` | Discovers devices and network interfaces,<br/>reports capacity and allocates devices. |
 | `model-manager` | Per-node `DaemonSet` | Caches model weights and mounts them into workloads using node delivery. |
+| `model-transfer` | Vendor source `DaemonSet` | Runs the source broker and worker control service for remote weight delivery. |
 | `worker-gateway` | Installed separately | Combines `InstanceType`s and capacity from multiple clusters into a fleet view. |
 
 The chart also includes [Node Feature Discovery (NFD)](https://github.com/kubernetes-sigs/node-feature-discovery),
@@ -80,7 +81,8 @@ resolves and pins a Hugging Face repository, ModelScope repository, container im
 
 Depending on the delivery mode, weights are fetched in the workload `Pod` (`Engine`), cached and
 mounted read-only on the node by the Model Manager's CSI driver (`Node`), or mounted from an
-existing volume or image.
+existing volume or image. Remote delivery can serve weights from source nodes through the
+`model-transfer` broker and vendor worker. See [Remote Weight Delivery](../modules/model-delivery/remote.md).
 
 `ModelStore` and `ModelStoreBinding` manage cache budgets and namespace grants. `NodeModelStore`
 tracks per-node cache state. `ModelPrefetch` warms weights before use. These resources operate

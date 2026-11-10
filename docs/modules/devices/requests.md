@@ -676,9 +676,9 @@ ordinary failures, neither naming the replacement:
 A development node an earlier build wrote those legacy capacities onto keeps them, because nothing owns
 them. List what is left and patch it off — one JSON-patch removal per stale key:
 
-```console
-$ kubectl get node <node> -o json | jq -r '.status.capacity | keys[] | select(contains("mig-"))'
-$ kubectl patch node <node> --subresource=status --type=json \
+```bash
+kubectl get node <node> -o json | jq -r '.status.capacity | keys[] | select(contains("mig-"))'
+kubectl patch node <node> --subresource=status --type=json \
     -p '[{"op":"remove","path":"/status/capacity/<escaped-key>"}]'   # escape "/" in the key as "~1"
 ```
 

@@ -290,14 +290,14 @@ Each `devices[i]` is 544 bytes:
 Total 34912 bytes. A worked read of one process holding 3072 MiB of a 4096 MiB card, taken from the
 same file `rocm-monitor` printed above:
 
-```console
-$ od -An -c   -N8       ledger      #  magic          ->  V R O C M R G N
-$ od -An -tu4 -j8   -N4 ledger      #  layout_version ->  1
-$ od -An -tu4 -j16  -N4 ledger      #  device_slots   ->  64
-$ od -An -tu8 -j96  -N8 ledger      #  card 0 quota   ->  4294967296
-$ od -An -tu8 -j104 -N8 ledger      #  card 0 used    ->  3221225472
-$ od -An -td4 -j128 -N4 ledger      #  card 0 proc 0  ->  pid 9
-$ od -An -tu8 -j136 -N8 ledger      #  its charge     ->  3221225472
+```bash
+od -An -c   -N8       ledger      #  magic          ->  V R O C M R G N
+od -An -tu4 -j8   -N4 ledger      #  layout_version ->  1
+od -An -tu4 -j16  -N4 ledger      #  device_slots   ->  64
+od -An -tu8 -j96  -N8 ledger      #  card 0 quota   ->  4294967296
+od -An -tu8 -j104 -N8 ledger      #  card 0 used    ->  3221225472
+od -An -td4 -j128 -N4 ledger      #  card 0 proc 0  ->  pid 9
+od -An -tu8 -j136 -N8 ledger      #  its charge     ->  3221225472
 ```
 
 Read **without any lock**, deliberately, and a reader should do the same: a figure one allocation

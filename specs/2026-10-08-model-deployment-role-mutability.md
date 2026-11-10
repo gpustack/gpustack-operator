@@ -239,7 +239,7 @@ Run gpustack-operator-e2e against the isolated temporary cluster.
 - `api/worker/v1/model_deployment.go`: public resource type.
 - `pkg/worker/webhooks/worker/model_deployment*.go`: identity, profile, and configuration validation.
 - `pkg/worker/controllers/worker/model_deployment*.go`: render, rollout, admission, health, retirement, Services, and status.
-- `docs/modules/model-deployment/deployment.md`: owning update and rollout guide.
+- `docs/modules/model-deployment/configuration.md`: owning update and rollout guide.
 - `docs/modules/model-deployment/prefill-decode.md`: shared transfer behavior.
 - `docs/modules/model-deployment/shutdown.md`: departure behavior.
 - `docs/modules/model-deployment/status.md`: progress and capacity interpretation.
@@ -345,7 +345,7 @@ Checkpoint: validate the replica reader and its negative controls before changin
 
 - [x] **T2 · Ordinary role update contract**
       Blocked by: None
-      Owns: `api/worker/v1alpha1/model_deployment.go`, `api/worker/v1alpha1/model_deployment_test.go`, `pkg/worker/webhooks/worker/model_deployment*.go`, `docs/modules/model-deployment/deployment.md`, `docs/modules/model-deployment/prefill-decode.md`, `docs/modules/model-deployment/shutdown.md`, `docs/modules/model-deployment/status.md`, `docs/modules/model-deployment/elastic-ep.md`
+      Owns: `api/worker/v1alpha1/model_deployment.go`, `api/worker/v1alpha1/model_deployment_test.go`, `pkg/worker/webhooks/worker/model_deployment*.go`, `docs/modules/model-deployment/configuration.md`, `docs/modules/model-deployment/prefill-decode.md`, `docs/modules/model-deployment/shutdown.md`, `docs/modules/model-deployment/status.md`, `docs/modules/model-deployment/elastic-ep.md`
       Gate: review
       Acceptance: Accept all four ordinary fields while preserving name-map identity and kind rules. Cover size bounds, resources, pool dependencies, and all command transitions. Revalidate changed dependencies without rejecting unchanged inputs due to external drift. Preserve every Elastic EP refusal. Document mixed configurations, whole-group Recreate, shared effects, merge-patch omission, and quota waits.
       Verify: `GODEBUG=gotypesalias=0 CGO_ENABLED=1 go test -tags 'goccy netgo' -race -count=1 ./api/worker/v1alpha1 ./pkg/worker/webhooks/worker`

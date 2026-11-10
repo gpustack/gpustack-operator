@@ -65,8 +65,13 @@ The captured run used this cluster, settings and hardware:
 With `instance-type-derived-from-node` on, the operator materializes the finest-grain `ResourceFlavor`s
 and one collapsed pool per accelerator plus a generic CPU pool:
 
-```console
-$ kubectl get resourceflavor
+```bash
+kubectl get resourceflavor
+```
+
+Captured output:
+
+```text
 NAME                                                                   AGE
 gpustack--amd-epyc-7r13-linux-amd64-16c                                5h19m
 gpustack--amd-epyc-7r32--nvidia-a10g-linux-amd64-1d                    9m26s
@@ -75,26 +80,54 @@ gpustack--intel-xeon-platinum-8259cl--nvidia-tesla-t4-linux-amd64-1d   5h19m
 gpustack--intel-xeon-platinum-8259cl--nvidia-tesla-t4-linux-amd64-4d   5h19m
 gpustack--intel-xeon-platinum-8259cl-linux-amd64-48c                   5h19m
 gpustack--intel-xeon-platinum-8259cl-linux-amd64-4c                    5h19m
+```
 
-$ kubectl get clusterqueue
+```bash
+kubectl get clusterqueue
+```
+
+Captured output:
+
+```text
 NAME                                    COHORT   PENDING WORKLOADS
 gpustack--generic-linux-amd64                    0
 gpustack--nvidia-a10g-linux-amd64                0
 gpustack--nvidia-tesla-t4-linux-amd64            0
+```
 
-$ kubectl get instancetype
+```bash
+kubectl get instancetype
+```
+
+Captured output:
+
+```text
 NAME                                    ENTRANCE                          UNIT(CPU/RAM)/STORAGE   ACCELERATOR(EX/SH/SL/PT)   CPU     PHASE
 gpustack--generic-linux-amd64           gpustack-fnv64-3b93966fd73eb9ec   1/2Gi/100Gi             0/0 0/0 0/0 0/0            48/72   Active
 gpustack--nvidia-a10g-linux-amd64       gpustack-fnv64-c4680bb149644f1c   8/64Gi/100Gi            1/1 10/10 100/100 0/0      0/0     Active
 gpustack--nvidia-tesla-t4-linux-amd64   gpustack-fnv64-6b371caa2da0b799   8/32Gi/100Gi            4/5 40/50 100/500 0/0      0/0     Active
+```
 
-$ kubectl get instancetypeflavor
+```bash
+kubectl get instancetypeflavor
+```
+
+Captured output:
+
+```text
 NAME                        GENERALGROUP   ACCELERATORGROUP   ACCELERATABLE   MANUFACTURER   PRODUCT       MEMORY   CORES   SLICEABLE
 gpustack--generic           generic                          false           generic
 gpustack--nvidia-a10g                      nvidia-a10g        true            nvidia         NVIDIA-A10G   24Gi     10240   true
 gpustack--nvidia-tesla-t4                  nvidia-tesla-t4    true            nvidia         Tesla-T4      16Gi     2560    true
+```
 
-$ kubectl get devices
+```bash
+kubectl get devices
+```
+
+Captured output:
+
+```text
 NAME
 node-t4-a
 node-a10g
@@ -339,8 +372,13 @@ A node stays in a pool only while it carries `gpustack.ai/managed=true`, require
 
 **Before** — `node-a10g` managed:
 
-```console
-$ kubectl get instancetypes
+```bash
+kubectl get instancetypes
+```
+
+Captured output:
+
+```text
 NAME                                    ENTRANCE                          UNIT(CPU/RAM)/STORAGE   ACCELERATOR(EX/SH/SL/PT)   CPU     PHASE
 gpustack--generic-linux-amd64           gpustack-fnv64-3b93966fd73eb9ec   1/2Gi/100Gi             0/0 0/0 0/0 0/0            48/72   Active
 gpustack--nvidia-a10g-linux-amd64       gpustack-fnv64-c4680bb149644f1c   8/64Gi/100Gi            1/1 10/10 100/100 0/0      0/0     Active
@@ -370,9 +408,14 @@ spec:
 
 Flip that label off:
 
-```console
-$ kubectl -n gpustack-system patch nodefeature node-a10g-gpustack-worker \
+```bash
+kubectl -n gpustack-system patch nodefeature node-a10g-gpustack-worker \
     --type=merge -p '{"spec":{"labels":{"gpustack.ai/managed":"false"}}}'
+```
+
+Captured output:
+
+```text
 nodefeature.nfd.k8s-sigs.io/node-a10g-gpustack-worker patched
 ```
 
@@ -396,8 +439,13 @@ nodefeature.nfd.k8s-sigs.io/node-a10g-gpustack-worker patched
 
 **After** — NFD propagates it; the operator retires the now-nodeless A10G flavor:
 
-```console
-$ kubectl get instancetypes
+```bash
+kubectl get instancetypes
+```
+
+Captured output:
+
+```text
 NAME                                    ENTRANCE                          UNIT(CPU/RAM)/STORAGE   ACCELERATOR(EX/SH/SL/PT)   CPU     PHASE
 gpustack--generic-linux-amd64           gpustack-fnv64-3b93966fd73eb9ec   1/2Gi/100Gi             0/0 0/0 0/0 0/0            48/68   Active
 gpustack--nvidia-a10g-linux-amd64       gpustack-fnv64-c4680bb149644f1c   8/64Gi/100Gi            0/0 0/0 0/0 0/0            0/0     Active
@@ -409,11 +457,16 @@ Two rows move: the A10G to `0/0 0/0 0/0` (its `ResourceFlavor` is deleted), and 
 
 Re-admit it and one reconcile rebuilds the flavor and restores the counts:
 
-```console
-$ kubectl -n gpustack-system patch nodefeature node-a10g-gpustack-worker \
+```bash
+kubectl -n gpustack-system patch nodefeature node-a10g-gpustack-worker \
     --type=merge -p '{"spec":{"labels":{"gpustack.ai/managed":"true"}}}'
 
-$ kubectl get instancetypes
+kubectl get instancetypes
+```
+
+Captured output:
+
+```text
 NAME                                    ENTRANCE                          UNIT(CPU/RAM)/STORAGE   ACCELERATOR(EX/SH/SL/PT)   CPU     PHASE
 gpustack--generic-linux-amd64           gpustack-fnv64-3b93966fd73eb9ec   1/2Gi/100Gi             0/0 0/0 0/0 0/0            48/72   Active
 gpustack--nvidia-a10g-linux-amd64       gpustack-fnv64-c4680bb149644f1c   8/64Gi/100Gi            1/1 10/10 100/100 0/0      0/0     Active
@@ -467,9 +520,14 @@ spec:
 
 **Before**, the A10G shows `1/1 10/10 100/100`. Apply it and wait for `Ready`:
 
-```console
-$ kubectl apply -f sliced-demo.yaml
-$ kubectl get instancetypes
+```bash
+kubectl apply -f sliced-demo.yaml
+kubectl get instancetypes
+```
+
+Captured output:
+
+```text
 NAME                                    ENTRANCE                          UNIT(CPU/RAM)/STORAGE   ACCELERATOR(EX/SH/SL/PT)   CPU     PHASE
 gpustack--generic-linux-amd64           gpustack-fnv64-3b93966fd73eb9ec   1/2Gi/100Gi             0/0 0/0 0/0 0/0            48/72   Active
 gpustack--nvidia-a10g-linux-amd64       gpustack-fnv64-c4680bb149644f1c   8/64Gi/100Gi            0/0 0/0 80/80 0/0          0/0     Active
@@ -482,8 +540,13 @@ unit; **PT** stays `0/0`, since no partitioning mode means no hardware partition
 
 Inside the `Instance`, the logical-slicing runtime caps visible VRAM to the slice, ≈ 20% of 24 GiB:
 
-```console
-$ kubectl exec sliced-demo -- nvidia-smi --query-gpu=name,memory.total --format=csv,noheader
+```bash
+kubectl exec sliced-demo -- nvidia-smi --query-gpu=name,memory.total --format=csv,noheader
+```
+
+Captured output:
+
+```text
 NVIDIA A10G, 4912 MiB
 ```
 
@@ -525,9 +588,14 @@ spec:
 Apply it: the defaulting webhook enriches its descriptors from the matching flavor, and it lands as a
 **sibling** of the derived A10G pool, on the one physical accelerator:
 
-```console
-$ kubectl apply -f a10g-12c128g.yaml
-$ kubectl get instancetypes
+```bash
+kubectl apply -f a10g-12c128g.yaml
+kubectl get instancetypes
+```
+
+Captured output:
+
+```text
 NAME                                    ENTRANCE                          UNIT(CPU/RAM)/STORAGE   ACCELERATOR(EX/SH/SL/PT)   CPU     PHASE
 a10g-12c128g                            gpustack-fnv64-8cf5b3114035c84a   12/128Gi/200Gi          1/1 10/10 100/100 0/0      0/0     Active
 gpustack--generic-linux-amd64           gpustack-fnv64-3b93966fd73eb9ec   1/2Gi/100Gi             0/0 0/0 0/0 0/0            48/72   Active
@@ -562,9 +630,14 @@ spec:
 Once `custom-demo` is `Ready`, both siblings drop to `0/0 0/0 0/0`, consistent across the
 accelerator's two views:
 
-```console
-$ kubectl apply -f custom-demo.yaml
-$ kubectl get instancetypes
+```bash
+kubectl apply -f custom-demo.yaml
+kubectl get instancetypes
+```
+
+Captured output:
+
+```text
 NAME                                    ENTRANCE                          UNIT(CPU/RAM)/STORAGE   ACCELERATOR(EX/SH/SL/PT)   CPU     PHASE
 a10g-12c128g                            gpustack-fnv64-8cf5b3114035c84a   12/128Gi/200Gi          0/0 0/0 0/0 0/0            0/0     Active
 gpustack--generic-linux-amd64           gpustack-fnv64-3b93966fd73eb9ec   1/2Gi/100Gi             0/0 0/0 0/0 0/0            48/72   Active
@@ -575,14 +648,33 @@ gpustack--nvidia-tesla-t4-linux-amd64   gpustack-fnv64-6b371caa2da0b799   8/32Gi
 Deleting it retires in order: the operator drains the `Instance` (`HoldAndDrain`), the `Instance` stops,
 and the type plus its `ClusterQueue` go:
 
-```console
-$ kubectl delete instancetype a10g-12c128g
+```bash
+kubectl delete instancetype a10g-12c128g
+```
+
+Captured output:
+
+```text
 instancetype.worker.gpustack.ai "a10g-12c128g" deleted
+```
 
-$ kubectl -n default get instance custom-demo -o jsonpath='{.status.phase}'
+```bash
+kubectl -n default get instance custom-demo -o jsonpath='{.status.phase}'
+```
+
+Captured output:
+
+```text
 Stopped
+```
 
-$ kubectl get instancetypes
+```bash
+kubectl get instancetypes
+```
+
+Captured output:
+
+```text
 NAME                                    ENTRANCE                          UNIT(CPU/RAM)/STORAGE   ACCELERATOR(EX/SH/SL/PT)   CPU     PHASE
 gpustack--generic-linux-amd64           gpustack-fnv64-3b93966fd73eb9ec   1/2Gi/100Gi             0/0 0/0 0/0 0/0            48/72   Active
 gpustack--nvidia-a10g-linux-amd64       gpustack-fnv64-c4680bb149644f1c   8/64Gi/100Gi            1/1 10/10 100/100 0/0      0/0     Active
@@ -596,17 +688,22 @@ gpustack--nvidia-tesla-t4-linux-amd64   gpustack-fnv64-6b371caa2da0b799   8/32Gi
 Flipping `instance-type-aware-cpu-manufacturer` on makes the aggregation layer split every pool by
 the CPU key. `ResourceFlavor`s are never rewritten; only queues, types and catalog re-group.
 
-```console
-$ kubectl -n gpustack-system patch secret gpustack-settings --type=merge \
+```bash
+kubectl -n gpustack-system patch secret gpustack-settings --type=merge \
     -p '{"data":{"instance-type-aware-cpu-manufacturer":"'"$(printf true | base64)"'"}}'
-$ kubectl -n gpustack-system rollout restart deploy/gpustack-operator-worker
+kubectl -n gpustack-system rollout restart deploy/gpustack-operator-worker
 ```
 
 **Before**, 3 `InstanceType`s; **after** the re-derive, CPU-aware types appear (create-only)
 **alongside** the old collapsed ones:
 
-```console
-$ kubectl get instancetypes
+```bash
+kubectl get instancetypes
+```
+
+Captured output:
+
+```text
 NAME                                                                ENTRANCE                          UNIT(CPU/RAM)/STORAGE   ACCELERATOR(EX/SH/SL/PT)   CPU     PHASE
 gpustack--amd-epyc-7r13-linux-amd64                                 gpustack-fnv64-8dde992f64a17a2f   1/2Gi/100Gi             0/0 0/0 0/0 0/0            16/16   Active
 gpustack--amd-epyc-7r32--nvidia-a10g-linux-amd64                    gpustack-fnv64-029fd9550e0c70bd   8/64Gi/100Gi            1/1 10/10 100/100 0/0      0/0     Active
@@ -629,8 +726,8 @@ gpustack--nvidia-tesla-t4-linux-amd64                               gpustack-fnv
 Re-purpose the `custom-demo` `Instance` stopped in Step 4: a drained `Instance` carries operator-set
 `spec.stop: true`, so repoint its `type` at a CPU-aware pool and clear the stop:
 
-```console
-$ kubectl -n default patch instance custom-demo --type=merge \
+```bash
+kubectl -n default patch instance custom-demo --type=merge \
     -p '{"spec":{"type":"gpustack--amd-epyc-7r32--nvidia-a10g-linux-amd64","stop":false}}'
 ```
 
@@ -647,8 +744,13 @@ $ kubectl -n default patch instance custom-demo --type=merge \
 +  stop: false
 ```
 
-```console
-$ kubectl get instancetypes
+```bash
+kubectl get instancetypes
+```
+
+Captured output:
+
+```text
 NAME                                               ENTRANCE                          UNIT(CPU/RAM)/STORAGE   ACCELERATOR(EX/SH/SL/PT)   CPU   PHASE
 gpustack--amd-epyc-7r32--nvidia-a10g-linux-amd64   gpustack-fnv64-029fd9550e0c70bd   8/64Gi/100Gi            0/0 0/0 0/0 0/0            0/0   Active
 gpustack--nvidia-a10g-linux-amd64                  gpustack-fnv64-c4680bb149644f1c   8/64Gi/100Gi            0/0 0/0 0/0 0/0            0/0   Active
@@ -677,8 +779,13 @@ metadata:
 The `InstanceTypeFlavor` catalog re-groups to per-`(gKey,aKey)` + per-`gKey`, replacing the collapsed
 rows:
 
-```console
-$ kubectl get instancetypeflavor
+```bash
+kubectl get instancetypeflavor
+```
+
+Captured output:
+
+```text
 NAME                                                    GENERALGROUP                 ACCELERATORGROUP   ACCELERATABLE   MANUFACTURER   PRODUCT                                          MEMORY   CORES   SLICEABLE
 gpustack--amd-epyc-7r13                                 amd-epyc-7r13                                   false           amd            AMD EPYC 7R13 Processor
 gpustack--amd-epyc-7r32                                 amd-epyc-7r32                                   false           amd            AMD EPYC 7R32
@@ -690,8 +797,13 @@ gpustack--intel-xeon-platinum-8259cl--nvidia-tesla-t4   intel-xeon-platinum-8259
 The `ResourceFlavor` set is byte-for-byte unchanged, the same 7 as Step 1: the flip re-grouped
 only the aggregation layer.
 
-```console
-$ kubectl get resourceflavor --no-headers | wc -l
+```bash
+kubectl get resourceflavor --no-headers | wc -l
+```
+
+Captured output:
+
+```text
 7
 ```
 

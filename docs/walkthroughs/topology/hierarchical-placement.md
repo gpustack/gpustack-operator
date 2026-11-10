@@ -262,6 +262,6 @@ and [Change a live hierarchy](../../modules/topology/operations.md#change-a-live
 
 **See also** — [Topology-Aware Scheduling](../../modules/topology/scheduling.md) (levels and profiles) ·
 [Topology-Aware Scheduling Operations](../../modules/topology/operations.md) (`ConfigMap` and Webhook sources) ·
-[Model Deployment Configuration](../../modules/model-deployment/deployment.md)
+[Model Deployment Configuration](../../modules/model-deployment/configuration.md)
 
 **Next** → [Shared Cache Walkthrough](../kv-cache/shared-cache.md)

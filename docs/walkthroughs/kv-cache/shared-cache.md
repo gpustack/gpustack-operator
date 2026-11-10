@@ -82,8 +82,13 @@ before Mooncake 0.3.12 is the one exception and declares `multiTenancy: false` o
 
 Wait for it, then read what it reports:
 
-```console
-$ kubectl get kvcb mooncake-dram -w
+```bash
+kubectl get kvcb mooncake-dram -w
+```
+
+Captured output:
+
+```text
 NAME            TYPE       PHASE   ENDPOINT                                         CAPACITY
 mooncake-dram   Mooncake   Ready   mooncake-dram-leader.gpustack-system.svc:50051   16Gi
 ```
@@ -185,8 +190,8 @@ starts healthy and then fails every write, so the version above is a choice. See
 
 Check the attachment from the deployment's own status rather than from the `Pod`s:
 
-```console
-$ kubectl -n team-a get md qwen-chat -o jsonpath='{.status.conditions[?(@.type=="CacheAttached")]}'
+```bash
+kubectl -n team-a get md qwen-chat -o jsonpath='{.status.conditions[?(@.type=="CacheAttached")]}'
 ```
 
 ## Step 4: Enable high availability
@@ -280,8 +285,8 @@ Create the directory on every selected node before you apply the backend. The pu
 runs as uid 65532, so give the directory to that uid. The uid depends on the image; see
 [Directory requirements](../../modules/kv-cache/local-disk-tier.md#directory-requirements).
 
-```console
-$ install -d -o 65532 -g 0 -m 0750 /var/lib/kvcache
+```bash
+install -d -o 65532 -g 0 -m 0750 /var/lib/kvcache
 ```
 
 A pool names exactly one backend and cannot be re-pointed. Serving workloads from `mooncake-disk`
@@ -396,7 +401,7 @@ asked. *`status.effectiveQuota`* on each Binding shows the grant. See
 [KV Cache Election and Failover](../../modules/kv-cache/leader.md) (the election, why there is no snapshot, and the member addressing choice in full) ·
 [KV Cache Pools and Bindings](../../modules/kv-cache/pool.md) (quota, domains and what a full quota does) ·
 [KV Cache Local Disk Tier](../../modules/kv-cache/local-disk-tier.md) (directory, bucket and cleanup rules) ·
-[Model Deployment](../../modules/model-deployment/deployment.md) (roles, *prefill*/*decode*, rollout) ·
+[Model Deployment](../../modules/model-deployment/configuration.md) (roles, *prefill*/*decode*, rollout) ·
 [Prefill and Decode](../../modules/model-deployment/prefill-decode.md) (router, transfer) ·
 [KV Cache Injection](../../modules/kv-cache/injection.md) (what a `Pod` actually receives)
 

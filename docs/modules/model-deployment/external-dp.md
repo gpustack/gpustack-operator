@@ -401,7 +401,7 @@ Admission enforces these boundaries on managed roles:
   role with `size: 1` — its *`width`*, not *DP* ranks, sizes the collective.
 
 *`size`* is a fate-sharing group, not a resize control: changing it replaces whole replicas instead of
-resizing a running *DP* group (see [Rollout behavior](deployment.md#rollout-behavior)). Growing or
+resizing a running *DP* group (see [Rollout behavior](configuration.md#rollout-behavior)). Growing or
 shrinking the *DP* world means recreating the deployment — or using [Elastic EP](elastic-ep.md) for
 width-only growth of a Ray *Internal LB* group.
 
@@ -450,7 +450,7 @@ scale-down is unverified.
 
 ---
 
-**See also** — [Model Deployment Configuration](deployment.md) (role fields, rollout) ·
+**See also** — [Model Deployment Configuration](configuration.md) (role fields, rollout) ·
 [Elastic EP](elastic-ep.md) (online width growth) ·
 [Routing](routing.md) (router engines and policies) ·
 [External DP Benchmark](external-dp-benchmark.md) (the measured crossover against a

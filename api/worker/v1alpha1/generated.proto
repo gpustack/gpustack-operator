@@ -4048,10 +4048,8 @@ message ModelDeploymentRetirementStatus {
 // its role and its ordinal, so edits to one role's running configuration do not rename a sibling
 // role's groups.
 //
-// A DEPARTURE THIS OPERATOR DID NOT INITIATE IS NOT A ROLLOUT. The replica that left is replaced on
-// its own, under a new name, while its siblings keep serving — see
-// docs/modules/model-deployment/deployment.md under "One group per replica" and "Rollout is a rolling
-// replacement".
+// A departure this operator did not initiate is not a rollout. The departed replica is replaced
+// under a new name while its siblings keep serving.
 message ModelDeploymentRole {
   // Name identifies the role, and it is also the name of the Kueue PodSet the role becomes.
   //
@@ -4782,10 +4780,8 @@ message ModelDeploymentRouterRoleStatus {
 
 // ModelDeploymentRouterStatus is the contract a router is configured from.
 //
-// EVERY STRING HERE IS ONE THE OPERATOR ACTUALLY RENDERED, never a default written down in
-// documentation. A consumer reading this object and the router the operator configured therefore
-// cannot disagree about a selector, a topic or a metric name, which is what makes this object worth
-// publishing rather than a restatement of what the documentation already says.
+// Each string reflects the operator's rendered configuration, including selectors, topics and
+// metric names.
 message ModelDeploymentRouterStatus {
   // Name echoes the spec, so that a reader holding only this object knows which implementation the
   // contract below was shaped for.

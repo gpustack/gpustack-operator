@@ -141,7 +141,7 @@ column names what is missing and who owns it.
 
 **See also** — [Model Artifact](artifact.md) for the artifact itself ·
 [Node Model Store](node-store.md) for each node's entries and the progress write rule ·
-[Node-to-Node Sync](peer-sync.md) for where a node's bytes come from ·
+[Node-to-Node Sync](node-to-node-sync.md) for where a node's bytes come from ·
 [Model Deployment Metrics](../model-deployment/metrics.md) for the other subresource built
 the same way.
 

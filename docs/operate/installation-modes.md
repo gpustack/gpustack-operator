@@ -133,7 +133,7 @@ Kueue's CRDs; `files/cleanup.sh` deletes the `NodeFeatureRule`, but only while i
 
 ---
 
-**See also** — [Migrating to Bundled Subcharts](migration/to-subcharts.md) (the ownership
+**See also** — [Migrating to Bundled Subcharts](migration/bundled-subcharts.md) (the ownership
 transfer out of the pre-subchart layout) · [High Availability Operations](high-availability.md) (more
 than one replica per control-plane component) · [Topology-Aware Scheduling
 Operations](../modules/topology/operations.md) (Topograph and generic inventory) ·

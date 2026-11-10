@@ -42,7 +42,7 @@ The v0.6.x operator indexes objects by their new names, so it never sees the v0.
 `ResourceFlavor`s, `ClusterQueue`s, Cohorts and `LocalQueue`s, and it neither reconciles nor
 garbage-collects them.
 No hook cleans them: the chart's post-delete `cleanup.sh` fires only on `helm uninstall`, and the
-upgrade's own migration hooks address the pre-subchart release layout ([Migrating to Bundled Subcharts](to-subcharts.md)), not v0.5.x names.
+upgrade's own migration hooks address the pre-subchart release layout ([Migrating to Bundled Subcharts](bundled-subcharts.md)), not v0.5.x names.
 
 An in-place upgrade therefore leaves both sets: the working v0.6.x one plus a leaked v0.5.x one of
 dead `ResourceFlavor`s, `ClusterQueue`s, Cohorts, a `LocalQueue` in every namespace, and Cohorts nothing
@@ -172,7 +172,7 @@ kubectl get nodes -o json | grep -oE '"[^"]*(\.z-[a-z]+|generic-ln-x64)[^"]*"' |
 
 ---
 
-**See also** — [Migrating to Bundled Subcharts](to-subcharts.md) (the other one-time upgrade, from
+**See also** — [Migrating to Bundled Subcharts](bundled-subcharts.md) (the other one-time upgrade, from
 v0.7.x or earlier) · [Scheduling Chain](../../modules/devices/scheduling.md#naming-and-grouping) (the
 object names this upgrade moves to) · [Migration Troubleshooting](troubleshooting.md) (recovering from
 a wedged upgrade or a stuck namespace)

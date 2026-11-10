@@ -344,7 +344,7 @@ Tasks are ordered by dependency. T1 blocks everything; T2 blocks T3 and T4; T5 a
 **T5 — Documentation.**
 `Owns:` `docs/modules/devices/hygon-mig.md`, `README.md`, `docs/README.md`,
 `docs/modules/devices/requests.md`, `docs/modules/devices/discovery.md`,
-`docs/reference/instance-metrics.md`
+`docs/modules/instances/metrics.md`
 - The operations page, the index entries, and the cross-links.
 - The metrics page's availability matrix, which this is the first change to make a partition's
   compute figure real on.

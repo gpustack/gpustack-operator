@@ -8,10 +8,6 @@ calculation code.
 
 - [Subresource](#subresource)
 - [Sample](#sample)
-- [One entry per grant](#one-entry-per-grant)
-- [Data sources](#data-sources)
-- [Manufacturer capabilities](#manufacturer-capabilities)
-- [Reasons for absent figures](#reasons-for-absent-figures)
 - [Scoping and authorization](#scoping-and-authorization)
 - [Degradation rules](#degradation-rules)
 - [Node exporter](#node-exporter)
@@ -87,7 +83,7 @@ Two caveats come with the pairs:
 > sides of one percentage. The kubelet evicts on the pod-level aggregate, so that aggregate is
 > the only numerator the limit can be read against, and it is the one *`storageUsedMiB`* carries.
 
-## One entry per grant
+### One entry per grant
 
 Every mode reports the same fields with the same meaning. An `Instance` holding a whole device
 reads the device's own figures, because the device is what it was granted; one holding a **logical
@@ -153,7 +149,7 @@ Before reading a number from an entry, check the following:
 > to consume: a reader had to know the mode to know which of two places held its own number. The
 > card-wide view belongs to a node- or device-scoped surface, not to the per-`Instance` one.
 
-## Data sources
+### Data sources
 
 - CPU / memory / storage: the kubelet's stats summary, read through the API-server node
   proxy (`/api/v1/nodes/<node>/proxy/stats/summary`); no Prometheus or metrics-server needed. The
@@ -173,7 +169,7 @@ Before reading a number from an entry, check the following:
   manufacturer's accelerators, so an allocation spanning two is read from both, never
   substituted. Only accelerators in the `Pod`'s allocation annotation are returned.
 
-## Manufacturer capabilities
+### Manufacturer capabilities
 
 A carved share's usage exists only where the manufacturer's own library answers a **per-process**
 query. So the totals are available on every backend that can carve a share, while the measurements
@@ -234,7 +230,7 @@ depend on the vendor API and the available hardware validation.
   than that field therefore reports an absence with a reason until its `Pod` is allocated again; the
   parent card's figures are every tenant's, so reporting them as this `Instance`'s would be worse.
 
-## Reasons for absent figures
+### Reasons for absent figures
 
 An absent figure always has a reason, and the reason is discoverable: on the exporter's
 [capability gauge](#metric-families) and in the Device Manager's log under
@@ -542,7 +538,7 @@ it is accepted and never enforced, so the port stays open.
 
 ---
 
-**See also** — [Architecture](../getting-started/architecture.md) · [Device
-Discovery](../modules/devices/discovery.md) for how the Device Manager samples accelerators ·
-[Internals](../contribute/internals.md) for the Device Manager's subcommands and flags.
-**Next** → [Accelerator Requests](../modules/devices/requests.md)
+**See also** — [Architecture](../../getting-started/architecture.md) · [Device
+Discovery](../devices/discovery.md) for how the Device Manager samples accelerators ·
+[Internals](../../contribute/internals.md) for the Device Manager's subcommands and flags.
+**Next** → [Accelerator Requests](../devices/requests.md)

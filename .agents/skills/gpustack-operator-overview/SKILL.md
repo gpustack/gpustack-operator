@@ -14,7 +14,8 @@ The `gpustack-operator` binary provides these subcommands: `worker` ([pkg/worker
 the control plane), `worker-gateway` ([pkg/workergateway](../../../pkg/workergateway/), the fleet
 view), `device-manager` ([pkg/devicemanager](../../../pkg/devicemanager/), one DaemonSet per
 manufacturer) and `model-manager` ([pkg/modelmanager](../../../pkg/modelmanager/), a per-node CSI
-plugin that delivers Hugging Face weights). The scheduling chain proceeds as follows: NFD labels the nodes; the
+plugin that delivers Hugging Face weights), and `model-transfer` ([pkg/modeltransfer](../../../pkg/modeltransfer/),
+the remote weight source broker). The scheduling chain proceeds as follows: NFD labels the nodes; the
 Device Manager detects accelerators and network interfaces into a per-node `Devices` ledger; the
 worker derives per-card capacity labels ([pkg/nodefeature](../../../pkg/nodefeature/) is the label
 algebra); worker controllers materialize them into Kueue `ResourceFlavor`, `ClusterQueue` (one

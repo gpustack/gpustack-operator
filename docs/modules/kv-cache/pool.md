@@ -176,12 +176,12 @@ without this two engines on one domain can write two element types under one key
   spelling both accept: `bfloat16`, `fp8_e4m3`, `fp8_e5m2` or `nvfp4`.
 - **A spelling the engine rejects stops every new `Pod`** at argument parsing, and the dtype is
   immutable. The recovery is under
-  [Upgrading to an enforced Binding dtype](../../operate/migration/kv-cache-dtype.md).
+  [Upgrading to an enforced Binding dtype](../../operate/migration/enforced-binding-dtype.md).
 - **`auto` is refused on a new Binding.** Both engines accept it and resolve it from the model they
   load, so it binds nothing. A Binding stored with it before the refusal stays usable and updatable.
 - **The engine is not free to disagree.** A role naming `--kv-cache-dtype` itself is refused; the
   rule and its exceptions are under
-  [Operator-owned keys](../model-deployment/deployment.md#operator-owned-keys).
+  [Operator-owned keys](../model-deployment/configuration.md#operator-owned-keys).
 
 All of it follows the `Setting` `model-deployment-kv-cache-dtype-owned`, on by default; turning it
 off renders and refuses nothing, as before. See [Settings](../../reference/settings.md).
@@ -400,7 +400,7 @@ zero is the [Zero grants](#zero-grants) case.
 
 **See also** — [KV Cache Backend](backend.md) (the store this pool publishes, and where eviction is
 configured) · [KV Cache Injection](injection.md) (how a `Pod` consumes a namespace grant) ·
-[Model Deployment](../model-deployment/deployment.md) (the other half of the
+[Model Deployment](../model-deployment/configuration.md) (the other half of the
 worked pair: a rendered engine names this Binding through *`spec.kvCache.poolRef`*) ·
 [Admission](../devices/admission.md) (the gates and the four-view status
 pattern) · [Settings & Environment Variables](../../reference/settings.md)

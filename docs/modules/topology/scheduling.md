@@ -123,7 +123,7 @@ A role replica owns one `Workload` and its *`size`* `Pod`s form the fate-sharing
 `replicas: 3` and `size: 8` produces three independent eight-`Pod` topology decisions, not one
 twenty-four-`Pod` decision. Different roles and replicas are not required to share a domain.
 
-Several roles still admit as one set. The [joint admission check](../model-deployment/deployment.md#prefill-and-decode)
+Several roles still admit as one set. The [joint admission check](../model-deployment/configuration.md#prefill-and-decode)
 holds every group until the whole set has reserved quota, and no role `Pod` binds to a `Node` before
 then. While the set waits, a group that fits keeps its quota reservation and topology assignment,
 so the domain it holds stays idle. When no role fits, no `Workload` of the set reserves anything.
@@ -135,7 +135,7 @@ so the domain it holds stays idle. When no role fits, no `Workload` of the set r
 > [status reference](../model-deployment/status.md#status)).
 
 Omitting *`requiredLevel`* adds no explicit topology request. The queue is still topology-aware, and
-Kueue may choose any compatible hierarchy. The [field contract](../model-deployment/deployment.md#topology-placement)
+Kueue may choose any compatible hierarchy. The [field contract](../model-deployment/configuration.md#topology-placement)
 defines the implicit hostname level.
 
 ## Node-delivered model placement
@@ -212,6 +212,6 @@ Kueue prose into a new stable reason. Operational checks and source examples are
 ---
 
 **See also** — [Scheduling Chain](../devices/scheduling.md) (the flavor and queue owners) ·
-[Admission](../devices/admission.md) (the gates after queue admission) · [Model Deployment](../model-deployment/deployment.md) (the user-facing field)
+[Admission](../devices/admission.md) (the gates after queue admission) · [Model Deployment](../model-deployment/configuration.md) (the user-facing field)
 
 **Next** → [Admission](../devices/admission.md) — the remaining gates after topology-aware quota reservation.

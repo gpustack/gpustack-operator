@@ -7,10 +7,8 @@ package v1alpha1
 //
 // ModelDeploymentRouterStatus is the contract a router is configured from.
 //
-// EVERY STRING HERE IS ONE THE OPERATOR ACTUALLY RENDERED, never a default written down in
-// documentation. A consumer reading this object and the router the operator configured therefore
-// cannot disagree about a selector, a topic or a metric name, which is what makes this object worth
-// publishing rather than a restatement of what the documentation already says.
+// Each string reflects the operator's rendered configuration, including selectors, topics and
+// metric names.
 type ModelDeploymentRouterStatusApplyConfiguration struct {
 	// Name echoes the spec, so that a reader holding only this object knows which implementation the
 	// contract below was shaped for.

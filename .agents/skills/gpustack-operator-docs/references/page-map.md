@@ -85,7 +85,7 @@ profiles, generated Kueue Topologies, TAS flavor and queue semantics, per-replic
 64-flavor limit, and the fresh-queue and live-profile lifecycle boundaries.
 
 **Never** — the commands and manifests an operator follows (`docs/modules/topology/operations.md`)
-or the full `ModelDeployment` field contract (`docs/modules/model-deployment/deployment.md`). Link both.
+or the full `ModelDeployment` field contract (`docs/modules/model-deployment/configuration.md`). Link both.
 
 ## `docs/modules/devices/admission.md`
 
@@ -195,7 +195,7 @@ its patterns, how a `ModelDeployment` or an `Instance` consumes it under each de
 placement, and the weight identity in KV keys.
 
 **Never** — anything about the deployment that mounts the artifact (that is
-`docs/modules/model-deployment/deployment.md`, which keeps one pointer here and states nothing about the artifact
+`docs/modules/model-deployment/configuration.md`, which keeps one pointer here and states nothing about the artifact
 itself), or the node plugin's internals (`node-store.md`).
 
 ## `docs/modules/model-delivery/image-source.md`
@@ -225,7 +225,7 @@ metrics.
 **Never** — the administrator's procedure (values, Settings, watermarks, switching delivery,
 upgrading, removing). That is `operations.md`, which links back.
 
-## `docs/modules/model-delivery/peer-sync.md`
+## `docs/modules/model-delivery/node-to-node-sync.md`
 
 **Owns** — the peer port a node's published trees are served on, the token authentication and
 NetworkPolicy that bound it, how a cold node pulls with in-stream checkpoints, and the `source` field
@@ -234,7 +234,7 @@ and metrics that tell peer bytes from hub bytes.
 **Never** — how a tree is materialized or verified in the first place (`node-store.md`); this page
 owns the node-to-node path only.
 
-## `docs/modules/model-delivery/views.md`
+## `docs/modules/model-delivery/artifact-api.md`
 
 **Owns** — the public APIs for `ModelArtifact` and `NodeModelStore`, the `progress` subresource
 (aggregate, live, authorized, naming no node), the tenant Role, and the GPUStack server capability
@@ -263,7 +263,7 @@ replicas land and turning the placement preference off, the upgrade notes, and r
 **Rule** — a page with a `## Verify` block states the expected output of every command in it. Unlike
 other runbooks, this page is not line-cap exempt — split it if it grows past the cap.
 
-## `docs/modules/model-deployment/deployment.md`
+## `docs/modules/model-deployment/configuration.md`
 
 **Owns** — the `ModelDeployment` contract: the inherited reuse domain, the three override tiers, the
 owned-key table, the runner-image formula, prefill/decode pairing, the topology-placement field
@@ -296,7 +296,7 @@ limits (`scaling-benchmark.md`), or any hardware or tuning claim. Link each.
 renders, the router block and its fields, the direct transfer's transport, roles on different
 hardware, and a role's own Service.
 
-**Never** — the deployment-level contract around the pair (`deployment.md`), the KV cache path's
+**Never** — the deployment-level contract around the pair (`configuration.md`), the KV cache path's
 transport (`../kv-cache/backend.md`), or the measured disaggregated-versus-aggregated numbers
 (`prefill-decode-benchmark.md`); this page owns the P/D path.
 
@@ -378,21 +378,21 @@ capacity, and the interconnect/KV-pressure crossover.
 **Owns** — the structured metrics subresource: which series each field reads per engine, role and
 router, windowed cache hits, and the Pod scrape annotations.
 
-**Never** — the exporter's own gauges (`docs/reference/instance-metrics.md` owns the exporter side).
+**Never** — the exporter's own gauges (`docs/modules/instances/metrics.md` owns the exporter side).
 
 ## `docs/modules/model-deployment/status.md`
 
 **Owns** — what each `ModelDeployment` status condition and published field means, and how to read
 them when a deployment misbehaves.
 
-**Never** — the lifecycle rules the conditions report (`deployment.md` owns those).
+**Never** — the lifecycle rules the conditions report (`configuration.md` owns those).
 
 ## `docs/modules/model-deployment/shutdown.md`
 
 **Owns** — the drain window and what a replica does between its Pod's delete and its engine's exit,
 including what it does not cover.
 
-**Never** — what turns a replica over in the first place. That stays on `deployment.md`, which links
+**Never** — what turns a replica over in the first place. That stays on `configuration.md`, which links
 here.
 
 ## `docs/modules/model-deployment/engine-versions.md`
@@ -486,8 +486,7 @@ transition, so do not "modernize" its version numbers.
 ## `docs/reference/*.md`
 
 **Owns** — lookup tables with provenance. Today: the per-product unit-resources presets
-(`instance-type-unit-resources.md`), the `instances/<name>/metrics` subresource and the Device
-Manager's Prometheus exporter behind it (`instance-metrics.md`), every command the binary offers with
+(`instance-type-unit-resources.md`), every command the binary offers with
 its flags and exit codes (`commands.md`). KV cache injection is under
 `docs/modules/kv-cache/injection.md`; model delivery and deployment have their own sections above.
 

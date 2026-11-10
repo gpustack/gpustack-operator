@@ -61,8 +61,8 @@ can fail for a holder on its way out. Re-check the descriptors.
 **Diagnose from the kernel log and the holders' open file descriptors, never from `ppu-smi` alone**, which
 reports the mode and carvable profiles, not who holds a PPU open:
 
-```console
-$ for p in /proc/[0-9]*; do pid=${p#/proc/}; n=$(ls -l "$p"/fd 2>/dev/null | grep -c alixpu); \
+```bash
+for p in /proc/[0-9]*; do pid=${p#/proc/}; n=$(ls -l "$p"/fd 2>/dev/null | grep -c alixpu); \
     [ "$n" -gt 0 ] 2>/dev/null && echo "pid=$pid fds=$n $(tr -d '\0' < "$p"/cmdline)"; done
 ```
 
@@ -99,9 +99,9 @@ These rules are shared with NVIDIA.
 
 What a PPU offers:
 
-```console
-$ ppu-smi mig -i <N> -lgip     # the profiles, with Instances Free/Total and memory per instance
-$ ppu-smi mig -i <N> -lgipp    # the legal placements per profile, as {Start,Start...}:Size
+```bash
+ppu-smi mig -i <N> -lgip     # the profiles, with Instances Free/Total and memory per instance
+ppu-smi mig -i <N> -lgipp    # the legal placements per profile, as {Start,Start...}:Size
 ```
 
 **`-lgipp` does not tell you what is free.** It lists every *legal* placement irrespective of occupancy: a
@@ -246,9 +246,14 @@ hardware called out where they bite.
 2. Enable the mode. **`-mig` is a top-level flag, not a `ppu-smi mig` subcommand flag**: the subcommand
    carries the instance operations (`-lgip`, `-cgi`, `-dgi`, …) and rejects `-mig`:
 
-   ```console
+   ```bash
    # one PPU by card ordinal
-   $ ppu-smi -i <N> -mig 1
+   ppu-smi -i <N> -mig 1
+   ```
+
+   Captured output:
+
+   ```text
    Enable MIG mode for PPU <bus-id>.
    All done.
    ```
@@ -259,8 +264,13 @@ hardware called out where they bite.
 
    Then confirm, because a successful call is not an applied mode:
 
-   ```console
-   $ ppu-smi -q -i <N> | grep -i -A2 "MIG Mode"
+   ```bash
+   ppu-smi -q -i <N> | grep -i -A2 "MIG Mode"
+   ```
+
+   Captured output:
+
+   ```text
        MIG Mode
            Current                             : Enabled
            Pending                             : Enabled
@@ -281,9 +291,9 @@ remains and flip the mode back.
 is in use, please destory related compute instances then try again` (the manufacturer's own spelling), with
 a non-zero exit. The reclaim does this in order; follow these steps by hand:
 
-```console
-$ ppu-smi mig -i <N> -gi <G> -ci <C> -dci
-$ ppu-smi mig -i <N> -gi <G> -dgi
+```bash
+ppu-smi mig -i <N> -gi <G> -ci <C> -dci
+ppu-smi mig -i <N> -gi <G> -dgi
 ```
 
 **`-dgi` without `-gi` destroys every GPU Instance on the PPU**, not the one you were looking at:
@@ -293,8 +303,8 @@ running `Pod`s.
 Then, with the PPU free of instances **and** of holders — the same [Prerequisites](#prerequisites) as
 enabling, since the mode cannot be flipped back while a process holds the driver:
 
-```console
-$ ppu-smi -i <N> -mig 0
+```bash
+ppu-smi -i <N> -mig 0
 ```
 
 then restart the Device Manager `Pod` so the ledger returns the PPU to unpartitioned capability.

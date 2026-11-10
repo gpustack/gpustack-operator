@@ -159,7 +159,7 @@ strip CRs. Regenerate it with the commands above.
    `values.schema.json`).
 4. Every other mention: `templates/NOTES.txt`, `files/cleanup.sh`, `applicationValuesKeys` + the overlay in
    `pkg/worker/kuberess/`, `chart_test.go` expectations, `docs/contribute/development.md`,
-   `docs/operate/migration/to-subcharts.md`, and the `gpustack-operator-chart-e2e` / `-e2e` skills.
+   `docs/operate/migration/bundled-subcharts.md`, and the `gpustack-operator-chart-e2e` / `-e2e` skills.
 
 **What an existing release keeps** — dropping the dependency cleans nothing up:
 

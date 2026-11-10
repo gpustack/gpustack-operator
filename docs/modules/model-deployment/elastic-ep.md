@@ -113,7 +113,7 @@ through the resize interface the engine already exposes.
 
 The CPU head, master and GPU workers each get a separate memory-backed `EmptyDir` at `/dev/shm`.
 Changing the role's *`shmSize`* affects new or replacement members; existing members keep their mounts.
-See [Shared memory](deployment.md#shared-memory) for configuration, precedence and memory budgeting.
+See [Shared memory](configuration.md#shared-memory) for configuration, precedence and memory budgeting.
 
 ## Configuration
 
@@ -354,11 +354,11 @@ The operator retains existing elastic `Pod`s, so an env edit does not change the
 
 ---
 
-**See also** — [Model Deployment Configuration](deployment.md) for the role contract ·
+**See also** — [Model Deployment Configuration](configuration.md) for the role contract ·
 [Prefill and Decode](prefill-decode.md) for the other way to split a deployment ·
 [Routing](routing.md) for how replicas are selected and observed ·
 [Shutdown](shutdown.md) for retirement and drain ·
 [Model Deployment Status](status.md) for the published fields ·
 [Elastic EP Benchmark](elastic-ep-benchmark.md) for a measured width change under load.
 
-**Next** → [Model Deployment Configuration](deployment.md)
+**Next** → [Model Deployment Configuration](configuration.md)

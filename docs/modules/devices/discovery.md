@@ -20,20 +20,14 @@ in `Devices`. These are stages 1 and 2 of the operator's discovery and schedulin
 
 The Device Manager manages `Devices`; Kubernetes consumes them as resources.
 
-```
-                ┌────────────────────────────────────┐
-   manages      │ Device — what the node carries     │
- DeviceManager ▶│  ├── Accelerator  GPU/TPU/XPU/NPU  │
- (detector,     │  └── (future) IB port, Link port…  │
-  allocator)    └────────────────────────────────────┘
-                            │ maps onto
-                            ▼
-                ┌────────────────────────────────────┐
-   consumes     │ Resource — how Kubernetes sees it  │
- DevicePlugin  ▶│  Resource{Group, Device}           │
- Controllers    │  ResourceToken = Resource + Index  │
-                └────────────────────────────────────┘
-```
+![Devices and Kubernetes resources](../../assets/diagrams/device-resource.svg)
+
+<!--
+flowchart LR
+    DM["Device Manager: detector and allocator"] -> DEVICE["Device: accelerator or future port"]
+    DEVICE -> RESOURCE["Resource: group and device; token adds index"]
+    CONSUMERS["Device plugin and controllers"] -> RESOURCE
+-->
 
 - **Device** — anything the node carries that the Device Manager manages.
 - **Accelerator** — a Device usable for compute acceleration: GPU, TPU, XPU or NPU. The default word
