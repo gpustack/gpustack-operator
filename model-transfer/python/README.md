@@ -62,7 +62,7 @@ Remote weight delivery separates **checkpoint metadata** from **tensor payload s
 HIXL and NIXL runtime loading does not compare vendor version numbers. Required API methods are checked before native use; missing or incompatible APIs still refuse. Distribution versions are diagnostic metadata, and an unavailable version remains unknown. Image builds pin their dependency versions and source commits for reproducibility; those pins do not make other vendor builds hardware-qualified.
 
 
-In a GPUStack-managed cluster, `device-manager` stages the wheel on the host at `/var/lib/gpustack/operator/lib/model-transfer`, and the `ModelDeployment` controller mounts and installs it offline before starting the engine:
+In a GPUStack-managed cluster, the `model-transfer` source DaemonSet's `stage-libs` initContainer stages the wheel on the host at `/var/lib/gpustack/operator/lib/model-transfer`, and the `ModelDeployment` controller mounts and installs it offline before starting the engine:
 
 ```sh
 python3 -c 'import importlib.util, sys; sys.exit(0 if importlib.util.find_spec("gpustack_model_transfer") else 1)' || \
