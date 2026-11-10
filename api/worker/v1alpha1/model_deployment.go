@@ -81,13 +81,11 @@ type ModelDeploymentSpec struct {
 	// reason to refuse one. Several prefillers with several decoders is another. A rule admitting only
 	// one prefiller and one decoder would describe a pairer rather than this field.
 	//
-	// ON ASCEND HARDWARE THE PREFILL/DECODE TRANSFER LEG RENDERS BEHIND ONE ROUTER ALONE:
-	// "llm-d-router", whose decode proxy relays the per-request handshake the Ascend connector waits
-	// for. "vllm-router" drives a pair in a handshake vocabulary that connector rejects, so an Ascend
-	// pair behind it renders as two complete engines with no leg between them; "sglang-gateway" is
-	// refused in front of this engine before any of that applies. The no-leg shape is QUIET: the
-	// deployment goes Ready, requests answer normally, and the two roles never exchange a block --
-	// a correctly answering deployment is exactly what makes the missing leg hard to see.
+	// ON ASCEND HARDWARE THE PREFILL/DECODE TRANSFER LEG RENDERS BEHIND EITHER MANAGED ROUTER:
+	// "llm-d-router", whose decode proxy relays the per-request handshake with
+	// --kv-connector=nixlv2, and "vllm-router", which selects the same vocabulary with
+	// --kv-connector=nixl. "sglang-gateway" is refused in front of this engine before any of
+	// that applies.
 	//
 	// Absent means no router, and that stays a supported shape rather than a broken one: the roles are
 	// individually addressable through their own Services either way, so a deployment written before
@@ -101,8 +99,8 @@ type ModelDeploymentSpec struct {
 	//
 	// THIS FIELD AND KVCache ABOVE ARE TWO ORTHOGONAL AXES, NOT TWO BRANCHES OF ONE CHOICE, and
 	// both may be set at once. The gate that turns this leg on — every admitted router-and-engine
-	// pair (on Ascend hardware, "llm-d-router" alone; Router above names each combination and what
-	// the quiet no-leg shape looks like) and a role kind of prefill or decode — reads none of
+	// pair (on Ascend hardware, "llm-d-router" or "vllm-router" alike; Router above names each
+	// combination) and a role kind of prefill or decode — reads none of
 	// spec.kvCache, and when both are set the two are synthesized into ONE connector and one
 	// --kv-transfer-config: a deployment may share a pool for its blocks AND hand them from prefill
 	// to decode directly, at the same time.
@@ -275,10 +273,11 @@ type ModelDeploymentKVTransfer struct {
 	//     runs a transport other than tcp, because it is process-wide and would leave the store
 	//     client without its fabric; the leg then keeps the engine's own selection.
 	//   - IT IS READ ONLY ON THE POINT-TO-POINT LEG: the prefill/decode roles of every admitted
-	//     router-and-engine pair. Where no leg renders -- no router, or an Ascend pair behind
-	//     "vllm-router" -- the value is accepted and renders nothing. An Ascend pair behind
-	//     "llm-d-router" renders the leg but not this value: that engine's transfer leg hardcodes
-	//     its transport, so the declared protocol has no key to land in. Each silence is stated
+	//     router-and-engine pair, behind either managed router. Where no leg renders -- no
+	//     router -- the value is accepted and renders nothing. On Ascend the engines' transfer
+	//     legs pick their own transport, so the value renders only where it names a switch:
+	//     SGLang takes it as its MemFabric protocol, and vLLM-Ascend takes "RDMA" as a Device
+	//     RoCE constraint when Backend is "HIXL". Each silence is stated
 	//     here because an accepted field that quietly does nothing is a promise broken quietly.
 	//   - IT IS EDITABLE, and an edit RESTARTS EVERY ROLE: the value renders into both ends'
 	//     argv, so a change rebuilds every Kueue pod group of the deployment. With roles split
@@ -289,7 +288,30 @@ type ModelDeploymentKVTransfer struct {
 	// +optional
 	// +k8s:validation:enum=["Auto","TCP","RDMA","EFA","CANN","ROCM"]
 	Protocol string `json:"protocol,omitempty" protobuf:"bytes,1,opt,name=protocol"`
+
+	// Backend selects the point-to-point KV transfer backend for a prefill/decode pair.
+	// Omitting the field or setting Auto selects the default backend for the role's
+	// hardware and engine (Mooncake on non-Ascend pools, MooncakeConnectorV1 over ADXL/HIXL
+	// on vLLM-Ascend, and ascend MemFabric on SGLang Ascend). NIXL selects NixlConnector on
+	// vLLM and nixl on SGLang. HIXL explicitly selects the Ascend HIXL data plane on Ascend
+	// pools.
+	//
+	// +optional
+	// +k8s:validation:enum=["Auto","Mooncake","NIXL","HIXL"]
+	Backend string `json:"backend,omitempty" protobuf:"bytes,2,opt,name=backend"`
 }
+
+// The point-to-point KV transfer backends a ModelDeployment can select, which are the values of
+// ModelDeploymentKVTransfer.Backend's enum.
+//
+// They are declared beside the field whose schema closes the set, so that a reader of either finds
+// the other.
+const (
+	ModelDeploymentKVTransferBackendAuto     = "Auto"
+	ModelDeploymentKVTransferBackendMooncake = "Mooncake"
+	ModelDeploymentKVTransferBackendNIXL     = "NIXL"
+	ModelDeploymentKVTransferBackendHIXL     = "HIXL"
+)
 
 // ModelDeploymentRole is one engine role and its replicas.
 //

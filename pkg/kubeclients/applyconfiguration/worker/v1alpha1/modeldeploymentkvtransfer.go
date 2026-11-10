@@ -32,10 +32,11 @@ type ModelDeploymentKVTransferApplyConfiguration struct {
 	// runs a transport other than tcp, because it is process-wide and would leave the store
 	// client without its fabric; the leg then keeps the engine's own selection.
 	// - IT IS READ ONLY ON THE POINT-TO-POINT LEG: the prefill/decode roles of every admitted
-	// router-and-engine pair. Where no leg renders -- no router, or an Ascend pair behind
-	// "vllm-router" -- the value is accepted and renders nothing. An Ascend pair behind
-	// "llm-d-router" renders the leg but not this value: that engine's transfer leg hardcodes
-	// its transport, so the declared protocol has no key to land in. Each silence is stated
+	// router-and-engine pair, behind either managed router. Where no leg renders -- no
+	// router -- the value is accepted and renders nothing. On Ascend the engines' transfer
+	// legs pick their own transport, so the value renders only where it names a switch:
+	// SGLang takes it as its MemFabric protocol, and vLLM-Ascend takes "RDMA" as a Device
+	// RoCE constraint when Backend is "HIXL". Each silence is stated
 	// here because an accepted field that quietly does nothing is a promise broken quietly.
 	// - IT IS EDITABLE, and an edit RESTARTS EVERY ROLE: the value renders into both ends'
 	// argv, so a change rebuilds every Kueue pod group of the deployment. With roles split
@@ -44,6 +45,14 @@ type ModelDeploymentKVTransferApplyConfiguration struct {
 	// engine image edit already opens.
 	//
 	Protocol *string `json:"protocol,omitempty"`
+	// Backend selects the point-to-point KV transfer backend for a prefill/decode pair.
+	// Omitting the field or setting Auto selects the default backend for the role's
+	// hardware and engine (Mooncake on non-Ascend pools, MooncakeConnectorV1 over ADXL/HIXL
+	// on vLLM-Ascend, and ascend MemFabric on SGLang Ascend). NIXL selects NixlConnector on
+	// vLLM and nixl on SGLang. HIXL explicitly selects the Ascend HIXL data plane on Ascend
+	// pools.
+	//
+	Backend *string `json:"backend,omitempty"`
 }
 
 // ModelDeploymentKVTransferApplyConfiguration constructs a declarative configuration of the ModelDeploymentKVTransfer type for use with
@@ -57,5 +66,13 @@ func ModelDeploymentKVTransfer() *ModelDeploymentKVTransferApplyConfiguration {
 // If called multiple times, the Protocol field is set to the value of the last call.
 func (b *ModelDeploymentKVTransferApplyConfiguration) WithProtocol(value string) *ModelDeploymentKVTransferApplyConfiguration {
 	b.Protocol = &value
+	return b
+}
+
+// WithBackend sets the Backend field in the declarative configuration to the given value
+// and returns the receiver, so that objects can be built by chaining "With" function invocations.
+// If called multiple times, the Backend field is set to the value of the last call.
+func (b *ModelDeploymentKVTransferApplyConfiguration) WithBackend(value string) *ModelDeploymentKVTransferApplyConfiguration {
+	b.Backend = &value
 	return b
 }
