@@ -33,24 +33,19 @@ so the successful remote path does not store a complete checkpoint on the target
 One `Setting` chooses the cluster's policy, and the chart ships it:
 
 
-| `Setting`                               | Default    | Values                          |
-| --------------------------------------- | ---------- | ------------------------------- |
-| **`model-artifact-remote-delivery-policy`** | **`Disabled`** | `Disabled`, `Require`, `Prefer` |
+| `Setting`                                   | Default      | Values                          |
+| ------------------------------------------- | ------------ | ------------------------------- |
+| **`model-artifact-remote-delivery-policy`** | **`Prefer`** | `Disabled`, `Require`, `Prefer` |
 
 
-- **`Disabled`**: Default policy; leaves `Pod` specs, conditions, and status fields unchanged.
+- **`Prefer`**: Default policy; uses remote delivery when a prepared source is ready and local delivery otherwise.
+- **`Disabled`**: Turns remote delivery off; leaves `Pod` specs, conditions, and status fields unchanged.
 - **`Require` and `Prefer`**: Require the `model.csi.gpustack.ai` `CSIDriver` so remote replicas can mount metadata views.
 
 ```bash
 kubectl -n gpustack-system patch setting model-artifact-remote-delivery-policy \
-  --type merge -p '{"spec":{"value":"Require"}}'
+  --type merge -p '{"spec":{"value":"Disabled"}}'
 ```
-
-The chart deploys the source runtime by default (`modelTransfer.enabled: true`) while keeping
-`modelTransfer.policy: Disabled`. It declares `GPUSTACK_MODEL_ARTIFACT_REMOTE_DELIVERY_POLICY` on the
-worker only when `modelTransfer.policy` is set to `Require` or `Prefer`; while `Disabled`, the `Setting`
-remains editable at runtime. Enabling the policy is an administrator decision: the routing allowlists do
-not certify hardware or source safety, and the recorded acceptance limits still apply.
 
 The source broker's `ServiceAccount` can review audience-scoped tokens and read live workload,
 artifact, placement and grant state. It pins each Binding's quota authority and updates that
@@ -838,8 +833,8 @@ Source loss does not change replicas that already loaded. Replicas still loading
 
 ## Rollback
 
-To roll back, patch the `model-artifact-remote-delivery-policy` `Setting` to `Disabled` (and reset
-`modelTransfer.policy` to `Disabled` if it was set in chart values). New replicas use the base
+To roll back, patch the `model-artifact-remote-delivery-policy` `Setting` to `Disabled` (or set
+`modelTransfer.enabled: false` in chart values). New replicas use the base
 delivery mode (`model-artifact-delivery-mode`, Node or Engine).
 
 Replicas already loaded keep serving their weights until their next roll. A checkpoint that

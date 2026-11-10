@@ -71,7 +71,7 @@ writes chooses where a node connects. The `Setting`s this adds:
 | `Setting` | Default | Check |
 | --- | --- | --- |
 | `model-artifact-delivery-mode` | `Engine`; the chart declares `Node` with the plugin, and the worker reasserts it | `Engine` or `Node`; `Node` needs the `CSIDriver` |
-| `model-artifact-remote-delivery-policy` | `Disabled`; the chart declares the configured policy with its `modelTransfer` section, and the worker reasserts it | `Disabled`, `Require` or `Prefer`; `Require` and `Prefer` need the `CSIDriver` |
+| `model-artifact-remote-delivery-policy` | `Prefer`; the chart declares `Disabled` only when `modelTransfer.enabled: false` | `Disabled`, `Require` or `Prefer`; `Require` and `Prefer` need the `CSIDriver` |
 | `model-store-high-watermark` | `80` | integer, above the low watermark, at most `95` |
 | `model-store-low-watermark` | `70` | integer, at least `1`, below the high watermark |
 | `model-store-download-concurrency` | `8` | concurrent requests per node, `1` to `64` |

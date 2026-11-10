@@ -513,12 +513,13 @@ modelManager:
   # -- Extra command-line arguments appended to the model-manager container args.
   extraArgs: []
 
-# -- Remote weight delivery (model-transfer): the source runtime's identity and
-# policy, the per-manufacturer broker+worker DaemonSets, their serving
-# certificates and headless Services. Remote delivery policy stays
-# OFF (`policy: Disabled`) until an administrator turns it on — a cluster at
-# defaults keeps every Pod, condition and status field unchanged until `policy`
-# or the `model-artifact-remote-delivery-policy` Setting is enabled.
+# -- Remote weight delivery (model-transfer): the source runtime's identity,
+# the per-manufacturer broker+worker DaemonSets, their serving certificates and
+# headless Services. Remote delivery policy defaults to `Prefer` via the
+# worker's built-in `model-artifact-remote-delivery-policy` Setting — a cluster
+# without a prepared `ModelPrefetch` source keeps every Pod, condition and
+# status field unchanged, and preparing a source enables remote delivery with
+# local fallback.
 modelTransfer:
   # -- Deploy the remote delivery source runtime: a ServiceAccount and the minimal RBAC
   # a source broker runs under, one broker+worker DaemonSet per manufacturer named in
@@ -526,20 +527,10 @@ modelTransfer:
   # under, and a headless Service per manufacturer an engine resolves exact source
   # endpoints through. Nothing here grants a device, a cache path, or a tenant secret,
   # and a disk-only warm-up Pod never uses this identity. With `images` empty the
-  # identity ships and no source runtime does; with `enabled=false` none of it renders.
+  # identity ships and no source runtime does; with `enabled=false` none of it renders
+  # and the chart declares `GPUSTACK_MODEL_ARTIFACT_REMOTE_DELIVERY_POLICY=Disabled` on
+  # the worker.
   enabled: true
-  # -- The cluster's remote delivery policy the chart declares on the worker when set to
-  # `Require` or `Prefer`: Disabled (default), the delivery is off and no worker env var
-  # is declared so the Setting remains editable at runtime; Require, a qualified replica's
-  # startup holds until a prepared source serves the weights and never falls back; Prefer,
-  # remote delivery is used when a prepared source is available and the declared
-  # identity-preserving fallback otherwise. Declared only while `enabled` and not
-  # `Disabled`; Require and Prefer additionally need the model-manager plugin installed,
-  # which the worker's Setting admission enforces independently of this value.
-  # @schema
-  # enum: ["Disabled", "Require", "Prefer"]
-  # @schema
-  policy: Disabled
   # -- The source workers' ServiceAccount name; an empty name derives
   # `<fullname>-model-transfer`.
   serviceAccount:

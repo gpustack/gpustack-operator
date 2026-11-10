@@ -117,9 +117,11 @@ Kubernetes: `>=1.23.0-0`
 By default, a `ModelDeployment`'s weights reach the engine the way they always
 have — the node's model-manager plugin materializes them on the node's cache
 (`modelManager`, Node delivery) or the engine downloads them itself (Engine
-delivery). The source runtime (`modelTransfer.enabled=true`) is deployed by
-default on accelerator nodes, while **remote weight delivery policy is off**
-(`modelTransfer.policy: Disabled`) until an administrator turns it on:
+delivery) — unless a `ModelPrefetch` in the same namespace prepares a host-memory
+source. The source runtime (`modelTransfer.enabled=true`) is deployed by default
+on accelerator nodes, and the worker's built-in
+`model-artifact-remote-delivery-policy` `Setting` defaults to `Prefer` (editable
+at runtime to `Disabled`, `Require`, or `Prefer`):
 
 1. `modelTransfer.enabled=true` (default) ships the source runtime's identity: a
    ServiceAccount whose RBAC is what a source broker runs under (TokenReview to
@@ -128,14 +130,11 @@ default on accelerator nodes, while **remote weight delivery policy is off**
    eligibility check resolves against, the Binding's initial annotation, and a
    Role scoped to the operator namespace's ConfigMaps where the Binding-wide
    reservation authority lives — no devices, no cache paths, no tenant secrets).
-2. `modelTransfer.policy` chooses the policy: `Disabled` (default), `Require`, or
-   `Prefer`. While `Disabled`, no `GPUSTACK_MODEL_ARTIFACT_REMOTE_DELIVERY_POLICY`
-   variable is rendered on the worker, so the Setting stays at `Disabled` and
-   remains editable at runtime; setting `Require` or `Prefer` declares the
-   variable on the worker. Require and Prefer additionally need the
-   model-manager plugin installed, which the worker's Setting admission enforces
-   independently of this value.
-3. `modelTransfer.images` turns the source runtime on, one DaemonSet per named
+   While enabled, no `GPUSTACK_MODEL_ARTIFACT_REMOTE_DELIVERY_POLICY` variable
+   is rendered on the worker, so the `Setting` remains editable at runtime.
+   Setting `modelTransfer.enabled=false` omits the source runtime and declares
+   `GPUSTACK_MODEL_ARTIFACT_REMOTE_DELIVERY_POLICY=Disabled` on the worker.
+2. `modelTransfer.images` turns the source runtime on, one DaemonSet per named
    manufacturer, each Pod carrying two containers: the operator image runs the
    `model-transfer` broker (its engine session listener on :9251 is TLS only,
    its worker control wire stays on the Pod's loopback at 127.0.0.1:9250), and
@@ -263,12 +262,10 @@ corresponding DaemonSet directly, without waiting for that drain acknowledgement
 Perform this maintenance when the affected workload is stable.
 
 Rolling back is turning the policy back: patch the
-`model-artifact-remote-delivery-policy` `Setting` to `Disabled` (and if
-`modelTransfer.policy` was set to `Require` or `Prefer` in values, reset
-`modelTransfer.policy=Disabled`). Replicas already loaded keep serving; new
-replicas are admitted on the base delivery mode exactly as before remote
-delivery existed, and no destination checkpoint a Require deployment refused to
-materialize was ever written.
+`model-artifact-remote-delivery-policy` `Setting` to `Disabled` (or set
+`modelTransfer.enabled=false` in values). Replicas already loaded keep serving;
+new replicas are admitted on the base delivery mode, and no destination
+checkpoint a Require deployment refused to materialize was ever written.
 
 ## Values
 
@@ -344,9 +341,8 @@ materialize was ever written.
 | modelManager.nodeSelector | object | `{}` | Node selector for the model-manager DaemonSet, merged over `global.nodeSelector`. |
 | modelManager.tolerations | list | `[{"operator":"Exists"}]` | Tolerations for the model-manager DaemonSet. Defaults tolerate every taint, so every node a workload may land on can mount its weights. |
 | modelManager.extraArgs | list | `[]` | Extra command-line arguments appended to the model-manager container args. |
-| modelTransfer | object | `{"brokerResources":{"limits":{"memory":"512Mi"},"requests":{"cpu":"100m","memory":"128Mi"}},"enabled":true,"env":{},"extraArgs":[],"images":{"amd":"gpustack/model-transfer:v0.1.0-rocm7.2","ascend":"gpustack/model-transfer:v0.1.0-cann9.2-a5","nvidia":"gpustack/model-transfer:v0.1.0-cuda12.9"},"nodeSelector":{},"policy":"Disabled","serviceAccount":{"name":""},"source":{"maxMemoryBytes":0,"maxSessions":64,"minMemoryBytes":1073741824},"tolerations":[{"operator":"Exists"}],"workerResources":{}}` | Remote weight delivery (model-transfer): the source runtime's identity and policy, the per-manufacturer broker+worker DaemonSets, their serving certificates and headless Services. Remote delivery policy stays OFF (`policy: Disabled`) until an administrator turns it on — a cluster at defaults keeps every Pod, condition and status field unchanged until `policy` or the `model-artifact-remote-delivery-policy` Setting is enabled. |
-| modelTransfer.enabled | bool | `true` | Deploy the remote delivery source runtime: a ServiceAccount and the minimal RBAC a source broker runs under, one broker+worker DaemonSet per manufacturer named in `images`, the session serving certificate each broker's TLS-only listener serves under, and a headless Service per manufacturer an engine resolves exact source endpoints through. Nothing here grants a device, a cache path, or a tenant secret, and a disk-only warm-up Pod never uses this identity. With `images` empty the identity ships and no source runtime does; with `enabled=false` none of it renders. |
-| modelTransfer.policy | string | `"Disabled"` | The cluster's remote delivery policy the chart declares on the worker when set to `Require` or `Prefer`: Disabled (default), the delivery is off and no worker env var is declared so the Setting remains editable at runtime; Require, a qualified replica's startup holds until a prepared source serves the weights and never falls back; Prefer, remote delivery is used when a prepared source is available and the declared identity-preserving fallback otherwise. Declared only while `enabled` and not `Disabled`; Require and Prefer additionally need the model-manager plugin installed, which the worker's Setting admission enforces independently of this value. @schema enum: ["Disabled", "Require", "Prefer"] @schema |
+| modelTransfer | object | `{"brokerResources":{"limits":{"memory":"512Mi"},"requests":{"cpu":"100m","memory":"128Mi"}},"enabled":true,"env":{},"extraArgs":[],"images":{"amd":"gpustack/model-transfer:v0.1.0-rocm7.2","ascend":"gpustack/model-transfer:v0.1.0-cann9.2-a5","nvidia":"gpustack/model-transfer:v0.1.0-cuda12.9"},"nodeSelector":{},"serviceAccount":{"name":""},"source":{"maxMemoryBytes":0,"maxSessions":64,"minMemoryBytes":1073741824},"tolerations":[{"operator":"Exists"}],"workerResources":{}}` | Remote weight delivery (model-transfer): the source runtime's identity, the per-manufacturer broker+worker DaemonSets, their serving certificates and headless Services. Remote delivery policy defaults to `Prefer` via the worker's built-in `model-artifact-remote-delivery-policy` Setting — a cluster without a prepared `ModelPrefetch` source keeps every Pod, condition and status field unchanged, and preparing a source enables remote delivery with local fallback. |
+| modelTransfer.enabled | bool | `true` | Deploy the remote delivery source runtime: a ServiceAccount and the minimal RBAC a source broker runs under, one broker+worker DaemonSet per manufacturer named in `images`, the session serving certificate each broker's TLS-only listener serves under, and a headless Service per manufacturer an engine resolves exact source endpoints through. Nothing here grants a device, a cache path, or a tenant secret, and a disk-only warm-up Pod never uses this identity. With `images` empty the identity ships and no source runtime does; with `enabled=false` none of it renders and the chart declares `GPUSTACK_MODEL_ARTIFACT_REMOTE_DELIVERY_POLICY=Disabled` on the worker. |
 | modelTransfer.serviceAccount | object | `{"name":""}` | The source workers' ServiceAccount name; an empty name derives `<fullname>-model-transfer`. |
 | modelTransfer.images | object | `{"amd":"gpustack/model-transfer:v0.1.0-rocm7.2","ascend":"gpustack/model-transfer:v0.1.0-cann9.2-a5","nvidia":"gpustack/model-transfer:v0.1.0-cuda12.9"}` | Manufacturer-to-image map for the remote delivery source DaemonSets (`amd`, `ascend`, `nvidia`). Values are full image references, for example {nvidia: "gpustack/model-transfer:v0.1.0-cuda12.9", amd: "gpustack/model-transfer:v0.1.0-rocm7.2", ascend: "gpustack/model-transfer:v0.1.0-cann9.2-a5"}; `global.imageRegistry` (or `global.hub`) and `global.imageNamespace` rewrite the registry and namespace segments when set while preserving the image's own tag, and a missing manufacturer ships no source runtime for itself. Each supported key maps to its `global.manufacturers` row: the row's PCI vendor is the DaemonSet's placement requirement (`nodeSelector`) and its runtime fields decide driver injection. Defaults cover NVIDIA, AMD and Ascend A5. Disk warm-up retains its separate lightweight Python Alpine image. @schema type: object additionalProperties:   type: string   minLength: 1 @schema |
 | modelTransfer.source | object | `{"maxMemoryBytes":0,"maxSessions":64,"minMemoryBytes":1073741824}` | The source broker's node memory window and session policy. `maxMemoryBytes` is the transfer buffer ceiling: `0` derives one sixteenth of the node's total RAM at node start, floored at `minMemoryBytes`, and a positive value below `minMemoryBytes` silently resolves up to it. `minMemoryBytes` defaults to 1 GiB (1073741824); a lower value resolves up to 1 GiB. The worker checks available RAM before initial allocation when it can read the figure. `maxSessions` caps concurrent source sessions; zero resolves to 64. Negative values are rejected by chart validation. @schema type: object properties:   maxMemoryBytes:     type: integer   minMemoryBytes:     type: integer   maxSessions:     type: integer @schema |
