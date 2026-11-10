@@ -1765,7 +1765,7 @@ version <code>1</code> readers and manifests are refused.</p>
 <code>4 MiB</code>, with at most <code>512 MiB</code> of pages and <code>1,048,576</code> tensors overall. Load and source journals
 cap operations at <code>1,048,576</code>; byte limits can refuse work sooner. Proven acknowledgements can
 be compacted; unknown receipts remain charged.</p>
-<p>See <a href="https://github.com/gpustack/gpustack-operator/blob/0c0ef23e7aca705b517b9adda92ac2b386b610f2/specs/2026-10-28-model-artifact-remote-weight-loading.md#source-budget-calculations">source budget calculations</a>
+<p>See <a href="https://github.com/gpustack/gpustack-operator/blob/304681b245c3f392539df1404126be8fb9d22adb/specs/2026-10-28-model-artifact-remote-weight-loading.md#source-budget-calculations">source budget calculations</a>
 
 for admission arithmetic and available-memory sizing.</p>
 <h2 id="replica-startup">Replica startup</h2>
@@ -2012,12 +2012,12 @@ sequential shards with 3.72–4.00 GiB of target RAM (66.33 s on 35B, 452.83 s o
 paging and makes <code>TP all</code> fastest again: 46.39 s (<code>6.09×</code>) on 35B and 232.93 s (<code>2.57×</code>) on 235B
 (versus 253.58 s for full-resident broadcast; the 235B paged and full-resident samples used
 different SDK builds). Detailed sweeps and lifecycle checks are in the
-<a href="https://github.com/gpustack/gpustack-operator/blob/0c0ef23e7aca705b517b9adda92ac2b386b610f2/specs/2026-10-28-model-artifact-remote-weight-loading.md#ascend-memory-and-loading">acceptance record</a>
+<a href="https://github.com/gpustack/gpustack-operator/blob/304681b245c3f392539df1404126be8fb9d22adb/specs/2026-10-28-model-artifact-remote-weight-loading.md#ascend-memory-and-loading">acceptance record</a>
 .</p>
 <h3 id="nvidia-nixl">NVIDIA (NIXL)</h3>
 <p>The runs used Nebius H100 80 GB nodes and vLLM 0.30.0 in eager mode with pre-warmed source weights.
 Every case below reached <code>Ready</code> and passed inference probes. The
-<a href="https://github.com/gpustack/gpustack-operator/blob/0c0ef23e7aca705b517b9adda92ac2b386b610f2/specs/2026-11-09-modelexpress-peer-d2d-and-cache-sharing.md#benchmarks-and-verification-results">NVIDIA evidence record</a>
+<a href="https://github.com/gpustack/gpustack-operator/blob/304681b245c3f392539df1404126be8fb9d22adb/specs/2026-11-09-modelexpress-peer-d2d-and-cache-sharing.md#benchmarks-and-verification-results">NVIDIA evidence record</a>
 
 retains the tested artifacts and measurement limits.</p>
 <p>The source host reported 1574.84 GiB of total RAM and approximately 1554.06 GiB available. With
@@ -2152,7 +2152,7 @@ H2H and H2D. ModelExpress peer D2D over HIXL is outside this design.</p>
 H100 80 GB nodes with vLLM 0.30.0 in graph mode, comparing the NIXL <code>TCP peer sync + local load</code>
 baseline against the seed replica, a scale-out peer replica, and a replica launched after a
 metadata-server restart (detailed sweeps and verification logs are in the
-<a href="https://github.com/gpustack/gpustack-operator/blob/0c0ef23e7aca705b517b9adda92ac2b386b610f2/specs/2026-11-09-modelexpress-peer-d2d-and-cache-sharing.md#benchmarks-and-verification-results">ModelExpress benchmark record</a>
+<a href="https://github.com/gpustack/gpustack-operator/blob/304681b245c3f392539df1404126be8fb9d22adb/specs/2026-11-09-modelexpress-peer-d2d-and-cache-sharing.md#benchmarks-and-verification-results">ModelExpress benchmark record</a>
 ):</p>
 <table>
   <thead>
@@ -2523,7 +2523,7 @@ on disk.</p>
           
           
           <nav class="page-actions" aria-label="Page source">
-            <a href="https://github.com/gpustack/gpustack-operator/blob/0c0ef23e7aca705b517b9adda92ac2b386b610f2/docs/modules/model-delivery/remote.md">View page source</a>
+            <a href="https://github.com/gpustack/gpustack-operator/blob/304681b245c3f392539df1404126be8fb9d22adb/docs/modules/model-delivery/remote.md">View page source</a>
             
             <a href="https://github.com/gpustack/gpustack-operator/edit/main/docs/modules/model-delivery/remote.md">Edit this page</a>
             
