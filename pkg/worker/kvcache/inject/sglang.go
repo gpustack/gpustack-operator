@@ -86,6 +86,24 @@ const (
 	// the pair speaks mooncake either way; only the engines' transfer engine is pinned.
 	sglangDisaggregationBackendMooncakeTCP = "mooncake_tcp"
 
+	// sglangDisaggregationBackendNIXL selects SGLang's NIXL point-to-point backend
+	// (--disaggregation-transfer-backend nixl). Its transport plugin is named through
+	// SGLangDisaggregationNIXLBackendEnv rather than through a command-line key: UCX is the
+	// plugin's default and LIBFABRIC the one an EFA device is reachable through.
+	sglangDisaggregationBackendNIXL = "nixl"
+
+	// sglangDisaggregationBackendAscend selects the Ascend MemFabric point-to-point backend
+	// (--disaggregation-transfer-backend ascend). The link it picks is named through
+	// AscendMFTransferProtocolEnv: device_rdma when spec.kvTransfer.protocol constrains the leg
+	// to Device RoCE, and its sdma default otherwise.
+	sglangDisaggregationBackendAscend = "ascend"
+
+	// The two variables the NIXL and Ascend backends read at engine start. Both are rendered
+	// defaulted rather than owned, so a role env entry can answer for an image that expects a
+	// different value.
+	SGLangDisaggregationNIXLBackendEnv = "SGLANG_DISAGGREGATION_NIXL_BACKEND"
+	AscendMFTransferProtocolEnv        = "ASCEND_MF_TRANSFER_PROTOCOL"
+
 	// sglangRetractionBackupArg selects where a decode half keeps the KV cache of a request it
 	// retracts (v0.5.18 `server_args.py` ServerArgs.disaggregation_decode_retraction_backup,
 	// choices cpu_tensor and host_pool). Left unset, a decode half on an MHA pool infers host_pool
@@ -361,12 +379,69 @@ func renderSGLang(in Input) (*Result, error) {
 	// undivided, where it previously started as one half.
 	if in.Disaggregated && (in.Role == RolePrefill || in.Role == RoleDecode) {
 		result.KVTransfer = true
+		// A backend this renderer has no disaggregation spelling for is refused rather than
+		// mapped: rendering the Mooncake backend under a name the deployment did not ask for
+		// would pair two halves whose transfer engines the router's handshake never matches.
+		// The check covers the whole backend set, so an unknown value never falls through to
+		// whichever backend the pair would otherwise have rendered.
+		switch in.KVTransferBackend {
+		case "", KVTransferBackendMooncake, KVTransferBackendNIXL, KVTransferBackendHIXL:
+		default:
+			return nil, newRefusal(ReasonTransportUnsupported,
+				"backend %q is not one this renderer knows; leave it empty or set %q, %q, or %q",
+				in.KVTransferBackend, KVTransferBackendMooncake, KVTransferBackendNIXL, KVTransferBackendHIXL)
+		}
 		// The backend is a pair property, so both halves choose it from the same inputs: a tcp
 		// leg is pinned exactly where directLegForcesTCP allows it, and every other leg keeps
 		// the transport the transfer engine selects for itself.
-		backend := sglangDisaggregationBackendMooncake
-		if directLegForcesTCP(in) {
-			backend = sglangDisaggregationBackendMooncakeTCP
+		var backend string
+		switch in.KVTransferBackend {
+		case KVTransferBackendNIXL:
+			backend = sglangDisaggregationBackendNIXL
+			// The plugin defaults to UCX, which cannot reach an EFA device, so an EFA leg names
+			// LIBFABRIC instead; the report comes from the resolved interface resource, the
+			// declared protocol from the API, and either is enough to switch.
+			nixlBackend := "UCX"
+			if in.KVTransferEFA || directLegProtocol(in) == "efa" {
+				nixlBackend = "LIBFABRIC"
+			}
+			result.DefaultedEnv = append(result.DefaultedEnv, core.EnvVar{
+				Name: SGLangDisaggregationNIXLBackendEnv, Value: nixlBackend,
+			})
+		case KVTransferBackendHIXL:
+			backend = sglangDisaggregationBackendAscend
+			// Only "rdma" selects device_rdma (Device RoCE). "ascend" (API CANN) and "tcp"
+			// (API Auto or TCP) keep the default "sdma" (HCCS/SDMA) link, and non-Ascend values
+			// are ignored rather than refused here because admission cannot always observe the
+			// pool manufacturer and a render refusal past admission would enter a reconcile loop.
+			mfProtocol := "sdma"
+			if directLegProtocol(in) == "rdma" {
+				mfProtocol = "device_rdma"
+			}
+			result.DefaultedEnv = append(result.DefaultedEnv, core.EnvVar{
+				Name: AscendMFTransferProtocolEnv, Value: mfProtocol,
+			})
+			// Both halves mount the host driver tree, read-only, for the reason the vLLM-Ascend
+			// leg does: the transfer reads each NPU's NIC address through hccn_tool, which ships
+			// with the driver, and the engine image carries the driver libraries but not the tool.
+			// The same volume name, path and type as vllm.go keeps the two engines' projections
+			// identical, and the Directory type turns a host missing the driver into a volume
+			// setup error naming the path rather than a startup failure.
+			hostPathDirectory := core.HostPathDirectory
+			result.Volumes = append(result.Volumes, core.Volume{
+				Name: vllmAscendDriverVolumeName,
+				VolumeSource: core.VolumeSource{
+					HostPath: &core.HostPathVolumeSource{Path: vllmAscendDriverPath, Type: &hostPathDirectory},
+				},
+			})
+			result.VolumeMounts = append(result.VolumeMounts, core.VolumeMount{
+				Name: vllmAscendDriverVolumeName, MountPath: vllmAscendDriverPath, ReadOnly: true,
+			})
+		default:
+			backend = sglangDisaggregationBackendMooncake
+			if directLegForcesTCP(in) {
+				backend = sglangDisaggregationBackendMooncakeTCP
+			}
 		}
 		result.Args = append(result.Args,
 			sglangDisaggregationModeArg, string(in.Role),
@@ -392,7 +467,8 @@ func renderSGLang(in Input) (*Result, error) {
 		}
 	}
 	if (hasStore && in.Connection.Protocol == "tcp") ||
-		(in.Disaggregated && (in.Role == RolePrefill || in.Role == RoleDecode) && directLegForcesTCP(in)) {
+		((in.KVTransferBackend == "" || in.KVTransferBackend == KVTransferBackendMooncake) &&
+			in.Disaggregated && (in.Role == RolePrefill || in.Role == RoleDecode) && directLegForcesTCP(in)) {
 		result.DefaultedEnv = append(result.DefaultedEnv, mooncakeTCPDefaultedEnv()...)
 		result.DefaultedArgs = append(result.DefaultedArgs, []string{sglangPageSizeArg, defaultSGLangTCPPageSize})
 	}

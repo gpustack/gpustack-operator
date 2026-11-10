@@ -73,6 +73,39 @@ func TestRenderVLLM_StatesTheDefaultsThatFailSilently(t *testing.T) {
 	assert.Empty(t, output.Document, "this router reads no configuration file")
 }
 
+// TestRenderVLLM_TheKVConnectorFollowsTheInput pins the connector's default and its override,
+// in both shapes, with the values written out: the flag is the handshake vocabulary the router
+// shares with the engines behind it, and an assertion built from the constant that renders it
+// would pass whatever vocabulary that constant named.
+func TestRenderVLLM_TheKVConnectorFollowsTheInput(t *testing.T) {
+	shapes := map[string][]Role{
+		"undivided":     {serverRole()},
+		"disaggregated": {prefillRole(), decodeRole()},
+	}
+	for _, tc := range []struct {
+		name        string
+		kvConnector string
+		want        string
+	}{
+		{name: "empty renders the mooncake connector", kvConnector: "", want: "--kv-connector=mooncake"},
+		{name: "nixl overrides it", kvConnector: "nixl", want: "--kv-connector=nixl"},
+	} {
+		for label, roles := range shapes {
+			t.Run(tc.name+"/"+label, func(t *testing.T) {
+				in := vllmInput(roles...)
+				in.KVConnector = tc.kvConnector
+				output, err := Render(VLLM, in)
+				require.NoError(t, err)
+
+				assert.Contains(t, output.Arguments, tc.want)
+				at := indexOf(t, output.Arguments, "--prometheus-port=9090")
+				assert.Less(t, at, indexOf(t, output.Arguments, tc.want),
+					"the connector rides immediately after the metrics port, in the shared Extra position")
+			})
+		}
+	}
+}
+
 func TestRenderVLLM_NamesItsOwnPortsAndTheOneItDials(t *testing.T) {
 	output, err := Render(VLLM, vllmInput(serverRole()))
 	require.NoError(t, err)

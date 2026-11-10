@@ -80,6 +80,42 @@ const (
 	vllmAscendDriverVolumeName = "gpustack-ascend-driver"
 )
 
+// The NIXL side channel and the Ascend HIXL variables the point-to-point leg renders. The two
+// NIXL names are read by vLLM's NixlConnector, which registers its side-channel listener from
+// them; the three Ascend names are read by vLLM-Ascend's MooncakeConnectorV1 and its MemFabric
+// transport.
+const (
+	// VLLMNIXLSideChannelPort is where the NIXL connector listens for the peer's handshake. It is
+	// declared on BOTH halves: the producer announces its side channel there and the consumer
+	// runs the matching listener.
+	VLLMNIXLSideChannelPort int32 = 5600
+
+	// VLLMNIXLSideChannelHostEnv carries this Pod's address to the connector. The value cannot be
+	// written at admission, so it is owned as a downwardAPI projection of the Pod IP and resolved
+	// by the kubelet at container start.
+	VLLMNIXLSideChannelHostEnv = "VLLM_NIXL_SIDE_CHANNEL_HOST"
+
+	// VLLMNIXLSideChannelPortEnv carries the port above, defaulted so a workload with a reason
+	// to move the listener can.
+	VLLMNIXLSideChannelPortEnv = "VLLM_NIXL_SIDE_CHANNEL_PORT"
+
+	// AscendAutoConnectEnv turns on the Ascend connector's automatic endpoint exchange, which is
+	// what a prefill/decode pair needs to find each other without a bootstrap address.
+	AscendAutoConnectEnv = "ASCEND_AUTO_CONNECT"
+
+	// AscendGlobalResourceConfigEnv constrains the Ascend MemFabric link selection. Its value is
+	// a JSON document, so the pair constant below carries the one spelling this renderer writes.
+	AscendGlobalResourceConfigEnv = "ASCEND_GLOBAL_RESOURCE_CONFIG"
+
+	// AscendGlobalResourceConfigRoCEValue pins the Ascend transfer leg to Device RoCE, the
+	// transport spec.kvTransfer.protocol RDMA declares on Ascend.
+	AscendGlobalResourceConfigRoCEValue = "{\"comm_resource_config.protocol_desc\":\"roce:device\"}"
+
+	// HCCLIntraRoCEEnableEnv turns on intra-node RoCE for the collective communication layer,
+	// alongside the resource config above.
+	HCCLIntraRoCEEnableEnv = "HCCL_INTRA_ROCE_ENABLE"
+)
+
 // vllmConnectorFor returns the connector name the given engine's own factory can resolve.
 //
 // The vLLM family shares a renderer because it shares a VEHICLE - a file at MOONCAKE_CONFIG_PATH,
@@ -139,7 +175,11 @@ type vllmTransferConfig struct {
 type vllmConnectorExtraConfig struct {
 	// CachePrefix is the store connector's key namespace: vLLM v0.29.0 builds every Mooncake
 	// store key as "[cache_prefix@]<model name>@tp_rank:N@...@<chunk hash>".
-	CachePrefix      string               `json:"cache_prefix,omitempty"`
+	CachePrefix string `json:"cache_prefix,omitempty"`
+	// Backends names the transport plugins the NIXL connector installs. It is read by NixlConnector
+	// alone and rendered only on that connector's document; UCX is its default and LIBFABRIC the
+	// plugin an EFA device is reachable through.
+	Backends         []string             `json:"backends,omitempty"`
 	Connectors       []vllmTransferConfig `json:"connectors,omitempty"`
 	MooncakeProtocol string               `json:"mooncake_protocol,omitempty"`
 	Prefill          *vllmRoleParallelism `json:"prefill,omitempty"`
@@ -272,25 +312,69 @@ func renderVLLMWithEncoderCache(in Input, ec EncoderCache) (*Result, error) {
 			return nil, newRefusal(ReasonRoleUnsupported,
 				"point-to-point transfer requires a native vLLM prefill or decode role")
 		}
+		// A backend the rendering engine has no connector for is refused rather than mapped:
+		// every mapping this branch could invent names a connector the engine's own registry
+		// does not resolve, and the container would start looking configured and transfer
+		// nothing. The check covers the whole backend set, so an unknown value never falls
+		// through to whichever connector the role would otherwise have rendered.
+		switch in.KVTransferBackend {
+		case "", KVTransferBackendMooncake:
+		case KVTransferBackendNIXL:
+			if !native {
+				return nil, newRefusal(ReasonTransportUnsupported,
+					"backend %q names a NIXL connector this engine has no registry entry for; "+
+						"the Ascend transfer leg is the Ascend connector alone",
+					in.KVTransferBackend)
+			}
+		case KVTransferBackendHIXL:
+			if native {
+				return nil, newRefusal(ReasonTransportUnsupported,
+					"backend %q names the Ascend HIXL data plane, which vLLM proper does not "+
+						"register; set it on an Ascend pool's deployment",
+					in.KVTransferBackend)
+			}
+		default:
+			return nil, newRefusal(ReasonTransportUnsupported,
+				"backend %q is not one this renderer knows; leave it empty or set %q, %q, or %q",
+				in.KVTransferBackend, KVTransferBackendMooncake, KVTransferBackendNIXL, KVTransferBackendHIXL)
+		}
 		var direct vllmTransferConfig
 		if native {
-			// This value is NOT gated, on purpose. The accepted set is a property of the mooncake
-			// build inside the engine's own image, which this operator neither ships nor can
-			// inspect: a HIP-compiled build makes "hip" a working point-to-point transport, and
-			// refusing it here would hard-code one image's compile set onto another image's
-			// connector. checkTransport documents the same rule from the other side -- an
-			// unmeasured pair is let through, because a refusal on a fact nobody read turns a
-			// working engine into a broken one. A mismatch therefore still raises at startup, in
-			// the container that owns the fact. The rule binds the declared value and the default
-			// alike.
-			direct = vllmTransferConfig{
-				KVConnector: "MooncakeConnector", KVRole: kvRole,
-				KVConnectorExtraConfig: &vllmConnectorExtraConfig{MooncakeProtocol: directLegProtocol(in)},
+			if in.KVTransferBackend == KVTransferBackendNIXL {
+				// NIXL replaces the Mooncake connector whole: the document carries the connector's
+				// own keys, and its transport plugin is named through the extra config rather than
+				// through a protocol key this connector has no field for. The plugin defaults to
+				// UCX, which cannot reach an EFA device, so an EFA leg names LIBFABRIC instead;
+				// the report comes from the resolved interface resource, the declared protocol
+				// from the API, and either is enough to switch.
+				nixlBackend := "UCX"
+				if in.KVTransferEFA || directLegProtocol(in) == "efa" {
+					nixlBackend = "LIBFABRIC"
+				}
+				direct = vllmTransferConfig{
+					KVConnector:            "NixlConnector",
+					KVRole:                 kvRole,
+					KVConnectorExtraConfig: &vllmConnectorExtraConfig{Backends: []string{nixlBackend}},
+				}
+			} else {
+				// This value is NOT gated, on purpose. The accepted set is a property of the mooncake
+				// build inside the engine's own image, which this operator neither ships nor can
+				// inspect: a HIP-compiled build makes "hip" a working point-to-point transport, and
+				// refusing it here would hard-code one image's compile set onto another image's
+				// connector. checkTransport documents the same rule from the other side -- an
+				// unmeasured pair is let through, because a refusal on a fact nobody read turns a
+				// working engine into a broken one. A mismatch therefore still raises at startup, in
+				// the container that owns the fact. The rule binds the declared value and the default
+				// alike.
+				direct = vllmTransferConfig{
+					KVConnector: "MooncakeConnector", KVRole: kvRole,
+					KVConnectorExtraConfig: &vllmConnectorExtraConfig{MooncakeProtocol: directLegProtocol(in)},
+				}
+				// The document's protocol key is a request the transfer engine does not read, so a
+				// tcp leg is also pinned through the one switch it does; directLegForcesTCP says when
+				// that is safe for the rest of the process.
+				forceTCP = directLegForcesTCP(in)
 			}
-			// The document's protocol key is a request the transfer engine does not read, so a
-			// tcp leg is also pinned through the one switch it does; directLegForcesTCP says when
-			// that is safe for the rest of the process.
-			forceTCP = directLegForcesTCP(in)
 		} else {
 			// The Ascend leg renders NO protocol key: its transfer engine is initialized with
 			// the literal "ascend" (`vllm_ascend/distributed/kv_transfer/utils/mooncake_transfer_engine.py:26`,
@@ -442,21 +526,55 @@ func renderVLLMWithEncoderCache(in Input, ec EncoderCache) (*Result, error) {
 	if hasStore && in.Dtype != "" {
 		result.Args = append(result.Args, KVCacheDtypeArg, in.Dtype)
 	}
-	if in.KVTransfer && in.Role == RolePrefill {
-		// The port is declared on either vendor: it is where the prefiller's handshake listener
-		// sits, and the admission reservation that keeps a user's own port off it is
-		// vendor-blind. The variable is vLLM proper's alone -- its connector reads the bootstrap
-		// port from the environment, while vLLM-Ascend's takes it from the kv_port in the
-		// document above and would never look here.
-		if in.Engine == EngineVLLM {
+	if in.KVTransfer {
+		// The NIXL side channel is a PAIR of listeners, not the producer's alone: the consumer
+		// runs the matching endpoint and announces its own IP through the same variable, so both
+		// halves carry the host projection, the defaulted port and the container port. The host
+		// is OWNED -- it is this Pod's address, not a value the workload may answer for -- and
+		// resolved by the kubelet, because no admission-time value can know it.
+		nixl := in.Engine == EngineVLLM && in.KVTransferBackend == KVTransferBackendNIXL
+		if nixl {
 			result.Env = append(result.Env, core.EnvVar{
-				Name: "VLLM_MOONCAKE_BOOTSTRAP_PORT", Value: fmt.Sprint(VLLMMooncakeBootstrapPort),
+				Name:      VLLMNIXLSideChannelHostEnv,
+				ValueFrom: &core.EnvVarSource{FieldRef: &core.ObjectFieldSelector{FieldPath: "status.podIP"}},
+			})
+			result.DefaultedEnv = append(result.DefaultedEnv, core.EnvVar{
+				Name: VLLMNIXLSideChannelPortEnv, Value: fmt.Sprint(VLLMNIXLSideChannelPort),
+			})
+			result.Ports = append(result.Ports, core.ContainerPort{
+				Name: "nixl-side", Protocol: core.ProtocolTCP, ContainerPort: VLLMNIXLSideChannelPort,
 			})
 		}
-		result.Ports = append(result.Ports, core.ContainerPort{
-			Name: "mc-bootstrap", Protocol: core.ProtocolTCP,
-			ContainerPort: VLLMMooncakeBootstrapPort,
-		})
+		if in.Role == RolePrefill && !nixl {
+			// The port is declared on either vendor: it is where the prefiller's handshake listener
+			// sits, and the admission reservation that keeps a user's own port off it is
+			// vendor-blind. The variable is vLLM proper's alone -- its connector reads the bootstrap
+			// port from the environment, while vLLM-Ascend's takes it from the kv_port in the
+			// document above and would never look here. A NIXL leg binds no Mooncake listener, so
+			// neither the variable nor the port renders beside it.
+			if in.Engine == EngineVLLM {
+				result.Env = append(result.Env, core.EnvVar{
+					Name: "VLLM_MOONCAKE_BOOTSTRAP_PORT", Value: fmt.Sprint(VLLMMooncakeBootstrapPort),
+				})
+			}
+			result.Ports = append(result.Ports, core.ContainerPort{
+				Name: "mc-bootstrap", Protocol: core.ProtocolTCP,
+				ContainerPort: VLLMMooncakeBootstrapPort,
+			})
+		}
+		// Ascend HIXL values are defaulted so a role env entry can override them. Only "rdma"
+		// pins Device RoCE; "ascend" (API CANN) and "tcp" (API Auto or TCP) keep the default
+		// HCCS link, and non-Ascend protocol values are ignored rather than refused here for
+		// the same reason as the transfer document above (avoiding a post-admission error loop).
+		if in.Engine == EngineVLLMAscend && in.KVTransferBackend == KVTransferBackendHIXL {
+			result.DefaultedEnv = append(result.DefaultedEnv, core.EnvVar{Name: AscendAutoConnectEnv, Value: "1"})
+			if directLegProtocol(in) == "rdma" {
+				result.DefaultedEnv = append(result.DefaultedEnv,
+					core.EnvVar{Name: AscendGlobalResourceConfigEnv, Value: AscendGlobalResourceConfigRoCEValue},
+					core.EnvVar{Name: HCCLIntraRoCEEnableEnv, Value: "1"},
+				)
+			}
+		}
 	}
 	if forceTCP {
 		// Defaulted rather than owned: the transfer engine only checks that the variable is

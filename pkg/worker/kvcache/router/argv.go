@@ -82,12 +82,10 @@ var argvRouters = map[string]argvRouter{
 		Binary: "vllm-router",
 		// `vllm-project/router@v0.1.15:src/main.rs:114-115`, `CliArgs::vllm_pd_disaggregation`.
 		DisaggregationArg: "--vllm-pd-disaggregation",
-		// The transfer this project runs. Upstream defaults the flag to NIXL (`:339-340`,
-		// `CliArgs::kv_connector`, `KvConnector::Nixl`), and a router left on that default ROUTES
-		// CORRECTLY AND NEVER TRANSFERS -- the failure arrives through a default rather than
-		// through a defect. The gateway has no such flag at all: its transfer backend is the
-		// engine's, named on the engine's own command line.
-		Extra: []string{"--kv-connector=mooncake"},
+		// Extra is FILLED PER RENDER in renderArgvRouter: this project's transfer connector is
+		// a pair property that follows Input.KVConnector ("mooncake" default, "nixl" override)
+		// rather than one fixed value. The gateway has no such flag at all: its transfer
+		// backend is the engine's, named on the engine's own command line.
 	},
 	SGLang: {
 		Binary: "sgl-model-gateway",
@@ -126,6 +124,22 @@ func renderArgvRouter(name string, input Input) (Output, error) {
 	}
 	if input.DiscoveryPort <= 0 {
 		return Output{}, fmt.Errorf("render %s: no discovery port", name)
+	}
+	// The transfer connector is stated on EVERY render, both shapes, and never left to its
+	// default: upstream defaults the flag to NIXL (`vllm-project/router@v0.1.15:src/main.rs:339-340`,
+	// `CliArgs::kv_connector`, `KvConnector::Nixl`), and a router left on that default ROUTES
+	// CORRECTLY AND NEVER TRANSFERS -- the failure arrives through a default rather than through
+	// a defect. An empty Input renders the Mooncake connector, the vocabulary the Mooncake
+	// engines pair with; a set value ("nixl") matches the connector the NIXL or Ascend engines
+	// behind it run, which is why the field travels beside the transfer backend it mirrors.
+	if name == VLLM {
+		kvConnector := input.KVConnector
+		if kvConnector == "" {
+			kvConnector = "mooncake"
+		}
+		delta.Extra = []string{
+			"--kv-connector=" + kvConnector,
+		}
 	}
 
 	args := []string{

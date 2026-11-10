@@ -68,6 +68,15 @@ type Input struct {
 	EndpointSelector  string
 	KVEvents          KVEvents
 
+	// KVConnector names the vllm-router --kv-connector flag; empty defaults to "mooncake".
+	//
+	// It is the handshake vocabulary the router shares with the engines behind it, so the value
+	// is a pair property like the transfer backend it mirrors: the router and the two engine
+	// halves must name the same connector, and a default inherited separately per side is how
+	// the pair drifts apart without any one side being wrong. The gateway has no such flag and
+	// reads the field never.
+	KVConnector string
+
 	// EndpointLabels is EndpointSelector's equality-only form: the Pods of this deployment that
 	// answer the API, whatever their role. The two say the same thing for the routers here, and
 	// carrying both is deliberate -- see Role.Selector for why a map rather than a string.

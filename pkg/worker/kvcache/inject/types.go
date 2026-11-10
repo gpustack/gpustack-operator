@@ -281,6 +281,20 @@ type Input struct {
 	// backend from this value rather than passing it through.
 	KVTransferProtocol string
 
+	// KVTransferBackend selects the point-to-point transfer connector a prefill/decode pair
+	// runs, already mapped by the caller from the ModelDeployment API value. Empty and
+	// KVTransferBackendMooncake keep every engine's existing rendering; the other values name a
+	// connector pair -- KVTransferBackendNIXL on the engines that register one, KVTransferBackendHIXL
+	// on the Ascend ones -- and a value the rendering engine has no connector for is a typed
+	// refusal, not a silent fallback.
+	KVTransferBackend string
+
+	// KVTransferEFA reports that AWS EFA (vpc.amazonaws.com/efa) is active on the direct transfer
+	// leg. The NIXL connectors default their transport plugin to UCX, which cannot reach an EFA
+	// device, so the report switches the named plugin to LIBFABRIC; engines without a NIXL leg
+	// render nothing from it.
+	KVTransferEFA bool
+
 	// Parallelism is the pair's declared parallel shape, resolved by the caller off each
 	// role's own books. Only the document that asserts on it reads it -- the Ascend transfer
 	// leg's -- and the zero value renders 1/1 there, exactly what the leg's inline literals
@@ -317,6 +331,15 @@ type Input struct {
 	// above is the other half of the same leg on the engine that carries the addresses instead.
 	EncoderCache EncoderCache
 }
+
+// The point-to-point KV transfer backends a caller may name in Input.KVTransferBackend.
+// They are the inject package's own spelling of the ModelDeployment API values, so the renderer
+// never compares against an API literal.
+const (
+	KVTransferBackendMooncake = "Mooncake"
+	KVTransferBackendNIXL     = "NIXL"
+	KVTransferBackendHIXL     = "HIXL"
+)
 
 const defaultKVTransferProtocol = "tcp"
 
