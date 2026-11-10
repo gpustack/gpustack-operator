@@ -72,7 +72,7 @@ image embeds: read it off the image, then pick the store from it.
 **A store runs on the client's minor line.** The store column is a requirement rather than a
 suggestion; see [Version compatibility](../kv-cache/backend.md#version-compatibility).
 
-**vLLM-Ascend's direct transfer does not support direct `tcp` transfer**, and one router renders it; see [Pair connections](prefill-decode.md#pair-connections).
+**vLLM-Ascend's direct transfer does not support direct `tcp` transfer**; see [Pair connections](prefill-decode.md#pair-connections).
 
 **The configurations above move KV over `tcp`, or over `ascend` on vLLM-Ascend.** Which other transport
 each engine can use is [the matrix below](#transport-compatibility).

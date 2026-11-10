@@ -10,8 +10,8 @@ type KVCacheBackendTransportApplyConfiguration struct {
 	// Protocol is the transport the members are ASKED to use. Auto resolves to TCP.
 	//
 	// THESE VALUES ARE NOT THE STORE'S OWN SPELLINGS. What is written here is translated before it
-	// reaches a member, and two of the eight change word entirely: CANN and ROCM render as the
-	// pool's hardware-native RDMA or fabric transport. So a member's environment, its logs, and
+	// reaches a member, and two of the eight change word entirely: CANN and ROCM translate to the
+	// store's vendor-native spellings (ascend and hip). So a member's environment, its logs, and
 	// status.members[].protocol below all report the store's lowercase spelling rather than the
 	// one written here, and comparing the two as strings finds a difference that is not one.
 	//

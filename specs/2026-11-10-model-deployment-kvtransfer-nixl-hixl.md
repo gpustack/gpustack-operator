@@ -1,7 +1,6 @@
 # Spec: ModelDeployment KV Transfer Support for NIXL, HIXL, and EFA LIBFABRIC
 
-Status: Building
-Blocked on: implementation and verification of T1-T5
+Status: Shipped
 Type: Feature
 
 - **Related Specs**: [2026-09-12-model-deployment-pd-pairing-and-router.md](2026-09-12-model-deployment-pd-pairing-and-router.md) · [2026-09-18-kvcache-and-model-deployment-consolidation.md](2026-09-18-kvcache-and-model-deployment-consolidation.md) · [2026-09-19-model-deployment-router-implementations.md](2026-09-19-model-deployment-router-implementations.md) · [2026-10-28-model-artifact-remote-weight-loading.md](2026-10-28-model-artifact-remote-weight-loading.md)
@@ -237,7 +236,7 @@ ModelDeployment.spec.kvTransfer
       Acceptance: `gpustack_model_transfer` reads `GPUSTACK_MODEL_TRANSFER_NIXL_BACKEND` (`UCX` | `LIBFABRIC`) and auto-detects AWS EFA devices under `/sys/class/infiniband` (PCI vendor `0x1d0f` or `rdmap*` / `efa_*` when no non-EFA IB/RoCE device is present) when unset; passes `{"enable_listen_thread": False, "backends": [backend]}` to `create_agent` in both `NixlSourceBackend` and `NixlTransferEngineClient`; skips `UCX_NET_DEVICES` synthesis when `LIBFABRIC` is active.
       Verify: `make lint python && (cd model-transfer/python && uv run pytest)`
 
-- [ ] **T5 · Add `parameterize.md` and update `ModelDeployment` documentation for `NIXL`, `HIXL`, and EFA `LIBFABRIC`**
+- [x] **T5 · Add `parameterize.md` and update `ModelDeployment` documentation for `NIXL`, `HIXL`, and EFA `LIBFABRIC`**
       Blocked by: T3, T4
       Owns: `docs/modules/model-deployment/parameterize.md`, `docs/modules/model-deployment/_index.md`, `docs/modules/model-deployment/prefill-decode.md`, `docs/modules/model-deployment/configuration.md`, `docs/README.md`, `site/data/navigation.yaml`, `.agents/skills/gpustack-operator-docs/SKILL.md`, `.agents/skills/gpustack-operator-docs/references/page-map.md`
       Acceptance: Create `docs/modules/model-deployment/parameterize.md` to centralize the `ModelDeployment` parameter injection, ownership, and defaulting tables across all configuration sources (`spec.model`, `spec.roles[]`, `spec.router`, `spec.kvCache`, `spec.kvTransfer`, `ModelArtifact`, `InstanceType`, hardware manufacturer, and fabric protocol) and target components (`vLLM`, `vLLM` on Ascend, `SGLang`, `SGLang` on Ascend, `llm-d-router`, `vllm-router`, `sglang-gateway`, `model-transfer`), distinguishing **Owned** parameters (rejected in `extraArgs`/`env` unless `roles[].command` takes over) from **Defaulted** parameters (overridable via `extraArgs`/`env`); update `prefill-decode.md` and `configuration.md` to document `spec.kvTransfer.backend` (`Auto`, `Mooncake`, `NIXL`, `HIXL`), EFA `LIBFABRIC` auto-switching, and cross-link `parameterize.md`; register `parameterize.md` in `docs/README.md`, `docs/modules/model-deployment/_index.md`, `site/data/navigation.yaml`, and `gpustack-operator-docs` routing tables; `make lint docs` and `check-specs.sh` exit 0.

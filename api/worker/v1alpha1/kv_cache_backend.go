@@ -411,8 +411,8 @@ type KVCacheBackendTransport struct {
 	// Protocol is the transport the members are ASKED to use. Auto resolves to TCP.
 	//
 	// THESE VALUES ARE NOT THE STORE'S OWN SPELLINGS. What is written here is translated before it
-	// reaches a member, and two of the eight change word entirely: CANN and ROCM render as the
-	// pool's hardware-native RDMA or fabric transport. So a member's environment, its logs, and
+	// reaches a member, and two of the eight change word entirely: CANN and ROCM translate to the
+	// store's vendor-native spellings (ascend and hip). So a member's environment, its logs, and
 	// status.members[].protocol below all report the store's lowercase spelling rather than the
 	// one written here, and comparing the two as strings finds a difference that is not one.
 	//
@@ -529,8 +529,8 @@ type KVCacheBackendMember struct {
 	// ExtraArgs passes config keys this API does not enumerate straight through to the member. An
 	// entry is written as its own flag token, "-key=value", and renders as the entrypoint's own
 	// engine-specific key/value flag override with the dashes gone — one namespace per side, each
-	// the one its own binary documents. A key that collides with one derived from a field above is refused at
-	// admission.
+	// the one its own binary documents. A key that collides with one derived from a field above is
+	// refused at admission.
 	//
 	// EVERY VALUE HERE IS WORLD-READABLE: stored verbatim on this cluster-scoped object, then
 	// rendered into the member container's argv, readable by anyone who can reach the Pod or the
@@ -545,9 +545,8 @@ type KVCacheBackendMember struct {
 	//
 	//   - It is NOT a second spelling of ExtraArgs: the two reach different places. ExtraArgs renders
 	//     as the entrypoint's engine-specific key/value flag override, while a whole family of this
-	//     store's
-	//     settings — the local disk tier's flush thresholds, its promotion behavior, the rest of its
-	//     eviction knobs — has no config key at all and is read from the ENVIRONMENT only.
+	//     store's settings — the local disk tier's flush thresholds, its promotion behavior, the rest
+	//     of its eviction knobs — has no config key at all and is read from the ENVIRONMENT only.
 	//   - A name this operator already renders is REFUSED at admission, for the same reason a
 	//     colliding ExtraArgs key is: Kubernetes accepts a container carrying one name twice and
 	//     leaves the winner to the runtime, so the collision would not even be reported. That
@@ -590,9 +589,9 @@ type KVCacheBackendMember struct {
 	//   - It is a LAYER on this group rather than a group of its own, which is the store's shape: the
 	//     leader routes an offload task to the client that owns the key's memory replica, so a member
 	//     holding no memory segment is never chosen and would report a cold tier that never fills.
-	//   - To check what the tier actually holds rather than what it declared, read the leader's own
-	//     the storage engine's allocated disk capacity metric on the leader; status.capacity
-	//     reports the declared CAPACITY only.
+	//   - To check what the tier actually holds rather than what it declared, read the storage
+	//     engine's allocated disk capacity metric on the leader; status.capacity reports the
+	//     declared CAPACITY only.
 	//   - At most ONE entry, and the bound is the status contract rather than any one renderer's
 	//     reach: status.capacity is a single pair of figures for the whole backend and cannot
 	//     attribute a tier's bytes to one disk, so two entries would describe neither. The same

@@ -28,7 +28,10 @@ flowchart TD
 ## Deployment configuration
 
 [Model Deployment Configuration](configuration.md) starts with a minimal manifest and explains
-the role contract. [Prefill and Decode](prefill-decode.md) covers split roles, and
+the role contract. [Parameters](parameterize.md) catalogs generated parameters
+and overrides.
+
+[Prefill and Decode](prefill-decode.md) covers split roles, and
 [Encode, Prefill and Decode](encode-prefill-decode.md) covers multimodal disaggregation.
 [Engine Compatibility](engine-versions.md) lists minimum releases, client and store requirements,
 transport support and known failures.
