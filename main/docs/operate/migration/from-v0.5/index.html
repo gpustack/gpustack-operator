@@ -27,7 +27,7 @@
   <link rel="alternate" type="text/markdown" href="/gpustack-operator/main/docs/operate/migration/from-v0.5/index.md">
   
   <link rel="describedby" href="/gpustack-operator/main/llms.txt">
-  <link rel="stylesheet" href="/gpustack-operator/main/css/site.1a0de63fe646aba4ed6541fe0a6383c2ed5ca649b1593a98595ba53430bcf032.css">
+  <link rel="stylesheet" href="/gpustack-operator/main/css/site.b1fdc6af165ce7fbb10ebc91a579913dc99eac181655e5aae84dbe714d354a09.css">
   <link rel="stylesheet" href="/gpustack-operator/main/css/code.d2570c1cc6480f9c62bc31ec538eef2578ce80980588c469638a5f95416bfc7b.css">
 </head>
 <body class="docs-page">
@@ -36,7 +36,6 @@
     
     <a class="brand" href="/gpustack-operator/main/" aria-label="GPUStack Operator home"><img src="/gpustack-operator/main/images/logo_hu_ced145186d6eddf4.47210af4015bb5bd13742c222995900070c6649233431804f39bf2e001be3ddb.png" width="32" height="32" alt=""><span>GPUStack Operator</span></a>
     <nav class="top-links" aria-label="Main navigation">
-      <a class="top-docs-link" href="/gpustack-operator/main/docs/" aria-current="page">Documentation</a>
       <a class="top-devin-link" href="https://deepwiki.com/gpustack/gpustack-operator" target="_blank" rel="noopener noreferrer" aria-label="Ask Devin on DeepWiki (opens in a new tab)">
         <svg aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M8 1.5c.31 3.02 1.67 4.38 4.69 4.69-3.02.31-4.38 1.67-4.69 4.69-.31-3.02-1.67-4.38-4.69-4.69 3.02-.31 4.38-1.67 4.69-4.69Zm5.06 8.19c.16 1.51.84 2.19 2.34 2.34-1.51.16-2.19.84-2.34 2.34-.16-1.51-.84-2.19-2.34-2.34 1.51-.16 2.19-.84 2.34-2.34Z"/></svg>
         <span>Ask Devin</span>
@@ -106,7 +105,6 @@
         </svg>
       </button>
       <nav id="docs-navigation" class="sidebar-inner">
-        <div class="nav-title">Documentation</div>
         <a class="nav-home" href="/gpustack-operator/main/" >Overview</a>
         
           
@@ -698,7 +696,7 @@
       
         
         
-          <a title="KV Cache Election and Failover" href="/gpustack-operator/main/docs/modules/kv-cache/leader/" >Election and Failover</a>
+          <a title="KV Cache Election and Failover" href="/gpustack-operator/main/docs/modules/kv-cache/leader/" >Leader Election</a>
           
           
         
@@ -761,15 +759,15 @@
 
 
   
-    
-      
-      
-        
-        
-      
-    
-  
 
+  
+    
+      
+      
+        
+        
+      
+    
   
 
   
@@ -803,7 +801,7 @@
             <div class="nav-children">
               
                 
-                  <a title="Model Artifact API" href="/gpustack-operator/main/docs/modules/model-delivery/views/" >API</a>
+                  <a title="Model Artifact API" href="/gpustack-operator/main/docs/modules/model-delivery/artifact-api/" >API</a>
                 
               
             </div>
@@ -848,7 +846,7 @@
       
         
         
-          <a title="Node-to-Node Sync" href="/gpustack-operator/main/docs/modules/model-delivery/peer-sync/" >Node-to-Node Sync</a>
+          <a title="Node-to-Node Sync" href="/gpustack-operator/main/docs/modules/model-delivery/node-to-node-sync/" >Node-to-Node Sync</a>
           
           
         
@@ -1030,7 +1028,7 @@
       
         
         
-          <a title="Model Deployment Configuration" href="/gpustack-operator/main/docs/modules/model-deployment/deployment/" >Configuration</a>
+          <a title="Configuration" href="/gpustack-operator/main/docs/modules/model-deployment/configuration/" >Configuration</a>
           
           
         
@@ -1040,7 +1038,7 @@
       
         
         
-          <a title="Engine Compatibility" href="/gpustack-operator/main/docs/modules/model-deployment/engine-versions/" >Compatibility</a>
+          <a title="Engine Compatibility" href="/gpustack-operator/main/docs/modules/model-deployment/engine-versions/" >Engine Versions</a>
           
           
         
@@ -1208,7 +1206,12 @@
 
 
 
+  
+  
 
+
+
+  
 
 <details class="nav-section" >
   <summary title="GPU Instances">GPU Instances</summary>
@@ -1218,6 +1221,16 @@
       
       <a title="GPU Instances" href="/gpustack-operator/main/docs/modules/instances/" >Overview</a>
     
+    
+      
+      
+        
+        
+          <a title="Instance Metrics Reference" href="/gpustack-operator/main/docs/modules/instances/metrics/" >Metrics</a>
+          
+          
+        
+      
     
   </div>
 </details>
@@ -1322,7 +1335,7 @@
       
         
         
-          <a title="Migrating to Bundled Subcharts" href="/gpustack-operator/main/docs/operate/migration/to-subcharts/" >Bundled Subcharts</a>
+          <a title="Migrating to Bundled Subcharts" href="/gpustack-operator/main/docs/operate/migration/bundled-subcharts/" >Bundled Subcharts</a>
           
           
         
@@ -1332,7 +1345,7 @@
       
         
         
-          <a title="Upgrading to an Enforced Binding Dtype" href="/gpustack-operator/main/docs/operate/migration/kv-cache-dtype/" >Enforced Binding Dtype</a>
+          <a title="Upgrading to an Enforced Binding Dtype" href="/gpustack-operator/main/docs/operate/migration/enforced-binding-dtype/" >Enforced Binding Dtype</a>
           
           
         
@@ -1373,12 +1386,7 @@
   
   
 
-  
-  
 
-
-
-  
 
   
 
@@ -1421,16 +1429,6 @@
         
       
     
-      
-      
-        
-        
-          <a title="Instance Metrics Reference" href="/gpustack-operator/main/docs/reference/instance-metrics/" >Instance Metrics</a>
-          
-          
-        
-      
-    
   </div>
 </details>
 
@@ -1454,7 +1452,7 @@
   <h1 id="migrating-from-v05x">Migrating from v0.5.x</h1>
 <p>Versions after v0.5.x rename and restructure the scheduling objects the operator creates.
 The first, v0.6.x (&ldquo;unified-pool refactor&rdquo;,
-<a href="https://github.com/gpustack/gpustack-operator/blob/304681b245c3f392539df1404126be8fb9d22adb/specs/2026-06-29-instancetype-unified-pool-refactor.md"><code>specs/2026-06-29-instancetype-unified-pool-refactor.md</code></a>
+<a href="https://github.com/gpustack/gpustack-operator/blob/e50f885d037f4c00400f32f4ec1be0cac9581fca/specs/2026-06-29-instancetype-unified-pool-refactor.md"><code>specs/2026-06-29-instancetype-unified-pool-refactor.md</code></a>
 ),
 renames nearly every Kueue/NFD object it manages and drops the <code>Cohort</code> layer; later versions may
 reshape v0.5.x structures further.</p>
@@ -1528,7 +1526,7 @@ per-accelerator allocation ledger), so they update in place and leave nothing or
 <code>ResourceFlavor</code>s, <code>ClusterQueue</code>s, Cohorts and <code>LocalQueue</code>s, and it neither reconciles nor
 garbage-collects them.
 No hook cleans them: the chart&rsquo;s post-delete <code>cleanup.sh</code> fires only on <code>helm uninstall</code>, and the
-upgrade&rsquo;s own migration hooks address the pre-subchart release layout (<a href="/gpustack-operator/main/docs/operate/migration/to-subcharts/">Migrating to Bundled Subcharts</a>
+upgrade&rsquo;s own migration hooks address the pre-subchart release layout (<a href="/gpustack-operator/main/docs/operate/migration/bundled-subcharts/">Migrating to Bundled Subcharts</a>
 ), not v0.5.x names.</p>
 <p>An in-place upgrade therefore leaves both sets: the working v0.6.x one plus a leaked v0.5.x one of
 dead <code>ResourceFlavor</code>s, <code>ClusterQueue</code>s, Cohorts, a <code>LocalQueue</code> in every namespace, and Cohorts nothing
@@ -1577,7 +1575,8 @@ only new admissions pause until v0.6.x is up.</p>
 </span></span><span class="line"><span class="cl">
 </span></span><span class="line"><span class="cl"><span class="c1"># 2. Fresh install of v0.6.x.</span>
 </span></span><span class="line"><span class="cl">helm install gpustack-operator gpustack/gpustack-operator -n <span class="s2">&#34;</span><span class="nv">$NS</span><span class="s2">&#34;</span> --create-namespace --version 0.6.0</span></span></code></pre></div>
-</div><p>Deleting the CRDs deletes all their CRs, every v0.5.x-named object included, so nothing is left to
+</div>
+<p>Deleting the CRDs deletes all their CRs, every v0.5.x-named object included, so nothing is left to
 orphan; the v0.6.x worker re-materializes the chain from the nodes.</p>
 <h2 id="path-b-upgrade-in-place">Path B: Upgrade in place</h2>
 <p>Use this when the release must stay in place, to preserve custom <code>values</code>. Upgrade in place, then
@@ -1595,7 +1594,8 @@ run the cleanup script to strip the leaked v0.5.x objects.</p>
 </span></span><span class="line"><span class="cl"><span class="c1"># 3. Preview what the cleanup will remove (changes nothing), then run it.</span>
 </span></span><span class="line"><span class="cl">bash docs/operate/migration/cleanup-v0.5-orphans.sh --dry-run
 </span></span><span class="line"><span class="cl">bash docs/operate/migration/cleanup-v0.5-orphans.sh</span></span></code></pre></div>
-</div><p><a href="/gpustack-operator/main/docs/operate/migration/cleanup-v0.5-orphans.sh"><code>cleanup-v0.5-orphans.sh</code></a>
+</div>
+<p><a href="/gpustack-operator/main/docs/operate/migration/cleanup-v0.5-orphans.sh"><code>cleanup-v0.5-orphans.sh</code></a>
  removes <strong>only</strong> the v0.5.x orphans. v0.6.x
 names are double-dash too, so a bare <code>gpustack--</code> match would take the healthy chain; the v0.5.x-only
 signal is the CPU/RAM <strong>unit-spec</strong> in every v0.5.x flavor/queue/cohort name: a <code>-&lt;n&gt;c-&lt;n&gt;g</code> pair
@@ -1628,7 +1628,8 @@ then deletes the drained queue; a queue with no workloads goes directly. The nam
 </span></span><span class="line"><span class="cl">
 </span></span><span class="line"><span class="cl"><span class="c1"># Node labels self-healed (expect empty):</span>
 </span></span><span class="line"><span class="cl">kubectl get nodes -o json <span class="p">|</span> grep -oE <span class="s1">&#39;&#34;[^&#34;]*(\.z-[a-z]+|generic-ln-x64)[^&#34;]*&#34;&#39;</span> <span class="p">|</span> sort -u</span></span></code></pre></div>
-</div><h2 id="notes">Notes</h2>
+</div>
+<h2 id="notes">Notes</h2>
 <ul>
 <li><code>Workload</code>s still on a v0.5.x queue are drained, not silently abandoned: the eviction is clean and
 leaves no orphaned accounting behind still-running <code>Pod</code>s. Path A sidesteps the question by stopping
@@ -1642,7 +1643,7 @@ healthy v0.6.x chain was left byte-for-byte identical.</li>
 <nav class="reading-footer" aria-label="Further reading">
     <section>
       <h2>See also</h2>
-      <ul class="related-pages"><li><a href="/gpustack-operator/main/docs/operate/migration/to-subcharts/">Migrating to Bundled Subcharts</a>
+      <ul class="related-pages"><li><a href="/gpustack-operator/main/docs/operate/migration/bundled-subcharts/">Migrating to Bundled Subcharts</a>
  (the other one-time upgrade, from
 v0.7.x or earlier)</li><li><a href="/gpustack-operator/main/docs/modules/devices/scheduling/#naming-and-grouping">Scheduling Chain</a>
  (the
@@ -1660,18 +1661,6 @@ a wedged upgrade or a stuck namespace)</li></ul>
     <aside class="toc-panel" aria-label="Page navigation">
       <div class="toc-inner">
         
-          
-          
-          
-          <nav class="page-actions" aria-label="Page source">
-            <a href="https://github.com/gpustack/gpustack-operator/blob/304681b245c3f392539df1404126be8fb9d22adb/docs/operate/migration/from-v0.5.md">View page source</a>
-            
-            <a href="https://github.com/gpustack/gpustack-operator/edit/main/docs/operate/migration/from-v0.5.md">Edit this page</a>
-            
-          </nav>
-        
-        
-          <div class="toc-title">On this page</div>
           <nav id="TableOfContents">
   <ul>
     <li><a href="#contents">Contents</a></li>

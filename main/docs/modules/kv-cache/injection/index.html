@@ -27,7 +27,7 @@
   <link rel="alternate" type="text/markdown" href="/gpustack-operator/main/docs/modules/kv-cache/injection/index.md">
   
   <link rel="describedby" href="/gpustack-operator/main/llms.txt">
-  <link rel="stylesheet" href="/gpustack-operator/main/css/site.1a0de63fe646aba4ed6541fe0a6383c2ed5ca649b1593a98595ba53430bcf032.css">
+  <link rel="stylesheet" href="/gpustack-operator/main/css/site.b1fdc6af165ce7fbb10ebc91a579913dc99eac181655e5aae84dbe714d354a09.css">
   <link rel="stylesheet" href="/gpustack-operator/main/css/code.d2570c1cc6480f9c62bc31ec538eef2578ce80980588c469638a5f95416bfc7b.css">
 </head>
 <body class="docs-page">
@@ -36,7 +36,6 @@
     
     <a class="brand" href="/gpustack-operator/main/" aria-label="GPUStack Operator home"><img src="/gpustack-operator/main/images/logo_hu_ced145186d6eddf4.47210af4015bb5bd13742c222995900070c6649233431804f39bf2e001be3ddb.png" width="32" height="32" alt=""><span>GPUStack Operator</span></a>
     <nav class="top-links" aria-label="Main navigation">
-      <a class="top-docs-link" href="/gpustack-operator/main/docs/" aria-current="page">Documentation</a>
       <a class="top-devin-link" href="https://deepwiki.com/gpustack/gpustack-operator" target="_blank" rel="noopener noreferrer" aria-label="Ask Devin on DeepWiki (opens in a new tab)">
         <svg aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M8 1.5c.31 3.02 1.67 4.38 4.69 4.69-3.02.31-4.38 1.67-4.69 4.69-.31-3.02-1.67-4.38-4.69-4.69 3.02-.31 4.38-1.67 4.69-4.69Zm5.06 8.19c.16 1.51.84 2.19 2.34 2.34-1.51.16-2.19.84-2.34 2.34-.16-1.51-.84-2.19-2.34-2.34 1.51-.16 2.19-.84 2.34-2.34Z"/></svg>
         <span>Ask Devin</span>
@@ -106,7 +105,6 @@
         </svg>
       </button>
       <nav id="docs-navigation" class="sidebar-inner">
-        <div class="nav-title">Documentation</div>
         <a class="nav-home" href="/gpustack-operator/main/" >Overview</a>
         
           
@@ -698,7 +696,7 @@
       
         
         
-          <a title="KV Cache Election and Failover" href="/gpustack-operator/main/docs/modules/kv-cache/leader/" >Election and Failover</a>
+          <a title="KV Cache Election and Failover" href="/gpustack-operator/main/docs/modules/kv-cache/leader/" >Leader Election</a>
           
           
         
@@ -761,15 +759,15 @@
 
 
   
-    
-      
-      
-        
-        
-      
-    
-  
 
+  
+    
+      
+      
+        
+        
+      
+    
   
 
   
@@ -803,7 +801,7 @@
             <div class="nav-children">
               
                 
-                  <a title="Model Artifact API" href="/gpustack-operator/main/docs/modules/model-delivery/views/" >API</a>
+                  <a title="Model Artifact API" href="/gpustack-operator/main/docs/modules/model-delivery/artifact-api/" >API</a>
                 
               
             </div>
@@ -848,7 +846,7 @@
       
         
         
-          <a title="Node-to-Node Sync" href="/gpustack-operator/main/docs/modules/model-delivery/peer-sync/" >Node-to-Node Sync</a>
+          <a title="Node-to-Node Sync" href="/gpustack-operator/main/docs/modules/model-delivery/node-to-node-sync/" >Node-to-Node Sync</a>
           
           
         
@@ -1030,7 +1028,7 @@
       
         
         
-          <a title="Model Deployment Configuration" href="/gpustack-operator/main/docs/modules/model-deployment/deployment/" >Configuration</a>
+          <a title="Configuration" href="/gpustack-operator/main/docs/modules/model-deployment/configuration/" >Configuration</a>
           
           
         
@@ -1040,7 +1038,7 @@
       
         
         
-          <a title="Engine Compatibility" href="/gpustack-operator/main/docs/modules/model-deployment/engine-versions/" >Compatibility</a>
+          <a title="Engine Compatibility" href="/gpustack-operator/main/docs/modules/model-deployment/engine-versions/" >Engine Versions</a>
           
           
         
@@ -1208,7 +1206,12 @@
 
 
 
+  
+  
 
+
+
+  
 
 <details class="nav-section" >
   <summary title="GPU Instances">GPU Instances</summary>
@@ -1218,6 +1221,16 @@
       
       <a title="GPU Instances" href="/gpustack-operator/main/docs/modules/instances/" >Overview</a>
     
+    
+      
+      
+        
+        
+          <a title="Instance Metrics Reference" href="/gpustack-operator/main/docs/modules/instances/metrics/" >Metrics</a>
+          
+          
+        
+      
     
   </div>
 </details>
@@ -1322,7 +1335,7 @@
       
         
         
-          <a title="Migrating to Bundled Subcharts" href="/gpustack-operator/main/docs/operate/migration/to-subcharts/" >Bundled Subcharts</a>
+          <a title="Migrating to Bundled Subcharts" href="/gpustack-operator/main/docs/operate/migration/bundled-subcharts/" >Bundled Subcharts</a>
           
           
         
@@ -1332,7 +1345,7 @@
       
         
         
-          <a title="Upgrading to an Enforced Binding Dtype" href="/gpustack-operator/main/docs/operate/migration/kv-cache-dtype/" >Enforced Binding Dtype</a>
+          <a title="Upgrading to an Enforced Binding Dtype" href="/gpustack-operator/main/docs/operate/migration/enforced-binding-dtype/" >Enforced Binding Dtype</a>
           
           
         
@@ -1373,12 +1386,7 @@
   
   
 
-  
-  
 
-
-
-  
 
   
 
@@ -1416,16 +1424,6 @@
         
         
           <a title="Instance Type Unit Resources Reference" href="/gpustack-operator/main/docs/reference/instance-type-unit-resources/" >Resource Presets</a>
-          
-          
-        
-      
-    
-      
-      
-        
-        
-          <a title="Instance Metrics Reference" href="/gpustack-operator/main/docs/reference/instance-metrics/" >Instance Metrics</a>
           
           
         
@@ -1498,7 +1496,8 @@ characters, so everything of unbounded length is an annotation.</p>
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">kvcache.gpustack.ai/container</span><span class="p">:</span><span class="w"> </span><span class="l">server </span><span class="w"> </span><span class="c"># Required only for a multi-container Pod.</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="c"># Optional: declare an unrecognised launcher, script or image ENTRYPOINT forwards arguments.</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">kvcache.gpustack.ai/launch-args-forwarded</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;true&#34;</span></span></span></code></pre></div>
-</div><p>For a plain server, one that is not half of a <em>prefill</em>/<em>decode</em> split, leave the role annotation off.
+</div>
+<p>For a plain server, one that is not half of a <em>prefill</em>/<em>decode</em> split, leave the role annotation off.
 <em>Server</em> is not in its value domain and a <code>Pod</code> carrying it is refused, while the same arrangement is
 spelled <em>Server</em> on <code>ModelDeployment.spec.roles[].kind</code>, which even defaults to it. The value that
 is correct there turns a <code>Pod</code> away here. An absent annotation renders the read-and-write
@@ -1530,7 +1529,8 @@ annotation and one without get the same injection.</p>
 </span></span></span><span class="line"><span class="cl"><span class="w">            </span>- <span class="s2">&#34;serve&#34;</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">            </span>- <span class="s2">&#34;--model&#34;</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">            </span>- <span class="s2">&#34;Qwen/Qwen3-8B&#34;</span></span></span></code></pre></div>
-</div><p>A bare <code>Pod</code> follows the same contract. The label opts it in, and the optional annotations select the
+</div>
+<p>A bare <code>Pod</code> follows the same contract. The label opts it in, and the optional annotations select the
 role and the container:</p>
 <div class="code-block">
   <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
@@ -1556,7 +1556,8 @@ role and the container:</p>
 </span></span></span><span class="line"><span class="cl"><span class="w">        </span>- <span class="s2">&#34;serve&#34;</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">        </span>- <span class="s2">&#34;--model&#34;</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">        </span>- <span class="s2">&#34;Qwen/Qwen2.5-72B-Instruct&#34;</span></span></span></code></pre></div>
-</div><p>The engine is <strong>declared, never guessed from the image</strong>. Engines take entirely different flags, and a
+</div>
+<p>The engine is <strong>declared, never guessed from the image</strong>. Engines take entirely different flags, and a
 wrong guess about a renamed or vendored image produces a container that starts normally and caches
 nothing.</p>
 <p>There is deliberately <strong>no domain annotation</strong>. The reuse domain comes from the Binding, because the
@@ -1624,7 +1625,8 @@ and which keys their readers know.</p>
 </span></span><span class="line"><span class="cl">  <span class="nt">&#34;local_buffer_size&#34;</span><span class="p">:</span> <span class="mi">134217728</span><span class="p">,</span>
 </span></span><span class="line"><span class="cl">  <span class="nt">&#34;tenant_id&#34;</span><span class="p">:</span> <span class="s2">&#34;&lt;binding-domain&gt;&#34;</span>
 </span></span><span class="line"><span class="cl"><span class="p">}</span></span></span></code></pre></div>
-</div><p>The endpoint is the pool&rsquo;s <code>status.clientEndpoint</code>; the protocol is always written from the
+</div>
+<p>The endpoint is the pool&rsquo;s <code>status.clientEndpoint</code>; the protocol is always written from the
 matched group. The RDMA device filter is empty and the contributed storage segment is zero.
 <code>standalone-store</code> selects a pure client; the staging buffer is 128 MiB. The tenant is the
 Binding&rsquo;s reuse domain.</p>
@@ -1691,7 +1693,7 @@ under <a href="#refusals-and-fixes">Refusals and fixes</a>
 .</p>
 <p>A flag is refused in every spelling the engine&rsquo;s own parser reads as it (a unique prefix, and on
 the vLLM family an underscored or dotted form) by the rule under
-<a href="/gpustack-operator/main/docs/modules/model-deployment/deployment/#operator-owned-keys">Operator-owned keys</a>
+<a href="/gpustack-operator/main/docs/modules/model-deployment/configuration/#operator-owned-keys">Operator-owned keys</a>
 .</p>
 <p>This applies only to <em><code>env</code></em>: a value supplied through <em><code>envFrom</code></em> is invisible to the check and <strong>will
 be overwritten with no symptom</strong>, so declare Mooncake variables in <em><code>env</code></em>.</p>
@@ -1894,23 +1896,27 @@ Some older images mount the file but do not read it, without logging an error.</
 <p>This is not validated, and it cannot be: admission never inspects the container image, so the webhook
 does not know which build will run. The check is yours, against the image you are actually running:</p>
 <div class="code-block">
-  <div class="code-toolbar"><span>console</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
-  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-console" data-lang="console"><span class="line"><span class="cl"><span class="gp">$</span> kubectl <span class="nb">exec</span> chat-0 -- python3 -c <span class="se">\
-</span></span></span><span class="line"><span class="cl"><span class="se"></span><span class="go">    &#34;import vllm.distributed.kv_transfer.kv_connector.v1.mooncake.store.worker; print(&#39;reader present&#39;)&#34;
-</span></span></span></code></pre></div>
-</div><p>An <code>ImportError</code> means the injection is inert on that image. Note the symptom is different from the
+  <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">kubectl <span class="nb">exec</span> chat-0 -- python3 -c <span class="se">\
+</span></span></span><span class="line"><span class="cl"><span class="se"></span>    <span class="s2">&#34;import vllm.distributed.kv_transfer.kv_connector.v1.mooncake.store.worker; print(&#39;reader present&#39;)&#34;</span></span></span></code></pre></div>
+</div>
+<p>An <code>ImportError</code> means the injection is inert on that image. Note the symptom is different from the
 one in the previous section, and calls for a different fix: an unregistered tenant fails loudly with
 <code>TENANT_NOT_REGISTERED</code> on every write, while a missing reader fails silently. The workload runs
 correctly, just with no cache at all.</p>
 <h2 id="injection-record">Injection record</h2>
 <p>An injected <code>Pod</code> carries <code>kvcache.gpustack.ai/injected</code>, a JSON object recording what was decided:</p>
 <div class="code-block">
-  <div class="code-toolbar"><span>console</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
-  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-console" data-lang="console"><span class="line"><span class="cl"><span class="gp">$</span> kubectl get pod chat-0 -o <span class="nv">jsonpath</span><span class="o">=</span><span class="s1">&#39;{.metadata.annotations.kvcache\.gpustack\.ai/injected}&#39;</span>
-</span></span><span class="line"><span class="cl"><span class="go">{&#34;binding&#34;:&#34;chat&#34;,&#34;engine&#34;:&#34;vllm&#34;,&#34;vehicle&#34;:&#34;file&#34;,&#34;domain&#34;:&#34;team-a-chat&#34;,
-</span></span></span><span class="line"><span class="cl"><span class="go"> &#34;tenantInjected&#34;:true,&#34;launchProgram&#34;:&#34;vllm&#34;,&#34;launchArgsForwarded&#34;:false}
-</span></span></span></code></pre></div>
-</div><p>The record is JSON. Its keys mean:</p>
+  <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">kubectl get pod chat-0 -o <span class="nv">jsonpath</span><span class="o">=</span><span class="s1">&#39;{.metadata.annotations.kvcache\.gpustack\.ai/injected}&#39;</span></span></span></code></pre></div>
+</div>
+<p>Captured output:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>text</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-text" data-lang="text"><span class="line"><span class="cl">{&#34;binding&#34;:&#34;chat&#34;,&#34;engine&#34;:&#34;vllm&#34;,&#34;vehicle&#34;:&#34;file&#34;,&#34;domain&#34;:&#34;team-a-chat&#34;,
+</span></span><span class="line"><span class="cl"> &#34;tenantInjected&#34;:true,&#34;launchProgram&#34;:&#34;vllm&#34;,&#34;launchArgsForwarded&#34;:false}</span></span></code></pre></div>
+</div>
+<p>The record is JSON. Its keys mean:</p>
 <ul>
 <li><code>binding</code>: the Binding the <code>Pod</code> named and the webhook resolved, not necessarily the one
 charged for writes. See <a href="#tenant-compatibility">tenant compatibility</a>
@@ -1942,7 +1948,8 @@ the injection is what triggers it. That engine accepts one transport and raises 
 <div class="code-block">
   <div class="code-toolbar"><span>text</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-text" data-lang="text"><span class="line"><span class="cl">NotImplementedError: MooncakeBackend does not support protocol &#39;tcp&#39;.</span></span></code></pre></div>
-</div><p>The engine&rsquo;s own file reader defaults <em><code>protocol</code></em> to <code>ascend</code>, so a file that said nothing would have
+</div>
+<p>The engine&rsquo;s own file reader defaults <em><code>protocol</code></em> to <code>ascend</code>, so a file that said nothing would have
 worked. This project writes the resolved pool transport explicitly on every path; that value
 overwrites the engine default.</p>
 <p>It is <strong>refused, not left to the container</strong>. The shared transport check rejects an injected <code>Pod</code> at
@@ -2029,7 +2036,8 @@ injected <code>Pod</code> destroys cache its peers may be waiting on.</p>
 <div class="code-block">
   <div class="code-toolbar"><span>text</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
   <pre tabindex="0"><code>E transfer_metadata.cpp:991] Local segment descriptor not found</code></pre>
-</div><p>The projected client configuration is readable by anyone who can read the <code>Pod</code>. It carries addresses, a
+</div>
+<p>The projected client configuration is readable by anyone who can read the <code>Pod</code>. It carries addresses, a
 protocol and a domain name, and no credential.</p>
 <h2 id="engine-prefix-caching">Engine prefix caching</h2>
 <p><strong>Injection does not touch the engine&rsquo;s own prefix caching, and switching that off is not a
@@ -2071,18 +2079,6 @@ operator for.</div>
     <aside class="toc-panel" aria-label="Page navigation">
       <div class="toc-inner">
         
-          
-          
-          
-          <nav class="page-actions" aria-label="Page source">
-            <a href="https://github.com/gpustack/gpustack-operator/blob/304681b245c3f392539df1404126be8fb9d22adb/docs/modules/kv-cache/injection.md">View page source</a>
-            
-            <a href="https://github.com/gpustack/gpustack-operator/edit/main/docs/modules/kv-cache/injection.md">Edit this page</a>
-            
-          </nav>
-        
-        
-          <div class="toc-title">On this page</div>
           <nav id="TableOfContents">
   <ul>
     <li><a href="#contents">Contents</a></li>

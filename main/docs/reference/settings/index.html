@@ -27,7 +27,7 @@
   <link rel="alternate" type="text/markdown" href="/gpustack-operator/main/docs/reference/settings/index.md">
   
   <link rel="describedby" href="/gpustack-operator/main/llms.txt">
-  <link rel="stylesheet" href="/gpustack-operator/main/css/site.1a0de63fe646aba4ed6541fe0a6383c2ed5ca649b1593a98595ba53430bcf032.css">
+  <link rel="stylesheet" href="/gpustack-operator/main/css/site.b1fdc6af165ce7fbb10ebc91a579913dc99eac181655e5aae84dbe714d354a09.css">
   <link rel="stylesheet" href="/gpustack-operator/main/css/code.d2570c1cc6480f9c62bc31ec538eef2578ce80980588c469638a5f95416bfc7b.css">
 </head>
 <body class="docs-page pin-table-first-col">
@@ -36,7 +36,6 @@
     
     <a class="brand" href="/gpustack-operator/main/" aria-label="GPUStack Operator home"><img src="/gpustack-operator/main/images/logo_hu_ced145186d6eddf4.47210af4015bb5bd13742c222995900070c6649233431804f39bf2e001be3ddb.png" width="32" height="32" alt=""><span>GPUStack Operator</span></a>
     <nav class="top-links" aria-label="Main navigation">
-      <a class="top-docs-link" href="/gpustack-operator/main/docs/" aria-current="page">Documentation</a>
       <a class="top-devin-link" href="https://deepwiki.com/gpustack/gpustack-operator" target="_blank" rel="noopener noreferrer" aria-label="Ask Devin on DeepWiki (opens in a new tab)">
         <svg aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M8 1.5c.31 3.02 1.67 4.38 4.69 4.69-3.02.31-4.38 1.67-4.69 4.69-.31-3.02-1.67-4.38-4.69-4.69 3.02-.31 4.38-1.67 4.69-4.69Zm5.06 8.19c.16 1.51.84 2.19 2.34 2.34-1.51.16-2.19.84-2.34 2.34-.16-1.51-.84-2.19-2.34-2.34 1.51-.16 2.19-.84 2.34-2.34Z"/></svg>
         <span>Ask Devin</span>
@@ -106,7 +105,6 @@
         </svg>
       </button>
       <nav id="docs-navigation" class="sidebar-inner">
-        <div class="nav-title">Documentation</div>
         <a class="nav-home" href="/gpustack-operator/main/" >Overview</a>
         
           
@@ -698,7 +696,7 @@
       
         
         
-          <a title="KV Cache Election and Failover" href="/gpustack-operator/main/docs/modules/kv-cache/leader/" >Election and Failover</a>
+          <a title="KV Cache Election and Failover" href="/gpustack-operator/main/docs/modules/kv-cache/leader/" >Leader Election</a>
           
           
         
@@ -761,15 +759,15 @@
 
 
   
-    
-      
-      
-        
-        
-      
-    
-  
 
+  
+    
+      
+      
+        
+        
+      
+    
   
 
   
@@ -803,7 +801,7 @@
             <div class="nav-children">
               
                 
-                  <a title="Model Artifact API" href="/gpustack-operator/main/docs/modules/model-delivery/views/" >API</a>
+                  <a title="Model Artifact API" href="/gpustack-operator/main/docs/modules/model-delivery/artifact-api/" >API</a>
                 
               
             </div>
@@ -848,7 +846,7 @@
       
         
         
-          <a title="Node-to-Node Sync" href="/gpustack-operator/main/docs/modules/model-delivery/peer-sync/" >Node-to-Node Sync</a>
+          <a title="Node-to-Node Sync" href="/gpustack-operator/main/docs/modules/model-delivery/node-to-node-sync/" >Node-to-Node Sync</a>
           
           
         
@@ -1030,7 +1028,7 @@
       
         
         
-          <a title="Model Deployment Configuration" href="/gpustack-operator/main/docs/modules/model-deployment/deployment/" >Configuration</a>
+          <a title="Configuration" href="/gpustack-operator/main/docs/modules/model-deployment/configuration/" >Configuration</a>
           
           
         
@@ -1040,7 +1038,7 @@
       
         
         
-          <a title="Engine Compatibility" href="/gpustack-operator/main/docs/modules/model-deployment/engine-versions/" >Compatibility</a>
+          <a title="Engine Compatibility" href="/gpustack-operator/main/docs/modules/model-deployment/engine-versions/" >Engine Versions</a>
           
           
         
@@ -1208,7 +1206,12 @@
 
 
 
+  
+  
 
+
+
+  
 
 <details class="nav-section" >
   <summary title="GPU Instances">GPU Instances</summary>
@@ -1218,6 +1221,16 @@
       
       <a title="GPU Instances" href="/gpustack-operator/main/docs/modules/instances/" >Overview</a>
     
+    
+      
+      
+        
+        
+          <a title="Instance Metrics Reference" href="/gpustack-operator/main/docs/modules/instances/metrics/" >Metrics</a>
+          
+          
+        
+      
     
   </div>
 </details>
@@ -1322,7 +1335,7 @@
       
         
         
-          <a title="Migrating to Bundled Subcharts" href="/gpustack-operator/main/docs/operate/migration/to-subcharts/" >Bundled Subcharts</a>
+          <a title="Migrating to Bundled Subcharts" href="/gpustack-operator/main/docs/operate/migration/bundled-subcharts/" >Bundled Subcharts</a>
           
           
         
@@ -1332,7 +1345,7 @@
       
         
         
-          <a title="Upgrading to an Enforced Binding Dtype" href="/gpustack-operator/main/docs/operate/migration/kv-cache-dtype/" >Enforced Binding Dtype</a>
+          <a title="Upgrading to an Enforced Binding Dtype" href="/gpustack-operator/main/docs/operate/migration/enforced-binding-dtype/" >Enforced Binding Dtype</a>
           
           
         
@@ -1373,12 +1386,7 @@
   
   
 
-  
-  
 
-
-
-  
 
   
 
@@ -1416,16 +1424,6 @@
         
         
           <a title="Instance Type Unit Resources Reference" href="/gpustack-operator/main/docs/reference/instance-type-unit-resources/" >Resource Presets</a>
-          
-          
-        
-      
-    
-      
-      
-        
-        
-          <a title="Instance Metrics Reference" href="/gpustack-operator/main/docs/reference/instance-metrics/" >Instance Metrics</a>
           
           
         
@@ -1509,7 +1507,8 @@ value it replaced, the value it wrote and the rule that fired:</p>
 <div class="code-block">
   <div class="code-toolbar"><span>text</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-text" data-lang="text"><span class="line"><span class="cl">setting overridden on start setting=&#34;container-registry&#34; stored=&#34;registry.example&#34; value=&#34;mirror.example&#34; rule=&#34;env-declared&#34; envName=&#34;GPUSTACK_CONTAINER_REGISTRY&#34;</span></span></code></pre></div>
-</div><p><code>rule</code> is <code>env-declared</code> for rule 2 and <code>default-tracked</code> for rule 3, and <code>envName</code> names the variable
+</div>
+<p><code>rule</code> is <code>env-declared</code> for rule 2 and <code>default-tracked</code> for rule 3, and <code>envName</code> names the variable
 when the <code>Setting</code> reads one. A start that changes nothing logs nothing, and a stored value that already
 equals the seed is not an override.</p>
 <p>A <code>Setting</code> the operator marks sensitive logs neither value. Its line carries the name, the rule and the
@@ -1520,7 +1519,8 @@ sets it on a <code>Setting</code> whose value should not appear in a log at all.
 <div class="code-block">
   <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">kubectl -n gpustack-system logs deploy/gpustack-operator-worker <span class="p">|</span> grep <span class="s1">&#39;setting overridden on start&#39;</span></span></span></code></pre></div>
-</div><h3 id="tracking-list">Tracking list</h3>
+</div>
+<h3 id="tracking-list">Tracking list</h3>
 <p><code>settings-default-tracking</code> holds a comma-separated list of <code>Setting</code> names. The worker reads it from the
 <code>Secret</code>, and the backfill has already written the built-in names the operator ships into a <code>Secret</code> that carries
 no such key, so a cluster that predates the <code>Setting</code> is tracked from the first start that backfills the
@@ -1538,7 +1538,8 @@ tracking its own membership would reconcile that membership against itself.</p>
 </span></span><span class="line"><span class="cl">
 </span></span><span class="line"><span class="cl"><span class="c1"># 2. Does the tracking list name it?</span>
 </span></span><span class="line"><span class="cl">kubectl -n gpustack-system get setting settings-default-tracking -o yaml</span></span></code></pre></div>
-</div><ul>
+</div>
+<ul>
 <li>The <code>Deployment</code> renders the variable with a non-blank value, so rule 2 owns the <code>Setting</code> whatever is
 stored. The <a href="#settings">Settings</a>
  list identifies the chart-rendered variables.</li>
@@ -1565,7 +1566,8 @@ it on every start and every upgrade.</p>
 </span></span><span class="line"><span class="cl">kubectl -n gpustack-system get setting node-management-manual -o yaml
 </span></span><span class="line"><span class="cl">kubectl -n gpustack-system edit setting node-management-manual
 </span></span><span class="line"><span class="cl">kubectl -n gpustack-system patch setting instance-type-derived-from-node --type merge -p <span class="s1">&#39;{&#34;spec&#34;:{&#34;value&#34;:&#34;false&#34;}}&#39;</span></span></span></code></pre></div>
-</div><p>For example, editing <code>node-management-manual</code> can set its value to <code>true</code>:</p>
+</div>
+<p>For example, editing <code>node-management-manual</code> can set its value to <code>true</code>:</p>
 <div class="code-block">
   <div class="code-toolbar"><span>diff</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-diff" data-lang="diff"><span class="line"><span class="cl"> apiVersion: gpustack.ai/v1
@@ -1577,7 +1579,8 @@ it on every start and every upgrade.</p>
 </span></span><span class="line"><span class="cl"><span class="gd">-  value: &lt;current-value&gt;
 </span></span></span><span class="line"><span class="cl"><span class="gd"></span><span class="gi">+  value: &#34;true&#34;
 </span></span></span></code></pre></div>
-</div><p>The patch sets <code>instance-type-derived-from-node</code> to <code>false</code>:</p>
+</div>
+<p>The patch sets <code>instance-type-derived-from-node</code> to <code>false</code>:</p>
 <div class="code-block">
   <div class="code-toolbar"><span>diff</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-diff" data-lang="diff"><span class="line"><span class="cl"> apiVersion: gpustack.ai/v1
@@ -1589,7 +1592,8 @@ it on every start and every upgrade.</p>
 </span></span><span class="line"><span class="cl"><span class="gd">-  value: &lt;current-value&gt;
 </span></span></span><span class="line"><span class="cl"><span class="gd"></span><span class="gi">+  value: &#34;false&#34;
 </span></span></span></code></pre></div>
-</div><p><strong>Effect windows</strong> — <strong>Immediate</strong>: the change does its own work. A consuming controller watches the
+</div>
+<p><strong>Effect windows</strong> — <strong>Immediate</strong>: the change does its own work. A consuming controller watches the
 delegated settings <code>Secret</code> and reconciles what the <code>Setting</code> governs, or an admission webhook starts
 judging every call by the new value. Values reach a process through a thirty-second read cache, so
 Immediate means within about that.</p>
@@ -1727,7 +1731,7 @@ request that reaches a webhook. Neither window needs a restart.</p>
       <tr>
           <td><code>model-deployment-kv-cache-dtype-owned</code><br/>(<code>GPUSTACK_MODEL_DEPLOYMENT_KV_CACHE_DTYPE_OWNED</code>)</td>
           <td>Effect window: Next trigger<br/>Default: <code>true</code><br/>Usage: Hand every <code>KVCachePoolBinding</code>&rsquo;s <em><code>spec.domain.dtype</code></em> to the engines attached through it as <code>--kv-cache-dtype</code>, verbatim, and refuse a pool-attached role or injected <code>Pod</code> naming that flag itself, and a new Binding declaring <code>auto</code> — see <a href="/gpustack-operator/main/docs/modules/kv-cache/pool/#engine-dtype">The dtype is handed to the engine</a>
-. <strong>It is the escape from a Binding whose spelling the engine rejects</strong>, which makes every new <code>Pod</code> fail argument parsing: <code>false</code> renders and refuses nothing, as before the flag was owned. Flipping it recreates every pool-attached replica at its next reconcile. The recovery is under <a href="/gpustack-operator/main/docs/operate/migration/kv-cache-dtype/">Upgrading to an enforced Binding dtype</a>
+. <strong>It is the escape from a Binding whose spelling the engine rejects</strong>, which makes every new <code>Pod</code> fail argument parsing: <code>false</code> renders and refuses nothing, as before the flag was owned. Flipping it recreates every pool-attached replica at its next reconcile. The recovery is under <a href="/gpustack-operator/main/docs/operate/migration/enforced-binding-dtype/">Upgrading to an enforced Binding dtype</a>
 .</td>
       </tr>
       <tr>
@@ -1821,7 +1825,7 @@ references <code>gpustack-model-deployment-joint</code> once it reports <code>Ac
 whatever this setting says.</p>
 <p>It answers <code>Ready</code> at once for every <code>Workload</code> that is not a replica of a multi-role <code>ModelDeployment</code>,
 so the only thing it changes in this mode is that such a deployment is admitted as a set; see
-<a href="/gpustack-operator/main/docs/modules/model-deployment/deployment/#prefill-and-decode">Prefill and decode</a>
+<a href="/gpustack-operator/main/docs/modules/model-deployment/configuration/#prefill-and-decode">Prefill and decode</a>
 , and
 <a href="/gpustack-operator/main/docs/modules/model-deployment/status/#status">Status</a>
  for a set that stays short of quota.</p>
@@ -1834,7 +1838,8 @@ produce), and its <em><code>spec</code></em> carries the identity fields an <cod
   <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">kubectl get instancetypeflavors                               <span class="c1"># short name: instypeflavor</span>
 </span></span><span class="line"><span class="cl">kubectl get instancetypeflavor gpustack--nvidia-a10g -o yaml</span></span></code></pre></div>
-</div><p>An <code>InstanceType</code> whose identity matches no entry there backs a <code>ClusterQueue</code> that selects no
+</div>
+<p>An <code>InstanceType</code> whose identity matches no entry there backs a <code>ClusterQueue</code> that selects no
 <code>ResourceFlavor</code>, so the queue is left with empty resource groups and admits nothing.</p>
 <h3 id="sglang-time-wait-reuse">SGLang TIME-WAIT reuse</h3>
 <p><code>model-deployment-tcp-tw-reuse</code> renders <code>net.ipv4.tcp_tw_reuse=1</code> into the <code>Pod</code>
@@ -1864,7 +1869,8 @@ kubelet:</li>
 </span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">KubeletConfiguration</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">allowedUnsafeSysctls</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span>- <span class="l">net.ipv4.tcp_tw_reuse</span></span></span></code></pre></div>
-</div><p>The command-line form is <code>--allowed-unsafe-sysctls=net.ipv4.tcp_tw_reuse</code>. It is one list, so keep
+</div>
+<p>The command-line form is <code>--allowed-unsafe-sysctls=net.ipv4.tcp_tw_reuse</code>. It is one list, so keep
 any name already on it.</p>
 <p><strong>On a managed cluster, set it where the node pool&rsquo;s kubelet configuration comes from</strong>, so a node
 added or replaced later keeps it; an edit made on a running node leaves with that node. On each of
@@ -1890,7 +1896,8 @@ configuration</a>
 <div class="code-block">
   <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">kubectl -n gpustack-system patch setting model-deployment-tcp-tw-reuse --type merge -p <span class="s1">&#39;{&#34;spec&#34;:{&#34;value&#34;:&#34;true&#34;}}&#39;</span></span></span></code></pre></div>
-</div><div class="code-block">
+</div>
+<div class="code-block">
   <div class="code-toolbar"><span>diff</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-diff" data-lang="diff"><span class="line"><span class="cl"> apiVersion: gpustack.ai/v1
 </span></span><span class="line"><span class="cl"> kind: Setting
@@ -1901,7 +1908,8 @@ configuration</a>
 </span></span><span class="line"><span class="cl"><span class="gd">-  value: &#34;false&#34;
 </span></span></span><span class="line"><span class="cl"><span class="gd"></span><span class="gi">+  value: &#34;true&#34;
 </span></span></span></code></pre></div>
-</div><p><strong>Flipping it recreates the <em>prefill</em> replicas it reaches</strong>, in either direction, because the sysctl
+</div>
+<p><strong>Flipping it recreates the <em>prefill</em> replicas it reaches</strong>, in either direction, because the sysctl
 is part of the <code>Pod</code> spec their fingerprint covers. Each deployment picks the value up on its next
 reconcile, and a setting change does not wake one. To apply it at once, delete one of the
 deployment&rsquo;s <em>prefill</em> <code>Pod</code>s: the reconcile that replaces it renders the new value, and the rollout
@@ -1915,7 +1923,8 @@ and over. The events outlive the <code>Pod</code>s, and their message names the 
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">kubectl -n &lt;namespace&gt; get events --field-selector <span class="nv">reason</span><span class="o">=</span>SysctlForbidden
 </span></span><span class="line"><span class="cl">kubectl -n &lt;namespace&gt; get pods -w <span class="se">\
 </span></span></span><span class="line"><span class="cl"><span class="se"></span>  -l app.kubernetes.io/instance<span class="o">=</span>&lt;deployment&gt;,app.kubernetes.io/component<span class="o">=</span>&lt;prefill-role&gt;</span></span></code></pre></div>
-</div><p>The second command shows the <em>prefill</em> <code>Pod</code>s cycling through <code>SysctlForbidden</code>. Allow the sysctl on
+</div>
+<p>The second command shows the <em>prefill</em> <code>Pod</code>s cycling through <code>SysctlForbidden</code>. Allow the sysctl on
 those nodes or turn the setting off; either ends the loop at the next replacement.</p>
 <p>A namespace enforcing the <code>baseline</code> or <code>restricted</code> <code>Pod</code> Security Standard refuses the <code>Pod</code> at
 creation instead, since the sysctl is not on that standard&rsquo;s allowed list either: no <code>Pod</code> appears,
@@ -1964,7 +1973,8 @@ chart value is what hands the <code>Setting</code> back to you.</li>
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">maxMemoryBytes</span><span class="p">:</span><span class="w"> </span><span class="m">0</span><span class="w">  </span><span class="c"># Derive the node ceiling from total RAM.</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">minMemoryBytes</span><span class="p">:</span><span class="w"> </span><span class="m">1073741824</span><span class="w">  </span><span class="c"># 1 GiB minimum buffer.</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">maxSessions</span><span class="p">:</span><span class="w"> </span><span class="m">64</span><span class="w">  </span><span class="c"># Concurrent sessions per source DaemonSet Pod.</span></span></span></code></pre></div>
-</div><p>The image variables default to empty except for the final <code>IfNotPresent</code> pull policy.
+</div>
+<p>The image variables default to empty except for the final <code>IfNotPresent</code> pull policy.
 The delivery mode variable is otherwise not rendered.
 The remote delivery policy variable is not rendered while <code>modelTransfer.enabled: true</code>; <code>modelTransfer.enabled: false</code> renders <code>Disabled</code>.
 <code>modelTransfer.images</code> selects source images; it does not declare a worker <code>Setting</code>.</p>
@@ -1994,7 +2004,8 @@ made with <code>kubectl patch</code> holds until the next start, and reverts to 
   <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">kubectl -n gpustack-system patch setting kv-cache-backend-image --type merge <span class="se">\
 </span></span></span><span class="line"><span class="cl"><span class="se"></span>  -p <span class="s1">&#39;{&#34;spec&#34;:{&#34;value&#34;:&#34;mirror.example/kv-cache:1.2.3&#34;}}&#39;</span></span></span></code></pre></div>
-</div><div class="code-block">
+</div>
+<div class="code-block">
   <div class="code-toolbar"><span>diff</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-diff" data-lang="diff"><span class="line"><span class="cl"> apiVersion: gpustack.ai/v1
 </span></span><span class="line"><span class="cl"> kind: Setting
@@ -2005,7 +2016,8 @@ made with <code>kubectl patch</code> holds until the next start, and reverts to 
 </span></span><span class="line"><span class="cl"><span class="gd">-  value: &lt;current-value&gt;
 </span></span></span><span class="line"><span class="cl"><span class="gd"></span><span class="gi">+  value: &#34;mirror.example/kv-cache:1.2.3&#34;
 </span></span></span></code></pre></div>
-</div><p>Untracking the <code>Setting</code> is the only thing that keeps the pin, and nothing else stands in for it: a
+</div>
+<p>Untracking the <code>Setting</code> is the only thing that keeps the pin, and nothing else stands in for it: a
 variable set to an empty value is no declaration, and a default that is blank is never written at all.</p>
 <div class="code-block">
   <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
@@ -2014,7 +2026,8 @@ variable set to an empty value is no declaration, and a default that is blank is
 </span></span><span class="line"><span class="cl">kubectl -n gpustack-system get setting settings-default-tracking -o yaml
 </span></span><span class="line"><span class="cl">kubectl -n gpustack-system patch setting settings-default-tracking --type merge <span class="se">\
 </span></span></span><span class="line"><span class="cl"><span class="se"></span>  -p <span class="s1">&#39;{&#34;spec&#34;:{&#34;value&#34;:&#34;instance-ssh-server-image,kv-cache-backend-image,model-deployment-modelexpress-server-image,model-deployment-router-image,model-deployment-router-proxy-image,model-deployment-routing-sidecar-image&#34;}}&#39;</span></span></span></code></pre></div>
-</div><p>The second patch removes <code>model-prefetch-warmup-image</code> from the default-tracking list:</p>
+</div>
+<p>The second patch removes <code>model-prefetch-warmup-image</code> from the default-tracking list:</p>
 <div class="code-block">
   <div class="code-toolbar"><span>diff</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-diff" data-lang="diff"><span class="line"><span class="cl"> apiVersion: gpustack.ai/v1
@@ -2026,7 +2039,8 @@ variable set to an empty value is no declaration, and a default that is blank is
 </span></span><span class="line"><span class="cl"><span class="gd">-  value: &lt;current-value&gt;
 </span></span></span><span class="line"><span class="cl"><span class="gd"></span><span class="gi">+  value: &#34;instance-ssh-server-image,kv-cache-backend-image,model-deployment-modelexpress-server-image,model-deployment-router-image,model-deployment-router-proxy-image,model-deployment-routing-sidecar-image&#34;
 </span></span></span></code></pre></div>
-</div><p>A pin that predates this behavior is replaced on the first worker start of the release that introduces
+</div>
+<p>A pin that predates this behavior is replaced on the first worker start of the release that introduces
 it, and the log line names both values when it happens. Deleting the <code>Secret</code> has the same effect on the
 list, which comes back as its built-in default names.</p>
 <h2 id="deployment-environment-variables">Deployment environment variables</h2>
@@ -2102,7 +2116,8 @@ node. Set it through the chart, which renders <code>deviceManager.env</code> ont
   <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">helm upgrade gpustack-operator &lt;chart&gt; --namespace gpustack-system --reset-then-reuse-values <span class="se">\
 </span></span></span><span class="line"><span class="cl"><span class="se"></span>  --set-string deviceManager.env.GPUSTACK_DEVICE_PLUGIN_SLICED_ALLOCATE_GATE<span class="o">=</span>false</span></span></code></pre></div>
-</div><ul>
+</div>
+<ul>
 <li><code>GPUSTACK_DEVICE_PLUGIN_SLICED_ALLOCATE_GATE=false</code> is for a slice refused although its accelerator
 has room: the <code>Pod</code> keeps coming back <code>UnexpectedAdmissionError</code> naming that accelerator. With it
 off, the slice is allocated and the ledger clamps that accelerator&rsquo;s <code>Remaining</code> at zero.</li>
@@ -2120,7 +2135,8 @@ which would store the string <code>&quot;null&quot;</code>:</p>
   <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">helm upgrade gpustack-operator &lt;chart&gt; --namespace gpustack-system --reset-then-reuse-values <span class="se">\
 </span></span></span><span class="line"><span class="cl"><span class="se"></span>  --set deviceManager.env.GPUSTACK_DEVICE_PLUGIN_SLICED_ALLOCATE_GATE<span class="o">=</span>null</span></span></code></pre></div>
-</div><h3 id="per-manufacturer-overrides">Per-manufacturer overrides</h3>
+</div>
+<h3 id="per-manufacturer-overrides">Per-manufacturer overrides</h3>
 <p>Override patterns expand for every known manufacturer (<code>amd</code>, <code>ascend</code>, <code>cambricon</code>, <code>hygon</code>,
 <code>iluvatar</code>, <code>metax</code>, <code>mthreads</code>, <code>nvidia</code>, <code>thead</code>); both the WK and the DM read them, so the propagation
 above keeps the two sides consistent.</p>
@@ -2278,7 +2294,8 @@ Device Manager <code>DaemonSet</code>:</p>
 <div class="code-block">
   <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">helm upgrade ... --set deviceManager.env.GPUSTACK_NVIDIA_DEVICE_INJECTION_STRATEGY<span class="o">=</span>auto</span></span></code></pre></div>
-</div><p>It is read once, when that manufacturer&rsquo;s allocator is constructed, so a change takes effect only when
+</div>
+<p>It is read once, when that manufacturer&rsquo;s allocator is constructed, so a change takes effect only when
 the <code>DaemonSet</code> restarts. A value that is not one of the supported choices is reported and the node keeps <code>envvar</code>:
 refusing to start the allocator over it would take the node&rsquo;s accelerators with it.</p>
 <p><code>auto</code> also keeps the variable when the engine&rsquo;s own default runtime is already the vendor runtime.
@@ -2459,18 +2476,6 @@ user-facing settings, listed for completeness.</p>
     <aside class="toc-panel" aria-label="Page navigation">
       <div class="toc-inner">
         
-          
-          
-          
-          <nav class="page-actions" aria-label="Page source">
-            <a href="https://github.com/gpustack/gpustack-operator/blob/304681b245c3f392539df1404126be8fb9d22adb/docs/reference/settings.md">View page source</a>
-            
-            <a href="https://github.com/gpustack/gpustack-operator/edit/main/docs/reference/settings.md">Edit this page</a>
-            
-          </nav>
-        
-        
-          <div class="toc-title">On this page</div>
           <nav id="TableOfContents">
   <ul>
     <li><a href="#contents">Contents</a></li>

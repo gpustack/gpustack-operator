@@ -216,7 +216,7 @@ kubectl delete ns "$NS"
 
 ---
 
-**See also** — [Migrating to Bundled Subcharts](/gpustack-operator/main/docs/operate/migration/to-subcharts/index.md) (the ownership transfer whose
+**See also** — [Migrating to Bundled Subcharts](/gpustack-operator/main/docs/operate/migration/bundled-subcharts/index.md) (the ownership transfer whose
 interruption the CrashLoop section repairs) · [Migrating from v0.5.x](/gpustack-operator/main/docs/operate/migration/from-v0.5/index.md) (the Kueue
 finalizer deadlock behind a stuck CRD) · [Installation Modes](/gpustack-operator/main/docs/operate/installation-modes/index.md)
 (the modes the commands mark at each step)

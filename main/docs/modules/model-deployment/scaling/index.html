@@ -27,7 +27,7 @@
   <link rel="alternate" type="text/markdown" href="/gpustack-operator/main/docs/modules/model-deployment/scaling/index.md">
   
   <link rel="describedby" href="/gpustack-operator/main/llms.txt">
-  <link rel="stylesheet" href="/gpustack-operator/main/css/site.1a0de63fe646aba4ed6541fe0a6383c2ed5ca649b1593a98595ba53430bcf032.css">
+  <link rel="stylesheet" href="/gpustack-operator/main/css/site.b1fdc6af165ce7fbb10ebc91a579913dc99eac181655e5aae84dbe714d354a09.css">
   <link rel="stylesheet" href="/gpustack-operator/main/css/code.d2570c1cc6480f9c62bc31ec538eef2578ce80980588c469638a5f95416bfc7b.css">
 </head>
 <body class="docs-page">
@@ -36,7 +36,6 @@
     
     <a class="brand" href="/gpustack-operator/main/" aria-label="GPUStack Operator home"><img src="/gpustack-operator/main/images/logo_hu_ced145186d6eddf4.47210af4015bb5bd13742c222995900070c6649233431804f39bf2e001be3ddb.png" width="32" height="32" alt=""><span>GPUStack Operator</span></a>
     <nav class="top-links" aria-label="Main navigation">
-      <a class="top-docs-link" href="/gpustack-operator/main/docs/" aria-current="page">Documentation</a>
       <a class="top-devin-link" href="https://deepwiki.com/gpustack/gpustack-operator" target="_blank" rel="noopener noreferrer" aria-label="Ask Devin on DeepWiki (opens in a new tab)">
         <svg aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M8 1.5c.31 3.02 1.67 4.38 4.69 4.69-3.02.31-4.38 1.67-4.69 4.69-.31-3.02-1.67-4.38-4.69-4.69 3.02-.31 4.38-1.67 4.69-4.69Zm5.06 8.19c.16 1.51.84 2.19 2.34 2.34-1.51.16-2.19.84-2.34 2.34-.16-1.51-.84-2.19-2.34-2.34 1.51-.16 2.19-.84 2.34-2.34Z"/></svg>
         <span>Ask Devin</span>
@@ -106,7 +105,6 @@
         </svg>
       </button>
       <nav id="docs-navigation" class="sidebar-inner">
-        <div class="nav-title">Documentation</div>
         <a class="nav-home" href="/gpustack-operator/main/" >Overview</a>
         
           
@@ -698,7 +696,7 @@
       
         
         
-          <a title="KV Cache Election and Failover" href="/gpustack-operator/main/docs/modules/kv-cache/leader/" >Election and Failover</a>
+          <a title="KV Cache Election and Failover" href="/gpustack-operator/main/docs/modules/kv-cache/leader/" >Leader Election</a>
           
           
         
@@ -761,15 +759,15 @@
 
 
   
-    
-      
-      
-        
-        
-      
-    
-  
 
+  
+    
+      
+      
+        
+        
+      
+    
   
 
   
@@ -803,7 +801,7 @@
             <div class="nav-children">
               
                 
-                  <a title="Model Artifact API" href="/gpustack-operator/main/docs/modules/model-delivery/views/" >API</a>
+                  <a title="Model Artifact API" href="/gpustack-operator/main/docs/modules/model-delivery/artifact-api/" >API</a>
                 
               
             </div>
@@ -848,7 +846,7 @@
       
         
         
-          <a title="Node-to-Node Sync" href="/gpustack-operator/main/docs/modules/model-delivery/peer-sync/" >Node-to-Node Sync</a>
+          <a title="Node-to-Node Sync" href="/gpustack-operator/main/docs/modules/model-delivery/node-to-node-sync/" >Node-to-Node Sync</a>
           
           
         
@@ -1030,7 +1028,7 @@
       
         
         
-          <a title="Model Deployment Configuration" href="/gpustack-operator/main/docs/modules/model-deployment/deployment/" >Configuration</a>
+          <a title="Configuration" href="/gpustack-operator/main/docs/modules/model-deployment/configuration/" >Configuration</a>
           
           
         
@@ -1040,7 +1038,7 @@
       
         
         
-          <a title="Engine Compatibility" href="/gpustack-operator/main/docs/modules/model-deployment/engine-versions/" >Compatibility</a>
+          <a title="Engine Compatibility" href="/gpustack-operator/main/docs/modules/model-deployment/engine-versions/" >Engine Versions</a>
           
           
         
@@ -1208,7 +1206,12 @@
 
 
 
+  
+  
 
+
+
+  
 
 <details class="nav-section" >
   <summary title="GPU Instances">GPU Instances</summary>
@@ -1218,6 +1221,16 @@
       
       <a title="GPU Instances" href="/gpustack-operator/main/docs/modules/instances/" >Overview</a>
     
+    
+      
+      
+        
+        
+          <a title="Instance Metrics Reference" href="/gpustack-operator/main/docs/modules/instances/metrics/" >Metrics</a>
+          
+          
+        
+      
     
   </div>
 </details>
@@ -1322,7 +1335,7 @@
       
         
         
-          <a title="Migrating to Bundled Subcharts" href="/gpustack-operator/main/docs/operate/migration/to-subcharts/" >Bundled Subcharts</a>
+          <a title="Migrating to Bundled Subcharts" href="/gpustack-operator/main/docs/operate/migration/bundled-subcharts/" >Bundled Subcharts</a>
           
           
         
@@ -1332,7 +1345,7 @@
       
         
         
-          <a title="Upgrading to an Enforced Binding Dtype" href="/gpustack-operator/main/docs/operate/migration/kv-cache-dtype/" >Enforced Binding Dtype</a>
+          <a title="Upgrading to an Enforced Binding Dtype" href="/gpustack-operator/main/docs/operate/migration/enforced-binding-dtype/" >Enforced Binding Dtype</a>
           
           
         
@@ -1373,12 +1386,7 @@
   
   
 
-  
-  
 
-
-
-  
 
   
 
@@ -1416,16 +1424,6 @@
         
         
           <a title="Instance Type Unit Resources Reference" href="/gpustack-operator/main/docs/reference/instance-type-unit-resources/" >Resource Presets</a>
-          
-          
-        
-      
-    
-      
-      
-        
-        
-          <a title="Instance Metrics Reference" href="/gpustack-operator/main/docs/reference/instance-metrics/" >Instance Metrics</a>
           
           
         
@@ -1549,7 +1547,8 @@ flowchart LR
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="c">#   value: 10      # required, nonnegative; zero prevents scale-down</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">rebalance</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">policy</span><span class="p">:</span><span class="w"> </span><span class="l">Opposing </span><span class="w"> </span><span class="c"># default; Opposing, Priority or Disabled</span></span></span></code></pre></div>
-</div><ul>
+</div>
+<ul>
 <li><strong>Target</strong>: Set <em><code>targetRef.name</code></em> to a <code>ModelDeployment</code> in the same namespace; the reference is immutable.</li>
 <li><strong>Roles</strong>: Provide bounds for every target role; each role name must be unique.</li>
 <li><strong>Algorithm</strong>: Select one algorithm and provide only its matching parameter block.</li>
@@ -1669,7 +1668,8 @@ It also works with vLLM: the scaler reads the target engine and needs no engine 
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">ttftTargetMilliseconds</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;500&#34;</span><span class="w">  </span><span class="c"># default; positive quantity</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">itlTargetMilliseconds</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;50&#34;</span><span class="w">    </span><span class="c"># default; positive quantity</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">latencyQuantile</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;0.95&#34;</span><span class="w">       </span><span class="c"># default; P95</span></span></span></code></pre></div>
-</div><ul>
+</div>
+<ul>
 <li><strong>Token targets</strong>: Set positive per-replica capacities for each scaled non-<em>encode</em> role.</li>
 <li><strong>Role capacity</strong>: Set prompt capacity for <em>prefill</em>, generation for <em>decode</em>, and combined capacity for <em>server</em>.</li>
 <li><strong>Encode</strong>: Couple <em>encode</em> to another role with a ratio.</li>
@@ -1733,7 +1733,8 @@ with the same defaults and rules. Both fallback targets and forecast capacities 
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">qTrend</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;0.1&#34;</span><span class="w">           </span><span class="c"># default process noise for demand trend</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">measurementNoise</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;10&#34;</span><span class="w">  </span><span class="c"># default observation noise</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">minPoints</span><span class="p">:</span><span class="w"> </span><span class="m">6</span><span class="w">  </span><span class="c"># default; 1 to 64 observations</span></span></span></code></pre></div>
-</div><ul>
+</div>
+<ul>
 <li><strong>Kalman forecast</strong>: Forecasts demand over <em><code>horizonSeconds</code></em> (<a href="https://github.com/ai-dynamo/dynamo/blob/4f42be7bebd96ea0199088840549397809f80a92/docs/fern/pages/developer-guide/knowledge-base/modular-components/planner/planner-design.md">Dynamo Planner</a>
 ), bounded below by the token-throughput fallback (<code>PredictorWarmingUp</code> until <em><code>minPoints</code></em> samples).</li>
 <li><strong>Noise tuning</strong>: Positive <em><code>qLevel</code></em> (default <code>1</code>), <em><code>qTrend</code></em> (<code>0.1</code>), and <em><code>measurementNoise</code></em> (<code>10</code>) tune level, trend, and observation weights.</li>
@@ -1772,7 +1773,8 @@ positive token capacities. Catalog resolution fails closed, with no online fallb
 </span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">capacity-priors </span><span class="w"> </span><span class="c"># Same-namespace ConfigMap; sole source, no merge or fallback.</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">key</span><span class="p">:</span><span class="w"> </span><span class="l">priors.yaml </span><span class="w"> </span><span class="c"># Default; the parser accepts YAML and JSON.</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">headroom</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;0.75&#34;</span><span class="w">  </span><span class="c"># Default when capacityPrior is present; quantity in (0, 1].</span></span></span></code></pre></div>
-</div><ul>
+</div>
+<ul>
 <li><strong>Target</strong>: Reference a deployment in the scaler&rsquo;s namespace.</li>
 <li><strong>Catalog</strong>: Omit <em><code>catalogRef</code></em> to use the embedded catalog.</li>
 <li><strong>Headroom</strong>: Set a value in <code>(0, 1]</code>; the default is <code>0.75</code>.</li>
@@ -1839,7 +1841,8 @@ Profiles are flat records without provenance, serving configuration or workload 
 </span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="nt">p90</span><span class="p">:</span><span class="w"> </span><span class="m">24</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="nt">p95</span><span class="p">:</span><span class="w"> </span><span class="m">27</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="nt">p99</span><span class="p">:</span><span class="w"> </span><span class="m">33</span></span></span></code></pre></div>
-</div><p>A profile is identified by its normalized <code>(role, model, quantization, engine, hardware, topology)</code> tuple. <code>ParseCatalog</code> fails closed when two entries normalize to the same
+</div>
+<p>A profile is identified by its normalized <code>(role, model, quantization, engine, hardware, topology)</code> tuple. <code>ParseCatalog</code> fails closed when two entries normalize to the same
 tuple — naming both — while <code>gen/priors --merge</code> upserts one canonical sweep deterministically, sorted by role, model, quantization, engine, hardware and parallelism widths.</p>
 <p>Throughput units are per-replica <code>tokens/s</code>; latencies are milliseconds (<code>itlMilliseconds</code> per
 token). Both latency maps accept any canonical <code>p&lt;N&gt;</code> quantile key in <code>(0, 100]</code> (<code>p25</code>, <code>p50</code>,
@@ -1998,7 +2001,7 @@ specs, identity annotations, effective algorithm, catalog digest, latency target
 prior quantities by semantic <code>Quantity</code> equality, keep the 256-sample <code>RingBuffer</code> in memory, and
 suppress <code>status</code> writes until control-plane state changes or a predictor advances by 16 samples.</p>
 <h3 id="local-evaluation">Local evaluation</h3>
-<p>The <a href="https://github.com/gpustack/gpustack-operator/blob/304681b245c3f392539df1404126be8fb9d22adb/specs/2026-10-26-inferencex-model-deployment-scaling.md">capacity priors and local evaluation spec</a>
+<p>The <a href="https://github.com/gpustack/gpustack-operator/blob/e50f885d037f4c00400f32f4ec1be0cac9581fca/specs/2026-10-26-inferencex-model-deployment-scaling.md">capacity priors and local evaluation spec</a>
  records 48 deterministic synthetic result rows across eight
 tuning traces (<code>manual</code>, <code>resolved</code> and one <code>passive</code> candidate at seed factor <code>1</code>) plus two open-loop versus closed-loop examples.</p>
 <p>It also evaluates two held-out traces (<code>heldout_bursts</code> and <code>heldout_length_cache_shift</code>, 11 rows each across <code>manual</code> at factor <code>1</code> plus <code>resolved</code> and one <code>passive</code> candidate
@@ -2119,7 +2122,8 @@ needs to grow, <em><code>rebalance.policy</code></em> decides whether another ro
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span>- <span class="l">decode</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span>- <span class="l">prefill</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span>- <span class="l">encode</span></span></span></code></pre></div>
-</div><p><em><code>priority[]</code></em> only affects <code>Priority</code>. A receiver may take from roles after it in the list,
+</div>
+<p><em><code>priority[]</code></em> only affects <code>Priority</code>. A receiver may take from roles after it in the list,
 starting with the next listed role. Unlisted roles neither donate nor receive through this policy;
 they retain their ordinary recommendations. The donor and receiver must use the same nonempty
 <em><code>instanceType</code></em>, and the donor must remain above its minimum before donation.</p>
@@ -2188,7 +2192,8 @@ needs its own replica pointer; <code>~1</code> escapes the slash inside an annot
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">syncPolicy</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">syncOptions</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span>- <span class="l">RespectIgnoreDifferences=true</span></span></span></code></pre></div>
-</div><p><code>RespectIgnoreDifferences=true</code> also applies the exclusions during sync. Without it, differences
+</div>
+<p><code>RespectIgnoreDifferences=true</code> also applies the exclusions during sync. Without it, differences
 can be hidden in the comparison while a sync still attempts to restore the declared counts.</p>
 <p>Flux versions that support <em><code>spec.ignore</code></em> on <code>Kustomization</code> use these paths:</p>
 <div class="code-block">
@@ -2209,7 +2214,8 @@ can be hidden in the comparison while a sync still attempts to restore the decla
 </span></span></span><span class="line"><span class="cl"><span class="w">        </span>- <span class="l">/spec/roles/0/replicas</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">        </span>- <span class="l">/metadata/annotations/modeldeployment.gpustack.ai~1scaler-binding</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">        </span>- <span class="l">/metadata/annotations/modeldeployment.gpustack.ai~1scaler-decision</span></span></span></code></pre></div>
-</div><h2 id="status">Status</h2>
+</div>
+<h2 id="status">Status</h2>
 <p>Status records observations, decisions and recovery state. The following fragments illustrate the field shapes; they are
 not captured output or configuration to apply. Optional entries appear only when the scaler has corresponding state.
 <em><code>observedGeneration</code></em> identifies the scaler spec generation used for the report.</p>
@@ -2248,7 +2254,8 @@ and the scaler reads them back from the status when it starts planning again.</p
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">stabilizationHistory</span><span class="p">:</span><span class="w">  </span><span class="c"># at most 256 recommendations</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">        </span>- <span class="nt">timestamp</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;&lt;sample time&gt;&#34;</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="nt">replicas</span><span class="p">:</span><span class="w"> </span><span class="m">2</span></span></span></code></pre></div>
-</div><p><em><code>signalState</code></em> is <code>Fresh</code> for current readings, <code>Idle</code> for a successfully observed role with no work, <code>Missing</code> for
+</div>
+<p><em><code>signalState</code></em> is <code>Fresh</code> for current readings, <code>Idle</code> for a successfully observed role with no work, <code>Missing</code> for
 unavailable signals or an unestablished window, and <code>Stale</code> for expired readings. A missing signal differs from a
 measured zero. Incomplete coverage prevents scale-down, although usable partial observations can still justify growth.</p>
 <p><em><code>reason</code></em> can explain an algorithm decision, such as <code>WithinTolerance</code>, <code>Panic</code>, <code>NoReadyReplicas</code>,
@@ -2302,7 +2309,8 @@ measured zero. Incomplete coverage prevents scale-down, although usable partial 
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">outcome</span><span class="p">:</span><span class="w"> </span><span class="l">Committed </span><span class="w"> </span><span class="c"># Aborted after a failed retirement is restored</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">abortedAt</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;&lt;abort time, when applicable&gt;&#34;</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">cooldownUntil</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;&lt;cooldown end, when applicable&gt;&#34;</span></span></span></code></pre></div>
-</div><p><em><code>lastCommit</code></em> identifies the latest actual write and the target generation it expects. <em><code>pendingCohort</code></em> tracks added
+</div>
+<p><em><code>lastCommit</code></em> identifies the latest actual write and the target generation it expects. <em><code>pendingCohort</code></em> tracks added
 ordinals until admission or rollback. <em><code>lastScaleDown.outcome</code></em> is <code>Committed</code> while retirement runs and becomes
 <code>Aborted</code> after a failed retirement is restored. The abort and cooldown times record that recovery.</p>
 <p><em><code>rebalance.reason</code></em> records <code>ResourceExhausted</code>, <code>DonorRelease</code>, <code>ReceiverAcquire</code> or
@@ -2330,7 +2338,8 @@ the two-step transaction. <em><code>exhaustionEpisodeGeneration</code></em> iden
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">history</span><span class="p">:</span><span class="w">  </span><span class="c"># recent demand samples within the active window, at most 256</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">        </span>- <span class="nt">timestamp</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;&lt;observation time&gt;&#34;</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="nt">tokensPerSecond</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;2400&#34;</span></span></span></code></pre></div>
-</div><p><em><code>predictors[]</code></em> persists demand history for <code>TokenThroughput</code> and filter state for <code>Predictive</code>.
+</div>
+<p><em><code>predictors[]</code></em> persists demand history for <code>TokenThroughput</code> and filter state for <code>Predictive</code>.
 The <em><code>level</code></em>, <em><code>trend</code></em> and <em><code>covariance</code></em> fields describe the filter estimate and its uncertainty. The scaler restores this state from status when it resumes planning, keeps
 the 256-sample window in memory while it plans, and checkpoints steady predictor progress to <code>status</code> every 16 samples.</p>
 <h3 id="resolved-priors">Resolved priors</h3>
@@ -2363,7 +2372,8 @@ the 256-sample window in memory while it plans, and checkpoints steady predictor
 </span></span></span><span class="line"><span class="cl"><span class="w">        </span>- <span class="nt">field</span><span class="p">:</span><span class="w"> </span><span class="l">predictive.tokenThroughput.serverTargetTokensPerSecond</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="nt">source</span><span class="p">:</span><span class="w"> </span><span class="l">Explicit</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="nt">effectiveTokensPerSecond</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;1200&#34;</span></span></span></code></pre></div>
-</div><p><em><code>resolvedCapacityPriors[]</code></em> records per-role catalog provenance and per-field effective capacities whenever <code>Catalog</code>
+</div>
+<p><em><code>resolvedCapacityPriors[]</code></em> records per-role catalog provenance and per-field effective capacities whenever <code>Catalog</code>
 is active. <em><code>fields[]</code></em> distinguishes <code>Explicit</code> spec fields from <code>Catalog</code> fields derived by multiplying
 <em><code>seedTokensPerSecond</code></em> by <em><code>headroom</code></em>. <em><code>latencyBounds[]</code></em> records the quantile statistic used for each required
 latency metric and whether a higher quantile bounded <code>0.95</code> conservatively.</p>
@@ -2386,7 +2396,8 @@ not represent measured hardware capacity.</p>
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">message</span><span class="p">:</span><span class="w"> </span><span class="l">all required role signals are available</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">observedGeneration</span><span class="p">:</span><span class="w"> </span><span class="m">1</span><span class="w">  </span><span class="c"># scaler generation used for this condition</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">lastTransitionTime</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;&lt;last condition transition time&gt;&#34;</span></span></span></code></pre></div>
-</div><p><code>Bound=True</code> means the target is available to this scaler. In <code>Active</code> mode, it also holds the
+</div>
+<p><code>Bound=True</code> means the target is available to this scaler. In <code>Active</code> mode, it also holds the
 binding. A <code>Shadow</code> scaler can report <code>Bound=True</code> without an ownership annotation.
 <code>Active</code> reports permission to commit, <code>MetricsReady</code> reports live engine signal coverage,
 <code>CapacityPriorsReady</code> reports catalog capacity resolution, and <code>Blocked</code> reports planning
@@ -2505,7 +2516,7 @@ outage does not allow unchecked writes through the binding fence.</p>
 <nav class="reading-footer" aria-label="Further reading">
     <section>
       <h2>See also</h2>
-      <ul class="related-pages"><li><a href="/gpustack-operator/main/docs/modules/model-deployment/deployment/">Configuration</a>
+      <ul class="related-pages"><li><a href="/gpustack-operator/main/docs/modules/model-deployment/configuration/">Configuration</a>
  (roles and counts)</li><li><a href="/gpustack-operator/main/docs/modules/model-deployment/scaling-benchmark/">Benchmark</a>
  (H100 and H200 results)</li><li><a href="/gpustack-operator/main/docs/modules/model-deployment/scaling-simulation/">Simulation</a>
  (synthetic comparison)</li><li><a href="/gpustack-operator/main/docs/walkthroughs/model-deployment/scaling/">Walkthrough</a>
@@ -2525,18 +2536,6 @@ and conditions)</li><li><a href="/gpustack-operator/main/docs/modules/model-depl
     <aside class="toc-panel" aria-label="Page navigation">
       <div class="toc-inner">
         
-          
-          
-          
-          <nav class="page-actions" aria-label="Page source">
-            <a href="https://github.com/gpustack/gpustack-operator/blob/304681b245c3f392539df1404126be8fb9d22adb/docs/modules/model-deployment/scaling.md">View page source</a>
-            
-            <a href="https://github.com/gpustack/gpustack-operator/edit/main/docs/modules/model-deployment/scaling.md">Edit this page</a>
-            
-          </nav>
-        
-        
-          <div class="toc-title">On this page</div>
           <nav id="TableOfContents">
   <ul>
     <li><a href="#contents">Contents</a></li>

@@ -258,11 +258,12 @@ afterwards.
 1. Satisfy the [Prerequisites](#prerequisites) — stop the using `Pod` and the driver-handle daemons.
 2. Enable the mode with `nvidia-smi`, per GPU or for all GPUs:
 
-   ```console
+   ```bash
    # one GPU by index
-   $ nvidia-smi -i <id> -mig 1
+   nvidia-smi -i <id> -mig 1
+
    # all GPUs
-   $ nvidia-smi -mig 1
+   nvidia-smi -mig 1
    ```
 
 3. **Ampere:** perform the GPU reset; if `nvidia_drm` is loaded or a passthrough VM blocks it, reboot the
@@ -287,8 +288,8 @@ Use the profile named **`all-enabled`**. It enables MIG mode and creates no inst
 instances during allocation. Other shipped profiles (`all-balanced`, `all-1g.5gb`, …) pre-create a fixed
 geometry and conflict with that allocation.
 
-```console
-$ kubectl label node <node> nvidia.com/mig.config=all-enabled --overwrite
+```bash
+kubectl label node <node> nvidia.com/mig.config=all-enabled --overwrite
 ```
 
 The label is per node, so a fleet can mix freely: nodes labelled `all-enabled` serve partitions, nodes
@@ -315,8 +316,8 @@ Three things to know before reaching for it:
 
 Run the inverse: with no `Pod` using the GPU's instances, destroy them, then
 
-```console
-$ nvidia-smi -i <id> -mig 0   # or `-mig 0` for all GPUs
+```bash
+nvidia-smi -i <id> -mig 0   # or `-mig 0` for all GPUs
 ```
 
 apply the same reset rules (Ampere reset or reboot; Hopper none), and restart the node's Device Manager `Pod`
@@ -376,8 +377,13 @@ The captured `PT` first values reflect an older calculation; see
 Every GPU offers logical slicing and none offers partitions: three logical views populated, partition view
 empty:
 
-```console
-$ kubectl get instancetypes
+```bash
+kubectl get instancetypes
+```
+
+Captured output:
+
+```text
 NAME                                          ENTRANCE                          UNIT(CPU/RAM)/STORAGE   ACCELERATOR(EX/SH/SL/PT)   CPU       PHASE
 gpustack--generic-linux-amd64                 gpustack-fnv64-3b93966fd73eb9ec   1/2Gi/100Gi             0/0 0/0 0/0 0/0            128/132   Active
 gpustack--nvidia-h100-80gb-hbm3-linux-amd64   gpustack-fnv64-e4768a65ca0ce96b   12/192Gi/100Gi          8/8 80/80 100/800 0/0      0/0       Active
@@ -387,8 +393,13 @@ The accelerated row reads **8** whole GPUs, **80** shares (10 per GPU), **800%**
 (100% per GPU), **no** partition capacity. The node advertises the logical key family, and
 `nvidia.com/gpu.partitioned` at 0 keeps every `.partitioned.*` counting key absent:
 
-```console
-$ kubectl get node node-h100 -o json | jq '.status.allocatable | with_entries(select(.key|test("nvidia.com/gpu")))'
+```bash
+kubectl get node node-h100 -o json | jq '.status.allocatable | with_entries(select(.key|test("nvidia.com/gpu")))'
+```
+
+Captured output:
+
+```text
 {
   "nvidia.com/gpu": "8",
   "nvidia.com/gpu.partitioned": "0",
@@ -405,13 +416,25 @@ Every number is per-GPU × 8: `1024 = 8 × 128` logical slices, `12800k = 8 × 1
 `655360 MiB = 8 × 81920`. The `Devices` capability (in *`spec`*; the runtime ledger is in *`status`*) says the
 same, GPU by GPU:
 
-```console
-$ kubectl get devices node-h100 -o jsonpath='{.spec.groups[0].accelerators[*].status}' | jq -c
+```bash
+kubectl get devices node-h100 -o jsonpath='{.spec.groups[0].accelerators[*].status}' | jq -c
+```
+
+Captured output:
+
+```text
 group NVIDIA H100 80GB HBM3: 8 GPU(s); logically sliceable indices [0, 1, 2, 3, 4, 5, 6, 7]; partitioned indices -
   GPU 0 logicalSliced: {"coresPercentageOvercommit": true, "count": 128}
   …                    (GPUs 1-7 identical)
+```
 
-$ kubectl get instancetypes gpustack--nvidia-h100-80gb-hbm3-linux-amd64 -o jsonpath='{.status.detail.slicedDetail}' | jq
+```bash
+kubectl get instancetypes gpustack--nvidia-h100-80gb-hbm3-linux-amd64 -o jsonpath='{.status.detail.slicedDetail}' | jq
+```
+
+Captured output:
+
+```text
 {
   "logical": { "coresPercentageOvercommit": true, "count": 1024 },
   "physical": {}
@@ -425,9 +448,14 @@ $ kubectl get instancetypes gpustack--nvidia-h100-80gb-hbm3-linux-amd64 -o jsonp
 Following the [runbook](#enabling-partitioning), flip the mode with `nvidia-smi` on the node itself (Hopper
 needs no reset). GPUStack never runs this:
 
-```console
+```bash
 # On node-h100 (via SSH), the GPUs idle and driver-handle daemons stopped:
-$ for i in $(seq 0 7); do sudo nvidia-smi -i "$i" -mig 1; done
+for i in $(seq 0 7); do sudo nvidia-smi -i "$i" -mig 1; done
+```
+
+Captured output:
+
+```text
 Enabled MIG Mode for GPU 00000000:8D:00.0
 All done.
 …                                                    (GPUs 1-7 identical)
@@ -436,11 +464,23 @@ All done.
 The cluster does **not** react yet. Restart the `DaemonSet` `Pod`; deleting the node's `Devices` object is
 **not** required (it was, in earlier builds):
 
-```console
-$ kubectl -n gpustack-system rollout restart ds/gpustack-operator-device-manager-nvidia
-daemonset.apps/gpustack-operator-device-manager-nvidia restarted
+```bash
+kubectl -n gpustack-system rollout restart ds/gpustack-operator-device-manager-nvidia
+```
 
-$ kubectl -n gpustack-system rollout status ds/gpustack-operator-device-manager-nvidia
+Captured output:
+
+```text
+daemonset.apps/gpustack-operator-device-manager-nvidia restarted
+```
+
+```bash
+kubectl -n gpustack-system rollout status ds/gpustack-operator-device-manager-nvidia
+```
+
+Captured output:
+
+```text
 daemon set "gpustack-operator-device-manager-nvidia" successfully rolled out
 ```
 
@@ -455,8 +495,13 @@ daemon set "gpustack-operator-device-manager-nvidia" successfully rolled out
 All three logical views drop to zero and the partition view takes over. Not cosmetic: an exclusive tenant on
 a MIG-mode GPU would get a device CUDA cannot use, so the views report what is servable.
 
-```console
-$ kubectl get instancetypes
+```bash
+kubectl get instancetypes
+```
+
+Captured output:
+
+```text
 NAME                                          ENTRANCE                          UNIT(CPU/RAM)/STORAGE   ACCELERATOR(EX/SH/SL/PT)   CPU       PHASE
 gpustack--generic-linux-amd64                 gpustack-fnv64-3b93966fd73eb9ec   1/2Gi/100Gi             0/0 0/0 0/0 0/0            128/132   Active
 gpustack--nvidia-h100-80gb-hbm3-linux-amd64   gpustack-fnv64-e4768a65ca0ce96b   12/192Gi/100Gi          0/0 0/0 0/0 1/56           0/0       Active
@@ -469,8 +514,13 @@ The keys flip families wholesale: every `.sliced.*` key is gone, and one `partit
 appears per profile alongside `.partitioned.units`, which values a partitioned GPU at a whole GPU's credits
 just as `.sliced.units` valued a logically sliceable one:
 
-```console
-$ kubectl get node node-h100 -o json | jq '.status.allocatable | with_entries(select(.key|test("nvidia.com/gpu")))'
+```bash
+kubectl get node node-h100 -o json | jq '.status.allocatable | with_entries(select(.key|test("nvidia.com/gpu")))'
+```
+
+Captured output:
+
+```text
 {
   "nvidia.com/gpu": "0",
   "nvidia.com/gpu.partitioned": "56",
@@ -490,8 +540,13 @@ Each per-profile key is 8 × that profile's count in the [profile table](#partit
 one-slice instances, `8 = 8 × 1` whole-GPU ones. `nvidia.com/gpu`, `.shared` and `.sliced` read `0` rather
 than disappearing — a device-plugin pool key zeroes out, never gets removed.
 
-```console
-$ kubectl get devices node-h100 -o jsonpath='{.spec.groups[0].accelerators[*].status}' | jq -c
+```bash
+kubectl get devices node-h100 -o jsonpath='{.spec.groups[0].accelerators[*].status}' | jq -c
+```
+
+Captured output:
+
+```text
 group NVIDIA H100 80GB HBM3: 8 GPU(s); logically sliceable indices -; partitioned indices [0, 1, 2, 3, 4, 5, 6, 7]
   GPU 0 partitioned: count=7 profiles=1g.10gb(7),1g.20gb(4),2g.20gb(3),3g.40gb(2),4g.40gb(1),7g.80gb(1)
   …                  (GPUs 1-7 identical)
@@ -528,12 +583,24 @@ spec:
 Kueue admits it, the node-devices `AdmissionCheck` confirms a free `3g.40gb` placement, and the plugin
 **materializes** the GPU/compute instance pair on a GPU it selects, injecting only that device:
 
-```console
-$ kubectl get pod mig-demo
+```bash
+kubectl get pod mig-demo
+```
+
+Captured output:
+
+```text
 NAME       READY   STATUS    RESTARTS   AGE
 mig-demo   1/1     Running   0          8s
+```
 
-$ kubectl exec mig-demo -- nvidia-smi -L
+```bash
+kubectl exec mig-demo -- nvidia-smi -L
+```
+
+Captured output:
+
+```text
 GPU 0: NVIDIA H100 80GB HBM3 (UUID: GPU-950792bf-a01c-3f1a-e122-3473e67f54b2)
   MIG 3g.40gb     Device  0: (UUID: MIG-b3061c09-2a4c-5026-a575-79f86a5bb12c)
 ```
@@ -542,12 +609,24 @@ GPU 0: NVIDIA H100 80GB HBM3 (UUID: GPU-950792bf-a01c-3f1a-e122-3473e67f54b2)
 
 One `3g.40gb` occupies memory slices 0–3 of **one** GPU, so only that GPU's arithmetic changes, per profile:
 
-```console
-$ kubectl get instancetypes gpustack--nvidia-h100-80gb-hbm3-linux-amd64
+```bash
+kubectl get instancetypes gpustack--nvidia-h100-80gb-hbm3-linux-amd64
+```
+
+Captured output:
+
+```text
 NAME                                          ENTRANCE                          UNIT(CPU/RAM)/STORAGE   ACCELERATOR(EX/SH/SL/PT)   CPU   PHASE
 gpustack--nvidia-h100-80gb-hbm3-linux-amd64   gpustack-fnv64-e4768a65ca0ce96b   12/192Gi/100Gi          0/0 0/0 0/0 7/52   0/0   Active
+```
 
-$ kubectl get node node-h100 -o json | jq '.status.allocatable | with_entries(select(.key|test("gpu\\.partitioned")))'
+```bash
+kubectl get node node-h100 -o json | jq '.status.allocatable | with_entries(select(.key|test("gpu\\.partitioned")))'
+```
+
+Captured output:
+
+```text
 {
   "nvidia.com/gpu.partitioned": "53",
   "nvidia.com/gpu.partitioned.mig-1g.10gb": "52",
@@ -641,12 +720,17 @@ So read *`slicedDetail`* as "what is this pool made of", never as a remainder; t
 Disabling MIG on five of the eight leaves three partitioned: the configuration where **both** families are
 advertised at once.
 
-```console
+```bash
 # On node-h100 (via SSH):
-$ for i in 3 4 5 6 7; do sudo nvidia-smi -i "$i" -mig 0; done
-$ kubectl -n gpustack-system rollout restart ds/gpustack-operator-device-manager-nvidia
+for i in 3 4 5 6 7; do sudo nvidia-smi -i "$i" -mig 0; done
+kubectl -n gpustack-system rollout restart ds/gpustack-operator-device-manager-nvidia
 
-$ sudo nvidia-smi --query-gpu=index,mig.mode.current --format=csv
+sudo nvidia-smi --query-gpu=index,mig.mode.current --format=csv
+```
+
+Captured output:
+
+```text
 index, mig.mode.current
 0, Enabled
 1, Enabled
@@ -658,8 +742,13 @@ index, mig.mode.current
 7, Disabled
 ```
 
-```console
-$ kubectl get instancetypes gpustack--nvidia-h100-80gb-hbm3-linux-amd64
+```bash
+kubectl get instancetypes gpustack--nvidia-h100-80gb-hbm3-linux-amd64
+```
+
+Captured output:
+
+```text
 NAME                                          ENTRANCE                          UNIT(CPU/RAM)/STORAGE   ACCELERATOR(EX/SH/SL/PT)   CPU   PHASE
 gpustack--nvidia-h100-80gb-hbm3-linux-amd64   gpustack-fnv64-e4768a65ca0ce96b   12/192Gi/100Gi          5/5 50/50 100/500 7/21   0/0   Active
 ```
@@ -667,8 +756,13 @@ gpustack--nvidia-h100-80gb-hbm3-linux-amd64   gpustack-fnv64-e4768a65ca0ce96b   
 `5/5 50/50 100/500` covers the **five** whole GPUs, `7/21` the **three** partitioned ones (`3 × 7`); no GPU
 is counted twice or missing:
 
-```console
-$ kubectl get node node-h100 -o json | jq '.status.allocatable | with_entries(select(.key|test("nvidia.com/gpu")))'
+```bash
+kubectl get node node-h100 -o json | jq '.status.allocatable | with_entries(select(.key|test("nvidia.com/gpu")))'
+```
+
+Captured output:
+
+```text
 {
   "nvidia.com/gpu": "5",
   "nvidia.com/gpu.partitioned": "21",
@@ -692,8 +786,13 @@ Every logical number is now **five** GPUs' worth (`640 = 5 × 128`, `8M = 5 × 1
 `409600 MiB = 5 × 81920`), every partition number **three** (`21 = 3 × 7`, `4800k = 3 × 1600k`). The
 `Devices` capability names which GPU is in which:
 
-```console
-$ kubectl get devices node-h100 -o jsonpath='{.spec.groups[0].accelerators[*].status}' | jq -c
+```bash
+kubectl get devices node-h100 -o jsonpath='{.spec.groups[0].accelerators[*].status}' | jq -c
+```
+
+Captured output:
+
+```text
 group NVIDIA H100 80GB HBM3: 8 GPU(s); logically sliceable indices [3, 4, 5, 6, 7]; partitioned indices [0, 1, 2]
   GPU 0 partitioned:     count=7 profiles=1g.10gb(7),1g.20gb(4),2g.20gb(3),3g.40gb(2),4g.40gb(1),7g.80gb(1)
   GPU 1 partitioned:     count=7 profiles=1g.10gb(7),1g.20gb(4),2g.20gb(3),3g.40gb(2),4g.40gb(1),7g.80gb(1)
@@ -707,33 +806,62 @@ group NVIDIA H100 80GB HBM3: 8 GPU(s); logically sliceable indices [3, 4, 5, 6, 
 A partition request and a logical-slice request submitted together land on **different** GPUs: their
 resource names come from disjoint populations, and the scheduler cannot consider a GPU that lacks the key:
 
-```console
-$ kubectl get pods
+```bash
+kubectl get pods
+```
+
+Captured output:
+
+```text
 NAME                  READY   STATUS    RESTARTS   AGE
 mixed-logical         1/1     Running   0          5s
 mixed-partition       1/1     Running   0          9s
+```
 
-$ kubectl exec mixed-partition -- nvidia-smi -L
+```bash
+kubectl exec mixed-partition -- nvidia-smi -L
+```
+
+Captured output:
+
+```text
 GPU 0: NVIDIA H100 80GB HBM3 (UUID: GPU-950792bf-a01c-3f1a-e122-3473e67f54b2)
   MIG 3g.40gb     Device  0: (UUID: MIG-b3061c09-2a4c-5026-a575-79f86a5bb12c)
+```
 
-$ kubectl exec mixed-logical -- nvidia-smi -L
+```bash
+kubectl exec mixed-logical -- nvidia-smi -L
+```
+
+Captured output:
+
+```text
 GPU 0: NVIDIA H100 80GB HBM3 (UUID: GPU-4e24fa00-9f4f-68c4-bfcd-581cd3cb7de6)
 ```
 
 The partition workload sees **only its MIG device**, the logical-slice workload a **whole GPU** (capped at
 runtime by the preload library, not by `nvidia-smi -L`). The allocation record names each GPU:
 
-```console
-$ kubectl get pod <name> -o jsonpath='{.metadata.annotations.device\.gpustack\.ai/accelerator\.allocated}'
+```bash
+kubectl get pod <name> -o jsonpath='{.metadata.annotations.device\.gpustack\.ai/accelerator\.allocated}'
+```
+
+Captured output:
+
+```text
 mixed-partition  -> index=0  id=GPU-950792bf-…  profile=3g.40gb     # a PARTITIONED GPU
 mixed-logical    -> index=5  id=GPU-4e24fa00-…  profile=-           # a WHOLE GPU
 ```
 
 Both views move independently, in their own family:
 
-```console
-$ kubectl get instancetypes gpustack--nvidia-h100-80gb-hbm3-linux-amd64
+```bash
+kubectl get instancetypes gpustack--nvidia-h100-80gb-hbm3-linux-amd64
+```
+
+Captured output:
+
+```text
 NAME                                          ENTRANCE                          UNIT(CPU/RAM)/STORAGE   ACCELERATOR(EX/SH/SL/PT)   CPU   PHASE
 gpustack--nvidia-h100-80gb-hbm3-linux-amd64   gpustack-fnv64-e4768a65ca0ce96b   12/192Gi/100Gi          4/4 40/40 100/450 7/17   0/0   Active
 ```
@@ -742,8 +870,13 @@ gpustack--nvidia-h100-80gb-hbm3-linux-amd64   gpustack-fnv64-e4768a65ca0ce96b   
 - `SL 500→450`: the slice took 50% of GPU 5; `450 = 4 × 100 + 50`.
 - `PT 21→17`: GPU 0 now holds a `3g.40gb`, leaving three `1g.10gb` slots; `17 = 2 × 7 + 3`.
 
-```console
-$ kubectl get node node-h100 -o json | jq '.status.allocatable | with_entries(select(.key|test("gpu\\.partitioned")))'
+```bash
+kubectl get node node-h100 -o json | jq '.status.allocatable | with_entries(select(.key|test("gpu\\.partitioned")))'
+```
+
+Captured output:
+
+```text
 {
   "nvidia.com/gpu.partitioned": "18",
   "nvidia.com/gpu.partitioned.mig-1g.10gb": "17",
@@ -770,17 +903,36 @@ Reverse the runbook ([Disabling MIG on a node](#disabling-partitioning)): with t
 remaining modes off and re-detect. The `partitioned` keys go to zero, the logical keys return, and the pool
 is back at [All-logical configuration](#all-logical-configuration):
 
-```console
+```bash
 # On node-h100 (via SSH):
-$ for i in 0 1 2; do sudo nvidia-smi -i "$i" -mig 0; done
+for i in 0 1 2; do sudo nvidia-smi -i "$i" -mig 0; done
+```
+
+Captured output:
+
+```text
 Disabled MIG Mode for GPU 00000000:8D:00.0
 All done.
 …
+```
 
-$ kubectl -n gpustack-system rollout restart ds/gpustack-operator-device-manager-nvidia
+```bash
+kubectl -n gpustack-system rollout restart ds/gpustack-operator-device-manager-nvidia
+```
+
+Captured output:
+
+```text
 daemonset.apps/gpustack-operator-device-manager-nvidia restarted
+```
 
-$ kubectl get instancetypes gpustack--nvidia-h100-80gb-hbm3-linux-amd64
+```bash
+kubectl get instancetypes gpustack--nvidia-h100-80gb-hbm3-linux-amd64
+```
+
+Captured output:
+
+```text
 NAME                                          ENTRANCE                          UNIT(CPU/RAM)/STORAGE   ACCELERATOR(EX/SH/SL/PT)   CPU   PHASE
 gpustack--nvidia-h100-80gb-hbm3-linux-amd64   gpustack-fnv64-e4768a65ca0ce96b   12/192Gi/100Gi          8/8 80/80 100/800 0/0   0/0   Active
 ```

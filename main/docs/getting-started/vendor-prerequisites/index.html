@@ -27,7 +27,7 @@
   <link rel="alternate" type="text/markdown" href="/gpustack-operator/main/docs/getting-started/vendor-prerequisites/index.md">
   
   <link rel="describedby" href="/gpustack-operator/main/llms.txt">
-  <link rel="stylesheet" href="/gpustack-operator/main/css/site.1a0de63fe646aba4ed6541fe0a6383c2ed5ca649b1593a98595ba53430bcf032.css">
+  <link rel="stylesheet" href="/gpustack-operator/main/css/site.b1fdc6af165ce7fbb10ebc91a579913dc99eac181655e5aae84dbe714d354a09.css">
   <link rel="stylesheet" href="/gpustack-operator/main/css/code.d2570c1cc6480f9c62bc31ec538eef2578ce80980588c469638a5f95416bfc7b.css">
 </head>
 <body class="docs-page">
@@ -36,7 +36,6 @@
     
     <a class="brand" href="/gpustack-operator/main/" aria-label="GPUStack Operator home"><img src="/gpustack-operator/main/images/logo_hu_ced145186d6eddf4.47210af4015bb5bd13742c222995900070c6649233431804f39bf2e001be3ddb.png" width="32" height="32" alt=""><span>GPUStack Operator</span></a>
     <nav class="top-links" aria-label="Main navigation">
-      <a class="top-docs-link" href="/gpustack-operator/main/docs/" aria-current="page">Documentation</a>
       <a class="top-devin-link" href="https://deepwiki.com/gpustack/gpustack-operator" target="_blank" rel="noopener noreferrer" aria-label="Ask Devin on DeepWiki (opens in a new tab)">
         <svg aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M8 1.5c.31 3.02 1.67 4.38 4.69 4.69-3.02.31-4.38 1.67-4.69 4.69-.31-3.02-1.67-4.38-4.69-4.69 3.02-.31 4.38-1.67 4.69-4.69Zm5.06 8.19c.16 1.51.84 2.19 2.34 2.34-1.51.16-2.19.84-2.34 2.34-.16-1.51-.84-2.19-2.34-2.34 1.51-.16 2.19-.84 2.34-2.34Z"/></svg>
         <span>Ask Devin</span>
@@ -106,7 +105,6 @@
         </svg>
       </button>
       <nav id="docs-navigation" class="sidebar-inner">
-        <div class="nav-title">Documentation</div>
         <a class="nav-home" href="/gpustack-operator/main/" >Overview</a>
         
           
@@ -698,7 +696,7 @@
       
         
         
-          <a title="KV Cache Election and Failover" href="/gpustack-operator/main/docs/modules/kv-cache/leader/" >Election and Failover</a>
+          <a title="KV Cache Election and Failover" href="/gpustack-operator/main/docs/modules/kv-cache/leader/" >Leader Election</a>
           
           
         
@@ -761,15 +759,15 @@
 
 
   
-    
-      
-      
-        
-        
-      
-    
-  
 
+  
+    
+      
+      
+        
+        
+      
+    
   
 
   
@@ -803,7 +801,7 @@
             <div class="nav-children">
               
                 
-                  <a title="Model Artifact API" href="/gpustack-operator/main/docs/modules/model-delivery/views/" >API</a>
+                  <a title="Model Artifact API" href="/gpustack-operator/main/docs/modules/model-delivery/artifact-api/" >API</a>
                 
               
             </div>
@@ -848,7 +846,7 @@
       
         
         
-          <a title="Node-to-Node Sync" href="/gpustack-operator/main/docs/modules/model-delivery/peer-sync/" >Node-to-Node Sync</a>
+          <a title="Node-to-Node Sync" href="/gpustack-operator/main/docs/modules/model-delivery/node-to-node-sync/" >Node-to-Node Sync</a>
           
           
         
@@ -1030,7 +1028,7 @@
       
         
         
-          <a title="Model Deployment Configuration" href="/gpustack-operator/main/docs/modules/model-deployment/deployment/" >Configuration</a>
+          <a title="Configuration" href="/gpustack-operator/main/docs/modules/model-deployment/configuration/" >Configuration</a>
           
           
         
@@ -1040,7 +1038,7 @@
       
         
         
-          <a title="Engine Compatibility" href="/gpustack-operator/main/docs/modules/model-deployment/engine-versions/" >Compatibility</a>
+          <a title="Engine Compatibility" href="/gpustack-operator/main/docs/modules/model-deployment/engine-versions/" >Engine Versions</a>
           
           
         
@@ -1208,7 +1206,12 @@
 
 
 
+  
+  
 
+
+
+  
 
 <details class="nav-section" >
   <summary title="GPU Instances">GPU Instances</summary>
@@ -1218,6 +1221,16 @@
       
       <a title="GPU Instances" href="/gpustack-operator/main/docs/modules/instances/" >Overview</a>
     
+    
+      
+      
+        
+        
+          <a title="Instance Metrics Reference" href="/gpustack-operator/main/docs/modules/instances/metrics/" >Metrics</a>
+          
+          
+        
+      
     
   </div>
 </details>
@@ -1322,7 +1335,7 @@
       
         
         
-          <a title="Migrating to Bundled Subcharts" href="/gpustack-operator/main/docs/operate/migration/to-subcharts/" >Bundled Subcharts</a>
+          <a title="Migrating to Bundled Subcharts" href="/gpustack-operator/main/docs/operate/migration/bundled-subcharts/" >Bundled Subcharts</a>
           
           
         
@@ -1332,7 +1345,7 @@
       
         
         
-          <a title="Upgrading to an Enforced Binding Dtype" href="/gpustack-operator/main/docs/operate/migration/kv-cache-dtype/" >Enforced Binding Dtype</a>
+          <a title="Upgrading to an Enforced Binding Dtype" href="/gpustack-operator/main/docs/operate/migration/enforced-binding-dtype/" >Enforced Binding Dtype</a>
           
           
         
@@ -1373,12 +1386,7 @@
   
   
 
-  
-  
 
-
-
-  
 
   
 
@@ -1416,16 +1424,6 @@
         
         
           <a title="Instance Type Unit Resources Reference" href="/gpustack-operator/main/docs/reference/instance-type-unit-resources/" >Resource Presets</a>
-          
-          
-        
-      
-    
-      
-      
-        
-        
-          <a title="Instance Metrics Reference" href="/gpustack-operator/main/docs/reference/instance-metrics/" >Instance Metrics</a>
           
           
         
@@ -1474,7 +1472,7 @@ Installation options and ownership are in <a href="/gpustack-operator/main/docs/
       <tr>
           <th>Dependency</th>
           <th>Role</th>
-          <th>Requirement or configuration</th>
+          <th>Configuration</th>
       </tr>
   </thead>
   <tbody>
@@ -1500,6 +1498,12 @@ Installation options and ownership are in <a href="/gpustack-operator/main/docs/
           <td>Mooncake</td>
           <td>Supplies cache services and transfer support for compatible engines.</td>
           <td>Optional. Match the engine, client, store and transport using <a href="/gpustack-operator/main/docs/modules/model-deployment/engine-versions/">Engine Compatibility</a>
+.</td>
+      </tr>
+      <tr>
+          <td>ModelExpress</td>
+          <td>Coordinates NVIDIA peer tensor transfer and compile-cache sharing.</td>
+          <td>Optional; the operator creates a per-deployment metadata service. See <a href="/gpustack-operator/main/docs/modules/model-delivery/remote/#nvidia-modelexpress">ModelExpress</a>
 .</td>
       </tr>
       <tr>
@@ -1561,14 +1565,16 @@ leave the DRA driver enabled; it is mutually exclusive with the device plugin on
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">enableNodeLabeller</span><span class="p">:</span><span class="w"> </span><span class="kc">false</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">draDriver</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">enable</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="w">  </span><span class="c"># Alternative to the device plugin.</span></span></span></code></pre></div>
-</div><div class="code-block">
+</div>
+<div class="code-block">
   <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">node-feature-discovery</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">enabled</span><span class="p">:</span><span class="w"> </span><span class="kc">false</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">kmm</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">enabled</span><span class="p">:</span><span class="w"> </span><span class="kc">false</span><span class="w">  </span><span class="c"># When the driver is pre-installed.</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">watch</span><span class="p">:</span><span class="w"> </span><span class="kc">false</span></span></span></code></pre></div>
-</div><p><strong>Install it</strong> — the chart&rsquo;s own switches cover the two bundled add-ons; the device plugin and the node
+</div>
+<p><strong>Install it</strong> — the chart&rsquo;s own switches cover the two bundled add-ons; the device plugin and the node
 labeller are <code>DeviceConfig</code> fields, so they are turned off on the CR the chart just created.</p>
 <div class="code-block">
   <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
@@ -1583,7 +1589,8 @@ labeller are <code>DeviceConfig</code> fields, so they are turned off on the CR 
 </span></span><span class="line"><span class="cl">
 </span></span><span class="line"><span class="cl">kubectl -n kube-amd-gpu patch deviceconfig &lt;name&gt; --type merge -p <span class="se">\
 </span></span></span><span class="line"><span class="cl"><span class="se"></span>  <span class="s1">&#39;{&#34;spec&#34;:{&#34;devicePlugin&#34;:{&#34;enableDevicePlugin&#34;:false,&#34;enableNodeLabeller&#34;:false},&#34;metricsExporter&#34;:{&#34;enable&#34;:true}}}&#39;</span></span></span></code></pre></div>
-</div><p>The patch above makes the following change to the chart-created <code>DeviceConfig</code>. Replace the name
+</div>
+<p>The patch above makes the following change to the chart-created <code>DeviceConfig</code>. Replace the name
 with that of the existing object:</p>
 <div class="code-block">
   <div class="code-toolbar"><span>diff</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
@@ -1602,7 +1609,8 @@ with that of the existing object:</p>
 </span></span><span class="line"><span class="cl"><span class="gd">-    enable: false
 </span></span></span><span class="line"><span class="cl"><span class="gd"></span><span class="gi">+    enable: true
 </span></span></span></code></pre></div>
-</div><p><strong>Already installed</strong> — the vendor plugin and GPUStack&rsquo;s plugin both advertise <code>amd.com/gpu</code>.
+</div>
+<p><strong>Already installed</strong> — the vendor plugin and GPUStack&rsquo;s plugin both advertise <code>amd.com/gpu</code>.
 Stop the vendor plugin before installing GPUStack on that node:</p>
 <ol>
 <li><strong>Device plugin and <code>Node</code> Labeller</strong> — turn both off on the existing <code>DeviceConfig</code>, the same patch as
@@ -1646,7 +1654,8 @@ about the vendor release. Read the version the installer recorded instead:</p>
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">grep <span class="s1">&#39;^version=&#39;</span> /usr/local/Ascend/Ascend-Docker-Runtime/ascend_docker_runtime_install.info
 </span></span><span class="line"><span class="cl"><span class="c1"># version=v7.3.0    &lt;- predates A5 support</span>
 </span></span><span class="line"><span class="cl"><span class="c1"># version=v26.1.0   &lt;- serves A5</span></span></span></code></pre></div>
-</div><p><code>gpustack-operator device-manager preflight</code> reads the same file and reports it as the
+</div>
+<p><code>gpustack-operator device-manager preflight</code> reads the same file and reports it as the
 <a href="/gpustack-operator/main/docs/modules/devices/preflight/#a5-host-state-rows"><code>ascend-docker-runtime</code> check</a>
  on each A5 accelerator,
 so a node too old to serve them is named before a workload lands on it.</p>
@@ -1660,7 +1669,8 @@ container whenever the host carries it, on presence alone and with no version ch
   <div class="code-toolbar"><span>text</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-text" data-lang="text"><span class="line"><span class="cl">Config_Error_Ranktable(EI0014): Value 1.0 for ranktable variable version is invalid.
 </span></span><span class="line"><span class="cl">Expected value: 2.0.</span></span></code></pre></div>
-</div><p>So a table left behind by an older fleet stops every <strong>multi-card</strong> job on the node: single-card
+</div>
+<p>So a table left behind by an older fleet stops every <strong>multi-card</strong> job on the node: single-card
 allocations never build a communicator and are unaffected. No environment variable disables the
 check, and the path is compiled into the library, so the file must be corrected rather than worked
 around:</p>
@@ -1669,7 +1679,8 @@ around:</p>
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl"><span class="c1"># absent is the healthy state -- HCCL then negotiates through rootInfo</span>
 </span></span><span class="line"><span class="cl"><span class="nb">test</span> -e /etc/hccl_rootinfo.json <span class="o">&amp;&amp;</span> grep -o <span class="s1">&#39;&#34;version&#34;[^,]*&#39;</span> /etc/hccl_rootinfo.json
 </span></span><span class="line"><span class="cl"><span class="c1"># &#34;version&#34;: &#34;1.0&#34;   &lt;- breaks multi-card HCCL on A5; remove it or regenerate as 2.0</span></span></span></code></pre></div>
-</div><p><code>gpustack-operator device-manager preflight</code> reports this as the <a href="/gpustack-operator/main/docs/modules/devices/preflight/#a5-host-state-rows"><code>hccl-ranktable</code>
+</div>
+<p><code>gpustack-operator device-manager preflight</code> reports this as the <a href="/gpustack-operator/main/docs/modules/devices/preflight/#a5-host-state-rows"><code>hccl-ranktable</code>
 check</a>
  on each A5 accelerator. A multi-node deployment
 does need a ranktable; this rule covers the single-node case.</p>
@@ -1711,14 +1722,16 @@ Replace the API version and name with those of the installed <code>DeviceConfig<
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">devicePlugin</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">enableDevicePlugin</span><span class="p">:</span><span class="w"> </span><span class="kc">false</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">enableNodeLabeller</span><span class="p">:</span><span class="w"> </span><span class="kc">false</span></span></span></code></pre></div>
-</div><p><strong>Install it</strong> — the vendor&rsquo;s install chapter sits behind its authenticated documentation portal, so no
+</div>
+<p><strong>Install it</strong> — the vendor&rsquo;s install chapter sits behind its authenticated documentation portal, so no
 install command is reproduced here. Whatever installs the operator, turn the two components off on the
 <code>DeviceConfig</code> it creates.</p>
 <div class="code-block">
   <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">kubectl -n kube-system patch deviceconfig &lt;name&gt; --type merge -p <span class="se">\
 </span></span></span><span class="line"><span class="cl"><span class="se"></span>  <span class="s1">&#39;{&#34;spec&#34;:{&#34;devicePlugin&#34;:{&#34;enableDevicePlugin&#34;:false,&#34;enableNodeLabeller&#34;:false},&#34;metricsExporter&#34;:{&#34;enable&#34;:true},&#34;dcgm&#34;:{&#34;enable&#34;:true}}}&#39;</span></span></span></code></pre></div>
-</div><p>The patch above updates the existing <code>DeviceConfig</code>. Read its <code>apiVersion</code> and name from
+</div>
+<p>The patch above updates the existing <code>DeviceConfig</code>. Read its <code>apiVersion</code> and name from
 <code>kubectl get deviceconfig -n kube-system -o yaml</code> and substitute them in the header:</p>
 <div class="code-block">
   <div class="code-toolbar"><span>diff</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
@@ -1740,7 +1753,8 @@ install command is reproduced here. Whatever installs the operator, turn the two
 </span></span><span class="line"><span class="cl"><span class="gd">-    enable: &lt;current-value&gt;
 </span></span></span><span class="line"><span class="cl"><span class="gd"></span><span class="gi">+    enable: true
 </span></span></span></code></pre></div>
-</div><p><strong>Already installed</strong> — the vendor plugin and GPUStack&rsquo;s plugin both advertise <code>hygon.com/dcu</code>.
+</div>
+<p><strong>Already installed</strong> — the vendor plugin and GPUStack&rsquo;s plugin both advertise <code>hygon.com/dcu</code>.
 Stop the vendor plugin before installing GPUStack on that node:</p>
 <ol>
 <li><strong>Device plugin and <code>Node</code> Labeller</strong> — turn <code>enableDevicePlugin</code> and <code>enableNodeLabeller</code> off on the
@@ -1774,7 +1788,8 @@ Disable ix-driver when the driver is pre-installed:</p>
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">enabled</span><span class="p">:</span><span class="w"> </span><span class="kc">false</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">ixfd</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">enabled</span><span class="p">:</span><span class="w"> </span><span class="kc">false</span></span></span></code></pre></div>
-</div><p><strong>Install it</strong> — the OCI chart, with the driver left to the node and the two competing components off.</p>
+</div>
+<p><strong>Install it</strong> — the OCI chart, with the driver left to the node and the two competing components off.</p>
 <div class="code-block">
   <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">helm install --wait ix-gpu-operator <span class="se">\
@@ -1786,7 +1801,8 @@ Disable ix-driver when the driver is pre-installed:</p>
 </span></span></span><span class="line"><span class="cl"><span class="se"></span>  --set ixDriver.enabled<span class="o">=</span><span class="nb">false</span> <span class="se">\
 </span></span></span><span class="line"><span class="cl"><span class="se"></span>  --set ixDevicePlugin.enabled<span class="o">=</span><span class="nb">false</span> <span class="se">\
 </span></span></span><span class="line"><span class="cl"><span class="se"></span>  --set ixfd.enabled<span class="o">=</span>false</span></span></code></pre></div>
-</div><p><strong>Already installed</strong> — ix-Device-Plugin and GPUStack&rsquo;s plugin both advertise <code>iluvatar.com/gpu</code>.
+</div>
+<p><strong>Already installed</strong> — ix-Device-Plugin and GPUStack&rsquo;s plugin both advertise <code>iluvatar.com/gpu</code>.
 Stop ix-Device-Plugin before installing GPUStack on that node:</p>
 <ol>
 <li><strong>ix-Device-Plugin and ix-Feature-Discovery</strong> — <code>helm upgrade</code> the release with the values it was
@@ -1869,7 +1885,8 @@ time and cannot be switched on a running release.</p>
 </span></span></span><span class="line"><span class="cl"><span class="se"></span>  --wait <span class="se">\
 </span></span></span><span class="line"><span class="cl"><span class="se"></span>  --set <span class="nv">registry</span><span class="o">=</span>DOMAIN/PROJECT <span class="se">\
 </span></span></span><span class="line"><span class="cl"><span class="se"></span>  --set <span class="nv">minimalMode</span><span class="o">=</span>true</span></span></code></pre></div>
-</div><p><strong>Already installed</strong> — <code>gpu-device</code> and GPUStack&rsquo;s plugin both advertise <code>metax-tech.com/gpu</code>.
+</div>
+<p><strong>Already installed</strong> — <code>gpu-device</code> and GPUStack&rsquo;s plugin both advertise <code>metax-tech.com/gpu</code>.
 The vendor requires <code>gpu-device</code> in every install mode, so the plugins cannot share a node.
 Uninstall the vendor operator before installing GPUStack:</p>
 <ol>
@@ -1919,7 +1936,8 @@ inside the operator&rsquo;s reconciliation loop and has no disabling switch.</p>
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">enabled</span><span class="p">:</span><span class="w"> </span><span class="kc">false</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">aiOps</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">enabled</span><span class="p">:</span><span class="w"> </span><span class="kc">false</span></span></span></code></pre></div>
-</div><p><strong>Install it</strong> — from the chart directories the vendor&rsquo;s bundle unpacks, with the cluster-level add-ons
+</div>
+<p><strong>Install it</strong> — from the chart directories the vendor&rsquo;s bundle unpacks, with the cluster-level add-ons
 off. No key disables the device plugin under <code>full</code> mode, so a node that must run GPUStack&rsquo;s device plugin is
 served by <code>core</code> mode with that manifest&rsquo;s device plugin removed.</p>
 <div class="code-block">
@@ -1930,7 +1948,8 @@ served by <code>core</code> mode with that manifest&rsquo;s device plugin remove
 </span></span></span><span class="line"><span class="cl"><span class="se"></span>  --set mtGpuClusterPolicyClusterpolicy.kured.enabled<span class="o">=</span><span class="nb">false</span> <span class="se">\
 </span></span></span><span class="line"><span class="cl"><span class="se"></span>  --set mtGpuClusterPolicyClusterpolicy.nodeProblemDetector.enabled<span class="o">=</span><span class="nb">false</span> <span class="se">\
 </span></span></span><span class="line"><span class="cl"><span class="se"></span>  --set mtGpuClusterPolicyClusterpolicy.aiOps.enabled<span class="o">=</span>false</span></span></code></pre></div>
-</div><p><strong>Already installed</strong> — the vendor plugin and GPUStack&rsquo;s plugin both advertise <code>mthreads.com/gpu</code>.
+</div>
+<p><strong>Already installed</strong> — the vendor plugin and GPUStack&rsquo;s plugin both advertise <code>mthreads.com/gpu</code>.
 Stop the vendor plugin before installing GPUStack on that node.
 The <code>full</code> mode has no switch to disable it; follow the procedure for the installed mode:</p>
 <ol>
@@ -1987,7 +2006,8 @@ bundled NFD instead.</p>
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">enabled</span><span class="p">:</span><span class="w"> </span><span class="kc">false</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">cdi</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">enabled</span><span class="p">:</span><span class="w"> </span><span class="kc">false</span><span class="w">  </span><span class="c"># Default true from v25.10.</span></span></span></code></pre></div>
-</div><p>MIG Manager changes geometry from node labels and conflicts with Allocate-time MIG actuation.
+</div>
+<p>MIG Manager changes geometry from node labels and conflicts with Allocate-time MIG actuation.
 One profile is an exception; see <a href="/gpustack-operator/main/docs/modules/devices/nvidia-mig/#fleet-wide-mig-manager">NVIDIA MIG</a>
 .</p>
 <p><strong>Check the node is not opted out.</strong> Some GPU distributions ship their nodes already labelled
@@ -2007,7 +2027,8 @@ components go.</p>
 </span></span></span><span class="line"><span class="cl"><span class="se"></span>  --set nfd.enabled<span class="o">=</span><span class="nb">false</span> <span class="se">\
 </span></span></span><span class="line"><span class="cl"><span class="se"></span>  --set migManager.enabled<span class="o">=</span><span class="nb">false</span> <span class="se">\
 </span></span></span><span class="line"><span class="cl"><span class="se"></span>  --set cdi.enabled<span class="o">=</span>false</span></span></code></pre></div>
-</div><p><strong>Already installed</strong> — the vendor plugin and GPUStack&rsquo;s plugin both advertise <code>nvidia.com/gpu</code>.
+</div>
+<p><strong>Already installed</strong> — the vendor plugin and GPUStack&rsquo;s plugin both advertise <code>nvidia.com/gpu</code>.
 The vendor&rsquo;s MIG Manager also reconfigures hardware that GPUStack&rsquo;s allocator manages.
 Stop both vendor components before installing GPUStack on that node.</p>
 <p>One <code>helm upgrade</code>, with the values the release was installed with plus the three switches below. The
@@ -2228,18 +2249,6 @@ worker applies.</div>
     <aside class="toc-panel" aria-label="Page navigation">
       <div class="toc-inner">
         
-          
-          
-          
-          <nav class="page-actions" aria-label="Page source">
-            <a href="https://github.com/gpustack/gpustack-operator/blob/304681b245c3f392539df1404126be8fb9d22adb/docs/getting-started/vendor-prerequisites.md">View page source</a>
-            
-            <a href="https://github.com/gpustack/gpustack-operator/edit/main/docs/getting-started/vendor-prerequisites.md">Edit this page</a>
-            
-          </nav>
-        
-        
-          <div class="toc-title">On this page</div>
           <nav id="TableOfContents">
   <ul>
     <li><a href="#contents">Contents</a></li>

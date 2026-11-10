@@ -47,7 +47,7 @@ Select memory and optional disk tiers. See [KV Cache Backend](/gpustack-operator
 
 Inspect the backend and its conditions:
 
-```shell
+```bash
 kubectl get kvcb
 kubectl describe kvcb <backend-name>
 ```

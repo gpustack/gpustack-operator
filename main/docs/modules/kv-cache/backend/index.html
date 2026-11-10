@@ -27,7 +27,7 @@
   <link rel="alternate" type="text/markdown" href="/gpustack-operator/main/docs/modules/kv-cache/backend/index.md">
   
   <link rel="describedby" href="/gpustack-operator/main/llms.txt">
-  <link rel="stylesheet" href="/gpustack-operator/main/css/site.1a0de63fe646aba4ed6541fe0a6383c2ed5ca649b1593a98595ba53430bcf032.css">
+  <link rel="stylesheet" href="/gpustack-operator/main/css/site.b1fdc6af165ce7fbb10ebc91a579913dc99eac181655e5aae84dbe714d354a09.css">
   <link rel="stylesheet" href="/gpustack-operator/main/css/code.d2570c1cc6480f9c62bc31ec538eef2578ce80980588c469638a5f95416bfc7b.css">
 </head>
 <body class="docs-page">
@@ -36,7 +36,6 @@
     
     <a class="brand" href="/gpustack-operator/main/" aria-label="GPUStack Operator home"><img src="/gpustack-operator/main/images/logo_hu_ced145186d6eddf4.47210af4015bb5bd13742c222995900070c6649233431804f39bf2e001be3ddb.png" width="32" height="32" alt=""><span>GPUStack Operator</span></a>
     <nav class="top-links" aria-label="Main navigation">
-      <a class="top-docs-link" href="/gpustack-operator/main/docs/" aria-current="page">Documentation</a>
       <a class="top-devin-link" href="https://deepwiki.com/gpustack/gpustack-operator" target="_blank" rel="noopener noreferrer" aria-label="Ask Devin on DeepWiki (opens in a new tab)">
         <svg aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M8 1.5c.31 3.02 1.67 4.38 4.69 4.69-3.02.31-4.38 1.67-4.69 4.69-.31-3.02-1.67-4.38-4.69-4.69 3.02-.31 4.38-1.67 4.69-4.69Zm5.06 8.19c.16 1.51.84 2.19 2.34 2.34-1.51.16-2.19.84-2.34 2.34-.16-1.51-.84-2.19-2.34-2.34 1.51-.16 2.19-.84 2.34-2.34Z"/></svg>
         <span>Ask Devin</span>
@@ -106,7 +105,6 @@
         </svg>
       </button>
       <nav id="docs-navigation" class="sidebar-inner">
-        <div class="nav-title">Documentation</div>
         <a class="nav-home" href="/gpustack-operator/main/" >Overview</a>
         
           
@@ -698,7 +696,7 @@
       
         
         
-          <a title="KV Cache Election and Failover" href="/gpustack-operator/main/docs/modules/kv-cache/leader/" >Election and Failover</a>
+          <a title="KV Cache Election and Failover" href="/gpustack-operator/main/docs/modules/kv-cache/leader/" >Leader Election</a>
           
           
         
@@ -761,15 +759,15 @@
 
 
   
-    
-      
-      
-        
-        
-      
-    
-  
 
+  
+    
+      
+      
+        
+        
+      
+    
   
 
   
@@ -803,7 +801,7 @@
             <div class="nav-children">
               
                 
-                  <a title="Model Artifact API" href="/gpustack-operator/main/docs/modules/model-delivery/views/" >API</a>
+                  <a title="Model Artifact API" href="/gpustack-operator/main/docs/modules/model-delivery/artifact-api/" >API</a>
                 
               
             </div>
@@ -848,7 +846,7 @@
       
         
         
-          <a title="Node-to-Node Sync" href="/gpustack-operator/main/docs/modules/model-delivery/peer-sync/" >Node-to-Node Sync</a>
+          <a title="Node-to-Node Sync" href="/gpustack-operator/main/docs/modules/model-delivery/node-to-node-sync/" >Node-to-Node Sync</a>
           
           
         
@@ -1030,7 +1028,7 @@
       
         
         
-          <a title="Model Deployment Configuration" href="/gpustack-operator/main/docs/modules/model-deployment/deployment/" >Configuration</a>
+          <a title="Configuration" href="/gpustack-operator/main/docs/modules/model-deployment/configuration/" >Configuration</a>
           
           
         
@@ -1040,7 +1038,7 @@
       
         
         
-          <a title="Engine Compatibility" href="/gpustack-operator/main/docs/modules/model-deployment/engine-versions/" >Compatibility</a>
+          <a title="Engine Compatibility" href="/gpustack-operator/main/docs/modules/model-deployment/engine-versions/" >Engine Versions</a>
           
           
         
@@ -1208,7 +1206,12 @@
 
 
 
+  
+  
 
+
+
+  
 
 <details class="nav-section" >
   <summary title="GPU Instances">GPU Instances</summary>
@@ -1218,6 +1221,16 @@
       
       <a title="GPU Instances" href="/gpustack-operator/main/docs/modules/instances/" >Overview</a>
     
+    
+      
+      
+        
+        
+          <a title="Instance Metrics Reference" href="/gpustack-operator/main/docs/modules/instances/metrics/" >Metrics</a>
+          
+          
+        
+      
     
   </div>
 </details>
@@ -1322,7 +1335,7 @@
       
         
         
-          <a title="Migrating to Bundled Subcharts" href="/gpustack-operator/main/docs/operate/migration/to-subcharts/" >Bundled Subcharts</a>
+          <a title="Migrating to Bundled Subcharts" href="/gpustack-operator/main/docs/operate/migration/bundled-subcharts/" >Bundled Subcharts</a>
           
           
         
@@ -1332,7 +1345,7 @@
       
         
         
-          <a title="Upgrading to an Enforced Binding Dtype" href="/gpustack-operator/main/docs/operate/migration/kv-cache-dtype/" >Enforced Binding Dtype</a>
+          <a title="Upgrading to an Enforced Binding Dtype" href="/gpustack-operator/main/docs/operate/migration/enforced-binding-dtype/" >Enforced Binding Dtype</a>
           
           
         
@@ -1373,12 +1386,7 @@
   
   
 
-  
-  
 
-
-
-  
 
   
 
@@ -1416,16 +1424,6 @@
         
         
           <a title="Instance Type Unit Resources Reference" href="/gpustack-operator/main/docs/reference/instance-type-unit-resources/" >Resource Presets</a>
-          
-          
-        
-      
-    
-      
-      
-        
-        
-          <a title="Instance Metrics Reference" href="/gpustack-operator/main/docs/reference/instance-metrics/" >Instance Metrics</a>
           
           
         
@@ -1496,7 +1494,8 @@ For managed backends, <em><code>members[].medium</code></em> chooses host memory
 </span></span></span><span class="line"><span class="cl"><span class="w">            </span><span class="nt">kubernetes.io/os</span><span class="p">:</span><span class="w"> </span><span class="l">linux</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="nt">medium: DRAM  # memory segment medium</span><span class="p">:</span><span class="w"> </span><span class="l">DRAM or VRAM</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="nt">capacityPerMember</span><span class="p">:</span><span class="w"> </span><span class="l">4Gi</span></span></span></code></pre></div>
-</div><ul>
+</div>
+<ul>
 <li><strong>Connection:</strong> Set exactly one of <em><code>connection.managed</code></em> or <em><code>connection.external</code></em>.</li>
 <li><strong>Groups:</strong> Multiple member groups are allowed. At most one may have a <a href="/gpustack-operator/main/docs/modules/kv-cache/local-disk-tier/">local disk tier</a>
 .</li>
@@ -1726,7 +1725,8 @@ their sources, not a YAML file mounted in the container.</p>
 </span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">global_segment_size</span><span class="p">:</span><span class="w"> </span><span class="l">&lt;segment-size&gt; </span><span class="w"> </span><span class="c"># MOONCAKE_GLOBAL_SEGMENT_SIZE</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">local_buffer_size</span><span class="p">:</span><span class="w"> </span><span class="l">&lt;buffer-size&gt; </span><span class="w"> </span><span class="c"># MOONCAKE_LOCAL_BUFFER_SIZE</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="c"># device_name is deliberately unset: MOONCAKE_DEVICE</span></span></span></code></pre></div>
-</div><p><strong><code>MOONCAKE_TE_META_DATA_SERVER</code> carries an underscore inside <code>META_DATA</code>.</strong> It is not
+</div>
+<p><strong><code>MOONCAKE_TE_META_DATA_SERVER</code> carries an underscore inside <code>META_DATA</code>.</strong> It is not
 <code>MOONCAKE_TE_METADATA_SERVER</code>, and normalising it to the spelling that reads correctly <strong>silently
 degrades the metadata plane</strong> rather than erroring.</p>
 <p><strong><code>MOONCAKE_DEVICE</code> is left unset on purpose, and the documented value <code>auto-discovery</code> is a trap.</strong>
@@ -1891,7 +1891,8 @@ be brought in. Nothing is inferred; every route is written on the group:</p>
 </span></span></span><span class="line"><span class="cl"><span class="w">              </span><span class="nt">readOnly</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="nt">securityContext</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">            </span><span class="nt">privileged</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="w">  </span><span class="c"># When a mount alone cannot open what was mounted.</span></span></span></code></pre></div>
-</div><p>These fields illustrate alternative access routes; select the route for the node&rsquo;s vendor.</p>
+</div>
+<p>These fields illustrate alternative access routes; select the route for the node&rsquo;s vendor.</p>
 <p><strong>Privilege alone does not cover this.</strong> It opens the node&rsquo;s device tree under <code>/dev</code>, which is
 where the device nodes are and is <strong>not</strong> where the libraries are: Ascend&rsquo;s driver is under
 <code>/usr/local/Ascend/driver</code> with DCMI beside it, and NVIDIA&rsquo;s <code>libcuda.so</code> is injected by the
@@ -1929,7 +1930,8 @@ driver once the variable tells it which devices to inject:</p>
 </span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="nt">extraEnv</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">            </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">NVIDIA_VISIBLE_DEVICES</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">              </span><span class="nt">value</span><span class="p">:</span><span class="w"> </span><span class="l">all</span></span></span></code></pre></div>
-</div><p>That variable is honored only while the toolkit&rsquo;s
+</div>
+<p>That variable is honored only while the toolkit&rsquo;s
 <code>accept-nvidia-visible-devices-envvar-when-unprivileged</code> is on, which is its default and which
 NVIDIA&rsquo;s own hardening guidance turns <strong>off</strong>. On a cluster that turned it off, use
 <em><code>runtimeClassName</code></em> instead.</p>
@@ -1964,7 +1966,8 @@ mounted from the node:</p>
 </span></span></span><span class="line"><span class="cl"><span class="w">              </span><span class="nt">mountPath</span><span class="p">:</span><span class="w"> </span><span class="l">/usr/local/bin/npu-smi</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">              </span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l">File</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">              </span><span class="nt">readOnly</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span></span></span></code></pre></div>
-</div><p><strong>A VRAM group may also carry a <a href="/gpustack-operator/main/docs/modules/kv-cache/local-disk-tier/">local disk tier</a>
+</div>
+<p><strong>A VRAM group may also carry a <a href="/gpustack-operator/main/docs/modules/kv-cache/local-disk-tier/">local disk tier</a>
 , and that combination is
 measured on NVIDIA.</strong> Objects written past a 256Mi device segment left memory for the tier and read
 back with matching digests. No upstream test covers the pairing, so the reading is this project&rsquo;s own.</p>
@@ -1993,12 +1996,16 @@ network rules. With host networking, the <code>Pod</code> IP is the node address
 must discover its current endpoint rather than reuse a previous connection address.</p>
 <h2 id="status-and-conditions">Status and conditions</h2>
 <div class="code-block">
-  <div class="code-toolbar"><span>console</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
-  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-console" data-lang="console"><span class="line"><span class="cl"><span class="gp">$</span> kubectl get kvcb
-</span></span><span class="line"><span class="cl"><span class="go">NAME            TYPE       PHASE   ENDPOINT                                        CAPACITY
-</span></span></span><span class="line"><span class="cl"><span class="go">mooncake-dram   Mooncake   Ready   mooncake-dram-leader.gpustack-system.svc:50051  12Gi
-</span></span></span></code></pre></div>
-</div><p>Phases: <code>Provisioning</code>, <code>Ready</code>, <code>Degraded</code>, <code>Error</code>, <code>Deleting</code>. <code>Ready</code> carries no
+  <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">kubectl get kvcb</span></span></code></pre></div>
+</div>
+<p>Captured output:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>text</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-text" data-lang="text"><span class="line"><span class="cl">NAME            TYPE       PHASE   ENDPOINT                                        CAPACITY
+</span></span><span class="line"><span class="cl">mooncake-dram   Mooncake   Ready   mooncake-dram-leader.gpustack-system.svc:50051  12Gi</span></span></code></pre></div>
+</div>
+<p>Phases: <code>Provisioning</code>, <code>Ready</code>, <code>Degraded</code>, <code>Error</code>, <code>Deleting</code>. <code>Ready</code> carries no
 <em><code>phaseMessage</code></em>; every other phase carries one.</p>
 <p>Conditions report independent aspects of backend health: <code>LeaderAvailable</code>, <code>MembersMounted</code>, <code>CapacityObserved</code>, <code>PoolWrites</code>, <code>Deletable</code> and
 <code>RolloutComplete</code>. Two more appear only where they have something to judge: <code>ElectionObserved</code>
@@ -2188,7 +2195,8 @@ the endpoint.</p>
 </span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="nt">capacityPerMember</span><span class="p">:</span><span class="w"> </span><span class="l">64Gi</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">scaleIn</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">gracePeriodSeconds</span><span class="p">:</span><span class="w"> </span><span class="m">30</span><span class="w">  </span><span class="c"># 0 to 3600 seconds</span></span></span></code></pre></div>
-</div><p><strong>The <code>Pod</code>&rsquo;s termination window is derived from it</strong>, as <code>gracePeriodSeconds + 60</code>, rather than being
+</div>
+<p><strong>The <code>Pod</code>&rsquo;s termination window is derived from it</strong>, as <code>gracePeriodSeconds + 60</code>, rather than being
 a second field beside it. That is what makes the relationship hold: two independent fields could be
 set so the kubelet kills the container in the middle of the wait, and no validation makes that
 impossible. It only makes it checkable.</p>
@@ -2217,7 +2225,8 @@ own success signal does not tell you that happened.</p>
 </span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="nt">address</span><span class="p">:</span><span class="w"> </span><span class="l">mooncake.example:50051</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">        </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">Admin</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="nt">address</span><span class="p">:</span><span class="w"> </span><span class="l">mooncake.example:9003</span></span></span></code></pre></div>
-</div><p>Both roles are required, so the list holds exactly two entries: entries are keyed by <code>name</code>, which
+</div>
+<p>Both roles are required, so the list holds exactly two entries: entries are keyed by <code>name</code>, which
 has two values, and admission refuses a list missing either one. Each address is validated as
 <code>host:port</code> at admission. A blank or portless one would otherwise be mirrored into status and
 handed to an engine that cannot dial it.</p>
@@ -2268,7 +2277,7 @@ other&rsquo;s blocks.</strong> The reuse identity an engine is handed is the dom
 Binding hands its own <a href="/gpustack-operator/main/docs/modules/kv-cache/pool/#engine-dtype"><code>dtype</code></a>
  to its own
 engines, and <em><code>blockSize</code></em> reaches no engine at all. So two differently-shaped caches land under
-one identity, which is <a href="/gpustack-operator/main/docs/modules/model-deployment/deployment/#inherited-reuse-domain">the silent cache pollution</a>
+one identity, which is <a href="/gpustack-operator/main/docs/modules/model-deployment/configuration/#inherited-reuse-domain">the silent cache pollution</a>
 
 a wrong <em><code>blockSize</code></em> or <code>dtype</code> causes, reached here without either value being wrong.</li>
 </ol>
@@ -2283,14 +2292,16 @@ and is harmless:</p>
 <div class="code-block">
   <div class="code-toolbar"><span>text</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
   <pre tabindex="0"><code>E transfer_metadata.cpp:991] Local segment descriptor not found</code></pre>
-</div><p><strong>Client-side environment settings</strong>, observed at startup:</p>
+</div>
+<p><strong>Client-side environment settings</strong>, observed at startup:</p>
 <div class="code-block">
   <div class="code-toolbar"><span>text</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
   <pre tabindex="0"><code>MC_TE_METRIC=1                        enable transfer-engine metrics (OFF by default)
 MC_STORE_CLIENT_METRIC_BANDWIDTH      client bandwidth summary
 MC_STORE_MEMCPY                       unset =&gt; auto-detected (&#34;TCP-only environment, memcpy enabled&#34;)
 MC_METADATA_SERVER / P2PHANDSHAKE     the transfer engine&#39;s own low-level metadata knob</code></pre>
-</div><p><strong><code>MC_TE_METRIC</code> is rendered on every member group and cannot be turned off from the CR.</strong> The other
+</div>
+<p><strong><code>MC_TE_METRIC</code> is rendered on every member group and cannot be turned off from the CR.</strong> The other
 three are set on the <em>workload</em> and not here. It is reserved in <em><code>members[].extraEnv</code></em> for the reason
 every rendered name is: the environment override appends, and a container carrying one name twice leaves the winner
 to the runtime.</p>
@@ -2363,18 +2374,6 @@ a quota on this store, and what a quota ceiling buys)</li><li><a href="/gpustack
     <aside class="toc-panel" aria-label="Page navigation">
       <div class="toc-inner">
         
-          
-          
-          
-          <nav class="page-actions" aria-label="Page source">
-            <a href="https://github.com/gpustack/gpustack-operator/blob/304681b245c3f392539df1404126be8fb9d22adb/docs/modules/kv-cache/backend.md">View page source</a>
-            
-            <a href="https://github.com/gpustack/gpustack-operator/edit/main/docs/modules/kv-cache/backend.md">Edit this page</a>
-            
-          </nav>
-        
-        
-          <div class="toc-title">On this page</div>
           <nav id="TableOfContents">
   <ul>
     <li><a href="#contents">Contents</a></li>

@@ -176,12 +176,12 @@ without this two engines on one domain can write two element types under one key
   spelling both accept: `bfloat16`, `fp8_e4m3`, `fp8_e5m2` or `nvfp4`.
 - **A spelling the engine rejects stops every new `Pod`** at argument parsing, and the dtype is
   immutable. The recovery is under
-  [Upgrading to an enforced Binding dtype](/gpustack-operator/main/docs/operate/migration/kv-cache-dtype/index.md).
+  [Upgrading to an enforced Binding dtype](/gpustack-operator/main/docs/operate/migration/enforced-binding-dtype/index.md).
 - **`auto` is refused on a new Binding.** Both engines accept it and resolve it from the model they
   load, so it binds nothing. A Binding stored with it before the refusal stays usable and updatable.
 - **The engine is not free to disagree.** A role naming `--kv-cache-dtype` itself is refused; the
   rule and its exceptions are under
-  [Operator-owned keys](/gpustack-operator/main/docs/modules/model-deployment/deployment/index.md#operator-owned-keys).
+  [Operator-owned keys](/gpustack-operator/main/docs/modules/model-deployment/configuration/index.md#operator-owned-keys).
 
 All of it follows the `Setting` `model-deployment-kv-cache-dtype-owned`, on by default; turning it
 off renders and refuses nothing, as before. See [Settings](/gpustack-operator/main/docs/reference/settings/index.md).
@@ -400,7 +400,7 @@ zero is the [Zero grants](#zero-grants) case.
 
 **See also** — [KV Cache Backend](/gpustack-operator/main/docs/modules/kv-cache/backend/index.md) (the store this pool publishes, and where eviction is
 configured) · [KV Cache Injection](/gpustack-operator/main/docs/modules/kv-cache/injection/index.md) (how a `Pod` consumes a namespace grant) ·
-[Model Deployment](/gpustack-operator/main/docs/modules/model-deployment/deployment/index.md) (the other half of the
+[Model Deployment](/gpustack-operator/main/docs/modules/model-deployment/configuration/index.md) (the other half of the
 worked pair: a rendered engine names this Binding through *`spec.kvCache.poolRef`*) ·
 [Admission](/gpustack-operator/main/docs/modules/devices/admission/index.md) (the gates and the four-view status
 pattern) · [Settings & Environment Variables](/gpustack-operator/main/docs/reference/settings/index.md)

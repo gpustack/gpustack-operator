@@ -323,7 +323,7 @@ The benchmark measured one model, two prompt/output targets and one run per conf
 This fixed group does not resize its collective online; use [Elastic EP](/gpustack-operator/main/docs/walkthroughs/model-deployment/elastic-ep/index.md) for width
 growth. Group sizing and replacement semantics are covered in
 [Admission constraints](/gpustack-operator/main/docs/modules/model-deployment/external-dp/index.md#admission-constraints) and
-[Rollout behavior](/gpustack-operator/main/docs/modules/model-deployment/deployment/index.md#rollout-behavior).
+[Rollout behavior](/gpustack-operator/main/docs/modules/model-deployment/configuration/index.md#rollout-behavior).
 
 The example does not establish *External DP* with *Prefill/Decode*, hybrid load balancing, multiple HTTP ports per `Pod`,
 or placement across GPU nodes. Those configurations need separate compatibility and runtime checks.

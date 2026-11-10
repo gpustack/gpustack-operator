@@ -2,7 +2,7 @@
 
 A *prefill/decode (PD)* deployment with *Prefill* and *Decode* roles is admitted as one set. Once both roles run, the
 operator connects them through a router and a transfer path. [Prefill and
-decode](deployment.md#prefill-and-decode) describes the role fields and admission rules.
+decode](configuration.md#prefill-and-decode) describes the role fields and admission rules.
 
 The recorded runs apply to vLLM `v0.30.0` and SGLang `0.5.22`. Other versions must be re-verified
 before they inherit a claim on this page.
@@ -97,7 +97,7 @@ invisibly widened pair therefore fails loudly only when the document's *decode* 
 
 Admission holds the visible side of the contract: a degree the command line does not state legibly
 is refused, and so is a declared per-member width the role's card request cannot hold; see
-[Admission refusals](/gpustack-operator/main/docs/modules/model-deployment/deployment/index.md#admission-refusals).
+[Admission refusals](/gpustack-operator/main/docs/modules/model-deployment/configuration/index.md#admission-refusals).
 
 SGLang renders its halves through the engine's own disaggregation arguments rather than this
 connector path; the two engines' paths differ by [their handshake](#direct-transfer-transport)
@@ -355,7 +355,7 @@ Which value works on which engine is [the transport matrix](/gpustack-operator/m
 
 **`tcp` is enforced, not only requested**: the transfer engine picks its transport from the host,
 and with no RDMA device a build with multi-node NVLink installs NVLink between hosts with no NVLink
-path. So native vLLM also gets the [defaulted](/gpustack-operator/main/docs/modules/model-deployment/deployment/index.md#operator-owned-keys) `MC_FORCE_TCP=1`. Both pins
+path. So native vLLM also gets the [defaulted](/gpustack-operator/main/docs/modules/model-deployment/configuration/index.md#operator-owned-keys) `MC_FORCE_TCP=1`. Both pins
 are process-wide, so neither renders beside a store on another transport, and every client at
 its engine's [supported minimum](/gpustack-operator/main/docs/modules/model-deployment/engine-versions/index.md) honors them.
 
@@ -372,13 +372,13 @@ It is separate from the pool's transport. `KVCacheBackend.spec.transport` feeds 
 client; this path is engine to engine and never traverses the store, so the two declare separately: a
 deployment with no *`kvCache`* block still has this path to configure.
 
-Editing it [turns over every role](/gpustack-operator/main/docs/modules/model-deployment/deployment/index.md#rollout-behavior): the value renders
+Editing it [turns over every role](/gpustack-operator/main/docs/modules/model-deployment/configuration/index.md#rollout-behavior): the value renders
 into both ends' arguments, so every role's replicas turn over one at a time. A prefiller and a decoder
 can disagree on the protocol until both converge, the same window an edit to the image a role runs
 (*`engine.image`* or *`roles[].image`*) opens.
 
 The same shared-document rule reaches the parallel degrees on the Ascend path. The pair turns over
-together; see [Rollout behavior](/gpustack-operator/main/docs/modules/model-deployment/deployment/index.md#rollout-behavior) for the mechanism. Until both roles
+together; see [Rollout behavior](/gpustack-operator/main/docs/modules/model-deployment/configuration/index.md#rollout-behavior) for the mechanism. Until both roles
 converge, the pair can fail to complete a transfer.
 
 ## Different hardware per role
@@ -388,7 +388,7 @@ publishes as its *`status.entrance`*. Every replica is its own group regardless,
 never going to share a `Workload`, on two *`instanceType`*s or on one. The set is admitted together by an
 admission check rather than by Kueue's intra-group rule.
 
-See [One group per replica](/gpustack-operator/main/docs/modules/model-deployment/deployment/index.md#one-group-per-replica) for what that costs an edit, and
+See [One group per replica](/gpustack-operator/main/docs/modules/model-deployment/configuration/index.md#one-group-per-replica) for what that costs an edit, and
 [Authoring the InstanceType yourself](/gpustack-operator/main/docs/reference/settings/index.md#authoring-the-instancetype) for which
 queues carry the check.
 
@@ -443,7 +443,7 @@ What *`status.endpoint`* publishes in each configuration is under [Status](/gpus
 
 ---
 
-**See also** — [Model Deployment](/gpustack-operator/main/docs/modules/model-deployment/deployment/index.md) for the role fields, the owned-key
+**See also** — [Model Deployment](/gpustack-operator/main/docs/modules/model-deployment/configuration/index.md) for the role fields, the owned-key
 table and what admission refuses · [Model Deployment Routing](/gpustack-operator/main/docs/modules/model-deployment/routing/index.md) for which replica each
 router picks · [Engine Compatibility](/gpustack-operator/main/docs/modules/model-deployment/engine-versions/index.md) for which transport each engine can use on
 each path · [Model Deployment Status](/gpustack-operator/main/docs/modules/model-deployment/status/index.md) for what *`status.endpoint`* publishes ·

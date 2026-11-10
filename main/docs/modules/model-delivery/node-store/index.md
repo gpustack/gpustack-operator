@@ -127,7 +127,7 @@ status:  # Node plugin-owned; admitted only through the status webhook below.
 
 The worker rewrites `spec` within a minute of a `Setting` change. The plugin has no `nodes/proxy` access.
 
-The public [NodeModelStore API](/gpustack-operator/main/docs/modules/model-delivery/views/index.md#resources) supports reads and deletion. Its configuration
+The public [NodeModelStore API](/gpustack-operator/main/docs/modules/model-delivery/artifact-api/index.md#resources) supports reads and deletion. Its configuration
 and status are maintained by the worker and node plugin. The worker recreates a deleted object
 while its node runs the plugin.
 
@@ -303,7 +303,7 @@ Served on the plugin's HTTPS port (`modelManager.securePort`, 32444), beside `/r
 
 No label carries a namespace, an artifact, a repository or a `Pod`.
 
-The `ModelArtifact` [progress](/gpustack-operator/main/docs/modules/model-delivery/views/index.md#progress-subresource) subresource reads the running
+The `ModelArtifact` [progress](/gpustack-operator/main/docs/modules/model-delivery/artifact-api/index.md#progress-subresource) subresource reads the running
 downloads from this port for live bytes between the status thresholds.
 
 ## Prerequisites and limitations
@@ -321,14 +321,14 @@ downloads from this port for live bytes between the status thresholds.
   [a node-delivered model prefers the nodes holding
   it](../topology/scheduling.md#node-delivered-model-placement).
 - **A download comes from the Hub**, directly or through the proxy, or, when
-  [node-to-node sync](/gpustack-operator/main/docs/modules/model-delivery/peer-sync/index.md) is on, from a peer node that already holds
+  [node-to-node sync](/gpustack-operator/main/docs/modules/model-delivery/node-to-node-sync/index.md) is on, from a peer node that already holds
   the tree.
 
 ---
 
 **See also** — [Model Artifact](/gpustack-operator/main/docs/modules/model-delivery/artifact/index.md) for the artifact and its other
-deliveries · [Model Artifact API](/gpustack-operator/main/docs/modules/model-delivery/views/index.md) for resource status and
-`progress` · [Node-to-Node Sync](/gpustack-operator/main/docs/modules/model-delivery/peer-sync/index.md) for where a node's bytes come from ·
+deliveries · [Model Artifact API](/gpustack-operator/main/docs/modules/model-delivery/artifact-api/index.md) for resource status and
+`progress` · [Node-to-Node Sync](/gpustack-operator/main/docs/modules/model-delivery/node-to-node-sync/index.md) for where a node's bytes come from ·
 [Model Store Operations](/gpustack-operator/main/docs/modules/model-delivery/operations/index.md) for enabling, configuring and upgrading ·
 [Settings](/gpustack-operator/main/docs/reference/settings/index.md#settings) for the `Setting`s *`spec`* is built from.
 

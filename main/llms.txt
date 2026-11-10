@@ -2,7 +2,7 @@
 
 > GPUStack Operator discovers accelerators, organizes capacity into pools, and schedules Kubernetes workloads for interactive use and model serving.
 
-Documentation version: main. Source revision: 304681b245c3f392539df1404126be8fb9d22adb.
+Documentation version: main. Source revision: e50f885d037f4c00400f32f4ec1be0cac9581fca.
 These pages come from the repository's docs/ sources. For version-specific behavior, use the
 documentation and code for your release. This index routes questions; follow its links for evidence.
 
@@ -65,18 +65,18 @@ documentation and code for your release. This index routes questions; follow its
 
 - [Model Delivery](https://docs.gpustack.ai/gpustack-operator/main/docs/modules/model-delivery/index.md): Choose how weights reach workloads.
 - [Model Artifact](https://docs.gpustack.ai/gpustack-operator/main/docs/modules/model-delivery/artifact/index.md): Resolve and verify model weights.
-- [Model Artifact API](https://docs.gpustack.ai/gpustack-operator/main/docs/modules/model-delivery/views/index.md): Read artifact and node cache status.
+- [Model Artifact API](https://docs.gpustack.ai/gpustack-operator/main/docs/modules/model-delivery/artifact-api/index.md): Read artifact and node cache status.
 - [Model Image Source](https://docs.gpustack.ai/gpustack-operator/main/docs/modules/model-delivery/image-source/index.md): Package weights in an image.
 - [Model Prefetch](https://docs.gpustack.ai/gpustack-operator/main/docs/modules/model-delivery/prefetch/index.md): Warm weights before a workload starts.
 - [Node Model Store](https://docs.gpustack.ai/gpustack-operator/main/docs/modules/model-delivery/node-store/index.md): Understand node cache state and collection.
-- [Node-to-Node Sync](https://docs.gpustack.ai/gpustack-operator/main/docs/modules/model-delivery/peer-sync/index.md): Move cached weights between nodes.
+- [Node-to-Node Sync](https://docs.gpustack.ai/gpustack-operator/main/docs/modules/model-delivery/node-to-node-sync/index.md): Move cached weights between nodes.
 - [Remote Weight Delivery](https://docs.gpustack.ai/gpustack-operator/main/docs/modules/model-delivery/remote/index.md): Load weights from a prepared source.
 - [Model Store Operations](https://docs.gpustack.ai/gpustack-operator/main/docs/modules/model-delivery/operations/index.md): Operate the node model cache.
 
 ## Model Deployment
 
 - [Model Deployment](https://docs.gpustack.ai/gpustack-operator/main/docs/modules/model-deployment/index.md): Start with managed model serving.
-- [Model Deployment Configuration](https://docs.gpustack.ai/gpustack-operator/main/docs/modules/model-deployment/deployment/index.md): Configure serving roles and overrides.
+- [Configuration](https://docs.gpustack.ai/gpustack-operator/main/docs/modules/model-deployment/configuration/index.md): Configure serving roles and overrides.
 - [Engine Compatibility](https://docs.gpustack.ai/gpustack-operator/main/docs/modules/model-deployment/engine-versions/index.md): Check engine releases, client and store requirements, and transport support.
 - [Prefill and Decode](https://docs.gpustack.ai/gpustack-operator/main/docs/modules/model-deployment/prefill-decode/index.md): Pair serving roles.
 - [Prefill and Decode Benchmark](https://docs.gpustack.ai/gpustack-operator/main/docs/modules/model-deployment/prefill-decode-benchmark/index.md): Compare equal-GPU H100 aggregated and disaggregated serving across fixed shapes and mixed traffic.
@@ -97,14 +97,15 @@ documentation and code for your release. This index routes questions; follow its
 ## GPU Instances
 
 - [GPU Instances](https://docs.gpustack.ai/gpustack-operator/main/docs/modules/instances/index.md): Start an accelerator-backed workspace.
+- [Instance Metrics Reference](https://docs.gpustack.ai/gpustack-operator/main/docs/modules/instances/metrics/index.md): Read an Instance’s resource use.
 
 ## Operations
 
 - [Installation Modes](https://docs.gpustack.ai/gpustack-operator/main/docs/operate/installation-modes/index.md): Choose chart or image installation.
 - [High Availability Operations](https://docs.gpustack.ai/gpustack-operator/main/docs/operate/high-availability/index.md): Set replica counts for control-plane parts.
 - [Migrating from v0.5.x](https://docs.gpustack.ai/gpustack-operator/main/docs/operate/migration/from-v0.5/index.md): Upgrade across the queue refactor.
-- [Migrating to Bundled Subcharts](https://docs.gpustack.ai/gpustack-operator/main/docs/operate/migration/to-subcharts/index.md): Transfer chart ownership.
-- [Upgrading to an Enforced Binding Dtype](https://docs.gpustack.ai/gpustack-operator/main/docs/operate/migration/kv-cache-dtype/index.md): Check dtype before upgrading.
+- [Migrating to Bundled Subcharts](https://docs.gpustack.ai/gpustack-operator/main/docs/operate/migration/bundled-subcharts/index.md): Transfer chart ownership.
+- [Upgrading to an Enforced Binding Dtype](https://docs.gpustack.ai/gpustack-operator/main/docs/operate/migration/enforced-binding-dtype/index.md): Check dtype before upgrading.
 - [Migration Troubleshooting](https://docs.gpustack.ai/gpustack-operator/main/docs/operate/migration/troubleshooting/index.md): Recover a stuck upgrade.
 
 ## Reference
@@ -112,14 +113,13 @@ documentation and code for your release. This index routes questions; follow its
 - [Command Reference](https://docs.gpustack.ai/gpustack-operator/main/docs/reference/commands/index.md): Look up binary commands and flags.
 - [Settings & Environment Variables](https://docs.gpustack.ai/gpustack-operator/main/docs/reference/settings/index.md): Look up operator configuration.
 - [Instance Type Unit Resources Reference](https://docs.gpustack.ai/gpustack-operator/main/docs/reference/instance-type-unit-resources/index.md): Look up CPU and memory presets.
-- [Instance Metrics Reference](https://docs.gpustack.ai/gpustack-operator/main/docs/reference/instance-metrics/index.md): Read an Instance’s resource use.
 
 ## Contribution
 
 
 ## Optional
 
-- [Repository navigation](https://github.com/gpustack/gpustack-operator/blob/304681b245c3f392539df1404126be8fb9d22adb/docs/README.md): Module relationships, design records, code entry points and applicable skills for contributors.
+- [Repository navigation](https://github.com/gpustack/gpustack-operator/blob/e50f885d037f4c00400f32f4ec1be0cac9581fca/docs/README.md): Module relationships, design records, code entry points and applicable skills for contributors.
 - [Development](https://docs.gpustack.ai/gpustack-operator/main/docs/contribute/development/index.md): Build, generate and lint the project.
 - [Local Cluster Setup](https://docs.gpustack.ai/gpustack-operator/main/docs/contribute/local-cluster-setup/index.md): Install kind and provide a cluster for development tests.
 - [Internals](https://docs.gpustack.ai/gpustack-operator/main/docs/contribute/internals/index.md): Review startup and naming constraints.

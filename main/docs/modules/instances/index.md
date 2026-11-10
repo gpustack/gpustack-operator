@@ -34,7 +34,7 @@ flowchart TD
 ### Instance configuration
 
 This minimal example requests one accelerator and exposes a service port. For the
-`InstanceSSHPublicKey` manifest and SSH login commands, see [Usage](https://github.com/gpustack/gpustack-operator/blob/304681b245c3f392539df1404126be8fb9d22adb/README.md#usage).
+`InstanceSSHPublicKey` manifest and SSH login commands, see [Usage](https://github.com/gpustack/gpustack-operator/blob/e50f885d037f4c00400f32f4ec1be0cac9581fca/README.md#usage).
 
 ```yaml
 apiVersion: worker.gpustack.ai/v1
@@ -67,7 +67,7 @@ spec:
 The workload container owns the accelerator request. The optional SSH sidecar uses a separate
 visibility resource to enter the same workspace without acquiring a second accelerator. See
 [Device Discovery](/gpustack-operator/main/docs/modules/devices/discovery/index.md#ssh-instances-and-visibility).
-[Instance Metrics](/gpustack-operator/main/docs/reference/instance-metrics/index.md) explains the reported utilization.
+[Instance Metrics](/gpustack-operator/main/docs/modules/instances/metrics/index.md) explains the reported utilization.
 
 ## Service lifecycle
 
@@ -126,25 +126,25 @@ another tenant's `Service` through the hosting node's address and node port.
 
 Replace the example values. Save the manifest as `instance.yaml`, then apply it:
 
-```shell
+```bash
 kubectl apply -f instance.yaml
 ```
 
 ### Step 2: Check workspace
 
-```shell
+```bash
 kubectl -n team-a wait --for=jsonpath='{.status.phase}'=Ready instance/workspace-demo --timeout=5m
 kubectl get instancetypes
 ```
 
 **Verification:** The wait completes when the `Instance` phase is `Ready`. The `InstanceType` reports remaining capacity.
-See [Instance Metrics](/gpustack-operator/main/docs/reference/instance-metrics/index.md) for utilization.
+See [Instance Metrics](/gpustack-operator/main/docs/modules/instances/metrics/index.md) for utilization.
 
 ## Troubleshooting
 
 If an `Instance` remains pending, inspect its phase message:
 
-```shell
+```bash
 kubectl -n team-a get instance workspace-demo -o jsonpath='{.status.phaseMessage}'
 ```
 
@@ -156,4 +156,4 @@ For Kueue `Workload` inspection, capacity checks and admission fixes, see the
 **See also** — [Heterogeneous Devices](/gpustack-operator/main/docs/modules/devices/index.md) (resource families) ·
 [Model Delivery](/gpustack-operator/main/docs/modules/model-delivery/index.md) (mounting model weights)
 
-**Next** → [Usage](https://github.com/gpustack/gpustack-operator/blob/304681b245c3f392539df1404126be8fb9d22adb/README.md#usage) — launch a sliced `Instance`.
+**Next** → [Usage](https://github.com/gpustack/gpustack-operator/blob/e50f885d037f4c00400f32f4ec1be0cac9581fca/README.md#usage) — launch a sliced `Instance`.

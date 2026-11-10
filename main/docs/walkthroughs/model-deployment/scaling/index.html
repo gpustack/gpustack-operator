@@ -27,7 +27,7 @@
   <link rel="alternate" type="text/markdown" href="/gpustack-operator/main/docs/walkthroughs/model-deployment/scaling/index.md">
   
   <link rel="describedby" href="/gpustack-operator/main/llms.txt">
-  <link rel="stylesheet" href="/gpustack-operator/main/css/site.1a0de63fe646aba4ed6541fe0a6383c2ed5ca649b1593a98595ba53430bcf032.css">
+  <link rel="stylesheet" href="/gpustack-operator/main/css/site.b1fdc6af165ce7fbb10ebc91a579913dc99eac181655e5aae84dbe714d354a09.css">
   <link rel="stylesheet" href="/gpustack-operator/main/css/code.d2570c1cc6480f9c62bc31ec538eef2578ce80980588c469638a5f95416bfc7b.css">
 </head>
 <body class="docs-page">
@@ -36,7 +36,6 @@
     
     <a class="brand" href="/gpustack-operator/main/" aria-label="GPUStack Operator home"><img src="/gpustack-operator/main/images/logo_hu_ced145186d6eddf4.47210af4015bb5bd13742c222995900070c6649233431804f39bf2e001be3ddb.png" width="32" height="32" alt=""><span>GPUStack Operator</span></a>
     <nav class="top-links" aria-label="Main navigation">
-      <a class="top-docs-link" href="/gpustack-operator/main/docs/" aria-current="page">Documentation</a>
       <a class="top-devin-link" href="https://deepwiki.com/gpustack/gpustack-operator" target="_blank" rel="noopener noreferrer" aria-label="Ask Devin on DeepWiki (opens in a new tab)">
         <svg aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M8 1.5c.31 3.02 1.67 4.38 4.69 4.69-3.02.31-4.38 1.67-4.69 4.69-.31-3.02-1.67-4.38-4.69-4.69 3.02-.31 4.38-1.67 4.69-4.69Zm5.06 8.19c.16 1.51.84 2.19 2.34 2.34-1.51.16-2.19.84-2.34 2.34-.16-1.51-.84-2.19-2.34-2.34 1.51-.16 2.19-.84 2.34-2.34Z"/></svg>
         <span>Ask Devin</span>
@@ -106,7 +105,6 @@
         </svg>
       </button>
       <nav id="docs-navigation" class="sidebar-inner">
-        <div class="nav-title">Documentation</div>
         <a class="nav-home" href="/gpustack-operator/main/" >Overview</a>
         
           
@@ -698,7 +696,7 @@
       
         
         
-          <a title="KV Cache Election and Failover" href="/gpustack-operator/main/docs/modules/kv-cache/leader/" >Election and Failover</a>
+          <a title="KV Cache Election and Failover" href="/gpustack-operator/main/docs/modules/kv-cache/leader/" >Leader Election</a>
           
           
         
@@ -761,15 +759,15 @@
 
 
   
-    
-      
-      
-        
-        
-      
-    
-  
 
+  
+    
+      
+      
+        
+        
+      
+    
   
 
   
@@ -803,7 +801,7 @@
             <div class="nav-children">
               
                 
-                  <a title="Model Artifact API" href="/gpustack-operator/main/docs/modules/model-delivery/views/" >API</a>
+                  <a title="Model Artifact API" href="/gpustack-operator/main/docs/modules/model-delivery/artifact-api/" >API</a>
                 
               
             </div>
@@ -848,7 +846,7 @@
       
         
         
-          <a title="Node-to-Node Sync" href="/gpustack-operator/main/docs/modules/model-delivery/peer-sync/" >Node-to-Node Sync</a>
+          <a title="Node-to-Node Sync" href="/gpustack-operator/main/docs/modules/model-delivery/node-to-node-sync/" >Node-to-Node Sync</a>
           
           
         
@@ -1030,7 +1028,7 @@
       
         
         
-          <a title="Model Deployment Configuration" href="/gpustack-operator/main/docs/modules/model-deployment/deployment/" >Configuration</a>
+          <a title="Configuration" href="/gpustack-operator/main/docs/modules/model-deployment/configuration/" >Configuration</a>
           
           
         
@@ -1040,7 +1038,7 @@
       
         
         
-          <a title="Engine Compatibility" href="/gpustack-operator/main/docs/modules/model-deployment/engine-versions/" >Compatibility</a>
+          <a title="Engine Compatibility" href="/gpustack-operator/main/docs/modules/model-deployment/engine-versions/" >Engine Versions</a>
           
           
         
@@ -1208,7 +1206,12 @@
 
 
 
+  
+  
 
+
+
+  
 
 <details class="nav-section" >
   <summary title="GPU Instances">GPU Instances</summary>
@@ -1218,6 +1221,16 @@
       
       <a title="GPU Instances" href="/gpustack-operator/main/docs/modules/instances/" >Overview</a>
     
+    
+      
+      
+        
+        
+          <a title="Instance Metrics Reference" href="/gpustack-operator/main/docs/modules/instances/metrics/" >Metrics</a>
+          
+          
+        
+      
     
   </div>
 </details>
@@ -1322,7 +1335,7 @@
       
         
         
-          <a title="Migrating to Bundled Subcharts" href="/gpustack-operator/main/docs/operate/migration/to-subcharts/" >Bundled Subcharts</a>
+          <a title="Migrating to Bundled Subcharts" href="/gpustack-operator/main/docs/operate/migration/bundled-subcharts/" >Bundled Subcharts</a>
           
           
         
@@ -1332,7 +1345,7 @@
       
         
         
-          <a title="Upgrading to an Enforced Binding Dtype" href="/gpustack-operator/main/docs/operate/migration/kv-cache-dtype/" >Enforced Binding Dtype</a>
+          <a title="Upgrading to an Enforced Binding Dtype" href="/gpustack-operator/main/docs/operate/migration/enforced-binding-dtype/" >Enforced Binding Dtype</a>
           
           
         
@@ -1373,12 +1386,7 @@
   
   
 
-  
-  
 
-
-
-  
 
   
 
@@ -1416,16 +1424,6 @@
         
         
           <a title="Instance Type Unit Resources Reference" href="/gpustack-operator/main/docs/reference/instance-type-unit-resources/" >Resource Presets</a>
-          
-          
-        
-      
-    
-      
-      
-        
-        
-          <a title="Instance Metrics Reference" href="/gpustack-operator/main/docs/reference/instance-metrics/" >Instance Metrics</a>
           
           
         
@@ -1628,11 +1626,13 @@ discovered H100 type.</p>
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">env</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">        </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">VLLM_HTTP_TIMEOUT_KEEP_ALIVE</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="nt">value</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;3600&#34;</span></span></span></code></pre></div>
-</div><div class="code-block">
+</div>
+<div class="code-block">
   <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">kubectl apply -f scaling-target.yaml
 </span></span><span class="line"><span class="cl">kubectl -n gpustack-bench get modeldeployment autoscaling-vllm-pd -w</span></span></code></pre></div>
-</div><p>Wait for <em><code>status.phase: Ready</code></em>. Verify one Ready replica in each role and a working Router
+</div>
+<p>Wait for <em><code>status.phase: Ready</code></em>. Verify one Ready replica in each role and a working Router
 before creating load. The vLLM flags enable the Router&rsquo;s
 <a href="/gpustack-operator/main/docs/modules/model-deployment/prefill-decode/#counting-engine-tokens">token-counting path</a>
 .
@@ -1674,14 +1674,16 @@ The ratio target prefers equal counts; add bounds only when a fixed ratio is req
 </span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="nt">target</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;3&#34;</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">        </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">decode</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="nt">target</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;3&#34;</span></span></span></code></pre></div>
-</div><div class="code-block">
+</div>
+<div class="code-block">
   <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">kubectl apply -f scaling-policy.yaml
 </span></span><span class="line"><span class="cl">kubectl -n gpustack-bench get mds autoscale-vllm-pd -o yaml
 </span></span><span class="line"><span class="cl">kubectl -n gpustack-bench get modeldeployment autoscaling-vllm-pd -o json <span class="se">\
 </span></span></span><span class="line"><span class="cl"><span class="se"></span>  <span class="p">|</span> jq <span class="s1">&#39;{replicas: [.spec.roles[] | {name, replicas}],
 </span></span></span><span class="line"><span class="cl"><span class="s1">         binding: .metadata.annotations[&#34;modeldeployment.gpustack.ai/scaler-binding&#34;]}&#39;</span></span></span></code></pre></div>
-</div><p>In <code>Shadow</code>, expect <code>Active=False</code> with reason <code>ShadowMode</code>, unchanged target counts and no binding
+</div>
+<p>In <code>Shadow</code>, expect <code>Active=False</code> with reason <code>ShadowMode</code>, unchanged target counts and no binding
 owned by this scaler. <code>Bound=True</code> means the target is available; it does not mean a Shadow scaler
 owns its replica counts. Inspect <em><code>status.roles[].rawRecommendedReplicas</code></em>,
 <em><code>constrainedReplicas</code></em>, <em><code>signalState</code></em> and <em><code>reason</code></em> together.</p>
@@ -1690,13 +1692,15 @@ owns its replica counts. Inspect <em><code>status.roles[].rawRecommendedReplicas
   <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">kubectl -n default run bench-driver --image<span class="o">=</span>python:3.11-slim --restart<span class="o">=</span>Never <span class="se">\
 </span></span></span><span class="line"><span class="cl"><span class="se"></span>  --command -- sleep infinity</span></span></code></pre></div>
-</div><p>Wait for readiness and install the client dependency if the driver does not already carry it:</p>
+</div>
+<p>Wait for readiness and install the client dependency if the driver does not already carry it:</p>
 <div class="code-block">
   <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">kubectl -n default <span class="nb">wait</span> pod/bench-driver --for<span class="o">=</span><span class="nv">condition</span><span class="o">=</span>Ready --timeout<span class="o">=</span>300s
 </span></span><span class="line"><span class="cl">kubectl -n default <span class="nb">exec</span> bench-driver -- python3 -m pip install aiohttp
 </span></span><span class="line"><span class="cl">kubectl -n default <span class="nb">exec</span> bench-driver -- python3 -c <span class="s1">&#39;import aiohttp&#39;</span></span></span></code></pre></div>
-</div><p>Run a small load from the source checkout. The client executes inside that driver against the
+</div>
+<p>Run a small load from the source checkout. The client executes inside that driver against the
 Router <code>Service</code>. Stop if it reports local fallback; local execution cannot measure this endpoint.</p>
 <div class="code-block">
   <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
@@ -1705,7 +1709,8 @@ Router <code>Service</code>. Stop if it reports local fallback; local execution 
 </span></span></span><span class="line"><span class="cl"><span class="se"></span>  --model /models --arm shadow --suite autoscaling --label baseline <span class="se">\
 </span></span></span><span class="line"><span class="cl"><span class="se"></span>  --input-tokens <span class="m">1024</span> --output-tokens <span class="m">256</span> --concurrency <span class="m">2</span> --duration <span class="m">45</span> <span class="se">\
 </span></span></span><span class="line"><span class="cl"><span class="se"></span>  --out /tmp/scaler-shadow.json --requests-out /tmp/scaler-shadow-requests.jsonl</span></span></code></pre></div>
-</div><p>Check the driver&rsquo;s readiness and error output if the load cannot start.
+</div>
+<p>Check the driver&rsquo;s readiness and error output if the load cannot start.
 Preserve both the phase JSON and request records before changing modes.
 Status is a snapshot of control-plane changes, so unchanged raw metrics do not establish that
 sampling stopped. Read engine metrics when a current signal value is needed.</p>
@@ -1763,7 +1768,8 @@ Capacity values below reproduce the benchmark&rsquo;s settings; tune them from m
 </span></span></span><span class="line"><span class="cl"><span class="gi">+      prefillTargetTokensPerSecond: &#34;1200&#34;
 </span></span></span><span class="line"><span class="cl"><span class="gi">+      decodeTargetTokensPerSecond: &#34;300&#34;
 </span></span></span></code></pre></div>
-</div><p>This replacement works for both vLLM and SGLang targets;
+</div>
+<p>This replacement works for both vLLM and SGLang targets;
 the scaler reads the target engine. Establish valid counter windows before judging recommendations.
 Read the <a href="/gpustack-operator/main/docs/modules/model-deployment/engine-versions/#limitations">SGLang TCP limitation</a>
 
@@ -1799,7 +1805,8 @@ before running sustained SGLang traffic.</p>
 </span></span></span><span class="line"><span class="cl"><span class="gi">+        prefillTargetTokensPerSecond: &#34;1200&#34;
 </span></span></span><span class="line"><span class="cl"><span class="gi">+        decodeTargetTokensPerSecond: &#34;300&#34;
 </span></span></span></code></pre></div>
-</div><p>The nested token targets supply the fallback while the predictor warms up.
+</div>
+<p>The nested token targets supply the fallback while the predictor warms up.
 Inspect <em><code>status.predictors</code></em> and the role reasons to distinguish fallback from predictive planning.
 Earlier growth alone does not prove a forecast caused it; token throughput also grew during baseline
 in the <a href="/gpustack-operator/main/docs/modules/model-deployment/scaling-benchmark/#scale-out-timing">recorded comparison</a>
@@ -1848,7 +1855,8 @@ server target and scaler changes are examples, not captured output from a live c
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">instanceType</span><span class="p">:</span><span class="w"> </span><span class="l">gpustack--nvidia-h100-80gb-hbm3-linux-amd64</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">resources</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">accelerator</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;1&#34;</span></span></span></code></pre></div>
-</div><p>Create a reviewed <code>ConfigMap</code> named <code>autoscaling-priors</code> in <code>gpustack-bench</code>. Its <code>priors.yaml</code>
+</div>
+<p>Create a reviewed <code>ConfigMap</code> named <code>autoscaling-priors</code> in <code>gpustack-bench</code>. Its <code>priors.yaml</code>
 key must contain a <a href="/gpustack-operator/main/docs/modules/model-deployment/scaling/#capacity-priors">profile matching the target</a>
 .
 Then create a separate scaler targeting this server:</p>
@@ -1880,7 +1888,8 @@ Then create a separate scaler targeting this server:</p>
 </span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">autoscaling-priors</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">key</span><span class="p">:</span><span class="w"> </span><span class="l">priors.yaml</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">headroom</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;0.75&#34;</span></span></span></code></pre></div>
-</div><p>In this <em>Server</em> partial override, <em><code>serverTargetTokensPerSecond</code></em> stays <code>Explicit</code> at <code>&quot;1200&quot;</code>
+</div>
+<p>In this <em>Server</em> partial override, <em><code>serverTargetTokensPerSecond</code></em> stays <code>Explicit</code> at <code>&quot;1200&quot;</code>
 while the omitted <em><code>serverTokenCapacityPerReplica</code></em> forecast capacity resolves from <code>Catalog</code> by
 the role&rsquo;s identity and multiplies its profile seed capacity by <em><code>headroom</code></em>. Both <code>&quot;1200&quot;</code> and
 <code>&quot;0.75&quot;</code> are illustrative configuration values rather than measured hardware capacities; removing
@@ -1891,7 +1900,8 @@ the role&rsquo;s identity and multiplies its profile seed capacity by <em><code>
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">kubectl -n gpustack-bench get mds autoscale-server -o json <span class="se">\
 </span></span></span><span class="line"><span class="cl"><span class="se"></span>  <span class="p">|</span> jq <span class="s1">&#39;{priors: .status.resolvedCapacityPriors,
 </span></span></span><span class="line"><span class="cl"><span class="s1">         conditions: [.status.conditions[] | select(.type == &#34;CapacityPriorsReady&#34; or .type == &#34;Blocked&#34;)]}&#39;</span></span></span></code></pre></div>
-</div><p>When the target matches an embedded profile, drop the explicit fallback and the <code>ConfigMap</code>: the
+</div>
+<p>When the target matches an embedded profile, drop the explicit fallback and the <code>ConfigMap</code>: the
 embedded catalog supplies the capacity and the identity resolves from the target.</p>
 <div class="code-block">
   <div class="code-toolbar"><span>diff</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
@@ -1914,7 +1924,8 @@ embedded catalog supplies the capacity and the identity resolves from the target
 </span></span></span><span class="line"><span class="cl"><span class="gd">-        key: priors.yaml
 </span></span></span><span class="line"><span class="cl"><span class="gd"></span>       headroom: &#34;0.75&#34;
 </span></span></code></pre></div>
-</div><p>To return to manual mode, remove <code>capacityPrior</code> and supply the required manual capacities:</p>
+</div>
+<p>To return to manual mode, remove <code>capacityPrior</code> and supply the required manual capacities:</p>
 <div class="code-block">
   <div class="code-toolbar"><span>diff</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-diff" data-lang="diff"><span class="line"><span class="cl"> apiVersion: worker.gpustack.ai/v1
@@ -1932,7 +1943,8 @@ embedded catalog supplies the capacity and the identity resolves from the target
 </span></span></span><span class="line"><span class="cl"><span class="gi"></span><span class="gd">-    capacityPrior:
 </span></span></span><span class="line"><span class="cl"><span class="gd">-      headroom: &#34;0.75&#34;
 </span></span></span></code></pre></div>
-</div><p>When the target exists, <code>CREATE</code> rejects an unresolved catalog prior. <code>UPDATE</code> admission returns a
+</div>
+<p>When the target exists, <code>CREATE</code> rejects an unresolved catalog prior. <code>UPDATE</code> admission returns a
 warning without writing <code>status</code> so you can suspend the scaler, switch to <code>Shadow</code>, remove
 <em><code>capacityPrior</code></em> or supply explicit capacities; the controller then sets
 <code>CapacityPriorsReady=False</code>, <code>Active=False</code> and <code>Blocked=True</code> on reconciliation (eventual
@@ -1975,7 +1987,8 @@ Provide bounds for every role and couple <em>encode</em> through a direct ratio.
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">numeratorRole</span><span class="p">:</span><span class="w"> </span><span class="l">encode</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">denominatorRole</span><span class="p">:</span><span class="w"> </span><span class="l">prefill</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">target</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;1&#34;</span></span></span></code></pre></div>
-</div><p>Combine this fragment with <code>TokenThroughput</code> or <code>Predictive</code>; the <em>encode</em> count follows ratio
+</div>
+<p>Combine this fragment with <code>TokenThroughput</code> or <code>Predictive</code>; the <em>encode</em> count follows ratio
 coupling rather than an encode token-capacity target. With one GPU per role replica, reserve up to
 six GPUs. A <em><code>target</code></em> without <em><code>min</code></em> and <em><code>max</code></em> is a preference.
 To require equal counts, set all three to <code>&quot;1&quot;</code> and ensure the current vector satisfies that policy.</p>
@@ -1987,7 +2000,8 @@ with the mode so later applies do not restore <code>Shadow</code>.</p>
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">kubectl apply -f scaling-policy.yaml
 </span></span><span class="line"><span class="cl">kubectl -n gpustack-bench get mds autoscale-vllm-pd -o json <span class="se">\
 </span></span></span><span class="line"><span class="cl"><span class="se"></span>  <span class="p">|</span> jq <span class="s1">&#39;{conditions: .status.conditions, binding: .status.binding, roles: .status.roles}&#39;</span></span></span></code></pre></div>
-</div><p>Expect <code>Bound=True</code> and <code>Active=True</code>. The target&rsquo;s binding identifies this scaler and its term.
+</div>
+<p>Expect <code>Bound=True</code> and <code>Active=True</code>. The target&rsquo;s binding identifies this scaler and its term.
 Let the scaler write the target&rsquo;s replica counts; the ownership contract reserves those writes
 while the binding is active.</p>
 <p>In one terminal, run higher concurrency. In another, watch the target and scaler.</p>
@@ -1998,14 +2012,16 @@ while the binding is active.</p>
 </span></span></span><span class="line"><span class="cl"><span class="se"></span>  --model /models --arm active --suite autoscaling --label ramp <span class="se">\
 </span></span></span><span class="line"><span class="cl"><span class="se"></span>  --input-tokens <span class="m">1024</span> --output-tokens <span class="m">256</span> --concurrency <span class="m">24</span> --duration <span class="m">75</span> <span class="se">\
 </span></span></span><span class="line"><span class="cl"><span class="se"></span>  --out /tmp/scaler-ramp.json --requests-out /tmp/scaler-ramp-requests.jsonl</span></span></code></pre></div>
-</div><div class="code-block">
+</div>
+<div class="code-block">
   <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">kubectl -n gpustack-bench get modeldeployment autoscaling-vllm-pd -w
 </span></span><span class="line"><span class="cl">kubectl -n gpustack-bench get mds autoscale-vllm-pd -o json <span class="se">\
 </span></span></span><span class="line"><span class="cl"><span class="se"></span>  <span class="p">|</span> jq <span class="s1">&#39;{roles: .status.roles, commit: .status.lastCommit,
 </span></span></span><span class="line"><span class="cl"><span class="s1">         pending: .status.pendingCohort, conditions: .status.conditions}&#39;</span>
 </span></span><span class="line"><span class="cl">kubectl -n gpustack-bench get pods,workloads</span></span></code></pre></div>
-</div><p>Compare the committed vector with desired and Ready counts. Confirm the new replica&rsquo;s own request
+</div>
+<p>Compare the committed vector with desired and Ready counts. Confirm the new replica&rsquo;s own request
 counter increases; a requested count alone proves neither admission nor serving.
 If <em><code>pendingCohort</code></em> remains set, inspect Kueue quota and <code>Pod</code> events before increasing ceilings.</p>
 <h2 id="step-5-observe-retirement">Step 5: Observe retirement</h2>
@@ -2019,7 +2035,8 @@ Leave additional time for the <em>decode</em> grace, Router withdrawal and drain
 </span></span></span><span class="line"><span class="cl"><span class="se"></span>  --model /models --arm active --suite autoscaling --label cooldown <span class="se">\
 </span></span></span><span class="line"><span class="cl"><span class="se"></span>  --input-tokens <span class="m">1024</span> --output-tokens <span class="m">256</span> --concurrency <span class="m">2</span> --duration <span class="m">600</span> <span class="se">\
 </span></span></span><span class="line"><span class="cl"><span class="se"></span>  --out /tmp/scaler-cooldown.json --requests-out /tmp/scaler-cooldown-requests.jsonl</span></span></code></pre></div>
-</div><p>Poll both status documents while the load runs. Repeat these commands to preserve changes:</p>
+</div>
+<p>Poll both status documents while the load runs. Repeat these commands to preserve changes:</p>
 <div class="code-block">
   <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">kubectl -n gpustack-bench get modeldeployment autoscaling-vllm-pd -o json <span class="se">\
@@ -2028,7 +2045,8 @@ Leave additional time for the <em>decode</em> grace, Router withdrawal and drain
 </span></span></span><span class="line"><span class="cl"><span class="se"></span>  <span class="p">|</span> jq <span class="s1">&#39;{roles: .status.roles, lastScaleDown: .status.lastScaleDown,
 </span></span></span><span class="line"><span class="cl"><span class="s1">         conditions: .status.conditions}&#39;</span>
 </span></span><span class="line"><span class="cl">kubectl -n gpustack-bench get pods,workloads</span></span></code></pre></div>
-</div><p>The protocol withdraws the selected replica, enters <code>Draining</code>, then commits deletion with state
+</div>
+<p>The protocol withdraws the selected replica, enters <code>Draining</code>, then commits deletion with state
 <code>Deleting</code>. Kubernetes may display its deleting <code>Pod</code> as <code>Terminating</code>.
 Read <a href="/gpustack-operator/main/docs/modules/model-deployment/shutdown/#retirement-protocol">Shutdown</a>
  for the complete protocol
@@ -2044,7 +2062,8 @@ count; lowering it below that count blocks planning with <code>BoundsConflict</c
 </span></span><span class="line"><span class="cl">PASS | the scaler records the vector it committed | the scaler committed server=2 on term 1
 </span></span><span class="line"><span class="cl">PASS | the replica count falls when the scaler is narrowed | the count of the role server is 1 after the scaler was narrowed
 </span></span><span class="line"><span class="cl">PASS | the retirement that carried the count down is observed | the target carried the retirement states Disqualified,Draining</span></span></code></pre></div>
-</div><p>These lines come from a separate <em>Server</em> target, not the <em>PD</em> example above.
+</div>
+<p>These lines come from a separate <em>Server</em> target, not the <em>PD</em> example above.
 The check also confirmed the new replica served and one Ready survivor remained after retirement.
 It failed its all-phases completion criterion because scale-out lost requests.
 See the <a href="/gpustack-operator/main/docs/modules/model-deployment/scaling-benchmark/#retirement">lifecycle result table</a>
@@ -2140,7 +2159,8 @@ illustrative at a ~0.0115 MW eight-accelerator node, and interactivity is <code>
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="c"># serverTargetTokensPerSecond omitted: it resolves from the catalog</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">capacityPrior</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">headroom</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;0.75&#34;</span><span class="w">                 </span><span class="c"># catalogRef omitted: the embedded catalog</span></span></span></code></pre></div>
-</div><p>The resolver then:</p>
+</div>
+<p>The resolver then:</p>
 <ol>
 <li>Matches the profile by the target&rsquo;s normalized <code>(role, model, quantization, engine, hardware, topology)</code> tuple — no profile identifier is configured.</li>
 <li>Filters the points against the P90 targets: concurrency <code>4</code>, <code>8</code>, <code>16</code> and <code>32</code> meet both;
@@ -2183,7 +2203,8 @@ only, never from live evaluation traffic.</p>
 </span></span></span><span class="line"><span class="cl"><span class="se"></span>  --capacity-comparison --config FILE --out DIR --validate-only
 </span></span><span class="line"><span class="cl">python3 .agents/skills/gpustack-operator-benchmark/scripts/autoscaling_report.py <span class="se">\
 </span></span></span><span class="line"><span class="cl"><span class="se"></span>  ARM_DIR --out REPORT_JSON</span></span></code></pre></div>
-</div><p><code>--validate-only</code> makes zero cluster API or driver calls, writes <code>validated-plan.json</code> and <code>catalog-input.json</code> under <code>--out</code>, and
+</div>
+<p><code>--validate-only</code> makes zero cluster API or driver calls, writes <code>validated-plan.json</code> and <code>catalog-input.json</code> under <code>--out</code>, and
 exits <code>0</code> when valid or <code>2</code> on validation or input error. On a live hardware gate, <code>--execute</code> writes per-round <code>&lt;NN&gt;-&lt;arm&gt;/</code>
 artifacts (<code>inputs/*.json</code>, <code>run.json</code>, <code>timeline.jsonl</code>, <code>prepare_reqs.jsonl</code>, <code>&lt;phase&gt;_reqs.jsonl</code>, <code>&lt;phase&gt;.json</code>, <code>cleanup.json</code>,
 <code>report.json</code>) and root <code>comparison.json</code> (<code>readyReplicaSeconds</code> and <code>latenciesByRun</code>).</p>
@@ -2206,7 +2227,8 @@ target serving at the current counts. Delete the target separately when it is no
 </span></span><span class="line"><span class="cl">kubectl -n gpustack-bench get modeldeployment autoscaling-vllm-pd -o json <span class="se">\
 </span></span></span><span class="line"><span class="cl"><span class="se"></span>  <span class="p">|</span> jq <span class="s1">&#39;.metadata.annotations[&#34;modeldeployment.gpustack.ai/scaler-binding&#34;]&#39;</span>
 </span></span><span class="line"><span class="cl">kubectl -n gpustack-bench delete modeldeployment autoscaling-vllm-pd --wait<span class="o">=</span>true</span></span></code></pre></div>
-</div><p>Remove a separate multimodal target and scaler the same way if created.
+</div>
+<p>Remove a separate multimodal target and scaler the same way if created.
 Keep shared prefetched artifacts and <code>default/bench-driver</code> when other procedures use them.</p>
 <h2 id="troubleshooting">Troubleshooting</h2>
 <table>
@@ -2293,18 +2315,6 @@ Keep shared prefetched artifacts and <code>default/bench-driver</code> when othe
     <aside class="toc-panel" aria-label="Page navigation">
       <div class="toc-inner">
         
-          
-          
-          
-          <nav class="page-actions" aria-label="Page source">
-            <a href="https://github.com/gpustack/gpustack-operator/blob/304681b245c3f392539df1404126be8fb9d22adb/docs/walkthroughs/model-deployment/scaling.md">View page source</a>
-            
-            <a href="https://github.com/gpustack/gpustack-operator/edit/main/docs/walkthroughs/model-deployment/scaling.md">Edit this page</a>
-            
-          </nav>
-        
-        
-          <div class="toc-title">On this page</div>
           <nav id="TableOfContents">
   <ul>
     <li><a href="#contents">Contents</a></li>

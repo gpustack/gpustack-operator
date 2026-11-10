@@ -37,7 +37,7 @@ no `.partitioned*` keys at all.
 ## Resource keys
 
 `<base>` is the manufacturer's device resource (`nvidia.com/gpu`, `huawei.com/npu`, … — see
-[Accelerator support](https://github.com/gpustack/gpustack-operator/blob/304681b245c3f392539df1404126be8fb9d22adb/README.md#accelerator-support)).
+[Accelerator support](https://github.com/gpustack/gpustack-operator/blob/e50f885d037f4c00400f32f4ec1be0cac9581fca/README.md#accelerator-support)).
 
 | Key | Served by | Eligible accelerators | Request value | `Node` value |
 |---|---|---|---|---|
@@ -676,9 +676,9 @@ ordinary failures, neither naming the replacement:
 A development node an earlier build wrote those legacy capacities onto keeps them, because nothing owns
 them. List what is left and patch it off — one JSON-patch removal per stale key:
 
-```console
-$ kubectl get node <node> -o json | jq -r '.status.capacity | keys[] | select(contains("mig-"))'
-$ kubectl patch node <node> --subresource=status --type=json \
+```bash
+kubectl get node <node> -o json | jq -r '.status.capacity | keys[] | select(contains("mig-"))'
+kubectl patch node <node> --subresource=status --type=json \
     -p '[{"op":"remove","path":"/status/capacity/<escaped-key>"}]'   # escape "/" in the key as "~1"
 ```
 

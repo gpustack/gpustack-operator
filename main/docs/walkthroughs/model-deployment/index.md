@@ -26,7 +26,7 @@ With *internal load balancing (Internal LB)*, the master distributes requests to
 
 A Router can front the *Internal LB* and *External LB* configurations.
 The engine's *load-balancing* mode determines which `Pod`s accept inference requests.
-Increasing *`roles[].replicas`* adds complete groups; see [role scaling](/gpustack-operator/main/docs/modules/model-deployment/deployment/index.md#rollout-behavior).
+Increasing *`roles[].replicas`* adds complete groups; see [role scaling](/gpustack-operator/main/docs/modules/model-deployment/configuration/index.md#rollout-behavior).
 The [Scaling Walkthrough](/gpustack-operator/main/docs/walkthroughs/model-deployment/scaling/index.md) links a recorded single-role lifecycle check and distinguishes
 its observed replica changes from reusable configuration examples.
 

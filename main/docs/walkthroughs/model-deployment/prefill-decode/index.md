@@ -213,7 +213,7 @@ Runtime logs verified the InfiniBand KV path; the configuration change alone is 
 
 A shared store through *`spec.kvCache.poolRef`* is part of the deployment identity. Declare it in the first
 apply. Adding it later is refused because a different cache describes a different deployment. See
-[deployment identity fields](/gpustack-operator/main/docs/modules/model-deployment/deployment/index.md#deployment-identity-fields).
+[deployment identity fields](/gpustack-operator/main/docs/modules/model-deployment/configuration/index.md#deployment-identity-fields).
 
 ## Step 3: Verify the router
 
@@ -266,7 +266,7 @@ gpustack-fnv64-d6b4e8ae20539d37   gpustack-fnv64-889bba71d87d29e2   bench-gpu   
 ```
 
 You can adjust *`replicas`* independently on either role to balance prompt versus token throughput.
-See [Rollout behavior](/gpustack-operator/main/docs/modules/model-deployment/deployment/index.md#rollout-behavior) for editable
+See [Rollout behavior](/gpustack-operator/main/docs/modules/model-deployment/configuration/index.md#rollout-behavior) for editable
 role fields and replica replacement semantics.
 
 ## Step 5: Release the application
@@ -300,8 +300,8 @@ This snapshot establishes released accelerator claims. Model-cache contents and 
   [benchmark](/gpustack-operator/main/docs/modules/model-deployment/prefill-decode-benchmark/index.md) measures all 16 fixed-shape cells
   and mixed traffic; its results remain limited to the captured H100 configuration.
 - Joint gang admission across all roles (`PodGroup`), role-set immutability after creation and per-replica
-  rollout replacement are covered in [Prefill and decode](/gpustack-operator/main/docs/modules/model-deployment/deployment/index.md#prefill-and-decode)
-  and [Rollout behavior](/gpustack-operator/main/docs/modules/model-deployment/deployment/index.md#rollout-behavior).
+  rollout replacement are covered in [Prefill and decode](/gpustack-operator/main/docs/modules/model-deployment/configuration/index.md#prefill-and-decode)
+  and [Rollout behavior](/gpustack-operator/main/docs/modules/model-deployment/configuration/index.md#rollout-behavior).
 - Disaggregated serving requires a ready Router (*`status.endpoint`* is populated only while the Router
   `Pod` is ready); see [Router configuration](/gpustack-operator/main/docs/modules/model-deployment/prefill-decode/index.md#router-configuration).
 
@@ -315,7 +315,7 @@ This snapshot establishes released accelerator claims. Model-cache contents and 
 | *`status.endpoint`* is empty | Condition: `RouterReady=False/NoReadyReplicas` | The Router has no ready replica. It may still pull its image or fail readiness. Inspect the Router `Pod` |
 | Router is not created | Condition: `RouterReady=False/RenderFailed` | The Router render was refused as a spec problem, so no Router `Pod` exists. Read the condition message and check *`spec.router`* |
 | Disaggregated roles fail KV transfer | Log: engine logs on both roles | The protocol is deployment-wide, so the two ends cannot name different values. Check that the image carries the matching Mooncake build, that the device request fits the protocol and that the nodes can reach each other |
-| Router sees no cache events | Condition: `KVEventsPublishing=False/PublisherDisabled` | A role that produces cache blocks renders no publisher. A routed SGLang deployment always reports this because only vLLM renders one. The condition reports configuration, not traffic. See [KV events](/gpustack-operator/main/docs/modules/model-deployment/deployment/index.md#operator-owned-keys) |
+| Router sees no cache events | Condition: `KVEventsPublishing=False/PublisherDisabled` | A role that produces cache blocks renders no publisher. A routed SGLang deployment always reports this because only vLLM renders one. The condition reports configuration, not traffic. See [KV events](/gpustack-operator/main/docs/modules/model-deployment/configuration/index.md#operator-owned-keys) |
 | Missing role readiness | Condition: `RoleKindsReady=False` | One of the role kinds (*Prefill* or *Decode*) has zero ready replicas; check failed engine `Pod`s |
 
 ---

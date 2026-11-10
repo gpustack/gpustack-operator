@@ -6,6 +6,7 @@ Each managed `Pod` also exposes its own native `/metrics` output for Prometheus 
 ## Contents
 
 - [Subresource](#subresource)
+- [Sample](#sample)
 - [Fields and sources](#fields-and-sources)
 - [Per-field series](#per-field-series)
 - [Windowed cache hits](#windowed-cache-hits)
@@ -27,6 +28,28 @@ ordinary not-found error. The response carries *`metadata`*, *`timestamp`*, *`pr
 *`timestamp`* is when the response was assembled. Each gauge and hit entry has an *`observedAt`* time
 for its HTTP read. It is a scrape time, not a producer-side timestamp; these engines do not attach
 sample timestamps to the selected Prometheus series.
+
+## Sample
+
+The API returns JSON. This YAML representation illustrates a single measured gauge:
+
+```yaml
+apiVersion: worker.gpustack.ai/v1
+kind: ModelDeploymentMetrics
+metadata:
+  name: example
+  namespace: team-a
+timestamp: "2026-01-01T00:00:00Z"
+processing:
+  - name: running
+    source: "vllm:num_requests_running"
+    scope: engine
+    unit: requests
+    value: 2
+    podCount: 1
+    observedAt: "2026-01-01T00:00:00Z"
+partial: false
+```
 
 ## Fields and sources
 
@@ -235,7 +258,7 @@ annotation. The operator installs no `PodMonitor` or `ServiceMonitor`.
 
 ---
 
-**See also** — [Model Deployment](/gpustack-operator/main/docs/modules/model-deployment/deployment/index.md) for role configuration ·
-[Instance Metrics Reference](/gpustack-operator/main/docs/reference/instance-metrics/index.md) for the separate `Instance` utilization API.
+**See also** — [Model Deployment](/gpustack-operator/main/docs/modules/model-deployment/configuration/index.md) for role configuration ·
+[Instance Metrics Reference](/gpustack-operator/main/docs/modules/instances/metrics/index.md) for the separate `Instance` utilization API.
 
 **Next** → [Model Deployment Status](/gpustack-operator/main/docs/modules/model-deployment/status/index.md)

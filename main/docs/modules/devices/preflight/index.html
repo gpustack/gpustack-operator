@@ -27,7 +27,7 @@
   <link rel="alternate" type="text/markdown" href="/gpustack-operator/main/docs/modules/devices/preflight/index.md">
   
   <link rel="describedby" href="/gpustack-operator/main/llms.txt">
-  <link rel="stylesheet" href="/gpustack-operator/main/css/site.1a0de63fe646aba4ed6541fe0a6383c2ed5ca649b1593a98595ba53430bcf032.css">
+  <link rel="stylesheet" href="/gpustack-operator/main/css/site.b1fdc6af165ce7fbb10ebc91a579913dc99eac181655e5aae84dbe714d354a09.css">
   <link rel="stylesheet" href="/gpustack-operator/main/css/code.d2570c1cc6480f9c62bc31ec538eef2578ce80980588c469638a5f95416bfc7b.css">
 </head>
 <body class="docs-page">
@@ -36,7 +36,6 @@
     
     <a class="brand" href="/gpustack-operator/main/" aria-label="GPUStack Operator home"><img src="/gpustack-operator/main/images/logo_hu_ced145186d6eddf4.47210af4015bb5bd13742c222995900070c6649233431804f39bf2e001be3ddb.png" width="32" height="32" alt=""><span>GPUStack Operator</span></a>
     <nav class="top-links" aria-label="Main navigation">
-      <a class="top-docs-link" href="/gpustack-operator/main/docs/" aria-current="page">Documentation</a>
       <a class="top-devin-link" href="https://deepwiki.com/gpustack/gpustack-operator" target="_blank" rel="noopener noreferrer" aria-label="Ask Devin on DeepWiki (opens in a new tab)">
         <svg aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M8 1.5c.31 3.02 1.67 4.38 4.69 4.69-3.02.31-4.38 1.67-4.69 4.69-.31-3.02-1.67-4.38-4.69-4.69 3.02-.31 4.38-1.67 4.69-4.69Zm5.06 8.19c.16 1.51.84 2.19 2.34 2.34-1.51.16-2.19.84-2.34 2.34-.16-1.51-.84-2.19-2.34-2.34 1.51-.16 2.19-.84 2.34-2.34Z"/></svg>
         <span>Ask Devin</span>
@@ -106,7 +105,6 @@
         </svg>
       </button>
       <nav id="docs-navigation" class="sidebar-inner">
-        <div class="nav-title">Documentation</div>
         <a class="nav-home" href="/gpustack-operator/main/" >Overview</a>
         
           
@@ -698,7 +696,7 @@
       
         
         
-          <a title="KV Cache Election and Failover" href="/gpustack-operator/main/docs/modules/kv-cache/leader/" >Election and Failover</a>
+          <a title="KV Cache Election and Failover" href="/gpustack-operator/main/docs/modules/kv-cache/leader/" >Leader Election</a>
           
           
         
@@ -761,15 +759,15 @@
 
 
   
-    
-      
-      
-        
-        
-      
-    
-  
 
+  
+    
+      
+      
+        
+        
+      
+    
   
 
   
@@ -803,7 +801,7 @@
             <div class="nav-children">
               
                 
-                  <a title="Model Artifact API" href="/gpustack-operator/main/docs/modules/model-delivery/views/" >API</a>
+                  <a title="Model Artifact API" href="/gpustack-operator/main/docs/modules/model-delivery/artifact-api/" >API</a>
                 
               
             </div>
@@ -848,7 +846,7 @@
       
         
         
-          <a title="Node-to-Node Sync" href="/gpustack-operator/main/docs/modules/model-delivery/peer-sync/" >Node-to-Node Sync</a>
+          <a title="Node-to-Node Sync" href="/gpustack-operator/main/docs/modules/model-delivery/node-to-node-sync/" >Node-to-Node Sync</a>
           
           
         
@@ -1030,7 +1028,7 @@
       
         
         
-          <a title="Model Deployment Configuration" href="/gpustack-operator/main/docs/modules/model-deployment/deployment/" >Configuration</a>
+          <a title="Configuration" href="/gpustack-operator/main/docs/modules/model-deployment/configuration/" >Configuration</a>
           
           
         
@@ -1040,7 +1038,7 @@
       
         
         
-          <a title="Engine Compatibility" href="/gpustack-operator/main/docs/modules/model-deployment/engine-versions/" >Compatibility</a>
+          <a title="Engine Compatibility" href="/gpustack-operator/main/docs/modules/model-deployment/engine-versions/" >Engine Versions</a>
           
           
         
@@ -1208,7 +1206,12 @@
 
 
 
+  
+  
 
+
+
+  
 
 <details class="nav-section" >
   <summary title="GPU Instances">GPU Instances</summary>
@@ -1218,6 +1221,16 @@
       
       <a title="GPU Instances" href="/gpustack-operator/main/docs/modules/instances/" >Overview</a>
     
+    
+      
+      
+        
+        
+          <a title="Instance Metrics Reference" href="/gpustack-operator/main/docs/modules/instances/metrics/" >Metrics</a>
+          
+          
+        
+      
     
   </div>
 </details>
@@ -1322,7 +1335,7 @@
       
         
         
-          <a title="Migrating to Bundled Subcharts" href="/gpustack-operator/main/docs/operate/migration/to-subcharts/" >Bundled Subcharts</a>
+          <a title="Migrating to Bundled Subcharts" href="/gpustack-operator/main/docs/operate/migration/bundled-subcharts/" >Bundled Subcharts</a>
           
           
         
@@ -1332,7 +1345,7 @@
       
         
         
-          <a title="Upgrading to an Enforced Binding Dtype" href="/gpustack-operator/main/docs/operate/migration/kv-cache-dtype/" >Enforced Binding Dtype</a>
+          <a title="Upgrading to an Enforced Binding Dtype" href="/gpustack-operator/main/docs/operate/migration/enforced-binding-dtype/" >Enforced Binding Dtype</a>
           
           
         
@@ -1373,12 +1386,7 @@
   
   
 
-  
-  
 
-
-
-  
 
   
 
@@ -1416,16 +1424,6 @@
         
         
           <a title="Instance Type Unit Resources Reference" href="/gpustack-operator/main/docs/reference/instance-type-unit-resources/" >Resource Presets</a>
-          
-          
-        
-      
-    
-      
-      
-        
-        
-          <a title="Instance Metrics Reference" href="/gpustack-operator/main/docs/reference/instance-metrics/" >Instance Metrics</a>
           
           
         
@@ -1517,7 +1515,8 @@ hardware gives. Check the path exists on the host before reading the result.</p>
 </span></span></span><span class="line"><span class="cl"><span class="se"></span>    -v /opt/rocm:/opt/rocm:ro -v /opt/rocm/lib:/opt/rocm/lib:ro <span class="se">\
 </span></span></span><span class="line"><span class="cl"><span class="se"></span>    gpustack/gpustack-operator:&lt;tag&gt; <span class="se">\
 </span></span></span><span class="line"><span class="cl"><span class="se"></span>    gpustack-operator device-manager preflight --manufacturer<span class="o">=</span>amd</span></span></code></pre></div>
-</div><p>The second mount is not a duplicate of the first. ROCm&rsquo;s packaging puts a symlink somewhere in this
+</div>
+<p>The second mount is not a duplicate of the first. ROCm&rsquo;s packaging puts a symlink somewhere in this
 path on every install, and where it falls decides whether the mount survives it: one at or above the
 mount source is resolved by the host and is harmless, while one inside the mounted tree dangles in
 the container. Naming the library directory as its own source has the host resolve it first.</p>
@@ -1540,7 +1539,8 @@ and 10.0 separately.</p>
 </span></span></span><span class="line"><span class="cl"><span class="se"></span>    -v /usr/local/Ascend:/usr/local/Ascend:ro -v /usr/local/dcmi:/usr/local/dcmi:ro <span class="se">\
 </span></span></span><span class="line"><span class="cl"><span class="se"></span>    gpustack/gpustack-operator:&lt;tag&gt; <span class="se">\
 </span></span></span><span class="line"><span class="cl"><span class="se"></span>    gpustack-operator device-manager preflight --manufacturer<span class="o">=</span>ascend</span></span></code></pre></div>
-</div><p>No <code>--runtime ascend</code> here, although <a href="/gpustack-operator/main/docs/getting-started/vendor-prerequisites/">Vendor Prerequisites</a>
+</div>
+<p>No <code>--runtime ascend</code> here, although <a href="/gpustack-operator/main/docs/getting-started/vendor-prerequisites/">Vendor Prerequisites</a>
  requires that
 runtime in production: what it injects is device nodes, and this command is already <code>--privileged</code>
 with <code>/dev</code> mounted whole. The driver is the mount above. The Ascend probe containers do need it,
@@ -1553,7 +1553,8 @@ and get it themselves; under <code>nerdctl</code> they cannot, and are emitted f
 </span></span></span><span class="line"><span class="cl"><span class="se"></span>    -v /usr/local/neuware:/usr/local/neuware:ro <span class="se">\
 </span></span></span><span class="line"><span class="cl"><span class="se"></span>    gpustack/gpustack-operator:&lt;tag&gt; <span class="se">\
 </span></span></span><span class="line"><span class="cl"><span class="se"></span>    gpustack-operator device-manager preflight --manufacturer<span class="o">=</span>cambricon</span></span></code></pre></div>
-</div><h3 id="hygon">Hygon</h3>
+</div>
+<h3 id="hygon">Hygon</h3>
 <div class="code-block">
   <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">docker run --rm --privileged --network<span class="o">=</span>host <span class="se">\
@@ -1562,7 +1563,8 @@ and get it themselves; under <code>nerdctl</code> they cannot, and are emitted f
 </span></span></span><span class="line"><span class="cl"><span class="se"></span>    -v /etc/dmi_mig_config:/etc/dmi_mig_config <span class="se">\
 </span></span></span><span class="line"><span class="cl"><span class="se"></span>    gpustack/gpustack-operator:&lt;tag&gt; <span class="se">\
 </span></span></span><span class="line"><span class="cl"><span class="se"></span>    gpustack-operator device-manager preflight --manufacturer<span class="o">=</span>hygon</span></span></code></pre></div>
-</div><p>The third mount is the only writable one in the command: the vendor library materializes a partition by
+</div>
+<p>The third mount is the only writable one in the command: the vendor library materializes a partition by
 writing that registry, and the <code>DaemonSet</code> mounts it writable for the same reason. Add
 <code>--probe-image &lt;image&gt;</code> to measure the two slice rows; no default is claimed for a Hygon family, and
 what the image has to carry is in <a href="#container-probe-tier">The container-probe
@@ -1576,7 +1578,8 @@ tier</a>
 </span></span></span><span class="line"><span class="cl"><span class="se"></span>    -v /usr/local/corex:/usr/local/corex:ro <span class="se">\
 </span></span></span><span class="line"><span class="cl"><span class="se"></span>    gpustack/gpustack-operator:&lt;tag&gt; <span class="se">\
 </span></span></span><span class="line"><span class="cl"><span class="se"></span>    gpustack-operator device-manager preflight --manufacturer<span class="o">=</span>iluvatar</span></span></code></pre></div>
-</div><p>No <code>--runtime iluvatar</code>, for the same reason Ascend needs none: <code>ix-container-runtime</code> injects device
+</div>
+<p>No <code>--runtime iluvatar</code>, for the same reason Ascend needs none: <code>ix-container-runtime</code> injects device
 nodes, which <code>--privileged</code> and <code>/dev</code> already cover, and the driver is the mount above.</p>
 <h3 id="metax">MetaX</h3>
 <div class="code-block">
@@ -1586,14 +1589,16 @@ nodes, which <code>--privileged</code> and <code>/dev</code> already cover, and 
 </span></span></span><span class="line"><span class="cl"><span class="se"></span>    -v /opt/mxdriver:/opt/mxdriver:ro -v /opt/maca:/opt/maca:ro <span class="se">\
 </span></span></span><span class="line"><span class="cl"><span class="se"></span>    gpustack/gpustack-operator:&lt;tag&gt; <span class="se">\
 </span></span></span><span class="line"><span class="cl"><span class="se"></span>    gpustack-operator device-manager preflight --manufacturer<span class="o">=</span>metax</span></span></code></pre></div>
-</div><h3 id="moore-threads">Moore Threads</h3>
+</div>
+<h3 id="moore-threads">Moore Threads</h3>
 <div class="code-block">
   <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">docker run --rm --privileged --network<span class="o">=</span>host --runtime mthreads <span class="se">\
 </span></span></span><span class="line"><span class="cl"><span class="se"></span>    -v /:/host -v /dev:/dev -v /sys:/sys <span class="se">\
 </span></span></span><span class="line"><span class="cl"><span class="se"></span>    gpustack/gpustack-operator:&lt;tag&gt; <span class="se">\
 </span></span></span><span class="line"><span class="cl"><span class="se"></span>    gpustack-operator device-manager preflight --manufacturer<span class="o">=</span>mthreads</span></span></code></pre></div>
-</div><p>Nothing to mount, and a <code>--runtime</code> instead: the user-space driver here is injected by the vendor
+</div>
+<p>Nothing to mount, and a <code>--runtime</code> instead: the user-space driver here is injected by the vendor
 container runtime rather than installed at a path you can bind-mount. <code>mthreads</code> is the handler that
 runtime registered with your container engine, and the same name the chart&rsquo;s <code>RuntimeClass</code> carries.
 Under <code>nerdctl</code>, whose <code>--runtime</code> names an OCI shim, that flag does not reach the handler.</p>
@@ -1604,7 +1609,8 @@ Under <code>nerdctl</code>, whose <code>--runtime</code> names an OCI shim, that
 </span></span></span><span class="line"><span class="cl"><span class="se"></span>    -v /:/host -v /dev:/dev -v /sys:/sys <span class="se">\
 </span></span></span><span class="line"><span class="cl"><span class="se"></span>    gpustack/gpustack-operator:&lt;tag&gt; <span class="se">\
 </span></span></span><span class="line"><span class="cl"><span class="se"></span>    gpustack-operator device-manager preflight --manufacturer<span class="o">=</span>nvidia</span></span></code></pre></div>
-</div><p>Nothing to mount, for the same reason as Moore Threads above. Under <code>nerdctl</code> use <code>--gpus all</code> in
+</div>
+<p>Nothing to mount, for the same reason as Moore Threads above. Under <code>nerdctl</code> use <code>--gpus all</code> in
 place of <code>--runtime nvidia</code>, whose <code>--runtime</code> names an OCI shim and rejects the handler name.</p>
 <p><strong>The flag is not optional.</strong> Measured on a host with one RTX 4090: the identical command under
 <code>--runtime runc</code> reports <code>accelerators: 0</code> against a host whose own <code>nvidia-smi</code> reports 1, and exits
@@ -1617,7 +1623,8 @@ place of <code>--runtime nvidia</code>, whose <code>--runtime</code> names an OC
 </span></span></span><span class="line"><span class="cl"><span class="se"></span>    -v /usr/local/PPU_SDK:/usr/local/PPU_SDK:ro <span class="se">\
 </span></span></span><span class="line"><span class="cl"><span class="se"></span>    gpustack/gpustack-operator:&lt;tag&gt; <span class="se">\
 </span></span></span><span class="line"><span class="cl"><span class="se"></span>    gpustack-operator device-manager preflight --manufacturer<span class="o">=</span>thead</span></span></code></pre></div>
-</div><p>Add <code>--probe-image &lt;image&gt;</code> to measure the slice rows: no default is claimed for a PPU family, because
+</div>
+<p>Add <code>--probe-image &lt;image&gt;</code> to measure the slice rows: no default is claimed for a PPU family, because
 the workload container brings its own SDK and there is no generation to match an image against.</p>
 <h3 id="every-manufacturer-at-once">Every manufacturer at once</h3>
 <div class="code-block">
@@ -1625,7 +1632,8 @@ the workload container brings its own SDK and there is no generation to match an
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">docker run --rm --network<span class="o">=</span>host -v /:/host <span class="se">\
 </span></span></span><span class="line"><span class="cl"><span class="se"></span>    gpustack/gpustack-operator:&lt;tag&gt; <span class="se">\
 </span></span></span><span class="line"><span class="cl"><span class="se"></span>    gpustack-operator device-manager preflight</span></span></code></pre></div>
-</div><p><strong>With no vendor mounts at all</strong>, the run still reports every manufacturer and names the mounts the
+</div>
+<p><strong>With no vendor mounts at all</strong>, the run still reports every manufacturer and names the mounts the
 rest of the questions need. Only NVIDIA, Ascend and AMD carry a host CLI to cross-check that
 detection against, so for manufacturers without a host CLI a detection of zero is this container&rsquo;s own view and not the
 host&rsquo;s; the Host cross-check column below says which is which.</p>
@@ -1641,7 +1649,8 @@ Device Manager reads, with no second container and no image to pull:</p>
 </span></span><span class="line"><span class="cl">
 </span></span><span class="line"><span class="cl">kubectl <span class="nb">exec</span> -n gpustack-system &lt;device-manager-pod&gt; -- <span class="se">\
 </span></span></span><span class="line"><span class="cl"><span class="se"></span>    gpustack-operator device-manager preflight --manufacturer<span class="o">=</span>&lt;manufacturer&gt;</span></span></code></pre></div>
-</div><p><code>detect</code> prints the accelerators it found and the health status of each, which is where an
+</div>
+<p><code>detect</code> prints the accelerators it found and the health status of each, which is where an
 accelerator the vendor reports as faulty is told apart from one that is not there. <code>preflight</code>
 prints the same document a run on a bare host prints, and it is the one that fails the run. Neither
 reads the cluster&rsquo;s <code>Devices</code> objects or the Pod&rsquo;s log.</p>
@@ -2277,7 +2286,8 @@ values and rows:</p>
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">timestamp</span><span class="p">:</span><span class="w"> </span><span class="l">...</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">policy</span><span class="p">:</span><span class="w"> </span><span class="l">single-numa-node</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">depth</span><span class="p">:</span><span class="w"> </span><span class="l">declared</span></span></span></code></pre></div>
-</div><p>Each <code>accelerators</code> group carries the time it was read, the detection answer, and a row per
+</div>
+<p>Each <code>accelerators</code> group carries the time it was read, the detection answer, and a row per
 accelerator per capability — each row carrying
 <a href="/gpustack-operator/main/docs/modules/devices/discovery/#preflight-checks">the state and the depth</a>
 
@@ -2358,7 +2368,8 @@ plus a <code>note</code> with what the panic said. The other manufacturers are r
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">note: &#39;this manufacturer&#39;&#39;s preflight panicked and was contained</span><span class="p">:</span><span class="w"> </span><span class="l">whatever it had established</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="l">is discarded, and every accelerator it was asked about is reported unavailable below; the</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">rest of this run is unaffected: runtime error</span><span class="p">:</span><span class="w"> </span><span class="l">invalid memory address&#39;</span></span></span></code></pre></div>
-</div><p>The rows are what make it <strong>exit non-zero</strong>: a crash that left only a note would be a run that
+</div>
+<p>The rows are what make it <strong>exit non-zero</strong>: a crash that left only a note would be a run that
 verified nothing and said it passed. Treat it as a bug worth reporting, with the <code>-v=3</code> output
 attached; the stack trace goes to the log rather than the document.</p>
 <p><strong>A sweep that could not be completed fails the accelerators it could not clear.</strong> Before anything is
@@ -2374,7 +2385,8 @@ run carries one <code>stale-container-sweep</code> row per accelerator:</p>
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">reason</span><span class="p">:</span><span class="w"> </span><span class="s1">&#39;the stale-container sweep could not be completed, so a container an earlier run left
 </span></span></span><span class="line"><span class="cl"><span class="s1">    behind may still be holding this accelerator and every answer measured against it here is
 </span></span></span><span class="line"><span class="cl"><span class="s1">    unsafe to trust: docker: exit status 1: permission denied&#39;</span></span></span></code></pre></div>
-</div><p>It is a failure and not a warning because of what a leftover does: it still holds its accelerator, so
+</div>
+<p>It is a failure and not a warning because of what a leftover does: it still holds its accelerator, so
 the slice measured against it comes back short and the report blames the card. A run that swept
 nothing, measured anyway and exited zero would state the opposite of the truth about hardware that is
 fine. Clear the leftovers by hand (<code>docker ps -aq --filter label=gpustack.ai/preflight=true</code>, and the
@@ -2422,7 +2434,8 @@ out of the detection it already did, and the group says so in its <code>detectio
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">depth</span><span class="p">:</span><span class="w"> </span><span class="l">declared</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">accelerators</span><span class="p">:</span><span class="w"> </span><span class="m">8</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">detail</span><span class="p">:</span><span class="w"> </span><span class="l">NVIDIA A100 x8 (1 unhealthy)</span></span></span></code></pre></div>
-</div><p><strong>The detection still succeeds.</strong> <code>state</code> stays <code>ok</code> and <code>accelerators</code> still counts every card on
+</div>
+<p><strong>The detection still succeeds.</strong> <code>state</code> stays <code>ok</code> and <code>accelerators</code> still counts every card on
 the node, because a node with one faulty accelerator still carries eight of them and seven serve
 allocations. The count beside the name is the whole group; the count in brackets is the faulty
 subset of it.</p>
@@ -2439,7 +2452,8 @@ management check is asked about it. The healthy accelerators beside it are prefl
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">reason</span><span class="p">:</span><span class="w"> </span><span class="p">&gt;-</span><span class="sd">
 </span></span></span><span class="line"><span class="cl"><span class="sd">    the detect pass reported this accelerator unhealthy, so the device plugin
 </span></span></span><span class="line"><span class="cl"><span class="sd">    withholds it from allocations and preflight skipped its capability checks</span></span></span></code></pre></div>
-</div><p><strong>It is a failure, and the run exits non-zero</strong>, the same as <code>stale-container-sweep</code> and
+</div>
+<p><strong>It is a failure, and the run exits non-zero</strong>, the same as <code>stale-container-sweep</code> and
 <code>preflight-panicked</code>. The device plugin withholds that accelerator from every allocation, so the
 node cannot serve what it appears to carry. The <code>mode</code> is <code>unnamed</code> because the fault is in the
 accelerator rather than in one allocation mode.</p>
@@ -2465,18 +2479,6 @@ never creates.</div>
     <aside class="toc-panel" aria-label="Page navigation">
       <div class="toc-inner">
         
-          
-          
-          
-          <nav class="page-actions" aria-label="Page source">
-            <a href="https://github.com/gpustack/gpustack-operator/blob/304681b245c3f392539df1404126be8fb9d22adb/docs/modules/devices/preflight.md">View page source</a>
-            
-            <a href="https://github.com/gpustack/gpustack-operator/edit/main/docs/modules/devices/preflight.md">Edit this page</a>
-            
-          </nav>
-        
-        
-          <div class="toc-title">On this page</div>
           <nav id="TableOfContents">
   <ul>
     <li><a href="#contents">Contents</a></li>

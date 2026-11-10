@@ -27,7 +27,7 @@
   <link rel="alternate" type="text/markdown" href="/gpustack-operator/main/docs/walkthroughs/model-deployment/external-dp/index.md">
   
   <link rel="describedby" href="/gpustack-operator/main/llms.txt">
-  <link rel="stylesheet" href="/gpustack-operator/main/css/site.1a0de63fe646aba4ed6541fe0a6383c2ed5ca649b1593a98595ba53430bcf032.css">
+  <link rel="stylesheet" href="/gpustack-operator/main/css/site.b1fdc6af165ce7fbb10ebc91a579913dc99eac181655e5aae84dbe714d354a09.css">
   <link rel="stylesheet" href="/gpustack-operator/main/css/code.d2570c1cc6480f9c62bc31ec538eef2578ce80980588c469638a5f95416bfc7b.css">
 </head>
 <body class="docs-page">
@@ -36,7 +36,6 @@
     
     <a class="brand" href="/gpustack-operator/main/" aria-label="GPUStack Operator home"><img src="/gpustack-operator/main/images/logo_hu_ced145186d6eddf4.47210af4015bb5bd13742c222995900070c6649233431804f39bf2e001be3ddb.png" width="32" height="32" alt=""><span>GPUStack Operator</span></a>
     <nav class="top-links" aria-label="Main navigation">
-      <a class="top-docs-link" href="/gpustack-operator/main/docs/" aria-current="page">Documentation</a>
       <a class="top-devin-link" href="https://deepwiki.com/gpustack/gpustack-operator" target="_blank" rel="noopener noreferrer" aria-label="Ask Devin on DeepWiki (opens in a new tab)">
         <svg aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M8 1.5c.31 3.02 1.67 4.38 4.69 4.69-3.02.31-4.38 1.67-4.69 4.69-.31-3.02-1.67-4.38-4.69-4.69 3.02-.31 4.38-1.67 4.69-4.69Zm5.06 8.19c.16 1.51.84 2.19 2.34 2.34-1.51.16-2.19.84-2.34 2.34-.16-1.51-.84-2.19-2.34-2.34 1.51-.16 2.19-.84 2.34-2.34Z"/></svg>
         <span>Ask Devin</span>
@@ -106,7 +105,6 @@
         </svg>
       </button>
       <nav id="docs-navigation" class="sidebar-inner">
-        <div class="nav-title">Documentation</div>
         <a class="nav-home" href="/gpustack-operator/main/" >Overview</a>
         
           
@@ -698,7 +696,7 @@
       
         
         
-          <a title="KV Cache Election and Failover" href="/gpustack-operator/main/docs/modules/kv-cache/leader/" >Election and Failover</a>
+          <a title="KV Cache Election and Failover" href="/gpustack-operator/main/docs/modules/kv-cache/leader/" >Leader Election</a>
           
           
         
@@ -761,15 +759,15 @@
 
 
   
-    
-      
-      
-        
-        
-      
-    
-  
 
+  
+    
+      
+      
+        
+        
+      
+    
   
 
   
@@ -803,7 +801,7 @@
             <div class="nav-children">
               
                 
-                  <a title="Model Artifact API" href="/gpustack-operator/main/docs/modules/model-delivery/views/" >API</a>
+                  <a title="Model Artifact API" href="/gpustack-operator/main/docs/modules/model-delivery/artifact-api/" >API</a>
                 
               
             </div>
@@ -848,7 +846,7 @@
       
         
         
-          <a title="Node-to-Node Sync" href="/gpustack-operator/main/docs/modules/model-delivery/peer-sync/" >Node-to-Node Sync</a>
+          <a title="Node-to-Node Sync" href="/gpustack-operator/main/docs/modules/model-delivery/node-to-node-sync/" >Node-to-Node Sync</a>
           
           
         
@@ -1030,7 +1028,7 @@
       
         
         
-          <a title="Model Deployment Configuration" href="/gpustack-operator/main/docs/modules/model-deployment/deployment/" >Configuration</a>
+          <a title="Configuration" href="/gpustack-operator/main/docs/modules/model-deployment/configuration/" >Configuration</a>
           
           
         
@@ -1040,7 +1038,7 @@
       
         
         
-          <a title="Engine Compatibility" href="/gpustack-operator/main/docs/modules/model-deployment/engine-versions/" >Compatibility</a>
+          <a title="Engine Compatibility" href="/gpustack-operator/main/docs/modules/model-deployment/engine-versions/" >Engine Versions</a>
           
           
         
@@ -1208,7 +1206,12 @@
 
 
 
+  
+  
 
+
+
+  
 
 <details class="nav-section" >
   <summary title="GPU Instances">GPU Instances</summary>
@@ -1218,6 +1221,16 @@
       
       <a title="GPU Instances" href="/gpustack-operator/main/docs/modules/instances/" >Overview</a>
     
+    
+      
+      
+        
+        
+          <a title="Instance Metrics Reference" href="/gpustack-operator/main/docs/modules/instances/metrics/" >Metrics</a>
+          
+          
+        
+      
     
   </div>
 </details>
@@ -1322,7 +1335,7 @@
       
         
         
-          <a title="Migrating to Bundled Subcharts" href="/gpustack-operator/main/docs/operate/migration/to-subcharts/" >Bundled Subcharts</a>
+          <a title="Migrating to Bundled Subcharts" href="/gpustack-operator/main/docs/operate/migration/bundled-subcharts/" >Bundled Subcharts</a>
           
           
         
@@ -1332,7 +1345,7 @@
       
         
         
-          <a title="Upgrading to an Enforced Binding Dtype" href="/gpustack-operator/main/docs/operate/migration/kv-cache-dtype/" >Enforced Binding Dtype</a>
+          <a title="Upgrading to an Enforced Binding Dtype" href="/gpustack-operator/main/docs/operate/migration/enforced-binding-dtype/" >Enforced Binding Dtype</a>
           
           
         
@@ -1373,12 +1386,7 @@
   
   
 
-  
-  
 
-
-
-  
 
   
 
@@ -1416,16 +1424,6 @@
         
         
           <a title="Instance Type Unit Resources Reference" href="/gpustack-operator/main/docs/reference/instance-type-unit-resources/" >Resource Presets</a>
-          
-          
-        
-      
-    
-      
-      
-        
-        
-          <a title="Instance Metrics Reference" href="/gpustack-operator/main/docs/reference/instance-metrics/" >Instance Metrics</a>
           
           
         
@@ -1637,7 +1635,8 @@ Replace <em><code>instanceType</code></em> with <code>bench-gpu</code> to reprod
 </span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="nt">value</span><span class="p">:</span><span class="w"> </span><span class="l">none</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">        </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">OTEL_TRACES_EXPORTER</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="nt">value</span><span class="p">:</span><span class="w"> </span><span class="l">none</span></span></span></code></pre></div>
-</div><p>The operator supplies <code>GPUSTACK_MEMBER_INDEX</code> and <code>GPUSTACK_REPLICA_LEADER_ADDRESS</code> to each member.
+</div>
+<p>The operator supplies <code>GPUSTACK_MEMBER_INDEX</code> and <code>GPUSTACK_REPLICA_LEADER_ADDRESS</code> to each member.
 Kubernetes expands the references in the container arguments.
 All four ranks receive the same leader address and distinct rank values from 0 to 3.
 An explicit <code>--data-parallel-rank</code> selects the engine&rsquo;s <em>External LB</em> mode.</p>
@@ -1654,7 +1653,8 @@ Keep matching <em>DP</em> widths, distinct ranks and a reachable leader address 
 </span></span><span class="line"><span class="cl">kubectl -n gpustack-bench get modeldeployment external-dp-arm2-external-dp
 </span></span><span class="line"><span class="cl">kubectl -n gpustack-bench get pods <span class="se">\
 </span></span></span><span class="line"><span class="cl"><span class="se"></span>  -l app.kubernetes.io/instance<span class="o">=</span>external-dp-arm2-external-dp -o wide</span></span></code></pre></div>
-</div><p>The captured phase was <code>Ready</code>, with role summary <code>1R1S</code>.
+</div>
+<p>The captured phase was <code>Ready</code>, with role summary <code>1R1S</code>.
 The following listing omits IP and scheduling-gate columns and replaces the node identity with <code>gpu-node-0</code>:</p>
 <div class="code-block">
   <div class="code-toolbar"><span>text</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
@@ -1664,7 +1664,8 @@ The following listing omits IP and scheduling-gate columns and replaces the node
 </span></span><span class="line"><span class="cl">external-dp-arm2-external-dp-server-r0-m1                1/1     Running   0          2m19s   gpu-node-0
 </span></span><span class="line"><span class="cl">external-dp-arm2-external-dp-server-r0-m2                1/1     Running   0          2m19s   gpu-node-0
 </span></span><span class="line"><span class="cl">external-dp-arm2-external-dp-server-r0-m3                1/1     Running   0          2m19s   gpu-node-0</span></span></code></pre></div>
-</div><h2 id="step-2-read-the-running-resources">Step 2: Read the running resources</h2>
+</div>
+<h2 id="step-2-read-the-running-resources">Step 2: Read the running resources</h2>
 <p>Save the live CR and inspect the engine&rsquo;s declared configuration and endpoint observations:</p>
 <div class="code-block">
   <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
@@ -1678,7 +1679,8 @@ The following listing omits IP and scheduling-gate columns and replaces the node
 </span></span><span class="line"><span class="cl">jq <span class="s1">&#39;.items[] | {name: .metadata.name,
 </span></span></span><span class="line"><span class="cl"><span class="s1">    member: .metadata.labels[&#34;modeldeployment.gpustack.ai/member-index&#34;],
 </span></span></span><span class="line"><span class="cl"><span class="s1">    containers: [.status.containerStatuses[]? | {name, ready, restartCount}]}&#39;</span> external-dp-pods.json</span></span></code></pre></div>
-</div><p>Require <em><code>parallelism.loadBalance</code></em> to read <code>External</code>.
+</div>
+<p>Require <em><code>parallelism.loadBalance</code></em> to read <code>External</code>.
 The role has one replica group, while the serving endpoint observation should confirm four HTTP endpoints.
 A <code>Ready</code> phase and declared arguments alone do not establish inference on each rank.
 The captured role reported this configuration and endpoint observation:</p>
@@ -1696,7 +1698,8 @@ The captured role reported this configuration and endpoint observation:</p>
 </span></span><span class="line"><span class="cl">    <span class="nt">&#34;serving&#34;</span><span class="p">:</span> <span class="p">{</span> <span class="nt">&#34;state&#34;</span><span class="p">:</span> <span class="s2">&#34;Confirmed&#34;</span><span class="p">,</span> <span class="nt">&#34;value&#34;</span><span class="p">:</span> <span class="mi">4</span> <span class="p">}</span>
 </span></span><span class="line"><span class="cl">  <span class="p">}</span>
 </span></span><span class="line"><span class="cl"><span class="p">}</span></span></span></code></pre></div>
-</div><p>The endpoint was <code>http://external-dp-arm2-external-dp-router.gpustack-bench.svc:8000</code>.
+</div>
+<p>The endpoint was <code>http://external-dp-arm2-external-dp-router.gpustack-bench.svc:8000</code>.
 <em><code>eligible</code></em> counts the single replica group; <em><code>serving.value</code></em> counts its four HTTP endpoints.</p>
 <h2 id="step-3-send-requests-per-rank">Step 3: Send requests per rank</h2>
 <p>The recorded benchmark sent streaming requests through the Router, which reached all four ranks.
@@ -1709,7 +1712,8 @@ The direct checks below are additional verification commands; no direct nonstrea
 </span></span></span><span class="line"><span class="cl"><span class="se"></span>  -l <span class="s2">&#34;app.kubernetes.io/instance=external-dp-arm2-external-dp,app.kubernetes.io/component=server,modeldeployment.gpustack.ai/member-index=</span><span class="nv">$RANK</span><span class="s2">&#34;</span> <span class="se">\
 </span></span></span><span class="line"><span class="cl"><span class="se"></span>  -o <span class="nv">jsonpath</span><span class="o">=</span><span class="s1">&#39;{.items[0].metadata.name}&#39;</span><span class="k">)</span>
 </span></span><span class="line"><span class="cl">kubectl -n gpustack-bench port-forward <span class="s2">&#34;pod/</span><span class="nv">$RANK_POD</span><span class="s2">&#34;</span> <span class="s2">&#34;</span><span class="k">$((</span><span class="m">18000</span> <span class="o">+</span> RANK<span class="k">))</span><span class="s2">:8000&#34;</span></span></span></code></pre></div>
-</div><p>In another terminal, send ordinary and streaming requests to all four local ports:</p>
+</div>
+<p>In another terminal, send ordinary and streaming requests to all four local ports:</p>
 <div class="code-block">
   <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl"><span class="k">for</span> port in <span class="m">18000</span> <span class="m">18001</span> <span class="m">18002</span> 18003<span class="p">;</span> <span class="k">do</span>
@@ -1724,7 +1728,8 @@ The direct checks below are additional verification commands; no direct nonstrea
 </span></span></span><span class="line"><span class="cl"><span class="se"></span>    -d <span class="s1">&#39;{&#34;model&#34;:&#34;/models&#34;,&#34;prompt&#34;:&#34;A GPU is&#34;,&#34;max_tokens&#34;:8,&#34;temperature&#34;:0,&#34;stream&#34;:true,&#34;stream_options&#34;:{&#34;include_usage&#34;:true}}&#39;</span> <span class="se">\
 </span></span></span><span class="line"><span class="cl"><span class="se"></span>    -o <span class="s2">&#34;rank-</span><span class="nv">$port</span><span class="s2">-stream.txt&#34;</span>
 </span></span><span class="line"><span class="cl"><span class="k">done</span></span></span></code></pre></div>
-</div><p>Require successful HTTP responses, nonempty text, positive completion tokens and a valid finish reason on every rank.
+</div>
+<p>Require successful HTTP responses, nonempty text, positive completion tokens and a valid finish reason on every rank.
 Each stream must end with <code>data: [DONE]</code> and include usage.
 Retain the responses per rank. These checks establish functional inference, not sustained throughput.</p>
 <h2 id="step-4-check-router-coverage">Step 4: Check Router coverage</h2>
@@ -1735,13 +1740,15 @@ Retain the responses per rank. These checks establish functional inference, not 
 </span></span></span><span class="line"><span class="cl"><span class="se"></span>  -l app.kubernetes.io/instance<span class="o">=</span>external-dp-arm2-external-dp -o json <span class="p">|</span>
 </span></span><span class="line"><span class="cl">  jq -r <span class="s1">&#39;.items[] | select(any(.spec.containers[]; .name == &#34;router&#34;)) | .metadata.name&#39;</span><span class="k">)</span>
 </span></span><span class="line"><span class="cl">kubectl -n gpustack-bench port-forward <span class="s2">&#34;pod/</span><span class="nv">$ROUTER_POD</span><span class="s2">&#34;</span> 18080:8000 19090:9090</span></span></code></pre></div>
-</div><p>In another terminal, save endpoint discovery and per-worker request counters before sending traffic:</p>
+</div>
+<p>In another terminal, save endpoint discovery and per-worker request counters before sending traffic:</p>
 <div class="code-block">
   <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">curl --fail-with-body http://127.0.0.1:18080/observer/endpoints &gt; router-endpoints.json
 </span></span><span class="line"><span class="cl">jq <span class="s1">&#39;.workers[] | {url, selection}&#39;</span> router-endpoints.json
 </span></span><span class="line"><span class="cl">curl --fail-with-body http://127.0.0.1:19090/metrics &gt; router-before.prom</span></span></code></pre></div>
-</div><p>Send at least eight ordinary requests through the Router:</p>
+</div>
+<p>Send at least eight ordinary requests through the Router:</p>
 <div class="code-block">
   <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl"><span class="k">for</span> request in <span class="m">1</span> <span class="m">2</span> <span class="m">3</span> <span class="m">4</span> <span class="m">5</span> <span class="m">6</span> <span class="m">7</span> 8<span class="p">;</span> <span class="k">do</span>
@@ -1752,7 +1759,8 @@ Retain the responses per rank. These checks establish functional inference, not 
 </span></span><span class="line"><span class="cl"><span class="k">done</span>
 </span></span><span class="line"><span class="cl">curl --fail-with-body http://127.0.0.1:19090/metrics &gt; router-after.prom
 </span></span><span class="line"><span class="cl">grep -H <span class="s1">&#39;^vllm_router_processed_requests_total&#39;</span> router-before.prom router-after.prom</span></span></code></pre></div>
-</div><p>Require four healthy rank endpoints in the registry and increased request counters for every rank.
+</div>
+<p>Require four healthy rank endpoints in the registry and increased request counters for every rank.
 <strong>A successful Router response alone does not prove all-rank coverage.</strong>
 If only rank 0 is registered, inspect endpoint qualification before interpreting the policy&rsquo;s distribution.
 For <em>Internal LB</em> and <a href="/gpustack-operator/main/docs/modules/model-deployment/prefill-decode/">Prefill and Decode</a>
@@ -1774,7 +1782,8 @@ for the per-rank breakdown, latency and throughput tables, and the wide-<em>TP</
 </span></span></span><span class="line"><span class="cl"><span class="se"></span>  -c main --prefix --tail<span class="o">=</span><span class="m">200</span>
 </span></span><span class="line"><span class="cl">kubectl -n gpustack-bench get modeldeployment external-dp-arm2-external-dp -o yaml
 </span></span><span class="line"><span class="cl">kubectl -n gpustack-bench get services,endpointslices</span></span></code></pre></div>
-</div><p>Check matching widths, distinct ranks, a shared leader address and peer reachability.
+</div>
+<p>Check matching widths, distinct ranks, a shared leader address and peer reachability.
 The replica&rsquo;s headless <code>Service</code> supplies peer discovery; limiting it to the HTTP leader can prevent group startup.
 Keep engine inference evidence separate from Router discovery and coverage evidence.</p>
 <p>Stop all port-forwards, then delete the application:</p>
@@ -1784,7 +1793,8 @@ Keep engine inference evidence separate from Router discovery and coverage evide
 </span></span><span class="line"><span class="cl">kubectl -n gpustack-bench get pods,services,deployments,workloads <span class="se">\
 </span></span></span><span class="line"><span class="cl"><span class="se"></span>  -l app.kubernetes.io/instance<span class="o">=</span>external-dp-arm2-external-dp
 </span></span><span class="line"><span class="cl">kubectl get devices -o json</span></span></code></pre></div>
-</div><p>Verify deletion of owned resources and release of all eight application GPU claims.
+</div>
+<p>Verify deletion of owned resources and release of all eight application GPU claims.
 The runner log confirms deletion of the <code>ModelDeployment</code>, but no final owned-resource or released-device snapshot was captured.
 The model cache and cluster remain separate from application cleanup.</p>
 <h2 id="limitations">Limitations</h2>
@@ -1796,7 +1806,7 @@ The benchmark measured one model, two prompt/output targets and one run per conf
 growth. Group sizing and replacement semantics are covered in
 <a href="/gpustack-operator/main/docs/modules/model-deployment/external-dp/#admission-constraints">Admission constraints</a>
  and
-<a href="/gpustack-operator/main/docs/modules/model-deployment/deployment/#rollout-behavior">Rollout behavior</a>
+<a href="/gpustack-operator/main/docs/modules/model-deployment/configuration/#rollout-behavior">Rollout behavior</a>
 .</p>
 <p>The example does not establish <em>External DP</em> with <em>Prefill/Decode</em>, hybrid load balancing, multiple HTTP ports per <code>Pod</code>,
 or placement across GPU nodes. Those configurations need separate compatibility and runtime checks.</p>
@@ -1854,18 +1864,6 @@ or placement across GPU nodes. Those configurations need separate compatibility 
     <aside class="toc-panel" aria-label="Page navigation">
       <div class="toc-inner">
         
-          
-          
-          
-          <nav class="page-actions" aria-label="Page source">
-            <a href="https://github.com/gpustack/gpustack-operator/blob/304681b245c3f392539df1404126be8fb9d22adb/docs/walkthroughs/model-deployment/external-dp.md">View page source</a>
-            
-            <a href="https://github.com/gpustack/gpustack-operator/edit/main/docs/walkthroughs/model-deployment/external-dp.md">Edit this page</a>
-            
-          </nav>
-        
-        
-          <div class="toc-title">On this page</div>
           <nav id="TableOfContents">
   <ul>
     <li><a href="#contents">Contents</a></li>

@@ -238,7 +238,7 @@ under [Refusals and fixes](#refusals-and-fixes).
 
 A flag is refused in every spelling the engine's own parser reads as it (a unique prefix, and on
 the vLLM family an underscored or dotted form) by the rule under
-[Operator-owned keys](/gpustack-operator/main/docs/modules/model-deployment/deployment/index.md#operator-owned-keys).
+[Operator-owned keys](/gpustack-operator/main/docs/modules/model-deployment/configuration/index.md#operator-owned-keys).
 
 This applies only to *`env`*: a value supplied through *`envFrom`* is invisible to the check and **will
 be overwritten with no symptom**, so declare Mooncake variables in *`env`*.
@@ -358,8 +358,8 @@ Some older images mount the file but do not read it, without logging an error.
 This is not validated, and it cannot be: admission never inspects the container image, so the webhook
 does not know which build will run. The check is yours, against the image you are actually running:
 
-```console
-$ kubectl exec chat-0 -- python3 -c \
+```bash
+kubectl exec chat-0 -- python3 -c \
     "import vllm.distributed.kv_transfer.kv_connector.v1.mooncake.store.worker; print('reader present')"
 ```
 
@@ -372,8 +372,13 @@ correctly, just with no cache at all.
 
 An injected `Pod` carries `kvcache.gpustack.ai/injected`, a JSON object recording what was decided:
 
-```console
-$ kubectl get pod chat-0 -o jsonpath='{.metadata.annotations.kvcache\.gpustack\.ai/injected}'
+```bash
+kubectl get pod chat-0 -o jsonpath='{.metadata.annotations.kvcache\.gpustack\.ai/injected}'
+```
+
+Captured output:
+
+```text
 {"binding":"chat","engine":"vllm","vehicle":"file","domain":"team-a-chat",
  "tenantInjected":true,"launchProgram":"vllm","launchArgsForwarded":false}
 ```

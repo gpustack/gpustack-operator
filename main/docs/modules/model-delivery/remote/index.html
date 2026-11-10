@@ -27,7 +27,7 @@
   <link rel="alternate" type="text/markdown" href="/gpustack-operator/main/docs/modules/model-delivery/remote/index.md">
   
   <link rel="describedby" href="/gpustack-operator/main/llms.txt">
-  <link rel="stylesheet" href="/gpustack-operator/main/css/site.1a0de63fe646aba4ed6541fe0a6383c2ed5ca649b1593a98595ba53430bcf032.css">
+  <link rel="stylesheet" href="/gpustack-operator/main/css/site.b1fdc6af165ce7fbb10ebc91a579913dc99eac181655e5aae84dbe714d354a09.css">
   <link rel="stylesheet" href="/gpustack-operator/main/css/code.d2570c1cc6480f9c62bc31ec538eef2578ce80980588c469638a5f95416bfc7b.css">
 </head>
 <body class="docs-page">
@@ -36,7 +36,6 @@
     
     <a class="brand" href="/gpustack-operator/main/" aria-label="GPUStack Operator home"><img src="/gpustack-operator/main/images/logo_hu_ced145186d6eddf4.47210af4015bb5bd13742c222995900070c6649233431804f39bf2e001be3ddb.png" width="32" height="32" alt=""><span>GPUStack Operator</span></a>
     <nav class="top-links" aria-label="Main navigation">
-      <a class="top-docs-link" href="/gpustack-operator/main/docs/" aria-current="page">Documentation</a>
       <a class="top-devin-link" href="https://deepwiki.com/gpustack/gpustack-operator" target="_blank" rel="noopener noreferrer" aria-label="Ask Devin on DeepWiki (opens in a new tab)">
         <svg aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M8 1.5c.31 3.02 1.67 4.38 4.69 4.69-3.02.31-4.38 1.67-4.69 4.69-.31-3.02-1.67-4.38-4.69-4.69 3.02-.31 4.38-1.67 4.69-4.69Zm5.06 8.19c.16 1.51.84 2.19 2.34 2.34-1.51.16-2.19.84-2.34 2.34-.16-1.51-.84-2.19-2.34-2.34 1.51-.16 2.19-.84 2.34-2.34Z"/></svg>
         <span>Ask Devin</span>
@@ -106,7 +105,6 @@
         </svg>
       </button>
       <nav id="docs-navigation" class="sidebar-inner">
-        <div class="nav-title">Documentation</div>
         <a class="nav-home" href="/gpustack-operator/main/" >Overview</a>
         
           
@@ -698,7 +696,7 @@
       
         
         
-          <a title="KV Cache Election and Failover" href="/gpustack-operator/main/docs/modules/kv-cache/leader/" >Election and Failover</a>
+          <a title="KV Cache Election and Failover" href="/gpustack-operator/main/docs/modules/kv-cache/leader/" >Leader Election</a>
           
           
         
@@ -761,15 +759,15 @@
 
 
   
-    
-      
-      
-        
-        
-      
-    
-  
 
+  
+    
+      
+      
+        
+        
+      
+    
   
 
   
@@ -803,7 +801,7 @@
             <div class="nav-children">
               
                 
-                  <a title="Model Artifact API" href="/gpustack-operator/main/docs/modules/model-delivery/views/" >API</a>
+                  <a title="Model Artifact API" href="/gpustack-operator/main/docs/modules/model-delivery/artifact-api/" >API</a>
                 
               
             </div>
@@ -848,7 +846,7 @@
       
         
         
-          <a title="Node-to-Node Sync" href="/gpustack-operator/main/docs/modules/model-delivery/peer-sync/" >Node-to-Node Sync</a>
+          <a title="Node-to-Node Sync" href="/gpustack-operator/main/docs/modules/model-delivery/node-to-node-sync/" >Node-to-Node Sync</a>
           
           
         
@@ -1030,7 +1028,7 @@
       
         
         
-          <a title="Model Deployment Configuration" href="/gpustack-operator/main/docs/modules/model-deployment/deployment/" >Configuration</a>
+          <a title="Configuration" href="/gpustack-operator/main/docs/modules/model-deployment/configuration/" >Configuration</a>
           
           
         
@@ -1040,7 +1038,7 @@
       
         
         
-          <a title="Engine Compatibility" href="/gpustack-operator/main/docs/modules/model-deployment/engine-versions/" >Compatibility</a>
+          <a title="Engine Compatibility" href="/gpustack-operator/main/docs/modules/model-deployment/engine-versions/" >Engine Versions</a>
           
           
         
@@ -1208,7 +1206,12 @@
 
 
 
+  
+  
 
+
+
+  
 
 <details class="nav-section" >
   <summary title="GPU Instances">GPU Instances</summary>
@@ -1218,6 +1221,16 @@
       
       <a title="GPU Instances" href="/gpustack-operator/main/docs/modules/instances/" >Overview</a>
     
+    
+      
+      
+        
+        
+          <a title="Instance Metrics Reference" href="/gpustack-operator/main/docs/modules/instances/metrics/" >Metrics</a>
+          
+          
+        
+      
     
   </div>
 </details>
@@ -1322,7 +1335,7 @@
       
         
         
-          <a title="Migrating to Bundled Subcharts" href="/gpustack-operator/main/docs/operate/migration/to-subcharts/" >Bundled Subcharts</a>
+          <a title="Migrating to Bundled Subcharts" href="/gpustack-operator/main/docs/operate/migration/bundled-subcharts/" >Bundled Subcharts</a>
           
           
         
@@ -1332,7 +1345,7 @@
       
         
         
-          <a title="Upgrading to an Enforced Binding Dtype" href="/gpustack-operator/main/docs/operate/migration/kv-cache-dtype/" >Enforced Binding Dtype</a>
+          <a title="Upgrading to an Enforced Binding Dtype" href="/gpustack-operator/main/docs/operate/migration/enforced-binding-dtype/" >Enforced Binding Dtype</a>
           
           
         
@@ -1373,12 +1386,7 @@
   
   
 
-  
-  
 
-
-
-  
 
   
 
@@ -1416,16 +1424,6 @@
         
         
           <a title="Instance Type Unit Resources Reference" href="/gpustack-operator/main/docs/reference/instance-type-unit-resources/" >Resource Presets</a>
-          
-          
-        
-      
-    
-      
-      
-        
-        
-          <a title="Instance Metrics Reference" href="/gpustack-operator/main/docs/reference/instance-metrics/" >Instance Metrics</a>
           
           
         
@@ -1512,7 +1510,8 @@ so the successful remote path does not store a complete checkpoint on the target
   <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">kubectl -n gpustack-system patch setting model-artifact-remote-delivery-policy <span class="se">\
 </span></span></span><span class="line"><span class="cl"><span class="se"></span>  --type merge -p <span class="s1">&#39;{&#34;spec&#34;:{&#34;value&#34;:&#34;Disabled&#34;}}&#39;</span></span></span></code></pre></div>
-</div><p>The source broker&rsquo;s <code>ServiceAccount</code> can review audience-scoped tokens and read live workload,
+</div>
+<p>The source broker&rsquo;s <code>ServiceAccount</code> can review audience-scoped tokens and read live workload,
 artifact, placement and grant state. It pins each Binding&rsquo;s quota authority and updates that
 authority&rsquo;s ConfigMap in the operator namespace. It can also acknowledge drain on source Pods in
 that namespace. The model-manager remains the only writer of <code>NodeModelStore</code> status.</p>
@@ -1572,7 +1571,8 @@ model device memory are separate; configure them under <a href="#replica-startup
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="c"># Additional HIXL ceiling: 16 GiB; 0 retains this default.</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="c"># Nonzero values have a 1 GiB floor and round down to 2 MiB.</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">GPUSTACK_MODEL_TRANSFER_HIXL_RESIDENT_BUDGET_BYTES</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;17179869184&#34;</span></span></span></code></pre></div>
-</div><p>Negative <em><code>source</code></em> values are rejected. A ceiling reserves no memory by itself: admission checks
+</div>
+<p>Negative <em><code>source</code></em> values are rejected. A ceiling reserves no memory by itself: admission checks
 available RAM, node capacity and the Binding grant, including 10% reservation overhead.
 Both NIXL and HIXL page checkpoints larger than the admitted window. The window must fit at least
 <code>1 GiB</code> and the largest safetensors shard, including native allocation overhead; shards are not split.</p>
@@ -1601,7 +1601,8 @@ managed replica routing allowlist.</p>
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">env</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">GPUSTACK_MODEL_TRANSFER_SOURCE_RESIDENT_BUDGET_BYTES</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;0&#34;</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">GPUSTACK_MODEL_TRANSFER_HIXL_RESIDENT_BUDGET_BYTES</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;17179869184&#34;</span><span class="w">  </span><span class="c"># 16 GiB per generation.</span></span></span></code></pre></div>
-</div><h4 id="models-and-shared-grant">Models and shared grant</h4>
+</div>
+<h4 id="models-and-shared-grant">Models and shared grant</h4>
 <p>Label the source node <code>gpustack.ai/model-transfer-source: &quot;true&quot;</code>. Create the two artifacts,
 the store and its Binding. Repository revisions and manifest digests are resolved automatically;
 see <a href="/gpustack-operator/main/docs/modules/model-delivery/artifact/#manifest-digest">Model Artifact</a>
@@ -1658,7 +1659,8 @@ see <a href="/gpustack-operator/main/docs/modules/model-delivery/artifact/#manif
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">registrations</span><span class="p">:</span><span class="w"> </span><span class="m">4096</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="c"># At least 1; can change online. Existing sessions may finish above a lowered cap.</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">sessions</span><span class="p">:</span><span class="w"> </span><span class="m">64</span></span></span></code></pre></div>
-</div><h4 id="two-model-sources">Two model sources</h4>
+</div>
+<h4 id="two-model-sources">Two model sources</h4>
 <p>Each prefetch references its own artifact and the shared <code>qwen-source</code> Binding:</p>
 <div class="code-block">
   <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
@@ -1698,7 +1700,8 @@ see <a href="/gpustack-operator/main/docs/modules/model-delivery/artifact/#manif
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">retention</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">pinned</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">source</span><span class="p">:</span><span class="w"> </span>{}</span></span></code></pre></div>
-</div><table>
+</div>
+<table>
   <thead>
       <tr>
           <th>Model</th>
@@ -1737,7 +1740,8 @@ three such sources fit within <code>64 GiB</code>; a fourth does not, even below
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">env</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">GPUSTACK_MODEL_TRANSFER_SOURCE_RESIDENT_BUDGET_BYTES</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;0&#34;</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">GPUSTACK_MODEL_TRANSFER_HIXL_RESIDENT_BUDGET_BYTES</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;17179869184&#34;</span></span></span></code></pre></div>
-</div><p>With no other charges, at most about <code>14.54 GiB</code> remains for native backing after overhead and
+</div>
+<p>With no other charges, at most about <code>14.54 GiB</code> remains for native backing after overhead and
 alignment. Even 8B now needs paging; the two sources cannot each claim that much concurrently.
 Admission may wait, and each admitted window must still fit its largest shard.</p>
 <h3 id="readiness-and-release">Readiness and release</h3>
@@ -1765,7 +1769,7 @@ version <code>1</code> readers and manifests are refused.</p>
 <code>4 MiB</code>, with at most <code>512 MiB</code> of pages and <code>1,048,576</code> tensors overall. Load and source journals
 cap operations at <code>1,048,576</code>; byte limits can refuse work sooner. Proven acknowledgements can
 be compacted; unknown receipts remain charged.</p>
-<p>See <a href="https://github.com/gpustack/gpustack-operator/blob/304681b245c3f392539df1404126be8fb9d22adb/specs/2026-10-28-model-artifact-remote-weight-loading.md#source-budget-calculations">source budget calculations</a>
+<p>See <a href="https://github.com/gpustack/gpustack-operator/blob/e50f885d037f4c00400f32f4ec1be0cac9581fca/specs/2026-10-28-model-artifact-remote-weight-loading.md#source-budget-calculations">source budget calculations</a>
 
 for admission arithmetic and available-memory sizing.</p>
 <h2 id="replica-startup">Replica startup</h2>
@@ -1807,7 +1811,8 @@ show the defaults; merge the entries with any existing role environment:</p>
 </span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="c"># In all mode, ranks divide this budget, with a 1 GiB minimum per rank.</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">        </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">GPUSTACK_MODEL_TRANSFER_MAX_WINDOW_BYTES</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="nt">value</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;8589934592&#34;</span></span></span></code></pre></div>
-</div><p>These entries belong to <em><code>spec.roles[].env</code></em>, not the source chart&rsquo;s <em><code>modelTransfer.env</code></em>.
+</div>
+<p>These entries belong to <em><code>spec.roles[].env</code></em>, not the source chart&rsquo;s <em><code>modelTransfer.env</code></em>.
 The <code>all</code> aliases are <code>all_tp</code>, <code>all-tp</code> and <code>all_tps</code>; invalid modes fail. Each session counts
 against the source session cap. Broadcast uses <code>torch.distributed.broadcast</code>.</p>
 <p>In <code>all</code> mode, each rank&rsquo;s default window is
@@ -1825,7 +1830,8 @@ when supplying it through a command-line argument, encode the object as JSON:</p
 </span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">max_inflight</span><span class="p">:</span><span class="w"> </span><span class="m">4</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="c"># 4 GiB default ceiling for one owned output tensor.</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">owned_output_bytes</span><span class="p">:</span><span class="w"> </span><span class="m">4294967296</span></span></span></code></pre></div>
-</div><p>The reader coalesces contiguous safetensors spans into a registered transfer window where
+</div>
+<p>The reader coalesces contiguous safetensors spans into a registered transfer window where
 possible. Window and concurrency budgets bound staging; retained output tensors still contribute
 to peak device memory until load completion.</p>
 <p>The target staging window uses pinned host RAM. Ascend uses <code>aclrtMallocHost</code> and HIXL <code>MEM_HOST</code>;
@@ -2012,12 +2018,12 @@ sequential shards with 3.72–4.00 GiB of target RAM (66.33 s on 35B, 452.83 s o
 paging and makes <code>TP all</code> fastest again: 46.39 s (<code>6.09×</code>) on 35B and 232.93 s (<code>2.57×</code>) on 235B
 (versus 253.58 s for full-resident broadcast; the 235B paged and full-resident samples used
 different SDK builds). Detailed sweeps and lifecycle checks are in the
-<a href="https://github.com/gpustack/gpustack-operator/blob/304681b245c3f392539df1404126be8fb9d22adb/specs/2026-10-28-model-artifact-remote-weight-loading.md#ascend-memory-and-loading">acceptance record</a>
+<a href="https://github.com/gpustack/gpustack-operator/blob/e50f885d037f4c00400f32f4ec1be0cac9581fca/specs/2026-10-28-model-artifact-remote-weight-loading.md#ascend-memory-and-loading">acceptance record</a>
 .</p>
 <h3 id="nvidia-nixl">NVIDIA (NIXL)</h3>
 <p>The runs used Nebius H100 80 GB nodes and vLLM 0.30.0 in eager mode with pre-warmed source weights.
 Every case below reached <code>Ready</code> and passed inference probes. The
-<a href="https://github.com/gpustack/gpustack-operator/blob/304681b245c3f392539df1404126be8fb9d22adb/specs/2026-11-09-modelexpress-peer-d2d-and-cache-sharing.md#benchmarks-and-verification-results">NVIDIA evidence record</a>
+<a href="https://github.com/gpustack/gpustack-operator/blob/e50f885d037f4c00400f32f4ec1be0cac9581fca/specs/2026-11-09-modelexpress-peer-d2d-and-cache-sharing.md#benchmarks-and-verification-results">NVIDIA evidence record</a>
 
 retains the tested artifacts and measurement limits.</p>
 <p>The source host reported 1574.84 GiB of total RAM and approximately 1554.06 GiB available. With
@@ -2152,7 +2158,7 @@ H2H and H2D. ModelExpress peer D2D over HIXL is outside this design.</p>
 H100 80 GB nodes with vLLM 0.30.0 in graph mode, comparing the NIXL <code>TCP peer sync + local load</code>
 baseline against the seed replica, a scale-out peer replica, and a replica launched after a
 metadata-server restart (detailed sweeps and verification logs are in the
-<a href="https://github.com/gpustack/gpustack-operator/blob/304681b245c3f392539df1404126be8fb9d22adb/specs/2026-11-09-modelexpress-peer-d2d-and-cache-sharing.md#benchmarks-and-verification-results">ModelExpress benchmark record</a>
+<a href="https://github.com/gpustack/gpustack-operator/blob/e50f885d037f4c00400f32f4ec1be0cac9581fca/specs/2026-11-09-modelexpress-peer-d2d-and-cache-sharing.md#benchmarks-and-verification-results">ModelExpress benchmark record</a>
 ):</p>
 <table>
   <thead>
@@ -2237,7 +2243,8 @@ cluster-specific runner image and instance type.</p>
 </span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">accelerator</span><span class="p">:</span><span class="w"> </span><span class="m">1</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">extraArgs</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">        </span>- --<span class="l">load-format=modelexpress </span><span class="w"> </span><span class="c"># required; mx is also accepted</span></span></span></code></pre></div>
-</div><ul>
+</div>
+<ul>
 <li><strong>Load format</strong>: Select <code>modelexpress</code> or <code>mx</code> in the role&rsquo;s command or extra arguments.</li>
 <li><strong>Artifact</strong>: ModelExpress integration requires a Hugging Face artifact.</li>
 <li><strong>Overrides</strong>: Role environment values override injected defaults (set <code>MX_ARTIFACT_TRANSFER: &quot;0&quot;</code> to disable cache transfer).</li>
@@ -2273,7 +2280,8 @@ shows the rendered environment. The actual Pod includes additional fields.</p>
 </span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="nt">value</span><span class="p">:</span><span class="w"> </span><span class="l">gpustack </span><span class="w"> </span><span class="c"># GPUStack loading strategy</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">        </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">MX_LOAD_PLUGIN_BEFORE</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="nt">value</span><span class="p">:</span><span class="w"> </span><span class="l">server-cache </span><span class="w"> </span><span class="c"># strategy insertion point</span></span></span></code></pre></div>
-</div><ul>
+</div>
+<ul>
 <li><strong>Server address</strong>: Long deployment names produce a shortened Service name.</li>
 <li><strong>Digest</strong>: The Operator omits the digest when no compile-cache identity is available.</li>
 <li><strong>Health URL</strong>: The Operator injects a URL only when it can grade the engine and its port is known.</li>
@@ -2333,7 +2341,8 @@ trusted Pods.</p>
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">namespace</span><span class="p">:</span><span class="w"> </span><span class="l">gpustack-system </span><span class="w"> </span><span class="c"># use the system namespace</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">spec</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">value</span><span class="p">:</span><span class="w"> </span><span class="l">gpustack/mirrored-modelexpress-server:v0.7.0 </span><span class="w"> </span><span class="c"># default image</span></span></span></code></pre></div>
-</div><ul>
+</div>
+<ul>
 <li><strong>Image</strong>: Use the <a href="/gpustack-operator/main/docs/reference/settings/">Setting</a>
  for registry redirection or image pinning.</li>
 <li><strong>Restart</strong>: Server replacement loses in-memory registrations; existing replicas keep serving.</li>
@@ -2421,7 +2430,8 @@ metadata readiness and source eligibility permit startup but are not serving pro
 <div class="code-block">
   <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">kubectl get modeldeployment &lt;name&gt; -o <span class="nv">jsonpath</span><span class="o">=</span><span class="s1">&#39;{.status.model.remote}&#39;</span> <span class="p">|</span> jq</span></span></code></pre></div>
-</div><p>Source eligibility uses the owning prefetch&rsquo;s <a href="/gpustack-operator/main/docs/modules/model-delivery/prefetch/#status-and-views">current serving observation</a>
+</div>
+<p>Source eligibility uses the owning prefetch&rsquo;s <a href="/gpustack-operator/main/docs/modules/model-delivery/prefetch/#status-and-views">current serving observation</a>
 .
 Lease expiry schedules a new deployment observation; progress counters and ordinary lease renewals
 alone do not enqueue every artifact consumer. Endpoint discovery still checks source <code>Pod</code> and
@@ -2519,18 +2529,6 @@ on disk.</p>
     <aside class="toc-panel" aria-label="Page navigation">
       <div class="toc-inner">
         
-          
-          
-          
-          <nav class="page-actions" aria-label="Page source">
-            <a href="https://github.com/gpustack/gpustack-operator/blob/304681b245c3f392539df1404126be8fb9d22adb/docs/modules/model-delivery/remote.md">View page source</a>
-            
-            <a href="https://github.com/gpustack/gpustack-operator/edit/main/docs/modules/model-delivery/remote.md">Edit this page</a>
-            
-          </nav>
-        
-        
-          <div class="toc-title">On this page</div>
           <nav id="TableOfContents">
   <ul>
     <li><a href="#contents">Contents</a></li>

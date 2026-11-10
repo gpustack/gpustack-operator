@@ -214,7 +214,7 @@ under each router, 120 requests with none failing, 60 on each replica. `vllm-rou
 in `vllm_router_policy_decisions_total{policy="round_robin"}`, 60 per replica, and `sglang-gateway`
 in `smg_worker_selection_total{policy="round_robin"}`, 120 in all.
 
-*`router.extraArgs`* is [editable](/gpustack-operator/main/docs/modules/model-deployment/deployment/index.md#deployment-identity-fields), so a
+*`router.extraArgs`* is [editable](/gpustack-operator/main/docs/modules/model-deployment/configuration/index.md#deployment-identity-fields), so a
 running deployment can switch as well. The router `Pod` is then replaced, and the new one starts with
 no record of earlier prefixes. Only a flag set at creation has been run.
 

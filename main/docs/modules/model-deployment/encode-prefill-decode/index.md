@@ -1,7 +1,7 @@
 # Encode, Prefill and Decode
 
 A deployment with *Encode*, *Prefill* and *Decode* roles runs visual encoding and language generation
-in separate `Pod`s. [Model Deployment Configuration](/gpustack-operator/main/docs/modules/model-deployment/deployment/index.md) describes the base role fields and
+in separate `Pod`s. [Model Deployment Configuration](/gpustack-operator/main/docs/modules/model-deployment/configuration/index.md) describes the base role fields and
 admission rules.
 
 ![Multimodal and text-only request flows](/gpustack-operator/main/docs/assets/diagrams/model-deployment-epd.svg)
@@ -229,7 +229,7 @@ spelling the engine reads. On vLLM that is `--ec-transfer-config`; `ECCPUConnect
 `VLLM_USE_V2_MODEL_RUNNER` and the two side-channel variables.
 
 SGLang owns `--encoder-only`, `--language-only`, `--encoder-urls` and
-`--encoder-bootstrap-port`. See [Operator-owned keys](/gpustack-operator/main/docs/modules/model-deployment/deployment/index.md#operator-owned-keys).
+`--encoder-bootstrap-port`. See [Operator-owned keys](/gpustack-operator/main/docs/modules/model-deployment/configuration/index.md#operator-owned-keys).
 
 Four flags the operator renders on the encoder are defaults, so a role's own value wins:
 `--enforce-eager`, `--no-enable-prefix-caching`, `--max-num-batched-tokens` and `--mm-encoder-only`.
@@ -309,6 +309,6 @@ hardware and when *EPD* helps.
 
 ---
 
-**See also** — [Model Deployment Configuration](/gpustack-operator/main/docs/modules/model-deployment/deployment/index.md) (base fields and admission rules) · [Prefill and Decode](/gpustack-operator/main/docs/modules/model-deployment/prefill-decode/index.md) (pairing *prefill* and *decode* roles) · [Encode, Prefill and Decode Benchmark](/gpustack-operator/main/docs/modules/model-deployment/encode-prefill-decode-benchmark/index.md) (measured latency and throughput across three configurations) · [Engine Compatibility](/gpustack-operator/main/docs/modules/model-deployment/engine-versions/index.md) (supported version floors) · [Model Deployment Routing](/gpustack-operator/main/docs/modules/model-deployment/routing/index.md) (router selection and deciders) · [Model Deployment Status](/gpustack-operator/main/docs/modules/model-deployment/status/index.md) (status conditions and role summaries) · [EPD Walkthrough](/gpustack-operator/main/docs/walkthroughs/model-deployment/encode-prefill-decode/index.md) (a recorded live run).
+**See also** — [Model Deployment Configuration](/gpustack-operator/main/docs/modules/model-deployment/configuration/index.md) (base fields and admission rules) · [Prefill and Decode](/gpustack-operator/main/docs/modules/model-deployment/prefill-decode/index.md) (pairing *prefill* and *decode* roles) · [Encode, Prefill and Decode Benchmark](/gpustack-operator/main/docs/modules/model-deployment/encode-prefill-decode-benchmark/index.md) (measured latency and throughput across three configurations) · [Engine Compatibility](/gpustack-operator/main/docs/modules/model-deployment/engine-versions/index.md) (supported version floors) · [Model Deployment Routing](/gpustack-operator/main/docs/modules/model-deployment/routing/index.md) (router selection and deciders) · [Model Deployment Status](/gpustack-operator/main/docs/modules/model-deployment/status/index.md) (status conditions and role summaries) · [EPD Walkthrough](/gpustack-operator/main/docs/walkthroughs/model-deployment/encode-prefill-decode/index.md) (a recorded live run).
 
 **Next** → [Model Deployment Routing](/gpustack-operator/main/docs/modules/model-deployment/routing/index.md) — choose a routing policy and inspect candidate endpoints.

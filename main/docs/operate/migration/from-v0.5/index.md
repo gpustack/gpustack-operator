@@ -2,7 +2,7 @@
 
 Versions after v0.5.x rename and restructure the scheduling objects the operator creates.
 The first, v0.6.x ("unified-pool refactor",
-[`specs/2026-06-29-instancetype-unified-pool-refactor.md`](https://github.com/gpustack/gpustack-operator/blob/304681b245c3f392539df1404126be8fb9d22adb/specs/2026-06-29-instancetype-unified-pool-refactor.md)),
+[`specs/2026-06-29-instancetype-unified-pool-refactor.md`](https://github.com/gpustack/gpustack-operator/blob/e50f885d037f4c00400f32f4ec1be0cac9581fca/specs/2026-06-29-instancetype-unified-pool-refactor.md)),
 renames nearly every Kueue/NFD object it manages and drops the `Cohort` layer; later versions may
 reshape v0.5.x structures further.
 
@@ -42,7 +42,7 @@ The v0.6.x operator indexes objects by their new names, so it never sees the v0.
 `ResourceFlavor`s, `ClusterQueue`s, Cohorts and `LocalQueue`s, and it neither reconciles nor
 garbage-collects them.
 No hook cleans them: the chart's post-delete `cleanup.sh` fires only on `helm uninstall`, and the
-upgrade's own migration hooks address the pre-subchart release layout ([Migrating to Bundled Subcharts](/gpustack-operator/main/docs/operate/migration/to-subcharts/index.md)), not v0.5.x names.
+upgrade's own migration hooks address the pre-subchart release layout ([Migrating to Bundled Subcharts](/gpustack-operator/main/docs/operate/migration/bundled-subcharts/index.md)), not v0.5.x names.
 
 An in-place upgrade therefore leaves both sets: the working v0.6.x one plus a leaked v0.5.x one of
 dead `ResourceFlavor`s, `ClusterQueue`s, Cohorts, a `LocalQueue` in every namespace, and Cohorts nothing
@@ -172,7 +172,7 @@ kubectl get nodes -o json | grep -oE '"[^"]*(\.z-[a-z]+|generic-ln-x64)[^"]*"' |
 
 ---
 
-**See also** — [Migrating to Bundled Subcharts](/gpustack-operator/main/docs/operate/migration/to-subcharts/index.md) (the other one-time upgrade, from
+**See also** — [Migrating to Bundled Subcharts](/gpustack-operator/main/docs/operate/migration/bundled-subcharts/index.md) (the other one-time upgrade, from
 v0.7.x or earlier) · [Scheduling Chain](/gpustack-operator/main/docs/modules/devices/scheduling/index.md#naming-and-grouping) (the
 object names this upgrade moves to) · [Migration Troubleshooting](/gpustack-operator/main/docs/operate/migration/troubleshooting/index.md) (recovering from
 a wedged upgrade or a stuck namespace)

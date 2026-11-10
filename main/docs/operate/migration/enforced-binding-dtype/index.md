@@ -108,7 +108,7 @@ An injected `Pod` carries the same two entries at the end of its `args`, where t
 ---
 
 **See also** — [KV Cache Pools and Bindings](/gpustack-operator/main/docs/modules/kv-cache/pool/index.md) (the dtype rule) ·
-[ModelDeployment](/gpustack-operator/main/docs/modules/model-deployment/deployment/index.md#operator-owned-keys) (what the operator owns) ·
+[ModelDeployment](/gpustack-operator/main/docs/modules/model-deployment/configuration/index.md#operator-owned-keys) (what the operator owns) ·
 [KV Cache Injection](/gpustack-operator/main/docs/modules/kv-cache/injection/index.md) (the `Pod` path) ·
 [Settings](/gpustack-operator/main/docs/reference/settings/index.md) (the escape switch)
 

@@ -27,7 +27,7 @@
   <link rel="alternate" type="text/markdown" href="/gpustack-operator/main/docs/walkthroughs/model-deployment/multi-host/index.md">
   
   <link rel="describedby" href="/gpustack-operator/main/llms.txt">
-  <link rel="stylesheet" href="/gpustack-operator/main/css/site.1a0de63fe646aba4ed6541fe0a6383c2ed5ca649b1593a98595ba53430bcf032.css">
+  <link rel="stylesheet" href="/gpustack-operator/main/css/site.b1fdc6af165ce7fbb10ebc91a579913dc99eac181655e5aae84dbe714d354a09.css">
   <link rel="stylesheet" href="/gpustack-operator/main/css/code.d2570c1cc6480f9c62bc31ec538eef2578ce80980588c469638a5f95416bfc7b.css">
 </head>
 <body class="docs-page">
@@ -36,7 +36,6 @@
     
     <a class="brand" href="/gpustack-operator/main/" aria-label="GPUStack Operator home"><img src="/gpustack-operator/main/images/logo_hu_ced145186d6eddf4.47210af4015bb5bd13742c222995900070c6649233431804f39bf2e001be3ddb.png" width="32" height="32" alt=""><span>GPUStack Operator</span></a>
     <nav class="top-links" aria-label="Main navigation">
-      <a class="top-docs-link" href="/gpustack-operator/main/docs/" aria-current="page">Documentation</a>
       <a class="top-devin-link" href="https://deepwiki.com/gpustack/gpustack-operator" target="_blank" rel="noopener noreferrer" aria-label="Ask Devin on DeepWiki (opens in a new tab)">
         <svg aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M8 1.5c.31 3.02 1.67 4.38 4.69 4.69-3.02.31-4.38 1.67-4.69 4.69-.31-3.02-1.67-4.38-4.69-4.69 3.02-.31 4.38-1.67 4.69-4.69Zm5.06 8.19c.16 1.51.84 2.19 2.34 2.34-1.51.16-2.19.84-2.34 2.34-.16-1.51-.84-2.19-2.34-2.34 1.51-.16 2.19-.84 2.34-2.34Z"/></svg>
         <span>Ask Devin</span>
@@ -106,7 +105,6 @@
         </svg>
       </button>
       <nav id="docs-navigation" class="sidebar-inner">
-        <div class="nav-title">Documentation</div>
         <a class="nav-home" href="/gpustack-operator/main/" >Overview</a>
         
           
@@ -698,7 +696,7 @@
       
         
         
-          <a title="KV Cache Election and Failover" href="/gpustack-operator/main/docs/modules/kv-cache/leader/" >Election and Failover</a>
+          <a title="KV Cache Election and Failover" href="/gpustack-operator/main/docs/modules/kv-cache/leader/" >Leader Election</a>
           
           
         
@@ -761,15 +759,15 @@
 
 
   
-    
-      
-      
-        
-        
-      
-    
-  
 
+  
+    
+      
+      
+        
+        
+      
+    
   
 
   
@@ -803,7 +801,7 @@
             <div class="nav-children">
               
                 
-                  <a title="Model Artifact API" href="/gpustack-operator/main/docs/modules/model-delivery/views/" >API</a>
+                  <a title="Model Artifact API" href="/gpustack-operator/main/docs/modules/model-delivery/artifact-api/" >API</a>
                 
               
             </div>
@@ -848,7 +846,7 @@
       
         
         
-          <a title="Node-to-Node Sync" href="/gpustack-operator/main/docs/modules/model-delivery/peer-sync/" >Node-to-Node Sync</a>
+          <a title="Node-to-Node Sync" href="/gpustack-operator/main/docs/modules/model-delivery/node-to-node-sync/" >Node-to-Node Sync</a>
           
           
         
@@ -1030,7 +1028,7 @@
       
         
         
-          <a title="Model Deployment Configuration" href="/gpustack-operator/main/docs/modules/model-deployment/deployment/" >Configuration</a>
+          <a title="Configuration" href="/gpustack-operator/main/docs/modules/model-deployment/configuration/" >Configuration</a>
           
           
         
@@ -1040,7 +1038,7 @@
       
         
         
-          <a title="Engine Compatibility" href="/gpustack-operator/main/docs/modules/model-deployment/engine-versions/" >Compatibility</a>
+          <a title="Engine Compatibility" href="/gpustack-operator/main/docs/modules/model-deployment/engine-versions/" >Engine Versions</a>
           
           
         
@@ -1208,7 +1206,12 @@
 
 
 
+  
+  
 
+
+
+  
 
 <details class="nav-section" >
   <summary title="GPU Instances">GPU Instances</summary>
@@ -1218,6 +1221,16 @@
       
       <a title="GPU Instances" href="/gpustack-operator/main/docs/modules/instances/" >Overview</a>
     
+    
+      
+      
+        
+        
+          <a title="Instance Metrics Reference" href="/gpustack-operator/main/docs/modules/instances/metrics/" >Metrics</a>
+          
+          
+        
+      
     
   </div>
 </details>
@@ -1322,7 +1335,7 @@
       
         
         
-          <a title="Migrating to Bundled Subcharts" href="/gpustack-operator/main/docs/operate/migration/to-subcharts/" >Bundled Subcharts</a>
+          <a title="Migrating to Bundled Subcharts" href="/gpustack-operator/main/docs/operate/migration/bundled-subcharts/" >Bundled Subcharts</a>
           
           
         
@@ -1332,7 +1345,7 @@
       
         
         
-          <a title="Upgrading to an Enforced Binding Dtype" href="/gpustack-operator/main/docs/operate/migration/kv-cache-dtype/" >Enforced Binding Dtype</a>
+          <a title="Upgrading to an Enforced Binding Dtype" href="/gpustack-operator/main/docs/operate/migration/enforced-binding-dtype/" >Enforced Binding Dtype</a>
           
           
         
@@ -1373,12 +1386,7 @@
   
   
 
-  
-  
 
-
-
-  
 
   
 
@@ -1416,16 +1424,6 @@
         
         
           <a title="Instance Type Unit Resources Reference" href="/gpustack-operator/main/docs/reference/instance-type-unit-resources/" >Resource Presets</a>
-          
-          
-        
-      
-    
-      
-      
-        
-        
-          <a title="Instance Metrics Reference" href="/gpustack-operator/main/docs/reference/instance-metrics/" >Instance Metrics</a>
           
           
         
@@ -1609,34 +1607,38 @@ The launch script sets <em>TP</em> = 8 across local GPUs and <em>PP</em> = 2 acr
 </span></span></span><span class="line"><span class="cl"><span class="sd">          else
 </span></span></span><span class="line"><span class="cl"><span class="sd">            exec ray start --address=&#34;${GPUSTACK_REPLICA_LEADER_ADDRESS}:6379&#34; --block
 </span></span></span><span class="line"><span class="cl"><span class="sd">          fi</span></span></span></code></pre></div>
-</div><p>The operator does not compose multi-node arguments. A multi-host role takes over the command line with
+</div>
+<p>The operator does not compose multi-node arguments. A multi-host role takes over the command line with
 <em><code>command</code></em>, and the script reads the three variables the operator injects into every member.
 This snippet illustrates how the operator wires member coordinates to the entrypoint script.</p>
 <p>Production multi-host engines typically use Ray (<code>--distributed-executor-backend ray</code>).
 Member <code>m0</code> initializes the Ray head cluster and serves the API; subordinate members join the Ray cluster
 with <code>ray start --address=... --block</code>. A role with <em><code>command</code></em> reports <code>status.roles[].unmanaged: true</code>,
 because the operator renders no engine argument for it. See
-<a href="/gpustack-operator/main/docs/modules/model-deployment/deployment/#three-override-tiers">Three override tiers</a>
+<a href="/gpustack-operator/main/docs/modules/model-deployment/configuration/#three-override-tiers">Three override tiers</a>
 .</p>
 <p>Apply the deployment manifest:</p>
 <div class="code-block">
   <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">kubectl apply -f multi-host.yaml
 </span></span><span class="line"><span class="cl">kubectl -n gpustack-elastic get modeldeployment deepseek-multi-host</span></span></code></pre></div>
-</div><h2 id="step-2-verify-gang-admission">Step 2: Verify gang admission</h2>
+</div>
+<h2 id="step-2-verify-gang-admission">Step 2: Verify gang admission</h2>
 <p>Gang admission places the two members of the group together, and the operator injects the leader
 address, the member index and the replica size into each member container.</p>
 <p>Check the member <code>Pod</code>s:</p>
 <div class="code-block">
   <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">kubectl -n gpustack-elastic get pods -l app.kubernetes.io/instance<span class="o">=</span>deepseek-multi-host</span></span></code></pre></div>
-</div><p>Verify that two member <code>Pod</code>s have the expected member index suffixes:
+</div>
+<p>Verify that two member <code>Pod</code>s have the expected member index suffixes:
 <code>deepseek-multi-host-server-r0-m0</code> and <code>deepseek-multi-host-server-r0-m1</code>.
 Inspect the injected environment variables in the secondary worker <code>m1</code>:</p>
 <div class="code-block">
   <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">kubectl -n gpustack-elastic <span class="nb">exec</span> deepseek-multi-host-server-r0-m1 -- env <span class="p">|</span> grep GPUSTACK_</span></span></code></pre></div>
-</div><p>The operator automatically populates:</p>
+</div>
+<p>The operator automatically populates:</p>
 <ul>
 <li><code>GPUSTACK_REPLICA_LEADER_ADDRESS</code>: the DNS name of member <code>m0</code>, <code>deepseek-multi-host-server-r0-m0.deepseek-multi-host-server-r0</code>.</li>
 <li><code>GPUSTACK_REPLICA_SIZE</code>: total member count (<code>2</code>).</li>
@@ -1646,7 +1648,8 @@ Inspect the injected environment variables in the secondary worker <code>m1</cod
 <div class="code-block">
   <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">kubectl -n gpustack-elastic get svc deepseek-multi-host-server -o yaml</span></span></code></pre></div>
-</div><p>The <code>Service</code> selector targets only member <code>m0</code>. External traffic lands on the primary replica.</p>
+</div>
+<p>The <code>Service</code> selector targets only member <code>m0</code>. External traffic lands on the primary replica.</p>
 <h2 id="step-3-verify-distributed-inference">Step 3: Verify distributed inference</h2>
 <p>Once both member <code>Pod</code>s reach the <code>Ready</code> condition, query the server <code>Service</code>:</p>
 <div class="code-block">
@@ -1660,7 +1663,8 @@ Inspect the injected environment variables in the secondary worker <code>m1</cod
 </span></span></span><span class="line"><span class="cl"><span class="s1">    &#34;messages&#34;: [{&#34;role&#34;: &#34;user&#34;, &#34;content&#34;: &#34;Hello distributed inference!&#34;}],
 </span></span></span><span class="line"><span class="cl"><span class="s1">    &#34;max_tokens&#34;: 16
 </span></span></span><span class="line"><span class="cl"><span class="s1">  }&#39;</span> <span class="p">|</span> jq .</span></span></code></pre></div>
-</div><p>The master rank coordinates distributed collective operations with the secondary worker and returns tokens.</p>
+</div>
+<p>The master rank coordinates distributed collective operations with the secondary worker and returns tokens.</p>
 <h2 id="step-4-change-replicas-and-size">Step 4: Change replicas and size</h2>
 <p>To scale serving throughput, increase <em><code>replicas</code></em> to launch additional multi-host groups:</p>
 <div class="code-block">
@@ -1677,7 +1681,8 @@ Inspect the injected environment variables in the secondary worker <code>m1</cod
 </span></span></span><span class="line"><span class="cl"><span class="gd"></span><span class="gi">+      replicas: 2
 </span></span></span><span class="line"><span class="cl"><span class="gi"></span>       size: 2
 </span></span></code></pre></div>
-</div><p>Scaling to <code>replicas: 2</code> creates another complete two-host group (<code>m0</code> and <code>m1</code>), reserving sixteen additional GPUs.</p>
+</div>
+<p>Scaling to <code>replicas: 2</code> creates another complete two-host group (<code>m0</code> and <code>m1</code>), reserving sixteen additional GPUs.</p>
 <p>To change the member topology of each instance, you can also update <em><code>size</code></em>, <em><code>resources</code></em> or <em><code>instanceType</code></em>.
 These edits do not resize a running collective engine in place.</p>
 <p>The operator deletes each old instance and its <code>Workload</code> first.
@@ -1686,7 +1691,7 @@ The next old instance is deleted only after the replacement is admitted.
 A role with one replica therefore stops serving during the replacement.</p>
 <p>The script reads <code>GPUSTACK_REPLICA_SIZE</code>, so the <em>PP</em> size follows <em><code>size</code></em>.
 The <em>TP</em> size is fixed at 8, so it must still match the accelerators per member.
-See <a href="/gpustack-operator/main/docs/modules/model-deployment/deployment/#rollout-behavior">Rollout behavior</a>
+See <a href="/gpustack-operator/main/docs/modules/model-deployment/configuration/#rollout-behavior">Rollout behavior</a>
 .</p>
 <h2 id="step-5-release-the-application">Step 5: Release the application</h2>
 <p>Remove the deployment and verify that all GPU allocations are freed:</p>
@@ -1694,12 +1699,14 @@ See <a href="/gpustack-operator/main/docs/modules/model-deployment/deployment/#r
   <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">kubectl -n gpustack-elastic delete modeldeployment deepseek-multi-host
 </span></span><span class="line"><span class="cl">kubectl -n gpustack-elastic get pods -l app.kubernetes.io/instance<span class="o">=</span>deepseek-multi-host</span></span></code></pre></div>
-</div><p>Confirm that the accelerators on both host nodes are free again. Each card reports <code>remaining</code>:</p>
+</div>
+<p>Confirm that the accelerators on both host nodes are free again. Each card reports <code>remaining</code>:</p>
 <div class="code-block">
   <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">kubectl get devices -o json <span class="p">|</span> jq <span class="s1">&#39;[.items[].status.groups[].accelerators[] |
 </span></span></span><span class="line"><span class="cl"><span class="s1">  {mode, remaining, allocatedSlices: (.allocatedSlices // 0)}]&#39;</span></span></span></code></pre></div>
-</div><h2 id="limitations">Limitations</h2>
+</div>
+<h2 id="limitations">Limitations</h2>
 <p>Gang scheduling is all-or-nothing: all <em><code>size</code></em> members of an instance need placement at once, or the
 whole instance waits.</p>
 <p>HTTP ingress is leader-only under <em>internal load balancing (Internal LB)</em>: the <code>Service</code> targets
@@ -1746,7 +1753,7 @@ the role stops serving while its replacement is rebuilt.</p>
 <nav class="reading-footer" aria-label="Further reading">
     <section>
       <h2>See also</h2>
-      <ul class="related-pages"><li><a href="/gpustack-operator/main/docs/modules/model-deployment/deployment/">Model Deployment Configuration</a>
+      <ul class="related-pages"><li><a href="/gpustack-operator/main/docs/modules/model-deployment/configuration/">Model Deployment Configuration</a>
  (role fields and scaling)</li><li><a href="/gpustack-operator/main/docs/walkthroughs/model-deployment/prefill-decode/">Prefill and Decode Walkthrough</a>
  (disaggregated serving)</li><li><a href="/gpustack-operator/main/docs/walkthroughs/model-deployment/elastic-ep/">Elastic EP Walkthrough</a>
  (collective expansion)</li><li><a href="/gpustack-operator/main/docs/walkthroughs/model-deployment/external-dp/">External DP Walkthrough</a>
@@ -1762,18 +1769,6 @@ the role stops serving while its replacement is rebuilt.</p>
     <aside class="toc-panel" aria-label="Page navigation">
       <div class="toc-inner">
         
-          
-          
-          
-          <nav class="page-actions" aria-label="Page source">
-            <a href="https://github.com/gpustack/gpustack-operator/blob/304681b245c3f392539df1404126be8fb9d22adb/docs/walkthroughs/model-deployment/multi-host.md">View page source</a>
-            
-            <a href="https://github.com/gpustack/gpustack-operator/edit/main/docs/walkthroughs/model-deployment/multi-host.md">Edit this page</a>
-            
-          </nav>
-        
-        
-          <div class="toc-title">On this page</div>
           <nav id="TableOfContents">
   <ul>
     <li><a href="#contents">Contents</a></li>

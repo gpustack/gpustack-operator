@@ -27,7 +27,7 @@
   <link rel="alternate" type="text/markdown" href="/gpustack-operator/main/docs/walkthroughs/model-deployment/encode-prefill-decode/index.md">
   
   <link rel="describedby" href="/gpustack-operator/main/llms.txt">
-  <link rel="stylesheet" href="/gpustack-operator/main/css/site.1a0de63fe646aba4ed6541fe0a6383c2ed5ca649b1593a98595ba53430bcf032.css">
+  <link rel="stylesheet" href="/gpustack-operator/main/css/site.b1fdc6af165ce7fbb10ebc91a579913dc99eac181655e5aae84dbe714d354a09.css">
   <link rel="stylesheet" href="/gpustack-operator/main/css/code.d2570c1cc6480f9c62bc31ec538eef2578ce80980588c469638a5f95416bfc7b.css">
 </head>
 <body class="docs-page">
@@ -36,7 +36,6 @@
     
     <a class="brand" href="/gpustack-operator/main/" aria-label="GPUStack Operator home"><img src="/gpustack-operator/main/images/logo_hu_ced145186d6eddf4.47210af4015bb5bd13742c222995900070c6649233431804f39bf2e001be3ddb.png" width="32" height="32" alt=""><span>GPUStack Operator</span></a>
     <nav class="top-links" aria-label="Main navigation">
-      <a class="top-docs-link" href="/gpustack-operator/main/docs/" aria-current="page">Documentation</a>
       <a class="top-devin-link" href="https://deepwiki.com/gpustack/gpustack-operator" target="_blank" rel="noopener noreferrer" aria-label="Ask Devin on DeepWiki (opens in a new tab)">
         <svg aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M8 1.5c.31 3.02 1.67 4.38 4.69 4.69-3.02.31-4.38 1.67-4.69 4.69-.31-3.02-1.67-4.38-4.69-4.69 3.02-.31 4.38-1.67 4.69-4.69Zm5.06 8.19c.16 1.51.84 2.19 2.34 2.34-1.51.16-2.19.84-2.34 2.34-.16-1.51-.84-2.19-2.34-2.34 1.51-.16 2.19-.84 2.34-2.34Z"/></svg>
         <span>Ask Devin</span>
@@ -106,7 +105,6 @@
         </svg>
       </button>
       <nav id="docs-navigation" class="sidebar-inner">
-        <div class="nav-title">Documentation</div>
         <a class="nav-home" href="/gpustack-operator/main/" >Overview</a>
         
           
@@ -698,7 +696,7 @@
       
         
         
-          <a title="KV Cache Election and Failover" href="/gpustack-operator/main/docs/modules/kv-cache/leader/" >Election and Failover</a>
+          <a title="KV Cache Election and Failover" href="/gpustack-operator/main/docs/modules/kv-cache/leader/" >Leader Election</a>
           
           
         
@@ -761,15 +759,15 @@
 
 
   
-    
-      
-      
-        
-        
-      
-    
-  
 
+  
+    
+      
+      
+        
+        
+      
+    
   
 
   
@@ -803,7 +801,7 @@
             <div class="nav-children">
               
                 
-                  <a title="Model Artifact API" href="/gpustack-operator/main/docs/modules/model-delivery/views/" >API</a>
+                  <a title="Model Artifact API" href="/gpustack-operator/main/docs/modules/model-delivery/artifact-api/" >API</a>
                 
               
             </div>
@@ -848,7 +846,7 @@
       
         
         
-          <a title="Node-to-Node Sync" href="/gpustack-operator/main/docs/modules/model-delivery/peer-sync/" >Node-to-Node Sync</a>
+          <a title="Node-to-Node Sync" href="/gpustack-operator/main/docs/modules/model-delivery/node-to-node-sync/" >Node-to-Node Sync</a>
           
           
         
@@ -1030,7 +1028,7 @@
       
         
         
-          <a title="Model Deployment Configuration" href="/gpustack-operator/main/docs/modules/model-deployment/deployment/" >Configuration</a>
+          <a title="Configuration" href="/gpustack-operator/main/docs/modules/model-deployment/configuration/" >Configuration</a>
           
           
         
@@ -1040,7 +1038,7 @@
       
         
         
-          <a title="Engine Compatibility" href="/gpustack-operator/main/docs/modules/model-deployment/engine-versions/" >Compatibility</a>
+          <a title="Engine Compatibility" href="/gpustack-operator/main/docs/modules/model-deployment/engine-versions/" >Engine Versions</a>
           
           
         
@@ -1208,7 +1206,12 @@
 
 
 
+  
+  
 
+
+
+  
 
 <details class="nav-section" >
   <summary title="GPU Instances">GPU Instances</summary>
@@ -1218,6 +1221,16 @@
       
       <a title="GPU Instances" href="/gpustack-operator/main/docs/modules/instances/" >Overview</a>
     
+    
+      
+      
+        
+        
+          <a title="Instance Metrics Reference" href="/gpustack-operator/main/docs/modules/instances/metrics/" >Metrics</a>
+          
+          
+        
+      
     
   </div>
 </details>
@@ -1322,7 +1335,7 @@
       
         
         
-          <a title="Migrating to Bundled Subcharts" href="/gpustack-operator/main/docs/operate/migration/to-subcharts/" >Bundled Subcharts</a>
+          <a title="Migrating to Bundled Subcharts" href="/gpustack-operator/main/docs/operate/migration/bundled-subcharts/" >Bundled Subcharts</a>
           
           
         
@@ -1332,7 +1345,7 @@
       
         
         
-          <a title="Upgrading to an Enforced Binding Dtype" href="/gpustack-operator/main/docs/operate/migration/kv-cache-dtype/" >Enforced Binding Dtype</a>
+          <a title="Upgrading to an Enforced Binding Dtype" href="/gpustack-operator/main/docs/operate/migration/enforced-binding-dtype/" >Enforced Binding Dtype</a>
           
           
         
@@ -1373,12 +1386,7 @@
   
   
 
-  
-  
 
-
-
-  
 
   
 
@@ -1416,16 +1424,6 @@
         
         
           <a title="Instance Type Unit Resources Reference" href="/gpustack-operator/main/docs/reference/instance-type-unit-resources/" >Resource Presets</a>
-          
-          
-        
-      
-    
-      
-      
-        
-        
-          <a title="Instance Metrics Reference" href="/gpustack-operator/main/docs/reference/instance-metrics/" >Instance Metrics</a>
           
           
         
@@ -1645,32 +1643,37 @@ stanza deploys <code>llm-d-router</code> in front of the roles.</p>
 </span></span></span><span class="line"><span class="cl"><span class="w">        </span>- <span class="s2">&#34;16384&#34;</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">        </span>- --<span class="l">gpu-memory-utilization</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">        </span>- <span class="s2">&#34;0.85&#34;</span></span></span></code></pre></div>
-</div><p>Apply the manifest and wait for the deployment to reach <code>Ready</code>. The <code>ROLES</code> column reads
+</div>
+<p>Apply the manifest and wait for the deployment to reach <code>Ready</code>. The <code>ROLES</code> column reads
 <code>1R1E1P1D</code>: one router, then one replica for each of the encoder, prefiller and decoder.</p>
 <div class="code-block">
   <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">kubectl apply -f epd-deployment.yaml
 </span></span><span class="line"><span class="cl">kubectl get modeldeployment epd-arm3-epd -n gpustack-bench <span class="se">\
 </span></span></span><span class="line"><span class="cl"><span class="se"></span>  -o custom-columns<span class="o">=</span>NAME:.metadata.name,ENGINE:.spec.engine.name,ROLES:.status.roleSummary,PHASE:.status.phase</span></span></code></pre></div>
-</div><div class="code-block">
+</div>
+<div class="code-block">
   <div class="code-toolbar"><span>text</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-text" data-lang="text"><span class="line"><span class="cl">NAME          ENGINE   ROLES      PHASE
 </span></span><span class="line"><span class="cl">epd-arm3-epd  vLLM     1R1E1P1D   Ready</span></span></code></pre></div>
-</div><p>The captured wide listing below omits the IP and scheduling-gate columns.
+</div>
+<p>The captured wide listing below omits the IP and scheduling-gate columns.
 Four <code>Pod</code>s run: one engine <code>Pod</code> per role and the router. The <em>Decode</em> <code>Pod</code> shows two containers
 because its routing sidecar runs beside the engine.</p>
 <div class="code-block">
   <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">kubectl get pods -n gpustack-bench -l app.kubernetes.io/instance<span class="o">=</span>epd-arm3-epd <span class="se">\
 </span></span></span><span class="line"><span class="cl"><span class="se"></span>  -o wide</span></span></code></pre></div>
-</div><div class="code-block">
+</div>
+<div class="code-block">
   <div class="code-toolbar"><span>text</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-text" data-lang="text"><span class="line"><span class="cl">NAME                                  READY   STATUS    RESTARTS   AGE   NODE
 </span></span><span class="line"><span class="cl">epd-arm3-epd-decode-h62cw               2/2     Running   0          95s   gpu-node-0
 </span></span><span class="line"><span class="cl">epd-arm3-epd-encode-9jz5c               1/1     Running   0          94s   gpu-node-0
 </span></span><span class="line"><span class="cl">epd-arm3-epd-prefill-26ls5              1/1     Running   0          95s   gpu-node-0
 </span></span><span class="line"><span class="cl">epd-arm3-epd-router-6cc94d94b8-glnvt     2/2     Running   0          93s   gpu-node-0</span></span></code></pre></div>
-</div><h2 id="step-2-inspect-role-configuration">Step 2: Inspect role configuration</h2>
+</div>
+<h2 id="step-2-inspect-role-configuration">Step 2: Inspect role configuration</h2>
 <p>The operator renders the encoder-cache connector for you. The encoder <code>Pod</code> runs <code>ECCPUConnector</code> as
 the producer with a 1 GiB host buffer and publishes a side-channel socket on port 5601. The
 <code>--mm-encoder-only</code> flag keeps the language-model weights unloaded.</p>
@@ -1729,7 +1732,8 @@ other generated fields are omitted where they do not explain the configuration.<
 </span></span></span><span class="line"><span class="cl"><span class="w">        </span>- <span class="nt">containerPort</span><span class="p">:</span><span class="w"> </span><span class="m">5601</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">ec-side-channel</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="nt">protocol</span><span class="p">:</span><span class="w"> </span><span class="l">TCP</span></span></span></code></pre></div>
-</div><p>The <em>Prefill</em> <code>Pod</code> gets the consumer half of the same connector. It also keeps its usual KV transfer
+</div>
+<p>The <em>Prefill</em> <code>Pod</code> gets the consumer half of the same connector. It also keeps its usual KV transfer
 producer and the KV event publisher that the router reads:</p>
 <div class="code-block">
   <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
@@ -1763,7 +1767,8 @@ producer and the KV event publisher that the router reads:</p>
 </span></span></span><span class="line"><span class="cl"><span class="w">        </span>- <span class="m">0.0.0.0</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">        </span>- --<span class="l">port</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">        </span>- <span class="s2">&#34;8000&#34;</span></span></span></code></pre></div>
-</div><p>The <em>Decode</em> <code>Pod</code> pairs the KV consumer on its engine container with a <code>routing-proxy</code> sidecar. The
+</div>
+<p>The <em>Decode</em> <code>Pod</code> pairs the KV consumer on its engine container with a <code>routing-proxy</code> sidecar. The
 sidecar owns the <code>Pod</code>&rsquo;s HTTP port, proxies to the engine, and carries <code>--ec-connector=ec-nixl</code>. That
 flag makes it fetch the encoder&rsquo;s embeddings before decoding. Kubernetes 1.35 renders this as a
 native sidecar:</p>
@@ -1805,7 +1810,8 @@ native sidecar:</p>
 </span></span></span><span class="line"><span class="cl"><span class="w">        </span>- <span class="m">0.0.0.0</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">        </span>- --<span class="l">port</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">        </span>- <span class="s2">&#34;8200&#34;</span></span></span></code></pre></div>
-</div><p>Do not set these keys on the roles yourself. The operator owns them, and a role that names one is
+</div>
+<p>Do not set these keys on the roles yourself. The operator owns them, and a role that names one is
 refused. See <a href="/gpustack-operator/main/docs/modules/model-deployment/encode-prefill-decode/#encoder-cache-connectors">Encoder-cache connectors</a>
 .</p>
 <h2 id="step-3-send-a-multimodal-request">Step 3: Send a multimodal request</h2>
@@ -1813,10 +1819,12 @@ refused. See <a href="/gpustack-operator/main/docs/modules/model-deployment/enco
 <div class="code-block">
   <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">kubectl get modeldeployment epd-arm3-epd -n gpustack-bench -o <span class="nv">jsonpath</span><span class="o">=</span><span class="s1">&#39;{.status.endpoint}&#39;</span></span></span></code></pre></div>
-</div><div class="code-block">
+</div>
+<div class="code-block">
   <div class="code-toolbar"><span>text</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-text" data-lang="text"><span class="line"><span class="cl">http://epd-arm3-epd-router.gpustack-bench.svc:8000</span></span></code></pre></div>
-</div><p>Send a multimodal chat completion to that endpoint from inside the cluster.
+</div>
+<p>Send a multimodal chat completion to that endpoint from inside the cluster.
 Include a base64 PNG as an <code>image_url</code> part beside a text instruction to select the encoder:</p>
 <div class="code-block">
   <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
@@ -1824,7 +1832,8 @@ Include a base64 PNG as an <code>image_url</code> part beside a text instruction
 </span></span></span><span class="line"><span class="cl"><span class="se"></span>  curl -sS -H <span class="s1">&#39;Content-Type: application/json&#39;</span> <span class="se">\
 </span></span></span><span class="line"><span class="cl"><span class="se"></span>  --data-binary @- <span class="se">\
 </span></span></span><span class="line"><span class="cl"><span class="se"></span>  http://epd-arm3-epd-router.gpustack-bench.svc:8000/v1/chat/completions &lt; request.json</span></span></code></pre></div>
-</div><p>The completed benchmark issued <strong>236 measured requests with zero errors</strong> and 28 warm-up requests.
+</div>
+<p>The completed benchmark issued <strong>236 measured requests with zero errors</strong> and 28 warm-up requests.
 The captured logs contain 264 <code>POST /v1/chat/completions</code> lines in each role&rsquo;s <code>main</code> container and
 264 multimodal-item lines in the <em>Decode</em> <code>routing-proxy</code> sidecar. The router access log contains 280
 lines for this run.</p>
@@ -1868,7 +1877,8 @@ Aggregate counts establish stage activity; they do not correlate each request ac
 <div class="code-block">
   <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">kubectl get workloads -n gpustack-bench</span></span></code></pre></div>
-</div><p>All three role <code>Pod</code>s and the router <code>Pod</code> ran on <code>gpu-node-0</code> in this recording. The node has eight
+</div>
+<p>All three role <code>Pod</code>s and the router <code>Pod</code> ran on <code>gpu-node-0</code> in this recording. The node has eight
 GPUs, so this placement does not show how the roles behave when GPU capacity is constrained.</p>
 <p>Each role exposed one GPU inside its own <code>Pod</code>, with private IPC and <code>/dev/shm</code>.
 No remote direct memory access (<em>RDMA</em>) interface was attached.
@@ -1916,7 +1926,8 @@ that exchange the most data:</p>
   <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">kubectl delete modeldeployment epd-arm3-epd -n gpustack-bench
 </span></span><span class="line"><span class="cl">kubectl get pods,services -n gpustack-bench -l app.kubernetes.io/instance<span class="o">=</span>epd-arm3-epd</span></span></code></pre></div>
-</div><p>Wait until the owned <code>Pod</code>s and <code>Service</code>s disappear; the recording does not include a cleanup snapshot.
+</div>
+<p>Wait until the owned <code>Pod</code>s and <code>Service</code>s disappear; the recording does not include a cleanup snapshot.
 An encoder replica is withdrawn from discovery and then removed after a fixed window.
 See <a href="#troubleshooting">Troubleshooting</a>
 .</p>
@@ -2004,18 +2015,6 @@ when the window ends fails at the client.</p>
     <aside class="toc-panel" aria-label="Page navigation">
       <div class="toc-inner">
         
-          
-          
-          
-          <nav class="page-actions" aria-label="Page source">
-            <a href="https://github.com/gpustack/gpustack-operator/blob/304681b245c3f392539df1404126be8fb9d22adb/docs/walkthroughs/model-deployment/encode-prefill-decode.md">View page source</a>
-            
-            <a href="https://github.com/gpustack/gpustack-operator/edit/main/docs/walkthroughs/model-deployment/encode-prefill-decode.md">Edit this page</a>
-            
-          </nav>
-        
-        
-          <div class="toc-title">On this page</div>
           <nav id="TableOfContents">
   <ul>
     <li><a href="#contents">Contents</a></li>

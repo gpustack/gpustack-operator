@@ -27,7 +27,7 @@
   <link rel="alternate" type="text/markdown" href="/gpustack-operator/main/docs/walkthroughs/kv-cache/shared-cache/index.md">
   
   <link rel="describedby" href="/gpustack-operator/main/llms.txt">
-  <link rel="stylesheet" href="/gpustack-operator/main/css/site.1a0de63fe646aba4ed6541fe0a6383c2ed5ca649b1593a98595ba53430bcf032.css">
+  <link rel="stylesheet" href="/gpustack-operator/main/css/site.b1fdc6af165ce7fbb10ebc91a579913dc99eac181655e5aae84dbe714d354a09.css">
   <link rel="stylesheet" href="/gpustack-operator/main/css/code.d2570c1cc6480f9c62bc31ec538eef2578ce80980588c469638a5f95416bfc7b.css">
 </head>
 <body class="docs-page">
@@ -36,7 +36,6 @@
     
     <a class="brand" href="/gpustack-operator/main/" aria-label="GPUStack Operator home"><img src="/gpustack-operator/main/images/logo_hu_ced145186d6eddf4.47210af4015bb5bd13742c222995900070c6649233431804f39bf2e001be3ddb.png" width="32" height="32" alt=""><span>GPUStack Operator</span></a>
     <nav class="top-links" aria-label="Main navigation">
-      <a class="top-docs-link" href="/gpustack-operator/main/docs/" aria-current="page">Documentation</a>
       <a class="top-devin-link" href="https://deepwiki.com/gpustack/gpustack-operator" target="_blank" rel="noopener noreferrer" aria-label="Ask Devin on DeepWiki (opens in a new tab)">
         <svg aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M8 1.5c.31 3.02 1.67 4.38 4.69 4.69-3.02.31-4.38 1.67-4.69 4.69-.31-3.02-1.67-4.38-4.69-4.69 3.02-.31 4.38-1.67 4.69-4.69Zm5.06 8.19c.16 1.51.84 2.19 2.34 2.34-1.51.16-2.19.84-2.34 2.34-.16-1.51-.84-2.19-2.34-2.34 1.51-.16 2.19-.84 2.34-2.34Z"/></svg>
         <span>Ask Devin</span>
@@ -106,7 +105,6 @@
         </svg>
       </button>
       <nav id="docs-navigation" class="sidebar-inner">
-        <div class="nav-title">Documentation</div>
         <a class="nav-home" href="/gpustack-operator/main/" >Overview</a>
         
           
@@ -698,7 +696,7 @@
       
         
         
-          <a title="KV Cache Election and Failover" href="/gpustack-operator/main/docs/modules/kv-cache/leader/" >Election and Failover</a>
+          <a title="KV Cache Election and Failover" href="/gpustack-operator/main/docs/modules/kv-cache/leader/" >Leader Election</a>
           
           
         
@@ -761,15 +759,15 @@
 
 
   
-    
-      
-      
-        
-        
-      
-    
-  
 
+  
+    
+      
+      
+        
+        
+      
+    
   
 
   
@@ -803,7 +801,7 @@
             <div class="nav-children">
               
                 
-                  <a title="Model Artifact API" href="/gpustack-operator/main/docs/modules/model-delivery/views/" >API</a>
+                  <a title="Model Artifact API" href="/gpustack-operator/main/docs/modules/model-delivery/artifact-api/" >API</a>
                 
               
             </div>
@@ -848,7 +846,7 @@
       
         
         
-          <a title="Node-to-Node Sync" href="/gpustack-operator/main/docs/modules/model-delivery/peer-sync/" >Node-to-Node Sync</a>
+          <a title="Node-to-Node Sync" href="/gpustack-operator/main/docs/modules/model-delivery/node-to-node-sync/" >Node-to-Node Sync</a>
           
           
         
@@ -1030,7 +1028,7 @@
       
         
         
-          <a title="Model Deployment Configuration" href="/gpustack-operator/main/docs/modules/model-deployment/deployment/" >Configuration</a>
+          <a title="Configuration" href="/gpustack-operator/main/docs/modules/model-deployment/configuration/" >Configuration</a>
           
           
         
@@ -1040,7 +1038,7 @@
       
         
         
-          <a title="Engine Compatibility" href="/gpustack-operator/main/docs/modules/model-deployment/engine-versions/" >Compatibility</a>
+          <a title="Engine Compatibility" href="/gpustack-operator/main/docs/modules/model-deployment/engine-versions/" >Engine Versions</a>
           
           
         
@@ -1208,7 +1206,12 @@
 
 
 
+  
+  
 
+
+
+  
 
 <details class="nav-section" >
   <summary title="GPU Instances">GPU Instances</summary>
@@ -1218,6 +1221,16 @@
       
       <a title="GPU Instances" href="/gpustack-operator/main/docs/modules/instances/" >Overview</a>
     
+    
+      
+      
+        
+        
+          <a title="Instance Metrics Reference" href="/gpustack-operator/main/docs/modules/instances/metrics/" >Metrics</a>
+          
+          
+        
+      
     
   </div>
 </details>
@@ -1322,7 +1335,7 @@
       
         
         
-          <a title="Migrating to Bundled Subcharts" href="/gpustack-operator/main/docs/operate/migration/to-subcharts/" >Bundled Subcharts</a>
+          <a title="Migrating to Bundled Subcharts" href="/gpustack-operator/main/docs/operate/migration/bundled-subcharts/" >Bundled Subcharts</a>
           
           
         
@@ -1332,7 +1345,7 @@
       
         
         
-          <a title="Upgrading to an Enforced Binding Dtype" href="/gpustack-operator/main/docs/operate/migration/kv-cache-dtype/" >Enforced Binding Dtype</a>
+          <a title="Upgrading to an Enforced Binding Dtype" href="/gpustack-operator/main/docs/operate/migration/enforced-binding-dtype/" >Enforced Binding Dtype</a>
           
           
         
@@ -1373,12 +1386,7 @@
   
   
 
-  
-  
 
-
-
-  
 
   
 
@@ -1416,16 +1424,6 @@
         
         
           <a title="Instance Type Unit Resources Reference" href="/gpustack-operator/main/docs/reference/instance-type-unit-resources/" >Resource Presets</a>
-          
-          
-        
-      
-    
-      
-      
-        
-        
-          <a title="Instance Metrics Reference" href="/gpustack-operator/main/docs/reference/instance-metrics/" >Instance Metrics</a>
           
           
         
@@ -1572,7 +1570,8 @@ the scope of each object.</p>
 </span></span></span><span class="line"><span class="cl"><span class="w">            </span><span class="nt">kubernetes.io/os</span><span class="p">:</span><span class="w"> </span><span class="l">linux</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="nt">medium</span><span class="p">:</span><span class="w"> </span><span class="l">DRAM</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="nt">capacityPerMember</span><span class="p">:</span><span class="w"> </span><span class="l">8Gi</span></span></span></code></pre></div>
-</div><p><em><code>spec.image</code></em> is left unset on purpose: the cluster-wide <code>kv-cache-backend-image</code>
+</div>
+<p><em><code>spec.image</code></em> is left unset on purpose: the cluster-wide <code>kv-cache-backend-image</code>
 <a href="/gpustack-operator/main/docs/reference/settings/">Setting</a>
  supplies this project&rsquo;s own build, which is the one that can elect a leader
 later. Naming a published upstream image here works until Step 4 and then does not. See
@@ -1587,12 +1586,16 @@ before Mooncake 0.3.12 is the one exception and declares <code>multiTenancy: fal
 .</p>
 <p>Wait for it, then read what it reports:</p>
 <div class="code-block">
-  <div class="code-toolbar"><span>console</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
-  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-console" data-lang="console"><span class="line"><span class="cl"><span class="gp">$</span> kubectl get kvcb mooncake-dram -w
-</span></span><span class="line"><span class="cl"><span class="go">NAME            TYPE       PHASE   ENDPOINT                                         CAPACITY
-</span></span></span><span class="line"><span class="cl"><span class="go">mooncake-dram   Mooncake   Ready   mooncake-dram-leader.gpustack-system.svc:50051   16Gi
-</span></span></span></code></pre></div>
-</div><p><strong><code>CAPACITY</code> is read from the store, never derived from the spec.</strong> Two nodes at <code>8Gi</code> show <code>16Gi</code>
+  <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">kubectl get kvcb mooncake-dram -w</span></span></code></pre></div>
+</div>
+<p>Captured output:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>text</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-text" data-lang="text"><span class="line"><span class="cl">NAME            TYPE       PHASE   ENDPOINT                                         CAPACITY
+</span></span><span class="line"><span class="cl">mooncake-dram   Mooncake   Ready   mooncake-dram-leader.gpustack-system.svc:50051   16Gi</span></span></code></pre></div>
+</div>
+<p><strong><code>CAPACITY</code> is read from the store, never derived from the spec.</strong> Two nodes at <code>8Gi</code> show <code>16Gi</code>
 because both members registered their segments, so this figure is the evidence that the store is
 really assembled. A number smaller than expected means a member has not registered yet, whatever the
 phase says: <code>kubectl describe kvcb mooncake-dram</code> and its <code>MembersMounted</code> condition name which.</p>
@@ -1622,7 +1625,8 @@ phase says: <code>kubectl describe kvcb mooncake-dram</code> and its <code>Membe
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">domain</span><span class="p">:</span><span class="w">  </span><span class="c"># every field here is immutable</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">blockSize</span><span class="p">:</span><span class="w"> </span><span class="m">64</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">dtype</span><span class="p">:</span><span class="w"> </span><span class="l">bfloat16</span></span></span></code></pre></div>
-</div><p><strong>The <code>domain</code> is the cache&rsquo;s compatibility key, and it is immutable for the reason it exists.</strong> Two
+</div>
+<p><strong>The <code>domain</code> is the cache&rsquo;s compatibility key, and it is immutable for the reason it exists.</strong> Two
 workloads sharing a domain share cached blocks, so a domain that could be edited would let a running
 workload start reading blocks another tokenizer wrote. Pick it to match the model and engine
 settings the deployments in this namespace will run; a second, different model gets a second Binding.</p>
@@ -1666,7 +1670,8 @@ See <a href="/gpustack-operator/main/docs/modules/kv-cache/injection/#tenant-com
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">instanceType</span><span class="p">:</span><span class="w"> </span><span class="l">&lt;one from kubectl get instancetype&gt;</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">resources</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">accelerator</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;1&#34;</span></span></span></code></pre></div>
-</div><p><em><code>kvCache</code></em> is optional. Omit it and the deployment runs with no shared cache at all, which is the
+</div>
+<p><em><code>kvCache</code></em> is optional. Omit it and the deployment runs with no shared cache at all, which is the
 useful comparison to have run once before attributing anything to the pool.</p>
 <p><strong>The engine is configured by injection, not by anything you write here.</strong> The operator resolves the
 Binding, reads the backend&rsquo;s endpoint and the domain, and injects the store&rsquo;s environment into every
@@ -1680,10 +1685,10 @@ starts healthy and then fails every write, so the version above is a choice. See
 .</p>
 <p>Check the attachment from the deployment&rsquo;s own status rather than from the <code>Pod</code>s:</p>
 <div class="code-block">
-  <div class="code-toolbar"><span>console</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
-  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-console" data-lang="console"><span class="line"><span class="cl"><span class="gp">$</span> kubectl -n team-a get md qwen-chat -o <span class="nv">jsonpath</span><span class="o">=</span><span class="s1">&#39;{.status.conditions[?(@.type==&#34;CacheAttached&#34;)]}&#39;</span>
-</span></span></code></pre></div>
-</div><h2 id="step-4-enable-high-availability">Step 4: Enable high availability</h2>
+  <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">kubectl -n team-a get md qwen-chat -o <span class="nv">jsonpath</span><span class="o">=</span><span class="s1">&#39;{.status.conditions[?(@.type==&#34;CacheAttached&#34;)]}&#39;</span></span></span></code></pre></div>
+</div>
+<h2 id="step-4-enable-high-availability">Step 4: Enable high availability</h2>
 <p>Everything so far runs one leader process that already holds a Kubernetes <code>Lease</code>. An update or a node
 failure takes the store&rsquo;s metadata with it. Add standbys with one edit:</p>
 <div class="code-block">
@@ -1705,7 +1710,8 @@ failure takes the store&rsquo;s metadata with it. Add standbys with one edit:</p
 </span></span><span class="line"><span class="cl">           medium: DRAM
 </span></span><span class="line"><span class="cl">           capacityPerMember: 8Gi
 </span></span></code></pre></div>
-</div><p><strong>The healthy steady state now reads <code>3 desired / 1 ready</code>, and that is not a broken <code>Deployment</code>.</strong>
+</div>
+<p><strong>The healthy steady state now reads <code>3 desired / 1 ready</code>, and that is not a broken <code>Deployment</code>.</strong>
 Exactly one leader serves; the other two are standbys, deliberately not ready so the leader <code>Service</code>&rsquo;s
 endpoints never include a process that cannot serve. During a healthy failover <code>2</code> are briefly ready
 as the old leader steps down. Both readings are normal.</p>
@@ -1777,15 +1783,16 @@ turns Step 1&rsquo;s manifest into a second backend that selects the nodes carry
 </span></span></span><span class="line"><span class="cl"><span class="gi">+            - path: /var/lib/kvcache
 </span></span></span><span class="line"><span class="cl"><span class="gi">+              capacity: 100Gi
 </span></span></span></code></pre></div>
-</div><p>Create the directory on every selected node before you apply the backend. The published store image
+</div>
+<p>Create the directory on every selected node before you apply the backend. The published store image
 runs as uid 65532, so give the directory to that uid. The uid depends on the image; see
 <a href="/gpustack-operator/main/docs/modules/kv-cache/local-disk-tier/#directory-requirements">Directory requirements</a>
 .</p>
 <div class="code-block">
-  <div class="code-toolbar"><span>console</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
-  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-console" data-lang="console"><span class="line"><span class="cl"><span class="gp">$</span> install -d -o <span class="m">65532</span> -g <span class="m">0</span> -m <span class="m">0750</span> /var/lib/kvcache
-</span></span></code></pre></div>
-</div><p>A pool names exactly one backend and cannot be re-pointed. Serving workloads from <code>mooncake-disk</code>
+  <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">install -d -o <span class="m">65532</span> -g <span class="m">0</span> -m <span class="m">0750</span> /var/lib/kvcache</span></span></code></pre></div>
+</div>
+<p>A pool names exactly one backend and cannot be re-pointed. Serving workloads from <code>mooncake-disk</code>
 therefore takes its own <code>KVCachePool</code> and Binding. The tier writes in buckets, so a small cache can
 show an empty tier while it works; see <a href="/gpustack-operator/main/docs/modules/kv-cache/local-disk-tier/#bucket-writes">Bucket writes</a>
 .</p>
@@ -1808,7 +1815,8 @@ Binding in its namespace:</p>
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">llama-8b-v1</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">blockSize</span><span class="p">:</span><span class="w"> </span><span class="m">16</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">dtype</span><span class="p">:</span><span class="w"> </span><span class="l">bfloat16</span></span></span></code></pre></div>
-</div><p>A namespace that runs a different dtype needs a second Binding, because a domain is immutable and
+</div>
+<p>A namespace that runs a different dtype needs a second Binding, because a domain is immutable and
 holds one dtype. Mixing dtypes in one domain can return wrong blocks silently. The Binding below
 serves an <code>fp8_e4m3</code> deployment in <code>team-a</code>. Replace the instance type as in Step 3.</p>
 <div class="code-block">
@@ -1848,7 +1856,8 @@ serves an <code>fp8_e4m3</code> deployment in <code>team-a</code>. Replace the i
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">instanceType</span><span class="p">:</span><span class="w"> </span><span class="l">&lt;one from kubectl get instancetype&gt;</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">resources</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">accelerator</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;1&#34;</span></span></span></code></pre></div>
-</div><p>The operator renders <code>--kv-cache-dtype fp8_e4m3</code> from the Binding onto every role. A role that sets
+</div>
+<p>The operator renders <code>--kv-cache-dtype fp8_e4m3</code> from the Binding onto every role. A role that sets
 that flag itself is refused. See <a href="/gpustack-operator/main/docs/modules/kv-cache/pool/#engine-dtype">Engine dtype</a>
 .</p>
 <p><strong>The three ceilings ask for 20Gi against a pool <em><code>quota.total</code></em> of 16Gi.</strong> The pool reports
@@ -1961,7 +1970,7 @@ covered in <a href="/gpustack-operator/main/docs/modules/kv-cache/injection/#ten
  (every field of the store, and what status reports)</li><li><a href="/gpustack-operator/main/docs/modules/kv-cache/leader/">KV Cache Election and Failover</a>
  (the election, why there is no snapshot, and the member addressing choice in full)</li><li><a href="/gpustack-operator/main/docs/modules/kv-cache/pool/">KV Cache Pools and Bindings</a>
  (quota, domains and what a full quota does)</li><li><a href="/gpustack-operator/main/docs/modules/kv-cache/local-disk-tier/">KV Cache Local Disk Tier</a>
- (directory, bucket and cleanup rules)</li><li><a href="/gpustack-operator/main/docs/modules/model-deployment/deployment/">Model Deployment</a>
+ (directory, bucket and cleanup rules)</li><li><a href="/gpustack-operator/main/docs/modules/model-deployment/configuration/">Model Deployment</a>
  (roles, <em>prefill</em>/<em>decode</em>, rollout)</li><li><a href="/gpustack-operator/main/docs/modules/model-deployment/prefill-decode/">Prefill and Decode</a>
  (router, transfer)</li><li><a href="/gpustack-operator/main/docs/modules/kv-cache/injection/">KV Cache Injection</a>
  (what a <code>Pod</code> actually receives)</li></ul>
@@ -1976,18 +1985,6 @@ covered in <a href="/gpustack-operator/main/docs/modules/kv-cache/injection/#ten
     <aside class="toc-panel" aria-label="Page navigation">
       <div class="toc-inner">
         
-          
-          
-          
-          <nav class="page-actions" aria-label="Page source">
-            <a href="https://github.com/gpustack/gpustack-operator/blob/304681b245c3f392539df1404126be8fb9d22adb/docs/walkthroughs/kv-cache/shared-cache.md">View page source</a>
-            
-            <a href="https://github.com/gpustack/gpustack-operator/edit/main/docs/walkthroughs/kv-cache/shared-cache.md">Edit this page</a>
-            
-          </nav>
-        
-        
-          <div class="toc-title">On this page</div>
           <nav id="TableOfContents">
   <ul>
     <li><a href="#contents">Contents</a></li>

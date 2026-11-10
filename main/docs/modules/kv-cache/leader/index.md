@@ -147,7 +147,7 @@ availability is a compile-time switch and every option ships **off**:
 | leader | answers `UNAVAILABLE_IN_CURRENT_MODE`, runs as a permanent standby |
 | member | answers `Invalid HA backend entry`, exits, CrashLoopBackOffs |
 
-Use an image built from [`pack/mirrored-mooncake`](https://github.com/gpustack/gpustack-operator/blob/304681b245c3f392539df1404126be8fb9d22adb/pack/mirrored-mooncake/Dockerfile) for
+Use an image built from [`pack/mirrored-mooncake`](https://github.com/gpustack/gpustack-operator/blob/e50f885d037f4c00400f32f4ec1be0cac9581fca/pack/mirrored-mooncake/Dockerfile) for
 *`spec.image`* **and for every *`members[].image`***, on Mooncake 0.3.12 or later: an electing leader is
 also rendered `-pod_name` and `-pod_namespace` to label the winner, and a 0.3.11 master exits on both.
 
@@ -203,8 +203,8 @@ failover briefly shows `2` ready as the old leader steps down; both readings are
 
 To see which `Pod` is serving, read the label the store itself sets when it wins:
 
-```console
-$ kubectl get pod -l mooncake.io/store-role=leader
+```bash
+kubectl get pod -l mooncake.io/store-role=leader
 ```
 
 **Both roles get a `ServiceAccount`, and they are different accounts.** The operator renders a

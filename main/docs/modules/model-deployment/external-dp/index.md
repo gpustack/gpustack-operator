@@ -401,7 +401,7 @@ Admission enforces these boundaries on managed roles:
   role with `size: 1` — its *`width`*, not *DP* ranks, sizes the collective.
 
 *`size`* is a fate-sharing group, not a resize control: changing it replaces whole replicas instead of
-resizing a running *DP* group (see [Rollout behavior](/gpustack-operator/main/docs/modules/model-deployment/deployment/index.md#rollout-behavior)). Growing or
+resizing a running *DP* group (see [Rollout behavior](/gpustack-operator/main/docs/modules/model-deployment/configuration/index.md#rollout-behavior)). Growing or
 shrinking the *DP* world means recreating the deployment — or using [Elastic EP](/gpustack-operator/main/docs/modules/model-deployment/elastic-ep/index.md) for
 width-only growth of a Ray *Internal LB* group.
 
@@ -450,7 +450,7 @@ scale-down is unverified.
 
 ---
 
-**See also** — [Model Deployment Configuration](/gpustack-operator/main/docs/modules/model-deployment/deployment/index.md) (role fields, rollout) ·
+**See also** — [Model Deployment Configuration](/gpustack-operator/main/docs/modules/model-deployment/configuration/index.md) (role fields, rollout) ·
 [Elastic EP](/gpustack-operator/main/docs/modules/model-deployment/elastic-ep/index.md) (online width growth) ·
 [Routing](/gpustack-operator/main/docs/modules/model-deployment/routing/index.md) (router engines and policies) ·
 [External DP Benchmark](/gpustack-operator/main/docs/modules/model-deployment/external-dp-benchmark/index.md) (the measured crossover against a

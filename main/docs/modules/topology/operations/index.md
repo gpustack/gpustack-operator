@@ -252,7 +252,7 @@ Set *`requiredLevel`* on an existing role to require each replica's `Pod` group 
 
 The value is a label key, not `region`, `zone`, or a concrete zone name. Valid examples include
 `topology.kubernetes.io/zone`, `topology.gpustack.ai/rack`, and a selected Topograph tier. Omit the
-field for unconstrained *topology-aware scheduling (TAS)* placement; the [field contract](/gpustack-operator/main/docs/modules/model-deployment/deployment/index.md#topology-placement)
+field for unconstrained *topology-aware scheduling (TAS)* placement; the [field contract](/gpustack-operator/main/docs/modules/model-deployment/configuration/index.md#topology-placement)
 defines the implicit hostname level.
 
 Changing or removing the field participates in the existing render hash and replaces only affected
@@ -360,8 +360,8 @@ before leaving the cluster running. The test does not prove an upgrade of previo
 ---
 
 **See also** — [Topology-Aware Scheduling](/gpustack-operator/main/docs/modules/topology/scheduling/index.md) (mechanism
-and boundaries) · [Model Deployment](/gpustack-operator/main/docs/modules/model-deployment/deployment/index.md) (field contract) ·
+and boundaries) · [Model Deployment](/gpustack-operator/main/docs/modules/model-deployment/configuration/index.md) (field contract) ·
 [Installation Modes](/gpustack-operator/main/docs/operate/installation-modes/index.md) (chart ownership)
 
-**Next** → [Model Deployment](/gpustack-operator/main/docs/modules/model-deployment/deployment/index.md) — configure the serving
+**Next** → [Model Deployment](/gpustack-operator/main/docs/modules/model-deployment/configuration/index.md) — configure the serving
 roles that consume topology-aware admission.

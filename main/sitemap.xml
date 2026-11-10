@@ -32,6 +32,8 @@
   </url><url>
     <loc>https://docs.gpustack.ai/gpustack-operator/main/docs/modules/instances/</loc>
   </url><url>
+    <loc>https://docs.gpustack.ai/gpustack-operator/main/docs/modules/instances/metrics/</loc>
+  </url><url>
     <loc>https://docs.gpustack.ai/gpustack-operator/main/docs/modules/kv-cache/</loc>
   </url><url>
     <loc>https://docs.gpustack.ai/gpustack-operator/main/docs/modules/kv-cache/backend/</loc>
@@ -48,25 +50,25 @@
   </url><url>
     <loc>https://docs.gpustack.ai/gpustack-operator/main/docs/modules/model-delivery/</loc>
   </url><url>
+    <loc>https://docs.gpustack.ai/gpustack-operator/main/docs/modules/model-delivery/artifact-api/</loc>
+  </url><url>
     <loc>https://docs.gpustack.ai/gpustack-operator/main/docs/modules/model-delivery/artifact/</loc>
   </url><url>
     <loc>https://docs.gpustack.ai/gpustack-operator/main/docs/modules/model-delivery/image-source/</loc>
   </url><url>
     <loc>https://docs.gpustack.ai/gpustack-operator/main/docs/modules/model-delivery/node-store/</loc>
   </url><url>
-    <loc>https://docs.gpustack.ai/gpustack-operator/main/docs/modules/model-delivery/operations/</loc>
+    <loc>https://docs.gpustack.ai/gpustack-operator/main/docs/modules/model-delivery/node-to-node-sync/</loc>
   </url><url>
-    <loc>https://docs.gpustack.ai/gpustack-operator/main/docs/modules/model-delivery/peer-sync/</loc>
+    <loc>https://docs.gpustack.ai/gpustack-operator/main/docs/modules/model-delivery/operations/</loc>
   </url><url>
     <loc>https://docs.gpustack.ai/gpustack-operator/main/docs/modules/model-delivery/prefetch/</loc>
   </url><url>
     <loc>https://docs.gpustack.ai/gpustack-operator/main/docs/modules/model-delivery/remote/</loc>
   </url><url>
-    <loc>https://docs.gpustack.ai/gpustack-operator/main/docs/modules/model-delivery/views/</loc>
-  </url><url>
     <loc>https://docs.gpustack.ai/gpustack-operator/main/docs/modules/model-deployment/</loc>
   </url><url>
-    <loc>https://docs.gpustack.ai/gpustack-operator/main/docs/modules/model-deployment/deployment/</loc>
+    <loc>https://docs.gpustack.ai/gpustack-operator/main/docs/modules/model-deployment/configuration/</loc>
   </url><url>
     <loc>https://docs.gpustack.ai/gpustack-operator/main/docs/modules/model-deployment/elastic-ep-benchmark/</loc>
   </url><url>
@@ -116,17 +118,15 @@
   </url><url>
     <loc>https://docs.gpustack.ai/gpustack-operator/main/docs/operate/installation-modes/</loc>
   </url><url>
+    <loc>https://docs.gpustack.ai/gpustack-operator/main/docs/operate/migration/bundled-subcharts/</loc>
+  </url><url>
+    <loc>https://docs.gpustack.ai/gpustack-operator/main/docs/operate/migration/enforced-binding-dtype/</loc>
+  </url><url>
     <loc>https://docs.gpustack.ai/gpustack-operator/main/docs/operate/migration/from-v0.5/</loc>
-  </url><url>
-    <loc>https://docs.gpustack.ai/gpustack-operator/main/docs/operate/migration/kv-cache-dtype/</loc>
-  </url><url>
-    <loc>https://docs.gpustack.ai/gpustack-operator/main/docs/operate/migration/to-subcharts/</loc>
   </url><url>
     <loc>https://docs.gpustack.ai/gpustack-operator/main/docs/operate/migration/troubleshooting/</loc>
   </url><url>
     <loc>https://docs.gpustack.ai/gpustack-operator/main/docs/reference/commands/</loc>
-  </url><url>
-    <loc>https://docs.gpustack.ai/gpustack-operator/main/docs/reference/instance-metrics/</loc>
   </url><url>
     <loc>https://docs.gpustack.ai/gpustack-operator/main/docs/reference/instance-type-unit-resources/</loc>
   </url><url>

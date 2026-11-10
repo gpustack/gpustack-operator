@@ -22,9 +22,10 @@ The `gpustack-operator` binary provides these subcommands:
 
 | Component | Deployment | Role |
 |---|---|---|
-| `worker` | Control-plane `Deployment` | Serves the public APIs and manages workloads, queues and supporting resources. |
-| `device-manager` | One `DaemonSet` per manufacturer | Discovers accelerators and network interfaces, reports available capacity and allocates devices to containers. |
+| `worker` | Control-plane `Deployment` | Serves APIs and manages workloads, queues and supporting resources. |
+| `device-manager` | Vendor `DaemonSet` | Discovers devices and network interfaces,<br/>reports capacity and allocates devices. |
 | `model-manager` | Per-node `DaemonSet` | Caches model weights and mounts them into workloads using node delivery. |
+| `model-transfer` | Vendor source `DaemonSet` | Runs the source broker and worker control service for remote weight delivery. |
 | `worker-gateway` | Installed separately | Combines `InstanceType`s and capacity from multiple clusters into a fleet view. |
 
 The chart also includes [Node Feature Discovery (NFD)](https://github.com/kubernetes-sigs/node-feature-discovery),
@@ -80,7 +81,8 @@ resolves and pins a Hugging Face repository, ModelScope repository, container im
 
 Depending on the delivery mode, weights are fetched in the workload `Pod` (`Engine`), cached and
 mounted read-only on the node by the Model Manager's CSI driver (`Node`), or mounted from an
-existing volume or image.
+existing volume or image. Remote delivery can serve weights from source nodes through the
+`model-transfer` broker and vendor worker. See [Remote Weight Delivery](/gpustack-operator/main/docs/modules/model-delivery/remote/index.md).
 
 `ModelStore` and `ModelStoreBinding` manage cache budgets and namespace grants. `NodeModelStore`
 tracks per-node cache state. `ModelPrefetch` warms weights before use. These resources operate
@@ -140,6 +142,6 @@ The hardware terms Device, Accelerator and Resource are defined in
 ---
 
 **See also** — [Accelerator Requests](/gpustack-operator/main/docs/modules/devices/requests/index.md) ·
-[Settings](/gpustack-operator/main/docs/reference/settings/index.md) · [All documentation](https://github.com/gpustack/gpustack-operator/blob/304681b245c3f392539df1404126be8fb9d22adb/docs/README.md)
+[Settings](/gpustack-operator/main/docs/reference/settings/index.md) · [All documentation](https://github.com/gpustack/gpustack-operator/blob/e50f885d037f4c00400f32f4ec1be0cac9581fca/docs/README.md)
 
 **Next** → [Walkthrough](/gpustack-operator/main/docs/walkthroughs/devices/scheduling/index.md) — follow a workload from submission to allocation.

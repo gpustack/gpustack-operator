@@ -27,7 +27,7 @@
   <link rel="alternate" type="text/markdown" href="/gpustack-operator/main/docs/modules/model-delivery/node-store/index.md">
   
   <link rel="describedby" href="/gpustack-operator/main/llms.txt">
-  <link rel="stylesheet" href="/gpustack-operator/main/css/site.1a0de63fe646aba4ed6541fe0a6383c2ed5ca649b1593a98595ba53430bcf032.css">
+  <link rel="stylesheet" href="/gpustack-operator/main/css/site.b1fdc6af165ce7fbb10ebc91a579913dc99eac181655e5aae84dbe714d354a09.css">
   <link rel="stylesheet" href="/gpustack-operator/main/css/code.d2570c1cc6480f9c62bc31ec538eef2578ce80980588c469638a5f95416bfc7b.css">
 </head>
 <body class="docs-page">
@@ -36,7 +36,6 @@
     
     <a class="brand" href="/gpustack-operator/main/" aria-label="GPUStack Operator home"><img src="/gpustack-operator/main/images/logo_hu_ced145186d6eddf4.47210af4015bb5bd13742c222995900070c6649233431804f39bf2e001be3ddb.png" width="32" height="32" alt=""><span>GPUStack Operator</span></a>
     <nav class="top-links" aria-label="Main navigation">
-      <a class="top-docs-link" href="/gpustack-operator/main/docs/" aria-current="page">Documentation</a>
       <a class="top-devin-link" href="https://deepwiki.com/gpustack/gpustack-operator" target="_blank" rel="noopener noreferrer" aria-label="Ask Devin on DeepWiki (opens in a new tab)">
         <svg aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M8 1.5c.31 3.02 1.67 4.38 4.69 4.69-3.02.31-4.38 1.67-4.69 4.69-.31-3.02-1.67-4.38-4.69-4.69 3.02-.31 4.38-1.67 4.69-4.69Zm5.06 8.19c.16 1.51.84 2.19 2.34 2.34-1.51.16-2.19.84-2.34 2.34-.16-1.51-.84-2.19-2.34-2.34 1.51-.16 2.19-.84 2.34-2.34Z"/></svg>
         <span>Ask Devin</span>
@@ -106,7 +105,6 @@
         </svg>
       </button>
       <nav id="docs-navigation" class="sidebar-inner">
-        <div class="nav-title">Documentation</div>
         <a class="nav-home" href="/gpustack-operator/main/" >Overview</a>
         
           
@@ -698,7 +696,7 @@
       
         
         
-          <a title="KV Cache Election and Failover" href="/gpustack-operator/main/docs/modules/kv-cache/leader/" >Election and Failover</a>
+          <a title="KV Cache Election and Failover" href="/gpustack-operator/main/docs/modules/kv-cache/leader/" >Leader Election</a>
           
           
         
@@ -761,15 +759,15 @@
 
 
   
-    
-      
-      
-        
-        
-      
-    
-  
 
+  
+    
+      
+      
+        
+        
+      
+    
   
 
   
@@ -803,7 +801,7 @@
             <div class="nav-children">
               
                 
-                  <a title="Model Artifact API" href="/gpustack-operator/main/docs/modules/model-delivery/views/" >API</a>
+                  <a title="Model Artifact API" href="/gpustack-operator/main/docs/modules/model-delivery/artifact-api/" >API</a>
                 
               
             </div>
@@ -848,7 +846,7 @@
       
         
         
-          <a title="Node-to-Node Sync" href="/gpustack-operator/main/docs/modules/model-delivery/peer-sync/" >Node-to-Node Sync</a>
+          <a title="Node-to-Node Sync" href="/gpustack-operator/main/docs/modules/model-delivery/node-to-node-sync/" >Node-to-Node Sync</a>
           
           
         
@@ -1030,7 +1028,7 @@
       
         
         
-          <a title="Model Deployment Configuration" href="/gpustack-operator/main/docs/modules/model-deployment/deployment/" >Configuration</a>
+          <a title="Configuration" href="/gpustack-operator/main/docs/modules/model-deployment/configuration/" >Configuration</a>
           
           
         
@@ -1040,7 +1038,7 @@
       
         
         
-          <a title="Engine Compatibility" href="/gpustack-operator/main/docs/modules/model-deployment/engine-versions/" >Compatibility</a>
+          <a title="Engine Compatibility" href="/gpustack-operator/main/docs/modules/model-deployment/engine-versions/" >Engine Versions</a>
           
           
         
@@ -1208,7 +1206,12 @@
 
 
 
+  
+  
 
+
+
+  
 
 <details class="nav-section" >
   <summary title="GPU Instances">GPU Instances</summary>
@@ -1218,6 +1221,16 @@
       
       <a title="GPU Instances" href="/gpustack-operator/main/docs/modules/instances/" >Overview</a>
     
+    
+      
+      
+        
+        
+          <a title="Instance Metrics Reference" href="/gpustack-operator/main/docs/modules/instances/metrics/" >Metrics</a>
+          
+          
+        
+      
     
   </div>
 </details>
@@ -1322,7 +1335,7 @@
       
         
         
-          <a title="Migrating to Bundled Subcharts" href="/gpustack-operator/main/docs/operate/migration/to-subcharts/" >Bundled Subcharts</a>
+          <a title="Migrating to Bundled Subcharts" href="/gpustack-operator/main/docs/operate/migration/bundled-subcharts/" >Bundled Subcharts</a>
           
           
         
@@ -1332,7 +1345,7 @@
       
         
         
-          <a title="Upgrading to an Enforced Binding Dtype" href="/gpustack-operator/main/docs/operate/migration/kv-cache-dtype/" >Enforced Binding Dtype</a>
+          <a title="Upgrading to an Enforced Binding Dtype" href="/gpustack-operator/main/docs/operate/migration/enforced-binding-dtype/" >Enforced Binding Dtype</a>
           
           
         
@@ -1373,12 +1386,7 @@
   
   
 
-  
-  
 
-
-
-  
 
   
 
@@ -1416,16 +1424,6 @@
         
         
           <a title="Instance Type Unit Resources Reference" href="/gpustack-operator/main/docs/reference/instance-type-unit-resources/" >Resource Presets</a>
-          
-          
-        
-      
-    
-      
-      
-        
-        
-          <a title="Instance Metrics Reference" href="/gpustack-operator/main/docs/reference/instance-metrics/" >Instance Metrics</a>
           
           
         
@@ -1539,7 +1537,8 @@ node plugin maintain its configuration and status. Configure the cache through
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l">CapacityLow</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">status</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;False&#34;</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">reason</span><span class="p">:</span><span class="w"> </span><span class="l">WithinWatermarks</span></span></span></code></pre></div>
-</div><p><code>kubectl get nms</code> prints Ready, Used (<em><code>usedPercent</code></em>) and Age.</p>
+</div>
+<p><code>kubectl get nms</code> prints Ready, Used (<em><code>usedPercent</code></em>) and Age.</p>
 <ul>
 <li><strong>It never names a tenant.</strong> It is cluster-scoped, so it carries a digest and sizes and never a
 namespace, an artifact, a <code>Pod</code> or a repository; those would leak across tenants. A failure&rsquo;s
@@ -1604,8 +1603,9 @@ It removes the object with the <code>Node</code>, and removes all objects while 
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">nodefsAvailable</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;10%&#34;</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">status</span><span class="p">:</span><span class="w">  </span><span class="c"># Node plugin-owned; admitted only through the status webhook below.</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">observedGeneration</span><span class="p">:</span><span class="w"> </span><span class="m">3</span></span></span></code></pre></div>
-</div><p>The worker rewrites <code>spec</code> within a minute of a <code>Setting</code> change. The plugin has no <code>nodes/proxy</code> access.</p>
-<p>The public <a href="/gpustack-operator/main/docs/modules/model-delivery/views/#resources">NodeModelStore API</a>
+</div>
+<p>The worker rewrites <code>spec</code> within a minute of a <code>Setting</code> change. The plugin has no <code>nodes/proxy</code> access.</p>
+<p>The public <a href="/gpustack-operator/main/docs/modules/model-delivery/artifact-api/#resources">NodeModelStore API</a>
  supports reads and deletion. Its configuration
 and status are maintained by the worker and node plugin. The worker recreates a deleted object
 while its node runs the plugin.</p>
@@ -1663,7 +1663,8 @@ tenant from making an artifact look resolved.</p>
 </span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="nt">manifestDigest</span><span class="p">:</span><span class="w"> </span><span class="l">sha256:0f3c...</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">nodePublishSecretRef</span><span class="p">:</span><span class="w">  </span><span class="c"># the artifact&#39;s secretRef; absent without one</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">hf-token</span></span></span></code></pre></div>
-</div><p>A hand-written <code>Pod</code> may mount the same volume; it is held to the same rules. The <code>CSIDriver</code> has
+</div>
+<p>A hand-written <code>Pod</code> may mount the same volume; it is held to the same rules. The <code>CSIDriver</code> has
 <code>attachRequired: false</code>, <code>podInfoOnMount: true</code>, an <code>Ephemeral</code> entry in <em><code>volumeLifecycleModes</code></em>, and
 <code>fsGroupPolicy: None</code>, so the tree keeps the plugin&rsquo;s ownership and is readable by any user.</p>
 <h2 id="mount-authorization">Mount authorization</h2>
@@ -1835,7 +1836,7 @@ the earlier watermarks in force.</p>
   </tbody>
 </table>
 <p>No label carries a namespace, an artifact, a repository or a <code>Pod</code>.</p>
-<p>The <code>ModelArtifact</code> <a href="/gpustack-operator/main/docs/modules/model-delivery/views/#progress-subresource">progress</a>
+<p>The <code>ModelArtifact</code> <a href="/gpustack-operator/main/docs/modules/model-delivery/artifact-api/#progress-subresource">progress</a>
  subresource reads the running
 downloads from this port for live bytes between the status thresholds.</p>
 <h2 id="prerequisites-and-limitations">Prerequisites and limitations</h2>
@@ -1854,7 +1855,7 @@ one placed on a node without it downloads it there. See
 it</a>
 .</li>
 <li><strong>A download comes from the Hub</strong>, directly or through the proxy, or, when
-<a href="/gpustack-operator/main/docs/modules/model-delivery/peer-sync/">node-to-node sync</a>
+<a href="/gpustack-operator/main/docs/modules/model-delivery/node-to-node-sync/">node-to-node sync</a>
  is on, from a peer node that already holds
 the tree.</li>
 </ul>
@@ -1863,9 +1864,9 @@ the tree.</li>
       <h2>See also</h2>
       <ul class="related-pages"><li><a href="/gpustack-operator/main/docs/modules/model-delivery/artifact/">Model Artifact</a>
  for the artifact and its other
-deliveries</li><li><a href="/gpustack-operator/main/docs/modules/model-delivery/views/">Model Artifact API</a>
+deliveries</li><li><a href="/gpustack-operator/main/docs/modules/model-delivery/artifact-api/">Model Artifact API</a>
  for resource status and
-<code>progress</code></li><li><a href="/gpustack-operator/main/docs/modules/model-delivery/peer-sync/">Node-to-Node Sync</a>
+<code>progress</code></li><li><a href="/gpustack-operator/main/docs/modules/model-delivery/node-to-node-sync/">Node-to-Node Sync</a>
  for where a node&rsquo;s bytes come from</li><li><a href="/gpustack-operator/main/docs/modules/model-delivery/operations/">Model Store Operations</a>
  for enabling, configuring and upgrading</li><li><a href="/gpustack-operator/main/docs/reference/settings/#settings">Settings</a>
  for the <code>Setting</code>s <em><code>spec</code></em> is built from.</li></ul>
@@ -1879,18 +1880,6 @@ deliveries</li><li><a href="/gpustack-operator/main/docs/modules/model-delivery/
     <aside class="toc-panel" aria-label="Page navigation">
       <div class="toc-inner">
         
-          
-          
-          
-          <nav class="page-actions" aria-label="Page source">
-            <a href="https://github.com/gpustack/gpustack-operator/blob/304681b245c3f392539df1404126be8fb9d22adb/docs/modules/model-delivery/node-store.md">View page source</a>
-            
-            <a href="https://github.com/gpustack/gpustack-operator/edit/main/docs/modules/model-delivery/node-store.md">Edit this page</a>
-            
-          </nav>
-        
-        
-          <div class="toc-title">On this page</div>
           <nav id="TableOfContents">
   <ul>
     <li><a href="#contents">Contents</a></li>

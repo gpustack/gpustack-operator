@@ -27,7 +27,7 @@
   <link rel="alternate" type="text/markdown" href="/gpustack-operator/main/docs/modules/devices/thead-mig/index.md">
   
   <link rel="describedby" href="/gpustack-operator/main/llms.txt">
-  <link rel="stylesheet" href="/gpustack-operator/main/css/site.1a0de63fe646aba4ed6541fe0a6383c2ed5ca649b1593a98595ba53430bcf032.css">
+  <link rel="stylesheet" href="/gpustack-operator/main/css/site.b1fdc6af165ce7fbb10ebc91a579913dc99eac181655e5aae84dbe714d354a09.css">
   <link rel="stylesheet" href="/gpustack-operator/main/css/code.d2570c1cc6480f9c62bc31ec538eef2578ce80980588c469638a5f95416bfc7b.css">
 </head>
 <body class="docs-page">
@@ -36,7 +36,6 @@
     
     <a class="brand" href="/gpustack-operator/main/" aria-label="GPUStack Operator home"><img src="/gpustack-operator/main/images/logo_hu_ced145186d6eddf4.47210af4015bb5bd13742c222995900070c6649233431804f39bf2e001be3ddb.png" width="32" height="32" alt=""><span>GPUStack Operator</span></a>
     <nav class="top-links" aria-label="Main navigation">
-      <a class="top-docs-link" href="/gpustack-operator/main/docs/" aria-current="page">Documentation</a>
       <a class="top-devin-link" href="https://deepwiki.com/gpustack/gpustack-operator" target="_blank" rel="noopener noreferrer" aria-label="Ask Devin on DeepWiki (opens in a new tab)">
         <svg aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M8 1.5c.31 3.02 1.67 4.38 4.69 4.69-3.02.31-4.38 1.67-4.69 4.69-.31-3.02-1.67-4.38-4.69-4.69 3.02-.31 4.38-1.67 4.69-4.69Zm5.06 8.19c.16 1.51.84 2.19 2.34 2.34-1.51.16-2.19.84-2.34 2.34-.16-1.51-.84-2.19-2.34-2.34 1.51-.16 2.19-.84 2.34-2.34Z"/></svg>
         <span>Ask Devin</span>
@@ -106,7 +105,6 @@
         </svg>
       </button>
       <nav id="docs-navigation" class="sidebar-inner">
-        <div class="nav-title">Documentation</div>
         <a class="nav-home" href="/gpustack-operator/main/" >Overview</a>
         
           
@@ -698,7 +696,7 @@
       
         
         
-          <a title="KV Cache Election and Failover" href="/gpustack-operator/main/docs/modules/kv-cache/leader/" >Election and Failover</a>
+          <a title="KV Cache Election and Failover" href="/gpustack-operator/main/docs/modules/kv-cache/leader/" >Leader Election</a>
           
           
         
@@ -761,15 +759,15 @@
 
 
   
-    
-      
-      
-        
-        
-      
-    
-  
 
+  
+    
+      
+      
+        
+        
+      
+    
   
 
   
@@ -803,7 +801,7 @@
             <div class="nav-children">
               
                 
-                  <a title="Model Artifact API" href="/gpustack-operator/main/docs/modules/model-delivery/views/" >API</a>
+                  <a title="Model Artifact API" href="/gpustack-operator/main/docs/modules/model-delivery/artifact-api/" >API</a>
                 
               
             </div>
@@ -848,7 +846,7 @@
       
         
         
-          <a title="Node-to-Node Sync" href="/gpustack-operator/main/docs/modules/model-delivery/peer-sync/" >Node-to-Node Sync</a>
+          <a title="Node-to-Node Sync" href="/gpustack-operator/main/docs/modules/model-delivery/node-to-node-sync/" >Node-to-Node Sync</a>
           
           
         
@@ -1030,7 +1028,7 @@
       
         
         
-          <a title="Model Deployment Configuration" href="/gpustack-operator/main/docs/modules/model-deployment/deployment/" >Configuration</a>
+          <a title="Configuration" href="/gpustack-operator/main/docs/modules/model-deployment/configuration/" >Configuration</a>
           
           
         
@@ -1040,7 +1038,7 @@
       
         
         
-          <a title="Engine Compatibility" href="/gpustack-operator/main/docs/modules/model-deployment/engine-versions/" >Compatibility</a>
+          <a title="Engine Compatibility" href="/gpustack-operator/main/docs/modules/model-deployment/engine-versions/" >Engine Versions</a>
           
           
         
@@ -1208,7 +1206,12 @@
 
 
 
+  
+  
 
+
+
+  
 
 <details class="nav-section" >
   <summary title="GPU Instances">GPU Instances</summary>
@@ -1218,6 +1221,16 @@
       
       <a title="GPU Instances" href="/gpustack-operator/main/docs/modules/instances/" >Overview</a>
     
+    
+      
+      
+        
+        
+          <a title="Instance Metrics Reference" href="/gpustack-operator/main/docs/modules/instances/metrics/" >Metrics</a>
+          
+          
+        
+      
     
   </div>
 </details>
@@ -1322,7 +1335,7 @@
       
         
         
-          <a title="Migrating to Bundled Subcharts" href="/gpustack-operator/main/docs/operate/migration/to-subcharts/" >Bundled Subcharts</a>
+          <a title="Migrating to Bundled Subcharts" href="/gpustack-operator/main/docs/operate/migration/bundled-subcharts/" >Bundled Subcharts</a>
           
           
         
@@ -1332,7 +1345,7 @@
       
         
         
-          <a title="Upgrading to an Enforced Binding Dtype" href="/gpustack-operator/main/docs/operate/migration/kv-cache-dtype/" >Enforced Binding Dtype</a>
+          <a title="Upgrading to an Enforced Binding Dtype" href="/gpustack-operator/main/docs/operate/migration/enforced-binding-dtype/" >Enforced Binding Dtype</a>
           
           
         
@@ -1373,12 +1386,7 @@
   
   
 
-  
-  
 
-
-
-  
 
   
 
@@ -1416,16 +1424,6 @@
         
         
           <a title="Instance Type Unit Resources Reference" href="/gpustack-operator/main/docs/reference/instance-type-unit-resources/" >Resource Presets</a>
-          
-          
-        
-      
-    
-      
-      
-        
-        
-          <a title="Instance Metrics Reference" href="/gpustack-operator/main/docs/reference/instance-metrics/" >Instance Metrics</a>
           
           
         
@@ -1491,12 +1489,14 @@ holder, then a failure line, while the command prints its own busy error. On a 1
 </span></span><span class="line"><span class="cl">[alixpu] Process[&lt;comm&gt;], pid:&lt;pid&gt;, uki_version:&lt;n&gt;
 </span></span><span class="line"><span class="cl">[alixpu] Process[&lt;comm&gt;], pid:&lt;pid&gt;, uki_version:&lt;n&gt;
 </span></span><span class="line"><span class="cl">[alixpu] PPU00&lt;N&gt; set MIG mode failed</span></span></code></pre></div>
-</div><p>and its own output:</p>
+</div>
+<p>and its own output:</p>
 <div class="code-block">
   <div class="code-toolbar"><span>text</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-text" data-lang="text"><span class="line"><span class="cl">MIG resources are in use, please destroy related GPU instances and try again
 </span></span><span class="line"><span class="cl">Failed to Enable MIG mode for PPU &lt;bus-id&gt;: An operation cannot be performed because the PPU is currently in use.</span></span></code></pre></div>
-</div><p>Two notes:</p>
+</div>
+<p>Two notes:</p>
 <ul>
 <li><strong>The count is not the list length</strong>: three processes reported, two holder lines printed. Treat it as
 a lower bound and go to the file descriptors.</li>
@@ -1513,11 +1513,11 @@ can fail for a holder on its way out. Re-check the descriptors.</p>
 <p><strong>Diagnose from the kernel log and the holders&rsquo; open file descriptors, never from <code>ppu-smi</code> alone</strong>, which
 reports the mode and carvable profiles, not who holds a PPU open:</p>
 <div class="code-block">
-  <div class="code-toolbar"><span>console</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
-  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-console" data-lang="console"><span class="line"><span class="cl"><span class="gp">$</span> <span class="k">for</span> p in /proc/<span class="o">[</span>0-9<span class="o">]</span>*<span class="p">;</span> <span class="k">do</span> <span class="nv">pid</span><span class="o">=</span><span class="si">${</span><span class="nv">p</span><span class="p">#/proc/</span><span class="si">}</span><span class="p">;</span> <span class="nv">n</span><span class="o">=</span><span class="k">$(</span>ls -l <span class="s2">&#34;</span><span class="nv">$p</span><span class="s2">&#34;</span>/fd 2&gt;/dev/null <span class="p">|</span> grep -c alixpu<span class="k">)</span><span class="p">;</span> <span class="se">\
-</span></span></span><span class="line"><span class="cl"><span class="se"></span><span class="go">    [ &#34;$n&#34; -gt 0 ] 2&gt;/dev/null &amp;&amp; echo &#34;pid=$pid fds=$n $(tr -d &#39;\0&#39; &lt; &#34;$p&#34;/cmdline)&#34;; done
-</span></span></span></code></pre></div>
-</div><p>Empty output is the precondition; anything printed is a process to stop. A holder typically has one
+  <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl"><span class="k">for</span> p in /proc/<span class="o">[</span>0-9<span class="o">]</span>*<span class="p">;</span> <span class="k">do</span> <span class="nv">pid</span><span class="o">=</span><span class="si">${</span><span class="nv">p</span><span class="p">#/proc/</span><span class="si">}</span><span class="p">;</span> <span class="nv">n</span><span class="o">=</span><span class="k">$(</span>ls -l <span class="s2">&#34;</span><span class="nv">$p</span><span class="s2">&#34;</span>/fd 2&gt;/dev/null <span class="p">|</span> grep -c alixpu<span class="k">)</span><span class="p">;</span> <span class="se">\
+</span></span></span><span class="line"><span class="cl"><span class="se"></span>    <span class="o">[</span> <span class="s2">&#34;</span><span class="nv">$n</span><span class="s2">&#34;</span> -gt <span class="m">0</span> <span class="o">]</span> 2&gt;/dev/null <span class="o">&amp;&amp;</span> <span class="nb">echo</span> <span class="s2">&#34;pid=</span><span class="nv">$pid</span><span class="s2"> fds=</span><span class="nv">$n</span><span class="s2"> </span><span class="k">$(</span>tr -d <span class="s1">&#39;\0&#39;</span> &lt; <span class="s2">&#34;</span><span class="nv">$p</span><span class="s2">&#34;</span>/cmdline<span class="k">)</span><span class="s2">&#34;</span><span class="p">;</span> <span class="k">done</span></span></span></code></pre></div>
+</div>
+<p>Empty output is the precondition; anything printed is a process to stop. A holder typically has one
 descriptor per PPU plus the shared control nodes — hence the cross-PPU blocking.</p>
 <p><strong>A mode change is not noticed until the Device Manager restarts.</strong> The re-detect trigger watches the
 device set and health, not the mode, so <code>ppu-smi mig</code> never reaches the cluster by itself. This is
@@ -1548,11 +1548,11 @@ compute each, all on the same memory), so it is refused rather than half-address
 <p>These rules are shared with NVIDIA.</p>
 <p>What a PPU offers:</p>
 <div class="code-block">
-  <div class="code-toolbar"><span>console</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
-  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-console" data-lang="console"><span class="line"><span class="cl"><span class="gp">$</span> ppu-smi mig -i &lt;N&gt; -lgip     <span class="c1"># the profiles, with Instances Free/Total and memory per instance</span>
-</span></span><span class="line"><span class="cl"><span class="gp">$</span> ppu-smi mig -i &lt;N&gt; -lgipp    <span class="c1"># the legal placements per profile, as {Start,Start...}:Size</span>
-</span></span></code></pre></div>
-</div><p><strong><code>-lgipp</code> does not tell you what is free.</strong> It lists every <em>legal</em> placement irrespective of occupancy: a
+  <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">ppu-smi mig -i &lt;N&gt; -lgip     <span class="c1"># the profiles, with Instances Free/Total and memory per instance</span>
+</span></span><span class="line"><span class="cl">ppu-smi mig -i &lt;N&gt; -lgipp    <span class="c1"># the legal placements per profile, as {Start,Start...}:Size</span></span></span></code></pre></div>
+</div>
+<p><strong><code>-lgipp</code> does not tell you what is free.</strong> It lists every <em>legal</em> placement irrespective of occupancy: a
 PPU carved to capacity still lists every start, and lists placements for a profile that can no longer be
 created. Occupancy lives in <code>-lgip</code>&rsquo;s <code>Instances Free/Total</code> and in <code>-lgi</code>.</p>
 <p>The ledger relies on that: it sizes capacity from the placement count because that count does not move
@@ -1591,7 +1591,8 @@ rules</a>
 </span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="nt">alibabacloud.com/ppu.partitioned</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;1&#34;</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="c"># Request exactly one instance of the selected profile.</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="nt">alibabacloud.com/ppu.partitioned.mig-&lt;profile&gt;</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;1&#34;</span></span></span></code></pre></div>
-</div><p>Or through the <code>Instance</code> API, as with <a href="/gpustack-operator/main/docs/modules/devices/nvidia-mig/#requesting-a-partition">NVIDIA&rsquo;s
+</div>
+<p>Or through the <code>Instance</code> API, as with <a href="/gpustack-operator/main/docs/modules/devices/nvidia-mig/#requesting-a-partition">NVIDIA&rsquo;s
 <code>acceleratorPartitionedProfile</code></a>
 :</p>
 <div class="code-block">
@@ -1605,7 +1606,8 @@ rules</a>
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">resources</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">accelerator</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;1&#34;</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">acceleratorPartitionedProfile</span><span class="p">:</span><span class="w"> </span><span class="l">&lt;profile&gt;</span></span></span></code></pre></div>
-</div><p><strong>One partition per allocated PPU</strong>, on the PPU the device plugin picks itself — never a pair split across
+</div>
+<p><strong>One partition per allocated PPU</strong>, on the PPU the device plugin picks itself — never a pair split across
 two PPUs, never two partitions in one container.</p>
 <p><strong>The container receives device nodes, not an environment variable.</strong> T-Head has no runtime hook for
 injecting visibility, so the allocation response carries the device specifications: the two shared control
@@ -1701,23 +1703,31 @@ hardware called out where they bite.</p>
 <p>Enable the mode. <strong><code>-mig</code> is a top-level flag, not a <code>ppu-smi mig</code> subcommand flag</strong>: the subcommand
 carries the instance operations (<code>-lgip</code>, <code>-cgi</code>, <code>-dgi</code>, …) and rejects <code>-mig</code>:</p>
 <div class="code-block">
-  <div class="code-toolbar"><span>console</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
-  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-console" data-lang="console"><span class="line"><span class="cl"><span class="gp">#</span> one PPU by card ordinal
-</span></span><span class="line"><span class="cl"><span class="gp">$</span> ppu-smi -i &lt;N&gt; -mig <span class="m">1</span>
-</span></span><span class="line"><span class="cl"><span class="go">Enable MIG mode for PPU &lt;bus-id&gt;.
-</span></span></span><span class="line"><span class="cl"><span class="go">All done.
-</span></span></span></code></pre></div>
-</div><p><strong>One PPU per invocation.</strong> <code>-i</code> takes no PPU list for this flag: a comma-separated form answers <code>No devices were found</code> and changes nothing, which reads like missing hardware rather than a rejected
+  <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl"><span class="c1"># one PPU by card ordinal</span>
+</span></span><span class="line"><span class="cl">ppu-smi -i &lt;N&gt; -mig <span class="m">1</span></span></span></code></pre></div>
+</div>
+<p>Captured output:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>text</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-text" data-lang="text"><span class="line"><span class="cl">Enable MIG mode for PPU &lt;bus-id&gt;.
+</span></span><span class="line"><span class="cl">All done.</span></span></code></pre></div>
+</div>
+<p><strong>One PPU per invocation.</strong> <code>-i</code> takes no PPU list for this flag: a comma-separated form answers <code>No devices were found</code> and changes nothing, which reads like missing hardware rather than a rejected
 argument. A node with several PPUs to flip therefore takes several calls.</p>
 <p>Then confirm, because a successful call is not an applied mode:</p>
 <div class="code-block">
-  <div class="code-toolbar"><span>console</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
-  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-console" data-lang="console"><span class="line"><span class="cl"><span class="gp">$</span> ppu-smi -q -i &lt;N&gt; <span class="p">|</span> grep -i -A2 <span class="s2">&#34;MIG Mode&#34;</span>
-</span></span><span class="line"><span class="cl"><span class="go">    MIG Mode
-</span></span></span><span class="line"><span class="cl"><span class="go">        Current                             : Enabled
-</span></span></span><span class="line"><span class="cl"><span class="go">        Pending                             : Enabled
-</span></span></span></code></pre></div>
-</div></li>
+  <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">ppu-smi -q -i &lt;N&gt; <span class="p">|</span> grep -i -A2 <span class="s2">&#34;MIG Mode&#34;</span></span></span></code></pre></div>
+</div>
+<p>Captured output:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>text</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-text" data-lang="text"><span class="line"><span class="cl">    MIG Mode
+</span></span><span class="line"><span class="cl">        Current                             : Enabled
+</span></span><span class="line"><span class="cl">        Pending                             : Enabled</span></span></code></pre></div>
+</div>
+</li>
 <li>
 <p>Restart the node&rsquo;s Device Manager <code>Pod</code> (<code>gpustack-operator-device-manager-thead</code>) to re-detect. As with
 NVIDIA, you need neither to delete the node&rsquo;s <code>Devices</code> object — the detector rewrites the group&rsquo;s
@@ -1734,21 +1744,21 @@ remains and flip the mode back.</p>
 <p><strong>Destroy the Compute Instance before its GPU Instance.</strong> The driver refuses otherwise — <code>GPU instance &lt;G&gt; is in use, please destory related compute instances then try again</code> (the manufacturer&rsquo;s own spelling), with
 a non-zero exit. The reclaim does this in order; follow these steps by hand:</p>
 <div class="code-block">
-  <div class="code-toolbar"><span>console</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
-  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-console" data-lang="console"><span class="line"><span class="cl"><span class="gp">$</span> ppu-smi mig -i &lt;N&gt; -gi &lt;G&gt; -ci &lt;C&gt; -dci
-</span></span><span class="line"><span class="cl"><span class="gp">$</span> ppu-smi mig -i &lt;N&gt; -gi &lt;G&gt; -dgi
-</span></span></code></pre></div>
-</div><p><strong><code>-dgi</code> without <code>-gi</code> destroys every GPU Instance on the PPU</strong>, not the one you were looking at:
+  <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">ppu-smi mig -i &lt;N&gt; -gi &lt;G&gt; -ci &lt;C&gt; -dci
+</span></span><span class="line"><span class="cl">ppu-smi mig -i &lt;N&gt; -gi &lt;G&gt; -dgi</span></span></code></pre></div>
+</div>
+<p><strong><code>-dgi</code> without <code>-gi</code> destroys every GPU Instance on the PPU</strong>, not the one you were looking at:
 convenient for a PPU you own outright, a hazard on a managed node, where other partitions may belong to
 running <code>Pod</code>s.</p>
 <p>Then, with the PPU free of instances <strong>and</strong> of holders — the same <a href="#prerequisites">Prerequisites</a>
  as
 enabling, since the mode cannot be flipped back while a process holds the driver:</p>
 <div class="code-block">
-  <div class="code-toolbar"><span>console</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
-  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-console" data-lang="console"><span class="line"><span class="cl"><span class="gp">$</span> ppu-smi -i &lt;N&gt; -mig <span class="m">0</span>
-</span></span></code></pre></div>
-</div><p>then restart the Device Manager <code>Pod</code> so the ledger returns the PPU to unpartitioned capability.</p>
+  <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">ppu-smi -i &lt;N&gt; -mig <span class="m">0</span></span></span></code></pre></div>
+</div>
+<p>then restart the Device Manager <code>Pod</code> so the ledger returns the PPU to unpartitioned capability.</p>
 <p><strong>Stale capability device nodes are expected and are not live partitions.</strong> The driver creates
 <code>/dev/alixpu-caps/alixpu-cap&lt;minor&gt;</code> with an instance and does <strong>not</strong> remove it on destroy, so a node that
 has hosted partitions accumulates entries. They are harmless: the minor is deterministic and reused when
@@ -1803,18 +1813,6 @@ partition is placed and reclaimed)</li></ul>
     <aside class="toc-panel" aria-label="Page navigation">
       <div class="toc-inner">
         
-          
-          
-          
-          <nav class="page-actions" aria-label="Page source">
-            <a href="https://github.com/gpustack/gpustack-operator/blob/304681b245c3f392539df1404126be8fb9d22adb/docs/modules/devices/thead-mig.md">View page source</a>
-            
-            <a href="https://github.com/gpustack/gpustack-operator/edit/main/docs/modules/devices/thead-mig.md">Edit this page</a>
-            
-          </nav>
-        
-        
-          <div class="toc-title">On this page</div>
           <nav id="TableOfContents">
   <ul>
     <li><a href="#contents">Contents</a></li>

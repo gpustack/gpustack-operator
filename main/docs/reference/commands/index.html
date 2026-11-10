@@ -27,7 +27,7 @@
   <link rel="alternate" type="text/markdown" href="/gpustack-operator/main/docs/reference/commands/index.md">
   
   <link rel="describedby" href="/gpustack-operator/main/llms.txt">
-  <link rel="stylesheet" href="/gpustack-operator/main/css/site.1a0de63fe646aba4ed6541fe0a6383c2ed5ca649b1593a98595ba53430bcf032.css">
+  <link rel="stylesheet" href="/gpustack-operator/main/css/site.b1fdc6af165ce7fbb10ebc91a579913dc99eac181655e5aae84dbe714d354a09.css">
   <link rel="stylesheet" href="/gpustack-operator/main/css/code.d2570c1cc6480f9c62bc31ec538eef2578ce80980588c469638a5f95416bfc7b.css">
 </head>
 <body class="docs-page">
@@ -36,7 +36,6 @@
     
     <a class="brand" href="/gpustack-operator/main/" aria-label="GPUStack Operator home"><img src="/gpustack-operator/main/images/logo_hu_ced145186d6eddf4.47210af4015bb5bd13742c222995900070c6649233431804f39bf2e001be3ddb.png" width="32" height="32" alt=""><span>GPUStack Operator</span></a>
     <nav class="top-links" aria-label="Main navigation">
-      <a class="top-docs-link" href="/gpustack-operator/main/docs/" aria-current="page">Documentation</a>
       <a class="top-devin-link" href="https://deepwiki.com/gpustack/gpustack-operator" target="_blank" rel="noopener noreferrer" aria-label="Ask Devin on DeepWiki (opens in a new tab)">
         <svg aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M8 1.5c.31 3.02 1.67 4.38 4.69 4.69-3.02.31-4.38 1.67-4.69 4.69-.31-3.02-1.67-4.38-4.69-4.69 3.02-.31 4.38-1.67 4.69-4.69Zm5.06 8.19c.16 1.51.84 2.19 2.34 2.34-1.51.16-2.19.84-2.34 2.34-.16-1.51-.84-2.19-2.34-2.34 1.51-.16 2.19-.84 2.34-2.34Z"/></svg>
         <span>Ask Devin</span>
@@ -106,7 +105,6 @@
         </svg>
       </button>
       <nav id="docs-navigation" class="sidebar-inner">
-        <div class="nav-title">Documentation</div>
         <a class="nav-home" href="/gpustack-operator/main/" >Overview</a>
         
           
@@ -698,7 +696,7 @@
       
         
         
-          <a title="KV Cache Election and Failover" href="/gpustack-operator/main/docs/modules/kv-cache/leader/" >Election and Failover</a>
+          <a title="KV Cache Election and Failover" href="/gpustack-operator/main/docs/modules/kv-cache/leader/" >Leader Election</a>
           
           
         
@@ -761,15 +759,15 @@
 
 
   
-    
-      
-      
-        
-        
-      
-    
-  
 
+  
+    
+      
+      
+        
+        
+      
+    
   
 
   
@@ -803,7 +801,7 @@
             <div class="nav-children">
               
                 
-                  <a title="Model Artifact API" href="/gpustack-operator/main/docs/modules/model-delivery/views/" >API</a>
+                  <a title="Model Artifact API" href="/gpustack-operator/main/docs/modules/model-delivery/artifact-api/" >API</a>
                 
               
             </div>
@@ -848,7 +846,7 @@
       
         
         
-          <a title="Node-to-Node Sync" href="/gpustack-operator/main/docs/modules/model-delivery/peer-sync/" >Node-to-Node Sync</a>
+          <a title="Node-to-Node Sync" href="/gpustack-operator/main/docs/modules/model-delivery/node-to-node-sync/" >Node-to-Node Sync</a>
           
           
         
@@ -1030,7 +1028,7 @@
       
         
         
-          <a title="Model Deployment Configuration" href="/gpustack-operator/main/docs/modules/model-deployment/deployment/" >Configuration</a>
+          <a title="Configuration" href="/gpustack-operator/main/docs/modules/model-deployment/configuration/" >Configuration</a>
           
           
         
@@ -1040,7 +1038,7 @@
       
         
         
-          <a title="Engine Compatibility" href="/gpustack-operator/main/docs/modules/model-deployment/engine-versions/" >Compatibility</a>
+          <a title="Engine Compatibility" href="/gpustack-operator/main/docs/modules/model-deployment/engine-versions/" >Engine Versions</a>
           
           
         
@@ -1208,7 +1206,12 @@
 
 
 
+  
+  
 
+
+
+  
 
 <details class="nav-section" >
   <summary title="GPU Instances">GPU Instances</summary>
@@ -1218,6 +1221,16 @@
       
       <a title="GPU Instances" href="/gpustack-operator/main/docs/modules/instances/" >Overview</a>
     
+    
+      
+      
+        
+        
+          <a title="Instance Metrics Reference" href="/gpustack-operator/main/docs/modules/instances/metrics/" >Metrics</a>
+          
+          
+        
+      
     
   </div>
 </details>
@@ -1322,7 +1335,7 @@
       
         
         
-          <a title="Migrating to Bundled Subcharts" href="/gpustack-operator/main/docs/operate/migration/to-subcharts/" >Bundled Subcharts</a>
+          <a title="Migrating to Bundled Subcharts" href="/gpustack-operator/main/docs/operate/migration/bundled-subcharts/" >Bundled Subcharts</a>
           
           
         
@@ -1332,7 +1345,7 @@
       
         
         
-          <a title="Upgrading to an Enforced Binding Dtype" href="/gpustack-operator/main/docs/operate/migration/kv-cache-dtype/" >Enforced Binding Dtype</a>
+          <a title="Upgrading to an Enforced Binding Dtype" href="/gpustack-operator/main/docs/operate/migration/enforced-binding-dtype/" >Enforced Binding Dtype</a>
           
           
         
@@ -1373,12 +1386,7 @@
   
   
 
-  
-  
 
-
-
-  
 
   
 
@@ -1416,16 +1424,6 @@
         
         
           <a title="Instance Type Unit Resources Reference" href="/gpustack-operator/main/docs/reference/instance-type-unit-resources/" >Resource Presets</a>
-          
-          
-        
-      
-    
-      
-      
-        
-        
-          <a title="Instance Metrics Reference" href="/gpustack-operator/main/docs/reference/instance-metrics/" >Instance Metrics</a>
           
           
         
@@ -1471,6 +1469,8 @@ between them.</p>
 </li>
 <li><a href="#model-manager">model-manager</a>
 </li>
+<li><a href="#model-transfer">model-transfer</a>
+</li>
 <li><a href="#device-manager-detect">device-manager detect</a>
 </li>
 <li><a href="#device-manager-monitor">device-manager monitor</a>
@@ -1512,6 +1512,12 @@ between them.</p>
           <td><code>mm</code></td>
           <td>service</td>
           <td>the Model Manager <code>DaemonSet</code>, one per node</td>
+      </tr>
+      <tr>
+          <td><code>model-transfer</code></td>
+          <td><code>mx</code></td>
+          <td>service</td>
+          <td>a vendor source <code>DaemonSet</code> on eligible nodes</td>
       </tr>
       <tr>
           <td><code>device-manager detect</code></td>
@@ -1706,7 +1712,8 @@ connection; see <a href="/gpustack-operator/main/docs/reference/settings/">Setti
 <div class="code-block">
   <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">gpustack-operator worker --secure-port<span class="o">=</span><span class="m">31443</span> --disable-applications<span class="o">=</span>kueue</span></span></code></pre></div>
-</div><h2 id="worker-gateway">worker-gateway</h2>
+</div>
+<h2 id="worker-gateway">worker-gateway</h2>
 <p>Aggregates resources from upstream clusters and mirrors them for <code>worker</code> to read. Runs beside
 <code>worker</code>; by default the two speak over a unix socket rather than a port.</p>
 <table>
@@ -1758,7 +1765,8 @@ connection; see <a href="/gpustack-operator/main/docs/reference/settings/">Setti
 <div class="code-block">
   <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">gpustack-operator worker-gateway --worker-conn-mode<span class="o">=</span>loopback</span></span></code></pre></div>
-</div><h2 id="device-manager-serve">device-manager serve</h2>
+</div>
+<h2 id="device-manager-serve">device-manager serve</h2>
 <p>It is the per-node agent: it detects accelerators, keeps the <code>Devices</code> ledger current, samples
 utilization, registers with the kubelet as a device plugin and injects the vendor runtime into
 allocated containers.</p>
@@ -1828,7 +1836,8 @@ subset of the allocation modes its hardware would otherwise offer.</p>
 <div class="code-block">
   <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">gpustack-operator device-manager serve --manufacturer<span class="o">=</span>nvidia --no-partitioned</span></span></code></pre></div>
-</div><h2 id="model-manager">model-manager</h2>
+</div>
+<h2 id="model-manager">model-manager</h2>
 <p>The per-node model cache. A CSI node plugin serving inline ephemeral volumes of the driver
 <code>model.csi.gpustack.ai</code>: it authorizes each mount against the <code>Pod</code>&rsquo;s namespace, downloads and
 verifies a Hugging Face artifact&rsquo;s files once per node, and writes that node&rsquo;s <code>NodeModelStore</code>
@@ -1880,7 +1889,134 @@ comes from its node&rsquo;s <code>NodeModelStore.spec</code>, not from flags.</p
 <div class="code-block">
   <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">gpustack-operator model-manager --node-name<span class="o">=</span><span class="s2">&#34;</span><span class="k">$(</span>hostname<span class="k">)</span><span class="s2">&#34;</span> --cache-root<span class="o">=</span>/mnt/models</span></span></code></pre></div>
-</div><h2 id="device-manager-detect">device-manager detect</h2>
+</div>
+<h2 id="model-transfer">model-transfer</h2>
+<p>The source runtime serves authorized remote weight delivery sessions and coordinates the local
+vendor transport worker. It runs in a source <code>DaemonSet</code>; see <a href="/gpustack-operator/main/docs/modules/model-delivery/remote/">Remote Weight Delivery</a>
+.</p>
+<table>
+  <thead>
+      <tr>
+          <th>Flag</th>
+          <th>Default</th>
+          <th>Effect</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td><code>--node-name</code>, <code>--worker-namespace</code></td>
+          <td>—</td>
+          <td>Required node and source-worker namespace.</td>
+      </tr>
+      <tr>
+          <td><code>--worker-id</code>, <code>--vendor-scope</code></td>
+          <td>—</td>
+          <td>Required worker and vendor identities.</td>
+      </tr>
+      <tr>
+          <td><code>--cache-root</code></td>
+          <td><code>/var/lib/gpustack/models</code></td>
+          <td>Published model cache root.</td>
+      </tr>
+      <tr>
+          <td><code>--broker-root</code></td>
+          <td><code>/var/lib/gpustack/model-transfer</code></td>
+          <td>Durable broker ledger directory.</td>
+      </tr>
+      <tr>
+          <td><code>--control-addr</code></td>
+          <td><code>127.0.0.1:9250</code></td>
+          <td>Local worker control listener.</td>
+      </tr>
+      <tr>
+          <td><code>--session-addr</code></td>
+          <td><code>:9251</code></td>
+          <td>TLS session listener.</td>
+      </tr>
+      <tr>
+          <td><code>--session-tls-cert</code>, <code>--session-tls-key</code></td>
+          <td>—</td>
+          <td>Required serving certificate and key paths.</td>
+      </tr>
+      <tr>
+          <td><code>--bootstrap-file</code></td>
+          <td><code>/run/model-transfer/bootstrap</code></td>
+          <td>Pod-local worker credential path.</td>
+      </tr>
+      <tr>
+          <td><code>--physical-bytes</code>, <code>--max-memory-bytes</code></td>
+          <td><code>0</code></td>
+          <td>Source memory ceiling; zero derives one sixteenth of node RAM.</td>
+      </tr>
+      <tr>
+          <td><code>--min-memory-bytes</code></td>
+          <td><code>1073741824</code></td>
+          <td>Source memory floor, at least 1 GiB.</td>
+      </tr>
+      <tr>
+          <td><code>--max-sessions</code></td>
+          <td><code>64</code></td>
+          <td>Concurrent session limit; values below one resolve to 64.</td>
+      </tr>
+      <tr>
+          <td><code>--max-generations</code>, <code>--max-quarantined</code></td>
+          <td><code>8</code>, <code>2</code></td>
+          <td>Limits on live and quarantined generations.</td>
+      </tr>
+      <tr>
+          <td><code>--quarantine-bytes</code></td>
+          <td><code>8589934592</code></td>
+          <td>Quarantined generation byte limit.</td>
+      </tr>
+      <tr>
+          <td><code>--lease-ttl</code></td>
+          <td><code>30s</code></td>
+          <td>Worker health lease duration.</td>
+      </tr>
+      <tr>
+          <td><code>--kube-conn-timeout</code>, <code>--kube-conn-qps</code>, <code>--kube-conn-burst</code></td>
+          <td><code>5m</code>, <code>200</code>, <code>400</code></td>
+          <td>Kubernetes client limits.</td>
+      </tr>
+      <tr>
+          <td><code>--kube-content-type</code></td>
+          <td>—</td>
+          <td>Kubernetes request encoding override.</td>
+      </tr>
+  </tbody>
+</table>
+<p>The command returns exit code <code>1</code> for invalid configuration or a runtime failure. Context cancellation
+stops the service normally. Kubernetes configuration uses the standard client loader, including
+<code>KUBECONFIG</code>.</p>
+<p>Flags can also be supplied through environment variables. The command harness uses the literal
+prefix <code>GPUSTACK_MODEL-TRANSFER_</code> and replaces underscores in the remaining name with hyphens; an
+explicit flag takes precedence. For example, <code>GPUSTACK_MODEL-TRANSFER_NODE_NAME</code> supplies <code>--node-name</code>.
+The hyphen in the prefix requires an environment launcher such as <code>env</code>.</p>
+<table>
+  <thead>
+      <tr>
+          <th>Environment</th>
+          <th>Default</th>
+          <th>Effect</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td><code>GPUSTACK_MODEL_TRANSFER_SOURCE_RESIDENT_BUDGET_BYTES</code></td>
+          <td><code>0</code></td>
+          <td>Optional source resident window limit.</td>
+      </tr>
+      <tr>
+          <td><code>GPUSTACK_MODEL_TRANSFER_HIXL_RESIDENT_BUDGET_BYTES</code></td>
+          <td><code>17179869184</code></td>
+          <td>HIXL resident window limit; zero retains the default.</td>
+      </tr>
+  </tbody>
+</table>
+<p>Both budgets require non-negative integers. Positive values are aligned down to 2 MiB and have a
+minimum of 1 GiB. See <a href="/gpustack-operator/main/docs/modules/model-delivery/remote/">Remote Weight Delivery</a>
+ for source setup.</p>
+<h2 id="device-manager-detect">device-manager detect</h2>
 <p>Runs one detect pass and prints the result. It is a pure read: nothing is written, nothing is
 started, and no flag changes that.</p>
 <p>The output is the <code>Devices</code> CRD&rsquo;s own <em><code>spec.groups</code></em>, so it can be compared directly against what the
@@ -1916,7 +2052,8 @@ cluster recorded; <code>kubectl get devices &lt;node&gt; -o yaml</code> beside i
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">docker run --rm --privileged -v /dev:/dev -v /sys:/sys <span class="se">\
 </span></span></span><span class="line"><span class="cl"><span class="se"></span>  gpustack/gpustack-operator:&lt;tag&gt; <span class="se">\
 </span></span></span><span class="line"><span class="cl"><span class="se"></span>  gpustack-operator device-manager detect --manufacturer<span class="o">=</span>amd</span></span></code></pre></div>
-</div><div class="code-block">
+</div>
+<div class="code-block">
   <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl">- <span class="nt">id</span><span class="p">:</span><span class="w"> </span><span class="l">radeon-rx-7800-xt</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">manufacturer</span><span class="p">:</span><span class="w"> </span><span class="l">amd</span><span class="w">
@@ -1942,7 +2079,8 @@ cluster recorded; <code>kubectl get devices &lt;node&gt; -o yaml</code> beside i
 </span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">logicalSliced</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">            </span><span class="nt">coresPercentageOvercommit</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">            </span><span class="nt">count</span><span class="p">:</span><span class="w"> </span><span class="m">128</span></span></span></code></pre></div>
-</div><blockquote>
+</div>
+<blockquote>
 <p><strong>A vendor&rsquo;s user-space libraries have to be reachable.</strong> AMD has no container runtime that
 injects them, so a run without <code>/opt/rocm</code> mounted finds no accelerator on a node that has two.
 <code>preflight</code>&rsquo;s host cross-check is what tells that apart from a node with none; see
@@ -1957,7 +2095,8 @@ flags.</p>
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">docker run --rm --privileged -v /dev:/dev -v /sys:/sys <span class="se">\
 </span></span></span><span class="line"><span class="cl"><span class="se"></span>  gpustack/gpustack-operator:&lt;tag&gt; <span class="se">\
 </span></span></span><span class="line"><span class="cl"><span class="se"></span>  gpustack-operator device-manager monitor --manufacturer<span class="o">=</span>amd</span></span></code></pre></div>
-</div><div class="code-block">
+</div>
+<div class="code-block">
   <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl">- <span class="nt">manufacturer</span><span class="p">:</span><span class="w"> </span><span class="l">amd</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">timestamp</span><span class="p">:</span><span class="w"> </span><span class="ld">2026-08-29T08:01:43.565038175</span><span class="m">+08</span><span class="p">:</span><span class="m">00</span><span class="w">
@@ -1970,7 +2109,8 @@ flags.</p>
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">temperature</span><span class="p">:</span><span class="w"> </span><span class="m">44</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">powerUsage</span><span class="p">:</span><span class="w"> </span><span class="m">8</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">unhealthy</span><span class="p">:</span><span class="w"> </span><span class="kc">false</span></span></span></code></pre></div>
-</div><p>The same figures reach a cluster through the <code>Instance</code> metrics surfaces; see <a href="/gpustack-operator/main/docs/reference/instance-metrics/">Instance
+</div>
+<p>The same figures reach a cluster through the <code>Instance</code> metrics surfaces; see <a href="/gpustack-operator/main/docs/modules/instances/metrics/">Instance
 Metrics</a>
 .</p>
 <h2 id="device-manager-preflight">device-manager preflight</h2>
@@ -2085,7 +2225,8 @@ removes, how to read each row).</p>
 </span></span></span><span class="line"><span class="cl"><span class="sd">    gpustack-preflight-maps-begin
 </span></span></span><span class="line"><span class="cl"><span class="sd">    …
 </span></span></span><span class="line"><span class="cl"><span class="sd">    7205a176b000-7205a176d000 r--p 00000000 fc:00 13006695   /usr/local/vrocm/libvrocm.so</span></span></span></code></pre></div>
-</div><p>The verdict is the mapping line, not the shim&rsquo;s own greeting: a library that failed to load prints a
+</div>
+<p>The verdict is the mapping line, not the shim&rsquo;s own greeting: a library that failed to load prints a
 message naming the same path, so only <code>/proc/self/maps</code> says it is actually there.</p>
 <p>The same row under <code>--dry-run</code> carries the <code>command</code> and no <code>evidence</code>, and its depth is
 <code>simulated</code>: the allocator&rsquo;s intent, proven, with nothing run to confirm it took.</p>
@@ -2114,7 +2255,8 @@ the step emitted for <code>nerdctl</code> instead, against the socket and namesp
 </span></span></span><span class="line"><span class="cl"><span class="se"></span>  -v /:/host -v /dev:/dev -v /sys:/sys <span class="se">\
 </span></span></span><span class="line"><span class="cl"><span class="se"></span>  gpustack/gpustack-operator:&lt;tag&gt; <span class="se">\
 </span></span></span><span class="line"><span class="cl"><span class="se"></span>  gpustack-operator device-manager preflight --manufacturer<span class="o">=</span>nvidia --dry-run</span></span></code></pre></div>
-</div><p><code>--network=host</code> is not optional: the host&rsquo;s CLI is entered through a chroot, which changes the root
+</div>
+<p><code>--network=host</code> is not optional: the host&rsquo;s CLI is entered through a chroot, which changes the root
 and not the network namespace, so an image pull would read the host&rsquo;s resolver and find nothing
 answering.</p>
 <nav class="reading-footer" aria-label="Further reading">
@@ -2136,18 +2278,6 @@ on.</li></ul>
     <aside class="toc-panel" aria-label="Page navigation">
       <div class="toc-inner">
         
-          
-          
-          
-          <nav class="page-actions" aria-label="Page source">
-            <a href="https://github.com/gpustack/gpustack-operator/blob/304681b245c3f392539df1404126be8fb9d22adb/docs/reference/commands.md">View page source</a>
-            
-            <a href="https://github.com/gpustack/gpustack-operator/edit/main/docs/reference/commands.md">Edit this page</a>
-            
-          </nav>
-        
-        
-          <div class="toc-title">On this page</div>
           <nav id="TableOfContents">
   <ul>
     <li><a href="#contents">Contents</a></li>
@@ -2158,6 +2288,7 @@ on.</li></ul>
     <li><a href="#worker-gateway">worker-gateway</a></li>
     <li><a href="#device-manager-serve">device-manager serve</a></li>
     <li><a href="#model-manager">model-manager</a></li>
+    <li><a href="#model-transfer">model-transfer</a></li>
     <li><a href="#device-manager-detect">device-manager detect</a></li>
     <li><a href="#device-manager-monitor">device-manager monitor</a></li>
     <li><a href="#device-manager-preflight">device-manager preflight</a>

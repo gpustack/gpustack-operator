@@ -47,7 +47,7 @@ SGLang Ascend rows are admitted but not verified on hardware
 
 **The minimum is a property of the image you name.** There is no *`engine.version`* field to set:
 the image a role runs resolves to *`roles[].image`* when the role names one, and to
-*`spec.engine.image`* otherwise ([Role images](/gpustack-operator/main/docs/modules/model-deployment/deployment/index.md#role-images)).
+*`spec.engine.image`* otherwise ([Role images](/gpustack-operator/main/docs/modules/model-deployment/configuration/index.md#role-images)).
 Nothing assembles a tag and no admission check reads a version, so meeting a minimum here means
 naming an image whose engine build carries it.
 
@@ -203,7 +203,7 @@ images install only `llm_datadist` and C++ `libcann_hixl.so`, so `load_runtime()
 
 ---
 
-**See also** — [Model Deployment Configuration](/gpustack-operator/main/docs/modules/model-deployment/deployment/index.md) (the fields these versions go into) ·
+**See also** — [Model Deployment Configuration](/gpustack-operator/main/docs/modules/model-deployment/configuration/index.md) (the fields these versions go into) ·
 [Prefill and Decode](/gpustack-operator/main/docs/modules/model-deployment/prefill-decode/index.md) (pairing *prefill* and *decode* roles) ·
 [Encode, Prefill and Decode](/gpustack-operator/main/docs/modules/model-deployment/encode-prefill-decode/index.md) (*encode*, *prefill* and *decode* disaggregation) ·
 [KV Cache Backend](/gpustack-operator/main/docs/modules/kv-cache/backend/index.md) (the store a client needs) ·

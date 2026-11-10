@@ -108,7 +108,7 @@ An image's identity is its reference digest. See [Resolution and revalidation](#
 *`status.nodes`* counts nodes whose `NodeModelStore` reports the digest `Ready`, `Downloading` or
 `Failed`. Artifacts with the same digest see the same nodes; only counts cross namespaces.
 The mean includes only downloading nodes. Each node represents a whole copy. See the
-[progress thresholds](/gpustack-operator/main/docs/modules/model-delivery/node-store/index.md#resource) and the full-precision [progress view](/gpustack-operator/main/docs/modules/model-delivery/views/index.md#progress-subresource).
+[progress thresholds](/gpustack-operator/main/docs/modules/model-delivery/node-store/index.md#resource) and the full-precision [progress view](/gpustack-operator/main/docs/modules/model-delivery/artifact-api/index.md#progress-subresource).
 
 The `worker.gpustack.ai/model-artifact-protection` finalizer holds a referenced artifact in
 `Terminating`. It waits until no `ModelDeployment` or `Instance` in the namespace references it.
@@ -472,9 +472,9 @@ waits instead when that node cannot run one, naming the node and the floor
 
 ---
 
-**See also** — [Model Deployment](/gpustack-operator/main/docs/modules/model-deployment/deployment/index.md) for the rest of the deployment
+**See also** — [Model Deployment](/gpustack-operator/main/docs/modules/model-deployment/configuration/index.md) for the rest of the deployment
 contract · [Node Model Store](/gpustack-operator/main/docs/modules/model-delivery/node-store/index.md) for `Node` delivery ·
-[Model Artifact API](/gpustack-operator/main/docs/modules/model-delivery/views/index.md) for resource status and `progress` · [KV Cache Injection Reference](/gpustack-operator/main/docs/modules/kv-cache/injection/index.md) for the store connector this
+[Model Artifact API](/gpustack-operator/main/docs/modules/model-delivery/artifact-api/index.md) for resource status and `progress` · [KV Cache Injection Reference](/gpustack-operator/main/docs/modules/kv-cache/injection/index.md) for the store connector this
 prefixes · [Model Deployment Status](/gpustack-operator/main/docs/modules/model-deployment/status/index.md) for the other conditions.
 
 **Next** → [Model Deployment Status](/gpustack-operator/main/docs/modules/model-deployment/status/index.md)

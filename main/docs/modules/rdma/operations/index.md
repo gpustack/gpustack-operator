@@ -52,7 +52,7 @@ The exclusive and shared families account for allocations separately. An exclusi
 token reserves an endpoint within that family; the shared family can still grant the same HCA.
 
 For a managed `ModelDeployment`, set *`spec.roles[].resources.interface`* instead of naming the key
-in a `Pod` template. [Model Deployment](/gpustack-operator/main/docs/modules/model-deployment/deployment/index.md) states which key a
+in a `Pod` template. [Model Deployment](/gpustack-operator/main/docs/modules/model-deployment/configuration/index.md) states which key a
 count selects, and the mixed-fabric refusal. The field allocates a device to each rendered engine
 `Pod` and does not assert that the engine has transferred bytes.
 
@@ -266,7 +266,7 @@ To pin every selected adapter to one physical port, add `port` to the same polic
 
 Read the policy and each node's `Devices` resource:
 
-```shell
+```bash
 kubectl get rdmasel b300-compute-hcas -o yaml
 kubectl get devices <node-name> -o yaml
 ```

@@ -260,7 +260,7 @@ status:
       reason: CompleteSummary
 ```
 
-The [ModelPrefetch API](/gpustack-operator/main/docs/modules/model-delivery/views/index.md) supports resource operations and adds no subresource: the per-node
+The [ModelPrefetch API](/gpustack-operator/main/docs/modules/model-delivery/artifact-api/index.md#resources) supports resource operations and adds no subresource: the per-node
 facts already live on the nodes' reports, and the table prints who warms what and how far.
 
 ---

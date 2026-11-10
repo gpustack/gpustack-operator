@@ -27,7 +27,7 @@
   <link rel="alternate" type="text/markdown" href="/gpustack-operator/main/docs/modules/model-deployment/prefill-decode/index.md">
   
   <link rel="describedby" href="/gpustack-operator/main/llms.txt">
-  <link rel="stylesheet" href="/gpustack-operator/main/css/site.1a0de63fe646aba4ed6541fe0a6383c2ed5ca649b1593a98595ba53430bcf032.css">
+  <link rel="stylesheet" href="/gpustack-operator/main/css/site.b1fdc6af165ce7fbb10ebc91a579913dc99eac181655e5aae84dbe714d354a09.css">
   <link rel="stylesheet" href="/gpustack-operator/main/css/code.d2570c1cc6480f9c62bc31ec538eef2578ce80980588c469638a5f95416bfc7b.css">
 </head>
 <body class="docs-page">
@@ -36,7 +36,6 @@
     
     <a class="brand" href="/gpustack-operator/main/" aria-label="GPUStack Operator home"><img src="/gpustack-operator/main/images/logo_hu_ced145186d6eddf4.47210af4015bb5bd13742c222995900070c6649233431804f39bf2e001be3ddb.png" width="32" height="32" alt=""><span>GPUStack Operator</span></a>
     <nav class="top-links" aria-label="Main navigation">
-      <a class="top-docs-link" href="/gpustack-operator/main/docs/" aria-current="page">Documentation</a>
       <a class="top-devin-link" href="https://deepwiki.com/gpustack/gpustack-operator" target="_blank" rel="noopener noreferrer" aria-label="Ask Devin on DeepWiki (opens in a new tab)">
         <svg aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M8 1.5c.31 3.02 1.67 4.38 4.69 4.69-3.02.31-4.38 1.67-4.69 4.69-.31-3.02-1.67-4.38-4.69-4.69 3.02-.31 4.38-1.67 4.69-4.69Zm5.06 8.19c.16 1.51.84 2.19 2.34 2.34-1.51.16-2.19.84-2.34 2.34-.16-1.51-.84-2.19-2.34-2.34 1.51-.16 2.19-.84 2.34-2.34Z"/></svg>
         <span>Ask Devin</span>
@@ -106,7 +105,6 @@
         </svg>
       </button>
       <nav id="docs-navigation" class="sidebar-inner">
-        <div class="nav-title">Documentation</div>
         <a class="nav-home" href="/gpustack-operator/main/" >Overview</a>
         
           
@@ -698,7 +696,7 @@
       
         
         
-          <a title="KV Cache Election and Failover" href="/gpustack-operator/main/docs/modules/kv-cache/leader/" >Election and Failover</a>
+          <a title="KV Cache Election and Failover" href="/gpustack-operator/main/docs/modules/kv-cache/leader/" >Leader Election</a>
           
           
         
@@ -761,15 +759,15 @@
 
 
   
-    
-      
-      
-        
-        
-      
-    
-  
 
+  
+    
+      
+      
+        
+        
+      
+    
   
 
   
@@ -803,7 +801,7 @@
             <div class="nav-children">
               
                 
-                  <a title="Model Artifact API" href="/gpustack-operator/main/docs/modules/model-delivery/views/" >API</a>
+                  <a title="Model Artifact API" href="/gpustack-operator/main/docs/modules/model-delivery/artifact-api/" >API</a>
                 
               
             </div>
@@ -848,7 +846,7 @@
       
         
         
-          <a title="Node-to-Node Sync" href="/gpustack-operator/main/docs/modules/model-delivery/peer-sync/" >Node-to-Node Sync</a>
+          <a title="Node-to-Node Sync" href="/gpustack-operator/main/docs/modules/model-delivery/node-to-node-sync/" >Node-to-Node Sync</a>
           
           
         
@@ -1030,7 +1028,7 @@
       
         
         
-          <a title="Model Deployment Configuration" href="/gpustack-operator/main/docs/modules/model-deployment/deployment/" >Configuration</a>
+          <a title="Configuration" href="/gpustack-operator/main/docs/modules/model-deployment/configuration/" >Configuration</a>
           
           
         
@@ -1040,7 +1038,7 @@
       
         
         
-          <a title="Engine Compatibility" href="/gpustack-operator/main/docs/modules/model-deployment/engine-versions/" >Compatibility</a>
+          <a title="Engine Compatibility" href="/gpustack-operator/main/docs/modules/model-deployment/engine-versions/" >Engine Versions</a>
           
           
         
@@ -1208,7 +1206,12 @@
 
 
 
+  
+  
 
+
+
+  
 
 <details class="nav-section" >
   <summary title="GPU Instances">GPU Instances</summary>
@@ -1218,6 +1221,16 @@
       
       <a title="GPU Instances" href="/gpustack-operator/main/docs/modules/instances/" >Overview</a>
     
+    
+      
+      
+        
+        
+          <a title="Instance Metrics Reference" href="/gpustack-operator/main/docs/modules/instances/metrics/" >Metrics</a>
+          
+          
+        
+      
     
   </div>
 </details>
@@ -1322,7 +1335,7 @@
       
         
         
-          <a title="Migrating to Bundled Subcharts" href="/gpustack-operator/main/docs/operate/migration/to-subcharts/" >Bundled Subcharts</a>
+          <a title="Migrating to Bundled Subcharts" href="/gpustack-operator/main/docs/operate/migration/bundled-subcharts/" >Bundled Subcharts</a>
           
           
         
@@ -1332,7 +1345,7 @@
       
         
         
-          <a title="Upgrading to an Enforced Binding Dtype" href="/gpustack-operator/main/docs/operate/migration/kv-cache-dtype/" >Enforced Binding Dtype</a>
+          <a title="Upgrading to an Enforced Binding Dtype" href="/gpustack-operator/main/docs/operate/migration/enforced-binding-dtype/" >Enforced Binding Dtype</a>
           
           
         
@@ -1373,12 +1386,7 @@
   
   
 
-  
-  
 
-
-
-  
 
   
 
@@ -1421,16 +1429,6 @@
         
       
     
-      
-      
-        
-        
-          <a title="Instance Metrics Reference" href="/gpustack-operator/main/docs/reference/instance-metrics/" >Instance Metrics</a>
-          
-          
-        
-      
-    
   </div>
 </details>
 
@@ -1453,7 +1451,7 @@
         
   <h1 id="prefill-and-decode">Prefill and Decode</h1>
 <p>A <em>prefill/decode (PD)</em> deployment with <em>Prefill</em> and <em>Decode</em> roles is admitted as one set. Once both roles run, the
-operator connects them through a router and a transfer path. <a href="/gpustack-operator/main/docs/modules/model-deployment/deployment/#prefill-and-decode">Prefill and
+operator connects them through a router and a transfer path. <a href="/gpustack-operator/main/docs/modules/model-deployment/configuration/#prefill-and-decode">Prefill and
 decode</a>
  describes the role fields and admission rules.</p>
 <p>The recorded runs apply to vLLM <code>v0.30.0</code> and SGLang <code>0.5.22</code>. Other versions must be re-verified
@@ -1558,7 +1556,7 @@ invisibly widened pair therefore fails loudly only when the document&rsquo;s <em
 <em>prefill</em> one. A pair widened symmetrically starts, answers, and pulls a wrong layout.</p>
 <p>Admission holds the visible side of the contract: a degree the command line does not state legibly
 is refused, and so is a declared per-member width the role&rsquo;s card request cannot hold; see
-<a href="/gpustack-operator/main/docs/modules/model-deployment/deployment/#admission-refusals">Admission refusals</a>
+<a href="/gpustack-operator/main/docs/modules/model-deployment/configuration/#admission-refusals">Admission refusals</a>
 .</p>
 <p>SGLang renders its halves through the engine&rsquo;s own disaggregation arguments rather than this
 connector path; the two engines&rsquo; paths differ by <a href="#direct-transfer-transport">their handshake</a>
@@ -1597,7 +1595,8 @@ and share a pool with every other deployment bound to it&rdquo;.</p>
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">instanceType</span><span class="p">:</span><span class="w"> </span><span class="l">gpustack--nvidia-h20-linux-amd64</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">resources</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">accelerator</span><span class="p">:</span><span class="w"> </span><span class="m">2</span></span></span></code></pre></div>
-</div><p><strong>Each replica of a role becomes its own Kueue <code>Pod</code> group: one group per replica, declaring a total
+</div>
+<p><strong>Each replica of a role becomes its own Kueue <code>Pod</code> group: one group per replica, declaring a total
 equal to the role&rsquo;s <em><code>size</code></em>.</strong> Two roles naming the same <em><code>instanceType</code></em> are still separate groups,
 each replica composing its own <code>Workload</code>. The example above therefore has <strong>four</strong> single-<code>Pod</code>
 groups, admitted as a set.</p>
@@ -1631,7 +1630,8 @@ by default.</p>
 </span></span></span><span class="line"><span class="cl"><span class="gi">+    poolRef:
 </span></span></span><span class="line"><span class="cl"><span class="gi">+      name: team-a-dram                  # a KVCachePoolBinding in THIS namespace
 </span></span></span></code></pre></div>
-</div><h2 id="router-configuration">Router configuration</h2>
+</div>
+<h2 id="router-configuration">Router configuration</h2>
 <p><strong><em><code>spec.router</code></em> is what pairs the roles, and <em><code>spec.kvCache</code></em> is not a substitute for it.</strong> A
 deployment declaring <em>Prefill</em> and <em>Decode</em> with no router is admitted and renders two roles that
 nothing routes between: each gets the shared-store connector with its role discriminator, and no
@@ -1788,7 +1788,8 @@ This diff shows the fields to add to the <a href="#configuration">complete deplo
 </span></span><span class="line"><span class="cl"><span class="gi">+      extraArgs:
 </span></span></span><span class="line"><span class="cl"><span class="gi">+        - --enable-scale-out
 </span></span></span></code></pre></div>
-</div><p>Older vLLM images below <a href="#counting-engine-tokens">the documented floor</a>
+</div>
+<p>Older vLLM images below <a href="#counting-engine-tokens">the documented floor</a>
  predate the
 flag, so adding it to them can make the engine reject its command line.
 The operator does not choose between these cases from the image tag.</p>
@@ -1841,7 +1842,8 @@ requirement on the vLLM and vLLM-Ascend rows.</p>
 </span></span><span class="line"><span class="cl"><span class="gi">+  kvTransfer:
 </span></span></span><span class="line"><span class="cl"><span class="gi">+    protocol: RDMA                     # unset renders &#34;tcp&#34;
 </span></span></span></code></pre></div>
-</div><p>The value is a property of <strong>one link</strong>, so it is deployment-wide: a per-role field could only
+</div>
+<p>The value is a property of <strong>one link</strong>, so it is deployment-wide: a per-role field could only
 express two ends naming different protocols for one connection, which fails at transfer time rather
 than at admission.</p>
 <p>The API accepts <code>Auto</code>, <code>TCP</code>, <code>RDMA</code>, <code>EFA</code>, <code>CANN</code> and <code>ROCM</code>,
@@ -1854,7 +1856,7 @@ Which value works on which engine is <a href="/gpustack-operator/main/docs/modul
 .</p>
 <p><strong><code>tcp</code> is enforced, not only requested</strong>: the transfer engine picks its transport from the host,
 and with no RDMA device a build with multi-node NVLink installs NVLink between hosts with no NVLink
-path. So native vLLM also gets the <a href="/gpustack-operator/main/docs/modules/model-deployment/deployment/#operator-owned-keys">defaulted</a>
+path. So native vLLM also gets the <a href="/gpustack-operator/main/docs/modules/model-deployment/configuration/#operator-owned-keys">defaulted</a>
  <code>MC_FORCE_TCP=1</code>. Both pins
 are process-wide, so neither renders beside a store on another transport, and every client at
 its engine&rsquo;s <a href="/gpustack-operator/main/docs/modules/model-deployment/engine-versions/">supported minimum</a>
@@ -1870,13 +1872,13 @@ ignored: the tested vLLM-Ascend v0.23.0 and v0.26.0rc1 builds use <code>ascend</
 <p>It is separate from the pool&rsquo;s transport. <code>KVCacheBackend.spec.transport</code> feeds the engine&rsquo;s store
 client; this path is engine to engine and never traverses the store, so the two declare separately: a
 deployment with no <em><code>kvCache</code></em> block still has this path to configure.</p>
-<p>Editing it <a href="/gpustack-operator/main/docs/modules/model-deployment/deployment/#rollout-behavior">turns over every role</a>
+<p>Editing it <a href="/gpustack-operator/main/docs/modules/model-deployment/configuration/#rollout-behavior">turns over every role</a>
 : the value renders
 into both ends&rsquo; arguments, so every role&rsquo;s replicas turn over one at a time. A prefiller and a decoder
 can disagree on the protocol until both converge, the same window an edit to the image a role runs
 (<em><code>engine.image</code></em> or <em><code>roles[].image</code></em>) opens.</p>
 <p>The same shared-document rule reaches the parallel degrees on the Ascend path. The pair turns over
-together; see <a href="/gpustack-operator/main/docs/modules/model-deployment/deployment/#rollout-behavior">Rollout behavior</a>
+together; see <a href="/gpustack-operator/main/docs/modules/model-deployment/configuration/#rollout-behavior">Rollout behavior</a>
  for the mechanism. Until both roles
 converge, the pair can fail to complete a transfer.</p>
 <h2 id="different-hardware-per-role">Different hardware per role</h2>
@@ -1884,7 +1886,7 @@ converge, the pair can fail to complete a transfer.</p>
 publishes as its <em><code>status.entrance</code></em>. Every replica is its own group regardless, so two roles were
 never going to share a <code>Workload</code>, on two *<code>instanceType</code>*s or on one. The set is admitted together by an
 admission check rather than by Kueue&rsquo;s intra-group rule.</p>
-<p>See <a href="/gpustack-operator/main/docs/modules/model-deployment/deployment/#one-group-per-replica">One group per replica</a>
+<p>See <a href="/gpustack-operator/main/docs/modules/model-deployment/configuration/#one-group-per-replica">One group per replica</a>
  for what that costs an edit, and
 <a href="/gpustack-operator/main/docs/reference/settings/#authoring-the-instancetype">Authoring the InstanceType yourself</a>
  for which
@@ -1939,7 +1941,7 @@ What <em><code>status.endpoint</code></em> publishes in each configuration is un
 <nav class="reading-footer" aria-label="Further reading">
     <section>
       <h2>See also</h2>
-      <ul class="related-pages"><li><a href="/gpustack-operator/main/docs/modules/model-deployment/deployment/">Model Deployment</a>
+      <ul class="related-pages"><li><a href="/gpustack-operator/main/docs/modules/model-deployment/configuration/">Model Deployment</a>
  for the role fields, the owned-key
 table and what admission refuses</li><li><a href="/gpustack-operator/main/docs/modules/model-deployment/routing/">Model Deployment Routing</a>
  for which replica each
@@ -1959,18 +1961,6 @@ comparison of a disaggregated pair with an aggregated group on equal GPUs.</li><
     <aside class="toc-panel" aria-label="Page navigation">
       <div class="toc-inner">
         
-          
-          
-          
-          <nav class="page-actions" aria-label="Page source">
-            <a href="https://github.com/gpustack/gpustack-operator/blob/304681b245c3f392539df1404126be8fb9d22adb/docs/modules/model-deployment/prefill-decode.md">View page source</a>
-            
-            <a href="https://github.com/gpustack/gpustack-operator/edit/main/docs/modules/model-deployment/prefill-decode.md">Edit this page</a>
-            
-          </nav>
-        
-        
-          <div class="toc-title">On this page</div>
           <nav id="TableOfContents">
   <ul>
     <li><a href="#contents">Contents</a></li>

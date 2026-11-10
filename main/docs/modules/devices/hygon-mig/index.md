@@ -38,8 +38,8 @@ Error: Set system level mig mode failed. The device is exist and may be in use.
 
 which names no holder. Find them through the control node's open file descriptors:
 
-```console
-$ for p in /proc/[0-9]*; do pid=${p#/proc/}; n=$(ls -l "$p"/fd 2>/dev/null | grep -c kfd); \
+```bash
+for p in /proc/[0-9]*; do pid=${p#/proc/}; n=$(ls -l "$p"/fd 2>/dev/null | grep -c kfd); \
     [ "$n" -gt 0 ] 2>/dev/null && echo "pid=$pid fds=$n $(tr -d '\0' < "$p"/cmdline)"; done
 ```
 
@@ -192,8 +192,13 @@ Two things below correct that manual: the long option is `--multi-instance-gpu`,
    `/dev/kfd` and will otherwise block the switch. Confirm with the descriptor scan above.
 2. **Turn the mode on**, node-wide:
 
-   ```console
-   $ sudo hy-smi -mig 1
+   ```bash
+   sudo hy-smi -mig 1
+   ```
+
+   Captured output:
+
+   ```text
    Enabled mig mode successful.
    ```
 
@@ -203,8 +208,13 @@ Two things below correct that manual: the long option is `--multi-instance-gpu`,
    pre-change capability.
 5. **Confirm** the node advertises the family and its profiles, and no longer advertises whole cards:
 
-   ```console
-   $ kubectl get node <node> -o jsonpath='{.status.allocatable}' | tr ',' '\n' | grep hygon
+   ```bash
+   kubectl get node <node> -o jsonpath='{.status.allocatable}' | tr ',' '\n' | grep hygon
+   ```
+
+   Captured output:
+
+   ```text
    "hygon.com/dcu":"0"
    "hygon.com/dcu.partitioned":"32"
    "hygon.com/dcu.sliced":"0"
@@ -223,16 +233,16 @@ The teardown order is forced by the driver, and each step refuses if the next ha
 2. **Let the operator reclaim its instances**, or destroy them by hand — compute instances first,
    then their GPU instances:
 
-   ```console
-   $ sudo hy-smi mig -dci -i <card>
-   $ sudo hy-smi mig -dgi -i <card>
+   ```bash
+   sudo hy-smi mig -dci -i <card>
+   sudo hy-smi mig -dgi -i <card>
    ```
 
 3. **Park the Device Manager `DaemonSet`**, for the same reason as enabling.
 4. **Turn the mode off:**
 
-   ```console
-   $ sudo hy-smi -mig 0
+   ```bash
+   sudo hy-smi -mig 0
    ```
 
    It is refused while any GPU instance survives anywhere on the node.

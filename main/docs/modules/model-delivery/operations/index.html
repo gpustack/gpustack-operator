@@ -27,7 +27,7 @@
   <link rel="alternate" type="text/markdown" href="/gpustack-operator/main/docs/modules/model-delivery/operations/index.md">
   
   <link rel="describedby" href="/gpustack-operator/main/llms.txt">
-  <link rel="stylesheet" href="/gpustack-operator/main/css/site.1a0de63fe646aba4ed6541fe0a6383c2ed5ca649b1593a98595ba53430bcf032.css">
+  <link rel="stylesheet" href="/gpustack-operator/main/css/site.b1fdc6af165ce7fbb10ebc91a579913dc99eac181655e5aae84dbe714d354a09.css">
   <link rel="stylesheet" href="/gpustack-operator/main/css/code.d2570c1cc6480f9c62bc31ec538eef2578ce80980588c469638a5f95416bfc7b.css">
 </head>
 <body class="docs-page">
@@ -36,7 +36,6 @@
     
     <a class="brand" href="/gpustack-operator/main/" aria-label="GPUStack Operator home"><img src="/gpustack-operator/main/images/logo_hu_ced145186d6eddf4.47210af4015bb5bd13742c222995900070c6649233431804f39bf2e001be3ddb.png" width="32" height="32" alt=""><span>GPUStack Operator</span></a>
     <nav class="top-links" aria-label="Main navigation">
-      <a class="top-docs-link" href="/gpustack-operator/main/docs/" aria-current="page">Documentation</a>
       <a class="top-devin-link" href="https://deepwiki.com/gpustack/gpustack-operator" target="_blank" rel="noopener noreferrer" aria-label="Ask Devin on DeepWiki (opens in a new tab)">
         <svg aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M8 1.5c.31 3.02 1.67 4.38 4.69 4.69-3.02.31-4.38 1.67-4.69 4.69-.31-3.02-1.67-4.38-4.69-4.69 3.02-.31 4.38-1.67 4.69-4.69Zm5.06 8.19c.16 1.51.84 2.19 2.34 2.34-1.51.16-2.19.84-2.34 2.34-.16-1.51-.84-2.19-2.34-2.34 1.51-.16 2.19-.84 2.34-2.34Z"/></svg>
         <span>Ask Devin</span>
@@ -106,7 +105,6 @@
         </svg>
       </button>
       <nav id="docs-navigation" class="sidebar-inner">
-        <div class="nav-title">Documentation</div>
         <a class="nav-home" href="/gpustack-operator/main/" >Overview</a>
         
           
@@ -698,7 +696,7 @@
       
         
         
-          <a title="KV Cache Election and Failover" href="/gpustack-operator/main/docs/modules/kv-cache/leader/" >Election and Failover</a>
+          <a title="KV Cache Election and Failover" href="/gpustack-operator/main/docs/modules/kv-cache/leader/" >Leader Election</a>
           
           
         
@@ -761,15 +759,15 @@
 
 
   
-    
-      
-      
-        
-        
-      
-    
-  
 
+  
+    
+      
+      
+        
+        
+      
+    
   
 
   
@@ -803,7 +801,7 @@
             <div class="nav-children">
               
                 
-                  <a title="Model Artifact API" href="/gpustack-operator/main/docs/modules/model-delivery/views/" >API</a>
+                  <a title="Model Artifact API" href="/gpustack-operator/main/docs/modules/model-delivery/artifact-api/" >API</a>
                 
               
             </div>
@@ -848,7 +846,7 @@
       
         
         
-          <a title="Node-to-Node Sync" href="/gpustack-operator/main/docs/modules/model-delivery/peer-sync/" >Node-to-Node Sync</a>
+          <a title="Node-to-Node Sync" href="/gpustack-operator/main/docs/modules/model-delivery/node-to-node-sync/" >Node-to-Node Sync</a>
           
           
         
@@ -1030,7 +1028,7 @@
       
         
         
-          <a title="Model Deployment Configuration" href="/gpustack-operator/main/docs/modules/model-deployment/deployment/" >Configuration</a>
+          <a title="Configuration" href="/gpustack-operator/main/docs/modules/model-deployment/configuration/" >Configuration</a>
           
           
         
@@ -1040,7 +1038,7 @@
       
         
         
-          <a title="Engine Compatibility" href="/gpustack-operator/main/docs/modules/model-deployment/engine-versions/" >Compatibility</a>
+          <a title="Engine Compatibility" href="/gpustack-operator/main/docs/modules/model-deployment/engine-versions/" >Engine Versions</a>
           
           
         
@@ -1208,7 +1206,12 @@
 
 
 
+  
+  
 
+
+
+  
 
 <details class="nav-section" >
   <summary title="GPU Instances">GPU Instances</summary>
@@ -1218,6 +1221,16 @@
       
       <a title="GPU Instances" href="/gpustack-operator/main/docs/modules/instances/" >Overview</a>
     
+    
+      
+      
+        
+        
+          <a title="Instance Metrics Reference" href="/gpustack-operator/main/docs/modules/instances/metrics/" >Metrics</a>
+          
+          
+        
+      
     
   </div>
 </details>
@@ -1322,7 +1335,7 @@
       
         
         
-          <a title="Migrating to Bundled Subcharts" href="/gpustack-operator/main/docs/operate/migration/to-subcharts/" >Bundled Subcharts</a>
+          <a title="Migrating to Bundled Subcharts" href="/gpustack-operator/main/docs/operate/migration/bundled-subcharts/" >Bundled Subcharts</a>
           
           
         
@@ -1332,7 +1345,7 @@
       
         
         
-          <a title="Upgrading to an Enforced Binding Dtype" href="/gpustack-operator/main/docs/operate/migration/kv-cache-dtype/" >Enforced Binding Dtype</a>
+          <a title="Upgrading to an Enforced Binding Dtype" href="/gpustack-operator/main/docs/operate/migration/enforced-binding-dtype/" >Enforced Binding Dtype</a>
           
           
         
@@ -1373,12 +1386,7 @@
   
   
 
-  
-  
 
-
-
-  
 
   
 
@@ -1416,16 +1424,6 @@
         
         
           <a title="Instance Type Unit Resources Reference" href="/gpustack-operator/main/docs/reference/instance-type-unit-resources/" >Resource Presets</a>
-          
-          
-        
-      
-    
-      
-      
-        
-        
-          <a title="Instance Metrics Reference" href="/gpustack-operator/main/docs/reference/instance-metrics/" >Instance Metrics</a>
           
           
         
@@ -1512,7 +1510,8 @@ hands each mount its artifact&rsquo;s <code>Secret</code>.</p>
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">nodeSelector</span><span class="p">:</span><span class="w"> </span>{}<span class="w">  </span><span class="c"># Every node by default.</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">tolerations</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">operator</span><span class="p">:</span><span class="w"> </span><span class="l">Exists </span><span class="w"> </span><span class="c"># Every taint by default.</span></span></span></code></pre></div>
-</div><p>The registrar sidecar registers the plugin with kubelet. The plugin mounts the kubelet <code>pods</code>
+</div>
+<p>The registrar sidecar registers the plugin with kubelet. The plugin mounts the kubelet <code>pods</code>
 directory with <code>Bidirectional</code> propagation and mounts its own plugin directory separately.
 A node without the plugin cannot mount node-delivered weights.</p>
 <table>
@@ -1600,7 +1599,8 @@ download starts.</p>
 <div class="code-block">
   <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">kubectl -n gpustack-system patch setting model-store-download-bandwidth --type merge -p <span class="s1">&#39;{&#34;spec&#34;:{&#34;value&#34;:&#34;200Mi&#34;}}&#39;</span></span></span></code></pre></div>
-</div><p>The patch sets the value to <code>200Mi</code>:</p>
+</div>
+<p>The patch sets the value to <code>200Mi</code>:</p>
 <div class="code-block">
   <div class="code-toolbar"><span>diff</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-diff" data-lang="diff"><span class="line"><span class="cl"> apiVersion: gpustack.ai/v1
@@ -1612,7 +1612,8 @@ download starts.</p>
 </span></span><span class="line"><span class="cl"><span class="gd">-  value: &lt;current-value&gt;
 </span></span></span><span class="line"><span class="cl"><span class="gd"></span><span class="gi">+  value: &#34;200Mi&#34;
 </span></span></span></code></pre></div>
-</div><h3 id="pool-layer">Pool layer</h3>
+</div>
+<h3 id="pool-layer">Pool layer</h3>
 <p>A <a href="/gpustack-operator/main/docs/modules/model-delivery/prefetch/"><code>ModelStore</code></a>
  is a fourth layer above the cluster <code>Setting</code>s: a
 cluster-scoped object whose <em><code>nodeSelector</code></em> picks a pool and whose watermarks and download limits
@@ -1630,7 +1631,8 @@ order; it is a tie-break, not a policy.</p>
 </span></span><span class="line"><span class="cl">kubectl get nms gpu-node-01 -o <span class="nv">jsonpath</span><span class="o">=</span><span class="s1">&#39;{.metadata.generation} {.status.observedGeneration}{&#34;\n&#34;}&#39;</span>
 </span></span><span class="line"><span class="cl">kubectl describe pod &lt;consumer&gt;                    <span class="c1"># FailedMount events carry refusals and download progress</span>
 </span></span><span class="line"><span class="cl">kubectl get nodemodelstores.v1.worker.gpustack.ai  <span class="c1"># Ready, Used, Models, Downloading</span></span></span></code></pre></div>
-</div><ul>
+</div>
+<ul>
 <li><strong><em><code>spec</code></em> is the effective configuration</strong>, and <em><code>observedGeneration</code></em> equal to the object&rsquo;s
 <code>generation</code> means the plugin applies it. The <code>Ready</code> message says when the high watermark was
 capped, and from what.</li>
@@ -1639,7 +1641,7 @@ capped, and from what.</li>
 .
 It names no tenant: find a deployment&rsquo;s digest in its <em><code>status.model.manifestDigest</code></em>, and an
 artifact&rsquo;s nodes in its <em><code>status.nodes</code></em> or its
-<a href="/gpustack-operator/main/docs/modules/model-delivery/views/#progress-subresource">progress</a>
+<a href="/gpustack-operator/main/docs/modules/model-delivery/artifact-api/#progress-subresource">progress</a>
 .</li>
 <li><strong>A <code>Failed</code> digest</strong> carries its reason and <em><code>retryTime</code></em>. Mounts of it do not download again
 before then; fix the cause (the <code>Secret</code>, the proxy, the CA) and the next attempt after <em><code>retryTime</code></em>
@@ -1711,7 +1713,8 @@ Compute always comes first, so a warm cache never holds a <code>Pod</code> back.
   <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">kubectl get pod &lt;replica&gt; -o <span class="nv">jsonpath</span><span class="o">=</span><span class="s1">&#39;{.spec.affinity.nodeAffinity.preferredDuringSchedulingIgnoredDuringExecution}{&#34;\n&#34;}{.spec.nodeName}{&#34;\n&#34;}&#39;</span>
 </span></span><span class="line"><span class="cl">kubectl get nms -o custom-columns<span class="o">=</span><span class="s1">&#39;NODE:.metadata.name,DIGESTS:.status.models[*].digest&#39;</span></span></span></code></pre></div>
-</div><p>A replica on a node that downloads again is expected when the first command shows one of these
+</div>
+<p>A replica on a node that downloads again is expected when the first command shows one of these
 (each rule is in the mechanism section linked above):</p>
 <ul>
 <li><strong>a term naming nodes other than <em><code>spec.nodeName</code></em></strong>: those hot nodes had no room for it;</li>
@@ -1818,18 +1821,6 @@ patterns</li><li><a href="/gpustack-operator/main/docs/reference/settings/#setti
     <aside class="toc-panel" aria-label="Page navigation">
       <div class="toc-inner">
         
-          
-          
-          
-          <nav class="page-actions" aria-label="Page source">
-            <a href="https://github.com/gpustack/gpustack-operator/blob/304681b245c3f392539df1404126be8fb9d22adb/docs/modules/model-delivery/operations.md">View page source</a>
-            
-            <a href="https://github.com/gpustack/gpustack-operator/edit/main/docs/modules/model-delivery/operations.md">Edit this page</a>
-            
-          </nav>
-        
-        
-          <div class="toc-title">On this page</div>
           <nav id="TableOfContents">
   <ul>
     <li><a href="#contents">Contents</a></li>

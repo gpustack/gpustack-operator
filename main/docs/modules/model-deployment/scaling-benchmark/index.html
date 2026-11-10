@@ -27,7 +27,7 @@
   <link rel="alternate" type="text/markdown" href="/gpustack-operator/main/docs/modules/model-deployment/scaling-benchmark/index.md">
   
   <link rel="describedby" href="/gpustack-operator/main/llms.txt">
-  <link rel="stylesheet" href="/gpustack-operator/main/css/site.1a0de63fe646aba4ed6541fe0a6383c2ed5ca649b1593a98595ba53430bcf032.css">
+  <link rel="stylesheet" href="/gpustack-operator/main/css/site.b1fdc6af165ce7fbb10ebc91a579913dc99eac181655e5aae84dbe714d354a09.css">
   <link rel="stylesheet" href="/gpustack-operator/main/css/code.d2570c1cc6480f9c62bc31ec538eef2578ce80980588c469638a5f95416bfc7b.css">
 </head>
 <body class="docs-page">
@@ -36,7 +36,6 @@
     
     <a class="brand" href="/gpustack-operator/main/" aria-label="GPUStack Operator home"><img src="/gpustack-operator/main/images/logo_hu_ced145186d6eddf4.47210af4015bb5bd13742c222995900070c6649233431804f39bf2e001be3ddb.png" width="32" height="32" alt=""><span>GPUStack Operator</span></a>
     <nav class="top-links" aria-label="Main navigation">
-      <a class="top-docs-link" href="/gpustack-operator/main/docs/" aria-current="page">Documentation</a>
       <a class="top-devin-link" href="https://deepwiki.com/gpustack/gpustack-operator" target="_blank" rel="noopener noreferrer" aria-label="Ask Devin on DeepWiki (opens in a new tab)">
         <svg aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M8 1.5c.31 3.02 1.67 4.38 4.69 4.69-3.02.31-4.38 1.67-4.69 4.69-.31-3.02-1.67-4.38-4.69-4.69 3.02-.31 4.38-1.67 4.69-4.69Zm5.06 8.19c.16 1.51.84 2.19 2.34 2.34-1.51.16-2.19.84-2.34 2.34-.16-1.51-.84-2.19-2.34-2.34 1.51-.16 2.19-.84 2.34-2.34Z"/></svg>
         <span>Ask Devin</span>
@@ -106,7 +105,6 @@
         </svg>
       </button>
       <nav id="docs-navigation" class="sidebar-inner">
-        <div class="nav-title">Documentation</div>
         <a class="nav-home" href="/gpustack-operator/main/" >Overview</a>
         
           
@@ -698,7 +696,7 @@
       
         
         
-          <a title="KV Cache Election and Failover" href="/gpustack-operator/main/docs/modules/kv-cache/leader/" >Election and Failover</a>
+          <a title="KV Cache Election and Failover" href="/gpustack-operator/main/docs/modules/kv-cache/leader/" >Leader Election</a>
           
           
         
@@ -761,15 +759,15 @@
 
 
   
-    
-      
-      
-        
-        
-      
-    
-  
 
+  
+    
+      
+      
+        
+        
+      
+    
   
 
   
@@ -803,7 +801,7 @@
             <div class="nav-children">
               
                 
-                  <a title="Model Artifact API" href="/gpustack-operator/main/docs/modules/model-delivery/views/" >API</a>
+                  <a title="Model Artifact API" href="/gpustack-operator/main/docs/modules/model-delivery/artifact-api/" >API</a>
                 
               
             </div>
@@ -848,7 +846,7 @@
       
         
         
-          <a title="Node-to-Node Sync" href="/gpustack-operator/main/docs/modules/model-delivery/peer-sync/" >Node-to-Node Sync</a>
+          <a title="Node-to-Node Sync" href="/gpustack-operator/main/docs/modules/model-delivery/node-to-node-sync/" >Node-to-Node Sync</a>
           
           
         
@@ -1032,7 +1030,7 @@
       
         
         
-          <a title="Model Deployment Configuration" href="/gpustack-operator/main/docs/modules/model-deployment/deployment/" >Configuration</a>
+          <a title="Configuration" href="/gpustack-operator/main/docs/modules/model-deployment/configuration/" >Configuration</a>
           
           
         
@@ -1042,7 +1040,7 @@
       
         
         
-          <a title="Engine Compatibility" href="/gpustack-operator/main/docs/modules/model-deployment/engine-versions/" >Compatibility</a>
+          <a title="Engine Compatibility" href="/gpustack-operator/main/docs/modules/model-deployment/engine-versions/" >Engine Versions</a>
           
           
         
@@ -1210,7 +1208,12 @@
 
 
 
+  
+  
 
+
+
+  
 
 <details class="nav-section" >
   <summary title="GPU Instances">GPU Instances</summary>
@@ -1220,6 +1223,16 @@
       
       <a title="GPU Instances" href="/gpustack-operator/main/docs/modules/instances/" >Overview</a>
     
+    
+      
+      
+        
+        
+          <a title="Instance Metrics Reference" href="/gpustack-operator/main/docs/modules/instances/metrics/" >Metrics</a>
+          
+          
+        
+      
     
   </div>
 </details>
@@ -1324,7 +1337,7 @@
       
         
         
-          <a title="Migrating to Bundled Subcharts" href="/gpustack-operator/main/docs/operate/migration/to-subcharts/" >Bundled Subcharts</a>
+          <a title="Migrating to Bundled Subcharts" href="/gpustack-operator/main/docs/operate/migration/bundled-subcharts/" >Bundled Subcharts</a>
           
           
         
@@ -1334,7 +1347,7 @@
       
         
         
-          <a title="Upgrading to an Enforced Binding Dtype" href="/gpustack-operator/main/docs/operate/migration/kv-cache-dtype/" >Enforced Binding Dtype</a>
+          <a title="Upgrading to an Enforced Binding Dtype" href="/gpustack-operator/main/docs/operate/migration/enforced-binding-dtype/" >Enforced Binding Dtype</a>
           
           
         
@@ -1375,12 +1388,7 @@
   
   
 
-  
-  
 
-
-
-  
 
   
 
@@ -1418,16 +1426,6 @@
         
         
           <a title="Instance Type Unit Resources Reference" href="/gpustack-operator/main/docs/reference/instance-type-unit-resources/" >Resource Presets</a>
-          
-          
-        
-      
-    
-      
-      
-        
-        
-          <a title="Instance Metrics Reference" href="/gpustack-operator/main/docs/reference/instance-metrics/" >Instance Metrics</a>
           
           
         
@@ -1663,7 +1661,8 @@ The observed <em>EPD</em> maxima were one <em>encode</em>, two <em>prefill</em> 
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="c">#   qTrend: &#34;0.3&#34;</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="c">#   prefillTokenCapacityPerReplica: &#34;2000&#34;</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="c">#   decodeTokenCapacityPerReplica: &#34;2000&#34;</span></span></span></code></pre></div>
-</div><p>The target <code>ModelDeployment</code> manifest is in
+</div>
+<p>The target <code>ModelDeployment</code> manifest is in
 <a href="/gpustack-operator/main/docs/walkthroughs/model-deployment/scaling/#step-1-prepare-the-target">Scaling Walkthrough</a>
 .</p>
 <h3 id="parallel-schedule">Parallel schedule</h3>
@@ -1754,8 +1753,8 @@ Failed requests remain in the request and error columns.</p>
   <p class="diagram-status" role="status">Rendering diagram…</p>
   <details class="diagram-source"><summary>Mermaid source</summary>
     <div class="code-block">
-      <div class="code-toolbar"><span>mermaid</span><button class="copy-code" type="button" aria-label="Copy diagram source">Copy</button></div>
-      <pre><code>%%{init: {&#34;themeVariables&#34;: {&#34;xyChart&#34;: {&#34;plotColorPalette&#34;: &#34;#2563eb, #f59e0b, #16a34a&#34;}}}}%%
+  <div class="code-toolbar"><span>mermaid</span><button class="copy-code" type="button" aria-label="Copy diagram source">Copy</button></div>
+  <pre><code>%%{init: {&#34;themeVariables&#34;: {&#34;xyChart&#34;: {&#34;plotColorPalette&#34;: &#34;#2563eb, #f59e0b, #16a34a&#34;}}}}%%
 xychart-beta
     title &#34;Feedback sensitivity (rawRecommendedReplicas)&#34;
     x-axis &#34;Blue: Proportional | Amber: TokenThroughput | Green: Predictive&#34; [&#34;B1&#34;, &#34;B2&#34;, &#34;R1&#34;, &#34;R2&#34;, &#34;R3&#34;, &#34;S1&#34;, &#34;S2&#34;, &#34;S3&#34;, &#34;C1&#34;, &#34;C2&#34;, &#34;C3&#34;]
@@ -1763,15 +1762,16 @@ xychart-beta
     line &#34;Proportional&#34; [1, 1, 1, 2, 2, 2, 2, 2, 1, 1, 1]
     line &#34;TokenThroughput&#34; [1, 2, 2, 12, 25, 25, 23, 23, 19, 1, 1]
     line &#34;Predictive&#34; [1, 7, 1, 47, 75, 22, 22, 24, 3, 1, 1]</code></pre>
-    </div>
+</div>
+
   </details>
 </div><div class="diagram-block">
   <div class="mermaid-diagram" role="img" aria-label="Diagram" aria-busy="true"></div>
   <p class="diagram-status" role="status">Rendering diagram…</p>
   <details class="diagram-source"><summary>Mermaid source</summary>
     <div class="code-block">
-      <div class="code-toolbar"><span>mermaid</span><button class="copy-code" type="button" aria-label="Copy diagram source">Copy</button></div>
-      <pre><code>%%{init: {&#34;themeVariables&#34;: {&#34;xyChart&#34;: {&#34;plotColorPalette&#34;: &#34;#2563eb, #f59e0b, #16a34a&#34;}}}}%%
+  <div class="code-toolbar"><span>mermaid</span><button class="copy-code" type="button" aria-label="Copy diagram source">Copy</button></div>
+  <pre><code>%%{init: {&#34;themeVariables&#34;: {&#34;xyChart&#34;: {&#34;plotColorPalette&#34;: &#34;#2563eb, #f59e0b, #16a34a&#34;}}}}%%
 xychart-beta
     title &#34;Ready replicas by checkpoint&#34;
     x-axis &#34;Blue: Proportional | Amber: TokenThroughput | Green: Predictive&#34; [&#34;B1&#34;, &#34;B2&#34;, &#34;R1&#34;, &#34;R2&#34;, &#34;R3&#34;, &#34;S1&#34;, &#34;S2&#34;, &#34;S3&#34;, &#34;C1&#34;, &#34;C2&#34;, &#34;C3&#34;]
@@ -1779,15 +1779,16 @@ xychart-beta
     line &#34;Proportional&#34; [1, 1, 1, 1, 2, 2, 2, 2, 2, 2, 2]
     line &#34;TokenThroughput&#34; [1, 1, 1, 2, 2, 2, 2, 2, 2, 2, 2]
     line &#34;Predictive&#34; [1, 1, 2, 2, 2, 2, 2, 2, 2, 2, 2]</code></pre>
-    </div>
+</div>
+
   </details>
 </div><div class="diagram-block">
   <div class="mermaid-diagram" role="img" aria-label="Diagram" aria-busy="true"></div>
   <p class="diagram-status" role="status">Rendering diagram…</p>
   <details class="diagram-source"><summary>Mermaid source</summary>
     <div class="code-block">
-      <div class="code-toolbar"><span>mermaid</span><button class="copy-code" type="button" aria-label="Copy diagram source">Copy</button></div>
-      <pre><code>%%{init: {&#34;themeVariables&#34;: {&#34;xyChart&#34;: {&#34;plotColorPalette&#34;: &#34;#2563eb, #f59e0b, #16a34a&#34;}}}}%%
+  <div class="code-toolbar"><span>mermaid</span><button class="copy-code" type="button" aria-label="Copy diagram source">Copy</button></div>
+  <pre><code>%%{init: {&#34;themeVariables&#34;: {&#34;xyChart&#34;: {&#34;plotColorPalette&#34;: &#34;#2563eb, #f59e0b, #16a34a&#34;}}}}%%
 xychart-beta
     title &#34;TTFT p50 by phase&#34;
     x-axis &#34;Blue: Proportional | Amber: TokenThroughput | Green: Predictive&#34; [&#34;baseline&#34;, &#34;ramp&#34;, &#34;sustain&#34;, &#34;cooldown&#34;]
@@ -1795,7 +1796,8 @@ xychart-beta
     line &#34;Proportional&#34; [298.564, 2540.853, 506.734, 188.231]
     line &#34;TokenThroughput&#34; [284.481, 2325.222, 480.418, 182.044]
     line &#34;Predictive&#34; [164.044, 467.906, 447.864, 60.883]</code></pre>
-    </div>
+</div>
+
   </details>
 </div><p>Both <code>ramp</code> and <code>sustain</code> run at concurrency 24. Because manual token targets sat below baseline
 traffic, <code>vllm-pd-token-throughput</code> (<code>raw = 2</code>) and <code>vllm-pd-predictive</code> (<code>raw = 7</code>) requested scale-out
@@ -2180,8 +2182,8 @@ requests) to construct the offline <code>ConfigMap</code> catalog profile:</p>
   <p class="diagram-status" role="status">Rendering diagram…</p>
   <details class="diagram-source"><summary>Mermaid source</summary>
     <div class="code-block">
-      <div class="code-toolbar"><span>mermaid</span><button class="copy-code" type="button" aria-label="Copy diagram source">Copy</button></div>
-      <pre><code>%%{init: {&#34;themeVariables&#34;: {&#34;xyChart&#34;: {&#34;plotColorPalette&#34;: &#34;#2563eb, #dc2626, #16a34a&#34;}}}}%%
+  <div class="code-toolbar"><span>mermaid</span><button class="copy-code" type="button" aria-label="Copy diagram source">Copy</button></div>
+  <pre><code>%%{init: {&#34;themeVariables&#34;: {&#34;xyChart&#34;: {&#34;plotColorPalette&#34;: &#34;#2563eb, #dc2626, #16a34a&#34;}}}}%%
 xychart-beta
     title &#34;Single-replica total throughput vs capacity targets (tok/s)&#34;
     x-axis &#34;Blue: Measured tok/s | Red: Tuned Manual (17135.2) | Green: Catalog 0.75 (12851.4)&#34; [&#34;c=2&#34;, &#34;c=4&#34;, &#34;c=8&#34;, &#34;c=16&#34;, &#34;c=24&#34;, &#34;c=32&#34;]
@@ -2189,15 +2191,16 @@ xychart-beta
     line &#34;Measured tok/s&#34; [1882.56, 3653.261, 6414.232, 11477.608, 14527.811, 17135.159]
     line &#34;Tuned Manual (17135.2)&#34; [17135.159, 17135.159, 17135.159, 17135.159, 17135.159, 17135.159]
     line &#34;Catalog 0.75 (12851.4)&#34; [12851.37, 12851.37, 12851.37, 12851.37, 12851.37, 12851.37]</code></pre>
-    </div>
+</div>
+
   </details>
 </div><div class="diagram-block">
   <div class="mermaid-diagram" role="img" aria-label="Diagram" aria-busy="true"></div>
   <p class="diagram-status" role="status">Rendering diagram…</p>
   <details class="diagram-source"><summary>Mermaid source</summary>
     <div class="code-block">
-      <div class="code-toolbar"><span>mermaid</span><button class="copy-code" type="button" aria-label="Copy diagram source">Copy</button></div>
-      <pre><code>%%{init: {&#34;themeVariables&#34;: {&#34;xyChart&#34;: {&#34;plotColorPalette&#34;: &#34;#16a34a, #f59e0b, #dc2626&#34;}}}}%%
+  <div class="code-toolbar"><span>mermaid</span><button class="copy-code" type="button" aria-label="Copy diagram source">Copy</button></div>
+  <pre><code>%%{init: {&#34;themeVariables&#34;: {&#34;xyChart&#34;: {&#34;plotColorPalette&#34;: &#34;#16a34a, #f59e0b, #dc2626&#34;}}}}%%
 xychart-beta
     title &#34;Single-replica TTFT percentiles by concurrency (ms)&#34;
     x-axis &#34;Green: TTFT p50 | Amber: TTFT p90 | Red: TTFT p99&#34; [&#34;c=2&#34;, &#34;c=4&#34;, &#34;c=8&#34;, &#34;c=16&#34;, &#34;c=24&#34;, &#34;c=32&#34;]
@@ -2205,7 +2208,8 @@ xychart-beta
     line &#34;TTFT p50&#34; [48.084, 58.658, 166.364, 224.723, 352.587, 490.591]
     line &#34;TTFT p90&#34; [50.489, 94.228, 190.725, 362.343, 527.173, 689.956]
     line &#34;TTFT p99&#34; [120.712, 98.486, 193.563, 384.708, 547.8, 736.115]</code></pre>
-    </div>
+</div>
+
   </details>
 </div><p>Under the P95 targets of <em><code>ttftTargetMilliseconds: &quot;2000&quot;</code></em> and <em><code>itlTargetMilliseconds: &quot;33&quot;</code></em>,
 every measured point passed (<code>ExplicitSaturation</code>). <code>Catalog.Resolve</code> selected <code>17135.159</code>
@@ -2299,8 +2303,8 @@ Latency columns show p50/p99:</p>
   <p class="diagram-status" role="status">Rendering diagram…</p>
   <details class="diagram-source"><summary>Mermaid source</summary>
     <div class="code-block">
-      <div class="code-toolbar"><span>mermaid</span><button class="copy-code" type="button" aria-label="Copy diagram source">Copy</button></div>
-      <pre><code>%%{init: {&#34;themeVariables&#34;: {&#34;xyChart&#34;: {&#34;plotColorPalette&#34;: &#34;#dc2626, #f59e0b, #16a34a&#34;}}}}%%
+  <div class="code-toolbar"><span>mermaid</span><button class="copy-code" type="button" aria-label="Copy diagram source">Copy</button></div>
+  <pre><code>%%{init: {&#34;themeVariables&#34;: {&#34;xyChart&#34;: {&#34;plotColorPalette&#34;: &#34;#dc2626, #f59e0b, #16a34a&#34;}}}}%%
 xychart-beta
     title &#34;Capacity-arm feedback sensitivity (rawRecommendedReplicas)&#34;
     x-axis &#34;Red: TT (tuned-manual) | Amber: TT (catalog) | Green: Predictive (catalog)&#34; [&#34;B1&#34;, &#34;B2&#34;, &#34;R1&#34;, &#34;R2&#34;, &#34;R3&#34;, &#34;S1&#34;, &#34;S2&#34;, &#34;S3&#34;, &#34;C1&#34;, &#34;C2&#34;, &#34;C3&#34;]
@@ -2308,15 +2312,16 @@ xychart-beta
     line &#34;TT (tuned-manual)&#34; [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1]
     line &#34;TT (catalog)&#34; [1, 1, 1, 2, 2, 1, 1, 2, 1, 1, 1]
     line &#34;Predictive (catalog)&#34; [1, 1, 1, 2, 4, 1, 4, 3, 1, 1, 1]</code></pre>
-    </div>
+</div>
+
   </details>
 </div><div class="diagram-block">
   <div class="mermaid-diagram" role="img" aria-label="Diagram" aria-busy="true"></div>
   <p class="diagram-status" role="status">Rendering diagram…</p>
   <details class="diagram-source"><summary>Mermaid source</summary>
     <div class="code-block">
-      <div class="code-toolbar"><span>mermaid</span><button class="copy-code" type="button" aria-label="Copy diagram source">Copy</button></div>
-      <pre><code>%%{init: {&#34;themeVariables&#34;: {&#34;xyChart&#34;: {&#34;plotColorPalette&#34;: &#34;#dc2626, #f59e0b, #16a34a&#34;}}}}%%
+  <div class="code-toolbar"><span>mermaid</span><button class="copy-code" type="button" aria-label="Copy diagram source">Copy</button></div>
+  <pre><code>%%{init: {&#34;themeVariables&#34;: {&#34;xyChart&#34;: {&#34;plotColorPalette&#34;: &#34;#dc2626, #f59e0b, #16a34a&#34;}}}}%%
 xychart-beta
     title &#34;Capacity-arm Ready replicas by checkpoint&#34;
     x-axis &#34;Red: TT (tuned-manual) | Amber: TT (catalog) | Green: Predictive (catalog)&#34; [&#34;B1&#34;, &#34;B2&#34;, &#34;R1&#34;, &#34;R2&#34;, &#34;R3&#34;, &#34;S1&#34;, &#34;S2&#34;, &#34;S3&#34;, &#34;C1&#34;, &#34;C2&#34;, &#34;C3&#34;]
@@ -2324,7 +2329,8 @@ xychart-beta
     line &#34;TT (tuned-manual)&#34; [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1]
     line &#34;TT (catalog)&#34; [1, 1, 1, 1, 1, 1, 1, 2, 2, 2, 1]
     line &#34;Predictive (catalog)&#34; [1, 1, 1, 1, 2, 2, 2, 2, 2, 2, 1]</code></pre>
-    </div>
+</div>
+
   </details>
 </div><p>The three lines in both checkpoint charts plot <strong>red</strong> (<code>TokenThroughput</code> <code>tuned-manual</code>),
 <strong>amber</strong> (<code>TokenThroughput</code> <code>catalog</code>) and <strong>green</strong> (<code>Predictive</code> <code>catalog</code>).
@@ -2467,8 +2473,8 @@ effective tok/s) against the <a href="/gpustack-operator/main/docs/modules/model
   <p class="diagram-status" role="status">Rendering diagram…</p>
   <details class="diagram-source"><summary>Mermaid source</summary>
     <div class="code-block">
-      <div class="code-toolbar"><span>mermaid</span><button class="copy-code" type="button" aria-label="Copy diagram source">Copy</button></div>
-      <pre><code>%%{init: {&#34;themeVariables&#34;: {&#34;xyChart&#34;: {&#34;plotColorPalette&#34;: &#34;#2563eb, #f59e0b, #16a34a&#34;}}}}%%
+  <div class="code-toolbar"><span>mermaid</span><button class="copy-code" type="button" aria-label="Copy diagram source">Copy</button></div>
+  <pre><code>%%{init: {&#34;themeVariables&#34;: {&#34;xyChart&#34;: {&#34;plotColorPalette&#34;: &#34;#2563eb, #f59e0b, #16a34a&#34;}}}}%%
 xychart-beta
     title &#34;360 s wave Ready replicas by checkpoint&#34;
     x-axis &#34;Blue: Proportional | Amber: TokenThroughput | Green: Predictive (catalog)&#34; [&#34;B1&#34;, &#34;B2&#34;, &#34;R1&#34;, &#34;R2&#34;, &#34;R3&#34;, &#34;S1&#34;, &#34;S2&#34;, &#34;S3&#34;, &#34;C1&#34;, &#34;C2&#34;, &#34;C3&#34;]
@@ -2476,15 +2482,16 @@ xychart-beta
     line &#34;Proportional&#34; [1, 1, 1, 1, 2, 2, 2, 2, 2, 2, 2]
     line &#34;TokenThroughput&#34; [1, 1, 1, 1, 3, 3, 4, 4, 4, 4, 4]
     line &#34;Predictive (catalog)&#34; [1, 1, 1, 3, 4, 4, 4, 4, 4, 4, 4]</code></pre>
-    </div>
+</div>
+
   </details>
 </div><div class="diagram-block">
   <div class="mermaid-diagram" role="img" aria-label="Diagram" aria-busy="true"></div>
   <p class="diagram-status" role="status">Rendering diagram…</p>
   <details class="diagram-source"><summary>Mermaid source</summary>
     <div class="code-block">
-      <div class="code-toolbar"><span>mermaid</span><button class="copy-code" type="button" aria-label="Copy diagram source">Copy</button></div>
-      <pre><code>%%{init: {&#34;themeVariables&#34;: {&#34;xyChart&#34;: {&#34;plotColorPalette&#34;: &#34;#2563eb, #f59e0b, #16a34a&#34;}}}}%%
+  <div class="code-toolbar"><span>mermaid</span><button class="copy-code" type="button" aria-label="Copy diagram source">Copy</button></div>
+  <pre><code>%%{init: {&#34;themeVariables&#34;: {&#34;xyChart&#34;: {&#34;plotColorPalette&#34;: &#34;#2563eb, #f59e0b, #16a34a&#34;}}}}%%
 xychart-beta
     title &#34;360 s wave TTFT p50 by phase (ms)&#34;
     x-axis &#34;Blue: Proportional | Amber: TokenThroughput | Green: Predictive (catalog)&#34; [&#34;baseline&#34;, &#34;ramp&#34;, &#34;sustain&#34;]
@@ -2492,7 +2499,8 @@ xychart-beta
     line &#34;Proportional&#34; [49.439, 347.282, 190.555]
     line &#34;TokenThroughput&#34; [49.263, 350.591, 145.939]
     line &#34;Predictive (catalog)&#34; [49.742, 192.093, 120.59]</code></pre>
-    </div>
+</div>
+
   </details>
 </div><p>In the 360-second wave (<strong>blue</strong> <code>Proportional</code>, <strong>amber</strong> <code>TokenThroughput</code>, <strong>green</strong>
 <code>Predictive</code>), catalog-backed <code>Predictive</code> brought three replicas Ready by <code>R2</code>
@@ -2775,18 +2783,6 @@ examples from captured lifecycle evidence.</p>
     <aside class="toc-panel" aria-label="Page navigation">
       <div class="toc-inner">
         
-          
-          
-          
-          <nav class="page-actions" aria-label="Page source">
-            <a href="https://github.com/gpustack/gpustack-operator/blob/304681b245c3f392539df1404126be8fb9d22adb/docs/modules/model-deployment/scaling-benchmark.md">View page source</a>
-            
-            <a href="https://github.com/gpustack/gpustack-operator/edit/main/docs/modules/model-deployment/scaling-benchmark.md">Edit this page</a>
-            
-          </nav>
-        
-        
-          <div class="toc-title">On this page</div>
           <nav id="TableOfContents">
   <ul>
     <li><a href="#contents">Contents</a></li>

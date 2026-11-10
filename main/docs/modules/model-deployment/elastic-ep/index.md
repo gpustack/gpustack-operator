@@ -113,7 +113,7 @@ through the resize interface the engine already exposes.
 
 The CPU head, master and GPU workers each get a separate memory-backed `EmptyDir` at `/dev/shm`.
 Changing the role's *`shmSize`* affects new or replacement members; existing members keep their mounts.
-See [Shared memory](/gpustack-operator/main/docs/modules/model-deployment/deployment/index.md#shared-memory) for configuration, precedence and memory budgeting.
+See [Shared memory](/gpustack-operator/main/docs/modules/model-deployment/configuration/index.md#shared-memory) for configuration, precedence and memory budgeting.
 
 ## Configuration
 
@@ -354,11 +354,11 @@ The operator retains existing elastic `Pod`s, so an env edit does not change the
 
 ---
 
-**See also** — [Model Deployment Configuration](/gpustack-operator/main/docs/modules/model-deployment/deployment/index.md) for the role contract ·
+**See also** — [Model Deployment Configuration](/gpustack-operator/main/docs/modules/model-deployment/configuration/index.md) for the role contract ·
 [Prefill and Decode](/gpustack-operator/main/docs/modules/model-deployment/prefill-decode/index.md) for the other way to split a deployment ·
 [Routing](/gpustack-operator/main/docs/modules/model-deployment/routing/index.md) for how replicas are selected and observed ·
 [Shutdown](/gpustack-operator/main/docs/modules/model-deployment/shutdown/index.md) for retirement and drain ·
 [Model Deployment Status](/gpustack-operator/main/docs/modules/model-deployment/status/index.md) for the published fields ·
 [Elastic EP Benchmark](/gpustack-operator/main/docs/modules/model-deployment/elastic-ep-benchmark/index.md) for a measured width change under load.
 
-**Next** → [Model Deployment Configuration](/gpustack-operator/main/docs/modules/model-deployment/deployment/index.md)
+**Next** → [Model Deployment Configuration](/gpustack-operator/main/docs/modules/model-deployment/configuration/index.md)

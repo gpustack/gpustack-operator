@@ -262,6 +262,6 @@ and [Change a live hierarchy](/gpustack-operator/main/docs/modules/topology/oper
 
 **See also** — [Topology-Aware Scheduling](/gpustack-operator/main/docs/modules/topology/scheduling/index.md) (levels and profiles) ·
 [Topology-Aware Scheduling Operations](/gpustack-operator/main/docs/modules/topology/operations/index.md) (`ConfigMap` and Webhook sources) ·
-[Model Deployment Configuration](/gpustack-operator/main/docs/modules/model-deployment/deployment/index.md)
+[Model Deployment Configuration](/gpustack-operator/main/docs/modules/model-deployment/configuration/index.md)
 
 **Next** → [Shared Cache Walkthrough](/gpustack-operator/main/docs/walkthroughs/kv-cache/shared-cache/index.md)

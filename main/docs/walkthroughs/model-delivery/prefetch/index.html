@@ -27,7 +27,7 @@
   <link rel="alternate" type="text/markdown" href="/gpustack-operator/main/docs/walkthroughs/model-delivery/prefetch/index.md">
   
   <link rel="describedby" href="/gpustack-operator/main/llms.txt">
-  <link rel="stylesheet" href="/gpustack-operator/main/css/site.1a0de63fe646aba4ed6541fe0a6383c2ed5ca649b1593a98595ba53430bcf032.css">
+  <link rel="stylesheet" href="/gpustack-operator/main/css/site.b1fdc6af165ce7fbb10ebc91a579913dc99eac181655e5aae84dbe714d354a09.css">
   <link rel="stylesheet" href="/gpustack-operator/main/css/code.d2570c1cc6480f9c62bc31ec538eef2578ce80980588c469638a5f95416bfc7b.css">
 </head>
 <body class="docs-page">
@@ -36,7 +36,6 @@
     
     <a class="brand" href="/gpustack-operator/main/" aria-label="GPUStack Operator home"><img src="/gpustack-operator/main/images/logo_hu_ced145186d6eddf4.47210af4015bb5bd13742c222995900070c6649233431804f39bf2e001be3ddb.png" width="32" height="32" alt=""><span>GPUStack Operator</span></a>
     <nav class="top-links" aria-label="Main navigation">
-      <a class="top-docs-link" href="/gpustack-operator/main/docs/" aria-current="page">Documentation</a>
       <a class="top-devin-link" href="https://deepwiki.com/gpustack/gpustack-operator" target="_blank" rel="noopener noreferrer" aria-label="Ask Devin on DeepWiki (opens in a new tab)">
         <svg aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M8 1.5c.31 3.02 1.67 4.38 4.69 4.69-3.02.31-4.38 1.67-4.69 4.69-.31-3.02-1.67-4.38-4.69-4.69 3.02-.31 4.38-1.67 4.69-4.69Zm5.06 8.19c.16 1.51.84 2.19 2.34 2.34-1.51.16-2.19.84-2.34 2.34-.16-1.51-.84-2.19-2.34-2.34 1.51-.16 2.19-.84 2.34-2.34Z"/></svg>
         <span>Ask Devin</span>
@@ -106,7 +105,6 @@
         </svg>
       </button>
       <nav id="docs-navigation" class="sidebar-inner">
-        <div class="nav-title">Documentation</div>
         <a class="nav-home" href="/gpustack-operator/main/" >Overview</a>
         
           
@@ -698,7 +696,7 @@
       
         
         
-          <a title="KV Cache Election and Failover" href="/gpustack-operator/main/docs/modules/kv-cache/leader/" >Election and Failover</a>
+          <a title="KV Cache Election and Failover" href="/gpustack-operator/main/docs/modules/kv-cache/leader/" >Leader Election</a>
           
           
         
@@ -761,15 +759,15 @@
 
 
   
-    
-      
-      
-        
-        
-      
-    
-  
 
+  
+    
+      
+      
+        
+        
+      
+    
   
 
   
@@ -803,7 +801,7 @@
             <div class="nav-children">
               
                 
-                  <a title="Model Artifact API" href="/gpustack-operator/main/docs/modules/model-delivery/views/" >API</a>
+                  <a title="Model Artifact API" href="/gpustack-operator/main/docs/modules/model-delivery/artifact-api/" >API</a>
                 
               
             </div>
@@ -848,7 +846,7 @@
       
         
         
-          <a title="Node-to-Node Sync" href="/gpustack-operator/main/docs/modules/model-delivery/peer-sync/" >Node-to-Node Sync</a>
+          <a title="Node-to-Node Sync" href="/gpustack-operator/main/docs/modules/model-delivery/node-to-node-sync/" >Node-to-Node Sync</a>
           
           
         
@@ -1030,7 +1028,7 @@
       
         
         
-          <a title="Model Deployment Configuration" href="/gpustack-operator/main/docs/modules/model-deployment/deployment/" >Configuration</a>
+          <a title="Configuration" href="/gpustack-operator/main/docs/modules/model-deployment/configuration/" >Configuration</a>
           
           
         
@@ -1040,7 +1038,7 @@
       
         
         
-          <a title="Engine Compatibility" href="/gpustack-operator/main/docs/modules/model-deployment/engine-versions/" >Compatibility</a>
+          <a title="Engine Compatibility" href="/gpustack-operator/main/docs/modules/model-deployment/engine-versions/" >Engine Versions</a>
           
           
         
@@ -1208,7 +1206,12 @@
 
 
 
+  
+  
 
+
+
+  
 
 <details class="nav-section" >
   <summary title="GPU Instances">GPU Instances</summary>
@@ -1218,6 +1221,16 @@
       
       <a title="GPU Instances" href="/gpustack-operator/main/docs/modules/instances/" >Overview</a>
     
+    
+      
+      
+        
+        
+          <a title="Instance Metrics Reference" href="/gpustack-operator/main/docs/modules/instances/metrics/" >Metrics</a>
+          
+          
+        
+      
     
   </div>
 </details>
@@ -1322,7 +1335,7 @@
       
         
         
-          <a title="Migrating to Bundled Subcharts" href="/gpustack-operator/main/docs/operate/migration/to-subcharts/" >Bundled Subcharts</a>
+          <a title="Migrating to Bundled Subcharts" href="/gpustack-operator/main/docs/operate/migration/bundled-subcharts/" >Bundled Subcharts</a>
           
           
         
@@ -1332,7 +1345,7 @@
       
         
         
-          <a title="Upgrading to an Enforced Binding Dtype" href="/gpustack-operator/main/docs/operate/migration/kv-cache-dtype/" >Enforced Binding Dtype</a>
+          <a title="Upgrading to an Enforced Binding Dtype" href="/gpustack-operator/main/docs/operate/migration/enforced-binding-dtype/" >Enforced Binding Dtype</a>
           
           
         
@@ -1373,12 +1386,7 @@
   
   
 
-  
-  
 
-
-
-  
 
   
 
@@ -1416,16 +1424,6 @@
         
         
           <a title="Instance Type Unit Resources Reference" href="/gpustack-operator/main/docs/reference/instance-type-unit-resources/" >Resource Presets</a>
-          
-          
-        
-      
-    
-      
-      
-        
-        
-          <a title="Instance Metrics Reference" href="/gpustack-operator/main/docs/reference/instance-metrics/" >Instance Metrics</a>
           
           
         
@@ -1622,14 +1620,16 @@ Size the binding quota and node disk space for the resolved weights.</p>
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">matchLabels</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">kubernetes.io/hostname</span><span class="p">:</span><span class="w"> </span><span class="l">gpu-node</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">minReady</span><span class="p">:</span><span class="w"> </span><span class="m">1</span></span></span></code></pre></div>
-</div><h2 id="step-2-verify-the-cached-model">Step 2: Verify the cached model</h2>
+</div>
+<h2 id="step-2-verify-the-cached-model">Step 2: Verify the cached model</h2>
 <div class="code-block">
   <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">kubectl apply -f model-delivery.yaml
 </span></span><span class="line"><span class="cl">kubectl -n gpustack-elastic get modelartifacts,modelprefetches
 </span></span><span class="line"><span class="cl">kubectl -n gpustack-elastic get modelprefetch deepseek-v2-lite-chat -o yaml
 </span></span><span class="line"><span class="cl">kubectl get nodemodelstores -o json</span></span></code></pre></div>
-</div><p>Captured <code>kubectl get modelartifacts,modelprefetches</code> output:</p>
+</div>
+<p>Captured <code>kubectl get modelartifacts,modelprefetches</code> output:</p>
 <div class="code-block">
   <div class="code-toolbar"><span>text</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-text" data-lang="text"><span class="line"><span class="cl">NAME                                                     SOURCE                              REVISION       SIZE          READY   DOWNLOADING   RESOLVED
@@ -1637,12 +1637,14 @@ Size the binding quota and node disk space for the resolved weights.</p>
 </span></span><span class="line"><span class="cl">
 </span></span><span class="line"><span class="cl">NAME                                                     ARTIFACT                BINDING          READY   DESIRED   AVAILABLE
 </span></span><span class="line"><span class="cl">modelprefetch.worker.gpustack.ai/deepseek-v2-lite-chat   deepseek-v2-lite-chat   rtx6000-models   1       1         True</span></span></code></pre></div>
-</div><p>Check the matching node&rsquo;s model entry as well:</p>
+</div>
+<p>Check the matching node&rsquo;s model entry as well:</p>
 <div class="code-block">
   <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">kubectl get nodemodelstores -o json <span class="p">|</span>
 </span></span><span class="line"><span class="cl">  jq <span class="s1">&#39;.items[] | .status.models[]? | {digest, sizeBytes, state}&#39;</span></span></span></code></pre></div>
-</div><p>Captured projection:</p>
+</div>
+<p>Captured projection:</p>
 <div class="code-block">
   <div class="code-toolbar"><span>json</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-json" data-lang="json"><span class="line"><span class="cl"><span class="p">{</span>
@@ -1650,7 +1652,8 @@ Size the binding quota and node disk space for the resolved weights.</p>
 </span></span><span class="line"><span class="cl">  <span class="nt">&#34;sizeBytes&#34;</span><span class="p">:</span> <span class="mi">31418807311</span><span class="p">,</span>
 </span></span><span class="line"><span class="cl">  <span class="nt">&#34;state&#34;</span><span class="p">:</span> <span class="s2">&#34;Ready&#34;</span>
 </span></span><span class="line"><span class="cl"><span class="p">}</span></span></span></code></pre></div>
-</div><p>The validation also retained the successful warm-up <code>Pod</code> and compared its 12 SHA-256 results with
+</div>
+<p>The validation also retained the successful warm-up <code>Pod</code> and compared its 12 SHA-256 results with
 the resolved manifest. Warm-up <code>Pod</code>s are transient; collect their logs before completion if you need
 that evidence. See <a href="/gpustack-operator/main/docs/modules/model-delivery/prefetch/">Model Prefetch</a>
 .
@@ -1680,7 +1683,8 @@ whose <code>ModelStoreBinding</code> does not set <em><code>allowPinned</code></
 </span></span><span class="line"><span class="cl">     bytes: 64Gi
 </span></span><span class="line"><span class="cl"><span class="gi">+  allowPinned: true
 </span></span></span></code></pre></div>
-</div><p>The prefetch then asks for the pin:</p>
+</div>
+<p>The prefetch then asks for the pin:</p>
 <div class="code-block">
   <div class="code-toolbar"><span>diff</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-diff" data-lang="diff"><span class="line"><span class="cl"> apiVersion: worker.gpustack.ai/v1
@@ -1701,7 +1705,8 @@ whose <code>ModelStoreBinding</code> does not set <em><code>allowPinned</code></
 </span></span><span class="line"><span class="cl"><span class="gi">+  retention:
 </span></span></span><span class="line"><span class="cl"><span class="gi">+    pinned: true
 </span></span></span></code></pre></div>
-</div><p>Run <code>kubectl apply -f model-delivery.yaml</code> again. The file lists the grant before the prefetch, so
+</div>
+<p>Run <code>kubectl apply -f model-delivery.yaml</code> again. The file lists the grant before the prefetch, so
 the grant is in place when the prefetch is admitted. A pinned digest is never a collection candidate
 on the target nodes, though it still counts toward the store&rsquo;s usage. See
 <a href="/gpustack-operator/main/docs/modules/model-delivery/prefetch/#pinning-and-expiry">Pinning and expiry</a>
@@ -1715,7 +1720,8 @@ After deleting those consumers, remove the dedicated resources:</p>
 </span></span><span class="line"><span class="cl">kubectl -n gpustack-elastic delete modelstorebinding rtx6000-models
 </span></span><span class="line"><span class="cl">kubectl -n gpustack-elastic delete modelartifact deepseek-v2-lite-chat
 </span></span><span class="line"><span class="cl">kubectl delete modelstore rtx6000-models</span></span></code></pre></div>
-</div><p>Cache collection follows the <a href="/gpustack-operator/main/docs/modules/model-delivery/prefetch/">retention rules</a>
+</div>
+<p>Cache collection follows the <a href="/gpustack-operator/main/docs/modules/model-delivery/prefetch/">retention rules</a>
 .
 Deleting these CRs does not delete the Kubernetes cluster or its disks.</p>
 <h2 id="limitations">Limitations</h2>
@@ -1814,18 +1820,6 @@ covered in <a href="/gpustack-operator/main/docs/modules/model-delivery/prefetch
     <aside class="toc-panel" aria-label="Page navigation">
       <div class="toc-inner">
         
-          
-          
-          
-          <nav class="page-actions" aria-label="Page source">
-            <a href="https://github.com/gpustack/gpustack-operator/blob/304681b245c3f392539df1404126be8fb9d22adb/docs/walkthroughs/model-delivery/prefetch.md">View page source</a>
-            
-            <a href="https://github.com/gpustack/gpustack-operator/edit/main/docs/walkthroughs/model-delivery/prefetch.md">Edit this page</a>
-            
-          </nav>
-        
-        
-          <div class="toc-title">On this page</div>
           <nav id="TableOfContents">
   <ul>
     <li><a href="#contents">Contents</a></li>

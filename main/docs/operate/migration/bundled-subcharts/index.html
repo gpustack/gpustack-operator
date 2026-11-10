@@ -24,10 +24,10 @@
   <meta name="robots" content="noindex, follow">
   <title>Migrating to Bundled Subcharts · GPUStack Operator</title>
   
-  <link rel="alternate" type="text/markdown" href="/gpustack-operator/main/docs/operate/migration/to-subcharts/index.md">
+  <link rel="alternate" type="text/markdown" href="/gpustack-operator/main/docs/operate/migration/bundled-subcharts/index.md">
   
   <link rel="describedby" href="/gpustack-operator/main/llms.txt">
-  <link rel="stylesheet" href="/gpustack-operator/main/css/site.1a0de63fe646aba4ed6541fe0a6383c2ed5ca649b1593a98595ba53430bcf032.css">
+  <link rel="stylesheet" href="/gpustack-operator/main/css/site.b1fdc6af165ce7fbb10ebc91a579913dc99eac181655e5aae84dbe714d354a09.css">
   <link rel="stylesheet" href="/gpustack-operator/main/css/code.d2570c1cc6480f9c62bc31ec538eef2578ce80980588c469638a5f95416bfc7b.css">
 </head>
 <body class="docs-page">
@@ -36,7 +36,6 @@
     
     <a class="brand" href="/gpustack-operator/main/" aria-label="GPUStack Operator home"><img src="/gpustack-operator/main/images/logo_hu_ced145186d6eddf4.47210af4015bb5bd13742c222995900070c6649233431804f39bf2e001be3ddb.png" width="32" height="32" alt=""><span>GPUStack Operator</span></a>
     <nav class="top-links" aria-label="Main navigation">
-      <a class="top-docs-link" href="/gpustack-operator/main/docs/" aria-current="page">Documentation</a>
       <a class="top-devin-link" href="https://deepwiki.com/gpustack/gpustack-operator" target="_blank" rel="noopener noreferrer" aria-label="Ask Devin on DeepWiki (opens in a new tab)">
         <svg aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M8 1.5c.31 3.02 1.67 4.38 4.69 4.69-3.02.31-4.38 1.67-4.69 4.69-.31-3.02-1.67-4.38-4.69-4.69 3.02-.31 4.38-1.67 4.69-4.69Zm5.06 8.19c.16 1.51.84 2.19 2.34 2.34-1.51.16-2.19.84-2.34 2.34-.16-1.51-.84-2.19-2.34-2.34 1.51-.16 2.19-.84 2.34-2.34Z"/></svg>
         <span>Ask Devin</span>
@@ -48,7 +47,7 @@
       
   <details class="picker version-picker" id="version-picker"
     data-root="https://docs.gpustack.ai/gpustack-operator/" data-version="main"
-    data-home="/gpustack-operator/main/" data-page="/gpustack-operator/main/docs/operate/migration/to-subcharts/">
+    data-home="/gpustack-operator/main/" data-page="/gpustack-operator/main/docs/operate/migration/bundled-subcharts/">
     <summary>
       <svg class="picker-icon" aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M9.5 3.25a2.25 2.25 0 1 1 3 2.122V6A2.5 2.5 0 0 1 10 8.5H6a1 1 0 0 0-1 1v1.128a2.251 2.251 0 1 1-1.5 0V5.372a2.25 2.25 0 1 1 1.5 0v1.836A2.493 2.493 0 0 1 6 7h4a1 1 0 0 0 1-1v-.628A2.25 2.25 0 0 1 9.5 3.25Zm-6 0a.75.75 0 1 0 1.5 0 .75.75 0 0 0-1.5 0Zm8.25-.75a.75.75 0 1 0 0 1.5.75.75 0 0 0 0-1.5ZM4.25 12a.75.75 0 1 0 0 1.5.75.75 0 0 0 0-1.5Z"/></svg>
       <span class="visually-hidden">Documentation version: </span><span class="picker-value">main</span>
@@ -106,7 +105,6 @@
         </svg>
       </button>
       <nav id="docs-navigation" class="sidebar-inner">
-        <div class="nav-title">Documentation</div>
         <a class="nav-home" href="/gpustack-operator/main/" >Overview</a>
         
           
@@ -698,7 +696,7 @@
       
         
         
-          <a title="KV Cache Election and Failover" href="/gpustack-operator/main/docs/modules/kv-cache/leader/" >Election and Failover</a>
+          <a title="KV Cache Election and Failover" href="/gpustack-operator/main/docs/modules/kv-cache/leader/" >Leader Election</a>
           
           
         
@@ -761,15 +759,15 @@
 
 
   
-    
-      
-      
-        
-        
-      
-    
-  
 
+  
+    
+      
+      
+        
+        
+      
+    
   
 
   
@@ -803,7 +801,7 @@
             <div class="nav-children">
               
                 
-                  <a title="Model Artifact API" href="/gpustack-operator/main/docs/modules/model-delivery/views/" >API</a>
+                  <a title="Model Artifact API" href="/gpustack-operator/main/docs/modules/model-delivery/artifact-api/" >API</a>
                 
               
             </div>
@@ -848,7 +846,7 @@
       
         
         
-          <a title="Node-to-Node Sync" href="/gpustack-operator/main/docs/modules/model-delivery/peer-sync/" >Node-to-Node Sync</a>
+          <a title="Node-to-Node Sync" href="/gpustack-operator/main/docs/modules/model-delivery/node-to-node-sync/" >Node-to-Node Sync</a>
           
           
         
@@ -1030,7 +1028,7 @@
       
         
         
-          <a title="Model Deployment Configuration" href="/gpustack-operator/main/docs/modules/model-deployment/deployment/" >Configuration</a>
+          <a title="Configuration" href="/gpustack-operator/main/docs/modules/model-deployment/configuration/" >Configuration</a>
           
           
         
@@ -1040,7 +1038,7 @@
       
         
         
-          <a title="Engine Compatibility" href="/gpustack-operator/main/docs/modules/model-deployment/engine-versions/" >Compatibility</a>
+          <a title="Engine Compatibility" href="/gpustack-operator/main/docs/modules/model-deployment/engine-versions/" >Engine Versions</a>
           
           
         
@@ -1208,7 +1206,12 @@
 
 
 
+  
+  
 
+
+
+  
 
 <details class="nav-section" >
   <summary title="GPU Instances">GPU Instances</summary>
@@ -1218,6 +1221,16 @@
       
       <a title="GPU Instances" href="/gpustack-operator/main/docs/modules/instances/" >Overview</a>
     
+    
+      
+      
+        
+        
+          <a title="Instance Metrics Reference" href="/gpustack-operator/main/docs/modules/instances/metrics/" >Metrics</a>
+          
+          
+        
+      
     
   </div>
 </details>
@@ -1322,7 +1335,7 @@
       
         
         
-          <a title="Migrating to Bundled Subcharts" href="/gpustack-operator/main/docs/operate/migration/to-subcharts/" aria-current="page">Bundled Subcharts</a>
+          <a title="Migrating to Bundled Subcharts" href="/gpustack-operator/main/docs/operate/migration/bundled-subcharts/" aria-current="page">Bundled Subcharts</a>
           
           
         
@@ -1332,7 +1345,7 @@
       
         
         
-          <a title="Upgrading to an Enforced Binding Dtype" href="/gpustack-operator/main/docs/operate/migration/kv-cache-dtype/" >Enforced Binding Dtype</a>
+          <a title="Upgrading to an Enforced Binding Dtype" href="/gpustack-operator/main/docs/operate/migration/enforced-binding-dtype/" >Enforced Binding Dtype</a>
           
           
         
@@ -1373,12 +1386,7 @@
   
   
 
-  
-  
 
-
-
-  
 
   
 
@@ -1416,16 +1424,6 @@
         
         
           <a title="Instance Type Unit Resources Reference" href="/gpustack-operator/main/docs/reference/instance-type-unit-resources/" >Resource Presets</a>
-          
-          
-        
-      
-    
-      
-      
-        
-        
-          <a title="Instance Metrics Reference" href="/gpustack-operator/main/docs/reference/instance-metrics/" >Instance Metrics</a>
           
           
         
@@ -1509,7 +1507,8 @@ nothing at runtime by default (<code>worker.disableApplications</code> contains 
 </span></span><span class="line"><span class="cl">helm upgrade gpustack-operator gpustack/gpustack-operator <span class="se">\
 </span></span></span><span class="line"><span class="cl"><span class="se"></span>  --namespace gpustack-system <span class="se">\
 </span></span></span><span class="line"><span class="cl"><span class="se"></span>  --take-ownership</span></span></code></pre></div>
-</div><p><code>--take-ownership</code> legalizes the adoption: Helm otherwise refuses every object carrying another
+</div>
+<p><code>--take-ownership</code> legalizes the adoption: Helm otherwise refuses every object carrying another
 release&rsquo;s ownership metadata. Needed <strong>once</strong>: drop it afterwards, since it adopts <em>any</em> live
 object the render names, hand-created ones included.</p>
 <p>Helm 3.21+ only: that is the version this migration was validated with, the one <code>hack/lib/helm.sh</code>
@@ -1557,7 +1556,8 @@ release, not five:</p>
 <div class="code-block">
   <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">helm list -n gpustack-system     <span class="c1"># expect: gpustack-operator only</span></span></span></code></pre></div>
-</div><h2 id="automatic-image-mode-migration">Automatic image-mode migration</h2>
+</div>
+<h2 id="automatic-image-mode-migration">Automatic image-mode migration</h2>
 <p>Installing the bundled chart from inside its own image, the worker detects its own legacy release
 and sets the transfer for that install only, never unconditionally, so there is nothing to run.</p>
 <h2 id="troubleshooting">Troubleshooting</h2>
@@ -1584,7 +1584,8 @@ starting point instead.</p>
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">helm upgrade --install gpustack-operator gpustack/gpustack-operator <span class="se">\
 </span></span></span><span class="line"><span class="cl"><span class="se"></span>  --namespace gpustack-system --create-namespace <span class="se">\
 </span></span></span><span class="line"><span class="cl"><span class="se"></span>  --set kueue.enabled<span class="o">=</span><span class="nb">false</span> --set node-feature-discovery.enabled<span class="o">=</span>false</span></span></code></pre></div>
-</div><p>Both switches are supported paths, not workarounds; NFD off still leaves the <code>gpustack-cpu-info</code>
+</div>
+<p>Both switches are supported paths, not workarounds; NFD off still leaves the <code>gpustack-cpu-info</code>
 <code>NodeFeatureRule</code> the scheduling chain starts from, applied unconditionally by the worker against
 whichever NFD is present. You then keep both at operator-compatible versions.</p>
 <p>Or hand them over: delete the non-Helm install&rsquo;s workloads, <code>Service</code>s, RBAC and, importantly,
@@ -1598,7 +1599,8 @@ give them the ownership Helm looks for:</p>
 </span></span><span class="line"><span class="cl">  kubectl annotate <span class="s2">&#34;</span><span class="nv">$crd</span><span class="s2">&#34;</span> meta.helm.sh/release-name<span class="o">=</span>gpustack-operator <span class="se">\
 </span></span></span><span class="line"><span class="cl"><span class="se"></span>                          meta.helm.sh/release-namespace<span class="o">=</span>gpustack-system --overwrite
 </span></span><span class="line"><span class="cl"><span class="k">done</span></span></span></code></pre></div>
-</div><p>then install normally: this is <code>--take-ownership</code>&rsquo;s adoption, narrowed to what needs it. Read <a href="#rollback-data-loss">Do not roll
+</div>
+<p>then install normally: this is <code>--take-ownership</code>&rsquo;s adoption, narrowed to what needs it. Read <a href="#rollback-data-loss">Do not roll
 back</a>
  first, because the release then owns those CRDs.</p>
 <h2 id="permanent-changes">Permanent changes</h2>
@@ -1615,7 +1617,8 @@ a manufacturer&rsquo;s whole identity, not only its PCI vendor ID:</p>
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">runtimeName</span><span class="p">:</span><span class="w"> </span><span class="l">nvidia</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">runtimeInjectsDriver</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">partitionKind</span><span class="p">:</span><span class="w"> </span><span class="l">mig</span></span></span></code></pre></div>
-</div><p>The bundled Kueue subchart reads the value too, so it moved under <code>global</code> to share it with both
+</div>
+<p>The bundled Kueue subchart reads the value too, so it moved under <code>global</code> to share it with both
 charts. If you left it unset, no change is needed; the defaults moved with it. Convert an override
 to a row and remove the old key: nothing reads top-level <code>manufacturers</code> any more, so leaving it
 there makes the Device Managers fall back to the default vendor IDs.</p>
@@ -1635,7 +1638,8 @@ installed. <code>deviceManager.createRuntimeClasses=false</code> remains the opt
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">issuer</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;&#34;</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">Issuer</span></span></span></code></pre></div>
-</div><p>It moved for the reason <code>manufacturers</code> did: the bundled Kueue reads it, ending a split where the
+</div>
+<p>It moved for the reason <code>manufacturers</code> did: the bundled Kueue reads it, ending a split where the
 worker decided cert-manager for itself while Kueue, defaulting off upstream, never saw <code>auto</code>&rsquo;s CRD
 detection.</p>
 <p>On a cluster that has cert-manager, this upgrade therefore moves Kueue onto it. Kueue stops
@@ -1667,7 +1671,8 @@ with the visibility API <code>FailedDiscoveryCheck</code>.</li>
 </span></span><span class="line"><span class="cl"><span class="c1"># 2. --take-ownership lets Helm adopt the Secret cert-manager owns (Helm 3.21+).</span>
 </span></span><span class="line"><span class="cl">helm upgrade gpustack-operator &lt;chart&gt; --namespace gpustack-system --reset-then-reuse-values <span class="se">\
 </span></span></span><span class="line"><span class="cl"><span class="se"></span>  --set global.certmanager.enabled<span class="o">=</span><span class="nb">false</span> --take-ownership --wait</span></span></code></pre></div>
-</div><p>It also recovers the release if you have already hit the second failure.</p>
+</div>
+<p>It also recovers the release if you have already hit the second failure.</p>
 <p>The same happens if cert-manager is uninstalled while <code>global.certmanager.enabled</code> is <code>auto</code>:
 the answer flips with nobody editing a value, and the next upgrade, even an image bump, fails
 identically. Where cert-manager comes and goes, state <code>&quot;true&quot;</code> or <code>&quot;false&quot;</code> rather than <code>auto</code>.</p>
@@ -1690,7 +1695,8 @@ and the randomly named ones go unread. They are inert, never Helm-owned, and not
   <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl"><span class="c1"># Inspect first — these are Secrets, and a hand-created one could match.</span>
 </span></span><span class="line"><span class="cl">kubectl -n gpustack-system get secret <span class="p">|</span> grep <span class="s1">&#39;^gpustack-cert-&#39;</span></span></span></code></pre></div>
-</div><p>The live one has a 16-character hex hash; the others carry Kubernetes&rsquo; 5-character random suffix.
+</div>
+<p>The live one has a 16-character hex hash; the others carry Kubernetes&rsquo; 5-character random suffix.
 Delete them at your leisure, or leave them.</p>
 <h2 id="rollback-data-loss">Rollback data loss</h2>
 <p><code>helm rollback</code> is destructive here, more so than the upgrade was. It deletes every resource the
@@ -1706,7 +1712,8 @@ want, following Path A of <a href="/gpustack-operator/main/docs/operate/migratio
   <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">kubectl get clusterqueues,resourceflavors,admissionchecks,instancetypes,localqueues -A -o yaml <span class="se">\
 </span></span></span><span class="line"><span class="cl"><span class="se"></span>  &gt; gpustack-chain.yaml</span></span></code></pre></div>
-</div><p>Running <code>Pod</code>s are never touched. A bad rollback costs the chain&rsquo;s own objects; the worker
+</div>
+<p>Running <code>Pod</code>s are never touched. A bad rollback costs the chain&rsquo;s own objects; the worker
 re-materializes most from the nodes on its next reconcile, but not <code>InstanceType</code>s an administrator
 authored or edited by hand, nor any queued (not yet admitted) <code>Workload</code>.</p>
 <h2 id="verification">Verification</h2>
@@ -1739,7 +1746,8 @@ authored or edited by hand, nor any queued (not yet admitted) <code>Workload</co
 </span></span><span class="line"><span class="cl">
 </span></span><span class="line"><span class="cl"><span class="c1"># No Kueue CRD is wedged Terminating (DELETING is &lt;none&gt; for every row).</span>
 </span></span><span class="line"><span class="cl">kubectl get crd -o custom-columns<span class="o">=</span>NAME:.metadata.name,DELETING:.metadata.deletionTimestamp <span class="p">|</span> grep kueue</span></span></code></pre></div>
-</div><nav class="reading-footer" aria-label="Further reading">
+</div>
+<nav class="reading-footer" aria-label="Further reading">
     <section>
       <h2>See also</h2>
       <ul class="related-pages"><li><a href="/gpustack-operator/main/docs/operate/installation-modes/">Installation Modes</a>
@@ -1760,18 +1768,6 @@ transfer)</li><li><a href="/gpustack-operator/main/docs/operate/high-availabilit
     <aside class="toc-panel" aria-label="Page navigation">
       <div class="toc-inner">
         
-          
-          
-          
-          <nav class="page-actions" aria-label="Page source">
-            <a href="https://github.com/gpustack/gpustack-operator/blob/304681b245c3f392539df1404126be8fb9d22adb/docs/operate/migration/to-subcharts.md">View page source</a>
-            
-            <a href="https://github.com/gpustack/gpustack-operator/edit/main/docs/operate/migration/to-subcharts.md">Edit this page</a>
-            
-          </nav>
-        
-        
-          <div class="toc-title">On this page</div>
           <nav id="TableOfContents">
   <ul>
     <li><a href="#contents">Contents</a></li>

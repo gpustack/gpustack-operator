@@ -27,7 +27,7 @@ flowchart TD
 
 ## Deployment configuration
 
-[Model Deployment Configuration](/gpustack-operator/main/docs/modules/model-deployment/deployment/index.md) starts with a minimal manifest and explains
+[Model Deployment Configuration](/gpustack-operator/main/docs/modules/model-deployment/configuration/index.md) starts with a minimal manifest and explains
 the role contract. [Prefill and Decode](/gpustack-operator/main/docs/modules/model-deployment/prefill-decode/index.md) covers split roles, and
 [Encode, Prefill and Decode](/gpustack-operator/main/docs/modules/model-deployment/encode-prefill-decode/index.md) covers multimodal disaggregation.
 [Engine Compatibility](/gpustack-operator/main/docs/modules/model-deployment/engine-versions/index.md) lists minimum releases, client and store requirements,
@@ -75,7 +75,7 @@ monolithic wide tensor-parallel group on the same GPUs.
 
 If a deployment does not become ready, inspect its phase, conditions and role status:
 
-```shell
+```bash
 kubectl -n <namespace> get modeldeployment <name> -o yaml
 ```
 
@@ -87,4 +87,4 @@ Compare the result with [Model Deployment Status](/gpustack-operator/main/docs/m
 **See also** — [KV Cache](/gpustack-operator/main/docs/modules/kv-cache/index.md) (shared prefix reuse) ·
 [Model Delivery](/gpustack-operator/main/docs/modules/model-delivery/index.md) (weights)
 
-**Next** → [Model Deployment Configuration](/gpustack-operator/main/docs/modules/model-deployment/deployment/index.md) — create a serving workload.
+**Next** → [Model Deployment Configuration](/gpustack-operator/main/docs/modules/model-deployment/configuration/index.md) — create a serving workload.

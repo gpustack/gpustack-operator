@@ -27,7 +27,7 @@
   <link rel="alternate" type="text/markdown" href="/gpustack-operator/main/docs/walkthroughs/model-deployment/prefill-decode/index.md">
   
   <link rel="describedby" href="/gpustack-operator/main/llms.txt">
-  <link rel="stylesheet" href="/gpustack-operator/main/css/site.1a0de63fe646aba4ed6541fe0a6383c2ed5ca649b1593a98595ba53430bcf032.css">
+  <link rel="stylesheet" href="/gpustack-operator/main/css/site.b1fdc6af165ce7fbb10ebc91a579913dc99eac181655e5aae84dbe714d354a09.css">
   <link rel="stylesheet" href="/gpustack-operator/main/css/code.d2570c1cc6480f9c62bc31ec538eef2578ce80980588c469638a5f95416bfc7b.css">
 </head>
 <body class="docs-page">
@@ -36,7 +36,6 @@
     
     <a class="brand" href="/gpustack-operator/main/" aria-label="GPUStack Operator home"><img src="/gpustack-operator/main/images/logo_hu_ced145186d6eddf4.47210af4015bb5bd13742c222995900070c6649233431804f39bf2e001be3ddb.png" width="32" height="32" alt=""><span>GPUStack Operator</span></a>
     <nav class="top-links" aria-label="Main navigation">
-      <a class="top-docs-link" href="/gpustack-operator/main/docs/" aria-current="page">Documentation</a>
       <a class="top-devin-link" href="https://deepwiki.com/gpustack/gpustack-operator" target="_blank" rel="noopener noreferrer" aria-label="Ask Devin on DeepWiki (opens in a new tab)">
         <svg aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M8 1.5c.31 3.02 1.67 4.38 4.69 4.69-3.02.31-4.38 1.67-4.69 4.69-.31-3.02-1.67-4.38-4.69-4.69 3.02-.31 4.38-1.67 4.69-4.69Zm5.06 8.19c.16 1.51.84 2.19 2.34 2.34-1.51.16-2.19.84-2.34 2.34-.16-1.51-.84-2.19-2.34-2.34 1.51-.16 2.19-.84 2.34-2.34Z"/></svg>
         <span>Ask Devin</span>
@@ -106,7 +105,6 @@
         </svg>
       </button>
       <nav id="docs-navigation" class="sidebar-inner">
-        <div class="nav-title">Documentation</div>
         <a class="nav-home" href="/gpustack-operator/main/" >Overview</a>
         
           
@@ -698,7 +696,7 @@
       
         
         
-          <a title="KV Cache Election and Failover" href="/gpustack-operator/main/docs/modules/kv-cache/leader/" >Election and Failover</a>
+          <a title="KV Cache Election and Failover" href="/gpustack-operator/main/docs/modules/kv-cache/leader/" >Leader Election</a>
           
           
         
@@ -761,15 +759,15 @@
 
 
   
-    
-      
-      
-        
-        
-      
-    
-  
 
+  
+    
+      
+      
+        
+        
+      
+    
   
 
   
@@ -803,7 +801,7 @@
             <div class="nav-children">
               
                 
-                  <a title="Model Artifact API" href="/gpustack-operator/main/docs/modules/model-delivery/views/" >API</a>
+                  <a title="Model Artifact API" href="/gpustack-operator/main/docs/modules/model-delivery/artifact-api/" >API</a>
                 
               
             </div>
@@ -848,7 +846,7 @@
       
         
         
-          <a title="Node-to-Node Sync" href="/gpustack-operator/main/docs/modules/model-delivery/peer-sync/" >Node-to-Node Sync</a>
+          <a title="Node-to-Node Sync" href="/gpustack-operator/main/docs/modules/model-delivery/node-to-node-sync/" >Node-to-Node Sync</a>
           
           
         
@@ -1030,7 +1028,7 @@
       
         
         
-          <a title="Model Deployment Configuration" href="/gpustack-operator/main/docs/modules/model-deployment/deployment/" >Configuration</a>
+          <a title="Configuration" href="/gpustack-operator/main/docs/modules/model-deployment/configuration/" >Configuration</a>
           
           
         
@@ -1040,7 +1038,7 @@
       
         
         
-          <a title="Engine Compatibility" href="/gpustack-operator/main/docs/modules/model-deployment/engine-versions/" >Compatibility</a>
+          <a title="Engine Compatibility" href="/gpustack-operator/main/docs/modules/model-deployment/engine-versions/" >Engine Versions</a>
           
           
         
@@ -1208,7 +1206,12 @@
 
 
 
+  
+  
 
+
+
+  
 
 <details class="nav-section" >
   <summary title="GPU Instances">GPU Instances</summary>
@@ -1218,6 +1221,16 @@
       
       <a title="GPU Instances" href="/gpustack-operator/main/docs/modules/instances/" >Overview</a>
     
+    
+      
+      
+        
+        
+          <a title="Instance Metrics Reference" href="/gpustack-operator/main/docs/modules/instances/metrics/" >Metrics</a>
+          
+          
+        
+      
     
   </div>
 </details>
@@ -1322,7 +1335,7 @@
       
         
         
-          <a title="Migrating to Bundled Subcharts" href="/gpustack-operator/main/docs/operate/migration/to-subcharts/" >Bundled Subcharts</a>
+          <a title="Migrating to Bundled Subcharts" href="/gpustack-operator/main/docs/operate/migration/bundled-subcharts/" >Bundled Subcharts</a>
           
           
         
@@ -1332,7 +1345,7 @@
       
         
         
-          <a title="Upgrading to an Enforced Binding Dtype" href="/gpustack-operator/main/docs/operate/migration/kv-cache-dtype/" >Enforced Binding Dtype</a>
+          <a title="Upgrading to an Enforced Binding Dtype" href="/gpustack-operator/main/docs/operate/migration/enforced-binding-dtype/" >Enforced Binding Dtype</a>
           
           
         
@@ -1373,12 +1386,7 @@
   
   
 
-  
-  
 
-
-
-  
 
   
 
@@ -1416,16 +1424,6 @@
         
         
           <a title="Instance Type Unit Resources Reference" href="/gpustack-operator/main/docs/reference/instance-type-unit-resources/" >Resource Presets</a>
-          
-          
-        
-      
-    
-      
-      
-        
-        
-          <a title="Instance Metrics Reference" href="/gpustack-operator/main/docs/reference/instance-metrics/" >Instance Metrics</a>
           
           
         
@@ -1641,17 +1639,20 @@ three engine <code>Pod</code>s and the Router ran on <code>gpu-node-0</code>.</p
 </span></span></span><span class="line"><span class="cl"><span class="w">        </span>- --<span class="l">gpu-memory-utilization</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">        </span>- <span class="s2">&#34;0.90&#34;</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">        </span>- --<span class="l">enable-scale-out</span></span></span></code></pre></div>
-</div><p>Apply the manifest and inspect the captured status:</p>
+</div>
+<p>Apply the manifest and inspect the captured status:</p>
 <div class="code-block">
   <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">kubectl apply -f pd-deployment.yaml
 </span></span><span class="line"><span class="cl">kubectl get modeldeployment pd-arm2-pd -n gpustack-bench <span class="se">\
 </span></span></span><span class="line"><span class="cl"><span class="se"></span>  -o custom-columns<span class="o">=</span>NAME:.metadata.name,ENGINE:.spec.engine.name,ROLES:.status.roleSummary,PHASE:.status.phase</span></span></code></pre></div>
-</div><div class="code-block">
+</div>
+<div class="code-block">
   <div class="code-toolbar"><span>text</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-text" data-lang="text"><span class="line"><span class="cl">NAME        ENGINE   ROLES    PHASE
 </span></span><span class="line"><span class="cl">pd-arm2-pd  vLLM     1R1P2D   Ready</span></span></code></pre></div>
-</div><p>The recorded <code>Pod</code>s were ready and co-located on <code>gpu-node-0</code>:</p>
+</div>
+<p>The recorded <code>Pod</code>s were ready and co-located on <code>gpu-node-0</code>:</p>
 <div class="code-block">
   <div class="code-toolbar"><span>text</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-text" data-lang="text"><span class="line"><span class="cl">NAME                                READY   STATUS    NODE
@@ -1659,7 +1660,8 @@ three engine <code>Pod</code>s and the Router ran on <code>gpu-node-0</code>.</p
 </span></span><span class="line"><span class="cl">pd-arm2-pd-decode-r2zt4             2/2     Running   gpu-node-0
 </span></span><span class="line"><span class="cl">pd-arm2-pd-prefill-xmjvs            1/1     Running   gpu-node-0
 </span></span><span class="line"><span class="cl">pd-arm2-pd-router-6b9fcd6b75-5ngnj   2/2     Running   gpu-node-0</span></span></code></pre></div>
-</div><p>Each engine process uses <em>tensor parallelism (TP)</em> across its two requested accelerators. The
+</div>
+<p>Each engine process uses <em>tensor parallelism (TP)</em> across its two requested accelerators. The
 <code>--tensor-parallel-size 2</code> flag sets <em>TP</em> = 2. The deployment has no <em>Encode</em> role, so both roles set
 <code>--enable-scale-out</code>; see <a href="/gpustack-operator/main/docs/modules/model-deployment/prefill-decode/#counting-engine-tokens">Counting engine tokens</a>
 .</p>
@@ -1680,11 +1682,13 @@ Pin the protocol explicitly. Add the lines marked <code>+</code> to <code>pd-dep
 </span></span></span><span class="line"><span class="cl"><span class="gi"></span>   router:
 </span></span><span class="line"><span class="cl">     name: llm-d-router
 </span></span></code></pre></div>
-</div><p>Apply the update:</p>
+</div>
+<p>Apply the update:</p>
 <div class="code-block">
   <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">kubectl apply -f pd-deployment.yaml</span></span></code></pre></div>
-</div><p>The recorded manifest leaves the protocol unset, which renders <code>tcp</code> by default. The protocol is
+</div>
+<p>The recorded manifest leaves the protocol unset, which renders <code>tcp</code> by default. The protocol is
 deployment-wide because it describes one link between the two roles. It accepts <code>Auto</code>, <code>TCP</code>, <code>RDMA</code>,
 <code>EFA</code>, <code>CANN</code> and <code>ROCM</code>; <code>Auto</code> renders <code>tcp</code> too. An edit restarts every role because the value renders
 into both ends&rsquo; arguments. <code>RDMA</code> and <code>EFA</code> also need a matching device request on each role. See the
@@ -1705,20 +1709,22 @@ into both ends&rsquo; arguments. <code>RDMA</code> and <code>EFA</code> also nee
 </span></span><span class="line"><span class="cl">Decode routing-proxy init container:
 </span></span><span class="line"><span class="cl">  --port=8000 --model-server-port=8200 --kv-connector=mooncake
 </span></span><span class="line"><span class="cl">  --mooncake-bootstrap-port=8998 --secure-proxy=false</span></span></code></pre></div>
-</div><p>The <a href="/gpustack-operator/main/docs/modules/model-deployment/prefill-decode-benchmark/#infiniband-rdma-comparison">InfiniBand RDMA follow-up</a>
+</div>
+<p>The <a href="/gpustack-operator/main/docs/modules/model-deployment/prefill-decode-benchmark/#infiniband-rdma-comparison">InfiniBand RDMA follow-up</a>
 
 set <em><code>spec.kvTransfer.protocol</code></em> to <code>RDMA</code> and requested <em><code>resources.interface</code></em> = <code>&quot;2&quot;</code> on both roles.
 Runtime logs verified the InfiniBand KV path; the configuration change alone is not transport proof.</p>
 <p>A shared store through <em><code>spec.kvCache.poolRef</code></em> is part of the deployment identity. Declare it in the first
 apply. Adding it later is refused because a different cache describes a different deployment. See
-<a href="/gpustack-operator/main/docs/modules/model-deployment/deployment/#deployment-identity-fields">deployment identity fields</a>
+<a href="/gpustack-operator/main/docs/modules/model-deployment/configuration/#deployment-identity-fields">deployment identity fields</a>
 .</p>
 <h2 id="step-3-verify-the-router">Step 3: Verify the router</h2>
 <p>The captured Router endpoint is:</p>
 <div class="code-block">
   <div class="code-toolbar"><span>text</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-text" data-lang="text"><span class="line"><span class="cl">http://pd-arm2-pd-router.gpustack-bench.svc:8000</span></span></code></pre></div>
-</div><p>Send a completion request through the Router from inside the cluster:</p>
+</div>
+<p>Send a completion request through the Router from inside the cluster:</p>
 <div class="code-block">
   <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">kubectl -n gpustack-bench run test-client --rm -i --restart<span class="o">=</span>Never <span class="se">\
@@ -1730,12 +1736,14 @@ apply. Adding it later is refused because a different cache describes a differen
 </span></span></span><span class="line"><span class="cl"><span class="s1">    &#34;messages&#34;: [{&#34;role&#34;: &#34;user&#34;, &#34;content&#34;: &#34;Explain prefill and decode disaggregation.&#34;}],
 </span></span></span><span class="line"><span class="cl"><span class="s1">    &#34;max_tokens&#34;: 16
 </span></span></span><span class="line"><span class="cl"><span class="s1">  }&#39;</span></span></span></code></pre></div>
-</div><p>The recorded burst probe sent 16 requests at concurrency 8, with 8,192 input tokens and 64 output tokens.
+</div>
+<p>The recorded burst probe sent 16 requests at concurrency 8, with 8,192 input tokens and 64 output tokens.
 <strong>All 16 succeeded, with zero empty bodies or errors:</strong></p>
 <div class="code-block">
   <div class="code-toolbar"><span>json</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-json" data-lang="json"><span class="line"><span class="cl"><span class="p">{</span><span class="nt">&#34;requests&#34;</span><span class="p">:</span><span class="mi">16</span><span class="p">,</span><span class="nt">&#34;concurrency&#34;</span><span class="p">:</span><span class="mi">8</span><span class="p">,</span><span class="nt">&#34;input_tokens&#34;</span><span class="p">:</span><span class="mi">8192</span><span class="p">,</span><span class="nt">&#34;output_tokens&#34;</span><span class="p">:</span><span class="mi">64</span><span class="p">,</span><span class="nt">&#34;ok&#34;</span><span class="p">:</span><span class="mi">16</span><span class="p">,</span><span class="nt">&#34;empty&#34;</span><span class="p">:</span><span class="mi">0</span><span class="p">,</span><span class="nt">&#34;bad&#34;</span><span class="p">:</span><span class="mi">0</span><span class="p">}</span></span></span></code></pre></div>
-</div><p>The Router delegates prompt processing and coordinates the roles. Mooncake transfers KV tensors
+</div>
+<p>The Router delegates prompt processing and coordinates the roles. Mooncake transfers KV tensors
 between the engines, and the Router returns generated tokens.
 <em><code>status.endpoint</code></em> remains empty until the Router <code>Pod</code> passes its readiness check.</p>
 <h2 id="step-4-inspect-joint-admission">Step 4: Inspect joint admission</h2>
@@ -1745,14 +1753,16 @@ uses its own generated queue:</p>
 <div class="code-block">
   <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">kubectl -n gpustack-bench get workloads</span></span></code></pre></div>
-</div><div class="code-block">
+</div>
+<div class="code-block">
   <div class="code-toolbar"><span>text</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-text" data-lang="text"><span class="line"><span class="cl">NAME                              QUEUE                             RESERVED IN   ADMITTED
 </span></span><span class="line"><span class="cl">gpustack-fnv64-ab5121bc91ece976   gpustack-fnv64-889bba71d87d29e2   bench-gpu     True
 </span></span><span class="line"><span class="cl">gpustack-fnv64-ab5122bc91eceb29   gpustack-fnv64-889bba71d87d29e2   bench-gpu     True
 </span></span><span class="line"><span class="cl">gpustack-fnv64-d6b4e8ae20539d37   gpustack-fnv64-889bba71d87d29e2   bench-gpu     True</span></span></code></pre></div>
-</div><p>You can adjust <em><code>replicas</code></em> independently on either role to balance prompt versus token throughput.
-See <a href="/gpustack-operator/main/docs/modules/model-deployment/deployment/#rollout-behavior">Rollout behavior</a>
+</div>
+<p>You can adjust <em><code>replicas</code></em> independently on either role to balance prompt versus token throughput.
+See <a href="/gpustack-operator/main/docs/modules/model-deployment/configuration/#rollout-behavior">Rollout behavior</a>
  for editable
 role fields and replica replacement semantics.</p>
 <h2 id="step-5-release-the-application">Step 5: Release the application</h2>
@@ -1761,7 +1771,8 @@ role fields and replica replacement semantics.</p>
   <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">kubectl -n gpustack-bench delete modeldeployment pd-arm2-pd
 </span></span><span class="line"><span class="cl">kubectl -n gpustack-bench get pods,services -l app.kubernetes.io/instance<span class="o">=</span>pd-arm2-pd</span></span></code></pre></div>
-</div><p>Verify that all application GPU claims are released. The post-deletion <em>PD</em> <code>Devices</code> snapshot
+</div>
+<p>Verify that all application GPU claims are released. The post-deletion <em>PD</em> <code>Devices</code> snapshot
 recorded the following availability:</p>
 <div class="code-block">
   <div class="code-toolbar"><span>text</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
@@ -1769,7 +1780,8 @@ recorded the following availability:</p>
 </span></span><span class="line"><span class="cl">accelerator: NVIDIA H100 80GB HBM3
 </span></span><span class="line"><span class="cl">count: 8
 </span></span><span class="line"><span class="cl">remaining per accelerator: 1600000</span></span></code></pre></div>
-</div><p>This snapshot establishes released accelerator claims. Model-cache contents and cluster infrastructure remain outside its scope.</p>
+</div>
+<p>This snapshot establishes released accelerator claims. Model-cache contents and cluster infrastructure remain outside its scope.</p>
 <h2 id="limitations">Limitations</h2>
 <ul>
 <li>The recording uses one GPU node with eight H100 accelerators and co-locates all six serving GPUs and
@@ -1781,9 +1793,9 @@ device requests and runtime validation.</li>
  measures all 16 fixed-shape cells
 and mixed traffic; its results remain limited to the captured H100 configuration.</li>
 <li>Joint gang admission across all roles (<code>PodGroup</code>), role-set immutability after creation and per-replica
-rollout replacement are covered in <a href="/gpustack-operator/main/docs/modules/model-deployment/deployment/#prefill-and-decode">Prefill and decode</a>
+rollout replacement are covered in <a href="/gpustack-operator/main/docs/modules/model-deployment/configuration/#prefill-and-decode">Prefill and decode</a>
 
-and <a href="/gpustack-operator/main/docs/modules/model-deployment/deployment/#rollout-behavior">Rollout behavior</a>
+and <a href="/gpustack-operator/main/docs/modules/model-deployment/configuration/#rollout-behavior">Rollout behavior</a>
 .</li>
 <li>Disaggregated serving requires a ready Router (<em><code>status.endpoint</code></em> is populated only while the Router
 <code>Pod</code> is ready); see <a href="/gpustack-operator/main/docs/modules/model-deployment/prefill-decode/#router-configuration">Router configuration</a>
@@ -1832,7 +1844,7 @@ and <a href="/gpustack-operator/main/docs/modules/model-deployment/deployment/#r
       <tr>
           <td>Router sees no cache events</td>
           <td>Condition: <code>KVEventsPublishing=False/PublisherDisabled</code></td>
-          <td>A role that produces cache blocks renders no publisher. A routed SGLang deployment always reports this because only vLLM renders one. The condition reports configuration, not traffic. See <a href="/gpustack-operator/main/docs/modules/model-deployment/deployment/#operator-owned-keys">KV events</a>
+          <td>A role that produces cache blocks renders no publisher. A routed SGLang deployment always reports this because only vLLM renders one. The condition reports configuration, not traffic. See <a href="/gpustack-operator/main/docs/modules/model-deployment/configuration/#operator-owned-keys">KV events</a>
 </td>
       </tr>
       <tr>
@@ -1863,18 +1875,6 @@ and <a href="/gpustack-operator/main/docs/modules/model-deployment/deployment/#r
     <aside class="toc-panel" aria-label="Page navigation">
       <div class="toc-inner">
         
-          
-          
-          
-          <nav class="page-actions" aria-label="Page source">
-            <a href="https://github.com/gpustack/gpustack-operator/blob/304681b245c3f392539df1404126be8fb9d22adb/docs/walkthroughs/model-deployment/prefill-decode.md">View page source</a>
-            
-            <a href="https://github.com/gpustack/gpustack-operator/edit/main/docs/walkthroughs/model-deployment/prefill-decode.md">Edit this page</a>
-            
-          </nav>
-        
-        
-          <div class="toc-title">On this page</div>
           <nav id="TableOfContents">
   <ul>
     <li><a href="#contents">Contents</a></li>

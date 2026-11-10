@@ -27,7 +27,7 @@
   <link rel="alternate" type="text/markdown" href="/gpustack-operator/main/docs/modules/model-deployment/elastic-ep/index.md">
   
   <link rel="describedby" href="/gpustack-operator/main/llms.txt">
-  <link rel="stylesheet" href="/gpustack-operator/main/css/site.1a0de63fe646aba4ed6541fe0a6383c2ed5ca649b1593a98595ba53430bcf032.css">
+  <link rel="stylesheet" href="/gpustack-operator/main/css/site.b1fdc6af165ce7fbb10ebc91a579913dc99eac181655e5aae84dbe714d354a09.css">
   <link rel="stylesheet" href="/gpustack-operator/main/css/code.d2570c1cc6480f9c62bc31ec538eef2578ce80980588c469638a5f95416bfc7b.css">
 </head>
 <body class="docs-page">
@@ -36,7 +36,6 @@
     
     <a class="brand" href="/gpustack-operator/main/" aria-label="GPUStack Operator home"><img src="/gpustack-operator/main/images/logo_hu_ced145186d6eddf4.47210af4015bb5bd13742c222995900070c6649233431804f39bf2e001be3ddb.png" width="32" height="32" alt=""><span>GPUStack Operator</span></a>
     <nav class="top-links" aria-label="Main navigation">
-      <a class="top-docs-link" href="/gpustack-operator/main/docs/" aria-current="page">Documentation</a>
       <a class="top-devin-link" href="https://deepwiki.com/gpustack/gpustack-operator" target="_blank" rel="noopener noreferrer" aria-label="Ask Devin on DeepWiki (opens in a new tab)">
         <svg aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M8 1.5c.31 3.02 1.67 4.38 4.69 4.69-3.02.31-4.38 1.67-4.69 4.69-.31-3.02-1.67-4.38-4.69-4.69 3.02-.31 4.38-1.67 4.69-4.69Zm5.06 8.19c.16 1.51.84 2.19 2.34 2.34-1.51.16-2.19.84-2.34 2.34-.16-1.51-.84-2.19-2.34-2.34 1.51-.16 2.19-.84 2.34-2.34Z"/></svg>
         <span>Ask Devin</span>
@@ -106,7 +105,6 @@
         </svg>
       </button>
       <nav id="docs-navigation" class="sidebar-inner">
-        <div class="nav-title">Documentation</div>
         <a class="nav-home" href="/gpustack-operator/main/" >Overview</a>
         
           
@@ -698,7 +696,7 @@
       
         
         
-          <a title="KV Cache Election and Failover" href="/gpustack-operator/main/docs/modules/kv-cache/leader/" >Election and Failover</a>
+          <a title="KV Cache Election and Failover" href="/gpustack-operator/main/docs/modules/kv-cache/leader/" >Leader Election</a>
           
           
         
@@ -761,15 +759,15 @@
 
 
   
-    
-      
-      
-        
-        
-      
-    
-  
 
+  
+    
+      
+      
+        
+        
+      
+    
   
 
   
@@ -803,7 +801,7 @@
             <div class="nav-children">
               
                 
-                  <a title="Model Artifact API" href="/gpustack-operator/main/docs/modules/model-delivery/views/" >API</a>
+                  <a title="Model Artifact API" href="/gpustack-operator/main/docs/modules/model-delivery/artifact-api/" >API</a>
                 
               
             </div>
@@ -848,7 +846,7 @@
       
         
         
-          <a title="Node-to-Node Sync" href="/gpustack-operator/main/docs/modules/model-delivery/peer-sync/" >Node-to-Node Sync</a>
+          <a title="Node-to-Node Sync" href="/gpustack-operator/main/docs/modules/model-delivery/node-to-node-sync/" >Node-to-Node Sync</a>
           
           
         
@@ -1030,7 +1028,7 @@
       
         
         
-          <a title="Model Deployment Configuration" href="/gpustack-operator/main/docs/modules/model-deployment/deployment/" >Configuration</a>
+          <a title="Configuration" href="/gpustack-operator/main/docs/modules/model-deployment/configuration/" >Configuration</a>
           
           
         
@@ -1040,7 +1038,7 @@
       
         
         
-          <a title="Engine Compatibility" href="/gpustack-operator/main/docs/modules/model-deployment/engine-versions/" >Compatibility</a>
+          <a title="Engine Compatibility" href="/gpustack-operator/main/docs/modules/model-deployment/engine-versions/" >Engine Versions</a>
           
           
         
@@ -1208,7 +1206,12 @@
 
 
 
+  
+  
 
+
+
+  
 
 <details class="nav-section" >
   <summary title="GPU Instances">GPU Instances</summary>
@@ -1218,6 +1221,16 @@
       
       <a title="GPU Instances" href="/gpustack-operator/main/docs/modules/instances/" >Overview</a>
     
+    
+      
+      
+        
+        
+          <a title="Instance Metrics Reference" href="/gpustack-operator/main/docs/modules/instances/metrics/" >Metrics</a>
+          
+          
+        
+      
     
   </div>
 </details>
@@ -1322,7 +1335,7 @@
       
         
         
-          <a title="Migrating to Bundled Subcharts" href="/gpustack-operator/main/docs/operate/migration/to-subcharts/" >Bundled Subcharts</a>
+          <a title="Migrating to Bundled Subcharts" href="/gpustack-operator/main/docs/operate/migration/bundled-subcharts/" >Bundled Subcharts</a>
           
           
         
@@ -1332,7 +1345,7 @@
       
         
         
-          <a title="Upgrading to an Enforced Binding Dtype" href="/gpustack-operator/main/docs/operate/migration/kv-cache-dtype/" >Enforced Binding Dtype</a>
+          <a title="Upgrading to an Enforced Binding Dtype" href="/gpustack-operator/main/docs/operate/migration/enforced-binding-dtype/" >Enforced Binding Dtype</a>
           
           
         
@@ -1373,12 +1386,7 @@
   
   
 
-  
-  
 
-
-
-  
 
   
 
@@ -1416,16 +1424,6 @@
         
         
           <a title="Instance Type Unit Resources Reference" href="/gpustack-operator/main/docs/reference/instance-type-unit-resources/" >Resource Presets</a>
-          
-          
-        
-      
-    
-      
-      
-        
-        
-          <a title="Instance Metrics Reference" href="/gpustack-operator/main/docs/reference/instance-metrics/" >Instance Metrics</a>
           
           
         
@@ -1509,7 +1507,8 @@ flowchart TD
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">instanceType</span><span class="p">:</span><span class="w"> </span><span class="l">elastic-gpu</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">elasticEp</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">width</span><span class="p">:</span><span class="w"> </span><span class="m">4</span><span class="w">  </span><span class="c"># Mutable target GPU engines, including the reserved master; 2 to 64.</span></span></span></code></pre></div>
-</div><p><em><code>width</code></em> counts <em>data parallelism (DP)</em> engines, including the master. Each member has its own GPU <code>Pod</code>.
+</div>
+<p><em><code>width</code></em> counts <em>data parallelism (DP)</em> engines, including the master. Each member has its own GPU <code>Pod</code>.
 Set <em>tensor parallelism (TP)</em> through the role&rsquo;s <em><code>extraArgs</code></em>, using the engine&rsquo;s <code>--tensor-parallel-size</code> argument.
 Omitting it uses <em>TP</em> = 1. Total GPU demand is <em><code>width</code></em> × <em>TP</em>.
 For <em>TP</em> = 2, width 2 needs four GPUs; width 4 needs eight GPUs.</p>
@@ -1559,7 +1558,7 @@ through the resize interface the engine already exposes.</p>
 <h2 id="shared-memory">Shared memory</h2>
 <p>The CPU head, master and GPU workers each get a separate memory-backed <code>EmptyDir</code> at <code>/dev/shm</code>.
 Changing the role&rsquo;s <em><code>shmSize</code></em> affects new or replacement members; existing members keep their mounts.
-See <a href="/gpustack-operator/main/docs/modules/model-deployment/deployment/#shared-memory">Shared memory</a>
+See <a href="/gpustack-operator/main/docs/modules/model-deployment/configuration/#shared-memory">Shared memory</a>
  for configuration, precedence and memory budgeting.</p>
 <h2 id="configuration">Configuration</h2>
 <div class="code-block">
@@ -1596,7 +1595,8 @@ See <a href="/gpustack-operator/main/docs/modules/model-deployment/deployment/#s
 </span></span></span><span class="line"><span class="cl"><span class="w">        </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">http</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="nt">port</span><span class="p">:</span><span class="w"> </span><span class="m">8000</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="nt">protocol</span><span class="p">:</span><span class="w"> </span><span class="l">TCP</span></span></span></code></pre></div>
-</div><p>Weights reach the members through the same artifact and cache as any other deployment. See
+</div>
+<p>Weights reach the members through the same artifact and cache as any other deployment. See
 <a href="/gpustack-operator/main/docs/modules/model-delivery/">Model Delivery</a>
 .</p>
 <p>To use <em>TP</em> = 2, pass <code>--tensor-parallel-size 2</code> in <em><code>extraArgs</code></em> and request <em><code>resources.accelerator</code></em> <code>&quot;2&quot;</code>.
@@ -1623,7 +1623,8 @@ Explicit quantities must equal the <em>TP</em> size. Each member&rsquo;s CPU and
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">extraArgs</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">        </span>- --<span class="l">elastic-ep-max-dp-size</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">        </span>- <span class="s2">&#34;4&#34;</span></span></span></code></pre></div>
-</div><p>This example permits widths up to 4. The maximum is fixed after creation.
+</div>
+<p>This example permits widths up to 4. The maximum is fixed after creation.
 Create a new deployment to change it.
 In vLLM 0.30.0 and later, omitting this argument prevents expansion beyond the initial width.
 Older vLLM releases do not accept this argument.</p>
@@ -1645,11 +1646,13 @@ webhook in this release; it does not reach the engine.</p>
 </span></span><span class="line"><span class="cl"><span class="gd">-        width: 2
 </span></span></span><span class="line"><span class="cl"><span class="gd"></span><span class="gi">+        width: 4
 </span></span></span></code></pre></div>
-</div><div class="code-block">
+</div>
+<div class="code-block">
   <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">kubectl patch modeldeployment qwen3-ep -n gpustack --type<span class="o">=</span>json <span class="se">\
 </span></span></span><span class="line"><span class="cl"><span class="se"></span>  -p <span class="s1">&#39;[{&#34;op&#34;:&#34;replace&#34;,&#34;path&#34;:&#34;/spec/roles/0/elasticEp/width&#34;,&#34;value&#34;:4}]&#39;</span></span></span></code></pre></div>
-</div><p>The operator keeps the master. It keeps the master&rsquo;s command, its UID and its bootstrap width
+</div>
+<p>The operator keeps the master. It keeps the master&rsquo;s command, its UID and its bootstrap width
 annotation, so the running instance is not replaced. In this release it grows the Ray worker
 members around that master; it does not shrink them.</p>
 <p>Scaling up is refused while the capacity it needs is missing. If Kueue has no quota for the extra
@@ -1819,7 +1822,7 @@ profile, as described above.</li>
 <nav class="reading-footer" aria-label="Further reading">
     <section>
       <h2>See also</h2>
-      <ul class="related-pages"><li><a href="/gpustack-operator/main/docs/modules/model-deployment/deployment/">Model Deployment Configuration</a>
+      <ul class="related-pages"><li><a href="/gpustack-operator/main/docs/modules/model-deployment/configuration/">Model Deployment Configuration</a>
  for the role contract</li><li><a href="/gpustack-operator/main/docs/modules/model-deployment/prefill-decode/">Prefill and Decode</a>
  for the other way to split a deployment</li><li><a href="/gpustack-operator/main/docs/modules/model-deployment/routing/">Routing</a>
  for how replicas are selected and observed</li><li><a href="/gpustack-operator/main/docs/modules/model-deployment/shutdown/">Shutdown</a>
@@ -1828,7 +1831,7 @@ profile, as described above.</li>
  for a measured width change under load.</li></ul>
     </section><section class="next-page">
         <h2>Next</h2>
-        <div><a href="/gpustack-operator/main/docs/modules/model-deployment/deployment/">Model Deployment Configuration</a></div>
+        <div><a href="/gpustack-operator/main/docs/modules/model-deployment/configuration/">Model Deployment Configuration</a></div>
       </section></nav>
 
       </article>
@@ -1836,18 +1839,6 @@ profile, as described above.</li>
     <aside class="toc-panel" aria-label="Page navigation">
       <div class="toc-inner">
         
-          
-          
-          
-          <nav class="page-actions" aria-label="Page source">
-            <a href="https://github.com/gpustack/gpustack-operator/blob/304681b245c3f392539df1404126be8fb9d22adb/docs/modules/model-deployment/elastic-ep.md">View page source</a>
-            
-            <a href="https://github.com/gpustack/gpustack-operator/edit/main/docs/modules/model-deployment/elastic-ep.md">Edit this page</a>
-            
-          </nav>
-        
-        
-          <div class="toc-title">On this page</div>
           <nav id="TableOfContents">
   <ul>
     <li><a href="#contents">Contents</a></li>

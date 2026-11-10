@@ -47,21 +47,21 @@ Follow [Model Store Operations](/gpustack-operator/main/docs/modules/model-deliv
 
 Inspect the artifact and node stores:
 
-```shell
+```bash
 kubectl -n <namespace> get modelartifact <artifact-name> -o yaml
 kubectl get nodemodelstores
 ```
 
 **Verification:** Check the artifact's `Resolved` condition and the node cache status.
 See [Model Artifact Status](/gpustack-operator/main/docs/modules/model-delivery/artifact/index.md#status) and [Node Model Store](/gpustack-operator/main/docs/modules/model-delivery/node-store/index.md#resource).
-The [Model Artifact API](/gpustack-operator/main/docs/modules/model-delivery/views/index.md) describes progress views.
-[Node-to-Node Sync](/gpustack-operator/main/docs/modules/model-delivery/peer-sync/index.md) describes peer status and metrics.
+The [Model Artifact API](/gpustack-operator/main/docs/modules/model-delivery/artifact-api/index.md) describes progress views.
+[Node-to-Node Sync](/gpustack-operator/main/docs/modules/model-delivery/node-to-node-sync/index.md) describes peer status and metrics.
 
 ## Troubleshooting
 
 If weights do not reach a deployment, inspect the artifact and deployment conditions:
 
-```shell
+```bash
 kubectl -n <namespace> describe modelartifact <artifact-name>
 kubectl -n <namespace> get modeldeployment <deployment-name> -o yaml
 ```
