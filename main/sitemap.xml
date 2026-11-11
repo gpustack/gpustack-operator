@@ -86,6 +86,8 @@
   </url><url>
     <loc>https://docs.gpustack.ai/gpustack-operator/main/docs/modules/model-deployment/metrics/</loc>
   </url><url>
+    <loc>https://docs.gpustack.ai/gpustack-operator/main/docs/modules/model-deployment/parameterize/</loc>
+  </url><url>
     <loc>https://docs.gpustack.ai/gpustack-operator/main/docs/modules/model-deployment/prefill-decode-benchmark/</loc>
   </url><url>
     <loc>https://docs.gpustack.ai/gpustack-operator/main/docs/modules/model-deployment/prefill-decode/</loc>

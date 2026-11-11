@@ -2,7 +2,7 @@
 
 > GPUStack Operator discovers accelerators, organizes capacity into pools, and schedules Kubernetes workloads for interactive use and model serving.
 
-Documentation version: main. Source revision: e50f885d037f4c00400f32f4ec1be0cac9581fca.
+Documentation version: main. Source revision: 7f4028fbd2fd080dcf45b16cdba6ada7ef0fe230.
 These pages come from the repository's docs/ sources. For version-specific behavior, use the
 documentation and code for your release. This index routes questions; follow its links for evidence.
 
@@ -77,6 +77,7 @@ documentation and code for your release. This index routes questions; follow its
 
 - [Model Deployment](https://docs.gpustack.ai/gpustack-operator/main/docs/modules/model-deployment/index.md): Start with managed model serving.
 - [Configuration](https://docs.gpustack.ai/gpustack-operator/main/docs/modules/model-deployment/configuration/index.md): Configure serving roles and overrides.
+- [Parameters](https://docs.gpustack.ai/gpustack-operator/main/docs/modules/model-deployment/parameterize/index.md): Look up synthesized engine, router and transfer parameters and override rules.
 - [Engine Compatibility](https://docs.gpustack.ai/gpustack-operator/main/docs/modules/model-deployment/engine-versions/index.md): Check engine releases, client and store requirements, and transport support.
 - [Prefill and Decode](https://docs.gpustack.ai/gpustack-operator/main/docs/modules/model-deployment/prefill-decode/index.md): Pair serving roles.
 - [Prefill and Decode Benchmark](https://docs.gpustack.ai/gpustack-operator/main/docs/modules/model-deployment/prefill-decode-benchmark/index.md): Compare equal-GPU H100 aggregated and disaggregated serving across fixed shapes and mixed traffic.
@@ -119,7 +120,7 @@ documentation and code for your release. This index routes questions; follow its
 
 ## Optional
 
-- [Repository navigation](https://github.com/gpustack/gpustack-operator/blob/e50f885d037f4c00400f32f4ec1be0cac9581fca/docs/README.md): Module relationships, design records, code entry points and applicable skills for contributors.
+- [Repository navigation](https://github.com/gpustack/gpustack-operator/blob/7f4028fbd2fd080dcf45b16cdba6ada7ef0fe230/docs/README.md): Module relationships, design records, code entry points and applicable skills for contributors.
 - [Development](https://docs.gpustack.ai/gpustack-operator/main/docs/contribute/development/index.md): Build, generate and lint the project.
 - [Local Cluster Setup](https://docs.gpustack.ai/gpustack-operator/main/docs/contribute/local-cluster-setup/index.md): Install kind and provide a cluster for development tests.
 - [Internals](https://docs.gpustack.ai/gpustack-operator/main/docs/contribute/internals/index.md): Review startup and naming constraints.

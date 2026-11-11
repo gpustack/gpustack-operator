@@ -114,10 +114,12 @@ instance are the same request. CPU, memory and ephemeral storage are **derived**
 expressible here.
 
 An optional *`resources.interface`* requests a whole number of fabric interfaces per engine `Pod`.
+
 One RDMA interface uses `device.gpustack.ai/rdma.shared`; more than one uses that count of
 `device.gpustack.ai/rdma` devices. EFA uses
 [the EFA device plugin's own key](/gpustack-operator/main/docs/modules/rdma/network-topology/index.md#rdma-resource-keys).
-An unset or zero count adds no device request.
+An unset or zero count adds no device request. Both vLLM and SGLang prefill/decode roles can
+request interfaces for RDMA or EFA transfer paths.
 
 The key follows the bound cache backend's effective group protocol and any direct *prefill/decode*
 transport the engine actually renders. A managed, non-Ascend vLLM Server collective can select RDMA
@@ -459,7 +461,7 @@ Ownership is per (engine, key): a key one engine owns is an ordinary user argume
 
 | Engine | Owned arguments | Owned environment |
 |---|---|---|
-| `vLLM` | `--kv-transfer-config`, `--kv-events-config` — each also in every spelling vLLM reads as it: a unique prefix (`--kv-transfer-conf`), underscores (`--kv_transfer_config`), or a dotted member (`--kv-transfer-config.kv_role`), which vLLM merges into a whole document that replaces the operator's | `MOONCAKE_CONFIG_PATH`, `VLLM_MOONCAKE_BOOTSTRAP_PORT` |
+| `vLLM` | `--kv-transfer-config`, `--kv-events-config` — each also in every spelling vLLM reads as it: a unique prefix (`--kv-transfer-conf`), underscores (`--kv_transfer_config`), or a dotted member (`--kv-transfer-config.kv_role`), which vLLM merges into a whole document that replaces the operator's | `MOONCAKE_CONFIG_PATH`, `VLLM_MOONCAKE_BOOTSTRAP_PORT`, `VLLM_NIXL_SIDE_CHANNEL_HOST` |
 | `SGLang` | `--hicache-storage-backend`, `--hicache-storage-backend-extra-config`, `--disaggregation-mode`, `--disaggregation-transfer-backend`, `--disaggregation-bootstrap-port` — each also as a unique prefix (`--disaggregation-mo`) | `SGLANG_HICACHE_MOONCAKE_CONFIG_PATH`, `MOONCAKE_MASTER`, `MOONCAKE_TE_META_DATA_SERVER`, `MOONCAKE_PROTOCOL`, `MOONCAKE_DEVICE`, `MOONCAKE_GLOBAL_SEGMENT_SIZE`, `MOONCAKE_LOCAL_HOSTNAME`, **`MOONCAKE_TENANT_ID`** |
 
 One `vLLM` row covers **both backends**. The owned keys follow the engine while only the connector
@@ -480,6 +482,8 @@ not in the table because it is conditional:
 - A deployment stored with the flag before the refusal keeps running on **its own value**, which
   comes later on the command line and wins. Its next update is refused until the flag is removed; the
   update that clears its finalizer on deletion is not.
+
+Transfer defaults add several defaulted environment variables; see [Parameters](/gpustack-operator/main/docs/modules/model-deployment/parameterize/index.md#transfer-parameters) for the complete table.
 
 **Defaulted** is the other case, and `MC_TE_METRIC` is the one that matters: the operator sets it to
 `1`, and a user's own value wins with no refusal. It turns on the transfer engine's metrics, without

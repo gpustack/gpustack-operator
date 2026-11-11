@@ -933,11 +933,10 @@
   
   
 
-
-
+  
   
 
-  
+
 
   
     
@@ -964,6 +963,18 @@
   
 
   
+    
+      
+      
+        
+        
+      
+    
+  
+
+  
+
+  
 
   
     
@@ -973,6 +984,8 @@
         
       
     
+  
+
   
 
   
@@ -1031,7 +1044,18 @@
           <a title="Configuration" href="/gpustack-operator/main/docs/modules/model-deployment/configuration/" aria-current="page">Configuration</a>
           
           
+            <div class="nav-children">
+              
+                
+                  <a title="Parameters" href="/gpustack-operator/main/docs/modules/model-deployment/parameterize/" >Parameters</a>
+                
+              
+            </div>
+          
         
+      
+    
+      
       
     
       
@@ -1581,12 +1605,13 @@ does not match reality.</p>
 ; at <code>size: 1</code> the <code>Pod</code> and the
 instance are the same request. CPU, memory and ephemeral storage are <strong>derived</strong> from the <code>InstanceType</code>&rsquo;s per-unit resources scaled by the card count, so they are not
 expressible here.</p>
-<p>An optional <em><code>resources.interface</code></em> requests a whole number of fabric interfaces per engine <code>Pod</code>.
-One RDMA interface uses <code>device.gpustack.ai/rdma.shared</code>; more than one uses that count of
+<p>An optional <em><code>resources.interface</code></em> requests a whole number of fabric interfaces per engine <code>Pod</code>.</p>
+<p>One RDMA interface uses <code>device.gpustack.ai/rdma.shared</code>; more than one uses that count of
 <code>device.gpustack.ai/rdma</code> devices. EFA uses
 <a href="/gpustack-operator/main/docs/modules/rdma/network-topology/#rdma-resource-keys">the EFA device plugin&rsquo;s own key</a>
 .
-An unset or zero count adds no device request.</p>
+An unset or zero count adds no device request. Both vLLM and SGLang prefill/decode roles can
+request interfaces for RDMA or EFA transfer paths.</p>
 <p>The key follows the bound cache backend&rsquo;s effective group protocol and any direct <em>prefill/decode</em>
 transport the engine actually renders. A managed, non-Ascend vLLM Server collective can select RDMA
 when it has multiple members or Elastic EP. Eligible NIXL-based remote weight delivery can also select
@@ -1937,7 +1962,7 @@ at <code>periodSeconds: 10</code> (<code>timeoutSeconds: 5</code>) so cold-start
       <tr>
           <td><code>vLLM</code></td>
           <td><code>--kv-transfer-config</code>, <code>--kv-events-config</code> — each also in every spelling vLLM reads as it: a unique prefix (<code>--kv-transfer-conf</code>), underscores (<code>--kv_transfer_config</code>), or a dotted member (<code>--kv-transfer-config.kv_role</code>), which vLLM merges into a whole document that replaces the operator&rsquo;s</td>
-          <td><code>MOONCAKE_CONFIG_PATH</code>, <code>VLLM_MOONCAKE_BOOTSTRAP_PORT</code></td>
+          <td><code>MOONCAKE_CONFIG_PATH</code>, <code>VLLM_MOONCAKE_BOOTSTRAP_PORT</code>, <code>VLLM_NIXL_SIDE_CHANNEL_HOST</code></td>
       </tr>
       <tr>
           <td><code>SGLang</code></td>
@@ -1964,6 +1989,8 @@ not in the table because it is conditional:</p>
 comes later on the command line and wins. Its next update is refused until the flag is removed; the
 update that clears its finalizer on deletion is not.</li>
 </ul>
+<p>Transfer defaults add several defaulted environment variables; see <a href="/gpustack-operator/main/docs/modules/model-deployment/parameterize/#transfer-parameters">Parameters</a>
+ for the complete table.</p>
 <p><strong>Defaulted</strong> is the other case, and <code>MC_TE_METRIC</code> is the one that matters: the operator sets it to
 <code>1</code>, and a user&rsquo;s own value wins with no refusal. It turns on the transfer engine&rsquo;s metrics, without
 which the hit rate this design rests on cannot be measured at all.</p>

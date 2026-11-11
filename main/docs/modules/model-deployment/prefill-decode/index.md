@@ -41,31 +41,16 @@ A router policy such as `round_robin` chooses among those leaders; it does not a
 the shape's own contract, including its Router requirement, is on [External DP](/gpustack-operator/main/docs/modules/model-deployment/external-dp/index.md).
 [Issue #754](https://github.com/gpustack/gpustack-operator/issues/754) tracks that deferred combination.
 
-With the managed `llm-d-router`, the connector a native vLLM role runs depends on whether
-*`spec.kvCache`* is set; the two settings render two different connector documents, not one document
-with a field toggled:
+With a managed router, the direct connector depends on the engine, platform and
+`spec.kvTransfer.backend`. A shared `spec.kvCache` pool adds a store connector alongside the direct
+path; for vLLM NIXL, `NixlConnector` comes first in `MultiConnector`. See
+[Transfer parameters](/gpustack-operator/main/docs/modules/model-deployment/parameterize/index.md#transfer-parameters) for the per-engine connector mapping and
+synthesized environment variables.
 
-| *`spec.kvCache`* | Connector rendered | Block path |
-| --- | --- | --- |
-| omitted | `MooncakeConnector` alone | the direct prefill-to-decode transfer, and nothing else |
-| set | `MultiConnector` wrapping `MooncakeConnector` and `MooncakeStoreConnector` | the direct transfer, with the shared pool attached alongside it |
-
-A pair needs no shared pool to hand blocks over, so omitting *`spec.kvCache`* is a supported configuration.
-Attaching a pool adds reuse across deployments.
-
-In both configurations the *decode* `Pod` runs llm-d's routing proxy as a restartable sidecar; it executes the
-*prefill* path named by the router and then forwards the request to the decoder.
-
-On **Ascend** the same two configurations render with that platform's own connector names
-(`MooncakeConnectorV1` for the path and `AscendStoreConnector` for the pool), and the sidecar relays
-the handshake in its `nixlv2` mode, the one whose per-request document matches what that connector
-waits for.
-
-That is the only router combination that renders the path on Ascend. Behind `vllm-router` an Ascend
-pair renders no path: that router drives its pairs in a handshake vocabulary the Ascend connector
-rejects, and behind no router nothing pairs the roles at all. The missing path is quiet: the
-deployment goes Ready, every request is answered normally, and the two roles never exchange a
-block. A correctly answering deployment is exactly what makes the failure hard to see.
+A pair needs no shared pool to hand blocks over. With `llm-d-router`, the decode `Pod` runs a
+routing-proxy sidecar. vLLM NIXL and Ascend use `--kv-connector=nixlv2`; vLLM Mooncake uses
+`mooncake` and SGLang uses `sglang`. Ascend vLLM pairs also render behind `vllm-router`, which
+uses `--kv-connector=nixl` for their relay handshake.
 
 Both role containers then mount the host's `/usr/local/Ascend/driver` tree read-only: the connector's
 transport builds Device RoCE endpoints and reads each NPU's NIC address through the `hccn_tool`
@@ -327,7 +312,10 @@ requirement on the vLLM and vLLM-Ascend rows.
 
 ## Direct transfer transport
 
-The point-to-point path renders Mooncake's `tcp` when the API field is unset:
+The deployment-wide `spec.kvTransfer.backend` selects `Auto`, `Mooncake`, `NIXL` or `HIXL`.
+`spec.kvTransfer.protocol` accepts `Auto`, `TCP`, `RDMA`, `EFA`, `CANN` or `ROCM`. Unset
+backend and protocol default to `Auto`; the Mooncake path maps `Auto` and `TCP` to `tcp`, `CANN`
+to `ascend`, and `ROCM` to `hip`.
 
 ```diff
  apiVersion: worker.gpustack.ai/v1
@@ -337,49 +325,31 @@ The point-to-point path renders Mooncake's `tcp` when the API field is unset:
    namespace: team-a
  spec:
 +  kvTransfer:
-+    protocol: RDMA                     # unset renders "tcp"
++    backend: NIXL
++    protocol: EFA
 ```
 
-The value is a property of **one link**, so it is deployment-wide: a per-role field could only
-express two ends naming different protocols for one connection, which fails at transfer time rather
-than at admission.
+- **Backend**: Select a connector compatible with both roles' `InstanceType` manufacturers.
+- **Protocol**: Select the transport for the direct link; the shared pool has its own transport.
 
-The API accepts `Auto`, `TCP`, `RDMA`, `EFA`, `CANN` and `ROCM`,
-using the same Mooncake mapping as `KVCacheBackend`: `Auto` and `TCP` render `tcp`, `CANN`
-renders `ascend`, and `ROCM` renders `hip`. `MUSA` and `MACA` are excluded because they are
-same-node IPC transports and the two roles may run on different nodes.
+Admission refuses `HIXL` on non-Ascend `InstanceType`s, `NIXL` on Ascend, and mixed
+Ascend/non-Ascend pairs when `spec.kvTransfer` is set. If the manufacturer is not yet observed,
+the renderer can refuse an incompatible combination after it resolves.
 
-The engine image must still carry a build for its transport. SGLang maps `tcp` to
-`--disaggregation-transfer-backend mooncake_tcp` and every other mapped value to `mooncake`.
-Which value works on which engine is [the transport matrix](/gpustack-operator/main/docs/modules/model-deployment/engine-versions/index.md#transport-compatibility).
+SGLang on Ascend defaults to HIXL with `--disaggregation-transfer-backend=ascend`, the read-only
+`/usr/local/Ascend/driver` mount and defaulted `ASCEND_MF_TRANSFER_PROTOCOL=sdma`, or
+`device_rdma` for `RDMA`. vLLM Ascend uses `MooncakeConnectorV1` and the same driver mount.
 
-**`tcp` is enforced, not only requested**: the transfer engine picks its transport from the host,
-and with no RDMA device a build with multi-node NVLink installs NVLink between hosts with no NVLink
-path. So native vLLM also gets the [defaulted](/gpustack-operator/main/docs/modules/model-deployment/configuration/index.md#operator-owned-keys) `MC_FORCE_TCP=1`. Both pins
-are process-wide, so neither renders beside a store on another transport, and every client at
-its engine's [supported minimum](/gpustack-operator/main/docs/modules/model-deployment/engine-versions/index.md) honors them.
+AWS EFA, selected by `protocol: EFA` or resolved `vpc.amazonaws.com/efa` resources, selects the
+NIXL `LIBFABRIC` backend for vLLM, SGLang and remote `model-transfer` delivery. Supply an
+EFA-enabled runner through `spec.engine.image` or `roles[].image` and an EFA-enabled
+`model-transfer` image through Helm `modelTransfer.images.nvidia`.
+The default image builds do not include the EFA provider.
 
-It is read on the direct-transfer path, which every **admitted router-and-engine pair** renders on its
-*Prefill* and *Decode* roles: a prefiller that cannot hand a decoder its blocks is not disaggregated
-under any router. On every other configuration the field is accepted and renders nothing.
-
-What differs per pair is the handshake, not whether there is a path: Mooncake's bootstrap server
-under native vLLM, SGLang's own registry under SGLang, and on Ascend the *decode* sidecar's relay
-([the one router combination that renders a path there](#pair-connections)). There the field is
-ignored: the tested vLLM-Ascend v0.23.0 and v0.26.0rc1 builds use `ascend` on this path.
-
-It is separate from the pool's transport. `KVCacheBackend.spec.transport` feeds the engine's store
-client; this path is engine to engine and never traverses the store, so the two declare separately: a
-deployment with no *`kvCache`* block still has this path to configure.
-
-Editing it [turns over every role](/gpustack-operator/main/docs/modules/model-deployment/configuration/index.md#rollout-behavior): the value renders
-into both ends' arguments, so every role's replicas turn over one at a time. A prefiller and a decoder
-can disagree on the protocol until both converge, the same window an edit to the image a role runs
-(*`engine.image`* or *`roles[].image`*) opens.
-
-The same shared-document rule reaches the parallel degrees on the Ascend path. The pair turns over
-together; see [Rollout behavior](/gpustack-operator/main/docs/modules/model-deployment/configuration/index.md#rollout-behavior) for the mechanism. Until both roles
-converge, the pair can fail to complete a transfer.
+The engine image must support its chosen transport. [Engine Compatibility](/gpustack-operator/main/docs/modules/model-deployment/engine-versions/index.md)
+lists existing compatibility evidence; these rendered combinations require their own validation.
+[Parameters](/gpustack-operator/main/docs/modules/model-deployment/parameterize/index.md) lists synthesized parameters and defaults.
+Changing transfer settings rolls the roles; transfers can fail until both ends converge.
 
 ## Different hardware per role
 
@@ -417,14 +387,8 @@ between the halves:
 This limit governs the shared pool alone: [a pair needs no shared pool to hand blocks
 over](#pair-connections).
 
-**For the direct transfer, what matters is the router in front, not the manufacturers.** The path
-renders per role, and on Ascend [only one router combination
-carries it](#pair-connections).
-
-A mixed pair never forms a transfer either way: the two sides' connectors speak different handshake
-vocabularies, so a relayed document from one names nothing the other reads. Two non-Ascend roles
-both render it (NVIDIA and AMD, say), and what the engines then do is upstream's answer,
-unmeasured here.
+A mixed Ascend/non-Ascend pair is refused when `spec.kvTransfer` is set. Two non-Ascend roles
+can name different manufacturers, but their direct transfer interoperability is unmeasured here.
 
 [Kueue assigns a ResourceFlavor per
 PodSet](../devices/scheduling.md#stage-4-kueue-chain), so a role still takes whatever

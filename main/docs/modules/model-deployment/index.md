@@ -28,7 +28,10 @@ flowchart TD
 ## Deployment configuration
 
 [Model Deployment Configuration](/gpustack-operator/main/docs/modules/model-deployment/configuration/index.md) starts with a minimal manifest and explains
-the role contract. [Prefill and Decode](/gpustack-operator/main/docs/modules/model-deployment/prefill-decode/index.md) covers split roles, and
+the role contract. [Parameters](/gpustack-operator/main/docs/modules/model-deployment/parameterize/index.md) catalogs generated parameters
+and overrides.
+
+[Prefill and Decode](/gpustack-operator/main/docs/modules/model-deployment/prefill-decode/index.md) covers split roles, and
 [Encode, Prefill and Decode](/gpustack-operator/main/docs/modules/model-deployment/encode-prefill-decode/index.md) covers multimodal disaggregation.
 [Engine Compatibility](/gpustack-operator/main/docs/modules/model-deployment/engine-versions/index.md) lists minimum releases, client and store requirements,
 transport support and known failures.
