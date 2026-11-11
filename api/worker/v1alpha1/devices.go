@@ -657,8 +657,8 @@ type (
 	//     partition (e.g. an NVIDIA MIG GPU instance) occupies, which is what both the
 	//     capability's empty-accelerator legal-slot cache and the annotation-transported
 	//     occupied slot are expressed in.
-	//   - the manufacturer's own compute units, for the logical-slice ledger — on AMD, CU-mask
-	//     bit indexes exactly as they appear in HSA_CU_MASK. A logical slice occupies a POSITION
+	//   - the manufacturer's own compute units, for the logical-slice ledger — on AMD, bit
+	//     indexes into the runtime compute-unit bitmask. A logical slice occupies a POSITION
 	//     on the accelerator, not only a share of it: two slices handed the same run share those
 	//     compute units instead of the accelerator.
 	AcceleratorPlacement struct {
@@ -899,8 +899,8 @@ type (
 
 		// AllocatedLogicalPlacements is the per-Pod annotation TRANSPORT of the logical-slice
 		// ledger: the compute geometry the Pod's logical slice holds on this accelerator, in the
-		// manufacturer's own compute units (on AMD, CU-mask bit indexes exactly as they appear in
-		// HSA_CU_MASK). The device-plugin Allocate records it so a later placement decision reads
+		// manufacturer's own compute units (for example, runtime compute-unit bitmasks). The
+		// device-plugin Allocate records it so a later placement decision reads
 		// what the node's live slices already occupy. Empty (omitted) in the aggregated
 		// Devices.Status, and for a manufacturer whose logical slice has no position.
 		//

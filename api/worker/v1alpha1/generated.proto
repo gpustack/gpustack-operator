@@ -122,8 +122,8 @@ message AcceleratorAllocation {
 
   // AllocatedLogicalPlacements is the per-Pod annotation TRANSPORT of the logical-slice
   // ledger: the compute geometry the Pod's logical slice holds on this accelerator, in the
-  // manufacturer's own compute units (on AMD, CU-mask bit indexes exactly as they appear in
-  // HSA_CU_MASK). The device-plugin Allocate records it so a later placement decision reads
+  // manufacturer's own compute units (for example, runtime compute-unit bitmasks). The
+  // device-plugin Allocate records it so a later placement decision reads
   // what the node's live slices already occupy. Empty (omitted) in the aggregated
   // Devices.Status, and for a manufacturer whose logical slice has no position.
   //
@@ -203,8 +203,8 @@ message AcceleratorPhysicalSlicedProfile {
 //     partition (e.g. an NVIDIA MIG GPU instance) occupies, which is what both the
 //     capability's empty-accelerator legal-slot cache and the annotation-transported
 //     occupied slot are expressed in.
-//   - the manufacturer's own compute units, for the logical-slice ledger — on AMD, CU-mask
-//     bit indexes exactly as they appear in HSA_CU_MASK. A logical slice occupies a POSITION
+//   - the manufacturer's own compute units, for the logical-slice ledger — on AMD, bit
+//     indexes into the runtime compute-unit bitmask. A logical slice occupies a POSITION
 //     on the accelerator, not only a share of it: two slices handed the same run share those
 //     compute units instead of the accelerator.
 message AcceleratorPlacement {
@@ -1729,7 +1729,7 @@ message KVCacheBackendLeader {
   // KVCachePool over a backend with no ledger to write quota into is admitted with a warning that
   // no per-tenant quota is in force, withdrawing the flag from a backend a pool already holds is
   // refused, and a webhook reading an unschema'd "true", "1" or "True" would be judging a value
-  // domain that belongs to whoever typed it. The store's global -quota_bytes flag stays in
+  // domain that belongs to whoever typed it. The storage engine's global quota flag stays in
   // extraArgs for the converse reason: no other API needs to interpret it.
   //
   // IT DEFAULTS TO TRUE, because the ledger is what makes the rest of this API mean what it says:
@@ -1893,9 +1893,9 @@ message KVCacheBackendMember {
 
   // ExtraArgs passes config keys this API does not enumerate straight through to the member. An
   // entry is written as its own flag token, "-key=value", and renders as the entrypoint's own
-  // "-D key=value" override with the dashes gone — one namespace per side, each the one its own
-  // binary documents. A key that collides with one derived from a field above is refused at
-  // admission.
+  // engine-specific key/value flag override with the dashes gone — one namespace per side, each
+  // the one its own binary documents. A key that collides with one derived from a field above is
+  // refused at admission.
   //
   // EVERY VALUE HERE IS WORLD-READABLE: stored verbatim on this cluster-scoped object, then
   // rendered into the member container's argv, readable by anyone who can reach the Pod or the
@@ -1909,9 +1909,9 @@ message KVCacheBackendMember {
   // member container.
   //
   //   - It is NOT a second spelling of ExtraArgs: the two reach different places. ExtraArgs renders
-  //     as the entrypoint's "-D key=value" config override, while a whole family of this store's
-  //     settings — the local disk tier's flush thresholds, its promotion behavior, the rest of its
-  //     eviction knobs — has no config key at all and is read from the ENVIRONMENT only.
+  //     as the entrypoint's engine-specific key/value flag override, while a whole family of this
+  //     store's settings — the local disk tier's flush thresholds, its promotion behavior, the rest
+  //     of its eviction knobs — has no config key at all and is read from the ENVIRONMENT only.
   //   - A name this operator already renders is REFUSED at admission, for the same reason a
   //     colliding ExtraArgs key is: Kubernetes accepts a container carrying one name twice and
   //     leaves the winner to the runtime, so the collision would not even be reported. That
@@ -1954,8 +1954,9 @@ message KVCacheBackendMember {
   //   - It is a LAYER on this group rather than a group of its own, which is the store's shape: the
   //     leader routes an offload task to the client that owns the key's memory replica, so a member
   //     holding no memory segment is never chosen and would report a cold tier that never fills.
-  //   - To check what the tier actually holds rather than what it declared, read the leader's own
-  //     master_allocated_file_size_bytes; status.capacity reports the declared CAPACITY only.
+  //   - To check what the tier actually holds rather than what it declared, read the storage
+  //     engine's allocated disk capacity metric on the leader; status.capacity reports the
+  //     declared CAPACITY only.
   //   - At most ONE entry, and the bound is the status contract rather than any one renderer's
   //     reach: status.capacity is a single pair of figures for the whole backend and cannot
   //     attribute a tier's bytes to one disk, so two entries would describe neither. The same
@@ -2323,8 +2324,8 @@ message KVCacheBackendMemberTransport {
 // one value. It arrives when there are two; widening an enum is not a breaking change.
 message KVCacheBackendScaleIn {
   // GracePeriodSeconds is the wait the operator asks a departing member for, after that member
-  // deregisters its local disk tier. It renders into the preStop hook as the endpoint's
-  // grace_period_seconds and nothing else reads it. A plain int32, because unset and zero mean the
+  // deregisters its local disk tier. It renders into the preStop hook as the storage engine's
+  // lease grace period and nothing else reads it. A plain int32, because unset and zero mean the
   // same thing here: deregister the tier, then do not wait.
   //
   //   - The TIER is the only thing deregistered on the way out. A memory segment is dropped rather
@@ -2488,10 +2489,10 @@ message KVCacheBackendTransport {
   // Protocol is the transport the members are ASKED to use. Auto resolves to TCP.
   //
   // THESE VALUES ARE NOT THE STORE'S OWN SPELLINGS. What is written here is translated before it
-  // reaches a member, and two of the eight change word entirely: CANN renders as ascend and ROCM
-  // as hip. So a member's environment, its logs, and status.members[].protocol below all report
-  // the store's lowercase spelling rather than the one written here, and comparing the two as
-  // strings finds a difference that is not one.
+  // reaches a member, and two of the eight change word entirely: CANN and ROCM translate to the
+  // store's vendor-native spellings (ascend and hip). So a member's environment, its logs, and
+  // status.members[].protocol below all report the store's lowercase spelling rather than the
+  // one written here, and comparing the two as strings finds a difference that is not one.
   //
   //   - TCP is the universal fallback. RDMA, EFA, CANN, ROCM, MUSA and MACA are peers of one
   //     another, each a fabric- or vendor-specific fast path rather than a spelling of TCP: EFA in
@@ -2638,7 +2639,7 @@ message KVCachePoolBinding {
 // KVCachePoolBindingDomain is the reuse identity: what the cache isolates on, and what its blocks
 // are shaped like.
 message KVCachePoolBindingDomain {
-  // Name is the domain, and it becomes the storage layer's tenant_id verbatim.
+  // Name is the domain, and it becomes the storage layer's tenant identifier verbatim.
   //
   //   - Left unset, it is "default", filled in by the API server before the object is stored. That
   //     is the tenant the store itself assigns to a writer that names none, so an omitted name and
@@ -2651,7 +2652,7 @@ message KVCachePoolBindingDomain {
   //     master rather than per pool because one master can serve several pools and the tenant space
   //     is master-global; it is not cluster-wide because two masters hold two ledgers.
   //   - The accepted shape is a DNS-1123 label, checked by the webhook. That is strictly inside
-  //     what the master accepts as a tenant_id and is what a Kubernetes object name already looks
+  //     what the master accepts as a tenant identifier and is what a Kubernetes object name already looks
   //     like, so nobody learns a second naming rule. This is the ONLY place the shape is judged;
   //     every consumer downstream copies the name rather than re-judging it.
   //
@@ -2740,15 +2741,14 @@ message KVCachePoolBindingSpec {
   // +required
   optional KVCachePoolBindingPoolReference poolRef = 1;
 
-  // Domain is the reuse identity this Binding registers, and it is REQUIRED. Its name maps to the
-  // storage layer's tenant_id and to nothing else, so registering a domain creates a tenant with a
-  // quota ledger of its own.
+  // Domain is the reuse identity this Binding registers, and it is REQUIRED. Its name maps to
+  // the storage layer's tenant identifier and to nothing else, so registering a domain creates
+  // a tenant with a quota ledger of its own.
   //
-  // IT IS NOT A KEY PREFIX. Inside one tenant the store key is formed by the engine from its model
-  // name and token-block hashes; blockSize and dtype are not part of that key. Where a prefix is
-  // rendered at all, it is the weights identity of a ModelDeployment that references a
-  // ModelArtifact, rendered as cache_prefix for vLLM and extra_backend_tag for SGLang, and never
-  // this name.
+  // IT IS NOT A KEY PREFIX. Inside one tenant the store key is formed by the engine from its
+  // model name and token-block hashes; blockSize and dtype are not part of that key. Where a
+  // prefix is rendered at all, it is the weights identity of a ModelDeployment that references
+  // a ModelArtifact, rendered as the inference engine's cache key prefix, and never this name.
   //
   // EXACTLY ONE DOMAIN AND NOT A LIST, deliberately, so the cardinality is enforced by the schema
   // and not by a webhook rule: one Binding is one tenant, every figure in Status is a single series
@@ -2866,7 +2866,7 @@ message KVCachePoolBindingStatus {
 // KVCachePoolDomain is one reuse identity registered against this pool: what it is, who declared it,
 // and what the master reports about it.
 message KVCachePoolDomain {
-  // Name is the reuse identity, and it is the storage layer's tenant_id.
+  // Name is the reuse identity, and it is the storage layer's tenant identifier.
   //
   // +required
   // +k8s:validation:maxLength=63
@@ -3644,42 +3644,37 @@ message ModelDeploymentKVCacheStatus {
 // one: both legs may be configured on one deployment, and the synthesized connector carries the
 // pair together.
 message ModelDeploymentKVTransfer {
-  // Protocol is the transport both ends of the direct leg are told to use. It uses the
-  // KVCacheBackend transport values and their Mooncake mapping, except MUSA and MACA:
-  // those are intra-node IPC transports, while prefill and decode may run on different nodes.
+  // Protocol selects the wire transport for the direct prefill-to-decode
+  // KV transfer leg across the deployment. Both prefill and decode roles
+  // share one wire transport; each engine's transfer injector translates
+  // the selected protocol and pool hardware manufacturer into the engine's
+  // transport configuration.
   //
-  //   - IT IS DEPLOYMENT-WIDE ON PURPOSE. The protocol is a property of the link, not of either
-  //     end, so a per-role field could only express a contradiction -- two ends naming different
-  //     values for one connection, which fails at transfer time rather than at admission.
-  //   - THE VALUE IS DECLARED, NOT DISCOVERED. The enum names supported transport families;
-  //     the engine image must still carry the matching Mooncake build. CANN renders as
-  //     "ascend" and ROCM as "hip", using the same mapping as KVCacheBackend members.
-  //   - Auto selects TCP and renders "tcp"; it does not inspect the worker's fabric.
-  //   - UNSET RENDERS "tcp", the transport every Mooncake build carries. The default lives in
-  //     the renderer rather than in this schema, so the stored object holds exactly what was
-  //     asked.
-  //   - TCP IS ENFORCED, NOT ONLY REQUESTED, because the transfer engine selects its transport
-  //     from the host's hardware and does not read the requested one. On vLLM the leg also gets
-  //     MC_FORCE_TCP=1, and a role's own value wins. On SGLang the value maps onto the engine's
-  //     transfer backend: TCP renders "mooncake_tcp", any other value renders "mooncake", and
-  //     the value itself is not passed through. Neither pin renders while the deployment's store
-  //     runs a transport other than tcp, because it is process-wide and would leave the store
-  //     client without its fabric; the leg then keeps the engine's own selection.
-  //   - IT IS READ ONLY ON THE POINT-TO-POINT LEG: the prefill/decode roles of every admitted
-  //     router-and-engine pair. Where no leg renders -- no router, or an Ascend pair behind
-  //     "vllm-router" -- the value is accepted and renders nothing. An Ascend pair behind
-  //     "llm-d-router" renders the leg but not this value: that engine's transfer leg hardcodes
-  //     its transport, so the declared protocol has no key to land in. Each silence is stated
-  //     here because an accepted field that quietly does nothing is a promise broken quietly.
-  //   - IT IS EDITABLE, and an edit RESTARTS EVERY ROLE: the value renders into both ends'
-  //     argv, so a change rebuilds every Kueue pod group of the deployment. With roles split
-  //     across InstanceTypes the groups rebuild independently, and a mixed-protocol window
-  //     between a prefiller and a decoder exists until both converge -- the same window an
-  //     engine image edit already opens.
+  // Allowed values are Auto, TCP, RDMA, EFA, CANN, and ROCM. When unset or
+  // Auto, the operator defaults the wire transport to TCP so fresh
+  // deployments run on clusters without RDMA or vendor high-speed fabric
+  // configured. Set RDMA, EFA, CANN, or ROCM explicitly to enable
+  // zero-copy RDMA, AWS EFA, or vendor high-speed fabric transport on the
+  // prefill/decode leg.
+  //
+  // Editing Protocol re-renders every role's transfer configuration and
+  // rolls every role's replicas together.
   //
   // +optional
   // +k8s:validation:enum=["Auto","TCP","RDMA","EFA","CANN","ROCM"]
   optional string protocol = 1;
+
+  // Backend selects the KV transfer backend used on the direct
+  // prefill-to-decode leg.
+  //
+  // Allowed values are Auto, Mooncake, NIXL, and HIXL. When unset or Auto,
+  // the operator selects the default transfer backend for the role's pool
+  // hardware manufacturer and inference engine. HIXL is only valid on
+  // Ascend pools, and NIXL is only valid on non-Ascend pools.
+  //
+  // +optional
+  // +k8s:validation:enum=["Auto","Mooncake","NIXL","HIXL"]
+  optional string backend = 2;
 }
 
 // ModelDeploymentList holds the list of ModelDeployment.
@@ -3703,9 +3698,8 @@ message ModelDeploymentList {
 message ModelDeploymentModel {
   // Name is the identifier the engine serves, e.g. "Qwen/Qwen2.5-72B-Instruct".
   //
-  // It stays the SERVED NAME whether or not ArtifactRef is set: routers, the router's tokenizer
-  // calls and the metrics' model label all match on it, so a managed role's own
-  // --served-model-name must equal it, admission-enforced.
+  // Serving name exposed by the inference engine. When a role leaves its command unset, any
+  // explicit served-model-name argument in that role's ExtraArgs must equal Name.
   //
   // +required
   // +k8s:validation:minLength=1
@@ -4031,8 +4025,8 @@ message ModelDeploymentRetirementStatus {
 //
 // EDITING A CONTAINER FIELD ROLLS THIS ROLE'S REPLICAS, and only this role's -- with one
 // exception. The declared parallel degrees of a prefill or decode role -- the degree flags in
-// ExtraArgs, and vLLM's VLLM_DP_SIZE environment entry -- are the one container field that can
-// render into a document BOTH roles carry: the vLLM-Ascend transfer leg writes the same
+// ExtraArgs and any data-parallel degree declared in Env -- are the one container field that
+// can render into a document BOTH roles carry: the Ascend transfer leg writes the same
 // parallel blocks into both roles' Pods, so on that leg editing one role's degrees rewrites
 // the other role's Pods too, and the edit rolls the pair. Where no shared document renders
 // them, a degree edit stays this role's own like every other container-field edit: every
@@ -6104,13 +6098,8 @@ message ModelDeploymentSpec {
   // reason to refuse one. Several prefillers with several decoders is another. A rule admitting only
   // one prefiller and one decoder would describe a pairer rather than this field.
   //
-  // ON ASCEND HARDWARE THE PREFILL/DECODE TRANSFER LEG RENDERS BEHIND ONE ROUTER ALONE:
-  // "llm-d-router", whose decode proxy relays the per-request handshake the Ascend connector waits
-  // for. "vllm-router" drives a pair in a handshake vocabulary that connector rejects, so an Ascend
-  // pair behind it renders as two complete engines with no leg between them; "sglang-gateway" is
-  // refused in front of this engine before any of that applies. The no-leg shape is QUIET: the
-  // deployment goes Ready, requests answer normally, and the two roles never exchange a block --
-  // a correctly answering deployment is exactly what makes the missing leg hard to see.
+  // Both llm-d-router and vllm-router support vLLM prefill/decode transfer across Ascend and
+  // non-Ascend pools. sglang-gateway is only valid when engine.name is SGLang.
   //
   // Absent means no router, and that stays a supported shape rather than a broken one: the roles are
   // individually addressable through their own Services either way, so a deployment written before
@@ -6119,22 +6108,11 @@ message ModelDeploymentSpec {
   // +optional
   optional ModelDeploymentRouter router = 5;
 
-  // KVTransfer tunes the engine-to-engine KV transfer leg of a managed prefill/decode
-  // pair.
-  //
-  // THIS FIELD AND KVCache ABOVE ARE TWO ORTHOGONAL AXES, NOT TWO BRANCHES OF ONE CHOICE, and
-  // both may be set at once. The gate that turns this leg on — every admitted router-and-engine
-  // pair (on Ascend hardware, "llm-d-router" alone; Router above names each combination and what
-  // the quiet no-leg shape looks like) and a role kind of prefill or decode — reads none of
-  // spec.kvCache, and when both are set the two are synthesized into ONE connector and one
-  // --kv-transfer-config: a deployment may share a pool for its blocks AND hand them from prefill
-  // to decode directly, at the same time.
-  //
-  // THE LEG THIS COVERS NEVER TRAVERSES THE STORE, and that is why the value does not come from
-  // the KVCacheBackend: spec.transport there defines the data plane the store MEMBERS run, this
-  // one is engine to engine, and the two planes declare separately. A deployment can render
-  // this leg with no pool attached at all, which is another reason the field cannot live under
-  // KVCache.
+  // KVTransfer configures the direct prefill-to-decode KV transfer leg when Roles declares
+  // both a prefill role and a decode role. Ignored on single-role Server deployments. When
+  // both KVCache and KVTransfer are active, the operator composes the shared-pool attachment
+  // and the direct prefill-to-decode transfer leg into each role's synthesized engine
+  // configuration.
   //
   // +optional
   optional ModelDeploymentKVTransfer kvTransfer = 6;

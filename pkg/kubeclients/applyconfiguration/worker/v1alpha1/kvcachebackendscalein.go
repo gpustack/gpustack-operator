@@ -13,8 +13,8 @@ package v1alpha1
 // one value. It arrives when there are two; widening an enum is not a breaking change.
 type KVCacheBackendScaleInApplyConfiguration struct {
 	// GracePeriodSeconds is the wait the operator asks a departing member for, after that member
-	// deregisters its local disk tier. It renders into the preStop hook as the endpoint's
-	// grace_period_seconds and nothing else reads it. A plain int32, because unset and zero mean the
+	// deregisters its local disk tier. It renders into the preStop hook as the storage engine's
+	// lease grace period and nothing else reads it. A plain int32, because unset and zero mean the
 	// same thing here: deregister the tier, then do not wait.
 	//
 	// - The TIER is the only thing deregistered on the way out. A memory segment is dropped rather

@@ -72,6 +72,7 @@ order:
     - operations
   /docs/modules/model-deployment/:
     - configuration
+    - parameterize
     - engine-versions
     - prefill-decode
     - prefill-decode-benchmark
@@ -112,6 +113,8 @@ overview_labels:
 children:
   /docs/modules/model-delivery/artifact/:
     - artifact-api
+  /docs/modules/model-deployment/configuration/:
+    - parameterize
   /docs/modules/model-deployment/scaling/:
     - scaling-simulation
     - scaling-benchmark
@@ -166,6 +169,7 @@ labels:
   /docs/modules/model-delivery/remote/: Remote Delivery
   /docs/modules/model-delivery/operations/: Operations
   /docs/modules/model-deployment/configuration/: Configuration
+  /docs/modules/model-deployment/parameterize/: Parameters
   /docs/modules/model-deployment/scaling/: Scaling
   /docs/modules/model-deployment/scaling-simulation/: Simulation
   /docs/modules/model-deployment/scaling-benchmark/: Benchmark

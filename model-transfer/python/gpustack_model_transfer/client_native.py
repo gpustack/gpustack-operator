@@ -2,12 +2,14 @@
 
 import base64
 import ctypes
+import logging
 import os
 import socket
 import threading
 import uuid
 from types import SimpleNamespace
 
+from gpustack_model_transfer import envs
 from gpustack_model_transfer.core.budgets import (
     MAX_WINDOW_BYTES,
     MEMORY_ALIGNMENT_BYTES,
@@ -17,6 +19,8 @@ from gpustack_model_transfer.core.budgets import (
 )
 from gpustack_model_transfer.core.errors import SourceUnavailableError
 from gpustack_model_transfer.source.memory import AclBlock, TorchPinnedOwner
+
+logger = logging.getLogger("gpustack_model_transfer.client_native")
 
 MAX_WINDOW = MAX_WINDOW_BYTES
 
@@ -112,6 +116,7 @@ class TargetNative:
             # One aligned region plus address padding must fit the slot budget.
             size = max(size, 2 * MEMORY_ALIGNMENT_BYTES) - MEMORY_ALIGNMENT_BYTES
         self.backend = backend
+        self.nixl_backend = ""
         self.pod_ip = pod_ip
         self.size = size
         self.owner = None
@@ -170,22 +175,32 @@ class TargetNative:
         if self.backend == "nixl":
             from gpustack_model_transfer.backends.nixl.runtime import load_runtime
 
-            rdma_devices = os.environ.get("GPUSTACK_RDMA_DEVICES", "").strip()
-            if rdma_devices and not os.environ.get("UCX_NET_DEVICES", "").strip():
-                ucx_devs = [
-                    dev.strip() if ":" in dev else f"{dev.strip()}:1"
-                    for dev in rdma_devices.split(",")
-                    if dev.strip()
-                ]
-                if ucx_devs:
-                    os.environ["UCX_NET_DEVICES"] = ",".join(ucx_devs)
+            nixl_backend = envs.resolve_nixl_backend()
+            self.nixl_backend = nixl_backend
+            logger.info(
+                "Starting NIXL target agent with transport plugin %s", nixl_backend
+            )
+            # The device filter is a UCX switch: LIBFABRIC reaches an EFA
+            # device through its own provider, so a declared RDMA device
+            # list synthesizes only for a UCX agent, and a UCX_NET_DEVICES
+            # the server already carries always stands.
+            if nixl_backend == "UCX":
+                rdma_devices = os.environ.get("GPUSTACK_RDMA_DEVICES", "").strip()
+                if rdma_devices and not os.environ.get("UCX_NET_DEVICES", "").strip():
+                    ucx_devs = [
+                        dev.strip() if ":" in dev else f"{dev.strip()}:1"
+                        for dev in rdma_devices.split(",")
+                        if dev.strip()
+                    ]
+                    if ucx_devs:
+                        os.environ["UCX_NET_DEVICES"] = ",".join(ucx_devs)
 
             self.owner = TorchPinnedOwner()
             self.block = self.owner.allocate("window", self.size)
             self.api = load_runtime()
             self.agent = self.api.create_agent(
                 "model-transfer-target-" + uuid.uuid4().hex,
-                {"enable_listen_thread": False},
+                {"enable_listen_thread": False, "backends": [nixl_backend]},
             )
             self.registration = self.api.register_memory(
                 self.agent, {"window": self.block}

@@ -10,40 +10,32 @@ package v1alpha1
 // one: both legs may be configured on one deployment, and the synthesized connector carries the
 // pair together.
 type ModelDeploymentKVTransferApplyConfiguration struct {
-	// Protocol is the transport both ends of the direct leg are told to use. It uses the
-	// KVCacheBackend transport values and their Mooncake mapping, except MUSA and MACA:
-	// those are intra-node IPC transports, while prefill and decode may run on different nodes.
+	// Protocol selects the wire transport for the direct prefill-to-decode
+	// KV transfer leg across the deployment. Both prefill and decode roles
+	// share one wire transport; each engine's transfer injector translates
+	// the selected protocol and pool hardware manufacturer into the engine's
+	// transport configuration.
 	//
-	// - IT IS DEPLOYMENT-WIDE ON PURPOSE. The protocol is a property of the link, not of either
-	// end, so a per-role field could only express a contradiction -- two ends naming different
-	// values for one connection, which fails at transfer time rather than at admission.
-	// - THE VALUE IS DECLARED, NOT DISCOVERED. The enum names supported transport families;
-	// the engine image must still carry the matching Mooncake build. CANN renders as
-	// "ascend" and ROCM as "hip", using the same mapping as KVCacheBackend members.
-	// - Auto selects TCP and renders "tcp"; it does not inspect the worker's fabric.
-	// - UNSET RENDERS "tcp", the transport every Mooncake build carries. The default lives in
-	// the renderer rather than in this schema, so the stored object holds exactly what was
-	// asked.
-	// - TCP IS ENFORCED, NOT ONLY REQUESTED, because the transfer engine selects its transport
-	// from the host's hardware and does not read the requested one. On vLLM the leg also gets
-	// MC_FORCE_TCP=1, and a role's own value wins. On SGLang the value maps onto the engine's
-	// transfer backend: TCP renders "mooncake_tcp", any other value renders "mooncake", and
-	// the value itself is not passed through. Neither pin renders while the deployment's store
-	// runs a transport other than tcp, because it is process-wide and would leave the store
-	// client without its fabric; the leg then keeps the engine's own selection.
-	// - IT IS READ ONLY ON THE POINT-TO-POINT LEG: the prefill/decode roles of every admitted
-	// router-and-engine pair. Where no leg renders -- no router, or an Ascend pair behind
-	// "vllm-router" -- the value is accepted and renders nothing. An Ascend pair behind
-	// "llm-d-router" renders the leg but not this value: that engine's transfer leg hardcodes
-	// its transport, so the declared protocol has no key to land in. Each silence is stated
-	// here because an accepted field that quietly does nothing is a promise broken quietly.
-	// - IT IS EDITABLE, and an edit RESTARTS EVERY ROLE: the value renders into both ends'
-	// argv, so a change rebuilds every Kueue pod group of the deployment. With roles split
-	// across InstanceTypes the groups rebuild independently, and a mixed-protocol window
-	// between a prefiller and a decoder exists until both converge -- the same window an
-	// engine image edit already opens.
+	// Allowed values are Auto, TCP, RDMA, EFA, CANN, and ROCM. When unset or
+	// Auto, the operator defaults the wire transport to TCP so fresh
+	// deployments run on clusters without RDMA or vendor high-speed fabric
+	// configured. Set RDMA, EFA, CANN, or ROCM explicitly to enable
+	// zero-copy RDMA, AWS EFA, or vendor high-speed fabric transport on the
+	// prefill/decode leg.
+	//
+	// Editing Protocol re-renders every role's transfer configuration and
+	// rolls every role's replicas together.
 	//
 	Protocol *string `json:"protocol,omitempty"`
+	// Backend selects the KV transfer backend used on the direct
+	// prefill-to-decode leg.
+	//
+	// Allowed values are Auto, Mooncake, NIXL, and HIXL. When unset or Auto,
+	// the operator selects the default transfer backend for the role's pool
+	// hardware manufacturer and inference engine. HIXL is only valid on
+	// Ascend pools, and NIXL is only valid on non-Ascend pools.
+	//
+	Backend *string `json:"backend,omitempty"`
 }
 
 // ModelDeploymentKVTransferApplyConfiguration constructs a declarative configuration of the ModelDeploymentKVTransfer type for use with
@@ -57,5 +49,13 @@ func ModelDeploymentKVTransfer() *ModelDeploymentKVTransferApplyConfiguration {
 // If called multiple times, the Protocol field is set to the value of the last call.
 func (b *ModelDeploymentKVTransferApplyConfiguration) WithProtocol(value string) *ModelDeploymentKVTransferApplyConfiguration {
 	b.Protocol = &value
+	return b
+}
+
+// WithBackend sets the Backend field in the declarative configuration to the given value
+// and returns the receiver, so that objects can be built by chaining "With" function invocations.
+// If called multiple times, the Backend field is set to the value of the last call.
+func (b *ModelDeploymentKVTransferApplyConfiguration) WithBackend(value string) *ModelDeploymentKVTransferApplyConfiguration {
+	b.Backend = &value
 	return b
 }

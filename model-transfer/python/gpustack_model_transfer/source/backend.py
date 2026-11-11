@@ -19,6 +19,7 @@ import threading
 import uuid
 from contextlib import suppress
 
+from gpustack_model_transfer import envs
 from gpustack_model_transfer.core.errors import SourceUnavailableError
 from gpustack_model_transfer.source.fill import fill_from_tree, resident_files
 
@@ -288,10 +289,16 @@ class _PagingBackend:
 class NixlSourceBackend(_PagingBackend):
     """The NVIDIA source holder over the pinned NIXL wrapper.
 
-    The agent is created with NO per-agent settings: the server
-    environment stays authoritative for UCX selection, and this holder
-    never writes the process environment. register-and-hold never calls
-    get_agent_metadata: the source publishes nothing by holding memory.
+    The agent is created with the transport plugin the host resolved:
+    UCX by default, LIBFABRIC on a host whose only InfiniBand-class
+    devices are AWS EFA, or the plugin GPUSTACK_MODEL_TRANSFER_NIXL_BACKEND
+    names explicitly. Source and target resolve the plugin independently
+    from their local host environment, so heterogeneous clusters mixing
+    EFA-only and conventional RDMA nodes must pin
+    GPUSTACK_MODEL_TRANSFER_NIXL_BACKEND uniformly on both sides. This
+    holder never writes the process environment.
+    register-and-hold never calls get_agent_metadata: the source
+    publishes nothing by holding memory.
     """
 
     backend_name = "nixl"
@@ -299,6 +306,7 @@ class NixlSourceBackend(_PagingBackend):
     def __init__(self, api=None):
         self._api = api
         self._agent = None
+        self.nixl_backend = ""
         self._peers = []
         self._in_use_counts = {}
         self._paging_failed = False
@@ -308,8 +316,13 @@ class NixlSourceBackend(_PagingBackend):
             from gpustack_model_transfer.backends.nixl.runtime import load_runtime
 
             self._api = load_runtime()
+        self.nixl_backend = envs.resolve_nixl_backend()
+        logger.info(
+            "Starting NIXL source agent with transport plugin %s", self.nixl_backend
+        )
         self._agent = self._api.create_agent(
-            "model-transfer-source-" + uuid.uuid4().hex, {"enable_listen_thread": False}
+            "model-transfer-source-" + uuid.uuid4().hex,
+            {"enable_listen_thread": False, "backends": [self.nixl_backend]},
         )
         return self._agent
 
@@ -365,6 +378,11 @@ class NixlSourceBackend(_PagingBackend):
             connection = self._api.connect_peer(self._agent, metadata)
         except BaseException:
             # No write was submitted, so no operation owns this file reference.
+            logger.warning(
+                "NIXL source connect_peer failed (source transport plugin %s; "
+                "verify target uses the same GPUSTACK_MODEL_TRANSFER_NIXL_BACKEND)",
+                self.nixl_backend,
+            )
             self._release_file(name)
             raise
         self._peers.append(connection)

@@ -3,6 +3,7 @@ package worker
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"maps"
 	"slices"
 	"strings"
@@ -31,6 +32,7 @@ import (
 	"gpustack.ai/gpustack/pkg/nodefeature"
 	"gpustack.ai/gpustack/pkg/systemmeta"
 	"gpustack.ai/gpustack/pkg/utils/stringx"
+	"gpustack.ai/gpustack/pkg/worker/kvcache/inject"
 	"gpustack.ai/gpustack/pkg/worker/kvcache/router"
 )
 
@@ -2396,4 +2398,183 @@ func TestModelDeploymentRouterCandidate_ThePublishedDiscoveryAndTheWrittenLabels
 		"the published discovery admits exactly the members the pass marked")
 	assert.Equal(t, []string{"M1", "P1"}, refused,
 		"and refuses the members it did not")
+}
+
+// TestModelDeploymentVLLMRouterKVConnector pins the handshake resolution one row per input:
+// the explicit backends name the relay handshake, the unset and Auto backends answer from the
+// pool hardware, and everything else keeps the Mooncake default the engines render. The gateway
+// rows are the negative half -- the flag is vllm-router's alone, and a gateway whose renderer
+// read this answer would be configured with a flag it refuses to start on.
+func TestModelDeploymentVLLMRouterKVConnector(t *testing.T) {
+	deployment := func(engine, backend string) *workercore.ModelDeployment {
+		return routedModelDeployment(func(md *workercore.ModelDeployment) {
+			md.Spec.Engine.Name = engine
+			if backend == "nil" {
+				md.Spec.KVTransfer = nil
+				return
+			}
+			md.Spec.KVTransfer = &workercore.ModelDeploymentKVTransfer{Backend: backend}
+		})
+	}
+
+	rows := []struct {
+		name          string
+		engine        string
+		backend       string
+		manufacturers map[string]string
+		want          string
+	}{
+		{
+			name: "a nil deployment names nothing",
+			want: "",
+		},
+		{
+			name:   "the gateway has no such flag",
+			engine: workercore.ModelDeploymentEngineSGLang,
+			want:   "",
+		},
+		{
+			name:    "nixl names the relay handshake",
+			engine:  workercore.ModelDeploymentEngineVLLM,
+			backend: workercore.ModelDeploymentKVTransferBackendNIXL,
+			want:    "nixl",
+		},
+		{
+			name:    "hixl names the same relay handshake",
+			engine:  workercore.ModelDeploymentEngineVLLM,
+			backend: workercore.ModelDeploymentKVTransferBackendHIXL,
+			want:    "nixl",
+		},
+		{
+			name:          "an unset backend answers from the pool hardware",
+			engine:        workercore.ModelDeploymentEngineVLLM,
+			manufacturers: map[string]string{"prefill": nodefeature.ManufacturerAscend},
+			want:          "nixl",
+		},
+		{
+			name:    "an auto backend answers from the pool hardware too",
+			engine:  workercore.ModelDeploymentEngineVLLM,
+			backend: workercore.ModelDeploymentKVTransferBackendAuto,
+			manufacturers: map[string]string{
+				"prefill": nodefeature.ManufacturerAscend, "decode": nodefeature.ManufacturerAscend,
+			},
+			want: "nixl",
+		},
+		{
+			name:   "a non-Ascend pair keeps the mooncake handshake",
+			engine: workercore.ModelDeploymentEngineVLLM,
+			manufacturers: map[string]string{
+				"prefill": nodefeature.ManufacturerNVIDIA, "decode": nodefeature.ManufacturerNVIDIA,
+			},
+			want: "mooncake",
+		},
+		{
+			name:   "no observed manufacturer keeps the mooncake handshake",
+			engine: workercore.ModelDeploymentEngineVLLM,
+			want:   "mooncake",
+		},
+		{
+			name:    "mooncake is explicit mooncake on non-Ascend",
+			engine:  workercore.ModelDeploymentEngineVLLM,
+			backend: workercore.ModelDeploymentKVTransferBackendMooncake,
+			want:    "mooncake",
+		},
+		{
+			name:    "explicit mooncake on Ascend still uses the nixl relay handshake",
+			engine:  workercore.ModelDeploymentEngineVLLM,
+			backend: workercore.ModelDeploymentKVTransferBackendMooncake,
+			manufacturers: map[string]string{
+				"prefill": nodefeature.ManufacturerAscend, "decode": nodefeature.ManufacturerAscend,
+			},
+			want: "nixl",
+		},
+	}
+
+	for _, tc := range rows {
+		t.Run(tc.name, func(t *testing.T) {
+			var md *workercore.ModelDeployment
+			if tc.engine == "" {
+				md = nil
+			} else {
+				md = deployment(tc.engine, tc.backend)
+			}
+			assert.Equal(t, tc.want, modelDeploymentVLLMRouterKVConnector(md, tc.manufacturers))
+		})
+	}
+
+	t.Run("a sole server role keeps mooncake even when backend names nixl", func(t *testing.T) {
+		md := newRenderDeployment()
+		md.Spec.KVTransfer = &workercore.ModelDeploymentKVTransfer{
+			Backend: workercore.ModelDeploymentKVTransferBackendNIXL,
+		}
+		assert.Equal(t, "mooncake", modelDeploymentVLLMRouterKVConnector(md, nil))
+	})
+}
+
+// TestRenderModelDeploymentRouterObjects_VLLMRouterHandshakeFollowsTheBackend drives the whole
+// router render so the flag lands where the binary reads it: the connector argument is one of the
+// vllm-router container's own argv, and a backend the engines render as NIXL must not leave the
+// router on the Mooncake handshake.
+func TestRenderModelDeploymentRouterObjects_VLLMRouterHandshakeFollowsTheBackend(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		backend string
+		want    string
+	}{
+		{name: "unset renders the mooncake handshake", backend: "", want: "--kv-connector=mooncake"},
+		{name: "nixl renders the relay handshake", backend: workercore.ModelDeploymentKVTransferBackendNIXL, want: "--kv-connector=nixl"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			md := routedModelDeployment(func(md *workercore.ModelDeployment) {
+				md.Spec.Router = &workercore.ModelDeploymentRouter{Name: workercore.ModelDeploymentRouterVLLM}
+				if tc.backend != "" {
+					md.Spec.KVTransfer = &workercore.ModelDeploymentKVTransfer{Backend: tc.backend}
+				}
+			})
+			objects, err := renderModelDeploymentRouterObjects(context.Background(), md,
+				map[string]string{"prefill": nodefeature.ManufacturerNVIDIA, "decode": nodefeature.ManufacturerNVIDIA}, false)
+			require.NoError(t, err)
+
+			args := objects.Deployment.Spec.Template.Spec.Containers[0].Args
+			assert.Contains(t, args, tc.want)
+			assert.NotContains(t, args, "--kv-connector=mooncake="+tc.want,
+				"the connector argument is one flag, not a value of another")
+		})
+	}
+}
+
+// TestRenderModelDeploymentRoutingSidecar_VLLMHandshakeFollowsTheBackend covers the three pair
+// shapes the nixlv2 relay covers on vLLM, beside the Mooncake baseline: an Ascend pair, a NIXL
+// backend and a HIXL backend all speak the relay vocabulary, and none of them may render the
+// Mooncake registry flag the relay pair cannot use.
+func TestRenderModelDeploymentRoutingSidecar_VLLMHandshakeFollowsTheBackend(t *testing.T) {
+	for _, tc := range []struct {
+		name         string
+		manufacturer string
+		backend      string
+		want         string
+	}{
+		{name: "an Ascend pair relays", manufacturer: nodefeature.ManufacturerAscend, backend: "", want: "--kv-connector=nixlv2"},
+		{name: "a NIXL backend relays", manufacturer: nodefeature.ManufacturerNVIDIA, backend: inject.KVTransferBackendNIXL, want: "--kv-connector=nixlv2"},
+		{name: "a HIXL backend relays", manufacturer: nodefeature.ManufacturerNVIDIA, backend: inject.KVTransferBackendHIXL, want: "--kv-connector=nixlv2"},
+		{name: "a mooncake shape keeps the registry handshake", manufacturer: nodefeature.ManufacturerNVIDIA, backend: "", want: "--kv-connector=mooncake"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			sidecar := renderModelDeploymentRoutingSidecar(
+				context.Background(), sidecarRole(), 8200, core.URISchemeHTTP,
+				workercore.ModelDeploymentEngineVLLM, true, tc.manufacturer, "",
+				tc.backend,
+			)
+			assert.Contains(t, sidecar.Args, tc.want)
+			if tc.want == "--kv-connector=nixlv2" {
+				for _, arg := range sidecar.Args {
+					assert.NotContains(t, arg, "mooncake",
+						"a relay pair has no bootstrap registry, so no mooncake flag may render")
+				}
+			} else {
+				assert.Contains(t, sidecar.Args,
+					fmt.Sprintf("--mooncake-bootstrap-port=%d", inject.VLLMMooncakeBootstrapPort))
+			}
+		})
+	}
 }

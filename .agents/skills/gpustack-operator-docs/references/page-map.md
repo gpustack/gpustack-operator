@@ -273,6 +273,14 @@ contract, and what turns a replica over.
 (`shutdown.md`), the router's own behavior (`routing.md`), or the status views
 (`status.md`). Link each.
 
+## `docs/modules/model-deployment/parameterize.md`
+
+**Owns** — complete parameter injection, ownership and defaulting lookup tables across engines,
+routers, sidecars and model-transfer.
+
+**Never** — narrative deployment lifecycle or rollout rules; keep those on `configuration.md`
+and `prefill-decode.md`.
+
 ## `docs/modules/model-deployment/scaling-benchmark.md`
 
 **Owns** — the measured H100 replica-scaling comparison: algorithm settings, two-wave GPU budgets,

@@ -30,6 +30,7 @@ import (
 	"gpustack.ai/gpustack/pkg/nodefeature"
 	"gpustack.ai/gpustack/pkg/setting/settingtest"
 	workerctrl "gpustack.ai/gpustack/pkg/worker/controllers/worker"
+	"gpustack.ai/gpustack/pkg/worker/kvcache/inject"
 )
 
 // modelDeployment builds a valid single-role deployment for the given engine, which every case then
@@ -208,6 +209,7 @@ func TestModelDeploymentWebhook_InterfaceProtocol(t *testing.T) {
 		direct     string
 		pureDirect bool
 		custom     bool
+		artifact   bool
 		wantErr    string
 	}{
 		{name: "cache RDMA", store: []string{"rdma"}},
@@ -216,10 +218,14 @@ func TestModelDeploymentWebhook_InterfaceProtocol(t *testing.T) {
 		{name: "mixed legs", store: []string{"rdma"}, direct: "EFA", wantErr: "rdma and efa"},
 		{name: "no fabric", store: []string{"tcp"}, wantErr: "no effective RDMA or EFA"},
 		{name: "custom command has no managed fabric", store: []string{"rdma"}, custom: true, wantErr: "no effective RDMA or EFA"},
+		{name: "artifact with RDMA cache pool and declared EFA", store: []string{"rdma"}, direct: "EFA", artifact: true, wantErr: "rdma and efa"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			md := modelDeployment(workercore.ModelDeploymentEngineVLLM)
+			if tc.artifact {
+				md.Spec.Model.ArtifactRef = &core.LocalObjectReference{Name: "qwen"}
+			}
 			md.Spec.Roles[0].Resources = &workercore.ModelDeploymentRoleResources{
 				Interface: ptr.To(resource.MustParse("1")),
 			}
@@ -227,13 +233,15 @@ func TestModelDeploymentWebhook_InterfaceProtocol(t *testing.T) {
 				md.Spec.Roles[0].Command = []string{"custom-server"}
 			}
 			objs := []ctrlcli.Object{servingInstanceType("h20-8x", 8)}
-			if tc.pureDirect || tc.direct != "" {
+			if tc.pureDirect || (tc.direct != "" && !tc.artifact) {
 				md.Spec.Roles[0].Kind = workercore.ModelDeploymentRoleKindPrefill
 				md.Spec.Roles = append(md.Spec.Roles, role(func(r *workercore.ModelDeploymentRole) {
 					r.Name = "decode"
 					r.Kind = workercore.ModelDeploymentRoleKindDecode
 				}))
 				md.Spec.Router = &workercore.ModelDeploymentRouter{Name: workercore.ModelDeploymentRouterLLMD}
+				md.Spec.KVTransfer = &workercore.ModelDeploymentKVTransfer{Protocol: tc.direct}
+			} else if tc.direct != "" {
 				md.Spec.KVTransfer = &workercore.ModelDeploymentKVTransfer{Protocol: tc.direct}
 			}
 			if tc.pureDirect {
@@ -5225,4 +5233,133 @@ func TestModelDeploymentSGLangInternalDPNeedsNoRouter(t *testing.T) {
 	md.Spec.Roles[0].Replicas++
 	_, err = w.ValidateUpdate(context.Background(), old, md)
 	assert.NoError(t, err)
+}
+
+// TestModelDeploymentWebhook_KVTransferBackendFollowsTheManufacturer pins the backend-vs-vendor
+// refusals and the mixed-pair refusal, one row per shape. The InstanceTypes are read even for
+// roles that request no resources -- a pair's vendor rules are decided per role, and a role that
+// names no resources still names the type whose vendor decides them.
+func TestModelDeploymentWebhook_KVTransferBackendFollowsTheManufacturer(t *testing.T) {
+	pair := func(engine, backend, prefillType, decodeType string) *workercore.ModelDeployment {
+		md := modelDeployment(engine,
+			role(func(r *workercore.ModelDeploymentRole) {
+				r.Name = "prefill"
+				r.Kind = workercore.ModelDeploymentRoleKindPrefill
+				r.InstanceType = prefillType
+			}),
+			role(func(r *workercore.ModelDeploymentRole) {
+				r.Name = "decode"
+				r.Kind = workercore.ModelDeploymentRoleKindDecode
+				r.InstanceType = decodeType
+			}),
+		)
+		md.Spec.Router = &workercore.ModelDeploymentRouter{Name: workercore.ModelDeploymentRouterVLLM}
+		if backend != "" {
+			md.Spec.KVTransfer = &workercore.ModelDeploymentKVTransfer{Backend: backend}
+		}
+		return md
+	}
+	ascendType := servingInstanceType("a2-8x", 8, func(it *worker.InstanceType) {
+		it.Status.Detail.Manufacturer = nodefeature.ManufacturerAscend
+	})
+	nvidiaType := servingInstanceType("h20-8x", 8)
+
+	for _, tc := range []struct {
+		name           string
+		md             *workercore.ModelDeployment
+		wantFieldErr   bool
+		wantErrMessage string
+	}{
+		{
+			name:           "hixl on a non-Ascend pool is refused",
+			md:             pair(workercore.ModelDeploymentEngineVLLM, workercore.ModelDeploymentKVTransferBackendHIXL, "h20-8x", "h20-8x"),
+			wantFieldErr:   true,
+			wantErrMessage: "backend HIXL requires an Ascend InstanceType",
+		},
+		{
+			name:           "nixl on an Ascend pool is refused",
+			md:             pair(workercore.ModelDeploymentEngineVLLM, workercore.ModelDeploymentKVTransferBackendNIXL, "a2-8x", "a2-8x"),
+			wantFieldErr:   true,
+			wantErrMessage: "backend NIXL is not supported on an Ascend InstanceType; use HIXL, Mooncake, or Auto",
+		},
+		{
+			name:           "a mixed Ascend and non-Ascend pair is refused",
+			md:             pair(workercore.ModelDeploymentEngineVLLM, workercore.ModelDeploymentKVTransferBackendMooncake, "a2-8x", "h20-8x"),
+			wantFieldErr:   true,
+			wantErrMessage: "cannot mix Ascend and non-Ascend InstanceTypes",
+		},
+		{
+			name: "hixl on an Ascend pool is accepted",
+			md:   pair(workercore.ModelDeploymentEngineVLLM, workercore.ModelDeploymentKVTransferBackendHIXL, "a2-8x", "a2-8x"),
+		},
+		{
+			// The pair the leg renders under either router now: an unset backend on an Ascend
+			// vLLM pair behind the vllm router is accepted, because Auto preserves the existing
+			// Ascend rendering and refuses nothing.
+			name: "an Ascend vLLM pair under the vllm router is accepted",
+			md:   pair(workercore.ModelDeploymentEngineVLLM, "", "a2-8x", "a2-8x"),
+		},
+		{
+			name: "an unobserved manufacturer refuses nothing",
+			md:   pair(workercore.ModelDeploymentEngineVLLM, workercore.ModelDeploymentKVTransferBackendHIXL, "syncing-type", "syncing-type"),
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			objs := []ctrlcli.Object{
+				nvidiaType, ascendType,
+				acceleratableInstanceType("syncing-type", true),
+			}
+			w := newModelDeploymentWebhookWith(objs)
+			errs, err := w.validateRoleResourcesAgainstInstanceTypes(context.Background(), tc.md)
+			require.NoError(t, err)
+
+			if !tc.wantFieldErr {
+				assert.Empty(t, errs, "the accepted shape must refuse nothing: %v", errs)
+				return
+			}
+			require.NotEmpty(t, errs, "the refused shape must carry the refusal")
+			for _, fieldErr := range errs {
+				assert.Contains(t, fieldErr.Error(), tc.wantErrMessage,
+					"every refusal on this shape names the same reason")
+			}
+		})
+	}
+}
+
+// TestModelDeploymentWebhook_NIXLSideChannelPortIsReservedOnBothHalves pins the reservation the
+// NIXL leg needs: the side channel is a pair of listeners, so 5600 is reserved on prefill AND
+// decode, and the Mooncake bootstrap port the leg binds no listener on stays free.
+func TestModelDeploymentWebhook_NIXLSideChannelPortIsReservedOnBothHalves(t *testing.T) {
+	md := modelDeployment(workercore.ModelDeploymentEngineVLLM,
+		role(func(r *workercore.ModelDeploymentRole) {
+			r.Name = "prefill"
+			r.Kind = workercore.ModelDeploymentRoleKindPrefill
+		}),
+		role(func(r *workercore.ModelDeploymentRole) {
+			r.Name = "decode"
+			r.Kind = workercore.ModelDeploymentRoleKindDecode
+		}),
+	)
+	md.Spec.Router = &workercore.ModelDeploymentRouter{Name: workercore.ModelDeploymentRouterVLLM}
+	md.Spec.KVTransfer = &workercore.ModelDeploymentKVTransfer{
+		Backend: workercore.ModelDeploymentKVTransferBackendNIXL,
+	}
+
+	for _, i := range []int{0, 1} {
+		reserved := modelDeploymentRouterReservedPorts(md, &md.Spec.Roles[i])
+		assert.Contains(t, reserved, inject.VLLMNIXLSideChannelPort,
+			"role %q arms the side channel the pair announces on", md.Spec.Roles[i].Name)
+		assert.NotContains(t, reserved, inject.VLLMMooncakeBootstrapPort,
+			"role %q binds no Mooncake listener for a NIXL leg", md.Spec.Roles[i].Name)
+	}
+
+	// The Mooncake backend keeps the prefill-only bootstrap reservation, and neither half of it
+	// claims the side-channel port.
+	md.Spec.KVTransfer.Backend = workercore.ModelDeploymentKVTransferBackendMooncake
+	assert.Contains(t,
+		modelDeploymentRouterReservedPorts(md, &md.Spec.Roles[0]), inject.VLLMMooncakeBootstrapPort)
+	assert.NotContains(t,
+		modelDeploymentRouterReservedPorts(md, &md.Spec.Roles[1]), inject.VLLMMooncakeBootstrapPort)
+	assert.NotContains(t,
+		modelDeploymentRouterReservedPorts(md, &md.Spec.Roles[1]), inject.VLLMNIXLSideChannelPort)
 }

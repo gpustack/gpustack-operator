@@ -17,6 +17,7 @@ import (
 
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
 	"gpustack.ai/gpustack/pkg/kubemeta"
+	"gpustack.ai/gpustack/pkg/nodefeature"
 	"gpustack.ai/gpustack/pkg/systemmeta"
 	"gpustack.ai/gpustack/pkg/utils/json"
 	"gpustack.ai/gpustack/pkg/utils/strconvx"
@@ -72,6 +73,34 @@ func modelDeploymentRouterProtectedRole(md *workercore.ModelDeployment) bool {
 	}
 
 	return false
+}
+
+// modelDeploymentVLLMRouterKVConnector selects the --kv-connector handshake for vllm-router.
+// Non-vLLM deployments return empty; deployments without a prefill/decode pair return "mooncake";
+// Ascend pairs and NIXL or HIXL backends return "nixl"; all other vLLM pairs return "mooncake".
+func modelDeploymentVLLMRouterKVConnector(md *workercore.ModelDeployment, manufacturers map[string]string) string {
+	if md == nil || md.Spec.Engine.Name != workercore.ModelDeploymentEngineVLLM {
+		return ""
+	}
+	if !ModelDeploymentDeclaresBothHalves(md) {
+		return "mooncake"
+	}
+	for i := range md.Spec.Roles {
+		kind := ModelDeploymentEffectiveRoleKind(&md.Spec.Roles[i])
+		if kind != workercore.ModelDeploymentRoleKindPrefill &&
+			kind != workercore.ModelDeploymentRoleKindDecode {
+			continue
+		}
+		if manufacturers[md.Spec.Roles[i].Name] == nodefeature.ManufacturerAscend {
+			return "nixl"
+		}
+	}
+	if md.Spec.KVTransfer != nil &&
+		(md.Spec.KVTransfer.Backend == workercore.ModelDeploymentKVTransferBackendNIXL ||
+			md.Spec.KVTransfer.Backend == workercore.ModelDeploymentKVTransferBackendHIXL) {
+		return "nixl"
+	}
+	return "mooncake"
 }
 
 func renderModelDeploymentRouterObjects(
@@ -329,6 +358,9 @@ func renderModelDeploymentRouterObjects(
 		DiscoveryPort:           ports[0],
 		RequestTimeoutSeconds:   md.Spec.Router.RequestTimeoutSeconds,
 		DisaggregationThreshold: md.Spec.Router.DisaggregationThresholdTokens,
+		// The handshake follows the transfer backend and the pool hardware the pair runs,
+		// resolved in one place so the router and the engine halves cannot disagree.
+		KVConnector: modelDeploymentVLLMRouterKVConnector(md, manufacturers),
 	}
 	// THE SGLANG EXTERNAL DP SHAPE NAMES ITS WIDTH TO THE GATEWAY. The gateway's --dp-aware fans
 	// its worker registration out per dp member, which is the one-worker-per-member contract the

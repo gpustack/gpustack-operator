@@ -2828,3 +2828,151 @@ func TestModelDeploymentModelExpressEndpointsConfigMapAlwaysReconciled(t *testin
 	assert.Empty(t, plainWeights.Render.ModelTransferConfigMap,
 		"no ModelExpress role means no discovery view to mount")
 }
+
+// TestApplyModelTransfer_DefaultsTheNIXLTransportPlugin pins the plugin default the adapter
+// reads: UCX is the plugin everything else speaks, LIBFABRIC the one an EFA device is reachable
+// through, and a role env entry naming the plugin outranks the operator's answer -- which is why
+// the default is appended only where the container carries none.
+func TestApplyModelTransfer_DefaultsTheNIXLTransportPlugin(t *testing.T) {
+	container := func(env ...core.EnvVar) *core.Container {
+		return &core.Container{
+			Name:    modelDeploymentMainContainerName,
+			Command: []string{"vllm", "serve", "org/model"},
+			Env:     env,
+		}
+	}
+	envValue := func(c *core.Container, name string) string {
+		for i := range c.Env {
+			if c.Env[i].Name == name {
+				return c.Env[i].Value
+			}
+		}
+		return ""
+	}
+
+	t.Run("UCX is the default without an EFA fabric", func(t *testing.T) {
+		render := modelTransferRemoteRender()
+		render.ModelTransferBackend = "nixl"
+		c := container()
+		render.applyModelTransfer(c, workercore.ModelDeploymentEngineVLLM)
+		assert.Equal(t, "UCX", envValue(c, modelDeploymentModelTransferEnvNIXLBackend))
+	})
+
+	t.Run("LIBFABRIC follows the EFA report", func(t *testing.T) {
+		render := modelTransferRemoteRender()
+		render.ModelTransferBackend = "nixl"
+		render.ModelTransferEFA = true
+		c := container()
+		render.applyModelTransfer(c, workercore.ModelDeploymentEngineVLLM)
+		assert.Equal(t, "LIBFABRIC", envValue(c, modelDeploymentModelTransferEnvNIXLBackend))
+	})
+
+	t.Run("a role env entry outranks the default", func(t *testing.T) {
+		render := modelTransferRemoteRender()
+		render.ModelTransferBackend = "nixl"
+		render.ModelTransferEFA = true
+		c := container(core.EnvVar{
+			Name: modelDeploymentModelTransferEnvNIXLBackend, Value: "UCX",
+		})
+		render.applyModelTransfer(c, workercore.ModelDeploymentEngineVLLM)
+		assert.Equal(t, "UCX", envValue(c, modelDeploymentModelTransferEnvNIXLBackend),
+			"the plugin is defaulted, never owned: the workload may answer for its image")
+	})
+
+	t.Run("the hixl backend carries no plugin selection", func(t *testing.T) {
+		render := modelTransferRemoteRender()
+		render.ModelTransferBackend = "hixl"
+		render.ModelTransferEFA = true
+		c := container()
+		render.applyModelTransfer(c, workercore.ModelDeploymentEngineVLLM)
+		assert.Empty(t, envValue(c, modelDeploymentModelTransferEnvNIXLBackend),
+			"the Ascend data plane picks its transport on the engine side, not here")
+	})
+}
+
+// TestModelDeploymentDirectInterfaceProtocol_SGLangAndRemoteEFA covers the two legs the fabric
+// answer widened for: an SGLang prefill/decode pair resolves the declared protocol the way a
+// vLLM pair does, and NIXL remote weight delivery prefers the declared EFA fabric over the RDMA
+// default, so a weight source and an EFA cache pool resolve to one fabric instead of two that
+// collide on one role.
+func TestModelDeploymentDirectInterfaceProtocol_SGLangAndRemoteEFA(t *testing.T) {
+	pair := func(engine, protocol string) *workercore.ModelDeployment {
+		return newRenderDeployment(func(md *workercore.ModelDeployment) {
+			md.Spec.Engine.Name = engine
+			md.Spec.KVCache = nil
+			md.Spec.Router = &workercore.ModelDeploymentRouter{Name: workercore.ModelDeploymentRouterLLMD}
+			md.Spec.Roles[0].Kind = workercore.ModelDeploymentRoleKindPrefill
+			md.Spec.KVTransfer = &workercore.ModelDeploymentKVTransfer{Protocol: protocol}
+			md.Spec.Roles = append(md.Spec.Roles, workercore.ModelDeploymentRole{
+				Name: "decode", Kind: workercore.ModelDeploymentRoleKindDecode,
+			})
+		})
+	}
+
+	t.Run("an SGLang pair resolves a declared rdma protocol", func(t *testing.T) {
+		md := pair(workercore.ModelDeploymentEngineSGLang, "RDMA")
+		assert.Equal(t, "rdma", ModelDeploymentDirectInterfaceProtocol(
+			md, &md.Spec.Roles[0], nodefeature.ManufacturerNVIDIA,
+		))
+	})
+
+	t.Run("an SGLang pair resolves a declared efa protocol", func(t *testing.T) {
+		md := pair(workercore.ModelDeploymentEngineSGLang, "EFA")
+		assert.Equal(t, "efa", ModelDeploymentDirectInterfaceProtocol(
+			md, &md.Spec.Roles[0], nodefeature.ManufacturerNVIDIA,
+		))
+	})
+
+	t.Run("an SGLang multi-member Server role resolves nothing", func(t *testing.T) {
+		md := pair(workercore.ModelDeploymentEngineSGLang, "RDMA")
+		md.Spec.Roles[0].Kind = workercore.ModelDeploymentRoleKindServer
+		md.Spec.Roles[0].ReplicaSize = 2
+		md.Spec.Roles = md.Spec.Roles[:1]
+		assert.Equal(t, "", ModelDeploymentDirectInterfaceProtocol(
+			md, &md.Spec.Roles[0], nodefeature.ManufacturerNVIDIA,
+		),
+			"the collective shape is vLLM's alone; SGLang Server roles are not a granted leg")
+	})
+
+	t.Run("remote weight delivery prefers the declared efa fabric", func(t *testing.T) {
+		md := pair(workercore.ModelDeploymentEngineVLLM, "EFA")
+		artifact := &ModelDeploymentArtifactRender{
+			Delivery: workercore.ModelDeploymentModelDeliveryRemote,
+		}
+		assert.Equal(t, "efa", ModelDeploymentDirectInterfaceProtocol(
+			md, &md.Spec.Roles[0], nodefeature.ManufacturerNVIDIA, artifact,
+		),
+			"the weight source resolves to the fabric the transfer leg declared")
+	})
+
+	t.Run("remote weight delivery keeps rdma without a declared efa protocol", func(t *testing.T) {
+		md := pair(workercore.ModelDeploymentEngineVLLM, "RDMA")
+		artifact := &ModelDeploymentArtifactRender{
+			Delivery: workercore.ModelDeploymentModelDeliveryRemote,
+		}
+		assert.Equal(t, "rdma", ModelDeploymentDirectInterfaceProtocol(
+			md, &md.Spec.Roles[0], nodefeature.ManufacturerNVIDIA, artifact,
+		))
+	})
+
+	t.Run("remote weight delivery on SGLang resolves the declared fabric too", func(t *testing.T) {
+		md := pair(workercore.ModelDeploymentEngineSGLang, "EFA")
+		artifact := &ModelDeploymentArtifactRender{
+			Delivery: workercore.ModelDeploymentModelDeliveryRemote,
+		}
+		assert.Equal(t, "efa", ModelDeploymentDirectInterfaceProtocol(
+			md, &md.Spec.Roles[0], nodefeature.ManufacturerNVIDIA, artifact,
+		))
+	})
+
+	t.Run("remote weight delivery resolves efa from an EFA cache pool when protocol is unset", func(t *testing.T) {
+		md := pair(workercore.ModelDeploymentEngineVLLM, "")
+		artifact := &ModelDeploymentArtifactRender{
+			Delivery:         workercore.ModelDeploymentModelDeliveryRemote,
+			ModelTransferEFA: true,
+		}
+		assert.Equal(t, "efa", ModelDeploymentDirectInterfaceProtocol(
+			md, &md.Spec.Roles[0], nodefeature.ManufacturerNVIDIA, artifact,
+		))
+	})
+}

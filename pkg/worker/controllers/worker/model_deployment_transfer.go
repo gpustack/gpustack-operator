@@ -562,7 +562,8 @@ func (a *ModelDeploymentArtifactRender) modelTransferFallbackRenderFor(
 // applyModelTransfer decorates a rendered main container for a remote delivery: the
 // bootstrap that installs the staged wheel before the engine starts, the
 // load format that selects the model-transfer adapter, and the env the adapter reads.
-// It is a no-op for every other delivery.
+// On the nixl backend it also defaults GPUSTACK_MODEL_TRANSFER_NIXL_BACKEND to LIBFABRIC
+// when ModelTransferEFA is true and UCX otherwise. It is a no-op for every other delivery.
 func (a *ModelDeploymentArtifactRender) applyModelTransfer(c *core.Container, engine string) {
 	if a.Delivery != workercore.ModelDeploymentModelDeliveryRemote {
 		return
@@ -586,6 +587,20 @@ func (a *ModelDeploymentArtifactRender) applyModelTransfer(c *core.Container, en
 		Name:  modelDeploymentModelTransferEnvTimeout,
 		Value: modelDeploymentModelTransferDefaultTimeoutSeconds,
 	}})
+	// The NIXL transport plugin follows the fabric this role resolved: LIBFABRIC is the
+	// plugin an EFA device is reachable through, UCX is the plugin everything else speaks.
+	// Defaulted rather than owned, so an image carrying one plugin can be answered for in
+	// role env.
+	if a.ModelTransferBackend == "nixl" {
+		nixlPlugin := "UCX"
+		if a.ModelTransferEFA {
+			nixlPlugin = "LIBFABRIC"
+		}
+		c.Env = appendModelDeploymentEnvIfAbsent(c.Env, []core.EnvVar{{
+			Name:  modelDeploymentModelTransferEnvNIXLBackend,
+			Value: nixlPlugin,
+		}})
+	}
 }
 
 // modelDeploymentModelTransferBootstrapScript installs the staged wheel before the
@@ -647,6 +662,7 @@ const (
 	modelDeploymentModelTransferEnvWheelDir       = "GPUSTACK_MODEL_TRANSFER_WHEEL_DIR"
 	modelDeploymentModelTransferEnvLoadFormat     = "GPUSTACK_MODEL_TRANSFER_LOAD_FORMAT"
 	modelDeploymentModelTransferEnvBackend        = "GPUSTACK_MODEL_TRANSFER_BACKEND"
+	modelDeploymentModelTransferEnvNIXLBackend    = "GPUSTACK_MODEL_TRANSFER_NIXL_BACKEND"
 	// modelDeploymentModelTransferEnvTimeout bounds one remote transfer: the
 	// client's probe and operation waits and the HCCL collective timeout the
 	// plugin sets from it share the figure, because a broadcast queued on the

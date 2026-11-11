@@ -49,6 +49,7 @@ import (
 	"gpustack.ai/gpustack/pkg/utils/ctrlclix"
 	"gpustack.ai/gpustack/pkg/worker/elasticengine"
 	"gpustack.ai/gpustack/pkg/worker/kvcache/inject"
+	"gpustack.ai/gpustack/pkg/worker/kvcache/mooncake"
 	"gpustack.ai/gpustack/pkg/worker/settings"
 )
 
@@ -2402,7 +2403,7 @@ func (r *ModelDeploymentReconciler) renderModelDeploymentRolePods(
 		// not do is reach the shared KV store. The early skip that used to keep Encode out of this
 		// block has therefore become a term below that excludes the KV terms alone, so a leg the
 		// operator owns is configured while the store the operator does not own is left alone.
-		kvTransfer := modelDeploymentUsesKVTransfer(md, role, instType.Status.Detail.Manufacturer)
+		kvTransfer := modelDeploymentUsesKVTransfer(md, role)
 		publishKVEvents := modelDeploymentPublishesKVEvents(md, role, instType.Status.Detail.Manufacturer)
 		routingSidecar := modelDeploymentFrontsDecodeWithSidecar(md, role)
 		roleKind := ModelDeploymentEffectiveRoleKind(role)
@@ -2412,6 +2413,34 @@ func (r *ModelDeploymentReconciler) renderModelDeploymentRolePods(
 		// fields below are set unconditionally rather than behind a test.
 		encoderLeg := modelDeploymentEPDEncoderLeg(md, role, instType.Status.Detail.Manufacturer)
 		encoderURLs := modelDeploymentEPDEncoderURLs(md)
+		// Resolve declared or pool-level EFA before the interface block: ModelDeploymentDirectInterfaceProtocol
+		// reads in.Artifact.ModelTransferEFA during interface resolution, and any EFA interface grant
+		// resolved below derives from these same two sources.
+		declaredOrPoolEFA := (md.Spec.KVTransfer != nil && mooncake.TransportProtocol(md.Spec.KVTransfer.Protocol) == "efa") ||
+			slices.Contains(interfaceProtocols, "efa")
+		if in.Artifact != nil && in.Artifact.Delivery == workercore.ModelDeploymentModelDeliveryRemote {
+			in.Artifact.ModelTransferEFA = declaredOrPoolEFA
+		}
+		var interfaceResource core.ResourceName
+		if role.Resources != nil && role.Resources.Interface != nil && role.Resources.Interface.Sign() > 0 {
+			count, whole := role.Resources.Interface.AsInt64()
+			if !whole {
+				return nil, fmt.Errorf("role %q requests a fractional interface count", role.Name)
+			}
+			var protocols []string
+			if len(role.Command) == 0 {
+				protocols = interfaceProtocols
+			}
+			resource, err := ModelDeploymentInterfaceResource(protocols,
+				ModelDeploymentDirectInterfaceProtocol(md, role, instType.Status.Detail.Manufacturer, in.Artifact), count)
+			if err != nil {
+				return nil, fmt.Errorf("role %q interface request: %w", role.Name, err)
+			}
+			interfaceResource = resource
+			in.InterfaceResource = resource
+		}
+		efaActive := interfaceResource == mooncake.FabricDeviceResource("efa", 1) || declaredOrPoolEFA
+
 		if roleKind != workercore.ModelDeploymentRoleKindEncode &&
 			ModelDeploymentMaySynthesizeConnector(md) &&
 			(connection != nil || kvTransfer || publishKVEvents || routingSidecar) {
@@ -2440,6 +2469,11 @@ func (r *ModelDeploymentReconciler) renderModelDeploymentRolePods(
 			if md.Spec.KVTransfer != nil {
 				roleConnection.KVTransferProtocol = md.Spec.KVTransfer.Protocol
 			}
+			// The backend is resolved from the spec, the manufacturer and the engine in one
+			// place; the fabric answer arrives from the grant resolved above, so a NIXL leg on
+			// an EFA pool names LIBFABRIC without anyone restating the rule here.
+			roleConnection.KVTransferBackend = ModelDeploymentEffectiveKVTransferBackend(md, instType.Status.Detail.Manufacturer)
+			roleConnection.KVTransferEFA = efaActive
 			if weights != nil && connection != nil {
 				roleConnection.CachePrefix = weights.KVIdentity
 			}
@@ -2489,22 +2523,6 @@ func (r *ModelDeploymentReconciler) renderModelDeploymentRolePods(
 		in.ECConnector = ModelDeploymentECSidecarConnector(
 			modelDeploymentEPDConnector(md, instType.Status.Detail.Manufacturer),
 		)
-		if role.Resources != nil && role.Resources.Interface != nil && role.Resources.Interface.Sign() > 0 {
-			count, whole := role.Resources.Interface.AsInt64()
-			if !whole {
-				return nil, fmt.Errorf("role %q requests a fractional interface count", role.Name)
-			}
-			var protocols []string
-			if len(role.Command) == 0 {
-				protocols = interfaceProtocols
-			}
-			in.InterfaceResource, err = ModelDeploymentInterfaceResource(protocols,
-				ModelDeploymentDirectInterfaceProtocol(md, role, instType.Status.Detail.Manufacturer, in.Artifact), count)
-			if err != nil {
-				return nil, fmt.Errorf("role %q interface request: %w", role.Name, err)
-			}
-		}
-
 		template, err := renderModelDeploymentPodTemplate(ctx, in)
 		if err != nil {
 			return nil, err

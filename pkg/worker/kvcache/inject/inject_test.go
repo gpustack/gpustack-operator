@@ -1148,6 +1148,33 @@ func TestRender_Refusals(t *testing.T) {
 			},
 			want: ReasonRoleUnsupported,
 		},
+		{
+			// The backend names a connector the engine's own registry does not resolve, so
+			// rendering anything would start a container that looks configured and transfers
+			// nothing. The connection here is deliberately absent: the backend is checked before
+			// any document is built, on whatever the caller declared.
+			name:  "the HIXL backend on vLLM proper",
+			input: Input{Engine: EngineVLLM, Role: RolePrefill, KVTransfer: true, KVTransferBackend: KVTransferBackendHIXL},
+			want:  ReasonTransportUnsupported,
+		},
+		{
+			name:  "the NIXL backend on vLLM-Ascend",
+			input: Input{Engine: EngineVLLMAscend, Role: RoleDecode, KVTransfer: true, KVTransferBackend: KVTransferBackendNIXL},
+			want:  ReasonTransportUnsupported,
+		},
+		{
+			name:  "a vLLM backend value outside the known set",
+			input: Input{Engine: EngineVLLM, Role: RolePrefill, KVTransfer: true, KVTransferBackend: "TensorRT"},
+			want:  ReasonTransportUnsupported,
+		},
+		{
+			name: "an SGLang backend value outside the known set",
+			input: Input{
+				Engine: EngineSGLang, Role: RolePrefill, Disaggregated: true, KVTransfer: true,
+				KVTransferBackend: "TensorRT",
+			},
+			want: ReasonTransportUnsupported,
+		},
 	}
 
 	for _, tc := range testCases {
@@ -1352,6 +1379,219 @@ func TestRender_TransferLegAndEventsFollowTheEngine(t *testing.T) {
 			}
 			require.Error(t, err, "a capability the renderer drops must be refused, not ignored")
 			assert.Contains(t, err.Error(), c.wantErr)
+		})
+	}
+}
+
+// TestRender_VLLMNIXLTransfer pins the NIXL leg: the connector the engine's own registry
+// resolves, the transport plugin named through the extra config, and the side channel the pair
+// exchanges its endpoints through. The plugin values and the port number are asserted as
+// LITERALS, not through the package's constants -- they are the contract with NIXL's plugin
+// registry and with the connector's own default, and an assertion built from the constant under
+// test would pass whatever the constant held.
+//
+// The side channel is a PAIR of listeners, so every row that renders the leg also renders the
+// host projection, the defaulted port and the container port -- a decode row asserting none of
+// them would pass a renderer that arms the producer alone. What the rows equally pin is the
+// absence of the Mooncake bootstrap pair: a NIXL leg binds no Mooncake listener, and neither the
+// variable nor the port may render beside it.
+func TestRender_VLLMNIXLTransfer(t *testing.T) {
+	testCases := []struct {
+		name       string
+		role       Role
+		conn       Connection
+		efa        bool
+		protocol   string
+		wantKVRole string
+		wantPlugin string
+	}{
+		{
+			name:       "prefill, UCX by default",
+			role:       RolePrefill,
+			wantKVRole: "kv_producer", wantPlugin: "UCX",
+		},
+		{
+			name:       "decode, UCX by default",
+			role:       RoleDecode,
+			wantKVRole: "kv_consumer", wantPlugin: "UCX",
+		},
+		{
+			name: "decode, LIBFABRIC on the EFA report",
+			role: RoleDecode, efa: true,
+			wantKVRole: "kv_consumer", wantPlugin: "LIBFABRIC",
+		},
+		{
+			name: "prefill, LIBFABRIC on a declared efa protocol",
+			role: RolePrefill, protocol: "efa",
+			wantKVRole: "kv_producer", wantPlugin: "LIBFABRIC",
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			result, err := Render(Input{
+				Engine: EngineVLLM, Role: tc.role, Connection: tc.conn,
+				KVTransfer: true, KVTransferBackend: KVTransferBackendNIXL,
+				KVTransferEFA: tc.efa, KVTransferProtocol: tc.protocol,
+			})
+			require.NoError(t, err)
+
+			require.Len(t, result.Args, 2)
+			assert.Equal(t, vllmTransferConfigArg, result.Args[0])
+			assert.JSONEq(t, fmt.Sprintf(`{
+				"kv_connector":"NixlConnector",
+				"kv_role":%q,
+				"kv_connector_extra_config":{"backends":[%q]}
+			}`, tc.wantKVRole, tc.wantPlugin), result.Args[1])
+			assert.True(t, result.KVTransfer)
+
+			host := envValue(t, result.Env, "VLLM_NIXL_SIDE_CHANNEL_HOST")
+			assert.Empty(t, host.Value, "a literal would be a guess; the kubelet resolves this one")
+			require.NotNil(t, host.ValueFrom)
+			require.NotNil(t, host.ValueFrom.FieldRef)
+			assert.Equal(t, "status.podIP", host.ValueFrom.FieldRef.FieldPath)
+
+			assert.Equal(t, []core.EnvVar{{Name: "VLLM_NIXL_SIDE_CHANNEL_PORT", Value: "5600"}},
+				result.DefaultedEnv, "the port is a default the workload may answer for itself")
+			assert.Equal(t, []core.ContainerPort{
+				{Name: "nixl-side", Protocol: core.ProtocolTCP, ContainerPort: 5600},
+			}, result.Ports, "both halves open the side channel they announce")
+
+			assert.NotContains(t, envNames(result.Env), "VLLM_MOONCAKE_BOOTSTRAP_PORT",
+				"a NIXL leg binds no Mooncake listener")
+			assert.NotContains(t, envNames(result.DefaultedEnv), "MC_FORCE_TCP",
+				"the Nixl connector reads no Mooncake pin, so none renders")
+			assert.Empty(t, result.Volumes, "the NIXL leg mounts no host path")
+			assert.Empty(t, result.VolumeMounts)
+			for _, port := range result.Ports {
+				assert.Empty(t, utilvalidation.IsValidPortName(port.Name),
+					"rendered port %q must be accepted by the Kubernetes API", port.Name)
+			}
+		})
+	}
+}
+
+// TestRender_VLLMNIXLTransferComposesPointToPointAndStore is the ordering half of the NIXL leg:
+// composed with a shared store, the Nixl connector must be the FIRST inner connector, because
+// vLLM's MultiConnector returns the first non-nil worker handshake metadata to the scheduler --
+// a Nixl connector rendered second would leave the engine without the side-channel metadata the
+// transfer rides on, while every Pod involved looks configured.
+func TestRender_VLLMNIXLTransferComposesPointToPointAndStore(t *testing.T) {
+	result, err := Render(Input{
+		Engine: EngineVLLM, Role: RolePrefill, Connection: testConnection(),
+		KVTransfer: true, KVTransferBackend: KVTransferBackendNIXL, KVTransferEFA: true,
+	})
+	require.NoError(t, err)
+
+	require.Len(t, result.Args, 2)
+	assert.Equal(t, vllmTransferConfigArg, result.Args[0])
+	assert.JSONEq(t, `{
+		"kv_connector":"MultiConnector",
+		"kv_role":"kv_producer",
+		"kv_connector_extra_config":{"connectors":[
+			{"kv_connector":"NixlConnector","kv_role":"kv_producer",
+			 "kv_connector_extra_config":{"backends":["LIBFABRIC"]}},
+			{"kv_connector":"MooncakeStoreConnector","kv_role":"kv_both"}
+		]}
+	}`, result.Args[1])
+}
+
+// TestRender_VLLMAscendHIXLTransfer pins what an explicitly named HIXL backend adds to the
+// Ascend leg. The document and the driver mount are the ones ANY Ascend leg renders -- pinned by
+// TestRender_VLLMAscendKVTransfer -- so what this test owns is the variables: AUTO_CONNECT turns
+// on the endpoint exchange the pair needs without a bootstrap address, and a declared RDMA
+// protocol additionally constrains the MemFabric link to Device RoCE, spelled as the JSON the
+// engine reads. The values are defaulted, never owned, and the RDMA pair is written
+// symmetrically from the deployment-wide protocol so the two halves cannot select different
+// links.
+func TestRender_VLLMAscendHIXLTransfer(t *testing.T) {
+	testCases := []struct {
+		name          string
+		role          Role
+		protocol      string
+		wantDefaulted []core.EnvVar
+	}{
+		{
+			name:          "prefill, tcp leaves the link to MemFabric",
+			role:          RolePrefill,
+			wantDefaulted: []core.EnvVar{{Name: "ASCEND_AUTO_CONNECT", Value: "1"}},
+		},
+		{
+			name: "decode, rdma constrains the link to Device RoCE",
+			role: RoleDecode, protocol: "rdma",
+			wantDefaulted: []core.EnvVar{
+				{Name: "ASCEND_AUTO_CONNECT", Value: "1"},
+				{Name: "ASCEND_GLOBAL_RESOURCE_CONFIG", Value: `{"comm_resource_config.protocol_desc":"roce:device"}`},
+				{Name: "HCCL_INTRA_ROCE_ENABLE", Value: "1"},
+			},
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			result, err := Render(Input{
+				Engine: EngineVLLMAscend, Role: tc.role, KVTransfer: true,
+				KVTransferBackend: KVTransferBackendHIXL, KVTransferProtocol: tc.protocol,
+			})
+			require.NoError(t, err)
+
+			require.Len(t, result.Args, 2)
+			assert.Equal(t, vllmTransferConfigArg, result.Args[0])
+			assert.JSONEq(t, fmt.Sprintf(`{
+				"kv_connector":"MooncakeConnectorV1",
+				"kv_role":%q,
+				"kv_port":8998,
+				"kv_connector_extra_config":{
+					"prefill":{"tp_size":1,"dp_size":1},
+					"decode":{"tp_size":1,"dp_size":1}}
+			}`, map[Role]string{RolePrefill: "kv_producer", RoleDecode: "kv_consumer"}[tc.role]),
+				result.Args[1], "the backend names variables, not a different connector")
+
+			assert.Equal(t, tc.wantDefaulted, result.DefaultedEnv,
+				"the Ascend variables are defaulted, and nothing else is defaulted beside them")
+
+			require.Len(t, result.Volumes, 1)
+			volume := result.Volumes[0]
+			assert.Equal(t, "gpustack-ascend-driver", volume.Name)
+			require.NotNil(t, volume.HostPath)
+			assert.Equal(t, "/usr/local/Ascend/driver", volume.HostPath.Path)
+			require.NotNil(t, volume.HostPath.Type)
+			assert.Equal(t, core.HostPathDirectory, *volume.HostPath.Type)
+			assert.Equal(t, []core.VolumeMount{
+				{Name: "gpustack-ascend-driver", MountPath: "/usr/local/Ascend/driver", ReadOnly: true},
+			}, result.VolumeMounts)
+
+			if tc.role == RolePrefill {
+				assert.Contains(t, result.Ports, core.ContainerPort{
+					Name: "mc-bootstrap", Protocol: core.ProtocolTCP, ContainerPort: 8998,
+				}, "an Ascend prefiller keeps the handshake port its admission reservation guards")
+			} else {
+				assert.Empty(t, result.Ports, "a consumer dials the prefiller's advertised port and binds none")
+			}
+		})
+	}
+}
+
+// TestRender_VLLMAscendNoBackendDefaultsNoAscendVariable is the backward-compatibility half: the
+// Ascend variables follow the NAMED backend, not the leg alone, so every Ascend render that
+// predates the backend field -- omitted, empty, or Mooncake -- must render none of them. An env
+// addition no row asked for would restart every Ascend pair the operator already runs.
+func TestRender_VLLMAscendNoBackendDefaultsNoAscendVariable(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		backend string
+	}{
+		{name: "omitted", backend: ""},
+		{name: "mooncake", backend: KVTransferBackendMooncake},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			result, err := Render(Input{
+				Engine: EngineVLLMAscend, Role: RolePrefill, KVTransfer: true,
+				KVTransferBackend: tc.backend, KVTransferProtocol: "rdma",
+			})
+			require.NoError(t, err)
+			assert.Empty(t, result.DefaultedEnv,
+				"the Ascend variables follow the named backend, and no backend was named")
 		})
 	}
 }

@@ -491,7 +491,8 @@ func (r *ModelDeploymentWebhook) validateModelDeploymentPoolTransport(
 		}
 		seen[role.InstanceType] = struct{}{}
 		manufacturer := ""
-		if md.Spec.Engine.Name == workercore.ModelDeploymentEngineVLLM || md.Spec.Model.ArtifactRef != nil {
+		if md.Spec.Engine.Name == workercore.ModelDeploymentEngineVLLM ||
+			md.Spec.Engine.Name == workercore.ModelDeploymentEngineSGLang || md.Spec.Model.ArtifactRef != nil {
 			instType, err := r.getInstanceType(ctx, role.InstanceType, i)
 			if err != nil {
 				return nil, err
@@ -576,7 +577,8 @@ func (r *ModelDeploymentWebhook) modelDeploymentRoleNeedsInterfaceRejudge(
 	// The probes differ, which only a non-Ascend manufacturer can turn into a real leg change,
 	// so the rendered legs are compared at the type's own manufacturer before rejudging.
 	manufacturer := ""
-	if md.Spec.Engine.Name == workercore.ModelDeploymentEngineVLLM || md.Spec.Model.ArtifactRef != nil {
+	if md.Spec.Engine.Name == workercore.ModelDeploymentEngineVLLM ||
+		md.Spec.Engine.Name == workercore.ModelDeploymentEngineSGLang || md.Spec.Model.ArtifactRef != nil {
 		instType, err := r.getInstanceType(ctx, role.InstanceType, i)
 		if err != nil {
 			return false, err
@@ -667,7 +669,8 @@ func (r *ModelDeploymentWebhook) validateModelDeploymentInterfaceRequests(
 			continue
 		}
 		manufacturer := ""
-		if md.Spec.Engine.Name == workercore.ModelDeploymentEngineVLLM || md.Spec.Model.ArtifactRef != nil {
+		if md.Spec.Engine.Name == workercore.ModelDeploymentEngineVLLM ||
+			md.Spec.Engine.Name == workercore.ModelDeploymentEngineSGLang || md.Spec.Model.ArtifactRef != nil {
 			instType, err := r.getInstanceType(ctx, role.InstanceType, i)
 			if err != nil {
 				return nil, err
@@ -678,8 +681,17 @@ func (r *ModelDeploymentWebhook) validateModelDeploymentInterfaceRequests(
 		if len(role.Command) > 0 {
 			roleProtocols = nil
 		}
+		var artifactRender []*workerctrl.ModelDeploymentArtifactRender
+		if md.Spec.Model.ArtifactRef != nil {
+			declaredEFA := md.Spec.KVTransfer != nil &&
+				mooncake.TransportProtocol(md.Spec.KVTransfer.Protocol) == "efa"
+			artifactRender = []*workerctrl.ModelDeploymentArtifactRender{{
+				Delivery:         workercore.ModelDeploymentModelDeliveryRemote,
+				ModelTransferEFA: declaredEFA || slices.Contains(roleProtocols, "efa"),
+			}}
+		}
 		_, err := workerctrl.ModelDeploymentInterfaceResource(roleProtocols,
-			workerctrl.ModelDeploymentDirectInterfaceProtocol(md, role, manufacturer), count)
+			workerctrl.ModelDeploymentDirectInterfaceProtocol(md, role, manufacturer, artifactRender...), count)
 		if err != nil {
 			errs = append(errs, field.Invalid(field.NewPath("spec", "roles").Index(i).Child("resources", "interface"),
 				role.Resources.Interface.String(), err.Error()))
@@ -1298,17 +1310,30 @@ func modelDeploymentRouterReservedPorts(
 			reserved = append(reserved, inject.VLLMKVEventsPort, inject.VLLMKVEventsReplayPort)
 		}
 		// The Mooncake bootstrap server runs on the prefiller alone, and UNDER EVERY ROUTER rather
-		// than one. The leg that binds it reads a router name only to exclude an Ascend pair behind
-		// a router that cannot drive it; on every other vendor the leg renders under whichever
-		// router is named. This rule cannot see the vendor, so naming one router here releases the
-		// port under the other two while the render still binds it -- the permanent collision the
-		// paragraph above describes as being wrong in both directions at once. The renderer states
-		// the same rule from its own side, that the reservation keeping a user's port off this one
-		// is vendor-blind. The pair term is read here too, because it CAN be: the leg follows a
-		// declared pair, and a lone prefiller under a router binds no bootstrap server.
-		if kind == workercore.ModelDeploymentRoleKindPrefill &&
-			workerctrl.ModelDeploymentDeclaresBothHalves(md) {
-			reserved = append(reserved, inject.VLLMMooncakeBootstrapPort)
+		// than one. On every vendor the leg renders under whichever router is named, so the
+		// reservation is vendor-blind; the renderer states the same rule from its own side. The
+		// pair term is read here too, because it CAN be: the leg follows a declared pair, and a
+		// lone prefiller under a router binds no bootstrap server.
+		//
+		// A NIXL LEG BINDS NO MOONCAKE LISTENER, and it arms the side channel on BOTH halves
+		// instead: the producer announces its handshake endpoint there and the consumer runs the
+		// matching listener, so 5600 is reserved on prefill and decode alike and 8998 stays free.
+		// HIXL stays on the 8998 branch because the vLLM-Ascend transfer connector still renders
+		// kv_port=8998 (VLLMMooncakeBootstrapPort) even though the routing sidecar uses the
+		// two-step nixlv2 HTTP relay. The backend is read from the spec because this rule cannot
+		// see the vendor; the renderer renders the listeners for every pool that names this
+		// backend, so reserving for the declared value is the only answer that cannot release a
+		// port the render binds.
+		if workerctrl.ModelDeploymentDeclaresBothHalves(md) {
+			if md.Spec.KVTransfer != nil &&
+				md.Spec.KVTransfer.Backend == workercore.ModelDeploymentKVTransferBackendNIXL {
+				if kind == workercore.ModelDeploymentRoleKindPrefill ||
+					kind == workercore.ModelDeploymentRoleKindDecode {
+					reserved = append(reserved, inject.VLLMNIXLSideChannelPort)
+				}
+			} else if kind == workercore.ModelDeploymentRoleKindPrefill {
+				reserved = append(reserved, inject.VLLMMooncakeBootstrapPort)
+			}
 		}
 	case workercore.ModelDeploymentEngineSGLang:
 		// SGLang's bootstrap registry follows the ROLE and not any router, because naming the split
@@ -2413,7 +2438,20 @@ func (r *ModelDeploymentWebhook) validateRoleResourcesAgainstInstanceTypes(
 	seen := make(map[string]*worker.InstanceType, 1)
 	for i := range md.Spec.Roles {
 		role := &md.Spec.Roles[i]
-		if role.InstanceType == "" || role.Resources == nil {
+		// A PAIR'S BACKEND RULES READ EVERY HALF'S MANUFACTURER, whether or not that half
+		// requests resources: the backend-vs-vendor refusals and the mixed-pair refusal are
+		// decided per role, and a role that declares no resources still names an InstanceType
+		// whose vendor decides them. A role outside a declared pair, and a role inside one that
+		// names no type, have nothing for the rules to read and stay skipped.
+		roleInPair := workerctrl.ModelDeploymentDeclaresBothHalves(md)
+		if roleInPair {
+			switch workerctrl.ModelDeploymentEffectiveRoleKind(role) {
+			case workercore.ModelDeploymentRoleKindPrefill, workercore.ModelDeploymentRoleKindDecode:
+			default:
+				roleInPair = false
+			}
+		}
+		if role.InstanceType == "" || (role.Resources == nil && !roleInPair) {
 			continue
 		}
 
@@ -2443,6 +2481,11 @@ func (r *ModelDeploymentWebhook) validateRoleResourcesAgainstInstanceTypes(
 			}
 			seen[role.InstanceType] = instType
 		}
+		if role.Resources == nil {
+			// The type was resolved for the backend rules' manufacturer alone; a role that
+			// requests no resources has nothing for the per-resource rules below to judge.
+			continue
+		}
 		if !instType.Spec.Acceleratable {
 			continue
 		}
@@ -2465,8 +2508,85 @@ func (r *ModelDeploymentWebhook) validateRoleResourcesAgainstInstanceTypes(
 	}
 
 	errs = append(errs, validateModelDeploymentZeroAcceleratorInMultiRoleGroup(md, seen, rolesPath)...)
+	errs = append(errs, validateModelDeploymentKVTransferBackendAgainstInstanceTypes(md, seen)...)
 
 	return append(errs, validateModelDeploymentPairCannotShareOneAccelerator(md, seen, rolesPath)...), nil
+}
+
+// validateModelDeploymentKVTransferBackendAgainstInstanceTypes refuses a spec.kvTransfer.backend
+// the roles' InstanceTypes cannot run, plus the pair shape no transfer can run at all.
+//
+// THE REFUSALS, PER ROLE:
+//
+//   - HIXL names the Ascend data plane, so a prefill or decode role whose InstanceType reports
+//     any other manufacturer is refused: the connector it selects is registered by the Ascend
+//     engine build alone, and a container running it elsewhere starts and transfers nothing.
+//   - NIXL names the vendor-neutral connector, which the Ascend build does not register, so an
+//     Ascend role naming it is refused with the alternatives spelled out.
+//
+// THE MIXED PAIR IS REFUSED WHOLE, EVEN UNDER EXPLICIT MOONCAKE. A prefill and a decode half on
+// manufacturers that disagree cannot exchange blocks -- on vLLM the Ascend half still renders
+// MooncakeConnectorV1 over the Ascend transport and the nixlv2 sidecar relay while the non-Ascend
+// half renders MooncakeConnector, and on both engines the two halves register device memory on
+// incompatible NPU and GPU runtimes -- so the pair is rejected at spec.roles rather than left to
+// fail at transfer time. An unobserved manufacturer (an InstanceType whose detail has not synced,
+// or a role naming no type) declines no role and enters no comparison, because a refusal on a
+// status that has not converged would hold a valid deployment until its pool's hardware is seen.
+func validateModelDeploymentKVTransferBackendAgainstInstanceTypes(
+	md *workercore.ModelDeployment, seen map[string]*worker.InstanceType,
+) field.ErrorList {
+	if md.Spec.KVTransfer == nil {
+		return nil
+	}
+	backend := md.Spec.KVTransfer.Backend
+	backendPath := field.NewPath("spec", "kvTransfer", "backend")
+
+	var errs field.ErrorList
+	var pairManufacturers []string
+	for i := range md.Spec.Roles {
+		kind := workerctrl.ModelDeploymentEffectiveRoleKind(&md.Spec.Roles[i])
+		if kind != workercore.ModelDeploymentRoleKindPrefill &&
+			kind != workercore.ModelDeploymentRoleKindDecode {
+			continue
+		}
+		instType, ok := seen[md.Spec.Roles[i].InstanceType]
+		if !ok || instType == nil {
+			continue
+		}
+		manufacturer := instType.Status.Detail.Manufacturer
+		if manufacturer == "" {
+			continue
+		}
+		pairManufacturers = append(pairManufacturers, manufacturer)
+
+		switch backend {
+		case workercore.ModelDeploymentKVTransferBackendHIXL:
+			if manufacturer != nodefeature.ManufacturerAscend {
+				errs = append(errs, field.Invalid(backendPath, backend,
+					fmt.Sprintf("backend HIXL requires an Ascend InstanceType, but role %q resolves %q",
+						md.Spec.Roles[i].Name, manufacturer)))
+			}
+		case workercore.ModelDeploymentKVTransferBackendNIXL:
+			if manufacturer == nodefeature.ManufacturerAscend {
+				errs = append(errs, field.Invalid(backendPath, backend,
+					"backend NIXL is not supported on an Ascend InstanceType; use HIXL, Mooncake, or Auto"))
+			}
+		}
+	}
+
+	if workerctrl.ModelDeploymentDeclaresBothHalves(md) && len(pairManufacturers) > 1 {
+		firstAscend := pairManufacturers[0] == nodefeature.ManufacturerAscend
+		for _, manufacturer := range pairManufacturers[1:] {
+			if (manufacturer == nodefeature.ManufacturerAscend) != firstAscend {
+				errs = append(errs, field.Invalid(field.NewPath("spec", "roles"), md.Spec.Roles,
+					"a prefill/decode pair cannot mix Ascend and non-Ascend InstanceTypes: the two "+
+						"halves would run transfer backends that cannot exchange blocks"))
+				break
+			}
+		}
+	}
+
+	return errs
 }
 
 // validateModelDeploymentZeroAcceleratorInMultiRoleGroup refuses a role that requests nothing an

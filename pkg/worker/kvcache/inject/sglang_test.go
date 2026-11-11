@@ -483,3 +483,150 @@ func indexOfArg(args []string, flag string) int {
 	}
 	return -1
 }
+
+// TestRender_SGLangDisaggregationBackendsFollowTheInput pins the NIXL and Ascend backends
+// against the input that names them, one row per half where the halves differ. The backend flag
+// value, the defaulted variable and the driver mount are asserted per row, and the Mooncake
+// baseline rides in the table so the two new backends are always read against what they replaced.
+//
+// EVERY ROW ASSERTS THE ABSENCE OF --host: the bind address is the caller's to write, and a
+// --host on the engine's own command line marks the listener user-moved, which strips the
+// prefill half's health probes while the container starts and serves normally.
+//
+// The Mooncake TCP tuning is asserted per row too, because the pin is a pair property of the
+// MOONCAKE backend alone: a NIXL or Ascend leg reads no Mooncake switch, so the defaulted tuning
+// follows the store's transport and the named backend, never the leg on its own.
+func TestRender_SGLangDisaggregationBackendsFollowTheInput(t *testing.T) {
+	tcpTuningEnv := []core.EnvVar{
+		{Name: "MC_TCP_MAX_QUEUED_TRANSFERS_PER_PEER", Value: "65535"},
+		{Name: "MC_TCP_MAX_PENDING_ADMISSIONS_PER_PEER", Value: "65535"},
+		{Name: "MC_TCP_LANES_PER_PEER", Value: "16"},
+		{Name: "MC_TCP_ADMISSION_TIMEOUT_MS", Value: "60000"},
+	}
+	retraction := []string{"--disaggregation-decode-retraction-backup", "cpu_tensor"}
+
+	testCases := []struct {
+		name              string
+		role              Role
+		backend           string
+		protocol          string
+		efa               bool
+		conn              Connection
+		wantTransfer      string
+		wantDefaultedEnv  []core.EnvVar
+		wantDriverMount   bool
+		wantDefaultedArgs [][]string
+	}{
+		{
+			name: "nixl prefill defaults UCX and no mooncake tcp pin",
+			role: RolePrefill, backend: KVTransferBackendNIXL,
+			wantTransfer:     "nixl",
+			wantDefaultedEnv: []core.EnvVar{{Name: "SGLANG_DISAGGREGATION_NIXL_BACKEND", Value: "UCX"}},
+		},
+		{
+			name: "nixl decode names LIBFABRIC on the EFA report",
+			role: RoleDecode, backend: KVTransferBackendNIXL, efa: true,
+			wantTransfer:      "nixl",
+			wantDefaultedEnv:  []core.EnvVar{{Name: "SGLANG_DISAGGREGATION_NIXL_BACKEND", Value: "LIBFABRIC"}},
+			wantDefaultedArgs: [][]string{retraction},
+		},
+		{
+			name: "nixl decode names LIBFABRIC on a declared efa protocol",
+			role: RoleDecode, backend: KVTransferBackendNIXL, protocol: "efa",
+			wantTransfer:      "nixl",
+			wantDefaultedEnv:  []core.EnvVar{{Name: "SGLANG_DISAGGREGATION_NIXL_BACKEND", Value: "LIBFABRIC"}},
+			wantDefaultedArgs: [][]string{retraction},
+		},
+		{
+			name: "ascend prefill mounts the driver and leaves the link to MemFabric",
+			role: RolePrefill, backend: KVTransferBackendHIXL,
+			wantTransfer:     "ascend",
+			wantDefaultedEnv: []core.EnvVar{{Name: "ASCEND_MF_TRANSFER_PROTOCOL", Value: "sdma"}},
+			wantDriverMount:  true,
+		},
+		{
+			name: "ascend decode constrains the link to Device RoCE on rdma",
+			role: RoleDecode, backend: KVTransferBackendHIXL, protocol: "rdma",
+			wantTransfer:      "ascend",
+			wantDefaultedEnv:  []core.EnvVar{{Name: "ASCEND_MF_TRANSFER_PROTOCOL", Value: "device_rdma"}},
+			wantDriverMount:   true,
+			wantDefaultedArgs: [][]string{retraction},
+		},
+		{
+			// The backward-compatibility baseline: an explicitly named Mooncake backend renders
+			// exactly what an omitted one does, TCP pin included.
+			name: "mooncake keeps the pinned tcp backend",
+			role: RolePrefill, backend: KVTransferBackendMooncake,
+			wantTransfer:      "mooncake_tcp",
+			wantDefaultedEnv:  tcpTuningEnv,
+			wantDefaultedArgs: [][]string{{"--page-size", "64"}},
+		},
+		{
+			// The store's transport keeps its own claim on the process-wide tuning even beside a
+			// NIXL leg: the same process runs the store client, and tcp there is a fact of the
+			// pool, not of the pair.
+			name: "nixl beside a tcp store keeps the store's tcp defaults",
+			role: RolePrefill, backend: KVTransferBackendNIXL, conn: testConnection(),
+			wantTransfer:      "nixl",
+			wantDefaultedEnv:  append([]core.EnvVar{{Name: "SGLANG_DISAGGREGATION_NIXL_BACKEND", Value: "UCX"}}, tcpTuningEnv...),
+			wantDefaultedArgs: [][]string{{"--enable-hierarchical-cache"}, {"--page-size", "64"}},
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			result, err := Render(Input{
+				Engine: EngineSGLang, Role: tc.role, Connection: tc.conn,
+				Disaggregated: true, KVTransfer: true,
+				KVTransferBackend: tc.backend, KVTransferProtocol: tc.protocol, KVTransferEFA: tc.efa,
+			})
+			require.NoError(t, err)
+
+			at := indexOfArg(result.Args, sglangDisaggregationBackendArg)
+			require.GreaterOrEqual(t, at, 0, "the half renders no transfer backend")
+			require.Less(t, at+1, len(result.Args))
+			assert.Equal(t, tc.wantTransfer, result.Args[at+1])
+
+			assert.Equal(t, tc.wantDefaultedEnv, result.DefaultedEnv,
+				"the defaulted environment is exactly the backend's variable plus what the transport claims")
+			assert.Equal(t, tc.wantDefaultedArgs, result.DefaultedArgs)
+
+			for _, arg := range result.Args {
+				assert.False(t, arg == "--host" || strings.HasPrefix(arg, "--host="),
+					"a --host on the engine's own command line strips the prefill health probes")
+			}
+
+			if tc.role == RolePrefill {
+				portAt := indexOfArg(result.Args, sglangDisaggregationBootstrapPortArg)
+				require.GreaterOrEqual(t, portAt, 0,
+					"the bootstrap registry is served on every disaggregation backend")
+				assert.Equal(t, "8998", result.Args[portAt+1])
+				assert.Contains(t, result.Ports, core.ContainerPort{
+					Name: "bootstrap", Protocol: core.ProtocolTCP, ContainerPort: 8998,
+				})
+				assert.Equal(t, map[string]string{"sglang.ai/bootstrap-port": "8998"}, result.PodAnnotations)
+			} else {
+				assert.NotContains(t, result.Args, sglangDisaggregationBootstrapPortArg,
+					"the decode half learns the registry per request and binds none")
+				assert.Empty(t, result.Ports)
+				assert.Empty(t, result.PodAnnotations)
+			}
+
+			if tc.wantDriverMount {
+				require.Len(t, result.Volumes, 1)
+				volume := result.Volumes[0]
+				assert.Equal(t, "gpustack-ascend-driver", volume.Name)
+				require.NotNil(t, volume.HostPath)
+				assert.Equal(t, "/usr/local/Ascend/driver", volume.HostPath.Path)
+				require.NotNil(t, volume.HostPath.Type)
+				assert.Equal(t, core.HostPathDirectory, *volume.HostPath.Type)
+				assert.Equal(t, []core.VolumeMount{
+					{Name: "gpustack-ascend-driver", MountPath: "/usr/local/Ascend/driver", ReadOnly: true},
+				}, result.VolumeMounts)
+			} else {
+				assert.Empty(t, result.Volumes, "the leg mounts no host path")
+				assert.Empty(t, result.VolumeMounts)
+			}
+		})
+	}
+}

@@ -64,7 +64,7 @@ type KVCacheBackendLeaderApplyConfiguration struct {
 	// KVCachePool over a backend with no ledger to write quota into is admitted with a warning that
 	// no per-tenant quota is in force, withdrawing the flag from a backend a pool already holds is
 	// refused, and a webhook reading an unschema'd "true", "1" or "True" would be judging a value
-	// domain that belongs to whoever typed it. The store's global -quota_bytes flag stays in
+	// domain that belongs to whoever typed it. The storage engine's global quota flag stays in
 	// extraArgs for the converse reason: no other API needs to interpret it.
 	//
 	// IT DEFAULTS TO TRUE, because the ledger is what makes the rest of this API mean what it says:
