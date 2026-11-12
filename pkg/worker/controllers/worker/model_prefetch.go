@@ -31,6 +31,7 @@ import (
 	"gpustack.ai/gpustack/pkg/modelstore"
 	"gpustack.ai/gpustack/pkg/modeltransfer/broker"
 	"gpustack.ai/gpustack/pkg/setting"
+	"gpustack.ai/gpustack/pkg/utils/ctrlclix"
 	"gpustack.ai/gpustack/pkg/utils/stringx"
 	"gpustack.ai/gpustack/pkg/worker/settings"
 )
@@ -129,7 +130,7 @@ func (r *ModelPrefetchReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 	if err := r.Client.List(ctx, deps, ctrlcli.InNamespace(pf.Namespace)); err != nil {
 		return ctrl.Result{}, err
 	}
-	pools, err := ResolveInstanceTypeFlavorNames(ctx, r.Client, pf, deps.Items)
+	pools, err := ResolveAcceleratorTypeFlavorNames(ctx, r.Client, pf, deps.Items)
 	if err != nil {
 		return ctrl.Result{}, err
 	}
@@ -302,7 +303,7 @@ func (r *ModelPrefetchReconciler) observeSource(ctx context.Context, pf *workerc
 	// A source names its target set; the derived-from-deployments default an ordinary prefetch
 	// keeps is not available to it, so a missing placement is a refusal, not an expansion.
 	placement := pf.Spec.Placement
-	if placement == nil || (len(placement.InstanceTypes) == 0 && placement.NodeSelector == nil) {
+	if placement == nil || (len(placement.AcceleratorTypes) == 0 && placement.NodeSelector == nil) {
 		obs.placementMissing = true
 	}
 
@@ -531,15 +532,15 @@ func (r *ModelPrefetchReconciler) sourceRuntimePods(ctx context.Context, nodes [
 // call sites and tests unchanged.
 func prefetchTargetNodes(
 	pf *workercore.ModelPrefetch, nodes []core.Node, deps []workercore.ModelDeployment,
-	pools InstanceTypeFlavorNames,
+	pools AcceleratorTypeFlavorNames,
 ) ([]string, error) {
 	return modelstore.PrefetchTargetNodes(pf, nodes, deps, pools)
 }
 
-// deploymentInstanceTypes collects the InstanceType names the namespace's deployments serve the
+// deploymentAcceleratorTypes collects the AcceleratorType names the namespace's deployments serve the
 // artifact's weights on; owned by modelstore, wrapped for this package's tests.
-func deploymentInstanceTypes(deps []workercore.ModelDeployment, artifactName string) []string {
-	return modelstore.DeploymentInstanceTypes(deps, artifactName)
+func deploymentAcceleratorTypes(deps []workercore.ModelDeployment, artifactName string) []string {
+	return modelstore.DeploymentAcceleratorTypes(deps, artifactName)
 }
 
 // deliver keeps one live warm-up Pod per target node, in bounded batches, and removes the ones
@@ -766,7 +767,7 @@ func (r *ModelPrefetchReconciler) recomputePinned(ctx context.Context) error {
 		// A source intent pins no set it did not name: the derived-from-deployments default is
 		// the disk half's, and a source without a placement is refused before it renders.
 		hasSourcePlacement := pf.Spec.Source != nil && pf.Spec.Placement != nil &&
-			(len(pf.Spec.Placement.InstanceTypes) > 0 || pf.Spec.Placement.NodeSelector != nil)
+			(len(pf.Spec.Placement.AcceleratorTypes) > 0 || pf.Spec.Placement.NodeSelector != nil)
 		binding := bindingByKey[pf.Namespace+"/"+pf.Spec.BindingRef.Name]
 		retentionPin := !deleting && pf.Spec.Retention.Pinned &&
 			binding != nil && bindingAllowsPinned(binding)
@@ -776,7 +777,7 @@ func (r *ModelPrefetchReconciler) recomputePinned(ctx context.Context) error {
 		if !retentionPin && pf.Spec.Source == nil && !admittedSourceDigests[digest] {
 			continue
 		}
-		pools, err := ResolveInstanceTypeFlavorNames(ctx, r.Client, pf, depsByNS[pf.Namespace])
+		pools, err := ResolveAcceleratorTypeFlavorNames(ctx, r.Client, pf, depsByNS[pf.Namespace])
 		if err != nil {
 			if !deleting {
 				return err
@@ -965,7 +966,7 @@ func (r *ModelPrefetchReconciler) writeStatus(
 	case source != nil && source.placementMissing:
 		progressing.Status, progressing.Reason = meta.ConditionFalse, "SourcePlacementMissing"
 		progressing.Message = "the source intent names no target set: set placement.nodeSelector or " +
-			"placement.instanceTypes, or drop spec.source to warm wherever this namespace's deployments run"
+			"placement.acceleratorTypes, or drop spec.source to warm wherever this namespace's deployments run"
 	case source != nil && source.missingGrant:
 		progressing.Status, progressing.Reason = meta.ConditionFalse, "SourceGrantMissing"
 		progressing.Message = "the referenced Binding does not exist, so no source is prepared; " +
@@ -1249,32 +1250,32 @@ func requeueOr(chosen, fallback ctrl.Result) ctrl.Result {
 	return fallback
 }
 
-// InstanceTypeFlavorNames carries, per InstanceType name, the ResourceFlavor names the type's
+// AcceleratorTypeFlavorNames carries, per AcceleratorType name, the ResourceFlavor names the type's
 // pool selects; owned by modelstore beside the resolution that fills it.
-type InstanceTypeFlavorNames = modelstore.InstanceTypeFlavorNames
+type AcceleratorTypeFlavorNames = modelstore.AcceleratorTypeFlavorNames
 
-// ResolveInstanceTypeFlavorNames resolves the InstanceType names a prefetch's placement — or, in
+// ResolveAcceleratorTypeFlavorNames resolves the AcceleratorType names a prefetch's placement — or, in
 // its default form, the type names its namespace's deployments serve the artifact on — into the
 // ResourceFlavor names each type's pool selects: the flavors carrying the schedule labels the
 // type's spec derives, the same reverse-lookup the type's backing ClusterQueue and its status
-// Detail run. Flavor names are topology-qualified and count-suffixed, so an InstanceType's
+// Detail run. Flavor names are topology-qualified and count-suffixed, so an AcceleratorType's
 // object name is never itself a flavor name and cannot be compared against one. The rule lives
 // in modelstore; this wrapper is where the worker reads its CPU-manufacturer awareness setting,
 // which the shared resolver takes as an explicit input.
-func ResolveInstanceTypeFlavorNames(
+func ResolveAcceleratorTypeFlavorNames(
 	ctx context.Context, r ctrlcli.Reader, pf *workercore.ModelPrefetch, deps []workercore.ModelDeployment,
-) (InstanceTypeFlavorNames, error) {
-	return modelstore.ResolveInstanceTypeFlavorNames(ctx, r, pf, deps,
+) (AcceleratorTypeFlavorNames, error) {
+	return modelstore.ResolveAcceleratorTypeFlavorNames(ctx, r, pf, deps,
 		settings.InstanceTypeAwareCPUManufacturer.ShouldValueBool(ctx))
 }
 
 // PrefetchTargetNodes resolves a prefetch's placement into node names. It is the controller's own
 // expansion, shared with the admission webhook so admission and delivery can never disagree about
-// what a prefetch would warm. The pools carry the named InstanceTypes' flavor resolution from
-// ResolveInstanceTypeFlavorNames; the rule lives in modelstore.
+// what a prefetch would warm. The pools carry the named AcceleratorTypes' flavor resolution from
+// ResolveAcceleratorTypeFlavorNames; the rule lives in modelstore.
 func PrefetchTargetNodes(
 	pf *workercore.ModelPrefetch, nodes []core.Node, deps []workercore.ModelDeployment,
-	pools InstanceTypeFlavorNames,
+	pools AcceleratorTypeFlavorNames,
 ) ([]string, error) {
 	return modelstore.PrefetchTargetNodes(pf, nodes, deps, pools)
 }
@@ -1379,6 +1380,11 @@ func (r *ModelPrefetchReconciler) SetupController(ctx context.Context, opts cont
 		Watches(
 			&workercore.ModelDeployment{},
 			ctrlhandler.EnqueueRequestsFromMapFunc(r.enqueuePrefetchesInNamespace),
+			ctrlbuilder.WithPredicates(ctrlpredicate.GenerationChangedPredicate{}),
+		).
+		Watches(
+			&workercore.AcceleratorType{},
+			ctrlhandler.EnqueueRequestsFromMapFunc(r.enqueueForAcceleratorType),
 			ctrlbuilder.WithPredicates(ctrlpredicate.GenerationChangedPredicate{}),
 		).
 		Watches(
@@ -1523,6 +1529,62 @@ func (r *ModelPrefetchReconciler) enqueuePrefetchesInNamespace(ctx context.Conte
 		reqs = append(reqs, ctrlreconcile.Request{NamespacedName: ctrlcli.ObjectKey{
 			Namespace: pfs.Items[i].Namespace, Name: pfs.Items[i].Name,
 		}})
+	}
+
+	return reqs
+}
+
+// enqueueForAcceleratorType enqueues prefetches that explicitly name the AcceleratorType in their
+// placement or derive their target pool from ModelDeployments serving the same artifact on it.
+func (r *ModelPrefetchReconciler) enqueueForAcceleratorType(ctx context.Context, obj ctrlcli.Object) []ctrlreconcile.Request {
+	pfs := new(workercore.ModelPrefetchList)
+	if err := r.Client.List(ctx, pfs, ctrlclix.WithoutQuorum, ctrlcli.UnsafeDisableDeepCopy); err != nil {
+		ctrllog.FromContext(ctx).Error(err, "list model prefetches")
+
+		return nil
+	}
+	if len(pfs.Items) == 0 {
+		return nil
+	}
+	var depsByNS map[string][]workercore.ModelDeployment
+	loadedNS := map[string]bool{}
+	atName := obj.GetName()
+	var reqs []ctrlreconcile.Request
+	for i := range pfs.Items {
+		pf := &pfs.Items[i]
+		var nsDeps []workercore.ModelDeployment
+		derivesFromDeployments := pf.Spec.Placement == nil ||
+			(len(pf.Spec.Placement.AcceleratorTypes) == 0 && pf.Spec.Placement.NodeSelector == nil)
+		if derivesFromDeployments {
+			if !loadedNS[pf.Namespace] {
+				deps := new(workercore.ModelDeploymentList)
+				if err := r.Client.List(
+					ctx, deps,
+					ctrlcli.InNamespace(pf.Namespace),
+					ctrlclix.WithoutQuorum,
+					ctrlcli.UnsafeDisableDeepCopy,
+				); err != nil {
+					ctrllog.FromContext(ctx).Error(err, "list model deployments", "namespace", pf.Namespace)
+
+					continue
+				}
+				loadedNS[pf.Namespace] = true
+				if depsByNS == nil {
+					depsByNS = make(map[string][]workercore.ModelDeployment)
+				}
+				depsByNS[pf.Namespace] = deps.Items
+			}
+			nsDeps = depsByNS[pf.Namespace]
+		}
+		types := modelstore.PrefetchPlacementTypeNames(pf, nsDeps)
+		for _, name := range types {
+			if name == atName {
+				reqs = append(reqs, ctrlreconcile.Request{NamespacedName: ctrlcli.ObjectKey{
+					Namespace: pf.Namespace, Name: pf.Name,
+				}})
+				break
+			}
+		}
 	}
 
 	return reqs

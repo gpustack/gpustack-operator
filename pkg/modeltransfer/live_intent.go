@@ -123,8 +123,8 @@ func (c *Config) validateLiveIntentUncached(ctx context.Context, intent broker.L
 	if !covered {
 		return errors.New("source node is outside the Binding")
 	}
-	var pools modelstore.InstanceTypeFlavorNames
-	if pf.Spec.Placement != nil && len(pf.Spec.Placement.InstanceTypes) > 0 {
+	var pools modelstore.AcceleratorTypeFlavorNames
+	if pf.Spec.Placement != nil && len(pf.Spec.Placement.AcceleratorTypes) > 0 {
 		setting, err := c.Client.GpustackV1().Settings(c.WorkerNamespace).Get(ctx, settings.InstanceTypeAwareCPUManufacturer.Name(), meta.GetOptions{})
 		if err != nil {
 			return err
@@ -133,7 +133,7 @@ func (c *Config) validateLiveIntentUncached(ctx context.Context, intent broker.L
 		if err != nil {
 			return err
 		}
-		pools, err = modelstore.ResolvePlacementInstanceTypeFlavorNames(ctx, reader, pf.Spec.Placement.InstanceTypes, cpuAware)
+		pools, err = modelstore.ResolvePlacementAcceleratorTypeFlavorNames(ctx, reader, pf.Spec.Placement.AcceleratorTypes, cpuAware)
 		if err != nil {
 			return err
 		}

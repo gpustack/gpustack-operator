@@ -114,10 +114,32 @@ func TestModelPrefetchAdmission(t *testing.T) {
 	t.Run("a placement naming both kinds is refused", func(t *testing.T) {
 		r := newModelPrefetchWebhook(newModelPrefetchFixture(true, "10Gi", 5<<30)...)
 		pf := newModelPrefetch()
-		pf.Spec.Placement.InstanceTypes = []string{"h100-8"}
+		pf.Spec.Placement.AcceleratorTypes = []string{"h100-8"}
 		_, err := r.ValidateCreate(context.Background(), pf)
 		require.Error(t, err)
-		assert.Contains(t, err.Error(), "both instanceTypes and nodeSelector")
+		assert.Contains(t, err.Error(), "both acceleratorTypes and nodeSelector")
+	})
+
+	t.Run("an empty acceleratorType entry is refused", func(t *testing.T) {
+		r := newModelPrefetchWebhook(newModelPrefetchFixture(true, "10Gi", 5<<30)...)
+		pf := newModelPrefetch()
+		pf.Spec.Placement = &workercore.ModelPrefetchPlacement{
+			AcceleratorTypes: []string{""},
+		}
+		_, err := r.ValidateCreate(context.Background(), pf)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "spec.placement.acceleratorTypes[0]")
+	})
+
+	t.Run("duplicate acceleratorType entries are refused", func(t *testing.T) {
+		r := newModelPrefetchWebhook(newModelPrefetchFixture(true, "10Gi", 5<<30)...)
+		pf := newModelPrefetch()
+		pf.Spec.Placement = &workercore.ModelPrefetchPlacement{
+			AcceleratorTypes: []string{"h100-8", "h100-8"},
+		}
+		_, err := r.ValidateCreate(context.Background(), pf)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "Duplicate value")
 	})
 
 	t.Run("a prefetch past the budget is refused", func(t *testing.T) {
@@ -208,10 +230,10 @@ func TestModelPrefetchSourceIntentAdmission(t *testing.T) {
 		pf := newSourcePrefetch(&workercore.ModelPrefetchPlacement{
 			NodeSelector: &meta.LabelSelector{MatchLabels: map[string]string{"pool": "h100"}},
 		})
-		pf.Spec.Placement.InstanceTypes = []string{"h100-8"}
+		pf.Spec.Placement.AcceleratorTypes = []string{"h100-8"}
 		_, err := r.ValidateCreate(context.Background(), pf)
 		require.Error(t, err)
-		assert.Contains(t, err.Error(), "both instanceTypes and nodeSelector")
+		assert.Contains(t, err.Error(), "both acceleratorTypes and nodeSelector")
 	})
 
 	t.Run("a source intent with a named target set and a grant passes", func(t *testing.T) {
@@ -227,14 +249,14 @@ func TestModelPrefetchSourceIntentAdmission(t *testing.T) {
 		require.NoError(t, err)
 	})
 
-	t.Run("a source intent over instanceTypes names the target set too", func(t *testing.T) {
+	t.Run("a source intent over acceleratorTypes names the target set too", func(t *testing.T) {
 		grant := &workercore.ModelStoreBindingSourceMemory{
 			Bytes:         resource.MustParse("16Gi"),
 			Registrations: 4,
 			Sessions:      8,
 		}
 		r := newModelPrefetchWebhook(newModelPrefetchFixture(true, "10Gi", 5<<30, grant)...)
-		pf := newSourcePrefetch(&workercore.ModelPrefetchPlacement{InstanceTypes: []string{"h100-8"}})
+		pf := newSourcePrefetch(&workercore.ModelPrefetchPlacement{AcceleratorTypes: []string{"h100-8"}})
 		pf.Spec.MinReady = 0
 		_, err := r.ValidateCreate(context.Background(), pf)
 		require.NoError(t, err)
