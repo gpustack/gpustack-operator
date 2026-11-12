@@ -290,36 +290,30 @@ func ModelDeploymentDeclaresBothHalves(md *workercore.ModelDeployment) bool {
 }
 
 // ModelDeploymentEffectiveKVTransferBackend resolves the point-to-point transfer backend for
-// a prefill/decode pair from spec.kvTransfer.backend, pool manufacturer, and engine. It
-// returns empty unless both halves are declared. Unset or Auto returns empty (preserving
-// existing Mooncake rendering), except on SGLang Ascend where Auto resolves to HIXL. Explicit
-// Mooncake, NIXL, and HIXL map to their respective backend constants.
-func ModelDeploymentEffectiveKVTransferBackend(md *workercore.ModelDeployment, manufacturer string) string {
+// a prefill/decode pair from spec.kvTransfer.backend and the pool manufacturer.
+func ModelDeploymentEffectiveKVTransferBackend(
+	md *workercore.ModelDeployment, manufacturer string,
+) string {
 	if !ModelDeploymentDeclaresBothHalves(md) {
 		return ""
 	}
-	backend := ""
 	if md.Spec.KVTransfer != nil {
-		backend = md.Spec.KVTransfer.Backend
-	}
-	switch backend {
-	case "", workercore.ModelDeploymentKVTransferBackendAuto:
-		if manufacturer == nodefeature.ManufacturerAscend {
-			if md.Spec.Engine.Name == workercore.ModelDeploymentEngineSGLang {
-				return inject.KVTransferBackendHIXL
-			}
+		switch md.Spec.KVTransfer.Backend {
+		case "":
+		case workercore.ModelDeploymentKVTransferBackendMooncake:
+			return inject.KVTransferBackendMooncake
+		case workercore.ModelDeploymentKVTransferBackendNIXL:
+			return inject.KVTransferBackendNIXL
+		case workercore.ModelDeploymentKVTransferBackendHIXL:
+			return inject.KVTransferBackendHIXL
+		default:
 			return ""
 		}
-		return ""
-	case workercore.ModelDeploymentKVTransferBackendMooncake:
-		return inject.KVTransferBackendMooncake
-	case workercore.ModelDeploymentKVTransferBackendNIXL:
-		return inject.KVTransferBackendNIXL
-	case workercore.ModelDeploymentKVTransferBackendHIXL:
-		return inject.KVTransferBackendHIXL
-	default:
-		return ""
 	}
+	if manufacturer == nodefeature.ManufacturerAscend {
+		return inject.KVTransferBackendHIXL
+	}
+	return inject.KVTransferBackendMooncake
 }
 
 // modelDeploymentUsesKVTransfer reports whether this role runs the engine side of a routed
@@ -664,8 +658,6 @@ var modelDeploymentDefaultedEnvNames = slices.Concat([]string{
 	inject.VLLMNIXLSideChannelPortEnv,
 	inject.SGLangDisaggregationNIXLBackendEnv,
 	inject.AscendAutoConnectEnv,
-	inject.AscendGlobalResourceConfigEnv,
-	inject.HCCLIntraRoCEEnableEnv,
 	inject.AscendMFTransferProtocolEnv,
 	"VLLM_CACHE_ROOT",
 	"SGLANG_CACHE_DIR",
@@ -822,12 +814,18 @@ func SynthesizeModelDeploymentConnector(in ModelDeploymentConnectorInput) (Model
 
 	kvTransferProtocol := ""
 	if in.KVTransferProtocol != "" {
-		kvTransferProtocol = mooncake.TransportProtocol(in.KVTransferProtocol)
-		if kvTransferProtocol == "" {
-			return ModelDeploymentConnectorRender{}, fmt.Errorf("unsupported KV transfer protocol %q", in.KVTransferProtocol)
+		switch in.KVTransferProtocol {
+		case "tcp", "rdma", "efa", "ascend", "hip", "musa", "maca":
+			kvTransferProtocol = in.KVTransferProtocol
+		default:
+			kvTransferProtocol = mooncake.TransportProtocol(in.KVTransferProtocol)
+			if kvTransferProtocol == "" {
+				return ModelDeploymentConnectorRender{}, fmt.Errorf("unsupported KV transfer protocol %q", in.KVTransferProtocol)
+			}
 		}
 	}
-	if in.KVTransfer && (role == inject.RolePrefill || role == inject.RoleDecode) {
+	if (in.KVTransfer || (engine == inject.EngineSGLang && in.Disaggregated)) &&
+		(role == inject.RolePrefill || role == inject.RoleDecode) {
 		switch in.KVTransferBackend {
 		case inject.KVTransferBackendHIXL:
 			if in.Manufacturer != nodefeature.ManufacturerAscend {
@@ -887,10 +885,12 @@ func SynthesizeModelDeploymentConnector(in ModelDeploymentConnectorInput) (Model
 
 	// The binding fingerprint carries the backend only where the leg rendered: an edited
 	// backend on a deployment whose pair renders no leg changes nothing, and omitempty keeps
-	// the unset pair out of every existing Mooncake hash.
+	// the unset pair out of every existing Mooncake hash. EFA is fingerprinted on NIXL alone
+	// because Mooncake interface legs already carry "efa" vs "rdma" in KVTransferProtocol.
 	backendFingerprint, efaFingerprint := "", false
 	if res.KVTransfer {
-		backendFingerprint, efaFingerprint = in.KVTransferBackend, in.KVTransferEFA
+		backendFingerprint = in.KVTransferBackend
+		efaFingerprint = in.KVTransferBackend == inject.KVTransferBackendNIXL && in.KVTransferEFA
 	}
 
 	return ModelDeploymentConnectorRender{

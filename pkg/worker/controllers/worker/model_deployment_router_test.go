@@ -2452,15 +2452,6 @@ func TestModelDeploymentVLLMRouterKVConnector(t *testing.T) {
 			want:          "nixl",
 		},
 		{
-			name:    "an auto backend answers from the pool hardware too",
-			engine:  workercore.ModelDeploymentEngineVLLM,
-			backend: workercore.ModelDeploymentKVTransferBackendAuto,
-			manufacturers: map[string]string{
-				"prefill": nodefeature.ManufacturerAscend, "decode": nodefeature.ManufacturerAscend,
-			},
-			want: "nixl",
-		},
-		{
 			name:   "a non-Ascend pair keeps the mooncake handshake",
 			engine: workercore.ModelDeploymentEngineVLLM,
 			manufacturers: map[string]string{

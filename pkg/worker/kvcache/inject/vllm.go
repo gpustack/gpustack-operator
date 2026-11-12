@@ -80,15 +80,15 @@ const (
 	vllmAscendDriverVolumeName = "gpustack-ascend-driver"
 )
 
-// The NIXL side channel and the Ascend HIXL variables the point-to-point leg renders. The two
-// NIXL names are read by vLLM's NixlConnector, which registers its side-channel listener from
-// them; the three Ascend names are read by vLLM-Ascend's MooncakeConnectorV1 and its MemFabric
-// transport.
+// The NIXL side channel and the Ascend transfer variables. The two NIXL names are read by vLLM's
+// NixlConnector, which registers its side-channel listener from them; AscendAutoConnectEnv is
+// rendered on vLLM-Ascend HIXL legs, while AscendGlobalResourceConfigEnv and HCCLIntraRoCEEnableEnv
+// are retained as recognize-but-never-render markers so scaler prior identity filtering strips them.
 const (
 	// VLLMNIXLSideChannelPort is where the NIXL connector listens for the peer's handshake. It is
 	// declared on BOTH halves: the producer announces its side channel there and the consumer
 	// runs the matching listener.
-	VLLMNIXLSideChannelPort int32 = 5600
+	VLLMNIXLSideChannelPort int32 = 8998
 
 	// VLLMNIXLSideChannelHostEnv carries this Pod's address to the connector. The value cannot be
 	// written at admission, so it is owned as a downwardAPI projection of the Pod IP and resolved
@@ -103,18 +103,28 @@ const (
 	// what a prefill/decode pair needs to find each other without a bootstrap address.
 	AscendAutoConnectEnv = "ASCEND_AUTO_CONNECT"
 
-	// AscendGlobalResourceConfigEnv constrains the Ascend MemFabric link selection. Its value is
-	// a JSON document, so the pair constant below carries the one spelling this renderer writes.
+	// AscendGlobalResourceConfigEnv is a recognized Ascend MemFabric link-selection variable,
+	// retained as a recognize-but-never-render marker for scaler prior identity filtering.
 	AscendGlobalResourceConfigEnv = "ASCEND_GLOBAL_RESOURCE_CONFIG"
 
-	// AscendGlobalResourceConfigRoCEValue pins the Ascend transfer leg to Device RoCE, the
-	// transport spec.kvTransfer.protocol RDMA declares on Ascend.
-	AscendGlobalResourceConfigRoCEValue = "{\"comm_resource_config.protocol_desc\":\"roce:device\"}"
-
-	// HCCLIntraRoCEEnableEnv turns on intra-node RoCE for the collective communication layer,
-	// alongside the resource config above.
+	// HCCLIntraRoCEEnableEnv is a recognized Ascend HCCL intra-node RoCE variable, retained as a
+	// recognize-but-never-render marker for scaler prior identity filtering.
 	HCCLIntraRoCEEnableEnv = "HCCL_INTRA_ROCE_ENABLE"
 )
+
+// ascendDriverProjection returns the read-only host driver volume and mount that Ascend KV
+// transfer legs (vLLM-Ascend and SGLang on Ascend) project into both role containers.
+func ascendDriverProjection() (core.Volume, core.VolumeMount) {
+	hostPathDirectory := core.HostPathDirectory
+	return core.Volume{
+		Name: vllmAscendDriverVolumeName,
+		VolumeSource: core.VolumeSource{
+			HostPath: &core.HostPathVolumeSource{Path: vllmAscendDriverPath, Type: &hostPathDirectory},
+		},
+	}, core.VolumeMount{
+		Name: vllmAscendDriverVolumeName, MountPath: vllmAscendDriverPath, ReadOnly: true,
+	}
+}
 
 // vllmConnectorFor returns the connector name the given engine's own factory can resolve.
 //
@@ -378,9 +388,7 @@ func renderVLLMWithEncoderCache(in Input, ec EncoderCache) (*Result, error) {
 		} else {
 			// The Ascend leg renders NO protocol key: its transfer engine is initialized with
 			// the literal "ascend" (`vllm_ascend/distributed/kv_transfer/utils/mooncake_transfer_engine.py:26`,
-			// read at v0.23.0), so spec.kvTransfer.protocol has no key to land in here and is
-			// ignored rather than refused -- admission cannot know the pool's vendor, and a
-			// refusal past admission is an error loop.
+			// read at v0.23.0), so KVTransferProtocol has no key to land in here and is ignored.
 			//
 			// kv_port is the one value both halves MUST agree on, and the agreement is structural:
 			// the prefiller advertises its side channel as an OFFSET from the consumer's own
@@ -429,16 +437,9 @@ func renderVLLMWithEncoderCache(in Input, ec EncoderCache) (*Result, error) {
 			// DaemonSet, so it follows the capability that needs it rather than the vendor.
 			// The Directory type turns a host missing the driver into a volume setup error
 			// naming the path, a deploy-time signal instead of a startup failure.
-			hostPathDirectory := core.HostPathDirectory
-			legVolumes = append(legVolumes, core.Volume{
-				Name: vllmAscendDriverVolumeName,
-				VolumeSource: core.VolumeSource{
-					HostPath: &core.HostPathVolumeSource{Path: vllmAscendDriverPath, Type: &hostPathDirectory},
-				},
-			})
-			legVolumeMounts = append(legVolumeMounts, core.VolumeMount{
-				Name: vllmAscendDriverVolumeName, MountPath: vllmAscendDriverPath, ReadOnly: true,
-			})
+			driverVolume, driverMount := ascendDriverProjection()
+			legVolumes = append(legVolumes, driverVolume)
+			legVolumeMounts = append(legVolumeMounts, driverMount)
 		}
 		if !hasStore {
 			// The decode arm renders only the role and the protocol: the bootstrap address is
@@ -562,18 +563,9 @@ func renderVLLMWithEncoderCache(in Input, ec EncoderCache) (*Result, error) {
 				ContainerPort: VLLMMooncakeBootstrapPort,
 			})
 		}
-		// Ascend HIXL values are defaulted so a role env entry can override them. Only "rdma"
-		// pins Device RoCE; "ascend" (API CANN) and "tcp" (API Auto or TCP) keep the default
-		// HCCS link, and non-Ascend protocol values are ignored rather than refused here for
-		// the same reason as the transfer document above (avoiding a post-admission error loop).
+		// Ascend HIXL defaults ASCEND_AUTO_CONNECT so a role env entry can override it.
 		if in.Engine == EngineVLLMAscend && in.KVTransferBackend == KVTransferBackendHIXL {
 			result.DefaultedEnv = append(result.DefaultedEnv, core.EnvVar{Name: AscendAutoConnectEnv, Value: "1"})
-			if directLegProtocol(in) == "rdma" {
-				result.DefaultedEnv = append(result.DefaultedEnv,
-					core.EnvVar{Name: AscendGlobalResourceConfigEnv, Value: AscendGlobalResourceConfigRoCEValue},
-					core.EnvVar{Name: HCCLIntraRoCEEnableEnv, Value: "1"},
-				)
-			}
 		}
 	}
 	if forceTCP {

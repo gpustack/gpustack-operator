@@ -93,9 +93,7 @@ const (
 	sglangDisaggregationBackendNIXL = "nixl"
 
 	// sglangDisaggregationBackendAscend selects the Ascend MemFabric point-to-point backend
-	// (--disaggregation-transfer-backend ascend). The link it picks is named through
-	// AscendMFTransferProtocolEnv: device_rdma when spec.kvTransfer.protocol constrains the leg
-	// to Device RoCE, and its sdma default otherwise.
+	// (--disaggregation-transfer-backend ascend), with AscendMFTransferProtocolEnv defaulted to sdma.
 	sglangDisaggregationBackendAscend = "ascend"
 
 	// The two variables the NIXL and Ascend backends read at engine start. Both are rendered
@@ -410,16 +408,8 @@ func renderSGLang(in Input) (*Result, error) {
 			})
 		case KVTransferBackendHIXL:
 			backend = sglangDisaggregationBackendAscend
-			// Only "rdma" selects device_rdma (Device RoCE). "ascend" (API CANN) and "tcp"
-			// (API Auto or TCP) keep the default "sdma" (HCCS/SDMA) link, and non-Ascend values
-			// are ignored rather than refused here because admission cannot always observe the
-			// pool manufacturer and a render refusal past admission would enter a reconcile loop.
-			mfProtocol := "sdma"
-			if directLegProtocol(in) == "rdma" {
-				mfProtocol = "device_rdma"
-			}
 			result.DefaultedEnv = append(result.DefaultedEnv, core.EnvVar{
-				Name: AscendMFTransferProtocolEnv, Value: mfProtocol,
+				Name: AscendMFTransferProtocolEnv, Value: "sdma",
 			})
 			// Both halves mount the host driver tree, read-only, for the reason the vLLM-Ascend
 			// leg does: the transfer reads each NPU's NIC address through hccn_tool, which ships
@@ -427,20 +417,18 @@ func renderSGLang(in Input) (*Result, error) {
 			// The same volume name, path and type as vllm.go keeps the two engines' projections
 			// identical, and the Directory type turns a host missing the driver into a volume
 			// setup error naming the path rather than a startup failure.
-			hostPathDirectory := core.HostPathDirectory
-			result.Volumes = append(result.Volumes, core.Volume{
-				Name: vllmAscendDriverVolumeName,
-				VolumeSource: core.VolumeSource{
-					HostPath: &core.HostPathVolumeSource{Path: vllmAscendDriverPath, Type: &hostPathDirectory},
-				},
-			})
-			result.VolumeMounts = append(result.VolumeMounts, core.VolumeMount{
-				Name: vllmAscendDriverVolumeName, MountPath: vllmAscendDriverPath, ReadOnly: true,
-			})
+			driverVolume, driverMount := ascendDriverProjection()
+			result.Volumes = append(result.Volumes, driverVolume)
+			result.VolumeMounts = append(result.VolumeMounts, driverMount)
 		default:
 			backend = sglangDisaggregationBackendMooncake
 			if directLegForcesTCP(in) {
 				backend = sglangDisaggregationBackendMooncakeTCP
+			}
+			if directLegProtocol(in) == "ascend" {
+				driverVolume, driverMount := ascendDriverProjection()
+				result.Volumes = append(result.Volumes, driverVolume)
+				result.VolumeMounts = append(result.VolumeMounts, driverMount)
 			}
 		}
 		result.Args = append(result.Args,

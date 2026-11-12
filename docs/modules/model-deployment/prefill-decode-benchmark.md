@@ -224,8 +224,6 @@ Update `pd-deployment.yaml` from the
    name: pd-arm2-pd
    namespace: gpustack-bench
  spec:
-+  kvTransfer:
-+    protocol: RDMA
    roles:
      - name: prefill
        kind: Prefill
@@ -239,7 +237,7 @@ Update `pd-deployment.yaml` from the
 +        interface: "2"
 ```
 
-Intra-`Pod` *TP* still used NVLink; the RDMA setting applied to cross-`Pod` Mooncake KV transfer.
+Intra-`Pod` *TP* still used NVLink; the interface requests selected RDMA for cross-`Pod` Mooncake KV transfer.
 
 Mooncake *TP* workers logged protocol `rdma`, KV-cache registration and RDMA-ready acknowledgements.
 The captured *Decode* workers enumerated `mlx5_6` and `mlx5_7`, with LIDs `21816` and `21819`.

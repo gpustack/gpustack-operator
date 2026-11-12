@@ -55,6 +55,19 @@ func Indexer() setting.IndexFunc {
 var (
 	// Global.
 
+	// AWSEFAEnabled selects AWS Elastic Fabric Adapter (vpc.amazonaws.com/efa and NIXL LIBFABRIC)
+	// instead of standard RDMA (device.gpustack.ai/rdma* and NIXL UCX) when ModelDeployment roles
+	// request fabric interfaces or run NIXL transfers.
+	// Env: GPUSTACK_AWS_EFA_ENABLED
+	AWSEFAEnabled = settings.NewEditable(
+		"aws-efa-enabled",
+		"Indicates whether to select AWS Elastic Fabric Adapter (vpc.amazonaws.com/efa and NIXL LIBFABRIC) "+
+			"instead of standard RDMA (device.gpustack.ai/rdma* and NIXL UCX) when ModelDeployment roles "+
+			"request fabric interfaces or run NIXL transfers.",
+		setting.InitializeFromEnv("false"),
+		setting.AllowBool(),
+	)
+
 	// ContainerNamespace is the namespace to pull images, which is used in all built-in applications' deployment.
 	ContainerNamespace = settings.NewEditable(
 		"container-namespace",

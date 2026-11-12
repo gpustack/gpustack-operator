@@ -1,0 +1,71 @@
+apiVersion: worker.gpustack.ai/v1
+kind: ModelDeployment
+metadata:
+  name: qwen
+  namespace: default
+spec:
+  engine:
+    image: vllm/vllm-openai:v0.19.0
+    name: vLLM
+  kvCache:
+    poolRef:
+      name: shared-kv
+  model:
+    name: Qwen/Qwen2.5-72B-Instruct
+  roles:
+  - image: vllm/vllm-openai:v0.19.0
+    instanceType: h20-8x
+    kind: Server
+    name: main
+    replicas: 1
+    resources:
+      accelerator: "1"
+      interface: "1"
+    size: 1
+status: {}
+---
+apiVersion: worker.gpustack.ai/v1
+kind: KVCachePoolBinding
+metadata:
+  name: shared-kv
+  namespace: default
+spec:
+  domain:
+    blockSize: 256
+    dtype: bfloat16
+    name: chat
+  poolRef:
+    name: pool-shared-kv
+  quota:
+    ceiling: 100Gi
+status:
+  conditions:
+  - lastTransitionTime: "2026-01-01T00:00:00Z"
+    message: the master granted 100Gi
+    reason: Granted
+    status: "True"
+    type: QuotaGranted
+  phase: Ready
+  phaseMessage: the master reports this domain's figures
+---
+apiVersion: worker.gpustack.ai/v1
+kind: KVCachePool
+metadata:
+  name: pool-shared-kv
+spec:
+  backends:
+  - backend-shared-kv
+  quota:
+    total: "0"
+status:
+  clientEndpoint: shared-kv-master.gpustack-system.svc:50051
+---
+apiVersion: worker.gpustack.ai/v1
+kind: KVCacheBackend
+metadata:
+  name: backend-shared-kv
+spec:
+  connection: {}
+  transport:
+    protocol: EFA
+status: {}

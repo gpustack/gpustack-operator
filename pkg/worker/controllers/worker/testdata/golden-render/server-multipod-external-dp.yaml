@@ -1,0 +1,24 @@
+apiVersion: worker.gpustack.ai/v1
+kind: ModelDeployment
+metadata:
+  name: qwen
+  namespace: default
+spec:
+  engine:
+    image: vllm/vllm-openai:v0.19.0
+    name: vLLM
+  model:
+    name: Qwen/Qwen2.5-72B-Instruct
+  roles:
+  - extraArgs:
+    - --data-parallel-size=2
+    - --data-parallel-size-local=1
+    image: vllm/vllm-openai:v0.19.0
+    instanceType: h20-8x
+    kind: Server
+    name: main
+    replicas: 1
+    resources:
+      accelerator: "1"
+    size: 2
+status: {}

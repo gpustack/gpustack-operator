@@ -1,0 +1,43 @@
+apiVersion: worker.gpustack.ai/v1
+kind: ModelDeployment
+metadata:
+  name: qwen
+  namespace: default
+spec:
+  engine:
+    image: lmsysorg/sglang:v0.5.18
+    name: SGLang
+  kvTransfer:
+    backend: NIXL
+  model:
+    name: Qwen/Qwen2.5-72B-Instruct
+  roles:
+  - image: lmsysorg/sglang:v0.5.18
+    instanceType: h20-8x
+    kind: Prefill
+    name: prefill
+    replicas: 1
+    resources:
+      accelerator: "1"
+      interface: "1"
+    size: 1
+  - image: lmsysorg/sglang:v0.5.18
+    instanceType: h20-8x
+    kind: Decode
+    name: decode
+    replicas: 1
+    resources:
+      accelerator: "1"
+      interface: "1"
+    size: 1
+  router:
+    name: sglang-gateway
+status: {}
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: gpustack-settings
+  namespace: gpustack-system
+stringData:
+  aws-efa-enabled: "true"

@@ -147,7 +147,7 @@ func TestModelDeploymentEnumSpellings(t *testing.T) {
 		{"status role kind", []string{"status", "roles", "[]", "kind"}, []string{`"Server"`, `"Prefill"`, `"Decode"`, `"Encode"`}, []string{`"server"`, `"prefill"`, `"decode"`, `"encode"`}, ""},
 		{"engine name", []string{"spec", "engine", "name"}, []string{`"vLLM"`, `"SGLang"`}, []string{`"vllm"`, `"sglang"`}, ""},
 		{"cache connector", []string{"spec", "kvCache", "connector"}, []string{`"Mooncake"`}, []string{`"mooncake"`}, `"Mooncake"`},
-		{"direct protocol", []string{"spec", "kvTransfer", "protocol"}, []string{`"Auto"`, `"TCP"`, `"RDMA"`, `"EFA"`, `"CANN"`, `"ROCM"`}, []string{`"auto"`, `"tcp"`, `"rdma"`, `"efa"`, `"cann"`, `"rocm"`, `"MUSA"`, `"MACA"`}, ""},
+		{"direct backend", []string{"spec", "kvTransfer", "backend"}, []string{`"Mooncake"`, `"NIXL"`, `"HIXL"`}, []string{`"Auto"`, `"mooncake"`, `"nixl"`, `"hixl"`}, ""},
 		{"model delivery", []string{"status", "model", "delivery"}, []string{`"PVC"`, `"Engine"`, `"Node"`, `"Image"`, `"Remote"`}, []string{`"Pvc"`}, ""},
 	}
 	for _, tc := range cases {
@@ -178,6 +178,12 @@ func TestModelDeploymentEnumSpellings(t *testing.T) {
 			}
 		})
 	}
+
+	t.Run("spec kvTransfer protocol removed", func(t *testing.T) {
+		kvTransfer, ok := crd.Spec.Versions[0].Schema.OpenAPIV3Schema.Properties["spec"].Properties["kvTransfer"]
+		require.True(t, ok, "missing spec.kvTransfer")
+		assert.NotContains(t, kvTransfer.Properties, "protocol", "spec.kvTransfer must not declare protocol")
+	})
 }
 
 // TestModelDeploymentStatusRoleKindIsConstrained pins that the status kind carries an enum at all.

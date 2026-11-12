@@ -8,6 +8,7 @@ import (
 
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
 	"gpustack.ai/gpustack/pkg/nodefeature"
+	"gpustack.ai/gpustack/pkg/worker/kvcache/inject"
 	"gpustack.ai/gpustack/pkg/worker/kvcache/mooncake"
 )
 
@@ -21,57 +22,66 @@ func modelDeploymentRequestsInterfaces(md *workercore.ModelDeployment) bool {
 	return false
 }
 
+// ModelDeploymentDirectPairRequestsInterfaces reports whether a routed prefill/decode pair
+// requests positive fabric interfaces on every Prefill and Decode role (ignoring Encode and Server).
+func ModelDeploymentDirectPairRequestsInterfaces(md *workercore.ModelDeployment) bool {
+	if md == nil || md.Spec.Router == nil || !ModelDeploymentDeclaresBothHalves(md) {
+		return false
+	}
+	for i := range md.Spec.Roles {
+		role := &md.Spec.Roles[i]
+		kind := ModelDeploymentEffectiveRoleKind(role)
+		if kind != workercore.ModelDeploymentRoleKindPrefill &&
+			kind != workercore.ModelDeploymentRoleKindDecode {
+			continue
+		}
+		if role.Resources == nil || role.Resources.Interface == nil || role.Resources.Interface.Sign() <= 0 {
+			return false
+		}
+	}
+	return true
+}
+
 // ModelDeploymentDirectInterfaceProtocol returns the protocol a managed direct-transfer or
-// multi-member Server collective leg actually renders. A role with a user-owned command, an absent
-// pair or collective, or an engine that ignores the declared protocol cannot use that declaration to
-// select a device grant. It covers routed prefill/decode pairs on vLLM and SGLang, managed multi-Pod
-// vLLM Server roles, and NIXL remote weight delivery (preferring EFA when declared or active on the pool).
+// multi-member Server collective leg actually renders. It covers NIXL remote weight delivery,
+// managed multi-Pod vLLM Server roles, and routed prefill/decode pairs on vLLM and SGLang when
+// every Prefill and Decode half requests interfaces on a non-Ascend pool.
 func ModelDeploymentDirectInterfaceProtocol(
 	md *workercore.ModelDeployment, role *workercore.ModelDeploymentRole, manufacturer string,
-	artifact ...*ModelDeploymentArtifactRender,
+	remoteDelivery, awsEFAEnabled bool,
 ) string {
-	if len(role.Command) > 0 ||
+	if md == nil || role == nil || len(role.Command) > 0 ||
 		manufacturer == "" || manufacturer == nodefeature.ManufacturerAscend {
 		return ""
 	}
-	remoteDelivery := md.Spec.Model.ArtifactRef != nil
-	if len(artifact) > 0 {
-		remoteDelivery = artifact[0] != nil &&
-			artifact[0].Delivery == workercore.ModelDeploymentModelDeliveryRemote
+	directProtocol := "rdma"
+	if awsEFAEnabled {
+		directProtocol = "efa"
 	}
 	if remoteDelivery &&
 		!modelDeploymentRoleHasConflictingLoadFormat(md.Spec.Engine.Name, role.ExtraArgs) &&
 		modelDeploymentModelTransferCandidateBackend(manufacturer, md.Spec.Engine.Name) == "nixl" {
-		// The declared protocol or an EFA-bound cache pool outranks the RDMA default here: a
-		// deployment whose transfer leg or cache store runs over EFA must resolve its weight
-		// delivery to the same fabric, or the two legs would request conflicting device grants
-		// on one role.
-		if (md.Spec.KVTransfer != nil && mooncake.TransportProtocol(md.Spec.KVTransfer.Protocol) == "efa") ||
-			(len(artifact) > 0 && artifact[0] != nil && artifact[0].ModelTransferEFA) {
-			return "efa"
-		}
-		return "rdma"
+		return directProtocol
 	}
 	if md.Spec.Engine.Name != workercore.ModelDeploymentEngineVLLM &&
 		md.Spec.Engine.Name != workercore.ModelDeploymentEngineSGLang {
 		return ""
 	}
-	// Managed multi-Pod Server collective legs (size > 1 or elasticEp) select the operator's
-	// RDMA device key ("rdma"); spec.kvTransfer applies only to routed prefill/decode pairs.
-	// The collective shape is vLLM's alone: SGLang multi-member Server roles are not a leg this
-	// answer grants devices for, so they fall through to the pair check and stop there.
+	// Managed multi-Pod Server collective legs (size > 1 or elasticEp) select the direct
+	// fabric device key; SGLang multi-member Server roles are not a leg this answer grants
+	// devices for, so they fall through to the pair check and stop there.
 	if md.Spec.Engine.Name == workercore.ModelDeploymentEngineVLLM &&
 		ModelDeploymentEffectiveRoleKind(role) == workercore.ModelDeploymentRoleKindServer &&
 		(modelDeploymentRoleSize(role) > 1 || role.ElasticEP != nil) {
-		return "rdma"
+		return directProtocol
 	}
-	if !modelDeploymentUsesKVTransfer(md, role) {
+	if !modelDeploymentUsesKVTransfer(md, role) || !ModelDeploymentDirectPairRequestsInterfaces(md) {
 		return ""
 	}
-	if md.Spec.KVTransfer != nil && md.Spec.KVTransfer.Protocol != "" {
-		return mooncake.TransportProtocol(md.Spec.KVTransfer.Protocol)
+	if ModelDeploymentEffectiveKVTransferBackend(md, manufacturer) == inject.KVTransferBackendHIXL {
+		return ""
 	}
-	return mooncake.TransportProtocol("")
+	return directProtocol
 }
 
 // ModelDeploymentInterfaceResource selects one device-plugin key for a positive role interface

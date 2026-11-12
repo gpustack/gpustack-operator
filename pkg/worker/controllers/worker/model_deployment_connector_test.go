@@ -16,8 +16,10 @@ import (
 	worker "gpustack.ai/gpustack/api/worker/v1"
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
 	"gpustack.ai/gpustack/pkg/nodefeature"
+	"gpustack.ai/gpustack/pkg/setting/settingtest"
 	"gpustack.ai/gpustack/pkg/utils/json"
 	"gpustack.ai/gpustack/pkg/worker/kvcache/inject"
+	"gpustack.ai/gpustack/pkg/worker/settings"
 )
 
 // connectorInput is one pool-and-domain fixture every case renders from.
@@ -930,9 +932,11 @@ func TestModelDeploymentConnector_RoutedPairWithoutKVCacheUsesKVTransferOnly(t *
 }
 
 func TestModelDeploymentConnector_PureDirectEFARequestsDevice(t *testing.T) {
+	settingtest.MergeDelegatedSettings(t, map[string]string{
+		settings.AWSEFAEnabled.Name(): "true",
+	})
 	md := routedModelDeployment(func(md *workercore.ModelDeployment) {
 		md.Spec.KVCache = nil
-		md.Spec.KVTransfer = &workercore.ModelDeploymentKVTransfer{Protocol: "EFA"}
 		for i := range md.Spec.Roles {
 			md.Spec.Roles[i].Resources = &workercore.ModelDeploymentRoleResources{
 				Interface: ptr.To(resource.MustParse("1")),
@@ -946,6 +950,57 @@ func TestModelDeploymentConnector_PureDirectEFARequestsDevice(t *testing.T) {
 		qtyEqual(t, qty("1"), pod.Spec.Containers[0].Resources.Limits["vpc.amazonaws.com/efa"],
 			"pure direct transfer grants EFA to each engine role")
 	}
+}
+
+func TestModelDeploymentConnector_MooncakeDerivesAscendAndROCmProtocols(t *testing.T) {
+	t.Run("sglang mooncake on ascend mounts driver and uses mooncake backend", func(t *testing.T) {
+		md := routedModelDeployment(func(md *workercore.ModelDeployment) {
+			md.Spec.Engine.Name = workercore.ModelDeploymentEngineSGLang
+			md.Spec.Router.Name = workercore.ModelDeploymentRouterSGLang
+			md.Spec.KVCache = nil
+			md.Spec.KVTransfer = &workercore.ModelDeploymentKVTransfer{
+				Backend: workercore.ModelDeploymentKVTransferBackendMooncake,
+			}
+		})
+		cli := newModelDeploymentClient(md, ascendRenderInstanceType())
+		_, err := reconcileModelDeployment(t, cli)
+		require.NoError(t, err)
+		for _, pod := range replicaPods(t, cli) {
+			c := pod.Spec.Containers[0]
+			at := slices.Index(c.Command, "--disaggregation-transfer-backend")
+			require.GreaterOrEqual(t, at, 0)
+			assert.Equal(t, "mooncake", c.Command[at+1])
+			assert.Nil(t, envByName(c.Env, "MC_FORCE_TCP"),
+				"ascend mooncake must not set MC_FORCE_TCP")
+			var hasDriver bool
+			for _, vm := range c.VolumeMounts {
+				if vm.MountPath == "/usr/local/Ascend/driver" {
+					hasDriver = true
+				}
+			}
+			assert.True(t, hasDriver, "sglang mooncake on ascend mounts the Ascend driver")
+		}
+	})
+
+	t.Run("vllm mooncake on rocm derives hip protocol without MC_FORCE_TCP", func(t *testing.T) {
+		md := routedModelDeployment(func(md *workercore.ModelDeployment) {
+			md.Spec.KVCache = nil
+		})
+		rocmIT := newRenderInstanceType(func(it *worker.InstanceType) {
+			it.Status.Detail.Manufacturer = nodefeature.ManufacturerAMD
+		})
+		cli := newModelDeploymentClient(md, rocmIT)
+		_, err := reconcileModelDeployment(t, cli)
+		require.NoError(t, err)
+		for _, pod := range replicaPods(t, cli) {
+			c := pod.Spec.Containers[0]
+			at := slices.Index(c.Command, "--kv-transfer-config")
+			require.GreaterOrEqual(t, at, 0)
+			assert.Contains(t, c.Command[at+1], `"mooncake_protocol":"hip"`)
+			assert.Nil(t, envByName(c.Env, "MC_FORCE_TCP"),
+				"rocm mooncake must not set MC_FORCE_TCP so intra-node hip and cross-node auto-discovery stay active")
+		}
+	})
 }
 
 func TestModelDeploymentConnector_CacheFabricReachesPod(t *testing.T) {
@@ -2003,11 +2058,8 @@ func TestModelDeploymentConnectorFieldIsInert(t *testing.T) {
 }
 
 // TestModelDeploymentEffectiveKVTransferBackend pins the resolver one row per input: the pair
-// gate, the unset and Auto defaults per manufacturer and engine, and the three explicit
-// backends. The Ascend rows are the load-bearing ones -- SGLang Ascend has always run the Ascend
-// data plane, so Auto resolves to HIXL there, while vLLM Ascend keeps empty, because the
-// endpoint-exchange variable the HIXL backend defaults must not appear on a render that named no
-// backend.
+// gate, the hardware defaults per manufacturer, and the three explicit backends. When both halves
+// are declared and no backend is set, Ascend defaults to HIXL and non-Ascend defaults to Mooncake.
 func TestModelDeploymentEffectiveKVTransferBackend(t *testing.T) {
 	deployment := func(engine, backend string, bothHalves bool) *workercore.ModelDeployment {
 		return newRenderDeployment(func(md *workercore.ModelDeployment) {
@@ -2039,32 +2091,27 @@ func TestModelDeploymentEffectiveKVTransferBackend(t *testing.T) {
 			manufacturer: nodefeature.ManufacturerNVIDIA, want: "",
 		},
 		{
-			name: "no kvTransfer block resolves nothing", bothHalves: true, backend: "nil",
+			name: "no kvTransfer block on non-Ascend resolves mooncake", bothHalves: true, backend: "nil",
 			engine:       workercore.ModelDeploymentEngineVLLM,
-			manufacturer: nodefeature.ManufacturerNVIDIA, want: "",
+			manufacturer: nodefeature.ManufacturerNVIDIA, want: inject.KVTransferBackendMooncake,
 		},
 		{
-			name: "unset on non-Ascend resolves nothing", bothHalves: true, backend: "",
+			name: "unset on non-Ascend resolves mooncake", bothHalves: true, backend: "",
 			engine:       workercore.ModelDeploymentEngineVLLM,
-			manufacturer: nodefeature.ManufacturerNVIDIA, want: "",
+			manufacturer: nodefeature.ManufacturerNVIDIA, want: inject.KVTransferBackendMooncake,
 		},
 		{
-			name: "auto on non-Ascend resolves nothing", bothHalves: true, backend: workercore.ModelDeploymentKVTransferBackendAuto,
+			name: "no kvTransfer block on Ascend vLLM resolves HIXL", bothHalves: true, backend: "nil",
 			engine:       workercore.ModelDeploymentEngineVLLM,
-			manufacturer: nodefeature.ManufacturerNVIDIA, want: "",
+			manufacturer: nodefeature.ManufacturerAscend, want: inject.KVTransferBackendHIXL,
 		},
 		{
-			name: "unset on Ascend vLLM resolves nothing", bothHalves: true, backend: "",
+			name: "unset on Ascend vLLM resolves HIXL", bothHalves: true, backend: "",
 			engine:       workercore.ModelDeploymentEngineVLLM,
-			manufacturer: nodefeature.ManufacturerAscend, want: "",
+			manufacturer: nodefeature.ManufacturerAscend, want: inject.KVTransferBackendHIXL,
 		},
 		{
-			name: "auto on Ascend vLLM resolves nothing", bothHalves: true, backend: workercore.ModelDeploymentKVTransferBackendAuto,
-			engine:       workercore.ModelDeploymentEngineVLLM,
-			manufacturer: nodefeature.ManufacturerAscend, want: "",
-		},
-		{
-			name: "auto on Ascend SGLang resolves HIXL", bothHalves: true, backend: workercore.ModelDeploymentKVTransferBackendAuto,
+			name: "unset on Ascend SGLang resolves HIXL", bothHalves: true, backend: "",
 			engine:       workercore.ModelDeploymentEngineSGLang,
 			manufacturer: nodefeature.ManufacturerAscend, want: inject.KVTransferBackendHIXL,
 		},
@@ -2091,7 +2138,7 @@ func TestModelDeploymentEffectiveKVTransferBackend(t *testing.T) {
 		{
 			name: "an unobserved manufacturer behaves as non-Ascend", bothHalves: true, backend: "",
 			engine:       workercore.ModelDeploymentEngineSGLang,
-			manufacturer: "", want: "",
+			manufacturer: "", want: inject.KVTransferBackendMooncake,
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -2140,7 +2187,7 @@ func TestSynthesizeModelDeploymentConnector_TransferBackends(t *testing.T) {
 		require.NotNil(t, host.ValueFrom.FieldRef)
 		assert.Equal(t, "status.podIP", host.ValueFrom.FieldRef.FieldPath)
 		assert.Contains(t, got.DefaultedEnv, core.EnvVar{
-			Name: inject.VLLMNIXLSideChannelPortEnv, Value: "5600",
+			Name: inject.VLLMNIXLSideChannelPortEnv, Value: "8998",
 		})
 		assert.Contains(t, got.Ports, core.ContainerPort{
 			Name: "nixl-side", Protocol: core.ProtocolTCP, ContainerPort: inject.VLLMNIXLSideChannelPort,
@@ -2167,20 +2214,18 @@ func TestSynthesizeModelDeploymentConnector_TransferBackends(t *testing.T) {
 		assert.NotContains(t, got.Args[1], `"backends":["UCX"]`)
 	})
 
-	t.Run("ascend hixl defaults the endpoint exchange and the roce constraint", func(t *testing.T) {
+	t.Run("ascend hixl defaults the endpoint exchange", func(t *testing.T) {
 		in := input(workercore.ModelDeploymentEngineVLLM, nodefeature.ManufacturerAscend, inject.KVTransferBackendHIXL, false)
-		in.KVTransferProtocol = "RDMA"
 		got, err := SynthesizeModelDeploymentConnector(in)
 		require.NoError(t, err)
 
 		assert.Contains(t, got.Args[1], `"kv_connector":"MooncakeConnectorV1"`,
 			"the HIXL backend names variables, not a different connector")
 		assert.Contains(t, got.DefaultedEnv, core.EnvVar{Name: inject.AscendAutoConnectEnv, Value: "1"})
-		assert.Contains(t, got.DefaultedEnv, core.EnvVar{
-			Name:  inject.AscendGlobalResourceConfigEnv,
-			Value: `{"comm_resource_config.protocol_desc":"roce:device"}`,
-		})
-		assert.Contains(t, got.DefaultedEnv, core.EnvVar{Name: inject.HCCLIntraRoCEEnableEnv, Value: "1"})
+		for _, env := range got.DefaultedEnv {
+			assert.NotEqual(t, inject.AscendGlobalResourceConfigEnv, env.Name)
+			assert.NotEqual(t, inject.HCCLIntraRoCEEnableEnv, env.Name)
+		}
 	})
 
 	t.Run("ascend vllm without a backend defaults no ascend variable", func(t *testing.T) {

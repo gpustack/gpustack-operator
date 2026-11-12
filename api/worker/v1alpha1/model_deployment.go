@@ -234,38 +234,21 @@ type ModelDeploymentKVCache struct {
 // ModelDeploymentKVTransfer carries the settings of the point-to-point KV transfer leg
 // between a prefill role and a decode role. It composes with a shared store rather than excluding
 // one: both legs may be configured on one deployment, and the synthesized connector carries the
-// pair together.
+// pair together. Mooncake, NIXL, and HIXL are the supported point-to-point KV transfer backends.
+// When omitted, the operator selects Mooncake on non-Ascend pools and HIXL on Ascend pools; each
+// backend selects the fastest available interconnect automatically and falls back to TCP when no
+// high-speed fabric is configured.
 type ModelDeploymentKVTransfer struct {
-	// Protocol selects the wire transport for the direct prefill-to-decode
-	// KV transfer leg across the deployment. Both prefill and decode roles
-	// share one wire transport; each engine's transfer injector translates
-	// the selected protocol and pool hardware manufacturer into the engine's
-	// transport configuration.
-	//
-	// Allowed values are Auto, TCP, RDMA, EFA, CANN, and ROCM. When unset or
-	// Auto, the operator defaults the wire transport to TCP so fresh
-	// deployments run on clusters without RDMA or vendor high-speed fabric
-	// configured. Set RDMA, EFA, CANN, or ROCM explicitly to enable
-	// zero-copy RDMA, AWS EFA, or vendor high-speed fabric transport on the
-	// prefill/decode leg.
-	//
-	// Editing Protocol re-renders every role's transfer configuration and
-	// rolls every role's replicas together.
-	//
-	// +optional
-	// +k8s:validation:enum=["Auto","TCP","RDMA","EFA","CANN","ROCM"]
-	Protocol string `json:"protocol,omitempty" protobuf:"bytes,1,opt,name=protocol"`
-
-	// Backend selects the KV transfer backend used on the direct
+	// Backend selects the point-to-point KV transfer backend used on the direct
 	// prefill-to-decode leg.
 	//
-	// Allowed values are Auto, Mooncake, NIXL, and HIXL. When unset or Auto,
-	// the operator selects the default transfer backend for the role's pool
-	// hardware manufacturer and inference engine. HIXL is only valid on
-	// Ascend pools, and NIXL is only valid on non-Ascend pools.
+	// Mooncake, NIXL, and HIXL are the supported point-to-point KV transfer backends.
+	// When omitted, the operator selects Mooncake on non-Ascend pools and HIXL on
+	// Ascend pools. Each backend selects the fastest available interconnect automatically
+	// and falls back to TCP when no high-speed fabric is configured.
 	//
 	// +optional
-	// +k8s:validation:enum=["Auto","Mooncake","NIXL","HIXL"]
+	// +k8s:validation:enum=["Mooncake","NIXL","HIXL"]
 	Backend string `json:"backend,omitempty" protobuf:"bytes,2,opt,name=backend"`
 }
 
@@ -275,7 +258,6 @@ type ModelDeploymentKVTransfer struct {
 // They are declared beside the field whose schema closes the set, so that a reader of either finds
 // the other.
 const (
-	ModelDeploymentKVTransferBackendAuto     = "Auto"
 	ModelDeploymentKVTransferBackendMooncake = "Mooncake"
 	ModelDeploymentKVTransferBackendNIXL     = "NIXL"
 	ModelDeploymentKVTransferBackendHIXL     = "HIXL"

@@ -312,39 +312,33 @@ requirement on the vLLM and vLLM-Ascend rows.
 
 ## Direct transfer transport
 
-The deployment-wide `spec.kvTransfer.backend` selects `Auto`, `Mooncake`, `NIXL` or `HIXL`.
-`spec.kvTransfer.protocol` accepts `Auto`, `TCP`, `RDMA`, `EFA`, `CANN` or `ROCM`. Unset
-backend and protocol default to `Auto`; the Mooncake path maps `Auto` and `TCP` to `tcp`, `CANN`
-to `ascend`, and `ROCM` to `hip`.
+The deployment-wide `spec.kvTransfer.backend` selects `Mooncake`, `NIXL`, or `HIXL`.
+When omitted, it defaults to `Mooncake` on non-Ascend pools and `HIXL` on Ascend pools.
+For example, select NIXL on an existing deployment with:
 
 ```diff
  apiVersion: worker.gpustack.ai/v1
  kind: ModelDeployment
  metadata:
    name: qwen-pd
-   namespace: team-a
  spec:
 +  kvTransfer:
 +    backend: NIXL
-+    protocol: EFA
 ```
 
-- **Backend**: Select a connector compatible with both roles' `InstanceType` manufacturers.
-- **Protocol**: Select the transport for the direct link; the shared pool has its own transport.
+Admission refuses `HIXL` on non-Ascend pools, `NIXL` on Ascend pools, and mixed
+Ascend/non-Ascend prefill/decode pairs. If the manufacturer is not yet observed, the renderer
+can refuse an incompatible combination after it resolves.
 
-Admission refuses `HIXL` on non-Ascend `InstanceType`s, `NIXL` on Ascend, and mixed
-Ascend/non-Ascend pairs when `spec.kvTransfer` is set. If the manufacturer is not yet observed,
-the renderer can refuse an incompatible combination after it resolves.
+Mooncake derives `ascend` on Ascend, `efa` when both roles request `resources.interface > 0`
+under EFA, `hip` on AMD ROCm, `rdma` when both roles request `resources.interface > 0`, and
+`tcp` otherwise. NIXL selects `LIBFABRIC` when `aws-efa-enabled` is true or a bound KV cache
+pool uses EFA, and `UCX` otherwise. HIXL uses the Ascend driver mount.
+See [Transfer parameters](parameterize.md#transfer-parameters) for the injected settings.
 
-SGLang on Ascend defaults to HIXL with `--disaggregation-transfer-backend=ascend`, the read-only
-`/usr/local/Ascend/driver` mount and defaulted `ASCEND_MF_TRANSFER_PROTOCOL=sdma`, or
-`device_rdma` for `RDMA`. vLLM Ascend uses `MooncakeConnectorV1` and the same driver mount.
-
-AWS EFA, selected by `protocol: EFA` or resolved `vpc.amazonaws.com/efa` resources, selects the
-NIXL `LIBFABRIC` backend for vLLM, SGLang and remote `model-transfer` delivery. Supply an
-EFA-enabled runner through `spec.engine.image` or `roles[].image` and an EFA-enabled
-`model-transfer` image through Helm `modelTransfer.images.nvidia`.
-The default image builds do not include the EFA provider.
+For AWS EFA, supply an EFA-enabled runner through `spec.engine.image` or `roles[].image`, and
+an EFA-enabled `model-transfer` image through Helm `modelTransfer.images.nvidia` for remote
+weight delivery. The default image builds do not include the EFA provider.
 
 The engine image must support its chosen transport. [Engine Compatibility](engine-versions.md)
 lists existing compatibility evidence; these rendered combinations require their own validation.
@@ -387,7 +381,7 @@ between the halves:
 This limit governs the shared pool alone: [a pair needs no shared pool to hand blocks
 over](#pair-connections).
 
-A mixed Ascend/non-Ascend pair is refused when `spec.kvTransfer` is set. Two non-Ascend roles
+A mixed Ascend/non-Ascend pair is refused. Two non-Ascend roles
 can name different manufacturers, but their direct transfer interoperability is unmeasured here.
 
 [Kueue assigns a ResourceFlavor per

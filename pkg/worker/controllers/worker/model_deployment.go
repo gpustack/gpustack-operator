@@ -49,7 +49,6 @@ import (
 	"gpustack.ai/gpustack/pkg/utils/ctrlclix"
 	"gpustack.ai/gpustack/pkg/worker/elasticengine"
 	"gpustack.ai/gpustack/pkg/worker/kvcache/inject"
-	"gpustack.ai/gpustack/pkg/worker/kvcache/mooncake"
 	"gpustack.ai/gpustack/pkg/worker/settings"
 )
 
@@ -2313,15 +2312,17 @@ func (r *ModelDeploymentReconciler) renderModelDeploymentPods(
 	if err := r.reconcileModelTransferClientConfig(ctx, md, weights); err != nil {
 		return nil, err
 	}
+	awsEFAEnabled := settings.AWSEFAEnabled.ShouldValueBool(ctx)
 	if ModelDeploymentElasticRole(md) != nil {
-		return r.renderModelDeploymentElasticPods(ctx, md, connection, interfaceProtocols, weights)
+		return r.renderModelDeploymentElasticPods(ctx, md, connection, interfaceProtocols, weights, awsEFAEnabled)
 	}
-	return r.renderModelDeploymentRolePods(ctx, md, connection, interfaceProtocols, weights)
+	return r.renderModelDeploymentRolePods(ctx, md, connection, interfaceProtocols, weights, awsEFAEnabled)
 }
 
 func (r *ModelDeploymentReconciler) renderModelDeploymentRolePods(
 	ctx context.Context, md *workercore.ModelDeployment,
 	connection *ModelDeploymentConnectorInput, interfaceProtocols []string, weights *modelArtifactWeights,
+	awsEFAEnabled bool,
 ) (map[string]map[int][]*core.Pod, error) {
 	// The overcommit setting is the Instance path's, deliberately: it decides how a declared
 	// resource becomes a request, and this renderer derives the same values the Instance webhook
@@ -2370,8 +2371,9 @@ func (r *ModelDeploymentReconciler) renderModelDeploymentRolePods(
 			TCPTWReuse:                 tcpTWReuse,
 			NativeSidecar:              nativeSidecar,
 		}
-		if weights != nil {
-			in.Artifact = weights.Render
+		if weights != nil && weights.Render != nil {
+			roleArtifact := *weights.Render
+			in.Artifact = &roleArtifact
 		}
 		// A remote delivery resolves per role: a qualified managed role keeps
 		// the remote render, an unqualified one takes Prefer's declared
@@ -2413,14 +2415,12 @@ func (r *ModelDeploymentReconciler) renderModelDeploymentRolePods(
 		// fields below are set unconditionally rather than behind a test.
 		encoderLeg := modelDeploymentEPDEncoderLeg(md, role, instType.Status.Detail.Manufacturer)
 		encoderURLs := modelDeploymentEPDEncoderURLs(md)
-		// Resolve declared or pool-level EFA before the interface block: ModelDeploymentDirectInterfaceProtocol
-		// reads in.Artifact.ModelTransferEFA during interface resolution, and any EFA interface grant
-		// resolved below derives from these same two sources.
-		declaredOrPoolEFA := (md.Spec.KVTransfer != nil && mooncake.TransportProtocol(md.Spec.KVTransfer.Protocol) == "efa") ||
-			slices.Contains(interfaceProtocols, "efa")
-		if in.Artifact != nil && in.Artifact.Delivery == workercore.ModelDeploymentModelDeliveryRemote {
-			in.Artifact.ModelTransferEFA = declaredOrPoolEFA
+		efaActive := awsEFAEnabled || slices.Contains(interfaceProtocols, "efa")
+		if in.Artifact != nil && manufacturer != nodefeature.ManufacturerAscend {
+			in.Artifact.ModelTransferEFA = efaActive
 		}
+		remoteDelivery := in.Artifact != nil &&
+			in.Artifact.Delivery == workercore.ModelDeploymentModelDeliveryRemote
 		var interfaceResource core.ResourceName
 		if role.Resources != nil && role.Resources.Interface != nil && role.Resources.Interface.Sign() > 0 {
 			count, whole := role.Resources.Interface.AsInt64()
@@ -2432,14 +2432,29 @@ func (r *ModelDeploymentReconciler) renderModelDeploymentRolePods(
 				protocols = interfaceProtocols
 			}
 			resource, err := ModelDeploymentInterfaceResource(protocols,
-				ModelDeploymentDirectInterfaceProtocol(md, role, instType.Status.Detail.Manufacturer, in.Artifact), count)
+				ModelDeploymentDirectInterfaceProtocol(
+					md, role, instType.Status.Detail.Manufacturer, remoteDelivery, efaActive,
+				), count)
 			if err != nil {
 				return nil, fmt.Errorf("role %q interface request: %w", role.Name, err)
 			}
 			interfaceResource = resource
 			in.InterfaceResource = resource
 		}
-		efaActive := interfaceResource == mooncake.FabricDeviceResource("efa", 1) || declaredOrPoolEFA
+		effectiveKVBackend := ModelDeploymentEffectiveKVTransferBackend(md, instType.Status.Detail.Manufacturer)
+		kvTransferProtocol := ""
+		if effectiveKVBackend == inject.KVTransferBackendMooncake {
+			switch {
+			case instType.Status.Detail.Manufacturer == nodefeature.ManufacturerAscend:
+				kvTransferProtocol = "ascend"
+			case ModelDeploymentDirectPairRequestsInterfaces(md) && interfaceResource != "" && efaActive:
+				kvTransferProtocol = "efa"
+			case instType.Status.Detail.Manufacturer == nodefeature.ManufacturerAMD:
+				kvTransferProtocol = "hip"
+			case ModelDeploymentDirectPairRequestsInterfaces(md) && interfaceResource != "":
+				kvTransferProtocol = "rdma"
+			}
+		}
 
 		if roleKind != workercore.ModelDeploymentRoleKindEncode &&
 			ModelDeploymentMaySynthesizeConnector(md) &&
@@ -2466,13 +2481,8 @@ func (r *ModelDeploymentReconciler) renderModelDeploymentRolePods(
 			roleConnection.RoutingSidecar = routingSidecar
 			roleConnection.EncoderCache = encoderLeg
 			roleConnection.EncoderURLs = encoderURLs
-			if md.Spec.KVTransfer != nil {
-				roleConnection.KVTransferProtocol = md.Spec.KVTransfer.Protocol
-			}
-			// The backend is resolved from the spec, the manufacturer and the engine in one
-			// place; the fabric answer arrives from the grant resolved above, so a NIXL leg on
-			// an EFA pool names LIBFABRIC without anyone restating the rule here.
-			roleConnection.KVTransferBackend = ModelDeploymentEffectiveKVTransferBackend(md, instType.Status.Detail.Manufacturer)
+			roleConnection.KVTransferProtocol = kvTransferProtocol
+			roleConnection.KVTransferBackend = effectiveKVBackend
 			roleConnection.KVTransferEFA = efaActive
 			if weights != nil && connection != nil {
 				roleConnection.CachePrefix = weights.KVIdentity
@@ -2552,6 +2562,9 @@ func (r *ModelDeploymentReconciler) renderModelDeploymentRolePods(
 			if override != "" && !weights.liveRemoteReplica(role.Name, ordinal) {
 				if weights != nil && weights.Render != nil {
 					if fallbackRender := weights.Render.modelTransferFallbackRenderFor(override); fallbackRender != nil {
+						if manufacturer != nodefeature.ManufacturerAscend {
+							fallbackRender.ModelTransferEFA = efaActive
+						}
 						saved := in.Artifact
 						in.Artifact = fallbackRender
 						fallbackTemplate, renderErr := renderModelDeploymentPodTemplate(ctx, in)

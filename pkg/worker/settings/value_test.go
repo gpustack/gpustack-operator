@@ -13,13 +13,25 @@ import (
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	k8stesting "k8s.io/client-go/testing"
+	ctrlfake "sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	"gpustack.ai/gpustack/pkg/kubeclients/kubernetes"
 	kubefake "gpustack.ai/gpustack/pkg/kubeclients/kubernetes/fake"
+	"gpustack.ai/gpustack/pkg/kubeclients/kubernetes/scheme"
 	"gpustack.ai/gpustack/pkg/setting"
+	"gpustack.ai/gpustack/pkg/setting/settingtest"
 	"gpustack.ai/gpustack/pkg/system"
 	"gpustack.ai/gpustack/pkg/utils/stringx"
 )
+
+// TestMain configures the fake controller-runtime client used by settings reads that reach the
+// delegated Secret via the loopback client.
+func TestMain(m *testing.M) {
+	system.LoopbackCtrlClient.Configure(
+		ctrlfake.NewClientBuilder().WithScheme(scheme.Scheme).Build(),
+	)
+	os.Exit(m.Run())
+}
 
 // TestInstanceTypeManagementSettings pins the three runtime-adjustable switches
 // added for the unified-pool refactor: their stable names (which drive the
@@ -515,4 +527,76 @@ func TestAdmissionReadsTheStore(t *testing.T) {
 			assert.Contains(t, err.Error(), c.wantErr)
 		})
 	}
+}
+
+// TestAWSEFAEnabledSetting pins the cluster Setting that selects AWS Elastic Fabric Adapter
+// (EFA) for fabric interfaces and NIXL transfers: its stable name (which drives the GPUSTACK_
+// env mapping), its default-off boot value, that it stays an editable boolean, its constraint
+// validation, and its delegated Secret override.
+func TestAWSEFAEnabledSetting(t *testing.T) {
+	assert.Equal(t, "aws-efa-enabled", AWSEFAEnabled.Name(), "name drives the GPUSTACK_ env mapping")
+	assert.Equal(t, "false", AWSEFAEnabled.DefaultValue(), "EFA must be opt-in, so the default is off")
+	assert.True(t, AWSEFAEnabled.Editable(), "must stay editable for runtime adjustment")
+
+	ctx := context.Background()
+
+	// Default value without overrides.
+	assert.False(t, AWSEFAEnabled.ShouldValueBool(ctx), "default value must evaluate to false")
+
+	// Environment variable mapping.
+	_, envName, _ := setting.InitializeFromEnv("false")(AWSEFAEnabled.Name())
+	assert.Equal(t, "GPUSTACK_AWS_EFA_ENABLED", envName, "env name must follow the GPUSTACK_${UPPER_SNAKE} convention")
+
+	envCases := []struct {
+		name     string
+		envValue string
+		want     string
+	}{
+		{name: "env true", envValue: "true", want: "true"},
+		{name: "env false", envValue: "false", want: "false"},
+	}
+	for _, tc := range envCases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv(envName, tc.envValue)
+			val, _, _ := setting.InitializeFromEnv("false")(AWSEFAEnabled.Name())
+			assert.Equal(t, tc.want, val)
+		})
+	}
+
+	// Boolean constraint validation via Validate.
+	validateCases := []struct {
+		name    string
+		value   string
+		wantErr bool
+	}{
+		{name: "valid true", value: "true", wantErr: false},
+		{name: "valid false", value: "false", wantErr: false},
+		{name: "valid 1", value: "1", wantErr: false},
+		{name: "valid 0", value: "0", wantErr: false},
+		{name: "invalid yes", value: "yes", wantErr: true},
+		{name: "invalid no", value: "no", wantErr: true},
+		{name: "invalid non-boolean string", value: "invalid", wantErr: true},
+		{name: "invalid blank", value: "", wantErr: true},
+	}
+	for _, tc := range validateCases {
+		t.Run("validate_"+tc.name, func(t *testing.T) {
+			err := AWSEFAEnabled.Validate(ctx, tc.value)
+			if tc.wantErr {
+				assert.Error(t, err)
+			} else {
+				assert.NoError(t, err)
+			}
+		})
+	}
+
+	// Delegated Secret override.
+	t.Run("delegated secret override", func(t *testing.T) {
+		settingtest.MergeDelegatedSettings(t, map[string]string{
+			AWSEFAEnabled.Name(): "true",
+		})
+		val, err := AWSEFAEnabled.ValueBool(ctx)
+		require.NoError(t, err)
+		assert.True(t, val)
+		assert.True(t, AWSEFAEnabled.ShouldValueBool(ctx), "ShouldValueBool must return true when overridden in delegated secret")
+	})
 }

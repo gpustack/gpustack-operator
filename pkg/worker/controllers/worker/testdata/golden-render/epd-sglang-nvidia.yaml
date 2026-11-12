@@ -1,0 +1,41 @@
+apiVersion: worker.gpustack.ai/v1
+kind: ModelDeployment
+metadata:
+  name: qwen-vl
+  namespace: default
+spec:
+  engine:
+    image: lmsysorg/sglang:v0.5.18
+    name: SGLang
+  kvTransfer:
+    backend: Mooncake
+  model:
+    name: Qwen/Qwen2.5-VL-7B-Instruct
+  roles:
+  - image: lmsysorg/sglang:v0.5.18
+    instanceType: h20-8x
+    kind: Encode
+    name: encode
+    replicas: 1
+    resources:
+      accelerator: "1"
+    size: 1
+  - image: lmsysorg/sglang:v0.5.18
+    instanceType: h20-8x
+    kind: Prefill
+    name: prefill
+    replicas: 1
+    resources:
+      accelerator: "1"
+    size: 1
+  - image: lmsysorg/sglang:v0.5.18
+    instanceType: h20-8x
+    kind: Decode
+    name: decode
+    replicas: 1
+    resources:
+      accelerator: "1"
+    size: 1
+  router:
+    name: sglang-gateway
+status: {}

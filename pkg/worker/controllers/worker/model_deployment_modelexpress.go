@@ -359,6 +359,16 @@ func modelExpressStagingFor(
 		Name:  modelDeploymentModelTransferEnvTimeout,
 		Value: modelDeploymentModelTransferDefaultTimeoutSeconds,
 	})
+	if backend == "nixl" {
+		nixlPlugin := "UCX"
+		if artifact.ModelTransferEFA {
+			nixlPlugin = "LIBFABRIC"
+		}
+		staging.env = append(staging.env, corev1.EnvVar{
+			Name:  modelDeploymentModelTransferEnvNIXLBackend,
+			Value: nixlPlugin,
+		})
+	}
 
 	return staging
 }

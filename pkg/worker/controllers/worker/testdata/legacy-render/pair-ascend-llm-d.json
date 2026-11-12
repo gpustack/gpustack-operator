@@ -19,8 +19,8 @@
         "kueue.x-k8s.io/pod-group-serving": "true",
         "kueue.x-k8s.io/pod-group-total-count": "1",
         "kueue.x-k8s.io/role-hash": "prefill",
-        "modeldeployment.gpustack.ai/pod-spec-hash": "a7e5080f63a1644be91875c7ace4b998f3c976184382cdb961a510959aaa8864",
-        "modeldeployment.gpustack.ai/render-version": "4",
+        "modeldeployment.gpustack.ai/pod-spec-hash": "2abbe3c2e7768b8726f00791545df0cda6dc7c0e526e12daf5b104dc03ffd0bf",
+        "modeldeployment.gpustack.ai/render-version": "5",
         "note.gpustack.ai/role": "prefill",
         "prometheus.io/path": "/metrics",
         "prometheus.io/port": "8000",
@@ -92,6 +92,10 @@
           "env": [
             {
               "name": "MC_TE_METRIC",
+              "value": "1"
+            },
+            {
+              "name": "ASCEND_AUTO_CONNECT",
               "value": "1"
             },
             {
@@ -227,8 +231,8 @@
         "kueue.x-k8s.io/pod-group-serving": "true",
         "kueue.x-k8s.io/pod-group-total-count": "1",
         "kueue.x-k8s.io/role-hash": "decode",
-        "modeldeployment.gpustack.ai/pod-spec-hash": "18d686bcd0890ddf4fef4cd4e78d2a551f314de261410be8fa77742807978165",
-        "modeldeployment.gpustack.ai/render-version": "4",
+        "modeldeployment.gpustack.ai/pod-spec-hash": "9e1380f5a384cbd2a3d70106ad62157de088fa457f3ebb226bcf2587e58fb701",
+        "modeldeployment.gpustack.ai/render-version": "5",
         "note.gpustack.ai/role": "decode",
         "prometheus.io/path": "/metrics",
         "prometheus.io/port": "8200",
@@ -331,6 +335,10 @@
           "env": [
             {
               "name": "MC_TE_METRIC",
+              "value": "1"
+            },
+            {
+              "name": "ASCEND_AUTO_CONNECT",
               "value": "1"
             },
             {
