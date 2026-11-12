@@ -119,7 +119,7 @@ func replicaRoleCounts(t *testing.T, cli ctrlcli.Client) map[string]int {
 // that is nothing at all -- Pods exist, they are gated, and the incomplete one composes no
 // Workload.
 func TestModelDeployment_GroupIsCreatedInOnePass(t *testing.T) {
-	cli := newModelDeploymentClient(twoRoleDeployment(), newRenderInstanceType())
+	cli := newModelDeploymentClient(twoRoleDeployment(), newRenderAcceleratorType())
 
 	_, err := reconcileModelDeployment(t, cli)
 	require.NoError(t, err)
@@ -134,7 +134,7 @@ func TestModelDeployment_GroupIsCreatedInOnePass(t *testing.T) {
 // TestModelDeployment_GroupMembersAgreeAndAreOwned covers the metadata the group is made of, read
 // off the Pods the reconciler actually created rather than off the render.
 func TestModelDeployment_GroupMembersAgreeAndAreOwned(t *testing.T) {
-	cli := newModelDeploymentClient(twoRoleDeployment(), newRenderInstanceType())
+	cli := newModelDeploymentClient(twoRoleDeployment(), newRenderAcceleratorType())
 
 	_, err := reconcileModelDeployment(t, cli)
 	require.NoError(t, err)
@@ -177,7 +177,7 @@ func TestModelDeployment_GroupMembersAgreeAndAreOwned(t *testing.T) {
 // the names, and a UID the fake client assigns is the environment's to stamp, not the test's, so
 // both ends of a same-object comparison can be made to agree without anything having stayed.
 func TestModelDeployment_ScaleUpKeepsTheSurvivorsAndAddsTheMissingOrdinal(t *testing.T) {
-	cli := newModelDeploymentClient(twoRoleDeployment(), newRenderInstanceType())
+	cli := newModelDeploymentClient(twoRoleDeployment(), newRenderAcceleratorType())
 
 	_, err := reconcileModelDeployment(t, cli)
 	require.NoError(t, err)
@@ -232,7 +232,7 @@ func TestModelDeployment_ScaleDownRemovesTheDepartingOrdinalsWorkload(t *testing
 	// only completes when the withdrawal can be observed. A deployment declaring no router
 	// holds instead, which is the contract the dedicated no-Router test covers.
 	md, router := retirementRouterFixture(twoRoleDeployment())
-	cli := newModelDeploymentClient(md, newRenderInstanceType(), router)
+	cli := newModelDeploymentClient(md, newRenderAcceleratorType(), router)
 
 	_, err := reconcileModelDeploymentRetiring(t, cli)
 	require.NoError(t, err)
@@ -320,7 +320,7 @@ func TestModelDeployment_RoleSetChangeSweepsTheRemovedRoleAlone(t *testing.T) {
 	// only completes when the withdrawal can be observed. A deployment declaring no router
 	// holds instead, which is the contract the dedicated no-Router test covers.
 	md, router := retirementRouterFixture(twoRoleDeployment())
-	cli := newModelDeploymentClient(md, newRenderInstanceType(), router)
+	cli := newModelDeploymentClient(md, newRenderAcceleratorType(), router)
 
 	_, err := reconcileModelDeploymentRetiring(t, cli)
 	require.NoError(t, err)
@@ -395,7 +395,7 @@ func TestModelDeployment_RoleSetChangeSweepsTheRemovedRoleAlone(t *testing.T) {
 // the one that fails when it is not.
 func TestModelDeployment_AnOrdinalLessPreExistingPodRollsOutRatherThanBeingAdopted(t *testing.T) {
 	ctx := context.Background()
-	cli := newModelDeploymentClient(twoRoleDeployment(), newRenderInstanceType())
+	cli := newModelDeploymentClient(twoRoleDeployment(), newRenderAcceleratorType())
 
 	_, err := reconcileModelDeployment(t, cli)
 	require.NoError(t, err)
@@ -475,7 +475,7 @@ func TestModelDeployment_AnOrdinalLessPreExistingPodRollsOutRatherThanBeingAdopt
 // waiting for something that cannot arrive.
 func TestModelDeployment_ARoleWhosePodsShareOneWorkloadIsRepaired(t *testing.T) {
 	ctx := context.Background()
-	cli := newModelDeploymentClient(twoRoleDeployment(), newRenderInstanceType())
+	cli := newModelDeploymentClient(twoRoleDeployment(), newRenderAcceleratorType())
 
 	_, err := reconcileModelDeployment(t, cli)
 	require.NoError(t, err)
@@ -546,7 +546,7 @@ func TestModelDeployment_ARoleWhosePodsShareOneWorkloadIsRepaired(t *testing.T) 
 // exactly like a legitimate rollout.
 func TestModelDeployment_GroupIsIdempotent(t *testing.T) {
 	writes := new(modelDeploymentWrites)
-	cli := newCountingModelDeploymentClient(writes, twoRoleDeployment(), newRenderInstanceType())
+	cli := newCountingModelDeploymentClient(writes, twoRoleDeployment(), newRenderAcceleratorType())
 
 	_, err := reconcileModelDeployment(t, cli)
 	require.NoError(t, err)
@@ -573,7 +573,7 @@ func TestModelDeployment_GroupIsIdempotent(t *testing.T) {
 // pod` goes through the state the departing-replica case covers, where the replacement waits for
 // the ask rather than rebuilding anything.
 func TestModelDeployment_HandDeletedReplicaIsRecreatedWithoutARebuild(t *testing.T) {
-	cli := newModelDeploymentClient(twoRoleDeployment(), newRenderInstanceType())
+	cli := newModelDeploymentClient(twoRoleDeployment(), newRenderAcceleratorType())
 
 	_, err := reconcileModelDeployment(t, cli)
 	require.NoError(t, err)
@@ -628,7 +628,7 @@ func TestModelDeploymentPodGroupIncomplete_IsAReportedStateNotASilentOne(t *test
 	cli := ctrlfake.NewClientBuilder().
 		WithScheme(scheme.Scheme).
 		WithStatusSubresource(&workercore.ModelDeployment{}, &workercore.KVCachePoolBinding{}).
-		WithObjects(md, newRenderInstanceType(), control).
+		WithObjects(md, newRenderAcceleratorType(), control).
 		WithInterceptorFuncs(ctrlinterceptor.Funcs{
 			Create: func(
 				ctx context.Context, c ctrlcli.WithWatch, obj ctrlcli.Object, opts ...ctrlcli.CreateOption,
@@ -687,7 +687,7 @@ func TestModelDeploymentPodGroupIncomplete_ClearsWhenTheGroupCompletes(t *testin
 	cli := ctrlfake.NewClientBuilder().
 		WithScheme(scheme.Scheme).
 		WithStatusSubresource(&workercore.ModelDeployment{}, &workercore.KVCachePoolBinding{}).
-		WithObjects(md, newRenderInstanceType()).
+		WithObjects(md, newRenderAcceleratorType()).
 		WithInterceptorFuncs(ctrlinterceptor.Funcs{
 			Create: func(
 				ctx context.Context, c ctrlcli.WithWatch, obj ctrlcli.Object, opts ...ctrlcli.CreateOption,
@@ -743,7 +743,7 @@ func TestModelDeploymentPodGroupIncomplete_ClearsWhenTheGroupCompletes(t *testin
 // erroring.
 func TestModelDeployment_ADepartingReplicaIsNotReplacedUntilItsOrdinalReadsEmpty(t *testing.T) {
 	ctx := context.Background()
-	cli := newModelDeploymentClient(twoRoleDeployment(), newRenderInstanceType())
+	cli := newModelDeploymentClient(twoRoleDeployment(), newRenderAcceleratorType())
 
 	_, err := reconcileModelDeployment(t, cli)
 	require.NoError(t, err)
@@ -814,7 +814,7 @@ func TestModelDeployment_ADepartingReplicaIsNotReplacedUntilItsOrdinalReadsEmpty
 // group.
 func TestModelDeployment_NoDepartureLeavesTheWorkloadAlone(t *testing.T) {
 	ctx := context.Background()
-	cli := newModelDeploymentClient(twoRoleDeployment(), newRenderInstanceType())
+	cli := newModelDeploymentClient(twoRoleDeployment(), newRenderAcceleratorType())
 
 	_, err := reconcileModelDeployment(t, cli)
 	require.NoError(t, err)
@@ -855,7 +855,7 @@ func TestModelDeployment_NoDepartureLeavesTheWorkloadAlone(t *testing.T) {
 // releases the finalizer, and it is the only remedy that covers both phases.
 func TestModelDeployment_AReplicaNothingHereSentAwayGetsItsWorkloadReleased(t *testing.T) {
 	ctx := context.Background()
-	cli := newModelDeploymentClient(newRenderDeployment(), newRenderInstanceType())
+	cli := newModelDeploymentClient(newRenderDeployment(), newRenderAcceleratorType())
 
 	_, err := reconcileModelDeployment(t, cli)
 	require.NoError(t, err)
@@ -928,7 +928,7 @@ func TestModelDeployment_AReplicaNothingHereSentAwayGetsItsWorkloadReleased(t *t
 // the guard would answer correctly for a reason that has nothing to do with anybody standing.
 func TestModelDeployment_AWorkloadWithAMemberStillStandingSurvivesADeparture(t *testing.T) {
 	ctx := context.Background()
-	cli := newModelDeploymentClient(newRenderDeployment(), newRenderInstanceType())
+	cli := newModelDeploymentClient(newRenderDeployment(), newRenderAcceleratorType())
 
 	_, err := reconcileModelDeployment(t, cli)
 	require.NoError(t, err)
@@ -970,7 +970,7 @@ func TestModelDeployment_AWorkloadWithAMemberStillStandingSurvivesADeparture(t *
 // its sibling's.
 func TestModelDeployment_AFailedReplicaIsReplaced(t *testing.T) {
 	ctx := context.Background()
-	cli := newModelDeploymentClient(twoRoleDeployment(), newRenderInstanceType())
+	cli := newModelDeploymentClient(twoRoleDeployment(), newRenderAcceleratorType())
 
 	_, err := reconcileModelDeployment(t, cli)
 	require.NoError(t, err)
@@ -1056,7 +1056,7 @@ func TestModelDeployment_AFailedReplicaIsReplaced(t *testing.T) {
 // reporting every replica up to date.
 func TestModelDeployment_ASucceededReplicaIsReplaced(t *testing.T) {
 	ctx := context.Background()
-	cli := newModelDeploymentClient(twoRoleDeployment(), newRenderInstanceType())
+	cli := newModelDeploymentClient(twoRoleDeployment(), newRenderAcceleratorType())
 
 	_, err := reconcileModelDeployment(t, cli)
 	require.NoError(t, err)
@@ -1145,7 +1145,7 @@ func TestModelDeployment_AFailedMemberTurnsItsReplicaOver(t *testing.T) {
 		md.Spec.Roles[0].Replicas = 1
 		md.Spec.Roles[0].ReplicaSize = 2
 	})
-	cli := newModelDeploymentClient(md, newRenderInstanceType())
+	cli := newModelDeploymentClient(md, newRenderAcceleratorType())
 
 	_, err := reconcileModelDeployment(t, cli)
 	require.NoError(t, err)
@@ -1187,7 +1187,7 @@ func TestModelDeployment_RedistributingReplicasMovesEachRolesOwnOrdinals(t *test
 	// only completes when the withdrawal can be observed. A deployment declaring no router
 	// holds instead, which is the contract the dedicated no-Router test covers.
 	md, router := retirementRouterFixture(twoRoleDeployment())
-	cli := newModelDeploymentClient(md, newRenderInstanceType(), router)
+	cli := newModelDeploymentClient(md, newRenderAcceleratorType(), router)
 
 	_, err := reconcileModelDeploymentRetiring(t, cli)
 	require.NoError(t, err)
@@ -1231,7 +1231,7 @@ func TestModelDeployment_RenamingARoleWithoutChangingCountsRebuilds(t *testing.T
 	// only completes when the withdrawal can be observed. A deployment declaring no router
 	// holds instead, which is the contract the dedicated no-Router test covers.
 	md, router := retirementRouterFixture(twoRoleDeployment())
-	cli := newModelDeploymentClient(md, newRenderInstanceType(), router)
+	cli := newModelDeploymentClient(md, newRenderAcceleratorType(), router)
 
 	_, err := reconcileModelDeploymentRetiring(t, cli)
 	require.NoError(t, err)
@@ -1249,13 +1249,13 @@ func TestModelDeployment_RenamingARoleWithoutChangingCountsRebuilds(t *testing.T
 			"and never move")
 }
 
-// newRenderInstanceTypeB is the SECOND InstanceType, and it is what makes every two-group case
+// newRenderAcceleratorTypeB is the SECOND InstanceType, and it is what makes every two-group case
 // expressible: another name, and another queue entrance so a role placed on it lands in another pool.
 //
 // The entrance is again a value no derivation produces, for the reason the first fixture states: one
 // spelled the way a name-derived render would spell it could not tell a read from a derivation apart.
-func newRenderInstanceTypeB() *worker.InstanceType {
-	return newRenderInstanceType(func(it *worker.InstanceType) {
+func newRenderAcceleratorTypeB() *worker.AcceleratorType {
+	return newRenderAcceleratorType(func(it *worker.AcceleratorType) {
 		it.Name = "a100-8x"
 		it.Status.Entrance = "queue-for-a100-8x"
 	})
@@ -1264,7 +1264,7 @@ func newRenderInstanceTypeB() *worker.InstanceType {
 // twoTypeDeployment puts the two roles on two instanceTypes, which is two groups.
 func twoTypeRoleDeployment(mutate ...func(*workercore.ModelDeployment)) *workercore.ModelDeployment {
 	return twoRoleDeployment(append([]func(*workercore.ModelDeployment){
-		func(md *workercore.ModelDeployment) { md.Spec.Roles[1].InstanceType = "a100-8x" },
+		func(md *workercore.ModelDeployment) { md.Spec.Roles[1].AcceleratorType = "a100-8x" },
 	}, mutate...)...)
 }
 
@@ -1289,7 +1289,7 @@ func groupNameCounts(t *testing.T, cli ctrlcli.Client) map[string]int {
 // reporting why.
 func TestModelDeployment_TwoTypesAreCreatedAsTwoGroupsInOnePass(t *testing.T) {
 	cli := newModelDeploymentClient(twoTypeRoleDeployment(),
-		newRenderInstanceType(), newRenderInstanceTypeB())
+		newRenderAcceleratorType(), newRenderAcceleratorTypeB())
 
 	_, err := reconcileModelDeployment(t, cli)
 	require.NoError(t, err)
@@ -1324,7 +1324,7 @@ func TestModelDeployment_TwoTypesAreCreatedAsTwoGroupsInOnePass(t *testing.T) {
 // better, for the reason the fake client states: it assigns nothing on a generated-name create.
 func TestModelDeployment_OneRolesScaleLeavesEverySurvivorAlone(t *testing.T) {
 	cli := newModelDeploymentClient(twoTypeRoleDeployment(),
-		newRenderInstanceType(), newRenderInstanceTypeB())
+		newRenderAcceleratorType(), newRenderAcceleratorTypeB())
 
 	_, err := reconcileModelDeployment(t, cli)
 	require.NoError(t, err)
@@ -1375,7 +1375,7 @@ func TestModelDeployment_OneRolesScaleLeavesEverySurvivorAlone(t *testing.T) {
 func TestModelDeployment_TeardownRemovesEveryReplicasWorkload(t *testing.T) {
 	ctx := context.Background()
 	cli := newModelDeploymentClient(twoTypeRoleDeployment(),
-		newRenderInstanceType(), newRenderInstanceTypeB())
+		newRenderAcceleratorType(), newRenderAcceleratorTypeB())
 
 	_, err := reconcileModelDeployment(t, cli)
 	require.NoError(t, err)
@@ -1431,7 +1431,7 @@ func TestModelDeployment_TeardownRemovesEveryReplicasWorkload(t *testing.T) {
 func TestModelDeployment_ARolesScaleDoesNotDelayAnotherRolesRepair(t *testing.T) {
 	ctx := context.Background()
 	cli := newModelDeploymentClient(twoTypeRoleDeployment(),
-		newRenderInstanceType(), newRenderInstanceTypeB())
+		newRenderAcceleratorType(), newRenderAcceleratorTypeB())
 
 	_, err := reconcileModelDeployment(t, cli)
 	require.NoError(t, err)
@@ -1484,7 +1484,7 @@ func TestModelDeployment_AReplicaShortOneMemberIsRepaired(t *testing.T) {
 		md.Spec.Roles[0].Replicas = 1
 		md.Spec.Roles[0].ReplicaSize = 2
 	})
-	cli := newModelDeploymentClient(md, newRenderInstanceType())
+	cli := newModelDeploymentClient(md, newRenderAcceleratorType())
 
 	_, err := reconcileModelDeployment(t, cli)
 	require.NoError(t, err)
@@ -1531,7 +1531,7 @@ func TestTheRouterIsNeverAServingReplica(t *testing.T) {
 	require.NotEmpty(t, replica.Labels[kueuepodconst.GroupNameLabel],
 		"and the real replica carries one, which is what the stand-in composes from")
 
-	cli := newModelDeploymentClient(md, newRenderInstanceType(), replica, router)
+	cli := newModelDeploymentClient(md, newRenderAcceleratorType(), replica, router)
 	standInForKueue(t, cli, true)
 
 	// The Router is still there, unchanged, because nothing about standing beside it is a defect.

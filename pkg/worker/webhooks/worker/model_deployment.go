@@ -117,8 +117,8 @@ var (
 // the result, and the alternative -- refusing it -- is the deadlock above.
 func (r *ModelDeploymentWebhook) ReceiveDeletionUpdate() {}
 
-// Default fills the accelerator count a role left unset, which is one card on an acceleratable
-// InstanceType and nothing on any other.
+// Default fills the accelerator count a role left unset, which is one card on an
+// AcceleratorType and nothing when acceleratorType is omitted.
 //
 // IT IS THE SAME RULE THE Instance WEBHOOK ALREADY APPLIES, and this type was the one that did not
 // have it. A role that names no count is asking for the ordinary thing — a card — and until now it
@@ -139,8 +139,8 @@ func (r *ModelDeploymentWebhook) ReceiveDeletionUpdate() {}
 // what is left is a replica holding accelerators nobody charged it for.
 //
 // AN EXPLICIT ZERO IS LEFT ALONE. Zero is a value the user wrote, and silently replacing it would
-// make the request stop meaning what it says. Validation refuses it on an accelerated type shared
-// with another role and points a CPU-only replica at a CPU-only InstanceType instead.
+// make the request stop meaning what it says. Validation refuses it on an accelerated type and
+// points a CPU-only replica at omitting acceleratorType instead.
 //
 // IT RUNS ON UPDATE AS WELL AS CREATE, because an existing role can still have an unset count.
 // Adding or removing a role is refused by validation. The defaulter is handed the incoming object
@@ -152,19 +152,19 @@ func (r *ModelDeploymentWebhook) Default(ctx context.Context, obj runtime.Object
 
 	// AN OBJECT BEING DELETED IS NOT DEFAULTED. This handler opts out of the shared deletion guard
 	// to keep validating updates in that window, and that opt-out is one decision covering
-	// defaulting too. The read below refuses when the InstanceType is absent, so without this the
+	// defaulting too. The read below refuses when the AcceleratorType is absent, so without this the
 	// update that clears the finalizer would be refused whenever the type was deleted first, and
 	// nothing could then release the object.
 	if md.DeletionTimestamp != nil {
 		return nil
 	}
 
-	// Roles may each name a DIFFERENT InstanceType, so each is defaulted against the type it names
+	// Roles may each name a DIFFERENT AcceleratorType, so each is defaulted against the type it names
 	// and the reads are memoized rather than assumed to be one. That is no longer a defense against
 	// running before validation -- it is the shape: a deployment's roles are admitted as a set
 	// ACROSS types, one group per replica, so several types in one object is ordinary rather than a
 	// state some later rule rejects.
-	seen := make(map[string]*worker.InstanceType, 1)
+	seen := make(map[string]*worker.AcceleratorType, 1)
 	for i := range md.Spec.Roles {
 		role := &md.Spec.Roles[i]
 		if role.Resources != nil && role.Resources.Accelerator != nil {
@@ -175,20 +175,16 @@ func (r *ModelDeploymentWebhook) Default(ctx context.Context, obj runtime.Object
 		// empty one is left to the rules that report it as the field error it is: looking it up
 		// would fail on the request rather than on the object, and deny the write with a message
 		// about reading the cluster instead of about the name.
-		if role.InstanceType == "" {
+		if role.AcceleratorType == "" {
 			continue
 		}
 
-		instType, ok := seen[role.InstanceType]
-		if !ok {
-			var err error
-			if instType, err = r.getInstanceType(ctx, role.InstanceType, i); err != nil {
+		if _, ok := seen[role.AcceleratorType]; !ok {
+			accType, err := r.getAcceleratorType(ctx, role.AcceleratorType, i)
+			if err != nil {
 				return err
 			}
-			seen[role.InstanceType] = instType
-		}
-		if !instType.Spec.Acceleratable {
-			continue
+			seen[role.AcceleratorType] = accType
 		}
 
 		if role.Resources == nil {
@@ -204,14 +200,14 @@ func (r *ModelDeploymentWebhook) Default(ctx context.Context, obj runtime.Object
 	return nil
 }
 
-// getInstanceType reads one InstanceType, from the API server and never from a cache.
+// getAcceleratorType reads one AcceleratorType, from the API server and never from a cache.
 //
 // A QUORUM READ IS THE WHOLE OF WHAT MAKES THIS DEFAULT SAFE TO ADD. A cached read decides the
 // outcome whenever the informer is behind, and it does so in BOTH directions: a type created moments
 // earlier reads as absent and the deployment is refused for naming a type that exists, while a type
-// deleted and recreated under the same name reads with its old acceleratable flag and the count is
-// written from it -- the second is the worse one, because the wrong value is then persisted. Reading
-// with ResourceVersion "0" is not a fix either: that is answered from the API server's watch cache,
+// deleted and recreated under the same name reads with its old spec and the count is written from
+// it -- the second is the worse one, because the wrong value is then persisted. Reading with
+// ResourceVersion "0" is not a fix either: that is answered from the API server's watch cache,
 // which is a second cache behind for the same reasons.
 //
 // THE COST IS ONE READ PER ADMISSION, not one per role. Every role of a valid deployment names the
@@ -227,23 +223,23 @@ func (r *ModelDeploymentWebhook) Default(ctx context.Context, obj runtime.Object
 // been created yet — which is how a slow start reads too.
 //
 // THE MESSAGE NAMES THE TYPE RATHER THAN THE READ, because those send a reader to different places.
-// "instance type not found" is a name to check; "could not read instance type" is a cluster to
+// "accelerator type not found" is a name to check; "could not read accelerator type" is a cluster to
 // check, and reporting the second for the first costs an operator the time to find a typo.
-func (r *ModelDeploymentWebhook) getInstanceType(
+func (r *ModelDeploymentWebhook) getAcceleratorType(
 	ctx context.Context, name string, roleIdx int,
-) (*worker.InstanceType, error) {
-	instType := &worker.InstanceType{ObjectMeta: meta.ObjectMeta{Name: name}}
-	rolePath := field.NewPath("spec.roles").Index(roleIdx).Child("instanceType")
+) (*worker.AcceleratorType, error) {
+	accType := &worker.AcceleratorType{ObjectMeta: meta.ObjectMeta{Name: name}}
+	rolePath := field.NewPath("spec.roles").Index(roleIdx).Child("acceleratorType")
 
-	if err := r.APIReader.Get(ctx, ctrlcli.ObjectKeyFromObject(instType), instType); err != nil {
+	if err := r.APIReader.Get(ctx, ctrlcli.ObjectKeyFromObject(accType), accType); err != nil {
 		if kerrors.IsNotFound(err) {
 			return nil, field.NotFound(rolePath, name)
 		}
 
-		return nil, field.InternalError(rolePath, fmt.Errorf("get instance type: %w", err))
+		return nil, field.InternalError(rolePath, fmt.Errorf("get accelerator type: %w", err))
 	}
 
-	return instType, nil
+	return accType, nil
 }
 
 // validateModelDeploymentHostAccess applies the Instance host access gates to each role. Access
@@ -482,22 +478,22 @@ func (r *ModelDeploymentWebhook) validateModelDeploymentPoolTransport(
 	for i := range md.Spec.Roles {
 		role := &md.Spec.Roles[i]
 		if !judgeAll {
-			if was := stored[role.Name]; was != nil && was.InstanceType == role.InstanceType {
+			if was := stored[role.Name]; was != nil && was.AcceleratorType == role.AcceleratorType {
 				continue
 			}
 		}
-		if _, ok := seen[role.InstanceType]; ok {
+		if _, ok := seen[role.AcceleratorType]; ok {
 			continue
 		}
-		seen[role.InstanceType] = struct{}{}
+		seen[role.AcceleratorType] = struct{}{}
 		manufacturer := ""
-		if md.Spec.Engine.Name == workercore.ModelDeploymentEngineVLLM ||
-			md.Spec.Engine.Name == workercore.ModelDeploymentEngineSGLang || md.Spec.Model.ArtifactRef != nil {
-			instType, err := r.getInstanceType(ctx, role.InstanceType, i)
+		if role.AcceleratorType != "" && (md.Spec.Engine.Name == workercore.ModelDeploymentEngineVLLM ||
+			md.Spec.Engine.Name == workercore.ModelDeploymentEngineSGLang || md.Spec.Model.ArtifactRef != nil) {
+			accType, err := r.getAcceleratorType(ctx, role.AcceleratorType, i)
 			if err != nil {
 				return nil, err
 			}
-			manufacturer = instType.Status.Detail.Manufacturer
+			manufacturer = accType.Status.Detail.Manufacturer
 		}
 		engine, err := workerctrl.ModelDeploymentInjectEngine(md.Spec.Engine.Name, manufacturer)
 		if err != nil {
@@ -511,7 +507,7 @@ func (r *ModelDeploymentWebhook) validateModelDeploymentPoolTransport(
 }
 
 // modelDeploymentPoolTransportInputsChanged reports whether an update moved a role onto a
-// different instanceType. That is the one transport input the object carries: the engine each
+// different acceleratorType. That is the one transport input the object carries: the engine each
 // role runs is read off the type's manufacturer, so a move can flip the verdict the stored shape
 // once passed.
 func modelDeploymentPoolTransportInputsChanged(old, md *workercore.ModelDeployment) bool {
@@ -520,10 +516,10 @@ func modelDeploymentPoolTransportInputsChanged(old, md *workercore.ModelDeployme
 	}
 	stored := make(map[string]string, len(old.Spec.Roles))
 	for i := range old.Spec.Roles {
-		stored[old.Spec.Roles[i].Name] = old.Spec.Roles[i].InstanceType
+		stored[old.Spec.Roles[i].Name] = old.Spec.Roles[i].AcceleratorType
 	}
 	for i := range md.Spec.Roles {
-		if stored[md.Spec.Roles[i].Name] != md.Spec.Roles[i].InstanceType {
+		if stored[md.Spec.Roles[i].Name] != md.Spec.Roles[i].AcceleratorType {
 			return true
 		}
 	}
@@ -544,7 +540,7 @@ func modelDeploymentDirectLegProbe(
 }
 
 // modelDeploymentRoleInterfaceInputsChanged reports whether an update touched the inputs the
-// interface-request rule reads for one role: its interface request, its InstanceType and its
+// interface-request rule reads for one role: its interface request, its AcceleratorType and its
 // command presence. A role the object did not carry counts as changed. Roles are matched by name
 // and quantities by value.
 //
@@ -552,7 +548,7 @@ func modelDeploymentDirectLegProbe(
 // under a stored deployment, so re-running it on a role whose inputs did not move would refuse
 // that role for a drift its own edit did not cause.
 func modelDeploymentRoleInterfaceInputsChanged(was, role *workercore.ModelDeploymentRole) bool {
-	return was == nil || role.InstanceType != was.InstanceType ||
+	return was == nil || role.AcceleratorType != was.AcceleratorType ||
 		(len(role.Command) > 0) != (len(was.Command) > 0) ||
 		!kubemeta.DeepEqual(interfaceQuantity(role.Resources), interfaceQuantity(was.Resources))
 }
@@ -582,13 +578,13 @@ func (r *ModelDeploymentWebhook) modelDeploymentRoleNeedsInterfaceRejudge(
 	// The probes differ, which only a non-Ascend manufacturer can turn into a real leg change,
 	// so the rendered legs are compared at the type's own manufacturer before rejudging.
 	manufacturer := ""
-	if md.Spec.Engine.Name == workercore.ModelDeploymentEngineVLLM ||
-		md.Spec.Engine.Name == workercore.ModelDeploymentEngineSGLang || md.Spec.Model.ArtifactRef != nil {
-		instType, err := r.getInstanceType(ctx, role.InstanceType, i)
+	if role.AcceleratorType != "" && (md.Spec.Engine.Name == workercore.ModelDeploymentEngineVLLM ||
+		md.Spec.Engine.Name == workercore.ModelDeploymentEngineSGLang || md.Spec.Model.ArtifactRef != nil) {
+		accType, err := r.getAcceleratorType(ctx, role.AcceleratorType, i)
 		if err != nil {
 			return false, err
 		}
-		manufacturer = instType.Status.Detail.Manufacturer
+		manufacturer = accType.Status.Detail.Manufacturer
 	}
 	return workerctrl.ModelDeploymentDirectInterfaceProtocol(old, was, manufacturer, old.Spec.Model.ArtifactRef != nil, awsEFAEnabled) !=
 		workerctrl.ModelDeploymentDirectInterfaceProtocol(md, role, manufacturer, md.Spec.Model.ArtifactRef != nil, awsEFAEnabled), nil
@@ -675,13 +671,13 @@ func (r *ModelDeploymentWebhook) validateModelDeploymentInterfaceRequests(
 			continue
 		}
 		manufacturer := ""
-		if md.Spec.Engine.Name == workercore.ModelDeploymentEngineVLLM ||
-			md.Spec.Engine.Name == workercore.ModelDeploymentEngineSGLang || md.Spec.Model.ArtifactRef != nil {
-			instType, err := r.getInstanceType(ctx, role.InstanceType, i)
+		if role.AcceleratorType != "" && (md.Spec.Engine.Name == workercore.ModelDeploymentEngineVLLM ||
+			md.Spec.Engine.Name == workercore.ModelDeploymentEngineSGLang || md.Spec.Model.ArtifactRef != nil) {
+			accType, err := r.getAcceleratorType(ctx, role.AcceleratorType, i)
 			if err != nil {
 				return nil, err
 			}
-			manufacturer = instType.Status.Detail.Manufacturer
+			manufacturer = accType.Status.Detail.Manufacturer
 		}
 		roleProtocols := protocols
 		if len(role.Command) > 0 {
@@ -716,7 +712,7 @@ func (r *ModelDeploymentWebhook) ValidateCreate(
 	errs = append(errs, validateModelDeploymentServedModelNames(nil, md)...)
 	errs = append(errs, validateModelDeploymentKVCacheDtype(md, workerctrl.ModelDeploymentOwnsKVCacheDtype(ctx))...)
 
-	typeErrs, err := r.validateRoleResourcesAgainstInstanceTypes(ctx, md)
+	typeErrs, err := r.validateRoleResourcesAgainstAcceleratorTypes(ctx, nil, md)
 	if err != nil {
 		return nil, err
 	}
@@ -779,7 +775,7 @@ func (r *ModelDeploymentWebhook) ValidateUpdate(
 	errs = append(errs, validateModelDeploymentIdentity(md, old)...)
 	errs = append(errs, validateModelDeploymentRouterName(md, old)...)
 
-	typeErrs, err := r.validateRoleResourcesAgainstInstanceTypes(ctx, md)
+	typeErrs, err := r.validateRoleResourcesAgainstAcceleratorTypes(ctx, old, md)
 	if err != nil {
 		return nil, err
 	}
@@ -1763,7 +1759,7 @@ func validateModelDeploymentRoles(md *workercore.ModelDeployment) field.ErrorLis
 	for i := range md.Spec.Roles {
 		role, rolePath := &md.Spec.Roles[i], rolesPath.Index(i)
 		if role.ShmSize != nil && role.ShmSize.Sign() <= 0 {
-			errs = append(errs, field.Invalid(rolePath.Child("shmSize"), role.ShmSize.String(), "must be greater than zero"))
+			errs = append(errs, field.Invalid(rolePath.Child("shmSize"), role.ShmSize.String(), "shmSize must be greater than zero"))
 		}
 
 		errs = append(errs, validateModelDeploymentRoleExtraArgs(md.Spec.Engine.Name, role, rolePath)...)
@@ -2367,7 +2363,7 @@ func validateModelDeploymentRoleEnv(
 // THE TWO RULES THAT NEED THE InstanceType ARE NOT HERE, and that is a property of what they read
 // rather than a split of the subject. This one is decided from the request alone, so it holds for a
 // deployment being deleted and for one whose type has not been read; the other two are in
-// validateRoleResourcesAgainstInstanceType, which is reached only when the type could be read.
+// validateRoleResourcesAgainstAcceleratorType, which is reached only when the type could be read.
 func validateModelDeploymentRoleResources(
 	role *workercore.ModelDeploymentRole, rolePath *field.Path,
 ) field.ErrorList {
@@ -2383,6 +2379,49 @@ func validateModelDeploymentRoleResources(
 				ress.Interface.String(), "interface count must be a non-negative whole number"))
 		}
 	}
+	if ress.CPU != nil && ress.CPU.Sign() <= 0 {
+		errs = append(errs, field.Invalid(rolePath.Child("resources", "cpu"), ress.CPU.String(), "cpu must be greater than zero"))
+	}
+	if ress.RAM != nil && ress.RAM.Sign() <= 0 {
+		errs = append(errs, field.Invalid(rolePath.Child("resources", "ram"), ress.RAM.String(), "ram must be greater than zero"))
+	}
+	if ress.LocalStorage != nil && ress.LocalStorage.Sign() <= 0 {
+		errs = append(errs, field.Invalid(
+			rolePath.Child("resources", "localStorage"), ress.LocalStorage.String(), "localStorage must be greater than zero",
+		))
+	}
+	if role.ShmSize != nil && ress.RAM != nil && ress.RAM.Sign() > 0 && role.ShmSize.Cmp(*ress.RAM) > 0 {
+		errs = append(errs, field.Invalid(rolePath.Child("shmSize"), role.ShmSize.String(), "shmSize cannot exceed ram"))
+	}
+
+	if role.AcceleratorType == "" {
+		if ress.Accelerator != nil {
+			errs = append(errs, field.Forbidden(
+				rolePath.Child("resources", "accelerator"),
+				"accelerator resources cannot be requested when acceleratorType is omitted",
+			))
+		}
+		if ress.AcceleratorSlicedMemoryPercentage != 0 {
+			errs = append(errs, field.Forbidden(
+				rolePath.Child("resources", "acceleratorSlicedMemoryPercentage"),
+				"logical slicing cannot be requested when acceleratorType is omitted",
+			))
+		}
+		if ress.AcceleratorSlicedCoresPercentage != 0 {
+			errs = append(errs, field.Forbidden(
+				rolePath.Child("resources", "acceleratorSlicedCoresPercentage"),
+				"logical slicing cannot be requested when acceleratorType is omitted",
+			))
+		}
+		if ress.AcceleratorPartitionedProfile != "" {
+			errs = append(errs, field.Forbidden(
+				rolePath.Child("resources", "acceleratorPartitionedProfile"),
+				"hardware partitioning cannot be requested when acceleratorType is omitted",
+			))
+		}
+		return errs
+	}
+
 	if ress.AcceleratorPartitionedProfile == "" {
 		return errs
 	}
@@ -2404,7 +2443,7 @@ func validateModelDeploymentRoleResources(
 	))
 }
 
-// validateRoleResourcesAgainstInstanceTypes applies the rules that need the InstanceType a role
+// validateRoleResourcesAgainstAcceleratorTypes applies the rules that need the AcceleratorType a role
 // names, and is the only validation path here that reads another object.
 //
 // THE REFUSAL LANDS AT THE API INSTEAD OF DEEPER IN THE CHAIN, which is the whole of what these
@@ -2414,7 +2453,7 @@ func validateModelDeploymentRoleResources(
 // this one states.
 //
 // AN OBJECT BEING DELETED IS NOT JUDGED BY THESE RULES. A rule that reads the type refuses when the
-// type is absent, so leaving them on would let a deleted InstanceType block the very update that
+// type is absent, so leaving them on would let a deleted AcceleratorType block the very update that
 // clears this deployment's finalizer. That is the same reasoning Default states for declining
 // wholesale, applied to the part of validation that acquired the same dependency.
 //
@@ -2422,11 +2461,11 @@ func validateModelDeploymentRoleResources(
 // error the object-only rules already report, and looking it up would fail on the request and answer
 // with a message about reading the cluster instead of about the name.
 //
-// A TYPE THAT COULD NOT BE READ STOPS THE PASS RATHER THAN BECOMING A SECOND REFUSAL. getInstanceType
+// A TYPE THAT COULD NOT BE READ STOPS THE PASS RATHER THAN BECOMING A SECOND REFUSAL. getAcceleratorType
 // already distinguishes a name that does not exist from a cluster that would not answer, and the
 // defaulting half raises the same error first on every path that reaches storage.
-func (r *ModelDeploymentWebhook) validateRoleResourcesAgainstInstanceTypes(
-	ctx context.Context, md *workercore.ModelDeployment,
+func (r *ModelDeploymentWebhook) validateRoleResourcesAgainstAcceleratorTypes(
+	ctx context.Context, old, md *workercore.ModelDeployment,
 ) (field.ErrorList, error) {
 	if md.DeletionTimestamp != nil {
 		return nil, nil
@@ -2434,13 +2473,20 @@ func (r *ModelDeploymentWebhook) validateRoleResourcesAgainstInstanceTypes(
 
 	rolesPath := field.NewPath("spec", "roles")
 
+	oldRoles := make(map[string]*workercore.ModelDeploymentRole)
+	if old != nil {
+		for i := range old.Spec.Roles {
+			oldRoles[old.Spec.Roles[i].Name] = &old.Spec.Roles[i]
+		}
+	}
+
 	var errs field.ErrorList
-	seen := make(map[string]*worker.InstanceType, 1)
+	seen := make(map[string]*worker.AcceleratorType, 1)
 	for i := range md.Spec.Roles {
 		role := &md.Spec.Roles[i]
 		// A PAIR'S BACKEND RULES READ EVERY HALF'S MANUFACTURER, whether or not that half
 		// requests resources: the backend-vs-vendor refusals and the mixed-pair refusal are
-		// decided per role, and a role that declares no resources still names an InstanceType
+		// decided per role, and a role that declares no resources still names an AcceleratorType
 		// whose vendor decides them. A role outside a declared pair, and a role inside one that
 		// names no type, have nothing for the rules to read and stay skipped.
 		roleInPair := workerctrl.ModelDeploymentDeclaresBothHalves(md)
@@ -2451,22 +2497,22 @@ func (r *ModelDeploymentWebhook) validateRoleResourcesAgainstInstanceTypes(
 				roleInPair = false
 			}
 		}
-		if role.InstanceType == "" || (role.Resources == nil && !roleInPair) {
+		if role.AcceleratorType == "" || (role.Resources == nil && !roleInPair) {
 			continue
 		}
 
-		instType, ok := seen[role.InstanceType]
+		accType, ok := seen[role.AcceleratorType]
 		if !ok {
 			var err error
-			if instType, err = r.getInstanceType(ctx, role.InstanceType, i); err != nil {
+			if accType, err = r.getAcceleratorType(ctx, role.AcceleratorType, i); err != nil {
 				// A FIELD ERROR JOINS THE OTHERS INSTEAD OF ENDING THE PASS. A named type that does
 				// not exist is a fact about this object's field, and returning it bare does two
 				// things wrong: the response comes back as a plain denial rather than an Invalid
-				// naming the path, and it SHORT-CIRCUITS -- one mistyped instanceType hides every
+				// naming the path, and it SHORT-CIRCUITS -- one mistyped acceleratorType hides every
 				// other validation error on the object, so the operator fixes one thing per apply.
 				//
 				// A TRANSPORT FAILURE IS CARRIED AS A FIELD ERROR TOO AND MUST NOT BE FOLDED IN.
-				// getInstanceType reports an unreadable API with field.InternalError, which is a
+				// getAcceleratorType reports an unreadable API with field.InternalError, which is a
 				// *field.Error like the not-found one and means something entirely different: the
 				// object may be perfectly valid and the cluster could not be asked. Folding it in
 				// would tell the operator their object is invalid on the strength of a failed read,
@@ -2479,14 +2525,33 @@ func (r *ModelDeploymentWebhook) validateRoleResourcesAgainstInstanceTypes(
 
 				continue
 			}
-			seen[role.InstanceType] = instType
+			seen[role.AcceleratorType] = accType
 		}
+
+		if accType.Spec.Inactive {
+			isExistingRoleOnSameType := false
+			if oldRole, ok := oldRoles[role.Name]; ok && oldRole != nil && oldRole.AcceleratorType == role.AcceleratorType {
+				isExistingRoleOnSameType = true
+			}
+			if !isExistingRoleOnSameType {
+				errs = append(errs, field.Forbidden(
+					rolesPath.Index(i).Child("acceleratorType"),
+					fmt.Sprintf("accelerator type %q is inactive", role.AcceleratorType),
+				))
+			}
+		}
+
+		if role.Resources != nil && role.Resources.Accelerator != nil && role.Resources.Accelerator.Sign() <= 0 {
+			errs = append(errs, field.Invalid(
+				rolesPath.Index(i).Child("resources", "accelerator"),
+				role.Resources.Accelerator.String(),
+				fmt.Sprintf("must be greater than zero on accelerator type %q; omit acceleratorType to run a CPU-only role", role.AcceleratorType),
+			))
+		}
+
 		if role.Resources == nil {
 			// The type was resolved for the backend rules' manufacturer alone; a role that
 			// requests no resources has nothing for the per-resource rules below to judge.
-			continue
-		}
-		if !instType.Spec.Acceleratable {
 			continue
 		}
 
@@ -2496,29 +2561,31 @@ func (r *ModelDeploymentWebhook) validateRoleResourcesAgainstInstanceTypes(
 		// would let them drift. Written without it, a valid deployment applied in the seconds after
 		// its pool appears is refused for a mode the type does in fact offer, and the user's fix is
 		// to wait, which a field error does not say.
-		if slicingRequestNotReady(instType, roleInstanceResources(role.Resources)) {
+		if (role.Resources.AcceleratorSlicedMemoryPercentage != 0 ||
+			role.Resources.AcceleratorSlicedCoresPercentage != 0 ||
+			role.Resources.AcceleratorPartitionedProfile != "") &&
+			!accType.Status.Detail.AcceleratorReady() {
 			return nil, kerrors.NewInternalError(
-				fmt.Errorf("instance type %s is not ready yet; retry", instType.Name),
+				fmt.Errorf("accelerator type %s is not ready yet; retry", accType.Name),
 			)
 		}
 
-		errs = append(errs, validateRoleResourcesAgainstInstanceType(
-			instType, role.Resources, rolesPath.Index(i).Child("resources"),
+		errs = append(errs, validateRoleResourcesAgainstAcceleratorType(
+			accType, role.Resources, rolesPath.Index(i).Child("resources"),
 		)...)
 	}
 
-	errs = append(errs, validateModelDeploymentZeroAcceleratorInMultiRoleGroup(md, seen, rolesPath)...)
-	errs = append(errs, validateModelDeploymentKVTransferBackendAgainstInstanceTypes(md, seen)...)
+	errs = append(errs, validateModelDeploymentKVTransferBackendAgainstAcceleratorTypes(md, seen)...)
 
 	return append(errs, validateModelDeploymentPairCannotShareOneAccelerator(md, seen, rolesPath)...), nil
 }
 
-// validateModelDeploymentKVTransferBackendAgainstInstanceTypes refuses a spec.kvTransfer.backend
-// the roles' InstanceTypes cannot run, plus the pair shape no transfer can run at all.
+// validateModelDeploymentKVTransferBackendAgainstAcceleratorTypes refuses a spec.kvTransfer.backend
+// the roles' AcceleratorTypes cannot run, plus the pair shape no transfer can run at all.
 //
 // THE REFUSALS, PER ROLE:
 //
-//   - HIXL names the Ascend data plane, so a prefill or decode role whose InstanceType reports
+//   - HIXL names the Ascend data plane, so a prefill or decode role whose AcceleratorType reports
 //     any other manufacturer is refused: the connector it selects is registered by the Ascend
 //     engine build alone, and a container running it elsewhere starts and transfers nothing.
 //   - NIXL names the vendor-neutral connector, which the Ascend build does not register, so an
@@ -2529,11 +2596,14 @@ func (r *ModelDeploymentWebhook) validateRoleResourcesAgainstInstanceTypes(
 // MooncakeConnectorV1 over the Ascend transport and the nixlv2 sidecar relay while the non-Ascend
 // half renders MooncakeConnector, and on both engines the two halves register device memory on
 // incompatible NPU and GPU runtimes -- so the pair is rejected at spec.roles rather than left to
-// fail at transfer time. An unobserved manufacturer (an InstanceType whose detail has not synced,
-// or a role naming no type) declines no role and enters no comparison, because a refusal on a
-// status that has not converged would hold a valid deployment until its pool's hardware is seen.
-func validateModelDeploymentKVTransferBackendAgainstInstanceTypes(
-	md *workercore.ModelDeployment, seen map[string]*worker.InstanceType,
+// fail at transfer time.
+// An unobserved manufacturer (a type whose Status.Detail has not yet been written by the reconciler)
+// declines no role and enters no comparison, because a refusal on a status that has not converged
+// would hold a valid deployment until its pool's hardware is seen. A CPU-only role (omitting
+// acceleratorType) resolves an empty manufacturer and participates in both checks, so HIXL on a
+// CPU-only role and mixing an Ascend role with a CPU-only role are refused at admission.
+func validateModelDeploymentKVTransferBackendAgainstAcceleratorTypes(
+	md *workercore.ModelDeployment, seen map[string]*worker.AcceleratorType,
 ) field.ErrorList {
 	if md.Spec.KVTransfer == nil && !workerctrl.ModelDeploymentDeclaresBothHalves(md) {
 		return nil
@@ -2552,13 +2622,16 @@ func validateModelDeploymentKVTransferBackendAgainstInstanceTypes(
 			kind != workercore.ModelDeploymentRoleKindDecode {
 			continue
 		}
-		instType, ok := seen[md.Spec.Roles[i].InstanceType]
-		if !ok || instType == nil {
-			continue
-		}
-		manufacturer := instType.Status.Detail.Manufacturer
-		if manufacturer == "" {
-			continue
+		manufacturer := ""
+		if md.Spec.Roles[i].AcceleratorType != "" {
+			accType, ok := seen[md.Spec.Roles[i].AcceleratorType]
+			if !ok || accType == nil {
+				continue
+			}
+			manufacturer = accType.Status.Detail.Manufacturer
+			if manufacturer == "" {
+				continue
+			}
 		}
 		pairManufacturers = append(pairManufacturers, manufacturer)
 
@@ -2566,13 +2639,13 @@ func validateModelDeploymentKVTransferBackendAgainstInstanceTypes(
 		case workercore.ModelDeploymentKVTransferBackendHIXL:
 			if manufacturer != nodefeature.ManufacturerAscend {
 				errs = append(errs, field.Invalid(backendPath, backend,
-					fmt.Sprintf("backend HIXL requires an Ascend InstanceType, but role %q resolves %q",
+					fmt.Sprintf("backend HIXL requires an Ascend AcceleratorType, but role %q resolves %q",
 						md.Spec.Roles[i].Name, manufacturer)))
 			}
 		case workercore.ModelDeploymentKVTransferBackendNIXL:
 			if manufacturer == nodefeature.ManufacturerAscend {
 				errs = append(errs, field.Invalid(backendPath, backend,
-					"backend NIXL is not supported on an Ascend InstanceType; use HIXL or Mooncake"))
+					"backend NIXL is not supported on an Ascend AcceleratorType; use HIXL or Mooncake"))
 			}
 		}
 	}
@@ -2582,7 +2655,7 @@ func validateModelDeploymentKVTransferBackendAgainstInstanceTypes(
 		for _, manufacturer := range pairManufacturers[1:] {
 			if (manufacturer == nodefeature.ManufacturerAscend) != firstAscend {
 				errs = append(errs, field.Invalid(field.NewPath("spec", "roles"), md.Spec.Roles,
-					"a prefill/decode pair cannot mix Ascend and non-Ascend InstanceTypes: the two "+
+					"a prefill/decode pair cannot mix Ascend and non-Ascend AcceleratorTypes: the two "+
 						"halves would run transfer backends that cannot exchange blocks"))
 				break
 			}
@@ -2592,68 +2665,18 @@ func validateModelDeploymentKVTransferBackendAgainstInstanceTypes(
 	return errs
 }
 
-// validateModelDeploymentZeroAcceleratorInMultiRoleGroup refuses a role that requests nothing an
-// accelerated queue covers while sharing that instance type with another role.
-//
-// WHAT IT PREVENTS IS A REPLICA THAT RUNS UNCHARGED. The queue covers only the manufacturer's
-// credits and the manager ignores what a queue does not declare, so such a replica reserves,
-// reports Admitted and runs while the queue's usage of those credits stays at zero -- measured on a
-// cluster, with nothing erroring. Its siblings on the same type are charged for every card they
-// hold and compete for a pool this one spends from without being counted.
-//
-// THE RULE IS SCOPED TO A SHARED TYPE rather than to every zero, because a role alone on an
-// acceleratable type is a deployment whose whole pool went uncharged -- visible as a deployment
-// that never consumes quota -- while one hidden among charged siblings is not visible at all.
-// NOTE that the reason above is not the one this rule was written for. That one was Kueue refusing
-// a partial assignment for a Workload whose PodSets outnumbered its assignments, and it cannot
-// happen now that every replica carries a Workload of a single PodSet.
-func validateModelDeploymentZeroAcceleratorInMultiRoleGroup(
-	md *workercore.ModelDeployment,
-	instanceTypes map[string]*worker.InstanceType,
-	rolesPath *field.Path,
-) field.ErrorList {
-	groupSizes := make(map[string]int, len(instanceTypes))
-	for i := range md.Spec.Roles {
-		groupSizes[md.Spec.Roles[i].InstanceType]++
-	}
-
-	var errs field.ErrorList
-	for i := range md.Spec.Roles {
-		role := &md.Spec.Roles[i]
-		instType := instanceTypes[role.InstanceType]
-		if instType == nil || !instType.Spec.Acceleratable || groupSizes[role.InstanceType] < 2 ||
-			role.Resources == nil || role.Resources.Accelerator == nil || role.Resources.Accelerator.Sign() != 0 {
-			continue
-		}
-
-		errs = append(errs, field.Invalid(
-			rolesPath.Index(i).Child("resources", "accelerator"), role.Resources.Accelerator.String(),
-			fmt.Sprintf(
-				"must be greater than zero because the queue behind acceleratable instance type %q "+
-					"accounts only in accelerator credits: this role's replicas would be admitted and "+
-					"run while that queue charges them nothing, spending from the pool its sibling "+
-					"roles on the same type are charged for; request at least one accelerator or use "+
-					"a non-acceleratable instance type for this CPU-only role",
-				role.InstanceType,
-			),
-		))
-	}
-
-	return errs
-}
-
 // validateModelDeploymentPairCannotShareOneAccelerator refuses a prefill and a decode role that both
-// ask for a logical slice of an accelerator their two InstanceTypes can both select.
+// ask for a logical slice of an accelerator their two AcceleratorTypes can both select.
 //
 // THE PAIR EXISTS TO SEPARATE TWO WORKLOADS THAT CONTEND, so letting both hold a slice of ONE card
 // undoes the split while the object still reads as disaggregated. Nothing errors: the replicas start,
 // they serve, and the prefiller's bursts land on the same silicon the decoder is streaming from.
 //
 // THE QUALIFIER IS A DISJOINT ACCELERATOR POPULATION, AND TWO DIFFERENT NAMES DO NOT ESTABLISH ONE.
-// An admin can author an InstanceType against an acceleratorGroup a derived type already covers, and
+// An admin can author an AcceleratorType against an acceleratorGroup a derived type already covers, and
 // the two are then two views of one accelerator. A rule keyed on the names being different leaves
 // open precisely the case it was written to close, and one with no qualifier at all over-refuses:
-// it blocks the heterogeneous shape that roles on two instanceTypes exist to enable.
+// it blocks the heterogeneous shape that roles on two acceleratorTypes exist to enable.
 //
 // A PARTITIONED PAIR IS ACCEPTED EVEN ON ONE CARD. Hardware partitions are isolated from each other
 // by the device, which is the property this rule is about; a logical slice is not, and that is the
@@ -2668,13 +2691,13 @@ func validateModelDeploymentZeroAcceleratorInMultiRoleGroup(
 // violating pair declared anywhere before it.
 func validateModelDeploymentPairCannotShareOneAccelerator(
 	md *workercore.ModelDeployment,
-	types map[string]*worker.InstanceType,
+	types map[string]*worker.AcceleratorType,
 	rolesPath *field.Path,
 ) field.ErrorList {
 	var prefills, decodes []*workercore.ModelDeploymentRole
 	for i := range md.Spec.Roles {
 		role := &md.Spec.Roles[i]
-		if !roleRequestsALogicalSlice(role) {
+		if role.AcceleratorType == "" || !roleRequestsALogicalSlice(role) {
 			continue
 		}
 		switch role.Kind {
@@ -2687,20 +2710,15 @@ func validateModelDeploymentPairCannotShareOneAccelerator(
 
 	var errs field.ErrorList
 	for _, prefill := range prefills {
-		prefillType := types[prefill.InstanceType]
+		prefillType := types[prefill.AcceleratorType]
 		if prefillType == nil {
 			// A type that could not be read, or a role naming none: the rules that report those have
 			// already done so, and answering this question from half the pair would be a guess.
 			continue
 		}
 		for _, decode := range decodes {
-			decodeType := types[decode.InstanceType]
-			// AN UNSET GROUP IS UNKNOWN, NOT A GROUP THAT TWO TYPES SHARE. The InstanceType webhook
-			// requires the field on an acceleratable type, but only objects that passed that rule
-			// carry it, and two empty strings comparing equal would refuse a pair on the strength of
-			// what neither type says. Refusing a valid deployment because a field is blank is the
-			// wrong way for this rule to be wrong: it blocks the shape the split exists to enable,
-			// and the operator has nothing to edit, since instanceType is frozen.
+			decodeType := types[decode.AcceleratorType]
+			// AN UNSET GROUP IS UNKNOWN, NOT A GROUP THAT TWO TYPES SHARE.
 			if decodeType == nil ||
 				prefillType.Spec.AcceleratorGroup == "" || decodeType.Spec.AcceleratorGroup == "" ||
 				prefillType.Spec.AcceleratorGroup != decodeType.Spec.AcceleratorGroup {
@@ -2710,13 +2728,13 @@ func validateModelDeploymentPairCannotShareOneAccelerator(
 			errs = append(errs, field.Invalid(
 				rolesPath, prefill.Name+", "+decode.Name,
 				fmt.Sprintf(
-					"roles %q and %q both request a logical slice, and instance types %q and %q draw from "+
+					"roles %q and %q both request a logical slice, and accelerator types %q and %q draw from "+
 						"the same accelerator group %q — so the two can land on one card, which is what the "+
-						"prefill/decode split exists to prevent. Give one of them an instance type over a "+
+						"prefill/decode split exists to prevent. Give one of them an accelerator type over a "+
 						"different accelerator group, or request whole cards or hardware partition profiles, "+
 						"which are isolated by the device",
 					prefill.Name, decode.Name,
-					prefill.InstanceType, decode.InstanceType, prefillType.Spec.AcceleratorGroup,
+					prefill.AcceleratorType, decode.AcceleratorType, prefillType.Spec.AcceleratorGroup,
 				),
 			))
 		}
@@ -2736,23 +2754,7 @@ func roleRequestsALogicalSlice(role *workercore.ModelDeploymentRole) bool {
 		(ress.AcceleratorSlicedMemoryPercentage != 0 || ress.AcceleratorSlicedCoresPercentage != 0)
 }
 
-// roleInstanceResources projects a role's request onto the accelerator fields of InstanceResources.
-//
-// It exists so the readiness question is asked through the helper that already answers it for an
-// Instance, rather than by a second reading of the same emptiness that could come to disagree.
-// ModelDeploymentRoleResources mirrors those fields by name and by meaning, which is what makes this
-// a rename rather than a translation -- and the reason the projection carries no CPU, RAM or local
-// storage is that a role does not declare them.
-func roleInstanceResources(ress *workercore.ModelDeploymentRoleResources) *workercore.InstanceResources {
-	return &workercore.InstanceResources{
-		Accelerator:                       ress.Accelerator,
-		AcceleratorSlicedMemoryPercentage: ress.AcceleratorSlicedMemoryPercentage,
-		AcceleratorSlicedCoresPercentage:  ress.AcceleratorSlicedCoresPercentage,
-		AcceleratorPartitionedProfile:     ress.AcceleratorPartitionedProfile,
-	}
-}
-
-// validateRoleResourcesAgainstInstanceType refuses a request the named InstanceType cannot serve:
+// validateRoleResourcesAgainstAcceleratorType refuses a request the named AcceleratorType cannot serve:
 // one asking for a mode it does not offer, and one asking for more whole cards than its pool has.
 //
 // THE MODE IS DECIDED BY WHAT THE REQUEST NAMES, not by what the type has. A partition profile makes
@@ -2762,8 +2764,8 @@ func roleInstanceResources(ress *workercore.ModelDeploymentRoleResources) *worke
 //
 // BOTH REFUSALS NAME THE TYPE, because the field alone does not locate the problem: the same request
 // is correct against another type, and what the operator has to change is one of the two.
-func validateRoleResourcesAgainstInstanceType(
-	instType *worker.InstanceType,
+func validateRoleResourcesAgainstAcceleratorType(
+	accType *worker.AcceleratorType,
 	ress *workercore.ModelDeploymentRoleResources,
 	ressPath *field.Path,
 ) field.ErrorList {
@@ -2771,15 +2773,15 @@ func validateRoleResourcesAgainstInstanceType(
 
 	switch {
 	case ress.AcceleratorPartitionedProfile != "":
-		errs = append(errs, validateRolePartitionProfileOffered(instType, ress, ressPath)...)
+		errs = append(errs, validateRolePartitionProfileOffered(accType, ress, ressPath)...)
 		errs = append(errs, validateRoleSingleCardRequest(ress, "partitioned", ressPath)...)
 	case ress.AcceleratorSlicedMemoryPercentage != 0 || ress.AcceleratorSlicedCoresPercentage != 0:
 		// A pool with no logically sliceable card cannot serve the request at all: admitted, such a
 		// role stays Pending forever rather than being reshaped into a whole-card one.
-		if !instType.Status.Detail.IsLogicallySliceable() {
+		if !accType.Status.Detail.IsLogicallySliceable() {
 			errs = append(errs, field.Forbidden(
 				ressPath.Child("acceleratorSlicedMemoryPercentage"),
-				fmt.Sprintf("instance type %s does not offer logical slicing", instType.Name),
+				fmt.Sprintf("accelerator type %s does not offer logical slicing", accType.Name),
 			))
 		}
 		errs = append(errs, validateRoleSingleCardRequest(ress, "sliced", ressPath)...)
@@ -2813,11 +2815,11 @@ func validateRoleResourcesAgainstInstanceType(
 		// the maximum" states that the request was wrong; the number states what would be right, and
 		// the difference is whether the next attempt is a guess.
 		if ress.Accelerator != nil {
-			if ceiling := instType.Status.Accelerator.Capacity; ress.Accelerator.Cmp(ceiling) > 0 {
+			if ceiling := accType.Status.Accelerator.Capacity; ress.Accelerator.Cmp(ceiling) > 0 {
 				errs = append(errs, field.Invalid(
 					ressPath.Child("accelerator"), ress.Accelerator.String(),
-					fmt.Sprintf("instance type %s has at most %s whole accelerator(s) in its pool",
-						instType.Name, ceiling.String()),
+					fmt.Sprintf("accelerator type %s has at most %s whole accelerator(s) in its pool",
+						accType.Name, ceiling.String()),
 				))
 			}
 		}
@@ -2864,18 +2866,18 @@ func validateRoleSingleCardRequest(
 // partitioning mode offers an empty profile set, and reporting that as "this profile is not offered"
 // reads as a typo -- sending the operator to correct a name that was never the problem.
 func validateRolePartitionProfileOffered(
-	instType *worker.InstanceType,
+	accType *worker.AcceleratorType,
 	ress *workercore.ModelDeploymentRoleResources,
 	ressPath *field.Path,
 ) field.ErrorList {
 	profilePath := ressPath.Child("acceleratorPartitionedProfile")
 
-	if !instType.Status.Detail.IsPhysicallySliceable() {
+	if !accType.Status.Detail.IsPhysicallySliceable() {
 		return field.ErrorList{field.Forbidden(profilePath,
-			fmt.Sprintf("instance type %s does not offer hardware partitioning", instType.Name))}
+			fmt.Sprintf("accelerator type %s does not offer hardware partitioning", accType.Name))}
 	}
 
-	profiles := instType.Status.Detail.SlicedDetail.Physical.Profiles
+	profiles := accType.Status.Detail.SlicedDetail.Physical.Profiles
 	offered := make([]string, 0, len(profiles))
 	for _, p := range profiles {
 		if p.Name == ress.AcceleratorPartitionedProfile {
@@ -2885,8 +2887,8 @@ func validateRolePartitionProfileOffered(
 	}
 
 	return field.ErrorList{field.Invalid(profilePath, ress.AcceleratorPartitionedProfile,
-		fmt.Sprintf("instance type %s does not offer this partition profile; offered: %v",
-			instType.Name, offered))}
+		fmt.Sprintf("accelerator type %s does not offer this partition profile; offered: %v",
+			accType.Name, offered))}
 }
 
 // The rules the single-writer fence refuses an edit by, named in the refusal so a test and a

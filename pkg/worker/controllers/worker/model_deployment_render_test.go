@@ -40,10 +40,10 @@ func newRenderDeployment(mutate ...func(*workercore.ModelDeployment)) *workercor
 			},
 			KVCache: &workercore.ModelDeploymentKVCache{PoolRef: core.LocalObjectReference{Name: "shared-kv"}},
 			Roles: []workercore.ModelDeploymentRole{{
-				Name:         "server",
-				Replicas:     2,
-				InstanceType: "h20-8x",
-				Image:        "vllm/vllm-openai:v0.25.1",
+				Name:            "server",
+				Replicas:        2,
+				AcceleratorType: "h20-8x",
+				Image:           "vllm/vllm-openai:v0.25.1",
 			}},
 		},
 	}
@@ -54,17 +54,11 @@ func newRenderDeployment(mutate ...func(*workercore.ModelDeployment)) *workercor
 	return md
 }
 
-// newRenderInstanceType builds an accelerated InstanceType whose per-card unit resources every
-// sizing case reads: 16 CPU and 64Gi of RAM for one whole card.
-func newRenderInstanceType(mutate ...func(*worker.InstanceType)) *worker.InstanceType {
-	it := &worker.InstanceType{
+// newRenderAcceleratorType builds an AcceleratorType fixture for rendering tests.
+func newRenderAcceleratorType(mutate ...func(*worker.AcceleratorType)) *worker.AcceleratorType {
+	at := &worker.AcceleratorType{
 		ObjectMeta: meta.ObjectMeta{Name: "h20-8x"},
-		Spec: workercore.InstanceTypeSpec{
-			Acceleratable: true,
-			UnitResources: workercore.InstanceTypeUnitResources{CPU: "16", RAM: "64Gi"},
-			LocalStorage:  "512Gi",
-		},
-		Status: workercore.InstanceTypeStatus{
+		Status: workercore.AcceleratorTypeStatus{
 			// DELIBERATELY NOT FormatLocalQueueName("h20-8x"). The entrance is read from this field,
 			// and a fixture spelling it the way a name-derived render would spell it could not tell
 			// the two apart -- the assertion in _Identity would pass either way. This value is one
@@ -82,19 +76,19 @@ func newRenderInstanceType(mutate ...func(*worker.InstanceType)) *worker.Instanc
 		},
 	}
 	for _, m := range mutate {
-		m(it)
+		m(at)
 	}
 
-	return it
+	return at
 }
 
-func renderOne(t *testing.T, md *workercore.ModelDeployment, it *worker.InstanceType) *core.Pod {
+func renderOne(t *testing.T, md *workercore.ModelDeployment, at *worker.AcceleratorType) *core.Pod {
 	t.Helper()
 
 	pod, err := renderModelDeploymentPod(context.Background(), ModelDeploymentRenderInput{
-		Deployment:   md,
-		Role:         &md.Spec.Roles[0],
-		InstanceType: it,
+		Deployment:      md,
+		Role:            &md.Spec.Roles[0],
+		AcceleratorType: at,
 	})
 	require.NoError(t, err)
 
@@ -118,9 +112,9 @@ func envValue(pod *core.Pod, name string) (string, bool) {
 func TestRenderModelDeploymentPod_Identity(t *testing.T) {
 	md := newRenderDeployment()
 	pod, err := renderModelDeploymentPod(context.Background(), ModelDeploymentRenderInput{
-		Deployment:   md,
-		Role:         &md.Spec.Roles[0],
-		InstanceType: newRenderInstanceType(),
+		Deployment:      md,
+		Role:            &md.Spec.Roles[0],
+		AcceleratorType: newRenderAcceleratorType(),
 	})
 	require.NoError(t, err)
 
@@ -164,7 +158,7 @@ func TestRenderModelDeploymentPod_DecodeUsesRoutingSidecar(t *testing.T) {
 				}}
 			})
 			pod, err := renderModelDeploymentPod(context.Background(), ModelDeploymentRenderInput{
-				Deployment: md, Role: &md.Spec.Roles[0], InstanceType: newRenderInstanceType(),
+				Deployment: md, Role: &md.Spec.Roles[0], AcceleratorType: newRenderAcceleratorType(),
 				Connector: ModelDeploymentConnectorRender{
 					Args: []string{"--kv-transfer-config", `{}`}, KVTransfer: true, RoutingSidecar: true,
 				},
@@ -220,7 +214,7 @@ func TestRenderModelDeploymentPod_DecodeReadsTheEnginesPort(t *testing.T) {
 				md.Spec.Roles[0].ExtraArgs = tc.extraArgs
 			})
 			pod, err := renderModelDeploymentPod(context.Background(), ModelDeploymentRenderInput{
-				Deployment: md, Role: &md.Spec.Roles[0], InstanceType: newRenderInstanceType(),
+				Deployment: md, Role: &md.Spec.Roles[0], AcceleratorType: newRenderAcceleratorType(),
 				Connector: ModelDeploymentConnectorRender{
 					Args: []string{"--kv-transfer-config", `{}`}, KVTransfer: true, RoutingSidecar: true,
 				},
@@ -327,7 +321,7 @@ func TestRenderModelDeploymentPod_ListenFlagSpellings(t *testing.T) {
 				md.Spec.Roles[0].ExtraArgs = tc.extraArgs
 			})
 			pod, err := renderModelDeploymentPod(context.Background(), ModelDeploymentRenderInput{
-				Deployment: md, Role: &md.Spec.Roles[0], InstanceType: newRenderInstanceType(),
+				Deployment: md, Role: &md.Spec.Roles[0], AcceleratorType: newRenderAcceleratorType(),
 			})
 			require.NoError(t, err)
 
@@ -365,7 +359,7 @@ func TestRenderModelDeploymentPod_DecodeUsesClassicSidecarBelowTheFloor(t *testi
 		}}
 	})
 	pod, err := renderModelDeploymentPod(context.Background(), ModelDeploymentRenderInput{
-		Deployment: md, Role: &md.Spec.Roles[0], InstanceType: newRenderInstanceType(),
+		Deployment: md, Role: &md.Spec.Roles[0], AcceleratorType: newRenderAcceleratorType(),
 		Connector: ModelDeploymentConnectorRender{
 			Args: []string{"--kv-transfer-config", `{}`}, KVTransfer: true, RoutingSidecar: true,
 		},
@@ -526,7 +520,7 @@ func TestRenderModelDeploymentPod_ProbeRouteFollowsTheServingShape(t *testing.T)
 		md := newRenderDeployment()
 
 		pod, err := renderModelDeploymentPod(context.Background(), ModelDeploymentRenderInput{
-			Deployment: md, Role: &md.Spec.Roles[0], InstanceType: newRenderInstanceType(),
+			Deployment: md, Role: &md.Spec.Roles[0], AcceleratorType: newRenderAcceleratorType(),
 		})
 		require.NoError(t, err)
 
@@ -556,7 +550,7 @@ func TestRenderModelDeploymentPod_ProbeRouteFollowsTheServingShape(t *testing.T)
 		})
 
 		pod, err := renderModelDeploymentPod(context.Background(), ModelDeploymentRenderInput{
-			Deployment: md, Role: &md.Spec.Roles[0], InstanceType: newRenderInstanceType(),
+			Deployment: md, Role: &md.Spec.Roles[0], AcceleratorType: newRenderAcceleratorType(),
 			Connector: ModelDeploymentConnectorRender{
 				Args: []string{"--kv-transfer-config", `{}`}, KVTransfer: true, RoutingSidecar: true,
 			},
@@ -588,7 +582,7 @@ func TestRenderModelDeploymentPod_EntranceLabelIsNotInTheSelector(t *testing.T) 
 
 	assert.NotContains(t, selector, kueuectrlconst.QueueLabel)
 
-	pod := renderOne(t, md, newRenderInstanceType())
+	pod := renderOne(t, md, newRenderAcceleratorType())
 	for k, v := range selector {
 		assert.Equal(t, v, pod.Labels[k], "a replica must carry every label its Service selects on")
 	}
@@ -643,7 +637,7 @@ func TestRenderModelDeploymentPod_RoleKindLabel(t *testing.T) {
 				md.Spec.Roles[0].Kind = tc.kind
 			})
 
-			pod := renderOne(t, md, newRenderInstanceType())
+			pod := renderOne(t, md, newRenderAcceleratorType())
 
 			assert.Equal(t, tc.want, pod.Labels[modelDeploymentLabelKeyRoleKind])
 			assert.Equal(t, tc.roleName, pod.Labels[modelDeploymentLabelKeyComponent],
@@ -666,7 +660,7 @@ func TestRenderModelDeploymentPod_RoleKindLabelIsNotInTheSelector(t *testing.T) 
 	selector := modelDeploymentSelectorLabels(md, &md.Spec.Roles[0])
 	assert.NotContains(t, selector, modelDeploymentLabelKeyRoleKind)
 
-	pod := renderOne(t, md, newRenderInstanceType())
+	pod := renderOne(t, md, newRenderAcceleratorType())
 	require.Contains(t, pod.Labels, modelDeploymentLabelKeyRoleKind,
 		"the baseline for the absence above: the replica does carry the key the selector omits")
 }
@@ -682,20 +676,20 @@ func TestRenderModelDeploymentPod_RoleKindLabelSeparatesAPair(t *testing.T) {
 		md.Spec.Roles[0].Name = "p"
 		md.Spec.Roles[0].Kind = workercore.ModelDeploymentRoleKindPrefill
 		md.Spec.Roles = append(md.Spec.Roles, workercore.ModelDeploymentRole{
-			Name:         "d",
-			Replicas:     2,
-			InstanceType: "h20-8x",
-			Kind:         workercore.ModelDeploymentRoleKindDecode,
-			Image:        "vllm/vllm-openai:v0.25.1",
+			Name:            "d",
+			Replicas:        2,
+			AcceleratorType: "h20-8x",
+			Kind:            workercore.ModelDeploymentRoleKindDecode,
+			Image:           "vllm/vllm-openai:v0.25.1",
 		})
 	})
 
-	it := newRenderInstanceType()
+	it := newRenderAcceleratorType()
 	labelOf := func(i int) string {
 		pod, err := renderModelDeploymentPod(context.Background(), ModelDeploymentRenderInput{
-			Deployment:   md,
-			Role:         &md.Spec.Roles[i],
-			InstanceType: it,
+			Deployment:      md,
+			Role:            &md.Spec.Roles[i],
+			AcceleratorType: it,
 		})
 		require.NoError(t, err)
 
@@ -785,10 +779,10 @@ func TestRenderModelDeploymentPod_Command(t *testing.T) {
 			})
 
 			pod, err := renderModelDeploymentPod(context.Background(), ModelDeploymentRenderInput{
-				Deployment:   md,
-				Role:         &md.Spec.Roles[0],
-				InstanceType: newRenderInstanceType(),
-				Connector:    tc.connector,
+				Deployment:      md,
+				Role:            &md.Spec.Roles[0],
+				AcceleratorType: newRenderAcceleratorType(),
+				Connector:       tc.connector,
 			})
 			require.NoError(t, err)
 
@@ -807,9 +801,9 @@ func TestRenderModelDeploymentPod_TakeOver(t *testing.T) {
 	})
 
 	pod, err := renderModelDeploymentPod(context.Background(), ModelDeploymentRenderInput{
-		Deployment:   md,
-		Role:         &md.Spec.Roles[0],
-		InstanceType: newRenderInstanceType(),
+		Deployment:      md,
+		Role:            &md.Spec.Roles[0],
+		AcceleratorType: newRenderAcceleratorType(),
 		Connector: ModelDeploymentConnectorRender{
 			Args: []string{`--kv-transfer-config={}`},
 			Env:  []core.EnvVar{{Name: "MOONCAKE_CONFIG_PATH", Value: inject.ConfigFilePath}},
@@ -863,9 +857,9 @@ func TestRenderModelDeploymentPod_TakeOver(t *testing.T) {
 func TestRenderModelDeploymentPod_KVEventPorts(t *testing.T) {
 	md := newRenderDeployment()
 	pod, err := renderModelDeploymentPod(context.Background(), ModelDeploymentRenderInput{
-		Deployment:   md,
-		Role:         &md.Spec.Roles[0],
-		InstanceType: newRenderInstanceType(),
+		Deployment:      md,
+		Role:            &md.Spec.Roles[0],
+		AcceleratorType: newRenderAcceleratorType(),
 		Connector: ModelDeploymentConnectorRender{Ports: []core.ContainerPort{
 			{Name: "kv-events", Protocol: core.ProtocolTCP, ContainerPort: 5557},
 			{Name: "kv-replay", Protocol: core.ProtocolTCP, ContainerPort: 5558},
@@ -918,7 +912,7 @@ func TestRenderModelDeploymentPod_ConnectorPortCollision(t *testing.T) {
 			}
 		})
 		_, err := renderModelDeploymentPod(context.Background(), ModelDeploymentRenderInput{
-			Deployment: md, Role: &md.Spec.Roles[0], InstanceType: newRenderInstanceType(),
+			Deployment: md, Role: &md.Spec.Roles[0], AcceleratorType: newRenderAcceleratorType(),
 			Connector: connector,
 		})
 		require.Error(t, err, "two endpoints claiming one socket cannot be merged silently")
@@ -936,7 +930,7 @@ func TestRenderModelDeploymentPod_ConnectorPortCollision(t *testing.T) {
 			}
 		})
 		_, err := renderModelDeploymentPod(context.Background(), ModelDeploymentRenderInput{
-			Deployment: md, Role: &md.Spec.Roles[0], InstanceType: newRenderInstanceType(),
+			Deployment: md, Role: &md.Spec.Roles[0], AcceleratorType: newRenderAcceleratorType(),
 			Connector: ModelDeploymentConnectorRender{
 				Args: []string{"--kv-transfer-config", `{}`}, KVTransfer: true, RoutingSidecar: true,
 			},
@@ -975,7 +969,7 @@ func TestRenderModelDeploymentPod_TCPPinYieldsToTheRole(t *testing.T) {
 			require.NoError(t, err)
 
 			pod, err := renderModelDeploymentPod(context.Background(), ModelDeploymentRenderInput{
-				Deployment: md, Role: &md.Spec.Roles[0], InstanceType: newRenderInstanceType(),
+				Deployment: md, Role: &md.Spec.Roles[0], AcceleratorType: newRenderAcceleratorType(),
 				Connector: connector,
 			})
 			require.NoError(t, err)
@@ -1077,7 +1071,7 @@ func TestRenderModelDeploymentPod_DefaultedArgsYieldToTheRole(t *testing.T) {
 			require.NoError(t, err)
 
 			pod, err := renderModelDeploymentPod(context.Background(), ModelDeploymentRenderInput{
-				Deployment: md, Role: &md.Spec.Roles[0], InstanceType: newRenderInstanceType(),
+				Deployment: md, Role: &md.Spec.Roles[0], AcceleratorType: newRenderAcceleratorType(),
 				Connector: connector,
 			})
 			require.NoError(t, err)
@@ -1141,10 +1135,10 @@ func TestRenderModelDeploymentPod_Env(t *testing.T) {
 			})
 
 			pod, err := renderModelDeploymentPod(context.Background(), ModelDeploymentRenderInput{
-				Deployment:   md,
-				Role:         &md.Spec.Roles[0],
-				InstanceType: newRenderInstanceType(),
-				Connector:    connector,
+				Deployment:      md,
+				Role:            &md.Spec.Roles[0],
+				AcceleratorType: newRenderAcceleratorType(),
+				Connector:       connector,
 			})
 			require.NoError(t, err)
 
@@ -1167,59 +1161,146 @@ func TestRenderModelDeploymentPod_Env(t *testing.T) {
 	}
 }
 
-// TestDeriveModelDeploymentResources covers the half of a replica's request that is DERIVED rather
-// than declared. CPU and memory are inexpressible on a role, so getting this wrong charges quota
-// for something other than what runs — and nothing in the API would show it.
-func TestDeriveModelDeploymentResources(t *testing.T) {
+// TestRenderModelDeploymentResources covers explicit host resource rendering, general overcommit,
+// and accelerator slicing/partitioning readiness checks.
+func TestRenderModelDeploymentResources(t *testing.T) {
 	testCases := []struct {
 		name string
 
-		resources *workercore.ModelDeploymentRoleResources
-		instType  func(*worker.InstanceType)
+		resources             *workercore.ModelDeploymentRoleResources
+		accType               func(*worker.AcceleratorType)
+		cpuOnly               bool
+		withGeneralOvercommit bool
 
-		wantCPU, wantRAM string
-		wantErr          string
+		wantLimits   core.ResourceList
+		wantRequests core.ResourceList
+		wantErr      string
 	}{
 		{
-			name:      "whole cards scale the unit resources by the card count",
-			resources: &workercore.ModelDeploymentRoleResources{Accelerator: ptr.To(resource.MustParse("4"))},
-			wantCPU:   "64", wantRAM: "256Gi",
+			name:      "host resources omitted when nil on role",
+			resources: &workercore.ModelDeploymentRoleResources{Accelerator: ptr.To(resource.MustParse("2"))},
+			wantLimits: core.ResourceList{
+				"nvidia.com/gpu": resource.MustParse("2"),
+			},
+			wantRequests: core.ResourceList{
+				"nvidia.com/gpu": resource.MustParse("2"),
+			},
 		},
 		{
-			name:    "no accelerator at all still sizes one unit's worth of host",
-			wantCPU: "16", wantRAM: "64Gi",
+			name: "explicit CPU, RAM, and LocalStorage render when set",
+			resources: &workercore.ModelDeploymentRoleResources{
+				Accelerator:  ptr.To(resource.MustParse("4")),
+				CPU:          ptr.To(resource.MustParse("64")),
+				RAM:          ptr.To(resource.MustParse("256Gi")),
+				LocalStorage: ptr.To(resource.MustParse("15Gi")),
+			},
+			wantLimits: core.ResourceList{
+				"nvidia.com/gpu":              resource.MustParse("4"),
+				core.ResourceCPU:              resource.MustParse("64"),
+				core.ResourceMemory:           resource.MustParse("256Gi"),
+				core.ResourceEphemeralStorage: resource.MustParse("15Gi"),
+			},
+			wantRequests: core.ResourceList{
+				"nvidia.com/gpu":              resource.MustParse("4"),
+				core.ResourceCPU:              resource.MustParse("64"),
+				core.ResourceMemory:           resource.MustParse("256Gi"),
+				core.ResourceEphemeralStorage: resource.MustParse("15Gi"),
+			},
 		},
 		{
-			name: "a memory slice takes that percentage of one card's worth",
+			name: "CPU-only role renders only declared host resources",
+			resources: &workercore.ModelDeploymentRoleResources{
+				CPU: ptr.To(resource.MustParse("8")),
+				RAM: ptr.To(resource.MustParse("32Gi")),
+			},
+			cpuOnly: true,
+			wantLimits: core.ResourceList{
+				core.ResourceCPU:    resource.MustParse("8"),
+				core.ResourceMemory: resource.MustParse("32Gi"),
+			},
+			wantRequests: core.ResourceList{
+				core.ResourceCPU:    resource.MustParse("8"),
+				core.ResourceMemory: resource.MustParse("32Gi"),
+			},
+		},
+		{
+			name: "general overcommit scales host requests on accelerated role",
+			resources: &workercore.ModelDeploymentRoleResources{
+				Accelerator:  ptr.To(resource.MustParse("1")),
+				CPU:          ptr.To(resource.MustParse("16")),
+				RAM:          ptr.To(resource.MustParse("64Gi")),
+				LocalStorage: ptr.To(resource.MustParse("15Gi")),
+			},
+			withGeneralOvercommit: true,
+			wantLimits: core.ResourceList{
+				"nvidia.com/gpu":              resource.MustParse("1"),
+				core.ResourceCPU:              resource.MustParse("16"),
+				core.ResourceMemory:           resource.MustParse("64Gi"),
+				core.ResourceEphemeralStorage: resource.MustParse("15Gi"),
+			},
+			wantRequests: core.ResourceList{
+				"nvidia.com/gpu":              resource.MustParse("1"),
+				core.ResourceCPU:              resource.MustParse("1600m"),
+				core.ResourceMemory:           resource.MustParse("8Gi"),
+				core.ResourceEphemeralStorage: resource.MustParse("1920Mi"),
+			},
+		},
+		{
+			name: "a memory slice copies across to cores when cores percentage is unset",
 			resources: &workercore.ModelDeploymentRoleResources{
 				Accelerator:                       ptr.To(resource.MustParse("1")),
 				AcceleratorSlicedMemoryPercentage: 50,
 			},
-			instType: func(it *worker.InstanceType) { it.Status.Detail.SlicedDetail.Logical.Count = 128 },
-			wantCPU:  "8", wantRAM: "32Gi",
+			accType: func(at *worker.AcceleratorType) { at.Status.Detail.SlicedDetail.Logical.Count = 128 },
+			wantLimits: core.ResourceList{
+				"nvidia.com/gpu.sliced":                   resource.MustParse("1"),
+				"nvidia.com/gpu.sliced.memory-percentage": resource.MustParse("50"),
+				"nvidia.com/gpu.sliced.cores-percentage":  resource.MustParse("50"),
+			},
+			wantRequests: core.ResourceList{
+				"nvidia.com/gpu.sliced":                   resource.MustParse("1"),
+				"nvidia.com/gpu.sliced.memory-percentage": resource.MustParse("50"),
+				"nvidia.com/gpu.sliced.cores-percentage":  resource.MustParse("50"),
+			},
 		},
 		{
-			name: "a bare compute slice copies across, so the host follows the same fraction",
+			name: "a bare compute slice copies across to memory when memory percentage is unset",
 			resources: &workercore.ModelDeploymentRoleResources{
 				Accelerator:                      ptr.To(resource.MustParse("1")),
 				AcceleratorSlicedCoresPercentage: 25,
 			},
-			instType: func(it *worker.InstanceType) { it.Status.Detail.SlicedDetail.Logical.Count = 128 },
-			wantCPU:  "4", wantRAM: "16Gi",
+			accType: func(at *worker.AcceleratorType) { at.Status.Detail.SlicedDetail.Logical.Count = 128 },
+			wantLimits: core.ResourceList{
+				"nvidia.com/gpu.sliced":                   resource.MustParse("1"),
+				"nvidia.com/gpu.sliced.memory-percentage": resource.MustParse("25"),
+				"nvidia.com/gpu.sliced.cores-percentage":  resource.MustParse("25"),
+			},
+			wantRequests: core.ResourceList{
+				"nvidia.com/gpu.sliced":                   resource.MustParse("1"),
+				"nvidia.com/gpu.sliced.memory-percentage": resource.MustParse("25"),
+				"nvidia.com/gpu.sliced.cores-percentage":  resource.MustParse("25"),
+			},
 		},
 		{
-			name: "a partition profile is anchored on the share of VRAM it occupies",
+			name: "a partition profile renders when the detail can size it",
 			resources: &workercore.ModelDeploymentRoleResources{
 				Accelerator:                   ptr.To(resource.MustParse("1")),
 				AcceleratorPartitionedProfile: "3g.40gb",
 			},
-			instType: func(it *worker.InstanceType) {
-				it.Status.Detail.Memory = "80Gi"
-				it.Status.Detail.SlicedDetail.Physical.Profiles = []workercore.AcceleratorSlicedPhysicalDetailProfile{
+			accType: func(at *worker.AcceleratorType) {
+				at.Status.Detail.Memory = "80Gi"
+				at.Status.Detail.SlicedDetail.Physical.Profiles = []workercore.AcceleratorSlicedPhysicalDetailProfile{
 					{Name: "3g.40gb", MemoryMib: 40 << 10, Count: 2},
 				}
 			},
-			wantCPU: "8", wantRAM: "32Gi",
+			wantLimits: core.ResourceList{
+				"nvidia.com/gpu.partitioned":             resource.MustParse("1"),
+				"nvidia.com/gpu.partitioned.mig-3g.40gb": resource.MustParse("1"),
+			},
+			wantRequests: core.ResourceList{
+				"nvidia.com/gpu.partitioned":             resource.MustParse("1"),
+				"nvidia.com/gpu.partitioned.mig-3g.40gb": resource.MustParse("1"),
+			},
 		},
 		{
 			name: "a slice against an uncomputed detail is retryable, never a whole card",
@@ -1227,8 +1308,44 @@ func TestDeriveModelDeploymentResources(t *testing.T) {
 				Accelerator:                       ptr.To(resource.MustParse("1")),
 				AcceleratorSlicedMemoryPercentage: 50,
 			},
-			instType: func(it *worker.InstanceType) { it.Status.Detail.Manufacturer = "" },
-			wantErr:  "not ready yet",
+			accType: func(at *worker.AcceleratorType) { at.Status.Detail.Manufacturer = "" },
+			wantErr: "not ready yet",
+		},
+		{
+			name: "a whole-card request against an uncomputed manufacturer is retryable, never an empty resource key",
+			resources: &workercore.ModelDeploymentRoleResources{
+				Accelerator: ptr.To(resource.MustParse("1")),
+			},
+			accType: func(at *worker.AcceleratorType) { at.Status.Detail.Manufacturer = "" },
+			wantErr: "yields no acceleratable resource name",
+		},
+		{
+			name: "a slice against an unknown manufacturer is refused before emitting malformed sliced keys",
+			resources: &workercore.ModelDeploymentRoleResources{
+				Accelerator:                       ptr.To(resource.MustParse("1")),
+				AcceleratorSlicedMemoryPercentage: 50,
+			},
+			accType: func(at *worker.AcceleratorType) {
+				at.Status.Detail.Manufacturer = "unknown-vendor"
+				at.Status.Detail.Memory = "80Gi"
+				at.Status.Detail.SlicedDetail.Logical.Count = 4
+			},
+			wantErr: "yields no acceleratable resource name",
+		},
+		{
+			name: "a partition profile on a manufacturer without hardware partitioning is refused rather than falling through to a whole card",
+			resources: &workercore.ModelDeploymentRoleResources{
+				Accelerator:                   ptr.To(resource.MustParse("1")),
+				AcceleratorPartitionedProfile: "3g.40gb",
+			},
+			accType: func(at *worker.AcceleratorType) {
+				at.Status.Detail.Manufacturer = nodefeature.ManufacturerAMD
+				at.Status.Detail.Memory = "64Gi"
+				at.Status.Detail.SlicedDetail.Physical.Profiles = []workercore.AcceleratorSlicedPhysicalDetailProfile{
+					{Name: "3g.40gb", MemoryMib: 32 << 10, Count: 2},
+				}
+			},
+			wantErr: "yields no partitioned resource name",
 		},
 		{
 			name: "a partition the detail cannot size yet is retryable too",
@@ -1236,30 +1353,27 @@ func TestDeriveModelDeploymentResources(t *testing.T) {
 				Accelerator:                   ptr.To(resource.MustParse("1")),
 				AcceleratorPartitionedProfile: "3g.40gb",
 			},
-			instType: func(it *worker.InstanceType) {
-				it.Status.Detail.SlicedDetail.Physical.Profiles = []workercore.AcceleratorSlicedPhysicalDetailProfile{
+			accType: func(at *worker.AcceleratorType) {
+				at.Status.Detail.SlicedDetail.Physical.Profiles = []workercore.AcceleratorSlicedPhysicalDetailProfile{
 					{Name: "3g.40gb", MemoryMib: 0},
 				}
 			},
 			wantErr: "cannot be sized",
 		},
-		{
-			name:      "an unparseable unit is reported rather than rendered as zero",
-			resources: &workercore.ModelDeploymentRoleResources{Accelerator: ptr.To(resource.MustParse("1"))},
-			instType:  func(it *worker.InstanceType) { it.Spec.UnitResources.CPU = "not-a-quantity" },
-			wantErr:   "invalid CPU unit",
-		},
 	}
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			it := newRenderInstanceType()
-			if tc.instType != nil {
-				tc.instType(it)
+			var at *worker.AcceleratorType
+			if !tc.cpuOnly {
+				at = newRenderAcceleratorType()
+				if tc.accType != nil {
+					tc.accType(at)
+				}
 			}
 			role := &workercore.ModelDeploymentRole{Name: "server", Resources: tc.resources}
 
-			ress, err := deriveModelDeploymentResources(role, it)
+			reqs, _, err := renderModelDeploymentResources(role, at, tc.withGeneralOvercommit)
 			if tc.wantErr != "" {
 				require.Error(t, err)
 				assert.Contains(t, err.Error(), tc.wantErr)
@@ -1268,57 +1382,43 @@ func TestDeriveModelDeploymentResources(t *testing.T) {
 			}
 
 			require.NoError(t, err)
-			qtyEqual(t, qty(tc.wantCPU), ress.CPU, "cpu")
-			qtyEqual(t, qty(tc.wantRAM), ress.RAM, "ram")
-			qtyEqual(t, qty("15Gi"), ress.LocalStorage, "local storage")
+			assert.Equal(t, len(tc.wantLimits), len(reqs.Limits))
+			for k, want := range tc.wantLimits {
+				got, ok := reqs.Limits[k]
+				require.True(t, ok, "missing limit %s", k)
+				qtyEqual(t, want, got, "limit "+string(k))
+			}
+			assert.Equal(t, len(tc.wantRequests), len(reqs.Requests))
+			for k, want := range tc.wantRequests {
+				got, ok := reqs.Requests[k]
+				require.True(t, ok, "missing request %s", k)
+				qtyEqual(t, want, got, "request "+string(k))
+			}
 		})
 	}
 }
 
-// TestDeriveModelDeploymentResources_LocalStorage pins both sides of the ephemeral-storage default,
-// which is a cap and not a constant: 15Gi is what a replica asks for, unless the InstanceType offers
-// less, in which case asking for the default would make every replica unschedulable.
-func TestDeriveModelDeploymentResources_LocalStorage(t *testing.T) {
-	testCases := []struct {
-		name        string
-		offered     string
-		wantStorage string
-	}{
-		{name: "the type offers more than the default", offered: "512Gi", wantStorage: "15Gi"},
-		{name: "the type offers nothing at all", offered: "", wantStorage: "15Gi"},
-		{name: "the type offers less than the default", offered: "8Gi", wantStorage: "8Gi"},
-	}
-
-	for _, tc := range testCases {
-		t.Run(tc.name, func(t *testing.T) {
-			it := newRenderInstanceType(func(it *worker.InstanceType) { it.Spec.LocalStorage = tc.offered })
-			role := &workercore.ModelDeploymentRole{Name: "server"}
-
-			ress, err := deriveModelDeploymentResources(role, it)
-			require.NoError(t, err)
-			qtyEqual(t, qty(tc.wantStorage), ress.LocalStorage, "local storage")
-		})
-	}
-}
-
-// TestRenderModelDeploymentPod_AcceleratorRequest checks that the derived values and the declared
-// accelerator reach the container through the one resource renderer both CRDs share.
+// TestRenderModelDeploymentPod_AcceleratorRequest checks that declared host and accelerator
+// resources reach the container and omitted host resources stay unset.
 func TestRenderModelDeploymentPod_AcceleratorRequest(t *testing.T) {
 	md := newRenderDeployment(func(md *workercore.ModelDeployment) {
 		md.Spec.Roles[0].Resources = &workercore.ModelDeploymentRoleResources{
 			Accelerator: ptr.To(resource.MustParse("2")),
+			CPU:         ptr.To(resource.MustParse("32")),
+			RAM:         ptr.To(resource.MustParse("128Gi")),
 		}
 	})
 
-	pod := renderOne(t, md, newRenderInstanceType())
+	pod := renderOne(t, md, newRenderAcceleratorType())
 
 	accName := nodefeature.GetAcceleratableResourceName(
 		nodefeature.ManufacturerNVIDIA, workercore.DeviceAllocationModeExclusive,
 	)
 	limits := pod.Spec.Containers[0].Resources.Limits
 	qtyEqual(t, qty("2"), limits[accName], "the declared card count reaches the container")
-	qtyEqual(t, qty("32"), limits[core.ResourceCPU], "the host CPU is derived, not declared")
-	qtyEqual(t, qty("128Gi"), limits[core.ResourceMemory], "the host memory is derived, not declared")
+	qtyEqual(t, qty("32"), limits[core.ResourceCPU], "the declared host CPU reaches the container")
+	qtyEqual(t, qty("128Gi"), limits[core.ResourceMemory], "the declared host memory reaches the container")
+	assert.NotContains(t, limits, core.ResourceEphemeralStorage, "unset LocalStorage is omitted")
 }
 
 func TestRenderModelDeploymentPod_InterfaceRequest(t *testing.T) {
@@ -1341,7 +1441,7 @@ func TestRenderModelDeploymentPod_InterfaceRequest(t *testing.T) {
 				}
 			}
 			pod, err := renderModelDeploymentPod(context.Background(), ModelDeploymentRenderInput{
-				Deployment: md, Role: &md.Spec.Roles[0], InstanceType: newRenderInstanceType(),
+				Deployment: md, Role: &md.Spec.Roles[0], AcceleratorType: newRenderAcceleratorType(),
 				InterfaceResource: tc.resource,
 			})
 			require.NoError(t, err)
@@ -1459,7 +1559,7 @@ func TestModelDeploymentDirectInterfaceProtocol(t *testing.T) {
 // still gets one, because the Service fronting the deployment needs a target.
 func TestRenderModelDeploymentPod_Ports(t *testing.T) {
 	md := newRenderDeployment()
-	pod := renderOne(t, md, newRenderInstanceType())
+	pod := renderOne(t, md, newRenderAcceleratorType())
 	require.Len(t, pod.Spec.Containers[0].Ports, 1)
 	assert.Equal(t, int32(8000), pod.Spec.Containers[0].Ports[0].ContainerPort)
 	assert.Equal(t, "http", pod.Spec.Containers[0].Ports[0].Name)
@@ -1469,7 +1569,7 @@ func TestRenderModelDeploymentPod_Ports(t *testing.T) {
 			{Port: 9000, Protocol: core.ProtocolTCP},
 		}
 	})
-	pod = renderOne(t, md, newRenderInstanceType())
+	pod = renderOne(t, md, newRenderAcceleratorType())
 	require.Len(t, pod.Spec.Containers[0].Ports, 1)
 	assert.Equal(t, int32(9000), pod.Spec.Containers[0].Ports[0].ContainerPort)
 }
@@ -1492,7 +1592,7 @@ func TestRenderModelDeploymentPod_MetricsScrape(t *testing.T) {
 			if tc.port != 8000 {
 				md.Spec.Roles[0].Ports = []workercore.ModelDeploymentPort{{Port: tc.port}}
 			}
-			pod := renderOne(t, md, newRenderInstanceType())
+			pod := renderOne(t, md, newRenderAcceleratorType())
 			assert.Equal(t, "true", pod.Annotations["prometheus.io/scrape"])
 			assert.Equal(t, "/metrics", pod.Annotations["prometheus.io/path"])
 			assert.Equal(t, strconv.Itoa(int(tc.port)), pod.Annotations["prometheus.io/port"])
@@ -1539,9 +1639,9 @@ func TestRenderModelDeploymentPod_ResolvesTheImageAtTwoLevels(t *testing.T) {
 			})
 
 			pod, err := renderModelDeploymentPod(context.Background(), ModelDeploymentRenderInput{
-				Deployment:   md,
-				Role:         &md.Spec.Roles[0],
-				InstanceType: newRenderInstanceType(),
+				Deployment:      md,
+				Role:            &md.Spec.Roles[0],
+				AcceleratorType: newRenderAcceleratorType(),
 			})
 			if tc.wantErr != "" {
 				require.Error(t, err)
@@ -1574,10 +1674,10 @@ func TestRenderModelDeploymentPod_ClientConfigMount(t *testing.T) {
 	require.NoError(t, err)
 
 	pod, err := renderModelDeploymentPod(context.Background(), ModelDeploymentRenderInput{
-		Deployment:   md,
-		Role:         &md.Spec.Roles[0],
-		InstanceType: newRenderInstanceType(),
-		Connector:    conn,
+		Deployment:      md,
+		Role:            &md.Spec.Roles[0],
+		AcceleratorType: newRenderAcceleratorType(),
+		Connector:       conn,
 	})
 	require.NoError(t, err)
 
@@ -1650,7 +1750,7 @@ func TestRenderModelDeploymentPod_StartupGateScalesWithTheDeclaredBudget(t *test
 				md.Spec.Roles[0].StartupTimeoutSeconds = tc.startupTimeoutSeconds
 			})
 
-			c := renderOne(t, md, newRenderInstanceType()).Spec.Containers[0]
+			c := renderOne(t, md, newRenderAcceleratorType()).Spec.Containers[0]
 
 			require.NotNil(t, c.StartupProbe)
 			assert.Equal(t, tc.wantFailureThreshold, c.StartupProbe.FailureThreshold)
@@ -1748,7 +1848,7 @@ func TestRenderModelDeploymentPod_CompileCacheMountsOnManagedRoles(t *testing.T)
 				}
 			})
 
-			pod := renderOne(t, md, newRenderInstanceType())
+			pod := renderOne(t, md, newRenderAcceleratorType())
 
 			assert.Nil(t, findVolume(pod, ModelDeploymentCompileCacheVolumeName),
 				"default hostPath compilation cache volume must yield when user mounts an overlapping path")
@@ -1813,7 +1913,7 @@ func TestRenderModelDeploymentPod_CompileCacheRootIsDefaultedNotOwned(t *testing
 				}
 			})
 
-			value, found := envValue(renderOne(t, md, newRenderInstanceType()), tc.variable)
+			value, found := envValue(renderOne(t, md, newRenderAcceleratorType()), tc.variable)
 
 			require.True(t, found, "the engine is told where its cache lives")
 			assert.Equal(t, tc.want, value)
@@ -1826,7 +1926,7 @@ func TestRenderModelDeploymentPod_CompileCacheRootIsDefaultedNotOwned(t *testing
 			md.Spec.Roles[0].Command = []string{"/bin/my-server", "--flag"}
 		})
 
-		pod := renderOne(t, md, newRenderInstanceType())
+		pod := renderOne(t, md, newRenderAcceleratorType())
 
 		_, found := envValue(pod, "VLLM_CACHE_ROOT")
 		assert.False(t, found)
@@ -1838,7 +1938,7 @@ func TestRenderModelDeploymentPod_CompileCacheRootIsDefaultedNotOwned(t *testing
 // rather than referencing a ConfigMap nothing has written.
 func TestRenderModelDeploymentPod_NoClientConfigWithoutOne(t *testing.T) {
 	md := newRenderDeployment()
-	pod := renderOne(t, md, newRenderInstanceType())
+	pod := renderOne(t, md, newRenderAcceleratorType())
 
 	for _, volume := range pod.Spec.Volumes {
 		assert.NotEqual(t, inject.ConfigVolumeName, volume.Name)
@@ -2039,8 +2139,8 @@ func TestModelDeploymentPodSpecHash_IsDeterministic(t *testing.T) {
 		}
 	})
 
-	first := renderOne(t, md, newRenderInstanceType())
-	second := renderOne(t, md, newRenderInstanceType())
+	first := renderOne(t, md, newRenderAcceleratorType())
+	second := renderOne(t, md, newRenderAcceleratorType())
 
 	assert.Equal(t,
 		first.Annotations[modelDeploymentPodSpecHashAnnotation],
@@ -2052,7 +2152,7 @@ func TestModelDeploymentPodSpecHash_IsDeterministic(t *testing.T) {
 // render-version annotation deterministically.
 func TestModelDeploymentPodSpecHash_DoesNotCoverItself(t *testing.T) {
 	md := newRenderDeployment()
-	it := newRenderInstanceType()
+	it := newRenderAcceleratorType()
 	pod := renderOne(t, md, it)
 
 	stored := pod.Annotations[modelDeploymentPodSpecHashAnnotation]
@@ -2070,7 +2170,7 @@ func TestModelDeploymentPodSpecHash_DoesNotCoverItself(t *testing.T) {
 // the user spec and resolved bindings rather than a Pod's assigned name, so a replica named by an
 // earlier scheme is not stale merely for being old.
 func TestModelDeploymentPodSpecHash_DoesNotCoverTheName(t *testing.T) {
-	base := renderOne(t, newRenderDeployment(), newRenderInstanceType())
+	base := renderOne(t, newRenderDeployment(), newRenderAcceleratorType())
 	stored := base.Annotations[modelDeploymentPodSpecHashAnnotation]
 
 	testCases := []struct {
@@ -2101,9 +2201,9 @@ func TestModelDeploymentPodSpecHash_DoesNotCoverTheName(t *testing.T) {
 				tc.mutateMD(md)
 			}
 			tmpl, err := renderModelDeploymentPodTemplate(context.Background(), ModelDeploymentRenderInput{
-				Deployment:   md,
-				Role:         &md.Spec.Roles[0],
-				InstanceType: newRenderInstanceType(),
+				Deployment:      md,
+				Role:            &md.Spec.Roles[0],
+				AcceleratorType: newRenderAcceleratorType(),
 			})
 			require.NoError(t, err)
 			if tc.mutatePod != nil {
@@ -2136,10 +2236,10 @@ func TestModelDeploymentPodSpecHash_IgnoresImplicitOperatorDefaultsAndSettings(t
 
 	baseMD := newRenderDeployment()
 	baseIn := ModelDeploymentRenderInput{
-		Deployment:   baseMD,
-		Role:         &baseMD.Spec.Roles[0],
-		InstanceType: newRenderInstanceType(),
-		Artifact:     newArtifact(),
+		Deployment:      baseMD,
+		Role:            &baseMD.Spec.Roles[0],
+		AcceleratorType: newRenderAcceleratorType(),
+		Artifact:        newArtifact(),
 	}
 	basePod, err := renderModelDeploymentPod(context.Background(), baseIn)
 	require.NoError(t, err)
@@ -2197,10 +2297,10 @@ func TestModelDeploymentPodSpecHash_IgnoresImplicitOperatorDefaultsAndSettings(t
 		t.Run(tc.name, func(t *testing.T) {
 			md := newRenderDeployment()
 			in := ModelDeploymentRenderInput{
-				Deployment:   md,
-				Role:         &md.Spec.Roles[0],
-				InstanceType: newRenderInstanceType(),
-				Artifact:     newArtifact(),
+				Deployment:      md,
+				Role:            &md.Spec.Roles[0],
+				AcceleratorType: newRenderAcceleratorType(),
+				Artifact:        newArtifact(),
 			}
 			tc.mutate(md, &in)
 			pod, err := renderModelDeploymentPod(context.Background(), in)
@@ -2236,13 +2336,13 @@ func TestModelDeploymentPodSpecHash_CoversEverySpecField(t *testing.T) {
 // to and asserts each one moves the fingerprint. A change that did not would leave replicas running
 // a spec nobody asked for, with the deployment reporting itself Ready.
 func TestModelDeploymentPodSpecHash_MovesWithEveryRenderedInput(t *testing.T) {
-	base := renderOne(t, newRenderDeployment(), newRenderInstanceType())
+	base := renderOne(t, newRenderDeployment(), newRenderAcceleratorType())
 	baseHash := base.Annotations[modelDeploymentPodSpecHashAnnotation]
 
 	testCases := []struct {
 		name    string
 		mutate  func(*workercore.ModelDeployment)
-		instype func(*worker.InstanceType)
+		acctype func(*worker.AcceleratorType)
 		input   func(*ModelDeploymentRenderInput)
 	}{
 		{
@@ -2278,25 +2378,21 @@ func TestModelDeploymentPodSpecHash_MovesWithEveryRenderedInput(t *testing.T) {
 			},
 		},
 		{
-			// BOTH SIDES MOVE, because that is what naming another pool actually does: the
-			// reconciler reads the InstanceType by the name the role carries
-			// (getModelDeploymentInstanceType), so a different name is a different object and a
-			// different published entrance. Mutating the name alone would render the SAME entrance
-			// and assert nothing -- the entrance is no longer derived from the name.
-			name:    "instance type — the entrance label moves with it",
-			mutate:  func(md *workercore.ModelDeployment) { md.Spec.Roles[0].InstanceType = "h20-4x" },
-			instype: func(it *worker.InstanceType) { it.Name, it.Status.Entrance = "h20-4x", "queue-for-h20-4x" },
+			name:    "accelerator type — the entrance label moves with it",
+			mutate:  func(md *workercore.ModelDeployment) { md.Spec.Roles[0].AcceleratorType = "h20-4x" },
+			acctype: func(at *worker.AcceleratorType) { at.Name, at.Status.Entrance = "h20-4x", "queue-for-h20-4x" },
 		},
 		{
-			// The entrance alone, with the role's instanceType untouched: a pool whose LocalQueue
-			// was renamed under a deployment that never changed. The replicas must be recreated
-			// carrying the new one, or they stay routed at a queue that is gone.
-			name:    "the published entrance, with the instance type name unchanged",
-			instype: func(it *worker.InstanceType) { it.Status.Entrance = "queue-renamed" },
+			name:    "the published entrance, with the accelerator type name unchanged",
+			acctype: func(at *worker.AcceleratorType) { at.Status.Entrance = "queue-renamed" },
 		},
 		{
-			name:    "unit resources — the derived host request moves without the spec moving",
-			instype: func(it *worker.InstanceType) { it.Spec.UnitResources.CPU = "32" },
+			name: "declared host CPU resource",
+			mutate: func(md *workercore.ModelDeployment) {
+				md.Spec.Roles[0].Resources = &workercore.ModelDeploymentRoleResources{
+					CPU: ptr.To(resource.MustParse("32")),
+				}
+			},
 		},
 		{
 			name:  "the resolved connector arguments",
@@ -2320,15 +2416,15 @@ func TestModelDeploymentPodSpecHash_MovesWithEveryRenderedInput(t *testing.T) {
 			if tc.mutate != nil {
 				tc.mutate(md)
 			}
-			it := newRenderInstanceType()
-			if tc.instype != nil {
-				tc.instype(it)
+			at := newRenderAcceleratorType()
+			if tc.acctype != nil {
+				tc.acctype(at)
 			}
 
 			in := ModelDeploymentRenderInput{
-				Deployment:   md,
-				Role:         &md.Spec.Roles[0],
-				InstanceType: it,
+				Deployment:      md,
+				Role:            &md.Spec.Roles[0],
+				AcceleratorType: at,
 			}
 			if tc.input != nil {
 				tc.input(&in)
@@ -2360,10 +2456,10 @@ func TestRenderModelDeploymentPod_ConfigChangeMovesTheSpecHash(t *testing.T) {
 		require.NoError(t, err)
 
 		pod, err := renderModelDeploymentPod(context.Background(), ModelDeploymentRenderInput{
-			Deployment:   md,
-			Role:         &md.Spec.Roles[0],
-			InstanceType: newRenderInstanceType(),
-			Connector:    conn,
+			Deployment:      md,
+			Role:            &md.Spec.Roles[0],
+			AcceleratorType: newRenderAcceleratorType(),
+			Connector:       conn,
 		})
 		require.NoError(t, err)
 
@@ -2404,9 +2500,9 @@ func TestRenderModelDeploymentPod_Probes(t *testing.T) {
 		})
 
 		pod, err := renderModelDeploymentPod(context.Background(), ModelDeploymentRenderInput{
-			Deployment:   md,
-			Role:         &md.Spec.Roles[0],
-			InstanceType: newRenderInstanceType(),
+			Deployment:      md,
+			Role:            &md.Spec.Roles[0],
+			AcceleratorType: newRenderAcceleratorType(),
 		})
 		require.NoError(t, err)
 
@@ -2435,9 +2531,9 @@ func TestRenderModelDeploymentPod_Probes(t *testing.T) {
 			})
 
 			pod, err := renderModelDeploymentPod(context.Background(), ModelDeploymentRenderInput{
-				Deployment:   md,
-				Role:         &md.Spec.Roles[0],
-				InstanceType: newRenderInstanceType(),
+				Deployment:      md,
+				Role:            &md.Spec.Roles[0],
+				AcceleratorType: newRenderAcceleratorType(),
 			})
 			require.NoError(t, err)
 
@@ -2463,7 +2559,7 @@ func TestRenderModelDeploymentPod_Probes(t *testing.T) {
 				md.Spec.Roles[0].ExtraArgs = extraArgs
 			})
 
-			c := renderOne(t, md, newRenderInstanceType()).Spec.Containers[0]
+			c := renderOne(t, md, newRenderAcceleratorType()).Spec.Containers[0]
 			assert.Equal(t, int32(9100), c.Ports[0].ContainerPort, "%v", extraArgs)
 			for _, probe := range []*core.Probe{c.StartupProbe, c.ReadinessProbe, c.LivenessProbe} {
 				require.NotNil(t, probe, "%v", extraArgs)
@@ -2481,7 +2577,7 @@ func TestRenderModelDeploymentPod_Probes(t *testing.T) {
 			md.Spec.Roles[0].ExtraArgs = []string{"--port", "9100"}
 		})
 
-		c := renderOne(t, md, newRenderInstanceType()).Spec.Containers[0]
+		c := renderOne(t, md, newRenderAcceleratorType()).Spec.Containers[0]
 		assert.Equal(t, int32(9000), c.Ports[0].ContainerPort, "the declared port is the role's own")
 		assert.Nil(t, c.StartupProbe)
 		assert.Nil(t, c.ReadinessProbe)
@@ -2522,9 +2618,9 @@ func TestRenderModelDeploymentPod_Probes(t *testing.T) {
 			})
 
 			pod, err := renderModelDeploymentPod(context.Background(), ModelDeploymentRenderInput{
-				Deployment:   md,
-				Role:         &md.Spec.Roles[0],
-				InstanceType: newRenderInstanceType(),
+				Deployment:      md,
+				Role:            &md.Spec.Roles[0],
+				AcceleratorType: newRenderAcceleratorType(),
 			})
 			require.NoError(t, err)
 
@@ -2563,9 +2659,9 @@ func TestRenderModelDeploymentPod_Probes(t *testing.T) {
 			})
 
 			pod, err := renderModelDeploymentPod(context.Background(), ModelDeploymentRenderInput{
-				Deployment:   md,
-				Role:         &md.Spec.Roles[0],
-				InstanceType: newRenderInstanceType(),
+				Deployment:      md,
+				Role:            &md.Spec.Roles[0],
+				AcceleratorType: newRenderAcceleratorType(),
 			})
 			require.NoError(t, err)
 
@@ -2601,9 +2697,9 @@ func TestRenderModelDeploymentPod_Probes(t *testing.T) {
 			})
 
 			pod, err := renderModelDeploymentPod(context.Background(), ModelDeploymentRenderInput{
-				Deployment:   md,
-				Role:         &md.Spec.Roles[0],
-				InstanceType: newRenderInstanceType(),
+				Deployment:      md,
+				Role:            &md.Spec.Roles[0],
+				AcceleratorType: newRenderAcceleratorType(),
 			})
 			require.NoError(t, err)
 
@@ -2631,9 +2727,9 @@ func TestRenderModelDeploymentPod_Probes(t *testing.T) {
 		md := newRenderDeployment()
 
 		pod, err := renderModelDeploymentPod(context.Background(), ModelDeploymentRenderInput{
-			Deployment:   md,
-			Role:         &md.Spec.Roles[0],
-			InstanceType: newRenderInstanceType(),
+			Deployment:      md,
+			Role:            &md.Spec.Roles[0],
+			AcceleratorType: newRenderAcceleratorType(),
 		})
 		require.NoError(t, err)
 
@@ -2661,10 +2757,10 @@ func TestRenderModelDeploymentPod_Probes(t *testing.T) {
 		md := newRenderDeployment()
 
 		pod, err := renderModelDeploymentPod(context.Background(), ModelDeploymentRenderInput{
-			Deployment:   md,
-			Role:         &md.Spec.Roles[0],
-			InstanceType: newRenderInstanceType(),
-			Connector:    ModelDeploymentConnectorRender{Args: []string{"--port", "9100"}},
+			Deployment:      md,
+			Role:            &md.Spec.Roles[0],
+			AcceleratorType: newRenderAcceleratorType(),
+			Connector:       ModelDeploymentConnectorRender{Args: []string{"--port", "9100"}},
 		})
 		require.NoError(t, err)
 
@@ -2686,9 +2782,9 @@ func TestRenderModelDeploymentPod_Probes(t *testing.T) {
 		})
 
 		pod, err := renderModelDeploymentPod(context.Background(), ModelDeploymentRenderInput{
-			Deployment:   md,
-			Role:         &md.Spec.Roles[0],
-			InstanceType: newRenderInstanceType(),
+			Deployment:      md,
+			Role:            &md.Spec.Roles[0],
+			AcceleratorType: newRenderAcceleratorType(),
 		})
 		require.NoError(t, err)
 
@@ -2715,9 +2811,9 @@ func TestRenderModelDeploymentPod_Probes(t *testing.T) {
 			md := newRenderDeployment()
 
 			pod, err := renderModelDeploymentPod(context.Background(), ModelDeploymentRenderInput{
-				Deployment:   md,
-				Role:         &md.Spec.Roles[0],
-				InstanceType: newRenderInstanceType(),
+				Deployment:      md,
+				Role:            &md.Spec.Roles[0],
+				AcceleratorType: newRenderAcceleratorType(),
 			})
 			require.NoError(t, err)
 
@@ -2799,15 +2895,15 @@ func TestRenderModelDeploymentPod_Probes(t *testing.T) {
 // print.
 func TestRenderModelDeploymentPod_SerializedOutputIsPinnedToThePreSplitRender(t *testing.T) {
 	pinned := map[string]string{
-		"a sole server role": "d5d63cb975d770ba33808446c79bba7de332cdd2ac2f07b475be403720fde63c",
-		"a sole server role with a synthesized cache connector":                              "faad20ebb9e86237fec4828a18338ee0ea6b98ff72b91aa520b7c92db700aac1",
-		"a take-over role carrying a connector it must be given no part of":                  "6adc092a5deea1a532e642a5a65b8fc8d34be938f644bd1eefc244b6d04225b7",
-		"a direct decoder with a native routing sidecar":                                     "638cef37ed13981dfdf9d6fd82fc593265e1174b17284bad3dedaa45d7a1d826",
-		"a direct decoder with a classic routing sidecar":                                    "c49acf3d8790150e95e9e156ab83b39086ca1701ce908efda7ea25002da3ed29",
-		"a role naming no image, which runs the engine's image":                              "d5d63cb975d770ba33808446c79bba7de332cdd2ac2f07b475be403720fde63c",
-		"a TLS-listening role with declared ports, privileges, a runtime class and a volume": "afacb41d56dce83994c31be4b6ccca5a83a38bf8b43de94efcc6f75c9100ba21",
-		"the prefill role of a two-role deployment":                                          "ab1b64d30dd33e3d88ed73baefd480b7377a8d0a97fdf5d3fb62a4b905d34e48",
-		"the decode role of a two-role deployment":                                           "d86765d62395774cd9686651c3d6f81dae0f80025af12f2ac0073e188d91cddc",
+		"a sole server role": "4e8bd9a4d85da4f3ecbe436806836ce5d3d9b8ecbfda107db29f1faeacd5cbdd",
+		"a sole server role with a synthesized cache connector":                              "fb59c6e7467638df3163a203238b5727a9044a4c794c1bde5bfd4515d388aaae",
+		"a take-over role carrying a connector it must be given no part of":                  "78f891f79b600820ab889365047f94e39f47c56ec51b140d9719d5344818b55b",
+		"a direct decoder with a native routing sidecar":                                     "c89cad40333e6a080b7a8f7ad1e1a8039c70bdb771827b2c72aeea8edb9c07c2",
+		"a direct decoder with a classic routing sidecar":                                    "b2fbdc3a5d6cd0ae7c426e135721aa48e52ace318d6bed91adf22a97c006e6bb",
+		"a role naming no image, which runs the engine's image":                              "4e8bd9a4d85da4f3ecbe436806836ce5d3d9b8ecbfda107db29f1faeacd5cbdd",
+		"a TLS-listening role with declared ports, privileges, a runtime class and a volume": "9cef99f51a7e03903e14733df94301113624c4618592552a759b9e4b173922c8",
+		"the prefill role of a two-role deployment":                                          "0a58d16f9ea5c4b17e0f748df601bf1f95cb4443f5483bf30c8084b4600ac713",
+		"the decode role of a two-role deployment":                                           "f65d8e35c4e6fd942d4f674f8822d7f606f60a17f98b9d6a40692fcfa9ea7baa",
 	}
 
 	// newPinnedInput builds the render input the way the reconciler does: the deployment and its
@@ -2822,9 +2918,9 @@ func TestRenderModelDeploymentPod_SerializedOutputIsPinnedToThePreSplitRender(t 
 		md := newRenderDeployment(mutate...)
 
 		return ModelDeploymentRenderInput{
-			Deployment:   md,
-			Role:         &md.Spec.Roles[roleIndex],
-			InstanceType: newRenderInstanceType(),
+			Deployment:      md,
+			Role:            &md.Spec.Roles[roleIndex],
+			AcceleratorType: newRenderAcceleratorType(),
 		}
 	}
 
@@ -2972,11 +3068,11 @@ func twoRoleDeploymentMutations() []func(*workercore.ModelDeployment) {
 		},
 		func(md *workercore.ModelDeployment) {
 			md.Spec.Roles = append(md.Spec.Roles, workercore.ModelDeploymentRole{
-				Name:         "decode",
-				Replicas:     2,
-				InstanceType: "h20-8x",
-				Kind:         workercore.ModelDeploymentRoleKindDecode,
-				Image:        "vllm/vllm-openai:v0.25.1",
+				Name:            "decode",
+				Replicas:        2,
+				AcceleratorType: "h20-8x",
+				Kind:            workercore.ModelDeploymentRoleKindDecode,
+				Image:           "vllm/vllm-openai:v0.25.1",
 			})
 		},
 	}
@@ -3000,9 +3096,9 @@ func TestRenderModelDeploymentPod_TemplateCarriesNoGroupMetadataOrHash(t *testin
 	role := &md.Spec.Roles[0]
 
 	template, err := renderModelDeploymentPodTemplate(context.Background(), ModelDeploymentRenderInput{
-		Deployment:   md,
-		Role:         role,
-		InstanceType: newRenderInstanceType(),
+		Deployment:      md,
+		Role:            role,
+		AcceleratorType: newRenderAcceleratorType(),
 	})
 	require.NoError(t, err)
 
@@ -3051,7 +3147,7 @@ func TestStampModelDeploymentPod_AboveOneMemberNamesAndAddressesEachMember(t *te
 		t.Helper()
 
 		pod, err := renderModelDeploymentPodTemplate(context.Background(), ModelDeploymentRenderInput{
-			Deployment: md, Role: role, InstanceType: newRenderInstanceType(),
+			Deployment: md, Role: role, AcceleratorType: newRenderAcceleratorType(),
 		})
 		require.NoError(t, err)
 		stampModelDeploymentPod(pod, md, role, ordinal, member)
@@ -3120,7 +3216,7 @@ func TestStampModelDeploymentPod_MembersOfAReplicaDifferOnlyInTheirIdentity(t *t
 		t.Helper()
 
 		pod, err := renderModelDeploymentPodTemplate(context.Background(), ModelDeploymentRenderInput{
-			Deployment: md, Role: role, InstanceType: newRenderInstanceType(),
+			Deployment: md, Role: role, AcceleratorType: newRenderAcceleratorType(),
 		})
 		require.NoError(t, err)
 		stampModelDeploymentPod(pod, md, role, 0, member)
@@ -3151,7 +3247,7 @@ func renderStampedMember(
 	t.Helper()
 
 	pod, err := renderModelDeploymentPodTemplate(context.Background(), ModelDeploymentRenderInput{
-		Deployment: md, Role: &md.Spec.Roles[0], InstanceType: newRenderInstanceType(),
+		Deployment: md, Role: &md.Spec.Roles[0], AcceleratorType: newRenderAcceleratorType(),
 	})
 	require.NoError(t, err)
 	stampModelDeploymentPod(pod, md, &md.Spec.Roles[0], ordinal, member)
@@ -3253,7 +3349,7 @@ func TestRenderModelDeploymentPodTemplate_RendersTwoReplicasOfOneRoleIdentical(t
 				md := newRenderDeployment()
 
 				return ModelDeploymentRenderInput{
-					Deployment: md, Role: &md.Spec.Roles[0], InstanceType: newRenderInstanceType(),
+					Deployment: md, Role: &md.Spec.Roles[0], AcceleratorType: newRenderAcceleratorType(),
 				}
 			},
 		},
@@ -3269,7 +3365,7 @@ func TestRenderModelDeploymentPodTemplate_RendersTwoReplicasOfOneRoleIdentical(t
 				})
 
 				return ModelDeploymentRenderInput{
-					Deployment: md, Role: &md.Spec.Roles[0], InstanceType: newRenderInstanceType(),
+					Deployment: md, Role: &md.Spec.Roles[0], AcceleratorType: newRenderAcceleratorType(),
 					Connector: ModelDeploymentConnectorRender{
 						Args: []string{"--kv-transfer-config", `{}`}, KVTransfer: true, RoutingSidecar: true,
 					},
@@ -3285,7 +3381,7 @@ func TestRenderModelDeploymentPodTemplate_RendersTwoReplicasOfOneRoleIdentical(t
 				})
 
 				return ModelDeploymentRenderInput{
-					Deployment: md, Role: &md.Spec.Roles[0], InstanceType: newRenderInstanceType(),
+					Deployment: md, Role: &md.Spec.Roles[0], AcceleratorType: newRenderAcceleratorType(),
 				}
 			},
 		},
@@ -3329,7 +3425,7 @@ func TestRenderModelDeploymentPod_DecodeWithoutTheProxyFlagRunsAlone(t *testing.
 	})
 
 	pod, err := renderModelDeploymentPod(context.Background(), ModelDeploymentRenderInput{
-		Deployment: md, Role: &md.Spec.Roles[0], InstanceType: newRenderInstanceType(),
+		Deployment: md, Role: &md.Spec.Roles[0], AcceleratorType: newRenderAcceleratorType(),
 		Connector: ModelDeploymentConnectorRender{
 			Args: []string{"--kv-transfer-config", `{}`}, KVTransfer: true,
 		},
@@ -3359,11 +3455,11 @@ func newTCPTWReusePair(mutate ...func(*workercore.ModelDeployment)) *workercore.
 		md.Spec.Roles = []workercore.ModelDeploymentRole{
 			{
 				Name: "prefill", Kind: workercore.ModelDeploymentRoleKindPrefill,
-				Replicas: 1, InstanceType: "h20-8x", Image: "lmsysorg/sglang:v0.5.18",
+				Replicas: 1, AcceleratorType: "h20-8x", Image: "lmsysorg/sglang:v0.5.18",
 			},
 			{
 				Name: "decode", Kind: workercore.ModelDeploymentRoleKindDecode,
-				Replicas: 1, InstanceType: "h20-8x", Image: "lmsysorg/sglang:v0.5.18",
+				Replicas: 1, AcceleratorType: "h20-8x", Image: "lmsysorg/sglang:v0.5.18",
 			},
 		}
 	})
@@ -3462,7 +3558,7 @@ func TestRenderModelDeploymentPod_TCPTWReuse(t *testing.T) {
 
 			render := func(reuse bool) *core.Pod {
 				pod, err := renderModelDeploymentPod(context.Background(), ModelDeploymentRenderInput{
-					Deployment: tc.md, Role: role, InstanceType: newRenderInstanceType(),
+					Deployment: tc.md, Role: role, AcceleratorType: newRenderAcceleratorType(),
 					Connector: connector, TCPTWReuse: reuse,
 				})
 				require.NoError(t, err)
@@ -3503,7 +3599,7 @@ func TestRenderModelDeploymentPod_TCPTWReuseKeepsPrivileged(t *testing.T) {
 	require.NoError(t, err)
 
 	pod, err := renderModelDeploymentPod(context.Background(), ModelDeploymentRenderInput{
-		Deployment: md, Role: &md.Spec.Roles[0], InstanceType: newRenderInstanceType(),
+		Deployment: md, Role: &md.Spec.Roles[0], AcceleratorType: newRenderAcceleratorType(),
 		Connector: connector, TCPTWReuse: true,
 	})
 	require.NoError(t, err)
@@ -3523,7 +3619,7 @@ func TestRenderModelDeploymentPods_TCPTWReuseFollowsTheSetting(t *testing.T) {
 		t.Helper()
 
 		md := newTCPTWReusePair()
-		r := &ModelDeploymentReconciler{Client: newModelDeploymentClient(md, newRenderInstanceType())}
+		r := &ModelDeploymentReconciler{Client: newModelDeploymentClient(md, newRenderAcceleratorType())}
 		desired, err := r.renderModelDeploymentPods(context.Background(), md, nil, nil, nil)
 		require.NoError(t, err)
 
@@ -3561,7 +3657,7 @@ func TestRenderModelDeploymentPods_AWSEFAEnabledPodSpecHash(t *testing.T) {
 	t.Cleanup(func() { modelDeploymentModelTransferQualified = origQualified })
 
 	renderHash := func(
-		t *testing.T, md *workercore.ModelDeployment, it *worker.InstanceType,
+		t *testing.T, md *workercore.ModelDeployment, it *worker.AcceleratorType,
 		artifact *ModelDeploymentArtifactRender, efa bool,
 	) string {
 		t.Helper()
@@ -3585,18 +3681,18 @@ func TestRenderModelDeploymentPods_AWSEFAEnabledPodSpecHash(t *testing.T) {
 		return desired[roleName][0][0].Annotations[modelDeploymentPodSpecHashAnnotation]
 	}
 
-	nvidiaIT := newRenderInstanceType()
-	amdIT := newRenderInstanceType(func(it *worker.InstanceType) {
+	nvidiaIT := newRenderAcceleratorType()
+	amdIT := newRenderAcceleratorType(func(it *worker.AcceleratorType) {
 		it.Status.Detail.Manufacturer = nodefeature.ManufacturerAMD
 	})
-	ascendIT := newRenderInstanceType(func(it *worker.InstanceType) {
+	ascendIT := newRenderAcceleratorType(func(it *worker.AcceleratorType) {
 		it.Status.Detail.Manufacturer = nodefeature.ManufacturerAscend
 	})
 
 	cases := []struct {
 		name      string
 		md        *workercore.ModelDeployment
-		it        *worker.InstanceType
+		it        *worker.AcceleratorType
 		artifact  *ModelDeploymentArtifactRender
 		wantMoves bool
 	}{
@@ -3801,7 +3897,7 @@ func TestRenderModelDeploymentPod_Capabilities(t *testing.T) {
 			pod, err := renderModelDeploymentPod(t.Context(), ModelDeploymentRenderInput{
 				Deployment:        tc.md,
 				Role:              &tc.md.Spec.Roles[0],
-				InstanceType:      newRenderInstanceType(),
+				AcceleratorType:   newRenderAcceleratorType(),
 				InterfaceResource: tc.interfaceResource,
 				Artifact:          tc.artifact,
 			})
@@ -3809,4 +3905,61 @@ func TestRenderModelDeploymentPod_Capabilities(t *testing.T) {
 			assert.Equal(t, tc.want, pod.Spec.Containers[0].SecurityContext)
 		})
 	}
+}
+
+func TestRenderModelDeploymentPod_CPUOnlyUnqueuedRole(t *testing.T) {
+	md := newRenderDeployment(func(md *workercore.ModelDeployment) {
+		md.Spec.Roles[0].AcceleratorType = ""
+		md.Spec.Roles[0].ReplicaSize = 2
+		md.Spec.Roles[0].Resources = &workercore.ModelDeploymentRoleResources{
+			CPU: ptr.To(resource.MustParse("8")),
+			RAM: ptr.To(resource.MustParse("32Gi")),
+		}
+	})
+
+	t.Run("default mixed-on-node false adds cpu-only nodeSelector and catch-all toleration", func(t *testing.T) {
+		pod, err := renderModelDeploymentPod(t.Context(), ModelDeploymentRenderInput{
+			Deployment:  md,
+			Role:        &md.Spec.Roles[0],
+			MixedOnNode: false,
+		})
+		require.NoError(t, err)
+
+		assert.NotContains(t, pod.Labels, kueuectrlconst.QueueLabel,
+			"CPU-only role must omit kueue.x-k8s.io/queue-name")
+		assert.NotContains(t, pod.Labels, "kueue.x-k8s.io/pod-group-name",
+			"CPU-only role must omit Kueue pod-group-name label")
+		assert.NotContains(t, pod.Annotations, "kueue.x-k8s.io/pod-group-total-count")
+		assert.NotContains(t, pod.Annotations, "kueue.x-k8s.io/role-hash")
+		assert.NotContains(t, pod.Annotations, "kueue.x-k8s.io/pod-group-serving")
+
+		assert.Equal(t, "0", pod.Labels[modelDeploymentReplicaOrdinalLabel])
+		assert.Equal(t, "0", pod.Labels[modelDeploymentMemberIndexLabel])
+		assert.Equal(t, "2", pod.Annotations[modelDeploymentReplicaSizeAnnotation])
+
+		assert.Equal(t, "true", pod.Spec.NodeSelector["gpustack.ai/managed"])
+		assert.Equal(t, "true", pod.Spec.NodeSelector[nodefeature.NodeCPUOnlyLabelKey])
+		assert.Contains(t, pod.Spec.Tolerations, core.Toleration{Operator: core.TolerationOpExists})
+
+		cacheVol := findVolume(pod, ModelDeploymentCompileCacheVolumeName)
+		require.NotNil(t, cacheVol, "CPU-only role must mount an emptyDir runtime cache at /var/lib/gpustack/cache")
+		assert.NotNil(t, cacheVol.EmptyDir, "CPU-only role uses EmptyDir rather than a GPU HostPath compilation cache")
+		assert.Nil(t, cacheVol.HostPath)
+		cacheMount := findMount(&pod.Spec.Containers[0], ModelDeploymentCompileCacheVolumeName)
+		require.NotNil(t, cacheMount)
+		assert.Equal(t, ModelDeploymentCompileCacheMountPath, cacheMount.MountPath)
+	})
+
+	t.Run("mixed-on-node true omits cpu-only nodeSelector while keeping managed selector and toleration", func(t *testing.T) {
+		pod, err := renderModelDeploymentPod(t.Context(), ModelDeploymentRenderInput{
+			Deployment:  md,
+			Role:        &md.Spec.Roles[0],
+			MixedOnNode: true,
+		})
+		require.NoError(t, err)
+
+		assert.Equal(t, "true", pod.Spec.NodeSelector["gpustack.ai/managed"])
+		assert.NotContains(t, pod.Spec.NodeSelector, nodefeature.NodeCPUOnlyLabelKey)
+		assert.Contains(t, pod.Spec.Tolerations, core.Toleration{Operator: core.TolerationOpExists})
+	})
 }

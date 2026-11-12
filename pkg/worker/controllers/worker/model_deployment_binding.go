@@ -337,7 +337,7 @@ func (r *ModelDeploymentReconciler) resolveModelDeploymentInterfaceProtocols(
 // message without adding an observation.
 //
 // The other half of the input, the engine and the accelerator, is per role: the accelerator comes
-// from the role's InstanceType, so the synthesis itself cannot be hoisted out of that loop.
+// from the role's AcceleratorType, so the synthesis itself cannot be hoisted out of that loop.
 func (r *ModelDeploymentReconciler) resolveModelDeploymentConnection(
 	ctx context.Context, domain *modelDeploymentDomain,
 ) (*ModelDeploymentConnectorInput, error) {

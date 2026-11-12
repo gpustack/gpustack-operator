@@ -12,16 +12,16 @@ spec:
       name: qwen-72b
     name: Qwen/Qwen2.5-72B-Instruct
   roles:
-  - image: vllm/vllm-openai:v0.19.0
-    instanceType: h20-8x
+  - acceleratorType: h20-8x
+    image: vllm/vllm-openai:v0.19.0
     kind: Server
     name: nvidia-ucx
     replicas: 1
     resources:
       accelerator: "1"
     size: 1
-  - image: vllm/vllm-openai:v0.19.0
-    instanceType: h20-8x
+  - acceleratorType: h20-8x
+    image: vllm/vllm-openai:v0.19.0
     kind: Server
     name: nvidia-efa
     replicas: 1
@@ -29,8 +29,8 @@ spec:
       accelerator: "1"
       interface: "1"
     size: 1
-  - image: quay.io/ascend/vllm-ascend:v0.19.0
-    instanceType: atlas-910b
+  - acceleratorType: atlas-910b
+    image: quay.io/ascend/vllm-ascend:v0.19.0
     kind: Server
     name: ascend-hixl
     replicas: 1

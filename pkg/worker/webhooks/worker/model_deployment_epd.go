@@ -247,20 +247,23 @@ func (r *ModelDeploymentWebhook) modelDeploymentEPDPlatform(
 	var errs field.ErrorList
 
 	rolesPath := field.NewPath("spec", "roles")
-	seen := make(map[string]*worker.InstanceType, len(md.Spec.Roles))
+	seen := make(map[string]*worker.AcceleratorType, len(md.Spec.Roles))
 
 	platform := ""
 	mixed := make([]string, 0, 2)
+	var missingPaths []*field.Path
 	for i := range md.Spec.Roles {
 		role := &md.Spec.Roles[i]
-		if role.InstanceType == "" {
+		if role.AcceleratorType == "" {
+			missingPaths = append(missingPaths, rolesPath.Index(i).Child("acceleratorType"))
+
 			continue
 		}
 
-		instType, ok := seen[role.InstanceType]
+		accType, ok := seen[role.AcceleratorType]
 		if !ok {
 			var err error
-			if instType, err = r.getInstanceType(ctx, role.InstanceType, i); err != nil {
+			if accType, err = r.getAcceleratorType(ctx, role.AcceleratorType, i); err != nil {
 				var fieldErr *field.Error
 				if !errors.As(err, &fieldErr) || fieldErr.Type == field.ErrorTypeInternal {
 					return "", nil, err
@@ -269,16 +272,16 @@ func (r *ModelDeploymentWebhook) modelDeploymentEPDPlatform(
 
 				continue
 			}
-			seen[role.InstanceType] = instType
+			seen[role.AcceleratorType] = accType
 		}
 
-		manufacturer := instType.Status.Detail.Manufacturer
+		manufacturer := accType.Status.Detail.Manufacturer
 		if manufacturer == "" {
-			errs = append(errs, field.Invalid(rolesPath.Index(i).Child("instanceType"), role.InstanceType,
+			errs = append(errs, field.Invalid(rolesPath.Index(i).Child("acceleratorType"), role.AcceleratorType,
 				fmt.Sprintf(
-					"instance type %q reports no accelerator platform yet: an encoder role is admitted "+
+					"accelerator type %q reports no accelerator platform yet: an encoder role is admitted "+
 						"per platform, because the connector it needs follows the accelerator, so the "+
-						"platform has to be known before this deployment can be judged", role.InstanceType,
+						"platform has to be known before this deployment can be judged", role.AcceleratorType,
 				)))
 
 			continue
@@ -303,9 +306,13 @@ func (r *ModelDeploymentWebhook) modelDeploymentEPDPlatform(
 		))), nil
 	}
 
-	if platform == "" && len(errs) == 0 {
+	if len(missingPaths) == len(md.Spec.Roles) {
 		return "", append(errs, field.Required(rolesPath,
-			"no role names an instance type, so the accelerator platform the encoder admission needs cannot be read")), nil
+			"no role names an accelerator type, so the accelerator platform the encoder admission needs cannot be read")), nil
+	}
+	for _, p := range missingPaths {
+		errs = append(errs, field.Required(p,
+			"every role in an encoder deployment must name an acceleratorType so its accelerator platform can be verified"))
 	}
 
 	return platform, errs, nil

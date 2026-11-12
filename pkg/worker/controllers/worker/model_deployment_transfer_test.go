@@ -916,8 +916,8 @@ func TestModelDeploymentModelTransferBindingHashStability(t *testing.T) {
 		}
 	}
 
-	a := modelDeploymentBindingHash(build(true, "nixl"), workercore.InstanceResources{})
-	b := modelDeploymentBindingHash(build(false, "hixl"), workercore.InstanceResources{})
+	a := modelDeploymentBindingHash(build(true, "nixl"), workercore.ModelDeploymentRoleResources{})
+	b := modelDeploymentBindingHash(build(false, "hixl"), workercore.ModelDeploymentRoleResources{})
 	assert.Equal(t, a, b,
 		"a source drain or a backend name must never read as a Pod spec change")
 }
@@ -1329,7 +1329,7 @@ func modelTransferFixtureClient(
 	t.Helper()
 
 	return newModelDeploymentClient(md,
-		newRenderInstanceType(func(it *worker.InstanceType) {
+		newRenderAcceleratorType(func(it *worker.AcceleratorType) {
 			it.Status.Detail.Manufacturer = manufacturer
 		}),
 		newRenderBinding(),
@@ -2588,10 +2588,10 @@ func modelExpressPodFixture(t *testing.T, delivery workercore.ModelDeploymentMod
 	}
 	render.ModelTransferConfigMap = "model-transfer-endpoints"
 	pod, err := renderModelDeploymentPodTemplate(context.Background(), ModelDeploymentRenderInput{
-		Deployment:   md,
-		Role:         &md.Spec.Roles[0],
-		InstanceType: newRenderInstanceType(),
-		Artifact:     render,
+		Deployment:      md,
+		Role:            &md.Spec.Roles[0],
+		AcceleratorType: newRenderAcceleratorType(),
+		Artifact:        render,
 	})
 	require.NoError(t, err)
 
@@ -2787,10 +2787,10 @@ func TestModelDeploymentModelExpressPodPerDelivery(t *testing.T) {
 	render.ModelTransferPolicy = settings.ModelArtifactRemoteDeliveryRequire
 	render.ModelTransferConfigMap = "model-transfer-endpoints"
 	pod, err := renderModelDeploymentPodTemplate(context.Background(), ModelDeploymentRenderInput{
-		Deployment:   md,
-		Role:         &md.Spec.Roles[0],
-		InstanceType: newRenderInstanceType(),
-		Artifact:     render,
+		Deployment:      md,
+		Role:            &md.Spec.Roles[0],
+		AcceleratorType: newRenderAcceleratorType(),
+		Artifact:        render,
 	})
 	require.NoError(t, err)
 	var loadFormatValues []string
@@ -2810,10 +2810,10 @@ func TestModelDeploymentModelExpressPodPerDelivery(t *testing.T) {
 		fallback.ModelTransferEFA = efa
 		fallback.ModelTransferConfigMap = "model-transfer-endpoints"
 		fbPod, fbErr := renderModelDeploymentPodTemplate(context.Background(), ModelDeploymentRenderInput{
-			Deployment:   md,
-			Role:         &md.Spec.Roles[0],
-			InstanceType: newRenderInstanceType(),
-			Artifact:     fallback,
+			Deployment:      md,
+			Role:            &md.Spec.Roles[0],
+			AcceleratorType: newRenderAcceleratorType(),
+			Artifact:        fallback,
 		})
 		require.NoError(t, fbErr)
 		wantPlugin := "UCX"

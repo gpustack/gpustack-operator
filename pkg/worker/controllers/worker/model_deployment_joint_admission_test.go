@@ -109,7 +109,7 @@ func jointDeployment(name string, instanceTypes ...string) *workercore.ModelDepl
 	}
 	for i, it := range instanceTypes {
 		md.Spec.Roles = append(md.Spec.Roles, workercore.ModelDeploymentRole{
-			Name: []string{"prefill", "decode", "third"}[i], Replicas: 1, InstanceType: it,
+			Name: []string{"prefill", "decode", "third"}[i], Replicas: 1, AcceleratorType: it,
 		})
 	}
 
@@ -264,15 +264,15 @@ func epdJointDeployment() *workercore.ModelDeployment {
 	md.Spec.Roles = []workercore.ModelDeploymentRole{
 		{
 			Name: "encode", Kind: workercore.ModelDeploymentRoleKindEncode,
-			Replicas: 1, InstanceType: "h20-8x",
+			Replicas: 1, AcceleratorType: "h20-8x",
 		},
 		{
 			Name: "prefill", Kind: workercore.ModelDeploymentRoleKindPrefill,
-			Replicas: 1, InstanceType: "a100-8x",
+			Replicas: 1, AcceleratorType: "a100-8x",
 		},
 		{
 			Name: "decode", Kind: workercore.ModelDeploymentRoleKindDecode,
-			Replicas: 1, InstanceType: "l20-8x",
+			Replicas: 1, AcceleratorType: "l20-8x",
 		},
 	}
 
@@ -1381,7 +1381,7 @@ func rolloutSetup(t *testing.T, cli ctrlcli.Client) {
 // Ready -- Kueue's own move -- and from then on holds it to the same skip as the originals.
 func TestModelDeploymentJointAdmission_AnAdmittedWorkloadIsSkippedThroughARollout(t *testing.T) {
 	ctx := context.Background()
-	cli := newRolloutClient(jointCheckObject(), twoRoleDeployment(), newRenderInstanceType())
+	cli := newRolloutClient(jointCheckObject(), twoRoleDeployment(), newRenderAcceleratorType())
 
 	rolloutSetup(t, cli)
 
@@ -1479,7 +1479,7 @@ func TestModelDeploymentJointAdmission_AnAdmittedWorkloadIsSkippedThroughARollou
 // hand-built, per state, in the case above.
 func TestModelDeploymentJointAdmission_ARolloutRunsToCompletionWithTheBarrierActive(t *testing.T) {
 	ctx := context.Background()
-	cli := newRolloutClient(jointCheckObject(), twoRoleDeployment(), newRenderInstanceType())
+	cli := newRolloutClient(jointCheckObject(), twoRoleDeployment(), newRenderAcceleratorType())
 
 	rolloutSetup(t, cli)
 
@@ -1827,4 +1827,35 @@ func TestModelDeploymentJointAdmission_AGroupOfOneSeatIsNotAssembling(t *testing
 		"the decode role is admitted, so the only thing left to hold is the unclassifiable group")
 	assert.NotContains(t, held.Message, "quota",
 		"a duplicate seat is not a quota problem, and the message must not send an operator there")
+}
+
+func TestModelDeploymentJointAdmission_CPUOnlyRolesAreSkipped(t *testing.T) {
+	t.Run("one_queued_role_and_one_cpu_only_role_needs_no_joint_barrier", func(t *testing.T) {
+		md := jointDeployment("qwen", "h20-8x", "")
+		md.Spec.Roles[1].AcceleratorType = ""
+		group := modelDeploymentReplicaGroupName(md, "prefill", 0)
+		pod := jointGroupPod("qwen-prefill-0", group, "qwen")
+		wl := jointWorkload("wl-prefill", true, pod)
+		cli := newJointClient(jointCheckObject(), md, pod, wl)
+
+		got := reconcileJoint(t, cli, "wl-prefill")
+		assert.Equal(t, kueue.CheckStateReady, jointCheckState(got))
+		assert.Contains(t, jointCheckMessage(got), "nothing to wait for")
+	})
+
+	t.Run("two_queued_roles_and_one_cpu_only_role_wait_only_on_queued_roles", func(t *testing.T) {
+		md := epdJointDeployment()
+		md.Spec.Roles[0].AcceleratorType = ""
+
+		prefillPod := jointGroupPod("qwen-prefill-0",
+			modelDeploymentReplicaGroupName(md, "prefill", 0), "qwen")
+		decodePod := jointGroupPod("qwen-decode-0",
+			modelDeploymentReplicaGroupName(md, "decode", 0), "qwen")
+		cli := newJointClient(jointCheckObject(), md, prefillPod, decodePod,
+			jointWorkload("wl-prefill", true, prefillPod),
+			jointWorkload("wl-decode", true, decodePod))
+
+		got := reconcileJoint(t, cli, "wl-prefill")
+		assert.Equal(t, kueue.CheckStateReady, jointCheckState(got))
+	})
 }

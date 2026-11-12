@@ -84,7 +84,7 @@ func modelDeploymentClaim() workercore.KVCacheObjectReference {
 // cache its replicas are on.
 func TestModelDeploymentBinding_ResolvesTheDomainInItsOwnNamespace(t *testing.T) {
 	md := newRenderDeployment()
-	cli := newModelDeploymentClient(md, newRenderInstanceType(), newRenderBinding())
+	cli := newModelDeploymentClient(md, newRenderAcceleratorType(), newRenderBinding())
 	r := &ModelDeploymentReconciler{Client: cli, APIReader: cli}
 
 	observed, err := r.resolveModelDeploymentDomain(context.Background(), md)
@@ -107,7 +107,7 @@ func TestModelDeploymentBinding_ResolvesTheDomainInItsOwnNamespace(t *testing.T)
 // six axes with no hint the sixth does not apply.
 func TestModelDeploymentBinding_NoCacheIsAnAnswerNotAGap(t *testing.T) {
 	md := newRenderDeployment(func(md *workercore.ModelDeployment) { md.Spec.KVCache = nil })
-	r := &ModelDeploymentReconciler{Client: newModelDeploymentClient(md, newRenderInstanceType())}
+	r := &ModelDeploymentReconciler{Client: newModelDeploymentClient(md, newRenderAcceleratorType())}
 
 	observed, err := r.resolveModelDeploymentDomain(context.Background(), md)
 	require.NoError(t, err)
@@ -132,7 +132,7 @@ func TestModelDeploymentBinding_NeverReadsAnotherNamespace(t *testing.T) {
 	cli := ctrlfake.NewClientBuilder().
 		WithScheme(scheme.Scheme).
 		WithStatusSubresource(&workercore.ModelDeployment{}, &workercore.KVCachePoolBinding{}).
-		WithObjects(md, newRenderInstanceType(), newRenderBinding()).
+		WithObjects(md, newRenderAcceleratorType(), newRenderBinding()).
 		WithInterceptorFuncs(ctrlinterceptor.Funcs{
 			Get: func(
 				ctx context.Context, c ctrlcli.WithWatch, key ctrlcli.ObjectKey,
@@ -247,7 +247,7 @@ func TestModelDeploymentBinding_MissingBindingKeepsTheReplicasServing(t *testing
 	// With the pool and the backend, so the replicas below are built WITH a connector. Without them
 	// the deployment never had one, and "the replicas keep serving" would hold whatever losing a
 	// connector does to a replica -- which is the half this acceptance is actually about.
-	cli := newModelDeploymentClient(md, newRenderInstanceType(), newRenderBinding(),
+	cli := newModelDeploymentClient(md, newRenderAcceleratorType(), newRenderBinding(),
 		newRenderPool(), newRenderBackend())
 
 	_, err := reconcileModelDeployment(t, cli)
@@ -285,7 +285,7 @@ func TestModelDeploymentBinding_MissingBindingKeepsTheReplicasServing(t *testing
 // what says whether they are attached.
 func TestModelDeploymentBinding_ConvergenceIsNotGatedOnTheBinding(t *testing.T) {
 	md := newRenderDeployment()
-	cli := newModelDeploymentClient(md, newRenderInstanceType())
+	cli := newModelDeploymentClient(md, newRenderAcceleratorType())
 
 	_, err := reconcileModelDeployment(t, cli)
 	require.NoError(t, err)
@@ -317,7 +317,7 @@ func TestModelDeploymentBinding_ALeaderRestartDropsNothing(t *testing.T) {
 	// blip tears nothing down -- holds for a reason that has nothing to do with the connector. It
 	// passed that way before they were added, which is what a measurement point sitting upstream of
 	// the fault looks like.
-	cli := newCountingModelDeploymentClient(writes, md, newRenderInstanceType(), newRenderBinding(),
+	cli := newCountingModelDeploymentClient(writes, md, newRenderAcceleratorType(), newRenderBinding(),
 		newRenderPool(), newRenderBackend())
 
 	_, err := reconcileModelDeployment(t, cli)
@@ -371,7 +371,7 @@ func TestModelDeploymentBinding_ALeaderRestartDropsNothing(t *testing.T) {
 func TestModelDeploymentBinding_ClaimsTheBinding(t *testing.T) {
 	md := newRenderDeployment()
 	writes := new(modelDeploymentWrites)
-	cli := newCountingModelDeploymentClient(writes, md, newRenderInstanceType(), newRenderBinding())
+	cli := newCountingModelDeploymentClient(writes, md, newRenderAcceleratorType(), newRenderBinding())
 
 	_, err := reconcileModelDeployment(t, cli)
 	require.NoError(t, err)
@@ -393,7 +393,7 @@ func TestModelDeploymentBinding_ClaimsTheBinding(t *testing.T) {
 // process that is still writing through it.
 func TestModelDeploymentBinding_ReleasesOnlyAfterTheLastReplicaIsGone(t *testing.T) {
 	md := newRenderDeployment()
-	cli := newModelDeploymentClient(md, newRenderInstanceType(), newRenderBinding())
+	cli := newModelDeploymentClient(md, newRenderAcceleratorType(), newRenderBinding())
 
 	_, err := reconcileModelDeployment(t, cli)
 	require.NoError(t, err)
@@ -425,7 +425,7 @@ func TestModelDeploymentBinding_ReleasesOnlyAfterTheLastReplicaIsGone(t *testing
 // is reading the object to find out what is being torn down.
 func TestModelDeploymentBinding_TeardownDoesNotReportTheDomainAsGone(t *testing.T) {
 	md := newRenderDeployment()
-	cli := newModelDeploymentClient(md, newRenderInstanceType(), newRenderBinding())
+	cli := newModelDeploymentClient(md, newRenderAcceleratorType(), newRenderBinding())
 
 	_, err := reconcileModelDeployment(t, cli)
 	require.NoError(t, err)

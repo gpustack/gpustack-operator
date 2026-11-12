@@ -12,8 +12,8 @@ spec:
       name: qwen-72b
     name: Qwen/Qwen2.5-72B-Instruct
   roles:
-  - image: vllm/vllm-openai:v0.19.0
-    instanceType: h20-8x
+  - acceleratorType: h20-8x
+    image: vllm/vllm-openai:v0.19.0
     kind: Server
     name: main
     replicas: 1

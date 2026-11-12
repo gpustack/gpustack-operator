@@ -320,9 +320,9 @@ func endpointHost(raw string) string {
 //
 // kubelet counts an emptyDir's usage toward the Pod's ephemeral-storage limit, the sum of its
 // containers' limits, as well as toward the volume's own sizeLimit. The container's limit is the
-// InstanceType's local storage, so a model larger than that would be evicted mid-download however
+// role's local storage, so a model larger than that would be evicted mid-download however
 // large the volume's limit. The request is what Kueue and the scheduler account, and it stays what
-// the InstanceType says.
+// the role's resources say.
 func (a *ModelDeploymentArtifactRender) raiseEphemeralStorageLimit(c *core.Container, takeOver bool) {
 	if takeOver || a.Delivery != workercore.ModelDeploymentModelDeliveryEngine {
 		return

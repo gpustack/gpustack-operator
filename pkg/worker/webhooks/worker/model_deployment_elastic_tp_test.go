@@ -95,7 +95,7 @@ func TestElasticTensorParallelDefault(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			md := elasticMD()
-			md.Spec.Roles[0].InstanceType = "h20-8x"
+			md.Spec.Roles[0].AcceleratorType = "h20-8x"
 			md.Spec.Roles[0].ExtraArgs = tc.args
 			md.Spec.Roles[0].Resources = nil
 			if tc.explicit != "" {

@@ -21,9 +21,9 @@ import (
 	"gpustack.ai/gpustack/pkg/systemmeta"
 	"gpustack.ai/gpustack/pkg/systemname"
 	"gpustack.ai/gpustack/pkg/utils/json"
-	"gpustack.ai/gpustack/pkg/utils/quantityx"
 	"gpustack.ai/gpustack/pkg/utils/slicex"
 	"gpustack.ai/gpustack/pkg/utils/stringx"
+	"gpustack.ai/gpustack/pkg/worker/kuberequest"
 	"gpustack.ai/gpustack/pkg/worker/kvcache/inject"
 	"gpustack.ai/gpustack/pkg/worker/settings"
 )
@@ -300,7 +300,7 @@ func ModelDeploymentListenArg(engine, arg string) string {
 
 // ModelDeploymentRenderInput is everything one replica's Pod is rendered from.
 //
-// The InstanceType and the connector arrive as values rather than being read here, because the
+// The AcceleratorType and the connector arrive as values rather than being read here, because the
 // render must stay a pure function of its inputs: the reconciler converges the same object on every
 // pass, so a render that reached for a client could return two different Pods for one spec and roll
 // the deployment forever.
@@ -309,9 +309,12 @@ type ModelDeploymentRenderInput struct {
 	Deployment *workercore.ModelDeployment
 	// Role is the entry of Deployment.Spec.Roles this replica belongs to.
 	Role *workercore.ModelDeploymentRole
-	// InstanceType is the type the role's Pods are admitted against. It supplies how to spell the
-	// accelerator keys and the per-card unit resources the host request is derived from.
-	InstanceType *worker.InstanceType
+	// AcceleratorType is the type the role's Pods are admitted against, or nil for a CPU-only role
+	// that bypasses Kueue and schedules directly onto managed nodes.
+	AcceleratorType *worker.AcceleratorType
+	// MixedOnNode mirrors the instance-type-mixed-on-node setting for unqueued CPU-only roles.
+	// When false, CPU-only role Pods also select feature.gpustack.ai/cpu-only=true.
+	MixedOnNode bool
 	// Connector is what the engine needs to reach the pool. Its zero value renders a replica with
 	// no connector at all, which is what a deployment whose Binding has not been resolved yet gets.
 	Connector ModelDeploymentConnectorRender
@@ -337,7 +340,8 @@ type ModelDeploymentRenderInput struct {
 	// because deciding it requires reading whether the class exists on the cluster.
 	RuntimeClassName string
 	// GeneralResourcesOvercommit mirrors the Instance path's overcommit setting, which decides
-	// whether the derived CPU and memory are requested at full size or scaled down.
+	// whether explicitly declared CPU, memory, and local storage are requested at full size or
+	// scaled down.
 	GeneralResourcesOvercommit bool
 	// TCPTWReuse mirrors the model-deployment-tcp-tw-reuse setting. It is the cluster's answer, not
 	// the role's: which Pods turn it into a sysctl is decided by modelDeploymentTakesTCPTWReuse.
@@ -388,7 +392,7 @@ func modelDeploymentSelectorLabels(
 // replica of a role shares, so nothing that names one member may be produced inside it.
 //
 // It returns an error rather than a best-effort Pod whenever the request cannot be sized — an
-// InstanceType whose accelerator detail has not been computed yet, a role with no image. Falling
+// AcceleratorType whose accelerator detail has not been computed yet, a role with no image. Falling
 // back to a whole-card or an empty request would produce a Pod that runs and charges the wrong
 // quota, which is the failure this whole path exists to avoid.
 func renderModelDeploymentPod(ctx context.Context, in ModelDeploymentRenderInput) (*core.Pod, error) {
@@ -429,30 +433,29 @@ func renderModelDeploymentPodTemplate(ctx context.Context, in ModelDeploymentRen
 		return nil, fmt.Errorf("role %q names no image and the deployment engine names none either", role.Name)
 	}
 
-	ress, err := deriveModelDeploymentResources(role, in.InstanceType)
-	if err != nil {
-		return nil, err
+	var entrance string
+	if in.AcceleratorType != nil {
+		// THE ENTRANCE IS READ, NOT RECOMPUTED, and the difference is the whole point of this line.
+		// role.AcceleratorType names an AcceleratorType; the label Kueue admits on names the LocalQueue that
+		// fronts that type's ClusterQueue, and the type's own status is where that name is published --
+		// by the same reconcile that creates the LocalQueue.
+		entrance = in.AcceleratorType.Status.Entrance
+		if entrance == "" {
+			// An AcceleratorType whose status has not been computed yet, exactly like an accelerator detail
+			// that is not there: refuse to render rather than fall back. A Pod carrying no queue-name
+			// label at all is not queued by Kueue, it is admitted by the kubelet directly -- charging no
+			// quota and bypassing every gate the chain exists to apply.
+			return nil, fmt.Errorf(
+				"accelerator type %q publishes no queue entrance yet", in.AcceleratorType.Name,
+			)
+		}
 	}
 
-	// THE ENTRANCE IS READ, NOT RECOMPUTED, and the difference is the whole point of this line.
-	// role.InstanceType names an InstanceType; the label Kueue admits on names the LocalQueue that
-	// fronts that type's ClusterQueue, and the type's own status is where that name is published --
-	// by the same reconcile that creates the LocalQueue.
-	//
-	// Deriving it here from the name instead would be a second answer to one question, written by a
-	// second function: equal today, because the ClusterQueue carries the InstanceType's name and
-	// both sides spell it with FormatLocalQueueName, and silently divergent the day either half of
-	// that stops holding. The half that drifted would be this one, whose symptom is a Pod routed at
-	// a LocalQueue that does not exist -- admitted by nothing, with nothing naming the field.
-	entrance := in.InstanceType.Status.Entrance
-	if entrance == "" {
-		// An InstanceType whose status has not been computed yet, exactly like an accelerator detail
-		// that is not there: refuse to render rather than fall back. A Pod carrying no queue-name
-		// label at all is not queued by Kueue, it is admitted by the kubelet directly -- charging no
-		// quota and bypassing every gate the chain exists to apply.
-		return nil, fmt.Errorf(
-			"instance type %q publishes no queue entrance yet", in.InstanceType.Name,
-		)
+	resources, resolvedResources, err := renderModelDeploymentResources(
+		role, in.AcceleratorType, in.GeneralResourcesOvercommit,
+	)
+	if err != nil {
+		return nil, err
 	}
 
 	// A role that replaces the command owns the whole argv, so the operator contributes neither
@@ -573,22 +576,30 @@ func renderModelDeploymentPodTemplate(ctx context.Context, in ModelDeploymentRen
 		// it has nothing in common with is the collision this separation exists to prevent, so the
 		// render refuses instead.
 		if !modelDeploymentCompileCacheMountOverridden(mounts) {
-			compileCacheSubPath, err = BuildModelDeploymentCompileCacheSubPath(
-				ModelDeploymentCompileCacheInput{
-					Deployment:   md,
-					Role:         role,
-					InstanceType: in.InstanceType,
-					Artifact:     in.Artifact,
-				},
-			)
-			if err != nil {
-				return nil, fmt.Errorf(
-					"role %q cannot place its compilation cache: %w", role.Name, err,
+			if in.AcceleratorType != nil {
+				compileCacheSubPath, err = BuildModelDeploymentCompileCacheSubPath(
+					ModelDeploymentCompileCacheInput{
+						Deployment:      md,
+						Role:            role,
+						AcceleratorType: in.AcceleratorType,
+						Artifact:        in.Artifact,
+					},
 				)
+				if err != nil {
+					return nil, fmt.Errorf(
+						"role %q cannot place its compilation cache: %w", role.Name, err,
+					)
+				}
+				if compileCacheSubPath != "" {
+					cacheVolume, cacheMount := modelDeploymentCompileCacheVolumes(compileCacheSubPath)
+					vols = append(vols, cacheVolume)
+					mounts = append(mounts, cacheMount)
+				}
+			} else {
+				cacheVolume, cacheMount := modelDeploymentCompileCacheEmptyDirVolumes()
+				vols = append(vols, cacheVolume)
+				mounts = append(mounts, cacheMount)
 			}
-			cacheVolume, cacheMount := modelDeploymentCompileCacheVolumes(compileCacheSubPath)
-			vols = append(vols, cacheVolume)
-			mounts = append(mounts, cacheMount)
 		}
 	}
 	// A MODEL EXPRESS ROLE STAGES ITS DELIVERY BESIDE THE CACHE COMPUTATION, because one
@@ -601,13 +612,13 @@ func renderModelDeploymentPodTemplate(ctx context.Context, in ModelDeploymentRen
 		in.Artifact != nil && in.Artifact.Hub == modelDeploymentHubHuggingFace
 	var staging *modelExpressStaging
 	if modelExpressStaged {
-		if compileCacheSubPath == "" {
+		if compileCacheSubPath == "" && in.AcceleratorType != nil {
 			compileCacheSubPath, err = BuildModelDeploymentCompileCacheSubPath(
 				ModelDeploymentCompileCacheInput{
-					Deployment:   md,
-					Role:         role,
-					InstanceType: in.InstanceType,
-					Artifact:     in.Artifact,
+					Deployment:      md,
+					Role:            role,
+					AcceleratorType: in.AcceleratorType,
+					Artifact:        in.Artifact,
 				},
 			)
 			if err != nil {
@@ -616,6 +627,10 @@ func renderModelDeploymentPodTemplate(ctx context.Context, in ModelDeploymentRen
 				)
 			}
 		}
+		var manufacturer string
+		if in.AcceleratorType != nil {
+			manufacturer = strings.ToLower(strings.TrimSpace(in.AcceleratorType.Status.Detail.Manufacturer))
+		}
 		staging = modelExpressStagingFor(ctx, md, role, in.Artifact,
 			modelDeploymentModelExpressCompileConfigDigest(compileCacheSubPath),
 			scheme, enginePort, gradable,
@@ -623,7 +638,7 @@ func renderModelDeploymentPodTemplate(ctx context.Context, in ModelDeploymentRen
 			// pool's manufacturer and the engine name it, and a Node-rendered seed
 			// replica reads the same env a remote replica does.
 			modelDeploymentModelTransferCandidateBackend(
-				strings.ToLower(strings.TrimSpace(in.InstanceType.Status.Detail.Manufacturer)),
+				manufacturer,
 				md.Spec.Engine.Name,
 			))
 	}
@@ -653,15 +668,13 @@ func renderModelDeploymentPodTemplate(ctx context.Context, in ModelDeploymentRen
 		Image:           image,
 		ImagePullPolicy: role.ImagePullPolicy,
 		Command:         command,
-		Resources: getResourceRequirements(
-			ress, in.InstanceType, true, in.GeneralResourcesOvercommit, true, false,
-		),
-		Ports:          ports,
-		Env:            mergeModelDeploymentEnv(md.Spec.Engine.Name, role, in.Connector, in.Artifact, takeOver),
-		VolumeMounts:   mounts,
-		StartupProbe:   startupProbe,
-		ReadinessProbe: readinessProbe,
-		LivenessProbe:  livenessProbe,
+		Resources:       resources,
+		Ports:           ports,
+		Env:             mergeModelDeploymentEnv(md.Spec.Engine.Name, role, in.Connector, in.Artifact, takeOver),
+		VolumeMounts:    mounts,
+		StartupProbe:    startupProbe,
+		ReadinessProbe:  readinessProbe,
+		LivenessProbe:   livenessProbe,
 	}
 	if in.Artifact != nil {
 		in.Artifact.raiseEphemeralStorageLimit(&mainC, takeOver)
@@ -731,6 +744,22 @@ func renderModelDeploymentPodTemplate(ctx context.Context, in ModelDeploymentRen
 			Containers:       []core.Container{mainC},
 		},
 	}
+	if in.AcceleratorType == nil {
+		if pod.Spec.NodeSelector == nil {
+			pod.Spec.NodeSelector = make(map[string]string, 2)
+		}
+		pod.Spec.NodeSelector[systemname.ManagedLabelKey] = "true"
+		if !in.MixedOnNode {
+			pod.Spec.NodeSelector[nodefeature.NodeCPUOnlyLabelKey] = "true"
+		}
+		// Match ResourceFlavor tolerations: node selectors above (gpustack.ai/managed=true, plus
+		// cpu-only when MixedOnNode is false) form the placement boundary onto managed nodes.
+		if !slices.ContainsFunc(pod.Spec.Tolerations, func(t core.Toleration) bool {
+			return t.Key == "" && t.Operator == core.TolerationOpExists && t.Effect == "" && t.Value == ""
+		}) {
+			pod.Spec.Tolerations = append(pod.Spec.Tolerations, core.Toleration{Operator: core.TolerationOpExists})
+		}
+	}
 	// The ModelExpress staging's pod-level parts land here, where the pod exists: the
 	// transfer client volumes the container's mounts name when the base delivery did not
 	// already add them.
@@ -755,7 +784,10 @@ func renderModelDeploymentPodTemplate(ctx context.Context, in ModelDeploymentRen
 		pod.Spec.TerminationGracePeriodSeconds = ptr.To(*role.TerminationGracePeriodSeconds)
 	}
 	if directDecode {
-		manufacturer := in.InstanceType.Status.Detail.Manufacturer
+		var manufacturer string
+		if in.AcceleratorType != nil {
+			manufacturer = in.AcceleratorType.Status.Detail.Manufacturer
+		}
 		// The sidecar's handshake reads the same resolved backend the engine half was
 		// synthesized from, so the two halves of one decode Pod cannot answer the question
 		// "which vocabulary does this pair speak" differently.
@@ -836,7 +868,7 @@ func renderModelDeploymentPodTemplate(ctx context.Context, in ModelDeploymentRen
 	if pod.Annotations == nil {
 		pod.Annotations = make(map[string]string, 1)
 	}
-	pod.Annotations[modelDeploymentTemplateBindingHashAnnotation] = modelDeploymentBindingHash(in, *ress)
+	pod.Annotations[modelDeploymentTemplateBindingHashAnnotation] = modelDeploymentBindingHash(in, resolvedResources)
 
 	return pod, nil
 }
@@ -1243,17 +1275,17 @@ func modelDeploymentPortTaken(ports []core.ContainerPort, port int32) bool {
 }
 
 // modelDeploymentPodLabels is what a replica carries: the selector, the queue-name entrance label
-// that routes it into the role's pool, the role-kind label whatever fronts the replicas selects on,
-// and the part-of label every object this operator renders carries.
+// that routes it into the role's pool (when queued), the role-kind label whatever fronts the
+// replicas selects on, and the part-of label every object this operator renders carries.
 //
-// The entrance label sits outside the selector deliberately. It follows the role's InstanceType,
+// The entrance label sits outside the selector deliberately. It follows the role's AcceleratorType,
 // which a spec update can change, and a selector that moved with it would orphan every replica
 // already running. The role-kind label is outside it for the reason stated on the constant.
 //
-// The entrance arrives as a VALUE, read from the InstanceType's status by the caller rather than
-// derived from role.InstanceType here, so that this operator and the reconcile that creates the
-// LocalQueue cannot disagree about the queue's name. See renderModelDeploymentPod for what deriving
-// it would cost.
+// The entrance arrives as a VALUE, read from the AcceleratorType's status by the caller rather than
+// derived from role.AcceleratorType here, so that this operator and the reconcile that creates the
+// LocalQueue cannot disagree about the queue's name. An unqueued CPU-only role has an empty
+// entrance and omits the queue-name label altogether.
 //
 // The kind is resolved through ModelDeploymentEffectiveRoleKind rather than read off the field, so
 // this label and status.roles[].kind can never name the same role differently.
@@ -1261,7 +1293,9 @@ func modelDeploymentPodLabels(
 	md *workercore.ModelDeployment, role *workercore.ModelDeploymentRole, entrance string,
 ) map[string]string {
 	labels := modelDeploymentSelectorLabels(md, role)
-	labels[kueuectrlconst.QueueLabel] = entrance
+	if entrance != "" {
+		labels[kueuectrlconst.QueueLabel] = entrance
+	}
 	kind, _ := ModelDeploymentRoleUpstreamKind(ModelDeploymentEffectiveRoleKind(role))
 	labels[modelDeploymentLabelKeyRoleKind] = kind
 	labels["app.kubernetes.io/part-of"] = "gpustack-operator-worker"
@@ -1908,159 +1942,136 @@ func modelDeploymentFalsyString(raw string) bool {
 	}
 }
 
-// deriveModelDeploymentResources turns a role's accelerator request into the full resource request
-// one replica makes.
-//
-// CPU, memory and ephemeral storage are DERIVED here because they are not expressible on the role
-// at all. The Instance path derives the same values in its mutating webhook and writes them onto the
-// object; this CRD's mutating webhook defaults only the accelerator count, so the derivation happens
-// at render time and the values live only on the Pod. The arithmetic is the same one, restricted to the case that is
-// the only one reachable here — nothing declared — so an InstanceType's per-unit resources scaled by
-// the requested share is the whole of it.
-//
-// A request that cannot be sized is an error rather than a fallback. Sizing a partition or a slice
-// as a whole card would charge quota for something other than what runs, and the state that causes
-// it (an accelerator detail not computed yet) clears on its own, so the caller can retry.
-//
-// It takes no overcommit flag, unlike the webhook path it mirrors. Overcommit decides whether a
-// value a user DECLARED is recomputed, and nothing is declared here; the request-versus-limit split
-// it also drives is applied downstream by getResourceRequirements.
-func deriveModelDeploymentResources(
+// renderModelDeploymentResources builds the Kubernetes ResourceRequirements for a
+// ModelDeployment serving container directly from role.Resources and the resolved
+// AcceleratorType, without injecting implicit host CPU, memory, or ephemeral storage.
+func renderModelDeploymentResources(
 	role *workercore.ModelDeploymentRole,
-	instType *worker.InstanceType,
-) (*workercore.InstanceResources, error) {
-	ress := new(workercore.InstanceResources)
-	if rr := role.Resources; rr != nil {
-		ress.Accelerator = rr.Accelerator
-		ress.AcceleratorSlicedMemoryPercentage = rr.AcceleratorSlicedMemoryPercentage
-		ress.AcceleratorSlicedCoresPercentage = rr.AcceleratorSlicedCoresPercentage
-		ress.AcceleratorPartitionedProfile = rr.AcceleratorPartitionedProfile
+	accType *worker.AcceleratorType,
+	withGeneralOvercommit bool,
+) (core.ResourceRequirements, workercore.ModelDeploymentRoleResources, error) {
+	rr := core.ResourceRequirements{
+		Limits:   core.ResourceList{},
+		Requests: core.ResourceList{},
+	}
+	var resolved workercore.ModelDeploymentRoleResources
+	if role != nil && role.Resources != nil {
+		resolved = *role.Resources.DeepCopy()
 	}
 
-	if err := sizeModelDeploymentHostResources(ress, instType); err != nil {
-		return nil, err
-	}
-
-	// Default the local storage the way the Instance webhook does: 15Gi, never above what the
-	// InstanceType offers.
-	def := resource.NewQuantity(15<<30, resource.BinarySI) // 15Gi
-	if instType.Spec.LocalStorage != "" {
-		if maxStg, err := resource.ParseQuantity(instType.Spec.LocalStorage); err == nil && def.Cmp(maxStg) > 0 {
-			def = &maxStg
+	acceleratable := accType != nil
+	if resolved.CPU != nil && resolved.CPU.Sign() > 0 {
+		q := resolved.CPU.DeepCopy()
+		rr.Limits[core.ResourceCPU] = q
+		if withGeneralOvercommit {
+			rr.Requests[core.ResourceCPU] = kuberequest.ScaleToOvercommit(core.ResourceCPU, q, acceleratable)
+		} else {
+			rr.Requests[core.ResourceCPU] = q.DeepCopy()
 		}
 	}
-	ress.LocalStorage = *def
-
-	return ress, nil
-}
-
-// sizeModelDeploymentHostResources fills the CPU and memory a replica asks of its host.
-func sizeModelDeploymentHostResources(
-	ress *workercore.InstanceResources, instType *worker.InstanceType,
-) error {
-	if !instType.Spec.Acceleratable {
-		// A non-accelerated pool sizes one unit's worth of host resources, matching what the
-		// Instance path gives a request that declares no CPU of its own.
-		cpu, ram, err := modelDeploymentUnitResources(instType, 1)
-		if err != nil {
-			return err
+	if resolved.RAM != nil && resolved.RAM.Sign() > 0 {
+		q := resolved.RAM.DeepCopy()
+		rr.Limits[core.ResourceMemory] = q
+		if withGeneralOvercommit {
+			rr.Requests[core.ResourceMemory] = kuberequest.ScaleToOvercommit(core.ResourceMemory, q, acceleratable)
+		} else {
+			rr.Requests[core.ResourceMemory] = q.DeepCopy()
 		}
-		ress.CPU, ress.RAM = cpu, ram
-
-		return nil
+	}
+	if resolved.LocalStorage != nil && resolved.LocalStorage.Sign() > 0 {
+		q := resolved.LocalStorage.DeepCopy()
+		rr.Limits[core.ResourceEphemeralStorage] = q
+		if withGeneralOvercommit {
+			rr.Requests[core.ResourceEphemeralStorage] = kuberequest.ScaleToOvercommit(core.ResourceEphemeralStorage, q, acceleratable)
+		} else {
+			rr.Requests[core.ResourceEphemeralStorage] = q.DeepCopy()
+		}
 	}
 
-	slicing := ress.AcceleratorSlicedMemoryPercentage != 0 || ress.AcceleratorSlicedCoresPercentage != 0
-	partitioning := ress.AcceleratorPartitionedProfile != ""
-	if (slicing || partitioning) && !instType.Status.Detail.AcceleratorReady() {
-		// The share of a card being asked for cannot be read yet. This clears once the detail is
-		// computed, so it is a retryable error and never a whole-card fallback.
-		return fmt.Errorf("instance type %s is not ready yet (accelerator detail not computed); retry", instType.Name)
+	if accType == nil {
+		return rr, resolved, nil
 	}
 
-	partitionPct, sizeable := PartitionProfileMemoryPercent((*workercore.InstanceType)(instType),
-		ress.AcceleratorPartitionedProfile)
-	if !sizeable {
-		return fmt.Errorf("instance type %s is not ready yet (partition profile %q cannot be sized "+
-			"from the observed accelerator detail); retry", instType.Name, ress.AcceleratorPartitionedProfile)
+	slicing := resolved.AcceleratorSlicedMemoryPercentage != 0 || resolved.AcceleratorSlicedCoresPercentage != 0
+	partitioning := resolved.AcceleratorPartitionedProfile != ""
+	if (slicing || partitioning) && !accType.Status.Detail.AcceleratorReady() {
+		return core.ResourceRequirements{}, workercore.ModelDeploymentRoleResources{},
+			fmt.Errorf("accelerator type %s is not ready yet (accelerator detail not computed); retry", accType.Name)
 	}
 
-	switch {
-	case partitionPct > 0:
-		// A hardware partition holds a share of ONE card, so the host resources follow the share of
-		// that card's VRAM the profile occupies — the same VRAM-anchored fraction a logical slice
-		// uses, so a partition and a slice of equal size cost equal host resources.
-		return modelDeploymentSizeByPercent(ress, instType, partitionPct)
-	case instType.Status.Detail.IsLogicallySliceable() && slicing:
-		// When only one of the two percentages is set, the other follows it, so a bare memory
-		// request yields an equal compute share and the reverse.
+	if partitioning {
+		_, sizeable := AcceleratorTypePartitionProfileMemoryPercent(
+			(*workercore.AcceleratorType)(accType), resolved.AcceleratorPartitionedProfile,
+		)
+		if !sizeable {
+			return core.ResourceRequirements{}, workercore.ModelDeploymentRoleResources{},
+				fmt.Errorf("accelerator type %s is not ready yet (partition profile %q cannot be sized "+
+					"from the observed accelerator detail); retry", accType.Name, resolved.AcceleratorPartitionedProfile)
+		}
+	}
+
+	if accType.Status.Detail.IsLogicallySliceable() && slicing {
 		switch {
-		case ress.AcceleratorSlicedMemoryPercentage > 0 && ress.AcceleratorSlicedCoresPercentage == 0:
-			ress.AcceleratorSlicedCoresPercentage = ress.AcceleratorSlicedMemoryPercentage
-		case ress.AcceleratorSlicedCoresPercentage > 0 && ress.AcceleratorSlicedMemoryPercentage == 0:
-			ress.AcceleratorSlicedMemoryPercentage = ress.AcceleratorSlicedCoresPercentage
+		case resolved.AcceleratorSlicedMemoryPercentage > 0 && resolved.AcceleratorSlicedCoresPercentage == 0:
+			resolved.AcceleratorSlicedCoresPercentage = resolved.AcceleratorSlicedMemoryPercentage
+		case resolved.AcceleratorSlicedCoresPercentage > 0 && resolved.AcceleratorSlicedMemoryPercentage == 0:
+			resolved.AcceleratorSlicedMemoryPercentage = resolved.AcceleratorSlicedCoresPercentage
 		}
-		// The memory percentage is the fraction of the card actually reserved; the compute
-		// percentage throttles GPU cores and not host resources.
-		return modelDeploymentSizeByPercent(ress, instType, int64(ress.AcceleratorSlicedMemoryPercentage))
 	}
 
-	// A whole-card request scales the unit resources by the card count. A replica asking for no
-	// accelerator at all — legitimate for a small model on an accelerated pool — still needs a host
-	// to run on, and is sized as one unit rather than as nothing.
-	cards := int64(1)
-	if ress.Accelerator != nil && ress.Accelerator.Value() > 0 {
-		cards = ress.Accelerator.Value()
+	if resolved.Accelerator != nil && resolved.Accelerator.Sign() > 0 {
+		cardQ := resolved.Accelerator.DeepCopy()
+		manufacturer := accType.Status.Detail.Manufacturer
+		baseResName := nodefeature.GetAcceleratableResourceName(manufacturer, workercore.DeviceAllocationModeExclusive)
+		if baseResName == "" {
+			return core.ResourceRequirements{}, workercore.ModelDeploymentRoleResources{},
+				fmt.Errorf("accelerator type %s is not ready yet (manufacturer %q yields no acceleratable resource name); retry", accType.Name, manufacturer)
+		}
+		partProfile := resolved.AcceleratorPartitionedProfile
+		switch {
+		case partProfile != "":
+			partCardResName := nodefeature.GetAcceleratableResourceName(manufacturer, workercore.DeviceAllocationModePartitioned)
+			partProfileResName := nodefeature.GetAcceleratablePartitionedProfileResourceName(manufacturer, partProfile)
+			if partCardResName == "" || partProfileResName == "" {
+				return core.ResourceRequirements{}, workercore.ModelDeploymentRoleResources{},
+					fmt.Errorf("accelerator type %s manufacturer %q partition profile %q yields no partitioned resource name; retry",
+						accType.Name, manufacturer, partProfile)
+			}
+			one := *resource.NewQuantity(1, resource.DecimalSI)
+			rr.Limits[partCardResName] = one
+			rr.Requests[partCardResName] = one.DeepCopy()
+			rr.Limits[partProfileResName] = one.DeepCopy()
+			rr.Requests[partProfileResName] = one.DeepCopy()
+		case accType.Status.Detail.IsLogicallySliceable() && resolved.AcceleratorSlicedMemoryPercentage > 0:
+			slicedResName := nodefeature.GetAcceleratableResourceName(manufacturer, workercore.DeviceAllocationModeSliced)
+			memResName := nodefeature.GetAcceleratableSlicedMemoryPercentageResourceName(manufacturer)
+			coresResName := nodefeature.GetAcceleratableSlicedCoresPercentageResourceName(manufacturer)
+			if slicedResName == "" || memResName == "" || coresResName == "" {
+				return core.ResourceRequirements{}, workercore.ModelDeploymentRoleResources{},
+					fmt.Errorf("accelerator type %s manufacturer %q yields no sliced resource names; retry", accType.Name, manufacturer)
+			}
+			memQ := *resource.NewQuantity(int64(resolved.AcceleratorSlicedMemoryPercentage), resource.DecimalSI)
+			coresQ := *resource.NewQuantity(int64(resolved.AcceleratorSlicedCoresPercentage), resource.DecimalSI)
+			rr.Limits[slicedResName] = cardQ
+			rr.Requests[slicedResName] = cardQ.DeepCopy()
+			rr.Limits[memResName] = memQ
+			rr.Requests[memResName] = memQ.DeepCopy()
+			rr.Limits[coresResName] = coresQ
+			rr.Requests[coresResName] = coresQ.DeepCopy()
+		default:
+			rr.Limits[baseResName] = cardQ
+			rr.Requests[baseResName] = cardQ.DeepCopy()
+		}
 	}
-	cpu, ram, err := modelDeploymentUnitResources(instType, cards)
-	if err != nil {
-		return err
-	}
-	ress.CPU, ress.RAM = cpu, ram
 
-	return nil
+	return rr, resolved, nil
 }
 
-// modelDeploymentSizeByPercent sizes the host resources as a percentage of one card's worth.
-func modelDeploymentSizeByPercent(
-	ress *workercore.InstanceResources, instType *worker.InstanceType, pct int64,
-) error {
-	cpu, err := quantityx.StringPercentMultiply(instType.Spec.UnitResources.CPU, pct)
-	if err != nil {
-		return fmt.Errorf("invalid CPU unit of instance type %s: %w", instType.Name, err)
-	}
-	ram, err := quantityx.StringPercentMultiply(instType.Spec.UnitResources.RAM, pct)
-	if err != nil {
-		return fmt.Errorf("invalid RAM unit of instance type %s: %w", instType.Name, err)
-	}
-	ress.CPU, ress.RAM = cpu, ram
-
-	return nil
-}
-
-// modelDeploymentUnitResources scales one card's worth of host resources by a whole-card count.
-func modelDeploymentUnitResources(
-	instType *worker.InstanceType, multiplier int64,
-) (cpu, ram resource.Quantity, err error) {
-	cpu, err = quantityx.StringMultiply(instType.Spec.UnitResources.CPU, multiplier)
-	if err != nil {
-		return cpu, ram, fmt.Errorf("invalid CPU unit of instance type %s: %w", instType.Name, err)
-	}
-	ram, err = quantityx.StringMultiply(instType.Spec.UnitResources.RAM, multiplier)
-	if err != nil {
-		return cpu, ram, fmt.Errorf("invalid RAM unit of instance type %s: %w", instType.Name, err)
-	}
-
-	return cpu, ram, nil
-}
-
-type modelDeploymentInstanceTypeHashInput struct {
-	Name          string                               `json:"name,omitempty"`
-	Entrance      string                               `json:"entrance,omitempty"`
-	Manufacturer  string                               `json:"manufacturer,omitempty"`
-	Acceleratable bool                                 `json:"acceleratable,omitempty"`
-	UnitResources workercore.InstanceTypeUnitResources `json:"unitResources"`
-	Resources     workercore.InstanceResources         `json:"resources"`
+type modelDeploymentAcceleratorTypeHashInput struct {
+	Name         string                                  `json:"name,omitempty"`
+	Entrance     string                                  `json:"entrance,omitempty"`
+	Manufacturer string                                  `json:"manufacturer,omitempty"`
+	Resources    workercore.ModelDeploymentRoleResources `json:"resources"`
 }
 
 type modelDeploymentRoleSiblingHashInput struct {
@@ -2071,19 +2082,17 @@ type modelDeploymentRoleSiblingHashInput struct {
 // modelDeploymentBindingHash fingerprints the resolved external binding inputs that feed a role's
 // template render, excluding implicit operator defaults and cluster-wide settings.
 func modelDeploymentBindingHash(
-	in ModelDeploymentRenderInput, ress workercore.InstanceResources,
+	in ModelDeploymentRenderInput, ress workercore.ModelDeploymentRoleResources,
 ) string {
 	takeOver := len(in.Role.Command) > 0
 
-	var instType modelDeploymentInstanceTypeHashInput
-	if in.InstanceType != nil {
-		instType = modelDeploymentInstanceTypeHashInput{
-			Name:          in.InstanceType.Name,
-			Entrance:      in.InstanceType.Status.Entrance,
-			Manufacturer:  in.InstanceType.Status.Detail.Manufacturer,
-			Acceleratable: in.InstanceType.Spec.Acceleratable,
-			UnitResources: in.InstanceType.Spec.UnitResources,
-			Resources:     ress,
+	var accType modelDeploymentAcceleratorTypeHashInput
+	if in.AcceleratorType != nil {
+		accType = modelDeploymentAcceleratorTypeHashInput{
+			Name:         in.AcceleratorType.Name,
+			Entrance:     in.AcceleratorType.Status.Entrance,
+			Manufacturer: in.AcceleratorType.Status.Detail.Manufacturer,
+			Resources:    ress,
 		}
 	}
 
@@ -2104,9 +2113,9 @@ func modelDeploymentBindingHash(
 				in.Artifact.ModelTransferBackend == "nixl") ||
 				(modelDeploymentRoleUsesModelExpress(in.Deployment.Spec.Engine.Name, in.Role) &&
 					a.Hub == modelDeploymentHubHuggingFace &&
-					in.InstanceType != nil &&
+					in.AcceleratorType != nil &&
 					modelDeploymentModelTransferCandidateBackend(
-						strings.ToLower(strings.TrimSpace(in.InstanceType.Status.Detail.Manufacturer)),
+						strings.ToLower(strings.TrimSpace(in.AcceleratorType.Status.Detail.Manufacturer)),
 						in.Deployment.Spec.Engine.Name,
 					) == "nixl"))
 		if !usesModelTransferNIXL {
@@ -2136,15 +2145,15 @@ func modelDeploymentBindingHash(
 	}
 
 	subject := struct {
-		InstanceType      modelDeploymentInstanceTypeHashInput `json:"instanceType"`
-		RuntimeClassName  string                               `json:"runtimeClassName,omitempty"`
-		InterfaceResource core.ResourceName                    `json:"interfaceResource,omitempty"`
-		Artifact          *ModelDeploymentArtifactRender       `json:"artifact,omitempty"`
-		Connector         *modelDeploymentConnectorBinding     `json:"connector,omitempty"`
-		RawConnector      *ModelDeploymentConnectorRender      `json:"rawConnector,omitempty"`
-		ECConnector       string                               `json:"ecConnector,omitempty"`
+		AcceleratorType   modelDeploymentAcceleratorTypeHashInput `json:"acceleratorType"`
+		RuntimeClassName  string                                  `json:"runtimeClassName,omitempty"`
+		InterfaceResource core.ResourceName                       `json:"interfaceResource,omitempty"`
+		Artifact          *ModelDeploymentArtifactRender          `json:"artifact,omitempty"`
+		Connector         *modelDeploymentConnectorBinding        `json:"connector,omitempty"`
+		RawConnector      *ModelDeploymentConnectorRender         `json:"rawConnector,omitempty"`
+		ECConnector       string                                  `json:"ecConnector,omitempty"`
 	}{
-		InstanceType:      instType,
+		AcceleratorType:   accType,
 		RuntimeClassName:  in.RuntimeClassName,
 		InterfaceResource: in.InterfaceResource,
 		Artifact:          artifact,

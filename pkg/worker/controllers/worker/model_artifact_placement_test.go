@@ -179,7 +179,7 @@ func TestModelDeploymentArtifactWait(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			objs := append([]ctrlcli.Object{artifactDeploymentFixture(c.replicas), newRenderInstanceType()}, c.objs...)
+			objs := append([]ctrlcli.Object{artifactDeploymentFixture(c.replicas), newRenderAcceleratorType()}, c.objs...)
 			cli := newModelDeploymentClient(objs...)
 
 			_, err := reconcileModelDeployment(t, cli)
@@ -243,7 +243,7 @@ func TestModelDeploymentArtifactNodeDelivery(t *testing.T) {
 			orig := modelArtifactDeliveryMode
 			t.Cleanup(func() { modelArtifactDeliveryMode = orig })
 			modelArtifactDeliveryMode = func(context.Context) string { return c.delivery }
-			objs := append([]ctrlcli.Object{artifactDeploymentFixture(1), newRenderInstanceType()}, c.objs...)
+			objs := append([]ctrlcli.Object{artifactDeploymentFixture(1), newRenderAcceleratorType()}, c.objs...)
 			cli := newModelDeploymentClient(objs...)
 
 			_, err := reconcileModelDeployment(t, cli)
@@ -313,7 +313,7 @@ func TestModelDeploymentArtifactAnchorNeedsNodeDelivery(t *testing.T) {
 			orig := modelArtifactDeliveryMode
 			t.Cleanup(func() { modelArtifactDeliveryMode = orig })
 			modelArtifactDeliveryMode = func(context.Context) string { return c.delivery }
-			objs := []ctrlcli.Object{artifactDeploymentFixture(1), newRenderInstanceType(), c.artifact()}
+			objs := []ctrlcli.Object{artifactDeploymentFixture(1), newRenderAcceleratorType(), c.artifact()}
 			if c.driver {
 				objs = append(objs, driver)
 			}
@@ -339,7 +339,7 @@ func TestModelDeploymentArtifactDeliverySwitchRolls(t *testing.T) {
 		orig := modelArtifactDeliveryMode
 		t.Cleanup(func() { modelArtifactDeliveryMode = orig })
 		modelArtifactDeliveryMode = func(context.Context) string { return delivery }
-		cli := newModelDeploymentClient(artifactDeploymentFixture(1), newRenderInstanceType(), artifactFixture("", true, true),
+		cli := newModelDeploymentClient(artifactDeploymentFixture(1), newRenderAcceleratorType(), artifactFixture("", true, true),
 			&storage.CSIDriver{ObjectMeta: meta.ObjectMeta{Name: "model.csi.gpustack.ai"}})
 		_, err := reconcileModelDeployment(t, cli)
 		require.NoError(t, err)
@@ -354,7 +354,7 @@ func TestModelDeploymentArtifactDeliverySwitchRolls(t *testing.T) {
 }
 
 func TestModelDeploymentArtifactWaitLeavesRunningReplicasAlone(t *testing.T) {
-	cli := newModelDeploymentClient(artifactDeploymentFixture(2), newRenderInstanceType(), artifactFixture("", true, true))
+	cli := newModelDeploymentClient(artifactDeploymentFixture(2), newRenderAcceleratorType(), artifactFixture("", true, true))
 	_, err := reconcileModelDeployment(t, cli)
 	require.NoError(t, err)
 	before := replicaNames(t, cli)
@@ -391,7 +391,7 @@ func TestModelDeploymentArtifactWaitLeavesRunningReplicasAlone(t *testing.T) {
 // about its cause. The deployment declares no KV cache, so a message naming the cache connection
 // would send the reader to a store this deployment never used.
 func TestModelDeploymentArtifactWaitReportsTheRolloutHeldByWeights(t *testing.T) {
-	cli := newModelDeploymentClient(artifactDeploymentFixture(2), newRenderInstanceType(), artifactFixture("", true, true))
+	cli := newModelDeploymentClient(artifactDeploymentFixture(2), newRenderAcceleratorType(), artifactFixture("", true, true))
 	_, err := reconcileModelDeployment(t, cli)
 	require.NoError(t, err)
 
@@ -419,7 +419,7 @@ func TestModelDeploymentArtifactWaitReportsTheRolloutHeldByWeights(t *testing.T)
 
 func TestModelDeploymentArtifactPlacement(t *testing.T) {
 	cli := newModelDeploymentClient(
-		artifactDeploymentFixture(1), newRenderInstanceType(), artifactFixture("models", true, true),
+		artifactDeploymentFixture(1), newRenderAcceleratorType(), artifactFixture("models", true, true),
 		claimFixture(core.ClaimBound, "local", core.ReadWriteOnce), volumeFixture("node-1"),
 	)
 	_, err := reconcileModelDeployment(t, cli)
@@ -439,7 +439,7 @@ func TestModelDeploymentArtifactPlacement(t *testing.T) {
 
 func TestModelDeploymentArtifactPlacementIsNotPartOfTheFingerprint(t *testing.T) {
 	cli := newModelDeploymentClient(
-		artifactDeploymentFixture(1), newRenderInstanceType(), artifactFixture("models", true, true),
+		artifactDeploymentFixture(1), newRenderAcceleratorType(), artifactFixture("models", true, true),
 		claimFixture(core.ClaimPending, "local-path", core.ReadWriteOnce),
 		classFixture("local-path", "rancher.io/local-path", storage.VolumeBindingWaitForFirstConsumer),
 	)
@@ -737,7 +737,7 @@ func TestModelDeploymentDeliveryWaitClears(t *testing.T) {
 			orig := modelArtifactDeliveryMode
 			t.Cleanup(func() { modelArtifactDeliveryMode = orig })
 			modelArtifactDeliveryMode = func(context.Context) string { return c.delivery }
-			objs := []ctrlcli.Object{artifactDeploymentFixture(1), newRenderInstanceType(), c.artifact, settingsSecret}
+			objs := []ctrlcli.Object{artifactDeploymentFixture(1), newRenderAcceleratorType(), c.artifact, settingsSecret}
 			if c.driver {
 				objs = append(objs, driver)
 			}
@@ -794,7 +794,7 @@ func TestModelDeploymentDeliveryUnblocksPastAStalledInformer(t *testing.T) {
 	artifact := artifactFixture("", true, true)
 	artifact.Spec.IgnorePatterns = []string{"original/"}
 	driver := &storage.CSIDriver{ObjectMeta: meta.ObjectMeta{Name: "model.csi.gpustack.ai"}}
-	cli := newModelDeploymentClient(artifactDeploymentFixture(1), newRenderInstanceType(), artifact, driver)
+	cli := newModelDeploymentClient(artifactDeploymentFixture(1), newRenderAcceleratorType(), artifact, driver)
 
 	res, err := reconcileModelDeployment(t, cli)
 	require.NoError(t, err)
@@ -928,7 +928,7 @@ func TestModelDeploymentArtifactImageDelivery(t *testing.T) {
 		Image: &workercore.ModelArtifactImageSource{Reference: testImageReference},
 	}
 
-	cli := newModelDeploymentClient(artifactDeploymentFixture(1), newRenderInstanceType(), imageArtifact)
+	cli := newModelDeploymentClient(artifactDeploymentFixture(1), newRenderAcceleratorType(), imageArtifact)
 	_, err := reconcileModelDeployment(t, cli)
 	require.NoError(t, err)
 

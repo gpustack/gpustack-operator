@@ -10,7 +10,8 @@ spec:
   model:
     name: Qwen/Qwen2.5-72B-Instruct
   roles:
-  - additionalVolumes:
+  - acceleratorType: h20-8x
+    additionalVolumes:
     - configMap:
         name: app-config
       mountPath: /etc/config
@@ -31,7 +32,6 @@ spec:
     - --ssl-keyfile
     - /etc/tls/tls.key
     image: vllm/vllm-openai:v0.19.0
-    instanceType: h20-8x
     kind: Server
     name: main
     ports:

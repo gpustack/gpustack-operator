@@ -25,7 +25,7 @@ func rolloutConditionOf(
 ) *workercore.ModelDeployment {
 	t.Helper()
 
-	cli := newModelDeploymentClient(md.DeepCopy(), newRenderInstanceType())
+	cli := newModelDeploymentClient(md.DeepCopy(), newRenderAcceleratorType())
 	r := &ModelDeploymentReconciler{Client: cli, APIReader: cli}
 
 	status, err := r.computeModelDeploymentStatusWithQualifications(context.Background(), md, nil, nil, rollout, nil, nil)
@@ -172,7 +172,7 @@ func TestModelDeploymentRollout_ARecordThatVouchesForNothingReportsUnknown(t *te
 // the domain this deployment already resolved stays in status, so both halves of the rollout guard
 // hold and the replicas are deliberately left alone.
 func TestModelDeploymentReconciler_ReportsARolloutHeldByAnUnreachableStore(t *testing.T) {
-	cli := newModelDeploymentClient(newRenderDeployment(), newRenderInstanceType(),
+	cli := newModelDeploymentClient(newRenderDeployment(), newRenderAcceleratorType(),
 		newRenderBinding(), newRenderPool(), newRenderBackend())
 
 	_, err := reconcileModelDeployment(t, cli)
@@ -212,7 +212,7 @@ func TestModelDeploymentReconciler_ReportsARolloutHeldByAnUnreachableStore(t *te
 // exactly what it built; reporting the survivors' held state is the answer that matches what
 // happened.
 func TestModelDeploymentReconciler_AResizeDuringAnOutageStillAnswersForWhatItDid(t *testing.T) {
-	cli := newModelDeploymentClient(newRenderDeployment(), newRenderInstanceType(),
+	cli := newModelDeploymentClient(newRenderDeployment(), newRenderAcceleratorType(),
 		newRenderBinding(), newRenderPool(), newRenderBackend())
 
 	_, err := reconcileModelDeployment(t, cli)
@@ -268,7 +268,7 @@ func TestModelDeploymentReconciler_AResizeDuringAnOutageStillAnswersForWhatItDid
 // deliberately; now a scale during an outage spends it, which is why the held message still names
 // what waits rather than promising an escape.
 func TestModelDeploymentReconciler_AnOutageDoesNotCarryAWithheldEditOntoTheRunningReplicas(t *testing.T) {
-	cli := newModelDeploymentClient(newRenderDeployment(), newRenderInstanceType(),
+	cli := newModelDeploymentClient(newRenderDeployment(), newRenderAcceleratorType(),
 		newRenderBinding(), newRenderPool(), newRenderBackend())
 
 	_, err := reconcileModelDeployment(t, cli)
@@ -357,7 +357,7 @@ func TestModelDeploymentReconciler_AnOutageDoesNotCarryAWithheldEditOntoTheRunni
 // second pass over an unchanged spec writes nothing at all.
 func TestModelDeploymentReconciler_AFirstPassAnswersForTheReplicasItCreated(t *testing.T) {
 	writes := new(modelDeploymentWrites)
-	cli := newCountingModelDeploymentClient(writes, newRenderDeployment(), newRenderInstanceType(),
+	cli := newCountingModelDeploymentClient(writes, newRenderDeployment(), newRenderAcceleratorType(),
 		newRenderBinding(), newRenderPool(), newRenderBackend())
 
 	_, err := reconcileModelDeployment(t, cli)
@@ -387,7 +387,7 @@ func TestModelDeploymentReconciler_AFirstPassAnswersForTheReplicasItCreated(t *t
 // replica on every departure it allows -- a world where nothing is admitted never starts rolling,
 // so without the stand-in this walk would not take its first step.
 func TestModelDeploymentReconciler_ARolloutReportsInProgressThenCurrent(t *testing.T) {
-	cli := newModelDeploymentClient(newRenderDeployment(), newRenderInstanceType(),
+	cli := newModelDeploymentClient(newRenderDeployment(), newRenderAcceleratorType(),
 		newRenderBinding(), newRenderPool(), newRenderBackend())
 
 	_, err := reconcileModelDeployment(t, cli)
@@ -453,7 +453,7 @@ func TestModelDeploymentReconciler_AReplacementIsNotARollout(t *testing.T) {
 		{
 			name: "the spec changed, so the missing replica is a rollout",
 			arrange: func(t *testing.T) ctrlcli.Client {
-				cli := newModelDeploymentClient(newRenderDeployment(), newRenderInstanceType(),
+				cli := newModelDeploymentClient(newRenderDeployment(), newRenderAcceleratorType(),
 					newRenderBinding(), newRenderPool(), newRenderBackend())
 
 				_, err := reconcileModelDeployment(t, cli)
@@ -475,7 +475,7 @@ func TestModelDeploymentReconciler_AReplacementIsNotARollout(t *testing.T) {
 			name: "a replica left while nothing changed the spec",
 			arrange: func(t *testing.T) ctrlcli.Client {
 				ctx := context.Background()
-				cli := newModelDeploymentClient(newRenderDeployment(), newRenderInstanceType())
+				cli := newModelDeploymentClient(newRenderDeployment(), newRenderAcceleratorType())
 
 				_, err := reconcileModelDeployment(t, cli)
 				require.NoError(t, err)
@@ -523,7 +523,7 @@ func TestModelDeploymentReconciler_AReplacementIsNotARollout(t *testing.T) {
 	// and a case that never set it could not tell that apart from a case where it still mattered.
 	t.Run("the replacement lands and the answer returns to UpToDate", func(t *testing.T) {
 		ctx := context.Background()
-		cli := newModelDeploymentClient(newRenderDeployment(), newRenderInstanceType())
+		cli := newModelDeploymentClient(newRenderDeployment(), newRenderAcceleratorType())
 
 		_, err := reconcileModelDeployment(t, cli)
 		require.NoError(t, err)
@@ -595,7 +595,7 @@ func TestModelDeploymentRollout_AHeldMessageDoesNotInventAnEdit(t *testing.T) {
 // TestModelDeploymentReconciler_HoldsWithNoEditAtAll is that limit end to end: nothing about the
 // deployment changed, and the store going away is enough to hold the rollout.
 func TestModelDeploymentReconciler_HoldsWithNoEditAtAll(t *testing.T) {
-	cli := newModelDeploymentClient(newRenderDeployment(), newRenderInstanceType(),
+	cli := newModelDeploymentClient(newRenderDeployment(), newRenderAcceleratorType(),
 		newRenderBinding(), newRenderPool(), newRenderBackend())
 
 	_, err := reconcileModelDeployment(t, cli)
@@ -627,7 +627,7 @@ func TestModelDeploymentReconciler_HoldsWithNoEditAtAll(t *testing.T) {
 // guard delays is an edit to a replica that is RUNNING, and the held message says exactly that
 // rather than the wider thing.
 func TestModelDeploymentReconciler_AnOutageDoesNotHoldTheScaleItself(t *testing.T) {
-	cli := newModelDeploymentClient(newRenderDeployment(), newRenderInstanceType(),
+	cli := newModelDeploymentClient(newRenderDeployment(), newRenderAcceleratorType(),
 		newRenderBinding(), newRenderPool(), newRenderBackend())
 
 	_, err := reconcileModelDeployment(t, cli)
@@ -658,7 +658,7 @@ func TestModelDeploymentReconciler_AnOutageDoesNotHoldTheScaleItself(t *testing.
 // same story, and the reason the message promises the change is only withheld: the withheld edit
 // rolls out on the pass that resolves a connection again.
 func TestModelDeploymentReconciler_ClearsTheHeldConditionWhenTheStoreReturns(t *testing.T) {
-	cli := newModelDeploymentClient(newRenderDeployment(), newRenderInstanceType(),
+	cli := newModelDeploymentClient(newRenderDeployment(), newRenderAcceleratorType(),
 		newRenderBinding(), newRenderPool(), newRenderBackend())
 
 	_, err := reconcileModelDeployment(t, cli)
@@ -703,7 +703,7 @@ func TestModelDeploymentReconciler_AScaleStillVouchesForTheSurvivors(t *testing.
 	// Router-backed: the trim below only removes the highest ordinal once the withdrawal is
 	// observed, and a deployment declaring no router holds instead.
 	fixture, router := retirementRouterFixture(newRenderDeployment())
-	cli := newModelDeploymentClient(fixture, newRenderInstanceType(),
+	cli := newModelDeploymentClient(fixture, newRenderAcceleratorType(),
 		newRenderBinding(), newRenderPool(), newRenderBackend(), router)
 
 	_, err := reconcileModelDeploymentRetiring(t, cli)

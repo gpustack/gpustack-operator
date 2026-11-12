@@ -115,7 +115,7 @@ func TestModelDeploymentScalerRebalancePriorityDonationLimit(t *testing.T) {
 
 func TestModelDeploymentScalerRebalanceReportsDistinctQueues(t *testing.T) {
 	r, _, scaler, md := scalerRebalanceFixture(t, workercore.ModelDeploymentScalerRebalancePolicyOpposing)
-	md.Spec.Roles[1].InstanceType = "other-pool"
+	md.Spec.Roles[1].AcceleratorType = "other-pool"
 	recommendations := map[string]algorithm.RoleRecommendation{
 		"prefill": {DesiredReplicas: 2},
 		"decode":  {DesiredReplicas: 1},
@@ -313,7 +313,7 @@ func scalerRebalanceFixture(
 	t.Helper()
 	md := scalerTestDeployment("target", "md-uid", map[string]int32{"prefill": 1, "decode": 2})
 	for i := range md.Spec.Roles {
-		md.Spec.Roles[i].InstanceType = "shared-pool"
+		md.Spec.Roles[i].AcceleratorType = "shared-pool"
 	}
 	scaler := scalerTestScaler("scaler", "scaler-uid", workercore.ModelDeploymentScalerModeActive)
 	scaler.Spec.Roles = []workercore.ModelDeploymentScalerRoleBounds{
@@ -327,4 +327,23 @@ func scalerRebalanceFixture(
 	}
 	client := scalerTestClient(t, md, scaler)
 	return scalerTestReconciler(client, time.Unix(20, 0)), client, scaler, md
+}
+
+func TestModelDeploymentScalerRebalanceRefusesCPUOnlyRole(t *testing.T) {
+	r, _, scaler, md := scalerRebalanceFixture(t, workercore.ModelDeploymentScalerRebalancePolicyOpposing)
+	md.Spec.Roles[1].AcceleratorType = ""
+	recommendations := map[string]algorithm.RoleRecommendation{
+		"prefill": {DesiredReplicas: 2},
+		"decode":  {DesiredReplicas: 1},
+	}
+	current := deploymentReplicaVector(md)
+
+	vector, reason, err := r.planRebalance(context.Background(), scaler, md, current,
+		map[string]int32{"prefill": 2, "decode": 1}, recommendations, time.Unix(20, 0), true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reason != workercore.ModelDeploymentScalerReasonRebalanceNotApplicable || !scalerTestVectorsEqual(vector, current) {
+		t.Fatalf("CPU-only donor = %v, reason=%q", vector, reason)
+	}
 }

@@ -161,7 +161,7 @@ func TestTheRealCollectorDrivesTheRestoreAcrossAnEmptyAndAPopulatedRegistry(t *t
 		md.Spec.Roles[0].Replicas = 1
 		md.Spec.Roles[0].ReplicaSize = 2
 	})
-	cli := newModelDeploymentClient(md.DeepCopy(), newRenderInstanceType())
+	cli := newModelDeploymentClient(md.DeepCopy(), newRenderAcceleratorType())
 	// THE MEMBERS ARRIVE OVER PASSES, because a group is composed and its members admitted one at a
 	// time. A case that wanted one member would not notice, and the retention rules differ between
 	// a leader-only group and a collective one.
@@ -455,7 +455,7 @@ func newQualifiedGroupFixture(t *testing.T) qualifiedGroupFixture {
 		md.Spec.Roles[0].Replicas = 1
 		md.Spec.Roles[0].ReplicaSize = 2
 	})
-	cli := newModelDeploymentClient(md.DeepCopy(), newRenderInstanceType())
+	cli := newModelDeploymentClient(md.DeepCopy(), newRenderAcceleratorType())
 	endpointEligibilityTestSeed(t, cli, md)
 	_, err := reconcileModelDeployment(t, cli)
 	require.NoError(t, err)
@@ -1011,7 +1011,7 @@ func TestTheRealCollectorReadsTheMembershipItBindsAgainst(t *testing.T) {
 		md.Spec.Roles[0].ReplicaSize = 2
 		md.Spec.Router = &workercore.ModelDeploymentRouter{Name: workercore.ModelDeploymentRouterLLMD}
 	})
-	cli := newModelDeploymentClient(md.DeepCopy(), newRenderInstanceType())
+	cli := newModelDeploymentClient(md.DeepCopy(), newRenderAcceleratorType())
 	endpointEligibilityTestSeed(t, cli, md)
 	setEndpointEligibilityPodsReady(t, cli, true)
 
@@ -3684,7 +3684,7 @@ func newModelDeploymentGroupFixture(t *testing.T, externalDP bool) *modelDeploym
 			md.Spec.Roles[0].ExtraArgs = []string{"--data-parallel-rank", "$(GPUSTACK_MEMBER_INDEX)"}
 		}
 	})
-	cli := newModelDeploymentClient(md.DeepCopy(), newRenderInstanceType())
+	cli := newModelDeploymentClient(md.DeepCopy(), newRenderAcceleratorType())
 	endpointEligibilityTestSeed(t, cli, md)
 	_, err := reconcileModelDeployment(t, cli)
 	require.NoError(t, err)

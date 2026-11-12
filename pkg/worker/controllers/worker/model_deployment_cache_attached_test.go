@@ -50,7 +50,7 @@ func cacheAttachedOf(
 ) *workercore.ModelDeployment {
 	t.Helper()
 
-	cli := newModelDeploymentClient(md.DeepCopy(), newRenderInstanceType())
+	cli := newModelDeploymentClient(md.DeepCopy(), newRenderAcceleratorType())
 	r := &ModelDeploymentReconciler{Client: cli, APIReader: cli, CacheScraper: scraper}
 
 	status, err := r.computeModelDeploymentStatusWithQualifications(context.Background(), md, pods, domain, nil, nil, nil)

@@ -376,15 +376,15 @@ func TestModelDeploymentRoleKindGuard(t *testing.T) {
 			t.Run(string(kind), func(t *testing.T) {
 				md := newRenderDeployment(func(md *workercore.ModelDeployment) {
 					md.Spec.Roles = []workercore.ModelDeploymentRole{{
-						Name:         "x",
-						Kind:         kind,
-						Replicas:     1,
-						InstanceType: "h20-8x",
-						Image:        "vllm/vllm-openai:v0.25.1",
+						Name:            "x",
+						Kind:            kind,
+						Replicas:        1,
+						AcceleratorType: "h20-8x",
+						Image:           "vllm/vllm-openai:v0.25.1",
 					}}
 					md.Spec.Router = &workercore.ModelDeploymentRouter{Name: workercore.ModelDeploymentRouterLLMD}
 				})
-				cli := newModelDeploymentClient(md, newRenderInstanceType(),
+				cli := newModelDeploymentClient(md, newRenderAcceleratorType(),
 					newRenderBinding(), newRenderPool(), newRenderBackend())
 
 				_, err := reconcileModelDeployment(t, cli)
@@ -485,15 +485,15 @@ func TestModelDeploymentParallelismPair_DropsEncodeDegrees(t *testing.T) {
 func TestEncodeProducesNoKVEvents(t *testing.T) {
 	md := newRenderDeployment(func(md *workercore.ModelDeployment) {
 		md.Spec.Roles = []workercore.ModelDeploymentRole{{
-			Name:         "encoder",
-			Kind:         workercore.ModelDeploymentRoleKindEncode,
-			Replicas:     1,
-			InstanceType: "h20-8x",
-			Image:        "vllm/vllm-openai:v0.25.1",
+			Name:            "encoder",
+			Kind:            workercore.ModelDeploymentRoleKindEncode,
+			Replicas:        1,
+			AcceleratorType: "h20-8x",
+			Image:           "vllm/vllm-openai:v0.25.1",
 		}}
 		md.Spec.Router = &workercore.ModelDeploymentRouter{Name: workercore.ModelDeploymentRouterLLMD}
 	})
-	cli := newModelDeploymentClient(md, newRenderInstanceType(),
+	cli := newModelDeploymentClient(md, newRenderAcceleratorType(),
 		newRenderBinding(), newRenderPool(), newRenderBackend())
 
 	_, err := reconcileModelDeployment(t, cli)

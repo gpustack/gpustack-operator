@@ -46,28 +46,27 @@ func newCompileCacheDeployment(mutate ...func(*workercore.ModelDeployment)) *wor
 	return md
 }
 
-// newCompileCacheInstanceType builds the acceleratable NVIDIA type most cases read. Nothing here
-// feeds a size calculation, so only the two facts the cache path reads are populated.
-func newCompileCacheInstanceType(mutate ...func(*worker.InstanceType)) *worker.InstanceType {
-	it := &worker.InstanceType{
-		Spec: workercore.InstanceTypeSpec{Acceleratable: true},
-		Status: workercore.InstanceTypeStatus{
+// newCompileCacheAcceleratorType builds the NVIDIA accelerator type most cases read. Nothing here
+// feeds a size calculation, so only the manufacturer fact the cache path reads is populated.
+func newCompileCacheAcceleratorType(mutate ...func(*worker.AcceleratorType)) *worker.AcceleratorType {
+	at := &worker.AcceleratorType{
+		Status: workercore.AcceleratorTypeStatus{
 			Detail: workercore.InstanceTypeDetail{Manufacturer: nodefeature.ManufacturerNVIDIA},
 		},
 	}
 	for _, m := range mutate {
-		m(it)
+		m(at)
 	}
 
-	return it
+	return at
 }
 
 // newCompileCacheInput assembles the inputs of the baseline every case starts from.
 func newCompileCacheInput(mutate ...func(*ModelDeploymentCompileCacheInput)) ModelDeploymentCompileCacheInput {
 	in := ModelDeploymentCompileCacheInput{
-		Deployment:   newCompileCacheDeployment(),
-		Role:         nil,
-		InstanceType: newCompileCacheInstanceType(),
+		Deployment:      newCompileCacheDeployment(),
+		Role:            nil,
+		AcceleratorType: newCompileCacheAcceleratorType(),
 	}
 	in.Role = &in.Deployment.Spec.Roles[0]
 	for _, m := range mutate {
@@ -112,68 +111,53 @@ func testCompileCacheSplit(t *testing.T, subPath string) (root, identity, shape,
 // and which engine a directory belongs to, and the two inputs that cannot produce one at all.
 func TestModelDeploymentCompileCacheSubPathManufacturerAndEngine(t *testing.T) {
 	cases := []struct {
-		name          string
-		engine        string
-		acceleratable bool
-		manufacturer  string
-		wantRoot      string
-		wantErr       string
+		name         string
+		engine       string
+		manufacturer string
+		wantRoot     string
+		wantErr      string
 	}{
 		{
-			name:          "an NVIDIA vLLM role",
-			engine:        workercore.ModelDeploymentEngineVLLM,
-			acceleratable: true,
-			manufacturer:  nodefeature.ManufacturerNVIDIA,
-			wantRoot:      "nvidia-vllm",
+			name:         "an NVIDIA vLLM role",
+			engine:       workercore.ModelDeploymentEngineVLLM,
+			manufacturer: nodefeature.ManufacturerNVIDIA,
+			wantRoot:     "nvidia-vllm",
 		},
 		{
-			name:          "an Ascend vLLM role compiles into its own tree",
-			engine:        workercore.ModelDeploymentEngineVLLM,
-			acceleratable: true,
-			manufacturer:  nodefeature.ManufacturerAscend,
-			wantRoot:      "ascend-vllm",
+			name:         "an Ascend vLLM role compiles into its own tree",
+			engine:       workercore.ModelDeploymentEngineVLLM,
+			manufacturer: nodefeature.ManufacturerAscend,
+			wantRoot:     "ascend-vllm",
 		},
 		{
-			name:          "an AMD role is named by its vendor",
-			engine:        workercore.ModelDeploymentEngineVLLM,
-			acceleratable: true,
-			manufacturer:  nodefeature.ManufacturerAMD,
-			wantRoot:      "amd-vllm",
+			name:         "an AMD role is named by its vendor",
+			engine:       workercore.ModelDeploymentEngineVLLM,
+			manufacturer: nodefeature.ManufacturerAMD,
+			wantRoot:     "amd-vllm",
 		},
 		{
-			name:          "a pool no vendor claims is a CPU pool",
-			engine:        workercore.ModelDeploymentEngineVLLM,
-			acceleratable: false,
-			manufacturer:  "",
-			wantRoot:      "cpu-vllm",
+			name:         "SGLang compiles differently and is named separately",
+			engine:       workercore.ModelDeploymentEngineSGLang,
+			manufacturer: nodefeature.ManufacturerNVIDIA,
+			wantRoot:     "nvidia-sglang",
 		},
 		{
-			name:          "SGLang compiles differently and is named separately",
-			engine:        workercore.ModelDeploymentEngineSGLang,
-			acceleratable: true,
-			manufacturer:  nodefeature.ManufacturerNVIDIA,
-			wantRoot:      "nvidia-sglang",
+			name:         "the manufacturer is read in lower case whatever status spells",
+			engine:       workercore.ModelDeploymentEngineVLLM,
+			manufacturer: "  NVIDIA  ",
+			wantRoot:     "nvidia-vllm",
 		},
 		{
-			name:          "the manufacturer is read in lower case whatever status spells",
-			engine:        workercore.ModelDeploymentEngineVLLM,
-			acceleratable: true,
-			manufacturer:  "  NVIDIA  ",
-			wantRoot:      "nvidia-vllm",
+			name:         "an accelerator type with no manufacturer is refused",
+			engine:       workercore.ModelDeploymentEngineVLLM,
+			manufacturer: "   ",
+			wantErr:      "no manufacturer in status",
 		},
 		{
-			name:          "an acceleratable type with no manufacturer is refused",
-			engine:        workercore.ModelDeploymentEngineVLLM,
-			acceleratable: true,
-			manufacturer:  "   ",
-			wantErr:       "no manufacturer in status",
-		},
-		{
-			name:          "an engine this operator does not serve has no cache",
-			engine:        "Triton",
-			acceleratable: true,
-			manufacturer:  nodefeature.ManufacturerNVIDIA,
-			wantErr:       `unsupported engine "Triton"`,
+			name:         "an engine this operator does not serve has no cache",
+			engine:       "Triton",
+			manufacturer: nodefeature.ManufacturerNVIDIA,
+			wantErr:      `unsupported engine "Triton"`,
 		},
 	}
 
@@ -182,8 +166,7 @@ func TestModelDeploymentCompileCacheSubPathManufacturerAndEngine(t *testing.T) {
 			subPath, err := BuildModelDeploymentCompileCacheSubPath(newCompileCacheInput(
 				func(in *ModelDeploymentCompileCacheInput) {
 					in.Deployment.Spec.Engine.Name = c.engine
-					in.InstanceType.Spec.Acceleratable = c.acceleratable
-					in.InstanceType.Status.Detail.Manufacturer = c.manufacturer
+					in.AcceleratorType.Status.Detail.Manufacturer = c.manufacturer
 				},
 			))
 			if c.wantErr != "" {
@@ -199,8 +182,8 @@ func TestModelDeploymentCompileCacheSubPathManufacturerAndEngine(t *testing.T) {
 	}
 }
 
-// TestModelDeploymentCompileCacheSubPathMissingInput covers the three inputs whose absence would
-// otherwise render a path from an empty string rather than say so.
+// TestModelDeploymentCompileCacheSubPathMissingInput covers the inputs whose absence either
+// refuses to render from an empty string or omits the GPU compile cache for CPU-only roles.
 func TestModelDeploymentCompileCacheSubPathMissingInput(t *testing.T) {
 	cases := []struct {
 		name    string
@@ -218,9 +201,9 @@ func TestModelDeploymentCompileCacheSubPathMissingInput(t *testing.T) {
 			wantErr: "needs the role",
 		},
 		{
-			name:    "without the instance type there is no manufacturer",
-			drop:    func(in *ModelDeploymentCompileCacheInput) { in.InstanceType = nil },
-			wantErr: "needs the instance type",
+			name:    "without the accelerator type a CPU-only role gets no GPU compilation cache",
+			drop:    func(in *ModelDeploymentCompileCacheInput) { in.AcceleratorType = nil },
+			wantErr: "",
 		},
 	}
 
@@ -229,7 +212,13 @@ func TestModelDeploymentCompileCacheSubPathMissingInput(t *testing.T) {
 			in := newCompileCacheInput()
 			c.drop(&in)
 
-			_, err := BuildModelDeploymentCompileCacheSubPath(in)
+			subPath, err := BuildModelDeploymentCompileCacheSubPath(in)
+			if c.wantErr == "" {
+				require.NoError(t, err)
+				assert.Empty(t, subPath)
+
+				return
+			}
 			require.ErrorContains(t, err, c.wantErr)
 		})
 	}

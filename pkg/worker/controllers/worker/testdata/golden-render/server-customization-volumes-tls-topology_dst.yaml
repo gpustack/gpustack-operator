@@ -6,7 +6,7 @@ metadata:
     kueue.x-k8s.io/pod-group-total-count: "1"
     kueue.x-k8s.io/podset-required-topology: topology.kubernetes.io/zone
     kueue.x-k8s.io/role-hash: main
-    modeldeployment.gpustack.ai/pod-spec-hash: a77970a81ba0b51c44271cd641b616b189dd67a145aeeee6a51bd160cf71bd5f
+    modeldeployment.gpustack.ai/pod-spec-hash: 8cc4d9fe369345ff58fe73536982d0664de3d8f7443a153e2a0beb676d37e20a
     modeldeployment.gpustack.ai/render-version: "5"
     note.gpustack.ai/role: main
     prometheus.io/path: /metrics
@@ -127,14 +127,8 @@ spec:
       timeoutSeconds: 5
     resources:
       limits:
-        cpu: "16"
-        ephemeral-storage: 15Gi
-        memory: 64Gi
         nvidia.com/gpu: "1"
       requests:
-        cpu: 1600m
-        ephemeral-storage: 1920Mi
-        memory: 8Gi
         nvidia.com/gpu: "1"
     securityContext:
       privileged: true

@@ -33,7 +33,7 @@ import (
 
 const (
 	// _JointAdmissionCheckName is the AdmissionCheck object every operator-owned ClusterQueue
-	// references once it is Active, whether or not the operator derived the queue's InstanceType,
+	// references once it is Active, whether or not the operator derived the queue's AcceleratorType,
 	// and _JointAdmissionControllerName claims it for the reconciler in this file: Kueue
 	// routes a Workload's check to whoever declares that name, so no other controller answers it.
 	//
@@ -275,7 +275,7 @@ func (r *ModelDeploymentJointAdmissionReconciler) Reconcile(
 	// deployment of several replicas inside the barrier, where it would gain partial-quota holds
 	// and exposure to the park bound for no atomicity at all -- there is no second role whose
 	// admission has to coincide with its.
-	if md == nil || len(modelDeploymentPodGroups(md)) < 2 {
+	if md == nil || modelDeploymentQueuedRoleCount(md) < 2 {
 		if err = r.applyVerdict(ctx, wl, checks, kueue.CheckStateReady,
 			"nothing to wait for: this workload is not one replica of a multi-role model deployment"); err != nil {
 			return objectWriteResult(logger, err, "write the verdict", ctrl.Result{})
@@ -441,6 +441,9 @@ func (r *ModelDeploymentJointAdmissionReconciler) jointVerdict(
 	reserved, replicas := 0, 0
 	for i := range md.Spec.Roles {
 		role := &md.Spec.Roles[i]
+		if role.AcceleratorType == "" {
+			continue
+		}
 
 		var roleWaiting, roleAssembling bool
 		for ordinal := range int(role.Replicas) {
@@ -793,7 +796,7 @@ func (r *ModelDeploymentJointAdmissionReconciler) jointSiblings(
 		logger.Error(err, "resolve the workload's model deployment for sibling mapping")
 		return nil
 	}
-	if md == nil || len(modelDeploymentPodGroups(md)) < 2 {
+	if md == nil || modelDeploymentQueuedRoleCount(md) < 2 {
 		return nil
 	}
 
@@ -840,4 +843,18 @@ func (r *ModelDeploymentJointAdmissionReconciler) SetupController(
 		For(&kueue.Workload{}).
 		Watches(&kueue.Workload{}, ctrlhandler.EnqueueRequestsFromMapFunc(r.jointSiblings)).
 		Complete(r)
+}
+
+func modelDeploymentQueuedRoleCount(md *workercore.ModelDeployment) int {
+	if md == nil {
+		return 0
+	}
+	count := 0
+	for i := range md.Spec.Roles {
+		if modelDeploymentRoleIsQueued(&md.Spec.Roles[i]) {
+			count++
+		}
+	}
+
+	return count
 }

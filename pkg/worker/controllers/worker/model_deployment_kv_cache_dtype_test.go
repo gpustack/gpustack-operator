@@ -83,7 +83,7 @@ func TestModelDeploymentKVCacheDtype_ReachesEveryReplica(t *testing.T) {
 			if tc.mutate != nil {
 				mutate = append(mutate, tc.mutate)
 			}
-			cli := newModelDeploymentClient(newRenderDeployment(mutate...), newRenderInstanceType(),
+			cli := newModelDeploymentClient(newRenderDeployment(mutate...), newRenderAcceleratorType(),
 				newRenderBinding(), newRenderPool(), newRenderBackend())
 
 			_, err := reconcileModelDeployment(t, cli)

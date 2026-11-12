@@ -82,7 +82,7 @@ func newElasticConvergenceFixture(t *testing.T) *elasticConvergenceFixture {
 	md.ResourceVersion = "1"
 	cli := ctrlfake.NewClientBuilder().WithScheme(scheme.Scheme).
 		WithObjectTracker(clitesting.NewObjectTracker(scheme.Scheme, scheme.Codecs.UniversalDecoder())).
-		WithObjects(md, newRenderInstanceType()).
+		WithObjects(md, newRenderAcceleratorType()).
 		WithStatusSubresource(&workercore.ModelDeployment{}, &workercore.Devices{}).
 		WithIndex(&core.Pod{}, "spec.nodeName", func(obj ctrlcli.Object) []string { return []string{obj.(*core.Pod).Spec.NodeName} }).
 		WithIndex(&core.Pod{}, modelDeploymentDrainIndexPodUID, func(obj ctrlcli.Object) []string { return []string{string(obj.GetUID())} }).Build()

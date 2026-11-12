@@ -5,7 +5,7 @@ metadata:
     kueue.x-k8s.io/pod-group-serving: "true"
     kueue.x-k8s.io/pod-group-total-count: "1"
     kueue.x-k8s.io/role-hash: decode
-    modeldeployment.gpustack.ai/pod-spec-hash: f9142a57f91ae9af5523894d5263903be33967b2167a8dda123947da1f7b532d
+    modeldeployment.gpustack.ai/pod-spec-hash: 1cc7e4b7d0096f52e1e03b7f20d68fc1f79dd2d1cdd780705b1abb2e60472675
     modeldeployment.gpustack.ai/render-version: "5"
     note.gpustack.ai/role: decode
     prometheus.io/path: /metrics
@@ -136,14 +136,8 @@ spec:
     resources:
       limits:
         amd.com/gpu: "1"
-        cpu: "16"
-        ephemeral-storage: 15Gi
-        memory: 64Gi
       requests:
         amd.com/gpu: "1"
-        cpu: 1600m
-        ephemeral-storage: 1920Mi
-        memory: 8Gi
     startupProbe:
       failureThreshold: 180
       httpGet:
@@ -201,7 +195,7 @@ metadata:
     kueue.x-k8s.io/pod-group-serving: "true"
     kueue.x-k8s.io/pod-group-total-count: "1"
     kueue.x-k8s.io/role-hash: prefill
-    modeldeployment.gpustack.ai/pod-spec-hash: a71f1d55df3f551af4f380ac2fb576c86053e64a19485c2988e5895e0bcd59bb
+    modeldeployment.gpustack.ai/pod-spec-hash: f41246d82cf46d07feb60081a60e26ce7abfef2ddaf74fdddbbc8ff2163c9a3f
     modeldeployment.gpustack.ai/render-version: "5"
     note.gpustack.ai/role: prefill
     prometheus.io/path: /metrics
@@ -340,14 +334,8 @@ spec:
     resources:
       limits:
         amd.com/gpu: "1"
-        cpu: "16"
-        ephemeral-storage: 15Gi
-        memory: 64Gi
       requests:
         amd.com/gpu: "1"
-        cpu: 1600m
-        ephemeral-storage: 1920Mi
-        memory: 8Gi
     startupProbe:
       failureThreshold: 180
       httpGet:

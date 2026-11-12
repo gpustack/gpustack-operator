@@ -19,37 +19,37 @@ import (
 	"gpustack.ai/gpustack/pkg/worker/kvcache/inject"
 )
 
-// epdInstanceType builds an acceleratable InstanceType reporting one manufacturer, so a case names
+// epdAcceleratorType builds an AcceleratorType reporting one manufacturer, so a case names
 // the platform it wants by naming a type and every other rule reads the same.
-func epdInstanceType(name, manufacturer string) *worker.InstanceType {
-	instType := servingInstanceType(name, 8)
-	instType.Status.Detail.Manufacturer = manufacturer
+func epdAcceleratorType(name, manufacturer string) *worker.AcceleratorType {
+	accType := servingAcceleratorType(name, 8)
+	accType.Status.Detail.Manufacturer = manufacturer
 
-	return instType
+	return accType
 }
 
-// epdPlatformTypes is the one instance type per platform the cases below run against, which is
+// epdPlatformTypes is the one accelerator type per platform the cases below run against, which is
 // enough for a shape whose roles are meant to share one platform and for the case that proves they
 // need not.
 func epdPlatformTypes() []ctrlcli.Object {
 	return []ctrlcli.Object{
-		epdInstanceType("ascend-8x", nodefeature.ManufacturerAscend),
-		epdInstanceType("amd-8x", nodefeature.ManufacturerAMD),
-		epdInstanceType("nvidia-8x", nodefeature.ManufacturerNVIDIA),
-		epdInstanceType("hygon-8x", nodefeature.ManufacturerHygon),
-		epdInstanceType("unknown-8x", ""),
+		epdAcceleratorType("ascend-8x", nodefeature.ManufacturerAscend),
+		epdAcceleratorType("amd-8x", nodefeature.ManufacturerAMD),
+		epdAcceleratorType("nvidia-8x", nodefeature.ManufacturerNVIDIA),
+		epdAcceleratorType("hygon-8x", nodefeature.ManufacturerHygon),
+		epdAcceleratorType("unknown-8x", ""),
 	}
 }
 
 // epdRole builds one role of an encoder/prefill/decode deployment. ReplicaSize is one everywhere,
 // which the encoder's own rule requires and which the other two roles do not object to.
-func epdRole(name string, kind workercore.ModelDeploymentRoleKind, instType string) workercore.ModelDeploymentRole {
+func epdRole(name string, kind workercore.ModelDeploymentRoleKind, accType string) workercore.ModelDeploymentRole {
 	return workercore.ModelDeploymentRole{
-		Name:         name,
-		Kind:         kind,
-		Replicas:     1,
-		ReplicaSize:  1,
-		InstanceType: instType,
+		Name:            name,
+		Kind:            kind,
+		Replicas:        1,
+		ReplicaSize:     1,
+		AcceleratorType: accType,
 		Resources: &workercore.ModelDeploymentRoleResources{
 			Accelerator: resource.NewQuantity(1, resource.DecimalSI),
 		},
@@ -132,7 +132,7 @@ func epdDropRole(md *workercore.ModelDeployment, name string) {
 func epdNetworkRowDeployment(mutate func(*workercore.ModelDeployment)) *workercore.ModelDeployment {
 	md := epdDeployment(func(md *workercore.ModelDeployment) {
 		for i := range md.Spec.Roles {
-			md.Spec.Roles[i].InstanceType = "amd-8x"
+			md.Spec.Roles[i].AcceleratorType = "amd-8x"
 			md.Spec.Roles[i].AdditionalVolumes = nil
 		}
 	})
@@ -148,13 +148,13 @@ func epdNetworkRowDeployment(mutate func(*workercore.ModelDeployment)) *workerco
 // connector. It is a builder rather than a flag on epdDeployment for the reason
 // epdNetworkRowDeployment is: the rows differ in what the roles mount and in which routers name
 // them.
-func epdSGLangLeg(router, instanceType string) func(*workercore.ModelDeployment) {
+func epdSGLangLeg(router, acceleratorType string) func(*workercore.ModelDeployment) {
 	return func(md *workercore.ModelDeployment) {
 		md.Spec.Router.Name = router
 		md.Spec.Engine.Name = workercore.ModelDeploymentEngineSGLang
 		md.Spec.Engine.Image = "lmsysorg/sglang:v0.5.18"
 		for i := range md.Spec.Roles {
-			md.Spec.Roles[i].InstanceType = instanceType
+			md.Spec.Roles[i].AcceleratorType = acceleratorType
 			// The address leg mounts no claim, because no directory carries it.
 			md.Spec.Roles[i].AdditionalVolumes = nil
 		}
@@ -190,7 +190,7 @@ func TestModelDeploymentWebhook_EncoderAdmission(t *testing.T) {
 			name: "the admitted ROCm row is admitted",
 			mutate: func(md *workercore.ModelDeployment) {
 				for i := range md.Spec.Roles {
-					md.Spec.Roles[i].InstanceType = "amd-8x"
+					md.Spec.Roles[i].AcceleratorType = "amd-8x"
 					// The ROCm row carries the encoder's output over the network, so no role mounts
 					// the shared claim.
 					md.Spec.Roles[i].AdditionalVolumes = nil
@@ -201,7 +201,7 @@ func TestModelDeploymentWebhook_EncoderAdmission(t *testing.T) {
 			name: "the admitted NVIDIA row is admitted",
 			mutate: func(md *workercore.ModelDeployment) {
 				for i := range md.Spec.Roles {
-					md.Spec.Roles[i].InstanceType = "nvidia-8x"
+					md.Spec.Roles[i].AcceleratorType = "nvidia-8x"
 					// The NVIDIA row carries the encoder's output over the network, so no role
 					// mounts the shared claim.
 					md.Spec.Roles[i].AdditionalVolumes = nil
@@ -213,7 +213,7 @@ func TestModelDeploymentWebhook_EncoderAdmission(t *testing.T) {
 			mutate: func(md *workercore.ModelDeployment) {
 				md.Spec.Router.Name = workercore.ModelDeploymentRouterVLLM
 				for i := range md.Spec.Roles {
-					md.Spec.Roles[i].InstanceType = "nvidia-8x"
+					md.Spec.Roles[i].AcceleratorType = "nvidia-8x"
 					md.Spec.Roles[i].AdditionalVolumes = nil
 				}
 			},
@@ -224,7 +224,7 @@ func TestModelDeploymentWebhook_EncoderAdmission(t *testing.T) {
 			mutate: func(md *workercore.ModelDeployment) {
 				md.Spec.Router.Name = workercore.ModelDeploymentRouterVLLM
 				for i := range md.Spec.Roles {
-					md.Spec.Roles[i].InstanceType = "amd-8x"
+					md.Spec.Roles[i].AcceleratorType = "amd-8x"
 					md.Spec.Roles[i].AdditionalVolumes = nil
 				}
 			},
@@ -271,7 +271,7 @@ func TestModelDeploymentWebhook_EncoderAdmission(t *testing.T) {
 			name: "a platform with no admitted row is refused and names the admitted rows",
 			mutate: func(md *workercore.ModelDeployment) {
 				for i := range md.Spec.Roles {
-					md.Spec.Roles[i].InstanceType = "hygon-8x"
+					md.Spec.Roles[i].AcceleratorType = "hygon-8x"
 					md.Spec.Roles[i].AdditionalVolumes = nil
 				}
 			},
@@ -296,7 +296,7 @@ func TestModelDeploymentWebhook_EncoderAdmission(t *testing.T) {
 			mutate: func(md *workercore.ModelDeployment) {
 				md.Spec.Router.Name = workercore.ModelDeploymentRouterSGLang
 				for i := range md.Spec.Roles {
-					md.Spec.Roles[i].InstanceType = "amd-8x"
+					md.Spec.Roles[i].AcceleratorType = "amd-8x"
 					md.Spec.Roles[i].AdditionalVolumes = nil
 				}
 			},
@@ -368,18 +368,19 @@ func TestModelDeploymentWebhook_EncoderAdmission(t *testing.T) {
 		{
 			name: "roles on two platforms are refused",
 			mutate: func(md *workercore.ModelDeployment) {
-				epdRoleByName(md, "decode").InstanceType = "nvidia-8x"
+				role := epdRoleByName(md, "decode")
+				role.AcceleratorType = "nvidia-8x"
 			},
 			wantRefuse: "the roles of this deployment run on more than one accelerator platform",
 		},
 		{
-			name: "a platform the instance type has not reported yet is refused",
+			name: "a platform the accelerator type has not reported yet is refused",
 			mutate: func(md *workercore.ModelDeployment) {
 				for i := range md.Spec.Roles {
-					md.Spec.Roles[i].InstanceType = "unknown-8x"
+					md.Spec.Roles[i].AcceleratorType = "unknown-8x"
 				}
 			},
-			wantRefuse: `instance type "unknown-8x" reports no accelerator platform yet`,
+			wantRefuse: `accelerator type "unknown-8x" reports no accelerator platform yet`,
 		},
 		{
 			name: "a claim entry naming no claim is refused",
@@ -490,21 +491,31 @@ func TestModelDeploymentWebhook_EncoderAdmission(t *testing.T) {
 					PoolRef: core.LocalObjectReference{Name: "shared-kv"},
 				}
 				for i := range md.Spec.Roles {
-					md.Spec.Roles[i].InstanceType = "nvidia-8x"
+					md.Spec.Roles[i].AcceleratorType = "nvidia-8x"
 					md.Spec.Roles[i].AdditionalVolumes = nil
 				}
 			},
 			selfStored: true,
 		},
 		{
-			name: "roles omitting every instance type are refused on spec.roles",
+			name: "roles omitting every accelerator type are refused on spec.roles",
 			mutate: func(md *workercore.ModelDeployment) {
 				for i := range md.Spec.Roles {
-					md.Spec.Roles[i].InstanceType = ""
+					md.Spec.Roles[i].AcceleratorType = ""
+					md.Spec.Roles[i].Resources = nil
 				}
 			},
-			wantRefuse: "no role names an instance type, so the accelerator platform the encoder admission needs cannot be read",
+			wantRefuse: "no role names an accelerator type, so the accelerator platform the encoder admission needs cannot be read",
 			wantField:  "spec.roles",
+		},
+		{
+			name: "an EPD role omitting acceleratorType while siblings name one is refused on that role's acceleratorType",
+			mutate: func(md *workercore.ModelDeployment) {
+				epdRoleByName(md, "encode").AcceleratorType = ""
+				epdRoleByName(md, "encode").Resources = nil
+			},
+			wantRefuse: "every role in an encoder deployment must name an acceleratorType so its accelerator platform can be verified",
+			wantField:  "spec.roles[0].acceleratorType",
 		},
 		{
 			name: "a deployment without an Encode role may carry a claim of its own",

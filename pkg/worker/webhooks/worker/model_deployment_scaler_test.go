@@ -43,7 +43,7 @@ func modelDeploymentScaler(mutate ...func(*workercore.ModelDeploymentScaler)) *w
 func modelDeploymentScalerTarget(roles ...workercore.ModelDeploymentRole) *workercore.ModelDeployment {
 	if len(roles) == 0 {
 		roles = []workercore.ModelDeploymentRole{{
-			Name: "server", Replicas: 2, InstanceType: "h20-8x",
+			Name: "server", Replicas: 2, AcceleratorType: "h20-8x",
 		}}
 	}
 

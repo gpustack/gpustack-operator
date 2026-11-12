@@ -35,8 +35,8 @@ func epdRenderDecodePod(
 	require.NotEmpty(t, connector, "%s+%s is not an admitted row", md.Spec.Engine.Name, manufacturer)
 
 	pod, err := renderModelDeploymentPod(context.Background(), ModelDeploymentRenderInput{
-		Deployment: md, Role: &md.Spec.Roles[2], InstanceType: newRenderInstanceType(
-			func(it *worker.InstanceType) { it.Status.Detail.Manufacturer = manufacturer },
+		Deployment: md, Role: &md.Spec.Roles[2], AcceleratorType: newRenderAcceleratorType(
+			func(it *worker.AcceleratorType) { it.Status.Detail.Manufacturer = manufacturer },
 		),
 		Connector: ModelDeploymentConnectorRender{
 			Args: []string{"--kv-transfer-config", `{}`}, KVTransfer: true, RoutingSidecar: true,
@@ -112,16 +112,16 @@ func TestRenderModelDeploymentRoutingSidecar_LeavesTheFlagOffWithoutAnEncoder(t 
 		md.Spec.Roles = []workercore.ModelDeploymentRole{
 			{
 				Name: "prefill", Kind: workercore.ModelDeploymentRoleKindPrefill,
-				InstanceType: "h20-8x", Image: "vllm/vllm-openai:v0.30.0",
+				AcceleratorType: "h20-8x", Image: "vllm/vllm-openai:v0.30.0",
 			},
 			{
 				Name: "decode", Kind: workercore.ModelDeploymentRoleKindDecode,
-				InstanceType: "h20-8x", Image: "vllm/vllm-openai:v0.30.0",
+				AcceleratorType: "h20-8x", Image: "vllm/vllm-openai:v0.30.0",
 			},
 		}
 	})
 	pod, err := renderModelDeploymentPod(context.Background(), ModelDeploymentRenderInput{
-		Deployment: md, Role: &md.Spec.Roles[1], InstanceType: newRenderInstanceType(),
+		Deployment: md, Role: &md.Spec.Roles[1], AcceleratorType: newRenderAcceleratorType(),
 		Connector: ModelDeploymentConnectorRender{
 			Args: []string{"--kv-transfer-config", `{}`}, KVTransfer: true, RoutingSidecar: true,
 		},
@@ -152,7 +152,7 @@ func TestRenderModelDeploymentRoutingSidecar_PutsTheConnectorOnlyOnTheDecoder(t 
 	for i := range md.Spec.Roles {
 		role := &md.Spec.Roles[i]
 		pod, err := renderModelDeploymentPod(context.Background(), ModelDeploymentRenderInput{
-			Deployment: md, Role: role, InstanceType: newRenderInstanceType(),
+			Deployment: md, Role: role, AcceleratorType: newRenderAcceleratorType(),
 			Connector: ModelDeploymentConnectorRender{
 				Args: []string{"--kv-transfer-config", `{}`}, KVTransfer: true,
 			},

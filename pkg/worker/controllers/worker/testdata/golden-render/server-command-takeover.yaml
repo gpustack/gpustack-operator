@@ -10,14 +10,14 @@ spec:
   model:
     name: Qwen/Qwen2.5-72B-Instruct
   roles:
-  - command:
+  - acceleratorType: h20-8x
+    command:
     - vllm
     - serve
     - Qwen/Qwen2.5-72B-Instruct
     extraArgs:
     - --max-model-len=32768
     image: vllm/vllm-openai:v0.19.0
-    instanceType: h20-8x
     kind: Server
     name: main
     replicas: 1

@@ -35,8 +35,8 @@ type modelDeploymentScalerPriorDeclaration struct {
 	// engineFamily is the engine the deployment runs.
 	engineFamily string
 
-	// instance is the instance type the deployment runs on.
-	instance *workerapi.InstanceType
+	// accelerator is the accelerator type the deployment runs on.
+	accelerator *workerapi.AcceleratorType
 }
 
 // shape returns the shape the deployment states.
@@ -94,11 +94,11 @@ func modelDeploymentScalerPriorDeclarationOf(
 	if declaration.engineFamily == "" {
 		return declaration, modelDeploymentScalerPriorRefusal(role.Name, "the deployment names no known engine")
 	}
-	instance, hardware, err := modelDeploymentScalerPriorHardwareIdentity(ctx, reader, role)
+	accelerator, hardware, err := modelDeploymentScalerPriorHardwareIdentity(ctx, reader, role)
 	if err != nil {
 		return declaration, err
 	}
-	declaration.instance = instance
+	declaration.accelerator = accelerator
 	declaration.identity.Hardware = hardware
 	return declaration, nil
 }
@@ -182,7 +182,7 @@ func modelDeploymentScalerPriorRequestMatched(
 	if err := modelDeploymentScalerPriorModel(role, profile.Identity.Model, declaration); err != nil {
 		return request, err
 	}
-	if err := modelDeploymentScalerPriorHardware(role, profile.Identity.Hardware, declaration.instance); err != nil {
+	if err := modelDeploymentScalerPriorHardware(role, profile.Identity.Hardware, declaration.accelerator); err != nil {
 		return request, err
 	}
 	serving, err := modelDeploymentScalerPriorServingConfig(target.Spec.Engine.Name, role, declaration.flags, profile.ServingConfig)
@@ -326,42 +326,42 @@ func modelDeploymentScalerPriorModel(
 // modelDeploymentScalerPriorHardwareIdentity reads the hardware the deployment
 // runs on.
 //
-// IT READS THE INSTANCE TYPE, because the instance type is what names the
+// IT READS THE ACCELERATOR TYPE, because the accelerator type is what names the
 // accelerator the deployment runs on.
 func modelDeploymentScalerPriorHardwareIdentity(
 	ctx context.Context, reader ctrlcli.Reader, role *workercore.ModelDeploymentRole,
-) (*workerapi.InstanceType, priors.HardwareIdentity, error) {
-	instance := new(workerapi.InstanceType)
-	if err := reader.Get(ctx, ctrlcli.ObjectKey{Name: role.InstanceType}, instance); err != nil {
+) (*workerapi.AcceleratorType, priors.HardwareIdentity, error) {
+	if role.AcceleratorType == "" {
+		return nil, priors.HardwareIdentity{}, modelDeploymentScalerPriorRefusal(role.Name, "AcceleratorType is not set on CPU-only role")
+	}
+	accelerator := new(workerapi.AcceleratorType)
+	if err := reader.Get(ctx, ctrlcli.ObjectKey{Name: role.AcceleratorType}, accelerator); err != nil {
 		if apierrors.IsNotFound(err) {
-			return nil, priors.HardwareIdentity{}, modelDeploymentScalerPriorRefusal(role.Name, "InstanceType %q does not exist", role.InstanceType)
+			return nil, priors.HardwareIdentity{}, modelDeploymentScalerPriorRefusal(role.Name, "AcceleratorType %q does not exist", role.AcceleratorType)
 		}
 		return nil, priors.HardwareIdentity{}, err
 	}
-	if !instance.Spec.Acceleratable {
-		return nil, priors.HardwareIdentity{}, modelDeploymentScalerPriorRefusal(role.Name, "InstanceType has no accelerators")
-	}
-	identity := priors.NormalizeHardwareIdentity(priors.HardwareIdentity{Accelerator: instance.Status.Detail.Product})
-	return instance, identity, nil
+	identity := priors.NormalizeHardwareIdentity(priors.HardwareIdentity{Accelerator: accelerator.Status.Detail.Product})
+	return accelerator, identity, nil
 }
 
-// modelDeploymentScalerPriorHardware refuses a deployment whose instance type
+// modelDeploymentScalerPriorHardware refuses a deployment whose accelerator type
 // contradicts the hardware the profile measured.
 //
 // THE PRODUCT IS COMPARED BY ITS CANONICAL NAME, because a vendor publishes the
 // same accelerator under a product line name and under a part number.
 func modelDeploymentScalerPriorHardware(
-	role *workercore.ModelDeploymentRole, identity priors.HardwareIdentity, instance *workerapi.InstanceType,
+	role *workercore.ModelDeploymentRole, identity priors.HardwareIdentity, accelerator *workerapi.AcceleratorType,
 ) error {
 	normalized := priors.NormalizeHardwareIdentity(identity)
-	if product := instance.Status.Detail.Product; product != "" &&
+	if product := accelerator.Status.Detail.Product; product != "" &&
 		priors.NormalizeHardwareIdentity(priors.HardwareIdentity{Accelerator: product}).Accelerator != normalized.Accelerator {
-		return modelDeploymentScalerPriorRefusal(role.Name, "InstanceType product conflicts with the declared hardware identity")
+		return modelDeploymentScalerPriorRefusal(role.Name, "AcceleratorType product conflicts with the declared hardware identity")
 	}
-	if memory := instance.Status.Detail.Memory; memory != "" {
+	if memory := accelerator.Status.Detail.Memory; memory != "" {
 		quantity, err := resource.ParseQuantity(memory)
 		if err != nil || quantity.Cmp(*resource.NewQuantity(int64(normalized.MemoryGB)*(1<<30), resource.BinarySI)) != 0 {
-			return modelDeploymentScalerPriorRefusal(role.Name, "InstanceType memory conflicts with the declared hardware identity")
+			return modelDeploymentScalerPriorRefusal(role.Name, "AcceleratorType memory conflicts with the declared hardware identity")
 		}
 	}
 	return nil

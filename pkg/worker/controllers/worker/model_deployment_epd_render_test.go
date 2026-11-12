@@ -57,8 +57,8 @@ func epdCommandOf(
 		m(md)
 	}
 
-	cli := newModelDeploymentClient(md, newRenderInstanceType(
-		func(it *worker.InstanceType) { it.Status.Detail.Manufacturer = manufacturer },
+	cli := newModelDeploymentClient(md, newRenderAcceleratorType(
+		func(it *worker.AcceleratorType) { it.Status.Detail.Manufacturer = manufacturer },
 	))
 	_, err := reconcileModelDeployment(t, cli)
 	require.NoError(t, err)
@@ -575,7 +575,7 @@ func TestModelDeploymentEncoderStage_RefusesALegWithNoDirectoryAtAll(t *testing.
 		md.Spec.Roles[i].ExtraArgs = nil
 	}
 
-	cli := newModelDeploymentClient(md, ascendRenderInstanceType())
+	cli := newModelDeploymentClient(md, ascendRenderAcceleratorType())
 	_, err := reconcileModelDeployment(t, cli)
 	require.Error(t, err,
 		"a leg with no directory on either end cannot be rendered, and the reconcile says so")

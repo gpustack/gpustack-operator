@@ -59,7 +59,7 @@ func probeDeployment(engine string, kind workercore.ModelDeploymentRoleKind) (
 		},
 	}
 	role := &workercore.ModelDeploymentRole{
-		Name: "server", Replicas: 1, ReplicaSize: 2, InstanceType: "h20-8x", Kind: kind,
+		Name: "server", Replicas: 1, ReplicaSize: 2, AcceleratorType: "h20-8x", Kind: kind,
 	}
 	md.Spec.Roles = []workercore.ModelDeploymentRole{*role}
 
@@ -627,12 +627,12 @@ func probePairDeployment(
 	}
 	md.Spec.Roles = []workercore.ModelDeploymentRole{
 		{
-			Name: "prefill", Replicas: 1, ReplicaSize: 1, InstanceType: "h20-8x",
+			Name: "prefill", Replicas: 1, ReplicaSize: 1, AcceleratorType: "h20-8x",
 			Kind:      workercore.ModelDeploymentRoleKindPrefill,
 			ExtraArgs: []string{"--dp-size", strconv.Itoa(prefillWidth)},
 		},
 		{
-			Name: "decode", Replicas: 1, ReplicaSize: 1, InstanceType: "h20-8x",
+			Name: "decode", Replicas: 1, ReplicaSize: 1, AcceleratorType: "h20-8x",
 			Kind:      workercore.ModelDeploymentRoleKindDecode,
 			ExtraArgs: []string{"--dp-size", strconv.Itoa(decodeWidth)},
 		},

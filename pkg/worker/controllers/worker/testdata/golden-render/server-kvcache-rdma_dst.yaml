@@ -6,7 +6,7 @@ metadata:
     kueue.x-k8s.io/pod-group-total-count: "1"
     kueue.x-k8s.io/role-hash: main
     kvcache.gpustack.ai/client-config: '{"metadata_server":"P2PHANDSHAKE","master_server_address":"shared-kv-master.gpustack-system.svc:50051","protocol":"rdma","device_name":"","mode":"standalone-store","global_segment_size":0,"local_buffer_size":134217728,"tenant_id":"chat"}'
-    modeldeployment.gpustack.ai/pod-spec-hash: 970892e332e1799071a0775cb393a396cf5a757dd9f6b6126906eeec48ea8724
+    modeldeployment.gpustack.ai/pod-spec-hash: 8818c4aae0372b532904b045935863c2e074a8109db66601b7dfc1d793663df8
     modeldeployment.gpustack.ai/render-version: "5"
     note.gpustack.ai/role: main
     prometheus.io/path: /metrics
@@ -131,15 +131,9 @@ spec:
       timeoutSeconds: 5
     resources:
       limits:
-        cpu: "16"
         device.gpustack.ai/rdma.shared: "1"
-        ephemeral-storage: 15Gi
-        memory: 64Gi
         nvidia.com/gpu: "1"
       requests:
-        cpu: 1600m
-        ephemeral-storage: 1920Mi
-        memory: 8Gi
         nvidia.com/gpu: "1"
     securityContext:
       capabilities:

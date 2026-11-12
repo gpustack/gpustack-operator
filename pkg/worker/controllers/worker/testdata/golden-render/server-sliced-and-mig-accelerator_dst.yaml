@@ -5,7 +5,7 @@ metadata:
     kueue.x-k8s.io/pod-group-serving: "true"
     kueue.x-k8s.io/pod-group-total-count: "1"
     kueue.x-k8s.io/role-hash: mig
-    modeldeployment.gpustack.ai/pod-spec-hash: 14ac8f6fb11396c3163976626d7f3db0f24766f194cb28914eed39211897ca3a
+    modeldeployment.gpustack.ai/pod-spec-hash: 9d91f505cbffc87a86c43ab92feeabd8f16e4fdf0e992d55f3b4c75648a2a3db
     modeldeployment.gpustack.ai/render-version: "5"
     note.gpustack.ai/role: mig
     prometheus.io/path: /metrics
@@ -122,15 +122,9 @@ spec:
       timeoutSeconds: 5
     resources:
       limits:
-        cpu: "8"
-        ephemeral-storage: 15Gi
-        memory: 32Gi
         nvidia.com/gpu.partitioned: "1"
         nvidia.com/gpu.partitioned.mig-3g.40gb: "1"
       requests:
-        cpu: 800m
-        ephemeral-storage: 1920Mi
-        memory: 4Gi
         nvidia.com/gpu.partitioned: "1"
         nvidia.com/gpu.partitioned.mig-3g.40gb: "1"
     startupProbe:
@@ -168,7 +162,7 @@ metadata:
     kueue.x-k8s.io/pod-group-serving: "true"
     kueue.x-k8s.io/pod-group-total-count: "1"
     kueue.x-k8s.io/role-hash: sliced
-    modeldeployment.gpustack.ai/pod-spec-hash: 4e7bc90af49d2a60aa42380f93483533ce9c66a9abd82a877bf84013600eb3ab
+    modeldeployment.gpustack.ai/pod-spec-hash: 24572c1c90b1b8ed4eb5a1a0685e2866e6699b30e8c4b74acc2eb668225af01a
     modeldeployment.gpustack.ai/render-version: "5"
     note.gpustack.ai/role: sliced
     prometheus.io/path: /metrics
@@ -285,16 +279,10 @@ spec:
       timeoutSeconds: 5
     resources:
       limits:
-        cpu: "8"
-        ephemeral-storage: 15Gi
-        memory: 32Gi
         nvidia.com/gpu.sliced: "1"
         nvidia.com/gpu.sliced.cores-percentage: "25"
         nvidia.com/gpu.sliced.memory-percentage: "50"
       requests:
-        cpu: 800m
-        ephemeral-storage: 1920Mi
-        memory: 4Gi
         nvidia.com/gpu.sliced: "1"
         nvidia.com/gpu.sliced.cores-percentage: "25"
         nvidia.com/gpu.sliced.memory-percentage: "50"

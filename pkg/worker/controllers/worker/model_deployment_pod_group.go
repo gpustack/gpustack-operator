@@ -116,7 +116,16 @@ const (
 	// than one place: a comparison that spelled it out again would be a second answer to what
 	// "true" means here, and the two could drift apart.
 	modelDeploymentTrueValue = "true"
+
+	// modelDeploymentReplicaSizeAnnotation records the replica size on Pods of unqueued roles
+	// (role.AcceleratorType == "") that do not carry kueuepodconst.GroupTotalCountAnnotation.
+	modelDeploymentReplicaSizeAnnotation = "modeldeployment." + systemname.LabelPrefix + "replica-size"
 )
+
+// modelDeploymentRoleIsQueued reports whether a role schedules through Kueue.
+func modelDeploymentRoleIsQueued(role *workercore.ModelDeploymentRole) bool {
+	return role != nil && role.AcceleratorType != ""
+}
 
 // ModelDeploymentPodGroupMeta is the Kueue group metadata one replica's Pod carries.
 //
@@ -146,11 +155,10 @@ type modelDeploymentPodGroupSpec struct {
 	// that role's declared count.
 	Role string
 
-	// InstanceType is carried, not keyed on. It is the role's own type, held here so every message
-	// and condition that names a cluster queue can name the queue this role schedules into: the
-	// ClusterQueue is named after the InstanceType, and naming the role instead would send an
-	// operator to an object that does not exist.
-	InstanceType string
+	// AcceleratorType is carried, not keyed on. It is the role's own type, held here so status
+	// observers can resolve the pool's canonical ClusterQueue for this role (or fall back to the
+	// AcceleratorType name when the type object is unavailable).
+	AcceleratorType string
 
 	// Name is the per-role join key described on the struct. It is stable for a role and distinct
 	// between roles, which is all a join key owes.
@@ -165,10 +173,10 @@ type modelDeploymentPodGroupSpec struct {
 //
 // It is PURE: same deployment, same result, no client and no clock.
 //
-// THE GROUPING KEY IS THE ROLE, NOT THE instanceType. Kueue admits each replica as its own unit and
+// THE GROUPING KEY IS THE ROLE, NOT THE acceleratorType. Kueue admits each replica as its own unit and
 // everything the role-level picture exists to carry -- per-role counting, per-role flavor
 // assignment, per-role status -- still hangs off that grouping. Keying on the type instead puts two
-// roles on one instanceType into one entry, and their counts then disagree with nothing the total
+// roles on one acceleratorType into one entry, and their counts then disagree with nothing the total
 // can express: moving prefill 2 / decode 2 to prefill 1 / decode 3 leaves the sum at four.
 //
 // THE ORDER IS THE ROLES' ORDER, so two passes over an unchanged spec return the same names in the
@@ -178,10 +186,10 @@ func modelDeploymentPodGroups(md *workercore.ModelDeployment) []modelDeploymentP
 	for i := range md.Spec.Roles {
 		role := &md.Spec.Roles[i]
 		groups = append(groups, modelDeploymentPodGroupSpec{
-			Role:         role.Name,
-			InstanceType: role.InstanceType,
-			TotalCount:   role.Replicas,
-			Name:         modelDeploymentPodGroupNameOf(md, role.Name),
+			Role:            role.Name,
+			AcceleratorType: role.AcceleratorType,
+			TotalCount:      role.Replicas,
+			Name:            modelDeploymentPodGroupNameOf(md, role.Name),
 		})
 	}
 
@@ -449,6 +457,18 @@ func modelDeploymentAnsweringMembers(
 func ModelDeploymentPodGroup(
 	md *workercore.ModelDeployment, role *workercore.ModelDeploymentRole, ordinal, member int,
 ) ModelDeploymentPodGroupMeta {
+	if !modelDeploymentRoleIsQueued(role) {
+		return ModelDeploymentPodGroupMeta{
+			Labels: map[string]string{
+				modelDeploymentReplicaOrdinalLabel: strconvx.Itoa(ordinal),
+				modelDeploymentMemberIndexLabel:    strconvx.Itoa(member),
+			},
+			Annotations: map[string]string{
+				modelDeploymentReplicaSizeAnnotation: strconvx.Itoa(modelDeploymentRoleSize(role)),
+			},
+		}
+	}
+
 	labels := map[string]string{
 		kueuepodconst.GroupNameLabel:       modelDeploymentReplicaGroupName(md, role.Name, ordinal),
 		modelDeploymentReplicaOrdinalLabel: strconvx.Itoa(ordinal),
@@ -605,6 +625,31 @@ func modelDeploymentGroupPods(pods []core.Pod, skipDeparting bool) []modelDeploy
 	return views
 }
 
+// modelDeploymentPodDeclaredTotalRaw returns the raw replica member count annotation stamped onto a
+// Pod at render time, checking Kueue's pod-group total annotation first and falling back to the
+// operator's replica-size annotation for unqueued CPU-only roles.
+func modelDeploymentPodDeclaredTotalRaw(pod *core.Pod) (string, bool) {
+	if raw, present := pod.Annotations[kueuepodconst.GroupTotalCountAnnotation]; present {
+		return raw, true
+	}
+	raw, present := pod.Annotations[modelDeploymentReplicaSizeAnnotation]
+	return raw, present
+}
+
+// modelDeploymentPodDeclaredTotal parses the replica member count stamped onto a Pod at render
+// time, reporting false when neither annotation is present or the value is not a positive count.
+func modelDeploymentPodDeclaredTotal(pod *core.Pod) (int, bool) {
+	raw, present := modelDeploymentPodDeclaredTotalRaw(pod)
+	if !present {
+		return 0, false
+	}
+	total, err := strconvx.Atoi[int](raw)
+	if err != nil || total <= 0 {
+		return 0, false
+	}
+	return total, true
+}
+
 // modelDeploymentPodDescription names a Pod the way its own shape makes true: a replica when a
 // replica is one Pod, and a member of one when it is not.
 //
@@ -616,8 +661,7 @@ func modelDeploymentGroupPods(pods []core.Pod, skipDeparting bool) []modelDeploy
 // separates the shapes, and a Pod carrying no total at all is a replica, which is what a Pod from
 // before the totals existed is.
 func modelDeploymentPodDescription(pod *core.Pod) string {
-	total, err := strconvx.Atoi[int](pod.Annotations[kueuepodconst.GroupTotalCountAnnotation])
-	if err == nil && total > 1 {
+	if total, ok := modelDeploymentPodDeclaredTotal(pod); ok && total > 1 {
 		return "member " + pod.Name
 	}
 

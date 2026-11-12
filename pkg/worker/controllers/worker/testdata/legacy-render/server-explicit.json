@@ -19,7 +19,7 @@
         "kueue.x-k8s.io/pod-group-serving": "true",
         "kueue.x-k8s.io/pod-group-total-count": "1",
         "kueue.x-k8s.io/role-hash": "server",
-        "modeldeployment.gpustack.ai/pod-spec-hash": "c10cf7e545174bd90f46bf7d605fa9b87a278fdece1fe9bd0a6160b1574312f2",
+        "modeldeployment.gpustack.ai/pod-spec-hash": "ba72b6ff4efee4e29ba12cabf79806da8d968e1e23dfee81c38bd5d6fdbcd8eb",
         "modeldeployment.gpustack.ai/render-version": "5",
         "note.gpustack.ai/role": "server",
         "prometheus.io/path": "/metrics",
@@ -111,15 +111,9 @@
           ],
           "resources": {
             "limits": {
-              "cpu": "16",
-              "ephemeral-storage": "15Gi",
-              "memory": "64Gi",
               "nvidia.com/gpu": "1"
             },
             "requests": {
-              "cpu": "1600m",
-              "ephemeral-storage": "1920Mi",
-              "memory": "8Gi",
               "nvidia.com/gpu": "1"
             }
           },

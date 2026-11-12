@@ -147,6 +147,8 @@ func setGoldenObjectTypeMeta(obj ctrlcli.Object) {
 		typed.TypeMeta = meta.TypeMeta{APIVersion: "worker.gpustack.ai/v1", Kind: "ModelArtifact"}
 	case *workercore.NodeModelStore:
 		typed.TypeMeta = meta.TypeMeta{APIVersion: "worker.gpustack.ai/v1", Kind: "NodeModelStore"}
+	case *worker.AcceleratorType:
+		typed.TypeMeta = meta.TypeMeta{APIVersion: "worker.gpustack.ai/v1", Kind: "AcceleratorType"}
 	case *worker.InstanceType:
 		typed.TypeMeta = meta.TypeMeta{APIVersion: "worker.gpustack.ai/v1", Kind: "InstanceType"}
 	case *core.Node:
@@ -182,6 +184,8 @@ func parseGoldenInputYAML(t *testing.T, srcPath, rawYAML string) []ctrlcli.Objec
 			obj = new(workercore.ModelArtifact)
 		case "NodeModelStore":
 			obj = new(workercore.NodeModelStore)
+		case "AcceleratorType":
+			obj = new(worker.AcceleratorType)
 		case "InstanceType":
 			obj = new(worker.InstanceType)
 		case "Node":
@@ -432,28 +436,28 @@ func runGoldenYAMLScenario(
 }
 
 func goldenBaseClusterFixtures() []ctrlcli.Object {
-	h20 := newRenderInstanceType(func(it *worker.InstanceType) {
-		it.Name = "h20-8x"
-		it.Status.Entrance = "queue-for-h20-8x"
-		it.Status.Detail.Manufacturer = nodefeature.ManufacturerNVIDIA
-		it.Status.Detail.Memory = "96Gi"
+	h20 := newRenderAcceleratorType(func(at *worker.AcceleratorType) {
+		at.Name = "h20-8x"
+		at.Status.Entrance = "queue-for-h20-8x"
+		at.Status.Detail.Manufacturer = nodefeature.ManufacturerNVIDIA
+		at.Status.Detail.Memory = "96Gi"
 	})
 
-	h20Sliced := newRenderInstanceType(func(it *worker.InstanceType) {
-		it.Name = "h20-sliced"
-		it.Status.Entrance = "queue-for-h20-sliced"
-		it.Status.Detail.Manufacturer = nodefeature.ManufacturerNVIDIA
-		it.Status.Detail.Memory = "96Gi"
-		it.Status.Detail.SlicedDetail.Logical.Count = 128
+	h20Sliced := newRenderAcceleratorType(func(at *worker.AcceleratorType) {
+		at.Name = "h20-sliced"
+		at.Status.Entrance = "queue-for-h20-sliced"
+		at.Status.Detail.Manufacturer = nodefeature.ManufacturerNVIDIA
+		at.Status.Detail.Memory = "96Gi"
+		at.Status.Detail.SlicedDetail.Logical.Count = 128
 	})
 
-	a100Mig := newRenderInstanceType(func(it *worker.InstanceType) {
-		it.Name = "a100-mig"
-		it.Status.Entrance = "queue-for-a100-mig"
-		it.Status.Detail.Manufacturer = nodefeature.ManufacturerNVIDIA
-		it.Status.Detail.Memory = "80Gi"
-		it.Status.Detail.SlicedDetail.Physical.Count = 2
-		it.Status.Detail.SlicedDetail.Physical.Profiles = []workercore.AcceleratorSlicedPhysicalDetailProfile{
+	a100Mig := newRenderAcceleratorType(func(at *worker.AcceleratorType) {
+		at.Name = "a100-mig"
+		at.Status.Entrance = "queue-for-a100-mig"
+		at.Status.Detail.Manufacturer = nodefeature.ManufacturerNVIDIA
+		at.Status.Detail.Memory = "80Gi"
+		at.Status.Detail.SlicedDetail.Physical.Count = 2
+		at.Status.Detail.SlicedDetail.Physical.Profiles = []workercore.AcceleratorSlicedPhysicalDetailProfile{
 			{
 				Name:      "3g.40gb",
 				MemoryMib: 40 << 10,
@@ -462,22 +466,22 @@ func goldenBaseClusterFixtures() []ctrlcli.Object {
 		}
 	})
 
-	mi300x := newRenderInstanceType(func(it *worker.InstanceType) {
-		it.Name = "mi300x-8x"
-		it.Status.Entrance = "queue-for-mi300x-8x"
-		it.Status.Detail.Manufacturer = nodefeature.ManufacturerAMD
-		it.Status.Detail.Memory = "192Gi"
-		it.Status.Detail.RuntimeVersion = "6.3"
-		it.Status.Detail.RuntimeVersions = []string{"6.3"}
+	mi300x := newRenderAcceleratorType(func(at *worker.AcceleratorType) {
+		at.Name = "mi300x-8x"
+		at.Status.Entrance = "queue-for-mi300x-8x"
+		at.Status.Detail.Manufacturer = nodefeature.ManufacturerAMD
+		at.Status.Detail.Memory = "192Gi"
+		at.Status.Detail.RuntimeVersion = "6.3"
+		at.Status.Detail.RuntimeVersions = []string{"6.3"}
 	})
 
-	atlas910b := newRenderInstanceType(func(it *worker.InstanceType) {
-		it.Name = "atlas-910b"
-		it.Status.Entrance = "queue-for-atlas-910b"
-		it.Status.Detail.Manufacturer = nodefeature.ManufacturerAscend
-		it.Status.Detail.Memory = "64Gi"
-		it.Status.Detail.RuntimeVersion = "8.2"
-		it.Status.Detail.RuntimeVersions = []string{"8.2"}
+	atlas910b := newRenderAcceleratorType(func(at *worker.AcceleratorType) {
+		at.Name = "atlas-910b"
+		at.Status.Entrance = "queue-for-atlas-910b"
+		at.Status.Detail.Manufacturer = nodefeature.ManufacturerAscend
+		at.Status.Detail.Memory = "64Gi"
+		at.Status.Detail.RuntimeVersion = "8.2"
+		at.Status.Detail.RuntimeVersions = []string{"8.2"}
 	})
 
 	return []ctrlcli.Object{
@@ -645,13 +649,13 @@ func buildGoldenYAMLScenarios() []goldenYAMLScenario {
 					Engine: workercore.ModelDeploymentEngine{Name: workercore.ModelDeploymentEngineVLLM, Image: vllmImage},
 					Roles: []workercore.ModelDeploymentRole{
 						{
-							Name:         "main",
-							Kind:         workercore.ModelDeploymentRoleKindServer,
-							InstanceType: "h20-8x",
-							Image:        vllmImage,
-							Replicas:     1,
-							ReplicaSize:  1,
-							Resources:    &workercore.ModelDeploymentRoleResources{Accelerator: ptr.To(qty1)},
+							Name:            "main",
+							Kind:            workercore.ModelDeploymentRoleKindServer,
+							AcceleratorType: "h20-8x",
+							Image:           vllmImage,
+							Replicas:        1,
+							ReplicaSize:     1,
+							Resources:       &workercore.ModelDeploymentRoleResources{Accelerator: ptr.To(qty1)},
 						},
 					},
 				},
@@ -666,13 +670,13 @@ func buildGoldenYAMLScenarios() []goldenYAMLScenario {
 					Engine: workercore.ModelDeploymentEngine{Name: workercore.ModelDeploymentEngineSGLang, Image: sglangImage},
 					Roles: []workercore.ModelDeploymentRole{
 						{
-							Name:         "main",
-							Kind:         workercore.ModelDeploymentRoleKindServer,
-							InstanceType: "h20-8x",
-							Image:        sglangImage,
-							Replicas:     1,
-							ReplicaSize:  1,
-							Resources:    &workercore.ModelDeploymentRoleResources{Accelerator: ptr.To(qty1)},
+							Name:            "main",
+							Kind:            workercore.ModelDeploymentRoleKindServer,
+							AcceleratorType: "h20-8x",
+							Image:           sglangImage,
+							Replicas:        1,
+							ReplicaSize:     1,
+							Resources:       &workercore.ModelDeploymentRoleResources{Accelerator: ptr.To(qty1)},
 						},
 					},
 				},
@@ -687,15 +691,15 @@ func buildGoldenYAMLScenarios() []goldenYAMLScenario {
 					Engine: workercore.ModelDeploymentEngine{Name: workercore.ModelDeploymentEngineVLLM, Image: vllmImage},
 					Roles: []workercore.ModelDeploymentRole{
 						{
-							Name:         "main",
-							Kind:         workercore.ModelDeploymentRoleKindServer,
-							InstanceType: "h20-8x",
-							Image:        vllmImage,
-							Replicas:     1,
-							ReplicaSize:  1,
-							Command:      []string{"vllm", "serve", modelID},
-							ExtraArgs:    []string{"--max-model-len=32768"},
-							Resources:    &workercore.ModelDeploymentRoleResources{Accelerator: ptr.To(qty1)},
+							Name:            "main",
+							Kind:            workercore.ModelDeploymentRoleKindServer,
+							AcceleratorType: "h20-8x",
+							Image:           vllmImage,
+							Replicas:        1,
+							ReplicaSize:     1,
+							Command:         []string{"vllm", "serve", modelID},
+							ExtraArgs:       []string{"--max-model-len=32768"},
+							Resources:       &workercore.ModelDeploymentRoleResources{Accelerator: ptr.To(qty1)},
 						},
 					},
 				},
@@ -712,7 +716,7 @@ func buildGoldenYAMLScenarios() []goldenYAMLScenario {
 						{
 							Name:                          "main",
 							Kind:                          workercore.ModelDeploymentRoleKindServer,
-							InstanceType:                  "h20-8x",
+							AcceleratorType:               "h20-8x",
 							Image:                         vllmImage,
 							Replicas:                      1,
 							ReplicaSize:                   1,
@@ -765,12 +769,12 @@ func buildGoldenYAMLScenarios() []goldenYAMLScenario {
 					Engine: workercore.ModelDeploymentEngine{Name: workercore.ModelDeploymentEngineVLLM, Image: vllmImage},
 					Roles: []workercore.ModelDeploymentRole{
 						{
-							Name:         "sliced",
-							Kind:         workercore.ModelDeploymentRoleKindServer,
-							InstanceType: "h20-sliced",
-							Image:        vllmImage,
-							Replicas:     1,
-							ReplicaSize:  1,
+							Name:            "sliced",
+							Kind:            workercore.ModelDeploymentRoleKindServer,
+							AcceleratorType: "h20-sliced",
+							Image:           vllmImage,
+							Replicas:        1,
+							ReplicaSize:     1,
 							Resources: &workercore.ModelDeploymentRoleResources{
 								Accelerator:                       ptr.To(qty1),
 								AcceleratorSlicedMemoryPercentage: 50,
@@ -778,12 +782,12 @@ func buildGoldenYAMLScenarios() []goldenYAMLScenario {
 							},
 						},
 						{
-							Name:         "mig",
-							Kind:         workercore.ModelDeploymentRoleKindServer,
-							InstanceType: "a100-mig",
-							Image:        vllmImage,
-							Replicas:     1,
-							ReplicaSize:  1,
+							Name:            "mig",
+							Kind:            workercore.ModelDeploymentRoleKindServer,
+							AcceleratorType: "a100-mig",
+							Image:           vllmImage,
+							Replicas:        1,
+							ReplicaSize:     1,
 							Resources: &workercore.ModelDeploymentRoleResources{
 								Accelerator:                   ptr.To(qty1),
 								AcceleratorPartitionedProfile: "3g.40gb",
@@ -802,12 +806,12 @@ func buildGoldenYAMLScenarios() []goldenYAMLScenario {
 					Engine: workercore.ModelDeploymentEngine{Name: workercore.ModelDeploymentEngineVLLM, Image: vllmImage},
 					Roles: []workercore.ModelDeploymentRole{
 						{
-							Name:         "main",
-							Kind:         workercore.ModelDeploymentRoleKindServer,
-							InstanceType: "h20-8x",
-							Image:        vllmImage,
-							Replicas:     1,
-							ReplicaSize:  2,
+							Name:            "main",
+							Kind:            workercore.ModelDeploymentRoleKindServer,
+							AcceleratorType: "h20-8x",
+							Image:           vllmImage,
+							Replicas:        1,
+							ReplicaSize:     2,
 							ExtraArgs: []string{
 								"--tensor-parallel-size=2",
 								"--pipeline-parallel-size=2",
@@ -827,12 +831,12 @@ func buildGoldenYAMLScenarios() []goldenYAMLScenario {
 					Engine: workercore.ModelDeploymentEngine{Name: workercore.ModelDeploymentEngineVLLM, Image: vllmImage},
 					Roles: []workercore.ModelDeploymentRole{
 						{
-							Name:         "main",
-							Kind:         workercore.ModelDeploymentRoleKindServer,
-							InstanceType: "h20-8x",
-							Image:        vllmImage,
-							Replicas:     1,
-							ReplicaSize:  2,
+							Name:            "main",
+							Kind:            workercore.ModelDeploymentRoleKindServer,
+							AcceleratorType: "h20-8x",
+							Image:           vllmImage,
+							Replicas:        1,
+							ReplicaSize:     2,
 							ExtraArgs: []string{
 								"--data-parallel-size=2",
 								"--data-parallel-size-local=1",
@@ -852,12 +856,12 @@ func buildGoldenYAMLScenarios() []goldenYAMLScenario {
 					Engine: workercore.ModelDeploymentEngine{Name: workercore.ModelDeploymentEngineVLLM, Image: vllmImage},
 					Roles: []workercore.ModelDeploymentRole{
 						{
-							Name:         "main",
-							Kind:         workercore.ModelDeploymentRoleKindServer,
-							InstanceType: "h20-8x",
-							Image:        vllmImage,
-							Replicas:     1,
-							ReplicaSize:  2,
+							Name:            "main",
+							Kind:            workercore.ModelDeploymentRoleKindServer,
+							AcceleratorType: "h20-8x",
+							Image:           vllmImage,
+							Replicas:        1,
+							ReplicaSize:     2,
 							ExtraArgs: []string{
 								"--tensor-parallel-size=2",
 							},
@@ -879,12 +883,12 @@ func buildGoldenYAMLScenarios() []goldenYAMLScenario {
 					Engine: workercore.ModelDeploymentEngine{Name: workercore.ModelDeploymentEngineVLLM, Image: vllmImage},
 					Roles: []workercore.ModelDeploymentRole{
 						{
-							Name:         "main",
-							Kind:         workercore.ModelDeploymentRoleKindServer,
-							InstanceType: "h20-8x",
-							Image:        vllmImage,
-							Replicas:     2,
-							ReplicaSize:  1,
+							Name:            "main",
+							Kind:            workercore.ModelDeploymentRoleKindServer,
+							AcceleratorType: "h20-8x",
+							Image:           vllmImage,
+							Replicas:        2,
+							ReplicaSize:     1,
 							ElasticEP: &workercore.ModelDeploymentRoleElasticEP{
 								Width: 2,
 							},
@@ -911,13 +915,13 @@ func buildGoldenYAMLScenarios() []goldenYAMLScenario {
 					Router: &workercore.ModelDeploymentRouter{Name: workercore.ModelDeploymentRouterLLMD},
 					Roles: []workercore.ModelDeploymentRole{
 						{
-							Name:         "main",
-							Kind:         workercore.ModelDeploymentRoleKindServer,
-							InstanceType: "h20-8x",
-							Image:        vllmImage,
-							Replicas:     1,
-							ReplicaSize:  1,
-							Resources:    &workercore.ModelDeploymentRoleResources{Accelerator: ptr.To(qty1)},
+							Name:            "main",
+							Kind:            workercore.ModelDeploymentRoleKindServer,
+							AcceleratorType: "h20-8x",
+							Image:           vllmImage,
+							Replicas:        1,
+							ReplicaSize:     1,
+							Resources:       &workercore.ModelDeploymentRoleResources{Accelerator: ptr.To(qty1)},
 						},
 					},
 				},
@@ -936,13 +940,13 @@ func buildGoldenYAMLScenarios() []goldenYAMLScenario {
 					KVCache: &workercore.ModelDeploymentKVCache{PoolRef: core.LocalObjectReference{Name: "shared-kv"}},
 					Roles: []workercore.ModelDeploymentRole{
 						{
-							Name:         "main",
-							Kind:         workercore.ModelDeploymentRoleKindServer,
-							InstanceType: "h20-8x",
-							Image:        vllmImage,
-							Replicas:     1,
-							ReplicaSize:  1,
-							Resources:    &workercore.ModelDeploymentRoleResources{Accelerator: ptr.To(qty1)},
+							Name:            "main",
+							Kind:            workercore.ModelDeploymentRoleKindServer,
+							AcceleratorType: "h20-8x",
+							Image:           vllmImage,
+							Replicas:        1,
+							ReplicaSize:     1,
+							Resources:       &workercore.ModelDeploymentRoleResources{Accelerator: ptr.To(qty1)},
 						},
 					},
 				},
@@ -959,12 +963,12 @@ func buildGoldenYAMLScenarios() []goldenYAMLScenario {
 					KVCache: &workercore.ModelDeploymentKVCache{PoolRef: core.LocalObjectReference{Name: "shared-kv"}},
 					Roles: []workercore.ModelDeploymentRole{
 						{
-							Name:         "main",
-							Kind:         workercore.ModelDeploymentRoleKindServer,
-							InstanceType: "h20-8x",
-							Image:        vllmImage,
-							Replicas:     1,
-							ReplicaSize:  1,
+							Name:            "main",
+							Kind:            workercore.ModelDeploymentRoleKindServer,
+							AcceleratorType: "h20-8x",
+							Image:           vllmImage,
+							Replicas:        1,
+							ReplicaSize:     1,
 							Resources: &workercore.ModelDeploymentRoleResources{
 								Accelerator: ptr.To(qty1),
 								Interface:   ptr.To(qty1),
@@ -985,12 +989,12 @@ func buildGoldenYAMLScenarios() []goldenYAMLScenario {
 					KVCache: &workercore.ModelDeploymentKVCache{PoolRef: core.LocalObjectReference{Name: "shared-kv"}},
 					Roles: []workercore.ModelDeploymentRole{
 						{
-							Name:         "main",
-							Kind:         workercore.ModelDeploymentRoleKindServer,
-							InstanceType: "h20-8x",
-							Image:        vllmImage,
-							Replicas:     1,
-							ReplicaSize:  1,
+							Name:            "main",
+							Kind:            workercore.ModelDeploymentRoleKindServer,
+							AcceleratorType: "h20-8x",
+							Image:           vllmImage,
+							Replicas:        1,
+							ReplicaSize:     1,
 							Resources: &workercore.ModelDeploymentRoleResources{
 								Accelerator: ptr.To(qty1),
 								Interface:   ptr.To(qty1),
@@ -1129,31 +1133,31 @@ func buildGoldenYAMLScenarios() []goldenYAMLScenario {
 					KVTransfer: &workercore.ModelDeploymentKVTransfer{Backend: "NIXL"},
 					Roles: []workercore.ModelDeploymentRole{
 						{
-							Name:         "encode",
-							Kind:         workercore.ModelDeploymentRoleKindEncode,
-							InstanceType: "h20-8x",
-							Image:        vllmImage,
-							Replicas:     1,
-							ReplicaSize:  1,
-							Resources:    &workercore.ModelDeploymentRoleResources{Accelerator: ptr.To(qty1)},
+							Name:            "encode",
+							Kind:            workercore.ModelDeploymentRoleKindEncode,
+							AcceleratorType: "h20-8x",
+							Image:           vllmImage,
+							Replicas:        1,
+							ReplicaSize:     1,
+							Resources:       &workercore.ModelDeploymentRoleResources{Accelerator: ptr.To(qty1)},
 						},
 						{
-							Name:         "prefill",
-							Kind:         workercore.ModelDeploymentRoleKindPrefill,
-							InstanceType: "h20-8x",
-							Image:        vllmImage,
-							Replicas:     1,
-							ReplicaSize:  1,
-							Resources:    &workercore.ModelDeploymentRoleResources{Accelerator: ptr.To(qty1)},
+							Name:            "prefill",
+							Kind:            workercore.ModelDeploymentRoleKindPrefill,
+							AcceleratorType: "h20-8x",
+							Image:           vllmImage,
+							Replicas:        1,
+							ReplicaSize:     1,
+							Resources:       &workercore.ModelDeploymentRoleResources{Accelerator: ptr.To(qty1)},
 						},
 						{
-							Name:         "decode",
-							Kind:         workercore.ModelDeploymentRoleKindDecode,
-							InstanceType: "h20-8x",
-							Image:        vllmImage,
-							Replicas:     1,
-							ReplicaSize:  1,
-							Resources:    &workercore.ModelDeploymentRoleResources{Accelerator: ptr.To(qty1)},
+							Name:            "decode",
+							Kind:            workercore.ModelDeploymentRoleKindDecode,
+							AcceleratorType: "h20-8x",
+							Image:           vllmImage,
+							Replicas:        1,
+							ReplicaSize:     1,
+							Resources:       &workercore.ModelDeploymentRoleResources{Accelerator: ptr.To(qty1)},
 						},
 					},
 				},
@@ -1170,12 +1174,12 @@ func buildGoldenYAMLScenarios() []goldenYAMLScenario {
 					KVTransfer: &workercore.ModelDeploymentKVTransfer{Backend: "HIXL"},
 					Roles: []workercore.ModelDeploymentRole{
 						{
-							Name:         "encode",
-							Kind:         workercore.ModelDeploymentRoleKindEncode,
-							InstanceType: "atlas-910b",
-							Image:        vllmAscendImage,
-							Replicas:     1,
-							ReplicaSize:  1,
+							Name:            "encode",
+							Kind:            workercore.ModelDeploymentRoleKindEncode,
+							AcceleratorType: "atlas-910b",
+							Image:           vllmAscendImage,
+							Replicas:        1,
+							ReplicaSize:     1,
 							AdditionalVolumes: []workercore.ModelDeploymentAdditionalVolume{
 								{
 									MountPath:             "/shared/encodings",
@@ -1185,12 +1189,12 @@ func buildGoldenYAMLScenarios() []goldenYAMLScenario {
 							Resources: &workercore.ModelDeploymentRoleResources{Accelerator: ptr.To(qty1)},
 						},
 						{
-							Name:         "prefill",
-							Kind:         workercore.ModelDeploymentRoleKindPrefill,
-							InstanceType: "atlas-910b",
-							Image:        vllmAscendImage,
-							Replicas:     1,
-							ReplicaSize:  1,
+							Name:            "prefill",
+							Kind:            workercore.ModelDeploymentRoleKindPrefill,
+							AcceleratorType: "atlas-910b",
+							Image:           vllmAscendImage,
+							Replicas:        1,
+							ReplicaSize:     1,
 							AdditionalVolumes: []workercore.ModelDeploymentAdditionalVolume{
 								{
 									MountPath:             "/shared/encodings",
@@ -1200,13 +1204,13 @@ func buildGoldenYAMLScenarios() []goldenYAMLScenario {
 							Resources: &workercore.ModelDeploymentRoleResources{Accelerator: ptr.To(qty1)},
 						},
 						{
-							Name:         "decode",
-							Kind:         workercore.ModelDeploymentRoleKindDecode,
-							InstanceType: "atlas-910b",
-							Image:        vllmAscendImage,
-							Replicas:     1,
-							ReplicaSize:  1,
-							Resources:    &workercore.ModelDeploymentRoleResources{Accelerator: ptr.To(qty1)},
+							Name:            "decode",
+							Kind:            workercore.ModelDeploymentRoleKindDecode,
+							AcceleratorType: "atlas-910b",
+							Image:           vllmAscendImage,
+							Replicas:        1,
+							ReplicaSize:     1,
+							Resources:       &workercore.ModelDeploymentRoleResources{Accelerator: ptr.To(qty1)},
 						},
 					},
 				},
@@ -1223,31 +1227,31 @@ func buildGoldenYAMLScenarios() []goldenYAMLScenario {
 					KVTransfer: &workercore.ModelDeploymentKVTransfer{Backend: "Mooncake"},
 					Roles: []workercore.ModelDeploymentRole{
 						{
-							Name:         "encode",
-							Kind:         workercore.ModelDeploymentRoleKindEncode,
-							InstanceType: "h20-8x",
-							Image:        sglangImage,
-							Replicas:     1,
-							ReplicaSize:  1,
-							Resources:    &workercore.ModelDeploymentRoleResources{Accelerator: ptr.To(qty1)},
+							Name:            "encode",
+							Kind:            workercore.ModelDeploymentRoleKindEncode,
+							AcceleratorType: "h20-8x",
+							Image:           sglangImage,
+							Replicas:        1,
+							ReplicaSize:     1,
+							Resources:       &workercore.ModelDeploymentRoleResources{Accelerator: ptr.To(qty1)},
 						},
 						{
-							Name:         "prefill",
-							Kind:         workercore.ModelDeploymentRoleKindPrefill,
-							InstanceType: "h20-8x",
-							Image:        sglangImage,
-							Replicas:     1,
-							ReplicaSize:  1,
-							Resources:    &workercore.ModelDeploymentRoleResources{Accelerator: ptr.To(qty1)},
+							Name:            "prefill",
+							Kind:            workercore.ModelDeploymentRoleKindPrefill,
+							AcceleratorType: "h20-8x",
+							Image:           sglangImage,
+							Replicas:        1,
+							ReplicaSize:     1,
+							Resources:       &workercore.ModelDeploymentRoleResources{Accelerator: ptr.To(qty1)},
 						},
 						{
-							Name:         "decode",
-							Kind:         workercore.ModelDeploymentRoleKindDecode,
-							InstanceType: "h20-8x",
-							Image:        sglangImage,
-							Replicas:     1,
-							ReplicaSize:  1,
-							Resources:    &workercore.ModelDeploymentRoleResources{Accelerator: ptr.To(qty1)},
+							Name:            "decode",
+							Kind:            workercore.ModelDeploymentRoleKindDecode,
+							AcceleratorType: "h20-8x",
+							Image:           sglangImage,
+							Replicas:        1,
+							ReplicaSize:     1,
+							Resources:       &workercore.ModelDeploymentRoleResources{Accelerator: ptr.To(qty1)},
 						},
 					},
 				},
@@ -1271,13 +1275,13 @@ func buildGoldenYAMLScenarios() []goldenYAMLScenario {
 					Engine: workercore.ModelDeploymentEngine{Name: workercore.ModelDeploymentEngineVLLM, Image: vllmImage},
 					Roles: []workercore.ModelDeploymentRole{
 						{
-							Name:         "main",
-							Kind:         workercore.ModelDeploymentRoleKindServer,
-							InstanceType: "h20-8x",
-							Image:        vllmImage,
-							Replicas:     1,
-							ReplicaSize:  1,
-							Resources:    &workercore.ModelDeploymentRoleResources{Accelerator: ptr.To(qty1)},
+							Name:            "main",
+							Kind:            workercore.ModelDeploymentRoleKindServer,
+							AcceleratorType: "h20-8x",
+							Image:           vllmImage,
+							Replicas:        1,
+							ReplicaSize:     1,
+							Resources:       &workercore.ModelDeploymentRoleResources{Accelerator: ptr.To(qty1)},
 						},
 					},
 				},
@@ -1301,34 +1305,34 @@ func buildGoldenYAMLScenarios() []goldenYAMLScenario {
 					Engine: workercore.ModelDeploymentEngine{Name: workercore.ModelDeploymentEngineVLLM, Image: vllmImage},
 					Roles: []workercore.ModelDeploymentRole{
 						{
-							Name:         "nvidia-ucx",
-							Kind:         workercore.ModelDeploymentRoleKindServer,
-							InstanceType: "h20-8x",
-							Image:        vllmImage,
-							Replicas:     1,
-							ReplicaSize:  1,
-							Resources:    &workercore.ModelDeploymentRoleResources{Accelerator: ptr.To(qty1)},
+							Name:            "nvidia-ucx",
+							Kind:            workercore.ModelDeploymentRoleKindServer,
+							AcceleratorType: "h20-8x",
+							Image:           vllmImage,
+							Replicas:        1,
+							ReplicaSize:     1,
+							Resources:       &workercore.ModelDeploymentRoleResources{Accelerator: ptr.To(qty1)},
 						},
 						{
-							Name:         "nvidia-efa",
-							Kind:         workercore.ModelDeploymentRoleKindServer,
-							InstanceType: "h20-8x",
-							Image:        vllmImage,
-							Replicas:     1,
-							ReplicaSize:  1,
+							Name:            "nvidia-efa",
+							Kind:            workercore.ModelDeploymentRoleKindServer,
+							AcceleratorType: "h20-8x",
+							Image:           vllmImage,
+							Replicas:        1,
+							ReplicaSize:     1,
 							Resources: &workercore.ModelDeploymentRoleResources{
 								Accelerator: ptr.To(qty1),
 								Interface:   ptr.To(qty1),
 							},
 						},
 						{
-							Name:         "ascend-hixl",
-							Kind:         workercore.ModelDeploymentRoleKindServer,
-							InstanceType: "atlas-910b",
-							Image:        vllmAscendImage,
-							Replicas:     1,
-							ReplicaSize:  1,
-							Resources:    &workercore.ModelDeploymentRoleResources{Accelerator: ptr.To(qty1)},
+							Name:            "ascend-hixl",
+							Kind:            workercore.ModelDeploymentRoleKindServer,
+							AcceleratorType: "atlas-910b",
+							Image:           vllmAscendImage,
+							Replicas:        1,
+							ReplicaSize:     1,
+							Resources:       &workercore.ModelDeploymentRoleResources{Accelerator: ptr.To(qty1)},
 						},
 					},
 				},
@@ -1377,14 +1381,14 @@ func buildGoldenYAMLScenarios() []goldenYAMLScenario {
 					Engine: workercore.ModelDeploymentEngine{Name: workercore.ModelDeploymentEngineVLLM, Image: vllmImage},
 					Roles: []workercore.ModelDeploymentRole{
 						{
-							Name:         "main",
-							Kind:         workercore.ModelDeploymentRoleKindServer,
-							InstanceType: "h20-8x",
-							Image:        vllmImage,
-							Replicas:     2,
-							ReplicaSize:  1,
-							ExtraArgs:    []string{"--load-format", "modelexpress"},
-							Resources:    &workercore.ModelDeploymentRoleResources{Accelerator: ptr.To(qty1)},
+							Name:            "main",
+							Kind:            workercore.ModelDeploymentRoleKindServer,
+							AcceleratorType: "h20-8x",
+							Image:           vllmImage,
+							Replicas:        2,
+							ReplicaSize:     1,
+							ExtraArgs:       []string{"--load-format", "modelexpress"},
+							Resources:       &workercore.ModelDeploymentRoleResources{Accelerator: ptr.To(qty1)},
 						},
 					},
 				},
@@ -1394,7 +1398,7 @@ func buildGoldenYAMLScenarios() []goldenYAMLScenario {
 }
 
 func newGoldenPDDeployment(
-	name, modelID, engineName, instanceType, image, routerName string,
+	name, modelID, engineName, acceleratorType, image, routerName string,
 	kvTransfer *workercore.ModelDeploymentKVTransfer,
 	kvCache *workercore.ModelDeploymentKVCache,
 	interfaces int64,
@@ -1415,22 +1419,22 @@ func newGoldenPDDeployment(
 			KVCache:    kvCache,
 			Roles: []workercore.ModelDeploymentRole{
 				{
-					Name:         "prefill",
-					Kind:         workercore.ModelDeploymentRoleKindPrefill,
-					InstanceType: instanceType,
-					Image:        image,
-					Replicas:     1,
-					ReplicaSize:  1,
-					Resources:    res.DeepCopy(),
+					Name:            "prefill",
+					Kind:            workercore.ModelDeploymentRoleKindPrefill,
+					AcceleratorType: acceleratorType,
+					Image:           image,
+					Replicas:        1,
+					ReplicaSize:     1,
+					Resources:       res.DeepCopy(),
 				},
 				{
-					Name:         "decode",
-					Kind:         workercore.ModelDeploymentRoleKindDecode,
-					InstanceType: instanceType,
-					Image:        image,
-					Replicas:     1,
-					ReplicaSize:  1,
-					Resources:    res.DeepCopy(),
+					Name:            "decode",
+					Kind:            workercore.ModelDeploymentRoleKindDecode,
+					AcceleratorType: acceleratorType,
+					Image:           image,
+					Replicas:        1,
+					ReplicaSize:     1,
+					Resources:       res.DeepCopy(),
 				},
 			},
 		},

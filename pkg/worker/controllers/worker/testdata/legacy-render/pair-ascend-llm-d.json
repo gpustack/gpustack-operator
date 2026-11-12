@@ -19,7 +19,7 @@
         "kueue.x-k8s.io/pod-group-serving": "true",
         "kueue.x-k8s.io/pod-group-total-count": "1",
         "kueue.x-k8s.io/role-hash": "prefill",
-        "modeldeployment.gpustack.ai/pod-spec-hash": "2abbe3c2e7768b8726f00791545df0cda6dc7c0e526e12daf5b104dc03ffd0bf",
+        "modeldeployment.gpustack.ai/pod-spec-hash": "422094efc3f40edd166e9da7853992175db3df9562d146cb860136c261da5d0c",
         "modeldeployment.gpustack.ai/render-version": "5",
         "note.gpustack.ai/role": "prefill",
         "prometheus.io/path": "/metrics",
@@ -133,16 +133,10 @@
           ],
           "resources": {
             "limits": {
-              "cpu": "16",
-              "ephemeral-storage": "15Gi",
-              "huawei.com/npu": "1",
-              "memory": "64Gi"
+              "huawei.com/npu": "1"
             },
             "requests": {
-              "cpu": "1600m",
-              "ephemeral-storage": "1920Mi",
-              "huawei.com/npu": "1",
-              "memory": "8Gi"
+              "huawei.com/npu": "1"
             }
           },
           "volumeMounts": [
@@ -231,7 +225,7 @@
         "kueue.x-k8s.io/pod-group-serving": "true",
         "kueue.x-k8s.io/pod-group-total-count": "1",
         "kueue.x-k8s.io/role-hash": "decode",
-        "modeldeployment.gpustack.ai/pod-spec-hash": "9e1380f5a384cbd2a3d70106ad62157de088fa457f3ebb226bcf2587e58fb701",
+        "modeldeployment.gpustack.ai/pod-spec-hash": "8de054a519ce1e9fb6043347ba5bca748a156a16a6220e2022eb9e6c73aae1fa",
         "modeldeployment.gpustack.ai/render-version": "5",
         "note.gpustack.ai/role": "decode",
         "prometheus.io/path": "/metrics",
@@ -376,16 +370,10 @@
           ],
           "resources": {
             "limits": {
-              "cpu": "16",
-              "ephemeral-storage": "15Gi",
-              "huawei.com/npu": "1",
-              "memory": "64Gi"
+              "huawei.com/npu": "1"
             },
             "requests": {
-              "cpu": "1600m",
-              "ephemeral-storage": "1920Mi",
-              "huawei.com/npu": "1",
-              "memory": "8Gi"
+              "huawei.com/npu": "1"
             }
           },
           "volumeMounts": [

@@ -117,10 +117,10 @@ func inferenceXDeployment(image string) *workercore.ModelDeployment {
 				Image: image,
 			},
 			Roles: []workercore.ModelDeploymentRole{{
-				Name:         "server",
-				Kind:         workercore.ModelDeploymentRoleKindServer,
-				InstanceType: "mi325x-oam",
-				ExtraArgs:    inferenceXLaunchArguments(),
+				Name:            "server",
+				Kind:            workercore.ModelDeploymentRoleKindServer,
+				AcceleratorType: "mi325x-oam",
+				ExtraArgs:       inferenceXLaunchArguments(),
 			}},
 		},
 	}
@@ -139,10 +139,9 @@ func inferenceXObjects(t *testing.T, deployment *workercore.ModelDeployment) []c
 			Resolved: &workercore.ModelArtifactResolved{Revision: inferenceXRevision},
 		},
 	}
-	instance := &workerapi.InstanceType{
+	instance := &workerapi.AcceleratorType{
 		ObjectMeta: meta.ObjectMeta{Name: "mi325x-oam"},
-		Spec:       workercore.InstanceTypeSpec{Acceleratable: true},
-		Status: workercore.InstanceTypeStatus{
+		Status: workercore.AcceleratorTypeStatus{
 			Detail: workercore.InstanceTypeDetail{
 				Product:                       inferenceXAccelerator,
 				InstanceTypeAcceleratorDetail: workercore.InstanceTypeAcceleratorDetail{Memory: "256Gi"},
@@ -181,10 +180,10 @@ func inferenceXRequest(
 func TestModelDeploymentScalerPriorRequestAcceptsBuildProvenance(t *testing.T) {
 	identity := inferenceXIdentity()
 	role := workercore.ModelDeploymentRole{
-		Name:         "server",
-		Kind:         workercore.ModelDeploymentRoleKindServer,
-		InstanceType: "mi325x-oam",
-		Resources:    &workercore.ModelDeploymentRoleResources{Accelerator: capacityPriorQuantity("8")},
+		Name:            "server",
+		Kind:            workercore.ModelDeploymentRoleKindServer,
+		AcceleratorType: "mi325x-oam",
+		Resources:       &workercore.ModelDeploymentRoleResources{Accelerator: capacityPriorQuantity("8")},
 		ExtraArgs: append(inferenceXLaunchArguments(),
 			"--dtype", "bf16", "--cpu-offload-gb", "0"),
 	}
@@ -214,12 +213,12 @@ func TestModelDeploymentScalerPriorRequestEngineEnv(t *testing.T) {
 	requestWith := func(t *testing.T, env []workercore.ModelDeploymentEnvVar) (priors.Request, error) {
 		identity := inferenceXIdentity()
 		role := workercore.ModelDeploymentRole{
-			Name:         "server",
-			Kind:         workercore.ModelDeploymentRoleKindServer,
-			InstanceType: "mi325x-oam",
-			Resources:    &workercore.ModelDeploymentRoleResources{Accelerator: capacityPriorQuantity("8")},
-			Env:          env,
-			ExtraArgs:    inferenceXLaunchArguments(),
+			Name:            "server",
+			Kind:            workercore.ModelDeploymentRoleKindServer,
+			AcceleratorType: "mi325x-oam",
+			Resources:       &workercore.ModelDeploymentRoleResources{Accelerator: capacityPriorQuantity("8")},
+			Env:             env,
+			ExtraArgs:       inferenceXLaunchArguments(),
 		}
 		deployment := inferenceXDeployment(inferenceXImage)
 		client := inferenceXClient(t, deployment)
@@ -294,11 +293,11 @@ func TestModelDeploymentScalerPriorRequestOmittedDefaults(t *testing.T) {
 	requestWith := func(t *testing.T, effectiveDefaults map[string]string) error {
 		identity := inferenceXIdentity()
 		role := workercore.ModelDeploymentRole{
-			Name:         "server",
-			Kind:         workercore.ModelDeploymentRoleKindServer,
-			InstanceType: "mi325x-oam",
-			Resources:    &workercore.ModelDeploymentRoleResources{Accelerator: capacityPriorQuantity("8")},
-			ExtraArgs:    inferenceXLaunchArguments(),
+			Name:            "server",
+			Kind:            workercore.ModelDeploymentRoleKindServer,
+			AcceleratorType: "mi325x-oam",
+			Resources:       &workercore.ModelDeploymentRoleResources{Accelerator: capacityPriorQuantity("8")},
+			ExtraArgs:       inferenceXLaunchArguments(),
 		}
 		deployment := inferenceXDeployment(inferenceXImage)
 		client := inferenceXClient(t, deployment)
@@ -353,10 +352,10 @@ func TestModelDeploymentScalerPriorRequestMatchesTheEngineFamily(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			identity := inferenceXIdentity()
 			role := workercore.ModelDeploymentRole{
-				Name:         "server",
-				Kind:         workercore.ModelDeploymentRoleKindServer,
-				InstanceType: "mi325x-oam",
-				Resources:    &workercore.ModelDeploymentRoleResources{Accelerator: capacityPriorQuantity("8")},
+				Name:            "server",
+				Kind:            workercore.ModelDeploymentRoleKindServer,
+				AcceleratorType: "mi325x-oam",
+				Resources:       &workercore.ModelDeploymentRoleResources{Accelerator: capacityPriorQuantity("8")},
 				ExtraArgs: append(inferenceXLaunchArguments(),
 					"--dtype", "bf16", "--cpu-offload-gb", "0"),
 			}
@@ -378,11 +377,11 @@ func TestModelDeploymentScalerPriorRequestMatchesTheEngineFamily(t *testing.T) {
 func TestModelDeploymentScalerPriorRequestRefusesAnotherEngineFamily(t *testing.T) {
 	identity := inferenceXIdentity()
 	role := workercore.ModelDeploymentRole{
-		Name:         "server",
-		Kind:         workercore.ModelDeploymentRoleKindServer,
-		InstanceType: "mi325x-oam",
-		Resources:    &workercore.ModelDeploymentRoleResources{Accelerator: capacityPriorQuantity("8")},
-		ExtraArgs:    inferenceXVLLMLaunchArguments(),
+		Name:            "server",
+		Kind:            workercore.ModelDeploymentRoleKindServer,
+		AcceleratorType: "mi325x-oam",
+		Resources:       &workercore.ModelDeploymentRoleResources{Accelerator: capacityPriorQuantity("8")},
+		ExtraArgs:       inferenceXVLLMLaunchArguments(),
 	}
 	deployment := inferenceXDeployment("vllm/vllm-openai:v0.8.5")
 	deployment.Spec.Engine.Name = workercore.ModelDeploymentEngineVLLM
@@ -409,12 +408,12 @@ func TestModelDeploymentScalerPriorRequestRefusesAnotherEngineFamily(t *testing.
 func TestModelDeploymentScalerPriorRequestAcceptsAnIncompleteEnvironment(t *testing.T) {
 	identity := inferenceXIdentity()
 	role := workercore.ModelDeploymentRole{
-		Name:         "server",
-		Kind:         workercore.ModelDeploymentRoleKindServer,
-		InstanceType: "mi325x-oam",
-		Resources:    &workercore.ModelDeploymentRoleResources{Accelerator: capacityPriorQuantity("8")},
-		Env:          []workercore.ModelDeploymentEnvVar{{Name: "EXTRA_VAR", Value: "1"}},
-		ExtraArgs:    inferenceXLaunchArguments(),
+		Name:            "server",
+		Kind:            workercore.ModelDeploymentRoleKindServer,
+		AcceleratorType: "mi325x-oam",
+		Resources:       &workercore.ModelDeploymentRoleResources{Accelerator: capacityPriorQuantity("8")},
+		Env:             []workercore.ModelDeploymentEnvVar{{Name: "EXTRA_VAR", Value: "1"}},
+		ExtraArgs:       inferenceXLaunchArguments(),
 	}
 	deployment := inferenceXDeployment(inferenceXImage)
 	client := inferenceXClient(t, deployment)
@@ -438,12 +437,12 @@ func TestModelDeploymentScalerPriorRequestAcceptsAnIncompleteEnvironment(t *test
 func TestModelDeploymentScalerPriorRequestRefusesAContradictedRecordedVariable(t *testing.T) {
 	identity := inferenceXIdentity()
 	role := workercore.ModelDeploymentRole{
-		Name:         "server",
-		Kind:         workercore.ModelDeploymentRoleKindServer,
-		InstanceType: "mi325x-oam",
-		Resources:    &workercore.ModelDeploymentRoleResources{Accelerator: capacityPriorQuantity("8")},
-		Env:          []workercore.ModelDeploymentEnvVar{{Name: "SGLANG_USE_AITER", Value: "2"}},
-		ExtraArgs:    inferenceXLaunchArguments(),
+		Name:            "server",
+		Kind:            workercore.ModelDeploymentRoleKindServer,
+		AcceleratorType: "mi325x-oam",
+		Resources:       &workercore.ModelDeploymentRoleResources{Accelerator: capacityPriorQuantity("8")},
+		Env:             []workercore.ModelDeploymentEnvVar{{Name: "SGLANG_USE_AITER", Value: "2"}},
+		ExtraArgs:       inferenceXLaunchArguments(),
 	}
 	deployment := inferenceXDeployment(inferenceXImage)
 	client := inferenceXClient(t, deployment)
@@ -468,11 +467,11 @@ func TestModelDeploymentScalerPriorRequestRefusesAContradictedRecordedVariable(t
 func TestModelDeploymentScalerPriorRequestMalformedEnvironment(t *testing.T) {
 	identity := inferenceXIdentity()
 	role := workercore.ModelDeploymentRole{
-		Name:         "server",
-		Kind:         workercore.ModelDeploymentRoleKindServer,
-		InstanceType: "mi325x-oam",
-		Resources:    &workercore.ModelDeploymentRoleResources{Accelerator: capacityPriorQuantity("8")},
-		ExtraArgs:    inferenceXLaunchArguments(),
+		Name:            "server",
+		Kind:            workercore.ModelDeploymentRoleKindServer,
+		AcceleratorType: "mi325x-oam",
+		Resources:       &workercore.ModelDeploymentRoleResources{Accelerator: capacityPriorQuantity("8")},
+		ExtraArgs:       inferenceXLaunchArguments(),
 	}
 	deployment := inferenceXDeployment(inferenceXImage)
 	client := inferenceXClient(t, deployment)
@@ -500,12 +499,12 @@ func TestModelDeploymentScalerPriorRequestMalformedEnvironment(t *testing.T) {
 func TestModelDeploymentScalerPriorRequestRedactsTheEnvironmentValue(t *testing.T) {
 	identity := inferenceXIdentity()
 	role := workercore.ModelDeploymentRole{
-		Name:         "server",
-		Kind:         workercore.ModelDeploymentRoleKindServer,
-		InstanceType: "mi325x-oam",
-		Resources:    &workercore.ModelDeploymentRoleResources{Accelerator: capacityPriorQuantity("8")},
-		Env:          []workercore.ModelDeploymentEnvVar{{Name: "VLLM_DP_SIZE", Value: "review-only-marker"}},
-		ExtraArgs:    inferenceXVLLMLaunchArguments(),
+		Name:            "server",
+		Kind:            workercore.ModelDeploymentRoleKindServer,
+		AcceleratorType: "mi325x-oam",
+		Resources:       &workercore.ModelDeploymentRoleResources{Accelerator: capacityPriorQuantity("8")},
+		Env:             []workercore.ModelDeploymentEnvVar{{Name: "VLLM_DP_SIZE", Value: "review-only-marker"}},
+		ExtraArgs:       inferenceXVLLMLaunchArguments(),
 	}
 	deployment := inferenceXDeployment(inferenceXImage)
 	deployment.Spec.Engine.Name = workercore.ModelDeploymentEngineVLLM
@@ -575,11 +574,11 @@ func TestModelDeploymentScalerPriorRequestOmittedDefaultsValue(t *testing.T) {
 		t.Run(testCase.name, func(t *testing.T) {
 			identity := inferenceXIdentity()
 			role := workercore.ModelDeploymentRole{
-				Name:         "server",
-				Kind:         workercore.ModelDeploymentRoleKindServer,
-				InstanceType: "mi325x-oam",
-				Resources:    &workercore.ModelDeploymentRoleResources{Accelerator: capacityPriorQuantity("8")},
-				ExtraArgs:    inferenceXLaunchArguments(),
+				Name:            "server",
+				Kind:            workercore.ModelDeploymentRoleKindServer,
+				AcceleratorType: "mi325x-oam",
+				Resources:       &workercore.ModelDeploymentRoleResources{Accelerator: capacityPriorQuantity("8")},
+				ExtraArgs:       inferenceXLaunchArguments(),
 			}
 			deployment := inferenceXDeployment(inferenceXImage)
 			client := inferenceXClient(t, deployment)
@@ -610,11 +609,11 @@ func TestModelDeploymentScalerPriorRequestOmittedDefaultsValue(t *testing.T) {
 func TestModelDeploymentScalerPriorRequestAcceptsAMountedVolume(t *testing.T) {
 	identity := inferenceXIdentity()
 	role := workercore.ModelDeploymentRole{
-		Name:         "server",
-		Kind:         workercore.ModelDeploymentRoleKindServer,
-		InstanceType: "mi325x-oam",
-		Resources:    &workercore.ModelDeploymentRoleResources{Accelerator: capacityPriorQuantity("8")},
-		ExtraArgs:    inferenceXLaunchArguments(),
+		Name:            "server",
+		Kind:            workercore.ModelDeploymentRoleKindServer,
+		AcceleratorType: "mi325x-oam",
+		Resources:       &workercore.ModelDeploymentRoleResources{Accelerator: capacityPriorQuantity("8")},
+		ExtraArgs:       inferenceXLaunchArguments(),
 		AdditionalVolumes: []workercore.ModelDeploymentAdditionalVolume{{
 			MountPath: "/var/lib/gpustack/weights",
 			ReadOnly:  true,
@@ -644,12 +643,12 @@ func TestModelDeploymentScalerPriorRequestAcceptsAMountedVolume(t *testing.T) {
 func TestModelDeploymentScalerPriorRequestRedactsANegativeNumber(t *testing.T) {
 	identity := inferenceXIdentity()
 	role := workercore.ModelDeploymentRole{
-		Name:         "server",
-		Kind:         workercore.ModelDeploymentRoleKindServer,
-		InstanceType: "mi325x-oam",
-		Resources:    &workercore.ModelDeploymentRoleResources{Accelerator: capacityPriorQuantity("8")},
-		Env:          []workercore.ModelDeploymentEnvVar{{Name: "VLLM_DP_SIZE", Value: "-123456789"}},
-		ExtraArgs:    inferenceXVLLMLaunchArguments(),
+		Name:            "server",
+		Kind:            workercore.ModelDeploymentRoleKindServer,
+		AcceleratorType: "mi325x-oam",
+		Resources:       &workercore.ModelDeploymentRoleResources{Accelerator: capacityPriorQuantity("8")},
+		Env:             []workercore.ModelDeploymentEnvVar{{Name: "VLLM_DP_SIZE", Value: "-123456789"}},
+		ExtraArgs:       inferenceXVLLMLaunchArguments(),
 	}
 	deployment := inferenceXDeployment(inferenceXImage)
 	deployment.Spec.Engine.Name = workercore.ModelDeploymentEngineVLLM
@@ -783,11 +782,11 @@ func TestModelDeploymentScalerPriorAcceptsTheIdentityForms(t *testing.T) {
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
 			role := workercore.ModelDeploymentRole{
-				Name:         "server",
-				Kind:         workercore.ModelDeploymentRoleKindServer,
-				InstanceType: "mi325x-oam",
-				Resources:    &workercore.ModelDeploymentRoleResources{Accelerator: capacityPriorQuantity("8")},
-				ExtraArgs:    inferenceXLaunchArguments(),
+				Name:            "server",
+				Kind:            workercore.ModelDeploymentRoleKindServer,
+				AcceleratorType: "mi325x-oam",
+				Resources:       &workercore.ModelDeploymentRoleResources{Accelerator: capacityPriorQuantity("8")},
+				ExtraArgs:       inferenceXLaunchArguments(),
 			}
 			deployment := inferenceXDeployment(inferenceXImage)
 			deployment.Annotations[workercore.ModelDeploymentScalerModelIDAnnotationKey] = testCase.modelID
@@ -809,4 +808,19 @@ func TestModelDeploymentScalerPriorAcceptsTheIdentityForms(t *testing.T) {
 			assert.Contains(t, err.Error(), testCase.wantErr)
 		})
 	}
+
+	t.Run("CPU-only role without acceleratorType is refused", func(t *testing.T) {
+		role := workercore.ModelDeploymentRole{
+			Name:      "server",
+			Kind:      workercore.ModelDeploymentRoleKindServer,
+			Resources: &workercore.ModelDeploymentRoleResources{Accelerator: capacityPriorQuantity("8")},
+			ExtraArgs: inferenceXLaunchArguments(),
+		}
+		deployment := inferenceXDeployment(inferenceXImage)
+		client := inferenceXClient(t, deployment)
+		profile := priors.Profile{Identity: identity}
+		_, err := inferenceXRequest(t, client, deployment, &role, &profile)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "AcceleratorType is not set on CPU-only role")
+	})
 }

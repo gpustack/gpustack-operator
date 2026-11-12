@@ -830,14 +830,14 @@ func SynthesizeModelDeploymentConnector(in ModelDeploymentConnectorInput) (Model
 		case inject.KVTransferBackendHIXL:
 			if in.Manufacturer != nodefeature.ManufacturerAscend {
 				return ModelDeploymentConnectorRender{}, fmt.Errorf(
-					"KVTransferBackend %q requires an Ascend InstanceType, got manufacturer %q",
+					"KVTransferBackend %q requires an Ascend AcceleratorType, got manufacturer %q",
 					in.KVTransferBackend, in.Manufacturer,
 				)
 			}
 		case inject.KVTransferBackendNIXL:
 			if in.Manufacturer == nodefeature.ManufacturerAscend {
 				return ModelDeploymentConnectorRender{}, fmt.Errorf(
-					"KVTransferBackend %q is not supported on an Ascend InstanceType",
+					"KVTransferBackend %q is not supported on an Ascend AcceleratorType",
 					in.KVTransferBackend,
 				)
 			}

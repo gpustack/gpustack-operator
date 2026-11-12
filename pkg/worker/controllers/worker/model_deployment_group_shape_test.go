@@ -415,7 +415,7 @@ func renderedReplica(
 
 	md := newRenderDeployment(mutate...)
 	pod, err := renderModelDeploymentPod(context.Background(), ModelDeploymentRenderInput{
-		Deployment: md, Role: &md.Spec.Roles[0], InstanceType: newRenderInstanceType(),
+		Deployment: md, Role: &md.Spec.Roles[0], AcceleratorType: newRenderAcceleratorType(),
 	})
 	require.NoError(t, err)
 
@@ -485,7 +485,7 @@ func TestActualElasticRenderCarriesExecutionFacts(t *testing.T) {
 	require.NotNil(t, ModelDeploymentElasticRole(md), "the dispatcher takes the elastic path")
 
 	cli := ctrlfake.NewClientBuilder().WithScheme(scheme.Scheme).
-		WithObjects(md, newRenderInstanceType()).
+		WithObjects(md, newRenderAcceleratorType()).
 		WithStatusSubresource(&workercore.ModelDeployment{}).
 		WithIndex(&core.Pod{}, "spec.nodeName", func(obj ctrlcli.Object) []string {
 			return []string{obj.(*core.Pod).Spec.NodeName}

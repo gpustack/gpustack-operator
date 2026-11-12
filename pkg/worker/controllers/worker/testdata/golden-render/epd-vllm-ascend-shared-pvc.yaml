@@ -12,32 +12,32 @@ spec:
   model:
     name: Qwen/Qwen2.5-VL-7B-Instruct
   roles:
-  - additionalVolumes:
+  - acceleratorType: atlas-910b
+    additionalVolumes:
     - mountPath: /shared/encodings
       persistentVolumeClaim:
         claimName: ec-cache
     image: quay.io/ascend/vllm-ascend:v0.19.0
-    instanceType: atlas-910b
     kind: Encode
     name: encode
     replicas: 1
     resources:
       accelerator: "1"
     size: 1
-  - additionalVolumes:
+  - acceleratorType: atlas-910b
+    additionalVolumes:
     - mountPath: /shared/encodings
       persistentVolumeClaim:
         claimName: ec-cache
     image: quay.io/ascend/vllm-ascend:v0.19.0
-    instanceType: atlas-910b
     kind: Prefill
     name: prefill
     replicas: 1
     resources:
       accelerator: "1"
     size: 1
-  - image: quay.io/ascend/vllm-ascend:v0.19.0
-    instanceType: atlas-910b
+  - acceleratorType: atlas-910b
+    image: quay.io/ascend/vllm-ascend:v0.19.0
     kind: Decode
     name: decode
     replicas: 1

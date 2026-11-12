@@ -8,7 +8,6 @@ import (
 	core "k8s.io/api/core/v1"
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
-	kueuepodconst "sigs.k8s.io/kueue/pkg/controller/jobs/pod/constants"
 
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
 	"gpustack.ai/gpustack/pkg/kubemeta"
@@ -87,8 +86,8 @@ func modelDeploymentReplicaServiceOrdinals(
 		if !modelDeploymentOwns(pod, md) || modelDeploymentPodRole(pod) != role.Name {
 			continue
 		}
-		total, err := strconvx.Atoi[int](pod.Annotations[kueuepodconst.GroupTotalCountAnnotation])
-		if err != nil || total <= 1 {
+		total, ok := modelDeploymentPodDeclaredTotal(pod)
+		if !ok || total <= 1 {
 			// A replica of one member has nobody to address.
 			continue
 		}
@@ -321,8 +320,7 @@ func modelDeploymentRoleHasMultiMemberReplica(
 		if !modelDeploymentOwns(pod, md) || modelDeploymentPodRole(pod) != role.Name {
 			continue
 		}
-		if total, err := strconvx.Atoi[int](pod.Annotations[kueuepodconst.GroupTotalCountAnnotation]); err == nil &&
-			total > 1 {
+		if total, ok := modelDeploymentPodDeclaredTotal(pod); ok && total > 1 {
 			return true
 		}
 	}

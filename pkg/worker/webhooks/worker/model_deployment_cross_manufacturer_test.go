@@ -14,10 +14,10 @@ import (
 	"gpustack.ai/gpustack/pkg/nodefeature"
 )
 
-// onManufacturer makes a serving InstanceType report a manufacturer other than the fixture's own.
-func onManufacturer(manufacturer string) func(*worker.InstanceType) {
-	return func(instType *worker.InstanceType) {
-		instType.Status.Detail.Manufacturer = manufacturer
+// onManufacturer makes a serving AcceleratorType report a manufacturer other than the fixture's own.
+func onManufacturer(manufacturer string) func(*worker.AcceleratorType) {
+	return func(accType *worker.AcceleratorType) {
+		accType.Status.Detail.Manufacturer = manufacturer
 	}
 }
 
@@ -46,10 +46,10 @@ func TestModelDeploymentWebhook_CrossManufacturerIsAdmitted(t *testing.T) {
 	}
 
 	live := []ctrlcli.Object{
-		servingInstanceType("h20-8x", 8),
-		servingInstanceType("mi300x-8x", 8,
+		servingAcceleratorType("h20-8x", 8),
+		servingAcceleratorType("mi300x-8x", 8,
 			onManufacturer(nodefeature.ManufacturerAMD)),
-		servingInstanceType("ascend-910c-8x", 8,
+		servingAcceleratorType("ascend-910c-8x", 8,
 			onManufacturer(nodefeature.ManufacturerAscend)),
 	}
 

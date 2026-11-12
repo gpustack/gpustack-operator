@@ -28,8 +28,8 @@ type modelDeploymentScalerPriorFixture struct {
 	scaler       *workercore.ModelDeploymentScaler
 	target       *workercore.ModelDeployment
 	catalog      *core.ConfigMap
-	instance     *workerapi.InstanceType
-	wideInstance *workerapi.InstanceType
+	instance     *workerapi.AcceleratorType
+	wideInstance *workerapi.AcceleratorType
 	args         []string
 	document     priors.CatalogDocument
 }
@@ -134,11 +134,11 @@ func newModelDeploymentScalerPriorFixture(t *testing.T) modelDeploymentScalerPri
 				Image: engineImage,
 			},
 			Roles: []workercore.ModelDeploymentRole{{
-				Name:         "server",
-				Kind:         workercore.ModelDeploymentRoleKindServer,
-				Replicas:     1,
-				InstanceType: "h100-1x",
-				ExtraArgs:    args,
+				Name:            "server",
+				Kind:            workercore.ModelDeploymentRoleKindServer,
+				Replicas:        1,
+				AcceleratorType: "h100-1x",
+				ExtraArgs:       args,
 				Resources: &workercore.ModelDeploymentRoleResources{
 					Accelerator: ptr.To(resource.MustParse("1")),
 				},
@@ -172,10 +172,9 @@ func newModelDeploymentScalerPriorFixture(t *testing.T) modelDeploymentScalerPri
 		ObjectMeta: meta.ObjectMeta{Namespace: "team-a", Name: "test-priors"},
 		Data:       map[string]string{priors.DefaultCatalogConfigMapKey: string(rawCatalog)},
 	}
-	instance := &workerapi.InstanceType{
+	instance := &workerapi.AcceleratorType{
 		ObjectMeta: meta.ObjectMeta{Name: "h100-1x"},
-		Spec:       workercore.InstanceTypeSpec{Acceleratable: true},
-		Status: workercore.InstanceTypeStatus{
+		Status: workercore.AcceleratorTypeStatus{
 			Detail: workercore.InstanceTypeDetail{
 				Product: "H100",
 				InstanceTypeAcceleratorDetail: workercore.InstanceTypeAcceleratorDetail{
@@ -184,10 +183,9 @@ func newModelDeploymentScalerPriorFixture(t *testing.T) modelDeploymentScalerPri
 			},
 		},
 	}
-	wideInstance := &workerapi.InstanceType{
+	wideInstance := &workerapi.AcceleratorType{
 		ObjectMeta: meta.ObjectMeta{Name: "h100-2x"},
-		Spec:       workercore.InstanceTypeSpec{Acceleratable: true},
-		Status: workercore.InstanceTypeStatus{
+		Status: workercore.AcceleratorTypeStatus{
 			Detail: workercore.InstanceTypeDetail{
 				Product: "H100",
 				InstanceTypeAcceleratorDetail: workercore.InstanceTypeAcceleratorDetail{
@@ -348,11 +346,11 @@ func modelDeploymentScalerPriorRole(
 	name string, kind workercore.ModelDeploymentRoleKind, extraArgs []string, gpusPerReplica int64,
 ) workercore.ModelDeploymentRole {
 	return workercore.ModelDeploymentRole{
-		Name:         name,
-		Kind:         kind,
-		Replicas:     1,
-		InstanceType: fmt.Sprintf("h100-%dx", gpusPerReplica),
-		ExtraArgs:    append([]string(nil), extraArgs...),
+		Name:            name,
+		Kind:            kind,
+		Replicas:        1,
+		AcceleratorType: fmt.Sprintf("h100-%dx", gpusPerReplica),
+		ExtraArgs:       append([]string(nil), extraArgs...),
 		Resources: &workercore.ModelDeploymentRoleResources{
 			Accelerator: ptr.To(resource.MustParse(strconv.FormatInt(gpusPerReplica, 10))),
 		},

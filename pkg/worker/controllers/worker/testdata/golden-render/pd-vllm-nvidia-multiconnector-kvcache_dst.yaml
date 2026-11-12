@@ -6,7 +6,7 @@ metadata:
     kueue.x-k8s.io/pod-group-total-count: "1"
     kueue.x-k8s.io/role-hash: decode
     kvcache.gpustack.ai/client-config: '{"metadata_server":"P2PHANDSHAKE","master_server_address":"shared-kv-master.gpustack-system.svc:50051","protocol":"tcp","device_name":"","mode":"standalone-store","global_segment_size":0,"local_buffer_size":134217728,"tenant_id":"chat"}'
-    modeldeployment.gpustack.ai/pod-spec-hash: ae9f2ae6afb98c0ba90c57a53a21cd80881b9ee1c813502dfca8d729989abf40
+    modeldeployment.gpustack.ai/pod-spec-hash: bda24f8e1241d3a8dfec2930a48bd2283d05bd7f6922972533f5fa3eb5087956
     modeldeployment.gpustack.ai/render-version: "5"
     note.gpustack.ai/role: decode
     prometheus.io/path: /metrics
@@ -150,14 +150,8 @@ spec:
       timeoutSeconds: 5
     resources:
       limits:
-        cpu: "16"
-        ephemeral-storage: 15Gi
-        memory: 64Gi
         nvidia.com/gpu: "1"
       requests:
-        cpu: 1600m
-        ephemeral-storage: 1920Mi
-        memory: 8Gi
         nvidia.com/gpu: "1"
     startupProbe:
       failureThreshold: 180
@@ -227,7 +221,7 @@ metadata:
     kueue.x-k8s.io/pod-group-total-count: "1"
     kueue.x-k8s.io/role-hash: prefill
     kvcache.gpustack.ai/client-config: '{"metadata_server":"P2PHANDSHAKE","master_server_address":"shared-kv-master.gpustack-system.svc:50051","protocol":"tcp","device_name":"","mode":"standalone-store","global_segment_size":0,"local_buffer_size":134217728,"tenant_id":"chat"}'
-    modeldeployment.gpustack.ai/pod-spec-hash: f6b9ee45ca75409eb43af2faa84aab60899dad0fd3f10d88839e8a4b7f3e0b3a
+    modeldeployment.gpustack.ai/pod-spec-hash: f4f2b1b16ddbd23475c344f1e2a90de8c81719aa667d689c7eda52e1716205e7
     modeldeployment.gpustack.ai/render-version: "5"
     note.gpustack.ai/role: prefill
     prometheus.io/path: /metrics
@@ -379,14 +373,8 @@ spec:
       timeoutSeconds: 5
     resources:
       limits:
-        cpu: "16"
-        ephemeral-storage: 15Gi
-        memory: 64Gi
         nvidia.com/gpu: "1"
       requests:
-        cpu: 1600m
-        ephemeral-storage: 1920Mi
-        memory: 8Gi
         nvidia.com/gpu: "1"
     startupProbe:
       failureThreshold: 180

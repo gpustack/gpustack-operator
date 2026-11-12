@@ -10,16 +10,16 @@ spec:
   model:
     name: Qwen/Qwen2.5-72B-Instruct
   roles:
-  - image: vllm/vllm-openai:v0.19.0
-    instanceType: h20-8x
+  - acceleratorType: h20-8x
+    image: vllm/vllm-openai:v0.19.0
     kind: Prefill
     name: prefill
     replicas: 1
     resources:
       accelerator: "1"
     size: 1
-  - image: vllm/vllm-openai:v0.19.0
-    instanceType: h20-8x
+  - acceleratorType: h20-8x
+    image: vllm/vllm-openai:v0.19.0
     kind: Decode
     name: decode
     replicas: 1
