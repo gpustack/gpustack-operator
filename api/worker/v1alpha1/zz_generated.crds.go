@@ -4971,12 +4971,9 @@ func crd_gpustack_api_worker_v1alpha1_ModelDeployment() *v1.CustomResourceDefini
 											Type:        "object",
 											Properties: map[string]v1.JSONSchemaProps{
 												"backend": {
-													Description: "Backend selects the KV transfer backend used on the direct\nprefill-to-decode leg.\nAllowed values are Auto, Mooncake, NIXL, and HIXL. When unset or Auto,\nthe operator selects the default transfer backend for the role's pool\nhardware manufacturer and inference engine. HIXL is only valid on\nAscend pools, and NIXL is only valid on non-Ascend pools.",
+													Description: "Backend selects the point-to-point KV transfer backend used on the direct\nprefill-to-decode leg.\nMooncake, NIXL, and HIXL are the supported point-to-point KV transfer backends.\nWhen omitted, the operator selects Mooncake on non-Ascend pools and HIXL on\nAscend pools. Each backend selects the fastest available interconnect automatically\nand falls back to TCP when no high-speed fabric is configured.",
 													Type:        "string",
 													Enum: []v1.JSON{
-														{
-															Raw: []byte(`"Auto"`),
-														},
 														{
 															Raw: []byte(`"Mooncake"`),
 														},
@@ -4985,30 +4982,6 @@ func crd_gpustack_api_worker_v1alpha1_ModelDeployment() *v1.CustomResourceDefini
 														},
 														{
 															Raw: []byte(`"HIXL"`),
-														},
-													},
-												},
-												"protocol": {
-													Description: "Protocol selects the wire transport for the direct prefill-to-decode\nKV transfer leg across the deployment. Both prefill and decode roles\nshare one wire transport; each engine's transfer injector translates\nthe selected protocol and pool hardware manufacturer into the engine's\ntransport configuration.\nAllowed values are Auto, TCP, RDMA, EFA, CANN, and ROCM. When unset or\nAuto, the operator defaults the wire transport to TCP so fresh\ndeployments run on clusters without RDMA or vendor high-speed fabric\nconfigured. Set RDMA, EFA, CANN, or ROCM explicitly to enable\nzero-copy RDMA, AWS EFA, or vendor high-speed fabric transport on the\nprefill/decode leg.\nEditing Protocol re-renders every role's transfer configuration and\nrolls every role's replicas together.",
-													Type:        "string",
-													Enum: []v1.JSON{
-														{
-															Raw: []byte(`"Auto"`),
-														},
-														{
-															Raw: []byte(`"TCP"`),
-														},
-														{
-															Raw: []byte(`"RDMA"`),
-														},
-														{
-															Raw: []byte(`"EFA"`),
-														},
-														{
-															Raw: []byte(`"CANN"`),
-														},
-														{
-															Raw: []byte(`"ROCM"`),
 														},
 													},
 												},

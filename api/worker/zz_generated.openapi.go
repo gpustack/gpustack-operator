@@ -10064,19 +10064,12 @@ func schema_gpustack_api_worker_v1alpha1_ModelDeploymentKVTransfer(ref common.Re
 	return common.OpenAPIDefinition{
 		Schema: spec.Schema{
 			SchemaProps: spec.SchemaProps{
-				Description: "ModelDeploymentKVTransfer carries the settings of the point-to-point KV transfer leg between a prefill role and a decode role. It composes with a shared store rather than excluding one: both legs may be configured on one deployment, and the synthesized connector carries the pair together.",
+				Description: "ModelDeploymentKVTransfer carries the settings of the point-to-point KV transfer leg between a prefill role and a decode role. It composes with a shared store rather than excluding one: both legs may be configured on one deployment, and the synthesized connector carries the pair together. Mooncake, NIXL, and HIXL are the supported point-to-point KV transfer backends. When omitted, the operator selects Mooncake on non-Ascend pools and HIXL on Ascend pools; each backend selects the fastest available interconnect automatically and falls back to TCP when no high-speed fabric is configured.",
 				Type:        []string{"object"},
 				Properties: map[string]spec.Schema{
-					"protocol": {
-						SchemaProps: spec.SchemaProps{
-							Description: "Protocol selects the wire transport for the direct prefill-to-decode KV transfer leg across the deployment. Both prefill and decode roles share one wire transport; each engine's transfer injector translates the selected protocol and pool hardware manufacturer into the engine's transport configuration.\n\nAllowed values are Auto, TCP, RDMA, EFA, CANN, and ROCM. When unset or Auto, the operator defaults the wire transport to TCP so fresh deployments run on clusters without RDMA or vendor high-speed fabric configured. Set RDMA, EFA, CANN, or ROCM explicitly to enable zero-copy RDMA, AWS EFA, or vendor high-speed fabric transport on the prefill/decode leg.\n\nEditing Protocol re-renders every role's transfer configuration and rolls every role's replicas together.",
-							Type:        []string{"string"},
-							Format:      "",
-						},
-					},
 					"backend": {
 						SchemaProps: spec.SchemaProps{
-							Description: "Backend selects the KV transfer backend used on the direct prefill-to-decode leg.\n\nAllowed values are Auto, Mooncake, NIXL, and HIXL. When unset or Auto, the operator selects the default transfer backend for the role's pool hardware manufacturer and inference engine. HIXL is only valid on Ascend pools, and NIXL is only valid on non-Ascend pools.",
+							Description: "Backend selects the point-to-point KV transfer backend used on the direct prefill-to-decode leg.\n\nMooncake, NIXL, and HIXL are the supported point-to-point KV transfer backends. When omitted, the operator selects Mooncake on non-Ascend pools and HIXL on Ascend pools. Each backend selects the fastest available interconnect automatically and falls back to TCP when no high-speed fabric is configured.",
 							Type:        []string{"string"},
 							Format:      "",
 						},

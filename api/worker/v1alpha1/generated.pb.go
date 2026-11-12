@@ -6502,11 +6502,6 @@ func (m *ModelDeploymentKVTransfer) MarshalToSizedBuffer(dAtA []byte) (int, erro
 	i = encodeVarintGenerated(dAtA, i, uint64(len(m.Backend)))
 	i--
 	dAtA[i] = 0x12
-	i -= len(m.Protocol)
-	copy(dAtA[i:], m.Protocol)
-	i = encodeVarintGenerated(dAtA, i, uint64(len(m.Protocol)))
-	i--
-	dAtA[i] = 0xa
 	return len(dAtA) - i, nil
 }
 
@@ -14826,8 +14821,6 @@ func (m *ModelDeploymentKVTransfer) Size() (n int) {
 	}
 	var l int
 	_ = l
-	l = len(m.Protocol)
-	n += 1 + l + sovGenerated(uint64(l))
 	l = len(m.Backend)
 	n += 1 + l + sovGenerated(uint64(l))
 	return n
@@ -18757,7 +18750,6 @@ func (this *ModelDeploymentKVTransfer) String() string {
 		return "nil"
 	}
 	s := strings.Join([]string{`&ModelDeploymentKVTransfer{`,
-		`Protocol:` + fmt.Sprintf("%v", this.Protocol) + `,`,
 		`Backend:` + fmt.Sprintf("%v", this.Backend) + `,`,
 		`}`,
 	}, "")
@@ -39672,38 +39664,6 @@ func (m *ModelDeploymentKVTransfer) Unmarshal(dAtA []byte) error {
 			return fmt.Errorf("proto: ModelDeploymentKVTransfer: illegal tag %d (wire type %d)", fieldNum, wire)
 		}
 		switch fieldNum {
-		case 1:
-			if wireType != 2 {
-				return fmt.Errorf("proto: wrong wireType = %d for field Protocol", wireType)
-			}
-			var stringLen uint64
-			for shift := uint(0); ; shift += 7 {
-				if shift >= 64 {
-					return ErrIntOverflowGenerated
-				}
-				if iNdEx >= l {
-					return io.ErrUnexpectedEOF
-				}
-				b := dAtA[iNdEx]
-				iNdEx++
-				stringLen |= uint64(b&0x7F) << shift
-				if b < 0x80 {
-					break
-				}
-			}
-			intStringLen := int(stringLen)
-			if intStringLen < 0 {
-				return ErrInvalidLengthGenerated
-			}
-			postIndex := iNdEx + intStringLen
-			if postIndex < 0 {
-				return ErrInvalidLengthGenerated
-			}
-			if postIndex > l {
-				return io.ErrUnexpectedEOF
-			}
-			m.Protocol = string(dAtA[iNdEx:postIndex])
-			iNdEx = postIndex
 		case 2:
 			if wireType != 2 {
 				return fmt.Errorf("proto: wrong wireType = %d for field Backend", wireType)
