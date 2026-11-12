@@ -7479,11 +7479,6 @@ func (m *ModelDeploymentRole) MarshalToSizedBuffer(dAtA []byte) (int, error) {
 		i--
 		dAtA[i] = 0x22
 	}
-	i -= len(m.InstanceType)
-	copy(dAtA[i:], m.InstanceType)
-	i = encodeVarintGenerated(dAtA, i, uint64(len(m.InstanceType)))
-	i--
-	dAtA[i] = 0x1a
 	i = encodeVarintGenerated(dAtA, i, uint64(m.Replicas))
 	i--
 	dAtA[i] = 0x10
@@ -10834,15 +10829,6 @@ func (m *ModelPrefetchPlacement) MarshalToSizedBuffer(dAtA []byte) (int, error) 
 		}
 		i--
 		dAtA[i] = 0x12
-	}
-	if len(m.InstanceTypes) > 0 {
-		for iNdEx := len(m.InstanceTypes) - 1; iNdEx >= 0; iNdEx-- {
-			i -= len(m.InstanceTypes[iNdEx])
-			copy(dAtA[i:], m.InstanceTypes[iNdEx])
-			i = encodeVarintGenerated(dAtA, i, uint64(len(m.InstanceTypes[iNdEx])))
-			i--
-			dAtA[i] = 0xa
-		}
 	}
 	return len(dAtA) - i, nil
 }
@@ -15445,8 +15431,6 @@ func (m *ModelDeploymentRole) Size() (n int) {
 	l = len(m.Name)
 	n += 1 + l + sovGenerated(uint64(l))
 	n += 1 + sovGenerated(uint64(m.Replicas))
-	l = len(m.InstanceType)
-	n += 1 + l + sovGenerated(uint64(l))
 	if m.Resources != nil {
 		l = m.Resources.Size()
 		n += 1 + l + sovGenerated(uint64(l))
@@ -16715,12 +16699,6 @@ func (m *ModelPrefetchPlacement) Size() (n int) {
 	}
 	var l int
 	_ = l
-	if len(m.InstanceTypes) > 0 {
-		for _, s := range m.InstanceTypes {
-			l = len(s)
-			n += 1 + l + sovGenerated(uint64(l))
-		}
-	}
 	if m.NodeSelector != nil {
 		l = m.NodeSelector.Size()
 		n += 1 + l + sovGenerated(uint64(l))
@@ -19426,7 +19404,6 @@ func (this *ModelDeploymentRole) String() string {
 	s := strings.Join([]string{`&ModelDeploymentRole{`,
 		`Name:` + fmt.Sprintf("%v", this.Name) + `,`,
 		`Replicas:` + fmt.Sprintf("%v", this.Replicas) + `,`,
-		`InstanceType:` + fmt.Sprintf("%v", this.InstanceType) + `,`,
 		`Resources:` + strings.Replace(this.Resources.String(), "ModelDeploymentRoleResources", "ModelDeploymentRoleResources", 1) + `,`,
 		`ExtraArgs:` + fmt.Sprintf("%v", this.ExtraArgs) + `,`,
 		`Env:` + repeatedStringForEnv + `,`,
@@ -20352,7 +20329,6 @@ func (this *ModelPrefetchPlacement) String() string {
 		return "nil"
 	}
 	s := strings.Join([]string{`&ModelPrefetchPlacement{`,
-		`InstanceTypes:` + fmt.Sprintf("%v", this.InstanceTypes) + `,`,
 		`NodeSelector:` + strings.Replace(fmt.Sprintf("%v", this.NodeSelector), "LabelSelector", "v1.LabelSelector", 1) + `,`,
 		`AcceleratorTypes:` + fmt.Sprintf("%v", this.AcceleratorTypes) + `,`,
 		`}`,
@@ -42899,38 +42875,6 @@ func (m *ModelDeploymentRole) Unmarshal(dAtA []byte) error {
 					break
 				}
 			}
-		case 3:
-			if wireType != 2 {
-				return fmt.Errorf("proto: wrong wireType = %d for field InstanceType", wireType)
-			}
-			var stringLen uint64
-			for shift := uint(0); ; shift += 7 {
-				if shift >= 64 {
-					return ErrIntOverflowGenerated
-				}
-				if iNdEx >= l {
-					return io.ErrUnexpectedEOF
-				}
-				b := dAtA[iNdEx]
-				iNdEx++
-				stringLen |= uint64(b&0x7F) << shift
-				if b < 0x80 {
-					break
-				}
-			}
-			intStringLen := int(stringLen)
-			if intStringLen < 0 {
-				return ErrInvalidLengthGenerated
-			}
-			postIndex := iNdEx + intStringLen
-			if postIndex < 0 {
-				return ErrInvalidLengthGenerated
-			}
-			if postIndex > l {
-				return io.ErrUnexpectedEOF
-			}
-			m.InstanceType = string(dAtA[iNdEx:postIndex])
-			iNdEx = postIndex
 		case 4:
 			if wireType != 2 {
 				return fmt.Errorf("proto: wrong wireType = %d for field Resources", wireType)
@@ -54373,38 +54317,6 @@ func (m *ModelPrefetchPlacement) Unmarshal(dAtA []byte) error {
 			return fmt.Errorf("proto: ModelPrefetchPlacement: illegal tag %d (wire type %d)", fieldNum, wire)
 		}
 		switch fieldNum {
-		case 1:
-			if wireType != 2 {
-				return fmt.Errorf("proto: wrong wireType = %d for field InstanceTypes", wireType)
-			}
-			var stringLen uint64
-			for shift := uint(0); ; shift += 7 {
-				if shift >= 64 {
-					return ErrIntOverflowGenerated
-				}
-				if iNdEx >= l {
-					return io.ErrUnexpectedEOF
-				}
-				b := dAtA[iNdEx]
-				iNdEx++
-				stringLen |= uint64(b&0x7F) << shift
-				if b < 0x80 {
-					break
-				}
-			}
-			intStringLen := int(stringLen)
-			if intStringLen < 0 {
-				return ErrInvalidLengthGenerated
-			}
-			postIndex := iNdEx + intStringLen
-			if postIndex < 0 {
-				return ErrInvalidLengthGenerated
-			}
-			if postIndex > l {
-				return io.ErrUnexpectedEOF
-			}
-			m.InstanceTypes = append(m.InstanceTypes, string(dAtA[iNdEx:postIndex]))
-			iNdEx = postIndex
 		case 2:
 			if wireType != 2 {
 				return fmt.Errorf("proto: wrong wireType = %d for field NodeSelector", wireType)

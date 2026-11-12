@@ -10972,7 +10972,7 @@ func schema_gpustack_api_worker_v1alpha1_ModelDeploymentRole(ref common.Referenc
 	return common.OpenAPIDefinition{
 		Schema: spec.Schema{
 			SchemaProps: spec.SchemaProps{
-				Description: "ModelDeploymentRole is one engine role and its replicas.\n\nReplicas, InstanceType and Resources are STRUCTURED FIELDS AND MUST STAY SO. They are inputs to admission and scheduling — Kueue PodSet counts, flavor selection and the request the queue accounts — so a container field able to shadow any of them would make the admission feasibility check read a ledger that does not match reality. That is why the container fields below carry no resource request at all: the accelerator half belongs in Resources and the rest is derived from the InstanceType, and neither can be overridden here.\n\nEDITING A CONTAINER FIELD ROLLS THIS ROLE'S REPLICAS, and only this role's -- with one exception. The declared parallel degrees of a prefill or decode role -- the degree flags in ExtraArgs and any data-parallel degree declared in Env -- are the one container field that can render into a document BOTH roles carry: the Ascend transfer leg writes the same parallel blocks into both roles' Pods, so on that leg editing one role's degrees rewrites the other role's Pods too, and the edit rolls the pair. Where no shared document renders them, a degree edit stays this role's own like every other container-field edit: every replica is a Kueue pod group of its own, so they are replaced one at a time -- one per role per pass -- and every sibling role keeps serving throughout. A `replicas` change rolls nothing at all: it adds or removes instances, and every instance that stays keeps running, keeps the accelerators it was admitted with and keeps whatever cache it holds.\n\nTHE SET OF ROLES IS FIXED AFTER CREATION. Admission refuses adding, removing or renaming a role, and it refuses a kind change on a role that exists: the name and the kind are what the role IS, while size, instanceType, resources and command are how it is currently running and are editable beside every other container field. A replica's group is named from the deployment, its role and its ordinal, so edits to one role's running configuration do not rename a sibling role's groups.\n\nA departure this operator did not initiate is not a rollout. The departed replica is replaced under a new name while its siblings keep serving.",
+				Description: "ModelDeploymentRole is one engine role and its replicas.\n\nReplicas, AcceleratorType and Resources are STRUCTURED FIELDS AND MUST STAY SO. They are inputs to admission and scheduling — Kueue PodSet counts, flavor selection and the request the queue accounts — so a container field able to shadow any of them would make the admission feasibility check read a ledger that does not match reality. That is why the container fields below carry no resource request at all: all accelerator, CPU, RAM and localStorage requests belong in Resources alongside AcceleratorType, and cannot be overridden on the container.\n\nEDITING A CONTAINER FIELD ROLLS THIS ROLE'S REPLICAS, and only this role's -- with one exception. The declared parallel degrees of a prefill or decode role -- the degree flags in ExtraArgs and any data-parallel degree declared in Env -- are the one container field that can render into a document BOTH roles carry: the Ascend transfer leg writes the same parallel blocks into both roles' Pods, so on that leg editing one role's degrees rewrites the other role's Pods too, and the edit rolls the pair. Where no shared document renders them, a degree edit stays this role's own like every other container-field edit: every replica is a Kueue pod group of its own, so they are replaced one at a time -- one per role per pass -- and every sibling role keeps serving throughout. A `replicas` change rolls nothing at all: it adds or removes instances, and every instance that stays keeps running, keeps the accelerators it was admitted with and keeps whatever cache it holds.\n\nTHE SET OF ROLES IS FIXED AFTER CREATION. Admission refuses adding, removing or renaming a role, and it refuses a kind change on a role that exists: the name and the kind are what the role IS, while size, acceleratorType, resources and command are how it is currently running and are editable beside every other container field. A replica's group is named from the deployment, its role and its ordinal, so edits to one role's running configuration do not rename a sibling role's groups.\n\nA departure this operator did not initiate is not a rollout. The departed replica is replaced under a new name while its siblings keep serving.",
 				Type:        []string{"object"},
 				Properties: map[string]spec.Schema{
 					"name": {
@@ -11010,14 +11010,6 @@ func schema_gpustack_api_worker_v1alpha1_ModelDeploymentRole(ref common.Referenc
 							Maximum:     ptr.To[float64](64),
 							Type:        []string{"integer"},
 							Format:      "int32",
-						},
-					},
-					"instanceType": {
-						SchemaProps: spec.SchemaProps{
-							Description: "InstanceType is the name of the InstanceType whose pool this role's Pods are admitted against. It is what the queue-name entrance label is derived from.\n\nIT IS EDITABLE. Moving a role to another type runs the same whole-group replacement: each old replica leaves before its replacement is created, and that replacement is admitted against the queue the new type publishes before the next old replica may leave. Existing Pods keep the type they were admitted with until they are deleted. The elastic-EP profile freezes this field after creation.",
-							MaxLength:   ptr.To[int64](253),
-							Type:        []string{"string"},
-							Format:      "",
 						},
 					},
 					"acceleratorType": {
@@ -11228,7 +11220,7 @@ func schema_gpustack_api_worker_v1alpha1_ModelDeploymentRoleElasticEP(ref common
 	return common.OpenAPIDefinition{
 		Schema: spec.Schema{
 			SchemaProps: spec.SchemaProps{
-				Description: "ModelDeploymentRoleElasticEP is the elastic-EP profile of one role.\n\nWidth is the only mutable field: it answers how large the collective currently should be, which is a running-state question. This release accepts increases and unchanged values; admission refuses a decrease until Elastic EP scale-down support is complete. The role cannot enable or disable this profile after creation. Its tensor parallel size comes from ExtraArgs and cannot change after creation. The ordinary role fields' editability does not reach this role: instanceType, resources and command are frozen with the profile, and replicas and size stay at one.",
+				Description: "ModelDeploymentRoleElasticEP is the elastic-EP profile of one role.\n\nWidth is the only mutable field: it answers how large the collective currently should be, which is a running-state question. This release accepts increases and unchanged values; admission refuses a decrease until Elastic EP scale-down support is complete. The role cannot enable or disable this profile after creation. Its tensor parallel size comes from ExtraArgs and cannot change after creation. The ordinary role fields' editability does not reach this role: acceleratorType, resources and command are frozen with the profile, and replicas and size stay at one.",
 				Type:        []string{"object"},
 				Properties: map[string]spec.Schema{
 					"width": {
@@ -11340,18 +11332,18 @@ func schema_gpustack_api_worker_v1alpha1_ModelDeploymentRoleResources(ref common
 	return common.OpenAPIDefinition{
 		Schema: spec.Schema{
 			SchemaProps: spec.SchemaProps{
-				Description: "ModelDeploymentRoleResources is what one Pod of a role asks of accelerators, fabric interfaces, and optional explicit host resources.\n\nIt mirrors the accelerator fields of InstanceResources — the same names, the same meanings — rather than inventing a second vocabulary for one request, and adds optional CPU, RAM and LocalStorage host resource requests that are rendered onto the serving container only when set (never derived from InstanceType).",
+				Description: "ModelDeploymentRoleResources is what one Pod of a role asks of accelerators, fabric interfaces, and optional explicit host resources.\n\nIt mirrors the accelerator fields of InstanceResources — the same names, the same meanings — rather than inventing a second vocabulary for one request, and adds optional CPU, RAM and LocalStorage host resource requests that are rendered onto the serving container only when set (never derived from AcceleratorType or InstanceType).",
 				Type:        []string{"object"},
 				Properties: map[string]spec.Schema{
 					"accelerator": {
 						SchemaProps: spec.SchemaProps{
-							Description: "Accelerator is how many accelerator cards ONE POD asks for.\n\n  - Left unset on an acceleratable InstanceType it DEFAULTS TO ONE at admission, on create and\n    on update alike, the same way an Instance's does. The value is written into the stored\n    object rather than applied at render time, so what was admitted is what can be read back.\n  - AN EXPLICIT ZERO IS KEPT, because it is a value the user wrote, and on an acceleratable\n    InstanceType it asks for nothing that pool's queue accounts in. It is accepted while it is\n    the only role using that type, and refused when another role shares the type: replicas\n    asking for nothing the queue accounts in are admitted and run while that queue charges\n    them nothing, spending from the pool their siblings on that type are charged for.\n  - A Pod meant to run without an accelerator belongs on an InstanceType that is not\n    acceleratable, where CPU is what the queue accounts in.",
+							Description: "Accelerator is how many accelerator cards ONE POD asks for.\n\n  - Left unset on an accelerated role (acceleratorType set) it DEFAULTS TO ONE at admission, on\n    create and on update alike. The value is written into the stored object rather than applied\n    at render time, so what was admitted is what can be read back.\n  - A role meant to run without an accelerator omits acceleratorType and leaves accelerator\n    unset or zero.",
 							Ref:         ref(resource.Quantity{}.OpenAPIModelName()),
 						},
 					},
 					"acceleratorSlicedMemoryPercentage": {
 						SchemaProps: spec.SchemaProps{
-							Description: "AcceleratorSlicedMemoryPercentage is the per-accelerator VRAM budget requested on a sliced InstanceType, as a percentage in [0,100]. 0 disables slicing, making the request an exclusive whole-accelerator one. It is ignored by an InstanceType offering no slicing.",
+							Description: "AcceleratorSlicedMemoryPercentage is the per-accelerator VRAM budget requested on a sliced AcceleratorType, as a percentage in [0,100]. 0 disables slicing, making the request an exclusive whole-accelerator one. It is ignored by an AcceleratorType offering no slicing.",
 							Minimum:     ptr.To[float64](0),
 							Maximum:     ptr.To[float64](100),
 							Type:        []string{"integer"},
@@ -11360,7 +11352,7 @@ func schema_gpustack_api_worker_v1alpha1_ModelDeploymentRoleResources(ref common
 					},
 					"acceleratorSlicedCoresPercentage": {
 						SchemaProps: spec.SchemaProps{
-							Description: "AcceleratorSlicedCoresPercentage is the per-accelerator compute budget requested on a sliced InstanceType, as a percentage in [0,100], independent of the memory percentage.",
+							Description: "AcceleratorSlicedCoresPercentage is the per-accelerator compute budget requested on a sliced AcceleratorType, as a percentage in [0,100], independent of the memory percentage.",
 							Minimum:     ptr.To[float64](0),
 							Maximum:     ptr.To[float64](100),
 							Type:        []string{"integer"},
@@ -11369,7 +11361,7 @@ func schema_gpustack_api_worker_v1alpha1_ModelDeploymentRoleResources(ref common
 					},
 					"acceleratorPartitionedProfile": {
 						SchemaProps: spec.SchemaProps{
-							Description: "AcceleratorPartitionedProfile is the hardware partition profile requested on a partition-offering InstanceType, e.g. \"3g.40gb\". A non-empty value is mutually exclusive with the two slice percentages: hardware partitioning and software slicing cannot both apply to one accelerator. It is ignored by an InstanceType offering no partition.",
+							Description: "AcceleratorPartitionedProfile is the hardware partition profile requested on a partition-offering AcceleratorType, e.g. \"3g.40gb\". A non-empty value is mutually exclusive with the two slice percentages: hardware partitioning and software slicing cannot both apply to one accelerator. It is ignored by an AcceleratorType offering no partition.",
 							MaxLength:   ptr.To[int64](64),
 							Type:        []string{"string"},
 							Format:      "",
@@ -14481,31 +14473,10 @@ func schema_gpustack_api_worker_v1alpha1_ModelPrefetchPlacement(ref common.Refer
 				Description: "ModelPrefetchPlacement narrows the target set of nodes the artifact warms.",
 				Type:        []string{"object"},
 				Properties: map[string]spec.Schema{
-					"instanceTypes": {
-						VendorExtensible: spec.VendorExtensible{
-							Extensions: spec.Extensions{
-								"x-kubernetes-list-type": "atomic",
-							},
-						},
-						SchemaProps: spec.SchemaProps{
-							Description: "InstanceTypes names the node pools to warm, by the InstanceType objects the scheduling chain already publishes. The target set is every node carrying one of these types' flavors.",
-							MinItems:    ptr.To[int64](1),
-							MaxItems:    ptr.To[int64](8),
-							Type:        []string{"array"},
-							Items: &spec.SchemaOrArray{
-								Schema: &spec.Schema{
-									SchemaProps: spec.SchemaProps{
-										Type:   []string{"string"},
-										Format: "",
-									},
-								},
-							},
-						},
-					},
 					"acceleratorTypes": {
 						VendorExtensible: spec.VendorExtensible{
 							Extensions: spec.Extensions{
-								"x-kubernetes-list-type": "atomic",
+								"x-kubernetes-list-type": "set",
 							},
 						},
 						SchemaProps: spec.SchemaProps{

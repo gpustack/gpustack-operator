@@ -15,34 +15,29 @@ import (
 // It mirrors the accelerator fields of InstanceResources — the same names, the same meanings —
 // rather than inventing a second vocabulary for one request, and adds optional CPU, RAM and
 // LocalStorage host resource requests that are rendered onto the serving container only when set
-// (never derived from InstanceType).
+// (never derived from AcceleratorType or InstanceType).
 type ModelDeploymentRoleResourcesApplyConfiguration struct {
 	// Accelerator is how many accelerator cards ONE POD asks for.
 	//
-	// - Left unset on an acceleratable InstanceType it DEFAULTS TO ONE at admission, on create and
-	// on update alike, the same way an Instance's does. The value is written into the stored
-	// object rather than applied at render time, so what was admitted is what can be read back.
-	// - AN EXPLICIT ZERO IS KEPT, because it is a value the user wrote, and on an acceleratable
-	// InstanceType it asks for nothing that pool's queue accounts in. It is accepted while it is
-	// the only role using that type, and refused when another role shares the type: replicas
-	// asking for nothing the queue accounts in are admitted and run while that queue charges
-	// them nothing, spending from the pool their siblings on that type are charged for.
-	// - A Pod meant to run without an accelerator belongs on an InstanceType that is not
-	// acceleratable, where CPU is what the queue accounts in.
+	// - Left unset on an accelerated role (acceleratorType set) it DEFAULTS TO ONE at admission, on
+	// create and on update alike. The value is written into the stored object rather than applied
+	// at render time, so what was admitted is what can be read back.
+	// - A role meant to run without an accelerator omits acceleratorType and leaves accelerator
+	// unset or zero.
 	Accelerator *resource.Quantity `json:"accelerator,omitempty"`
 	// AcceleratorSlicedMemoryPercentage is the per-accelerator VRAM budget requested on a sliced
-	// InstanceType, as a percentage in [0,100]. 0 disables slicing, making the request an exclusive
-	// whole-accelerator one. It is ignored by an InstanceType offering no slicing.
+	// AcceleratorType, as a percentage in [0,100]. 0 disables slicing, making the request an exclusive
+	// whole-accelerator one. It is ignored by an AcceleratorType offering no slicing.
 	//
 	AcceleratorSlicedMemoryPercentage *int32 `json:"acceleratorSlicedMemoryPercentage,omitempty"`
 	// AcceleratorSlicedCoresPercentage is the per-accelerator compute budget requested on a sliced
-	// InstanceType, as a percentage in [0,100], independent of the memory percentage.
+	// AcceleratorType, as a percentage in [0,100], independent of the memory percentage.
 	//
 	AcceleratorSlicedCoresPercentage *int32 `json:"acceleratorSlicedCoresPercentage,omitempty"`
 	// AcceleratorPartitionedProfile is the hardware partition profile requested on a
-	// partition-offering InstanceType, e.g. "3g.40gb". A non-empty value is mutually exclusive with
+	// partition-offering AcceleratorType, e.g. "3g.40gb". A non-empty value is mutually exclusive with
 	// the two slice percentages: hardware partitioning and software slicing cannot both apply to one
-	// accelerator. It is ignored by an InstanceType offering no partition.
+	// accelerator. It is ignored by an AcceleratorType offering no partition.
 	//
 	AcceleratorPartitionedProfile *string `json:"acceleratorPartitionedProfile,omitempty"`
 	// Interface is the number of fabric interfaces one role Pod requests, as a whole number.

@@ -121,21 +121,12 @@ type ModelPrefetchBindingReference struct {
 
 // ModelPrefetchPlacement narrows the target set of nodes the artifact warms.
 type ModelPrefetchPlacement struct {
-	// InstanceTypes names the node pools to warm, by the InstanceType objects the scheduling chain
-	// already publishes. The target set is every node carrying one of these types' flavors.
-	//
-	// +optional
-	// +listType=atomic
-	// +k8s:validation:minItems=1
-	// +k8s:validation:maxItems=8
-	InstanceTypes []string `json:"instanceTypes,omitempty" protobuf:"bytes,1,rep,name=instanceTypes"`
-
 	// AcceleratorTypes names the accelerator pools to warm, by the AcceleratorType objects the
 	// scheduling chain publishes. The target set is every node carrying one of these types'
 	// flavors.
 	//
 	// +optional
-	// +listType=atomic
+	// +listType=set
 	// +k8s:validation:minItems=1
 	// +k8s:validation:maxItems=8
 	AcceleratorTypes []string `json:"acceleratorTypes,omitempty" protobuf:"bytes,3,rep,name=acceleratorTypes"`

@@ -5875,11 +5875,6 @@ func crd_gpustack_api_worker_v1alpha1_ModelDeployment() *v1.CustomResourceDefini
 															Nullable:  true,
 															XListType: ptr.To[string]("atomic"),
 														},
-														"instanceType": {
-															Description: "InstanceType is the name of the InstanceType whose pool this role's Pods are admitted against.\nIt is what the queue-name entrance label is derived from.\nIT IS EDITABLE. Moving a role to another type runs the same whole-group replacement: each\nold replica leaves before its replacement is created, and that replacement is admitted\nagainst the queue the new type publishes before the next old replica may leave. Existing\nPods keep the type they were admitted with until they are deleted. The elastic-EP profile\nfreezes this field after creation.",
-															Type:        "string",
-															MaxLength:   ptr.To[int64](253),
-														},
 														"kind": {
 															Description: "Kind is what the engine is told this role is. It is CLOSED and it is NOT the role's name: Name\nis free-form and identifies the PodSet, while this selects behavior, and a semantic reachable\nby typing a string is one typo away from silently changing. Two roles may share a kind and\ndiffer in name ONLY where that kind is Server, because a pair of servers is a set of equals and\ntwo prefillers are not: nothing that consumes these roles expresses a second prefiller, so a\ndeployment declaring one would render a role no reader of the rendered configuration could\nreach. It defaults to Server, the shape a deployment written before disaggregation existed has,\nso such a deployment renders exactly as it did.",
 															Type:        "string",
@@ -5972,7 +5967,7 @@ func crd_gpustack_api_worker_v1alpha1_ModelDeployment() *v1.CustomResourceDefini
 															Type:        "object",
 															Properties: map[string]v1.JSONSchemaProps{
 																"accelerator": {
-																	Description: "Accelerator is how many accelerator cards ONE POD asks for.\n- Left unset on an acceleratable InstanceType it DEFAULTS TO ONE at admission, on create and\non update alike, the same way an Instance's does. The value is written into the stored\nobject rather than applied at render time, so what was admitted is what can be read back.\n- AN EXPLICIT ZERO IS KEPT, because it is a value the user wrote, and on an acceleratable\nInstanceType it asks for nothing that pool's queue accounts in. It is accepted while it is\nthe only role using that type, and refused when another role shares the type: replicas\nasking for nothing the queue accounts in are admitted and run while that queue charges\nthem nothing, spending from the pool their siblings on that type are charged for.\n- A Pod meant to run without an accelerator belongs on an InstanceType that is not\nacceleratable, where CPU is what the queue accounts in.",
+																	Description: "Accelerator is how many accelerator cards ONE POD asks for.\n- Left unset on an accelerated role (acceleratorType set) it DEFAULTS TO ONE at admission, on\ncreate and on update alike. The value is written into the stored object rather than applied\nat render time, so what was admitted is what can be read back.\n- A role meant to run without an accelerator omits acceleratorType and leaves accelerator\nunset or zero.",
 																	Pattern:     `^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$`,
 																	AnyOf: []v1.JSONSchemaProps{
 																		{
@@ -5986,19 +5981,19 @@ func crd_gpustack_api_worker_v1alpha1_ModelDeployment() *v1.CustomResourceDefini
 																	XIntOrString: true,
 																},
 																"acceleratorPartitionedProfile": {
-																	Description: "AcceleratorPartitionedProfile is the hardware partition profile requested on a\npartition-offering InstanceType, e.g. \"3g.40gb\". A non-empty value is mutually exclusive with\nthe two slice percentages: hardware partitioning and software slicing cannot both apply to one\naccelerator. It is ignored by an InstanceType offering no partition.",
+																	Description: "AcceleratorPartitionedProfile is the hardware partition profile requested on a\npartition-offering AcceleratorType, e.g. \"3g.40gb\". A non-empty value is mutually exclusive with\nthe two slice percentages: hardware partitioning and software slicing cannot both apply to one\naccelerator. It is ignored by an AcceleratorType offering no partition.",
 																	Type:        "string",
 																	MaxLength:   ptr.To[int64](64),
 																},
 																"acceleratorSlicedCoresPercentage": {
-																	Description: "AcceleratorSlicedCoresPercentage is the per-accelerator compute budget requested on a sliced\nInstanceType, as a percentage in [0,100], independent of the memory percentage.",
+																	Description: "AcceleratorSlicedCoresPercentage is the per-accelerator compute budget requested on a sliced\nAcceleratorType, as a percentage in [0,100], independent of the memory percentage.",
 																	Type:        "integer",
 																	Format:      "int32",
 																	Maximum:     ptr.To[float64](100),
 																	Minimum:     ptr.To[float64](0),
 																},
 																"acceleratorSlicedMemoryPercentage": {
-																	Description: "AcceleratorSlicedMemoryPercentage is the per-accelerator VRAM budget requested on a sliced\nInstanceType, as a percentage in [0,100]. 0 disables slicing, making the request an exclusive\nwhole-accelerator one. It is ignored by an InstanceType offering no slicing.",
+																	Description: "AcceleratorSlicedMemoryPercentage is the per-accelerator VRAM budget requested on a sliced\nAcceleratorType, as a percentage in [0,100]. 0 disables slicing, making the request an exclusive\nwhole-accelerator one. It is ignored by an AcceleratorType offering no slicing.",
 																	Type:        "integer",
 																	Format:      "int32",
 																	Maximum:     ptr.To[float64](100),
@@ -9039,20 +9034,7 @@ func crd_gpustack_api_worker_v1alpha1_ModelPrefetch() *v1.CustomResourceDefiniti
 														},
 													},
 													Nullable:  true,
-													XListType: ptr.To[string]("atomic"),
-												},
-												"instanceTypes": {
-													Description: "InstanceTypes names the node pools to warm, by the InstanceType objects the scheduling chain\nalready publishes. The target set is every node carrying one of these types' flavors.",
-													Type:        "array",
-													MaxItems:    ptr.To[int64](8),
-													MinItems:    ptr.To[int64](1),
-													Items: &v1.JSONSchemaPropsOrArray{
-														Schema: &v1.JSONSchemaProps{
-															Type: "string",
-														},
-													},
-													Nullable:  true,
-													XListType: ptr.To[string]("atomic"),
+													XListType: ptr.To[string]("set"),
 												},
 												"nodeSelector": {
 													Description: "NodeSelector selects the target nodes directly, the \"download to these nodes\" form.",
