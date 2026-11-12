@@ -80,10 +80,10 @@ const (
 	vllmAscendDriverVolumeName = "gpustack-ascend-driver"
 )
 
-// The NIXL side channel and the Ascend HIXL variables the point-to-point leg renders. The two
-// NIXL names are read by vLLM's NixlConnector, which registers its side-channel listener from
-// them; the three Ascend names are read by vLLM-Ascend's MooncakeConnectorV1 and its MemFabric
-// transport.
+// The NIXL side channel and the Ascend transfer variables. The two NIXL names are read by vLLM's
+// NixlConnector, which registers its side-channel listener from them; AscendAutoConnectEnv is
+// rendered on vLLM-Ascend HIXL legs, while AscendGlobalResourceConfigEnv and HCCLIntraRoCEEnableEnv
+// are retained as recognize-but-never-render markers so scaler prior identity filtering strips them.
 const (
 	// VLLMNIXLSideChannelPort is where the NIXL connector listens for the peer's handshake. It is
 	// declared on BOTH halves: the producer announces its side channel there and the consumer
@@ -103,13 +103,28 @@ const (
 	// what a prefill/decode pair needs to find each other without a bootstrap address.
 	AscendAutoConnectEnv = "ASCEND_AUTO_CONNECT"
 
-	// AscendGlobalResourceConfigEnv constrains the Ascend MemFabric link selection.
+	// AscendGlobalResourceConfigEnv is a recognized Ascend MemFabric link-selection variable,
+	// retained as a recognize-but-never-render marker for scaler prior identity filtering.
 	AscendGlobalResourceConfigEnv = "ASCEND_GLOBAL_RESOURCE_CONFIG"
 
-	// HCCLIntraRoCEEnableEnv turns on intra-node RoCE for the collective communication layer,
-	// alongside the resource config above.
+	// HCCLIntraRoCEEnableEnv is a recognized Ascend HCCL intra-node RoCE variable, retained as a
+	// recognize-but-never-render marker for scaler prior identity filtering.
 	HCCLIntraRoCEEnableEnv = "HCCL_INTRA_ROCE_ENABLE"
 )
+
+// ascendDriverProjection returns the read-only host driver volume and mount that Ascend KV
+// transfer legs (vLLM-Ascend and SGLang on Ascend) project into both role containers.
+func ascendDriverProjection() (core.Volume, core.VolumeMount) {
+	hostPathDirectory := core.HostPathDirectory
+	return core.Volume{
+		Name: vllmAscendDriverVolumeName,
+		VolumeSource: core.VolumeSource{
+			HostPath: &core.HostPathVolumeSource{Path: vllmAscendDriverPath, Type: &hostPathDirectory},
+		},
+	}, core.VolumeMount{
+		Name: vllmAscendDriverVolumeName, MountPath: vllmAscendDriverPath, ReadOnly: true,
+	}
+}
 
 // vllmConnectorFor returns the connector name the given engine's own factory can resolve.
 //
@@ -422,16 +437,9 @@ func renderVLLMWithEncoderCache(in Input, ec EncoderCache) (*Result, error) {
 			// DaemonSet, so it follows the capability that needs it rather than the vendor.
 			// The Directory type turns a host missing the driver into a volume setup error
 			// naming the path, a deploy-time signal instead of a startup failure.
-			hostPathDirectory := core.HostPathDirectory
-			legVolumes = append(legVolumes, core.Volume{
-				Name: vllmAscendDriverVolumeName,
-				VolumeSource: core.VolumeSource{
-					HostPath: &core.HostPathVolumeSource{Path: vllmAscendDriverPath, Type: &hostPathDirectory},
-				},
-			})
-			legVolumeMounts = append(legVolumeMounts, core.VolumeMount{
-				Name: vllmAscendDriverVolumeName, MountPath: vllmAscendDriverPath, ReadOnly: true,
-			})
+			driverVolume, driverMount := ascendDriverProjection()
+			legVolumes = append(legVolumes, driverVolume)
+			legVolumeMounts = append(legVolumeMounts, driverMount)
 		}
 		if !hasStore {
 			// The decode arm renders only the role and the protocol: the bootstrap address is

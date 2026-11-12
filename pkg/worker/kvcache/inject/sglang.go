@@ -417,32 +417,18 @@ func renderSGLang(in Input) (*Result, error) {
 			// The same volume name, path and type as vllm.go keeps the two engines' projections
 			// identical, and the Directory type turns a host missing the driver into a volume
 			// setup error naming the path rather than a startup failure.
-			hostPathDirectory := core.HostPathDirectory
-			result.Volumes = append(result.Volumes, core.Volume{
-				Name: vllmAscendDriverVolumeName,
-				VolumeSource: core.VolumeSource{
-					HostPath: &core.HostPathVolumeSource{Path: vllmAscendDriverPath, Type: &hostPathDirectory},
-				},
-			})
-			result.VolumeMounts = append(result.VolumeMounts, core.VolumeMount{
-				Name: vllmAscendDriverVolumeName, MountPath: vllmAscendDriverPath, ReadOnly: true,
-			})
+			driverVolume, driverMount := ascendDriverProjection()
+			result.Volumes = append(result.Volumes, driverVolume)
+			result.VolumeMounts = append(result.VolumeMounts, driverMount)
 		default:
 			backend = sglangDisaggregationBackendMooncake
 			if directLegForcesTCP(in) {
 				backend = sglangDisaggregationBackendMooncakeTCP
 			}
 			if directLegProtocol(in) == "ascend" {
-				hostPathDirectory := core.HostPathDirectory
-				result.Volumes = append(result.Volumes, core.Volume{
-					Name: vllmAscendDriverVolumeName,
-					VolumeSource: core.VolumeSource{
-						HostPath: &core.HostPathVolumeSource{Path: vllmAscendDriverPath, Type: &hostPathDirectory},
-					},
-				})
-				result.VolumeMounts = append(result.VolumeMounts, core.VolumeMount{
-					Name: vllmAscendDriverVolumeName, MountPath: vllmAscendDriverPath, ReadOnly: true,
-				})
+				driverVolume, driverMount := ascendDriverProjection()
+				result.Volumes = append(result.Volumes, driverVolume)
+				result.VolumeMounts = append(result.VolumeMounts, driverMount)
 			}
 		}
 		result.Args = append(result.Args,
