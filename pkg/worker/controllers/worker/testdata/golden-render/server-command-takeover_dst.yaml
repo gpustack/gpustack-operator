@@ -6,7 +6,7 @@ metadata:
     kueue.x-k8s.io/pod-group-total-count: "1"
     kueue.x-k8s.io/role-hash: main
     modeldeployment.gpustack.ai/pod-spec-hash: eb5691f9878257250bf33e4df70aa0dc65533d75656743b6a9e6ac92a8d6c78c
-    modeldeployment.gpustack.ai/render-version: "4"
+    modeldeployment.gpustack.ai/render-version: "5"
     note.gpustack.ai/role: main
   generateName: qwen-main-
   labels:

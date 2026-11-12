@@ -207,7 +207,7 @@ Tasks start with a prerequisite pretty-YAML golden baseline on the unmodified re
   - **Acceptance:** `AWSEFAEnabled` (`"aws-efa-enabled"`, env `GPUSTACK_AWS_EFA_ENABLED`, default `"false"`, `setting.AllowBool()`) is registered in `pkg/worker/settings/value.go` and covered for default value, boolean validation, and delegated `Secret` override in `pkg/worker/settings/value_test.go`.
   - **Verify:** `CGO_ENABLED=1 go test -race ./pkg/worker/settings/... && make lint`
 
-- [ ] **T3 · Migrate `inject`, controller rendering, webhook admission, and re-verify golden YAML conversions**
+- [x] **T3 · Migrate `inject`, controller rendering, webhook admission, and re-verify golden YAML conversions**
   - **Blocked by:** T1, T2
   - **Gate:** `review`
   - **Owns:** `pkg/worker/kvcache/inject/**`, `pkg/worker/controllers/worker/**`, `pkg/worker/webhooks/worker/**`

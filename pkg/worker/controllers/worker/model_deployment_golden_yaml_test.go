@@ -34,6 +34,7 @@ import (
 	"gpustack.ai/gpustack/pkg/kubeclients/kubernetes/scheme"
 	"gpustack.ai/gpustack/pkg/modelstore"
 	"gpustack.ai/gpustack/pkg/nodefeature"
+	"gpustack.ai/gpustack/pkg/setting"
 	"gpustack.ai/gpustack/pkg/setting/settingtest"
 	"gpustack.ai/gpustack/pkg/worker/settings"
 )
@@ -42,6 +43,7 @@ type goldenYAMLScenario struct {
 	name             string
 	md               *workercore.ModelDeployment
 	objects          []ctrlcli.Object
+	awsEFAEnabled    bool
 	deliveryMode     string
 	secondPassMode   string
 	secondPassScale  map[string]int32
@@ -112,7 +114,11 @@ func prepareGoldenInputObjects(tc goldenYAMLScenario) []ctrlcli.Object {
 
 	objs := make([]ctrlcli.Object, 0, 1+len(tc.objects))
 	objs = append(objs, inputMD)
-	for _, obj := range tc.objects {
+	extraObjs := tc.objects
+	if tc.awsEFAEnabled {
+		extraObjs = append(append([]ctrlcli.Object(nil), extraObjs...), goldenAWSEFAEnabledFixtures()...)
+	}
+	for _, obj := range extraObjs {
 		cloned := obj.DeepCopyObject().(ctrlcli.Object)
 		setGoldenObjectTypeMeta(cloned)
 		cloned.SetResourceVersion("")
@@ -145,6 +151,8 @@ func setGoldenObjectTypeMeta(obj ctrlcli.Object) {
 		typed.TypeMeta = meta.TypeMeta{APIVersion: "worker.gpustack.ai/v1", Kind: "InstanceType"}
 	case *core.Node:
 		typed.TypeMeta = meta.TypeMeta{APIVersion: "v1", Kind: "Node"}
+	case *core.Secret:
+		typed.TypeMeta = meta.TypeMeta{APIVersion: "v1", Kind: "Secret"}
 	case *storagev1.CSIDriver:
 		typed.TypeMeta = meta.TypeMeta{APIVersion: "storage.k8s.io/v1", Kind: "CSIDriver"}
 	}
@@ -178,6 +186,8 @@ func parseGoldenInputYAML(t *testing.T, srcPath, rawYAML string) []ctrlcli.Objec
 			obj = new(worker.InstanceType)
 		case "Node":
 			obj = new(core.Node)
+		case "Secret":
+			obj = new(core.Secret)
 		case "CSIDriver":
 			obj = new(storagev1.CSIDriver)
 		default:
@@ -251,6 +261,18 @@ func runGoldenYAMLScenario(
 
 	baseObjs := goldenBaseClusterFixtures()
 	for _, extra := range inputObjs[1:] {
+		if sec, ok := extra.(*core.Secret); ok &&
+			sec.Name == setting.DelegatedSecretName &&
+			sec.Namespace == setting.DelegatedSecretNamespace {
+			kvs := make(map[string]string, len(sec.Data)+len(sec.StringData))
+			for k, v := range sec.Data {
+				kvs[k] = string(v)
+			}
+			for k, v := range sec.StringData {
+				kvs[k] = v
+			}
+			settingtest.MergeDelegatedSettings(t, kvs)
+		}
 		baseObjs = append(baseObjs, extra.DeepCopyObject().(ctrlcli.Object))
 	}
 	baseObjs = append(baseObjs, md)
@@ -583,6 +605,20 @@ func goldenModelArtifactFixtures() []ctrlcli.Object {
 		},
 	}
 	return []ctrlcli.Object{artifact, node, nms, csiDriver}
+}
+
+func goldenAWSEFAEnabledFixtures() []ctrlcli.Object {
+	return []ctrlcli.Object{
+		&core.Secret{
+			ObjectMeta: meta.ObjectMeta{
+				Namespace: setting.DelegatedSecretNamespace,
+				Name:      setting.DelegatedSecretName,
+			},
+			StringData: map[string]string{
+				settings.AWSEFAEnabled.Name(): "true",
+			},
+		},
+	}
 }
 
 func buildGoldenYAMLScenarios() []goldenYAMLScenario {
@@ -984,15 +1020,16 @@ func buildGoldenYAMLScenarios() []goldenYAMLScenario {
 			md: newGoldenPDDeployment(
 				"qwen", modelID, workercore.ModelDeploymentEngineVLLM, "h20-8x", vllmImage,
 				workercore.ModelDeploymentRouterLLMD,
-				&workercore.ModelDeploymentKVTransfer{Backend: "Mooncake", Protocol: "RDMA"}, nil, 1,
+				&workercore.ModelDeploymentKVTransfer{Backend: "Mooncake"}, nil, 1,
 			),
 		},
 		{
-			name: "pd-vllm-nvidia-mooncake-efa",
+			name:          "pd-vllm-nvidia-mooncake-efa",
+			awsEFAEnabled: true,
 			md: newGoldenPDDeployment(
 				"qwen", modelID, workercore.ModelDeploymentEngineVLLM, "h20-8x", vllmImage,
 				workercore.ModelDeploymentRouterLLMD,
-				&workercore.ModelDeploymentKVTransfer{Backend: "Mooncake", Protocol: "EFA"}, nil, 1,
+				&workercore.ModelDeploymentKVTransfer{Backend: "Mooncake"}, nil, 1,
 			),
 		},
 		{
@@ -1000,15 +1037,16 @@ func buildGoldenYAMLScenarios() []goldenYAMLScenario {
 			md: newGoldenPDDeployment(
 				"qwen", modelID, workercore.ModelDeploymentEngineVLLM, "h20-8x", vllmImage,
 				workercore.ModelDeploymentRouterVLLM,
-				&workercore.ModelDeploymentKVTransfer{Backend: "NIXL", Protocol: "RDMA"}, nil, 1,
+				&workercore.ModelDeploymentKVTransfer{Backend: "NIXL"}, nil, 1,
 			),
 		},
 		{
-			name: "pd-vllm-nvidia-nixl-efa",
+			name:          "pd-vllm-nvidia-nixl-efa",
+			awsEFAEnabled: true,
 			md: newGoldenPDDeployment(
 				"qwen", modelID, workercore.ModelDeploymentEngineVLLM, "h20-8x", vllmImage,
 				workercore.ModelDeploymentRouterLLMD,
-				&workercore.ModelDeploymentKVTransfer{Backend: "NIXL", Protocol: "EFA"}, nil, 1,
+				&workercore.ModelDeploymentKVTransfer{Backend: "NIXL"}, nil, 1,
 			),
 		},
 		{
@@ -1042,7 +1080,7 @@ func buildGoldenYAMLScenarios() []goldenYAMLScenario {
 			md: newGoldenPDDeployment(
 				"qwen", modelID, workercore.ModelDeploymentEngineSGLang, "h20-8x", sglangImage,
 				workercore.ModelDeploymentRouterSGLang,
-				&workercore.ModelDeploymentKVTransfer{Backend: "Mooncake", Protocol: "TCP"}, nil, 0,
+				&workercore.ModelDeploymentKVTransfer{Backend: "Mooncake"}, nil, 0,
 			),
 		},
 		{
@@ -1050,15 +1088,16 @@ func buildGoldenYAMLScenarios() []goldenYAMLScenario {
 			md: newGoldenPDDeployment(
 				"qwen", modelID, workercore.ModelDeploymentEngineSGLang, "h20-8x", sglangImage,
 				workercore.ModelDeploymentRouterSGLang,
-				&workercore.ModelDeploymentKVTransfer{Backend: "Mooncake", Protocol: "RDMA"}, nil, 1,
+				&workercore.ModelDeploymentKVTransfer{Backend: "Mooncake"}, nil, 1,
 			),
 		},
 		{
-			name: "pd-sglang-nvidia-nixl-efa",
+			name:          "pd-sglang-nvidia-nixl-efa",
+			awsEFAEnabled: true,
 			md: newGoldenPDDeployment(
 				"qwen", modelID, workercore.ModelDeploymentEngineSGLang, "h20-8x", sglangImage,
 				workercore.ModelDeploymentRouterSGLang,
-				&workercore.ModelDeploymentKVTransfer{Backend: "NIXL", Protocol: "EFA"}, nil, 1,
+				&workercore.ModelDeploymentKVTransfer{Backend: "NIXL"}, nil, 1,
 			),
 		},
 		{
@@ -1181,7 +1220,7 @@ func buildGoldenYAMLScenarios() []goldenYAMLScenario {
 					Model:      workercore.ModelDeploymentModel{Name: vlModelID},
 					Engine:     workercore.ModelDeploymentEngine{Name: workercore.ModelDeploymentEngineSGLang, Image: sglangImage},
 					Router:     &workercore.ModelDeploymentRouter{Name: workercore.ModelDeploymentRouterSGLang},
-					KVTransfer: &workercore.ModelDeploymentKVTransfer{Backend: "Mooncake", Protocol: "TCP"},
+					KVTransfer: &workercore.ModelDeploymentKVTransfer{Backend: "Mooncake"},
 					Roles: []workercore.ModelDeploymentRole{
 						{
 							Name:         "encode",
@@ -1247,6 +1286,7 @@ func buildGoldenYAMLScenarios() []goldenYAMLScenario {
 		{
 			name:             "artifact-remote-nixl-and-hixl",
 			objects:          goldenModelArtifactFixtures(),
+			awsEFAEnabled:    true,
 			deliveryMode:     settings.ModelArtifactDeliveryNode,
 			remotePolicy:     settings.ModelArtifactRemoteDeliveryPrefer,
 			sourceReady:      true,
@@ -1258,8 +1298,7 @@ func buildGoldenYAMLScenarios() []goldenYAMLScenario {
 						Name:        modelID,
 						ArtifactRef: &core.LocalObjectReference{Name: "qwen-72b"},
 					},
-					Engine:     workercore.ModelDeploymentEngine{Name: workercore.ModelDeploymentEngineVLLM, Image: vllmImage},
-					KVTransfer: &workercore.ModelDeploymentKVTransfer{Protocol: "EFA"},
+					Engine: workercore.ModelDeploymentEngine{Name: workercore.ModelDeploymentEngineVLLM, Image: vllmImage},
 					Roles: []workercore.ModelDeploymentRole{
 						{
 							Name:         "nvidia-ucx",

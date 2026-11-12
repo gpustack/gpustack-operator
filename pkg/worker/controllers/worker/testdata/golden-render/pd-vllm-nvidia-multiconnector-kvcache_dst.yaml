@@ -7,7 +7,7 @@ metadata:
     kueue.x-k8s.io/role-hash: decode
     kvcache.gpustack.ai/client-config: '{"metadata_server":"P2PHANDSHAKE","master_server_address":"shared-kv-master.gpustack-system.svc:50051","protocol":"tcp","device_name":"","mode":"standalone-store","global_segment_size":0,"local_buffer_size":134217728,"tenant_id":"chat"}'
     modeldeployment.gpustack.ai/pod-spec-hash: ae9f2ae6afb98c0ba90c57a53a21cd80881b9ee1c813502dfca8d729989abf40
-    modeldeployment.gpustack.ai/render-version: "4"
+    modeldeployment.gpustack.ai/render-version: "5"
     note.gpustack.ai/role: decode
     prometheus.io/path: /metrics
     prometheus.io/port: "8200"
@@ -61,7 +61,7 @@ spec:
     - name: MC_TE_METRIC
       value: "1"
     - name: VLLM_NIXL_SIDE_CHANNEL_PORT
-      value: "5600"
+      value: "8998"
     - name: MC_TCP_MAX_QUEUED_TRANSFERS_PER_PEER
       value: "65535"
     - name: MC_TCP_MAX_PENDING_ADMISSIONS_PER_PEER
@@ -137,7 +137,7 @@ spec:
     - containerPort: 8200
       name: model-server
       protocol: TCP
-    - containerPort: 5600
+    - containerPort: 8998
       name: nixl-side
       protocol: TCP
     readinessProbe:
@@ -228,7 +228,7 @@ metadata:
     kueue.x-k8s.io/role-hash: prefill
     kvcache.gpustack.ai/client-config: '{"metadata_server":"P2PHANDSHAKE","master_server_address":"shared-kv-master.gpustack-system.svc:50051","protocol":"tcp","device_name":"","mode":"standalone-store","global_segment_size":0,"local_buffer_size":134217728,"tenant_id":"chat"}'
     modeldeployment.gpustack.ai/pod-spec-hash: f6b9ee45ca75409eb43af2faa84aab60899dad0fd3f10d88839e8a4b7f3e0b3a
-    modeldeployment.gpustack.ai/render-version: "4"
+    modeldeployment.gpustack.ai/render-version: "5"
     note.gpustack.ai/role: prefill
     prometheus.io/path: /metrics
     prometheus.io/port: "8000"
@@ -284,7 +284,7 @@ spec:
     - name: MC_TE_METRIC
       value: "1"
     - name: VLLM_NIXL_SIDE_CHANNEL_PORT
-      value: "5600"
+      value: "8998"
     - name: MC_TCP_MAX_QUEUED_TRANSFERS_PER_PEER
       value: "65535"
     - name: MC_TCP_MAX_PENDING_ADMISSIONS_PER_PEER
@@ -360,7 +360,7 @@ spec:
     - containerPort: 8000
       name: http
       protocol: TCP
-    - containerPort: 5600
+    - containerPort: 8998
       name: nixl-side
       protocol: TCP
     - containerPort: 5557

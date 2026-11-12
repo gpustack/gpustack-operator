@@ -1451,10 +1451,10 @@ func TestRender_VLLMNIXLTransfer(t *testing.T) {
 			require.NotNil(t, host.ValueFrom.FieldRef)
 			assert.Equal(t, "status.podIP", host.ValueFrom.FieldRef.FieldPath)
 
-			assert.Equal(t, []core.EnvVar{{Name: "VLLM_NIXL_SIDE_CHANNEL_PORT", Value: "5600"}},
+			assert.Equal(t, []core.EnvVar{{Name: "VLLM_NIXL_SIDE_CHANNEL_PORT", Value: "8998"}},
 				result.DefaultedEnv, "the port is a default the workload may answer for itself")
 			assert.Equal(t, []core.ContainerPort{
-				{Name: "nixl-side", Protocol: core.ProtocolTCP, ContainerPort: 5600},
+				{Name: "nixl-side", Protocol: core.ProtocolTCP, ContainerPort: 8998},
 			}, result.Ports, "both halves open the side channel they announce")
 
 			assert.NotContains(t, envNames(result.Env), "VLLM_MOONCAKE_BOOTSTRAP_PORT",
@@ -1498,12 +1498,10 @@ func TestRender_VLLMNIXLTransferComposesPointToPointAndStore(t *testing.T) {
 
 // TestRender_VLLMAscendHIXLTransfer pins what an explicitly named HIXL backend adds to the
 // Ascend leg. The document and the driver mount are the ones ANY Ascend leg renders -- pinned by
-// TestRender_VLLMAscendKVTransfer -- so what this test owns is the variables: AUTO_CONNECT turns
-// on the endpoint exchange the pair needs without a bootstrap address, and a declared RDMA
-// protocol additionally constrains the MemFabric link to Device RoCE, spelled as the JSON the
-// engine reads. The values are defaulted, never owned, and the RDMA pair is written
-// symmetrically from the deployment-wide protocol so the two halves cannot select different
-// links.
+// TestRender_VLLMAscendKVTransfer -- so what this test owns is the variable: AUTO_CONNECT turns
+// on the endpoint exchange the pair needs without a bootstrap address, while Device RoCE
+// overrides (ASCEND_GLOBAL_RESOURCE_CONFIG and HCCL_INTRA_ROCE_ENABLE) are never defaulted so
+// MemFabric selects HCCS or RoCE automatically.
 func TestRender_VLLMAscendHIXLTransfer(t *testing.T) {
 	testCases := []struct {
 		name          string
@@ -1517,13 +1515,10 @@ func TestRender_VLLMAscendHIXLTransfer(t *testing.T) {
 			wantDefaulted: []core.EnvVar{{Name: "ASCEND_AUTO_CONNECT", Value: "1"}},
 		},
 		{
-			name: "decode, rdma constrains the link to Device RoCE",
-			role: RoleDecode, protocol: "rdma",
-			wantDefaulted: []core.EnvVar{
-				{Name: "ASCEND_AUTO_CONNECT", Value: "1"},
-				{Name: "ASCEND_GLOBAL_RESOURCE_CONFIG", Value: `{"comm_resource_config.protocol_desc":"roce:device"}`},
-				{Name: "HCCL_INTRA_ROCE_ENABLE", Value: "1"},
-			},
+			name:          "decode, rdma also leaves the link to MemFabric without Device RoCE pin",
+			role:          RoleDecode,
+			protocol:      "rdma",
+			wantDefaulted: []core.EnvVar{{Name: "ASCEND_AUTO_CONNECT", Value: "1"}},
 		},
 	}
 

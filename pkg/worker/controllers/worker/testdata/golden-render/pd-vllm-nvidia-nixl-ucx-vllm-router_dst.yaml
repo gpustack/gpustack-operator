@@ -5,8 +5,8 @@ metadata:
     kueue.x-k8s.io/pod-group-serving: "true"
     kueue.x-k8s.io/pod-group-total-count: "1"
     kueue.x-k8s.io/role-hash: decode
-    modeldeployment.gpustack.ai/pod-spec-hash: 67999f6b22fb4297e8a4c359ec6b7891cd6dff7f81ec4253634f038542fd5629
-    modeldeployment.gpustack.ai/render-version: "4"
+    modeldeployment.gpustack.ai/pod-spec-hash: 2d23509f7b534634e8ffb23bcaaa9064c04da110f8dbc3acf638b5313bb4f3b4
+    modeldeployment.gpustack.ai/render-version: "5"
     note.gpustack.ai/role: decode
     prometheus.io/path: /metrics
     prometheus.io/port: "8000"
@@ -55,7 +55,7 @@ spec:
     - name: MC_TE_METRIC
       value: "1"
     - name: VLLM_NIXL_SIDE_CHANNEL_PORT
-      value: "5600"
+      value: "8998"
     - name: VLLM_CACHE_ROOT
       value: /var/lib/gpustack/cache
     - name: HF_HUB_CACHE
@@ -123,7 +123,7 @@ spec:
     - containerPort: 8000
       name: http
       protocol: TCP
-    - containerPort: 5600
+    - containerPort: 8998
       name: nixl-side
       protocol: TCP
     readinessProbe:
@@ -186,8 +186,8 @@ metadata:
     kueue.x-k8s.io/pod-group-serving: "true"
     kueue.x-k8s.io/pod-group-total-count: "1"
     kueue.x-k8s.io/role-hash: prefill
-    modeldeployment.gpustack.ai/pod-spec-hash: ab77754ea61be0973c1449438d52760c83dd2e34d9aa186771a5cc6e4edee2aa
-    modeldeployment.gpustack.ai/render-version: "4"
+    modeldeployment.gpustack.ai/pod-spec-hash: 246e0c9c36d3a0c6e2fb5776a637dee35c334d24616e0a103b4030747840a66d
+    modeldeployment.gpustack.ai/render-version: "5"
     note.gpustack.ai/role: prefill
     prometheus.io/path: /metrics
     prometheus.io/port: "8000"
@@ -236,7 +236,7 @@ spec:
     - name: MC_TE_METRIC
       value: "1"
     - name: VLLM_NIXL_SIDE_CHANNEL_PORT
-      value: "5600"
+      value: "8998"
     - name: VLLM_CACHE_ROOT
       value: /var/lib/gpustack/cache
     - name: HF_HUB_CACHE
@@ -304,7 +304,7 @@ spec:
     - containerPort: 8000
       name: http
       protocol: TCP
-    - containerPort: 5600
+    - containerPort: 8998
       name: nixl-side
       protocol: TCP
     readinessProbe:

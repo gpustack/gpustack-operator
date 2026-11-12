@@ -7,7 +7,7 @@ metadata:
     kueue.x-k8s.io/role-hash: main
     model-transfer.gpustack.ai/delivery: Node
     modeldeployment.gpustack.ai/pod-spec-hash: 48168746d7b0af7010aa27e3f09c654a5d151da8103b28b9f1a2caf2e33616de
-    modeldeployment.gpustack.ai/render-version: "4"
+    modeldeployment.gpustack.ai/render-version: "5"
     note.gpustack.ai/role: main
     prometheus.io/path: /metrics
     prometheus.io/port: "8000"
@@ -128,6 +128,8 @@ spec:
       value: nixl
     - name: GPUSTACK_MODEL_TRANSFER_TIMEOUT
       value: "1800"
+    - name: GPUSTACK_MODEL_TRANSFER_NIXL_BACKEND
+      value: UCX
     image: vllm/vllm-openai:v0.19.0
     lifecycle:
       preStop:
@@ -275,7 +277,7 @@ metadata:
     kueue.x-k8s.io/role-hash: main
     model-transfer.gpustack.ai/delivery: Remote
     modeldeployment.gpustack.ai/pod-spec-hash: eebc5aec77d9190e72617f6b90bc5b225f690b99456215d1a7d55564e28bd1eb
-    modeldeployment.gpustack.ai/render-version: "4"
+    modeldeployment.gpustack.ai/render-version: "5"
     note.gpustack.ai/role: main
     prometheus.io/path: /metrics
     prometheus.io/port: "8000"

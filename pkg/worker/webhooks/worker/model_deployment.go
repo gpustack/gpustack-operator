@@ -535,8 +535,12 @@ func modelDeploymentPoolTransportInputsChanged(old, md *workercore.ModelDeployme
 // type with a computed status would. The manufacturer only ever forces the leg empty or hands
 // back the declared protocol, so equal probes mean the leg kept its value whatever this role's
 // type reports.
-func modelDeploymentDirectLegProbe(md *workercore.ModelDeployment, role *workercore.ModelDeploymentRole) string {
-	return workerctrl.ModelDeploymentDirectInterfaceProtocol(md, role, nodefeature.ManufacturerNVIDIA)
+func modelDeploymentDirectLegProbe(
+	md *workercore.ModelDeployment, role *workercore.ModelDeploymentRole, awsEFAEnabled bool,
+) string {
+	return workerctrl.ModelDeploymentDirectInterfaceProtocol(
+		md, role, nodefeature.ManufacturerNVIDIA, md.Spec.Model.ArtifactRef != nil, awsEFAEnabled,
+	)
 }
 
 // modelDeploymentRoleInterfaceInputsChanged reports whether an update touched the inputs the
@@ -567,11 +571,12 @@ func interfaceQuantity(ress *workercore.ModelDeploymentRoleResources) *resource.
 // renders, so a role whose leg kept its value keeps the escape hatch its stored verdict provides.
 func (r *ModelDeploymentWebhook) modelDeploymentRoleNeedsInterfaceRejudge(
 	ctx context.Context, old, md *workercore.ModelDeployment, was, role *workercore.ModelDeploymentRole, i int,
+	awsEFAEnabled bool,
 ) (bool, error) {
 	if modelDeploymentRoleInterfaceInputsChanged(was, role) {
 		return true, nil
 	}
-	if modelDeploymentDirectLegProbe(old, was) == modelDeploymentDirectLegProbe(md, role) {
+	if modelDeploymentDirectLegProbe(old, was, awsEFAEnabled) == modelDeploymentDirectLegProbe(md, role, awsEFAEnabled) {
 		return false, nil
 	}
 	// The probes differ, which only a non-Ascend manufacturer can turn into a real leg change,
@@ -585,8 +590,8 @@ func (r *ModelDeploymentWebhook) modelDeploymentRoleNeedsInterfaceRejudge(
 		}
 		manufacturer = instType.Status.Detail.Manufacturer
 	}
-	return workerctrl.ModelDeploymentDirectInterfaceProtocol(old, was, manufacturer) !=
-		workerctrl.ModelDeploymentDirectInterfaceProtocol(md, role, manufacturer), nil
+	return workerctrl.ModelDeploymentDirectInterfaceProtocol(old, was, manufacturer, old.Spec.Model.ArtifactRef != nil, awsEFAEnabled) !=
+		workerctrl.ModelDeploymentDirectInterfaceProtocol(md, role, manufacturer, md.Spec.Model.ArtifactRef != nil, awsEFAEnabled), nil
 }
 
 // validateModelDeploymentInterfaceRequests checks the device key against the resolved cache
@@ -599,6 +604,7 @@ func (r *ModelDeploymentWebhook) modelDeploymentRoleNeedsInterfaceRejudge(
 func (r *ModelDeploymentWebhook) validateModelDeploymentInterfaceRequests(
 	ctx context.Context, old, md *workercore.ModelDeployment,
 ) (field.ErrorList, error) {
+	awsEFAEnabled := settings.AWSEFAEnabled.ShouldValueBool(ctx)
 	stored := make(map[string]*workercore.ModelDeploymentRole, len(md.Spec.Roles))
 	if old != nil {
 		for i := range old.Spec.Roles {
@@ -614,7 +620,7 @@ func (r *ModelDeploymentWebhook) validateModelDeploymentInterfaceRequests(
 		}
 		if old != nil {
 			judge, err := r.modelDeploymentRoleNeedsInterfaceRejudge(
-				ctx, old, md, stored[md.Spec.Roles[i].Name], &md.Spec.Roles[i], i,
+				ctx, old, md, stored[md.Spec.Roles[i].Name], &md.Spec.Roles[i], i, awsEFAEnabled,
 			)
 			if err != nil {
 				return nil, err
@@ -681,17 +687,11 @@ func (r *ModelDeploymentWebhook) validateModelDeploymentInterfaceRequests(
 		if len(role.Command) > 0 {
 			roleProtocols = nil
 		}
-		var artifactRender []*workerctrl.ModelDeploymentArtifactRender
-		if md.Spec.Model.ArtifactRef != nil {
-			declaredEFA := md.Spec.KVTransfer != nil &&
-				mooncake.TransportProtocol(md.Spec.KVTransfer.Protocol) == "efa"
-			artifactRender = []*workerctrl.ModelDeploymentArtifactRender{{
-				Delivery:         workercore.ModelDeploymentModelDeliveryRemote,
-				ModelTransferEFA: declaredEFA || slices.Contains(roleProtocols, "efa"),
-			}}
-		}
-		_, err := workerctrl.ModelDeploymentInterfaceResource(roleProtocols,
-			workerctrl.ModelDeploymentDirectInterfaceProtocol(md, role, manufacturer, artifactRender...), count)
+		efaActive := awsEFAEnabled || slices.Contains(roleProtocols, "efa")
+		directProtocol := workerctrl.ModelDeploymentDirectInterfaceProtocol(
+			md, role, manufacturer, md.Spec.Model.ArtifactRef != nil, efaActive,
+		)
+		_, err := workerctrl.ModelDeploymentInterfaceResource(roleProtocols, directProtocol, count)
 		if err != nil {
 			errs = append(errs, field.Invalid(field.NewPath("spec", "roles").Index(i).Child("resources", "interface"),
 				role.Resources.Interface.String(), err.Error()))
@@ -1317,9 +1317,9 @@ func modelDeploymentRouterReservedPorts(
 		//
 		// A NIXL LEG BINDS NO MOONCAKE LISTENER, and it arms the side channel on BOTH halves
 		// instead: the producer announces its handshake endpoint there and the consumer runs the
-		// matching listener, so 5600 is reserved on prefill and decode alike and 8998 stays free.
-		// HIXL stays on the 8998 branch because the vLLM-Ascend transfer connector still renders
-		// kv_port=8998 (VLLMMooncakeBootstrapPort) even though the routing sidecar uses the
+		// matching listener, so 8998 is reserved on prefill and decode alike.
+		// HIXL stays on the prefill-only 8998 branch because the vLLM-Ascend transfer connector
+		// renders kv_port=8998 (VLLMMooncakeBootstrapPort) even though the routing sidecar uses the
 		// two-step nixlv2 HTTP relay. The backend is read from the spec because this rule cannot
 		// see the vendor; the renderer renders the listeners for every pool that names this
 		// backend, so reserving for the declared value is the only answer that cannot release a
@@ -2535,10 +2535,13 @@ func (r *ModelDeploymentWebhook) validateRoleResourcesAgainstInstanceTypes(
 func validateModelDeploymentKVTransferBackendAgainstInstanceTypes(
 	md *workercore.ModelDeployment, seen map[string]*worker.InstanceType,
 ) field.ErrorList {
-	if md.Spec.KVTransfer == nil {
+	if md.Spec.KVTransfer == nil && !workerctrl.ModelDeploymentDeclaresBothHalves(md) {
 		return nil
 	}
-	backend := md.Spec.KVTransfer.Backend
+	var backend string
+	if md.Spec.KVTransfer != nil {
+		backend = md.Spec.KVTransfer.Backend
+	}
 	backendPath := field.NewPath("spec", "kvTransfer", "backend")
 
 	var errs field.ErrorList
@@ -2569,7 +2572,7 @@ func validateModelDeploymentKVTransferBackendAgainstInstanceTypes(
 		case workercore.ModelDeploymentKVTransferBackendNIXL:
 			if manufacturer == nodefeature.ManufacturerAscend {
 				errs = append(errs, field.Invalid(backendPath, backend,
-					"backend NIXL is not supported on an Ascend InstanceType; use HIXL, Mooncake, or Auto"))
+					"backend NIXL is not supported on an Ascend InstanceType; use HIXL or Mooncake"))
 			}
 		}
 	}

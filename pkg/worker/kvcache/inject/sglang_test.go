@@ -545,10 +545,10 @@ func TestRender_SGLangDisaggregationBackendsFollowTheInput(t *testing.T) {
 			wantDriverMount:  true,
 		},
 		{
-			name: "ascend decode constrains the link to Device RoCE on rdma",
+			name: "ascend decode defaults sdma even when rdma protocol is passed",
 			role: RoleDecode, backend: KVTransferBackendHIXL, protocol: "rdma",
 			wantTransfer:      "ascend",
-			wantDefaultedEnv:  []core.EnvVar{{Name: "ASCEND_MF_TRANSFER_PROTOCOL", Value: "device_rdma"}},
+			wantDefaultedEnv:  []core.EnvVar{{Name: "ASCEND_MF_TRANSFER_PROTOCOL", Value: "sdma"}},
 			wantDriverMount:   true,
 			wantDefaultedArgs: [][]string{retraction},
 		},
@@ -560,6 +560,17 @@ func TestRender_SGLangDisaggregationBackendsFollowTheInput(t *testing.T) {
 			wantTransfer:      "mooncake_tcp",
 			wantDefaultedEnv:  tcpTuningEnv,
 			wantDefaultedArgs: [][]string{{"--page-size", "64"}},
+		},
+		{
+			name: "mooncake with ascend protocol mounts the driver and uses mooncake backend",
+			role: RolePrefill, backend: KVTransferBackendMooncake, protocol: "ascend",
+			wantTransfer:    "mooncake",
+			wantDriverMount: true,
+		},
+		{
+			name: "mooncake with hip protocol uses mooncake backend without tcp pin",
+			role: RolePrefill, backend: KVTransferBackendMooncake, protocol: "hip",
+			wantTransfer: "mooncake",
 		},
 		{
 			// The store's transport keeps its own claim on the process-wide tuning even beside a

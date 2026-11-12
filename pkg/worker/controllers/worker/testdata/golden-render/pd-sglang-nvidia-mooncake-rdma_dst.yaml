@@ -5,8 +5,8 @@ metadata:
     kueue.x-k8s.io/pod-group-serving: "true"
     kueue.x-k8s.io/pod-group-total-count: "1"
     kueue.x-k8s.io/role-hash: decode
-    modeldeployment.gpustack.ai/pod-spec-hash: e2dfcc7e08dbbce58b5883aabac8cc00db0545e7cbc09b25010a248dd4312e9b
-    modeldeployment.gpustack.ai/render-version: "4"
+    modeldeployment.gpustack.ai/pod-spec-hash: 94b3894fe17722799bc25e7f7beac7e65a5ff361bb4d210de136b41c6e87d4f7
+    modeldeployment.gpustack.ai/render-version: "5"
     note.gpustack.ai/role: decode
     prometheus.io/path: /metrics
     prometheus.io/port: "8000"
@@ -183,8 +183,8 @@ metadata:
     kueue.x-k8s.io/pod-group-serving: "true"
     kueue.x-k8s.io/pod-group-total-count: "1"
     kueue.x-k8s.io/role-hash: prefill
-    modeldeployment.gpustack.ai/pod-spec-hash: dcb010c1729606de4862a368cd2119a8b57c435e910c1675641dfe86ffea57ce
-    modeldeployment.gpustack.ai/render-version: "4"
+    modeldeployment.gpustack.ai/pod-spec-hash: bd273f7a221736d6af018dfd16e3e9d117c3ce4ad98ec61607f11701f060aeb0
+    modeldeployment.gpustack.ai/render-version: "5"
     note.gpustack.ai/role: prefill
     prometheus.io/path: /metrics
     prometheus.io/port: "8000"

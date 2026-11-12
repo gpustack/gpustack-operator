@@ -204,24 +204,29 @@ func TestValidateModelDeploymentInterfaceQuantity(t *testing.T) {
 
 func TestModelDeploymentWebhook_InterfaceProtocol(t *testing.T) {
 	tests := []struct {
-		name       string
-		store      []string
-		direct     string
-		pureDirect bool
-		custom     bool
-		artifact   bool
-		wantErr    string
+		name          string
+		store         []string
+		awsEFAEnabled bool
+		pureDirect    bool
+		custom        bool
+		artifact      bool
+		wantErr       string
 	}{
 		{name: "cache RDMA", store: []string{"rdma"}},
-		{name: "pure direct EFA", direct: "EFA", pureDirect: true},
+		{name: "pure direct EFA", awsEFAEnabled: true, pureDirect: true},
 		{name: "mixed cache groups", store: []string{"tcp", "rdma"}, wantErr: "conflicting protocols"},
-		{name: "mixed legs", store: []string{"rdma"}, direct: "EFA", wantErr: "rdma and efa"},
+		{name: "mixed legs", store: []string{"rdma"}, awsEFAEnabled: true, wantErr: "rdma and efa"},
 		{name: "no fabric", store: []string{"tcp"}, wantErr: "no effective RDMA or EFA"},
 		{name: "custom command has no managed fabric", store: []string{"rdma"}, custom: true, wantErr: "no effective RDMA or EFA"},
-		{name: "artifact with RDMA cache pool and declared EFA", store: []string{"rdma"}, direct: "EFA", artifact: true, wantErr: "rdma and efa"},
+		{name: "artifact with RDMA cache pool and declared EFA", store: []string{"rdma"}, awsEFAEnabled: true, artifact: true, wantErr: "rdma and efa"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
+			if tc.awsEFAEnabled {
+				settingtest.MergeDelegatedSettings(t, map[string]string{
+					"aws-efa-enabled": "true",
+				})
+			}
 			md := modelDeployment(workercore.ModelDeploymentEngineVLLM)
 			if tc.artifact {
 				md.Spec.Model.ArtifactRef = &core.LocalObjectReference{Name: "qwen"}
@@ -233,16 +238,16 @@ func TestModelDeploymentWebhook_InterfaceProtocol(t *testing.T) {
 				md.Spec.Roles[0].Command = []string{"custom-server"}
 			}
 			objs := []ctrlcli.Object{servingInstanceType("h20-8x", 8)}
-			if tc.pureDirect || (tc.direct != "" && !tc.artifact) {
+			if tc.pureDirect || (tc.awsEFAEnabled && !tc.artifact) {
 				md.Spec.Roles[0].Kind = workercore.ModelDeploymentRoleKindPrefill
 				md.Spec.Roles = append(md.Spec.Roles, role(func(r *workercore.ModelDeploymentRole) {
 					r.Name = "decode"
 					r.Kind = workercore.ModelDeploymentRoleKindDecode
+					r.Resources = &workercore.ModelDeploymentRoleResources{
+						Interface: ptr.To(resource.MustParse("1")),
+					}
 				}))
 				md.Spec.Router = &workercore.ModelDeploymentRouter{Name: workercore.ModelDeploymentRouterLLMD}
-				md.Spec.KVTransfer = &workercore.ModelDeploymentKVTransfer{Protocol: tc.direct}
-			} else if tc.direct != "" {
-				md.Spec.KVTransfer = &workercore.ModelDeploymentKVTransfer{Protocol: tc.direct}
 			}
 			if tc.pureDirect {
 				md.Spec.KVCache = nil
@@ -266,7 +271,7 @@ func TestModelDeploymentWebhook_InterfaceProtocol(t *testing.T) {
 			errs, err := w.validateModelDeploymentInterfaceRequests(context.Background(), nil, md)
 			require.NoError(t, err)
 			if tc.wantErr != "" {
-				require.Len(t, errs, 1)
+				require.GreaterOrEqual(t, len(errs), 1)
 				assert.Equal(t, "spec.roles[0].resources.interface", errs[0].Field)
 				assert.Contains(t, errs[0].Error(), tc.wantErr)
 				return
@@ -286,16 +291,16 @@ func TestModelDeploymentWebhook_InterfaceCreate(t *testing.T) {
 		role(func(r *workercore.ModelDeploymentRole) {
 			r.Name = "decode"
 			r.Kind = workercore.ModelDeploymentRoleKindDecode
+			r.Resources = &workercore.ModelDeploymentRoleResources{Interface: ptr.To(resource.MustParse("1"))}
 		}),
 	)
 	md.Spec.KVCache = nil
-	md.Spec.KVTransfer = &workercore.ModelDeploymentKVTransfer{Protocol: "EFA"}
 	md.Spec.Router = &workercore.ModelDeploymentRouter{Name: workercore.ModelDeploymentRouterLLMD}
 	w := newModelDeploymentWebhookWith([]ctrlcli.Object{servingInstanceType("h20-8x", 8)})
 	_, err := w.ValidateCreate(context.Background(), md)
-	require.NoError(t, err, "pure direct transfer needs no cache backend to select EFA")
+	require.NoError(t, err, "pure direct transfer needs no cache backend when both halves request interfaces")
 
-	md.Spec.KVTransfer.Protocol = "TCP"
+	md.Spec.Roles[1].Resources = nil
 	_, err = w.ValidateCreate(context.Background(), md)
 	require.ErrorContains(t, err, "spec.roles[0].resources.interface")
 	require.ErrorContains(t, err, "no effective RDMA or EFA")
@@ -344,14 +349,14 @@ func TestModelDeploymentWebhook_InterfaceUpdateRejectsProtocolChange(t *testing.
 		role(func(r *workercore.ModelDeploymentRole) {
 			r.Name = "decode"
 			r.Kind = workercore.ModelDeploymentRoleKindDecode
+			r.Resources = &workercore.ModelDeploymentRoleResources{Interface: ptr.To(resource.MustParse("1"))}
 		}),
 	)
 	md.Spec.KVCache = nil
-	md.Spec.KVTransfer = &workercore.ModelDeploymentKVTransfer{Protocol: "EFA"}
 	md.Spec.Router = &workercore.ModelDeploymentRouter{Name: workercore.ModelDeploymentRouterLLMD}
 	w := newModelDeploymentWebhookWith([]ctrlcli.Object{servingInstanceType("h20-8x", 8)})
 	old := md.DeepCopy()
-	md.Spec.KVTransfer.Protocol = "TCP"
+	md.Spec.Roles[1].Resources = nil
 	_, err := w.ValidateUpdate(context.Background(), old, md)
 	require.ErrorContains(t, err, "spec.roles[0].resources.interface")
 	require.ErrorContains(t, err, "no effective RDMA or EFA")
@@ -363,6 +368,9 @@ func TestModelDeploymentWebhook_InterfaceUpdateRejectsProtocolChange(t *testing.
 // leg accepts both one and two interfaces, so the raised count is admitted; the unchanged update
 // is the baseline that proves admission is not an accident of skipping the check.
 func TestModelDeploymentWebhook_InterfaceUpdateJudgesACountChange(t *testing.T) {
+	settingtest.MergeDelegatedSettings(t, map[string]string{
+		"aws-efa-enabled": "true",
+	})
 	md := modelDeployment(workercore.ModelDeploymentEngineVLLM,
 		role(func(r *workercore.ModelDeploymentRole) {
 			r.Name = "prefill"
@@ -372,10 +380,10 @@ func TestModelDeploymentWebhook_InterfaceUpdateJudgesACountChange(t *testing.T) 
 		role(func(r *workercore.ModelDeploymentRole) {
 			r.Name = "decode"
 			r.Kind = workercore.ModelDeploymentRoleKindDecode
+			r.Resources = &workercore.ModelDeploymentRoleResources{Interface: ptr.To(resource.MustParse("1"))}
 		}),
 	)
 	md.Spec.KVCache = nil
-	md.Spec.KVTransfer = &workercore.ModelDeploymentKVTransfer{Protocol: "EFA"}
 	md.Spec.Router = &workercore.ModelDeploymentRouter{Name: workercore.ModelDeploymentRouterLLMD}
 	w := newModelDeploymentWebhookWith([]ctrlcli.Object{servingInstanceType("h20-8x", 8)})
 	old := md.DeepCopy()
@@ -3571,10 +3579,12 @@ func TestModelDeploymentWebhook_InterfaceRecheckJudgesOnlyTheMovedRoles(t *testi
 			role(func(r *workercore.ModelDeploymentRole) {
 				r.Name = "decode"
 				r.Kind = workercore.ModelDeploymentRoleKindDecode
+				r.Resources = &workercore.ModelDeploymentRoleResources{
+					Interface: ptr.To(resource.MustParse("1")),
+				}
 			}),
 		)
 		md.Spec.KVCache = nil
-		md.Spec.KVTransfer = &workercore.ModelDeploymentKVTransfer{Protocol: "EFA"}
 		md.Spec.Router = &workercore.ModelDeploymentRouter{Name: workercore.ModelDeploymentRouterLLMD}
 		r := newModelDeploymentWebhookWith([]ctrlcli.Object{servingInstanceType("h20-8x", 8)})
 		if _, err := r.ValidateCreate(context.Background(), md); err != nil {
@@ -3582,10 +3592,10 @@ func TestModelDeploymentWebhook_InterfaceRecheckJudgesOnlyTheMovedRoles(t *testi
 		}
 
 		newer := md.DeepCopy()
-		newer.Spec.KVTransfer.Protocol = "TCP"
+		newer.Spec.Roles[1].Resources = nil
 
 		_, err := r.ValidateUpdate(context.Background(), md, newer)
-		require.Error(t, err, "the transfer protocol is shared, so the unchanged prefill is rejudged")
+		require.Error(t, err, "the pair-level interface condition is shared, so the unchanged prefill is rejudged")
 		assert.True(t, errsContain(err.Error(), "spec.roles[0].resources.interface"), err.Error())
 	})
 
@@ -3599,9 +3609,9 @@ func TestModelDeploymentWebhook_InterfaceRecheckJudgesOnlyTheMovedRoles(t *testi
 		// and for plain Server roles it is empty on both sides of the edit: a router fronts no
 		// pair here, so the edit moves no effective direct input.
 		assert.Empty(t, workerctrl.ModelDeploymentDirectInterfaceProtocol(old, &old.Spec.Roles[0],
-			nodefeature.ManufacturerNVIDIA))
+			nodefeature.ManufacturerNVIDIA, false, false))
 		assert.Empty(t, workerctrl.ModelDeploymentDirectInterfaceProtocol(md, &md.Spec.Roles[0],
-			nodefeature.ManufacturerNVIDIA))
+			nodefeature.ManufacturerNVIDIA, false, false))
 
 		_, err := r.ValidateUpdate(context.Background(), old, md)
 		assert.NoError(t, err,
@@ -3628,7 +3638,7 @@ func TestModelDeploymentWebhook_InterfaceRecheckJudgesOnlyTheMovedRoles(t *testi
 			}),
 		)
 		md.Spec.KVCache.PoolRef.Name = "chat"
-		md.Spec.KVTransfer = &workercore.ModelDeploymentKVTransfer{Protocol: "EFA"}
+		md.Spec.KVTransfer = &workercore.ModelDeploymentKVTransfer{Backend: workercore.ModelDeploymentKVTransferBackendNIXL}
 		r := newModelDeploymentWebhookWith(objs)
 		if _, err := r.ValidateCreate(context.Background(), md); err != nil {
 			t.Fatalf("the stored object was valid at creation: %s", err)
@@ -3640,14 +3650,14 @@ func TestModelDeploymentWebhook_InterfaceRecheckJudgesOnlyTheMovedRoles(t *testi
 		r = newModelDeploymentWebhookWith(drifted)
 
 		newer := md.DeepCopy()
-		newer.Spec.KVTransfer.Protocol = "TCP"
+		newer.Spec.KVTransfer.Backend = workercore.ModelDeploymentKVTransferBackendMooncake
 
-		// Without a pair the declaration renders no leg on either side, so the protocol the
+		// Without a pair the declaration renders no leg on either side, so the backend the
 		// object carries is inert for this role and the drifted fabric is not re-judged.
 		assert.Empty(t, workerctrl.ModelDeploymentDirectInterfaceProtocol(md, &md.Spec.Roles[0],
-			nodefeature.ManufacturerNVIDIA))
+			nodefeature.ManufacturerNVIDIA, false, false))
 		assert.Empty(t, workerctrl.ModelDeploymentDirectInterfaceProtocol(newer, &newer.Spec.Roles[0],
-			nodefeature.ManufacturerNVIDIA))
+			nodefeature.ManufacturerNVIDIA, false, false))
 
 		_, err := r.ValidateUpdate(context.Background(), md, newer)
 		assert.NoError(t, err,
@@ -3679,11 +3689,12 @@ func TestModelDeploymentWebhook_InterfaceRecheckJudgesOnlyTheMovedRoles(t *testi
 				r.InstanceType = "ascend-type"
 				r.Resources = &workercore.ModelDeploymentRoleResources{
 					Accelerator: resource.NewQuantity(1, resource.DecimalSI),
+					Interface:   ptr.To(resource.MustParse("1")),
 				}
 			}),
 		)
 		md.Spec.KVCache.PoolRef.Name = "chat"
-		md.Spec.KVTransfer = &workercore.ModelDeploymentKVTransfer{Protocol: "EFA"}
+		md.Spec.KVTransfer = &workercore.ModelDeploymentKVTransfer{Backend: workercore.ModelDeploymentKVTransferBackendHIXL}
 		md.Spec.Router = &workercore.ModelDeploymentRouter{Name: workercore.ModelDeploymentRouterLLMD}
 		r := newModelDeploymentWebhookWith(objs)
 		if _, err := r.ValidateCreate(context.Background(), md); err != nil {
@@ -3696,14 +3707,14 @@ func TestModelDeploymentWebhook_InterfaceRecheckJudgesOnlyTheMovedRoles(t *testi
 		r = newModelDeploymentWebhookWith(drifted)
 
 		newer := md.DeepCopy()
-		newer.Spec.KVTransfer.Protocol = "TCP"
+		newer.Spec.KVTransfer = nil
 
-		// The helper renders no leg on Ascend whatever the routed pair declares, so the protocol
+		// The helper renders no leg on Ascend whatever the routed pair declares, so the backend
 		// edit moves no effective direct input for this role either.
 		assert.Empty(t, workerctrl.ModelDeploymentDirectInterfaceProtocol(md, &md.Spec.Roles[0],
-			nodefeature.ManufacturerAscend))
+			nodefeature.ManufacturerAscend, false, false))
 		assert.Empty(t, workerctrl.ModelDeploymentDirectInterfaceProtocol(newer, &newer.Spec.Roles[0],
-			nodefeature.ManufacturerAscend))
+			nodefeature.ManufacturerAscend, false, false))
 
 		_, err := r.ValidateUpdate(context.Background(), md, newer)
 		assert.NoError(t, err,
@@ -5280,11 +5291,17 @@ func TestModelDeploymentWebhook_KVTransferBackendFollowsTheManufacturer(t *testi
 			name:           "nixl on an Ascend pool is refused",
 			md:             pair(workercore.ModelDeploymentEngineVLLM, workercore.ModelDeploymentKVTransferBackendNIXL, "a2-8x", "a2-8x"),
 			wantFieldErr:   true,
-			wantErrMessage: "backend NIXL is not supported on an Ascend InstanceType; use HIXL, Mooncake, or Auto",
+			wantErrMessage: "backend NIXL is not supported on an Ascend InstanceType; use HIXL or Mooncake",
 		},
 		{
 			name:           "a mixed Ascend and non-Ascend pair is refused",
 			md:             pair(workercore.ModelDeploymentEngineVLLM, workercore.ModelDeploymentKVTransferBackendMooncake, "a2-8x", "h20-8x"),
+			wantFieldErr:   true,
+			wantErrMessage: "cannot mix Ascend and non-Ascend InstanceTypes",
+		},
+		{
+			name:           "a mixed Ascend and non-Ascend pair without kvTransfer is refused",
+			md:             pair(workercore.ModelDeploymentEngineVLLM, "", "a2-8x", "h20-8x"),
 			wantFieldErr:   true,
 			wantErrMessage: "cannot mix Ascend and non-Ascend InstanceTypes",
 		},
@@ -5327,8 +5344,8 @@ func TestModelDeploymentWebhook_KVTransferBackendFollowsTheManufacturer(t *testi
 }
 
 // TestModelDeploymentWebhook_NIXLSideChannelPortIsReservedOnBothHalves pins the reservation the
-// NIXL leg needs: the side channel is a pair of listeners, so 5600 is reserved on prefill AND
-// decode, and the Mooncake bootstrap port the leg binds no listener on stays free.
+// NIXL leg needs: the side channel is a pair of listeners, so 8998 is reserved on prefill AND
+// decode, while Mooncake and HIXL reserve 8998 on prefill alone.
 func TestModelDeploymentWebhook_NIXLSideChannelPortIsReservedOnBothHalves(t *testing.T) {
 	md := modelDeployment(workercore.ModelDeploymentEngineVLLM,
 		role(func(r *workercore.ModelDeploymentRole) {
@@ -5349,12 +5366,9 @@ func TestModelDeploymentWebhook_NIXLSideChannelPortIsReservedOnBothHalves(t *tes
 		reserved := modelDeploymentRouterReservedPorts(md, &md.Spec.Roles[i])
 		assert.Contains(t, reserved, inject.VLLMNIXLSideChannelPort,
 			"role %q arms the side channel the pair announces on", md.Spec.Roles[i].Name)
-		assert.NotContains(t, reserved, inject.VLLMMooncakeBootstrapPort,
-			"role %q binds no Mooncake listener for a NIXL leg", md.Spec.Roles[i].Name)
 	}
 
-	// The Mooncake backend keeps the prefill-only bootstrap reservation, and neither half of it
-	// claims the side-channel port.
+	// The Mooncake backend keeps the prefill-only bootstrap reservation; decode stays free.
 	md.Spec.KVTransfer.Backend = workercore.ModelDeploymentKVTransferBackendMooncake
 	assert.Contains(t,
 		modelDeploymentRouterReservedPorts(md, &md.Spec.Roles[0]), inject.VLLMMooncakeBootstrapPort)

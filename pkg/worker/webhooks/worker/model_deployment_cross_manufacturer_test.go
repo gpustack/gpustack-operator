@@ -47,6 +47,8 @@ func TestModelDeploymentWebhook_CrossManufacturerIsAdmitted(t *testing.T) {
 
 	live := []ctrlcli.Object{
 		servingInstanceType("h20-8x", 8),
+		servingInstanceType("mi300x-8x", 8,
+			onManufacturer(nodefeature.ManufacturerAMD)),
 		servingInstanceType("ascend-910c-8x", 8,
 			onManufacturer(nodefeature.ManufacturerAscend)),
 	}
@@ -62,7 +64,7 @@ func TestModelDeploymentWebhook_CrossManufacturerIsAdmitted(t *testing.T) {
 			engine: workercore.ModelDeploymentEngineVLLM,
 			roles: []workercore.ModelDeploymentRole{
 				pdRole("prefill", workercore.ModelDeploymentRoleKindPrefill, "h20-8x", wholeCard()),
-				pdRole("decode", workercore.ModelDeploymentRoleKindDecode, "ascend-910c-8x", wholeCard()),
+				pdRole("decode", workercore.ModelDeploymentRoleKindDecode, "mi300x-8x", wholeCard()),
 			},
 		},
 		{
@@ -82,7 +84,7 @@ func TestModelDeploymentWebhook_CrossManufacturerIsAdmitted(t *testing.T) {
 			engine: workercore.ModelDeploymentEngineSGLang,
 			roles: []workercore.ModelDeploymentRole{
 				pdRole("prefill", workercore.ModelDeploymentRoleKindPrefill, "h20-8x", wholeCard()),
-				pdRole("decode", workercore.ModelDeploymentRoleKindDecode, "ascend-910c-8x", wholeCard()),
+				pdRole("decode", workercore.ModelDeploymentRoleKindDecode, "mi300x-8x", wholeCard()),
 			},
 		},
 		{

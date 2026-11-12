@@ -79,7 +79,7 @@ func modelDeploymentElasticCollectiveMembers(
 }
 
 func (r *ModelDeploymentReconciler) renderModelDeploymentElasticPods(ctx context.Context, md *workercore.ModelDeployment,
-	connection *ModelDeploymentConnectorInput, protocols []string, weights *modelArtifactWeights,
+	connection *ModelDeploymentConnectorInput, protocols []string, weights *modelArtifactWeights, awsEFAEnabled bool,
 ) (map[string]map[int][]*core.Pod, error) {
 	role := ModelDeploymentElasticRole(md)
 	_, err := ModelDeploymentElasticTensorParallelSize(role)
@@ -120,7 +120,7 @@ func (r *ModelDeploymentReconciler) renderModelDeploymentElasticPods(ctx context
 		}
 	}
 	copyMD.Spec.Roles = []workercore.ModelDeploymentRole{*gpu}
-	desired, err := r.renderModelDeploymentRolePods(ctx, copyMD, connection, protocols, weights)
+	desired, err := r.renderModelDeploymentRolePods(ctx, copyMD, connection, protocols, weights, awsEFAEnabled)
 	if err != nil {
 		return nil, err
 	}

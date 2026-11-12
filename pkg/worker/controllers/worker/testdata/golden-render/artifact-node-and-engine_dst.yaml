@@ -7,7 +7,7 @@ metadata:
     kueue.x-k8s.io/role-hash: main
     model-transfer.gpustack.ai/delivery: Node
     modeldeployment.gpustack.ai/pod-spec-hash: faef74af60ff1994f97f9b34fd14ce184fe19ac64e7d2eeadeb348a144f713ab
-    modeldeployment.gpustack.ai/render-version: "4"
+    modeldeployment.gpustack.ai/render-version: "5"
     note.gpustack.ai/role: main
     prometheus.io/path: /metrics
     prometheus.io/port: "8000"
@@ -182,7 +182,7 @@ metadata:
     kueue.x-k8s.io/role-hash: main
     model-transfer.gpustack.ai/delivery: Engine
     modeldeployment.gpustack.ai/pod-spec-hash: b780794f8097a7a4d71252510c08d2a525b704af0f79dc75ad29d73070a04870
-    modeldeployment.gpustack.ai/render-version: "4"
+    modeldeployment.gpustack.ai/render-version: "5"
     note.gpustack.ai/role: main
     prometheus.io/path: /metrics
     prometheus.io/port: "8000"

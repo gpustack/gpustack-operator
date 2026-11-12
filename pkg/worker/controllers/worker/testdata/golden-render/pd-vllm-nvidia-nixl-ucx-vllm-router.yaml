@@ -9,7 +9,6 @@ spec:
     name: vLLM
   kvTransfer:
     backend: NIXL
-    protocol: RDMA
   model:
     name: Qwen/Qwen2.5-72B-Instruct
   roles:

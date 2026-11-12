@@ -105,7 +105,7 @@ const (
 
 	// modelDeploymentRenderVersion is the current operator Pod rendering baseline. Bump this
 	// constant whenever a change modifies the rendered Pod output of any ModelDeployment shape.
-	modelDeploymentRenderVersion = 4
+	modelDeploymentRenderVersion = 5
 	// modelDeploymentMinSupportedRenderVersion is the lowest render version that remains compatible
 	// with the current controller without replacing running Pods.
 	modelDeploymentMinSupportedRenderVersion = 1
@@ -2099,6 +2099,19 @@ func modelDeploymentBindingHash(
 		// replica.
 		a.SourceReady = false
 		a.ModelTransferBackend = ""
+		usesModelTransferNIXL := !takeOver &&
+			((a.Delivery == workercore.ModelDeploymentModelDeliveryRemote &&
+				in.Artifact.ModelTransferBackend == "nixl") ||
+				(modelDeploymentRoleUsesModelExpress(in.Deployment.Spec.Engine.Name, in.Role) &&
+					a.Hub == modelDeploymentHubHuggingFace &&
+					in.InstanceType != nil &&
+					modelDeploymentModelTransferCandidateBackend(
+						strings.ToLower(strings.TrimSpace(in.InstanceType.Status.Detail.Manufacturer)),
+						in.Deployment.Spec.Engine.Name,
+					) == "nixl"))
+		if !usesModelTransferNIXL {
+			a.ModelTransferEFA = false
+		}
 		artifact = &a
 	}
 

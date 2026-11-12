@@ -88,7 +88,7 @@ const (
 	// VLLMNIXLSideChannelPort is where the NIXL connector listens for the peer's handshake. It is
 	// declared on BOTH halves: the producer announces its side channel there and the consumer
 	// runs the matching listener.
-	VLLMNIXLSideChannelPort int32 = 5600
+	VLLMNIXLSideChannelPort int32 = 8998
 
 	// VLLMNIXLSideChannelHostEnv carries this Pod's address to the connector. The value cannot be
 	// written at admission, so it is owned as a downwardAPI projection of the Pod IP and resolved
@@ -103,13 +103,8 @@ const (
 	// what a prefill/decode pair needs to find each other without a bootstrap address.
 	AscendAutoConnectEnv = "ASCEND_AUTO_CONNECT"
 
-	// AscendGlobalResourceConfigEnv constrains the Ascend MemFabric link selection. Its value is
-	// a JSON document, so the pair constant below carries the one spelling this renderer writes.
+	// AscendGlobalResourceConfigEnv constrains the Ascend MemFabric link selection.
 	AscendGlobalResourceConfigEnv = "ASCEND_GLOBAL_RESOURCE_CONFIG"
-
-	// AscendGlobalResourceConfigRoCEValue pins the Ascend transfer leg to Device RoCE, the
-	// transport spec.kvTransfer.protocol RDMA declares on Ascend.
-	AscendGlobalResourceConfigRoCEValue = "{\"comm_resource_config.protocol_desc\":\"roce:device\"}"
 
 	// HCCLIntraRoCEEnableEnv turns on intra-node RoCE for the collective communication layer,
 	// alongside the resource config above.
@@ -378,9 +373,7 @@ func renderVLLMWithEncoderCache(in Input, ec EncoderCache) (*Result, error) {
 		} else {
 			// The Ascend leg renders NO protocol key: its transfer engine is initialized with
 			// the literal "ascend" (`vllm_ascend/distributed/kv_transfer/utils/mooncake_transfer_engine.py:26`,
-			// read at v0.23.0), so spec.kvTransfer.protocol has no key to land in here and is
-			// ignored rather than refused -- admission cannot know the pool's vendor, and a
-			// refusal past admission is an error loop.
+			// read at v0.23.0), so KVTransferProtocol has no key to land in here and is ignored.
 			//
 			// kv_port is the one value both halves MUST agree on, and the agreement is structural:
 			// the prefiller advertises its side channel as an OFFSET from the consumer's own
@@ -562,18 +555,9 @@ func renderVLLMWithEncoderCache(in Input, ec EncoderCache) (*Result, error) {
 				ContainerPort: VLLMMooncakeBootstrapPort,
 			})
 		}
-		// Ascend HIXL values are defaulted so a role env entry can override them. Only "rdma"
-		// pins Device RoCE; "ascend" (API CANN) and "tcp" (API Auto or TCP) keep the default
-		// HCCS link, and non-Ascend protocol values are ignored rather than refused here for
-		// the same reason as the transfer document above (avoiding a post-admission error loop).
+		// Ascend HIXL defaults ASCEND_AUTO_CONNECT so a role env entry can override it.
 		if in.Engine == EngineVLLMAscend && in.KVTransferBackend == KVTransferBackendHIXL {
 			result.DefaultedEnv = append(result.DefaultedEnv, core.EnvVar{Name: AscendAutoConnectEnv, Value: "1"})
-			if directLegProtocol(in) == "rdma" {
-				result.DefaultedEnv = append(result.DefaultedEnv,
-					core.EnvVar{Name: AscendGlobalResourceConfigEnv, Value: AscendGlobalResourceConfigRoCEValue},
-					core.EnvVar{Name: HCCLIntraRoCEEnableEnv, Value: "1"},
-				)
-			}
 		}
 	}
 	if forceTCP {

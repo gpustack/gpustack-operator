@@ -7,8 +7,6 @@ spec:
   engine:
     image: vllm/vllm-openai:v0.19.0
     name: vLLM
-  kvTransfer:
-    protocol: EFA
   model:
     artifactRef:
       name: qwen-72b
@@ -113,3 +111,11 @@ kind: CSIDriver
 metadata:
   name: model.csi.gpustack.ai
 spec: {}
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: gpustack-settings
+  namespace: gpustack-system
+stringData:
+  aws-efa-enabled: "true"

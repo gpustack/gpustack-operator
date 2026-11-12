@@ -1390,20 +1390,27 @@ func TestModelDeploymentInterfaceResource(t *testing.T) {
 
 func TestModelDeploymentDirectInterfaceProtocol(t *testing.T) {
 	tests := []struct {
-		name         string
-		engine       string
-		manufacturer string
-		command      []string
-		serverSize   int32
-		elasticEP    *workercore.ModelDeploymentRoleElasticEP
-		want         string
+		name            string
+		engine          string
+		manufacturer    string
+		command         []string
+		serverSize      int32
+		elasticEP       *workercore.ModelDeploymentRoleElasticEP
+		awsEFAEnabled   bool
+		omitDecodeIface bool
+		includeEncode   bool
+		want            string
 	}{
-		{name: "native vLLM", engine: workercore.ModelDeploymentEngineVLLM, manufacturer: nodefeature.ManufacturerNVIDIA, want: "efa"},
-		{name: "Ascend ignores declaration", engine: workercore.ModelDeploymentEngineVLLM, manufacturer: nodefeature.ManufacturerAscend},
-		{name: "unobserved manufacturer cannot select device", engine: workercore.ModelDeploymentEngineVLLM},
-		{name: "SGLang pair resolves the declared protocol", engine: workercore.ModelDeploymentEngineSGLang, manufacturer: nodefeature.ManufacturerNVIDIA, want: "efa"},
+		{name: "native vLLM with EFA", engine: workercore.ModelDeploymentEngineVLLM, manufacturer: nodefeature.ManufacturerNVIDIA, awsEFAEnabled: true, want: "efa"},
+		{name: "native vLLM defaults to RDMA", engine: workercore.ModelDeploymentEngineVLLM, manufacturer: nodefeature.ManufacturerNVIDIA, want: "rdma"},
+		{name: "Ascend ignores direct interface", engine: workercore.ModelDeploymentEngineVLLM, manufacturer: nodefeature.ManufacturerAscend, awsEFAEnabled: true},
+		{name: "unobserved manufacturer cannot select device", engine: workercore.ModelDeploymentEngineVLLM, awsEFAEnabled: true},
+		{name: "SGLang pair resolves EFA", engine: workercore.ModelDeploymentEngineSGLang, manufacturer: nodefeature.ManufacturerNVIDIA, awsEFAEnabled: true, want: "efa"},
+		{name: "one half without interface disables pair direct fabric", engine: workercore.ModelDeploymentEngineVLLM, manufacturer: nodefeature.ManufacturerNVIDIA, omitDecodeIface: true},
+		{name: "encode without interface does not block P/D pair direct fabric", engine: workercore.ModelDeploymentEngineVLLM, manufacturer: nodefeature.ManufacturerNVIDIA, includeEncode: true, want: "rdma"},
 		{name: "user command owns transfer", engine: workercore.ModelDeploymentEngineVLLM, manufacturer: nodefeature.ManufacturerNVIDIA, command: []string{"custom"}},
 		{name: "multi-member Server role selects RDMA", engine: workercore.ModelDeploymentEngineVLLM, manufacturer: nodefeature.ManufacturerNVIDIA, serverSize: 2, want: "rdma"},
+		{name: "multi-member Server role selects EFA when enabled", engine: workercore.ModelDeploymentEngineVLLM, manufacturer: nodefeature.ManufacturerNVIDIA, serverSize: 2, awsEFAEnabled: true, want: "efa"},
 		{name: "elastic EP Server role selects RDMA", engine: workercore.ModelDeploymentEngineVLLM, manufacturer: nodefeature.ManufacturerNVIDIA, serverSize: 1, elasticEP: &workercore.ModelDeploymentRoleElasticEP{Width: 2}, want: "rdma"},
 	}
 	for _, tc := range tests {
@@ -1418,13 +1425,32 @@ func TestModelDeploymentDirectInterfaceProtocol(t *testing.T) {
 					md.Spec.Roles[0].Command = tc.command
 					return
 				}
-				md.Spec.KVTransfer = &workercore.ModelDeploymentKVTransfer{Protocol: "EFA"}
 				md.Spec.Router = &workercore.ModelDeploymentRouter{Name: workercore.ModelDeploymentRouterLLMD}
 				md.Spec.Roles[0].Kind = workercore.ModelDeploymentRoleKindPrefill
 				md.Spec.Roles[0].Command = tc.command
-				md.Spec.Roles = append(md.Spec.Roles, workercore.ModelDeploymentRole{Name: "decode", Kind: workercore.ModelDeploymentRoleKindDecode})
+				md.Spec.Roles[0].Resources = &workercore.ModelDeploymentRoleResources{
+					Interface: ptr.To(resource.MustParse("1")),
+				}
+				decodeRole := workercore.ModelDeploymentRole{
+					Name: "decode",
+					Kind: workercore.ModelDeploymentRoleKindDecode,
+				}
+				if !tc.omitDecodeIface {
+					decodeRole.Resources = &workercore.ModelDeploymentRoleResources{
+						Interface: ptr.To(resource.MustParse("1")),
+					}
+				}
+				md.Spec.Roles = append(md.Spec.Roles, decodeRole)
+				if tc.includeEncode {
+					md.Spec.Roles = append(md.Spec.Roles, workercore.ModelDeploymentRole{
+						Name: "encode",
+						Kind: workercore.ModelDeploymentRoleKindEncode,
+					})
+				}
 			})
-			assert.Equal(t, tc.want, ModelDeploymentDirectInterfaceProtocol(md, &md.Spec.Roles[0], tc.manufacturer))
+			assert.Equal(t, tc.want, ModelDeploymentDirectInterfaceProtocol(
+				md, &md.Spec.Roles[0], tc.manufacturer, false, tc.awsEFAEnabled,
+			))
 		})
 	}
 }
@@ -2773,15 +2799,15 @@ func TestRenderModelDeploymentPod_Probes(t *testing.T) {
 // print.
 func TestRenderModelDeploymentPod_SerializedOutputIsPinnedToThePreSplitRender(t *testing.T) {
 	pinned := map[string]string{
-		"a sole server role": "fc211da18f5ea497d6e3183240d5404148c85fc592345ca3711887bb26ce4646",
-		"a sole server role with a synthesized cache connector":                              "ca98b111146f53cb2dff41c2064390b5790eb825aa4615df91091dd38578c37b",
-		"a take-over role carrying a connector it must be given no part of":                  "26412e32bc6c8e07bcf9304a4d503194c236cae02f011547cba1339f8385c6da",
-		"a direct decoder with a native routing sidecar":                                     "b9aac7bdc1b6ecdb1bdff2d4c078c58eee508995ece768e2d5e5cc02dcf53595",
-		"a direct decoder with a classic routing sidecar":                                    "cd785db1c9c7ecf9bc3f00893f46a30b24560c7da8afaf2f068497d4e746a467",
-		"a role naming no image, which runs the engine's image":                              "fc211da18f5ea497d6e3183240d5404148c85fc592345ca3711887bb26ce4646",
-		"a TLS-listening role with declared ports, privileges, a runtime class and a volume": "abb84875ce2cfb57fcb2d7d6b14e9951c685432894357720e5c93245c15957e6",
-		"the prefill role of a two-role deployment":                                          "5959729d41a52776894ac12b5ca2034b2cc36d5eebbeec6a9a522ae685fc8f44",
-		"the decode role of a two-role deployment":                                           "b3ecf0dc46dcc2ad9e39c736cd2df2790ce58318c724453f5240e8c2d72cd9c0",
+		"a sole server role": "d5d63cb975d770ba33808446c79bba7de332cdd2ac2f07b475be403720fde63c",
+		"a sole server role with a synthesized cache connector":                              "faad20ebb9e86237fec4828a18338ee0ea6b98ff72b91aa520b7c92db700aac1",
+		"a take-over role carrying a connector it must be given no part of":                  "6adc092a5deea1a532e642a5a65b8fc8d34be938f644bd1eefc244b6d04225b7",
+		"a direct decoder with a native routing sidecar":                                     "638cef37ed13981dfdf9d6fd82fc593265e1174b17284bad3dedaa45d7a1d826",
+		"a direct decoder with a classic routing sidecar":                                    "c49acf3d8790150e95e9e156ab83b39086ca1701ce908efda7ea25002da3ed29",
+		"a role naming no image, which runs the engine's image":                              "d5d63cb975d770ba33808446c79bba7de332cdd2ac2f07b475be403720fde63c",
+		"a TLS-listening role with declared ports, privileges, a runtime class and a volume": "afacb41d56dce83994c31be4b6ccca5a83a38bf8b43de94efcc6f75c9100ba21",
+		"the prefill role of a two-role deployment":                                          "ab1b64d30dd33e3d88ed73baefd480b7377a8d0a97fdf5d3fb62a4b905d34e48",
+		"the decode role of a two-role deployment":                                           "d86765d62395774cd9686651c3d6f81dae0f80025af12f2ac0073e188d91cddc",
 	}
 
 	// newPinnedInput builds the render input the way the reconciler does: the deployment and its
@@ -3522,6 +3548,139 @@ func TestRenderModelDeploymentPods_TCPTWReuseFollowsTheSetting(t *testing.T) {
 			"prefill": {{Name: "net.ipv4.tcp_tw_reuse", Value: "1"}},
 		}, sysctls(t))
 	})
+}
+
+// TestRenderModelDeploymentPods_AWSEFAEnabledPodSpecHash verifies that flipping aws-efa-enabled
+// changes pod-spec-hash on roles whose rendered PodSpec changes (NIXL P/D, Mooncake P/D with
+// interfaces, multi-Pod vLLM Server with interfaces) and leaves pod-spec-hash untouched on
+// unaffected roles (Mooncake TCP/HIP/Ascend P/D without interfaces, Ascend HIXL P/D, and
+// non-Remote/non-ModelExpress artifactRef deployments).
+func TestRenderModelDeploymentPods_AWSEFAEnabledPodSpecHash(t *testing.T) {
+	origQualified := modelDeploymentModelTransferQualified
+	modelDeploymentModelTransferQualified = func(modelTransferTuple) bool { return true }
+	t.Cleanup(func() { modelDeploymentModelTransferQualified = origQualified })
+
+	renderHash := func(
+		t *testing.T, md *workercore.ModelDeployment, it *worker.InstanceType,
+		artifact *ModelDeploymentArtifactRender, efa bool,
+	) string {
+		t.Helper()
+		val := "false"
+		if efa {
+			val = "true"
+		}
+		settingtest.MergeDelegatedSettings(t, map[string]string{
+			"aws-efa-enabled": val,
+		})
+		var weights *modelArtifactWeights
+		if artifact != nil {
+			weights = &modelArtifactWeights{Render: artifact}
+		}
+		r := &ModelDeploymentReconciler{Client: newModelDeploymentClient(md, it)}
+		desired, err := r.renderModelDeploymentPods(t.Context(), md, nil, nil, weights)
+		require.NoError(t, err)
+		roleName := md.Spec.Roles[0].Name
+		require.NotEmpty(t, desired[roleName])
+		require.NotEmpty(t, desired[roleName][0])
+		return desired[roleName][0][0].Annotations[modelDeploymentPodSpecHashAnnotation]
+	}
+
+	nvidiaIT := newRenderInstanceType()
+	amdIT := newRenderInstanceType(func(it *worker.InstanceType) {
+		it.Status.Detail.Manufacturer = nodefeature.ManufacturerAMD
+	})
+	ascendIT := newRenderInstanceType(func(it *worker.InstanceType) {
+		it.Status.Detail.Manufacturer = nodefeature.ManufacturerAscend
+	})
+
+	cases := []struct {
+		name      string
+		md        *workercore.ModelDeployment
+		it        *worker.InstanceType
+		artifact  *ModelDeploymentArtifactRender
+		wantMoves bool
+	}{
+		{
+			name: "NIXL P/D pair moves pod-spec-hash when aws-efa-enabled flips",
+			md: newTCPTWReusePair(func(md *workercore.ModelDeployment) {
+				md.Spec.KVTransfer = &workercore.ModelDeploymentKVTransfer{
+					Backend: workercore.ModelDeploymentKVTransferBackendNIXL,
+				}
+			}),
+			it:        nvidiaIT,
+			wantMoves: true,
+		},
+		{
+			name: "Mooncake P/D pair requesting interfaces moves pod-spec-hash when aws-efa-enabled flips",
+			md: newTCPTWReusePair(func(md *workercore.ModelDeployment) {
+				for i := range md.Spec.Roles {
+					md.Spec.Roles[i].Resources = &workercore.ModelDeploymentRoleResources{
+						Interface: ptr.To(resource.MustParse("1")),
+					}
+				}
+			}),
+			it:        nvidiaIT,
+			wantMoves: true,
+		},
+		{
+			name: "Remote NIXL artifact role moves pod-spec-hash when aws-efa-enabled flips",
+			md:   newRenderDeployment(),
+			it:   nvidiaIT,
+			artifact: &ModelDeploymentArtifactRender{
+				Delivery:             workercore.ModelDeploymentModelDeliveryRemote,
+				ModelTransferPolicy:  "Require",
+				SourceReady:          true,
+				ModelTransferBackend: "nixl",
+				ArtifactName:         "qwen3-8b",
+				ArtifactUID:          "uid-1",
+				ManifestDigest:       "sha256:fea7da0c5227e595df7f4fa5822011e7a33cabe1dff13e3ffa7be6898dd1c363",
+			},
+			wantMoves: true,
+		},
+		{
+			name:      "Mooncake TCP P/D pair without interfaces keeps pod-spec-hash unchanged",
+			md:        newTCPTWReusePair(),
+			it:        nvidiaIT,
+			wantMoves: false,
+		},
+		{
+			name:      "Mooncake AMD ROCm P/D pair without interfaces keeps pod-spec-hash unchanged",
+			md:        newTCPTWReusePair(),
+			it:        amdIT,
+			wantMoves: false,
+		},
+		{
+			name:      "Ascend HIXL P/D pair keeps pod-spec-hash unchanged",
+			md:        newTCPTWReusePair(),
+			it:        ascendIT,
+			wantMoves: false,
+		},
+		{
+			name: "Node CSI artifactRef deployment without ModelExpress keeps pod-spec-hash unchanged",
+			md:   newRenderDeployment(),
+			it:   nvidiaIT,
+			artifact: &ModelDeploymentArtifactRender{
+				Delivery:     workercore.ModelDeploymentModelDeliveryNode,
+				ArtifactName: "qwen3-8b",
+				Repository:   "Qwen/Qwen3-8B",
+				Revision:     "abc1234",
+				Hub:          modelDeploymentHubHuggingFace,
+			},
+			wantMoves: false,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			offHash := renderHash(t, tc.md, tc.it, tc.artifact, false)
+			onHash := renderHash(t, tc.md, tc.it, tc.artifact, true)
+			if tc.wantMoves {
+				assert.NotEqual(t, offHash, onHash)
+			} else {
+				assert.Equal(t, offHash, onHash)
+			}
+		})
+	}
 }
 
 func TestRenderModelDeploymentPod_Capabilities(t *testing.T) {

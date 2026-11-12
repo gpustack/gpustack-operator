@@ -9,7 +9,6 @@ spec:
     name: SGLang
   kvTransfer:
     backend: Mooncake
-    protocol: TCP
   model:
     name: Qwen/Qwen2.5-VL-7B-Instruct
   roles:

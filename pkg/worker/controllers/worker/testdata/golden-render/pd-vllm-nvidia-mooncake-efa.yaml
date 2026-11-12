@@ -9,7 +9,6 @@ spec:
     name: vLLM
   kvTransfer:
     backend: Mooncake
-    protocol: EFA
   model:
     name: Qwen/Qwen2.5-72B-Instruct
   roles:
@@ -34,3 +33,11 @@ spec:
   router:
     name: llm-d-router
 status: {}
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: gpustack-settings
+  namespace: gpustack-system
+stringData:
+  aws-efa-enabled: "true"

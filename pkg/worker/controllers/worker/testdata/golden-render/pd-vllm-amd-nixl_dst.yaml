@@ -6,7 +6,7 @@ metadata:
     kueue.x-k8s.io/pod-group-total-count: "1"
     kueue.x-k8s.io/role-hash: decode
     modeldeployment.gpustack.ai/pod-spec-hash: f9142a57f91ae9af5523894d5263903be33967b2167a8dda123947da1f7b532d
-    modeldeployment.gpustack.ai/render-version: "4"
+    modeldeployment.gpustack.ai/render-version: "5"
     note.gpustack.ai/role: decode
     prometheus.io/path: /metrics
     prometheus.io/port: "8200"
@@ -54,7 +54,7 @@ spec:
     - name: MC_TE_METRIC
       value: "1"
     - name: VLLM_NIXL_SIDE_CHANNEL_PORT
-      value: "5600"
+      value: "8998"
     - name: VLLM_CACHE_ROOT
       value: /var/lib/gpustack/cache
     - name: HF_HUB_CACHE
@@ -122,7 +122,7 @@ spec:
     - containerPort: 8200
       name: model-server
       protocol: TCP
-    - containerPort: 5600
+    - containerPort: 8998
       name: nixl-side
       protocol: TCP
     readinessProbe:
@@ -202,7 +202,7 @@ metadata:
     kueue.x-k8s.io/pod-group-total-count: "1"
     kueue.x-k8s.io/role-hash: prefill
     modeldeployment.gpustack.ai/pod-spec-hash: a71f1d55df3f551af4f380ac2fb576c86053e64a19485c2988e5895e0bcd59bb
-    modeldeployment.gpustack.ai/render-version: "4"
+    modeldeployment.gpustack.ai/render-version: "5"
     note.gpustack.ai/role: prefill
     prometheus.io/path: /metrics
     prometheus.io/port: "8000"
@@ -252,7 +252,7 @@ spec:
     - name: MC_TE_METRIC
       value: "1"
     - name: VLLM_NIXL_SIDE_CHANNEL_PORT
-      value: "5600"
+      value: "8998"
     - name: VLLM_CACHE_ROOT
       value: /var/lib/gpustack/cache
     - name: HF_HUB_CACHE
@@ -320,7 +320,7 @@ spec:
     - containerPort: 8000
       name: http
       protocol: TCP
-    - containerPort: 5600
+    - containerPort: 8998
       name: nixl-side
       protocol: TCP
     - containerPort: 5557

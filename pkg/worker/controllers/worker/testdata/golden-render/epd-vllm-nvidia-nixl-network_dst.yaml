@@ -6,7 +6,7 @@ metadata:
     kueue.x-k8s.io/pod-group-total-count: "1"
     kueue.x-k8s.io/role-hash: decode
     modeldeployment.gpustack.ai/pod-spec-hash: a40bdc7d8954e10b93b76dda8aba861d328d91217986cd80ee50f01b434d4fea
-    modeldeployment.gpustack.ai/render-version: "4"
+    modeldeployment.gpustack.ai/render-version: "5"
     note.gpustack.ai/role: decode
     prometheus.io/path: /metrics
     prometheus.io/port: "8200"
@@ -65,7 +65,7 @@ spec:
     - name: MC_TE_METRIC
       value: "1"
     - name: VLLM_NIXL_SIDE_CHANNEL_PORT
-      value: "5600"
+      value: "8998"
     - name: VLLM_CACHE_ROOT
       value: /var/lib/gpustack/cache
     - name: HF_HUB_CACHE
@@ -133,7 +133,7 @@ spec:
     - containerPort: 8200
       name: model-server
       protocol: TCP
-    - containerPort: 5600
+    - containerPort: 8998
       name: nixl-side
       protocol: TCP
     readinessProbe:
@@ -215,7 +215,7 @@ metadata:
     kueue.x-k8s.io/pod-group-total-count: "1"
     kueue.x-k8s.io/role-hash: encode
     modeldeployment.gpustack.ai/pod-spec-hash: 66a315dcf71b8e48957e49e1c8ff4f0438be1b2197b83a3b69c869cfda4c67be
-    modeldeployment.gpustack.ai/render-version: "4"
+    modeldeployment.gpustack.ai/render-version: "5"
     note.gpustack.ai/role: encode
     prometheus.io/path: /metrics
     prometheus.io/port: "8000"
@@ -407,7 +407,7 @@ metadata:
     kueue.x-k8s.io/pod-group-total-count: "1"
     kueue.x-k8s.io/role-hash: prefill
     modeldeployment.gpustack.ai/pod-spec-hash: c065d8d217c3d14f3e42d6c944dc402bbe21258e59afd53ba3b48486cc1cf50b
-    modeldeployment.gpustack.ai/render-version: "4"
+    modeldeployment.gpustack.ai/render-version: "5"
     note.gpustack.ai/role: prefill
     prometheus.io/path: /metrics
     prometheus.io/port: "8000"
@@ -480,7 +480,7 @@ spec:
     - name: MC_TE_METRIC
       value: "1"
     - name: VLLM_NIXL_SIDE_CHANNEL_PORT
-      value: "5600"
+      value: "8998"
     - name: VLLM_CACHE_ROOT
       value: /var/lib/gpustack/cache
     - name: HF_HUB_CACHE
@@ -548,7 +548,7 @@ spec:
     - containerPort: 8000
       name: http
       protocol: TCP
-    - containerPort: 5600
+    - containerPort: 8998
       name: nixl-side
       protocol: TCP
     - containerPort: 5557
