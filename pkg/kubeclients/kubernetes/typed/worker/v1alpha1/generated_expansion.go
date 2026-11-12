@@ -7,6 +7,8 @@
 
 package v1alpha1
 
+type AcceleratorTypeExpansion interface{}
+
 type DevicesExpansion interface{}
 
 type DevicesRDMASelectionPolicyExpansion interface{}

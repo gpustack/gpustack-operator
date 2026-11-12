@@ -9,11 +9,13 @@ import (
 // ModelDeploymentRoleResourcesApplyConfiguration represents a declarative configuration of the ModelDeploymentRoleResources type for use
 // with apply.
 //
-// ModelDeploymentRoleResources is what one Pod of a role asks of accelerators and fabric interfaces.
+// ModelDeploymentRoleResources is what one Pod of a role asks of accelerators, fabric interfaces,
+// and optional explicit host resources.
 //
-// It deliberately mirrors the accelerator fields of InstanceResources — the same names, the same
-// meanings — rather than inventing a second vocabulary for one request, and it deliberately omits
-// that type's CPU, RAM and LocalStorage, which are derived here rather than declared.
+// It mirrors the accelerator fields of InstanceResources — the same names, the same meanings —
+// rather than inventing a second vocabulary for one request, and adds optional CPU, RAM and
+// LocalStorage host resource requests that are rendered onto the serving container only when set
+// (never derived from InstanceType).
 type ModelDeploymentRoleResourcesApplyConfiguration struct {
 	// Accelerator is how many accelerator cards ONE POD asks for.
 	//
@@ -52,6 +54,19 @@ type ModelDeploymentRoleResourcesApplyConfiguration struct {
 	// the same as for accelerator; the schema carries no bound of its own.
 	//
 	Interface *resource.Quantity `json:"interface,omitempty"`
+	// CPU is the host CPU request and limit for one role Pod, such as "8" or "16". When omitted,
+	// no CPU request or limit is rendered onto the serving container.
+	//
+	CPU *resource.Quantity `json:"cpu,omitempty"`
+	// RAM is the host memory request and limit for one role Pod, such as "64Gi". When omitted,
+	// no memory request or limit is rendered onto the serving container.
+	//
+	RAM *resource.Quantity `json:"ram,omitempty"`
+	// LocalStorage is the host ephemeral storage request and limit for one role Pod, such as
+	// "100Gi". When omitted, no ephemeral storage request or limit is rendered onto the serving
+	// container.
+	//
+	LocalStorage *resource.Quantity `json:"localStorage,omitempty"`
 }
 
 // ModelDeploymentRoleResourcesApplyConfiguration constructs a declarative configuration of the ModelDeploymentRoleResources type for use with
@@ -97,5 +112,29 @@ func (b *ModelDeploymentRoleResourcesApplyConfiguration) WithAcceleratorPartitio
 // If called multiple times, the Interface field is set to the value of the last call.
 func (b *ModelDeploymentRoleResourcesApplyConfiguration) WithInterface(value resource.Quantity) *ModelDeploymentRoleResourcesApplyConfiguration {
 	b.Interface = &value
+	return b
+}
+
+// WithCPU sets the CPU field in the declarative configuration to the given value
+// and returns the receiver, so that objects can be built by chaining "With" function invocations.
+// If called multiple times, the CPU field is set to the value of the last call.
+func (b *ModelDeploymentRoleResourcesApplyConfiguration) WithCPU(value resource.Quantity) *ModelDeploymentRoleResourcesApplyConfiguration {
+	b.CPU = &value
+	return b
+}
+
+// WithRAM sets the RAM field in the declarative configuration to the given value
+// and returns the receiver, so that objects can be built by chaining "With" function invocations.
+// If called multiple times, the RAM field is set to the value of the last call.
+func (b *ModelDeploymentRoleResourcesApplyConfiguration) WithRAM(value resource.Quantity) *ModelDeploymentRoleResourcesApplyConfiguration {
+	b.RAM = &value
+	return b
+}
+
+// WithLocalStorage sets the LocalStorage field in the declarative configuration to the given value
+// and returns the receiver, so that objects can be built by chaining "With" function invocations.
+// If called multiple times, the LocalStorage field is set to the value of the last call.
+func (b *ModelDeploymentRoleResourcesApplyConfiguration) WithLocalStorage(value resource.Quantity) *ModelDeploymentRoleResourcesApplyConfiguration {
+	b.LocalStorage = &value
 	return b
 }

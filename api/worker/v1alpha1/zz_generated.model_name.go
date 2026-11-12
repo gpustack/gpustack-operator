@@ -66,6 +66,26 @@ func (in AcceleratorStatus) OpenAPIModelName() string {
 }
 
 // OpenAPIModelName returns the OpenAPI model name for this type.
+func (in AcceleratorType) OpenAPIModelName() string {
+	return "ai.gpustack.worker.v1alpha1.AcceleratorType"
+}
+
+// OpenAPIModelName returns the OpenAPI model name for this type.
+func (in AcceleratorTypeList) OpenAPIModelName() string {
+	return "ai.gpustack.worker.v1alpha1.AcceleratorTypeList"
+}
+
+// OpenAPIModelName returns the OpenAPI model name for this type.
+func (in AcceleratorTypeSpec) OpenAPIModelName() string {
+	return "ai.gpustack.worker.v1alpha1.AcceleratorTypeSpec"
+}
+
+// OpenAPIModelName returns the OpenAPI model name for this type.
+func (in AcceleratorTypeStatus) OpenAPIModelName() string {
+	return "ai.gpustack.worker.v1alpha1.AcceleratorTypeStatus"
+}
+
+// OpenAPIModelName returns the OpenAPI model name for this type.
 func (in DeviceEthernet) OpenAPIModelName() string {
 	return "ai.gpustack.worker.v1alpha1.DeviceEthernet"
 }

@@ -274,6 +274,8 @@ func (f *sharedInformerFactory) ForResource(resource schema.GroupVersionResource
 		return &genericInformer{resource: resource.GroupResource(), informer: f.Storagemigration().V1beta1().StorageVersionMigrations().Informer()}, nil
 
 		// Group=worker.gpustack.ai, Version=v1
+	case workerv1.SchemeGroupVersion.WithResource("acceleratortypes"):
+		return &genericInformer{resource: resource.GroupResource(), informer: f.Worker().V1().AcceleratorTypes().Informer()}, nil
 	case workerv1.SchemeGroupVersion.WithResource("devices"):
 		return &genericInformer{resource: resource.GroupResource(), informer: f.Worker().V1().Devices().Informer()}, nil
 	case workerv1.SchemeGroupVersion.WithResource("devicesrdmaselectionpolicies"):
@@ -316,6 +318,8 @@ func (f *sharedInformerFactory) ForResource(resource schema.GroupVersionResource
 		return &genericInformer{resource: resource.GroupResource(), informer: f.Worker().V1().TopologySources().Informer()}, nil
 
 		// Group=worker.gpustack.ai, Version=v1alpha1
+	case workerv1alpha1.SchemeGroupVersion.WithResource("acceleratortypes"):
+		return &genericInformer{resource: resource.GroupResource(), informer: f.Worker().V1alpha1().AcceleratorTypes().Informer()}, nil
 	case workerv1alpha1.SchemeGroupVersion.WithResource("devices"):
 		return &genericInformer{resource: resource.GroupResource(), informer: f.Worker().V1alpha1().Devices().Informer()}, nil
 	case workerv1alpha1.SchemeGroupVersion.WithResource("devicesrdmaselectionpolicies"):

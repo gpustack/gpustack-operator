@@ -383,27 +383,28 @@ type ModelDeploymentRole struct {
 	// Pods keep the type they were admitted with until they are deleted. The elastic-EP profile
 	// freezes this field after creation.
 	//
-	// +required
-	// +k8s:validation:minLength=1
+	// +optional
 	// +k8s:validation:maxLength=253
-	InstanceType string `json:"instanceType" protobuf:"bytes,3,name=instanceType"`
+	InstanceType string `json:"instanceType,omitempty" protobuf:"bytes,3,opt,name=instanceType"`
 
-	// Resources is what one Pod of this role asks of an accelerator, and it is a STRUCTURED
-	// FIELD FOR THE SAME REASON Replicas and InstanceType are: admission and scheduling read it.
+	// AcceleratorType is the name of the AcceleratorType whose hardware pool this role's Pods
+	// are admitted against. When omitted, the role runs as an unqueued CPU-only workload
+	// scheduled directly onto managed nodes.
 	//
-	// It carries only the ACCELERATOR half of a request, because that is the only half a workload
-	// decides. CPU, memory and ephemeral storage are DERIVED from the InstanceType's per-unit
-	// resources scaled by the requested card count, so they are not expressible here at all — a
-	// stronger guarantee than refusing them, since a field that does not exist cannot be shadowed by
-	// the container fields below either.
+	// +optional
+	// +k8s:validation:maxLength=253
+	AcceleratorType string `json:"acceleratorType,omitempty" protobuf:"bytes,21,opt,name=acceleratorType"`
+
+	// Resources is what one Pod of this role asks of accelerators, fabric interfaces, and host
+	// resources, and it is a STRUCTURED FIELD FOR THE SAME REASON Replicas and AcceleratorType are:
+	// admission and scheduling read it.
 	//
-	// InstanceType alone cannot supply this half: its UnitResources size ONE card, and how many cards
-	// a Pod wants is a property of the model being served, so two deployments on one InstanceType
-	// routinely want different counts.
+	// It carries the accelerator request and optional explicit CPU, memory and ephemeral storage
+	// requests rendered onto the serving container when set.
 	//
 	// IT IS EDITABLE. A change runs the same whole-group replacement, and the new request is
 	// admitted against the pool as each replacement is created. Omission behaves as on create:
-	// the accelerator half is defaulted, to one whole card of an acceleratable type. The
+	// when AcceleratorType is set, the accelerator half is defaulted to one whole card. The
 	// elastic-EP profile freezes this field at the whole-card group it bound to TP at creation.
 	Resources *ModelDeploymentRoleResources `json:"resources,omitempty" protobuf:"bytes,4,opt,name=resources"`
 
@@ -697,11 +698,13 @@ type ModelDeploymentAdditionalVolume struct {
 	PersistentVolumeClaim *core.PersistentVolumeClaimVolumeSource `json:"persistentVolumeClaim,omitempty" protobuf:"bytes,7,opt,name=persistentVolumeClaim"` // nolint: lll
 }
 
-// ModelDeploymentRoleResources is what one Pod of a role asks of accelerators and fabric interfaces.
+// ModelDeploymentRoleResources is what one Pod of a role asks of accelerators, fabric interfaces,
+// and optional explicit host resources.
 //
-// It deliberately mirrors the accelerator fields of InstanceResources — the same names, the same
-// meanings — rather than inventing a second vocabulary for one request, and it deliberately omits
-// that type's CPU, RAM and LocalStorage, which are derived here rather than declared.
+// It mirrors the accelerator fields of InstanceResources — the same names, the same meanings —
+// rather than inventing a second vocabulary for one request, and adds optional CPU, RAM and
+// LocalStorage host resource requests that are rendered onto the serving container only when set
+// (never derived from InstanceType).
 type ModelDeploymentRoleResources struct {
 	// Accelerator is how many accelerator cards ONE POD asks for.
 	//
@@ -750,6 +753,25 @@ type ModelDeploymentRoleResources struct {
 	//
 	// +optional
 	Interface *resource.Quantity `json:"interface,omitempty" protobuf:"bytes,5,opt,name=interface"`
+
+	// CPU is the host CPU request and limit for one role Pod, such as "8" or "16". When omitted,
+	// no CPU request or limit is rendered onto the serving container.
+	//
+	// +optional
+	CPU *resource.Quantity `json:"cpu,omitempty" protobuf:"bytes,6,opt,name=cpu"`
+
+	// RAM is the host memory request and limit for one role Pod, such as "64Gi". When omitted,
+	// no memory request or limit is rendered onto the serving container.
+	//
+	// +optional
+	RAM *resource.Quantity `json:"ram,omitempty" protobuf:"bytes,7,opt,name=ram"`
+
+	// LocalStorage is the host ephemeral storage request and limit for one role Pod, such as
+	// "100Gi". When omitted, no ephemeral storage request or limit is rendered onto the serving
+	// container.
+	//
+	// +optional
+	LocalStorage *resource.Quantity `json:"localStorage,omitempty" protobuf:"bytes,8,opt,name=localStorage"`
 }
 
 // ModelDeploymentRouter is the router that fronts a deployment's roles, and how much of it this

@@ -54,6 +54,46 @@ func GetAPIService(svc apiregistrationv1.ServiceReference, ca []byte) *apiregist
 	}
 }
 
+var _ rest.Scoper = (*AcceleratorType)(nil)
+
+func (*AcceleratorType) NamespaceScoped() bool {
+	return false
+}
+
+var _ rest.KindProvider = (*AcceleratorType)(nil)
+
+func (*AcceleratorType) Kind() string {
+	return "AcceleratorType"
+}
+
+var _ rest.SingularNameProvider = (*AcceleratorType)(nil)
+
+func (*AcceleratorType) GetSingularName() string {
+	return "acceleratortype"
+}
+
+var _ rest.ShortNamesProvider = (*AcceleratorType)(nil)
+
+func (*AcceleratorType) ShortNames() []string {
+	return []string{
+		"acctype",
+	}
+}
+
+var _ rest.CategoriesProvider = (*AcceleratorType)(nil)
+
+func (*AcceleratorType) Categories() []string {
+	return []string{
+		"gpustack",
+	}
+}
+
+var _ WithStatusSubResource = (*AcceleratorType)(nil)
+
+func (in *AcceleratorType) CopyStatusTo(out runtime.Object) {
+	out.(*AcceleratorType).Status = in.Status
+}
+
 var _ rest.Scoper = (*Devices)(nil)
 
 func (*Devices) NamespaceScoped() bool {

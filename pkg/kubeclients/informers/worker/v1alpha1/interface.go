@@ -13,6 +13,8 @@ import (
 
 // Interface provides access to all the informers in this group version.
 type Interface interface {
+	// AcceleratorTypes returns a AcceleratorTypeInformer.
+	AcceleratorTypes() AcceleratorTypeInformer
 	// Devices returns a DevicesInformer.
 	Devices() DevicesInformer
 	// DevicesRDMASelectionPolicies returns a DevicesRDMASelectionPolicyInformer.
@@ -54,6 +56,11 @@ type version struct {
 // New returns a new Interface.
 func New(f internalinterfaces.SharedInformerFactory, namespace string, tweakListOptions internalinterfaces.TweakListOptionsFunc) Interface {
 	return &version{factory: f, namespace: namespace, tweakListOptions: tweakListOptions}
+}
+
+// AcceleratorTypes returns a AcceleratorTypeInformer.
+func (v *version) AcceleratorTypes() AcceleratorTypeInformer {
+	return &acceleratorTypeInformer{factory: v.factory, tweakListOptions: v.tweakListOptions}
 }
 
 // Devices returns a DevicesInformer.

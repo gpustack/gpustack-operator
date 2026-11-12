@@ -22,6 +22,8 @@ import (
 
 func GetOpenAPIDefinitions(ref common.ReferenceCallback) map[string]common.OpenAPIDefinition {
 	return map[string]common.OpenAPIDefinition{
+		v1.AcceleratorType{}.OpenAPIModelName():                                        schema_gpustack_api_worker_v1_AcceleratorType(ref),
+		v1.AcceleratorTypeList{}.OpenAPIModelName():                                    schema_gpustack_api_worker_v1_AcceleratorTypeList(ref),
 		v1.Devices{}.OpenAPIModelName():                                                schema_gpustack_api_worker_v1_Devices(ref),
 		v1.DevicesList{}.OpenAPIModelName():                                            schema_gpustack_api_worker_v1_DevicesList(ref),
 		v1.DevicesRDMASelectionPolicy{}.OpenAPIModelName():                             schema_gpustack_api_worker_v1_DevicesRDMASelectionPolicy(ref),
@@ -97,6 +99,10 @@ func GetOpenAPIDefinitions(ref common.ReferenceCallback) map[string]common.OpenA
 		v1alpha1.AcceleratorSlicedPhysicalDetail{}.OpenAPIModelName():                  schema_gpustack_api_worker_v1alpha1_AcceleratorSlicedPhysicalDetail(ref),
 		v1alpha1.AcceleratorSlicedPhysicalDetailProfile{}.OpenAPIModelName():           schema_gpustack_api_worker_v1alpha1_AcceleratorSlicedPhysicalDetailProfile(ref),
 		v1alpha1.AcceleratorStatus{}.OpenAPIModelName():                                schema_gpustack_api_worker_v1alpha1_AcceleratorStatus(ref),
+		v1alpha1.AcceleratorType{}.OpenAPIModelName():                                  schema_gpustack_api_worker_v1alpha1_AcceleratorType(ref),
+		v1alpha1.AcceleratorTypeList{}.OpenAPIModelName():                              schema_gpustack_api_worker_v1alpha1_AcceleratorTypeList(ref),
+		v1alpha1.AcceleratorTypeSpec{}.OpenAPIModelName():                              schema_gpustack_api_worker_v1alpha1_AcceleratorTypeSpec(ref),
+		v1alpha1.AcceleratorTypeStatus{}.OpenAPIModelName():                            schema_gpustack_api_worker_v1alpha1_AcceleratorTypeStatus(ref),
 		v1alpha1.DeviceEthernet{}.OpenAPIModelName():                                   schema_gpustack_api_worker_v1alpha1_DeviceEthernet(ref),
 		v1alpha1.DeviceFabric{}.OpenAPIModelName():                                     schema_gpustack_api_worker_v1alpha1_DeviceFabric(ref),
 		v1alpha1.DeviceInterface{}.OpenAPIModelName():                                  schema_gpustack_api_worker_v1alpha1_DeviceInterface(ref),
@@ -603,6 +609,101 @@ func GetOpenAPIDefinitions(ref common.ReferenceCallback) map[string]common.OpenA
 		runtime.Unknown{}.OpenAPIModelName():                                           schema_k8sio_apimachinery_pkg_runtime_Unknown(ref),
 		intstr.IntOrString{}.OpenAPIModelName():                                        schema_apimachinery_pkg_util_intstr_IntOrString(ref),
 		version.Info{}.OpenAPIModelName():                                              schema_k8sio_apimachinery_pkg_version_Info(ref),
+	}
+}
+
+func schema_gpustack_api_worker_v1_AcceleratorType(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "AcceleratorType is the schema for worker.gpustack.ai.\n\nAn AcceleratorType represents an accelerated hardware pool backed by a canonical Kueue ClusterQueue, without workspace CPU, memory, or local-storage presets.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"kind": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Kind is a string value representing the REST resource this object represents. Servers may infer this from the endpoint the client submits requests to. Cannot be updated. In CamelCase. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"apiVersion": {
+						SchemaProps: spec.SchemaProps{
+							Description: "APIVersion defines the versioned schema of this representation of an object. Servers should convert recognized schemas to the latest internal value, and may reject unrecognized values. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"metadata": {
+						SchemaProps: spec.SchemaProps{
+							Default: map[string]interface{}{},
+							Ref:     ref(metav1.ObjectMeta{}.OpenAPIModelName()),
+						},
+					},
+					"spec": {
+						SchemaProps: spec.SchemaProps{
+							Default: map[string]interface{}{},
+							Ref:     ref(v1alpha1.AcceleratorTypeSpec{}.OpenAPIModelName()),
+						},
+					},
+					"status": {
+						SchemaProps: spec.SchemaProps{
+							Default: map[string]interface{}{},
+							Ref:     ref(v1alpha1.AcceleratorTypeStatus{}.OpenAPIModelName()),
+						},
+					},
+				},
+			},
+		},
+		Dependencies: []string{
+			v1alpha1.AcceleratorTypeSpec{}.OpenAPIModelName(), v1alpha1.AcceleratorTypeStatus{}.OpenAPIModelName(), metav1.ObjectMeta{}.OpenAPIModelName()},
+	}
+}
+
+func schema_gpustack_api_worker_v1_AcceleratorTypeList(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "AcceleratorTypeList holds the list of AcceleratorType.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"kind": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Kind is a string value representing the REST resource this object represents. Servers may infer this from the endpoint the client submits requests to. Cannot be updated. In CamelCase. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"apiVersion": {
+						SchemaProps: spec.SchemaProps{
+							Description: "APIVersion defines the versioned schema of this representation of an object. Servers should convert recognized schemas to the latest internal value, and may reject unrecognized values. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"metadata": {
+						SchemaProps: spec.SchemaProps{
+							Default: map[string]interface{}{},
+							Ref:     ref(metav1.ListMeta{}.OpenAPIModelName()),
+						},
+					},
+					"items": {
+						SchemaProps: spec.SchemaProps{
+							Type: []string{"array"},
+							Items: &spec.SchemaOrArray{
+								Schema: &spec.Schema{
+									SchemaProps: spec.SchemaProps{
+										Ref: ref(v1.AcceleratorType{}.OpenAPIModelName()),
+									},
+								},
+							},
+						},
+					},
+				},
+				Required: []string{"items"},
+			},
+		},
+		Dependencies: []string{
+			v1.AcceleratorType{}.OpenAPIModelName(), metav1.ListMeta{}.OpenAPIModelName()},
 	}
 }
 
@@ -4535,6 +4636,265 @@ func schema_gpustack_api_worker_v1alpha1_AcceleratorStatus(ref common.ReferenceC
 		},
 		Dependencies: []string{
 			v1alpha1.AcceleratorLogicalSliced{}.OpenAPIModelName(), v1alpha1.AcceleratorPhysicalSliced{}.OpenAPIModelName()},
+	}
+}
+
+func schema_gpustack_api_worker_v1alpha1_AcceleratorType(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "AcceleratorType is the schema for worker.gpustack.ai.\n\nAn AcceleratorType represents an accelerated hardware pool backed by a canonical Kueue ClusterQueue, without workspace CPU, memory, or local-storage presets.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"kind": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Kind is a string value representing the REST resource this object represents. Servers may infer this from the endpoint the client submits requests to. Cannot be updated. In CamelCase. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"apiVersion": {
+						SchemaProps: spec.SchemaProps{
+							Description: "APIVersion defines the versioned schema of this representation of an object. Servers should convert recognized schemas to the latest internal value, and may reject unrecognized values. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"metadata": {
+						SchemaProps: spec.SchemaProps{
+							Default: map[string]interface{}{},
+							Ref:     ref(metav1.ObjectMeta{}.OpenAPIModelName()),
+						},
+					},
+					"spec": {
+						SchemaProps: spec.SchemaProps{
+							Default: map[string]interface{}{},
+							Ref:     ref(v1alpha1.AcceleratorTypeSpec{}.OpenAPIModelName()),
+						},
+					},
+					"status": {
+						SchemaProps: spec.SchemaProps{
+							Default: map[string]interface{}{},
+							Ref:     ref(v1alpha1.AcceleratorTypeStatus{}.OpenAPIModelName()),
+						},
+					},
+				},
+			},
+		},
+		Dependencies: []string{
+			v1alpha1.AcceleratorTypeSpec{}.OpenAPIModelName(), v1alpha1.AcceleratorTypeStatus{}.OpenAPIModelName(), metav1.ObjectMeta{}.OpenAPIModelName()},
+	}
+}
+
+func schema_gpustack_api_worker_v1alpha1_AcceleratorTypeList(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "AcceleratorTypeList holds the list of AcceleratorType.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"kind": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Kind is a string value representing the REST resource this object represents. Servers may infer this from the endpoint the client submits requests to. Cannot be updated. In CamelCase. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"apiVersion": {
+						SchemaProps: spec.SchemaProps{
+							Description: "APIVersion defines the versioned schema of this representation of an object. Servers should convert recognized schemas to the latest internal value, and may reject unrecognized values. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"metadata": {
+						SchemaProps: spec.SchemaProps{
+							Default: map[string]interface{}{},
+							Ref:     ref(metav1.ListMeta{}.OpenAPIModelName()),
+						},
+					},
+					"items": {
+						SchemaProps: spec.SchemaProps{
+							Type: []string{"array"},
+							Items: &spec.SchemaOrArray{
+								Schema: &spec.Schema{
+									SchemaProps: spec.SchemaProps{
+										Ref: ref(v1alpha1.AcceleratorType{}.OpenAPIModelName()),
+									},
+								},
+							},
+						},
+					},
+				},
+				Required: []string{"items"},
+			},
+		},
+		Dependencies: []string{
+			v1alpha1.AcceleratorType{}.OpenAPIModelName(), metav1.ListMeta{}.OpenAPIModelName()},
+	}
+}
+
+func schema_gpustack_api_worker_v1alpha1_AcceleratorTypeSpec(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "AcceleratorTypeSpec defines the desired spec of AcceleratorType. Its field order and protobuf numbering group the admin-editable fields (DisplayName, Description, Inactive) first, followed by the immutable pool identity inputs.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"displayName": {
+						SchemaProps: spec.SchemaProps{
+							Description: "DisplayName is a human-friendly label for the AcceleratorType. It is admin-editable and, for a derived AcceleratorType, stamped at derivation time.",
+							MaxLength:   ptr.To[int64](64),
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"description": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Description is a free-form admin annotation for the AcceleratorType.",
+							MaxLength:   ptr.To[int64](1024),
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"inactive": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Inactive takes the AcceleratorType out of service. When true, admission refuses new workloads targeting this AcceleratorType, and the backing ClusterQueue is held when every fronting type on the pool is inactive.",
+							Type:        []string{"boolean"},
+							Format:      "",
+						},
+					},
+					"acceleratorGroup": {
+						SchemaProps: spec.SchemaProps{
+							Description: "AcceleratorGroup is the accelerator group (the acceleratable node key) of the AcceleratorType, e.g. \"nvidia-a10g\". It selects the accelerator pool the type schedules onto and is a required admin-writable input.",
+							Default:     "",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"generalGroup": {
+						SchemaProps: spec.SchemaProps{
+							Description: "GeneralGroup is the general(CPU) group (the general node key) of the AcceleratorType, e.g. \"amd-epyc-7763\", or the literal \"generic\" for a CPU-manufacturer-agnostic pool. The mutating webhook defaults an empty value to \"generic\"; it participates as a scheduling discriminator only when instance-type-aware-cpu-manufacturer is enabled.",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"os": {
+						SchemaProps: spec.SchemaProps{
+							Description: "OS is the operating system of the AcceleratorType, e.g. \"linux\", \"windows\".\n\nIt is a required admin-writable input, enforced by the validating webhook.",
+							Default:     "",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"arch": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Arch is the architecture of the AcceleratorType, e.g. \"amd64\", \"arm64\".\n\nIt is a required admin-writable input, enforced by the validating webhook.",
+							Default:     "",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+				},
+				Required: []string{"acceleratorGroup", "os", "arch"},
+			},
+		},
+	}
+}
+
+func schema_gpustack_api_worker_v1alpha1_AcceleratorTypeStatus(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "AcceleratorTypeStatus describes the observed state of the AcceleratorType.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"detail": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Detail is the observed hardware descriptor of the AcceleratorType, computed by the reconciler from the matched ResourceFlavor's notes and the pool's Devices ledger.",
+							Default:     map[string]interface{}{},
+							Ref:         ref(v1alpha1.InstanceTypeDetail{}.OpenAPIModelName()),
+						},
+					},
+					"entrance": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Entrance is the name of the namespaced LocalQueue that fronts this AcceleratorType's backing ClusterQueue — the value a workload sets as its \"kueue.x-k8s.io/queue-name\" label to be admitted.",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"phase": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Phase is the summary of conditions.",
+							Default:     "",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"phaseMessage": {
+						SchemaProps: spec.SchemaProps{
+							Description: "PhaseMessage is the message of the phase.",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"accelerator": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Accelerator is the allocatable-as-exclusive view: whole accelerators that are entirely free, e.g. \"1\", \"4\".",
+							Default:     map[string]interface{}{},
+							Ref:         ref(v1alpha1.InstanceTypeResource{}.OpenAPIModelName()),
+						},
+					},
+					"acceleratorShared": {
+						SchemaProps: spec.SchemaProps{
+							Description: "AcceleratorShared is the shareable view: per-accelerator ownership shares (up to SharedResourceMaxSize owners per accelerator) summed over free and already-shared accelerators.",
+							Default:     map[string]interface{}{},
+							Ref:         ref(v1alpha1.InstanceTypeResource{}.OpenAPIModelName()),
+						},
+					},
+					"acceleratorSliced": {
+						SchemaProps: spec.SchemaProps{
+							Description: "AcceleratorSliced is the sliceable view: per-accelerator VRAM-percent units (one hundred per accelerator) summed over free and already-sliced accelerators.",
+							Default:     map[string]interface{}{},
+							Ref:         ref(v1alpha1.InstanceTypeResource{}.OpenAPIModelName()),
+						},
+					},
+					"acceleratorPartitioned": {
+						SchemaProps: spec.SchemaProps{
+							Description: "AcceleratorPartitioned is the hardware-partitionable view: the partition instances the pool's partitioned accelerators can still host, summed over those accelerators. It is disjoint from the three views above — an accelerator in a partitioning mode can serve no other kind of claim — so a pool with no partitioned accelerator reports zero here.",
+							Default:     map[string]interface{}{},
+							Ref:         ref(v1alpha1.InstanceTypePartitionedResource{}.OpenAPIModelName()),
+						},
+					},
+					"conditions": {
+						VendorExtensible: spec.VendorExtensible{
+							Extensions: spec.Extensions{
+								"x-kubernetes-list-map-keys": []interface{}{
+									"type",
+								},
+								"x-kubernetes-list-type":       "map",
+								"x-kubernetes-patch-merge-key": "type",
+								"x-kubernetes-patch-strategy":  "merge",
+							},
+						},
+						SchemaProps: spec.SchemaProps{
+							Description: "Conditions is the finer view of the AcceleratorType's state.",
+							Type:        []string{"array"},
+							Items: &spec.SchemaOrArray{
+								Schema: &spec.Schema{
+									SchemaProps: spec.SchemaProps{
+										Ref: ref(apiv1.Condition{}.OpenAPIModelName()),
+									},
+								},
+							},
+						},
+					},
+				},
+				Required: []string{"phase", "accelerator", "acceleratorShared", "acceleratorSliced", "acceleratorPartitioned"},
+			},
+		},
+		Dependencies: []string{
+			apiv1.Condition{}.OpenAPIModelName(), v1alpha1.InstanceTypeDetail{}.OpenAPIModelName(), v1alpha1.InstanceTypePartitionedResource{}.OpenAPIModelName(), v1alpha1.InstanceTypeResource{}.OpenAPIModelName()},
 	}
 }
 
@@ -10655,8 +11015,14 @@ func schema_gpustack_api_worker_v1alpha1_ModelDeploymentRole(ref common.Referenc
 					"instanceType": {
 						SchemaProps: spec.SchemaProps{
 							Description: "InstanceType is the name of the InstanceType whose pool this role's Pods are admitted against. It is what the queue-name entrance label is derived from.\n\nIT IS EDITABLE. Moving a role to another type runs the same whole-group replacement: each old replica leaves before its replacement is created, and that replacement is admitted against the queue the new type publishes before the next old replica may leave. Existing Pods keep the type they were admitted with until they are deleted. The elastic-EP profile freezes this field after creation.",
-							Default:     "",
-							MinLength:   ptr.To[int64](1),
+							MaxLength:   ptr.To[int64](253),
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"acceleratorType": {
+						SchemaProps: spec.SchemaProps{
+							Description: "AcceleratorType is the name of the AcceleratorType whose hardware pool this role's Pods are admitted against. When omitted, the role runs as an unqueued CPU-only workload scheduled directly onto managed nodes.",
 							MaxLength:   ptr.To[int64](253),
 							Type:        []string{"string"},
 							Format:      "",
@@ -10664,7 +11030,7 @@ func schema_gpustack_api_worker_v1alpha1_ModelDeploymentRole(ref common.Referenc
 					},
 					"resources": {
 						SchemaProps: spec.SchemaProps{
-							Description: "Resources is what one Pod of this role asks of an accelerator, and it is a STRUCTURED FIELD FOR THE SAME REASON Replicas and InstanceType are: admission and scheduling read it.\n\nIt carries only the ACCELERATOR half of a request, because that is the only half a workload decides. CPU, memory and ephemeral storage are DERIVED from the InstanceType's per-unit resources scaled by the requested card count, so they are not expressible here at all — a stronger guarantee than refusing them, since a field that does not exist cannot be shadowed by the container fields below either.\n\nInstanceType alone cannot supply this half: its UnitResources size ONE card, and how many cards a Pod wants is a property of the model being served, so two deployments on one InstanceType routinely want different counts.\n\nIT IS EDITABLE. A change runs the same whole-group replacement, and the new request is admitted against the pool as each replacement is created. Omission behaves as on create: the accelerator half is defaulted, to one whole card of an acceleratable type. The elastic-EP profile freezes this field at the whole-card group it bound to TP at creation.",
+							Description: "Resources is what one Pod of this role asks of accelerators, fabric interfaces, and host resources, and it is a STRUCTURED FIELD FOR THE SAME REASON Replicas and AcceleratorType are: admission and scheduling read it.\n\nIt carries the accelerator request and optional explicit CPU, memory and ephemeral storage requests rendered onto the serving container when set.\n\nIT IS EDITABLE. A change runs the same whole-group replacement, and the new request is admitted against the pool as each replacement is created. Omission behaves as on create: when AcceleratorType is set, the accelerator half is defaulted to one whole card. The elastic-EP profile freezes this field at the whole-card group it bound to TP at creation.",
 							Ref:         ref(v1alpha1.ModelDeploymentRoleResources{}.OpenAPIModelName()),
 						},
 					},
@@ -10850,7 +11216,7 @@ func schema_gpustack_api_worker_v1alpha1_ModelDeploymentRole(ref common.Referenc
 						},
 					},
 				},
-				Required: []string{"name", "instanceType"},
+				Required: []string{"name"},
 			},
 		},
 		Dependencies: []string{
@@ -10974,7 +11340,7 @@ func schema_gpustack_api_worker_v1alpha1_ModelDeploymentRoleResources(ref common
 	return common.OpenAPIDefinition{
 		Schema: spec.Schema{
 			SchemaProps: spec.SchemaProps{
-				Description: "ModelDeploymentRoleResources is what one Pod of a role asks of accelerators and fabric interfaces.\n\nIt deliberately mirrors the accelerator fields of InstanceResources — the same names, the same meanings — rather than inventing a second vocabulary for one request, and it deliberately omits that type's CPU, RAM and LocalStorage, which are derived here rather than declared.",
+				Description: "ModelDeploymentRoleResources is what one Pod of a role asks of accelerators, fabric interfaces, and optional explicit host resources.\n\nIt mirrors the accelerator fields of InstanceResources — the same names, the same meanings — rather than inventing a second vocabulary for one request, and adds optional CPU, RAM and LocalStorage host resource requests that are rendered onto the serving container only when set (never derived from InstanceType).",
 				Type:        []string{"object"},
 				Properties: map[string]spec.Schema{
 					"accelerator": {
@@ -11012,6 +11378,24 @@ func schema_gpustack_api_worker_v1alpha1_ModelDeploymentRoleResources(ref common
 					"interface": {
 						SchemaProps: spec.SchemaProps{
 							Description: "Interface is the number of fabric interfaces one role Pod requests, as a whole number. Unset or zero requests none. A positive count selects the device-plugin resource of the effective cache or direct-transfer protocol. A single RDMA interface uses the shared resource; multiple RDMA interfaces use the exclusive resource. EFA uses its own plugin resource. Conflicting effective protocols are refused rather than assigned one of the available device families. Admission enforces the whole number and the protocol rules, the same as for accelerator; the schema carries no bound of its own.",
+							Ref:         ref(resource.Quantity{}.OpenAPIModelName()),
+						},
+					},
+					"cpu": {
+						SchemaProps: spec.SchemaProps{
+							Description: "CPU is the host CPU request and limit for one role Pod, such as \"8\" or \"16\". When omitted, no CPU request or limit is rendered onto the serving container.",
+							Ref:         ref(resource.Quantity{}.OpenAPIModelName()),
+						},
+					},
+					"ram": {
+						SchemaProps: spec.SchemaProps{
+							Description: "RAM is the host memory request and limit for one role Pod, such as \"64Gi\". When omitted, no memory request or limit is rendered onto the serving container.",
+							Ref:         ref(resource.Quantity{}.OpenAPIModelName()),
+						},
+					},
+					"localStorage": {
+						SchemaProps: spec.SchemaProps{
+							Description: "LocalStorage is the host ephemeral storage request and limit for one role Pod, such as \"100Gi\". When omitted, no ephemeral storage request or limit is rendered onto the serving container.",
 							Ref:         ref(resource.Quantity{}.OpenAPIModelName()),
 						},
 					},
@@ -13956,7 +14340,7 @@ func schema_gpustack_api_worker_v1alpha1_ModelPrefetch(ref common.ReferenceCallb
 	return common.OpenAPIDefinition{
 		Schema: spec.Schema{
 			SchemaProps: spec.SchemaProps{
-				Description: "ModelPrefetch is the schema for worker.gpustack.ai.\n\nIt is a tenant's RESIDENCY INTENT for one model artifact: keep the artifact's weights on a set of nodes ahead of any Pod that mounts them. The worker delivers it the same way it delivers a cold mount — one warm-up Pod per target node, the artifact's own CSI volume, no accelerator request — so the bytes land through the node cache's ordinary path, once per node, verified, and Pod exits once the tree is readable. The Pod IS the delivery operation; there is no separate job state.\n\nPlacement narrows the target set: the InstanceTypes of a node pool, or a nodeSelector for named nodes, or — when both are left out — the InstanceTypes of the namespace's own deployments that reference the artifact. Retention decides what happens after: whether the content is pinned against collection (an admin-granted capability) and how long a node keeps it after its last use.\n\nDeleting the object revokes the intent: the warm-up Pods go, the nodes' pins drop, and the bytes are reclaimed by the node cache's own collection once they are unreferenced and past its grace. Nothing is torn out from under a Pod still reading the tree.",
+				Description: "ModelPrefetch is the schema for worker.gpustack.ai.\n\nIt is a tenant's RESIDENCY INTENT for one model artifact: keep the artifact's weights on a set of nodes ahead of any Pod that mounts them. The worker delivers it the same way it delivers a cold mount — one warm-up Pod per target node, the artifact's own CSI volume, no accelerator request — so the bytes land through the node cache's ordinary path, once per node, verified, and Pod exits once the tree is readable. The Pod IS the delivery operation; there is no separate job state.\n\nPlacement narrows the target set: the AcceleratorTypes of an accelerator pool, or a nodeSelector for named nodes, or — when both are left out — the AcceleratorTypes of the namespace's own deployments that reference the artifact. Retention decides what happens after: whether the content is pinned against collection (an admin-granted capability) and how long a node keeps it after its last use.\n\nDeleting the object revokes the intent: the warm-up Pods go, the nodes' pins drop, and the bytes are reclaimed by the node cache's own collection once they are unreferenced and past its grace. Nothing is torn out from under a Pod still reading the tree.",
 				Type:        []string{"object"},
 				Properties: map[string]spec.Schema{
 					"kind": {
@@ -14118,6 +14502,27 @@ func schema_gpustack_api_worker_v1alpha1_ModelPrefetchPlacement(ref common.Refer
 							},
 						},
 					},
+					"acceleratorTypes": {
+						VendorExtensible: spec.VendorExtensible{
+							Extensions: spec.Extensions{
+								"x-kubernetes-list-type": "atomic",
+							},
+						},
+						SchemaProps: spec.SchemaProps{
+							Description: "AcceleratorTypes names the accelerator pools to warm, by the AcceleratorType objects the scheduling chain publishes. The target set is every node carrying one of these types' flavors.",
+							MinItems:    ptr.To[int64](1),
+							MaxItems:    ptr.To[int64](8),
+							Type:        []string{"array"},
+							Items: &spec.SchemaOrArray{
+								Schema: &spec.Schema{
+									SchemaProps: spec.SchemaProps{
+										Type:   []string{"string"},
+										Format: "",
+									},
+								},
+							},
+						},
+					},
 					"nodeSelector": {
 						SchemaProps: spec.SchemaProps{
 							Description: "NodeSelector selects the target nodes directly, the \"download to these nodes\" form.",
@@ -14194,7 +14599,7 @@ func schema_gpustack_api_worker_v1alpha1_ModelPrefetchSpec(ref common.ReferenceC
 					},
 					"placement": {
 						SchemaProps: spec.SchemaProps{
-							Description: "Placement narrows the target set. InstanceTypes and NodeSelector are mutually exclusive; both set is refused, and both left out derives the target set from the namespace's own deployments that reference the artifact. The relational rules are webhook-enforced.",
+							Description: "Placement narrows the target set. AcceleratorTypes and NodeSelector are mutually exclusive; both set is refused, and both left out derives the target set from the namespace's own deployments that reference the artifact. The relational rules are webhook-enforced.",
 							Ref:         ref(v1alpha1.ModelPrefetchPlacement{}.OpenAPIModelName()),
 						},
 					},
@@ -14215,7 +14620,7 @@ func schema_gpustack_api_worker_v1alpha1_ModelPrefetchSpec(ref common.ReferenceC
 					},
 					"source": {
 						SchemaProps: spec.SchemaProps{
-							Description: "Source opts this prefetch into source preparation for remote weight loading, beside the disk residency it always asked for. With it, the target nodes may fill a registered-memory source from this artifact, and the prefetch reports that readiness in status.transfer, separately from the disk figures above.\n\nIT REQUIRES AN EXPLICIT PLACEMENT. A source is memory a node holds against a known target set, so the derived-from-deployments default an ordinary prefetch falls back to — which follows this namespace's consumers around — would prepare whatever machines happen to serve the model this week. A source intent on a prefetch whose placement names no instanceTypes and no nodeSelector is refused at admission, and the two out together stay refused for the ambiguity they already were.\n\nThe optional Binding sourceMemory grant bounds memory independently of disk quota. Without it, source preparation uses the node's configured source capacity.\n\nAbsent means a prefetch that warms the node cache only, exactly as this object has always meant, with the same placement defaults, warm-up behavior and status meaning as before.",
+							Description: "Source opts this prefetch into source preparation for remote weight loading, beside the disk residency it always asked for. With it, the target nodes may fill a registered-memory source from this artifact, and the prefetch reports that readiness in status.transfer, separately from the disk figures above.\n\nIT REQUIRES AN EXPLICIT PLACEMENT. A source is memory a node holds against a known target set, so the derived-from-deployments default an ordinary prefetch falls back to — which follows this namespace's consumers around — would prepare whatever machines happen to serve the model this week. A source intent on a prefetch whose placement names no acceleratorTypes and no nodeSelector is refused at admission, and the two out together stay refused for the ambiguity they already were.\n\nThe optional Binding sourceMemory grant bounds memory independently of disk quota. Without it, source preparation uses the node's configured source capacity.\n\nAbsent means a prefetch that warms the node cache only, exactly as this object has always meant, with the same placement defaults, warm-up behavior and status meaning as before.",
 							Ref:         ref(v1alpha1.ModelPrefetchSource{}.OpenAPIModelName()),
 						},
 					},

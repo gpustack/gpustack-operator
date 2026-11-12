@@ -19,10 +19,11 @@ import (
 // so the bytes land through the node cache's ordinary path, once per node, verified, and Pod exits
 // once the tree is readable. The Pod IS the delivery operation; there is no separate job state.
 //
-// Placement narrows the target set: the InstanceTypes of a node pool, or a nodeSelector for named
-// nodes, or — when both are left out — the InstanceTypes of the namespace's own deployments that
-// reference the artifact. Retention decides what happens after: whether the content is pinned
-// against collection (an admin-granted capability) and how long a node keeps it after its last use.
+// Placement narrows the target set: the AcceleratorTypes of an accelerator pool, or a nodeSelector
+// for named nodes, or — when both are left out — the AcceleratorTypes of the namespace's own
+// deployments that reference the artifact. Retention decides what happens after: whether the
+// content is pinned against collection (an admin-granted capability) and how long a node keeps it
+// after its last use.
 //
 // Deleting the object revokes the intent: the warm-up Pods go, the nodes' pins drop, and the bytes
 // are reclaimed by the node cache's own collection once they are unreferenced and past its grace.

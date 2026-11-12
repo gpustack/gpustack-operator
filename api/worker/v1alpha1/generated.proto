@@ -297,6 +297,126 @@ message AcceleratorStatus {
   optional AcceleratorPhysicalSliced physicalSliced = 3;
 }
 
+// AcceleratorType is the schema for worker.gpustack.ai.
+//
+// An AcceleratorType represents an accelerated hardware pool backed by a canonical Kueue
+// ClusterQueue, without workspace CPU, memory, or local-storage presets.
+//
+// +genclient
+// +genclient:nonNamespaced
+// +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
+// +k8s:crd-gen:resource:scope="Cluster",categories=["gpustack"],shortName=["acctype"],subResources=["status"]
+message AcceleratorType {
+  optional .k8s.io.apimachinery.pkg.apis.meta.v1.ObjectMeta metadata = 1;
+
+  optional AcceleratorTypeSpec spec = 2;
+
+  optional AcceleratorTypeStatus status = 3;
+}
+
+// AcceleratorTypeList holds the list of AcceleratorType.
+//
+// +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
+message AcceleratorTypeList {
+  optional .k8s.io.apimachinery.pkg.apis.meta.v1.ListMeta metadata = 1;
+
+  repeated AcceleratorType items = 2;
+}
+
+// AcceleratorTypeSpec defines the desired spec of AcceleratorType. Its field order and protobuf
+// numbering group the admin-editable fields (DisplayName, Description, Inactive) first, followed
+// by the immutable pool identity inputs.
+message AcceleratorTypeSpec {
+  // DisplayName is a human-friendly label for the AcceleratorType. It is admin-editable and, for
+  // a derived AcceleratorType, stamped at derivation time.
+  //
+  // +k8s:validation:maxLength=64
+  optional string displayName = 1;
+
+  // Description is a free-form admin annotation for the AcceleratorType.
+  //
+  // +k8s:validation:maxLength=1024
+  optional string description = 2;
+
+  // Inactive takes the AcceleratorType out of service. When true, admission refuses new
+  // workloads targeting this AcceleratorType, and the backing ClusterQueue is held when every
+  // fronting type on the pool is inactive.
+  optional bool inactive = 3;
+
+  // AcceleratorGroup is the accelerator group (the acceleratable node key) of the
+  // AcceleratorType, e.g. "nvidia-a10g". It selects the accelerator pool the type schedules
+  // onto and is a required admin-writable input.
+  //
+  // +required
+  optional string acceleratorGroup = 4;
+
+  // GeneralGroup is the general(CPU) group (the general node key) of the AcceleratorType, e.g.
+  // "amd-epyc-7763", or the literal "generic" for a CPU-manufacturer-agnostic pool. The
+  // mutating webhook defaults an empty value to "generic"; it participates as a scheduling
+  // discriminator only when instance-type-aware-cpu-manufacturer is enabled.
+  optional string generalGroup = 5;
+
+  // OS is the operating system of the AcceleratorType, e.g. "linux", "windows".
+  //
+  // It is a required admin-writable input, enforced by the validating webhook.
+  //
+  // +required
+  optional string os = 6;
+
+  // Arch is the architecture of the AcceleratorType, e.g. "amd64", "arm64".
+  //
+  // It is a required admin-writable input, enforced by the validating webhook.
+  //
+  // +required
+  optional string arch = 7;
+}
+
+// AcceleratorTypeStatus describes the observed state of the AcceleratorType.
+message AcceleratorTypeStatus {
+  // Detail is the observed hardware descriptor of the AcceleratorType, computed by the
+  // reconciler from the matched ResourceFlavor's notes and the pool's Devices ledger.
+  optional InstanceTypeDetail detail = 1;
+
+  // Entrance is the name of the namespaced LocalQueue that fronts this
+  // AcceleratorType's backing ClusterQueue — the value a workload sets as its
+  // "kueue.x-k8s.io/queue-name" label to be admitted.
+  optional string entrance = 2;
+
+  // Phase is the summary of conditions.
+  optional string phase = 3;
+
+  // PhaseMessage is the message of the phase.
+  optional string phaseMessage = 4;
+
+  // Accelerator is the allocatable-as-exclusive view: whole accelerators that are
+  // entirely free, e.g. "1", "4".
+  optional InstanceTypeResource accelerator = 5;
+
+  // AcceleratorShared is the shareable view: per-accelerator ownership shares (up to
+  // SharedResourceMaxSize owners per accelerator) summed over free and already-shared
+  // accelerators.
+  optional InstanceTypeResource acceleratorShared = 6;
+
+  // AcceleratorSliced is the sliceable view: per-accelerator VRAM-percent units (one
+  // hundred per accelerator) summed over free and already-sliced accelerators.
+  optional InstanceTypeResource acceleratorSliced = 7;
+
+  // AcceleratorPartitioned is the hardware-partitionable view: the partition instances the
+  // pool's partitioned accelerators can still host, summed over those accelerators. It is
+  // disjoint from the three views above — an accelerator in a partitioning mode can serve no
+  // other kind of claim — so a pool with no partitioned accelerator reports zero here.
+  optional InstanceTypePartitionedResource acceleratorPartitioned = 8;
+
+  // Conditions is the finer view of the AcceleratorType's state.
+  //
+  // +optional
+  // +patchMergeKey=type
+  // +patchStrategy=merge
+  // +listType=map
+  // +listMapKey=type
+  repeated .gpustack.ai.gpustack.api.v1.Condition conditions = 9;
+}
+
 // DeviceEthernet describes the Ethernet information of the device.
 message DeviceEthernet {
   // IP is the IP address of the Ethernet interface of the device.
@@ -4117,27 +4237,28 @@ message ModelDeploymentRole {
   // Pods keep the type they were admitted with until they are deleted. The elastic-EP profile
   // freezes this field after creation.
   //
-  // +required
-  // +k8s:validation:minLength=1
+  // +optional
   // +k8s:validation:maxLength=253
   optional string instanceType = 3;
 
-  // Resources is what one Pod of this role asks of an accelerator, and it is a STRUCTURED
-  // FIELD FOR THE SAME REASON Replicas and InstanceType are: admission and scheduling read it.
+  // AcceleratorType is the name of the AcceleratorType whose hardware pool this role's Pods
+  // are admitted against. When omitted, the role runs as an unqueued CPU-only workload
+  // scheduled directly onto managed nodes.
   //
-  // It carries only the ACCELERATOR half of a request, because that is the only half a workload
-  // decides. CPU, memory and ephemeral storage are DERIVED from the InstanceType's per-unit
-  // resources scaled by the requested card count, so they are not expressible here at all — a
-  // stronger guarantee than refusing them, since a field that does not exist cannot be shadowed by
-  // the container fields below either.
+  // +optional
+  // +k8s:validation:maxLength=253
+  optional string acceleratorType = 21;
+
+  // Resources is what one Pod of this role asks of accelerators, fabric interfaces, and host
+  // resources, and it is a STRUCTURED FIELD FOR THE SAME REASON Replicas and AcceleratorType are:
+  // admission and scheduling read it.
   //
-  // InstanceType alone cannot supply this half: its UnitResources size ONE card, and how many cards
-  // a Pod wants is a property of the model being served, so two deployments on one InstanceType
-  // routinely want different counts.
+  // It carries the accelerator request and optional explicit CPU, memory and ephemeral storage
+  // requests rendered onto the serving container when set.
   //
   // IT IS EDITABLE. A change runs the same whole-group replacement, and the new request is
   // admitted against the pool as each replacement is created. Omission behaves as on create:
-  // the accelerator half is defaulted, to one whole card of an acceleratable type. The
+  // when AcceleratorType is set, the accelerator half is defaulted to one whole card. The
   // elastic-EP profile freezes this field at the whole-card group it bound to TP at creation.
   optional ModelDeploymentRoleResources resources = 4;
 
@@ -4371,11 +4492,13 @@ message ModelDeploymentRoleParallelismStatus {
   optional ModelDeploymentParallelismSourceStatus source = 4;
 }
 
-// ModelDeploymentRoleResources is what one Pod of a role asks of accelerators and fabric interfaces.
+// ModelDeploymentRoleResources is what one Pod of a role asks of accelerators, fabric interfaces,
+// and optional explicit host resources.
 //
-// It deliberately mirrors the accelerator fields of InstanceResources — the same names, the same
-// meanings — rather than inventing a second vocabulary for one request, and it deliberately omits
-// that type's CPU, RAM and LocalStorage, which are derived here rather than declared.
+// It mirrors the accelerator fields of InstanceResources — the same names, the same meanings —
+// rather than inventing a second vocabulary for one request, and adds optional CPU, RAM and
+// LocalStorage host resource requests that are rendered onto the serving container only when set
+// (never derived from InstanceType).
 message ModelDeploymentRoleResources {
   // Accelerator is how many accelerator cards ONE POD asks for.
   //
@@ -4424,6 +4547,25 @@ message ModelDeploymentRoleResources {
   //
   // +optional
   optional .k8s.io.apimachinery.pkg.api.resource.Quantity interface = 5;
+
+  // CPU is the host CPU request and limit for one role Pod, such as "8" or "16". When omitted,
+  // no CPU request or limit is rendered onto the serving container.
+  //
+  // +optional
+  optional .k8s.io.apimachinery.pkg.api.resource.Quantity cpu = 6;
+
+  // RAM is the host memory request and limit for one role Pod, such as "64Gi". When omitted,
+  // no memory request or limit is rendered onto the serving container.
+  //
+  // +optional
+  optional .k8s.io.apimachinery.pkg.api.resource.Quantity ram = 7;
+
+  // LocalStorage is the host ephemeral storage request and limit for one role Pod, such as
+  // "100Gi". When omitted, no ephemeral storage request or limit is rendered onto the serving
+  // container.
+  //
+  // +optional
+  optional .k8s.io.apimachinery.pkg.api.resource.Quantity localStorage = 8;
 }
 
 // ModelDeploymentRoleStatus is one role's observed readiness.
@@ -6199,10 +6341,11 @@ message ModelDeploymentStatus {
 // so the bytes land through the node cache's ordinary path, once per node, verified, and Pod exits
 // once the tree is readable. The Pod IS the delivery operation; there is no separate job state.
 //
-// Placement narrows the target set: the InstanceTypes of a node pool, or a nodeSelector for named
-// nodes, or — when both are left out — the InstanceTypes of the namespace's own deployments that
-// reference the artifact. Retention decides what happens after: whether the content is pinned
-// against collection (an admin-granted capability) and how long a node keeps it after its last use.
+// Placement narrows the target set: the AcceleratorTypes of an accelerator pool, or a nodeSelector
+// for named nodes, or — when both are left out — the AcceleratorTypes of the namespace's own
+// deployments that reference the artifact. Retention decides what happens after: whether the
+// content is pinned against collection (an admin-granted capability) and how long a node keeps it
+// after its last use.
 //
 // Deleting the object revokes the intent: the warm-up Pods go, the nodes' pins drop, and the bytes
 // are reclaimed by the node cache's own collection once they are unreferenced and past its grace.
@@ -6257,6 +6400,16 @@ message ModelPrefetchPlacement {
   // +k8s:validation:maxItems=8
   repeated string instanceTypes = 1;
 
+  // AcceleratorTypes names the accelerator pools to warm, by the AcceleratorType objects the
+  // scheduling chain publishes. The target set is every node carrying one of these types'
+  // flavors.
+  //
+  // +optional
+  // +listType=atomic
+  // +k8s:validation:minItems=1
+  // +k8s:validation:maxItems=8
+  repeated string acceleratorTypes = 3;
+
   // NodeSelector selects the target nodes directly, the "download to these nodes" form.
   //
   // +optional
@@ -6302,7 +6455,7 @@ message ModelPrefetchSpec {
   // +required
   optional ModelPrefetchBindingReference bindingRef = 2;
 
-  // Placement narrows the target set. InstanceTypes and NodeSelector are mutually exclusive;
+  // Placement narrows the target set. AcceleratorTypes and NodeSelector are mutually exclusive;
   // both set is refused, and both left out derives the target set from the namespace's own
   // deployments that reference the artifact. The relational rules are webhook-enforced.
   //
@@ -6331,7 +6484,7 @@ message ModelPrefetchSpec {
   // set, so the derived-from-deployments default an ordinary prefetch falls back to — which
   // follows this namespace's consumers around — would prepare whatever machines happen to
   // serve the model this week. A source intent on a prefetch whose placement names no
-  // instanceTypes and no nodeSelector is refused at admission, and the two out together stay
+  // acceleratorTypes and no nodeSelector is refused at admission, and the two out together stay
   // refused for the ambiguity they already were.
   //
   // The optional Binding sourceMemory grant bounds memory independently of disk quota.

@@ -7,6 +7,10 @@
 
 package v1alpha1
 
+// AcceleratorTypeListerExpansion allows custom methods to be added to
+// AcceleratorTypeLister.
+type AcceleratorTypeListerExpansion interface{}
+
 // DevicesListerExpansion allows custom methods to be added to
 // DevicesLister.
 type DevicesListerExpansion interface{}

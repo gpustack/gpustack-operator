@@ -17,6 +17,10 @@ type FakeWorkerV1alpha1 struct {
 	*testing.Fake
 }
 
+func (c *FakeWorkerV1alpha1) AcceleratorTypes() v1alpha1.AcceleratorTypeInterface {
+	return newFakeAcceleratorTypes(c)
+}
+
 func (c *FakeWorkerV1alpha1) Devices() v1alpha1.DevicesInterface {
 	return newFakeDevices(c)
 }

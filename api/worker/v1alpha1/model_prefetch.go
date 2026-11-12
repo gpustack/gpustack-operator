@@ -16,10 +16,11 @@ import (
 // so the bytes land through the node cache's ordinary path, once per node, verified, and Pod exits
 // once the tree is readable. The Pod IS the delivery operation; there is no separate job state.
 //
-// Placement narrows the target set: the InstanceTypes of a node pool, or a nodeSelector for named
-// nodes, or — when both are left out — the InstanceTypes of the namespace's own deployments that
-// reference the artifact. Retention decides what happens after: whether the content is pinned
-// against collection (an admin-granted capability) and how long a node keeps it after its last use.
+// Placement narrows the target set: the AcceleratorTypes of an accelerator pool, or a nodeSelector
+// for named nodes, or — when both are left out — the AcceleratorTypes of the namespace's own
+// deployments that reference the artifact. Retention decides what happens after: whether the
+// content is pinned against collection (an admin-granted capability) and how long a node keeps it
+// after its last use.
 //
 // Deleting the object revokes the intent: the warm-up Pods go, the nodes' pins drop, and the bytes
 // are reclaimed by the node cache's own collection once they are unreferenced and past its grace.
@@ -58,7 +59,7 @@ type ModelPrefetchSpec struct {
 	// +required
 	BindingRef ModelPrefetchBindingReference `json:"bindingRef" protobuf:"bytes,2,name=bindingRef"`
 
-	// Placement narrows the target set. InstanceTypes and NodeSelector are mutually exclusive;
+	// Placement narrows the target set. AcceleratorTypes and NodeSelector are mutually exclusive;
 	// both set is refused, and both left out derives the target set from the namespace's own
 	// deployments that reference the artifact. The relational rules are webhook-enforced.
 	//
@@ -87,7 +88,7 @@ type ModelPrefetchSpec struct {
 	// set, so the derived-from-deployments default an ordinary prefetch falls back to — which
 	// follows this namespace's consumers around — would prepare whatever machines happen to
 	// serve the model this week. A source intent on a prefetch whose placement names no
-	// instanceTypes and no nodeSelector is refused at admission, and the two out together stay
+	// acceleratorTypes and no nodeSelector is refused at admission, and the two out together stay
 	// refused for the ambiguity they already were.
 	//
 	// The optional Binding sourceMemory grant bounds memory independently of disk quota.
@@ -128,6 +129,16 @@ type ModelPrefetchPlacement struct {
 	// +k8s:validation:minItems=1
 	// +k8s:validation:maxItems=8
 	InstanceTypes []string `json:"instanceTypes,omitempty" protobuf:"bytes,1,rep,name=instanceTypes"`
+
+	// AcceleratorTypes names the accelerator pools to warm, by the AcceleratorType objects the
+	// scheduling chain publishes. The target set is every node carrying one of these types'
+	// flavors.
+	//
+	// +optional
+	// +listType=atomic
+	// +k8s:validation:minItems=1
+	// +k8s:validation:maxItems=8
+	AcceleratorTypes []string `json:"acceleratorTypes,omitempty" protobuf:"bytes,3,rep,name=acceleratorTypes"`
 
 	// NodeSelector selects the target nodes directly, the "download to these nodes" form.
 	//

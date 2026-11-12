@@ -1278,6 +1278,8 @@ func ForKind(kind schema.GroupVersionKind) interface{} {
 		return &storagemigrationv1beta1.StorageVersionMigrationStatusApplyConfiguration{}
 
 		// Group=worker.gpustack.ai, Version=v1
+	case workerv1.SchemeGroupVersion.WithKind("AcceleratorType"):
+		return &applyconfigurationworkerv1.AcceleratorTypeApplyConfiguration{}
 	case workerv1.SchemeGroupVersion.WithKind("Devices"):
 		return &applyconfigurationworkerv1.DevicesApplyConfiguration{}
 	case workerv1.SchemeGroupVersion.WithKind("DevicesRDMASelectionPolicy"):
@@ -1356,6 +1358,12 @@ func ForKind(kind schema.GroupVersionKind) interface{} {
 		return &applyconfigurationworkerv1alpha1.AcceleratorSlicedPhysicalDetailProfileApplyConfiguration{}
 	case workerv1alpha1.SchemeGroupVersion.WithKind("AcceleratorStatus"):
 		return &applyconfigurationworkerv1alpha1.AcceleratorStatusApplyConfiguration{}
+	case workerv1alpha1.SchemeGroupVersion.WithKind("AcceleratorType"):
+		return &applyconfigurationworkerv1alpha1.AcceleratorTypeApplyConfiguration{}
+	case workerv1alpha1.SchemeGroupVersion.WithKind("AcceleratorTypeSpec"):
+		return &applyconfigurationworkerv1alpha1.AcceleratorTypeSpecApplyConfiguration{}
+	case workerv1alpha1.SchemeGroupVersion.WithKind("AcceleratorTypeStatus"):
+		return &applyconfigurationworkerv1alpha1.AcceleratorTypeStatusApplyConfiguration{}
 	case workerv1alpha1.SchemeGroupVersion.WithKind("DeviceEthernet"):
 		return &applyconfigurationworkerv1alpha1.DeviceEthernetApplyConfiguration{}
 	case workerv1alpha1.SchemeGroupVersion.WithKind("DeviceFabric"):

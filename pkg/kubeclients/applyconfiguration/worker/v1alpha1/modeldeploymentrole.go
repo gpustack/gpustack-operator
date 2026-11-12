@@ -117,22 +117,21 @@ type ModelDeploymentRoleApplyConfiguration struct {
 	// freezes this field after creation.
 	//
 	InstanceType *string `json:"instanceType,omitempty"`
-	// Resources is what one Pod of this role asks of an accelerator, and it is a STRUCTURED
-	// FIELD FOR THE SAME REASON Replicas and InstanceType are: admission and scheduling read it.
+	// AcceleratorType is the name of the AcceleratorType whose hardware pool this role's Pods
+	// are admitted against. When omitted, the role runs as an unqueued CPU-only workload
+	// scheduled directly onto managed nodes.
 	//
-	// It carries only the ACCELERATOR half of a request, because that is the only half a workload
-	// decides. CPU, memory and ephemeral storage are DERIVED from the InstanceType's per-unit
-	// resources scaled by the requested card count, so they are not expressible here at all — a
-	// stronger guarantee than refusing them, since a field that does not exist cannot be shadowed by
-	// the container fields below either.
+	AcceleratorType *string `json:"acceleratorType,omitempty"`
+	// Resources is what one Pod of this role asks of accelerators, fabric interfaces, and host
+	// resources, and it is a STRUCTURED FIELD FOR THE SAME REASON Replicas and AcceleratorType are:
+	// admission and scheduling read it.
 	//
-	// InstanceType alone cannot supply this half: its UnitResources size ONE card, and how many cards
-	// a Pod wants is a property of the model being served, so two deployments on one InstanceType
-	// routinely want different counts.
+	// It carries the accelerator request and optional explicit CPU, memory and ephemeral storage
+	// requests rendered onto the serving container when set.
 	//
 	// IT IS EDITABLE. A change runs the same whole-group replacement, and the new request is
 	// admitted against the pool as each replacement is created. Omission behaves as on create:
-	// the accelerator half is defaulted, to one whole card of an acceleratable type. The
+	// when AcceleratorType is set, the accelerator half is defaulted to one whole card. The
 	// elastic-EP profile freezes this field at the whole-card group it bound to TP at creation.
 	Resources *ModelDeploymentRoleResourcesApplyConfiguration `json:"resources,omitempty"`
 	// Image is the container image to run. Leaving it empty is the ordinary case: the role then
@@ -289,6 +288,14 @@ func (b *ModelDeploymentRoleApplyConfiguration) WithReplicaSize(value int32) *Mo
 // If called multiple times, the InstanceType field is set to the value of the last call.
 func (b *ModelDeploymentRoleApplyConfiguration) WithInstanceType(value string) *ModelDeploymentRoleApplyConfiguration {
 	b.InstanceType = &value
+	return b
+}
+
+// WithAcceleratorType sets the AcceleratorType field in the declarative configuration to the given value
+// and returns the receiver, so that objects can be built by chaining "With" function invocations.
+// If called multiple times, the AcceleratorType field is set to the value of the last call.
+func (b *ModelDeploymentRoleApplyConfiguration) WithAcceleratorType(value string) *ModelDeploymentRoleApplyConfiguration {
+	b.AcceleratorType = &value
 	return b
 }
 

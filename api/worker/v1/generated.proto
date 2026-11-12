@@ -20,6 +20,32 @@ import "k8s.io/apimachinery/pkg/runtime/schema/generated.proto";
 // Package-wide variables from generator "generated".
 option go_package = "gpustack.ai/gpustack/api/worker/v1";
 
+// AcceleratorType is the schema for worker.gpustack.ai.
+//
+// An AcceleratorType represents an accelerated hardware pool backed by a canonical Kueue
+// ClusterQueue, without workspace CPU, memory, or local-storage presets.
+//
+// +genclient
+// +genclient:nonNamespaced
+// +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
+// +k8s:apireg-gen:resource:scope="Cluster",categories=["gpustack"],shortName=["acctype"],subResources=["status"]
+message AcceleratorType {
+  optional .k8s.io.apimachinery.pkg.apis.meta.v1.ObjectMeta metadata = 1;
+
+  optional .gpustack.ai.gpustack.api.worker.v1alpha1.AcceleratorTypeSpec spec = 2;
+
+  optional .gpustack.ai.gpustack.api.worker.v1alpha1.AcceleratorTypeStatus status = 3;
+}
+
+// AcceleratorTypeList holds the list of AcceleratorType.
+//
+// +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
+message AcceleratorTypeList {
+  optional .k8s.io.apimachinery.pkg.apis.meta.v1.ListMeta metadata = 1;
+
+  repeated AcceleratorType items = 2;
+}
+
 // Devices is the schema for worker.gpustack.ai.
 //
 // Devices proxies the v1alpha1.Devices.
