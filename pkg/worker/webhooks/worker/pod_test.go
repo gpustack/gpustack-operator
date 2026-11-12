@@ -883,3 +883,124 @@ func TestPodWebhook_DefaultSharedPinsTheCardCount(t *testing.T) {
 		})
 	}
 }
+
+func acceleratorTypeWithEntrance(memory string) *workercore.AcceleratorType {
+	at := &workercore.AcceleratorType{
+		ObjectMeta: meta.ObjectMeta{
+			Name:   "at-" + testLocalQueueName,
+			Labels: map[string]string{QueueEntranceLabelKey: testLocalQueueName},
+		},
+		Spec: workercore.AcceleratorTypeSpec{
+			AcceleratorGroup: "nvidia-g0",
+		},
+	}
+	at.Status.Detail.Manufacturer = nodefeature.ManufacturerNVIDIA
+	at.Status.Detail.Memory = memory
+	return at
+}
+
+func TestPodWebhook_DefaultFrontedByAcceleratorTypeAndSharedPool(t *testing.T) {
+	nvidiaBase := nodefeature.GetAcceleratableResourceName(nodefeature.ManufacturerNVIDIA, workercore.DeviceAllocationModeExclusive)
+	names := logicalResourceNamesForBase(nvidiaBase)
+	pnames := partitionResourceNamesForBase(nvidiaBase)
+	sharedCard := nodefeature.GetAcceleratableResourceName(nodefeature.ManufacturerNVIDIA, workercore.DeviceAllocationModeShared)
+	profileKey := partitionKey("1g.10gb")
+
+	t.Run("pod routed to LocalQueue fronted only by AcceleratorType folds sliced, partitioned, and pins shared", func(t *testing.T) {
+		at := acceleratorTypeWithEntrance("81920Mi")
+		at.Status.Detail.SlicedDetail.Physical.Profiles = physicalProfiles()
+		w := newPodWebhook(at)
+
+		sliced := slicedPod(map[core.ResourceName]string{names.card: "1", names.memMib: "10240"})
+		assert.NoError(t, w.Default(context.Background(), sliced))
+		reqSlicedUnits := sliced.Spec.Containers[0].Resources.Requests[names.units]
+		assert.Equal(t, int64(200000), reqSlicedUnits.Value())
+
+		part := slicedPod(map[core.ResourceName]string{pnames.card: "1", profileKey: "1"})
+		assert.NoError(t, w.Default(context.Background(), part))
+		reqPartUnits := part.Spec.Containers[0].Resources.Requests[pnames.units]
+		assert.Equal(t, int64(200000), reqPartUnits.Value())
+
+		shared := slicedPod(map[core.ResourceName]string{sharedCard: "2"})
+		assert.NoError(t, w.Default(context.Background(), shared))
+		if assert.NotNil(t, shared.Spec.Affinity) &&
+			assert.NotNil(t, shared.Spec.Affinity.NodeAffinity) &&
+			assert.NotNil(t, shared.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution) {
+			terms := shared.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms
+			assert.Equal(t, []core.NodeSelectorTerm{{
+				MatchExpressions: []core.NodeSelectorRequirement{{
+					Key:      nodefeature.AcceleratableFeatureLabelPrefix + "nvidia-g0.count",
+					Operator: core.NodeSelectorOpGt,
+					Values:   []string{"1"},
+				}},
+			}}, terms)
+		}
+	})
+
+	t.Run("pod routed to LocalQueue fronted by AcceleratorType and multiple InstanceTypes succeeds", func(t *testing.T) {
+		at := acceleratorTypeWithEntrance("40960Mi")
+		it1 := instanceTypeWithEntrance("40960Mi")
+		it1.Name = "derived-it"
+		it2 := instanceTypeWithEntrance("40960Mi")
+		it2.Name = "custom-it"
+		w := newPodWebhook(at, it1, it2)
+
+		pod := slicedPod(map[core.ResourceName]string{names.card: "1", names.memMib: "4096"})
+		assert.NoError(t, w.Default(context.Background(), pod))
+		reqUnits := pod.Spec.Containers[0].Resources.Requests[names.units]
+		assert.Equal(t, int64(160000), reqUnits.Value())
+
+		// Also succeeds when fronted by multiple InstanceTypes without an AcceleratorType.
+		wITOnly := newPodWebhook(it1, it2)
+		pod2 := slicedPod(map[core.ResourceName]string{names.card: "1", names.memMib: "4096"})
+		assert.NoError(t, wITOnly.Default(context.Background(), pod2))
+		reqUnits2 := pod2.Spec.Containers[0].Resources.Requests[names.units]
+		assert.Equal(t, int64(160000), reqUnits2.Value())
+	})
+
+	t.Run("unready AcceleratorType falls back to ready sibling InstanceType on shared LocalQueue", func(t *testing.T) {
+		unreadyAT := acceleratorTypeWithEntrance("")
+		unreadyAT.Status.Detail = workercore.InstanceTypeDetail{}
+		readyIT := instanceTypeWithEntrance("40960Mi")
+		readyIT.Name = "ready-sibling-it"
+		readyIT.Status.Detail.Manufacturer = nodefeature.ManufacturerNVIDIA
+
+		w := newPodWebhook(unreadyAT, readyIT)
+		pod := slicedPod(map[core.ResourceName]string{names.card: "1", names.memMib: "4096"})
+		assert.NoError(t, w.Default(context.Background(), pod))
+		reqUnits := pod.Spec.Containers[0].Resources.Requests[names.units]
+		assert.Equal(t, int64(160000), reqUnits.Value())
+	})
+
+	t.Run("cached ready InstanceType avoids APIReader fallback when no AcceleratorType exists", func(t *testing.T) {
+		readyIT := instanceTypeWithEntrance("40960Mi")
+		readyIT.Status.Detail.Manufacturer = nodefeature.ManufacturerNVIDIA
+		cachedOnly := ctrlfake.NewClientBuilder().WithScheme(scheme.Scheme).WithObjects(readyIT).Build()
+		w := &PodWebhook{Client: cachedOnly, APIReader: nil}
+
+		pod := slicedPod(map[core.ResourceName]string{names.card: "1", names.memMib: "4096"})
+		assert.NoError(t, w.Default(context.Background(), pod))
+		reqUnits := pod.Spec.Containers[0].Resources.Requests[names.units]
+		assert.Equal(t, int64(160000), reqUnits.Value())
+
+		emptyCache := ctrlfake.NewClientBuilder().WithScheme(scheme.Scheme).Build()
+		liveReader := ctrlfake.NewClientBuilder().WithScheme(scheme.Scheme).WithObjects(acceleratorTypeWithEntrance("40960Mi")).Build()
+		wFallback := &PodWebhook{Client: emptyCache, APIReader: liveReader}
+		podFallback := slicedPod(map[core.ResourceName]string{names.card: "1", names.memMib: "4096"})
+		assert.NoError(t, wFallback.Default(context.Background(), podFallback))
+		reqFallback := podFallback.Spec.Containers[0].Resources.Requests[names.units]
+		assert.Equal(t, int64(160000), reqFallback.Value())
+	})
+
+	t.Run("conflicting acceleratorGroup across fronting types on one LocalQueue is rejected", func(t *testing.T) {
+		at := acceleratorTypeWithEntrance("40960Mi")
+		conflictIT := instanceTypeWithEntrance("40960Mi")
+		conflictIT.Name = "mismatched-it"
+		conflictIT.Spec.AcceleratorGroup = "nvidia-other"
+
+		w := newPodWebhook(at, conflictIT)
+		pod := slicedPod(map[core.ResourceName]string{names.card: "1", names.memMib: "4096"})
+		err := w.Default(context.Background(), pod)
+		assert.ErrorContains(t, err, "conflicting accelerator groups")
+	})
+}

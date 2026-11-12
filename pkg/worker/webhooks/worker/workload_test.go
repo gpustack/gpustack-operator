@@ -384,6 +384,46 @@ func TestWorkloadWebhook_SettingOff(t *testing.T) {
 	assert.Equal(t, before, wl)
 }
 
+func TestWorkloadWebhook_PoolClusterQueueWithoutInstanceType(t *testing.T) {
+	seedFitAffinity(t, "true")
+
+	lq := &kueue.LocalQueue{
+		ObjectMeta: meta.ObjectMeta{Namespace: _fitNamespace, Name: _fitQueue},
+		Spec:       kueue.LocalQueueSpec{ClusterQueue: _fitInstanceType},
+	}
+
+	t.Run("ClusterQueue carrying acceleratable schedule label pins without an InstanceType", func(t *testing.T) {
+		cq := &kueue.ClusterQueue{
+			ObjectMeta: meta.ObjectMeta{
+				Name:   _fitInstanceType,
+				Labels: map[string]string{nodefeature.AcceleratableFeatureLabelPrefix + _fitGroup: "true"},
+			},
+		}
+		systemmeta.NoteResource(cq, "instancetypes", nil)
+
+		wl := fitWorkload(_fitQueue, fitPodSet("main", _slice800k))
+		require.NoError(t, newWorkloadWebhook(lq, cq).Default(context.Background(), wl))
+		assert.Equal(t, []core.NodeSelectorTerm{{
+			MatchExpressions: []core.NodeSelectorRequirement{gt(_fitSlicedKey, "799999")},
+		}}, requiredTerms(wl.Spec.PodSets[0]))
+	})
+
+	t.Run("ClusterQueue backed by an AcceleratorType with no InstanceType pins", func(t *testing.T) {
+		cq := &kueue.ClusterQueue{ObjectMeta: meta.ObjectMeta{Name: _fitInstanceType}}
+		systemmeta.NoteResource(cq, "instancetypes", nil)
+		at := &workercore.AcceleratorType{
+			ObjectMeta: meta.ObjectMeta{Name: _fitInstanceType},
+			Spec:       workercore.AcceleratorTypeSpec{AcceleratorGroup: _fitGroup},
+		}
+
+		wl := fitWorkload(_fitQueue, fitPodSet("main", _slice800k))
+		require.NoError(t, newWorkloadWebhook(lq, cq, at).Default(context.Background(), wl))
+		assert.Equal(t, []core.NodeSelectorTerm{{
+			MatchExpressions: []core.NodeSelectorRequirement{gt(_fitSlicedKey, "799999")},
+		}}, requiredTerms(wl.Spec.PodSets[0]))
+	})
+}
+
 // TestWorkloadWebhook_PatchTouchesOnlyAffinity runs the webhook through controller-runtime's
 // defaulting handler on raw Workload JSON, as the API server sends it, including a field the vendored
 // Kueue type does not know. The patch an operator Workload gets must only add affinity, and a foreign
@@ -449,4 +489,125 @@ func rulesCoverResource(rules []admreg.RuleWithOperations, resource string) bool
 	return slices.ContainsFunc(rules, func(r admreg.RuleWithOperations) bool {
 		return slices.Contains(r.Resources, resource)
 	})
+}
+
+func TestWorkloadWebhook_AcceleratorGroupPrefersCRSpecOverQueueLabels(t *testing.T) {
+	seedFitAffinity(t, "true")
+
+	lq := &kueue.LocalQueue{
+		ObjectMeta: meta.ObjectMeta{Namespace: _fitNamespace, Name: _fitQueue},
+		Spec:       kueue.LocalQueueSpec{ClusterQueue: _fitInstanceType},
+	}
+	cq := &kueue.ClusterQueue{
+		ObjectMeta: meta.ObjectMeta{
+			Name: _fitInstanceType,
+			Labels: map[string]string{
+				nodefeature.AcceleratableFeatureLabelPrefix + "stale-group": "true",
+			},
+		},
+	}
+	systemmeta.NoteResource(cq, "instancetypes", nil)
+	customAT := &workercore.AcceleratorType{
+		ObjectMeta: meta.ObjectMeta{
+			Name:   "custom-at",
+			Labels: map[string]string{QueueEntranceLabelKey: _fitQueue},
+		},
+		Spec: workercore.AcceleratorTypeSpec{AcceleratorGroup: _fitGroup},
+	}
+
+	r := newWorkloadWebhook(lq, cq, customAT)
+	wl := fitWorkload(_fitQueue, fitPodSet("main", _slice800k))
+	require.NoError(t, r.Default(context.Background(), wl))
+	assert.Equal(t, []core.NodeSelectorTerm{{
+		MatchExpressions: []core.NodeSelectorRequirement{gt(_fitSlicedKey, "799999")},
+	}}, requiredTerms(wl.Spec.PodSets[0]))
+}
+
+func TestWorkloadWebhook_AmbiguousAcceleratorGroupLeavesWorkloadUnpinned(t *testing.T) {
+	seedFitAffinity(t, "true")
+
+	lq := &kueue.LocalQueue{
+		ObjectMeta: meta.ObjectMeta{Namespace: _fitNamespace, Name: _fitQueue},
+		Spec:       kueue.LocalQueueSpec{ClusterQueue: _fitInstanceType},
+	}
+	baseCQ := func(labels map[string]string) *kueue.ClusterQueue {
+		cq := &kueue.ClusterQueue{ObjectMeta: meta.ObjectMeta{Name: _fitInstanceType, Labels: labels}}
+		systemmeta.NoteResource(cq, "instancetypes", nil)
+		return cq
+	}
+
+	cases := []struct {
+		name string
+		objs []ctrlcli.Object
+	}{
+		{
+			name: "conflicting same-named AcceleratorType and InstanceType",
+			objs: []ctrlcli.Object{
+				lq,
+				baseCQ(nil),
+				&workercore.AcceleratorType{
+					ObjectMeta: meta.ObjectMeta{Name: _fitInstanceType},
+					Spec:       workercore.AcceleratorTypeSpec{AcceleratorGroup: _fitGroup},
+				},
+				&workercore.InstanceType{
+					ObjectMeta: meta.ObjectMeta{Name: _fitInstanceType},
+					Spec:       workercore.InstanceTypeSpec{AcceleratorGroup: "nvidia-l4"},
+				},
+			},
+		},
+		{
+			name: "same-named AcceleratorType with empty group is not overridden by stale InstanceType",
+			objs: []ctrlcli.Object{
+				lq,
+				baseCQ(nil),
+				&workercore.AcceleratorType{
+					ObjectMeta: meta.ObjectMeta{Name: _fitInstanceType},
+				},
+				&workercore.InstanceType{
+					ObjectMeta: meta.ObjectMeta{Name: _fitInstanceType},
+					Spec:       workercore.InstanceTypeSpec{AcceleratorGroup: _fitGroup},
+				},
+			},
+		},
+		{
+			name: "conflicting fronting objects via queue-entrance label",
+			objs: []ctrlcli.Object{
+				lq,
+				baseCQ(nil),
+				&workercore.AcceleratorType{
+					ObjectMeta: meta.ObjectMeta{
+						Name:   "custom-at",
+						Labels: map[string]string{QueueEntranceLabelKey: _fitQueue},
+					},
+					Spec: workercore.AcceleratorTypeSpec{AcceleratorGroup: _fitGroup},
+				},
+				&workercore.InstanceType{
+					ObjectMeta: meta.ObjectMeta{
+						Name:   "custom-it",
+						Labels: map[string]string{QueueEntranceLabelKey: _fitQueue},
+					},
+					Spec: workercore.InstanceTypeSpec{AcceleratorGroup: "nvidia-l4"},
+				},
+			},
+		},
+		{
+			name: "ClusterQueue with multiple acceleratable group labels",
+			objs: []ctrlcli.Object{
+				lq,
+				baseCQ(map[string]string{
+					nodefeature.AcceleratableFeatureLabelPrefix + _fitGroup:   "true",
+					nodefeature.AcceleratableFeatureLabelPrefix + "nvidia-l4": "true",
+				}),
+			},
+		},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			wl := fitWorkload(_fitQueue, fitPodSet("main", _slice800k))
+			before := wl.DeepCopy()
+			require.NoError(t, newWorkloadWebhook(c.objs...).Default(context.Background(), wl))
+			assert.Equal(t, before, wl)
+		})
+	}
 }

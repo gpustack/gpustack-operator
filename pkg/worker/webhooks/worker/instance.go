@@ -109,6 +109,11 @@ func (r *InstanceWebhook) ValidateCreate(ctx context.Context, obj runtime.Object
 	}
 
 	var errs field.ErrorList
+	if instType != nil && instType.Spec.Inactive {
+		errs = append(errs, field.Forbidden(
+			field.NewPath("spec.type"), fmt.Sprintf("instance type %s is inactive", instType.Name),
+		))
+	}
 	if instRess := inst.Spec.Resources; instType != nil && instRess != nil {
 		// A slice request whose accelerator Detail is not yet computed cannot be validated;
 		// reject it with a transient (retryable) error, never a permanent Invalid, so the same
@@ -294,7 +299,13 @@ func (r *InstanceWebhook) ValidateUpdate(ctx context.Context, oldObj, newObj run
 				errs = append(errs, field.NotFound(
 					field.NewPath("spec.type"), inst.Spec.Type,
 				))
+				instType = nil
 			}
+		}
+		if instType != nil && instType.Spec.Inactive {
+			errs = append(errs, field.Forbidden(
+				field.NewPath("spec.type"), fmt.Sprintf("instance type %s is inactive", instType.Name),
+			))
 		}
 		// The node pin is deliberately NOT re-validated here: it is checked once, on create, and a
 		// node that has since gone away makes the Pod stay Pending with the scheduler's own reason
@@ -308,7 +319,7 @@ func (r *InstanceWebhook) ValidateUpdate(ctx context.Context, oldObj, newObj run
 		// ValidateCreate applies (sign, accelerator/CPU caps, slice-percentage ranges, and
 		// per-unit RAM / local storage), not just the upper caps — a stopped Instance may have
 		// had its resources edited while stopped, when the immutability guard above is skipped.
-		if inst.Spec.Resources != nil {
+		if instType != nil && inst.Spec.Resources != nil {
 			// As on create, a slice request whose accelerator Detail is not yet computed is
 			// rejected with a transient (retryable) error, not a permanent Invalid.
 			if slicingRequestNotReady(instType, inst.Spec.Resources) {

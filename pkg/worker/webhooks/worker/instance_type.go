@@ -15,6 +15,7 @@ import (
 	"gpustack.ai/gpustack/pkg/systemname"
 	"gpustack.ai/gpustack/pkg/utils/strconvx"
 	"gpustack.ai/gpustack/pkg/webhook"
+	workerctrl "gpustack.ai/gpustack/pkg/worker/controllers/worker"
 	"gpustack.ai/gpustack/pkg/worker/settings"
 )
 
@@ -145,7 +146,7 @@ func (r *InstanceTypeWebhook) Default(ctx context.Context, obj runtime.Object) e
 	}
 	// Advertise the fronting LocalQueue name so the Pod webhook reverse-looks-up this
 	// InstanceType for the observed per-card VRAM (Status.Detail.Memory).
-	it.Labels[QueueEntranceLabelKey] = nodefeature.FormatLocalQueueName(it.Name)
+	it.Labels[QueueEntranceLabelKey] = nodefeature.FormatLocalQueueName(workerctrl.InstanceTypePoolQueueName(ctx, it))
 
 	return nil
 }

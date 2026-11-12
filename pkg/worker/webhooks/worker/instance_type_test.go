@@ -192,7 +192,7 @@ func TestInstanceTypeWebhook_DefaultStampsScheduleLabels(t *testing.T) {
 
 	t.Run("accelerated type gets the acceleratable feature key + boolean + os/arch", func(t *testing.T) {
 		it := &workercore.InstanceType{
-			ObjectMeta: meta.ObjectMeta{Name: "my-a10g"},
+			ObjectMeta: meta.ObjectMeta{Name: "gpustack--nvidia-a10g-linux-amd64"},
 			Spec:       workercore.InstanceTypeSpec{AcceleratorGroup: "nvidia-a10g", Acceleratable: true, OS: "linux", Arch: "amd64"},
 		}
 		require.NoError(t, wh.Default(context.Background(), it))
@@ -200,8 +200,18 @@ func TestInstanceTypeWebhook_DefaultStampsScheduleLabels(t *testing.T) {
 		assert.Equal(t, "true", it.Labels[nodefeature.NodeAcceleratableLabelKey], "acceleratable=true discriminator")
 		assert.Equal(t, "linux", it.Labels[core.LabelOSStable])
 		assert.Equal(t, "amd64", it.Labels[core.LabelArchStable])
-		assert.Equal(t, nodefeature.FormatLocalQueueName("my-a10g"), it.Labels[QueueEntranceLabelKey],
+		assert.Equal(t, nodefeature.FormatLocalQueueName("gpustack--nvidia-a10g-linux-amd64"), it.Labels[QueueEntranceLabelKey],
 			"entrance label advertises the fronting LocalQueue name")
+	})
+
+	t.Run("custom-named accelerated type stamps the canonical pool queue entrance", func(t *testing.T) {
+		it := &workercore.InstanceType{
+			ObjectMeta: meta.ObjectMeta{Name: "my-a10g"},
+			Spec:       workercore.InstanceTypeSpec{AcceleratorGroup: "nvidia-a10g", Acceleratable: true, OS: "linux", Arch: "amd64"},
+		}
+		require.NoError(t, wh.Default(context.Background(), it))
+		assert.Equal(t, nodefeature.FormatLocalQueueName("gpustack--nvidia-a10g-linux-amd64"), it.Labels[QueueEntranceLabelKey],
+			"custom-named InstanceType stamps the shared pool's LocalQueue name")
 	})
 
 	t.Run("cpu-only type collapses to the acceleratable=false discriminator (unaware)", func(t *testing.T) {
@@ -262,5 +272,5 @@ func TestInstanceTypeWebhook_DefaultWritesNoDescriptor(t *testing.T) {
 	assert.Empty(t, it.Spec.DisplayName, "Default no longer defaults DisplayName (derivation stamps it)")
 	// The schedule + entrance labels are still stamped.
 	assert.Equal(t, "true", it.Labels[nodefeature.AcceleratableFeatureLabelPrefix+"nvidia-a10g"])
-	assert.Equal(t, nodefeature.FormatLocalQueueName("my-a10g"), it.Labels[QueueEntranceLabelKey])
+	assert.Equal(t, nodefeature.FormatLocalQueueName("gpustack--nvidia-a10g-linux-amd64"), it.Labels[QueueEntranceLabelKey])
 }
