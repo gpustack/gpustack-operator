@@ -287,6 +287,17 @@ func (r *NodeFlavorReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 		return ctrl.Result{}, err
 	}
 
+	// Author the pool's AcceleratorType from the just-synced accelerated flavor — create-only,
+	// unconditional on instance-type-derived-from-node, so an admin's edits to an existing type
+	// are preserved.
+	if flavor.Acceleratable {
+		err = r.authorDerivedAcceleratorType(ctx, flavor)
+		if err != nil {
+			logger.Error(err, "author derived accelerator type")
+			return ctrl.Result{}, err
+		}
+	}
+
 	// Author the pool's InstanceType from the just-synced flavor when
 	// instance-type-derived-from-node is enabled — create-only, never delete/update, so an
 	// admin's edits to an existing type are preserved. The InstanceTypeReconciler no longer
@@ -563,6 +574,49 @@ func (r *NodeFlavorReconciler) authorDerivedInstanceType(ctx context.Context, fl
 	return nil
 }
 
+// authorDerivedAcceleratorType creates the pool's operator-owned AcceleratorType from a synced
+// accelerated flavor. It is unconditional on instance-type-derived-from-node and create-only so
+// existing types are left untouched.
+func (r *NodeFlavorReconciler) authorDerivedAcceleratorType(ctx context.Context, flavor *nodefeature.NodeFlavor) error {
+	logger := ctrllog.FromContext(ctx)
+
+	cpuAware := settings.InstanceTypeAwareCPUManufacturer.ShouldValueBool(ctx)
+	name, generalGroup, acceleratorGroup := flavor.DerivedAcceleratorTypeIdentity(cpuAware)
+	if name == "" {
+		return nil
+	}
+
+	displayName := flavor.Product
+	if runes := []rune(displayName); len(runes) > 64 {
+		displayName = string(runes[:64])
+	}
+
+	at := &workercore.AcceleratorType{
+		ObjectMeta: meta.ObjectMeta{
+			Name:   name,
+			Labels: map[string]string{_InstanceTypeDerivedFromNodeLabel: "true"},
+		},
+		Spec: workercore.AcceleratorTypeSpec{
+			GeneralGroup:     generalGroup,
+			AcceleratorGroup: acceleratorGroup,
+			OS:               flavor.OS,
+			Arch:             flavor.Arch,
+			DisplayName:      displayName,
+		},
+	}
+	err := r.Client.Create(ctx, at)
+	if err != nil {
+		if !kerrors.IsAlreadyExists(err) {
+			return err
+		}
+		return nil
+	}
+
+	logger.V(2).Info("authored derived accelerator type",
+		"accelerator type", at.Name)
+	return nil
+}
+
 // cpuDetailNote marshals a node's CPU detail into the JSON carried by the ResourceFlavor's
 // cpuDetail note, in the shape the InstanceType webhook folds straight back into the spec (the
 // workercore CPU structs are the single typed source shared by both sides): a non-accelerated
@@ -768,11 +822,32 @@ func (r *NodeFlavorReconciler) SetupController(ctx context.Context, opts control
 				// Nothing else says anything the inputs do not: authoring is create-only, so a
 				// creation is this reconciler's own write, and the status churn an InstanceType
 				// carries never changes whether it exists.
-				ctrlpredicate.Not(ctrlpredicate.Funcs{
-					DeleteFunc: func(e ctrlevent.DeleteEvent) bool {
-						return false
-					},
+				ctrlpredicate.Funcs{
+					CreateFunc:  func(ctrlevent.CreateEvent) bool { return false },
+					UpdateFunc:  func(ctrlevent.UpdateEvent) bool { return false },
+					DeleteFunc:  func(ctrlevent.DeleteEvent) bool { return true },
+					GenericFunc: func(ctrlevent.GenericEvent) bool { return false },
+				},
+			),
+		).
+		Watches(
+			// Watch the AcceleratorTypes this reconciler authors, and enqueue the flavors when
+			// one is deleted so the contributing flavor recreates it.
+			&workercore.AcceleratorType{},
+			ctrlhandlerx.DedupEnqueueRequestsFromMapFunc(
+				5*time.Second,
+				r.enqueueResourceFlavorsWhenDerivedInstanceTypeDeleted,
+			),
+			ctrlbuilder.WithPredicates(
+				ctrlpredicate.NewPredicateFuncs(func(obj ctrlcli.Object) bool {
+					return obj.GetLabels()[_InstanceTypeDerivedFromNodeLabel] == "true"
 				}),
+				ctrlpredicate.Funcs{
+					CreateFunc:  func(ctrlevent.CreateEvent) bool { return false },
+					UpdateFunc:  func(ctrlevent.UpdateEvent) bool { return false },
+					DeleteFunc:  func(ctrlevent.DeleteEvent) bool { return true },
+					GenericFunc: func(ctrlevent.GenericEvent) bool { return false },
+				},
 			),
 		).
 		Complete(r)

@@ -75,6 +75,10 @@ const (
 )
 
 const (
+	// InstanceTypePhaseActive is the InstanceType status phase reported when its backing Kueue
+	// ClusterQueue is active and ready to admit workloads, mirroring the "Active" summary from
+	// apistatus.GetSummaryOfClusterQueue.
+	InstanceTypePhaseActive = "Active"
 	// InstanceTypePhaseInactive is the InstanceType status phase reported when its backing Kueue
 	// ClusterQueue is held (Hold, an admin Inactive) or already fully drained (HoldAndDrain with no
 	// reservations left), mirroring the "Inactive" summary from apistatus.GetSummaryOfClusterQueue.
@@ -327,11 +331,12 @@ func (r *InstanceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	// (block new admission, keep running Pods) from a HoldAndDrain drain or teardown (evict admitted
 	// workloads). Both collapse to InstanceType phase Inactive once no reservation remains, and a fast
 	// drain skips a durable Draining phase entirely, so the phase cannot be relied on to stop a drained
-	// Instance. The ClusterQueue is named after the InstanceType.
+	// Instance. The ClusterQueue is resolved by the InstanceType's canonical pool queue name.
 	var draining bool
 	if !instTypeGone {
+		cqName := InstanceTypePoolQueueName(ctx, (*workercore.InstanceType)(instType))
 		cq := new(kueue.ClusterQueue)
-		cqErr := r.Client.Get(ctx, ctrlcli.ObjectKey{Name: inst.Spec.Type}, cq)
+		cqErr := r.Client.Get(ctx, ctrlcli.ObjectKey{Name: cqName}, cq)
 		if cqErr != nil && !kerrors.IsNotFound(cqErr) {
 			logger.Error(cqErr, "fetch backing cluster queue")
 			return ctrl.Result{}, cqErr
@@ -1177,7 +1182,7 @@ func (r *InstanceReconciler) SetupController(_ context.Context, opts controller.
 						return false
 					},
 					DeleteFunc: func(e ctrlevent.DeleteEvent) bool {
-						return false
+						return true
 					},
 					UpdateFunc: func(e ctrlevent.UpdateEvent) bool {
 						oldInstType, newInstType := e.ObjectOld.(*workercore.InstanceType), e.ObjectNew.(*workercore.InstanceType)
@@ -1191,15 +1196,15 @@ func (r *InstanceReconciler) SetupController(_ context.Context, opts controller.
 			),
 		).
 		Watches(
-			// Watch the backing ClusterQueues (named after the InstanceType) and enqueue every
-			// Instance of that type on a StopPolicy change, so a HoldAndDrain drain/teardown stops
-			// its Instances promptly. Only a StopPolicy transition can change the stop decision;
+			// Watch the backing ClusterQueues and enqueue every Instance whose InstanceType fronts
+			// that pool queue on a StopPolicy change, so a HoldAndDrain drain/teardown stops its
+			// Instances promptly. Only a StopPolicy transition can change the stop decision;
 			// ignore the frequent status churn.
 			&kueue.ClusterQueue{},
 			ctrlhandlerx.DedupEnqueueRequestsFromMapFuncWithWindow(
 				3*time.Second,
 				dedupWindow,
-				r.enqueueInstancesWhenInstanceTypeChanged,
+				r.enqueueInstancesWhenClusterQueueChanged,
 			),
 			ctrlbuilder.WithPredicates(
 				ctrlpredicate.Funcs{
@@ -1274,7 +1279,7 @@ func (r *InstanceReconciler) enqueueInstancesWhenInstanceTypeChanged(
 		WithValues("instancetype", obj.GetName())
 
 	instances := new(workercore.InstanceList)
-	if err := r.Client.List(ctx, instances); err != nil {
+	if err := r.Client.List(ctx, instances, ctrlclix.WithoutQuorum, ctrlcli.UnsafeDisableDeepCopy); err != nil {
 		logger.Error(err, "list instances of instance type")
 		return nil
 	}
@@ -1293,6 +1298,59 @@ func (r *InstanceReconciler) enqueueInstancesWhenInstanceTypeChanged(
 	}
 
 	logger.V(2).Info("enqueue instances from instance type", "requests", reqs)
+	return reqs
+}
+
+func (r *InstanceReconciler) enqueueInstancesWhenClusterQueueChanged(
+	ctx context.Context,
+	obj ctrlcli.Object,
+) []ctrlreconcile.Request {
+	logger := ctrllog.FromContext(ctx).
+		WithValues("clusterqueue", obj.GetName())
+
+	// EnqueueRequestsFromMapFunc cannot return an error, so fall back to APIReader on cache errors
+	// and keep obj.GetName() seeded as a best-effort fallback for derived/same-named types.
+	typeNames := map[string]bool{obj.GetName(): true}
+	itList := new(workercore.InstanceTypeList)
+	itErr := r.Client.List(ctx, itList, ctrlclix.WithoutQuorum, ctrlcli.UnsafeDisableDeepCopy)
+	if itErr != nil && r.APIReader != nil {
+		itErr = r.APIReader.List(ctx, itList, ctrlclix.WithoutQuorum)
+	}
+	if itErr != nil {
+		logger.Error(itErr, "list instance types for cluster queue")
+	} else {
+		for i := range itList.Items {
+			it := &itList.Items[i]
+			if InstanceTypePoolQueueName(ctx, it) == obj.GetName() {
+				typeNames[it.Name] = true
+			}
+		}
+	}
+
+	instances := new(workercore.InstanceList)
+	instErr := r.Client.List(ctx, instances, ctrlclix.WithoutQuorum, ctrlcli.UnsafeDisableDeepCopy)
+	if instErr != nil && r.APIReader != nil {
+		instErr = r.APIReader.List(ctx, instances, ctrlclix.WithoutQuorum)
+	}
+	if instErr != nil {
+		logger.Error(instErr, "list instances for cluster queue")
+		return nil
+	}
+
+	var reqs []ctrlreconcile.Request
+	for i := range instances.Items {
+		if !typeNames[instances.Items[i].Spec.Type] {
+			continue
+		}
+		reqs = append(reqs, ctrlreconcile.Request{
+			NamespacedName: ctrlcli.ObjectKeyFromObject(&instances.Items[i]),
+		})
+	}
+	if len(reqs) == 0 {
+		return nil
+	}
+
+	logger.V(2).Info("enqueue instances from cluster queue", "requests", reqs)
 	return reqs
 }
 

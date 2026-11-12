@@ -10,6 +10,7 @@ import (
 
 // setups is the list of controller setup functions.
 var setups = []controller.Setup{
+	new(worker.AcceleratorTypeReconciler),
 	new(worker.InstanceReconciler),
 	new(worker.InstanceIsolationReconciler),
 	new(worker.InstanceTypeReconciler),

@@ -868,7 +868,7 @@ func buildInstanceTypeClient(objs ...ctrlcli.Object) ctrlcli.Client {
 	return ctrlfake.NewClientBuilder().
 		WithScheme(scheme.Scheme).
 		WithObjects(objs...).
-		WithStatusSubresource(&workercore.InstanceType{}).
+		WithStatusSubresource(&workercore.InstanceType{}, &workercore.AcceleratorType{}).
 		Build()
 }
 
@@ -969,11 +969,8 @@ func TestInstanceTypeReconciler_RecreatesDeletedClusterQueue(t *testing.T) {
 }
 
 // TestInstanceTypeReconciler_RepointsFeatureKeyOnGroupChange pins that changing an InstanceType's
-// accelerator group (mutable — only unitResources/localStorage are frozen on update) re-points its
-// queue's feature-key label instead of leaving the stale one. A leftover key would make the flavor
-// and device selectors (which AND every feature-key label on the queue) match no pool and strand
-// it. (Accelerated groups always surface an acceleratable.* key regardless of awareness, so this
-// exercises the prune deterministically in the unit binary.)
+// accelerator group resolves its backing ClusterQueue to the new canonical pool queue name and
+// stamps the updated feature-key label on that canonical queue.
 func TestInstanceTypeReconciler_RepointsFeatureKeyOnGroupChange(t *testing.T) {
 	name := "gpustack--nvidia-a10g-linux-amd64"
 	it := &workercore.InstanceType{
@@ -991,13 +988,14 @@ func TestInstanceTypeReconciler_RepointsFeatureKeyOnGroupChange(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "true", cq.Labels[featureKeyLabel(true, "nvidia-a10g")], "initial feature key")
 
-	// Admin re-points the accelerator group (group is not frozen by the update webhook).
+	// Admin re-points the accelerator group; the canonical pool queue name follows the new group.
 	got := getInstanceType(t, cli, name)
 	got.Spec.AcceleratorGroup = "nvidia-a10g-v2"
 	require.NoError(t, cli.Update(context.Background(), got))
 	reconcileInstanceTypeN(t, cli, name, 2)
 
-	cq, err = getClusterQueue(t, cli, name)
+	newCQName := InstanceTypePoolQueueName(context.Background(), got)
+	cq, err = getClusterQueue(t, cli, newCQName)
 	require.NoError(t, err)
 	assert.Equal(t, "true", cq.Labels[featureKeyLabel(true, "nvidia-a10g-v2")], "feature key re-pointed")
 	assert.NotContains(t, cq.Labels, featureKeyLabel(true, "nvidia-a10g"), "stale feature key pruned")
@@ -2106,4 +2104,254 @@ func TestInstanceTypeReconciler_ExpectedStopPolicySyncFailuresAreQuiet(t *testin
 			assert.Equal(t, kueue.Hold, ptr.Deref(gotCQ.Spec.StopPolicy, kueue.None))
 		})
 	}
+}
+
+func TestTeardownInstanceType_APIReaderFallbackPreservesSharedClusterQueue(t *testing.T) {
+	const (
+		key  = "nvidia-a10g"
+		name = "gpustack--nvidia-a10g-linux-amd64"
+	)
+	now := meta.Now()
+	deletingIT := &workercore.InstanceType{
+		ObjectMeta: meta.ObjectMeta{
+			Name:              name,
+			Finalizers:        []string{systemmeta.LockedResourceFinalizer},
+			DeletionTimestamp: &now,
+		},
+		Spec: workercore.InstanceTypeSpec{
+			AcceleratorGroup: key,
+			Acceleratable:    true,
+			OS:               "linux",
+			Arch:             "amd64",
+			UnitResources:    workercore.InstanceTypeUnitResources{CPU: "1", RAM: "2Gi"},
+			LocalStorage:     "100Gi",
+		},
+	}
+	siblingAT := &workercore.AcceleratorType{
+		ObjectMeta: meta.ObjectMeta{Name: name},
+		Spec: workercore.AcceleratorTypeSpec{
+			AcceleratorGroup: key,
+			OS:               "linux",
+			Arch:             "amd64",
+		},
+	}
+	cq := newInstanceTypeQueue(key, true, cpuResourceGroup("gpustack-nvidia-a10g-linux-amd64-1d", 4))
+	cq.Spec.StopPolicy = ptr.To(kueue.None)
+
+	// Stale informer cache lacks siblingAT; live APIReader sees siblingAT.
+	staleCache := buildInstanceTypeClient(deletingIT, cq)
+	liveReader := buildInstanceTypeClient(deletingIT, siblingAT, cq)
+	r := &InstanceTypeReconciler{Client: staleCache, APIReader: liveReader}
+
+	_, err := r.Reconcile(context.Background(), ctrlreconcile.Request{NamespacedName: ctrlcli.ObjectKey{Name: name}})
+	require.NoError(t, err)
+
+	gotCQ, err := getClusterQueue(t, staleCache, name)
+	require.NoError(t, err, "shared ClusterQueue must not be deleted when APIReader sees an active sibling AcceleratorType")
+	assert.Nil(t, gotCQ.DeletionTimestamp)
+	assert.Equal(t, kueue.None, ptr.Deref(gotCQ.Spec.StopPolicy, kueue.None))
+}
+
+func TestClusterQueueUpdateAffectsAcceleratorType(t *testing.T) {
+	activeCQ := func(admitted int32) *kueue.ClusterQueue {
+		cq := newInstanceTypeQueue("nvidia-a10g", true, cpuResourceGroup("gpustack-nvidia-a10g-linux-amd64-1d", 4))
+		cq.Generation = 2
+		cq.Spec.StopPolicy = ptr.To(kueue.None)
+		cq.Status.AdmittedWorkloads = admitted
+		cq.Status.Conditions = []meta.Condition{{
+			Type: kueue.ClusterQueueActive, Status: meta.ConditionTrue, Reason: "Ready", Message: "Can admit new workloads",
+		}}
+		return cq
+	}
+
+	cases := []struct {
+		name string
+		old  *kueue.ClusterQueue
+		new  *kueue.ClusterQueue
+		want bool
+	}{
+		{
+			name: "steady-state workload reservation status churn is ignored",
+			old:  activeCQ(1),
+			new:  activeCQ(2),
+			want: false,
+		},
+		{
+			name: "Active condition transition triggers status refresh",
+			old:  activeCQ(0),
+			new: func() *kueue.ClusterQueue {
+				cq := activeCQ(0)
+				cq.Status.Conditions[0].Status = meta.ConditionFalse
+				cq.Status.Conditions[0].Message = "Flavor not found"
+				return cq
+			}(),
+			want: true,
+		},
+		{
+			name: "draining completion triggers Draining to Inactive refresh",
+			old: func() *kueue.ClusterQueue {
+				cq := activeCQ(1)
+				cq.Spec.StopPolicy = ptr.To(kueue.HoldAndDrain)
+				return cq
+			}(),
+			new: func() *kueue.ClusterQueue {
+				cq := activeCQ(0)
+				cq.Spec.StopPolicy = ptr.To(kueue.HoldAndDrain)
+				return cq
+			}(),
+			want: true,
+		},
+		{
+			name: "annotation update triggers reconcile",
+			old:  activeCQ(0),
+			new: func() *kueue.ClusterQueue {
+				cq := activeCQ(0)
+				cq.Annotations = map[string]string{_TASQueueMigrationPhaseAnnotation: "draining"}
+				return cq
+			}(),
+			want: true,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.Equal(t, tc.want, clusterQueueUpdateAffectsAcceleratorType(tc.old, tc.new))
+		})
+	}
+}
+
+func TestCPUManufacturerAwarenessToggleReapsDisplacedQueueAndRefreshesLabels(t *testing.T) {
+	const (
+		gKey        = "amd-epyc-7r32"
+		aKey        = "nvidia-a10g"
+		collapsedCQ = "gpustack--nvidia-a10g-linux-amd64"
+		awareCQ     = "gpustack--amd-epyc-7r32--nvidia-a10g-linux-amd64"
+	)
+
+	t.Run("toggling awareness off moves custom types back to collapsed queue and deletes orphaned aware queue", func(t *testing.T) {
+		settingtest.MergeDelegatedSettings(t, map[string]string{"instance-type-aware-cpu-manufacturer": "true"})
+
+		it := &workercore.InstanceType{
+			ObjectMeta: meta.ObjectMeta{
+				Name: "custom-epyc-a10g",
+				Labels: map[string]string{
+					queueEntranceLabelKey: nodefeature.FormatLocalQueueName(awareCQ),
+				},
+			},
+			Spec: workercore.InstanceTypeSpec{
+				GeneralGroup:     gKey,
+				AcceleratorGroup: aKey,
+				Acceleratable:    true,
+				OS:               "linux",
+				Arch:             "amd64",
+				UnitResources:    workercore.InstanceTypeUnitResources{CPU: "8", RAM: "64Gi"},
+				LocalStorage:     "100Gi",
+			},
+		}
+		at := &workercore.AcceleratorType{
+			ObjectMeta: meta.ObjectMeta{
+				Name: awareCQ,
+				Labels: map[string]string{
+					_InstanceTypeDerivedFromNodeLabel: "true",
+					queueEntranceLabelKey:             nodefeature.FormatLocalQueueName(awareCQ),
+				},
+			},
+			Spec: workercore.AcceleratorTypeSpec{
+				GeneralGroup:     gKey,
+				AcceleratorGroup: aKey,
+				OS:               "linux",
+				Arch:             "amd64",
+			},
+		}
+		cli := buildInstanceTypeClient(it, at)
+		itRec := &InstanceTypeReconciler{Client: cli, APIReader: cli}
+		atRec := &AcceleratorTypeReconciler{Client: cli, APIReader: cli}
+
+		_, err := itRec.Reconcile(context.Background(), ctrlreconcile.Request{NamespacedName: ctrlcli.ObjectKey{Name: it.Name}})
+		require.NoError(t, err)
+		_, err = atRec.Reconcile(context.Background(), ctrlreconcile.Request{NamespacedName: ctrlcli.ObjectKey{Name: at.Name}})
+		require.NoError(t, err)
+		_, err = getClusterQueue(t, cli, awareCQ)
+		require.NoError(t, err)
+
+		// Flip awareness off: both types now resolve to collapsedCQ, refresh their entrance labels,
+		// keep the derived AcceleratorType alive on collapsedCQ, and reap the orphaned awareCQ.
+		settingtest.MergeDelegatedSettings(t, map[string]string{"instance-type-aware-cpu-manufacturer": "false"})
+
+		_, err = itRec.Reconcile(context.Background(), ctrlreconcile.Request{NamespacedName: ctrlcli.ObjectKey{Name: it.Name}})
+		require.NoError(t, err)
+		_, err = atRec.Reconcile(context.Background(), ctrlreconcile.Request{NamespacedName: ctrlcli.ObjectKey{Name: at.Name}})
+		require.NoError(t, err)
+
+		_, err = getClusterQueue(t, cli, collapsedCQ)
+		require.NoError(t, err, "collapsed ClusterQueue must be created")
+		_, err = getClusterQueue(t, cli, awareCQ)
+		assert.True(t, kerrors.IsNotFound(err), "orphaned aware ClusterQueue must be reaped once no fronting object resolves to it")
+
+		gotIT := new(workercore.InstanceType)
+		require.NoError(t, cli.Get(context.Background(), ctrlcli.ObjectKey{Name: it.Name}, gotIT))
+		assert.Equal(t, nodefeature.FormatLocalQueueName(collapsedCQ), gotIT.Labels[queueEntranceLabelKey])
+		assert.NotContains(t, gotIT.Labels, nodefeature.GeneralFeatureLabelPrefix+gKey)
+		assert.Equal(t, nodefeature.FormatLocalQueueName(collapsedCQ), gotIT.Status.Entrance)
+
+		gotAT := new(workercore.AcceleratorType)
+		require.NoError(t, cli.Get(context.Background(), ctrlcli.ObjectKey{Name: at.Name}, gotAT))
+		assert.Nil(t, gotAT.DeletionTimestamp, "derived AcceleratorType moving onto a new pool queue must not be mistaken for a deleted queue")
+		assert.Equal(t, nodefeature.FormatLocalQueueName(collapsedCQ), gotAT.Labels[queueEntranceLabelKey])
+		assert.Equal(t, nodefeature.FormatLocalQueueName(collapsedCQ), gotAT.Status.Entrance)
+	})
+
+	t.Run("toggling awareness on keeps collapsed queue alive when a collapsed generic type still fronts it", func(t *testing.T) {
+		settingtest.MergeDelegatedSettings(t, map[string]string{"instance-type-aware-cpu-manufacturer": "false"})
+
+		collapsedDerived := &workercore.InstanceType{
+			ObjectMeta: meta.ObjectMeta{Name: collapsedCQ},
+			Spec: workercore.InstanceTypeSpec{
+				GeneralGroup:     nodefeature.GeneralGroupGeneric,
+				AcceleratorGroup: aKey,
+				Acceleratable:    true,
+				OS:               "linux",
+				Arch:             "amd64",
+				UnitResources:    workercore.InstanceTypeUnitResources{CPU: "8", RAM: "64Gi"},
+				LocalStorage:     "100Gi",
+			},
+		}
+		customEPYC := &workercore.InstanceType{
+			ObjectMeta: meta.ObjectMeta{
+				Name: "custom-epyc-tier",
+				Labels: map[string]string{
+					queueEntranceLabelKey: nodefeature.FormatLocalQueueName(collapsedCQ),
+				},
+			},
+			Spec: workercore.InstanceTypeSpec{
+				GeneralGroup:     gKey,
+				AcceleratorGroup: aKey,
+				Acceleratable:    true,
+				OS:               "linux",
+				Arch:             "amd64",
+				UnitResources:    workercore.InstanceTypeUnitResources{CPU: "16", RAM: "128Gi"},
+				LocalStorage:     "100Gi",
+			},
+		}
+		cli := buildInstanceTypeClient(collapsedDerived, customEPYC)
+		itRec := &InstanceTypeReconciler{Client: cli, APIReader: cli}
+
+		_, err := itRec.Reconcile(context.Background(), ctrlreconcile.Request{NamespacedName: ctrlcli.ObjectKey{Name: collapsedDerived.Name}})
+		require.NoError(t, err)
+		_, err = itRec.Reconcile(context.Background(), ctrlreconcile.Request{NamespacedName: ctrlcli.ObjectKey{Name: customEPYC.Name}})
+		require.NoError(t, err)
+
+		settingtest.MergeDelegatedSettings(t, map[string]string{"instance-type-aware-cpu-manufacturer": "true"})
+		t.Cleanup(func() {
+			settingtest.MergeDelegatedSettings(t, map[string]string{"instance-type-aware-cpu-manufacturer": "false"})
+		})
+
+		_, err = itRec.Reconcile(context.Background(), ctrlreconcile.Request{NamespacedName: ctrlcli.ObjectKey{Name: customEPYC.Name}})
+		require.NoError(t, err)
+
+		_, err = getClusterQueue(t, cli, awareCQ)
+		require.NoError(t, err, "custom EPYC tier must create the split aware ClusterQueue")
+		_, err = getClusterQueue(t, cli, collapsedCQ)
+		require.NoError(t, err, "collapsed ClusterQueue must remain alive while collapsedDerived still fronts it")
+	})
 }

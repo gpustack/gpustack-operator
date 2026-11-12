@@ -2182,3 +2182,55 @@ func TestInstanceReconciler_RefusesAServiceItDoesNotOwn(t *testing.T) {
 		})
 	}
 }
+
+func TestInstanceReconciler_ResolvesCanonicalPoolClusterQueueForCustomInstanceType(t *testing.T) {
+	ctx := context.Background()
+	canonicalCQName := "gpustack--nvidia-a10g-linux-amd64"
+
+	instType := &worker.InstanceType{
+		ObjectMeta: meta.ObjectMeta{
+			Name: "a10g-custom-tier",
+		},
+		Spec: workercore.InstanceTypeSpec{
+			GeneralGroup:     "generic",
+			AcceleratorGroup: "nvidia-a10g",
+			Acceleratable:    true,
+			OS:               "linux",
+			Arch:             "amd64",
+			UnitResources:    workercore.InstanceTypeUnitResources{CPU: "4", RAM: "16Gi"},
+			LocalStorage:     "100Gi",
+		},
+	}
+	cq := &kueue.ClusterQueue{
+		ObjectMeta: meta.ObjectMeta{
+			Name: canonicalCQName,
+		},
+		Spec: kueue.ClusterQueueSpec{
+			StopPolicy: ptr.To(kueue.HoldAndDrain),
+		},
+	}
+	inst := &workercore.Instance{
+		ObjectMeta: meta.ObjectMeta{
+			Namespace:  "default",
+			Name:       "inst-custom",
+			Finalizers: []string{systemmeta.LockedResourceFinalizer},
+		},
+		Spec: workercore.InstanceSpec{
+			Type: instType.Name,
+		},
+	}
+
+	cli := buildInstanceClient(instType, (*workercore.InstanceType)(instType), cq, inst)
+	r := &InstanceReconciler{Client: cli, APIReader: cli}
+
+	reqs := r.enqueueInstancesWhenClusterQueueChanged(ctx, cq)
+	require.Len(t, reqs, 1)
+	assert.Equal(t, ctrlcli.ObjectKeyFromObject(inst), reqs[0].NamespacedName)
+
+	_, err := r.Reconcile(ctx, reqs[0])
+	require.NoError(t, err)
+
+	gotInst := new(workercore.Instance)
+	require.NoError(t, cli.Get(ctx, ctrlcli.ObjectKeyFromObject(inst), gotInst))
+	assert.True(t, gotInst.Spec.Stop, "HoldAndDrain on the canonical pool ClusterQueue stops the Instance")
+}
