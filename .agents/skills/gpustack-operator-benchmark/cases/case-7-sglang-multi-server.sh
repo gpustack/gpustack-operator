@@ -49,7 +49,7 @@ IMAGE="${SGLANG_IMAGE:-gpustack/runner:cuda13.0-sglang0.5.22}"
 # below selects on the label the operator renders from that same name.
 ROUTER_NAME="sglang-gateway"
 ROUTER_IMAGE="${SGLANG_ROUTER_IMAGE:-gpustack/llm-router:v0.3.1}"
-INSTANCE_TYPE="${SGLANG_INSTANCE_TYPE:-gpustack--nvidia-h100-80gb-hbm3-linux-amd64}"
+INSTANCE_TYPE="${SGLANG_ACCELERATOR_TYPE:-${SGLANG_INSTANCE_TYPE:-gpustack--nvidia-h100-80gb-hbm3-linux-amd64}}"
 LOCAL_PORT_BASE="${LOCAL_PORT_BASE:-18200}"
 READY_TIMEOUT="${READY_TIMEOUT:-1200}"
 SCALE_TIMEOUT="${SCALE_TIMEOUT:-900}"
@@ -97,7 +97,7 @@ spec:
       kind: Server
       replicas: 1
       size: 1
-      instanceType: ${INSTANCE_TYPE}
+      acceleratorType: ${INSTANCE_TYPE}
       image: ${IMAGE}
       imagePullPolicy: IfNotPresent
       resources:
@@ -208,7 +208,7 @@ wait_workers() {
 # list, so the role that comes back carries only the two fields the patch carried and the API
 # server rejects the deployment for the role it no longer describes: the instance type, the
 # image, the size and the resources are all gone, and the recorded rejection reads
-# "spec.roles[0].instanceType: Invalid value: empty". A JSON patch changes the one number and
+# "spec.roles[0].acceleratorType: Invalid value: empty". A JSON patch changes the one number and
 # leaves the rest of the role alone. The path names the first role because the manifest
 # declares exactly one role, the server role.
 #

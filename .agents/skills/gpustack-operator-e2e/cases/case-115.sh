@@ -47,8 +47,8 @@ import uuid
 from decimal import Decimal
 
 NS = os.environ['E2E_C115_NAMESPACE']
-IT = os.environ.get('E2E_C115_IT', '')
-OTHER = os.environ.get('E2E_C115_OTHER_IT', '')
+IT = os.environ.get('E2E_C115_AT', os.environ.get('E2E_C115_IT', ''))
+OTHER = os.environ.get('E2E_C115_OTHER_AT', os.environ.get('E2E_C115_OTHER_IT', ''))
 CPU_IT = os.environ.get('E2E_C115_CPU_IT', '')
 NAME = 'case115-' + uuid.uuid4().hex[:8]
 TIMEOUT = int(os.environ.get('E2E_C115_TIMEOUT', '180'))
@@ -192,7 +192,8 @@ def converged(state, old=None, changed='server'):
     md = state['deployment']
     roles = md['spec']['roles']
     pods, workloads = state['pods'], state['workloads']
-    if md['metadata']['uid'] != MD_UID or len(pods) != sum(r['size'] for r in roles) or len(workloads) != len(roles):
+    queued_roles = [r for r in roles if r.get('acceleratorType') or r.get('instanceType')]
+    if md['metadata']['uid'] != MD_UID or len(pods) != sum(r['size'] for r in roles) or len(workloads) != len(queued_roles):
         return False
     if md['metadata'].get('annotations', {}).get('modeldeployment.gpustack.ai/replacement-slots'):
         return False
@@ -204,6 +205,17 @@ def converged(state, old=None, changed='server'):
             return False
         member_uids = {p['metadata']['uid'] for p in members}
         owned = [w for w in workloads if any(o['uid'] in member_uids for o in w['metadata'].get('ownerReferences', []))]
+        acc_type_name = role.get('acceleratorType') or role.get('instanceType')
+        if not acc_type_name:
+            if owned:
+                return False
+            for pod in members:
+                container = main_container(pod)
+                if container.get('command') != role['command']:
+                    return False
+                if pod['metadata']['labels'].get('kueue.x-k8s.io/queue-name'):
+                    return False
+            continue
         if len(owned) != 1:
             return False
         workload = owned[0]
@@ -215,7 +227,10 @@ def converged(state, old=None, changed='server'):
         owners = {o['uid'] for o in workload['metadata'].get('ownerReferences', []) if o['kind'] == 'Pod'}
         if owners != member_uids:
             return False
-        inst_type = kubectl('get', 'instancetypes.worker.gpustack.ai', role['instanceType'], '-o', 'json')
+        try:
+            inst_type = kubectl('get', 'acceleratortypes.worker.gpustack.ai', acc_type_name, '-o', 'json')
+        except Exception:
+            inst_type = kubectl('get', 'instancetypes.worker.gpustack.ai', acc_type_name, '-o', 'json')
         entrance = inst_type['status']['entrance']
         if workload['spec']['queueName'] != entrance:
             return False
@@ -225,7 +240,7 @@ def converged(state, old=None, changed='server'):
                 return False
             if pod['metadata']['labels'].get('kueue.x-k8s.io/queue-name') != entrance:
                 return False
-            if inst_type['spec'].get('acceleratable', False):
+            if inst_type.get('spec', {}).get('acceleratable', True):
                 node = pod['spec'].get('nodeName')
                 if not node:
                     return False
@@ -329,7 +344,10 @@ try:
     if not IT:
         record('SKIP', 'role shape updates', 'E2E_C115_IT is unset; NOTHING WAS VERIFIED')
     else:
-        inst_type = kubectl('get', 'instancetypes.worker.gpustack.ai', IT, '-o', 'json')
+        try:
+            inst_type = kubectl('get', 'acceleratortypes.worker.gpustack.ai', IT, '-o', 'json')
+        except Exception:
+            inst_type = kubectl('get', 'instancetypes.worker.gpustack.ai', IT, '-o', 'json')
         resource = inst_type['status']['accelerator']
         suitable = (inst_type['status']['phase'] == 'Active'
                     and inst_type['status']['detail']['manufacturer'] == 'nvidia'
@@ -343,7 +361,7 @@ try:
                        'model': {'name': 'Qwen/Qwen2.5-0.5B-Instruct'},
                        'engine': {'name': 'vLLM', 'version': '0.29.0'}, 'roles': [{
                            'name': 'server', 'kind': 'Server', 'replicas': 1, 'size': 1,
-                           'instanceType': IT, 'image': os.environ.get('E2E_C115_IMAGE', 'ubuntu:24.04'),
+                           'acceleratorType': IT, 'image': os.environ.get('E2E_C115_IMAGE', 'ubuntu:24.04'),
                            'command': COMMAND, 'resources': {'accelerator': '2' if int(resource['capacity']) >= 2 else '1'},
                            'terminationGracePeriodSeconds': 15}]}}
             obj['metadata']['labels'] = {OWNERSHIP_LABEL: OWNERSHIP_TOKEN}
@@ -377,12 +395,15 @@ try:
             else:
                 record('SKIP', 'logical slice resource updates', 'no logical slice capacity; slice replacement remains UNVERIFIED')
             if OTHER:
-                second = kubectl('get', 'instancetypes.worker.gpustack.ai', OTHER, '-o', 'json')
+                try:
+                    second = kubectl('get', 'acceleratortypes.worker.gpustack.ai', OTHER, '-o', 'json')
+                except Exception:
+                    second = kubectl('get', 'instancetypes.worker.gpustack.ai', OTHER, '-o', 'json')
                 if second['spec']['acceleratorGroup'] == inst_type['spec']['acceleratorGroup']:
                     raise RuntimeError('E2E_C115_OTHER_IT names the same accelerator group; it cannot prove a cross-pool update')
-                edit('InstanceType cross-pool replacement', {'instanceType': OTHER})
+                edit('AcceleratorType cross-pool replacement', {'acceleratorType': OTHER})
             else:
-                record('SKIP', 'InstanceType cross-pool replacement', 'E2E_C115_OTHER_IT is unset; cross-pool behavior remains UNVERIFIED')
+                record('SKIP', 'AcceleratorType cross-pool replacement', 'E2E_C115_OTHER_IT is unset; cross-pool behavior remains UNVERIFIED')
             if CPU_IT:
                 cleanup()
                 MD_UID = None
@@ -391,8 +412,8 @@ try:
                 obj['metadata']['name'] = NAME
                 obj['spec']['roles'] = [{
                     'name': kind.lower(), 'kind': kind, 'replicas': 1, 'size': 1,
-                    'instanceType': CPU_IT, 'image': os.environ.get('E2E_C115_IMAGE', 'ubuntu:24.04'),
-                    'command': COMMAND, 'resources': {'accelerator': '0'},
+                    'image': os.environ.get('E2E_C115_IMAGE', 'ubuntu:24.04'),
+                    'command': COMMAND,
                     'terminationGracePeriodSeconds': 15,
                 } for kind in ('Prefill', 'Decode')]
                 created = create_owned_deployment(obj)

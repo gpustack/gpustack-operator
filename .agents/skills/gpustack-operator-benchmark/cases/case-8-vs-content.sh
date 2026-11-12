@@ -63,7 +63,7 @@ IMAGE="${VS_IMAGE:-gpustack/runner:cuda13.0-vllm0.32.0}"
 # below selects on the label the operator renders from that same name.
 ROUTER_NAME="vllm-router"
 ROUTER_IMAGE="${VS_ROUTER_IMAGE:-gpustack/llm-router:v0.3.1}"
-INSTANCE_TYPE="${VS_INSTANCE_TYPE:-gpustack--nvidia-h100-80gb-hbm3-linux-amd64}"
+INSTANCE_TYPE="${VS_ACCELERATOR_TYPE:-${VS_INSTANCE_TYPE:-gpustack--nvidia-h100-80gb-hbm3-linux-amd64}}"
 LOCAL_PORT_BASE="${LOCAL_PORT_BASE:-18300}"
 READY_TIMEOUT="${READY_TIMEOUT:-1800}"
 # THE SCALE WAIT NEEDS A BOUND. Without one the wait for the Router's worker set has no deadline
@@ -139,7 +139,7 @@ spec:
       kind: Server
       replicas: 2
       size: 1
-      instanceType: ${INSTANCE_TYPE}
+      acceleratorType: ${INSTANCE_TYPE}
       image: ${IMAGE}
       imagePullPolicy: IfNotPresent
       resources:

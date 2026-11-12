@@ -87,13 +87,13 @@ ACCELERATOR_KEY="$(kubectl get devices.worker.gpustack.ai "$NODE" -o json 2>/dev
    | select(.key | endswith(".count") or endswith(".capacity") | not)
    | select(.value == "true")
    | .key | sub("^acceleratable.feature.gpustack.ai/"; "")] | sort | .[0] // ""')"
-IT="$(kubectl get instancetypes.worker.gpustack.ai -o json 2>/dev/null | jq -r --arg key "$ACCELERATOR_KEY" '
+IT="$(kubectl get acceleratortypes.worker.gpustack.ai -o json 2>/dev/null | jq -r --arg key "$ACCELERATOR_KEY" '
   [.items[]
    | select(.spec.acceleratorGroup == $key)
    | select((.spec.inactive // false) == false and .status.phase == "Active")
    | .metadata.name] | sort | .[0] // ""')"
 if [ -z "$ACCELERATOR_KEY" ] || [ -z "$IT" ]; then
-  echo "The free accelerator Node has no matching Active InstanceType; key=${ACCELERATOR_KEY:-missing}." >&2
+  echo "The free accelerator Node has no matching Active AcceleratorType; key=${ACCELERATOR_KEY:-missing}." >&2
   exit 2
 fi
 # The whole-card resource the Pod must request, for the chosen card's own vendor. The accelerator key
@@ -117,12 +117,11 @@ case "$MANUFACTURER" in
     ;;
 esac
 
-ENTRANCE="$(kubectl get instancetype.worker.gpustack.ai "$IT" -o jsonpath='{.status.entrance}' 2>/dev/null)"
-CQ="$IT"
+ENTRANCE="$(kubectl get acceleratortype.worker.gpustack.ai "$IT" -o jsonpath='{.status.entrance}' 2>/dev/null)"
+CQ="$(kubectl -n "$NS" get localqueue.kueue.x-k8s.io "$ENTRANCE" -o jsonpath='{.spec.clusterQueue}' 2>/dev/null)"
 CQ_UID="$(kubectl get clusterqueue.kueue.x-k8s.io "$CQ" -o jsonpath='{.metadata.uid}' 2>/dev/null)"
-LQ_CQ="$(kubectl -n "$NS" get localqueue.kueue.x-k8s.io "$ENTRANCE" -o jsonpath='{.spec.clusterQueue}' 2>/dev/null)"
-if [ -z "$ENTRANCE" ] || [ -z "$CQ_UID" ] || [ "$LQ_CQ" != "$CQ" ]; then
-  echo "Accelerated scheduling chain is incomplete: IT=${IT}, entrance=${ENTRANCE:-missing}, queue=${LQ_CQ:-missing}." >&2
+if [ -z "$ENTRANCE" ] || [ -z "$CQ_UID" ] || [ -z "$CQ" ]; then
+  echo "Accelerated scheduling chain is incomplete: type=${IT}, entrance=${ENTRANCE:-missing}, queue=${CQ:-missing}." >&2
   exit 2
 fi
 
@@ -204,7 +203,7 @@ spec:
       name: ${PREFIX}-no-such-binding
   roles:
     - name: server
-      instanceType: ${IT}
+      acceleratorType: ${IT}
       replicas: 1
       size: 1
       image: ${IMAGE}

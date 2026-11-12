@@ -70,7 +70,7 @@ set -uo pipefail
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/_md-lib.sh"
 
 NS="${1:?usage: case-98.sh <NS>}"
-IT="${E2E_MD_INSTANCE_TYPE:-}"
+IT="${E2E_MD_ACCELERATOR_TYPE:-${E2E_MD_INSTANCE_TYPE:-}}"
 IMAGE="${E2E_MD_IMAGE:-registry.k8s.io/pause:3.10}"
 # shellcheck disable=SC2034 # Read by the sourced library, which shellcheck does not follow.
 SYSTEM_NS="${E2E_SYSTEM_NS:-gpustack-system}"
@@ -110,8 +110,13 @@ cleanup() {
 }
 trap cleanup EXIT
 
+AT="${E2E_MD_ACCELERATOR_TYPE:-}"
+if [ -z "$AT" ]; then
+  AT="$(kubectl get acceleratortypes.worker.gpustack.ai -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)"
+fi
 if [ -z "$IT" ]; then
   IT="$(kubectl get instancetypes.worker.gpustack.ai -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)"
+  [ -n "$IT" ] || IT="$AT"
 fi
 [ -n "$IT" ] || { echo "[case-98] no InstanceType; run case-1 first" >&2; exit 2; }
 WORKERS="$(kubectl get nodes -l '!node-role.kubernetes.io/control-plane' -o jsonpath='{range .items[*]}{.metadata.labels.kubernetes\.io/hostname}{"\n"}{end}' | sort)"
@@ -124,6 +129,12 @@ fi
 PV_NODE="$(printf '%s\n' "$WORKERS" | sed -n 2p)"
 PV_NODE_NAME="$(kubectl get nodes -l "kubernetes.io/hostname=${PV_NODE}" -o jsonpath='{.items[0].metadata.name}')"
 
+ROLE_AT_YAML=""
+[ -n "$AT" ] && ROLE_AT_YAML="
+      acceleratorType: \"${AT}\""
+ROLE_AT_INLINE=""
+[ -n "$AT" ] && ROLE_AT_INLINE="acceleratorType: \"${AT}\", "
+
 md() { # name artifact replicas [extra role yaml]
   kubectl apply -f - >/dev/null <<YAML
 apiVersion: worker.gpustack.ai/v1alpha1
@@ -133,8 +144,7 @@ spec:
   engine: {name: vLLM, image: "${IMAGE}"}
   model: {name: e2e/c98, artifactRef: {name: $2}}
   roles:
-    - name: server
-      instanceType: "${IT}"
+    - name: server${ROLE_AT_YAML}
       replicas: $3
       image: "${IMAGE}"${4:-}
 YAML
@@ -453,7 +463,7 @@ metadata: {name: ${P}-refuse, namespace: ${NS}}
 spec:
   engine: {name: vLLM, image: "${IMAGE}"}
   model: {name: e2e/c98, artifactRef: {name: ${P}-later}}
-  roles: [{name: server, instanceType: "${IT}", image: "${IMAGE}", extraArgs: ["--served-model-name", "other"]}]
+  roles: [{name: server, ${ROLE_AT_INLINE}image: "${IMAGE}", extraArgs: ["--served-model-name", "other"]}]
 YAML
 refused "a revision beside an artifact is refused" <<YAML
 apiVersion: worker.gpustack.ai/v1alpha1
@@ -462,7 +472,7 @@ metadata: {name: ${P}-refuse, namespace: ${NS}}
 spec:
   engine: {name: vLLM, image: "${IMAGE}"}
   model: {name: e2e/c98, artifactRef: {name: ${P}-later}}
-  roles: [{name: server, instanceType: "${IT}", image: "${IMAGE}", extraArgs: ["--revision", "v2"]}]
+  roles: [{name: server, ${ROLE_AT_INLINE}image: "${IMAGE}", extraArgs: ["--revision", "v2"]}]
 YAML
 refused "a volume on the weights' path is refused" <<YAML
 apiVersion: worker.gpustack.ai/v1alpha1
@@ -472,8 +482,7 @@ spec:
   engine: {name: vLLM, image: "${IMAGE}"}
   model: {name: e2e/c98, artifactRef: {name: ${P}-later}}
   roles:
-    - name: server
-      instanceType: "${IT}"
+    - name: server${ROLE_AT_YAML}
       image: "${IMAGE}"
       additionalVolumes: [{mountPath: /var/lib/gpustack, configMap: {name: x}}]
 YAML

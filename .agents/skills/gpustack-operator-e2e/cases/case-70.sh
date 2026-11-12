@@ -60,7 +60,7 @@ if ! k get namespace "$OPERATOR_NS" >/dev/null 2>&1; then
 fi
 NS="$TEST_NS"
 CASE_ID=70
-IT="${E2E_MD_INSTANCE_TYPE:-}"
+IT="${E2E_MD_ACCELERATOR_TYPE:-${E2E_MD_INSTANCE_TYPE:-}}"
 IMAGE="${E2E_MD_IMAGE:-registry.k8s.io/pause:3.10}"
 SETTLE="${E2E_MD_SETTLE:-120}"
 LIFECYCLE=case70-lifecycle
@@ -129,7 +129,7 @@ trap case70_teardown EXIT
 
 role() {
   local name="$1" kind="$2" managed="$3"
-  printf '  - name: %s\n    kind: %s\n    instanceType: %s\n    replicas: 1\n' "$name" "$kind" "$IT"
+  printf '  - name: %s\n    kind: %s\n    acceleratorType: %s\n    replicas: 1\n' "$name" "$kind" "$IT"
   printf '    image: %s\n' "$IMAGE"
   [ "$managed" = yes ] || printf '    command: ["/pause"]\n'
 }
@@ -348,12 +348,12 @@ spec:
   roles:
   - name: prefill
     kind: Prefill
-    instanceType: ${IT}
+    acceleratorType: ${IT}
     replicas: 1
     image: ${IMAGE}
   - name: decode
     kind: Decode
-    instanceType: ${IT}
+    acceleratorType: ${IT}
     replicas: 1
     image: ${IMAGE}
 YAML

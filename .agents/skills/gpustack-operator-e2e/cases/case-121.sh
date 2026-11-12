@@ -123,7 +123,7 @@ fi
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/_epd-lib.sh"
 
 MD=case121-epd
-IT="${E2E_C121_INSTANCE_TYPE:-}"
+IT="${E2E_C121_ACCELERATOR_TYPE:-${E2E_C121_INSTANCE_TYPE:-}}"
 CLAIM="${E2E_C121_CLAIM:-}"
 MOUNT="${E2E_C121_MOUNT:-/ec-cache}"
 IMAGE="${E2E_C121_IMAGE:-quay.io/gpustack/runner:cann9.1-910b-vllm0.30.0rc1-router}"
@@ -166,7 +166,7 @@ skip_row() { record SKIP "$1" "$2"; print_rows; echo "[case-121] skipped"; exit 
 command -v jq >/dev/null 2>&1 || { echo "[case-121] jq is required." >&2; exit 2; }
 
 if [ -z "$IT" ]; then
-  echo "[case-121] E2E_C121_INSTANCE_TYPE is required (an accelerated InstanceType reporting" >&2
+  echo "[case-121] E2E_C121_ACCELERATOR_TYPE / E2E_C121_INSTANCE_TYPE is required (an accelerated type reporting" >&2
   echo "          manufacturer ascend); refusing to guess a pool." >&2
   exit 2
 fi
@@ -188,14 +188,17 @@ local_queues="$(kubectl -n "$NS" get localqueue --no-headers 2>/dev/null)"
   exit 2
 }
 
-IT_JSON="$(kubectl get instancetypes.worker.gpustack.ai "$IT" -o json 2>/dev/null)"
+IT_JSON="$(kubectl get acceleratortypes.worker.gpustack.ai "$IT" -o json 2>/dev/null)"
 if [ -z "$IT_JSON" ]; then
-  echo "[case-121] InstanceType '${IT}' not found." >&2
+  IT_JSON="$(kubectl get instancetypes.worker.gpustack.ai "$IT" -o json 2>/dev/null)"
+fi
+if [ -z "$IT_JSON" ]; then
+  echo "[case-121] AcceleratorType / InstanceType '${IT}' not found." >&2
   exit 2
 fi
 MANUFACTURER="$(printf '%s' "$IT_JSON" | jq -r '.status.detail.manufacturer // ""')"
 [ "$MANUFACTURER" = ascend ] ||
-  skip "InstanceType '${IT}' reports manufacturer '${MANUFACTURER:-<none>}', and the admitted row this case runs is Ascend."
+  skip "type '${IT}' reports manufacturer '${MANUFACTURER:-<none>}', and the admitted row this case runs is Ascend."
 
 IT_PHASE="$(printf '%s' "$IT_JSON" | jq -r '.status.phase // ""')"
 FREE_EX="$(printf '%s' "$IT_JSON" | jq -r '.status.accelerator.remaining // "0"')"
@@ -310,7 +313,7 @@ spec:
   roles:
   - name: encode
     kind: Encode
-    instanceType: ${IT}
+    acceleratorType: ${IT}
     replicas: 1
     size: 1
     image: ${IMAGE}
@@ -328,7 +331,7 @@ spec:
       readOnly: true
   - name: prefill
     kind: Prefill
-    instanceType: ${IT}
+    acceleratorType: ${IT}
     replicas: 1
     size: 1
     image: ${IMAGE}
@@ -346,7 +349,7 @@ spec:
       readOnly: true
   - name: decode
     kind: Decode
-    instanceType: ${IT}
+    acceleratorType: ${IT}
     replicas: 1
     size: 1
     image: ${IMAGE}

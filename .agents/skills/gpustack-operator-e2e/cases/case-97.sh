@@ -54,7 +54,7 @@ REFERENCE="${REPO_ROOT}/pkg/modelartifact/testdata/manifest/canonical_manifest.p
 
 NS="${1:?usage: case-97.sh <NS>}"
 SYSTEM_NS="${E2E_SYSTEM_NS:-gpustack-system}"
-IT="${E2E_MD_INSTANCE_TYPE:-}"
+IT="${E2E_MD_ACCELERATOR_TYPE:-${E2E_MD_INSTANCE_TYPE:-}}"
 IMAGE="${E2E_MD_IMAGE:-registry.k8s.io/pause:3.10}"
 PRIVATE="${E2E_C97_PRIVATE:-XyX824/mam-d-private-tiny}"
 GATED="${E2E_C97_GATED:-XyX824/mam-d-gated-tiny}"
@@ -300,8 +300,10 @@ fi
 echo "== 6. revocation stops new Pods and leaves the running one =="
 pin_engine_delivery
 if [ -z "$IT" ]; then
-  IT="$(kubectl get instancetypes.worker.gpustack.ai -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)"
+  IT="$(kubectl get acceleratortypes.worker.gpustack.ai -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)"
 fi
+ROLE_AT_LINE=""
+[ -n "$IT" ] && ROLE_AT_LINE="acceleratorType: \"${IT}\", "
 kubectl apply -f - >/dev/null <<YAML
 apiVersion: worker.gpustack.ai/v1alpha1
 kind: ModelDeployment
@@ -310,7 +312,7 @@ spec:
   engine: {name: vLLM, image: "${IMAGE}"}
   model: {name: e2e/c97, artifactRef: {name: ${P}-private}}
   roles:
-    - {name: server, instanceType: "${IT}", replicas: 1, image: "${IMAGE}", command: ["/pause"]}
+    - {name: server, ${ROLE_AT_LINE}replicas: 1, image: "${IMAGE}", command: ["/pause"]}
 YAML
 uid=""
 for _ in $(seq 1 60); do

@@ -58,9 +58,9 @@ if [ -n "$REUSE_BACKEND" ] || [ -n "$REUSE_DOMAIN" ] || [ -n "$REUSE_SERVICES" ]
   REUSE=1
 fi
 
-INSTANCE_TYPE="${E2E_VB_INSTANCE_TYPE:-}"
+INSTANCE_TYPE="${E2E_VB_ACCELERATOR_TYPE:-${E2E_VB_INSTANCE_TYPE:-}}"
 if [ "$REUSE" -eq 0 ] && [ -z "$INSTANCE_TYPE" ]; then
-  echo "[case-73] input required: E2E_VB_INSTANCE_TYPE must name an accelerated InstanceType" >&2
+  echo "[case-73] input required: E2E_VB_ACCELERATOR_TYPE / E2E_VB_INSTANCE_TYPE must name an accelerated type" >&2
   echo "[case-73] backed by a pool with at least two free exclusive cards" >&2
   exit 2
 fi
@@ -217,7 +217,7 @@ spec:
     - name: server-a
       kind: Server
       replicas: 1
-      instanceType: ${INSTANCE_TYPE}
+      acceleratorType: ${INSTANCE_TYPE}
       resources: {accelerator: 1}
       extraArgs: ["--gpu-memory-utilization", "${GPU_UTIL}"]
       additionalVolumes:
@@ -228,7 +228,7 @@ spec:
     - name: server-b
       kind: Server
       replicas: 1
-      instanceType: ${INSTANCE_TYPE}
+      acceleratorType: ${INSTANCE_TYPE}
       resources: {accelerator: 1}
       extraArgs: ["--gpu-memory-utilization", "${GPU_UTIL}"]
       additionalVolumes:

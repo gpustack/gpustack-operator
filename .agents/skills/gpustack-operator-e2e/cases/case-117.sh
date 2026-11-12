@@ -261,7 +261,8 @@ fi
 # The type's entrance LocalQueue in this namespace is what routes the group into its queue; the
 # operator materializes it in every non-reserved namespace once the queue exists, so this poll is
 # part of the fixture rather than a subject.
-ENTRANCE="$(kubectl get instancetypes.worker.gpustack.ai "$IT" -o jsonpath='{.status.entrance}' 2>/dev/null)"
+ENTRANCE="$(kubectl get acceleratortypes.worker.gpustack.ai "$IT" -o jsonpath='{.status.entrance}' 2>/dev/null)"
+[ -n "$ENTRANCE" ] || ENTRANCE="$(kubectl get instancetypes.worker.gpustack.ai "$IT" -o jsonpath='{.status.entrance}' 2>/dev/null)"
 ENTRANCE_LQ=""
 for _ in $(seq 1 "$SETTLE_ROUNDS"); do
   ENTRANCE_LQ="$(kubectl -n "$NS" get localqueue "${ENTRANCE:-}" -o name 2>/dev/null)"
@@ -348,7 +349,7 @@ spec:
   roles:
     - name: encode
       kind: Encode
-      instanceType: ${IT}
+      acceleratorType: ${IT}
       replicas: 1
       image: ${IMAGE}
       additionalVolumes:
@@ -357,7 +358,7 @@ spec:
             claimName: ${CLAIM}
     - name: prefill
       kind: Prefill
-      instanceType: ${IT}
+      acceleratorType: ${IT}
       replicas: 1
       image: ${IMAGE}
       additionalVolumes:
@@ -366,7 +367,7 @@ spec:
             claimName: ${CLAIM}
     - name: decode
       kind: Decode
-      instanceType: ${IT}
+      acceleratorType: ${IT}
       replicas: 1
       image: ${IMAGE}
 YAML
@@ -695,12 +696,12 @@ spec:
   roles:
     - name: prefill
       kind: Prefill
-      instanceType: ${IT}
+      acceleratorType: ${IT}
       replicas: 1
       image: ${IMAGE}
     - name: decode
       kind: Decode
-      instanceType: ${IT}
+      acceleratorType: ${IT}
       replicas: 1
       image: ${IMAGE}
 YAML

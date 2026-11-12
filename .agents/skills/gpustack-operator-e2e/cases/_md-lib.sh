@@ -33,17 +33,17 @@ md_kubectl() {
   fi
 }
 
-# ---------------------------------------------------------------- the InstanceType a role names
+# ---------------------------------------------------------------- the AcceleratorType a role names
 
-# md_usable_instance_type prints the first InstanceType a deployment can name. A type that is
+# md_usable_accelerator_type prints the first AcceleratorType a deployment can name. A type that is
 # deleting or inactive is skipped: naming one is refused at admission, or the deployment is admitted
 # and then never scheduled.
 #
 # Every name passed as an argument is excluded. A case that authors a type of its own excludes it
 # here, because a leftover of it would otherwise be picked and measured as if it were a working one.
-md_usable_instance_type() {
+md_usable_accelerator_type() {
   local name deleting inactive skip
-  md_kubectl get instancetypes.worker.gpustack.ai \
+  md_kubectl get acceleratortypes.worker.gpustack.ai \
     -o jsonpath='{range .items[*]}{.metadata.name}|{.metadata.deletionTimestamp}|{.spec.inactive}{"\n"}{end}' \
     2>/dev/null \
     | while IFS='|' read -r name deleting inactive; do
@@ -58,12 +58,14 @@ md_usable_instance_type() {
       done
 }
 
-# md_usable_type_for prints the first InstanceType reporting the named manufacturer. The webhook
-# reads the platform the type a role names reports, so a row that needs a real type reads it by the
-# manufacturer it expects rather than by list position.
+# md_usable_instance_type prints the first usable AcceleratorType a ModelDeployment can name.
+md_usable_instance_type() {
+  md_usable_accelerator_type "$@"
+}
+
+# md_usable_type_for prints the first AcceleratorType reporting the named manufacturer.
 md_usable_type_for() {
-  local name deleting inactive manufacturer
-  md_kubectl get instancetypes.worker.gpustack.ai \
+  md_kubectl get acceleratortypes.worker.gpustack.ai \
     -o jsonpath='{range .items[*]}{.metadata.name}|{.metadata.deletionTimestamp}|{.spec.inactive}|{.status.detail.manufacturer}{"\n"}{end}' \
     2>/dev/null \
     | while IFS='|' read -r name deleting inactive manufacturer; do
@@ -78,39 +80,41 @@ md_usable_type_for() {
       done
 }
 
-# md_usable_instance_types prints every InstanceType a deployment can name.
-#
-# AN ACCELERATED TYPE WITH NO WHOLE CARD IS EXCLUDED TOO. A role that names no accelerator count is
-# defaulted to one card, and the webhook refuses a count above the type's whole-card capacity, so
-# naming a type whose pool has no card left is refused for a reason none of the rows is about.
-md_usable_instance_types() {
-  local name deleting inactive acceleratable capacity
-  md_kubectl get instancetypes.worker.gpustack.ai \
-    -o jsonpath='{range .items[*]}{.metadata.name}|{.metadata.deletionTimestamp}|{.spec.inactive}|{.spec.acceleratable}|{.status.accelerator.capacity}{"\n"}{end}' \
+# md_usable_accelerator_types prints every AcceleratorType a deployment can name.
+md_usable_accelerator_types() {
+  local name deleting inactive capacity
+  md_kubectl get acceleratortypes.worker.gpustack.ai \
+    -o jsonpath='{range .items[*]}{.metadata.name}|{.metadata.deletionTimestamp}|{.spec.inactive}|{.status.accelerator.capacity}{"\n"}{end}' \
     2>/dev/null \
-    | while IFS='|' read -r name deleting inactive acceleratable capacity; do
+    | while IFS='|' read -r name deleting inactive capacity; do
         [ -n "$name" ] || continue
         [ -z "$deleting" ] || continue
         [ "$inactive" = true ] && continue
-        if [ "$acceleratable" = true ]; then
-          case "$capacity" in "" | 0) continue ;; esac
-        fi
+        case "$capacity" in "" | 0) continue ;; esac
         echo "$name"
       done
 }
 
-# md_cq_of_it prints the ClusterQueue an InstanceType schedules into, resolved the way the operator
-# resolves it: the type's published entrance LocalQueue, then that LocalQueue's ClusterQueue.
-#
-# It prints nothing when the type names no entrance, which is the same reading a lookup of an empty
-# LocalQueue name gives.
-md_cq_of_it() {
+# md_usable_instance_types prints every AcceleratorType a deployment can name.
+md_usable_instance_types() {
+  md_usable_accelerator_types
+}
+
+# md_cq_of_at prints the ClusterQueue an AcceleratorType schedules into.
+md_cq_of_at() {
   local lq
-  lq="$(md_kubectl get instancetypes.worker.gpustack.ai "$2" \
+  lq="$(md_kubectl get acceleratortypes.worker.gpustack.ai "$2" \
     -o jsonpath='{.status.entrance}' 2>/dev/null)"
   [ -n "$lq" ] || return 0
   md_kubectl -n "$1" get localqueue.kueue.x-k8s.io "$lq" \
     -o jsonpath='{.spec.clusterQueue}' 2>/dev/null
+}
+
+# md_cq_of_it prints the ClusterQueue an AcceleratorType schedules into, resolved the way the
+# operator resolves it: the type's published entrance LocalQueue, then that LocalQueue's
+# ClusterQueue.
+md_cq_of_it() {
+  md_cq_of_at "$1" "$2"
 }
 
 # ---------------------------------------------------------------- the manifest and its roles
@@ -120,7 +124,7 @@ md_cq_of_it() {
 md_role_block() {
   printf '  - name: %s\n' "$1"
   [ -n "$2" ] && printf '    kind: %s\n' "$2"
-  printf '    instanceType: %s\n    replicas: %s\n' "$3" "$4"
+  printf '    acceleratorType: %s\n    replicas: %s\n' "$3" "$4"
   printf '    image: %s\n    command: ["/pause"]\n' "$5"
   [ -n "${6:-}" ] && printf '    size: %s\n' "$6"
   if [ -n "${7:-}" ]; then
@@ -160,15 +164,15 @@ YAML
 # carries the extra fields of that role, one per line.
 md_server_manifest() {
   local roles
-  printf -v roles '  - name: server\n    instanceType: %s\n    replicas: 1\n%s\n' "$7" "${8:-}"
+  printf -v roles '  - name: server\n    acceleratorType: %s\n    replicas: 1\n%s\n' "$7" "${8:-}"
   md_manifest "$1" "$2" "$3" "$4" "$5" "$6" "$roles"
 }
 
-# md_epd_manifest prints a manifest declaring a prefill and a decode role on one instanceType. The
+# md_epd_manifest prints a manifest declaring a prefill and a decode role on one acceleratorType. The
 # explicit image and command are plumbing, not part of any rule.
 md_epd_manifest() {
   local roles
-  printf -v roles '  - name: prefill\n    kind: Prefill\n    instanceType: %s\n    replicas: 1\n    image: %s\n    command: ["/pause"]\n  - name: decode\n    kind: Decode\n    instanceType: %s\n    replicas: 1\n    image: %s\n    command: ["/pause"]\n' \
+  printf -v roles '  - name: prefill\n    kind: Prefill\n    acceleratorType: %s\n    replicas: 1\n    image: %s\n    command: ["/pause"]\n  - name: decode\n    kind: Decode\n    acceleratorType: %s\n    replicas: 1\n    image: %s\n    command: ["/pause"]\n' \
     "$7" "$4" "$7" "$4"
   md_manifest "$1" "$2" "$3" "$4" "$5" "$6" "$roles"
 }

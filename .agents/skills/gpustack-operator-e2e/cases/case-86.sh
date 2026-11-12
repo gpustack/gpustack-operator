@@ -81,7 +81,7 @@ fi
 
 MD=case86-pd
 TP="${E2E_RP_TP:-2}"
-IT="${E2E_RP_INSTANCE_TYPE:-}"
+IT="${E2E_RP_ACCELERATOR_TYPE:-${E2E_RP_INSTANCE_TYPE:-}}"
 IMAGE="${E2E_RP_IMAGE:-quay.io/gpustack/runner:cann9.1-910b-vllm0.23.0-router}"
 ROUTER_IMAGE="${E2E_RP_ROUTER_IMAGE:-docker.io/gpustack/llm-router:v0.2.0}"
 WEIGHTS="${E2E_RP_WEIGHTS:-/data/models/model_scope/Qwen/Qwen2.5-0.5B-Instruct}"
@@ -99,14 +99,14 @@ skip() { echo "[case-86] SKIP: $1"; echo "NOTHING WAS VERIFIED"; exit 0; }
 command -v jq >/dev/null 2>&1 || { echo "[case-86] jq is required." >&2; exit 2; }
 
 if [ -z "$IT" ]; then
-  echo "[case-86] E2E_RP_INSTANCE_TYPE is required (an accelerated InstanceType with enough free" >&2
+  echo "[case-86] E2E_RP_ACCELERATOR_TYPE / E2E_RP_INSTANCE_TYPE is required (an accelerated type with enough free" >&2
   echo "          exclusive cards); refusing to guess a pool." >&2
   exit 2
 fi
 if [ -z "${E2E_RP_NODE_SSH:-}" ]; then
   echo "[case-86] E2E_RP_NODE_SSH is required: the card cross-check reads npu-smi on the" >&2
   echo "          accelerator node over SSH. Pass it inline:" >&2
-  echo "    E2E_RP_NODE_SSH=<user@host> E2E_RP_INSTANCE_TYPE=<type> bash $0 $NS" >&2
+  echo "    E2E_RP_NODE_SSH=<user@host> E2E_RP_ACCELERATOR_TYPE=<type> bash $0 $NS" >&2
   exit 2
 fi
 
@@ -121,9 +121,12 @@ if ! node_ssh true >/dev/null 2>&1; then
   exit 2
 fi
 
-IT_JSON="$(kubectl get instancetypes.worker.gpustack.ai "$IT" -o json 2>/dev/null)"
+IT_JSON="$(kubectl get acceleratortypes.worker.gpustack.ai "$IT" -o json 2>/dev/null)"
 if [ -z "$IT_JSON" ]; then
-  echo "[case-86] InstanceType '${IT}' not found." >&2
+  IT_JSON="$(kubectl get instancetypes.worker.gpustack.ai "$IT" -o json 2>/dev/null)"
+fi
+if [ -z "$IT_JSON" ]; then
+  echo "[case-86] AcceleratorType / InstanceType '${IT}' not found." >&2
   exit 2
 fi
 IT_PHASE="$(printf '%s' "$IT_JSON" | jq -r '.status.phase // ""')"
@@ -193,7 +196,7 @@ spec:
   roles:
   - name: prefill
     kind: Prefill
-    instanceType: ${IT}
+    acceleratorType: ${IT}
     replicas: 1
     size: 1
     image: ${IMAGE}
@@ -212,7 +215,7 @@ spec:
       readOnly: true
   - name: decode
     kind: Decode
-    instanceType: ${IT}
+    acceleratorType: ${IT}
     replicas: 1
     size: 1
     image: ${IMAGE}

@@ -265,18 +265,21 @@ if [ -z "$MD" ]; then
     ENV_REASON="E2E_C129_WEIGHTS is unset, so the engine would have no weights to serve"
   fi
   if [ -z "$ENV_REASON" ]; then
-    IT="$(kubectl get instancetypes.worker.gpustack.ai -o jsonpath='{range .items[*]}{.metadata.name}|{.metadata.deletionTimestamp}|{.spec.inactive}|{.status.detail.manufacturer}{"\n"}{end}' \
-      2>/dev/null \
-      | while IFS='|' read -r name deleting inactive manufacturer; do
-        [ -n "$name" ] || continue
-        [ -z "$deleting" ] || continue
-        [ "$inactive" = true ] && continue
-        case "$manufacturer" in
-          ascend | nvidia | amd) echo "$name"; break ;;
-        esac
-      done)"
+    IT="${E2E_MD_ACCELERATOR_TYPE:-${E2E_MD_INSTANCE_TYPE:-}}"
     if [ -z "$IT" ]; then
-      ENV_REASON="no usable InstanceType reports an accelerated platform (ascend, nvidia, amd), so a target built by this case would never be admitted"
+      IT="$(kubectl get acceleratortypes.worker.gpustack.ai -o jsonpath='{range .items[*]}{.metadata.name}|{.metadata.deletionTimestamp}|{.spec.inactive}|{.status.detail.manufacturer}{"\n"}{end}' \
+        2>/dev/null \
+        | while IFS='|' read -r name deleting inactive manufacturer; do
+          [ -n "$name" ] || continue
+          [ -z "$deleting" ] || continue
+          [ "$inactive" = true ] && continue
+          case "$manufacturer" in
+            ascend | nvidia | amd) echo "$name"; break ;;
+          esac
+        done)"
+    fi
+    if [ -z "$IT" ]; then
+      ENV_REASON="no usable AcceleratorType reports an accelerated platform (ascend, nvidia, amd), so a target built by this case would never be admitted"
     fi
   fi
   # A target the case builds serves the model it mounts, so the mount path is the served name.
@@ -299,7 +302,7 @@ spec:
       kind: Server
       replicas: 1
       size: 1
-      instanceType: ${IT}
+      acceleratorType: ${IT}
       image: ${ENGINE_IMAGE}
       imagePullPolicy: IfNotPresent
       resources:

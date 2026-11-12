@@ -305,7 +305,7 @@ def fixture(root, algorithm="TokenThroughput"):
             "model": {"name": "local-model", "artifactRef": {"name": "local-model"}},
             "engine": {"name": "vLLM", "image": "example.invalid/qualified-engine@sha256:" + "a" * 64},
             "roles": [{"name": "server", "kind": "Server", "replicas": 1,
-                       "size": 1, "instanceType": "local-small", "resources": {"accelerator": "1"}}],
+                       "size": 1, "acceleratorType": "local-small", "resources": {"accelerator": "1"}}],
         },
     }
     throughput = {

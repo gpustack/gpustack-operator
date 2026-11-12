@@ -129,7 +129,7 @@ fi
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/_epd-lib.sh"
 
 MD=case120-epd
-IT="${E2E_C120_INSTANCE_TYPE:-}"
+IT="${E2E_C120_ACCELERATOR_TYPE:-${E2E_C120_INSTANCE_TYPE:-}}"
 # The engine image default depends on the platform the named InstanceType reports, so the value is
 # resolved after that check below rather than here.
 IMAGE="${E2E_C120_IMAGE:-}"
@@ -170,7 +170,7 @@ skip() { echo "[case-120] SKIP: $1"; echo "NOTHING WAS VERIFIED"; exit 0; }
 command -v jq >/dev/null 2>&1 || { echo "[case-120] jq is required." >&2; exit 2; }
 
 if [ -z "$IT" ]; then
-  echo "[case-120] E2E_C120_INSTANCE_TYPE is required (an accelerated InstanceType reporting" >&2
+  echo "[case-120] E2E_C120_ACCELERATOR_TYPE / E2E_C120_INSTANCE_TYPE is required (an accelerated type reporting" >&2
   echo "          manufacturer nvidia or amd); refusing to guess a pool." >&2
   exit 2
 fi
@@ -187,17 +187,20 @@ local_queues="$(kubectl -n "$NS" get localqueue --no-headers 2>/dev/null)"
 }
 
 # The manufacturer check is the platform the MATRIX admits, read from the object rather than
-# assumed from the variable name: an InstanceType whose manufacturer is neither nvidia nor amd is
+# assumed from the variable name: an AcceleratorType / InstanceType whose manufacturer is neither nvidia nor amd is
 # refused at admission by the very rows this case exercises, and every row below would then read a
 # refusal as a failure of the operator.
-IT_JSON="$(kubectl get instancetypes.worker.gpustack.ai "$IT" -o json 2>/dev/null)"
+IT_JSON="$(kubectl get acceleratortypes.worker.gpustack.ai "$IT" -o json 2>/dev/null)"
 if [ -z "$IT_JSON" ]; then
-  echo "[case-120] InstanceType '${IT}' not found." >&2
+  IT_JSON="$(kubectl get instancetypes.worker.gpustack.ai "$IT" -o json 2>/dev/null)"
+fi
+if [ -z "$IT_JSON" ]; then
+  echo "[case-120] AcceleratorType / InstanceType '${IT}' not found." >&2
   exit 2
 fi
 MANUFACTURER="$(printf '%s' "$IT_JSON" | jq -r '.status.detail.manufacturer // ""')"
 [ "$MANUFACTURER" = nvidia ] || [ "$MANUFACTURER" = amd ] ||
-  skip "InstanceType '${IT}' reports manufacturer '${MANUFACTURER:-<none>}', and the admitted rows this case runs are NVIDIA CUDA or AMD ROCm."
+  skip "type '${IT}' reports manufacturer '${MANUFACTURER:-<none>}', and the admitted rows this case runs are NVIDIA CUDA or AMD ROCm."
 
 # The engine image defaults per platform: each admitted network row assembles its own runner tag.
 if [ -z "$IMAGE" ]; then
@@ -306,7 +309,7 @@ spec:
   roles:
   - name: encode
     kind: Encode
-    instanceType: ${IT}
+    acceleratorType: ${IT}
     replicas: 1
     size: 1
     image: ${IMAGE}
@@ -321,7 +324,7 @@ spec:
       readOnly: true
   - name: prefill
     kind: Prefill
-    instanceType: ${IT}
+    acceleratorType: ${IT}
     replicas: 1
     size: 1
     image: ${IMAGE}
@@ -336,7 +339,7 @@ spec:
       readOnly: true
   - name: decode
     kind: Decode
-    instanceType: ${IT}
+    acceleratorType: ${IT}
     replicas: 1
     size: 1
     image: ${IMAGE}

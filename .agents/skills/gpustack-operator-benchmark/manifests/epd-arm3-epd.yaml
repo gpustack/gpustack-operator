@@ -18,7 +18,7 @@ spec:
       kind: Encode
       replicas: 1
       size: 1
-      instanceType: bench-gpu
+      acceleratorType: bench-gpu
       image: gpustack/runner:cuda13.0-vllm0.30.0
       imagePullPolicy: IfNotPresent
       resources:
@@ -32,7 +32,7 @@ spec:
       kind: Prefill
       replicas: 1
       size: 1
-      instanceType: bench-gpu
+      acceleratorType: bench-gpu
       image: gpustack/runner:cuda13.0-vllm0.30.0
       imagePullPolicy: IfNotPresent
       resources:
@@ -48,7 +48,7 @@ spec:
       kind: Decode
       replicas: 1
       size: 1
-      instanceType: bench-gpu
+      acceleratorType: bench-gpu
       image: gpustack/runner:cuda13.0-vllm0.30.0
       imagePullPolicy: IfNotPresent
       resources:

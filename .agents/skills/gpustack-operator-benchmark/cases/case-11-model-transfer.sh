@@ -78,7 +78,7 @@ export PATH="${REPO}/.agents/skills/_e2e-lib/scripts/kubectl-shim:${PATH}"
 NS="${BENCH_NS:-gpustack-bench}"
 OUT="${1:-${REPO}/.claude/reports/$(date +%F)-benchmark/model-transfer}"
 ENGINE="${MT_ENGINE:-vLLM}"
-INSTANCE_TYPE="${MT_INSTANCE_TYPE:?Set MT_INSTANCE_TYPE for the selected Ascend or NVIDIA pool}"
+INSTANCE_TYPE="${MT_ACCELERATOR_TYPE:-${MT_INSTANCE_TYPE:?Set MT_ACCELERATOR_TYPE or MT_INSTANCE_TYPE for the selected Ascend or NVIDIA pool}}"
 case "${INSTANCE_TYPE}" in
   *nvidia*) VENDOR=NVIDIA ;;
   *ascend*) VENDOR=Ascend ;;
@@ -315,7 +315,7 @@ spec:
       replicas: ${init_replicas}
       size: 1
       startupTimeoutSeconds: 1800
-      instanceType: ${INSTANCE_TYPE}
+      acceleratorType: ${INSTANCE_TYPE}
       image: ${IMAGE}
       imagePullPolicy: IfNotPresent
       resources:

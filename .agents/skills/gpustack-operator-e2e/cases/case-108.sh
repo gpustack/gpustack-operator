@@ -284,15 +284,14 @@ if [ "$ANCHOR_OK" = 1 ]; then
   settings_settle
 
   echo "== Engine delivery is refused for anchored artifacts =="
-  IT="$(kubectl get instancetypes.worker.gpustack.ai -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)"
-  if [ -z "$IT" ]; then
-    record SKIP "engine block" "no InstanceType exists to reference; the render is unit-covered"
-  else
-    setting_set model-artifact-delivery-mode Engine >/dev/null
-    settings_settle
-    for pair in "${P114}-match:${P114}-md-match:cannot anchor-verify" "${P114}-expected:${P114}-md-expected:no resolved commit"; do
-      ART="${pair%%:*}"; REST="${pair#*:}"; MD="${REST%%:*}"; WANT="${REST#*:}"
-      kubectl apply -f - >/dev/null <<YAML
+  IT="$(kubectl get acceleratortypes.worker.gpustack.ai -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)"
+  AT_LINE=""
+  [ -n "$IT" ] && AT_LINE="      acceleratorType: ${IT}"
+  setting_set model-artifact-delivery-mode Engine >/dev/null
+  settings_settle
+  for pair in "${P114}-match:${P114}-md-match:cannot anchor-verify" "${P114}-expected:${P114}-md-expected:no resolved commit"; do
+    ART="${pair%%:*}"; REST="${pair#*:}"; MD="${REST%%:*}"; WANT="${REST#*:}"
+    kubectl apply -f - >/dev/null <<YAML
 apiVersion: worker.gpustack.ai/v1alpha1
 kind: ModelDeployment
 metadata: {name: ${MD}, namespace: ${NS}}
@@ -301,8 +300,8 @@ spec:
   model: {name: qwen, artifactRef: {name: ${ART}}}
   roles:
     - name: server
-      instanceType: ${IT}
-      image: ${MH_PYTHON}
+${AT_LINE:+$AT_LINE
+}      image: ${MH_PYTHON}
       replicas: 1
 YAML
       REASON=""
@@ -321,9 +320,8 @@ YAML
       fi
       kubectl -n "$NS" delete modeldeployments.worker.gpustack.ai "$MD" --ignore-not-found >/dev/null 2>&1
     done
-    setting_set model-artifact-delivery-mode Node >/dev/null
-    settings_settle
-  fi
+  setting_set model-artifact-delivery-mode Node >/dev/null
+  settings_settle
 
   echo "== the Expected identity is served from the peer =="
   if [ "${#WORKERS[@]}" -lt 2 ]; then

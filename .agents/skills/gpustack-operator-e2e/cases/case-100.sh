@@ -35,7 +35,7 @@ set -uo pipefail
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/_rows-lib.sh"
 
 NS="${1:?usage: case-100.sh <NS>}"
-IT="${E2E_C100_IT:?set E2E_C100_IT to an accelerator InstanceType}"
+IT="${E2E_C100_AT:-${E2E_C100_IT:?set E2E_C100_AT or E2E_C100_IT to an accelerator type}}"
 MEMBER_NODE="${E2E_C100_MEMBER_NODE:?set E2E_C100_MEMBER_NODE to the hostname the store member runs on}"
 READY_BOUND="${E2E_C100_READY_BOUND:-1200}"
 # The engine image every role falls back to. This case reads which prompts the store serves, not
@@ -146,7 +146,7 @@ spec:
   model: {name: ${SERVED}, artifactRef: {name: $2}}
   kvCache: {poolRef: {name: ${P}-shared}}
   roles:
-    - {name: server, instanceType: "${IT}", replicas: 1, resources: {accelerator: 1}, extraArgs: ["--max-model-len", "2048", "--gpu-memory-utilization", "0.3"]}
+    - {name: server, acceleratorType: "${IT}", replicas: 1, resources: {accelerator: 1}, extraArgs: ["--max-model-len", "2048", "--gpu-memory-utilization", "0.3"]}
 YAML
 }
 

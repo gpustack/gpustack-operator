@@ -157,7 +157,8 @@ fi
 
 # The entrance LocalQueue in this namespace routes the groups into the queue; the operator
 # materializes it in every non-reserved namespace once the queue exists.
-ENTRANCE="$(kubectl get instancetypes.worker.gpustack.ai "$IT" -o jsonpath='{.status.entrance}' 2>/dev/null)"
+ENTRANCE="$(kubectl get acceleratortypes.worker.gpustack.ai "$IT" -o jsonpath='{.status.entrance}' 2>/dev/null)"
+[ -n "$ENTRANCE" ] || ENTRANCE="$(kubectl get instancetypes.worker.gpustack.ai "$IT" -o jsonpath='{.status.entrance}' 2>/dev/null)"
 for _ in $(seq 1 "$SETTLE_ROUNDS"); do
   [ -n "$(kubectl -n "$NS" get localqueue "$ENTRANCE" -o name 2>/dev/null)" ] && break
   sleep 5
@@ -202,7 +203,7 @@ spec:
     name: Qwen/Qwen2.5-0.5B-Instruct
   roles:
     - name: bulk
-      instanceType: ${IT}
+      acceleratorType: ${IT}
       replicas: ${2}
       image: ${IMAGE}
       command: ["/pause"]
@@ -228,19 +229,19 @@ spec:
   roles:
     - name: encode
       kind: Encode
-      instanceType: ${IT}
+      acceleratorType: ${IT}
       replicas: 1
       image: ${IMAGE}
 ${EC_VOLUMES}
     - name: prefill
       kind: Prefill
-      instanceType: ${IT}
+      acceleratorType: ${IT}
       replicas: 1
       image: ${IMAGE}
 ${EC_VOLUMES}
     - name: decode
       kind: Decode
-      instanceType: ${IT}
+      acceleratorType: ${IT}
       replicas: 1
       image: ${IMAGE}
 YAML

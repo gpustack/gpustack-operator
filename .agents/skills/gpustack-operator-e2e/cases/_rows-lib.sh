@@ -67,6 +67,45 @@ print_rows() {
   done
 }
 
+# cq_of_instancetype <ns> <instancetype> prints the ClusterQueue an InstanceType schedules into,
+# resolved via status.entrance (or schedule.gpustack.ai/queue-entrance) -> LocalQueue.spec.clusterQueue
+# in non-system namespaces, or by matching FormatLocalQueueName(cq.Name) across ClusterQueues when
+# running in a reserved system namespace (where NodeQueueEntranceReconciler skips LocalQueue creation).
+cq_of_instancetype() {
+  local ns="$1" it="$2" lq q
+  lq="$(kubectl get instancetypes.worker.gpustack.ai "$it" -o jsonpath='{.status.entrance}' 2>/dev/null)"
+  if [ -z "$lq" ]; then
+    lq="$(kubectl get instancetypes.worker.gpustack.ai "$it" -o jsonpath='{.metadata.labels.schedule\.gpustack\.ai/queue-entrance}' 2>/dev/null)"
+  fi
+  if [ -n "$lq" ]; then
+    q="$(kubectl -n "$ns" get localqueue.kueue.x-k8s.io "$lq" -o jsonpath='{.spec.clusterQueue}' 2>/dev/null)"
+    if [ -n "$q" ]; then
+      echo "$q"
+      return 0
+    fi
+    q="$(kubectl get clusterqueues.kueue.x-k8s.io -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}' 2>/dev/null | python3 -c "
+import sys
+target = sys.argv[1]
+def fnv64a(s):
+    h = 0xcbf29ce484222325
+    for b in s.encode('utf-8'):
+        h ^= b
+        h = (h * 0x100000001b3) & 0xffffffffffffffff
+    return f'gpustack-fnv64-{h:016x}'
+for line in sys.stdin:
+    name = line.strip()
+    if name and fnv64a(name) == target:
+        print(name)
+        break
+" "$lq" 2>/dev/null)"
+    if [ -n "$q" ]; then
+      echo "$q"
+      return 0
+    fi
+  fi
+  echo "$it"
+}
+
 # wait_for <kind> <name> <path> <want> [secs] [ns] polls one jsonpath until it reads what is wanted,
 # and prints the LAST value seen, so a timeout says what the object was doing rather than only that
 # it timed out.

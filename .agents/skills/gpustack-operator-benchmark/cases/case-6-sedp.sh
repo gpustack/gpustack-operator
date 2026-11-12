@@ -66,7 +66,7 @@ ARTIFACT="${SEDP_ARTIFACT:-qwen3-8b}"
 IMAGE="${SEDP_IMAGE:-gpustack/runner:cuda13.0-sglang0.5.22}"
 ROUTER_IMAGE="${SEDP_ROUTER_IMAGE:-gpustack/llm-router:v0.3.1}"
 ROUTER_NAME="${SEDP_ROUTER_NAME:-sglang-gateway}"
-INSTANCE_TYPE="${SEDP_INSTANCE_TYPE:-gpustack--nvidia-h100-80gb-hbm3-linux-amd64}"
+INSTANCE_TYPE="${SEDP_ACCELERATOR_TYPE:-${SEDP_INSTANCE_TYPE:-gpustack--nvidia-h100-80gb-hbm3-linux-amd64}}"
 LOCAL_PORT_BASE="${LOCAL_PORT_BASE:-18100}"
 READY_TIMEOUT="${READY_TIMEOUT:-1800}"
 SCALE_TIMEOUT="${SCALE_TIMEOUT:-900}"
@@ -161,7 +161,7 @@ spec:
       kind: Server
       replicas: 1
       size: 2
-      instanceType: ${INSTANCE_TYPE}
+      acceleratorType: ${INSTANCE_TYPE}
       image: ${IMAGE}
       imagePullPolicy: IfNotPresent
       resources:

@@ -184,7 +184,7 @@ arm_roles() {
   case "$1" in
     vllm-epd-predictive)
       local cap
-      cap="$(kubectl get instancetype.worker.gpustack.ai -o jsonpath='{.items[?(@.spec.acceleratable==true)].status.accelerator.capacity}' 2>/dev/null | awk '{print $1}')"
+      cap="$(kubectl get acceleratortype.worker.gpustack.ai -o jsonpath='{.items[0].status.accelerator.capacity}' 2>/dev/null | awk '{print $1}')"
       if [ "${cap:-8}" -lt 6 ] 2>/dev/null; then
         cat <<'ROLES'
     - name: encode
@@ -374,13 +374,14 @@ deploy_arm() { # <manifest> <deploy>
 # in the file is rewritten on the way in, because kubectl refuses an object whose namespace
 # differs from the one it was told to use.
 apply_manifest() { # <manifest>
-  local inst_type="${BENCH_QUAL_INSTANCE_TYPE:-bench-gpu}"
-  if ! kubectl get instancetype.worker.gpustack.ai "$inst_type" >/dev/null 2>&1; then
-    inst_type="$(kubectl get instancetype.worker.gpustack.ai -o jsonpath='{.items[?(@.spec.acceleratable==true)].metadata.name}' 2>/dev/null | awk '{print $1}')"
+  local inst_type="${BENCH_QUAL_ACCELERATOR_TYPE:-${BENCH_QUAL_INSTANCE_TYPE:-bench-gpu}}"
+  if ! kubectl get acceleratortype.worker.gpustack.ai "$inst_type" >/dev/null 2>&1; then
+    inst_type="$(kubectl get acceleratortype.worker.gpustack.ai -o jsonpath='{.items[0].metadata.name}' 2>/dev/null | awk '{print $1}')"
     inst_type="${inst_type:-bench-gpu}"
   fi
   sed -e "s/^  namespace: gpustack-bench$/  namespace: ${NS}/" \
-      -e "s/^      instanceType: bench-gpu$/      instanceType: ${inst_type}/" \
+      -e "s/^      instanceType: bench-gpu$/      acceleratorType: ${inst_type}/" \
+      -e "s/^      acceleratorType: bench-gpu$/      acceleratorType: ${inst_type}/" \
       "${SKILL_DIR}/manifests/$1" | kubectl apply -f - >/dev/null 2>&1
 }
 

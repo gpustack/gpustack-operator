@@ -22,7 +22,7 @@ spec:
       kind: Server
       replicas: 1
       size: 4
-      instanceType: bench-gpu
+      acceleratorType: bench-gpu
       image: gpustack/runner:cuda13.0-vllm0.30.0
       imagePullPolicy: IfNotPresent
       resources:

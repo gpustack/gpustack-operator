@@ -57,7 +57,7 @@ CASES_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 NS="${1:?usage: case-107.sh <NS>}"
 MDNS="${NS}-c107"
 P=c107
-IT="${E2E_MD_INSTANCE_TYPE:-}"
+IT="${E2E_MD_ACCELERATOR_TYPE:-${E2E_MD_INSTANCE_TYPE:-}}"
 IMAGE="${E2E_MD_IMAGE:-registry.k8s.io/pause:3.10}"
 TRIALS="${E2E_C107_TRIALS:-20}"
 FULL_TRIALS="${E2E_C107_FULL_TRIALS:-10}"
@@ -99,6 +99,8 @@ YAML
 
 # md NAME ARTIFACT [SIZE]: a deployment of one replica of SIZE members (1) mounting ARTIFACT.
 md() {
+  local at=""
+  [ -n "$IT" ] && at="acceleratorType: \"${IT}\", "
   kubectl apply -f - >/dev/null <<YAML
 apiVersion: worker.gpustack.ai/v1alpha1
 kind: ModelDeployment
@@ -107,7 +109,7 @@ spec:
   engine: {name: vLLM, image: "${IMAGE}"}
   model: {name: e2e/c107, artifactRef: {name: $2}}
   roles:
-    - {name: server, instanceType: "${IT}", replicas: 1, size: ${3:-1}, image: "${IMAGE}", command: ["/pause"]}
+    - {name: server, ${at}replicas: 1, size: ${3:-1}, resources: {cpu: "1"}, image: "${IMAGE}", command: ["/pause"]}
 YAML
 }
 
@@ -142,13 +144,14 @@ bound_node() {
   printf '%s' "$n"
 }
 
-# admission BOUND: polls the namespace's Workloads until one reads QuotaReserved=True, printing
-# "<seconds> <whether any read False on the way>".
+# admission BOUND: polls the namespace's Workloads (or unqueued ModelDeployments when CPU-only)
+# until one reads QuotaReserved=True, printing "<seconds> <whether any read False on the way>".
 admission() {
-  local start seen_false=no states
+  local start seen_false=no states kind=workloads.kueue.x-k8s.io
+  [ -z "$IT" ] && kind=modeldeployments.worker.gpustack.ai
   start="$(date +%s)"
   while [ $(( $(date +%s) - start )) -lt "$1" ]; do
-    states="$(kubectl -n "$MDNS" get workloads.kueue.x-k8s.io \
+    states="$(kubectl -n "$MDNS" get "$kind" \
       -o jsonpath="{range .items[*]}{.status.conditions[?(@.type=='QuotaReserved')].status}{' '}{end}" 2>/dev/null)"
     case " $states " in *" False "*) seen_false=yes ;; esac
     case " $states " in *" True "*) break ;; esac
@@ -228,8 +231,11 @@ if [ "$BEST_N" -ge 2 ] && [ "$BEST_N" -lt "${#POOL[@]}" ]; then
 fi
 [ "${#POOL[@]}" -ge 2 ] || { echo "[case-107] needs two workers of one CPU model running the plugin; NOTHING WAS VERIFIED"; exit 2; }
 K="${#POOL[@]}"
-[ -n "$IT" ] || IT="$(kubectl get instancetypes.worker.gpustack.ai -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)"
-[ -n "$IT" ] || { echo "[case-107] no InstanceType; run case-1 first; NOTHING WAS VERIFIED" >&2; exit 2; }
+if [ -z "$IT" ]; then
+  IT="$(kubectl get acceleratortypes.worker.gpustack.ai -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)"
+fi
+INST_TYPE="${E2E_MD_INSTANCE_TYPE:-$(kubectl get instancetypes.worker.gpustack.ai -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)}"
+[ -n "$INST_TYPE" ] || { echo "[case-107] no InstanceType; run case-1 first; NOTHING WAS VERIFIED" >&2; exit 2; }
 kubectl create namespace "$MDNS" --dry-run=client -o yaml | kubectl apply -f - >/dev/null
 for _ in $(seq 1 30); do [ -n "$(kubectl -n "$MDNS" get localqueues -o name 2>/dev/null)" ] && break; sleep 2; done
 
@@ -408,7 +414,7 @@ apiVersion: worker.gpustack.ai/v1alpha1
 kind: Instance
 metadata: {name: ${P}-inst, namespace: ${MDNS}}
 spec:
-  type: "${IT}"
+  type: "${INST_TYPE}"
   image: "${IMAGE}"
   resources: {cpu: "1", ram: 2Gi, localStorage: 1Gi}
   volume: {ephemeral: {capacity: 1Gi}}

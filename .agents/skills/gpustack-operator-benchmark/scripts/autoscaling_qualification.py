@@ -98,8 +98,12 @@ def namespace_manifest(name=None):
     }
 
 
-def instance_type():
-    return os.environ.get("BENCH_QUAL_INSTANCE_TYPE", f"gpustack--{HARDWARE}-linux-amd64")
+def accelerator_type():
+    # Keep BENCH_QUAL_INSTANCE_TYPE as a legacy CLI/env fallback alias for local runs.
+    return os.environ.get(
+        "BENCH_QUAL_ACCELERATOR_TYPE",
+        os.environ.get("BENCH_QUAL_INSTANCE_TYPE", f"gpustack--{HARDWARE}-linux-amd64"),
+    )
 
 
 # --------------------------------------------------------------- manifest builders
@@ -169,7 +173,7 @@ def model_prefetch(name, placement_type):
         "spec": {
             "artifactRef": {"name": name},
             "bindingRef": {"name": MODEL_STORE},
-            "placement": {"instanceTypes": [placement_type]},
+            "placement": {"acceleratorTypes": [placement_type]},
             "minReady": 0,
         },
     }
@@ -238,7 +242,7 @@ def server_deployment(name, artifact, model_path, gpus_per_replica, image):
         "kind": "Server",
         "replicas": 1,
         "size": 1,
-        "instanceType": instance_type(),
+        "acceleratorType": accelerator_type(),
         "image": image,
         "imagePullPolicy": "IfNotPresent",
         "resources": {"accelerator": str(gpus_per_replica)},
@@ -1381,7 +1385,7 @@ def suite_prepare(cluster, out_dir, options):
     for model_name in MODELS:
         try:
             cluster.apply(model_artifact(model_name))
-            cluster.apply(model_prefetch(model_name, instance_type()))
+            cluster.apply(model_prefetch(model_name, accelerator_type()))
         except (ClusterError, OSError) as error:
             failures.append(f"model {model_name}: {error}")
             record["models"][model_name] = {"repository": MODELS[model_name]["repository"], "ready": False, "error": str(error)}

@@ -83,7 +83,7 @@ ARTIFACT="${SPD_ARTIFACT:-qwen3-8b}"
 IMAGE="${SPD_IMAGE:-gpustack/runner:cuda13.0-sglang0.5.22}"
 ROUTER_IMAGE="${SPD_ROUTER_IMAGE:-gpustack/llm-router:v0.3.1}"
 ROUTER_NAME="${SPD_ROUTER_NAME:-sglang-gateway}"
-INSTANCE_TYPE="${SPD_INSTANCE_TYPE:-bench-gpu}"
+INSTANCE_TYPE="${SPD_ACCELERATOR_TYPE:-${SPD_INSTANCE_TYPE:-bench-gpu}}"
 LOCAL_PORT_BASE="${LOCAL_PORT_BASE:-18500}"
 READY_TIMEOUT="${READY_TIMEOUT:-1800}"
 SCALE_TIMEOUT="${SCALE_TIMEOUT:-900}"
@@ -166,7 +166,7 @@ spec:
       kind: Prefill
       replicas: 1
       size: 1
-      instanceType: ${INSTANCE_TYPE}
+      acceleratorType: ${INSTANCE_TYPE}
       image: ${IMAGE}
       imagePullPolicy: IfNotPresent
       # An SGLang half takes 26 to 28 s to exit after its delete, so the grace has to carry that
@@ -185,7 +185,7 @@ spec:
       kind: Decode
       replicas: 1
       size: 1
-      instanceType: ${INSTANCE_TYPE}
+      acceleratorType: ${INSTANCE_TYPE}
       image: ${IMAGE}
       imagePullPolicy: IfNotPresent
       terminationGracePeriodSeconds: 60

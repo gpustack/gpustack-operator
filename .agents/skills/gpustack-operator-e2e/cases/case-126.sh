@@ -123,7 +123,7 @@ done
 # The SGLang rows name the InstanceType the caller picked, and nothing else: they assert an
 # admission rule about the role's shape, not a scheduling one, so a name that resolves to nothing
 # is as good as a real type and never turns the row into a scheduling question.
-SGLANG_IT="${E2E_MD_INSTANCE_TYPE:-unset}"
+SGLANG_IT="${E2E_MD_ACCELERATOR_TYPE:-${E2E_MD_INSTANCE_TYPE:-unset}}"
 
 # ---------------------------------------------------------------- the manifests' parts
 
@@ -143,11 +143,11 @@ ENGINE_SGLANG="    name: SGLang
 # reader might think substitutes for the engine default, so their agreement is evidence.
 ROLE_PLAIN="  - name: decode
     kind: Decode
-    instanceType: ${IT:-case126-any}"
+    acceleratorType: ${IT:-case126-any}"
 
 ROLE_WITH_IMAGE="  - name: decode
     kind: Decode
-    instanceType: ${IT:-case126-any}
+    acceleratorType: ${IT:-case126-any}
     image: ${IMAGE}"
 
 # ROLE_PINNED is the no-patch shape: pinning resources.accelerator: "1" leaves the mutating
@@ -155,7 +155,7 @@ ROLE_WITH_IMAGE="  - name: decode
 # written. That is the shape whose refusal wording differs from the patched one.
 ROLE_PINNED="  - name: decode
     kind: Decode
-    instanceType: ${IT:-case126-any}
+    acceleratorType: ${IT:-case126-any}
     resources:
       accelerator: \"1\""
 
@@ -174,7 +174,7 @@ sglang_role() { # attention-width node-count env-block
     kind: Server
     replicas: 1
     size: 2
-    instanceType: ${SGLANG_IT}
+    acceleratorType: ${SGLANG_IT}
     image: ${IMAGE}
     extraArgs:
       - --tp-size

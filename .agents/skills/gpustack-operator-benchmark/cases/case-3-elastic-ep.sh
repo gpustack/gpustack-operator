@@ -40,7 +40,7 @@ OUT="${1:-${REPO}/.claude/reports/$(date +%F)-benchmark/elastic-ep}"
 LOCAL_PORT="${LOCAL_PORT:-18010}"
 PF_PID=""
 WATCH_PID=""
-INSTANCE_TYPE="${EEP_INSTANCE_TYPE:-gpustack--nvidia-h100-80gb-hbm3-linux-amd64}"
+INSTANCE_TYPE="${EEP_ACCELERATOR_TYPE:-${EEP_INSTANCE_TYPE:-gpustack--nvidia-h100-80gb-hbm3-linux-amd64}}"
 ELASTIC_WIDTH_START="${EEP_WIDTH_START:-2}"
 ELASTIC_WIDTH_TARGET="${EEP_WIDTH_TARGET:-4}"
 MD_RESOURCE="modeldeployments.v1alpha1.worker.gpustack.ai"
@@ -79,7 +79,8 @@ write_manifest() {
     return 1
   fi
   sed -e "s|^  namespace: gpustack-bench$|  namespace: ${NS}|" \
-      -e "s|^      instanceType: bench-gpu$|      instanceType: ${INSTANCE_TYPE}|" \
+      -e "s|^      instanceType: bench-gpu$|      acceleratorType: ${INSTANCE_TYPE}|" \
+      -e "s|^      acceleratorType: bench-gpu$|      acceleratorType: ${INSTANCE_TYPE}|" \
       "$src" > "${OUT}/elastic-ep.yaml"
   {
     echo "instance_type=${INSTANCE_TYPE}"

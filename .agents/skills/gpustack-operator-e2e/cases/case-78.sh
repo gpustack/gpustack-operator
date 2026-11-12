@@ -105,7 +105,7 @@ MD_SIZE=case78-size
 ROLE=server
 SIZE=2
 BINDING="${E2E_MD_BINDING:-case78-no-such-binding}"
-IT="${E2E_MD_INSTANCE_TYPE:-}"
+IT="${E2E_MD_ACCELERATOR_TYPE:-${E2E_MD_INSTANCE_TYPE:-}}"
 # The placeholder image of the single-member legs, and of the group leg unless it is overridden:
 # that leg execs into a member, and pause has no shell.
 IMAGE="${E2E_MD_IMAGE:-registry.k8s.io/pause:3.10}"
@@ -523,7 +523,7 @@ spec:
   roles:
   - name: server
     kind: Server
-    instanceType: ${IT}
+    acceleratorType: ${IT}
     replicas: 2
     image: ${IMAGE}
     command: ["/pause"]
@@ -859,7 +859,7 @@ spec:
   roles:
   - name: ${ROLE}
     kind: Server
-    instanceType: ${IT}
+    acceleratorType: ${IT}
     replicas: 1
     size: ${SIZE}
     image: ${MEMBER_IMAGE}
@@ -1021,7 +1021,7 @@ if [ "$GROUP_SETTLED" = yes ]; then
 
   BEFORE_UIDS="$(pod_uids "$MD_SIZE")"
   SCALE_OUT="$(k -n "$NS" patch modeldeployments.worker.gpustack.ai "$MD_SIZE" --type=merge \
-    -p '{"spec":{"roles":[{"name":"'"$ROLE"'","kind":"Server","instanceType":"'"$IT"'","replicas":2,"size":'"$SIZE"',"image":"'"$MEMBER_IMAGE"'","command":["sh","-c","sleep 100000"]}]}}' \
+    -p '{"spec":{"roles":[{"name":"'"$ROLE"'","kind":"Server","acceleratorType":"'"$IT"'","replicas":2,"size":'"$SIZE"',"image":"'"$MEMBER_IMAGE"'","command":["sh","-c","sleep 100000"]}]}}' \
     2>&1)"
 
   if wait_instances "$MD_SIZE" 2; then

@@ -58,7 +58,7 @@ MODEL_ARTIFACT="${EDP_ARTIFACT:-deepseek-v2-lite-chat}"
 IMAGE="${EDP_IMAGE:-gpustack/runner:cuda13.0-vllm0.32.0}"
 ROUTER_IMAGE="${EDP_ROUTER_IMAGE:-gpustack/llm-router:v0.3.1}"
 ROUTER_NAME="${EDP_ROUTER_NAME:-vllm-router}"
-INSTANCE_TYPE="${EDP_INSTANCE_TYPE:-bench-gpu}"
+INSTANCE_TYPE="${EDP_ACCELERATOR_TYPE:-${EDP_INSTANCE_TYPE:-bench-gpu}}"
 MEMBERS="${EDP_MEMBERS:-4}"
 # The shape this run uses. "recorded" is the shape the manifest was recorded with: size=4
 # members at 2 GPUs each, so two replicas are 16 GPUs. "width2" is the plan's shape for a
@@ -125,7 +125,8 @@ write_manifest() {
       -e "s|^  namespace: gpustack-bench$|  namespace: ${NS}|" \
       -e "s|gpustack/runner:cuda13.0-vllm0.30.0|${IMAGE}|g" \
       -e "s|gpustack/llm-router:v0.3.1|${ROUTER_IMAGE}|g" \
-      -e "s|^      instanceType: bench-gpu$|      instanceType: ${INSTANCE_TYPE}|" \
+      -e "s|^      instanceType: bench-gpu$|      acceleratorType: ${INSTANCE_TYPE}|" \
+      -e "s|^      acceleratorType: bench-gpu$|      acceleratorType: ${INSTANCE_TYPE}|" \
       -e "s|^      name: deepseek-v2-lite-chat$|      name: ${MODEL_ARTIFACT}|" \
       "$src" > "${OUT}/external-dp-scaling.yaml"
   if [ "$SHAPE" = "width2" ]; then
@@ -204,7 +205,7 @@ router_worker_urls() {
 # list, so the role that comes back carries only the two fields the patch carried and the API
 # server rejects the deployment for the role it no longer describes: the instance type, the
 # image, the size and the resources are all gone, and the recorded rejection reads
-# "spec.roles[0].instanceType: Invalid value: empty". A JSON patch changes the one number and
+# "spec.roles[0].acceleratorType: Invalid value: empty". A JSON patch changes the one number and
 # leaves the rest of the role alone. The path names the first role because the manifest
 # declares exactly one role, the server role.
 #
