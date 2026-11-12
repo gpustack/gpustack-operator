@@ -72,10 +72,11 @@ if [ "$ENGINE" = vLLM ] && [ "$SP_PIN" != none ]; then
     exit 2
   fi
 fi
-if [ "$SP_PIN" != none ] && ! jq -e '(.spec.kvTransfer.protocol // "TCP") == "TCP"' <<<"$md_json" >/dev/null; then
-  echo "case 91 needs the direct leg on tcp" >&2
+if [ "$SP_PIN" != none ] && ! jq -e '(.spec.kvTransfer.backend // "Mooncake") == "Mooncake" and all(.spec.roles[] | select(.kind == "Prefill" or .kind == "Decode"); ((.resources.interface // "0") | tonumber) == 0)' <<<"$md_json" >/dev/null; then
+  echo "case 91 needs no fabric interfaces on the direct pair" >&2
   exit 2
 fi
+
 if jq -e 'any(.spec.roles[]; any(.env[]?; .name == "MC_FORCE_TCP") or
   any(.extraArgs[]?; startswith("--enable-hierarchical-cache") or
     startswith("--disaggregation-decode-retraction-backup")))' <<<"$md_json" >/dev/null; then

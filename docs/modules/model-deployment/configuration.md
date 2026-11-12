@@ -123,8 +123,8 @@ request interfaces for RDMA or EFA transfer paths.
 
 The key follows the bound cache backend's effective group protocol and any direct *prefill/decode*
 transport the engine actually renders. A managed, non-Ascend vLLM Server collective can select RDMA
-when it has multiple members or Elastic EP. Eligible NIXL-based remote weight delivery can also select
-RDMA. See [Remote Weight Delivery](../model-delivery/remote.md) for its qualification limits.
+or EFA when it has multiple members or Elastic EP. Eligible NIXL-based remote weight delivery can also
+select RDMA or EFA. See [Remote Weight Delivery](../model-delivery/remote.md) for its qualification limits.
 
 A device grant does not establish that a transport has been validated. Different backend-group
 protocols or an RDMA and EFA mix are refused for a positive count.
@@ -858,7 +858,7 @@ depends on the `InstanceType` the role names.
 | an owned name in *`env`* | the same three |
 | `--kv-cache-dtype` in *`extraArgs`* while *`spec.kvCache`* is set | that it carries the Binding's `dtype`, and a Binding declaring another dtype or *`roles[].command`* as the ways out — see [Operator-owned keys](#operator-owned-keys) |
 | a `--port` in *`extraArgs`* or *`command`* naming another port than the role's first *`ports`* entry | both values and the field each came from. A managed direct decoder is exempt, since its proxy owns the declared port. A stored role is judged only when an edit changes its *`ports`* or arguments |
-| a port the operator reserves for a listener it synthesizes onto the role — vLLM's KV event ports under `llm-d-router`, or the bootstrap port of a prefiller in a declared pair that names a router or a cache — declared in *`ports`*, or passed as `--port` in *`extraArgs`* by a role declaring no *`ports`* | the port, the field it came from and the reserved set, on *`spec.router`* when a router is named. A replaced *`command`* is exempt, since nothing is synthesized onto it. A stored `--port` collision is left alone until an edit changes it; adding a router that creates one is refused |
+| a port the operator reserves for a listener it synthesizes onto the role — vLLM's KV event ports under `llm-d-router`, vLLM's `NIXL` side-channel port on both roles, or the bootstrap port of a prefiller in a declared pair that names a router or a cache — declared in *`ports`*, or passed as `--port` in *`extraArgs`* by a role declaring no *`ports`* | the port, the field it came from and the reserved set, on *`spec.router`* when a router is named. A replaced *`command`* is exempt, since nothing is synthesized onto it. A stored `--port` collision is left alone until an edit changes it; adding a router that creates one is refused |
 | a parallel degree the role's books cannot be read for — a known flag's value missing, non-integer, out of range or below its bound, or a malformed `VLLM_DP_SIZE` | the role, the flag, and *`roles[].command`* as the way to own the whole line |
 | a declared parallel width over the role's card request | the card count, the degrees behind the width, and that the width is per member — *`size`* does not rescue it |
 | a `template` field on a role | the unknown field itself — the block is gone, so strict decoding refuses it rather than a webhook rule |

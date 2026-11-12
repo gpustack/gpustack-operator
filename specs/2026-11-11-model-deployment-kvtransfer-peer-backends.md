@@ -1,7 +1,6 @@
 # Spec: Align ModelDeployment KV Transfer Peer Backends and AWS EFA Setting
 
-Status: Building
-Blocked on: implementation and verification of T1 through T5
+Status: Shipped
 Type: Feature
 
 ## Summary
@@ -93,8 +92,9 @@ As an administrator or user on AWS, I want one `aws-efa-enabled` `Setting` to co
    - If only one half of a prefill/decode pair requests `resources.interface > 0` without another fabric consumer (`KVCache` store or remote weight delivery), direct P/D fabric stays inactive on both halves and admission rejects the lone interface request on both `CREATE` and `UPDATE`.
 5. **Automatic Link Selection and TCP Fallback per Backend**:
    - **`Mooncake`**:
-     - If every `Prefill` and `Decode` role of a non-Ascend routed pair requests `resources.interface > 0`, vLLM renders `MooncakeConnector` with `mooncake_protocol` set to `"efa"` or `"rdma"` and omits `MC_FORCE_TCP`. SGLang renders `--disaggregation-transfer-backend=mooncake`.
-     - Otherwise, vLLM renders `mooncake_protocol: "tcp"` and SGLang renders `--disaggregation-transfer-backend=mooncake_tcp`. When no non-TCP `KVCache` store shares the process, the renderer supplies defaulted `MC_FORCE_TCP=1`, `MC_TCP_*` tuning variables, and vLLM `--block-size 128` or SGLang `--page-size 64`.
+     - On Ascend (`ascend`), the operator derives `"ascend"` (`MooncakeConnectorV1` on vLLM-Ascend; `--disaggregation-transfer-backend=mooncake` with read-only `/usr/local/Ascend/driver` mount on SGLang). On AMD ROCm (`amd`), when EFA is not active, the operator derives `"hip"` (`mooncake_protocol: "hip"` on vLLM; `--disaggregation-transfer-backend=mooncake` on SGLang) without `MC_FORCE_TCP=1`, letting Mooncake's `MultiTransport` install intra-node `"hip"` alongside cross-node `"rdma"` or `"tcp"` via topology discovery.
+     - If every `Prefill` and `Decode` role of a non-Ascend routed pair requests `resources.interface > 0`, vLLM renders `MooncakeConnector` with `mooncake_protocol` set to `"efa"` (under `aws-efa-enabled` or an EFA pool) or `"rdma"` (on NVIDIA) and omits `MC_FORCE_TCP`. SGLang renders `--disaggregation-transfer-backend=mooncake`.
+     - Otherwise on NVIDIA, vLLM renders `mooncake_protocol: "tcp"` and SGLang renders `--disaggregation-transfer-backend=mooncake_tcp`. When no non-TCP `KVCache` store shares the process, the renderer supplies defaulted `MC_FORCE_TCP=1`, `MC_TCP_*` tuning variables, and vLLM `--block-size 128` or SGLang `--page-size 64`.
    - **`NIXL`**:
      - When `aws-efa-enabled` is `true` or EFA is active on the role, vLLM renders `NixlConnector` with `backends: ["LIBFABRIC"]` and SGLang sets defaulted `SGLANG_DISAGGREGATION_NIXL_BACKEND=LIBFABRIC`. Otherwise, both select `UCX`.
      - Target containers using NIXL `model-transfer` remote weight delivery (including `ModelExpress` `Node`/`Engine` seed and fallback replicas) receive defaulted `GPUSTACK_MODEL_TRANSFER_NIXL_BACKEND=LIBFABRIC` when `aws-efa-enabled` is `true` or EFA is active, and `UCX` otherwise, even when `resources.interface` is `0`.
@@ -220,14 +220,14 @@ Tasks start with a prerequisite pretty-YAML golden baseline on the unmodified re
     - `CGO_ENABLED=1 go test -race ./pkg/worker/controllers/worker/... ./pkg/worker/webhooks/worker/... -run 'TestModelDeploymentGoldenYAML|TestSynthesizeModelDeploymentConnector|TestModelDeploymentConnector|TestRenderModelDeployment|TestModelDeploymentLegacyRender|TestModelDeploymentDirectInterfaceProtocol|TestModelTransfer|TestModelDeploymentModelExpress|TestModelDeploymentOwnedAndDefaultedCannotDisagree|TestModelDeploymentWebhook|TestValidateModelDeployment'`
     - `make lint`
 
-- [ ] **T4 · Contract `ModelDeploymentKVTransfer` API schema and regenerate artifacts**
+- [x] **T4 · Contract `ModelDeploymentKVTransfer` API schema and regenerate artifacts**
   - **Blocked by:** T3
   - **Gate:** `review`
   - **Owns:** `api/worker/v1alpha1/**`, `api/worker/zz_generated.openapi.go`, `pkg/kubeclients/applyconfiguration/worker/v1alpha1/**`
   - **Acceptance:** `ModelDeploymentKVTransfer.Protocol` and `ModelDeploymentKVTransferBackendAuto` are removed in `api/worker/v1alpha1/model_deployment.go`, `+k8s:validation:enum` on `Backend` is narrowed to `["Mooncake","NIXL","HIXL"]` with plain API doc comments compliant with `hack/check/api-descriptions.sh`, `api/worker/v1alpha1/model_deployment_test.go` asserts `spec.kvTransfer.backend` (`"Mooncake"`, `"NIXL"`, `"HIXL"`, rejecting `"Auto"`) and absence of `protocol`, and `make generate` produces clean generated diffs.
   - **Verify:** `CGO_ENABLED=1 go test -race ./api/worker/v1alpha1/... -run 'TestModelDeploymentEnumSpellings' && make lint`
 
-- [ ] **T5 · Update documentation, walkthroughs, shared index, and skill fixtures**
+- [x] **T5 · Update documentation, walkthroughs, shared index, and skill fixtures**
   - **Blocked by:** T3
   - **Owns:** `docs/**`, `.agents/skills/gpustack-operator-benchmark/SKILL.md`, `.agents/skills/gpustack-operator-e2e/cases/**`
   - **Acceptance:** `docs/modules/model-deployment/parameterize.md` documents peer backends (`Mooncake`, `NIXL`, `HIXL`) and unified port `8998`; `docs/reference/settings.md` adds `aws-efa-enabled` (`GPUSTACK_AWS_EFA_ENABLED`, `Effect window: Next trigger`); `ModelDeployment` and RDMA guides/walkthroughs, `docs/README.md`, `.agents/skills/gpustack-operator-benchmark/SKILL.md`, `case-91.sh`, and `case-115.sh` carry no stale `spec.kvTransfer.protocol` or `Auto` references.

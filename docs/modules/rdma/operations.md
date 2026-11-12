@@ -490,7 +490,7 @@ not supported`, and never starts: the `Pod` restarts in a loop. Without the gran
 and says nothing.
 
 **Both transfer paths require the engine's EFA build.** A store group on `EFA` hands the engines it serves the
-protocol `EFA`, and `kvTransfer.protocol: EFA` renders `efa` into both ends of a direct pair, so
+protocol `EFA`, and the `aws-efa-enabled` Setting selects EFA for a direct pair with interface requests on both roles, so
 every engine `Pod` on either path needs the EFA build. The store members do not: the
 [default member image](../kv-cache/backend.md#image) already carries EFA.
 

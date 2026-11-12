@@ -389,7 +389,6 @@ try:
                 WORKLOADS.clear()
                 NAME += '-pd'
                 obj['metadata']['name'] = NAME
-                obj['spec']['kvTransfer'] = {'protocol': 'TCP'}
                 obj['spec']['roles'] = [{
                     'name': kind.lower(), 'kind': kind, 'replicas': 1, 'size': 1,
                     'instanceType': CPU_IT, 'image': os.environ.get('E2E_C115_IMAGE', 'ubuntu:24.04'),
