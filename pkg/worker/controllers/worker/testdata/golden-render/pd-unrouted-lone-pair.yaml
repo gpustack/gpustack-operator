@@ -1,0 +1,29 @@
+apiVersion: worker.gpustack.ai/v1
+kind: ModelDeployment
+metadata:
+  name: qwen
+  namespace: default
+spec:
+  engine:
+    image: vllm/vllm-openai:v0.19.0
+    name: vLLM
+  model:
+    name: Qwen/Qwen2.5-72B-Instruct
+  roles:
+  - image: vllm/vllm-openai:v0.19.0
+    instanceType: h20-8x
+    kind: Prefill
+    name: prefill
+    replicas: 1
+    resources:
+      accelerator: "1"
+    size: 1
+  - image: vllm/vllm-openai:v0.19.0
+    instanceType: h20-8x
+    kind: Decode
+    name: decode
+    replicas: 1
+    resources:
+      accelerator: "1"
+    size: 1
+status: {}

@@ -1,0 +1,133 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  annotations:
+    kueue.x-k8s.io/pod-group-serving: "true"
+    kueue.x-k8s.io/pod-group-total-count: "1"
+    kueue.x-k8s.io/role-hash: main
+    modeldeployment.gpustack.ai/pod-spec-hash: eb5691f9878257250bf33e4df70aa0dc65533d75656743b6a9e6ac92a8d6c78c
+    modeldeployment.gpustack.ai/render-version: "4"
+    note.gpustack.ai/role: main
+  generateName: qwen-main-
+  labels:
+    app.kubernetes.io/component: main
+    app.kubernetes.io/instance: qwen
+    app.kubernetes.io/name: model-deployment
+    app.kubernetes.io/part-of: gpustack-operator-worker
+    kueue.x-k8s.io/pod-group-name: gpustack-fnv64-782503a2fb4f6cc3
+    kueue.x-k8s.io/queue-name: queue-for-h20-8x
+    modeldeployment.gpustack.ai/member-index: "0"
+    modeldeployment.gpustack.ai/pod-ordinal: "0"
+    modeldeployment.gpustack.ai/role-kind: server
+    resource.gpustack.ai/type: modeldeployments
+  name: qwen-main-0-0
+  namespace: default
+  ownerReferences:
+  - apiVersion: worker.gpustack.ai/v1alpha1
+    blockOwnerDeletion: false
+    controller: true
+    kind: ModelDeployment
+    name: qwen
+    uid: md-uid
+spec:
+  automountServiceAccountToken: false
+  containers:
+  - command:
+    - vllm
+    - serve
+    - Qwen/Qwen2.5-72B-Instruct
+    image: vllm/vllm-openai:v0.19.0
+    name: main
+    ports:
+    - containerPort: 8000
+      name: http
+      protocol: TCP
+    resources:
+      limits:
+        cpu: "16"
+        ephemeral-storage: 15Gi
+        memory: 64Gi
+        nvidia.com/gpu: "1"
+      requests:
+        cpu: 1600m
+        ephemeral-storage: 1920Mi
+        memory: 8Gi
+        nvidia.com/gpu: "1"
+    volumeMounts:
+    - mountPath: /dev/shm
+      name: model-shm
+  enableServiceLinks: false
+  restartPolicy: Always
+  runtimeClassName: nvidia
+  volumes:
+  - emptyDir:
+      medium: Memory
+      sizeLimit: 16Gi
+    name: model-shm
+status: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  annotations:
+    note.gpustack.ai/role: main
+  labels:
+    app.kubernetes.io/component: main
+    app.kubernetes.io/instance: qwen
+    app.kubernetes.io/name: model-deployment
+    resource.gpustack.ai/type: modeldeployments
+  name: qwen
+  namespace: default
+  ownerReferences:
+  - apiVersion: worker.gpustack.ai/v1alpha1
+    blockOwnerDeletion: false
+    controller: true
+    kind: ModelDeployment
+    name: qwen
+    uid: md-uid
+spec:
+  ports:
+  - name: http
+    port: 8000
+    protocol: TCP
+    targetPort: 8000
+  selector:
+    app.kubernetes.io/component: main
+    app.kubernetes.io/instance: qwen
+    app.kubernetes.io/name: model-deployment
+  type: ClusterIP
+status:
+  loadBalancer: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  annotations:
+    note.gpustack.ai/role: main
+  labels:
+    app.kubernetes.io/component: main
+    app.kubernetes.io/instance: qwen
+    app.kubernetes.io/name: model-deployment
+    resource.gpustack.ai/type: modeldeployments
+  name: qwen-main
+  namespace: default
+  ownerReferences:
+  - apiVersion: worker.gpustack.ai/v1alpha1
+    blockOwnerDeletion: false
+    controller: true
+    kind: ModelDeployment
+    name: qwen
+    uid: md-uid
+spec:
+  ports:
+  - name: http
+    port: 8000
+    protocol: TCP
+    targetPort: 8000
+  selector:
+    app.kubernetes.io/component: main
+    app.kubernetes.io/instance: qwen
+    app.kubernetes.io/name: model-deployment
+  type: ClusterIP
+status:
+  loadBalancer: {}

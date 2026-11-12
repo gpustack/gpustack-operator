@@ -1,0 +1,763 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  annotations:
+    kueue.x-k8s.io/pod-group-serving: "true"
+    kueue.x-k8s.io/pod-group-total-count: "1"
+    kueue.x-k8s.io/role-hash: decode
+    modeldeployment.gpustack.ai/pod-spec-hash: deb87692254cfdf8dbdcc4510dcdeb3832a17bb1de3c93c3eaa7e8579cc21729
+    modeldeployment.gpustack.ai/render-version: "4"
+    note.gpustack.ai/role: decode
+    prometheus.io/path: /metrics
+    prometheus.io/port: "8200"
+    prometheus.io/scheme: http
+    prometheus.io/scrape: "true"
+  generateName: qwen-vl-decode-
+  labels:
+    app.kubernetes.io/component: decode
+    app.kubernetes.io/instance: qwen-vl
+    app.kubernetes.io/name: model-deployment
+    app.kubernetes.io/part-of: gpustack-operator-worker
+    kueue.x-k8s.io/pod-group-name: gpustack-fnv64-0846752c61cf418b
+    kueue.x-k8s.io/queue-name: queue-for-atlas-910b
+    modeldeployment.gpustack.ai/member-index: "0"
+    modeldeployment.gpustack.ai/pod-ordinal: "0"
+    modeldeployment.gpustack.ai/role-kind: decode
+    resource.gpustack.ai/type: modeldeployments
+  name: qwen-vl-decode-0-0
+  namespace: default
+  ownerReferences:
+  - apiVersion: worker.gpustack.ai/v1alpha1
+    blockOwnerDeletion: false
+    controller: true
+    kind: ModelDeployment
+    name: qwen-vl
+    uid: md-uid
+spec:
+  affinity:
+    podAffinity:
+      preferredDuringSchedulingIgnoredDuringExecution:
+      - podAffinityTerm:
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/instance: qwen-vl
+              app.kubernetes.io/name: model-deployment
+              modeldeployment.gpustack.ai/role-kind: prefill
+          topologyKey: kubernetes.io/hostname
+        weight: 100
+  automountServiceAccountToken: false
+  containers:
+  - command:
+    - vllm
+    - serve
+    - Qwen/Qwen2.5-VL-7B-Instruct
+    - --kv-transfer-config
+    - '{"kv_connector":"MooncakeConnectorV1","kv_role":"kv_consumer","kv_port":8998,"kv_connector_extra_config":{"prefill":{"tp_size":1,"dp_size":1},"decode":{"tp_size":1,"dp_size":1}}}'
+    - --host
+    - 0.0.0.0
+    - --port
+    - "8200"
+    env:
+    - name: MC_TE_METRIC
+      value: "1"
+    - name: ASCEND_AUTO_CONNECT
+      value: "1"
+    - name: VLLM_CACHE_ROOT
+      value: /var/lib/gpustack/cache
+    - name: HF_HUB_CACHE
+      value: /var/lib/gpustack/cache/hf-hub
+    - name: HF_XET_CACHE
+      value: /var/lib/gpustack/cache/xet
+    - name: PIP_CACHE_DIR
+      value: /var/lib/gpustack/cache/pip
+    - name: TORCH_HOME
+      value: /var/lib/gpustack/cache/torch
+    - name: FLASHINFER_WORKSPACE_BASE
+      value: /var/lib/gpustack/cache/flashinfer
+    - name: TORCHINDUCTOR_CACHE_DIR
+      value: /var/lib/gpustack/cache/inductor
+    - name: TRITON_CACHE_DIR
+      value: /var/lib/gpustack/cache/triton
+    image: quay.io/ascend/vllm-ascend:v0.19.0
+    lifecycle:
+      preStop:
+        exec:
+          command:
+          - python3
+          - -c
+          - |
+            import socket, ssl, sys, time, urllib.request
+            start = time.monotonic()
+            time.sleep(5)
+            names = ["vllm:num_requests_running", "vllm:num_requests_waiting"]
+            context = ssl.create_default_context()
+            context.check_hostname = False
+            context.verify_mode = ssl.CERT_NONE
+            idle = 0
+            while time.monotonic() - start < 25:
+                try:
+                    body = urllib.request.urlopen("http://127.0.0.1:8200/metrics", timeout=1, context=context).read().decode()
+                except Exception as err:
+                    if not isinstance(getattr(err, "reason", err), (TimeoutError, socket.timeout)):
+                        sys.exit(0)
+                    body = None
+                busy = 1.0 if body is None else 0.0
+                for line in (body or "").splitlines():
+                    name = line.split("{", 1)[0].split(" ", 1)[0]
+                    if name not in names:
+                        continue
+                    sample = line.rsplit("}", 1)[1] if "{" in line else line[len(name):]
+                    try:
+                        busy += float(sample.split()[0])
+                    except (IndexError, ValueError):
+                        busy += 1.0
+                idle = idle + 1 if busy == 0 else 0
+                if idle == 2:
+                    sys.exit(0)
+                time.sleep(1)
+            sys.exit(0)
+    livenessProbe:
+      failureThreshold: 6
+      httpGet:
+        path: /v1/models
+        port: 8000
+        scheme: HTTP
+      periodSeconds: 10
+      timeoutSeconds: 5
+    name: main
+    ports:
+    - containerPort: 8200
+      name: model-server
+      protocol: TCP
+    readinessProbe:
+      failureThreshold: 3
+      httpGet:
+        path: /v1/models
+        port: 8000
+        scheme: HTTP
+      periodSeconds: 10
+      timeoutSeconds: 5
+    resources:
+      limits:
+        cpu: "16"
+        ephemeral-storage: 15Gi
+        huawei.com/npu: "1"
+        memory: 64Gi
+      requests:
+        cpu: 1600m
+        ephemeral-storage: 1920Mi
+        huawei.com/npu: "1"
+        memory: 8Gi
+    startupProbe:
+      failureThreshold: 180
+      httpGet:
+        path: /v1/models
+        port: 8000
+        scheme: HTTP
+      periodSeconds: 10
+      timeoutSeconds: 5
+    volumeMounts:
+    - mountPath: /usr/local/Ascend/driver
+      name: gpustack-ascend-driver
+      readOnly: true
+    - mountPath: /var/lib/gpustack/cache
+      name: gpustack-compile-cache
+    - mountPath: /dev/shm
+      name: model-shm
+  enableServiceLinks: false
+  initContainers:
+  - args:
+    - --port=8000
+    - --model-server-port=8200
+    - --kv-connector=nixlv2
+    - --secure-proxy=false
+    - --ec-connector=ec-example
+    env:
+    - name: POD_IP
+      valueFrom:
+        fieldRef:
+          fieldPath: status.podIP
+    image: gpustack.example/disagg-sidecar:v0.10.0-fixture
+    imagePullPolicy: IfNotPresent
+    name: routing-proxy
+    ports:
+    - containerPort: 8000
+      name: http
+      protocol: TCP
+    resources: {}
+    restartPolicy: Always
+    securityContext:
+      allowPrivilegeEscalation: false
+      runAsNonRoot: true
+  restartPolicy: Always
+  runtimeClassName: ascend
+  terminationGracePeriodSeconds: 30
+  volumes:
+  - hostPath:
+      path: /usr/local/Ascend/driver
+      type: Directory
+    name: gpustack-ascend-driver
+  - hostPath:
+      path: /var/lib/gpustack/cache/ascend-vllm/m-e71d72a4282a498ba3e22c62909d319f/tp1-pp1-dp1-ep1-cp1_1-415ae14e
+      type: DirectoryOrCreate
+    name: gpustack-compile-cache
+  - emptyDir:
+      medium: Memory
+      sizeLimit: 16Gi
+    name: model-shm
+status: {}
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  annotations:
+    kueue.x-k8s.io/pod-group-serving: "true"
+    kueue.x-k8s.io/pod-group-total-count: "1"
+    kueue.x-k8s.io/role-hash: encode
+    modeldeployment.gpustack.ai/pod-spec-hash: d02d592682135ed73a5761be844e68cd65131beb6cb9f8846f759d59495e540b
+    modeldeployment.gpustack.ai/render-version: "4"
+    note.gpustack.ai/role: encode
+    prometheus.io/path: /metrics
+    prometheus.io/port: "8000"
+    prometheus.io/scheme: http
+    prometheus.io/scrape: "true"
+  generateName: qwen-vl-encode-
+  labels:
+    app.kubernetes.io/component: encode
+    app.kubernetes.io/instance: qwen-vl
+    app.kubernetes.io/name: model-deployment
+    app.kubernetes.io/part-of: gpustack-operator-worker
+    kueue.x-k8s.io/pod-group-name: gpustack-fnv64-4b0247fafa542267
+    kueue.x-k8s.io/queue-name: queue-for-atlas-910b
+    modeldeployment.gpustack.ai/member-index: "0"
+    modeldeployment.gpustack.ai/pod-ordinal: "0"
+    modeldeployment.gpustack.ai/role-kind: encode
+    resource.gpustack.ai/type: modeldeployments
+  name: qwen-vl-encode-0-0
+  namespace: default
+  ownerReferences:
+  - apiVersion: worker.gpustack.ai/v1alpha1
+    blockOwnerDeletion: false
+    controller: true
+    kind: ModelDeployment
+    name: qwen-vl
+    uid: md-uid
+spec:
+  affinity:
+    podAffinity:
+      preferredDuringSchedulingIgnoredDuringExecution:
+      - podAffinityTerm:
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/instance: qwen-vl
+              app.kubernetes.io/name: model-deployment
+              modeldeployment.gpustack.ai/role-kind: prefill
+          topologyKey: kubernetes.io/hostname
+        weight: 50
+  automountServiceAccountToken: false
+  containers:
+  - command:
+    - vllm
+    - serve
+    - Qwen/Qwen2.5-VL-7B-Instruct
+    - --ec-transfer-config
+    - '{"ec_connector":"ECExampleConnector","ec_role":"ec_producer","ec_connector_extra_config":{"shared_storage_path":"/shared/encodings"}}'
+    - --enforce-eager
+    - --no-enable-prefix-caching
+    - --max-num-batched-tokens
+    - "114688"
+    - --mm-encoder-only
+    - --host
+    - 0.0.0.0
+    - --port
+    - "8000"
+    env:
+    - name: MC_TE_METRIC
+      value: "1"
+    - name: VLLM_CACHE_ROOT
+      value: /var/lib/gpustack/cache
+    - name: HF_HUB_CACHE
+      value: /var/lib/gpustack/cache/hf-hub
+    - name: HF_XET_CACHE
+      value: /var/lib/gpustack/cache/xet
+    - name: PIP_CACHE_DIR
+      value: /var/lib/gpustack/cache/pip
+    - name: TORCH_HOME
+      value: /var/lib/gpustack/cache/torch
+    - name: FLASHINFER_WORKSPACE_BASE
+      value: /var/lib/gpustack/cache/flashinfer
+    - name: TORCHINDUCTOR_CACHE_DIR
+      value: /var/lib/gpustack/cache/inductor
+    - name: TRITON_CACHE_DIR
+      value: /var/lib/gpustack/cache/triton
+    image: quay.io/ascend/vllm-ascend:v0.19.0
+    lifecycle:
+      preStop:
+        exec:
+          command:
+          - python3
+          - -c
+          - |
+            import socket, ssl, sys, time, urllib.request
+            start = time.monotonic()
+            time.sleep(5)
+            names = ["vllm:num_requests_running", "vllm:num_requests_waiting"]
+            context = ssl.create_default_context()
+            context.check_hostname = False
+            context.verify_mode = ssl.CERT_NONE
+            idle = 0
+            while time.monotonic() - start < 25:
+                try:
+                    body = urllib.request.urlopen("http://127.0.0.1:8000/metrics", timeout=1, context=context).read().decode()
+                except Exception as err:
+                    if not isinstance(getattr(err, "reason", err), (TimeoutError, socket.timeout)):
+                        sys.exit(0)
+                    body = None
+                busy = 1.0 if body is None else 0.0
+                for line in (body or "").splitlines():
+                    name = line.split("{", 1)[0].split(" ", 1)[0]
+                    if name not in names:
+                        continue
+                    sample = line.rsplit("}", 1)[1] if "{" in line else line[len(name):]
+                    try:
+                        busy += float(sample.split()[0])
+                    except (IndexError, ValueError):
+                        busy += 1.0
+                idle = idle + 1 if busy == 0 else 0
+                if idle == 2:
+                    sys.exit(0)
+                time.sleep(1)
+            sys.exit(0)
+    livenessProbe:
+      failureThreshold: 6
+      httpGet:
+        path: /health
+        port: 8000
+        scheme: HTTP
+      periodSeconds: 10
+      timeoutSeconds: 5
+    name: main
+    ports:
+    - containerPort: 8000
+      name: http
+      protocol: TCP
+    readinessProbe:
+      failureThreshold: 3
+      httpGet:
+        path: /health
+        port: 8000
+        scheme: HTTP
+      periodSeconds: 10
+      timeoutSeconds: 5
+    resources:
+      limits:
+        cpu: "16"
+        ephemeral-storage: 15Gi
+        huawei.com/npu: "1"
+        memory: 64Gi
+      requests:
+        cpu: 1600m
+        ephemeral-storage: 1920Mi
+        huawei.com/npu: "1"
+        memory: 8Gi
+    startupProbe:
+      failureThreshold: 180
+      httpGet:
+        path: /health
+        port: 8000
+        scheme: HTTP
+      periodSeconds: 10
+      timeoutSeconds: 5
+    volumeMounts:
+    - mountPath: /shared/encodings
+      name: additional-0
+    - mountPath: /var/lib/gpustack/cache
+      name: gpustack-compile-cache
+    - mountPath: /dev/shm
+      name: model-shm
+  enableServiceLinks: false
+  restartPolicy: Always
+  runtimeClassName: ascend
+  terminationGracePeriodSeconds: 30
+  volumes:
+  - name: additional-0
+    persistentVolumeClaim:
+      claimName: ec-cache
+  - hostPath:
+      path: /var/lib/gpustack/cache/ascend-vllm/m-e71d72a4282a498ba3e22c62909d319f/tp1-pp1-dp1-ep1-cp1_1-415ae14e
+      type: DirectoryOrCreate
+    name: gpustack-compile-cache
+  - emptyDir:
+      medium: Memory
+      sizeLimit: 16Gi
+    name: model-shm
+status: {}
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  annotations:
+    kueue.x-k8s.io/pod-group-serving: "true"
+    kueue.x-k8s.io/pod-group-total-count: "1"
+    kueue.x-k8s.io/role-hash: prefill
+    modeldeployment.gpustack.ai/pod-spec-hash: 8a695915fc98fa56bdfebb62e658524a839c960b2adbea50a619fb278e569ecc
+    modeldeployment.gpustack.ai/render-version: "4"
+    note.gpustack.ai/role: prefill
+    prometheus.io/path: /metrics
+    prometheus.io/port: "8000"
+    prometheus.io/scheme: http
+    prometheus.io/scrape: "true"
+  generateName: qwen-vl-prefill-
+  labels:
+    app.kubernetes.io/component: prefill
+    app.kubernetes.io/instance: qwen-vl
+    app.kubernetes.io/name: model-deployment
+    app.kubernetes.io/part-of: gpustack-operator-worker
+    kueue.x-k8s.io/pod-group-name: gpustack-fnv64-9834bdf27ea73a65
+    kueue.x-k8s.io/queue-name: queue-for-atlas-910b
+    modeldeployment.gpustack.ai/member-index: "0"
+    modeldeployment.gpustack.ai/pod-ordinal: "0"
+    modeldeployment.gpustack.ai/role-kind: prefill
+    resource.gpustack.ai/type: modeldeployments
+  name: qwen-vl-prefill-0-0
+  namespace: default
+  ownerReferences:
+  - apiVersion: worker.gpustack.ai/v1alpha1
+    blockOwnerDeletion: false
+    controller: true
+    kind: ModelDeployment
+    name: qwen-vl
+    uid: md-uid
+spec:
+  affinity:
+    podAffinity:
+      preferredDuringSchedulingIgnoredDuringExecution:
+      - podAffinityTerm:
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/instance: qwen-vl
+              app.kubernetes.io/name: model-deployment
+              modeldeployment.gpustack.ai/role-kind: decode
+          topologyKey: kubernetes.io/hostname
+        weight: 100
+      - podAffinityTerm:
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/instance: qwen-vl
+              app.kubernetes.io/name: model-deployment
+              modeldeployment.gpustack.ai/role-kind: encode
+          topologyKey: kubernetes.io/hostname
+        weight: 50
+  automountServiceAccountToken: false
+  containers:
+  - command:
+    - vllm
+    - serve
+    - Qwen/Qwen2.5-VL-7B-Instruct
+    - --kv-transfer-config
+    - '{"kv_connector":"MooncakeConnectorV1","kv_role":"kv_producer","kv_port":8998,"kv_connector_extra_config":{"prefill":{"tp_size":1,"dp_size":1},"decode":{"tp_size":1,"dp_size":1}}}'
+    - --ec-transfer-config
+    - '{"ec_connector":"ECExampleConnector","ec_role":"ec_consumer","ec_connector_extra_config":{"shared_storage_path":"/shared/encodings"}}'
+    - --host
+    - 0.0.0.0
+    - --port
+    - "8000"
+    env:
+    - name: MC_TE_METRIC
+      value: "1"
+    - name: ASCEND_AUTO_CONNECT
+      value: "1"
+    - name: VLLM_CACHE_ROOT
+      value: /var/lib/gpustack/cache
+    - name: HF_HUB_CACHE
+      value: /var/lib/gpustack/cache/hf-hub
+    - name: HF_XET_CACHE
+      value: /var/lib/gpustack/cache/xet
+    - name: PIP_CACHE_DIR
+      value: /var/lib/gpustack/cache/pip
+    - name: TORCH_HOME
+      value: /var/lib/gpustack/cache/torch
+    - name: FLASHINFER_WORKSPACE_BASE
+      value: /var/lib/gpustack/cache/flashinfer
+    - name: TORCHINDUCTOR_CACHE_DIR
+      value: /var/lib/gpustack/cache/inductor
+    - name: TRITON_CACHE_DIR
+      value: /var/lib/gpustack/cache/triton
+    image: quay.io/ascend/vllm-ascend:v0.19.0
+    lifecycle:
+      preStop:
+        exec:
+          command:
+          - python3
+          - -c
+          - |
+            import socket, ssl, sys, time, urllib.request
+            start = time.monotonic()
+            time.sleep(5)
+            names = ["vllm:num_requests_running", "vllm:num_requests_waiting"]
+            context = ssl.create_default_context()
+            context.check_hostname = False
+            context.verify_mode = ssl.CERT_NONE
+            idle = 0
+            while time.monotonic() - start < 25:
+                try:
+                    body = urllib.request.urlopen("http://127.0.0.1:8000/metrics", timeout=1, context=context).read().decode()
+                except Exception as err:
+                    if not isinstance(getattr(err, "reason", err), (TimeoutError, socket.timeout)):
+                        sys.exit(0)
+                    body = None
+                busy = 1.0 if body is None else 0.0
+                for line in (body or "").splitlines():
+                    name = line.split("{", 1)[0].split(" ", 1)[0]
+                    if name not in names:
+                        continue
+                    sample = line.rsplit("}", 1)[1] if "{" in line else line[len(name):]
+                    try:
+                        busy += float(sample.split()[0])
+                    except (IndexError, ValueError):
+                        busy += 1.0
+                idle = idle + 1 if busy == 0 else 0
+                if idle == 2:
+                    sys.exit(0)
+                time.sleep(1)
+            sys.exit(0)
+    livenessProbe:
+      failureThreshold: 6
+      httpGet:
+        path: /health
+        port: 8000
+        scheme: HTTP
+      periodSeconds: 10
+      timeoutSeconds: 5
+    name: main
+    ports:
+    - containerPort: 8000
+      name: http
+      protocol: TCP
+    - containerPort: 8998
+      name: mc-bootstrap
+      protocol: TCP
+    readinessProbe:
+      failureThreshold: 3
+      httpGet:
+        path: /health
+        port: 8000
+        scheme: HTTP
+      periodSeconds: 10
+      timeoutSeconds: 5
+    resources:
+      limits:
+        cpu: "16"
+        ephemeral-storage: 15Gi
+        huawei.com/npu: "1"
+        memory: 64Gi
+      requests:
+        cpu: 1600m
+        ephemeral-storage: 1920Mi
+        huawei.com/npu: "1"
+        memory: 8Gi
+    startupProbe:
+      failureThreshold: 180
+      httpGet:
+        path: /health
+        port: 8000
+        scheme: HTTP
+      periodSeconds: 10
+      timeoutSeconds: 5
+    volumeMounts:
+    - mountPath: /shared/encodings
+      name: additional-0
+    - mountPath: /usr/local/Ascend/driver
+      name: gpustack-ascend-driver
+      readOnly: true
+    - mountPath: /var/lib/gpustack/cache
+      name: gpustack-compile-cache
+    - mountPath: /dev/shm
+      name: model-shm
+  enableServiceLinks: false
+  restartPolicy: Always
+  runtimeClassName: ascend
+  terminationGracePeriodSeconds: 30
+  volumes:
+  - name: additional-0
+    persistentVolumeClaim:
+      claimName: ec-cache
+  - hostPath:
+      path: /usr/local/Ascend/driver
+      type: Directory
+    name: gpustack-ascend-driver
+  - hostPath:
+      path: /var/lib/gpustack/cache/ascend-vllm/m-e71d72a4282a498ba3e22c62909d319f/tp1-pp1-dp1-ep1-cp1_1-415ae14e
+      type: DirectoryOrCreate
+    name: gpustack-compile-cache
+  - emptyDir:
+      medium: Memory
+      sizeLimit: 16Gi
+    name: model-shm
+status: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  annotations:
+    note.gpustack.ai/role: prefill
+  labels:
+    app.kubernetes.io/component: prefill
+    app.kubernetes.io/instance: qwen-vl
+    app.kubernetes.io/name: model-deployment
+    resource.gpustack.ai/type: modeldeployments
+  name: qwen-vl
+  namespace: default
+  ownerReferences:
+  - apiVersion: worker.gpustack.ai/v1alpha1
+    blockOwnerDeletion: false
+    controller: true
+    kind: ModelDeployment
+    name: qwen-vl
+    uid: md-uid
+spec:
+  ports:
+  - name: http
+    port: 8000
+    protocol: TCP
+    targetPort: 8000
+  selector:
+    app.kubernetes.io/component: prefill
+    app.kubernetes.io/instance: qwen-vl
+    app.kubernetes.io/name: model-deployment
+    modeldeployment.gpustack.ai/endpoint-eligible: "true"
+  type: ClusterIP
+status:
+  loadBalancer: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  annotations:
+    note.gpustack.ai/role: decode
+  labels:
+    app.kubernetes.io/component: decode
+    app.kubernetes.io/instance: qwen-vl
+    app.kubernetes.io/name: model-deployment
+    resource.gpustack.ai/type: modeldeployments
+  name: qwen-vl-decode
+  namespace: default
+  ownerReferences:
+  - apiVersion: worker.gpustack.ai/v1alpha1
+    blockOwnerDeletion: false
+    controller: true
+    kind: ModelDeployment
+    name: qwen-vl
+    uid: md-uid
+spec:
+  ports:
+  - name: http
+    port: 8000
+    protocol: TCP
+    targetPort: 8000
+  selector:
+    app.kubernetes.io/component: decode
+    app.kubernetes.io/instance: qwen-vl
+    app.kubernetes.io/name: model-deployment
+    modeldeployment.gpustack.ai/endpoint-eligible: "true"
+  type: ClusterIP
+status:
+  loadBalancer: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  annotations:
+    note.gpustack.ai/role: encode
+  labels:
+    app.kubernetes.io/component: encode
+    app.kubernetes.io/instance: qwen-vl
+    app.kubernetes.io/name: model-deployment
+    resource.gpustack.ai/type: modeldeployments
+  name: qwen-vl-encode
+  namespace: default
+  ownerReferences:
+  - apiVersion: worker.gpustack.ai/v1alpha1
+    blockOwnerDeletion: false
+    controller: true
+    kind: ModelDeployment
+    name: qwen-vl
+    uid: md-uid
+spec:
+  ports:
+  - name: http
+    port: 8000
+    protocol: TCP
+    targetPort: 8000
+  selector:
+    app.kubernetes.io/component: encode
+    app.kubernetes.io/instance: qwen-vl
+    app.kubernetes.io/name: model-deployment
+  type: ClusterIP
+status:
+  loadBalancer: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  annotations:
+    note.gpustack.ai/role: prefill
+  labels:
+    app.kubernetes.io/component: prefill
+    app.kubernetes.io/instance: qwen-vl
+    app.kubernetes.io/name: model-deployment
+    resource.gpustack.ai/type: modeldeployments
+  name: qwen-vl-prefill
+  namespace: default
+  ownerReferences:
+  - apiVersion: worker.gpustack.ai/v1alpha1
+    blockOwnerDeletion: false
+    controller: true
+    kind: ModelDeployment
+    name: qwen-vl
+    uid: md-uid
+spec:
+  ports:
+  - name: http
+    port: 8000
+    protocol: TCP
+    targetPort: 8000
+  selector:
+    app.kubernetes.io/component: prefill
+    app.kubernetes.io/instance: qwen-vl
+    app.kubernetes.io/name: model-deployment
+    modeldeployment.gpustack.ai/endpoint-eligible: "true"
+  type: ClusterIP
+status:
+  loadBalancer: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  annotations:
+    note.gpustack.ai/router: llm-d-router
+  labels:
+    app.kubernetes.io/instance: qwen-vl
+    app.kubernetes.io/name: model-deployment
+    modeldeployment.gpustack.ai/router: llm-d-router
+    resource.gpustack.ai/type: modeldeployments
+  name: qwen-vl-router
+  namespace: default
+  ownerReferences:
+  - apiVersion: worker.gpustack.ai/v1alpha1
+    blockOwnerDeletion: false
+    controller: true
+    kind: ModelDeployment
+    name: qwen-vl
+    uid: md-uid
+spec:
+  ports:
+  - name: http
+    port: 8000
+    targetPort: 8000
+  selector:
+    app.kubernetes.io/instance: qwen-vl
+    app.kubernetes.io/name: model-deployment
+    modeldeployment.gpustack.ai/router: llm-d-router
+status:
+  loadBalancer: {}

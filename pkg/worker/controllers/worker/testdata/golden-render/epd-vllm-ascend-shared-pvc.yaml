@@ -1,0 +1,49 @@
+apiVersion: worker.gpustack.ai/v1
+kind: ModelDeployment
+metadata:
+  name: qwen-vl
+  namespace: default
+spec:
+  engine:
+    image: quay.io/ascend/vllm-ascend:v0.19.0
+    name: vLLM
+  kvTransfer:
+    backend: HIXL
+  model:
+    name: Qwen/Qwen2.5-VL-7B-Instruct
+  roles:
+  - additionalVolumes:
+    - mountPath: /shared/encodings
+      persistentVolumeClaim:
+        claimName: ec-cache
+    image: quay.io/ascend/vllm-ascend:v0.19.0
+    instanceType: atlas-910b
+    kind: Encode
+    name: encode
+    replicas: 1
+    resources:
+      accelerator: "1"
+    size: 1
+  - additionalVolumes:
+    - mountPath: /shared/encodings
+      persistentVolumeClaim:
+        claimName: ec-cache
+    image: quay.io/ascend/vllm-ascend:v0.19.0
+    instanceType: atlas-910b
+    kind: Prefill
+    name: prefill
+    replicas: 1
+    resources:
+      accelerator: "1"
+    size: 1
+  - image: quay.io/ascend/vllm-ascend:v0.19.0
+    instanceType: atlas-910b
+    kind: Decode
+    name: decode
+    replicas: 1
+    resources:
+      accelerator: "1"
+    size: 1
+  router:
+    name: llm-d-router
+status: {}
