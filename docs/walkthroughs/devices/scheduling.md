@@ -564,6 +564,10 @@ Deleting the `Instance` releases the slice: the row returns to `1/1 10/10 100/10
 
 ## Step 4: Manage a custom InstanceType
 
+The custom workspace type shares its canonical pool queue with the derived `AcceleratorType` and
+other `InstanceType`s for the same pool. The output below records an earlier run with separate
+queue entrances; current siblings publish the same canonical pool entrance.
+
 A derived pool is sized from a **per-product preset**: 8 CPU / 64 GiB for this A10G, 4 CPU / 16 GiB for
 an unrecognised accelerator ([preset reference](../../reference/instance-type-unit-resources.md)). For
 another size, an admin authors an `InstanceType` referencing a catalog flavor by its *`acceleratorGroup`*,
@@ -645,8 +649,8 @@ gpustack--nvidia-a10g-linux-amd64       gpustack-fnv64-c4680bb149644f1c   8/64Gi
 gpustack--nvidia-tesla-t4-linux-amd64   gpustack-fnv64-6b371caa2da0b799   8/32Gi/100Gi            4/5 40/50 100/500 0/0      0/0     Active
 ```
 
-Deleting it retires in order: the operator drains the `Instance` (`HoldAndDrain`), the `Instance` stops,
-and the type plus its `ClusterQueue` go:
+Deleting the type stops its `Instance`. The shared `ClusterQueue` remains while another type fronts
+the pool:
 
 ```bash
 kubectl delete instancetype a10g-12c128g

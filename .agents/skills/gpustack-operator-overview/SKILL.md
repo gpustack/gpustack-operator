@@ -19,7 +19,7 @@ the remote weight source broker). The scheduling chain proceeds as follows: NFD 
 Device Manager detects accelerators and network interfaces into a per-node `Devices` ledger; the
 worker derives per-card capacity labels ([pkg/nodefeature](../../../pkg/nodefeature/) is the label
 algebra); worker controllers materialize them into Kueue `ResourceFlavor`, `ClusterQueue` (one
-isolated queue per pool), `LocalQueue` and an `InstanceType` CRD, gated per card by an
+isolated queue per pool), `LocalQueue`, `AcceleratorType` and `InstanceType` CRDs, gated per card by an
 AdmissionCheck. Vendor runtime bindings under [binding/](../../../binding/) are generated from
 [gen/binding/](../../../gen/binding/). Hand-written slicing preload libraries live in
 [csrc/](../../../csrc/). [architecture.md](../../../docs/getting-started/architecture.md) is the
@@ -49,9 +49,10 @@ page is the `gpustack-operator-docs` skill. Every page is listed in
 ## Contributor invariants
 
 - Manufacturers: nvidia, amd, ascend, cambricon, hygon, iluvatar, metax, mthreads, thead.
-- **Kueue object names**: `gpustack-${key}-${os}-${arch}-${count}{c|d}` for a `ResourceFlavor`
-  (`c` = CPU cores, `d` = devices); `gpustack-${key}-${os}-${arch}` for the `ClusterQueue` /
-  `InstanceType` — single dash, CPU and device pools split (not composite), os/arch in full.
+- **Kueue object names**: `gpustack--${gKey}--${aKey}-${os}-${arch}-${count}d` for an accelerated `ResourceFlavor`;
+  canonical pool queues use `gpustack--${aKey}-${os}-${arch}`,
+  `gpustack--${gKey}--${aKey}-${os}-${arch}`, or `gpustack--generic-${os}-${arch}`.
+  An `AcceleratorType` and all `InstanceType`s on a pool share that queue.
 - **LocalQueue names**: `gpustack-fnv64-<fnv64a-hash>` — always 31 chars (the full ClusterQueue
   name goes in the `schedule.gpustack.ai/queue` annotation).
 - **Label domains**: `feature.gpustack.ai/` (CPU/PCI facts), `acceleratable.feature.gpustack.ai/`

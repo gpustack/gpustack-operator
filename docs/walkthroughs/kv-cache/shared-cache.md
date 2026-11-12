@@ -1,7 +1,7 @@
 # Shared Cache Walkthrough
 
 Create a store, a pool, a namespace grant and a workload in that order. Replace the node selector,
-namespace, instance type and model name in the manifests below. The serving replicas can then reuse
+namespace, accelerator type and model name in the manifests below. The serving replicas can then reuse
 prefix KV blocks.
 
 ## Contents
@@ -42,7 +42,7 @@ the scope of each object.
 |---|---|
 | Cluster | Kubernetes with GPUStack installed |
 | Contributing nodes | selected by the backend's *`nodeSelector`*; Step 5's disk tier selects nodes labeled `kvcache: "true"` |
-| `InstanceType` | one from `kubectl get instancetype` |
+| `AcceleratorType` | one from `kubectl get acctype` |
 | Model | `Qwen/Qwen2.5-7B-Instruct` |
 | Engine | vLLM `gpustack/runner:cuda13.0-vllm0.29.0` |
 
@@ -170,7 +170,7 @@ spec:
   roles:
     - name: server
       replicas: 2
-      instanceType: <one from kubectl get instancetype>
+      acceleratorType: <one from kubectl get acctype>
       resources:
         accelerator: "1"
 ```
@@ -317,7 +317,7 @@ spec:
 
 A namespace that runs a different dtype needs a second Binding, because a domain is immutable and
 holds one dtype. Mixing dtypes in one domain can return wrong blocks silently. The Binding below
-serves an `fp8_e4m3` deployment in `team-a`. Replace the instance type as in Step 3.
+serves an `fp8_e4m3` deployment in `team-a`. Replace the accelerator type as in Step 3.
 
 ```yaml
 apiVersion: worker.gpustack.ai/v1
@@ -352,7 +352,7 @@ spec:
   roles:
     - name: server
       replicas: 1
-      instanceType: <one from kubectl get instancetype>
+      acceleratorType: <one from kubectl get acctype>
       resources:
         accelerator: "1"
 ```

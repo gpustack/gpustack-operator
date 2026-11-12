@@ -30,7 +30,7 @@ The captured load completed **439/439 client requests with zero errors** during 
 |---|---|---|---|
 | `ModelArtifact` | namespace | user, via the prefetch procedure | the DeepSeek V2 Lite weights the deployment serves |
 | `ModelDeployment` | namespace | user | the elastic vLLM collective that expands in place |
-| `InstanceType` | cluster | operator | the whole-GPU H100 type each member requests |
+| `AcceleratorType` | cluster | operator | the whole-GPU H100 type each member requests |
 
 At concurrency 64, width 4 reduced *time to first token (TTFT)* p50 to **2,598.867 ms** from width 2's **6,509.231 ms**, or **2.50× lower**.
 Width growth suits high-concurrency first-token targets when process retention matters.
@@ -64,8 +64,7 @@ The store and binding names can differ; they must grant this namespace access to
 ## Step 1: Start the elastic deployment
 
 Keep all eight GPUs available so expansion can reserve its additional members.
-The reusable manifest uses the discovered H100 `InstanceType`.
-To match the captured custom queue, replace its *`instanceType`* value with `bench-gpu`.
+The reusable manifest uses the discovered H100 `AcceleratorType`.
 Save the manifest as `elastic-ep.yaml`:
 
 ```yaml
@@ -87,7 +86,7 @@ spec:
       kind: Server
       replicas: 1
       size: 1
-      instanceType: gpustack--nvidia-h100-80gb-hbm3-linux-amd64
+      acceleratorType: gpustack--nvidia-h100-80gb-hbm3-linux-amd64
       image: gpustack/runner:cuda13.0-vllm0.30.0
       imagePullPolicy: IfNotPresent
       resources:

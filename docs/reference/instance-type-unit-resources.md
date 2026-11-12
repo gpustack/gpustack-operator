@@ -254,7 +254,7 @@ at the top of that file; when either changes, compare the rows here with the pre
 ---
 
 **See also** — [Scheduling Chain](../modules/devices/scheduling.md#unit-spec-defaults)
-(where the unit spec is stamped) · [Admission](../modules/devices/admission.md#instancetype-instance-webhooks)
+(where the unit spec is stamped) · [Admission](../modules/devices/admission.md#type-and-instance-webhooks)
 (what the webhooks enforce on it) · [Walkthrough](../walkthroughs/devices/scheduling.md#step-4-manage-a-custom-instancetype)
 
 **Next** → [Settings](settings.md#settings) — configure resource derivation and CPU awareness.

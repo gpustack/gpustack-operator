@@ -1,7 +1,7 @@
 # Parameters
 
 `ModelDeployment` synthesizes engine and router arguments, environment variables, files and volume
-mounts from its fields and bound `InstanceType`, `KVCachePoolBinding` and `ModelArtifact` resources.
+mounts from its fields and bound `AcceleratorType`, `KVCachePoolBinding` and `ModelArtifact` resources.
 The tables describe managed engine roles, routers, sidecars and remote weight clients (`Engine` in
 the `Component` column means both `vLLM` and `SGLang`). Rendering establishes configuration; it
 does not establish hardware or image qualification.

@@ -579,3 +579,6 @@ prefetch, and node-store output. Model-serving walkthroughs link here before cre
 and `ModelDeploymentScaler`). Each capability module under `docs/modules/<module>/` covers its four
 functional areas (`Overview`, `Configuration`, `Operations`, `Troubleshooting`) and links here for
 cross-module examples.
+
+`docs/modules/devices/scheduling.md` owns `AcceleratorType` and shared pool queue identity.
+`docs/modules/model-deployment/configuration.md` owns role resources and CPU-only scheduling.

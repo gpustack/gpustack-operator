@@ -102,7 +102,7 @@ spec:
       kind: Server
       replicas: 1
       size: 4  # four member Pods in one fate-sharing DP group
-      instanceType: gpustack--nvidia-h100-80gb-hbm3-linux-amd64
+      acceleratorType: gpustack--nvidia-h100-80gb-hbm3-linux-amd64
       resources:
         accelerator: "2"  # matches local --tensor-parallel-size per member
       extraArgs:
@@ -163,7 +163,7 @@ spec:
       kind: Server
       replicas: 1
       size: 2  # two member Pods in one fate-sharing group
-      instanceType: gpustack--nvidia-h100-80gb-hbm3-linux-amd64
+      acceleratorType: gpustack--nvidia-h100-80gb-hbm3-linux-amd64
       resources:
         accelerator: "1"  # one GPU per member; the FFN tensor-parallel group spans both
       extraArgs:

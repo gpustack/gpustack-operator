@@ -40,9 +40,12 @@ spec:
   roles:
     - name: server
       replicas: 4
-      instanceType: gpustack--nvidia-a10g-linux-amd64
+      acceleratorType: gpustack--nvidia-a10g-linux-amd64
       resources:
         accelerator: 2  # cards per Pod
+        cpu: "8"  # optional CPU per Pod
+        ram: 32Gi  # optional memory per Pod
+        localStorage: 100Gi  # optional ephemeral storage per Pod
 ```
 
 - **Model**: *`model.name`* identifies the served model; select its weight source separately.
@@ -101,17 +104,22 @@ a formula missing an input would pass silently. A degree you declare on the role
 it is read and validated, and [the transfer path renders from
 it](prefill-decode.md#pair-connections).
 
-A whole instance is the unit of replacement at every size. That is Kueue's constraint rather than a
+For queued roles, a whole instance is the unit of replacement at every size. That is Kueue's constraint rather than a
 preference: a deleted member of an admitted group is held on the API server until the group's
 `Workload` goes, and deleting that `Workload` stops the instance's surviving members anyway.
 
-*`replicas`*, *`size`* and *`instanceType`* are structured fields and stay so: admission and scheduling
+*`replicas`*, *`size`* and *`acceleratorType`* are structured fields and stay so: admission and scheduling
 read them, so an override able to shadow them would make the feasibility check read a ledger that
 does not match reality.
 
 The accelerator request of **one `Pod`** lives in *`roles[].resources`*, whose fields mirror [Accelerator Requests](../devices/requests.md); at `size: 1` the `Pod` and the
-instance are the same request. CPU, memory and ephemeral storage are **derived** from the `InstanceType`'s per-unit resources scaled by the card count, so they are not
-expressible here.
+instance are the same request. Optional positive *`resources.cpu`*, *`resources.ram`*, and
+*`resources.localStorage`* set the serving container CPU, memory, and ephemeral-storage requests and
+limits. The general-resource overcommit setting can reduce requests. Only specified values are
+injected; no unit preset is used.
+
+Omitting *`acceleratorType`* makes a role CPU-only: kube-scheduler places its Pods directly without Kueue,
+and accelerator requests are rejected.
 
 An optional *`resources.interface`* requests a whole number of fabric interfaces per engine `Pod`.
 
@@ -154,14 +162,14 @@ spec:
     - name: prefill
       kind: Prefill  # Server (default), Prefill, Decode or Encode
       replicas: 2
-      instanceType: gpustack--nvidia-h20-linux-amd64
+      acceleratorType: gpustack--nvidia-h20-linux-amd64
       resources:
         accelerator: 2
     - name: decode
       kind: Decode
       replicas: 2
       # may use different hardware from the prefill role
-      instanceType: gpustack--nvidia-h20-linux-amd64
+      acceleratorType: gpustack--nvidia-h20-linux-amd64
       resources:
         accelerator: 2
 ```
@@ -198,8 +206,8 @@ metadata:
   labels:
     # Hash of namespace, deployment, role and ordinal; unique but not parseable.
     kueue.x-k8s.io/pod-group-name: gpustack-fnv64-<hash>
-    # InstanceType status.entrance; all Pods in a group must agree.
-    kueue.x-k8s.io/queue-name: <instance-type-entrance>
+    # AcceleratorType status.entrance; all Pods in a group must agree.
+    kueue.x-k8s.io/queue-name: <accelerator-type-entrance>
     app.kubernetes.io/component: server  # Role name; Service selection and status attribution.
     modeldeployment.gpustack.ai/role-kind: server  # Effective kind in router spelling; unset kind maps to server.
     modeldeployment.gpustack.ai/pod-ordinal: "0"  # Replica slot; scale-down sheds highest first.
@@ -303,7 +311,7 @@ spec:
     image: example/engine:tag  # Editable.
   roles:
     - name: server
-      instanceType: gpustack--nvidia-h20-linux-amd64
+      acceleratorType: gpustack--nvidia-h20-linux-amd64
       # Append after operator-synthesized arguments; operator-owned keys are refused.
       extraArgs:
         - --enable-prefix-caching
@@ -388,7 +396,7 @@ spec:
     image: example/engine:tag  # Editable.
   roles:
     - name: server
-      instanceType: gpustack--nvidia-h20-linux-amd64
+      acceleratorType: gpustack--nvidia-h20-linux-amd64
       shmSize: 32Gi
 ```
 
@@ -566,7 +574,7 @@ uses it as written.
 
 Changing *`replicas`* adds or removes instances and nothing more: the survivors are not restarted, do
 not reload their weights and keep their cached blocks. What still replaces **every** instance of the
-role is an edit that changes what a replica's `Pod` renders: *`size`*, *`instanceType`*, *`resources`*,
+role is an edit that changes what a replica's `Pod` renders: *`size`*, *`acceleratorType`*, *`resources`*,
 *`command`*, *`image`*, *`extraArgs`*, *`env`*, *`ports`*, *`additionalVolumes`*, *`shmSize`*,
 *`terminationGracePeriodSeconds`*, *`startupTimeoutSeconds`*.
 
@@ -593,7 +601,7 @@ earlier execution does not qualify as first admission.
 
 ### Changed role configuration
 
-When a role's configuration changes, the operator replaces its replicas. *`size`*, *`instanceType`*,
+When a role's configuration changes, the operator replaces its replicas. *`size`*, *`acceleratorType`*,
 *`resources`* and *`command`* roll the same way as any `Pod` field, and each carries consequences the
 `Pod` fields do not.
 
@@ -628,7 +636,7 @@ rendering changes are evaluated separately:
 
 | Annotation | Scope | Trigger | Default rollout behavior |
 |---|---|---|---|
-| `modeldeployment.gpustack.ai/pod-spec-hash` (on `Pod`) | explicit `ModelDeployment` fields (`model`, *`engine`*, *`router`*, *`kvCache.poolRef`*, *`kvTransfer`*, and the role's configuration) plus resolved external bindings (`InstanceType` entrance/manufacturer/resources, `KVCachePoolBinding` endpoint/domain/dtype, `ModelArtifact` source/digest, fabric interface key, `RuntimeClassName`, and seat `ordinal`/`member`) | editing any covered `ModelDeployment` field or changing a bound external resource | rolls affected replicas one per role per pass |
+| `modeldeployment.gpustack.ai/pod-spec-hash` (on `Pod`) | explicit `ModelDeployment` fields (`model`, *`engine`*, *`router`*, *`kvCache.poolRef`*, *`kvTransfer`*, and the role's configuration) plus resolved external bindings (`AcceleratorType` entrance/manufacturer/resources, `KVCachePoolBinding` endpoint/domain/dtype, `ModelArtifact` source/digest, fabric interface key, `RuntimeClassName`, and seat `ordinal`/`member`) | editing any covered `ModelDeployment` field or changing a bound external resource | rolls affected replicas one per role per pass |
 | `modeldeployment.gpustack.ai/render-version` (on `Pod`) | operator-synthesized flags (`--host`, `--port`, `--served-model-name`, connector flags), defaulted environment entries, probes, `preStop` drain hook, sidecars (`routing-proxy`, `wait-for-worker`), implicit labels/annotations, and worker `Setting` values | upgrading to an operator release with a newer rendering baseline | keeps running replicas in place while `render-version` meets the effective minimum floor; applies to newly created or replaced `Pod`s |
 | `modeldeployment.gpustack.ai/min-render-version` (on `ModelDeployment`) | per-deployment render-version floor, clamped to `[minSupportedRenderVersion, currentRenderVersion]` | setting or raising the annotation on `ModelDeployment.metadata.annotations` | rolls replicas whose `render-version` is below the effective floor, one per role per pass |
 
@@ -652,7 +660,7 @@ spec:
   roles:
     - name: server
       replicas: 4
-      instanceType: gpustack--nvidia-a10g-linux-amd64
+      acceleratorType: gpustack--nvidia-a10g-linux-amd64
       resources:
         accelerator: 2
 ```
@@ -731,7 +739,7 @@ spec:
       kind: Server # Frozen.
       replicas: 1  # Editable.
       size: 1  # Editable, except on an elasticEp role.
-      instanceType: gpu-pool  # Editable, except on an elasticEp role.
+      acceleratorType: gpu-pool  # Editable, except on an elasticEp role.
       resources: {}  # Editable, except on an elasticEp role.
       command: []  # Editable, except on an elasticEp role.
       extraArgs: []  # Editable.
@@ -747,7 +755,7 @@ spec:
       startupTimeoutSeconds: 1800  # Editable Pod field.
 ```
 
-The role's configuration fields — *`size`*, *`instanceType`*, *`resources`*, *`command`* — are editable on the same
+The role's configuration fields — *`size`*, *`acceleratorType`*, *`resources`*, *`command`* — are editable on the same
 terms as the `Pod` fields: each edit replaces that role's replicas one at a time, deleting each old
 instance before creating its replacement, whose fresh admission gates the next deletion.
 *`roles[].privileged`* stays editable because it controls how the role runs.
@@ -766,9 +774,9 @@ choosing its update rule.
 > **A merge patch replaces the *`roles`* list wholesale.** `kubectl patch --type=merge` follows
 > RFC 7386, which replaces an array rather than merging into it: a role restated with only some of
 > its fields loses the ones it did not carry. An omitted *`size`* lands on the default of 1 and an
-> omitted *`resources`* lands on the accelerator default, exactly as a full-list rewrite says; a role
-> restated without its `name` is refused for the missing name, and one restated without *`instanceType`*
-> is refused for the empty value — none of these fields has a default that can stand in.
+> omitted *`resources`* takes the accelerator default only when an accelerator type is selected, exactly as a full-list rewrite says; a role
+> restated without its `name` is refused for the missing name. Omitting *`acceleratorType`*
+> instead selects CPU-only scheduling; any accelerator request must also be removed.
 > `listType=map` does not soften this: it is what keeps role names unique and drives `kubectl apply`'s
 > merge, not what a client-side merge patch does to an array.
 >
@@ -809,23 +817,23 @@ choosing its update rule.
 >       kind: Server
 >       replicas: 4
 >       size: 2
->       instanceType: h20-8x
+>       acceleratorType: h20-8x
 >       resources:
 >         accelerator: "2"
 > ```
 
 ### One group per replica
 
-The grouping key is the **replica**: every replica of every role forms its own `Pod` group, derived from the role and the replica's ordinal within it, and Kueue composes one
-`Workload` per group with a declared total equal to the role's *`size`*. Two roles naming the same *`instanceType`* share nothing: a queue name is derived from the
-*`instanceType`* and one `Workload` carries one queue name, so rather than forbid the configuration the roles are simply not made to share.
+For accelerated roles, the grouping key is the **replica**: every replica forms its own `Pod` group, derived from the role and the replica's ordinal within it, and Kueue composes one
+`Workload` per group with a declared total equal to the role's *`size`*. Two roles naming the same *`acceleratorType`* share the pool queue but have separate `Workload`s.
+CPU-only roles have no Kueue `Pod` group or `Workload`.
 
 **What an edit costs is therefore the replica, not the group it used to share.** Growing or shrinking
 *`replicas`* adds or removes whole groups and leaves every surviving replica's group, `Workload` and
 admission untouched; a role-field edit rolls that role's replicas one at a time.
 
 The groups are still admitted as a **set**, by the admission check described in
-[Prefill and decode](#prefill-and-decode), whichever *`instanceType`*s they name.
+[Prefill and decode](#prefill-and-decode), whichever *`acceleratorType`*s they name.
 
 A scale-down sheds the **highest ordinals first**, deleting each departing replica's `Pod` together with
 its own `Workload`: the `Workload` delete is what releases Kueue's finalizer on the `Pod` and the quota the
@@ -835,7 +843,7 @@ replica held, because a serving group is never finished and nothing else release
 
 Two webhooks make up the admission surface. Nearly every default lives in the CRD schema; the
 mutating half exists for the one value a schema cannot reach: a role's accelerator count, which
-depends on the `InstanceType` the role names.
+depends on the `AcceleratorType` the role names.
 
 | Refused | Message names |
 |---|---|
@@ -843,10 +851,11 @@ depends on the `InstanceType` the role names.
 | a role whose members could not be named | the longest name the declared *`replicas`* and *`size`* would produce, its length and why it is not a hostname, and the ways out — shorten the role, shorten the deployment, or declare fewer replicas |
 | two roles sharing a `name` | the duplicate — refused by the **schema**, since *`roles`* is a list keyed on `name`, so this one never reaches the webhook |
 | an edit to an identity field — `model`, *`engine.name`*, *`kvCache`*, the role set, or a role's *`kind`* | the field path, and that a different value describes a different **deployment**, which is created rather than edited. See [Deployment identity fields](#deployment-identity-fields) |
-| a resource mode the named `InstanceType` does not offer | the mode and the type — a slice on a type that offers no slicing, a partition profile on a type that cannot partition, or one outside its profile inventory, with the offered list |
+| a resource mode the named `AcceleratorType` does not offer | the mode and the type — a slice on a type that offers no slicing, a partition profile on a type that cannot partition, or one outside its profile inventory, with the offered list |
 | a whole-accelerator count over the type's whole-accelerator capacity | the capacity itself, not only that the request was too large, so the next attempt is not a guess. The bound is the pool's total, not what is free, so a deployment submitted while every accelerator is held is admitted and waits in its queue; one above the largest node but within the total is admitted and stays queued — see [Accelerator Requests](../devices/requests.md#limitations) |
 | a negative or fractional *`resources.interface`*, or one with no effective RDMA/EFA path | the role's interface field and the protocol that prevents allocation; mixed backend groups and mixed fabric paths are rejected |
-| an explicit `accelerator: 0` on an acceleratable `InstanceType` shared by another role | the accelerator field, the shared type, and two recommended remedies: request at least one accelerator or move the CPU-only role to a non-acceleratable type |
+| an accelerator request (whole card, slice percentage, or partition profile) without `acceleratorType` | omit accelerator resources for a CPU-only role, or select an `AcceleratorType` |
+| an incompatible *`kvTransfer.backend`* or mixed Ascend pair — `HIXL` on a non-Ascend or CPU-only role, `NIXL` on an Ascend `AcceleratorType`, or a *Prefill*/*Decode* pair mixing an Ascend role with a non-Ascend or CPU-only role | *`spec.kvTransfer.backend`* or *`spec.roles`* and the incompatible manufacturer (or CPU-only omission) |
 | a *Prefill* and a *Decode* role both requesting a **logical slice** from types that draw on the same accelerator group | both roles and the slice field. Whole cards and partition profiles are accepted — including on one card, because partitions are isolated by the device |
 | a role whose `<deployment>-<role>` is not a DNS-1035 label | the combined **`Service`** name, which is what the pair becomes; over 63 characters or carrying a dot from a subdomain-shaped deployment name. A role the object **already had** is exempt, so a rule added later cannot strand a stored object |
 | two roles whose `Service`s would be named the same | the shared name and both claimants — a role named `x-r0` collides with a role `x` of several members, whose instance 0 is published behind `<deployment>-x-r0`. Checked on every edit, since *`replicas`* decides how many instance `Service`s a role derives |
@@ -869,23 +878,23 @@ depends on the `InstanceType` the role names.
 | a new binding to a pool with mixed member protocols for an unconstrained engine | each effective protocol and why one installed transport cannot read blocks on the others; use one protocol across the groups or another pool |
 
 **Most rules above are answered from the submitted object.** Resource mode, card count and a shared
-type's acceleratability depend on `InstanceType`; new cache binding compatibility depends on its
+type's acceleratability depend on `AcceleratorType`; new cache binding compatibility depends on its
 Binding, pool and backend. The webhook reads these objects from the API server so a stale cache
 cannot decide admission. An unchanged binding stays editable if its backend later becomes mixed.
 
 An older binding still renders its first offered transport. It can remain healthy while reads of
 blocks on another transport fail, so repair the pool even though an unrelated update is accepted.
 
-**Any rule that reads an `InstanceType` declines for a deployment being deleted**, in the mutating
+**Any rule that reads an `AcceleratorType` declines for a deployment being deleted**, in the mutating
 half and the validating half alike. Such a rule refuses when the type is absent, so leaving it on
-would let a deleted `InstanceType` block the very update that clears the deployment's finalizer, an
+would let a deleted `AcceleratorType` block the very update that clears the deployment's finalizer, an
 object its own teardown could never release.
 
 The price is named rather than hidden: an edit made while a deployment is being deleted can move a role onto a mode its type does not offer, and nothing renders the result. Why
 that trade is necessary rather than merely tidy is in [Update validation on deletion](../devices/admission.md#update-validation-on-deletion).
 
-The render, not admission, is where a not-yet-converged `InstanceType` shows up. Sizing a replica needs the `InstanceType`'s OBSERVED detail, and `InstanceType.status` has not
-converged on a freshly created object, so the render fails rather than admission refusing a perfectly legal deployment for losing a race against the `InstanceType` reconciler.
+The render, not admission, is where a not-yet-converged `AcceleratorType` shows up. Rendering an accelerated replica needs the `AcceleratorType`'s observed detail, and `AcceleratorType.status` has not
+converged on a freshly created object, so the render fails rather than admission refusing a perfectly legal deployment for losing a race against the `AcceleratorType` reconciler.
 
 A render-time failure reaches a reader as a `RenderFailed` warning event carrying the renderer's
 own message, because a pass that cannot build a replica aborts before writing any status.

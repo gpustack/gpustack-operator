@@ -36,7 +36,7 @@ See [Prefill and Decode Benchmark](../../modules/model-deployment/prefill-decode
 |---|---|---|---|
 | `ModelArtifact` | namespace | user | the Qwen3-32B weights the deployment serves |
 | `ModelPrefetch` | namespace | user | the artifact cached onto the H100 node before serving |
-| `InstanceType` | cluster | operator | the H100 accelerator group each role requests |
+| `AcceleratorType` | cluster | operator | the H100 accelerator group each role requests |
 | `ModelDeployment` | namespace | user | one *Prefill* and two *Decode* replicas behind a router |
 | Router `Deployment` and `Service` | namespace | operator | the one HTTP endpoint requests are sent to |
 
@@ -67,8 +67,7 @@ Create `ModelArtifact` `qwen3-32b` from `Qwen/Qwen3-32B` at revision
 Use that artifact and namespace throughout the procedure instead of its DeepSeek example.
 
 The captured run used the custom `bench-gpu` `InstanceType` for the same H100 accelerator group.
-This reusable manifest uses the discovered H100 `InstanceType` name. Replace the two *`instanceType`*
-values with `bench-gpu` to reproduce the captured configuration exactly.
+This reusable manifest uses the discovered H100 `AcceleratorType` name.
 
 The deployment requests one *Prefill* replica and two *Decode* replicas, each with two GPUs. All
 three engine `Pod`s and the Router ran on `gpu-node-0`.
@@ -96,7 +95,7 @@ spec:
       kind: Prefill
       replicas: 1
       size: 1
-      instanceType: gpustack--nvidia-h100-80gb-hbm3-linux-amd64
+      acceleratorType: gpustack--nvidia-h100-80gb-hbm3-linux-amd64
       image: gpustack/runner:cuda13.0-vllm0.30.0
       imagePullPolicy: IfNotPresent
       resources:
@@ -115,7 +114,7 @@ spec:
       kind: Decode
       replicas: 2
       size: 1
-      instanceType: gpustack--nvidia-h100-80gb-hbm3-linux-amd64
+      acceleratorType: gpustack--nvidia-h100-80gb-hbm3-linux-amd64
       image: gpustack/runner:cuda13.0-vllm0.30.0
       imagePullPolicy: IfNotPresent
       resources:
@@ -228,8 +227,8 @@ between the engines, and the Router returns generated tokens.
 ## Step 4: Inspect joint admission
 
 The operator manages Kueue workloads across all declared roles simultaneously. The captured workloads were
-all admitted into the captured custom `bench-gpu` queue. The reusable discovered `InstanceType`
-uses its own generated queue:
+all admitted into the captured custom `bench-gpu` queue. The reusable discovered `AcceleratorType`
+admits into the shared canonical pool queue:
 
 ```bash
 kubectl -n gpustack-bench get workloads

@@ -64,19 +64,19 @@ spec:
     - name: encode
       kind: Encode
       replicas: 1
-      instanceType: gpustack--nvidia-h100-80gb-hbm3-linux-amd64
+      acceleratorType: gpustack--nvidia-h100-80gb-hbm3-linux-amd64
       resources:
-        accelerator: "1"  # defaults to 1 on an accelerated InstanceType when omitted
+        accelerator: "1"  # defaults to 1 on an accelerated AcceleratorType when omitted
     - name: prefill
       kind: Prefill
       replicas: 1
-      instanceType: gpustack--nvidia-h100-80gb-hbm3-linux-amd64
+      acceleratorType: gpustack--nvidia-h100-80gb-hbm3-linux-amd64
       resources:
         accelerator: "1"
     - name: decode
       kind: Decode
       replicas: 1
-      instanceType: gpustack--nvidia-h100-80gb-hbm3-linux-amd64
+      acceleratorType: gpustack--nvidia-h100-80gb-hbm3-linux-amd64
       resources:
         accelerator: "1"
 ```
@@ -99,7 +99,7 @@ image floor, which is a requirement on the image you name.
 - A role *`command`* is refused on all three roles, because a custom command replaces the managed
   arguments and the sidecar proxy.
 - All three roles must run on the same accelerator platform. Admission reads it from each role's
-  `InstanceType`, so mixed or unknown platforms are refused.
+  `AcceleratorType`, so mixed or unknown platforms are refused.
 - The image an *Encode* deployment runs must carry an engine build that meets the floor of the
   matching row in [the admitted matrix](#admitted-matrix). This is a requirement on the image
   you name, not an admission rule: no check reads a version at apply time.

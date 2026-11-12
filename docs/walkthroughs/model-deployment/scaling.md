@@ -26,7 +26,7 @@ watch a replica retire.
 | Object | Scope | Creator | Purpose |
 |---|---|---|---|
 | `ModelArtifact` | namespace | user | the `qwen3-8b` weights the target serves |
-| `InstanceType` | cluster | operator | the whole-GPU type each role replica requests |
+| `AcceleratorType` | cluster | operator | the whole-GPU type each role replica requests |
 | `ModelDeployment` | namespace | user | the *PD* target whose replica counts the scaler drives |
 | `ModelDeploymentScaler` | namespace | user | the policy observed in `Shadow`, then allowed to act in `Active` |
 
@@ -40,7 +40,7 @@ was executed in the recorded benchmark.
 | Item | Value |
 |---|---|
 | GPUs | two free initially, up to four after scaling; one GPU per replica |
-| `InstanceType` | the whole-GPU type of the intended cluster; the example uses the discovered `gpustack--nvidia-h100-80gb-hbm3-linux-amd64` |
+| `AcceleratorType` | the whole-GPU type of the intended cluster; the example uses the discovered `gpustack--nvidia-h100-80gb-hbm3-linux-amd64` |
 | Namespace | `gpustack-bench` |
 | Model | `Qwen/Qwen3-8B` from `ModelArtifact` `qwen3-8b`, revision `b968826d9c46dd6066d109eabc6255188de91218` |
 | Tools | `kubectl`, `jq`, Python 3 with `aiohttp`; a source checkout provides the load client |
@@ -58,7 +58,7 @@ Confirm that no other scaler owns the target. See
 
 ## Step 1: Prepare the target
 
-Save this example as `scaling-target.yaml`. Replace both *`instanceType`* values with the whole-GPU
+Save this example as `scaling-target.yaml`. Replace both *`acceleratorType`* values with the whole-GPU
 type for the intended cluster. The benchmark used `bench-gpu`; the reusable example uses the
 discovered H100 type.
 
@@ -83,7 +83,7 @@ spec:
       kind: Prefill
       replicas: 1
       size: 1
-      instanceType: gpustack--nvidia-h100-80gb-hbm3-linux-amd64
+      acceleratorType: gpustack--nvidia-h100-80gb-hbm3-linux-amd64
       resources:
         accelerator: "1"
       extraArgs:
@@ -103,7 +103,7 @@ spec:
       kind: Decode
       replicas: 1
       size: 1
-      instanceType: gpustack--nvidia-h100-80gb-hbm3-linux-amd64
+      acceleratorType: gpustack--nvidia-h100-80gb-hbm3-linux-amd64
       resources:
         accelerator: "1"
       extraArgs:
@@ -318,7 +318,7 @@ The engine image matches by family, so no hand-computed digests or `@sha256` pin
 
 Omit *`spec.router`*, *`spec.kvCache`*, *`spec.kvTransfer`* and *`Encode`*. The following separate
 server target and scaler changes are examples, not captured output from a live cluster run. Replace
-`instanceType` for the intended cluster and check the target against the catalog before use:
+`acceleratorType` for the intended cluster and check the target against the catalog before use:
 
 ```yaml
 apiVersion: worker.gpustack.ai/v1
@@ -339,7 +339,7 @@ spec:
       kind: Server
       replicas: 1
       size: 1
-      instanceType: gpustack--nvidia-h100-80gb-hbm3-linux-amd64
+      acceleratorType: gpustack--nvidia-h100-80gb-hbm3-linux-amd64
       resources:
         accelerator: "1"
 ```
