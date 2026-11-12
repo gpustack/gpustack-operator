@@ -163,6 +163,7 @@ request that reaches a webhook. Neither window needs a restart.
 
 | `Setting` | Description |
 |---|---|
+| `aws-efa-enabled`<br/>(`GPUSTACK_AWS_EFA_ENABLED`) | Effect window: Next trigger<br/>Default: `"false"`<br/>Editable: Yes<br/>Constraint: bool<br/>Usage: Select AWS EFA for `ModelDeployment` fabric interface requests (`vpc.amazonaws.com/efa` instead of `device.gpustack.ai/rdma*`) and NIXL `LIBFABRIC` instead of `UCX`. This applies to prefill/decode transfer, remote weight delivery through `model-transfer` and `ModelExpress`, and multi-Pod vLLM `Server` and `elasticEp` roles. A bound EFA KV cache pool also selects EFA. |
 | `container-namespace`<br/>(`GPUSTACK_CONTAINER_NAMESPACE`, *chart-rendered*) | Effect window: Next trigger<br/>Default: *(blank)*<br/>Usage: Namespace to pull images from, for all built-in applications' deployments. |
 | `container-registry`<br/>(`GPUSTACK_CONTAINER_REGISTRY`, *chart-rendered*) | Effect window: Next trigger<br/>Default: *(blank)*<br/>Usage: Registry to pull images from, for all built-in applications' deployments. |
 | `image-pull-policy`<br/>(`GPUSTACK_IMAGE_PULL_POLICY`, *chart-rendered*) | Effect window: Next trigger<br/>Default: `IfNotPresent`<br/>Usage: Image pull policy for all built-in applications' deployments, on the same boundary as the secret above: a controller-rendered workload carries its own. The chart renders it, so a runtime edit to this `Setting` is reverted at the next worker start; change it through `global.imagePullPolicy` or *`image.pullPolicy`* and leave this `Setting` alone. |

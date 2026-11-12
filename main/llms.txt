@@ -2,7 +2,7 @@
 
 > GPUStack Operator discovers accelerators, organizes capacity into pools, and schedules Kubernetes workloads for interactive use and model serving.
 
-Documentation version: main. Source revision: 7f4028fbd2fd080dcf45b16cdba6ada7ef0fe230.
+Documentation version: main. Source revision: e98bebaa9dd043dca04b2fbce39d2441f60259a8.
 These pages come from the repository's docs/ sources. For version-specific behavior, use the
 documentation and code for your release. This index routes questions; follow its links for evidence.
 
@@ -120,7 +120,7 @@ documentation and code for your release. This index routes questions; follow its
 
 ## Optional
 
-- [Repository navigation](https://github.com/gpustack/gpustack-operator/blob/7f4028fbd2fd080dcf45b16cdba6ada7ef0fe230/docs/README.md): Module relationships, design records, code entry points and applicable skills for contributors.
+- [Repository navigation](https://github.com/gpustack/gpustack-operator/blob/e98bebaa9dd043dca04b2fbce39d2441f60259a8/docs/README.md): Module relationships, design records, code entry points and applicable skills for contributors.
 - [Development](https://docs.gpustack.ai/gpustack-operator/main/docs/contribute/development/index.md): Build, generate and lint the project.
 - [Local Cluster Setup](https://docs.gpustack.ai/gpustack-operator/main/docs/contribute/local-cluster-setup/index.md): Install kind and provide a cluster for development tests.
 - [Internals](https://docs.gpustack.ai/gpustack-operator/main/docs/contribute/internals/index.md): Review startup and naming constraints.

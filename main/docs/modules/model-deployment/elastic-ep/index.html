@@ -1836,7 +1836,7 @@ SGLang supports ordinary replica scaling; its native elastic protocol is not int
 <li>The profile cannot be added to or removed from an existing role.</li>
 <li>There is one serving instance per deployment. <em><code>replicas</code></em> and <em><code>size</code></em> are not a width mechanism.</li>
 <li>Only the master serves HTTP.</li>
-<li>An RDMA fabric (<em><code>resources.interface</code></em>) is optional on the <code>Server</code> role; see the <a href="/gpustack-operator/main/docs/modules/model-deployment/elastic-ep-benchmark/#infiniband-rdma-comparison">Elastic EP Benchmark</a>
+<li>An RDMA or EFA fabric (<em><code>resources.interface</code></em>) is optional on the <code>Server</code> role; see the <a href="/gpustack-operator/main/docs/modules/model-deployment/elastic-ep-benchmark/#infiniband-rdma-comparison">Elastic EP Benchmark</a>
  for a measured InfiniBand comparison.</li>
 <li>The ordinary role fields&rsquo; editability does not apply: the configuration fields are frozen with the
 profile, as described above.</li>

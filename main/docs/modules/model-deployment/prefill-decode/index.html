@@ -1827,38 +1827,32 @@ it needs.</p>
  carries the same floors as a
 requirement on the vLLM and vLLM-Ascend rows.</p>
 <h2 id="direct-transfer-transport">Direct transfer transport</h2>
-<p>The deployment-wide <code>spec.kvTransfer.backend</code> selects <code>Auto</code>, <code>Mooncake</code>, <code>NIXL</code> or <code>HIXL</code>.
-<code>spec.kvTransfer.protocol</code> accepts <code>Auto</code>, <code>TCP</code>, <code>RDMA</code>, <code>EFA</code>, <code>CANN</code> or <code>ROCM</code>. Unset
-backend and protocol default to <code>Auto</code>; the Mooncake path maps <code>Auto</code> and <code>TCP</code> to <code>tcp</code>, <code>CANN</code>
-to <code>ascend</code>, and <code>ROCM</code> to <code>hip</code>.</p>
+<p>The deployment-wide <code>spec.kvTransfer.backend</code> selects <code>Mooncake</code>, <code>NIXL</code>, or <code>HIXL</code>.
+When omitted, it defaults to <code>Mooncake</code> on non-Ascend pools and <code>HIXL</code> on Ascend pools.
+For example, select NIXL on an existing deployment with:</p>
 <div class="code-block">
   <div class="code-toolbar"><span>diff</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-diff" data-lang="diff"><span class="line"><span class="cl"> apiVersion: worker.gpustack.ai/v1
 </span></span><span class="line"><span class="cl"> kind: ModelDeployment
 </span></span><span class="line"><span class="cl"> metadata:
 </span></span><span class="line"><span class="cl">   name: qwen-pd
-</span></span><span class="line"><span class="cl">   namespace: team-a
 </span></span><span class="line"><span class="cl"> spec:
 </span></span><span class="line"><span class="cl"><span class="gi">+  kvTransfer:
 </span></span></span><span class="line"><span class="cl"><span class="gi">+    backend: NIXL
-</span></span></span><span class="line"><span class="cl"><span class="gi">+    protocol: EFA
 </span></span></span></code></pre></div>
 </div>
-<ul>
-<li><strong>Backend</strong>: Select a connector compatible with both roles&rsquo; <code>InstanceType</code> manufacturers.</li>
-<li><strong>Protocol</strong>: Select the transport for the direct link; the shared pool has its own transport.</li>
-</ul>
-<p>Admission refuses <code>HIXL</code> on non-Ascend <code>InstanceType</code>s, <code>NIXL</code> on Ascend, and mixed
-Ascend/non-Ascend pairs when <code>spec.kvTransfer</code> is set. If the manufacturer is not yet observed,
-the renderer can refuse an incompatible combination after it resolves.</p>
-<p>SGLang on Ascend defaults to HIXL with <code>--disaggregation-transfer-backend=ascend</code>, the read-only
-<code>/usr/local/Ascend/driver</code> mount and defaulted <code>ASCEND_MF_TRANSFER_PROTOCOL=sdma</code>, or
-<code>device_rdma</code> for <code>RDMA</code>. vLLM Ascend uses <code>MooncakeConnectorV1</code> and the same driver mount.</p>
-<p>AWS EFA, selected by <code>protocol: EFA</code> or resolved <code>vpc.amazonaws.com/efa</code> resources, selects the
-NIXL <code>LIBFABRIC</code> backend for vLLM, SGLang and remote <code>model-transfer</code> delivery. Supply an
-EFA-enabled runner through <code>spec.engine.image</code> or <code>roles[].image</code> and an EFA-enabled
-<code>model-transfer</code> image through Helm <code>modelTransfer.images.nvidia</code>.
-The default image builds do not include the EFA provider.</p>
+<p>Admission refuses <code>HIXL</code> on non-Ascend pools, <code>NIXL</code> on Ascend pools, and mixed
+Ascend/non-Ascend prefill/decode pairs. If the manufacturer is not yet observed, the renderer
+can refuse an incompatible combination after it resolves.</p>
+<p>Mooncake derives <code>ascend</code> on Ascend, <code>efa</code> when both roles request <code>resources.interface &gt; 0</code>
+under EFA, <code>hip</code> on AMD ROCm, <code>rdma</code> when both roles request <code>resources.interface &gt; 0</code>, and
+<code>tcp</code> otherwise. NIXL selects <code>LIBFABRIC</code> when <code>aws-efa-enabled</code> is true or a bound KV cache
+pool uses EFA, and <code>UCX</code> otherwise. HIXL uses the Ascend driver mount.
+See <a href="/gpustack-operator/main/docs/modules/model-deployment/parameterize/#transfer-parameters">Transfer parameters</a>
+ for the injected settings.</p>
+<p>For AWS EFA, supply an EFA-enabled runner through <code>spec.engine.image</code> or <code>roles[].image</code>, and
+an EFA-enabled <code>model-transfer</code> image through Helm <code>modelTransfer.images.nvidia</code> for remote
+weight delivery. The default image builds do not include the EFA provider.</p>
 <p>The engine image must support its chosen transport. <a href="/gpustack-operator/main/docs/modules/model-deployment/engine-versions/">Engine Compatibility</a>
 
 lists existing compatibility evidence; these rendered combinations require their own validation.
@@ -1901,7 +1895,7 @@ it with incompatible keys, so every lookup misses and no error is raised.</li>
 <p>This limit governs the shared pool alone: <a href="#pair-connections">a pair needs no shared pool to hand blocks
 over</a>
 .</p>
-<p>A mixed Ascend/non-Ascend pair is refused when <code>spec.kvTransfer</code> is set. Two non-Ascend roles
+<p>A mixed Ascend/non-Ascend pair is refused. Two non-Ascend roles
 can name different manufacturers, but their direct transfer interoperability is unmeasured here.</p>
 <p><a href="/gpustack-operator/main/docs/modules/devices/scheduling/#stage-4-kueue-chain">Kueue assigns a ResourceFlavor per
 PodSet</a>

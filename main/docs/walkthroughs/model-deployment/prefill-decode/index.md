@@ -9,7 +9,7 @@ the router's single endpoint.
 - [Summary](#summary)
 - [Environment](#environment)
 - [Step 1: Start disaggregated serving](#step-1-start-disaggregated-serving)
-- [Step 2: Pin the transfer protocol](#step-2-pin-the-transfer-protocol)
+- [Step 2: Select the transfer backend](#step-2-select-the-transfer-backend)
 - [Step 3: Verify the router](#step-3-verify-the-router)
 - [Step 4: Inspect joint admission](#step-4-inspect-joint-admission)
 - [Step 5: Release the application](#step-5-release-the-application)
@@ -159,35 +159,12 @@ Each engine process uses *tensor parallelism (TP)* across its two requested acce
 `--tensor-parallel-size 2` flag sets *TP* = 2. The deployment has no *Encode* role, so both roles set
 `--enable-scale-out`; see [Counting engine tokens](/gpustack-operator/main/docs/modules/model-deployment/prefill-decode/index.md#counting-engine-tokens).
 
-## Step 2: Pin the transfer protocol
+## Step 2: Select the transfer backend
 
 Disaggregated serving requires prompt KV tensors to flow from *prefill* workers to *decode* workers.
-The pair in Step 1 hands blocks over directly. An unset *`spec.kvTransfer.protocol`* renders `tcp`.
-Pin the protocol explicitly. Add the lines marked `+` to `pd-deployment.yaml`:
-
-```diff
- apiVersion: worker.gpustack.ai/v1
- kind: ModelDeployment
- metadata:
-   name: pd-arm2-pd
-   namespace: gpustack-bench
- spec:
-+  kvTransfer:
-+    protocol: TCP
-   router:
-     name: llm-d-router
-```
-
-Apply the update:
-
-```bash
-kubectl apply -f pd-deployment.yaml
-```
-
-The recorded manifest leaves the protocol unset, which renders `tcp` by default. The protocol is
-deployment-wide because it describes one link between the two roles. It accepts `Auto`, `TCP`, `RDMA`,
-`EFA`, `CANN` and `ROCM`; `Auto` renders `tcp` too. An edit restarts every role because the value renders
-into both ends' arguments. `RDMA` and `EFA` also need a matching device request on each role. See the
+The recorded pair requests no fabric interfaces, so its default Mooncake backend uses TCP.
+To select the same backend explicitly, add `spec.kvTransfer.backend: Mooncake` to the manifest.
+To use RDMA, request `resources.interface` on both roles; see the
 [RDMA walkthrough](/gpustack-operator/main/docs/walkthroughs/rdma/network-endpoints/index.md#step-3-request-interfaces-per-role).
 
 The captured engine commands rendered these transfer settings:
@@ -208,7 +185,7 @@ Decode routing-proxy init container:
 ```
 
 The [InfiniBand RDMA follow-up](/gpustack-operator/main/docs/modules/model-deployment/prefill-decode-benchmark/index.md#infiniband-rdma-comparison)
-set *`spec.kvTransfer.protocol`* to `RDMA` and requested *`resources.interface`* = `"2"` on both roles.
+requested *`resources.interface`* = `"2"` on both roles.
 Runtime logs verified the InfiniBand KV path; the configuration change alone is not transport proof.
 
 A shared store through *`spec.kvCache.poolRef`* is part of the deployment identity. Declare it in the first

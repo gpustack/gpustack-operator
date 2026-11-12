@@ -249,8 +249,6 @@ Update `epd-deployment.yaml` from the
    name: epd-arm3-epd
    namespace: gpustack-bench
  spec:
-+  kvTransfer:
-+    protocol: RDMA
    roles:
      - name: encode
        kind: Encode

@@ -2136,9 +2136,7 @@ The 16 fixed-shape cells completed <strong>640/640 requests with zero errors</st
 </span></span><span class="line"><span class="cl">   name: pd-arm2-pd
 </span></span><span class="line"><span class="cl">   namespace: gpustack-bench
 </span></span><span class="line"><span class="cl"> spec:
-</span></span><span class="line"><span class="cl"><span class="gi">+  kvTransfer:
-</span></span></span><span class="line"><span class="cl"><span class="gi">+    protocol: RDMA
-</span></span></span><span class="line"><span class="cl"><span class="gi"></span>   roles:
+</span></span><span class="line"><span class="cl">   roles:
 </span></span><span class="line"><span class="cl">     - name: prefill
 </span></span><span class="line"><span class="cl">       kind: Prefill
 </span></span><span class="line"><span class="cl">       resources:
@@ -2151,7 +2149,7 @@ The 16 fixed-shape cells completed <strong>640/640 requests with zero errors</st
 </span></span><span class="line"><span class="cl"><span class="gi">+        interface: &#34;2&#34;
 </span></span></span></code></pre></div>
 </div>
-<p>Intra-<code>Pod</code> <em>TP</em> still used NVLink; the RDMA setting applied to cross-<code>Pod</code> Mooncake KV transfer.</p>
+<p>Intra-<code>Pod</code> <em>TP</em> still used NVLink; the interface requests selected RDMA for cross-<code>Pod</code> Mooncake KV transfer.</p>
 <p>Mooncake <em>TP</em> workers logged protocol <code>rdma</code>, KV-cache registration and RDMA-ready acknowledgements.
 The captured <em>Decode</em> workers enumerated <code>mlx5_6</code> and <code>mlx5_7</code>, with LIDs <code>21816</code> and <code>21819</code>.
 This runtime evidence establishes the InfiniBand KV path; HTTP routing and bootstrap control traffic remain separate.</p>

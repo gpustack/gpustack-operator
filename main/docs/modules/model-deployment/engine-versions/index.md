@@ -101,50 +101,45 @@ admission refusal.
 
 ## Transport compatibility
 
-A **store** cell is the pool's `KVCacheBackend.spec.transport.protocol`, which a member group can
-override and the engine is handed. A **direct** cell is *`spec.kvTransfer.protocol`* on a
-*prefill/decode* pair. The first column gives the API and Mooncake spellings. `Auto` renders
-`tcp` on either path; the direct path also renders `tcp` when the field is unset.
+The store path uses `KVCacheBackend.spec.transport.protocol`. The direct prefill/decode path
+selects `Mooncake`, `NIXL`, or `HIXL` through `spec.kvTransfer.backend`; see
+[Transfer parameters](/gpustack-operator/main/docs/modules/model-deployment/parameterize/index.md#transfer-parameters) for fabric selection.
 
-| Transport (API/Mooncake) | Engine | Store path | Direct path |
-|---|---|---|---|
-| `Auto`, `TCP` / `tcp` | vLLM | **Works**, default images; beside a direct path it keeps its store connections open too and did not [run out of ports](#limitations) where measured | **Works**, default images; it keeps its connections open and did not [run out of ports](#limitations) where measured |
-| `TCP` / `tcp` | SGLang | **Works**, with a published store image on [its client's line](#minimum-versions), named by hand; beside a direct path, [it runs out of ports](#limitations) unless [`model-deployment-tcp-tw-reuse`](/gpustack-operator/main/docs/reference/settings/index.md#sglang-time-wait-reuse) is on | **Works**, default images; under sustained load [it runs out of ports](#limitations), and [`model-deployment-tcp-tw-reuse`](/gpustack-operator/main/docs/reference/settings/index.md#sglang-time-wait-reuse) is the remedy, run so far only beside a store |
-| `TCP` / `tcp` | vLLM-Ascend | **Not supported**: refused at admission, its store client accepts `CANN` only | **Not supported**: the value is ignored, the path runs `ascend` |
-| `RDMA` / `rdma` | vLLM | **Not verified** | **Works**, default images on InfiniBand H100 SXM5 ([Prefill and Decode Benchmark](/gpustack-operator/main/docs/modules/model-deployment/prefill-decode-benchmark/index.md#infiniband-rdma-comparison), [Encode, Prefill and Decode Benchmark](/gpustack-operator/main/docs/modules/model-deployment/encode-prefill-decode-benchmark/index.md#infiniband-rdma-comparison)) |
-| `RDMA` / `rdma` | SGLang | **Not verified** | **Not supported**: the operator grants SGLang's direct path no device |
-| `RDMA` / `rdma` | vLLM-Ascend | **Not supported**: refused at admission, as for `TCP` | **Not supported**: ignored, as for `tcp` |
-| `EFA` / `efa` | vLLM | **Own image**: an [EFA build of Mooncake](/gpustack-operator/main/docs/modules/rdma/operations/index.md#efa-engine-images) in the engine; default store image | **Own image**: [the same build](/gpustack-operator/main/docs/modules/rdma/operations/index.md#efa-engine-images) on both ends |
-| `EFA` / `efa` | SGLang | **Not supported**: [no EFA build serves SGLang](/gpustack-operator/main/docs/modules/rdma/operations/index.md#sglang-and-efa) | **Not supported**: the operator grants SGLang's direct path no device |
-| `EFA` / `efa` | vLLM-Ascend | **Not supported**: refused at admission, as for `TCP` | **Not supported**: ignored, as for `tcp` |
-| `CANN` / `ascend` | vLLM | **Not supported**: the CUDA client has no Ascend transport | **Not supported**: the CUDA client has no Ascend transport |
-| `CANN` / `ascend` | SGLang | **Not verified** | **Not verified** |
-| `CANN` / `ascend` | vLLM-Ascend | **Not verified**; the members need [an image carrying CANN](/gpustack-operator/main/docs/modules/kv-cache/backend/index.md#image) | **Works**, `cann9.1-910b-vllm0.23.0` named by hand in *`roles[].image`*, behind `llm-d-router` |
-| `ROCM` / `hip` | vLLM, SGLang | **Not verified** | **Not verified** |
-| `ROCM` / `hip` | vLLM-Ascend | **Not supported**: refused at admission, as for `TCP` | **Not supported**: ignored, as for `tcp` |
-| `MUSA`, `MACA` / `musa`, `maca` | vLLM, SGLang, vLLM-Ascend | **Not verified** | **Rejected by the direct-path schema**: these are same-node IPC transports, while *prefill* and *decode* have no same-node placement guarantee |
+The store compatibility observations below apply to the named images.
 
-The vLLM and SGLang verdicts are read on their CUDA runner images. What each verdict means:
+| Transport (API/Mooncake) | Engine | Store path |
+|---|---|---|
+| `TCP` / `tcp` | vLLM | **Works**, default images; beside a direct path it keeps its store connections open too and did not [run out of ports](#limitations) where measured |
+| `TCP` / `tcp` | SGLang | **Works**, with a published store image on [its client's line](#minimum-versions), named by hand; beside a direct path, [it runs out of ports](#limitations) unless [`model-deployment-tcp-tw-reuse`](/gpustack-operator/main/docs/reference/settings/index.md#sglang-time-wait-reuse) is on |
+| `TCP` / `tcp` | vLLM-Ascend | **Not supported**: refused at admission, its store client accepts `CANN` only |
+| `RDMA` / `rdma` | vLLM | **Not verified** |
+| `RDMA` / `rdma` | SGLang | **Not verified** |
+| `RDMA` / `rdma` | vLLM-Ascend | **Not supported**: refused at admission, as for `TCP` |
+| `EFA` / `efa` | vLLM | **Own image**: an [EFA build of Mooncake](/gpustack-operator/main/docs/modules/rdma/operations/index.md#efa-engine-images) in the engine; default store image |
+| `EFA` / `efa` | SGLang | **Not supported**: [no EFA build serves SGLang](/gpustack-operator/main/docs/modules/rdma/operations/index.md#sglang-and-efa) |
+| `EFA` / `efa` | vLLM-Ascend | **Not supported**: refused at admission, as for `TCP` |
+| `CANN` / `ascend` | vLLM | **Not supported**: the CUDA client has no Ascend transport |
+| `CANN` / `ascend` | SGLang | **Not verified** |
+| `CANN` / `ascend` | vLLM-Ascend | **Not verified**; the members need [an image carrying CANN](/gpustack-operator/main/docs/modules/kv-cache/backend/index.md#image) |
+| `ROCM` / `hip` | vLLM, SGLang | **Not verified** |
+| `ROCM` / `hip` | vLLM-Ascend | **Not supported**: refused at admission, as for `TCP` |
+| `MUSA`, `MACA` / `musa`, `maca` | vLLM, SGLang, vLLM-Ascend | **Not verified** |
 
-- **Works**: run on this operator with blocks moving, by the criterion under [the
-  minimum](#minimum-versions), on the images the cell names.
-- **Own image**: works only on an engine image you build and keep up to date yourself.
-- **Not supported**: admission refuses it, the operator renders nothing for it, or no image the
-  cell could run carries the transport; the cell says which.
-- **Not verified**: no run. Nothing refuses it; nothing here says it works.
 
-**"Default images" needs no image work from you**: a stock runner image the project publishes,
-named in *`engine.image`* or *`roles[].image`*, and the
-[`kv-cache-backend-image`](/gpustack-operator/main/docs/reference/settings/index.md) default for the store members. "Named by
-hand" is a published image you write into *`roles[].image`* or the backend's *`spec.image`*.
+The following direct-path observations apply to the named configurations, not every backend or image:
 
-**A cell is one path.** A deployment using both paths is a separate configuration, read from [the
-minimum](#minimum-versions) rather than added up from two cells; both paths over EFA at once
-have not been run. With a positive *`resources.interface`*, an `RDMA` path beside an `EFA` one is
-refused at admission.
+- Mooncake TCP worked with the default vLLM and SGLang images. SGLang under sustained load can
+  [run out of ports](#limitations); `model-deployment-tcp-tw-reuse` is the documented remedy.
+- Mooncake RDMA worked with vLLM on InfiniBand H100 SXM5 in the
+  [Prefill and Decode Benchmark](/gpustack-operator/main/docs/modules/model-deployment/prefill-decode-benchmark/index.md#infiniband-rdma-comparison) and
+  [Encode, Prefill and Decode Benchmark](/gpustack-operator/main/docs/modules/model-deployment/encode-prefill-decode-benchmark/index.md#infiniband-rdma-comparison).
+- EFA requires an [EFA engine build](/gpustack-operator/main/docs/modules/rdma/operations/index.md#efa-engine-images). The default store
+  image carries EFA. The combined store and direct paths over EFA have not been run here.
+- The recorded vLLM-Ascend direct path used `cann9.1-910b-vllm0.23.0` behind `llm-d-router`.
+  Other direct backend and fabric combinations require separate validation.
+- A store on Ascend requires CANN; its members need an [image carrying CANN](/gpustack-operator/main/docs/modules/kv-cache/backend/index.md#image).
 
-On AWS the `RDMA` rows do not apply; [choose `EFA` or
-`TCP`](../rdma/operations.md#rdma-on-aws).
+When a store and direct path request incompatible fabrics, admission refuses the deployment.
 
 ## Remote weight loading
 

@@ -1614,8 +1614,8 @@ An unset or zero count adds no device request. Both vLLM and SGLang prefill/deco
 request interfaces for RDMA or EFA transfer paths.</p>
 <p>The key follows the bound cache backend&rsquo;s effective group protocol and any direct <em>prefill/decode</em>
 transport the engine actually renders. A managed, non-Ascend vLLM Server collective can select RDMA
-when it has multiple members or Elastic EP. Eligible NIXL-based remote weight delivery can also select
-RDMA. See <a href="/gpustack-operator/main/docs/modules/model-delivery/remote/">Remote Weight Delivery</a>
+or EFA when it has multiple members or Elastic EP. Eligible NIXL-based remote weight delivery can also
+select RDMA or EFA. See <a href="/gpustack-operator/main/docs/modules/model-delivery/remote/">Remote Weight Delivery</a>
  for its qualification limits.</p>
 <p>A device grant does not establish that a transport has been validated. Different backend-group
 protocols or an RDMA and EFA mix are refused for a positive count.</p>
@@ -2433,7 +2433,7 @@ depends on the <code>InstanceType</code> the role names.</p>
           <td>both values and the field each came from. A managed direct decoder is exempt, since its proxy owns the declared port. A stored role is judged only when an edit changes its <em><code>ports</code></em> or arguments</td>
       </tr>
       <tr>
-          <td>a port the operator reserves for a listener it synthesizes onto the role — vLLM&rsquo;s KV event ports under <code>llm-d-router</code>, or the bootstrap port of a prefiller in a declared pair that names a router or a cache — declared in <em><code>ports</code></em>, or passed as <code>--port</code> in <em><code>extraArgs</code></em> by a role declaring no <em><code>ports</code></em></td>
+          <td>a port the operator reserves for a listener it synthesizes onto the role — vLLM&rsquo;s KV event ports under <code>llm-d-router</code>, vLLM&rsquo;s <code>NIXL</code> side-channel port on both roles, or the bootstrap port of a prefiller in a declared pair that names a router or a cache — declared in <em><code>ports</code></em>, or passed as <code>--port</code> in <em><code>extraArgs</code></em> by a role declaring no <em><code>ports</code></em></td>
           <td>the port, the field it came from and the reserved set, on <em><code>spec.router</code></em> when a router is named. A replaced <em><code>command</code></em> is exempt, since nothing is synthesized onto it. A stored <code>--port</code> collision is left alone until an edit changes it; adding a router that creates one is refused</td>
       </tr>
       <tr>

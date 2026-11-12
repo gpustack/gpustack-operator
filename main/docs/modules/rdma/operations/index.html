@@ -1984,7 +1984,7 @@ runner images carry the standard build, which has no EFA transport. Granted an E
 engine on that build falls to the verbs path, fails creating its completion queue with <code>Operation not supported</code>, and never starts: the <code>Pod</code> restarts in a loop. Without the grant it moves KV over TCP
 and says nothing.</p>
 <p><strong>Both transfer paths require the engine&rsquo;s EFA build.</strong> A store group on <code>EFA</code> hands the engines it serves the
-protocol <code>EFA</code>, and <code>kvTransfer.protocol: EFA</code> renders <code>efa</code> into both ends of a direct pair, so
+protocol <code>EFA</code>, and the <code>aws-efa-enabled</code> Setting selects EFA for a direct pair with interface requests on both roles, so
 every engine <code>Pod</code> on either path needs the EFA build. The store members do not: the
 <a href="/gpustack-operator/main/docs/modules/kv-cache/backend/#image">default member image</a>
  already carries EFA.</p>

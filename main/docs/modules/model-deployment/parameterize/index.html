@@ -1701,12 +1701,45 @@ rules are described in <a href="/gpustack-operator/main/docs/modules/kv-cache/in
   </tbody>
 </table>
 <h2 id="transfer-parameters">Transfer parameters</h2>
-<p>The table applies to managed prefill and decode roles behind a router. Unset or <code>Auto</code>
-<code>spec.kvTransfer.protocol</code> resolves to <code>tcp</code> (<code>RDMA</code>, <code>EFA</code>, <code>CANN</code> and <code>ROCM</code> must be declared
-explicitly; on NIXL, an EFA-bound pool or interface grant still switches the NIXL transport plugin
-to <code>LIBFABRIC</code>). See <a href="/gpustack-operator/main/docs/modules/model-deployment/prefill-decode/#direct-transfer-transport">Direct transfer transport</a>
- for
-admission and image requirements.</p>
+<p>The table applies to managed <em>Prefill</em> and <em>Decode</em> roles behind a router. See
+<a href="/gpustack-operator/main/docs/modules/model-deployment/prefill-decode/#direct-transfer-transport">Direct transfer transport</a>
+ for admission and image
+requirements.</p>
+<p><span class="diagram-scroll"><img src="/gpustack-operator/main/docs/assets/diagrams/model-deployment-transfer-decision.svg" alt="KV transfer parameter decision flow" decoding="async"></span></p>
+<!--
+flowchart TD
+    PAIR["Managed Prefill + Decode pair behind spec.router"] -> BACKEND{"spec.kvTransfer.backend"}
+    BACKEND ->|"Mooncake or omitted on NVIDIA/AMD"| MC{"Mooncake link resolution"}
+    BACKEND ->|"NIXL on NVIDIA/AMD"| NIXL{"aws-efa-enabled or EFA pool?"}
+    BACKEND ->|"HIXL or omitted on Ascend"| HIXL["HIXL on Ascend: mount /usr/local/Ascend/driver RO, port 8998"]
+    MC ->|"1. Ascend pool"| MC_ASC["protocol=ascend: vLLM MooncakeConnectorV1 or SGLang mooncake + driver mount"]
+    MC ->|"2. Pair interface > 0 + EFA"| MC_EFA["protocol=efa: vLLM mooncake_protocol=efa or SGLang mooncake + vpc.amazonaws.com/efa"]
+    MC ->|"3. AMD ROCm pool"| MC_HIP["protocol=hip: vLLM mooncake_protocol=hip or SGLang mooncake (XGMI + RDMA/TCP auto-discovery)"]
+    MC ->|"4. NVIDIA + Pair interface > 0"| MC_RDMA["protocol=rdma: vLLM mooncake_protocol=rdma or SGLang mooncake + device.gpustack.ai/rdma*"]
+    MC ->|"5. NVIDIA without Pair interface > 0"| MC_TCP["protocol=tcp: vLLM mooncake_protocol=tcp or SGLang mooncake_tcp + defaulted MC_FORCE_TCP=1"]
+    NIXL ->|"Yes"| NIXL_EFA["Plugin LIBFABRIC: vLLM NixlConnector or SGLang nixl, port 8998"]
+    NIXL ->|"No"| NIXL_UCX["Plugin UCX: vLLM NixlConnector or SGLang nixl, port 8998"]
+    HIXL -> HIXL_OUT["vLLM MooncakeConnectorV1 + ASCEND_AUTO_CONNECT=1 | SGLang ascend + ASCEND_MF_TRANSFER_PROTOCOL=sdma"]
+-->
+<p>The operator resolves transfer parameters in two steps:</p>
+<ul>
+<li><strong>Step 1 — Backend selection</strong>: <em><code>spec.kvTransfer.backend</code></em> selects <code>Mooncake</code>, <code>NIXL</code>, or <code>HIXL</code>. When omitted, the operator defaults to <code>HIXL</code> on Ascend pools and <code>Mooncake</code> on NVIDIA or AMD pools. Every backend uses base port <code>8998</code> for its KV handshake listener.</li>
+<li><strong>Step 2 — Link and parameter derivation</strong>:
+<ul>
+<li><strong>Mooncake</strong>: Evaluates pool vendor, pair <em><code>resources.interface &gt; 0</code></em> (both <em>Prefill</em> and <em>Decode</em>), and EFA state in order:
+<ol>
+<li><strong>Ascend (<code>ascend</code>)</strong>: Renders <code>MooncakeConnectorV1</code> on vLLM or <code>--disaggregation-transfer-backend=mooncake</code> on SGLang, mounts <code>/usr/local/Ascend/driver</code> read-only, and omits <code>MC_FORCE_TCP</code>.</li>
+<li><strong>EFA (<code>efa</code>)</strong>: When both roles request <em><code>interface &gt; 0</code></em> and <code>aws-efa-enabled</code> is <code>true</code> (or a bound <code>KVCache</code> pool uses EFA), allocates <code>vpc.amazonaws.com/efa</code> and renders <code>mooncake_protocol: efa</code> on vLLM or <code>mooncake</code> on SGLang.</li>
+<li><strong>AMD ROCm (<code>hip</code>)</strong>: On AMD pools, renders <code>mooncake_protocol: hip</code> on vLLM or <code>mooncake</code> on SGLang without <code>MC_FORCE_TCP</code>, so Mooncake&rsquo;s <code>MultiTransport</code> auto-discovers intra-node XGMI alongside cross-node RDMA or TCP.</li>
+<li><strong>NVIDIA RDMA (<code>rdma</code>)</strong>: When both roles request <em><code>interface &gt; 0</code></em> on NVIDIA, allocates <code>device.gpustack.ai/rdma*</code> and renders <code>mooncake_protocol: rdma</code> on vLLM or <code>mooncake</code> on SGLang without <code>MC_FORCE_TCP</code>.</li>
+<li><strong>NVIDIA TCP fallback (<code>tcp</code>)</strong>: Without pair <em><code>interface &gt; 0</code></em> on NVIDIA, renders <code>mooncake_protocol: tcp</code> on vLLM or <code>mooncake_tcp</code> on SGLang and defaults <code>MC_FORCE_TCP=1</code> (unless a non-TCP store shares the process) to prevent unconfigured cross-host NVLink selection.</li>
+</ol>
+</li>
+<li><strong>NIXL</strong>: Selects <code>LIBFABRIC</code> when the <code>aws-efa-enabled</code> <code>Setting</code> is <code>true</code> or a bound <code>KVCache</code> pool uses EFA; otherwise selects <code>UCX</code> (which negotiates InfiniBand, RoCE, NVLink/IPC, or TCP at runtime). On vLLM, both <em>Prefill</em> and <em>Decode</em> open side-channel port <code>8998</code>.</li>
+<li><strong>HIXL</strong>: Mounts <code>/usr/local/Ascend/driver</code> read-only on both engines so CANN <code>hccn_tool</code> resolves NPU RoCE endpoints, and defaults <code>ASCEND_AUTO_CONNECT=1</code> on vLLM or <code>ASCEND_MF_TRANSFER_PROTOCOL=sdma</code> on SGLang.</li>
+</ul>
+</li>
+</ul>
 <table>
   <thead>
       <tr>
@@ -1728,8 +1761,8 @@ admission and image requirements.</p>
       <tr>
           <td>vLLM</td>
           <td>Owned</td>
-          <td>Auto or Mooncake, NVIDIA/AMD</td>
-          <td><code>MooncakeConnector</code>, prefill <code>VLLM_MOONCAKE_BOOTSTRAP_PORT=8998</code>; <code>MOONCAKE_CONFIG_PATH</code> and generated file with a pool</td>
+          <td>Mooncake, NVIDIA/AMD</td>
+          <td><code>MooncakeConnector</code> (<code>mooncake_protocol</code> set to <code>rdma</code>, <code>efa</code>, <code>hip</code>, or <code>tcp</code>), prefill <code>VLLM_MOONCAKE_BOOTSTRAP_PORT=8998</code>; <code>MOONCAKE_CONFIG_PATH</code> and generated file with a pool</td>
           <td>Operator owns connector and environment keys.</td>
       </tr>
       <tr>
@@ -1743,21 +1776,21 @@ admission and image requirements.</p>
           <td>vLLM</td>
           <td>Owned</td>
           <td>NIXL, NVIDIA/AMD</td>
-          <td><code>VLLM_NIXL_SIDE_CHANNEL_HOST</code> from <code>status.podIP</code>, port <code>5600</code> on both roles</td>
+          <td><code>VLLM_NIXL_SIDE_CHANNEL_HOST</code> from <code>status.podIP</code>, container port <code>8998</code> on both roles</td>
           <td>Host is reserved.</td>
       </tr>
       <tr>
           <td>vLLM</td>
           <td>Owned</td>
-          <td>Auto or Mooncake, Ascend</td>
-          <td><code>MooncakeConnectorV1</code>, <code>kv_port: 8998</code>, role <code>tp_size</code> and <code>dp_size</code>; read-only <code>/usr/local/Ascend/driver</code> mount</td>
+          <td>Mooncake, Ascend</td>
+          <td><code>MooncakeConnectorV1</code> (<code>kv_port: 8998</code> and <code>prefill</code>/<code>decode</code> <code>tp_size</code> and <code>dp_size</code> in <code>--kv-transfer-config</code>), prefill container port <code>8998</code>, and read-only <code>/usr/local/Ascend/driver</code> mount</td>
           <td>Connector document derives parallel sizes from role configuration.</td>
       </tr>
       <tr>
           <td>vLLM</td>
           <td>Owned</td>
           <td>HIXL, Ascend</td>
-          <td><code>MooncakeConnectorV1</code> and read-only <code>/usr/local/Ascend/driver</code> mount</td>
+          <td><code>MooncakeConnectorV1</code> (<code>kv_port: 8998</code> and <code>prefill</code>/<code>decode</code> <code>tp_size</code> and <code>dp_size</code> in <code>--kv-transfer-config</code>), prefill container port <code>8998</code>, and read-only <code>/usr/local/Ascend/driver</code> mount</td>
           <td>Operator owns connector document.</td>
       </tr>
       <tr>
@@ -1771,8 +1804,8 @@ admission and image requirements.</p>
           <td>vLLM</td>
           <td>Defaulted</td>
           <td>NIXL, NVIDIA/AMD</td>
-          <td><code>VLLM_NIXL_SIDE_CHANNEL_PORT=5600</code></td>
-          <td>User environment wins.</td>
+          <td><code>VLLM_NIXL_SIDE_CHANNEL_PORT=8998</code></td>
+          <td>Overrides upstream vLLM default <code>5600</code>; user environment wins.</td>
       </tr>
       <tr>
           <td>vLLM</td>
@@ -1782,17 +1815,10 @@ admission and image requirements.</p>
           <td>User environment wins.</td>
       </tr>
       <tr>
-          <td>vLLM</td>
-          <td>Defaulted</td>
-          <td>HIXL and RDMA, Ascend</td>
-          <td><code>ASCEND_GLOBAL_RESOURCE_CONFIG={&quot;comm_resource_config.protocol_desc&quot;:&quot;roce:device&quot;}</code>, <code>HCCL_INTRA_ROCE_ENABLE=1</code></td>
-          <td>User environment wins.</td>
-      </tr>
-      <tr>
           <td>SGLang</td>
           <td>Owned</td>
-          <td>Mooncake, or Auto on NVIDIA/AMD</td>
-          <td><code>--disaggregation-mode=prefill</code> or <code>decode</code>, <code>--disaggregation-transfer-backend=mooncake_tcp</code> or <code>mooncake</code>, prefill <code>--disaggregation-bootstrap-port=8998</code></td>
+          <td>Mooncake, NVIDIA/AMD/Ascend</td>
+          <td><code>--disaggregation-mode=prefill</code> or <code>decode</code>, <code>--disaggregation-transfer-backend=mooncake_tcp</code> or <code>mooncake</code>, prefill <code>--disaggregation-bootstrap-port=8998</code>; read-only <code>/usr/local/Ascend/driver</code> mount on Ascend</td>
           <td>Operator owns disaggregation flags.</td>
       </tr>
       <tr>
@@ -1812,7 +1838,7 @@ admission and image requirements.</p>
       <tr>
           <td>SGLang</td>
           <td>Owned</td>
-          <td>Auto or HIXL, Ascend</td>
+          <td>HIXL, Ascend</td>
           <td><code>--disaggregation-mode=prefill</code> or <code>decode</code>, <code>--disaggregation-transfer-backend=ascend</code>, prefill <code>--disaggregation-bootstrap-port=8998</code>, read-only <code>/usr/local/Ascend/driver</code> mount</td>
           <td>Operator owns disaggregation flags.</td>
       </tr>
@@ -1833,8 +1859,8 @@ admission and image requirements.</p>
       <tr>
           <td>SGLang</td>
           <td>Defaulted</td>
-          <td>Auto or HIXL, Ascend</td>
-          <td><code>ASCEND_MF_TRANSFER_PROTOCOL=sdma</code>, or <code>device_rdma</code> on RDMA</td>
+          <td>HIXL, Ascend</td>
+          <td><code>ASCEND_MF_TRANSFER_PROTOCOL=sdma</code></td>
           <td>User environment wins.</td>
       </tr>
   </tbody>

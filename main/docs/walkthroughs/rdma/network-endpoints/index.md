@@ -126,7 +126,7 @@ spanning multiple sockets are packed into the minimum number of *NUMA* nodes.
 In a `ModelDeployment`, roles do not declare raw resource keys. Specify the number of network
 interfaces under *`roles[].resources.interface`*.
 The operator refuses an interface request when no *RDMA* or EFA transfer path uses it.
-A *prefill* and *decode* pair with `spec.kvTransfer.protocol: RDMA` is such a path:
+A managed *prefill* and *decode* pair with interface requests on both roles is such a path:
 
 ```yaml
 apiVersion: worker.gpustack.ai/v1
@@ -143,7 +143,7 @@ spec:
   router:
     name: llm-d-router
   kvTransfer:
-    protocol: RDMA
+    backend: Mooncake
   roles:
     - name: prefill
       kind: Prefill
@@ -166,7 +166,7 @@ When `interface` is greater than 1, it renders `device.gpustack.ai/rdma: N`.
 Each allocated endpoint then corresponds to an independent physical adapter
 (see [A minimal deployment](/gpustack-operator/main/docs/modules/model-deployment/configuration/index.md#minimal-deployment)).
 
-The same request without *`router`*, *`kvTransfer`* or a cache backend that uses *RDMA* fails at admission with
+The same request without *`router`* or a cache backend that uses *RDMA* fails at admission with
 `no effective RDMA or EFA transfer leg uses the requested interfaces`.
 A cache backend on *RDMA* is the other path, and Step 4 sets it up.
 
@@ -224,7 +224,7 @@ spec:
           fabricInterfaceCount: 2
 ```
 
-In `ModelDeployment`, set `kvTransfer.protocol: EFA` and specify custom runner images containing
+Enable the `aws-efa-enabled` Setting for `ModelDeployment` and specify custom runner images containing
 `libfabric` and EFA-enabled Mooncake builds.
 
 ## Limitations
@@ -248,7 +248,7 @@ In `ModelDeployment`, set `kvTransfer.protocol: EFA` and specify custom runner i
 | Fewer `uverbs` devices inside container than requested shared units | Request exceeds eligible HCA count, or policy excludes granted endpoints | `GetPreferredAllocation` spreads `rdma.shared` tokens across distinct eligible HCAs first, then repeats HCAs. Check eligible capacity and [policy status](/gpustack-operator/main/docs/modules/rdma/operations/index.md#selection-policy). Use `device.gpustack.ai/rdma` for whole-endpoint ownership within the exclusive family |
 | `Node` unexpectedly loses `feature.gpustack.ai/rdma.capable` | Status: every endpoint on the node reports `Failed` or lacks a bound *RDMA* device | Check kernel dmesg and interface carrier status; operator removes the label when every endpoint reports `Failed` or lacks a bound *RDMA* device. See [Network Topology](/gpustack-operator/main/docs/modules/rdma/network-topology/index.md#three-node-labels) |
 | AWS EFA workload remains `Pending` indefinitely | `Workload` requested `device.gpustack.ai/rdma` instead of EFA | EFA nodes expose 0 allocatable for standard *RDMA* keys; configure `transport.protocol: EFA` or `TCP` |
-| `ModelDeployment` rejected with `no effective RDMA or EFA transfer leg uses the requested interfaces` | Interface requested with no *RDMA* or EFA path | Pair the request with `kvTransfer.protocol: RDMA` or `EFA` on a *prefill* and *decode* pair, or with a `KVCacheBackend` on that transport. A role with its own *`command`* has no managed direct path |
+| `ModelDeployment` rejected with `no effective RDMA or EFA transfer leg uses the requested interfaces` | Interface requested with no *RDMA* or EFA path | Request interfaces on both roles of a managed *prefill* and *decode* pair, or use a `KVCacheBackend` on that transport. A role with its own *`command`* has no managed direct path |
 
 ---
 

@@ -1650,26 +1650,24 @@ check of the same <a href="/gpustack-operator/main/docs/modules/model-deployment
  withdraws an eligible member. Neither probe outcome is an
 admission refusal.</p>
 <h2 id="transport-compatibility">Transport compatibility</h2>
-<p>A <strong>store</strong> cell is the pool&rsquo;s <code>KVCacheBackend.spec.transport.protocol</code>, which a member group can
-override and the engine is handed. A <strong>direct</strong> cell is <em><code>spec.kvTransfer.protocol</code></em> on a
-<em>prefill/decode</em> pair. The first column gives the API and Mooncake spellings. <code>Auto</code> renders
-<code>tcp</code> on either path; the direct path also renders <code>tcp</code> when the field is unset.</p>
+<p>The store path uses <code>KVCacheBackend.spec.transport.protocol</code>. The direct prefill/decode path
+selects <code>Mooncake</code>, <code>NIXL</code>, or <code>HIXL</code> through <code>spec.kvTransfer.backend</code>; see
+<a href="/gpustack-operator/main/docs/modules/model-deployment/parameterize/#transfer-parameters">Transfer parameters</a>
+ for fabric selection.</p>
+<p>The store compatibility observations below apply to the named images.</p>
 <table>
   <thead>
       <tr>
           <th>Transport (API/Mooncake)</th>
           <th>Engine</th>
           <th>Store path</th>
-          <th>Direct path</th>
       </tr>
   </thead>
   <tbody>
       <tr>
-          <td><code>Auto</code>, <code>TCP</code> / <code>tcp</code></td>
+          <td><code>TCP</code> / <code>tcp</code></td>
           <td>vLLM</td>
           <td><strong>Works</strong>, default images; beside a direct path it keeps its store connections open too and did not <a href="#limitations">run out of ports</a>
- where measured</td>
-          <td><strong>Works</strong>, default images; it keeps its connections open and did not <a href="#limitations">run out of ports</a>
  where measured</td>
       </tr>
       <tr>
@@ -1679,67 +1677,52 @@ override and the engine is handed. A <strong>direct</strong> cell is <em><code>s
 , named by hand; beside a direct path, <a href="#limitations">it runs out of ports</a>
  unless <a href="/gpustack-operator/main/docs/reference/settings/#sglang-time-wait-reuse"><code>model-deployment-tcp-tw-reuse</code></a>
  is on</td>
-          <td><strong>Works</strong>, default images; under sustained load <a href="#limitations">it runs out of ports</a>
-, and <a href="/gpustack-operator/main/docs/reference/settings/#sglang-time-wait-reuse"><code>model-deployment-tcp-tw-reuse</code></a>
- is the remedy, run so far only beside a store</td>
       </tr>
       <tr>
           <td><code>TCP</code> / <code>tcp</code></td>
           <td>vLLM-Ascend</td>
           <td><strong>Not supported</strong>: refused at admission, its store client accepts <code>CANN</code> only</td>
-          <td><strong>Not supported</strong>: the value is ignored, the path runs <code>ascend</code></td>
       </tr>
       <tr>
           <td><code>RDMA</code> / <code>rdma</code></td>
           <td>vLLM</td>
           <td><strong>Not verified</strong></td>
-          <td><strong>Works</strong>, default images on InfiniBand H100 SXM5 (<a href="/gpustack-operator/main/docs/modules/model-deployment/prefill-decode-benchmark/#infiniband-rdma-comparison">Prefill and Decode Benchmark</a>
-, <a href="/gpustack-operator/main/docs/modules/model-deployment/encode-prefill-decode-benchmark/#infiniband-rdma-comparison">Encode, Prefill and Decode Benchmark</a>
-)</td>
       </tr>
       <tr>
           <td><code>RDMA</code> / <code>rdma</code></td>
           <td>SGLang</td>
           <td><strong>Not verified</strong></td>
-          <td><strong>Not supported</strong>: the operator grants SGLang&rsquo;s direct path no device</td>
       </tr>
       <tr>
           <td><code>RDMA</code> / <code>rdma</code></td>
           <td>vLLM-Ascend</td>
           <td><strong>Not supported</strong>: refused at admission, as for <code>TCP</code></td>
-          <td><strong>Not supported</strong>: ignored, as for <code>tcp</code></td>
       </tr>
       <tr>
           <td><code>EFA</code> / <code>efa</code></td>
           <td>vLLM</td>
           <td><strong>Own image</strong>: an <a href="/gpustack-operator/main/docs/modules/rdma/operations/#efa-engine-images">EFA build of Mooncake</a>
  in the engine; default store image</td>
-          <td><strong>Own image</strong>: <a href="/gpustack-operator/main/docs/modules/rdma/operations/#efa-engine-images">the same build</a>
- on both ends</td>
       </tr>
       <tr>
           <td><code>EFA</code> / <code>efa</code></td>
           <td>SGLang</td>
           <td><strong>Not supported</strong>: <a href="/gpustack-operator/main/docs/modules/rdma/operations/#sglang-and-efa">no EFA build serves SGLang</a>
 </td>
-          <td><strong>Not supported</strong>: the operator grants SGLang&rsquo;s direct path no device</td>
       </tr>
       <tr>
           <td><code>EFA</code> / <code>efa</code></td>
           <td>vLLM-Ascend</td>
           <td><strong>Not supported</strong>: refused at admission, as for <code>TCP</code></td>
-          <td><strong>Not supported</strong>: ignored, as for <code>tcp</code></td>
       </tr>
       <tr>
           <td><code>CANN</code> / <code>ascend</code></td>
           <td>vLLM</td>
           <td><strong>Not supported</strong>: the CUDA client has no Ascend transport</td>
-          <td><strong>Not supported</strong>: the CUDA client has no Ascend transport</td>
       </tr>
       <tr>
           <td><code>CANN</code> / <code>ascend</code></td>
           <td>SGLang</td>
-          <td><strong>Not verified</strong></td>
           <td><strong>Not verified</strong></td>
       </tr>
       <tr>
@@ -1747,51 +1730,43 @@ override and the engine is handed. A <strong>direct</strong> cell is <em><code>s
           <td>vLLM-Ascend</td>
           <td><strong>Not verified</strong>; the members need <a href="/gpustack-operator/main/docs/modules/kv-cache/backend/#image">an image carrying CANN</a>
 </td>
-          <td><strong>Works</strong>, <code>cann9.1-910b-vllm0.23.0</code> named by hand in <em><code>roles[].image</code></em>, behind <code>llm-d-router</code></td>
       </tr>
       <tr>
           <td><code>ROCM</code> / <code>hip</code></td>
           <td>vLLM, SGLang</td>
-          <td><strong>Not verified</strong></td>
           <td><strong>Not verified</strong></td>
       </tr>
       <tr>
           <td><code>ROCM</code> / <code>hip</code></td>
           <td>vLLM-Ascend</td>
           <td><strong>Not supported</strong>: refused at admission, as for <code>TCP</code></td>
-          <td><strong>Not supported</strong>: ignored, as for <code>tcp</code></td>
       </tr>
       <tr>
           <td><code>MUSA</code>, <code>MACA</code> / <code>musa</code>, <code>maca</code></td>
           <td>vLLM, SGLang, vLLM-Ascend</td>
           <td><strong>Not verified</strong></td>
-          <td><strong>Rejected by the direct-path schema</strong>: these are same-node IPC transports, while <em>prefill</em> and <em>decode</em> have no same-node placement guarantee</td>
       </tr>
   </tbody>
 </table>
-<p>The vLLM and SGLang verdicts are read on their CUDA runner images. What each verdict means:</p>
+<p>The following direct-path observations apply to the named configurations, not every backend or image:</p>
 <ul>
-<li><strong>Works</strong>: run on this operator with blocks moving, by the criterion under <a href="#minimum-versions">the
-minimum</a>
-, on the images the cell names.</li>
-<li><strong>Own image</strong>: works only on an engine image you build and keep up to date yourself.</li>
-<li><strong>Not supported</strong>: admission refuses it, the operator renders nothing for it, or no image the
-cell could run carries the transport; the cell says which.</li>
-<li><strong>Not verified</strong>: no run. Nothing refuses it; nothing here says it works.</li>
+<li>Mooncake TCP worked with the default vLLM and SGLang images. SGLang under sustained load can
+<a href="#limitations">run out of ports</a>
+; <code>model-deployment-tcp-tw-reuse</code> is the documented remedy.</li>
+<li>Mooncake RDMA worked with vLLM on InfiniBand H100 SXM5 in the
+<a href="/gpustack-operator/main/docs/modules/model-deployment/prefill-decode-benchmark/#infiniband-rdma-comparison">Prefill and Decode Benchmark</a>
+ and
+<a href="/gpustack-operator/main/docs/modules/model-deployment/encode-prefill-decode-benchmark/#infiniband-rdma-comparison">Encode, Prefill and Decode Benchmark</a>
+.</li>
+<li>EFA requires an <a href="/gpustack-operator/main/docs/modules/rdma/operations/#efa-engine-images">EFA engine build</a>
+. The default store
+image carries EFA. The combined store and direct paths over EFA have not been run here.</li>
+<li>The recorded vLLM-Ascend direct path used <code>cann9.1-910b-vllm0.23.0</code> behind <code>llm-d-router</code>.
+Other direct backend and fabric combinations require separate validation.</li>
+<li>A store on Ascend requires CANN; its members need an <a href="/gpustack-operator/main/docs/modules/kv-cache/backend/#image">image carrying CANN</a>
+.</li>
 </ul>
-<p><strong>&ldquo;Default images&rdquo; needs no image work from you</strong>: a stock runner image the project publishes,
-named in <em><code>engine.image</code></em> or <em><code>roles[].image</code></em>, and the
-<a href="/gpustack-operator/main/docs/reference/settings/"><code>kv-cache-backend-image</code></a>
- default for the store members. &ldquo;Named by
-hand&rdquo; is a published image you write into <em><code>roles[].image</code></em> or the backend&rsquo;s <em><code>spec.image</code></em>.</p>
-<p><strong>A cell is one path.</strong> A deployment using both paths is a separate configuration, read from <a href="#minimum-versions">the
-minimum</a>
- rather than added up from two cells; both paths over EFA at once
-have not been run. With a positive <em><code>resources.interface</code></em>, an <code>RDMA</code> path beside an <code>EFA</code> one is
-refused at admission.</p>
-<p>On AWS the <code>RDMA</code> rows do not apply; <a href="/gpustack-operator/main/docs/modules/rdma/operations/#rdma-on-aws">choose <code>EFA</code> or
-<code>TCP</code></a>
-.</p>
+<p>When a store and direct path request incompatible fabrics, admission refuses the deployment.</p>
 <h2 id="remote-weight-loading">Remote weight loading</h2>
 <p>The <code>--load-format model-transfer</code> value selects an engine&rsquo;s model-transfer adapter, the loader that reads weights from
 a prepared source instead of a local checkpoint. The engine keeps its own parameter mapping,

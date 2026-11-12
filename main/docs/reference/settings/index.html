@@ -1633,6 +1633,10 @@ request that reaches a webhook. Neither window needs a restart.</p>
   </thead>
   <tbody>
       <tr>
+          <td><code>aws-efa-enabled</code><br/>(<code>GPUSTACK_AWS_EFA_ENABLED</code>)</td>
+          <td>Effect window: Next trigger<br/>Default: <code>&quot;false&quot;</code><br/>Editable: Yes<br/>Constraint: bool<br/>Usage: Select AWS EFA for <code>ModelDeployment</code> fabric interface requests (<code>vpc.amazonaws.com/efa</code> instead of <code>device.gpustack.ai/rdma*</code>) and NIXL <code>LIBFABRIC</code> instead of <code>UCX</code>. This applies to prefill/decode transfer, remote weight delivery through <code>model-transfer</code> and <code>ModelExpress</code>, and multi-Pod vLLM <code>Server</code> and <code>elasticEp</code> roles. A bound EFA KV cache pool also selects EFA.</td>
+      </tr>
+      <tr>
           <td><code>container-namespace</code><br/>(<code>GPUSTACK_CONTAINER_NAMESPACE</code>, <em>chart-rendered</em>)</td>
           <td>Effect window: Next trigger<br/>Default: <em>(blank)</em><br/>Usage: Namespace to pull images from, for all built-in applications&rsquo; deployments.</td>
       </tr>

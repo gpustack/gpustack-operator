@@ -321,7 +321,7 @@ Inline manifests are limited to `64 MiB` raw JSON. Paged manifests use roots and
 cap operations at `1,048,576`; byte limits can refuse work sooner. Proven acknowledgements can
 be compacted; unknown receipts remain charged.
 
-See [source budget calculations](https://github.com/gpustack/gpustack-operator/blob/7f4028fbd2fd080dcf45b16cdba6ada7ef0fe230/specs/2026-10-28-model-artifact-remote-weight-loading.md#source-budget-calculations)
+See [source budget calculations](https://github.com/gpustack/gpustack-operator/blob/e98bebaa9dd043dca04b2fbce39d2441f60259a8/specs/2026-10-28-model-artifact-remote-weight-loading.md#source-budget-calculations)
 for admission arithmetic and available-memory sizing.
 
 ## Replica startup
@@ -517,13 +517,13 @@ Sizing the source window to hold the full model (`80 GiB` on 35B, `256 GiB` on 2
 paging and makes `TP all` fastest again: 46.39 s (`6.09×`) on 35B and 232.93 s (`2.57×`) on 235B
 (versus 253.58 s for full-resident broadcast; the 235B paged and full-resident samples used
 different SDK builds). Detailed sweeps and lifecycle checks are in the
-[acceptance record](https://github.com/gpustack/gpustack-operator/blob/7f4028fbd2fd080dcf45b16cdba6ada7ef0fe230/specs/2026-10-28-model-artifact-remote-weight-loading.md#ascend-memory-and-loading).
+[acceptance record](https://github.com/gpustack/gpustack-operator/blob/e98bebaa9dd043dca04b2fbce39d2441f60259a8/specs/2026-10-28-model-artifact-remote-weight-loading.md#ascend-memory-and-loading).
 
 ### NVIDIA (NIXL)
 
 The runs used Nebius H100 80 GB nodes and vLLM 0.30.0 in eager mode with pre-warmed source weights.
 Every case below reached `Ready` and passed inference probes. The
-[NVIDIA evidence record](https://github.com/gpustack/gpustack-operator/blob/7f4028fbd2fd080dcf45b16cdba6ada7ef0fe230/specs/2026-11-09-modelexpress-peer-d2d-and-cache-sharing.md#benchmarks-and-verification-results)
+[NVIDIA evidence record](https://github.com/gpustack/gpustack-operator/blob/e98bebaa9dd043dca04b2fbce39d2441f60259a8/specs/2026-11-09-modelexpress-peer-d2d-and-cache-sharing.md#benchmarks-and-verification-results)
 retains the tested artifacts and measurement limits.
 
 The source host reported 1574.84 GiB of total RAM and approximately 1554.06 GiB available. With
@@ -603,7 +603,7 @@ The runs below measured `235B (TP8 + EP)` (`Qwen/Qwen3-235B-A22B-Instruct-2507-F
 H100 80 GB nodes with vLLM 0.30.0 in graph mode, comparing the NIXL `TCP peer sync + local load`
 baseline against the seed replica, a scale-out peer replica, and a replica launched after a
 metadata-server restart (detailed sweeps and verification logs are in the
-[ModelExpress benchmark record](https://github.com/gpustack/gpustack-operator/blob/7f4028fbd2fd080dcf45b16cdba6ada7ef0fe230/specs/2026-11-09-modelexpress-peer-d2d-and-cache-sharing.md#benchmarks-and-verification-results)):
+[ModelExpress benchmark record](https://github.com/gpustack/gpustack-operator/blob/e98bebaa9dd043dca04b2fbce39d2441f60259a8/specs/2026-11-09-modelexpress-peer-d2d-and-cache-sharing.md#benchmarks-and-verification-results)):
 
 
 | Model           | Mode                                                                | Source RAM | Target RAM | Target Storage | Weight Transfer Time            |

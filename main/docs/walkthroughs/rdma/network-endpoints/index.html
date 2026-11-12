@@ -1635,7 +1635,7 @@ spanning multiple sockets are packed into the minimum number of <em>NUMA</em> no
 <p>In a <code>ModelDeployment</code>, roles do not declare raw resource keys. Specify the number of network
 interfaces under <em><code>roles[].resources.interface</code></em>.
 The operator refuses an interface request when no <em>RDMA</em> or EFA transfer path uses it.
-A <em>prefill</em> and <em>decode</em> pair with <code>spec.kvTransfer.protocol: RDMA</code> is such a path:</p>
+A managed <em>prefill</em> and <em>decode</em> pair with interface requests on both roles is such a path:</p>
 <div class="code-block">
   <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">worker.gpustack.ai/v1</span><span class="w">
@@ -1652,7 +1652,7 @@ A <em>prefill</em> and <em>decode</em> pair with <code>spec.kvTransfer.protocol:
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">router</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">llm-d-router</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">kvTransfer</span><span class="p">:</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">protocol</span><span class="p">:</span><span class="w"> </span><span class="l">RDMA</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">backend</span><span class="p">:</span><span class="w"> </span><span class="l">Mooncake</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">roles</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">prefill</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">Prefill</span><span class="w">
@@ -1674,7 +1674,7 @@ When <code>interface</code> is greater than 1, it renders <code>device.gpustack.
 Each allocated endpoint then corresponds to an independent physical adapter
 (see <a href="/gpustack-operator/main/docs/modules/model-deployment/configuration/#minimal-deployment">A minimal deployment</a>
 ).</p>
-<p>The same request without <em><code>router</code></em>, <em><code>kvTransfer</code></em> or a cache backend that uses <em>RDMA</em> fails at admission with
+<p>The same request without <em><code>router</code></em> or a cache backend that uses <em>RDMA</em> fails at admission with
 <code>no effective RDMA or EFA transfer leg uses the requested interfaces</code>.
 A cache backend on <em>RDMA</em> is the other path, and Step 4 sets it up.</p>
 <h2 id="step-4-kv-cache-over-rdma">Step 4: KV cache over RDMA</h2>
@@ -1729,7 +1729,7 @@ standard verbs completion queues. Declare the <code>EFA</code> protocol explicit
 </span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="nt">capacityPerMember</span><span class="p">:</span><span class="w"> </span><span class="l">64Gi</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="nt">fabricInterfaceCount</span><span class="p">:</span><span class="w"> </span><span class="m">2</span></span></span></code></pre></div>
 </div>
-<p>In <code>ModelDeployment</code>, set <code>kvTransfer.protocol: EFA</code> and specify custom runner images containing
+<p>Enable the <code>aws-efa-enabled</code> Setting for <code>ModelDeployment</code> and specify custom runner images containing
 <code>libfabric</code> and EFA-enabled Mooncake builds.</p>
 <h2 id="limitations">Limitations</h2>
 <ul>
@@ -1794,7 +1794,7 @@ and <a href="/gpustack-operator/main/docs/modules/devices/preflight/#reading-the
       <tr>
           <td><code>ModelDeployment</code> rejected with <code>no effective RDMA or EFA transfer leg uses the requested interfaces</code></td>
           <td>Interface requested with no <em>RDMA</em> or EFA path</td>
-          <td>Pair the request with <code>kvTransfer.protocol: RDMA</code> or <code>EFA</code> on a <em>prefill</em> and <em>decode</em> pair, or with a <code>KVCacheBackend</code> on that transport. A role with its own <em><code>command</code></em> has no managed direct path</td>
+          <td>Request interfaces on both roles of a managed <em>prefill</em> and <em>decode</em> pair, or use a <code>KVCacheBackend</code> on that transport. A role with its own <em><code>command</code></em> has no managed direct path</td>
       </tr>
   </tbody>
 </table>
