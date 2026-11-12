@@ -402,12 +402,8 @@ func TestSynthesizeModelDeploymentConnector_KVTransferProtocol(t *testing.T) {
 			require.NoError(t, err)
 			require.Len(t, got.Args, 2)
 			assert.JSONEq(t, strings.ReplaceAll(`{
-		"kv_connector":"MultiConnector","kv_role":"kv_consumer",
-		"kv_connector_extra_config":{"connectors":[
-			{"kv_connector":"MooncakeConnector","kv_role":"kv_consumer",
-			 "kv_connector_extra_config":{"mooncake_protocol":"<protocol>"}},
-			{"kv_connector":"MooncakeStoreConnector","kv_role":"kv_consumer"}
-		]}
+		"kv_connector":"MooncakeConnector","kv_role":"kv_consumer",
+		"kv_connector_extra_config":{"mooncake_protocol":"<protocol>"}
 		}`, "<protocol>", tc.want), got.Args[1])
 		})
 	}
@@ -2195,8 +2191,18 @@ func TestSynthesizeModelDeploymentConnector_TransferBackends(t *testing.T) {
 
 		decode := input(workercore.ModelDeploymentEngineVLLM, nodefeature.ManufacturerNVIDIA, inject.KVTransferBackendNIXL, false)
 		decode.Kind = workercore.ModelDeploymentRoleKindDecode
+		decode.CachePrefix = "m-0123456789abcdef0123456789abcdef"
 		decodeRender, err := SynthesizeModelDeploymentConnector(decode)
 		require.NoError(t, err)
+		require.Len(t, decodeRender.Args, 2)
+		assert.JSONEq(t, `{
+			"kv_connector":"NixlConnector",
+			"kv_role":"kv_consumer",
+			"kv_connector_extra_config":{"backends":["UCX"]}
+		}`, decodeRender.Args[1])
+		require.NotNil(t, decodeRender.binding)
+		assert.Empty(t, decodeRender.binding.Domain)
+		assert.Empty(t, decodeRender.binding.CachePrefix)
 		require.NotNil(t, envByName(decodeRender.Env, inject.VLLMNIXLSideChannelHostEnv),
 			"the side channel is a pair of listeners, so the consumer arms it too")
 		assert.Contains(t, decodeRender.Ports, core.ContainerPort{

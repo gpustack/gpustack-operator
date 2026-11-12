@@ -53,6 +53,14 @@ func TestRenderDtype(t *testing.T) {
 			want: []string{"bfloat16"},
 		},
 		{
+			name: "a vllm decode half on a store keeps the pair dtype",
+			input: Input{
+				Engine: EngineVLLM, Role: RoleDecode, Disaggregated: true, KVTransfer: true,
+				Connection: testConnectionFor(EngineVLLM), Dtype: "bfloat16",
+			},
+			want: []string{"bfloat16"},
+		},
+		{
 			name: "an sglang decode half on a store renders it",
 			input: Input{
 				Engine: EngineSGLang, Role: RoleDecode, Disaggregated: true,

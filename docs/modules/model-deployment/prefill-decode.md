@@ -41,11 +41,11 @@ A router policy such as `round_robin` chooses among those leaders; it does not a
 the shape's own contract, including its Router requirement, is on [External DP](external-dp.md).
 [Issue #754](https://github.com/gpustack/gpustack-operator/issues/754) tracks that deferred combination.
 
-With a managed router, the direct connector depends on the engine, platform and
-`spec.kvTransfer.backend`. A shared `spec.kvCache` pool adds a store connector alongside the direct
-path; for vLLM NIXL, `NixlConnector` comes first in `MultiConnector`. See
-[Transfer parameters](parameterize.md#transfer-parameters) for the per-engine connector mapping and
-synthesized environment variables.
+With a managed router, the direct connector depends on the engine, platform and `spec.kvTransfer.backend`. On
+vLLM pairs with a shared `spec.kvCache` pool, *Prefill* wraps the direct connector first in `MultiConnector`
+alongside the store connector, while *Decode* runs the direct connector alone and keeps pool dtype and
+block-size alignment. See [Transfer parameters](parameterize.md#transfer-parameters) for connector and
+environment mappings.
 
 A pair needs no shared pool to hand blocks over. With `llm-d-router`, the decode `Pod` runs a
 routing-proxy sidecar. vLLM NIXL and Ascend use `--kv-connector=nixlv2`; vLLM Mooncake uses

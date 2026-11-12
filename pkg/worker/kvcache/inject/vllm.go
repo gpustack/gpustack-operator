@@ -293,7 +293,14 @@ func renderVLLMWithEncoderCache(in Input, ec EncoderCache) (*Result, error) {
 	// property of the caller rather than of this line, and nothing here would notice it changing.
 	// An encoder stage never reaches this line with a connection: it is refused above, as the
 	// SGLang renderer refuses the same shape.
-	hasStore := !encoderOnly && in.Connection.MasterAddress != ""
+	hasPool := !encoderOnly && in.Connection.MasterAddress != ""
+	// A disaggregated decode half receives prompt KV blocks directly from its paired prefiller,
+	// which already reads and writes the shared store. Composing a store connector beside the
+	// direct consumer inside MultiConnector causes both inner connectors to signal async KV
+	// completion for the same request on prompts at or above one block, crashing vLLM's V1
+	// scheduler (`_update_from_kv_xfer_finished`: `assert req_id in self.requests`). Standalone
+	// decode without a point-to-point transfer leg still renders the store connector as a consumer.
+	rendersStore := hasPool && (!in.KVTransfer || in.Role != RoleDecode)
 
 	// The connector configuration is a JSON document on the command line, marshaled from a type so an
 	// unreadable key is a compile error. Key order is not part of the contract - JSON defines none -
@@ -303,7 +310,7 @@ func renderVLLMWithEncoderCache(in Input, ec EncoderCache) (*Result, error) {
 	var legVolumes []core.Volume
 	var legVolumeMounts []core.VolumeMount
 	var forceTCP bool
-	if hasStore {
+	if rendersStore {
 		connector, err := vllmConnectorFor(in.Engine)
 		if err != nil {
 			return nil, err
@@ -441,20 +448,16 @@ func renderVLLMWithEncoderCache(in Input, ec EncoderCache) (*Result, error) {
 			legVolumes = append(legVolumes, driverVolume)
 			legVolumeMounts = append(legVolumeMounts, driverMount)
 		}
-		if !hasStore {
-			// The decode arm renders only the role and the protocol: the bootstrap address is
-			// expected to arrive per-request via kv_transfer_params. That is verified behavior
-			// from a real-cluster run; the upstream per-request path has not been read.
+		if !rendersStore {
+			// The decode arm renders only the direct connector: the bootstrap address arrives
+			// per-request via kv_transfer_params, and the paired prefiller handles shared-store
+			// reads and writes on behalf of the pair.
 			transferConfigValue = &direct
 		} else {
-			// The inner store connector's kv_consumer/kv_both roles are hardcoded: upstream
-			// per-inner-connector kv_role semantics are unverified. A real-cluster run observed
-			// a Prometheus-metrics registration assert naming MooncakeConnector on the kv_both
-			// role, which recovered after one APIServer restart.
-			storeRole := "kv_consumer"
-			if in.Role == RolePrefill {
-				storeRole = "kv_both"
-			}
+			// Only a prefill half reaches MultiConnector here (decode with KVTransfer renders
+			// the direct connector alone; see rendersStore). The inner store connector's kv_both
+			// role is hardcoded: upstream per-inner-connector kv_role semantics are unverified.
+			const storeRole = "kv_both"
 			transferConfigValue = &vllmTransferConfig{
 				KVConnector: "MultiConnector",
 				KVRole:      kvRole,
@@ -469,7 +472,7 @@ func renderVLLMWithEncoderCache(in Input, ec EncoderCache) (*Result, error) {
 	result := &Result{
 		KVTransfer: in.KVTransfer,
 	}
-	if hasStore {
+	if rendersStore {
 		config, err := renderVLLMClientConfig(in.Connection, in.Domain)
 		if err != nil {
 			return nil, err
@@ -524,7 +527,7 @@ func renderVLLMWithEncoderCache(in Input, ec EncoderCache) (*Result, error) {
 	result.Env = append(result.Env, leg.Env...)
 	result.Ports = append(result.Ports, leg.Ports...)
 	result.DefaultedArgs = append(result.DefaultedArgs, leg.DefaultedArgs...)
-	if hasStore && in.Dtype != "" {
+	if hasPool && in.Dtype != "" {
 		result.Args = append(result.Args, KVCacheDtypeArg, in.Dtype)
 	}
 	if in.KVTransfer {
@@ -573,8 +576,10 @@ func renderVLLMWithEncoderCache(in Input, ec EncoderCache) (*Result, error) {
 		// present, and a user who already sets it -- to any value -- has asked for the same thing.
 		result.DefaultedEnv = append(result.DefaultedEnv, core.EnvVar{Name: MooncakeForceTCPEnv, Value: "1"})
 	}
-	if in.Engine == EngineVLLM && ((hasStore && in.Connection.Protocol == "tcp") || forceTCP) {
+	if in.Engine == EngineVLLM && ((rendersStore && in.Connection.Protocol == "tcp") || forceTCP) {
 		result.DefaultedEnv = append(result.DefaultedEnv, mooncakeTCPDefaultedEnv()...)
+	}
+	if in.Engine == EngineVLLM && ((hasPool && in.Connection.Protocol == "tcp") || forceTCP) {
 		result.DefaultedArgs = append(result.DefaultedArgs, []string{vllmBlockSizeArg, defaultVLLMTCPBlockSize})
 	}
 	if !in.PublishKVEvents {
