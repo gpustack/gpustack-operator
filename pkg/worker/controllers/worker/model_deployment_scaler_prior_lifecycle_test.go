@@ -3,6 +3,7 @@ package worker
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -364,5 +365,55 @@ func TestModelDeploymentScalerCapacityPriorSkipsSteadyStatusWrites(t *testing.T)
 	}
 	if stored := scalerTestGetScaler(t, client, scaler.Name); stored.ResourceVersion == first.ResourceVersion {
 		t.Fatal("a changed effective capacity must write status")
+	}
+}
+
+func TestModelDeploymentScalerCapacityPriorTier2LifecycleAndReset(t *testing.T) {
+	scaler, md, cm, instances := capacityPriorDisaggregatedFixture(t, true)
+	client := scalerTestClient(t, scaler, md, cm, instances[0], instances[1])
+	now := time.Unix(2000, 0)
+	r := scalerTestReconciler(client, now)
+	reconcileScaler(t, r, scaler.Name)
+
+	stored := scalerTestGetScaler(t, client, scaler.Name)
+	ready := scalerCondition(stored, workercore.ModelDeploymentScalerConditionTypeCapacityPriorsReady)
+	if ready.Status != meta.ConditionTrue || !strings.Contains(ready.Message, "Tier 2") {
+		t.Fatalf("expected Tier 2 CapacityPriorsReady=True condition, got %#v", ready)
+	}
+	if len(stored.Status.ResolvedCapacityPriors) != 2 {
+		t.Fatalf("resolved prior count = %d, want 2 LLM roles", len(stored.Status.ResolvedCapacityPriors))
+	}
+
+	stored.Status.Predictors = []workercore.ModelDeploymentScalerPredictorStatus{{Name: "decode", SampleCount: 16}}
+	if err := client.Status().Update(context.Background(), stored); err != nil {
+		t.Fatal(err)
+	}
+	r.sampler.RecordPredictorStates(stored, map[string]*algorithm.PredictorState{"decode": {SampleCount: 16}})
+
+	liveMD := scalerTestGetDeployment(t, client)
+	liveMD.Spec.Roles[0].ExtraArgs = append(liveMD.Spec.Roles[0].ExtraArgs, "--max-num-seqs=8")
+	if err := client.Update(context.Background(), liveMD); err != nil {
+		t.Fatal(err)
+	}
+
+	// Simulate controller restart: fresh sampler must not restore invalidated SampleCount: 16 state.
+	restarted := scalerTestReconciler(client, now.Add(30*time.Second))
+	reconcileScaler(t, restarted, scaler.Name)
+	after := scalerTestGetScaler(t, client, scaler.Name)
+	for _, pred := range after.Status.Predictors {
+		if pred.SampleCount != 0 || len(pred.History) != 0 {
+			t.Fatalf("joint fingerprint invalidation did not reset predictor %q: %#v", pred.Name, pred)
+		}
+	}
+	if state := restarted.sampler.PredictorState(after, "decode"); state != nil && state.SampleCount != 0 {
+		t.Fatalf("stale memory predictor sample count survived restart: %#v", state)
+	}
+	if len(after.Status.ResolvedCapacityPriors) != 2 {
+		t.Fatalf("resolved prior count after update = %d, want 2", len(after.Status.ResolvedCapacityPriors))
+	}
+	for i := range after.Status.ResolvedCapacityPriors {
+		if after.Status.ResolvedCapacityPriors[i].CompatibilityFingerprint == stored.Status.ResolvedCapacityPriors[i].CompatibilityFingerprint {
+			t.Fatalf("joint fingerprint[%d] did not change after encode role update", i)
+		}
 	}
 }

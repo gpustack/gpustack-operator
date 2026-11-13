@@ -19,6 +19,7 @@ import (
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
 	"gpustack.ai/gpustack/pkg/kubeclients/kubernetes/scheme"
 	"gpustack.ai/gpustack/pkg/kubemeta"
+	"gpustack.ai/gpustack/pkg/nodefeature"
 	"gpustack.ai/gpustack/pkg/worker/scaling/priors"
 )
 
@@ -276,8 +277,7 @@ func TestModelDeploymentScalerCapacityPriorRefusals(t *testing.T) {
 		{name: "elastic parallel", field: "arg", value: "--elastic-ep-max-dp-size=4", want: "metric denominator"},
 		{name: "malformed parallel", field: "arg", value: "--tensor-parallel-size", want: "unreadable parallelism"},
 		{name: "a data parallel environment variable", field: "env", want: "metric denominator"},
-		{name: "router synthesis", field: "router", want: "generated cache"},
-		{name: "cache synthesis", field: "cache", want: "generated cache"},
+		{name: "unknown role kind", field: "roleKind", want: "not supported"},
 		{name: "speculative decoding", field: "arg", value: "--speculative-config={}", want: "cannot establish settings"},
 		{name: "malformed dtype", field: "arg", value: "--dtype", want: "requires a value"},
 		{name: "wrong observed hardware", field: "hardware", value: "other-product", want: "no catalog profile matches the deployment shape"},
@@ -309,10 +309,8 @@ func TestModelDeploymentScalerCapacityPriorRefusals(t *testing.T) {
 				role.ReplicaSize = 2
 			case "env":
 				role.Env = []workercore.ModelDeploymentEnvVar{{Name: "VLLM_DP_SIZE", Value: "2"}}
-			case "router":
-				md.Spec.Router = &workercore.ModelDeploymentRouter{Name: "llm-d-router"}
-			case "cache":
-				md.Spec.KVCache = &workercore.ModelDeploymentKVCache{PoolRef: core.LocalObjectReference{Name: "cache"}}
+			case "roleKind":
+				role.Kind = workercore.ModelDeploymentRoleKind("Custom")
 			case "hardware":
 				instance.Status.Detail.Product = tt.value
 			case "memory":
@@ -713,6 +711,585 @@ func TestModelDeploymentScalerCapacityPriorRoleSpecificFields(t *testing.T) {
 			}
 			if len(resolved.Status[0].LatencyBounds) != 1 {
 				t.Fatalf("role latency evidence = %#v", resolved.Status[0].LatencyBounds)
+			}
+		})
+	}
+}
+
+func capacityPriorDisaggregatedFixture(t *testing.T, includeEncode bool) (*workercore.ModelDeploymentScaler, *workercore.ModelDeployment, *core.ConfigMap, []*workerapi.AcceleratorType) {
+	t.Helper()
+	scaler, md, cm, instance := capacityPriorCompleteFixture(t)
+	instance.Status.Detail.Manufacturer = nodefeature.ManufacturerNVIDIA
+	h200 := instance.DeepCopy()
+	h200.Name = "test-h200"
+	h200.Status.Detail.Product = "H200"
+	h200.Status.Detail.Memory = "140Gi"
+
+	args := append([]string{}, md.Spec.Roles[0].ExtraArgs...)
+	args = append(args, "--tensor-parallel-size=2")
+
+	roles := []workercore.ModelDeploymentRole{
+		{
+			Name:            "prefill",
+			Kind:            workercore.ModelDeploymentRoleKindPrefill,
+			Replicas:        1,
+			Image:           md.Spec.Engine.Image,
+			ExtraArgs:       slicesCloneStrings(args),
+			AcceleratorType: instance.Name,
+			Resources:       &workercore.ModelDeploymentRoleResources{Accelerator: capacityPriorQuantity("2")},
+		},
+		{
+			Name:            "decode",
+			Kind:            workercore.ModelDeploymentRoleKindDecode,
+			Replicas:        3,
+			Image:           md.Spec.Engine.Image,
+			ExtraArgs:       append(slicesCloneStrings(md.Spec.Roles[0].ExtraArgs), "--tensor-parallel-size=4"),
+			AcceleratorType: h200.Name,
+			Resources:       &workercore.ModelDeploymentRoleResources{Accelerator: capacityPriorQuantity("4")},
+		},
+	}
+	scalerRoles := []workercore.ModelDeploymentScalerRoleBounds{
+		{Name: "prefill", MinReplicas: 1, MaxReplicas: 4},
+		{Name: "decode", MinReplicas: 3, MaxReplicas: 9},
+	}
+	ratios := []workercore.ModelDeploymentScalerRoleRatio{
+		{
+			NumeratorRole:   "decode",
+			DenominatorRole: "prefill",
+			Min:             capacityPriorQuantity("3"),
+			Max:             capacityPriorQuantity("3"),
+		},
+	}
+	if includeEncode {
+		roles = append([]workercore.ModelDeploymentRole{{
+			Name:            "encode",
+			Kind:            workercore.ModelDeploymentRoleKindEncode,
+			Replicas:        1,
+			Image:           md.Spec.Engine.Image,
+			AcceleratorType: instance.Name,
+			Resources:       &workercore.ModelDeploymentRoleResources{Accelerator: capacityPriorQuantity("1")},
+		}}, roles...)
+		scalerRoles = append([]workercore.ModelDeploymentScalerRoleBounds{
+			{Name: "encode", MinReplicas: 1, MaxReplicas: 3},
+		}, scalerRoles...)
+		ratios = []workercore.ModelDeploymentScalerRoleRatio{
+			{
+				NumeratorRole:   "encode",
+				DenominatorRole: "prefill",
+				Min:             capacityPriorQuantity("1"),
+				Max:             capacityPriorQuantity("1"),
+			},
+			{
+				NumeratorRole:   "decode",
+				DenominatorRole: "prefill",
+				Min:             capacityPriorQuantity("2"),
+				Max:             capacityPriorQuantity("2"),
+			},
+		}
+		roles[2].Replicas = 2
+		scalerRoles[2].MinReplicas = 2
+		scalerRoles[2].MaxReplicas = 6
+	}
+
+	md.Spec.Router = &workercore.ModelDeploymentRouter{Name: workercore.ModelDeploymentRouterLLMD}
+	md.Spec.KVTransfer = &workercore.ModelDeploymentKVTransfer{Backend: workercore.ModelDeploymentKVTransferBackendNIXL}
+	md.Spec.Roles = roles
+	delete(md.Annotations, workercore.ModelDeploymentScalerHardwareIDAnnotationKey)
+
+	scaler.Spec.Roles = scalerRoles
+	scaler.Spec.Ratios = ratios
+
+	serverDoc := capacityPriorReadCatalog(t, cm)
+	prefillServer := serverDoc.Profiles[0]
+	prefillServer.Role = string(priors.RoleKindServer)
+	prefillServer.Hardware = "nvidia-h100"
+	prefillServer.Topology = priors.TopologyDocument{GPUsPerReplica: 2, TensorParallel: 2}
+	prefillServer.Points = nil
+	// Under headroom=0.75, feasible boundary=1600 -> effective=1200 -> 600 tok/s/GPU.
+	for i, tp := range []float64{1000, 1600, 1800} {
+		ttft, itl := 200.0, 20.0
+		if i == 2 {
+			ttft, itl = 800, 80
+		}
+		prefillServer.Points = append(prefillServer.Points, priors.PointDocument{
+			Concurrency:           i + 1,
+			TotalTokensPerSecond:  tp,
+			InputTokensPerSecond:  tp,
+			OutputTokensPerSecond: tp,
+			TTFTMilliseconds:      priors.LatencyQuantiles{"p95": ttft},
+			ITLMilliseconds:       priors.LatencyQuantiles{"p95": itl},
+		})
+	}
+
+	decodeServer := serverDoc.Profiles[0]
+	decodeServer.Role = string(priors.RoleKindServer)
+	decodeServer.Hardware = "nvidia-h200"
+	decodeServer.Topology = priors.TopologyDocument{GPUsPerReplica: 4, TensorParallel: 4}
+	decodeServer.Points = nil
+	// Under headroom=0.75, feasible boundary=2000 -> effective=1500 -> 375 tok/s/GPU.
+	for i, tp := range []float64{1200, 2000, 2400} {
+		ttft, itl := 200.0, 20.0
+		if i == 2 {
+			ttft, itl = 800, 80
+		}
+		decodeServer.Points = append(decodeServer.Points, priors.PointDocument{
+			Concurrency:           i + 1,
+			TotalTokensPerSecond:  tp,
+			InputTokensPerSecond:  tp,
+			OutputTokensPerSecond: tp,
+			TTFTMilliseconds:      priors.LatencyQuantiles{"p95": ttft},
+			ITLMilliseconds:       priors.LatencyQuantiles{"p95": itl},
+		})
+	}
+
+	doc := priors.NewCatalogDocument(prefillServer, decodeServer)
+	capacityPriorWriteCatalog(t, cm, doc)
+	return scaler, md, cm, []*workerapi.AcceleratorType{instance, h200}
+}
+
+func slicesCloneStrings(s []string) []string {
+	out := make([]string, len(s))
+	copy(out, s)
+	return out
+}
+
+func TestSolveFixedWholeUnitVector(t *testing.T) {
+	baseTarget := &workercore.ModelDeployment{
+		Spec: workercore.ModelDeploymentSpec{
+			Roles: []workercore.ModelDeploymentRole{
+				{Name: "encode", Kind: workercore.ModelDeploymentRoleKindEncode},
+				{Name: "prefill", Kind: workercore.ModelDeploymentRoleKindPrefill},
+				{Name: "decode", Kind: workercore.ModelDeploymentRoleKindDecode},
+			},
+		},
+	}
+
+	cases := []struct {
+		name      string
+		target    *workercore.ModelDeployment
+		roles     []workercore.ModelDeploymentScalerRoleBounds
+		ratios    []workercore.ModelDeploymentScalerRoleRatio
+		wantUnit  map[string]int32
+		wantMinK  int32
+		wantMaxK  int32
+		wantError string
+	}{
+		{
+			name: "1P:3D",
+			target: &workercore.ModelDeployment{
+				Spec: workercore.ModelDeploymentSpec{Roles: baseTarget.Spec.Roles[1:]},
+			},
+			roles: []workercore.ModelDeploymentScalerRoleBounds{
+				{Name: "prefill", MinReplicas: 1, MaxReplicas: 4},
+				{Name: "decode", MinReplicas: 3, MaxReplicas: 9},
+			},
+			ratios: []workercore.ModelDeploymentScalerRoleRatio{
+				{NumeratorRole: "decode", DenominatorRole: "prefill", Min: capacityPriorQuantity("3"), Max: capacityPriorQuantity("3")},
+			},
+			wantUnit: map[string]int32{"prefill": 1, "decode": 3},
+			wantMinK: 1,
+			wantMaxK: 3,
+		},
+		{
+			name: "0.5 equals 500m yields 2P:1D",
+			target: &workercore.ModelDeployment{
+				Spec: workercore.ModelDeploymentSpec{Roles: baseTarget.Spec.Roles[1:]},
+			},
+			roles: []workercore.ModelDeploymentScalerRoleBounds{
+				{Name: "prefill", MinReplicas: 2, MaxReplicas: 6},
+				{Name: "decode", MinReplicas: 1, MaxReplicas: 4},
+			},
+			ratios: []workercore.ModelDeploymentScalerRoleRatio{
+				{NumeratorRole: "decode", DenominatorRole: "prefill", Min: capacityPriorQuantity("0.5"), Max: capacityPriorQuantity("500m")},
+			},
+			wantUnit: map[string]int32{"prefill": 2, "decode": 1},
+			wantMinK: 1,
+			wantMaxK: 3,
+		},
+		{
+			name:   "1E:1P:2D consistent cycle with reversed and duplicate edges",
+			target: baseTarget,
+			roles: []workercore.ModelDeploymentScalerRoleBounds{
+				{Name: "encode", MinReplicas: 1, MaxReplicas: 5},
+				{Name: "prefill", MinReplicas: 2, MaxReplicas: 5},
+				{Name: "decode", MinReplicas: 4, MaxReplicas: 10},
+			},
+			ratios: []workercore.ModelDeploymentScalerRoleRatio{
+				{NumeratorRole: "prefill", DenominatorRole: "encode", Min: capacityPriorQuantity("1"), Max: capacityPriorQuantity("1")},
+				{NumeratorRole: "decode", DenominatorRole: "prefill", Min: capacityPriorQuantity("2"), Max: capacityPriorQuantity("2")},
+				{NumeratorRole: "encode", DenominatorRole: "decode", Min: capacityPriorQuantity("0.5"), Max: capacityPriorQuantity("500m")},
+				{NumeratorRole: "decode", DenominatorRole: "prefill", Min: capacityPriorQuantity("2"), Max: capacityPriorQuantity("2")},
+			},
+			wantUnit: map[string]int32{"encode": 1, "prefill": 1, "decode": 2},
+			wantMinK: 2,
+			wantMaxK: 5,
+		},
+		{
+			name:   "contradictory cycle is refused",
+			target: baseTarget,
+			roles: []workercore.ModelDeploymentScalerRoleBounds{
+				{Name: "encode", MinReplicas: 1, MaxReplicas: 5},
+				{Name: "prefill", MinReplicas: 1, MaxReplicas: 5},
+				{Name: "decode", MinReplicas: 2, MaxReplicas: 10},
+			},
+			ratios: []workercore.ModelDeploymentScalerRoleRatio{
+				{NumeratorRole: "prefill", DenominatorRole: "encode", Min: capacityPriorQuantity("1"), Max: capacityPriorQuantity("1")},
+				{NumeratorRole: "decode", DenominatorRole: "prefill", Min: capacityPriorQuantity("2"), Max: capacityPriorQuantity("2")},
+				{NumeratorRole: "decode", DenominatorRole: "encode", Min: capacityPriorQuantity("3"), Max: capacityPriorQuantity("3")},
+			},
+			wantError: "inconsistent cycle",
+		},
+		{
+			name:   "disconnected role is refused",
+			target: baseTarget,
+			roles: []workercore.ModelDeploymentScalerRoleBounds{
+				{Name: "encode", MinReplicas: 1, MaxReplicas: 5},
+				{Name: "prefill", MinReplicas: 1, MaxReplicas: 5},
+				{Name: "decode", MinReplicas: 2, MaxReplicas: 10},
+			},
+			ratios: []workercore.ModelDeploymentScalerRoleRatio{
+				{NumeratorRole: "decode", DenominatorRole: "prefill", Min: capacityPriorQuantity("2"), Max: capacityPriorQuantity("2")},
+			},
+			wantError: "connect all",
+		},
+		{
+			name: "loose ratio min != max is refused",
+			target: &workercore.ModelDeployment{
+				Spec: workercore.ModelDeploymentSpec{Roles: baseTarget.Spec.Roles[1:]},
+			},
+			roles: []workercore.ModelDeploymentScalerRoleBounds{
+				{Name: "prefill", MinReplicas: 1, MaxReplicas: 5},
+				{Name: "decode", MinReplicas: 1, MaxReplicas: 10},
+			},
+			ratios: []workercore.ModelDeploymentScalerRoleRatio{
+				{NumeratorRole: "decode", DenominatorRole: "prefill", Min: capacityPriorQuantity("1"), Max: capacityPriorQuantity("3")},
+			},
+			wantError: "min == max",
+		},
+		{
+			name: "empty integer multiplier interval is refused",
+			target: &workercore.ModelDeployment{
+				Spec: workercore.ModelDeploymentSpec{Roles: baseTarget.Spec.Roles[1:]},
+			},
+			roles: []workercore.ModelDeploymentScalerRoleBounds{
+				{Name: "prefill", MinReplicas: 1, MaxReplicas: 1},
+				{Name: "decode", MinReplicas: 4, MaxReplicas: 6},
+			},
+			ratios: []workercore.ModelDeploymentScalerRoleRatio{
+				{NumeratorRole: "decode", DenominatorRole: "prefill", Min: capacityPriorQuantity("3"), Max: capacityPriorQuantity("3")},
+			},
+			wantError: "multiplier",
+		},
+		{
+			name: "int32 overflow on canonical vector is refused",
+			target: &workercore.ModelDeployment{
+				Spec: workercore.ModelDeploymentSpec{Roles: baseTarget.Spec.Roles[1:]},
+			},
+			roles: []workercore.ModelDeploymentScalerRoleBounds{
+				{Name: "prefill", MinReplicas: 1, MaxReplicas: 1000000000},
+				{Name: "decode", MinReplicas: 1, MaxReplicas: 1000000000},
+			},
+			ratios: []workercore.ModelDeploymentScalerRoleRatio{
+				{NumeratorRole: "decode", DenominatorRole: "prefill", Min: capacityPriorQuantity("3000000000"), Max: capacityPriorQuantity("3000000000")},
+			},
+			wantError: "int32",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			scaler := scalerTestScaler("test", "uid", workercore.ModelDeploymentScalerModeActive)
+			scaler.Spec.Roles = tc.roles
+			scaler.Spec.Ratios = tc.ratios
+			unit, kMin, kMax, err := solveFixedWholeUnitVector(scaler, tc.target)
+			if tc.wantError != "" {
+				if err == nil || !strings.Contains(err.Error(), tc.wantError) {
+					t.Fatalf("err = %v, want substring %q", err, tc.wantError)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if !reflect.DeepEqual(unit, tc.wantUnit) || kMin != tc.wantMinK || kMax != tc.wantMaxK {
+				t.Fatalf("got unit=%v k=[%d,%d], want unit=%v k=[%d,%d]", unit, kMin, kMax, tc.wantUnit, tc.wantMinK, tc.wantMaxK)
+			}
+		})
+	}
+}
+
+func TestModelDeploymentScalerCapacityPriorDisaggregatedTiers(t *testing.T) {
+	t.Run("manual bypass skips catalog reads on PD deployment", func(t *testing.T) {
+		scaler, md, _, _ := capacityPriorDisaggregatedFixture(t, false)
+		scaler.Spec.Algorithm.Type = workercore.ModelDeploymentScalerAlgorithmTypePredictive
+		scaler.Spec.Algorithm.Predictive = &workercore.ModelDeploymentScalerPredictiveSpec{
+			TokenThroughput: workercore.ModelDeploymentScalerTokenThroughputSpec{
+				TTFTTargetMilliseconds:       capacityPriorQuantity("500"),
+				ITLTargetMilliseconds:        capacityPriorQuantity("50"),
+				PrefillTargetTokensPerSecond: capacityPriorQuantity("1000"),
+				DecodeTargetTokensPerSecond:  capacityPriorQuantity("2000"),
+			},
+			PrefillTokenCapacityPerReplica: capacityPriorQuantity("1100"),
+			DecodeTokenCapacityPerReplica:  capacityPriorQuantity("2100"),
+		}
+		scaler.Spec.Algorithm.TokenThroughput = nil
+		got, err := ResolveModelDeploymentScalerCapacityPriors(context.Background(), capacityPriorNoReads{t: t}, scaler, md)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got.Mode != ModelDeploymentScalerPriorModeRole || got.WholeUnit != nil {
+			t.Fatalf("unexpected tier = %q wholeUnit = %#v", got.Mode, got.WholeUnit)
+		}
+	})
+
+	t.Run("Tier 1 resolves dedicated Prefill and Decode profiles with partial override", func(t *testing.T) {
+		scaler, md, cm, instances := capacityPriorDisaggregatedFixture(t, true)
+		doc := capacityPriorReadCatalog(t, cm)
+		prefillProf := doc.Profiles[0]
+		prefillProf.Role = string(priors.RoleKindPrefill)
+		decodeProf := doc.Profiles[1]
+		decodeProf.Role = string(priors.RoleKindDecode)
+		doc.Profiles = append(doc.Profiles, prefillProf, decodeProf)
+		capacityPriorWriteCatalog(t, cm, doc)
+		scaler.Spec.Algorithm.TokenThroughput.DecodeTargetTokensPerSecond = capacityPriorQuantity("1888")
+
+		client := scalerTestClient(t, scaler, md, cm, instances[0], instances[1])
+		got, err := ResolveModelDeploymentScalerCapacityPriors(context.Background(), client, scaler, md)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got.Mode != ModelDeploymentScalerPriorModeRole || got.WholeUnit != nil || got.ConditionMessage != "" {
+			t.Fatalf("unexpected Tier 1 result: mode=%q wholeUnit=%#v msg=%q", got.Mode, got.WholeUnit, got.ConditionMessage)
+		}
+		if got.Algorithms["prefill"].TokenThroughput.PrefillTargetTokensPerSecond.Cmp(*capacityPriorQuantity("1200")) != 0 {
+			t.Fatalf("prefill target = %v, want 1200", got.Algorithms["prefill"].TokenThroughput.PrefillTargetTokensPerSecond)
+		}
+		if got.Algorithms["decode"].TokenThroughput.DecodeTargetTokensPerSecond.Cmp(*capacityPriorQuantity("1888")) != 0 {
+			t.Fatalf("decode explicit override = %v, want 1888", got.Algorithms["decode"].TokenThroughput.DecodeTargetTokensPerSecond)
+		}
+		if _, ok := got.Algorithms["encode"]; !ok {
+			t.Fatal("missing encode algorithm entry")
+		}
+	})
+
+	t.Run("Tier 1 ambiguity or SLO failure fails closed without falling back to Tier 2", func(t *testing.T) {
+		for _, mode := range []string{"ambiguous", "slo"} {
+			t.Run(mode, func(t *testing.T) {
+				scaler, md, cm, instances := capacityPriorDisaggregatedFixture(t, false)
+				doc := capacityPriorReadCatalog(t, cm)
+				prefillProf := doc.Profiles[0]
+				prefillProf.Role = string(priors.RoleKindPrefill)
+				decodeProf := doc.Profiles[1]
+				decodeProf.Role = string(priors.RoleKindDecode)
+				doc.Profiles = append(doc.Profiles, prefillProf, decodeProf)
+				if mode == "slo" {
+					for i := range doc.Profiles[3].Points {
+						doc.Profiles[3].Points[i].ITLMilliseconds["p95"] = 9999
+					}
+					capacityPriorWriteCatalog(t, cm, doc)
+				} else {
+					ambiguousPrefill := prefillProf
+					ambiguousPrefill.Quantization = "bf16"
+					doc.Profiles = append(doc.Profiles, ambiguousPrefill)
+					delete(md.Annotations, workercore.ModelDeploymentScalerPrecisionAnnotationKey)
+					capacityPriorWriteCatalog(t, cm, doc)
+				}
+				client := scalerTestClient(t, scaler, md, cm, instances[0], instances[1])
+				_, err := ResolveModelDeploymentScalerCapacityPriors(context.Background(), client, scaler, md)
+				var refusal *priors.RefusalError
+				if !errors.As(err, &refusal) {
+					t.Fatalf("expected refusal instead of Tier 2 fallback, got %v", err)
+				}
+				if mode == "ambiguous" && !strings.Contains(err.Error(), "several catalog profiles match") {
+					t.Fatalf("expected ambiguity refusal, got %v", err)
+				}
+			})
+		}
+	})
+
+	t.Run("Tier 2 resolves 1P:3D when Decode dedicated profile is missing", func(t *testing.T) {
+		scaler, md, cm, instances := capacityPriorDisaggregatedFixture(t, false)
+		doc := capacityPriorReadCatalog(t, cm)
+		prefillOnly := doc.Profiles[0]
+		prefillOnly.Role = string(priors.RoleKindPrefill)
+		doc.Profiles = append(doc.Profiles, prefillOnly)
+		capacityPriorWriteCatalog(t, cm, doc)
+
+		client := scalerTestClient(t, scaler, md, cm, instances[0], instances[1])
+		got, err := ResolveModelDeploymentScalerCapacityPriors(context.Background(), client, scaler, md)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got.Mode != ModelDeploymentScalerPriorModeWholeUnitServerFallback || got.WholeUnit == nil {
+			t.Fatalf("expected Tier 2 whole unit mode, got %q / %#v", got.Mode, got.WholeUnit)
+		}
+		// g_P=2, eff_P=1200 -> 600; g_D=4, eff_D=1500 -> 375.
+		// c_gpu = 375, UnitGPUs = 1*2 + 3*4 = 14, C_unit = floor(14 * 375) = 5250.
+		if got.WholeUnit.UnitGPUs != 14 || got.WholeUnit.MinUnits != 1 || got.WholeUnit.MaxUnits != 3 ||
+			got.WholeUnit.PerGPUTokensPerSecond != 375 || got.WholeUnit.UnitTargetTokensPerSecond != 5250 {
+			t.Fatalf("unexpected WholeUnit = %#v", got.WholeUnit)
+		}
+		if got.ConditionMessage == "" {
+			t.Fatal("expected Tier 2 condition message")
+		}
+		if len(got.Status) != 2 {
+			t.Fatalf("status entries = %d, want 2 LLM roles", len(got.Status))
+		}
+		if got.Status[0].CompatibilityFingerprint != got.Status[1].CompatibilityFingerprint {
+			t.Fatal("LLM roles must share joint compatibility fingerprint")
+		}
+		if got.Status[0].SeedTokensPerSecond.Cmp(*capacityPriorQuantity("1600")) != 0 ||
+			got.Status[1].SeedTokensPerSecond.Cmp(*capacityPriorQuantity("2000")) != 0 {
+			t.Fatalf("unexpected server seeds: %#v / %#v", got.Status[0].SeedTokensPerSecond, got.Status[1].SeedTokensPerSecond)
+		}
+		for _, st := range got.Status {
+			if len(st.Fields) != 1 || st.Fields[0].Field != "tokenThroughput.unitTargetTokensPerSecond" ||
+				st.Fields[0].EffectiveTokensPerSecond.Cmp(*capacityPriorQuantity("5250")) != 0 {
+				t.Fatalf("unexpected unit field status: %#v", st.Fields)
+			}
+		}
+	})
+
+	t.Run("Tier 2 resolves 1E:1P:2D Predictive when both dedicated profiles are missing", func(t *testing.T) {
+		scaler, md, cm, instances := capacityPriorDisaggregatedFixture(t, true)
+		scaler.Spec.Algorithm.Type = workercore.ModelDeploymentScalerAlgorithmTypePredictive
+		scaler.Spec.Algorithm.Predictive = &workercore.ModelDeploymentScalerPredictiveSpec{
+			TokenThroughput: *scaler.Spec.Algorithm.TokenThroughput,
+		}
+		scaler.Spec.Algorithm.TokenThroughput = nil
+
+		client := scalerTestClient(t, scaler, md, cm, instances[0], instances[1])
+		got, err := ResolveModelDeploymentScalerCapacityPriors(context.Background(), client, scaler, md)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got.Mode != ModelDeploymentScalerPriorModeWholeUnitServerFallback || got.WholeUnit == nil {
+			t.Fatalf("expected Tier 2, got %q", got.Mode)
+		}
+		// UnitGPUs = 1*2 + 2*4 = 10, c_gpu = 375, C_unit = 3750.
+		if got.WholeUnit.EncodeRole != "encode" || got.WholeUnit.UnitGPUs != 10 || got.WholeUnit.UnitTargetTokensPerSecond != 3750 {
+			t.Fatalf("unexpected EPD WholeUnit = %#v", got.WholeUnit)
+		}
+		if got.Status[0].Fields[0].Field != "predictive.unitTokenCapacityPerReplica" ||
+			got.Status[0].Fields[0].EffectiveTokensPerSecond.Cmp(*capacityPriorQuantity("3750")) != 0 {
+			t.Fatalf("unexpected predictive unit status fields: %#v", got.Status[0].Fields)
+		}
+	})
+
+	t.Run("Tier 2 refusals", func(t *testing.T) {
+		cases := []struct {
+			name string
+			edit func(t *testing.T, scaler *workercore.ModelDeploymentScaler, md *workercore.ModelDeployment, cm *core.ConfigMap)
+			want string
+		}{
+			{
+				name: "custom catalog does not fall back to embedded",
+				edit: func(_ *testing.T, scaler *workercore.ModelDeploymentScaler, _ *workercore.ModelDeployment, _ *core.ConfigMap) {
+					scaler.Spec.Algorithm.CapacityPrior.CatalogRef.Name = "missing-custom-cm"
+				},
+				want: "does not exist",
+			},
+			{
+				name: "partial explicit override fails in Tier 2",
+				edit: func(_ *testing.T, scaler *workercore.ModelDeploymentScaler, _ *workercore.ModelDeployment, _ *core.ConfigMap) {
+					scaler.Spec.Algorithm.TokenThroughput.PrefillTargetTokensPerSecond = capacityPriorQuantity("900")
+				},
+				want: "partial explicit",
+			},
+			{
+				name: "missing ITL fails in Tier 2",
+				edit: func(_ *testing.T, scaler *workercore.ModelDeploymentScaler, _ *workercore.ModelDeployment, _ *core.ConfigMap) {
+					scaler.Spec.Algorithm.TokenThroughput.ITLTargetMilliseconds = nil
+				},
+				want: "ITL",
+			},
+			{
+				name: "loose ratio fails in Tier 2",
+				edit: func(_ *testing.T, scaler *workercore.ModelDeploymentScaler, _ *workercore.ModelDeployment, _ *core.ConfigMap) {
+					scaler.Spec.Ratios[0].Max = capacityPriorQuantity("5")
+				},
+				want: "min == max",
+			},
+		}
+		for _, tc := range cases {
+			t.Run(tc.name, func(t *testing.T) {
+				scaler, md, cm, instances := capacityPriorDisaggregatedFixture(t, false)
+				tc.edit(t, scaler, md, cm)
+				client := scalerTestClient(t, scaler, md, cm, instances[0], instances[1])
+				_, err := ResolveModelDeploymentScalerCapacityPriors(context.Background(), client, scaler, md)
+				var refusal *priors.RefusalError
+				if !errors.As(err, &refusal) || !strings.Contains(err.Error(), tc.want) {
+					t.Fatalf("err = %v, want refusal containing %q", err, tc.want)
+				}
+			})
+		}
+	})
+}
+
+func TestModelDeploymentScalerCapacityPriorTier2Fingerprint(t *testing.T) {
+	scaler, md, cm, instances := capacityPriorDisaggregatedFixture(t, true)
+	client := scalerTestClient(t, scaler, md, cm, instances[0], instances[1])
+	first, err := ResolveModelDeploymentScalerCapacityPriors(context.Background(), client, scaler, md)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	cases := []struct {
+		name    string
+		changed bool
+		mutate  func(nextScaler *workercore.ModelDeploymentScaler, nextMD *workercore.ModelDeployment, nextCM *core.ConfigMap)
+	}{
+		{
+			name: "replica scaling retains joint fingerprint",
+			mutate: func(_ *workercore.ModelDeploymentScaler, nextMD *workercore.ModelDeployment, _ *core.ConfigMap) {
+				nextMD.Spec.Roles[0].Replicas = 2
+				nextMD.Spec.Roles[1].Replicas = 2
+				nextMD.Spec.Roles[2].Replicas = 4
+			},
+		},
+		{
+			name:    "ratio change invalidates joint fingerprint",
+			changed: true,
+			mutate: func(nextScaler *workercore.ModelDeploymentScaler, nextMD *workercore.ModelDeployment, _ *core.ConfigMap) {
+				nextScaler.Spec.Ratios[1].Min = capacityPriorQuantity("3")
+				nextScaler.Spec.Ratios[1].Max = capacityPriorQuantity("3")
+				nextScaler.Spec.Roles[2].MinReplicas = 3
+			},
+		},
+		{
+			name:    "encode config change invalidates joint fingerprint",
+			changed: true,
+			mutate: func(_ *workercore.ModelDeploymentScaler, nextMD *workercore.ModelDeployment, _ *core.ConfigMap) {
+				nextMD.Spec.Roles[0].ExtraArgs = append(nextMD.Spec.Roles[0].ExtraArgs, "--max-num-seqs=16")
+			},
+		},
+		{
+			name:    "server seed change invalidates joint fingerprint",
+			changed: true,
+			mutate: func(_ *workercore.ModelDeploymentScaler, _ *workercore.ModelDeployment, nextCM *core.ConfigMap) {
+				doc := capacityPriorReadCatalog(t, nextCM)
+				doc.Profiles[0].Points[0].TotalTokensPerSecond = 1111
+				doc.Profiles[0].Points[0].InputTokensPerSecond = 1111
+				doc.Profiles[0].Points[0].OutputTokensPerSecond = 1111
+				capacityPriorWriteCatalog(t, nextCM, doc)
+			},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			nextScaler, nextMD, nextCM := scaler.DeepCopy(), md.DeepCopy(), cm.DeepCopy()
+			tc.mutate(nextScaler, nextMD, nextCM)
+			nextClient := scalerTestClient(t, nextScaler, nextMD, nextCM, instances[0], instances[1])
+			second, err := ResolveModelDeploymentScalerCapacityPriors(context.Background(), nextClient, nextScaler, nextMD)
+			if err != nil {
+				t.Fatal(err)
+			}
+			changed := first.WholeUnit.JointCompatibilityDigest != second.WholeUnit.JointCompatibilityDigest ||
+				first.Status[0].CompatibilityFingerprint != second.Status[0].CompatibilityFingerprint ||
+				first.Status[1].CompatibilityFingerprint != second.Status[1].CompatibilityFingerprint
+			if changed != tc.changed {
+				t.Fatalf("fingerprint changed = %v, want %v", changed, tc.changed)
 			}
 		})
 	}

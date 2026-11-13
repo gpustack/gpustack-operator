@@ -1,6 +1,7 @@
 package priors
 
 import (
+	"errors"
 	"fmt"
 	"math"
 	"sort"
@@ -489,6 +490,17 @@ func (c *Catalog) selectProfile(request Request) (Profile, *RefusalError) {
 			map[string]string{"shapes": strings.Join(shapes, ",")},
 		)
 	}
+}
+
+// IsProfileNotFound reports whether err represents a zero-match catalog lookup
+// rather than profile ambiguity, constraint infeasibility, or other refusals.
+func IsProfileNotFound(err error) bool {
+	var refusal *RefusalError
+	if !errors.As(err, &refusal) || refusal == nil {
+		return false
+	}
+	return refusal.Reason == RefusalCapacityPriorUnresolved &&
+		strings.HasPrefix(refusal.Message, "no catalog profile matches the deployment shape ")
 }
 
 // profileMismatches returns the fields a profile and a request disagree on.

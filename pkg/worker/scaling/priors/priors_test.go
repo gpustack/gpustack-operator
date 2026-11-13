@@ -1,6 +1,9 @@
 package priors
 
 import (
+	"errors"
+	"fmt"
+	"math"
 	"testing"
 
 	"gpustack.ai/gpustack/pkg/worker/scaling/algorithm"
@@ -243,3 +246,137 @@ func intPointer(value int) *int { return &value }
 
 // floatPointer returns a pointer to a float64.
 func floatPointer(value float64) *float64 { return &value }
+
+func TestIsProfileNotFound(t *testing.T) {
+	prefillPoints := []MeasuredPoint{
+		testPoint(4, 100, 1000, 20),
+		testPoint(8, 200, 4000, 20),
+	}
+	for i := range prefillPoints {
+		prefillPoints[i].Throughput.Metric = ThroughputMetricCacheMissedInputTokensPerSecond
+		prefillPoints[i].Throughput.TokenCountConvention = TokenCountConventionCacheMissedInput
+	}
+	base := testProfile(t, RoleKindPrefill, prefillPoints)
+	catalog := testCatalog(t, base)
+
+	var nilRefusal *RefusalError
+	missingReq := testRequest()
+	missingReq.Role = RoleKindDecode
+	_, zeroMatchResolveErr := catalog.Resolve(missingReq)
+	_, zeroMatchSelectErr := catalog.Select(missingReq.Shape())
+
+	serverPoints := []MeasuredPoint{
+		testPoint(4, 100, 1000, 20),
+		testPoint(8, 200, 4000, 20),
+	}
+	ambig1 := testProfile(t, RoleKindServer, serverPoints)
+	ambig2 := ambig1
+	ambig2.Workload.Revision = "rev-2"
+	ambig2 = redigest(t, ambig2)
+	ambigCatalog := testCatalog(t, ambig1, ambig2)
+	_, ambigErr := ambigCatalog.Resolve(testRequest())
+
+	mismatchReq := testRequest()
+	mismatchReq.Role = RoleKindPrefill
+	mismatchReq.Identity.Model.Revision = "rev-other"
+	_, mismatchErr := catalog.Resolve(mismatchReq)
+
+	sloReq := testRequest()
+	sloReq.Role = RoleKindPrefill
+	sloReq.Constraints.TTFTTargetMilliseconds = 1
+	_, sloErr := catalog.Resolve(sloReq)
+
+	var nilCatalog *Catalog
+	_, nilCatalogErr := nilCatalog.Resolve(testRequest())
+
+	cases := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{name: "nil error", err: nil, want: false},
+		{name: "typed nil refusal", err: nilRefusal, want: false},
+		{name: "non-refusal error", err: errors.New("boom"), want: false},
+		{name: "resolve zero match", err: zeroMatchResolveErr, want: true},
+		{name: "select zero match", err: zeroMatchSelectErr, want: true},
+		{name: "wrapped zero match", err: fmt.Errorf("probe prefill: %w", zeroMatchResolveErr), want: true},
+		{name: "ambiguous match", err: ambigErr, want: false},
+		{name: "identity mismatch", err: mismatchErr, want: false},
+		{name: "slo infeasible", err: sloErr, want: false},
+		{name: "nil catalog", err: nilCatalogErr, want: false},
+		{name: "insufficient load coverage", err: newRefusal(RefusalInsufficientLoadCoverage, "missing coverage", nil), want: false},
+		{name: "incompatible metric", err: newRefusal(RefusalIncompatibleMetric, "wrong metric", nil), want: false},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := IsProfileNotFound(tc.err); got != tc.want {
+				t.Fatalf("IsProfileNotFound(%v) = %v, want %v", tc.err, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestDenominatorReconstructionAndSingleHeadroom(t *testing.T) {
+	cases := []struct {
+		name        string
+		denominator Denominator
+		throughput  float64
+		wantSeed    float64
+		wantEff     float64
+	}{
+		{
+			name:        "PerGPU multiplies by GPUsPerReplica once",
+			denominator: DenominatorPerGPU,
+			throughput:  100,
+			wantSeed:    400,
+			wantEff:     340,
+		},
+		{
+			name:        "PerReplica preserves per-replica throughput",
+			denominator: DenominatorPerReplica,
+			throughput:  400,
+			wantSeed:    400,
+			wantEff:     340,
+		},
+		{
+			name:        "WholeSystem divides by MeasuredReplicas once",
+			denominator: DenominatorWholeSystem,
+			throughput:  800,
+			wantSeed:    400,
+			wantEff:     340,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			points := []MeasuredPoint{
+				testPoint(4, tc.throughput, 1000, 20),
+				testPoint(8, tc.throughput*1.5, 4000, 20),
+			}
+			for i := range points {
+				points[i].Throughput.Denominator = tc.denominator
+			}
+			profile := testProfile(t, RoleKindServer, points)
+			profile.Topology.GPUsPerReplica = 4
+			profile.MeasuredReplicas = 2
+			profile = redigest(t, profile)
+			catalog := testCatalog(t, profile)
+
+			req := testRequest()
+			req.Topology.GPUsPerReplica = 4
+			req.Constraints.Headroom = 0.85
+
+			res, err := catalog.Resolve(req)
+			if err != nil {
+				t.Fatalf("Resolve failed: %v", err)
+			}
+			if math.Abs(res.SeedTokensPerSecond-tc.wantSeed) > 1e-9 {
+				t.Fatalf("SeedTokensPerSecond = %v, want %v", res.SeedTokensPerSecond, tc.wantSeed)
+			}
+			if math.Abs(res.EffectiveTokensPerSecond-tc.wantEff) > 1e-9 {
+				t.Fatalf("EffectiveTokensPerSecond = %v, want %v", res.EffectiveTokensPerSecond, tc.wantEff)
+			}
+		})
+	}
+}

@@ -384,7 +384,7 @@ func (t TokenThroughput) demand(obs RoleObservation) float64 {
 `T5` is independent from start. Once `T1` lands, `T2` and `T3` own disjoint packages and can run in
 parallel before `T4` finalizes the scaling guides and module index.
 
-- [ ] **T1 · Disaggregated identity, connector env gate, and two-tier capacity prior resolution**
+- [x] **T1 · Disaggregated identity, connector env gate, and two-tier capacity prior resolution**
   - **Blocked by:** None
   - **Owns:** `pkg/worker/scaling/priors/resolve.go`, `pkg/worker/scaling/priors/priors_test.go`, `pkg/worker/controllers/worker/model_deployment_scaler_priors.go`, `pkg/worker/controllers/worker/model_deployment_scaler_priors_test.go`, `pkg/worker/controllers/worker/model_deployment_scaler_prior_identity.go`, `pkg/worker/controllers/worker/model_deployment_scaler_prior_identity_test.go`, `pkg/worker/controllers/worker/model_deployment_scaler_prior_lifecycle.go`, `pkg/worker/controllers/worker/model_deployment_scaler_prior_lifecycle_test.go`
   - **Gate:** review

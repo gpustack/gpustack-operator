@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"math/big"
+	"sort"
 	"strconv"
 	"sync"
 	"unicode/utf8"
@@ -19,10 +21,43 @@ import (
 	"gpustack.ai/gpustack/pkg/worker/scaling/priors"
 )
 
+// ModelDeploymentScalerPriorResolutionMode identifies how a disaggregated
+// scaler resolved capacity priors across its roles.
+type ModelDeploymentScalerPriorResolutionMode string
+
+const (
+	// ModelDeploymentScalerPriorModeRole resolves each role independently from
+	// dedicated role profiles in the catalog.
+	ModelDeploymentScalerPriorModeRole ModelDeploymentScalerPriorResolutionMode = "Role"
+	// ModelDeploymentScalerPriorModeWholeUnitServerFallback estimates fixed-ratio
+	// whole-unit capacity from Server profiles when dedicated PD profiles are absent.
+	ModelDeploymentScalerPriorModeWholeUnitServerFallback ModelDeploymentScalerPriorResolutionMode = "WholeUnitServerFallback"
+)
+
+// ModelDeploymentScalerWholeUnitPrior captures fixed-ratio whole-unit scaling
+// capacity derived from standalone Server profiles when dedicated PD priors are absent.
+type ModelDeploymentScalerWholeUnitPrior struct {
+	UnitVector                map[string]int32
+	PrefillRole               string
+	DecodeRole                string
+	EncodeRole                string
+	PrefillGPUsPerReplica     int32
+	DecodeGPUsPerReplica      int32
+	UnitGPUs                  int32
+	MinUnits                  int32
+	MaxUnits                  int32
+	PerGPUTokensPerSecond     float64
+	UnitTargetTokensPerSecond float64
+	JointCompatibilityDigest  string
+}
+
 // ModelDeploymentScalerCapacityPriors contains independent effective algorithms and their evidence.
 type ModelDeploymentScalerCapacityPriors struct {
-	Algorithms map[string]workercore.ModelDeploymentScalerAlgorithmSpec
-	Status     []workercore.ModelDeploymentScalerResolvedCapacityPriorStatus
+	Algorithms       map[string]workercore.ModelDeploymentScalerAlgorithmSpec
+	Status           []workercore.ModelDeploymentScalerResolvedCapacityPriorStatus
+	Mode             ModelDeploymentScalerPriorResolutionMode
+	WholeUnit        *ModelDeploymentScalerWholeUnitPrior
+	ConditionMessage string
 }
 
 type modelDeploymentScalerCapacityField struct {
@@ -61,59 +96,69 @@ func ModelDeploymentScalerNeedsCapacityPrior(scaler *workercore.ModelDeploymentS
 func ResolveModelDeploymentScalerCapacityPriors(
 	ctx context.Context, reader ctrlcli.Reader, scaler *workercore.ModelDeploymentScaler, target *workercore.ModelDeployment,
 ) (*ModelDeploymentScalerCapacityPriors, error) {
-	result := &ModelDeploymentScalerCapacityPriors{Algorithms: make(map[string]workercore.ModelDeploymentScalerAlgorithmSpec)}
+	result := &ModelDeploymentScalerCapacityPriors{
+		Algorithms: make(map[string]workercore.ModelDeploymentScalerAlgorithmSpec),
+		Mode:       ModelDeploymentScalerPriorModeRole,
+	}
 	// THE QUANTILE THE SCALER IS HELD TO IS RESOLVED ONCE, because the
 	// resolution and the online sampling have to answer the same question.
 	quantile, quantileErr := ModelDeploymentScalerLatencyQuantile(&scaler.Spec.Algorithm)
 	if quantileErr != nil {
 		return nil, modelDeploymentScalerPriorRefusal("", "%v", quantileErr)
 	}
-	var catalog *priors.Catalog
-	for _, role := range target.Spec.Roles {
-		effective := scaler.Spec.Algorithm.DeepCopy()
-		if !modelDeploymentScalerPriorRequested(scaler) {
-			result.Algorithms[role.Name] = *effective
-			continue
+	if !modelDeploymentScalerPriorRequested(scaler) {
+		for _, role := range target.Spec.Roles {
+			result.Algorithms[role.Name] = *scaler.Spec.Algorithm.DeepCopy()
 		}
-		fields := modelDeploymentScalerCapacityFields(effective, ModelDeploymentEffectiveRoleKind(&role))
-		missing := false
-		for _, field := range fields {
+		return result, nil
+	}
+
+	needsCatalog := false
+	for _, role := range target.Spec.Roles {
+		kind := ModelDeploymentEffectiveRoleKind(&role)
+		switch kind {
+		case workercore.ModelDeploymentRoleKindServer, workercore.ModelDeploymentRoleKindPrefill,
+			workercore.ModelDeploymentRoleKindDecode, workercore.ModelDeploymentRoleKindEncode:
+		default:
+			return nil, modelDeploymentScalerPriorRefusal(role.Name, "role kind %q is not supported by Catalog", kind)
+		}
+		effective := scaler.Spec.Algorithm.DeepCopy()
+		for _, field := range modelDeploymentScalerCapacityFields(effective, kind) {
 			if *field.value == nil {
-				missing = true
+				needsCatalog = true
 				continue
 			}
 			if (*field.value).Sign() <= 0 || !modelDeploymentScalerFinite((*field.value).AsApproximateFloat64()) {
 				return nil, modelDeploymentScalerPriorRefusal(role.Name, "explicit capacity field %s must be finite and positive", field.name)
 			}
 		}
+	}
+	if !needsCatalog {
+		return modelDeploymentScalerResolveExplicitPriors(scaler, target, result)
+	}
+
+	catalog, err := modelDeploymentScalerLoadCatalog(ctx, reader, scaler)
+	if err != nil {
+		return nil, err
+	}
+	if ModelDeploymentDeclaresBothHalves(target) {
+		return modelDeploymentScalerResolveDisaggregatedPriors(ctx, reader, scaler, target, catalog, quantile)
+	}
+	return modelDeploymentScalerResolveRoleLoop(ctx, reader, scaler, target, catalog, quantile)
+}
+
+func modelDeploymentScalerResolveExplicitPriors(
+	scaler *workercore.ModelDeploymentScaler, target *workercore.ModelDeployment, result *ModelDeploymentScalerCapacityPriors,
+) (*ModelDeploymentScalerCapacityPriors, error) {
+	for _, role := range target.Spec.Roles {
+		effective := scaler.Spec.Algorithm.DeepCopy()
+		fields := modelDeploymentScalerCapacityFields(effective, ModelDeploymentEffectiveRoleKind(&role))
 		status := workercore.ModelDeploymentScalerResolvedCapacityPriorStatus{Name: role.Name}
-		var resolution priors.Resolution
-		if missing {
-			if catalog == nil {
-				var err error
-				catalog, err = modelDeploymentScalerLoadCatalog(ctx, reader, scaler)
-				if err != nil {
-					return nil, err
-				}
-			}
-			var err error
-			resolution, status, err = modelDeploymentScalerResolveRolePrior(ctx, reader, scaler, target, &role, effective, catalog, quantile)
-			if err != nil {
-				return nil, err
-			}
-		}
 		for _, field := range fields {
-			source := workercore.ModelDeploymentScalerCapacityFieldSourceExplicit
-			if *field.value == nil {
-				quantity, err := modelDeploymentScalerPriorQuantity(resolution.EffectiveTokensPerSecond)
-				if err != nil {
-					return nil, modelDeploymentScalerPriorRefusal(role.Name, "effective capacity cannot be represented: %v", err)
-				}
-				*field.value = quantity
-				source = workercore.ModelDeploymentScalerCapacityFieldSourceCatalog
-			}
 			status.Fields = append(status.Fields, workercore.ModelDeploymentScalerResolvedCapacityFieldStatus{
-				Field: field.name, Source: source, EffectiveTokensPerSecond: (*field.value).DeepCopy(),
+				Field:                    field.name,
+				Source:                   workercore.ModelDeploymentScalerCapacityFieldSourceExplicit,
+				EffectiveTokensPerSecond: (*field.value).DeepCopy(),
 			})
 		}
 		fingerprint, err := modelDeploymentScalerPriorFingerprint(target, &role, effective, status)
@@ -125,6 +170,81 @@ func ResolveModelDeploymentScalerCapacityPriors(
 		result.Status = append(result.Status, status)
 	}
 	return result, nil
+}
+
+func modelDeploymentScalerResolveRoleLoop(
+	ctx context.Context, reader ctrlcli.Reader, scaler *workercore.ModelDeploymentScaler,
+	target *workercore.ModelDeployment, catalog *priors.Catalog, quantile float64,
+) (*ModelDeploymentScalerCapacityPriors, error) {
+	result := &ModelDeploymentScalerCapacityPriors{
+		Algorithms: make(map[string]workercore.ModelDeploymentScalerAlgorithmSpec, len(target.Spec.Roles)),
+		Mode:       ModelDeploymentScalerPriorModeRole,
+	}
+	for _, role := range target.Spec.Roles {
+		effective, status, err := modelDeploymentScalerResolveSingleRole(ctx, reader, scaler, target, &role, catalog, quantile)
+		if err != nil {
+			return nil, err
+		}
+		result.Algorithms[role.Name] = *effective
+		result.Status = append(result.Status, status)
+	}
+	return result, nil
+}
+
+func modelDeploymentScalerResolveSingleRole(
+	ctx context.Context, reader ctrlcli.Reader, scaler *workercore.ModelDeploymentScaler,
+	target *workercore.ModelDeployment, role *workercore.ModelDeploymentRole, catalog *priors.Catalog, quantile float64,
+) (*workercore.ModelDeploymentScalerAlgorithmSpec, workercore.ModelDeploymentScalerResolvedCapacityPriorStatus, error) {
+	effective := scaler.Spec.Algorithm.DeepCopy()
+	kind := ModelDeploymentEffectiveRoleKind(role)
+	if kind == workercore.ModelDeploymentRoleKindEncode {
+		if err := modelDeploymentScalerValidateEncodeRole(ctx, reader, target, role); err != nil {
+			return nil, workercore.ModelDeploymentScalerResolvedCapacityPriorStatus{}, err
+		}
+		status := workercore.ModelDeploymentScalerResolvedCapacityPriorStatus{Name: role.Name}
+		fingerprint, err := modelDeploymentScalerPriorFingerprint(target, role, effective, status)
+		if err != nil {
+			return nil, status, err
+		}
+		status.CompatibilityFingerprint = fingerprint
+		return effective, status, nil
+	}
+	fields := modelDeploymentScalerCapacityFields(effective, kind)
+	missing := false
+	for _, field := range fields {
+		if *field.value == nil {
+			missing = true
+		}
+	}
+	status := workercore.ModelDeploymentScalerResolvedCapacityPriorStatus{Name: role.Name}
+	var resolution priors.Resolution
+	if missing {
+		var err error
+		resolution, status, err = modelDeploymentScalerResolveRolePrior(ctx, reader, scaler, target, role, effective, catalog, quantile)
+		if err != nil {
+			return nil, status, err
+		}
+	}
+	for _, field := range fields {
+		source := workercore.ModelDeploymentScalerCapacityFieldSourceExplicit
+		if *field.value == nil {
+			quantity, err := modelDeploymentScalerPriorQuantity(resolution.EffectiveTokensPerSecond)
+			if err != nil {
+				return nil, status, modelDeploymentScalerPriorRefusal(role.Name, "effective capacity cannot be represented: %v", err)
+			}
+			*field.value = quantity
+			source = workercore.ModelDeploymentScalerCapacityFieldSourceCatalog
+		}
+		status.Fields = append(status.Fields, workercore.ModelDeploymentScalerResolvedCapacityFieldStatus{
+			Field: field.name, Source: source, EffectiveTokensPerSecond: (*field.value).DeepCopy(),
+		})
+	}
+	fingerprint, err := modelDeploymentScalerPriorFingerprint(target, role, effective, status)
+	if err != nil {
+		return nil, status, err
+	}
+	status.CompatibilityFingerprint = fingerprint
+	return effective, status, nil
 }
 
 const maxCachedConfigMapCatalogs = 32
@@ -232,20 +352,33 @@ func modelDeploymentScalerResolveRolePrior(
 	role *workercore.ModelDeploymentRole, effective *workercore.ModelDeploymentScalerAlgorithmSpec, catalog *priors.Catalog,
 	quantile float64,
 ) (priors.Resolution, workercore.ModelDeploymentScalerResolvedCapacityPriorStatus, error) {
-	status := workercore.ModelDeploymentScalerResolvedCapacityPriorStatus{Name: role.Name}
-	// THE CATALOG IS SELECTED BY WHAT THE DEPLOYMENT STATES, because a profile
-	// is one deployment shape and the deployment states the shape it runs.
 	declaration, err := modelDeploymentScalerPriorDeclarationOf(ctx, reader, target, role)
 	if err != nil {
-		return priors.Resolution{}, status, err
+		return priors.Resolution{}, workercore.ModelDeploymentScalerResolvedCapacityPriorStatus{Name: role.Name}, err
 	}
-	shape := declaration.shape(modelDeploymentScalerRoleKind(ModelDeploymentEffectiveRoleKind(role)))
+	roleKind := modelDeploymentScalerRoleKind(ModelDeploymentEffectiveRoleKind(role))
+	return modelDeploymentScalerResolveProfilePrior(
+		scaler, target, role, effective, catalog, declaration, roleKind, quantile, false,
+	)
+}
+
+func modelDeploymentScalerResolveProfilePrior(
+	scaler *workercore.ModelDeploymentScaler, target *workercore.ModelDeployment,
+	role *workercore.ModelDeploymentRole, effective *workercore.ModelDeploymentScalerAlgorithmSpec, catalog *priors.Catalog,
+	declaration modelDeploymentScalerPriorDeclaration, roleKind priors.RoleKind, quantile float64, serverRouterFallback bool,
+) (priors.Resolution, workercore.ModelDeploymentScalerResolvedCapacityPriorStatus, error) {
+	status := workercore.ModelDeploymentScalerResolvedCapacityPriorStatus{Name: role.Name}
+	shape := declaration.shape(roleKind)
 	profile, refusal := catalog.Select(shape)
 	if refusal != nil {
 		refusal.Role = role.Name
 		return priors.Resolution{}, status, refusal
 	}
-	request, err := modelDeploymentScalerPriorRequest(target, role, &profile, declaration)
+	buildRequest := modelDeploymentScalerPriorRequest
+	if serverRouterFallback {
+		buildRequest = modelDeploymentScalerPriorRequestForServerFallback
+	}
+	request, err := buildRequest(target, role, &profile, declaration)
 	if err != nil {
 		return priors.Resolution{}, status, err
 	}
@@ -313,6 +446,463 @@ func modelDeploymentScalerResolveRolePrior(
 	status.Quantile = priors.FormatLatencyQuantile(selectedQuantile)
 	status.RequestedQuantile = priors.FormatLatencyQuantile(quantile)
 	return resolution, status, nil
+}
+
+type modelDeploymentScalerDisaggRoleSet struct {
+	encode  *workercore.ModelDeploymentRole
+	prefill *workercore.ModelDeploymentRole
+	decode  *workercore.ModelDeploymentRole
+}
+
+func modelDeploymentScalerDisaggregatedRoles(target *workercore.ModelDeployment) (modelDeploymentScalerDisaggRoleSet, error) {
+	var set modelDeploymentScalerDisaggRoleSet
+	for i := range target.Spec.Roles {
+		role := &target.Spec.Roles[i]
+		switch ModelDeploymentEffectiveRoleKind(role) {
+		case workercore.ModelDeploymentRoleKindEncode:
+			if set.encode != nil {
+				return set, modelDeploymentScalerPriorRefusal(role.Name, "multiple Encode roles are not supported by disaggregated capacity priors")
+			}
+			set.encode = role
+		case workercore.ModelDeploymentRoleKindPrefill:
+			if set.prefill != nil {
+				return set, modelDeploymentScalerPriorRefusal(role.Name, "multiple Prefill roles are not supported by disaggregated capacity priors")
+			}
+			set.prefill = role
+		case workercore.ModelDeploymentRoleKindDecode:
+			if set.decode != nil {
+				return set, modelDeploymentScalerPriorRefusal(role.Name, "multiple Decode roles are not supported by disaggregated capacity priors")
+			}
+			set.decode = role
+		default:
+			return set, modelDeploymentScalerPriorRefusal(role.Name, "mixed or unsupported role kind %q cannot resolve disaggregated capacity priors", ModelDeploymentEffectiveRoleKind(role))
+		}
+	}
+	if set.prefill == nil || set.decode == nil {
+		return set, modelDeploymentScalerPriorRefusal("", "disaggregated deployment must declare both Prefill and Decode roles")
+	}
+	return set, nil
+}
+
+func modelDeploymentScalerValidateEncodeRole(
+	ctx context.Context, reader ctrlcli.Reader, target *workercore.ModelDeployment, role *workercore.ModelDeploymentRole,
+) (err error) {
+	defer func() {
+		err = modelDeploymentScalerRedactPriorRefusal(err, role, nil)
+	}()
+	if len(role.Command) != 0 || role.ReplicaSize > 1 || role.ElasticEP != nil {
+		return modelDeploymentScalerPriorRefusal(role.Name, "Catalog requires a managed single-serving-Pod replica")
+	}
+	manufacturer := ""
+	if role.AcceleratorType != "" {
+		acc, _, accErr := modelDeploymentScalerPriorHardwareIdentity(ctx, reader, role)
+		if accErr != nil {
+			return accErr
+		}
+		manufacturer = acc.Status.Detail.Manufacturer
+	}
+	if gateErr := modelDeploymentScalerOperatorEnvGateWithManufacturer(target.Spec.Engine.Name, target, role, manufacturer); gateErr != nil {
+		return modelDeploymentScalerPriorRefusal(role.Name, "%v", gateErr)
+	}
+	return nil
+}
+
+func modelDeploymentScalerResolveDisaggregatedPriors(
+	ctx context.Context, reader ctrlcli.Reader, scaler *workercore.ModelDeploymentScaler,
+	target *workercore.ModelDeployment, catalog *priors.Catalog, quantile float64,
+) (*ModelDeploymentScalerCapacityPriors, error) {
+	roles, err := modelDeploymentScalerDisaggregatedRoles(target)
+	if err != nil {
+		return nil, err
+	}
+	if roles.encode != nil {
+		if err := modelDeploymentScalerValidateEncodeRole(ctx, reader, target, roles.encode); err != nil {
+			return nil, err
+		}
+	}
+	prefillDecl, err := modelDeploymentScalerPriorDeclarationOf(ctx, reader, target, roles.prefill)
+	if err != nil {
+		return nil, err
+	}
+	decodeDecl, err := modelDeploymentScalerPriorDeclarationOf(ctx, reader, target, roles.decode)
+	if err != nil {
+		return nil, err
+	}
+
+	_, prefillSelectErr := catalog.Select(prefillDecl.shape(priors.RoleKindPrefill))
+	_, decodeSelectErr := catalog.Select(decodeDecl.shape(priors.RoleKindDecode))
+
+	if prefillSelectErr == nil && decodeSelectErr == nil {
+		return modelDeploymentScalerResolveRoleLoop(ctx, reader, scaler, target, catalog, quantile)
+	}
+	if prefillSelectErr != nil && !priors.IsProfileNotFound(prefillSelectErr) {
+		prefillSelectErr.Role = roles.prefill.Name
+		return nil, prefillSelectErr
+	}
+	if decodeSelectErr != nil && !priors.IsProfileNotFound(decodeSelectErr) {
+		decodeSelectErr.Role = roles.decode.Name
+		return nil, decodeSelectErr
+	}
+
+	return modelDeploymentScalerResolveWholeUnitFallback(
+		scaler, target, roles, prefillDecl, decodeDecl, catalog, quantile,
+	)
+}
+
+func modelDeploymentScalerResolveWholeUnitFallback(
+	scaler *workercore.ModelDeploymentScaler, target *workercore.ModelDeployment,
+	roles modelDeploymentScalerDisaggRoleSet,
+	prefillDecl, decodeDecl modelDeploymentScalerPriorDeclaration,
+	catalog *priors.Catalog, quantile float64,
+) (*ModelDeploymentScalerCapacityPriors, error) {
+	for _, role := range []*workercore.ModelDeploymentRole{roles.prefill, roles.decode} {
+		probeSpec := scaler.Spec.Algorithm.DeepCopy()
+		for _, field := range modelDeploymentScalerCapacityFields(probeSpec, ModelDeploymentEffectiveRoleKind(role)) {
+			if *field.value != nil {
+				return nil, modelDeploymentScalerPriorRefusal(
+					role.Name, "Tier 2 whole-unit Server fallback does not permit partial explicit capacity field %s", field.name,
+				)
+			}
+		}
+	}
+
+	tokenSpec := scaler.Spec.Algorithm.TokenThroughput
+	if scaler.Spec.Algorithm.Type == workercore.ModelDeploymentScalerAlgorithmTypePredictive && scaler.Spec.Algorithm.Predictive != nil {
+		tokenSpec = &scaler.Spec.Algorithm.Predictive.TokenThroughput
+	}
+	if tokenSpec == nil || tokenSpec.TTFTTargetMilliseconds == nil || tokenSpec.TTFTTargetMilliseconds.AsApproximateFloat64() <= 0 ||
+		!modelDeploymentScalerFinite(tokenSpec.TTFTTargetMilliseconds.AsApproximateFloat64()) {
+		return nil, modelDeploymentScalerPriorRefusal("", "Tier 2 whole-unit Server fallback requires positive TTFT latency target")
+	}
+	if tokenSpec.ITLTargetMilliseconds == nil || tokenSpec.ITLTargetMilliseconds.AsApproximateFloat64() <= 0 ||
+		!modelDeploymentScalerFinite(tokenSpec.ITLTargetMilliseconds.AsApproximateFloat64()) {
+		return nil, modelDeploymentScalerPriorRefusal("", "Tier 2 whole-unit Server fallback requires positive ITL latency target")
+	}
+
+	unitVector, minUnits, maxUnits, err := solveFixedWholeUnitVector(scaler, target)
+	if err != nil {
+		return nil, err
+	}
+
+	prefillEffective := scaler.Spec.Algorithm.DeepCopy()
+	prefillRes, prefillStatus, err := modelDeploymentScalerResolveProfilePrior(
+		scaler, target, roles.prefill, prefillEffective, catalog, prefillDecl, priors.RoleKindServer, quantile, true,
+	)
+	if err != nil {
+		return nil, err
+	}
+	decodeEffective := scaler.Spec.Algorithm.DeepCopy()
+	decodeRes, decodeStatus, err := modelDeploymentScalerResolveProfilePrior(
+		scaler, target, roles.decode, decodeEffective, catalog, decodeDecl, priors.RoleKindServer, quantile, true,
+	)
+	if err != nil {
+		return nil, err
+	}
+	if prefillRes.GPUsPerReplica <= 0 || decodeRes.GPUsPerReplica <= 0 {
+		return nil, modelDeploymentScalerPriorRefusal("", "resolved Server profiles must carry positive GPUsPerReplica")
+	}
+
+	gP, gD := int64(prefillRes.GPUsPerReplica), int64(decodeRes.GPUsPerReplica)
+	uP, uD := int64(unitVector[roles.prefill.Name]), int64(unitVector[roles.decode.Name])
+	unitGPUs := uP*gP + uD*gD
+	if unitGPUs <= 0 || unitGPUs > math.MaxInt32 {
+		return nil, modelDeploymentScalerPriorRefusal("", "whole-unit GPU count exceeds supported int32 bounds")
+	}
+
+	cGPU := math.Min(
+		prefillRes.EffectiveTokensPerSecond/float64(gP),
+		decodeRes.EffectiveTokensPerSecond/float64(gD),
+	)
+	cUnit := math.Max(1, math.Floor(float64(unitGPUs)*cGPU))
+	cUnitQuantity, err := modelDeploymentScalerPriorQuantity(cUnit)
+	if err != nil {
+		return nil, modelDeploymentScalerPriorRefusal("", "whole-unit capacity cannot be represented: %v", err)
+	}
+
+	unitFieldNames := []string{"tokenThroughput.unitTargetTokensPerSecond"}
+	if scaler.Spec.Algorithm.Type == workercore.ModelDeploymentScalerAlgorithmTypePredictive {
+		unitFieldNames = []string{
+			"predictive.unitTokenCapacityPerReplica",
+			"predictive.tokenThroughput.unitTargetTokensPerSecond",
+		}
+	}
+	for _, fieldName := range unitFieldNames {
+		entry := workercore.ModelDeploymentScalerResolvedCapacityFieldStatus{
+			Field:                    fieldName,
+			Source:                   workercore.ModelDeploymentScalerCapacityFieldSourceCatalog,
+			EffectiveTokensPerSecond: cUnitQuantity.DeepCopy(),
+		}
+		prefillStatus.Fields = append(prefillStatus.Fields, entry)
+		decodeStatus.Fields = append(decodeStatus.Fields, entry)
+	}
+
+	for _, field := range modelDeploymentScalerCapacityFields(prefillEffective, workercore.ModelDeploymentRoleKindPrefill) {
+		if *field.value == nil {
+			q := cUnitQuantity.DeepCopy()
+			*field.value = &q
+		}
+	}
+	for _, field := range modelDeploymentScalerCapacityFields(decodeEffective, workercore.ModelDeploymentRoleKindDecode) {
+		if *field.value == nil {
+			q := cUnitQuantity.DeepCopy()
+			*field.value = &q
+		}
+	}
+
+	wholeUnit := &ModelDeploymentScalerWholeUnitPrior{
+		UnitVector:                unitVector,
+		PrefillRole:               roles.prefill.Name,
+		DecodeRole:                roles.decode.Name,
+		PrefillGPUsPerReplica:     int32(gP),
+		DecodeGPUsPerReplica:      int32(gD),
+		UnitGPUs:                  int32(unitGPUs),
+		MinUnits:                  minUnits,
+		MaxUnits:                  maxUnits,
+		PerGPUTokensPerSecond:     cGPU,
+		UnitTargetTokensPerSecond: cUnit,
+	}
+	if roles.encode != nil {
+		wholeUnit.EncodeRole = roles.encode.Name
+	}
+
+	jointDigest, err := modelDeploymentScalerWholeUnitFingerprint(
+		scaler, target, unitVector, minUnits, maxUnits, cUnit, prefillStatus, decodeStatus,
+	)
+	if err != nil {
+		return nil, err
+	}
+	wholeUnit.JointCompatibilityDigest = jointDigest
+	prefillStatus.CompatibilityFingerprint = jointDigest
+	decodeStatus.CompatibilityFingerprint = jointDigest
+
+	result := &ModelDeploymentScalerCapacityPriors{
+		Algorithms: map[string]workercore.ModelDeploymentScalerAlgorithmSpec{
+			roles.prefill.Name: *prefillEffective,
+			roles.decode.Name:  *decodeEffective,
+		},
+		Status:           []workercore.ModelDeploymentScalerResolvedCapacityPriorStatus{prefillStatus, decodeStatus},
+		Mode:             ModelDeploymentScalerPriorModeWholeUnitServerFallback,
+		WholeUnit:        wholeUnit,
+		ConditionMessage: "all required capacities are resolved via Tier 2 whole-unit Server fallback (initial estimate assumes GPU-time-balanced stage sizing across the fixed unit ratio)",
+	}
+	if roles.encode != nil {
+		result.Algorithms[roles.encode.Name] = *scaler.Spec.Algorithm.DeepCopy()
+	}
+	return result, nil
+}
+
+func modelDeploymentScalerWholeUnitFingerprint(
+	scaler *workercore.ModelDeploymentScaler, target *workercore.ModelDeployment,
+	unitVector map[string]int32, minUnits, maxUnits int32, unitTokens float64,
+	prefillStatus, decodeStatus workercore.ModelDeploymentScalerResolvedCapacityPriorStatus,
+) (string, error) {
+	canonicalRoles := make([]workercore.ModelDeploymentRole, 0, len(target.Spec.Roles))
+	for i := range target.Spec.Roles {
+		roleCopy := target.Spec.Roles[i].DeepCopy()
+		roleCopy.Replicas = 0
+		canonicalRoles = append(canonicalRoles, *roleCopy)
+	}
+	annotations := make(map[string]string)
+	for _, key := range []string{
+		workercore.ModelDeploymentScalerModelIDAnnotationKey,
+		workercore.ModelDeploymentScalerHardwareIDAnnotationKey,
+		workercore.ModelDeploymentScalerPrecisionAnnotationKey,
+		workercore.ModelDeploymentScalerPrefillHardwareIDAnnotationKey,
+		workercore.ModelDeploymentScalerDecodeHardwareIDAnnotationKey,
+	} {
+		annotations[key] = target.Annotations[key]
+	}
+	return priors.Digest(struct {
+		Mode        ModelDeploymentScalerPriorResolutionMode
+		TargetUID   string
+		UnitVector  map[string]int32
+		MinUnits    int32
+		MaxUnits    int32
+		UnitTokens  float64
+		Roles       []workercore.ModelDeploymentRole
+		Model       workercore.ModelDeploymentModel
+		Engine      workercore.ModelDeploymentEngine
+		Router      *workercore.ModelDeploymentRouter
+		KVCache     *workercore.ModelDeploymentKVCache
+		KVTransfer  *workercore.ModelDeploymentKVTransfer
+		Annotations map[string]string
+		Algorithm   *workercore.ModelDeploymentScalerAlgorithmSpec
+		Ratios      []workercore.ModelDeploymentScalerRoleRatio
+		RoleBounds  []workercore.ModelDeploymentScalerRoleBounds
+		Prefill     workercore.ModelDeploymentScalerResolvedCapacityPriorStatus
+		Decode      workercore.ModelDeploymentScalerResolvedCapacityPriorStatus
+	}{
+		ModelDeploymentScalerPriorModeWholeUnitServerFallback,
+		string(target.UID), unitVector, minUnits, maxUnits, unitTokens,
+		canonicalRoles, target.Spec.Model, target.Spec.Engine, target.Spec.Router,
+		target.Spec.KVCache, target.Spec.KVTransfer, annotations,
+		scaler.Spec.Algorithm.DeepCopy(), scaler.Spec.Ratios, scaler.Spec.Roles,
+		prefillStatus, decodeStatus,
+	})
+}
+
+func quantityToPositiveRat(q *resource.Quantity) (*big.Rat, error) {
+	if q == nil {
+		return nil, fmt.Errorf("missing ratio quantity")
+	}
+	rat, ok := new(big.Rat).SetString(q.AsDec().String())
+	if !ok || rat.Sign() <= 0 {
+		return nil, fmt.Errorf("ratio %q must be a positive rational number", q.String())
+	}
+	return rat, nil
+}
+
+func solveFixedWholeUnitVector(
+	scaler *workercore.ModelDeploymentScaler, target *workercore.ModelDeployment,
+) (map[string]int32, int32, int32, error) {
+	roleNames := make(map[string]struct{}, len(target.Spec.Roles))
+	orderedNames := make([]string, 0, len(target.Spec.Roles))
+	for i := range target.Spec.Roles {
+		name := target.Spec.Roles[i].Name
+		if _, dup := roleNames[name]; dup {
+			return nil, 0, 0, modelDeploymentScalerPriorRefusal(name, "duplicate role name in target deployment")
+		}
+		roleNames[name] = struct{}{}
+		orderedNames = append(orderedNames, name)
+	}
+	if len(orderedNames) < 2 {
+		return nil, 0, 0, modelDeploymentScalerPriorRefusal("", "fixed whole-unit vector requires at least two roles")
+	}
+	if len(scaler.Spec.Ratios) == 0 {
+		return nil, 0, 0, modelDeploymentScalerPriorRefusal("", "Tier 2 whole-unit Server fallback requires fixed ratios covering all target roles")
+	}
+
+	bounds := make(map[string]workercore.ModelDeploymentScalerRoleBounds, len(scaler.Spec.Roles))
+	for i := range scaler.Spec.Roles {
+		b := scaler.Spec.Roles[i]
+		bounds[b.Name] = b
+	}
+	for _, name := range orderedNames {
+		b, ok := bounds[name]
+		if !ok {
+			return nil, 0, 0, modelDeploymentScalerPriorRefusal(name, "missing scaler role bounds for target role")
+		}
+		minR := max(b.MinReplicas, 1)
+		if b.MaxReplicas < minR {
+			return nil, 0, 0, modelDeploymentScalerPriorRefusal(name, "maxReplicas %d is less than minReplicas %d", b.MaxReplicas, minR)
+		}
+	}
+
+	type ratioEdge struct {
+		to     string
+		factor *big.Rat
+	}
+	adj := make(map[string][]ratioEdge, len(orderedNames))
+	for _, ratio := range scaler.Spec.Ratios {
+		if _, ok := roleNames[ratio.NumeratorRole]; !ok {
+			return nil, 0, 0, modelDeploymentScalerPriorRefusal(ratio.NumeratorRole, "ratio references unknown role")
+		}
+		if _, ok := roleNames[ratio.DenominatorRole]; !ok {
+			return nil, 0, 0, modelDeploymentScalerPriorRefusal(ratio.DenominatorRole, "ratio references unknown role")
+		}
+		if ratio.Min == nil || ratio.Max == nil {
+			return nil, 0, 0, modelDeploymentScalerPriorRefusal("", "fixed-ratio constraints require min == max on %s/%s", ratio.NumeratorRole, ratio.DenominatorRole)
+		}
+		minRat, err := quantityToPositiveRat(ratio.Min)
+		if err != nil {
+			return nil, 0, 0, modelDeploymentScalerPriorRefusal("", "%v", err)
+		}
+		maxRat, err := quantityToPositiveRat(ratio.Max)
+		if err != nil {
+			return nil, 0, 0, modelDeploymentScalerPriorRefusal("", "%v", err)
+		}
+		if minRat.Cmp(maxRat) != 0 {
+			return nil, 0, 0, modelDeploymentScalerPriorRefusal("", "Tier 2 whole-unit Server fallback requires fixed ratios (min == max) on %s/%s", ratio.NumeratorRole, ratio.DenominatorRole)
+		}
+		if ratio.Target != nil {
+			targetRat, err := quantityToPositiveRat(ratio.Target)
+			if err != nil {
+				return nil, 0, 0, modelDeploymentScalerPriorRefusal("", "%v", err)
+			}
+			if targetRat.Cmp(minRat) != 0 {
+				return nil, 0, 0, modelDeploymentScalerPriorRefusal("", "ratio target conflicts with fixed min == max on %s/%s", ratio.NumeratorRole, ratio.DenominatorRole)
+			}
+		}
+		invRat := new(big.Rat).Inv(minRat)
+		adj[ratio.DenominatorRole] = append(adj[ratio.DenominatorRole], ratioEdge{to: ratio.NumeratorRole, factor: minRat})
+		adj[ratio.NumeratorRole] = append(adj[ratio.NumeratorRole], ratioEdge{to: ratio.DenominatorRole, factor: invRat})
+	}
+
+	vals := map[string]*big.Rat{orderedNames[0]: big.NewRat(1, 1)}
+	queue := []string{orderedNames[0]}
+	for len(queue) > 0 {
+		cur := queue[0]
+		queue = queue[1:]
+		for _, edge := range adj[cur] {
+			nextVal := new(big.Rat).Mul(vals[cur], edge.factor)
+			if existing, seen := vals[edge.to]; seen {
+				if existing.Cmp(nextVal) != 0 {
+					return nil, 0, 0, modelDeploymentScalerPriorRefusal("", "fixed-ratio constraints contain an inconsistent cycle")
+				}
+				continue
+			}
+			vals[edge.to] = nextVal
+			queue = append(queue, edge.to)
+		}
+	}
+	if len(vals) != len(orderedNames) {
+		return nil, 0, 0, modelDeploymentScalerPriorRefusal("", "fixed-ratio constraints must connect all target roles into one component")
+	}
+
+	sort.Strings(orderedNames)
+	lcm := big.NewInt(1)
+	gcdTmp := new(big.Int)
+	for _, name := range orderedNames {
+		d := vals[name].Denom()
+		gcdTmp.GCD(nil, nil, lcm, d)
+		lcm.Quo(lcm, gcdTmp)
+		lcm.Mul(lcm, d)
+	}
+
+	scaled := make(map[string]*big.Int, len(orderedNames))
+	var overallGCD *big.Int
+	for _, name := range orderedNames {
+		val := vals[name]
+		term := new(big.Int).Quo(lcm, val.Denom())
+		term.Mul(term, val.Num())
+		scaled[name] = term
+		if overallGCD == nil {
+			overallGCD = new(big.Int).Set(term)
+		} else {
+			overallGCD.GCD(nil, nil, overallGCD, term)
+		}
+	}
+
+	unit := make(map[string]int32, len(orderedNames))
+	maxInt32 := big.NewInt(math.MaxInt32)
+	for _, name := range orderedNames {
+		reduced := new(big.Int).Quo(scaled[name], overallGCD)
+		if reduced.Sign() <= 0 || reduced.Cmp(maxInt32) > 0 {
+			return nil, 0, 0, modelDeploymentScalerPriorRefusal(name, "canonical unit vector exceeds supported int32 bounds")
+		}
+		unit[name] = int32(reduced.Int64())
+	}
+
+	kMin := int64(1)
+	kMax := int64(math.MaxInt32)
+	for _, name := range orderedNames {
+		b := bounds[name]
+		minR := int64(max(b.MinReplicas, 1))
+		maxR := int64(b.MaxReplicas)
+		u := int64(unit[name])
+		ceilK := (minR + u - 1) / u
+		floorK := maxR / u
+		if ceilK > kMin {
+			kMin = ceilK
+		}
+		if floorK < kMax {
+			kMax = floorK
+		}
+	}
+	if kMin > kMax || kMax <= 0 {
+		return nil, 0, 0, modelDeploymentScalerPriorRefusal("", "no positive integer unit multiplier satisfies role replica bounds")
+	}
+	return unit, int32(kMin), int32(kMax), nil
 }
 
 func modelDeploymentScalerPriorFingerprint(
