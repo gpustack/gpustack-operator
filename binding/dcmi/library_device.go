@@ -2,6 +2,7 @@ package dcmi
 
 import "C"
 import (
+	"bytes"
 	"fmt"
 	"strconv"
 	"strings"
@@ -539,11 +540,19 @@ func (l Device) GetAffinityCPUInfo() (string, Return) {
 	if !ret.IsSuccess() {
 		return "", ret
 	}
-	if infoLength < 0 || infoLength > int32(len(info)) {
+
+	return decodeAffinityCPUInfo(info, infoLength)
+}
+
+func decodeAffinityCPUInfo(info []byte, infoLength int32) (string, Return) {
+	if infoLength < 0 || int(infoLength) > len(info) {
 		return "", ERROR_LIST_TRUNCATED
 	}
-
-	return string(info[:infoLength]), SUCCESS
+	raw := info[:infoLength]
+	if nul := bytes.IndexByte(raw, 0); nul >= 0 {
+		raw = raw[:nul]
+	}
+	return strings.TrimSpace(string(raw)), SUCCESS
 }
 
 // GetTopoInfo retrieves the topology information between two devices, returning it as an integer.
