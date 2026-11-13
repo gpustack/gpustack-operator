@@ -135,18 +135,13 @@ func (in *ascend) DetectAccelerator(noPciCheck bool) (_ device.DevicesGroupList,
 				continue
 			}
 
-			var pciBusId string
-			{
-				pciHandler := dev.GetPcieInfoV()
-				pciInfo, ret := pciHandler.V2()
-				if !ret.IsSuccess() {
-					pciInfo, ret = pciHandler.V1()
-					if !ret.IsSuccess() {
-						logger.Error(ret, "failed to get device PCI info")
-						continue
-					}
+			pciBusId, pciRet := devicePCIBusID(dev)
+			if !pciRet.IsSuccess() {
+				if isPCIBusIDUnsupported(pciRet) {
+					logger.V(3).Info("device reports no PCI info", "reason", pciRet.Error())
+				} else {
+					logger.Info("could not read device PCI info", "reason", pciRet.Error())
 				}
-				pciBusId = pciInfo.GetBusId()
 			}
 			pciDev := pciDevs[pciBusId]
 
@@ -233,6 +228,7 @@ func (in *ascend) DetectAccelerator(noPciCheck bool) (_ device.DevicesGroupList,
 			}
 
 			topo := device.ConstructTopology(pciBusId, pciDev.Root, pciDev.Class, pciDev.Switches)
+			applyFallbackAffinity(&topo, dev.GetAffinityCPUInfo, binding.MapCPUAffinityStrToNumaNode)
 
 			// RoCE networking belongs to the dcmi card, a hardware level above the
 			// accelerator that carries several NPUs; it is recorded on the topology of
@@ -513,6 +509,67 @@ func deviceUUID(dev dcmi.Device) (string, dcmi.Return) {
 	}
 
 	return "", v1Ret
+}
+
+// devicePCIBusID reads the device's PCIe BDF across DCMI V2 and V1.
+// Callers keep the accelerator with an empty bus ID when this query fails,
+// because UB-attached parts such as Ascend950DT expose no PCIe address.
+func devicePCIBusID(dev dcmi.Device) (string, dcmi.Return) {
+	pciHandler := dev.GetPcieInfoV()
+	v2Info, v2Ret := pciHandler.V2()
+	return selectPCIBusID(v2Info, v2Ret, pciHandler.V1)
+}
+
+func selectPCIBusID(
+	v2Info dcmi.PcieInfoAll,
+	v2Ret dcmi.Return,
+	readV1 func() (dcmi.PcieInfoAll, dcmi.Return),
+) (string, dcmi.Return) {
+	if v2Ret.IsSuccess() {
+		return v2Info.GetBusId(), v2Ret
+	}
+
+	v1Info, v1Ret := readV1()
+	if v1Ret.IsSuccess() {
+		return v1Info.GetBusId(), v1Ret
+	}
+
+	if v1Ret == dcmi.ERROR_NOT_SUPPORT || v1Ret.IsAPIUnavailable() {
+		return "", v2Ret
+	}
+	return "", v1Ret
+}
+
+func isPCIBusIDUnsupported(ret dcmi.Return) bool {
+	return ret.IsAPIUnavailable() ||
+		ret == dcmi.ERROR_NOT_SUPPORT ||
+		ret == dcmi.ERROR_NOT_SUPPORT_IN_CONTAINER
+}
+
+// applyFallbackAffinity populates CPU and NUMA affinity from DCMI when sysfs
+// had no PCI BDF or reported no NUMA node for the device.
+func applyFallbackAffinity(
+	topo *device.Topology,
+	readCPU func() (string, dcmi.Return),
+	mapNuma func(string) string,
+) {
+	if topo.NumaAffinity != "" {
+		return
+	}
+	raw, ret := readCPU()
+	if !ret.IsSuccess() {
+		return
+	}
+	cpus := binding.ListToStrRange(binding.StrRangeToList(raw))
+	if cpus == "" {
+		return
+	}
+	if topo.CpuAffinity == "" {
+		topo.CpuAffinity = cpus
+	}
+	if numa := mapNuma(cpus); numa != "" {
+		topo.NumaAffinity = numa
+	}
 }
 
 var (
