@@ -1,0 +1,374 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 880" role="img" aria-labelledby="title desc">
+  <title id="title">Default TCP Disk Staging Versus HIXL And NIXL Double-Buffered RAM Delivery</title>
+  <desc id="desc">Comparison of two model loading paths when starting a ModelDeployment: default TCP must finish writing the entire model to target local disk before loading from disk into Device DRAM, whereas HIXL and NIXL alternate between two bounded Host RAM buffers (Buffer A and Buffer B) over multiple cycles to pipeline H2H receive and H2D transfer into Device DRAM.</desc>
+  <defs>
+    <style>
+      :root {
+        --bg: #f8fafc;
+        --canvas-stroke: #e2e8f0;
+        --card: #ffffff;
+        --card-stroke: #cbd5e1;
+        --tcp-fill: #f8fafc;
+        --tcp-stroke: #94a3b8;
+        --hixl-fill: #f0fdf4;
+        --hixl-stroke: #10b981;
+        --ink: #0f172a;
+        --muted: #475569;
+        --faint: #64748b;
+        --grid: #eef2f7;
+        --blue: #2563eb;
+        --teal: #0891b2;
+        --emerald: #059669;
+        --purple: #7c3aed;
+        --amber: #d97706;
+        --slate: #64748b;
+        --pill-green: #dcfce7;
+        --pill-amber: #fef3c7;
+        --pill-slate: #e2e8f0;
+        --track: #e2e8f0;
+      }
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --bg: #0b1220;
+          --canvas-stroke: #1e293b;
+          --card: #111827;
+          --card-stroke: #334155;
+          --tcp-fill: #0f172a;
+          --tcp-stroke: #64748b;
+          --hixl-fill: #071f18;
+          --hixl-stroke: #34d399;
+          --ink: #f8fafc;
+          --muted: #cbd5e1;
+          --faint: #94a3b8;
+          --grid: #131c2e;
+          --blue: #60a5fa;
+          --teal: #22d3ee;
+          --emerald: #34d399;
+          --purple: #a78bfa;
+          --amber: #fbbf24;
+          --slate: #94a3b8;
+          --pill-green: #064e3b;
+          --pill-amber: #78350f;
+          --pill-slate: #1e293b;
+          --track: #1e293b;
+        }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        .slow-tcp, .slow-hop, .fast-stream, .fast-stream-2, .fast-hop, .anim { animation: none !important; }
+      }
+      text {
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, Roboto, sans-serif;
+        fill: var(--ink);
+      }
+      .kicker { font-size: 11px; font-weight: 800; letter-spacing: 0.14em; fill: var(--emerald); }
+      .h1 { font-size: 26px; font-weight: 800; letter-spacing: -0.02em; }
+      .sub { font-size: 14px; font-weight: 500; fill: var(--muted); }
+      .ct { font-size: 16px; font-weight: 700; }
+      .stage { font-size: 13.5px; font-weight: 700; }
+      .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 11.5px; font-weight: 700; fill: var(--muted); }
+      .detail { font-size: 12.5px; font-weight: 500; fill: var(--muted); }
+      .small { font-size: 11px; font-weight: 600; fill: var(--faint); }
+      .badge-green { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 10.5px; font-weight: 800; fill: var(--emerald); }
+      .badge-amber { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 10.5px; font-weight: 800; fill: var(--amber); }
+      .badge-slate { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 10.5px; font-weight: 800; fill: var(--slate); }
+      .pill { font-size: 13px; font-weight: 700; }
+      .canvas { fill: var(--bg); stroke: var(--canvas-stroke); stroke-width: 1.25; }
+      .box { fill: var(--card); stroke: var(--card-stroke); stroke-width: 1.5; }
+      .subbox { fill: var(--bg); stroke: var(--card-stroke); stroke-width: 1.25; }
+      .layer-tcp { fill: var(--tcp-fill); stroke: var(--tcp-stroke); stroke-width: 1.75; stroke-dasharray: 6 4; }
+      .layer-hixl { fill: var(--hixl-fill); stroke: var(--hixl-stroke); stroke-width: 2.2; }
+      .track { fill: var(--track); }
+      .guide { fill: none; stroke: var(--card-stroke); stroke-width: 1.5; stroke-dasharray: 4 5; }
+
+      /* Slow TCP and sequential disk animations */
+      .slow-tcp {
+        fill: none;
+        stroke: var(--amber);
+        stroke-width: 2.2;
+        stroke-linecap: round;
+        stroke-dasharray: 6 10;
+        animation: dash-slow 2.6s linear infinite;
+      }
+      .slow-hop {
+        fill: none;
+        stroke: var(--amber);
+        stroke-width: 2.2;
+        stroke-linecap: round;
+        stroke-dasharray: 5 8;
+        animation: dash-slow 2.2s linear infinite;
+      }
+
+      /* Ultra-fast HIXL / NIXL and RAM double-buffer animations */
+      .fast-stream {
+        fill: none;
+        stroke: var(--emerald);
+        stroke-width: 3.5;
+        stroke-linecap: round;
+        stroke-dasharray: 12 10;
+        animation: dash-fast 0.36s linear infinite;
+      }
+      .fast-stream-2 {
+        fill: none;
+        stroke: var(--teal);
+        stroke-width: 3;
+        stroke-linecap: round;
+        stroke-dasharray: 10 12;
+        animation: dash-fast 0.42s linear infinite;
+      }
+      .fast-hop {
+        fill: none;
+        stroke: var(--emerald);
+        stroke-width: 2.6;
+        stroke-linecap: round;
+        stroke-dasharray: 8 8;
+        animation: dash-fast 0.40s linear infinite;
+      }
+      @keyframes dash-slow { to { stroke-dashoffset: -32; } }
+      @keyframes dash-fast { to { stroke-dashoffset: -44; } }
+    </style>
+    <pattern id="grid" width="32" height="32" patternUnits="userSpaceOnUse">
+      <path d="M 32 0 L 0 0 0 32" fill="none" stroke="var(--grid)" stroke-width="1"/>
+    </pattern>
+    <marker id="arr-amber" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+      <path d="M 0 1 L 9 5 L 0 9 z" fill="var(--amber)"/>
+    </marker>
+    <marker id="arr-emerald" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+      <path d="M 0 1 L 9 5 L 0 9 z" fill="var(--emerald)"/>
+    </marker>
+    <marker id="arr-teal" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+      <path d="M 0 1 L 9 5 L 0 9 z" fill="var(--teal)"/>
+    </marker>
+    <marker id="arr-purple" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+      <path d="M 0 1 L 9 5 L 0 9 z" fill="var(--purple)"/>
+    </marker>
+  </defs>
+
+  <rect class="canvas" x="8" y="8" width="1184" height="864" rx="20"/>
+  <rect x="9" y="9" width="1182" height="862" rx="19" fill="url(#grid)" opacity="0.65"/>
+
+  <!-- Header -->
+  <text class="kicker" x="32" y="42">GPUSTACK OPERATOR / MODEL DELIVERY</text>
+  <text class="h1" x="32" y="74">Remote Weight Delivery Vs. Default TCP Loading</text>
+  <text class="sub" x="32" y="98">TCP stages weights on disk; HIXL / NIXL pipelines host RAM buffers into device DRAM</text>
+  <rect x="1132" y="44" width="36" height="36" rx="10" fill="var(--blue)"/>
+  <text x="1150" y="68" text-anchor="middle" style="font-size:17px;font-weight:800;fill:#fff">G</text>
+
+  <!-- ======================================================================= -->
+  <!-- LAYER 1 (TOP): DEFAULT TCP MODE (SEQUENTIAL: DISK MUST FINISH FIRST)    -->
+  <!-- Synchronized 8s timeline:                                               -->
+  <!--   0.00 - 0.48 (0-3.84s): Disk fills 0 -> 100%, DRAM stays at 0%         -->
+  <!--   0.48 - 0.92 (3.84-7.36s): Disk stays 100%, DRAM fills 0 -> 100%       -->
+  <!-- ======================================================================= -->
+  <rect class="layer-tcp" x="32" y="124" width="1136" height="304" rx="18"/>
+  <rect x="52" y="140" width="28" height="28" rx="8" fill="var(--slate)"/>
+  <text x="66" y="159" text-anchor="middle" style="font-size:13px;font-weight:800;fill:#fff">1</text>
+  <text class="ct" x="92" y="159">DEFAULT TCP  ·  DISK BEFORE DRAM</text>
+  <rect x="966" y="140" width="180" height="24" rx="12" fill="var(--pill-amber)"/>
+  <text class="badge-amber" x="1056" y="156" text-anchor="middle">SEQUENTIAL (DISK → DRAM)</text>
+
+  <!-- Layer 1 Left: Source Node (node-01) -->
+  <rect class="box" x="56" y="182" width="300" height="224" rx="14"/>
+  <rect x="56" y="196" width="4" height="196" rx="2" fill="var(--slate)"/>
+  <text class="ct" x="76" y="218">node-01 (source)</text>
+  <rect x="236" y="202" width="102" height="20" rx="10" fill="var(--pill-slate)"/>
+  <text class="badge-slate" x="287" y="216" text-anchor="middle">HAS MODEL</text>
+  <text class="detail" x="76" y="244">Model cached on source disk</text>
+  <text class="small" x="76" y="280">Source disk cache (100%)</text>
+  <rect class="track" x="76" y="292" width="260" height="12" rx="6"/>
+  <rect x="76" y="292" width="260" height="12" rx="6" fill="var(--slate)"/>
+  <text class="mono" x="76" y="338">Serves files over TCP</text>
+  <text class="small" x="76" y="364">Target copies all files to disk</text>
+
+  <!-- Layer 1 Center: Slow Single TCP Line (active during Phase 1: 0.00 - 0.48) -->
+  <rect class="box" x="382" y="244" width="140" height="44" rx="10"/>
+  <text class="stage" x="452" y="264" text-anchor="middle" style="fill:var(--amber)">Standard TCP</text>
+  <text class="small" x="452" y="280" text-anchor="middle">Phase 1: TCP → Disk</text>
+  <path class="guide" d="M 356 310 L 548 310"/>
+  <path class="slow-tcp" d="M 356 310 L 542 310" marker-end="url(#arr-amber)">
+    <animate attributeName="stroke-dashoffset" from="0" to="-32" dur="2.6s" repeatCount="indefinite"/>
+    <animate class="anim" attributeName="opacity" values="1;1;0.2;0.2;1" keyTimes="0;0.47;0.50;0.95;1" dur="8s" repeatCount="indefinite"/>
+  </path>
+
+  <!-- Layer 1 Right: Target Node (node-02) -->
+  <rect class="box" x="548" y="182" width="596" height="224" rx="14"/>
+  <rect x="548" y="196" width="4" height="196" rx="2" fill="var(--amber)"/>
+  <text class="ct" x="568" y="218">node-02 (starting ModelDeployment)</text>
+  <rect x="976" y="202" width="150" height="20" rx="10" fill="var(--pill-amber)"/>
+  <text class="badge-amber" x="1051" y="216" text-anchor="middle">WAIT FOR FULL DISK</text>
+
+  <!-- Step 1 Subcard: Write to Local Disk (fills 0 -> 220 during 0.00 - 0.48, then holds at 220) -->
+  <rect class="subbox" x="568" y="236" width="252" height="150" rx="12"/>
+  <text class="stage" x="584" y="260">Step 1 · Write to Local Disk</text>
+  <text class="detail" x="584" y="282">Complete before Step 2</text>
+  <text class="small" x="584" y="314">Disk fill (Phase 1: 0% → 100%)</text>
+  <rect class="track" x="584" y="324" width="220" height="14" rx="7"/>
+  <rect x="584" y="324" width="220" height="14" rx="7" fill="var(--amber)">
+    <animate class="anim" attributeName="width" values="0;220;220;220;0" keyTimes="0;0.48;0.92;0.96;1" dur="8s" repeatCount="indefinite"/>
+  </rect>
+  <text class="mono" x="584" y="364">Full checkpoint on disk</text>
+
+  <!-- Arrow from Disk to DRAM (only active during Phase 2: 0.48 - 0.92, after Disk reaches 100%) -->
+  <path class="guide" d="M 820 314 L 872 314"/>
+  <path class="slow-hop" d="M 820 314 L 866 314" marker-end="url(#arr-amber)">
+    <animate attributeName="stroke-dashoffset" from="0" to="-32" dur="2.2s" repeatCount="indefinite"/>
+    <animate class="anim" attributeName="opacity" values="0.15;0.15;1;1;0.15" keyTimes="0;0.47;0.50;0.92;1" dur="8s" repeatCount="indefinite"/>
+  </path>
+  <text class="small" x="846" y="300" text-anchor="middle" style="fill:var(--amber)">Then</text>
+
+  <!-- Step 2 Subcard: Load from Disk into DRAM (stays 0 until 0.48, then fills 0 -> 220 during 0.48 - 0.92) -->
+  <rect class="subbox" x="872" y="236" width="252" height="150" rx="12"/>
+  <text class="stage" x="888" y="260">Step 2 · Load Disk → DRAM</text>
+  <text class="detail" x="888" y="282">Starts after disk is full</text>
+  <text class="small" x="888" y="314">Device DRAM (Phase 2)</text>
+  <rect class="track" x="888" y="324" width="220" height="14" rx="7"/>
+  <rect x="888" y="324" width="160" height="14" rx="7" fill="var(--amber)">
+    <animate class="anim" attributeName="width" values="0;0;220;220;0" keyTimes="0;0.48;0.92;0.96;1" dur="8s" repeatCount="indefinite"/>
+  </rect>
+  <text class="mono" x="888" y="364">Disk → GPU / NPU DRAM</text>
+
+  <!-- ======================================================================= -->
+  <!-- LAYER 2 (BOTTOM): HIXL / NIXL DOUBLE-BUFFERED RAM -> DEVICE DRAM        -->
+  <!-- Synchronized 8s timeline across 4 RAM buffer chunks:                    -->
+  <!--   t=0.00..0.14: Buf A fills (0->200), Buf B=0, DRAM=0 (waits for Buf A) -->
+  <!--   t=0.14..0.28: Buf A drains to DRAM (0->55), while Buf B fills (0->200)-->
+  <!--   t=0.28..0.42: Buf B drains to DRAM (55->110), while Buf A fills       -->
+  <!--   t=0.42..0.56: Buf A drains to DRAM (110->165), while Buf B fills      -->
+  <!--   t=0.56..0.70: Buf B drains to DRAM (165->220 = 100% Ready!)           -->
+  <!--   t=0.70..0.95: DRAM holds at 100% Ready while TCP is still loading!    -->
+  <!-- ======================================================================= -->
+  <rect class="layer-hixl" x="32" y="450" width="1136" height="330" rx="18"/>
+  <rect x="52" y="466" width="28" height="28" rx="8" fill="var(--emerald)"/>
+  <text x="66" y="485" text-anchor="middle" style="font-size:13px;font-weight:800;fill:#fff">2</text>
+  <text class="ct" x="92" y="485">REMOTE DELIVERY (HIXL / NIXL)  ·  RAM → DRAM</text>
+  <rect x="954" y="466" width="192" height="24" rx="12" fill="var(--pill-green)"/>
+  <text class="badge-green" x="1050" y="482" text-anchor="middle">DOUBLE BUFFER PIPELINE</text>
+
+  <!-- Layer 2 Left: Source Node (node-01) -->
+  <rect class="box" x="56" y="508" width="300" height="250" rx="14"/>
+  <rect x="56" y="522" width="4" height="222" rx="2" fill="var(--emerald)"/>
+  <text class="ct" x="76" y="544">node-01 (source)</text>
+  <rect x="230" y="528" width="108" height="20" rx="10" fill="var(--pill-green)"/>
+  <text class="badge-green" x="284" y="542" text-anchor="middle">SOURCE RAM</text>
+  <text class="detail" x="76" y="570">Model cached on source</text>
+  <text class="small" x="76" y="606">Registered host RAM (100%)</text>
+  <rect class="track" x="76" y="618" width="260" height="12" rx="6"/>
+  <rect x="76" y="618" width="260" height="12" rx="6" fill="var(--emerald)"/>
+  <text class="mono" x="76" y="664">HIXL (Ascend) / NIXL (NVIDIA)</text>
+  <text class="small" x="76" y="690">Streams chunks to alternating</text>
+  <text class="small" x="76" y="708">target RAM Buffer A &amp; Buffer B</text>
+
+  <!-- Layer 2 Center: Ultra-Fast Multi-Lane HIXL / NIXL Stream -->
+  <rect class="box" x="382" y="542" width="140" height="48" rx="10"/>
+  <text class="stage" x="452" y="563" text-anchor="middle" style="fill:var(--emerald)">HIXL / NIXL</text>
+  <text class="mono" x="452" y="580" text-anchor="middle">High-speed H2H</text>
+
+  <path class="guide" d="M 356 616 L 548 616"/>
+  <path class="fast-stream" d="M 356 616 L 542 616" marker-end="url(#arr-emerald)">
+    <animate attributeName="stroke-dashoffset" from="0" to="-44" dur="0.36s" repeatCount="indefinite"/>
+  </path>
+
+  <path class="guide" d="M 356 644 L 548 644"/>
+  <path class="fast-stream-2" d="M 356 644 L 542 644" marker-end="url(#arr-teal)">
+    <animate attributeName="stroke-dashoffset" from="0" to="-44" dur="0.42s" repeatCount="indefinite"/>
+  </path>
+
+  <path class="guide" d="M 356 672 L 548 672"/>
+  <path class="fast-stream" d="M 356 672 L 542 672" marker-end="url(#arr-emerald)">
+    <animate attributeName="stroke-dashoffset" from="0" to="-44" dur="0.36s" repeatCount="indefinite"/>
+  </path>
+
+  <text class="small" x="452" y="700" text-anchor="middle" style="fill:var(--emerald)">Fills Buffer A / B in turns</text>
+
+  <!-- Layer 2 Right: Target Node (node-02) with Double-Buffer RAM -> Multi-step DRAM -->
+  <rect class="box" x="548" y="508" width="596" height="250" rx="14"/>
+  <rect x="548" y="522" width="4" height="222" rx="2" fill="var(--emerald)"/>
+  <text class="ct" x="568" y="544">node-02 (starting ModelDeployment)</text>
+  <rect x="976" y="528" width="150" height="20" rx="10" fill="var(--pill-green)"/>
+  <text class="badge-green" x="1051" y="542" text-anchor="middle">4× RAM → 1× DRAM</text>
+
+  <!-- Step 1 Subcard: Double-Buffered Host RAM (Buffer A & Buffer B ping-pong) -->
+  <rect class="subbox" x="568" y="560" width="252" height="180" rx="12"/>
+  <text class="stage" x="584" y="584">Step 1 · Double-buffered RAM</text>
+  <text class="detail" x="584" y="604">Drains to DRAM while next fills</text>
+
+  <!-- RAM Buffer A (fills on Chunk 1 [0..0.14] & Chunk 3 [0.28..0.42], drains on [0.14..0.28] & [0.42..0.56]) -->
+  <text class="small" x="584" y="630">Buffer A (chunks 1, 3: recv → H2D)</text>
+  <rect class="track" x="584" y="638" width="220" height="12" rx="6"/>
+  <rect x="584" y="638" width="220" height="12" rx="6" fill="var(--teal)">
+    <animate class="anim" attributeName="width"
+      values="0;220;0;220;0;0;0;0"
+      keyTimes="0;0.14;0.28;0.42;0.56;0.70;0.95;1"
+      dur="8s" repeatCount="indefinite"/>
+  </rect>
+
+  <!-- RAM Buffer B (fills on Chunk 2 [0.14..0.28] & Chunk 4 [0.42..0.56], drains on [0.28..0.42] & [0.56..0.70]) -->
+  <text class="small" x="584" y="672">Buffer B (chunks 2, 4: recv → H2D)</text>
+  <rect class="track" x="584" y="680" width="220" height="12" rx="6"/>
+  <rect x="584" y="680" width="220" height="12" rx="6" fill="var(--purple)">
+    <animate class="anim" attributeName="width"
+      values="0;0;220;0;220;0;0;0"
+      keyTimes="0;0.14;0.28;0.42;0.56;0.70;0.95;1"
+      dur="8s" repeatCount="indefinite"/>
+  </rect>
+
+  <text class="mono" x="584" y="718" style="fill:var(--emerald)">Alternating RAM · no disk write</text>
+
+  <!-- Two alternating H2D arrows from Buffer A and Buffer B into Device DRAM -->
+  <path class="guide" d="M 820 644 L 872 644"/>
+  <path class="fast-hop" d="M 820 644 L 866 644" marker-end="url(#arr-teal)">
+    <animate attributeName="stroke-dashoffset" from="0" to="-44" dur="0.40s" repeatCount="indefinite"/>
+    <animate class="anim" attributeName="opacity"
+      values="0.15;0.15;1;0.15;1;0.15;0.15;0.15"
+      keyTimes="0;0.13;0.15;0.28;0.43;0.56;0.95;1"
+      dur="8s" repeatCount="indefinite"/>
+  </path>
+  <text class="small" x="846" y="632" text-anchor="middle" style="fill:var(--teal)">Buf A</text>
+
+  <path class="guide" d="M 820 686 L 872 686"/>
+  <path class="fast-hop" d="M 820 686 L 866 686" stroke="var(--purple)" marker-end="url(#arr-purple)">
+    <animate attributeName="stroke-dashoffset" from="0" to="-44" dur="0.40s" repeatCount="indefinite"/>
+    <animate class="anim" attributeName="opacity"
+      values="0.15;0.15;0.15;1;0.15;1;0.15;0.15"
+      keyTimes="0;0.14;0.27;0.29;0.42;0.57;0.70;1"
+      dur="8s" repeatCount="indefinite"/>
+  </path>
+  <text class="small" x="846" y="676" text-anchor="middle" style="fill:var(--purple)">Buf B</text>
+
+  <!-- Step 2 Subcard: Device DRAM accumulates across 4 RAM buffer drains (0 -> 25% -> 50% -> 75% -> 100%) -->
+  <rect class="subbox" x="872" y="560" width="252" height="180" rx="12"/>
+  <text class="stage" x="888" y="584">Step 2 · Load RAM → DRAM</text>
+  <text class="detail" x="888" y="604">Starts once first buffer fills</text>
+  <text class="detail" x="888" y="622">Four chunks fill DRAM</text>
+
+  <text class="small" x="888" y="654">Device DRAM (25% per buffer)</text>
+  <rect class="track" x="888" y="664" width="220" height="16" rx="7"/>
+  <rect x="888" y="664" width="220" height="16" rx="7" fill="var(--emerald)">
+    <animate class="anim" attributeName="width"
+      values="0;0;55;110;165;220;220;0"
+      keyTimes="0;0.14;0.28;0.42;0.56;0.70;0.95;1"
+      dur="8s" repeatCount="indefinite"/>
+  </rect>
+  <!-- 25% / 50% / 75% chunk tick dividers on Device DRAM bar -->
+  <line x1="943" y1="664" x2="943" y2="680" stroke="var(--card)" stroke-width="1.5"/>
+  <line x1="998" y1="664" x2="998" y2="680" stroke="var(--card)" stroke-width="1.5"/>
+  <line x1="1053" y1="664" x2="1053" y2="680" stroke="var(--card)" stroke-width="1.5"/>
+
+  <text class="small" y="696" text-anchor="middle"><tspan x="915">25%</tspan><tspan x="970">50%</tspan><tspan x="1025">75%</tspan><tspan x="1080">100%</tspan></text>
+  <text class="mono" x="888" y="718" style="fill:var(--emerald)">Pipelined H2D transfer</text>
+
+  <!-- Bottom Takeaway Pills -->
+  <rect class="box" x="32" y="806" width="368" height="42" rx="10"/>
+  <circle cx="52" cy="827.5" r="5.5" fill="none" stroke="var(--amber)" stroke-width="1.6"/>
+  <circle cx="52" cy="827.5" r="2.5" fill="var(--amber)"/>
+  <text class="pill" x="67" y="832">TCP: disk first, then DRAM</text>
+
+  <rect class="box" x="416" y="806" width="368" height="42" rx="10"/>
+  <circle cx="436" cy="827.5" r="5.5" fill="none" stroke="var(--emerald)" stroke-width="1.6"/>
+  <circle cx="436" cy="827.5" r="2.5" fill="var(--emerald)"/>
+  <text class="pill" x="451" y="832">HIXL / NIXL: double-buffered RAM</text>
+
+  <rect class="box" x="800" y="806" width="368" height="42" rx="10"/>
+  <circle cx="820" cy="827.5" r="5.5" fill="none" stroke="var(--emerald)" stroke-width="1.6"/>
+  <circle cx="820" cy="827.5" r="2.5" fill="var(--emerald)"/>
+  <text class="pill" x="835" y="832">RAM chunks fill device DRAM</text>
+</svg>
