@@ -1475,7 +1475,7 @@
         
   <h1 id="shared-cache-walkthrough">Shared Cache Walkthrough</h1>
 <p>Create a store, a pool, a namespace grant and a workload in that order. Replace the node selector,
-namespace, instance type and model name in the manifests below. The serving replicas can then reuse
+namespace, accelerator type and model name in the manifests below. The serving replicas can then reuse
 prefix KV blocks.</p>
 <h2 id="contents">Contents</h2>
 <ul>
@@ -1563,8 +1563,8 @@ the scope of each object.</p>
           <td>selected by the backend&rsquo;s <em><code>nodeSelector</code></em>; Step 5&rsquo;s disk tier selects nodes labeled <code>kvcache: &quot;true&quot;</code></td>
       </tr>
       <tr>
-          <td><code>InstanceType</code></td>
-          <td>one from <code>kubectl get instancetype</code></td>
+          <td><code>AcceleratorType</code></td>
+          <td>one from <code>kubectl get acctype</code></td>
       </tr>
       <tr>
           <td>Model</td>
@@ -1691,7 +1691,7 @@ See <a href="/gpustack-operator/main/docs/modules/kv-cache/injection/#tenant-com
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">roles</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">server</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">replicas</span><span class="p">:</span><span class="w"> </span><span class="m">2</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">instanceType</span><span class="p">:</span><span class="w"> </span><span class="l">&lt;one from kubectl get instancetype&gt;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">acceleratorType</span><span class="p">:</span><span class="w"> </span><span class="l">&lt;one from kubectl get acctype&gt;</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">resources</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">accelerator</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;1&#34;</span></span></span></code></pre></div>
 </div>
@@ -1842,7 +1842,7 @@ Binding in its namespace:</p>
 </div>
 <p>A namespace that runs a different dtype needs a second Binding, because a domain is immutable and
 holds one dtype. Mixing dtypes in one domain can return wrong blocks silently. The Binding below
-serves an <code>fp8_e4m3</code> deployment in <code>team-a</code>. Replace the instance type as in Step 3.</p>
+serves an <code>fp8_e4m3</code> deployment in <code>team-a</code>. Replace the accelerator type as in Step 3.</p>
 <div class="code-block">
   <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">worker.gpustack.ai/v1</span><span class="w">
@@ -1877,7 +1877,7 @@ serves an <code>fp8_e4m3</code> deployment in <code>team-a</code>. Replace the i
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">roles</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">server</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">replicas</span><span class="p">:</span><span class="w"> </span><span class="m">1</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">instanceType</span><span class="p">:</span><span class="w"> </span><span class="l">&lt;one from kubectl get instancetype&gt;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">acceleratorType</span><span class="p">:</span><span class="w"> </span><span class="l">&lt;one from kubectl get acctype&gt;</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">resources</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">accelerator</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;1&#34;</span></span></span></code></pre></div>
 </div>

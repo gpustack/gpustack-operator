@@ -1650,13 +1650,13 @@ expansion, so the two can never disagree about what a prefetch would warm:</p>
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">bindingRef</span><span class="p">:</span><span class="w">  </span><span class="c"># Required; the binding is in this namespace.</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">store-binding</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">placement</span><span class="p">:</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">instanceTypes</span><span class="p">:</span><span class="w">  </span><span class="c"># Optional; every node carrying a named InstanceType&#39;s flavor.</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">acceleratorTypes</span><span class="p">:</span><span class="w">  </span><span class="c"># Optional; every node carrying a named AcceleratorType&#39;s flavor.</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span>- <span class="l">gpu-pool</span></span></span></code></pre></div>
 </div>
 <ul>
 <li><strong>Artifact</strong>: Reference a <code>ModelArtifact</code> in the same namespace.</li>
 <li><strong>Binding</strong>: Reference a <code>ModelStoreBinding</code> that covers the target nodes.</li>
-<li><strong>Placement</strong>: Set either <em><code>instanceTypes</code></em> or <em><code>nodeSelector</code></em>, or omit both.</li>
+<li><strong>Placement</strong>: Set either <em><code>acceleratorTypes</code></em> or <em><code>nodeSelector</code></em>, or omit both.</li>
 </ul>
 <div class="code-block">
   <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
@@ -1676,7 +1676,7 @@ expansion, so the two can never disagree about what a prefetch would warm:</p>
 </div>
 <ul>
 <li><strong>Node selector</strong>: Select nodes with labels that are present in the cluster.</li>
-<li><strong>Default placement</strong>: Omit both fields to derive types from deployments that reference the artifact.</li>
+<li><strong>Default placement</strong>: Omit both fields to derive accelerator types from same-namespace deployments referencing the artifact; CPU-only roles are ignored.</li>
 <li><strong>Source preparation</strong>: Explicit placement is required when <em><code>source</code></em> is set.</li>
 </ul>
 <table>

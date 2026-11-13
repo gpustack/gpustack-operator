@@ -312,8 +312,8 @@ skips `.bin` files when `.safetensors` exist).
 
 **The container's ephemeral-storage limit is raised by the same amount; its request is not.**
 Kubelet counts an `emptyDir` toward the `Pod`'s ephemeral-storage limit as well as its own
-`sizeLimit`, so a model larger than the `InstanceType`'s local storage would otherwise be evicted
-mid-download. Kueue and the scheduler read the request, which stays the `InstanceType`'s.
+`sizeLimit`, so a large model would otherwise exhaust the container's ephemeral-storage limit.
+The request remains the explicitly configured role or workspace request.
 
 A namespace `LimitRange` whose maximum is below the raised limit makes the API server refuse the `Pod`,
 which the deployment reports as a create failure.

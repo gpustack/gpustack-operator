@@ -1521,7 +1521,7 @@ watch a replica retire.</p>
           <td>the <code>qwen3-8b</code> weights the target serves</td>
       </tr>
       <tr>
-          <td><code>InstanceType</code></td>
+          <td><code>AcceleratorType</code></td>
           <td>cluster</td>
           <td>operator</td>
           <td>the whole-GPU type each role replica requests</td>
@@ -1559,7 +1559,7 @@ was executed in the recorded benchmark.</p>
           <td>two free initially, up to four after scaling; one GPU per replica</td>
       </tr>
       <tr>
-          <td><code>InstanceType</code></td>
+          <td><code>AcceleratorType</code></td>
           <td>the whole-GPU type of the intended cluster; the example uses the discovered <code>gpustack--nvidia-h100-80gb-hbm3-linux-amd64</code></td>
       </tr>
       <tr>
@@ -1589,7 +1589,7 @@ Use a build that includes <code>ModelDeploymentScaler</code>, its controller and
 <a href="/gpustack-operator/main/docs/modules/model-deployment/scaling/#gitops-sync">GitOps exclusions</a>
 .</p>
 <h2 id="step-1-prepare-the-target">Step 1: Prepare the target</h2>
-<p>Save this example as <code>scaling-target.yaml</code>. Replace both <em><code>instanceType</code></em> values with the whole-GPU
+<p>Save this example as <code>scaling-target.yaml</code>. Replace both <em><code>acceleratorType</code></em> values with the whole-GPU
 type for the intended cluster. The benchmark used <code>bench-gpu</code>; the reusable example uses the
 discovered H100 type.</p>
 <div class="code-block">
@@ -1614,7 +1614,7 @@ discovered H100 type.</p>
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">Prefill</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">replicas</span><span class="p">:</span><span class="w"> </span><span class="m">1</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">size</span><span class="p">:</span><span class="w"> </span><span class="m">1</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">instanceType</span><span class="p">:</span><span class="w"> </span><span class="l">gpustack--nvidia-h100-80gb-hbm3-linux-amd64</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">acceleratorType</span><span class="p">:</span><span class="w"> </span><span class="l">gpustack--nvidia-h100-80gb-hbm3-linux-amd64</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">resources</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">accelerator</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;1&#34;</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">extraArgs</span><span class="p">:</span><span class="w">
@@ -1634,7 +1634,7 @@ discovered H100 type.</p>
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">Decode</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">replicas</span><span class="p">:</span><span class="w"> </span><span class="m">1</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">size</span><span class="p">:</span><span class="w"> </span><span class="m">1</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">instanceType</span><span class="p">:</span><span class="w"> </span><span class="l">gpustack--nvidia-h100-80gb-hbm3-linux-amd64</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">acceleratorType</span><span class="p">:</span><span class="w"> </span><span class="l">gpustack--nvidia-h100-80gb-hbm3-linux-amd64</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">resources</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">accelerator</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;1&#34;</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">extraArgs</span><span class="p">:</span><span class="w">
@@ -1855,7 +1855,7 @@ canonical family <code>amd-mi325x</code> via the
 <p>The engine image matches by family, so no hand-computed digests or <code>@sha256</code> pinning are required.</p>
 <p>Omit <em><code>spec.router</code></em>, <em><code>spec.kvCache</code></em>, <em><code>spec.kvTransfer</code></em> and <em><code>Encode</code></em>. The following separate
 server target and scaler changes are examples, not captured output from a live cluster run. Replace
-<code>instanceType</code> for the intended cluster and check the target against the catalog before use:</p>
+<code>acceleratorType</code> for the intended cluster and check the target against the catalog before use:</p>
 <div class="code-block">
   <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">worker.gpustack.ai/v1</span><span class="w">
@@ -1876,7 +1876,7 @@ server target and scaler changes are examples, not captured output from a live c
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">Server</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">replicas</span><span class="p">:</span><span class="w"> </span><span class="m">1</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">size</span><span class="p">:</span><span class="w"> </span><span class="m">1</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">instanceType</span><span class="p">:</span><span class="w"> </span><span class="l">gpustack--nvidia-h100-80gb-hbm3-linux-amd64</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">acceleratorType</span><span class="p">:</span><span class="w"> </span><span class="l">gpustack--nvidia-h100-80gb-hbm3-linux-amd64</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">resources</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">accelerator</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;1&#34;</span></span></span></code></pre></div>
 </div>

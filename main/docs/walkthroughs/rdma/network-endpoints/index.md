@@ -148,14 +148,14 @@ spec:
     - name: prefill
       kind: Prefill
       replicas: 1
-      instanceType: gpustack--nvidia-a10g-linux-amd64
+      acceleratorType: gpustack--nvidia-a10g-linux-amd64
       resources:
         accelerator: "2"
         interface: "2"
     - name: decode
       kind: Decode
       replicas: 1
-      instanceType: gpustack--nvidia-a10g-linux-amd64
+      acceleratorType: gpustack--nvidia-a10g-linux-amd64
       resources:
         accelerator: "2"
         interface: "2"

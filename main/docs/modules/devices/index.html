@@ -1486,8 +1486,9 @@ controls the resource name and runtime isolation method.</p>
 </li>
 </ul>
 <h2 id="overview">Overview</h2>
-<p>Device Manager detects hardware and publishes capacity. Kueue admits requests against the resulting
-queues. The device plugin allocates devices to containers.</p>
+<p>Device Manager detects hardware and publishes capacity. <code>AcceleratorType</code> selects accelerated pools
+for serving and prefetch; <code>InstanceType</code> sizes interactive workspaces. Both share the canonical pool
+<code>ClusterQueue</code>. Kueue admits queued requests, and the device plugin allocates devices to containers.</p>
 <p><span class="diagram-scroll"><img src="/gpustack-operator/main/docs/assets/diagrams/devices-flow.svg" alt="Device discovery and allocation flow" decoding="async"></span></p>
 <!--
 flowchart TD
@@ -1495,7 +1496,7 @@ flowchart TD
     HARDWARE -> DM["Device Manager inventory and ledger"]
     NFD -> PROFILER["Worker capacity profiler"]
     DM -> PROFILER
-    PROFILER -> QUEUES["InstanceType, ResourceFlavor and isolated queues"]
+    PROFILER -> QUEUES["AcceleratorType, InstanceType, ResourceFlavor and pool queues"]
     QUEUES -> GATES["Webhook, quota, per-device fit, scheduler and plugin"]
     GATES -> CONTAINER["Device access and supported slicing or MIG"]
 -->

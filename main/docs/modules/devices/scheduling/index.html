@@ -1474,7 +1474,7 @@
       <article>
         
   <h1 id="scheduling-chain">Scheduling Chain</h1>
-<p>The worker turns <code>Node</code> and <code>Devices</code> signals into capacity labels, Kueue queues and <code>InstanceType</code>
+<p>The worker turns <code>Node</code> and <code>Devices</code> signals into capacity labels, Kueue queues, <code>AcceleratorType</code> and <code>InstanceType</code>
 resources. These are stages 3 and 4 of the chain introduced in
 <a href="/gpustack-operator/main/docs/getting-started/architecture/">Architecture</a>
 ; <a href="/gpustack-operator/main/docs/modules/devices/admission/">Admission</a>
@@ -1746,7 +1746,7 @@ weights</a>
 <h2 id="naming-and-grouping">Naming and grouping</h2>
 <p>The <code>ResourceFlavor</code> is the finest grain and setting-independent: always the CPU key, plus the
 accelerator key when accelerated, so the aggregation layer re-groups without rewriting a flavor. That
-layer (<code>ClusterQueue</code> / <code>InstanceType</code> / <code>InstanceTypeFlavor</code>) is grouped by the editable
+layer (<code>ClusterQueue</code> / <code>AcceleratorType</code> / <code>InstanceType</code> / <code>InstanceTypeFlavor</code>) is grouped by the editable
 <a href="/gpustack-operator/main/docs/reference/settings/#settings"><code>instance-type-aware-cpu-manufacturer</code></a>
  (default <code>false</code>):</p>
 <div class="code-block">
@@ -1755,7 +1755,7 @@ layer (<code>ClusterQueue</code> / <code>InstanceType</code> / <code>InstanceTyp
   gpustack--${gKey}-${os}-${arch}-${cpu}c              # non-accelerated (c = CPU cores)
   gpustack--${gKey}--${aKey}-${os}-${arch}-${acc}d     # accelerated     (d = devices)
 
-ClusterQueue / InstanceType — grouped by instance-type-aware-cpu-manufacturer:
+ClusterQueue / derived types — grouped by instance-type-aware-cpu-manufacturer:
   aware=false (default):  gpustack--generic-${os}-${arch}           # all CPUs collapse into one generic pool
                           gpustack--${aKey}-${os}-${arch}           # one pool per accelerator (CPU ignored)
   aware=true:             gpustack--${gKey}-${os}-${arch}           # split per CPU
@@ -1774,7 +1774,7 @@ matching an accelerated flavor carrying the same key.</li>
 through NFD only for <code>Node</code>s without a detected accelerator; CPU flavors select it to exclude GPU <code>Node</code>s.</li>
 <li><code>note.gpustack.ai/cpuDetail</code> carries the raw CPU detail: always on a CPU flavor, on an accelerated one
 only when awareness is on. The defaulting webhook folds it back into the type&rsquo;s spec — see
-<a href="/gpustack-operator/main/docs/modules/devices/admission/#instancetype-instance-webhooks">Admission</a>
+<a href="/gpustack-operator/main/docs/modules/devices/admission/#type-and-instance-webhooks">Admission</a>
 .</li>
 </ul>
 <h2 id="controllers">Controllers</h2>
@@ -1803,6 +1803,10 @@ nodeLabels, not taints. <em><code>spec.topologyName</code></em> references the g
 only, no unit spec.</p>
 <p>A flavor whose group has no contributing node is deleted. The name comes from the first contributing
 node, and every contributor to a flavor name shares it.</p>
+<p>For every accelerated pool the worker derives a cluster-scoped <code>AcceleratorType</code> (<code>worker.gpustack.ai/v1</code>,
+short name <code>acctype</code>), independently of <code>instance-type-derived-from-node</code>. Serving roles and prefetch
+select this type. Each type and every <code>InstanceType</code> of the same pool share its canonical <code>ClusterQueue</code>
+and quota. Deleting the bound <code>ClusterQueue</code> removes a standalone derived <code>AcceleratorType</code>; admin-authored types and shared pools recreate the queue.</p>
 <p>After syncing a flavor, and only under <code>instance-type-derived-from-node=true</code> (default), the worker
 authors the pool&rsquo;s <code>InstanceType</code>, <strong>create-only</strong>, at the setting-correct name and identity
 (<em><code>generalGroup</code></em>/<em><code>acceleratorGroup</code></em>/<code>acceleratable</code>/<code>os</code>/<code>arch</code>; the CPU key is the <code>generic</code> sentinel
@@ -1811,11 +1815,11 @@ when awareness is off) with the <a href="#unit-spec-defaults">default unit spec<
 <p>An existing type is untouched, admin- or operator-authored. The worker watches the types it authored
 and re-authors a deleted one.</p>
 <h3 id="instancetype-lifecycle">InstanceType lifecycle</h3>
-<p>A second controller keeps the backing <code>ClusterQueue</code> existing and the materialized <code>InstanceType</code>&rsquo;s
-status fresh, but not its quota. It does not author <code>InstanceType</code>s and never deletes one for lack of
-flavors.</p>
+<p>Controllers keep the canonical pool <code>ClusterQueue</code> and type status current, while the quota controller
+sets quota from flavors. An <code>InstanceType</code> names its pool by identity, so multiple workspace sizes and
+the <code>AcceleratorType</code> share one queue.</p>
 <ul>
-<li><strong>Creation and identity.</strong> A missing queue is created under the name-identical name, stamped at
+<li><strong>Creation and identity.</strong> A missing queue is created under the canonical pool name, stamped at
 creation with the pool&rsquo;s schedule labels (the <code>feature.gpustack.ai/acceleratable</code> boolean, the
 feature key(s) selected by <code>instance-type-aware-cpu-manufacturer</code>, <code>kubernetes.io/os|arch</code> — all
 from the <code>InstanceType</code> <strong>spec</strong> identity) and the fixed no-borrow <strong>isolation</strong> (empty cohort, no
@@ -1830,21 +1834,14 @@ The update that fills the groups drops the marker, and the hold is then released
 <li><strong>Status and recreation.</strong> The queue is watched to keep the type&rsquo;s <code>.status</code> fresh (the
 <a href="/gpustack-operator/main/docs/modules/devices/admission/#four-view-status">four-view</a>
  / CPU projection + <em><code>status.entrance</code></em>), and to recreate a
-queue an admin deleted while the <code>InstanceType</code> still lives.</li>
-<li><strong>Teardown.</strong> Deleting the type runs a delete-then-wait teardown: mark the type <code>Inactive</code>, delete
-the queue once, and hold a <code>gpustack.ai/controlled</code> finalizer until Kueue has removed it. It does
-not drain; the quota controller below sees the deletion and drives that.</li>
+queue an admin deleted while an <code>InstanceType</code> or admin-authored <code>AcceleratorType</code> still lives; a standalone derived <code>AcceleratorType</code> is deleted.</li>
+<li><strong>Teardown.</strong> Deleting an <code>InstanceType</code> stops its active <code>Instance</code>s. Its shared queue is removed only when
+no remaining <code>InstanceType</code> or <code>AcceleratorType</code> fronts the pool.</li>
 <li><strong>Inactive and the stop policy.</strong> The type&rsquo;s <em><code>spec.inactive</code></em> is synced with the queue&rsquo;s
-<code>StopPolicy</code>: <code>Hold</code> when <code>Inactive</code> (blocking new admission without evicting running workloads,
-never <code>HoldAndDrain</code>), <code>None</code> when an admin reactivates, and <code>Inactive=true</code> backfilled one-way and
-stickily whenever the queue is stopped by any means.</li>
+<code>StopPolicy</code>: <code>Hold</code> when all fronting types are inactive and <code>None</code> when any is active,
+including the saved stop policy while a drained pool waits for flavors.
+This blocks new admission without evicting running workloads.</li>
 </ul>
-<p>While the pool is in a drained state waiting for flavors (the marker below), this sync writes its
-<code>Hold</code>/<code>None</code> pair onto the stop policy the drain saved and later restores, and pauses the backfill:
-an <code>Inactive</code> change made while an emptied pool waits for a flavor is what the pool comes back with.</p>
-<p>It neither releases a marked empty-plan <code>Hold</code> nor mirrors it into <code>Inactive</code>; once the marker is
-gone it treats the <code>Hold</code> like an admin&rsquo;s, released only while the type is not <code>Inactive</code>. Clearing
-<code>Inactive</code> on a queue that has no resource groups marks its <code>Hold</code> rather than releasing it.</p>
 <h3 id="queue-quota-and-draining">Queue quota and draining</h3>
 <p>A third controller fills the queue&rsquo;s quota and admission gating — resource groups, the <code>HoldAndDrain</code>
 drain policy (admin <code>Hold</code>/<code>None</code> belongs to the lifecycle controller above), the <code>AdmissionCheck</code>

@@ -21,7 +21,7 @@ The [Model Deployment guides](/gpustack-operator/main/docs/modules/model-deploym
 | Topology | [Hierarchical Placement](/gpustack-operator/main/docs/walkthroughs/topology/hierarchical-placement/index.md) | Publish zone and rack hierarchies and constrain replicas to a topology domain. |
 | KV Cache | [Shared Cache](/gpustack-operator/main/docs/walkthroughs/kv-cache/shared-cache/index.md) | Create a backend, pool, namespace grant, and serving workload. |
 | Model Delivery | [Model Prefetch](/gpustack-operator/main/docs/walkthroughs/model-delivery/prefetch/index.md) | Cache and verify model weights before inference. |
-| Model Deployment | [Preparation and choices](/gpustack-operator/main/docs/walkthroughs/model-deployment/index.md) | Choose a serving configuration and follow its hardware, model and `InstanceType` requirements. |
+| Model Deployment | [Preparation and choices](/gpustack-operator/main/docs/walkthroughs/model-deployment/index.md) | Choose a serving configuration and follow its hardware, model and `AcceleratorType` requirements. |
 | Model Deployment | [Prefill and Decode](/gpustack-operator/main/docs/walkthroughs/model-deployment/prefill-decode/index.md) | Disaggregate *prefill* and *decode* roles fronted by a router. |
 | Model Deployment | [Encode, Prefill and Decode](/gpustack-operator/main/docs/walkthroughs/model-deployment/encode-prefill-decode/index.md) | Separate multimodal *encode*, *prefill* and *decode* roles. |
 | Model Deployment | [Elastic EP](/gpustack-operator/main/docs/walkthroughs/model-deployment/elastic-ep/index.md) | Grow *DP* width 2 → 4 with *TP* = 2. |

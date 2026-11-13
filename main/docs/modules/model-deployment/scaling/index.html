@@ -1883,7 +1883,7 @@ by its own identity, without overwriting another role&rsquo;s effective values.<
 <h3 id="target-eligibility">Target eligibility</h3>
 <p><code>Catalog</code> requires a verifiable target identity and a single-serving-<code>Pod</code> replica shape before deriving capacity. The
 controller infers the model and hardware identity from the target itself — <em><code>spec.model</code></em> (the <code>ModelArtifact</code> repository from <em><code>spec.model.artifactRef</code></em>, or <em><code>spec.model.name</code></em>)
-and the role&rsquo;s <code>InstanceType</code> — so the identity annotations below are optional and resolve through <a href="#identity-normalization">identity normalization</a>
+and the role&rsquo;s <code>AcceleratorType</code> — so the identity annotations below are optional and resolve through <a href="#identity-normalization">identity normalization</a>
 :</p>
 <table>
   <thead>
@@ -1917,7 +1917,7 @@ and the role&rsquo;s <code>InstanceType</code> — so the identity annotations b
 </table>
 <p>Model name and weight revision must match <em><code>spec.model</code></em> (or the resolved Hugging Face or ModelScope
 <code>ModelArtifact</code> repository and <em><code>status.resolved.revision</code></em>) and any <code>--revision</code>, <code>--quantization</code>,
-<code>--tokenizer</code>, <code>--tokenizer-path</code> or <code>--tokenizer-revision</code> flags. The role&rsquo;s <code>InstanceType</code> must be
+<code>--tokenizer</code>, <code>--tokenizer-path</code> or <code>--tokenizer-revision</code> flags. The role&rsquo;s <code>AcceleratorType</code> must be
 acceleratable and match the declared product and <code>memoryGB</code> (<code>Gi</code> by semantic <code>Quantity</code> equality).</p>
 <p>The effective engine image (<em><code>role.image</code></em> or <em><code>spec.engine.image</code></em>) matches the profile by engine
 family (<code>vllm</code> / <code>sglang</code>); registry or model aliases are never inferred.</p>
@@ -2007,7 +2007,7 @@ revision resolves as <code>unspecified</code>; an omitted tokenizer defaults to 
 <code>32gb</code>) refine multi-capacity families such as <code>nvidia-a100-80gb</code> versus <code>nvidia-a100-40gb</code>.</p>
 <p>At runtime the same yardstick applies: the <code>worker.gpustack.ai/model-id</code> and
 <code>worker.gpustack.ai/hardware-id</code> annotations accept the natural names above and are inferred from
-<em><code>spec.model</code></em>, the engine flags and the role&rsquo;s <code>InstanceType</code> when omitted. See
+<em><code>spec.model</code></em>, the engine flags and the role&rsquo;s <code>AcceleratorType</code> when omitted. See
 <a href="#target-eligibility">Target eligibility</a>
  for the full resolution order.</p>
 <h3 id="prior-lifecycle">Prior lifecycle</h3>
@@ -2025,7 +2025,7 @@ specs, identity annotations, effective algorithm, catalog digest, latency target
 prior quantities by semantic <code>Quantity</code> equality, keep the 256-sample <code>RingBuffer</code> in memory, and
 suppress <code>status</code> writes until control-plane state changes or a predictor advances by 16 samples.</p>
 <h3 id="local-evaluation">Local evaluation</h3>
-<p>The <a href="https://github.com/gpustack/gpustack-operator/blob/e98bebaa9dd043dca04b2fbce39d2441f60259a8/specs/2026-10-26-inferencex-model-deployment-scaling.md">capacity priors and local evaluation spec</a>
+<p>The <a href="https://github.com/gpustack/gpustack-operator/blob/71cc4d7292144f1ac46ec916e43da8e452555090/specs/2026-10-26-inferencex-model-deployment-scaling.md">capacity priors and local evaluation spec</a>
  records 48 deterministic synthetic result rows across eight
 tuning traces (<code>manual</code>, <code>resolved</code> and one <code>passive</code> candidate at seed factor <code>1</code>) plus two open-loop versus closed-loop examples.</p>
 <p>It also evaluates two held-out traces (<code>heldout_bursts</code> and <code>heldout_length_cache_shift</code>, 11 rows each across <code>manual</code> at factor <code>1</code> plus <code>resolved</code> and one <code>passive</code> candidate
@@ -2150,7 +2150,7 @@ needs to grow, <em><code>rebalance.policy</code></em> decides whether another ro
 <p><em><code>priority[]</code></em> only affects <code>Priority</code>. A receiver may take from roles after it in the list,
 starting with the next listed role. Unlisted roles neither donate nor receive through this policy;
 they retain their ordinary recommendations. The donor and receiver must use the same nonempty
-<em><code>instanceType</code></em>, and the donor must remain above its minimum before donation.</p>
+<em><code>acceleratorType</code></em>, and the donor must remain above its minimum before donation.</p>
 <p>The <code>Opposing</code> policy follows the <a href="https://github.com/ai-dynamo/dynamo/blob/4f42be7bebd96ea0199088840549397809f80a92/components/src/dynamo/planner/core/budget.py">Dynamo Budget
 Guard</a>
 , which moves both legs of an opposing

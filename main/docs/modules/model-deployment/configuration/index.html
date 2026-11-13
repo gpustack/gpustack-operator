@@ -1522,9 +1522,12 @@ binding; the generated <code>Pod</code>s bypass KV cache <code>Pod</code> inject
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">roles</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">server</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">replicas</span><span class="p">:</span><span class="w"> </span><span class="m">4</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">instanceType</span><span class="p">:</span><span class="w"> </span><span class="l">gpustack--nvidia-a10g-linux-amd64</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">acceleratorType</span><span class="p">:</span><span class="w"> </span><span class="l">gpustack--nvidia-a10g-linux-amd64</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">resources</span><span class="p">:</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">accelerator</span><span class="p">:</span><span class="w"> </span><span class="m">2</span><span class="w">  </span><span class="c"># cards per Pod</span></span></span></code></pre></div>
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">accelerator</span><span class="p">:</span><span class="w"> </span><span class="m">2</span><span class="w">  </span><span class="c"># cards per Pod</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">cpu</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;8&#34;</span><span class="w">  </span><span class="c"># optional CPU per Pod</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">ram</span><span class="p">:</span><span class="w"> </span><span class="l">32Gi </span><span class="w"> </span><span class="c"># optional memory per Pod</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">localStorage</span><span class="p">:</span><span class="w"> </span><span class="l">100Gi </span><span class="w"> </span><span class="c"># optional ephemeral storage per Pod</span></span></span></code></pre></div>
 </div>
 <ul>
 <li><strong>Model</strong>: <em><code>model.name</code></em> identifies the served model; select its weight source separately.</li>
@@ -1595,16 +1598,20 @@ a formula missing an input would pass silently. A degree you declare on the role
 it is read and validated, and <a href="/gpustack-operator/main/docs/modules/model-deployment/prefill-decode/#pair-connections">the transfer path renders from
 it</a>
 .</p>
-<p>A whole instance is the unit of replacement at every size. That is Kueue&rsquo;s constraint rather than a
+<p>For queued roles, a whole instance is the unit of replacement at every size. That is Kueue&rsquo;s constraint rather than a
 preference: a deleted member of an admitted group is held on the API server until the group&rsquo;s
 <code>Workload</code> goes, and deleting that <code>Workload</code> stops the instance&rsquo;s surviving members anyway.</p>
-<p><em><code>replicas</code></em>, <em><code>size</code></em> and <em><code>instanceType</code></em> are structured fields and stay so: admission and scheduling
+<p><em><code>replicas</code></em>, <em><code>size</code></em> and <em><code>acceleratorType</code></em> are structured fields and stay so: admission and scheduling
 read them, so an override able to shadow them would make the feasibility check read a ledger that
 does not match reality.</p>
 <p>The accelerator request of <strong>one <code>Pod</code></strong> lives in <em><code>roles[].resources</code></em>, whose fields mirror <a href="/gpustack-operator/main/docs/modules/devices/requests/">Accelerator Requests</a>
 ; at <code>size: 1</code> the <code>Pod</code> and the
-instance are the same request. CPU, memory and ephemeral storage are <strong>derived</strong> from the <code>InstanceType</code>&rsquo;s per-unit resources scaled by the card count, so they are not
-expressible here.</p>
+instance are the same request. Optional positive <em><code>resources.cpu</code></em>, <em><code>resources.ram</code></em>, and
+<em><code>resources.localStorage</code></em> set the serving container CPU, memory, and ephemeral-storage requests and
+limits. The general-resource overcommit setting can reduce requests. Only specified values are
+injected; no unit preset is used.</p>
+<p>Omitting <em><code>acceleratorType</code></em> makes a role CPU-only: kube-scheduler places its Pods directly without Kueue,
+and accelerator requests are rejected.</p>
 <p>An optional <em><code>resources.interface</code></em> requests a whole number of fabric interfaces per engine <code>Pod</code>.</p>
 <p>One RDMA interface uses <code>device.gpustack.ai/rdma.shared</code>; more than one uses that count of
 <code>device.gpustack.ai/rdma</code> devices. EFA uses
@@ -1643,14 +1650,14 @@ every group until the whole set has reserved quota.</p>
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">prefill</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">Prefill </span><span class="w"> </span><span class="c"># Server (default), Prefill, Decode or Encode</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">replicas</span><span class="p">:</span><span class="w"> </span><span class="m">2</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">instanceType</span><span class="p">:</span><span class="w"> </span><span class="l">gpustack--nvidia-h20-linux-amd64</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">acceleratorType</span><span class="p">:</span><span class="w"> </span><span class="l">gpustack--nvidia-h20-linux-amd64</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">resources</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">accelerator</span><span class="p">:</span><span class="w"> </span><span class="m">2</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">decode</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">Decode</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">replicas</span><span class="p">:</span><span class="w"> </span><span class="m">2</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="c"># may use different hardware from the prefill role</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">instanceType</span><span class="p">:</span><span class="w"> </span><span class="l">gpustack--nvidia-h20-linux-amd64</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">acceleratorType</span><span class="p">:</span><span class="w"> </span><span class="l">gpustack--nvidia-h20-linux-amd64</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">resources</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">accelerator</span><span class="p">:</span><span class="w"> </span><span class="m">2</span></span></span></code></pre></div>
 </div>
@@ -1683,8 +1690,8 @@ every <code>Pod</code>.</p>
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">labels</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="c"># Hash of namespace, deployment, role and ordinal; unique but not parseable.</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">kueue.x-k8s.io/pod-group-name</span><span class="p">:</span><span class="w"> </span><span class="l">gpustack-fnv64-&lt;hash&gt;</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="c"># InstanceType status.entrance; all Pods in a group must agree.</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">kueue.x-k8s.io/queue-name</span><span class="p">:</span><span class="w"> </span><span class="l">&lt;instance-type-entrance&gt;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="c"># AcceleratorType status.entrance; all Pods in a group must agree.</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">kueue.x-k8s.io/queue-name</span><span class="p">:</span><span class="w"> </span><span class="l">&lt;accelerator-type-entrance&gt;</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">app.kubernetes.io/component</span><span class="p">:</span><span class="w"> </span><span class="l">server </span><span class="w"> </span><span class="c"># Role name; Service selection and status attribution.</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">modeldeployment.gpustack.ai/role-kind</span><span class="p">:</span><span class="w"> </span><span class="l">server </span><span class="w"> </span><span class="c"># Effective kind in router spelling; unset kind maps to server.</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">modeldeployment.gpustack.ai/pod-ordinal</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;0&#34;</span><span class="w">  </span><span class="c"># Replica slot; scale-down sheds highest first.</span><span class="w">
@@ -1781,7 +1788,7 @@ Without one, users patch the rendered <code>Pod</code> and the reconcile loop si
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">image</span><span class="p">:</span><span class="w"> </span><span class="l">example/engine:tag </span><span class="w"> </span><span class="c"># Editable.</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">roles</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">server</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">instanceType</span><span class="p">:</span><span class="w"> </span><span class="l">gpustack--nvidia-h20-linux-amd64</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">acceleratorType</span><span class="p">:</span><span class="w"> </span><span class="l">gpustack--nvidia-h20-linux-amd64</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="c"># Append after operator-synthesized arguments; operator-owned keys are refused.</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">extraArgs</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">        </span>- --<span class="l">enable-prefix-caching</span><span class="w">
@@ -1856,7 +1863,7 @@ Each <code>Pod</code> has its own volume. Only the main container mounts it.</p>
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">image</span><span class="p">:</span><span class="w"> </span><span class="l">example/engine:tag </span><span class="w"> </span><span class="c"># Editable.</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">roles</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">server</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">instanceType</span><span class="p">:</span><span class="w"> </span><span class="l">gpustack--nvidia-h20-linux-amd64</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">acceleratorType</span><span class="p">:</span><span class="w"> </span><span class="l">gpustack--nvidia-h20-linux-amd64</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">shmSize</span><span class="p">:</span><span class="w"> </span><span class="l">32Gi</span></span></span></code></pre></div>
 </div>
 <p>An explicit <code>/dev/shm</code> mount in <em><code>additionalVolumes</code></em> takes precedence, including when <em><code>shmSize</code></em> is set.
@@ -2058,7 +2065,7 @@ uses it as written.</p>
 <h2 id="rollout-behavior">Rollout behavior</h2>
 <p>Changing <em><code>replicas</code></em> adds or removes instances and nothing more: the survivors are not restarted, do
 not reload their weights and keep their cached blocks. What still replaces <strong>every</strong> instance of the
-role is an edit that changes what a replica&rsquo;s <code>Pod</code> renders: <em><code>size</code></em>, <em><code>instanceType</code></em>, <em><code>resources</code></em>,
+role is an edit that changes what a replica&rsquo;s <code>Pod</code> renders: <em><code>size</code></em>, <em><code>acceleratorType</code></em>, <em><code>resources</code></em>,
 <em><code>command</code></em>, <em><code>image</code></em>, <em><code>extraArgs</code></em>, <em><code>env</code></em>, <em><code>ports</code></em>, <em><code>additionalVolumes</code></em>, <em><code>shmSize</code></em>,
 <em><code>terminationGracePeriodSeconds</code></em>, <em><code>startupTimeoutSeconds</code></em>.</p>
 <p>Such an edit <strong>deletes and recreates</strong> the role&rsquo;s replicas, one replica per role per pass, waited
@@ -2077,7 +2084,7 @@ replacement is superseded by a newer edit and admitted once, with the newer conf
 operator selects this queued group before deleting an admitted sibling. This exception requires every member to remain behind Kueue&rsquo;s admission gate. An eviction, preemption, or
 earlier execution does not qualify as first admission.</p>
 <h3 id="changed-role-configuration">Changed role configuration</h3>
-<p>When a role&rsquo;s configuration changes, the operator replaces its replicas. <em><code>size</code></em>, <em><code>instanceType</code></em>,
+<p>When a role&rsquo;s configuration changes, the operator replaces its replicas. <em><code>size</code></em>, <em><code>acceleratorType</code></em>,
 <em><code>resources</code></em> and <em><code>command</code></em> roll the same way as any <code>Pod</code> field, and each carries consequences the
 <code>Pod</code> fields do not.</p>
 <p><strong>One unresolved replacement per role.</strong> A replacement&rsquo;s fresh admission gates deleting the next
@@ -2121,7 +2128,7 @@ rendering changes are evaluated separately:</p>
   <tbody>
       <tr>
           <td><code>modeldeployment.gpustack.ai/pod-spec-hash</code> (on <code>Pod</code>)</td>
-          <td>explicit <code>ModelDeployment</code> fields (<code>model</code>, <em><code>engine</code></em>, <em><code>router</code></em>, <em><code>kvCache.poolRef</code></em>, <em><code>kvTransfer</code></em>, and the role&rsquo;s configuration) plus resolved external bindings (<code>InstanceType</code> entrance/manufacturer/resources, <code>KVCachePoolBinding</code> endpoint/domain/dtype, <code>ModelArtifact</code> source/digest, fabric interface key, <code>RuntimeClassName</code>, and seat <code>ordinal</code>/<code>member</code>)</td>
+          <td>explicit <code>ModelDeployment</code> fields (<code>model</code>, <em><code>engine</code></em>, <em><code>router</code></em>, <em><code>kvCache.poolRef</code></em>, <em><code>kvTransfer</code></em>, and the role&rsquo;s configuration) plus resolved external bindings (<code>AcceleratorType</code> entrance/manufacturer/resources, <code>KVCachePoolBinding</code> endpoint/domain/dtype, <code>ModelArtifact</code> source/digest, fabric interface key, <code>RuntimeClassName</code>, and seat <code>ordinal</code>/<code>member</code>)</td>
           <td>editing any covered <code>ModelDeployment</code> field or changing a bound external resource</td>
           <td>rolls affected replicas one per role per pass</td>
       </tr>
@@ -2160,7 +2167,7 @@ Status</a>
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">roles</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">server</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">replicas</span><span class="p">:</span><span class="w"> </span><span class="m">4</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">instanceType</span><span class="p">:</span><span class="w"> </span><span class="l">gpustack--nvidia-a10g-linux-amd64</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">acceleratorType</span><span class="p">:</span><span class="w"> </span><span class="l">gpustack--nvidia-a10g-linux-amd64</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">resources</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">accelerator</span><span class="p">:</span><span class="w"> </span><span class="m">2</span></span></span></code></pre></div>
 </div>
@@ -2248,7 +2255,7 @@ role set cannot be edited at all; admission refuses it.</p>
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">Server</span><span class="w"> </span><span class="c"># Frozen.</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">replicas</span><span class="p">:</span><span class="w"> </span><span class="m">1</span><span class="w">  </span><span class="c"># Editable.</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">size</span><span class="p">:</span><span class="w"> </span><span class="m">1</span><span class="w">  </span><span class="c"># Editable, except on an elasticEp role.</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">instanceType</span><span class="p">:</span><span class="w"> </span><span class="l">gpu-pool </span><span class="w"> </span><span class="c"># Editable, except on an elasticEp role.</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">acceleratorType</span><span class="p">:</span><span class="w"> </span><span class="l">gpu-pool </span><span class="w"> </span><span class="c"># Editable, except on an elasticEp role.</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">resources</span><span class="p">:</span><span class="w"> </span>{}<span class="w">  </span><span class="c"># Editable, except on an elasticEp role.</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">command</span><span class="p">:</span><span class="w"> </span><span class="p">[]</span><span class="w">  </span><span class="c"># Editable, except on an elasticEp role.</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">extraArgs</span><span class="p">:</span><span class="w"> </span><span class="p">[]</span><span class="w">  </span><span class="c"># Editable.</span><span class="w">
@@ -2263,7 +2270,7 @@ role set cannot be edited at all; admission refuses it.</p>
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">terminationGracePeriodSeconds</span><span class="p">:</span><span class="w"> </span><span class="m">30</span><span class="w">  </span><span class="c"># Editable Pod field.</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">startupTimeoutSeconds</span><span class="p">:</span><span class="w"> </span><span class="m">1800</span><span class="w">  </span><span class="c"># Editable Pod field.</span></span></span></code></pre></div>
 </div>
-<p>The role&rsquo;s configuration fields — <em><code>size</code></em>, <em><code>instanceType</code></em>, <em><code>resources</code></em>, <em><code>command</code></em> — are editable on the same
+<p>The role&rsquo;s configuration fields — <em><code>size</code></em>, <em><code>acceleratorType</code></em>, <em><code>resources</code></em>, <em><code>command</code></em> — are editable on the same
 terms as the <code>Pod</code> fields: each edit replaces that role&rsquo;s replicas one at a time, deleting each old
 instance before creating its replacement, whose fresh admission gates the next deletion.
 <em><code>roles[].privileged</code></em> stays editable because it controls how the role runs.</p>
@@ -2280,9 +2287,9 @@ choosing its update rule.</p>
 <p><strong>A merge patch replaces the <em><code>roles</code></em> list wholesale.</strong> <code>kubectl patch --type=merge</code> follows
 RFC 7386, which replaces an array rather than merging into it: a role restated with only some of
 its fields loses the ones it did not carry. An omitted <em><code>size</code></em> lands on the default of 1 and an
-omitted <em><code>resources</code></em> lands on the accelerator default, exactly as a full-list rewrite says; a role
-restated without its <code>name</code> is refused for the missing name, and one restated without <em><code>instanceType</code></em>
-is refused for the empty value — none of these fields has a default that can stand in.
+omitted <em><code>resources</code></em> takes the accelerator default only when an accelerator type is selected, exactly as a full-list rewrite says; a role
+restated without its <code>name</code> is refused for the missing name. Omitting <em><code>acceleratorType</code></em>
+instead selects CPU-only scheduling; any accelerator request must also be removed.
 <code>listType=map</code> does not soften this: it is what keeps role names unique and drives <code>kubectl apply</code>&rsquo;s
 merge, not what a client-side merge patch does to an array.</p>
 <p><em><code>kind</code></em> still binds too: a role restated without its <em><code>kind</code></em> picks up the default <em>Server</em>, so
@@ -2322,28 +2329,28 @@ changes the size from 1 to 2:</p>
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">Server</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">replicas</span><span class="p">:</span><span class="w"> </span><span class="m">4</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">size</span><span class="p">:</span><span class="w"> </span><span class="m">2</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">instanceType</span><span class="p">:</span><span class="w"> </span><span class="l">h20-8x</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">acceleratorType</span><span class="p">:</span><span class="w"> </span><span class="l">h20-8x</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">resources</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">accelerator</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;2&#34;</span></span></span></code></pre></div>
 </div>
 </blockquote>
 <h3 id="one-group-per-replica">One group per replica</h3>
-<p>The grouping key is the <strong>replica</strong>: every replica of every role forms its own <code>Pod</code> group, derived from the role and the replica&rsquo;s ordinal within it, and Kueue composes one
-<code>Workload</code> per group with a declared total equal to the role&rsquo;s <em><code>size</code></em>. Two roles naming the same <em><code>instanceType</code></em> share nothing: a queue name is derived from the
-<em><code>instanceType</code></em> and one <code>Workload</code> carries one queue name, so rather than forbid the configuration the roles are simply not made to share.</p>
+<p>For accelerated roles, the grouping key is the <strong>replica</strong>: every replica forms its own <code>Pod</code> group, derived from the role and the replica&rsquo;s ordinal within it, and Kueue composes one
+<code>Workload</code> per group with a declared total equal to the role&rsquo;s <em><code>size</code></em>. Two roles naming the same <em><code>acceleratorType</code></em> share the pool queue but have separate <code>Workload</code>s.
+CPU-only roles have no Kueue <code>Pod</code> group or <code>Workload</code>.</p>
 <p><strong>What an edit costs is therefore the replica, not the group it used to share.</strong> Growing or shrinking
 <em><code>replicas</code></em> adds or removes whole groups and leaves every surviving replica&rsquo;s group, <code>Workload</code> and
 admission untouched; a role-field edit rolls that role&rsquo;s replicas one at a time.</p>
 <p>The groups are still admitted as a <strong>set</strong>, by the admission check described in
 <a href="#prefill-and-decode">Prefill and decode</a>
-, whichever *<code>instanceType</code>*s they name.</p>
+, whichever *<code>acceleratorType</code>*s they name.</p>
 <p>A scale-down sheds the <strong>highest ordinals first</strong>, deleting each departing replica&rsquo;s <code>Pod</code> together with
 its own <code>Workload</code>: the <code>Workload</code> delete is what releases Kueue&rsquo;s finalizer on the <code>Pod</code> and the quota the
 replica held, because a serving group is never finished and nothing else releases either.</p>
 <h2 id="admission-refusals">Admission refusals</h2>
 <p>Two webhooks make up the admission surface. Nearly every default lives in the CRD schema; the
 mutating half exists for the one value a schema cannot reach: a role&rsquo;s accelerator count, which
-depends on the <code>InstanceType</code> the role names.</p>
+depends on the <code>AcceleratorType</code> the role names.</p>
 <table>
   <thead>
       <tr>
@@ -2370,7 +2377,7 @@ depends on the <code>InstanceType</code> the role names.</p>
 </td>
       </tr>
       <tr>
-          <td>a resource mode the named <code>InstanceType</code> does not offer</td>
+          <td>a resource mode the named <code>AcceleratorType</code> does not offer</td>
           <td>the mode and the type — a slice on a type that offers no slicing, a partition profile on a type that cannot partition, or one outside its profile inventory, with the offered list</td>
       </tr>
       <tr>
@@ -2383,8 +2390,12 @@ depends on the <code>InstanceType</code> the role names.</p>
           <td>the role&rsquo;s interface field and the protocol that prevents allocation; mixed backend groups and mixed fabric paths are rejected</td>
       </tr>
       <tr>
-          <td>an explicit <code>accelerator: 0</code> on an acceleratable <code>InstanceType</code> shared by another role</td>
-          <td>the accelerator field, the shared type, and two recommended remedies: request at least one accelerator or move the CPU-only role to a non-acceleratable type</td>
+          <td>an accelerator request (whole card, slice percentage, or partition profile) without <code>acceleratorType</code></td>
+          <td>omit accelerator resources for a CPU-only role, or select an <code>AcceleratorType</code></td>
+      </tr>
+      <tr>
+          <td>an incompatible <em><code>kvTransfer.backend</code></em> or mixed Ascend pair — <code>HIXL</code> on a non-Ascend or CPU-only role, <code>NIXL</code> on an Ascend <code>AcceleratorType</code>, or a <em>Prefill</em>/<em>Decode</em> pair mixing an Ascend role with a non-Ascend or CPU-only role</td>
+          <td><em><code>spec.kvTransfer.backend</code></em> or <em><code>spec.roles</code></em> and the incompatible manufacturer (or CPU-only omission)</td>
       </tr>
       <tr>
           <td>a <em>Prefill</em> and a <em>Decode</em> role both requesting a <strong>logical slice</strong> from types that draw on the same accelerator group</td>
@@ -2471,20 +2482,20 @@ depends on the <code>InstanceType</code> the role names.</p>
   </tbody>
 </table>
 <p><strong>Most rules above are answered from the submitted object.</strong> Resource mode, card count and a shared
-type&rsquo;s acceleratability depend on <code>InstanceType</code>; new cache binding compatibility depends on its
+type&rsquo;s acceleratability depend on <code>AcceleratorType</code>; new cache binding compatibility depends on its
 Binding, pool and backend. The webhook reads these objects from the API server so a stale cache
 cannot decide admission. An unchanged binding stays editable if its backend later becomes mixed.</p>
 <p>An older binding still renders its first offered transport. It can remain healthy while reads of
 blocks on another transport fail, so repair the pool even though an unrelated update is accepted.</p>
-<p><strong>Any rule that reads an <code>InstanceType</code> declines for a deployment being deleted</strong>, in the mutating
+<p><strong>Any rule that reads an <code>AcceleratorType</code> declines for a deployment being deleted</strong>, in the mutating
 half and the validating half alike. Such a rule refuses when the type is absent, so leaving it on
-would let a deleted <code>InstanceType</code> block the very update that clears the deployment&rsquo;s finalizer, an
+would let a deleted <code>AcceleratorType</code> block the very update that clears the deployment&rsquo;s finalizer, an
 object its own teardown could never release.</p>
 <p>The price is named rather than hidden: an edit made while a deployment is being deleted can move a role onto a mode its type does not offer, and nothing renders the result. Why
 that trade is necessary rather than merely tidy is in <a href="/gpustack-operator/main/docs/modules/devices/admission/#update-validation-on-deletion">Update validation on deletion</a>
 .</p>
-<p>The render, not admission, is where a not-yet-converged <code>InstanceType</code> shows up. Sizing a replica needs the <code>InstanceType</code>&rsquo;s OBSERVED detail, and <code>InstanceType.status</code> has not
-converged on a freshly created object, so the render fails rather than admission refusing a perfectly legal deployment for losing a race against the <code>InstanceType</code> reconciler.</p>
+<p>The render, not admission, is where a not-yet-converged <code>AcceleratorType</code> shows up. Rendering an accelerated replica needs the <code>AcceleratorType</code>&rsquo;s observed detail, and <code>AcceleratorType.status</code> has not
+converged on a freshly created object, so the render fails rather than admission refusing a perfectly legal deployment for losing a race against the <code>AcceleratorType</code> reconciler.</p>
 <p>A render-time failure reaches a reader as a <code>RenderFailed</code> warning event carrying the renderer&rsquo;s
 own message, because a pass that cannot build a replica aborts before writing any status.</p>
 <h2 id="operating-notes">Operating notes</h2>

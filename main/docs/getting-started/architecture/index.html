@@ -1569,13 +1569,13 @@ RDMA, a topology source or a shared cache. An ordinary <code>Pod</code> can requ
 <li>The Device Manager discovers accelerators and network interfaces and maintains the <code>Devices</code>
 inventory and allocation record.</li>
 <li>The Worker derives schedulable CPU and accelerator capacity from that inventory.</li>
-<li>The Worker creates <code>InstanceType</code>s and Kueue resources. Each pool has an isolated queue; topology
-profiles constrain placement, and admission checks verify whether individual accelerators fit.</li>
+<li>The Worker derives an <code>AcceleratorType</code> for each accelerated pool (and <code>InstanceType</code>s when enabled), sharing
+the canonical pool <code>ClusterQueue</code> while topology and admission checks constrain placement.</li>
 </ol>
 <p><a href="/gpustack-operator/main/docs/modules/devices/discovery/">Device Discovery</a>
  covers node labeling and device discovery.
 <a href="/gpustack-operator/main/docs/modules/devices/scheduling/">Scheduling Chain</a>
- covers capacity and queues.
+ covers capacity, queues and workload pool selection.
 <a href="/gpustack-operator/main/docs/modules/rdma/operations/">RDMA Operations</a>
  explains network resource requests, while
 <a href="/gpustack-operator/main/docs/modules/topology/scheduling/">Topology-Aware Scheduling</a>
@@ -1614,10 +1614,10 @@ confirm that devices can satisfy it, and the scheduler, kubelet and allocator co
 allocation. <a href="/gpustack-operator/main/docs/modules/devices/admission/#gates">Admission</a>
  owns the gate sequence and
 its failure behavior.</p>
-<p><code>InstanceType</code> status reports the remaining capacity as workloads allocate and release devices. Use
-<code>kubectl get instancetype -w</code> to watch those changes. The <a href="/gpustack-operator/main/docs/walkthroughs/devices/scheduling/">Walkthrough</a>
- shows the
-request and its resulting Kubernetes resources.</p>
+<p><code>AcceleratorType</code> and <code>InstanceType</code> status report the remaining capacity as workloads allocate and release
+devices. Use <code>kubectl get acctype,instancetype -w</code> to watch those changes. The
+<a href="/gpustack-operator/main/docs/walkthroughs/devices/scheduling/">Walkthrough</a>
+ shows the request and its resulting Kubernetes resources.</p>
 <h2 id="vocabulary">Vocabulary</h2>
 <table>
   <thead>
@@ -1632,8 +1632,12 @@ request and its resulting Kubernetes resources.</p>
           <td><code>Node</code>s with compatible CPU, accelerator, operating system and architecture identities, served by an isolated queue.</td>
       </tr>
       <tr>
+          <td><code>AcceleratorType</code></td>
+          <td>Cluster-scoped serving and prefetch accelerator pool; short name <code>acctype</code>.</td>
+      </tr>
+      <tr>
           <td><code>InstanceType</code></td>
-          <td>The resource configuration and available capacity offered by a pool.</td>
+          <td>Workspace sizing and available capacity for an <code>Instance</code>.</td>
       </tr>
       <tr>
           <td>Allocation mode</td>
@@ -1647,7 +1651,7 @@ request and its resulting Kubernetes resources.</p>
       <tr>
           <td>Four capacity views</td>
           <td><a href="/gpustack-operator/main/docs/modules/devices/admission/#four-view-status">Available allocation modes</a>
- reported by an <code>InstanceType</code>.</td>
+ reported by an <code>AcceleratorType</code> or <code>InstanceType</code>.</td>
       </tr>
       <tr>
           <td><code>Devices</code> ledger</td>

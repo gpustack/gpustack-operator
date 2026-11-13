@@ -254,7 +254,7 @@ at the top of that file; when either changes, compare the rows here with the pre
 ---
 
 **See also** — [Scheduling Chain](/gpustack-operator/main/docs/modules/devices/scheduling/index.md#unit-spec-defaults)
-(where the unit spec is stamped) · [Admission](/gpustack-operator/main/docs/modules/devices/admission/index.md#instancetype-instance-webhooks)
+(where the unit spec is stamped) · [Admission](/gpustack-operator/main/docs/modules/devices/admission/index.md#type-and-instance-webhooks)
 (what the webhooks enforce on it) · [Walkthrough](/gpustack-operator/main/docs/walkthroughs/devices/scheduling/index.md#step-4-manage-a-custom-instancetype)
 
 **Next** → [Settings](/gpustack-operator/main/docs/reference/settings/index.md#settings) — configure resource derivation and CPU awareness.

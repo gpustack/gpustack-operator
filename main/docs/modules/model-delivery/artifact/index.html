@@ -1902,8 +1902,8 @@ whether a commit is accepted; see <a href="#prerequisites-and-limitations">Requi
 skips <code>.bin</code> files when <code>.safetensors</code> exist).</p>
 <p><strong>The container&rsquo;s ephemeral-storage limit is raised by the same amount; its request is not.</strong>
 Kubelet counts an <code>emptyDir</code> toward the <code>Pod</code>&rsquo;s ephemeral-storage limit as well as its own
-<code>sizeLimit</code>, so a model larger than the <code>InstanceType</code>&rsquo;s local storage would otherwise be evicted
-mid-download. Kueue and the scheduler read the request, which stays the <code>InstanceType</code>&rsquo;s.</p>
+<code>sizeLimit</code>, so a large model would otherwise exhaust the container&rsquo;s ephemeral-storage limit.
+The request remains the explicitly configured role or workspace request.</p>
 <p>A namespace <code>LimitRange</code> whose maximum is below the raised limit makes the API server refuse the <code>Pod</code>,
 which the deployment reports as a create failure.</p>
 <p>A download that still outgrows the cache is evicted; the <code>Pod</code> ends <code>Succeeded</code>, and the deployment&rsquo;s

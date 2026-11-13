@@ -1477,7 +1477,7 @@
         
   <h1 id="parameters">Parameters</h1>
 <p><code>ModelDeployment</code> synthesizes engine and router arguments, environment variables, files and volume
-mounts from its fields and bound <code>InstanceType</code>, <code>KVCachePoolBinding</code> and <code>ModelArtifact</code> resources.
+mounts from its fields and bound <code>AcceleratorType</code>, <code>KVCachePoolBinding</code> and <code>ModelArtifact</code> resources.
 The tables describe managed engine roles, routers, sidecars and remote weight clients (<code>Engine</code> in
 the <code>Component</code> column means both <code>vLLM</code> and <code>SGLang</code>). Rendering establishes configuration; it
 does not establish hardware or image qualification.</p>
@@ -1762,15 +1762,15 @@ flowchart TD
           <td>vLLM</td>
           <td>Owned</td>
           <td>Mooncake, NVIDIA/AMD</td>
-          <td><code>MooncakeConnector</code> (<code>mooncake_protocol</code> set to <code>rdma</code>, <code>efa</code>, <code>hip</code>, or <code>tcp</code>), prefill <code>VLLM_MOONCAKE_BOOTSTRAP_PORT=8998</code>; <code>MOONCAKE_CONFIG_PATH</code> and generated file with a pool</td>
-          <td>Operator owns connector and environment keys.</td>
+          <td><code>MooncakeConnector</code> (<code>mooncake_protocol</code> set to <code>rdma</code>, <code>efa</code>, <code>hip</code>, or <code>tcp</code>), prefill <code>VLLM_MOONCAKE_BOOTSTRAP_PORT=8998</code>; prefill <code>MultiConnector</code>, <code>MOONCAKE_CONFIG_PATH</code> and generated file with a pool</td>
+          <td>Operator owns connector and environment keys; disaggregated decode omits the store connector.</td>
       </tr>
       <tr>
           <td>vLLM</td>
           <td>Owned</td>
           <td>NIXL, NVIDIA/AMD</td>
-          <td><code>NixlConnector</code> with <code>kv_connector_extra_config.backends</code> set to <code>UCX</code> or EFA <code>LIBFABRIC</code>; first in <code>MultiConnector</code> with a pool</td>
-          <td>Operator owns connector document.</td>
+          <td><code>NixlConnector</code> with <code>kv_connector_extra_config.backends</code> set to <code>UCX</code> or EFA <code>LIBFABRIC</code>; first in prefill <code>MultiConnector</code> with a pool</td>
+          <td>Operator owns connector document; disaggregated decode runs <code>NixlConnector</code> alone.</td>
       </tr>
       <tr>
           <td>vLLM</td>

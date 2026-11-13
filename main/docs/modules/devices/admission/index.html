@@ -1486,7 +1486,7 @@ pool capacity, while GPUStack checks whether individual accelerators can satisfy
 </li>
 <li><a href="#capability-versus-availability">Capability versus availability</a>
 </li>
-<li><a href="#instancetype-instance-webhooks">InstanceType, Instance webhooks</a>
+<li><a href="#type-and-instance-webhooks">Type and Instance webhooks</a>
 </li>
 <li><a href="#kv-cache-injection-webhook">KV cache injection webhook</a>
 </li>
@@ -1550,7 +1550,7 @@ point on the path.</p>
 input:</p>
 <ul>
 <li><strong>logical slice</strong> — <code>.sliced.memory-percentage</code> / <code>.sliced.memory-mib</code> into <code>.sliced.units</code>: the
-memory demand over the pool <code>InstanceType</code>&rsquo;s per-accelerator <code>Memory</code>;</li>
+memory demand over the pool&rsquo;s per-accelerator memory;</li>
 <li><strong>hardware partition</strong> — the profile&rsquo;s VRAM into <code>.partitioned.units</code> by that same VRAM-anchored fold,
 so a <code>3g.40gb</code> partition costs what a same-VRAM slice costs.</li>
 </ul>
@@ -1560,8 +1560,8 @@ always recomputes the fold, since no trusted path sets it.</p>
 <p>It then validates the <a href="/gpustack-operator/main/docs/modules/devices/requests/#request-rules">request rules</a>
 . Each rule includes
 an accepted and a rejected example.</p>
-<p>The divisor is the operator-owned <strong><code>InstanceType</code></strong>&rsquo;s <em><code>spec.memory</code></em>, found via the
-<code>schedule.gpustack.ai/queue-entrance</code> label — <strong>never</strong> the user-writable <code>LocalQueue</code>. Its
+<p>The divisor is the pool&rsquo;s per-card memory, resolved from an operator-owned <code>AcceleratorType</code> or
+<code>InstanceType</code> via the <code>schedule.gpustack.ai/queue-entrance</code> label. Its
 <code>MutatingWebhookConfiguration</code> sorts before <code>kueue-mutating-webhook-configuration</code>, so the fold precedes
 Kueue&rsquo;s resource hash.</p>
 <h3 id="gate-2-kueue-credits">Gate 2: Kueue credits</h3>
@@ -1647,7 +1647,7 @@ shared request of <code>N &gt;= 2</code> accelerators gets <code>shared-free-car
 any one container asks for.</p>
 <ul>
 <li>It changes only a <code>Workload</code> whose <code>LocalQueue</code> points at a <code>ClusterQueue</code> carrying this operator&rsquo;s
-<code>InstanceType</code> mark, with a same-named <code>InstanceType</code> naming an accelerator group, so other tenants'
+<code>InstanceType</code> mark and an accelerator group resolved for the pool, so other tenants'
 <code>Workload</code>s in a shared Kueue are out of its reach.</li>
 <li>It acts on an UPDATE only while the old <code>Workload</code> holds no quota reservation, which is when Kueue
 rebuilds a suspended job&rsquo;s spec and still lets PodSets change.</li>
@@ -1740,7 +1740,7 @@ cap hid can no longer be requested.</p>
 kubelet by the device-plugin <code>Allocate</code> for every allocation, Kueue-routed or not. It drives the
 four-view and backs gate 3, but is not itself a gate.</p>
 <h2 id="four-view-status">Four-view status</h2>
-<p><code>InstanceType.status</code> carries four per-accelerator bin-packing projections from the <code>Devices</code> ledger, not
+<p><code>AcceleratorType.status</code> and <code>InstanceType.status</code> carry four per-accelerator bin-packing projections from the <code>Devices</code> ledger, not
 a credits fold-down:</p>
 <table>
   <thead>
@@ -1818,12 +1818,16 @@ and free. A read-only projection over the <code>ClusterQueue</code> could not.</
 </blockquote>
 <p>The <code>InstanceType</code> API proxies the controller-managed resource and converts it to the public
 representation.</p>
-<h2 id="instancetype-instance-webhooks">InstanceType, Instance webhooks</h2>
+<h2 id="type-and-instance-webhooks">Type and Instance webhooks</h2>
 <p>The unit spec lives <strong>only</strong> on the <code>InstanceType</code>: a derived type is stamped with its <a href="/gpustack-operator/main/docs/modules/devices/scheduling/#unit-spec-defaults">per-product
 preset</a>
  at creation, and an admin
 edit touches only the <code>InstanceType</code>, never a <code>Node</code> or the <code>ClusterQueue</code> notes.</p>
 <ul>
+<li><strong><code>AcceleratorType</code> validating and defaulting</strong> — requires <em><code>acceleratorGroup</code></em>, <code>os</code>, and <code>arch</code> on
+create, freezes pool identity fields on update (allowing only <em><code>displayName</code></em>, <em><code>description</code></em>, and
+<code>inactive</code> edits), defaults empty <em><code>generalGroup</code></em> to <code>generic</code>, and stamps the canonical pool schedule
+labels plus <code>schedule.gpustack.ai/queue-entrance</code>.</li>
 <li><strong><code>InstanceType</code> validating, create</strong> — requires the complete input, read independently of any editable
 setting: <em><code>acceleratorGroup</code></em> (only when <code>acceleratable</code>), <code>os</code>, <code>arch</code>, the unit triple
 (<em><code>unitResources.cpu</code></em>/<code>.ram</code> + <em><code>localStorage</code></em>); empty or partial is rejected. A CPU-only
@@ -1839,7 +1843,8 @@ labels (grouped by <code>instance-type-aware-cpu-manufacturer</code>) and
 from a matching <code>ResourceFlavor</code>; and when awareness is on, that flavor&rsquo;s <code>cpuDetail</code> note folded into
 <em><code>spec.cpu</code></em> (generic) or <em><code>spec.accelerator.cpu</code></em> (accelerated).</li>
 <li><strong><code>Instance</code> validating</strong> — enforces the unit spec on <strong>Create and Update</strong>: a submission&rsquo;s RAM must not
-exceed <code>unitRAM × count</code>, its local storage not the <code>InstanceType</code>&rsquo;s <code>LocalStorage</code>.
+exceed <code>unitRAM × count</code>, its local storage not the <code>InstanceType</code>&rsquo;s <code>LocalStorage</code>. Creating a new
+<code>Instance</code> or starting a stopped <code>Instance</code> on an <code>InstanceType</code> with <code>spec.inactive: true</code> is refused.
 <ul>
 <li>Changing <em><code>spec.type</code></em>, <em><code>spec.resources</code></em> or any other template field requires an already stored
 <code>spec.stop: true</code>. Only <em><code>spec.volume</code></em> is immutable regardless of <em><code>spec.stop</code></em>.
@@ -1959,7 +1964,7 @@ resource, so nothing is checked, the <code>Workload</code> gets no flavor, and w
     <li><a href="#ledger-beneath-the-gates">Ledger beneath the gates</a></li>
     <li><a href="#four-view-status">Four-view status</a></li>
     <li><a href="#capability-versus-availability">Capability versus availability</a></li>
-    <li><a href="#instancetype-instance-webhooks">InstanceType, Instance webhooks</a></li>
+    <li><a href="#type-and-instance-webhooks">Type and Instance webhooks</a></li>
     <li><a href="#kv-cache-injection-webhook">KV cache injection webhook</a></li>
     <li><a href="#update-validation-on-deletion">Update validation on deletion</a></li>
     <li><a href="#running-instance-stop">Running-instance stop</a></li>

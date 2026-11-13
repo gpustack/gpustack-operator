@@ -1482,7 +1482,7 @@ The H100 walkthroughs distinguish recorded deployments from configuration exampl
 </li>
 <li><a href="#prepare-the-cluster">Prepare the cluster</a>
 </li>
-<li><a href="#prepare-the-gpu-instancetype">Prepare the GPU InstanceType</a>
+<li><a href="#prepare-the-gpu-acceleratortype">Prepare the GPU AcceleratorType</a>
 </li>
 </ul>
 <h2 id="choose-an-example">Choose an example</h2>
@@ -1560,7 +1560,7 @@ The <em>Multi-Host</em> example instead needs two GPU nodes.</p>
   <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">kubectl get nodes
 </span></span><span class="line"><span class="cl">kubectl get devices -o json
-</span></span><span class="line"><span class="cl">kubectl get instancetypes
+</span></span><span class="line"><span class="cl">kubectl get acceleratortypes
 </span></span><span class="line"><span class="cl">kubectl get nodemodelstores -o json</span></span></code></pre></div>
 </div>
 <p>Confirm Model Manager readiness and free GPUs before creating a serving workload.
@@ -1568,10 +1568,10 @@ The <em>Multi-Host</em> example instead needs two GPU nodes.</p>
 Complete <a href="/gpustack-operator/main/docs/walkthroughs/model-delivery/prefetch/">model prefetch</a>
  with the artifact, namespace and node selection
 specified by the serving walkthrough.</p>
-<h2 id="prepare-the-gpu-instancetype">Prepare the GPU InstanceType</h2>
+<h2 id="prepare-the-gpu-acceleratortype">Prepare the GPU AcceleratorType</h2>
 <p>The H100 manifests use the discovered whole-GPU type
 <code>gpustack--nvidia-h100-80gb-hbm3-linux-amd64</code>. The recordings used the custom type <code>bench-gpu</code>.
-Each walkthrough explains this substitution; captured queue output retains the recorded name.
+Captured queue output retains the recorded name; current manifests use the discovered <code>AcceleratorType</code>.
 Confirm the selected type&rsquo;s capacity before applying a manifest.</p>
 <p>Select another whole-GPU type when using different hardware, and verify model compatibility.</p>
 <nav class="reading-footer" aria-label="Further reading">
@@ -1596,7 +1596,7 @@ Confirm the selected type&rsquo;s capacity before applying a manifest.</p>
     <li><a href="#contents">Contents</a></li>
     <li><a href="#choose-an-example">Choose an example</a></li>
     <li><a href="#prepare-the-cluster">Prepare the cluster</a></li>
-    <li><a href="#prepare-the-gpu-instancetype">Prepare the GPU InstanceType</a></li>
+    <li><a href="#prepare-the-gpu-acceleratortype">Prepare the GPU AcceleratorType</a></li>
   </ul>
 </nav>
         

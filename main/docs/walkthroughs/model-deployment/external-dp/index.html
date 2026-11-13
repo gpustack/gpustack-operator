@@ -1532,7 +1532,7 @@ The captured H100 SXM5 run used this fixed group in namespace <code>gpustack-ben
           <td>the fixed four-rank <em>DP</em> group behind the managed Router</td>
       </tr>
       <tr>
-          <td><code>InstanceType</code></td>
+          <td><code>AcceleratorType</code></td>
           <td>cluster</td>
           <td>operator</td>
           <td>the whole-GPU H100 type each member requests</td>
@@ -1579,7 +1579,7 @@ Use <a href="/gpustack-operator/main/docs/modules/model-deployment/external-dp-b
           <td><code>deepseek-ai/DeepSeek-V2-Lite-Chat</code>, artifact <code>deepseek-v2-lite-chat</code>, served as <code>/models</code></td>
       </tr>
       <tr>
-          <td>Reusable <code>InstanceType</code></td>
+          <td>Reusable <code>AcceleratorType</code></td>
           <td><code>gpustack--nvidia-h100-80gb-hbm3-linux-amd64</code></td>
       </tr>
       <tr>
@@ -1600,9 +1600,8 @@ Keep the DeepSeek artifact name and revision from that procedure.
 Verify cached weights, free GPU capacity and communication between all ranks before starting the group.</p>
 <h2 id="step-1-start-the-fixed-group">Step 1: Start the fixed group</h2>
 <p>Save the manifest as <code>external-dp.yaml</code>.
-It uses the discovered H100 <code>InstanceType</code>; the benchmark preparation&rsquo;s custom type was named <code>bench-gpu</code>.
-Use an existing type that selects the same whole-GPU accelerator group.
-Replace <em><code>instanceType</code></em> with <code>bench-gpu</code> to reproduce the captured scheduling configuration.</p>
+It uses the discovered H100 <code>AcceleratorType</code>; the recorded benchmark used a custom <code>InstanceType</code> named <code>bench-gpu</code>.
+Use an existing type that selects the same whole-GPU accelerator group.</p>
 <div class="code-block">
   <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">worker.gpustack.ai/v1</span><span class="w">
@@ -1629,7 +1628,7 @@ Replace <em><code>instanceType</code></em> with <code>bench-gpu</code> to reprod
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">Server</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">replicas</span><span class="p">:</span><span class="w"> </span><span class="m">1</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">size</span><span class="p">:</span><span class="w"> </span><span class="m">4</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">instanceType</span><span class="p">:</span><span class="w"> </span><span class="l">gpustack--nvidia-h100-80gb-hbm3-linux-amd64</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">acceleratorType</span><span class="p">:</span><span class="w"> </span><span class="l">gpustack--nvidia-h100-80gb-hbm3-linux-amd64</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">image</span><span class="p">:</span><span class="w"> </span><span class="l">gpustack/runner:cuda13.0-vllm0.30.0</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">imagePullPolicy</span><span class="p">:</span><span class="w"> </span><span class="l">IfNotPresent</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">resources</span><span class="p">:</span><span class="w">
@@ -1847,7 +1846,7 @@ or placement across GPU nodes. Those configurations need separate compatibility 
       <tr>
           <td>Members stay Pending</td>
           <td>Status: member <code>Pod</code> phase <code>Pending</code></td>
-          <td>Read Kueue quota, events and <code>InstanceType</code> capacity. Four members with two GPUs each need eight free GPUs.</td>
+          <td>Read Kueue quota, events and <code>AcceleratorType</code> capacity. Four members with two GPUs each need eight free GPUs.</td>
       </tr>
       <tr>
           <td>Ranks cannot initialize</td>

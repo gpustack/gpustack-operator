@@ -1540,7 +1540,7 @@ See <a href="/gpustack-operator/main/docs/modules/model-deployment/encode-prefil
           <td>the artifact cached onto the H100 node before serving</td>
       </tr>
       <tr>
-          <td><code>InstanceType</code></td>
+          <td><code>AcceleratorType</code></td>
           <td>cluster</td>
           <td>operator</td>
           <td>the H100 accelerator group each role requests</td>
@@ -1596,10 +1596,9 @@ See <a href="/gpustack-operator/main/docs/modules/model-deployment/encode-prefil
 and prefetch it onto the H100 node using the <a href="/gpustack-operator/main/docs/walkthroughs/model-delivery/prefetch/#step-1-create-artifact-and-prefetch">model prefetch walkthrough</a>
 
 (substituting <code>qwen2-5-vl-7b-instruct</code> and <code>gpustack-bench</code> for its DeepSeek example).</p>
-<p>Save the following manifest as <code>epd-deployment.yaml</code>. It uses the discovered H100 <code>InstanceType</code>
+<p>Save the following manifest as <code>epd-deployment.yaml</code>. It uses the discovered H100 <code>AcceleratorType</code>
 name <code>gpustack--nvidia-h100-80gb-hbm3-linux-amd64</code>.</p>
-<p>The recorded run used its custom <code>bench-gpu</code> <code>InstanceType</code>, configured for the same accelerator group.
-Replace all three <code>instanceType</code> values with <code>bench-gpu</code> to reproduce that configuration exactly.</p>
+<p>The recorded run used its custom <code>bench-gpu</code> <code>InstanceType</code>, configured for the same accelerator group.</p>
 <p>One <em>Encode</em>, one <em>Prefill</em> and one <em>Decode</em> replica each request one GPU. The <code>artifactRef</code> points to
 the existing <code>ModelArtifact</code>; <em><code>spec.model.name</code></em> exposes it to vLLM as <code>/models</code>. The <em><code>spec.router</code></em>
 stanza deploys <code>llm-d-router</code> in front of the roles.</p>
@@ -1625,7 +1624,7 @@ stanza deploys <code>llm-d-router</code> in front of the roles.</p>
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">Encode</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">replicas</span><span class="p">:</span><span class="w"> </span><span class="m">1</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">size</span><span class="p">:</span><span class="w"> </span><span class="m">1</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">instanceType</span><span class="p">:</span><span class="w"> </span><span class="l">gpustack--nvidia-h100-80gb-hbm3-linux-amd64</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">acceleratorType</span><span class="p">:</span><span class="w"> </span><span class="l">gpustack--nvidia-h100-80gb-hbm3-linux-amd64</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">image</span><span class="p">:</span><span class="w"> </span><span class="l">gpustack/runner:cuda13.0-vllm0.30.0</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">imagePullPolicy</span><span class="p">:</span><span class="w"> </span><span class="l">IfNotPresent</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">resources</span><span class="p">:</span><span class="w">
@@ -1639,7 +1638,7 @@ stanza deploys <code>llm-d-router</code> in front of the roles.</p>
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">Prefill</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">replicas</span><span class="p">:</span><span class="w"> </span><span class="m">1</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">size</span><span class="p">:</span><span class="w"> </span><span class="m">1</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">instanceType</span><span class="p">:</span><span class="w"> </span><span class="l">gpustack--nvidia-h100-80gb-hbm3-linux-amd64</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">acceleratorType</span><span class="p">:</span><span class="w"> </span><span class="l">gpustack--nvidia-h100-80gb-hbm3-linux-amd64</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">image</span><span class="p">:</span><span class="w"> </span><span class="l">gpustack/runner:cuda13.0-vllm0.30.0</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">imagePullPolicy</span><span class="p">:</span><span class="w"> </span><span class="l">IfNotPresent</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">resources</span><span class="p">:</span><span class="w">
@@ -1655,7 +1654,7 @@ stanza deploys <code>llm-d-router</code> in front of the roles.</p>
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">Decode</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">replicas</span><span class="p">:</span><span class="w"> </span><span class="m">1</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">size</span><span class="p">:</span><span class="w"> </span><span class="m">1</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">instanceType</span><span class="p">:</span><span class="w"> </span><span class="l">gpustack--nvidia-h100-80gb-hbm3-linux-amd64</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">acceleratorType</span><span class="p">:</span><span class="w"> </span><span class="l">gpustack--nvidia-h100-80gb-hbm3-linux-amd64</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">image</span><span class="p">:</span><span class="w"> </span><span class="l">gpustack/runner:cuda13.0-vllm0.30.0</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">imagePullPolicy</span><span class="p">:</span><span class="w"> </span><span class="l">IfNotPresent</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">resources</span><span class="p">:</span><span class="w">

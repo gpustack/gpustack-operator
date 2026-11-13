@@ -1,6 +1,6 @@
 # Scheduling Chain
 
-The worker turns `Node` and `Devices` signals into capacity labels, Kueue queues and `InstanceType`
+The worker turns `Node` and `Devices` signals into capacity labels, Kueue queues, `AcceleratorType` and `InstanceType`
 resources. These are stages 3 and 4 of the chain introduced in
 [Architecture](/gpustack-operator/main/docs/getting-started/architecture/index.md); [Admission](/gpustack-operator/main/docs/modules/devices/admission/index.md) covers the checks
 a workload then passes.
@@ -195,7 +195,7 @@ weights](../topology/scheduling.md#node-delivered-model-placement).
 
 The `ResourceFlavor` is the finest grain and setting-independent: always the CPU key, plus the
 accelerator key when accelerated, so the aggregation layer re-groups without rewriting a flavor. That
-layer (`ClusterQueue` / `InstanceType` / `InstanceTypeFlavor`) is grouped by the editable
+layer (`ClusterQueue` / `AcceleratorType` / `InstanceType` / `InstanceTypeFlavor`) is grouped by the editable
 [`instance-type-aware-cpu-manufacturer`](/gpustack-operator/main/docs/reference/settings/index.md#settings) (default `false`):
 
 ```
@@ -203,7 +203,7 @@ ResourceFlavor (always the finest grain, setting-independent):
   gpustack--${gKey}-${os}-${arch}-${cpu}c              # non-accelerated (c = CPU cores)
   gpustack--${gKey}--${aKey}-${os}-${arch}-${acc}d     # accelerated     (d = devices)
 
-ClusterQueue / InstanceType — grouped by instance-type-aware-cpu-manufacturer:
+ClusterQueue / derived types — grouped by instance-type-aware-cpu-manufacturer:
   aware=false (default):  gpustack--generic-${os}-${arch}           # all CPUs collapse into one generic pool
                           gpustack--${aKey}-${os}-${arch}           # one pool per accelerator (CPU ignored)
   aware=true:             gpustack--${gKey}-${os}-${arch}           # split per CPU
@@ -223,7 +223,7 @@ Two discriminators keep the pools clean, and one annotation carries the raw CPU 
   through NFD only for `Node`s without a detected accelerator; CPU flavors select it to exclude GPU `Node`s.
 - `note.gpustack.ai/cpuDetail` carries the raw CPU detail: always on a CPU flavor, on an accelerated one
   only when awareness is on. The defaulting webhook folds it back into the type's spec — see
-  [Admission](/gpustack-operator/main/docs/modules/devices/admission/index.md#instancetype-instance-webhooks).
+  [Admission](/gpustack-operator/main/docs/modules/devices/admission/index.md#type-and-instance-webhooks).
 
 ## Controllers
 
@@ -259,6 +259,11 @@ only, no unit spec.
 A flavor whose group has no contributing node is deleted. The name comes from the first contributing
 node, and every contributor to a flavor name shares it.
 
+For every accelerated pool the worker derives a cluster-scoped `AcceleratorType` (`worker.gpustack.ai/v1`,
+short name `acctype`), independently of `instance-type-derived-from-node`. Serving roles and prefetch
+select this type. Each type and every `InstanceType` of the same pool share its canonical `ClusterQueue`
+and quota. Deleting the bound `ClusterQueue` removes a standalone derived `AcceleratorType`; admin-authored types and shared pools recreate the queue.
+
 After syncing a flavor, and only under `instance-type-derived-from-node=true` (default), the worker
 authors the pool's `InstanceType`, **create-only**, at the setting-correct name and identity
 (*`generalGroup`*/*`acceleratorGroup`*/`acceleratable`/`os`/`arch`; the CPU key is the `generic` sentinel
@@ -269,11 +274,11 @@ and re-authors a deleted one.
 
 ### InstanceType lifecycle
 
-A second controller keeps the backing `ClusterQueue` existing and the materialized `InstanceType`'s
-status fresh, but not its quota. It does not author `InstanceType`s and never deletes one for lack of
-flavors.
+Controllers keep the canonical pool `ClusterQueue` and type status current, while the quota controller
+sets quota from flavors. An `InstanceType` names its pool by identity, so multiple workspace sizes and
+the `AcceleratorType` share one queue.
 
-- **Creation and identity.** A missing queue is created under the name-identical name, stamped at
+- **Creation and identity.** A missing queue is created under the canonical pool name, stamped at
   creation with the pool's schedule labels (the `feature.gpustack.ai/acceleratable` boolean, the
   feature key(s) selected by `instance-type-aware-cpu-manufacturer`, `kubernetes.io/os|arch` — all
   from the `InstanceType` **spec** identity) and the fixed no-borrow **isolation** (empty cohort, no
@@ -286,23 +291,13 @@ flavors.
   `Inactive`.
 - **Status and recreation.** The queue is watched to keep the type's `.status` fresh (the
   [four-view](/gpustack-operator/main/docs/modules/devices/admission/index.md#four-view-status) / CPU projection + *`status.entrance`*), and to recreate a
-  queue an admin deleted while the `InstanceType` still lives.
-- **Teardown.** Deleting the type runs a delete-then-wait teardown: mark the type `Inactive`, delete
-  the queue once, and hold a `gpustack.ai/controlled` finalizer until Kueue has removed it. It does
-  not drain; the quota controller below sees the deletion and drives that.
+  queue an admin deleted while an `InstanceType` or admin-authored `AcceleratorType` still lives; a standalone derived `AcceleratorType` is deleted.
+- **Teardown.** Deleting an `InstanceType` stops its active `Instance`s. Its shared queue is removed only when
+  no remaining `InstanceType` or `AcceleratorType` fronts the pool.
 - **Inactive and the stop policy.** The type's *`spec.inactive`* is synced with the queue's
-  `StopPolicy`: `Hold` when `Inactive` (blocking new admission without evicting running workloads,
-  never `HoldAndDrain`), `None` when an admin reactivates, and `Inactive=true` backfilled one-way and
-  stickily whenever the queue is stopped by any means.
-
-While the pool is in a drained state waiting for flavors (the marker below), this sync writes its
-`Hold`/`None` pair onto the stop policy the drain saved and later restores, and pauses the backfill:
-an `Inactive` change made while an emptied pool waits for a flavor is what the pool comes back with.
-
-
-It neither releases a marked empty-plan `Hold` nor mirrors it into `Inactive`; once the marker is
-gone it treats the `Hold` like an admin's, released only while the type is not `Inactive`. Clearing
-`Inactive` on a queue that has no resource groups marks its `Hold` rather than releasing it.
+  `StopPolicy`: `Hold` when all fronting types are inactive and `None` when any is active,
+  including the saved stop policy while a drained pool waits for flavors.
+  This blocks new admission without evicting running workloads.
 
 ### Queue quota and draining
 

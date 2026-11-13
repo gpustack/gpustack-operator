@@ -65,11 +65,11 @@ Device scheduling follows this chain:
 2. The Device Manager discovers accelerators and network interfaces and maintains the `Devices`
    inventory and allocation record.
 3. The Worker derives schedulable CPU and accelerator capacity from that inventory.
-4. The Worker creates `InstanceType`s and Kueue resources. Each pool has an isolated queue; topology
-   profiles constrain placement, and admission checks verify whether individual accelerators fit.
+4. The Worker derives an `AcceleratorType` for each accelerated pool (and `InstanceType`s when enabled), sharing
+   the canonical pool `ClusterQueue` while topology and admission checks constrain placement.
 
 [Device Discovery](/gpustack-operator/main/docs/modules/devices/discovery/index.md) covers node labeling and device discovery.
-[Scheduling Chain](/gpustack-operator/main/docs/modules/devices/scheduling/index.md) covers capacity and queues.
+[Scheduling Chain](/gpustack-operator/main/docs/modules/devices/scheduling/index.md) covers capacity, queues and workload pool selection.
 [RDMA Operations](/gpustack-operator/main/docs/modules/rdma/operations/index.md) explains network resource requests, while
 [Topology-Aware Scheduling](/gpustack-operator/main/docs/modules/topology/scheduling/index.md) explains placement domains.
 
@@ -108,19 +108,20 @@ confirm that devices can satisfy it, and the scheduler, kubelet and allocator co
 allocation. [Admission](/gpustack-operator/main/docs/modules/devices/admission/index.md#gates) owns the gate sequence and
 its failure behavior.
 
-`InstanceType` status reports the remaining capacity as workloads allocate and release devices. Use
-`kubectl get instancetype -w` to watch those changes. The [Walkthrough](/gpustack-operator/main/docs/walkthroughs/devices/scheduling/index.md) shows the
-request and its resulting Kubernetes resources.
+`AcceleratorType` and `InstanceType` status report the remaining capacity as workloads allocate and release
+devices. Use `kubectl get acctype,instancetype -w` to watch those changes. The
+[Walkthrough](/gpustack-operator/main/docs/walkthroughs/devices/scheduling/index.md) shows the request and its resulting Kubernetes resources.
 
 ## Vocabulary
 
 | Term | Meaning |
 |---|---|
 | Pool | `Node`s with compatible CPU, accelerator, operating system and architecture identities, served by an isolated queue. |
-| `InstanceType` | The resource configuration and available capacity offered by a pool. |
+| `AcceleratorType` | Cluster-scoped serving and prefetch accelerator pool; short name `acctype`. |
+| `InstanceType` | Workspace sizing and available capacity for an `Instance`. |
 | Allocation mode | Whole accelerators, shared accelerators, logical slices or hardware partitions. |
 | Credits | [Quota accounting units](/gpustack-operator/main/docs/modules/devices/admission/index.md#gate-2-kueue-credits). |
-| Four capacity views | [Available allocation modes](/gpustack-operator/main/docs/modules/devices/admission/index.md#four-view-status) reported by an `InstanceType`. |
+| Four capacity views | [Available allocation modes](/gpustack-operator/main/docs/modules/devices/admission/index.md#four-view-status) reported by an `AcceleratorType` or `InstanceType`. |
 | `Devices` ledger | The per-node inventory and record of accelerator allocations. |
 | `LocalQueue` | The namespace queue through which a workload enters its pool. |
 | `ModelArtifact` | A namespaced model source and resolved weight identity referenced by workloads. |
@@ -142,6 +143,6 @@ The hardware terms Device, Accelerator and Resource are defined in
 ---
 
 **See also** — [Accelerator Requests](/gpustack-operator/main/docs/modules/devices/requests/index.md) ·
-[Settings](/gpustack-operator/main/docs/reference/settings/index.md) · [All documentation](https://github.com/gpustack/gpustack-operator/blob/e98bebaa9dd043dca04b2fbce39d2441f60259a8/docs/README.md)
+[Settings](/gpustack-operator/main/docs/reference/settings/index.md) · [All documentation](https://github.com/gpustack/gpustack-operator/blob/71cc4d7292144f1ac46ec916e43da8e452555090/docs/README.md)
 
 **Next** → [Walkthrough](/gpustack-operator/main/docs/walkthroughs/devices/scheduling/index.md) — follow a workload from submission to allocation.

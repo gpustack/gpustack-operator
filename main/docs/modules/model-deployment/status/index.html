@@ -1780,9 +1780,9 @@ described with the artifact it reports on, in <a href="/gpustack-operator/main/d
 replica is its own group with its own <code>Workload</code>, so a deployment of N replicas is N <code>Workload</code>s. <code>True</code>
 is therefore an answer about the whole set and not about whichever <code>Workload</code> sorts first, because half
 a deployment holding quota is not the deployment holding quota.</p>
-<p>A message that names groups names them <strong>by role</strong>, never by <em><code>instanceType</code></em>: two roles can name one
+<p>A message that names groups names them <strong>by role</strong>, never by <em><code>acceleratorType</code></em>: two roles can name one
 type, so a type would point at two roles&rsquo; groups at once while a role names exactly the set that
-waits. The queue an operator has to free follows from the named role&rsquo;s own <em><code>instanceType</code></em>.</p>
+waits. The queue an operator has to free follows from the named role&rsquo;s own <em><code>acceleratorType</code></em>.</p>
 <p>It mirrors the <code>Workload</code>s&rsquo; own conditions, so it stays current after admission rather than
 reporting only the moment a <code>Workload</code> was admitted.</p>
 <table>
@@ -1865,7 +1865,7 @@ The state self-heals but is UNBOUNDED: no timeout, no give-up, nothing makes the
 capacity that never comes back leaves it standing.</li>
 <li><strong>Delete and recreate the deployment.</strong> Deleting is the other release for the quota the kept
 replicas hold.</li>
-<li><strong>Move the roles apart.</strong> Each role draws from the <code>ClusterQueue</code> its own <em><code>instanceType</code></em> resolves
+<li><strong>Move the roles apart.</strong> Each role draws from the <code>ClusterQueue</code> its own <em><code>acceleratorType</code></em> resolves
 to; giving the roles different types keeps one preemption from reclaiming both halves out of the
 same queue.</li>
 </ul>

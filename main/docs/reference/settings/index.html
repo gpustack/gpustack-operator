@@ -1689,11 +1689,11 @@ request that reaches a webhook. Neither window needs a restart.</p>
       </tr>
       <tr>
           <td><code>instance-type-aware-cpu-manufacturer</code><br/>(<code>GPUSTACK_INSTANCE_TYPE_AWARE_CPU_MANUFACTURER</code>)</td>
-          <td>Effect window: Next trigger<br/>Default: <code>false</code><br/>Usage: Whether the derived <code>ClusterQueue</code>/<code>InstanceType</code>/<code>InstanceTypeFlavor</code> aggregation splits by CPU manufacturer. When <code>false</code>, non-accelerated flavors collapse into one <code>generic</code> pool per os/arch and accelerated flavors pool per accelerator (CPU ignored); when <code>true</code>, every pool splits by the CPU key (<code>gpustack--${gKey}-…</code> / <code>gpustack--${gKey}--${aKey}-…</code>) and the <code>InstanceType</code> records the raw CPU detail. The <code>ResourceFlavor</code>s themselves are unaffected — they always carry the CPU key, so a flip only re-groups the aggregation layer. Read per-reconcile.</td>
+          <td>Effect window: Next trigger<br/>Default: <code>false</code><br/>Usage: Whether the derived <code>ClusterQueue</code>/<code>AcceleratorType</code>/<code>InstanceType</code>/<code>InstanceTypeFlavor</code> aggregation splits by CPU manufacturer. When <code>false</code>, non-accelerated flavors collapse into one <code>generic</code> pool per os/arch and accelerated flavors pool per accelerator (CPU ignored); when <code>true</code>, every pool splits by the CPU key (<code>gpustack--${gKey}-…</code> / <code>gpustack--${gKey}--${aKey}-…</code>) and the <code>InstanceType</code> records the raw CPU detail. The <code>ResourceFlavor</code>s themselves are unaffected — they always carry the CPU key, so a flip only re-groups the aggregation layer. Read per-reconcile.</td>
       </tr>
       <tr>
           <td><code>instance-type-derived-from-node</code><br/>(<code>GPUSTACK_INSTANCE_TYPE_DERIVED_FROM_NODE</code>)</td>
-          <td>Effect window: Next trigger<br/>Default: <code>true</code><br/>Usage: Whether the operator auto-derives the <code>InstanceType</code> (and its backing <code>ClusterQueue</code>) from node hardware. When <code>true</code>, the <code>NodeFlavorReconciler</code> authors the derived <code>InstanceType</code> (create-only); when <code>false</code>, it only aligns the <code>ResourceFlavor</code> and the administrator defines the <code>InstanceType</code> via the API, and owns feasibility with it — see <a href="#authoring-the-instancetype">Authoring the InstanceType</a>
+          <td>Effect window: Next trigger<br/>Default: <code>true</code><br/>Usage: Whether the operator auto-derives <code>InstanceType</code>s from node hardware. When <code>true</code>, <code>NodeFlavorReconciler</code> authors them create-only; when <code>false</code>, administrators define them through the API. It always derives <code>AcceleratorType</code> for accelerated pools, which share canonical queues with matching <code>InstanceType</code>s — see <a href="#authoring-the-instancetype">Authoring the InstanceType</a>
 . Read per-reconcile.</td>
       </tr>
       <tr>
@@ -1827,8 +1827,8 @@ request that reaches a webhook. Neither window needs a restart.</p>
 </table>
 <h3 id="authoring-the-instancetype">Authoring the InstanceType</h3>
 <p>With <code>instance-type-derived-from-node=false</code> the operator authors no <code>InstanceType</code>, so the
-administrator owns both halves of a pool: which <code>InstanceType</code>s exist, and whether what their queue
-admits can actually be placed. Flipping the setting off does not retire the types the operator
+administrator chooses which <code>InstanceType</code>s exist and checks whether their requests can be placed.
+Accelerated pools retain their derived <code>AcceleratorType</code> and canonical queue. Flipping the setting off does not retire the types the operator
 already authored; the derived marker is provenance, and nothing auto-removes a type.</p>
 <p>No <code>ClusterQueue</code> gains a reference to the node-devices feasibility gate in this mode. That
 <a href="/gpustack-operator/main/docs/modules/devices/admission/#gate-3-per-accelerator-admissioncheck">AdmissionCheck</a>

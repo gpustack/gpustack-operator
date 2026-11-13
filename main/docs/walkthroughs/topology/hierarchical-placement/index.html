@@ -1552,7 +1552,7 @@ manage topology updates.</p>
           <td>labeled <code>topology.kubernetes.io/region</code> and <code>topology.kubernetes.io/zone</code> for Steps 1 and 2; Steps 3 through 5 publish a <code>ConfigMap</code> rack inventory instead</td>
       </tr>
       <tr>
-          <td><code>InstanceType</code></td>
+          <td><code>AcceleratorType</code></td>
           <td><code>gpustack--nvidia-a10g-linux-amd64</code></td>
       </tr>
       <tr>
@@ -1618,7 +1618,7 @@ request placement within a single availability zone:</p>
 </span></span><span class="line"><span class="cl">     - name: server
 </span></span><span class="line"><span class="cl">       replicas: 1
 </span></span><span class="line"><span class="cl">       size: 2
-</span></span><span class="line"><span class="cl">       instanceType: gpustack--nvidia-a10g-linux-amd64
+</span></span><span class="line"><span class="cl">       acceleratorType: gpustack--nvidia-a10g-linux-amd64
 </span></span><span class="line"><span class="cl">       resources:
 </span></span><span class="line"><span class="cl">         accelerator: &#34;1&#34;
 </span></span><span class="line"><span class="cl"><span class="gi">+      topology:

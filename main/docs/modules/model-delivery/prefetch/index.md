@@ -132,13 +132,13 @@ spec:
   bindingRef:  # Required; the binding is in this namespace.
     name: store-binding
   placement:
-    instanceTypes:  # Optional; every node carrying a named InstanceType's flavor.
+    acceleratorTypes:  # Optional; every node carrying a named AcceleratorType's flavor.
       - gpu-pool
 ```
 
 - **Artifact**: Reference a `ModelArtifact` in the same namespace.
 - **Binding**: Reference a `ModelStoreBinding` that covers the target nodes.
-- **Placement**: Set either *`instanceTypes`* or *`nodeSelector`*, or omit both.
+- **Placement**: Set either *`acceleratorTypes`* or *`nodeSelector`*, or omit both.
 
 ```yaml
 apiVersion: worker.gpustack.ai/v1
@@ -157,7 +157,7 @@ spec:
 ```
 
 - **Node selector**: Select nodes with labels that are present in the cluster.
-- **Default placement**: Omit both fields to derive types from deployments that reference the artifact.
+- **Default placement**: Omit both fields to derive accelerator types from same-namespace deployments referencing the artifact; CPU-only roles are ignored.
 - **Source preparation**: Explicit placement is required when *`source`* is set.
 
 | Condition | Reason | Resolution |

@@ -2,7 +2,7 @@
 
 > GPUStack Operator discovers accelerators, organizes capacity into pools, and schedules Kubernetes workloads for interactive use and model serving.
 
-Documentation version: main. Source revision: e98bebaa9dd043dca04b2fbce39d2441f60259a8.
+Documentation version: main. Source revision: 71cc4d7292144f1ac46ec916e43da8e452555090.
 These pages come from the repository's docs/ sources. For version-specific behavior, use the
 documentation and code for your release. This index routes questions; follow its links for evidence.
 
@@ -19,7 +19,7 @@ documentation and code for your release. This index routes questions; follow its
 - [Hierarchical Placement Walkthrough](https://docs.gpustack.ai/gpustack-operator/main/docs/walkthroughs/topology/hierarchical-placement/index.md): Place serving replicas across zones and physical racks.
 - [Shared Cache Walkthrough](https://docs.gpustack.ai/gpustack-operator/main/docs/walkthroughs/kv-cache/shared-cache/index.md): Create a shared cache from backend to workload.
 - [Model Prefetch Walkthrough](https://docs.gpustack.ai/gpustack-operator/main/docs/walkthroughs/model-delivery/prefetch/index.md): Cache weights and verify captured model CR output.
-- [Model Deployment Walkthroughs](https://docs.gpustack.ai/gpustack-operator/main/docs/walkthroughs/model-deployment/index.md): Choose a serving configuration and its hardware, model and `InstanceType` setup.
+- [Model Deployment Walkthroughs](https://docs.gpustack.ai/gpustack-operator/main/docs/walkthroughs/model-deployment/index.md): Choose a serving configuration and its hardware, model and `AcceleratorType` setup.
 - [Prefill and Decode Walkthrough](https://docs.gpustack.ai/gpustack-operator/main/docs/walkthroughs/model-deployment/prefill-decode/index.md): Deploy H100 prefill and decode roles with tested TCP transfer settings.
 - [Encode, Prefill and Decode Walkthrough](https://docs.gpustack.ai/gpustack-operator/main/docs/walkthroughs/model-deployment/encode-prefill-decode/index.md): Deploy encode, prefill and decode roles and verify a multimodal request.
 - [Model Deployment Scaling Walkthrough](https://docs.gpustack.ai/gpustack-operator/main/docs/walkthroughs/model-deployment/scaling/index.md): Configure Shadow and Active scaling, choose algorithms and observe replica retirement.
@@ -120,7 +120,7 @@ documentation and code for your release. This index routes questions; follow its
 
 ## Optional
 
-- [Repository navigation](https://github.com/gpustack/gpustack-operator/blob/e98bebaa9dd043dca04b2fbce39d2441f60259a8/docs/README.md): Module relationships, design records, code entry points and applicable skills for contributors.
+- [Repository navigation](https://github.com/gpustack/gpustack-operator/blob/71cc4d7292144f1ac46ec916e43da8e452555090/docs/README.md): Module relationships, design records, code entry points and applicable skills for contributors.
 - [Development](https://docs.gpustack.ai/gpustack-operator/main/docs/contribute/development/index.md): Build, generate and lint the project.
 - [Local Cluster Setup](https://docs.gpustack.ai/gpustack-operator/main/docs/contribute/local-cluster-setup/index.md): Install kind and provide a cluster for development tests.
 - [Internals](https://docs.gpustack.ai/gpustack-operator/main/docs/contribute/internals/index.md): Review startup and naming constraints.

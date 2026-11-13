@@ -35,7 +35,7 @@ The captured H100 SXM5 run used this fixed group in namespace `gpustack-bench`.
 |---|---|---|---|
 | `ModelArtifact` | namespace | user, via the prefetch procedure | the DeepSeek V2 Lite weights the deployment serves |
 | `ModelDeployment` | namespace | user | the fixed four-rank *DP* group behind the managed Router |
-| `InstanceType` | cluster | operator | the whole-GPU H100 type each member requests |
+| `AcceleratorType` | cluster | operator | the whole-GPU H100 type each member requests |
 
 At concurrency 64, *time to first token (TTFT)* p50 was **2.58× lower** for the four-rank group on `1024/256`:
 **1,863.100 ms** against wide *TP* = 8 at `4,798.411 ms`.
@@ -53,7 +53,7 @@ Use [External DP Benchmark](/gpustack-operator/main/docs/modules/model-deploymen
 | Runner | `gpustack/runner:cuda13.0-vllm0.30.0` |
 | Router | `vllm-router`, image `gpustack/llm-router:v0.3.1`, policy `round_robin` |
 | Model | `deepseek-ai/DeepSeek-V2-Lite-Chat`, artifact `deepseek-v2-lite-chat`, served as `/models` |
-| Reusable `InstanceType` | `gpustack--nvidia-h100-80gb-hbm3-linux-amd64` |
+| Reusable `AcceleratorType` | `gpustack--nvidia-h100-80gb-hbm3-linux-amd64` |
 | GPU budget | 4 members × 2 GPUs = 8 GPUs |
 
 Each `Pod` exposed only its assigned GPUs, with private IPC and `/dev/shm` and no RDMA interface.
@@ -69,9 +69,8 @@ Verify cached weights, free GPU capacity and communication between all ranks bef
 ## Step 1: Start the fixed group
 
 Save the manifest as `external-dp.yaml`.
-It uses the discovered H100 `InstanceType`; the benchmark preparation's custom type was named `bench-gpu`.
+It uses the discovered H100 `AcceleratorType`; the recorded benchmark used a custom `InstanceType` named `bench-gpu`.
 Use an existing type that selects the same whole-GPU accelerator group.
-Replace *`instanceType`* with `bench-gpu` to reproduce the captured scheduling configuration.
 
 ```yaml
 apiVersion: worker.gpustack.ai/v1
@@ -98,7 +97,7 @@ spec:
       kind: Server
       replicas: 1
       size: 4
-      instanceType: gpustack--nvidia-h100-80gb-hbm3-linux-amd64
+      acceleratorType: gpustack--nvidia-h100-80gb-hbm3-linux-amd64
       image: gpustack/runner:cuda13.0-vllm0.30.0
       imagePullPolicy: IfNotPresent
       resources:
@@ -332,7 +331,7 @@ or placement across GPU nodes. Those configurations need separate compatibility 
 
 | Symptom | Signal | Check & Mitigation |
 |---|---|---|
-| Members stay Pending | Status: member `Pod` phase `Pending` | Read Kueue quota, events and `InstanceType` capacity. Four members with two GPUs each need eight free GPUs. |
+| Members stay Pending | Status: member `Pod` phase `Pending` | Read Kueue quota, events and `AcceleratorType` capacity. Four members with two GPUs each need eight free GPUs. |
 | Ranks cannot initialize | Log: failing rank's engine startup log | Verify rank values 0–3, *DP* width 4, the shared leader address and the engine's peer ports. |
 | Direct requests pass but Router requests fail | Status: *`status.roles[].endpoints`* | Read *`status.roles[].endpoints`*, Router discovery and eligibility labels. |
 | Router registers only rank 0 | Status: `/observer/endpoints` lists one worker | Confirm the build supports managed *External LB* discovery and the role reports `External`. |

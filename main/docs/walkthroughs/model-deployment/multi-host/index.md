@@ -33,7 +33,7 @@ The operator injects cluster discovery environment variables into each container
 | Object | Scope | Creator | Purpose |
 |---|---|---|---|
 | `ModelArtifact` | namespace | user | the `deepseek-v2-lite-chat` weights each member mounts |
-| `InstanceType` | cluster | operator | the discovered H100 whole-GPU type the role requests |
+| `AcceleratorType` | cluster | operator | the discovered H100 whole-GPU type the role requests |
 | `ModelDeployment` | namespace | user | one multi-host serving instance spanning two nodes |
 
 Complete [cluster preparation](/gpustack-operator/main/docs/walkthroughs/model-deployment/index.md#prepare-the-cluster) and
@@ -43,8 +43,8 @@ Complete [cluster preparation](/gpustack-operator/main/docs/walkthroughs/model-d
 This sixteen-GPU layout is a configuration example without measured runtime results. Unlike the
 recorded H100 walkthroughs in `gpustack-bench`, it uses the `gpustack-elastic` namespace and a
 `deepseek-v2-lite-chat` `ModelArtifact` in that namespace. The manifest requests the same
-discovered H100 `InstanceType` as the other reusable manifests; see
-[Prepare the GPU InstanceType](/gpustack-operator/main/docs/walkthroughs/model-deployment/index.md#prepare-the-gpu-instancetype).
+discovered H100 `AcceleratorType` as the other reusable manifests; see
+[Prepare the GPU AcceleratorType](/gpustack-operator/main/docs/walkthroughs/model-deployment/index.md#prepare-the-gpu-acceleratortype).
 
 When running [model prefetch](/gpustack-operator/main/docs/walkthroughs/model-delivery/prefetch/index.md), warm the artifact onto **both**
 physical GPU nodes (`minReady: 2` across the GPU node pool rather than pinning a single
@@ -57,7 +57,7 @@ physical GPU nodes (`minReady: 2` across the GPU node pool rather than pinning a
 | Nodes | two physical GPU nodes with identical accelerator counts |
 | GPUs | eight per node, sixteen total |
 | Fabric | inter-node high-speed network such as RoCE, InfiniBand or AWS EFA |
-| `InstanceType` | the discovered `gpustack--nvidia-h100-80gb-hbm3-linux-amd64` |
+| `AcceleratorType` | the discovered `gpustack--nvidia-h100-80gb-hbm3-linux-amd64` |
 | Namespace | `gpustack-elastic` |
 | Model | `deepseek-v2-lite-chat` `ModelArtifact` in that namespace |
 
@@ -86,7 +86,7 @@ spec:
       kind: Server
       replicas: 1
       size: 2
-      instanceType: gpustack--nvidia-h100-80gb-hbm3-linux-amd64
+      acceleratorType: gpustack--nvidia-h100-80gb-hbm3-linux-amd64
       image: gpustack/runner:cuda13.0-vllm0.29.0
       resources:
         accelerator: "8"
@@ -194,7 +194,7 @@ To scale serving throughput, increase *`replicas`* to launch additional multi-ho
 
 Scaling to `replicas: 2` creates another complete two-host group (`m0` and `m1`), reserving sixteen additional GPUs.
 
-To change the member topology of each instance, you can also update *`size`*, *`resources`* or *`instanceType`*.
+To change the member topology of each instance, you can also update *`size`*, *`resources`* or *`acceleratorType`*.
 These edits do not resize a running collective engine in place.
 
 The operator deletes each old instance and its `Workload` first.

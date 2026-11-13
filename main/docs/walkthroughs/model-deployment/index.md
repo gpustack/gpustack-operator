@@ -7,7 +7,7 @@ The H100 walkthroughs distinguish recorded deployments from configuration exampl
 
 - [Choose an example](#choose-an-example)
 - [Prepare the cluster](#prepare-the-cluster)
-- [Prepare the GPU InstanceType](#prepare-the-gpu-instancetype)
+- [Prepare the GPU AcceleratorType](#prepare-the-gpu-acceleratortype)
 
 ## Choose an example
 
@@ -44,7 +44,7 @@ The *Multi-Host* example instead needs two GPU nodes.
 ```bash
 kubectl get nodes
 kubectl get devices -o json
-kubectl get instancetypes
+kubectl get acceleratortypes
 kubectl get nodemodelstores -o json
 ```
 
@@ -53,11 +53,11 @@ Confirm Model Manager readiness and free GPUs before creating a serving workload
 Complete [model prefetch](/gpustack-operator/main/docs/walkthroughs/model-delivery/prefetch/index.md) with the artifact, namespace and node selection
 specified by the serving walkthrough.
 
-## Prepare the GPU InstanceType
+## Prepare the GPU AcceleratorType
 
 The H100 manifests use the discovered whole-GPU type
 `gpustack--nvidia-h100-80gb-hbm3-linux-amd64`. The recordings used the custom type `bench-gpu`.
-Each walkthrough explains this substitution; captured queue output retains the recorded name.
+Captured queue output retains the recorded name; current manifests use the discovered `AcceleratorType`.
 Confirm the selected type's capacity before applying a manifest.
 
 Select another whole-GPU type when using different hardware, and verify model compatibility.

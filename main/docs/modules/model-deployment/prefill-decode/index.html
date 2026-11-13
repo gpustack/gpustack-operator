@@ -1519,12 +1519,12 @@ the shape&rsquo;s own contract, including its Router requirement, is on <a href=
 .
 <a href="https://github.com/gpustack/gpustack-operator/issues/754">Issue #754</a>
  tracks that deferred combination.</p>
-<p>With a managed router, the direct connector depends on the engine, platform and
-<code>spec.kvTransfer.backend</code>. A shared <code>spec.kvCache</code> pool adds a store connector alongside the direct
-path; for vLLM NIXL, <code>NixlConnector</code> comes first in <code>MultiConnector</code>. See
-<a href="/gpustack-operator/main/docs/modules/model-deployment/parameterize/#transfer-parameters">Transfer parameters</a>
- for the per-engine connector mapping and
-synthesized environment variables.</p>
+<p>With a managed router, the direct connector depends on the engine, platform and <code>spec.kvTransfer.backend</code>. On
+vLLM pairs with a shared <code>spec.kvCache</code> pool, <em>Prefill</em> wraps the direct connector first in <code>MultiConnector</code>
+alongside the store connector, while <em>Decode</em> runs the direct connector alone and keeps pool dtype and
+block-size alignment. See <a href="/gpustack-operator/main/docs/modules/model-deployment/parameterize/#transfer-parameters">Transfer parameters</a>
+ for connector and
+environment mappings.</p>
 <p>A pair needs no shared pool to hand blocks over. With <code>llm-d-router</code>, the decode <code>Pod</code> runs a
 routing-proxy sidecar. vLLM NIXL and Ascend use <code>--kv-connector=nixlv2</code>; vLLM Mooncake uses
 <code>mooncake</code> and SGLang uses <code>sglang</code>. Ascend vLLM pairs also render behind <code>vllm-router</code>, which
@@ -1583,18 +1583,18 @@ and share a pool with every other deployment bound to it&rdquo;.</p>
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">prefill</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">Prefill</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">replicas</span><span class="p">:</span><span class="w"> </span><span class="m">2</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">instanceType</span><span class="p">:</span><span class="w"> </span><span class="l">gpustack--nvidia-h20-linux-amd64</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">acceleratorType</span><span class="p">:</span><span class="w"> </span><span class="l">gpustack--nvidia-h20-linux-amd64</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">resources</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">accelerator</span><span class="p">:</span><span class="w"> </span><span class="m">2</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">decode</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">Decode</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">replicas</span><span class="p">:</span><span class="w"> </span><span class="m">2</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">instanceType</span><span class="p">:</span><span class="w"> </span><span class="l">gpustack--nvidia-h20-linux-amd64</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">acceleratorType</span><span class="p">:</span><span class="w"> </span><span class="l">gpustack--nvidia-h20-linux-amd64</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">resources</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">accelerator</span><span class="p">:</span><span class="w"> </span><span class="m">2</span></span></span></code></pre></div>
 </div>
 <p><strong>Each replica of a role becomes its own Kueue <code>Pod</code> group: one group per replica, declaring a total
-equal to the role&rsquo;s <em><code>size</code></em>.</strong> Two roles naming the same <em><code>instanceType</code></em> are still separate groups,
+equal to the role&rsquo;s <em><code>size</code></em>.</strong> Two roles naming the same <em><code>acceleratorType</code></em> are still separate groups,
 each replica composing its own <code>Workload</code>. The example above therefore has <strong>four</strong> single-<code>Pod</code>
 groups, admitted as a set.</p>
 <p><strong>A lost replica is replaced once its slot reads empty, and its siblings keep serving.</strong> A node
@@ -1612,7 +1612,7 @@ excess, and Kueue&rsquo;s answer to the excess is to delete the newcomer.</p>
 another replica&rsquo;s group: one <em>Prefill</em> replica turning over leaves its siblings and all of <em>Decode</em>
 serving. The groups are still admitted together; an <code>AdmissionCheck</code> holds them until the whole set
 has reserved quota, so <em>Prefill</em> still never starts without <em>Decode</em>.</p>
-<p>Splitting *<code>instanceType</code>*s buys different hardware; the isolation it used to buy, every replica has
+<p>Splitting *<code>acceleratorType</code>*s buys different hardware; the isolation it used to buy, every replica has
 by default.</p>
 <p><strong>With a shared pool</strong>, the same object plus one block. <em><code>spec.kvCache</code></em> is frozen after creation, so declare it in the first apply:</p>
 <div class="code-block">
@@ -1841,8 +1841,8 @@ For example, select NIXL on an existing deployment with:</p>
 </span></span></span><span class="line"><span class="cl"><span class="gi">+    backend: NIXL
 </span></span></span></code></pre></div>
 </div>
-<p>Admission refuses <code>HIXL</code> on non-Ascend pools, <code>NIXL</code> on Ascend pools, and mixed
-Ascend/non-Ascend prefill/decode pairs. If the manufacturer is not yet observed, the renderer
+<p>Admission refuses <code>HIXL</code> on non-Ascend or CPU-only roles, <code>NIXL</code> on Ascend <code>AcceleratorType</code>s, and mixed
+Ascend/non-Ascend (including CPU-only) prefill/decode pairs. If the manufacturer is not yet observed, the renderer
 can refuse an incompatible combination after it resolves.</p>
 <p>Mooncake derives <code>ascend</code> on Ascend, <code>efa</code> when both roles request <code>resources.interface &gt; 0</code>
 under EFA, <code>hip</code> on AMD ROCm, <code>rdma</code> when both roles request <code>resources.interface &gt; 0</code>, and
@@ -1860,47 +1860,28 @@ lists existing compatibility evidence; these rendered combinations require their
  lists synthesized parameters and defaults.
 Changing transfer settings rolls the roles; transfers can fail until both ends converge.</p>
 <h2 id="different-hardware-per-role">Different hardware per role</h2>
-<p>A Kueue <code>Workload</code> carries one <code>queueName</code>, and that name is the one the role&rsquo;s <em><code>instanceType</code></em>
+<p>A Kueue <code>Workload</code> carries one <code>queueName</code>, and that name is the one the role&rsquo;s <em><code>acceleratorType</code></em>
 publishes as its <em><code>status.entrance</code></em>. Every replica is its own group regardless, so two roles were
-never going to share a <code>Workload</code>, on two *<code>instanceType</code>*s or on one. The set is admitted together by an
+never going to share a <code>Workload</code>, on two *<code>acceleratorType</code>*s or on one. The set is admitted together by an
 admission check rather than by Kueue&rsquo;s intra-group rule.</p>
 <p>See <a href="/gpustack-operator/main/docs/modules/model-deployment/configuration/#one-group-per-replica">One group per replica</a>
  for what that costs an edit, and
-<a href="/gpustack-operator/main/docs/reference/settings/#authoring-the-instancetype">Authoring the InstanceType yourself</a>
+<a href="/gpustack-operator/main/docs/reference/settings/#authoring-the-instancetype">Authoring the InstanceType</a>
  for which
 queues carry the check.</p>
 <p><strong>Adding a second manufacturer uses the same mechanism.</strong> A queue&rsquo;s accelerator quota is
 <code>credits.gpustack.ai/&lt;manufacturer&gt;</code>, one resource name per manufacturer, and Kueue&rsquo;s own webhook
-refuses a second resource group repeating a covered resource within one queue. With a queue per role
-there is no second group to repeat anything.</p>
-<p><strong>Two roles on different manufacturers cannot share KV through their pool.</strong> The deployment is
-admitted and both halves serve; what fails is the sharing, and it fails silently: reads from the
-shared store miss, and nothing on the deployment reports it. Independent reasons stand
-between the halves:</p>
-<ul>
-<li><strong>This operator&rsquo;s own refusal is the one an administrator meets.</strong> On a pool left at its default
-transport, the renderer <a href="/gpustack-operator/main/docs/modules/kv-cache/injection/#binding-transport-support">refuses the vLLM-Ascend
-half</a>
- (the rule and its
-remediation are stated there). The check is one-sided: it fires for a single-manufacturer Ascend
-deployment just the same, and it is the only one of the three that produces a message;
-following its remediation clears only this refusal; the next two apply regardless.</li>
-<li><strong>Two upstream limits then apply</strong>, described at the versions each engine is supported at (see
-<a href="/gpustack-operator/main/docs/modules/model-deployment/engine-versions/#minimum-versions">the minimum versions</a>
-); they describe that pair of
-releases, not a permanent property of either project. The operator
-renders no key that lets the Ascend half load from the shared store, and the two engines address
-it with incompatible keys, so every lookup misses and no error is raised.</li>
-</ul>
-<p>This limit governs the shared pool alone: <a href="#pair-connections">a pair needs no shared pool to hand blocks
-over</a>
+refuses a second resource group repeating a covered resource within one queue. Roles on the same pool share its queue; different manufacturers use different pool queues.</p>
+<p>A mixed Ascend/non-Ascend pair is refused once both manufacturers are observed. Two non-Ascend
+roles can name different manufacturers, but their direct transfer interoperability is unmeasured
+here. A pair needs no shared pool for <a href="#pair-connections">direct transfer</a>
+; a vLLM-Ascend role
+using a pool has separate <a href="/gpustack-operator/main/docs/modules/kv-cache/injection/#binding-transport-support">store transport requirements</a>
 .</p>
-<p>A mixed Ascend/non-Ascend pair is refused. Two non-Ascend roles
-can name different manufacturers, but their direct transfer interoperability is unmeasured here.</p>
 <p><a href="/gpustack-operator/main/docs/modules/devices/scheduling/#stage-4-kueue-chain">Kueue assigns a ResourceFlavor per
 PodSet</a>
 , so a role still takes whatever
-its own pool assigns; what selects the hardware is the <em><code>instanceType</code></em> the role names.</p>
+its own pool assigns; what selects the hardware is the <em><code>acceleratorType</code></em> the role names.</p>
 <h2 id="addressing-a-role">Addressing a role</h2>
 <p>Each role gets a <code>ClusterIP</code> <code>Service</code> named <code>&lt;deployment&gt;-&lt;role&gt;</code>, beside the deployment-wide one, so a
 decoder is reachable <strong>as</strong> a decoder. The managed router uses these stable role addresses for the

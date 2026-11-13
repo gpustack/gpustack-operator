@@ -48,7 +48,7 @@ spec:
     image: gpustack/runner:cuda13.0-vllm0.30.0
   roles:
     - name: server
-      instanceType: elastic-gpu
+      acceleratorType: elastic-gpu
       elasticEp:
         width: 4  # Mutable target GPU engines, including the reserved master; 2 to 64.
 ```
@@ -72,7 +72,7 @@ enforces the rest:
 - pipeline and *prefill* context parallel sizes stay 1;
 - you cannot supply *`command`*, because the renderer owns the command line of the managed role.
 
-The role's *`size`*, *`instanceType`* and *`resources`* are frozen with the profile: the ordinary role
+The role's *`size`*, *`acceleratorType`* and *`resources`* are frozen with the profile: the ordinary role
 fields' editability does not reach it, and width is the only configuration setting it offers.
 
 Adding or removing the profile on an existing role is refused.
@@ -94,7 +94,7 @@ The operator does not limit *TP* to the size used by a particular test.
 For a step-by-step live expansion example (`2 → 4`) and measured latency/throughput figures under load, see the [Elastic EP Walkthrough](/gpustack-operator/main/docs/walkthroughs/model-deployment/elastic-ep/index.md) and the [Elastic EP Benchmark](/gpustack-operator/main/docs/modules/model-deployment/elastic-ep-benchmark/index.md#live-resize). Admission of *TP* = 2, 4 or 8 does not by itself establish dynamic inference support across arbitrary models or engine builds.
 
 The operator directly manages a separate CPU Ray head `Pod` and its `Service`.
-The head has no `InstanceType` or `LocalQueue` dependency and does not count toward GPU width.
+The head has no `AcceleratorType` or `LocalQueue` dependency and does not count toward GPU width.
 Its `Pod` template declares no container or `Pod` resource requests or limits.
 Kubernetes schedules it using the namespace's normal admission rules.
 A LimitRange or another webhook can still inject resources at admission.
@@ -138,9 +138,9 @@ spec:
       kind: Server
       replicas: 1
       size: 1
-      instanceType: elastic-gpu
+      acceleratorType: elastic-gpu
       resources:
-        accelerator: "1"  # defaults to the TP size (1 here) on an accelerated InstanceType when omitted
+        accelerator: "1"  # defaults to the TP size (1 here) on an accelerated AcceleratorType when omitted
       elasticEp:
         width: 2
       extraArgs:
@@ -156,9 +156,10 @@ Weights reach the members through the same artifact and cache as any other deplo
 [Model Delivery](/gpustack-operator/main/docs/modules/model-delivery/index.md).
 
 To use *TP* = 2, pass `--tensor-parallel-size 2` in *`extraArgs`* and request *`resources.accelerator`* `"2"`.
-When *`resources.accelerator`* is omitted on an accelerated `InstanceType`, the mutating admission
+When *`resources.accelerator`* is omitted on an accelerated `AcceleratorType`, the mutating admission
 webhook defaults it to the declared *TP* size (1 when `--tensor-parallel-size` is omitted).
-Explicit quantities must equal the *TP* size. Each member's CPU and memory scale with its GPU count.
+Explicit accelerator quantities must equal the *TP* size. CPU and memory are supplied explicitly
+through role resources and do not scale automatically with GPU count.
 
 ### Maximum width
 
@@ -177,7 +178,7 @@ spec:
     image: gpustack/runner:cuda13.0-vllm0.30.0  # the 0.30.0 line this feature starts at
   roles:
     - name: server
-      instanceType: gpustack--nvidia-h200-sxm-linux-amd64
+      acceleratorType: gpustack--nvidia-h200-sxm-linux-amd64
       extraArgs:
         - --elastic-ep-max-dp-size
         - "4"

@@ -1,7 +1,7 @@
 # Parameters
 
 `ModelDeployment` synthesizes engine and router arguments, environment variables, files and volume
-mounts from its fields and bound `InstanceType`, `KVCachePoolBinding` and `ModelArtifact` resources.
+mounts from its fields and bound `AcceleratorType`, `KVCachePoolBinding` and `ModelArtifact` resources.
 The tables describe managed engine roles, routers, sidecars and remote weight clients (`Engine` in
 the `Component` column means both `vLLM` and `SGLang`). Rendering establishes configuration; it
 does not establish hardware or image qualification.
@@ -102,8 +102,8 @@ The operator resolves transfer parameters in two steps:
 | Component | Tier | Trigger | Injected | Note |
 |---|---|---|---|---|
 | Engine | Defaulted | Transfer injection | `MC_TE_METRIC=1` | User environment wins. |
-| vLLM | Owned | Mooncake, NVIDIA/AMD | `MooncakeConnector` (`mooncake_protocol` set to `rdma`, `efa`, `hip`, or `tcp`), prefill `VLLM_MOONCAKE_BOOTSTRAP_PORT=8998`; `MOONCAKE_CONFIG_PATH` and generated file with a pool | Operator owns connector and environment keys. |
-| vLLM | Owned | NIXL, NVIDIA/AMD | `NixlConnector` with `kv_connector_extra_config.backends` set to `UCX` or EFA `LIBFABRIC`; first in `MultiConnector` with a pool | Operator owns connector document. |
+| vLLM | Owned | Mooncake, NVIDIA/AMD | `MooncakeConnector` (`mooncake_protocol` set to `rdma`, `efa`, `hip`, or `tcp`), prefill `VLLM_MOONCAKE_BOOTSTRAP_PORT=8998`; prefill `MultiConnector`, `MOONCAKE_CONFIG_PATH` and generated file with a pool | Operator owns connector and environment keys; disaggregated decode omits the store connector. |
+| vLLM | Owned | NIXL, NVIDIA/AMD | `NixlConnector` with `kv_connector_extra_config.backends` set to `UCX` or EFA `LIBFABRIC`; first in prefill `MultiConnector` with a pool | Operator owns connector document; disaggregated decode runs `NixlConnector` alone. |
 | vLLM | Owned | NIXL, NVIDIA/AMD | `VLLM_NIXL_SIDE_CHANNEL_HOST` from `status.podIP`, container port `8998` on both roles | Host is reserved. |
 | vLLM | Owned | Mooncake, Ascend | `MooncakeConnectorV1` (`kv_port: 8998` and `prefill`/`decode` `tp_size` and `dp_size` in `--kv-transfer-config`), prefill container port `8998`, and read-only `/usr/local/Ascend/driver` mount | Connector document derives parallel sizes from role configuration. |
 | vLLM | Owned | HIXL, Ascend | `MooncakeConnectorV1` (`kv_port: 8998` and `prefill`/`decode` `tp_size` and `dp_size` in `--kv-transfer-config`), prefill container port `8998`, and read-only `/usr/local/Ascend/driver` mount | Operator owns connector document. |

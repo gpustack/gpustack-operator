@@ -292,9 +292,9 @@ replica is its own group with its own `Workload`, so a deployment of N replicas 
 is therefore an answer about the whole set and not about whichever `Workload` sorts first, because half
 a deployment holding quota is not the deployment holding quota.
 
-A message that names groups names them **by role**, never by *`instanceType`*: two roles can name one
+A message that names groups names them **by role**, never by *`acceleratorType`*: two roles can name one
 type, so a type would point at two roles' groups at once while a role names exactly the set that
-waits. The queue an operator has to free follows from the named role's own *`instanceType`*.
+waits. The queue an operator has to free follows from the named role's own *`acceleratorType`*.
 
 It mirrors the `Workload`s' own conditions, so it stays current after admission rather than
 reporting only the moment a `Workload` was admitted.
@@ -337,7 +337,7 @@ What to do about it:
   capacity that never comes back leaves it standing.
 - **Delete and recreate the deployment.** Deleting is the other release for the quota the kept
   replicas hold.
-- **Move the roles apart.** Each role draws from the `ClusterQueue` its own *`instanceType`* resolves
+- **Move the roles apart.** Each role draws from the `ClusterQueue` its own *`acceleratorType`* resolves
   to; giving the roles different types keeps one preemption from reclaiming both halves out of the
   same queue.
 

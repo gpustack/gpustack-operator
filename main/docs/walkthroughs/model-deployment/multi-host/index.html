@@ -1525,7 +1525,7 @@ The operator injects cluster discovery environment variables into each container
           <td>the <code>deepseek-v2-lite-chat</code> weights each member mounts</td>
       </tr>
       <tr>
-          <td><code>InstanceType</code></td>
+          <td><code>AcceleratorType</code></td>
           <td>cluster</td>
           <td>operator</td>
           <td>the discovered H100 whole-GPU type the role requests</td>
@@ -1546,8 +1546,8 @@ The operator injects cluster discovery environment variables into each container
 <p>This sixteen-GPU layout is a configuration example without measured runtime results. Unlike the
 recorded H100 walkthroughs in <code>gpustack-bench</code>, it uses the <code>gpustack-elastic</code> namespace and a
 <code>deepseek-v2-lite-chat</code> <code>ModelArtifact</code> in that namespace. The manifest requests the same
-discovered H100 <code>InstanceType</code> as the other reusable manifests; see
-<a href="/gpustack-operator/main/docs/walkthroughs/model-deployment/#prepare-the-gpu-instancetype">Prepare the GPU InstanceType</a>
+discovered H100 <code>AcceleratorType</code> as the other reusable manifests; see
+<a href="/gpustack-operator/main/docs/walkthroughs/model-deployment/#prepare-the-gpu-acceleratortype">Prepare the GPU AcceleratorType</a>
 .</p>
 <p>When running <a href="/gpustack-operator/main/docs/walkthroughs/model-delivery/prefetch/">model prefetch</a>
 , warm the artifact onto <strong>both</strong>
@@ -1575,7 +1575,7 @@ physical GPU nodes (<code>minReady: 2</code> across the GPU node pool rather tha
           <td>inter-node high-speed network such as RoCE, InfiniBand or AWS EFA</td>
       </tr>
       <tr>
-          <td><code>InstanceType</code></td>
+          <td><code>AcceleratorType</code></td>
           <td>the discovered <code>gpustack--nvidia-h100-80gb-hbm3-linux-amd64</code></td>
       </tr>
       <tr>
@@ -1612,7 +1612,7 @@ The launch script sets <em>TP</em> = 8 across local GPUs and <em>PP</em> = 2 acr
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">Server</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">replicas</span><span class="p">:</span><span class="w"> </span><span class="m">1</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">size</span><span class="p">:</span><span class="w"> </span><span class="m">2</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">instanceType</span><span class="p">:</span><span class="w"> </span><span class="l">gpustack--nvidia-h100-80gb-hbm3-linux-amd64</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">acceleratorType</span><span class="p">:</span><span class="w"> </span><span class="l">gpustack--nvidia-h100-80gb-hbm3-linux-amd64</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">image</span><span class="p">:</span><span class="w"> </span><span class="l">gpustack/runner:cuda13.0-vllm0.29.0</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">resources</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">accelerator</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;8&#34;</span><span class="w">
@@ -1707,7 +1707,7 @@ Inspect the injected environment variables in the secondary worker <code>m1</cod
 </span></span></code></pre></div>
 </div>
 <p>Scaling to <code>replicas: 2</code> creates another complete two-host group (<code>m0</code> and <code>m1</code>), reserving sixteen additional GPUs.</p>
-<p>To change the member topology of each instance, you can also update <em><code>size</code></em>, <em><code>resources</code></em> or <em><code>instanceType</code></em>.
+<p>To change the member topology of each instance, you can also update <em><code>size</code></em>, <em><code>resources</code></em> or <em><code>acceleratorType</code></em>.
 These edits do not resize a running collective engine in place.</p>
 <p>The operator deletes each old instance and its <code>Workload</code> first.
 It then creates the replacement in that slot and waits for fresh Kueue gang admission.

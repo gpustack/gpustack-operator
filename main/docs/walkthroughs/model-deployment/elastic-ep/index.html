@@ -1526,7 +1526,7 @@ The captured load completed <strong>439/439 client requests with zero errors</st
           <td>the elastic vLLM collective that expands in place</td>
       </tr>
       <tr>
-          <td><code>InstanceType</code></td>
+          <td><code>AcceleratorType</code></td>
           <td>cluster</td>
           <td>operator</td>
           <td>the whole-GPU H100 type each member requests</td>
@@ -1594,8 +1594,7 @@ Keep the DeepSeek artifact name and revision from that procedure. Confirm the ar
 The store and binding names can differ; they must grant this namespace access to the selected node.</p>
 <h2 id="step-1-start-the-elastic-deployment">Step 1: Start the elastic deployment</h2>
 <p>Keep all eight GPUs available so expansion can reserve its additional members.
-The reusable manifest uses the discovered H100 <code>InstanceType</code>.
-To match the captured custom queue, replace its <em><code>instanceType</code></em> value with <code>bench-gpu</code>.
+The reusable manifest uses the discovered H100 <code>AcceleratorType</code>.
 Save the manifest as <code>elastic-ep.yaml</code>:</p>
 <div class="code-block">
   <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
@@ -1617,7 +1616,7 @@ Save the manifest as <code>elastic-ep.yaml</code>:</p>
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">Server</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">replicas</span><span class="p">:</span><span class="w"> </span><span class="m">1</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">size</span><span class="p">:</span><span class="w"> </span><span class="m">1</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">instanceType</span><span class="p">:</span><span class="w"> </span><span class="l">gpustack--nvidia-h100-80gb-hbm3-linux-amd64</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">acceleratorType</span><span class="p">:</span><span class="w"> </span><span class="l">gpustack--nvidia-h100-80gb-hbm3-linux-amd64</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">image</span><span class="p">:</span><span class="w"> </span><span class="l">gpustack/runner:cuda13.0-vllm0.30.0</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">imagePullPolicy</span><span class="p">:</span><span class="w"> </span><span class="l">IfNotPresent</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">resources</span><span class="p">:</span><span class="w">

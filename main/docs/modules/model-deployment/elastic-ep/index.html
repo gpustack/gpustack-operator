@@ -1528,7 +1528,7 @@ flowchart TD
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">image</span><span class="p">:</span><span class="w"> </span><span class="l">gpustack/runner:cuda13.0-vllm0.30.0</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">roles</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">server</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">instanceType</span><span class="p">:</span><span class="w"> </span><span class="l">elastic-gpu</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">acceleratorType</span><span class="p">:</span><span class="w"> </span><span class="l">elastic-gpu</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">elasticEp</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">width</span><span class="p">:</span><span class="w"> </span><span class="m">4</span><span class="w">  </span><span class="c"># Mutable target GPU engines, including the reserved master; 2 to 64.</span></span></span></code></pre></div>
 </div>
@@ -1550,7 +1550,7 @@ enforces the rest:</p>
 <li>pipeline and <em>prefill</em> context parallel sizes stay 1;</li>
 <li>you cannot supply <em><code>command</code></em>, because the renderer owns the command line of the managed role.</li>
 </ul>
-<p>The role&rsquo;s <em><code>size</code></em>, <em><code>instanceType</code></em> and <em><code>resources</code></em> are frozen with the profile: the ordinary role
+<p>The role&rsquo;s <em><code>size</code></em>, <em><code>acceleratorType</code></em> and <em><code>resources</code></em> are frozen with the profile: the ordinary role
 fields&rsquo; editability does not reach it, and width is the only configuration setting it offers.</p>
 <p>Adding or removing the profile on an existing role is refused.
 The effective <em>TP</em> value is fixed after creation.
@@ -1567,7 +1567,7 @@ The operator does not limit <em>TP</em> to the size used by a particular test.</
  and the <a href="/gpustack-operator/main/docs/modules/model-deployment/elastic-ep-benchmark/#live-resize">Elastic EP Benchmark</a>
 . Admission of <em>TP</em> = 2, 4 or 8 does not by itself establish dynamic inference support across arbitrary models or engine builds.</p>
 <p>The operator directly manages a separate CPU Ray head <code>Pod</code> and its <code>Service</code>.
-The head has no <code>InstanceType</code> or <code>LocalQueue</code> dependency and does not count toward GPU width.
+The head has no <code>AcceleratorType</code> or <code>LocalQueue</code> dependency and does not count toward GPU width.
 Its <code>Pod</code> template declares no container or <code>Pod</code> resource requests or limits.
 Kubernetes schedules it using the namespace&rsquo;s normal admission rules.
 A LimitRange or another webhook can still inject resources at admission.</p>
@@ -1607,9 +1607,9 @@ See <a href="/gpustack-operator/main/docs/modules/model-deployment/configuration
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">Server</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">replicas</span><span class="p">:</span><span class="w"> </span><span class="m">1</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">size</span><span class="p">:</span><span class="w"> </span><span class="m">1</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">instanceType</span><span class="p">:</span><span class="w"> </span><span class="l">elastic-gpu</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">acceleratorType</span><span class="p">:</span><span class="w"> </span><span class="l">elastic-gpu</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">resources</span><span class="p">:</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">accelerator</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;1&#34;</span><span class="w">  </span><span class="c"># defaults to the TP size (1 here) on an accelerated InstanceType when omitted</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">accelerator</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;1&#34;</span><span class="w">  </span><span class="c"># defaults to the TP size (1 here) on an accelerated AcceleratorType when omitted</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">elasticEp</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">width</span><span class="p">:</span><span class="w"> </span><span class="m">2</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">extraArgs</span><span class="p">:</span><span class="w">
@@ -1624,9 +1624,10 @@ See <a href="/gpustack-operator/main/docs/modules/model-deployment/configuration
 <a href="/gpustack-operator/main/docs/modules/model-delivery/">Model Delivery</a>
 .</p>
 <p>To use <em>TP</em> = 2, pass <code>--tensor-parallel-size 2</code> in <em><code>extraArgs</code></em> and request <em><code>resources.accelerator</code></em> <code>&quot;2&quot;</code>.
-When <em><code>resources.accelerator</code></em> is omitted on an accelerated <code>InstanceType</code>, the mutating admission
+When <em><code>resources.accelerator</code></em> is omitted on an accelerated <code>AcceleratorType</code>, the mutating admission
 webhook defaults it to the declared <em>TP</em> size (1 when <code>--tensor-parallel-size</code> is omitted).
-Explicit quantities must equal the <em>TP</em> size. Each member&rsquo;s CPU and memory scale with its GPU count.</p>
+Explicit accelerator quantities must equal the <em>TP</em> size. CPU and memory are supplied explicitly
+through role resources and do not scale automatically with GPU count.</p>
 <h3 id="maximum-width">Maximum width</h3>
 <p>Starting with vLLM 0.30.0, set the largest planned width through <em><code>extraArgs</code></em> when creating the deployment:</p>
 <div class="code-block">
@@ -1643,7 +1644,7 @@ Explicit quantities must equal the <em>TP</em> size. Each member&rsquo;s CPU and
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">image</span><span class="p">:</span><span class="w"> </span><span class="l">gpustack/runner:cuda13.0-vllm0.30.0 </span><span class="w"> </span><span class="c"># the 0.30.0 line this feature starts at</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">roles</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">server</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">instanceType</span><span class="p">:</span><span class="w"> </span><span class="l">gpustack--nvidia-h200-sxm-linux-amd64</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">acceleratorType</span><span class="p">:</span><span class="w"> </span><span class="l">gpustack--nvidia-h200-sxm-linux-amd64</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">extraArgs</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">        </span>- --<span class="l">elastic-ep-max-dp-size</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">        </span>- <span class="s2">&#34;4&#34;</span></span></span></code></pre></div>

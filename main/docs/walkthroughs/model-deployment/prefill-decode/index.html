@@ -1534,7 +1534,7 @@ See <a href="/gpustack-operator/main/docs/modules/model-deployment/prefill-decod
           <td>the artifact cached onto the H100 node before serving</td>
       </tr>
       <tr>
-          <td><code>InstanceType</code></td>
+          <td><code>AcceleratorType</code></td>
           <td>cluster</td>
           <td>operator</td>
           <td>the H100 accelerator group each role requests</td>
@@ -1602,8 +1602,7 @@ Create <code>ModelArtifact</code> <code>qwen3-32b</code> from <code>Qwen/Qwen3-3
 <code>9216db5781bf21249d130ec9da846c4624c16137</code>, then prefetch it onto the H100 node.
 Use that artifact and namespace throughout the procedure instead of its DeepSeek example.</p>
 <p>The captured run used the custom <code>bench-gpu</code> <code>InstanceType</code> for the same H100 accelerator group.
-This reusable manifest uses the discovered H100 <code>InstanceType</code> name. Replace the two <em><code>instanceType</code></em>
-values with <code>bench-gpu</code> to reproduce the captured configuration exactly.</p>
+This reusable manifest uses the discovered H100 <code>AcceleratorType</code> name.</p>
 <p>The deployment requests one <em>Prefill</em> replica and two <em>Decode</em> replicas, each with two GPUs. All
 three engine <code>Pod</code>s and the Router ran on <code>gpu-node-0</code>.</p>
 <p>Save the following manifest as <code>pd-deployment.yaml</code>:</p>
@@ -1629,7 +1628,7 @@ three engine <code>Pod</code>s and the Router ran on <code>gpu-node-0</code>.</p
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">Prefill</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">replicas</span><span class="p">:</span><span class="w"> </span><span class="m">1</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">size</span><span class="p">:</span><span class="w"> </span><span class="m">1</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">instanceType</span><span class="p">:</span><span class="w"> </span><span class="l">gpustack--nvidia-h100-80gb-hbm3-linux-amd64</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">acceleratorType</span><span class="p">:</span><span class="w"> </span><span class="l">gpustack--nvidia-h100-80gb-hbm3-linux-amd64</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">image</span><span class="p">:</span><span class="w"> </span><span class="l">gpustack/runner:cuda13.0-vllm0.30.0</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">imagePullPolicy</span><span class="p">:</span><span class="w"> </span><span class="l">IfNotPresent</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">resources</span><span class="p">:</span><span class="w">
@@ -1648,7 +1647,7 @@ three engine <code>Pod</code>s and the Router ran on <code>gpu-node-0</code>.</p
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">Decode</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">replicas</span><span class="p">:</span><span class="w"> </span><span class="m">2</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">size</span><span class="p">:</span><span class="w"> </span><span class="m">1</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">instanceType</span><span class="p">:</span><span class="w"> </span><span class="l">gpustack--nvidia-h100-80gb-hbm3-linux-amd64</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">acceleratorType</span><span class="p">:</span><span class="w"> </span><span class="l">gpustack--nvidia-h100-80gb-hbm3-linux-amd64</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">image</span><span class="p">:</span><span class="w"> </span><span class="l">gpustack/runner:cuda13.0-vllm0.30.0</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">imagePullPolicy</span><span class="p">:</span><span class="w"> </span><span class="l">IfNotPresent</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">resources</span><span class="p">:</span><span class="w">
@@ -1750,8 +1749,8 @@ between the engines, and the Router returns generated tokens.
 <em><code>status.endpoint</code></em> remains empty until the Router <code>Pod</code> passes its readiness check.</p>
 <h2 id="step-4-inspect-joint-admission">Step 4: Inspect joint admission</h2>
 <p>The operator manages Kueue workloads across all declared roles simultaneously. The captured workloads were
-all admitted into the captured custom <code>bench-gpu</code> queue. The reusable discovered <code>InstanceType</code>
-uses its own generated queue:</p>
+all admitted into the captured custom <code>bench-gpu</code> queue. The reusable discovered <code>AcceleratorType</code>
+admits into the shared canonical pool queue:</p>
 <div class="code-block">
   <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">kubectl -n gpustack-bench get workloads</span></span></code></pre></div>

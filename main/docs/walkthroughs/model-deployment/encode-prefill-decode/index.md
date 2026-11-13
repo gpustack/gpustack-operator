@@ -42,7 +42,7 @@ See [Encode, Prefill and Decode Benchmark](/gpustack-operator/main/docs/modules/
 |---|---|---|---|
 | `ModelArtifact` | namespace | user | the Qwen2.5-VL-7B-Instruct weights the deployment serves |
 | `ModelPrefetch` | namespace | user | the artifact cached onto the H100 node before serving |
-| `InstanceType` | cluster | operator | the H100 accelerator group each role requests |
+| `AcceleratorType` | cluster | operator | the H100 accelerator group each role requests |
 | `ModelDeployment` | namespace | user | one *Encode*, *Prefill* and *Decode* replica each behind a router |
 | Router `Deployment` and `Service` | namespace | operator | the one HTTP endpoint requests are sent to |
 
@@ -64,11 +64,10 @@ Create `ModelArtifact` `qwen2-5-vl-7b-instruct` for `Qwen/Qwen2.5-VL-7B-Instruct
 and prefetch it onto the H100 node using the [model prefetch walkthrough](/gpustack-operator/main/docs/walkthroughs/model-delivery/prefetch/index.md#step-1-create-artifact-and-prefetch)
 (substituting `qwen2-5-vl-7b-instruct` and `gpustack-bench` for its DeepSeek example).
 
-Save the following manifest as `epd-deployment.yaml`. It uses the discovered H100 `InstanceType`
+Save the following manifest as `epd-deployment.yaml`. It uses the discovered H100 `AcceleratorType`
 name `gpustack--nvidia-h100-80gb-hbm3-linux-amd64`.
 
 The recorded run used its custom `bench-gpu` `InstanceType`, configured for the same accelerator group.
-Replace all three `instanceType` values with `bench-gpu` to reproduce that configuration exactly.
 
 One *Encode*, one *Prefill* and one *Decode* replica each request one GPU. The `artifactRef` points to
 the existing `ModelArtifact`; *`spec.model.name`* exposes it to vLLM as `/models`. The *`spec.router`*
@@ -95,7 +94,7 @@ spec:
       kind: Encode
       replicas: 1
       size: 1
-      instanceType: gpustack--nvidia-h100-80gb-hbm3-linux-amd64
+      acceleratorType: gpustack--nvidia-h100-80gb-hbm3-linux-amd64
       image: gpustack/runner:cuda13.0-vllm0.30.0
       imagePullPolicy: IfNotPresent
       resources:
@@ -109,7 +108,7 @@ spec:
       kind: Prefill
       replicas: 1
       size: 1
-      instanceType: gpustack--nvidia-h100-80gb-hbm3-linux-amd64
+      acceleratorType: gpustack--nvidia-h100-80gb-hbm3-linux-amd64
       image: gpustack/runner:cuda13.0-vllm0.30.0
       imagePullPolicy: IfNotPresent
       resources:
@@ -125,7 +124,7 @@ spec:
       kind: Decode
       replicas: 1
       size: 1
-      instanceType: gpustack--nvidia-h100-80gb-hbm3-linux-amd64
+      acceleratorType: gpustack--nvidia-h100-80gb-hbm3-linux-amd64
       image: gpustack/runner:cuda13.0-vllm0.30.0
       imagePullPolicy: IfNotPresent
       resources:
