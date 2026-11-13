@@ -1,6 +1,12 @@
 {
-  "latest": "v0.11.0",
+  "latest": "v0.11.1",
   "versions": [
+    {
+      "name": "v0.11.1",
+      "path": "v0.11.1/",
+      "commit": "7e33372fc3660f56c1d37293cb4d736d5ab8939d",
+      "kind": "stable"
+    },
     {
       "name": "v0.11.0",
       "path": "v0.11.0/",
@@ -55,6 +61,12 @@
       "name": "v0.11.0",
       "path": "v0.11.0/",
       "commit": "71cc4d7292144f1ac46ec916e43da8e452555090",
+      "kind": "stable"
+    },
+    {
+      "name": "v0.11.1",
+      "path": "v0.11.1/",
+      "commit": "7e33372fc3660f56c1d37293cb4d736d5ab8939d",
       "kind": "stable"
     },
     {

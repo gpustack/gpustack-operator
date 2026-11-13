@@ -1,0 +1,263 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 780" role="img" aria-labelledby="title desc">
+  <title id="title">Model Prefetch Workflow</title>
+  <desc id="desc">After configuring ModelPrefetch, if a peer node already has the model, it syncs directly across all selected nodes inside the cluster; if no peer node has the model yet, it downloads from the external model hub and syncs to the selected nodes.</desc>
+  <defs>
+    <style>
+      :root {
+        --bg: #f8fafc;
+        --canvas-stroke: #e2e8f0;
+        --card: #ffffff;
+        --card-stroke: #cbd5e1;
+        --panel-green: #f0fdf4;
+        --panel-green-stroke: #10b981;
+        --panel-blue: #eff6ff;
+        --panel-blue-stroke: #3b82f6;
+        --ink: #0f172a;
+        --muted: #475569;
+        --faint: #64748b;
+        --grid: #eef2f7;
+        --blue: #2563eb;
+        --teal: #0891b2;
+        --emerald: #059669;
+        --purple: #7c3aed;
+        --pill-green: #dcfce7;
+        --pill-blue: #dbeafe;
+        --track: #e2e8f0;
+      }
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --bg: #0b1220;
+          --canvas-stroke: #1e293b;
+          --card: #111827;
+          --card-stroke: #334155;
+          --panel-green: #071f18;
+          --panel-green-stroke: #34d399;
+          --panel-blue: #0c192e;
+          --panel-blue-stroke: #60a5fa;
+          --ink: #f8fafc;
+          --muted: #cbd5e1;
+          --faint: #94a3b8;
+          --grid: #131c2e;
+          --blue: #60a5fa;
+          --teal: #22d3ee;
+          --emerald: #34d399;
+          --purple: #a78bfa;
+          --pill-green: #064e3b;
+          --pill-blue: #1e3a8a;
+          --track: #1e293b;
+        }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        .flow-green, .flow-blue, .anim { animation: none !important; }
+      }
+      text {
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, Roboto, sans-serif;
+        fill: var(--ink);
+      }
+      .kicker { font-size: 11px; font-weight: 800; letter-spacing: 0.14em; fill: var(--emerald); }
+      .h1 { font-size: 26px; font-weight: 800; letter-spacing: -0.02em; }
+      .sub { font-size: 14px; font-weight: 500; fill: var(--muted); }
+      .sec { font-size: 11px; font-weight: 800; letter-spacing: 0.12em; fill: var(--faint); }
+      .ct { font-size: 15.5px; font-weight: 700; }
+      .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 11.5px; font-weight: 700; fill: var(--muted); }
+      .detail { font-size: 12.5px; font-weight: 500; fill: var(--muted); }
+      .small { font-size: 11.5px; font-weight: 600; fill: var(--faint); }
+      .badge-green { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 10.5px; font-weight: 800; fill: var(--emerald); }
+      .badge-blue { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 10.5px; font-weight: 800; fill: var(--blue); }
+      .pill { font-size: 13px; font-weight: 700; }
+      .canvas { fill: var(--bg); stroke: var(--canvas-stroke); stroke-width: 1.25; }
+      .box { fill: var(--card); stroke: var(--card-stroke); stroke-width: 1.5; }
+      .case-green { fill: var(--panel-green); stroke: var(--panel-green-stroke); stroke-width: 2; }
+      .case-blue { fill: var(--panel-blue); stroke: var(--panel-blue-stroke); stroke-width: 2; }
+      .track { fill: var(--track); }
+      .guide { fill: none; stroke: var(--card-stroke); stroke-width: 1.5; stroke-dasharray: 4 5; }
+      .flow-green {
+        fill: none;
+        stroke: var(--emerald);
+        stroke-width: 2.5;
+        stroke-linecap: round;
+        stroke-dasharray: 8 10;
+        animation: dash 1.5s linear infinite;
+      }
+      .flow-blue {
+        fill: none;
+        stroke: var(--blue);
+        stroke-width: 2.5;
+        stroke-linecap: round;
+        stroke-dasharray: 8 10;
+        animation: dash 1.5s linear infinite;
+      }
+      @keyframes dash { to { stroke-dashoffset: -36; } }
+    </style>
+    <pattern id="grid" width="32" height="32" patternUnits="userSpaceOnUse">
+      <path d="M 32 0 L 0 0 0 32" fill="none" stroke="var(--grid)" stroke-width="1"/>
+    </pattern>
+    <marker id="arr-green" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+      <path d="M 0 1 L 9 5 L 0 9 z" fill="var(--emerald)"/>
+    </marker>
+    <marker id="arr-blue" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+      <path d="M 0 1 L 9 5 L 0 9 z" fill="var(--blue)"/>
+    </marker>
+  </defs>
+
+  <rect class="canvas" x="8" y="8" width="1184" height="764" rx="20"/>
+  <rect x="9" y="9" width="1182" height="762" rx="19" fill="url(#grid)" opacity="0.65"/>
+
+  <!-- Header -->
+  <text class="kicker" x="32" y="42">GPUSTACK OPERATOR / MODEL DELIVERY</text>
+  <text class="h1" x="32" y="74">Model Prefetch</text>
+  <text class="sub" x="32" y="98">Sync from an existing cluster peer to all selected nodes, or download from the external hub when no peer has the model</text>
+  <rect x="1132" y="44" width="36" height="36" rx="10" fill="var(--blue)"/>
+  <text x="1150" y="68" text-anchor="middle" style="font-size:17px;font-weight:800;fill:#fff">G</text>
+
+  <!-- Top Left: ModelPrefetch Declaration -->
+  <rect class="box" x="64" y="128" width="496" height="92" rx="14"/>
+  <rect x="64" y="140" width="4" height="68" rx="2" fill="var(--emerald)"/>
+  <text class="ct" x="86" y="160">ModelPrefetch configured</text>
+  <rect x="432" y="142" width="110" height="22" rx="11" fill="var(--pill-green)"/>
+  <text class="badge-green" x="487" y="157" text-anchor="middle">TARGET NODES</text>
+  <text class="detail" x="86" y="184">Warms selected nodes (node-01, node-02, node-03) before serving Pods run</text>
+  <text class="mono" x="86" y="204">artifact: qwen3-32b  ·  selected nodes: 3</text>
+
+  <!-- Top Right: External Model Hub (used only by Case 2) -->
+  <rect class="box" x="640" y="128" width="496" height="92" rx="14"/>
+  <rect x="640" y="140" width="4" height="68" rx="2" fill="var(--blue)"/>
+  <text class="ct" x="662" y="160">External model hub</text>
+  <rect x="1000" y="142" width="118" height="22" rx="11" fill="var(--pill-blue)"/>
+  <text class="badge-blue" x="1059" y="157" text-anchor="middle">EXTERNAL ORIGIN</text>
+  <text class="detail" x="662" y="184">Hugging Face · ModelScope · S3 · OCI registry</text>
+  <text class="small" x="662" y="204">Queried only when no peer in the cluster has the model cached</text>
+
+  <!-- Connectors down to the two cases -->
+  <path class="guide" d="M 312 220 L 312 268"/>
+  <path class="flow-green" d="M 312 220 L 312 264" marker-end="url(#arr-green)"/>
+
+  <path class="guide" d="M 888 220 L 888 268"/>
+  <path class="flow-blue" d="M 888 220 L 888 264" marker-end="url(#arr-blue)"/>
+  <rect class="box" x="802" y="232" width="172" height="22" rx="11"/>
+  <text class="mono" x="888" y="247" text-anchor="middle" style="fill:var(--blue)">External download</text>
+
+  <!-- ======================================================================= -->
+  <!-- LEFT PANEL: CASE 1 - Peer already has model -> In-cluster sync to all   -->
+  <!-- ======================================================================= -->
+  <rect class="case-green" x="32" y="268" width="552" height="412" rx="18"/>
+  <rect x="52" y="286" width="26" height="26" rx="7" fill="var(--emerald)"/>
+  <text x="65" y="304" text-anchor="middle" style="font-size:13px;font-weight:800;fill:#fff">1</text>
+  <text class="ct" x="88" y="304">Peer already has model  →  In-cluster sync</text>
+  <text class="small" x="88" y="324">No external download; existing peer syncs to all selected nodes</text>
+
+  <!-- Left Seed Peer: node-01 -->
+  <rect class="box" x="56" y="344" width="504" height="92" rx="12"/>
+  <rect x="56" y="354" width="4" height="72" rx="2" fill="var(--emerald)"/>
+  <text class="ct" x="76" y="372">peer node-01</text>
+  <rect x="432" y="356" width="112" height="20" rx="10" fill="var(--pill-green)"/>
+  <text class="badge-green" x="488" y="370" text-anchor="middle">HAS MODEL (100%)</text>
+  <text class="small" x="76" y="394">Local model cache already present</text>
+  <rect class="track" x="76" y="404" width="464" height="12" rx="6"/>
+  <rect x="76" y="404" width="464" height="12" rx="6" fill="var(--emerald)"/>
+
+  <!-- Fan-out arrows from node-01 to selected node-02 and node-03 -->
+  <path class="guide" d="M 180 436 L 180 492"/>
+  <path class="flow-green" d="M 180 436 L 180 488" marker-end="url(#arr-green)"/>
+  <path class="guide" d="M 436 436 L 436 492"/>
+  <path class="flow-green" d="M 436 436 L 436 488" marker-end="url(#arr-green)"/>
+  <rect class="box" x="234" y="452" width="148" height="22" rx="11"/>
+  <text class="mono" x="308" y="467" text-anchor="middle" style="fill:var(--emerald)">Cluster TCP sync</text>
+
+  <!-- Selected Node 02 (Left) -->
+  <rect class="box" x="56" y="492" width="242" height="164" rx="12"/>
+  <rect x="56" y="504" width="4" height="140" rx="2" fill="var(--teal)"/>
+  <text class="ct" x="74" y="522">selected node-02</text>
+  <text class="badge-green" x="284" y="522" text-anchor="end">SYNCING</text>
+  <text class="detail" x="74" y="546">Syncs from peer node-01</text>
+  <text class="small" x="74" y="580">Local cache storage</text>
+  <rect class="track" x="74" y="590" width="206" height="12" rx="6"/>
+  <rect x="74" y="590" width="160" height="12" rx="6" fill="var(--emerald)">
+    <animate class="anim" attributeName="width" values="40;206;206;40" dur="3.2s" repeatCount="indefinite"/>
+  </rect>
+  <text class="mono" x="74" y="632">source: peer node-01</text>
+
+  <!-- Selected Node 03 (Left) -->
+  <rect class="box" x="318" y="492" width="242" height="164" rx="12"/>
+  <rect x="318" y="504" width="4" height="140" rx="2" fill="var(--teal)"/>
+  <text class="ct" x="336" y="522">selected node-03</text>
+  <text class="badge-green" x="546" y="522" text-anchor="end">SYNCING</text>
+  <text class="detail" x="336" y="546">Syncs from peer node-01</text>
+  <text class="small" x="336" y="580">Local cache storage</text>
+  <rect class="track" x="336" y="590" width="206" height="12" rx="6"/>
+  <rect x="336" y="590" width="140" height="12" rx="6" fill="var(--emerald)">
+    <animate class="anim" attributeName="width" values="28;206;206;28" dur="3.6s" repeatCount="indefinite"/>
+  </rect>
+  <text class="mono" x="336" y="632">source: peer node-01</text>
+
+  <!-- ======================================================================= -->
+  <!-- RIGHT PANEL: CASE 2 - No peer has model -> External download + sync     -->
+  <!-- ======================================================================= -->
+  <rect class="case-blue" x="616" y="268" width="552" height="412" rx="18"/>
+  <rect x="636" y="286" width="26" height="26" rx="7" fill="var(--blue)"/>
+  <text x="649" y="304" text-anchor="middle" style="font-size:13px;font-weight:800;fill:#fff">2</text>
+  <text class="ct" x="672" y="304">No peer has model  →  Download from external</text>
+  <text class="small" x="672" y="324">Downloads from External model hub, then syncs to selected nodes</text>
+
+  <!-- Right Node 01: Downloading from external hub -->
+  <rect class="box" x="640" y="344" width="504" height="92" rx="12"/>
+  <rect x="640" y="354" width="4" height="72" rx="2" fill="var(--blue)"/>
+  <text class="ct" x="660" y="372">selected node-01</text>
+  <rect x="1000" y="356" width="128" height="20" rx="10" fill="var(--pill-blue)"/>
+  <text class="badge-blue" x="1064" y="370" text-anchor="middle">HUB DOWNLOADING</text>
+  <text class="small" x="660" y="394">Pulling weights from External model hub</text>
+  <rect class="track" x="660" y="404" width="464" height="12" rx="6"/>
+  <rect x="660" y="404" width="320" height="12" rx="6" fill="var(--blue)">
+    <animate class="anim" attributeName="width" values="80;464;464;80" dur="3.4s" repeatCount="indefinite"/>
+  </rect>
+
+  <!-- Fan-out arrows from node-01 to selected node-02 and node-03 -->
+  <path class="guide" d="M 764 436 L 764 492"/>
+  <path class="flow-green" d="M 764 436 L 764 488" marker-end="url(#arr-green)"/>
+  <path class="guide" d="M 1020 436 L 1020 492"/>
+  <path class="flow-green" d="M 1020 436 L 1020 488" marker-end="url(#arr-green)"/>
+  <rect class="box" x="818" y="452" width="148" height="22" rx="11"/>
+  <text class="mono" x="892" y="467" text-anchor="middle" style="fill:var(--emerald)">Cluster TCP sync</text>
+
+  <!-- Selected Node 02 (Right) -->
+  <rect class="box" x="640" y="492" width="242" height="164" rx="12"/>
+  <rect x="640" y="504" width="4" height="140" rx="2" fill="var(--purple)"/>
+  <text class="ct" x="658" y="522">selected node-02</text>
+  <text class="badge-blue" x="868" y="522" text-anchor="end">WARMING</text>
+  <text class="detail" x="658" y="546">Syncs chunks from node-01</text>
+  <text class="small" x="658" y="580">Local cache storage</text>
+  <rect class="track" x="658" y="590" width="206" height="12" rx="6"/>
+  <rect x="658" y="590" width="130" height="12" rx="6" fill="var(--purple)">
+    <animate class="anim" attributeName="width" values="24;190;206;24" dur="3.6s" repeatCount="indefinite"/>
+  </rect>
+  <text class="mono" x="658" y="632">source: node-01 (TCP)</text>
+
+  <!-- Selected Node 03 (Right) -->
+  <rect class="box" x="902" y="492" width="242" height="164" rx="12"/>
+  <rect x="902" y="504" width="4" height="140" rx="2" fill="var(--purple)"/>
+  <text class="ct" x="920" y="522">selected node-03</text>
+  <text class="badge-blue" x="1130" y="522" text-anchor="end">WARMING</text>
+  <text class="detail" x="920" y="546">Syncs chunks from node-01</text>
+  <text class="small" x="920" y="580">Local cache storage</text>
+  <rect class="track" x="920" y="590" width="206" height="12" rx="6"/>
+  <rect x="920" y="590" width="110" height="12" rx="6" fill="var(--purple)">
+    <animate class="anim" attributeName="width" values="20;180;206;20" dur="3.9s" repeatCount="indefinite"/>
+  </rect>
+  <text class="mono" x="920" y="632">source: node-01 (TCP)</text>
+
+  <!-- Bottom Takeaway Pills -->
+  <rect class="box" x="32" y="704" width="368" height="42" rx="10"/>
+  <circle cx="52" cy="725.5" r="5.5" fill="none" stroke="var(--emerald)" stroke-width="1.6"/>
+  <circle cx="52" cy="725.5" r="2.5" fill="var(--emerald)"/>
+  <text class="pill" x="67" y="730">Peer cached → in-cluster sync to all</text>
+
+  <rect class="box" x="416" y="704" width="368" height="42" rx="10"/>
+  <circle cx="436" cy="725.5" r="5.5" fill="none" stroke="var(--blue)" stroke-width="1.6"/>
+  <circle cx="436" cy="725.5" r="2.5" fill="var(--blue)"/>
+  <text class="pill" x="451" y="730">No peer cached → download from external</text>
+
+  <rect class="box" x="800" y="704" width="368" height="42" rx="10"/>
+  <circle cx="820" cy="725.5" r="5.5" fill="none" stroke="var(--emerald)" stroke-width="1.6"/>
+  <circle cx="820" cy="725.5" r="2.5" fill="var(--emerald)"/>
+  <text class="pill" x="835" y="730">Dynamic local cache storage bars</text>
+</svg>

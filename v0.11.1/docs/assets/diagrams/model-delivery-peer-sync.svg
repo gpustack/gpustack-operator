@@ -1,0 +1,217 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 760" role="img" aria-labelledby="title desc">
+  <title id="title">Node-To-Node Peer Sync</title>
+  <desc id="desc">One node downloads model weights from the upstream model hub, and nodes inside the Kubernetes cluster transfer cached weights to each other over TCP with animated storage bars.</desc>
+  <defs>
+    <style>
+      :root {
+        --bg: #f8fafc;
+        --canvas-stroke: #e2e8f0;
+        --card: #ffffff;
+        --card-stroke: #cbd5e1;
+        --cluster-fill: #f0fdf4;
+        --cluster-stroke: #10b981;
+        --ink: #0f172a;
+        --muted: #475569;
+        --faint: #64748b;
+        --grid: #eef2f7;
+        --blue: #2563eb;
+        --teal: #0891b2;
+        --emerald: #059669;
+        --purple: #7c3aed;
+        --pill-bg: #ecfdf5;
+        --track: #e2e8f0;
+      }
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --bg: #0b1220;
+          --canvas-stroke: #1e293b;
+          --card: #111827;
+          --card-stroke: #334155;
+          --cluster-fill: #071f18;
+          --cluster-stroke: #34d399;
+          --ink: #f8fafc;
+          --muted: #cbd5e1;
+          --faint: #94a3b8;
+          --grid: #131c2e;
+          --blue: #60a5fa;
+          --teal: #22d3ee;
+          --emerald: #34d399;
+          --purple: #a78bfa;
+          --pill-bg: #064e3b;
+          --track: #1e293b;
+        }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        .flow-line, .anim { animation: none !important; }
+      }
+      text {
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, Roboto, sans-serif;
+        fill: var(--ink);
+      }
+      .kicker { font-size: 11px; font-weight: 800; letter-spacing: 0.14em; fill: var(--emerald); }
+      .h1 { font-size: 26px; font-weight: 800; letter-spacing: -0.02em; }
+      .sub { font-size: 14px; font-weight: 500; fill: var(--muted); }
+      .sec { font-size: 11px; font-weight: 800; letter-spacing: 0.12em; fill: var(--faint); }
+      .ct { font-size: 16px; font-weight: 700; }
+      .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; font-weight: 600; fill: var(--muted); }
+      .detail { font-size: 12.5px; font-weight: 500; fill: var(--muted); }
+      .small { font-size: 11.5px; font-weight: 600; fill: var(--faint); }
+      .badge { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 10.5px; font-weight: 800; fill: var(--emerald); }
+      .pill { font-size: 13px; font-weight: 700; }
+      .canvas { fill: var(--bg); stroke: var(--canvas-stroke); stroke-width: 1.25; }
+      .box { fill: var(--card); stroke: var(--card-stroke); stroke-width: 1.5; }
+      .cluster { fill: var(--cluster-fill); stroke: var(--cluster-stroke); stroke-width: 2; }
+      .track { fill: var(--track); }
+      .guide { fill: none; stroke: var(--card-stroke); stroke-width: 1.5; stroke-dasharray: 4 5; }
+      .flow-line {
+        fill: none;
+        stroke: var(--emerald);
+        stroke-width: 2.5;
+        stroke-linecap: round;
+        stroke-dasharray: 8 10;
+        animation: dash 1.5s linear infinite;
+      }
+      .flow-blue {
+        fill: none;
+        stroke: var(--blue);
+        stroke-width: 2.5;
+        stroke-linecap: round;
+        stroke-dasharray: 8 10;
+        animation: dash 1.5s linear infinite;
+      }
+      @keyframes dash { to { stroke-dashoffset: -36; } }
+    </style>
+    <pattern id="grid" width="32" height="32" patternUnits="userSpaceOnUse">
+      <path d="M 32 0 L 0 0 0 32" fill="none" stroke="var(--grid)" stroke-width="1"/>
+    </pattern>
+    <marker id="arr-blue" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+      <path d="M 0 1 L 9 5 L 0 9 z" fill="var(--blue)"/>
+    </marker>
+    <marker id="arr-emerald" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+      <path d="M 0 1 L 9 5 L 0 9 z" fill="var(--emerald)"/>
+    </marker>
+  </defs>
+
+  <rect class="canvas" x="8" y="8" width="1184" height="744" rx="20"/>
+  <rect x="9" y="9" width="1182" height="742" rx="19" fill="url(#grid)" opacity="0.65"/>
+
+  <!-- Header -->
+  <text class="kicker" x="32" y="42">GPUSTACK OPERATOR / MODEL DELIVERY</text>
+  <text class="h1" x="32" y="74">Node-To-Node Peer Sync</text>
+  <text class="sub" x="32" y="98">One node downloads model weights from the upstream hub, then nodes inside the cluster sync over TCP</text>
+  <rect x="1132" y="44" width="36" height="36" rx="10" fill="var(--blue)"/>
+  <text x="1150" y="68" text-anchor="middle" style="font-size:17px;font-weight:800;fill:#fff">G</text>
+
+  <!-- Top: Upstream Model Hub -->
+  <text class="sec" x="400" y="136">EXTERNAL ORIGIN</text>
+  <rect class="box" x="400" y="148" width="400" height="108" rx="14"/>
+  <rect x="400" y="160" width="4" height="84" rx="2" fill="var(--blue)"/>
+  <g fill="none" stroke="var(--blue)" stroke-width="1.6">
+    <rect x="420" y="166" width="24" height="20" rx="4"/>
+    <path d="M424 180h16 M426 172h8"/>
+  </g>
+  <text class="ct" x="454" y="182">Upstream model hub</text>
+  <rect x="692" y="166" width="92" height="22" rx="11" fill="var(--pill-bg)"/>
+  <text class="badge" x="738" y="181" text-anchor="middle">1× HUB PULL</text>
+  <text class="detail" x="420" y="208">Hugging Face · ModelScope · S3 · OCI registry</text>
+  <text class="small" x="420" y="232">Delivers weights once to node-01 instead of every node</text>
+
+  <!-- Vertical download flow from Upstream Hub into node-01 -->
+  <path class="guide" d="M 600 256 L 600 296 L 216 296 L 216 392"/>
+  <path class="flow-blue" d="M 600 256 L 600 296 L 216 296 L 216 392" marker-end="url(#arr-blue)"/>
+  <rect class="box" x="318" y="282" width="196" height="26" rx="13"/>
+  <text class="mono" x="416" y="299" text-anchor="middle" style="fill:var(--blue)">HTTPS download (1×)</text>
+
+  <!-- Bottom: Kubernetes Cluster & GPUStack Operator Peer Sync -->
+  <rect class="cluster" x="32" y="332" width="1136" height="328" rx="18"/>
+  <rect x="52" y="348" width="28" height="28" rx="8" fill="var(--emerald)"/>
+  <text x="66" y="367" text-anchor="middle" style="font-size:14px;font-weight:800;fill:#fff">G</text>
+  <text class="ct" x="92" y="367">KUBERNETES CLUSTER  ·  GPUSTACK OPERATOR PEER TCP SYNC</text>
+  <text class="small" x="1144" y="366" text-anchor="end">TCP PORT 32445</text>
+
+  <!-- Node 01 (Seed Node) -->
+  <rect class="box" x="56" y="394" width="320" height="236" rx="14"/>
+  <rect x="56" y="408" width="4" height="208" rx="2" fill="var(--emerald)"/>
+  <text class="ct" x="76" y="428">node-01</text>
+  <rect x="256" y="410" width="104" height="22" rx="11" fill="var(--pill-bg)"/>
+  <text class="badge" x="308" y="425" text-anchor="middle">SEED CACHE</text>
+  <text class="detail" x="76" y="454">Downloaded from Upstream model hub</text>
+  <text class="detail" x="76" y="474">Serves cached files to cluster peers</text>
+
+  <text class="small" x="76" y="514">Local NVMe model cache (100% ready)</text>
+  <rect class="track" x="76" y="526" width="280" height="14" rx="7"/>
+  <rect x="76" y="526" width="280" height="14" rx="7" fill="var(--emerald)"/>
+
+  <text class="mono" x="76" y="572">source: Upstream Hub</text>
+  <text class="small" x="76" y="596">Publishes manifest &amp; serves HTTP byte ranges</text>
+
+  <!-- TCP flow: node-01 -> node-02 -->
+  <path class="guide" d="M 376 512 L 440 512"/>
+  <path class="flow-line" d="M 376 512 L 436 512" marker-end="url(#arr-emerald)"/>
+  <rect class="box" x="379" y="474" width="58" height="24" rx="8"/>
+  <text class="mono" x="408" y="490" text-anchor="middle" style="fill:var(--emerald)">TCP</text>
+
+  <!-- Node 02 (Peer Node) -->
+  <rect class="box" x="440" y="394" width="320" height="236" rx="14"/>
+  <rect x="440" y="408" width="4" height="208" rx="2" fill="var(--teal)"/>
+  <text class="ct" x="460" y="428">node-02</text>
+  <rect x="644" y="410" width="100" height="22" rx="11" fill="var(--pill-bg)"/>
+  <text class="badge" x="694" y="425" text-anchor="middle">PEER SYNCING</text>
+  <text class="detail" x="460" y="454">Pulls weights from node-01 over TCP</text>
+  <text class="detail" x="460" y="474">Also serves verified files to node-03</text>
+
+  <text class="small" x="460" y="514">Local NVMe model cache (syncing over TCP)</text>
+  <rect class="track" x="460" y="526" width="280" height="14" rx="7"/>
+  <rect x="460" y="526" width="210" height="14" rx="7" fill="var(--teal)">
+    <animate class="anim" attributeName="width" values="64;280;280;64" dur="3.4s" repeatCount="indefinite"/>
+  </rect>
+
+  <text class="mono" x="460" y="572">source: node-01:32445</text>
+  <text class="small" x="460" y="596">No external hub bandwidth consumed</text>
+
+  <!-- TCP flow: node-02 -> node-03 -->
+  <path class="guide" d="M 760 512 L 824 512"/>
+  <path class="flow-line" d="M 760 512 L 820 512" marker-end="url(#arr-emerald)"/>
+  <rect class="box" x="763" y="474" width="58" height="24" rx="8"/>
+  <text class="mono" x="792" y="490" text-anchor="middle" style="fill:var(--emerald)">TCP</text>
+
+  <!-- Direct TCP arc from node-01 -> node-03 -->
+  <path class="guide" d="M 216 630 Q 600 662 984 630"/>
+  <path class="flow-line" d="M 216 630 Q 600 662 980 630" marker-end="url(#arr-emerald)"/>
+  <rect class="box" x="526" y="632" width="148" height="22" rx="11"/>
+  <text class="mono" x="600" y="647" text-anchor="middle" style="fill:var(--emerald)">Peer TCP :32445</text>
+
+  <!-- Node 03 (Peer Node) -->
+  <rect class="box" x="824" y="394" width="320" height="236" rx="14"/>
+  <rect x="824" y="408" width="4" height="208" rx="2" fill="var(--purple)"/>
+  <text class="ct" x="844" y="428">node-03</text>
+  <rect x="1028" y="410" width="100" height="22" rx="11" fill="var(--pill-bg)"/>
+  <text class="badge" x="1078" y="425" text-anchor="middle">PEER SYNCING</text>
+  <text class="detail" x="844" y="454">Pulls weights from cluster peers over TCP</text>
+  <text class="detail" x="844" y="474">Works even if upstream hub is offline</text>
+
+  <text class="small" x="844" y="514">Local NVMe model cache (syncing over TCP)</text>
+  <rect class="track" x="844" y="526" width="280" height="14" rx="7"/>
+  <rect x="844" y="526" width="160" height="14" rx="7" fill="var(--purple)">
+    <animate class="anim" attributeName="width" values="36;260;280;36" dur="3.8s" repeatCount="indefinite"/>
+  </rect>
+
+  <text class="mono" x="844" y="572">source: node-01 / node-02 (:32445)</text>
+  <text class="small" x="844" y="596">64 MiB checkpointed local storage fill</text>
+
+  <!-- Bottom Takeaway Pills -->
+  <rect class="box" x="32" y="684" width="368" height="42" rx="10"/>
+  <circle cx="52" cy="705.5" r="5.5" fill="none" stroke="var(--emerald)" stroke-width="1.6"/>
+  <circle cx="52" cy="705.5" r="2.5" fill="var(--emerald)"/>
+  <text class="pill" x="67" y="710">1× download from Upstream hub</text>
+
+  <rect class="box" x="416" y="684" width="368" height="42" rx="10"/>
+  <circle cx="436" cy="705.5" r="5.5" fill="none" stroke="var(--emerald)" stroke-width="1.6"/>
+  <circle cx="436" cy="705.5" r="2.5" fill="var(--emerald)"/>
+  <text class="pill" x="451" y="710">In-cluster node-to-node TCP (:32445)</text>
+
+  <rect class="box" x="800" y="684" width="368" height="42" rx="10"/>
+  <circle cx="820" cy="705.5" r="5.5" fill="none" stroke="var(--emerald)" stroke-width="1.6"/>
+  <circle cx="820" cy="705.5" r="2.5" fill="var(--emerald)"/>
+  <text class="pill" x="835" y="710">Dynamic peer cache fill</text>
+</svg>
