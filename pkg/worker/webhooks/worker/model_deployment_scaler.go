@@ -803,9 +803,12 @@ func validateModelDeploymentScalerCapacityPrior(s *workercore.ModelDeploymentSca
 				fmt.Sprintf("a ConfigMap name must be a valid DNS subdomain: %s", strings.Join(why, "; "))))
 		}
 
-		if strings.TrimSpace(cp.CatalogRef.Key) == "" {
+		if cp.CatalogRef.Key == "" {
 			errs = append(errs, field.Required(refPath.Child("key"),
 				"the catalog reference must name a ConfigMap data key"))
+		} else if strings.TrimSpace(cp.CatalogRef.Key) == "" {
+			errs = append(errs, field.Invalid(refPath.Child("key"), cp.CatalogRef.Key,
+				"the catalog reference must name a non-blank ConfigMap data key"))
 		} else if why := validation.IsConfigMapKey(cp.CatalogRef.Key); len(why) > 0 {
 			errs = append(errs, field.Invalid(refPath.Child("key"), cp.CatalogRef.Key,
 				fmt.Sprintf("a ConfigMap key must be a valid data key: %s", strings.Join(why, "; "))))

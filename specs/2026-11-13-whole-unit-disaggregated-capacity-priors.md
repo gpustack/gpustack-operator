@@ -54,7 +54,7 @@ manifests with logical model identifiers.
   coupled roles atomically by whole units, and keep serial multi-replica retirement and abort
   recovery atomic at the decision level.
 - Document how `capacityPrior` selects the embedded catalog versus a `ConfigMap` (including
-  `catalogRef.key` defaulting to `catalog.yaml`) and clarify when `worker.gpustack.ai/precision`,
+  `catalogRef.key` defaulting to `priors.yaml`) and clarify when `worker.gpustack.ai/precision`,
   `worker.gpustack.ai/model-id`, `worker.gpustack.ai/hardware-id`,
   `worker.gpustack.ai/prefill-hardware-id`, and `worker.gpustack.ai/decode-hardware-id` apply.
 - Standardize `spec.model.name` across `ModelDeployment` walkthroughs so reusable manifests and
@@ -244,7 +244,8 @@ do not confuse `spec.model.name` with the container model mount path.
      [README.md](../docs/README.md) to document:
      - `catalogRef` defaulting and validation: omitting `catalogRef` (`capacityPrior: {}` or setting
        only `headroom`) selects the embedded catalog; `catalogRef: {name: my-priors}` defaults `key`
-       to `catalog.yaml`; `catalogRef: {}` fails admission on missing `name`; an explicit whitespace
+       to `priors.yaml` (and falls back to legacy `catalog.yaml` at load time if `priors.yaml` is
+       absent); `catalogRef: {}` fails admission on missing `name`; an explicit whitespace
        `key` fails admission on `key`.
      - Identity and quantization matching: `ModelArtifact` source/revision + `AcceleratorType`
        hardware + `--quantization`; automatic quantization selection when a single profile matches
@@ -404,11 +405,11 @@ parallel before `T4` finalizes the scaling guides and module index.
     - `go test -run 'TestScalerConstraints|TestModelDeploymentScaler' ./pkg/worker/controllers/worker`
   - **Expected:** Exit code `0`; `1P:3D` and `1E:1P:2D` scale `1x -> 2x -> 1x` cleanly under throughput and single-stage latency breaches, and aborting first/middle/last retired ordinals restores the pre-scale-down vector.
 
-- [ ] **T3 · Webhook defaulting and admission coverage for disaggregated `capacityPrior` and `catalogRef`**
+- [x] **T3 · Webhook defaulting and admission coverage for disaggregated `capacityPrior` and `catalogRef`**
   - **Blocked by:** T1
   - **Owns:** `pkg/worker/webhooks/worker/model_deployment_scaler.go`, `pkg/worker/webhooks/worker/model_deployment_scaler_prior_test.go`
   - **Gate:** review
-  - **Deliverables:** Verify and tighten `Default`, `ValidateCreate`, and `ValidateUpdate` for PD and EPD `capacityPrior` scalers (explicit `ttftTargetMilliseconds` and `itlTargetMilliseconds`, pre-target warnings when `ModelDeployment` is absent, `CREATE` rejection versus `UPDATE` warning/repair entry when Tier 2 ratios or `Server` profiles are unresolved, and preservation of manual/single-role behavior); add full defaulting + validation coverage for `catalogRef` omitted, empty `{}`, `{name: x}` (`key` defaulted to `catalog.yaml`), and whitespace `key`.
+  - **Deliverables:** Verify and tighten `Default`, `ValidateCreate`, and `ValidateUpdate` for PD and EPD `capacityPrior` scalers (explicit `ttftTargetMilliseconds` and `itlTargetMilliseconds`, pre-target warnings when `ModelDeployment` is absent, `CREATE` rejection versus `UPDATE` warning/repair entry when Tier 2 ratios or `Server` profiles are unresolved, and preservation of manual/single-role behavior); add full defaulting + validation coverage for `catalogRef` omitted, empty `{}`, `{name: x}` (`key` defaulted to `priors.yaml`), and whitespace `key`.
   - **Verify:**
     - `go test -run 'TestModelDeploymentScalerDefault_CapacityPrior|TestModelDeploymentScalerValidate_CapacityPrior' ./pkg/worker/webhooks/worker`
     - `make lint`

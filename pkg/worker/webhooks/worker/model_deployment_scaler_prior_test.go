@@ -21,6 +21,7 @@ import (
 	workerapi "gpustack.ai/gpustack/api/worker/v1"
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
 	"gpustack.ai/gpustack/pkg/kubeclients/kubernetes/scheme"
+	"gpustack.ai/gpustack/pkg/nodefeature"
 	"gpustack.ai/gpustack/pkg/worker/scaling/priors"
 )
 
@@ -402,6 +403,7 @@ func TestModelDeploymentScalerDefault_CapacityPrior(t *testing.T) {
 		scaler                     *workercore.ModelDeploymentScaler
 		wantErr                    string
 		wantNilCapacityPrior       bool
+		wantNilCatalogRef          bool
 		wantCatalogKey             string
 		wantHeadroom               *resource.Quantity
 		checkTokenThroughputSLOs   bool
@@ -507,6 +509,29 @@ func TestModelDeploymentScalerDefault_CapacityPrior(t *testing.T) {
 			checkPredictiveSLOs: true,
 		},
 		{
+			name: "capacityPrior empty defaults headroom and keeps catalogRef nil",
+			scaler: modelDeploymentScaler(func(s *workercore.ModelDeploymentScaler) {
+				s.Spec.Algorithm.TokenThroughput = &workercore.ModelDeploymentScalerTokenThroughputSpec{}
+				s.Spec.Algorithm.CapacityPrior = &workercore.ModelDeploymentScalerCapacityPriorSpec{}
+			}),
+			wantNilCatalogRef:          true,
+			wantHeadroom:               ptr.To(resource.MustParse("0.75")),
+			checkTokenThroughputSLOs:   true,
+			wantTokenThroughputWindows: true,
+		},
+		{
+			name: "capacityPrior with empty catalogRef defaults key to priors.yaml and headroom to 0.75",
+			scaler: modelDeploymentScaler(func(s *workercore.ModelDeploymentScaler) {
+				s.Spec.Algorithm.TokenThroughput = &workercore.ModelDeploymentScalerTokenThroughputSpec{}
+				s.Spec.Algorithm.CapacityPrior = &workercore.ModelDeploymentScalerCapacityPriorSpec{
+					CatalogRef: &workercore.ModelDeploymentScalerCatalogReference{},
+				}
+			}),
+			wantCatalogKey:           priors.DefaultCatalogConfigMapKey,
+			wantHeadroom:             ptr.To(resource.MustParse("0.75")),
+			checkTokenThroughputSLOs: true,
+		},
+		{
 			name: "catalogRef with explicit whitespace key is preserved by Default so validation can refuse it",
 			scaler: modelDeploymentScaler(func(s *workercore.ModelDeploymentScaler) {
 				s.Spec.Algorithm.CapacityPrior = &workercore.ModelDeploymentScalerCapacityPriorSpec{
@@ -517,6 +542,56 @@ func TestModelDeploymentScalerDefault_CapacityPrior(t *testing.T) {
 				}
 			}),
 			wantCatalogKey: "   ",
+			wantHeadroom:   ptr.To(resource.MustParse("0.75")),
+		},
+		{
+			name: "disaggregated PD TokenThroughput scaler with omitted capacities suppresses default SLOs and defaults catalog",
+			objects: []ctrlcli.Object{modelDeploymentScalerTarget(
+				workercore.ModelDeploymentRole{Name: "prefill", Kind: workercore.ModelDeploymentRoleKindPrefill, Replicas: 1},
+				workercore.ModelDeploymentRole{Name: "decode", Kind: workercore.ModelDeploymentRoleKindDecode, Replicas: 3},
+			)},
+			scaler: modelDeploymentScaler(func(s *workercore.ModelDeploymentScaler) {
+				s.Spec.Roles = []workercore.ModelDeploymentScalerRoleBounds{
+					{Name: "prefill", MinReplicas: 1, MaxReplicas: 4},
+					{Name: "decode", MinReplicas: 3, MaxReplicas: 12},
+				}
+				s.Spec.Ratios = []workercore.ModelDeploymentScalerRoleRatio{
+					{NumeratorRole: "decode", DenominatorRole: "prefill", Min: ptr.To(resource.MustParse("3")), Max: ptr.To(resource.MustParse("3"))},
+				}
+				s.Spec.Algorithm.TokenThroughput = &workercore.ModelDeploymentScalerTokenThroughputSpec{}
+				s.Spec.Algorithm.CapacityPrior = &workercore.ModelDeploymentScalerCapacityPriorSpec{
+					CatalogRef: &workercore.ModelDeploymentScalerCatalogReference{Name: "my-priors"},
+				}
+			}),
+			wantCatalogKey:           priors.DefaultCatalogConfigMapKey,
+			wantHeadroom:             ptr.To(resource.MustParse("0.75")),
+			checkTokenThroughputSLOs: true,
+		},
+		{
+			name: "disaggregated EPD Predictive scaler with omitted capacities suppresses default SLOs and defaults catalog",
+			objects: []ctrlcli.Object{modelDeploymentScalerTarget(
+				workercore.ModelDeploymentRole{Name: "encode", Kind: workercore.ModelDeploymentRoleKindEncode, Replicas: 1},
+				workercore.ModelDeploymentRole{Name: "prefill", Kind: workercore.ModelDeploymentRoleKindPrefill, Replicas: 1},
+				workercore.ModelDeploymentRole{Name: "decode", Kind: workercore.ModelDeploymentRoleKindDecode, Replicas: 2},
+			)},
+			scaler: modelDeploymentScaler(func(s *workercore.ModelDeploymentScaler) {
+				s.Spec.Roles = []workercore.ModelDeploymentScalerRoleBounds{
+					{Name: "encode", MinReplicas: 1, MaxReplicas: 3},
+					{Name: "prefill", MinReplicas: 1, MaxReplicas: 3},
+					{Name: "decode", MinReplicas: 2, MaxReplicas: 6},
+				}
+				s.Spec.Ratios = []workercore.ModelDeploymentScalerRoleRatio{
+					{NumeratorRole: "encode", DenominatorRole: "prefill", Min: ptr.To(resource.MustParse("1")), Max: ptr.To(resource.MustParse("1"))},
+					{NumeratorRole: "decode", DenominatorRole: "prefill", Min: ptr.To(resource.MustParse("2")), Max: ptr.To(resource.MustParse("2"))},
+				}
+				s.Spec.Algorithm.Type = workercore.ModelDeploymentScalerAlgorithmTypePredictive
+				s.Spec.Algorithm.TokenThroughput = nil
+				s.Spec.Algorithm.Predictive = &workercore.ModelDeploymentScalerPredictiveSpec{}
+				s.Spec.Algorithm.CapacityPrior = &workercore.ModelDeploymentScalerCapacityPriorSpec{}
+			}),
+			wantNilCatalogRef:   true,
+			wantHeadroom:        ptr.To(resource.MustParse("0.75")),
+			checkPredictiveSLOs: true,
 		},
 		{
 			name:   "default propagates non-NotFound target read errors when catalog needs target inspection",
@@ -542,6 +617,10 @@ func TestModelDeploymentScalerDefault_CapacityPrior(t *testing.T) {
 			require.NoError(t, err)
 			if tc.wantNilCapacityPrior {
 				assert.Nil(t, scaler.Spec.Algorithm.CapacityPrior)
+			}
+			if tc.wantNilCatalogRef {
+				require.NotNil(t, scaler.Spec.Algorithm.CapacityPrior)
+				assert.Nil(t, scaler.Spec.Algorithm.CapacityPrior.CatalogRef)
 			}
 			if tc.wantCatalogKey != "" {
 				require.NotNil(t, scaler.Spec.Algorithm.CapacityPrior)
@@ -634,6 +713,36 @@ func TestModelDeploymentScalerValidate_CapacityPrior(t *testing.T) {
 			wantErr: "spec.algorithm.capacityPrior",
 		},
 		{
+			name: "empty capacityPrior resolves from embedded catalog when catalogRef is omitted",
+			objects: []ctrlcli.Object{
+				func() *workercore.ModelDeployment {
+					md := fx.targetWith(func(d *workercore.ModelDeployment) {
+						d.Annotations = nil
+						d.Spec.Model.Name = "meta-llama/Llama-3.3-70B-Instruct"
+						d.Spec.Roles[0] = modelDeploymentScalerPriorRole(
+							"server", workercore.ModelDeploymentRoleKindServer,
+							[]string{"--tensor-parallel-size=2", "--quantization=fp8"}, 2,
+						)
+					})
+					return md
+				}(),
+				fx.wideInstance.DeepCopy(),
+			},
+			scaler: fx.scalerWith(func(s *workercore.ModelDeploymentScaler) {
+				s.Spec.Algorithm.CapacityPrior = &workercore.ModelDeploymentScalerCapacityPriorSpec{}
+				s.Spec.Algorithm.TokenThroughput.TTFTTargetMilliseconds = ptr.To(resource.MustParse("2000"))
+				s.Spec.Algorithm.TokenThroughput.ITLTargetMilliseconds = ptr.To(resource.MustParse("50"))
+			}),
+		},
+		{
+			name:    "catalogRef empty object is refused as Required name",
+			objects: fx.targetOnlyObjects(),
+			scaler: fx.scalerWith(func(s *workercore.ModelDeploymentScaler) {
+				s.Spec.Algorithm.CapacityPrior.CatalogRef = &workercore.ModelDeploymentScalerCatalogReference{}
+			}),
+			wantErr: "spec.algorithm.capacityPrior.catalogRef.name: Required value",
+		},
+		{
 			name:    "catalogRef with empty name is refused",
 			objects: fx.targetOnlyObjects(),
 			scaler: fx.scalerWith(func(s *workercore.ModelDeploymentScaler) {
@@ -650,12 +759,12 @@ func TestModelDeploymentScalerValidate_CapacityPrior(t *testing.T) {
 			wantErr: "spec.algorithm.capacityPrior.catalogRef.name",
 		},
 		{
-			name:    "catalogRef with whitespace key is refused",
+			name:    "catalogRef with whitespace key is refused as Invalid",
 			objects: fx.targetOnlyObjects(),
 			scaler: fx.scalerWith(func(s *workercore.ModelDeploymentScaler) {
 				s.Spec.Algorithm.CapacityPrior.CatalogRef.Key = "   "
 			}),
-			wantErr: "spec.algorithm.capacityPrior.catalogRef.key",
+			wantErr: "spec.algorithm.capacityPrior.catalogRef.key: Invalid value",
 		},
 		{
 			name:    "catalogRef with invalid ConfigMap key is refused",
@@ -1019,6 +1128,377 @@ func TestModelDeploymentScalerValidate_CapacityPrior(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			webhook := newModelDeploymentScalerPriorWebhook(t, tc.objects, tc.forbidNonTargetReads, nil, tc.configMapGetErr)
+			newScaler := tc.scaler.DeepCopy()
+			before := newScaler.DeepCopy()
+
+			var (
+				warnings []string
+				err      error
+			)
+			if tc.isUpdate {
+				warnings, err = webhook.ValidateUpdate(context.Background(), tc.oldScaler.DeepCopy(), newScaler)
+			} else {
+				warnings, err = webhook.ValidateCreate(context.Background(), newScaler)
+			}
+
+			assert.Equal(t, before.Spec, newScaler.Spec, "validation must not mutate persisted spec")
+			if tc.wantErr == "" {
+				require.NoError(t, err)
+			} else {
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), tc.wantErr)
+			}
+			if tc.wantWarning != "" {
+				require.NotEmpty(t, warnings)
+				assert.Contains(t, strings.Join(warnings, "; "), tc.wantWarning)
+			}
+		})
+	}
+}
+
+func TestModelDeploymentScalerValidate_CapacityPriorDisaggregated(t *testing.T) {
+	fx := newModelDeploymentScalerPriorFixture(t)
+
+	h100_1x := fx.instance.DeepCopy()
+	h100_1x.Status.Detail.Manufacturer = nodefeature.ManufacturerNVIDIA
+	h100_2x := fx.wideInstance.DeepCopy()
+	h100_2x.Status.Detail.Manufacturer = nodefeature.ManufacturerNVIDIA
+	h100_4x := h100_2x.DeepCopy()
+	h100_4x.Name = "h100-4x"
+
+	buildServerProfile := func(gpusPerReplica int, baseThroughput float64) priors.ProfileDocument {
+		doc := priors.ProfileDocument{
+			Role:         string(priors.RoleKindServer),
+			Model:        fx.target.Spec.Model.Name,
+			Quantization: "none",
+			Engine:       "vllm",
+			Hardware:     "nvidia-h100",
+			Topology:     priors.TopologyDocument{GPUsPerReplica: gpusPerReplica, TensorParallel: gpusPerReplica},
+		}
+		for i, mult := range []float64{1.0, 2.0, 2.1} {
+			ttft, itl := float64(100*(i+1)), float64(10*(i+1))
+			if i == 2 {
+				ttft, itl = 800, 80
+			}
+			rate := baseThroughput * mult
+			doc.Points = append(doc.Points, priors.PointDocument{
+				Concurrency:           i + 1,
+				TotalTokensPerSecond:  rate,
+				InputTokensPerSecond:  rate,
+				OutputTokensPerSecond: rate,
+				TTFTMilliseconds:      priors.LatencyQuantiles{"p95": ttft},
+				ITLMilliseconds:       priors.LatencyQuantiles{"p95": itl},
+			})
+		}
+		return doc
+	}
+
+	serverOnlyCM := fx.catalogWith(t,
+		buildServerProfile(1, 1000),
+		buildServerProfile(2, 1600),
+	)
+	serverOnlyCM.Name = "my-priors"
+
+	prefillProf := buildServerProfile(2, 1600)
+	prefillProf.Role = string(priors.RoleKindPrefill)
+	decodeProf := buildServerProfile(1, 1000)
+	decodeProf.Role = string(priors.RoleKindDecode)
+	dedicatedPDCM := fx.catalogWith(t, prefillProf, decodeProf)
+	dedicatedPDCM.Name = "my-priors"
+
+	pdTarget := func(mutate ...func(*workercore.ModelDeployment)) *workercore.ModelDeployment {
+		d := fx.targetWith(func(d *workercore.ModelDeployment) {
+			d.Spec.Router = &workercore.ModelDeploymentRouter{Name: workercore.ModelDeploymentRouterLLMD}
+			d.Spec.KVTransfer = &workercore.ModelDeploymentKVTransfer{Backend: workercore.ModelDeploymentKVTransferBackendNIXL}
+			prefill := modelDeploymentScalerPriorRole(
+				"prefill", workercore.ModelDeploymentRoleKindPrefill,
+				append(append([]string(nil), fx.args...), "--tensor-parallel-size=2"), 2,
+			)
+			prefill.Image = d.Spec.Engine.Image
+			decode := modelDeploymentScalerPriorRole(
+				"decode", workercore.ModelDeploymentRoleKindDecode,
+				append(append([]string(nil), fx.args...), "--tensor-parallel-size=1"), 1,
+			)
+			decode.Image = d.Spec.Engine.Image
+			decode.Replicas = 3
+			d.Spec.Roles = []workercore.ModelDeploymentRole{prefill, decode}
+		})
+		for _, m := range mutate {
+			m(d)
+		}
+		return d
+	}
+
+	epdTarget := func(mutate ...func(*workercore.ModelDeployment)) *workercore.ModelDeployment {
+		d := pdTarget(func(d *workercore.ModelDeployment) {
+			encode := modelDeploymentScalerPriorRole("encode", workercore.ModelDeploymentRoleKindEncode, nil, 1)
+			encode.Image = d.Spec.Engine.Image
+			d.Spec.Roles = append([]workercore.ModelDeploymentRole{encode}, d.Spec.Roles...)
+			d.Spec.Roles[2].Replicas = 2
+		})
+		for _, m := range mutate {
+			m(d)
+		}
+		return d
+	}
+
+	pdScaler := func(mutate ...func(*workercore.ModelDeploymentScaler)) *workercore.ModelDeploymentScaler {
+		s := fx.scalerWith(func(s *workercore.ModelDeploymentScaler) {
+			s.Spec.Roles = []workercore.ModelDeploymentScalerRoleBounds{
+				{Name: "prefill", MinReplicas: 1, MaxReplicas: 4},
+				{Name: "decode", MinReplicas: 3, MaxReplicas: 9},
+			}
+			s.Spec.Ratios = []workercore.ModelDeploymentScalerRoleRatio{
+				{
+					NumeratorRole:   "decode",
+					DenominatorRole: "prefill",
+					Min:             ptr.To(resource.MustParse("3")),
+					Max:             ptr.To(resource.MustParse("3")),
+				},
+			}
+			s.Spec.Algorithm.CapacityPrior.CatalogRef.Name = "my-priors"
+		})
+		for _, m := range mutate {
+			m(s)
+		}
+		return s
+	}
+
+	epdScaler := func(mutate ...func(*workercore.ModelDeploymentScaler)) *workercore.ModelDeploymentScaler {
+		s := pdScaler(func(s *workercore.ModelDeploymentScaler) {
+			s.Spec.Roles = []workercore.ModelDeploymentScalerRoleBounds{
+				{Name: "encode", MinReplicas: 1, MaxReplicas: 3},
+				{Name: "prefill", MinReplicas: 1, MaxReplicas: 3},
+				{Name: "decode", MinReplicas: 2, MaxReplicas: 6},
+			}
+			s.Spec.Ratios = []workercore.ModelDeploymentScalerRoleRatio{
+				{
+					NumeratorRole:   "encode",
+					DenominatorRole: "prefill",
+					Min:             ptr.To(resource.MustParse("1")),
+					Max:             ptr.To(resource.MustParse("1")),
+				},
+				{
+					NumeratorRole:   "decode",
+					DenominatorRole: "prefill",
+					Min:             ptr.To(resource.MustParse("2")),
+					Max:             ptr.To(resource.MustParse("2")),
+				},
+			}
+		})
+		for _, m := range mutate {
+			m(s)
+		}
+		return s
+	}
+
+	toPredictive := func(s *workercore.ModelDeploymentScaler) {
+		s.Spec.Algorithm.Type = workercore.ModelDeploymentScalerAlgorithmTypePredictive
+		s.Spec.Algorithm.Predictive = &workercore.ModelDeploymentScalerPredictiveSpec{
+			TokenThroughput: *s.Spec.Algorithm.TokenThroughput,
+		}
+		s.Spec.Algorithm.TokenThroughput = nil
+	}
+
+	cases := []struct {
+		name        string
+		objects     []ctrlcli.Object
+		oldScaler   *workercore.ModelDeploymentScaler
+		scaler      *workercore.ModelDeploymentScaler
+		isUpdate    bool
+		wantErr     string
+		wantWarning string
+	}{
+		{
+			name:    "PD 1P:3D Tier 2 TokenThroughput resolves from Server ConfigMap",
+			objects: []ctrlcli.Object{pdTarget(), serverOnlyCM.DeepCopy(), h100_1x.DeepCopy(), h100_2x.DeepCopy()},
+			scaler:  pdScaler(),
+		},
+		{
+			name:    "PD 1P:3D Tier 2 Predictive resolves from Server ConfigMap",
+			objects: []ctrlcli.Object{pdTarget(), serverOnlyCM.DeepCopy(), h100_1x.DeepCopy(), h100_2x.DeepCopy()},
+			scaler:  pdScaler(toPredictive),
+		},
+		{
+			name: "PD 1P:3D Tier 2 TokenThroughput resolves from embedded priors.yaml",
+			objects: []ctrlcli.Object{
+				pdTarget(func(d *workercore.ModelDeployment) {
+					d.Annotations = nil
+					d.Spec.Model.Name = "meta-llama/Llama-3.3-70B-Instruct"
+					d.Spec.Roles[0] = modelDeploymentScalerPriorRole(
+						"prefill", workercore.ModelDeploymentRoleKindPrefill,
+						[]string{"--tensor-parallel-size=2", "--quantization=fp8"}, 2,
+					)
+					d.Spec.Roles[0].Image = d.Spec.Engine.Image
+					d.Spec.Roles[1] = modelDeploymentScalerPriorRole(
+						"decode", workercore.ModelDeploymentRoleKindDecode,
+						[]string{"--tensor-parallel-size=4", "--quantization=fp8"}, 4,
+					)
+					d.Spec.Roles[1].Image = d.Spec.Engine.Image
+					d.Spec.Roles[1].Replicas = 3
+				}),
+				h100_2x.DeepCopy(),
+				h100_4x.DeepCopy(),
+			},
+			scaler: pdScaler(func(s *workercore.ModelDeploymentScaler) {
+				s.Spec.Algorithm.CapacityPrior = &workercore.ModelDeploymentScalerCapacityPriorSpec{}
+				s.Spec.Algorithm.TokenThroughput.TTFTTargetMilliseconds = ptr.To(resource.MustParse("2000"))
+				s.Spec.Algorithm.TokenThroughput.ITLTargetMilliseconds = ptr.To(resource.MustParse("50"))
+			}),
+		},
+		{
+			name:    "EPD 1E:1P:2D Tier 2 TokenThroughput resolves from Server ConfigMap",
+			objects: []ctrlcli.Object{epdTarget(), serverOnlyCM.DeepCopy(), h100_1x.DeepCopy(), h100_2x.DeepCopy()},
+			scaler:  epdScaler(),
+		},
+		{
+			name:    "EPD 1E:1P:2D Tier 2 Predictive resolves from Server ConfigMap",
+			objects: []ctrlcli.Object{epdTarget(), serverOnlyCM.DeepCopy(), h100_1x.DeepCopy(), h100_2x.DeepCopy()},
+			scaler:  epdScaler(toPredictive),
+		},
+		{
+			name:    "PD Tier 2 create refuses when ratios are omitted",
+			objects: []ctrlcli.Object{pdTarget(), serverOnlyCM.DeepCopy(), h100_1x.DeepCopy(), h100_2x.DeepCopy()},
+			scaler: pdScaler(func(s *workercore.ModelDeploymentScaler) {
+				s.Spec.Ratios = nil
+			}),
+			wantErr: "spec.algorithm.capacityPrior",
+		},
+		{
+			name:      "PD Tier 2 update warns and allows when ratios are omitted",
+			isUpdate:  true,
+			objects:   []ctrlcli.Object{pdTarget(), serverOnlyCM.DeepCopy(), h100_1x.DeepCopy(), h100_2x.DeepCopy()},
+			oldScaler: pdScaler(),
+			scaler: pdScaler(func(s *workercore.ModelDeploymentScaler) {
+				s.Spec.Ratios = nil
+				s.Spec.Mode = workercore.ModelDeploymentScalerModeShadow
+			}),
+			wantWarning: "requires fixed ratios",
+		},
+		{
+			name:    "PD Tier 2 create refuses when ratios have min < max",
+			objects: []ctrlcli.Object{pdTarget(), serverOnlyCM.DeepCopy(), h100_1x.DeepCopy(), h100_2x.DeepCopy()},
+			scaler: pdScaler(func(s *workercore.ModelDeploymentScaler) {
+				s.Spec.Ratios[0].Min = ptr.To(resource.MustParse("1"))
+				s.Spec.Ratios[0].Max = ptr.To(resource.MustParse("2"))
+			}),
+			wantErr: "spec.algorithm.capacityPrior",
+		},
+		{
+			name:      "PD Tier 2 update warns and allows when ratios have min < max",
+			isUpdate:  true,
+			objects:   []ctrlcli.Object{pdTarget(), serverOnlyCM.DeepCopy(), h100_1x.DeepCopy(), h100_2x.DeepCopy()},
+			oldScaler: pdScaler(),
+			scaler: pdScaler(func(s *workercore.ModelDeploymentScaler) {
+				s.Spec.Ratios[0].Min = ptr.To(resource.MustParse("1"))
+				s.Spec.Ratios[0].Max = ptr.To(resource.MustParse("2"))
+			}),
+			wantWarning: "min == max",
+		},
+		{
+			name:    "PD Tier 2 create refuses partial explicit per-role capacity override",
+			objects: []ctrlcli.Object{pdTarget(), serverOnlyCM.DeepCopy(), h100_1x.DeepCopy(), h100_2x.DeepCopy()},
+			scaler: pdScaler(func(s *workercore.ModelDeploymentScaler) {
+				s.Spec.Algorithm.TokenThroughput.PrefillTargetTokensPerSecond = ptr.To(resource.MustParse("900"))
+			}),
+			wantErr: "spec.algorithm.capacityPrior",
+		},
+		{
+			name:      "PD Tier 2 update warns and allows partial explicit per-role capacity override",
+			isUpdate:  true,
+			objects:   []ctrlcli.Object{pdTarget(), serverOnlyCM.DeepCopy(), h100_1x.DeepCopy(), h100_2x.DeepCopy()},
+			oldScaler: pdScaler(),
+			scaler: pdScaler(func(s *workercore.ModelDeploymentScaler) {
+				s.Spec.Algorithm.TokenThroughput.PrefillTargetTokensPerSecond = ptr.To(resource.MustParse("900"))
+			}),
+			wantWarning: "partial explicit",
+		},
+		{
+			name:    "PD Tier 2 create refuses replica bounds admitting no integer multiple of unit vector",
+			objects: []ctrlcli.Object{pdTarget(), serverOnlyCM.DeepCopy(), h100_1x.DeepCopy(), h100_2x.DeepCopy()},
+			scaler: pdScaler(func(s *workercore.ModelDeploymentScaler) {
+				s.Spec.Roles = []workercore.ModelDeploymentScalerRoleBounds{
+					{Name: "prefill", MinReplicas: 1, MaxReplicas: 1},
+					{Name: "decode", MinReplicas: 4, MaxReplicas: 6},
+				}
+			}),
+			wantErr: "spec.roles",
+		},
+		{
+			name:    "PD Tier 2 TokenThroughput create refuses missing ttftTargetMilliseconds",
+			objects: []ctrlcli.Object{pdTarget(), serverOnlyCM.DeepCopy(), h100_1x.DeepCopy(), h100_2x.DeepCopy()},
+			scaler: pdScaler(func(s *workercore.ModelDeploymentScaler) {
+				s.Spec.Algorithm.TokenThroughput.TTFTTargetMilliseconds = nil
+			}),
+			wantErr: "spec.algorithm.tokenThroughput.ttftTargetMilliseconds",
+		},
+		{
+			name:    "EPD Tier 2 Predictive create refuses missing itlTargetMilliseconds",
+			objects: []ctrlcli.Object{epdTarget(), serverOnlyCM.DeepCopy(), h100_1x.DeepCopy(), h100_2x.DeepCopy()},
+			scaler: epdScaler(toPredictive, func(s *workercore.ModelDeploymentScaler) {
+				s.Spec.Algorithm.Predictive.TokenThroughput.ITLTargetMilliseconds = nil
+			}),
+			wantErr: "spec.algorithm.predictive.tokenThroughput.itlTargetMilliseconds",
+		},
+		{
+			name:    "PD Tier 2 create refuses non-positive ttftTargetMilliseconds",
+			objects: []ctrlcli.Object{pdTarget(), serverOnlyCM.DeepCopy(), h100_1x.DeepCopy(), h100_2x.DeepCopy()},
+			scaler: pdScaler(func(s *workercore.ModelDeploymentScaler) {
+				s.Spec.Algorithm.TokenThroughput.TTFTTargetMilliseconds = ptr.To(resource.MustParse("0"))
+			}),
+			wantErr: "spec.algorithm.tokenThroughput.ttftTargetMilliseconds",
+		},
+		{
+			name:    "PD Tier 2 create refuses infeasible ttftTargetMilliseconds against Server profile",
+			objects: []ctrlcli.Object{pdTarget(), serverOnlyCM.DeepCopy(), h100_1x.DeepCopy(), h100_2x.DeepCopy()},
+			scaler: pdScaler(func(s *workercore.ModelDeploymentScaler) {
+				s.Spec.Algorithm.TokenThroughput.TTFTTargetMilliseconds = ptr.To(resource.MustParse("10"))
+			}),
+			wantErr: "spec.algorithm.capacityPrior",
+		},
+		{
+			name:      "PD Tier 2 update warns and allows infeasible itlTargetMilliseconds against Server profile",
+			isUpdate:  true,
+			objects:   []ctrlcli.Object{pdTarget(), serverOnlyCM.DeepCopy(), h100_1x.DeepCopy(), h100_2x.DeepCopy()},
+			oldScaler: pdScaler(),
+			scaler: pdScaler(func(s *workercore.ModelDeploymentScaler) {
+				s.Spec.Algorithm.TokenThroughput.ITLTargetMilliseconds = ptr.To(resource.MustParse("1"))
+			}),
+			wantWarning: "capacity prior cannot be resolved",
+		},
+		{
+			name:    "PD Tier 1 succeeds with dedicated Prefill and Decode profiles even with range ratios",
+			objects: []ctrlcli.Object{pdTarget(), dedicatedPDCM.DeepCopy(), h100_1x.DeepCopy(), h100_2x.DeepCopy()},
+			scaler: pdScaler(func(s *workercore.ModelDeploymentScaler) {
+				s.Spec.Ratios[0].Min = ptr.To(resource.MustParse("1"))
+				s.Spec.Ratios[0].Max = ptr.To(resource.MustParse("3"))
+			}),
+		},
+		{
+			name:    "PD Tier 1 succeeds with dedicated profiles and partial explicit per-role capacity override",
+			objects: []ctrlcli.Object{pdTarget(), dedicatedPDCM.DeepCopy(), h100_1x.DeepCopy(), h100_2x.DeepCopy()},
+			scaler: pdScaler(func(s *workercore.ModelDeploymentScaler) {
+				s.Spec.Ratios = nil
+				s.Spec.Algorithm.TokenThroughput.PrefillTargetTokensPerSecond = ptr.To(resource.MustParse("1100"))
+			}),
+		},
+		{
+			name:        "missing target ModelDeployment admits PD scaler create with warning",
+			scaler:      pdScaler(),
+			wantWarning: "does not exist yet",
+		},
+		{
+			name:        "missing target ModelDeployment admits EPD Predictive scaler update with warning",
+			isUpdate:    true,
+			oldScaler:   epdScaler(toPredictive),
+			scaler:      epdScaler(toPredictive),
+			wantWarning: "does not exist yet",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			webhook := newModelDeploymentScalerPriorWebhook(t, tc.objects, false, nil, nil)
 			newScaler := tc.scaler.DeepCopy()
 			before := newScaler.DeepCopy()
 
