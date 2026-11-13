@@ -82,7 +82,7 @@ metadata:
   namespace: gpustack-bench
 spec:
   model:
-    name: /models
+    name: Qwen/Qwen3-32B
     artifactRef:
       name: qwen3-32b
   engine:
@@ -207,7 +207,7 @@ kubectl -n gpustack-bench run test-client --rm -i --restart=Never \
   curl -s http://pd-arm2-pd-router.gpustack-bench.svc:8000/v1/chat/completions \
   -H "Content-Type: application/json" \
   -d '{
-    "model": "/models",
+    "model": "Qwen/Qwen3-32B",
     "messages": [{"role": "user", "content": "Explain prefill and decode disaggregation."}],
     "max_tokens": 16
   }'

@@ -80,7 +80,7 @@ metadata:
   namespace: gpustack-bench
 spec:
   model:
-    name: /models
+    name: deepseek-v2-lite-chat
     artifactRef:
       name: deepseek-v2-lite-chat
   engine:
@@ -223,13 +223,13 @@ In another terminal, send ordinary and streaming requests to all four local port
 for port in 18000 18001 18002 18003; do
   curl --fail-with-body --max-time 60 "http://127.0.0.1:$port/v1/completions" \
     -H 'Content-Type: application/json' \
-    -d '{"model":"/models","prompt":"The sky is","max_tokens":8,"temperature":0}' \
+    -d '{"model":"deepseek-v2-lite-chat","prompt":"The sky is","max_tokens":8,"temperature":0}' \
     -o "rank-$port.json"
   jq '{text: .choices[0].text, finish_reason: .choices[0].finish_reason,
        completion_tokens: .usage.completion_tokens}' "rank-$port.json"
   curl --fail-with-body --no-buffer --max-time 60 "http://127.0.0.1:$port/v1/completions" \
     -H 'Content-Type: application/json' \
-    -d '{"model":"/models","prompt":"A GPU is","max_tokens":8,"temperature":0,"stream":true,"stream_options":{"include_usage":true}}' \
+    -d '{"model":"deepseek-v2-lite-chat","prompt":"A GPU is","max_tokens":8,"temperature":0,"stream":true,"stream_options":{"include_usage":true}}' \
     -o "rank-$port-stream.txt"
 done
 ```
@@ -263,7 +263,7 @@ Send at least eight ordinary requests through the Router:
 for request in 1 2 3 4 5 6 7 8; do
   curl --fail-with-body --max-time 60 http://127.0.0.1:18080/v1/completions \
     -H 'Content-Type: application/json' \
-    -d '{"model":"/models","prompt":"The sky is","max_tokens":8,"temperature":0}' \
+    -d '{"model":"deepseek-v2-lite-chat","prompt":"The sky is","max_tokens":8,"temperature":0}' \
     -o "router-$request.json"
 done
 curl --fail-with-body http://127.0.0.1:19090/metrics > router-after.prom

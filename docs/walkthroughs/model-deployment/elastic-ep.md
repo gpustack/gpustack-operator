@@ -75,7 +75,7 @@ metadata:
   namespace: gpustack-bench
 spec:
   model:
-    name: /models
+    name: deepseek-v2-lite-chat
     artifactRef:
       name: deepseek-v2-lite-chat
   engine:
@@ -180,7 +180,7 @@ Send a streaming generation request and preserve its response:
 curl --fail-with-body --no-buffer --max-time 60 \
   http://127.0.0.1:8000/v1/chat/completions \
   -H 'Content-Type: application/json' \
-  -d '{"model":"/models","messages":[{"role":"user","content":"Explain GPU scheduling briefly."}],"max_tokens":64,"temperature":0,"stream":true,"stream_options":{"include_usage":true}}' \
+  -d '{"model":"deepseek-v2-lite-chat","messages":[{"role":"user","content":"Explain GPU scheduling briefly."}],"max_tokens":64,"temperature":0,"stream":true,"stream_options":{"include_usage":true}}' \
   -o baseline-stream.txt
 cat baseline-stream.txt
 ```

@@ -70,7 +70,7 @@ name `gpustack--nvidia-h100-80gb-hbm3-linux-amd64`.
 The recorded run used its custom `bench-gpu` `InstanceType`, configured for the same accelerator group.
 
 One *Encode*, one *Prefill* and one *Decode* replica each request one GPU. The `artifactRef` points to
-the existing `ModelArtifact`; *`spec.model.name`* exposes it to vLLM as `/models`. The *`spec.router`*
+the existing `ModelArtifact`; *`spec.model.name`* exposes it to vLLM as `qwen2-5-vl-7b-instruct`. The *`spec.router`*
 stanza deploys `llm-d-router` in front of the roles.
 
 ```yaml
@@ -81,7 +81,7 @@ metadata:
   namespace: gpustack-bench
 spec:
   model:
-    name: /models
+    name: qwen2-5-vl-7b-instruct
     artifactRef:
       name: qwen2-5-vl-7b-instruct
   engine:
@@ -183,6 +183,8 @@ for the rationale; do not copy `--enforce-eager` onto *Prefill* or *Decode*, whi
 The following blocks are captured `Pod` excerpts, not manifests to apply. They include the `Pod`
 identity and container nesting so each generated field has its Kubernetes context; probes, volumes and
 other generated fields are omitted where they do not explain the configuration.
+
+These historical cluster captures were recorded when `spec.model.name` was set to `/models`.
 
 ```yaml
 apiVersion: v1
@@ -328,6 +330,7 @@ http://epd-arm3-epd-router.gpustack-bench.svc:8000
 ```
 
 Send a multimodal chat completion to that endpoint from inside the cluster.
+Set `"model": "qwen2-5-vl-7b-instruct"` in `request.json`.
 Include a base64 PNG as an `image_url` part beside a text instruction to select the encoder:
 
 ```bash
