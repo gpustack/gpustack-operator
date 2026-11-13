@@ -81,6 +81,74 @@ func TestChipInfoCommands_MatchTheVendor(t *testing.T) {
 	}
 }
 
+func TestDecodeAffinityCPUInfo(t *testing.T) {
+	testCases := []struct {
+		name   string
+		buf    []byte
+		length int32
+		want   string
+		ret    Return
+	}{
+		{
+			name:   "exact length without terminator",
+			buf:    []byte("0-31,64-95\x00\x00"),
+			length: 10,
+			want:   "0-31,64-95",
+			ret:    SUCCESS,
+		},
+		{
+			name:   "length includes trailing nul terminator",
+			buf:    []byte("0-31\x00garbage"),
+			length: 5,
+			want:   "0-31",
+			ret:    SUCCESS,
+		},
+		{
+			name:   "length includes nul padding and trailing bytes",
+			buf:    []byte("0-31\x00\x00extra"),
+			length: 9,
+			want:   "0-31",
+			ret:    SUCCESS,
+		},
+		{
+			name:   "surrounding whitespace is trimmed",
+			buf:    []byte(" 0-15,32-47 \n\x00"),
+			length: 14,
+			want:   "0-15,32-47",
+			ret:    SUCCESS,
+		},
+		{
+			name:   "zero length returns empty string",
+			buf:    make([]byte, 8),
+			length: 0,
+			want:   "",
+			ret:    SUCCESS,
+		},
+		{
+			name:   "negative length reports truncated",
+			buf:    make([]byte, 8),
+			length: -1,
+			want:   "",
+			ret:    ERROR_LIST_TRUNCATED,
+		},
+		{
+			name:   "length past buffer reports truncated",
+			buf:    make([]byte, 8),
+			length: 9,
+			want:   "",
+			ret:    ERROR_LIST_TRUNCATED,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, ret := decodeAffinityCPUInfo(tc.buf, tc.length)
+			assert.Equal(t, tc.ret, ret)
+			assert.Equal(t, tc.want, got)
+		})
+	}
+}
+
 // Every exported signature of this package, pinned at compile time.
 //
 // `go build ./...` already catches a changed signature that some package in this repo calls. This

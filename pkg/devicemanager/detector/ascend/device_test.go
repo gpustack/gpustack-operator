@@ -312,3 +312,188 @@ func TestKeepOnMissingDDR(t *testing.T) {
 		})
 	}
 }
+
+func TestSelectPCIBusID(t *testing.T) {
+	testCases := []struct {
+		name       string
+		v2Info     dcmi.PcieInfoAll
+		v2Ret      dcmi.Return
+		v1Info     dcmi.PcieInfoAll
+		v1Ret      dcmi.Return
+		wantV1Call bool
+		wantBusID  string
+		wantRet    dcmi.Return
+	}{
+		{
+			name: "v2 success returns formatted bus id without calling v1",
+			v2Info: dcmi.PcieInfoAll{
+				Domain:       0,
+				Bdf_busid:    0xc1,
+				Bdf_deviceid: 0,
+				Bdf_funcid:   0,
+			},
+			v2Ret:      dcmi.SUCCESS,
+			wantV1Call: false,
+			wantBusID:  "0000:c1:00.0",
+			wantRet:    dcmi.SUCCESS,
+		},
+		{
+			name:  "v2 unsupported falls back to v1 on older drivers",
+			v2Ret: dcmi.ERROR_NOT_SUPPORT,
+			v1Info: dcmi.PcieInfoAll{
+				Domain:       0,
+				Bdf_busid:    0x21,
+				Bdf_deviceid: 0,
+				Bdf_funcid:   0,
+			},
+			v1Ret:      dcmi.SUCCESS,
+			wantV1Call: true,
+			wantBusID:  "0000:21:00.0",
+			wantRet:    dcmi.SUCCESS,
+		},
+		{
+			name:       "ub-attached v2 device keeps empty bus id when both generations return not supported",
+			v2Ret:      dcmi.ERROR_NOT_SUPPORT,
+			v1Ret:      dcmi.ERROR_NOT_SUPPORT,
+			wantV1Call: true,
+			wantBusID:  "",
+			wantRet:    dcmi.ERROR_NOT_SUPPORT,
+		},
+		{
+			name:       "v2 failure reason is preserved when v1 entry point is absent",
+			v2Ret:      dcmi.ERROR_TIME_OUT,
+			v1Ret:      dcmi.ERROR_FUNCTION_NOT_FOUND,
+			wantV1Call: true,
+			wantBusID:  "",
+			wantRet:    dcmi.ERROR_TIME_OUT,
+		},
+		{
+			name:       "v1 failure reason is returned when v1 driver served and failed",
+			v2Ret:      dcmi.ERROR_FUNCTION_NOT_FOUND,
+			v1Ret:      dcmi.ERROR_IOCTL_FAIL,
+			wantV1Call: true,
+			wantBusID:  "",
+			wantRet:    dcmi.ERROR_IOCTL_FAIL,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			v1Called := false
+			busID, ret := selectPCIBusID(tc.v2Info, tc.v2Ret, func() (dcmi.PcieInfoAll, dcmi.Return) {
+				v1Called = true
+				return tc.v1Info, tc.v1Ret
+			})
+			assert.Equal(t, tc.wantV1Call, v1Called)
+			assert.Equal(t, tc.wantBusID, busID)
+			assert.Equal(t, tc.wantRet, ret)
+		})
+	}
+}
+
+func TestIsPCIBusIDUnsupported(t *testing.T) {
+	testCases := []struct {
+		name string
+		ret  dcmi.Return
+		want bool
+	}{
+		{"not supported on ub-attached device", dcmi.ERROR_NOT_SUPPORT, true},
+		{"not supported inside container", dcmi.ERROR_NOT_SUPPORT_IN_CONTAINER, true},
+		{"symbol absent from library", dcmi.ERROR_FUNCTION_NOT_FOUND, true},
+		{"library absent", dcmi.ERROR_LIBRARY_NOT_FOUND, true},
+		{"config info missing", dcmi.ERROR_CONFIG_INFO_NOT_EXIST, false},
+		{"driver timeout", dcmi.ERROR_TIME_OUT, false},
+		{"success", dcmi.SUCCESS, false},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.Equal(t, tc.want, isPCIBusIDUnsupported(tc.ret))
+		})
+	}
+}
+
+func TestApplyFallbackAffinity(t *testing.T) {
+	testCases := []struct {
+		name       string
+		initial    device.Topology
+		cpuRaw     string
+		cpuRet     dcmi.Return
+		mappedNuma string
+		wantRead   bool
+		want       device.Topology
+	}{
+		{
+			name: "existing sysfs numa affinity skips dcmi cpu query",
+			initial: device.Topology{
+				PciBusID:     "0000:c1:00.0",
+				NumaAffinity: "1",
+				CpuAffinity:  "32-63",
+			},
+			wantRead: false,
+			want: device.Topology{
+				PciBusID:     "0000:c1:00.0",
+				NumaAffinity: "1",
+				CpuAffinity:  "32-63",
+			},
+		},
+		{
+			name:       "empty bus id populates canonical cpu and numa affinity from dcmi",
+			initial:    device.Topology{},
+			cpuRaw:     "0-15, 32-47",
+			cpuRet:     dcmi.SUCCESS,
+			mappedNuma: "0",
+			wantRead:   true,
+			want: device.Topology{
+				NumaAffinity: "0",
+				CpuAffinity:  "0-15,32-47",
+			},
+		},
+		{
+			name:       "valid dcmi cpu list stays when host exposes no numa mapping",
+			initial:    device.Topology{},
+			cpuRaw:     "0-15",
+			cpuRet:     dcmi.SUCCESS,
+			mappedNuma: "",
+			wantRead:   true,
+			want: device.Topology{
+				NumaAffinity: "",
+				CpuAffinity:  "0-15",
+			},
+		},
+		{
+			name:     "unsupported dcmi cpu query leaves affinity empty",
+			initial:  device.Topology{},
+			cpuRet:   dcmi.ERROR_NOT_SUPPORT,
+			wantRead: true,
+			want:     device.Topology{},
+		},
+		{
+			name:     "non-numeric dcmi cpu text leaves affinity empty",
+			initial:  device.Topology{},
+			cpuRaw:   "N/A",
+			cpuRet:   dcmi.SUCCESS,
+			wantRead: true,
+			want:     device.Topology{},
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			topo := tc.initial
+			readCalled := false
+			applyFallbackAffinity(
+				&topo,
+				func() (string, dcmi.Return) {
+					readCalled = true
+					return tc.cpuRaw, tc.cpuRet
+				},
+				func(string) string {
+					return tc.mappedNuma
+				},
+			)
+			assert.Equal(t, tc.wantRead, readCalled)
+			assert.Equal(t, tc.want, topo)
+		})
+	}
+}

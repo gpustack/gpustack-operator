@@ -243,6 +243,10 @@ as every vendor reader of that name does. A device whose identity die cannot be 
 rather than identified by its PCI address, which repeats on every node and would make two nodes'
 accelerators collide on identity.
 
+When a UnifiedBus-attached part such as `Ascend950DT` reports no PCIe address (`NOT_SUPPORT`), the
+detector keeps the accelerator with empty PCI topology fields and reads CPU and NUMA affinity from
+DCMI when available.
+
 ## Device-plugin allocator
 
 Alongside detection the Device Manager runs the **device-plugin allocator**: it registers per-mode
