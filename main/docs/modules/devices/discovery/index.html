@@ -1743,6 +1743,9 @@ today), so the detector folds every <code>950*</code> name onto one soc name, an
 as every vendor reader of that name does. A device whose identity die cannot be read is dropped
 rather than identified by its PCI address, which repeats on every node and would make two nodes'
 accelerators collide on identity.</p>
+<p>When a UnifiedBus-attached part such as <code>Ascend950DT</code> reports no PCIe address (<code>NOT_SUPPORT</code>), the
+detector keeps the accelerator with empty PCI topology fields and reads CPU and NUMA affinity from
+DCMI when available.</p>
 <h2 id="device-plugin-allocator">Device-plugin allocator</h2>
 <p>Alongside detection the Device Manager runs the <strong>device-plugin allocator</strong>: it registers per-mode
 resources (exclusive / shared / sliced / partitioned) with the kubelet and, on allocation, returns
