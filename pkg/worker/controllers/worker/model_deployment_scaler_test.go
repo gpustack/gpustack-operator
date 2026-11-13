@@ -3,10 +3,12 @@ package worker
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"math"
 	"testing"
 	"time"
 
+	core "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -688,6 +690,256 @@ func TestModelDeploymentScalerTargetRolesEligibility(t *testing.T) {
 		cond := scalerCondition(scaler, workercore.ModelDeploymentScalerConditionTypeBlocked)
 		if cond.Status != meta.ConditionTrue || cond.Reason != workercore.ModelDeploymentScalerReasonBoundsConflict {
 			t.Fatalf("Blocked condition = %+v, want True with BoundsConflict", cond)
+		}
+	})
+}
+
+func scalerTestOwnedPod(md *workercore.ModelDeployment, role string, ordinal int32, phase core.PodPhase) *core.Pod {
+	controller := true
+	return &core.Pod{
+		ObjectMeta: meta.ObjectMeta{
+			Namespace: md.Namespace,
+			Name:      fmt.Sprintf("%s-%s-%d", md.Name, role, ordinal),
+			UID:       types.UID(fmt.Sprintf("%s-%s-%d-uid", md.Name, role, ordinal)),
+			Labels: map[string]string{
+				modelDeploymentLabelKeyName:        modelDeploymentLabelValueName,
+				modelDeploymentLabelKeyInstance:    md.Name,
+				modelDeploymentLabelKeyComponent:   role,
+				modelDeploymentReplicaOrdinalLabel: fmt.Sprintf("%d", ordinal),
+			},
+			OwnerReferences: []meta.OwnerReference{{
+				APIVersion: workercore.SchemeGroupVersion.String(),
+				Kind:       "ModelDeployment",
+				Name:       md.Name,
+				UID:        md.UID,
+				Controller: &controller,
+			}},
+		},
+		Status: core.PodStatus{Phase: phase},
+	}
+}
+
+func TestModelDeploymentScalerMultiReplicaSerialRetirement(t *testing.T) {
+	now := time.Unix(2000, 0).UTC()
+
+	t.Run("surplus pods hold further scale-down when retirement status is nil or completed", func(t *testing.T) {
+		// Deployment spec was already scaled down to 2P:6D, but decode-6 and prefill-2 Pods still exist.
+		md := scalerTestDeployment("target", "target-uid", map[string]int32{"prefill": 2, "decode": 6})
+		md.Status.Retirement = &workercore.ModelDeploymentRetirementStatus{
+			RoleName:       "decode",
+			ReplicaOrdinal: 8,
+			State:          workercore.ModelDeploymentRetirementStateCompleted,
+		}
+		scaler := scalerTestCoupledScaler()
+		scaler.Spec.Roles = []workercore.ModelDeploymentScalerRoleBounds{
+			{Name: "prefill", MinReplicas: 1, MaxReplicas: 4},
+			{Name: "decode", MinReplicas: 1, MaxReplicas: 12},
+		}
+		scaler.Spec.Ratios = []workercore.ModelDeploymentScalerRoleRatio{{
+			NumeratorRole: "decode", DenominatorRole: "prefill",
+			Min: quantityPointer("3"), Max: quantityPointer("3"), Target: quantityPointer("3"),
+		}}
+		// Seed stabilization history well below 2P:6D so only the live surplus Pod hold prevents scaling down to 1P:3D.
+		old := meta.NewTime(now.Add(-10 * time.Minute))
+		recent := meta.NewTime(now.Add(-30 * time.Second))
+		scaler.Status.Roles = []workercore.ModelDeploymentScalerRoleStatus{
+			{
+				Name: "prefill", CurrentReplicas: 2,
+				StabilizationHistory: []workercore.ModelDeploymentScalerStabilizationSample{
+					{Timestamp: old, Replicas: 1},
+					{Timestamp: recent, Replicas: 1},
+				},
+			},
+			{
+				Name: "decode", CurrentReplicas: 6,
+				StabilizationHistory: []workercore.ModelDeploymentScalerStabilizationSample{
+					{Timestamp: old, Replicas: 3},
+					{Timestamp: recent, Replicas: 3},
+				},
+			},
+		}
+		scaler.Status.LastScaleDown = &workercore.ModelDeploymentScalerScaleDownStatus{
+			Role:               "prefill",
+			Ordinal:            2,
+			PreScaleDownVector: map[string]int32{"prefill": 3, "decode": 9},
+			Outcome:            workercore.ModelDeploymentScalerScaleDownOutcomeCommitted,
+		}
+		commitTS := meta.NewTime(now.Add(-2 * time.Minute))
+		scaler.Status.LastCommit = &workercore.ModelDeploymentScalerCommitStatus{
+			DecisionID: "dec-down",
+			Term:       1,
+			Vector:     map[string]int32{"prefill": 2, "decode": 6},
+			Timestamp:  &commitTS,
+		}
+		scaler.Status.Binding = &workercore.ModelDeploymentScalerBindingStatus{
+			TargetUID: "target-uid", TargetName: "target", Term: 1,
+		}
+		md.Annotations = map[string]string{
+			workercore.ModelDeploymentScalerBindingAnnotationKey: scalerTestBindingJSON(scaler, 1),
+		}
+
+		objs := []ctrlcli.Object{
+			md,
+			scaler,
+			scalerTestOwnedPod(md, "prefill", 0, core.PodRunning),
+			scalerTestOwnedPod(md, "prefill", 1, core.PodRunning),
+			scalerTestOwnedPod(md, "prefill", 2, core.PodRunning), // surplus Pod (ordinal >= current[prefill]=2)
+			scalerTestOwnedPod(md, "decode", 0, core.PodRunning),
+			scalerTestOwnedPod(md, "decode", 1, core.PodRunning),
+			scalerTestOwnedPod(md, "decode", 2, core.PodRunning),
+			scalerTestOwnedPod(md, "decode", 3, core.PodRunning),
+			scalerTestOwnedPod(md, "decode", 4, core.PodRunning),
+			scalerTestOwnedPod(md, "decode", 5, core.PodRunning),
+			scalerTestOwnedPod(md, "decode", 6, core.PodRunning), // surplus Pod (ordinal >= current[decode]=6)
+		}
+		cli := scalerTestClient(t, objs...)
+		r := scalerTestReconciler(cli, now)
+		pods, _, _, err := r.executionState(context.Background(), md)
+		if err != nil {
+			t.Fatalf("executionState error = %v", err)
+		}
+		if !hasSurplusDeploymentPod(pods, map[string]int32{"prefill": 2, "decode": 6}) {
+			t.Fatalf("expected surplus pods to be detected")
+		}
+
+		if _, err := r.plan(context.Background(), scaler.DeepCopy(), scaler, md, now, true); err != nil {
+			t.Fatalf("plan error = %v", err)
+		}
+		if scaler.Status.LastScaleDown == nil || scaler.Status.LastScaleDown.Outcome != workercore.ModelDeploymentScalerScaleDownOutcomeCommitted {
+			t.Fatalf("expected Committed LastScaleDown to remain intact while surplus pods exist, got %+v", scaler.Status.LastScaleDown)
+		}
+
+		// Delete decode-6 while prefill-2 remains and set Retirement=nil: still held by prefill-2!
+		if err := cli.Delete(context.Background(), objs[len(objs)-1]); err != nil {
+			t.Fatal(err)
+		}
+		md.Status.Retirement = nil
+		if err := cli.Status().Update(context.Background(), md); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := r.plan(context.Background(), scaler.DeepCopy(), scaler, md, now.Add(10*time.Second), true); err != nil {
+			t.Fatalf("plan error = %v", err)
+		}
+		if scaler.Status.LastScaleDown == nil {
+			t.Fatalf("expected Committed LastScaleDown to remain intact while prefill-2 surplus pod exists")
+		}
+
+		// Delete prefill-2 (all surplus pods gone): Committed LastScaleDown is now cleared.
+		if err := cli.Delete(context.Background(), objs[4]); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := r.plan(context.Background(), scaler.DeepCopy(), scaler, md, now.Add(20*time.Second), true); err != nil {
+			t.Fatalf("plan error = %v", err)
+		}
+		if scaler.Status.LastScaleDown != nil {
+			t.Fatalf("expected Committed LastScaleDown to clear once all surplus pods are gone, got %+v", scaler.Status.LastScaleDown)
+		}
+	})
+
+	for _, tc := range []struct {
+		name           string
+		roleName       string
+		replicaOrdinal int32
+		restartCtrl    bool
+	}{
+		{name: "aborted first ordinal decode-5 restores 2P:6D", roleName: "decode", replicaOrdinal: 5},
+		{name: "aborted middle ordinal decode-4 restores 2P:6D", roleName: "decode", replicaOrdinal: 4},
+		{name: "aborted last ordinal prefill-1 restores 2P:6D after restart", roleName: "prefill", replicaOrdinal: 1, restartCtrl: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			md := scalerTestDeployment("target", "target-uid", map[string]int32{"prefill": 1, "decode": 3})
+			startedAt := meta.NewTime(now.Add(-30 * time.Second))
+			md.Status.Retirement = &workercore.ModelDeploymentRetirementStatus{
+				RoleName:       tc.roleName,
+				ReplicaOrdinal: tc.replicaOrdinal,
+				State:          workercore.ModelDeploymentRetirementStateAborted,
+				Reason:         "drain timed out",
+				StartedAt:      startedAt,
+				PhaseStartedAt: startedAt,
+			}
+			scaler := scalerTestCoupledScaler()
+			scaler.Status.Binding = &workercore.ModelDeploymentScalerBindingStatus{
+				TargetUID: "target-uid", TargetName: "target", Term: 1,
+			}
+			commitTS := meta.NewTime(now.Add(-1 * time.Minute))
+			scaler.Status.LastCommit = &workercore.ModelDeploymentScalerCommitStatus{
+				DecisionID: "dec-down",
+				Term:       1,
+				Vector:     map[string]int32{"prefill": 1, "decode": 3},
+				Timestamp:  &commitTS,
+			}
+			scaler.Status.LastScaleDown = &workercore.ModelDeploymentScalerScaleDownStatus{
+				Role:               "decode",
+				Ordinal:            3,
+				PreScaleDownVector: map[string]int32{"prefill": 2, "decode": 6},
+				Outcome:            workercore.ModelDeploymentScalerScaleDownOutcomeCommitted,
+			}
+			md.Annotations = map[string]string{
+				workercore.ModelDeploymentScalerBindingAnnotationKey: scalerTestBindingJSON(scaler, 1),
+			}
+
+			cli := scalerTestClient(t, md, scaler)
+			r := scalerTestReconciler(cli, now)
+			if tc.restartCtrl {
+				// Simulate a freshly started controller instance reloading state strictly from objects.
+				r = scalerTestReconciler(cli, now)
+			}
+			if _, err := r.plan(context.Background(), scaler.DeepCopy(), scaler, md, now, true); err != nil {
+				t.Fatalf("plan error = %v", err)
+			}
+			gotMD := scalerTestGetDeployment(t, cli)
+			if got := scalerTestVector(gotMD); got["prefill"] != 2 || got["decode"] != 6 {
+				t.Fatalf("restored vector = %#v, want 2P:6D", got)
+			}
+			if scaler.Status.LastScaleDown.Outcome != workercore.ModelDeploymentScalerScaleDownOutcomeAborted {
+				t.Fatalf("LastScaleDown.Outcome = %q, want Aborted", scaler.Status.LastScaleDown.Outcome)
+			}
+			if cond := scalerCondition(scaler, workercore.ModelDeploymentScalerConditionTypeBlocked); cond.Status != meta.ConditionTrue || cond.Reason != workercore.ModelDeploymentScalerReasonScaleDownAborted {
+				t.Fatalf("Blocked condition = %+v, want ScaleDownAborted", cond)
+			}
+		})
+	}
+
+	t.Run("stale aborted status before current commit does not restore old vector", func(t *testing.T) {
+		md := scalerTestDeployment("target", "target-uid", map[string]int32{"prefill": 1, "decode": 3})
+		staleTime := meta.NewTime(now.Add(-10 * time.Minute))
+		md.Status.Retirement = &workercore.ModelDeploymentRetirementStatus{
+			RoleName:       "decode",
+			ReplicaOrdinal: 4,
+			State:          workercore.ModelDeploymentRetirementStateAborted,
+			Reason:         "old abort",
+			StartedAt:      staleTime,
+			PhaseStartedAt: staleTime,
+		}
+		scaler := scalerTestCoupledScaler()
+		scaler.Status.Binding = &workercore.ModelDeploymentScalerBindingStatus{
+			TargetUID: "target-uid", TargetName: "target", Term: 1,
+		}
+		commitTS := meta.NewTime(now.Add(-1 * time.Minute))
+		scaler.Status.LastCommit = &workercore.ModelDeploymentScalerCommitStatus{
+			DecisionID: "dec-new-down",
+			Term:       1,
+			Vector:     map[string]int32{"prefill": 1, "decode": 3},
+			Timestamp:  &commitTS,
+		}
+		scaler.Status.LastScaleDown = &workercore.ModelDeploymentScalerScaleDownStatus{
+			Role:               "decode",
+			Ordinal:            3,
+			PreScaleDownVector: map[string]int32{"prefill": 2, "decode": 6},
+			Outcome:            workercore.ModelDeploymentScalerScaleDownOutcomeCommitted,
+		}
+		md.Annotations = map[string]string{
+			workercore.ModelDeploymentScalerBindingAnnotationKey: scalerTestBindingJSON(scaler, 1),
+		}
+
+		cli := scalerTestClient(t, md, scaler, scalerTestOwnedPod(md, "prefill", 0, core.PodRunning), scalerTestOwnedPod(md, "decode", 0, core.PodRunning))
+		r := scalerTestReconciler(cli, now)
+		if _, err := r.plan(context.Background(), scaler.DeepCopy(), scaler, md, now, true); err != nil {
+			t.Fatalf("plan error = %v", err)
+		}
+		gotMD := scalerTestGetDeployment(t, cli)
+		if got := scalerTestVector(gotMD); got["prefill"] != 1 || got["decode"] != 3 {
+			t.Fatalf("stale abort unexpectedly modified vector to %#v", got)
 		}
 	})
 }

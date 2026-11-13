@@ -36,6 +36,7 @@ type ModelDeploymentScalerRoleState struct {
 type ModelDeploymentScalerConstraintInput struct {
 	Spec                v1alpha1.ModelDeploymentScalerSpec
 	Roles               []ModelDeploymentScalerRoleState
+	WholeUnit           map[string]int32
 	HasActiveRetirement bool
 	InAbortCooldown     bool
 	CooldownUntil       time.Time
@@ -95,6 +96,10 @@ func SolveModelDeploymentScalerConstraints(input ModelDeploymentScalerConstraint
 	}
 	if result.BlockingReason == v1alpha1.ModelDeploymentScalerReasonBoundsConflict {
 		return result
+	}
+
+	if kCur, ok := wholeUnitCurrentMultiplier(input.Roles, states, input.WholeUnit); ok {
+		return solveWholeUnitConstraints(input, states, bounds, kCur, result)
 	}
 
 	roleNames := make([]string, 0, len(input.Roles))
@@ -647,4 +652,265 @@ func minInt32(a, b int32) int32 {
 		return a
 	}
 	return b
+}
+
+func wholeUnitCurrentMultiplier(
+	roles []ModelDeploymentScalerRoleState,
+	states map[string]ModelDeploymentScalerRoleState,
+	wholeUnit map[string]int32,
+) (int32, bool) {
+	if len(wholeUnit) == 0 || len(wholeUnit) != len(roles) {
+		return 0, false
+	}
+	var kCur int32
+	first := true
+	for _, role := range roles {
+		unit, ok := wholeUnit[role.Name]
+		if !ok || unit <= 0 {
+			return 0, false
+		}
+		state := states[role.Name]
+		if state.CurrentReplicas < unit || state.CurrentReplicas%unit != 0 {
+			return 0, false
+		}
+		k := state.CurrentReplicas / unit
+		if k < 1 {
+			return 0, false
+		}
+		if first {
+			kCur = k
+			first = false
+		} else if k != kCur {
+			return 0, false
+		}
+	}
+	return kCur, !first && kCur >= 1
+}
+
+func wholeUnitRawTarget(
+	roles []ModelDeploymentScalerRoleState,
+	wholeUnit map[string]int32,
+	kCur int32,
+) int32 {
+	var (
+		sharedK int32
+		same    = true
+		anyUp   = false
+		maxUpK  int32
+		minK    int32
+		decodeK int32
+		hasDec  bool
+	)
+	for i, role := range roles {
+		unit := wholeUnit[role.Name]
+		raw := role.RawRecommendedReplicas
+		k := int32(1)
+		if raw > 0 {
+			k = (raw + unit - 1) / unit
+		}
+		if raw > role.CurrentReplicas {
+			anyUp = true
+			if k > maxUpK {
+				maxUpK = k
+			}
+		}
+		if role.Kind == algorithm.RoleKindDecode && raw > 0 && raw%unit == 0 {
+			decodeK = raw / unit
+			hasDec = true
+		}
+		if i == 0 {
+			sharedK = k
+			minK = k
+		} else {
+			if raw%unit != 0 || raw/unit != sharedK {
+				same = false
+			}
+			if k < minK {
+				minK = k
+			}
+		}
+	}
+	if same && sharedK >= 1 {
+		return sharedK
+	}
+	if hasDec && decodeK >= 1 {
+		return decodeK
+	}
+	if anyUp && maxUpK > kCur {
+		return maxUpK
+	}
+	return maxInt32(1, minK)
+}
+
+func applyWholeUnitStepLimit(
+	behavior v1alpha1.ModelDeploymentScalerBehaviorSpec,
+	states map[string]ModelDeploymentScalerRoleState,
+	wholeUnit map[string]int32,
+	kCur, kMin, kMax int32,
+) (int32, int32) {
+	up := behavior.ScaleUp
+	unitUpCap := int32(math.MaxInt32)
+	if up.StepPolicy == nil && up.MaxStepReplicas == 0 && up.MaxStepPercent == 0 {
+		for name, unit := range wholeUnit {
+			current := states[name].CurrentReplicas
+			delta := maxInt32(4, int32(math.Ceil(float64(current)*100/100)))
+			unitUpCap = minInt32(unitUpCap, delta/unit)
+		}
+		unitUpCap = maxInt32(1, unitUpCap)
+	} else {
+		for name, unit := range wholeUnit {
+			current := states[name].CurrentReplicas
+			var delta int32
+			if up.StepPolicy != nil {
+				delta = stepAmount(current, *up.StepPolicy)
+			} else {
+				if up.MaxStepReplicas > 0 {
+					delta = maxInt32(delta, up.MaxStepReplicas)
+				}
+				if up.MaxStepPercent > 0 {
+					delta = maxInt32(delta, int32(math.Ceil(float64(current)*float64(up.MaxStepPercent)/100)))
+				}
+			}
+			unitUpCap = minInt32(unitUpCap, delta/unit)
+		}
+	}
+	kCeil := clamp(kCur+unitUpCap, kCur, kMax)
+
+	down := behavior.ScaleDown
+	unitDownCap := int32(1)
+	if down.StepPolicy != nil {
+		unitDownCap = math.MaxInt32
+		for name, unit := range wholeUnit {
+			delta := stepAmount(states[name].CurrentReplicas, *down.StepPolicy)
+			unitDownCap = minInt32(unitDownCap, delta/unit)
+		}
+	}
+	kFloor := maxInt32(kCur-unitDownCap, kMin)
+	return kFloor, kCeil
+}
+
+func solveWholeUnitConstraints(
+	input ModelDeploymentScalerConstraintInput,
+	states map[string]ModelDeploymentScalerRoleState,
+	bounds map[string]v1alpha1.ModelDeploymentScalerRoleBounds,
+	kCur int32,
+	result ModelDeploymentScalerConstraintResult,
+) ModelDeploymentScalerConstraintResult {
+	kMin := int32(1)
+	kMax := int32(math.MaxInt32)
+	for _, role := range input.Roles {
+		bound := bounds[role.Name]
+		minimum := maxInt32(1, bound.MinReplicas)
+		maximum := bound.MaxReplicas
+		if maximum < minimum {
+			result.BlockingReason = v1alpha1.ModelDeploymentScalerReasonBoundsConflict
+			for _, r := range input.Roles {
+				result.Reasons[r.Name] = result.BlockingReason
+			}
+			return result
+		}
+		unit := input.WholeUnit[role.Name]
+		kMin = maxInt32(kMin, (minimum+unit-1)/unit)
+		kMax = minInt32(kMax, maximum/unit)
+	}
+	if kMin > kMax {
+		result.BlockingReason = v1alpha1.ModelDeploymentScalerReasonRatioConflict
+		for _, r := range input.Roles {
+			result.Reasons[r.Name] = result.BlockingReason
+		}
+		return result
+	}
+
+	kCurClamped := clamp(kCur, kMin, kMax)
+	kRaw := wholeUnitRawTarget(input.Roles, input.WholeUnit, kCur)
+	kFloor, kCeil := applyWholeUnitStepLimit(input.Spec.Behavior, states, input.WholeUnit, kCurClamped, kMin, kMax)
+
+	up := input.Spec.Behavior.ScaleUp
+	upWindow := time.Duration(up.StabilizationWindowSeconds) * time.Second
+	for _, role := range input.Roles {
+		if role.HasPendingUnadmittedWorkload {
+			kCeil = minInt32(kCeil, kCurClamped)
+		}
+		if up.StabilizationWindowSeconds > 0 && kRaw > kCurClamped &&
+			!historySpans(result.StabilizationHistory[role.Name], input.Now, upWindow) {
+			kCeil = minInt32(kCeil, kCurClamped)
+		}
+	}
+
+	down := input.Spec.Behavior.ScaleDown
+	downWindow := time.Duration(down.StabilizationWindowSeconds) * time.Second
+	if downWindow <= 0 {
+		downWindow = modelDeploymentScalerDefaultScaleDownWindow
+	}
+	allSpan := true
+	var maxHistK int32
+	hasHistSample := false
+	for _, role := range input.Roles {
+		unit := input.WholeUnit[role.Name]
+		hist := result.StabilizationHistory[role.Name]
+		if !historySpans(hist, input.Now, downWindow) {
+			allSpan = false
+		}
+		unitHist := make([]v1alpha1.ModelDeploymentScalerStabilizationSample, len(hist))
+		for i, sample := range hist {
+			units := int32(0)
+			if sample.Replicas > 0 {
+				units = (sample.Replicas + unit - 1) / unit
+			}
+			unitHist[i] = v1alpha1.ModelDeploymentScalerStabilizationSample{
+				Timestamp: sample.Timestamp,
+				Replicas:  units,
+			}
+		}
+		if roleMax, ok := rollingMaximum(unitHist, input.Now, downWindow); ok {
+			if !hasHistSample || roleMax > maxHistK {
+				maxHistK = roleMax
+				hasHistSample = true
+			}
+		}
+	}
+	if !allSpan {
+		kFloor = maxInt32(kFloor, kCurClamped)
+	} else if hasHistSample && maxHistK >= kCurClamped {
+		kFloor = maxInt32(kFloor, kCurClamped)
+	} else if hasHistSample {
+		kFloor = maxInt32(kFloor, minInt32(kCurClamped, maxHistK))
+	}
+
+	inCooldown := input.InAbortCooldown || (!input.CooldownUntil.IsZero() && input.Now.Before(input.CooldownUntil))
+	if input.HasActiveRetirement || inCooldown {
+		kFloor = maxInt32(kFloor, kCurClamped)
+	}
+	grace := time.Duration(down.DecodePostScaleUpGraceSeconds) * time.Second
+	if grace <= 0 {
+		grace = modelDeploymentScalerDefaultDecodeGrace
+	}
+	for _, role := range input.Roles {
+		if role.HoldScaleDown || !role.CompleteCoverage {
+			kFloor = maxInt32(kFloor, kCurClamped)
+		}
+		if role.Kind == algorithm.RoleKindDecode && !role.LastScaleUpTime.IsZero() && input.Now.Sub(role.LastScaleUpTime) < grace {
+			kFloor = maxInt32(kFloor, kCurClamped)
+		}
+	}
+
+	kFloor = clamp(kFloor, kMin, kMax)
+	kCeil = clamp(kCeil, kMin, kMax)
+	kTarget := clamp(kRaw, kMin, kMax)
+	kFinal := clamp(kTarget, kFloor, kCeil)
+	for _, role := range input.Roles {
+		unit := input.WholeUnit[role.Name]
+		result.Intervals[role.Name] = ModelDeploymentScalerReplicaInterval{
+			Floor: kFloor * unit,
+			Ceil:  kCeil * unit,
+		}
+		result.Replicas[role.Name] = kFinal * unit
+	}
+	if kFinal == kCur && kRaw != kCur {
+		result.BlockingReason = v1alpha1.ModelDeploymentScalerReasonPacingBounded
+		for _, role := range input.Roles {
+			result.Reasons[role.Name] = result.BlockingReason
+		}
+	}
+	return result
 }

@@ -395,7 +395,7 @@ parallel before `T4` finalizes the scaling guides and module index.
     - `go test -run 'TestModelDeploymentScalerPrior|TestModelDeploymentScalerOperatorEnvGate|TestModelDeploymentScalerCapacityPrior' ./pkg/worker/controllers/worker`
   - **Expected:** Exit code `0`; Tier 1 and Tier 2 resolution matrices, connector env synthesis, and fingerprint invalidation tests pass.
 
-- [ ] **T2 · Whole-unit observation, partial-signal latency guard, atomic unit pacing, and retirement recovery**
+- [x] **T2 · Whole-unit observation, partial-signal latency guard, atomic unit pacing, and retirement recovery**
   - **Blocked by:** T1
   - **Owns:** `pkg/worker/scaling/algorithm/token_throughput.go`, `pkg/worker/scaling/algorithm/predictive.go`, `pkg/worker/scaling/algorithm/algorithm_test.go`, `pkg/worker/controllers/worker/model_deployment_scaler_planner.go`, `pkg/worker/controllers/worker/model_deployment_scaler_constraints.go`, `pkg/worker/controllers/worker/model_deployment_scaler_constraints_test.go`, `pkg/worker/controllers/worker/model_deployment_scaler_test.go`, `pkg/worker/controllers/worker/model_deployment_scaler_sim_ratio_test.go`
   - **Gate:** review

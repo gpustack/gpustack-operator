@@ -467,3 +467,112 @@ func TestPredictorStateCopyIsolationAndSignalUsability(t *testing.T) {
 		t.Fatalf("next history len = %v, want 2", next)
 	}
 }
+
+func TestLatencyGuardWithMissingOrStaleThroughput(t *testing.T) {
+	base := time.Unix(100, 0)
+	tt := TokenThroughput{
+		ServerTargetTokensPerSecond: 100,
+		TTFTTargetMilliseconds:      100,
+		ITLTargetMilliseconds:       20,
+	}
+	pred := Predictive{
+		TokenThroughput:               tt,
+		ServerTokenCapacityPerReplica: 100,
+		HorizonSeconds:                300,
+		MinPoints:                     6,
+	}
+
+	for _, throughputState := range []SignalState{SignalMissing, SignalStale} {
+		for _, tc := range []struct {
+			name        string
+			ttft        float64
+			itl         float64
+			wantDesired int32
+			wantReason  string
+		}{
+			{
+				name:        "ratio_1.0",
+				ttft:        100,
+				itl:         20,
+				wantDesired: 2,
+				wantReason:  ReasonWaitingForMetrics,
+			},
+			{
+				name:        "ratio_1.1",
+				ttft:        110,
+				itl:         20,
+				wantDesired: 2,
+				wantReason:  ReasonWaitingForMetrics,
+			},
+			{
+				name:        "ratio_1.2",
+				ttft:        120,
+				itl:         20,
+				wantDesired: 2,
+				wantReason:  ReasonWaitingForMetrics,
+			},
+			{
+				name:        "ratio_gt_1.2_ttft",
+				ttft:        121,
+				itl:         10,
+				wantDesired: 3,
+				wantReason:  ReasonLatencyGuardScaleUp,
+			},
+			{
+				name:        "ratio_gt_1.2_itl",
+				ttft:        50,
+				itl:         25,
+				wantDesired: 3,
+				wantReason:  ReasonLatencyGuardScaleUp,
+			},
+		} {
+			t.Run(string(throughputState)+"/"+tc.name, func(t *testing.T) {
+				priorHistory := NewDemandHistory()
+				priorHistory.Push(DemandSample{Timestamp: base, TokensPerSecond: 80})
+				prior := &PredictorState{
+					Level:       80,
+					Trend:       4,
+					Covariance:  [4]float64{1, 0, 0, 1},
+					SampleCount: 6,
+					History:     priorHistory,
+				}
+				obs := freshObservation(base.Add(15 * time.Second))
+				obs.Kind = RoleKindServer
+				obs.CurrentReplicas = 2
+				obs.ReadyReplicas = 2
+				obs.ThroughputState = throughputState
+				obs.LatencyState = SignalFresh
+				obs.TTFTMilliseconds = tc.ttft
+				obs.ITLMilliseconds = tc.itl
+
+				recTT, stateTT := tt.Recommend(obs, prior)
+				if recTT.DesiredReplicas != tc.wantDesired || recTT.Reason != tc.wantReason || !recTT.HoldScaleDown {
+					t.Fatalf("TokenThroughput = %#v, want desired=%d reason=%s HoldScaleDown=true", recTT, tc.wantDesired, tc.wantReason)
+				}
+				if stateTT.History.Len() != 1 {
+					t.Fatalf("TokenThroughput appended sample on missing throughput: len=%d", stateTT.History.Len())
+				}
+
+				recPred, statePred := pred.Recommend(obs, prior)
+				if recPred.DesiredReplicas != tc.wantDesired || recPred.Reason != tc.wantReason || !recPred.HoldScaleDown {
+					t.Fatalf("Predictive = %#v, want desired=%d reason=%s HoldScaleDown=true", recPred, tc.wantDesired, tc.wantReason)
+				}
+				if statePred.History.Len() != 1 || statePred.SampleCount != 6 || statePred.Level != 80 || statePred.Trend != 4 {
+					t.Fatalf("Predictive mutated Kalman state on missing throughput: %#v", statePred)
+				}
+			})
+		}
+	}
+
+	// Zero ready replicas must still hold even on fresh latency breach.
+	obsNoReady := freshObservation(base.Add(30 * time.Second))
+	obsNoReady.Kind = RoleKindServer
+	obsNoReady.CurrentReplicas = 2
+	obsNoReady.ReadyReplicas = 0
+	obsNoReady.ThroughputState = SignalMissing
+	obsNoReady.LatencyState = SignalFresh
+	obsNoReady.TTFTMilliseconds = 200
+	if rec, _ := tt.Recommend(obsNoReady, nil); rec.DesiredReplicas != 2 || rec.Reason != ReasonNoReadyReplicas || !rec.HoldScaleDown {
+		t.Fatalf("no ready replicas = %#v", rec)
+	}
+}

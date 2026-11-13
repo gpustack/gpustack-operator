@@ -45,6 +45,13 @@ func (t TokenThroughput) Recommend(obs RoleObservation, prior *PredictorState) (
 		return rec, &state
 	}
 	if !signalUsable(obs.ThroughputState) {
+		latencyRec, latencyReason, _ := t.latencyGuard(obs)
+		if obs.ReadyReplicas > 0 && latencyReason == ReasonLatencyGuardScaleUp {
+			rec.DesiredReplicas = maxInt32(1, latencyRec)
+			rec.HoldScaleDown = true
+			rec.Reason = ReasonLatencyGuardScaleUp
+			return rec, &state
+		}
 		rec.HoldScaleDown = true
 		rec.Reason = ReasonWaitingForMetrics
 		return rec, &state
