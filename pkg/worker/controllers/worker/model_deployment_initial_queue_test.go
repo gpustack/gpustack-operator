@@ -42,7 +42,7 @@ func TestLifecycle_AnInitialQueuedRoleAcceptsUpdatedSchedulingInputs(t *testing.
 				md.Spec.Roles[0].ReplicaSize = tc.size
 				md.Spec.Roles[0].Resources = &workercore.ModelDeploymentRoleResources{Accelerator: ptr.To(resource.MustParse("2"))}
 			})
-			f := newLifecycleFixture(t, md, newRenderInstanceTypeB())
+			f := newLifecycleFixture(t, md, newRenderAcceleratorTypeB())
 			f.pass(false)
 			for ordinal := range int(tc.replicas) {
 				setInitialReplicaQueue(t, f, ordinal)
@@ -75,7 +75,7 @@ func TestLifecycle_AnInitialQueuedRoleAcceptsUpdatedSchedulingInputs(t *testing.
 			edited.Spec.Roles[0].Resources.Accelerator = ptr.To(resource.MustParse("1"))
 			queue := "queue-for-h20-8x"
 			if tc.changePool {
-				edited.Spec.Roles[0].InstanceType = "a100-8x"
+				edited.Spec.Roles[0].AcceleratorType = "a100-8x"
 				queue = "queue-for-a100-8x"
 			}
 			require.NoError(t, f.cli.Update(context.Background(), edited))
@@ -99,7 +99,6 @@ func TestLifecycle_AnInitialQueuedRoleAcceptsUpdatedSchedulingInputs(t *testing.
 					require.NotEqual(t, old.UID, member.UID)
 				}
 				qtyEqual(t, qty("1"), member.Spec.Containers[0].Resources.Requests[accName], "the replacement request")
-				qtyEqual(t, qty("16"), member.Spec.Containers[0].Resources.Limits[core.ResourceCPU], "derived CPU capacity")
 				require.Equal(t, queue, member.Labels[kueuectrlconst.QueueLabel])
 			}
 			fresh := f.workloadNamed(members[0].Labels[kueuepodconst.GroupNameLabel])
@@ -308,7 +307,7 @@ func TestLifecycle_InitialQueueSlotAcceptsASecondResourceAndPoolEdit(t *testing.
 	f := newLifecycleFixture(t, newRenderDeployment(func(md *workercore.ModelDeployment) {
 		md.Spec.Roles[0].Replicas = 1
 		md.Spec.Roles[0].Resources = &workercore.ModelDeploymentRoleResources{Accelerator: ptr.To(resource.MustParse("2"))}
-	}), newRenderInstanceTypeB())
+	}), newRenderAcceleratorTypeB())
 	f.pass(false)
 	setInitialReplicaQueue(t, f, 0)
 	standInForKueue(t, f.cli, false)
@@ -325,7 +324,7 @@ func TestLifecycle_InitialQueueSlotAcceptsASecondResourceAndPoolEdit(t *testing.
 	require.NotNil(t, oldWorkload)
 	second := getModelDeployment(t, f.cli)
 	second.Spec.Roles[0].Resources.Accelerator = ptr.To(resource.MustParse("3"))
-	second.Spec.Roles[0].InstanceType = "a100-8x"
+	second.Spec.Roles[0].AcceleratorType = "a100-8x"
 	require.NoError(t, f.cli.Update(context.Background(), second))
 	f.pass(false)
 	f.admit()

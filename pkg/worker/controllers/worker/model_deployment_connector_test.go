@@ -402,12 +402,8 @@ func TestSynthesizeModelDeploymentConnector_KVTransferProtocol(t *testing.T) {
 			require.NoError(t, err)
 			require.Len(t, got.Args, 2)
 			assert.JSONEq(t, strings.ReplaceAll(`{
-		"kv_connector":"MultiConnector","kv_role":"kv_consumer",
-		"kv_connector_extra_config":{"connectors":[
-			{"kv_connector":"MooncakeConnector","kv_role":"kv_consumer",
-			 "kv_connector_extra_config":{"mooncake_protocol":"<protocol>"}},
-			{"kv_connector":"MooncakeStoreConnector","kv_role":"kv_consumer"}
-		]}
+		"kv_connector":"MooncakeConnector","kv_role":"kv_consumer",
+		"kv_connector_extra_config":{"mooncake_protocol":"<protocol>"}
 		}`, "<protocol>", tc.want), got.Args[1])
 		})
 	}
@@ -874,7 +870,7 @@ func TestModelDeploymentConnector_ReachesThePodPerRole(t *testing.T) {
 		md.Spec.Roles[0].Kind = workercore.ModelDeploymentRoleKindPrefill
 		md.Spec.Roles[1].Kind = workercore.ModelDeploymentRoleKindDecode
 	})
-	cli := newModelDeploymentClient(md, newRenderInstanceType(),
+	cli := newModelDeploymentClient(md, newRenderAcceleratorType(),
 		newRenderBinding(), newRenderPool(), newRenderBackend())
 
 	_, err := reconcileModelDeployment(t, cli)
@@ -903,7 +899,7 @@ func TestModelDeploymentConnector_RoutedPairWithoutKVCacheUsesKVTransferOnly(t *
 	md := routedModelDeployment(func(md *workercore.ModelDeployment) {
 		md.Spec.KVCache = nil
 	})
-	cli := newModelDeploymentClient(md, newRenderInstanceType())
+	cli := newModelDeploymentClient(md, newRenderAcceleratorType())
 
 	_, err := reconcileModelDeployment(t, cli)
 	require.NoError(t, err)
@@ -943,7 +939,7 @@ func TestModelDeploymentConnector_PureDirectEFARequestsDevice(t *testing.T) {
 			}
 		}
 	})
-	cli := newModelDeploymentClient(md, newRenderInstanceType())
+	cli := newModelDeploymentClient(md, newRenderAcceleratorType())
 	_, err := reconcileModelDeployment(t, cli)
 	require.NoError(t, err)
 	for _, pod := range replicaPods(t, cli) {
@@ -962,7 +958,7 @@ func TestModelDeploymentConnector_MooncakeDerivesAscendAndROCmProtocols(t *testi
 				Backend: workercore.ModelDeploymentKVTransferBackendMooncake,
 			}
 		})
-		cli := newModelDeploymentClient(md, ascendRenderInstanceType())
+		cli := newModelDeploymentClient(md, ascendRenderAcceleratorType())
 		_, err := reconcileModelDeployment(t, cli)
 		require.NoError(t, err)
 		for _, pod := range replicaPods(t, cli) {
@@ -986,7 +982,7 @@ func TestModelDeploymentConnector_MooncakeDerivesAscendAndROCmProtocols(t *testi
 		md := routedModelDeployment(func(md *workercore.ModelDeployment) {
 			md.Spec.KVCache = nil
 		})
-		rocmIT := newRenderInstanceType(func(it *worker.InstanceType) {
+		rocmIT := newRenderAcceleratorType(func(it *worker.AcceleratorType) {
 			it.Status.Detail.Manufacturer = nodefeature.ManufacturerAMD
 		})
 		cli := newModelDeploymentClient(md, rocmIT)
@@ -1023,7 +1019,7 @@ func TestModelDeploymentConnector_CacheFabricReachesPod(t *testing.T) {
 			})
 			backend := newRenderBackend()
 			backend.Spec.Transport.Protocol = tc.protocol
-			cli := newModelDeploymentClient(md, newRenderInstanceType(),
+			cli := newModelDeploymentClient(md, newRenderAcceleratorType(),
 				newRenderBinding(), newRenderPool(), backend)
 			_, err := reconcileModelDeployment(t, cli)
 			require.NoError(t, err)
@@ -1047,7 +1043,7 @@ func TestModelDeploymentConnector_CacheFabricBeforeEndpoint(t *testing.T) {
 	pool.Status.ClientEndpoint = ""
 	backend := newRenderBackend()
 	backend.Spec.Transport.Protocol = "RDMA"
-	cli := newModelDeploymentClient(md, newRenderInstanceType(), newRenderBinding(), pool, backend)
+	cli := newModelDeploymentClient(md, newRenderAcceleratorType(), newRenderBinding(), pool, backend)
 	_, err := reconcileModelDeployment(t, cli)
 	require.NoError(t, err)
 	pods := replicaPods(t, cli)
@@ -1058,10 +1054,10 @@ func TestModelDeploymentConnector_CacheFabricBeforeEndpoint(t *testing.T) {
 	}
 }
 
-// ascendRenderInstanceType is the render fixture's InstanceType with the pool's vendor flipped to
+// ascendRenderAcceleratorType is the render fixture's InstanceType with the pool's vendor flipped to
 // Ascend, which is what turns the same declared engine into the vLLM-Ascend renderer.
-func ascendRenderInstanceType() *worker.InstanceType {
-	return newRenderInstanceType(func(it *worker.InstanceType) {
+func ascendRenderAcceleratorType() *worker.AcceleratorType {
+	return newRenderAcceleratorType(func(it *worker.AcceleratorType) {
 		it.Status.Detail.Manufacturer = nodefeature.ManufacturerAscend
 	})
 }
@@ -1077,7 +1073,7 @@ func TestModelDeploymentConnector_ParallelismReachesBothPodsOfThePair(t *testing
 		md.Spec.Roles[0].ExtraArgs = []string{"--tensor-parallel-size", "2"}
 		md.Spec.Roles[1].ExtraArgs = []string{"--tensor-parallel-size", "1", "--data-parallel-size", "2"}
 	})
-	cli := newModelDeploymentClient(md, ascendRenderInstanceType())
+	cli := newModelDeploymentClient(md, ascendRenderAcceleratorType())
 
 	_, err := reconcileModelDeployment(t, cli)
 	require.NoError(t, err)
@@ -1117,7 +1113,7 @@ func TestModelDeploymentConnector_DeclaredDegreesLeaveTheNativeDocumentUntouched
 		md.Spec.Roles[0].ExtraArgs = []string{"--tensor-parallel-size", "2"}
 		md.Spec.Roles[1].ExtraArgs = []string{"--tensor-parallel-size", "2"}
 	})
-	cli := newModelDeploymentClient(md, newRenderInstanceType())
+	cli := newModelDeploymentClient(md, newRenderAcceleratorType())
 
 	_, err := reconcileModelDeployment(t, cli)
 	require.NoError(t, err)
@@ -1151,7 +1147,7 @@ func TestModelDeploymentConnector_TakeOverHalfReadsOnlyItsCommand(t *testing.T) 
 		md.Spec.Roles[1].Command = []string{"/bin/my-server", "--flag"}
 		md.Spec.Roles[1].ExtraArgs = []string{"--tensor-parallel-size", "banana"}
 	})
-	cli := newModelDeploymentClient(md, ascendRenderInstanceType())
+	cli := newModelDeploymentClient(md, ascendRenderAcceleratorType())
 
 	_, err := reconcileModelDeployment(t, cli)
 	require.NoError(t, err, "a take-over role's inert arguments are parsed by nobody, not even to refuse them")
@@ -1185,7 +1181,7 @@ func TestModelDeploymentConnector_TakeOverCommandFillsItsHalf(t *testing.T) {
 		md.Spec.Roles[0].ExtraArgs = []string{"--tensor-parallel-size", "2"}
 		md.Spec.Roles[1].Command = []string{"/bin/my-server", "--data-parallel-size", "3"}
 	})
-	cli := newModelDeploymentClient(md, ascendRenderInstanceType())
+	cli := newModelDeploymentClient(md, ascendRenderAcceleratorType())
 
 	_, err := reconcileModelDeployment(t, cli)
 	require.NoError(t, err)
@@ -2021,7 +2017,7 @@ func TestModelDeploymentConnectorEnumHasOneValue(t *testing.T) {
 // be held: the field is inert, asserted on a render that DOES carry a connector, so a wiring that
 // made it matter would move the comparison.
 func TestModelDeploymentConnectorFieldIsInert(t *testing.T) {
-	it := newRenderInstanceType()
+	it := newRenderAcceleratorType()
 
 	render := func(connector string) *core.Pod {
 		t.Helper()
@@ -2036,10 +2032,10 @@ func TestModelDeploymentConnectorFieldIsInert(t *testing.T) {
 		require.NoError(t, err)
 
 		pod, err := renderModelDeploymentPod(context.Background(), ModelDeploymentRenderInput{
-			Deployment:   md,
-			Role:         &md.Spec.Roles[0],
-			InstanceType: it,
-			Connector:    synthesized,
+			Deployment:      md,
+			Role:            &md.Spec.Roles[0],
+			AcceleratorType: it,
+			Connector:       synthesized,
 		})
 		require.NoError(t, err)
 
@@ -2195,8 +2191,18 @@ func TestSynthesizeModelDeploymentConnector_TransferBackends(t *testing.T) {
 
 		decode := input(workercore.ModelDeploymentEngineVLLM, nodefeature.ManufacturerNVIDIA, inject.KVTransferBackendNIXL, false)
 		decode.Kind = workercore.ModelDeploymentRoleKindDecode
+		decode.CachePrefix = "m-0123456789abcdef0123456789abcdef"
 		decodeRender, err := SynthesizeModelDeploymentConnector(decode)
 		require.NoError(t, err)
+		require.Len(t, decodeRender.Args, 2)
+		assert.JSONEq(t, `{
+			"kv_connector":"NixlConnector",
+			"kv_role":"kv_consumer",
+			"kv_connector_extra_config":{"backends":["UCX"]}
+		}`, decodeRender.Args[1])
+		require.NotNil(t, decodeRender.binding)
+		assert.Empty(t, decodeRender.binding.Domain)
+		assert.Empty(t, decodeRender.binding.CachePrefix)
 		require.NotNil(t, envByName(decodeRender.Env, inject.VLLMNIXLSideChannelHostEnv),
 			"the side channel is a pair of listeners, so the consumer arms it too")
 		assert.Contains(t, decodeRender.Ports, core.ContainerPort{

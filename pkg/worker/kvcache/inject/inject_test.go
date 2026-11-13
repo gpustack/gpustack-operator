@@ -546,39 +546,56 @@ func TestRender_TenantOmittedForAnEmptyDomain(t *testing.T) {
 }
 
 func TestRender_VLLMKVTransferComposesPointToPointAndStore(t *testing.T) {
-	for _, tc := range []struct {
-		name      string
-		role      Role
-		pointRole string
-		storeRole string
-	}{
-		{name: "prefill", role: RolePrefill, pointRole: "kv_producer", storeRole: "kv_both"},
-		{name: "decode", role: RoleDecode, pointRole: "kv_consumer", storeRole: "kv_consumer"},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			result, err := Render(Input{
-				Engine: EngineVLLM, Role: tc.role, Domain: "team-a-chat",
-				Connection: testConnection(), KVTransfer: true,
-			})
-			require.NoError(t, err)
-			require.Len(t, result.Args, 2)
-			assert.Equal(t, vllmTransferConfigArg, result.Args[0])
-			assert.JSONEq(t, fmt.Sprintf(`{
-				"kv_connector":"MultiConnector",
-				"kv_role":%q,
-				"kv_connector_extra_config":{"connectors":[
-					{"kv_connector":"MooncakeConnector","kv_role":%q,
-					 "kv_connector_extra_config":{"mooncake_protocol":"tcp"}},
-					{"kv_connector":"MooncakeStoreConnector","kv_role":%q}
-				]}
-			}`, tc.pointRole, tc.pointRole, tc.storeRole), result.Args[1])
-			assert.True(t, result.KVTransfer)
-			for _, port := range result.Ports {
-				assert.Empty(t, utilvalidation.IsValidPortName(port.Name),
-					"rendered port %q must be accepted by the Kubernetes API", port.Name)
-			}
+	t.Run("prefill composes MultiConnector with shared store", func(t *testing.T) {
+		result, err := Render(Input{
+			Engine: EngineVLLM, Role: RolePrefill, Domain: "team-a-chat",
+			Connection: testConnection(), KVTransfer: true,
 		})
-	}
+		require.NoError(t, err)
+		require.Len(t, result.Args, 2)
+		assert.Equal(t, vllmTransferConfigArg, result.Args[0])
+		assert.JSONEq(t, `{
+			"kv_connector":"MultiConnector",
+			"kv_role":"kv_producer",
+			"kv_connector_extra_config":{"connectors":[
+				{"kv_connector":"MooncakeConnector","kv_role":"kv_producer",
+				 "kv_connector_extra_config":{"mooncake_protocol":"tcp"}},
+				{"kv_connector":"MooncakeStoreConnector","kv_role":"kv_both"}
+			]}
+		}`, result.Args[1])
+		assert.True(t, result.KVTransfer)
+		assert.True(t, result.TenantInjected)
+		assert.Contains(t, envNames(result.Env), vllmConfigPathEnv)
+		require.Len(t, result.Volumes, 1)
+		require.Len(t, result.VolumeMounts, 1)
+		assert.Contains(t, result.PodAnnotations, ClientConfigAnnotationKey)
+		for _, port := range result.Ports {
+			assert.Empty(t, utilvalidation.IsValidPortName(port.Name),
+				"rendered port %q must be accepted by the Kubernetes API", port.Name)
+		}
+	})
+
+	t.Run("disaggregated decode renders direct connector alone without store projection", func(t *testing.T) {
+		result, err := Render(Input{
+			Engine: EngineVLLM, Role: RoleDecode, Domain: "team-a-chat",
+			Connection: testConnection(), KVTransfer: true,
+		})
+		require.NoError(t, err)
+		require.Len(t, result.Args, 2)
+		assert.Equal(t, vllmTransferConfigArg, result.Args[0])
+		assert.JSONEq(t, `{
+			"kv_connector":"MooncakeConnector",
+			"kv_role":"kv_consumer",
+			"kv_connector_extra_config":{"mooncake_protocol":"tcp"}
+		}`, result.Args[1])
+		assert.True(t, result.KVTransfer)
+		assert.False(t, result.TenantInjected)
+		assert.NotContains(t, envNames(result.Env), vllmConfigPathEnv)
+		assert.Empty(t, result.Volumes)
+		assert.Empty(t, result.VolumeMounts)
+		assert.Empty(t, result.PodAnnotations)
+		assert.Contains(t, result.DefaultedArgs, []string{"--block-size", "128"})
+	})
 }
 
 func TestRender_VLLMKVTransferWithoutStore(t *testing.T) {
@@ -710,6 +727,29 @@ func TestRender_VLLMAscendKVTransfer(t *testing.T) {
 		require.Len(t, result.VolumeMounts, 2)
 		assert.Equal(t, "/usr/local/Ascend/driver", result.VolumeMounts[1].MountPath)
 		assert.True(t, result.VolumeMounts[1].ReadOnly)
+	})
+
+	t.Run("disaggregated decode with a pool omits the store connector and mounts driver only", func(t *testing.T) {
+		conn := testConnection()
+		conn.Protocol = "ascend"
+		result, err := Render(Input{
+			Engine: EngineVLLMAscend, Role: RoleDecode, Connection: conn, KVTransfer: true,
+		})
+		require.NoError(t, err)
+		require.Len(t, result.Args, 2)
+		assert.Equal(t, vllmTransferConfigArg, result.Args[0])
+		assert.JSONEq(t, `{
+			"kv_connector":"MooncakeConnectorV1",
+			"kv_role":"kv_consumer",
+			"kv_port":8998,
+			"kv_connector_extra_config":{
+				"prefill":{"tp_size":1,"dp_size":1},
+				"decode":{"tp_size":1,"dp_size":1}}
+		}`, result.Args[1])
+		require.Len(t, result.Volumes, 1, "decode mounts only the Ascend driver without store config projection")
+		require.NotNil(t, result.Volumes[0].HostPath)
+		assert.Equal(t, "/usr/local/Ascend/driver", result.Volumes[0].HostPath.Path)
+		assert.Empty(t, result.PodAnnotations)
 	})
 }
 
@@ -889,25 +929,38 @@ func TestRender_KVTransferProtocolDeclared(t *testing.T) {
 			conn.Protocol = "tcp"
 
 			result, err := Render(Input{
-				Engine: EngineVLLM, Role: RoleDecode, Connection: conn,
+				Engine: EngineVLLM, Role: RolePrefill, Connection: conn,
 				KVTransfer: true, KVTransferProtocol: protocol,
 			})
 			require.NoError(t, err)
 			require.Len(t, result.Args, 2)
 			assert.JSONEq(t, fmt.Sprintf(`{
 				"kv_connector":"MultiConnector",
-				"kv_role":"kv_consumer",
+				"kv_role":"kv_producer",
 				"kv_connector_extra_config":{"connectors":[
-					{"kv_connector":"MooncakeConnector","kv_role":"kv_consumer",
+					{"kv_connector":"MooncakeConnector","kv_role":"kv_producer",
 					 "kv_connector_extra_config":{"mooncake_protocol":%q}},
-					{"kv_connector":"MooncakeStoreConnector","kv_role":"kv_consumer"}
+					{"kv_connector":"MooncakeStoreConnector","kv_role":"kv_both"}
 				]}
 			}`, protocol), result.Args[1])
 
 			assert.Equal(t, "tcp", renderedConfig(t, Input{
-				Engine: EngineVLLM, Role: RoleDecode, Connection: conn,
+				Engine: EngineVLLM, Role: RolePrefill, Connection: conn,
 				KVTransfer: true, KVTransferProtocol: protocol,
 			})["protocol"], "the declared value moves the direct leg alone")
+
+			decodeRes, err := Render(Input{
+				Engine: EngineVLLM, Role: RoleDecode, Connection: conn,
+				KVTransfer: true, KVTransferProtocol: protocol,
+			})
+			require.NoError(t, err)
+			require.Len(t, decodeRes.Args, 2)
+			assert.JSONEq(t, fmt.Sprintf(`{
+				"kv_connector":"MooncakeConnector",
+				"kv_role":"kv_consumer",
+				"kv_connector_extra_config":{"mooncake_protocol":%q}
+			}`, protocol), decodeRes.Args[1])
+			assert.Empty(t, decodeRes.PodAnnotations)
 		})
 	}
 }
@@ -1494,6 +1547,22 @@ func TestRender_VLLMNIXLTransferComposesPointToPointAndStore(t *testing.T) {
 			{"kv_connector":"MooncakeStoreConnector","kv_role":"kv_both"}
 		]}
 	}`, result.Args[1])
+
+	decode, err := Render(Input{
+		Engine: EngineVLLM, Role: RoleDecode, Connection: testConnection(),
+		KVTransfer: true, KVTransferBackend: KVTransferBackendNIXL, KVTransferEFA: true,
+	})
+	require.NoError(t, err)
+	require.Len(t, decode.Args, 2)
+	assert.JSONEq(t, `{
+		"kv_connector":"NixlConnector",
+		"kv_role":"kv_consumer",
+		"kv_connector_extra_config":{"backends":["LIBFABRIC"]}
+	}`, decode.Args[1])
+	assert.Contains(t, decode.DefaultedArgs, []string{"--block-size", "128"},
+		"decode keeps the TCP pool's block size aligned with prefill even without a store connector")
+	assert.NotContains(t, envNames(decode.DefaultedEnv), "MC_TCP_LANES_PER_PEER",
+		"decode running NixlConnector alone omits Mooncake TCP tuning env vars")
 }
 
 // TestRender_VLLMAscendHIXLTransfer pins what an explicitly named HIXL backend adds to the

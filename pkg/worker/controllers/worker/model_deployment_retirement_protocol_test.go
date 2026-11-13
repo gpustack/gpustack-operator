@@ -40,7 +40,7 @@ func newRetirementGPUProtocolFixture(t *testing.T) *retirementGPUProtocolFixture
 	md.Spec.Roles[0].Replicas = 1
 	require.Equal(t, realRenderHashOf(t, md, 0), kept.Annotations[modelDeploymentPodSpecHashAnnotation])
 	objects := make([]ctrlcli.Object, 0, 9)
-	objects = append(objects, md, newRenderInstanceType(), router)
+	objects = append(objects, md, newRenderAcceleratorType(), router)
 	for i, pod := range []*core.Pod{kept, target} {
 		pod.UID = types.UID([]string{"member-0", "member-1"}[i])
 		pod.Spec.NodeName = []string{"node-keeper", "node-target"}[i]

@@ -38,9 +38,9 @@ import (
 func modelDeployment(engine string, roles ...workercore.ModelDeploymentRole) *workercore.ModelDeployment {
 	if len(roles) == 0 {
 		roles = []workercore.ModelDeploymentRole{{
-			Name:         "server",
-			Replicas:     4,
-			InstanceType: "h20-8x",
+			Name:            "server",
+			Replicas:        4,
+			AcceleratorType: "h20-8x",
 		}}
 	}
 
@@ -58,7 +58,7 @@ func modelDeployment(engine string, roles ...workercore.ModelDeploymentRole) *wo
 }
 
 func role(mutate func(*workercore.ModelDeploymentRole)) workercore.ModelDeploymentRole {
-	r := workercore.ModelDeploymentRole{Name: "server", Replicas: 4, InstanceType: "h20-8x"}
+	r := workercore.ModelDeploymentRole{Name: "server", Replicas: 4, AcceleratorType: "h20-8x"}
 	mutate(&r)
 
 	return r
@@ -487,7 +487,7 @@ func TestValidateModelDeployment(t *testing.T) {
 			md: modelDeployment(workercore.ModelDeploymentEngineVLLM,
 				role(func(r *workercore.ModelDeploymentRole) { r.Name = "prefill" }),
 				role(func(r *workercore.ModelDeploymentRole) {
-					r.Name, r.InstanceType = "decode", "a100-8x"
+					r.Name, r.AcceleratorType = "decode", "a100-8x"
 				}),
 			),
 		},
@@ -502,7 +502,7 @@ func TestValidateModelDeployment(t *testing.T) {
 			name: "role_instance_types_differ_with_the_outlier_first",
 			md: modelDeployment(workercore.ModelDeploymentEngineVLLM,
 				role(func(r *workercore.ModelDeploymentRole) {
-					r.Name, r.InstanceType = "prefill", "a100-8x"
+					r.Name, r.AcceleratorType = "prefill", "a100-8x"
 				}),
 				role(func(r *workercore.ModelDeploymentRole) { r.Name = "decode" }),
 				role(func(r *workercore.ModelDeploymentRole) { r.Name = "decode2" }),
@@ -2323,15 +2323,67 @@ func TestModelDeploymentWebhook_AnUndeclaredRolesOwnPortMustClearTheReservedPort
 	}
 }
 
-// newModelDeploymentWebhookWith builds the handler over two independent fakes, so a case can put an
-// InstanceType behind the API reader that the cache does not have -- the state the two-stage read
-// exists for, and one a single shared fake cannot express.
+func acceleratorTypeFromInstanceType(it *worker.InstanceType) *worker.AcceleratorType {
+	if it == nil {
+		return nil
+	}
+	return &worker.AcceleratorType{
+		ObjectMeta: it.ObjectMeta,
+		Spec: workercore.AcceleratorTypeSpec{
+			DisplayName:      it.Spec.DisplayName,
+			Description:      it.Spec.Description,
+			Inactive:         it.Spec.Inactive,
+			AcceleratorGroup: it.Spec.AcceleratorGroup,
+			GeneralGroup:     it.Spec.GeneralGroup,
+			OS:               it.Spec.OS,
+			Arch:             it.Spec.Arch,
+		},
+		Status: workercore.AcceleratorTypeStatus{
+			Detail:                 it.Status.Detail,
+			Entrance:               it.Status.Entrance,
+			Phase:                  it.Status.Phase,
+			PhaseMessage:           it.Status.PhaseMessage,
+			Accelerator:            it.Status.Accelerator,
+			AcceleratorShared:      it.Status.AcceleratorShared,
+			AcceleratorSliced:      it.Status.AcceleratorSliced,
+			AcceleratorPartitioned: it.Status.AcceleratorPartitioned,
+		},
+	}
+}
+
+func servingAcceleratorType(
+	name string, ceiling int64, opts ...func(*worker.AcceleratorType),
+) *worker.AcceleratorType {
+	instType := servingInstanceType(name, ceiling)
+	accType := acceleratorTypeFromInstanceType(instType)
+	for _, opt := range opts {
+		opt(accType)
+	}
+	return accType
+}
+
 // newModelDeploymentWebhookWith builds a handler over one API-server view. There is no second,
 // cached view to pass: the defaulter reads through on purpose, so a fixture offering a stale one
 // would model a client this handler does not have.
 func newModelDeploymentWebhookWith(live []ctrlcli.Object) *ModelDeploymentWebhook {
+	var expanded []ctrlcli.Object
+	hasAcc := make(map[string]bool)
+	for _, obj := range live {
+		if at, ok := obj.(*worker.AcceleratorType); ok {
+			hasAcc[at.Name] = true
+		}
+	}
+	for _, obj := range live {
+		expanded = append(expanded, obj)
+		if it, ok := obj.(*worker.InstanceType); ok {
+			if !hasAcc[it.Name] && it.Spec.Acceleratable {
+				expanded = append(expanded, acceleratorTypeFromInstanceType(it))
+				hasAcc[it.Name] = true
+			}
+		}
+	}
 	return &ModelDeploymentWebhook{
-		APIReader: ctrlfake.NewClientBuilder().WithScheme(scheme.Scheme).WithObjects(live...).Build(),
+		APIReader: ctrlfake.NewClientBuilder().WithScheme(scheme.Scheme).WithObjects(expanded...).Build(),
 	}
 }
 
@@ -2366,13 +2418,6 @@ func servingInstanceType(
 	return instType
 }
 
-// saturated makes every whole card of the pool held by a running workload: the free view reads zero
-// while the capacity stays what it was.
-func saturated(instType *worker.InstanceType) {
-	instType.Status.Accelerator.OnceMaxRequest = *resource.NewQuantity(0, resource.DecimalSI)
-	instType.Status.Accelerator.Remaining = *resource.NewQuantity(0, resource.DecimalSI)
-}
-
 // offeringLogicalSlices makes the pool report a logically sliceable card. The count is what the
 // predicate reads; the value beyond "non-zero" carries no meaning here.
 func offeringLogicalSlices(instType *worker.InstanceType) {
@@ -2402,7 +2447,7 @@ func notSyncedInstanceType(name string) *worker.InstanceType {
 }
 
 func roleWithAccelerator(name string, accel *resource.Quantity) workercore.ModelDeploymentRole {
-	role := workercore.ModelDeploymentRole{Name: name, Replicas: 1, InstanceType: "h20-8x"}
+	role := workercore.ModelDeploymentRole{Name: name, Replicas: 1, AcceleratorType: "h20-8x"}
 	if accel != nil {
 		role.Resources = &workercore.ModelDeploymentRoleResources{Accelerator: accel}
 	}
@@ -2412,29 +2457,23 @@ func roleWithAccelerator(name string, accel *resource.Quantity) workercore.Model
 
 // TestModelDeploymentWebhook_Default covers the one value this API defaults from another object.
 //
-// A role that names no accelerator count on an acceleratable InstanceType gets one card. The point
-// is not the size of the replica: a role requesting no accelerator requests nothing an accelerated
-// ClusterQueue covers, and one such role alongside any second role leaves the deployment queued
-// forever -- measured: a mixed deployment is refused exactly like an all-uncovered one.
+// A role that names no accelerator count on an AcceleratorType gets one card.
 func TestModelDeploymentWebhook_Default(t *testing.T) {
 	testCases := []struct {
-		name          string
-		acceleratable bool
-		roles         []workercore.ModelDeploymentRole
-		want          []*resource.Quantity // per role, nil meaning "left unset"
+		name  string
+		roles []workercore.ModelDeploymentRole
+		want  []*resource.Quantity // per role, nil meaning "left unset"
 	}{
 		{
-			name:          "an unset count on an acceleratable type becomes one card",
-			acceleratable: true,
-			roles:         []workercore.ModelDeploymentRole{roleWithAccelerator("server", nil)},
-			want:          []*resource.Quantity{resource.NewQuantity(1, resource.DecimalSI)},
+			name:  "an unset count on an accelerator type becomes one card",
+			roles: []workercore.ModelDeploymentRole{roleWithAccelerator("server", nil)},
+			want:  []*resource.Quantity{resource.NewQuantity(1, resource.DecimalSI)},
 		},
 		{
 			// THE SHAPE THE DEFAULT EXISTS FOR. Two roles requesting nothing the queue covers is
 			// what makes the scheduler spin; one such role is admitted, so a single-role case
 			// cannot show this.
-			name:          "every role of a multi-role deployment is defaulted",
-			acceleratable: true,
+			name: "every role of a multi-role deployment is defaulted",
 			roles: []workercore.ModelDeploymentRole{
 				roleWithAccelerator("prefill", nil), roleWithAccelerator("decode", nil),
 			},
@@ -2445,31 +2484,31 @@ func TestModelDeploymentWebhook_Default(t *testing.T) {
 		{
 			// AN EXPLICIT ZERO IS A VALUE THE USER WROTE. It is kept because replacing it would
 			// make the request stop meaning what it says; validation owns unsafe combinations.
-			name:          "an explicit zero is kept",
-			acceleratable: true,
-			roles:         []workercore.ModelDeploymentRole{roleWithAccelerator("server", resource.NewQuantity(0, resource.DecimalSI))},
-			want:          []*resource.Quantity{resource.NewQuantity(0, resource.DecimalSI)},
+			name:  "an explicit zero is kept",
+			roles: []workercore.ModelDeploymentRole{roleWithAccelerator("server", resource.NewQuantity(0, resource.DecimalSI))},
+			want:  []*resource.Quantity{resource.NewQuantity(0, resource.DecimalSI)},
 		},
 		{
-			name:          "a stated count is not touched",
-			acceleratable: true,
-			roles:         []workercore.ModelDeploymentRole{roleWithAccelerator("server", resource.NewQuantity(4, resource.DecimalSI))},
-			want:          []*resource.Quantity{resource.NewQuantity(4, resource.DecimalSI)},
+			name:  "a stated count is not touched",
+			roles: []workercore.ModelDeploymentRole{roleWithAccelerator("server", resource.NewQuantity(4, resource.DecimalSI))},
+			want:  []*resource.Quantity{resource.NewQuantity(4, resource.DecimalSI)},
 		},
 		{
-			// THE BASELINE FOR EVERY CASE ABOVE. A default applied unconditionally satisfies them
-			// and fails here, which is the only reason they say anything about acceleratability.
-			name:          "a non-acceleratable type is left alone",
-			acceleratable: false,
-			roles:         []workercore.ModelDeploymentRole{roleWithAccelerator("server", nil)},
-			want:          []*resource.Quantity{nil},
+			// CPU-only role: omitting acceleratorType means accelerator count is NOT defaulted.
+			name: "a CPU-only role omitting acceleratorType is left alone",
+			roles: []workercore.ModelDeploymentRole{{
+				Name:            "server",
+				Replicas:        1,
+				AcceleratorType: "",
+			}},
+			want: []*resource.Quantity{nil},
 		},
 	}
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			it := acceleratableInstanceType("h20-8x", tc.acceleratable)
-			w := newModelDeploymentWebhookWith([]ctrlcli.Object{it})
+			at := servingAcceleratorType("h20-8x", 8)
+			w := newModelDeploymentWebhookWith([]ctrlcli.Object{at})
 			md := modelDeployment(workercore.ModelDeploymentEngineVLLM, tc.roles...)
 
 			require.NoError(t, w.Default(context.Background(), md))
@@ -2488,6 +2527,9 @@ func TestModelDeploymentWebhook_Default(t *testing.T) {
 				require.NotNil(t, got.Accelerator, "role %d was not defaulted", i)
 				assert.Zero(t, want.Cmp(*got.Accelerator),
 					"role %d: want %s, got %s", i, want, got.Accelerator)
+				assert.Nil(t, got.CPU, "role %d: host cpu must not be defaulted", i)
+				assert.Nil(t, got.RAM, "role %d: host ram must not be defaulted", i)
+				assert.Nil(t, got.LocalStorage, "role %d: host localStorage must not be defaulted", i)
 			}
 		})
 	}
@@ -2495,14 +2537,13 @@ func TestModelDeploymentWebhook_Default(t *testing.T) {
 
 // TestModelDeploymentWebhook_ValidateRefusesZeroAcceleratorInAMultiRoleGroup covers the explicit
 // value that defaulting deliberately leaves alone. A role asking for no accelerator on an
-// acceleratable type requests nothing its queue accounts for, so its replicas are admitted and run
-// while that queue charges them nothing -- and the siblings sharing the type are charged for every
-// card they hold, competing for a pool this role spends from uncounted.
+// AcceleratorType requests nothing its queue accounts for, so its replicas are admitted and run
+// while that queue charges them nothing.
 func TestModelDeploymentWebhook_ValidateRefusesZeroAcceleratorInAMultiRoleGroup(t *testing.T) {
 	zero := resource.NewQuantity(0, resource.DecimalSI)
 	one := resource.NewQuantity(1, resource.DecimalSI)
 	zeroOnA100 := roleWithAccelerator("decode", zero)
-	zeroOnA100.InstanceType = "a100-8x"
+	zeroOnA100.AcceleratorType = "a100-8x"
 
 	testCases := []struct {
 		name      string
@@ -2516,7 +2557,7 @@ func TestModelDeploymentWebhook_ValidateRefusesZeroAcceleratorInAMultiRoleGroup(
 				roleWithAccelerator("prefill", zero),
 				roleWithAccelerator("decode", zero),
 			},
-			types: []ctrlcli.Object{servingInstanceType("h20-8x", 8)},
+			types: []ctrlcli.Object{servingAcceleratorType("h20-8x", 8)},
 			refusedAt: []string{
 				"spec.roles[0].resources.accelerator",
 				"spec.roles[1].resources.accelerator",
@@ -2528,13 +2569,14 @@ func TestModelDeploymentWebhook_ValidateRefusesZeroAcceleratorInAMultiRoleGroup(
 				roleWithAccelerator("prefill", zero),
 				roleWithAccelerator("decode", one),
 			},
-			types:     []ctrlcli.Object{servingInstanceType("h20-8x", 8)},
+			types:     []ctrlcli.Object{servingAcceleratorType("h20-8x", 8)},
 			refusedAt: []string{"spec.roles[0].resources.accelerator"},
 		},
 		{
-			name:  "one zero-card role on an accelerated type",
-			roles: []workercore.ModelDeploymentRole{roleWithAccelerator("server", zero)},
-			types: []ctrlcli.Object{servingInstanceType("h20-8x", 8)},
+			name:      "one zero-card role on an accelerated type",
+			roles:     []workercore.ModelDeploymentRole{roleWithAccelerator("server", zero)},
+			types:     []ctrlcli.Object{servingAcceleratorType("h20-8x", 8)},
+			refusedAt: []string{"spec.roles[0].resources.accelerator"},
 		},
 		{
 			name: "zero-card roles in separate scheduling groups",
@@ -2543,17 +2585,25 @@ func TestModelDeploymentWebhook_ValidateRefusesZeroAcceleratorInAMultiRoleGroup(
 				zeroOnA100,
 			},
 			types: []ctrlcli.Object{
-				servingInstanceType("h20-8x", 8),
-				servingInstanceType("a100-8x", 8),
+				servingAcceleratorType("h20-8x", 8),
+				servingAcceleratorType("a100-8x", 8),
+			},
+			refusedAt: []string{
+				"spec.roles[0].resources.accelerator",
+				"spec.roles[1].resources.accelerator",
 			},
 		},
 		{
-			name: "zero-card roles sharing a CPU-only type",
+			name: "zero-card role omitting acceleratorType is refused by CPU-only role rule",
 			roles: []workercore.ModelDeploymentRole{
-				roleWithAccelerator("prefill", zero),
-				roleWithAccelerator("decode", zero),
+				{Name: "prefill", Replicas: 1, Resources: &workercore.ModelDeploymentRoleResources{Accelerator: zero}},
+				{Name: "decode", Replicas: 1, Resources: &workercore.ModelDeploymentRoleResources{Accelerator: zero}},
 			},
-			types: []ctrlcli.Object{acceleratableInstanceType("h20-8x", false)},
+			types: []ctrlcli.Object{servingAcceleratorType("h20-8x", 8)},
+			refusedAt: []string{
+				"spec.roles[0].resources.accelerator",
+				"spec.roles[1].resources.accelerator",
+			},
 		},
 	}
 
@@ -2573,8 +2623,11 @@ func TestModelDeploymentWebhook_ValidateRefusesZeroAcceleratorInAMultiRoleGroup(
 			for _, path := range tc.refusedAt {
 				assert.Contains(t, err.Error(), path)
 			}
-			assert.Contains(t, err.Error(), "request at least one accelerator")
-			assert.Contains(t, err.Error(), "non-acceleratable instance type")
+			if tc.name == "zero-card role omitting acceleratorType is refused by CPU-only role rule" {
+				assert.Contains(t, err.Error(), "accelerator resources cannot be requested when acceleratorType is omitted")
+			} else {
+				assert.Contains(t, err.Error(), "omit acceleratorType to run a CPU-only role")
+			}
 		})
 	}
 }
@@ -2585,10 +2638,10 @@ func TestModelDeploymentWebhook_ValidateRefusesZeroAcceleratorInAMultiRoleGroup(
 // type that is genuinely gone is reported as the NAME it is. Those two send a reader to different
 // places, which is the whole reason the message is asserted rather than the error's existence.
 func TestModelDeploymentWebhook_DefaultReadsTheAPIServer(t *testing.T) {
-	it := acceleratableInstanceType("h20-8x", true)
+	at := servingAcceleratorType("h20-8x", 8)
 
 	t.Run("a type only the API server has is still found", func(t *testing.T) {
-		w := newModelDeploymentWebhookWith([]ctrlcli.Object{it})
+		w := newModelDeploymentWebhookWith([]ctrlcli.Object{at})
 		md := modelDeployment(workercore.ModelDeploymentEngineVLLM, roleWithAccelerator("server", nil))
 
 		require.NoError(t, w.Default(context.Background(), md))
@@ -2604,8 +2657,8 @@ func TestModelDeploymentWebhook_DefaultReadsTheAPIServer(t *testing.T) {
 		err := w.Default(context.Background(), md)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "h20-8x",
-			"the message must name the instance type so a reader checks the spelling, not the cluster")
-		assert.Contains(t, err.Error(), "spec.roles[0].instanceType",
+			"the message must name the accelerator type so a reader checks the spelling, not the cluster")
+		assert.Contains(t, err.Error(), "spec.roles[0].acceleratorType",
 			"and name the field that carries it")
 	})
 }
@@ -2620,11 +2673,11 @@ func TestModelDeploymentWebhook_DefaultReadsTheAPIServer(t *testing.T) {
 func TestModelDeploymentWebhook_DefaultLeavesAnEmptyTypeToValidation(t *testing.T) {
 	w := newModelDeploymentWebhookWith(nil)
 	md := modelDeployment(workercore.ModelDeploymentEngineVLLM, workercore.ModelDeploymentRole{
-		Name: "server", Replicas: 1, InstanceType: "",
+		Name: "server", Replicas: 1, AcceleratorType: "",
 	})
 
 	require.NoError(t, w.Default(context.Background(), md),
-		"an empty instance type is the schema's to report, not the defaulter's")
+		"an empty accelerator type is the schema's to report, not the defaulter's")
 	if r := md.Spec.Roles[0].Resources; r != nil {
 		assert.Nil(t, r.Accelerator, "and nothing is defaulted against a type that was never read")
 	}
@@ -2667,17 +2720,17 @@ func TestModelDeploymentWebhook_DefaultDeclinesAnObjectBeingDeleted(t *testing.T
 // two halves run against the same cluster, so the refusal is shown to track the name and not an
 // empty cluster.
 func TestModelDeploymentWebhook_DefaultKeepsTheRepairEditReachable(t *testing.T) {
-	it := acceleratableInstanceType("h20-8x", true)
-	w := newModelDeploymentWebhookWith([]ctrlcli.Object{it})
+	at := servingAcceleratorType("h20-8x", 8)
+	w := newModelDeploymentWebhookWith([]ctrlcli.Object{at})
 
 	absent := modelDeployment(workercore.ModelDeploymentEngineVLLM, workercore.ModelDeploymentRole{
-		Name: "server", Replicas: 1, InstanceType: "retired-type",
+		Name: "server", Replicas: 1, AcceleratorType: "retired-type",
 	})
 	require.Error(t, w.Default(context.Background(), absent),
 		"a role naming a type neither read has is still refused")
 
 	repaired := modelDeployment(workercore.ModelDeploymentEngineVLLM, workercore.ModelDeploymentRole{
-		Name: "server", Replicas: 1, InstanceType: "h20-8x",
+		Name: "server", Replicas: 1, AcceleratorType: "h20-8x",
 	})
 	require.NoError(t, w.Default(context.Background(), repaired),
 		"and the edit that repairs the reference is not refused with it")
@@ -2769,7 +2822,7 @@ func TestValidateModelDeploymentIdentity(t *testing.T) {
 		// The role's shape fields: how the deployment is currently run. Each is applied by
 		// replacing the role's replicas, not by editing running Pods.
 		{"role_instance_type", func(md *workercore.ModelDeployment) {
-			md.Spec.Roles[0].InstanceType = "a100-8x"
+			md.Spec.Roles[0].AcceleratorType = "a100-8x"
 		}, ""},
 		{"role_resources", func(md *workercore.ModelDeployment) {
 			md.Spec.Roles[0].Resources.Accelerator = accel2
@@ -3143,7 +3196,9 @@ func TestModelDeploymentWebhook_ValidateUpdateAcceptsOrdinaryShapeEdits(t *testi
 		},
 		{
 			name: "instanceType moves to another pool",
-			edit: func(md *workercore.ModelDeployment) { md.Spec.Roles[0].InstanceType = "a100-8x" },
+			edit: func(md *workercore.ModelDeployment) {
+				md.Spec.Roles[0].AcceleratorType = "a100-8x"
+			},
 			types: func() []ctrlcli.Object {
 				return []ctrlcli.Object{servingInstanceType("h20-8x", 8), servingInstanceType("a100-8x", 8)}
 			},
@@ -3281,7 +3336,7 @@ func TestModelDeploymentWebhook_ValidateUpdateStillRefusesInvalidShapeEdits(t *t
 				}
 			},
 			refuse:   "spec.roles[0].resources.accelerator",
-			contains: "request at least one accelerator",
+			contains: "must be greater than zero",
 		},
 	}
 
@@ -3459,7 +3514,7 @@ func TestModelDeploymentWebhook_ValidateUpdateRechecksPoolTransportAfterInstance
 	stored := func(name string) *workercore.ModelDeployment {
 		md := modelDeployment(workercore.ModelDeploymentEngineVLLM)
 		md.Spec.KVCache.PoolRef.Name = "chat"
-		md.Spec.Roles[0].InstanceType = name
+		md.Spec.Roles[0].AcceleratorType = name
 
 		return md
 	}
@@ -3472,7 +3527,7 @@ func TestModelDeploymentWebhook_ValidateUpdateRechecksPoolTransportAfterInstance
 		}
 
 		md := old.DeepCopy()
-		md.Spec.Roles[0].InstanceType = "nvidia-type"
+		md.Spec.Roles[0].AcceleratorType = "nvidia-type"
 
 		_, err := r.ValidateUpdate(context.Background(), old, md)
 		require.Error(t, err, "the mixed pool cannot serve the NVIDIA half of this binding")
@@ -3486,7 +3541,7 @@ func TestModelDeploymentWebhook_ValidateUpdateRechecksPoolTransportAfterInstance
 		r := newModelDeploymentWebhookWith(objs)
 
 		md := old.DeepCopy()
-		md.Spec.Roles[0].InstanceType = "ascend-type-2"
+		md.Spec.Roles[0].AcceleratorType = "ascend-type-2"
 
 		_, err := r.ValidateUpdate(context.Background(), old, md)
 		assert.NoError(t, err, "the constrained engine still reads every offered protocol")
@@ -3677,7 +3732,7 @@ func TestModelDeploymentWebhook_InterfaceRecheckJudgesOnlyTheMovedRoles(t *testi
 			role(func(r *workercore.ModelDeploymentRole) {
 				r.Name = "prefill"
 				r.Kind = workercore.ModelDeploymentRoleKindPrefill
-				r.InstanceType = "ascend-type"
+				r.AcceleratorType = "ascend-type"
 				r.Resources = &workercore.ModelDeploymentRoleResources{
 					Accelerator: resource.NewQuantity(1, resource.DecimalSI),
 					Interface:   ptr.To(resource.MustParse("1")),
@@ -3686,7 +3741,7 @@ func TestModelDeploymentWebhook_InterfaceRecheckJudgesOnlyTheMovedRoles(t *testi
 			role(func(r *workercore.ModelDeploymentRole) {
 				r.Name = "decode"
 				r.Kind = workercore.ModelDeploymentRoleKindDecode
-				r.InstanceType = "ascend-type"
+				r.AcceleratorType = "ascend-type"
 				r.Resources = &workercore.ModelDeploymentRoleResources{
 					Accelerator: resource.NewQuantity(1, resource.DecimalSI),
 					Interface:   ptr.To(resource.MustParse("1")),
@@ -3753,14 +3808,14 @@ func TestModelDeploymentWebhook_PoolTransportRecheckJudgesOnlyTheMovedRole(t *te
 		md := modelDeployment(workercore.ModelDeploymentEngineVLLM,
 			role(func(r *workercore.ModelDeploymentRole) {
 				r.Name = "server"
-				r.InstanceType = "nvidia-type"
+				r.AcceleratorType = "nvidia-type"
 				r.Resources = &workercore.ModelDeploymentRoleResources{
 					Accelerator: resource.NewQuantity(1, resource.DecimalSI),
 				}
 			}),
 			role(func(r *workercore.ModelDeploymentRole) {
 				r.Name = "worker"
-				r.InstanceType = "ascend-type"
+				r.AcceleratorType = "ascend-type"
 				r.Resources = &workercore.ModelDeploymentRoleResources{
 					Accelerator: resource.NewQuantity(1, resource.DecimalSI),
 				}
@@ -3789,7 +3844,7 @@ func TestModelDeploymentWebhook_PoolTransportRecheckJudgesOnlyTheMovedRole(t *te
 		)
 
 		md := old.DeepCopy()
-		md.Spec.Roles[1].InstanceType = "ascend-type-2"
+		md.Spec.Roles[1].AcceleratorType = "ascend-type-2"
 
 		_, err := r.ValidateUpdate(context.Background(), old, md)
 		assert.NoError(t, err,
@@ -3804,7 +3859,7 @@ func TestModelDeploymentWebhook_PoolTransportRecheckJudgesOnlyTheMovedRole(t *te
 		)
 
 		md := old.DeepCopy()
-		md.Spec.Roles[1].InstanceType = "nvidia-type-2"
+		md.Spec.Roles[1].AcceleratorType = "nvidia-type-2"
 
 		_, err := r.ValidateUpdate(context.Background(), old, md)
 		require.Error(t, err, "the Ascend role moved onto an engine that cannot read a CANN/RDMA pool")
@@ -3854,19 +3909,35 @@ func TestModelDeploymentWebhook_ValidateUpdateAllowsMetadataAndTheDeletionWindow
 // break the ceiling, or the reverse, so each rule gets a case where the OTHER one is violated. A
 // table whose acceptance cases all satisfied both rules at once would pass against an implementation
 // that had only ever run one.
-func TestValidateRoleResourcesAgainstInstanceType(t *testing.T) {
-	plain := servingInstanceType("h20-8x", 8)
-	sliceable := servingInstanceType("h20-8x", 8, offeringLogicalSlices)
-	partitionable := servingInstanceType("h20-8x", 8, offeringPartitionProfiles("1g.10gb", "2g.20gb"))
+func TestValidateRoleResourcesAgainstAcceleratorType(t *testing.T) {
+	plain := servingAcceleratorType("h20-8x", 8)
+	sliceable := servingAcceleratorType("h20-8x", 8, func(at *worker.AcceleratorType) {
+		at.Status.Detail.SlicedDetail.Logical.Count = 1
+	})
+	partitionable := servingAcceleratorType("h20-8x", 8, func(at *worker.AcceleratorType) {
+		at.Status.Detail.SlicedDetail.Physical.Count = 1
+		at.Status.Detail.SlicedDetail.Physical.Profiles = []workercore.AcceleratorSlicedPhysicalDetailProfile{
+			{Name: "1g.10gb", Count: 1, MemoryMib: 10240},
+			{Name: "2g.20gb", Count: 1, MemoryMib: 10240},
+		}
+	})
 	// AN ALL-PARTITIONED POOL, WHOSE WHOLE-CARD CEILING IS ZERO. status.accelerator.onceMaxRequest
 	// counts FREE UNPARTITIONED cards, so a pool that has carved all of its own reports none there
 	// while its partitioned view serves requests all day. It is the only fixture on which the
 	// whole-card ceiling and a valid partitioned request disagree, and without it an acceptance case
 	// for one partitioned card passes whether or not the ceiling is applied to it.
-	allPartitioned := servingInstanceType("h20-mig", 0, offeringPartitionProfiles("1g.10gb"))
+	allPartitioned := servingAcceleratorType("h20-mig", 0, func(at *worker.AcceleratorType) {
+		at.Status.Detail.SlicedDetail.Physical.Count = 1
+		at.Status.Detail.SlicedDetail.Physical.Profiles = []workercore.AcceleratorSlicedPhysicalDetailProfile{
+			{Name: "1g.10gb", Count: 1, MemoryMib: 10240},
+		}
+	})
 	// A POOL WHOSE EVERY CARD IS HELD. The ceiling bounds what the pool can EVER serve; what is free
 	// right now is the queue's question, and a deployment admitted here waits in it for a card.
-	busy := servingInstanceType("h20-8x", 8, saturated)
+	busy := servingAcceleratorType("h20-8x", 8, func(at *worker.AcceleratorType) {
+		at.Status.Accelerator.OnceMaxRequest = *resource.NewQuantity(0, resource.DecimalSI)
+		at.Status.Accelerator.Remaining = *resource.NewQuantity(0, resource.DecimalSI)
+	})
 
 	cards := func(n int64) *resource.Quantity { return resource.NewQuantity(n, resource.DecimalSI) }
 	const (
@@ -3876,9 +3947,9 @@ func TestValidateRoleResourcesAgainstInstanceType(t *testing.T) {
 	)
 
 	cases := []struct {
-		name     string
-		instType *worker.InstanceType
-		ress     *workercore.ModelDeploymentRoleResources
+		name    string
+		accType *worker.AcceleratorType
+		ress    *workercore.ModelDeploymentRoleResources
 		// refuse is every field path the refusals must name, and nothing else.
 		refuse []string
 		// says is a phrase the refusal must carry, for the pairs of rules that answer on ONE field
@@ -3896,32 +3967,32 @@ func TestValidateRoleResourcesAgainstInstanceType(t *testing.T) {
 		aboutTheRequest []string
 	}{
 		{
-			name: "whole_card_at_the_ceiling", instType: plain,
+			name: "whole_card_at_the_ceiling", accType: plain,
 			ress: &workercore.ModelDeploymentRoleResources{Accelerator: cards(8)},
 		},
 		{
-			name: "whole_card_over_the_ceiling", instType: plain,
+			name: "whole_card_over_the_ceiling", accType: plain,
 			ress:   &workercore.ModelDeploymentRoleResources{Accelerator: cards(9)},
 			refuse: []string{accelPath},
 		},
 		{
-			name: "whole_card_on_a_saturated_pool", instType: busy,
+			name: "whole_card_on_a_saturated_pool", accType: busy,
 			ress: &workercore.ModelDeploymentRoleResources{Accelerator: cards(8)},
 		},
 		{
-			name: "whole_card_over_the_capacity_of_a_saturated_pool", instType: busy,
+			name: "whole_card_over_the_capacity_of_a_saturated_pool", accType: busy,
 			ress:   &workercore.ModelDeploymentRoleResources{Accelerator: cards(9)},
 			refuse: []string{accelPath},
 			says:   "8",
 		},
 		{
-			name: "sliced_on_a_type_that_offers_slicing", instType: sliceable,
+			name: "sliced_on_a_type_that_offers_slicing", accType: sliceable,
 			ress: &workercore.ModelDeploymentRoleResources{
 				Accelerator: cards(1), AcceleratorSlicedMemoryPercentage: 50,
 			},
 		},
 		{
-			name: "sliced_on_a_type_that_offers_none", instType: plain,
+			name: "sliced_on_a_type_that_offers_none", accType: plain,
 			ress: &workercore.ModelDeploymentRoleResources{
 				Accelerator: cards(1), AcceleratorSlicedMemoryPercentage: 50,
 			},
@@ -3930,14 +4001,14 @@ func TestValidateRoleResourcesAgainstInstanceType(t *testing.T) {
 		{
 			// The compute percentage alone is a slice request too; a rule reading only the memory
 			// one would let this through.
-			name: "sliced_by_cores_only_on_a_type_that_offers_none", instType: plain,
+			name: "sliced_by_cores_only_on_a_type_that_offers_none", accType: plain,
 			ress: &workercore.ModelDeploymentRoleResources{
 				Accelerator: cards(1), AcceleratorSlicedCoresPercentage: 50,
 			},
 			refuse: []string{slicePath},
 		},
 		{
-			name: "partitioned_on_a_type_that_offers_none", instType: plain,
+			name: "partitioned_on_a_type_that_offers_none", accType: plain,
 			ress: &workercore.ModelDeploymentRoleResources{
 				Accelerator: cards(1), AcceleratorPartitionedProfile: "1g.10gb",
 			},
@@ -3945,13 +4016,13 @@ func TestValidateRoleResourcesAgainstInstanceType(t *testing.T) {
 			says:   "does not offer hardware partitioning",
 		},
 		{
-			name: "partition_profile_in_the_inventory", instType: partitionable,
+			name: "partition_profile_in_the_inventory", accType: partitionable,
 			ress: &workercore.ModelDeploymentRoleResources{
 				Accelerator: cards(1), AcceleratorPartitionedProfile: "2g.20gb",
 			},
 		},
 		{
-			name: "partition_profile_outside_the_inventory", instType: partitionable,
+			name: "partition_profile_outside_the_inventory", accType: partitionable,
 			ress: &workercore.ModelDeploymentRoleResources{
 				Accelerator: cards(1), AcceleratorPartitionedProfile: "7g.80gb",
 			},
@@ -3966,7 +4037,7 @@ func TestValidateRoleResourcesAgainstInstanceType(t *testing.T) {
 			// pool, so applying it here refused correct one-card requests while describing the type
 			// rather than the request. What is wrong with nine cards at fifty percent is that a
 			// slice is a fraction of ONE card, and that holds against every pool.
-			name: "sliced_over_one_card", instType: sliceable,
+			name: "sliced_over_one_card", accType: sliceable,
 			ress: &workercore.ModelDeploymentRoleResources{
 				Accelerator: cards(9), AcceleratorSlicedMemoryPercentage: 50,
 			},
@@ -3981,21 +4052,21 @@ func TestValidateRoleResourcesAgainstInstanceType(t *testing.T) {
 			// is the ordinary partitioned request, and the count is the one this webhook's OWN
 			// defaulting writes when the operator names none -- so the refusal it used to produce was
 			// one nobody could avoid and nobody could act on.
-			name: "partitioned_one_card_on_an_all_partitioned_pool", instType: allPartitioned,
+			name: "partitioned_one_card_on_an_all_partitioned_pool", accType: allPartitioned,
 			ress: &workercore.ModelDeploymentRoleResources{
 				Accelerator: cards(1), AcceleratorPartitionedProfile: "1g.10gb",
 			},
 		},
 		{
 			// The same shape for a slice, so neither mode's acceptance rests on the other's.
-			name: "sliced_one_card_is_accepted", instType: sliceable,
+			name: "sliced_one_card_is_accepted", accType: sliceable,
 			ress: &workercore.ModelDeploymentRoleResources{
 				Accelerator: cards(1), AcceleratorSlicedMemoryPercentage: 50,
 			},
 		},
 		{
 			// The same for a partition, which is one instance on one card.
-			name: "partitioned_over_one_card", instType: partitionable,
+			name: "partitioned_over_one_card", accType: partitionable,
 			ress: &workercore.ModelDeploymentRoleResources{
 				Accelerator: cards(2), AcceleratorPartitionedProfile: "2g.20gb",
 			},
@@ -4007,7 +4078,7 @@ func TestValidateRoleResourcesAgainstInstanceType(t *testing.T) {
 			// TWO INDEPENDENT FAULTS AND BOTH ARE REPORTED: the pool offers no slicing, and four
 			// cards at fifty percent each describes nothing a scheduler can place. An operator who
 			// saw only the first would fix the type and be refused again.
-			name: "unoffered_mode_and_over_one_card", instType: plain,
+			name: "unoffered_mode_and_over_one_card", accType: plain,
 			ress: &workercore.ModelDeploymentRoleResources{
 				Accelerator: cards(4), AcceleratorSlicedMemoryPercentage: 50,
 			},
@@ -4015,7 +4086,7 @@ func TestValidateRoleResourcesAgainstInstanceType(t *testing.T) {
 			aboutTheRequest: []string{accelPath},
 		},
 		{
-			name: "unoffered_mode_far_over_one_card", instType: plain,
+			name: "unoffered_mode_far_over_one_card", accType: plain,
 			ress: &workercore.ModelDeploymentRoleResources{
 				Accelerator: cards(9), AcceleratorSlicedMemoryPercentage: 50,
 			},
@@ -4026,8 +4097,8 @@ func TestValidateRoleResourcesAgainstInstanceType(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			errs := validateRoleResourcesAgainstInstanceType(
-				tc.instType, tc.ress, field.NewPath("spec", "roles").Index(0).Child("resources"),
+			errs := validateRoleResourcesAgainstAcceleratorType(
+				tc.accType, tc.ress, field.NewPath("spec", "roles").Index(0).Child("resources"),
 			)
 
 			got := make([]string, 0, len(errs))
@@ -4036,13 +4107,13 @@ func TestValidateRoleResourcesAgainstInstanceType(t *testing.T) {
 				got = append(got, e.Field)
 				joined += e.Error() + "\n"
 				if slices.Contains(tc.aboutTheRequest, e.Field) {
-					assert.NotContains(t, e.Error(), tc.instType.Name,
+					assert.NotContains(t, e.Error(), tc.accType.Name,
 						"this refusal is about the request and holds against every type; naming one "+
 							"sends the operator to inspect a pool that is not the problem")
 
 					continue
 				}
-				assert.Contains(t, e.Error(), tc.instType.Name,
+				assert.Contains(t, e.Error(), tc.accType.Name,
 					"the field alone does not locate the problem: the same request is correct against another type")
 			}
 			assert.ElementsMatch(t, tc.refuse, got)
@@ -4054,12 +4125,12 @@ func TestValidateRoleResourcesAgainstInstanceType(t *testing.T) {
 	}
 }
 
-// TestValidateRoleResourcesAgainstInstanceType_TheCeilingIsInTheMessage pins the number, not only
+// TestValidateRoleResourcesAgainstAcceleratorType_TheCeilingIsInTheMessage pins the number, not only
 // the refusal. "Exceeds the maximum" says the request was wrong; the ceiling says what would be
 // right, and without it the next attempt is a guess.
-func TestValidateRoleResourcesAgainstInstanceType_TheCeilingIsInTheMessage(t *testing.T) {
-	errs := validateRoleResourcesAgainstInstanceType(
-		servingInstanceType("h20-8x", 8),
+func TestValidateRoleResourcesAgainstAcceleratorType_TheCeilingIsInTheMessage(t *testing.T) {
+	errs := validateRoleResourcesAgainstAcceleratorType(
+		servingAcceleratorType("h20-8x", 8),
 		&workercore.ModelDeploymentRoleResources{Accelerator: resource.NewQuantity(9, resource.DecimalSI)},
 		field.NewPath("spec", "roles").Index(0).Child("resources"),
 	)
@@ -4137,7 +4208,7 @@ func pdRole(name string, kind workercore.ModelDeploymentRoleKind, instanceType s
 	ress *workercore.ModelDeploymentRoleResources,
 ) workercore.ModelDeploymentRole {
 	return workercore.ModelDeploymentRole{
-		Name: name, Kind: kind, Replicas: 1, InstanceType: instanceType, Resources: ress,
+		Name: name, Kind: kind, Replicas: 1, AcceleratorType: instanceType, Resources: ress,
 	}
 }
 
@@ -4373,7 +4444,7 @@ func TestModelDeploymentWebhook_AMissingTypeDoesNotHideTheRest(t *testing.T) {
 
 	md := modelDeployment(workercore.ModelDeploymentEngineVLLM,
 		role(func(role *workercore.ModelDeploymentRole) {
-			role.Name, role.InstanceType = "server", "no-such-type"
+			role.Name, role.AcceleratorType = "server", "no-such-type"
 			role.Resources = &workercore.ModelDeploymentRoleResources{
 				Accelerator: resource.NewQuantity(1, resource.DecimalSI),
 			}
@@ -4388,7 +4459,7 @@ func TestModelDeploymentWebhook_AMissingTypeDoesNotHideTheRest(t *testing.T) {
 
 	assert.True(t, kerrors.IsInvalid(err),
 		"a field that names a missing object is Invalid, not a bare denial: %v", err)
-	assert.True(t, errsContain(err.Error(), "instanceType"),
+	assert.True(t, errsContain(err.Error(), "acceleratorType"),
 		"the refusal names the field that names the missing type: %v", err)
 	assert.True(t, errsContain(err.Error(), "engine"),
 		"and it does not short-circuit: the object's other faults are reported in the same pass: %v", err)
@@ -5247,7 +5318,7 @@ func TestModelDeploymentSGLangInternalDPNeedsNoRouter(t *testing.T) {
 }
 
 // TestModelDeploymentWebhook_KVTransferBackendFollowsTheManufacturer pins the backend-vs-vendor
-// refusals and the mixed-pair refusal, one row per shape. The InstanceTypes are read even for
+// refusals and the mixed-pair refusal, one row per shape. The AcceleratorTypes are read even for
 // roles that request no resources -- a pair's vendor rules are decided per role, and a role that
 // names no resources still names the type whose vendor decides them.
 func TestModelDeploymentWebhook_KVTransferBackendFollowsTheManufacturer(t *testing.T) {
@@ -5256,12 +5327,12 @@ func TestModelDeploymentWebhook_KVTransferBackendFollowsTheManufacturer(t *testi
 			role(func(r *workercore.ModelDeploymentRole) {
 				r.Name = "prefill"
 				r.Kind = workercore.ModelDeploymentRoleKindPrefill
-				r.InstanceType = prefillType
+				r.AcceleratorType = prefillType
 			}),
 			role(func(r *workercore.ModelDeploymentRole) {
 				r.Name = "decode"
 				r.Kind = workercore.ModelDeploymentRoleKindDecode
-				r.InstanceType = decodeType
+				r.AcceleratorType = decodeType
 			}),
 		)
 		md.Spec.Router = &workercore.ModelDeploymentRouter{Name: workercore.ModelDeploymentRouterVLLM}
@@ -5270,10 +5341,10 @@ func TestModelDeploymentWebhook_KVTransferBackendFollowsTheManufacturer(t *testi
 		}
 		return md
 	}
-	ascendType := servingInstanceType("a2-8x", 8, func(it *worker.InstanceType) {
-		it.Status.Detail.Manufacturer = nodefeature.ManufacturerAscend
+	ascendType := servingAcceleratorType("a2-8x", 8, func(at *worker.AcceleratorType) {
+		at.Status.Detail.Manufacturer = nodefeature.ManufacturerAscend
 	})
-	nvidiaType := servingInstanceType("h20-8x", 8)
+	nvidiaType := servingAcceleratorType("h20-8x", 8)
 
 	for _, tc := range []struct {
 		name           string
@@ -5285,25 +5356,25 @@ func TestModelDeploymentWebhook_KVTransferBackendFollowsTheManufacturer(t *testi
 			name:           "hixl on a non-Ascend pool is refused",
 			md:             pair(workercore.ModelDeploymentEngineVLLM, workercore.ModelDeploymentKVTransferBackendHIXL, "h20-8x", "h20-8x"),
 			wantFieldErr:   true,
-			wantErrMessage: "backend HIXL requires an Ascend InstanceType",
+			wantErrMessage: "backend HIXL requires an Ascend AcceleratorType",
 		},
 		{
 			name:           "nixl on an Ascend pool is refused",
 			md:             pair(workercore.ModelDeploymentEngineVLLM, workercore.ModelDeploymentKVTransferBackendNIXL, "a2-8x", "a2-8x"),
 			wantFieldErr:   true,
-			wantErrMessage: "backend NIXL is not supported on an Ascend InstanceType; use HIXL or Mooncake",
+			wantErrMessage: "backend NIXL is not supported on an Ascend AcceleratorType; use HIXL or Mooncake",
 		},
 		{
 			name:           "a mixed Ascend and non-Ascend pair is refused",
 			md:             pair(workercore.ModelDeploymentEngineVLLM, workercore.ModelDeploymentKVTransferBackendMooncake, "a2-8x", "h20-8x"),
 			wantFieldErr:   true,
-			wantErrMessage: "cannot mix Ascend and non-Ascend InstanceTypes",
+			wantErrMessage: "cannot mix Ascend and non-Ascend AcceleratorTypes",
 		},
 		{
 			name:           "a mixed Ascend and non-Ascend pair without kvTransfer is refused",
 			md:             pair(workercore.ModelDeploymentEngineVLLM, "", "a2-8x", "h20-8x"),
 			wantFieldErr:   true,
-			wantErrMessage: "cannot mix Ascend and non-Ascend InstanceTypes",
+			wantErrMessage: "cannot mix Ascend and non-Ascend AcceleratorTypes",
 		},
 		{
 			name: "hixl on an Ascend pool is accepted",
@@ -5320,14 +5391,28 @@ func TestModelDeploymentWebhook_KVTransferBackendFollowsTheManufacturer(t *testi
 			name: "an unobserved manufacturer refuses nothing",
 			md:   pair(workercore.ModelDeploymentEngineVLLM, workercore.ModelDeploymentKVTransferBackendHIXL, "syncing-type", "syncing-type"),
 		},
+		{
+			name:           "hixl on a CPU-only role omitting acceleratorType is refused",
+			md:             pair(workercore.ModelDeploymentEngineVLLM, workercore.ModelDeploymentKVTransferBackendHIXL, "", ""),
+			wantFieldErr:   true,
+			wantErrMessage: "backend HIXL requires an Ascend AcceleratorType",
+		},
+		{
+			name:           "a mixed Ascend and CPU-only pair is refused",
+			md:             pair(workercore.ModelDeploymentEngineVLLM, "", "a2-8x", ""),
+			wantFieldErr:   true,
+			wantErrMessage: "cannot mix Ascend and non-Ascend AcceleratorTypes",
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			objs := []ctrlcli.Object{
 				nvidiaType, ascendType,
-				acceleratableInstanceType("syncing-type", true),
+				servingAcceleratorType("syncing-type", 8, func(at *worker.AcceleratorType) {
+					at.Status.Detail.Manufacturer = ""
+				}),
 			}
 			w := newModelDeploymentWebhookWith(objs)
-			errs, err := w.validateRoleResourcesAgainstInstanceTypes(context.Background(), tc.md)
+			errs, err := w.validateRoleResourcesAgainstAcceleratorTypes(context.Background(), nil, tc.md)
 			require.NoError(t, err)
 
 			if !tc.wantFieldErr {
@@ -5376,4 +5461,380 @@ func TestModelDeploymentWebhook_NIXLSideChannelPortIsReservedOnBothHalves(t *tes
 		modelDeploymentRouterReservedPorts(md, &md.Spec.Roles[1]), inject.VLLMMooncakeBootstrapPort)
 	assert.NotContains(t,
 		modelDeploymentRouterReservedPorts(md, &md.Spec.Roles[1]), inject.VLLMNIXLSideChannelPort)
+}
+
+func TestModelDeploymentWebhook_CPUOnlyRole(t *testing.T) {
+	cases := []struct {
+		name       string
+		role       workercore.ModelDeploymentRole
+		wantFields []string
+		wantMsg    string
+	}{
+		{
+			name: "admitted without accelerator request",
+			role: workercore.ModelDeploymentRole{
+				Name:            "server",
+				Replicas:        1,
+				AcceleratorType: "",
+				Resources: &workercore.ModelDeploymentRoleResources{
+					CPU: ptr.To(resource.MustParse("2")),
+					RAM: ptr.To(resource.MustParse("4Gi")),
+				},
+			},
+		},
+		{
+			name: "admitted with nil resources",
+			role: workercore.ModelDeploymentRole{
+				Name:            "server",
+				Replicas:        1,
+				AcceleratorType: "",
+			},
+		},
+		{
+			name: "rejected when accelerator count is positive",
+			role: workercore.ModelDeploymentRole{
+				Name:            "server",
+				Replicas:        1,
+				AcceleratorType: "",
+				Resources: &workercore.ModelDeploymentRoleResources{
+					Accelerator: resource.NewQuantity(1, resource.DecimalSI),
+				},
+			},
+			wantFields: []string{"spec.roles[0].resources.accelerator"},
+			wantMsg:    "accelerator resources cannot be requested when acceleratorType is omitted",
+		},
+		{
+			name: "rejected when accelerator count is zero",
+			role: workercore.ModelDeploymentRole{
+				Name:            "server",
+				Replicas:        1,
+				AcceleratorType: "",
+				Resources: &workercore.ModelDeploymentRoleResources{
+					Accelerator: resource.NewQuantity(0, resource.DecimalSI),
+				},
+			},
+			wantFields: []string{"spec.roles[0].resources.accelerator"},
+			wantMsg:    "accelerator resources cannot be requested when acceleratorType is omitted",
+		},
+		{
+			name: "rejected when logical slice memory is set",
+			role: workercore.ModelDeploymentRole{
+				Name:            "server",
+				Replicas:        1,
+				AcceleratorType: "",
+				Resources: &workercore.ModelDeploymentRoleResources{
+					AcceleratorSlicedMemoryPercentage: 50,
+				},
+			},
+			wantFields: []string{"spec.roles[0].resources.acceleratorSlicedMemoryPercentage"},
+			wantMsg:    "logical slicing cannot be requested when acceleratorType is omitted",
+		},
+		{
+			name: "rejected when logical slice cores is set",
+			role: workercore.ModelDeploymentRole{
+				Name:            "server",
+				Replicas:        1,
+				AcceleratorType: "",
+				Resources: &workercore.ModelDeploymentRoleResources{
+					AcceleratorSlicedCoresPercentage: 50,
+				},
+			},
+			wantFields: []string{"spec.roles[0].resources.acceleratorSlicedCoresPercentage"},
+			wantMsg:    "logical slicing cannot be requested when acceleratorType is omitted",
+		},
+		{
+			name: "rejected when partition profile is set",
+			role: workercore.ModelDeploymentRole{
+				Name:            "server",
+				Replicas:        1,
+				AcceleratorType: "",
+				Resources: &workercore.ModelDeploymentRoleResources{
+					AcceleratorPartitionedProfile: "1g.10gb",
+				},
+			},
+			wantFields: []string{"spec.roles[0].resources.acceleratorPartitionedProfile"},
+			wantMsg:    "hardware partitioning cannot be requested when acceleratorType is omitted",
+		},
+		{
+			name: "rejected when elasticEp is set",
+			role: workercore.ModelDeploymentRole{
+				Name:            "server",
+				Replicas:        1,
+				AcceleratorType: "",
+				ElasticEP: &workercore.ModelDeploymentRoleElasticEP{
+					Width: 2,
+				},
+			},
+			wantFields: []string{"spec.roles[0].acceleratorType"},
+			wantMsg:    "the elastic-EP profile requires an acceleratorType",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			w := newModelDeploymentWebhookWith(nil)
+			md := modelDeployment(workercore.ModelDeploymentEngineVLLM, tc.role)
+
+			_, err := w.ValidateCreate(context.Background(), md)
+			if len(tc.wantFields) == 0 {
+				require.NoError(t, err)
+				return
+			}
+
+			require.Error(t, err)
+			for _, f := range tc.wantFields {
+				assert.Contains(t, err.Error(), f)
+			}
+			if tc.wantMsg != "" {
+				assert.Contains(t, err.Error(), tc.wantMsg)
+			}
+		})
+	}
+}
+
+func TestModelDeploymentWebhook_AcceleratorType_InactiveAndDefaulting(t *testing.T) {
+	activeType := servingAcceleratorType("active-type", 8)
+	inactiveType := servingAcceleratorType("inactive-type", 8, func(at *worker.AcceleratorType) {
+		at.Spec.Inactive = true
+	})
+
+	t.Run("inactive type rejected on create", func(t *testing.T) {
+		w := newModelDeploymentWebhookWith([]ctrlcli.Object{activeType, inactiveType})
+		md := modelDeployment(workercore.ModelDeploymentEngineVLLM, workercore.ModelDeploymentRole{
+			Name:            "server",
+			Replicas:        1,
+			AcceleratorType: "inactive-type",
+			Resources: &workercore.ModelDeploymentRoleResources{
+				Accelerator: resource.NewQuantity(1, resource.DecimalSI),
+			},
+		})
+
+		_, err := w.ValidateCreate(context.Background(), md)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "spec.roles[0].acceleratorType")
+		assert.Contains(t, err.Error(), `accelerator type "inactive-type" is inactive`)
+	})
+
+	t.Run("inactive type rejected when update switches to it", func(t *testing.T) {
+		w := newModelDeploymentWebhookWith([]ctrlcli.Object{activeType, inactiveType})
+		old := modelDeployment(workercore.ModelDeploymentEngineVLLM, workercore.ModelDeploymentRole{
+			Name:            "server",
+			Replicas:        1,
+			AcceleratorType: "active-type",
+			Resources: &workercore.ModelDeploymentRoleResources{
+				Accelerator: resource.NewQuantity(1, resource.DecimalSI),
+			},
+		})
+		md := old.DeepCopy()
+		md.Spec.Roles[0].AcceleratorType = "inactive-type"
+
+		_, err := w.ValidateUpdate(context.Background(), old, md)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "spec.roles[0].acceleratorType")
+		assert.Contains(t, err.Error(), `accelerator type "inactive-type" is inactive`)
+	})
+
+	t.Run("inactive type admitted on update when role already targets it", func(t *testing.T) {
+		w := newModelDeploymentWebhookWith([]ctrlcli.Object{activeType, inactiveType})
+		old := modelDeployment(workercore.ModelDeploymentEngineVLLM, workercore.ModelDeploymentRole{
+			Name:            "server",
+			Replicas:        1,
+			AcceleratorType: "inactive-type",
+			Resources: &workercore.ModelDeploymentRoleResources{
+				Accelerator: resource.NewQuantity(1, resource.DecimalSI),
+			},
+		})
+		md := old.DeepCopy()
+		md.Spec.Roles[0].Replicas = 2
+
+		_, err := w.ValidateUpdate(context.Background(), old, md)
+		assert.NoError(t, err)
+	})
+}
+
+func TestModelDeploymentWebhook_ExplicitHostResources(t *testing.T) {
+	at := servingAcceleratorType("h20-8x", 8)
+
+	cases := []struct {
+		name       string
+		role       workercore.ModelDeploymentRole
+		wantFields []string
+		wantMsg    string
+	}{
+		{
+			name: "positive host resources admitted",
+			role: workercore.ModelDeploymentRole{
+				Name:            "server",
+				Replicas:        1,
+				AcceleratorType: "h20-8x",
+				ShmSize:         ptr.To(resource.MustParse("2Gi")),
+				Resources: &workercore.ModelDeploymentRoleResources{
+					Accelerator:  resource.NewQuantity(1, resource.DecimalSI),
+					CPU:          ptr.To(resource.MustParse("2000m")),
+					RAM:          ptr.To(resource.MustParse("4Gi")),
+					LocalStorage: ptr.To(resource.MustParse("20Gi")),
+				},
+			},
+		},
+		{
+			name: "shmSize set without ram is admitted",
+			role: workercore.ModelDeploymentRole{
+				Name:            "server",
+				Replicas:        1,
+				AcceleratorType: "h20-8x",
+				ShmSize:         ptr.To(resource.MustParse("2Gi")),
+				Resources: &workercore.ModelDeploymentRoleResources{
+					Accelerator: resource.NewQuantity(1, resource.DecimalSI),
+				},
+			},
+		},
+		{
+			name: "zero cpu rejected",
+			role: workercore.ModelDeploymentRole{
+				Name:            "server",
+				Replicas:        1,
+				AcceleratorType: "h20-8x",
+				Resources: &workercore.ModelDeploymentRoleResources{
+					Accelerator: resource.NewQuantity(1, resource.DecimalSI),
+					CPU:         ptr.To(resource.MustParse("0")),
+				},
+			},
+			wantFields: []string{"spec.roles[0].resources.cpu"},
+			wantMsg:    "cpu must be greater than zero",
+		},
+		{
+			name: "negative cpu rejected",
+			role: workercore.ModelDeploymentRole{
+				Name:            "server",
+				Replicas:        1,
+				AcceleratorType: "h20-8x",
+				Resources: &workercore.ModelDeploymentRoleResources{
+					Accelerator: resource.NewQuantity(1, resource.DecimalSI),
+					CPU:         ptr.To(resource.MustParse("-1")),
+				},
+			},
+			wantFields: []string{"spec.roles[0].resources.cpu"},
+			wantMsg:    "cpu must be greater than zero",
+		},
+		{
+			name: "zero ram rejected",
+			role: workercore.ModelDeploymentRole{
+				Name:            "server",
+				Replicas:        1,
+				AcceleratorType: "h20-8x",
+				Resources: &workercore.ModelDeploymentRoleResources{
+					Accelerator: resource.NewQuantity(1, resource.DecimalSI),
+					RAM:         ptr.To(resource.MustParse("0")),
+				},
+			},
+			wantFields: []string{"spec.roles[0].resources.ram"},
+			wantMsg:    "ram must be greater than zero",
+		},
+		{
+			name: "negative ram rejected",
+			role: workercore.ModelDeploymentRole{
+				Name:            "server",
+				Replicas:        1,
+				AcceleratorType: "h20-8x",
+				Resources: &workercore.ModelDeploymentRoleResources{
+					Accelerator: resource.NewQuantity(1, resource.DecimalSI),
+					RAM:         ptr.To(resource.MustParse("-1Gi")),
+				},
+			},
+			wantFields: []string{"spec.roles[0].resources.ram"},
+			wantMsg:    "ram must be greater than zero",
+		},
+		{
+			name: "zero localStorage rejected",
+			role: workercore.ModelDeploymentRole{
+				Name:            "server",
+				Replicas:        1,
+				AcceleratorType: "h20-8x",
+				Resources: &workercore.ModelDeploymentRoleResources{
+					Accelerator:  resource.NewQuantity(1, resource.DecimalSI),
+					LocalStorage: ptr.To(resource.MustParse("0")),
+				},
+			},
+			wantFields: []string{"spec.roles[0].resources.localStorage"},
+			wantMsg:    "localStorage must be greater than zero",
+		},
+		{
+			name: "negative localStorage rejected",
+			role: workercore.ModelDeploymentRole{
+				Name:            "server",
+				Replicas:        1,
+				AcceleratorType: "h20-8x",
+				Resources: &workercore.ModelDeploymentRoleResources{
+					Accelerator:  resource.NewQuantity(1, resource.DecimalSI),
+					LocalStorage: ptr.To(resource.MustParse("-5Gi")),
+				},
+			},
+			wantFields: []string{"spec.roles[0].resources.localStorage"},
+			wantMsg:    "localStorage must be greater than zero",
+		},
+		{
+			name: "zero shmSize rejected",
+			role: workercore.ModelDeploymentRole{
+				Name:            "server",
+				Replicas:        1,
+				AcceleratorType: "h20-8x",
+				ShmSize:         ptr.To(resource.MustParse("0")),
+				Resources: &workercore.ModelDeploymentRoleResources{
+					Accelerator: resource.NewQuantity(1, resource.DecimalSI),
+				},
+			},
+			wantFields: []string{"spec.roles[0].shmSize"},
+			wantMsg:    "shmSize must be greater than zero",
+		},
+		{
+			name: "negative shmSize rejected",
+			role: workercore.ModelDeploymentRole{
+				Name:            "server",
+				Replicas:        1,
+				AcceleratorType: "h20-8x",
+				ShmSize:         ptr.To(resource.MustParse("-1Gi")),
+				Resources: &workercore.ModelDeploymentRoleResources{
+					Accelerator: resource.NewQuantity(1, resource.DecimalSI),
+				},
+			},
+			wantFields: []string{"spec.roles[0].shmSize"},
+			wantMsg:    "shmSize must be greater than zero",
+		},
+		{
+			name: "shmSize exceeding ram rejected",
+			role: workercore.ModelDeploymentRole{
+				Name:            "server",
+				Replicas:        1,
+				AcceleratorType: "h20-8x",
+				ShmSize:         ptr.To(resource.MustParse("8Gi")),
+				Resources: &workercore.ModelDeploymentRoleResources{
+					Accelerator: resource.NewQuantity(1, resource.DecimalSI),
+					RAM:         ptr.To(resource.MustParse("4Gi")),
+				},
+			},
+			wantFields: []string{"spec.roles[0].shmSize"},
+			wantMsg:    "shmSize cannot exceed ram",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			w := newModelDeploymentWebhookWith([]ctrlcli.Object{at})
+			md := modelDeployment(workercore.ModelDeploymentEngineVLLM, tc.role)
+
+			_, err := w.ValidateCreate(context.Background(), md)
+			if len(tc.wantFields) == 0 {
+				require.NoError(t, err)
+				return
+			}
+
+			require.Error(t, err)
+			for _, f := range tc.wantFields {
+				assert.Contains(t, err.Error(), f)
+			}
+			if tc.wantMsg != "" {
+				assert.Contains(t, err.Error(), tc.wantMsg)
+			}
+		})
+	}
 }

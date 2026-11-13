@@ -6,7 +6,7 @@ metadata:
     kueue.x-k8s.io/pod-group-total-count: "1"
     kueue.x-k8s.io/role-hash: main
     kvcache.gpustack.ai/client-config: '{"metadata_server":"P2PHANDSHAKE","master_server_address":"shared-kv-master.gpustack-system.svc:50051","protocol":"efa","device_name":"","mode":"standalone-store","global_segment_size":0,"local_buffer_size":134217728,"tenant_id":"chat"}'
-    modeldeployment.gpustack.ai/pod-spec-hash: e30bb7c7e5b4ecfa0cb9993774119c4bb8dc00520564e592156416376e9626eb
+    modeldeployment.gpustack.ai/pod-spec-hash: 80917ee38355ef4eacf85d15dee656d7c6b34f15d576d7688abfa55f5f7d46cd
     modeldeployment.gpustack.ai/render-version: "5"
     note.gpustack.ai/role: main
     prometheus.io/path: /metrics
@@ -131,15 +131,9 @@ spec:
       timeoutSeconds: 5
     resources:
       limits:
-        cpu: "16"
-        ephemeral-storage: 15Gi
-        memory: 64Gi
         nvidia.com/gpu: "1"
         vpc.amazonaws.com/efa: "1"
       requests:
-        cpu: 1600m
-        ephemeral-storage: 1920Mi
-        memory: 8Gi
         nvidia.com/gpu: "1"
     securityContext:
       capabilities:

@@ -6,6 +6,16 @@
 package v1
 
 // OpenAPIModelName returns the OpenAPI model name for this type.
+func (in AcceleratorType) OpenAPIModelName() string {
+	return "ai.gpustack.worker.v1.AcceleratorType"
+}
+
+// OpenAPIModelName returns the OpenAPI model name for this type.
+func (in AcceleratorTypeList) OpenAPIModelName() string {
+	return "ai.gpustack.worker.v1.AcceleratorTypeList"
+}
+
+// OpenAPIModelName returns the OpenAPI model name for this type.
 func (in Devices) OpenAPIModelName() string {
 	return "ai.gpustack.worker.v1.Devices"
 }

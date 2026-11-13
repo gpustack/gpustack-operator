@@ -9,6 +9,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/sets"
 	ctrlcli "sigs.k8s.io/controller-runtime/pkg/client"
 	kueue "sigs.k8s.io/kueue/apis/kueue/v1beta2"
+	kueuectrlconst "sigs.k8s.io/kueue/pkg/controller/constants"
 	kueuepodconst "sigs.k8s.io/kueue/pkg/controller/jobs/pod/constants"
 	utilpod "sigs.k8s.io/kueue/pkg/util/pod"
 )
@@ -33,6 +34,7 @@ func (r *ModelDeploymentReconciler) initialQueuedReplica(
 		}
 	}
 
+	unqueued := len(view.Members) > 0 && view.Members[0].Labels[kueuectrlconst.QueueLabel] == ""
 	for i, member := range view.Members {
 		standing := new(core.Pod)
 		if err := r.APIReader.Get(ctx, ctrlcli.ObjectKeyFromObject(member), standing); err != nil {
@@ -43,13 +45,17 @@ func (r *ModelDeploymentReconciler) initialQueuedReplica(
 		}
 		if standing.UID != member.UID || standing.DeletionTimestamp != nil ||
 			standing.Status.Phase != core.PodPending || standing.Spec.NodeName != "" ||
-			!utilpod.HasGate(standing, kueuepodconst.SchedulingGateName) ||
+			(!unqueued && !utilpod.HasGate(standing, kueuepodconst.SchedulingGateName)) ||
 			len(standing.Status.ContainerStatuses) != 0 ||
 			len(standing.Status.InitContainerStatuses) != 0 ||
 			len(standing.Status.EphemeralContainerStatuses) != 0 {
 			return false, nil
 		}
 		view.Members[i] = standing
+	}
+
+	if unqueued {
+		return true, nil
 	}
 
 	wl := replicaOwningWorkload(view.Members, workloadPointers(workloads))

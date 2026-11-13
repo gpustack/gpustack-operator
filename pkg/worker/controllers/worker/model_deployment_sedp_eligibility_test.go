@@ -50,7 +50,7 @@ func TestModelDeploymentReconciler_ANonHeadMemberFaultWithdrawsTheWholeGroup(t *
 			"--data-parallel-size", "2", "--data-parallel-rank", "$(GPUSTACK_MEMBER_INDEX)",
 		}
 	})
-	cli := newModelDeploymentClient(md.DeepCopy(), newRenderInstanceType())
+	cli := newModelDeploymentClient(md.DeepCopy(), newRenderAcceleratorType())
 	endpointEligibilityTestSeed(t, cli, md)
 	setEndpointEligibilityPodsReady(t, cli, true)
 	// THE PROBE ASKS A MEMBER AT ITS ADDRESS, so a member with no address is a member the

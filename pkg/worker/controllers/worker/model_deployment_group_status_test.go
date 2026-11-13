@@ -219,7 +219,7 @@ func groupStatusPublishMembership(
 
 	answer.CollectedAt = time.Now()
 
-	r := &ModelDeploymentReconciler{Client: newModelDeploymentClient(md, newRenderInstanceType())}
+	r := &ModelDeploymentReconciler{Client: newModelDeploymentClient(md, newRenderAcceleratorType())}
 	status, err := r.computeModelDeploymentStatusWithQualifications(
 		context.Background(), md, pods, nil, nil, nil, qualifications,
 	)
@@ -1052,7 +1052,7 @@ func TestModelDeploymentGroupStatusPublishesNoGroupThePassDidNotEvaluate(t *test
 // idempotence fixture's contract, and a second copy of one fact is not a second proof of it.
 func TestModelDeploymentGroupStatusDistinguishesAnObservationTransitionFromAStablePass(t *testing.T) {
 	writes := new(modelDeploymentWrites)
-	cli := newCountingModelDeploymentClient(writes, newRenderDeployment(), newRenderInstanceType())
+	cli := newCountingModelDeploymentClient(writes, newRenderDeployment(), newRenderAcceleratorType())
 
 	published := make([][]workercore.ModelDeploymentGroupStatus, 0, 3)
 	for pass := 1; pass <= 3; pass++ {

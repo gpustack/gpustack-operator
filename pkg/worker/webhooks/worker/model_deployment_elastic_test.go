@@ -30,11 +30,11 @@ import (
 
 func elasticRole(mutate func(*workercore.ModelDeploymentRole)) workercore.ModelDeploymentRole {
 	role := workercore.ModelDeploymentRole{
-		Name:         "vllm-elastic",
-		Kind:         workercore.ModelDeploymentRoleKindServer,
-		Replicas:     1,
-		ReplicaSize:  1,
-		InstanceType: "nvidia-gpu",
+		Name:            "vllm-elastic",
+		Kind:            workercore.ModelDeploymentRoleKindServer,
+		Replicas:        1,
+		ReplicaSize:     1,
+		AcceleratorType: "h20-8x",
 		ElasticEP: &workercore.ModelDeploymentRoleElasticEP{
 			Width: 2,
 		},
@@ -109,14 +109,22 @@ func TestValidateModelDeploymentElasticSpec(t *testing.T) {
 		md:   func() *workercore.ModelDeployment { return elasticMD() },
 		old:  func() *workercore.ModelDeployment { return elasticMD() },
 	}, {
-		name: "instanceType change on update refused",
+		name: "acceleratorType change on update refused",
 		md: func() *workercore.ModelDeployment {
 			md := elasticMD()
-			md.Spec.Roles[0].InstanceType = "other-gpu"
+			md.Spec.Roles[0].AcceleratorType = "other-gpu"
 			return md
 		},
 		old:     func() *workercore.ModelDeployment { return elasticMD() },
-		wantErr: []string{"spec.roles[0].instanceType", "profile"},
+		wantErr: []string{"spec.roles[0].acceleratorType", "profile"},
+	}, {
+		name: "acceleratorType omitted on elastic role refused",
+		md: func() *workercore.ModelDeployment {
+			md := elasticMD()
+			md.Spec.Roles[0].AcceleratorType = ""
+			return md
+		},
+		wantErr: []string{"spec.roles[0].acceleratorType", "requires an acceleratorType"},
 	}, {
 		name: "resources change on update refused",
 		md: func() *workercore.ModelDeployment {
@@ -170,10 +178,10 @@ func TestValidateModelDeploymentElasticSpec(t *testing.T) {
 		name: "non-elastic second role refused",
 		md: func() *workercore.ModelDeployment {
 			return elasticMD(elasticRole(nil), workercore.ModelDeploymentRole{
-				Name:         "plain-server",
-				Kind:         workercore.ModelDeploymentRoleKindServer,
-				Replicas:     1,
-				InstanceType: "nvidia-gpu",
+				Name:            "plain-server",
+				Kind:            workercore.ModelDeploymentRoleKindServer,
+				Replicas:        1,
+				AcceleratorType: "h20-8x",
 			})
 		},
 		wantErr: []string{"elasticEp"},
@@ -342,6 +350,8 @@ func TestValidateModelDeploymentElasticEPWidthBounds(t *testing.T) {
 	}
 	cli := fakecli.NewClientBuilder().WithScheme(scheme).WithObjects(&workercore.InstanceType{
 		ObjectMeta: meta.ObjectMeta{Name: "cpu-head"},
+	}, &workercore.AcceleratorType{
+		ObjectMeta: meta.ObjectMeta{Name: "cpu-head"},
 	}).Build()
 	webhook := &ModelDeploymentWebhook{APIReader: cli}
 
@@ -394,6 +404,8 @@ func TestValidateElasticNodeIdentityEnv(t *testing.T) {
 		t.Fatalf("build scheme: %v", err)
 	}
 	cli := fakecli.NewClientBuilder().WithScheme(scheme).WithObjects(&workercore.InstanceType{
+		ObjectMeta: meta.ObjectMeta{Name: "cpu-head"},
+	}, &workercore.AcceleratorType{
 		ObjectMeta: meta.ObjectMeta{Name: "cpu-head"},
 	}).Build()
 	webhook := &ModelDeploymentWebhook{APIReader: cli}

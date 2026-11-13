@@ -190,8 +190,8 @@ func TestModelStoreBindingAccounting(t *testing.T) {
 	t.Run("a prefetch whose placement cannot expand leaves the figure unmeasured", func(t *testing.T) {
 		ambiguous := testAccountingPrefetch("team-a", "model")
 		ambiguous.Spec.Placement = &workercore.ModelPrefetchPlacement{
-			InstanceTypes: []string{"h100-8"},
-			NodeSelector:  &meta.LabelSelector{MatchLabels: map[string]string{"pool": "h100"}},
+			AcceleratorTypes: []string{"h100-8"},
+			NodeSelector:     &meta.LabelSelector{MatchLabels: map[string]string{"pool": "h100"}},
 		}
 		r, cli := newAccountingEnv(t,
 			newAccountingBinding("team-a", "cache", "20Gi"),

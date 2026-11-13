@@ -20,7 +20,6 @@ import (
 	kueue "sigs.k8s.io/kueue/apis/kueue/v1beta2"
 	kueuepodconst "sigs.k8s.io/kueue/pkg/controller/jobs/pod/constants"
 
-	worker "gpustack.ai/gpustack/api/worker/v1"
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
 	"gpustack.ai/gpustack/pkg/nodefeature"
 	"gpustack.ai/gpustack/pkg/systemmeta"
@@ -62,12 +61,7 @@ func TestElasticRayLoggingEnvironment(t *testing.T) {
 				md.Spec.Roles[0].Replicas = 1
 				md.Spec.Roles[0].ElasticEP = &workercore.ModelDeploymentRoleElasticEP{Width: 2}
 			}
-			cpu := newRenderInstanceType(func(it *worker.InstanceType) {
-				it.Name = "cpu"
-				it.Spec.Acceleratable = false
-				it.Status.Entrance = "cpu-queue"
-			})
-			cli := newModelDeploymentClient(md, newRenderInstanceType(), cpu)
+			cli := newModelDeploymentClient(md, newRenderAcceleratorType())
 			r := &ModelDeploymentReconciler{Client: cli, APIReader: cli}
 			_, err := r.convergeModelDeployment(context.Background(), md)
 			require.NoError(t, err)
@@ -109,15 +103,17 @@ func TestElasticConvergenceCreatesChildren(t *testing.T) {
 			md := newRenderDeployment()
 			md.Spec.KVCache = nil
 			md.Spec.Roles[0].Replicas = 1
-			md.Spec.Roles[0].Resources = &workercore.ModelDeploymentRoleResources{Accelerator: resource.NewQuantity(int64(tp), resource.DecimalSI)}
+			wantCPU := resource.MustParse(fmt.Sprintf("%d", 16*tp))
+			wantMemory := resource.MustParse(fmt.Sprintf("%dGi", 64*tp))
+			md.Spec.Roles[0].Resources = &workercore.ModelDeploymentRoleResources{
+				Accelerator: resource.NewQuantity(int64(tp), resource.DecimalSI),
+				CPU:         &wantCPU,
+				RAM:         &wantMemory,
+			}
 			md.Spec.Roles[0].ElasticEP = &workercore.ModelDeploymentRoleElasticEP{Width: 2}
 			md.Spec.Roles[0].ExtraArgs = []string{"--tensor-parallel-size", strconv.Itoa(tp)}
-			cli := newModelDeploymentClient(md, newRenderInstanceType())
+			cli := newModelDeploymentClient(md, newRenderAcceleratorType())
 			r := &ModelDeploymentReconciler{Client: cli, APIReader: cli}
-			gpuType := new(worker.InstanceType)
-			require.NoError(t, cli.Get(context.Background(), ctrlcli.ObjectKey{Name: md.Spec.Roles[0].InstanceType}, gpuType))
-			unitCPU := resource.MustParse(gpuType.Spec.UnitResources.CPU)
-			unitMemory := resource.MustParse(gpuType.Spec.UnitResources.RAM)
 			_, err := r.convergeModelDeployment(context.Background(), md)
 			require.NoError(t, err)
 			pods := new(core.PodList)
@@ -147,8 +143,8 @@ func TestElasticConvergenceCreatesChildren(t *testing.T) {
 					q := c.Resources.Limits[gpuResource]
 					require.Equal(t, int64(tp), q.Value())
 					require.NotContains(t, c.Command[2], "--num-gpus")
-					require.Equal(t, unitCPU.MilliValue()*int64(tp), c.Resources.Limits.Cpu().MilliValue())
-					require.Equal(t, unitMemory.Value()*int64(tp), c.Resources.Limits.Memory().Value())
+					require.Equal(t, wantCPU.MilliValue(), c.Resources.Limits.Cpu().MilliValue())
+					require.Equal(t, wantMemory.Value(), c.Resources.Limits.Memory().Value())
 					require.Contains(t, c.Command[2], "gpustack-pod-uid=\"$GPUSTACK_ELASTIC_POD_UID\"")
 					if modelDeploymentOrdinalOrFloor(pod) == 0 {
 						master = *pod.DeepCopy()
@@ -449,8 +445,7 @@ func TestModelDeploymentRolesSharedMemory(t *testing.T) {
 			if tc.takeOver {
 				md.Spec.Roles[0].Command = []string{"custom-server"}
 			}
-			cpu := newRenderInstanceType(func(it *worker.InstanceType) { it.Name = "cpu"; it.Spec.Acceleratable = false })
-			cli := newModelDeploymentClient(md, newRenderInstanceType(), cpu)
+			cli := newModelDeploymentClient(md, newRenderAcceleratorType())
 			r := &ModelDeploymentReconciler{Client: cli, APIReader: cli}
 			_, err := r.convergeModelDeployment(context.Background(), md)
 			require.NoError(t, err)
@@ -623,8 +618,7 @@ func TestElasticUnknownBootstrapRetainsMembers(t *testing.T) {
 			md.Spec.KVCache = nil
 			md.Spec.Roles[0].Replicas = 1
 			md.Spec.Roles[0].ElasticEP = &workercore.ModelDeploymentRoleElasticEP{Width: 2}
-			cpu := newRenderInstanceType(func(it *worker.InstanceType) { it.Name = "cpu"; it.Spec.Acceleratable = false })
-			cli := newModelDeploymentClient(md, newRenderInstanceType(), cpu)
+			cli := newModelDeploymentClient(md, newRenderAcceleratorType())
 			r := &ModelDeploymentReconciler{Client: cli, APIReader: cli}
 			_, err := r.convergeModelDeployment(context.Background(), md)
 			require.NoError(t, err)
@@ -652,11 +646,11 @@ func TestElasticCreateUsesUncachedOccupancy(t *testing.T) {
 	md.Spec.KVCache = nil
 	md.Spec.Roles[0].Replicas = 1
 	md.Spec.Roles[0].ElasticEP = &workercore.ModelDeploymentRoleElasticEP{Width: 2}
-	fresh := newModelDeploymentClient(md, newRenderInstanceType())
+	fresh := newModelDeploymentClient(md, newRenderAcceleratorType())
 	r := &ModelDeploymentReconciler{Client: fresh, APIReader: fresh}
 	_, err := r.convergeModelDeployment(context.Background(), md)
 	require.NoError(t, err)
-	stale := newModelDeploymentClient(md, newRenderInstanceType())
+	stale := newModelDeploymentClient(md, newRenderAcceleratorType())
 	r.Client = stale
 	_, err = r.convergeModelDeployment(context.Background(), md)
 	require.NoError(t, err)
@@ -684,7 +678,7 @@ func TestElasticAuxiliaryHeadRoleSettings(t *testing.T) {
 			md.Spec.Roles[0].ElasticEP = &workercore.ModelDeploymentRoleElasticEP{Width: 2}
 			md.Spec.Roles[0].Privileged = tc.privileged
 			md.Spec.Roles[0].TerminationGracePeriodSeconds = tc.grace
-			cli := newModelDeploymentClient(md, newRenderInstanceType())
+			cli := newModelDeploymentClient(md, newRenderAcceleratorType())
 			r := &ModelDeploymentReconciler{Client: cli, APIReader: cli}
 			_, err := r.convergeModelDeployment(ctx, md)
 			require.NoError(t, err)

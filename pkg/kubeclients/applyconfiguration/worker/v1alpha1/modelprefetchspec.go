@@ -19,7 +19,7 @@ type ModelPrefetchSpecApplyConfiguration struct {
 	// grant a store covering the target set, and its budget bounds the prefetch at admission.
 	//
 	BindingRef *ModelPrefetchBindingReferenceApplyConfiguration `json:"bindingRef,omitempty"`
-	// Placement narrows the target set. InstanceTypes and NodeSelector are mutually exclusive;
+	// Placement narrows the target set. AcceleratorTypes and NodeSelector are mutually exclusive;
 	// both set is refused, and both left out derives the target set from the namespace's own
 	// deployments that reference the artifact. The relational rules are webhook-enforced.
 	//
@@ -40,7 +40,7 @@ type ModelPrefetchSpecApplyConfiguration struct {
 	// set, so the derived-from-deployments default an ordinary prefetch falls back to — which
 	// follows this namespace's consumers around — would prepare whatever machines happen to
 	// serve the model this week. A source intent on a prefetch whose placement names no
-	// instanceTypes and no nodeSelector is refused at admission, and the two out together stay
+	// acceleratorTypes and no nodeSelector is refused at admission, and the two out together stay
 	// refused for the ambiguity they already were.
 	//
 	// The optional Binding sourceMemory grant bounds memory independently of disk quota.

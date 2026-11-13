@@ -631,7 +631,7 @@ baseline) and republishes its descriptors once ready.
 #### Role configuration
 
 Select the load format on a `ModelDeployment` role. The example uses a Hugging Face artifact and a
-cluster-specific runner image and instance type.
+cluster-specific runner image and accelerator type.
 
 ```yaml
 apiVersion: worker.gpustack.ai/v1
@@ -650,7 +650,7 @@ spec:
   roles:
     - name: server
       replicas: 2
-      instanceType: gpustack--nvidia-a10g-linux-amd64
+      acceleratorType: gpustack--nvidia-a10g-linux-amd64
       resources:
         accelerator: 1
       extraArgs:

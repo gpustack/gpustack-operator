@@ -51,7 +51,7 @@ the owning deep page, then link to it. Add a deep page when no existing page own
 | NFD labels, the `gpustack-cpu-info` rule, the manufacturer map | `docs/modules/devices/discovery.md` |
 | Device Manager detection, the `Devices` ledger, allocator injection, cross-mode exclusion, placement | `docs/modules/devices/discovery.md` |
 | The NIC/RDMA interface inventory, `pciRootId`/`pciSwitches`, the three link states, the `rdma.*` node labels, the RDMA resource keys | `docs/modules/rdma/network-topology.md` |
-| Capacity labels, flavor/queue/InstanceType naming and grouping, the scheduling controllers | `docs/modules/devices/scheduling.md` |
+| Capacity labels, flavor/queue/AcceleratorType/InstanceType naming and grouping, the scheduling controllers | `docs/modules/devices/scheduling.md` |
 | Topograph's boundary, `TopologySource`, topology profiles, Kueue Topologies and TAS capacity semantics, and the placement preference toward nodes holding a model | `docs/modules/topology/scheduling.md` |
 | Any admission gate, the four-view status, InstanceType/Instance/Pod webhook rules, drain-stop | `docs/modules/devices/admission.md` |
 | Chart mode vs image mode, `disableApplications`, what the worker applies itself | `docs/operate/installation-modes.md` |
@@ -71,7 +71,7 @@ the owning deep page, then link to it. Add a deep page when no existing page own
 | Running node delivery: the chart values, where the node's configuration comes from, reading a node, the watermark cap, switching delivery, where replicas land and turning the preference off, upgrading, removing the cache | `docs/modules/model-delivery/operations.md` |
 | Remote weight delivery: the `Require` and `Prefer` policies and their fallback rules, source preparation and the `sourceMemory` grant, metadata-only mounts, session credentials, control and payload networks, the remote status view, troubleshooting and rollback | `docs/modules/model-delivery/remote.md` |
 | Injected engine, router, sidecar and transfer parameters, ownership and defaults | `docs/modules/model-deployment/parameterize.md` |
-| The `ModelDeployment` contract: the inherited reuse domain, the three override tiers, the owned-key table, the runner-image formula, prefill/decode pairing, the topology-placement field contract | `docs/modules/model-deployment/configuration.md` |
+| The `ModelDeployment` contract: AcceleratorType, explicit role resources, CPU-only scheduling, the inherited reuse domain, the three override tiers, the owned-key table, the runner-image formula, prefill/decode pairing, the topology-placement field contract | `docs/modules/model-deployment/configuration.md` |
 | The measured replica-scaling comparison across algorithms and engines, its latency and throughput, scale-out timing, retirement observations and failure limits | `docs/modules/model-deployment/scaling-benchmark.md` |
 | The synthetic three-algorithm scaler comparison on identical seeds, its measured request outcomes, adjustment-dynamics timelines and true per-token latencies | `docs/modules/model-deployment/scaling-simulation.md` |
 | Configuring and observing `ModelDeploymentScaler`, Shadow and Active modes, algorithm selection, EPD ratios and retirement | `docs/walkthroughs/model-deployment/scaling.md` |

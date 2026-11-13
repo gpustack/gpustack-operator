@@ -195,7 +195,7 @@ func TestRenderModelDeploymentRouterObjects_BothSelectorsSelectOnlyThePodsThatAn
 				t.Helper()
 
 				pod, err := renderModelDeploymentPodTemplate(context.Background(), ModelDeploymentRenderInput{
-					Deployment: md, Role: &md.Spec.Roles[roleIndex], InstanceType: newRenderInstanceType(),
+					Deployment: md, Role: &md.Spec.Roles[roleIndex], AcceleratorType: newRenderAcceleratorType(),
 				})
 				require.NoError(t, err)
 				stampModelDeploymentPod(pod, md, &md.Spec.Roles[roleIndex], 0, member)
@@ -290,7 +290,7 @@ func mixedEligibilityDeployment() *workercore.ModelDeployment {
 	) workercore.ModelDeploymentRole {
 		return workercore.ModelDeploymentRole{
 			Name: name, Kind: kind, Replicas: 1, ReplicaSize: replicaSize,
-			InstanceType: "h20-8x", Image: "vllm/vllm-openai:v0.30.0",
+			AcceleratorType: "h20-8x", Image: "vllm/vllm-openai:v0.30.0",
 			// One serving port for every role, because the router refuses a deployment whose roles
 			// disagree on it. No command, no Elastic EP and no parallelism arguments: the shape a
 			// managed role has, so the group shape below is the one the operator itself renders.
@@ -334,7 +334,7 @@ func mixedEligibilityDeployment() *workercore.ModelDeployment {
 // to write by hand. A hand-stamped eligibility label would make this an assertion about the fixture.
 func TestRenderModelDeploymentRouterObjects_EPDKeepsUnsupportedPrefillDiscoverable(t *testing.T) {
 	md := mixedEligibilityDeployment()
-	instanceType := newRenderInstanceType(func(it *worker.InstanceType) {
+	instanceType := newRenderAcceleratorType(func(it *worker.AcceleratorType) {
 		it.Status.Detail.Manufacturer = nodefeature.ManufacturerNVIDIA
 	})
 	manufacturers := map[string]string{
@@ -364,7 +364,7 @@ func TestRenderModelDeploymentRouterObjects_EPDKeepsUnsupportedPrefillDiscoverab
 	ids := make(map[types.UID]string, len(members))
 	for _, m := range members {
 		pod, err := renderModelDeploymentPodTemplate(context.Background(), ModelDeploymentRenderInput{
-			Deployment: md, Role: roles[m.role], InstanceType: instanceType,
+			Deployment: md, Role: roles[m.role], AcceleratorType: instanceType,
 		})
 		require.NoErrorf(t, err, "render the %s member of %s", m.id, m.role)
 		stampModelDeploymentPod(pod, md, roles[m.role], 0, m.member)
@@ -781,11 +781,11 @@ func TestRenderModelDeploymentRouterObjects_MixedRolesRenderTheirOwnRequirements
 			md.Spec.Roles[0].Name = "managed"
 			md.Spec.Roles[0].ReplicaSize = 2
 			md.Spec.Roles = append(md.Spec.Roles, workercore.ModelDeploymentRole{
-				Name:         "custom",
-				Replicas:     1,
-				InstanceType: "h20-8x",
-				Image:        "vllm/vllm-openai:v0.25.1",
-				Command:      []string{"custom-server"},
+				Name:            "custom",
+				Replicas:        1,
+				AcceleratorType: "h20-8x",
+				Image:           "vllm/vllm-openai:v0.25.1",
+				Command:         []string{"custom-server"},
 			})
 		})
 	}
@@ -1402,7 +1402,7 @@ func objectsConfig(objects ModelDeploymentRouterObjects) string {
 }
 
 func TestModelDeploymentRouter_ConvergesAndRepairsConfig(t *testing.T) {
-	cli := newModelDeploymentClient(routedModelDeployment(), newRenderInstanceType())
+	cli := newModelDeploymentClient(routedModelDeployment(), newRenderAcceleratorType())
 
 	_, err := reconcileModelDeployment(t, cli)
 	require.NoError(t, err)
@@ -1420,7 +1420,7 @@ func TestModelDeploymentRouter_ConvergesAndRepairsConfig(t *testing.T) {
 }
 
 func TestModelDeploymentRouter_RemovalPrunesEveryObject(t *testing.T) {
-	cli := newModelDeploymentClient(routedModelDeployment(), newRenderInstanceType())
+	cli := newModelDeploymentClient(routedModelDeployment(), newRenderAcceleratorType())
 	_, err := reconcileModelDeployment(t, cli)
 	require.NoError(t, err)
 	key := ctrlcli.ObjectKey{Namespace: "team-a", Name: "qwen-router"}
@@ -1455,7 +1455,7 @@ func TestModelDeploymentRouter_RemovalPrunesEveryObject(t *testing.T) {
 }
 
 func TestModelDeploymentRouter_ReadyReplicaPublishesRouterEndpoint(t *testing.T) {
-	cli := newModelDeploymentClient(routedModelDeployment(), newRenderInstanceType())
+	cli := newModelDeploymentClient(routedModelDeployment(), newRenderAcceleratorType())
 	_, err := reconcileModelDeployment(t, cli)
 	require.NoError(t, err)
 	md := getModelDeployment(t, cli)
@@ -1475,7 +1475,7 @@ func TestModelDeploymentRouter_ReadyReplicaPublishesRouterEndpoint(t *testing.T)
 
 func TestModelDeploymentRouter_RefusesToAdopt(t *testing.T) {
 	foreign := &core.ConfigMap{ObjectMeta: meta.ObjectMeta{Name: "qwen-router", Namespace: "team-a"}}
-	cli := newModelDeploymentClient(routedModelDeployment(), newRenderInstanceType(), foreign)
+	cli := newModelDeploymentClient(routedModelDeployment(), newRenderAcceleratorType(), foreign)
 
 	_, err := reconcileModelDeployment(t, cli)
 	require.EqualError(t, err, "configmap team-a/qwen-router is not owned by this deployment")
@@ -1483,7 +1483,7 @@ func TestModelDeploymentRouter_RefusesToAdopt(t *testing.T) {
 
 func TestModelDeploymentRouter_SecondPassWritesNothing(t *testing.T) {
 	writes := new(modelDeploymentWrites)
-	cli := newCountingModelDeploymentClient(writes, routedModelDeployment(), newRenderInstanceType())
+	cli := newCountingModelDeploymentClient(writes, routedModelDeployment(), newRenderAcceleratorType())
 	_, err := reconcileModelDeployment(t, cli)
 	require.NoError(t, err)
 	require.Equal(t, 13, writes.creates,
@@ -1497,7 +1497,7 @@ func TestModelDeploymentRouter_SecondPassWritesNothing(t *testing.T) {
 
 func TestModelDeploymentRouter_ConfigChangeRollsOnce(t *testing.T) {
 	writes := new(modelDeploymentWrites)
-	cli := newCountingModelDeploymentClient(writes, routedModelDeployment(), newRenderInstanceType())
+	cli := newCountingModelDeploymentClient(writes, routedModelDeployment(), newRenderAcceleratorType())
 	_, err := reconcileModelDeployment(t, cli)
 	require.NoError(t, err)
 
@@ -1844,7 +1844,7 @@ func TestRenderModelDeploymentRouterObjects_TheGatewayAndTheEngineReadOneField(t
 		"the fixture must not already carry this name, or the comparison proves nothing")
 
 	pod, err := renderModelDeploymentPodTemplate(context.Background(), ModelDeploymentRenderInput{
-		Deployment: md, Role: &md.Spec.Roles[0], InstanceType: newRenderInstanceType(),
+		Deployment: md, Role: &md.Spec.Roles[0], AcceleratorType: newRenderAcceleratorType(),
 	})
 	require.NoError(t, err)
 
@@ -2342,12 +2342,12 @@ func TestModelDeploymentRouterCandidate_ThePublishedDiscoveryAndTheWrittenLabels
 		md.Spec.Roles[0].Replicas = 1
 		md.Spec.Roles[0].ReplicaSize = 2
 		md.Spec.Roles = append(md.Spec.Roles, workercore.ModelDeploymentRole{
-			Name:         "custom",
-			Replicas:     1,
-			ReplicaSize:  2,
-			InstanceType: "h20-8x",
-			Image:        "vllm/vllm-openai:v0.25.1",
-			Command:      []string{"python3", "-m", "vllm.entrypoints.openai.api_server"},
+			Name:            "custom",
+			Replicas:        1,
+			ReplicaSize:     2,
+			AcceleratorType: "h20-8x",
+			Image:           "vllm/vllm-openai:v0.25.1",
+			Command:         []string{"python3", "-m", "vllm.entrypoints.openai.api_server"},
 		})
 	})
 	objects, err := renderModelDeploymentRouterObjects(context.Background(), md, nil, false)

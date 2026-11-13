@@ -88,7 +88,7 @@ fi
 # Deliberately absent: see the Environment note. Admission does not resolve it, and the controller
 # row in the single-role phase asserts that the controller does.
 BINDING="${E2E_MD_BINDING:-case45-no-such-binding}"
-IT="${E2E_MD_INSTANCE_TYPE:-}"
+IT="${E2E_MD_ACCELERATOR_TYPE:-${E2E_MD_INSTANCE_TYPE:-}}"
 # The deployment-wide engine image. No row here runs a container, so what it names does not matter --
 # only that it exists, because the field is required and a role that names none falls back to it.
 IMAGE="${E2E_MD_IMAGE:-registry.k8s.io/pause:3.10}"
@@ -629,7 +629,7 @@ esac
 eleven=""
 for i in $(seq 0 10); do
   eleven+="  - name: role-${i}
-    instanceType: ${IT}
+    acceleratorType: ${IT}
     replicas: 1
 "
 done
@@ -651,10 +651,10 @@ refuses "eleven roles are refused naming THIS PROJECT's cap" \
 refuses "two roles sharing a name are refused BY THE SCHEMA" \
   'spec.roles[1]: Duplicate value:' \
   "  - name: worker
-    instanceType: ${IT}
+    acceleratorType: ${IT}
     replicas: 1
   - name: worker
-    instanceType: ${IT}
+    acceleratorType: ${IT}
     replicas: 1" \
   '{"name":"worker"}'
 
@@ -673,10 +673,10 @@ refuses "two roles sharing a name are refused BY THE SCHEMA" \
 if [ -n "${IT2:-}" ]; then
   accepts "two instanceTypes are ACCEPTED, which is the joint barrier's whole premise" \
     "  - name: prefill
-    instanceType: ${IT}
+    acceleratorType: ${IT}
     replicas: 1
   - name: decode
-    instanceType: ${IT2}
+    acceleratorType: ${IT2}
     replicas: 1"
 else
   record SKIP "two instanceTypes are ACCEPTED, which is the joint barrier's whole premise" \
@@ -687,11 +687,11 @@ refuses "kind: Server beside another kind is refused" \
   "cannot be combined with another kind" \
   "  - name: server
     kind: Server
-    instanceType: ${IT}
+    acceleratorType: ${IT}
     replicas: 1
   - name: prefill
     kind: Prefill
-    instanceType: ${IT}
+    acceleratorType: ${IT}
     replicas: 1"
 
 # THIS ROW WAS A REFUSAL AND IS NOW AN ACCEPTANCE, for the reason the rule's own comment gives: both
@@ -707,14 +707,14 @@ ENGINE=SGLang accepts "an sglang prefill/decode pair is ACCEPTED: every engine r
 refuses "a role name that is not a PodSetReference is refused BY THE SCHEMA" \
   "spec.roles[0].name" \
   "  - name: Prefill
-    instanceType: ${IT}
+    acceleratorType: ${IT}
     replicas: 1"
 
 refuses "a kind outside the enum is refused BY THE SCHEMA" \
   "spec.roles[0].kind" \
   "  - name: prefill
     kind: router
-    instanceType: ${IT}
+    acceleratorType: ${IT}
     replicas: 1"
 
 # ---------------------------------------------------------------- the live convergence
@@ -796,7 +796,7 @@ TPL='"image":"'"$IMAGE"'","command":["/pause"]'
 # only moment it was available. Capturing it is what turned that symptom into the decoding error
 # above, which is the whole reason the brace was findable at all.
 SCALE_PATCH="$(kubectl -n "$NS" patch modeldeployments.worker.gpustack.ai "$REBUILD_MD" --type=merge \
-  -p '{"spec":{"roles":[{"name":"prefill","kind":"Prefill","instanceType":"'"$IT"'","replicas":2,'"$TPL"'},{"name":"decode","kind":"Decode","instanceType":"'"$IT"'","replicas":1,'"$TPL"'}]}}' \
+  -p '{"spec":{"roles":[{"name":"prefill","kind":"Prefill","acceleratorType":"'"$IT"'","replicas":2,'"$TPL"'},{"name":"decode","kind":"Decode","acceleratorType":"'"$IT"'","replicas":1,'"$TPL"'}]}}' \
   2>&1)"
 
 SCALED=no

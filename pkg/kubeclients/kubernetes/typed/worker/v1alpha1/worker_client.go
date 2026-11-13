@@ -17,6 +17,7 @@ import (
 
 type WorkerV1alpha1Interface interface {
 	RESTClient() rest.Interface
+	AcceleratorTypesGetter
 	DevicesGetter
 	DevicesRDMASelectionPoliciesGetter
 	InstancesGetter
@@ -37,6 +38,10 @@ type WorkerV1alpha1Interface interface {
 // WorkerV1alpha1Client is used to interact with features provided by the worker.gpustack.ai group.
 type WorkerV1alpha1Client struct {
 	restClient rest.Interface
+}
+
+func (c *WorkerV1alpha1Client) AcceleratorTypes() AcceleratorTypeInterface {
+	return newAcceleratorTypes(c)
 }
 
 func (c *WorkerV1alpha1Client) Devices() DevicesInterface {

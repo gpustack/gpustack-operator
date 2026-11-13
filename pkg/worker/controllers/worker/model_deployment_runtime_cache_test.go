@@ -88,7 +88,7 @@ func TestRenderModelDeploymentPod_RuntimeCacheEnvPointsAtTheHostBackedMount(t *t
 				md.Spec.KVCache = nil
 			})
 
-			pod := renderOne(t, md, newRenderInstanceType())
+			pod := renderOne(t, md, newRenderAcceleratorType())
 
 			volume := findVolume(pod, ModelDeploymentCompileCacheVolumeName)
 			require.NotNil(t, volume, "the managed role carries the cache volume")
@@ -133,7 +133,7 @@ func TestRenderModelDeploymentPod_RuntimeCacheEnvIsDefaultedNotOwned(t *testing.
 			}
 		})
 
-		pod := renderOne(t, md, newRenderInstanceType())
+		pod := renderOne(t, md, newRenderAcceleratorType())
 
 		value, found := envValue(pod, "TRITON_CACHE_DIR")
 		require.True(t, found)
@@ -146,7 +146,7 @@ func TestRenderModelDeploymentPod_RuntimeCacheEnvIsDefaultedNotOwned(t *testing.
 			md.Spec.Roles[0].Command = []string{"/bin/my-server", "--flag"}
 		})
 
-		pod := renderOne(t, md, newRenderInstanceType())
+		pod := renderOne(t, md, newRenderAcceleratorType())
 
 		for _, c := range runtimeCacheEnvLayout {
 			_, found := envValue(pod, c.name)

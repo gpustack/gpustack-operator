@@ -156,7 +156,7 @@ func newReleaseScenario(t *testing.T, holder ...func(*core.Pod)) *releaseScenari
 	devices := releaseDevices()
 	workload := releaseWorkload("wl-uid-1", "member-1", "qwen-server-one")
 
-	cli := newModelDeploymentClient(md, newRenderInstanceType(), held, router, devices, workload)
+	cli := newModelDeploymentClient(md, newRenderAcceleratorType(), held, router, devices, workload)
 	r := retirementRouterReconciler(cli, &scriptedDrainReader{}, time.Now(), []core.Pod{*held})
 	started := time.Now()
 	md = reserve(md, retirementReservation(
@@ -202,7 +202,7 @@ func newReleaseScenario(t *testing.T, holder ...func(*core.Pod)) *releaseScenari
 func (s *releaseScenario) replaceDevices(devs *workercore.Devices) {
 	s.t.Helper()
 
-	cli := newModelDeploymentClient(s.md, newRenderInstanceType(), s.holder, s.router, devs,
+	cli := newModelDeploymentClient(s.md, newRenderAcceleratorType(), s.holder, s.router, devs,
 		releaseWorkload(s.workloadUID, "member-1", "qwen-server-one"))
 	s.cli = cli
 	s.r = retirementRouterReconciler(cli, &scriptedDrainReader{}, time.Now(), []core.Pod{*s.holder})
@@ -646,7 +646,7 @@ func TestModelDeploymentRetirementRelease_RouterBackedTwoToOneLifecycle(t *testi
 	devices := releaseDevices()
 	workload := releaseWorkload("wl-uid-1", "member-1", "qwen-server-one")
 
-	cli := newModelDeploymentClient(md, newRenderInstanceType(), target, keeper, router, devices, workload)
+	cli := newModelDeploymentClient(md, newRenderAcceleratorType(), target, keeper, router, devices, workload)
 	md.Spec.Roles[0].Replicas = 2
 	md = reserve(md, retirementReservation(
 		workercore.ModelDeploymentRetirementStateDraining, "server", 1, []string{"member-1"},
@@ -792,7 +792,7 @@ func TestModelDeploymentRetirementRelease_CPUOnlyTargetCompletes(t *testing.T) {
 		Status: core.PodStatus{Phase: core.PodRunning, PodIP: "10.0.8.1"},
 	}
 	workload := releaseWorkload("wl-uid-1", "member-1", "qwen-server-one")
-	cli := newModelDeploymentClient(md, newRenderInstanceType(), holder, router, releaseDevices(), workload)
+	cli := newModelDeploymentClient(md, newRenderAcceleratorType(), holder, router, releaseDevices(), workload)
 	r := retirementRouterReconciler(cli, &scriptedDrainReader{}, time.Now(), []core.Pod{*holder})
 
 	md = reserve(md, retirementReservation(

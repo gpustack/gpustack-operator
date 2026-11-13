@@ -7,6 +7,7 @@ import (
 	core "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/types"
 	kueue "sigs.k8s.io/kueue/apis/kueue/v1beta2"
+	kueuectrlconst "sigs.k8s.io/kueue/pkg/controller/constants"
 
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
 	"gpustack.ai/gpustack/pkg/kubeapistatus"
@@ -356,7 +357,11 @@ func modelDeploymentRoleEverAssembled(
 	role string, pods []core.Pod, wlByReplica map[types.UID]*kueue.Workload,
 ) bool {
 	for i := range pods {
-		if modelDeploymentPodRole(&pods[i]) == role && wlByReplica[pods[i].UID] != nil {
+		if modelDeploymentPodRole(&pods[i]) != role {
+			continue
+		}
+		if wlByReplica[pods[i].UID] != nil ||
+			(pods[i].Labels[kueuectrlconst.QueueLabel] == "" && pods[i].Spec.NodeName != "") {
 			return true
 		}
 	}

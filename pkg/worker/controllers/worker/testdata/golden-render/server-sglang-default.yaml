@@ -10,8 +10,8 @@ spec:
   model:
     name: Qwen/Qwen2.5-72B-Instruct
   roles:
-  - image: lmsysorg/sglang:v0.5.18
-    instanceType: h20-8x
+  - acceleratorType: h20-8x
+    image: lmsysorg/sglang:v0.5.18
     kind: Server
     name: main
     replicas: 1

@@ -86,8 +86,14 @@ func (r *InstanceTypeReconciler) Reconcile(ctx context.Context, req ctrl.Request
 		return r.teardownInstanceType(ctx, it)
 	}
 
-	// Lock.
-	if !systemmeta.Lock(it) {
+	// Lock, and refresh admission-stamped schedule/entrance labels if the awareness setting moved
+	// this type onto a different canonical pool queue.
+	cqName := InstanceTypePoolQueueName(ctx, it)
+	locked := systemmeta.Lock(it)
+	labelsChanged := alignAdmissionQueueLabels(
+		it.Labels, instanceTypeScheduleLabels(ctx, it), nodefeature.FormatLocalQueueName(cqName),
+	)
+	if !locked || labelsChanged {
 		err = r.Client.Update(ctx, it)
 		if err != nil {
 			logger.Error(err, "lock instance type")
@@ -125,6 +131,13 @@ func (r *InstanceTypeReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	}
 	if changed {
 		return ctrl.Result{}, nil
+	}
+
+	if prevCQName := instanceTypePreviousPoolQueueName(ctx, it, cq.Name); prevCQName != "" {
+		if _, err = reapDisplacedPoolClusterQueue(ctx, r.Client, r.APIReader, prevCQName, it); err != nil {
+			logger.Error(err, "reap displaced cluster queue", "clusterQueue", prevCQName)
+			return ctrl.Result{}, err
+		}
 	}
 
 	overcommit := settings.InstanceGeneralResourcesOvercommit.ShouldValueBool(ctx)
@@ -173,6 +186,12 @@ func (r *InstanceTypeReconciler) Reconcile(ctx context.Context, req ctrl.Request
 func (r *InstanceTypeReconciler) syncInactive(
 	ctx context.Context, it *workercore.InstanceType, cq *kueue.ClusterQueue,
 ) (bool, error) {
+	_, otherActive, err := poolHasActiveFrontingObjects(ctx, r.Client, cq.Name, it)
+	if err != nil {
+		return false, err
+	}
+	allInactive := it.Spec.Inactive && !otherActive
+
 	// NodeQueue owns StopPolicy for the whole topology migration window. In particular, its
 	// temporary HoldAndDrain must not be mirrored into the administrator-facing Inactive field;
 	// otherwise the restored active policy is immediately converted into a sticky Hold. The
@@ -183,9 +202,9 @@ func (r *InstanceTypeReconciler) syncInactive(
 		saved := cq.Annotations[_TASQueueMigrationStopPolicyAnnotation]
 		want := saved
 		switch {
-		case it.Spec.Inactive && (saved == string(kueue.None) || saved == _TASQueueMigrationStopPolicyUnset):
+		case allInactive && (saved == string(kueue.None) || saved == _TASQueueMigrationStopPolicyUnset):
 			want = string(kueue.Hold)
-		case !it.Spec.Inactive && saved == string(kueue.Hold):
+		case !allInactive && saved == string(kueue.Hold):
 			want = string(kueue.None)
 		}
 		if want == saved {
@@ -200,12 +219,12 @@ func (r *InstanceTypeReconciler) syncInactive(
 
 	switch ptr.Deref(cq.Spec.StopPolicy, kueue.None) {
 	case kueue.None:
-		if it.Spec.Inactive {
+		if allInactive {
 			cq.Spec.StopPolicy = ptr.To(kueue.Hold)
 			return true, r.Client.Update(ctx, cq)
 		}
 	case kueue.Hold:
-		if !it.Spec.Inactive {
+		if !allInactive {
 			if len(cq.Spec.ResourceGroups) == 0 {
 				if cq.Annotations == nil {
 					cq.Annotations = make(map[string]string)
@@ -226,6 +245,168 @@ func (r *InstanceTypeReconciler) syncInactive(
 	return false, nil
 }
 
+// poolHasActiveFrontingObjects inspects non-deleting InstanceTypes and AcceleratorTypes fronting
+// the given canonical ClusterQueue name (excluding exclude when non-nil). It scans the zero-copy
+// informer cache rather than matching QueueEntranceLabelKey because canonical queue names depend on
+// the live awareness setting and pre-webhook objects may not carry the admission label yet.
+func poolHasActiveFrontingObjects(
+	ctx context.Context, cli ctrlcli.Client, cqName string, exclude ctrlcli.Object,
+) (anyNonDeleting, anyActive bool, err error) {
+	return listPoolFrontingObjects(ctx, cli, true, cqName, exclude)
+}
+
+// poolHasActiveFrontingObjectsWithFallback checks the informer cache first and re-checks via
+// apiReader whenever the cache reports zero remaining non-deleting fronting objects, preventing a
+// stale cache from deleting a shared ClusterQueue while a newly created sibling type already fronts
+// the pool on the API server.
+func poolHasActiveFrontingObjectsWithFallback(
+	ctx context.Context, cli ctrlcli.Client, apiReader ctrlcli.Reader, cqName string, exclude ctrlcli.Object,
+) (anyNonDeleting, anyActive bool, err error) {
+	anyNonDeleting, anyActive, err = listPoolFrontingObjects(ctx, cli, true, cqName, exclude)
+	if err != nil || anyNonDeleting || apiReader == nil {
+		return anyNonDeleting, anyActive, err
+	}
+	return listPoolFrontingObjects(ctx, apiReader, false, cqName, exclude)
+}
+
+func listPoolFrontingObjects(
+	ctx context.Context, rdr ctrlcli.Reader, zeroCopy bool, cqName string, exclude ctrlcli.Object,
+) (anyNonDeleting, anyActive bool, err error) {
+	_, excludeIT := exclude.(*workercore.InstanceType)
+	_, excludeAT := exclude.(*workercore.AcceleratorType)
+
+	opts := []ctrlcli.ListOption{ctrlclix.WithoutQuorum}
+	if zeroCopy {
+		opts = append(opts, ctrlcli.UnsafeDisableDeepCopy)
+	}
+
+	itList := new(workercore.InstanceTypeList)
+	if err = rdr.List(ctx, itList, opts...); err != nil {
+		return false, false, err
+	}
+	for i := range itList.Items {
+		it := &itList.Items[i]
+		if it.DeletionTimestamp != nil {
+			continue
+		}
+		if exclude != nil && ((exclude.GetUID() != "" && it.UID == exclude.GetUID()) || (excludeIT && it.Name == exclude.GetName())) {
+			continue
+		}
+		if InstanceTypePoolQueueName(ctx, it) != cqName {
+			continue
+		}
+		anyNonDeleting = true
+		if !it.Spec.Inactive {
+			anyActive = true
+		}
+	}
+
+	atList := new(workercore.AcceleratorTypeList)
+	if err = rdr.List(ctx, atList, opts...); err != nil {
+		return false, false, err
+	}
+	for i := range atList.Items {
+		at := &atList.Items[i]
+		if at.DeletionTimestamp != nil {
+			continue
+		}
+		if exclude != nil && ((exclude.GetUID() != "" && at.UID == exclude.GetUID()) || (excludeAT && at.Name == exclude.GetName())) {
+			continue
+		}
+		if AcceleratorTypePoolQueueName(ctx, at) != cqName {
+			continue
+		}
+		anyNonDeleting = true
+		if !at.Spec.Inactive {
+			anyActive = true
+		}
+	}
+	return anyNonDeleting, anyActive, nil
+}
+
+const queueEntranceLabelKey = "schedule." + systemname.LabelPrefix + "queue-entrance"
+
+// alignAdmissionQueueLabels keeps an admission-defaulted fronting object's schedule discriminators
+// and queue-entrance label aligned with the live awareness setting so PodWebhook and WorkloadWebhook
+// reverse-lookups stay accurate across setting toggles without touching bare unit-test fixtures.
+func alignAdmissionQueueLabels(labels, schedLabels map[string]string, entrance string) bool {
+	if len(labels) == 0 || labels[queueEntranceLabelKey] == "" {
+		return false
+	}
+	changed := false
+	for k := range labels {
+		if _, want := schedLabels[k]; want {
+			continue
+		}
+		if strings.HasPrefix(k, nodefeature.GeneralFeatureLabelPrefix) ||
+			strings.HasPrefix(k, nodefeature.AcceleratableFeatureLabelPrefix) {
+			delete(labels, k)
+			changed = true
+		}
+	}
+	for k, v := range schedLabels {
+		if labels[k] != v {
+			labels[k] = v
+			changed = true
+		}
+	}
+	if labels[queueEntranceLabelKey] != entrance {
+		labels[queueEntranceLabelKey] = entrance
+		changed = true
+	}
+	return changed
+}
+
+// instanceTypePreviousPoolQueueName resolves the prior canonical ClusterQueue name recorded in
+// it.Status.Entrance when toggling instance-type-aware-cpu-manufacturer moves it onto currCQName.
+func instanceTypePreviousPoolQueueName(ctx context.Context, it *workercore.InstanceType, currCQName string) string {
+	if it == nil || it.Status.Entrance == "" || it.Status.Entrance == nodefeature.FormatLocalQueueName(currCQName) {
+		return ""
+	}
+	altAware := !settings.InstanceTypeAwareCPUManufacturer.ShouldValueBool(ctx)
+	for _, candidate := range []string{
+		nodefeature.CanonicalPoolQueueName(
+			it.Spec.Acceleratable, altAware,
+			it.Spec.GeneralGroup, it.Spec.AcceleratorGroup,
+			it.Spec.OS, it.Spec.Arch,
+		),
+		it.Name,
+	} {
+		if candidate != "" && candidate != currCQName && nodefeature.FormatLocalQueueName(candidate) == it.Status.Entrance {
+			return candidate
+		}
+	}
+	return ""
+}
+
+// reapDisplacedPoolClusterQueue deletes prevCQName when no non-deleting InstanceType or
+// AcceleratorType fronts it anymore, reporting whether prevCQName still exists on the API server.
+func reapDisplacedPoolClusterQueue(
+	ctx context.Context, cli ctrlcli.Client, apiReader ctrlcli.Reader, prevCQName string, exclude ctrlcli.Object,
+) (bool, error) {
+	anyNonDeleting, _, err := poolHasActiveFrontingObjectsWithFallback(ctx, cli, apiReader, prevCQName, exclude)
+	if err != nil {
+		return false, err
+	}
+	if anyNonDeleting {
+		return false, nil
+	}
+	prevCQ := new(kueue.ClusterQueue)
+	err = cli.Get(ctx, ctrlcli.ObjectKey{Name: prevCQName}, prevCQ, ctrlclix.WithoutQuorum)
+	if err != nil {
+		if kerrors.IsNotFound(err) {
+			return false, nil
+		}
+		return false, err
+	}
+	if prevCQ.DeletionTimestamp == nil {
+		if err = cli.Delete(ctx, prevCQ); err != nil && !kerrors.IsNotFound(err) {
+			return false, err
+		}
+	}
+	return true, nil
+}
+
 // ensureClusterQueue guarantees the backing ClusterQueue matches the InstanceType. It creates the
 // queue when missing — first creation or a recreation after an accidental delete — stamping the
 // fixed no-borrow isolation policy into the spec at that point, and afterwards only aligns the
@@ -243,8 +424,9 @@ func (r *InstanceTypeReconciler) ensureClusterQueue(
 ) (*kueue.ClusterQueue, error) {
 	logger := ctrllog.FromContext(ctx)
 
+	cqName := InstanceTypePoolQueueName(ctx, it)
 	cq := new(kueue.ClusterQueue)
-	err := r.Client.Get(ctx, ctrlcli.ObjectKey{Name: it.Name}, cq, ctrlclix.WithoutQuorum)
+	err := r.Client.Get(ctx, ctrlcli.ObjectKey{Name: cqName}, cq, ctrlclix.WithoutQuorum)
 	if err != nil {
 		if !kerrors.IsNotFound(err) {
 			return nil, err
@@ -313,9 +495,10 @@ func (r *InstanceTypeReconciler) createClusterQueue(
 ) (*kueue.ClusterQueue, error) {
 	logger := ctrllog.FromContext(ctx)
 
+	cqName := InstanceTypePoolQueueName(ctx, it)
 	cq := &kueue.ClusterQueue{
 		ObjectMeta: meta.ObjectMeta{
-			Name:        it.Name,
+			Name:        cqName,
 			Labels:      instanceTypeScheduleLabels(ctx, it),
 			Annotations: map[string]string{_TASQueueEmptyPlanHoldAnnotation: "true"},
 		},
@@ -336,7 +519,7 @@ func (r *InstanceTypeReconciler) createClusterQueue(
 	systemmeta.NoteResource(cq, _ClusterQueueResType, nil)
 	if err := r.Client.Create(ctx, cq); err != nil {
 		if kerrors.IsAlreadyExists(err) {
-			return cq, r.Client.Get(ctx, ctrlcli.ObjectKey{Name: it.Name}, cq, ctrlclix.WithoutQuorum)
+			return cq, r.Client.Get(ctx, ctrlcli.ObjectKey{Name: cqName}, cq, ctrlclix.WithoutQuorum)
 		}
 		return nil, err
 	}
@@ -344,10 +527,9 @@ func (r *InstanceTypeReconciler) createClusterQueue(
 	return cq, nil
 }
 
-// teardownInstanceType completes a delete: it deletes the backing ClusterQueue and holds the
-// InstanceType's finalizer until the queue has actually disappeared. It does not drain the queue
-// itself — the NodeQueueReconciler observes the deletion and drives HoldAndDrain so Kueue evicts
-// the workloads and removes the queue; this reconciler only requests the deletion and waits.
+// teardownInstanceType completes a delete: it stops active Instances of this InstanceType, and
+// when no other non-deleting InstanceType or AcceleratorType fronts the same pool ClusterQueue,
+// deletes the backing ClusterQueue and holds the finalizer until the queue has disappeared.
 func (r *InstanceTypeReconciler) teardownInstanceType(
 	ctx context.Context, it *workercore.InstanceType,
 ) (ctrl.Result, error) {
@@ -357,39 +539,92 @@ func (r *InstanceTypeReconciler) teardownInstanceType(
 		return ctrl.Result{}, nil
 	}
 
-	cq := new(kueue.ClusterQueue)
-	err := r.Client.Get(ctx, ctrlcli.ObjectKey{Name: it.Name}, cq, ctrlclix.WithoutQuorum)
-	switch {
-	case err == nil:
-		// Reflect the teardown in the InstanceType status so consumers — and the Instance
-		// reconciler's stop check — see it go Inactive before the queue is gone.
-		if it.Status.Phase != InstanceTypePhaseInactive {
-			it.Status = workercore.InstanceTypeStatus{
-				Phase:        InstanceTypePhaseInactive,
-				PhaseMessage: "instance type is terminating",
-				Entrance:     nodefeature.FormatLocalQueueName(cq.Name),
-			}
-			if err = r.Client.Status().Update(ctx, it); err != nil {
-				return objectWriteResult(logger, err, "mark instance type inactive while terminating", _requeueAfterConflict)
-			}
-		}
-		// Request the queue's deletion once; the NodeQueueReconciler drains it (HoldAndDrain) so
-		// Kueue evicts its workloads and removes it. Wait for it to disappear before releasing
-		// the finalizer.
-		if cq.DeletionTimestamp == nil {
-			if err = r.Client.Delete(ctx, cq); err != nil && !kerrors.IsNotFound(err) {
-				logger.Error(err, "delete cluster queue")
-				return ctrl.Result{}, err
-			}
-			logger.V(2).Info("requested cluster queue deletion; the node queue drains it")
-		}
-		return ctrl.Result{RequeueAfter: 15 * time.Second}, nil
-	case !kerrors.IsNotFound(err):
-		logger.Error(err, "fetch cluster queue")
+	instList := new(workercore.InstanceList)
+	if err := r.Client.List(ctx, instList, ctrlclix.WithoutQuorum, ctrlcli.UnsafeDisableDeepCopy); err != nil {
+		logger.Error(err, "list instances for terminating instance type")
 		return ctrl.Result{}, err
 	}
+	for i := range instList.Items {
+		inst := &instList.Items[i]
+		if inst.DeletionTimestamp != nil || inst.Spec.Type != it.Name || inst.Spec.Stop {
+			continue
+		}
+		target := inst.DeepCopy()
+		target.Spec.Stop = true
+		if err := r.Client.Patch(ctx, target, ctrlcli.MergeFrom(inst)); err != nil && !kerrors.IsNotFound(err) {
+			logger.Error(err, "stop instance of terminating instance type", "instance", ctrlcli.ObjectKeyFromObject(inst))
+			return ctrl.Result{}, err
+		}
+	}
 
-	// The queue is gone: release the finalizer.
+	cqName := InstanceTypePoolQueueName(ctx, it)
+	anyNonDeleting, anyActive, err := poolHasActiveFrontingObjectsWithFallback(ctx, r.Client, r.APIReader, cqName, it)
+	if err != nil {
+		logger.Error(err, "check remaining fronting objects on pool cluster queue")
+		return ctrl.Result{}, err
+	}
+	if !anyNonDeleting {
+		cq := new(kueue.ClusterQueue)
+		err = r.Client.Get(ctx, ctrlcli.ObjectKey{Name: cqName}, cq, ctrlclix.WithoutQuorum)
+		switch {
+		case err == nil:
+			// Reflect the teardown in the InstanceType status so consumers — and the Instance
+			// reconciler's stop check — see it go Inactive before the queue is gone.
+			if it.Status.Phase != InstanceTypePhaseInactive {
+				it.Status = workercore.InstanceTypeStatus{
+					Phase:        InstanceTypePhaseInactive,
+					PhaseMessage: "instance type is terminating",
+					Entrance:     nodefeature.FormatLocalQueueName(cq.Name),
+				}
+				if err = r.Client.Status().Update(ctx, it); err != nil {
+					return objectWriteResult(logger, err, "mark instance type inactive while terminating", _requeueAfterConflict)
+				}
+			}
+			// Request the queue's deletion once; the NodeQueueReconciler drains it (HoldAndDrain) so
+			// Kueue evicts its workloads and removes it. Wait for it to disappear before releasing
+			// the finalizer.
+			if cq.DeletionTimestamp == nil {
+				if err = r.Client.Delete(ctx, cq); err != nil && !kerrors.IsNotFound(err) {
+					logger.Error(err, "delete cluster queue")
+					return ctrl.Result{}, err
+				}
+				logger.V(2).Info("requested cluster queue deletion; the node queue drains it")
+			}
+			return ctrl.Result{RequeueAfter: 15 * time.Second}, nil
+		case !kerrors.IsNotFound(err):
+			logger.Error(err, "fetch cluster queue")
+			return ctrl.Result{}, err
+		}
+	} else if !anyActive {
+		cq := new(kueue.ClusterQueue)
+		if err = r.Client.Get(ctx, ctrlcli.ObjectKey{Name: cqName}, cq, ctrlclix.WithoutQuorum); err != nil {
+			if !kerrors.IsNotFound(err) {
+				logger.Error(err, "fetch cluster queue")
+				return ctrl.Result{}, err
+			}
+		} else if cq.DeletionTimestamp == nil &&
+			cq.Annotations[_TASQueueMigrationPhaseAnnotation] == "" &&
+			ptr.Deref(cq.Spec.StopPolicy, kueue.None) == kueue.None {
+			cq.Spec.StopPolicy = ptr.To(kueue.Hold)
+			if err = r.Client.Update(ctx, cq); err != nil {
+				return objectWriteResult(logger, err, "hold cluster queue after last active fronting object deleted", _requeueAfterConflict)
+			}
+		}
+	}
+
+	if prevCQName := instanceTypePreviousPoolQueueName(ctx, it, cqName); prevCQName != "" {
+		stillPresent, rerr := reapDisplacedPoolClusterQueue(ctx, r.Client, r.APIReader, prevCQName, it)
+		if rerr != nil {
+			logger.Error(rerr, "reap displaced cluster queue during teardown", "clusterQueue", prevCQName)
+			return ctrl.Result{}, rerr
+		}
+		if stillPresent {
+			return ctrl.Result{RequeueAfter: 15 * time.Second}, nil
+		}
+	}
+
+	// Either another fronting object keeps the shared pool queue alive, or the queue is gone:
+	// release the finalizer.
 	systemmeta.Unlock(it)
 	if err = r.Client.Update(ctx, it); err != nil {
 		return ctrl.Result{}, ctrlcli.IgnoreNotFound(err)
@@ -427,6 +662,10 @@ func (r *InstanceTypeReconciler) computeStatus(
 	publishPartitionProfileNames(&st)
 	st.Entrance = nodefeature.FormatLocalQueueName(cq.Name)
 	st.Phase, st.PhaseMessage = apistatus.GetSummaryOfClusterQueue(cq)
+	if it.Spec.Inactive && st.Phase == InstanceTypePhaseActive {
+		st.Phase = InstanceTypePhaseInactive
+		st.PhaseMessage = "Deactivated by administrator"
+	}
 	return st
 }
 
@@ -666,6 +905,26 @@ func splitRuntimeVersion(v string) (major, minor int, ok bool) {
 	}
 
 	return major, minor, true
+}
+
+// InstanceTypePoolQueueName returns the canonical ClusterQueue name backing the given InstanceType.
+// When the spec identity fields are unset (as in bare unit-test fixtures), it falls back to the
+// InstanceType's own name.
+func InstanceTypePoolQueueName(ctx context.Context, it *workercore.InstanceType) string {
+	if it == nil {
+		return ""
+	}
+	if it.Spec.OS == "" || it.Spec.Arch == "" || (it.Spec.Acceleratable && it.Spec.AcceleratorGroup == "") {
+		return it.Name
+	}
+	return nodefeature.CanonicalPoolQueueName(
+		it.Spec.Acceleratable,
+		settings.InstanceTypeAwareCPUManufacturer.ShouldValueBool(ctx),
+		it.Spec.GeneralGroup,
+		it.Spec.AcceleratorGroup,
+		it.Spec.OS,
+		it.Spec.Arch,
+	)
 }
 
 // instanceTypeScheduleLabels builds the schedule discriminator labels stamped on the backing
@@ -1140,19 +1399,41 @@ func (r *InstanceTypeReconciler) SetupController(_ context.Context, opts control
 		Complete(r)
 }
 
-// enqueueInstanceTypeWhenClusterQueueChanged maps a changed backing ClusterQueue back to its
-// name-identical InstanceType, so the reconcile refreshes status from the queue (or recreates it
-// when the queue was deleted while the InstanceType still lives).
+// enqueueInstanceTypeWhenClusterQueueChanged maps a changed backing ClusterQueue back to every
+// InstanceType fronting that pool queue (plus the name-identical InstanceType as a fallback), so
+// the reconcile refreshes status from the queue or recreates it when deleted while an InstanceType
+// still lives.
 func (r *InstanceTypeReconciler) enqueueInstanceTypeWhenClusterQueueChanged(
 	ctx context.Context, obj ctrlcli.Object,
 ) []ctrlreconcile.Request {
 	logger := ctrllog.FromContext(ctx).
 		WithValues("cluster queue", ctrlcli.ObjectKeyFromObject(obj))
 
+	seen := map[string]bool{obj.GetName(): true}
 	reqs := []ctrlreconcile.Request{
 		{
 			NamespacedName: ctrlcli.ObjectKeyFromObject(obj),
 		},
+	}
+
+	itList := new(workercore.InstanceTypeList)
+	err := r.Client.List(ctx, itList, ctrlclix.WithoutQuorum, ctrlcli.UnsafeDisableDeepCopy)
+	if err != nil && r.APIReader != nil {
+		err = r.APIReader.List(ctx, itList, ctrlclix.WithoutQuorum)
+	}
+	if err != nil {
+		logger.Error(err, "list instance types for cluster queue")
+		return reqs
+	}
+	for i := range itList.Items {
+		it := &itList.Items[i]
+		if seen[it.Name] || InstanceTypePoolQueueName(ctx, it) != obj.GetName() {
+			continue
+		}
+		seen[it.Name] = true
+		reqs = append(reqs, ctrlreconcile.Request{
+			NamespacedName: ctrlcli.ObjectKey{Name: it.Name},
+		})
 	}
 
 	logger.V(2).Info("enqueued instance type from cluster queue", "requests", reqs)

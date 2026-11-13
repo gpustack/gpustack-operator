@@ -92,8 +92,8 @@ func (r *ModelDeploymentScalerReconciler) planRebalance(
 		if minimum <= 0 {
 			minimum = 1
 		}
-		if current[donor.Name] <= minimum || receiver.InstanceType == "" || donor.InstanceType == "" ||
-			receiver.InstanceType != donor.InstanceType {
+		if current[donor.Name] <= minimum || receiver.AcceleratorType == "" || donor.AcceleratorType == "" ||
+			receiver.AcceleratorType != donor.AcceleratorType {
 			continue
 		}
 		if policy == workercore.ModelDeploymentScalerRebalancePolicyOpposing &&

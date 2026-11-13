@@ -2,6 +2,7 @@ package worker
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -15,6 +16,7 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	ctrlcli "sigs.k8s.io/controller-runtime/pkg/client"
 	ctrlfake "sigs.k8s.io/controller-runtime/pkg/client/fake"
+	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
 	"gpustack.ai/gpustack/pkg/kubeclients/kubernetes/scheme"
@@ -458,27 +460,27 @@ func TestDeploymentInstanceTypesCollectsServingPools(t *testing.T) {
 			Spec: workercore.ModelDeploymentSpec{
 				Model: workercore.ModelDeploymentModel{ArtifactRef: &core.LocalObjectReference{Name: "model"}},
 				Roles: []workercore.ModelDeploymentRole{
-					{InstanceType: "h100-8"},
-					{InstanceType: "mi300-8"},
+					{AcceleratorType: "h100-8"},
+					{AcceleratorType: "mi300-8"},
 				},
 			},
 		},
 		{
 			Spec: workercore.ModelDeploymentSpec{
 				Model: workercore.ModelDeploymentModel{ArtifactRef: &core.LocalObjectReference{Name: "other"}},
-				Roles: []workercore.ModelDeploymentRole{{InstanceType: "ignored"}},
+				Roles: []workercore.ModelDeploymentRole{{AcceleratorType: "ignored"}},
 			},
 		},
 	}
 
-	assert.ElementsMatch(t, []string{"h100-8", "mi300-8"}, deploymentInstanceTypes(deps, "model"))
+	assert.ElementsMatch(t, []string{"h100-8", "mi300-8"}, deploymentAcceleratorTypes(deps, "model"))
 }
 
-// newPrefetchInstanceTypeEnv builds a fake client carrying the given nodes and InstanceTypes plus
+// newPrefetchAcceleratorTypeEnv builds a fake client carrying the given nodes and AcceleratorTypes plus
 // the ResourceFlavors the nodes genuinely contribute to — reconciled through the NodeFlavor
 // reconciler, so the flavors' names and labels are the production ones, never hand-written.
-func newPrefetchInstanceTypeEnv(
-	t *testing.T, nodes []*core.Node, types ...*workercore.InstanceType,
+func newPrefetchAcceleratorTypeEnv(
+	t *testing.T, nodes []*core.Node, types ...*workercore.AcceleratorType,
 ) ctrlcli.Client {
 	t.Helper()
 	objs := make([]ctrlcli.Object, 0, len(nodes)+len(types))
@@ -506,7 +508,7 @@ func resolvePrefetchTargets(
 	nodes []core.Node, deps []workercore.ModelDeployment,
 ) []string {
 	t.Helper()
-	pools, err := ResolveInstanceTypeFlavorNames(context.Background(), cli, pf, deps)
+	pools, err := ResolveAcceleratorTypeFlavorNames(context.Background(), cli, pf, deps)
 	require.NoError(t, err)
 	targets, err := PrefetchTargetNodes(pf, nodes, deps, pools)
 	require.NoError(t, err)
@@ -514,8 +516,20 @@ func resolvePrefetchTargets(
 	return targets
 }
 
-// testElasticInstanceType is the issue's shape: an admin-authored accelerated InstanceType with
+// testElasticAcceleratorType is the issue's shape: an admin-authored accelerated AcceleratorType with
 // a custom name over the nvidia-h100-80gb-hbm3 pool.
+func testElasticAcceleratorType() *workercore.AcceleratorType {
+	return &workercore.AcceleratorType{
+		ObjectMeta: meta.ObjectMeta{Name: "elastic-cpu-gpu"},
+		Spec: workercore.AcceleratorTypeSpec{
+			GeneralGroup:     "generic",
+			AcceleratorGroup: "nvidia-h100-80gb-hbm3",
+			OS:               "linux",
+			Arch:             "amd64",
+		},
+	}
+}
+
 func testElasticInstanceType() *workercore.InstanceType {
 	return &workercore.InstanceType{
 		ObjectMeta: meta.ObjectMeta{Name: "elastic-cpu-gpu"},
@@ -529,31 +543,66 @@ func testElasticInstanceType() *workercore.InstanceType {
 	}
 }
 
+func newPrefetchInstanceTypeEnv(
+	t *testing.T, nodes []*core.Node, types ...*workercore.InstanceType,
+) ctrlcli.Client {
+	t.Helper()
+	atTypes := make([]*workercore.AcceleratorType, 0, len(types))
+	objs := make([]ctrlcli.Object, 0, len(nodes)+len(types)*2)
+	for _, nd := range nodes {
+		objs = append(objs, nd)
+	}
+	for _, it := range types {
+		objs = append(objs, it)
+		atTypes = append(atTypes, &workercore.AcceleratorType{
+			ObjectMeta: it.ObjectMeta,
+			Spec: workercore.AcceleratorTypeSpec{
+				GeneralGroup:     it.Spec.GeneralGroup,
+				AcceleratorGroup: it.Spec.AcceleratorGroup,
+				OS:               it.Spec.OS,
+				Arch:             it.Spec.Arch,
+			},
+		})
+	}
+	for _, at := range atTypes {
+		objs = append(objs, at)
+	}
+	cli := buildNodeFlavorClient(objs...)
+	for _, nd := range nodes {
+		for _, f := range nodefeature.ExtractNodeFlavors(nd) {
+			reconcileNodeFlavor(t, cli,
+				topologyQualifiedFlavorName(f.Name, nd.Labels[TopologyProfileLabel]))
+		}
+	}
+
+	return cli
+}
+
 func TestPrefetchPlacementNamedInstanceTypeResolvesThePool(t *testing.T) {
-	// #717: a custom accelerated InstanceType, Active with capacity, selected by
-	// spec.placement.instanceTypes, resolves the nodes carrying the type's flavors — through the
+	// #717: a custom accelerated AcceleratorType, Active with capacity, selected by
+	// spec.placement.acceleratorTypes, resolves the nodes carrying the type's flavors — through the
 	// same resolution the admission webhook runs — not zero. A CPU-only node in the cluster is
 	// the negative control.
 	gpu1 := newManagedAccelNodeOf("gpu-node-1", 8, "nvidia-h100-80gb-hbm3", "NVIDIA-H100-80GB-HBM3")
 	gpu2 := newManagedAccelNodeOf("gpu-node-2", 8, "nvidia-h100-80gb-hbm3", "NVIDIA-H100-80GB-HBM3")
 	cpu := newManagedCPUNode("cpu-node-1", 16, 64, 200)
-	cli := newPrefetchInstanceTypeEnv(t, []*core.Node{gpu1, gpu2, cpu}, testElasticInstanceType())
+	cli := newPrefetchAcceleratorTypeEnv(t, []*core.Node{gpu1, gpu2, cpu}, testElasticAcceleratorType())
 	pf := testPrefetch("warm", func(pf *workercore.ModelPrefetch) {
 		pf.Spec.Placement = &workercore.ModelPrefetchPlacement{
-			InstanceTypes: []string{"elastic-cpu-gpu"},
+			AcceleratorTypes: []string{"elastic-cpu-gpu"},
 		}
 	})
 
 	targets := resolvePrefetchTargets(t, cli, pf, []core.Node{*gpu1, *gpu2, *cpu}, nil)
 	assert.Equal(t, []string{"gpu-node-1", "gpu-node-2"}, targets,
-		"the named custom InstanceType's pool nodes are the targets")
+		"the named custom AcceleratorType's pool nodes are the targets")
 }
 
 func TestPrefetchPlacementDerivedInstanceTypeResolvesThePool(t *testing.T) {
 	// #717: the default placement derives the target set from the namespace deployments' own
-	// InstanceType names; a custom name resolves the same way as an explicit one.
+	// AcceleratorType names; a custom name resolves the same way as an explicit one.
 	gpu1 := newManagedAccelNodeOf("gpu-node-1", 8, "nvidia-h100-80gb-hbm3", "NVIDIA-H100-80GB-HBM3")
-	cli := newPrefetchInstanceTypeEnv(t, []*core.Node{gpu1}, testElasticInstanceType())
+	cli := newPrefetchAcceleratorTypeEnv(t, []*core.Node{gpu1}, testElasticAcceleratorType())
 	pf := testPrefetch("warm", func(pf *workercore.ModelPrefetch) {
 		pf.Spec.Placement = nil
 	})
@@ -561,13 +610,13 @@ func TestPrefetchPlacementDerivedInstanceTypeResolvesThePool(t *testing.T) {
 		ObjectMeta: meta.ObjectMeta{Name: "served", Namespace: "team-a"},
 		Spec: workercore.ModelDeploymentSpec{
 			Model: workercore.ModelDeploymentModel{ArtifactRef: &core.LocalObjectReference{Name: "model"}},
-			Roles: []workercore.ModelDeploymentRole{{InstanceType: "elastic-cpu-gpu"}},
+			Roles: []workercore.ModelDeploymentRole{{AcceleratorType: "elastic-cpu-gpu"}},
 		},
 	}
 
 	targets := resolvePrefetchTargets(t, cli, pf, []core.Node{*gpu1}, []workercore.ModelDeployment{dep})
 	assert.Equal(t, []string{"gpu-node-1"}, targets,
-		"the deployment's custom InstanceType's pool node is a target")
+		"the deployment's custom AcceleratorType's pool node is a target")
 }
 
 func TestPrefetchPlacementFollowsTheTypeAcrossTopologyProfiles(t *testing.T) {
@@ -579,10 +628,10 @@ func TestPrefetchPlacementFollowsTheTypeAcrossTopologyProfiles(t *testing.T) {
 		core.LabelHostname,
 		"topology.kubernetes.io/zone",
 	})
-	cli := newPrefetchInstanceTypeEnv(t, []*core.Node{gpuA, gpuB}, testElasticInstanceType())
+	cli := newPrefetchAcceleratorTypeEnv(t, []*core.Node{gpuA, gpuB}, testElasticAcceleratorType())
 	pf := testPrefetch("warm", func(pf *workercore.ModelPrefetch) {
 		pf.Spec.Placement = &workercore.ModelPrefetchPlacement{
-			InstanceTypes: []string{"elastic-cpu-gpu"},
+			AcceleratorTypes: []string{"elastic-cpu-gpu"},
 		}
 	})
 
@@ -596,23 +645,23 @@ func TestPrefetchPlacementUnknownInstanceTypeResolvesNoNodes(t *testing.T) {
 	// publishes carries none, so the target set is empty and the minReady admission check
 	// explains the shortfall — no error, no invented targets.
 	gpu1 := newManagedAccelNodeOf("gpu-node-1", 8, "nvidia-h100-80gb-hbm3", "NVIDIA-H100-80GB-HBM3")
-	cli := newPrefetchInstanceTypeEnv(t, []*core.Node{gpu1})
+	cli := newPrefetchAcceleratorTypeEnv(t, []*core.Node{gpu1})
 	pf := testPrefetch("warm", func(pf *workercore.ModelPrefetch) {
 		pf.Spec.Placement = &workercore.ModelPrefetchPlacement{
-			InstanceTypes: []string{"no-such-type"},
+			AcceleratorTypes: []string{"no-such-type"},
 		}
 	})
 
 	targets := resolvePrefetchTargets(t, cli, pf, []core.Node{*gpu1}, nil)
-	assert.Empty(t, targets, "an unknown InstanceType name contributes no nodes")
+	assert.Empty(t, targets, "an unknown AcceleratorType name contributes no nodes")
 }
 
 func TestPrefetchPlacementAmbiguousStillRefuses(t *testing.T) {
 	// Both placement kinds set is refused before any resolution runs.
 	pf := testPrefetch("warm", func(pf *workercore.ModelPrefetch) {
 		pf.Spec.Placement = &workercore.ModelPrefetchPlacement{
-			InstanceTypes: []string{"elastic-cpu-gpu"},
-			NodeSelector:  &meta.LabelSelector{MatchLabels: map[string]string{"pool": "h100"}},
+			AcceleratorTypes: []string{"elastic-cpu-gpu"},
+			NodeSelector:     &meta.LabelSelector{MatchLabels: map[string]string{"pool": "h100"}},
 		}
 	})
 
@@ -788,4 +837,89 @@ func TestWarmupDigestLabelPassesValidation(t *testing.T) {
 	if value != strings.Repeat("a", 32) {
 		t.Fatalf("the label value should carry the first half of the digest hex, got %q", value)
 	}
+}
+
+func TestEnqueueForAcceleratorType(t *testing.T) {
+	at := &workercore.AcceleratorType{ObjectMeta: meta.ObjectMeta{Name: "gpustack--nvidia-h100-linux-amd64"}}
+
+	t.Run("empty prefetch list returns nil without listing deployments", func(t *testing.T) {
+		r, _ := newTestModelPrefetchEnv(t)
+		assert.Nil(t, r.enqueueForAcceleratorType(context.Background(), at))
+	})
+
+	t.Run("matches explicit placement and deployment-derived placement per namespace", func(t *testing.T) {
+		explicitMatch := testPrefetch("explicit-h100", func(pf *workercore.ModelPrefetch) {
+			pf.Spec.Placement = &workercore.ModelPrefetchPlacement{AcceleratorTypes: []string{at.Name}}
+		})
+		explicitOther := testPrefetch("explicit-a10g", func(pf *workercore.ModelPrefetch) {
+			pf.Spec.Placement = &workercore.ModelPrefetchPlacement{AcceleratorTypes: []string{"gpustack--nvidia-a10g-linux-amd64"}}
+		})
+		selectorOnly := testPrefetch("selector-only", nil)
+		derivedMatch := testPrefetch("derived-h100", func(pf *workercore.ModelPrefetch) {
+			pf.Namespace = "team-b"
+			pf.Spec.Placement = nil
+		})
+		depTeamB := &workercore.ModelDeployment{
+			ObjectMeta: meta.ObjectMeta{Namespace: "team-b", Name: "serve-model"},
+			Spec: workercore.ModelDeploymentSpec{
+				Model: workercore.ModelDeploymentModel{
+					ArtifactRef: &core.LocalObjectReference{Name: "model"},
+				},
+				Roles: []workercore.ModelDeploymentRole{
+					{Name: "prefill", AcceleratorType: at.Name, Replicas: 1},
+				},
+			},
+		}
+		r, _ := newTestModelPrefetchEnv(t, explicitMatch, explicitOther, selectorOnly, derivedMatch, depTeamB)
+
+		got := r.enqueueForAcceleratorType(context.Background(), at)
+		assert.ElementsMatch(t, []ctrl.Request{
+			{NamespacedName: ctrlcli.ObjectKey{Namespace: "team-a", Name: "explicit-h100"}},
+			{NamespacedName: ctrlcli.ObjectKey{Namespace: "team-b", Name: "derived-h100"}},
+		}, got)
+	})
+
+	t.Run("transient deployment list error does not poison namespace cache for later prefetches", func(t *testing.T) {
+		pf1 := testPrefetch("derived-first", func(pf *workercore.ModelPrefetch) {
+			pf.Namespace = "team-b"
+			pf.Spec.Placement = nil
+		})
+		pf2 := testPrefetch("derived-second", func(pf *workercore.ModelPrefetch) {
+			pf.Namespace = "team-b"
+			pf.Spec.Placement = nil
+		})
+		depTeamB := &workercore.ModelDeployment{
+			ObjectMeta: meta.ObjectMeta{Namespace: "team-b", Name: "serve-model"},
+			Spec: workercore.ModelDeploymentSpec{
+				Model: workercore.ModelDeploymentModel{
+					ArtifactRef: &core.LocalObjectReference{Name: "model"},
+				},
+				Roles: []workercore.ModelDeploymentRole{
+					{Name: "prefill", AcceleratorType: at.Name, Replicas: 1},
+				},
+			},
+		}
+
+		var mdListCalls int
+		cli := ctrlfake.NewClientBuilder().WithScheme(scheme.Scheme).
+			WithObjects(pf1, pf2, depTeamB).
+			WithInterceptorFuncs(interceptor.Funcs{
+				List: func(ctx context.Context, client ctrlcli.WithWatch, list ctrlcli.ObjectList, opts ...ctrlcli.ListOption) error {
+					if _, ok := list.(*workercore.ModelDeploymentList); ok {
+						mdListCalls++
+						if mdListCalls == 1 {
+							return errors.New("transient cache list error")
+						}
+					}
+					return client.List(ctx, list, opts...)
+				},
+			}).Build()
+
+		r := &ModelPrefetchReconciler{Client: cli, Now: func() time.Time { return testNow }}
+		got := r.enqueueForAcceleratorType(context.Background(), at)
+		assert.Equal(t, 2, mdListCalls, "second prefetch in same namespace should retry failed ModelDeployment list")
+		assert.Equal(t, []ctrl.Request{
+			{NamespacedName: ctrlcli.ObjectKey{Namespace: "team-b", Name: "derived-second"}},
+		}, got)
+	})
 }

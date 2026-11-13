@@ -5,7 +5,7 @@ metadata:
     kueue.x-k8s.io/pod-group-serving: "true"
     kueue.x-k8s.io/pod-group-total-count: "1"
     kueue.x-k8s.io/role-hash: main
-    modeldeployment.gpustack.ai/pod-spec-hash: eb5691f9878257250bf33e4df70aa0dc65533d75656743b6a9e6ac92a8d6c78c
+    modeldeployment.gpustack.ai/pod-spec-hash: 0cf0d2d973352e8240b294429f53b34a9696150666114e5c35d724ea47ce1c75
     modeldeployment.gpustack.ai/render-version: "5"
     note.gpustack.ai/role: main
   generateName: qwen-main-
@@ -44,14 +44,8 @@ spec:
       protocol: TCP
     resources:
       limits:
-        cpu: "16"
-        ephemeral-storage: 15Gi
-        memory: 64Gi
         nvidia.com/gpu: "1"
       requests:
-        cpu: 1600m
-        ephemeral-storage: 1920Mi
-        memory: 8Gi
         nvidia.com/gpu: "1"
     volumeMounts:
     - mountPath: /dev/shm

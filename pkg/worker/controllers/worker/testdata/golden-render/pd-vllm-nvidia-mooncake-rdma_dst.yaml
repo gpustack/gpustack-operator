@@ -5,7 +5,7 @@ metadata:
     kueue.x-k8s.io/pod-group-serving: "true"
     kueue.x-k8s.io/pod-group-total-count: "1"
     kueue.x-k8s.io/role-hash: decode
-    modeldeployment.gpustack.ai/pod-spec-hash: 01e62c62618df707de0dd02ac8fd4100098be52f395a739b46b5a6448a789f2d
+    modeldeployment.gpustack.ai/pod-spec-hash: 214c68f2b6535b529596e077abf0f798add2c8a53dc0646127f055989f3acefd
     modeldeployment.gpustack.ai/render-version: "5"
     note.gpustack.ai/role: decode
     prometheus.io/path: /metrics
@@ -126,15 +126,9 @@ spec:
       timeoutSeconds: 5
     resources:
       limits:
-        cpu: "16"
         device.gpustack.ai/rdma.shared: "1"
-        ephemeral-storage: 15Gi
-        memory: 64Gi
         nvidia.com/gpu: "1"
       requests:
-        cpu: 1600m
-        ephemeral-storage: 1920Mi
-        memory: 8Gi
         nvidia.com/gpu: "1"
     securityContext:
       capabilities:
@@ -200,7 +194,7 @@ metadata:
     kueue.x-k8s.io/pod-group-serving: "true"
     kueue.x-k8s.io/pod-group-total-count: "1"
     kueue.x-k8s.io/role-hash: prefill
-    modeldeployment.gpustack.ai/pod-spec-hash: 1bca6fb8affd82ec4f0010a1b4dd7c7eef51587bcc0a3dfdc35b663ef989b216
+    modeldeployment.gpustack.ai/pod-spec-hash: 25b7a6a374dafdf8f55c1fb7261114d397c34effb22d7fd8dbc930fddb6f54e6
     modeldeployment.gpustack.ai/render-version: "5"
     note.gpustack.ai/role: prefill
     prometheus.io/path: /metrics
@@ -334,15 +328,9 @@ spec:
       timeoutSeconds: 5
     resources:
       limits:
-        cpu: "16"
         device.gpustack.ai/rdma.shared: "1"
-        ephemeral-storage: 15Gi
-        memory: 64Gi
         nvidia.com/gpu: "1"
       requests:
-        cpu: 1600m
-        ephemeral-storage: 1920Mi
-        memory: 8Gi
         nvidia.com/gpu: "1"
     securityContext:
       capabilities:

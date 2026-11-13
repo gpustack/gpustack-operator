@@ -5,8 +5,7 @@ metadata:
     kueue.x-k8s.io/pod-group-serving: "true"
     kueue.x-k8s.io/pod-group-total-count: "1"
     kueue.x-k8s.io/role-hash: decode
-    kvcache.gpustack.ai/client-config: '{"metadata_server":"P2PHANDSHAKE","master_server_address":"shared-kv-master.gpustack-system.svc:50051","protocol":"tcp","device_name":"","mode":"standalone-store","global_segment_size":0,"local_buffer_size":134217728,"tenant_id":"chat"}'
-    modeldeployment.gpustack.ai/pod-spec-hash: ae9f2ae6afb98c0ba90c57a53a21cd80881b9ee1c813502dfca8d729989abf40
+    modeldeployment.gpustack.ai/pod-spec-hash: 2d19bbd1c12faa6f417b70b05188dcd97844b2dca240ec9b5dbc4c1d47c30304
     modeldeployment.gpustack.ai/render-version: "5"
     note.gpustack.ai/role: decode
     prometheus.io/path: /metrics
@@ -42,7 +41,7 @@ spec:
     - serve
     - Qwen/Qwen2.5-72B-Instruct
     - --kv-transfer-config
-    - '{"kv_connector":"MultiConnector","kv_role":"kv_consumer","kv_connector_extra_config":{"connectors":[{"kv_connector":"NixlConnector","kv_role":"kv_consumer","kv_connector_extra_config":{"backends":["UCX"]}},{"kv_connector":"MooncakeStoreConnector","kv_role":"kv_consumer"}]}}'
+    - '{"kv_connector":"NixlConnector","kv_role":"kv_consumer","kv_connector_extra_config":{"backends":["UCX"]}}'
     - --kv-cache-dtype
     - bfloat16
     - --block-size
@@ -52,8 +51,6 @@ spec:
     - --port
     - "8200"
     env:
-    - name: MOONCAKE_CONFIG_PATH
-      value: /etc/gpustack/kvcache/mooncake.json
     - name: VLLM_NIXL_SIDE_CHANNEL_HOST
       valueFrom:
         fieldRef:
@@ -62,14 +59,6 @@ spec:
       value: "1"
     - name: VLLM_NIXL_SIDE_CHANNEL_PORT
       value: "8998"
-    - name: MC_TCP_MAX_QUEUED_TRANSFERS_PER_PEER
-      value: "65535"
-    - name: MC_TCP_MAX_PENDING_ADMISSIONS_PER_PEER
-      value: "65535"
-    - name: MC_TCP_LANES_PER_PEER
-      value: "16"
-    - name: MC_TCP_ADMISSION_TIMEOUT_MS
-      value: "60000"
     - name: VLLM_CACHE_ROOT
       value: /var/lib/gpustack/cache
     - name: HF_HUB_CACHE
@@ -150,14 +139,8 @@ spec:
       timeoutSeconds: 5
     resources:
       limits:
-        cpu: "16"
-        ephemeral-storage: 15Gi
-        memory: 64Gi
         nvidia.com/gpu: "1"
       requests:
-        cpu: 1600m
-        ephemeral-storage: 1920Mi
-        memory: 8Gi
         nvidia.com/gpu: "1"
     startupProbe:
       failureThreshold: 180
@@ -168,9 +151,6 @@ spec:
       periodSeconds: 10
       timeoutSeconds: 5
     volumeMounts:
-    - mountPath: /etc/gpustack/kvcache
-      name: gpustack-kvcache-config
-      readOnly: true
     - mountPath: /var/lib/gpustack/cache
       name: gpustack-compile-cache
     - mountPath: /dev/shm
@@ -203,12 +183,6 @@ spec:
   runtimeClassName: nvidia
   terminationGracePeriodSeconds: 30
   volumes:
-  - downwardAPI:
-      items:
-      - fieldRef:
-          fieldPath: metadata.annotations['kvcache.gpustack.ai/client-config']
-        path: mooncake.json
-    name: gpustack-kvcache-config
   - hostPath:
       path: /var/lib/gpustack/cache/nvidia-vllm/m-1a67e1afa7075ef35646bfd3ee97d8de/tp1-pp1-dp1-ep1-cp1_1-f7c2ae1c
       type: DirectoryOrCreate
@@ -227,7 +201,7 @@ metadata:
     kueue.x-k8s.io/pod-group-total-count: "1"
     kueue.x-k8s.io/role-hash: prefill
     kvcache.gpustack.ai/client-config: '{"metadata_server":"P2PHANDSHAKE","master_server_address":"shared-kv-master.gpustack-system.svc:50051","protocol":"tcp","device_name":"","mode":"standalone-store","global_segment_size":0,"local_buffer_size":134217728,"tenant_id":"chat"}'
-    modeldeployment.gpustack.ai/pod-spec-hash: f6b9ee45ca75409eb43af2faa84aab60899dad0fd3f10d88839e8a4b7f3e0b3a
+    modeldeployment.gpustack.ai/pod-spec-hash: f4f2b1b16ddbd23475c344f1e2a90de8c81719aa667d689c7eda52e1716205e7
     modeldeployment.gpustack.ai/render-version: "5"
     note.gpustack.ai/role: prefill
     prometheus.io/path: /metrics
@@ -379,14 +353,8 @@ spec:
       timeoutSeconds: 5
     resources:
       limits:
-        cpu: "16"
-        ephemeral-storage: 15Gi
-        memory: 64Gi
         nvidia.com/gpu: "1"
       requests:
-        cpu: 1600m
-        ephemeral-storage: 1920Mi
-        memory: 8Gi
         nvidia.com/gpu: "1"
     startupProbe:
       failureThreshold: 180

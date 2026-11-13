@@ -10,8 +10,8 @@ spec:
   model:
     name: Qwen/Qwen2.5-72B-Instruct
   roles:
-  - image: vllm/vllm-openai:v0.19.0
-    instanceType: h20-sliced
+  - acceleratorType: h20-sliced
+    image: vllm/vllm-openai:v0.19.0
     kind: Server
     name: sliced
     replicas: 1
@@ -20,8 +20,8 @@ spec:
       acceleratorSlicedCoresPercentage: 25
       acceleratorSlicedMemoryPercentage: 50
     size: 1
-  - image: vllm/vllm-openai:v0.19.0
-    instanceType: a100-mig
+  - acceleratorType: a100-mig
+    image: vllm/vllm-openai:v0.19.0
     kind: Server
     name: mig
     replicas: 1

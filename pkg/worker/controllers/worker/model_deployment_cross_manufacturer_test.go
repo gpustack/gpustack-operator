@@ -42,8 +42,8 @@ import (
 // The family and the runtime version are Ascend's own rather than the first fixture's. Image
 // synthesis reads both, so carrying NVIDIA's runtime version here would render a tag whose backend
 // and version disagree while still satisfying an assertion written against it.
-func crossManufacturerAscendType() *worker.InstanceType {
-	return newRenderInstanceType(func(it *worker.InstanceType) {
+func crossManufacturerAscendType() *worker.AcceleratorType {
+	return newRenderAcceleratorType(func(it *worker.AcceleratorType) {
 		it.Name = "ascend-910c-8x"
 		it.Status.Entrance = "queue-for-ascend-910c-8x"
 		it.Status.Detail.Manufacturer = nodefeature.ManufacturerAscend
@@ -73,7 +73,7 @@ func crossManufacturerDeployment(
 ) *workercore.ModelDeployment {
 	return twoRoleDeployment(append([]func(*workercore.ModelDeployment){
 		func(md *workercore.ModelDeployment) {
-			md.Spec.Roles[1].InstanceType = "ascend-910c-8x"
+			md.Spec.Roles[1].AcceleratorType = "ascend-910c-8x"
 		},
 	}, mutate...)...)
 }
@@ -92,7 +92,7 @@ func asPD(md *workercore.ModelDeployment) {
 // about a connector then holds vacuously.
 func crossManufacturerClient(md *workercore.ModelDeployment) ctrlcli.Client {
 	return newModelDeploymentClient(md,
-		newRenderInstanceType(), crossManufacturerAscendType(),
+		newRenderAcceleratorType(), crossManufacturerAscendType(),
 		newRenderBinding(), newRenderPool(), newAscendTransportBackend())
 }
 
@@ -176,14 +176,14 @@ func TestModelDeploymentCrossManufacturer_ThePoolTransportDecidesWhetherItRender
 		{
 			name:      "pd_across_manufacturers_on_the_default_transport",
 			mutate:    asPD,
-			live:      []ctrlcli.Object{newRenderInstanceType(), crossManufacturerAscendType()},
+			live:      []ctrlcli.Object{newRenderAcceleratorType(), crossManufacturerAscendType()},
 			roleTypes: [2]string{"h20-8x", "ascend-910c-8x"},
 			refused:   true,
 		},
 		{
 			name:      "two_servers_across_manufacturers_on_the_default_transport",
 			mutate:    func(*workercore.ModelDeployment) {},
-			live:      []ctrlcli.Object{newRenderInstanceType(), crossManufacturerAscendType()},
+			live:      []ctrlcli.Object{newRenderAcceleratorType(), crossManufacturerAscendType()},
 			roleTypes: [2]string{"h20-8x", "ascend-910c-8x"},
 			refused:   true,
 		},
@@ -201,7 +201,7 @@ func TestModelDeploymentCrossManufacturer_ThePoolTransportDecidesWhetherItRender
 		{
 			name:      "pd_on_nvidia_is_what_the_default_transport_serves",
 			mutate:    asPD,
-			live:      []ctrlcli.Object{newRenderInstanceType(), newRenderInstanceTypeB()},
+			live:      []ctrlcli.Object{newRenderAcceleratorType(), newRenderAcceleratorTypeB()},
 			roleTypes: [2]string{"h20-8x", "a100-8x"},
 		},
 	}
@@ -209,8 +209,8 @@ func TestModelDeploymentCrossManufacturer_ThePoolTransportDecidesWhetherItRender
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			md := twoRoleDeployment(func(md *workercore.ModelDeployment) {
-				md.Spec.Roles[0].InstanceType = tc.roleTypes[0]
-				md.Spec.Roles[1].InstanceType = tc.roleTypes[1]
+				md.Spec.Roles[0].AcceleratorType = tc.roleTypes[0]
+				md.Spec.Roles[1].AcceleratorType = tc.roleTypes[1]
 			}, tc.mutate)
 
 			objs := append([]ctrlcli.Object{md}, tc.live...)

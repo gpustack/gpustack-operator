@@ -5,7 +5,7 @@ metadata:
     kueue.x-k8s.io/pod-group-serving: "true"
     kueue.x-k8s.io/pod-group-total-count: "1"
     kueue.x-k8s.io/role-hash: main
-    modeldeployment.gpustack.ai/pod-spec-hash: e3e80b0a4a8ecf27bda1ee3cb5e2dfd5772c8888fb43ce0fc4234d0a7db8a1e1
+    modeldeployment.gpustack.ai/pod-spec-hash: e5a7cedabd1d9bb1ef3f7a5358c8830b4f3ff8109bd11e3be7cc1b6c08d0d051
     modeldeployment.gpustack.ai/render-version: "5"
     note.gpustack.ai/role: main
     prometheus.io/path: /metrics
@@ -172,15 +172,9 @@ spec:
       timeoutSeconds: 5
     resources:
       limits:
-        cpu: "16"
         device.gpustack.ai/rdma.shared: "1"
-        ephemeral-storage: 15Gi
-        memory: 64Gi
         nvidia.com/gpu: "1"
       requests:
-        cpu: 1600m
-        ephemeral-storage: 1920Mi
-        memory: 8Gi
         nvidia.com/gpu: "1"
     securityContext:
       capabilities:
@@ -222,7 +216,7 @@ metadata:
     kueue.x-k8s.io/pod-group-serving: "true"
     kueue.x-k8s.io/pod-group-total-count: "1"
     kueue.x-k8s.io/role-hash: main
-    modeldeployment.gpustack.ai/pod-spec-hash: 26bb32205281a8831c142fbe5dd6538b6d5b3d9194c1f28e7a7183eea2763751
+    modeldeployment.gpustack.ai/pod-spec-hash: cf82c68010a9e4354e29abc998e0a9aaaa84aa4e53bb244761f471303dca2e27
     modeldeployment.gpustack.ai/render-version: "5"
     note.gpustack.ai/role: main
     prometheus.io/path: /metrics
@@ -301,15 +295,9 @@ spec:
       protocol: TCP
     resources:
       limits:
-        cpu: "16"
         device.gpustack.ai/rdma.shared: "1"
-        ephemeral-storage: 15Gi
-        memory: 64Gi
         nvidia.com/gpu: "1"
       requests:
-        cpu: 1600m
-        ephemeral-storage: 1920Mi
-        memory: 8Gi
         nvidia.com/gpu: "1"
     securityContext:
       capabilities:
@@ -340,7 +328,7 @@ apiVersion: v1
 kind: Pod
 metadata:
   annotations:
-    modeldeployment.gpustack.ai/pod-spec-hash: 0f1c13c3e70811db0684f785c6cb4a354e472e50c2d8bde9b36b68e50a4adecd
+    modeldeployment.gpustack.ai/pod-spec-hash: c82456074238f7c36155728507e4adda1653f05a876bd8739396efeb5de8f6c7
     modeldeployment.gpustack.ai/render-version: "5"
     note.gpustack.ai/role: qwen-elastic-head
   generateName: qwen-qwen-elastic-head-

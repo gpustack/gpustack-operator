@@ -172,7 +172,7 @@ YAML
 }
 
 encode_role() { # [claimName mountPath readOnly]
-  printf '  - name: encode\n    kind: Encode\n    instanceType: %s\n    image: %s\n' "$IT" "$IMAGE"
+  printf '  - name: encode\n    kind: Encode\n    acceleratorType: %s\n    image: %s\n' "$IT" "$IMAGE"
   [ -n "${1:-}" ] || return 0
   printf '    additionalVolumes:\n      - mountPath: %s\n' "${2:-/ec-cache}"
   [ -n "${3:-}" ] && printf '        readOnly: %s\n' "$3"
@@ -181,14 +181,14 @@ encode_role() { # [claimName mountPath readOnly]
 }
 
 encode_role_sized() { # size claimName
-  printf '  - name: encode\n    kind: Encode\n    instanceType: %s\n    image: %s\n    size: %s\n' \
+  printf '  - name: encode\n    kind: Encode\n    acceleratorType: %s\n    image: %s\n    size: %s\n' \
     "$IT" "$IMAGE" "$1"
   printf '    additionalVolumes:\n      - mountPath: /ec-cache\n'
   printf '        persistentVolumeClaim:\n          claimName: %s\n' "$2"
 }
 
 prefill_role() { # [claimName mountPath]
-  printf '  - name: prefill\n    kind: Prefill\n    instanceType: %s\n    image: %s\n' "$IT" "$IMAGE"
+  printf '  - name: prefill\n    kind: Prefill\n    acceleratorType: %s\n    image: %s\n' "$IT" "$IMAGE"
   [ -n "${1:-}" ] || return 0
   printf '    additionalVolumes:\n      - mountPath: %s\n' "${2:-/ec-cache}"
   printf '        persistentVolumeClaim:\n          claimName: %s\n' "$1"
@@ -196,7 +196,7 @@ prefill_role() { # [claimName mountPath]
 }
 
 decode_role() { # [command]
-  printf '  - name: decode\n    kind: Decode\n    instanceType: %s\n    image: %s\n' "$IT" "$IMAGE"
+  printf '  - name: decode\n    kind: Decode\n    acceleratorType: %s\n    image: %s\n' "$IT" "$IMAGE"
   [ -n "${1:-}" ] && printf '    command: ["/pause"]\n'
   return 0
 }
@@ -225,17 +225,17 @@ platform_baseline_roles() { # [instanceType] [manufacturer]
   cat <<ROLES
   - name: encode
     kind: Encode
-    instanceType: ${it}
+    acceleratorType: ${it}
     image: ${IMAGE}
 ${claim}
   - name: prefill
     kind: Prefill
-    instanceType: ${it}
+    acceleratorType: ${it}
     image: ${IMAGE}
 ${claim}
   - name: decode
     kind: Decode
-    instanceType: ${it}
+    acceleratorType: ${it}
     image: ${IMAGE}
 ROLES
 }
@@ -248,15 +248,15 @@ network_roles() { # instanceType
   cat <<ROLES
   - name: encode
     kind: Encode
-    instanceType: ${1:-${IT:-unset}}
+    acceleratorType: ${1:-${IT:-unset}}
     image: ${IMAGE}
   - name: prefill
     kind: Prefill
-    instanceType: ${1:-${IT:-unset}}
+    acceleratorType: ${1:-${IT:-unset}}
     image: ${IMAGE}
   - name: decode
     kind: Decode
-    instanceType: ${1:-${IT:-unset}}
+    acceleratorType: ${1:-${IT:-unset}}
     image: ${IMAGE}
 ROLES
 }
@@ -266,11 +266,11 @@ pair_roles() { # instanceType
   cat <<ROLES
   - name: prefill
     kind: Prefill
-    instanceType: ${1:-${IT:-unset}}
+    acceleratorType: ${1:-${IT:-unset}}
     image: ${IMAGE}
   - name: decode
     kind: Decode
-    instanceType: ${1:-${IT:-unset}}
+    acceleratorType: ${1:-${IT:-unset}}
     image: ${IMAGE}
 ROLES
 }
@@ -407,7 +407,7 @@ else
         "$(platform_baseline_roles "$ADMITTED_IT" "$ADMITTED_MFG")
   - name: decode
     kind: Decode
-    instanceType: ${OTHER_IT}
+    acceleratorType: ${OTHER_IT}
     image: ${IMAGE}"
     else
       record SKIP "two platforms in one encoder deployment are refused by the mixing rule" \
@@ -510,7 +510,7 @@ refuses "a Server role beside the encoder is refused" \
   "cannot be combined with another kind" \
   "  - name: server
     kind: Server
-    instanceType: ${IT}
+    acceleratorType: ${IT}
     image: ${IMAGE}
 $(encode_role case116-shared /ec-cache)
 $(prefill_role case116-shared /ec-cache)
@@ -573,7 +573,7 @@ refuses "an empty claim name is refused" \
   "claim name must not be empty" \
   "  - name: encode
     kind: Encode
-    instanceType: ${IT}
+    acceleratorType: ${IT}
     image: ${IMAGE}
     additionalVolumes:
       - mountPath: /ec-cache
@@ -586,7 +586,7 @@ $(decode_role)"
 # never makes.
 out="$(manifest "  - name: encode
     kind: Encode
-    instanceType: ${IT}
+    acceleratorType: ${IT}
     image: ${IMAGE}
     additionalVolumes:
       - mountPath: /ec-cache
@@ -673,7 +673,7 @@ fi
 # cluster's own CPU types report their real vendor, so any such type serves; an all-AMD,
 # all-NVIDIA or all-unknown cluster may have none, and the row says so rather than inventing one.
 if [ -n "$PLATFORM_TYPE" ]; then
-  UNADMITTED_IT="$(kubectl get instancetypes.worker.gpustack.ai \
+  UNADMITTED_IT="$(kubectl get acceleratortypes.worker.gpustack.ai \
     -o jsonpath='{range .items[*]}{.metadata.name}|{.metadata.deletionTimestamp}|{.spec.inactive}|{.status.detail.manufacturer}{"\n"}{end}' \
     2>/dev/null \
     | while IFS='|' read -r name deleting inactive manufacturer; do
@@ -686,7 +686,7 @@ if [ -n "$PLATFORM_TYPE" ]; then
           break
         fi
       done)"
-  SECOND_IT="$(kubectl get instancetypes.worker.gpustack.ai \
+  SECOND_IT="$(kubectl get acceleratortypes.worker.gpustack.ai \
     -o jsonpath='{range .items[*]}{.metadata.name}|{.metadata.deletionTimestamp}|{.spec.inactive}|{.status.detail.manufacturer}{"\n"}{end}' \
     2>/dev/null \
     | while IFS='|' read -r name deleting inactive manufacturer; do
@@ -706,7 +706,7 @@ if [ -n "$PLATFORM_TYPE" ]; then
       "is not admitted for encoder roles under router" \
       "  - name: encode
     kind: Encode
-    instanceType: ${UNADMITTED_IT}
+    acceleratorType: ${UNADMITTED_IT}
     image: ${IMAGE}
     additionalVolumes:
       - mountPath: /ec-cache
@@ -714,7 +714,7 @@ if [ -n "$PLATFORM_TYPE" ]; then
           claimName: case116-shared
   - name: prefill
     kind: Prefill
-    instanceType: ${UNADMITTED_IT}
+    acceleratorType: ${UNADMITTED_IT}
     image: ${IMAGE}
     additionalVolumes:
       - mountPath: /ec-cache
@@ -722,7 +722,7 @@ if [ -n "$PLATFORM_TYPE" ]; then
           claimName: case116-shared
   - name: decode
     kind: Decode
-    instanceType: ${UNADMITTED_IT}
+    acceleratorType: ${UNADMITTED_IT}
     image: ${IMAGE}"
   else
     record SKIP "a platform the matrix does not admit is refused, all three named" \
@@ -736,7 +736,7 @@ if [ -n "$PLATFORM_TYPE" ]; then
       "$(encode_role case116-shared /ec-cache)
   - name: prefill
     kind: Prefill
-    instanceType: ${SECOND_IT}
+    acceleratorType: ${SECOND_IT}
     image: ${IMAGE}
     additionalVolumes:
       - mountPath: /ec-cache

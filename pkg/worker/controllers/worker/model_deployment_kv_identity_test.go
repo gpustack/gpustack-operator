@@ -80,7 +80,7 @@ func TestModelDeploymentKVIdentityReachesTheEngine(t *testing.T) {
 			if !c.ref {
 				md.Spec.Model.ArtifactRef = nil
 			}
-			cli := newModelDeploymentClient(md, newRenderInstanceType(), artifactFixture("", true, true))
+			cli := newModelDeploymentClient(md, newRenderAcceleratorType(), artifactFixture("", true, true))
 			r := &ModelDeploymentReconciler{Client: cli}
 			weights, err := r.resolveModelDeploymentWeights(context.Background(), md, nil)
 			require.NoError(t, err)

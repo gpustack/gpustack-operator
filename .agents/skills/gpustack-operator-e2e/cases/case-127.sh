@@ -96,7 +96,7 @@ if [ -z "$NS" ]; then
 fi
 export CASE_ID=127
 IMAGE="${E2E_MD_IMAGE:-registry.k8s.io/pause:3.10}"
-IT="${E2E_MD_INSTANCE_TYPE:-}"
+IT="${E2E_MD_ACCELERATOR_TYPE:-${E2E_MD_INSTANCE_TYPE:-}}"
 HOLD="${E2E_C127_HOLD:-240}"
 READY_BOUND="${E2E_C127_READY_BOUND:-2700}"
 ENGINE_IMAGE="${E2E_C127_ENGINE_IMAGE:-}"
@@ -197,7 +197,7 @@ spec:
   roles:
   - name: decode
     kind: Decode
-    instanceType: ${IT:-case127-any}
+    acceleratorType: ${IT:-case127-any}
     image: ${IMAGE}
 ${timeout}
 ${cmd}
@@ -284,7 +284,7 @@ spec:
     name: ${PLACEHOLDER_MODEL}
   roles:
   - name: server
-    instanceType: ${IT}
+    acceleratorType: ${IT}
     replicas: 1
     image: ${IMAGE}
     startupTimeoutSeconds: 3600
@@ -524,7 +524,7 @@ spec:
     name: ${ENGINE_MODEL}
   roles:
   - name: server
-    instanceType: ${WARM_IT}
+    acceleratorType: ${WARM_IT}
     replicas: 1
     image: ${ENGINE_IMAGE}
     startupTimeoutSeconds: 3600

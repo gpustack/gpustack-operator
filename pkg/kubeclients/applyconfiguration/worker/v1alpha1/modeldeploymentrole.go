@@ -14,12 +14,12 @@ import (
 //
 // ModelDeploymentRole is one engine role and its replicas.
 //
-// Replicas, InstanceType and Resources are STRUCTURED FIELDS AND MUST STAY SO. They are inputs to
+// Replicas, AcceleratorType and Resources are STRUCTURED FIELDS AND MUST STAY SO. They are inputs to
 // admission and scheduling — Kueue PodSet counts, flavor selection and the request the queue
 // accounts — so a container field able to shadow any of them would make the admission feasibility
 // check read a ledger that does not match reality. That is why the container fields below carry no
-// resource request at all: the accelerator half belongs in Resources and the rest is derived from
-// the InstanceType, and neither can be overridden here.
+// resource request at all: all accelerator, CPU, RAM and localStorage requests belong in Resources
+// alongside AcceleratorType, and cannot be overridden on the container.
 //
 // EDITING A CONTAINER FIELD ROLLS THIS ROLE'S REPLICAS, and only this role's -- with one
 // exception. The declared parallel degrees of a prefill or decode role -- the degree flags in
@@ -35,7 +35,7 @@ import (
 //
 // THE SET OF ROLES IS FIXED AFTER CREATION. Admission refuses adding, removing or renaming a role,
 // and it refuses a kind change on a role that exists: the name and the kind are what the role IS,
-// while size, instanceType, resources and command are how it is currently running and are
+// while size, acceleratorType, resources and command are how it is currently running and are
 // editable beside every other container field. A replica's group is named from the deployment,
 // its role and its ordinal, so edits to one role's running configuration do not rename a sibling
 // role's groups.
@@ -107,32 +107,21 @@ type ModelDeploymentRoleApplyConfiguration struct {
 	// far below the range that turns one accepted field value into an out-of-memory worker.
 	//
 	ReplicaSize *int32 `json:"size,omitempty"`
-	// InstanceType is the name of the InstanceType whose pool this role's Pods are admitted against.
-	// It is what the queue-name entrance label is derived from.
+	// AcceleratorType is the name of the AcceleratorType whose hardware pool this role's Pods
+	// are admitted against. When omitted, the role runs as an unqueued CPU-only workload
+	// scheduled directly onto managed nodes.
 	//
-	// IT IS EDITABLE. Moving a role to another type runs the same whole-group replacement: each
-	// old replica leaves before its replacement is created, and that replacement is admitted
-	// against the queue the new type publishes before the next old replica may leave. Existing
-	// Pods keep the type they were admitted with until they are deleted. The elastic-EP profile
-	// freezes this field after creation.
+	AcceleratorType *string `json:"acceleratorType,omitempty"`
+	// Resources is what one Pod of this role asks of accelerators, fabric interfaces, and host
+	// resources, and it is a STRUCTURED FIELD FOR THE SAME REASON Replicas and AcceleratorType are:
+	// admission and scheduling read it.
 	//
-	InstanceType *string `json:"instanceType,omitempty"`
-	// Resources is what one Pod of this role asks of an accelerator, and it is a STRUCTURED
-	// FIELD FOR THE SAME REASON Replicas and InstanceType are: admission and scheduling read it.
-	//
-	// It carries only the ACCELERATOR half of a request, because that is the only half a workload
-	// decides. CPU, memory and ephemeral storage are DERIVED from the InstanceType's per-unit
-	// resources scaled by the requested card count, so they are not expressible here at all — a
-	// stronger guarantee than refusing them, since a field that does not exist cannot be shadowed by
-	// the container fields below either.
-	//
-	// InstanceType alone cannot supply this half: its UnitResources size ONE card, and how many cards
-	// a Pod wants is a property of the model being served, so two deployments on one InstanceType
-	// routinely want different counts.
+	// It carries the accelerator request and optional explicit CPU, memory and ephemeral storage
+	// requests rendered onto the serving container when set.
 	//
 	// IT IS EDITABLE. A change runs the same whole-group replacement, and the new request is
 	// admitted against the pool as each replacement is created. Omission behaves as on create:
-	// the accelerator half is defaulted, to one whole card of an acceleratable type. The
+	// when AcceleratorType is set, the accelerator half is defaulted to one whole card. The
 	// elastic-EP profile freezes this field at the whole-card group it bound to TP at creation.
 	Resources *ModelDeploymentRoleResourcesApplyConfiguration `json:"resources,omitempty"`
 	// Image is the container image to run. Leaving it empty is the ordinary case: the role then
@@ -284,11 +273,11 @@ func (b *ModelDeploymentRoleApplyConfiguration) WithReplicaSize(value int32) *Mo
 	return b
 }
 
-// WithInstanceType sets the InstanceType field in the declarative configuration to the given value
+// WithAcceleratorType sets the AcceleratorType field in the declarative configuration to the given value
 // and returns the receiver, so that objects can be built by chaining "With" function invocations.
-// If called multiple times, the InstanceType field is set to the value of the last call.
-func (b *ModelDeploymentRoleApplyConfiguration) WithInstanceType(value string) *ModelDeploymentRoleApplyConfiguration {
-	b.InstanceType = &value
+// If called multiple times, the AcceleratorType field is set to the value of the last call.
+func (b *ModelDeploymentRoleApplyConfiguration) WithAcceleratorType(value string) *ModelDeploymentRoleApplyConfiguration {
+	b.AcceleratorType = &value
 	return b
 }
 

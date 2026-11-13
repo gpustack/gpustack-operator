@@ -37,18 +37,38 @@
 #   SP_SERVED          prom: a counter on an engine Pod that grows with each request it finished, for
 #                      a role that serves whole requests.
 #
+# serving_at_vendor ACCELERATOR_TYPE prints the manufacturer of an AcceleratorType.
+serving_at_vendor() {
+  local at="$1"
+  [ -n "$at" ] || return 1
+  kubectl get acceleratortypes.worker.gpustack.ai "$at" -o jsonpath='{.status.detail.manufacturer}' 2>/dev/null
+}
+
+# serving_it_vendor TARGET prints the manufacturer of an AcceleratorType (or InstanceType fallback).
+serving_it_vendor() {
+  local target="$1"
+  [ -n "$target" ] || return 1
+  local m
+  m="$(serving_at_vendor "$target")"
+  if [ -n "$m" ]; then
+    echo "$m"
+    return 0
+  fi
+  kubectl get instancetypes.worker.gpustack.ai "$target" -o jsonpath='{.status.detail.manufacturer}' 2>/dev/null
+}
+
 # serving_vendor MD_JSON prints the accelerator manufacturer of the deployment's first role's
-# InstanceType (nvidia, ascend, ...). E2E_VENDOR overrides it.
+# AcceleratorType (or legacy InstanceType) (nvidia, ascend, ...). E2E_VENDOR overrides it.
 
 serving_vendor() {
   if [ -n "${E2E_VENDOR:-}" ]; then
     echo "$E2E_VENDOR"
     return
   fi
-  local it
-  it="$(jq -r '.spec.roles[0].instanceType // empty' <<<"$1")"
-  [ -n "$it" ] || return 1
-  kubectl get instancetypes.worker.gpustack.ai "$it" -o jsonpath='{.status.detail.manufacturer}'
+  local at
+  at="$(jq -r '.spec.roles[0].acceleratorType // .spec.roles[0].instanceType // empty' <<<"$1")"
+  [ -n "$at" ] || return 1
+  serving_it_vendor "$at"
 }
 
 # The SP_* variables are this function's output, read by the caller that sourced this file.
@@ -191,6 +211,10 @@ capture_cluster_shape() {
       + "  accelerators=" + ((.status.capacity["nvidia.com/gpu"] // "0") | tostring)
       + "  gpu-partitionable=" + ((.status.capacity["nvidia.com/gpu.partitioned"] // "0") | tostring)
       + "  gpu-sliced=" + ((.status.capacity["nvidia.com/gpu.sliced"] // "0") | tostring)'
+    echo
+    echo "=== AcceleratorTypes the cluster carries ==="
+    kubectl get acceleratortypes.worker.gpustack.ai -o json 2>/dev/null \
+      | jq -r '.items[] | "\(.metadata.name)  phase=\(.status.phase // "?")  detail=\(.status.detail // {})"'
     echo
     echo "=== InstanceTypes the cluster carries ==="
     kubectl get instancetypes.worker.gpustack.ai -o json 2>/dev/null \

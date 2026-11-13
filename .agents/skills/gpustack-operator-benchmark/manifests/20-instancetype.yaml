@@ -12,3 +12,13 @@ spec:
   unitResources:
     cpu: "8"
     ram: 64Gi
+---
+apiVersion: worker.gpustack.ai/v1
+kind: AcceleratorType
+metadata:
+  name: bench-gpu
+spec:
+  generalGroup: generic
+  acceleratorGroup: nvidia-h100-80gb-hbm3
+  os: linux
+  arch: amd64

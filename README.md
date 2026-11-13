@@ -25,7 +25,7 @@ flowchart LR
 -->
 
 1. **Discover:** NFD and Device Manager identify accelerators and RDMA interfaces. See [Device Discovery](./docs/modules/devices/discovery.md).
-2. **Schedule:** The worker builds pools and `InstanceType`s; Kueue and admission checks place workloads. See [Admission](./docs/modules/devices/admission.md).
+2. **Schedule:** The worker builds pools, `AcceleratorType`s and `InstanceType`s; Kueue and admission checks place workloads. See [Admission](./docs/modules/devices/admission.md).
 3. **Deliver:** Optional model prefetch and shared KV cache support workloads. See [Model Delivery](./docs/modules/model-delivery/_index.md) and [KV Cache](./docs/modules/kv-cache/_index.md).
 4. **Run:** Model deployments and instances serve workloads. See [Model Deployment](./docs/modules/model-deployment/_index.md) and [GPU Instances](./docs/modules/instances/_index.md).
 
@@ -290,11 +290,11 @@ sources; [Model Store Operations](./docs/modules/model-delivery/operations.md) c
 flowchart LR
   Artifact["ModelArtifact qwen-7b"] -> Deployment["ModelDeployment qwen-chat: vLLM"]
   Binding["KVCachePoolBinding qwen-cache"] -> Deployment
-  InstanceType["InstanceType nvidia-a10g"] -> Deployment
+  AcceleratorType["AcceleratorType nvidia-a10g"] -> Deployment
   Deployment -> Replica["Serving Replica Pod: accelerator 1"] -> Inference["Inference"]
 -->
 
-This deployment uses the artifact and cache binding above. Replace `instanceType` with one from your
+This deployment uses the artifact and cache binding above. List serving types with `kubectl get acctype`. Replace `acceleratorType` with one from your
 cluster:
 
 ```yaml
@@ -317,12 +317,12 @@ spec:
   roles:
     - name: server
       replicas: 1
-      instanceType: gpustack--nvidia-a10g-linux-amd64
+      acceleratorType: gpustack--nvidia-a10g-linux-amd64
       resources:
         accelerator: 1
 ```
 
-For a standalone serving example, read
+Role resources (`cpu`, `ram`, `localStorage`) and CPU-only roles omitting `acceleratorType` are covered in
 [Model Deployment](./docs/modules/model-deployment/configuration.md). [Prefill and
 Decode](./docs/modules/model-deployment/prefill-decode.md) shows how to split the serving roles.
 

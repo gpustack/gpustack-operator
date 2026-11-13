@@ -19,7 +19,7 @@
         "kueue.x-k8s.io/pod-group-serving": "true",
         "kueue.x-k8s.io/pod-group-total-count": "1",
         "kueue.x-k8s.io/role-hash": "prefill",
-        "modeldeployment.gpustack.ai/pod-spec-hash": "292b80e909617c5e27fea4f80d7fb80afcf5c4ed9317e423faa7dd9ee4390c29",
+        "modeldeployment.gpustack.ai/pod-spec-hash": "53e65a62f104889c29829452adeab9bfb5ab9bffc8993e192b32b782ef172ab6",
         "modeldeployment.gpustack.ai/render-version": "5",
         "note.gpustack.ai/role": "prefill",
         "prometheus.io/path": "/metrics",
@@ -160,15 +160,9 @@
           ],
           "resources": {
             "limits": {
-              "cpu": "16",
-              "ephemeral-storage": "15Gi",
-              "memory": "64Gi",
               "nvidia.com/gpu": "1"
             },
             "requests": {
-              "cpu": "1600m",
-              "ephemeral-storage": "1920Mi",
-              "memory": "8Gi",
               "nvidia.com/gpu": "1"
             }
           },
@@ -253,7 +247,7 @@
         "kueue.x-k8s.io/pod-group-serving": "true",
         "kueue.x-k8s.io/pod-group-total-count": "1",
         "kueue.x-k8s.io/role-hash": "decode",
-        "modeldeployment.gpustack.ai/pod-spec-hash": "85ff92e3c3af8c442de0c80dbefdc54e46a88d647d749d0e5c35a81d8903e309",
+        "modeldeployment.gpustack.ai/pod-spec-hash": "9971c471ff4fb88170ebc8d27c2cd4386afdd3dfe82d9e813c029bae59b4e212",
         "modeldeployment.gpustack.ai/render-version": "5",
         "note.gpustack.ai/role": "decode",
         "prometheus.io/path": "/metrics",
@@ -410,15 +404,9 @@
           ],
           "resources": {
             "limits": {
-              "cpu": "16",
-              "ephemeral-storage": "15Gi",
-              "memory": "64Gi",
               "nvidia.com/gpu": "1"
             },
             "requests": {
-              "cpu": "1600m",
-              "ephemeral-storage": "1920Mi",
-              "memory": "8Gi",
               "nvidia.com/gpu": "1"
             }
           },

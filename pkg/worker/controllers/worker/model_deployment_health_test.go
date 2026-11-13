@@ -145,13 +145,13 @@ func healthDeployment(replicaSize int32, extraRoles ...string) *workercore.Model
 				Name: workercore.ModelDeploymentEngineVLLM, Image: "vllm/vllm-openai:v0.25.1",
 			},
 			Roles: []workercore.ModelDeploymentRole{{
-				Name: "server", Replicas: 1, ReplicaSize: replicaSize, InstanceType: "h20-8x",
+				Name: "server", Replicas: 1, ReplicaSize: replicaSize, AcceleratorType: "h20-8x",
 			}},
 		},
 	}
 	for _, name := range extraRoles {
 		md.Spec.Roles = append(md.Spec.Roles, workercore.ModelDeploymentRole{
-			Name: name, Replicas: 1, ReplicaSize: replicaSize, InstanceType: "h20-8x",
+			Name: name, Replicas: 1, ReplicaSize: replicaSize, AcceleratorType: "h20-8x",
 		})
 	}
 
@@ -903,12 +903,12 @@ func healthPairDeployment(engine string, prefillWidth, decodeWidth int) *workerc
 			Model:  workercore.ModelDeploymentModel{Name: "Qwen/Qwen3-30B-A3B"},
 			Roles: []workercore.ModelDeploymentRole{
 				{
-					Name: "prefill", Replicas: 1, ReplicaSize: 1, InstanceType: "h20-8x",
+					Name: "prefill", Replicas: 1, ReplicaSize: 1, AcceleratorType: "h20-8x",
 					Kind:      workercore.ModelDeploymentRoleKindPrefill,
 					ExtraArgs: []string{"--dp-size", strconvx.Itoa(prefillWidth)},
 				},
 				{
-					Name: "decode", Replicas: 1, ReplicaSize: 1, InstanceType: "h20-8x",
+					Name: "decode", Replicas: 1, ReplicaSize: 1, AcceleratorType: "h20-8x",
 					Kind:      workercore.ModelDeploymentRoleKindDecode,
 					ExtraArgs: []string{"--dp-size", strconvx.Itoa(decodeWidth)},
 				},

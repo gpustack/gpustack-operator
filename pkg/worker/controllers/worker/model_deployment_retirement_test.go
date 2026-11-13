@@ -494,7 +494,7 @@ func TestEncodeReplicaLeavesOnTheWindowAndNotOnAGauge(t *testing.T) {
 			md := retirementDeployment(func(md *workercore.ModelDeployment) {
 				md.Spec.Roles = []workercore.ModelDeploymentRole{{
 					Name: "encode", Kind: workercore.ModelDeploymentRoleKindEncode, Replicas: 2,
-					InstanceType: "h20-8x", Image: "vllm/vllm-openai:v0.25.1", ReplicaSize: int32(len(tc.kinds)),
+					AcceleratorType: "h20-8x", Image: "vllm/vllm-openai:v0.25.1", ReplicaSize: int32(len(tc.kinds)),
 				}}
 			})
 			pods := make([]core.Pod, 0, len(tc.kinds))
@@ -587,7 +587,7 @@ func TestEncodeRetirementThatCannotBeCapturedAbortsAtItsDeadline(t *testing.T) {
 			md := retirementDeployment(func(md *workercore.ModelDeployment) {
 				md.Spec.Roles = []workercore.ModelDeploymentRole{{
 					Name: "encode", Kind: workercore.ModelDeploymentRoleKindEncode, Replicas: 2,
-					InstanceType: "h20-8x", Image: "vllm/vllm-openai:v0.25.1", ReplicaSize: 2,
+					AcceleratorType: "h20-8x", Image: "vllm/vllm-openai:v0.25.1", ReplicaSize: 2,
 				}}
 			})
 			gone := renderedMember("encode", 1, 0, healthBool(true), "member-1")
@@ -1319,7 +1319,7 @@ func TestRetryDirectiveOrdering(t *testing.T) {
 
 					return c.Patch(ctx, obj, patch, opts...)
 				},
-			}, md, newRenderInstanceType())
+			}, md, newRenderAcceleratorType())
 			r := holdReconciler(cli, &scriptedDrainReader{}, time.Now())
 			stored := getModelDeployment(t, cli)
 
@@ -1485,7 +1485,7 @@ func TestTheProtocolCompletesTheWholeProtocol(t *testing.T) {
 		},
 	}
 	cli := newModelDeploymentClient(append(
-		[]ctrlcli.Object{md, newRenderInstanceType(), target}, ownedRouterObjects(md)...,
+		[]ctrlcli.Object{md, newRenderAcceleratorType(), target}, ownedRouterObjects(md)...,
 	)...)
 	r := retirementRouterReconciler(cli, reader, time.Now(), pods)
 
@@ -1553,7 +1553,7 @@ func TestTheProtocolDeleteCarriesItsUIDPrecondition(t *testing.T) {
 
 				return c.Delete(ctx, obj, opts...)
 			},
-		}, md, newRenderInstanceType(), target,
+		}, md, newRenderAcceleratorType(), target,
 	)
 	r := holdReconciler(cli, &scriptedDrainReader{
 		answers: map[types.UID][]modelDeploymentDrainAnswer{"member-1": {idleDrain(), idleDrain()}},
@@ -1641,7 +1641,7 @@ func TestAScaleDownRunsTheWholeProtocolFromNoReservation(t *testing.T) {
 	kept.Status.PodIP = "10.0.4.2"
 	pods := []core.Pod{*kept, *target}
 	cli := newModelDeploymentClient(append(
-		[]ctrlcli.Object{md, newRenderInstanceType(), kept, target}, ownedRouterObjects(md)...,
+		[]ctrlcli.Object{md, newRenderAcceleratorType(), kept, target}, ownedRouterObjects(md)...,
 	)...)
 	r := retirementRouterReconciler(cli, &scriptedDrainReader{
 		answers: map[types.UID][]modelDeploymentDrainAnswer{"member-1": {idleDrain(), idleDrain()}},
@@ -1728,7 +1728,7 @@ func TestTheCreateGateDoesNotRefillTheSlotTheOperationIsEmptying(t *testing.T) {
 	md = reserve(md, retirementReservation(
 		workercore.ModelDeploymentRetirementStateSettling, "server", 1, nil,
 	))
-	cli := newModelDeploymentClient(md, newRenderInstanceType())
+	cli := newModelDeploymentClient(md, newRenderAcceleratorType())
 	r := holdReconciler(cli, &scriptedDrainReader{}, time.Now())
 
 	_, err := reconcileModelDeploymentWith(t, r)
@@ -1836,7 +1836,7 @@ var retirementDeletionPaths = []retirementPathCase{
 		build: func(t *testing.T) (*workercore.ModelDeployment, []ctrlcli.Object, string) {
 			md := retirementDeployment(func(md *workercore.ModelDeployment) {
 				md.Spec.Roles = append(md.Spec.Roles, workercore.ModelDeploymentRole{
-					Name: "extra", Replicas: 1, InstanceType: "h20-8x",
+					Name: "extra", Replicas: 1, AcceleratorType: "h20-8x",
 					Image: "vllm/vllm-openai:v0.25.1",
 				})
 			})
@@ -1848,7 +1848,7 @@ var retirementDeletionPaths = []retirementPathCase{
 			target.Labels[modelDeploymentLabelKeyComponent] = "extra"
 			md.Spec.Roles = md.Spec.Roles[:1] // the role is scaled away
 
-			return md, []ctrlcli.Object{newRenderInstanceType(), target}, target.Name
+			return md, []ctrlcli.Object{newRenderAcceleratorType(), target}, target.Name
 		},
 		survives: podAndWorkloadSurvive,
 		gone:     podAndWorkloadGone,
@@ -1863,7 +1863,7 @@ var retirementDeletionPaths = []retirementPathCase{
 			target.Status.Phase = core.PodFailed
 			target.Status.Reason = "Evicted"
 
-			return md, []ctrlcli.Object{newRenderInstanceType(), target}, target.Name
+			return md, []ctrlcli.Object{newRenderAcceleratorType(), target}, target.Name
 		},
 		survives: externallyTerminated,
 		gone:     podIsGone,
@@ -1878,7 +1878,7 @@ var retirementDeletionPaths = []retirementPathCase{
 			keeper := surplusReplicaAt(t, md, "qwen-server-zero", 0, "")
 			target := surplusReplicaAt(t, md, "qwen-server-one", 1, "")
 
-			return md, []ctrlcli.Object{newRenderInstanceType(), keeper, target}, target.Name
+			return md, []ctrlcli.Object{newRenderAcceleratorType(), keeper, target}, target.Name
 		},
 		survives: podSurvives,
 		gone:     podIsGone,
@@ -1893,7 +1893,7 @@ var retirementDeletionPaths = []retirementPathCase{
 			keeper := surplusReplicaAt(t, md, "qwen-server-zero", 0, "")
 			target := surplusReplicaAt(t, md, "qwen-server-one", 1, "")
 
-			return md, []ctrlcli.Object{newRenderInstanceType(), keeper, target}, target.Name
+			return md, []ctrlcli.Object{newRenderAcceleratorType(), keeper, target}, target.Name
 		},
 		survives: workloadSurvives,
 		gone:     workloadIsGone,
@@ -1911,7 +1911,7 @@ var retirementDeletionPaths = []retirementPathCase{
 			target := surplusReplicaAt(t, md, "qwen-server-zero", 0, "a-hash-no-render-produces")
 			md.Spec.Roles[0].Image = "vllm/vllm-openai:v0.26.0"
 
-			return md, []ctrlcli.Object{newRenderInstanceType(), target}, target.Name
+			return md, []ctrlcli.Object{newRenderAcceleratorType(), target}, target.Name
 		},
 		survives: podAndWorkloadSurvive,
 		gone:     podAndWorkloadGone,
@@ -1932,7 +1932,7 @@ var retirementDeletionPaths = []retirementPathCase{
 			now := meta.Now()
 			target.DeletionTimestamp = &now
 
-			return md, []ctrlcli.Object{newRenderInstanceType(), target}, target.Name
+			return md, []ctrlcli.Object{newRenderAcceleratorType(), target}, target.Name
 		},
 		survives: externallyTerminated,
 		gone:     noReservation,
@@ -2078,7 +2078,7 @@ func TestAnExplicitZeroHoldsWithCapacityPreserved(t *testing.T) {
 	md = reserve(md, retirementReservation(
 		workercore.ModelDeploymentRetirementStateWithdrawing, "server", 0, []string{"member-1"},
 	))
-	cli := newModelDeploymentClient(md, newRenderInstanceType(), target)
+	cli := newModelDeploymentClient(md, newRenderAcceleratorType(), target)
 	standInForKueue(t, cli, true)
 
 	r := holdReconciler(cli, &scriptedDrainReader{}, time.Now())
@@ -2184,7 +2184,7 @@ func TestARouterResidualBlocksDeletion(t *testing.T) {
 			// indeterminate, every case would hold, and the "no residual" rows would be asserting
 			// a refusal rather than the absence they are about.
 			seeded := make([]ctrlcli.Object, 0, len(pods)+4)
-			seeded = append(seeded, md.DeepCopy(), newRenderInstanceType())
+			seeded = append(seeded, md.DeepCopy(), newRenderAcceleratorType())
 			seeded = append(seeded, ownedRouterObjects(md)...)
 			for i := range pods {
 				seeded = append(seeded, pods[i].DeepCopy())
@@ -2292,7 +2292,7 @@ func TestASettledReservationWritesNothing(t *testing.T) {
 	md = reserve(md, retirementReservation(
 		workercore.ModelDeploymentRetirementStateWithdrawing, "server", 1, []string{"member-1"},
 	))
-	cli := newModelDeploymentClient(md, newRenderInstanceType(), target)
+	cli := newModelDeploymentClient(md, newRenderAcceleratorType(), target)
 	r := holdReconciler(cli, &scriptedDrainReader{}, time.Now())
 
 	// The first pass settles the reservation on the object; the second has nothing left to say.
@@ -2302,7 +2302,7 @@ func TestASettledReservationWritesNothing(t *testing.T) {
 	require.NotNil(t, settled.Status.Retirement)
 
 	writes := new(modelDeploymentWrites)
-	counting := newCountingModelDeploymentClient(writes, settled, newRenderInstanceType())
+	counting := newCountingModelDeploymentClient(writes, settled, newRenderAcceleratorType())
 	r2 := holdReconciler(counting, &scriptedDrainReader{}, time.Now())
 	_, err = reconcileModelDeploymentWith(t, r2)
 	require.NoError(t, err)
@@ -2448,7 +2448,7 @@ func TestARemovalIntentAdmitsAndTheAdmittingPassDeletesNothing(t *testing.T) {
 	surplus := surplusReplicaAt(t, md, "qwen-server-one", 1, "")
 	keeper := surplusReplicaAt(t, md, "qwen-server-zero", 0, "")
 	surplus.UID, keeper.UID = "target", "keeper"
-	cli := newModelDeploymentClient(md, newRenderInstanceType(), surplus, keeper)
+	cli := newModelDeploymentClient(md, newRenderAcceleratorType(), surplus, keeper)
 	standInForKueue(t, cli, true)
 	r := holdReconciler(cli, &scriptedDrainReader{}, time.Now())
 
@@ -2484,7 +2484,7 @@ func TestASecondRemovalIntentIsRefusedWhileOneIsInFlight(t *testing.T) {
 	second := surplusReplicaAt(t, md, "qwen-server-two", 2, "")
 	second.UID = "second"
 	cli := newModelDeploymentClient(append(
-		[]ctrlcli.Object{md, newRenderInstanceType(), first, second}, ownedRouterObjects(md)...,
+		[]ctrlcli.Object{md, newRenderAcceleratorType(), first, second}, ownedRouterObjects(md)...,
 	)...)
 	standInForKueue(t, cli, true)
 	r := holdReconciler(cli, &scriptedDrainReader{}, time.Now())
@@ -2528,7 +2528,7 @@ func TestTheRolloutStepsOverAReservedReplica(t *testing.T) {
 	keeper := surplusReplicaAt(t, md, "qwen-server-dup-a", 0, "")
 	seated := surplusReplicaAt(t, md, "qwen-server-one", 1, "")
 	stale.UID, keeper.UID, seated.UID = "stale", "keeper", "seated"
-	cli := newModelDeploymentClient(md, newRenderInstanceType(), stale, keeper, seated)
+	cli := newModelDeploymentClient(md, newRenderAcceleratorType(), stale, keeper, seated)
 	standInForKueue(t, cli, true)
 	r := holdReconciler(cli, &scriptedDrainReader{
 		answers: map[types.UID][]modelDeploymentDrainAnswer{"stale": {idleDrain(), idleDrain()}},
@@ -2557,7 +2557,7 @@ func TestTheCommitLeavesASharedGroupWorkloadAlone(t *testing.T) {
 	target := surplusReplicaAt(t, md, "qwen-server-one", 1, "")
 	survivor := surplusReplicaAt(t, md, "qwen-server-zero", 0, "")
 	target.UID, survivor.UID = "target", "survivor"
-	cli := newModelDeploymentClient(md, newRenderInstanceType(), target, survivor)
+	cli := newModelDeploymentClient(md, newRenderAcceleratorType(), target, survivor)
 
 	// ONE WORKLOAD OWNING BOTH, which is what a shared serving group composes.
 	shared := &kueue.Workload{}
@@ -2612,7 +2612,7 @@ func TestAdmissionRefusesATargetItCannotName(t *testing.T) {
 	surplus := surplusReplicaAt(t, md, "qwen-server-one", 1, "")
 	keeper := surplusReplicaAt(t, md, "qwen-server-zero", 0, "")
 	// NEITHER POD CARRIES A UID, which is the state this refuses.
-	cli := newModelDeploymentClient(md, newRenderInstanceType(), surplus, keeper)
+	cli := newModelDeploymentClient(md, newRenderAcceleratorType(), surplus, keeper)
 	r := r2(cli)
 
 	plan := &modelDeploymentRetirementPlan{DeletesAllowed: true}
@@ -2637,7 +2637,7 @@ func TestTheDrainIsIdempotentUnderUnchangedIntent(t *testing.T) {
 	md = reserve(md, retirementReservation(
 		workercore.ModelDeploymentRetirementStateDraining, "server", 1, []string{"target"},
 	))
-	cli := newModelDeploymentClient(md, newRenderInstanceType(), surplus, keeper)
+	cli := newModelDeploymentClient(md, newRenderAcceleratorType(), surplus, keeper)
 	standInForKueue(t, cli, true)
 
 	// THE READER NEVER GOES IDLE, so the operation stays where it is and every pass sees the same
@@ -2692,7 +2692,7 @@ func TestNoPathButTheThreeRemovalIntentsEverAdmits(t *testing.T) {
 			target := tc.pod(t, md)
 			keeper := surplusReplicaAt(t, md, "qwen-server-one", 1, "")
 			target.UID, keeper.UID = "target", "keeper"
-			cli := newModelDeploymentClient(md, newRenderInstanceType(), target, keeper)
+			cli := newModelDeploymentClient(md, newRenderAcceleratorType(), target, keeper)
 
 			// A SINGLE PASS, driven the ordinary way, with no admission helper in the path: a pass
 			// that is not a removal intent must leave the object without an operation.
@@ -2724,7 +2724,7 @@ func TestTheHoldSurvivesIntoTheCommittedDelete(t *testing.T) {
 	md = reserve(md, retirementReservation(
 		workercore.ModelDeploymentRetirementStateDeleting, "server", 1, []string{"target"},
 	))
-	cli := newModelDeploymentClient(md, newRenderInstanceType(), target, keeper)
+	cli := newModelDeploymentClient(md, newRenderAcceleratorType(), target, keeper)
 	standInForKueue(t, cli, true)
 	r := holdReconciler(cli, &scriptedDrainReader{
 		answers: map[types.UID][]modelDeploymentDrainAnswer{"target": {idleDrain(), idleDrain()}},
@@ -2783,7 +2783,7 @@ func TestTheWithdrawalBudgetIsSpentByAnAdvancingClock(t *testing.T) {
 		},
 	))
 
-	cli := newModelDeploymentClient(md, newRenderInstanceType(), target)
+	cli := newModelDeploymentClient(md, newRenderAcceleratorType(), target)
 	now := started
 	r := advancingReconciler(cli, &scriptedDrainReader{}, &now)
 
@@ -2836,7 +2836,7 @@ func TestARetainedAbortedReservationRefusesASecondRemoval(t *testing.T) {
 	))
 	before := md.Status.Retirement.DeepCopy()
 
-	cli := newModelDeploymentClient(md, newRenderInstanceType(), retained, other)
+	cli := newModelDeploymentClient(md, newRenderAcceleratorType(), retained, other)
 	r := holdReconciler(cli, &scriptedDrainReader{}, time.Now())
 	pods := []core.Pod{*retained, *other}
 
@@ -2871,7 +2871,7 @@ func TestAnExternallyTerminatedAbortStillAdmits(t *testing.T) {
 		workercore.ModelDeploymentRetirementStateAdmitted, "server", 1, []string{"vanished"},
 		func(r *workercore.ModelDeploymentRetirementStatus) { r.Reason = "admitted" },
 	))
-	cli := newModelDeploymentClient(md, newRenderInstanceType(), other)
+	cli := newModelDeploymentClient(md, newRenderAcceleratorType(), other)
 	r := holdReconciler(cli, &scriptedDrainReader{}, time.Now())
 	pods := []core.Pod{*other}
 
@@ -2914,7 +2914,7 @@ func TestANoRouterDeploymentHoldsUntilTheBudgetAbortsAndRetains(t *testing.T) {
 		},
 	))
 
-	cli := newModelDeploymentClient(md, newRenderInstanceType(), target, keeper)
+	cli := newModelDeploymentClient(md, newRenderAcceleratorType(), target, keeper)
 	now := started
 	r := advancingReconciler(cli, &scriptedDrainReader{}, &now)
 	pods := []core.Pod{*target, *keeper}
@@ -3049,7 +3049,7 @@ func TestAReservedPodIsHeldEvenWhenItsOrdinalLabelIsGone(t *testing.T) {
 	before := md.Status.Retirement.DeepCopy()
 
 	cli := newModelDeploymentClient(append(
-		[]ctrlcli.Object{md, newRenderInstanceType(), retained, keeper}, ownedRouterObjects(md)...,
+		[]ctrlcli.Object{md, newRenderAcceleratorType(), retained, keeper}, ownedRouterObjects(md)...,
 	)...)
 	r := retirementRouterReconciler(cli, &scriptedDrainReader{}, time.Now(), []core.Pod{*retained, *keeper})
 
@@ -3104,7 +3104,7 @@ func TestAnUnseatedPodTheReservationDoesNotHoldIsStillNotFrozen(t *testing.T) {
 	))
 
 	cli := newModelDeploymentClient(append(
-		[]ctrlcli.Object{md, newRenderInstanceType(), unseated, keeper}, ownedRouterObjects(md)...,
+		[]ctrlcli.Object{md, newRenderAcceleratorType(), unseated, keeper}, ownedRouterObjects(md)...,
 	)...)
 	r := retirementRouterReconciler(cli, &scriptedDrainReader{}, time.Now(), []core.Pod{*unseated, *keeper})
 	pods := []core.Pod{*unseated, *keeper}
@@ -3174,7 +3174,7 @@ func newRetirementReleaseFixture(
 
 	workload := admittedReplicaWorkload([]*core.Pod{target}, true)
 	cli := newModelDeploymentClient(
-		md, newRenderInstanceType(), target, keeper, router, workload,
+		md, newRenderAcceleratorType(), target, keeper, router, workload,
 	)
 	r := retirementRouterReconciler(cli, &scriptedDrainReader{}, time.Now(), []core.Pod{*target, *keeper})
 

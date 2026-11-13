@@ -37,7 +37,7 @@ manage topology updates.
 |---|---|
 | Cluster | Kubernetes with GPUStack installed |
 | Nodes | labeled `topology.kubernetes.io/region` and `topology.kubernetes.io/zone` for Steps 1 and 2; Steps 3 through 5 publish a `ConfigMap` rack inventory instead |
-| `InstanceType` | `gpustack--nvidia-a10g-linux-amd64` |
+| `AcceleratorType` | `gpustack--nvidia-a10g-linux-amd64` |
 | Model | `Qwen/Qwen2.5-7B-Instruct` |
 | Engine | vLLM `gpustack/runner:cuda13.0-vllm0.29.0`, with `llm-d-router` |
 
@@ -100,7 +100,7 @@ request placement within a single availability zone:
      - name: server
        replicas: 1
        size: 2
-       instanceType: gpustack--nvidia-a10g-linux-amd64
+       acceleratorType: gpustack--nvidia-a10g-linux-amd64
        resources:
          accelerator: "1"
 +      topology:

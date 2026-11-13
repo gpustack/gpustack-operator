@@ -16,6 +16,7 @@ import (
 
 func GetCustomResourceDefinitions() map[string]*v1.CustomResourceDefinition {
 	return map[string]*v1.CustomResourceDefinition{
+		"AcceleratorType":            crd_gpustack_api_worker_v1alpha1_AcceleratorType(),
 		"Devices":                    crd_gpustack_api_worker_v1alpha1_Devices(),
 		"DevicesRDMASelectionPolicy": crd_gpustack_api_worker_v1alpha1_DevicesRDMASelectionPolicy(),
 		"Instance":                   crd_gpustack_api_worker_v1alpha1_Instance(),
@@ -31,6 +32,653 @@ func GetCustomResourceDefinitions() map[string]*v1.CustomResourceDefinition {
 		"ModelStoreBinding":          crd_gpustack_api_worker_v1alpha1_ModelStoreBinding(),
 		"NodeModelStore":             crd_gpustack_api_worker_v1alpha1_NodeModelStore(),
 		"TopologySource":             crd_gpustack_api_worker_v1alpha1_TopologySource(),
+	}
+}
+
+func crd_gpustack_api_worker_v1alpha1_AcceleratorType() *v1.CustomResourceDefinition {
+	return &v1.CustomResourceDefinition{
+		TypeMeta: metav1.TypeMeta{
+			APIVersion: "apiextensions.k8s.io/v1",
+			Kind:       "CustomResourceDefinition",
+		},
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "acceleratortypes.worker.gpustack.ai",
+		},
+		Spec: v1.CustomResourceDefinitionSpec{
+			Group: "worker.gpustack.ai",
+			Names: v1.CustomResourceDefinitionNames{
+				Plural:   "acceleratortypes",
+				Singular: "acceleratortype",
+				ShortNames: []string{
+					"acctype",
+				},
+				Kind:     "AcceleratorType",
+				ListKind: "AcceleratorTypeList",
+				Categories: []string{
+					"gpustack",
+				},
+			},
+			Scope: "Cluster",
+			Versions: []v1.CustomResourceDefinitionVersion{
+				{
+					Name:    "v1alpha1",
+					Served:  true,
+					Storage: true,
+					Schema: &v1.CustomResourceValidation{
+						OpenAPIV3Schema: &v1.JSONSchemaProps{
+							Description: "AcceleratorType is the schema for worker.gpustack.ai.\nAn AcceleratorType represents an accelerated hardware pool backed by a canonical Kueue\nClusterQueue, without workspace CPU, memory, or local-storage presets.",
+							Type:        "object",
+							Properties: map[string]v1.JSONSchemaProps{
+								"apiVersion": {
+									Type: "string",
+								},
+								"kind": {
+									Type: "string",
+								},
+								"metadata": {
+									Type: "object",
+								},
+								"spec": {
+									Type: "object",
+									Required: []string{
+										"acceleratorGroup",
+										"os",
+										"arch",
+									},
+									Properties: map[string]v1.JSONSchemaProps{
+										"acceleratorGroup": {
+											Description: "AcceleratorGroup is the accelerator group (the acceleratable node key) of the\nAcceleratorType, e.g. \"nvidia-a10g\". It selects the accelerator pool the type schedules\nonto and is a required admin-writable input.",
+											Type:        "string",
+										},
+										"arch": {
+											Description: "Arch is the architecture of the AcceleratorType, e.g. \"amd64\", \"arm64\".\nIt is a required admin-writable input, enforced by the validating webhook.",
+											Type:        "string",
+										},
+										"description": {
+											Description: "Description is a free-form admin annotation for the AcceleratorType.",
+											Type:        "string",
+											MaxLength:   ptr.To[int64](1024),
+										},
+										"displayName": {
+											Description: "DisplayName is a human-friendly label for the AcceleratorType. It is admin-editable and, for\na derived AcceleratorType, stamped at derivation time.",
+											Type:        "string",
+											MaxLength:   ptr.To[int64](64),
+										},
+										"generalGroup": {
+											Description: "GeneralGroup is the general(CPU) group (the general node key) of the AcceleratorType, e.g.\n\"amd-epyc-7763\", or the literal \"generic\" for a CPU-manufacturer-agnostic pool. The\nmutating webhook defaults an empty value to \"generic\"; it participates as a scheduling\ndiscriminator only when instance-type-aware-cpu-manufacturer is enabled.",
+											Type:        "string",
+										},
+										"inactive": {
+											Description: "Inactive takes the AcceleratorType out of service. When true, admission refuses new\nworkloads targeting this AcceleratorType, and the backing ClusterQueue is held when every\nfronting type on the pool is inactive.",
+											Type:        "boolean",
+										},
+										"os": {
+											Description: "OS is the operating system of the AcceleratorType, e.g. \"linux\", \"windows\".\nIt is a required admin-writable input, enforced by the validating webhook.",
+											Type:        "string",
+										},
+									},
+								},
+								"status": {
+									Type: "object",
+									Required: []string{
+										"phase",
+										"accelerator",
+										"acceleratorShared",
+										"acceleratorSliced",
+										"acceleratorPartitioned",
+									},
+									Properties: map[string]v1.JSONSchemaProps{
+										"accelerator": {
+											Description: "Accelerator is the allocatable-as-exclusive view: whole accelerators that are\nentirely free, e.g. \"1\", \"4\".",
+											Type:        "object",
+											Properties: map[string]v1.JSONSchemaProps{
+												"capacity": {
+													Description: "Capacity is the total value of the resource.",
+													Pattern:     `^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$`,
+													AnyOf: []v1.JSONSchemaProps{
+														{
+															Type: "integer",
+														},
+														{
+															Type: "string",
+														},
+													},
+													XIntOrString: true,
+												},
+												"onceMaxRequest": {
+													Description: "OnceMaxRequest is the maximum value of the resource that can be requested once.\nThis is a soft limitation. Requesting this value may result in scheduling failure.",
+													Pattern:     `^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$`,
+													AnyOf: []v1.JSONSchemaProps{
+														{
+															Type: "integer",
+														},
+														{
+															Type: "string",
+														},
+													},
+													XIntOrString: true,
+												},
+												"remaining": {
+													Description: "Remaining is the remaining requestable value of the resource.",
+													Pattern:     `^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$`,
+													AnyOf: []v1.JSONSchemaProps{
+														{
+															Type: "integer",
+														},
+														{
+															Type: "string",
+														},
+													},
+													XIntOrString: true,
+												},
+											},
+										},
+										"acceleratorPartitioned": {
+											Description: "AcceleratorPartitioned is the hardware-partitionable view: the partition instances the\npool's partitioned accelerators can still host, summed over those accelerators. It is\ndisjoint from the three views above — an accelerator in a partitioning mode can serve no\nother kind of claim — so a pool with no partitioned accelerator reports zero here.",
+											Type:        "object",
+											Properties: map[string]v1.JSONSchemaProps{
+												"allocatedProfiles": {
+													Description: "AllocatedProfiles lists, by profile name, how many instances of each profile the pool's\npartitioned accelerators currently hold, summed over those accelerators. A profile holding\nnothing is absent rather than listed at zero — unlike RemainingProfiles, where zero carries\nmeaning.\nThe worker gateway ingests it per candidate and sums it by profile name into the fleet-wide\naggregate it serves, so changing its zero-handling or its presence changes that aggregate too.\nIts readers are the consumers of this status — the UI and the GPUStack app — which show what a\npool is running beside what it can still take, and which cannot derive it: RemainingProfiles\nalone cannot say whether a zero is \"occupied\" or merely \"squeezed out by a sibling profile\".",
+													Type:        "array",
+													Items: &v1.JSONSchemaPropsOrArray{
+														Schema: &v1.JSONSchemaProps{
+															Type: "object",
+															Required: []string{
+																"name",
+															},
+															Properties: map[string]v1.JSONSchemaProps{
+																"count": {
+																	Description: "Count is the number of instances of this profile.",
+																	Type:        "integer",
+																	Format:      "int32",
+																},
+																"name": {
+																	Description: "Name is the profile identifier, e.g. \"1g.10gb\".",
+																	Type:        "string",
+																},
+															},
+														},
+													},
+													Nullable: true,
+													XListMapKeys: []string{
+														"name",
+													},
+													XListType: ptr.To[string]("map"),
+												},
+												"capacity": {
+													Description: "Capacity is the total value of the resource.",
+													Pattern:     `^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$`,
+													AnyOf: []v1.JSONSchemaProps{
+														{
+															Type: "integer",
+														},
+														{
+															Type: "string",
+														},
+													},
+													XIntOrString: true,
+												},
+												"onceMaxRequest": {
+													Description: "OnceMaxRequest is the maximum value of the resource that can be requested once.\nThis is a soft limitation. Requesting this value may result in scheduling failure.",
+													Pattern:     `^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$`,
+													AnyOf: []v1.JSONSchemaProps{
+														{
+															Type: "integer",
+														},
+														{
+															Type: "string",
+														},
+													},
+													XIntOrString: true,
+												},
+												"remaining": {
+													Description: "Remaining is the remaining requestable value of the resource.",
+													Pattern:     `^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$`,
+													AnyOf: []v1.JSONSchemaProps{
+														{
+															Type: "integer",
+														},
+														{
+															Type: "string",
+														},
+													},
+													XIntOrString: true,
+												},
+												"remainingProfiles": {
+													Description: "RemainingProfiles lists, by profile name, how many more instances of each profile the pool\ncan still host, summed over its partitioned accelerators.\nEvery profile the pool offers gets an entry, even at zero, so a profile whose room a\nsibling's instance consumed reads 0 instead of vanishing — a reader can tell \"offered but\ncurrently full\" from \"not offered at all\", and the wholesale status write does not churn the\nkey set on every carve and release.",
+													Type:        "array",
+													Items: &v1.JSONSchemaPropsOrArray{
+														Schema: &v1.JSONSchemaProps{
+															Type: "object",
+															Required: []string{
+																"name",
+															},
+															Properties: map[string]v1.JSONSchemaProps{
+																"count": {
+																	Description: "Count is the number of instances of this profile.",
+																	Type:        "integer",
+																	Format:      "int32",
+																},
+																"name": {
+																	Description: "Name is the profile identifier, e.g. \"1g.10gb\".",
+																	Type:        "string",
+																},
+															},
+														},
+													},
+													Nullable: true,
+													XListMapKeys: []string{
+														"name",
+													},
+													XListType: ptr.To[string]("map"),
+												},
+											},
+										},
+										"acceleratorShared": {
+											Description: "AcceleratorShared is the shareable view: per-accelerator ownership shares (up to\nSharedResourceMaxSize owners per accelerator) summed over free and already-shared\naccelerators.",
+											Type:        "object",
+											Properties: map[string]v1.JSONSchemaProps{
+												"capacity": {
+													Description: "Capacity is the total value of the resource.",
+													Pattern:     `^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$`,
+													AnyOf: []v1.JSONSchemaProps{
+														{
+															Type: "integer",
+														},
+														{
+															Type: "string",
+														},
+													},
+													XIntOrString: true,
+												},
+												"onceMaxRequest": {
+													Description: "OnceMaxRequest is the maximum value of the resource that can be requested once.\nThis is a soft limitation. Requesting this value may result in scheduling failure.",
+													Pattern:     `^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$`,
+													AnyOf: []v1.JSONSchemaProps{
+														{
+															Type: "integer",
+														},
+														{
+															Type: "string",
+														},
+													},
+													XIntOrString: true,
+												},
+												"remaining": {
+													Description: "Remaining is the remaining requestable value of the resource.",
+													Pattern:     `^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$`,
+													AnyOf: []v1.JSONSchemaProps{
+														{
+															Type: "integer",
+														},
+														{
+															Type: "string",
+														},
+													},
+													XIntOrString: true,
+												},
+											},
+										},
+										"acceleratorSliced": {
+											Description: "AcceleratorSliced is the sliceable view: per-accelerator VRAM-percent units (one\nhundred per accelerator) summed over free and already-sliced accelerators.",
+											Type:        "object",
+											Properties: map[string]v1.JSONSchemaProps{
+												"capacity": {
+													Description: "Capacity is the total value of the resource.",
+													Pattern:     `^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$`,
+													AnyOf: []v1.JSONSchemaProps{
+														{
+															Type: "integer",
+														},
+														{
+															Type: "string",
+														},
+													},
+													XIntOrString: true,
+												},
+												"onceMaxRequest": {
+													Description: "OnceMaxRequest is the maximum value of the resource that can be requested once.\nThis is a soft limitation. Requesting this value may result in scheduling failure.",
+													Pattern:     `^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$`,
+													AnyOf: []v1.JSONSchemaProps{
+														{
+															Type: "integer",
+														},
+														{
+															Type: "string",
+														},
+													},
+													XIntOrString: true,
+												},
+												"remaining": {
+													Description: "Remaining is the remaining requestable value of the resource.",
+													Pattern:     `^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$`,
+													AnyOf: []v1.JSONSchemaProps{
+														{
+															Type: "integer",
+														},
+														{
+															Type: "string",
+														},
+													},
+													XIntOrString: true,
+												},
+											},
+										},
+										"conditions": {
+											Description: "Conditions is the finer view of the AcceleratorType's state.",
+											Type:        "array",
+											Items: &v1.JSONSchemaPropsOrArray{
+												Schema: &v1.JSONSchemaProps{
+													Type: "object",
+													Required: []string{
+														"type",
+														"status",
+														"lastTransitionTime",
+													},
+													Properties: map[string]v1.JSONSchemaProps{
+														"lastTransitionTime": {
+															Description: "LastTransitionTime is the last time the condition transitioned from one status to another.\nThis should be when the underlying condition changed.  If that is not known, then using the time when the API field changed is acceptable.",
+															Type:        "string",
+															Format:      "datetime",
+														},
+														"message": {
+															Description: "Message is a human readable message indicating details about the transition.\nThis may be an empty string.",
+															Type:        "string",
+															MaxLength:   ptr.To[int64](32768),
+														},
+														"observedGeneration": {
+															Description: "ObservedGeneration represents the .metadata.generation that the condition was set based upon.\nFor instance, if .metadata.generation is currently 12, but the .status.conditions[x].observedGeneration is 9,\nthe condition is out of date with respect to the current state of the instance.",
+															Type:        "integer",
+															Format:      "int64",
+															Minimum:     ptr.To[float64](0),
+														},
+														"reason": {
+															Description: "Reason contains a programmatic identifier indicating the reason for the condition's last transition.\nProducers of specific condition types may define expected values and meanings for this field,\nand whether the values are considered a guaranteed API.\nThe value should be a CamelCase string.",
+															Type:        "string",
+															MaxLength:   ptr.To[int64](1024),
+															Pattern:     `^$|^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$`,
+														},
+														"status": {
+															Description: "Status of the condition, one of True, False, Unknown.",
+															Type:        "string",
+															Enum: []v1.JSON{
+																{
+																	Raw: []byte(`"True"`),
+																},
+																{
+																	Raw: []byte(`"False"`),
+																},
+																{
+																	Raw: []byte(`"Unknown"`),
+																},
+															},
+														},
+														"type": {
+															Description: "Type of condition in CamelCase or in foo.example.com/CamelCase.",
+															Type:        "string",
+															MaxLength:   ptr.To[int64](316),
+															Pattern:     `^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$`,
+														},
+													},
+												},
+											},
+											Nullable: true,
+											XListMapKeys: []string{
+												"type",
+											},
+											XListType: ptr.To[string]("map"),
+										},
+										"detail": {
+											Description: "Detail is the observed hardware descriptor of the AcceleratorType, computed by the\nreconciler from the matched ResourceFlavor's notes and the pool's Devices ledger.",
+											Type:        "object",
+											Properties: map[string]v1.JSONSchemaProps{
+												"cache": {
+													Description: "Cache describes the cache information of the CPU.",
+													Type:        "object",
+													Properties: map[string]v1.JSONSchemaProps{
+														"l1d": {
+															Description: "L1D is the L1 data cache size in bytes of the CPU.",
+															Type:        "string",
+														},
+														"l1i": {
+															Description: "L1I is the L1 instruction cache size in bytes of the CPU.",
+															Type:        "string",
+														},
+														"l2": {
+															Description: "L2 is the L2 cache size in bytes of the CPU.",
+															Type:        "string",
+														},
+														"l3": {
+															Description: "L3 is the L3 cache size in bytes of the CPU.",
+															Type:        "string",
+														},
+													},
+												},
+												"cacheLine": {
+													Description: "CacheLine is the cache line size in bytes of the CPU, e.g. \"64\", \"128\".",
+													Type:        "string",
+												},
+												"clockSpeed": {
+													Description: "ClockSpeed is the speed in Hz of the CPU, e.g. \"2000\"",
+													Type:        "string",
+												},
+												"computeCapability": {
+													Description: "ComputeCapability is the compute capability of the accelerator, e.g. \"8.0\", \"7.0\".",
+													Type:        "string",
+												},
+												"cores": {
+													Description: "Cores is the number of cores of the accelerator, e.g. \"128\", \"256\".",
+													Type:        "string",
+												},
+												"cpu": {
+													Description: "CPU describes the CPU information of the accelerator.",
+													Type:        "object",
+													Properties: map[string]v1.JSONSchemaProps{
+														"cache": {
+															Description: "Cache describes the cache information of the CPU.",
+															Type:        "object",
+															Properties: map[string]v1.JSONSchemaProps{
+																"l1d": {
+																	Description: "L1D is the L1 data cache size in bytes of the CPU.",
+																	Type:        "string",
+																},
+																"l1i": {
+																	Description: "L1I is the L1 instruction cache size in bytes of the CPU.",
+																	Type:        "string",
+																},
+																"l2": {
+																	Description: "L2 is the L2 cache size in bytes of the CPU.",
+																	Type:        "string",
+																},
+																"l3": {
+																	Description: "L3 is the L3 cache size in bytes of the CPU.",
+																	Type:        "string",
+																},
+															},
+														},
+														"cacheLine": {
+															Description: "CacheLine is the cache line size in bytes of the CPU, e.g. \"64\", \"128\".",
+															Type:        "string",
+														},
+														"clockSpeed": {
+															Description: "ClockSpeed is the speed in Hz of the CPU, e.g. \"2000\"",
+															Type:        "string",
+														},
+														"family": {
+															Description: "Family is the family of the CPU.",
+															Type:        "string",
+														},
+														"logicalCores": {
+															Description: "LogicalCores is the number of logical cores of the CPU, e.g. \"8\", \"16\".",
+															Type:        "string",
+														},
+														"manufacturer": {
+															Description: "Manufacturer is the name of the CPU manufacturer, e.g. \"amd\", \"intel\".",
+															Type:        "string",
+														},
+														"maxClockSpeed": {
+															Description: "MaxClockSpeed is the maximum speed in Hz of the CPU, e.g. \"3000\"",
+															Type:        "string",
+														},
+														"physicalCores": {
+															Description: "PhysicalCores is the number of physical cores of the CPU, e.g. \"4\", \"8\".",
+															Type:        "string",
+														},
+														"product": {
+															Description: "Product is the name of the CPU product.",
+															Type:        "string",
+														},
+														"stepping": {
+															Description: "Stepping is the stepping of the CPU, e.g. \"0\", \"1\".",
+															Type:        "string",
+														},
+														"threadsPerPhysicalCore": {
+															Description: "ThreadsPerPhysicalCore is the number of threads per physical core of the CPU, e.g. \"2\", \"4\".",
+															Type:        "string",
+														},
+													},
+												},
+												"family": {
+													Description: "Family is the family of the InstanceType.",
+													Type:        "string",
+												},
+												"logicalCores": {
+													Description: "LogicalCores is the number of logical cores of the CPU, e.g. \"8\", \"16\".",
+													Type:        "string",
+												},
+												"manufacturer": {
+													Description: "Manufacturer is the name of the InstanceType manufacturer.",
+													Type:        "string",
+												},
+												"maxClockSpeed": {
+													Description: "MaxClockSpeed is the maximum speed in Hz of the CPU, e.g. \"3000\"",
+													Type:        "string",
+												},
+												"memory": {
+													Description: "Memory is the VRAM size of the accelerator, e.g. \"65535Mi\".",
+													Type:        "string",
+												},
+												"physicalCores": {
+													Description: "PhysicalCores is the number of physical cores of the CPU, e.g. \"4\", \"8\".",
+													Type:        "string",
+												},
+												"product": {
+													Description: "Product is the name of the InstanceType product.",
+													Type:        "string",
+												},
+												"runtimeVersion": {
+													Description: "RuntimeVersion is the accelerator runtime version observed across the pool, normalized to\n\"major.minor\" by the detectors, e.g. \"12.9\" for CUDA or \"8.2\" for CANN.\nIt is the MINIMUM over every node backing the accelerator group, not an arbitrary\nrepresentative. One InstanceType spans every such node, and a driver rollout makes them\ndisagree for as long as it runs; a container built against an older runtime runs on a newer\ndriver but not the reverse, so the lowest version present is the one whose image every node\ncan run. That is the property that matters, because a workload's image is fixed before\nadmission chooses which node it lands on.\nAn empty value means NOTHING WAS OBSERVED - no synced flavor, or a pool with no accelerator\ngroup of its own - and is distinct from a pool whose nodes all report the same version. A\nconsumer must not read it as a default.\nIT IS ALWAYS THE FIRST ELEMENT OF RuntimeVersions, which is where that invariant is\nmaintained: both are assigned from one sorted list, so they cannot disagree by construction.",
+													Type:        "string",
+												},
+												"runtimeVersions": {
+													Description: "RuntimeVersions is every distinct runtime version the pool's nodes report, ascending.\nIt exists so that a consumer can tell a pool that AGREES from one that does not, which the\nsingle value above cannot express. A driver rollout makes the nodes disagree for as long as\nit runs, and a workload built from the minimum needs to be able to say what it skipped.\nA consumer reads disagreement as len() > 1 and the skipped versions as the tail. That is a\nlength comparison rather than a second copy of the aggregation, which is the whole reason\nthis is published instead of being recomputed from the Devices ledger downstream.",
+													Type:        "array",
+													Items: &v1.JSONSchemaPropsOrArray{
+														Schema: &v1.JSONSchemaProps{
+															Type: "string",
+														},
+													},
+													Nullable:  true,
+													XListType: ptr.To[string]("atomic"),
+												},
+												"slicedDetail": {
+													Description: "SlicedDetail is the pool's aggregated slicing capability for this accelerator group.",
+													Type:        "object",
+													Properties: map[string]v1.JSONSchemaProps{
+														"logical": {
+															Description: "Logical is the aggregated logical (software) slicing capability.",
+															Type:        "object",
+															Properties: map[string]v1.JSONSchemaProps{
+																"coresPercentageOvercommit": {
+																	Description: "CoresPercentageOvercommit is a per-model property (uniform within a group), taken from\nany logically sliceable accelerator; false and meaningless when no accelerator is\nlogically sliceable.",
+																	Type:        "boolean",
+																},
+																"count": {
+																	Description: "Count is the sum of per-accelerator LogicalSliced.Count across the group.",
+																	Type:        "integer",
+																	Format:      "int32",
+																},
+															},
+														},
+														"physical": {
+															Description: "Physical is the aggregated physical (hardware) slicing capability.",
+															Type:        "object",
+															Properties: map[string]v1.JSONSchemaProps{
+																"count": {
+																	Description: "Count is the sum of per-accelerator PhysicalSliced.Count across the group.",
+																	Type:        "integer",
+																	Format:      "int32",
+																},
+																"profiles": {
+																	Description: "Profiles is the group's physical profiles, summed by name.",
+																	Type:        "array",
+																	Items: &v1.JSONSchemaPropsOrArray{
+																		Schema: &v1.JSONSchemaProps{
+																			Type: "object",
+																			Required: []string{
+																				"name",
+																			},
+																			Properties: map[string]v1.JSONSchemaProps{
+																				"count": {
+																					Description: "Count is the sum of per-accelerator Count for this profile name across the group.",
+																					Type:        "integer",
+																					Format:      "int32",
+																				},
+																				"memoryMib": {
+																					Description: "MemoryMib is the memory of one instance of this profile, in MiB. It is uniform\nper profile name within a group, so it is carried through (not summed). It is the\nVRAM-anchored input the Pod webhook folds into \".sliced.units\" (MemoryMibToUnits)\nfor a MIG request, which is why the aggregate — reachable from the InstanceType\nDetail, unlike per-accelerator Devices — must carry it. Optional in the schema (a real\nprofile always carries a non-zero value); the Pod webhook treats a not-yet-populated\ndetail as a retryable not-ready state rather than relying on schema-required presence.",
+																					Type:        "integer",
+																					Format:      "int64",
+																				},
+																				"name": {
+																					Description: "Name is the profile identifier, e.g. \"1g.5gb\".",
+																					Type:        "string",
+																				},
+																			},
+																		},
+																	},
+																	Nullable: true,
+																	XListMapKeys: []string{
+																		"name",
+																	},
+																	XListType: ptr.To[string]("map"),
+																},
+															},
+														},
+													},
+												},
+												"stepping": {
+													Description: "Stepping is the stepping of the CPU, e.g. \"0\", \"1\".",
+													Type:        "string",
+												},
+												"threadsPerPhysicalCore": {
+													Description: "ThreadsPerPhysicalCore is the number of threads per physical core of the CPU, e.g. \"2\", \"4\".",
+													Type:        "string",
+												},
+											},
+										},
+										"entrance": {
+											Description: "Entrance is the name of the namespaced LocalQueue that fronts this\nAcceleratorType's backing ClusterQueue — the value a workload sets as its\n\"kueue.x-k8s.io/queue-name\" label to be admitted.",
+											Type:        "string",
+										},
+										"phase": {
+											Description: "Phase is the summary of conditions.",
+											Type:        "string",
+										},
+										"phaseMessage": {
+											Description: "PhaseMessage is the message of the phase.",
+											Type:        "string",
+										},
+									},
+								},
+							},
+						},
+					},
+					Subresources: &v1.CustomResourceSubresources{
+						Status: &v1.CustomResourceSubresourceStatus{},
+					},
+				},
+			},
+		},
 	}
 }
 
@@ -5026,9 +5674,13 @@ func crd_gpustack_api_worker_v1alpha1_ModelDeployment() *v1.CustomResourceDefini
 													Type: "object",
 													Required: []string{
 														"name",
-														"instanceType",
 													},
 													Properties: map[string]v1.JSONSchemaProps{
+														"acceleratorType": {
+															Description: "AcceleratorType is the name of the AcceleratorType whose hardware pool this role's Pods\nare admitted against. When omitted, the role runs as an unqueued CPU-only workload\nscheduled directly onto managed nodes.",
+															Type:        "string",
+															MaxLength:   ptr.To[int64](253),
+														},
 														"additionalVolumes": {
 															Description: "AdditionalVolumes are volumes mounted into the container alongside the operator's own.",
 															Type:        "array",
@@ -5223,12 +5875,6 @@ func crd_gpustack_api_worker_v1alpha1_ModelDeployment() *v1.CustomResourceDefini
 															Nullable:  true,
 															XListType: ptr.To[string]("atomic"),
 														},
-														"instanceType": {
-															Description: "InstanceType is the name of the InstanceType whose pool this role's Pods are admitted against.\nIt is what the queue-name entrance label is derived from.\nIT IS EDITABLE. Moving a role to another type runs the same whole-group replacement: each\nold replica leaves before its replacement is created, and that replacement is admitted\nagainst the queue the new type publishes before the next old replica may leave. Existing\nPods keep the type they were admitted with until they are deleted. The elastic-EP profile\nfreezes this field after creation.",
-															Type:        "string",
-															MaxLength:   ptr.To[int64](253),
-															MinLength:   ptr.To[int64](1),
-														},
 														"kind": {
 															Description: "Kind is what the engine is told this role is. It is CLOSED and it is NOT the role's name: Name\nis free-form and identifies the PodSet, while this selects behavior, and a semantic reachable\nby typing a string is one typo away from silently changing. Two roles may share a kind and\ndiffer in name ONLY where that kind is Server, because a pair of servers is a set of equals and\ntwo prefillers are not: nothing that consumes these roles expresses a second prefiller, so a\ndeployment declaring one would render a role no reader of the rendered configuration could\nreach. It defaults to Server, the shape a deployment written before disaggregation existed has,\nso such a deployment renders exactly as it did.",
 															Type:        "string",
@@ -5317,11 +5963,11 @@ func crd_gpustack_api_worker_v1alpha1_ModelDeployment() *v1.CustomResourceDefini
 															Minimum: ptr.To[float64](1),
 														},
 														"resources": {
-															Description: "Resources is what one Pod of this role asks of an accelerator, and it is a STRUCTURED\nFIELD FOR THE SAME REASON Replicas and InstanceType are: admission and scheduling read it.\nIt carries only the ACCELERATOR half of a request, because that is the only half a workload\ndecides. CPU, memory and ephemeral storage are DERIVED from the InstanceType's per-unit\nresources scaled by the requested card count, so they are not expressible here at all — a\nstronger guarantee than refusing them, since a field that does not exist cannot be shadowed by\nthe container fields below either.\nInstanceType alone cannot supply this half: its UnitResources size ONE card, and how many cards\na Pod wants is a property of the model being served, so two deployments on one InstanceType\nroutinely want different counts.\nIT IS EDITABLE. A change runs the same whole-group replacement, and the new request is\nadmitted against the pool as each replacement is created. Omission behaves as on create:\nthe accelerator half is defaulted, to one whole card of an acceleratable type. The\nelastic-EP profile freezes this field at the whole-card group it bound to TP at creation.",
+															Description: "Resources is what one Pod of this role asks of accelerators, fabric interfaces, and host\nresources, and it is a STRUCTURED FIELD FOR THE SAME REASON Replicas and AcceleratorType are:\nadmission and scheduling read it.\nIt carries the accelerator request and optional explicit CPU, memory and ephemeral storage\nrequests rendered onto the serving container when set.\nIT IS EDITABLE. A change runs the same whole-group replacement, and the new request is\nadmitted against the pool as each replacement is created. Omission behaves as on create:\nwhen AcceleratorType is set, the accelerator half is defaulted to one whole card. The\nelastic-EP profile freezes this field at the whole-card group it bound to TP at creation.",
 															Type:        "object",
 															Properties: map[string]v1.JSONSchemaProps{
 																"accelerator": {
-																	Description: "Accelerator is how many accelerator cards ONE POD asks for.\n- Left unset on an acceleratable InstanceType it DEFAULTS TO ONE at admission, on create and\non update alike, the same way an Instance's does. The value is written into the stored\nobject rather than applied at render time, so what was admitted is what can be read back.\n- AN EXPLICIT ZERO IS KEPT, because it is a value the user wrote, and on an acceleratable\nInstanceType it asks for nothing that pool's queue accounts in. It is accepted while it is\nthe only role using that type, and refused when another role shares the type: replicas\nasking for nothing the queue accounts in are admitted and run while that queue charges\nthem nothing, spending from the pool their siblings on that type are charged for.\n- A Pod meant to run without an accelerator belongs on an InstanceType that is not\nacceleratable, where CPU is what the queue accounts in.",
+																	Description: "Accelerator is how many accelerator cards ONE POD asks for.\n- Left unset on an accelerated role (acceleratorType set) it DEFAULTS TO ONE at admission, on\ncreate and on update alike. The value is written into the stored object rather than applied\nat render time, so what was admitted is what can be read back.\n- A role meant to run without an accelerator omits acceleratorType and leaves accelerator\nunset or zero.",
 																	Pattern:     `^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$`,
 																	AnyOf: []v1.JSONSchemaProps{
 																		{
@@ -5335,26 +5981,68 @@ func crd_gpustack_api_worker_v1alpha1_ModelDeployment() *v1.CustomResourceDefini
 																	XIntOrString: true,
 																},
 																"acceleratorPartitionedProfile": {
-																	Description: "AcceleratorPartitionedProfile is the hardware partition profile requested on a\npartition-offering InstanceType, e.g. \"3g.40gb\". A non-empty value is mutually exclusive with\nthe two slice percentages: hardware partitioning and software slicing cannot both apply to one\naccelerator. It is ignored by an InstanceType offering no partition.",
+																	Description: "AcceleratorPartitionedProfile is the hardware partition profile requested on a\npartition-offering AcceleratorType, e.g. \"3g.40gb\". A non-empty value is mutually exclusive with\nthe two slice percentages: hardware partitioning and software slicing cannot both apply to one\naccelerator. It is ignored by an AcceleratorType offering no partition.",
 																	Type:        "string",
 																	MaxLength:   ptr.To[int64](64),
 																},
 																"acceleratorSlicedCoresPercentage": {
-																	Description: "AcceleratorSlicedCoresPercentage is the per-accelerator compute budget requested on a sliced\nInstanceType, as a percentage in [0,100], independent of the memory percentage.",
+																	Description: "AcceleratorSlicedCoresPercentage is the per-accelerator compute budget requested on a sliced\nAcceleratorType, as a percentage in [0,100], independent of the memory percentage.",
 																	Type:        "integer",
 																	Format:      "int32",
 																	Maximum:     ptr.To[float64](100),
 																	Minimum:     ptr.To[float64](0),
 																},
 																"acceleratorSlicedMemoryPercentage": {
-																	Description: "AcceleratorSlicedMemoryPercentage is the per-accelerator VRAM budget requested on a sliced\nInstanceType, as a percentage in [0,100]. 0 disables slicing, making the request an exclusive\nwhole-accelerator one. It is ignored by an InstanceType offering no slicing.",
+																	Description: "AcceleratorSlicedMemoryPercentage is the per-accelerator VRAM budget requested on a sliced\nAcceleratorType, as a percentage in [0,100]. 0 disables slicing, making the request an exclusive\nwhole-accelerator one. It is ignored by an AcceleratorType offering no slicing.",
 																	Type:        "integer",
 																	Format:      "int32",
 																	Maximum:     ptr.To[float64](100),
 																	Minimum:     ptr.To[float64](0),
 																},
+																"cpu": {
+																	Description: "CPU is the host CPU request and limit for one role Pod, such as \"8\" or \"16\". When omitted,\nno CPU request or limit is rendered onto the serving container.",
+																	Pattern:     `^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$`,
+																	AnyOf: []v1.JSONSchemaProps{
+																		{
+																			Type: "integer",
+																		},
+																		{
+																			Type: "string",
+																		},
+																	},
+																	Nullable:     true,
+																	XIntOrString: true,
+																},
 																"interface": {
 																	Description: "Interface is the number of fabric interfaces one role Pod requests, as a whole number.\nUnset or zero requests none. A positive count selects the device-plugin resource of the\neffective cache or direct-transfer protocol. A single RDMA interface uses the shared\nresource; multiple RDMA interfaces use the exclusive resource. EFA uses its own plugin\nresource. Conflicting effective protocols are refused rather than assigned one of the\navailable device families. Admission enforces the whole number and the protocol rules,\nthe same as for accelerator; the schema carries no bound of its own.",
+																	Pattern:     `^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$`,
+																	AnyOf: []v1.JSONSchemaProps{
+																		{
+																			Type: "integer",
+																		},
+																		{
+																			Type: "string",
+																		},
+																	},
+																	Nullable:     true,
+																	XIntOrString: true,
+																},
+																"localStorage": {
+																	Description: "LocalStorage is the host ephemeral storage request and limit for one role Pod, such as\n\"100Gi\". When omitted, no ephemeral storage request or limit is rendered onto the serving\ncontainer.",
+																	Pattern:     `^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$`,
+																	AnyOf: []v1.JSONSchemaProps{
+																		{
+																			Type: "integer",
+																		},
+																		{
+																			Type: "string",
+																		},
+																	},
+																	Nullable:     true,
+																	XIntOrString: true,
+																},
+																"ram": {
+																	Description: "RAM is the host memory request and limit for one role Pod, such as \"64Gi\". When omitted,\nno memory request or limit is rendered onto the serving container.",
 																	Pattern:     `^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$`,
 																	AnyOf: []v1.JSONSchemaProps{
 																		{
@@ -8276,7 +8964,7 @@ func crd_gpustack_api_worker_v1alpha1_ModelPrefetch() *v1.CustomResourceDefiniti
 					Storage: true,
 					Schema: &v1.CustomResourceValidation{
 						OpenAPIV3Schema: &v1.JSONSchemaProps{
-							Description: "ModelPrefetch is the schema for worker.gpustack.ai.\nIt is a tenant's RESIDENCY INTENT for one model artifact: keep the artifact's weights on a set of\nnodes ahead of any Pod that mounts them. The worker delivers it the same way it delivers a cold\nmount — one warm-up Pod per target node, the artifact's own CSI volume, no accelerator request —\nso the bytes land through the node cache's ordinary path, once per node, verified, and Pod exits\nonce the tree is readable. The Pod IS the delivery operation; there is no separate job state.\nPlacement narrows the target set: the InstanceTypes of a node pool, or a nodeSelector for named\nnodes, or — when both are left out — the InstanceTypes of the namespace's own deployments that\nreference the artifact. Retention decides what happens after: whether the content is pinned\nagainst collection (an admin-granted capability) and how long a node keeps it after its last use.\nDeleting the object revokes the intent: the warm-up Pods go, the nodes' pins drop, and the bytes\nare reclaimed by the node cache's own collection once they are unreferenced and past its grace.\nNothing is torn out from under a Pod still reading the tree.",
+							Description: "ModelPrefetch is the schema for worker.gpustack.ai.\nIt is a tenant's RESIDENCY INTENT for one model artifact: keep the artifact's weights on a set of\nnodes ahead of any Pod that mounts them. The worker delivers it the same way it delivers a cold\nmount — one warm-up Pod per target node, the artifact's own CSI volume, no accelerator request —\nso the bytes land through the node cache's ordinary path, once per node, verified, and Pod exits\nonce the tree is readable. The Pod IS the delivery operation; there is no separate job state.\nPlacement narrows the target set: the AcceleratorTypes of an accelerator pool, or a nodeSelector\nfor named nodes, or — when both are left out — the AcceleratorTypes of the namespace's own\ndeployments that reference the artifact. Retention decides what happens after: whether the\ncontent is pinned against collection (an admin-granted capability) and how long a node keeps it\nafter its last use.\nDeleting the object revokes the intent: the warm-up Pods go, the nodes' pins drop, and the bytes\nare reclaimed by the node cache's own collection once they are unreferenced and past its grace.\nNothing is torn out from under a Pod still reading the tree.",
 							Type:        "object",
 							Required: []string{
 								"spec",
@@ -8332,11 +9020,11 @@ func crd_gpustack_api_worker_v1alpha1_ModelPrefetch() *v1.CustomResourceDefiniti
 											Minimum: ptr.To[float64](0),
 										},
 										"placement": {
-											Description: "Placement narrows the target set. InstanceTypes and NodeSelector are mutually exclusive;\nboth set is refused, and both left out derives the target set from the namespace's own\ndeployments that reference the artifact. The relational rules are webhook-enforced.",
+											Description: "Placement narrows the target set. AcceleratorTypes and NodeSelector are mutually exclusive;\nboth set is refused, and both left out derives the target set from the namespace's own\ndeployments that reference the artifact. The relational rules are webhook-enforced.",
 											Type:        "object",
 											Properties: map[string]v1.JSONSchemaProps{
-												"instanceTypes": {
-													Description: "InstanceTypes names the node pools to warm, by the InstanceType objects the scheduling chain\nalready publishes. The target set is every node carrying one of these types' flavors.",
+												"acceleratorTypes": {
+													Description: "AcceleratorTypes names the accelerator pools to warm, by the AcceleratorType objects the\nscheduling chain publishes. The target set is every node carrying one of these types'\nflavors.",
 													Type:        "array",
 													MaxItems:    ptr.To[int64](8),
 													MinItems:    ptr.To[int64](1),
@@ -8346,7 +9034,7 @@ func crd_gpustack_api_worker_v1alpha1_ModelPrefetch() *v1.CustomResourceDefiniti
 														},
 													},
 													Nullable:  true,
-													XListType: ptr.To[string]("atomic"),
+													XListType: ptr.To[string]("set"),
 												},
 												"nodeSelector": {
 													Description: "NodeSelector selects the target nodes directly, the \"download to these nodes\" form.",
@@ -8422,7 +9110,7 @@ func crd_gpustack_api_worker_v1alpha1_ModelPrefetch() *v1.CustomResourceDefiniti
 											},
 										},
 										"source": {
-											Description: "Source opts this prefetch into source preparation for remote weight loading, beside the\ndisk residency it always asked for. With it, the target nodes may fill a registered-memory\nsource from this artifact, and the prefetch reports that readiness in status.transfer,\nseparately from the disk figures above.\nIT REQUIRES AN EXPLICIT PLACEMENT. A source is memory a node holds against a known target\nset, so the derived-from-deployments default an ordinary prefetch falls back to — which\nfollows this namespace's consumers around — would prepare whatever machines happen to\nserve the model this week. A source intent on a prefetch whose placement names no\ninstanceTypes and no nodeSelector is refused at admission, and the two out together stay\nrefused for the ambiguity they already were.\nThe optional Binding sourceMemory grant bounds memory independently of disk quota.\nWithout it, source preparation uses the node's configured source capacity.\nAbsent means a prefetch that warms the node cache only, exactly as this object has always\nmeant, with the same placement defaults, warm-up behavior and status meaning as before.",
+											Description: "Source opts this prefetch into source preparation for remote weight loading, beside the\ndisk residency it always asked for. With it, the target nodes may fill a registered-memory\nsource from this artifact, and the prefetch reports that readiness in status.transfer,\nseparately from the disk figures above.\nIT REQUIRES AN EXPLICIT PLACEMENT. A source is memory a node holds against a known target\nset, so the derived-from-deployments default an ordinary prefetch falls back to — which\nfollows this namespace's consumers around — would prepare whatever machines happen to\nserve the model this week. A source intent on a prefetch whose placement names no\nacceleratorTypes and no nodeSelector is refused at admission, and the two out together stay\nrefused for the ambiguity they already were.\nThe optional Binding sourceMemory grant bounds memory independently of disk quota.\nWithout it, source preparation uses the node's configured source capacity.\nAbsent means a prefetch that warms the node cache only, exactly as this object has always\nmeant, with the same placement defaults, warm-up behavior and status meaning as before.",
 											Type:        "object",
 											Nullable:    true,
 										},

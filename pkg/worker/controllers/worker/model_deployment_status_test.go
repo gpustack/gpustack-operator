@@ -146,7 +146,7 @@ func readyReplica(md *workercore.ModelDeployment, ordinal int32, ready bool) *co
 	pod.Name = fmt.Sprintf("%s-%s-%d", md.Name, md.Spec.Roles[0].Name, ordinal)
 	pod.Namespace = md.Namespace
 	pod.UID = types.UID(pod.Name + "-uid")
-	// A LITERAL rather than FormatLocalQueueName(role.InstanceType): the entrance a replica carries
+	// A LITERAL rather than FormatLocalQueueName(role.AcceleratorType): the entrance a replica carries
 	// is read from the InstanceType's status, so a fixture that re-derived it from the name would
 	// agree with a render that wrongly did the same and stop discriminating between them.
 	pod.Labels = modelDeploymentPodLabels(md, &md.Spec.Roles[0], "fixture-entrance")
@@ -235,7 +235,7 @@ func TestComputeModelDeploymentStatus_Phase(t *testing.T) {
 				md.Finalizers = []string{systemmeta.LockedResourceFinalizer}
 			}
 
-			objs := []ctrlcli.Object{md, newRenderInstanceType()}
+			objs := []ctrlcli.Object{md, newRenderAcceleratorType()}
 			pods := make([]core.Pod, 0, tc.replicas)
 			for i := range tc.replicas {
 				pod := readyReplica(md, i, i < tc.ready)
@@ -265,7 +265,7 @@ func TestComputeModelDeploymentStatus_Roles(t *testing.T) {
 		*readyReplica(md, 0, true),
 		*readyReplica(md, 1, false),
 	}
-	r := &ModelDeploymentReconciler{Client: newModelDeploymentClient(md, newRenderInstanceType())}
+	r := &ModelDeploymentReconciler{Client: newModelDeploymentClient(md, newRenderAcceleratorType())}
 
 	status, err := r.computeModelDeploymentStatusWithQualifications(context.Background(), md, pods, nil, nil, nil, nil)
 	require.NoError(t, err)
@@ -416,7 +416,7 @@ func TestComputeModelDeploymentStatus_Unmanaged(t *testing.T) {
 	managed := newRenderDeployment(func(md *workercore.ModelDeployment) {
 		md.Spec.Roles[0].Replicas = 1
 	})
-	r := &ModelDeploymentReconciler{Client: newModelDeploymentClient(managed, newRenderInstanceType())}
+	r := &ModelDeploymentReconciler{Client: newModelDeploymentClient(managed, newRenderAcceleratorType())}
 
 	status, err := r.computeModelDeploymentStatusWithQualifications(
 		context.Background(), managed, readyPods(managed, 1), nil, nil, nil, nil,
@@ -435,7 +435,7 @@ func TestComputeModelDeploymentStatus_UnmanagedIsObservedNotDeclared(t *testing.
 	md := newRenderDeployment(func(md *workercore.ModelDeployment) {
 		md.Spec.Roles[0].Replicas = 1
 	})
-	r := &ModelDeploymentReconciler{Client: newModelDeploymentClient(md, newRenderInstanceType())}
+	r := &ModelDeploymentReconciler{Client: newModelDeploymentClient(md, newRenderAcceleratorType())}
 
 	status, err := r.computeModelDeploymentStatusWithQualifications(
 		context.Background(), md, takeoverPods(md, 1), nil, nil, nil, nil,
@@ -783,7 +783,7 @@ func TestObserveModelDeploymentQuota_AnIncompleteReplicaIsReportedAboveOneMember
 // in the first, a first-Workload implementation would pass.
 func TestModelDeploymentStatus_AssignedFlavorsArePerReplica(t *testing.T) {
 	md := twoRoleDeployment(func(md *workercore.ModelDeployment) {
-		md.Spec.Roles[1].InstanceType = "a100-8x"
+		md.Spec.Roles[1].AcceleratorType = "a100-8x"
 	})
 	prefill, decode := &md.Spec.Roles[0], &md.Spec.Roles[1]
 
@@ -1118,7 +1118,7 @@ func TestObserveModelDeploymentQuota_TrueCoversEveryRole(t *testing.T) {
 func TestObserveModelDeploymentQuota_NamesTheClusterQueue(t *testing.T) {
 	md := newRenderDeployment(func(md *workercore.ModelDeployment) {
 		md.Spec.Roles[0].Replicas = 1
-		md.Spec.Roles[0].InstanceType = "a100-4x"
+		md.Spec.Roles[0].AcceleratorType = "a100-4x"
 	})
 	pods := []core.Pod{*readyReplica(md, 0, true)}
 
@@ -1185,7 +1185,7 @@ func TestSyncModelDeploymentStatus_RebuiltWholesale(t *testing.T) {
 	}
 
 	pods := []core.Pod{*readyReplica(md, 0, true), *readyReplica(md, 1, false)}
-	cli := newModelDeploymentClient(md, newRenderInstanceType())
+	cli := newModelDeploymentClient(md, newRenderAcceleratorType())
 	r := &ModelDeploymentReconciler{Client: cli}
 
 	require.NoError(t, r.syncModelDeploymentStatus(context.Background(), md, pods, nil, nil, nil,
@@ -1209,7 +1209,7 @@ func TestSyncModelDeploymentStatus_RebuiltWholesale(t *testing.T) {
 func TestSyncModelDeploymentStatus_WritesNothingWhenUnchanged(t *testing.T) {
 	md := newRenderDeployment()
 	writes := new(modelDeploymentWrites)
-	cli := newCountingModelDeploymentClient(writes, md, newRenderInstanceType())
+	cli := newCountingModelDeploymentClient(writes, md, newRenderAcceleratorType())
 	r := &ModelDeploymentReconciler{Client: cli}
 
 	pods := []core.Pod{*readyReplica(md, 0, true), *readyReplica(md, 1, true)}
@@ -1239,7 +1239,7 @@ func TestSyncModelDeploymentStatus_AFailingListWritesNoStatus(t *testing.T) {
 	failing := ctrlfake.NewClientBuilder().
 		WithScheme(scheme.Scheme).
 		WithStatusSubresource(&workercore.ModelDeployment{}, &workercore.KVCachePoolBinding{}).
-		WithObjects(md, newRenderInstanceType()).
+		WithObjects(md, newRenderAcceleratorType()).
 		WithInterceptorFuncs(ctrlinterceptor.Funcs{
 			List: func(
 				ctx context.Context, c ctrlcli.WithWatch, obj ctrlcli.ObjectList, opts ...ctrlcli.ListOption,
@@ -1261,7 +1261,7 @@ func TestSyncModelDeploymentStatus_AFailingListWritesNoStatus(t *testing.T) {
 	require.Empty(t, stored.Status.Roles,
 		"a failed Workload list writes no status at all, rather than a zero that reads as observed")
 
-	healthy := &ModelDeploymentReconciler{Client: newModelDeploymentClient(md, newRenderInstanceType())}
+	healthy := &ModelDeploymentReconciler{Client: newModelDeploymentClient(md, newRenderAcceleratorType())}
 	require.NoError(t, healthy.syncModelDeploymentStatus(context.Background(), md, pods, nil, nil, nil,
 		modelDeploymentPassObservation{}))
 
@@ -1280,7 +1280,7 @@ func TestSyncModelDeploymentStatus_AFailingListWritesNoStatus(t *testing.T) {
 // handed no reading of the Binding at all, and a pass that did not look must not report.
 func TestComputeModelDeploymentStatus_DeclaresOnlyWhatItObserved(t *testing.T) {
 	md := newRenderDeployment()
-	r := &ModelDeploymentReconciler{Client: newModelDeploymentClient(md, newRenderInstanceType())}
+	r := &ModelDeploymentReconciler{Client: newModelDeploymentClient(md, newRenderAcceleratorType())}
 
 	status, err := r.computeModelDeploymentStatusWithQualifications(context.Background(), md, nil, nil, nil, nil, nil)
 	require.NoError(t, err)
@@ -1421,7 +1421,7 @@ func TestObserveModelDeploymentQuota_CountsPerGroup(t *testing.T) {
 	md := newRenderDeployment(func(md *workercore.ModelDeployment) {
 		decode := md.Spec.Roles[0]
 		md.Spec.Roles[0].Name, md.Spec.Roles[0].Replicas = "prefill", 2
-		decode.Name, decode.Replicas, decode.InstanceType = "decode", 3, "a100-8x"
+		decode.Name, decode.Replicas, decode.AcceleratorType = "decode", 3, "a100-8x"
 		md.Spec.Roles = append(md.Spec.Roles, decode)
 	})
 
@@ -1466,7 +1466,7 @@ func TestObserveModelDeploymentQuota_AdmissionInFlightNamesTheRightGroups(t *tes
 	md := newRenderDeployment(func(md *workercore.ModelDeployment) {
 		decode := md.Spec.Roles[0]
 		md.Spec.Roles[0].Name, md.Spec.Roles[0].Replicas = "prefill", 1
-		decode.Name, decode.Replicas, decode.InstanceType = "decode", 1, "a100-8x"
+		decode.Name, decode.Replicas, decode.AcceleratorType = "decode", 1, "a100-8x"
 		md.Spec.Roles = append(md.Spec.Roles, decode)
 	})
 
@@ -1585,7 +1585,7 @@ func observeQuotaOver(
 	holder *workercore.ModelDeployment,
 ) {
 	wlByReplica := modelDeploymentReplicaWorkloads(pods, wls)
-	observeModelDeploymentQuota(md, pods, wls, wlByReplica, holder)
+	observeModelDeploymentQuota(md, pods, wls, wlByReplica, holder, nil)
 }
 
 // roleStatusesOver is the same resolution for the per-role view, for the same reason.
@@ -1616,7 +1616,7 @@ func TestObserveModelDeploymentQuota_OneGroupReservedIsNotTheDeployment(t *testi
 	md := newRenderDeployment(func(md *workercore.ModelDeployment) {
 		decode := md.Spec.Roles[0]
 		md.Spec.Roles[0].Name, md.Spec.Roles[0].Replicas = "prefill", 1
-		decode.Name, decode.Replicas, decode.InstanceType = "decode", 1, "a100-8x"
+		decode.Name, decode.Replicas, decode.AcceleratorType = "decode", 1, "a100-8x"
 		md.Spec.Roles = append(md.Spec.Roles, decode)
 	})
 
@@ -1663,7 +1663,7 @@ func TestObserveModelDeploymentQuota_TwoRolesOnOneInstanceTypeStillNameTheGroup(
 	md := newRenderDeployment(func(md *workercore.ModelDeployment) {
 		decode := md.Spec.Roles[0]
 		md.Spec.Roles[0].Name, md.Spec.Roles[0].Replicas = "prefill", 1
-		decode.Name, decode.Replicas, decode.InstanceType = "decode", 1, "h20-8x"
+		decode.Name, decode.Replicas, decode.AcceleratorType = "decode", 1, "h20-8x"
 		md.Spec.Roles = append(md.Spec.Roles, decode)
 	})
 
@@ -1704,7 +1704,7 @@ func TestObserveModelDeploymentQuota_EveryGroupReservedIsReserved(t *testing.T) 
 	md := newRenderDeployment(func(md *workercore.ModelDeployment) {
 		decode := md.Spec.Roles[0]
 		md.Spec.Roles[0].Name, md.Spec.Roles[0].Replicas = "prefill", 1
-		decode.Name, decode.Replicas, decode.InstanceType = "decode", 1, "a100-8x"
+		decode.Name, decode.Replicas, decode.AcceleratorType = "decode", 1, "a100-8x"
 		md.Spec.Roles = append(md.Spec.Roles, decode)
 	})
 
@@ -1779,7 +1779,7 @@ func TestObserveModelDeploymentQuota_PreemptedInPart(t *testing.T) {
 	md := newRenderDeployment(func(md *workercore.ModelDeployment) {
 		decode := md.Spec.Roles[0]
 		md.Spec.Roles[0].Name, md.Spec.Roles[0].Replicas = "prefill", 1
-		decode.Name, decode.Replicas, decode.InstanceType = "decode", 1, "a100-8x"
+		decode.Name, decode.Replicas, decode.AcceleratorType = "decode", 1, "a100-8x"
 		md.Spec.Roles = append(md.Spec.Roles, decode)
 	})
 
@@ -1885,7 +1885,7 @@ func TestObserveModelDeploymentQuota_PreemptedInPartDoesNotClaimNothingIsAdmitte
 	md := newRenderDeployment(func(md *workercore.ModelDeployment) {
 		decode := md.Spec.Roles[0]
 		md.Spec.Roles[0].Name, md.Spec.Roles[0].Replicas = "prefill", 1
-		decode.Name, decode.Replicas, decode.InstanceType = "decode", 1, "a100-8x"
+		decode.Name, decode.Replicas, decode.AcceleratorType = "decode", 1, "a100-8x"
 		md.Spec.Roles = append(md.Spec.Roles, decode)
 	})
 
@@ -1922,7 +1922,7 @@ func TestObserveModelDeploymentQuota_PreemptionIsCarriedIntoTheOtherAnswers(t *t
 	md := newRenderDeployment(func(md *workercore.ModelDeployment) {
 		decode := md.Spec.Roles[0]
 		md.Spec.Roles[0].Name, md.Spec.Roles[0].Replicas = "prefill", 1
-		decode.Name, decode.Replicas, decode.InstanceType = "decode", 2, "a100-8x"
+		decode.Name, decode.Replicas, decode.AcceleratorType = "decode", 2, "a100-8x"
 		md.Spec.Roles = append(md.Spec.Roles, decode)
 	})
 
@@ -1967,7 +1967,7 @@ func TestObserveModelDeploymentQuota_ThePreemptionNoteContract(t *testing.T) {
 		return newRenderDeployment(func(md *workercore.ModelDeployment) {
 			decode := md.Spec.Roles[0]
 			md.Spec.Roles[0].Name, md.Spec.Roles[0].Replicas = "prefill", 1
-			decode.Name, decode.Replicas, decode.InstanceType = "decode", 1, "a100-8x"
+			decode.Name, decode.Replicas, decode.AcceleratorType = "decode", 1, "a100-8x"
 			md.Spec.Roles = append(md.Spec.Roles, decode)
 		})
 	}
@@ -2488,7 +2488,7 @@ func TestObserveModelDeploymentQuota_PreemptedInPartSaysWhatWasLost(t *testing.T
 			md := newRenderDeployment(func(md *workercore.ModelDeployment) {
 				decode := md.Spec.Roles[0]
 				md.Spec.Roles[0].Name, md.Spec.Roles[0].Replicas = "prefill", 1
-				decode.Name, decode.Replicas, decode.InstanceType = "decode", 1, "a100-8x"
+				decode.Name, decode.Replicas, decode.AcceleratorType = "decode", 1, "a100-8x"
 				if c.kinds {
 					md.Spec.Roles[0].Kind = workercore.ModelDeploymentRoleKindPrefill
 					decode.Kind = workercore.ModelDeploymentRoleKindDecode
@@ -2499,7 +2499,7 @@ func TestObserveModelDeploymentQuota_PreemptedInPartSaysWhatWasLost(t *testing.T
 					// admitted one belong to the same kind. Prefill therefore stays served, and
 					// decode is unserved for the single reason under test rather than for two.
 					second := md.Spec.Roles[0]
-					second.Name, second.InstanceType = "prefill-2", "h100-8x"
+					second.Name, second.AcceleratorType = "prefill-2", "h100-8x"
 					md.Spec.Roles = append(md.Spec.Roles, second)
 				}
 			})
@@ -2701,7 +2701,7 @@ func TestComputeModelDeploymentStatus_NoQualificationObservation(t *testing.T) {
 				md.Status.Retirement = tc.retirement
 			}
 
-			r := &ModelDeploymentReconciler{Client: newModelDeploymentClient(md, newRenderInstanceType())}
+			r := &ModelDeploymentReconciler{Client: newModelDeploymentClient(md, newRenderAcceleratorType())}
 			status, err := r.computeModelDeploymentStatusWithQualifications(context.Background(), md, nil, nil, nil, nil, nil)
 			require.NoError(t, err)
 
@@ -2843,7 +2843,7 @@ func TestComputeModelDeploymentStatus_ReadsRoleParallelism(t *testing.T) {
 				md.Spec.Roles = append(md.Spec.Roles, *tc.secondRole)
 			}
 
-			r := &ModelDeploymentReconciler{Client: newModelDeploymentClient(md, newRenderInstanceType())}
+			r := &ModelDeploymentReconciler{Client: newModelDeploymentClient(md, newRenderAcceleratorType())}
 			status, err := r.computeModelDeploymentStatusWithQualifications(context.Background(), md, nil, nil, nil, nil, nil)
 			require.NoError(t, err)
 
@@ -2953,7 +2953,7 @@ func TestSyncModelDeploymentStatusPublishesThePrecollectedAnswer(t *testing.T) {
 	md := newRenderDeployment()
 	md.Spec.Router = &workercore.ModelDeploymentRouter{Name: workercore.ModelDeploymentRouterLLMD}
 	pods := []core.Pod{*readyReplica(md, 0, true)}
-	cli := newModelDeploymentClient(md, newRenderInstanceType())
+	cli := newModelDeploymentClient(md, newRenderAcceleratorType())
 	r := &ModelDeploymentReconciler{Client: cli, APIReader: cli}
 
 	observation := modelDeploymentPassObservation{
@@ -2987,7 +2987,7 @@ func TestSyncModelDeploymentStatusNeverPublishesAnEmptyServingState(t *testing.T
 	md := newRenderDeployment()
 	md.Spec.Router = &workercore.ModelDeploymentRouter{Name: workercore.ModelDeploymentRouterLLMD}
 	pods := []core.Pod{*readyReplica(md, 0, true)}
-	cli := newModelDeploymentClient(md, newRenderInstanceType())
+	cli := newModelDeploymentClient(md, newRenderAcceleratorType())
 	r := &ModelDeploymentReconciler{Client: cli, APIReader: cli}
 
 	require.NoError(t, r.syncModelDeploymentStatus(
@@ -3000,4 +3000,54 @@ func TestSyncModelDeploymentStatusNeverPublishesAnEmptyServingState(t *testing.T
 		"an unobserved answer is a state, never the empty string")
 	assert.Equal(t, workercore.ModelDeploymentServingStateUnknown,
 		stored.Status.Roles[0].Endpoints.Serving.State)
+}
+
+func TestObserveModelDeploymentQuota_CPUOnlyDeploymentIsNotApplicable(t *testing.T) {
+	md := newRenderDeployment(func(md *workercore.ModelDeployment) {
+		md.Spec.Roles[0].AcceleratorType = ""
+	})
+	holder := new(workercore.ModelDeployment)
+	observeQuotaOver(md, nil, nil, holder)
+
+	assert.True(t, ModelDeploymentConditionQuotaReserved.IsTrue(holder))
+	assert.Equal(t, "NotApplicable", ModelDeploymentConditionQuotaReserved.GetReason(holder))
+	assert.Equal(t,
+		"no role requests an acceleratorType, so replicas schedule directly without Kueue quota reservation",
+		ModelDeploymentConditionQuotaReserved.GetMessage(holder),
+	)
+}
+
+func TestObserveModelDeploymentQuota_CustomAcceleratorTypeNamesCanonicalClusterQueue(t *testing.T) {
+	at := &workercore.AcceleratorType{
+		ObjectMeta: meta.ObjectMeta{Name: "custom-a10g"},
+		Spec: workercore.AcceleratorTypeSpec{
+			GeneralGroup:     "generic",
+			AcceleratorGroup: "nvidia-a10g",
+			OS:               "linux",
+			Arch:             "amd64",
+		},
+	}
+	md := newRenderDeployment(func(md *workercore.ModelDeployment) {
+		md.Spec.Roles[0].Name = "server"
+		md.Spec.Roles[0].Replicas = 2
+		md.Spec.Roles[0].AcceleratorType = "custom-a10g"
+	})
+	pod0 := *readyReplica(md, 0, true)
+
+	cli := newModelDeploymentClient(md, at, &pod0)
+	r := &ModelDeploymentReconciler{Client: cli, APIReader: cli}
+	status, err := r.computeModelDeploymentStatusWithQualifications(
+		context.Background(), md, []core.Pod{pod0}, nil, nil, nil, nil,
+	)
+	require.NoError(t, err)
+
+	var quotaMsg string
+	for _, c := range status.Conditions {
+		if c.Type == string(ModelDeploymentConditionQuotaReserved) {
+			quotaMsg = c.Message
+			break
+		}
+	}
+	assert.Contains(t, quotaMsg, `cluster queue "gpustack--nvidia-a10g-linux-amd64"`,
+		"QuotaReserved condition must name the canonical pool ClusterQueue rather than the custom AcceleratorType name")
 }

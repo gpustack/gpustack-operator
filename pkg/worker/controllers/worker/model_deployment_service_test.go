@@ -15,6 +15,7 @@ import (
 	ctrlrecord "k8s.io/client-go/tools/record"
 	ctrlcli "sigs.k8s.io/controller-runtime/pkg/client"
 	kueuectrlconst "sigs.k8s.io/kueue/pkg/controller/constants"
+	kueuepodconst "sigs.k8s.io/kueue/pkg/controller/jobs/pod/constants"
 
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
 	"gpustack.ai/gpustack/pkg/kubemeta"
@@ -57,7 +58,7 @@ func serviceNames(t *testing.T, cli ctrlcli.Client) []string {
 // balancing and burn one node port per replica.
 func TestRenderModelDeploymentService_IsOneClusterIPForEveryReplica(t *testing.T) {
 	md := newRenderDeployment(func(md *workercore.ModelDeployment) { md.Spec.Roles[0].Replicas = 4 })
-	cli := newModelDeploymentClient(md, newRenderInstanceType())
+	cli := newModelDeploymentClient(md, newRenderAcceleratorType())
 
 	_, err := reconcileModelDeployment(t, cli)
 	require.NoError(t, err)
@@ -85,7 +86,7 @@ func TestRenderModelDeploymentService_IsOneClusterIPForEveryReplica(t *testing.T
 // exists yet; they are rendered now so the pairing spec finds them rather than having to change
 // this object's shape to get them.
 func TestModelDeploymentService_OnePerRoleBesideTheDeploymentWide(t *testing.T) {
-	cli := newModelDeploymentClient(twoRoleDeployment(), newRenderInstanceType())
+	cli := newModelDeploymentClient(twoRoleDeployment(), newRenderAcceleratorType())
 
 	_, err := reconcileModelDeployment(t, cli)
 	require.NoError(t, err)
@@ -138,26 +139,26 @@ func epdDeployment(
 
 	shapes := map[workercore.ModelDeploymentRoleKind]workercore.ModelDeploymentRole{
 		workercore.ModelDeploymentRoleKindEncode: {
-			Name:         "encode",
-			Kind:         workercore.ModelDeploymentRoleKindEncode,
-			InstanceType: "h20-8x",
-			Image:        "vllm/vllm-openai:v0.30.0",
+			Name:            "encode",
+			Kind:            workercore.ModelDeploymentRoleKindEncode,
+			AcceleratorType: "h20-8x",
+			Image:           "vllm/vllm-openai:v0.30.0",
 			Ports: []workercore.ModelDeploymentPort{
 				{Port: 9100, Protocol: core.ProtocolTCP},
 			},
 			ExtraArgs: []string{"--port", "9100", "--ssl-certfile", "/etc/tls/tls.crt"},
 		},
 		workercore.ModelDeploymentRoleKindPrefill: {
-			Name:         "prefill",
-			Kind:         workercore.ModelDeploymentRoleKindPrefill,
-			InstanceType: "h20-8x",
-			Image:        "vllm/vllm-openai:v0.30.0",
+			Name:            "prefill",
+			Kind:            workercore.ModelDeploymentRoleKindPrefill,
+			AcceleratorType: "h20-8x",
+			Image:           "vllm/vllm-openai:v0.30.0",
 		},
 		workercore.ModelDeploymentRoleKindDecode: {
-			Name:         "decode",
-			Kind:         workercore.ModelDeploymentRoleKindDecode,
-			InstanceType: "h20-8x",
-			Image:        "vllm/vllm-openai:v0.30.0",
+			Name:            "decode",
+			Kind:            workercore.ModelDeploymentRoleKindDecode,
+			AcceleratorType: "h20-8x",
+			Image:           "vllm/vllm-openai:v0.30.0",
 		},
 	}
 
@@ -351,7 +352,7 @@ func TestRenderModelDeploymentService_KVEventPorts(t *testing.T) {
 // decoder that was removed gets connection refused rather than NXDOMAIN and reads it as the decoder
 // being down.
 func TestModelDeploymentService_RemovingARoleRemovesItsService(t *testing.T) {
-	cli := newModelDeploymentClient(twoRoleDeployment(), newRenderInstanceType())
+	cli := newModelDeploymentClient(twoRoleDeployment(), newRenderAcceleratorType())
 
 	_, err := reconcileModelDeployment(t, cli)
 	require.NoError(t, err)
@@ -381,7 +382,7 @@ func TestModelDeploymentService_AReplicaServiceIsCreatedAndReclaimedWithItsRepli
 		md.Spec.Roles[0].ReplicaSize = 2
 		md.Spec.Roles[0].Replicas = 3
 	})
-	cli := newModelDeploymentClient(md, newRenderInstanceType())
+	cli := newModelDeploymentClient(md, newRenderAcceleratorType())
 
 	_, err := reconcileModelDeployment(t, cli)
 	require.NoError(t, err)
@@ -422,7 +423,7 @@ func TestModelDeploymentService_AReplicaServiceIsCreatedAndReclaimedWithItsRepli
 // client that resolved the name would be talking to an address nothing answers on -- for a change
 // that was only ever about how many replicas there are.
 func TestModelDeploymentService_SurvivesAScale(t *testing.T) {
-	cli := newModelDeploymentClient(twoRoleDeployment(), newRenderInstanceType())
+	cli := newModelDeploymentClient(twoRoleDeployment(), newRenderAcceleratorType())
 
 	_, err := reconcileModelDeployment(t, cli)
 	require.NoError(t, err)
@@ -457,7 +458,7 @@ func TestModelDeploymentService_SurvivesAScale(t *testing.T) {
 func TestRenderModelDeploymentService_SelectsExactlyTheRolesPods(t *testing.T) {
 	md := newRenderDeployment()
 	svc := renderModelDeploymentService(md, nil)
-	pod := renderOne(t, md, newRenderInstanceType())
+	pod := renderOne(t, md, newRenderAcceleratorType())
 	// The eligibility term is written at runtime by the reconciler, so a member the Service may
 	// select is one that carries it; the rendered template never does.
 	pod.Labels[modelDeploymentLabelKeyEndpointEligible] = modelDeploymentEndpointEligibleValue
@@ -595,7 +596,7 @@ func TestRenderModelDeploymentServices_AtSizeOneIsUnchanged(t *testing.T) {
 
 	// The endpoints still reach a rendered replica, which is what makes the absences above mean
 	// "unchanged" rather than "empty".
-	pod := renderOne(t, md, newRenderInstanceType())
+	pod := renderOne(t, md, newRenderAcceleratorType())
 	// A member a Service selects carries the eligibility label the reconciler writes at runtime;
 	// the template it renders with does not, which is why the term above is absent from selectors
 	// on the headless replica Services that reach every member regardless.
@@ -644,7 +645,7 @@ func TestRenderModelDeploymentService_Port(t *testing.T) {
 				assert.Equal(t, tc.wantName, svc.Spec.Ports[0].Name)
 			}
 
-			pod := renderOne(t, md, newRenderInstanceType())
+			pod := renderOne(t, md, newRenderAcceleratorType())
 			assert.Equal(t, svc.Spec.Ports[0].TargetPort.IntVal,
 				pod.Spec.Containers[0].Ports[0].ContainerPort,
 				"the Service must target the port the container actually opens")
@@ -753,7 +754,7 @@ func TestRenderModelDeploymentService_TargetFollowsTheEnginesPort(t *testing.T) 
 				}
 			})
 			in := ModelDeploymentRenderInput{
-				Deployment: md, Role: &md.Spec.Roles[0], InstanceType: newRenderInstanceType(),
+				Deployment: md, Role: &md.Spec.Roles[0], AcceleratorType: newRenderAcceleratorType(),
 				NativeSidecar: true,
 			}
 			if tc.directDecode {
@@ -1027,7 +1028,7 @@ func TestModelDeploymentReconciler_ScalingDoesNotRecreateTheService(t *testing.T
 	// being created.
 	md, router := retirementRouterFixture(md)
 	writes := new(modelDeploymentWrites)
-	cli := newCountingModelDeploymentClient(writes, md, newRenderInstanceType(), router)
+	cli := newCountingModelDeploymentClient(writes, md, newRenderAcceleratorType(), router)
 
 	_, err := reconcileModelDeploymentRetiring(t, cli)
 	require.NoError(t, err)
@@ -1133,7 +1134,7 @@ func TestModelDeploymentReconciler_RefusesAServiceItDoesNotOwn(t *testing.T) {
 	stray.Spec.Selector = map[string]string{"app": "something-else"}
 	stray.Spec.Ports = []core.ServicePort{{Name: "http", Port: 80}}
 
-	cli := newModelDeploymentClient(newRenderDeployment(), newRenderInstanceType(), stray)
+	cli := newModelDeploymentClient(newRenderDeployment(), newRenderAcceleratorType(), stray)
 
 	_, err := reconcileModelDeployment(t, cli)
 	require.Error(t, err)
@@ -1960,7 +1961,7 @@ func TestRenderModelDeploymentRoleService_AnUnsafeMemberWithdrawsItsWholeGroup(t
 					workercore.SchemeGroupVersionKind("ModelDeployment"))
 			}
 
-			cli := newModelDeploymentClient(md, newRenderInstanceType())
+			cli := newModelDeploymentClient(md, newRenderAcceleratorType())
 
 			// the first pass: every group is healthy, so the Services narrow onto the members
 			// this operator qualified.
@@ -2022,7 +2023,7 @@ func TestRenderModelDeploymentRoleService_ATakeOverKeepsTheNarrowedSelector(t *t
 	pods := stampHealthGroupTotals(md, members)
 	fetch := &healthPairFetch{prefillHosts: map[string]bool{healthPairHost("prefill", 0, 0): true}}
 
-	cli := newModelDeploymentClient(md, newRenderInstanceType())
+	cli := newModelDeploymentClient(md, newRenderAcceleratorType())
 
 	// the first pass: the pair is verified, so the healthy groups qualify and the Services
 	// narrow onto them.
@@ -2090,4 +2091,39 @@ func TestRenderModelDeploymentRoleService_ATakeOverKeepsTheNarrowedSelector(t *t
 	assert.Equal(t, []string{"prefill-0-0"},
 		serviceReached(services[md.Name], qualified),
 		"the deployment-wide Service keeps serving the front role alone")
+}
+
+func TestModelDeploymentService_CPUOnlyMultiMemberReplicaUsesReplicaSizeAnnotation(t *testing.T) {
+	md := newRenderDeployment(func(md *workercore.ModelDeployment) {
+		md.Spec.Roles[0].AcceleratorType = ""
+		md.Spec.Roles[0].ReplicaSize = 2
+		md.Spec.Roles[0].Replicas = 1
+	})
+	role := &md.Spec.Roles[0]
+
+	pod0, err := renderModelDeploymentPod(context.Background(), ModelDeploymentRenderInput{
+		Deployment: md, Role: role, Ordinal: 0, Member: 0,
+	})
+	require.NoError(t, err)
+	pod1, err := renderModelDeploymentPod(context.Background(), ModelDeploymentRenderInput{
+		Deployment: md, Role: role, Ordinal: 0, Member: 1,
+	})
+	require.NoError(t, err)
+	require.Empty(t, pod0.Annotations[kueuepodconst.GroupTotalCountAnnotation],
+		"unqueued CPU-only role carries no Kueue group-total annotation")
+	require.Equal(t, "2", pod0.Annotations[modelDeploymentReplicaSizeAnnotation])
+
+	pods := []core.Pod{*pod0, *pod1}
+	assert.Equal(t, map[int]bool{0: true}, modelDeploymentReplicaServiceOrdinals(pods, md, role),
+		"unqueued CPU-only multi-member replica renders its headless peer Service ordinal")
+	assert.True(t, modelDeploymentRoleHasMultiMemberReplica(pods, md, role),
+		"unqueued CPU-only multi-member Pods are recognized as multi-member standing")
+
+	// Editing ReplicaSize down to 1 while the multi-member CPU Pods are still standing must retain
+	// the leader-only selector on the front Service until those Pods exit.
+	md.Spec.Roles[0].ReplicaSize = 1
+	svc := renderModelDeploymentService(md, pods)
+	assert.Equal(t, strconv.Itoa(modelDeploymentLeaderMemberIndex),
+		svc.Spec.Selector[modelDeploymentMemberIndexLabel],
+		"leader-only selector is preserved while unqueued multi-member CPU Pods stand")
 }

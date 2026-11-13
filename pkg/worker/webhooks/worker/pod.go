@@ -2,6 +2,7 @@ package worker
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"slices"
 	"strconv"
@@ -14,14 +15,15 @@ import (
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/apimachinery/pkg/util/validation/field"
 	ctrlcli "sigs.k8s.io/controller-runtime/pkg/client"
+	ctrllog "sigs.k8s.io/controller-runtime/pkg/log"
 	ctrladmission "sigs.k8s.io/controller-runtime/pkg/webhook/admission"
 	kueuectrlconst "sigs.k8s.io/kueue/pkg/controller/constants"
 
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
 	"gpustack.ai/gpustack/pkg/nodefeature"
 	"gpustack.ai/gpustack/pkg/utils/ctrlclix"
+	"gpustack.ai/gpustack/pkg/utils/quantityx"
 	"gpustack.ai/gpustack/pkg/webhook"
-	workerctrl "gpustack.ai/gpustack/pkg/worker/controllers/worker"
 )
 
 // PodWebhook hooks core Pods routed to a GPUStack queue (selected by the
@@ -377,16 +379,16 @@ func (r *PodWebhook) pinSharedCardCount(ctx context.Context, pod *core.Pod) erro
 		return nil
 	}
 
-	it, err := r.frontingInstanceType(ctx, pod)
+	pool, err := r.frontingPool(ctx, pod)
 	if err != nil {
 		return err
 	}
-	if it.Spec.AcceleratorGroup == "" {
-		return fmt.Errorf("instance type %s names no accelerator group, so a shared request of %d cannot be pinned to nodes with that many cards",
-			it.Name, cards)
+	if pool.acceleratorGroup == "" {
+		return fmt.Errorf("%s %s names no accelerator group, so a shared request of %d cannot be pinned to nodes with that many cards",
+			pool.kind, pool.name, cards)
 	}
 	pin := core.NodeSelectorRequirement{
-		Key:      nodefeature.AcceleratableFeatureLabelPrefix + it.Spec.AcceleratorGroup + ".count",
+		Key:      nodefeature.AcceleratableFeatureLabelPrefix + pool.acceleratorGroup + ".count",
 		Operator: core.NodeSelectorOpGt,
 		Values:   []string{strconv.FormatInt(cards-1, 10)},
 	}
@@ -417,50 +419,187 @@ func (r *PodWebhook) pinSharedCardCount(ctx context.Context, pod *core.Pod) erro
 	return nil
 }
 
-// frontingInstanceType reverse-looks-up the operator-owned InstanceType that fronts the Pod's
-// LocalQueue by the queue-entrance label the Default webhook stamps with the LocalQueue name, so
-// the authoritative per-card VRAM and partition profile inventory are never taken from the
-// user-writable, namespaced LocalQueue. It falls back to a non-cached read when the controller
-// cache is not yet warm, and errors when no (or more than one) InstanceType matches.
-func (r *PodWebhook) frontingInstanceType(ctx context.Context, pod *core.Pod) (*workercore.InstanceType, error) {
+// poolDescriptor captures the observed hardware pool backing a Pod's LocalQueue, resolved from
+// an operator-owned AcceleratorType or InstanceType carrying the queue-entrance label.
+type poolDescriptor struct {
+	kind             string
+	name             string
+	acceleratorGroup string
+	detail           workercore.InstanceTypeDetail
+}
+
+func (p *poolDescriptor) cardVRAMMib() (int64, error) {
+	memStr := p.detail.Memory
+	if memStr == "" {
+		return 0, fmt.Errorf("%s %s has no per-card memory yet (detail not ready)", p.kind, p.name)
+	}
+	q, err := resource.ParseQuantity(memStr)
+	if err != nil {
+		return 0, fmt.Errorf("parse memory %q of %s %s: %w", memStr, p.kind, p.name, err)
+	}
+	mib := q.Value() / quantityx.Mi
+	if mib <= 0 {
+		return 0, fmt.Errorf("%s %s has non-positive memory %q", p.kind, p.name, memStr)
+	}
+	return mib, nil
+}
+
+func (p *poolDescriptor) partitionProfile(profile string) (workercore.AcceleratorSlicedPhysicalDetailProfile, bool, bool) {
+	ready := p.detail.AcceleratorReady()
+	for _, prof := range p.detail.SlicedDetail.Physical.Profiles {
+		if prof.Name == profile {
+			return prof, ready, true
+		}
+	}
+	return workercore.AcceleratorSlicedPhysicalDetailProfile{}, ready, false
+}
+
+func selectFrontingPoolDescriptor(
+	lqName string,
+	ats []workercore.AcceleratorType,
+	its []workercore.InstanceType,
+) (ready, first *poolDescriptor, err error) {
+	var group string
+	checkGroup := func(itemGroup string) error {
+		if itemGroup == "" {
+			return nil
+		}
+		if group == "" {
+			group = itemGroup
+			return nil
+		}
+		if group != itemGroup {
+			return fmt.Errorf("conflicting accelerator groups (%q vs %q) front local queue %s", group, itemGroup, lqName)
+		}
+		return nil
+	}
+
+	for i := range ats {
+		if err := checkGroup(ats[i].Spec.AcceleratorGroup); err != nil {
+			return nil, nil, err
+		}
+		desc := &poolDescriptor{
+			kind:             "accelerator type",
+			name:             ats[i].Name,
+			acceleratorGroup: ats[i].Spec.AcceleratorGroup,
+			detail:           ats[i].Status.Detail,
+		}
+		if first == nil {
+			first = desc
+		}
+		if ready == nil && (desc.detail.AcceleratorReady() || desc.detail.Memory != "") {
+			ready = desc
+		}
+	}
+	for i := range its {
+		if err := checkGroup(its[i].Spec.AcceleratorGroup); err != nil {
+			return nil, nil, err
+		}
+		desc := &poolDescriptor{
+			kind:             "instance type",
+			name:             its[i].Name,
+			acceleratorGroup: its[i].Spec.AcceleratorGroup,
+			detail:           its[i].Status.Detail,
+		}
+		if first == nil {
+			first = desc
+		}
+		if ready == nil && (desc.detail.AcceleratorReady() || desc.detail.Memory != "") {
+			ready = desc
+		}
+	}
+	if ready != nil && ready.acceleratorGroup == "" {
+		ready.acceleratorGroup = group
+	}
+	if first != nil && first.acceleratorGroup == "" {
+		first.acceleratorGroup = group
+	}
+	return ready, first, nil
+}
+
+// frontingPool reverse-looks-up the operator-owned AcceleratorType or InstanceType that fronts
+// the Pod's LocalQueue by the queue-entrance label the Default webhook stamps with the LocalQueue
+// name, so the authoritative per-card VRAM and partition profile inventory are never taken from
+// the user-writable, namespaced LocalQueue. Multiple fronting objects on the same shared pool
+// observe the same hardware pool and must agree on acceleratorGroup; it checks the informer cache
+// across both kinds first and falls back to an uncached APIReader read when no ready fronting
+// object is cached yet.
+func (r *PodWebhook) frontingPool(ctx context.Context, pod *core.Pod) (*poolDescriptor, error) {
 	lqName := pod.Labels[kueuectrlconst.QueueLabel]
 	if lqName == "" {
 		return nil, fmt.Errorf("pod has no %q label", kueuectrlconst.QueueLabel)
 	}
 
-	itList := new(workercore.InstanceTypeList)
 	sel := ctrlcli.MatchingLabels{QueueEntranceLabelKey: lqName}
-	err := r.Client.List(ctx, itList, sel)
-	if err != nil || len(itList.Items) == 0 {
-		// The controller cache may not be warm yet; fall back to a direct read.
-		if err = r.APIReader.List(ctx, itList, sel, ctrlclix.WithoutQuorum); err != nil {
-			return nil, fmt.Errorf("list instance types fronting local queue %s: %w", lqName, err)
+
+	var fallback *poolDescriptor
+	if r.Client != nil {
+		atList := new(workercore.AcceleratorTypeList)
+		atErr := r.Client.List(ctx, atList, sel, ctrlcli.UnsafeDisableDeepCopy)
+		if atErr != nil {
+			ctrllog.FromContext(ctx).Error(atErr, "list cached accelerator types fronting local queue", "localQueue", lqName)
+		}
+		itList := new(workercore.InstanceTypeList)
+		itErr := r.Client.List(ctx, itList, sel, ctrlcli.UnsafeDisableDeepCopy)
+		if itErr != nil {
+			ctrllog.FromContext(ctx).Error(itErr, "list cached instance types fronting local queue", "localQueue", lqName)
+		}
+		if atErr == nil && itErr == nil {
+			ready, first, err := selectFrontingPoolDescriptor(lqName, atList.Items, itList.Items)
+			if err != nil {
+				return nil, err
+			}
+			if ready != nil {
+				return ready, nil
+			}
+			fallback = first
+		} else if r.APIReader == nil {
+			return nil, errors.Join(atErr, itErr)
 		}
 	}
-	switch len(itList.Items) {
-	case 0:
-		return nil, fmt.Errorf("no instance type fronts local queue %s", lqName)
-	case 1:
-	default:
-		return nil, fmt.Errorf("more than one instance type fronts local queue %s", lqName)
+
+	if r.APIReader != nil {
+		atList := new(workercore.AcceleratorTypeList)
+		if err := r.APIReader.List(ctx, atList, sel, ctrlclix.WithoutQuorum); err != nil {
+			return nil, fmt.Errorf("list accelerator types fronting local queue %s: %w", lqName, err)
+		}
+		itList := new(workercore.InstanceTypeList)
+		if err := r.APIReader.List(ctx, itList, sel, ctrlclix.WithoutQuorum); err != nil {
+			return nil, fmt.Errorf("list instance types fronting local queue %s: %w", lqName, err)
+		}
+		ready, first, err := selectFrontingPoolDescriptor(lqName, atList.Items, itList.Items)
+		if err != nil {
+			return nil, err
+		}
+		if ready != nil {
+			return ready, nil
+		}
+		if first != nil {
+			fallback = first
+		}
 	}
-	return &itList.Items[0], nil
+
+	if fallback != nil {
+		return fallback, nil
+	}
+
+	return nil, fmt.Errorf("no accelerator type or instance type fronts local queue %s", lqName)
 }
 
-// cardVRAMMib reads the per-card VRAM (MiB) from the observed Status.Detail of the InstanceType
+// cardVRAMMib reads the per-card VRAM (MiB) from the observed Status.Detail of the pool
 // fronting the Pod's LocalQueue. It errors when the Detail's Memory is missing (detail not yet
 // computed) or unparseable, so an unfoldable memory-mib request is rejected rather than silently
 // mis-sized.
 func (r *PodWebhook) cardVRAMMib(ctx context.Context, pod *core.Pod) (int64, error) {
-	it, err := r.frontingInstanceType(ctx, pod)
+	pool, err := r.frontingPool(ctx, pod)
 	if err != nil {
 		return 0, err
 	}
-	return workerctrl.InstanceTypeCardVRAMMib(it)
+	return pool.cardVRAMMib()
 }
 
 // partitionContainerUnits validates a container's partition profile request against the fronting
-// InstanceType's observed inventory and returns the .partitioned.units it folds to. A
+// pool's observed inventory and returns the .partitioned.units it folds to. A
 // not-yet-computed Detail is a retryable rejection; a profile the pool does not offer, or a card
 // count above the pool's per-profile instance ceiling, is a permanent rejection.
 //
@@ -473,26 +612,26 @@ func (r *PodWebhook) cardVRAMMib(ctx context.Context, pod *core.Pod) (int64, err
 func (r *PodWebhook) partitionContainerUnits(
 	ctx context.Context, pod *core.Pod, ctr *core.Container, base core.ResourceName, profile string,
 ) (int64, error) {
-	it, err := r.frontingInstanceType(ctx, pod)
+	pool, err := r.frontingPool(ctx, pod)
 	if err != nil {
 		return 0, err
 	}
-	prof, ready, found := workerctrl.PartitionProfile(it, profile)
+	prof, ready, found := pool.partitionProfile(profile)
 	if !found {
 		if !ready {
-			return 0, fmt.Errorf("instance type %s is not ready yet (accelerator detail not computed); retry", it.Name)
+			return 0, fmt.Errorf("%s %s is not ready yet (accelerator detail not computed); retry", pool.kind, pool.name)
 		}
-		return 0, fmt.Errorf("container %q: partition profile %q is not offered by the target pool (instance type %s)",
-			ctr.Name, profile, it.Name)
+		return 0, fmt.Errorf("container %q: partition profile %q is not offered by the target pool (%s %s)",
+			ctr.Name, profile, pool.kind, pool.name)
 	}
 	// A profile can appear in the inventory before its per-instance MemoryMib is populated (partial
 	// detail during detection / rollout skew). Treat a missing memory as not-ready/retryable rather
 	// than folding to zero units and rejecting permanently.
 	if prof.MemoryMib <= 0 {
-		return 0, fmt.Errorf("instance type %s is not ready yet (partition profile %q has no memory detail); retry",
-			it.Name, profile)
+		return 0, fmt.Errorf("%s %s is not ready yet (partition profile %q has no memory detail); retry",
+			pool.kind, pool.name, profile)
 	}
-	cardVRAMMib, err := workerctrl.InstanceTypeCardVRAMMib(it)
+	cardVRAMMib, err := pool.cardVRAMMib()
 	if err != nil {
 		return 0, err
 	}

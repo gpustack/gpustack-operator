@@ -5,7 +5,7 @@ metadata:
     kueue.x-k8s.io/pod-group-serving: "true"
     kueue.x-k8s.io/pod-group-total-count: "1"
     kueue.x-k8s.io/role-hash: decode
-    modeldeployment.gpustack.ai/pod-spec-hash: deb87692254cfdf8dbdcc4510dcdeb3832a17bb1de3c93c3eaa7e8579cc21729
+    modeldeployment.gpustack.ai/pod-spec-hash: 4e12861b5366f1bfc47eafa1813c4e44934a2da2e47d9c9c1b2ff9017b985453
     modeldeployment.gpustack.ai/render-version: "5"
     note.gpustack.ai/role: decode
     prometheus.io/path: /metrics
@@ -139,15 +139,9 @@ spec:
       timeoutSeconds: 5
     resources:
       limits:
-        cpu: "16"
-        ephemeral-storage: 15Gi
         huawei.com/npu: "1"
-        memory: 64Gi
       requests:
-        cpu: 1600m
-        ephemeral-storage: 1920Mi
         huawei.com/npu: "1"
-        memory: 8Gi
     startupProbe:
       failureThreshold: 180
       httpGet:
@@ -214,7 +208,7 @@ metadata:
     kueue.x-k8s.io/pod-group-serving: "true"
     kueue.x-k8s.io/pod-group-total-count: "1"
     kueue.x-k8s.io/role-hash: encode
-    modeldeployment.gpustack.ai/pod-spec-hash: d02d592682135ed73a5761be844e68cd65131beb6cb9f8846f759d59495e540b
+    modeldeployment.gpustack.ai/pod-spec-hash: 4336aea60da8163fe029ea33cd217ff96cee34fd3a10f0bf92e846fab558f125
     modeldeployment.gpustack.ai/render-version: "5"
     note.gpustack.ai/role: encode
     prometheus.io/path: /metrics
@@ -351,15 +345,9 @@ spec:
       timeoutSeconds: 5
     resources:
       limits:
-        cpu: "16"
-        ephemeral-storage: 15Gi
         huawei.com/npu: "1"
-        memory: 64Gi
       requests:
-        cpu: 1600m
-        ephemeral-storage: 1920Mi
         huawei.com/npu: "1"
-        memory: 8Gi
     startupProbe:
       failureThreshold: 180
       httpGet:
@@ -400,7 +388,7 @@ metadata:
     kueue.x-k8s.io/pod-group-serving: "true"
     kueue.x-k8s.io/pod-group-total-count: "1"
     kueue.x-k8s.io/role-hash: prefill
-    modeldeployment.gpustack.ai/pod-spec-hash: 8a695915fc98fa56bdfebb62e658524a839c960b2adbea50a619fb278e569ecc
+    modeldeployment.gpustack.ai/pod-spec-hash: 6ae2659e49fc38b04755e82bd4b3e30f3768b7a4bddc1d2cba06a3e002ee6329
     modeldeployment.gpustack.ai/render-version: "5"
     note.gpustack.ai/role: prefill
     prometheus.io/path: /metrics
@@ -547,15 +535,9 @@ spec:
       timeoutSeconds: 5
     resources:
       limits:
-        cpu: "16"
-        ephemeral-storage: 15Gi
         huawei.com/npu: "1"
-        memory: 64Gi
       requests:
-        cpu: 1600m
-        ephemeral-storage: 1920Mi
         huawei.com/npu: "1"
-        memory: 8Gi
     startupProbe:
       failureThreshold: 180
       httpGet:

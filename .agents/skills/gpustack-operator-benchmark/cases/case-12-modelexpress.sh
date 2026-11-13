@@ -80,7 +80,7 @@ OUT="${1:-${REPO}/.claude/reports/$(date +%F)-benchmark/modelexpress}"
 DEPLOY="${MX_DEPLOY:-mx-bench}"
 MODEL="${MX_MODEL:-Qwen/Qwen3-235B-A22B-Instruct-2507-FP8}"
 ARTIFACT="${MX_ARTIFACT:-qwen3-235b-a22b-fp8}"
-INSTANCE_TYPE="${MX_INSTANCE_TYPE:?Set MX_INSTANCE_TYPE for the NVIDIA pool, for example nvidia-h100-80g}"
+INSTANCE_TYPE="${MX_ACCELERATOR_TYPE:-${MX_INSTANCE_TYPE:?Set MX_ACCELERATOR_TYPE or MX_INSTANCE_TYPE for the NVIDIA pool, for example nvidia-h100-80g}}"
 SOURCE_NODE="${MX_SOURCE_NODE:-}"
 TARGET_NODE="${MX_TARGET_NODE:-}"
 IMAGE="${MX_IMAGE:?Set MX_IMAGE to the pinned runner image carrying modelexpress==0.8.0}"
@@ -97,7 +97,7 @@ MX_SERVER_TIMEOUT="${MX_SERVER_TIMEOUT:-600}"
 CHAT_CHECKS=1
 case "${INSTANCE_TYPE}" in
   *nvidia*) ;;
-  *) echo "Case 12 is an NVIDIA/NIXL case: MX_INSTANCE_TYPE must name an NVIDIA pool" >&2; exit 1 ;;
+  *) echo "Case 12 is an NVIDIA/NIXL case: MX_ACCELERATOR_TYPE / MX_INSTANCE_TYPE must name an NVIDIA pool" >&2; exit 1 ;;
 esac
 if [ -z "${SOURCE_NODE}" ] || [ -z "${TARGET_NODE}" ] || [ "${SOURCE_NODE}" = "${TARGET_NODE}" ]; then
   echo "Set distinct MX_SOURCE_NODE and MX_TARGET_NODE for the two-node pool" >&2
@@ -224,7 +224,7 @@ spec:
       replicas: ${replicas}
       size: 1
       startupTimeoutSeconds: 1800
-      instanceType: ${INSTANCE_TYPE}
+      acceleratorType: ${INSTANCE_TYPE}
       image: ${IMAGE}
       imagePullPolicy: IfNotPresent
       resources:

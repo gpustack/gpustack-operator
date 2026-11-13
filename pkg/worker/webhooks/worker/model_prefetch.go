@@ -150,7 +150,7 @@ func (r *ModelPrefetchWebhook) validateModelPrefetch(ctx context.Context, pf *wo
 	if err := r.APIReader.List(ctx, deps, ctrlcli.InNamespace(pf.Namespace)); err != nil {
 		return field.ErrorList{field.InternalError(field.NewPath("spec", "placement"), err)}
 	}
-	pools, err := workerctrl.ResolveInstanceTypeFlavorNames(ctx, r.APIReader, pf, deps.Items)
+	pools, err := workerctrl.ResolveAcceleratorTypeFlavorNames(ctx, r.APIReader, pf, deps.Items)
 	if err != nil {
 		return field.ErrorList{field.InternalError(field.NewPath("spec", "placement"), err)}
 	}
@@ -316,22 +316,36 @@ func (r *ModelPrefetchWebhook) validateModelPrefetchBudget(
 // and — for a source intent only — no target set at all. The shared error is the controller's, so
 // admission and delivery name the same mistake the same way.
 func validateModelPrefetchPlacement(pf *workercore.ModelPrefetch) field.ErrorList {
+	var errs field.ErrorList
 	placement := pf.Spec.Placement
-	if placement != nil && len(placement.InstanceTypes) > 0 && placement.NodeSelector != nil {
-		return field.ErrorList{field.Invalid(field.NewPath("spec", "placement"), "",
-			workerctrl.ErrPrefetchPlacementAmbiguous.Error())}
+	if placement != nil && len(placement.AcceleratorTypes) > 0 && placement.NodeSelector != nil {
+		errs = append(errs, field.Invalid(field.NewPath("spec", "placement"), "",
+			workerctrl.ErrPrefetchPlacementAmbiguous.Error()))
 	}
 
 	if pf.Spec.Source != nil &&
-		(placement == nil || (len(placement.InstanceTypes) == 0 && placement.NodeSelector == nil)) {
-		return field.ErrorList{field.Invalid(field.NewPath("spec", "source"), "",
-			"source preparation fills a target set this prefetch does not name: a source is memory "+
-				"a node holds, so the derived-from-deployments default an ordinary prefetch keeps is not "+
-				"available to it — set placement.nodeSelector or placement.instanceTypes, or drop "+
-				"spec.source to warm wherever this namespace's deployments run")}
+		(placement == nil || (len(placement.AcceleratorTypes) == 0 && placement.NodeSelector == nil)) {
+		msg := "a source placement must name acceleratorTypes or a nodeSelector: " +
+			"an empty placement derives targets from this namespace's ModelDeployments, which is a consumer rule"
+		errs = append(errs, field.Invalid(field.NewPath("spec", "source"), "", msg))
 	}
 
-	return nil
+	if placement != nil && len(placement.AcceleratorTypes) > 0 {
+		fldPath := field.NewPath("spec", "placement", "acceleratorTypes")
+		seen := make(map[string]bool, len(placement.AcceleratorTypes))
+		for i, at := range placement.AcceleratorTypes {
+			switch {
+			case at == "":
+				errs = append(errs, field.Required(fldPath.Index(i), "an acceleratorType must not be empty"))
+			case seen[at]:
+				errs = append(errs, field.Duplicate(fldPath.Index(i), at))
+			default:
+				seen[at] = true
+			}
+		}
+	}
+
+	return errs
 }
 
 func nodeByName(nodes []core.Node, name string) *core.Node {

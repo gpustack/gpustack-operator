@@ -168,7 +168,7 @@ func (r *ModelDeploymentReconciler) renderModelDeploymentElasticPods(ctx context
 	return desired, nil
 }
 
-// renderModelDeploymentElasticHeadPod bypasses GPU and InstanceType admission for the auxiliary head.
+// renderModelDeploymentElasticHeadPod bypasses GPU and AcceleratorType admission for the auxiliary head.
 func renderModelDeploymentElasticHeadPod(
 	md *workercore.ModelDeployment, role *workercore.ModelDeploymentRole, main core.Container,
 ) *core.Pod {

@@ -47,6 +47,7 @@ CREATED=()
 # The Settings store and the helpers that read and write it.
 
 derived_its() { kubectl get instancetypes.worker.gpustack.ai -l "${DERIVED_LABEL}=true" -o jsonpath='{.items[*].metadata.name}' 2>/dev/null; }
+derived_ats() { kubectl get acceleratortypes.worker.gpustack.ai -l "${DERIVED_LABEL}=true" -o jsonpath='{.items[*].metadata.name}' 2>/dev/null; }
 note() { kubectl get resourceflavor "$1" -o jsonpath="{.metadata.annotations.note\.gpustack\.ai/$2}" 2>/dev/null; }
 bounce_worker() { kubectl -n "$NS" rollout restart deploy/gpustack-operator-worker >/dev/null 2>&1;
   kubectl -n "$NS" rollout status deploy/gpustack-operator-worker --timeout=180s >/dev/null 2>&1; }
@@ -76,6 +77,7 @@ kubectl -n "$NS" get secret gpustack-settings >/dev/null 2>&1 || { echo "[case-1
 settings_save "$AWARE_KEY"
 orig="$(setting_get "$AWARE_KEY")"
 before_json=$(kubectl get instancetypes.worker.gpustack.ai -o json) || exit 1
+before_at_json=$(kubectl get acceleratortypes.worker.gpustack.ai -o json) || exit 1
 before_type=$(printf '%s' "$before_json" | jq -c --arg name "$AWARE_IT" '.items[] | select(.metadata.name == $name)')
 for name in "$INST" "$MULTI_INST"; do
   existing=$(kubectl -n default get instance "$name" --ignore-not-found -o name) || exit 1
@@ -122,6 +124,13 @@ cleanup() {
     if ! printf '%s' "$before_json" | jq -e --arg name "$it" '.items | any(.metadata.name == $name)' >/dev/null; then
       kubectl delete instancetype "$it" --wait=false >/dev/null || failed=1
       kubectl wait --for=delete instancetype/"$it" --timeout=60s >/dev/null || failed=1
+    fi
+  done
+  current=$(derived_ats) || failed=1
+  for it in $current; do
+    if ! printf '%s' "$before_at_json" | jq -e --arg name "$it" '.items | any(.metadata.name == $name)' >/dev/null; then
+      kubectl delete acceleratortype "$it" --wait=false >/dev/null || failed=1
+      kubectl wait --for=delete acceleratortype/"$it" --timeout=60s >/dev/null || failed=1
     fi
   done
   return "$failed"

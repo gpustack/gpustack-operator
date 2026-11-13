@@ -10,6 +10,7 @@ import (
 	"github.com/stretchr/testify/require"
 	core "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
+	"k8s.io/utils/ptr"
 
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
 )
@@ -102,10 +103,10 @@ func renderWithArtifact(
 ) *core.Pod {
 	t.Helper()
 	pod, err := renderModelDeploymentPod(context.Background(), ModelDeploymentRenderInput{
-		Deployment:   md,
-		Role:         &md.Spec.Roles[0],
-		InstanceType: newRenderInstanceType(),
-		Artifact:     artifact,
+		Deployment:      md,
+		Role:            &md.Spec.Roles[0],
+		AcceleratorType: newRenderAcceleratorType(),
+		Artifact:        artifact,
 	})
 	require.NoError(t, err)
 
@@ -427,7 +428,12 @@ func TestRenderModelDeploymentArtifactEphemeralStorage(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			res := renderWithArtifact(t, newRenderDeployment(), c.artifact).Spec.Containers[0].Resources
+			md := newRenderDeployment(func(md *workercore.ModelDeployment) {
+				md.Spec.Roles[0].Resources = &workercore.ModelDeploymentRoleResources{
+					LocalStorage: ptr.To(resource.MustParse("15Gi")),
+				}
+			})
+			res := renderWithArtifact(t, md, c.artifact).Spec.Containers[0].Resources
 
 			limit := res.Limits[core.ResourceEphemeralStorage]
 			assert.Zero(t, limit.Cmp(resource.MustParse(c.wantLimit)), limit.String())
@@ -435,6 +441,11 @@ func TestRenderModelDeploymentArtifactEphemeralStorage(t *testing.T) {
 			assert.Zero(t, request.Cmp(resource.MustParse("15Gi")), "the request is unchanged: %s", request.String())
 		})
 	}
+	t.Run("unset localStorage stays omitted even with an engine download artifact", func(t *testing.T) {
+		res := renderWithArtifact(t, newRenderDeployment(), testEngineArtifactRender()).Spec.Containers[0].Resources
+		assert.NotContains(t, res.Limits, core.ResourceEphemeralStorage)
+		assert.NotContains(t, res.Requests, core.ResourceEphemeralStorage)
+	})
 }
 
 func TestRenderModelDeploymentArtifactNodeVolume(t *testing.T) {

@@ -813,3 +813,408 @@ func TestExtractNodeFlavors(t *testing.T) {
 		})
 	}
 }
+
+func TestCanonicalPoolQueueName(t *testing.T) {
+	cases := []struct {
+		name             string
+		acceleratable    bool
+		aware            bool
+		generalGroup     string
+		acceleratorGroup string
+		osName           string
+		arch             string
+		want             string
+	}{
+		{
+			name:             "accelerated aware with distinct cpu",
+			acceleratable:    true,
+			aware:            true,
+			generalGroup:     "amd-epyc-7763",
+			acceleratorGroup: "nvidia-tesla-t4",
+			osName:           "linux",
+			arch:             "amd64",
+			want:             "gpustack--amd-epyc-7763--nvidia-tesla-t4-linux-amd64",
+		},
+		{
+			name:             "accelerated aware with generic cpu",
+			acceleratable:    true,
+			aware:            true,
+			generalGroup:     GeneralGroupGeneric,
+			acceleratorGroup: "nvidia-tesla-t4",
+			osName:           "linux",
+			arch:             "amd64",
+			want:             "gpustack--nvidia-tesla-t4-linux-amd64",
+		},
+		{
+			name:             "accelerated aware with empty cpu",
+			acceleratable:    true,
+			aware:            true,
+			generalGroup:     "",
+			acceleratorGroup: "nvidia-tesla-t4",
+			osName:           "linux",
+			arch:             "amd64",
+			want:             "gpustack--nvidia-tesla-t4-linux-amd64",
+		},
+		{
+			name:             "accelerated unaware ignores distinct cpu",
+			acceleratable:    true,
+			aware:            false,
+			generalGroup:     "amd-epyc-7763",
+			acceleratorGroup: "nvidia-tesla-t4",
+			osName:           "linux",
+			arch:             "amd64",
+			want:             "gpustack--nvidia-tesla-t4-linux-amd64",
+		},
+		{
+			name:             "accelerated unaware with generic cpu",
+			acceleratable:    true,
+			aware:            false,
+			generalGroup:     GeneralGroupGeneric,
+			acceleratorGroup: "nvidia-tesla-t4",
+			osName:           "linux",
+			arch:             "amd64",
+			want:             "gpustack--nvidia-tesla-t4-linux-amd64",
+		},
+		{
+			name:             "cpu-only aware with distinct cpu",
+			acceleratable:    false,
+			aware:            true,
+			generalGroup:     "amd-epyc-7763",
+			acceleratorGroup: "",
+			osName:           "linux",
+			arch:             "amd64",
+			want:             "gpustack--amd-epyc-7763-linux-amd64",
+		},
+		{
+			name:             "cpu-only aware with generic cpu",
+			acceleratable:    false,
+			aware:            true,
+			generalGroup:     GeneralGroupGeneric,
+			acceleratorGroup: "",
+			osName:           "linux",
+			arch:             "amd64",
+			want:             "gpustack--generic-linux-amd64",
+		},
+		{
+			name:             "cpu-only aware with empty cpu",
+			acceleratable:    false,
+			aware:            true,
+			generalGroup:     "",
+			acceleratorGroup: "",
+			osName:           "linux",
+			arch:             "amd64",
+			want:             "gpustack--generic-linux-amd64",
+		},
+		{
+			name:             "cpu-only unaware collapses distinct cpu to generic",
+			acceleratable:    false,
+			aware:            false,
+			generalGroup:     "amd-epyc-7763",
+			acceleratorGroup: "",
+			osName:           "linux",
+			arch:             "amd64",
+			want:             "gpustack--generic-linux-amd64",
+		},
+		{
+			name:             "cpu-only unaware with generic cpu",
+			acceleratable:    false,
+			aware:            false,
+			generalGroup:     GeneralGroupGeneric,
+			acceleratorGroup: "",
+			osName:           "linux",
+			arch:             "amd64",
+			want:             "gpustack--generic-linux-amd64",
+		},
+		{
+			name:             "cpu-only unaware with empty cpu",
+			acceleratable:    false,
+			aware:            false,
+			generalGroup:     "",
+			acceleratorGroup: "",
+			osName:           "linux",
+			arch:             "amd64",
+			want:             "gpustack--generic-linux-amd64",
+		},
+	}
+
+	for _, cs := range cases {
+		t.Run(cs.name, func(t *testing.T) {
+			got := CanonicalPoolQueueName(cs.acceleratable, cs.aware, cs.generalGroup, cs.acceleratorGroup, cs.osName, cs.arch)
+			assert.Equal(t, cs.want, got)
+		})
+	}
+}
+
+func TestCanonicalPoolLocalQueueName(t *testing.T) {
+	cases := []struct {
+		name             string
+		acceleratable    bool
+		aware            bool
+		generalGroup     string
+		acceleratorGroup string
+		osName           string
+		arch             string
+		wantClusterQueue string
+	}{
+		{
+			name:             "accelerated aware",
+			acceleratable:    true,
+			aware:            true,
+			generalGroup:     "amd-epyc-7763",
+			acceleratorGroup: "nvidia-tesla-t4",
+			osName:           "linux",
+			arch:             "amd64",
+			wantClusterQueue: "gpustack--amd-epyc-7763--nvidia-tesla-t4-linux-amd64",
+		},
+		{
+			name:             "accelerated unaware",
+			acceleratable:    true,
+			aware:            false,
+			generalGroup:     "amd-epyc-7763",
+			acceleratorGroup: "nvidia-tesla-t4",
+			osName:           "linux",
+			arch:             "amd64",
+			wantClusterQueue: "gpustack--nvidia-tesla-t4-linux-amd64",
+		},
+		{
+			name:             "cpu-only aware",
+			acceleratable:    false,
+			aware:            true,
+			generalGroup:     "amd-epyc-7763",
+			acceleratorGroup: "",
+			osName:           "linux",
+			arch:             "amd64",
+			wantClusterQueue: "gpustack--amd-epyc-7763-linux-amd64",
+		},
+		{
+			name:             "cpu-only unaware",
+			acceleratable:    false,
+			aware:            false,
+			generalGroup:     "amd-epyc-7763",
+			acceleratorGroup: "",
+			osName:           "linux",
+			arch:             "amd64",
+			wantClusterQueue: "gpustack--generic-linux-amd64",
+		},
+	}
+
+	for _, cs := range cases {
+		t.Run(cs.name, func(t *testing.T) {
+			got := CanonicalPoolLocalQueueName(cs.acceleratable, cs.aware, cs.generalGroup, cs.acceleratorGroup, cs.osName, cs.arch)
+			expected := FormatLocalQueueName(cs.wantClusterQueue)
+			assert.Equal(t, expected, got)
+			assert.Len(t, got, 31)
+			assert.True(t, strings.HasPrefix(got, LocalQueueNamePrefix))
+		})
+	}
+}
+
+func TestNodeFlavor_DerivedInstanceTypeIdentity(t *testing.T) {
+	cases := []struct {
+		name                 string
+		flavor               NodeFlavor
+		aware                bool
+		wantName             string
+		wantGeneralGroup     string
+		wantAcceleratorGroup string
+	}{
+		{
+			name: "accelerated flavor aware",
+			flavor: NodeFlavor{
+				Acceleratable:  true,
+				GeneralKey:     "amd-epyc-7763",
+				AcceleratorKey: "nvidia-tesla-t4",
+				OS:             "linux",
+				Arch:           "amd64",
+			},
+			aware:                true,
+			wantName:             "gpustack--amd-epyc-7763--nvidia-tesla-t4-linux-amd64",
+			wantGeneralGroup:     "amd-epyc-7763",
+			wantAcceleratorGroup: "nvidia-tesla-t4",
+		},
+		{
+			name: "accelerated flavor unaware",
+			flavor: NodeFlavor{
+				Acceleratable:  true,
+				GeneralKey:     "amd-epyc-7763",
+				AcceleratorKey: "nvidia-tesla-t4",
+				OS:             "linux",
+				Arch:           "amd64",
+			},
+			aware:                false,
+			wantName:             "gpustack--nvidia-tesla-t4-linux-amd64",
+			wantGeneralGroup:     GeneralGroupGeneric,
+			wantAcceleratorGroup: "nvidia-tesla-t4",
+		},
+		{
+			name: "accelerated flavor aware with generic cpu",
+			flavor: NodeFlavor{
+				Acceleratable:  true,
+				GeneralKey:     GeneralGroupGeneric,
+				AcceleratorKey: "nvidia-tesla-t4",
+				OS:             "linux",
+				Arch:           "amd64",
+			},
+			aware:                true,
+			wantName:             "gpustack--nvidia-tesla-t4-linux-amd64",
+			wantGeneralGroup:     GeneralGroupGeneric,
+			wantAcceleratorGroup: "nvidia-tesla-t4",
+		},
+		{
+			name: "cpu-only flavor aware",
+			flavor: NodeFlavor{
+				Acceleratable:  false,
+				GeneralKey:     "amd-epyc-7763",
+				AcceleratorKey: "",
+				OS:             "linux",
+				Arch:           "amd64",
+			},
+			aware:                true,
+			wantName:             "gpustack--amd-epyc-7763-linux-amd64",
+			wantGeneralGroup:     "amd-epyc-7763",
+			wantAcceleratorGroup: "",
+		},
+		{
+			name: "cpu-only flavor unaware",
+			flavor: NodeFlavor{
+				Acceleratable:  false,
+				GeneralKey:     "amd-epyc-7763",
+				AcceleratorKey: "",
+				OS:             "linux",
+				Arch:           "amd64",
+			},
+			aware:                false,
+			wantName:             "gpustack--generic-linux-amd64",
+			wantGeneralGroup:     GeneralGroupGeneric,
+			wantAcceleratorGroup: "",
+		},
+		{
+			name: "cpu-only flavor aware with generic cpu",
+			flavor: NodeFlavor{
+				Acceleratable:  false,
+				GeneralKey:     GeneralGroupGeneric,
+				AcceleratorKey: "",
+				OS:             "linux",
+				Arch:           "amd64",
+			},
+			aware:                true,
+			wantName:             "gpustack--generic-linux-amd64",
+			wantGeneralGroup:     GeneralGroupGeneric,
+			wantAcceleratorGroup: "",
+		},
+	}
+
+	for _, cs := range cases {
+		t.Run(cs.name, func(t *testing.T) {
+			gotName, gotGeneralGroup, gotAcceleratorGroup := cs.flavor.DerivedInstanceTypeIdentity(cs.aware)
+			assert.Equal(t, cs.wantName, gotName)
+			assert.Equal(t, cs.wantGeneralGroup, gotGeneralGroup)
+			assert.Equal(t, cs.wantAcceleratorGroup, gotAcceleratorGroup)
+		})
+	}
+}
+
+func TestNodeFlavor_DerivedAcceleratorTypeIdentity(t *testing.T) {
+	cases := []struct {
+		name                 string
+		flavor               NodeFlavor
+		aware                bool
+		wantName             string
+		wantGeneralGroup     string
+		wantAcceleratorGroup string
+	}{
+		{
+			name: "non-accelerated flavor aware returns empty",
+			flavor: NodeFlavor{
+				Acceleratable:  false,
+				GeneralKey:     "amd-epyc-7763",
+				AcceleratorKey: "",
+				OS:             "linux",
+				Arch:           "amd64",
+			},
+			aware:                true,
+			wantName:             "",
+			wantGeneralGroup:     "",
+			wantAcceleratorGroup: "",
+		},
+		{
+			name: "non-accelerated flavor unaware returns empty",
+			flavor: NodeFlavor{
+				Acceleratable:  false,
+				GeneralKey:     "amd-epyc-7763",
+				AcceleratorKey: "",
+				OS:             "linux",
+				Arch:           "amd64",
+			},
+			aware:                false,
+			wantName:             "",
+			wantGeneralGroup:     "",
+			wantAcceleratorGroup: "",
+		},
+		{
+			name: "accelerated flavor with empty accelerator key returns empty",
+			flavor: NodeFlavor{
+				Acceleratable:  true,
+				GeneralKey:     "amd-epyc-7763",
+				AcceleratorKey: "",
+				OS:             "linux",
+				Arch:           "amd64",
+			},
+			aware:                true,
+			wantName:             "",
+			wantGeneralGroup:     "",
+			wantAcceleratorGroup: "",
+		},
+		{
+			name: "accelerated flavor aware",
+			flavor: NodeFlavor{
+				Acceleratable:  true,
+				GeneralKey:     "amd-epyc-7763",
+				AcceleratorKey: "nvidia-tesla-t4",
+				OS:             "linux",
+				Arch:           "amd64",
+			},
+			aware:                true,
+			wantName:             "gpustack--amd-epyc-7763--nvidia-tesla-t4-linux-amd64",
+			wantGeneralGroup:     "amd-epyc-7763",
+			wantAcceleratorGroup: "nvidia-tesla-t4",
+		},
+		{
+			name: "accelerated flavor unaware",
+			flavor: NodeFlavor{
+				Acceleratable:  true,
+				GeneralKey:     "amd-epyc-7763",
+				AcceleratorKey: "nvidia-tesla-t4",
+				OS:             "linux",
+				Arch:           "amd64",
+			},
+			aware:                false,
+			wantName:             "gpustack--nvidia-tesla-t4-linux-amd64",
+			wantGeneralGroup:     GeneralGroupGeneric,
+			wantAcceleratorGroup: "nvidia-tesla-t4",
+		},
+		{
+			name: "accelerated flavor aware with generic cpu",
+			flavor: NodeFlavor{
+				Acceleratable:  true,
+				GeneralKey:     GeneralGroupGeneric,
+				AcceleratorKey: "nvidia-tesla-t4",
+				OS:             "linux",
+				Arch:           "amd64",
+			},
+			aware:                true,
+			wantName:             "gpustack--nvidia-tesla-t4-linux-amd64",
+			wantGeneralGroup:     GeneralGroupGeneric,
+			wantAcceleratorGroup: "nvidia-tesla-t4",
+		},
+	}
+
+	for _, cs := range cases {
+		t.Run(cs.name, func(t *testing.T) {
+			gotName, gotGeneralGroup, gotAcceleratorGroup := cs.flavor.DerivedAcceleratorTypeIdentity(cs.aware)
+			assert.Equal(t, cs.wantName, gotName)
+			assert.Equal(t, cs.wantGeneralGroup, gotGeneralGroup)
+			assert.Equal(t, cs.wantAcceleratorGroup, gotAcceleratorGroup)
+		})
+	}
+}

@@ -134,7 +134,7 @@ func TestModelDeploymentEvents_ReadFromObservedStateNotADeleteHook(t *testing.T)
 	leaving.DeletionTimestamp = &now
 	leaving.Finalizers = []string{"test.gpustack.ai/hold"}
 
-	cli := newModelDeploymentClient(md, newRenderInstanceType(), leaving)
+	cli := newModelDeploymentClient(md, newRenderAcceleratorType(), leaving)
 	recorder := ctrlrecord.NewFakeRecorder(64)
 	r := &ModelDeploymentReconciler{Client: cli, APIReader: cli, Recorder: recorder}
 
@@ -157,7 +157,7 @@ func TestModelDeploymentEvents_ReadFromObservedStateNotADeleteHook(t *testing.T)
 // otherwise would train an operator to ignore it.
 func TestModelDeploymentEvents_NothingForASteadyDeployment(t *testing.T) {
 	md := newRenderDeployment()
-	cli := newModelDeploymentClient(md, newRenderInstanceType())
+	cli := newModelDeploymentClient(md, newRenderAcceleratorType())
 	recorder := ctrlrecord.NewFakeRecorder(64)
 	r := &ModelDeploymentReconciler{Client: cli, APIReader: cli, Recorder: recorder}
 
@@ -180,7 +180,7 @@ func TestModelDeploymentEvents_TheReconcilerLeavesReplicasObservableWhileTheyGo(
 	// the delete counter still observes exactly the one departing replica.
 	md, router := retirementRouterFixture(md)
 	writes := new(modelDeploymentWrites)
-	cli := newCountingModelDeploymentClient(writes, md, newRenderInstanceType(), router)
+	cli := newCountingModelDeploymentClient(writes, md, newRenderAcceleratorType(), router)
 
 	_, err := reconcileModelDeploymentRetiring(t, cli)
 	require.NoError(t, err)

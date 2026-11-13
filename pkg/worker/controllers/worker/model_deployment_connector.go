@@ -830,14 +830,14 @@ func SynthesizeModelDeploymentConnector(in ModelDeploymentConnectorInput) (Model
 		case inject.KVTransferBackendHIXL:
 			if in.Manufacturer != nodefeature.ManufacturerAscend {
 				return ModelDeploymentConnectorRender{}, fmt.Errorf(
-					"KVTransferBackend %q requires an Ascend InstanceType, got manufacturer %q",
+					"KVTransferBackend %q requires an Ascend AcceleratorType, got manufacturer %q",
 					in.KVTransferBackend, in.Manufacturer,
 				)
 			}
 		case inject.KVTransferBackendNIXL:
 			if in.Manufacturer == nodefeature.ManufacturerAscend {
 				return ModelDeploymentConnectorRender{}, fmt.Errorf(
-					"KVTransferBackend %q is not supported on an Ascend InstanceType",
+					"KVTransferBackend %q is not supported on an Ascend AcceleratorType",
 					in.KVTransferBackend,
 				)
 			}
@@ -893,6 +893,13 @@ func SynthesizeModelDeploymentConnector(in ModelDeploymentConnectorInput) (Model
 		efaFingerprint = in.KVTransferBackend == inject.KVTransferBackendNIXL && in.KVTransferEFA
 	}
 
+	// Disaggregated vLLM decode legs omit the shared-store connector (renderVLLM sets rendersStore=false),
+	// so pool domain and cache-prefix edits change nothing rendered on decode Pods and must not roll them.
+	domainFingerprint, cachePrefixFingerprint := in.Domain, in.CachePrefix
+	if (engine == inject.EngineVLLM || engine == inject.EngineVLLMAscend) && res.KVTransfer && role == inject.RoleDecode {
+		domainFingerprint, cachePrefixFingerprint = "", ""
+	}
+
 	return ModelDeploymentConnectorRender{
 		Args: res.Args,
 		Env:  res.Env,
@@ -912,9 +919,9 @@ func SynthesizeModelDeploymentConnector(in ModelDeploymentConnectorInput) (Model
 		// front, and deriving it from the transfer leg is exactly the inheritance this split ends.
 		RoutingSidecar: in.RoutingSidecar,
 		binding: &modelDeploymentConnectorBinding{
-			Domain:              in.Domain,
+			Domain:              domainFingerprint,
 			Dtype:               in.Dtype,
-			CachePrefix:         in.CachePrefix,
+			CachePrefix:         cachePrefixFingerprint,
 			MasterServerAddress: in.MasterServerAddress,
 			Protocol:            protocol,
 			KVTransfer:          res.KVTransfer,

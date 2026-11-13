@@ -9,7 +9,7 @@ pool capacity, while GPUStack checks whether individual accelerators can satisfy
 - [Ledger beneath the gates](#ledger-beneath-the-gates)
 - [Four-view status](#four-view-status)
 - [Capability versus availability](#capability-versus-availability)
-- [InstanceType, Instance webhooks](#instancetype-instance-webhooks)
+- [Type and Instance webhooks](#type-and-instance-webhooks)
 - [KV cache injection webhook](#kv-cache-injection-webhook)
 - [Update validation on deletion](#update-validation-on-deletion)
 - [Running-instance stop](#running-instance-stop)
@@ -36,7 +36,7 @@ A `pods` CREATE webhook (objectSelector `kueue.x-k8s.io/queue-name`, `failurePol
 input:
 
 - **logical slice** — `.sliced.memory-percentage` / `.sliced.memory-mib` into `.sliced.units`: the
-  memory demand over the pool `InstanceType`'s per-accelerator `Memory`;
+  memory demand over the pool's per-accelerator memory;
 - **hardware partition** — the profile's VRAM into `.partitioned.units` by that same VRAM-anchored fold,
   so a `3g.40gb` partition costs what a same-VRAM slice costs.
 
@@ -47,8 +47,8 @@ always recomputes the fold, since no trusted path sets it.
 It then validates the [request rules](requests.md#request-rules). Each rule includes
 an accepted and a rejected example.
 
-The divisor is the operator-owned **`InstanceType`**'s *`spec.memory`*, found via the
-`schedule.gpustack.ai/queue-entrance` label — **never** the user-writable `LocalQueue`. Its
+The divisor is the pool's per-card memory, resolved from an operator-owned `AcceleratorType` or
+`InstanceType` via the `schedule.gpustack.ai/queue-entrance` label. Its
 `MutatingWebhookConfiguration` sorts before `kueue-mutating-webhook-configuration`, so the fold precedes
 Kueue's resource hash.
 
@@ -138,7 +138,7 @@ shared request of `N >= 2` accelerators gets `shared-free-cards… Gt N-1`. `N` 
 any one container asks for.
 
 - It changes only a `Workload` whose `LocalQueue` points at a `ClusterQueue` carrying this operator's
-  `InstanceType` mark, with a same-named `InstanceType` naming an accelerator group, so other tenants'
+  `InstanceType` mark and an accelerator group resolved for the pool, so other tenants'
   `Workload`s in a shared Kueue are out of its reach.
 - It acts on an UPDATE only while the old `Workload` holds no quota reservation, which is when Kueue
   rebuilds a suspended job's spec and still lets PodSets change.
@@ -238,7 +238,7 @@ four-view and backs gate 3, but is not itself a gate.
 
 ## Four-view status
 
-`InstanceType.status` carries four per-accelerator bin-packing projections from the `Devices` ledger, not
+`AcceleratorType.status` and `InstanceType.status` carry four per-accelerator bin-packing projections from the `Devices` ledger, not
 a credits fold-down:
 
 | View | Column | Counts |
@@ -302,12 +302,16 @@ its catalog ceilings, as the node's per-profile capacity keys do.
 The `InstanceType` API proxies the controller-managed resource and converts it to the public
 representation.
 
-## InstanceType, Instance webhooks
+## Type and Instance webhooks
 
 The unit spec lives **only** on the `InstanceType`: a derived type is stamped with its [per-product
 preset](scheduling.md#unit-spec-defaults) at creation, and an admin
 edit touches only the `InstanceType`, never a `Node` or the `ClusterQueue` notes.
 
+- **`AcceleratorType` validating and defaulting** — requires *`acceleratorGroup`*, `os`, and `arch` on
+  create, freezes pool identity fields on update (allowing only *`displayName`*, *`description`*, and
+  `inactive` edits), defaults empty *`generalGroup`* to `generic`, and stamps the canonical pool schedule
+  labels plus `schedule.gpustack.ai/queue-entrance`.
 - **`InstanceType` validating, create** — requires the complete input, read independently of any editable
   setting: *`acceleratorGroup`* (only when `acceleratable`), `os`, `arch`, the unit triple
   (*`unitResources.cpu`*/`.ram` + *`localStorage`*); empty or partial is rejected. A CPU-only
@@ -323,7 +327,8 @@ edit touches only the `InstanceType`, never a `Node` or the `ClusterQueue` notes
   from a matching `ResourceFlavor`; and when awareness is on, that flavor's `cpuDetail` note folded into
   *`spec.cpu`* (generic) or *`spec.accelerator.cpu`* (accelerated).
 - **`Instance` validating** — enforces the unit spec on **Create and Update**: a submission's RAM must not
-  exceed `unitRAM × count`, its local storage not the `InstanceType`'s `LocalStorage`.
+  exceed `unitRAM × count`, its local storage not the `InstanceType`'s `LocalStorage`. Creating a new
+  `Instance` or starting a stopped `Instance` on an `InstanceType` with `spec.inactive: true` is refused.
   - Changing *`spec.type`*, *`spec.resources`* or any other template field requires an already stored
     `spec.stop: true`. Only *`spec.volume`* is immutable regardless of *`spec.stop`*.
     Stop the `Instance` before editing its configuration.

@@ -31,7 +31,7 @@ func placementDeploymentClient(t *testing.T, objs ...ctrlcli.Object) ctrlcli.Cli
 	md.Spec.Roles[0].ReplicaSize = 2
 
 	return newModelDeploymentClient(append([]ctrlcli.Object{
-		md, newRenderInstanceType(), artifactFixture("", true, true),
+		md, newRenderAcceleratorType(), artifactFixture("", true, true),
 		&storage.CSIDriver{ObjectMeta: meta.ObjectMeta{Name: modelstore.DriverName}},
 	}, objs...)...)
 }
@@ -129,7 +129,7 @@ func TestModelDeploymentPlacementPreferenceChangeRollsNothing(t *testing.T) {
 
 func TestModelDeploymentPlacementPreferenceNotForAClaim(t *testing.T) {
 	cli := newModelDeploymentClient(append(hotNode("n1"),
-		artifactDeploymentFixture(1), newRenderInstanceType(), artifactFixture("models", true, true),
+		artifactDeploymentFixture(1), newRenderAcceleratorType(), artifactFixture("models", true, true),
 		claimFixture(core.ClaimBound, "local", core.ReadWriteOnce), volumeFixture("node-1"),
 	)...)
 
@@ -164,7 +164,7 @@ func TestModelDeploymentPlacementPreferenceNoRenderAsksForAPreferredLevel(t *tes
 			role := &md.Spec.Roles[0]
 			for member := range modelDeploymentRoleSize(role) {
 				pod, err := renderModelDeploymentPod(context.Background(), ModelDeploymentRenderInput{
-					Deployment: md, Role: role, InstanceType: newRenderInstanceType(), Member: member,
+					Deployment: md, Role: role, AcceleratorType: newRenderAcceleratorType(), Member: member,
 				})
 				require.NoError(t, err)
 				assert.NotContains(t, pod.Annotations, kueue.PodSetPreferredTopologyAnnotation)
@@ -188,7 +188,7 @@ func TestModelDeploymentPlacementPreferenceReadOnlyWhenCreating(t *testing.T) {
 		WithScheme(scheme.Scheme).
 		WithStatusSubresource(&workercore.ModelDeployment{}, &workercore.KVCachePoolBinding{}).
 		WithObjects(append([]ctrlcli.Object{
-			md, newRenderInstanceType(), artifactFixture("", true, true),
+			md, newRenderAcceleratorType(), artifactFixture("", true, true),
 			&storage.CSIDriver{ObjectMeta: meta.ObjectMeta{Name: modelstore.DriverName}},
 		}, hotNode("n1")...)...).
 		WithInterceptorFuncs(ctrlinterceptor.Funcs{

@@ -12,6 +12,7 @@ import (
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	ctrlrecord "k8s.io/client-go/tools/record"
+	"k8s.io/utils/ptr"
 	kueue "sigs.k8s.io/kueue/apis/kueue/v1beta2"
 	kueuectrlconst "sigs.k8s.io/kueue/pkg/controller/constants"
 
@@ -203,7 +204,12 @@ func TestReplacementAdmission_ARequestOnlyPodIsReservedAsKubernetesReadsIt(t *te
 // makes: the Workload holds the pre-admission template, the live Pod carries what the admission
 // chain added and consumed.
 func TestReplacementAdmission_AnAdmittedPlacementIsNotAStaleReservation(t *testing.T) {
-	md := newRenderDeployment(func(md *workercore.ModelDeployment) { md.Spec.Roles[0].ReplicaSize = 2 })
+	md := newRenderDeployment(func(md *workercore.ModelDeployment) {
+		md.Spec.Roles[0].ReplicaSize = 2
+		md.Spec.Roles[0].Resources = &workercore.ModelDeploymentRoleResources{
+			Accelerator: ptr.To(resource.MustParse("1")),
+		}
+	})
 	members := replicaMembersAt(t, md, "server", 0)
 	require.Len(t, members, 2)
 
@@ -257,6 +263,9 @@ func TestReplacementAdmission_AnAdmittedPlacementIsNotAStaleReservation(t *testi
 		"while a rendered field the live Pods do not carry is still refused")
 
 	shortened := wl.DeepCopy()
+	if shortened.Spec.PodSets[0].Template.Spec.Containers[0].Resources.Requests == nil {
+		shortened.Spec.PodSets[0].Template.Spec.Containers[0].Resources.Requests = core.ResourceList{}
+	}
 	shortened.Spec.PodSets[0].Template.Spec.Containers[0].Resources.Requests["nvidia.com/gpu"] = resource.MustParse("2")
 	assert.Contains(t, replacementAdmissionHolds(shortened, placed, placed), "reserves",
 		"and a Workload reserving a different amount is still refused")
@@ -367,7 +376,7 @@ func replicaMembersAt(
 ) []*core.Pod {
 	t.Helper()
 
-	cli := newModelDeploymentClient(md, newRenderInstanceType())
+	cli := newModelDeploymentClient(md, newRenderAcceleratorType())
 	for pass := 0; pass < 4; pass++ {
 		_, err := reconcileModelDeploymentWith(t, &ModelDeploymentReconciler{
 			Client: cli, APIReader: cli, Recorder: ctrlrecord.NewFakeRecorder(64),
@@ -477,7 +486,7 @@ func TestReplacementRenderVersion_PartialGroupAndSlotCurrency(t *testing.T) {
 
 	t.Run("partial group is fillable only when standing member carries the current render version", func(t *testing.T) {
 		standingCurrent := want[0].DeepCopy()
-		cli := newModelDeploymentClient(md.DeepCopy(), newRenderInstanceType(), standingCurrent)
+		cli := newModelDeploymentClient(md.DeepCopy(), newRenderAcceleratorType(), standingCurrent)
 		r := &ModelDeploymentReconciler{Client: cli, APIReader: cli}
 		slot := modelDeploymentReplacementSlot{Role: "server", Ordinal: 0}
 
@@ -489,7 +498,7 @@ func TestReplacementRenderVersion_PartialGroupAndSlotCurrency(t *testing.T) {
 
 		standingOlder := want[0].DeepCopy()
 		standingOlder.Annotations[modelDeploymentRenderVersionAnnotation] = "99"
-		cliOlder := newModelDeploymentClient(md.DeepCopy(), newRenderInstanceType(), standingOlder)
+		cliOlder := newModelDeploymentClient(md.DeepCopy(), newRenderAcceleratorType(), standingOlder)
 		rOlder := &ModelDeploymentReconciler{Client: cliOlder, APIReader: cliOlder}
 
 		missing, fillable, err = rOlder.modelDeploymentPartialGroupMembers(ctx, md, slot, want)
@@ -523,7 +532,7 @@ func TestReplacementRenderVersion_PartialGroupAndSlotCurrency(t *testing.T) {
 			MemberHashes:      replacementRenderHashes(want),
 			CurrentMemberUIDs: []types.UID{m0.UID, m1.UID},
 		}
-		cli := newModelDeploymentClient(md.DeepCopy(), newRenderInstanceType(), m0, m1)
+		cli := newModelDeploymentClient(md.DeepCopy(), newRenderAcceleratorType(), m0, m1)
 		r := &ModelDeploymentReconciler{Client: cli, APIReader: cli}
 
 		progress, err := r.resolveReplacementSlot(ctx, getModelDeployment(t, cli), slot, &md.Spec.Roles[0], want)
@@ -553,7 +562,7 @@ func TestReplacementRenderVersion_PartialGroupAndSlotCurrency(t *testing.T) {
 			MemberHashes:      replacementRenderHashes(want),
 			CurrentMemberUIDs: []types.UID{outOfRange.UID},
 		}
-		cli := newModelDeploymentClient(md.DeepCopy(), newRenderInstanceType(), outOfRange)
+		cli := newModelDeploymentClient(md.DeepCopy(), newRenderAcceleratorType(), outOfRange)
 		r := &ModelDeploymentReconciler{Client: cli, APIReader: cli}
 
 		progress, err := r.resolveReplacementSlot(ctx, getModelDeployment(t, cli), slot, &md.Spec.Roles[0], want)

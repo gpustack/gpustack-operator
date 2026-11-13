@@ -368,7 +368,7 @@ by its own identity, without overwriting another role's effective values.
 
 `Catalog` requires a verifiable target identity and a single-serving-`Pod` replica shape before deriving capacity. The
 controller infers the model and hardware identity from the target itself — *`spec.model`* (the `ModelArtifact` repository from *`spec.model.artifactRef`*, or *`spec.model.name`*)
-and the role's `InstanceType` — so the identity annotations below are optional and resolve through [identity normalization](#identity-normalization):
+and the role's `AcceleratorType` — so the identity annotations below are optional and resolve through [identity normalization](#identity-normalization):
 
 | Annotation | Accepted values |
 |---|---|
@@ -380,7 +380,7 @@ and the role's `InstanceType` — so the identity annotations below are optional
 
 Model name and weight revision must match *`spec.model`* (or the resolved Hugging Face or ModelScope
 `ModelArtifact` repository and *`status.resolved.revision`*) and any `--revision`, `--quantization`,
-`--tokenizer`, `--tokenizer-path` or `--tokenizer-revision` flags. The role's `InstanceType` must be
+`--tokenizer`, `--tokenizer-path` or `--tokenizer-revision` flags. The role's `AcceleratorType` must be
 acceleratable and match the declared product and `memoryGB` (`Gi` by semantic `Quantity` equality).
 
 The effective engine image (*`role.image`* or *`spec.engine.image`*) matches the profile by engine
@@ -471,7 +471,7 @@ Product strings tokenize on `-`, `_` and `.`, leading vendor and marketing token
 
 At runtime the same yardstick applies: the `worker.gpustack.ai/model-id` and
 `worker.gpustack.ai/hardware-id` annotations accept the natural names above and are inferred from
-*`spec.model`*, the engine flags and the role's `InstanceType` when omitted. See
+*`spec.model`*, the engine flags and the role's `AcceleratorType` when omitted. See
 [Target eligibility](#target-eligibility) for the full resolution order.
 
 ### Prior lifecycle
@@ -621,7 +621,7 @@ spec:
 *`priority[]`* only affects `Priority`. A receiver may take from roles after it in the list,
 starting with the next listed role. Unlisted roles neither donate nor receive through this policy;
 they retain their ordinary recommendations. The donor and receiver must use the same nonempty
-*`instanceType`*, and the donor must remain above its minimum before donation.
+*`acceleratorType`*, and the donor must remain above its minimum before donation.
 
 The `Opposing` policy follows the [Dynamo Budget
 Guard](https://github.com/ai-dynamo/dynamo/blob/4f42be7bebd96ea0199088840549397809f80a92/components/src/dynamo/planner/core/budget.py), which moves both legs of an opposing

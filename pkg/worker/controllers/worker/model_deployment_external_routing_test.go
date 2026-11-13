@@ -49,7 +49,7 @@ func TestExternalDPRoutingSelectsQualifiedMembers(t *testing.T) {
 					service := labels.SelectorFromSet(renderModelDeploymentRoleService(md, role, nil, nil, false).Spec.Selector)
 					for member := range 2 {
 						pod, renderErr := renderModelDeploymentPodTemplate(context.Background(), ModelDeploymentRenderInput{
-							Deployment: md, Role: role, InstanceType: newRenderInstanceType(),
+							Deployment: md, Role: role, AcceleratorType: newRenderAcceleratorType(),
 						})
 						require.NoError(t, renderErr)
 						stampModelDeploymentPod(pod, md, role, 0, member)
@@ -145,7 +145,7 @@ func TestPDRoutingKeepsReplicaLeaders(t *testing.T) {
 					}
 					for ordinal := range 2 {
 						for member := range sizes[i] {
-							pod, err := renderModelDeploymentPodTemplate(context.Background(), ModelDeploymentRenderInput{Deployment: md, Role: role, InstanceType: newRenderInstanceType()})
+							pod, err := renderModelDeploymentPodTemplate(context.Background(), ModelDeploymentRenderInput{Deployment: md, Role: role, AcceleratorType: newRenderAcceleratorType()})
 							require.NoError(t, err)
 							stampModelDeploymentPod(pod, md, role, ordinal, member)
 							if member == 0 {
@@ -177,7 +177,7 @@ func TestExternalDPServiceEligibilityRetention(t *testing.T) {
 	role := &md.Spec.Roles[0]
 	role.ReplicaSize = 2
 	role.ExtraArgs = []string{"--data-parallel-rank", "$(GPUSTACK_MEMBER_INDEX)"}
-	cli := newModelDeploymentClient(md, newRenderInstanceType())
+	cli := newModelDeploymentClient(md, newRenderAcceleratorType())
 	reconciler := &ModelDeploymentReconciler{Client: cli, APIReader: cli, Recorder: ctrlrecord.NewFakeRecorder(16)}
 	for _, status := range []meta.ConditionStatus{meta.ConditionTrue, meta.ConditionFalse, meta.ConditionUnknown} {
 		md.Status.Conditions = []gpustackcore.Condition{{Type: string(ModelDeploymentConditionEndpointEligibility), Status: status}}

@@ -151,6 +151,10 @@ func validateModelDeploymentElasticShape(
 		}
 		rolePath := rolesPath.Index(i)
 
+		if role.AcceleratorType == "" {
+			errs = append(errs, field.Required(rolePath.Child("acceleratorType"), "the elastic-EP profile requires an acceleratorType"))
+		}
+
 		if role.ElasticEP.Width < elasticprofile.WidthMin || role.ElasticEP.Width > elasticprofile.WidthMax {
 			errs = append(errs, field.Invalid(
 				rolePath.Child("elasticEp", "width"), role.ElasticEP.Width,
@@ -325,10 +329,10 @@ func validateModelDeploymentElasticIdentity(
 	// The profile pins what the ordinary contract lets move: an elastic role's member shape is
 	// fixed at creation, and width is the only running-state field. ReplicaSize stays at one and
 	// a command stays forbidden through the shape rules.
-	if newElastic.InstanceType != oldElastic.InstanceType {
+	if newElastic.AcceleratorType != oldElastic.AcceleratorType {
 		errs = append(errs, field.Invalid(
-			modelDeploymentElasticRolePath(md, newElastic).Child("instanceType"),
-			newElastic.InstanceType,
+			modelDeploymentElasticRolePath(md, newElastic).Child("acceleratorType"),
+			newElastic.AcceleratorType,
 			"the elastic-EP profile pins the pool the members were admitted against: "+modelDeploymentIdentityMessage,
 		))
 	}

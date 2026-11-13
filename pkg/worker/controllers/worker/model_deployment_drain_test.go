@@ -37,7 +37,7 @@ func TestRenderModelDeploymentPod_DrainsBeforeTheEngineStops(t *testing.T) {
 			})
 
 			return ModelDeploymentRenderInput{
-				Deployment: md, Role: &md.Spec.Roles[0], InstanceType: newRenderInstanceType(),
+				Deployment: md, Role: &md.Spec.Roles[0], AcceleratorType: newRenderAcceleratorType(),
 				Connector: ModelDeploymentConnectorRender{
 					Args: []string{"--kv-transfer-config", `{}`}, KVTransfer: true, RoutingSidecar: true,
 				},
@@ -50,7 +50,7 @@ func TestRenderModelDeploymentPod_DrainsBeforeTheEngineStops(t *testing.T) {
 			md := newRenderDeployment(mutate...)
 
 			return ModelDeploymentRenderInput{
-				Deployment: md, Role: &md.Spec.Roles[roleIndex], InstanceType: newRenderInstanceType(),
+				Deployment: md, Role: &md.Spec.Roles[roleIndex], AcceleratorType: newRenderAcceleratorType(),
 			}
 		}
 	}
@@ -210,7 +210,7 @@ func TestRenderModelDeploymentPod_GraceIsTheRoles(t *testing.T) {
 				md.Spec.Roles[0].Command = tc.command
 				md.Spec.Roles[0].TerminationGracePeriodSeconds = tc.grace
 			})
-			pod := renderOne(t, md, newRenderInstanceType())
+			pod := renderOne(t, md, newRenderAcceleratorType())
 
 			assert.Equal(t, tc.wantGrace, pod.Spec.TerminationGracePeriodSeconds)
 			require.Len(t, pod.Spec.Containers, 1)
@@ -232,10 +232,10 @@ func TestRenderModelDeploymentPod_GraceIsTheRoles(t *testing.T) {
 // default grace onto a role that had none changes nothing it renders, so the edit replaces no
 // replica.
 func TestRenderModelDeploymentPod_TheDefaultWrittenOutRendersTheSamePod(t *testing.T) {
-	unset := renderOne(t, newRenderDeployment(), newRenderInstanceType())
+	unset := renderOne(t, newRenderDeployment(), newRenderAcceleratorType())
 	written := renderOne(t, newRenderDeployment(func(md *workercore.ModelDeployment) {
 		md.Spec.Roles[0].TerminationGracePeriodSeconds = ptr.To[int64](30)
-	}), newRenderInstanceType())
+	}), newRenderAcceleratorType())
 
 	assert.Equal(t, unset.Annotations[modelDeploymentPodSpecHashAnnotation],
 		written.Annotations[modelDeploymentPodSpecHashAnnotation])

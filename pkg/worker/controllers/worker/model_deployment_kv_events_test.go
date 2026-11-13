@@ -108,10 +108,10 @@ func TestObserveModelDeploymentKVEventsPublishing(t *testing.T) {
 			name: "an_unrouted_encoder_is_not_a_reason_to_need_a_router",
 			deployment: newRenderDeployment(func(md *workercore.ModelDeployment) {
 				md.Spec.Roles = []workercore.ModelDeploymentRole{{
-					Name:         "encode",
-					Kind:         workercore.ModelDeploymentRoleKindEncode,
-					InstanceType: "h20-8x",
-					Image:        "vllm/vllm-openai:v0.30.0",
+					Name:            "encode",
+					Kind:            workercore.ModelDeploymentRoleKindEncode,
+					AcceleratorType: "h20-8x",
+					Image:           "vllm/vllm-openai:v0.30.0",
 				}}
 			}),
 			status: meta.ConditionTrue, reason: modelDeploymentReasonKVEventsNotApplicable,

@@ -852,11 +852,19 @@ YAML
   fi
 fi
 
+authored_cq() {
+  cq_of_instancetype "$NS" "$AUTHORED"
+}
+
 queue_filled() {
-  [ -n "$(kubectl get clusterqueue "$AUTHORED" -o jsonpath='{.spec.resourceGroups[*].flavors[*].name}' 2>/dev/null)" ]
+  local cq
+  cq="$(authored_cq)"
+  [ -n "$(kubectl get clusterqueue "$cq" -o jsonpath='{.spec.resourceGroups[*].flavors[*].name}' 2>/dev/null)" ]
 }
 queue_references_joint() {
-  kubectl get clusterqueue "$AUTHORED" \
+  local cq
+  cq="$(authored_cq)"
+  kubectl get clusterqueue "$cq" \
     -o jsonpath='{range .spec.admissionChecksStrategy.admissionChecks[*]}{.name}{"\n"}{end}' 2>/dev/null \
     | grep -qxF "$JOINT"
 }
@@ -868,11 +876,13 @@ entrance_ready() {
 
 if [ "$AUTHORED_STATE" = go ]; then
   if ! wait_for "$SETTLE" queue_filled; then
+    cq="$(authored_cq)"
     record FAIL "the authored type's queue is filled" \
-      "ClusterQueue ${AUTHORED} carries no flavor after ${SETTLE}s, so nothing below can reserve quota"
+      "ClusterQueue ${cq} carries no flavor after ${SETTLE}s, so nothing below can reserve quota"
     AUTHORED_STATE=stop
   else
-    record PASS "the authored type's queue is filled" "$(kubectl get clusterqueue "$AUTHORED" \
+    cq="$(authored_cq)"
+    record PASS "the authored type's queue is filled" "$(kubectl get clusterqueue "$cq" \
       -o jsonpath='{.spec.resourceGroups[*].flavors[*].name}' 2>/dev/null)"
   fi
 fi
@@ -881,11 +891,12 @@ if [ "$AUTHORED_STATE" = go ]; then
   # THE QUEUE ROW IS WHAT DISCRIMINATES THIS MODE. A queue filled while the setting is off carried no
   # AdmissionCheck at all before this change, and the check is referenced only once it is Active --
   # which the precondition above established -- so a missing reference here is the operator's.
+  cq="$(authored_cq)"
   if wait_for 30 queue_references_joint; then
     record PASS "the authored type's queue references the joint check" "setting off, ${JOINT} referenced"
   else
     record FAIL "the authored type's queue references the joint check" \
-      "references [$(kubectl get clusterqueue "$AUTHORED" \
+      "references [$(kubectl get clusterqueue "$cq" \
         -o jsonpath='{.spec.admissionChecksStrategy.admissionChecks[*].name}' 2>/dev/null)] with the setting off"
   fi
 
@@ -906,7 +917,7 @@ if [ "$AUTHORED_STATE" = go ]; then
   echo
   echo "== the same shortage on ${AUTHORED} =="
   ROWS_BEFORE="${#ROWS[@]}"
-  run_shortage_suite "$AUTHORED" "$AUTHORED" case50a
+  run_shortage_suite "$AUTHORED" "$(authored_cq)" case50a
   finish_shortage_suite case50a
 
   SUITE_FAILS=0

@@ -47,7 +47,7 @@ func (c *Config) candidateSnapshot() ([]core.Node, []workercore.ModelPrefetch, b
 // snapshot prefetch could still name this node, so a candidate the cached
 // placement provably excludes is never read live. A placement without a
 // source target set, an ambiguous one, and an unparsable nodeSelector
-// nominate nothing. An InstanceType-only placement cannot be excluded
+// nominate nothing. An AcceleratorType-only placement cannot be excluded
 // without the pool resolution, so it stays a candidate and its placement is
 // resolved live. A stale negative waits for its watch event rather than
 // forcing a read; a nomination is never itself a positive — the live pass
@@ -56,9 +56,9 @@ func (c *Config) candidateSnapshot() ([]core.Node, []workercore.ModelPrefetch, b
 func placementCouldTarget(pf *workercore.ModelPrefetch, node *core.Node) bool {
 	placement := pf.Spec.Placement
 	switch {
-	case placement == nil || (len(placement.InstanceTypes) == 0 && placement.NodeSelector == nil):
+	case placement == nil || (len(placement.AcceleratorTypes) == 0 && placement.NodeSelector == nil):
 		return false
-	case len(placement.InstanceTypes) > 0 && placement.NodeSelector != nil:
+	case len(placement.AcceleratorTypes) > 0 && placement.NodeSelector != nil:
 		return false
 	case placement.NodeSelector != nil:
 		selector, err := meta.LabelSelectorAsSelector(placement.NodeSelector)
@@ -169,8 +169,8 @@ func (s *kubernetesIntentSource) ListIntents(ctx context.Context) (_ []broker.In
 			}
 			pf = live
 		}
-		var pools modelstore.InstanceTypeFlavorNames
-		if pf.Spec.Placement != nil && len(pf.Spec.Placement.InstanceTypes) > 0 {
+		var pools modelstore.AcceleratorTypeFlavorNames
+		if pf.Spec.Placement != nil && len(pf.Spec.Placement.AcceleratorTypes) > 0 {
 			if cpuAware == nil {
 				setting, err := c.Client.GpustackV1().Settings(c.WorkerNamespace).Get(ctx, settings.InstanceTypeAwareCPUManufacturer.Name(), meta.GetOptions{})
 				if err != nil {
@@ -183,7 +183,7 @@ func (s *kubernetesIntentSource) ListIntents(ctx context.Context) (_ []broker.In
 				cpuAware = &value
 			}
 			var err error
-			pools, err = modelstore.ResolvePlacementInstanceTypeFlavorNames(ctx, s.client, pf.Spec.Placement.InstanceTypes, *cpuAware)
+			pools, err = modelstore.ResolvePlacementAcceleratorTypeFlavorNames(ctx, s.client, pf.Spec.Placement.AcceleratorTypes, *cpuAware)
 			if err != nil {
 				return nil, fmt.Errorf("resolve placement: %w", err)
 			}

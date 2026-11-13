@@ -2585,3 +2585,36 @@ func TestInstanceWebhook_Default_PartitionProfileNotSizeable(t *testing.T) {
 		})
 	}
 }
+
+func TestInstanceWebhook_InactiveInstanceType(t *testing.T) {
+	const typeName = "inactive-type"
+	inactiveType := pinnedType(typeName)
+	inactiveType.Spec.Inactive = true
+	w := newInstanceWebhook(inactiveType)
+
+	t.Run("creating a running instance on an inactive instance type is rejected", func(t *testing.T) {
+		inst := webhookInstance("a", typeName)
+		inst.Spec.Stop = false
+		_, err := w.ValidateCreate(context.Background(), inst)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "spec.type: Forbidden: instance type inactive-type is inactive")
+	})
+
+	t.Run("creating a stopped instance on an inactive instance type is allowed", func(t *testing.T) {
+		inst := webhookInstance("a", typeName)
+		inst.Spec.Stop = true
+		_, err := w.ValidateCreate(context.Background(), inst)
+		require.NoError(t, err)
+	})
+
+	t.Run("starting a stopped instance on an inactive instance type is rejected", func(t *testing.T) {
+		instOld := webhookInstance("a", typeName)
+		instOld.Spec.Stop = true
+		instOld.Status.Phase = workerctrl.InstancePhaseStopped
+		inst := instOld.DeepCopy()
+		inst.Spec.Stop = false
+		_, err := w.ValidateUpdate(context.Background(), instOld, inst)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "spec.type: Forbidden: instance type inactive-type is inactive")
+	})
+}

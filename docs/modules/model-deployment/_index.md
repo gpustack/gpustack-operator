@@ -18,7 +18,7 @@ its own replicas and resources.
 flowchart TD
     ARTIFACT["Optional ModelArtifact"] -> CTRL["ModelDeployment role controller"]
     CACHE["Optional KVCachePoolBinding"] -> CTRL
-    POOL["InstanceType and topology"] -> CTRL
+    POOL["AcceleratorType and topology"] -> CTRL
     SCALER["Optional ModelDeploymentScaler"] -> CTRL
     CTRL -> ROUTER["Managed traffic router"]
     CTRL -> PODS["Aggregated, encode, prefill and decode replicas"]

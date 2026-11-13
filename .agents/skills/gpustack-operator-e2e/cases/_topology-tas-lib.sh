@@ -415,12 +415,18 @@ tas_source_nodefeatures() {
 # carries types on their way out (a sibling case creates and deletes `caseNN-nowhere` without
 # waiting, and that name sorts ahead of ordinary derived types); inactive types are excluded for
 # the mirror reason -- a deployment on one is admitted and then never scheduled.
+tas_md_usable_accelerator_type() {
+  md_usable_accelerator_type "$@"
+}
+
 tas_md_usable_instance_type() {
   md_usable_instance_type "$@"
 }
 
-# The ClusterQueue an InstanceType schedules into, resolved the way the operator resolves it: the
-# type's published entrance LocalQueue, then that LocalQueue's ClusterQueue.
+tas_md_cq_of_at() {
+  md_cq_of_at "$@"
+}
+
 tas_md_cq_of_it() {
   md_cq_of_it "$@"
 }

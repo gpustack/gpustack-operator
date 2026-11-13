@@ -64,7 +64,7 @@ func newLifecycleFixtureAround(
 	t.Helper()
 
 	objs := make([]ctrlcli.Object, 0, 2+len(extra))
-	objs = append(objs, md, newRenderInstanceType())
+	objs = append(objs, md, newRenderAcceleratorType())
 	objs = append(objs, extra...)
 	// An object read from a server always carries a resource version, and the lifecycle writes its
 	// replacement intent through a real optimistic lock that needs one to compare against.
@@ -975,9 +975,8 @@ func TestLifecycle_AFourFieldEditIsOneReplacementNotFour(t *testing.T) {
 	md := newRenderDeployment(func(md *workercore.ModelDeployment) {
 		md.Spec.Roles[0].Replicas = 2
 	})
-	f := newLifecycleFixture(t, md, newRenderInstanceType(func(it *worker.InstanceType) {
+	f := newLifecycleFixture(t, md, newRenderAcceleratorType(func(it *worker.AcceleratorType) {
 		it.Name = "h20-2x"
-		it.Spec.UnitResources = workercore.InstanceTypeUnitResources{CPU: "4", RAM: "16Gi"}
 		it.Status.Entrance = "queue-for-h20-2x"
 	}))
 
@@ -985,13 +984,14 @@ func TestLifecycle_AFourFieldEditIsOneReplacementNotFour(t *testing.T) {
 	f.admit()
 
 	// The four fields the role makes mutable, each observable in the rendered Pod: two members per
-	// replica, host resources sized for two cards, the narrower pool's queue, and the command line
+	// replica, explicit host and accelerator resources, the narrower pool's queue, and the command line
 	// the role supplies in full.
 	edited := getModelDeployment(t, f.cli)
 	edited.Spec.Roles[0].ReplicaSize = 2
-	edited.Spec.Roles[0].InstanceType = "h20-2x"
+	edited.Spec.Roles[0].AcceleratorType = "h20-2x"
 	edited.Spec.Roles[0].Resources = &workercore.ModelDeploymentRoleResources{
 		Accelerator: ptr.To(resource.MustParse("2")),
+		CPU:         ptr.To(resource.MustParse("8")),
 	}
 	edited.Spec.Roles[0].Command = []string{"python", "-m", "vllm.entrypoints.openai.api_server"}
 	require.NoError(t, f.cli.Update(context.Background(), edited))
@@ -1019,10 +1019,8 @@ func TestLifecycle_AFourFieldEditIsOneReplacementNotFour(t *testing.T) {
 				member.Spec.Containers[0].Command, "the command is the one the role supplied")
 			assert.Equal(t, "queue-for-h20-2x", member.Labels[kueuectrlconst.QueueLabel],
 				"and the group is submitted to the pool the role named")
-			// Four cards' worth of unit resources are one: the narrower pool's four CPU by the two
-			// cards the role asked for, where the unedited render asked for one card of the wider.
 			assert.Equal(t, int64(8), member.Spec.Containers[0].Resources.Limits.Cpu().Value(),
-				"the host resources follow the pool the edit named and the cards it asked for")
+				"the host resources follow the role's explicit CPU request")
 		}
 	}
 }

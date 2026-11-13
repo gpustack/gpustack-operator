@@ -21,7 +21,7 @@ The [Model Deployment guides](../modules/model-deployment/_index.md) explain the
 | Topology | [Hierarchical Placement](topology/hierarchical-placement.md) | Publish zone and rack hierarchies and constrain replicas to a topology domain. |
 | KV Cache | [Shared Cache](kv-cache/shared-cache.md) | Create a backend, pool, namespace grant, and serving workload. |
 | Model Delivery | [Model Prefetch](model-delivery/prefetch.md) | Cache and verify model weights before inference. |
-| Model Deployment | [Preparation and choices](model-deployment/_index.md) | Choose a serving configuration and follow its hardware, model and `InstanceType` requirements. |
+| Model Deployment | [Preparation and choices](model-deployment/_index.md) | Choose a serving configuration and follow its hardware, model and `AcceleratorType` requirements. |
 | Model Deployment | [Prefill and Decode](model-deployment/prefill-decode.md) | Disaggregate *prefill* and *decode* roles fronted by a router. |
 | Model Deployment | [Encode, Prefill and Decode](model-deployment/encode-prefill-decode.md) | Separate multimodal *encode*, *prefill* and *decode* roles. |
 | Model Deployment | [Elastic EP](model-deployment/elastic-ep.md) | Grow *DP* width 2 → 4 with *TP* = 2. |

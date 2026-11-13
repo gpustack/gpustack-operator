@@ -68,7 +68,7 @@ CASES_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 NS="${1:?usage: case-103.sh <NS>}"
 MDNS="${NS}-c103"
 P=c103
-IT="${E2E_MD_INSTANCE_TYPE:-}"
+IT="${E2E_MD_ACCELERATOR_TYPE:-${E2E_MD_INSTANCE_TYPE:-}}"
 IMAGE="${E2E_MD_IMAGE:-registry.k8s.io/pause:3.10}"
 DS=gpustack-operator-model-manager
 CACHE_ROOT=/var/lib/gpustack/models
@@ -168,8 +168,9 @@ read -r -a WORKERS <<<"$(model_workers)"
 W1="${WORKERS[0]}" W2="${WORKERS[1]}"
 kubectl get csidriver model.csi.gpustack.ai >/dev/null 2>&1 \
   || { echo "[case-103] the model-manager plugin is not installed; NOTHING WAS VERIFIED"; exit 2; }
-[ -n "$IT" ] || IT="$(kubectl get instancetypes.worker.gpustack.ai -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)"
-[ -n "$IT" ] || { echo "[case-103] no InstanceType; run case-1 first" >&2; exit 2; }
+if [ -z "$IT" ]; then
+  IT="$(kubectl get acceleratortypes.worker.gpustack.ai -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)"
+fi
 for ns in "$NS" "$MDNS"; do kubectl create namespace "$ns" --dry-run=client -o yaml | kubectl apply -f - >/dev/null; done
 
 # One docker gate for the whole case: the tmpfs and the kubelet both need it.
@@ -318,6 +319,8 @@ kubectl -n "$NS" delete pod "${P}-filtered" --wait=false >/dev/null 2>&1
 # its own Pods, and the pool's entrance LocalQueue, which the operator creates in every namespace.
 for _ in $(seq 1 30); do [ -n "$(kubectl -n "$MDNS" get localqueues -o name 2>/dev/null)" ] && break; sleep 2; done
 md() { # name artifact
+  local at=""
+  [ -n "$IT" ] && at="acceleratorType: \"${IT}\", "
   kubectl apply -f - >/dev/null <<YAML
 apiVersion: worker.gpustack.ai/v1alpha1
 kind: ModelDeployment
@@ -326,7 +329,7 @@ spec:
   engine: {name: vLLM, image: "${IMAGE}"}
   model: {name: e2e/c103, artifactRef: {name: $2}}
   roles:
-    - {name: server, instanceType: "${IT}", replicas: 1, image: "${IMAGE}", command: ["/pause"]}
+    - {name: server, ${at}replicas: 1, image: "${IMAGE}", command: ["/pause"]}
 YAML
 }
 mdartifact() { # name repository [patterns yaml]

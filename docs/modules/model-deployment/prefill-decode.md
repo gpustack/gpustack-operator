@@ -41,11 +41,11 @@ A router policy such as `round_robin` chooses among those leaders; it does not a
 the shape's own contract, including its Router requirement, is on [External DP](external-dp.md).
 [Issue #754](https://github.com/gpustack/gpustack-operator/issues/754) tracks that deferred combination.
 
-With a managed router, the direct connector depends on the engine, platform and
-`spec.kvTransfer.backend`. A shared `spec.kvCache` pool adds a store connector alongside the direct
-path; for vLLM NIXL, `NixlConnector` comes first in `MultiConnector`. See
-[Transfer parameters](parameterize.md#transfer-parameters) for the per-engine connector mapping and
-synthesized environment variables.
+With a managed router, the direct connector depends on the engine, platform and `spec.kvTransfer.backend`. On
+vLLM pairs with a shared `spec.kvCache` pool, *Prefill* wraps the direct connector first in `MultiConnector`
+alongside the store connector, while *Decode* runs the direct connector alone and keeps pool dtype and
+block-size alignment. See [Transfer parameters](parameterize.md#transfer-parameters) for connector and
+environment mappings.
 
 A pair needs no shared pool to hand blocks over. With `llm-d-router`, the decode `Pod` runs a
 routing-proxy sidecar. vLLM NIXL and Ascend use `--kv-connector=nixlv2`; vLLM Mooncake uses
@@ -114,19 +114,19 @@ spec:
     - name: prefill
       kind: Prefill
       replicas: 2
-      instanceType: gpustack--nvidia-h20-linux-amd64
+      acceleratorType: gpustack--nvidia-h20-linux-amd64
       resources:
         accelerator: 2
     - name: decode
       kind: Decode
       replicas: 2
-      instanceType: gpustack--nvidia-h20-linux-amd64
+      acceleratorType: gpustack--nvidia-h20-linux-amd64
       resources:
         accelerator: 2
 ```
 
 **Each replica of a role becomes its own Kueue `Pod` group: one group per replica, declaring a total
-equal to the role's *`size`*.** Two roles naming the same *`instanceType`* are still separate groups,
+equal to the role's *`size`*.** Two roles naming the same *`acceleratorType`* are still separate groups,
 each replica composing its own `Workload`. The example above therefore has **four** single-`Pod`
 groups, admitted as a set.
 
@@ -146,7 +146,7 @@ another replica's group: one *Prefill* replica turning over leaves its siblings 
 serving. The groups are still admitted together; an `AdmissionCheck` holds them until the whole set
 has reserved quota, so *Prefill* still never starts without *Decode*.
 
-Splitting *`instanceType`*s buys different hardware; the isolation it used to buy, every replica has
+Splitting *`acceleratorType`*s buys different hardware; the isolation it used to buy, every replica has
 by default.
 
 **With a shared pool**, the same object plus one block. *`spec.kvCache`* is frozen after creation, so declare it in the first apply:
@@ -326,8 +326,8 @@ For example, select NIXL on an existing deployment with:
 +    backend: NIXL
 ```
 
-Admission refuses `HIXL` on non-Ascend pools, `NIXL` on Ascend pools, and mixed
-Ascend/non-Ascend prefill/decode pairs. If the manufacturer is not yet observed, the renderer
+Admission refuses `HIXL` on non-Ascend or CPU-only roles, `NIXL` on Ascend `AcceleratorType`s, and mixed
+Ascend/non-Ascend (including CPU-only) prefill/decode pairs. If the manufacturer is not yet observed, the renderer
 can refuse an incompatible combination after it resolves.
 
 Mooncake derives `ascend` on Ascend, `efa` when both roles request `resources.interface > 0`
@@ -347,46 +347,27 @@ Changing transfer settings rolls the roles; transfers can fail until both ends c
 
 ## Different hardware per role
 
-A Kueue `Workload` carries one `queueName`, and that name is the one the role's *`instanceType`*
+A Kueue `Workload` carries one `queueName`, and that name is the one the role's *`acceleratorType`*
 publishes as its *`status.entrance`*. Every replica is its own group regardless, so two roles were
-never going to share a `Workload`, on two *`instanceType`*s or on one. The set is admitted together by an
+never going to share a `Workload`, on two *`acceleratorType`*s or on one. The set is admitted together by an
 admission check rather than by Kueue's intra-group rule.
 
 See [One group per replica](configuration.md#one-group-per-replica) for what that costs an edit, and
-[Authoring the InstanceType yourself](../../reference/settings.md#authoring-the-instancetype) for which
+[Authoring the InstanceType](../../reference/settings.md#authoring-the-instancetype) for which
 queues carry the check.
 
 **Adding a second manufacturer uses the same mechanism.** A queue's accelerator quota is
 `credits.gpustack.ai/<manufacturer>`, one resource name per manufacturer, and Kueue's own webhook
-refuses a second resource group repeating a covered resource within one queue. With a queue per role
-there is no second group to repeat anything.
+refuses a second resource group repeating a covered resource within one queue. Roles on the same pool share its queue; different manufacturers use different pool queues.
 
-**Two roles on different manufacturers cannot share KV through their pool.** The deployment is
-admitted and both halves serve; what fails is the sharing, and it fails silently: reads from the
-shared store miss, and nothing on the deployment reports it. Independent reasons stand
-between the halves:
-
-- **This operator's own refusal is the one an administrator meets.** On a pool left at its default
-  transport, the renderer [refuses the vLLM-Ascend
-  half](../kv-cache/injection.md#binding-transport-support) (the rule and its
-  remediation are stated there). The check is one-sided: it fires for a single-manufacturer Ascend
-  deployment just the same, and it is the only one of the three that produces a message;
-  following its remediation clears only this refusal; the next two apply regardless.
-- **Two upstream limits then apply**, described at the versions each engine is supported at (see
-  [the minimum versions](engine-versions.md#minimum-versions)); they describe that pair of
-  releases, not a permanent property of either project. The operator
-  renders no key that lets the Ascend half load from the shared store, and the two engines address
-  it with incompatible keys, so every lookup misses and no error is raised.
-
-This limit governs the shared pool alone: [a pair needs no shared pool to hand blocks
-over](#pair-connections).
-
-A mixed Ascend/non-Ascend pair is refused. Two non-Ascend roles
-can name different manufacturers, but their direct transfer interoperability is unmeasured here.
+A mixed Ascend/non-Ascend pair is refused once both manufacturers are observed. Two non-Ascend
+roles can name different manufacturers, but their direct transfer interoperability is unmeasured
+here. A pair needs no shared pool for [direct transfer](#pair-connections); a vLLM-Ascend role
+using a pool has separate [store transport requirements](../kv-cache/injection.md#binding-transport-support).
 
 [Kueue assigns a ResourceFlavor per
 PodSet](../devices/scheduling.md#stage-4-kueue-chain), so a role still takes whatever
-its own pool assigns; what selects the hardware is the *`instanceType`* the role names.
+its own pool assigns; what selects the hardware is the *`acceleratorType`* the role names.
 
 ## Addressing a role
 

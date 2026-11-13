@@ -20,6 +20,7 @@ import (
 // TestEveryCRDViewServesDelete enforces it.
 var setups = []extensionapi.Setup{
 	extensionapi.NewSettingHandler(settings.Indexer()),
+	new(worker.AcceleratorTypeHandler),
 	new(worker.DevicesHandler),
 	new(worker.DevicesRDMASelectionPolicyHandler),
 	new(worker.InstanceHandler),

@@ -950,7 +950,7 @@ func TestRecomputePinnedKeepsDiskRetentionWhenSourcePlacementOmitted(t *testing.
 		ObjectMeta: meta.ObjectMeta{Name: "serving", Namespace: "team-a"},
 		Spec: workercore.ModelDeploymentSpec{
 			Model: workercore.ModelDeploymentModel{ArtifactRef: &core.LocalObjectReference{Name: "model"}},
-			Roles: []workercore.ModelDeploymentRole{{Name: "s0", InstanceType: "elastic-cpu-gpu"}},
+			Roles: []workercore.ModelDeploymentRole{{Name: "s0", AcceleratorType: "elastic-cpu-gpu"}},
 		},
 	}
 	for _, obj := range []ctrlcli.Object{

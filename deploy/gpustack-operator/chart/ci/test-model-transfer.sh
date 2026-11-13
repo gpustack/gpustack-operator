@@ -501,9 +501,16 @@ fi
 # surface, the one Binding write, and the authority ConfigMaps scoped to the
 # operator namespace. No Secret, no configmap outside it.
 rbac="$(render "${enabled[@]}" --show-only templates/model-transfer/serviceaccount.yaml)"
-for resource in 'tokenreviews' '"pods", "nodes"' '"settings"' 'modelprefetches' 'modelstorebindings' '"configmaps"'; do
+for resource in 'tokenreviews' '"pods", "nodes"' '"settings"' 'modelprefetches' 'modelstorebindings' '"configmaps"' 'acceleratortypes'; do
   if ! grep -qF "${resource}" <<<"${rbac}"; then
     echo "rbac: expected ${resource} in the source identity" >&2
+    exit 1
+  fi
+done
+accel_rules="$(sed -n '/acceleratortypes/,/verbs:/p' <<<"${rbac}")"
+for verb in '"get"' '"list"' '"watch"'; do
+  if ! grep -qF "${verb}" <<<"${accel_rules}"; then
+    echo "rbac: acceleratortypes missing ${verb} permission" >&2
     exit 1
   fi
 done

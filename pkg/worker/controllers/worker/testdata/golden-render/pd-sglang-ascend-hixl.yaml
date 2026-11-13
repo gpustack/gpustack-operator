@@ -12,16 +12,16 @@ spec:
   model:
     name: Qwen/Qwen2.5-72B-Instruct
   roles:
-  - image: lmsysorg/sglang:v0.5.18
-    instanceType: atlas-910b
+  - acceleratorType: atlas-910b
+    image: lmsysorg/sglang:v0.5.18
     kind: Prefill
     name: prefill
     replicas: 1
     resources:
       accelerator: "1"
     size: 1
-  - image: lmsysorg/sglang:v0.5.18
-    instanceType: atlas-910b
+  - acceleratorType: atlas-910b
+    image: lmsysorg/sglang:v0.5.18
     kind: Decode
     name: decode
     replicas: 1

@@ -172,9 +172,9 @@ func oldWorkloadHoldsQuota(ctx context.Context) (bool, error) {
 }
 
 // acceleratorGroup follows the queue chain this operator builds, from the Workload's LocalQueue to a
-// ClusterQueue carrying the InstanceType mark and on to the same-named InstanceType, and returns
-// that InstanceType's accelerator group. It returns an empty group when any link is missing or is
-// not this operator's.
+// ClusterQueue carrying the InstanceType mark and on to the pool's fronting AcceleratorType or
+// InstanceType (or single acceleratable schedule label), and returns that pool's accelerator group.
+// It returns an empty group when any link is missing, not this operator's, or ambiguous.
 func (r *WorkloadWebhook) acceleratorGroup(ctx context.Context, wl *kueue.Workload) (string, error) {
 	namespace := wl.Namespace
 	if req, err := ctrladmission.RequestFromContext(ctx); err == nil && req.Namespace != "" {
@@ -193,12 +193,89 @@ func (r *WorkloadWebhook) acceleratorGroup(ctx context.Context, wl *kueue.Worklo
 	if !workerctrl.IsInstanceTypeClusterQueue(cq) {
 		return "", nil
 	}
-	it := new(workercore.InstanceType)
-	err = r.Client.Get(ctx, ctrlcli.ObjectKey{Name: cq.Name}, it)
-	if err != nil {
-		return "", ctrlcli.IgnoreNotFound(err)
+	at := new(workercore.AcceleratorType)
+	atErr := r.Client.Get(ctx, ctrlcli.ObjectKey{Name: cq.Name}, at)
+	if ctrlcli.IgnoreNotFound(atErr) != nil {
+		return "", atErr
 	}
-	return it.Spec.AcceleratorGroup, nil
+	it := new(workercore.InstanceType)
+	itErr := r.Client.Get(ctx, ctrlcli.ObjectKey{Name: cq.Name}, it)
+	if ctrlcli.IgnoreNotFound(itErr) != nil {
+		return "", itErr
+	}
+	switch {
+	case atErr == nil && itErr == nil:
+		if at.Spec.AcceleratorGroup != it.Spec.AcceleratorGroup {
+			ctrllog.FromContext(ctx).Info(
+				"same-named accelerator type and instance type disagree on accelerator group, leaving workload unpinned",
+				"clusterQueue", cq.Name,
+				"acceleratorTypeGroup", at.Spec.AcceleratorGroup,
+				"instanceTypeGroup", it.Spec.AcceleratorGroup,
+			)
+			return "", nil
+		}
+		return at.Spec.AcceleratorGroup, nil
+	case atErr == nil:
+		return at.Spec.AcceleratorGroup, nil
+	case itErr == nil:
+		return it.Spec.AcceleratorGroup, nil
+	}
+
+	sel := ctrlcli.MatchingLabels{QueueEntranceLabelKey: lq.Name}
+	atList := new(workercore.AcceleratorTypeList)
+	if err = r.Client.List(ctx, atList, sel, ctrlcli.UnsafeDisableDeepCopy); err != nil {
+		return "", err
+	}
+	itList := new(workercore.InstanceTypeList)
+	if err = r.Client.List(ctx, itList, sel, ctrlcli.UnsafeDisableDeepCopy); err != nil {
+		return "", err
+	}
+	group := ""
+	for i := range atList.Items {
+		g := atList.Items[i].Spec.AcceleratorGroup
+		if g == "" {
+			continue
+		}
+		if group != "" && group != g {
+			ctrllog.FromContext(ctx).Info("fronting objects disagree on accelerator group, leaving workload unpinned", "localQueue", lq.Name)
+			return "", nil
+		}
+		group = g
+	}
+	for i := range itList.Items {
+		g := itList.Items[i].Spec.AcceleratorGroup
+		if g == "" {
+			continue
+		}
+		if group != "" && group != g {
+			ctrllog.FromContext(ctx).Info("fronting objects disagree on accelerator group, leaving workload unpinned", "localQueue", lq.Name)
+			return "", nil
+		}
+		group = g
+	}
+	if group != "" {
+		return group, nil
+	}
+	if len(atList.Items)+len(itList.Items) > 0 {
+		return "", nil
+	}
+
+	// PoolScheduleLabels stamps at most one acceleratable.feature.gpustack.ai/<group> label on an
+	// operator-owned ClusterQueue. Leave the workload unpinned if manual label edits create ambiguity.
+	var labelGroups []string
+	for k, v := range cq.Labels {
+		if v == "true" && strings.HasPrefix(k, nodefeature.AcceleratableFeatureLabelPrefix) {
+			labelGroups = append(labelGroups, strings.TrimPrefix(k, nodefeature.AcceleratableFeatureLabelPrefix))
+		}
+	}
+	switch len(labelGroups) {
+	case 1:
+		return labelGroups[0], nil
+	case 0:
+	default:
+		ctrllog.FromContext(ctx).Info("cluster queue carries multiple acceleratable group labels, leaving workload unpinned", "clusterQueue", cq.Name)
+	}
+	return "", nil
 }
 
 // requireNodeExpression requires the node label key to be greater than need-1, ANDed into every

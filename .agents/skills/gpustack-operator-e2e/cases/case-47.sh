@@ -256,7 +256,7 @@ kvi_setup
 # ONE InstanceType FOR THE WHOLE CASE, discovered once and shared by both halves. The corpus's
 # usable_instance_type skips a type that is terminating or inactive, which a naive "first item"
 # would happily hand over and which would then refuse every ModelDeployment that names it.
-IT="${E2E_MD_INSTANCE_TYPE:-$(md_usable_instance_type)}"
+IT="${E2E_MD_ACCELERATOR_TYPE:-${E2E_MD_INSTANCE_TYPE:-$(md_usable_instance_type)}}"
 
 # ONE DEPLOYMENT SHAPE FOR BOTH HALVES, and the engine is the only thing that differs between
 # them. The output is READ, not discarded: a refused manifest -- a bad InstanceType name, a
@@ -284,7 +284,7 @@ spec:
       name: ${2}
   roles:
   - name: server
-    instanceType: ${IT}
+    acceleratorType: ${IT}
     replicas: 1
     image: ${CLIENT_IMAGE}
 YAML

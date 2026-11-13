@@ -12,8 +12,9 @@ controls the resource name and runtime isolation method.
 
 ## Overview
 
-Device Manager detects hardware and publishes capacity. Kueue admits requests against the resulting
-queues. The device plugin allocates devices to containers.
+Device Manager detects hardware and publishes capacity. `AcceleratorType` selects accelerated pools
+for serving and prefetch; `InstanceType` sizes interactive workspaces. Both share the canonical pool
+`ClusterQueue`. Kueue admits queued requests, and the device plugin allocates devices to containers.
 
 ![Device discovery and allocation flow](../../assets/diagrams/devices-flow.svg)
 
@@ -23,7 +24,7 @@ flowchart TD
     HARDWARE -> DM["Device Manager inventory and ledger"]
     NFD -> PROFILER["Worker capacity profiler"]
     DM -> PROFILER
-    PROFILER -> QUEUES["InstanceType, ResourceFlavor and isolated queues"]
+    PROFILER -> QUEUES["AcceleratorType, InstanceType, ResourceFlavor and pool queues"]
     QUEUES -> GATES["Webhook, quota, per-device fit, scheduler and plugin"]
     GATES -> CONTAINER["Device access and supported slicing or MIG"]
 -->

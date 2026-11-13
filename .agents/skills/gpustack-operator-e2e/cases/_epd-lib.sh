@@ -85,15 +85,15 @@ for n in json.load(sys.stdin).get("items",[]):
 '
 }
 
-# epd_platform_type <manufacturer> prints the InstanceType reporting that manufacturer, skipping
+# epd_platform_type <manufacturer> prints the AcceleratorType reporting that manufacturer, skipping
 # types on their way out and Inactive ones for the reasons case-45 records: naming either is
 # refused at admission for a reason no row here is about.
 #
 # The manufacturer is read from status, not from spec: the platform of a role is whatever its
-# InstanceType reports, which is the same fact the webhook reads. A type reporting nothing is not
+# AcceleratorType reports, which is the same fact the webhook reads. A type reporting nothing is not
 # a platform of its own — that is the not-yet-synced state, and the webhook refuses it.
 epd_platform_type() { # <manufacturer>
-  kubectl get instancetypes.worker.gpustack.ai \
+  kubectl get acceleratortypes.worker.gpustack.ai \
     -o jsonpath='{range .items[*]}{.metadata.name}|{.metadata.deletionTimestamp}|{.spec.inactive}|{.status.detail.manufacturer}{"\n"}{end}' \
     2>/dev/null \
     | while IFS='|' read -r name deleting inactive manufacturer; do
@@ -108,8 +108,10 @@ epd_platform_type() { # <manufacturer>
       done
 }
 
-# epd_type_exists <type-name> succeeds while the InstanceType is still there.
-epd_type_exists() { kubectl get instancetypes.worker.gpustack.ai "$1" >/dev/null 2>&1; }
+# epd_type_exists <type-name> succeeds while the AcceleratorType is still there.
+epd_type_exists() {
+  kubectl get acceleratortypes.worker.gpustack.ai "$1" >/dev/null 2>&1
+}
 
 # epd_any_type_exists <type-name>... prints the first of the named InstanceTypes that is still
 # there, and fails when none of them is.

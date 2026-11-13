@@ -5,7 +5,7 @@ metadata:
     kueue.x-k8s.io/pod-group-serving: "true"
     kueue.x-k8s.io/pod-group-total-count: "1"
     kueue.x-k8s.io/role-hash: decode
-    modeldeployment.gpustack.ai/pod-spec-hash: a40bdc7d8954e10b93b76dda8aba861d328d91217986cd80ee50f01b434d4fea
+    modeldeployment.gpustack.ai/pod-spec-hash: 16f6b22a05f9cca1e4c3de72b085558b4c69d5df9659079aae8b87d994208a80
     modeldeployment.gpustack.ai/render-version: "5"
     note.gpustack.ai/role: decode
     prometheus.io/path: /metrics
@@ -146,14 +146,8 @@ spec:
       timeoutSeconds: 5
     resources:
       limits:
-        cpu: "16"
-        ephemeral-storage: 15Gi
-        memory: 64Gi
         nvidia.com/gpu: "1"
       requests:
-        cpu: 1600m
-        ephemeral-storage: 1920Mi
-        memory: 8Gi
         nvidia.com/gpu: "1"
     startupProbe:
       failureThreshold: 180
@@ -214,7 +208,7 @@ metadata:
     kueue.x-k8s.io/pod-group-serving: "true"
     kueue.x-k8s.io/pod-group-total-count: "1"
     kueue.x-k8s.io/role-hash: encode
-    modeldeployment.gpustack.ai/pod-spec-hash: 66a315dcf71b8e48957e49e1c8ff4f0438be1b2197b83a3b69c869cfda4c67be
+    modeldeployment.gpustack.ai/pod-spec-hash: 20230d5ab683c91163aa55ff334c78e55f9a2c4398d036242cf01da509bcfc90
     modeldeployment.gpustack.ai/render-version: "5"
     note.gpustack.ai/role: encode
     prometheus.io/path: /metrics
@@ -362,14 +356,8 @@ spec:
       timeoutSeconds: 5
     resources:
       limits:
-        cpu: "16"
-        ephemeral-storage: 15Gi
-        memory: 64Gi
         nvidia.com/gpu: "1"
       requests:
-        cpu: 1600m
-        ephemeral-storage: 1920Mi
-        memory: 8Gi
         nvidia.com/gpu: "1"
     startupProbe:
       failureThreshold: 180
@@ -406,7 +394,7 @@ metadata:
     kueue.x-k8s.io/pod-group-serving: "true"
     kueue.x-k8s.io/pod-group-total-count: "1"
     kueue.x-k8s.io/role-hash: prefill
-    modeldeployment.gpustack.ai/pod-spec-hash: c065d8d217c3d14f3e42d6c944dc402bbe21258e59afd53ba3b48486cc1cf50b
+    modeldeployment.gpustack.ai/pod-spec-hash: 65fd1c8eda8d9991aa07384e33d1c3c8259e5931e3003b5d603bde4963ddecdc
     modeldeployment.gpustack.ai/render-version: "5"
     note.gpustack.ai/role: prefill
     prometheus.io/path: /metrics
@@ -567,14 +555,8 @@ spec:
       timeoutSeconds: 5
     resources:
       limits:
-        cpu: "16"
-        ephemeral-storage: 15Gi
-        memory: 64Gi
         nvidia.com/gpu: "1"
       requests:
-        cpu: 1600m
-        ephemeral-storage: 1920Mi
-        memory: 8Gi
         nvidia.com/gpu: "1"
     startupProbe:
       failureThreshold: 180

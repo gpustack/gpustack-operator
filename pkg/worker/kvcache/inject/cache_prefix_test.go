@@ -57,6 +57,19 @@ func TestRenderCachePrefix(t *testing.T) {
 			},
 		},
 		{
+			name: "disaggregated decode omits the store connector and its prefix",
+			input: Input{
+				Engine: EngineVLLM, Role: RoleDecode, Disaggregated: true, KVTransfer: true,
+				Connection: testConnectionFor(EngineVLLM), CachePrefix: testCachePrefix,
+			},
+			assert: func(t *testing.T, doc vllmTransferConfig) {
+				assert.Equal(t, "MooncakeConnector", doc.KVConnector)
+				require.NotNil(t, doc.KVConnectorExtraConfig)
+				assert.Empty(t, doc.KVConnectorExtraConfig.CachePrefix)
+				assert.Empty(t, doc.KVConnectorExtraConfig.Connectors)
+			},
+		},
+		{
 			name:  "no prefix renders no extra configuration",
 			input: Input{Engine: EngineVLLM, Role: RoleNone, Connection: testConnectionFor(EngineVLLM)},
 			assert: func(t *testing.T, doc vllmTransferConfig) {

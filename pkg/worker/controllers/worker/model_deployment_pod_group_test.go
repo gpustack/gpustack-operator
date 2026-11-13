@@ -32,8 +32,8 @@ func podGroupDeployment(mutate ...func(*workercore.ModelDeployment)) *workercore
 		ObjectMeta: meta.ObjectMeta{Name: "qwen-72b", Namespace: "team-a"},
 		Spec: workercore.ModelDeploymentSpec{
 			Roles: []workercore.ModelDeploymentRole{
-				{Name: "prefill", Replicas: 2, InstanceType: "h20-8x"},
-				{Name: "decode", Replicas: 2, InstanceType: "h20-8x"},
+				{Name: "prefill", Replicas: 2, AcceleratorType: "h20-8x"},
+				{Name: "decode", Replicas: 2, AcceleratorType: "h20-8x"},
 			},
 		},
 	}
@@ -175,8 +175,8 @@ func TestModelDeploymentPodGroup_TopologyParticipatesInRolloutHash(t *testing.T)
 func TestModelDeploymentPodGroup_RoleHashIsTheRoleName(t *testing.T) {
 	md := podGroupDeployment(func(md *workercore.ModelDeployment) {
 		md.Spec.Roles = []workercore.ModelDeploymentRole{
-			{Name: "left", Replicas: 2, InstanceType: "h20-8x"},
-			{Name: "right", Replicas: 2, InstanceType: "h20-8x"},
+			{Name: "left", Replicas: 2, AcceleratorType: "h20-8x"},
+			{Name: "right", Replicas: 2, AcceleratorType: "h20-8x"},
 		}
 	})
 
@@ -510,7 +510,7 @@ func TestDeleteModelDeploymentGroupWorkload(t *testing.T) {
 func twoTypeDeployment(mutate ...func(*workercore.ModelDeployment)) *workercore.ModelDeployment {
 	md := podGroupDeployment(func(md *workercore.ModelDeployment) {
 		md.Spec.Roles[1].Replicas = 3
-		md.Spec.Roles[1].InstanceType = "a100-8x"
+		md.Spec.Roles[1].AcceleratorType = "a100-8x"
 	})
 	for _, m := range mutate {
 		m(md)
@@ -552,7 +552,7 @@ func TestModelDeploymentPodGroups(t *testing.T) {
 			name: "three_roles_two_types",
 			md: twoTypeDeployment(func(md *workercore.ModelDeployment) {
 				md.Spec.Roles = append(md.Spec.Roles, workercore.ModelDeploymentRole{
-					Name: "prefill-2", Replicas: 5, InstanceType: "h20-8x",
+					Name: "prefill-2", Replicas: 5, AcceleratorType: "h20-8x",
 				})
 			}),
 			want: []group{{"prefill", "h20-8x", 2}, {"decode", "a100-8x", 3}, {"prefill-2", "h20-8x", 5}},
@@ -562,9 +562,9 @@ func TestModelDeploymentPodGroups(t *testing.T) {
 			name: "order_is_the_roles_order",
 			md: podGroupDeployment(func(md *workercore.ModelDeployment) {
 				md.Spec.Roles = []workercore.ModelDeploymentRole{
-					{Name: "a", Replicas: 1, InstanceType: "a100-8x"},
-					{Name: "b", Replicas: 1, InstanceType: "h20-8x"},
-					{Name: "c", Replicas: 1, InstanceType: "a100-8x"},
+					{Name: "a", Replicas: 1, AcceleratorType: "a100-8x"},
+					{Name: "b", Replicas: 1, AcceleratorType: "h20-8x"},
+					{Name: "c", Replicas: 1, AcceleratorType: "a100-8x"},
 				}
 			}),
 			want: []group{{"a", "a100-8x", 1}, {"b", "h20-8x", 1}, {"c", "a100-8x", 1}},
@@ -577,7 +577,7 @@ func TestModelDeploymentPodGroups(t *testing.T) {
 
 			got := make([]group, 0, len(groups))
 			for _, g := range groups {
-				got = append(got, group{g.Role, g.InstanceType, g.TotalCount})
+				got = append(got, group{g.Role, g.AcceleratorType, g.TotalCount})
 			}
 			assert.Equal(t, tc.want, got, "one group per role, in the order the spec names them")
 		})
@@ -688,7 +688,7 @@ func TestModelDeploymentPodSpecHash_CoversTheGroupNameAndOrdinal(t *testing.T) {
 
 	stamp := func(ordinal int) *core.Pod {
 		pod, err := renderModelDeploymentPodTemplate(context.Background(), ModelDeploymentRenderInput{
-			Deployment: md, Role: role, InstanceType: newRenderInstanceType(),
+			Deployment: md, Role: role, AcceleratorType: newRenderAcceleratorType(),
 		})
 		require.NoError(t, err)
 		stampModelDeploymentPod(pod, md, role, ordinal, 0)
@@ -707,4 +707,37 @@ func TestModelDeploymentPodSpecHash_CoversTheGroupNameAndOrdinal(t *testing.T) {
 		first.Annotations[modelDeploymentPodSpecHashAnnotation],
 		again.Annotations[modelDeploymentPodSpecHashAnnotation],
 		"the same ordinal renders the same hash, or no running replica would ever read as current")
+}
+
+func TestModelDeploymentPodGroup_CPUOnlyUnqueuedRole(t *testing.T) {
+	md := podGroupDeployment(func(md *workercore.ModelDeployment) {
+		md.Spec.Roles[0].AcceleratorType = ""
+		md.Spec.Roles[0].ReplicaSize = 2
+	})
+	role := &md.Spec.Roles[0]
+
+	group := ModelDeploymentPodGroup(md, role, 1, 0)
+	assert.NotContains(t, group.Labels, kueuepodconst.GroupNameLabel)
+	assert.Equal(t, "1", group.Labels[modelDeploymentReplicaOrdinalLabel])
+	assert.Equal(t, "0", group.Labels[modelDeploymentMemberIndexLabel])
+	assert.NotContains(t, group.Annotations, kueuepodconst.GroupTotalCountAnnotation)
+	assert.NotContains(t, group.Annotations, kueuepodconst.RoleHashAnnotation)
+	assert.NotContains(t, group.Annotations, kueuepodconst.GroupServingAnnotationKey)
+	assert.NotContains(t, group.Annotations, kueue.PodSetRequiredTopologyAnnotation)
+	assert.Equal(t, "2", group.Annotations[modelDeploymentReplicaSizeAnnotation])
+
+	pod := &core.Pod{
+		ObjectMeta: meta.ObjectMeta{
+			Name:        "qwen-prefill-r1-m0",
+			Labels:      map[string]string{modelDeploymentLabelKeyComponent: role.Name},
+			Annotations: group.Annotations,
+		},
+	}
+	for k, v := range group.Labels {
+		pod.Labels[k] = v
+	}
+	assert.Equal(t, "member qwen-prefill-r1-m0", modelDeploymentPodDescription(pod))
+	total, ok := modelDeploymentMemberDeclaredTotal(pod)
+	assert.True(t, ok)
+	assert.Equal(t, 2, total)
 }

@@ -30,7 +30,7 @@
 # Inputs:      All real, nothing mocked —
 #              - reads the InstanceTypeFlavor catalog and the CPU ResourceFlavor;
 #              - deletes the derived general pool's backing ClusterQueue, then lets it self-heal;
-#              - creates + deletes a throwaway admin InstanceType e2e-case16-teardown (generalGroup e2e16td);
+#              - creates + deletes a throwaway admin InstanceType e2e-case16-teardown (acceleratorGroup nvidia-e2e16td);
 #              - patches the gpustack-settings Secret's instance-type-aware-cpu-manufacturer key true/false
 #                (the editable-setting store the aggregated apiserver reads, with a <=30s value cache).
 # Expected:    - A — >=1 InstanceTypeFlavor row, and a generic (acceleratable=false) one;
@@ -101,11 +101,18 @@ derived_its() {
 # wait_generic waits for the collapsed generic row to appear (rides out the <=30s setting cache).
 wait_generic() { for _ in $(seq 1 24); do [ -n "$(generic_row)" ] && return 0; sleep 3; done; return 1; }
 
-# The derived general InstanceType == its backing ClusterQueue name (one isolated CQ per pool).
+# it_cq prints the ClusterQueue an InstanceType schedules into, resolved via status.entrance ->
+# FormatLocalQueueName(cq.Name) (or LocalQueue.spec.clusterQueue in non-system namespaces).
+it_cq() {
+  cq_of_instancetype "$NS" "$1"
+}
+
+# The derived general InstanceType and its backing ClusterQueue name.
 IT=$(kubectl get instancetypes.worker.gpustack.ai \
   -o jsonpath='{.items[?(@.spec.acceleratable==false)].metadata.name}' 2>/dev/null | tr ' ' '\n' | grep -m1 'gpustack-')
 [ -n "$IT" ] || { echo "no general InstanceType found — run case-1 first to materialize the chain"; exit 1; }
-echo "general InstanceType / ClusterQueue: ${IT}"
+IT_CQ="$(it_cq "$IT")"
+echo "general InstanceType: ${IT}, backing ClusterQueue: ${IT_CQ}"
 
 # The CPU ResourceFlavor is keyed by the node's real CPU (gpustack--${gKey}-...-${count}c, plus a
 # -fnv64-<16 hex> topology profile on a TAS cluster),
@@ -143,6 +150,9 @@ cleanup() {
     kubectl patch instancetype "$PROBE" --type=merge -p '{"metadata":{"finalizers":[]}}' >/dev/null 2>&1 || true
   kubectl delete instancetype "$PROBE" --wait=false >/dev/null 2>&1 || true
   kubectl delete clusterqueue "$PROBE" --wait=false >/dev/null 2>&1 || true
+  if [ -n "${PROBE_CQ:-}" ]; then
+    kubectl delete clusterqueue "$PROBE_CQ" --wait=false >/dev/null 2>&1 || true
+  fi
   for _ in $(seq 1 50); do
     [ "$(kubectl get instancetype "$IT" -o jsonpath='{.status.phase}' 2>/dev/null)" = "Active" ] && break
     sleep 3
@@ -166,12 +176,12 @@ else
 fi
 
 # --- B. Accidental delete of the backing ClusterQueue self-heals (recreated with a new uid). ---
-uid_before=$(kubectl get clusterqueue "$IT" -o jsonpath='{.metadata.uid}' 2>/dev/null)
-echo "[case-16] deleting ClusterQueue ${IT} (uid ${uid_before}) while its InstanceType still lives"
-kubectl delete clusterqueue "$IT" --wait=false >/dev/null 2>&1 || true
+uid_before=$(kubectl get clusterqueue "$IT_CQ" -o jsonpath='{.metadata.uid}' 2>/dev/null)
+echo "[case-16] deleting ClusterQueue ${IT_CQ} (uid ${uid_before}) while its InstanceType still lives"
+kubectl delete clusterqueue "$IT_CQ" --wait=false >/dev/null 2>&1 || true
 recreated=""
 for _ in $(seq 1 50); do
-  uid_now=$(kubectl get clusterqueue "$IT" -o jsonpath='{.metadata.uid}' 2>/dev/null)
+  uid_now=$(kubectl get clusterqueue "$IT_CQ" -o jsonpath='{.metadata.uid}' 2>/dev/null)
   [ -n "$uid_now" ] && [ "$uid_now" != "$uid_before" ] && { recreated=1; break; }
   sleep 3
 done
@@ -183,7 +193,7 @@ for _ in $(seq 1 10); do
   sleep 2
 done
 if [ -n "$recreated" ] && [ -n "$it_alive" ]; then
-  record PASS "accidental CQ delete self-heals" "${IT} recreated (uid ${uid_now}), InstanceType survived"
+  record PASS "accidental CQ delete self-heals" "${IT_CQ} recreated (uid ${uid_now}), InstanceType survived"
 else
   record FAIL "accidental CQ delete self-heals" "recreated='${recreated:-no}' it_alive='${it_alive:-no}' — a live InstanceType must recreate its deleted queue"
 fi
@@ -195,6 +205,9 @@ for _ in $(seq 1 40); do
 done
 
 # --- C. Deleting an InstanceType tears down its ClusterQueue, then releases (delete-then-wait). ---
+# Use an isolated accelerated pool (acceleratorGroup: nvidia-e2e16td) so the throwaway InstanceType
+# owns a dedicated ClusterQueue (gpustack--nvidia-e2e16td-linux-amd64) regardless of whether
+# instance-type-aware-cpu-manufacturer is false (where non-accelerated types share gpustack--generic-linux-amd64).
 cat <<EOF | kubectl apply -f - >/dev/null 2>&1
 apiVersion: worker.gpustack.ai/v1alpha1
 kind: InstanceType
@@ -202,7 +215,8 @@ metadata:
   name: ${PROBE}
 spec:
   generalGroup: e2e16td
-  acceleratable: false
+  acceleratable: true
+  acceleratorGroup: nvidia-e2e16td
   os: linux
   arch: amd64
   unitResources:
@@ -210,16 +224,21 @@ spec:
     ram: "2Gi"
   localStorage: "100Gi"
 EOF
-# The reconciler ensures the name-identical backing ClusterQueue exists.
+# The reconciler ensures the backing ClusterQueue exists.
 cq_made=""
+PROBE_CQ=""
 for _ in $(seq 1 30); do
-  kubectl get clusterqueue "$PROBE" >/dev/null 2>&1 && { cq_made=1; break; }
+  PROBE_CQ="$(it_cq "$PROBE")"
+  if [ -n "$PROBE_CQ" ] && kubectl get clusterqueue "$PROBE_CQ" >/dev/null 2>&1; then
+    cq_made=1
+    break
+  fi
   sleep 2
 done
 if [ -n "$cq_made" ]; then
-  record PASS "InstanceType creates its backing ClusterQueue" "${PROBE} queue present"
+  record PASS "InstanceType creates its backing ClusterQueue" "${PROBE_CQ} queue present"
 else
-  record FAIL "InstanceType creates its backing ClusterQueue" "${PROBE} queue never appeared"
+  record FAIL "InstanceType creates its backing ClusterQueue" "${PROBE} backing queue never appeared"
 fi
 
 echo "[case-16] deleting InstanceType ${PROBE}; the finalizer must hold until its queue is gone"
@@ -231,7 +250,7 @@ torn=""
 early=""
 for _ in $(seq 1 50); do
   it_left=$(kubectl get instancetype "$PROBE" -o name 2>/dev/null)
-  cq_left=$(kubectl get clusterqueue "$PROBE" -o name 2>/dev/null)
+  cq_left=$(kubectl get clusterqueue "$PROBE_CQ" -o name 2>/dev/null)
   [ -z "$it_left" ] && [ -n "$cq_left" ] && early=1
   [ -z "$it_left" ] && [ -z "$cq_left" ] && { torn=1; break; }
   sleep 3

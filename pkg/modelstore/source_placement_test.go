@@ -72,12 +72,11 @@ func notedFlavor(name string, labels map[string]string) *kueue.ResourceFlavor {
 	return rf
 }
 
-// gpuType is the accelerated InstanceType the GPU fixtures' flavors back.
-func gpuType(name, generalGroup string) *workercore.InstanceType {
-	return &workercore.InstanceType{
+// gpuAcceleratorType is the accelerated AcceleratorType the GPU fixtures' flavors back.
+func gpuAcceleratorType(name, generalGroup string) *workercore.AcceleratorType {
+	return &workercore.AcceleratorType{
 		ObjectMeta: meta.ObjectMeta{Name: name},
-		Spec: workercore.InstanceTypeSpec{
-			Acceleratable:    true,
+		Spec: workercore.AcceleratorTypeSpec{
 			GeneralGroup:     generalGroup,
 			AcceleratorGroup: testGPUKey,
 			OS:               testGPUOS,
@@ -119,13 +118,67 @@ func TestPrefetchTargetNodesBySelector(t *testing.T) {
 func TestPrefetchTargetNodesAmbiguousPlacementRefused(t *testing.T) {
 	pf := sourcePrefetch(func(pf *workercore.ModelPrefetch) {
 		pf.Spec.Placement = &workercore.ModelPrefetchPlacement{
-			InstanceTypes: []string{"h100-8"},
-			NodeSelector:  &meta.LabelSelector{MatchLabels: map[string]string{"pool": "h100"}},
+			AcceleratorTypes: []string{"h100-8"},
+			NodeSelector:     &meta.LabelSelector{MatchLabels: map[string]string{"pool": "h100"}},
 		}
 	})
 
 	_, err := PrefetchTargetNodes(pf, nil, nil, nil)
 	assert.ErrorIs(t, err, ErrPrefetchPlacementAmbiguous)
+}
+
+func TestDeploymentAcceleratorTypes(t *testing.T) {
+	now := meta.Now()
+	deps := []workercore.ModelDeployment{
+		{
+			ObjectMeta: meta.ObjectMeta{Name: "served-1", Namespace: "team-a"},
+			Spec: workercore.ModelDeploymentSpec{
+				Model: workercore.ModelDeploymentModel{ArtifactRef: &core.LocalObjectReference{Name: "model-a"}},
+				Roles: []workercore.ModelDeploymentRole{
+					{AcceleratorType: "nvidia-h100"},
+					{AcceleratorType: ""}, // CPU-only role skipped cleanly
+					{AcceleratorType: "nvidia-a100"},
+				},
+			},
+		},
+		{
+			ObjectMeta: meta.ObjectMeta{Name: "served-2", Namespace: "team-a"},
+			Spec: workercore.ModelDeploymentSpec{
+				Model: workercore.ModelDeploymentModel{ArtifactRef: &core.LocalObjectReference{Name: "model-a"}},
+				Roles: []workercore.ModelDeploymentRole{
+					{AcceleratorType: "nvidia-h100"}, // duplicate
+					{AcceleratorType: "amd-mi300"},
+				},
+			},
+		},
+		{
+			ObjectMeta: meta.ObjectMeta{Name: "other-model", Namespace: "team-a"},
+			Spec: workercore.ModelDeploymentSpec{
+				Model: workercore.ModelDeploymentModel{ArtifactRef: &core.LocalObjectReference{Name: "model-b"}},
+				Roles: []workercore.ModelDeploymentRole{
+					{AcceleratorType: "nvidia-l4"},
+				},
+			},
+		},
+		{
+			ObjectMeta: meta.ObjectMeta{
+				Name:              "deleting-dep",
+				Namespace:         "team-a",
+				DeletionTimestamp: &now,
+				Finalizers:        []string{"test"},
+			},
+			Spec: workercore.ModelDeploymentSpec{
+				Model: workercore.ModelDeploymentModel{ArtifactRef: &core.LocalObjectReference{Name: "model-a"}},
+				Roles: []workercore.ModelDeploymentRole{
+					{AcceleratorType: "nvidia-t4"},
+				},
+			},
+		},
+	}
+
+	got := DeploymentAcceleratorTypes(deps, "model-a")
+	assert.Equal(t, []string{"amd-mi300", "nvidia-a100", "nvidia-h100"}, got,
+		"collects sorted unique non-empty role.AcceleratorType, skipping CPU-only and deleted deployments")
 }
 
 func TestPrefetchTargetNodesDerivedFromOwnNamespaceDeployments(t *testing.T) {
@@ -140,7 +193,7 @@ func TestPrefetchTargetNodesDerivedFromOwnNamespaceDeployments(t *testing.T) {
 			Spec: workercore.ModelDeploymentSpec{
 				Model: workercore.ModelDeploymentModel{ArtifactRef: &core.LocalObjectReference{Name: "model"}},
 				Roles: []workercore.ModelDeploymentRole{
-					{InstanceType: "h100-8"}, {InstanceType: ""}, {InstanceType: "mi300-8"},
+					{AcceleratorType: "h100-8"}, {AcceleratorType: ""}, {AcceleratorType: "mi300-8"},
 				},
 			},
 		},
@@ -148,11 +201,11 @@ func TestPrefetchTargetNodesDerivedFromOwnNamespaceDeployments(t *testing.T) {
 			ObjectMeta: meta.ObjectMeta{Name: "other", Namespace: "team-a"},
 			Spec: workercore.ModelDeploymentSpec{
 				Model: workercore.ModelDeploymentModel{ArtifactRef: &core.LocalObjectReference{Name: "other"}},
-				Roles: []workercore.ModelDeploymentRole{{InstanceType: "ignored"}},
+				Roles: []workercore.ModelDeploymentRole{{AcceleratorType: "ignored"}},
 			},
 		},
 	}
-	pools := InstanceTypeFlavorNames{
+	pools := AcceleratorTypeFlavorNames{
 		"h100-8":  {testGPUFlavorZone},
 		"mi300-8": nil,
 	}
@@ -179,7 +232,7 @@ func TestPrefetchTargetNodesUnparsableSelectorIsAnError(t *testing.T) {
 func TestPrefetchSourceTargetNodesExplicitOnly(t *testing.T) {
 	gpu1 := accelNode("gpu-1", testProfileZone)
 	gpu2 := accelNode("gpu-2", testProfileHost) // same hardware, other profile: another flavor
-	pools := InstanceTypeFlavorNames{
+	pools := AcceleratorTypeFlavorNames{
 		"h100-8": {testGPUFlavorZone, "gpustack--generic--nvidia-h100-80gb-hbm3-linux-amd64-8d-" + testProfileHost},
 		"ghost":  nil,
 	}
@@ -194,7 +247,7 @@ func TestPrefetchSourceTargetNodesExplicitOnly(t *testing.T) {
 	// contributes an empty set, not an error, and the target set is sorted.
 	pf = sourcePrefetch(func(pf *workercore.ModelPrefetch) {
 		pf.Spec.Placement = &workercore.ModelPrefetchPlacement{
-			InstanceTypes: []string{"h100-8", "ghost"},
+			AcceleratorTypes: []string{"h100-8", "ghost"},
 		}
 	})
 	targets, err := PrefetchSourceTargetNodes(pf, []core.Node{gpu2, gpu1}, pools)
@@ -203,7 +256,7 @@ func TestPrefetchSourceTargetNodesExplicitOnly(t *testing.T) {
 		"both profiles' flavors of the named type are targets, sorted")
 
 	// A topology-qualified flavor name matches only the node set carrying that profile.
-	pools = InstanceTypeFlavorNames{"h100-8": {testGPUFlavorZone}}
+	pools = AcceleratorTypeFlavorNames{"h100-8": {testGPUFlavorZone}}
 	targets, err = PrefetchSourceTargetNodes(pf, []core.Node{gpu1, gpu2}, pools)
 	require.NoError(t, err)
 	assert.Equal(t, []string{"gpu-1"}, targets,
@@ -221,8 +274,8 @@ func TestPrefetchSourceTargetNodesExplicitOnly(t *testing.T) {
 	// Both kinds set is the shared ambiguity refusal.
 	pf = sourcePrefetch(func(pf *workercore.ModelPrefetch) {
 		pf.Spec.Placement = &workercore.ModelPrefetchPlacement{
-			InstanceTypes: []string{"h100-8"},
-			NodeSelector:  &meta.LabelSelector{MatchLabels: map[string]string{"pool": "h100"}},
+			AcceleratorTypes: []string{"h100-8"},
+			NodeSelector:     &meta.LabelSelector{MatchLabels: map[string]string{"pool": "h100"}},
 		}
 	})
 	_, err = PrefetchSourceTargetNodes(pf, []core.Node{gpu1, gpu2}, pools)
@@ -241,22 +294,22 @@ func TestResolvePlacementInstanceTypeFlavorNames(t *testing.T) {
 	t.Run("unknown type resolves empty, not an error", func(t *testing.T) {
 		cli := ctrlfake.NewClientBuilder().WithScheme(scheme.Scheme).
 			WithObjects(collapsed).Build()
-		pools, err := ResolvePlacementInstanceTypeFlavorNames(ctx, cli, []string{"ghost"}, false)
+		pools, err := ResolvePlacementAcceleratorTypeFlavorNames(ctx, cli, []string{"ghost"}, false)
 		require.NoError(t, err)
 		assert.Empty(t, pools["ghost"])
 	})
 
 	t.Run("no type names resolves nothing", func(t *testing.T) {
 		cli := ctrlfake.NewClientBuilder().WithScheme(scheme.Scheme).Build()
-		pools, err := ResolvePlacementInstanceTypeFlavorNames(ctx, cli, nil, false)
+		pools, err := ResolvePlacementAcceleratorTypeFlavorNames(ctx, cli, nil, false)
 		require.NoError(t, err)
 		assert.Nil(t, pools)
 	})
 
 	t.Run("the pool follows the type's schedule labels", func(t *testing.T) {
 		cli := ctrlfake.NewClientBuilder().WithScheme(scheme.Scheme).
-			WithObjects(gpuType("h100-8", testCPUKey), collapsed, aware).Build()
-		pools, err := ResolvePlacementInstanceTypeFlavorNames(ctx, cli, []string{"h100-8"}, false)
+			WithObjects(gpuAcceleratorType("h100-8", testCPUKey), collapsed, aware).Build()
+		pools, err := ResolvePlacementAcceleratorTypeFlavorNames(ctx, cli, []string{"h100-8"}, false)
 		require.NoError(t, err)
 		assert.Equal(t, []string{"flavor-qualified-aware", testGPUFlavorZone}, pools["h100-8"],
 			"the lookup is a label containment: an aware flavor is a superset of a collapsed type's schedule labels, so both are the pool")
@@ -264,21 +317,21 @@ func TestResolvePlacementInstanceTypeFlavorNames(t *testing.T) {
 
 	t.Run("cpu awareness splits the pool", func(t *testing.T) {
 		cli := ctrlfake.NewClientBuilder().WithScheme(scheme.Scheme).
-			WithObjects(gpuType("h100-8", "amd-epyc"), collapsed, aware).Build()
+			WithObjects(gpuAcceleratorType("h100-8", "amd-epyc"), collapsed, aware).Build()
 
-		pools, err := ResolvePlacementInstanceTypeFlavorNames(ctx, cli, []string{"h100-8"}, true)
+		pools, err := ResolvePlacementAcceleratorTypeFlavorNames(ctx, cli, []string{"h100-8"}, true)
 		require.NoError(t, err)
 		assert.Equal(t, []string{"flavor-qualified-aware"}, pools["h100-8"],
 			"an aware pool selects the CPU-split flavor")
 
-		pools, err = ResolvePlacementInstanceTypeFlavorNames(ctx, cli, []string{"h100-8"}, false)
+		pools, err = ResolvePlacementAcceleratorTypeFlavorNames(ctx, cli, []string{"h100-8"}, false)
 		require.NoError(t, err)
 		assert.Equal(t, []string{"flavor-qualified-aware", testGPUFlavorZone}, pools["h100-8"],
 			"read unaware, the same type's pool is both flavors: the flag decides the split")
 	})
 
 	t.Run("api errors propagate", func(t *testing.T) {
-		_, err := ResolvePlacementInstanceTypeFlavorNames(ctx, failingReader{},
+		_, err := ResolvePlacementAcceleratorTypeFlavorNames(ctx, failingReader{},
 			[]string{"h100-8"}, false)
 		assert.Error(t, err)
 	})
@@ -376,7 +429,7 @@ func TestBindingCoversNode(t *testing.T) {
 
 func TestResolveInstanceTypeFlavorNamesNotFoundIsNotAnError(t *testing.T) {
 	cli := ctrlfake.NewClientBuilder().WithScheme(scheme.Scheme).Build()
-	pools, err := ResolvePlacementInstanceTypeFlavorNames(context.Background(), cli,
+	pools, err := ResolvePlacementAcceleratorTypeFlavorNames(context.Background(), cli,
 		[]string{"absent"}, false)
 	require.NoError(t, err)
 	assert.NotNil(t, pools)
@@ -387,10 +440,10 @@ func TestPrefetchTargetNodesMissingFlavorsStayEmpty(t *testing.T) {
 	// "Missing type/flavors means empty target": a placed prefetch over a type the cluster
 	// never heard of targets nothing and says nothing; only API errors propagate.
 	pf := sourcePrefetch(func(pf *workercore.ModelPrefetch) {
-		pf.Spec.Placement = &workercore.ModelPrefetchPlacement{InstanceTypes: []string{"ghost"}}
+		pf.Spec.Placement = &workercore.ModelPrefetchPlacement{AcceleratorTypes: []string{"ghost"}}
 	})
 	targets, err := PrefetchTargetNodes(pf, []core.Node{accelNode("gpu-1", testProfileZone)},
-		nil, InstanceTypeFlavorNames{"ghost": nil})
+		nil, AcceleratorTypeFlavorNames{"ghost": nil})
 	require.NoError(t, err)
 	assert.Empty(t, targets)
 }

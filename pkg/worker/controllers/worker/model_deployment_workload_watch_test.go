@@ -296,7 +296,7 @@ func TestModelDeploymentWorkloadWatch_EnqueuesTheDeployment(t *testing.T) {
 // enqueues is the one that turns a replica over.
 func TestModelDeploymentWorkloadWatch_ReleasesAHeldRollout(t *testing.T) {
 	ctx := context.Background()
-	cli := newModelDeploymentClient(newRenderDeployment(), newRenderInstanceType())
+	cli := newModelDeploymentClient(newRenderDeployment(), newRenderAcceleratorType())
 	_, err := reconcileModelDeployment(t, cli)
 	require.NoError(t, err)
 	require.Len(t, replicaNames(t, cli), 2)

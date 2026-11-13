@@ -610,6 +610,16 @@ func (r *ModelDeploymentReconciler) replacementAdmitted(
 		return false, reason, nil
 	}
 
+	if replacementQueueName(want) == "" {
+		for _, member := range standing {
+			if member.Spec.NodeName == "" {
+				return false, fmt.Sprintf("member %s is not scheduled yet", member.Name), nil
+			}
+		}
+
+		return true, "", nil
+	}
+
 	wl, err := r.replacementGroupWorkload(ctx, md, slot)
 	if err != nil {
 		return false, "", err

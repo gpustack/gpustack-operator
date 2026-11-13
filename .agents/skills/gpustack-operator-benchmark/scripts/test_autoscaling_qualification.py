@@ -204,9 +204,9 @@ class BuilderTests(unittest.TestCase):
         self.assertEqual(gpt["spec"]["source"]["huggingFace"]["repository"], "openai/gpt-oss-120b")
         self.assertNotIn("allowPatterns", gpt["spec"])
 
-    def test_model_prefetch_places_on_the_instance_type(self):
+    def test_model_prefetch_places_on_the_accelerator_type(self):
         prefetch = qualification.model_prefetch("qwen3-8b", "nvidia-h200")
-        self.assertEqual(prefetch["spec"]["placement"], {"instanceTypes": ["nvidia-h200"]})
+        self.assertEqual(prefetch["spec"]["placement"], {"acceleratorTypes": ["nvidia-h200"]})
         self.assertEqual(prefetch["spec"]["bindingRef"], {"name": "bench-models"})
         self.assertEqual(prefetch["spec"]["minReady"], 0)
 

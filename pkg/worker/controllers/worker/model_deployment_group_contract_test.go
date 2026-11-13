@@ -71,7 +71,7 @@ func newContractFixture(t *testing.T, size int32, externalDP bool) *contractFixt
 			md.Spec.Roles[0].ExtraArgs = []string{"--data-parallel-rank", "$(GPUSTACK_MEMBER_INDEX)"}
 		}
 	})
-	cli := newModelDeploymentClient(md.DeepCopy(), newRenderInstanceType())
+	cli := newModelDeploymentClient(md.DeepCopy(), newRenderAcceleratorType())
 	endpointEligibilityTestSeed(t, cli, md)
 	_, err := reconcileModelDeployment(t, cli)
 	require.NoError(t, err)

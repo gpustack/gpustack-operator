@@ -981,3 +981,32 @@ func TestNodeFlavorReconciler_RetiresFlavorLeftByLateCPUIdentity(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "2", got.Labels[nodefeature.GeneralFeatureLabelPrefix+"amd-epyc-7571"+_ResourceFlavorCapacityLabelSuffix])
 }
+
+func TestNodeFlavorReconciler_AuthorsDerivedAcceleratorTypeUnconditionally(t *testing.T) {
+	nd := newManagedAccelNode("node-g", 2)
+	devName := deviceFlavorName(nd)
+	cpuName := cpuFlavorName(nd)
+	cli := buildNodeFlavorClient(nd)
+
+	ctx := context.Background()
+	r := &NodeFlavorReconciler{Client: cli}
+	_, err := r.Reconcile(ctx, ctrlreconcile.Request{NamespacedName: ctrlcli.ObjectKey{Name: devName}})
+	require.NoError(t, err)
+
+	// Accelerated flavor derives an AcceleratorType.
+	at := new(workercore.AcceleratorType)
+	require.NoError(t, cli.Get(ctx, ctrlcli.ObjectKey{Name: "gpustack--nvidia-a10g-linux-amd64"}, at))
+	assert.Equal(t, "true", at.Labels[_InstanceTypeDerivedFromNodeLabel])
+	assert.Equal(t, "generic", at.Spec.GeneralGroup)
+	assert.Equal(t, "nvidia-a10g", at.Spec.AcceleratorGroup)
+	assert.Equal(t, "linux", at.Spec.OS)
+	assert.Equal(t, "amd64", at.Spec.Arch)
+	assert.Equal(t, "NVIDIA-A10G", at.Spec.DisplayName)
+
+	// CPU flavor does NOT derive an AcceleratorType.
+	_, err = r.Reconcile(ctx, ctrlreconcile.Request{NamespacedName: ctrlcli.ObjectKey{Name: cpuName}})
+	require.NoError(t, err)
+	atList := new(workercore.AcceleratorTypeList)
+	require.NoError(t, cli.List(ctx, atList))
+	assert.Len(t, atList.Items, 1)
+}

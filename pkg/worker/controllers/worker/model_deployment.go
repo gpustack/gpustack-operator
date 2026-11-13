@@ -32,6 +32,7 @@ import (
 	ctrlpredicate "sigs.k8s.io/controller-runtime/pkg/predicate"
 	ctrlreconcile "sigs.k8s.io/controller-runtime/pkg/reconcile"
 	kueue "sigs.k8s.io/kueue/apis/kueue/v1beta2"
+	kueuectrlconst "sigs.k8s.io/kueue/pkg/controller/constants"
 	kueuepodconst "sigs.k8s.io/kueue/pkg/controller/jobs/pod/constants"
 	kueueworkload "sigs.k8s.io/kueue/pkg/workload"
 
@@ -375,7 +376,7 @@ func (r *ModelDeploymentReconciler) convergeModelDeployment(
 
 	desired, err := r.renderModelDeploymentPods(ctx, md, connection, interfaceProtocols, weights)
 	if err != nil {
-		// A render failure is the InstanceType not being ready, or a role the renderer cannot build
+		// A render failure is the AcceleratorType not being ready, or a role the renderer cannot build
 		// a container from. The pass aborts before any status is written, so an Event is the only
 		// place the cause reaches a reader: the conditions still say "no replica has been created
 		// yet", which describes a slow start and a permanent failure identically.
@@ -2328,6 +2329,7 @@ func (r *ModelDeploymentReconciler) renderModelDeploymentRolePods(
 	// resource becomes a request, and this renderer derives the same values the Instance webhook
 	// does. A second knob for one translation would let the two disagree on one cluster.
 	overcommit := settings.InstanceGeneralResourcesOvercommit.ShouldValueBool(ctx)
+	mixedOnNode := settings.InstanceTypeMixedOnNode.ShouldValueBool(ctx)
 	// Read once per pass so every role renders against one value; the render decides which Pods
 	// turn it into a sysctl.
 	tcpTWReuse := settings.ModelDeploymentTCPTWReuse.ShouldValueBool(ctx)
@@ -2357,17 +2359,24 @@ func (r *ModelDeploymentReconciler) renderModelDeploymentRolePods(
 	for i := range md.Spec.Roles {
 		role := &md.Spec.Roles[i]
 
-		instType, err := r.getModelDeploymentInstanceType(ctx, role.InstanceType)
-		if err != nil {
-			return nil, err
+		var accType *worker.AcceleratorType
+		var manufacturer string
+		if role.AcceleratorType != "" {
+			var err error
+			accType, err = r.getModelDeploymentAcceleratorType(ctx, role.AcceleratorType)
+			if err != nil {
+				return nil, err
+			}
+			manufacturer = accType.Status.Detail.Manufacturer
 		}
 
 		in := ModelDeploymentRenderInput{
 			Deployment:                 md,
 			Role:                       role,
-			InstanceType:               instType,
-			RuntimeClassName:           r.getModelDeploymentRuntimeClassName(ctx, instType),
+			AcceleratorType:            accType,
+			RuntimeClassName:           r.getModelDeploymentRuntimeClassName(ctx, accType),
 			GeneralResourcesOvercommit: overcommit,
+			MixedOnNode:                mixedOnNode,
 			TCPTWReuse:                 tcpTWReuse,
 			NativeSidecar:              nativeSidecar,
 		}
@@ -2380,7 +2389,6 @@ func (r *ModelDeploymentReconciler) renderModelDeploymentRolePods(
 		// fallback, and a role that cannot take one at all falls back under
 		// Prefer too. A refusal holds creation across the deployment, and the status
 		// carries the reason, instead of a render error that would say nothing.
-		manufacturer := instType.Status.Detail.Manufacturer
 		if weights != nil && weights.Render != nil &&
 			weights.Render.Delivery == workercore.ModelDeploymentModelDeliveryRemote {
 			effective, modelTransferReason, modelTransferMessage := weights.Render.modelTransferForRole(
@@ -2398,7 +2406,7 @@ func (r *ModelDeploymentReconciler) renderModelDeploymentRolePods(
 
 		// The connector is synthesized PER ROLE even though its connection is per deployment,
 		// because the accelerator is the role's: it selects the store connector the engine
-		// registers, and only the role's InstanceType knows it.
+		// registers, and only the role's AcceleratorType knows it.
 		//
 		// ENCODE REACHES THE RENDERER, BUT NOT THE KV CONNECTOR. The synthesizer renders the
 		// encoder-cache leg on it, which is the whole point of it being here; what an encoder does
@@ -2406,14 +2414,14 @@ func (r *ModelDeploymentReconciler) renderModelDeploymentRolePods(
 		// block has therefore become a term below that excludes the KV terms alone, so a leg the
 		// operator owns is configured while the store the operator does not own is left alone.
 		kvTransfer := modelDeploymentUsesKVTransfer(md, role)
-		publishKVEvents := modelDeploymentPublishesKVEvents(md, role, instType.Status.Detail.Manufacturer)
+		publishKVEvents := modelDeploymentPublishesKVEvents(md, role, manufacturer)
 		routingSidecar := modelDeploymentFrontsDecodeWithSidecar(md, role)
 		roleKind := ModelDeploymentEffectiveRoleKind(role)
 		// The encoder stage is the row's answer for this combination, taken once per role because
 		// the render is per role: the leg differs by half and the sidecar flag is the same on both
 		// ends of the data plane. Both are empty for a deployment with no encoder stage, so the
 		// fields below are set unconditionally rather than behind a test.
-		encoderLeg := modelDeploymentEPDEncoderLeg(md, role, instType.Status.Detail.Manufacturer)
+		encoderLeg := modelDeploymentEPDEncoderLeg(md, role, manufacturer)
 		encoderURLs := modelDeploymentEPDEncoderURLs(md)
 		efaActive := awsEFAEnabled || slices.Contains(interfaceProtocols, "efa")
 		if in.Artifact != nil && manufacturer != nodefeature.ManufacturerAscend {
@@ -2433,7 +2441,7 @@ func (r *ModelDeploymentReconciler) renderModelDeploymentRolePods(
 			}
 			resource, err := ModelDeploymentInterfaceResource(protocols,
 				ModelDeploymentDirectInterfaceProtocol(
-					md, role, instType.Status.Detail.Manufacturer, remoteDelivery, efaActive,
+					md, role, manufacturer, remoteDelivery, efaActive,
 				), count)
 			if err != nil {
 				return nil, fmt.Errorf("role %q interface request: %w", role.Name, err)
@@ -2441,15 +2449,15 @@ func (r *ModelDeploymentReconciler) renderModelDeploymentRolePods(
 			interfaceResource = resource
 			in.InterfaceResource = resource
 		}
-		effectiveKVBackend := ModelDeploymentEffectiveKVTransferBackend(md, instType.Status.Detail.Manufacturer)
+		effectiveKVBackend := ModelDeploymentEffectiveKVTransferBackend(md, manufacturer)
 		kvTransferProtocol := ""
 		if effectiveKVBackend == inject.KVTransferBackendMooncake {
 			switch {
-			case instType.Status.Detail.Manufacturer == nodefeature.ManufacturerAscend:
+			case manufacturer == nodefeature.ManufacturerAscend:
 				kvTransferProtocol = "ascend"
 			case ModelDeploymentDirectPairRequestsInterfaces(md) && interfaceResource != "" && efaActive:
 				kvTransferProtocol = "efa"
-			case instType.Status.Detail.Manufacturer == nodefeature.ManufacturerAMD:
+			case manufacturer == nodefeature.ManufacturerAMD:
 				kvTransferProtocol = "hip"
 			case ModelDeploymentDirectPairRequestsInterfaces(md) && interfaceResource != "":
 				kvTransferProtocol = "rdma"
@@ -2464,7 +2472,7 @@ func (r *ModelDeploymentReconciler) renderModelDeploymentRolePods(
 				roleConnection = *connection
 			}
 			roleConnection.Engine = md.Spec.Engine.Name
-			roleConnection.Manufacturer = instType.Status.Detail.Manufacturer
+			roleConnection.Manufacturer = manufacturer
 			// The kind is the role's, and it is the only per-role term in the synthesized
 			// configuration: it is what makes a prefiller and a decoder two configurations rather
 			// than two copies of one, which is what the atomic admission of the pair is FOR.
@@ -2498,7 +2506,7 @@ func (r *ModelDeploymentReconciler) renderModelDeploymentRolePods(
 			}
 			in.Connector = connector
 		} else if roleKind == workercore.ModelDeploymentRoleKindEncode &&
-			modelDeploymentEPDReachesEncoderStage(md, instType.Status.Detail.Manufacturer) {
+			modelDeploymentEPDReachesEncoderStage(md, manufacturer) {
 			// AN ENCODER TAKES THE LEG WITHOUT ANYTHING ELSE, so this is its own path rather than a
 			// term in the condition above: an encoder has no store connection, no transfer leg and
 			// no sidecar, and folding it into that branch would carry four false terms to reach the
@@ -2511,7 +2519,7 @@ func (r *ModelDeploymentReconciler) renderModelDeploymentRolePods(
 			// refuses should keep doing rather than fail over a field nothing consumes.
 			connector, err := SynthesizeModelDeploymentConnector(ModelDeploymentConnectorInput{
 				Engine:       md.Spec.Engine.Name,
-				Manufacturer: instType.Status.Detail.Manufacturer,
+				Manufacturer: manufacturer,
 				Kind:         role.Kind,
 				EncoderCache: encoderLeg,
 				EncoderURLs:  encoderURLs,
@@ -2527,11 +2535,11 @@ func (r *ModelDeploymentReconciler) renderModelDeploymentRolePods(
 		// of this flag is never one of the two roles the leg is configured onto.
 		//
 		// It is set here rather than beside the sidecar call because this is the one place holding
-		// both the deployment and its InstanceType, and therefore the one place that can ask which
+		// both the deployment and its AcceleratorType, and therefore the one place that can ask which
 		// row this deployment runs under. Empty renders no flag, which is what a deployment
 		// declaring no encoder role gets.
 		in.ECConnector = ModelDeploymentECSidecarConnector(
-			modelDeploymentEPDConnector(md, instType.Status.Detail.Manufacturer),
+			modelDeploymentEPDConnector(md, manufacturer),
 		)
 		template, err := renderModelDeploymentPodTemplate(ctx, in)
 		if err != nil {
@@ -2719,9 +2727,13 @@ func (r *ModelDeploymentReconciler) modelDeploymentTakenGroups(
 			continue
 		}
 		group := pod.Labels[kueuepodconst.GroupNameLabel]
-		if group == "" && ModelDeploymentElasticRole(md) != nil && role == modelDeploymentElasticHeadName(md) {
-			// The auxiliary head has no Kueue group, but its uncached presence still holds the slot.
-			group = modelDeploymentReplicaGroupName(md, role, 0)
+		if group == "" {
+			if ordinal, ok := modelDeploymentPodOrdinal(pod); ok {
+				group = modelDeploymentReplicaGroupName(md, role, ordinal)
+			} else if ModelDeploymentElasticRole(md) != nil && role == modelDeploymentElasticHeadName(md) {
+				// The auxiliary head has no Kueue group, but its uncached presence still holds the slot.
+				group = modelDeploymentReplicaGroupName(md, role, 0)
+			}
 		}
 		if group != "" {
 			taken.Insert(group)
@@ -2732,7 +2744,7 @@ func (r *ModelDeploymentReconciler) modelDeploymentTakenGroups(
 }
 
 // modelDeploymentAdmittedReplicas counts how many of these replicas hold an admitted Workload of
-// their own.
+// their own, or (for unqueued CPU-only roles) have every member scheduled onto a node.
 //
 // A REPLICA COUNTS WHEN ITS WORKLOAD IS ADMITTED, and by nothing weaker. Admission is the
 // statement that quota was granted; a created-but-still-queued replacement has a Workload that is
@@ -2752,6 +2764,25 @@ func modelDeploymentAdmittedReplicas(workloads []kueue.Workload, pods []*core.Po
 		wl := &workloads[i]
 		if modelDeploymentWorkloadOwnsAny(wl, ours) &&
 			kubeapistatus.ConditionType(kueue.WorkloadAdmitted).IsTrue(wl) {
+			admitted++
+		}
+	}
+
+	for _, view := range modelDeploymentGroupPods(modelDeploymentPodValues(pods), true) {
+		if !view.Seated || len(view.Members) == 0 || view.Members[0].Labels[kueuectrlconst.QueueLabel] != "" {
+			continue
+		}
+		if !modelDeploymentDeployedReplicaShape(view).modelDeploymentReplicaIsWhole() {
+			continue
+		}
+		scheduled := true
+		for _, member := range view.Members {
+			if member.Spec.NodeName == "" {
+				scheduled = false
+				break
+			}
+		}
+		if scheduled {
 			admitted++
 		}
 	}
@@ -2978,40 +3009,40 @@ func modelDeploymentOrdinalOrFloor(pod *core.Pod) int {
 	return ordinal
 }
 
-// getModelDeploymentInstanceType reads the InstanceType a role is admitted against.
+// getModelDeploymentAcceleratorType reads the AcceleratorType a role is admitted against.
 //
-// A missing type is an error rather than a render without one: the type supplies both how to spell
-// the accelerator keys and the per-card resources the host request is derived from, so a Pod
-// rendered without it would ask for something other than what the role declared.
-func (r *ModelDeploymentReconciler) getModelDeploymentInstanceType(
+// A missing type is an error rather than a render without one: the type supplies how to spell the
+// accelerator keys, so a Pod rendered without it would ask for something other than what the role
+// declared.
+func (r *ModelDeploymentReconciler) getModelDeploymentAcceleratorType(
 	ctx context.Context, name string,
-) (*worker.InstanceType, error) {
-	instType := new(worker.InstanceType)
-	err := r.Client.Get(ctx, ctrlcli.ObjectKey{Name: name}, instType,
+) (*worker.AcceleratorType, error) {
+	accType := new(worker.AcceleratorType)
+	err := r.Client.Get(ctx, ctrlcli.ObjectKey{Name: name}, accType,
 		ctrlclix.WithoutQuorum)
 	if err == nil {
-		return instType, nil
+		return accType, nil
 	}
 	if !kerrors.IsNotFound(err) {
-		return nil, fmt.Errorf("get instance type %s: %w", name, err)
+		return nil, fmt.Errorf("get accelerator type %s: %w", name, err)
 	}
 
-	// Maybe the InstanceType is not cached yet; read through to the API server rather than treat a
+	// Maybe the AcceleratorType is not cached yet; read through to the API server rather than treat a
 	// cold cache as a missing type.
-	err = r.APIReader.Get(ctx, ctrlcli.ObjectKey{Name: name}, instType,
+	err = r.APIReader.Get(ctx, ctrlcli.ObjectKey{Name: name}, accType,
 		ctrlclix.WithoutQuorum)
 	if err != nil {
-		return nil, fmt.Errorf("get instance type %s: %w", name, err)
+		return nil, fmt.Errorf("get accelerator type %s: %w", name, err)
 	}
 
-	return instType, nil
+	return accType, nil
 }
 
 // modelDeploymentRoleManufacturers resolves each role's accelerator manufacturer, keyed by role
 // name, for the routed-path decisions that depend on it. An unrouted deployment gets nil, because
 // nothing it renders reads a manufacturer.
 //
-// The read is BEST-EFFORT, and deliberately narrower than getModelDeploymentInstanceType's: a role
+// The read is BEST-EFFORT, and deliberately narrower than getModelDeploymentAcceleratorType's: a role
 // whose type cannot be read simply has no entry, and every consumer treats a missing entry as "not
 // known to be Ascend" -- the answer these paths gave before they looked. The pod render already
 // fails the pass on an unreadable type, so a gap here means the type went away mid-pass, and one
@@ -3025,15 +3056,51 @@ func (r *ModelDeploymentReconciler) modelDeploymentRoleManufacturers(
 
 	manufacturers := make(map[string]string, len(md.Spec.Roles))
 	for i := range md.Spec.Roles {
-		instType := new(worker.InstanceType)
-		if err := r.Client.Get(ctx, ctrlcli.ObjectKey{Name: md.Spec.Roles[i].InstanceType}, instType,
+		if md.Spec.Roles[i].AcceleratorType == "" {
+			continue
+		}
+		accType := new(worker.AcceleratorType)
+		if err := r.Client.Get(ctx, ctrlcli.ObjectKey{Name: md.Spec.Roles[i].AcceleratorType}, accType,
 			ctrlclix.WithoutQuorum); err != nil {
 			continue
 		}
-		manufacturers[md.Spec.Roles[i].Name] = instType.Status.Detail.Manufacturer
+		manufacturers[md.Spec.Roles[i].Name] = accType.Status.Detail.Manufacturer
 	}
 
 	return manufacturers
+}
+
+// modelDeploymentRoleQueues resolves the canonical pool ClusterQueue name for each role's
+// AcceleratorType, keyed by AcceleratorType name. When an AcceleratorType cannot be read or the
+// reconciler has no client, the map omits the entry and observeModelDeploymentQuota falls back to
+// the AcceleratorType name.
+func (r *ModelDeploymentReconciler) modelDeploymentRoleQueues(
+	ctx context.Context, md *workercore.ModelDeployment,
+) map[string]string {
+	if r == nil || r.Client == nil {
+		return nil
+	}
+
+	var queues map[string]string
+	for i := range md.Spec.Roles {
+		atName := md.Spec.Roles[i].AcceleratorType
+		if atName == "" {
+			continue
+		}
+		if _, ok := queues[atName]; ok {
+			continue
+		}
+		accType := new(workercore.AcceleratorType)
+		if err := r.Client.Get(ctx, ctrlcli.ObjectKey{Name: atName}, accType, ctrlclix.WithoutQuorum); err != nil {
+			continue
+		}
+		if queues == nil {
+			queues = make(map[string]string, len(md.Spec.Roles))
+		}
+		queues[atName] = AcceleratorTypePoolQueueName(ctx, accType)
+	}
+
+	return queues
 }
 
 // getModelDeploymentRuntimeClassName reports the runtime class an accelerated replica needs, and ""
@@ -3043,13 +3110,13 @@ func (r *ModelDeploymentReconciler) modelDeploymentRoleManufacturers(
 // different name, or not at all, reports itself. It is looked up rather than assumed because a
 // Pod naming a RuntimeClass that does not exist is rejected outright.
 func (r *ModelDeploymentReconciler) getModelDeploymentRuntimeClassName(
-	ctx context.Context, instType *worker.InstanceType,
+	ctx context.Context, accType *worker.AcceleratorType,
 ) string {
-	if !instType.Spec.Acceleratable {
+	if accType == nil {
 		return ""
 	}
 
-	name := nodefeature.GetAcceleratableRuntimeName(instType.Status.Detail.Manufacturer)
+	name := nodefeature.GetAcceleratableRuntimeName(accType.Status.Detail.Manufacturer)
 	if name == "" {
 		return ""
 	}
@@ -3232,7 +3299,7 @@ func (r *ModelDeploymentReconciler) SetupController(ctx context.Context, opts co
 			ctrlhandler.EnqueueRequestsFromMapFunc(r.mapModelDeploymentBinding),
 		).
 		Watches(
-			// The InstanceType's OBSERVED detail is now an input to the rendered Pod: a role that
+			// The AcceleratorType's OBSERVED detail is now an input to the rendered Pod: a role that
 			// names no image has one synthesized from the pool's accelerator runtime version, so a
 			// driver rollout changes the image every replica should be running. Without this watch
 			// that change would be picked up only when something else woke the deployment, and the
@@ -3242,8 +3309,8 @@ func (r *ModelDeploymentReconciler) SetupController(ctx context.Context, opts co
 			// No GenerationChangedPredicate here, and that is the point: what moves is the status,
 			// which does not bump the generation. The predicate on the primary object would filter
 			// out exactly the updates this watch exists for.
-			&worker.InstanceType{},
-			ctrlhandler.EnqueueRequestsFromMapFunc(r.mapModelDeploymentInstanceType),
+			&worker.AcceleratorType{},
+			ctrlhandler.EnqueueRequestsFromMapFunc(r.mapModelDeploymentAcceleratorType),
 		).
 		Watches(
 			// The pool's published client endpoint is the address every replica dials, and it is
@@ -3403,19 +3470,19 @@ func (r *ModelDeploymentReconciler) mapModelDeploymentBackend(
 	return reqs
 }
 
-// mapModelDeploymentInstanceType enqueues every deployment with a role admitted against the type.
+// mapModelDeploymentAcceleratorType enqueues every deployment with a role admitted against the type.
 //
-// The scan crosses namespaces, unlike the Binding's, and it has to: an InstanceType is
+// The scan crosses namespaces, unlike the Binding's, and it has to: an AcceleratorType is
 // cluster-scoped, so the deployments referencing one are not confined to any namespace. The set
 // walked is every ModelDeployment on the cluster, which is bounded by how many a cluster has rather
 // than by how many nodes or Pods it runs.
-func (r *ModelDeploymentReconciler) mapModelDeploymentInstanceType(
+func (r *ModelDeploymentReconciler) mapModelDeploymentAcceleratorType(
 	ctx context.Context, obj ctrlcli.Object,
 ) []ctrlreconcile.Request {
 	mdList := new(workercore.ModelDeploymentList)
 	if err := r.Client.List(ctx, mdList, ctrlclix.WithoutQuorum); err != nil {
-		ctrllog.FromContext(ctx).Error(err, "list model deployments for instance type",
-			"instance type", ctrlcli.ObjectKeyFromObject(obj))
+		ctrllog.FromContext(ctx).Error(err, "list model deployments for accelerator type",
+			"accelerator type", ctrlcli.ObjectKeyFromObject(obj))
 
 		return nil
 	}
@@ -3424,7 +3491,7 @@ func (r *ModelDeploymentReconciler) mapModelDeploymentInstanceType(
 	for i := range mdList.Items {
 		md := &mdList.Items[i]
 		for j := range md.Spec.Roles {
-			if md.Spec.Roles[j].InstanceType != obj.GetName() {
+			if md.Spec.Roles[j].AcceleratorType == "" || md.Spec.Roles[j].AcceleratorType != obj.GetName() {
 				continue
 			}
 			reqs = append(reqs, ctrlreconcile.Request{

@@ -9,38 +9,35 @@ import (
 // ModelDeploymentRoleResourcesApplyConfiguration represents a declarative configuration of the ModelDeploymentRoleResources type for use
 // with apply.
 //
-// ModelDeploymentRoleResources is what one Pod of a role asks of accelerators and fabric interfaces.
+// ModelDeploymentRoleResources is what one Pod of a role asks of accelerators, fabric interfaces,
+// and optional explicit host resources.
 //
-// It deliberately mirrors the accelerator fields of InstanceResources — the same names, the same
-// meanings — rather than inventing a second vocabulary for one request, and it deliberately omits
-// that type's CPU, RAM and LocalStorage, which are derived here rather than declared.
+// It mirrors the accelerator fields of InstanceResources — the same names, the same meanings —
+// rather than inventing a second vocabulary for one request, and adds optional CPU, RAM and
+// LocalStorage host resource requests that are rendered onto the serving container only when set
+// (never derived from AcceleratorType or InstanceType).
 type ModelDeploymentRoleResourcesApplyConfiguration struct {
 	// Accelerator is how many accelerator cards ONE POD asks for.
 	//
-	// - Left unset on an acceleratable InstanceType it DEFAULTS TO ONE at admission, on create and
-	// on update alike, the same way an Instance's does. The value is written into the stored
-	// object rather than applied at render time, so what was admitted is what can be read back.
-	// - AN EXPLICIT ZERO IS KEPT, because it is a value the user wrote, and on an acceleratable
-	// InstanceType it asks for nothing that pool's queue accounts in. It is accepted while it is
-	// the only role using that type, and refused when another role shares the type: replicas
-	// asking for nothing the queue accounts in are admitted and run while that queue charges
-	// them nothing, spending from the pool their siblings on that type are charged for.
-	// - A Pod meant to run without an accelerator belongs on an InstanceType that is not
-	// acceleratable, where CPU is what the queue accounts in.
+	// - Left unset on an accelerated role (acceleratorType set) it DEFAULTS TO ONE at admission, on
+	// create and on update alike. The value is written into the stored object rather than applied
+	// at render time, so what was admitted is what can be read back.
+	// - A role meant to run without an accelerator omits acceleratorType and leaves accelerator
+	// unset or zero.
 	Accelerator *resource.Quantity `json:"accelerator,omitempty"`
 	// AcceleratorSlicedMemoryPercentage is the per-accelerator VRAM budget requested on a sliced
-	// InstanceType, as a percentage in [0,100]. 0 disables slicing, making the request an exclusive
-	// whole-accelerator one. It is ignored by an InstanceType offering no slicing.
+	// AcceleratorType, as a percentage in [0,100]. 0 disables slicing, making the request an exclusive
+	// whole-accelerator one. It is ignored by an AcceleratorType offering no slicing.
 	//
 	AcceleratorSlicedMemoryPercentage *int32 `json:"acceleratorSlicedMemoryPercentage,omitempty"`
 	// AcceleratorSlicedCoresPercentage is the per-accelerator compute budget requested on a sliced
-	// InstanceType, as a percentage in [0,100], independent of the memory percentage.
+	// AcceleratorType, as a percentage in [0,100], independent of the memory percentage.
 	//
 	AcceleratorSlicedCoresPercentage *int32 `json:"acceleratorSlicedCoresPercentage,omitempty"`
 	// AcceleratorPartitionedProfile is the hardware partition profile requested on a
-	// partition-offering InstanceType, e.g. "3g.40gb". A non-empty value is mutually exclusive with
+	// partition-offering AcceleratorType, e.g. "3g.40gb". A non-empty value is mutually exclusive with
 	// the two slice percentages: hardware partitioning and software slicing cannot both apply to one
-	// accelerator. It is ignored by an InstanceType offering no partition.
+	// accelerator. It is ignored by an AcceleratorType offering no partition.
 	//
 	AcceleratorPartitionedProfile *string `json:"acceleratorPartitionedProfile,omitempty"`
 	// Interface is the number of fabric interfaces one role Pod requests, as a whole number.
@@ -52,6 +49,19 @@ type ModelDeploymentRoleResourcesApplyConfiguration struct {
 	// the same as for accelerator; the schema carries no bound of its own.
 	//
 	Interface *resource.Quantity `json:"interface,omitempty"`
+	// CPU is the host CPU request and limit for one role Pod, such as "8" or "16". When omitted,
+	// no CPU request or limit is rendered onto the serving container.
+	//
+	CPU *resource.Quantity `json:"cpu,omitempty"`
+	// RAM is the host memory request and limit for one role Pod, such as "64Gi". When omitted,
+	// no memory request or limit is rendered onto the serving container.
+	//
+	RAM *resource.Quantity `json:"ram,omitempty"`
+	// LocalStorage is the host ephemeral storage request and limit for one role Pod, such as
+	// "100Gi". When omitted, no ephemeral storage request or limit is rendered onto the serving
+	// container.
+	//
+	LocalStorage *resource.Quantity `json:"localStorage,omitempty"`
 }
 
 // ModelDeploymentRoleResourcesApplyConfiguration constructs a declarative configuration of the ModelDeploymentRoleResources type for use with
@@ -97,5 +107,29 @@ func (b *ModelDeploymentRoleResourcesApplyConfiguration) WithAcceleratorPartitio
 // If called multiple times, the Interface field is set to the value of the last call.
 func (b *ModelDeploymentRoleResourcesApplyConfiguration) WithInterface(value resource.Quantity) *ModelDeploymentRoleResourcesApplyConfiguration {
 	b.Interface = &value
+	return b
+}
+
+// WithCPU sets the CPU field in the declarative configuration to the given value
+// and returns the receiver, so that objects can be built by chaining "With" function invocations.
+// If called multiple times, the CPU field is set to the value of the last call.
+func (b *ModelDeploymentRoleResourcesApplyConfiguration) WithCPU(value resource.Quantity) *ModelDeploymentRoleResourcesApplyConfiguration {
+	b.CPU = &value
+	return b
+}
+
+// WithRAM sets the RAM field in the declarative configuration to the given value
+// and returns the receiver, so that objects can be built by chaining "With" function invocations.
+// If called multiple times, the RAM field is set to the value of the last call.
+func (b *ModelDeploymentRoleResourcesApplyConfiguration) WithRAM(value resource.Quantity) *ModelDeploymentRoleResourcesApplyConfiguration {
+	b.RAM = &value
+	return b
+}
+
+// WithLocalStorage sets the LocalStorage field in the declarative configuration to the given value
+// and returns the receiver, so that objects can be built by chaining "With" function invocations.
+// If called multiple times, the LocalStorage field is set to the value of the last call.
+func (b *ModelDeploymentRoleResourcesApplyConfiguration) WithLocalStorage(value resource.Quantity) *ModelDeploymentRoleResourcesApplyConfiguration {
+	b.LocalStorage = &value
 	return b
 }

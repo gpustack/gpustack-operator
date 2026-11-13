@@ -345,7 +345,7 @@ func TestListIntentsSnapshotFiltersUnrelatedPlacementsWithoutLiveReads(t *testin
 		{
 			name: "ambiguous placement",
 			placement: &workercore.ModelPrefetchPlacement{
-				InstanceTypes: []string{"gpu"}, NodeSelector: &meta.LabelSelector{MatchLabels: map[string]string{"pool": "source"}},
+				AcceleratorTypes: []string{"gpu"}, NodeSelector: &meta.LabelSelector{MatchLabels: map[string]string{"pool": "source"}},
 			},
 		},
 		{
@@ -366,17 +366,17 @@ func TestListIntentsSnapshotFiltersUnrelatedPlacementsWithoutLiveReads(t *testin
 	}
 }
 
-func TestListIntentsInstanceTypePlacementStillResolvesLive(t *testing.T) {
-	// An InstanceType-only placement cannot be excluded from cached facts
+func TestListIntentsAcceleratorTypePlacementStillResolvesLive(t *testing.T) {
+	// An AcceleratorType-only placement cannot be excluded from cached facts
 	// alone: it stays a candidate, is read live, and its pool resolution and
-	// targeting run live. With no InstanceTypes in the cluster it targets
+	// targeting run live. With no AcceleratorTypes in the cluster it targets
 	// nothing and admits nothing.
 	f := newSnapshotFixture(t)
 	cachedPlacement(t, f, "typed-prefetch", "typed-uid",
-		&workercore.ModelPrefetchPlacement{InstanceTypes: []string{"gpu"}})
+		&workercore.ModelPrefetchPlacement{AcceleratorTypes: []string{"gpu"}})
 	require.Len(t, f.listIntents(t), 1, "the healthy prefetch must still admit")
 	assert.GreaterOrEqual(t, f.client.getCount("typed-prefetch"), 1,
-		"an InstanceType-only candidate keeps its live read; the residual is reported in the handback")
+		"an AcceleratorType-only candidate keeps its live read; the residual is reported in the handback")
 }
 
 func TestListIntentsSnapshotFollowsTargetedChanges(t *testing.T) {

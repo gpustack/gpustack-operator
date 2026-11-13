@@ -27,10 +27,6 @@ const (
 	// answer, and the leaf is where administrators prune what a flag change left behind.
 	modelDeploymentCompileCacheHashDigits = 8
 
-	// modelDeploymentCompileCacheCPUManufacturer is the manufacturer segment of a role whose
-	// instance type is not acceleratable, since no vendor claims a CPU-only pool.
-	modelDeploymentCompileCacheCPUManufacturer = "cpu"
-
 	// modelDeploymentCompileCacheDigestPrefix is the algorithm prefix every content address in
 	// this project carries.
 	modelDeploymentCompileCacheDigestPrefix = "sha256:"
@@ -54,9 +50,10 @@ type ModelDeploymentCompileCacheInput struct {
 	// Role is the entry of Deployment.Spec.Roles this replica belongs to.
 	Role *workercore.ModelDeploymentRole
 
-	// InstanceType is the type the role's Pods are admitted against, which says what
-	// manufacturer compiled the artifacts a directory may hold.
-	InstanceType *worker.InstanceType
+	// AcceleratorType is the type the role's Pods are admitted against, which says what
+	// manufacturer compiled the artifacts a directory may hold. When nil (CPU-only role),
+	// no GPU compilation cache directory is rendered.
+	AcceleratorType *worker.AcceleratorType
 
 	// Artifact is how the reconciler resolved the deployment's weights, or nil for a deployment
 	// naming no artifact.
@@ -93,11 +90,11 @@ func BuildModelDeploymentCompileCacheSubPath(in ModelDeploymentCompileCacheInput
 	if in.Role == nil {
 		return "", errors.New("the compilation cache path needs the role")
 	}
-	if in.InstanceType == nil {
-		return "", errors.New("the compilation cache path needs the instance type")
+	if in.AcceleratorType == nil {
+		return "", nil
 	}
 
-	manufacturer, err := modelDeploymentCompileCacheManufacturer(in.InstanceType)
+	manufacturer, err := modelDeploymentCompileCacheManufacturer(in.AcceleratorType)
 	if err != nil {
 		return "", err
 	}
@@ -135,17 +132,12 @@ func BuildModelDeploymentCompileCacheSubPath(in ModelDeploymentCompileCacheInput
 }
 
 // modelDeploymentCompileCacheManufacturer is the vendor whose compiler wrote the artifacts a
-// directory may hold. A pool no vendor claims is a CPU pool, and calling it "generic" would
-// collide with a real vendor the moment one answers for it.
-func modelDeploymentCompileCacheManufacturer(it *worker.InstanceType) (string, error) {
-	if !it.Spec.Acceleratable {
-		return modelDeploymentCompileCacheCPUManufacturer, nil
-	}
-
-	manufacturer := strings.ToLower(strings.TrimSpace(it.Status.Detail.Manufacturer))
+// directory may hold.
+func modelDeploymentCompileCacheManufacturer(at *worker.AcceleratorType) (string, error) {
+	manufacturer := strings.ToLower(strings.TrimSpace(at.Status.Detail.Manufacturer))
 	if manufacturer == "" {
 		return "", fmt.Errorf(
-			"instance type %q is acceleratable but has no manufacturer in status", it.Name,
+			"accelerator type %q has no manufacturer in status", at.Name,
 		)
 	}
 
@@ -710,6 +702,18 @@ func modelDeploymentCompileCacheVolumes(subPath string) (core.Volume, core.Volum
 			Path: path.Join(DefaultModelDeploymentCompileCacheHostDir, subPath),
 			Type: ptr.To(core.HostPathDirectoryOrCreate),
 		}},
+	}, core.VolumeMount{
+		Name:      ModelDeploymentCompileCacheVolumeName,
+		MountPath: ModelDeploymentCompileCacheMountPath,
+	}
+}
+
+// modelDeploymentCompileCacheEmptyDirVolumes returns the EmptyDir volume and container
+// VolumeMount for a managed CPU-only role's compilation and runtime cache.
+func modelDeploymentCompileCacheEmptyDirVolumes() (core.Volume, core.VolumeMount) {
+	return core.Volume{
+		Name:         ModelDeploymentCompileCacheVolumeName,
+		VolumeSource: core.VolumeSource{EmptyDir: &core.EmptyDirVolumeSource{}},
 	}, core.VolumeMount{
 		Name:      ModelDeploymentCompileCacheVolumeName,
 		MountPath: ModelDeploymentCompileCacheMountPath,

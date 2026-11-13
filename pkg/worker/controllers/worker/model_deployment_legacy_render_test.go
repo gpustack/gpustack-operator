@@ -47,11 +47,11 @@ var legacyRenderUpdate = flag.Bool(
 const (
 	legacyRenderDir = "testdata/legacy-render"
 
-	legacyRenderPinnedEngineImage         = "vllm/vllm-openai:v0.25.1"
-	legacyRenderPinnedAscendEngineImage   = "vllm/vllm-ascend:v0.23.0"
-	legacyRenderPinnedSidecarImage        = "gpustack.example/disagg-sidecar:v0.10.0-fixture"
-	legacyRenderAscendInstanceType        = "atlas-910b"
-	legacyRenderAscendInstanceTypeEntrant = "entrance-for-atlas-910b"
+	legacyRenderPinnedEngineImage            = "vllm/vllm-openai:v0.25.1"
+	legacyRenderPinnedAscendEngineImage      = "vllm/vllm-ascend:v0.23.0"
+	legacyRenderPinnedSidecarImage           = "gpustack.example/disagg-sidecar:v0.10.0-fixture"
+	legacyRenderAscendAcceleratorType        = "atlas-910b"
+	legacyRenderAscendAcceleratorTypeEntrant = "entrance-for-atlas-910b"
 )
 
 // newLegacyRenderDeployment is the stored-object base every shape varies: engine and model named,
@@ -69,10 +69,10 @@ func newLegacyRenderDeployment() *workercore.ModelDeployment {
 // the render resolves it, which is half of what that fixture freezes.
 func legacyRenderServerRole(kind workercore.ModelDeploymentRoleKind) workercore.ModelDeploymentRole {
 	return workercore.ModelDeploymentRole{
-		Name:         "server",
-		Kind:         kind,
-		Replicas:     1,
-		InstanceType: "h20-8x",
+		Name:            "server",
+		Kind:            kind,
+		Replicas:        1,
+		AcceleratorType: "h20-8x",
 		Resources: &workercore.ModelDeploymentRoleResources{
 			Accelerator: ptr.To(resource.MustParse("1")),
 		},
@@ -84,20 +84,20 @@ func legacyRenderServerRole(kind workercore.ModelDeploymentRoleKind) workercore.
 func legacyRenderPairRoles(instanceType, image string) []workercore.ModelDeploymentRole {
 	return []workercore.ModelDeploymentRole{
 		{
-			Name:         "prefill",
-			Kind:         workercore.ModelDeploymentRoleKindPrefill,
-			Replicas:     1,
-			InstanceType: instanceType,
+			Name:            "prefill",
+			Kind:            workercore.ModelDeploymentRoleKindPrefill,
+			Replicas:        1,
+			AcceleratorType: instanceType,
 			Resources: &workercore.ModelDeploymentRoleResources{
 				Accelerator: ptr.To(resource.MustParse("1")),
 			},
 			Image: image,
 		},
 		{
-			Name:         "decode",
-			Kind:         workercore.ModelDeploymentRoleKindDecode,
-			Replicas:     1,
-			InstanceType: instanceType,
+			Name:            "decode",
+			Kind:            workercore.ModelDeploymentRoleKindDecode,
+			Replicas:        1,
+			AcceleratorType: instanceType,
 			Resources: &workercore.ModelDeploymentRoleResources{
 				Accelerator: ptr.To(resource.MustParse("1")),
 			},
@@ -106,14 +106,14 @@ func legacyRenderPairRoles(instanceType, image string) []workercore.ModelDeploym
 	}
 }
 
-// newLegacyRenderAscendInstanceType is the Ascend pool the Ascend pair runs on: the same unit
+// newLegacyRenderAscendAcceleratorType is the Ascend pool the Ascend pair runs on: the same unit
 // sizing as the NVIDIA fixture, a manufacturer that switches the vLLM renderer to its Ascend
 // variant and the sidecar to the nixlv2 handshake, and an entrance no derivation from the name
 // produces, for the same reason the NVIDIA fixture spells its own that way.
-func newLegacyRenderAscendInstanceType() *worker.InstanceType {
-	return newRenderInstanceType(func(it *worker.InstanceType) {
-		it.Name = legacyRenderAscendInstanceType
-		it.Status.Entrance = legacyRenderAscendInstanceTypeEntrant
+func newLegacyRenderAscendAcceleratorType() *worker.AcceleratorType {
+	return newRenderAcceleratorType(func(it *worker.AcceleratorType) {
+		it.Name = legacyRenderAscendAcceleratorType
+		it.Status.Entrance = legacyRenderAscendAcceleratorTypeEntrant
 		it.Status.Detail.Manufacturer = nodefeature.ManufacturerAscend
 		it.Status.Detail.RuntimeVersion = "8.2"
 		it.Status.Detail.RuntimeVersions = []string{"8.2"}
@@ -211,13 +211,14 @@ func checkLegacyRenderFixture(
 
 	recorded, err := os.ReadFile(path)
 	require.NoError(t, err, "the recording is the contract; regenerate it with -update")
-	if string(recorded) != rendered && manifest.RenderVersion == modelDeploymentRenderVersion {
-		require.Equal(t, string(recorded), rendered,
+	expected := string(recorded)
+	if expected != rendered && manifest.RenderVersion == modelDeploymentRenderVersion {
+		require.Equal(t, expected, rendered,
 			"rendered Pod bytes for %s changed while modelDeploymentRenderVersion (%d) matches %s; "+
 				"bump modelDeploymentRenderVersion in model_deployment_render.go before running -update",
 			path, modelDeploymentRenderVersion, filepath.Join(legacyRenderDir, "version.json"))
 	}
-	require.Equal(t, string(recorded), rendered,
+	require.Equal(t, expected, rendered,
 		"the render of %s moved; re-baseline deliberately with -update", path)
 	assert.Equal(t, manifest.Fixtures[name], entry,
 		"the version.json entry for %s is out of sync; regenerate with -update", name)
@@ -243,7 +244,7 @@ func TestModelDeploymentLegacyRender_GoldenPods(t *testing.T) {
 		// mutate builds the deployment of this shape out of the plain base.
 		mutate func(md *workercore.ModelDeployment)
 		// instypes adds InstanceTypes beyond the NVIDIA default every shape already gets.
-		instypes []*worker.InstanceType
+		instypes []*worker.AcceleratorType
 		// connection is the resolved shared-pool binding, nil for shapes with no cache.
 		connection *ModelDeploymentConnectorInput
 	}{
@@ -300,10 +301,10 @@ func TestModelDeploymentLegacyRender_GoldenPods(t *testing.T) {
 			mutate: func(md *workercore.ModelDeployment) {
 				md.Spec.Router = &workercore.ModelDeploymentRouter{Name: workercore.ModelDeploymentRouterLLMD}
 				md.Spec.Roles = legacyRenderPairRoles(
-					legacyRenderAscendInstanceType, legacyRenderPinnedAscendEngineImage,
+					legacyRenderAscendAcceleratorType, legacyRenderPinnedAscendEngineImage,
 				)
 			},
-			instypes: []*worker.InstanceType{newLegacyRenderAscendInstanceType()},
+			instypes: []*worker.AcceleratorType{newLegacyRenderAscendAcceleratorType()},
 		},
 		{
 			// A role that replaces the command line: no engine arguments of the operator's, no
@@ -336,7 +337,7 @@ func TestModelDeploymentLegacyRender_GoldenPods(t *testing.T) {
 			md := newLegacyRenderDeployment()
 			tc.mutate(md)
 
-			objs := legacyRenderCluster(append(tc.instypes, newRenderInstanceType())...)
+			objs := legacyRenderCluster(append(tc.instypes, newRenderAcceleratorType())...)
 			pods := renderLegacyDeploymentPods(t, md, objs, tc.connection)
 			require.NotEmpty(t, pods)
 
@@ -367,7 +368,7 @@ func TestModelDeploymentLegacyRender_DynamicRenderChangeKeepsPodSpecHash(t *test
 		md := newLegacyRenderDeployment()
 		md.Spec.Router = &workercore.ModelDeploymentRouter{Name: workercore.ModelDeploymentRouterLLMD}
 		md.Spec.Roles = legacyRenderPairRoles("h20-8x", legacyRenderPinnedEngineImage)
-		pods := renderLegacyDeploymentPods(t, md, legacyRenderCluster(newRenderInstanceType()), nil)
+		pods := renderLegacyDeploymentPods(t, md, legacyRenderCluster(newRenderAcceleratorType()), nil)
 		return pods, legacyRenderPodsJSON(t, pods)
 	}
 
@@ -405,7 +406,7 @@ func TestModelDeploymentLegacyRender_DefaultedMatchesExplicit(t *testing.T) {
 		md := newLegacyRenderDeployment()
 		md.Spec.Roles[0].Kind = kind
 
-		pods := renderLegacyDeploymentPods(t, md, legacyRenderCluster(newRenderInstanceType()), nil)
+		pods := renderLegacyDeploymentPods(t, md, legacyRenderCluster(newRenderAcceleratorType()), nil)
 		require.NotEmpty(t, pods)
 
 		return legacyRenderPodsJSON(t, pods)
@@ -418,7 +419,7 @@ func TestModelDeploymentLegacyRender_DefaultedMatchesExplicit(t *testing.T) {
 // legacyRenderCluster returns the cluster objects every shape renders against: the pool's
 // InstanceTypes and the accelerator RuntimeClasses the reconciler looks up, present as they are on
 // a cluster this operator installed, so the rendered Pods carry their runtime class names.
-func legacyRenderCluster(instTypes ...*worker.InstanceType) []ctrlcli.Object {
+func legacyRenderCluster(instTypes ...*worker.AcceleratorType) []ctrlcli.Object {
 	objs := make([]ctrlcli.Object, 0, len(instTypes)+2)
 	for _, it := range instTypes {
 		objs = append(objs, it)

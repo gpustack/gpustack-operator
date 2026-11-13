@@ -23,6 +23,7 @@ import (
 	"gpustack.ai/gpustack/pkg/kubemeta"
 	"gpustack.ai/gpustack/pkg/modeltransfer/broker"
 	"gpustack.ai/gpustack/pkg/setting"
+	"gpustack.ai/gpustack/pkg/utils/ctrlclix"
 )
 
 // Conditions of a ModelStoreBinding's status.
@@ -130,7 +131,7 @@ func (r *ModelStoreBindingReconciler) Reconcile(ctx context.Context, req ctrl.Re
 		}
 		sizes[resolved.ManifestDigest] = resolved.SizeBytes
 
-		pools, err := ResolveInstanceTypeFlavorNames(ctx, r.Client, pf, deps.Items)
+		pools, err := ResolveAcceleratorTypeFlavorNames(ctx, r.Client, pf, deps.Items)
 		if err != nil {
 			measured = false
 			continue
@@ -303,6 +304,11 @@ func (r *ModelStoreBindingReconciler) SetupController(_ context.Context, opts co
 			ctrlhandler.EnqueueRequestsFromMapFunc(r.enqueueAllBindings),
 			ctrlbuilder.WithPredicates(nodeReportChanged),
 		).
+		Watches(
+			&workercore.AcceleratorType{},
+			ctrlhandler.EnqueueRequestsFromMapFunc(r.enqueueAllBindings),
+			ctrlbuilder.WithPredicates(ctrlpredicate.GenerationChangedPredicate{}),
+		).
 		Complete(r)
 }
 
@@ -310,7 +316,7 @@ func (r *ModelStoreBindingReconciler) SetupController(_ context.Context, opts co
 // grants are few.
 func (r *ModelStoreBindingReconciler) enqueueAllBindings(ctx context.Context, _ ctrlcli.Object) []ctrlreconcile.Request {
 	bindings := new(workercore.ModelStoreBindingList)
-	if err := r.Client.List(ctx, bindings); err != nil {
+	if err := r.Client.List(ctx, bindings, ctrlclix.WithoutQuorum, ctrlcli.UnsafeDisableDeepCopy); err != nil {
 		ctrllog.FromContext(ctx).Error(err, "list model store bindings")
 
 		return nil

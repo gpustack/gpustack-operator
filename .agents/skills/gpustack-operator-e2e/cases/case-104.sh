@@ -46,7 +46,7 @@ CASES_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 . "${CASES_DIR}/_model-hub-lib.sh"
 
 NS="${1:?usage: case-104.sh <NS>}"
-IT="${E2E_C104_IT:?set E2E_C104_IT to an accelerator InstanceType}"
+IT="${E2E_C104_AT:-${E2E_C104_IT:?set E2E_C104_AT or E2E_C104_IT to an accelerator type}}"
 MODEL="${E2E_C104_MODEL:-Qwen/Qwen2.5-7B-Instruct}"
 PROBE_IMAGE="${E2E_PD_PROBE_IMAGE:-curlimages/curl:8.11.1}"
 READY_BOUND="${E2E_C104_READY_BOUND:-3600}"
@@ -138,7 +138,7 @@ spec:
   engine: {name: vLLM, image: "${IMAGE}"}
   model: {name: ${SERVED}, artifactRef: {name: ${P}-model}}
   roles:
-    - {name: server, instanceType: "${IT}", replicas: 1, resources: {accelerator: 1}, extraArgs: ["--max-model-len", "4096", "--gpu-memory-utilization", "0.85"]}
+    - {name: server, acceleratorType: "${IT}", replicas: 1, resources: {accelerator: 1}, extraArgs: ["--max-model-len", "4096", "--gpu-memory-utilization", "0.85"]}
 YAML
 START="$(date +%s)"
 pod="" node=""

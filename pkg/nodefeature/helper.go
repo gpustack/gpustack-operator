@@ -456,18 +456,23 @@ func (f NodeFlavor) DerivedInstanceTypeIdentity(aware bool) (name, generalGroup,
 	}
 	if f.Acceleratable {
 		acceleratorGroup = f.AcceleratorKey
-		if aware {
-			name = fmt.Sprintf("gpustack--%s--%s-%s-%s", f.GeneralKey, f.AcceleratorKey, f.OS, f.Arch)
-		} else {
-			name = fmt.Sprintf("gpustack--%s-%s-%s", f.AcceleratorKey, f.OS, f.Arch)
-		}
-		return name, generalGroup, acceleratorGroup
 	}
+	name = CanonicalPoolQueueName(f.Acceleratable, aware, generalGroup, acceleratorGroup, f.OS, f.Arch)
+	return name, generalGroup, acceleratorGroup
+}
+
+// DerivedAcceleratorTypeIdentity returns the setting-correct name and group identity for the pool's
+// derived AcceleratorType. Non-accelerated flavors return empty values.
+func (f NodeFlavor) DerivedAcceleratorTypeIdentity(aware bool) (name, generalGroup, acceleratorGroup string) {
+	if !f.Acceleratable || f.AcceleratorKey == "" {
+		return "", "", ""
+	}
+	generalGroup = GeneralGroupGeneric
 	if aware {
-		name = fmt.Sprintf("gpustack--%s-%s-%s", f.GeneralKey, f.OS, f.Arch)
-	} else {
-		name = fmt.Sprintf("gpustack--%s-%s-%s", GeneralGroupGeneric, f.OS, f.Arch)
+		generalGroup = f.GeneralKey
 	}
+	acceleratorGroup = f.AcceleratorKey
+	name = CanonicalPoolQueueName(true, aware, generalGroup, acceleratorGroup, f.OS, f.Arch)
 	return name, generalGroup, acceleratorGroup
 }
 
@@ -581,6 +586,29 @@ func generalFeatureAnnotation(node *core.Node, name string) string {
 		return ""
 	}
 	return v
+}
+
+// CanonicalPoolQueueName returns the canonical ClusterQueue name for a hardware pool identity.
+func CanonicalPoolQueueName(
+	acceleratable, aware bool, generalGroup, acceleratorGroup, osName, arch string,
+) string {
+	if acceleratable {
+		if aware && generalGroup != "" && generalGroup != GeneralGroupGeneric {
+			return fmt.Sprintf("gpustack--%s--%s-%s-%s", generalGroup, acceleratorGroup, osName, arch)
+		}
+		return fmt.Sprintf("gpustack--%s-%s-%s", acceleratorGroup, osName, arch)
+	}
+	if aware && generalGroup != "" {
+		return fmt.Sprintf("gpustack--%s-%s-%s", generalGroup, osName, arch)
+	}
+	return fmt.Sprintf("gpustack--%s-%s-%s", GeneralGroupGeneric, osName, arch)
+}
+
+// CanonicalPoolLocalQueueName returns the canonical LocalQueue name for a hardware pool identity.
+func CanonicalPoolLocalQueueName(
+	acceleratable, aware bool, generalGroup, acceleratorGroup, osName, arch string,
+) string {
+	return FormatLocalQueueName(CanonicalPoolQueueName(acceleratable, aware, generalGroup, acceleratorGroup, osName, arch))
 }
 
 // FormatLocalQueueName formats the LocalQueue name for the given ClusterQueue name.

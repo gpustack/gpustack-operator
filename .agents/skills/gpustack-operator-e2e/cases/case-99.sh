@@ -36,7 +36,7 @@ set -uo pipefail
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/_rows-lib.sh"
 
 NS="${1:?usage: case-99.sh <NS>}"
-IT="${E2E_C99_IT:?set E2E_C99_IT to an accelerator InstanceType}"
+IT="${E2E_C99_AT:-${E2E_C99_IT:?set E2E_C99_AT or E2E_C99_IT to an accelerator type}}"
 GATED="${E2E_C99_GATED:-XyX824/mam-c-gated-tiny}"
 GATED_COMMIT="${E2E_C99_GATED_COMMIT:-849d87054adea51b3cc2e81b95ed17b1289e9a40}"
 PROBE_IMAGE="${E2E_PD_PROBE_IMAGE:-curlimages/curl:8.11.1}"
@@ -131,7 +131,7 @@ spec:
   model: {name: e2e/c99-claim, artifactRef: {name: ${P}-claim}}
   router: {name: llm-d-router}
   roles:
-    - {name: server, instanceType: "${IT}", replicas: 1, resources: {accelerator: 1}, extraArgs: ["--max-model-len", "4096", "--gpu-memory-utilization", "0.4"]}
+    - {name: server, acceleratorType: "${IT}", replicas: 1, resources: {accelerator: 1}, extraArgs: ["--max-model-len", "4096", "--gpu-memory-utilization", "0.4"]}
 YAML
 phase="$(wait_ready "${P}-vllm")"
 pod="$(leader "${P}-vllm")"
@@ -171,7 +171,7 @@ spec:
   engine: {name: SGLang, image: "${SGLANG_IMAGE}"}
   model: {name: e2e/c99-gated, artifactRef: {name: ${P}-gated}}
   roles:
-    - {name: server, instanceType: "${IT}", replicas: 1, resources: {accelerator: 1}, extraArgs: ["--mem-fraction-static", "0.4"]}
+    - {name: server, acceleratorType: "${IT}", replicas: 1, resources: {accelerator: 1}, extraArgs: ["--mem-fraction-static", "0.4"]}
 YAML
 phase="$(wait_ready "${P}-sglang")"
 pod="$(leader "${P}-sglang")"

@@ -18,7 +18,7 @@ spec:
       kind: Prefill
       replicas: 1
       size: 1
-      instanceType: bench-gpu
+      acceleratorType: bench-gpu
       image: gpustack/runner:cuda12.9-sglang0.5.18
       imagePullPolicy: IfNotPresent
       # An SGLang half takes 26 to 28 s to exit after its delete, so the grace has to carry that
@@ -37,7 +37,7 @@ spec:
       kind: Decode
       replicas: 1
       size: 1
-      instanceType: bench-gpu
+      acceleratorType: bench-gpu
       image: gpustack/runner:cuda12.9-sglang0.5.18
       imagePullPolicy: IfNotPresent
       terminationGracePeriodSeconds: 60

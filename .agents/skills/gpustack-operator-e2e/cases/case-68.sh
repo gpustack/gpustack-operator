@@ -111,7 +111,7 @@ MD_CONTROL=case68-control
 MD_OPENS=case68-opens
 IT_HELD=case68-held
 BINDING="${E2E_MD_BINDING:-case68-no-such-binding}"
-IT="${E2E_MD_INSTANCE_TYPE:-}"
+IT="${E2E_MD_ACCELERATOR_TYPE:-${E2E_MD_INSTANCE_TYPE:-}}"
 IMAGE="${E2E_MD_IMAGE:-registry.k8s.io/pause:3.10}"
 
 # How long a state gets to appear. Admission is a scheduling round plus a check round trip, and the
@@ -151,24 +151,24 @@ record() {
 # reason that has nothing to do with what it measures. Inactive is excluded for the mirror reason: a
 # deployment on one is admitted and then never scheduled, so the case waits out every timeout it has.
 if [ -z "$IT" ]; then
-  IT="$(md_usable_instance_type)"
+  IT="$(md_usable_accelerator_type)"
 fi
 if [ -z "$IT" ]; then
-  echo "[case-68] no usable InstanceType in the cluster; run case-1 first" >&2
+  echo "[case-68] no usable AcceleratorType in the cluster; run case-1 first" >&2
   exit 2
 fi
-# The held type is created on the working type's own CPU pool; see Phase B for why.
-read -r HELD_GROUP HELD_OS HELD_ARCH <<<"$(k get instancetypes.worker.gpustack.ai "$IT" \
+# The held type is created on a distinct acceleratorGroup on the working type's own generalGroup, OS and arch; see Phase B for why.
+read -r HELD_GROUP HELD_OS HELD_ARCH <<<"$(k get acceleratortypes.worker.gpustack.ai "$IT" \
   -o jsonpath='{.spec.generalGroup} {.spec.os} {.spec.arch}' 2>/dev/null)"
 if [ -z "$HELD_GROUP" ] || [ -z "$HELD_OS" ] || [ -z "$HELD_ARCH" ]; then
-  echo "[case-68] InstanceType ${IT} names no general group, OS and arch to put the held type on" >&2
+  echo "[case-68] AcceleratorType ${IT} names no general group, OS and arch to put the held type on" >&2
   exit 2
 fi
 
 cleanup() {
   k -n "$NS" delete modeldeployment "$MD" "$MD_CONTROL" "$MD_OPENS" \
     --ignore-not-found --wait=false >/dev/null 2>&1
-  k delete instancetype.worker.gpustack.ai "$IT_HELD" --ignore-not-found --wait=false >/dev/null 2>&1
+  k delete acceleratortype.worker.gpustack.ai "$IT_HELD" --ignore-not-found --wait=false >/dev/null 2>&1
 }
 trap cleanup EXIT
 
@@ -280,7 +280,7 @@ one_role() {
     - name: alpha
       kind: Server
       replicas: 1
-      instanceType: $IT
+      acceleratorType: $IT
       image: $IMAGE
       command: ["/pause"]
 YAML
@@ -291,13 +291,13 @@ two_roles_one_type() {
     - name: alpha
       kind: Server
       replicas: 1
-      instanceType: $IT
+      acceleratorType: $IT
       image: $IMAGE
       command: ["/pause"]
     - name: beta
       kind: Server
       replicas: 1
-      instanceType: $IT
+      acceleratorType: $IT
       image: $IMAGE
       command: ["/pause"]
 YAML
@@ -308,13 +308,13 @@ two_roles_two_types() {
     - name: alpha
       kind: Server
       replicas: 1
-      instanceType: $IT
+      acceleratorType: $IT
       image: $IMAGE
       command: ["/pause"]
     - name: beta
       kind: Server
       replicas: 1
-      instanceType: $IT_HELD
+      acceleratorType: $IT_HELD
       # NO resources block. The type is not acceleratable, so nothing defaults a card count here --
       # and a card count is what the per-unit ceiling rule reads. Declaring one would put this role
       # back in front of that rule.
@@ -438,24 +438,23 @@ k -n "$NS" delete modeldeployment "$MD" --ignore-not-found --wait=true >/dev/nul
 # between a create and a patch is one in which it admits.
 k apply -f - >/dev/null 2>&1 <<YAML
 apiVersion: worker.gpustack.ai/v1alpha1
-kind: InstanceType
+kind: AcceleratorType
 metadata:
   name: $IT_HELD
 spec:
   displayName: case-68 held
-  acceleratable: false
   generalGroup: $HELD_GROUP
+  acceleratorGroup: nvidia-case68-held
   os: $HELD_OS
   arch: $HELD_ARCH
   inactive: true
-  localStorage: 1Gi
-  unitResources:
-    cpu: "1"
-    ram: 1Gi
 YAML
 # Phase E releases this type and expects its group to place, which only a queue with a flavor can do.
 held_queue_has_capacity() {
-  [ -n "$(k get clusterqueue "$IT_HELD" -o jsonpath='{.spec.resourceGroups[*].flavors[*].name}' 2>/dev/null)" ]
+  local cq
+  cq="$(md_cq_of_at "$NS" "$IT_HELD")"
+  cq="${cq:-$IT_HELD}"
+  [ -n "$(k get clusterqueue "$cq" -o jsonpath='{.spec.resourceGroups[*].flavors[*].name}' 2>/dev/null)" ]
 }
 held_capacity=no
 wait_for "$SETTLE" held_queue_has_capacity && held_capacity=yes
@@ -644,12 +643,14 @@ if [ "$opens_held" != yes ]; then
 elif [ "$held_capacity" != yes ]; then
   # Releasing a type whose queue carries no flavor cannot make its group placeable, so a group that
   # stays held says nothing about the barrier.
+  held_cq="$(md_cq_of_at "$NS" "$IT_HELD")"
+  held_cq="${held_cq:-$IT_HELD}"
   record NO-READ "the barrier opens when the set becomes feasible" \
-    "ClusterQueue ${IT_HELD} never carried a flavor, so releasing its type cannot make that group placeable"
+    "ClusterQueue ${held_cq} never carried a flavor, so releasing its type cannot make that group placeable"
 else
   # RELEASING THE TYPE IS THE ONLY CHANGE. The held group's own workload is untouched; what moves is
   # its SIBLING's ability to reserve, which is exactly the event the held group has to hear about.
-  k patch instancetype "$IT_HELD" --type=merge -p '{"spec":{"inactive":false}}' >/dev/null 2>&1
+  k patch acceleratortype "$IT_HELD" --type=merge -p '{"spec":{"inactive":false}}' >/dev/null 2>&1
 
   both_admitted() { [ "$(deployment_admitted "$MD_OPENS")" = "2/2" ]; }
   if wait_for "$SETTLE" both_admitted; then

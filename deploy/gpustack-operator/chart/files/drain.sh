@@ -80,6 +80,7 @@ kvcachepoolbindings.worker.gpustack.ai
 kvcachepools.worker.gpustack.ai
 kvcachebackends.worker.gpustack.ai
 instancetypes.worker.gpustack.ai
+acceleratortypes.worker.gpustack.ai
 nodemodelstores.worker.gpustack.ai
 "
 
@@ -101,7 +102,7 @@ resource_of() { # crd-name -> plural.VERSION.group, empty when the CRD is absent
 # Separated by "/", which neither a namespace nor a name may contain, and NOT by a space: a
 # cluster-scoped object has an empty namespace, so a space-separated line starts with a blank field
 # that `read` folds away, putting the NAME into the namespace variable and dropping the object.
-# KVCacheBackend, KVCachePool and InstanceType are all cluster-scoped.
+# KVCacheBackend, KVCachePool, InstanceType and AcceleratorType are all cluster-scoped.
 # Its EXIT STATUS is load-bearing and every caller checks it. A failed list prints nothing, and
 # nothing is also what a drained kind prints - so reading the output alone turns a transient API
 # error, an expired token or a mid-run RBAC change into the answer "this kind is empty", and the run
@@ -197,14 +198,14 @@ for crd in ${DRAIN_ORDER}; do
   case "${res}" in
     ""|.*|*..*) continue ;;
   esac
-  # A derived InstanceType is deleted once and not waited for. While the worker runs it authors the
+  # A derived AcceleratorType or InstanceType is deleted once and not waited for. While the worker runs it authors the
   # type again from its Node a few seconds after the delete completes, so the kind never empties
   # and the wait would only spend the whole budget. The delete still starts the type's teardown
   # while the worker runs. The recreated type is left to the later steps: drain-kueue.sh, where this
   # release ships Kueue, stops the worker and deletes the queue it backs, and cleanup.sh strips its
   # finalizer.
   wait_sel=""
-  if [ "${crd}" = "instancetypes.worker.gpustack.ai" ]; then
+  if [ "${crd}" = "instancetypes.worker.gpustack.ai" ] || [ "${crd}" = "acceleratortypes.worker.gpustack.ai" ]; then
     wait_sel="schedule.gpustack.ai/derived-from-node!=true"
   fi
   # A NodeModelStore has no finalizer, and the worker recreates it from CSINode while running.

@@ -11,10 +11,11 @@ import (
 //
 // ModelPrefetchPlacement narrows the target set of nodes the artifact warms.
 type ModelPrefetchPlacementApplyConfiguration struct {
-	// InstanceTypes names the node pools to warm, by the InstanceType objects the scheduling chain
-	// already publishes. The target set is every node carrying one of these types' flavors.
+	// AcceleratorTypes names the accelerator pools to warm, by the AcceleratorType objects the
+	// scheduling chain publishes. The target set is every node carrying one of these types'
+	// flavors.
 	//
-	InstanceTypes []string `json:"instanceTypes,omitempty"`
+	AcceleratorTypes []string `json:"acceleratorTypes,omitempty"`
 	// NodeSelector selects the target nodes directly, the "download to these nodes" form.
 	//
 	NodeSelector *v1.LabelSelectorApplyConfiguration `json:"nodeSelector,omitempty"`
@@ -26,12 +27,12 @@ func ModelPrefetchPlacement() *ModelPrefetchPlacementApplyConfiguration {
 	return &ModelPrefetchPlacementApplyConfiguration{}
 }
 
-// WithInstanceTypes adds the given value to the InstanceTypes field in the declarative configuration
+// WithAcceleratorTypes adds the given value to the AcceleratorTypes field in the declarative configuration
 // and returns the receiver, so that objects can be build by chaining "With" function invocations.
-// If called multiple times, values provided by each call will be appended to the InstanceTypes field.
-func (b *ModelPrefetchPlacementApplyConfiguration) WithInstanceTypes(values ...string) *ModelPrefetchPlacementApplyConfiguration {
+// If called multiple times, values provided by each call will be appended to the AcceleratorTypes field.
+func (b *ModelPrefetchPlacementApplyConfiguration) WithAcceleratorTypes(values ...string) *ModelPrefetchPlacementApplyConfiguration {
 	for i := range values {
-		b.InstanceTypes = append(b.InstanceTypes, values[i])
+		b.AcceleratorTypes = append(b.AcceleratorTypes, values[i])
 	}
 	return b
 }

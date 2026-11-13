@@ -259,7 +259,7 @@ func realSurplusReplicaAt(
 ) *core.Pod {
 	t.Helper()
 
-	r := &ModelDeploymentReconciler{Client: newModelDeploymentClient(md, newRenderInstanceType())}
+	r := &ModelDeploymentReconciler{Client: newModelDeploymentClient(md, newRenderAcceleratorType())}
 	desired, err := r.renderModelDeploymentPods(context.Background(), md, nil, nil, nil)
 	require.NoError(t, err)
 	require.Contains(t, desired, "server")
@@ -280,7 +280,7 @@ func realRenderHashOf(
 ) string {
 	t.Helper()
 
-	r := &ModelDeploymentReconciler{Client: newModelDeploymentClient(md, newRenderInstanceType())}
+	r := &ModelDeploymentReconciler{Client: newModelDeploymentClient(md, newRenderAcceleratorType())}
 	desired, err := r.renderModelDeploymentPods(context.Background(), md, nil, nil, nil)
 	require.NoError(t, err)
 
@@ -600,7 +600,7 @@ func TestModelDeploymentReconciler_CreatesOneReplicaPerDeclaredCount(t *testing.
 	md := newRenderDeployment(func(md *workercore.ModelDeployment) {
 		md.Spec.Roles[0].Replicas = 4
 	})
-	cli := newModelDeploymentClient(md, newRenderInstanceType())
+	cli := newModelDeploymentClient(md, newRenderAcceleratorType())
 
 	_, err := reconcileModelDeployment(t, cli)
 	require.NoError(t, err)
@@ -634,7 +634,7 @@ func TestModelDeploymentReconciler_CreatedReplicasCarryNoName(t *testing.T) {
 		// manager published, and a published ledger is a status write on a cluster-scoped object.
 		WithStatusSubresource(&workercore.ModelDeployment{}, &workercore.KVCachePoolBinding{},
 			&workercore.Devices{}).
-		WithObjects(newRenderDeployment(), newRenderInstanceType()).
+		WithObjects(newRenderDeployment(), newRenderAcceleratorType()).
 		WithInterceptorFuncs(ctrlinterceptor.Funcs{
 			Create: func(
 				ctx context.Context, c ctrlcli.WithWatch, obj ctrlcli.Object, opts ...ctrlcli.CreateOption,
@@ -664,7 +664,7 @@ func TestModelDeploymentReconciler_CreatedReplicasCarryNoName(t *testing.T) {
 // time any of them changed.
 func TestModelDeploymentReconciler_SecondPassWritesNothing(t *testing.T) {
 	writes := new(modelDeploymentWrites)
-	cli := newCountingModelDeploymentClient(writes, newRenderDeployment(), newRenderInstanceType())
+	cli := newCountingModelDeploymentClient(writes, newRenderDeployment(), newRenderAcceleratorType())
 
 	_, err := reconcileModelDeployment(t, cli)
 	require.NoError(t, err)
@@ -689,7 +689,7 @@ func TestModelDeploymentReconciler_SecondPassWritesNothing(t *testing.T) {
 // gate selects on it -- so a pass that moved one would move the replica's whole identity.
 func TestModelDeploymentReconciler_TwoPassesAssignTheSameOrdinalToTheSameReplica(t *testing.T) {
 	md := newRenderDeployment(func(md *workercore.ModelDeployment) { md.Spec.Roles[0].Replicas = 3 })
-	cli := newModelDeploymentClient(md, newRenderInstanceType())
+	cli := newModelDeploymentClient(md, newRenderAcceleratorType())
 
 	ordinalsOf := func() map[string]string {
 		assigned := make(map[string]string, 3)
@@ -725,7 +725,7 @@ func TestModelDeploymentReconciler_TwoPassesAssignTheSameOrdinalToTheSameReplica
 // down for one missing member.
 func TestModelDeploymentReconciler_ReplacesADeletedReplicaUnderAFreshName(t *testing.T) {
 	ctx := context.Background()
-	cli := newModelDeploymentClient(newRenderDeployment(), newRenderInstanceType())
+	cli := newModelDeploymentClient(newRenderDeployment(), newRenderAcceleratorType())
 
 	_, err := reconcileModelDeployment(t, cli)
 	require.NoError(t, err)
@@ -778,7 +778,7 @@ func TestModelDeploymentReconciler_ReplacesADeletedReplicaUnderAFreshName(t *tes
 // creates nothing".
 func TestModelDeploymentReconciler_ALostCreateResponseLeavesOnePodPerOrdinal(t *testing.T) {
 	md := newRenderDeployment(func(md *workercore.ModelDeployment) { md.Spec.Roles[0].Replicas = 2 })
-	server := newModelDeploymentClient(md, newRenderInstanceType())
+	server := newModelDeploymentClient(md, newRenderAcceleratorType())
 
 	var lostCreates int
 	cacheView := ctrlfake.NewClientBuilder().
@@ -787,7 +787,7 @@ func TestModelDeploymentReconciler_ALostCreateResponseLeavesOnePodPerOrdinal(t *
 		// manager published, and a published ledger is a status write on a cluster-scoped object.
 		WithStatusSubresource(&workercore.ModelDeployment{}, &workercore.KVCachePoolBinding{},
 			&workercore.Devices{}).
-		WithObjects(md, newRenderInstanceType()).
+		WithObjects(md, newRenderAcceleratorType()).
 		WithInterceptorFuncs(ctrlinterceptor.Funcs{
 			Create: func(
 				ctx context.Context, c ctrlcli.WithWatch, obj ctrlcli.Object, opts ...ctrlcli.CreateOption,
@@ -855,7 +855,7 @@ func TestModelDeploymentReconciler_CountChangeTrimsTheHighestOrdinals(t *testing
 	// Router-backed: this case is about which ordinals a trim keeps, and a trim only completes when
 	// the withdrawal can be observed. Without a router the surplus would be held, not removed.
 	md, router := retirementRouterFixture(md)
-	cli := newModelDeploymentClient(md, newRenderInstanceType(), router)
+	cli := newModelDeploymentClient(md, newRenderAcceleratorType(), router)
 
 	_, err := reconcileModelDeploymentRetiring(t, cli)
 	require.NoError(t, err)
@@ -904,7 +904,7 @@ func surplusReplicaAt(
 	// The reconciler renders with the overcommit setting it reads, so the fixture reads it too.
 	pod, err := renderModelDeploymentPod(context.Background(), ModelDeploymentRenderInput{
 		Deployment: md, Role: &md.Spec.Roles[0],
-		InstanceType: newRenderInstanceType(), Ordinal: ordinal,
+		AcceleratorType: newRenderAcceleratorType(), Ordinal: ordinal,
 		GeneralResourcesOvercommit: settings.InstanceGeneralResourcesOvercommit.ShouldValueBool(context.Background()),
 	})
 	require.NoError(t, err)
@@ -944,7 +944,7 @@ func TestModelDeploymentReconciler_ScaleDownShedsTheSurplusBySlot(t *testing.T) 
 			"and the stale occupant's fingerprint is distinct from it")
 		seated := realSurplusReplicaAt(t, md, "qwen-server-one", 1, "")
 
-		cli := newModelDeploymentClient(md, newRenderInstanceType(), stale, keeper, seated, router)
+		cli := newModelDeploymentClient(md, newRenderAcceleratorType(), stale, keeper, seated, router)
 
 		res, err := reconcileModelDeploymentRetiring(t, cli)
 		require.NoError(t, err)
@@ -962,7 +962,7 @@ func TestModelDeploymentReconciler_ScaleDownShedsTheSurplusBySlot(t *testing.T) 
 		greater := realSurplusReplicaAt(t, md, "qwen-server-dup-z", 0, "")
 		seated := realSurplusReplicaAt(t, md, "qwen-server-one", 1, "")
 
-		cli := newModelDeploymentClient(md, newRenderInstanceType(), lesser, greater, seated, router)
+		cli := newModelDeploymentClient(md, newRenderAcceleratorType(), lesser, greater, seated, router)
 
 		_, err := reconcileModelDeploymentRetiring(t, cli)
 		require.NoError(t, err)
@@ -983,7 +983,7 @@ func TestModelDeploymentReconciler_ScaleDownShedsTheSurplusBySlot(t *testing.T) 
 // the finalizer of a departing one -- and without it the guard holds the rollout, which is the
 // behavior its own case below pins.
 func TestModelDeploymentReconciler_RecreatesOnASpecChange(t *testing.T) {
-	cli := newModelDeploymentClient(newRenderDeployment(), newRenderInstanceType())
+	cli := newModelDeploymentClient(newRenderDeployment(), newRenderAcceleratorType())
 
 	_, err := reconcileModelDeployment(t, cli)
 	require.NoError(t, err)
@@ -1041,7 +1041,7 @@ func TestModelDeploymentReconciler_RecreatesOnASpecChange(t *testing.T) {
 // it, which is the heal-first order asserted from the other side.
 func TestModelDeploymentReconciler_CountHealsBeforeTheHashRolls(t *testing.T) {
 	ctx := context.Background()
-	cli := newModelDeploymentClient(newRenderDeployment(), newRenderInstanceType())
+	cli := newModelDeploymentClient(newRenderDeployment(), newRenderAcceleratorType())
 
 	_, err := reconcileModelDeployment(t, cli)
 	require.NoError(t, err)
@@ -1113,7 +1113,7 @@ func TestModelDeploymentReconciler_CountHealsBeforeTheHashRolls(t *testing.T) {
 // finalizer has to be on the object before the first replica exists, or a deployment deleted
 // moments after creation would leave replicas holding accelerators nothing accounts for.
 func TestModelDeploymentReconciler_LocksBeforeRendering(t *testing.T) {
-	cli := newModelDeploymentClient(newRenderDeployment(), newRenderInstanceType())
+	cli := newModelDeploymentClient(newRenderDeployment(), newRenderAcceleratorType())
 
 	_, err := reconcileModelDeployment(t, cli)
 	require.NoError(t, err)
@@ -1148,7 +1148,7 @@ func TestModelDeploymentReconciler_TeardownHoldsTheFinalizerUntilTheReplicasAreG
 	}}
 	systemmeta.NoteResource(pod, ModelDeploymentResourceType, nil)
 
-	cli := newModelDeploymentClient(md, pod, newRenderInstanceType())
+	cli := newModelDeploymentClient(md, pod, newRenderAcceleratorType())
 
 	res, err := reconcileModelDeployment(t, cli)
 	require.NoError(t, err)
@@ -1198,7 +1198,7 @@ func TestModelDeploymentReconciler_IgnoresAPodItDoesNotOwn(t *testing.T) {
 		}},
 	}}
 
-	cli := newModelDeploymentClient(newRenderDeployment(), newRenderInstanceType(), stray)
+	cli := newModelDeploymentClient(newRenderDeployment(), newRenderAcceleratorType(), stray)
 
 	_, err := reconcileModelDeployment(t, cli)
 	require.NoError(t, err)
@@ -1218,16 +1218,16 @@ func TestModelDeploymentReconciler_IgnoresAPodItDoesNotOwn(t *testing.T) {
 		"a Pod this deployment does not own is left exactly as it was")
 }
 
-// TestModelDeploymentReconciler_MissingInstanceTypeIsRetried states that an unresolvable type is an
-// error rather than a Pod rendered without one. The type supplies the accelerator spelling and the
-// per-card resources the host request is derived from, so a replica rendered without it would ask
-// for something other than what the role declared.
-func TestModelDeploymentReconciler_MissingInstanceTypeIsRetried(t *testing.T) {
+// TestModelDeploymentReconciler_MissingAcceleratorTypeIsRetried states that an unresolvable type is an
+// error rather than a Pod rendered without one. The type supplies the accelerator spelling and
+// queue entrance, so a replica rendered without it would ask for something other than what the role
+// declared.
+func TestModelDeploymentReconciler_MissingAcceleratorTypeIsRetried(t *testing.T) {
 	cli := newModelDeploymentClient(newRenderDeployment())
 
 	_, err := reconcileModelDeployment(t, cli)
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "instance type")
+	assert.Contains(t, err.Error(), "accelerator type")
 	assert.Empty(t, replicaNames(t, cli), "and nothing is rendered in the meantime")
 }
 
@@ -1246,7 +1246,7 @@ func TestModelDeploymentReconciler_RenderFailureIsEventedNotOnlyLogged(t *testin
 		md.Spec.Roles[0].Image = ""
 		md.Spec.Engine.Image = ""
 	})
-	it := newRenderInstanceType()
+	it := newRenderAcceleratorType()
 	recorder := ctrlrecord.NewFakeRecorder(64)
 
 	_, err := reconcileModelDeploymentWith(t, &ModelDeploymentReconciler{
@@ -1275,7 +1275,7 @@ func TestModelDeploymentReconciler_RenderFailureWithoutARecorderDoesNotPanic(t *
 		md.Spec.Roles[0].Image = ""
 		md.Spec.Engine.Image = ""
 	})
-	it := newRenderInstanceType()
+	it := newRenderAcceleratorType()
 
 	_, err := reconcileModelDeploymentWith(t, &ModelDeploymentReconciler{
 		Client:    newModelDeploymentClient(md, it),
@@ -1290,43 +1290,47 @@ func TestModelDeploymentReconciler_RenderFailureWithoutARecorderDoesNotPanic(t *
 
 func boolPtr(b bool) *bool { return &b }
 
-// TestMapModelDeploymentInstanceType covers the watch that keeps a synthesized image current.
+// TestMapModelDeploymentAcceleratorType covers the watch that keeps a synthesized image current.
 //
 // NOTE ON WHAT THE CROSS-NAMESPACE CASE DOES NOT PROVE: an InstanceType is cluster-scoped, so
 // obj.GetNamespace() is empty, and a List scoped to that empty namespace is a List over all of
 // them. An implementation that copied the Binding mapper's InNamespace(obj.GetNamespace()) would
 // therefore pass a cross-namespace assertion by coincidence. The assertions that do discriminate
 // are the name filter and the per-deployment de-duplication.
-func TestMapModelDeploymentInstanceType(t *testing.T) {
+func TestMapModelDeploymentAcceleratorType(t *testing.T) {
 	matching := newRenderDeployment(func(md *workercore.ModelDeployment) {
 		md.Name = "matching"
-		md.Spec.Roles[0].InstanceType = "h20-8x"
+		md.Spec.Roles[0].AcceleratorType = "h20-8x"
 	})
 	otherNamespace := newRenderDeployment(func(md *workercore.ModelDeployment) {
 		md.Name = "elsewhere"
 		md.Namespace = "team-b"
-		md.Spec.Roles[0].InstanceType = "h20-8x"
+		md.Spec.Roles[0].AcceleratorType = "h20-8x"
 	})
 	otherType := newRenderDeployment(func(md *workercore.ModelDeployment) {
 		md.Name = "other-type"
-		md.Spec.Roles[0].InstanceType = "l4-1x"
+		md.Spec.Roles[0].AcceleratorType = "l4-1x"
 	})
 	// Two roles on the SAME type. The mapper must still enqueue one request: a duplicate is not
 	// wrong so much as it is a second full reconcile for nothing, and the loop that produces it is
 	// the easy thing to write.
 	twoRoles := newRenderDeployment(func(md *workercore.ModelDeployment) {
 		md.Name = "two-roles"
-		md.Spec.Roles[0].InstanceType = "h20-8x"
+		md.Spec.Roles[0].AcceleratorType = "h20-8x"
 		second := md.Spec.Roles[0]
 		second.Name = "decode"
 		md.Spec.Roles = append(md.Spec.Roles, second)
 	})
+	cpuOnly := newRenderDeployment(func(md *workercore.ModelDeployment) {
+		md.Name = "cpu-only"
+		md.Spec.Roles[0].AcceleratorType = ""
+	})
 
-	cli := newModelDeploymentClient(matching, otherNamespace, otherType, twoRoles)
+	cli := newModelDeploymentClient(matching, otherNamespace, otherType, twoRoles, cpuOnly)
 	r := &ModelDeploymentReconciler{Client: cli, APIReader: cli}
 
-	it := &worker.InstanceType{ObjectMeta: meta.ObjectMeta{Name: "h20-8x"}}
-	reqs := r.mapModelDeploymentInstanceType(context.Background(), it)
+	it := &worker.AcceleratorType{ObjectMeta: meta.ObjectMeta{Name: "h20-8x"}}
+	reqs := r.mapModelDeploymentAcceleratorType(context.Background(), it)
 
 	got := make([]string, 0, len(reqs))
 	for _, req := range reqs {
@@ -1357,7 +1361,7 @@ func TestMapModelDeploymentInstanceType(t *testing.T) {
 // the Pod is gone there is nothing left to ask.
 func TestModelDeploymentReconciler_ReplacementWaitsForTheOrdinalToReadEmpty(t *testing.T) {
 	ctx := context.Background()
-	cli := newModelDeploymentClient(newRenderDeployment(), newRenderInstanceType())
+	cli := newModelDeploymentClient(newRenderDeployment(), newRenderAcceleratorType())
 
 	_, err := reconcileModelDeployment(t, cli)
 	require.NoError(t, err)
@@ -1424,7 +1428,7 @@ func TestModelDeploymentReconciler_ReplacementWaitsForTheOrdinalToReadEmpty(t *t
 func TestModelDeploymentReconciler_ATemplateEditRollsOneReplicaAtATime(t *testing.T) {
 	ctx := context.Background()
 	md := newRenderDeployment(func(md *workercore.ModelDeployment) { md.Spec.Roles[0].Replicas = 3 })
-	cli := newModelDeploymentClient(md, newRenderInstanceType())
+	cli := newModelDeploymentClient(md, newRenderAcceleratorType())
 
 	_, err := reconcileModelDeployment(t, cli)
 	require.NoError(t, err)
@@ -1519,7 +1523,7 @@ func (r *countingAPIReader) List(
 
 func TestModelDeploymentReconciler_TheCreateGateReadsTheAPIServer(t *testing.T) {
 	ctx := context.Background()
-	cli := newModelDeploymentClient(newRenderDeployment(), newRenderInstanceType())
+	cli := newModelDeploymentClient(newRenderDeployment(), newRenderAcceleratorType())
 	reader := &countingAPIReader{Reader: cli}
 	r := &ModelDeploymentReconciler{Client: cli, APIReader: reader}
 
@@ -1566,7 +1570,7 @@ func TestModelDeploymentReconciler_TheRolloutGuardCountsAdmittedReplicas(t *test
 	prepare := func(t *testing.T, admit bool) ctrlcli.Client {
 		t.Helper()
 
-		cli := newModelDeploymentClient(newRenderDeployment(), newRenderInstanceType())
+		cli := newModelDeploymentClient(newRenderDeployment(), newRenderAcceleratorType())
 		_, err := reconcileModelDeployment(t, cli)
 		require.NoError(t, err)
 		require.Len(t, replicaNames(t, cli), 2)
@@ -1618,7 +1622,7 @@ func TestModelDeploymentReconciler_TheRolloutGuardCountsAdmittedReplicas(t *test
 func TestModelDeploymentReconciler_ARolloutReplacesTheHighestOrdinalFirst(t *testing.T) {
 	ctx := context.Background()
 	md := newRenderDeployment(func(md *workercore.ModelDeployment) { md.Spec.Roles[0].Replicas = 3 })
-	cli := newModelDeploymentClient(md, newRenderInstanceType())
+	cli := newModelDeploymentClient(md, newRenderAcceleratorType())
 
 	_, err := reconcileModelDeployment(t, cli)
 	require.NoError(t, err)
@@ -1791,7 +1795,7 @@ func TestModelDeployment_UnreadableDeclaredParallelismFailsTheRender(t *testing.
 	md := routedModelDeployment(func(md *workercore.ModelDeployment) {
 		md.Spec.Roles[0].ExtraArgs = []string{"--tensor-parallel-size", "banana"}
 	})
-	cli := newModelDeploymentClient(md, newRenderInstanceType())
+	cli := newModelDeploymentClient(md, newRenderAcceleratorType())
 
 	_, err := reconcileModelDeployment(t, cli)
 	require.ErrorContains(t, err, `role "prefill"`)
@@ -1808,7 +1812,7 @@ func TestModelDeployment_UnreadableDeclaredParallelismOffThePairFailsTheRender(t
 		md.Spec.Roles[0].Kind = workercore.ModelDeploymentRoleKindDecode
 		md.Spec.Roles[0].ExtraArgs = []string{"--tensor-parallel-size", "banana"}
 	})
-	cli := newModelDeploymentClient(md, newRenderInstanceType())
+	cli := newModelDeploymentClient(md, newRenderAcceleratorType())
 
 	_, err := reconcileModelDeployment(t, cli)
 	require.ErrorContains(t, err, `role "server" cannot place its compilation cache`)
@@ -1831,7 +1835,7 @@ func TestModelDeployment_DegreeEditRollsThePair(t *testing.T) {
 			md.Spec.Roles[1].ExtraArgs = decodeArgs
 			md.Spec.Roles[1].Env = decodeEnv
 		})
-		cli := newModelDeploymentClient(md, ascendRenderInstanceType())
+		cli := newModelDeploymentClient(md, ascendRenderAcceleratorType())
 		_, err := reconcileModelDeployment(t, cli)
 		require.NoError(t, err)
 
@@ -1905,7 +1909,7 @@ func TestModelDeploymentReconciler_ExpectedBindingClaimFailuresAreQuiet(t *testi
 			var injected bool
 			fail := failOnce(tc.err)
 			cli := ctrlinterceptor.NewClient(
-				newModelDeploymentClient(newRenderDeployment(), newRenderInstanceType(), newRenderBinding()).(ctrlcli.WithWatch),
+				newModelDeploymentClient(newRenderDeployment(), newRenderAcceleratorType(), newRenderBinding()).(ctrlcli.WithWatch),
 				ctrlinterceptor.Funcs{
 					SubResourceUpdate: func(ctx context.Context, c ctrlcli.Client, sub string, obj ctrlcli.Object, opts ...ctrlcli.SubResourceUpdateOption) error {
 						if _, ok := obj.(*workercore.KVCachePoolBinding); ok {
@@ -1974,7 +1978,7 @@ func TestModelDeploymentReconciler_ExpectedStatusWriteFailuresAreQuiet(t *testin
 			var injected bool
 			fail := failOnce(tc.err)
 			cli := ctrlinterceptor.NewClient(
-				newModelDeploymentClient(newRenderDeployment(), newRenderInstanceType(), newRenderBinding()).(ctrlcli.WithWatch),
+				newModelDeploymentClient(newRenderDeployment(), newRenderAcceleratorType(), newRenderBinding()).(ctrlcli.WithWatch),
 				ctrlinterceptor.Funcs{
 					SubResourceUpdate: func(ctx context.Context, c ctrlcli.Client, sub string, obj ctrlcli.Object, opts ...ctrlcli.SubResourceUpdateOption) error {
 						if _, ok := obj.(*workercore.ModelDeployment); ok {
@@ -2112,7 +2116,7 @@ func endpointEligibilityOrdinarySelector(t *testing.T, cli ctrlcli.Client) label
 // ordinary Service's endpoints.
 func TestModelDeploymentReconciler_BackfillsEligibilityBeforeTheSelectorsNarrow(t *testing.T) {
 	md := newRenderDeployment(func(md *workercore.ModelDeployment) { md.Spec.Roles[0].Replicas = 2 })
-	cli := newModelDeploymentClient(md.DeepCopy(), newRenderInstanceType())
+	cli := newModelDeploymentClient(md.DeepCopy(), newRenderAcceleratorType())
 
 	// The world the upgrade arrives at: replicas exist and serve, Services are term-less.
 	endpointEligibilityTestSeed(t, cli, md)
@@ -2147,7 +2151,7 @@ func TestModelDeploymentReconciler_BackfillsEligibilityBeforeTheSelectorsNarrow(
 // Pod's identity — generation, UID, or the spec hash the rollout reads.
 func TestModelDeploymentReconciler_EligibilityWritesChangeNoPodIdentity(t *testing.T) {
 	md := newRenderDeployment(func(md *workercore.ModelDeployment) { md.Spec.Roles[0].Replicas = 2 })
-	cli := newModelDeploymentClient(md.DeepCopy(), newRenderInstanceType())
+	cli := newModelDeploymentClient(md.DeepCopy(), newRenderAcceleratorType())
 	endpointEligibilityTestSeed(t, cli, md)
 	setEndpointEligibilityPodsReady(t, cli, true)
 
@@ -2191,7 +2195,7 @@ func TestModelDeploymentReconciler_EligibilityWritesChangeNoPodIdentity(t *testi
 // single patch, and a converged tree is written by no pass at all.
 func TestModelDeploymentReconciler_TheKeyRestoresThroughDerivationWithoutFlapping(t *testing.T) {
 	md := newRenderDeployment(func(md *workercore.ModelDeployment) { md.Spec.Roles[0].Replicas = 1 })
-	cli := newModelDeploymentClient(md.DeepCopy(), newRenderInstanceType())
+	cli := newModelDeploymentClient(md.DeepCopy(), newRenderAcceleratorType())
 	endpointEligibilityTestSeed(t, cli, md)
 	setEndpointEligibilityPodsReady(t, cli, true)
 	_, err := reconcileModelDeploymentActivated(t, cli)
@@ -2237,7 +2241,7 @@ func TestModelDeploymentReconciler_TheKeyRestoresThroughDerivationWithoutFlappin
 // was, and becomes eligible only through its own readiness.
 func TestModelDeploymentReconciler_AReplacementMemberIsEligibleOnlyThroughItsOwnVerification(t *testing.T) {
 	md := newRenderDeployment(func(md *workercore.ModelDeployment) { md.Spec.Roles[0].Replicas = 1 })
-	cli := newModelDeploymentClient(md.DeepCopy(), newRenderInstanceType())
+	cli := newModelDeploymentClient(md.DeepCopy(), newRenderAcceleratorType())
 	endpointEligibilityTestSeed(t, cli, md)
 	setEndpointEligibilityPodsReady(t, cli, true)
 	_, err := reconcileModelDeployment(t, cli)
@@ -2292,7 +2296,7 @@ func TestModelDeploymentReconciler_ReadinessAloneNeverEligiblesANonLeader(t *tes
 		md.Spec.Roles[0].Replicas = 1
 		md.Spec.Roles[0].ReplicaSize = 2
 	})
-	cli := newModelDeploymentClient(md.DeepCopy(), newRenderInstanceType())
+	cli := newModelDeploymentClient(md.DeepCopy(), newRenderAcceleratorType())
 	endpointEligibilityTestSeed(t, cli, md)
 	setEndpointEligibilityPodsReady(t, cli, true)
 	_, err := reconcileModelDeployment(t, cli)
@@ -2341,7 +2345,7 @@ func TestModelDeploymentReconciler_AMultiMemberReplicaIsHeldUnverified(t *testin
 				md.Spec.Roles[0].ReplicaSize = 2
 				md.Spec.Roles[0].ExtraArgs = tc.extraArgs
 			})
-			cli := newModelDeploymentClient(md.DeepCopy(), newRenderInstanceType())
+			cli := newModelDeploymentClient(md.DeepCopy(), newRenderAcceleratorType())
 			endpointEligibilityTestSeed(t, cli, md)
 			setEndpointEligibilityPodsReady(t, cli, true)
 			_, err := reconcileModelDeployment(t, cli)
@@ -2364,7 +2368,7 @@ func TestModelDeploymentReconciler_ANotReadyMemberRevokesTheWholeReplica(t *test
 	md := newRenderDeployment(func(md *workercore.ModelDeployment) {
 		md.Spec.Roles[0].Replicas = 1
 	})
-	cli := newModelDeploymentClient(md.DeepCopy(), newRenderInstanceType())
+	cli := newModelDeploymentClient(md.DeepCopy(), newRenderAcceleratorType())
 	endpointEligibilityTestSeed(t, cli, md)
 	setEndpointEligibilityPodsReady(t, cli, true)
 	_, err := reconcileModelDeployment(t, cli)
@@ -2460,7 +2464,7 @@ func TestModelDeploymentReconciler_AHeldReplicaLeavesAnExistingLabelUntouched(t 
 		md.Spec.Roles[0].Replicas = 1
 		md.Spec.Roles[0].ReplicaSize = 2
 	})
-	cli := newModelDeploymentClient(md.DeepCopy(), newRenderInstanceType())
+	cli := newModelDeploymentClient(md.DeepCopy(), newRenderAcceleratorType())
 	endpointEligibilityTestSeed(t, cli, md)
 	setEndpointEligibilityPodsReady(t, cli, true)
 	setEndpointEligibilityLabelOnPods(t, cli, true)
@@ -2505,7 +2509,7 @@ func TestModelDeploymentReconciler_ADefaultHealthFaultWithdrawsThroughTheGate(t 
 		md.Spec.Roles[0].Replicas = 1
 		md.Spec.Roles[0].ReplicaSize = 2
 	})
-	cli := newModelDeploymentClient(md.DeepCopy(), newRenderInstanceType())
+	cli := newModelDeploymentClient(md.DeepCopy(), newRenderAcceleratorType())
 	endpointEligibilityTestSeed(t, cli, md)
 	setEndpointEligibilityPodsReady(t, cli, true)
 	setEndpointEligibilityLabelOnPods(t, cli, true)
@@ -2539,7 +2543,7 @@ func TestModelDeploymentReconciler_AReservedReplicaIsNotRestored(t *testing.T) {
 	md := newRenderDeployment(func(md *workercore.ModelDeployment) {
 		md.Spec.Roles[0].Replicas = 1
 	})
-	cli := newModelDeploymentClient(md.DeepCopy(), newRenderInstanceType())
+	cli := newModelDeploymentClient(md.DeepCopy(), newRenderAcceleratorType())
 	endpointEligibilityTestSeed(t, cli, md)
 	setEndpointEligibilityPodsReady(t, cli, true)
 
@@ -2572,15 +2576,15 @@ func TestModelDeploymentReconciler_TheGateIsPerReplicaAndDoesNotStopBackfill(t *
 		md.Spec.Roles = []workercore.ModelDeploymentRole{
 			{
 				Name: "paired", Replicas: 1, ReplicaSize: 2,
-				InstanceType: "h20-8x", Image: "vllm/vllm-openai:v0.25.1",
+				AcceleratorType: "h20-8x", Image: "vllm/vllm-openai:v0.25.1",
 			},
 			{
 				Name: "solo", Replicas: 1,
-				InstanceType: "h20-8x", Image: "vllm/vllm-openai:v0.25.1",
+				AcceleratorType: "h20-8x", Image: "vllm/vllm-openai:v0.25.1",
 			},
 		}
 	})
-	cli := newModelDeploymentClient(md.DeepCopy(), newRenderInstanceType())
+	cli := newModelDeploymentClient(md.DeepCopy(), newRenderAcceleratorType())
 	endpointEligibilityTestSeed(t, cli, md)
 	setEndpointEligibilityPodsReady(t, cli, true)
 	setEndpointEligibilityTermOnServices(t, cli, false)
@@ -2619,7 +2623,7 @@ func endpointEligibilityCountingClient(
 ) ctrlcli.Client {
 	t.Helper()
 
-	instList := new(worker.InstanceTypeList)
+	instList := new(worker.AcceleratorTypeList)
 	require.NoError(t, previous.List(context.Background(), instList))
 	pods := endpointEligibilityPods(t, previous)
 	svcList := new(core.ServiceList)
@@ -2648,7 +2652,7 @@ func TestModelDeploymentReconciler_RenderVersionFloorAndPredicate(t *testing.T) 
 	ctx := context.Background()
 
 	t.Run("missing render-version annotation rolls replicas one per pass", func(t *testing.T) {
-		cli := newModelDeploymentClient(newRenderDeployment(), newRenderInstanceType())
+		cli := newModelDeploymentClient(newRenderDeployment(), newRenderAcceleratorType())
 		_, err := reconcileModelDeployment(t, cli)
 		require.NoError(t, err)
 		standInForKueue(t, cli, true)
@@ -2729,7 +2733,7 @@ func TestModelDeploymentReconciler_MultiMemberRenderVersionUniformity(t *testing
 			md.Spec.Roles[0].Replicas = 1
 			md.Spec.Roles[0].ReplicaSize = 2
 		})
-		cli := newModelDeploymentClient(md, newRenderInstanceType())
+		cli := newModelDeploymentClient(md, newRenderAcceleratorType())
 		_, err := reconcileModelDeployment(t, cli)
 		require.NoError(t, err)
 		standInForKueue(t, cli, true)
@@ -2783,7 +2787,7 @@ func TestModelDeploymentReconciler_MultiRenderVersionCoexistence(t *testing.T) {
 		md.Spec.Roles[0].Replicas = 2
 	})
 	md, router := retirementRouterFixture(md)
-	cli := newModelDeploymentClient(md, newRenderInstanceType(), router)
+	cli := newModelDeploymentClient(md, newRenderAcceleratorType(), router)
 
 	_, err := reconcileModelDeploymentRetiring(t, cli)
 	require.NoError(t, err)
@@ -2980,7 +2984,7 @@ func TestModelDeploymentReconciler_AnUnsafeMemberWithdrawsTheWholeGroup(t *testi
 				md.Spec.Roles[0].Replicas = 1
 				md.Spec.Roles[0].ReplicaSize = tc.replicaSize
 			})
-			cli := newModelDeploymentClient(md.DeepCopy(), newRenderInstanceType())
+			cli := newModelDeploymentClient(md.DeepCopy(), newRenderAcceleratorType())
 			endpointEligibilityTestSeed(t, cli, md)
 			setEndpointEligibilityPodsReady(t, cli, true)
 			// The key is put on by hand, because otherwise there would be nothing to withdraw and
@@ -3016,7 +3020,7 @@ func TestModelDeploymentReconciler_RecoveryRestoresTheGroupAfterAFreshProbe(t *t
 		md.Spec.Roles[0].Replicas = 1
 		md.Spec.Roles[0].ReplicaSize = 2
 	})
-	cli := newModelDeploymentClient(md.DeepCopy(), newRenderInstanceType())
+	cli := newModelDeploymentClient(md.DeepCopy(), newRenderAcceleratorType())
 	endpointEligibilityTestSeed(t, cli, md)
 	setEndpointEligibilityPodsReady(t, cli, true)
 	// The members are given an address, because a member with no address is a member the
@@ -3228,7 +3232,7 @@ func TestModelDeploymentRestorationIsGatedOnTheGroupsObservation(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			md := newDeployment()
-			cli := newModelDeploymentClient(md.DeepCopy(), newRenderInstanceType())
+			cli := newModelDeploymentClient(md.DeepCopy(), newRenderAcceleratorType())
 			endpointEligibilityTestSeed(t, cli, md)
 			setEndpointEligibilityPodsReady(t, cli, true)
 
@@ -3324,13 +3328,13 @@ func mixedRouterCandidateDeployment() *workercore.ModelDeployment {
 		md.Spec.Roles[0].ReplicaSize = 1
 		md.Spec.Roles[0].Ports = ports
 		md.Spec.Roles = append(md.Spec.Roles, workercore.ModelDeploymentRole{
-			Name:         "custom",
-			Replicas:     1,
-			ReplicaSize:  2,
-			InstanceType: "h20-8x",
-			Image:        "vllm/vllm-openai:v0.25.1",
-			Command:      []string{"python3", "-m", "vllm.entrypoints.openai.api_server"},
-			Ports:        ports,
+			Name:            "custom",
+			Replicas:        1,
+			ReplicaSize:     2,
+			AcceleratorType: "h20-8x",
+			Image:           "vllm/vllm-openai:v0.25.1",
+			Command:         []string{"python3", "-m", "vllm.entrypoints.openai.api_server"},
+			Ports:           ports,
 		})
 	})
 }
@@ -3463,7 +3467,7 @@ func routerStandingMemberLabels(
 // between the two writes is a different claim, and no unit control observes it.
 func TestModelDeploymentRouterCandidate_TheLabelsAreCommittedBeforeTheConfigurationIsPublished(t *testing.T) {
 	md := mixedRouterCandidateDeployment()
-	base := newModelDeploymentClient(md.DeepCopy(), newRenderInstanceType())
+	base := newModelDeploymentClient(md.DeepCopy(), newRenderAcceleratorType())
 
 	// THE SEED PASS: the members stand and the Router's own objects exist.
 	_, err := reconcileModelDeploymentActivated(t, base)
@@ -3559,4 +3563,41 @@ func TestModelDeploymentRouterCandidate_TheLabelsAreCommittedBeforeTheConfigurat
 		"the published discovery admits exactly the members the pass marked")
 	assert.Len(t, candidates, 2, "the restored member and the compatibility leader are the candidates")
 	assert.Len(t, refused, 1, "the follower that answers nothing stays out")
+}
+
+func TestModelDeploymentReconciler_CPUOnlyUnqueuedRoleRollout(t *testing.T) {
+	ctx := context.Background()
+	md := newRenderDeployment(func(md *workercore.ModelDeployment) {
+		md.Spec.Roles[0].AcceleratorType = ""
+	})
+	cli := newModelDeploymentClient(md)
+
+	_, err := reconcileModelDeployment(t, cli)
+	require.NoError(t, err)
+	before := replicaNames(t, cli)
+	require.Len(t, before, 2)
+
+	stored := getModelDeployment(t, cli)
+	assert.True(t, ModelDeploymentConditionQuotaReserved.IsTrue(stored))
+	assert.Equal(t, "NotApplicable", ModelDeploymentConditionQuotaReserved.GetReason(stored))
+
+	// Update image while replicas have no NodeName (unscheduled): rollout holds because 0 admitted.
+	changed := getModelDeployment(t, cli)
+	changed.Spec.Roles[0].Image = "vllm/vllm-openai:v0.26.0"
+	require.NoError(t, cli.Update(ctx, changed))
+
+	_, err = reconcileModelDeployment(t, cli)
+	require.NoError(t, err)
+	assert.Len(t, replicaNames(t, cli), 2, "unscheduled CPU replicas hold the rollout")
+
+	// Mark both replicas scheduled (NodeName != "") so they count as admitted.
+	for _, pod := range replicaPods(t, cli) {
+		scheduled := pod.DeepCopy()
+		scheduled.Spec.NodeName = "node-1"
+		require.NoError(t, cli.Update(ctx, scheduled))
+	}
+
+	_, err = reconcileModelDeployment(t, cli)
+	require.NoError(t, err)
+	assert.Len(t, replicaNames(t, cli), 1, "once scheduled, one outdated CPU replica turns over")
 }

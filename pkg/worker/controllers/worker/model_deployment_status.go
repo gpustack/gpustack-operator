@@ -326,7 +326,7 @@ func (r *ModelDeploymentReconciler) computeModelDeploymentStatusWithQualificatio
 
 	observeModelDeploymentDomain(holder, domain)
 
-	observeModelDeploymentQuota(md, pods, wls, wlByReplica, holder)
+	observeModelDeploymentQuota(md, pods, wls, wlByReplica, holder, r.modelDeploymentRoleQueues(ctx, md))
 
 	r.observeModelDeploymentCache(ctx, md, pods, domain, holder)
 
@@ -1485,6 +1485,7 @@ func modelDeploymentPodRole(pod *core.Pod) string {
 func observeModelDeploymentQuota(
 	md *workercore.ModelDeployment, pods []core.Pod, wls []*kueue.Workload,
 	wlByReplica map[types.UID]*kueue.Workload, holder *workercore.ModelDeployment,
+	queueByAT map[string]string,
 ) {
 	// A PARKED DEPLOYMENT IS REPORTED FIRST, because every other answer below would describe it
 	// wrongly. Its groups are complete and their Workloads deactivated, which the vocabulary here
@@ -1503,6 +1504,13 @@ func observeModelDeploymentQuota(
 				"create it again",
 			len(parked), strings.Join(parked, ", "),
 		))
+
+		return
+	}
+
+	if modelDeploymentQueuedRoleCount(md) == 0 {
+		ModelDeploymentConditionQuotaReserved.True(holder, "NotApplicable",
+			"no role requests an acceleratorType, so replicas schedule directly without Kueue quota reservation")
 
 		return
 	}
@@ -1603,8 +1611,25 @@ func observeModelDeploymentQuota(
 	// IN REPLICAS, NOT PODS, because every message below spells this figure "replicas" and compares
 	// it against a declared count that is in replicas. The two agree only while a replica is one
 	// Pod.
-	live := len(modelDeploymentGroupPodsByReplica(pods))
-	all := len(modelDeploymentGroupPodsIncludingDeparting(pods))
+	queuedRoles := make(map[string]bool, len(md.Spec.Roles))
+	for i := range md.Spec.Roles {
+		if md.Spec.Roles[i].AcceleratorType != "" {
+			queuedRoles[md.Spec.Roles[i].Name] = true
+		}
+	}
+	views := modelDeploymentGroupPodsByReplica(pods)
+	live := 0
+	for _, view := range views {
+		if queuedRoles[view.Role] {
+			live++
+		}
+	}
+	all := 0
+	for _, view := range modelDeploymentGroupPodsIncludingDeparting(pods) {
+		if queuedRoles[view.Role] {
+			all++
+		}
+	}
 
 	// EVERY REPLICA TERMINATING IS NOT "ALL RESERVED". The early return above guards an empty LIST;
 	// this guards an empty RESULT, and they are different emptinesses. A recreate rollout or a group
@@ -1613,6 +1638,12 @@ func observeModelDeploymentQuota(
 	//
 	// Unknown rather than False: no replica holds quota, but none is being refused any either.
 	if live == 0 {
+		if all == 0 {
+			ModelDeploymentConditionQuotaReserved.Unknown(holder, "NoReplicas",
+				"no replica has been created yet")
+
+			return
+		}
 		// THE PREEMPTION IS CARRIED HERE TOO, and this is the branch where it matters most: replicas
 		// on their way out is what a reclaimed group looks like from the Pod side, so "all of them are
 		// terminating" without the reason why sends the reader to look for who deleted them.
@@ -1629,10 +1660,11 @@ func observeModelDeploymentQuota(
 	// deployment-wide sum answers about neither: it reads a complete role as short whenever a
 	// sibling is, and reports a queue that is not the one holding anything back.
 	//
-	// The ClusterQueue is named after the InstanceType, so the queue a refusal points at is read off
-	// the spec rather than resolved: the LocalQueue the entrance label names is derived from it.
+	// The ClusterQueue is derived from the AcceleratorType's pool identity (falling back to the
+	// AcceleratorType name when the object is not resolved), and any admitted Workload's observed
+	// ClusterQueue takes precedence.
 	// The message names the ROLE beside that queue, because the queue and the role are not the same
-	// thing to identify: two roles can name one instance type, so a queue names the pool two roles
+	// thing to identify: two roles can name one accelerator type, so a queue names the pool two roles
 	// share and identifies neither, while the role names exactly the one that is short.
 	// A replica is attributed to its role through the SAME LABEL every other figure on this status
 	// reads, so a Pod cannot be counted in one place and not another -- and a replica that predates
@@ -1643,8 +1675,12 @@ func observeModelDeploymentQuota(
 	// tally of Pods against it reads a role of two replicas of four Pods as having eight of two --
 	// the condition never fires, and the state it exists to name goes unreported precisely where it
 	// is most likely: a group short of a member is one Kueue composes nothing for.
-	views := modelDeploymentGroupPodsByReplica(pods)
-	groups := modelDeploymentPodGroups(md)
+	var groups []modelDeploymentPodGroupSpec
+	for _, group := range modelDeploymentPodGroups(md) {
+		if group.AcceleratorType != "" {
+			groups = append(groups, group)
+		}
+	}
 	for _, group := range groups {
 		var alive int
 		for _, view := range views {
@@ -1662,7 +1698,7 @@ func observeModelDeploymentQuota(
 					"%d of %d replicas role %q declares exist, so Kueue composes no workload for the "+
 						"missing ones at all and there is nothing in cluster queue %q to hold quota "+
 						"for them%s",
-					alive, want, group.Role, group.InstanceType, taken,
+					alive, want, group.Role, modelDeploymentGroupClusterQueueName(group, views, wlByReplica, queueByAT), taken,
 				))
 
 			return
@@ -1673,7 +1709,7 @@ func observeModelDeploymentQuota(
 	// quota.
 	//
 	// THE ANSWER IS OVER EVERY REPLICA, NOT OVER THE FIRST WORKLOAD. A deployment spread over
-	// several instanceTypes has one workload per replica, and answering a role from whichever sorts
+	// several acceleratorTypes has one workload per replica, and answering a role from whichever sorts
 	// first says the deployment holds quota while half of it does not. Measured on a cluster: one
 	// group reserved, its sibling's queue was held, and this condition read Reserved with a message
 	// naming the deployment's whole replica count -- a reading that is wrong in both halves at once.
@@ -1681,7 +1717,7 @@ func observeModelDeploymentQuota(
 	// queue to name, and naming the first role's is a statement about one role offered as a statement
 	// about the deployment. So the queue is read only where the branch has already established there
 	// is one role, and the multi-role branches name the roles they are actually talking about.
-	queue := md.Spec.Roles[0].InstanceType
+	queue := modelDeploymentGroupClusterQueueName(groups[0], views, wlByReplica, queueByAT)
 
 	if uncomposedRoles, uncomposed := modelDeploymentRolesWithUncomposedReplicas(md, pods, wlByReplica); uncomposed > 0 {
 		if kuberess.IsReservedNamespace(md.Namespace) {
@@ -1795,6 +1831,25 @@ func modelDeploymentInadmissibleWorkloadDetails(
 	return "; downstream admission: " + strings.Join(parts, "; ")
 }
 
+func modelDeploymentGroupClusterQueueName(
+	group modelDeploymentPodGroupSpec, views []modelDeploymentReplicaView,
+	wlByReplica map[types.UID]*kueue.Workload, queueByAT map[string]string,
+) string {
+	for _, view := range views {
+		if view.Role != group.Role {
+			continue
+		}
+		if wl := modelDeploymentReplicaWorkload(view, wlByReplica); wl != nil &&
+			wl.Status.Admission != nil && wl.Status.Admission.ClusterQueue != "" {
+			return string(wl.Status.Admission.ClusterQueue)
+		}
+	}
+	if cq := queueByAT[group.AcceleratorType]; cq != "" {
+		return cq
+	}
+	return group.AcceleratorType
+}
+
 // modelDeploymentReplicaWorkloads resolves, for every replica this pass observed, the one Workload
 // owning it.
 //
@@ -1895,6 +1950,9 @@ func modelDeploymentPreemptedInPart(
 	views := modelDeploymentGroupPodsIncludingDeparting(pods)
 	for i := range md.Spec.Roles {
 		role := &md.Spec.Roles[i]
+		if role.AcceleratorType == "" {
+			continue
+		}
 		var lostRole, keptRole bool
 		for _, view := range views {
 			if view.Role != role.Name {
@@ -1970,6 +2028,19 @@ func modelDeploymentKindsWithoutAdmittedReplica(
 			served[kind] = false
 		}
 
+		if role.AcceleratorType == "" {
+			var rolePods []*core.Pod
+			for j := range pods {
+				if pods[j].DeletionTimestamp == nil && modelDeploymentPodRole(&pods[j]) == role.Name {
+					rolePods = append(rolePods, &pods[j])
+				}
+			}
+			if modelDeploymentAdmittedReplicas(nil, rolePods) > 0 {
+				served[kind] = true
+			}
+			continue
+		}
+
 		for j := range pods {
 			if modelDeploymentPodRole(&pods[j]) != role.Name {
 				continue
@@ -1993,11 +2064,14 @@ func modelDeploymentKindsWithoutAdmittedReplica(
 	return unserved
 }
 
-// modelDeploymentDeclaredReplicas sums the replicas every role declares, which is the denominator
-// the per-replica answers name.
+// modelDeploymentDeclaredReplicas sums the replicas every queued role declares, which is the
+// denominator the per-replica quota answers name.
 func modelDeploymentDeclaredReplicas(md *workercore.ModelDeployment) int {
 	declared := 0
 	for i := range md.Spec.Roles {
+		if md.Spec.Roles[i].AcceleratorType == "" {
+			continue
+		}
 		declared += int(md.Spec.Roles[i].Replicas)
 	}
 
@@ -2018,6 +2092,9 @@ func modelDeploymentRolesWithUncomposedReplicas(
 	views := modelDeploymentGroupPodsByReplica(pods)
 	for i := range md.Spec.Roles {
 		role := &md.Spec.Roles[i]
+		if role.AcceleratorType == "" {
+			continue
+		}
 		var short int
 		for _, view := range views {
 			if view.Role != role.Name {
@@ -2076,6 +2153,9 @@ func modelDeploymentRolesWithUnquotaedReplicas(
 	views := modelDeploymentGroupPodsByReplica(pods)
 	for i := range md.Spec.Roles {
 		role := &md.Spec.Roles[i]
+		if role.AcceleratorType == "" {
+			continue
+		}
 		var short int
 		for _, view := range views {
 			if view.Role != role.Name {

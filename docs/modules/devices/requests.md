@@ -3,6 +3,7 @@
 The `Pod` webhooks check these requests at creation and reject invalid ones before a container starts.
 They select `Pod`s with the `kueue.x-k8s.io/queue-name` label. Without that label, a `Pod` can still
 request device-plugin resources, but these checks and resource-unit calculations do not run.
+Pool selection and shared queues are covered in [Scheduling Chain](scheduling.md#naming-and-grouping).
 
 ## Contents
 
@@ -119,7 +120,7 @@ cap: up to 10 holders use the whole accelerator side by side; isolating them is 
 The `Pod` webhook pins a request of two or more (its largest container's) to nodes with that many
 accelerators. It adds
 `acceleratable.feature.gpustack.ai/<group>.count Gt N-1` to every required node-affinity term, reading
-`<group>` from the `InstanceType` fronting the queue, and rejects the `Pod` when that cannot be read.
+`<group>` from an `AcceleratorType` or `InstanceType` fronting the pool queue, and rejects the `Pod` when that cannot be read.
 Ten tokens per accelerator hide a node's accelerator count from Kueue and the scheduler; the label does not.
 
 **Logical slice** — half of one accelerator's VRAM, capped at 40% of its compute:

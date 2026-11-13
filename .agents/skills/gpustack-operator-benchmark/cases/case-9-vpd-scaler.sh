@@ -95,7 +95,7 @@ SCALER="autoscale-vpd-scaler"
 MODEL="${VPD_MODEL:-Qwen/Qwen3-8B}"
 ARTIFACT="${VPD_ARTIFACT:-qwen3-8b}"
 IMAGE="${VPD_IMAGE:-gpustack/runner:cuda13.0-vllm0.32.0}"
-INSTANCE_TYPE="${VPD_INSTANCE_TYPE:-bench-gpu}"
+INSTANCE_TYPE="${VPD_ACCELERATOR_TYPE:-${VPD_INSTANCE_TYPE:-bench-gpu}}"
 ROUTER_NAME="${VPD_ROUTER_NAME:-llm-d-router}"
 LOCAL_PORT_BASE="${LOCAL_PORT_BASE:-18400}"
 READY_TIMEOUT="${READY_TIMEOUT:-1800}"
@@ -188,7 +188,7 @@ spec:
       kind: Prefill
       replicas: 1
       size: 1
-      instanceType: ${INSTANCE_TYPE}
+      acceleratorType: ${INSTANCE_TYPE}
       image: ${IMAGE}
       imagePullPolicy: IfNotPresent
       resources:
@@ -219,7 +219,7 @@ spec:
       kind: Decode
       replicas: 1
       size: 1
-      instanceType: ${INSTANCE_TYPE}
+      acceleratorType: ${INSTANCE_TYPE}
       image: ${IMAGE}
       imagePullPolicy: IfNotPresent
       resources:

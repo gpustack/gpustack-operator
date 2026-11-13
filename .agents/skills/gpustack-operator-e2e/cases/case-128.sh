@@ -212,14 +212,16 @@ accepts() { # <check>
 # The rows that read a target need one, because the webhook reads the platform the type a role
 # names reports. The type must not be deleting and must not be inactive. The lookup is the
 # library's: md_usable_type_for.
-IT=""
-for m in ascend nvidia amd; do
-  found="$(md_usable_type_for "$m")"
-  if [ -n "$found" ]; then
-    IT="$found"
-    break
-  fi
-done
+IT="${E2E_MD_ACCELERATOR_TYPE:-${E2E_MD_INSTANCE_TYPE:-}}"
+if [ -z "$IT" ]; then
+  for m in ascend nvidia amd; do
+    found="$(md_usable_type_for "$m")"
+    if [ -n "$found" ]; then
+      IT="$found"
+      break
+    fi
+  done
+fi
 
 # ---------------------------------------------------------------- the defaults
 
@@ -478,14 +480,14 @@ spec:
       kind: Prefill
       replicas: 2
       size: 1
-      instanceType: ${IT}
+      acceleratorType: ${IT}
       resources:
         accelerator: "1"
     - name: decode
       kind: Decode
       replicas: 2
       size: 1
-      instanceType: ${IT}
+      acceleratorType: ${IT}
       resources:
         accelerator: "1"
 EOF
@@ -517,7 +519,7 @@ spec:
       kind: Server
       replicas: 1
       size: 1
-      instanceType: ${IT}
+      acceleratorType: ${IT}
       command:
         - /bin/sh
         - -c
@@ -553,7 +555,7 @@ spec:
       kind: Server
       replicas: 1
       size: 1
-      instanceType: ${IT}
+      acceleratorType: ${IT}
       elasticEp:
         width: 2
       resources:

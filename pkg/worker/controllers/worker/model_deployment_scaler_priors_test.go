@@ -179,7 +179,7 @@ func TestModelDeploymentScalerCapacityPriorPartialFields(t *testing.T) {
 	}
 }
 
-func capacityPriorFixture(t *testing.T) (*workercore.ModelDeploymentScaler, *workercore.ModelDeployment, *core.ConfigMap, *workerapi.InstanceType) {
+func capacityPriorFixture(t *testing.T) (*workercore.ModelDeploymentScaler, *workercore.ModelDeployment, *core.ConfigMap, *workerapi.AcceleratorType) {
 	t.Helper()
 	imageDigest := "sha256:" + strings.Repeat("a", 64)
 	engineImage := "vllm/vllm-openai@" + imageDigest
@@ -224,7 +224,7 @@ func capacityPriorFixture(t *testing.T) (*workercore.ModelDeploymentScaler, *wor
 	md.Spec.Model.Name = modelName
 	md.Spec.Roles[0].ExtraArgs = args
 	md.Spec.Roles[0].Resources = &workercore.ModelDeploymentRoleResources{Accelerator: capacityPriorQuantity("1")}
-	md.Spec.Roles[0].InstanceType = "test-hardware"
+	md.Spec.Roles[0].AcceleratorType = "test-hardware"
 	md.Annotations = map[string]string{
 		workercore.ModelDeploymentScalerModelIDAnnotationKey:    "model:" + capacityPriorDigestResult(t, func() (string, error) { return priors.Digest(profile.Identity.Model) }),
 		workercore.ModelDeploymentScalerHardwareIDAnnotationKey: "hardware:" + capacityPriorDigestResult(t, func() (string, error) { return priors.Digest(profile.Identity.Hardware) }),
@@ -239,7 +239,7 @@ func capacityPriorFixture(t *testing.T) (*workercore.ModelDeploymentScaler, *wor
 		},
 	}
 	cm := &core.ConfigMap{ObjectMeta: meta.ObjectMeta{Name: "test-priors", Namespace: scaler.Namespace}, Data: map[string]string{priors.DefaultCatalogConfigMapKey: string(data)}}
-	instance := &workerapi.InstanceType{ObjectMeta: meta.ObjectMeta{Name: "test-hardware"}, Spec: workercore.InstanceTypeSpec{Acceleratable: true}, Status: workercore.InstanceTypeStatus{Detail: workercore.InstanceTypeDetail{Product: "H100", InstanceTypeAcceleratorDetail: workercore.InstanceTypeAcceleratorDetail{Memory: "80Gi"}}}}
+	instance := &workerapi.AcceleratorType{ObjectMeta: meta.ObjectMeta{Name: "test-hardware"}, Status: workercore.AcceleratorTypeStatus{Detail: workercore.InstanceTypeDetail{Product: "H100", InstanceTypeAcceleratorDetail: workercore.InstanceTypeAcceleratorDetail{Memory: "80Gi"}}}}
 	return scaler, md, cm, instance
 }
 
@@ -249,7 +249,7 @@ func capacityPriorFixture(t *testing.T) (*workercore.ModelDeploymentScaler, *wor
 // IT IS THE PLAIN FIXTURE, because the catalog the operator ships states no
 // environment, and a catalog that states none constrains the deployment on
 // none.
-func capacityPriorCompleteFixture(t *testing.T) (*workercore.ModelDeploymentScaler, *workercore.ModelDeployment, *core.ConfigMap, *workerapi.InstanceType) {
+func capacityPriorCompleteFixture(t *testing.T) (*workercore.ModelDeploymentScaler, *workercore.ModelDeployment, *core.ConfigMap, *workerapi.AcceleratorType) {
 	t.Helper()
 	return capacityPriorFixture(t)
 }
@@ -525,7 +525,7 @@ func (r capacityPriorErrorReader) Get(ctx context.Context, key ctrlcli.ObjectKey
 func TestModelDeploymentScalerCapacityPriorReadErrors(t *testing.T) {
 	tests := []struct{ name, kind string }{
 		{name: "catalog", kind: "*v1.ConfigMap"},
-		{name: "hardware", kind: "*v1.InstanceType"},
+		{name: "hardware", kind: "*v1.AcceleratorType"},
 		{name: "artifact", kind: "*v1alpha1.ModelArtifact"},
 	}
 	for _, tt := range tests {

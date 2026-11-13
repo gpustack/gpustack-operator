@@ -2,7 +2,6 @@ package worker
 
 import (
 	core "k8s.io/api/core/v1"
-	kueuepodconst "sigs.k8s.io/kueue/pkg/controller/jobs/pod/constants"
 
 	"gpustack.ai/gpustack/pkg/utils/strconvx"
 )
@@ -136,7 +135,7 @@ func modelDeploymentReplicaDeclaredTotal(members []*core.Pod) (int, string) {
 // is. One is a Pod from before the annotation existed, the other is a claim this operator cannot
 // act on.
 func modelDeploymentMemberDeclaredTotal(member *core.Pod) (int, bool) {
-	raw, present := member.Annotations[kueuepodconst.GroupTotalCountAnnotation]
+	raw, present := modelDeploymentPodDeclaredTotalRaw(member)
 	if !present {
 		return 1, true
 	}
