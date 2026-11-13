@@ -869,11 +869,12 @@ func solveWholeUnitConstraints(
 			}
 		}
 	}
-	if !allSpan {
+	switch {
+	case !allSpan:
 		kFloor = maxInt32(kFloor, kCurClamped)
-	} else if hasHistSample && maxHistK >= kCurClamped {
+	case hasHistSample && maxHistK >= kCurClamped:
 		kFloor = maxInt32(kFloor, kCurClamped)
-	} else if hasHistSample {
+	case hasHistSample:
 		kFloor = maxInt32(kFloor, minInt32(kCurClamped, maxHistK))
 	}
 

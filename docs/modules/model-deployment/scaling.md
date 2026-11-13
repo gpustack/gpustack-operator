@@ -312,6 +312,11 @@ The catalog may resolve missing capacity fields for `TokenThroughput` and `Predi
 initial configurable engineering margin, not a universal optimum. [Scaling Benchmark](scaling-benchmark.md#suite-2-capacity-priors) compares `0.75` catalog headroom against
 unmargined manual capacities on H200 hardware, with no warranty.
 
+Omit *`catalogRef`* with `capacityPrior: {}` or set only *`headroom`* to use the embedded catalog. With `catalogRef: {name: my-priors}`, admission defaults *`key`* to `priors.yaml`.
+If absent, the loader checks the legacy `catalog.yaml` key. A referenced catalog is the sole source; it never falls back to the embedded catalog.
+
+An empty `catalogRef: {}` also defaults the key, but admission rejects it because *`name`* is required. A whitespace-only key fails admission on `spec.algorithm.capacityPrior.catalogRef.key`.
+
 The committed catalog, `pkg/worker/scaling/priors/priors.yaml`, is human-editable YAML. The parser also accepts JSON, so a hand-written `ConfigMap` catalog can use either format.
 Profiles are flat records without provenance, serving configuration or workload details. Upstream evidence pins live in
 `.agents/skills/gpustack-operator-priors/references/records.md`.
@@ -357,12 +362,27 @@ When any serving role omits a capacity field under a present *`capacityPrior`*, 
 *`ttftTargetMilliseconds`* for *Prefill*, *`itlTargetMilliseconds`* for *Decode*, and both for *Server*. Manual mode
 retains the `500` ms and `50` ms defaults.
 
-`Predictive` resolves forecast capacity (*`predictive.*TokenCapacityPerReplica`*) and fallback capacity
-(*`predictive.tokenThroughput.*TargetTokensPerSecond`*) independently per field. Setting one explicitly records
-`Explicit` for that field while an omitted sibling resolves from `Catalog` and applies *`headroom`*.
+`Predictive` resolves forecast capacity (*`predictive.*TokenCapacityPerReplica`*) and fallback capacity (*`predictive.tokenThroughput.*TargetTokensPerSecond`*) independently per field in direct resolution.
+An explicit field stays `Explicit`; a missing sibling resolves from `Catalog` with *`headroom`*.
 
-Each scaled serving role that omits a capacity field resolves independently against the catalog
-by its own identity, without overwriting another role's effective values.
+For PD and EPD targets, the active catalog selects between two tiers:
+
+1. **Direct role priors**: When both dedicated `Prefill` and `Decode` profiles match, each role resolves missing fields against its own identity and topology.
+   Partial explicit overrides are supported. Ambiguity, identity or configuration conflicts, and infeasible SLOs fail closed.
+2. **Whole-unit fallback**: When either dedicated role has zero matches (`len(matched) == 0`), the resolver can use `Server` profiles from the same active catalog.
+   It never falls back on ambiguity or other resolution failures. Partial explicit per-role capacity overrides are refused.
+
+Whole-unit fallback requires fixed, connected *`spec.ratios`* across all target roles. Every edge must have `min == max`, and the ratios must reduce to a consistent positive integer unit vector `u` with `gcd == 1`. Role replica bounds must permit a non-empty integer multiplier interval `[k_min, k_max]`; both *`ttftTargetMilliseconds`* and *`itlTargetMilliseconds`* are required.
+
+The resolver matches a compatible `Server` profile for each of `Prefill` and `Decode`, using each role's identity and topology and both latency targets.
+Let `eff_P` and `eff_D` be effective per-replica capacities after headroom, and `g_P` and `g_D` the GPUs per replica.
+It computes `c_gpu = min(eff_P / g_P, eff_D / g_D)` and estimates initial unit throughput as `C_unit = (u_P * g_P + u_D * g_D) * c_gpu`.
+
+This is an initial GPU-time-balanced estimate, not a mathematical lower bound for arbitrary input-to-output sequence length (`ISL:OSL`) splits.
+Runtime unit demand adds `PromptTokensPerSecond` from `Prefill` to `GenerationTokensPerSecond` from `Decode`.
+
+The latency guard reads TTFT from `Prefill` and ITL from `Decode`. A latency ratio above `1.2x` recommends one more whole unit (`LatencyGuardScaleUp`); a ratio in `(1.0x, 1.2x]` holds scale-down (`LatencyGuardHold`).
+`Encode` scales strictly by the fixed ratio (`RatioCoupled`); TTFT reflects the `Prefill` engine histogram, not encoder latency.
 
 ### Target eligibility
 
@@ -372,26 +392,32 @@ and the role's `AcceleratorType` — so the identity annotations below are optio
 
 | Annotation | Accepted values |
 |---|---|
-| `worker.gpustack.ai/model-id` | Natural model name (`deepseek-ai/DeepSeek-R1-0528`); a ModelScope mirror org or vendor-repackaged checkpoint name adapts to the profile's canonical Hugging Face repository. Inferred from *`spec.model.artifactRef`* (`ModelArtifact` repository) or *`spec.model.name`* when omitted. |
-| `worker.gpustack.ai/hardware-id` | Natural accelerator name or slug (`amd-mi325x`, `mi325x`, `AMD Instinct MI325X`, `nvidia-h100`). |
-| `worker.gpustack.ai/prefill-hardware-id` | Optional override for *Prefill* roles on heterogeneous targets; same accepted values. |
-| `worker.gpustack.ai/decode-hardware-id` | Optional override for *Decode* roles on heterogeneous targets; same accepted values. |
-| `worker.gpustack.ai/precision` | Optional; read from the annotation, the engine quantization or dtype flags, or the selected profile's quantization. |
+| `worker.gpustack.ai/model-id` | Optional model identity guard; accepts natural model names and normalized aliases. |
+| `worker.gpustack.ai/hardware-id` | Optional hardware identity guard; accepts natural accelerator names or slugs. |
+| `worker.gpustack.ai/prefill-hardware-id` | Optional *Prefill* hardware identity guard for heterogeneous targets. |
+| `worker.gpustack.ai/decode-hardware-id` | Optional *Decode* hardware identity guard for heterogeneous targets. |
+| `worker.gpustack.ai/precision` | Optional precision selector; compared with engine flags and catalog profiles. |
 
 Model name and weight revision must match *`spec.model`* (or the resolved Hugging Face or ModelScope
 `ModelArtifact` repository and *`status.resolved.revision`*) and any `--revision`, `--quantization`,
 `--tokenizer`, `--tokenizer-path` or `--tokenizer-revision` flags. The role's `AcceleratorType` must be
 acceleratable and match the declared product and `memoryGB` (`Gi` by semantic `Quantity` equality).
 
+The resolver reads `ModelArtifact` *`spec.source.huggingFace.modelID`* and *`revision`*, `AcceleratorType` *`status.manufacturer`* and *`status.model`*, and the engine's `--quantization`.
+If exactly one quantization matches the role, model, engine, hardware and topology, no `ModelDeployment` annotations are needed.
+
+If multiple quantizations match, select one with `--quantization` or `worker.gpustack.ai/precision`.
+The precision annotation also pins precision without an `extraArgs` flag. For example, `Qwen/Qwen3-32B` and `DeepSeek-R1-0528` can have `bf16`, `fp8` or `fp4` profiles.
+The optional model and hardware annotations cross-check the resolved identities; a mismatch is refused.
+
 The effective engine image (*`role.image`* or *`spec.engine.image`*) matches the profile by engine
 family (`vllm` / `sglang`); registry or model aliases are never inferred.
 
-Each catalog-backed role must run as a managed single-serving-`Pod` replica (*`size`* at most `1`, no custom *`command`* and no *`elasticEp`*). The target must omit
-*`spec.router`*, *`spec.kvCache`*, *`spec.kvTransfer`* and any *`Encode`* role whenever a serving role uses `Catalog`, and *`resources.accelerator`* must be an explicit
-whole-accelerator integer without slicing or partitioning.
+Catalog resolution supports a single `Server`, PD `Prefill` / `Decode`, and EPD `Encode` / `Prefill` / `Decode` targets with managed *`spec.router`* and *`spec.kvTransfer`*.
+Each catalog-backed role needs a managed single-serving-`Pod` replica and explicit whole-accelerator resources without slicing.
 
-Supported engines are `vLLM` and `SGLang` with internal load balance, `DP = 1`, `localDP <= 1`, and
-a complete single-`Pod` metric denominator.
+External *`spec.kvCache`*, `elasticEp`, external DP and custom commands remain gated unless the profile explicitly matches the configuration.
+Unknown injected environment variables fail closed. Supported engines use internal load balance, `DP = 1`, `localDP <= 1`, and a complete single-`Pod` metric denominator.
 
 ### Catalog qualification
 
@@ -885,6 +911,9 @@ status:
 is active. *`fields[]`* distinguishes `Explicit` spec fields from `Catalog` fields derived by multiplying
 *`seedTokensPerSecond`* by *`headroom`*. *`latencyBounds[]`* records the quantile statistic used for each required
 latency metric and whether a higher quantile bounded `0.95` conservatively.
+
+In whole-unit fallback, *`status.resolvedCapacityPriors`* has one entry for each LLM role, `prefill` and `decode`. Each *`seedTokensPerSecond`* is that role's own `Server` profile seed per replica.
+The *`tokenThroughput.unitTargetTokensPerSecond`* field records `C_unit`. For `Predictive`, *`predictive.unitTokenCapacityPerReplica`* also records `C_unit`. These unit fields are not per-role replica capacities.
 
 Quantities in *`resolvedCapacityPriors[]`* (*`headroom`*, *`seedTokensPerSecond`* and
 *`effectiveTokensPerSecond`*) compare by semantic `Quantity` equality (`1.5k` equals `1500`).

@@ -112,7 +112,8 @@ func (r *ModelDeploymentScalerReconciler) planWithPriors(
 		}
 	}
 
-	if retirement := md.Status.Retirement; active && shouldRestoreScaleDownAbort(retirement, scaler.Status.LastScaleDown, scaler.Status.LastCommit, current) {
+	if retirement := md.Status.Retirement; active &&
+		shouldRestoreScaleDownAbort(retirement, scaler.Status.LastScaleDown, scaler.Status.LastCommit, current) {
 		owned, err := r.ensureOwnedBinding(ctx, before, scaler, md, now)
 		if err != nil {
 			return ctrlreconcile.Result{}, err
@@ -905,7 +906,7 @@ func (r *ModelDeploymentScalerReconciler) planWholeUnitStates(
 		typed.ServerTargetTokensPerSecond = uPrior.UnitTargetTokensPerSecond
 		engineAlgorithm = typed
 	case algorithm.Predictive:
-		typed.TokenThroughput.ServerTargetTokensPerSecond = uPrior.UnitTargetTokensPerSecond
+		typed.ServerTargetTokensPerSecond = uPrior.UnitTargetTokensPerSecond
 		typed.ServerTokenCapacityPerReplica = uPrior.UnitTargetTokensPerSecond
 		engineAlgorithm = typed
 	}

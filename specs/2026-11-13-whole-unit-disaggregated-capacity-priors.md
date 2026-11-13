@@ -1,7 +1,7 @@
 # Spec: Whole-Unit Disaggregated Capacity Priors and Scaling Documentation Alignment
 
-Status: Building
-Blocked on: completing implementation and verification tasks T1-T5 before setting Status to Shipped
+Status: Built
+Blocked on: end-of-build review and final ship gate before setting Status to Shipped
 Type: Feature
 
 ## Table of Contents
@@ -415,13 +415,13 @@ parallel before `T4` finalizes the scaling guides and module index.
     - `make lint`
   - **Expected:** Exit code `0`; webhook tests and Go linters pass with zero warnings or formatting diffs.
 
-- [ ] **T4 · Scaling module reference, scaling walkthrough, and shared index updates**
+- [x] **T4 · Scaling module reference, scaling walkthrough, and shared index updates**
   - **Blocked by:** T1, T2, T3
   - **Owns:** `docs/modules/model-deployment/scaling.md`, `docs/walkthroughs/model-deployment/scaling.md`, `docs/README.md`
   - **Deliverables:** Document Tier 1 versus Tier 2 `capacityPrior` behavior, GPU-time-balanced estimation limits, `TTFT`/`ITL` hysteresis, EPD `Encode` metric scope, `catalogRef` defaulting, and `ModelDeployment` identity/precision annotation rules in `docs/modules/model-deployment/scaling.md`; replace `spec.model.name: /models` and `--model /models` with `Qwen/Qwen3-8B` and add a fixed-ratio PD `capacityPrior` example in `docs/walkthroughs/model-deployment/scaling.md`; register this specification under `model-deployment` in `docs/README.md`.
   - **Verify:**
     - `make lint docs`
-  - **Expected:** Exit code `0` across `check-docs.sh`, `check-specs.sh`, `check-crossrefs.sh`, `check-skills.sh`, and `make site`.
+  - **Expected:** Exit code `0` across `check-docs.sh`, `check-specs.sh`, `check-crossrefs.sh`, `hack/check/skills.sh`, and `make site`.
 
 - [x] **T5 · Logical `spec.model.name` alignment across remaining model-deployment walkthroughs**
   - **Blocked by:** None
@@ -433,7 +433,7 @@ parallel before `T4` finalizes the scaling guides and module index.
 
 ### Test Plan
 
-- [ ] I/we understand the owners of the involved components may require updates to existing tests to make this code solid enough prior to committing the changes necessary to implement this enhancement.
+- [x] I/we understand the owners of the involved components may require updates to existing tests to make this code solid enough prior to committing the changes necessary to implement this enhancement.
 
 #### Prerequisite testing updates
 

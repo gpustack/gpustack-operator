@@ -475,7 +475,11 @@ func modelDeploymentScalerDisaggregatedRoles(target *workercore.ModelDeployment)
 			}
 			set.decode = role
 		default:
-			return set, modelDeploymentScalerPriorRefusal(role.Name, "mixed or unsupported role kind %q cannot resolve disaggregated capacity priors", ModelDeploymentEffectiveRoleKind(role))
+			return set, modelDeploymentScalerPriorRefusal(
+				role.Name,
+				"mixed or unsupported role kind %q cannot resolve disaggregated capacity priors",
+				ModelDeploymentEffectiveRoleKind(role),
+			)
 		}
 	}
 	if set.prefill == nil || set.decode == nil {
@@ -680,10 +684,11 @@ func modelDeploymentScalerResolveWholeUnitFallback(
 			roles.prefill.Name: *prefillEffective,
 			roles.decode.Name:  *decodeEffective,
 		},
-		Status:           []workercore.ModelDeploymentScalerResolvedCapacityPriorStatus{prefillStatus, decodeStatus},
-		Mode:             ModelDeploymentScalerPriorModeWholeUnitServerFallback,
-		WholeUnit:        wholeUnit,
-		ConditionMessage: "all required capacities are resolved via Tier 2 whole-unit Server fallback (initial estimate assumes GPU-time-balanced stage sizing across the fixed unit ratio)",
+		Status:    []workercore.ModelDeploymentScalerResolvedCapacityPriorStatus{prefillStatus, decodeStatus},
+		Mode:      ModelDeploymentScalerPriorModeWholeUnitServerFallback,
+		WholeUnit: wholeUnit,
+		ConditionMessage: "all required capacities are resolved via Tier 2 whole-unit Server fallback " +
+			"(initial estimate assumes GPU-time-balanced stage sizing across the fixed unit ratio)",
 	}
 	if roles.encode != nil {
 		result.Algorithms[roles.encode.Name] = *scaler.Spec.Algorithm.DeepCopy()
@@ -801,7 +806,10 @@ func solveFixedWholeUnitVector(
 			return nil, 0, 0, modelDeploymentScalerPriorRefusal(ratio.DenominatorRole, "ratio references unknown role")
 		}
 		if ratio.Min == nil || ratio.Max == nil {
-			return nil, 0, 0, modelDeploymentScalerPriorRefusal("", "fixed-ratio constraints require min == max on %s/%s", ratio.NumeratorRole, ratio.DenominatorRole)
+			return nil, 0, 0, modelDeploymentScalerPriorRefusal(
+				"", "fixed-ratio constraints require min == max on %s/%s",
+				ratio.NumeratorRole, ratio.DenominatorRole,
+			)
 		}
 		minRat, err := quantityToPositiveRat(ratio.Min)
 		if err != nil {
@@ -812,7 +820,10 @@ func solveFixedWholeUnitVector(
 			return nil, 0, 0, modelDeploymentScalerPriorRefusal("", "%v", err)
 		}
 		if minRat.Cmp(maxRat) != 0 {
-			return nil, 0, 0, modelDeploymentScalerPriorRefusal("", "Tier 2 whole-unit Server fallback requires fixed ratios (min == max) on %s/%s", ratio.NumeratorRole, ratio.DenominatorRole)
+			return nil, 0, 0, modelDeploymentScalerPriorRefusal(
+				"", "Tier 2 whole-unit Server fallback requires fixed ratios (min == max) on %s/%s",
+				ratio.NumeratorRole, ratio.DenominatorRole,
+			)
 		}
 		if ratio.Target != nil {
 			targetRat, err := quantityToPositiveRat(ratio.Target)
@@ -820,7 +831,10 @@ func solveFixedWholeUnitVector(
 				return nil, 0, 0, modelDeploymentScalerPriorRefusal("", "%v", err)
 			}
 			if targetRat.Cmp(minRat) != 0 {
-				return nil, 0, 0, modelDeploymentScalerPriorRefusal("", "ratio target conflicts with fixed min == max on %s/%s", ratio.NumeratorRole, ratio.DenominatorRole)
+				return nil, 0, 0, modelDeploymentScalerPriorRefusal(
+					"", "ratio target conflicts with fixed min == max on %s/%s",
+					ratio.NumeratorRole, ratio.DenominatorRole,
+				)
 			}
 		}
 		invRat := new(big.Rat).Inv(minRat)

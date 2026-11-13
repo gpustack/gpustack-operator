@@ -70,7 +70,7 @@ metadata:
   namespace: gpustack-bench
 spec:
   model:
-    name: /models
+    name: Qwen/Qwen3-8B
     artifactRef:
       name: qwen3-8b
   engine:
@@ -205,7 +205,7 @@ Router `Service`. Stop if it reports local fallback; local execution cannot meas
 ```bash
 BENCH_INCLUSTER=1 python3 .agents/skills/gpustack-operator-benchmark/scripts/bench_client.py load \
   --endpoint http://autoscaling-vllm-pd-router.gpustack-bench.svc:8000 \
-  --model /models --arm shadow --suite autoscaling --label baseline \
+  --model Qwen/Qwen3-8B --arm shadow --suite autoscaling --label baseline \
   --input-tokens 1024 --output-tokens 256 --concurrency 2 --duration 45 \
   --out /tmp/scaler-shadow.json --requests-out /tmp/scaler-shadow-requests.jsonl
 ```
@@ -304,21 +304,61 @@ For other evidence, supply a reviewed same-namespace `ConfigMap` through *`catal
 `priors.yaml` by default; the parser accepts YAML and JSON) with a qualified profile that
 matches the deployment.
 
-The *`PD`* target in Step 1 sets *`spec.router`*, so it requires manual capacities.
-To use `Catalog`, create a separate single-`Pod` *Server* target that satisfies
-[Target eligibility](../../modules/model-deployment/scaling.md#target-eligibility). A deployment
-whose identity matches an embedded profile resolves against the catalog with no extra setup.
+Single-role `Server`, PD and EPD targets can use catalog priors when they satisfy
+[Target eligibility](../../modules/model-deployment/scaling.md#target-eligibility). Omitting
+*`catalogRef`*, as in `capacityPrior: {headroom: "0.75"}`, selects the embedded catalog.
 
-The model and hardware identity are inferred from the target — natural names in the optional
-identity annotations also work, and bare `mi325x` or `AMD Instinct MI325X` normalize to the
-canonical family `amd-mi325x` via the
-[Instance Type Unit Resources](../../reference/instance-type-unit-resources.md) family rules.
+A `ModelArtifact`, `AcceleratorType` and engine flags supply the identity. No `ModelDeployment`
+annotations are required when `--quantization fp8` or a single catalog quantization identifies the
+profile uniquely.
+
+If multiple quantizations match, set `--quantization` or annotate the deployment with
+`worker.gpustack.ai/precision`. Use the annotation also to pin precision without an engine flag.
+An empty `catalogRef: {}` is invalid: admission requires a name for a present reference.
+
+For a fixed `1P:3D` target, the following scaler uses the embedded catalog. Align the target's
+replicas to the ratio and provide enough GPU capacity before applying it. The matching catalog
+profiles and target topology must also satisfy the prior's requirements; this example is not a
+recorded cluster run.
+
+```yaml
+apiVersion: worker.gpustack.ai/v1
+kind: ModelDeploymentScaler
+metadata:
+  name: autoscale-vllm-pd-prior
+  namespace: gpustack-bench
+spec:
+  targetRef:
+    name: autoscaling-vllm-pd
+  mode: Shadow
+  roles:
+    - name: prefill
+      minReplicas: 1
+      maxReplicas: 2
+    - name: decode
+      minReplicas: 3
+      maxReplicas: 6
+  ratios:
+    - numeratorRole: decode
+      denominatorRole: prefill
+      min: "3"
+      max: "3"
+  algorithm:
+    type: TokenThroughput
+    tokenThroughput:
+      ttftTargetMilliseconds: "2000"
+      itlTargetMilliseconds: "50"
+    capacityPrior:
+      headroom: "0.75"
+```
+
+The resolver uses dedicated role profiles when both match. If either has no match, it can use
+`Server` profiles to estimate whole-unit capacity. See
+[Capacity priors](../../modules/model-deployment/scaling.md#capacity-priors) for the conditions.
 
 The engine image matches by family, so no hand-computed digests or `@sha256` pinning are required.
-
-Omit *`spec.router`*, *`spec.kvCache`*, *`spec.kvTransfer`* and *`Encode`*. The following separate
-server target and scaler changes are examples, not captured output from a live cluster run. Replace
-`acceleratorType` for the intended cluster and check the target against the catalog before use:
+The following separate server target and scaler changes are examples, not captured output from a
+live cluster run. Replace `acceleratorType` and check the target against the catalog before use:
 
 ```yaml
 apiVersion: worker.gpustack.ai/v1
@@ -328,7 +368,7 @@ metadata:
   namespace: gpustack-bench
 spec:
   model:
-    name: /models
+    name: Qwen/Qwen3-8B
     artifactRef:
       name: qwen3-8b
   engine:
@@ -505,7 +545,7 @@ In one terminal, run higher concurrency. In another, watch the target and scaler
 ```bash
 BENCH_INCLUSTER=1 python3 .agents/skills/gpustack-operator-benchmark/scripts/bench_client.py load \
   --endpoint http://autoscaling-vllm-pd-router.gpustack-bench.svc:8000 \
-  --model /models --arm active --suite autoscaling --label ramp \
+  --model Qwen/Qwen3-8B --arm active --suite autoscaling --label ramp \
   --input-tokens 1024 --output-tokens 256 --concurrency 24 --duration 75 \
   --out /tmp/scaler-ramp.json --requests-out /tmp/scaler-ramp-requests.jsonl
 ```
@@ -531,7 +571,7 @@ Leave additional time for the *decode* grace, Router withdrawal and drain.
 ```bash
 BENCH_INCLUSTER=1 python3 .agents/skills/gpustack-operator-benchmark/scripts/bench_client.py load \
   --endpoint http://autoscaling-vllm-pd-router.gpustack-bench.svc:8000 \
-  --model /models --arm active --suite autoscaling --label cooldown \
+  --model Qwen/Qwen3-8B --arm active --suite autoscaling --label cooldown \
   --input-tokens 1024 --output-tokens 256 --concurrency 2 --duration 600 \
   --out /tmp/scaler-cooldown.json --requests-out /tmp/scaler-cooldown-requests.jsonl
 ```
