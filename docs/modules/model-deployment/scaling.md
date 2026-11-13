@@ -403,7 +403,7 @@ Model name and weight revision must match *`spec.model`* (or the resolved Huggin
 `--tokenizer`, `--tokenizer-path` or `--tokenizer-revision` flags. The role's `AcceleratorType` must be
 acceleratable and match the declared product and `memoryGB` (`Gi` by semantic `Quantity` equality).
 
-The resolver reads `ModelArtifact` *`spec.source.huggingFace.modelID`* and *`revision`*, `AcceleratorType` *`status.manufacturer`* and *`status.model`*, and the engine's `--quantization`.
+The resolver reads `ModelArtifact` *`spec.source.huggingFace.repository`* or *`spec.source.modelScope.repository`*, and *`status.resolved.revision`*. It also reads `AcceleratorType` *`status.detail.manufacturer`* and *`status.detail.product`*, and the engine's `--quantization`.
 If exactly one quantization matches the role, model, engine, hardware and topology, no `ModelDeployment` annotations are needed.
 
 If multiple quantizations match, select one with `--quantization` or `worker.gpustack.ai/precision`.

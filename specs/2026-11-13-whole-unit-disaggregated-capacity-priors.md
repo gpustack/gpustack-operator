@@ -247,7 +247,7 @@ do not confuse `spec.model.name` with the container model mount path.
        to `priors.yaml` (and falls back to legacy `catalog.yaml` at load time if `priors.yaml` is
        absent); `catalogRef: {}` fails admission on missing `name`; an explicit whitespace
        `key` fails admission on `key`.
-     - Identity and quantization matching: `ModelArtifact` source/revision + `AcceleratorType`
+     - Identity and quantization matching: `ModelArtifact` repository/revision + `AcceleratorType`
        hardware + `--quantization`; automatic quantization selection when a single profile matches
        `(role, model, engine, hardware, topology)` versus requiring `--quantization` or
        `worker.gpustack.ai/precision` when multiple quantizations match or to pin precision; optional

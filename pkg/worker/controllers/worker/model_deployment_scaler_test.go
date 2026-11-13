@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -15,6 +17,8 @@ import (
 	ctrlcli "sigs.k8s.io/controller-runtime/pkg/client"
 	ctrlfake "sigs.k8s.io/controller-runtime/pkg/client/fake"
 	ctrlreconcile "sigs.k8s.io/controller-runtime/pkg/reconcile"
+	kueue "sigs.k8s.io/kueue/apis/kueue/v1beta2"
+	kueuepodconst "sigs.k8s.io/kueue/pkg/controller/jobs/pod/constants"
 
 	gpustack "gpustack.ai/gpustack/api/v1"
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
@@ -940,6 +944,797 @@ func TestModelDeploymentScalerMultiReplicaSerialRetirement(t *testing.T) {
 		gotMD := scalerTestGetDeployment(t, cli)
 		if got := scalerTestVector(gotMD); got["prefill"] != 1 || got["decode"] != 3 {
 			t.Fatalf("stale abort unexpectedly modified vector to %#v", got)
+		}
+	})
+}
+
+func TestModelDeploymentScalerWholeUnitObservationAndPanicExpiry(t *testing.T) {
+	const unitTargetTPS = 5250.0
+	t0 := time.Unix(200000, 0).UTC()
+
+	newWholeUnitScaler := func(predictive bool) *workercore.ModelDeploymentScaler {
+		scaler := scalerTestCoupledScaler()
+		scaler.Spec.Roles = []workercore.ModelDeploymentScalerRoleBounds{
+			{Name: "prefill", MinReplicas: 1, MaxReplicas: 4},
+			{Name: "decode", MinReplicas: 3, MaxReplicas: 12},
+		}
+		scaler.Spec.Ratios = []workercore.ModelDeploymentScalerRoleRatio{{
+			NumeratorRole:   "decode",
+			DenominatorRole: "prefill",
+			Min:             quantityPointer("3"),
+			Max:             quantityPointer("3"),
+		}}
+		scaler.Spec.Behavior = workercore.ModelDeploymentScalerBehaviorSpec{
+			ScaleUp: workercore.ModelDeploymentScalerScaleUpRules{
+				StabilizationWindowSeconds: 0,
+			},
+			ScaleDown: workercore.ModelDeploymentScalerScaleDownRules{
+				StabilizationWindowSeconds:    60,
+				DecodePostScaleUpGraceSeconds: 10,
+			},
+		}
+		ttSpec := workercore.ModelDeploymentScalerTokenThroughputSpec{
+			TTFTTargetMilliseconds: quantityPointer("500"),
+			ITLTargetMilliseconds:  quantityPointer("50"),
+			StableWindowSeconds:    180,
+			PanicWindowSeconds:     60,
+			PanicThreshold:         quantityPointer("2"),
+		}
+		if predictive {
+			scaler.Spec.Algorithm = workercore.ModelDeploymentScalerAlgorithmSpec{
+				Type: workercore.ModelDeploymentScalerAlgorithmTypePredictive,
+				Predictive: &workercore.ModelDeploymentScalerPredictiveSpec{
+					TokenThroughput: ttSpec,
+					HorizonSeconds:  60,
+					MinPoints:       2,
+				},
+			}
+		} else {
+			scaler.Spec.Algorithm = workercore.ModelDeploymentScalerAlgorithmSpec{
+				Type:            workercore.ModelDeploymentScalerAlgorithmTypeTokenThroughput,
+				TokenThroughput: &ttSpec,
+			}
+		}
+		scaler.Status.Binding = &workercore.ModelDeploymentScalerBindingStatus{
+			TargetUID: "target-uid", TargetName: "target", Term: 1,
+		}
+		return scaler
+	}
+
+	newWholeUnitPriors := func(scaler *workercore.ModelDeploymentScaler, includeEncode bool) *ModelDeploymentScalerCapacityPriors {
+		unitVector := map[string]int32{"prefill": 1, "decode": 3}
+		encodeRole := ""
+		algs := map[string]workercore.ModelDeploymentScalerAlgorithmSpec{
+			"prefill": {},
+			"decode":  scaler.Spec.Algorithm,
+		}
+		if includeEncode {
+			unitVector = map[string]int32{"encode": 1, "prefill": 1, "decode": 2}
+			encodeRole = "encode"
+			algs["encode"] = workercore.ModelDeploymentScalerAlgorithmSpec{}
+		}
+		return &ModelDeploymentScalerCapacityPriors{
+			Mode:       ModelDeploymentScalerPriorModeWholeUnitServerFallback,
+			Algorithms: algs,
+			WholeUnit: &ModelDeploymentScalerWholeUnitPrior{
+				UnitVector:                unitVector,
+				EncodeRole:                encodeRole,
+				PrefillRole:               "prefill",
+				DecodeRole:                "decode",
+				UnitTargetTokensPerSecond: unitTargetTPS,
+				MinUnits:                  1,
+				MaxUnits:                  4,
+			},
+		}
+	}
+
+	ensureAdmittedUnitPods := func(
+		t *testing.T,
+		cli ctrlcli.Client,
+		md *workercore.ModelDeployment,
+		counts map[string]int32,
+	) {
+		t.Helper()
+		ctx := context.Background()
+		controller := true
+		for role, count := range counts {
+			for ordinal := int32(0); ordinal < count; ordinal++ {
+				podName := fmt.Sprintf("%s-%s-%d", md.Name, role, ordinal)
+				existing := new(core.Pod)
+				if err := cli.Get(ctx, ctrlcli.ObjectKey{Namespace: md.Namespace, Name: podName}, existing); err == nil {
+					continue
+				}
+				pod := scalerSamplerPod(podName, role, types.UID(podName+"-uid"), int(ordinal))
+				pod.Namespace = md.Namespace
+				pod.Labels[modelDeploymentLabelKeyName] = modelDeploymentLabelValueName
+				pod.Labels[modelDeploymentLabelKeyInstance] = md.Name
+				group := modelDeploymentReplicaGroupName(md, role, int(ordinal))
+				pod.Labels[kueuepodconst.GroupNameLabel] = group
+				pod.OwnerReferences = []meta.OwnerReference{{
+					APIVersion: workercore.SchemeGroupVersion.String(),
+					Kind:       "ModelDeployment",
+					Name:       md.Name,
+					UID:        md.UID,
+					Controller: &controller,
+				}}
+				if err := cli.Create(ctx, &pod); err != nil {
+					t.Fatal(err)
+				}
+				wl := &kueue.Workload{
+					ObjectMeta: meta.ObjectMeta{
+						Namespace:       md.Namespace,
+						Name:            group,
+						Labels:          pod.Labels,
+						OwnerReferences: []meta.OwnerReference{{Kind: "Pod", Name: pod.Name, UID: pod.UID}},
+					},
+					Status: kueue.WorkloadStatus{
+						Conditions: []meta.Condition{
+							{Type: kueue.WorkloadQuotaReserved, Status: meta.ConditionTrue, Reason: "Admitted"},
+							{Type: kueue.WorkloadAdmitted, Status: meta.ConditionTrue, Reason: "Admitted"},
+						},
+					},
+				}
+				if err := cli.Create(ctx, wl); err != nil {
+					t.Fatal(err)
+				}
+			}
+		}
+	}
+
+	t.Run("observation clock, history retention, and panic expiry", func(t *testing.T) {
+		for _, predictive := range []bool{false, true} {
+			name := "TokenThroughput"
+			if predictive {
+				name = "Predictive"
+			}
+			t.Run(name, func(t *testing.T) {
+				md := scalerTestDeployment("target", "target-uid", map[string]int32{"prefill": 1, "decode": 3})
+				md.Spec.Engine = workercore.ModelDeploymentEngine{Name: workercore.ModelDeploymentEngineVLLM}
+				md.Spec.Roles[0].Kind = workercore.ModelDeploymentRoleKindPrefill
+				md.Spec.Roles[1].Kind = workercore.ModelDeploymentRoleKindDecode
+
+				scaler := newWholeUnitScaler(predictive)
+				md.Annotations = map[string]string{
+					workercore.ModelDeploymentScalerBindingAnnotationKey: scalerTestBindingJSON(scaler, 1),
+				}
+				resolved := newWholeUnitPriors(scaler, false)
+
+				cli := ctrlfake.NewClientBuilder().WithScheme(scheme.Scheme).
+					WithStatusSubresource(&workercore.ModelDeployment{}, &workercore.ModelDeploymentScaler{}, &core.Pod{}, &kueue.Workload{}).
+					WithObjects(md, scaler).Build()
+				ensureAdmittedUnitPods(t, cli, md, map[string]int32{"prefill": 1, "decode": 3})
+
+				type podCounters struct {
+					prompt int64
+					gen    int64
+					hist   int64
+				}
+				var mu sync.Mutex
+				counters := map[string]*podCounters{}
+				clockNow := t0.Add(-10 * time.Second)
+				promptRatePerPod := 100.0
+				genRatePerPod := 100.0
+				lastScrapeAt := map[string]time.Time{}
+
+				r := &ModelDeploymentScalerReconciler{
+					Client:  cli,
+					clock:   func() time.Time { return clockNow },
+					sampler: &modelDeploymentScalerSampler{Clock: func() time.Time { return clockNow }},
+				}
+				r.sampler.Scrape = func(_ context.Context, pod *core.Pod) ([]byte, error) {
+					mu.Lock()
+					defer mu.Unlock()
+					c, ok := counters[pod.Name]
+					if !ok {
+						c = &podCounters{hist: 10}
+						counters[pod.Name] = c
+						lastScrapeAt[pod.Name] = clockNow
+					}
+					if dt := clockNow.Sub(lastScrapeAt[pod.Name]).Seconds(); dt > 0 {
+						role := modelDeploymentPodRole(pod)
+						if role == "prefill" {
+							c.prompt += int64(math.Round(promptRatePerPod * dt))
+						} else {
+							c.gen += int64(math.Round(genRatePerPod * dt))
+						}
+						c.hist += 10
+						lastScrapeAt[pod.Name] = clockNow
+					}
+					var b strings.Builder
+					fmt.Fprintf(&b, "# TYPE vllm:num_requests_running gauge\nvllm:num_requests_running 1\n")
+					fmt.Fprintf(&b, "# TYPE vllm:num_requests_waiting gauge\nvllm:num_requests_waiting 0\n")
+					fmt.Fprintf(&b, "# TYPE vllm:kv_cache_usage_perc gauge\nvllm:kv_cache_usage_perc 0.1\n")
+					fmt.Fprintf(&b, "# TYPE vllm:prompt_tokens_total counter\nvllm:prompt_tokens_total %d\n", c.prompt)
+					fmt.Fprintf(&b, "# TYPE vllm:generation_tokens_total counter\nvllm:generation_tokens_total %d\n", c.gen)
+					fmt.Fprintf(&b, "# TYPE vllm:prefix_cache_queries_total counter\nvllm:prefix_cache_queries_total %d\n", c.prompt)
+					fmt.Fprintf(&b, "# TYPE vllm:prefix_cache_hits_total counter\nvllm:prefix_cache_hits_total 0\n")
+					fmt.Fprintf(&b, "# TYPE vllm:time_to_first_token_seconds histogram\n")
+					fmt.Fprintf(&b, "vllm:time_to_first_token_seconds_bucket{le=\"0.1\"} %d\n", c.hist)
+					fmt.Fprintf(&b, "vllm:time_to_first_token_seconds_bucket{le=\"0.5\"} %d\n", c.hist)
+					fmt.Fprintf(&b, "vllm:time_to_first_token_seconds_bucket{le=\"+Inf\"} %d\n", c.hist)
+					fmt.Fprintf(&b, "vllm:time_to_first_token_seconds_count %d\n", c.hist)
+					fmt.Fprintf(&b, "vllm:time_to_first_token_seconds_sum %.1f\n", float64(c.hist)*0.1)
+					fmt.Fprintf(&b, "# TYPE vllm:inter_token_latency_seconds histogram\n")
+					fmt.Fprintf(&b, "vllm:inter_token_latency_seconds_bucket{le=\"0.01\"} %d\n", c.hist)
+					fmt.Fprintf(&b, "vllm:inter_token_latency_seconds_bucket{le=\"0.05\"} %d\n", c.hist)
+					fmt.Fprintf(&b, "vllm:inter_token_latency_seconds_bucket{le=\"+Inf\"} %d\n", c.hist)
+					fmt.Fprintf(&b, "vllm:inter_token_latency_seconds_count %d\n", c.hist)
+					fmt.Fprintf(&b, "vllm:inter_token_latency_seconds_sum %.2f\n", float64(c.hist)*0.01)
+					return []byte(b.String()), nil
+				}
+
+				step := func(at time.Time) {
+					t.Helper()
+					clockNow = at
+					md = scalerTestGetDeployment(t, cli)
+					scaler = scalerTestGetScaler(t, cli, scaler.Name)
+					if _, err := r.planWithPriors(context.Background(), scaler.DeepCopy(), scaler, md, resolved, at, true); err != nil {
+						t.Fatalf("planWithPriors(%s) error = %v", at, err)
+					}
+				}
+
+				// Baseline pass at t0-10s initializes counter snapshots.
+				step(t0.Add(-10 * time.Second))
+
+				// Drive a 3 * C_unit panic spike at t0 (C_unit=5250 -> 15750 tok/s across 1P:3D).
+				promptRatePerPod = 8000
+				genRatePerPod = 8000.0 / 3.0
+				step(t0)
+
+				state := r.sampler.PredictorState(scaler, "decode")
+				if state == nil || state.History == nil || state.History.Len() == 0 {
+					t.Fatalf("expected non-empty state.History at panic spike, got %+v", state)
+				}
+				lastSample, ok := state.History.At(state.History.Len() - 1)
+				if !ok || !lastSample.Timestamp.Equal(t0) {
+					t.Fatalf("latest history sample = %+v (ok=%v), want timestamp %v", lastSample, ok, t0)
+				}
+				if wantExit := t0.Add(180 * time.Second); !state.PanicExitAt.Equal(wantExit) {
+					t.Fatalf("PanicExitAt = %v, want %v", state.PanicExitAt, wantExit)
+				}
+				gotMD := scalerTestGetDeployment(t, cli)
+				if gotVec := scalerTestVector(gotMD); gotVec["prefill"] < 2 || gotVec["decode"] < 6 {
+					t.Fatalf("expected scale-up on panic spike, got vector %v", gotVec)
+				}
+				if gotScaler := scalerTestGetScaler(t, cli, scaler.Name); gotScaler.Status.Roles[1].Reason != algorithm.ReasonPanic {
+					t.Fatalf("decode role reason = %q, want %q", gotScaler.Status.Roles[1].Reason, algorithm.ReasonPanic)
+				}
+
+				// Admit scaled-up pods and settle low demand well past stableWindow (t0 + 10m).
+				scaledVec := scalerTestVector(gotMD)
+				ensureAdmittedUnitPods(t, cli, gotMD, scaledVec)
+				promptRatePerPod = 100
+				genRatePerPod = 100
+				step(t0.Add(20 * time.Second))
+
+				for tick := 8*time.Minute + 50*time.Second; tick <= 10*time.Minute; tick += 10 * time.Second {
+					step(t0.Add(tick))
+				}
+
+				afterState := r.sampler.PredictorState(scaler, "decode")
+				if afterState == nil || afterState.History == nil || afterState.History.Len() == 0 {
+					t.Fatalf("expected non-empty state.History after panic expiry")
+				}
+				if !afterState.PanicExitAt.IsZero() {
+					t.Fatalf("expected PanicExitAt to expire, got %v", afterState.PanicExitAt)
+				}
+				finalVec := scalerTestVector(scalerTestGetDeployment(t, cli))
+				if finalVec["prefill"] != 1 || finalVec["decode"] != 3 {
+					t.Fatalf("expected scale-down to 1P:3D after panic expiry, got %v", finalVec)
+				}
+				finalScaler := scalerTestGetScaler(t, cli, scaler.Name)
+				if gotReason := finalScaler.Status.Roles[1].Reason; gotReason != algorithm.ReasonScaleDown {
+					t.Fatalf("decode role reason after panic expiry = %q, want %q", gotReason, algorithm.ReasonScaleDown)
+				}
+
+				// Verify planWholeUnitStates directly clears InPanic and HoldScaleDown after stableWindow.
+				settledObs := map[string]algorithm.RoleObservation{
+					"prefill": {
+						Role: "prefill", Kind: algorithm.RoleKindPrefill,
+						CurrentReplicas: 2, ReadyReplicas: 2,
+						PromptTokensPerSecond: 100, TTFTMilliseconds: 100,
+						ThroughputState: algorithm.SignalFresh, LatencyState: algorithm.SignalFresh,
+						CompleteCoverage: true, ObservedAt: t0.Add(10*time.Minute + 10*time.Second),
+					},
+					"decode": {
+						Role: "decode", Kind: algorithm.RoleKindDecode,
+						CurrentReplicas: 6, ReadyReplicas: 6,
+						GenerationTokensPerSecond: 100, ITLMilliseconds: 10,
+						ThroughputState: algorithm.SignalFresh, LatencyState: algorithm.SignalFresh,
+						CompleteCoverage: true, ObservedAt: t0.Add(10*time.Minute + 10*time.Second),
+					},
+				}
+				twoUnitMD := scalerTestGetDeployment(t, cli)
+				twoUnitMD.Spec.Roles[0].Replicas = 2
+				twoUnitMD.Spec.Roles[1].Replicas = 6
+				algByRole, _, roleStates, _, _, _, err := r.planWholeUnitStates(
+					finalScaler, twoUnitMD, resolved, settledObs, nil, 2, t0.Add(10*time.Minute+10*time.Second),
+				)
+				if err != nil {
+					t.Fatalf("planWholeUnitStates error = %v", err)
+				}
+				if algByRole["decode"].InPanic || algByRole["decode"].HoldScaleDown {
+					t.Fatalf("expected InPanic=false and HoldScaleDown=false after expiry, got %+v", algByRole["decode"])
+				}
+				if roleStates[1].HoldScaleDown {
+					t.Fatalf("expected role state HoldScaleDown=false after expiry, got %+v", roleStates[1])
+				}
+			})
+		}
+	})
+
+	t.Run("observation timestamp fallback and max selection", func(t *testing.T) {
+		pTime := t0.Add(-5 * time.Second)
+		dTime := t0.Add(-2 * time.Second)
+		cases := []struct {
+			name   string
+			pObsAt time.Time
+			dObsAt time.Time
+			wantAt time.Time
+		}{
+			{name: "both zero falls back to now", wantAt: t0},
+			{name: "prefill only uses prefill timestamp", pObsAt: pTime, wantAt: pTime},
+			{name: "decode only uses decode timestamp", dObsAt: dTime, wantAt: dTime},
+			{name: "decode newer uses decode timestamp", pObsAt: pTime, dObsAt: dTime, wantAt: dTime},
+			{name: "prefill newer uses prefill timestamp", pObsAt: dTime, dObsAt: pTime, wantAt: dTime},
+		}
+		for _, tc := range cases {
+			t.Run(tc.name, func(t *testing.T) {
+				md := scalerTestDeployment("target", "target-uid", map[string]int32{"prefill": 1, "decode": 3})
+				md.Spec.Roles[0].Kind = workercore.ModelDeploymentRoleKindPrefill
+				md.Spec.Roles[1].Kind = workercore.ModelDeploymentRoleKindDecode
+				scaler := newWholeUnitScaler(false)
+				resolved := newWholeUnitPriors(scaler, false)
+				cli := scalerTestClient(t, md, scaler)
+				r := scalerTestReconciler(cli, t0)
+
+				obs := map[string]algorithm.RoleObservation{
+					"prefill": {
+						Role: "prefill", Kind: algorithm.RoleKindPrefill,
+						CurrentReplicas: 1, ReadyReplicas: 1,
+						PromptTokensPerSecond: 1000, TTFTMilliseconds: 100,
+						ThroughputState: algorithm.SignalFresh, LatencyState: algorithm.SignalFresh,
+						CompleteCoverage: true, ObservedAt: tc.pObsAt,
+					},
+					"decode": {
+						Role: "decode", Kind: algorithm.RoleKindDecode,
+						CurrentReplicas: 3, ReadyReplicas: 3,
+						GenerationTokensPerSecond: 1000, ITLMilliseconds: 10,
+						ThroughputState: algorithm.SignalFresh, LatencyState: algorithm.SignalFresh,
+						CompleteCoverage: true, ObservedAt: tc.dObsAt,
+					},
+				}
+				_, unitObs, _ := buildWholeUnitObservation(md, resolved.WholeUnit, obs, 1, t0)
+				if !unitObs.ObservedAt.Equal(tc.wantAt) {
+					t.Fatalf("unitObs.ObservedAt = %v, want %v", unitObs.ObservedAt, tc.wantAt)
+				}
+				_, predictorByRole, _, _, _, _, err := r.planWholeUnitStates(
+					scaler, md, resolved, obs, nil, 1, t0,
+				)
+				if err != nil {
+					t.Fatalf("planWholeUnitStates error = %v", err)
+				}
+				pred := predictorByRole["decode"]
+				if pred == nil || pred.History == nil || pred.History.Len() == 0 {
+					t.Fatalf("expected recorded history sample, got %+v", pred)
+				}
+				sample, ok := pred.History.At(pred.History.Len() - 1)
+				if !ok || !sample.Timestamp.Equal(tc.wantAt) {
+					t.Fatalf("history sample timestamp = %v (ok=%v), want %v", sample.Timestamp, ok, tc.wantAt)
+				}
+			})
+		}
+	})
+
+	t.Run("cross-role signal matrix", func(t *testing.T) {
+		cases := []struct {
+			name               string
+			pThroughput        algorithm.SignalState
+			dThroughput        algorithm.SignalState
+			pLatency           algorithm.SignalState
+			dLatency           algorithm.SignalState
+			pTTFT              float64
+			pTTFTUnmeasured    bool
+			dITL               float64
+			dITLUnmeasured     bool
+			pComplete          bool
+			dComplete          bool
+			wantThroughput     algorithm.SignalState
+			wantLatency        algorithm.SignalState
+			wantTTFTUnmeasured bool
+			wantITLUnmeasured  bool
+			wantMetricsReady   bool
+			wantReason         string
+		}{
+			{
+				name:               "Fresh and Fresh",
+				pThroughput:        algorithm.SignalFresh,
+				dThroughput:        algorithm.SignalFresh,
+				pLatency:           algorithm.SignalFresh,
+				dLatency:           algorithm.SignalFresh,
+				pTTFT:              100,
+				dITL:               10,
+				pComplete:          true,
+				dComplete:          true,
+				wantThroughput:     algorithm.SignalFresh,
+				wantLatency:        algorithm.SignalFresh,
+				wantTTFTUnmeasured: false,
+				wantITLUnmeasured:  false,
+				wantMetricsReady:   true,
+				wantReason:         algorithm.ReasonTokenThroughput,
+			},
+			{
+				name:               "Fresh and Idle with normal TTFT",
+				pThroughput:        algorithm.SignalFresh,
+				dThroughput:        algorithm.SignalIdle,
+				pLatency:           algorithm.SignalFresh,
+				dLatency:           algorithm.SignalIdle,
+				pTTFT:              100,
+				dITLUnmeasured:     true,
+				pComplete:          true,
+				dComplete:          true,
+				wantThroughput:     algorithm.SignalFresh,
+				wantLatency:        algorithm.SignalFresh,
+				wantTTFTUnmeasured: false,
+				wantITLUnmeasured:  true,
+				wantMetricsReady:   false,
+				wantReason:         algorithm.ReasonWaitingForMetrics,
+			},
+			{
+				name:               "Idle and Idle",
+				pThroughput:        algorithm.SignalIdle,
+				dThroughput:        algorithm.SignalIdle,
+				pLatency:           algorithm.SignalIdle,
+				dLatency:           algorithm.SignalIdle,
+				pTTFTUnmeasured:    true,
+				dITLUnmeasured:     true,
+				pComplete:          true,
+				dComplete:          true,
+				wantThroughput:     algorithm.SignalIdle,
+				wantLatency:        algorithm.SignalIdle,
+				wantTTFTUnmeasured: true,
+				wantITLUnmeasured:  true,
+				wantMetricsReady:   true,
+				wantReason:         algorithm.ReasonTokenThroughput,
+			},
+			{
+				name:               "Fresh and Missing",
+				pThroughput:        algorithm.SignalFresh,
+				dThroughput:        algorithm.SignalMissing,
+				pLatency:           algorithm.SignalFresh,
+				dLatency:           algorithm.SignalMissing,
+				pTTFT:              100,
+				dITLUnmeasured:     true,
+				pComplete:          true,
+				dComplete:          false,
+				wantThroughput:     algorithm.SignalMissing,
+				wantLatency:        algorithm.SignalFresh,
+				wantTTFTUnmeasured: false,
+				wantITLUnmeasured:  true,
+				wantMetricsReady:   false,
+				wantReason:         algorithm.ReasonWaitingForMetrics,
+			},
+			{
+				name:               "Fresh and Stale",
+				pThroughput:        algorithm.SignalFresh,
+				dThroughput:        algorithm.SignalStale,
+				pLatency:           algorithm.SignalFresh,
+				dLatency:           algorithm.SignalStale,
+				pTTFT:              100,
+				dITLUnmeasured:     true,
+				pComplete:          true,
+				dComplete:          false,
+				wantThroughput:     algorithm.SignalStale,
+				wantLatency:        algorithm.SignalFresh,
+				wantTTFTUnmeasured: false,
+				wantITLUnmeasured:  true,
+				wantMetricsReady:   false,
+				wantReason:         algorithm.ReasonWaitingForMetrics,
+			},
+			{
+				name:               "Fresh and Missing without any fresh latency",
+				pThroughput:        algorithm.SignalFresh,
+				dThroughput:        algorithm.SignalMissing,
+				pLatency:           algorithm.SignalFresh,
+				dLatency:           algorithm.SignalMissing,
+				pTTFTUnmeasured:    true,
+				dITLUnmeasured:     true,
+				pComplete:          false,
+				dComplete:          false,
+				wantThroughput:     algorithm.SignalMissing,
+				wantLatency:        algorithm.SignalMissing,
+				wantTTFTUnmeasured: true,
+				wantITLUnmeasured:  true,
+				wantMetricsReady:   false,
+				wantReason:         algorithm.ReasonWaitingForMetrics,
+			},
+			{
+				name:               "Fresh and Stale without any fresh latency",
+				pThroughput:        algorithm.SignalFresh,
+				dThroughput:        algorithm.SignalStale,
+				pLatency:           algorithm.SignalFresh,
+				dLatency:           algorithm.SignalStale,
+				pTTFTUnmeasured:    true,
+				dITLUnmeasured:     true,
+				pComplete:          false,
+				dComplete:          false,
+				wantThroughput:     algorithm.SignalStale,
+				wantLatency:        algorithm.SignalStale,
+				wantTTFTUnmeasured: true,
+				wantITLUnmeasured:  true,
+				wantMetricsReady:   false,
+				wantReason:         algorithm.ReasonWaitingForMetrics,
+			},
+			{
+				name:               "single-side TTFT fresh breach with ITL missing",
+				pThroughput:        algorithm.SignalFresh,
+				dThroughput:        algorithm.SignalMissing,
+				pLatency:           algorithm.SignalFresh,
+				dLatency:           algorithm.SignalMissing,
+				pTTFT:              700,
+				dITLUnmeasured:     true,
+				pComplete:          true,
+				dComplete:          true,
+				wantThroughput:     algorithm.SignalMissing,
+				wantLatency:        algorithm.SignalFresh,
+				wantTTFTUnmeasured: false,
+				wantITLUnmeasured:  true,
+				wantMetricsReady:   true,
+				wantReason:         algorithm.ReasonLatencyGuardScaleUp,
+			},
+			{
+				name:               "single-side ITL fresh breach with TTFT missing",
+				pThroughput:        algorithm.SignalMissing,
+				dThroughput:        algorithm.SignalFresh,
+				pLatency:           algorithm.SignalMissing,
+				dLatency:           algorithm.SignalFresh,
+				pTTFTUnmeasured:    true,
+				dITL:               75,
+				pComplete:          true,
+				dComplete:          true,
+				wantThroughput:     algorithm.SignalMissing,
+				wantLatency:        algorithm.SignalFresh,
+				wantTTFTUnmeasured: true,
+				wantITLUnmeasured:  false,
+				wantMetricsReady:   true,
+				wantReason:         algorithm.ReasonLatencyGuardScaleUp,
+			},
+		}
+
+		for _, tc := range cases {
+			t.Run(tc.name, func(t *testing.T) {
+				pHasTTFT := !tc.pTTFTUnmeasured && tc.pLatency == algorithm.SignalFresh
+				dHasITL := !tc.dITLUnmeasured && tc.dLatency == algorithm.SignalFresh
+				if got := combineWholeUnitThroughputState(tc.pThroughput, tc.dThroughput); got != tc.wantThroughput {
+					t.Fatalf("combineWholeUnitThroughputState(%q, %q) = %q, want %q",
+						tc.pThroughput, tc.dThroughput, got, tc.wantThroughput)
+				}
+				if got := combineWholeUnitLatencyState(tc.pLatency, tc.dLatency, pHasTTFT, dHasITL); got != tc.wantLatency {
+					t.Fatalf("combineWholeUnitLatencyState(%q, %q, %v, %v) = %q, want %q",
+						tc.pLatency, tc.dLatency, pHasTTFT, dHasITL, got, tc.wantLatency)
+				}
+
+				md := scalerTestDeployment("target", "target-uid", map[string]int32{"prefill": 1, "decode": 3})
+				md.Spec.Roles[0].Kind = workercore.ModelDeploymentRoleKindPrefill
+				md.Spec.Roles[1].Kind = workercore.ModelDeploymentRoleKindDecode
+				scaler := newWholeUnitScaler(false)
+				resolved := newWholeUnitPriors(scaler, false)
+				cli := scalerTestClient(t, md, scaler)
+				r := scalerTestReconciler(cli, t0)
+
+				obs := map[string]algorithm.RoleObservation{
+					"prefill": {
+						Role: "prefill", Kind: algorithm.RoleKindPrefill,
+						CurrentReplicas: 1, ReadyReplicas: 1,
+						PromptTokensPerSecond: 500, TTFTMilliseconds: tc.pTTFT, TTFTUnmeasured: tc.pTTFTUnmeasured,
+						ThroughputState: tc.pThroughput, LatencyState: tc.pLatency,
+						CompleteCoverage: tc.pComplete, ObservedAt: t0,
+					},
+					"decode": {
+						Role: "decode", Kind: algorithm.RoleKindDecode,
+						CurrentReplicas: 3, ReadyReplicas: 3,
+						GenerationTokensPerSecond: 500, ITLMilliseconds: tc.dITL, ITLUnmeasured: tc.dITLUnmeasured,
+						ThroughputState: tc.dThroughput, LatencyState: tc.dLatency,
+						CompleteCoverage: tc.dComplete, ObservedAt: t0,
+					},
+				}
+				_, unitObs, _ := buildWholeUnitObservation(md, resolved.WholeUnit, obs, 1, t0)
+				if unitObs.ThroughputState != tc.wantThroughput || unitObs.LatencyState != tc.wantLatency {
+					t.Fatalf("unitObs states = (%q, %q), want (%q, %q)",
+						unitObs.ThroughputState, unitObs.LatencyState, tc.wantThroughput, tc.wantLatency)
+				}
+				if unitObs.TTFTUnmeasured != tc.wantTTFTUnmeasured || unitObs.ITLUnmeasured != tc.wantITLUnmeasured {
+					t.Fatalf("unitObs unmeasured = (%v, %v), want (%v, %v)",
+						unitObs.TTFTUnmeasured, unitObs.ITLUnmeasured, tc.wantTTFTUnmeasured, tc.wantITLUnmeasured)
+				}
+
+				algByRole, _, _, _, metricsReady, _, err := r.planWholeUnitStates(
+					scaler, md, resolved, obs, nil, 1, t0,
+				)
+				if err != nil {
+					t.Fatalf("planWholeUnitStates error = %v", err)
+				}
+				if metricsReady != tc.wantMetricsReady {
+					t.Fatalf("metricsReady = %v, want %v", metricsReady, tc.wantMetricsReady)
+				}
+				if gotReason := algByRole["decode"].Reason; gotReason != tc.wantReason {
+					t.Fatalf("decode reason = %q, want %q", gotReason, tc.wantReason)
+				}
+			})
+		}
+	})
+
+	t.Run("partial unit readiness", func(t *testing.T) {
+		cases := []struct {
+			name                string
+			includeEncode       bool
+			current             map[string]int32
+			ready               map[string]int32
+			completeByRole      map[string]bool
+			kCur                int32
+			wantUnitReady       int32
+			wantComplete        bool
+			wantMetricsReady    bool
+			wantDecodeReason    string
+			wantHoldScaleDown   bool
+			checkPlanWithPriors bool
+		}{
+			{
+				name:              "1P:3D current 2P:6D ready (2,5) gives unitReady=1 and incomplete coverage",
+				current:           map[string]int32{"prefill": 2, "decode": 6},
+				ready:             map[string]int32{"prefill": 2, "decode": 5},
+				completeByRole:    map[string]bool{"prefill": true, "decode": false},
+				kCur:              2,
+				wantUnitReady:     1,
+				wantComplete:      false,
+				wantMetricsReady:  false,
+				wantDecodeReason:  algorithm.ReasonScaleDown,
+				wantHoldScaleDown: true,
+			},
+			{
+				name:              "1P:3D current 1P:3D ready (1,2) gives unitReady=0 and NoReadyReplicas",
+				current:           map[string]int32{"prefill": 1, "decode": 3},
+				ready:             map[string]int32{"prefill": 1, "decode": 2},
+				completeByRole:    map[string]bool{"prefill": true, "decode": false},
+				kCur:              1,
+				wantUnitReady:     0,
+				wantComplete:      false,
+				wantMetricsReady:  false,
+				wantDecodeReason:  algorithm.ReasonNoReadyReplicas,
+				wantHoldScaleDown: true,
+			},
+			{
+				name:                "1E:1P:2D with Encode unready gives unitReady=0 and MetricsReady=False",
+				includeEncode:       true,
+				current:             map[string]int32{"encode": 1, "prefill": 1, "decode": 2},
+				ready:               map[string]int32{"encode": 0, "prefill": 1, "decode": 2},
+				completeByRole:      map[string]bool{"encode": false, "prefill": true, "decode": true},
+				kCur:                1,
+				wantUnitReady:       0,
+				wantComplete:        false,
+				wantMetricsReady:    false,
+				wantDecodeReason:    algorithm.ReasonNoReadyReplicas,
+				wantHoldScaleDown:   true,
+				checkPlanWithPriors: true,
+			},
+		}
+
+		for _, tc := range cases {
+			t.Run(tc.name, func(t *testing.T) {
+				scaler := newWholeUnitScaler(false)
+				roles := []workercore.ModelDeploymentRole{
+					{Name: "prefill", Kind: workercore.ModelDeploymentRoleKindPrefill, Replicas: tc.current["prefill"]},
+					{Name: "decode", Kind: workercore.ModelDeploymentRoleKindDecode, Replicas: tc.current["decode"]},
+				}
+				if tc.includeEncode {
+					roles = append([]workercore.ModelDeploymentRole{{
+						Name:     "encode",
+						Kind:     workercore.ModelDeploymentRoleKindEncode,
+						Replicas: tc.current["encode"],
+					}}, roles...)
+					scaler.Spec.Roles = []workercore.ModelDeploymentScalerRoleBounds{
+						{Name: "encode", MinReplicas: 1, MaxReplicas: 4},
+						{Name: "prefill", MinReplicas: 1, MaxReplicas: 4},
+						{Name: "decode", MinReplicas: 2, MaxReplicas: 8},
+					}
+					scaler.Spec.Ratios = []workercore.ModelDeploymentScalerRoleRatio{
+						{NumeratorRole: "encode", DenominatorRole: "prefill", Min: quantityPointer("1"), Max: quantityPointer("1")},
+						{NumeratorRole: "decode", DenominatorRole: "prefill", Min: quantityPointer("2"), Max: quantityPointer("2")},
+					}
+				}
+				md := &workercore.ModelDeployment{
+					ObjectMeta: meta.ObjectMeta{Namespace: "ns", Name: "target", UID: "target-uid", Generation: 1},
+					Spec: workercore.ModelDeploymentSpec{
+						Engine: workercore.ModelDeploymentEngine{Name: workercore.ModelDeploymentEngineVLLM},
+						Roles:  roles,
+					},
+				}
+				md.Annotations = map[string]string{
+					workercore.ModelDeploymentScalerBindingAnnotationKey: scalerTestBindingJSON(scaler, 1),
+				}
+				resolved := newWholeUnitPriors(scaler, tc.includeEncode)
+				cli := scalerTestClient(t, md, scaler)
+				r := scalerTestReconciler(cli, t0)
+
+				obs := map[string]algorithm.RoleObservation{
+					"prefill": {
+						Role: "prefill", Kind: algorithm.RoleKindPrefill,
+						CurrentReplicas: tc.current["prefill"], ReadyReplicas: tc.ready["prefill"],
+						PromptTokensPerSecond: 500, TTFTMilliseconds: 100,
+						ThroughputState: algorithm.SignalFresh, LatencyState: algorithm.SignalFresh,
+						CompleteCoverage: tc.completeByRole["prefill"], ObservedAt: t0,
+					},
+					"decode": {
+						Role: "decode", Kind: algorithm.RoleKindDecode,
+						CurrentReplicas: tc.current["decode"], ReadyReplicas: tc.ready["decode"],
+						GenerationTokensPerSecond: 500, ITLMilliseconds: 10,
+						ThroughputState: algorithm.SignalFresh, LatencyState: algorithm.SignalFresh,
+						CompleteCoverage: tc.completeByRole["decode"], ObservedAt: t0,
+					},
+				}
+				if tc.includeEncode {
+					obs["encode"] = algorithm.RoleObservation{
+						Role: "encode", Kind: algorithm.RoleKindEncode,
+						CurrentReplicas: tc.current["encode"], ReadyReplicas: tc.ready["encode"],
+						CompleteCoverage: tc.completeByRole["encode"], ObservedAt: t0,
+					}
+				}
+
+				_, unitObs, _ := buildWholeUnitObservation(md, resolved.WholeUnit, obs, tc.kCur, t0)
+				if unitObs.ReadyReplicas != tc.wantUnitReady {
+					t.Fatalf("unitObs.ReadyReplicas = %d, want %d", unitObs.ReadyReplicas, tc.wantUnitReady)
+				}
+				if unitObs.CompleteCoverage != tc.wantComplete {
+					t.Fatalf("unitObs.CompleteCoverage = %v, want %v", unitObs.CompleteCoverage, tc.wantComplete)
+				}
+
+				algByRole, _, roleStates, _, metricsReady, _, err := r.planWholeUnitStates(
+					scaler, md, resolved, obs, nil, tc.kCur, t0,
+				)
+				if err != nil {
+					t.Fatalf("planWholeUnitStates error = %v", err)
+				}
+				if metricsReady != tc.wantMetricsReady {
+					t.Fatalf("metricsReady = %v, want %v", metricsReady, tc.wantMetricsReady)
+				}
+				if got := algByRole["decode"]; got.Reason != tc.wantDecodeReason || got.HoldScaleDown != tc.wantHoldScaleDown {
+					t.Fatalf("decode recommendation = %+v, want reason=%q holdScaleDown=%v",
+						got, tc.wantDecodeReason, tc.wantHoldScaleDown)
+				}
+				for _, st := range roleStates {
+					if st.CompleteCoverage != tc.wantComplete || st.HoldScaleDown != tc.wantHoldScaleDown {
+						t.Fatalf("role state %s = %+v, want complete=%v hold=%v",
+							st.Name, st, tc.wantComplete, tc.wantHoldScaleDown)
+					}
+				}
+
+				if tc.checkPlanWithPriors {
+					e2eCli := ctrlfake.NewClientBuilder().WithScheme(scheme.Scheme).
+						WithStatusSubresource(&workercore.ModelDeployment{}, &workercore.ModelDeploymentScaler{}, &core.Pod{}, &kueue.Workload{}).
+						WithObjects(md.DeepCopy(), scaler.DeepCopy()).Build()
+					ensureAdmittedUnitPods(t, e2eCli, md, map[string]int32{"prefill": 1, "decode": 2})
+					e2eR := &ModelDeploymentScalerReconciler{
+						Client:  e2eCli,
+						clock:   func() time.Time { return t0 },
+						sampler: &modelDeploymentScalerSampler{Clock: func() time.Time { return t0 }},
+					}
+					e2eR.sampler.Scrape = func(_ context.Context, _ *core.Pod) ([]byte, error) {
+						return []byte("# TYPE vllm:num_requests_running gauge\nvllm:num_requests_running 0\n"), nil
+					}
+					e2eScaler := scalerTestGetScaler(t, e2eCli, scaler.Name)
+					e2eMD := scalerTestGetDeployment(t, e2eCli)
+					if _, err := e2eR.planWithPriors(
+						context.Background(), e2eScaler.DeepCopy(), e2eScaler, e2eMD, resolved, t0, true,
+					); err != nil {
+						t.Fatalf("planWithPriors error = %v", err)
+					}
+					stored := scalerTestGetScaler(t, e2eCli, scaler.Name)
+					cond := scalerCondition(stored, workercore.ModelDeploymentScalerConditionTypeMetricsReady)
+					if cond.Status != meta.ConditionFalse {
+						t.Fatalf("MetricsReady condition = %+v, want False", cond)
+					}
+				}
+			})
 		}
 	})
 }

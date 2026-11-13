@@ -216,7 +216,7 @@ func (r *ModelDeploymentScalerReconciler) planWithPriors(
 		if kCur, ok := wholeUnitMultiplier(md.Spec.Roles, resolved.WholeUnit.UnitVector); ok {
 			var err error
 			algorithmByRole, predictorByRole, states, roleStatuses, metricsReady, metricsReasons, err = r.planWholeUnitStates(
-				scaler, md, resolved, observations, pendingByRole, kCur,
+				scaler, md, resolved, observations, pendingByRole, kCur, now,
 			)
 			if err != nil {
 				return ctrlreconcile.Result{}, err
@@ -814,24 +814,23 @@ func roleStatusFromObservation(
 	return status
 }
 
-func (r *ModelDeploymentScalerReconciler) planWholeUnitStates(
-	scaler *workercore.ModelDeploymentScaler,
+func wholeUnitObservedAt(prefillObs, decodeObs algorithm.RoleObservation, now time.Time) time.Time {
+	unitObservedAt := now
+	if !prefillObs.ObservedAt.IsZero() && (decodeObs.ObservedAt.IsZero() || !decodeObs.ObservedAt.After(prefillObs.ObservedAt)) {
+		unitObservedAt = prefillObs.ObservedAt
+	} else if !decodeObs.ObservedAt.IsZero() {
+		unitObservedAt = decodeObs.ObservedAt
+	}
+	return unitObservedAt
+}
+
+func buildWholeUnitObservation(
 	md *workercore.ModelDeployment,
-	resolved *ModelDeploymentScalerCapacityPriors,
+	uPrior *ModelDeploymentScalerWholeUnitPrior,
 	observations map[string]algorithm.RoleObservation,
-	pendingByRole map[string]bool,
 	kCur int32,
-) (
-	map[string]algorithm.RoleRecommendation,
-	map[string]*algorithm.PredictorState,
-	[]ModelDeploymentScalerRoleState,
-	[]workercore.ModelDeploymentScalerRoleStatus,
-	bool,
-	[]string,
-	error,
-) {
-	uPrior := resolved.WholeUnit
-	samples := r.sampler.RoleSamples(scaler)
+	now time.Time,
+) (map[string]algorithm.RoleObservation, algorithm.RoleObservation, bool) {
 	roleObs := make(map[string]algorithm.RoleObservation, len(md.Spec.Roles))
 	for i := range md.Spec.Roles {
 		role := &md.Spec.Roles[i]
@@ -895,7 +894,31 @@ func (r *ModelDeploymentScalerReconciler) planWholeUnitStates(
 		ThroughputState:           combineWholeUnitThroughputState(prefillObs.ThroughputState, decodeObs.ThroughputState),
 		LatencyState:              combineWholeUnitLatencyState(prefillObs.LatencyState, decodeObs.LatencyState, prefillHasTTFT, decodeHasITL),
 		CompleteCoverage:          unitCompleteCoverage,
+		ObservedAt:                wholeUnitObservedAt(prefillObs, decodeObs, now),
 	}
+	return roleObs, unitObs, encodeReady
+}
+
+func (r *ModelDeploymentScalerReconciler) planWholeUnitStates(
+	scaler *workercore.ModelDeploymentScaler,
+	md *workercore.ModelDeployment,
+	resolved *ModelDeploymentScalerCapacityPriors,
+	observations map[string]algorithm.RoleObservation,
+	pendingByRole map[string]bool,
+	kCur int32,
+	now time.Time,
+) (
+	map[string]algorithm.RoleRecommendation,
+	map[string]*algorithm.PredictorState,
+	[]ModelDeploymentScalerRoleState,
+	[]workercore.ModelDeploymentScalerRoleStatus,
+	bool,
+	[]string,
+	error,
+) {
+	uPrior := resolved.WholeUnit
+	samples := r.sampler.RoleSamples(scaler)
+	roleObs, unitObs, encodeReady := buildWholeUnitObservation(md, uPrior, observations, kCur, now)
 
 	engineAlgorithm, err := modelDeploymentScalerAlgorithmForRole(resolved.Algorithms[uPrior.DecodeRole], uPrior.DecodeRole)
 	if err != nil {
