@@ -1525,3 +1525,219 @@ func TestGroupQualificationStatesTheGroup(t *testing.T) {
 	assert.Equal(t, modelDeploymentGroupStateUnsupported, unsupported[0].GroupState(),
 		"a shape no observation exists for is unsupported")
 }
+
+// TestGroupQualificationSkipsAlreadyEligibleAndCondemnedReplicas verifies that standing eligible
+// replicas and retiring replicas do not re-trigger live pair probes on unchanged passes, while new
+// or generation-changed replicas are probed.
+func TestGroupQualificationSkipsAlreadyEligibleAndCondemnedReplicas(t *testing.T) {
+	stampEligible := func(pod *core.Pod) {
+		if pod.Labels == nil {
+			pod.Labels = map[string]string{}
+		}
+		if pod.Annotations == nil {
+			pod.Annotations = map[string]string{}
+		}
+		pod.Labels[modelDeploymentLabelKeyEndpointEligible] = modelDeploymentEndpointEligibleValue
+		pod.Annotations[modelDeploymentAnnotationKeyEndpointEligibleGeneration] = string(pod.UID)
+	}
+
+	testCases := []struct {
+		name           string
+		prefills       int32
+		decodes        int32
+		eligibleSet    map[string]bool
+		retireOrdinal  *int32
+		retireRole     string
+		wantCalls      int
+		wantEligible   map[string]bool
+		wantStateByKey map[string]modelDeploymentGroupState
+	}{
+		{
+			name:         "steady already-eligible replicas skip all pair probes",
+			prefills:     1,
+			decodes:      2,
+			eligibleSet:  map[string]bool{"prefill/0": true, "decode/0": true, "decode/1": true},
+			wantCalls:    0,
+			wantEligible: map[string]bool{"prefill/0": true, "decode/0": true, "decode/1": true},
+		},
+		{
+			name:         "new decode replica probes once paired with already-eligible prefill",
+			prefills:     1,
+			decodes:      2,
+			eligibleSet:  map[string]bool{"prefill/0": true, "decode/0": true},
+			wantCalls:    2,
+			wantEligible: map[string]bool{"prefill/0": true, "decode/0": true, "decode/1": true},
+		},
+		{
+			name:          "retiring prefill replica is never probed while remaining replicas stay eligible with zero calls",
+			prefills:      2,
+			decodes:       2,
+			eligibleSet:   map[string]bool{"prefill/0": true, "decode/0": true, "decode/1": true},
+			retireRole:    "prefill",
+			retireOrdinal: func() *int32 { v := int32(1); return &v }(),
+			wantCalls:     0,
+			wantEligible:  map[string]bool{"prefill/0": true, "decode/0": true, "decode/1": true},
+			wantStateByKey: map[string]modelDeploymentGroupState{
+				"prefill/0": modelDeploymentGroupStateEligible,
+				"prefill/1": modelDeploymentGroupStateWithdrawn,
+				"decode/0":  modelDeploymentGroupStateEligible,
+				"decode/1":  modelDeploymentGroupStateEligible,
+			},
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			md := healthPairDeployment(workercore.ModelDeploymentEngineSGLang, 1, 1)
+			md.Spec.Roles[0].Replicas = tc.prefills
+			md.Spec.Roles[1].Replicas = tc.decodes
+
+			var pods []core.Pod
+			prefillHosts := map[string]bool{}
+			statusRoles := []workercore.ModelDeploymentRoleStatus{
+				{Name: "prefill"},
+				{Name: "decode"},
+			}
+			for ord := int32(0); ord < tc.prefills; ord++ {
+				key := "prefill/" + strconvx.Itoa(int(ord))
+				uid := "uid-p" + strconvx.Itoa(int(ord))
+				pod := healthPairPod("prefill", int(ord), 0, healthBool(true), uid, "8998")
+				prefillHosts[healthPairHost("prefill", int(ord), 0)] = true
+				if tc.eligibleSet[key] {
+					stampEligible(&pod)
+					statusRoles[0].Groups = append(statusRoles[0].Groups, workercore.ModelDeploymentGroupStatus{
+						Role:       "prefill",
+						Ordinal:    ord,
+						Generation: uid,
+						State:      workercore.ModelDeploymentGroupStateEligible,
+					})
+				}
+				pods = append(pods, pod)
+			}
+			for ord := int32(0); ord < tc.decodes; ord++ {
+				key := "decode/" + strconvx.Itoa(int(ord))
+				uid := "uid-d" + strconvx.Itoa(int(ord))
+				pod := healthPairPod("decode", int(ord), 0, healthBool(true), uid, "")
+				if tc.eligibleSet[key] {
+					stampEligible(&pod)
+					statusRoles[1].Groups = append(statusRoles[1].Groups, workercore.ModelDeploymentGroupStatus{
+						Role:       "decode",
+						Ordinal:    ord,
+						Generation: uid,
+						State:      workercore.ModelDeploymentGroupStateEligible,
+					})
+				}
+				pods = append(pods, pod)
+			}
+			md.Status.Roles = statusRoles
+			if tc.retireOrdinal != nil {
+				md.Status.Retirement = &workercore.ModelDeploymentRetirementStatus{
+					State:          workercore.ModelDeploymentRetirementStateDraining,
+					RoleName:       tc.retireRole,
+					ReplicaOrdinal: *tc.retireOrdinal,
+				}
+			}
+			pods = stampHealthGroupTotals(md, pods)
+
+			fetch := &healthPairFetch{prefillHosts: prefillHosts}
+			qualifications := qualifyModelDeploymentInstances(
+				context.Background(), md, pods, modelDeploymentPendingReplacement{}, boundProbeFetch, fetch.fetch,
+			)
+
+			assert.Len(t, fetch.asked, tc.wantCalls, "unexpected live pair probe call count")
+			for _, q := range qualifications {
+				key := q.View.Role + "/" + strconvx.Itoa(q.View.Ordinal)
+				assert.Equal(t, tc.wantEligible[key], q.Eligible(), "%s eligibility", key)
+				if wantState, ok := tc.wantStateByKey[key]; ok {
+					assert.Equal(t, wantState, q.GroupState(), "%s group state", key)
+				}
+			}
+		})
+	}
+}
+
+// TestInPlaceContainerRestartAdvancesGenerationAndRequalifiesOnce verifies that an in-place
+// restart of a serving container or a RestartPolicy=Always sidecar advances the membership
+// generation without a Pod UID change, triggers a fresh live pair probe once, and then stabilizes
+// at the new restart generation without repeating probes on steady passes.
+func TestInPlaceContainerRestartAdvancesGenerationAndRequalifiesOnce(t *testing.T) {
+	t.Parallel()
+
+	always := core.ContainerRestartPolicyAlways
+	onFailure := core.ContainerRestartPolicyOnFailure
+
+	basePod := healthPairPod("decode", 0, 0, healthBool(true), "uid-d0", "")
+	basePod.Spec.InitContainers = []core.Container{
+		{Name: "setup", RestartPolicy: &onFailure},
+		{Name: "routing-proxy", RestartPolicy: &always},
+	}
+	basePod.Status.InitContainerStatuses = []core.ContainerStatus{
+		{Name: "setup", RestartCount: 2},
+		{Name: "routing-proxy", RestartCount: 0},
+	}
+	basePod.Status.ContainerStatuses = []core.ContainerStatus{
+		{Name: "engine", RestartCount: 0},
+	}
+	assert.Equal(t, modelDeploymentMembershipGeneration("uid-d0"),
+		modelDeploymentGenerationOf(modelDeploymentReplicaView{Members: []*core.Pod{&basePod}}),
+		"completed non-Always init container retries must not alter initial generation")
+
+	md := healthPairDeployment(workercore.ModelDeploymentEngineSGLang, 1, 1)
+	prefill := healthPairPod("prefill", 0, 0, healthBool(true), "uid-p0", "8998")
+	prefill.Labels[modelDeploymentLabelKeyEndpointEligible] = modelDeploymentEndpointEligibleValue
+	prefill.Annotations[modelDeploymentAnnotationKeyEndpointEligibleGeneration] = "uid-p0"
+	decode := *basePod.DeepCopy()
+	decode.Labels[modelDeploymentLabelKeyEndpointEligible] = modelDeploymentEndpointEligibleValue
+	decode.Annotations[modelDeploymentAnnotationKeyEndpointEligibleGeneration] = "uid-d0"
+
+	// Simulate an in-place engine restart (0 -> 1) and native sidecar restart (0 -> 1) under the same UID.
+	decode.Status.ContainerStatuses[0].RestartCount = 1
+	decode.Status.InitContainerStatuses[1].RestartCount = 1
+
+	md.Status.Roles = []workercore.ModelDeploymentRoleStatus{
+		{
+			Name: "prefill",
+			Groups: []workercore.ModelDeploymentGroupStatus{
+				{Role: "prefill", Ordinal: 0, Generation: "uid-p0", State: workercore.ModelDeploymentGroupStateEligible},
+			},
+		},
+		{
+			Name: "decode",
+			Groups: []workercore.ModelDeploymentGroupStatus{
+				{Role: "decode", Ordinal: 0, Generation: "uid-d0", State: workercore.ModelDeploymentGroupStateEligible},
+			},
+		},
+	}
+
+	pods := stampHealthGroupTotals(md, []core.Pod{prefill, decode})
+	prefillHosts := map[string]bool{healthPairHost("prefill", 0, 0): true}
+	fetch := &healthPairFetch{prefillHosts: prefillHosts}
+
+	firstPass := qualifyModelDeploymentInstances(
+		context.Background(), md, pods, modelDeploymentPendingReplacement{}, boundProbeFetch, fetch.fetch,
+	)
+	assert.Len(t, fetch.asked, 2, "in-place container restart must force fresh pair qualification")
+
+	var decodeGen modelDeploymentMembershipGeneration
+	for _, q := range firstPass {
+		assert.True(t, q.Eligible(), "%s/%d should re-qualify after fresh probe", q.View.Role, q.View.Ordinal)
+		if q.View.Role == "decode" {
+			decodeGen = q.Generation
+		}
+	}
+	assert.Equal(t, modelDeploymentMembershipGeneration("uid-d0@r2"), decodeGen)
+
+	// Stamp the updated generation as the controller status and eligibility convergence do, then
+	// verify the next steady pass skips pair probes instead of re-probing forever.
+	pods[1].Annotations[modelDeploymentAnnotationKeyEndpointEligibleGeneration] = string(decodeGen)
+	md.Status.Roles[1].Groups[0].Generation = string(decodeGen)
+	fetchSteady := &healthPairFetch{prefillHosts: prefillHosts}
+
+	secondPass := qualifyModelDeploymentInstances(
+		context.Background(), md, pods, modelDeploymentPendingReplacement{}, boundProbeFetch, fetchSteady.fetch,
+	)
+	assert.Empty(t, fetchSteady.asked, "steady pass at updated restart generation must retain without re-probing")
+	for _, q := range secondPass {
+		assert.True(t, q.Eligible(), "%s/%d should remain eligible", q.View.Role, q.View.Ordinal)
+	}
+}
