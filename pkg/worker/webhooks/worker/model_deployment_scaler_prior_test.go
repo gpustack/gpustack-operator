@@ -1652,6 +1652,23 @@ func TestModelDeploymentScalerValidate_CapacityPriorDisaggregated(t *testing.T) 
 			scaler:      epdScaler(toPredictive),
 			wantWarning: "does not exist yet",
 		},
+		{
+			name: "missing target ModelDeployment refuses omitted ttftTargetMilliseconds when decode still needs catalog prior",
+			scaler: pdScaler(func(s *workercore.ModelDeploymentScaler) {
+				s.Spec.Algorithm.TokenThroughput.PrefillTargetTokensPerSecond = ptr.To(resource.MustParse("1000"))
+				s.Spec.Algorithm.TokenThroughput.TTFTTargetMilliseconds = nil
+			}),
+			wantErr: "spec.algorithm.tokenThroughput.ttftTargetMilliseconds",
+		},
+		{
+			name: "extreme exponent ratio quantity is rejected without OOM or Spec mutation",
+			scaler: pdScaler(func(s *workercore.ModelDeploymentScaler) {
+				s.Spec.Ratios[0].Target = ptr.To(resource.MustParse("1e1000000000"))
+				s.Spec.Ratios[0].Min = nil
+				s.Spec.Ratios[0].Max = nil
+			}),
+			wantErr: "spec.ratios[0].target",
+		},
 	}
 
 	for _, tc := range cases {

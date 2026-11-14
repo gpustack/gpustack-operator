@@ -596,7 +596,8 @@ func validateModelDeploymentScalerRatioQuantities(
 	return errs
 }
 
-// validateModelDeploymentScalerPositiveQuantity refuses a quantity that is not a positive number.
+// validateModelDeploymentScalerPositiveQuantity refuses a quantity that is not a positive number
+// within the supported rational range.
 func validateModelDeploymentScalerPositiveQuantity(
 	path *field.Path, quantity *resource.Quantity, what string,
 ) field.ErrorList {
@@ -605,9 +606,10 @@ func validateModelDeploymentScalerPositiveQuantity(
 	if quantity == nil {
 		return errs
 	}
-	if quantity.Sign() <= 0 {
-		errs = append(errs, field.Invalid(path, quantity.String(),
-			what+", so it is a positive number"))
+	rat, ok := workerctrl.ModelDeploymentScalerBoundedRat(quantity)
+	if !ok || rat.Sign() <= 0 {
+		errs = append(errs, field.Invalid(path, workerctrl.ModelDeploymentScalerFormatQuantity(quantity),
+			what+", so it is a positive number within supported bounds"))
 	}
 
 	return errs
@@ -619,21 +621,7 @@ func validateModelDeploymentScalerPositiveQuantity(
 // THE RATIONAL IS EXACT, because a ratio bound is compared against a quotient of two integers and
 // a rounded one would decide a boundary wrongly.
 func modelDeploymentScalerRatioValue(quantity *resource.Quantity) (*big.Rat, bool) {
-	if quantity == nil {
-		return nil, false
-	}
-
-	dec := quantity.AsDec()
-	num := new(big.Int).Set(dec.UnscaledBig())
-	den := big.NewInt(1)
-	scale := int64(dec.Scale())
-	if scale >= 0 {
-		den.Exp(big.NewInt(10), big.NewInt(scale), nil)
-	} else {
-		num.Mul(num, new(big.Int).Exp(big.NewInt(10), big.NewInt(-scale), nil))
-	}
-
-	return new(big.Rat).SetFrac(num, den), true
+	return workerctrl.ModelDeploymentScalerBoundedRat(quantity)
 }
 
 // validateModelDeploymentScalerBehavior holds the pacing rules of a scaler.
@@ -954,8 +942,8 @@ func validateModelDeploymentScalerTokenThroughputSpec(
 		quantile, ok := modelDeploymentScalerRatioValue(tt.LatencyQuantile)
 		switch {
 		case !ok:
-			errs = append(errs, field.Invalid(quantilePath, tt.LatencyQuantile.String(),
-				"the latency quantile must be a number"))
+			errs = append(errs, field.Invalid(quantilePath, workerctrl.ModelDeploymentScalerFormatQuantity(tt.LatencyQuantile),
+				"the latency quantile must be a number within supported bounds"))
 		case quantile.Sign() <= 0:
 			errs = append(errs, field.Invalid(quantilePath, tt.LatencyQuantile.String(),
 				"the latency quantile is a quantile, so it is greater than zero"))
@@ -1432,15 +1420,13 @@ func (r *ModelDeploymentScalerWebhook) validateModelDeploymentScalerCatalogRoles
 		if kind == workercore.ModelDeploymentRoleKindEncode || !modelDeploymentScalerRoleNeedsCapacityPrior(s, kind) {
 			continue
 		}
-		if (kind == workercore.ModelDeploymentRoleKindPrefill || kind == workercore.ModelDeploymentRoleKindServer) &&
-			(tt == nil || tt.TTFTTargetMilliseconds == nil) {
+		if tt == nil || tt.TTFTTargetMilliseconds == nil {
 			errs = append(errs, field.Required(
 				ttPath.Child("ttftTargetMilliseconds"),
 				fmt.Sprintf("role %q (%s) resolves capacity from a catalog prior and requires an explicit ttftTargetMilliseconds", bounds.Name, kind),
 			))
 		}
-		if (kind == workercore.ModelDeploymentRoleKindDecode || kind == workercore.ModelDeploymentRoleKindServer) &&
-			(tt == nil || tt.ITLTargetMilliseconds == nil) {
+		if tt == nil || tt.ITLTargetMilliseconds == nil {
 			errs = append(errs, field.Required(
 				ttPath.Child("itlTargetMilliseconds"),
 				fmt.Sprintf("role %q (%s) resolves capacity from a catalog prior and requires an explicit itlTargetMilliseconds", bounds.Name, kind),
@@ -1512,19 +1498,16 @@ func validateModelDeploymentScalerUnresolvedTargetSLOs(
 		return nil
 	}
 
-	needsServer := modelDeploymentScalerRoleNeedsCapacityPrior(s, workercore.ModelDeploymentRoleKindServer)
-	needsPrefill := modelDeploymentScalerRoleNeedsCapacityPrior(s, workercore.ModelDeploymentRoleKindPrefill)
-	needsDecode := modelDeploymentScalerRoleNeedsCapacityPrior(s, workercore.ModelDeploymentRoleKindDecode)
-
-	needsTTFT := needsServer || needsPrefill
-	needsITL := needsServer || needsDecode
-	if needsTTFT && (tt == nil || tt.TTFTTargetMilliseconds == nil) {
+	needsPrior := modelDeploymentScalerRoleNeedsCapacityPrior(s, workercore.ModelDeploymentRoleKindServer) ||
+		modelDeploymentScalerRoleNeedsCapacityPrior(s, workercore.ModelDeploymentRoleKindPrefill) ||
+		modelDeploymentScalerRoleNeedsCapacityPrior(s, workercore.ModelDeploymentRoleKindDecode)
+	if needsPrior && (tt == nil || tt.TTFTTargetMilliseconds == nil) {
 		errs = append(errs, field.Required(
 			ttPath.Child("ttftTargetMilliseconds"),
 			"a scaler that resolves capacity from a catalog prior before its target exists requires an explicit ttftTargetMilliseconds",
 		))
 	}
-	if needsITL && (tt == nil || tt.ITLTargetMilliseconds == nil) {
+	if needsPrior && (tt == nil || tt.ITLTargetMilliseconds == nil) {
 		errs = append(errs, field.Required(
 			ttPath.Child("itlTargetMilliseconds"),
 			"a scaler that resolves capacity from a catalog prior before its target exists requires an explicit itlTargetMilliseconds",

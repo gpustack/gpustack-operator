@@ -723,4 +723,76 @@ func TestScalerConstraintsWholeUnitOverflowSaturation(t *testing.T) {
 			t.Fatalf("expected RatioConflict, got %q", res.BlockingReason)
 		}
 	})
+
+	t.Run("wholeUnitRawTarget honors prefill scale-up, asymmetric demand hold, and passive encode scale-down", func(t *testing.T) {
+		makeHistory := func(t1Val, t2Val int32) []v1alpha1.ModelDeploymentScalerStabilizationSample {
+			return []v1alpha1.ModelDeploymentScalerStabilizationSample{
+				{Timestamp: metav1Time(old), Replicas: t1Val},
+				{Timestamp: metav1Time(recent), Replicas: t2Val},
+			}
+		}
+		spec := constraintSpec("prefill", "decode")
+		spec.Roles = []v1alpha1.ModelDeploymentScalerRoleBounds{
+			{Name: "prefill", MinReplicas: 1, MaxReplicas: 4},
+			{Name: "decode", MinReplicas: 3, MaxReplicas: 12},
+		}
+
+		// Prefill needs 4 units while decode raw (6) is an exact multiple of u_D=3 (2 units) -> scales up to 4P:12D.
+		pUp := roleState("prefill", 2, 4)
+		pUp.Kind = algorithm.RoleKindPrefill
+		dSteady := roleState("decode", 6, 6)
+		dSteady.Kind = algorithm.RoleKindDecode
+		upRes := SolveModelDeploymentScalerConstraints(ModelDeploymentScalerConstraintInput{
+			Spec:      spec,
+			Roles:     []ModelDeploymentScalerRoleState{pUp, dSteady},
+			WholeUnit: map[string]int32{"prefill": 1, "decode": 3},
+			Now:       now,
+		})
+		if upRes.Replicas["prefill"] != 4 || upRes.Replicas["decode"] != 12 {
+			t.Fatalf("expected prefill-driven scale-up to 4P:12D, got %#v", upRes.Replicas)
+		}
+
+		// Prefill still needs 2 units while decode only needs 1 unit (raw=2) -> holds at 2P:6D instead of scaling down.
+		pHold := roleState("prefill", 2, 2)
+		pHold.Kind = algorithm.RoleKindPrefill
+		pHold.StabilizationHistory = makeHistory(2, 2)
+		dLow := roleState("decode", 6, 2)
+		dLow.Kind = algorithm.RoleKindDecode
+		dLow.StabilizationHistory = makeHistory(2, 2)
+		holdRes := SolveModelDeploymentScalerConstraints(ModelDeploymentScalerConstraintInput{
+			Spec:      spec,
+			Roles:     []ModelDeploymentScalerRoleState{pHold, dLow},
+			WholeUnit: map[string]int32{"prefill": 1, "decode": 3},
+			Now:       now,
+		})
+		if holdRes.Replicas["prefill"] != 2 || holdRes.Replicas["decode"] != 6 {
+			t.Fatalf("expected asymmetric demand hold at 2P:6D, got %#v", holdRes.Replicas)
+		}
+
+		// Passive Encode role with RawRecommendedReplicas == CurrentReplicas (2) does not block scale-down when P and D fit in 1 unit.
+		epdSpec := constraintSpec("encode", "prefill", "decode")
+		epdSpec.Roles = []v1alpha1.ModelDeploymentScalerRoleBounds{
+			{Name: "encode", MinReplicas: 1, MaxReplicas: 4},
+			{Name: "prefill", MinReplicas: 1, MaxReplicas: 4},
+			{Name: "decode", MinReplicas: 2, MaxReplicas: 8},
+		}
+		ePassive := roleState("encode", 2, 2)
+		ePassive.Kind = algorithm.RoleKindEncode
+		ePassive.StabilizationHistory = makeHistory(1, 1)
+		pLow := roleState("prefill", 2, 1)
+		pLow.Kind = algorithm.RoleKindPrefill
+		pLow.StabilizationHistory = makeHistory(1, 1)
+		dLowEPD := roleState("decode", 4, 1)
+		dLowEPD.Kind = algorithm.RoleKindDecode
+		dLowEPD.StabilizationHistory = makeHistory(1, 1)
+		downRes := SolveModelDeploymentScalerConstraints(ModelDeploymentScalerConstraintInput{
+			Spec:      epdSpec,
+			Roles:     []ModelDeploymentScalerRoleState{ePassive, pLow, dLowEPD},
+			WholeUnit: map[string]int32{"encode": 1, "prefill": 1, "decode": 2},
+			Now:       now,
+		})
+		if downRes.Replicas["encode"] != 1 || downRes.Replicas["prefill"] != 1 || downRes.Replicas["decode"] != 2 {
+			t.Fatalf("expected scale-down to 1E:1P:2D despite passive encode raw=2, got %#v", downRes.Replicas)
+		}
+	})
 }

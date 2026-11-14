@@ -934,9 +934,9 @@ func quantityToPositiveRat(q *resource.Quantity) (*big.Rat, error) {
 	if q == nil {
 		return nil, fmt.Errorf("missing ratio quantity")
 	}
-	rat, ok := new(big.Rat).SetString(q.AsDec().String())
+	rat, ok := ModelDeploymentScalerBoundedRat(q)
 	if !ok || rat.Sign() <= 0 {
-		return nil, fmt.Errorf("ratio %q must be a positive rational number", q.String())
+		return nil, fmt.Errorf("ratio %q must be a positive rational number within supported bounds", ModelDeploymentScalerFormatQuantity(q))
 	}
 	return rat, nil
 }

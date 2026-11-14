@@ -1895,4 +1895,68 @@ func TestModelDeploymentScalerWholeUnitObservationAndPanicExpiry(t *testing.T) {
 			t.Fatalf("expected target replicas unchanged at 4P:5D, got %+v", afterMD.Spec.Roles)
 		}
 	})
+
+	t.Run("shouldRestoreScaleDownAbort and planner boundary helpers never regress current replicas or wrap NaN", func(t *testing.T) {
+		retirement := &workercore.ModelDeploymentRetirementStatus{
+			State:          workercore.ModelDeploymentRetirementStateAborted,
+			RoleName:       "decode",
+			ReplicaOrdinal: 3,
+			PhaseStartedAt: meta.NewTime(t0),
+		}
+		lastScaleDown := &workercore.ModelDeploymentScalerScaleDownStatus{
+			Role:               "decode",
+			Ordinal:            3,
+			Outcome:            workercore.ModelDeploymentScalerScaleDownOutcomeCommitted,
+			PreScaleDownVector: map[string]int32{"prefill": 2, "decode": 4},
+		}
+		// Current already scaled up above PreScaleDownVector (decode=6 > 3) -> must NOT restore downward!
+		if shouldRestoreScaleDownAbort(retirement, lastScaleDown, nil, map[string]int32{"prefill": 2, "decode": 6}) {
+			t.Fatal("expected shouldRestoreScaleDownAbort == false when current already exceeds PreScaleDownVector")
+		}
+		// Current is below PreScaleDownVector on decode (decode=3 == ordinal < 4) -> should restore.
+		if !shouldRestoreScaleDownAbort(retirement, lastScaleDown, nil, map[string]int32{"prefill": 3, "decode": 3}) {
+			t.Fatal("expected shouldRestoreScaleDownAbort == true when retired ordinal has not been restored")
+		}
+
+		// End-to-end planWithPriors abort restore clamps per role to max(PreScaleDownVector, current).
+		scaler := newWholeUnitScaler(false)
+		scaler.Status.LastScaleDown = lastScaleDown.DeepCopy()
+		md := scalerTestDeployment("target", "target-uid", map[string]int32{"prefill": 3, "decode": 3})
+		md.Spec.Engine = workercore.ModelDeploymentEngine{Name: workercore.ModelDeploymentEngineVLLM}
+		md.Spec.Roles[0].Kind = workercore.ModelDeploymentRoleKindPrefill
+		md.Spec.Roles[1].Kind = workercore.ModelDeploymentRoleKindDecode
+		md.Annotations = map[string]string{
+			workercore.ModelDeploymentScalerBindingAnnotationKey: scalerTestBindingJSON(scaler, 1),
+		}
+		md.Status.Retirement = retirement.DeepCopy()
+
+		cli := ctrlfake.NewClientBuilder().WithScheme(scheme.Scheme).
+			WithStatusSubresource(&workercore.ModelDeployment{}, &workercore.ModelDeploymentScaler{}, &core.Pod{}, &kueue.Workload{}).
+			WithObjects(md.DeepCopy(), scaler.DeepCopy()).Build()
+		r := scalerTestReconciler(cli, t0)
+		curScaler := scalerTestGetScaler(t, cli, scaler.Name)
+		curMD := scalerTestGetDeployment(t, cli)
+		if _, err := r.planWithPriors(
+			context.Background(), curScaler.DeepCopy(), curScaler, curMD, newWholeUnitPriors(scaler, false), t0, true,
+		); err != nil {
+			t.Fatalf("planWithPriors abort restore error = %v", err)
+		}
+		afterMD := scalerTestGetDeployment(t, cli)
+		if afterMD.Spec.Roles[0].Replicas != 3 || afterMD.Spec.Roles[1].Replicas != 4 {
+			t.Fatalf("expected abort restore to clamp to 3P:4D without shrinking prefill, got %+v", afterMD.Spec.Roles)
+		}
+
+		if got := clampNonNegativeRoundedInt32(math.NaN()); got != 0 {
+			t.Fatalf("clampNonNegativeRoundedInt32(NaN) = %d, want 0", got)
+		}
+		if got := clampNonNegativeRoundedInt32(math.Inf(1)); got != math.MaxInt32 {
+			t.Fatalf("clampNonNegativeRoundedInt32(+Inf) = %d, want MaxInt32", got)
+		}
+		if _, ok := wholeUnitMultiplier([]workercore.ModelDeploymentRole{
+			{Name: "prefill", Replicas: 1},
+			{Name: "prefill", Replicas: 1},
+		}, map[string]int32{"prefill": 1, "decode": 0}); ok {
+			t.Fatal("expected duplicate roles in wholeUnitMultiplier to return false")
+		}
+	})
 }

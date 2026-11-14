@@ -3,10 +3,12 @@ package worker
 import (
 	"context"
 	"errors"
+	"math/big"
 	"reflect"
 	"strings"
 	"testing"
 
+	inf "gopkg.in/inf.v0"
 	core "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -1684,6 +1686,142 @@ func TestModelDeploymentScalerCapacityPriorExternalKVCacheRefusal(t *testing.T) 
 		}
 		if got.Mode != ModelDeploymentScalerPriorModeAggregated || got.WholeUnit != nil {
 			t.Fatalf("unexpected mode=%q wholeUnit=%#v", got.Mode, got.WholeUnit)
+		}
+	})
+}
+
+func TestQuantityBoundedRatAndDisaggregatedIdentityGates(t *testing.T) {
+	t.Run("bounded rational conversion rejects extreme exponents without mutating input Quantity", func(t *testing.T) {
+		cases := []resource.Quantity{
+			resource.MustParse("1e1000000000"),
+			*resource.NewDecimalQuantity(*inf.NewDec(1, 1000), resource.DecimalSI),
+			*resource.NewDecimalQuantity(*inf.NewDecBig(new(big.Int).Lsh(big.NewInt(1), 200), 0), resource.DecimalSI),
+			resource.MustParse("0"),
+			resource.MustParse("-5"),
+		}
+		for i, q := range cases {
+			before := q
+			if _, err := quantityToPositiveRat(&q); err == nil {
+				t.Fatalf("case %d (%#v) unexpectedly succeeded", i, q)
+			}
+			if !reflect.DeepEqual(q, before) {
+				t.Fatalf("case %d mutated input Quantity: got %#v, want %#v", i, q, before)
+			}
+		}
+
+		hugeQuantile := resource.MustParse("1e1000000000")
+		beforeQuantile := hugeQuantile
+		alg := &workercore.ModelDeploymentScalerAlgorithmSpec{
+			Type: workercore.ModelDeploymentScalerAlgorithmTypeTokenThroughput,
+			TokenThroughput: &workercore.ModelDeploymentScalerTokenThroughputSpec{
+				LatencyQuantile: &hugeQuantile,
+			},
+		}
+		if _, err := ModelDeploymentScalerLatencyQuantile(alg); err == nil {
+			t.Fatal("expected huge LatencyQuantile to be rejected")
+		}
+		if hugeQuantile != beforeQuantile {
+			t.Fatalf("ModelDeploymentScalerLatencyQuantile mutated input Quantity: got %#v, want %#v", hugeQuantile, beforeQuantile)
+		}
+	})
+
+	t.Run("Priority 1 disaggregated refuses unrecognized decode image without falling back", func(t *testing.T) {
+		scaler, md, cm, instances := capacityPriorDisaggregatedFixture(t, false)
+		for i := range md.Spec.Roles {
+			if md.Spec.Roles[i].Kind == workercore.ModelDeploymentRoleKindDecode {
+				md.Spec.Roles[i].Image = "registry.example/custom-runtime:v1"
+			}
+		}
+		doc := capacityPriorReadCatalog(t, cm)
+		doc.Profiles = append(doc.Profiles, capacityPriorDisaggregatedProfile(
+			md.Spec.Model.Name,
+			1, "nvidia-h100", 2, 3, "nvidia-h200", 4,
+		))
+		capacityPriorWriteCatalog(t, cm, doc)
+
+		client := scalerTestClient(t, scaler, md, cm, instances[0], instances[1])
+		_, err := ResolveModelDeploymentScalerCapacityPriors(context.Background(), client, scaler, md)
+		if err == nil || !strings.Contains(err.Error(), "names no known engine family") {
+			t.Fatalf("err = %v, want refusal mentioning names no known engine family", err)
+		}
+	})
+
+	t.Run("disaggregated request refuses conflicting stage revisions, tokenizers, and builds", func(t *testing.T) {
+		scaler, md, cm, instances := capacityPriorDisaggregatedFixture(t, false)
+		doc := capacityPriorReadCatalog(t, cm)
+		doc.Profiles = append(doc.Profiles, capacityPriorDisaggregatedProfile(
+			md.Spec.Model.Name,
+			1, "nvidia-h100", 2, 3, "nvidia-h200", 4,
+		))
+		capacityPriorWriteCatalog(t, cm, doc)
+		parsed, err := priors.ParseCatalog([]byte(cm.Data[priors.DefaultCatalogConfigMapKey]))
+		if err != nil {
+			t.Fatal(err)
+		}
+		var disaggProfile *priors.Profile
+		for i := range parsed.Profiles {
+			if parsed.Profiles[i].Mode == priors.ModeDisaggregated {
+				disaggProfile = &parsed.Profiles[i]
+				break
+			}
+		}
+		if disaggProfile == nil {
+			t.Fatal("missing disaggregated profile")
+		}
+		delete(md.Annotations, workercore.ModelDeploymentScalerModelIDAnnotationKey)
+		client := scalerTestClient(t, scaler, md, cm, instances[0], instances[1])
+		prefillDecl, err := modelDeploymentScalerPriorDeclarationOf(context.Background(), client, md, &md.Spec.Roles[0])
+		if err != nil {
+			t.Fatal(err)
+		}
+		decodeDecl, err := modelDeploymentScalerPriorDeclarationOf(context.Background(), client, md, &md.Spec.Roles[1])
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		cases := []struct {
+			name   string
+			mutate func(*priors.Profile, *modelDeploymentScalerPriorDeclaration, *modelDeploymentScalerPriorDeclaration)
+			want   string
+		}{
+			{
+				name: "conflicting model revisions",
+				mutate: func(_ *priors.Profile, p, d *modelDeploymentScalerPriorDeclaration) {
+					p.identity.Model.Revision = "rev-a"
+					d.identity.Model.Revision = "rev-b"
+				},
+				want: "conflicting model revisions",
+			},
+			{
+				name: "conflicting model tokenizers",
+				mutate: func(prof *priors.Profile, p, d *modelDeploymentScalerPriorDeclaration) {
+					prof.Identity.Model.Tokenizer = priors.UnspecifiedRevision
+					p.identity.Model.Tokenizer = "org/tok-a"
+					d.identity.Model.Tokenizer = "org/tok-b"
+				},
+				want: "conflicting model tokenizers",
+			},
+			{
+				name: "conflicting engine builds",
+				mutate: func(_ *priors.Profile, p, d *modelDeploymentScalerPriorDeclaration) {
+					p.identity.Engine.Build = "build-1"
+					d.identity.Engine.Build = "build-2"
+				},
+				want: "conflicting engine builds",
+			},
+		}
+		for _, tc := range cases {
+			t.Run(tc.name, func(t *testing.T) {
+				profCopy := *disaggProfile
+				pCopy, dCopy := prefillDecl, decodeDecl
+				tc.mutate(&profCopy, &pCopy, &dCopy)
+				_, reqErr := modelDeploymentScalerDisaggregatedPriorRequestMatched(
+					md, &md.Spec.Roles[0], &md.Spec.Roles[1], &profCopy, pCopy, dCopy, 1, 3,
+				)
+				if reqErr == nil || !strings.Contains(reqErr.Error(), tc.want) {
+					t.Fatalf("err = %v, want %q", reqErr, tc.want)
+				}
+			})
 		}
 	})
 }

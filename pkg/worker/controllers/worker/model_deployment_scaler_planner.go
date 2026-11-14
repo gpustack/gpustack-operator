@@ -122,6 +122,11 @@ func (r *ModelDeploymentScalerReconciler) planWithPriors(
 			return ctrlreconcile.Result{RequeueAfter: interval}, nil
 		}
 		target := cloneReplicaVector(scaler.Status.LastScaleDown.PreScaleDownVector)
+		for role, curCount := range current {
+			if target[role] < curCount {
+				target[role] = curCount
+			}
+		}
 		if scaler.Status.Rebalance != nil && scaler.Status.Rebalance.DonorRole == retirement.RoleName {
 			scaler.Status.Rebalance = nil
 		}
@@ -243,7 +248,11 @@ func (r *ModelDeploymentScalerReconciler) planWithPriors(
 			role := &md.Spec.Roles[i]
 			observation, found := observations[role.Name]
 			if !found {
-				observation = algorithm.RoleObservation{Role: role.Name, CurrentReplicas: role.Replicas, Kind: modelDeploymentScalerRoleKind(role.Kind)}
+				observation = algorithm.RoleObservation{
+					Role:            role.Name,
+					CurrentReplicas: role.Replicas,
+					Kind:            modelDeploymentScalerRoleKind(ModelDeploymentEffectiveRoleKind(role)),
+				}
 			}
 			observation.Role = role.Name
 			observation.CurrentReplicas = role.Replicas
@@ -732,21 +741,27 @@ func shouldRestoreScaleDownAbort(
 			return false
 		}
 	}
-	if preCount, ok := lastScaleDown.PreScaleDownVector[retirement.RoleName]; ok &&
-		retirement.ReplicaOrdinal >= current[retirement.RoleName] &&
-		retirement.ReplicaOrdinal < preCount {
-		return true
+	if preCount, ok := lastScaleDown.PreScaleDownVector[retirement.RoleName]; ok {
+		return retirement.ReplicaOrdinal >= current[retirement.RoleName] &&
+			retirement.ReplicaOrdinal < preCount
 	}
-	return lastScaleDown.Role == retirement.RoleName && lastScaleDown.Ordinal == retirement.ReplicaOrdinal
+	return lastScaleDown.Role == retirement.RoleName &&
+		lastScaleDown.Ordinal == retirement.ReplicaOrdinal &&
+		retirement.ReplicaOrdinal >= current[retirement.RoleName]
 }
 
 func wholeUnitMultiplier(roles []workercore.ModelDeploymentRole, unitVector map[string]int32) (int32, bool) {
 	if len(unitVector) == 0 || len(unitVector) != len(roles) {
 		return 0, false
 	}
+	seen := make(map[string]struct{}, len(roles))
 	var kCur int32
 	for i := range roles {
 		role := roles[i]
+		if _, dup := seen[role.Name]; dup {
+			return 0, false
+		}
+		seen[role.Name] = struct{}{}
 		unit, ok := unitVector[role.Name]
 		if !ok || unit <= 0 || role.Replicas < unit || role.Replicas%unit != 0 {
 			return 0, false
@@ -799,14 +814,14 @@ func roleStatusFromObservation(
 	history []workercore.ModelDeploymentScalerStabilizationSample,
 	hasPredictor bool,
 ) workercore.ModelDeploymentScalerRoleStatus {
-	readyCount := int32(math.Max(0, float64(observation.ReadyReplicas)))
+	readyCount := max(int32(0), observation.ReadyReplicas)
 	status := workercore.ModelDeploymentScalerRoleStatus{
 		Name: role.Name, CurrentReplicas: role.Replicas, ReadyReplicas: readyCount,
 		SignalState:               scalerObservationState(observation),
 		PromptTokensPerSecond:     quantityPointerFloat(observation.PromptTokensPerSecond),
 		GenerationTokensPerSecond: quantityPointerFloat(observation.GenerationTokensPerSecond),
-		RunningRequests:           int32(math.Max(0, math.Round(observation.RunningRequests))),
-		WaitingRequests:           int32(math.Max(0, math.Round(observation.WaitingRequests))),
+		RunningRequests:           clampNonNegativeRoundedInt32(observation.RunningRequests),
+		WaitingRequests:           clampNonNegativeRoundedInt32(observation.WaitingRequests),
 		KVCacheUsage:              quantityPointerFloat(observation.KVCacheUsage),
 		TTFTMilliseconds:          modelDeploymentScalerLatencyQuantity(observation.TTFTMilliseconds, observation.TTFTUnmeasured),
 		ITLMilliseconds:           modelDeploymentScalerLatencyQuantity(observation.ITLMilliseconds, observation.ITLUnmeasured),
@@ -821,6 +836,20 @@ func roleStatusFromObservation(
 		status.LastScaleUpTime = scalerRoleLastScaleUp(scaler.Status.Roles, role.Name)
 	}
 	return status
+}
+
+func clampNonNegativeRoundedInt32(value float64) int32 {
+	if math.IsNaN(value) || value <= 0 {
+		return 0
+	}
+	if math.IsInf(value, 1) {
+		return math.MaxInt32
+	}
+	rounded := math.Round(value)
+	if rounded >= float64(math.MaxInt32) {
+		return math.MaxInt32
+	}
+	return int32(rounded)
 }
 
 func wholeUnitObservedAt(prefillObs, decodeObs algorithm.RoleObservation, now time.Time) time.Time {
@@ -848,7 +877,7 @@ func buildWholeUnitObservation(
 			obs = algorithm.RoleObservation{
 				Role:            role.Name,
 				CurrentReplicas: role.Replicas,
-				Kind:            modelDeploymentScalerRoleKind(role.Kind),
+				Kind:            modelDeploymentScalerRoleKind(ModelDeploymentEffectiveRoleKind(role)),
 			}
 		}
 		obs.Role = role.Name
@@ -858,14 +887,23 @@ func buildWholeUnitObservation(
 
 	prefillObs := roleObs[uPrior.PrefillRole]
 	decodeObs := roleObs[uPrior.DecodeRole]
-	unitReady := prefillObs.ReadyReplicas / uPrior.UnitVector[uPrior.PrefillRole]
-	if dReady := decodeObs.ReadyReplicas / uPrior.UnitVector[uPrior.DecodeRole]; dReady < unitReady {
+	pUnit := uPrior.UnitVector[uPrior.PrefillRole]
+	dUnit := uPrior.UnitVector[uPrior.DecodeRole]
+	if pUnit <= 0 || dUnit <= 0 {
+		return roleObs, algorithm.RoleObservation{Role: uPrior.DecodeRole, Kind: algorithm.RoleKindServer, CurrentReplicas: kCur}, false
+	}
+	unitReady := prefillObs.ReadyReplicas / pUnit
+	if dReady := decodeObs.ReadyReplicas / dUnit; dReady < unitReady {
 		unitReady = dReady
 	}
 	encodeReady := true
 	if uPrior.EncodeRole != "" {
 		encodeObs := roleObs[uPrior.EncodeRole]
-		if eReady := encodeObs.ReadyReplicas / uPrior.UnitVector[uPrior.EncodeRole]; eReady < unitReady {
+		eUnit := uPrior.UnitVector[uPrior.EncodeRole]
+		if eUnit <= 0 {
+			return roleObs, algorithm.RoleObservation{Role: uPrior.DecodeRole, Kind: algorithm.RoleKindServer, CurrentReplicas: kCur}, false
+		}
+		if eReady := encodeObs.ReadyReplicas / eUnit; eReady < unitReady {
 			unitReady = eReady
 		}
 		encodeReady = encodeObs.ReadyReplicas >= encodeObs.CurrentReplicas

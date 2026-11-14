@@ -745,56 +745,43 @@ func wholeUnitCurrentMultiplier(
 func wholeUnitRawTarget(
 	roles []ModelDeploymentScalerRoleState,
 	wholeUnit map[string]int32,
-	kCur int32,
+	_ int32,
 ) int32 {
 	var (
-		sharedK int32
-		same    = true
-		anyUp   = false
-		maxUpK  int32
-		minK    int32
-		decodeK int32
-		hasDec  bool
+		sharedK    int32
+		same       = true
+		maxActiveK int32
+		maxAnyK    int32
 	)
 	for i, role := range roles {
 		unit := wholeUnit[role.Name]
+		if unit <= 0 {
+			continue
+		}
 		raw := role.RawRecommendedReplicas
 		k := int32(1)
 		if raw > 0 {
 			k = ceilDivInt32(raw, unit)
 		}
-		if raw > role.CurrentReplicas {
-			anyUp = true
-			if k > maxUpK {
-				maxUpK = k
-			}
-		}
-		if role.Kind == algorithm.RoleKindDecode && raw > 0 && raw%unit == 0 {
-			decodeK = raw / unit
-			hasDec = true
-		}
 		if i == 0 {
 			sharedK = k
-			minK = k
-		} else {
-			if raw%unit != 0 || raw/unit != sharedK {
-				same = false
-			}
-			if k < minK {
-				minK = k
-			}
+		} else if raw%unit != 0 || raw/unit != sharedK {
+			same = false
+		}
+		if k > maxAnyK {
+			maxAnyK = k
+		}
+		if role.Kind != algorithm.RoleKindEncode && k > maxActiveK {
+			maxActiveK = k
 		}
 	}
 	if same && sharedK >= 1 {
 		return sharedK
 	}
-	if hasDec && decodeK >= 1 {
-		return decodeK
+	if maxActiveK >= 1 {
+		return maxActiveK
 	}
-	if anyUp && maxUpK > kCur {
-		return maxUpK
-	}
-	return maxInt32(1, minK)
+	return maxInt32(1, maxAnyK)
 }
 
 func applyWholeUnitStepLimit(
@@ -866,11 +853,22 @@ func solveWholeUnitConstraints(
 	kRaw := wholeUnitRawTarget(input.Roles, input.WholeUnit, kCur)
 	kFloor, kCeil := applyWholeUnitStepLimit(input.Spec.Behavior, states, input.WholeUnit, kCurClamped, kMin, kMax)
 
+	hasActiveRole := false
+	for _, role := range input.Roles {
+		if role.Kind != algorithm.RoleKindEncode {
+			hasActiveRole = true
+			break
+		}
+	}
+
 	up := input.Spec.Behavior.ScaleUp
 	upWindow := time.Duration(up.StabilizationWindowSeconds) * time.Second
 	for _, role := range input.Roles {
 		if role.HasPendingUnadmittedWorkload {
 			kCeil = minInt32(kCeil, kCurClamped)
+		}
+		if hasActiveRole && role.Kind == algorithm.RoleKindEncode {
+			continue
 		}
 		if up.StabilizationWindowSeconds > 0 && kRaw > kCurClamped &&
 			!historySpans(result.StabilizationHistory[role.Name], input.Now, upWindow) {
@@ -887,6 +885,9 @@ func solveWholeUnitConstraints(
 	var maxHistK int32
 	hasHistSample := false
 	for _, role := range input.Roles {
+		if hasActiveRole && role.Kind == algorithm.RoleKindEncode {
+			continue
+		}
 		unit := input.WholeUnit[role.Name]
 		hist := result.StabilizationHistory[role.Name]
 		if !historySpans(hist, input.Now, downWindow) {

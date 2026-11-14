@@ -320,7 +320,7 @@ func TestModelDeploymentScalerCapacityPriorSkipsSteadyStatusWrites(t *testing.T)
 		served += increment
 		return scalerStatusTestExposition(served, served/2), nil
 	}
-	for range 4 {
+	for range 8 {
 		reconcileScaler(t, r, scaler.Name)
 		now = now.Add(15 * time.Second)
 		r.clock = func() time.Time { return now }
@@ -328,6 +328,9 @@ func TestModelDeploymentScalerCapacityPriorSkipsSteadyStatusWrites(t *testing.T)
 	first := scalerTestGetScaler(t, client, scaler.Name)
 	if len(first.Status.ResolvedCapacityPriors) != 1 {
 		t.Fatalf("expected a resolved catalog capacity: %#v", first.Status)
+	}
+	if len(first.Status.Roles) != 1 || first.Status.Roles[0].Reason != algorithm.ReasonTokenThroughput {
+		t.Fatalf("expected warmed steady catalog role to run TokenThroughput, got %#v", first.Status.Roles)
 	}
 	fingerprint := first.Status.ResolvedCapacityPriors[0].CompatibilityFingerprint
 	priorSample := r.sampler.RoleSamples(first)["server"].Observation
