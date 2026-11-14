@@ -579,17 +579,17 @@ func validateModelDeploymentScalerRatioQuantities(
 	minimum, minimumSet := modelDeploymentScalerRatioValue(ratio.Min)
 	maximum, maximumSet := modelDeploymentScalerRatioValue(ratio.Max)
 	if minimumSet && maximumSet && minimum.Cmp(maximum) > 0 {
-		errs = append(errs, field.Invalid(ratioPath.Child("max"), ratio.Max.String(),
+		errs = append(errs, field.Invalid(ratioPath.Child("max"), workerctrl.ModelDeploymentScalerFormatQuantity(ratio.Max),
 			"the upper bound of a ratio is below its lower bound, so no ratio satisfies it"))
 	}
 
 	target, targetSet := modelDeploymentScalerRatioValue(ratio.Target)
 	if targetSet && minimumSet && target.Cmp(minimum) < 0 {
-		errs = append(errs, field.Invalid(ratioPath.Child("target"), ratio.Target.String(),
+		errs = append(errs, field.Invalid(ratioPath.Child("target"), workerctrl.ModelDeploymentScalerFormatQuantity(ratio.Target),
 			"the target of a ratio is below its lower bound, so no vector reaches it"))
 	}
 	if targetSet && maximumSet && target.Cmp(maximum) > 0 {
-		errs = append(errs, field.Invalid(ratioPath.Child("target"), ratio.Target.String(),
+		errs = append(errs, field.Invalid(ratioPath.Child("target"), workerctrl.ModelDeploymentScalerFormatQuantity(ratio.Target),
 			"the target of a ratio is above its upper bound, so no vector reaches it"))
 	}
 
@@ -806,10 +806,10 @@ func validateModelDeploymentScalerCapacityPrior(s *workercore.ModelDeploymentSca
 	if cp.Headroom != nil {
 		headroom, ok := modelDeploymentScalerRatioValue(cp.Headroom)
 		if !ok || headroom.Sign() <= 0 {
-			errs = append(errs, field.Invalid(path.Child("headroom"), cp.Headroom.String(),
+			errs = append(errs, field.Invalid(path.Child("headroom"), workerctrl.ModelDeploymentScalerFormatQuantity(cp.Headroom),
 				"headroom is a positive fraction of the seed capacity"))
 		} else if headroom.Cmp(big.NewRat(1, 1)) > 0 {
-			errs = append(errs, field.Invalid(path.Child("headroom"), cp.Headroom.String(),
+			errs = append(errs, field.Invalid(path.Child("headroom"), workerctrl.ModelDeploymentScalerFormatQuantity(cp.Headroom),
 				"headroom is a fraction of the seed capacity, so it is at most one"))
 		}
 	}
@@ -843,13 +843,19 @@ func validateModelDeploymentScalerProportional(s *workercore.ModelDeploymentScal
 	}
 
 	if proportional.Tolerance != nil {
-		tolerance, _ := modelDeploymentScalerRatioValue(proportional.Tolerance)
-		if tolerance.Cmp(big.NewRat(1, 1)) > 0 {
-			errs = append(errs, field.Invalid(path.Child("tolerance"), proportional.Tolerance.String(),
-				"the tolerance is a fraction of the target, so it is at most one"))
-		} else if tolerance.Sign() <= 0 {
-			errs = append(errs, field.Invalid(path.Child("tolerance"), proportional.Tolerance.String(),
-				"the tolerance is a positive fraction of the target"))
+		tolerance, ok := modelDeploymentScalerRatioValue(proportional.Tolerance)
+		if !ok || tolerance.Sign() <= 0 {
+			errs = append(errs, field.Invalid(
+				path.Child("tolerance"),
+				workerctrl.ModelDeploymentScalerFormatQuantity(proportional.Tolerance),
+				"the tolerance is a positive fraction of the target",
+			))
+		} else if tolerance.Cmp(big.NewRat(1, 1)) > 0 {
+			errs = append(errs, field.Invalid(
+				path.Child("tolerance"),
+				workerctrl.ModelDeploymentScalerFormatQuantity(proportional.Tolerance),
+				"the tolerance is a fraction of the target, so it is at most one",
+			))
 		}
 	}
 
@@ -945,10 +951,10 @@ func validateModelDeploymentScalerTokenThroughputSpec(
 			errs = append(errs, field.Invalid(quantilePath, workerctrl.ModelDeploymentScalerFormatQuantity(tt.LatencyQuantile),
 				"the latency quantile must be a number within supported bounds"))
 		case quantile.Sign() <= 0:
-			errs = append(errs, field.Invalid(quantilePath, tt.LatencyQuantile.String(),
+			errs = append(errs, field.Invalid(quantilePath, workerctrl.ModelDeploymentScalerFormatQuantity(tt.LatencyQuantile),
 				"the latency quantile is a quantile, so it is greater than zero"))
 		case quantile.Cmp(big.NewRat(1, 1)) > 0:
-			errs = append(errs, field.Invalid(quantilePath, tt.LatencyQuantile.String(),
+			errs = append(errs, field.Invalid(quantilePath, workerctrl.ModelDeploymentScalerFormatQuantity(tt.LatencyQuantile),
 				"the latency quantile is a fraction of the distribution, so it is at most one"))
 		}
 	}
@@ -1410,28 +1416,17 @@ func (r *ModelDeploymentScalerWebhook) validateModelDeploymentScalerCatalogRoles
 		return warnings, errs
 	}
 
-	for i := range s.Spec.Roles {
-		bounds := &s.Spec.Roles[i]
-		role, ok := declared[bounds.Name]
-		if !ok {
-			continue
-		}
-		kind := workerctrl.ModelDeploymentEffectiveRoleKind(role)
-		if kind == workercore.ModelDeploymentRoleKindEncode || !modelDeploymentScalerRoleNeedsCapacityPrior(s, kind) {
-			continue
-		}
-		if tt == nil || tt.TTFTTargetMilliseconds == nil {
-			errs = append(errs, field.Required(
-				ttPath.Child("ttftTargetMilliseconds"),
-				fmt.Sprintf("role %q (%s) resolves capacity from a catalog prior and requires an explicit ttftTargetMilliseconds", bounds.Name, kind),
-			))
-		}
-		if tt == nil || tt.ITLTargetMilliseconds == nil {
-			errs = append(errs, field.Required(
-				ttPath.Child("itlTargetMilliseconds"),
-				fmt.Sprintf("role %q (%s) resolves capacity from a catalog prior and requires an explicit itlTargetMilliseconds", bounds.Name, kind),
-			))
-		}
+	if tt == nil || tt.TTFTTargetMilliseconds == nil {
+		errs = append(errs, field.Required(
+			ttPath.Child("ttftTargetMilliseconds"),
+			"resolving capacity from a catalog prior requires an explicit ttftTargetMilliseconds",
+		))
+	}
+	if tt == nil || tt.ITLTargetMilliseconds == nil {
+		errs = append(errs, field.Required(
+			ttPath.Child("itlTargetMilliseconds"),
+			"resolving capacity from a catalog prior requires an explicit itlTargetMilliseconds",
+		))
 	}
 
 	if len(errs) > 0 {

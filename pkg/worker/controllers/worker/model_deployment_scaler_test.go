@@ -1917,6 +1917,10 @@ func TestModelDeploymentScalerWholeUnitObservationAndPanicExpiry(t *testing.T) {
 		if !shouldRestoreScaleDownAbort(retirement, lastScaleDown, nil, map[string]int32{"prefill": 3, "decode": 3}) {
 			t.Fatal("expected shouldRestoreScaleDownAbort == true when retired ordinal has not been restored")
 		}
+		// Role absent from current deployment spec must NOT trigger restore against missing-key 0.
+		if shouldRestoreScaleDownAbort(retirement, lastScaleDown, nil, map[string]int32{"prefill": 2}) {
+			t.Fatal("expected shouldRestoreScaleDownAbort == false when retired role is absent from current")
+		}
 
 		// End-to-end planWithPriors abort restore clamps per role to max(PreScaleDownVector, current).
 		scaler := newWholeUnitScaler(false)

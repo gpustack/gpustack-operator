@@ -299,10 +299,14 @@ func modelDeploymentScalerDisaggregatedPriorRequestMatched(
 	if identity.Engine.Build == "" {
 		identity.Engine.Build = decodeDecl.identity.Engine.Build
 	}
+	topServing := priors.ServingConfig{Router: prefillStage.ServingConfig.Router}
+	if target.Spec.KVCache != nil {
+		topServing.Offload = prefillStage.ServingConfig.Offload
+	}
 	return priors.Request{
 		Mode:          priors.ModeDisaggregated,
 		Identity:      identity,
-		ServingConfig: priors.ServingConfig{Router: prefillStage.ServingConfig.Router},
+		ServingConfig: topServing,
 		Prefill:       &prefillStage,
 		Decode:        &decodeStage,
 	}, nil
@@ -632,8 +636,8 @@ func modelDeploymentScalerPriorEngine(
 		image = target.Spec.Engine.Image
 	}
 	imageFamily := priors.EngineFamily(image)
-	// THE ROLE IMAGE MUST RUN THE ENGINE THE DEPLOYMENT NAMES, when the image
-	// names a family at all.
+	// A role image that names a known engine family must match the deployment engine; an image
+	// that names no known family is accepted only when it matches the selected profile image.
 	if imageFamily != "" && imageFamily != family {
 		return modelDeploymentScalerPriorRefusal(role.Name, "the engine image of the role does not match the deployment engine")
 	}
@@ -652,7 +656,10 @@ func modelDeploymentScalerPriorEngine(
 		return modelDeploymentScalerPriorRefusal(role.Name, "the engine family of the selected profile does not match the deployment engine")
 	}
 	if image != "" && imageFamily == "" && declared.Engine.Image != image {
-		return modelDeploymentScalerPriorRefusal(role.Name, "the engine image of the role names no known engine family")
+		return modelDeploymentScalerPriorRefusal(
+			role.Name,
+			"the engine image of the role names no known engine family and does not match the selected profile image",
+		)
 	}
 	return nil
 }
@@ -1123,11 +1130,20 @@ func modelDeploymentScalerEnvValues(role *workercore.ModelDeploymentRole, profil
 	if profile == nil {
 		return values
 	}
-	for _, entry := range profile.ServingConfig.EngineEnv {
-		_, value, found := strings.Cut(entry, "=")
-		if found && value != "" {
-			values = append(values, value)
+	appendEnvEntries := func(entries []string) {
+		for _, entry := range entries {
+			_, value, found := strings.Cut(entry, "=")
+			if found && value != "" {
+				values = append(values, value)
+			}
 		}
+	}
+	appendEnvEntries(profile.ServingConfig.EngineEnv)
+	if profile.Prefill != nil {
+		appendEnvEntries(profile.Prefill.ServingConfig.EngineEnv)
+	}
+	if profile.Decode != nil {
+		appendEnvEntries(profile.Decode.ServingConfig.EngineEnv)
 	}
 	return values
 }

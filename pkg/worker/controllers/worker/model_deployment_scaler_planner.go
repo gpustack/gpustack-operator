@@ -741,13 +741,17 @@ func shouldRestoreScaleDownAbort(
 			return false
 		}
 	}
-	if preCount, ok := lastScaleDown.PreScaleDownVector[retirement.RoleName]; ok {
-		return retirement.ReplicaOrdinal >= current[retirement.RoleName] &&
+	curCount, ok := current[retirement.RoleName]
+	if !ok {
+		return false
+	}
+	if preCount, hasPre := lastScaleDown.PreScaleDownVector[retirement.RoleName]; hasPre {
+		return retirement.ReplicaOrdinal >= curCount &&
 			retirement.ReplicaOrdinal < preCount
 	}
 	return lastScaleDown.Role == retirement.RoleName &&
 		lastScaleDown.Ordinal == retirement.ReplicaOrdinal &&
-		retirement.ReplicaOrdinal >= current[retirement.RoleName]
+		retirement.ReplicaOrdinal >= curCount
 }
 
 func wholeUnitMultiplier(roles []workercore.ModelDeploymentRole, unitVector map[string]int32) (int32, bool) {

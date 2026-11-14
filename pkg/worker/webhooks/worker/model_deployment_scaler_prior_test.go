@@ -1669,7 +1669,41 @@ func TestModelDeploymentScalerValidate_CapacityPriorDisaggregated(t *testing.T) 
 			}),
 			wantErr: "spec.ratios[0].target",
 		},
+		{
+			name: "extreme exponent capacityPrior.headroom is rejected without OOM or Spec mutation",
+			scaler: pdScaler(func(s *workercore.ModelDeploymentScaler) {
+				s.Spec.Algorithm.CapacityPrior.Headroom = ptr.To(resource.MustParse("1e1000000000"))
+			}),
+			wantErr: "spec.algorithm.capacityPrior.headroom",
+		},
+		{
+			name: "extreme exponent proportional.tolerance is rejected without nil panic or OOM",
+			scaler: pdScaler(func(s *workercore.ModelDeploymentScaler) {
+				s.Spec.Algorithm = workercore.ModelDeploymentScalerAlgorithmSpec{
+					Type: workercore.ModelDeploymentScalerAlgorithmTypeProportional,
+					Proportional: &workercore.ModelDeploymentScalerProportionalSpec{
+						Metric:    workercore.ModelDeploymentScalerProportionalMetricQueueDepth,
+						Tolerance: ptr.To(resource.MustParse("1e1000000000")),
+					},
+				}
+			}),
+			wantErr: "spec.algorithm.proportional.tolerance",
+		},
 	}
+
+	t.Run("multi-role PD missing ttftTargetMilliseconds emits a single non-duplicated Required error", func(t *testing.T) {
+		webhook := newModelDeploymentScalerPriorWebhook(
+			t,
+			[]ctrlcli.Object{pdTarget(), serverOnlyCM.DeepCopy(), h100_1x.DeepCopy(), h100_2x.DeepCopy()},
+			false, nil, nil,
+		)
+		s := pdScaler(func(sc *workercore.ModelDeploymentScaler) {
+			sc.Spec.Algorithm.TokenThroughput.TTFTTargetMilliseconds = nil
+		})
+		_, err := webhook.ValidateCreate(context.Background(), s)
+		require.Error(t, err)
+		assert.Equal(t, 1, strings.Count(err.Error(), "spec.algorithm.tokenThroughput.ttftTargetMilliseconds"))
+	})
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

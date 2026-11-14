@@ -8,7 +8,6 @@ import (
 	"strings"
 	"testing"
 
-	inf "gopkg.in/inf.v0"
 	core "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -1692,10 +1691,16 @@ func TestModelDeploymentScalerCapacityPriorExternalKVCacheRefusal(t *testing.T) 
 
 func TestQuantityBoundedRatAndDisaggregatedIdentityGates(t *testing.T) {
 	t.Run("bounded rational conversion rejects extreme exponents without mutating input Quantity", func(t *testing.T) {
+		posScale := resource.MustParse("1e-10")
+		posScale.AsDec().SetScale(1000)
+		hugeBits := resource.MustParse("1e-10")
+		hugeBits.AsDec().SetScale(0)
+		hugeBits.AsDec().SetUnscaledBig(new(big.Int).Lsh(big.NewInt(1), 200))
+
 		cases := []resource.Quantity{
 			resource.MustParse("1e1000000000"),
-			*resource.NewDecimalQuantity(*inf.NewDec(1, 1000), resource.DecimalSI),
-			*resource.NewDecimalQuantity(*inf.NewDecBig(new(big.Int).Lsh(big.NewInt(1), 200), 0), resource.DecimalSI),
+			posScale,
+			hugeBits,
 			resource.MustParse("0"),
 			resource.MustParse("-5"),
 		}
@@ -1741,8 +1746,36 @@ func TestQuantityBoundedRatAndDisaggregatedIdentityGates(t *testing.T) {
 
 		client := scalerTestClient(t, scaler, md, cm, instances[0], instances[1])
 		_, err := ResolveModelDeploymentScalerCapacityPriors(context.Background(), client, scaler, md)
-		if err == nil || !strings.Contains(err.Error(), "names no known engine family") {
-			t.Fatalf("err = %v, want refusal mentioning names no known engine family", err)
+		wantMsg := "the engine image of the role names no known engine family and does not match the selected profile image"
+		if err == nil || !strings.Contains(err.Error(), wantMsg) {
+			t.Fatalf("err = %v, want refusal mentioning %q", err, wantMsg)
+		}
+	})
+
+	t.Run("disaggregated stage EngineEnv values are redacted and malformed stage entries are refused", func(t *testing.T) {
+		profile := &priors.Profile{
+			ServingConfig: priors.ServingConfig{EngineEnv: []string{"TOP_SECRET=top-val"}},
+			Prefill:       &priors.DisaggregatedStage{ServingConfig: priors.ServingConfig{EngineEnv: []string{"PREFILL_SECRET=prefill-val"}}},
+			Decode:        &priors.DisaggregatedStage{ServingConfig: priors.ServingConfig{EngineEnv: []string{"DECODE_SECRET=decode-val"}}},
+		}
+		values := modelDeploymentScalerEnvValues(&workercore.ModelDeploymentRole{}, profile)
+		redacted := modelDeploymentScalerRedactEnvValues(
+			"values top-val prefill-val decode-val must not leak",
+			values,
+		)
+		for _, secret := range []string{"top-val", "prefill-val", "decode-val"} {
+			if strings.Contains(redacted, secret) {
+				t.Fatalf("redacted message %q leaked %q", redacted, secret)
+			}
+		}
+
+		mergedMalformed := priors.MergeServingConfig(
+			priors.ServingConfig{EngineEnv: []string{"BARE_ENTRY"}, EngineEnvComplete: true},
+			priors.ServingConfig{EngineEnv: []string{"VALID=1"}},
+		)
+		if err := modelDeploymentScalerMatchEngineEnv(mergedMalformed.EngineEnv, []string{"VALID=1"}, true); err == nil ||
+			!strings.Contains(err.Error(), "malformed engine environment entry") {
+			t.Fatalf("err = %v, want malformed engine environment entry refusal", err)
 		}
 	})
 
