@@ -3,6 +3,7 @@ package priors
 import (
 	"errors"
 	"math"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -1628,6 +1629,94 @@ func TestResolveDisaggregatedBoundariesAndStageServingMerge(t *testing.T) {
 		nanReq.Constraints.TTFTTargetMilliseconds = math.NaN()
 		if _, err := validCatalog.Resolve(nanReq); err == nil {
 			t.Fatal("expected NaN TTFT target to be refused")
+		}
+	})
+
+	t.Run("stage LaunchParameters override shared flags via last-write-wins while preserving malformed tokens", func(t *testing.T) {
+		profile := testDisaggregatedProfile(t, 1, topo, 1, topo, makePoints())
+		profile.ServingConfig.LaunchParameters = []string{"--max-model-len=2048"}
+		profile.Decode.ServingConfig.LaunchParameters = []string{"--max-model-len=4096"}
+		profile = redigest(t, profile)
+		catalog := testCatalog(t, profile)
+
+		req := testRequest()
+		req.Mode = ModeDisaggregated
+		req.Identity.Hardware = HardwareIdentity{}
+		req.Topology = Topology{}
+		req.Prefill = &DisaggregatedStage{
+			Replicas:      1,
+			Hardware:      testIdentity().Hardware,
+			ServingConfig: ServingConfig{LaunchParameters: []string{"--max-model-len=2048"}},
+			Topology:      topo,
+		}
+		req.Decode = &DisaggregatedStage{
+			Replicas:      1,
+			Hardware:      testIdentity().Hardware,
+			ServingConfig: ServingConfig{LaunchParameters: []string{"--max-model-len=4096"}},
+			Topology:      topo,
+		}
+		if _, err := catalog.Resolve(req); err != nil {
+			t.Fatalf("expected stage LaunchParameters override to match, got %v", err)
+		}
+
+		badDecode := *req.Decode
+		badDecode.ServingConfig.LaunchParameters = []string{"--max-model-len=2048"}
+		mismatchReq := req
+		mismatchReq.Decode = &badDecode
+		if _, err := catalog.Resolve(mismatchReq); err == nil {
+			t.Fatal("expected mismatched decode LaunchParameters to be refused")
+		}
+	})
+
+	t.Run("MergeServingConfig preserves malformed and conflicting EngineEnv entries without aliasing inputs", func(t *testing.T) {
+		base := ServingConfig{
+			Router:                    "llmd",
+			LaunchParameters:          []string{"--max-model-len=2048"},
+			EffectiveLaunchParameters: []string{"--max-model-len=2048"},
+			EngineEnv:                 []string{"A=1", "B=2"},
+			EffectiveDefaults:         map[string]string{"--dtype": "bf16"},
+		}
+		overlay := ServingConfig{
+			EngineEnv:         []string{"B=20", "C=3"},
+			EffectiveDefaults: map[string]string{"--swap-space": "0"},
+		}
+		merged := MergeServingConfig(base, overlay)
+		wantEnv := []string{"A=1", "B=20", "C=3"}
+		if !slices.Equal(merged.EngineEnv, wantEnv) {
+			t.Fatalf("merged.EngineEnv = %v, want %v", merged.EngineEnv, wantEnv)
+		}
+		merged.LaunchParameters[0] = "--mutated"
+		merged.EffectiveDefaults["--dtype"] = "fp16"
+		if base.LaunchParameters[0] != "--max-model-len=2048" || base.EffectiveDefaults["--dtype"] != "bf16" {
+			t.Fatalf("MergeServingConfig aliased base collections: %+v", base)
+		}
+
+		emptyNonNil := ServingConfig{
+			LaunchParameters:          []string{},
+			EffectiveLaunchParameters: []string{},
+			EngineEnv:                 []string{},
+			EffectiveDefaults:         map[string]string{},
+		}
+		mergedEmpty := MergeServingConfig(emptyNonNil, emptyNonNil)
+		if mergedEmpty.LaunchParameters != nil || mergedEmpty.EffectiveLaunchParameters != nil ||
+			mergedEmpty.EngineEnv != nil || mergedEmpty.EffectiveDefaults != nil {
+			t.Fatalf("expected nil empty collections on MergeServingConfig, got %+v", mergedEmpty)
+		}
+
+		malformed := MergeServingConfig(
+			ServingConfig{EngineEnv: []string{"MALFORMED", "=empty"}},
+			ServingConfig{EngineEnv: []string{"VALID=1"}},
+		)
+		if !slices.Contains(malformed.EngineEnv, "MALFORMED") || !slices.Contains(malformed.EngineEnv, "=empty") {
+			t.Fatalf("expected malformed entries preserved verbatim, got %v", malformed.EngineEnv)
+		}
+
+		conflicting := MergeServingConfig(
+			ServingConfig{EngineEnv: []string{"DUP=1", "DUP=2"}},
+			ServingConfig{EngineEnv: []string{"DUP=3", "OTHER=1"}},
+		)
+		if !slices.Contains(conflicting.EngineEnv, "DUP=1") || !slices.Contains(conflicting.EngineEnv, "DUP=2") {
+			t.Fatalf("expected intra-slice duplicate conflict preserved, got %v", conflicting.EngineEnv)
 		}
 	})
 }

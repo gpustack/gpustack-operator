@@ -306,8 +306,20 @@ func normalizeSpelling(spelling string) string {
 }
 
 // MergeServingConfig merges a stage serving overlay onto a profile's shared serving configuration.
+//
+// LaunchParameters concatenates base tokens followed by overlay tokens without deduplicating by flag
+// name: launchParameterConflicts parses both token slices through ParseLaunchParameters and folds
+// repeated flags with last-write-wins semantics so stage flags override shared flags, while raw
+// concatenation keeps malformed tokens in either slice visible to ParseLaunchParameters.
 func MergeServingConfig(base, overlay ServingConfig) ServingConfig {
-	merged := base
+	merged := ServingConfig{
+		Router:              base.Router,
+		KVCacheDType:        base.KVCacheDType,
+		Offload:             base.Offload,
+		PrefixCaching:       base.PrefixCaching,
+		SpeculativeDecoding: base.SpeculativeDecoding,
+		EngineEnvComplete:   base.EngineEnvComplete || overlay.EngineEnvComplete,
+	}
 	if overlay.Router != "" {
 		merged.Router = overlay.Router
 	}
@@ -326,6 +338,11 @@ func MergeServingConfig(base, overlay ServingConfig) ServingConfig {
 	if len(base.LaunchParameters) > 0 || len(overlay.LaunchParameters) > 0 {
 		merged.LaunchParameters = append(slices.Clone(base.LaunchParameters), overlay.LaunchParameters...)
 	}
+	if len(base.EffectiveLaunchParameters) > 0 || len(overlay.EffectiveLaunchParameters) > 0 {
+		merged.EffectiveLaunchParameters = append(
+			slices.Clone(base.EffectiveLaunchParameters), overlay.EffectiveLaunchParameters...,
+		)
+	}
 	if len(base.EffectiveDefaults) > 0 || len(overlay.EffectiveDefaults) > 0 {
 		defaults := make(map[string]string, len(base.EffectiveDefaults)+len(overlay.EffectiveDefaults))
 		for k, v := range base.EffectiveDefaults {
@@ -339,37 +356,67 @@ func MergeServingConfig(base, overlay ServingConfig) ServingConfig {
 	if len(base.EngineEnv) > 0 || len(overlay.EngineEnv) > 0 {
 		merged.EngineEnv = mergeEngineEnvEntries(base.EngineEnv, overlay.EngineEnv)
 	}
-	if overlay.EngineEnvComplete {
-		merged.EngineEnvComplete = true
-	}
 	return merged
+}
+
+type engineEnvLayer struct {
+	valid     map[string]string
+	conflicts map[string]bool
+	preserved []string
+}
+
+func collectEngineEnvLayer(entries []string) engineEnvLayer {
+	layer := engineEnvLayer{
+		valid:     make(map[string]string, len(entries)),
+		conflicts: make(map[string]bool),
+	}
+	for _, entry := range entries {
+		key, val, ok := strings.Cut(entry, "=")
+		if !ok || key == "" {
+			layer.preserved = append(layer.preserved, entry)
+			continue
+		}
+		if layer.conflicts[key] {
+			layer.preserved = append(layer.preserved, entry)
+			continue
+		}
+		if prev, seen := layer.valid[key]; seen {
+			if prev != val {
+				layer.conflicts[key] = true
+				layer.preserved = append(layer.preserved, key+"="+prev, entry)
+				delete(layer.valid, key)
+			}
+			continue
+		}
+		layer.valid[key] = val
+	}
+	return layer
 }
 
 func mergeEngineEnvEntries(base, overlay []string) []string {
 	if len(overlay) == 0 {
 		return slices.Clone(base)
 	}
-	byKey := make(map[string]string, len(base)+len(overlay))
-	for _, entry := range base {
-		key, val, ok := strings.Cut(entry, "=")
-		if ok {
+	baseLayer := collectEngineEnvLayer(base)
+	overlayLayer := collectEngineEnvLayer(overlay)
+
+	byKey := make(map[string]string, len(baseLayer.valid)+len(overlayLayer.valid))
+	for key, val := range baseLayer.valid {
+		if !overlayLayer.conflicts[key] {
 			byKey[key] = val
-		} else {
-			byKey[entry] = ""
 		}
 	}
-	for _, entry := range overlay {
-		key, val, ok := strings.Cut(entry, "=")
-		if ok {
+	for key, val := range overlayLayer.valid {
+		if !baseLayer.conflicts[key] {
 			byKey[key] = val
-		} else {
-			byKey[entry] = ""
 		}
 	}
-	merged := make([]string, 0, len(byKey))
+	merged := make([]string, 0, len(byKey)+len(baseLayer.preserved)+len(overlayLayer.preserved))
 	for key, val := range byKey {
 		merged = append(merged, key+"="+val)
 	}
 	sort.Strings(merged)
+	merged = append(merged, baseLayer.preserved...)
+	merged = append(merged, overlayLayer.preserved...)
 	return merged
 }
