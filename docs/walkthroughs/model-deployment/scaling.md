@@ -316,11 +316,10 @@ If multiple quantizations match, set `--quantization` or annotate the deployment
 `worker.gpustack.ai/precision`. Use the annotation also to pin precision without an engine flag.
 An empty `catalogRef: {}` is invalid: admission requires a name for a present reference.
 
-For a fixed `1P:3D` target whose model is in the embedded catalog, omitting *`catalogRef`* resolves
-directly. Because the committed catalog carries no `Qwen/Qwen3-8B` profile, point *`catalogRef`* at
-a reviewed `ConfigMap` (such as `autoscaling-priors` below) when targeting `autoscaling-vllm-pd`.
-Align the target's replicas to the ratio and provide enough GPU capacity before applying it; this
-example is not a recorded cluster run.
+When the embedded catalog covers the target model, a fixed `1P:3D` scaler can omit *`catalogRef`*.
+Because the committed catalog omits `Qwen/Qwen3-8B`, create `autoscaling-priors` first (as shown
+below, with a matching `mode: disaggregated` or `mode: aggregated` profile) before applying this
+example; align replicas to the ratio and provide enough GPU capacity.
 
 ```yaml
 apiVersion: worker.gpustack.ai/v1
@@ -387,9 +386,11 @@ spec:
         accelerator: "1"
 ```
 
-Create a reviewed `ConfigMap` named `autoscaling-priors` in `gpustack-bench`. Its `priors.yaml`
-key must contain a [profile matching the target](../../modules/model-deployment/scaling.md#capacity-priors).
-Then create a separate scaler targeting this server:
+Create a reviewed `ConfigMap` named `autoscaling-priors` in `gpustack-bench` (or reuse and extend
+the one created for `autoscale-vllm-pd-prior` above). Its `priors.yaml` key must contain a
+[profile matching each target](../../modules/model-deployment/scaling.md#capacity-priors)—for
+example, a `mode: disaggregated` profile for `autoscaling-vllm-pd` and a `mode: aggregated` profile
+for `catalog-server`. Then create a separate scaler targeting this server:
 
 ```yaml
 apiVersion: worker.gpustack.ai/v1
