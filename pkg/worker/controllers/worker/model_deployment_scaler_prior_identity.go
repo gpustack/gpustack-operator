@@ -368,6 +368,9 @@ func modelDeploymentScalerValidateDisaggregatedStage(
 	if err != nil {
 		return priors.DisaggregatedStage{}, priors.ServingConfig{}, err
 	}
+	if target.Spec.KVCache != nil && stageProfile.ServingConfig.Offload == "" && stageMergedServing.Offload == "external" {
+		stageRoleServing.Offload = ""
+	}
 	if err := modelDeploymentScalerPriorOmittedDefaultsGate(target.Spec.Engine.Name, stageMergedServing, declaration.flags); err != nil {
 		return priors.DisaggregatedStage{}, priors.ServingConfig{}, modelDeploymentScalerPriorRefusal(role.Name, "%v", err)
 	}

@@ -1593,3 +1593,97 @@ func TestModelDeploymentScalerCapacityPriorEmbeddedCatalog(t *testing.T) {
 		}
 	})
 }
+
+func TestModelDeploymentScalerCapacityPriorExternalKVCacheRefusal(t *testing.T) {
+	t.Run("single-role Server fails closed against YAML profile without external offload", func(t *testing.T) {
+		scaler, md, cm, instance := capacityPriorCompleteFixture(t)
+		md.Spec.KVCache = &workercore.ModelDeploymentKVCache{PoolRef: core.LocalObjectReference{Name: "kv-pool"}}
+
+		client := scalerTestClient(t, scaler, md, cm, instance)
+		_, err := ResolveModelDeploymentScalerCapacityPriors(context.Background(), client, scaler, md)
+		var refusal *priors.RefusalError
+		if !errors.As(err, &refusal) || !strings.Contains(err.Error(), "servingConfig.offload") {
+			t.Fatalf("err = %v, want RefusalError containing servingConfig.offload", err)
+		}
+	})
+
+	t.Run("Priority 1 mode disaggregated fails closed without Priority 2 fallback against YAML profile", func(t *testing.T) {
+		scaler, md, cm, instances := capacityPriorDisaggregatedFixture(t, false)
+		md.Spec.KVCache = &workercore.ModelDeploymentKVCache{PoolRef: core.LocalObjectReference{Name: "kv-pool"}}
+		doc := capacityPriorReadCatalog(t, cm)
+		doc.Profiles = append(doc.Profiles, capacityPriorDisaggregatedProfile(
+			md.Spec.Model.Name,
+			1, "nvidia-h100", 2, 3, "nvidia-h200", 4,
+		))
+		capacityPriorWriteCatalog(t, cm, doc)
+
+		client := scalerTestClient(t, scaler, md, cm, instances[0], instances[1])
+		_, err := ResolveModelDeploymentScalerCapacityPriors(context.Background(), client, scaler, md)
+		var refusal *priors.RefusalError
+		if !errors.As(err, &refusal) || !strings.Contains(err.Error(), "servingConfig.offload") {
+			t.Fatalf("err = %v, want RefusalError containing servingConfig.offload", err)
+		}
+
+		// Verify Priority 1 fails closed even if disaggregated profile explicitly records offload=none while aggregated profiles are absent.
+		raw := []byte(cm.Data[priors.DefaultCatalogConfigMapKey])
+		parsedCatalog, parseErr := priors.ParseCatalog(raw)
+		if parseErr != nil {
+			t.Fatal(parseErr)
+		}
+		for i := range parsedCatalog.Profiles {
+			if parsedCatalog.Profiles[i].Mode == priors.ModeDisaggregated {
+				parsedCatalog.Profiles[i].ServingConfig.Offload = "none"
+			}
+		}
+		_, err = modelDeploymentScalerResolveDisaggregatedPriors(
+			context.Background(), client, scaler, md, parsedCatalog, 0.95,
+		)
+		if !errors.As(err, &refusal) || !strings.Contains(err.Error(), "servingConfig.offload") {
+			t.Fatalf("err = %v, want fail-closed RefusalError containing servingConfig.offload", err)
+		}
+	})
+
+	t.Run("Priority 2 mode aggregated fallback fails closed against YAML profiles when spec.kvCache is set", func(t *testing.T) {
+		scaler, md, cm, instances := capacityPriorDisaggregatedFixture(t, false)
+		md.Spec.KVCache = &workercore.ModelDeploymentKVCache{PoolRef: core.LocalObjectReference{Name: "kv-pool"}}
+
+		client := scalerTestClient(t, scaler, md, cm, instances[0], instances[1])
+		_, err := ResolveModelDeploymentScalerCapacityPriors(context.Background(), client, scaler, md)
+		var refusal *priors.RefusalError
+		if !errors.As(err, &refusal) || !strings.Contains(err.Error(), "servingConfig.offload") {
+			t.Fatalf("err = %v, want RefusalError containing servingConfig.offload", err)
+		}
+	})
+
+	t.Run("native kvTransfer without kvCache resolves unchanged", func(t *testing.T) {
+		scaler, md, cm, instances := capacityPriorDisaggregatedFixture(t, false)
+		if md.Spec.KVTransfer == nil || md.Spec.KVCache != nil {
+			t.Fatalf("expected KVTransfer!=nil and KVCache==nil in fixture")
+		}
+		client := scalerTestClient(t, scaler, md, cm, instances[0], instances[1])
+		got, err := ResolveModelDeploymentScalerCapacityPriors(context.Background(), client, scaler, md)
+		if err != nil {
+			t.Fatalf("unexpected error for native KVTransfer without KVCache: %v", err)
+		}
+		if got.Mode != ModelDeploymentScalerPriorModeAggregatedFallback {
+			t.Fatalf("mode = %q, want AggregatedFallback", got.Mode)
+		}
+	})
+
+	t.Run("explicit manual capacities with spec.kvCache bypass catalog unchanged", func(t *testing.T) {
+		scaler, md, _, _ := capacityPriorDisaggregatedFixture(t, false)
+		md.Spec.KVCache = &workercore.ModelDeploymentKVCache{PoolRef: core.LocalObjectReference{Name: "kv-pool"}}
+		scaler.Spec.Algorithm.TokenThroughput.PrefillTargetTokensPerSecond = capacityPriorQuantity("1000")
+		scaler.Spec.Algorithm.TokenThroughput.DecodeTargetTokensPerSecond = capacityPriorQuantity("2000")
+		if ModelDeploymentScalerNeedsCapacityPrior(scaler, md) {
+			t.Fatalf("expected ModelDeploymentScalerNeedsCapacityPrior == false with explicit capacities")
+		}
+		got, err := ResolveModelDeploymentScalerCapacityPriors(context.Background(), capacityPriorNoReads{t: t}, scaler, md)
+		if err != nil {
+			t.Fatalf("unexpected error with explicit capacities and spec.kvCache: %v", err)
+		}
+		if got.Mode != ModelDeploymentScalerPriorModeAggregated || got.WholeUnit != nil {
+			t.Fatalf("unexpected mode=%q wholeUnit=%#v", got.Mode, got.WholeUnit)
+		}
+	})
+}

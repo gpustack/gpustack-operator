@@ -35,8 +35,11 @@ The 2026-11-14 InferenceX sync was qualified under these rules:
 
 ### 2026-11-14 — Sync InferenceX aggregated and disaggregated benchmarks
 
-This sync supersedes the 2026-10-27 record below. It retired zero shapes. The resulting catalog
-has 385 profiles: 205 aggregated and 180 disaggregated. Counts below were read from the catalog.
+This sync supersedes the 2026-10-27 record below. It retired one previously published shape:
+`aggregated / deepseek-ai/DeepSeek-V4-Pro / fp4 / sglang / nvidia-b300` with
+`gpusPerReplica=4, tensorParallel=4, expertParallel=1`. See the [retirement log](#retirement-log).
+It added 244 shapes: 64 aggregated and 180 disaggregated. The resulting catalog has 385 profiles:
+205 aggregated and 180 disaggregated. Counts below were read from the catalog.
 The benchmark URLs use `https://inferencex.semianalysis.com/api/v1/benchmarks?model=<query ID>`.
 The downloaded availability file from https://inferencex.semianalysis.com/api/v1/availability has
 SHA-256 `43bc03ac251697770697addc3e1c2b1ff64e78e444f2ed689fec6ed73d35ef23`.
@@ -107,10 +110,11 @@ source; any future import must pin the actual data snapshot and pass the same qu
 
 ## Retirement log
 
-Retirements remove profiles from `priors.yaml` through `go run ./gen/priors --retire`, selecting
-by `--mode`, `--model`, `--quantization`, `--engine`, `--hardware` and optional `--tp` / `--ep` / `--gpus`,
-all normalized by the same identity rules, and are logged here.
+Use `go run ./gen/priors --retire` to remove profiles from `priors.yaml`. Select them by
+`--mode`, `--model`, `--quantization`, `--engine`, `--hardware` or `--tp` / `--ep` / `--gpus`.
+All selectors use the same identity rules. This table records those retirements and shapes
+removed because they are absent from a full upstream refresh.
 
 | Date | Removed | Reason |
 |---|---|---|
-| — | — | — |
+| 2026-11-14 | `aggregated / deepseek-ai/DeepSeek-V4-Pro / fp4 / sglang / nvidia-b300` (`gpus=4, tp=4, ep=1`) | The refreshed `DeepSeek-V4-Pro` snapshot (SHA-256 `c59dbd3c1cc7a10632b7eb1207f4619ed31527ac8e106490e1a367cf08026d40`) no longer contains a qualifying 4-GPU `TP=4, EP=1` sweep for this configuration. It retains the `gpus=64, tp=8, ep=8` sweep. |

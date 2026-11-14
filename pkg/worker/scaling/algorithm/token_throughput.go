@@ -46,10 +46,16 @@ func (t TokenThroughput) Recommend(obs RoleObservation, prior *PredictorState) (
 	}
 	if !signalUsable(obs.ThroughputState) {
 		latencyRec, latencyReason, _ := t.latencyGuard(obs)
-		if obs.ReadyReplicas > 0 && latencyReason == ReasonLatencyGuardScaleUp {
+		switch latencyReason {
+		case ReasonLatencyGuardScaleUp:
 			rec.DesiredReplicas = maxInt32(1, latencyRec)
 			rec.HoldScaleDown = true
 			rec.Reason = ReasonLatencyGuardScaleUp
+			return rec, &state
+		case ReasonLatencyGuardHold:
+			rec.DesiredReplicas = obs.CurrentReplicas
+			rec.HoldScaleDown = true
+			rec.Reason = ReasonLatencyGuardHold
 			return rec, &state
 		}
 		rec.HoldScaleDown = true
@@ -167,7 +173,18 @@ func desiredFromDemand(demand, target float64) int32 {
 	if demand <= 0 {
 		return 1
 	}
-	return int32(math.Max(1, math.Ceil(demand/target)))
+	return clampPositiveCeilInt32(demand / target)
+}
+
+func clampPositiveCeilInt32(ratio float64) int32 {
+	if math.IsNaN(ratio) || ratio <= 1 {
+		return 1
+	}
+	ceiled := math.Ceil(ratio)
+	if ceiled >= float64(math.MaxInt32) {
+		return math.MaxInt32
+	}
+	return int32(ceiled)
 }
 
 func (t TokenThroughput) stableWindow() time.Duration {

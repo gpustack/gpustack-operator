@@ -39,10 +39,15 @@ func (p Predictive) Recommend(obs RoleObservation, prior *PredictorState) (RoleR
 		return rec, &state
 	}
 	if !signalUsable(obs.ThroughputState) {
-		if rec.Reason != ReasonLatencyGuardScaleUp {
-			if latencyRec, latencyReason, _ := p.latencyGuard(obs); latencyReason == ReasonLatencyGuardScaleUp {
+		if rec.Reason != ReasonLatencyGuardScaleUp && rec.Reason != ReasonLatencyGuardHold {
+			switch latencyRec, latencyReason, _ := p.latencyGuard(obs); latencyReason {
+			case ReasonLatencyGuardScaleUp:
 				rec.DesiredReplicas = maxInt32(1, latencyRec)
 				rec.Reason = ReasonLatencyGuardScaleUp
+				rec.HoldScaleDown = true
+			case ReasonLatencyGuardHold:
+				rec.DesiredReplicas = obs.CurrentReplicas
+				rec.Reason = ReasonLatencyGuardHold
 				rec.HoldScaleDown = true
 			}
 		}
@@ -70,10 +75,7 @@ func (p Predictive) Recommend(obs RoleObservation, prior *PredictorState) (RoleR
 	if math.IsNaN(forecast) || math.IsInf(forecast, 0) {
 		return rec, &state
 	}
-	slowFloor := int32(math.Ceil(forecast / capacity))
-	if slowFloor < 1 {
-		slowFloor = 1
-	}
+	slowFloor := clampPositiveCeilInt32(forecast / capacity)
 	rec.DesiredReplicas = maxInt32(rec.DesiredReplicas, slowFloor)
 
 	latencyFast := p.latencyBreached(obs)

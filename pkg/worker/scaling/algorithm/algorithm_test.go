@@ -502,14 +502,21 @@ func TestLatencyGuardWithMissingOrStaleThroughput(t *testing.T) {
 				ttft:        110,
 				itl:         20,
 				wantDesired: 2,
-				wantReason:  ReasonWaitingForMetrics,
+				wantReason:  ReasonLatencyGuardHold,
+			},
+			{
+				name:        "ratio_1.15_itl",
+				ttft:        100,
+				itl:         23,
+				wantDesired: 2,
+				wantReason:  ReasonLatencyGuardHold,
 			},
 			{
 				name:        "ratio_1.2",
 				ttft:        120,
 				itl:         20,
 				wantDesired: 2,
-				wantReason:  ReasonWaitingForMetrics,
+				wantReason:  ReasonLatencyGuardHold,
 			},
 			{
 				name:        "ratio_gt_1.2_ttft",
@@ -574,5 +581,43 @@ func TestLatencyGuardWithMissingOrStaleThroughput(t *testing.T) {
 	obsNoReady.TTFTMilliseconds = 200
 	if rec, _ := tt.Recommend(obsNoReady, nil); rec.DesiredReplicas != 2 || rec.Reason != ReasonNoReadyReplicas || !rec.HoldScaleDown {
 		t.Fatalf("no ready replicas = %#v", rec)
+	}
+}
+
+func TestTokenThroughputAndPredictiveExtremeDemandClamp(t *testing.T) {
+	base := time.Unix(200, 0)
+	tt := TokenThroughput{
+		ServerTargetTokensPerSecond: 1e-9,
+	}
+	pred := Predictive{
+		TokenThroughput:               tt,
+		ServerTokenCapacityPerReplica: 1e-9,
+		HorizonSeconds:                300,
+		MinPoints:                     2,
+	}
+
+	obs := freshObservation(base)
+	obs.Kind = RoleKindServer
+	obs.CurrentReplicas = 2
+	obs.ReadyReplicas = 2
+	obs.PromptTokensPerSecond = 10
+	obs.GenerationTokensPerSecond = 10
+
+	recTT, _ := tt.Recommend(obs, nil)
+	if recTT.DesiredReplicas != math.MaxInt32 {
+		t.Fatalf("TokenThroughput DesiredReplicas = %d, want %d", recTT.DesiredReplicas, math.MaxInt32)
+	}
+
+	prior := &PredictorState{
+		Level:       10,
+		Trend:       5,
+		Covariance:  [4]float64{1, 0, 0, 1},
+		SampleCount: 2,
+	}
+	obs2 := obs
+	obs2.ObservedAt = base.Add(15 * time.Second)
+	recPred, _ := pred.Recommend(obs2, prior)
+	if recPred.DesiredReplicas != math.MaxInt32 {
+		t.Fatalf("Predictive DesiredReplicas = %d, want %d", recPred.DesiredReplicas, math.MaxInt32)
 	}
 }

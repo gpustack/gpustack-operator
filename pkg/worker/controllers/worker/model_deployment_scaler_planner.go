@@ -949,6 +949,18 @@ func (r *ModelDeploymentScalerReconciler) planWholeUnitStates(
 		}
 	}
 
+	maxUnit := int32(1)
+	for _, unit := range uPrior.UnitVector {
+		if unit > maxUnit {
+			maxUnit = unit
+		}
+	}
+	maxSafeUnits := int32(math.MaxInt32) / maxUnit
+	rawUnits := unitRec.DesiredReplicas
+	if rawUnits > 0 {
+		rawUnits = clamp(rawUnits, 1, maxSafeUnits)
+	}
+
 	algorithmByRole := make(map[string]algorithm.RoleRecommendation, len(md.Spec.Roles))
 	predictorByRole := map[string]*algorithm.PredictorState{uPrior.DecodeRole: unitNext}
 	states := make([]ModelDeploymentScalerRoleState, 0, len(md.Spec.Roles))
@@ -957,7 +969,7 @@ func (r *ModelDeploymentScalerReconciler) planWholeUnitStates(
 		role := &md.Spec.Roles[i]
 		obs := roleObs[role.Name]
 		unit := uPrior.UnitVector[role.Name]
-		rawReplicas := unitRec.DesiredReplicas * unit
+		rawReplicas := checkedMulInt32(rawUnits, unit)
 		roleReason := unitRec.Reason
 		if role.Name == uPrior.EncodeRole && unitRec.Reason != algorithm.ReasonWaitingForMetrics && encodeReady {
 			roleReason = algorithm.ReasonRatioCoupled

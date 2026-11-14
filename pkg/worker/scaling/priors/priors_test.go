@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"strings"
 	"testing"
 
 	"gpustack.ai/gpustack/pkg/worker/scaling/algorithm"
@@ -454,6 +455,73 @@ func TestDenominatorReconstructionAndSingleHeadroom(t *testing.T) {
 			}
 			if math.Abs(res.EffectiveTokensPerSecond-tc.wantEff) > 1e-9 {
 				t.Fatalf("EffectiveTokensPerSecond = %v, want %v", res.EffectiveTokensPerSecond, tc.wantEff)
+			}
+		})
+	}
+}
+
+func TestExternalKVCacheOffloadRefusal(t *testing.T) {
+	points := []MeasuredPoint{
+		testPoint(4, 100, 1000, 20),
+		testPoint(8, 200, 4000, 20),
+	}
+	cases := []struct {
+		name           string
+		mode           ProfileMode
+		profileOffload string
+		wantErr        bool
+	}{
+		{name: "aggregated empty offload refuses external", mode: ModeAggregated, profileOffload: "", wantErr: true},
+		{name: "aggregated none offload refuses external", mode: ModeAggregated, profileOffload: "none", wantErr: true},
+		{name: "aggregated external offload resolves", mode: ModeAggregated, profileOffload: "external", wantErr: false},
+		{name: "disaggregated empty offload refuses external", mode: ModeDisaggregated, profileOffload: "", wantErr: true},
+		{name: "disaggregated none offload refuses external", mode: ModeDisaggregated, profileOffload: "none", wantErr: true},
+		{name: "disaggregated external offload resolves", mode: ModeDisaggregated, profileOffload: "external", wantErr: false},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var profile Profile
+			var req Request
+			if tc.mode == ModeDisaggregated {
+				disaggPoints := []MeasuredPoint{
+					testPoint(4, 100, 1000, 20),
+					testPoint(8, 200, 4000, 20),
+				}
+				for i := range disaggPoints {
+					disaggPoints[i].Throughput.Denominator = DenominatorPerUnit
+				}
+				profile = testDisaggregatedProfile(t, 1, testTopology(), 1, testTopology(), disaggPoints)
+				profile.ServingConfig.Offload = tc.profileOffload
+				profile = redigest(t, profile)
+
+				req = testRequest()
+				req.Mode = ModeDisaggregated
+				req.Identity.Hardware = HardwareIdentity{}
+				req.Topology = Topology{}
+				req.ServingConfig.Offload = "external"
+				req.Prefill = &DisaggregatedStage{Replicas: 1, Hardware: testIdentity().Hardware, Topology: testTopology()}
+				req.Decode = &DisaggregatedStage{Replicas: 1, Hardware: testIdentity().Hardware, Topology: testTopology()}
+			} else {
+				profile = testProfile(t, ModeAggregated, points)
+				profile.ServingConfig.Offload = tc.profileOffload
+				profile = redigest(t, profile)
+
+				req = testRequest()
+				req.ServingConfig.Offload = "external"
+			}
+			catalog := testCatalog(t, profile)
+
+			_, err := catalog.Resolve(req)
+			if !tc.wantErr {
+				if err != nil {
+					t.Fatalf("unexpected Resolve error: %v", err)
+				}
+				return
+			}
+			var refusal *RefusalError
+			if !errors.As(err, &refusal) || !strings.Contains(err.Error(), "servingConfig.offload") {
+				t.Fatalf("err = %v, want RefusalError containing servingConfig.offload", err)
 			}
 		})
 	}

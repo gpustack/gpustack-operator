@@ -1099,6 +1099,23 @@ func TestModelDeploymentScalerValidate_CapacityPrior(t *testing.T) {
 			scaler:          fx.scalerWith(),
 			wantErr:         "apiserver etcd timeout",
 		},
+		{
+			name: "create refuses external kvCache against YAML catalog profile without external offload",
+			objects: fx.objectsWithTarget(func(d *workercore.ModelDeployment) {
+				d.Spec.KVCache = &workercore.ModelDeploymentKVCache{PoolRef: core.LocalObjectReference{Name: "kv-pool"}}
+			}),
+			scaler:  fx.scalerWith(),
+			wantErr: "servingConfig.offload",
+		},
+		{
+			name: "create admits external kvCache when explicit manual capacities bypass catalog",
+			objects: fx.objectsWithTarget(func(d *workercore.ModelDeployment) {
+				d.Spec.KVCache = &workercore.ModelDeploymentKVCache{PoolRef: core.LocalObjectReference{Name: "kv-pool"}}
+			}),
+			scaler: fx.scalerWith(func(s *workercore.ModelDeploymentScaler) {
+				s.Spec.Algorithm.TokenThroughput.ServerTargetTokensPerSecond = ptr.To(resource.MustParse("1000"))
+			}),
+		},
 	}
 
 	for _, tc := range cases {
@@ -1596,6 +1613,32 @@ func TestModelDeploymentScalerValidate_CapacityPriorDisaggregated(t *testing.T) 
 			objects: []ctrlcli.Object{pdTarget(), infeasibleDisaggCM.DeepCopy(), h100_1x.DeepCopy(), h100_2x.DeepCopy()},
 			scaler:  pdScaler(),
 			wantErr: "spec.algorithm.capacityPrior",
+		},
+		{
+			name: "PD Priority 1 create refuses external kvCache against YAML mode disaggregated profile without falling back",
+			objects: []ctrlcli.Object{
+				pdTarget(func(d *workercore.ModelDeployment) {
+					d.Spec.KVCache = &workercore.ModelDeploymentKVCache{PoolRef: core.LocalObjectReference{Name: "kv-pool"}}
+				}),
+				disaggregatedCM.DeepCopy(),
+				h100_1x.DeepCopy(),
+				h100_2x.DeepCopy(),
+			},
+			scaler:  pdScaler(),
+			wantErr: "servingConfig.offload",
+		},
+		{
+			name: "PD Priority 2 create refuses external kvCache against YAML mode aggregated profiles",
+			objects: []ctrlcli.Object{
+				pdTarget(func(d *workercore.ModelDeployment) {
+					d.Spec.KVCache = &workercore.ModelDeploymentKVCache{PoolRef: core.LocalObjectReference{Name: "kv-pool"}}
+				}),
+				serverOnlyCM.DeepCopy(),
+				h100_1x.DeepCopy(),
+				h100_2x.DeepCopy(),
+			},
+			scaler:  pdScaler(),
+			wantErr: "servingConfig.offload",
 		},
 		{
 			name:        "missing target ModelDeployment admits PD scaler create with warning",

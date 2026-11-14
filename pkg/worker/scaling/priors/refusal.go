@@ -203,7 +203,11 @@ func servingConfigMismatch(want, got ServingConfig) []string {
 	}
 	appendIf("servingConfig.router", want.Router, got.Router)
 	appendIf("servingConfig.kvCacheDType", want.KVCacheDType, got.KVCacheDType)
-	appendIf("servingConfig.offload", want.Offload, got.Offload)
+	if got.Offload == "external" && want.Offload != "external" {
+		mismatched = append(mismatched, "servingConfig.offload")
+	} else {
+		appendIf("servingConfig.offload", want.Offload, got.Offload)
+	}
 	appendIf("servingConfig.prefixCaching", want.PrefixCaching, got.PrefixCaching)
 	appendIf("servingConfig.speculativeDecoding", want.SpeculativeDecoding, got.SpeculativeDecoding)
 	if conflicts := launchParameterConflicts(want, got); len(conflicts) > 0 {

@@ -20,6 +20,7 @@ import (
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
 	"gpustack.ai/gpustack/pkg/kubeclients/kubernetes/scheme"
 	"gpustack.ai/gpustack/pkg/worker/scaling/algorithm"
+	"gpustack.ai/gpustack/pkg/worker/scaling/priors"
 	"gpustack.ai/gpustack/pkg/worker/scaling/sim"
 )
 
@@ -556,179 +557,232 @@ func TestModelDeploymentScalerSimulationWholeUnitCausal(t *testing.T) {
 		{name: "predictive", predictive: true},
 	}
 
-	for _, topo := range topologies {
-		for _, alg := range algorithms {
-			for _, sc := range buildScenarios(topo.includeEncode) {
-				t.Run(fmt.Sprintf("%s/%s/%s", topo.name, alg.name, sc.name), func(t *testing.T) {
-					scaler, md, cm, instances := capacityPriorDisaggregatedFixture(t, topo.includeEncode)
-					scaler.Spec.Sampling = workercore.ModelDeploymentScalerSamplingSpec{
-						IntervalSeconds:       10,
-						PendingTimeoutSeconds: 60,
-					}
-					scaler.Spec.Behavior.ScaleDown.StabilizationWindowSeconds = 30
-					scaler.Spec.Behavior.ScaleDown.DecodePostScaleUpGraceSeconds = 10
-					scaler.Spec.Behavior.ScaleUp.StabilizationWindowSeconds = 0
-					scaler.Spec.Algorithm.TokenThroughput.StableWindowSeconds = 20
-					scaler.Spec.Algorithm.TokenThroughput.PanicWindowSeconds = 10
-					if alg.predictive {
-						scaler.Spec.Algorithm.Type = workercore.ModelDeploymentScalerAlgorithmTypePredictive
-						scaler.Spec.Algorithm.Predictive = &workercore.ModelDeploymentScalerPredictiveSpec{
-							TokenThroughput: *scaler.Spec.Algorithm.TokenThroughput.DeepCopy(),
-							HorizonSeconds:  20,
-							MinPoints:       2,
+	resolutionModes := []struct {
+		name     string
+		wantMode ModelDeploymentScalerPriorResolutionMode
+		populate bool
+	}{
+		{
+			name:     "priority1_disaggregated",
+			wantMode: ModelDeploymentScalerPriorModeDisaggregated,
+			populate: true,
+		},
+		{
+			name:     "priority2_aggregated_fallback",
+			wantMode: ModelDeploymentScalerPriorModeAggregatedFallback,
+			populate: false,
+		},
+	}
+
+	for _, resMode := range resolutionModes {
+		for _, topo := range topologies {
+			for _, alg := range algorithms {
+				for _, sc := range buildScenarios(topo.includeEncode) {
+					t.Run(fmt.Sprintf("%s/%s/%s/%s", resMode.name, topo.name, alg.name, sc.name), func(t *testing.T) {
+						scaler, md, cm, instances := capacityPriorDisaggregatedFixture(t, topo.includeEncode)
+						if resMode.populate {
+							disaggProf := capacityPriorDisaggregatedProfile(
+								md.Spec.Model.Name,
+								int(topo.unitVector["prefill"]), "nvidia-h100", 2,
+								int(topo.unitVector["decode"]), "nvidia-h200", 4,
+							)
+							boundary := topo.unitTargetTPS / priors.DefaultHeadroom
+							disaggProf.Points = nil
+							for i, tp := range []float64{0.5 * boundary, boundary, 1.2 * boundary} {
+								ttft, itl := 200.0, 20.0
+								if i == 2 {
+									ttft, itl = 800, 80
+								}
+								disaggProf.Points = append(disaggProf.Points, priors.PointDocument{
+									Concurrency:           i + 1,
+									TotalTokensPerSecond:  tp,
+									InputTokensPerSecond:  tp,
+									OutputTokensPerSecond: tp,
+									TTFTMilliseconds:      priors.LatencyQuantiles{"p95": ttft},
+									ITLMilliseconds:       priors.LatencyQuantiles{"p95": itl},
+								})
+							}
+							doc := capacityPriorReadCatalog(t, cm)
+							doc.Profiles = append(doc.Profiles, disaggProf)
+							capacityPriorWriteCatalog(t, cm, doc)
 						}
-						scaler.Spec.Algorithm.TokenThroughput = nil
-					}
+						scaler.Spec.Sampling = workercore.ModelDeploymentScalerSamplingSpec{
+							IntervalSeconds:       10,
+							PendingTimeoutSeconds: 60,
+						}
+						scaler.Spec.Behavior.ScaleDown.StabilizationWindowSeconds = 30
+						scaler.Spec.Behavior.ScaleDown.DecodePostScaleUpGraceSeconds = 10
+						scaler.Spec.Behavior.ScaleUp.StabilizationWindowSeconds = 0
+						scaler.Spec.Algorithm.TokenThroughput.StableWindowSeconds = 20
+						scaler.Spec.Algorithm.TokenThroughput.PanicWindowSeconds = 10
+						if alg.predictive {
+							scaler.Spec.Algorithm.Type = workercore.ModelDeploymentScalerAlgorithmTypePredictive
+							scaler.Spec.Algorithm.Predictive = &workercore.ModelDeploymentScalerPredictiveSpec{
+								TokenThroughput: *scaler.Spec.Algorithm.TokenThroughput.DeepCopy(),
+								HorizonSeconds:  20,
+								MinPoints:       2,
+							}
+							scaler.Spec.Algorithm.TokenThroughput = nil
+						}
 
-					objs := []ctrlcli.Object{md, scaler, cm}
-					for _, inst := range instances {
-						objs = append(objs, inst)
-					}
-					client := ctrlfake.NewClientBuilder().WithScheme(scheme.Scheme).
-						WithStatusSubresource(&workercore.ModelDeployment{}, &workercore.ModelDeploymentScaler{}, &core.Pod{}, &kueue.Workload{}).
-						WithObjects(objs...).Build()
+						objs := []ctrlcli.Object{md, scaler, cm}
+						for _, inst := range instances {
+							objs = append(objs, inst)
+						}
+						client := ctrlfake.NewClientBuilder().WithScheme(scheme.Scheme).
+							WithStatusSubresource(&workercore.ModelDeployment{}, &workercore.ModelDeploymentScaler{}, &core.Pod{}, &kueue.Workload{}).
+							WithObjects(objs...).Build()
 
-					fleets := make(map[string]*sim.Fleet, len(topo.unitVector))
-					roles := make([]string, 0, len(topo.unitVector))
-					for role, unit := range topo.unitVector {
-						roles = append(roles, role)
-						fleets[role] = sim.NewFleet(sim.FleetConfig{
-							Initial:           int(unit),
-							Quota:             int(unit * 4),
-							BootSeconds:       5,
-							RetirementSeconds: 20,
-						})
-					}
-					sort.Strings(roles)
-					plant := newCausalDisaggPlant(sc.cfg)
-
-					now := 0.0
-					clock := func() time.Time { return time.Unix(200000, 0).Add(time.Duration(now * float64(time.Second))) }
-					r := &ModelDeploymentScalerReconciler{
-						Client:  client,
-						clock:   clock,
-						sampler: &modelDeploymentScalerSampler{Clock: clock},
-					}
-					r.sampler.Scrape = func(_ context.Context, pod *core.Pod) ([]byte, error) {
-						role := modelDeploymentPodRole(pod)
-						ordinal, err := strconv.Atoi(pod.Labels[modelDeploymentReplicaOrdinalLabel])
+						resolved, err := ResolveModelDeploymentScalerCapacityPriors(context.Background(), client, scaler, md)
 						if err != nil {
-							return nil, err
+							t.Fatalf("ResolveModelDeploymentScalerCapacityPriors failed: %v", err)
 						}
-						return plant.exposition(role, ordinal)
-					}
-
-					aborted := false
-					grew := false
-					sawLatencyGuard := false
-					maxObservedTPS := 0.0
-					var sawRetirementHold bool
-					var trace []string
-
-					for tick := 0; tick <= 480; tick++ {
-						now = float64(tick)
-						for _, role := range roles {
-							fleet := fleets[role]
-							fleet.Advance(now)
-							plant.retain(role, fleet.Ordinals())
+						if resolved.Mode != resMode.wantMode {
+							t.Fatalf("resolved.Mode = %q, want %q", resolved.Mode, resMode.wantMode)
 						}
-						var readyE []int
-						if topo.includeEncode {
-							readyE = fleets["encode"].Ready()
-						}
-						plant.step(now, 1.0, readyE, fleets["prefill"].Ready(), fleets["decode"].Ready())
 
-						if tick%10 == 0 {
+						fleets := make(map[string]*sim.Fleet, len(topo.unitVector))
+						roles := make([]string, 0, len(topo.unitVector))
+						for role, unit := range topo.unitVector {
+							roles = append(roles, role)
+							fleets[role] = sim.NewFleet(sim.FleetConfig{
+								Initial:           int(unit),
+								Quota:             int(unit * 4),
+								BootSeconds:       5,
+								RetirementSeconds: 20,
+							})
+						}
+						sort.Strings(roles)
+						plant := newCausalDisaggPlant(sc.cfg)
+
+						now := 0.0
+						clock := func() time.Time { return time.Unix(200000, 0).Add(time.Duration(now * float64(time.Second))) }
+						r := &ModelDeploymentScalerReconciler{
+							Client:  client,
+							clock:   clock,
+							sampler: &modelDeploymentScalerSampler{Clock: clock},
+						}
+						r.sampler.Scrape = func(_ context.Context, pod *core.Pod) ([]byte, error) {
+							role := modelDeploymentPodRole(pod)
+							ordinal, err := strconv.Atoi(pod.Labels[modelDeploymentReplicaOrdinalLabel])
+							if err != nil {
+								return nil, err
+							}
+							return plant.exposition(role, ordinal)
+						}
+
+						aborted := false
+						grew := false
+						sawLatencyGuard := false
+						maxObservedTPS := 0.0
+						var sawRetirementHold bool
+						var trace []string
+
+						for tick := 0; tick <= 480; tick++ {
+							now = float64(tick)
 							for _, role := range roles {
-								syncScalerSimulationRole(t, client, fleets[role], role, false, &aborted)
+								fleet := fleets[role]
+								fleet.Advance(now)
+								plant.retain(role, fleet.Ordinals())
 							}
-							before := scalerTestGetDeployment(t, client)
-							retiringBefore := before.Status.Retirement != nil &&
-								before.Status.Retirement.State == workercore.ModelDeploymentRetirementStateDraining
+							var readyE []int
+							if topo.includeEncode {
+								readyE = fleets["encode"].Ready()
+							}
+							plant.step(now, 1.0, readyE, fleets["prefill"].Ready(), fleets["decode"].Ready())
 
-							reconcileScaler(t, r, scaler.Name)
-
-							after := scalerTestGetDeployment(t, client)
-							afterVec := deploymentReplicaVector(after)
-							kAfter, ok := wholeUnitMultiplier(after.Spec.Roles, topo.unitVector)
-							if !ok || kAfter < 1 {
-								t.Fatalf("whole-unit invariant violated at t=%.0fs: vector=%v unit=%v", now, afterVec, topo.unitVector)
-							}
-							if kAfter >= 2 {
-								grew = true
-							}
-							beforeVec := deploymentReplicaVector(before)
-							if retiringBefore {
-								sawRetirementHold = true
+							if tick%10 == 0 {
 								for _, role := range roles {
-									if afterVec[role] < beforeVec[role] {
-										t.Fatalf("scale-down happened during active retirement at t=%.0fs: %v -> %v", now, beforeVec, afterVec)
+									syncScalerSimulationRole(t, client, fleets[role], role, false, &aborted)
+								}
+								before := scalerTestGetDeployment(t, client)
+								retiringBefore := before.Status.Retirement != nil &&
+									before.Status.Retirement.State == workercore.ModelDeploymentRetirementStateDraining
+
+								reconcileScaler(t, r, scaler.Name)
+
+								after := scalerTestGetDeployment(t, client)
+								afterVec := deploymentReplicaVector(after)
+								kAfter, ok := wholeUnitMultiplier(after.Spec.Roles, topo.unitVector)
+								if !ok || kAfter < 1 {
+									t.Fatalf("whole-unit invariant violated at t=%.0fs: vector=%v unit=%v", now, afterVec, topo.unitVector)
+								}
+								if kAfter >= 2 {
+									grew = true
+								}
+								beforeVec := deploymentReplicaVector(before)
+								if retiringBefore {
+									sawRetirementHold = true
+									for _, role := range roles {
+										if afterVec[role] < beforeVec[role] {
+											t.Fatalf("scale-down happened during active retirement at t=%.0fs: %v -> %v", now, beforeVec, afterVec)
+										}
 									}
 								}
-							}
 
-							curScaler := scalerTestGetScaler(t, client, scaler.Name)
-							var pTPS, dTPS float64
-							var dReason string
-							for _, rs := range curScaler.Status.Roles {
-								if rs.Name == "prefill" && rs.PromptTokensPerSecond != nil {
-									pTPS = rs.PromptTokensPerSecond.AsApproximateFloat64()
-								}
-								if rs.Name == "decode" {
-									dReason = rs.Reason
-									if rs.GenerationTokensPerSecond != nil {
-										dTPS = rs.GenerationTokensPerSecond.AsApproximateFloat64()
+								curScaler := scalerTestGetScaler(t, client, scaler.Name)
+								var pTPS, dTPS float64
+								var dReason string
+								for _, rs := range curScaler.Status.Roles {
+									if rs.Name == "prefill" && rs.PromptTokensPerSecond != nil {
+										pTPS = rs.PromptTokensPerSecond.AsApproximateFloat64()
+									}
+									if rs.Name == "decode" {
+										dReason = rs.Reason
+										if rs.GenerationTokensPerSecond != nil {
+											dTPS = rs.GenerationTokensPerSecond.AsApproximateFloat64()
+										}
+									}
+									if rs.Reason == algorithm.ReasonLatencyGuardScaleUp {
+										sawLatencyGuard = true
 									}
 								}
-								if rs.Reason == algorithm.ReasonLatencyGuardScaleUp {
-									sawLatencyGuard = true
+								if !scalerTestVectorsEqual(beforeVec, afterVec) {
+									trace = append(trace, fmt.Sprintf("t=%.0f:%v->%v(%s)", now, beforeVec, afterVec, dReason))
+								}
+								if tick%60 == 0 {
+									trace = append(trace, fmt.Sprintf("t=%.0f:%v[ret=%v,reason=%s,tps=%.0f]", now, afterVec, retiringBefore, dReason, pTPS+dTPS))
+								}
+								if totalTPS := pTPS + dTPS; totalTPS > maxObservedTPS {
+									maxObservedTPS = totalTPS
+								}
+
+								for _, role := range roles {
+									fleets[role].SetDesired(int(afterVec[role]), now)
 								}
 							}
-							if !scalerTestVectorsEqual(beforeVec, afterVec) {
-								trace = append(trace, fmt.Sprintf("t=%.0f:%v->%v(%s)", now, beforeVec, afterVec, dReason))
-							}
-							if tick%60 == 0 {
-								trace = append(trace, fmt.Sprintf("t=%.0f:%v[ret=%v,reason=%s,tps=%.0f]", now, afterVec, retiringBefore, dReason, pTPS+dTPS))
-							}
-							if totalTPS := pTPS + dTPS; totalTPS > maxObservedTPS {
-								maxObservedTPS = totalTPS
-							}
+						}
 
-							for _, role := range roles {
-								fleets[role].SetDesired(int(afterVec[role]), now)
+						if !grew {
+							t.Fatalf("whole-unit simulation never scaled up to >=2x; trace=%v", trace)
+						}
+						if !sawRetirementHold {
+							t.Fatalf("expected retirement hold window during 2x -> 1x scale-down; trace=%v", trace)
+						}
+						if sc.expectLatencyGuard {
+							if !sawLatencyGuard {
+								t.Fatalf("expected LatencyGuardScaleUp reason under %s bottleneck", sc.name)
+							}
+							if maxObservedTPS >= topo.unitTargetTPS {
+								t.Fatalf("expected bottlenecked total TPS (%.1f) to remain below C_unit (%.1f)", maxObservedTPS, topo.unitTargetTPS)
 							}
 						}
-					}
-
-					if !grew {
-						t.Fatalf("whole-unit simulation never scaled up to >=2x; trace=%v", trace)
-					}
-					if !sawRetirementHold {
-						t.Fatalf("expected retirement hold window during 2x -> 1x scale-down; trace=%v", trace)
-					}
-					if sc.expectLatencyGuard {
-						if !sawLatencyGuard {
-							t.Fatalf("expected LatencyGuardScaleUp reason under %s bottleneck", sc.name)
+						finalMD := scalerTestGetDeployment(t, client)
+						finalVec := deploymentReplicaVector(finalMD)
+						for role, unit := range topo.unitVector {
+							if finalVec[role] != unit {
+								t.Fatalf("final %s replicas = %d, want %d (full vector %v)", role, finalVec[role], unit, finalVec)
+							}
+							if len(fleets[role].Ready()) != int(unit) || len(fleets[role].Replicas()) != int(unit) {
+								t.Fatalf("role %s fleet did not settle to %d: ready=%v all=%+v", role, unit, fleets[role].Ready(), fleets[role].Replicas())
+							}
 						}
-						if maxObservedTPS >= topo.unitTargetTPS {
-							t.Fatalf("expected bottlenecked total TPS (%.1f) to remain below C_unit (%.1f)", maxObservedTPS, topo.unitTargetTPS)
+						finalScaler := scalerTestGetScaler(t, client, scaler.Name)
+						if finalScaler.Status.LastScaleDown != nil {
+							t.Fatalf("expected Committed LastScaleDown to clear after retirement completion, got %+v", finalScaler.Status.LastScaleDown)
 						}
-					}
-					finalMD := scalerTestGetDeployment(t, client)
-					finalVec := deploymentReplicaVector(finalMD)
-					for role, unit := range topo.unitVector {
-						if finalVec[role] != unit {
-							t.Fatalf("final %s replicas = %d, want %d (full vector %v)", role, finalVec[role], unit, finalVec)
-						}
-						if len(fleets[role].Ready()) != int(unit) || len(fleets[role].Replicas()) != int(unit) {
-							t.Fatalf("role %s fleet did not settle to %d: ready=%v all=%+v", role, unit, fleets[role].Ready(), fleets[role].Replicas())
-						}
-					}
-					finalScaler := scalerTestGetScaler(t, client, scaler.Name)
-					if finalScaler.Status.LastScaleDown != nil {
-						t.Fatalf("expected Committed LastScaleDown to clear after retirement completion, got %+v", finalScaler.Status.LastScaleDown)
-					}
-				})
+					})
+				}
 			}
 		}
 	}

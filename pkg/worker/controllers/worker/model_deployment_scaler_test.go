@@ -1466,6 +1466,23 @@ func TestModelDeploymentScalerWholeUnitObservationAndPanicExpiry(t *testing.T) {
 				wantReason:         algorithm.ReasonWaitingForMetrics,
 			},
 			{
+				name:               "single-side TTFT latency guard hold with decode throughput missing",
+				pThroughput:        algorithm.SignalFresh,
+				dThroughput:        algorithm.SignalMissing,
+				pLatency:           algorithm.SignalFresh,
+				dLatency:           algorithm.SignalMissing,
+				pTTFT:              550,
+				dITLUnmeasured:     true,
+				pComplete:          true,
+				dComplete:          false,
+				wantThroughput:     algorithm.SignalMissing,
+				wantLatency:        algorithm.SignalFresh,
+				wantTTFTUnmeasured: false,
+				wantITLUnmeasured:  true,
+				wantMetricsReady:   false,
+				wantReason:         algorithm.ReasonLatencyGuardHold,
+			},
+			{
 				name:               "single-side TTFT fresh breach with ITL missing",
 				pThroughput:        algorithm.SignalFresh,
 				dThroughput:        algorithm.SignalMissing,
@@ -1556,6 +1573,9 @@ func TestModelDeploymentScalerWholeUnitObservationAndPanicExpiry(t *testing.T) {
 				}
 				if metricsReady != tc.wantMetricsReady {
 					t.Fatalf("metricsReady = %v, want %v", metricsReady, tc.wantMetricsReady)
+				}
+				if gotReason := algByRole["prefill"].Reason; gotReason != tc.wantReason {
+					t.Fatalf("prefill reason = %q, want %q", gotReason, tc.wantReason)
 				}
 				if gotReason := algByRole["decode"].Reason; gotReason != tc.wantReason {
 					t.Fatalf("decode reason = %q, want %q", gotReason, tc.wantReason)
@@ -1735,6 +1755,85 @@ func TestModelDeploymentScalerWholeUnitObservationAndPanicExpiry(t *testing.T) {
 					}
 				}
 			})
+		}
+	})
+
+	t.Run("3P:4D extreme demand ratio clamps before unit multiplication and scales up", func(t *testing.T) {
+		scaler := newWholeUnitScaler(false)
+		scaler.Spec.Roles = []workercore.ModelDeploymentScalerRoleBounds{
+			{Name: "prefill", MinReplicas: 3, MaxReplicas: 12},
+			{Name: "decode", MinReplicas: 4, MaxReplicas: 16},
+		}
+		scaler.Spec.Ratios = []workercore.ModelDeploymentScalerRoleRatio{{
+			NumeratorRole:   "decode",
+			DenominatorRole: "prefill",
+			Min:             quantityPointer("1333m"),
+			Max:             quantityPointer("1334m"),
+		}}
+		md := scalerTestDeployment("target", "target-uid", map[string]int32{"prefill": 6, "decode": 8})
+		md.Spec.Engine = workercore.ModelDeploymentEngine{Name: workercore.ModelDeploymentEngineVLLM}
+		md.Spec.Roles[0].Kind = workercore.ModelDeploymentRoleKindPrefill
+		md.Spec.Roles[1].Kind = workercore.ModelDeploymentRoleKindDecode
+		md.Annotations = map[string]string{
+			workercore.ModelDeploymentScalerBindingAnnotationKey: scalerTestBindingJSON(scaler, 1),
+		}
+
+		resolved := &ModelDeploymentScalerCapacityPriors{
+			Mode: ModelDeploymentScalerPriorModeDisaggregated,
+			Algorithms: map[string]workercore.ModelDeploymentScalerAlgorithmSpec{
+				"prefill": {},
+				"decode":  scaler.Spec.Algorithm,
+			},
+			WholeUnit: &ModelDeploymentScalerWholeUnitPrior{
+				UnitVector:                map[string]int32{"prefill": 3, "decode": 4},
+				PrefillRole:               "prefill",
+				DecodeRole:                "decode",
+				UnitTargetTokensPerSecond: 1e-9,
+				MinUnits:                  1,
+				MaxUnits:                  4,
+			},
+		}
+
+		cli := scalerTestClient(t, md, scaler)
+		r := scalerTestReconciler(cli, t0)
+		obs := map[string]algorithm.RoleObservation{
+			"prefill": {
+				Role: "prefill", Kind: algorithm.RoleKindPrefill,
+				CurrentReplicas: 6, ReadyReplicas: 6,
+				PromptTokensPerSecond: 1.073741825, TTFTMilliseconds: 100,
+				ThroughputState: algorithm.SignalFresh, LatencyState: algorithm.SignalFresh,
+				CompleteCoverage: true, ObservedAt: t0,
+			},
+			"decode": {
+				Role: "decode", Kind: algorithm.RoleKindDecode,
+				CurrentReplicas: 8, ReadyReplicas: 8,
+				GenerationTokensPerSecond: 0, ITLMilliseconds: 10,
+				ThroughputState: algorithm.SignalFresh, LatencyState: algorithm.SignalFresh,
+				CompleteCoverage: true, ObservedAt: t0,
+			},
+		}
+
+		algByRole, _, roleStates, _, _, _, err := r.planWholeUnitStates(
+			scaler, md, resolved, obs, nil, 2, t0,
+		)
+		if err != nil {
+			t.Fatalf("planWholeUnitStates error = %v", err)
+		}
+		pRaw := algByRole["prefill"].DesiredReplicas
+		dRaw := algByRole["decode"].DesiredReplicas
+		if pRaw <= 0 || dRaw <= 0 || pRaw%3 != 0 || dRaw%4 != 0 || pRaw/3 != dRaw/4 {
+			t.Fatalf("expected positive proportional raw replicas, got prefill=%d decode=%d", pRaw, dRaw)
+		}
+
+		constraint := SolveModelDeploymentScalerConstraints(ModelDeploymentScalerConstraintInput{
+			Spec:      scaler.Spec,
+			Roles:     roleStates,
+			WholeUnit: resolved.WholeUnit.UnitVector,
+			Now:       t0,
+		})
+		if constraint.Replicas["prefill"] != 12 || constraint.Replicas["decode"] != 16 {
+			t.Fatalf("expected scale up from 6P:8D toward MaxUnits=4 (12P:16D), got %#v (blocking=%q)",
+				constraint.Replicas, constraint.BlockingReason)
 		}
 	})
 }

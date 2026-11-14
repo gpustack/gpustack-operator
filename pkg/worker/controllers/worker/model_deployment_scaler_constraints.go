@@ -235,7 +235,7 @@ func stepAmount(current int32, policy v1alpha1.ModelDeploymentScalerStepPolicy) 
 		return 0
 	}
 	if policy.Type == v1alpha1.ModelDeploymentScalerStepPolicyTypePercent {
-		return int32(math.Ceil(float64(current) * float64(policy.Value) / 100))
+		return clampPositiveCeilFloatToInt32(float64(current) * float64(policy.Value) / 100)
 	}
 	return policy.Value
 }
@@ -654,6 +654,42 @@ func minInt32(a, b int32) int32 {
 	return b
 }
 
+func clampInt64ToInt32(v int64) int32 {
+	if v > math.MaxInt32 {
+		return math.MaxInt32
+	}
+	if v < math.MinInt32 {
+		return math.MinInt32
+	}
+	return int32(v)
+}
+
+func ceilDivInt32(num, denom int32) int32 {
+	if num <= 0 || denom <= 0 {
+		return 0
+	}
+	return clampInt64ToInt32((int64(num) + int64(denom) - 1) / int64(denom))
+}
+
+func addClampInt32(a, b int32) int32 {
+	return clampInt64ToInt32(int64(a) + int64(b))
+}
+
+func checkedMulInt32(a, b int32) int32 {
+	return clampInt64ToInt32(int64(a) * int64(b))
+}
+
+func clampPositiveCeilFloatToInt32(value float64) int32 {
+	if math.IsNaN(value) || value <= 0 {
+		return 0
+	}
+	ceiled := math.Ceil(value)
+	if ceiled >= float64(math.MaxInt32) {
+		return math.MaxInt32
+	}
+	return int32(ceiled)
+}
+
 func wholeUnitCurrentMultiplier(
 	roles []ModelDeploymentScalerRoleState,
 	states map[string]ModelDeploymentScalerRoleState,
@@ -706,7 +742,7 @@ func wholeUnitRawTarget(
 		raw := role.RawRecommendedReplicas
 		k := int32(1)
 		if raw > 0 {
-			k = (raw + unit - 1) / unit
+			k = ceilDivInt32(raw, unit)
 		}
 		if raw > role.CurrentReplicas {
 			anyUp = true
@@ -753,7 +789,7 @@ func applyWholeUnitStepLimit(
 	if up.StepPolicy == nil && up.MaxStepReplicas == 0 && up.MaxStepPercent == 0 {
 		for name, unit := range wholeUnit {
 			current := states[name].CurrentReplicas
-			delta := maxInt32(4, int32(math.Ceil(float64(current)*100/100)))
+			delta := maxInt32(4, clampPositiveCeilFloatToInt32(float64(current)*100/100))
 			unitUpCap = minInt32(unitUpCap, delta/unit)
 		}
 		unitUpCap = maxInt32(1, unitUpCap)
@@ -768,13 +804,13 @@ func applyWholeUnitStepLimit(
 					delta = maxInt32(delta, up.MaxStepReplicas)
 				}
 				if up.MaxStepPercent > 0 {
-					delta = maxInt32(delta, int32(math.Ceil(float64(current)*float64(up.MaxStepPercent)/100)))
+					delta = maxInt32(delta, clampPositiveCeilFloatToInt32(float64(current)*float64(up.MaxStepPercent)/100))
 				}
 			}
 			unitUpCap = minInt32(unitUpCap, delta/unit)
 		}
 	}
-	kCeil := clamp(kCur+unitUpCap, kCur, kMax)
+	kCeil := clamp(addClampInt32(kCur, unitUpCap), kCur, kMax)
 
 	down := behavior.ScaleDown
 	unitDownCap := int32(1)
@@ -785,7 +821,7 @@ func applyWholeUnitStepLimit(
 			unitDownCap = minInt32(unitDownCap, delta/unit)
 		}
 	}
-	kFloor := maxInt32(kCur-unitDownCap, kMin)
+	kFloor := maxInt32(clampInt64ToInt32(int64(kCur)-int64(unitDownCap)), kMin)
 	return kFloor, kCeil
 }
 
@@ -810,7 +846,7 @@ func solveWholeUnitConstraints(
 			return result
 		}
 		unit := input.WholeUnit[role.Name]
-		kMin = maxInt32(kMin, (minimum+unit-1)/unit)
+		kMin = maxInt32(kMin, ceilDivInt32(minimum, unit))
 		kMax = minInt32(kMax, maximum/unit)
 	}
 	if kMin > kMax {
@@ -855,7 +891,7 @@ func solveWholeUnitConstraints(
 		for i, sample := range hist {
 			units := int32(0)
 			if sample.Replicas > 0 {
-				units = (sample.Replicas + unit - 1) / unit
+				units = ceilDivInt32(sample.Replicas, unit)
 			}
 			unitHist[i] = v1alpha1.ModelDeploymentScalerStabilizationSample{
 				Timestamp: sample.Timestamp,
@@ -902,10 +938,10 @@ func solveWholeUnitConstraints(
 	for _, role := range input.Roles {
 		unit := input.WholeUnit[role.Name]
 		result.Intervals[role.Name] = ModelDeploymentScalerReplicaInterval{
-			Floor: kFloor * unit,
-			Ceil:  kCeil * unit,
+			Floor: checkedMulInt32(kFloor, unit),
+			Ceil:  checkedMulInt32(kCeil, unit),
 		}
-		result.Replicas[role.Name] = kFinal * unit
+		result.Replicas[role.Name] = checkedMulInt32(kFinal, unit)
 	}
 	if kFinal == kCur && kRaw != kCur {
 		result.BlockingReason = v1alpha1.ModelDeploymentScalerReasonPacingBounded
