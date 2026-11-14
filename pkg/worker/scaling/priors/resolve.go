@@ -456,11 +456,13 @@ func (c *Catalog) selectProfileByShape(want Shape) (Profile, *RefusalError) {
 
 	switch len(matched) {
 	case 0:
-		return Profile{}, newRefusal(
+		refusal := newRefusal(
 			RefusalCapacityPriorUnresolved,
 			fmt.Sprintf("no catalog profile matches the deployment shape %s", want),
 			map[string]string{"mode": string(want.Mode), "shape": want.String()},
 		)
+		refusal.profileNotFound = true
+		return Profile{}, refusal
 	case 1:
 		return matched[0], nil
 	default:
@@ -484,8 +486,7 @@ func IsProfileNotFound(err error) bool {
 	if !errors.As(err, &refusal) || refusal == nil {
 		return false
 	}
-	return refusal.Reason == RefusalCapacityPriorUnresolved &&
-		strings.HasPrefix(refusal.Message, "no catalog profile matches the deployment shape ")
+	return refusal.Reason == RefusalCapacityPriorUnresolved && refusal.profileNotFound
 }
 
 // profileMismatches returns the fields a profile and a request disagree on.

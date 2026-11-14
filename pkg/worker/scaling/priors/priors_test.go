@@ -331,6 +331,20 @@ func TestIsProfileNotFound(t *testing.T) {
 		{name: "non-refusal error", err: errors.New("boom"), want: false},
 		{name: "resolve zero match", err: zeroMatchResolveErr, want: true},
 		{name: "select zero match", err: zeroMatchSelectErr, want: true},
+		{
+			name: "zero match with reworded message stays classified as not found",
+			err: &RefusalError{
+				Reason:          RefusalCapacityPriorUnresolved,
+				Message:         "custom message text",
+				profileNotFound: true,
+			},
+			want: true,
+		},
+		{
+			name: "matching message prefix without profileNotFound flag is not classified as not found",
+			err:  newRefusal(RefusalCapacityPriorUnresolved, "no catalog profile matches the deployment shape synthetic", nil),
+			want: false,
+		},
 		{name: "wrapped zero match", err: fmt.Errorf("probe prefill: %w", zeroMatchResolveErr), want: true},
 		{name: "ambiguous match", err: ambigErr, want: false},
 		{name: "identity mismatch", err: mismatchErr, want: false},

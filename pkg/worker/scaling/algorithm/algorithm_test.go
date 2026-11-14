@@ -621,3 +621,56 @@ func TestTokenThroughputAndPredictiveExtremeDemandClamp(t *testing.T) {
 		t.Fatalf("Predictive DesiredReplicas = %d, want %d", recPred.DesiredReplicas, math.MaxInt32)
 	}
 }
+
+func TestTokenThroughputAndPredictiveNonFiniteDemandHoldsCurrentReplicas(t *testing.T) {
+	base := time.Unix(300, 0)
+	tt := TokenThroughput{
+		ServerTargetTokensPerSecond: 100,
+	}
+	pred := Predictive{
+		TokenThroughput:               tt,
+		ServerTokenCapacityPerReplica: 100,
+		HorizonSeconds:                60,
+		MinPoints:                     2,
+	}
+
+	for _, nonFinite := range []float64{math.NaN(), math.Inf(1), math.Inf(-1)} {
+		obs := freshObservation(base)
+		obs.Kind = RoleKindServer
+		obs.CurrentReplicas = 4
+		obs.ReadyReplicas = 4
+		obs.PromptTokensPerSecond = nonFinite
+		obs.GenerationTokensPerSecond = 20
+
+		recTT, stateTT := tt.Recommend(obs, nil)
+		if recTT.DesiredReplicas != 4 || !recTT.HoldScaleDown || recTT.Reason != ReasonWaitingForMetrics {
+			t.Fatalf("TokenThroughput(%v) = %#v, want DesiredReplicas=4 HoldScaleDown=true Reason=WaitingForMetrics", nonFinite, recTT)
+		}
+		if stateTT != nil && stateTT.History != nil && stateTT.History.Len() != 0 {
+			t.Fatalf("TokenThroughput(%v) recorded non-finite sample in history: len=%d", nonFinite, stateTT.History.Len())
+		}
+
+		recPred, statePred := pred.Recommend(obs, nil)
+		if recPred.DesiredReplicas != 4 || !recPred.HoldScaleDown || recPred.Reason != ReasonWaitingForMetrics {
+			t.Fatalf("Predictive(%v) = %#v, want DesiredReplicas=4 HoldScaleDown=true Reason=WaitingForMetrics", nonFinite, recPred)
+		}
+		if statePred.SampleCount != 0 {
+			t.Fatalf("Predictive(%v) advanced SampleCount on non-finite input: %d", nonFinite, statePred.SampleCount)
+		}
+	}
+
+	// A corrupted NaN sample in prior history is skipped rather than poisoning windowMean into a 1-replica scale-down.
+	history := NewDemandHistory()
+	history.Push(DemandSample{Timestamp: base.Add(-15 * time.Second), TokensPerSecond: math.NaN()})
+	prior := &PredictorState{History: history}
+	validObs := freshObservation(base)
+	validObs.Kind = RoleKindServer
+	validObs.CurrentReplicas = 4
+	validObs.ReadyReplicas = 4
+	validObs.PromptTokensPerSecond = 250
+	validObs.GenerationTokensPerSecond = 100
+	recAfterCorruptHistory, _ := tt.Recommend(validObs, prior)
+	if recAfterCorruptHistory.DesiredReplicas != 4 {
+		t.Fatalf("corrupted NaN history sample skewed recommendation: got %#v, want DesiredReplicas=4", recAfterCorruptHistory)
+	}
+}

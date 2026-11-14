@@ -44,7 +44,7 @@ func (t TokenThroughput) Recommend(obs RoleObservation, prior *PredictorState) (
 		rec.Reason = ReasonWaitingForMetrics
 		return rec, &state
 	}
-	if !signalUsable(obs.ThroughputState) {
+	if !signalUsable(obs.ThroughputState) || !t.demandFinite(obs) {
 		latencyRec, latencyReason, _ := t.latencyGuard(obs)
 		switch latencyReason {
 		case ReasonLatencyGuardScaleUp:
@@ -162,15 +162,32 @@ func (t TokenThroughput) demand(obs RoleObservation) float64 {
 	}
 }
 
+func (t TokenThroughput) demandFinite(obs RoleObservation) bool {
+	switch roleKind(obs) {
+	case RoleKindPrefill:
+		return isFiniteFloat64(obs.PromptTokensPerSecond)
+	case RoleKindDecode:
+		return isFiniteFloat64(obs.GenerationTokensPerSecond)
+	case RoleKindServer:
+		return isFiniteFloat64(obs.PromptTokensPerSecond) && isFiniteFloat64(obs.GenerationTokensPerSecond)
+	default:
+		return true
+	}
+}
+
+func isFiniteFloat64(value float64) bool {
+	return !math.IsNaN(value) && !math.IsInf(value, 0)
+}
+
 func nonNegative(value float64) float64 {
-	if value < 0 || math.IsNaN(value) {
+	if value < 0 || !isFiniteFloat64(value) {
 		return 0
 	}
 	return value
 }
 
 func desiredFromDemand(demand, target float64) int32 {
-	if demand <= 0 {
+	if !isFiniteFloat64(demand) || !isFiniteFloat64(target) || demand <= 0 || target <= 0 {
 		return 1
 	}
 	return clampPositiveCeilInt32(demand / target)
@@ -278,7 +295,8 @@ func windowMean(history *datax.RingBuffer[DemandSample], now time.Time, window t
 		if !ok {
 			break
 		}
-		if !sample.Timestamp.IsZero() && !sample.Timestamp.Before(cutoff) && !sample.Timestamp.After(now) {
+		if !sample.Timestamp.IsZero() && !sample.Timestamp.Before(cutoff) && !sample.Timestamp.After(now) &&
+			isFiniteFloat64(sample.TokensPerSecond) {
 			sum += sample.TokensPerSecond
 			count++
 		}

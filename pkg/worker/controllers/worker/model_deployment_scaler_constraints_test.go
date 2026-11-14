@@ -620,4 +620,33 @@ func TestScalerConstraintsWholeUnitOverflowSaturation(t *testing.T) {
 			t.Fatalf("expected RatioConflict, got %q (replicas=%#v)", res.BlockingReason, res.Replicas)
 		}
 	})
+
+	t.Run("non-divisible current vector with WholeUnit blocks as RatioConflict instead of per-role fallback", func(t *testing.T) {
+		spec := constraintSpec("prefill", "decode")
+		spec.Roles = []v1alpha1.ModelDeploymentScalerRoleBounds{
+			{Name: "prefill", MinReplicas: 1, MaxReplicas: 12},
+			{Name: "decode", MinReplicas: 1, MaxReplicas: 16},
+		}
+		p := roleState("prefill", 2, 6)
+		p.Kind = algorithm.RoleKindPrefill
+		d := roleState("decode", 5, 10)
+		d.Kind = algorithm.RoleKindDecode
+
+		res := SolveModelDeploymentScalerConstraints(ModelDeploymentScalerConstraintInput{
+			Spec:      spec,
+			Roles:     []ModelDeploymentScalerRoleState{p, d},
+			WholeUnit: map[string]int32{"prefill": 1, "decode": 3},
+			Now:       now,
+		})
+		if res.BlockingReason != v1alpha1.ModelDeploymentScalerReasonRatioConflict {
+			t.Fatalf("expected RatioConflict, got %q", res.BlockingReason)
+		}
+		if res.Replicas["prefill"] != 2 || res.Replicas["decode"] != 5 {
+			t.Fatalf("expected current vector held at 2P:5D, got %#v", res.Replicas)
+		}
+		if res.Reasons["prefill"] != v1alpha1.ModelDeploymentScalerReasonRatioConflict ||
+			res.Reasons["decode"] != v1alpha1.ModelDeploymentScalerReasonRatioConflict {
+			t.Fatalf("expected RatioConflict reason on every role, got %#v", res.Reasons)
+		}
+	})
 }

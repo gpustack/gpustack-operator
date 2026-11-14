@@ -13,10 +13,12 @@ import (
 )
 
 const (
-	modelDeploymentScalerDefaultScaleDownWindow = 5 * time.Minute
-	modelDeploymentScalerDefaultDecodeGrace     = 2 * time.Minute
-	modelDeploymentScalerRatioEpsilon           = 1e-9
-	modelDeploymentScalerConstraintSearchBudget = 1 << 14
+	modelDeploymentScalerDefaultScaleDownWindow       = 5 * time.Minute
+	modelDeploymentScalerDefaultDecodeGrace           = 2 * time.Minute
+	modelDeploymentScalerDefaultMaxStepReplicas int32 = 4
+	modelDeploymentScalerDefaultMaxStepPercent  int32 = 100
+	modelDeploymentScalerRatioEpsilon                 = 1e-9
+	modelDeploymentScalerConstraintSearchBudget       = 1 << 14
 )
 
 // ModelDeploymentScalerRoleState supplies the current and unconstrained state for one role.
@@ -98,8 +100,16 @@ func SolveModelDeploymentScalerConstraints(input ModelDeploymentScalerConstraint
 		return result
 	}
 
-	if kCur, ok := wholeUnitCurrentMultiplier(input.Roles, states, input.WholeUnit); ok {
-		return solveWholeUnitConstraints(input, states, bounds, kCur, result)
+	if len(input.WholeUnit) > 0 {
+		if kCur, ok := wholeUnitCurrentMultiplier(input.Roles, states, input.WholeUnit); ok {
+			return solveWholeUnitConstraints(input, states, bounds, kCur, result)
+		} else if len(input.Spec.Ratios) == 0 {
+			result.BlockingReason = v1alpha1.ModelDeploymentScalerReasonRatioConflict
+			for _, role := range input.Roles {
+				result.Reasons[role.Name] = result.BlockingReason
+			}
+			return result
+		}
 	}
 
 	roleNames := make([]string, 0, len(input.Roles))
@@ -170,26 +180,8 @@ func roleInterval(
 	}
 	current := clamp(role.CurrentReplicas, minimum, maximum)
 
-	var ceil int32
 	up := input.Spec.Behavior.ScaleUp
-	if up.StepPolicy != nil {
-		ceil = current + stepAmount(current, *up.StepPolicy)
-	} else {
-		pods, percent := int32(0), int32(0)
-		if up.MaxStepReplicas == 0 && up.MaxStepPercent == 0 {
-			pods, percent = 4, 100
-		} else {
-			pods, percent = up.MaxStepReplicas, up.MaxStepPercent
-		}
-		ceil = current
-		if pods > 0 {
-			ceil = maxInt32(ceil, current+pods)
-		}
-		if percent > 0 {
-			ceil = maxInt32(ceil, current+int32(math.Ceil(float64(current)*float64(percent)/100)))
-		}
-	}
-	ceil = clamp(ceil, current, maximum)
+	ceil := clamp(addClampInt32(current, scaleUpStepDelta(current, up)), current, maximum)
 	if role.HasPendingUnadmittedWorkload {
 		ceil = minInt32(ceil, current)
 	}
@@ -228,6 +220,28 @@ func roleInterval(
 		floor = maxInt32(floor, current)
 	}
 	return clamp(floor, minimum, maximum), clamp(ceil, minimum, maximum)
+}
+
+// scaleUpStepDelta returns the maximum single-step replica increase permitted for a role at
+// current replicas under up, applying the ModelDeploymentScalerScaleUpRules defaults (4 replicas
+// or 100% of current) when neither StepPolicy nor explicit MaxStep bounds are set.
+func scaleUpStepDelta(current int32, up v1alpha1.ModelDeploymentScalerScaleUpRules) int32 {
+	if up.StepPolicy != nil {
+		return stepAmount(current, *up.StepPolicy)
+	}
+	pods, percent := up.MaxStepReplicas, up.MaxStepPercent
+	if pods == 0 && percent == 0 {
+		pods = modelDeploymentScalerDefaultMaxStepReplicas
+		percent = modelDeploymentScalerDefaultMaxStepPercent
+	}
+	var delta int32
+	if pods > 0 {
+		delta = maxInt32(delta, pods)
+	}
+	if percent > 0 {
+		delta = maxInt32(delta, clampPositiveCeilFloatToInt32(float64(current)*float64(percent)/100))
+	}
+	return delta
 }
 
 func stepAmount(current int32, policy v1alpha1.ModelDeploymentScalerStepPolicy) int32 {
@@ -786,29 +800,9 @@ func applyWholeUnitStepLimit(
 ) (int32, int32) {
 	up := behavior.ScaleUp
 	unitUpCap := int32(math.MaxInt32)
-	if up.StepPolicy == nil && up.MaxStepReplicas == 0 && up.MaxStepPercent == 0 {
-		for name, unit := range wholeUnit {
-			current := states[name].CurrentReplicas
-			delta := maxInt32(4, clampPositiveCeilFloatToInt32(float64(current)*100/100))
-			unitUpCap = minInt32(unitUpCap, delta/unit)
-		}
-		unitUpCap = maxInt32(1, unitUpCap)
-	} else {
-		for name, unit := range wholeUnit {
-			current := states[name].CurrentReplicas
-			var delta int32
-			if up.StepPolicy != nil {
-				delta = stepAmount(current, *up.StepPolicy)
-			} else {
-				if up.MaxStepReplicas > 0 {
-					delta = maxInt32(delta, up.MaxStepReplicas)
-				}
-				if up.MaxStepPercent > 0 {
-					delta = maxInt32(delta, clampPositiveCeilFloatToInt32(float64(current)*float64(up.MaxStepPercent)/100))
-				}
-			}
-			unitUpCap = minInt32(unitUpCap, delta/unit)
-		}
+	for name, unit := range wholeUnit {
+		delta := scaleUpStepDelta(states[name].CurrentReplicas, up)
+		unitUpCap = minInt32(unitUpCap, delta/unit)
 	}
 	kCeil := clamp(addClampInt32(kCur, unitUpCap), kCur, kMax)
 

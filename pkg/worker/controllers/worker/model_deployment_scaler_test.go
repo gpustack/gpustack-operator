@@ -1836,4 +1836,63 @@ func TestModelDeploymentScalerWholeUnitObservationAndPanicExpiry(t *testing.T) {
 				constraint.Replicas, constraint.BlockingReason)
 		}
 	})
+
+	t.Run("planWithPriors blocks with RatioConflict when current replicas are not a whole-unit multiple", func(t *testing.T) {
+		scaler := newWholeUnitScaler(false)
+		scaler.Spec.Roles = []workercore.ModelDeploymentScalerRoleBounds{
+			{Name: "prefill", MinReplicas: 1, MaxReplicas: 12},
+			{Name: "decode", MinReplicas: 1, MaxReplicas: 16},
+		}
+		// Wide ratio allows 4P:5D through currentVectorConflict while WholeUnit requires 3P:4D multiples.
+		scaler.Spec.Ratios = []workercore.ModelDeploymentScalerRoleRatio{{
+			NumeratorRole:   "decode",
+			DenominatorRole: "prefill",
+			Min:             quantityPointer("1"),
+			Max:             quantityPointer("2"),
+		}}
+		md := scalerTestDeployment("target", "target-uid", map[string]int32{"prefill": 4, "decode": 5})
+		md.Spec.Engine = workercore.ModelDeploymentEngine{Name: workercore.ModelDeploymentEngineVLLM}
+		md.Spec.Roles[0].Kind = workercore.ModelDeploymentRoleKindPrefill
+		md.Spec.Roles[1].Kind = workercore.ModelDeploymentRoleKindDecode
+		md.Annotations = map[string]string{
+			workercore.ModelDeploymentScalerBindingAnnotationKey: scalerTestBindingJSON(scaler, 1),
+		}
+
+		resolved := newWholeUnitPriors(scaler, false)
+		resolved.WholeUnit.UnitVector = map[string]int32{"prefill": 3, "decode": 4}
+
+		cli := ctrlfake.NewClientBuilder().WithScheme(scheme.Scheme).
+			WithStatusSubresource(&workercore.ModelDeployment{}, &workercore.ModelDeploymentScaler{}, &core.Pod{}, &kueue.Workload{}).
+			WithObjects(md.DeepCopy(), scaler.DeepCopy()).Build()
+		ensureAdmittedUnitPods(t, cli, md, map[string]int32{"prefill": 4, "decode": 5})
+		r := &ModelDeploymentScalerReconciler{
+			Client:  cli,
+			clock:   func() time.Time { return t0 },
+			sampler: &modelDeploymentScalerSampler{Clock: func() time.Time { return t0 }},
+		}
+		r.sampler.Scrape = func(_ context.Context, _ *core.Pod) ([]byte, error) {
+			return []byte("# TYPE vllm:prompt_tokens_total counter\nvllm:prompt_tokens_total 1000\n"), nil
+		}
+		curScaler := scalerTestGetScaler(t, cli, scaler.Name)
+		curMD := scalerTestGetDeployment(t, cli)
+		if _, err := r.planWithPriors(
+			context.Background(), curScaler.DeepCopy(), curScaler, curMD, resolved, t0, true,
+		); err != nil {
+			t.Fatalf("planWithPriors error = %v", err)
+		}
+
+		stored := scalerTestGetScaler(t, cli, scaler.Name)
+		blocked := scalerCondition(stored, workercore.ModelDeploymentScalerConditionTypeBlocked)
+		if blocked.Status != meta.ConditionTrue || blocked.Reason != workercore.ModelDeploymentScalerReasonRatioConflict {
+			t.Fatalf("Blocked condition = %+v, want True/RatioConflict", blocked)
+		}
+		metricsCond := scalerCondition(stored, workercore.ModelDeploymentScalerConditionTypeMetricsReady)
+		if metricsCond.Status != meta.ConditionUnknown || metricsCond.Reason != workercore.ModelDeploymentScalerReasonRatioConflict {
+			t.Fatalf("MetricsReady condition = %+v, want Unknown/RatioConflict", metricsCond)
+		}
+		afterMD := scalerTestGetDeployment(t, cli)
+		if afterMD.Spec.Roles[0].Replicas != 4 || afterMD.Spec.Roles[1].Replicas != 5 {
+			t.Fatalf("expected target replicas unchanged at 4P:5D, got %+v", afterMD.Spec.Roles)
+		}
+	})
 }

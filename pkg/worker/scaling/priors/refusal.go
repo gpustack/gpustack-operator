@@ -60,6 +60,11 @@ type RefusalError struct {
 	//
 	// IT IS BOUNDED, because it ends up in a status field.
 	Detail map[string]string `json:"detail,omitempty"`
+
+	// profileNotFound marks a zero-match lookup from selectProfileByShape so
+	// callers can distinguish an absent profile from ambiguity or mismatches
+	// without matching human-readable Message text.
+	profileNotFound bool
 }
 
 // Error returns the refusal message.

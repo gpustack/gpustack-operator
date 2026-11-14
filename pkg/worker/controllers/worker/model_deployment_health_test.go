@@ -1739,5 +1739,7 @@ func TestInPlaceContainerRestartAdvancesGenerationAndRequalifiesOnce(t *testing.
 	assert.Empty(t, fetchSteady.asked, "steady pass at updated restart generation must retain without re-probing")
 	for _, q := range secondPass {
 		assert.True(t, q.Eligible(), "%s/%d should remain eligible", q.View.Role, q.View.Ordinal)
+		assert.Equal(t, "standing endpoint eligibility matches the current membership generation",
+			q.GroupForward.Reason, "%s/%d retained forward reason should distinguish retention from live probe", q.View.Role, q.View.Ordinal)
 	}
 }

@@ -958,7 +958,7 @@ func solveFixedWholeUnitVector(
 		return nil, 0, 0, modelDeploymentScalerPriorRefusal("", "fixed whole-unit vector requires at least two roles")
 	}
 	if len(scaler.Spec.Ratios) == 0 {
-		return nil, 0, 0, modelDeploymentScalerPriorRefusal("", "Tier 2 whole-unit Server fallback requires fixed ratios covering all target roles")
+		return nil, 0, 0, modelDeploymentScalerPriorRefusal("", "disaggregated whole-unit prior resolution requires fixed ratios covering all target roles")
 	}
 
 	bounds := make(map[string]workercore.ModelDeploymentScalerRoleBounds, len(scaler.Spec.Roles))
@@ -1005,7 +1005,7 @@ func solveFixedWholeUnitVector(
 		}
 		if minRat.Cmp(maxRat) != 0 {
 			return nil, 0, 0, modelDeploymentScalerPriorRefusal(
-				"", "Tier 2 whole-unit Server fallback requires fixed ratios (min == max) on %s/%s",
+				"", "disaggregated whole-unit prior resolution requires fixed ratios (min == max) on %s/%s",
 				ratio.NumeratorRole, ratio.DenominatorRole,
 			)
 		}

@@ -746,7 +746,7 @@ func modelDeploymentReplicaAlreadyEligible(
 func modelDeploymentGroupForwardRetained(view modelDeploymentReplicaView) modelDeploymentGroupForward {
 	return modelDeploymentGroupForward{
 		State:       modelDeploymentGroupForwardVerified,
-		Reason:      "every leg of the group verified",
+		Reason:      "standing endpoint eligibility matches the current membership generation",
 		Generation:  modelDeploymentGenerationOf(view),
 		Observation: "retained from standing endpoint eligibility under the current membership generation",
 	}

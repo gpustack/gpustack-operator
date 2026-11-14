@@ -211,19 +211,28 @@ func (r *ModelDeploymentScalerReconciler) planWithPriors(
 	)
 	if resolved != nil && resolved.WholeUnit != nil {
 		wholeUnit = resolved.WholeUnit.UnitVector
-	}
-	if resolved != nil && resolved.WholeUnit != nil {
-		if kCur, ok := wholeUnitMultiplier(md.Spec.Roles, resolved.WholeUnit.UnitVector); ok {
-			var err error
-			algorithmByRole, predictorByRole, states, roleStatuses, metricsReady, metricsReasons, err = r.planWholeUnitStates(
-				scaler, md, resolved, observations, pendingByRole, kCur, now,
-			)
-			if err != nil {
+		kCur, ok := wholeUnitMultiplier(md.Spec.Roles, wholeUnit)
+		if !ok {
+			r.setCondition(scaler, workercore.ModelDeploymentScalerConditionTypeBlocked, meta.ConditionTrue,
+				workercore.ModelDeploymentScalerReasonRatioConflict,
+				"the current replica vector is not an integer multiple of the whole-unit vector", now)
+			r.setCondition(scaler, workercore.ModelDeploymentScalerConditionTypeMetricsReady, meta.ConditionUnknown,
+				workercore.ModelDeploymentScalerReasonRatioConflict,
+				"planning is held until the current vector aligns to the whole-unit vector", now)
+			scaler.Status.ObservedGeneration = scaler.Generation
+			if err := r.updateStatus(ctx, before, scaler); err != nil {
 				return ctrlreconcile.Result{}, err
 			}
+			return ctrlreconcile.Result{RequeueAfter: interval}, nil
 		}
-	}
-	if states == nil {
+		var err error
+		algorithmByRole, predictorByRole, states, roleStatuses, metricsReady, metricsReasons, err = r.planWholeUnitStates(
+			scaler, md, resolved, observations, pendingByRole, kCur, now,
+		)
+		if err != nil {
+			return ctrlreconcile.Result{}, err
+		}
+	} else {
 		algorithmByRole = make(map[string]algorithm.RoleRecommendation, len(md.Spec.Roles))
 		predictorByRole = make(map[string]*algorithm.PredictorState, len(md.Spec.Roles))
 		states = make([]ModelDeploymentScalerRoleState, 0, len(md.Spec.Roles))

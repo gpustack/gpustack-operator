@@ -38,7 +38,7 @@ func (p Predictive) Recommend(obs RoleObservation, prior *PredictorState) (RoleR
 	if roleKind(obs) == RoleKindEncode || obs.ReadyReplicas <= 0 {
 		return rec, &state
 	}
-	if !signalUsable(obs.ThroughputState) {
+	if !signalUsable(obs.ThroughputState) || !p.demandFinite(obs) {
 		if rec.Reason != ReasonLatencyGuardScaleUp && rec.Reason != ReasonLatencyGuardHold {
 			switch latencyRec, latencyReason, _ := p.latencyGuard(obs); latencyReason {
 			case ReasonLatencyGuardScaleUp:
