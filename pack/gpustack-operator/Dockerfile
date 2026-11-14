@@ -158,6 +158,7 @@ EOF
 ARG GPUSTACK_WORKSPACE="/usr/local/go/src/gpustack.ai/gpustack"
 ARG GPUSTACK_GIT_COMMIT
 ARG GPUSTACK_GIT_VERSION
+ARG GPUSTACK_BUILD_CI
 
 RUN --mount=type=cache,target=/root/.cache/go-build,sharing=locked \
     --mount=type=cache,target=/go/pkg/mod,sharing=locked \
@@ -190,8 +191,10 @@ RUN --mount=type=cache,target=/root/.cache/go-build,sharing=locked \
 
     # Build
     CI="true"
-    if [[ "${BUILDPLATFORM}" != "${TARGETPLATFORM}" ]] || [[ ! -d "${GPUSTACK_WORKSPACE}/.git" ]]; then
+    if [[ "${GPUSTACK_BUILD_CI}" == "false" ]] || [[ "${BUILDPLATFORM}" != "${TARGETPLATFORM}" ]] || [[ ! -d "${GPUSTACK_WORKSPACE}/.git" ]]; then
       CI="false"
+    elif [[ "${GPUSTACK_BUILD_CI}" == "true" ]]; then
+      CI="true"
     fi
     export BUILD_OS=${TARGETOS}
     export BUILD_ARCH=${TARGETARCH}
