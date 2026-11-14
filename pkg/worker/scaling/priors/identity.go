@@ -393,6 +393,12 @@ func collectEngineEnvLayer(entries []string) engineEnvLayer {
 	return layer
 }
 
+// mergeEngineEnvEntries overlays valid stage KEY=VAL entries onto shared KEY=VAL entries.
+//
+// Malformed entries and intra-layer conflicting duplicate keys in either base or overlay are
+// preserved verbatim and never masked by the other layer, because a contradictory or malformed
+// catalog layer is invalid evidence that downstream environment matching must refuse rather than
+// silently repair via stage override.
 func mergeEngineEnvEntries(base, overlay []string) []string {
 	if len(overlay) == 0 {
 		return slices.Clone(base)
