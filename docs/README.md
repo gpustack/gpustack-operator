@@ -259,7 +259,7 @@ A skill link names a procedure; the entry's other fields carry shared facts.
 | [Elastic EP Benchmark](modules/model-deployment/elastic-ep-benchmark.md) | Compare four- and eight-GPU H100 collectives and measure requests during live expansion. |
 | [External DP](modules/model-deployment/external-dp.md) | Run one fixed data-parallel group with an HTTP endpoint on every rank. |
 | [External DP Benchmark](modules/model-deployment/external-dp-benchmark.md) | Compare External DP ranks with a monolithic wide tensor-parallel group. |
-| [Model Deployment Scaling](modules/model-deployment/scaling.md) | Plan a deployment's replica count from the signals it publishes. |
+| [Model Deployment Scaling](modules/model-deployment/scaling.md) | Plan replica counts and resolve whole-unit capacity from disaggregated or aggregated priors. |
 | [Model Deployment Scaling Simulation](modules/model-deployment/scaling-simulation.md) | Compare the three scaler algorithms on identical synthetic traffic with measured adjustment dynamics. |
 | [Model Deployment Scaling Benchmark](modules/model-deployment/scaling-benchmark.md) | Compare H100 and H200 scaling configurations and capacity priors with measured latency, throughput and lifecycle limits. |
 | [Model Deployment Routing](modules/model-deployment/routing.md) | Choose a routing policy, confirm a Router serves. |

@@ -352,8 +352,8 @@ spec:
       headroom: "0.75"
 ```
 
-The resolver uses dedicated role profiles when both match. If either has no match, it can use
-`Server` profiles to estimate whole-unit capacity. See
+The resolver first matches a `mode: disaggregated` profile for the coupled unit. Only when no
+such profile matches can `mode: aggregated` profiles estimate whole-unit capacity. See
 [Capacity priors](../../modules/model-deployment/scaling.md#capacity-priors) for the conditions.
 
 The engine image matches by family, so no hand-computed digests or `@sha256` pinning are required.

@@ -308,24 +308,21 @@ spec:
 | `Predictive` | Forecast-based scaling | Supports capacity priors. |
 | `Proportional` | Single-metric scaling | Rejects capacity priors. |
 
-The catalog may resolve missing capacity fields for `TokenThroughput` and `Predictive`. Explicit capacities win; headroom multiplies only catalog seed capacity. The default is an
-initial configurable engineering margin, not a universal optimum. [Scaling Benchmark](scaling-benchmark.md#suite-2-capacity-priors) compares `0.75` catalog headroom against
-unmargined manual capacities on H200 hardware, with no warranty.
+The catalog may resolve missing capacity fields for `TokenThroughput` and `Predictive`. Explicit capacities win; headroom multiplies only catalog seed capacity. The default is an initial configurable engineering margin, not a universal optimum. [Scaling Benchmark](scaling-benchmark.md#suite-2-capacity-priors) compares `0.75` catalog headroom against unmargined manual capacities on H200 hardware, with no warranty.
 
 Omit *`catalogRef`* with `capacityPrior: {}` or set only *`headroom`* to use the embedded catalog. With `catalogRef: {name: my-priors}`, admission defaults *`key`* to `priors.yaml`.
-If absent, the loader checks the legacy `catalog.yaml` key. A referenced catalog is the sole source; it never falls back to the embedded catalog.
+If `priors.yaml` is absent, the loader checks the legacy `priors.json` key. A referenced catalog is the sole source; it never falls back to the embedded catalog.
 
 An empty `catalogRef: {}` also defaults the key, but admission rejects it because *`name`* is required. A whitespace-only key fails admission on `spec.algorithm.capacityPrior.catalogRef.key`.
 
-The committed catalog, `pkg/worker/scaling/priors/priors.yaml`, is human-editable YAML. The parser also accepts JSON, so a hand-written `ConfigMap` catalog can use either format.
-Profiles are flat records without provenance, serving configuration or workload details. Upstream evidence pins live in
-`.agents/skills/gpustack-operator-priors/references/records.md`.
+The committed catalog, `pkg/worker/scaling/priors/priors.yaml`, is human-editable YAML. The parser also accepts JSON, so a hand-written `ConfigMap` catalog can use either format. Profiles have no provenance, serving configuration or workload details. Evidence pins live in `.agents/skills/gpustack-operator-priors/references/records.md`.
+The illustrative schema below has one point per profile; resolution needs at least two distinct load levels.
 
 ```yaml
 apiVersion: worker.gpustack.ai/v1alpha1
 kind: ModelDeploymentScalerCapacityPriorCatalog
 profiles:
-  - role: Server                         # Server, Prefill or Decode
+  - mode: aggregated
     model: deepseek-ai/DeepSeek-R1-0528  # verified Hugging Face org/repo ID
     quantization: fp8                    # canonical lowercase token
     engine: vllm                         # vllm or sglang
@@ -339,44 +336,49 @@ profiles:
         inputTokensPerSecond: 1840       # per-replica tokens/s
         outputTokensPerSecond: 290       # per-replica tokens/s
         ttftMilliseconds:                # any canonical p<N> quantile in (0, 100]
-          p50: 320
-          p90: 410
           p95: 455
-          p99: 512
         itlMilliseconds:                 # milliseconds per token
-          p50: 18
-          p90: 24
           p95: 27
-          p99: 33
+  - mode: disaggregated
+    model: deepseek-ai/DeepSeek-R1-0528
+    quantization: fp8
+    engine: vllm
+    prefill:
+      replicas: 1
+      hardware: amd-mi325x
+      topology:
+        gpusPerReplica: 8
+        tensorParallel: 8
+    decode:
+      replicas: 1
+      hardware: amd-mi325x
+      topology:
+        gpusPerReplica: 8
+        tensorParallel: 8
+    points:
+      - concurrency: 4
+        totalTokensPerSecond: 3000
+        inputTokensPerSecond: 2600
+        outputTokensPerSecond: 400
+        ttftMilliseconds:
+          p95: 455
+        itlMilliseconds:
+          p95: 27
 ```
 
-A profile is identified by its normalized `(role, model, quantization, engine, hardware, topology)` tuple. `ParseCatalog` fails closed when two entries normalize to the same
-tuple — naming both — while `gen/priors --merge` upserts one canonical sweep deterministically, sorted by role, model, quantization, engine, hardware and parallelism widths.
+The normalized profile shape includes mode, model, quantization and engine. Aggregated shapes also include hardware and topology; disaggregated shapes include both stage shapes and their reduced replica ratio. `ParseCatalog` rejects duplicate shapes; `gen/priors --merge` upserts one canonical sweep.
 
-Throughput units are per-replica `tokens/s`; latencies are milliseconds (`itlMilliseconds` per
-token). Both latency maps accept any canonical `p<N>` quantile key in `(0, 100]` (`p25`, `p50`,
-`p70`, `p95`, `p99`, `p99.9`), and unmeasured quantiles stay absent.
+Throughput is `tokens/s` per replica for aggregated profiles and per minimal coupled unit for disaggregated profiles; latencies are milliseconds (`itlMilliseconds` per token). Both latency maps accept any canonical `p<N>` quantile key in `(0, 100]` (`p25`, `p50`, `p70`, `p95`, `p99`, `p99.9`), and unmeasured quantiles stay absent.
 
-When any serving role omits a capacity field under a present *`capacityPrior`*, the webhook suppresses the `500` ms and
-`50` ms latency defaults. Each catalog-backed role must set explicit positive latency targets for its kind:
-*`ttftTargetMilliseconds`* for *Prefill*, *`itlTargetMilliseconds`* for *Decode*, and both for *Server*. Manual mode
-retains the `500` ms and `50` ms defaults.
+When any serving role omits a capacity field under a present *`capacityPrior`*, the webhook suppresses the `500` ms and `50` ms latency defaults. Each catalog-backed role must set explicit positive latency targets: *`ttftTargetMilliseconds`* for *Prefill*, *`itlTargetMilliseconds`* for *Decode*, and both for *Server*. Manual mode retains the defaults.
 
-`Predictive` resolves forecast capacity (*`predictive.*TokenCapacityPerReplica`*) and fallback capacity (*`predictive.tokenThroughput.*TargetTokensPerSecond`*) independently per field in direct resolution.
+For a single `Server`, `Predictive` resolves forecast capacity (*`predictive.*TokenCapacityPerReplica`*) and fallback capacity (*`predictive.tokenThroughput.*TargetTokensPerSecond`*) independently per field.
 An explicit field stays `Explicit`; a missing sibling resolves from `Catalog` with *`headroom`*.
 
-For PD and EPD targets, the active catalog selects between two tiers:
+For PD and EPD targets, explicit manual capacities on both `Prefill` and `Decode` bypass catalog lookup. Otherwise, partial per-role overrides are refused. Catalog resolution requires fixed connected *`spec.ratios`* across all roles: every edge has `min == max` and reduces to a consistent positive integer unit vector `u` with `gcd == 1`. Replica bounds must permit a non-empty multiplier interval `[k_min, k_max]`. Both *`ttftTargetMilliseconds`* and *`itlTargetMilliseconds`* must be positive.
 
-1. **Direct role priors**: When both dedicated `Prefill` and `Decode` profiles match, each role resolves missing fields against its own identity and topology.
-   Partial explicit overrides are supported. Ambiguity, identity or configuration conflicts, and infeasible SLOs fail closed.
-2. **Whole-unit fallback**: When either dedicated role has zero matches (`len(matched) == 0`), the resolver can use `Server` profiles from the same active catalog.
-   It never falls back on ambiguity or other resolution failures. Partial explicit per-role capacity overrides are refused.
-
-Whole-unit fallback requires fixed, connected *`spec.ratios`* across all target roles. Every edge must have `min == max`, and the ratios must reduce to a consistent positive integer unit vector `u` with `gcd == 1`. Role replica bounds must permit a non-empty integer multiplier interval `[k_min, k_max]`; both *`ttftTargetMilliseconds`* and *`itlTargetMilliseconds`* are required.
-
-The resolver matches a compatible `Server` profile for each of `Prefill` and `Decode`, using each role's identity and topology and both latency targets.
-Let `eff_P` and `eff_D` be effective per-replica capacities after headroom, and `g_P` and `g_D` the GPUs per replica.
-It computes `c_gpu = min(eff_P / g_P, eff_D / g_D)` and estimates initial unit throughput as `C_unit = (u_P * g_P + u_D * g_D) * c_gpu`.
+1. **Disaggregated primary**: Match `mode: disaggregated` by model, quantization, engine, stage hardware and topology, and reduced P:D ratio `(u_P/g, u_D/g)`, where `g = gcd(u_P, u_D)`. Scale minimal-unit capacity by `g`. Ambiguity, configuration mismatch or infeasible SLOs fail closed without fallback.
+2. **Aggregated fallback**: Only when zero disaggregated profiles match, resolve each LLM stage against `mode: aggregated` in the same catalog. Let `eff_P` and `eff_D` be effective per-replica capacities after headroom, and `g_P` and `g_D` GPUs per replica. Compute `c_gpu = min(eff_P / g_P, eff_D / g_D)` and `C_unit = max(1, floor((u_P * g_P + u_D * g_D) * c_gpu))`.
 
 This is an initial GPU-time-balanced estimate, not a mathematical lower bound for arbitrary input-to-output sequence length (`ISL:OSL`) splits.
 Runtime unit demand adds `PromptTokensPerSecond` from `Prefill` to `GenerationTokensPerSecond` from `Decode`.
@@ -421,12 +423,9 @@ Unknown injected environment variables fail closed. Supported engines use intern
 
 ### Catalog qualification
 
-All prior acquisition and qualification is offline. At runtime, admission and reconciliation read only the embedded catalog or the referenced same-namespace `ConfigMap`
-(`ModelDeploymentScalerCapacityPriorCatalog`, up to 512 KiB, 256 profiles and 128 points per profile) plus live engine metrics; the operator never calls external benchmark
-services or profiles live traffic to create a prior.
+All prior acquisition and qualification is offline. Admission and reconciliation read only the embedded catalog or the referenced same-namespace `ConfigMap` (`ModelDeploymentScalerCapacityPriorCatalog`, up to 4 MiB, 2048 profiles and 128 points per profile) plus live engine metrics. The operator never calls external benchmark services or profiles live traffic to create a prior.
 
-A profile qualifies when its normalized `(role, model, quantization, engine, hardware, topology)` tuple matches the
-serving role and its points carry the concurrency, per-replica token rates and latency quantiles the resolver needs.
+A profile qualifies when its normalized mode-specific shape matches the target and its points carry the concurrency, token rates and latency quantiles the resolver needs.
 
 The throughput numerator follows the sampler's token convention — cache-missed input tokens/s for
 *Prefill*, output tokens/s for *Decode*, their sum for *Server* — and a latency quantile the
@@ -435,15 +434,14 @@ source did not publish stays missing; it is never reconstructed from a different
 An unresolved match fails closed with `CapacityPriorUnresolved`, `InsufficientLoadCoverage` or
 `IncompatibleMetric`; a missing or incompatible profile never supplies borrowed or zero capacity.
 
-Resolving a prior walks one measured sweep along its two axes. As concurrency rises, per-replica throughput — proportional to power efficiency, `tokens/s/MW` at a fixed replica
-power — climbs toward hardware saturation, while per-user interactivity (`tokens/s/user` ≈ `1000 / ITL` milliseconds) falls and *TTFT* grows.
+Resolving a prior walks one measured sweep along its two axes. As concurrency rises, replica or unit throughput climbs toward saturation, while per-user interactivity (`tokens/s/user` ≈ `1000 / ITL` milliseconds) falls and *TTFT* grows.
 
 The role's `latencyQuantile` (default `0.95`) and its `ttftTargetMilliseconds` /
 `itlTargetMilliseconds` set the interactivity floor and split `points[]` into feasible and failed:
 a point is feasible when the measured quantile meets both targets, interpolating bracketing
 quantiles linearly or bounding conservatively from a single higher measured quantile.
 
-Among the feasible points of a sweep with at least two distinct concurrency levels, the resolver selects the highest per-replica `tokens/s` — the maximum of `tokens/s/MW` under
+Among the feasible points of a sweep with at least two distinct concurrency levels, the resolver selects the highest per-replica or per-unit `tokens/s` — the maximum of `tokens/s/MW` under
 the interactivity and *TTFT* targets — as the seed, and *`headroom`* multiplies it into the effective capacity.
 
 A higher concurrency point that breaches a target establishes `HigherLoadSLOFailure`; when every measured point passes, the resolver never extrapolates beyond the measured
@@ -462,7 +460,7 @@ refused. The pins — source URLs, capture dates, artifact digests and refusal r
 | Data point | Requirement | Fallback handling |
 |---|---|---|
 | Model and hardware identity | Verified Hugging Face repository; canonical accelerator `Family` | Normalized by the [identity normalization](#identity-normalization) rules; source slugs, mirror orgs and vendor checkpoints adapt to the canonical identity. |
-| Load points | `concurrency`, per-replica `tokens/s` throughput and latency quantiles in milliseconds | Quantiles the source did not publish stay absent; chunk-gap percentiles normalize to per-token *ITL* at import. |
+| Load points | `concurrency`, per-replica or per-unit `tokens/s` and latency quantiles in milliseconds | Quantiles the source did not publish stay absent; chunk-gap percentiles normalize to per-token *ITL* at import. |
 | Source attribution | Upstream URL, capture date and artifact SHA-256 per dataset | Recorded in the skill's provenance records; unattributed numbers are refused. |
 
 ### Identity normalization

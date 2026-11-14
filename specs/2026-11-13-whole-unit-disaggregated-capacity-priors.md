@@ -1,7 +1,7 @@
 # Spec: Whole-Unit Disaggregated Capacity Priors and Scaling Documentation Alignment
 
-Status: Building
-Blocked on: completion of realigned tasks T1, T2, and T4, end-of-build review, and final ship gate before setting Status to Shipped
+Status: Built
+Blocked on: end-of-build review and final ship gate before setting Status to Shipped
 Type: Feature
 
 ## Table of Contents
@@ -396,7 +396,7 @@ disjoint paths and can run in parallel.
     - `go test -run 'TestScalerConstraints' ./pkg/worker/controllers/worker`
   - **Expected:** Exit code `0`.
 
-- [ ] **T4 · Priors skill provenance records, scaling module reference, scaling/EPD walkthroughs, and shared index updates**
+- [x] **T4 · Priors skill provenance records, scaling module reference, scaling/EPD walkthroughs, and shared index updates**
   - **Blocked by:** T1
   - **Owns:** `.agents/skills/gpustack-operator-priors/SKILL.md`, `.agents/skills/gpustack-operator-priors/references/records.md`, `docs/modules/model-deployment/scaling.md`, `docs/walkthroughs/model-deployment/scaling.md`, `docs/walkthroughs/model-deployment/encode-prefill-decode.md`, `docs/README.md`
   - **Deliverables:** Update `gpustack-operator-priors` `SKILL.md` and `references/records.md` for `mode: aggregated | disaggregated`, multi-node (`> 8` GPU) and `disagg: true` conservation/divisibility rules, `--mode` retirement flags, and the 12 synced InferenceX dataset URLs, row counts, and SHA-256 digests; update `docs/modules/model-deployment/scaling.md` (`<= 1000` lines), `docs/walkthroughs/model-deployment/scaling.md`, and `docs/README.md` to document `mode: aggregated | disaggregated`, Priority 1 measured `disaggregated` resolution versus Priority 2 `aggregated` whole-unit fallback, `catalogRef` defaulting (`priors.yaml` with `priors.json` legacy fallback), and `ModelDeployment` identity/precision annotations; remove the internal `/models` historical note in `docs/walkthroughs/model-deployment/encode-prefill-decode.md` and align Step 2 `--served-model-name` values to `qwen2-5-vl-7b-instruct`.
@@ -481,7 +481,7 @@ completion without requiring cluster GPUs. Real-cluster reconcile/webhook verifi
   division:** Assumes the user's `P:D` GPU split equals the unmeasured compute time split inside a
   collocated benchmark and breaks minority-role L1 projection on asymmetric ratios. Rejected.
 - **Require `mode: disaggregated` without `mode: aggregated` fallback:** Even after importing all
-  182 upstream InferenceX `disaggregated` sweeps, arbitrary user `P:D` ratios or heterogeneous
+  180 upstream InferenceX `disaggregated` sweeps, arbitrary user `P:D` ratios or heterogeneous
   accelerator pairings may have no exact `disaggregated` match; Priority 2 `mode: aggregated`
   whole-unit fallback + live `TTFT`/`ITL` guards preserves broad out-of-the-box coverage.
 
