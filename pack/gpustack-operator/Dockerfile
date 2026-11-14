@@ -169,6 +169,13 @@ RUN --mount=type=cache,target=/root/.cache/go-build,sharing=locked \
     set -exo pipefail
     echo "GPUSTACK_GIT_COMMIT=${GPUSTACK_GIT_COMMIT}"
     echo "GPUSTACK_GIT_VERSION=${GPUSTACK_GIT_VERSION}"
+    case "${GPUSTACK_BUILD_CI:-}" in
+      "" | "true" | "false") ;;
+      *)
+        echo "invalid GPUSTACK_BUILD_CI=${GPUSTACK_BUILD_CI}: expected empty, true, or false" >&2
+        exit 1
+        ;;
+    esac
 
     # Stamp the version deterministically from the build-arg (set by hack/package.sh / CI from the git
     # tag), so the builder cache key tracks the VERSION — not just the commit — and a release tag on an
@@ -191,13 +198,6 @@ RUN --mount=type=cache,target=/root/.cache/go-build,sharing=locked \
     done
 
     # Build
-    case "${GPUSTACK_BUILD_CI:-}" in
-      "" | "true" | "false") ;;
-      *)
-        echo "invalid GPUSTACK_BUILD_CI=${GPUSTACK_BUILD_CI}: expected empty, true, or false" >&2
-        exit 1
-        ;;
-    esac
     CI="true"
     if [[ "${GPUSTACK_BUILD_CI}" == "false" ]] || [[ "${BUILDPLATFORM}" != "${TARGETPLATFORM}" ]] || [[ ! -d "${GPUSTACK_WORKSPACE}/.git" ]]; then
       CI="false"
