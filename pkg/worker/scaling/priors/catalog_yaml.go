@@ -37,6 +37,9 @@ type ProfileDocument = workercore.ModelDeploymentScalerCapacityPriorProfile
 // state is a width of one and a reader has to know which widths were measured.
 type TopologyDocument = workercore.ModelDeploymentScalerCapacityPriorTopology
 
+// StageDocument is one stage of a disaggregated profile as it is written.
+type StageDocument = workercore.ModelDeploymentScalerCapacityPriorStage
+
 // PointDocument is one measured load point as it is written.
 //
 // IT NAMES THE THREE RATES THE MEASUREMENT PRODUCED, because a reader asks
@@ -226,13 +229,13 @@ func toCatalog(d CatalogDocument) (*Catalog, error) {
 // measurement and not a configuration: a measurement says how fast the replica
 // was, not which serving settings it ran under.
 func toProfile(d ProfileDocument) (Profile, error) {
-	role := RoleKind(d.Role)
-	if _, known := requirementFor(role); !known {
-		return Profile{}, fmt.Errorf("carries the unknown role %q", d.Role)
+	mode := ProfileMode(d.Mode)
+	if _, known := requirementForMode(mode); !known {
+		return Profile{}, fmt.Errorf("carries the unknown mode %q", d.Mode)
 	}
 	shape := DocumentShape(d)
 	profile := Profile{
-		Role: role,
+		Mode: mode,
 		Identity: Identity{
 			Model: ModelIdentity{
 				Name:         CanonicalModelName(d.Model),
@@ -246,10 +249,8 @@ func toProfile(d ProfileDocument) (Profile, error) {
 				// the engine behind them.
 				Image: d.Engine,
 			},
-			Hardware: NormalizeHardwareIdentity(HardwareIdentity{Accelerator: d.Hardware}),
 		},
 		ServingConfig:    ServingConfig{},
-		Topology:         NormalizeTopologyDocument(d.Topology),
 		MeasuredReplicas: 1,
 		Workload: Workload{
 			// THE WORKLOAD IS NAMED AFTER THE SHAPE, because the document names
@@ -267,8 +268,47 @@ func toProfile(d ProfileDocument) (Profile, error) {
 			ArrivalModel:  ClientModelFixedConcurrency,
 		},
 	}
+
+	denominator := DenominatorPerReplica
+	switch mode {
+	case ModeAggregated:
+		if strings.TrimSpace(d.Hardware) == "" {
+			return Profile{}, fmt.Errorf("aggregated profile requires hardware")
+		}
+		if d.Topology == nil {
+			return Profile{}, fmt.Errorf("aggregated profile requires topology")
+		}
+		if d.Prefill != nil || d.Decode != nil {
+			return Profile{}, fmt.Errorf("aggregated profile must not carry prefill or decode stage")
+		}
+		profile.Identity.Hardware = NormalizeHardwareIdentity(HardwareIdentity{Accelerator: d.Hardware})
+		profile.Topology = NormalizeTopologyDocument(*d.Topology)
+	case ModeDisaggregated:
+		if strings.TrimSpace(d.Hardware) != "" {
+			return Profile{}, fmt.Errorf("disaggregated profile must not carry top-level hardware")
+		}
+		if d.Topology != nil {
+			return Profile{}, fmt.Errorf("disaggregated profile must not carry top-level topology")
+		}
+		if d.Prefill == nil || d.Decode == nil {
+			return Profile{}, fmt.Errorf("disaggregated profile requires both prefill and decode stages")
+		}
+		if d.Prefill.Replicas <= 0 || d.Decode.Replicas <= 0 {
+			return Profile{}, fmt.Errorf("disaggregated stage replicas must be positive")
+		}
+		if gcdInt(d.Prefill.Replicas, d.Decode.Replicas) != 1 {
+			return Profile{}, fmt.Errorf("disaggregated stage replicas %d:%d must be coprime", d.Prefill.Replicas, d.Decode.Replicas)
+		}
+		if strings.TrimSpace(d.Prefill.Hardware) == "" || strings.TrimSpace(d.Decode.Hardware) == "" {
+			return Profile{}, fmt.Errorf("disaggregated stage requires hardware")
+		}
+		profile.Prefill = toDisaggregatedStage(d.Prefill)
+		profile.Decode = toDisaggregatedStage(d.Decode)
+		denominator = DenominatorPerUnit
+	}
+
 	for _, point := range d.Points {
-		converted, err := toPoint(point, role)
+		converted, err := toPoint(point, mode, denominator)
 		if err != nil {
 			return Profile{}, err
 		}
@@ -296,12 +336,23 @@ func toProfile(d ProfileDocument) (Profile, error) {
 	return profile, nil
 }
 
+func toDisaggregatedStage(d *StageDocument) *DisaggregatedStage {
+	if d == nil {
+		return nil
+	}
+	return &DisaggregatedStage{
+		Replicas: d.Replicas,
+		Hardware: NormalizeHardwareIdentity(HardwareIdentity{Accelerator: d.Hardware}),
+		Topology: NormalizeTopologyDocument(d.Topology),
+	}
+}
+
 // toPoint turns one written load point into the point the resolver reads.
 //
-// IT PICKS THE RATE THE ROLE NEEDS, because the document holds the three rates
-// the measurement produced and the resolver asks for one of them.
-func toPoint(d PointDocument, role RoleKind) (MeasuredPoint, error) {
-	requirement, _ := requirementFor(role)
+// IT PICKS THE RATE THE MODE NEEDS, because the document holds the three rates
+// the measurement produced and the resolver reads the unit or replica total.
+func toPoint(d PointDocument, mode ProfileMode, denominator Denominator) (MeasuredPoint, error) {
+	requirement, _ := requirementForMode(mode)
 	rate := d.TotalTokensPerSecond
 	switch requirement.metric {
 	case ThroughputMetricCacheMissedInputTokensPerSecond:
@@ -320,7 +371,7 @@ func toPoint(d PointDocument, role RoleKind) (MeasuredPoint, error) {
 			Metric:               requirement.metric,
 			Value:                rate,
 			Unit:                 UnitTokensPerSecond,
-			Denominator:          DenominatorPerReplica,
+			Denominator:          denominator,
 			TokenCountConvention: requirement.convention,
 		},
 	}
@@ -335,6 +386,19 @@ func toPoint(d PointDocument, role RoleKind) (MeasuredPoint, error) {
 	point.Latencies = append(point.Latencies, ttftReadings...)
 	point.Latencies = append(point.Latencies, itlReadings...)
 	return point, nil
+}
+
+func gcdInt(a, b int) int {
+	if a < 0 {
+		a = -a
+	}
+	if b < 0 {
+		b = -b
+	}
+	for b != 0 {
+		a, b = b, a%b
+	}
+	return a
 }
 
 // latencyReadings turns the written quantiles of one metric into latency

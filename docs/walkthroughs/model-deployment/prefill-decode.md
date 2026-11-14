@@ -49,7 +49,7 @@ The deployment and probe below were captured on this cluster:
 | Cluster | Kubernetes 1.35.7; one CPU node and one GPU node (`gpu-node-0`) |
 | GPUs | 8 × NVIDIA H100 80 GB HBM3 SXM5; six GPUs assigned to serving |
 | `InstanceType` | `bench-gpu`, configured for the H100 accelerator group |
-| Model | Qwen/Qwen3-32B from `ModelArtifact` `qwen3-32b`, served as `/models` through node model delivery |
+| Model | `Qwen/Qwen3-32B` from `ModelArtifact` `qwen3-32b` through node model delivery |
 | Engine and router | vLLM `gpustack/runner:cuda13.0-vllm0.30.0` with `llm-d-router` |
 | KV transfer | Mooncake over TCP; the default protocol renders as `tcp` |
 
@@ -82,7 +82,7 @@ metadata:
   namespace: gpustack-bench
 spec:
   model:
-    name: /models
+    name: Qwen/Qwen3-32B
     artifactRef:
       name: qwen3-32b
   engine:
@@ -207,7 +207,7 @@ kubectl -n gpustack-bench run test-client --rm -i --restart=Never \
   curl -s http://pd-arm2-pd-router.gpustack-bench.svc:8000/v1/chat/completions \
   -H "Content-Type: application/json" \
   -d '{
-    "model": "/models",
+    "model": "Qwen/Qwen3-32B",
     "messages": [{"role": "user", "content": "Explain prefill and decode disaggregation."}],
     "max_tokens": 16
   }'

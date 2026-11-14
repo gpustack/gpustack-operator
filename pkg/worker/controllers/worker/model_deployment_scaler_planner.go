@@ -64,6 +64,11 @@ func (r *ModelDeploymentScalerReconciler) planWithPriors(
 	observations := r.sampler.SampleRoleMetrics(ctx, scaler, md, pods, now)
 	samples := r.sampler.RoleSamples(scaler)
 	current := deploymentReplicaVector(md)
+	hasSurplusPods := hasSurplusDeploymentPod(pods, current)
+	retirementInFlight := md.Status.Retirement != nil &&
+		md.Status.Retirement.State != workercore.ModelDeploymentRetirementStateAborted &&
+		md.Status.Retirement.State != workercore.ModelDeploymentRetirementStateCompleted
+	hasActiveRetirement := retirementInFlight || hasSurplusPods
 	interval := r.interval(scaler)
 	r.resetRebalanceForGenerationChange(scaler, md)
 
@@ -107,11 +112,8 @@ func (r *ModelDeploymentScalerReconciler) planWithPriors(
 		}
 	}
 
-	if retirement := md.Status.Retirement; active && retirement != nil &&
-		retirement.State == workercore.ModelDeploymentRetirementStateAborted &&
-		scaler.Status.LastScaleDown != nil && scaler.Status.LastScaleDown.Outcome == workercore.ModelDeploymentScalerScaleDownOutcomeCommitted &&
-		scaler.Status.LastScaleDown.Role == retirement.RoleName &&
-		scaler.Status.LastScaleDown.Ordinal == retirement.ReplicaOrdinal {
+	if retirement := md.Status.Retirement; active &&
+		shouldRestoreScaleDownAbort(retirement, scaler.Status.LastScaleDown, scaler.Status.LastCommit, current) {
 		owned, err := r.ensureOwnedBinding(ctx, before, scaler, md, now)
 		if err != nil {
 			return ctrlreconcile.Result{}, err
@@ -120,6 +122,11 @@ func (r *ModelDeploymentScalerReconciler) planWithPriors(
 			return ctrlreconcile.Result{RequeueAfter: interval}, nil
 		}
 		target := cloneReplicaVector(scaler.Status.LastScaleDown.PreScaleDownVector)
+		for role, curCount := range current {
+			if target[role] < curCount {
+				target[role] = curCount
+			}
+		}
 		if scaler.Status.Rebalance != nil && scaler.Status.Rebalance.DonorRole == retirement.RoleName {
 			scaler.Status.Rebalance = nil
 		}
@@ -156,6 +163,16 @@ func (r *ModelDeploymentScalerReconciler) planWithPriors(
 		)
 	}
 
+	if active && !hasActiveRetirement &&
+		scaler.Status.LastScaleDown != nil &&
+		scaler.Status.LastScaleDown.Outcome == workercore.ModelDeploymentScalerScaleDownOutcomeCommitted &&
+		((md.Status.Retirement != nil &&
+			(md.Status.Retirement.State == workercore.ModelDeploymentRetirementStateCompleted ||
+				(md.Status.Retirement.State == workercore.ModelDeploymentRetirementStateAborted && len(pods) > 0))) ||
+			(md.Status.Retirement == nil && len(pods) > 0)) {
+		scaler.Status.LastScaleDown = nil
+	}
+
 	if resolutionErr != nil {
 		return r.stopForCapacityPrior(ctx, before, scaler, resolutionErr, now)
 	}
@@ -188,79 +205,97 @@ func (r *ModelDeploymentScalerReconciler) planWithPriors(
 		return ctrlreconcile.Result{RequeueAfter: interval}, nil
 	}
 
-	algorithmByRole := make(map[string]algorithm.RoleRecommendation, len(md.Spec.Roles))
-	predictorByRole := make(map[string]*algorithm.PredictorState, len(md.Spec.Roles))
-	states := make([]ModelDeploymentScalerRoleState, 0, len(md.Spec.Roles))
-	roleStatuses := make([]workercore.ModelDeploymentScalerRoleStatus, 0, len(md.Spec.Roles))
-	metricsReady := true
-	metricsReasons := make([]string, 0)
-	for i := range md.Spec.Roles {
-		role := &md.Spec.Roles[i]
-		observation, found := observations[role.Name]
-		if !found {
-			observation = algorithm.RoleObservation{Role: role.Name, CurrentReplicas: role.Replicas, Kind: modelDeploymentScalerRoleKind(role.Kind)}
+	var (
+		algorithmByRole map[string]algorithm.RoleRecommendation
+		predictorByRole map[string]*algorithm.PredictorState
+		states          []ModelDeploymentScalerRoleState
+		roleStatuses    []workercore.ModelDeploymentScalerRoleStatus
+		metricsReady    bool
+		metricsReasons  []string
+		wholeUnit       map[string]int32
+	)
+	if resolved != nil && resolved.WholeUnit != nil {
+		wholeUnit = resolved.WholeUnit.UnitVector
+		kCur, ok := wholeUnitMultiplier(md.Spec.Roles, wholeUnit)
+		if !ok {
+			r.setCondition(scaler, workercore.ModelDeploymentScalerConditionTypeBlocked, meta.ConditionTrue,
+				workercore.ModelDeploymentScalerReasonRatioConflict,
+				"the current replica vector is not an integer multiple of the whole-unit vector", now)
+			r.setCondition(scaler, workercore.ModelDeploymentScalerConditionTypeMetricsReady, meta.ConditionUnknown,
+				workercore.ModelDeploymentScalerReasonRatioConflict,
+				"planning is held until the current vector aligns to the whole-unit vector", now)
+			scaler.Status.ObservedGeneration = scaler.Generation
+			if err := r.updateStatus(ctx, before, scaler); err != nil {
+				return ctrlreconcile.Result{}, err
+			}
+			return ctrlreconcile.Result{RequeueAfter: interval}, nil
 		}
-		observation.Role = role.Name
-		observation.CurrentReplicas = role.Replicas
-		obsSample := samples[role.Name]
-		engineAlgorithm, err := modelDeploymentScalerAlgorithmForRole(resolved.Algorithms[role.Name], role.Name)
+		var err error
+		algorithmByRole, predictorByRole, states, roleStatuses, metricsReady, metricsReasons, err = r.planWholeUnitStates(
+			scaler, md, resolved, observations, pendingByRole, kCur, now,
+		)
 		if err != nil {
 			return ctrlreconcile.Result{}, err
 		}
-		history := r.sampler.StabilizationHistory(scaler, role.Name)
-		prior := r.sampler.PredictorState(scaler, role.Name)
-		recommendation, next := engineAlgorithm.Recommend(observation, prior)
-		algorithmByRole[role.Name] = recommendation
-		predictorByRole[role.Name] = next
-		if recommendation.Reason == algorithm.ReasonWaitingForMetrics ||
-			(recommendation.Reason != algorithm.ReasonRatioCoupled && !observation.CompleteCoverage) {
-			metricsReady = false
-			metricsReasons = append(metricsReasons, role.Name+": "+strings.Join(obsSample.Reasons, "; "))
+	} else {
+		algorithmByRole = make(map[string]algorithm.RoleRecommendation, len(md.Spec.Roles))
+		predictorByRole = make(map[string]*algorithm.PredictorState, len(md.Spec.Roles))
+		states = make([]ModelDeploymentScalerRoleState, 0, len(md.Spec.Roles))
+		roleStatuses = make([]workercore.ModelDeploymentScalerRoleStatus, 0, len(md.Spec.Roles))
+		metricsReady = true
+		metricsReasons = make([]string, 0)
+		for i := range md.Spec.Roles {
+			role := &md.Spec.Roles[i]
+			observation, found := observations[role.Name]
+			if !found {
+				observation = algorithm.RoleObservation{
+					Role:            role.Name,
+					CurrentReplicas: role.Replicas,
+					Kind:            modelDeploymentScalerRoleKind(ModelDeploymentEffectiveRoleKind(role)),
+				}
+			}
+			observation.Role = role.Name
+			observation.CurrentReplicas = role.Replicas
+			obsSample := samples[role.Name]
+			engineAlgorithm, err := modelDeploymentScalerAlgorithmForRole(resolved.Algorithms[role.Name], role.Name)
+			if err != nil {
+				return ctrlreconcile.Result{}, err
+			}
+			history := r.sampler.StabilizationHistory(scaler, role.Name)
+			prior := r.sampler.PredictorState(scaler, role.Name)
+			recommendation, next := engineAlgorithm.Recommend(observation, prior)
+			algorithmByRole[role.Name] = recommendation
+			predictorByRole[role.Name] = next
+			if recommendation.Reason == algorithm.ReasonWaitingForMetrics ||
+				(recommendation.Reason != algorithm.ReasonRatioCoupled && !observation.CompleteCoverage) {
+				metricsReady = false
+				metricsReasons = append(metricsReasons, role.Name+": "+strings.Join(obsSample.Reasons, "; "))
+			}
+			roleStatuses = append(roleStatuses, roleStatusFromObservation(
+				scaler, role, observation, obsSample.Reasons, recommendation, history, next != nil,
+			))
+			states = append(states, ModelDeploymentScalerRoleState{
+				Name: role.Name, Kind: observation.Kind, CurrentReplicas: role.Replicas,
+				RawRecommendedReplicas:       recommendation.DesiredReplicas,
+				HoldScaleDown:                recommendation.HoldScaleDown,
+				CompleteCoverage:             observation.CompleteCoverage || recommendation.Reason == algorithm.ReasonRatioCoupled,
+				HasPendingUnadmittedWorkload: pendingByRole[role.Name] || scaler.Status.PendingCohort != nil,
+				LastScaleUpTime:              scalerRoleLastScaleUpTime(scaler.Status.Roles, role.Name),
+				StabilizationHistory:         history,
+			})
 		}
-		readyCount := int32(math.Max(0, float64(observation.ReadyReplicas)))
-		status := workercore.ModelDeploymentScalerRoleStatus{
-			Name: role.Name, CurrentReplicas: role.Replicas, ReadyReplicas: readyCount,
-			SignalState:               scalerObservationState(observation),
-			PromptTokensPerSecond:     quantityPointerFloat(observation.PromptTokensPerSecond),
-			GenerationTokensPerSecond: quantityPointerFloat(observation.GenerationTokensPerSecond),
-			RunningRequests:           int32(math.Max(0, math.Round(observation.RunningRequests))),
-			WaitingRequests:           int32(math.Max(0, math.Round(observation.WaitingRequests))),
-			KVCacheUsage:              quantityPointerFloat(observation.KVCacheUsage),
-			TTFTMilliseconds:          modelDeploymentScalerLatencyQuantity(observation.TTFTMilliseconds, observation.TTFTUnmeasured),
-			ITLMilliseconds:           modelDeploymentScalerLatencyQuantity(observation.ITLMilliseconds, observation.ITLUnmeasured),
-			RawRecommendedReplicas:    recommendation.DesiredReplicas,
-			Reason:                    recommendation.Reason,
-		}
-		if recommendation.Reason == algorithm.ReasonWaitingForMetrics && len(obsSample.Reasons) != 0 {
-			status.Reason += ": " + strings.Join(obsSample.Reasons, "; ")
-		}
-		if next != nil {
-			status.StabilizationHistory = history
-			status.LastScaleUpTime = scalerRoleLastScaleUp(scaler.Status.Roles, role.Name)
-		}
-		roleStatuses = append(roleStatuses, status)
-		states = append(states, ModelDeploymentScalerRoleState{
-			Name: role.Name, Kind: observation.Kind, CurrentReplicas: role.Replicas,
-			RawRecommendedReplicas:       recommendation.DesiredReplicas,
-			HoldScaleDown:                recommendation.HoldScaleDown,
-			CompleteCoverage:             observation.CompleteCoverage || recommendation.Reason == algorithm.ReasonRatioCoupled,
-			HasPendingUnadmittedWorkload: pendingByRole[role.Name] || scaler.Status.PendingCohort != nil,
-			LastScaleUpTime:              scalerRoleLastScaleUpTime(scaler.Status.Roles, role.Name),
-			StabilizationHistory:         history,
-		})
 	}
 
 	inAbortCooldown := scaler.Status.LastScaleDown != nil &&
 		scaler.Status.LastScaleDown.CooldownUntil != nil &&
 		now.Before(scaler.Status.LastScaleDown.CooldownUntil.Time)
 	constraint := SolveModelDeploymentScalerConstraints(ModelDeploymentScalerConstraintInput{
-		Spec:  scaler.Spec,
-		Roles: states,
-		HasActiveRetirement: md.Status.Retirement != nil &&
-			md.Status.Retirement.State != workercore.ModelDeploymentRetirementStateAborted &&
-			md.Status.Retirement.State != workercore.ModelDeploymentRetirementStateCompleted,
-		InAbortCooldown: inAbortCooldown,
-		Now:             now,
+		Spec:                scaler.Spec,
+		Roles:               states,
+		WholeUnit:           wholeUnit,
+		HasActiveRetirement: hasActiveRetirement,
+		InAbortCooldown:     inAbortCooldown,
+		Now:                 now,
 	})
 	for i := range roleStatuses {
 		status := &roleStatuses[i]
@@ -344,6 +379,10 @@ func (r *ModelDeploymentScalerReconciler) planWithPriors(
 			}
 		}
 		if anyScaleUp {
+			if scaler.Status.LastScaleDown != nil &&
+				scaler.Status.LastScaleDown.Outcome == workercore.ModelDeploymentScalerScaleDownOutcomeCommitted {
+				scaler.Status.LastScaleDown = nil
+			}
 			started := meta.NewTime(now)
 			scaler.Status.PendingCohort = &workercore.ModelDeploymentScalerPendingCohortStatus{
 				DecisionID: decisionID, Term: scalerTerm(scaler), BaselineVector: cloneReplicaVector(current),
@@ -653,4 +692,363 @@ func firstScaleDown(before, after map[string]int32) (string, int32) {
 func timePointer(now time.Time) *meta.Time {
 	value := meta.NewTime(now)
 	return &value
+}
+
+func hasSurplusDeploymentPod(pods []core.Pod, current map[string]int32) bool {
+	for i := range pods {
+		pod := &pods[i]
+		if pod.DeletionTimestamp == nil && (pod.Status.Phase == core.PodFailed || pod.Status.Phase == core.PodSucceeded) {
+			continue
+		}
+		role := modelDeploymentPodRole(pod)
+		if role == "" {
+			continue
+		}
+		target, ok := current[role]
+		if !ok {
+			continue
+		}
+		ordinal, ok := modelDeploymentPodOrdinal(pod)
+		if ok && int32(ordinal) >= target {
+			return true
+		}
+	}
+	return false
+}
+
+func shouldRestoreScaleDownAbort(
+	retirement *workercore.ModelDeploymentRetirementStatus,
+	lastScaleDown *workercore.ModelDeploymentScalerScaleDownStatus,
+	lastCommit *workercore.ModelDeploymentScalerCommitStatus,
+	current map[string]int32,
+) bool {
+	if retirement == nil || retirement.State != workercore.ModelDeploymentRetirementStateAborted {
+		return false
+	}
+	if lastScaleDown == nil || lastScaleDown.Outcome != workercore.ModelDeploymentScalerScaleDownOutcomeCommitted {
+		return false
+	}
+	if len(lastScaleDown.PreScaleDownVector) == 0 {
+		return false
+	}
+	// Ignore a historical Aborted status recorded prior to the current scale-down commit.
+	if lastCommit != nil && lastCommit.Timestamp != nil {
+		retTime := retirement.PhaseStartedAt
+		if retTime.IsZero() {
+			retTime = retirement.StartedAt
+		}
+		if !retTime.IsZero() && retTime.Before(lastCommit.Timestamp) {
+			return false
+		}
+	}
+	curCount, ok := current[retirement.RoleName]
+	if !ok {
+		return false
+	}
+	if preCount, hasPre := lastScaleDown.PreScaleDownVector[retirement.RoleName]; hasPre {
+		return retirement.ReplicaOrdinal >= curCount &&
+			retirement.ReplicaOrdinal < preCount
+	}
+	return lastScaleDown.Role == retirement.RoleName &&
+		lastScaleDown.Ordinal == retirement.ReplicaOrdinal &&
+		retirement.ReplicaOrdinal >= curCount
+}
+
+func wholeUnitMultiplier(roles []workercore.ModelDeploymentRole, unitVector map[string]int32) (int32, bool) {
+	if len(unitVector) == 0 || len(unitVector) != len(roles) {
+		return 0, false
+	}
+	seen := make(map[string]struct{}, len(roles))
+	var kCur int32
+	for i := range roles {
+		role := roles[i]
+		if _, dup := seen[role.Name]; dup {
+			return 0, false
+		}
+		seen[role.Name] = struct{}{}
+		unit, ok := unitVector[role.Name]
+		if !ok || unit <= 0 || role.Replicas < unit || role.Replicas%unit != 0 {
+			return 0, false
+		}
+		k := role.Replicas / unit
+		if k < 1 {
+			return 0, false
+		}
+		if i == 0 {
+			kCur = k
+		} else if k != kCur {
+			return 0, false
+		}
+	}
+	return kCur, kCur >= 1
+}
+
+func combineWholeUnitThroughputState(p, d algorithm.SignalState) algorithm.SignalState {
+	if p == "" || p == algorithm.SignalMissing || d == "" || d == algorithm.SignalMissing {
+		return algorithm.SignalMissing
+	}
+	if p == algorithm.SignalStale || d == algorithm.SignalStale {
+		return algorithm.SignalStale
+	}
+	if p == algorithm.SignalFresh || d == algorithm.SignalFresh {
+		return algorithm.SignalFresh
+	}
+	return algorithm.SignalIdle
+}
+
+func combineWholeUnitLatencyState(p, d algorithm.SignalState, pHasTTFT, dHasITL bool) algorithm.SignalState {
+	if pHasTTFT || dHasITL {
+		return algorithm.SignalFresh
+	}
+	if p == "" || p == algorithm.SignalMissing || d == "" || d == algorithm.SignalMissing {
+		return algorithm.SignalMissing
+	}
+	if p == algorithm.SignalStale || d == algorithm.SignalStale {
+		return algorithm.SignalStale
+	}
+	return algorithm.SignalIdle
+}
+
+func roleStatusFromObservation(
+	scaler *workercore.ModelDeploymentScaler,
+	role *workercore.ModelDeploymentRole,
+	observation algorithm.RoleObservation,
+	obsReasons []string,
+	recommendation algorithm.RoleRecommendation,
+	history []workercore.ModelDeploymentScalerStabilizationSample,
+	hasPredictor bool,
+) workercore.ModelDeploymentScalerRoleStatus {
+	readyCount := max(int32(0), observation.ReadyReplicas)
+	status := workercore.ModelDeploymentScalerRoleStatus{
+		Name: role.Name, CurrentReplicas: role.Replicas, ReadyReplicas: readyCount,
+		SignalState:               scalerObservationState(observation),
+		PromptTokensPerSecond:     quantityPointerFloat(observation.PromptTokensPerSecond),
+		GenerationTokensPerSecond: quantityPointerFloat(observation.GenerationTokensPerSecond),
+		RunningRequests:           clampNonNegativeRoundedInt32(observation.RunningRequests),
+		WaitingRequests:           clampNonNegativeRoundedInt32(observation.WaitingRequests),
+		KVCacheUsage:              quantityPointerFloat(observation.KVCacheUsage),
+		TTFTMilliseconds:          modelDeploymentScalerLatencyQuantity(observation.TTFTMilliseconds, observation.TTFTUnmeasured),
+		ITLMilliseconds:           modelDeploymentScalerLatencyQuantity(observation.ITLMilliseconds, observation.ITLUnmeasured),
+		RawRecommendedReplicas:    recommendation.DesiredReplicas,
+		Reason:                    recommendation.Reason,
+	}
+	if recommendation.Reason == algorithm.ReasonWaitingForMetrics && len(obsReasons) != 0 {
+		status.Reason += ": " + strings.Join(obsReasons, "; ")
+	}
+	if hasPredictor {
+		status.StabilizationHistory = history
+		status.LastScaleUpTime = scalerRoleLastScaleUp(scaler.Status.Roles, role.Name)
+	}
+	return status
+}
+
+func clampNonNegativeRoundedInt32(value float64) int32 {
+	if math.IsNaN(value) || value <= 0 {
+		return 0
+	}
+	if math.IsInf(value, 1) {
+		return math.MaxInt32
+	}
+	rounded := math.Round(value)
+	if rounded >= float64(math.MaxInt32) {
+		return math.MaxInt32
+	}
+	return int32(rounded)
+}
+
+func wholeUnitObservedAt(prefillObs, decodeObs algorithm.RoleObservation, now time.Time) time.Time {
+	unitObservedAt := now
+	if !prefillObs.ObservedAt.IsZero() && (decodeObs.ObservedAt.IsZero() || !decodeObs.ObservedAt.After(prefillObs.ObservedAt)) {
+		unitObservedAt = prefillObs.ObservedAt
+	} else if !decodeObs.ObservedAt.IsZero() {
+		unitObservedAt = decodeObs.ObservedAt
+	}
+	return unitObservedAt
+}
+
+func buildWholeUnitObservation(
+	md *workercore.ModelDeployment,
+	uPrior *ModelDeploymentScalerWholeUnitPrior,
+	observations map[string]algorithm.RoleObservation,
+	kCur int32,
+	now time.Time,
+) (map[string]algorithm.RoleObservation, algorithm.RoleObservation, bool) {
+	roleObs := make(map[string]algorithm.RoleObservation, len(md.Spec.Roles))
+	for i := range md.Spec.Roles {
+		role := &md.Spec.Roles[i]
+		obs, found := observations[role.Name]
+		if !found {
+			obs = algorithm.RoleObservation{
+				Role:            role.Name,
+				CurrentReplicas: role.Replicas,
+				Kind:            modelDeploymentScalerRoleKind(ModelDeploymentEffectiveRoleKind(role)),
+			}
+		}
+		obs.Role = role.Name
+		obs.CurrentReplicas = role.Replicas
+		roleObs[role.Name] = obs
+	}
+
+	prefillObs := roleObs[uPrior.PrefillRole]
+	decodeObs := roleObs[uPrior.DecodeRole]
+	pUnit := uPrior.UnitVector[uPrior.PrefillRole]
+	dUnit := uPrior.UnitVector[uPrior.DecodeRole]
+	if pUnit <= 0 || dUnit <= 0 {
+		return roleObs, algorithm.RoleObservation{Role: uPrior.DecodeRole, Kind: algorithm.RoleKindServer, CurrentReplicas: kCur}, false
+	}
+	unitReady := prefillObs.ReadyReplicas / pUnit
+	if dReady := decodeObs.ReadyReplicas / dUnit; dReady < unitReady {
+		unitReady = dReady
+	}
+	encodeReady := true
+	if uPrior.EncodeRole != "" {
+		encodeObs := roleObs[uPrior.EncodeRole]
+		eUnit := uPrior.UnitVector[uPrior.EncodeRole]
+		if eUnit <= 0 {
+			return roleObs, algorithm.RoleObservation{Role: uPrior.DecodeRole, Kind: algorithm.RoleKindServer, CurrentReplicas: kCur}, false
+		}
+		if eReady := encodeObs.ReadyReplicas / eUnit; eReady < unitReady {
+			unitReady = eReady
+		}
+		encodeReady = encodeObs.ReadyReplicas >= encodeObs.CurrentReplicas
+	}
+	if unitReady < 0 {
+		unitReady = 0
+	}
+
+	prefillHasTTFT := !prefillObs.TTFTUnmeasured && prefillObs.LatencyState == algorithm.SignalFresh
+	decodeHasITL := !decodeObs.ITLUnmeasured && decodeObs.LatencyState == algorithm.SignalFresh
+	ttftMs := 0.0
+	if prefillHasTTFT {
+		ttftMs = prefillObs.TTFTMilliseconds
+	}
+	itlMs := 0.0
+	if decodeHasITL {
+		itlMs = decodeObs.ITLMilliseconds
+	}
+
+	unitCompleteCoverage := prefillObs.CompleteCoverage && decodeObs.CompleteCoverage && encodeReady
+	unitObs := algorithm.RoleObservation{
+		Role:                      uPrior.DecodeRole,
+		Kind:                      algorithm.RoleKindServer,
+		CurrentReplicas:           kCur,
+		ReadyReplicas:             unitReady,
+		RunningRequests:           prefillObs.RunningRequests + decodeObs.RunningRequests,
+		WaitingRequests:           prefillObs.WaitingRequests + decodeObs.WaitingRequests,
+		KVCacheUsage:              math.Max(prefillObs.KVCacheUsage, decodeObs.KVCacheUsage),
+		PromptTokensPerSecond:     prefillObs.PromptTokensPerSecond,
+		GenerationTokensPerSecond: decodeObs.GenerationTokensPerSecond,
+		TTFTMilliseconds:          ttftMs,
+		TTFTUnmeasured:            !prefillHasTTFT,
+		ITLMilliseconds:           itlMs,
+		ITLUnmeasured:             !decodeHasITL,
+		ThroughputState:           combineWholeUnitThroughputState(prefillObs.ThroughputState, decodeObs.ThroughputState),
+		LatencyState:              combineWholeUnitLatencyState(prefillObs.LatencyState, decodeObs.LatencyState, prefillHasTTFT, decodeHasITL),
+		CompleteCoverage:          unitCompleteCoverage,
+		ObservedAt:                wholeUnitObservedAt(prefillObs, decodeObs, now),
+	}
+	return roleObs, unitObs, encodeReady
+}
+
+func (r *ModelDeploymentScalerReconciler) planWholeUnitStates(
+	scaler *workercore.ModelDeploymentScaler,
+	md *workercore.ModelDeployment,
+	resolved *ModelDeploymentScalerCapacityPriors,
+	observations map[string]algorithm.RoleObservation,
+	pendingByRole map[string]bool,
+	kCur int32,
+	now time.Time,
+) (
+	map[string]algorithm.RoleRecommendation,
+	map[string]*algorithm.PredictorState,
+	[]ModelDeploymentScalerRoleState,
+	[]workercore.ModelDeploymentScalerRoleStatus,
+	bool,
+	[]string,
+	error,
+) {
+	uPrior := resolved.WholeUnit
+	samples := r.sampler.RoleSamples(scaler)
+	roleObs, unitObs, encodeReady := buildWholeUnitObservation(md, uPrior, observations, kCur, now)
+
+	engineAlgorithm, err := modelDeploymentScalerAlgorithmForRole(resolved.Algorithms[uPrior.DecodeRole], uPrior.DecodeRole)
+	if err != nil {
+		return nil, nil, nil, nil, false, nil, err
+	}
+	switch typed := engineAlgorithm.(type) {
+	case algorithm.TokenThroughput:
+		typed.ServerTargetTokensPerSecond = uPrior.UnitTargetTokensPerSecond
+		engineAlgorithm = typed
+	case algorithm.Predictive:
+		typed.ServerTargetTokensPerSecond = uPrior.UnitTargetTokensPerSecond
+		typed.ServerTokenCapacityPerReplica = uPrior.UnitTargetTokensPerSecond
+		engineAlgorithm = typed
+	}
+
+	unitRec, unitNext := engineAlgorithm.Recommend(unitObs, r.sampler.PredictorState(scaler, uPrior.DecodeRole))
+	metricsReady := true
+	metricsReasons := make([]string, 0)
+	if unitRec.Reason == algorithm.ReasonWaitingForMetrics || !unitObs.CompleteCoverage {
+		metricsReady = false
+		for _, roleName := range []string{uPrior.PrefillRole, uPrior.DecodeRole} {
+			if s := samples[roleName]; len(s.Reasons) > 0 {
+				metricsReasons = append(metricsReasons, roleName+": "+strings.Join(s.Reasons, "; "))
+			}
+		}
+		if !encodeReady && uPrior.EncodeRole != "" {
+			metricsReasons = append(metricsReasons, uPrior.EncodeRole+": waiting for encode replicas to become ready")
+		}
+	}
+
+	maxUnit := int32(1)
+	for _, unit := range uPrior.UnitVector {
+		if unit > maxUnit {
+			maxUnit = unit
+		}
+	}
+	maxSafeUnits := int32(math.MaxInt32) / maxUnit
+	rawUnits := unitRec.DesiredReplicas
+	if rawUnits > 0 {
+		rawUnits = clamp(rawUnits, 1, maxSafeUnits)
+	}
+
+	algorithmByRole := make(map[string]algorithm.RoleRecommendation, len(md.Spec.Roles))
+	predictorByRole := map[string]*algorithm.PredictorState{uPrior.DecodeRole: unitNext}
+	states := make([]ModelDeploymentScalerRoleState, 0, len(md.Spec.Roles))
+	roleStatuses := make([]workercore.ModelDeploymentScalerRoleStatus, 0, len(md.Spec.Roles))
+	for i := range md.Spec.Roles {
+		role := &md.Spec.Roles[i]
+		obs := roleObs[role.Name]
+		unit := uPrior.UnitVector[role.Name]
+		rawReplicas := checkedMulInt32(rawUnits, unit)
+		roleReason := unitRec.Reason
+		if role.Name == uPrior.EncodeRole && unitRec.Reason != algorithm.ReasonWaitingForMetrics && encodeReady {
+			roleReason = algorithm.ReasonRatioCoupled
+		}
+		rec := algorithm.RoleRecommendation{
+			DesiredReplicas: rawReplicas,
+			Reason:          roleReason,
+			HoldScaleDown:   unitRec.HoldScaleDown,
+			InPanic:         unitRec.InPanic,
+		}
+		algorithmByRole[role.Name] = rec
+		history := r.sampler.StabilizationHistory(scaler, role.Name)
+		obsReasons := samples[role.Name].Reasons
+		if role.Name == uPrior.EncodeRole && roleReason != algorithm.ReasonWaitingForMetrics {
+			obsReasons = nil
+		}
+		roleStatuses = append(roleStatuses, roleStatusFromObservation(
+			scaler, role, obs, obsReasons, rec, history, unitNext != nil,
+		))
+		states = append(states, ModelDeploymentScalerRoleState{
+			Name: role.Name, Kind: obs.Kind, CurrentReplicas: role.Replicas,
+			RawRecommendedReplicas:       rawReplicas,
+			HoldScaleDown:                unitRec.HoldScaleDown,
+			CompleteCoverage:             unitObs.CompleteCoverage,
+			HasPendingUnadmittedWorkload: pendingByRole[role.Name] || scaler.Status.PendingCohort != nil,
+			LastScaleUpTime:              scalerRoleLastScaleUpTime(scaler.Status.Roles, role.Name),
+			StabilizationHistory:         history,
+		})
+	}
+	return algorithmByRole, predictorByRole, states, roleStatuses, metricsReady, metricsReasons, nil
 }

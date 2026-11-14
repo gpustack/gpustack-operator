@@ -13,6 +13,7 @@ PACKAGE_ARCH=${PACKAGE_ARCH:-$(uname -m | sed 's/aarch64/arm64/' | sed 's/x86_64
 PACKAGE_TAG=${PACKAGE_TAG:-dev}
 PACKAGE_WITH_CACHE=${PACKAGE_WITH_CACHE:-true}
 PACKAGE_PUSH=${PACKAGE_PUSH:-false}
+PACKAGE_CI=${PACKAGE_CI:-}
 
 function pack() {
   local tasks
@@ -68,6 +69,13 @@ function pack() {
     for label in "${labels[@]}"; do
       extra_args+=("--label" "${label}")
     done
+    # Iterative dev and E2E builds pass PACKAGE_CI=false from build-load.sh so the container
+    # runs `make build` instead of repeating `make ci` (lint + commit-lint + unit tests) on a
+    # checkout that may be intentionally dirty. Leaving PACKAGE_CI unset preserves `make ci`
+    # for release and CI builds.
+    if [[ "${task}" == "gpustack-operator" ]] && [[ -n "${PACKAGE_CI}" ]]; then
+      extra_args+=("--build-arg" "GPUSTACK_BUILD_CI=${PACKAGE_CI}")
+    fi
     # The T-Head PPU SDK is only distributed as a presigned object-storage link, so the
     # thead-ppu-devel image takes it as a build argument instead of hardcoding it, passed
     # through from the environment when set. Only that task consumes it: the `set -x` below

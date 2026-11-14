@@ -1,6 +1,7 @@
 package worker
 
 import (
+	"math"
 	"testing"
 	"time"
 
@@ -208,4 +209,590 @@ func TestScalerConstraintsStarGraphMultipleNeighbors(t *testing.T) {
 	if result.Replicas["center"] != 4 || result.Replicas["leaf1"] != 2 || result.Replicas["leaf2"] != 2 {
 		t.Fatalf("star graph projection = %#v", result.Replicas)
 	}
+}
+
+func TestScalerConstraintsWholeUnit1P3DAnd1E1P2D(t *testing.T) {
+	now := time.Unix(2000, 0).UTC()
+	old := now.Add(-10 * time.Minute)
+	recent := now.Add(-20 * time.Second)
+
+	makeHistory := func(t1Val, t2Val int32) []v1alpha1.ModelDeploymentScalerStabilizationSample {
+		return []v1alpha1.ModelDeploymentScalerStabilizationSample{
+			{Timestamp: metav1Time(old), Replicas: t1Val},
+			{Timestamp: metav1Time(recent), Replicas: t2Val},
+		}
+	}
+
+	t.Run("1P:3D scale up 1x to 2x", func(t *testing.T) {
+		spec := constraintSpec("prefill", "decode")
+		spec.Roles = []v1alpha1.ModelDeploymentScalerRoleBounds{
+			{Name: "prefill", MinReplicas: 1, MaxReplicas: 4},
+			{Name: "decode", MinReplicas: 3, MaxReplicas: 12},
+		}
+		p := roleState("prefill", 1, 2)
+		p.Kind = algorithm.RoleKindPrefill
+		d := roleState("decode", 3, 6)
+		d.Kind = algorithm.RoleKindDecode
+
+		res := SolveModelDeploymentScalerConstraints(ModelDeploymentScalerConstraintInput{
+			Spec:      spec,
+			Roles:     []ModelDeploymentScalerRoleState{p, d},
+			WholeUnit: map[string]int32{"prefill": 1, "decode": 3},
+			Now:       now,
+		})
+		if res.BlockingReason != "" {
+			t.Fatalf("unexpected blocking reason: %q", res.BlockingReason)
+		}
+		if res.Replicas["prefill"] != 2 || res.Replicas["decode"] != 6 {
+			t.Fatalf("expected 2P:6D, got %#v", res.Replicas)
+		}
+	})
+
+	t.Run("1P:3D scale down 2x to 1x does not deadlock on u_D=3", func(t *testing.T) {
+		spec := constraintSpec("prefill", "decode")
+		spec.Roles = []v1alpha1.ModelDeploymentScalerRoleBounds{
+			{Name: "prefill", MinReplicas: 1, MaxReplicas: 4},
+			{Name: "decode", MinReplicas: 3, MaxReplicas: 12},
+		}
+		p := roleState("prefill", 2, 1)
+		p.Kind = algorithm.RoleKindPrefill
+		p.StabilizationHistory = makeHistory(1, 1)
+		d := roleState("decode", 6, 3)
+		d.Kind = algorithm.RoleKindDecode
+		d.StabilizationHistory = makeHistory(3, 3)
+
+		res := SolveModelDeploymentScalerConstraints(ModelDeploymentScalerConstraintInput{
+			Spec:      spec,
+			Roles:     []ModelDeploymentScalerRoleState{p, d},
+			WholeUnit: map[string]int32{"prefill": 1, "decode": 3},
+			Now:       now,
+		})
+		if res.BlockingReason != "" {
+			t.Fatalf("unexpected blocking reason: %q", res.BlockingReason)
+		}
+		if res.Replicas["prefill"] != 1 || res.Replicas["decode"] != 3 {
+			t.Fatalf("expected 1P:3D, got %#v", res.Replicas)
+		}
+	})
+
+	t.Run("1E:1P:2D atomic scale up and scale down", func(t *testing.T) {
+		spec := constraintSpec("encode", "prefill", "decode")
+		spec.Roles = []v1alpha1.ModelDeploymentScalerRoleBounds{
+			{Name: "encode", MinReplicas: 1, MaxReplicas: 4},
+			{Name: "prefill", MinReplicas: 1, MaxReplicas: 4},
+			{Name: "decode", MinReplicas: 2, MaxReplicas: 8},
+		}
+		e := roleState("encode", 1, 2)
+		e.Kind = algorithm.RoleKindEncode
+		p := roleState("prefill", 1, 2)
+		p.Kind = algorithm.RoleKindPrefill
+		d := roleState("decode", 2, 4)
+		d.Kind = algorithm.RoleKindDecode
+
+		upRes := SolveModelDeploymentScalerConstraints(ModelDeploymentScalerConstraintInput{
+			Spec:      spec,
+			Roles:     []ModelDeploymentScalerRoleState{e, p, d},
+			WholeUnit: map[string]int32{"encode": 1, "prefill": 1, "decode": 2},
+			Now:       now,
+		})
+		if upRes.Replicas["encode"] != 2 || upRes.Replicas["prefill"] != 2 || upRes.Replicas["decode"] != 4 {
+			t.Fatalf("expected 2E:2P:4D, got %#v", upRes.Replicas)
+		}
+
+		eDown := roleState("encode", 2, 1)
+		eDown.Kind = algorithm.RoleKindEncode
+		eDown.StabilizationHistory = makeHistory(1, 1)
+		pDown := roleState("prefill", 2, 1)
+		pDown.Kind = algorithm.RoleKindPrefill
+		pDown.StabilizationHistory = makeHistory(1, 1)
+		dDown := roleState("decode", 4, 2)
+		dDown.Kind = algorithm.RoleKindDecode
+		dDown.StabilizationHistory = makeHistory(2, 2)
+
+		downRes := SolveModelDeploymentScalerConstraints(ModelDeploymentScalerConstraintInput{
+			Spec:      spec,
+			Roles:     []ModelDeploymentScalerRoleState{eDown, pDown, dDown},
+			WholeUnit: map[string]int32{"encode": 1, "prefill": 1, "decode": 2},
+			Now:       now,
+		})
+		if downRes.Replicas["encode"] != 1 || downRes.Replicas["prefill"] != 1 || downRes.Replicas["decode"] != 2 {
+			t.Fatalf("expected 1E:1P:2D, got %#v", downRes.Replicas)
+		}
+	})
+
+	t.Run("explicit step policy smaller than unit holds and percent floors to units", func(t *testing.T) {
+		spec := constraintSpec("prefill", "decode")
+		spec.Roles = []v1alpha1.ModelDeploymentScalerRoleBounds{
+			{Name: "prefill", MinReplicas: 1, MaxReplicas: 4},
+			{Name: "decode", MinReplicas: 3, MaxReplicas: 12},
+		}
+		// ScaleUp StepPolicy Pods=2 < u_D=3 -> holds at 1x.
+		spec.Behavior.ScaleUp.StepPolicy = &v1alpha1.ModelDeploymentScalerStepPolicy{
+			Type:  v1alpha1.ModelDeploymentScalerStepPolicyTypePods,
+			Value: 2,
+		}
+		p := roleState("prefill", 1, 2)
+		d := roleState("decode", 3, 6)
+		d.Kind = algorithm.RoleKindDecode
+		held := SolveModelDeploymentScalerConstraints(ModelDeploymentScalerConstraintInput{
+			Spec:      spec,
+			Roles:     []ModelDeploymentScalerRoleState{p, d},
+			WholeUnit: map[string]int32{"prefill": 1, "decode": 3},
+			Now:       now,
+		})
+		if held.Replicas["prefill"] != 1 || held.Replicas["decode"] != 3 {
+			t.Fatalf("expected hold when Pods step < u_D, got %#v", held.Replicas)
+		}
+		if held.BlockingReason != v1alpha1.ModelDeploymentScalerReasonPacingBounded {
+			t.Fatalf("expected PacingBounded, got %q", held.BlockingReason)
+		}
+
+		// ScaleUp MaxStepPercent=25 at 2x (2P:6D): ceil(2*0.25)=1 for P (1 unit), ceil(6*0.25)=2 for D (0 units) -> holds.
+		spec.Behavior.ScaleUp.StepPolicy = nil
+		spec.Behavior.ScaleUp.MaxStepPercent = 25
+		p2 := roleState("prefill", 2, 3)
+		d2 := roleState("decode", 6, 9)
+		d2.Kind = algorithm.RoleKindDecode
+		pctHeld := SolveModelDeploymentScalerConstraints(ModelDeploymentScalerConstraintInput{
+			Spec:      spec,
+			Roles:     []ModelDeploymentScalerRoleState{p2, d2},
+			WholeUnit: map[string]int32{"prefill": 1, "decode": 3},
+			Now:       now,
+		})
+		if pctHeld.Replicas["prefill"] != 2 || pctHeld.Replicas["decode"] != 6 {
+			t.Fatalf("expected percent step < 1 unit on D to hold at 2P:6D, got %#v", pctHeld.Replicas)
+		}
+
+		// ScaleUp MaxStepPercent=50 at 2x (2P:6D): ceil(2*0.5)=1 P (1 unit), ceil(6*0.5)=3 D (1 unit) -> +1 unit to 3P:9D.
+		spec.Behavior.ScaleUp.MaxStepPercent = 50
+		pctStep := SolveModelDeploymentScalerConstraints(ModelDeploymentScalerConstraintInput{
+			Spec:      spec,
+			Roles:     []ModelDeploymentScalerRoleState{p2, d2},
+			WholeUnit: map[string]int32{"prefill": 1, "decode": 3},
+			Now:       now,
+		})
+		if pctStep.Replicas["prefill"] != 3 || pctStep.Replicas["decode"] != 9 {
+			t.Fatalf("expected +1 unit to 3P:9D, got %#v", pctStep.Replicas)
+		}
+
+		// Explicit ScaleDown StepPolicy Pods=2 < u_D=3 -> holds at 2P:6D.
+		spec.Behavior.ScaleDown.StepPolicy = &v1alpha1.ModelDeploymentScalerStepPolicy{
+			Type:  v1alpha1.ModelDeploymentScalerStepPolicyTypePods,
+			Value: 2,
+		}
+		pDown := roleState("prefill", 2, 1)
+		pDown.StabilizationHistory = makeHistory(1, 1)
+		dDown := roleState("decode", 6, 3)
+		dDown.Kind = algorithm.RoleKindDecode
+		dDown.StabilizationHistory = makeHistory(3, 3)
+		downHeld := SolveModelDeploymentScalerConstraints(ModelDeploymentScalerConstraintInput{
+			Spec:      spec,
+			Roles:     []ModelDeploymentScalerRoleState{pDown, dDown},
+			WholeUnit: map[string]int32{"prefill": 1, "decode": 3},
+			Now:       now,
+		})
+		if downHeld.Replicas["prefill"] != 2 || downHeld.Replicas["decode"] != 6 {
+			t.Fatalf("expected ScaleDown hold when Pods step < u_D, got %#v", downHeld.Replicas)
+		}
+	})
+
+	t.Run("feasible bounds and RatioConflict", func(t *testing.T) {
+		spec := constraintSpec("prefill", "decode")
+		spec.Roles = []v1alpha1.ModelDeploymentScalerRoleBounds{
+			{Name: "prefill", MinReplicas: 1, MaxReplicas: 1},
+			{Name: "decode", MinReplicas: 6, MaxReplicas: 12},
+		}
+		p := roleState("prefill", 1, 2)
+		d := roleState("decode", 3, 6)
+		d.Kind = algorithm.RoleKindDecode
+		res := SolveModelDeploymentScalerConstraints(ModelDeploymentScalerConstraintInput{
+			Spec:      spec,
+			Roles:     []ModelDeploymentScalerRoleState{p, d},
+			WholeUnit: map[string]int32{"prefill": 1, "decode": 3},
+			Now:       now,
+		})
+		if res.BlockingReason != v1alpha1.ModelDeploymentScalerReasonRatioConflict {
+			t.Fatalf("expected RatioConflict, got %q", res.BlockingReason)
+		}
+	})
+
+	t.Run("stabilization window and scale-down/scale-up holds", func(t *testing.T) {
+		spec := constraintSpec("prefill", "decode")
+		spec.Roles = []v1alpha1.ModelDeploymentScalerRoleBounds{
+			{Name: "prefill", MinReplicas: 1, MaxReplicas: 4},
+			{Name: "decode", MinReplicas: 3, MaxReplicas: 12},
+		}
+		spec.Behavior.ScaleUp.StabilizationWindowSeconds = 60
+		pUp := roleState("prefill", 1, 2)
+		dUp := roleState("decode", 3, 6)
+		dUp.Kind = algorithm.RoleKindDecode
+		// Short history doesn't span upWindow -> hold scale-up.
+		pUp.StabilizationHistory = []v1alpha1.ModelDeploymentScalerStabilizationSample{
+			{Timestamp: metav1Time(recent), Replicas: 2},
+		}
+		dUp.StabilizationHistory = []v1alpha1.ModelDeploymentScalerStabilizationSample{
+			{Timestamp: metav1Time(recent), Replicas: 6},
+		}
+		resUpHold := SolveModelDeploymentScalerConstraints(ModelDeploymentScalerConstraintInput{
+			Spec:      spec,
+			Roles:     []ModelDeploymentScalerRoleState{pUp, dUp},
+			WholeUnit: map[string]int32{"prefill": 1, "decode": 3},
+			Now:       now,
+		})
+		if resUpHold.Replicas["prefill"] != 1 || resUpHold.Replicas["decode"] != 3 {
+			t.Fatalf("expected scale-up hold under stabilization window, got %#v", resUpHold.Replicas)
+		}
+
+		// Scale-up blocked when pending workload exists.
+		spec.Behavior.ScaleUp.StabilizationWindowSeconds = 0
+		pUp.HasPendingUnadmittedWorkload = true
+		pUp.StabilizationHistory = nil
+		dUp.StabilizationHistory = nil
+		resPending := SolveModelDeploymentScalerConstraints(ModelDeploymentScalerConstraintInput{
+			Spec:      spec,
+			Roles:     []ModelDeploymentScalerRoleState{pUp, dUp},
+			WholeUnit: map[string]int32{"prefill": 1, "decode": 3},
+			Now:       now,
+		})
+		if resPending.Replicas["prefill"] != 1 || resPending.Replicas["decode"] != 3 {
+			t.Fatalf("expected scale-up hold when pending workload exists, got %#v", resPending.Replicas)
+		}
+
+		// Scale-down held on DecodePostScaleUpGraceSeconds, HoldScaleDown, InAbortCooldown, HasActiveRetirement, and stabilization max >= kCur.
+		baseDown := func() (ModelDeploymentScalerRoleState, ModelDeploymentScalerRoleState) {
+			p := roleState("prefill", 2, 1)
+			p.StabilizationHistory = makeHistory(1, 1)
+			d := roleState("decode", 6, 3)
+			d.Kind = algorithm.RoleKindDecode
+			d.StabilizationHistory = makeHistory(3, 3)
+			return p, d
+		}
+
+		p1, d1 := baseDown()
+		d1.LastScaleUpTime = now.Add(-10 * time.Second)
+		if res := SolveModelDeploymentScalerConstraints(ModelDeploymentScalerConstraintInput{
+			Spec: spec, Roles: []ModelDeploymentScalerRoleState{p1, d1},
+			WholeUnit: map[string]int32{"prefill": 1, "decode": 3}, Now: now,
+		}); res.Replicas["prefill"] != 2 || res.Replicas["decode"] != 6 {
+			t.Fatalf("expected Decode grace hold, got %#v", res.Replicas)
+		}
+
+		p2, d2 := baseDown()
+		p2.HoldScaleDown = true
+		if res := SolveModelDeploymentScalerConstraints(ModelDeploymentScalerConstraintInput{
+			Spec: spec, Roles: []ModelDeploymentScalerRoleState{p2, d2},
+			WholeUnit: map[string]int32{"prefill": 1, "decode": 3}, Now: now,
+		}); res.Replicas["prefill"] != 2 || res.Replicas["decode"] != 6 {
+			t.Fatalf("expected HoldScaleDown hold, got %#v", res.Replicas)
+		}
+
+		p3, d3 := baseDown()
+		if res := SolveModelDeploymentScalerConstraints(ModelDeploymentScalerConstraintInput{
+			Spec: spec, Roles: []ModelDeploymentScalerRoleState{p3, d3},
+			WholeUnit: map[string]int32{"prefill": 1, "decode": 3}, InAbortCooldown: true, Now: now,
+		}); res.Replicas["prefill"] != 2 || res.Replicas["decode"] != 6 {
+			t.Fatalf("expected InAbortCooldown hold, got %#v", res.Replicas)
+		}
+
+		p4, d4 := baseDown()
+		if res := SolveModelDeploymentScalerConstraints(ModelDeploymentScalerConstraintInput{
+			Spec: spec, Roles: []ModelDeploymentScalerRoleState{p4, d4},
+			WholeUnit: map[string]int32{"prefill": 1, "decode": 3}, HasActiveRetirement: true, Now: now,
+		}); res.Replicas["prefill"] != 2 || res.Replicas["decode"] != 6 {
+			t.Fatalf("expected HasActiveRetirement hold, got %#v", res.Replicas)
+		}
+
+		// History peak at 2x inside the 5-minute window blocks scale-down to 1x.
+		p5, d5 := baseDown()
+		d5.StabilizationHistory = []v1alpha1.ModelDeploymentScalerStabilizationSample{
+			{Timestamp: metav1Time(old), Replicas: 3},
+			{Timestamp: metav1Time(now.Add(-2 * time.Minute)), Replicas: 6},
+			{Timestamp: metav1Time(recent), Replicas: 3},
+		}
+		if res := SolveModelDeploymentScalerConstraints(ModelDeploymentScalerConstraintInput{
+			Spec: spec, Roles: []ModelDeploymentScalerRoleState{p5, d5},
+			WholeUnit: map[string]int32{"prefill": 1, "decode": 3}, Now: now,
+		}); res.Replicas["prefill"] != 2 || res.Replicas["decode"] != 6 {
+			t.Fatalf("expected stabilization max >= kCur hold, got %#v", res.Replicas)
+		}
+	})
+
+	t.Run("non-multiple current falls back to ratio projection", func(t *testing.T) {
+		spec := constraintSpec("prefill", "decode")
+		spec.Roles = []v1alpha1.ModelDeploymentScalerRoleBounds{
+			{Name: "prefill", MinReplicas: 1, MaxReplicas: 4},
+			{Name: "decode", MinReplicas: 3, MaxReplicas: 12},
+		}
+		spec.Ratios = []v1alpha1.ModelDeploymentScalerRoleRatio{
+			scalerRatio("decode", "prefill", "3", "3", "3"),
+		}
+		// Current is skewed (2P:4D) instead of 2P:6D -> fallback restores exact 3:1 ratio.
+		p := roleState("prefill", 2, 2)
+		d := roleState("decode", 4, 6)
+		d.Kind = algorithm.RoleKindDecode
+		res := SolveModelDeploymentScalerConstraints(ModelDeploymentScalerConstraintInput{
+			Spec:      spec,
+			Roles:     []ModelDeploymentScalerRoleState{p, d},
+			WholeUnit: map[string]int32{"prefill": 1, "decode": 3},
+			Now:       now,
+		})
+		if res.Replicas["prefill"] == 0 || res.Replicas["decode"] != 3*res.Replicas["prefill"] {
+			t.Fatalf("expected fallback ratio projection to satisfy 3:1, got %#v", res.Replicas)
+		}
+	})
+}
+
+func TestScalerConstraintsWholeUnitOverflowSaturation(t *testing.T) {
+	now := time.Unix(2000, 0).UTC()
+	old := now.Add(-10 * time.Minute)
+	recent := now.Add(-20 * time.Second)
+
+	t.Run("wholeUnitRawTarget handles math.MaxInt32 without negative wrap", func(t *testing.T) {
+		p := roleState("prefill", 6, math.MaxInt32)
+		p.Kind = algorithm.RoleKindPrefill
+		d := roleState("decode", 8, math.MaxInt32)
+		d.Kind = algorithm.RoleKindDecode
+		wholeUnit := map[string]int32{"prefill": 3, "decode": 4}
+		kRaw := wholeUnitRawTarget([]ModelDeploymentScalerRoleState{p, d}, wholeUnit, 2)
+		want := int32((int64(math.MaxInt32) + 2) / 3)
+		if kRaw != want {
+			t.Fatalf("wholeUnitRawTarget = %d, want %d", kRaw, want)
+		}
+	})
+
+	t.Run("solveWholeUnitConstraints scales up with RawRecommendedReplicas=MaxInt32 and StepPolicy Pods=MaxInt32", func(t *testing.T) {
+		spec := constraintSpec("prefill", "decode")
+		spec.Roles = []v1alpha1.ModelDeploymentScalerRoleBounds{
+			{Name: "prefill", MinReplicas: 3, MaxReplicas: 12},
+			{Name: "decode", MinReplicas: 4, MaxReplicas: 16},
+		}
+		spec.Behavior.ScaleUp.StepPolicy = &v1alpha1.ModelDeploymentScalerStepPolicy{
+			Type:  v1alpha1.ModelDeploymentScalerStepPolicyTypePods,
+			Value: math.MaxInt32,
+		}
+		p := roleState("prefill", 6, math.MaxInt32)
+		p.Kind = algorithm.RoleKindPrefill
+		p.StabilizationHistory = []v1alpha1.ModelDeploymentScalerStabilizationSample{
+			{Timestamp: metav1Time(old), Replicas: math.MaxInt32},
+			{Timestamp: metav1Time(recent), Replicas: math.MaxInt32},
+		}
+		d := roleState("decode", 8, math.MaxInt32)
+		d.Kind = algorithm.RoleKindDecode
+		d.StabilizationHistory = []v1alpha1.ModelDeploymentScalerStabilizationSample{
+			{Timestamp: metav1Time(old), Replicas: math.MaxInt32},
+			{Timestamp: metav1Time(recent), Replicas: math.MaxInt32},
+		}
+
+		res := SolveModelDeploymentScalerConstraints(ModelDeploymentScalerConstraintInput{
+			Spec:      spec,
+			Roles:     []ModelDeploymentScalerRoleState{p, d},
+			WholeUnit: map[string]int32{"prefill": 3, "decode": 4},
+			Now:       now,
+		})
+		if res.Replicas["prefill"] != 12 || res.Replicas["decode"] != 16 {
+			t.Fatalf("expected scale up to 12P:16D, got %#v (blocking=%q)", res.Replicas, res.BlockingReason)
+		}
+	})
+
+	t.Run("solveWholeUnitConstraints handles large MinReplicas without int32 overflow", func(t *testing.T) {
+		spec := constraintSpec("prefill", "decode")
+		// Choose MinReplicas near MaxInt32 where minimum+unit-1 would overflow int32.
+		unit := int32(3)
+		maxUnits := int32(math.MaxInt32) / 4
+		minP := maxUnits * unit
+		spec.Roles = []v1alpha1.ModelDeploymentScalerRoleBounds{
+			{Name: "prefill", MinReplicas: math.MaxInt32 - 1, MaxReplicas: math.MaxInt32},
+			{Name: "decode", MinReplicas: 4, MaxReplicas: math.MaxInt32},
+		}
+		// (math.MaxInt32 - 1 + 2) / 3 = 715827883 > maxUnits (536870911), so kMin > kMax -> RatioConflict cleanly.
+		p := roleState("prefill", minP, minP)
+		p.Kind = algorithm.RoleKindPrefill
+		d := roleState("decode", maxUnits*4, maxUnits*4)
+		d.Kind = algorithm.RoleKindDecode
+
+		res := SolveModelDeploymentScalerConstraints(ModelDeploymentScalerConstraintInput{
+			Spec:      spec,
+			Roles:     []ModelDeploymentScalerRoleState{p, d},
+			WholeUnit: map[string]int32{"prefill": 3, "decode": 4},
+			Now:       now,
+		})
+		if res.BlockingReason != v1alpha1.ModelDeploymentScalerReasonRatioConflict {
+			t.Fatalf("expected RatioConflict, got %q (replicas=%#v)", res.BlockingReason, res.Replicas)
+		}
+	})
+
+	t.Run("non-divisible current vector with WholeUnit blocks as RatioConflict instead of per-role fallback", func(t *testing.T) {
+		spec := constraintSpec("prefill", "decode")
+		spec.Roles = []v1alpha1.ModelDeploymentScalerRoleBounds{
+			{Name: "prefill", MinReplicas: 1, MaxReplicas: 12},
+			{Name: "decode", MinReplicas: 1, MaxReplicas: 16},
+		}
+		p := roleState("prefill", 2, 6)
+		p.Kind = algorithm.RoleKindPrefill
+		d := roleState("decode", 5, 10)
+		d.Kind = algorithm.RoleKindDecode
+
+		res := SolveModelDeploymentScalerConstraints(ModelDeploymentScalerConstraintInput{
+			Spec:      spec,
+			Roles:     []ModelDeploymentScalerRoleState{p, d},
+			WholeUnit: map[string]int32{"prefill": 1, "decode": 3},
+			Now:       now,
+		})
+		if res.BlockingReason != v1alpha1.ModelDeploymentScalerReasonRatioConflict {
+			t.Fatalf("expected RatioConflict, got %q", res.BlockingReason)
+		}
+		if res.Replicas["prefill"] != 2 || res.Replicas["decode"] != 5 {
+			t.Fatalf("expected current vector held at 2P:5D, got %#v", res.Replicas)
+		}
+		if res.Reasons["prefill"] != v1alpha1.ModelDeploymentScalerReasonRatioConflict ||
+			res.Reasons["decode"] != v1alpha1.ModelDeploymentScalerReasonRatioConflict {
+			t.Fatalf("expected RatioConflict reason on every role, got %#v", res.Reasons)
+		}
+	})
+
+	t.Run("whole-unit larger than default MaxStepReplicas scales up by one unit under default rules", func(t *testing.T) {
+		cases := []struct {
+			name         string
+			scaleUp      v1alpha1.ModelDeploymentScalerScaleUpRules
+			wantP, wantD int32
+			wantBlock    string
+		}{
+			{
+				name:  "zero-value ScaleUpRules defaults to max(4, 100%)",
+				wantP: 2, wantD: 16,
+			},
+			{
+				name: "webhook-defaulted ScaleUpRules(4, 100%) permits +1 unit on 1P:8D",
+				scaleUp: v1alpha1.ModelDeploymentScalerScaleUpRules{
+					MaxStepReplicas: 4,
+					MaxStepPercent:  100,
+				},
+				wantP: 2, wantD: 16,
+			},
+			{
+				name: "explicit MaxStepReplicas=4 without percent holds 1P:8D",
+				scaleUp: v1alpha1.ModelDeploymentScalerScaleUpRules{
+					MaxStepReplicas: 4,
+				},
+				wantP:     1,
+				wantD:     8,
+				wantBlock: v1alpha1.ModelDeploymentScalerReasonPacingBounded,
+			},
+		}
+		for _, tc := range cases {
+			t.Run(tc.name, func(t *testing.T) {
+				spec := constraintSpec("prefill", "decode")
+				spec.Roles = []v1alpha1.ModelDeploymentScalerRoleBounds{
+					{Name: "prefill", MinReplicas: 1, MaxReplicas: 4},
+					{Name: "decode", MinReplicas: 8, MaxReplicas: 32},
+				}
+				spec.Behavior.ScaleUp = tc.scaleUp
+				p := roleState("prefill", 1, 2)
+				p.Kind = algorithm.RoleKindPrefill
+				d := roleState("decode", 8, 16)
+				d.Kind = algorithm.RoleKindDecode
+				res := SolveModelDeploymentScalerConstraints(ModelDeploymentScalerConstraintInput{
+					Spec:      spec,
+					Roles:     []ModelDeploymentScalerRoleState{p, d},
+					WholeUnit: map[string]int32{"prefill": 1, "decode": 8},
+					Now:       now,
+				})
+				if res.Replicas["prefill"] != tc.wantP || res.Replicas["decode"] != tc.wantD {
+					t.Fatalf("replicas = %#v, want %dP:%dD", res.Replicas, tc.wantP, tc.wantD)
+				}
+				if res.BlockingReason != tc.wantBlock {
+					t.Fatalf("blockingReason = %q, want %q", res.BlockingReason, tc.wantBlock)
+				}
+			})
+		}
+	})
+
+	t.Run("duplicate role names with zero whole-unit entry do not divide by zero", func(t *testing.T) {
+		spec := constraintSpec("prefill")
+		spec.Roles = []v1alpha1.ModelDeploymentScalerRoleBounds{
+			{Name: "prefill", MinReplicas: 1, MaxReplicas: 4},
+		}
+		p := roleState("prefill", 1, 2)
+		res := SolveModelDeploymentScalerConstraints(ModelDeploymentScalerConstraintInput{
+			Spec:      spec,
+			Roles:     []ModelDeploymentScalerRoleState{p, p},
+			WholeUnit: map[string]int32{"prefill": 1, "decode": 0},
+			Now:       now,
+		})
+		if res.BlockingReason != v1alpha1.ModelDeploymentScalerReasonRatioConflict {
+			t.Fatalf("expected RatioConflict, got %q", res.BlockingReason)
+		}
+	})
+
+	t.Run("wholeUnitRawTarget honors prefill scale-up, asymmetric demand hold, and passive encode scale-down", func(t *testing.T) {
+		makeHistory := func(t1Val, t2Val int32) []v1alpha1.ModelDeploymentScalerStabilizationSample {
+			return []v1alpha1.ModelDeploymentScalerStabilizationSample{
+				{Timestamp: metav1Time(old), Replicas: t1Val},
+				{Timestamp: metav1Time(recent), Replicas: t2Val},
+			}
+		}
+		spec := constraintSpec("prefill", "decode")
+		spec.Roles = []v1alpha1.ModelDeploymentScalerRoleBounds{
+			{Name: "prefill", MinReplicas: 1, MaxReplicas: 4},
+			{Name: "decode", MinReplicas: 3, MaxReplicas: 12},
+		}
+
+		// Prefill needs 4 units while decode raw (6) is an exact multiple of u_D=3 (2 units) -> scales up to 4P:12D.
+		pUp := roleState("prefill", 2, 4)
+		pUp.Kind = algorithm.RoleKindPrefill
+		dSteady := roleState("decode", 6, 6)
+		dSteady.Kind = algorithm.RoleKindDecode
+		upRes := SolveModelDeploymentScalerConstraints(ModelDeploymentScalerConstraintInput{
+			Spec:      spec,
+			Roles:     []ModelDeploymentScalerRoleState{pUp, dSteady},
+			WholeUnit: map[string]int32{"prefill": 1, "decode": 3},
+			Now:       now,
+		})
+		if upRes.Replicas["prefill"] != 4 || upRes.Replicas["decode"] != 12 {
+			t.Fatalf("expected prefill-driven scale-up to 4P:12D, got %#v", upRes.Replicas)
+		}
+
+		// Prefill still needs 2 units while decode only needs 1 unit (raw=2) -> holds at 2P:6D instead of scaling down.
+		pHold := roleState("prefill", 2, 2)
+		pHold.Kind = algorithm.RoleKindPrefill
+		pHold.StabilizationHistory = makeHistory(2, 2)
+		dLow := roleState("decode", 6, 2)
+		dLow.Kind = algorithm.RoleKindDecode
+		dLow.StabilizationHistory = makeHistory(2, 2)
+		holdRes := SolveModelDeploymentScalerConstraints(ModelDeploymentScalerConstraintInput{
+			Spec:      spec,
+			Roles:     []ModelDeploymentScalerRoleState{pHold, dLow},
+			WholeUnit: map[string]int32{"prefill": 1, "decode": 3},
+			Now:       now,
+		})
+		if holdRes.Replicas["prefill"] != 2 || holdRes.Replicas["decode"] != 6 {
+			t.Fatalf("expected asymmetric demand hold at 2P:6D, got %#v", holdRes.Replicas)
+		}
+
+		// Passive Encode role with RawRecommendedReplicas == CurrentReplicas (2) does not block scale-down when P and D fit in 1 unit.
+		epdSpec := constraintSpec("encode", "prefill", "decode")
+		epdSpec.Roles = []v1alpha1.ModelDeploymentScalerRoleBounds{
+			{Name: "encode", MinReplicas: 1, MaxReplicas: 4},
+			{Name: "prefill", MinReplicas: 1, MaxReplicas: 4},
+			{Name: "decode", MinReplicas: 2, MaxReplicas: 8},
+		}
+		ePassive := roleState("encode", 2, 2)
+		ePassive.Kind = algorithm.RoleKindEncode
+		ePassive.StabilizationHistory = makeHistory(1, 1)
+		pLow := roleState("prefill", 2, 1)
+		pLow.Kind = algorithm.RoleKindPrefill
+		pLow.StabilizationHistory = makeHistory(1, 1)
+		dLowEPD := roleState("decode", 4, 1)
+		dLowEPD.Kind = algorithm.RoleKindDecode
+		dLowEPD.StabilizationHistory = makeHistory(1, 1)
+		downRes := SolveModelDeploymentScalerConstraints(ModelDeploymentScalerConstraintInput{
+			Spec:      epdSpec,
+			Roles:     []ModelDeploymentScalerRoleState{ePassive, pLow, dLowEPD},
+			WholeUnit: map[string]int32{"encode": 1, "prefill": 1, "decode": 2},
+			Now:       now,
+		})
+		if downRes.Replicas["encode"] != 1 || downRes.Replicas["prefill"] != 1 || downRes.Replicas["decode"] != 2 {
+			t.Fatalf("expected scale-down to 1E:1P:2D despite passive encode raw=2, got %#v", downRes.Replicas)
+		}
+	})
 }

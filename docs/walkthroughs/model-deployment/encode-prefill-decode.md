@@ -55,7 +55,7 @@ The recorded run used this cluster and model setup:
 | Cluster | Kubernetes v1.35.7; one CPU node and one GPU node (`gpu-node-0`) |
 | GPUs | 8 × NVIDIA H100 80 GB HBM3 SXM5; three GPUs assigned to roles |
 | `InstanceType` | `bench-gpu`, configured for the H100 accelerator group |
-| Model | `qwen2-5-vl-7b-instruct` for `Qwen/Qwen2.5-VL-7B-Instruct`; node model delivery mounts the weights at `/var/lib/gpustack/model`, served as `/models` |
+| Model | `qwen2-5-vl-7b-instruct` for `Qwen/Qwen2.5-VL-7B-Instruct`; node model delivery mounts the weights at `/var/lib/gpustack/model`. |
 | Runtime | vLLM `gpustack/runner:cuda13.0-vllm0.30.0`, with `llm-d-router` |
 
 ## Step 1: Start three-role serving
@@ -70,7 +70,7 @@ name `gpustack--nvidia-h100-80gb-hbm3-linux-amd64`.
 The recorded run used its custom `bench-gpu` `InstanceType`, configured for the same accelerator group.
 
 One *Encode*, one *Prefill* and one *Decode* replica each request one GPU. The `artifactRef` points to
-the existing `ModelArtifact`; *`spec.model.name`* exposes it to vLLM as `/models`. The *`spec.router`*
+the existing `ModelArtifact`; *`spec.model.name`* exposes it to vLLM as `qwen2-5-vl-7b-instruct`. The *`spec.router`*
 stanza deploys `llm-d-router` in front of the roles.
 
 ```yaml
@@ -81,7 +81,7 @@ metadata:
   namespace: gpustack-bench
 spec:
   model:
-    name: /models
+    name: qwen2-5-vl-7b-instruct
     artifactRef:
       name: qwen2-5-vl-7b-instruct
   engine:
@@ -180,9 +180,8 @@ role only, so `epd-deployment.yaml` declares neither in *`extraArgs`*. See
 [Keys the operator owns](../../modules/model-deployment/encode-prefill-decode.md#keys-the-operator-owns)
 for the rationale; do not copy `--enforce-eager` onto *Prefill* or *Decode*, which keep CUDA graphs.
 
-The following blocks are captured `Pod` excerpts, not manifests to apply. They include the `Pod`
-identity and container nesting so each generated field has its Kubernetes context; probes, volumes and
-other generated fields are omitted where they do not explain the configuration.
+The following `Pod` excerpts are captured examples, not manifests to apply. Probes, volumes and other
+generated fields are omitted where they do not explain the configuration.
 
 ```yaml
 apiVersion: v1
@@ -205,7 +204,7 @@ spec:
         - "114688"
         - --mm-encoder-only
         - --served-model-name
-        - /models
+        - qwen2-5-vl-7b-instruct
         - --max-model-len
         - "16384"
         - --gpu-memory-utilization
@@ -255,7 +254,7 @@ spec:
         - --kv-events-config
         - '{"enable_kv_cache_events":true,"publisher":"zmq","endpoint":"tcp://*:5557","replay_endpoint":"tcp://*:5558","buffer_steps":10000,"hwm":100000,"max_queue_size":100000,"topic":"kv@"}'
         - --served-model-name
-        - /models
+        - qwen2-5-vl-7b-instruct
         - --tensor-parallel-size
         - "1"
         - --max-model-len
@@ -299,7 +298,7 @@ spec:
         - --kv-transfer-config
         - '{"kv_connector":"MooncakeConnector","kv_role":"kv_consumer","kv_connector_extra_config":{"mooncake_protocol":"tcp"}}'
         - --served-model-name
-        - /models
+        - qwen2-5-vl-7b-instruct
         - --tensor-parallel-size
         - "1"
         - --max-model-len
@@ -328,6 +327,7 @@ http://epd-arm3-epd-router.gpustack-bench.svc:8000
 ```
 
 Send a multimodal chat completion to that endpoint from inside the cluster.
+Set `"model": "qwen2-5-vl-7b-instruct"` in `request.json`.
 Include a base64 PNG as an `image_url` part beside a text instruction to select the encoder:
 
 ```bash

@@ -467,3 +467,302 @@ func TestPredictorStateCopyIsolationAndSignalUsability(t *testing.T) {
 		t.Fatalf("next history len = %v, want 2", next)
 	}
 }
+
+func TestLatencyGuardWithMissingOrStaleThroughput(t *testing.T) {
+	base := time.Unix(100, 0)
+	tt := TokenThroughput{
+		ServerTargetTokensPerSecond: 100,
+		TTFTTargetMilliseconds:      100,
+		ITLTargetMilliseconds:       20,
+	}
+	pred := Predictive{
+		TokenThroughput:               tt,
+		ServerTokenCapacityPerReplica: 100,
+		HorizonSeconds:                300,
+		MinPoints:                     6,
+	}
+
+	for _, throughputState := range []SignalState{SignalMissing, SignalStale} {
+		for _, tc := range []struct {
+			name        string
+			ttft        float64
+			itl         float64
+			wantDesired int32
+			wantReason  string
+		}{
+			{
+				name:        "ratio_1.0",
+				ttft:        100,
+				itl:         20,
+				wantDesired: 2,
+				wantReason:  ReasonWaitingForMetrics,
+			},
+			{
+				name:        "ratio_1.1",
+				ttft:        110,
+				itl:         20,
+				wantDesired: 2,
+				wantReason:  ReasonLatencyGuardHold,
+			},
+			{
+				name:        "ratio_1.15_itl",
+				ttft:        100,
+				itl:         23,
+				wantDesired: 2,
+				wantReason:  ReasonLatencyGuardHold,
+			},
+			{
+				name:        "ratio_1.2",
+				ttft:        120,
+				itl:         20,
+				wantDesired: 2,
+				wantReason:  ReasonLatencyGuardHold,
+			},
+			{
+				name:        "ratio_gt_1.2_ttft",
+				ttft:        121,
+				itl:         10,
+				wantDesired: 3,
+				wantReason:  ReasonLatencyGuardScaleUp,
+			},
+			{
+				name:        "ratio_gt_1.2_itl",
+				ttft:        50,
+				itl:         25,
+				wantDesired: 3,
+				wantReason:  ReasonLatencyGuardScaleUp,
+			},
+		} {
+			t.Run(string(throughputState)+"/"+tc.name, func(t *testing.T) {
+				priorHistory := NewDemandHistory()
+				priorHistory.Push(DemandSample{Timestamp: base, TokensPerSecond: 80})
+				prior := &PredictorState{
+					Level:       80,
+					Trend:       4,
+					Covariance:  [4]float64{1, 0, 0, 1},
+					SampleCount: 6,
+					History:     priorHistory,
+				}
+				obs := freshObservation(base.Add(15 * time.Second))
+				obs.Kind = RoleKindServer
+				obs.CurrentReplicas = 2
+				obs.ReadyReplicas = 2
+				obs.ThroughputState = throughputState
+				obs.LatencyState = SignalFresh
+				obs.TTFTMilliseconds = tc.ttft
+				obs.ITLMilliseconds = tc.itl
+
+				recTT, stateTT := tt.Recommend(obs, prior)
+				if recTT.DesiredReplicas != tc.wantDesired || recTT.Reason != tc.wantReason || !recTT.HoldScaleDown {
+					t.Fatalf("TokenThroughput = %#v, want desired=%d reason=%s HoldScaleDown=true", recTT, tc.wantDesired, tc.wantReason)
+				}
+				if stateTT.History.Len() != 1 {
+					t.Fatalf("TokenThroughput appended sample on missing throughput: len=%d", stateTT.History.Len())
+				}
+
+				recPred, statePred := pred.Recommend(obs, prior)
+				if recPred.DesiredReplicas != tc.wantDesired || recPred.Reason != tc.wantReason || !recPred.HoldScaleDown {
+					t.Fatalf("Predictive = %#v, want desired=%d reason=%s HoldScaleDown=true", recPred, tc.wantDesired, tc.wantReason)
+				}
+				if statePred.History.Len() != 1 || statePred.SampleCount != 6 || statePred.Level != 80 || statePred.Trend != 4 {
+					t.Fatalf("Predictive mutated Kalman state on missing throughput: %#v", statePred)
+				}
+			})
+		}
+	}
+
+	// Zero ready replicas must still hold even on fresh latency breach.
+	obsNoReady := freshObservation(base.Add(30 * time.Second))
+	obsNoReady.Kind = RoleKindServer
+	obsNoReady.CurrentReplicas = 2
+	obsNoReady.ReadyReplicas = 0
+	obsNoReady.ThroughputState = SignalMissing
+	obsNoReady.LatencyState = SignalFresh
+	obsNoReady.TTFTMilliseconds = 200
+	if rec, _ := tt.Recommend(obsNoReady, nil); rec.DesiredReplicas != 2 || rec.Reason != ReasonNoReadyReplicas || !rec.HoldScaleDown {
+		t.Fatalf("no ready replicas = %#v", rec)
+	}
+}
+
+func TestTokenThroughputAndPredictiveExtremeDemandClamp(t *testing.T) {
+	base := time.Unix(200, 0)
+	tt := TokenThroughput{
+		ServerTargetTokensPerSecond: 1e-9,
+	}
+	pred := Predictive{
+		TokenThroughput:               tt,
+		ServerTokenCapacityPerReplica: 1e-9,
+		HorizonSeconds:                300,
+		MinPoints:                     2,
+	}
+
+	obs := freshObservation(base)
+	obs.Kind = RoleKindServer
+	obs.CurrentReplicas = 2
+	obs.ReadyReplicas = 2
+	obs.PromptTokensPerSecond = 10
+	obs.GenerationTokensPerSecond = 10
+
+	recTT, _ := tt.Recommend(obs, nil)
+	if recTT.DesiredReplicas != math.MaxInt32 {
+		t.Fatalf("TokenThroughput DesiredReplicas = %d, want %d", recTT.DesiredReplicas, math.MaxInt32)
+	}
+
+	prior := &PredictorState{
+		Level:       10,
+		Trend:       5,
+		Covariance:  [4]float64{1, 0, 0, 1},
+		SampleCount: 2,
+	}
+	obs2 := obs
+	obs2.ObservedAt = base.Add(15 * time.Second)
+	recPred, _ := pred.Recommend(obs2, prior)
+	if recPred.DesiredReplicas != math.MaxInt32 {
+		t.Fatalf("Predictive DesiredReplicas = %d, want %d", recPred.DesiredReplicas, math.MaxInt32)
+	}
+}
+
+func TestTokenThroughputAndPredictiveNonFiniteDemandHoldsCurrentReplicas(t *testing.T) {
+	base := time.Unix(300, 0)
+	tt := TokenThroughput{
+		ServerTargetTokensPerSecond: 100,
+	}
+	pred := Predictive{
+		TokenThroughput:               tt,
+		ServerTokenCapacityPerReplica: 100,
+		HorizonSeconds:                60,
+		MinPoints:                     2,
+	}
+
+	for _, nonFinite := range []float64{math.NaN(), math.Inf(1), math.Inf(-1)} {
+		obs := freshObservation(base)
+		obs.Kind = RoleKindServer
+		obs.CurrentReplicas = 4
+		obs.ReadyReplicas = 4
+		obs.PromptTokensPerSecond = nonFinite
+		obs.GenerationTokensPerSecond = 20
+
+		recTT, stateTT := tt.Recommend(obs, nil)
+		if recTT.DesiredReplicas != 4 || !recTT.HoldScaleDown || recTT.Reason != ReasonWaitingForMetrics {
+			t.Fatalf("TokenThroughput(%v) = %#v, want DesiredReplicas=4 HoldScaleDown=true Reason=WaitingForMetrics", nonFinite, recTT)
+		}
+		if stateTT != nil && stateTT.History != nil && stateTT.History.Len() != 0 {
+			t.Fatalf("TokenThroughput(%v) recorded non-finite sample in history: len=%d", nonFinite, stateTT.History.Len())
+		}
+
+		recPred, statePred := pred.Recommend(obs, nil)
+		if recPred.DesiredReplicas != 4 || !recPred.HoldScaleDown || recPred.Reason != ReasonWaitingForMetrics {
+			t.Fatalf("Predictive(%v) = %#v, want DesiredReplicas=4 HoldScaleDown=true Reason=WaitingForMetrics", nonFinite, recPred)
+		}
+		if statePred.SampleCount != 0 {
+			t.Fatalf("Predictive(%v) advanced SampleCount on non-finite input: %d", nonFinite, statePred.SampleCount)
+		}
+	}
+
+	// A corrupted NaN sample in prior history is skipped rather than poisoning windowMean into a 1-replica scale-down.
+	history := NewDemandHistory()
+	history.Push(DemandSample{Timestamp: base.Add(-15 * time.Second), TokensPerSecond: math.NaN()})
+	prior := &PredictorState{History: history}
+	validObs := freshObservation(base)
+	validObs.Kind = RoleKindServer
+	validObs.CurrentReplicas = 4
+	validObs.ReadyReplicas = 4
+	validObs.PromptTokensPerSecond = 250
+	validObs.GenerationTokensPerSecond = 100
+	recAfterCorruptHistory, _ := tt.Recommend(validObs, prior)
+	if recAfterCorruptHistory.DesiredReplicas != 4 {
+		t.Fatalf("corrupted NaN history sample skewed recommendation: got %#v, want DesiredReplicas=4", recAfterCorruptHistory)
+	}
+}
+
+func TestAlgorithmOverflowAndUnknownRoleBoundaries(t *testing.T) {
+	base := time.Unix(500, 0)
+	tt := TokenThroughput{
+		ServerTargetTokensPerSecond: 100,
+		TTFTTargetMilliseconds:      100,
+		ITLTargetMilliseconds:       20,
+	}
+	pred := Predictive{
+		TokenThroughput:               tt,
+		ServerTokenCapacityPerReplica: 100,
+		HorizonSeconds:                60,
+		MinPoints:                     2,
+	}
+
+	t.Run("Prompt+Generation float64 sum overflow holds current replicas", func(t *testing.T) {
+		obs := freshObservation(base)
+		obs.Kind = RoleKindServer
+		obs.CurrentReplicas = 4
+		obs.ReadyReplicas = 4
+		obs.PromptTokensPerSecond = 1e308
+		obs.GenerationTokensPerSecond = 1e308
+
+		recTT, stateTT := tt.Recommend(obs, nil)
+		if recTT.DesiredReplicas != 4 || !recTT.HoldScaleDown || recTT.Reason != ReasonWaitingForMetrics {
+			t.Fatalf("TokenThroughput sum overflow = %#v", recTT)
+		}
+		if stateTT != nil && stateTT.History != nil && stateTT.History.Len() != 0 {
+			t.Fatalf("expected empty history on sum overflow, got len=%d", stateTT.History.Len())
+		}
+
+		recPred, statePred := pred.Recommend(obs, nil)
+		if recPred.DesiredReplicas != 4 || !recPred.HoldScaleDown || recPred.Reason != ReasonWaitingForMetrics {
+			t.Fatalf("Predictive sum overflow = %#v", recPred)
+		}
+		if statePred.SampleCount != 0 {
+			t.Fatalf("expected SampleCount=0 on sum overflow, got %d", statePred.SampleCount)
+		}
+	})
+
+	t.Run("windowMean avoids multi-sample float64 sum overflow", func(t *testing.T) {
+		hist := NewDemandHistory()
+		hist.Push(DemandSample{Timestamp: base.Add(-30 * time.Second), TokensPerSecond: 1e308})
+		hist.Push(DemandSample{Timestamp: base.Add(-15 * time.Second), TokensPerSecond: 1e308})
+		got := windowMean(hist, base, 60*time.Second, 0)
+		if math.IsInf(got, 0) || math.IsNaN(got) || got < 9e307 {
+			t.Fatalf("windowMean = %v, want finite ~1e308", got)
+		}
+	})
+
+	t.Run("MaxInt32 CurrentReplicas saturates instead of wrapping negative on latency breach", func(t *testing.T) {
+		obs := freshObservation(base)
+		obs.Kind = RoleKindServer
+		obs.CurrentReplicas = math.MaxInt32
+		obs.ReadyReplicas = math.MaxInt32
+		obs.ThroughputState = SignalFresh
+		obs.PromptTokensPerSecond = 100
+		obs.GenerationTokensPerSecond = 100
+		obs.LatencyState = SignalFresh
+		obs.TTFTMilliseconds = 250
+		obs.ITLMilliseconds = 10
+
+		recTT, _ := tt.Recommend(obs, nil)
+		if recTT.DesiredReplicas != math.MaxInt32 {
+			t.Fatalf("TokenThroughput MaxInt32 + 1 = %d, want MaxInt32", recTT.DesiredReplicas)
+		}
+		prior := &PredictorState{Level: 200, Trend: 0, Covariance: [4]float64{1, 0, 0, 1}, SampleCount: 6}
+		recPred, _ := pred.Recommend(obs, prior)
+		if recPred.DesiredReplicas != math.MaxInt32 {
+			t.Fatalf("Predictive MaxInt32 + 1 = %d, want MaxInt32", recPred.DesiredReplicas)
+		}
+	})
+
+	t.Run("RoleKindUnknown holds current replicas in Predictive without advancing filter", func(t *testing.T) {
+		obs := freshObservation(base)
+		obs.Kind = RoleKind("custom")
+		obs.CurrentReplicas = 4
+		obs.ReadyReplicas = 4
+		obs.ThroughputState = SignalFresh
+		obs.LatencyState = SignalFresh
+		obs.TTFTMilliseconds = 250
+
+		prior := &PredictorState{Level: 10, Trend: 0, Covariance: [4]float64{1, 0, 0, 1}, SampleCount: 6}
+		recPred, statePred := pred.Recommend(obs, prior)
+		if recPred.DesiredReplicas != 4 || !recPred.HoldScaleDown || recPred.Reason != ReasonWaitingForMetrics {
+			t.Fatalf("Predictive RoleKindUnknown = %#v", recPred)
+		}
+		if statePred.SampleCount != 6 {
+			t.Fatalf("expected SampleCount unchanged (6), got %d", statePred.SampleCount)
+		}
+	})
+}

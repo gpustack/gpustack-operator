@@ -16,6 +16,14 @@ Skill-specific symptoms live in each skill's own `references/`.
   Dockerfile's `GPUSTACK_GIT_COMMIT` build-arg recompiles per commit), then rebuild with a fresh
   `TAG=dev-$(git rev-parse --short HEAD)`, reload, and redeploy pointing at the new tag.
 
+- **Remote SSH build hangs in `rsync` or fails inside Docker `make ci`** — always invoke
+  `E2E_BUILDER_SSH=<user@builder-host> E2E_IMAGE_NAMESPACE=<ns> bash .agents/skills/_e2e-lib/scripts/build-load.sh "$TAG"`
+  instead of a hand-written `rsync ./` or `ssh … make package`. A raw `rsync ./` sweeps up multi-gigabyte
+  ignored directories (`.dist/`, `.terraform/`, `.gitnexus/`, `.claude/`), while `build-load.sh` restricts the
+  file list to `git ls-files -z --cached --others --exclude-standard` (preserving Git-LFS `*.so` binaries),
+  bootstraps `.git` on a fresh builder directory, and sets `PACKAGE_CI=false` (`E2E_PACKAGE_CI=true` to opt back
+  in) so dev/E2E image builds run `make build` directly.
+
 - **A probe against the Mooncake master answers nothing, and the master looks dead** — the mooncake
   image **ships no `curl`**. A probe built on it produces no output and no error, which is exactly
   what an unreachable master produces, so the symptom points at the wrong thing. Use `python3` (the

@@ -60,6 +60,11 @@ type RefusalError struct {
 	//
 	// IT IS BOUNDED, because it ends up in a status field.
 	Detail map[string]string `json:"detail,omitempty"`
+
+	// profileNotFound marks a zero-match lookup from selectProfileByShape so
+	// callers can distinguish an absent profile from ambiguity or mismatches
+	// without matching human-readable Message text.
+	profileNotFound bool
 }
 
 // Error returns the refusal message.
@@ -110,8 +115,8 @@ func newRefusal(reason RefusalReason, message string, detail map[string]string) 
 // THE REQUEST SIDE IS THE DEPLOYMENT, and an element the deployment does not
 // state constrains nothing, because a deployment that states no quantization
 // has contradicted no measurement.
-func identityMismatch(want, got Identity) []string {
-	mismatched := make([]string, 0, 9)
+func sharedIdentityMismatch(want, got Identity) []string {
+	mismatched := make([]string, 0, 6)
 	appendIf := func(name string, equal bool) {
 		if !equal {
 			mismatched = append(mismatched, name)
@@ -136,16 +141,32 @@ func identityMismatch(want, got Identity) []string {
 	if want.Engine.Build != "" && got.Engine.Build != "" {
 		appendIf("engine.build", want.Engine.Build == got.Engine.Build)
 	}
-	appendIf("hardware.accelerator", NormalizeHardwareIdentity(want.Hardware).Accelerator == NormalizeHardwareIdentity(got.Hardware).Accelerator)
+	return mismatched
+}
+
+func hardwareIdentityMismatch(want, got HardwareIdentity) []string {
+	mismatched := make([]string, 0, 3)
+	appendIf := func(name string, equal bool) {
+		if !equal {
+			mismatched = append(mismatched, name)
+		}
+	}
+	appendIf("hardware.accelerator", NormalizeHardwareIdentity(want).Accelerator == NormalizeHardwareIdentity(got).Accelerator)
 	// THE MEMORY AND THE FORM FACTOR ARE COMPARED ONLY WHEN THE DEPLOYMENT
 	// STATES ONE, because a deployment whose instance type names no memory
 	// agrees with a measurement of any memory.
-	if got.Hardware.MemoryGB > 0 {
-		appendIf("hardware.memoryGB", want.Hardware.MemoryGB == got.Hardware.MemoryGB)
+	if got.MemoryGB > 0 {
+		appendIf("hardware.memoryGB", want.MemoryGB == got.MemoryGB)
 	}
-	if got.Hardware.FormFactor != "" {
-		appendIf("hardware.formFactor", want.Hardware.FormFactor == got.Hardware.FormFactor)
+	if got.FormFactor != "" {
+		appendIf("hardware.formFactor", want.FormFactor == got.FormFactor)
 	}
+	return mismatched
+}
+
+func identityMismatch(want, got Identity) []string {
+	mismatched := sharedIdentityMismatch(want, got)
+	mismatched = append(mismatched, hardwareIdentityMismatch(want.Hardware, got.Hardware)...)
 	return mismatched
 }
 
@@ -187,7 +208,11 @@ func servingConfigMismatch(want, got ServingConfig) []string {
 	}
 	appendIf("servingConfig.router", want.Router, got.Router)
 	appendIf("servingConfig.kvCacheDType", want.KVCacheDType, got.KVCacheDType)
-	appendIf("servingConfig.offload", want.Offload, got.Offload)
+	if got.Offload == "external" && want.Offload != "external" {
+		mismatched = append(mismatched, "servingConfig.offload")
+	} else {
+		appendIf("servingConfig.offload", want.Offload, got.Offload)
+	}
 	appendIf("servingConfig.prefixCaching", want.PrefixCaching, got.PrefixCaching)
 	appendIf("servingConfig.speculativeDecoding", want.SpeculativeDecoding, got.SpeculativeDecoding)
 	if conflicts := launchParameterConflicts(want, got); len(conflicts) > 0 {

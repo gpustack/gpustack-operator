@@ -1491,8 +1491,8 @@ type ModelDeploymentScalerResolvedCapacityFieldStatus struct {
 	EffectiveTokensPerSecond resource.Quantity `json:"effectiveTokensPerSecond" protobuf:"bytes,3,name=effectiveTokensPerSecond"` // nolint: lll
 }
 
-// ModelDeploymentScalerCapacityPriorCatalog is an offline catalog of measured per-replica token
-// capacities and latency quantiles across load levels.
+// ModelDeploymentScalerCapacityPriorCatalog is an offline catalog of measured per-replica or
+// per-unit token capacities and latency quantiles across load levels.
 //
 // +protobuf=false
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
@@ -1513,10 +1513,10 @@ var _ runtime.Object = (*ModelDeploymentScalerCapacityPriorCatalog)(nil)
 //
 // +protobuf=false
 type ModelDeploymentScalerCapacityPriorProfile struct {
-	// Role is the serving role the measurements describe.
+	// Mode is the serving architecture the measurements describe ("aggregated" or "disaggregated").
 	//
 	// +required
-	Role string `json:"role" yaml:"role"`
+	Mode string `json:"mode" yaml:"mode"`
 
 	// Model is the served model identifier.
 	//
@@ -1533,21 +1533,52 @@ type ModelDeploymentScalerCapacityPriorProfile struct {
 	// +required
 	Engine string `json:"engine" yaml:"engine"`
 
-	// Hardware is the accelerator family.
+	// Hardware is the accelerator family for an aggregated profile.
 	//
-	// +required
-	Hardware string `json:"hardware" yaml:"hardware"`
+	// +optional
+	Hardware string `json:"hardware,omitempty" yaml:"hardware,omitempty"`
 
-	// Topology is the parallelism shape of one scaling replica.
+	// Topology is the parallelism shape of one scaling replica in an aggregated profile.
 	//
-	// +required
-	Topology ModelDeploymentScalerCapacityPriorTopology `json:"topology" yaml:"topology"`
+	// +optional
+	Topology *ModelDeploymentScalerCapacityPriorTopology `json:"topology,omitempty" yaml:"topology,omitempty"`
+
+	// Prefill is the prefill stage shape and minimal unit replica count in a disaggregated profile.
+	//
+	// +optional
+	Prefill *ModelDeploymentScalerCapacityPriorStage `json:"prefill,omitempty" yaml:"prefill,omitempty"`
+
+	// Decode is the decode stage shape and minimal unit replica count in a disaggregated profile.
+	//
+	// +optional
+	Decode *ModelDeploymentScalerCapacityPriorStage `json:"decode,omitempty" yaml:"decode,omitempty"`
 
 	// Points are the load points measured for this profile.
 	//
 	// +required
 	// +listType=atomic
 	Points []ModelDeploymentScalerCapacityPriorPoint `json:"points" yaml:"points"`
+}
+
+// ModelDeploymentScalerCapacityPriorStage is the hardware, parallelism shape, and minimal unit
+// replica count of one stage in a disaggregated capacity prior profile.
+//
+// +protobuf=false
+type ModelDeploymentScalerCapacityPriorStage struct {
+	// Replicas is the replica count of this stage within one minimal coupled serving unit.
+	//
+	// +required
+	Replicas int `json:"replicas" yaml:"replicas"`
+
+	// Hardware is the accelerator family for this stage.
+	//
+	// +required
+	Hardware string `json:"hardware" yaml:"hardware"`
+
+	// Topology is the parallelism shape of one replica in this stage.
+	//
+	// +required
+	Topology ModelDeploymentScalerCapacityPriorTopology `json:"topology" yaml:"topology"`
 }
 
 // ModelDeploymentScalerCapacityPriorTopology is the parallelism shape of one scaling replica in a
@@ -1600,17 +1631,19 @@ type ModelDeploymentScalerCapacityPriorPoint struct {
 	// +required
 	Concurrency int `json:"concurrency" yaml:"concurrency"`
 
-	// TotalTokensPerSecond is the combined prompt and generated token rate of one replica.
+	// TotalTokensPerSecond is the combined prompt and generated token rate of one scaling replica
+	// or minimal coupled unit.
 	//
 	// +required
 	TotalTokensPerSecond float64 `json:"totalTokensPerSecond" yaml:"totalTokensPerSecond"`
 
-	// InputTokensPerSecond is the prompt token rate of one replica.
+	// InputTokensPerSecond is the prompt token rate of one scaling replica or minimal coupled unit.
 	//
 	// +required
 	InputTokensPerSecond float64 `json:"inputTokensPerSecond" yaml:"inputTokensPerSecond"`
 
-	// OutputTokensPerSecond is the generated token rate of one replica.
+	// OutputTokensPerSecond is the generated token rate of one scaling replica or minimal coupled
+	// unit.
 	//
 	// +required
 	OutputTokensPerSecond float64 `json:"outputTokensPerSecond" yaml:"outputTokensPerSecond"`

@@ -15,6 +15,7 @@ import (
 	workerapi "gpustack.ai/gpustack/api/worker/v1"
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
 	"gpustack.ai/gpustack/pkg/kubeclients/kubernetes/scheme"
+	"gpustack.ai/gpustack/pkg/nodefeature"
 	"gpustack.ai/gpustack/pkg/worker/scaling/priors"
 )
 
@@ -822,5 +823,223 @@ func TestModelDeploymentScalerPriorAcceptsTheIdentityForms(t *testing.T) {
 		_, err := inferenceXRequest(t, client, deployment, &role, &profile)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "AcceleratorType is not set on CPU-only role")
+	})
+}
+
+func TestModelDeploymentScalerOperatorEnvGateDisaggregatedConnectors(t *testing.T) {
+	newDisagg := func(engine, routerName, kvBackend string, includeEncode bool, extraArgs []string) *workercore.ModelDeployment {
+		roles := []workercore.ModelDeploymentRole{
+			{
+				Name:      "prefill",
+				Kind:      workercore.ModelDeploymentRoleKindPrefill,
+				ExtraArgs: extraArgs,
+			},
+			{
+				Name:      "decode",
+				Kind:      workercore.ModelDeploymentRoleKindDecode,
+				ExtraArgs: extraArgs,
+			},
+		}
+		if includeEncode {
+			roles = append([]workercore.ModelDeploymentRole{{
+				Name: "encode",
+				Kind: workercore.ModelDeploymentRoleKindEncode,
+				AdditionalVolumes: []workercore.ModelDeploymentAdditionalVolume{{
+					MountPath:             "/var/lib/gpustack/ec-cache",
+					PersistentVolumeClaim: &core.PersistentVolumeClaimVolumeSource{ClaimName: "ec-shared"},
+				}},
+			}}, roles...)
+		}
+		md := &workercore.ModelDeployment{
+			ObjectMeta: meta.ObjectMeta{Name: "disagg", Namespace: "default"},
+			Spec: workercore.ModelDeploymentSpec{
+				Engine: workercore.ModelDeploymentEngine{Name: engine},
+				Router: &workercore.ModelDeploymentRouter{Name: routerName},
+				Roles:  roles,
+			},
+		}
+		if kvBackend != "" {
+			md.Spec.KVTransfer = &workercore.ModelDeploymentKVTransfer{
+				Backend: kvBackend,
+			}
+		}
+		return md
+	}
+
+	cases := []struct {
+		name         string
+		manufacturer string
+		deployment   *workercore.ModelDeployment
+	}{
+		{
+			name:         "vLLM NVIDIA PD NIXL",
+			manufacturer: nodefeature.ManufacturerNVIDIA,
+			deployment:   newDisagg(workercore.ModelDeploymentEngineVLLM, workercore.ModelDeploymentRouterLLMD, workercore.ModelDeploymentKVTransferBackendNIXL, false, inferenceXVLLMLaunchArguments()),
+		},
+		{
+			name:         "vLLM NVIDIA EPD llm-d-router",
+			manufacturer: nodefeature.ManufacturerNVIDIA,
+			deployment:   newDisagg(workercore.ModelDeploymentEngineVLLM, workercore.ModelDeploymentRouterLLMD, workercore.ModelDeploymentKVTransferBackendNIXL, true, inferenceXVLLMLaunchArguments()),
+		},
+		{
+			name:         "vLLM AMD PD Mooncake",
+			manufacturer: nodefeature.ManufacturerAMD,
+			deployment:   newDisagg(workercore.ModelDeploymentEngineVLLM, workercore.ModelDeploymentRouterLLMD, workercore.ModelDeploymentKVTransferBackendMooncake, false, inferenceXVLLMLaunchArguments()),
+		},
+		{
+			name:         "vLLM-Ascend Ascend PD HIXL",
+			manufacturer: nodefeature.ManufacturerAscend,
+			deployment:   newDisagg(workercore.ModelDeploymentEngineVLLM, workercore.ModelDeploymentRouterLLMD, workercore.ModelDeploymentKVTransferBackendHIXL, false, inferenceXVLLMLaunchArguments()),
+		},
+		{
+			name:         "vLLM-Ascend Ascend EPD Mooncake",
+			manufacturer: nodefeature.ManufacturerAscend,
+			deployment:   newDisagg(workercore.ModelDeploymentEngineVLLM, workercore.ModelDeploymentRouterLLMD, workercore.ModelDeploymentKVTransferBackendMooncake, true, inferenceXVLLMLaunchArguments()),
+		},
+		{
+			name:         "SGLang NVIDIA PD Mooncake",
+			manufacturer: nodefeature.ManufacturerNVIDIA,
+			deployment:   newDisagg(workercore.ModelDeploymentEngineSGLang, workercore.ModelDeploymentRouterSGLang, workercore.ModelDeploymentKVTransferBackendMooncake, false, inferenceXLaunchArguments()),
+		},
+		{
+			name:         "SGLang NVIDIA EPD NIXL",
+			manufacturer: nodefeature.ManufacturerNVIDIA,
+			deployment:   newDisagg(workercore.ModelDeploymentEngineSGLang, workercore.ModelDeploymentRouterSGLang, workercore.ModelDeploymentKVTransferBackendNIXL, true, inferenceXLaunchArguments()),
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			for i := range tc.deployment.Spec.Roles {
+				role := &tc.deployment.Spec.Roles[i]
+				err := modelDeploymentScalerOperatorEnvGateWithManufacturer(
+					tc.deployment.Spec.Engine.Name, tc.deployment, role, tc.manufacturer,
+				)
+				require.NoError(t, err, "role %s should pass connector env gate", role.Name)
+			}
+		})
+	}
+}
+
+func TestModelDeploymentScalerPriorRequestDisaggregatedAndKVCache(t *testing.T) {
+	t.Run("disaggregated router and kvTransfer are allowed and Tier 1 vs Tier 2 router differs", func(t *testing.T) {
+		identity := inferenceXIdentity()
+		deployment := inferenceXDeployment(inferenceXImage)
+		deployment.Spec.Router = &workercore.ModelDeploymentRouter{Name: workercore.ModelDeploymentRouterSGLang}
+		deployment.Spec.KVTransfer = &workercore.ModelDeploymentKVTransfer{
+			Backend: workercore.ModelDeploymentKVTransferBackendNIXL,
+		}
+		deployment.Spec.Roles = []workercore.ModelDeploymentRole{
+			{
+				Name:            "encode",
+				Kind:            workercore.ModelDeploymentRoleKindEncode,
+				AcceleratorType: "mi325x-oam",
+				Resources:       &workercore.ModelDeploymentRoleResources{Accelerator: capacityPriorQuantity("1")},
+			},
+			{
+				Name:            "prefill",
+				Kind:            workercore.ModelDeploymentRoleKindPrefill,
+				AcceleratorType: "mi325x-oam",
+				Resources:       &workercore.ModelDeploymentRoleResources{Accelerator: capacityPriorQuantity("8")},
+				ExtraArgs:       inferenceXLaunchArguments(),
+			},
+			{
+				Name:            "decode",
+				Kind:            workercore.ModelDeploymentRoleKindDecode,
+				AcceleratorType: "mi325x-oam",
+				Resources:       &workercore.ModelDeploymentRoleResources{Accelerator: capacityPriorQuantity("8")},
+				ExtraArgs:       inferenceXLaunchArguments(),
+			},
+		}
+		client := ctrlfake.NewClientBuilder().WithScheme(scheme.Scheme).WithObjects(inferenceXObjects(t, deployment)...).Build()
+		stageProfile := &priors.DisaggregatedStage{
+			Replicas: 1,
+			Hardware: identity.Hardware,
+			Topology: priors.Topology{
+				GPUsPerReplica: 8, TensorParallel: 8, PipelineParallel: 1,
+				DataParallel: 1, LocalDataParallel: 1, ContextParallel: 1, ExpertParallel: 1,
+			},
+		}
+		profile := priors.Profile{
+			Mode:     priors.ModeDisaggregated,
+			Identity: identity,
+			ServingConfig: priors.ServingConfig{
+				Router: "none", KVCacheDType: "fp8_e4m3", Offload: "none",
+				PrefixCaching: "disabled", SpeculativeDecoding: "none",
+				EngineEnvComplete: true,
+				EffectiveDefaults: map[string]string{"--dtype": "bf16", "--cpu-offload-gb": "0"},
+			},
+			Prefill: stageProfile,
+			Decode:  stageProfile,
+		}
+		prefill := &deployment.Spec.Roles[1]
+		decode := &deployment.Spec.Roles[2]
+		prefillDecl, err := modelDeploymentScalerPriorDeclarationOf(context.Background(), client, deployment, prefill)
+		require.NoError(t, err)
+		decodeDecl, err := modelDeploymentScalerPriorDeclarationOf(context.Background(), client, deployment, decode)
+		require.NoError(t, err)
+
+		prio1Req, err := modelDeploymentScalerDisaggregatedPriorRequest(
+			deployment, prefill, decode, &profile, prefillDecl, decodeDecl, 1, 1,
+		)
+		require.NoError(t, err)
+		assert.Equal(t, workercore.ModelDeploymentRouterSGLang, prio1Req.ServingConfig.Router)
+
+		aggProfile := priors.Profile{
+			Mode:          priors.ModeAggregated,
+			Identity:      identity,
+			ServingConfig: profile.ServingConfig,
+			Topology:      stageProfile.Topology,
+		}
+		prio2Req, err := modelDeploymentScalerPriorRequestForServerFallback(deployment, prefill, &aggProfile, prefillDecl)
+		require.NoError(t, err)
+		assert.Equal(t, "none", prio2Req.ServingConfig.Router)
+	})
+
+	t.Run("spec.kvCache != nil fails closed against offload none profile", func(t *testing.T) {
+		identity := inferenceXIdentity()
+		deployment := inferenceXDeployment(inferenceXImage)
+		deployment.Spec.KVCache = &workercore.ModelDeploymentKVCache{PoolRef: core.LocalObjectReference{Name: "cache"}}
+		client := inferenceXClient(t, deployment)
+		role := &deployment.Spec.Roles[0]
+		role.ExtraArgs = inferenceXLaunchArguments()
+		role.AcceleratorType = "mi325x-oam"
+		role.Resources = &workercore.ModelDeploymentRoleResources{Accelerator: capacityPriorQuantity("8")}
+
+		profile := priors.Profile{
+			Mode:     priors.ModeAggregated,
+			Identity: identity,
+			ServingConfig: priors.ServingConfig{
+				Router: "none", KVCacheDType: "fp8_e4m3", Offload: "none",
+				PrefixCaching: "disabled", SpeculativeDecoding: "none",
+				EngineEnvComplete: true,
+				EffectiveDefaults: map[string]string{"--dtype": "bf16", "--cpu-offload-gb": "0"},
+			},
+			Topology: priors.Topology{
+				GPUsPerReplica: 8, TensorParallel: 8, PipelineParallel: 1,
+				DataParallel: 1, LocalDataParallel: 1, ContextParallel: 1, ExpertParallel: 1,
+			},
+			MeasuredReplicas: 1,
+			Points: []priors.MeasuredPoint{
+				{
+					Load:       priors.LoadLevel{Kind: priors.LoadKindConcurrency, Value: 4, ClientModel: priors.ClientModelFixedConcurrency, Unit: "requests"},
+					Throughput: priors.Throughput{Metric: priors.ThroughputMetricCacheMissedTotalTokensPerSecond, Value: 1000, Unit: priors.UnitTokensPerSecond, Denominator: priors.DenominatorPerReplica, TokenCountConvention: priors.TokenCountConventionCacheMissedInputPlusOutput},
+					Latencies:  []priors.Latency{{Metric: priors.LatencyMetricTTFT, Quantile: 0.95, Value: 100, Unit: priors.UnitMilliseconds}, {Metric: priors.LatencyMetricITL, Quantile: 0.95, Value: 10, Unit: priors.UnitMilliseconds}},
+				},
+				{
+					Load:       priors.LoadLevel{Kind: priors.LoadKindConcurrency, Value: 8, ClientModel: priors.ClientModelFixedConcurrency, Unit: "requests"},
+					Throughput: priors.Throughput{Metric: priors.ThroughputMetricCacheMissedTotalTokensPerSecond, Value: 1500, Unit: priors.UnitTokensPerSecond, Denominator: priors.DenominatorPerReplica, TokenCountConvention: priors.TokenCountConventionCacheMissedInputPlusOutput},
+					Latencies:  []priors.Latency{{Metric: priors.LatencyMetricTTFT, Quantile: 0.95, Value: 800, Unit: priors.UnitMilliseconds}, {Metric: priors.LatencyMetricITL, Quantile: 0.95, Value: 80, Unit: priors.UnitMilliseconds}},
+				},
+			},
+		}
+		req, err := inferenceXRequest(t, client, deployment, role, &profile)
+		require.NoError(t, err)
+		assert.Equal(t, "external", req.ServingConfig.Offload)
+
+		catalog := &priors.Catalog{Profiles: []priors.Profile{profile}}
+		_, err = catalog.Resolve(req)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "servingConfig.offload")
 	})
 }

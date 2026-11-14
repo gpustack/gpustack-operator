@@ -8,7 +8,7 @@ import (
 const flatCatalog = `apiVersion: worker.gpustack.ai/v1alpha1
 kind: ModelDeploymentScalerCapacityPriorCatalog
 profiles:
-  - role: Server
+  - mode: aggregated
     model: deepseek-ai/DeepSeek-R1-0528
     quantization: fp8
     engine: vllm
@@ -60,7 +60,7 @@ func TestParseCatalogReadsTheFlatCatalog(t *testing.T) {
 	profile := catalog.Profiles[0]
 
 	want := Shape{
-		Role:         RoleKindServer,
+		Mode:         ModeAggregated,
 		Model:        "deepseek-ai/DeepSeek-R1-0528",
 		Quantization: "fp8",
 		Engine:       "vllm",
@@ -81,8 +81,8 @@ func TestParseCatalogReadsTheFlatCatalog(t *testing.T) {
 	if profile.Workload.ID != profile.Shape().String() {
 		t.Fatalf("the profile names the workload %q", profile.Workload.ID)
 	}
-	if profile.Role != RoleKindServer {
-		t.Fatalf("the profile describes the %s role", profile.Role)
+	if profile.Mode != ModeAggregated {
+		t.Fatalf("the profile describes the %s mode", profile.Mode)
 	}
 	if profile.Identity.Model.Name != "deepseek-ai/DeepSeek-R1-0528" {
 		t.Fatalf("the profile measures the model %q", profile.Identity.Model.Name)
@@ -122,7 +122,7 @@ func TestParseCatalogReadsTheFlatCatalog(t *testing.T) {
 // ConfigMap holds whatever the operator wrote into it.
 func TestParseCatalogReadsTheJSONCatalog(t *testing.T) {
 	const jsonCatalog = `{"apiVersion":"worker.gpustack.ai/v1alpha1","kind":"ModelDeploymentScalerCapacityPriorCatalog","profiles":[` +
-		`{"role":"Server","model":"org/model",` +
+		`{"mode":"aggregated","model":"org/model",` +
 		`"quantization":"fp8","engine":"vllm","hardware":"amd-mi325x",` +
 		`"topology":{"gpusPerReplica":8,"tensorParallel":8,"expertParallel":1},"points":[` +
 		`{"concurrency":4,"totalTokensPerSecond":100,"inputTokensPerSecond":90,` +
@@ -192,8 +192,8 @@ func TestMarshalCatalogDocumentIsStable(t *testing.T) {
 // ARRIVED CHANGES ITS BYTES EVERY TIME A MEASUREMENT IS ADDED.
 func TestMarshalCatalogDocumentSortsTheProfiles(t *testing.T) {
 	document := NewCatalogDocument(
-		ProfileDocument{Role: "Server", Model: "org/b-model", Points: []PointDocument{{Concurrency: 8}, {Concurrency: 4}}},
-		ProfileDocument{Role: "Server", Model: "org/a-model"},
+		ProfileDocument{Mode: "aggregated", Model: "org/b-model", Points: []PointDocument{{Concurrency: 8}, {Concurrency: 4}}},
+		ProfileDocument{Mode: "aggregated", Model: "org/a-model"},
 	)
 	encoded, err := MarshalCatalogDocument(document)
 	if err != nil {
@@ -215,12 +215,12 @@ func TestMarshalCatalogDocumentSortsTheProfiles(t *testing.T) {
 // numeric percentile order when marshaling.
 func TestParseCatalogSupportsArbitraryLatencyQuantiles(t *testing.T) {
 	document := NewCatalogDocument(ProfileDocument{
-		Role:         "Server",
+		Mode:         "aggregated",
 		Model:        "org/model",
 		Quantization: "fp8",
 		Engine:       "vllm",
 		Hardware:     "amd-mi325x",
-		Topology:     TopologyDocument{GPUsPerReplica: 8, TensorParallel: 8},
+		Topology:     &TopologyDocument{GPUsPerReplica: 8, TensorParallel: 8},
 		Points: []PointDocument{
 			{
 				Concurrency:           4,
@@ -254,7 +254,7 @@ func TestParseCatalogSupportsArbitraryLatencyQuantiles(t *testing.T) {
 	}
 	profile := catalog.Profiles[0]
 	resolution, err := catalog.Resolve(Request{
-		Role:          profile.Role,
+		Mode:          profile.Mode,
 		Identity:      profile.Identity,
 		ServingConfig: profile.ServingConfig,
 		Topology:      profile.Topology,
@@ -282,12 +282,12 @@ func TestParseCatalogRefusesInvalidLatencyQuantileKeys(t *testing.T) {
 	for _, badKey := range []string{"unknown", "P50", "p0", "p101", "p-50", "p50.0", "p050"} {
 		t.Run(badKey, func(t *testing.T) {
 			document := NewCatalogDocument(ProfileDocument{
-				Role:         "Server",
+				Mode:         "aggregated",
 				Model:        "org/model",
 				Quantization: "fp8",
 				Engine:       "vllm",
 				Hardware:     "amd-mi325x",
-				Topology:     TopologyDocument{GPUsPerReplica: 8, TensorParallel: 8},
+				Topology:     &TopologyDocument{GPUsPerReplica: 8, TensorParallel: 8},
 				Points: []PointDocument{
 					{
 						Concurrency:           4,
@@ -356,7 +356,7 @@ func TestFlatCatalogCapsConservativelyAtHighestConcurrency(t *testing.T) {
 	}
 	profile := catalog.Profiles[0]
 	resolution, err := catalog.Resolve(Request{
-		Role:          profile.Role,
+		Mode:          profile.Mode,
 		Identity:      profile.Identity,
 		ServingConfig: profile.ServingConfig,
 		Topology:      profile.Topology,
@@ -375,5 +375,162 @@ func TestFlatCatalogCapsConservativelyAtHighestConcurrency(t *testing.T) {
 	}
 	if resolution.Basis.Boundary != BoundaryExplicitSaturation {
 		t.Fatalf("boundary = %q, want %q", resolution.Basis.Boundary, BoundaryExplicitSaturation)
+	}
+}
+
+func TestParseCatalogReadsAndResolvesDisaggregatedProfile(t *testing.T) {
+	const disaggYAML = `apiVersion: worker.gpustack.ai/v1alpha1
+kind: ModelDeploymentScalerCapacityPriorCatalog
+profiles:
+  - mode: disaggregated
+    model: deepseek-ai/DeepSeek-R1-0528
+    quantization: fp4
+    engine: trtllm
+    prefill:
+      replicas: 2
+      hardware: nvidia-b200
+      topology:
+        gpusPerReplica: 4
+        tensorParallel: 4
+        expertParallel: 4
+    decode:
+      replicas: 1
+      hardware: nvidia-b200
+      topology:
+        gpusPerReplica: 8
+        tensorParallel: 8
+        expertParallel: 8
+    points:
+      - concurrency: 8
+        totalTokensPerSecond: 3200
+        inputTokensPerSecond: 2400
+        outputTokensPerSecond: 800
+        ttftMilliseconds:
+          p95: 300
+        itlMilliseconds:
+          p95: 12
+      - concurrency: 16
+        totalTokensPerSecond: 4800
+        inputTokensPerSecond: 3600
+        outputTokensPerSecond: 1200
+        ttftMilliseconds:
+          p95: 500
+        itlMilliseconds:
+          p95: 18
+`
+	catalog, err := ParseCatalog([]byte(disaggYAML))
+	if err != nil {
+		t.Fatalf("parse disaggregated catalog: %v", err)
+	}
+	profile := catalog.Profiles[0]
+	if profile.Mode != ModeDisaggregated {
+		t.Fatalf("Mode = %q, want %q", profile.Mode, ModeDisaggregated)
+	}
+	if profile.Points[0].Throughput.Denominator != DenominatorPerUnit {
+		t.Fatalf("Denominator = %q, want %q", profile.Points[0].Throughput.Denominator, DenominatorPerUnit)
+	}
+	res, err := catalog.Resolve(Request{
+		Mode:          profile.Mode,
+		Identity:      profile.Identity,
+		ServingConfig: profile.ServingConfig,
+		Prefill:       profile.Prefill,
+		Decode:        profile.Decode,
+		Constraints: Constraints{
+			TTFTTargetMilliseconds: 600,
+			ITLTargetMilliseconds:  20,
+			Headroom:               0.85,
+		},
+	})
+	if err != nil {
+		t.Fatalf("Resolve disaggregated: %v", err)
+	}
+	if res.SeedTokensPerSecond != 4800 {
+		t.Fatalf("SeedTokensPerSecond = %v, want 4800", res.SeedTokensPerSecond)
+	}
+}
+
+func TestParseCatalogRefusesInvalidDisaggregatedDocuments(t *testing.T) {
+	cases := []struct {
+		name string
+		yaml string
+	}{
+		{
+			name: "disaggregated non-coprime stage replicas",
+			yaml: `apiVersion: worker.gpustack.ai/v1alpha1
+kind: ModelDeploymentScalerCapacityPriorCatalog
+profiles:
+  - mode: disaggregated
+    model: org/model
+    quantization: fp8
+    engine: vllm
+    prefill:
+      replicas: 2
+      hardware: nvidia-h200
+      topology:
+        gpusPerReplica: 8
+        tensorParallel: 8
+    decode:
+      replicas: 4
+      hardware: nvidia-h200
+      topology:
+        gpusPerReplica: 8
+        tensorParallel: 8
+    points:
+      - concurrency: 4
+        totalTokensPerSecond: 100
+        inputTokensPerSecond: 80
+        outputTokensPerSecond: 20
+        ttftMilliseconds: {p95: 100}
+        itlMilliseconds: {p95: 10}
+      - concurrency: 8
+        totalTokensPerSecond: 200
+        inputTokensPerSecond: 160
+        outputTokensPerSecond: 40
+        ttftMilliseconds: {p95: 200}
+        itlMilliseconds: {p95: 20}
+`,
+		},
+		{
+			name: "aggregated with prefill stage",
+			yaml: `apiVersion: worker.gpustack.ai/v1alpha1
+kind: ModelDeploymentScalerCapacityPriorCatalog
+profiles:
+  - mode: aggregated
+    model: org/model
+    quantization: fp8
+    engine: vllm
+    hardware: nvidia-h200
+    topology:
+      gpusPerReplica: 8
+      tensorParallel: 8
+    prefill:
+      replicas: 1
+      hardware: nvidia-h200
+      topology:
+        gpusPerReplica: 8
+        tensorParallel: 8
+    points:
+      - concurrency: 4
+        totalTokensPerSecond: 100
+        inputTokensPerSecond: 80
+        outputTokensPerSecond: 20
+        ttftMilliseconds: {p95: 100}
+        itlMilliseconds: {p95: 10}
+      - concurrency: 8
+        totalTokensPerSecond: 200
+        inputTokensPerSecond: 160
+        outputTokensPerSecond: 40
+        ttftMilliseconds: {p95: 200}
+        itlMilliseconds: {p95: 20}
+`,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, err := ParseCatalog([]byte(tc.yaml)); err == nil {
+				t.Fatalf("expected %s to fail parsing", tc.name)
+			}
+		})
 	}
 }

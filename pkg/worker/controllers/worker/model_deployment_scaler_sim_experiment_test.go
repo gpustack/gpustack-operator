@@ -68,7 +68,7 @@ func scalerExperimentPrior(t *testing.T) priors.Resolution {
 	}
 	length, mean := 100, 100.0
 	profile := priors.Profile{
-		SourceID: "synthetic-base-plant", Role: priors.RoleKindServer, MeasuredReplicas: 1,
+		SourceID: "synthetic-base-plant", Mode: priors.ModeAggregated, MeasuredReplicas: 1,
 		Identity: priors.Identity{
 			Model:    priors.ModelIdentity{Name: "synthetic", Revision: "baseline-v1", Tokenizer: "synthetic", Quantization: "none"},
 			Engine:   priors.EngineIdentity{Image: "synthetic-vllm-exposition", Build: "baseline-v1"},
@@ -91,7 +91,7 @@ func scalerExperimentPrior(t *testing.T) priors.Resolution {
 	}
 	// THE PROFILE IS SELECTED BY THE SHAPE IT MEASURED, because a profile is
 	// known by its shape and not by a name.
-	resolution, err := catalog.Resolve(priors.Request{Role: profile.Role, Identity: profile.Identity, ServingConfig: profile.ServingConfig, Topology: profile.Topology, Constraints: priors.Constraints{TTFTTargetMilliseconds: 2000, ITLTargetMilliseconds: 100, LatencyQuantile: 1}})
+	resolution, err := catalog.Resolve(priors.Request{Mode: profile.Mode, Identity: profile.Identity, ServingConfig: profile.ServingConfig, Topology: profile.Topology, Constraints: priors.Constraints{TTFTTargetMilliseconds: 2000, ITLTargetMilliseconds: 100, LatencyQuantile: 1}})
 	if err != nil {
 		t.Fatal(err)
 	}

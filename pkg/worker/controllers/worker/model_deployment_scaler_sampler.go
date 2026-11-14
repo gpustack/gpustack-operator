@@ -280,7 +280,7 @@ func (s *modelDeploymentScalerSampler) observeRole(
 ) (algorithm.RoleObservation, map[string]modelDeploymentScalerPodSample, modelDeploymentScalerRoleSample) {
 	observation := algorithm.RoleObservation{
 		Role:            role.Name,
-		Kind:            modelDeploymentScalerRoleKind(role.Kind),
+		Kind:            modelDeploymentScalerRoleKind(ModelDeploymentEffectiveRoleKind(role)),
 		CurrentReplicas: role.Replicas,
 		ReadyReplicas:   int32(len(ready)),
 		ObservedAt:      now,
