@@ -52,7 +52,7 @@ Use [External DP Benchmark](../../modules/model-deployment/external-dp-benchmark
 | Operator | GPUStack Operator v0.9.1 with managed *External LB* endpoint discovery |
 | Runner | `gpustack/runner:cuda13.0-vllm0.30.0` |
 | Router | `vllm-router`, image `gpustack/llm-router:v0.3.1`, policy `round_robin` |
-| Model | `deepseek-ai/DeepSeek-V2-Lite-Chat`, artifact `deepseek-v2-lite-chat`, served as `/models` |
+| Model | `deepseek-ai/DeepSeek-V2-Lite-Chat`, artifact `deepseek-v2-lite-chat` |
 | Reusable `AcceleratorType` | `gpustack--nvidia-h100-80gb-hbm3-linux-amd64` |
 | GPU budget | 4 members × 2 GPUs = 8 GPUs |
 

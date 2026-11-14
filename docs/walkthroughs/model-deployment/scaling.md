@@ -316,10 +316,11 @@ If multiple quantizations match, set `--quantization` or annotate the deployment
 `worker.gpustack.ai/precision`. Use the annotation also to pin precision without an engine flag.
 An empty `catalogRef: {}` is invalid: admission requires a name for a present reference.
 
-For a fixed `1P:3D` target, the following scaler uses the embedded catalog. Align the target's
-replicas to the ratio and provide enough GPU capacity before applying it. The matching catalog
-profiles and target topology must also satisfy the prior's requirements; this example is not a
-recorded cluster run.
+For a fixed `1P:3D` target whose model is in the embedded catalog, omitting *`catalogRef`* resolves
+directly. Because the committed catalog carries no `Qwen/Qwen3-8B` profile, point *`catalogRef`* at
+a reviewed `ConfigMap` (such as `autoscaling-priors` below) when targeting `autoscaling-vllm-pd`.
+Align the target's replicas to the ratio and provide enough GPU capacity before applying it; this
+example is not a recorded cluster run.
 
 ```yaml
 apiVersion: worker.gpustack.ai/v1
@@ -349,6 +350,8 @@ spec:
       ttftTargetMilliseconds: "2000"
       itlTargetMilliseconds: "50"
     capacityPrior:
+      catalogRef:
+        name: autoscaling-priors
       headroom: "0.75"
 ```
 

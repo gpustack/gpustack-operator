@@ -46,7 +46,7 @@ Use [Elastic EP Benchmark](../../modules/model-deployment/elastic-ep-benchmark.m
 | Hardware | 8 × NVIDIA H100 80 GB HBM3 SXM5; physical NVLink bandwidth 900 GB/s |
 | Operator | GPUStack Operator v0.9.1 |
 | Runner | `gpustack/runner:cuda13.0-vllm0.30.0` |
-| Model | `deepseek-ai/DeepSeek-V2-Lite-Chat`, `ModelArtifact` `deepseek-v2-lite-chat`, served as `/models` |
+| Model | `deepseek-ai/DeepSeek-V2-Lite-Chat`, `ModelArtifact` `deepseek-v2-lite-chat` |
 | Captured `InstanceType` | Custom `bench-gpu`, selecting the H100 accelerator group |
 | Initial allocation | Two GPU members × 2 GPUs = 4 GPUs, plus one CPU-only Ray head |
 | Expanded allocation | Four GPU members × 2 GPUs = 8 GPUs, plus the retained Ray head |
