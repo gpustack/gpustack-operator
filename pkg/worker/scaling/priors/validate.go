@@ -202,6 +202,9 @@ func validateProfile(profile Profile) error {
 		if err := validateDisaggregatedStage("decode", profile.Decode); err != nil {
 			return err
 		}
+		if unitGPUs(profile) <= 0 {
+			return fmt.Errorf("disaggregated unit GPU count overflows supported integer bounds")
+		}
 	}
 	switch profile.Workload.CacheBehavior {
 	case CacheBehaviorAllMisses, CacheBehaviorIncludesHits, CacheBehaviorUnknown:

@@ -1,6 +1,8 @@
 package priors
 
 import (
+	"slices"
+	"sort"
 	"strings"
 
 	"gpustack.ai/gpustack/pkg/nodefeature"
@@ -301,4 +303,73 @@ func normalizeSpelling(spelling string) string {
 	spelling = strings.ToLower(strings.TrimSpace(spelling))
 	spelling = strings.ReplaceAll(spelling, "_", "-")
 	return strings.Join(strings.Fields(spelling), " ")
+}
+
+// MergeServingConfig merges a stage serving overlay onto a profile's shared serving configuration.
+func MergeServingConfig(base, overlay ServingConfig) ServingConfig {
+	merged := base
+	if overlay.Router != "" {
+		merged.Router = overlay.Router
+	}
+	if overlay.KVCacheDType != "" {
+		merged.KVCacheDType = overlay.KVCacheDType
+	}
+	if overlay.Offload != "" {
+		merged.Offload = overlay.Offload
+	}
+	if overlay.PrefixCaching != "" {
+		merged.PrefixCaching = overlay.PrefixCaching
+	}
+	if overlay.SpeculativeDecoding != "" {
+		merged.SpeculativeDecoding = overlay.SpeculativeDecoding
+	}
+	if len(base.LaunchParameters) > 0 || len(overlay.LaunchParameters) > 0 {
+		merged.LaunchParameters = append(slices.Clone(base.LaunchParameters), overlay.LaunchParameters...)
+	}
+	if len(base.EffectiveDefaults) > 0 || len(overlay.EffectiveDefaults) > 0 {
+		defaults := make(map[string]string, len(base.EffectiveDefaults)+len(overlay.EffectiveDefaults))
+		for k, v := range base.EffectiveDefaults {
+			defaults[k] = v
+		}
+		for k, v := range overlay.EffectiveDefaults {
+			defaults[k] = v
+		}
+		merged.EffectiveDefaults = defaults
+	}
+	if len(base.EngineEnv) > 0 || len(overlay.EngineEnv) > 0 {
+		merged.EngineEnv = mergeEngineEnvEntries(base.EngineEnv, overlay.EngineEnv)
+	}
+	if overlay.EngineEnvComplete {
+		merged.EngineEnvComplete = true
+	}
+	return merged
+}
+
+func mergeEngineEnvEntries(base, overlay []string) []string {
+	if len(overlay) == 0 {
+		return slices.Clone(base)
+	}
+	byKey := make(map[string]string, len(base)+len(overlay))
+	for _, entry := range base {
+		key, val, ok := strings.Cut(entry, "=")
+		if ok {
+			byKey[key] = val
+		} else {
+			byKey[entry] = ""
+		}
+	}
+	for _, entry := range overlay {
+		key, val, ok := strings.Cut(entry, "=")
+		if ok {
+			byKey[key] = val
+		} else {
+			byKey[entry] = ""
+		}
+	}
+	merged := make([]string, 0, len(byKey))
+	for key, val := range byKey {
+		merged = append(merged, key+"="+val)
+	}
+	sort.Strings(merged)
+	return merged
 }

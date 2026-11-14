@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"math/bits"
 	"sort"
 	"strconv"
 	"strings"
@@ -496,15 +497,36 @@ func profileMismatches(profile Profile, request Request) string {
 	mismatched := make([]string, 0, 16)
 	if profile.Mode == ModeDisaggregated {
 		mismatched = append(mismatched, sharedIdentityMismatch(profile.Identity, request.Identity)...)
-		mismatched = append(mismatched, servingConfigMismatch(profile.ServingConfig, request.ServingConfig)...)
-		mismatched = append(mismatched, stageMismatches("prefill", profile.Prefill, request.Prefill)...)
-		mismatched = append(mismatched, stageMismatches("decode", profile.Decode, request.Decode)...)
+		if profile.Prefill != nil && profile.Decode != nil && request.Prefill != nil && request.Decode != nil {
+			mismatched = append(
+				mismatched,
+				stageMismatchesWithServing("prefill", profile.ServingConfig, profile.Prefill, request.ServingConfig, request.Prefill)...,
+			)
+			mismatched = append(
+				mismatched,
+				stageMismatchesWithServing("decode", profile.ServingConfig, profile.Decode, request.ServingConfig, request.Decode)...,
+			)
+		} else {
+			mismatched = append(mismatched, servingConfigMismatch(profile.ServingConfig, request.ServingConfig)...)
+			mismatched = append(mismatched, stageMismatches("prefill", profile.Prefill, request.Prefill)...)
+			mismatched = append(mismatched, stageMismatches("decode", profile.Decode, request.Decode)...)
+		}
 		return formatMismatch(mismatched)
 	}
 	mismatched = append(mismatched, identityMismatch(profile.Identity, request.Identity)...)
 	mismatched = append(mismatched, servingConfigMismatch(profile.ServingConfig, request.ServingConfig)...)
 	mismatched = append(mismatched, topologyMismatch(profile.Topology.Normalized(), request.Topology.Normalized())...)
 	return formatMismatch(mismatched)
+}
+
+func stageMismatchesWithServing(
+	prefix string, wantBase ServingConfig, want *DisaggregatedStage, gotBase ServingConfig, got *DisaggregatedStage,
+) []string {
+	mergedWant := *want
+	mergedWant.ServingConfig = MergeServingConfig(wantBase, want.ServingConfig)
+	mergedGot := *got
+	mergedGot.ServingConfig = MergeServingConfig(gotBase, got.ServingConfig)
+	return stageMismatches(prefix, &mergedWant, &mergedGot)
 }
 
 func stageMismatches(prefix string, want, got *DisaggregatedStage) []string {
@@ -849,8 +871,13 @@ func unitGPUs(profile Profile) int {
 			profile.Prefill.Topology.GPUsPerReplica <= 0 || profile.Decode.Topology.GPUsPerReplica <= 0 {
 			return 0
 		}
-		return profile.Prefill.Replicas*profile.Prefill.Topology.GPUsPerReplica +
-			profile.Decode.Replicas*profile.Decode.Topology.GPUsPerReplica
+		hiP, loP := bits.Mul64(uint64(profile.Prefill.Replicas), uint64(profile.Prefill.Topology.GPUsPerReplica))
+		hiD, loD := bits.Mul64(uint64(profile.Decode.Replicas), uint64(profile.Decode.Topology.GPUsPerReplica))
+		sum, carry := bits.Add64(loP, loD, 0)
+		if hiP != 0 || hiD != 0 || carry != 0 || sum > uint64(math.MaxInt) {
+			return 0
+		}
+		return int(sum)
 	}
 	return profile.Topology.GPUsPerReplica
 }
@@ -873,7 +900,7 @@ func latencyTargets(request Request, requirement roleRequirement) (map[LatencyMe
 		case LatencyMetricITL:
 			target = request.Constraints.ITLTargetMilliseconds
 		}
-		if target <= 0 {
+		if !finitePositive(target) {
 			return nil, newRefusal(
 				RefusalCapacityPriorUnresolved,
 				fmt.Sprintf("a role that relies on a catalog capacity requires the %s latency target", metric),
@@ -890,31 +917,36 @@ func latencyTargets(request Request, requirement roleRequirement) (map[LatencyMe
 // THE DENOMINATOR DECIDES THE RECONSTRUCTION, because the source states what
 // it counted over and the resolver must not pick a multiplier.
 func perReplicaTokensPerSecond(throughput Throughput, profile Profile) (float64, bool) {
+	var rate float64
 	switch throughput.Denominator {
 	case DenominatorPerGPU:
 		gpus := unitGPUs(profile)
 		if gpus <= 0 {
 			return 0, false
 		}
-		return throughput.Value * float64(gpus), true
+		rate = throughput.Value * float64(gpus)
 	case DenominatorPerReplica:
 		if profile.Mode != ModeAggregated {
 			return 0, false
 		}
-		return throughput.Value, true
+		rate = throughput.Value
 	case DenominatorPerUnit:
 		if profile.Mode != ModeDisaggregated {
 			return 0, false
 		}
-		return throughput.Value, true
+		rate = throughput.Value
 	case DenominatorWholeSystem:
 		if profile.MeasuredReplicas <= 0 {
 			return 0, false
 		}
-		return throughput.Value / float64(profile.MeasuredReplicas), true
+		rate = throughput.Value / float64(profile.MeasuredReplicas)
 	default:
 		return 0, false
 	}
+	if !finitePositive(rate) {
+		return 0, false
+	}
+	return rate, true
 }
 
 // satisfiesConstraints checks a qualified point against the latency targets.

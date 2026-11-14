@@ -1540,3 +1540,94 @@ func TestResolveDisaggregatedStagesAndMismatches(t *testing.T) {
 		t.Fatalf("mismatch = %q, want decode.hardware.memoryGB", ref.Detail["mismatch"])
 	}
 }
+
+func TestResolveDisaggregatedBoundariesAndStageServingMerge(t *testing.T) {
+	topo := testTopology()
+	makePoints := func() []MeasuredPoint {
+		pts := []MeasuredPoint{
+			testPoint(8, 1600, 300, 10),
+			testPoint(16, 2400, 4000, 100),
+		}
+		for i := range pts {
+			pts[i].Throughput.Denominator = DenominatorPerUnit
+		}
+		return pts
+	}
+
+	t.Run("stage servingConfig overrides top-level servingConfig per stage", func(t *testing.T) {
+		profile := testDisaggregatedProfile(t, 1, topo, 1, topo, makePoints())
+		profile.ServingConfig.PrefixCaching = "enabled"
+		profile.Decode.ServingConfig.PrefixCaching = "disabled"
+		profile = redigest(t, profile)
+		catalog := testCatalog(t, profile)
+
+		req := testRequest()
+		req.Mode = ModeDisaggregated
+		req.Identity.Hardware = HardwareIdentity{}
+		req.Topology = Topology{}
+		req.Prefill = &DisaggregatedStage{
+			Replicas:      1,
+			Hardware:      testIdentity().Hardware,
+			ServingConfig: ServingConfig{PrefixCaching: "enabled"},
+			Topology:      topo,
+		}
+		req.Decode = &DisaggregatedStage{
+			Replicas:      1,
+			Hardware:      testIdentity().Hardware,
+			ServingConfig: ServingConfig{PrefixCaching: "disabled"},
+			Topology:      topo,
+		}
+		if _, err := catalog.Resolve(req); err != nil {
+			t.Fatalf("expected stage override to match, got %v", err)
+		}
+
+		mismatchReq := req
+		prefillBad := *req.Prefill
+		prefillBad.ServingConfig.PrefixCaching = "disabled"
+		mismatchReq.Prefill = &prefillBad
+		_, err := catalog.Resolve(mismatchReq)
+		if err == nil {
+			t.Fatal("expected prefill servingConfig mismatch")
+		}
+		if got := refusalOf(t, err).Detail["mismatch"]; got != "prefill.servingConfig.prefixCaching" {
+			t.Fatalf("mismatch = %q, want prefill.servingConfig.prefixCaching", got)
+		}
+	})
+
+	t.Run("unitGPUs and ValidateProfile reject integer overflow", func(t *testing.T) {
+		eightGPUTopo := topo
+		eightGPUTopo.GPUsPerReplica = 8
+		eightGPUTopo.TensorParallel = 8
+		profile := testDisaggregatedProfile(t, math.MaxInt/4, eightGPUTopo, math.MaxInt/4-1, eightGPUTopo, makePoints())
+		if got := unitGPUs(profile); got != 0 {
+			t.Fatalf("unitGPUs = %d, want 0 on overflow", got)
+		}
+		if err := validateProfile(profile); err == nil {
+			t.Fatal("expected validateProfile error on overflowing disaggregated unit GPU count")
+		}
+	})
+
+	t.Run("perReplicaTokensPerSecond rejects float64 overflow and non-finite latency targets", func(t *testing.T) {
+		agg := testProfile(t, ModeAggregated, []MeasuredPoint{
+			testPoint(8, 1e308, 300, 10),
+			testPoint(16, 1e308, 4000, 100),
+		})
+		agg.Topology.GPUsPerReplica = 8
+		agg.Topology.TensorParallel = 8
+		agg.Points[0].Throughput.Denominator = DenominatorPerGPU
+		agg.Points[1].Throughput.Denominator = DenominatorPerGPU
+		if _, ok := perReplicaTokensPerSecond(agg.Points[0].Throughput, agg); ok {
+			t.Fatal("expected perReplicaTokensPerSecond overflow to return false")
+		}
+
+		validCatalog := testCatalog(t, testProfile(t, ModeAggregated, []MeasuredPoint{
+			testPoint(8, 1600, 300, 10),
+			testPoint(16, 2400, 4000, 100),
+		}))
+		nanReq := testRequest()
+		nanReq.Constraints.TTFTTargetMilliseconds = math.NaN()
+		if _, err := validCatalog.Resolve(nanReq); err == nil {
+			t.Fatal("expected NaN TTFT target to be refused")
+		}
+	})
+}

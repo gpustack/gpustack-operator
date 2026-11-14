@@ -258,26 +258,35 @@ func (r InferenceXRow) skipReason() (string, bool) {
 
 func (r InferenceXRow) aggSkipReason() (string, bool) {
 	gpus := r.aggGPUs()
-	if gpus <= 0 || r.PrefillNumWorkers > 1 {
+	if gpus <= 0 || r.GPUs < 0 || r.NumPrefillGPU < 0 || r.NumDecodeGPU > 0 ||
+		r.PrefillNumWorkers < 0 || r.PrefillNumWorkers > 1 || r.DecodeNumWorkers > 0 {
 		return "the row ran a replica the catalog does not hold", true
 	}
 	if !validStageTopology(r.aggTP(), r.aggEP(), r.aggDPAttention(), gpus) {
 		return "the row ran an invalid topology", true
 	}
-	if r.Metrics.ThroughputPerGPU <= 0 || r.Metrics.InputThroughputPerGPU < 0 || r.Metrics.OutputThroughputPerGPU <= 0 {
+	if !finitePositiveFloat64(r.Metrics.ThroughputPerGPU) ||
+		!finiteNonNegativeFloat64(r.Metrics.InputThroughputPerGPU) ||
+		!finitePositiveFloat64(r.Metrics.OutputThroughputPerGPU) {
+		return "the row published no throughput", true
+	}
+	totalRate := round(r.Metrics.ThroughputPerGPU*float64(gpus), 2)
+	outputRate := round(r.Metrics.OutputThroughputPerGPU*float64(gpus), 2)
+	if !finitePositiveFloat64(totalRate) || !finitePositiveFloat64(outputRate) {
 		return "the row published no throughput", true
 	}
 	relErr := math.Abs((r.Metrics.InputThroughputPerGPU+r.Metrics.OutputThroughputPerGPU)-r.Metrics.ThroughputPerGPU) /
 		r.Metrics.ThroughputPerGPU
-	if relErr > maxRelativeThroughputConservationError {
+	if math.IsNaN(relErr) || math.IsInf(relErr, 0) || relErr > maxRelativeThroughputConservationError {
 		return "the row violated throughput conservation", true
 	}
 	return "", false
 }
 
 func (r InferenceXRow) disaggSkipReason() (string, bool) {
-	if r.PrefillNumWorkers <= 0 || r.DecodeNumWorkers <= 0 ||
+	if r.GPUs < 0 || r.PrefillNumWorkers <= 0 || r.DecodeNumWorkers <= 0 ||
 		r.NumPrefillGPU <= 0 || r.NumDecodeGPU <= 0 ||
+		r.NumPrefillGPU > math.MaxInt-r.NumDecodeGPU ||
 		r.NumPrefillGPU%r.PrefillNumWorkers != 0 || r.NumDecodeGPU%r.DecodeNumWorkers != 0 ||
 		(r.GPUs > 0 && r.GPUs != r.NumPrefillGPU+r.NumDecodeGPU) {
 		return "the row ran an invalid disaggregated worker layout", true
@@ -288,16 +297,24 @@ func (r InferenceXRow) disaggSkipReason() (string, bool) {
 		!validStageTopology(r.decodeTP(), r.decodeEP(), r.decodeDPAttention(), gD) {
 		return "the row ran an invalid topology", true
 	}
-	if r.Metrics.ThroughputPerGPU <= 0 || r.Metrics.InputThroughputPerGPU <= 0 || r.Metrics.OutputThroughputPerGPU <= 0 {
+	if !finitePositiveFloat64(r.Metrics.ThroughputPerGPU) ||
+		!finitePositiveFloat64(r.Metrics.InputThroughputPerGPU) ||
+		!finitePositiveFloat64(r.Metrics.OutputThroughputPerGPU) {
 		return "the row published no throughput", true
 	}
 	sysTotal := r.Metrics.ThroughputPerGPU * float64(r.NumPrefillGPU+r.NumDecodeGPU)
 	sysInput := r.Metrics.InputThroughputPerGPU * float64(r.NumPrefillGPU)
 	sysOutput := r.Metrics.OutputThroughputPerGPU * float64(r.NumDecodeGPU)
-	if sysTotal <= 0 || sysInput <= 0 || sysOutput <= 0 {
+	unitCount := float64(gcdInt(r.PrefillNumWorkers, r.DecodeNumWorkers))
+	totalRate := round(sysTotal/unitCount, 2)
+	inputRate := round(sysInput/unitCount, 2)
+	outputRate := round(sysOutput/unitCount, 2)
+	if !finitePositiveFloat64(sysTotal) || !finitePositiveFloat64(sysInput) || !finitePositiveFloat64(sysOutput) ||
+		!finitePositiveFloat64(totalRate) || !finitePositiveFloat64(inputRate) || !finitePositiveFloat64(outputRate) {
 		return "the row published no throughput", true
 	}
-	if math.Abs((sysInput+sysOutput)-sysTotal)/sysTotal > maxRelativeThroughputConservationError {
+	relErr := math.Abs((sysInput+sysOutput)-sysTotal) / sysTotal
+	if math.IsNaN(relErr) || math.IsInf(relErr, 0) || relErr > maxRelativeThroughputConservationError {
 		return "the row violated throughput conservation", true
 	}
 	return "", false
@@ -709,15 +726,33 @@ func latencyQuantiles(p50, p90, p99 float64) priors.LatencyQuantiles {
 	return quantiles
 }
 
+func finitePositiveFloat64(value float64) bool {
+	return !math.IsNaN(value) && !math.IsInf(value, 0) && value > 0
+}
+
+func finiteNonNegativeFloat64(value float64) bool {
+	return !math.IsNaN(value) && !math.IsInf(value, 0) && value >= 0
+}
+
 // round rounds a number to the given number of decimal places.
 //
 // IT EXISTS SO THE CATALOG READS THE SAME WHATEVER THE MEASUREMENT PUBLISHED,
 // because a file that changes its last digit on every run is a file no one can
 // diff.
 func round(value float64, places int) float64 {
-	factor := 1.0
-	for range places {
-		factor *= 10
+	if math.IsNaN(value) || math.IsInf(value, 0) {
+		return 0
 	}
-	return float64(int64(value*factor+0.5)) / factor
+	if places <= 0 {
+		return math.Round(value)
+	}
+	factor := math.Pow10(places)
+	if math.IsInf(factor, 0) || factor == 0 {
+		return value
+	}
+	scaled := value * factor
+	if math.IsInf(scaled, 0) {
+		return value
+	}
+	return math.Round(scaled) / factor
 }

@@ -1,6 +1,7 @@
 package adapter
 
 import (
+	"math"
 	"strings"
 	"testing"
 
@@ -411,4 +412,76 @@ func skippedFor(skipped map[string]int, reason string) bool {
 		}
 	}
 	return false
+}
+
+func TestInferenceXBoundaryGuards(t *testing.T) {
+	if got := round(1e20, 2); got != 1e20 {
+		t.Fatalf("round(1e20, 2) = %v, want 1e20 without int64 wrap", got)
+	}
+	if got := round(math.NaN(), 2); got != 0 {
+		t.Fatalf("round(NaN, 2) = %v, want 0", got)
+	}
+
+	baseAgg := InferenceXRow{
+		Model: "dsr1", CanonicalModel: "deepseek-ai/DeepSeek-R1-0528",
+		Framework: "sglang", Hardware: "h200", Precision: "fp8",
+		Concurrency: 8, InputLength: 8192, OutputLength: 1024, Date: "2026-08-01",
+		GPUs: 8, PrefillTensorParallel: 8,
+		Metrics: InferenceXMetrics{
+			ThroughputPerGPU: 200, InputThroughputPerGPU: 160, OutputThroughputPerGPU: 40,
+			MeanITL: 0.01, MeanTPOT: 0.01, P90TTFT: 0.2, P99TTFT: 0.3, P90ITL: 0.012, P99ITL: 0.015,
+		},
+	}
+
+	cases := []struct {
+		name   string
+		mutate func(*InferenceXRow)
+	}{
+		{
+			name: "aggregated row with decode workers is skipped",
+			mutate: func(r *InferenceXRow) {
+				r.DecodeNumWorkers = 2
+			},
+		},
+		{
+			name: "aggregated row with sub-cent throughput rounding to zero is skipped",
+			mutate: func(r *InferenceXRow) {
+				r.GPUs = 1
+				r.PrefillTensorParallel = 1
+				r.Metrics.ThroughputPerGPU = 0.001
+				r.Metrics.InputThroughputPerGPU = 0
+				r.Metrics.OutputThroughputPerGPU = 0.001
+			},
+		},
+		{
+			name: "aggregated row with infinite throughput is skipped",
+			mutate: func(r *InferenceXRow) {
+				r.Metrics.ThroughputPerGPU = math.Inf(1)
+				r.Metrics.OutputThroughputPerGPU = math.Inf(1)
+			},
+		},
+		{
+			name: "disaggregated row with overflowing GPU sum is skipped",
+			mutate: func(r *InferenceXRow) {
+				r.Disagg = true
+				r.GPUs = 0
+				r.PrefillNumWorkers = 1
+				r.DecodeNumWorkers = 1
+				r.NumPrefillGPU = math.MaxInt
+				r.NumDecodeGPU = 8
+			},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			row := baseAgg
+			tc.mutate(&row)
+			row2 := row
+			row2.Concurrency = 16
+			docs, _ := ImportInferenceXRows([]InferenceXRow{row, row2})
+			if len(docs) != 0 {
+				t.Fatalf("expected invalid rows to be skipped, got %d profile documents", len(docs))
+			}
+		})
+	}
 }
