@@ -714,7 +714,12 @@ func wholeUnitCurrentMultiplier(
 	}
 	var kCur int32
 	first := true
+	seen := make(map[string]struct{}, len(roles))
 	for _, role := range roles {
+		if _, dup := seen[role.Name]; dup {
+			return 0, false
+		}
+		seen[role.Name] = struct{}{}
 		unit, ok := wholeUnit[role.Name]
 		if !ok || unit <= 0 {
 			return 0, false
@@ -801,6 +806,9 @@ func applyWholeUnitStepLimit(
 	up := behavior.ScaleUp
 	unitUpCap := int32(math.MaxInt32)
 	for name, unit := range wholeUnit {
+		if unit <= 0 {
+			return kCur, kCur
+		}
 		delta := scaleUpStepDelta(states[name].CurrentReplicas, up)
 		unitUpCap = minInt32(unitUpCap, delta/unit)
 	}
@@ -811,6 +819,9 @@ func applyWholeUnitStepLimit(
 	if down.StepPolicy != nil {
 		unitDownCap = math.MaxInt32
 		for name, unit := range wholeUnit {
+			if unit <= 0 {
+				return kCur, kCur
+			}
 			delta := stepAmount(states[name].CurrentReplicas, *down.StepPolicy)
 			unitDownCap = minInt32(unitDownCap, delta/unit)
 		}

@@ -649,4 +649,78 @@ func TestScalerConstraintsWholeUnitOverflowSaturation(t *testing.T) {
 			t.Fatalf("expected RatioConflict reason on every role, got %#v", res.Reasons)
 		}
 	})
+
+	t.Run("whole-unit larger than default MaxStepReplicas scales up by one unit under default rules", func(t *testing.T) {
+		cases := []struct {
+			name         string
+			scaleUp      v1alpha1.ModelDeploymentScalerScaleUpRules
+			wantP, wantD int32
+			wantBlock    string
+		}{
+			{
+				name:  "zero-value ScaleUpRules defaults to max(4, 100%)",
+				wantP: 2, wantD: 16,
+			},
+			{
+				name: "webhook-defaulted ScaleUpRules(4, 100%) permits +1 unit on 1P:8D",
+				scaleUp: v1alpha1.ModelDeploymentScalerScaleUpRules{
+					MaxStepReplicas: 4,
+					MaxStepPercent:  100,
+				},
+				wantP: 2, wantD: 16,
+			},
+			{
+				name: "explicit MaxStepReplicas=4 without percent holds 1P:8D",
+				scaleUp: v1alpha1.ModelDeploymentScalerScaleUpRules{
+					MaxStepReplicas: 4,
+				},
+				wantP:     1,
+				wantD:     8,
+				wantBlock: v1alpha1.ModelDeploymentScalerReasonPacingBounded,
+			},
+		}
+		for _, tc := range cases {
+			t.Run(tc.name, func(t *testing.T) {
+				spec := constraintSpec("prefill", "decode")
+				spec.Roles = []v1alpha1.ModelDeploymentScalerRoleBounds{
+					{Name: "prefill", MinReplicas: 1, MaxReplicas: 4},
+					{Name: "decode", MinReplicas: 8, MaxReplicas: 32},
+				}
+				spec.Behavior.ScaleUp = tc.scaleUp
+				p := roleState("prefill", 1, 2)
+				p.Kind = algorithm.RoleKindPrefill
+				d := roleState("decode", 8, 16)
+				d.Kind = algorithm.RoleKindDecode
+				res := SolveModelDeploymentScalerConstraints(ModelDeploymentScalerConstraintInput{
+					Spec:      spec,
+					Roles:     []ModelDeploymentScalerRoleState{p, d},
+					WholeUnit: map[string]int32{"prefill": 1, "decode": 8},
+					Now:       now,
+				})
+				if res.Replicas["prefill"] != tc.wantP || res.Replicas["decode"] != tc.wantD {
+					t.Fatalf("replicas = %#v, want %dP:%dD", res.Replicas, tc.wantP, tc.wantD)
+				}
+				if res.BlockingReason != tc.wantBlock {
+					t.Fatalf("blockingReason = %q, want %q", res.BlockingReason, tc.wantBlock)
+				}
+			})
+		}
+	})
+
+	t.Run("duplicate role names with zero whole-unit entry do not divide by zero", func(t *testing.T) {
+		spec := constraintSpec("prefill")
+		spec.Roles = []v1alpha1.ModelDeploymentScalerRoleBounds{
+			{Name: "prefill", MinReplicas: 1, MaxReplicas: 4},
+		}
+		p := roleState("prefill", 1, 2)
+		res := SolveModelDeploymentScalerConstraints(ModelDeploymentScalerConstraintInput{
+			Spec:      spec,
+			Roles:     []ModelDeploymentScalerRoleState{p, p},
+			WholeUnit: map[string]int32{"prefill": 1, "decode": 0},
+			Now:       now,
+		})
+		if res.BlockingReason != v1alpha1.ModelDeploymentScalerReasonRatioConflict {
+			t.Fatalf("expected RatioConflict, got %q", res.BlockingReason)
+		}
+	})
 }
