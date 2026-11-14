@@ -7,19 +7,27 @@ import (
 	"gpustack.ai/gpustack/pkg/nodefeature"
 )
 
-// Shape is the six-tuple that identifies one deployment shape.
+// StageShape is the normalized shape of one stage in a disaggregated profile.
+type StageShape struct {
+	// Replicas is the replica count of this stage within one minimal coupled serving unit.
+	Replicas int `json:"replicas"`
+
+	// Hardware is the canonical accelerator family for this stage.
+	Hardware string `json:"hardware"`
+
+	// Topology is the normalized shape of one replica in this stage.
+	Topology Topology `json:"topology"`
+}
+
+// Shape identifies one deployment shape for catalog indexing and matching.
 //
 // IT IS WHAT A PROFILE IS KNOWN BY, because a catalog that names its profiles
 // by a name lets two profiles claim one name, and a deployment that selects a
 // profile by a name has to know that name before it knows anything else about
 // the catalog.
-//
-// THE SIX ELEMENTS ARE THE ROLE, THE MODEL, THE QUANTIZATION, THE ENGINE, THE
-// HARDWARE AND THE TOPOLOGY, because a measurement of one model under one
-// recipe on one engine on one accelerator in one shape is one measurement.
 type Shape struct {
-	// Role is the serving role the shape serves.
-	Role RoleKind `json:"role"`
+	// Mode is the serving architecture the shape describes.
+	Mode ProfileMode `json:"mode"`
 
 	// Model is the canonical model repository.
 	Model string `json:"model"`
@@ -30,41 +38,62 @@ type Shape struct {
 	// Engine is the engine family.
 	Engine string `json:"engine"`
 
-	// Hardware is the canonical accelerator family.
-	Hardware string `json:"hardware"`
+	// Hardware is the canonical accelerator family for an aggregated shape.
+	Hardware string `json:"hardware,omitempty"`
 
-	// Topology is the normalized shape of one scaling replica.
-	Topology Topology `json:"topology"`
+	// Topology is the normalized shape of one scaling replica in an aggregated shape.
+	Topology Topology `json:"topology,omitempty"`
+
+	// Prefill is the prefill stage shape in a disaggregated shape.
+	Prefill *StageShape `json:"prefill,omitempty"`
+
+	// Decode is the decode stage shape in a disaggregated shape.
+	Decode *StageShape `json:"decode,omitempty"`
 }
 
-// Shape returns the shape of a profile.
+// Shape returns the normalized shape of a profile.
 //
 // IT NORMALIZES EVERY ELEMENT, because a profile written under one spelling of
 // a model and a deployment written under another name one shape.
 func (p Profile) Shape() Shape {
-	return Shape{
-		Role:         p.Role,
+	shape := Shape{
+		Mode:         p.Mode,
 		Model:        CanonicalModelName(p.Identity.Model.Name),
 		Quantization: CanonicalQuantization(p.Identity.Model.Quantization),
 		Engine:       CanonicalEngineFamily(p.Identity.Engine.Image),
-		Hardware:     CanonicalAcceleratorFamily(p.Identity.Hardware.Accelerator),
-		Topology:     p.Topology.Normalized(),
 	}
+	if p.Mode == ModeDisaggregated {
+		shape.Prefill = stageShapeFromStage(p.Prefill)
+		shape.Decode = stageShapeFromStage(p.Decode)
+		return shape
+	}
+	shape.Hardware = CanonicalAcceleratorFamily(p.Identity.Hardware.Accelerator)
+	shape.Topology = p.Topology.Normalized()
+	return shape
 }
 
-// DocumentShape returns the shape of a written profile.
+// DocumentShape returns the normalized shape of a written profile.
 //
 // IT NORMALIZES EVERY ELEMENT, because the shape is what a profile is known by
 // and a reader has to reach the same shape from the file and from the runtime.
 func DocumentShape(d ProfileDocument) Shape {
-	return Shape{
-		Role:         RoleKind(d.Role),
+	mode := ProfileMode(d.Mode)
+	shape := Shape{
+		Mode:         mode,
 		Model:        CanonicalModelName(d.Model),
 		Quantization: CanonicalQuantization(d.Quantization),
 		Engine:       CanonicalEngineFamily(d.Engine),
-		Hardware:     CanonicalAcceleratorFamily(d.Hardware),
-		Topology:     NormalizeTopologyDocument(d.Topology),
 	}
+	if mode == ModeDisaggregated {
+		shape.Prefill = stageShapeFromDocument(d.Prefill)
+		shape.Decode = stageShapeFromDocument(d.Decode)
+		return shape
+	}
+	shape.Hardware = CanonicalAcceleratorFamily(d.Hardware)
+	if d.Topology != nil {
+		shape.Topology = NormalizeTopologyDocument(*d.Topology)
+	}
+	return shape
 }
 
 // NormalizeTopologyDocument returns a written topology in its canonical form.
@@ -76,54 +105,131 @@ func NormalizeTopologyDocument(d TopologyDocument) Topology {
 	return topology.Normalized()
 }
 
-// Shape returns the shape a request names.
+// Shape returns the normalized shape a request names.
 //
 // IT READS THE REQUEST AND NOT A PROFILE, because the request is what a
 // deployment states and the profile is what the catalog holds.
 func (r Request) Shape() Shape {
-	return Shape{
-		Role:         r.Role,
+	shape := Shape{
+		Mode:         r.Mode,
 		Model:        CanonicalModelName(r.Identity.Model.Name),
 		Quantization: CanonicalQuantization(r.Identity.Model.Quantization),
 		Engine:       CanonicalEngineFamily(r.Identity.Engine.Image),
-		Hardware:     CanonicalAcceleratorFamily(r.Identity.Hardware.Accelerator),
-		Topology:     r.Topology.Normalized(),
+	}
+	if r.Mode == ModeDisaggregated {
+		shape.Prefill = stageShapeFromStage(r.Prefill)
+		shape.Decode = stageShapeFromStage(r.Decode)
+		return shape
+	}
+	shape.Hardware = CanonicalAcceleratorFamily(r.Identity.Hardware.Accelerator)
+	shape.Topology = r.Topology.Normalized()
+	return shape
+}
+
+func stageShapeFromStage(stage *DisaggregatedStage) *StageShape {
+	if stage == nil {
+		return nil
+	}
+	return &StageShape{
+		Replicas: stage.Replicas,
+		Hardware: CanonicalAcceleratorFamily(stage.Hardware.Accelerator),
+		Topology: stage.Topology.Normalized(),
 	}
 }
 
-// String renders the shape in a stable form.
-//
-// IT NAMES THE SIX ELEMENTS, because a refusal that names the shape it could
-// not resolve tells the reader what to change.
+func stageShapeFromDocument(stage *StageDocument) *StageShape {
+	if stage == nil {
+		return nil
+	}
+	return &StageShape{
+		Replicas: stage.Replicas,
+		Hardware: CanonicalAcceleratorFamily(stage.Hardware),
+		Topology: NormalizeTopologyDocument(stage.Topology),
+	}
+}
+
+// String renders the shape in a stable, compact form suitable for workload IDs.
 func (s Shape) String() string {
+	if s.Mode == ModeDisaggregated {
+		return fmt.Sprintf(
+			"disaggregated/%s/%s/%s/p=%s/d=%s",
+			s.Model, s.Quantization, s.Engine,
+			formatStageShape(s.Prefill),
+			formatStageShape(s.Decode),
+		)
+	}
 	return fmt.Sprintf(
 		"%s/%s/%s/%s/%s/gpus=%d,tp=%d,ep=%d,pp=%d,dp=%d,ldp=%d,cp=%d",
-		s.Role, s.Model, s.Quantization, s.Engine, s.Hardware,
+		s.Mode, s.Model, s.Quantization, s.Engine, s.Hardware,
 		s.Topology.GPUsPerReplica, s.Topology.TensorParallel, s.Topology.ExpertParallel,
 		s.Topology.PipelineParallel, s.Topology.DataParallel, s.Topology.LocalDataParallel,
 		s.Topology.ContextParallel,
 	)
 }
 
-// CompareShapes orders two shapes.
+func formatStageShape(stage *StageShape) string {
+	if stage == nil {
+		return "missing"
+	}
+	return fmt.Sprintf(
+		"%dx(%s:gpus=%d,tp=%d,ep=%d,pp=%d,dp=%d,ldp=%d,cp=%d)",
+		stage.Replicas, stage.Hardware,
+		stage.Topology.GPUsPerReplica, stage.Topology.TensorParallel, stage.Topology.ExpertParallel,
+		stage.Topology.PipelineParallel, stage.Topology.DataParallel, stage.Topology.LocalDataParallel,
+		stage.Topology.ContextParallel,
+	)
+}
+
+// CompareShapes orders two shapes deterministically across all shape fields.
 //
-// IT ORDERS BY THE SIX ELEMENTS AND THEN BY THE TOPOLOGY WIDTHS, because a
-// catalog that is written in the order the profiles were measured changes its
-// bytes every time a measurement is added.
+// IT ORDERS BY MODE, MODEL, QUANTIZATION, ENGINE AND THEN STAGE OR TOPOLOGY
+// WIDTHS, because a catalog that is written in the order the profiles were
+// measured changes its bytes every time a measurement is added.
 func CompareShapes(left, right Shape) int {
 	for _, pair := range [][2]string{
-		{string(left.Role), string(right.Role)},
+		{string(left.Mode), string(right.Mode)},
 		{left.Model, right.Model},
 		{left.Quantization, right.Quantization},
 		{left.Engine, right.Engine},
-		{left.Hardware, right.Hardware},
 	} {
 		if pair[0] != pair[1] {
 			return strings.Compare(pair[0], pair[1])
 		}
 	}
-	leftWidths := shapeWidths(left.Topology)
-	rightWidths := shapeWidths(right.Topology)
+	if left.Mode == ModeDisaggregated {
+		if cmp := compareStageShapes(left.Prefill, right.Prefill); cmp != 0 {
+			return cmp
+		}
+		return compareStageShapes(left.Decode, right.Decode)
+	}
+	if left.Hardware != right.Hardware {
+		return strings.Compare(left.Hardware, right.Hardware)
+	}
+	return compareTopologyWidths(left.Topology, right.Topology)
+}
+
+func compareStageShapes(left, right *StageShape) int {
+	if left == nil || right == nil {
+		if left == right {
+			return 0
+		}
+		if left == nil {
+			return -1
+		}
+		return 1
+	}
+	if left.Replicas != right.Replicas {
+		return left.Replicas - right.Replicas
+	}
+	if left.Hardware != right.Hardware {
+		return strings.Compare(left.Hardware, right.Hardware)
+	}
+	return compareTopologyWidths(left.Topology, right.Topology)
+}
+
+func compareTopologyWidths(left, right Topology) int {
+	leftWidths := shapeWidths(left)
+	rightWidths := shapeWidths(right)
 	for i := range leftWidths {
 		if leftWidths[i] != rightWidths[i] {
 			return leftWidths[i] - rightWidths[i]
@@ -155,7 +261,7 @@ func shapeWidths(topology Topology) [7]int {
 // either. The selection refuses when several profiles match, so an unstated
 // element never picks a profile on its own.
 func shapeMatches(want, got Shape) bool {
-	if want.Role != got.Role {
+	if want.Mode != got.Mode {
 		return false
 	}
 	if !ModelNameMatches(want.Model, got.Model) {
@@ -167,10 +273,27 @@ func shapeMatches(want, got Shape) bool {
 	if want.Engine != "" && want.Engine != got.Engine {
 		return false
 	}
+	if want.Mode == ModeDisaggregated {
+		if want.Prefill == nil || got.Prefill == nil || want.Decode == nil || got.Decode == nil {
+			return false
+		}
+		return stageShapeMatches(*want.Prefill, *got.Prefill) &&
+			stageShapeMatches(*want.Decode, *got.Decode)
+	}
 	if want.Hardware != "" && want.Hardware != got.Hardware {
 		return false
 	}
-	return want.Topology == got.Topology
+	return want.Topology == (Topology{}) || want.Topology.Normalized() == got.Topology.Normalized()
+}
+
+func stageShapeMatches(want, got StageShape) bool {
+	if want.Replicas != got.Replicas {
+		return false
+	}
+	if want.Hardware != "" && want.Hardware != got.Hardware {
+		return false
+	}
+	return want.Topology == (Topology{}) || want.Topology.Normalized() == got.Topology.Normalized()
 }
 
 // CanonicalEngineFamily returns the engine family an engine name belongs to.

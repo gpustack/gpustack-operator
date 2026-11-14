@@ -340,3 +340,9 @@ func TestEngineFamilyReadsTheImage(t *testing.T) {
 		})
 	}
 }
+
+func TestCanonicalModelNameIncludesMiniMaxM25(t *testing.T) {
+	if got := CanonicalModelName("minimaxm2.5"); got != "MiniMaxAI/MiniMax-M2.5" {
+		t.Fatalf("CanonicalModelName(%q) = %q, want %q", "minimaxm2.5", got, "MiniMaxAI/MiniMax-M2.5")
+	}
+}

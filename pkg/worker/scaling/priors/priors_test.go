@@ -121,22 +121,51 @@ func testPoint(concurrency, throughput, ttftP95, itlP95 float64) MeasuredPoint {
 	}
 }
 
-// testProfile returns a profile that carries the given points.
+// testProfile returns an aggregated profile that carries the given points.
 //
 // IT COMPUTES THE DIGEST, because a profile the validator accepts has to carry
 // one.
-func testProfile(t *testing.T, role RoleKind, points []MeasuredPoint) Profile {
+func testProfile(t *testing.T, mode ProfileMode, points []MeasuredPoint) Profile {
 	t.Helper()
 
 	profile := Profile{
 		SourceID:         "source-1",
-		Role:             role,
+		Mode:             mode,
 		Identity:         testIdentity(),
 		ServingConfig:    testServingConfig(),
 		Topology:         testTopology(),
 		MeasuredReplicas: 1,
 		Workload:         testWorkload(),
 		Points:           points,
+	}
+
+	return redigest(t, profile)
+}
+
+// testDisaggregatedProfile returns a disaggregated profile that carries the given stages and points.
+func testDisaggregatedProfile(t *testing.T, prefillReplicas int, prefillTopology Topology, decodeReplicas int, decodeTopology Topology, points []MeasuredPoint) Profile {
+	t.Helper()
+
+	identity := testIdentity()
+	identity.Hardware = HardwareIdentity{}
+	profile := Profile{
+		SourceID:         "source-1",
+		Mode:             ModeDisaggregated,
+		Identity:         identity,
+		ServingConfig:    testServingConfig(),
+		MeasuredReplicas: 1,
+		Prefill: &DisaggregatedStage{
+			Replicas: prefillReplicas,
+			Hardware: testIdentity().Hardware,
+			Topology: prefillTopology,
+		},
+		Decode: &DisaggregatedStage{
+			Replicas: decodeReplicas,
+			Hardware: testIdentity().Hardware,
+			Topology: decodeTopology,
+		},
+		Workload: testWorkload(),
+		Points:   points,
 	}
 
 	return redigest(t, profile)
@@ -207,7 +236,7 @@ func testCatalog(t *testing.T, profiles ...Profile) *Catalog {
 // testRequest returns a request that matches the test profile.
 func testRequest() Request {
 	return Request{
-		Role:          RoleKindServer,
+		Mode:          ModeAggregated,
 		Identity:      testIdentity(),
 		ServingConfig: testServingConfig(),
 		Topology:      testTopology(),
@@ -248,28 +277,32 @@ func intPointer(value int) *int { return &value }
 func floatPointer(value float64) *float64 { return &value }
 
 func TestIsProfileNotFound(t *testing.T) {
-	prefillPoints := []MeasuredPoint{
+	aggPoints := []MeasuredPoint{
 		testPoint(4, 100, 1000, 20),
 		testPoint(8, 200, 4000, 20),
 	}
-	for i := range prefillPoints {
-		prefillPoints[i].Throughput.Metric = ThroughputMetricCacheMissedInputTokensPerSecond
-		prefillPoints[i].Throughput.TokenCountConvention = TokenCountConventionCacheMissedInput
-	}
-	base := testProfile(t, RoleKindPrefill, prefillPoints)
+	base := testProfile(t, ModeAggregated, aggPoints)
 	catalog := testCatalog(t, base)
 
 	var nilRefusal *RefusalError
 	missingReq := testRequest()
-	missingReq.Role = RoleKindDecode
+	missingReq.Mode = ModeDisaggregated
+	missingReq.Identity.Hardware = HardwareIdentity{}
+	missingReq.Topology = Topology{}
+	missingReq.Prefill = &DisaggregatedStage{
+		Replicas: 1,
+		Hardware: testIdentity().Hardware,
+		Topology: testTopology(),
+	}
+	missingReq.Decode = &DisaggregatedStage{
+		Replicas: 1,
+		Hardware: testIdentity().Hardware,
+		Topology: testTopology(),
+	}
 	_, zeroMatchResolveErr := catalog.Resolve(missingReq)
 	_, zeroMatchSelectErr := catalog.Select(missingReq.Shape())
 
-	serverPoints := []MeasuredPoint{
-		testPoint(4, 100, 1000, 20),
-		testPoint(8, 200, 4000, 20),
-	}
-	ambig1 := testProfile(t, RoleKindServer, serverPoints)
+	ambig1 := testProfile(t, ModeAggregated, aggPoints)
 	ambig2 := ambig1
 	ambig2.Workload.Revision = "rev-2"
 	ambig2 = redigest(t, ambig2)
@@ -277,12 +310,10 @@ func TestIsProfileNotFound(t *testing.T) {
 	_, ambigErr := ambigCatalog.Resolve(testRequest())
 
 	mismatchReq := testRequest()
-	mismatchReq.Role = RoleKindPrefill
 	mismatchReq.Identity.Model.Revision = "rev-other"
 	_, mismatchErr := catalog.Resolve(mismatchReq)
 
 	sloReq := testRequest()
-	sloReq.Role = RoleKindPrefill
 	sloReq.Constraints.TTFTTargetMilliseconds = 1
 	_, sloErr := catalog.Resolve(sloReq)
 
@@ -320,31 +351,59 @@ func TestIsProfileNotFound(t *testing.T) {
 func TestDenominatorReconstructionAndSingleHeadroom(t *testing.T) {
 	cases := []struct {
 		name        string
+		mode        ProfileMode
 		denominator Denominator
 		throughput  float64
 		wantSeed    float64
 		wantEff     float64
 	}{
 		{
-			name:        "PerGPU multiplies by GPUsPerReplica once",
+			name:        "Aggregated PerGPU multiplies by GPUsPerReplica once",
+			mode:        ModeAggregated,
 			denominator: DenominatorPerGPU,
 			throughput:  100,
 			wantSeed:    400,
 			wantEff:     340,
 		},
 		{
-			name:        "PerReplica preserves per-replica throughput",
+			name:        "Aggregated PerReplica preserves per-replica throughput",
+			mode:        ModeAggregated,
 			denominator: DenominatorPerReplica,
 			throughput:  400,
 			wantSeed:    400,
 			wantEff:     340,
 		},
 		{
-			name:        "WholeSystem divides by MeasuredReplicas once",
+			name:        "Aggregated WholeSystem divides by MeasuredReplicas once",
+			mode:        ModeAggregated,
 			denominator: DenominatorWholeSystem,
 			throughput:  800,
 			wantSeed:    400,
 			wantEff:     340,
+		},
+		{
+			name:        "Disaggregated PerUnit preserves per-unit throughput",
+			mode:        ModeDisaggregated,
+			denominator: DenominatorPerUnit,
+			throughput:  1200,
+			wantSeed:    1200,
+			wantEff:     1020,
+		},
+		{
+			name:        "Disaggregated PerGPU multiplies by unit GPUs once",
+			mode:        ModeDisaggregated,
+			denominator: DenominatorPerGPU,
+			throughput:  100,
+			wantSeed:    1200,
+			wantEff:     1020,
+		},
+		{
+			name:        "Disaggregated WholeSystem divides by MeasuredReplicas once",
+			mode:        ModeDisaggregated,
+			denominator: DenominatorWholeSystem,
+			throughput:  2400,
+			wantSeed:    1200,
+			wantEff:     1020,
 		},
 	}
 
@@ -357,15 +416,34 @@ func TestDenominatorReconstructionAndSingleHeadroom(t *testing.T) {
 			for i := range points {
 				points[i].Throughput.Denominator = tc.denominator
 			}
-			profile := testProfile(t, RoleKindServer, points)
-			profile.Topology.GPUsPerReplica = 4
-			profile.MeasuredReplicas = 2
-			profile = redigest(t, profile)
-			catalog := testCatalog(t, profile)
+			var profile Profile
+			var req Request
+			if tc.mode == ModeDisaggregated {
+				prefillTopo := Topology{GPUsPerReplica: 4, TensorParallel: 4, PipelineParallel: 1, DataParallel: 1, ExpertParallel: 1}
+				decodeTopo := Topology{GPUsPerReplica: 4, TensorParallel: 4, PipelineParallel: 1, DataParallel: 1, ExpertParallel: 1}
+				// 1*4 + 2*4 = 12 GPUs per unit.
+				profile = testDisaggregatedProfile(t, 1, prefillTopo, 2, decodeTopo, points)
+				profile.MeasuredReplicas = 2
+				profile = redigest(t, profile)
 
-			req := testRequest()
-			req.Topology.GPUsPerReplica = 4
-			req.Constraints.Headroom = 0.85
+				req = testRequest()
+				req.Mode = ModeDisaggregated
+				req.Identity.Hardware = HardwareIdentity{}
+				req.Topology = Topology{}
+				req.Prefill = &DisaggregatedStage{Replicas: 1, Hardware: testIdentity().Hardware, Topology: prefillTopo}
+				req.Decode = &DisaggregatedStage{Replicas: 2, Hardware: testIdentity().Hardware, Topology: decodeTopo}
+				req.Constraints.Headroom = 0.85
+			} else {
+				profile = testProfile(t, ModeAggregated, points)
+				profile.Topology.GPUsPerReplica = 4
+				profile.MeasuredReplicas = 2
+				profile = redigest(t, profile)
+
+				req = testRequest()
+				req.Topology.GPUsPerReplica = 4
+				req.Constraints.Headroom = 0.85
+			}
+			catalog := testCatalog(t, profile)
 
 			res, err := catalog.Resolve(req)
 			if err != nil {

@@ -33,22 +33,24 @@ func main() {
 	mergeSource := flag.String("merge", "", "merge the measured sweeps in this file into the catalog")
 	retire := flag.Bool("retire", false, "remove the profiles the filter flags name")
 	catalogFile := flag.String("catalog", "", "the catalog file to read and write")
-	role := flag.String("role", "", "retire the profiles of this serving role")
+	mode := flag.String("mode", "", "retire the profiles of this serving mode (aggregated or disaggregated)")
 	model := flag.String("model", "", "retire the profiles of this model")
 	quantization := flag.String("quantization", "", "retire the profiles of this quantization")
 	engine := flag.String("engine", "", "retire the profiles of this engine")
 	hardware := flag.String("hardware", "", "retire the profiles of this hardware")
 	tensorParallel := flag.Int("tp", 0, "retire the profiles of this tensor parallel width")
+	expertParallel := flag.Int("ep", 0, "retire the profiles of this expert parallel width")
 	gpus := flag.Int("gpus", 0, "retire the profiles of this GPU count")
 	flag.Parse()
 
 	filter := retireFilter{
-		Role:           strings.TrimSpace(*role),
+		Mode:           strings.TrimSpace(*mode),
 		Model:          strings.TrimSpace(*model),
 		Quantization:   strings.TrimSpace(*quantization),
 		Engine:         strings.TrimSpace(*engine),
 		Hardware:       strings.TrimSpace(*hardware),
 		TensorParallel: *tensorParallel,
+		ExpertParallel: *expertParallel,
 		GPUsPerReplica: *gpus,
 	}
 
@@ -170,11 +172,10 @@ func mergeProfiles(document *priors.CatalogDocument, imported []priors.ProfileDo
 // retireFilter names the profiles a retirement removes.
 //
 // IT IS A SET OF FIELDS AND NOT ONE STRING, because a profile is known by its
-// shape and a shape has six elements. A field the filter leaves out constrains
-// nothing.
+// shape. A field the filter leaves out constrains nothing.
 type retireFilter struct {
-	// Role is the serving role to retire.
-	Role string
+	// Mode is the serving mode to retire (aggregated or disaggregated).
+	Mode string
 
 	// Model is the model to retire.
 	Model string
@@ -191,6 +192,9 @@ type retireFilter struct {
 	// TensorParallel is the tensor parallel width to retire.
 	TensorParallel int
 
+	// ExpertParallel is the expert parallel width to retire.
+	ExpertParallel int
+
 	// GPUsPerReplica is the GPU count to retire.
 	GPUsPerReplica int
 }
@@ -201,8 +205,8 @@ type retireFilter struct {
 // every profile and a catalog that lost every profile silently is a catalog
 // nobody can account for.
 func (f retireFilter) stated() bool {
-	return f.Role != "" || f.Model != "" || f.Quantization != "" || f.Engine != "" ||
-		f.Hardware != "" || f.TensorParallel > 0 || f.GPUsPerReplica > 0
+	return f.Mode != "" || f.Model != "" || f.Quantization != "" || f.Engine != "" ||
+		f.Hardware != "" || f.TensorParallel > 0 || f.ExpertParallel > 0 || f.GPUsPerReplica > 0
 }
 
 // retireFrom removes the profiles the filter names and writes the catalog back.
@@ -211,7 +215,7 @@ func (f retireFilter) stated() bool {
 // catalog nobody can account for.
 func retireFrom(path string, filter retireFilter) error {
 	if !filter.stated() {
-		return fmt.Errorf("--retire needs at least one of --role, --model, --quantization, --engine, --hardware, --tp or --gpus")
+		return fmt.Errorf("--retire needs at least one of --mode, --model, --quantization, --engine, --hardware, --tp, --ep or --gpus")
 	}
 	document, err := readDocument(path)
 	if err != nil {
@@ -238,10 +242,11 @@ func retireFrom(path string, filter retireFilter) error {
 //
 // IT MATCHES EVERY FIELD THE FILTER STATES, because a retirement names one
 // measurement and a filter that matched on one field alone would retire a
-// family of measurements.
+// family of measurements. In disaggregated mode, stage-level filters match if
+// either the prefill or decode stage satisfies them.
 func (f retireFilter) retires(profile priors.ProfileDocument) bool {
 	shape := priors.DocumentShape(profile)
-	if f.Role != "" && !strings.EqualFold(f.Role, string(shape.Role)) {
+	if f.Mode != "" && !strings.EqualFold(f.Mode, string(shape.Mode)) {
 		return false
 	}
 	if f.Model != "" && !priors.ModelNameMatches(f.Model, shape.Model) {
@@ -253,13 +258,37 @@ func (f retireFilter) retires(profile priors.ProfileDocument) bool {
 	if f.Engine != "" && priors.CanonicalEngineFamily(f.Engine) != shape.Engine {
 		return false
 	}
-	if f.Hardware != "" && priors.CanonicalAcceleratorFamily(f.Hardware) != shape.Hardware {
+	if shape.Mode == priors.ModeDisaggregated {
+		if f.hasStageFilter() {
+			return f.matchesStage(shape.Prefill) || f.matchesStage(shape.Decode)
+		}
+		return true
+	}
+	return f.matchesHardwareAndTopology(shape.Hardware, shape.Topology)
+}
+
+func (f retireFilter) hasStageFilter() bool {
+	return f.Hardware != "" || f.TensorParallel > 0 || f.ExpertParallel > 0 || f.GPUsPerReplica > 0
+}
+
+func (f retireFilter) matchesStage(stage *priors.StageShape) bool {
+	if stage == nil {
 		return false
 	}
-	if f.TensorParallel > 0 && f.TensorParallel != shape.Topology.TensorParallel {
+	return f.matchesHardwareAndTopology(stage.Hardware, stage.Topology)
+}
+
+func (f retireFilter) matchesHardwareAndTopology(hardware string, topology priors.Topology) bool {
+	if f.Hardware != "" && priors.CanonicalAcceleratorFamily(f.Hardware) != hardware {
 		return false
 	}
-	if f.GPUsPerReplica > 0 && f.GPUsPerReplica != shape.Topology.GPUsPerReplica {
+	if f.TensorParallel > 0 && f.TensorParallel != topology.TensorParallel {
+		return false
+	}
+	if f.ExpertParallel > 0 && f.ExpertParallel != topology.ExpertParallel {
+		return false
+	}
+	if f.GPUsPerReplica > 0 && f.GPUsPerReplica != topology.GPUsPerReplica {
 		return false
 	}
 	return true

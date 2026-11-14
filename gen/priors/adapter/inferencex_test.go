@@ -179,12 +179,11 @@ func TestImportInferenceXRowsRefusesTheRowsItCannotUse(t *testing.T) {
 		mutate func(*InferenceXRow)
 		reason string
 	}{
-		{name: "an engine the catalog does not name", mutate: func(r *InferenceXRow) { r.Framework = "trt" }, reason: "engine the catalog does not name"},
+		{name: "an engine the catalog does not name", mutate: func(r *InferenceXRow) { r.Framework = "unknown-engine" }, reason: "engine the catalog does not name"},
 		{name: "a speculative recipe", mutate: func(r *InferenceXRow) { r.SpecMethod = "mtp" }, reason: "speculative decoding recipe"},
-		{name: "more than one node", mutate: func(r *InferenceXRow) { r.IsMultinode = true }, reason: "more than one node"},
-		{name: "a disaggregated deployment", mutate: func(r *InferenceXRow) { r.Disagg = true }, reason: "disaggregated deployment"},
 		{name: "an accelerator the catalog cannot name", mutate: func(r *InferenceXRow) { r.Hardware = "rtx6000pro" }, reason: "accelerator the catalog cannot name"},
-		{name: "a replica the catalog does not hold", mutate: func(r *InferenceXRow) { r.NumPrefillGPU = 64 }, reason: "replica the catalog does not hold"},
+		{name: "non-divisible worker GPUs", mutate: func(r *InferenceXRow) { r.NumPrefillGPU = 8; r.PrefillNumWorkers = 3 }, reason: "replica the catalog does not hold"},
+		{name: "non-conserving throughput", mutate: func(r *InferenceXRow) { r.Metrics.ThroughputPerGPU = 600 }, reason: "violated throughput conservation"},
 		{name: "no throughput", mutate: func(r *InferenceXRow) { r.Metrics.ThroughputPerGPU = 0 }, reason: "no throughput"},
 	}
 	for _, testCase := range cases {
@@ -267,6 +266,137 @@ func TestImportedProfilesAreEligible(t *testing.T) {
 	}
 	if refusal := priors.CheckEligibility(parsed.Profiles[0]); refusal != nil {
 		t.Fatalf("the imported profile cannot carry a capacity: %v", refusal)
+	}
+}
+
+func TestImportInferenceXRowsImportsLargeAggregatedAndDisaggregated(t *testing.T) {
+	// Multi-node aggregated (>8 GPUs per replica) with DP attention.
+	agg1 := row("dsr1", "sglang", "b200", "fp4", 32, 16)
+	agg1.IsMultinode = true
+	agg1.PrefillTensorParallel = 16
+	agg1.PrefillExpertParallel = 16
+	agg1.PrefillDPAttention = true
+	agg1.PrefillNumWorkers = 1
+	agg2 := agg1
+	agg2.Concurrency = 64
+
+	// Disaggregated wide-EP (dynamo-sglang -> sglang, 4P / 2D workers, gcd=2 -> 2P / 1D).
+	disagg1 := InferenceXRow{
+		Model:                 "minimaxm2.5",
+		CanonicalModel:        "",
+		Framework:             "dynamo-sglang",
+		Hardware:              "b200",
+		Precision:             "fp4",
+		Concurrency:           16,
+		InputLength:           8192,
+		OutputLength:          1024,
+		Date:                  "2026-08-01",
+		Disagg:                true,
+		IsMultinode:           true,
+		NumPrefillGPU:         16,
+		PrefillNumWorkers:     4,
+		PrefillTensorParallel: 4,
+		PrefillExpertParallel: 4,
+		NumDecodeGPU:          16,
+		DecodeNumWorkers:      2,
+		DecodeTensorParallel:  8,
+		DecodeExpertParallel:  8,
+		Metrics: InferenceXMetrics{
+			ThroughputPerGPU:       100,
+			InputThroughputPerGPU:  160,
+			OutputThroughputPerGPU: 40,
+			MeanITL:                0.01,
+			MeanTPOT:               0.01,
+			MedianTTFT:             0.1,
+			P90TTFT:                0.2,
+			P99TTFT:                0.3,
+			MedianITL:              0.01,
+			P90ITL:                 0.012,
+			P99ITL:                 0.015,
+		},
+	}
+	disagg2 := disagg1
+	disagg2.Concurrency = 32
+	disagg2.Metrics.ThroughputPerGPU = 150
+	disagg2.Metrics.InputThroughputPerGPU = 240
+	disagg2.Metrics.OutputThroughputPerGPU = 60
+
+	documents, summary := ImportInferenceXRows([]InferenceXRow{agg1, agg2, disagg1, disagg2})
+	if summary.Profiles != 2 || len(documents) != 2 {
+		t.Fatalf("got %d profiles (%d docs), want 2; skipped=%v", summary.Profiles, len(documents), summary.Skipped)
+	}
+
+	var aggDoc, disaggDoc *priors.ProfileDocument
+	for i := range documents {
+		switch documents[i].Mode {
+		case string(priors.ModeAggregated):
+			aggDoc = &documents[i]
+		case string(priors.ModeDisaggregated):
+			disaggDoc = &documents[i]
+		}
+	}
+	if aggDoc == nil || disaggDoc == nil {
+		t.Fatalf("missing aggregated (%v) or disaggregated (%v) doc", aggDoc, disaggDoc)
+	}
+	if aggDoc.Topology.GPUsPerReplica != 16 || aggDoc.Topology.ExpertParallel != 16 {
+		t.Fatalf("unexpected aggregated topology: %+v", aggDoc.Topology)
+	}
+	if disaggDoc.Model != "MiniMaxAI/MiniMax-M2.5" || disaggDoc.Engine != "sglang" {
+		t.Fatalf("unexpected disaggregated identity: model=%q engine=%q", disaggDoc.Model, disaggDoc.Engine)
+	}
+	if disaggDoc.Prefill == nil || disaggDoc.Decode == nil {
+		t.Fatalf("missing prefill/decode stages: %+v", disaggDoc)
+	}
+	if disaggDoc.Prefill.Replicas != 2 || disaggDoc.Prefill.Topology.GPUsPerReplica != 4 {
+		t.Fatalf("unexpected prefill stage after gcd reduction: %+v", disaggDoc.Prefill)
+	}
+	if disaggDoc.Decode.Replicas != 1 || disaggDoc.Decode.Topology.GPUsPerReplica != 8 {
+		t.Fatalf("unexpected decode stage after gcd reduction: %+v", disaggDoc.Decode)
+	}
+	// Unit GPUs = (16 + 16) / gcd(4, 2) = 16 -> Total = 100 * 16 = 1600.
+	if disaggDoc.Points[0].TotalTokensPerSecond != 1600 {
+		t.Fatalf("PerUnit throughput = %v, want 1600", disaggDoc.Points[0].TotalTokensPerSecond)
+	}
+
+	catalog := priors.NewCatalogDocument(documents...)
+	encoded, err := priors.MarshalCatalogDocument(catalog)
+	if err != nil {
+		t.Fatalf("MarshalCatalogDocument: %v", err)
+	}
+	parsed, err := priors.ParseCatalog(encoded)
+	if err != nil {
+		t.Fatalf("ParseCatalog: %v", err)
+	}
+	for _, p := range parsed.Profiles {
+		if refusal := priors.CheckEligibility(p); refusal != nil {
+			t.Fatalf("CheckEligibility(%s) failed: %v", p.Shape(), refusal)
+		}
+	}
+}
+
+func TestImportInferenceXRowsSeparatesSweepCohorts(t *testing.T) {
+	// Same date/isl/osl but different framework or worker count or dp_attention must stay distinct sweeps.
+	base := InferenceXRow{
+		Model: "dsr1", CanonicalModel: "deepseek-ai/DeepSeek-R1-0528",
+		Framework: "sglang", Hardware: "h200", Precision: "fp8",
+		Concurrency: 8, InputLength: 8192, OutputLength: 1024, Date: "2026-08-01",
+		Disagg: true, NumPrefillGPU: 8, PrefillNumWorkers: 1, PrefillTensorParallel: 8,
+		NumDecodeGPU: 8, DecodeNumWorkers: 1, DecodeTensorParallel: 8,
+		Metrics: InferenceXMetrics{
+			ThroughputPerGPU: 200, InputThroughputPerGPU: 360, OutputThroughputPerGPU: 40,
+			MeanITL: 0.01, MeanTPOT: 0.01, P90TTFT: 0.2, P99TTFT: 0.3, P90ITL: 0.012, P99ITL: 0.015,
+		},
+	}
+	p2 := base
+	p2.Concurrency = 16
+	dpOn1 := base
+	dpOn1.DecodeDPAttention = true
+	dpOn2 := dpOn1
+	dpOn2.Concurrency = 16
+
+	documents, summary := ImportInferenceXRows([]InferenceXRow{base, p2, dpOn1, dpOn2})
+	if summary.Profiles != 1 || len(documents) != 1 || len(documents[0].Points) != 2 {
+		t.Fatalf("expected 1 profile with 2 points from winning sweep cohort, got %d profiles, %v", summary.Profiles, documents)
 	}
 }
 

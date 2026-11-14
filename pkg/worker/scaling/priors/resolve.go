@@ -18,8 +18,8 @@ const DefaultHeadroom = 0.75
 
 // Request is one capacity prior resolution request.
 type Request struct {
-	// Role is the serving role the capacity is for.
-	Role RoleKind
+	// Mode is the serving architecture the capacity is for.
+	Mode ProfileMode
 
 	// Identity is the deployment identity the profile must match.
 	Identity Identity
@@ -27,8 +27,14 @@ type Request struct {
 	// ServingConfig is the serving configuration the profile must match.
 	ServingConfig ServingConfig
 
-	// Topology is the shape of one scaling replica the profile must match.
+	// Topology is the shape of one scaling replica in aggregated mode.
 	Topology Topology
+
+	// Prefill is the prefill stage shape and configuration in disaggregated mode.
+	Prefill *DisaggregatedStage
+
+	// Decode is the decode stage shape and configuration in disaggregated mode.
+	Decode *DisaggregatedStage
 
 	// Constraints are the latency targets and the headroom.
 	Constraints Constraints
@@ -273,41 +279,29 @@ func worseOutcome(current, candidate constraintOutcome) constraintOutcome {
 	}
 }
 
-// requirementFor returns what a role needs from a profile.
+// requirementForMode returns what a profile mode needs from a profile.
 //
-// IT IS EXHAUSTIVE ON PURPOSE, because a role the resolver does not know
-// cannot be given a capacity.
-func requirementFor(role RoleKind) (roleRequirement, bool) {
-	switch role {
-	case RoleKindServer:
+// Both aggregated and disaggregated modes measure end-to-end cache-missed
+// total token throughput bounded by TTFT and ITL latency quantiles.
+func requirementForMode(mode ProfileMode) (roleRequirement, bool) {
+	switch mode {
+	case ModeAggregated, ModeDisaggregated:
 		return roleRequirement{
 			metric:     ThroughputMetricCacheMissedTotalTokensPerSecond,
 			convention: TokenCountConventionCacheMissedInputPlusOutput,
 			latencies:  []LatencyMetric{LatencyMetricTTFT, LatencyMetricITL},
-		}, true
-	case RoleKindPrefill:
-		return roleRequirement{
-			metric:     ThroughputMetricCacheMissedInputTokensPerSecond,
-			convention: TokenCountConventionCacheMissedInput,
-			latencies:  []LatencyMetric{LatencyMetricTTFT},
-		}, true
-	case RoleKindDecode:
-		return roleRequirement{
-			metric:     ThroughputMetricOutputTokensPerSecond,
-			convention: TokenCountConventionOutput,
-			latencies:  []LatencyMetric{LatencyMetricITL},
 		}, true
 	default:
 		return roleRequirement{}, false
 	}
 }
 
-// countsPromptTokens says whether the role's numerator counts prompt tokens.
+// countsPromptTokens says whether the mode's numerator counts prompt tokens.
 //
 // IT MATTERS FOR THE CACHE CONVENTION, because a numerator that counts prompt
 // tokens only matches a measurement whose prompt tokens were cache misses.
-func countsPromptTokens(role RoleKind) bool {
-	return role == RoleKindServer || role == RoleKindPrefill
+func countsPromptTokens(mode ProfileMode) bool {
+	return mode == ModeAggregated || mode == ModeDisaggregated
 }
 
 // loadAxisIncoherence returns the way a profile's load points disagree about
@@ -441,27 +435,18 @@ func (c *Catalog) Resolve(request Request) (Resolution, error) {
 // deployment that matches two measurements has no evidence about which one
 // applies.
 func (c *Catalog) Select(shape Shape) (Profile, *RefusalError) {
-	return c.selectProfile(Request{
-		Role: shape.Role,
-		Identity: Identity{
-			Model:    ModelIdentity{Name: shape.Model, Quantization: shape.Quantization},
-			Engine:   EngineIdentity{Image: shape.Engine},
-			Hardware: HardwareIdentity{Accelerator: shape.Hardware},
-		},
-		Topology: shape.Topology,
-	})
+	return c.selectProfileByShape(shape)
 }
 
 // selectProfile finds the one profile a request may use.
 //
-// IT MATCHES THE SIX-TUPLE, because the shape is what a profile is known by and
-// a deployment states its shape before it states anything else about the
-// catalog.
-//
 // IT REFUSES WHEN SEVERAL PROFILES MATCH, because a deployment that matches two
 // measurements has no evidence about which one applies.
 func (c *Catalog) selectProfile(request Request) (Profile, *RefusalError) {
-	want := request.Shape()
+	return c.selectProfileByShape(request.Shape())
+}
+
+func (c *Catalog) selectProfileByShape(want Shape) (Profile, *RefusalError) {
 	var matched []Profile
 	for _, profile := range c.Profiles {
 		if shapeMatches(want, profile.Shape()) {
@@ -474,7 +459,7 @@ func (c *Catalog) selectProfile(request Request) (Profile, *RefusalError) {
 		return Profile{}, newRefusal(
 			RefusalCapacityPriorUnresolved,
 			fmt.Sprintf("no catalog profile matches the deployment shape %s", want),
-			map[string]string{"role": string(request.Role), "shape": want.String()},
+			map[string]string{"mode": string(want.Mode), "shape": want.String()},
 		)
 	case 1:
 		return matched[0], nil
@@ -507,11 +492,41 @@ func IsProfileNotFound(err error) bool {
 //
 // IT IS EMPTY WHEN THEY AGREE.
 func profileMismatches(profile Profile, request Request) string {
-	mismatched := make([]string, 0, 12)
+	mismatched := make([]string, 0, 16)
+	if profile.Mode == ModeDisaggregated {
+		mismatched = append(mismatched, sharedIdentityMismatch(profile.Identity, request.Identity)...)
+		mismatched = append(mismatched, servingConfigMismatch(profile.ServingConfig, request.ServingConfig)...)
+		mismatched = append(mismatched, stageMismatches("prefill", profile.Prefill, request.Prefill)...)
+		mismatched = append(mismatched, stageMismatches("decode", profile.Decode, request.Decode)...)
+		return formatMismatch(mismatched)
+	}
 	mismatched = append(mismatched, identityMismatch(profile.Identity, request.Identity)...)
 	mismatched = append(mismatched, servingConfigMismatch(profile.ServingConfig, request.ServingConfig)...)
 	mismatched = append(mismatched, topologyMismatch(profile.Topology.Normalized(), request.Topology.Normalized())...)
 	return formatMismatch(mismatched)
+}
+
+func stageMismatches(prefix string, want, got *DisaggregatedStage) []string {
+	if want == nil || got == nil {
+		if want == got {
+			return nil
+		}
+		return []string{prefix}
+	}
+	var mismatched []string
+	if want.Replicas != got.Replicas {
+		mismatched = append(mismatched, prefix+".replicas")
+	}
+	for _, field := range hardwareIdentityMismatch(want.Hardware, got.Hardware) {
+		mismatched = append(mismatched, prefix+"."+field)
+	}
+	for _, field := range servingConfigMismatch(want.ServingConfig, got.ServingConfig) {
+		mismatched = append(mismatched, prefix+"."+field)
+	}
+	for _, field := range topologyMismatch(want.Topology.Normalized(), got.Topology.Normalized()) {
+		mismatched = append(mismatched, prefix+"."+field)
+	}
+	return mismatched
 }
 
 // CheckEligibility reports why a profile cannot carry a capacity.
@@ -530,12 +545,12 @@ func profileMismatches(profile Profile, request Request) string {
 // evidence usually misses more than one and the caller needs the whole list
 // to know what to measure next.
 func CheckEligibility(profile Profile) *RefusalError {
-	requirement, known := requirementFor(profile.Role)
+	requirement, known := requirementForMode(profile.Mode)
 	if !known {
 		return newRefusal(
 			RefusalCapacityPriorUnresolved,
-			fmt.Sprintf("the %s role needs no capacity prior", profile.Role),
-			map[string]string{"role": string(profile.Role), "shape": profile.Shape().String()},
+			fmt.Sprintf("the %s mode needs no capacity prior", profile.Mode),
+			map[string]string{"mode": string(profile.Mode), "shape": profile.Shape().String()},
 		)
 	}
 
@@ -590,7 +605,7 @@ func CheckEligibility(profile Profile) *RefusalError {
 				break
 			}
 		}
-		if countsPromptTokens(profile.Role) && profile.Workload.CacheBehavior != CacheBehaviorAllMisses {
+		if countsPromptTokens(profile.Mode) && profile.Workload.CacheBehavior != CacheBehaviorAllMisses {
 			findings = append(findings, "does not establish that its prompt tokens were cache misses")
 			detail["cacheBehavior"] = string(profile.Workload.CacheBehavior)
 		}
@@ -681,7 +696,7 @@ func resolveProfile(
 	headroom float64,
 	requested float64,
 ) (Resolution, *RefusalError) {
-	requirement, _ := requirementFor(profile.Role)
+	requirement, _ := requirementForMode(profile.Mode)
 
 	if refusal := CheckEligibility(profile); refusal != nil {
 		return Resolution{}, refusal
@@ -818,12 +833,25 @@ func resolveProfile(
 	return Resolution{
 		Shape:                    profile.Shape().String(),
 		WorkloadRevision:         profile.Workload.Revision,
-		GPUsPerReplica:           profile.Topology.GPUsPerReplica,
+		GPUsPerReplica:           unitGPUs(profile),
 		MeasuredReplicas:         profile.MeasuredReplicas,
 		SeedTokensPerSecond:      seed,
 		EffectiveTokensPerSecond: headroom * seed,
 		Basis:                    basis,
 	}, nil
+}
+
+func unitGPUs(profile Profile) int {
+	if profile.Mode == ModeDisaggregated {
+		if profile.Prefill == nil || profile.Decode == nil ||
+			profile.Prefill.Replicas <= 0 || profile.Decode.Replicas <= 0 ||
+			profile.Prefill.Topology.GPUsPerReplica <= 0 || profile.Decode.Topology.GPUsPerReplica <= 0 {
+			return 0
+		}
+		return profile.Prefill.Replicas*profile.Prefill.Topology.GPUsPerReplica +
+			profile.Decode.Replicas*profile.Decode.Topology.GPUsPerReplica
+	}
+	return profile.Topology.GPUsPerReplica
 }
 
 // latencyTargets returns the target each required latency metric is held to.
@@ -856,18 +884,27 @@ func latencyTargets(request Request, requirement roleRequirement) (map[LatencyMe
 	return targets, nil
 }
 
-// perReplicaTokensPerSecond reconstructs a measured rate for one replica.
+// perReplicaTokensPerSecond reconstructs a measured rate for one replica or minimal unit.
 //
 // THE DENOMINATOR DECIDES THE RECONSTRUCTION, because the source states what
 // it counted over and the resolver must not pick a multiplier.
 func perReplicaTokensPerSecond(throughput Throughput, profile Profile) (float64, bool) {
 	switch throughput.Denominator {
 	case DenominatorPerGPU:
-		if profile.Topology.GPUsPerReplica <= 0 {
+		gpus := unitGPUs(profile)
+		if gpus <= 0 {
 			return 0, false
 		}
-		return throughput.Value * float64(profile.Topology.GPUsPerReplica), true
+		return throughput.Value * float64(gpus), true
 	case DenominatorPerReplica:
+		if profile.Mode != ModeAggregated {
+			return 0, false
+		}
+		return throughput.Value, true
+	case DenominatorPerUnit:
+		if profile.Mode != ModeDisaggregated {
+			return 0, false
+		}
 		return throughput.Value, true
 	case DenominatorWholeSystem:
 		if profile.MeasuredReplicas <= 0 {

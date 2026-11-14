@@ -88,6 +88,7 @@ var canonicalModelNames = map[string]string{
 	"kimik2.6":    "moonshotai/Kimi-K2.5",
 	"kimik3":      "moonshotai/Kimi-K3",
 	"llama70b":    "meta-llama/Llama-3.3-70B-Instruct",
+	"minimaxm2.5": "MiniMaxAI/MiniMax-M2.5",
 	"minimaxm3":   "MiniMaxAI/MiniMax-M3",
 	"qwen3.5":     "Qwen/Qwen3.5-397B-A17B",
 	"qwen3.8next": "Qwen/Qwen3.8-Flash-Next",

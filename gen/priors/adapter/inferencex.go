@@ -7,6 +7,7 @@ package adapter
 import (
 	"encoding/json"
 	"fmt"
+	"math"
 	"os"
 	"sort"
 	"strings"
@@ -24,12 +25,9 @@ import (
 // latency reads a latency that is several times too large.
 const chunkBundlingRatio = 1.05
 
-// maxGPUsPerReplica is the widest replica the catalog holds.
-//
-// IT EXISTS BECAUSE A REPLICA THAT SPANS MORE GPUs THAN THE MEASUREMENT RUNS ON
-// IS A SHAPE THE CLUSTER MAY NOT HAVE, and a profile of a shape no deployment
-// can have is a profile no deployment can use.
-const maxGPUsPerReplica = 8
+// maxRelativeThroughputConservationError bounds how far input+output may differ
+// from total throughput before a row is rejected as inconsistent.
+const maxRelativeThroughputConservationError = 0.02
 
 // InferenceXRow is one measured row of a public benchmark sweep.
 //
@@ -75,14 +73,47 @@ type InferenceXRow struct {
 	// Date is the day the sweep ran on.
 	Date string `json:"date"`
 
-	// PrefillTensorParallel is the tensor parallel width of the sweep.
+	// GPUs is the total GPU count when published at top level.
+	GPUs int `json:"gpus"`
+
+	// TP is the fallback tensor parallel width when stage-specific widths are omitted.
+	TP int `json:"tp"`
+
+	// EP is the fallback expert parallel width when stage-specific widths are omitted.
+	EP int `json:"ep"`
+
+	// DPAttention is the fallback attention-DP flag when stage-specific flags are omitted.
+	DPAttention bool `json:"dp_attention"`
+
+	// PrefillNumWorkers is how many prefill worker replicas ran.
+	PrefillNumWorkers int `json:"prefill_num_workers"`
+
+	// PrefillTensorParallel is the tensor parallel width of the prefill stage.
 	PrefillTensorParallel int `json:"prefill_tp"`
 
-	// PrefillExpertParallel is the expert parallel width of the sweep.
+	// PrefillExpertParallel is the expert parallel width of the prefill stage.
 	PrefillExpertParallel int `json:"prefill_ep"`
 
-	// NumPrefillGPU is how many GPUs the sweep ran on.
+	// PrefillDPAttention says whether prefill used attention data parallelism.
+	PrefillDPAttention bool `json:"prefill_dp_attention"`
+
+	// NumPrefillGPU is how many prefill (or aggregated) GPUs the sweep ran on.
 	NumPrefillGPU int `json:"num_prefill_gpu"`
+
+	// DecodeNumWorkers is how many decode worker replicas ran.
+	DecodeNumWorkers int `json:"decode_num_workers"`
+
+	// DecodeTensorParallel is the tensor parallel width of the decode stage.
+	DecodeTensorParallel int `json:"decode_tp"`
+
+	// DecodeExpertParallel is the expert parallel width of the decode stage.
+	DecodeExpertParallel int `json:"decode_ep"`
+
+	// DecodeDPAttention says whether decode used attention data parallelism.
+	DecodeDPAttention bool `json:"decode_dp_attention"`
+
+	// NumDecodeGPU is how many decode GPUs the sweep ran on.
+	NumDecodeGPU int `json:"num_decode_gpu"`
 
 	// Metrics holds the measured numbers of the row.
 	Metrics InferenceXMetrics `json:"metrics"`
@@ -208,83 +239,176 @@ func ImportInferenceXRows(rows []InferenceXRow) ([]priors.ProfileDocument, Summa
 	return documents, summary
 }
 
-// skipReason says why a row measured a shape the catalog cannot hold.
-//
-// IT REFUSES THE SHAPES THAT ARE NOT ONE REPLICA OF ONE ENGINE: a
-// disaggregated deployment runs the prefill and the decode apart, a
-// multinode run spans more than one node, a speculative run measures a
-// different recipe, and an engine the catalog does not name is not one the
-// catalog can match.
+// skipReason says why a row measured a shape or metric the catalog cannot hold.
 func (r InferenceXRow) skipReason() (string, bool) {
-	if r.Framework != "vllm" && r.Framework != "sglang" {
+	if priors.EngineFamily(r.Framework) == "" {
 		return "the row ran an engine the catalog does not name", true
 	}
 	if r.SpecMethod != "" && r.SpecMethod != "none" {
 		return "the row ran a speculative decoding recipe", true
 	}
-	if r.IsMultinode {
-		return "the row ran on more than one node", true
-	}
-	if r.Disagg {
-		return "the row ran a disaggregated deployment", true
-	}
 	if nodefeature.ResolveAcceleratorFamily(r.Hardware) == "" {
 		return "the row ran an accelerator the catalog cannot name", true
 	}
-	if gpus := r.gpusPerReplica(); gpus <= 0 || gpus > maxGPUsPerReplica {
+	if r.Disagg {
+		return r.disaggSkipReason()
+	}
+	return r.aggSkipReason()
+}
+
+func (r InferenceXRow) aggSkipReason() (string, bool) {
+	gpus := r.aggGPUs()
+	if gpus <= 0 || r.PrefillNumWorkers > 1 {
 		return "the row ran a replica the catalog does not hold", true
 	}
-	if r.Metrics.ThroughputPerGPU <= 0 {
+	if !validStageTopology(r.aggTP(), r.aggEP(), r.aggDPAttention(), gpus) {
+		return "the row ran an invalid topology", true
+	}
+	if r.Metrics.ThroughputPerGPU <= 0 || r.Metrics.InputThroughputPerGPU < 0 || r.Metrics.OutputThroughputPerGPU <= 0 {
 		return "the row published no throughput", true
+	}
+	relErr := math.Abs((r.Metrics.InputThroughputPerGPU+r.Metrics.OutputThroughputPerGPU)-r.Metrics.ThroughputPerGPU) /
+		r.Metrics.ThroughputPerGPU
+	if relErr > maxRelativeThroughputConservationError {
+		return "the row violated throughput conservation", true
 	}
 	return "", false
 }
 
-// gpusPerReplica returns how many GPUs the row's replica used.
-//
-// IT FALLS BACK TO THE PARALLEL WIDTHS, because a source that does not count
-// the GPUs still states the widths the replica ran with.
-func (r InferenceXRow) gpusPerReplica() int {
-	if r.NumPrefillGPU > 0 {
-		return r.NumPrefillGPU
+func (r InferenceXRow) disaggSkipReason() (string, bool) {
+	if r.PrefillNumWorkers <= 0 || r.DecodeNumWorkers <= 0 ||
+		r.NumPrefillGPU <= 0 || r.NumDecodeGPU <= 0 ||
+		r.NumPrefillGPU%r.PrefillNumWorkers != 0 || r.NumDecodeGPU%r.DecodeNumWorkers != 0 ||
+		(r.GPUs > 0 && r.GPUs != r.NumPrefillGPU+r.NumDecodeGPU) {
+		return "the row ran an invalid disaggregated worker layout", true
 	}
-	return r.tensorParallel() * r.expertParallel()
+	gP := r.NumPrefillGPU / r.PrefillNumWorkers
+	gD := r.NumDecodeGPU / r.DecodeNumWorkers
+	if !validStageTopology(r.prefillTP(), r.prefillEP(), r.prefillDPAttention(), gP) ||
+		!validStageTopology(r.decodeTP(), r.decodeEP(), r.decodeDPAttention(), gD) {
+		return "the row ran an invalid topology", true
+	}
+	if r.Metrics.ThroughputPerGPU <= 0 || r.Metrics.InputThroughputPerGPU <= 0 || r.Metrics.OutputThroughputPerGPU <= 0 {
+		return "the row published no throughput", true
+	}
+	sysTotal := r.Metrics.ThroughputPerGPU * float64(r.NumPrefillGPU+r.NumDecodeGPU)
+	sysInput := r.Metrics.InputThroughputPerGPU * float64(r.NumPrefillGPU)
+	sysOutput := r.Metrics.OutputThroughputPerGPU * float64(r.NumDecodeGPU)
+	if sysTotal <= 0 || sysInput <= 0 || sysOutput <= 0 {
+		return "the row published no throughput", true
+	}
+	if math.Abs((sysInput+sysOutput)-sysTotal)/sysTotal > maxRelativeThroughputConservationError {
+		return "the row violated throughput conservation", true
+	}
+	return "", false
 }
 
-// tensorParallel returns the tensor parallel width of the row.
-//
-// IT IS ONE WHEN THE SOURCE STATES NONE, because a width of one is how a
-// deployment states that it does not split the model, and the catalog has to
-// speak the width the deployment speaks.
-func (r InferenceXRow) tensorParallel() int {
-	if r.PrefillTensorParallel <= 0 {
-		return 1
+func validStageTopology(tp, ep int, _ bool, gpus int) bool {
+	if gpus <= 0 {
+		return false
 	}
-	return r.PrefillTensorParallel
+	if tp <= 0 {
+		tp = 1
+	}
+	if ep <= 0 {
+		ep = 1
+	}
+	return tp <= gpus && ep <= gpus
 }
 
-// expertParallel returns the expert parallel width of the row.
-//
-// IT IS ONE WHEN THE SOURCE STATES NONE, because a width of one is how a
-// deployment states that it does not split the experts.
-func (r InferenceXRow) expertParallel() int {
-	if r.PrefillExpertParallel <= 0 {
-		return 1
+func (r InferenceXRow) aggGPUs() int {
+	if r.GPUs > 0 {
+		return r.GPUs
 	}
-	return r.PrefillExpertParallel
+	return r.NumPrefillGPU
 }
 
-// groupKey names the deployment shape the row measured.
+func (r InferenceXRow) aggTP() int {
+	return r.prefillTP()
+}
+
+func (r InferenceXRow) aggEP() int {
+	return r.prefillEP()
+}
+
+func (r InferenceXRow) aggDPAttention() bool {
+	return r.prefillDPAttention()
+}
+
+func (r InferenceXRow) prefillTP() int {
+	if r.PrefillTensorParallel > 0 {
+		return r.PrefillTensorParallel
+	}
+	if r.TP > 0 {
+		return r.TP
+	}
+	return 1
+}
+
+func (r InferenceXRow) prefillEP() int {
+	if r.PrefillExpertParallel > 0 {
+		return r.PrefillExpertParallel
+	}
+	if r.EP > 0 {
+		return r.EP
+	}
+	return 1
+}
+
+func (r InferenceXRow) prefillDPAttention() bool {
+	return r.PrefillDPAttention || r.DPAttention
+}
+
+func (r InferenceXRow) decodeTP() int {
+	if r.DecodeTensorParallel > 0 {
+		return r.DecodeTensorParallel
+	}
+	if r.TP > 0 {
+		return r.TP
+	}
+	return 1
+}
+
+func (r InferenceXRow) decodeEP() int {
+	if r.DecodeExpertParallel > 0 {
+		return r.DecodeExpertParallel
+	}
+	if r.EP > 0 {
+		return r.EP
+	}
+	return 1
+}
+
+func (r InferenceXRow) decodeDPAttention() bool {
+	return r.DecodeDPAttention || r.DPAttention
+}
+
+// groupKey names the normalized deployment shape the row measured.
 func (r InferenceXRow) groupKey() string {
-	return strings.Join([]string{
+	engine := priors.EngineFamily(r.Framework)
+	hw := nodefeature.ResolveAcceleratorFamily(r.Hardware)
+	base := []string{
 		r.modelName(),
 		priors.CanonicalQuantization(r.Precision),
-		r.Framework,
-		nodefeature.ResolveAcceleratorFamily(r.Hardware),
-		fmt.Sprintf("tp%d", r.tensorParallel()),
-		fmt.Sprintf("ep%d", r.expertParallel()),
-		fmt.Sprintf("gpu%d", r.gpusPerReplica()),
-	}, "|")
+		engine,
+		hw,
+	}
+	if r.Disagg {
+		unitCount := gcdInt(r.PrefillNumWorkers, r.DecodeNumWorkers)
+		pRep := r.PrefillNumWorkers / unitCount
+		dRep := r.DecodeNumWorkers / unitCount
+		gP := r.NumPrefillGPU / r.PrefillNumWorkers
+		gD := r.NumDecodeGPU / r.DecodeNumWorkers
+		return strings.Join(append([]string{"disaggregated"}, append(base,
+			fmt.Sprintf("p=%dx(g=%d,tp=%d,ep=%d)", pRep, gP, r.prefillTP(), r.prefillEP()),
+			fmt.Sprintf("d=%dx(g=%d,tp=%d,ep=%d)", dRep, gD, r.decodeTP(), r.decodeEP()),
+		)...), "|")
+	}
+	return strings.Join(append([]string{"aggregated"}, append(base,
+		fmt.Sprintf("tp%d", r.aggTP()),
+		fmt.Sprintf("ep%d", r.aggEP()),
+		fmt.Sprintf("gpu%d", r.aggGPUs()),
+	)...), "|")
 }
 
 // modelName returns the canonical name of the model the row measured.
@@ -305,11 +429,25 @@ func (r InferenceXRow) modelName() string {
 
 // sweepKey names the sweep the row belongs to.
 //
-// IT NAMES THE DAY AND THE TWO LENGTHS, because a benchmark sweeps one length
-// pair on one day and every other row of the same shape is a different
-// measurement.
+// It keeps wrapper frameworks, worker cohort sizes, and dp_attention flags
+// separate so incompatible curves are never merged before selectSweep picks
+// the winning sweep for a shape.
 func (r InferenceXRow) sweepKey() string {
-	return strings.Join([]string{r.Date, fmt.Sprintf("isl%d", r.InputLength), fmt.Sprintf("osl%d", r.OutputLength)}, "|")
+	parts := []string{
+		r.Date,
+		r.Framework,
+		fmt.Sprintf("isl%d", r.InputLength),
+		fmt.Sprintf("osl%d", r.OutputLength),
+		fmt.Sprintf("pdp%t", r.prefillDPAttention()),
+	}
+	if r.Disagg {
+		parts = append(parts,
+			fmt.Sprintf("pw%d", r.PrefillNumWorkers),
+			fmt.Sprintf("dw%d", r.DecodeNumWorkers),
+			fmt.Sprintf("ddp%t", r.decodeDPAttention()),
+		)
+	}
+	return strings.Join(parts, "|")
 }
 
 // selectSweep picks the sweep that describes the shape and returns the profile
@@ -334,6 +472,7 @@ func selectSweep(rows []InferenceXRow) (priors.ProfileDocument, bool, string) {
 	best := ""
 	bestPoints := map[int]InferenceXRow{}
 	bestRank := sweepRank{}
+	var bestSample InferenceXRow
 	for _, key := range keys {
 		points := pointsByConcurrency(sweeps[key])
 		if len(points) < 2 {
@@ -341,13 +480,13 @@ func selectSweep(rows []InferenceXRow) (priors.ProfileDocument, bool, string) {
 		}
 		rank := sweepRank{lengths: lengthPreference(sweeps[key][0]), levels: len(points), date: sweeps[key][0].Date}
 		if best == "" || rank.betterThan(bestRank) {
-			best, bestPoints, bestRank = key, points, rank
+			best, bestPoints, bestRank, bestSample = key, points, rank, sweeps[key][0]
 		}
 	}
 	if best == "" {
 		return priors.ProfileDocument{}, false, "the shape measured fewer than two load levels"
 	}
-	return buildProfile(rows[0], bestPoints), true, ""
+	return buildProfile(bestSample, bestPoints), true, ""
 }
 
 // sweepRank orders the sweeps of one shape.
@@ -420,17 +559,43 @@ func buildProfile(row InferenceXRow, points map[int]InferenceXRow) priors.Profil
 	}
 	sort.Ints(levels)
 
+	hw := nodefeature.ResolveAcceleratorFamily(row.Hardware)
 	document := priors.ProfileDocument{
-		Role:         string(priors.RoleKindServer),
 		Model:        row.modelName(),
 		Quantization: priors.CanonicalQuantization(row.Precision),
-		Engine:       row.Framework,
-		Hardware:     nodefeature.ResolveAcceleratorFamily(row.Hardware),
-		Topology: priors.TopologyDocument{
-			TensorParallel: row.tensorParallel(),
-			ExpertParallel: row.expertParallel(),
-			GPUsPerReplica: row.gpusPerReplica(),
-		},
+		Engine:       priors.EngineFamily(row.Framework),
+	}
+	if row.Disagg {
+		unitCount := gcdInt(row.PrefillNumWorkers, row.DecodeNumWorkers)
+		gP := row.NumPrefillGPU / row.PrefillNumWorkers
+		gD := row.NumDecodeGPU / row.DecodeNumWorkers
+		document.Mode = string(priors.ModeDisaggregated)
+		document.Prefill = &priors.StageDocument{
+			Replicas: row.PrefillNumWorkers / unitCount,
+			Hardware: hw,
+			Topology: priors.TopologyDocument{
+				GPUsPerReplica: gP,
+				TensorParallel: row.prefillTP(),
+				ExpertParallel: row.prefillEP(),
+			},
+		}
+		document.Decode = &priors.StageDocument{
+			Replicas: row.DecodeNumWorkers / unitCount,
+			Hardware: hw,
+			Topology: priors.TopologyDocument{
+				GPUsPerReplica: gD,
+				TensorParallel: row.decodeTP(),
+				ExpertParallel: row.decodeEP(),
+			},
+		}
+	} else {
+		document.Mode = string(priors.ModeAggregated)
+		document.Hardware = hw
+		document.Topology = &priors.TopologyDocument{
+			GPUsPerReplica: row.aggGPUs(),
+			TensorParallel: row.aggTP(),
+			ExpertParallel: row.aggEP(),
+		}
 	}
 	for _, level := range levels {
 		document.Points = append(document.Points, buildPoint(points[level]))
@@ -439,17 +604,28 @@ func buildProfile(row InferenceXRow, points map[int]InferenceXRow) priors.Profil
 }
 
 // buildPoint turns one measured row into a measured load point.
-//
-// IT MULTIPLIES THE RATE OF ONE GPU BY THE WIDTH OF THE REPLICA, because the
-// catalog holds the capacity of one replica and not the capacity of one card.
 func buildPoint(row InferenceXRow) priors.PointDocument {
-	gpus := float64(row.gpusPerReplica())
+	var totalRate, inputRate, outputRate float64
+	if row.Disagg {
+		unitCount := float64(gcdInt(row.PrefillNumWorkers, row.DecodeNumWorkers))
+		sysTotal := row.Metrics.ThroughputPerGPU * float64(row.NumPrefillGPU+row.NumDecodeGPU)
+		sysInput := row.Metrics.InputThroughputPerGPU * float64(row.NumPrefillGPU)
+		sysOutput := row.Metrics.OutputThroughputPerGPU * float64(row.NumDecodeGPU)
+		totalRate = round(sysTotal/unitCount, 2)
+		inputRate = round(sysInput/unitCount, 2)
+		outputRate = round(sysOutput/unitCount, 2)
+	} else {
+		gpus := float64(row.aggGPUs())
+		totalRate = round(row.Metrics.ThroughputPerGPU*gpus, 2)
+		inputRate = round(row.Metrics.InputThroughputPerGPU*gpus, 2)
+		outputRate = round(row.Metrics.OutputThroughputPerGPU*gpus, 2)
+	}
 	ratio := interTokenRatio(row.Metrics)
 	point := priors.PointDocument{
 		Concurrency:           row.Concurrency,
-		TotalTokensPerSecond:  round(row.Metrics.ThroughputPerGPU*gpus, 2),
-		InputTokensPerSecond:  round(row.Metrics.InputThroughputPerGPU*gpus, 2),
-		OutputTokensPerSecond: round(row.Metrics.OutputThroughputPerGPU*gpus, 2),
+		TotalTokensPerSecond:  totalRate,
+		InputTokensPerSecond:  inputRate,
+		OutputTokensPerSecond: outputRate,
 		TTFTMilliseconds: latencyQuantiles(
 			row.Metrics.MedianTTFT,
 			row.Metrics.P90TTFT,
@@ -458,6 +634,19 @@ func buildPoint(row InferenceXRow) priors.PointDocument {
 	}
 	point.ITLMilliseconds = interTokenLatency(row.Metrics, ratio)
 	return point
+}
+
+func gcdInt(a, b int) int {
+	if a < 0 {
+		a = -a
+	}
+	if b < 0 {
+		b = -b
+	}
+	for b != 0 {
+		a, b = b, a%b
+	}
+	return a
 }
 
 // interTokenRatio returns the number of tokens the measured gap covered.
