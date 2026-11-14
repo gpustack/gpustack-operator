@@ -54,14 +54,14 @@ func newModelDeploymentScalerPriorFixture(t *testing.T) modelDeploymentScalerPri
 	// THE FIXTURE WRITES THE CATALOG IN THE FORMAT THE OPERATOR READS, because a
 	// fixture in another format proves nothing about the format the operator
 	// ships.
-	buildProfile := func(role priors.RoleKind, gpusPerReplica int, quantization string, baseThroughput float64) priors.ProfileDocument {
+	buildAggregatedProfile := func(gpusPerReplica int, quantization string, baseThroughput float64) priors.ProfileDocument {
 		document := priors.ProfileDocument{
-			Role:         string(role),
+			Mode:         string(priors.ModeAggregated),
 			Model:        modelName,
 			Quantization: quantization,
 			Engine:       "vllm",
 			Hardware:     "nvidia-h100",
-			Topology:     priors.TopologyDocument{GPUsPerReplica: gpusPerReplica},
+			Topology:     &priors.TopologyDocument{GPUsPerReplica: gpusPerReplica},
 		}
 		for i, mult := range []float64{1.0, 2.0, 2.1} {
 			ttft, itl := float64(100*(i+1)), float64(10*(i+1))
@@ -74,12 +74,8 @@ func newModelDeploymentScalerPriorFixture(t *testing.T) modelDeploymentScalerPri
 				TotalTokensPerSecond:  rate,
 				InputTokensPerSecond:  rate,
 				OutputTokensPerSecond: rate,
-			}
-			if role != priors.RoleKindDecode {
-				point.TTFTMilliseconds = priors.LatencyQuantiles{"p95": ttft}
-			}
-			if role != priors.RoleKindPrefill {
-				point.ITLMilliseconds = priors.LatencyQuantiles{"p95": itl}
+				TTFTMilliseconds:      priors.LatencyQuantiles{"p95": ttft},
+				ITLMilliseconds:       priors.LatencyQuantiles{"p95": itl},
 			}
 			document.Points = append(document.Points, point)
 		}
@@ -87,10 +83,8 @@ func newModelDeploymentScalerPriorFixture(t *testing.T) modelDeploymentScalerPri
 	}
 
 	document := priors.NewCatalogDocument(
-		buildProfile(priors.RoleKindServer, 1, "none", 1000),
-		buildProfile(priors.RoleKindPrefill, 1, "none", 1200),
-		buildProfile(priors.RoleKindPrefill, 2, "none", 800),
-		buildProfile(priors.RoleKindDecode, 1, "none", 600),
+		buildAggregatedProfile(1, "none", 1000),
+		buildAggregatedProfile(2, "none", 800),
 	)
 	rawCatalog, err := priors.MarshalCatalogDocument(document)
 	require.NoError(t, err)
@@ -99,18 +93,12 @@ func newModelDeploymentScalerPriorFixture(t *testing.T) modelDeploymentScalerPri
 	// fixture that describes a profile the reader never builds proves nothing.
 	parsed, err := priors.ParseCatalog(rawCatalog)
 	require.NoError(t, err)
-	require.Len(t, parsed.Profiles, 4)
-	serverProfile := priorProfile(t, parsed, priors.RoleKindServer, 1)
+	require.Len(t, parsed.Profiles, 2)
+	serverProfile := priorProfile(t, parsed, priors.ModeAggregated, 1)
 	// THE ROLES SHARE ONE MODEL AND ONE HARDWARE, because the deployment states
 	// its model and its hardware once and every role of it reads that one.
-	for _, profile := range []priors.Profile{
-		priorProfile(t, parsed, priors.RoleKindPrefill, 1),
-		priorProfile(t, parsed, priors.RoleKindPrefill, 2),
-		priorProfile(t, parsed, priors.RoleKindDecode, 1),
-	} {
-		require.Equal(t, serverProfile.Identity.Model, profile.Identity.Model)
-		require.Equal(t, serverProfile.Identity.Hardware, profile.Identity.Hardware)
-	}
+	require.Equal(t, serverProfile.Identity.Model, priorProfile(t, parsed, priors.ModeAggregated, 2).Identity.Model)
+	require.Equal(t, serverProfile.Identity.Hardware, priorProfile(t, parsed, priors.ModeAggregated, 2).Identity.Hardware)
 
 	modelDigest, err := priors.Digest(serverProfile.Identity.Model)
 	require.NoError(t, err)
@@ -207,18 +195,15 @@ func newModelDeploymentScalerPriorFixture(t *testing.T) modelDeploymentScalerPri
 	}
 }
 
-// priorProfile returns the profile of one role and replica width.
-//
-// IT LOOKS THE PROFILE UP BY ITS SHAPE, because a profile is known by the shape
-// it measured and the shape is what a catalog is selected by.
-func priorProfile(t *testing.T, catalog *priors.Catalog, role priors.RoleKind, gpusPerReplica int) priors.Profile {
+// priorProfile returns the profile of one mode and replica width.
+func priorProfile(t *testing.T, catalog *priors.Catalog, mode priors.ProfileMode, gpusPerReplica int) priors.Profile {
 	t.Helper()
 	for _, profile := range catalog.Profiles {
-		if profile.Role == role && profile.Topology.GPUsPerReplica == gpusPerReplica {
+		if profile.Mode == mode && profile.Topology.GPUsPerReplica == gpusPerReplica {
 			return profile
 		}
 	}
-	t.Fatalf("the catalog holds no %s profile with %d GPUs per replica", role, gpusPerReplica)
+	t.Fatalf("the catalog holds no %s profile with %d GPUs per replica", mode, gpusPerReplica)
 	return priors.Profile{}
 }
 
@@ -260,31 +245,24 @@ func (fx modelDeploymentScalerPriorFixture) catalogUnderKey(t *testing.T, key st
 	return catalog
 }
 
-// catalogWithoutRole returns the catalog ConfigMap without the profile of one role.
-//
-// IT DROPS EVERY PROFILE OF THE ROLE, because a catalog that keeps one profile
-// of the role still matches the role and proves nothing.
-func (fx modelDeploymentScalerPriorFixture) catalogWithoutRole(t *testing.T, role priors.RoleKind) *core.ConfigMap {
+// catalogWithoutMode returns the catalog ConfigMap without profiles of one mode.
+func (fx modelDeploymentScalerPriorFixture) catalogWithoutMode(t *testing.T, mode priors.ProfileMode) *core.ConfigMap {
 	t.Helper()
 	var kept []priors.ProfileDocument
 	for _, profile := range fx.document.Profiles {
-		if profile.Role != string(role) {
+		if profile.Mode != string(mode) {
 			kept = append(kept, profile)
 		}
 	}
 	return fx.catalogWith(t, kept...)
 }
 
-// catalogWithTwoRecipes returns the catalog ConfigMap with a second recipe of one role.
-//
-// IT GIVES THE SECOND PROFILE ANOTHER QUANTIZATION, because a catalog reader
-// refuses two profiles of one shape, and a deployment that states no recipe
-// cannot choose between two recipes of one shape.
-func (fx modelDeploymentScalerPriorFixture) catalogWithTwoRecipes(t *testing.T, role priors.RoleKind) *core.ConfigMap {
+// catalogWithTwoRecipes returns the catalog ConfigMap with a second recipe of one mode.
+func (fx modelDeploymentScalerPriorFixture) catalogWithTwoRecipes(t *testing.T, mode priors.ProfileMode) *core.ConfigMap {
 	t.Helper()
 	profiles := append([]priors.ProfileDocument(nil), fx.document.Profiles...)
 	for _, profile := range profiles {
-		if profile.Role != string(role) {
+		if profile.Mode != string(mode) {
 			continue
 		}
 		other := profile
@@ -848,15 +826,16 @@ func TestModelDeploymentScalerValidate_CapacityPrior(t *testing.T) {
 			wantErr: "spec.algorithm.tokenThroughput.ttftTargetMilliseconds",
 		},
 		{
-			name: "prefill role needing catalog does not require itlTargetMilliseconds",
+			name: "single-half prefill role needing catalog is refused",
 			objects: fx.objectsWithTarget(func(d *workercore.ModelDeployment) {
 				d.Spec.Roles[0] = modelDeploymentScalerPriorRole("prefill", workercore.ModelDeploymentRoleKindPrefill, fx.args, 1)
 			}),
 			scaler: fx.scalerWith(func(s *workercore.ModelDeploymentScaler) {
 				s.Spec.Roles = []workercore.ModelDeploymentScalerRoleBounds{{Name: "prefill", MinReplicas: 1, MaxReplicas: 4}}
 				s.Spec.Algorithm.TokenThroughput.TTFTTargetMilliseconds = ptr.To(resource.MustParse("500"))
-				s.Spec.Algorithm.TokenThroughput.ITLTargetMilliseconds = nil
+				s.Spec.Algorithm.TokenThroughput.ITLTargetMilliseconds = ptr.To(resource.MustParse("50"))
 			}),
+			wantErr: "requires both Prefill and Decode",
 		},
 		{
 			name: "missing itlTargetMilliseconds for decode role needing catalog is refused",
@@ -871,15 +850,16 @@ func TestModelDeploymentScalerValidate_CapacityPrior(t *testing.T) {
 			wantErr: "spec.algorithm.tokenThroughput.itlTargetMilliseconds",
 		},
 		{
-			name: "decode role needing catalog does not require ttftTargetMilliseconds",
+			name: "single-half decode role needing catalog is refused",
 			objects: fx.objectsWithTarget(func(d *workercore.ModelDeployment) {
 				d.Spec.Roles[0] = modelDeploymentScalerPriorRole("decode", workercore.ModelDeploymentRoleKindDecode, fx.args, 1)
 			}),
 			scaler: fx.scalerWith(func(s *workercore.ModelDeploymentScaler) {
 				s.Spec.Roles = []workercore.ModelDeploymentScalerRoleBounds{{Name: "decode", MinReplicas: 1, MaxReplicas: 4}}
-				s.Spec.Algorithm.TokenThroughput.TTFTTargetMilliseconds = nil
+				s.Spec.Algorithm.TokenThroughput.TTFTTargetMilliseconds = ptr.To(resource.MustParse("500"))
 				s.Spec.Algorithm.TokenThroughput.ITLTargetMilliseconds = ptr.To(resource.MustParse("50"))
 			}),
+			wantErr: "requires both Prefill and Decode",
 		},
 		{
 			name: "all manual capacities with a capacity prior bypass external reads and missing catalog",
@@ -935,37 +915,33 @@ func TestModelDeploymentScalerValidate_CapacityPrior(t *testing.T) {
 			}),
 		},
 		{
-			name: "repeated prefill roles of distinct replica widths resolve from the profile of each width",
+			name: "repeated server roles of distinct replica widths resolve from the profile of each width",
 			objects: fx.objectsWithTarget(func(d *workercore.ModelDeployment) {
 				d.Spec.Roles = []workercore.ModelDeploymentRole{
-					modelDeploymentScalerPriorRole("prefill-a", workercore.ModelDeploymentRoleKindPrefill, fx.args, 1),
-					modelDeploymentScalerPriorRole("prefill-b", workercore.ModelDeploymentRoleKindPrefill, fx.args, 2),
+					modelDeploymentScalerPriorRole("server-a", workercore.ModelDeploymentRoleKindServer, fx.args, 1),
+					modelDeploymentScalerPriorRole("server-b", workercore.ModelDeploymentRoleKindServer, fx.args, 2),
 				}
 			}),
 			scaler: fx.scalerWith(func(s *workercore.ModelDeploymentScaler) {
 				s.Spec.Roles = []workercore.ModelDeploymentScalerRoleBounds{
-					{Name: "prefill-a", MinReplicas: 1, MaxReplicas: 4},
-					{Name: "prefill-b", MinReplicas: 1, MaxReplicas: 4},
+					{Name: "server-a", MinReplicas: 1, MaxReplicas: 4},
+					{Name: "server-b", MinReplicas: 1, MaxReplicas: 4},
 				}
-				s.Spec.Algorithm.TokenThroughput.TTFTTargetMilliseconds = ptr.To(resource.MustParse("500"))
-				s.Spec.Algorithm.TokenThroughput.ITLTargetMilliseconds = nil
 			}),
 		},
 		{
-			name: "repeated prefill roles of one replica width resolve from the one profile of that width",
+			name: "repeated server roles of one replica width resolve from the one profile of that width",
 			objects: fx.objectsWithTarget(func(d *workercore.ModelDeployment) {
 				d.Spec.Roles = []workercore.ModelDeploymentRole{
-					modelDeploymentScalerPriorRole("prefill-a", workercore.ModelDeploymentRoleKindPrefill, fx.args, 1),
-					modelDeploymentScalerPriorRole("prefill-b", workercore.ModelDeploymentRoleKindPrefill, fx.args, 1),
+					modelDeploymentScalerPriorRole("server-a", workercore.ModelDeploymentRoleKindServer, fx.args, 1),
+					modelDeploymentScalerPriorRole("server-b", workercore.ModelDeploymentRoleKindServer, fx.args, 1),
 				}
 			}),
 			scaler: fx.scalerWith(func(s *workercore.ModelDeploymentScaler) {
 				s.Spec.Roles = []workercore.ModelDeploymentScalerRoleBounds{
-					{Name: "prefill-a", MinReplicas: 1, MaxReplicas: 4},
-					{Name: "prefill-b", MinReplicas: 1, MaxReplicas: 4},
+					{Name: "server-a", MinReplicas: 1, MaxReplicas: 4},
+					{Name: "server-b", MinReplicas: 1, MaxReplicas: 4},
 				}
-				s.Spec.Algorithm.TokenThroughput.TTFTTargetMilliseconds = ptr.To(resource.MustParse("500"))
-				s.Spec.Algorithm.TokenThroughput.ITLTargetMilliseconds = nil
 			}),
 		},
 		{
@@ -1023,14 +999,14 @@ func TestModelDeploymentScalerValidate_CapacityPrior(t *testing.T) {
 		},
 		{
 			name:    "a role whose shape matches no catalog profile is refused",
-			objects: fx.objectsWithCatalog(fx.catalogWithoutRole(t, priors.RoleKindServer)),
+			objects: fx.objectsWithCatalog(fx.catalogWithoutMode(t, priors.ModeAggregated)),
 			scaler:  fx.scalerWith(),
 			wantErr: "no catalog profile matches the deployment shape",
 		},
 		{
 			name: "a deployment that states no recipe and a catalog that holds two recipes is refused",
 			objects: fx.objectsWithCatalogAndTarget(
-				fx.catalogWithTwoRecipes(t, priors.RoleKindServer),
+				fx.catalogWithTwoRecipes(t, priors.ModeAggregated),
 				func(d *workercore.ModelDeployment) {
 					d.Annotations = nil
 				},
@@ -1166,14 +1142,21 @@ func TestModelDeploymentScalerValidate_CapacityPriorDisaggregated(t *testing.T) 
 	h100_4x := h100_2x.DeepCopy()
 	h100_4x.Name = "h100-4x"
 
+	b200_1x := h100_1x.DeepCopy()
+	b200_1x.Name = "b200-1x"
+	b200_1x.Status.Detail.Product = "B200"
+	b200_1x.Status.Detail.Memory = "192Gi"
+	b200_4x := b200_1x.DeepCopy()
+	b200_4x.Name = "b200-4x"
+
 	buildServerProfile := func(gpusPerReplica int, baseThroughput float64) priors.ProfileDocument {
 		doc := priors.ProfileDocument{
-			Role:         string(priors.RoleKindServer),
+			Mode:         string(priors.ModeAggregated),
 			Model:        fx.target.Spec.Model.Name,
 			Quantization: "none",
 			Engine:       "vllm",
 			Hardware:     "nvidia-h100",
-			Topology:     priors.TopologyDocument{GPUsPerReplica: gpusPerReplica, TensorParallel: gpusPerReplica},
+			Topology:     &priors.TopologyDocument{GPUsPerReplica: gpusPerReplica, TensorParallel: gpusPerReplica},
 		}
 		for i, mult := range []float64{1.0, 2.0, 2.1} {
 			ttft, itl := float64(100*(i+1)), float64(10*(i+1))
@@ -1193,18 +1176,72 @@ func TestModelDeploymentScalerValidate_CapacityPriorDisaggregated(t *testing.T) 
 		return doc
 	}
 
+	buildDisaggregatedProfile := func(rP, tpP, rD, tpD int, quantization string) priors.ProfileDocument {
+		doc := priors.ProfileDocument{
+			Mode:         string(priors.ModeDisaggregated),
+			Model:        fx.target.Spec.Model.Name,
+			Quantization: quantization,
+			Engine:       "vllm",
+			Prefill: &priors.StageDocument{
+				Replicas: rP,
+				Hardware: "nvidia-h100",
+				Topology: priors.TopologyDocument{GPUsPerReplica: tpP, TensorParallel: tpP},
+			},
+			Decode: &priors.StageDocument{
+				Replicas: rD,
+				Hardware: "nvidia-h100",
+				Topology: priors.TopologyDocument{GPUsPerReplica: tpD, TensorParallel: tpD},
+			},
+		}
+		for i, rate := range []float64{2000, 4000, 4800} {
+			ttft, itl := 100.0*float64(i+1), 10.0*float64(i+1)
+			if i == 2 {
+				ttft, itl = 800, 80
+			}
+			doc.Points = append(doc.Points, priors.PointDocument{
+				Concurrency:           i + 1,
+				TotalTokensPerSecond:  rate,
+				InputTokensPerSecond:  rate,
+				OutputTokensPerSecond: rate,
+				TTFTMilliseconds:      priors.LatencyQuantiles{"p95": ttft},
+				ITLMilliseconds:       priors.LatencyQuantiles{"p95": itl},
+			})
+		}
+		return doc
+	}
+
 	serverOnlyCM := fx.catalogWith(t,
 		buildServerProfile(1, 1000),
 		buildServerProfile(2, 1600),
 	)
 	serverOnlyCM.Name = "my-priors"
 
-	prefillProf := buildServerProfile(2, 1600)
-	prefillProf.Role = string(priors.RoleKindPrefill)
-	decodeProf := buildServerProfile(1, 1000)
-	decodeProf.Role = string(priors.RoleKindDecode)
-	dedicatedPDCM := fx.catalogWith(t, prefillProf, decodeProf)
-	dedicatedPDCM.Name = "my-priors"
+	disaggregatedCM := fx.catalogWith(t,
+		buildServerProfile(1, 1000),
+		buildServerProfile(2, 1600),
+		buildDisaggregatedProfile(1, 2, 3, 1, "none"),
+		buildDisaggregatedProfile(1, 2, 2, 1, "none"),
+	)
+	disaggregatedCM.Name = "my-priors"
+
+	infeasibleDisaggProf := buildDisaggregatedProfile(1, 2, 3, 1, "none")
+	for i := range infeasibleDisaggProf.Points {
+		infeasibleDisaggProf.Points[i].ITLMilliseconds["p95"] = 999
+	}
+	infeasibleDisaggCM := fx.catalogWith(t,
+		buildServerProfile(1, 1000),
+		buildServerProfile(2, 1600),
+		infeasibleDisaggProf,
+	)
+	infeasibleDisaggCM.Name = "my-priors"
+
+	ambiguousDisaggCM := fx.catalogWith(t,
+		buildServerProfile(1, 1000),
+		buildServerProfile(2, 1600),
+		buildDisaggregatedProfile(1, 2, 3, 1, "fp8"),
+		buildDisaggregatedProfile(1, 2, 3, 1, "fp4"),
+	)
+	ambiguousDisaggCM.Name = "my-priors"
 
 	pdTarget := func(mutate ...func(*workercore.ModelDeployment)) *workercore.ModelDeployment {
 		d := fx.targetWith(func(d *workercore.ModelDeployment) {
@@ -1310,17 +1347,17 @@ func TestModelDeploymentScalerValidate_CapacityPriorDisaggregated(t *testing.T) 
 		wantWarning string
 	}{
 		{
-			name:    "PD 1P:3D Tier 2 TokenThroughput resolves from Server ConfigMap",
+			name:    "PD 1P:3D Priority 2 TokenThroughput resolves from mode aggregated ConfigMap",
 			objects: []ctrlcli.Object{pdTarget(), serverOnlyCM.DeepCopy(), h100_1x.DeepCopy(), h100_2x.DeepCopy()},
 			scaler:  pdScaler(),
 		},
 		{
-			name:    "PD 1P:3D Tier 2 Predictive resolves from Server ConfigMap",
+			name:    "PD 1P:3D Priority 2 Predictive resolves from mode aggregated ConfigMap",
 			objects: []ctrlcli.Object{pdTarget(), serverOnlyCM.DeepCopy(), h100_1x.DeepCopy(), h100_2x.DeepCopy()},
 			scaler:  pdScaler(toPredictive),
 		},
 		{
-			name: "PD 1P:3D Tier 2 TokenThroughput resolves from embedded priors.yaml",
+			name: "PD 1P:3D Priority 2 TokenThroughput resolves from embedded priors.yaml",
 			objects: []ctrlcli.Object{
 				pdTarget(func(d *workercore.ModelDeployment) {
 					d.Annotations = nil
@@ -1347,17 +1384,75 @@ func TestModelDeploymentScalerValidate_CapacityPriorDisaggregated(t *testing.T) 
 			}),
 		},
 		{
-			name:    "EPD 1E:1P:2D Tier 2 TokenThroughput resolves from Server ConfigMap",
+			name:    "PD 1P:3D Priority 1 TokenThroughput resolves from mode disaggregated ConfigMap",
+			objects: []ctrlcli.Object{pdTarget(), disaggregatedCM.DeepCopy(), h100_1x.DeepCopy(), h100_2x.DeepCopy()},
+			scaler:  pdScaler(),
+		},
+		{
+			name:    "EPD 1E:2P:4D Priority 1 Predictive resolves from mode disaggregated 1P:2D ConfigMap",
+			objects: []ctrlcli.Object{epdTarget(), disaggregatedCM.DeepCopy(), h100_1x.DeepCopy(), h100_2x.DeepCopy()},
+			scaler: epdScaler(toPredictive, func(s *workercore.ModelDeploymentScaler) {
+				s.Spec.Ratios = []workercore.ModelDeploymentScalerRoleRatio{
+					{NumeratorRole: "encode", DenominatorRole: "prefill", Min: ptr.To(resource.MustParse("0.5")), Max: ptr.To(resource.MustParse("0.5"))},
+					{NumeratorRole: "decode", DenominatorRole: "prefill", Min: ptr.To(resource.MustParse("2")), Max: ptr.To(resource.MustParse("2"))},
+				}
+				s.Spec.Roles = []workercore.ModelDeploymentScalerRoleBounds{
+					{Name: "encode", MinReplicas: 1, MaxReplicas: 4},
+					{Name: "prefill", MinReplicas: 2, MaxReplicas: 6},
+					{Name: "decode", MinReplicas: 4, MaxReplicas: 12},
+				}
+			}),
+		},
+		{
+			name: "PD 1P:1D Priority 1 resolves from embedded priors.yaml mode disaggregated",
+			objects: []ctrlcli.Object{
+				pdTarget(func(d *workercore.ModelDeployment) {
+					d.Annotations = nil
+					d.Spec.Router = nil
+					d.Spec.KVTransfer = nil
+					d.Spec.Model.Name = "MiniMaxAI/MiniMax-M2.5"
+					args := []string{"--quantization=fp4", "--kv-cache-dtype=auto", "--no-enable-prefix-caching", "--cpu-offload-gb=0", "--swap-space=0"}
+					d.Spec.Roles[0] = modelDeploymentScalerPriorRole(
+						"prefill", workercore.ModelDeploymentRoleKindPrefill,
+						append(append([]string(nil), args...), "--tensor-parallel-size=1", "--expert-parallel-size=1"), 1,
+					)
+					d.Spec.Roles[0].AcceleratorType = b200_1x.Name
+					d.Spec.Roles[0].Image = d.Spec.Engine.Image
+					d.Spec.Roles[1] = modelDeploymentScalerPriorRole(
+						"decode", workercore.ModelDeploymentRoleKindDecode,
+						append(append([]string(nil), args...), "--tensor-parallel-size=4", "--expert-parallel-size=1"), 4,
+					)
+					d.Spec.Roles[1].AcceleratorType = b200_4x.Name
+					d.Spec.Roles[1].Image = d.Spec.Engine.Image
+				}),
+				b200_1x.DeepCopy(),
+				b200_4x.DeepCopy(),
+			},
+			scaler: pdScaler(func(s *workercore.ModelDeploymentScaler) {
+				s.Spec.Algorithm.CapacityPrior = &workercore.ModelDeploymentScalerCapacityPriorSpec{}
+				s.Spec.Algorithm.TokenThroughput.TTFTTargetMilliseconds = ptr.To(resource.MustParse("1000"))
+				s.Spec.Algorithm.TokenThroughput.ITLTargetMilliseconds = ptr.To(resource.MustParse("20"))
+				s.Spec.Roles = []workercore.ModelDeploymentScalerRoleBounds{
+					{Name: "prefill", MinReplicas: 1, MaxReplicas: 4},
+					{Name: "decode", MinReplicas: 1, MaxReplicas: 4},
+				}
+				s.Spec.Ratios = []workercore.ModelDeploymentScalerRoleRatio{
+					{NumeratorRole: "decode", DenominatorRole: "prefill", Min: ptr.To(resource.MustParse("1")), Max: ptr.To(resource.MustParse("1"))},
+				}
+			}),
+		},
+		{
+			name:    "EPD 1E:1P:2D Priority 2 TokenThroughput resolves from mode aggregated ConfigMap",
 			objects: []ctrlcli.Object{epdTarget(), serverOnlyCM.DeepCopy(), h100_1x.DeepCopy(), h100_2x.DeepCopy()},
 			scaler:  epdScaler(),
 		},
 		{
-			name:    "EPD 1E:1P:2D Tier 2 Predictive resolves from Server ConfigMap",
+			name:    "EPD 1E:1P:2D Priority 2 Predictive resolves from mode aggregated ConfigMap",
 			objects: []ctrlcli.Object{epdTarget(), serverOnlyCM.DeepCopy(), h100_1x.DeepCopy(), h100_2x.DeepCopy()},
 			scaler:  epdScaler(toPredictive),
 		},
 		{
-			name:    "PD Tier 2 create refuses when ratios are omitted",
+			name:    "PD Priority 2 create refuses when ratios are omitted",
 			objects: []ctrlcli.Object{pdTarget(), serverOnlyCM.DeepCopy(), h100_1x.DeepCopy(), h100_2x.DeepCopy()},
 			scaler: pdScaler(func(s *workercore.ModelDeploymentScaler) {
 				s.Spec.Ratios = nil
@@ -1365,7 +1460,7 @@ func TestModelDeploymentScalerValidate_CapacityPriorDisaggregated(t *testing.T) 
 			wantErr: "spec.algorithm.capacityPrior",
 		},
 		{
-			name:      "PD Tier 2 update warns and allows when ratios are omitted",
+			name:      "PD Priority 2 update warns and allows when ratios are omitted",
 			isUpdate:  true,
 			objects:   []ctrlcli.Object{pdTarget(), serverOnlyCM.DeepCopy(), h100_1x.DeepCopy(), h100_2x.DeepCopy()},
 			oldScaler: pdScaler(),
@@ -1376,7 +1471,7 @@ func TestModelDeploymentScalerValidate_CapacityPriorDisaggregated(t *testing.T) 
 			wantWarning: "requires fixed ratios",
 		},
 		{
-			name:    "PD Tier 2 create refuses when ratios have min < max",
+			name:    "PD Priority 2 create refuses when ratios have min < max",
 			objects: []ctrlcli.Object{pdTarget(), serverOnlyCM.DeepCopy(), h100_1x.DeepCopy(), h100_2x.DeepCopy()},
 			scaler: pdScaler(func(s *workercore.ModelDeploymentScaler) {
 				s.Spec.Ratios[0].Min = ptr.To(resource.MustParse("1"))
@@ -1385,7 +1480,7 @@ func TestModelDeploymentScalerValidate_CapacityPriorDisaggregated(t *testing.T) 
 			wantErr: "spec.algorithm.capacityPrior",
 		},
 		{
-			name:      "PD Tier 2 update warns and allows when ratios have min < max",
+			name:      "PD Priority 2 update warns and allows when ratios have min < max",
 			isUpdate:  true,
 			objects:   []ctrlcli.Object{pdTarget(), serverOnlyCM.DeepCopy(), h100_1x.DeepCopy(), h100_2x.DeepCopy()},
 			oldScaler: pdScaler(),
@@ -1396,7 +1491,7 @@ func TestModelDeploymentScalerValidate_CapacityPriorDisaggregated(t *testing.T) 
 			wantWarning: "min == max",
 		},
 		{
-			name:    "PD Tier 2 create refuses partial explicit per-role capacity override",
+			name:    "PD Priority 2 create refuses partial explicit per-role capacity override",
 			objects: []ctrlcli.Object{pdTarget(), serverOnlyCM.DeepCopy(), h100_1x.DeepCopy(), h100_2x.DeepCopy()},
 			scaler: pdScaler(func(s *workercore.ModelDeploymentScaler) {
 				s.Spec.Algorithm.TokenThroughput.PrefillTargetTokensPerSecond = ptr.To(resource.MustParse("900"))
@@ -1404,7 +1499,7 @@ func TestModelDeploymentScalerValidate_CapacityPriorDisaggregated(t *testing.T) 
 			wantErr: "spec.algorithm.capacityPrior",
 		},
 		{
-			name:      "PD Tier 2 update warns and allows partial explicit per-role capacity override",
+			name:      "PD Priority 2 update warns and allows partial explicit per-role capacity override",
 			isUpdate:  true,
 			objects:   []ctrlcli.Object{pdTarget(), serverOnlyCM.DeepCopy(), h100_1x.DeepCopy(), h100_2x.DeepCopy()},
 			oldScaler: pdScaler(),
@@ -1414,7 +1509,7 @@ func TestModelDeploymentScalerValidate_CapacityPriorDisaggregated(t *testing.T) 
 			wantWarning: "partial explicit",
 		},
 		{
-			name:    "PD Tier 2 create refuses replica bounds admitting no integer multiple of unit vector",
+			name:    "PD Priority 2 create refuses replica bounds admitting no integer multiple of unit vector",
 			objects: []ctrlcli.Object{pdTarget(), serverOnlyCM.DeepCopy(), h100_1x.DeepCopy(), h100_2x.DeepCopy()},
 			scaler: pdScaler(func(s *workercore.ModelDeploymentScaler) {
 				s.Spec.Roles = []workercore.ModelDeploymentScalerRoleBounds{
@@ -1425,7 +1520,7 @@ func TestModelDeploymentScalerValidate_CapacityPriorDisaggregated(t *testing.T) 
 			wantErr: "spec.roles",
 		},
 		{
-			name:    "PD Tier 2 TokenThroughput create refuses missing ttftTargetMilliseconds",
+			name:    "PD Priority 2 TokenThroughput create refuses missing ttftTargetMilliseconds",
 			objects: []ctrlcli.Object{pdTarget(), serverOnlyCM.DeepCopy(), h100_1x.DeepCopy(), h100_2x.DeepCopy()},
 			scaler: pdScaler(func(s *workercore.ModelDeploymentScaler) {
 				s.Spec.Algorithm.TokenThroughput.TTFTTargetMilliseconds = nil
@@ -1433,7 +1528,7 @@ func TestModelDeploymentScalerValidate_CapacityPriorDisaggregated(t *testing.T) 
 			wantErr: "spec.algorithm.tokenThroughput.ttftTargetMilliseconds",
 		},
 		{
-			name:    "EPD Tier 2 Predictive create refuses missing itlTargetMilliseconds",
+			name:    "EPD Priority 2 Predictive create refuses missing itlTargetMilliseconds",
 			objects: []ctrlcli.Object{epdTarget(), serverOnlyCM.DeepCopy(), h100_1x.DeepCopy(), h100_2x.DeepCopy()},
 			scaler: epdScaler(toPredictive, func(s *workercore.ModelDeploymentScaler) {
 				s.Spec.Algorithm.Predictive.TokenThroughput.ITLTargetMilliseconds = nil
@@ -1441,7 +1536,7 @@ func TestModelDeploymentScalerValidate_CapacityPriorDisaggregated(t *testing.T) 
 			wantErr: "spec.algorithm.predictive.tokenThroughput.itlTargetMilliseconds",
 		},
 		{
-			name:    "PD Tier 2 create refuses non-positive ttftTargetMilliseconds",
+			name:    "PD Priority 2 create refuses non-positive ttftTargetMilliseconds",
 			objects: []ctrlcli.Object{pdTarget(), serverOnlyCM.DeepCopy(), h100_1x.DeepCopy(), h100_2x.DeepCopy()},
 			scaler: pdScaler(func(s *workercore.ModelDeploymentScaler) {
 				s.Spec.Algorithm.TokenThroughput.TTFTTargetMilliseconds = ptr.To(resource.MustParse("0"))
@@ -1449,7 +1544,7 @@ func TestModelDeploymentScalerValidate_CapacityPriorDisaggregated(t *testing.T) 
 			wantErr: "spec.algorithm.tokenThroughput.ttftTargetMilliseconds",
 		},
 		{
-			name:    "PD Tier 2 create refuses infeasible ttftTargetMilliseconds against Server profile",
+			name:    "PD Priority 2 create refuses infeasible ttftTargetMilliseconds against mode aggregated profile",
 			objects: []ctrlcli.Object{pdTarget(), serverOnlyCM.DeepCopy(), h100_1x.DeepCopy(), h100_2x.DeepCopy()},
 			scaler: pdScaler(func(s *workercore.ModelDeploymentScaler) {
 				s.Spec.Algorithm.TokenThroughput.TTFTTargetMilliseconds = ptr.To(resource.MustParse("10"))
@@ -1457,7 +1552,7 @@ func TestModelDeploymentScalerValidate_CapacityPriorDisaggregated(t *testing.T) 
 			wantErr: "spec.algorithm.capacityPrior",
 		},
 		{
-			name:      "PD Tier 2 update warns and allows infeasible itlTargetMilliseconds against Server profile",
+			name:      "PD Priority 2 update warns and allows infeasible itlTargetMilliseconds against mode aggregated profile",
 			isUpdate:  true,
 			objects:   []ctrlcli.Object{pdTarget(), serverOnlyCM.DeepCopy(), h100_1x.DeepCopy(), h100_2x.DeepCopy()},
 			oldScaler: pdScaler(),
@@ -1467,20 +1562,40 @@ func TestModelDeploymentScalerValidate_CapacityPriorDisaggregated(t *testing.T) 
 			wantWarning: "capacity prior cannot be resolved",
 		},
 		{
-			name:    "PD Tier 1 succeeds with dedicated Prefill and Decode profiles even with range ratios",
-			objects: []ctrlcli.Object{pdTarget(), dedicatedPDCM.DeepCopy(), h100_1x.DeepCopy(), h100_2x.DeepCopy()},
+			name:    "PD Priority 1 create refuses range ratios even when mode disaggregated profile exists",
+			objects: []ctrlcli.Object{pdTarget(), disaggregatedCM.DeepCopy(), h100_1x.DeepCopy(), h100_2x.DeepCopy()},
 			scaler: pdScaler(func(s *workercore.ModelDeploymentScaler) {
 				s.Spec.Ratios[0].Min = ptr.To(resource.MustParse("1"))
 				s.Spec.Ratios[0].Max = ptr.To(resource.MustParse("3"))
 			}),
+			wantErr: "spec.algorithm.capacityPrior",
 		},
 		{
-			name:    "PD Tier 1 succeeds with dedicated profiles and partial explicit per-role capacity override",
-			objects: []ctrlcli.Object{pdTarget(), dedicatedPDCM.DeepCopy(), h100_1x.DeepCopy(), h100_2x.DeepCopy()},
+			name:    "PD Priority 1 create refuses partial explicit per-role capacity override",
+			objects: []ctrlcli.Object{pdTarget(), disaggregatedCM.DeepCopy(), h100_1x.DeepCopy(), h100_2x.DeepCopy()},
 			scaler: pdScaler(func(s *workercore.ModelDeploymentScaler) {
-				s.Spec.Ratios = nil
 				s.Spec.Algorithm.TokenThroughput.PrefillTargetTokensPerSecond = ptr.To(resource.MustParse("1100"))
 			}),
+			wantErr: "spec.algorithm.capacityPrior",
+		},
+		{
+			name: "PD Priority 1 create refuses ambiguous mode disaggregated profiles without falling back",
+			objects: []ctrlcli.Object{
+				pdTarget(func(d *workercore.ModelDeployment) {
+					delete(d.Annotations, workercore.ModelDeploymentScalerPrecisionAnnotationKey)
+				}),
+				ambiguousDisaggCM.DeepCopy(),
+				h100_1x.DeepCopy(),
+				h100_2x.DeepCopy(),
+			},
+			scaler:  pdScaler(),
+			wantErr: "several catalog profiles match",
+		},
+		{
+			name:    "PD Priority 1 create refuses infeasible mode disaggregated ITL without falling back",
+			objects: []ctrlcli.Object{pdTarget(), infeasibleDisaggCM.DeepCopy(), h100_1x.DeepCopy(), h100_2x.DeepCopy()},
+			scaler:  pdScaler(),
+			wantErr: "spec.algorithm.capacityPrior",
 		},
 		{
 			name:        "missing target ModelDeployment admits PD scaler create with warning",

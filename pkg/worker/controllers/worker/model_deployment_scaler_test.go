@@ -1014,7 +1014,7 @@ func TestModelDeploymentScalerWholeUnitObservationAndPanicExpiry(t *testing.T) {
 			algs["encode"] = workercore.ModelDeploymentScalerAlgorithmSpec{}
 		}
 		return &ModelDeploymentScalerCapacityPriors{
-			Mode:       ModelDeploymentScalerPriorModeWholeUnitServerFallback,
+			Mode:       ModelDeploymentScalerPriorModeAggregatedFallback,
 			Algorithms: algs,
 			WholeUnit: &ModelDeploymentScalerWholeUnitPrior{
 				UnitVector:                unitVector,

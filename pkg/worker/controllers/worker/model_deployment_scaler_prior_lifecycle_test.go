@@ -377,8 +377,8 @@ func TestModelDeploymentScalerCapacityPriorTier2LifecycleAndReset(t *testing.T) 
 
 	stored := scalerTestGetScaler(t, client, scaler.Name)
 	ready := scalerCondition(stored, workercore.ModelDeploymentScalerConditionTypeCapacityPriorsReady)
-	if ready.Status != meta.ConditionTrue || !strings.Contains(ready.Message, "Tier 2") {
-		t.Fatalf("expected Tier 2 CapacityPriorsReady=True condition, got %#v", ready)
+	if ready.Status != meta.ConditionTrue || !strings.Contains(ready.Message, "mode: aggregated fallback") {
+		t.Fatalf("expected aggregated fallback CapacityPriorsReady=True condition, got %#v", ready)
 	}
 	if len(stored.Status.ResolvedCapacityPriors) != 2 {
 		t.Fatalf("resolved prior count = %d, want 2 LLM roles", len(stored.Status.ResolvedCapacityPriors))

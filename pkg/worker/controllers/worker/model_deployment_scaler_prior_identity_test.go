@@ -952,7 +952,16 @@ func TestModelDeploymentScalerPriorRequestDisaggregatedAndKVCache(t *testing.T) 
 			},
 		}
 		client := ctrlfake.NewClientBuilder().WithScheme(scheme.Scheme).WithObjects(inferenceXObjects(t, deployment)...).Build()
+		stageProfile := &priors.DisaggregatedStage{
+			Replicas: 1,
+			Hardware: identity.Hardware,
+			Topology: priors.Topology{
+				GPUsPerReplica: 8, TensorParallel: 8, PipelineParallel: 1,
+				DataParallel: 1, LocalDataParallel: 1, ContextParallel: 1, ExpertParallel: 1,
+			},
+		}
 		profile := priors.Profile{
+			Mode:     priors.ModeDisaggregated,
 			Identity: identity,
 			ServingConfig: priors.ServingConfig{
 				Router: "none", KVCacheDType: "fp8_e4m3", Offload: "none",
@@ -960,18 +969,31 @@ func TestModelDeploymentScalerPriorRequestDisaggregatedAndKVCache(t *testing.T) 
 				EngineEnvComplete: true,
 				EffectiveDefaults: map[string]string{"--dtype": "bf16", "--cpu-offload-gb": "0"},
 			},
+			Prefill: stageProfile,
+			Decode:  stageProfile,
 		}
 		prefill := &deployment.Spec.Roles[1]
-		decl, err := modelDeploymentScalerPriorDeclarationOf(context.Background(), client, deployment, prefill)
+		decode := &deployment.Spec.Roles[2]
+		prefillDecl, err := modelDeploymentScalerPriorDeclarationOf(context.Background(), client, deployment, prefill)
+		require.NoError(t, err)
+		decodeDecl, err := modelDeploymentScalerPriorDeclarationOf(context.Background(), client, deployment, decode)
 		require.NoError(t, err)
 
-		tier1Req, err := modelDeploymentScalerPriorRequest(deployment, prefill, &profile, decl)
+		prio1Req, err := modelDeploymentScalerDisaggregatedPriorRequest(
+			deployment, prefill, decode, &profile, prefillDecl, decodeDecl, 1, 1,
+		)
 		require.NoError(t, err)
-		assert.Equal(t, workercore.ModelDeploymentRouterSGLang, tier1Req.ServingConfig.Router)
+		assert.Equal(t, workercore.ModelDeploymentRouterSGLang, prio1Req.ServingConfig.Router)
 
-		tier2Req, err := modelDeploymentScalerPriorRequestForServerFallback(deployment, prefill, &profile, decl)
+		aggProfile := priors.Profile{
+			Mode:          priors.ModeAggregated,
+			Identity:      identity,
+			ServingConfig: profile.ServingConfig,
+			Topology:      stageProfile.Topology,
+		}
+		prio2Req, err := modelDeploymentScalerPriorRequestForServerFallback(deployment, prefill, &aggProfile, prefillDecl)
 		require.NoError(t, err)
-		assert.Equal(t, "none", tier2Req.ServingConfig.Router)
+		assert.Equal(t, "none", prio2Req.ServingConfig.Router)
 	})
 
 	t.Run("spec.kvCache != nil fails closed against offload none profile", func(t *testing.T) {
@@ -985,7 +1007,7 @@ func TestModelDeploymentScalerPriorRequestDisaggregatedAndKVCache(t *testing.T) 
 		role.Resources = &workercore.ModelDeploymentRoleResources{Accelerator: capacityPriorQuantity("8")}
 
 		profile := priors.Profile{
-			Role:     priors.RoleKindServer,
+			Mode:     priors.ModeAggregated,
 			Identity: identity,
 			ServingConfig: priors.ServingConfig{
 				Router: "none", KVCacheDType: "fp8_e4m3", Offload: "none",
