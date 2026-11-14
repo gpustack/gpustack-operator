@@ -1,7 +1,6 @@
 # Spec: Whole-Unit Disaggregated Capacity Priors and Scaling Documentation Alignment
 
-Status: Built
-Blocked on: end-of-build review and final ship gate before setting Status to Shipped
+Status: Shipped
 Type: Feature
 
 ## Table of Contents
@@ -362,9 +361,11 @@ whole-system cache-missed total throughput (`input + output`) bounded by `[TTFT,
 
 ### Implementation Plan
 
-`T3` and `T5` are already implemented on branch. Once `T1` lands (`api/`, `priors/`, `gen/priors/`,
-and synced `priors.yaml`), `T2` (controller + webhook) and `T4` (priors skill + scaling docs) own
-disjoint paths and can run in parallel.
+All tasks `T1`–`T5` are implemented, together with `ModelDeployment` group-qualification retention
+(including in-place container restart re-qualification) and router-observation group-isolation
+hardening (`model_deployment_health.go`, `model_deployment_router_observation.go`,
+`model_deployment_retirement.go`, and `model_deployment.go`) verified during live P/D whole-unit
+scaling.
 
 - [x] **T1 · Mode-keyed catalog schema (`aggregated` / `disaggregated`), `PerUnit` denominator, InferenceX adapter, and live `priors.yaml` sync**
   - **Blocked by:** None
@@ -467,9 +468,14 @@ explicit fail-closed tests for malformed single-half catalog lookups.
 
 Local fake-client controller, simulation, webhook, Go lint (`make lint`), codegen (`make generate`
 and `make generate priors`), and documentation lint (`make lint docs`) suites gate implementation
-completion without requiring cluster GPUs. Real-cluster reconcile/webhook verification
-(`gpustack-operator-e2e`) and live multi-GPU serving/scaling qualification
-(`gpustack-operator-benchmark`) remain explicit opt-in gates on user-supplied cluster hardware.
+completion without requiring cluster GPUs. Real-cluster E2E cases
+[case-131.sh](../.agents/skills/gpustack-operator-e2e/cases/case-131.sh) (P/D and EPD
+`capacityPrior` admission, Priority 1 / Priority 2 resolution, `priors.json` fallback, and
+broken-ConfigMap `UPDATE` freeze) and
+[case-132.sh](../.agents/skills/gpustack-operator-e2e/cases/case-132.sh) (live routed vLLM P/D
+`1P:2D -> 2P:4D -> 1P:2D` atomic whole-unit scaling under `TokenThroughput` with zero failed probe
+requests and zero container restarts) were added under `gpustack-operator-e2e` and verified on an
+8x NVIDIA H100 cluster alongside `case-01`, `case-128`, and `case-129`.
 
 ## Alternatives
 
