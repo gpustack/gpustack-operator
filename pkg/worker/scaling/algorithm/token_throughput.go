@@ -142,10 +142,10 @@ func (t TokenThroughput) target(kind RoleKind) float64 {
 		return t.PrefillTargetTokensPerSecond
 	case RoleKindDecode:
 		return t.DecodeTargetTokensPerSecond
-	case RoleKindUnknown:
-		return 0
-	default:
+	case RoleKindServer:
 		return t.ServerTargetTokensPerSecond
+	default:
+		return 0
 	}
 }
 
@@ -169,7 +169,9 @@ func (t TokenThroughput) demandFinite(obs RoleObservation) bool {
 	case RoleKindDecode:
 		return isFiniteFloat64(obs.GenerationTokensPerSecond)
 	case RoleKindServer:
-		return isFiniteFloat64(obs.PromptTokensPerSecond) && isFiniteFloat64(obs.GenerationTokensPerSecond)
+		return isFiniteFloat64(obs.PromptTokensPerSecond) &&
+			isFiniteFloat64(obs.GenerationTokensPerSecond) &&
+			isFiniteFloat64(t.demand(obs))
 	default:
 		return true
 	}
@@ -177,6 +179,13 @@ func (t TokenThroughput) demandFinite(obs RoleObservation) bool {
 
 func isFiniteFloat64(value float64) bool {
 	return !math.IsNaN(value) && !math.IsInf(value, 0)
+}
+
+func saturatingIncInt32(value int32) int32 {
+	if value == math.MaxInt32 {
+		return math.MaxInt32
+	}
+	return value + 1
 }
 
 func nonNegative(value float64) float64 {
@@ -187,8 +196,11 @@ func nonNegative(value float64) float64 {
 }
 
 func desiredFromDemand(demand, target float64) int32 {
-	if !isFiniteFloat64(demand) || !isFiniteFloat64(target) || demand <= 0 || target <= 0 {
+	if !isFiniteFloat64(target) || target <= 0 || math.IsNaN(demand) || demand <= 0 {
 		return 1
+	}
+	if math.IsInf(demand, 1) {
+		return math.MaxInt32
 	}
 	return clampPositiveCeilInt32(demand / target)
 }
@@ -288,7 +300,7 @@ func windowMean(history *datax.RingBuffer[DemandSample], now time.Time, window t
 		return fallback
 	}
 	cutoff := now.Add(-window)
-	var sum float64
+	var mean float64
 	var count int
 	for i := 0; i < history.Len(); i++ {
 		sample, ok := history.At(i)
@@ -297,14 +309,14 @@ func windowMean(history *datax.RingBuffer[DemandSample], now time.Time, window t
 		}
 		if !sample.Timestamp.IsZero() && !sample.Timestamp.Before(cutoff) && !sample.Timestamp.After(now) &&
 			isFiniteFloat64(sample.TokensPerSecond) {
-			sum += sample.TokensPerSecond
 			count++
+			mean += (sample.TokensPerSecond - mean) / float64(count)
 		}
 	}
-	if count == 0 {
+	if count == 0 || !isFiniteFloat64(mean) {
 		return fallback
 	}
-	return sum / float64(count)
+	return mean
 }
 
 // latencyGuard returns the replica count the latency targets hold the role to.
@@ -324,7 +336,7 @@ func (t TokenThroughput) latencyGuard(obs RoleObservation) (int32, string, bool)
 	}
 	ratio, missing := t.latencyAssessment(obs)
 	if ratio > 1.2 {
-		return obs.CurrentReplicas + 1, ReasonLatencyGuardScaleUp, true
+		return saturatingIncInt32(obs.CurrentReplicas), ReasonLatencyGuardScaleUp, true
 	}
 	if ratio > 1 {
 		return obs.CurrentReplicas, ReasonLatencyGuardHold, true
@@ -341,8 +353,10 @@ func (t TokenThroughput) latencyConfigured(obs RoleObservation) bool {
 		return t.TTFTTargetMilliseconds > 0
 	case RoleKindDecode:
 		return t.ITLTargetMilliseconds > 0
-	default:
+	case RoleKindServer:
 		return t.TTFTTargetMilliseconds > 0 || t.ITLTargetMilliseconds > 0
+	default:
+		return false
 	}
 }
 

@@ -38,6 +38,9 @@ func (p Predictive) Recommend(obs RoleObservation, prior *PredictorState) (RoleR
 	if roleKind(obs) == RoleKindEncode || obs.ReadyReplicas <= 0 {
 		return rec, &state
 	}
+	if target := p.target(roleKind(obs)); target <= 0 || !isFiniteFloat64(target) {
+		return rec, &state
+	}
 	if !signalUsable(obs.ThroughputState) || !p.demandFinite(obs) {
 		if rec.Reason != ReasonLatencyGuardScaleUp && rec.Reason != ReasonLatencyGuardHold {
 			switch latencyRec, latencyReason, _ := p.latencyGuard(obs); latencyReason {
@@ -80,7 +83,7 @@ func (p Predictive) Recommend(obs RoleObservation, prior *PredictorState) (RoleR
 
 	latencyFast := p.latencyBreached(obs)
 	if latencyFast || rec.InPanic {
-		rec.DesiredReplicas = maxInt32(rec.DesiredReplicas, obs.CurrentReplicas+1)
+		rec.DesiredReplicas = maxInt32(rec.DesiredReplicas, saturatingIncInt32(obs.CurrentReplicas))
 		rec.HoldScaleDown = true
 		if latencyFast {
 			rec.Reason = ReasonLatencyGuardScaleUp
@@ -117,13 +120,19 @@ func (p Predictive) Recommend(obs RoleObservation, prior *PredictorState) (RoleR
 
 func (p Predictive) updateFilter(state PredictorState, obs RoleObservation) PredictorState {
 	demand := p.demand(obs)
+	if !isFiniteFloat64(demand) {
+		return state
+	}
 	if state.SampleCount == 0 {
 		state.Level = demand
 		state.Trend = 0
-		if state.Covariance == [4]float64{} {
+		if state.Covariance == [4]float64{} || !isFiniteCovariance(state.Covariance) {
 			state.Covariance = [4]float64{1, 0, 0, 1}
 		}
 		state.SampleCount = 1
+		return state
+	}
+	if !isFiniteFloat64(state.Level) || !isFiniteFloat64(state.Trend) || !isFiniteCovariance(state.Covariance) {
 		return state
 	}
 	dt := 15.0
@@ -160,16 +169,26 @@ func (p Predictive) updateFilter(state PredictorState, obs RoleObservation) Pred
 		innovationVariance = r
 	}
 	gain0, gain1 := pred00/innovationVariance, pred10/innovationVariance
-	state.Level = predictedLevel + gain0*innovation
-	state.Trend = predictedTrend + gain1*innovation
-	state.Covariance = [4]float64{
+	nextLevel := predictedLevel + gain0*innovation
+	nextTrend := predictedTrend + gain1*innovation
+	nextCov := [4]float64{
 		(1 - gain0) * pred00,
 		(1 - gain0) * pred01,
 		pred10 - gain1*pred00,
 		pred11 - gain1*pred01,
 	}
+	if !isFiniteFloat64(nextLevel) || !isFiniteFloat64(nextTrend) || !isFiniteCovariance(nextCov) {
+		return state
+	}
+	state.Level = nextLevel
+	state.Trend = nextTrend
+	state.Covariance = nextCov
 	state.SampleCount++
 	return state
+}
+
+func isFiniteCovariance(cov [4]float64) bool {
+	return isFiniteFloat64(cov[0]) && isFiniteFloat64(cov[1]) && isFiniteFloat64(cov[2]) && isFiniteFloat64(cov[3])
 }
 
 // previousDemandSample returns the sample the newest one was measured against.
@@ -198,8 +217,10 @@ func (p Predictive) capacity(kind RoleKind) float64 {
 		return p.PrefillTokenCapacityPerReplica
 	case RoleKindDecode:
 		return p.DecodeTokenCapacityPerReplica
-	default:
+	case RoleKindServer:
 		return p.ServerTokenCapacityPerReplica
+	default:
+		return 0
 	}
 }
 
