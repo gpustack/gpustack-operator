@@ -1577,7 +1577,7 @@ See <a href="/gpustack-operator/main/docs/modules/model-deployment/prefill-decod
       </tr>
       <tr>
           <td>Model</td>
-          <td>Qwen/Qwen3-32B from <code>ModelArtifact</code> <code>qwen3-32b</code>, served as <code>/models</code> through node model delivery</td>
+          <td><code>Qwen/Qwen3-32B</code> from <code>ModelArtifact</code> <code>qwen3-32b</code> through node model delivery</td>
       </tr>
       <tr>
           <td>Engine and router</td>
@@ -1615,7 +1615,7 @@ three engine <code>Pod</code>s and the Router ran on <code>gpu-node-0</code>.</p
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">namespace</span><span class="p">:</span><span class="w"> </span><span class="l">gpustack-bench</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">spec</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">model</span><span class="p">:</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">/models</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">Qwen/Qwen3-32B</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">artifactRef</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">qwen3-32b</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">engine</span><span class="p">:</span><span class="w">
@@ -1733,7 +1733,7 @@ apply. Adding it later is refused because a different cache describes a differen
 </span></span></span><span class="line"><span class="cl"><span class="se"></span>  curl -s http://pd-arm2-pd-router.gpustack-bench.svc:8000/v1/chat/completions <span class="se">\
 </span></span></span><span class="line"><span class="cl"><span class="se"></span>  -H <span class="s2">&#34;Content-Type: application/json&#34;</span> <span class="se">\
 </span></span></span><span class="line"><span class="cl"><span class="se"></span>  -d <span class="s1">&#39;{
-</span></span></span><span class="line"><span class="cl"><span class="s1">    &#34;model&#34;: &#34;/models&#34;,
+</span></span></span><span class="line"><span class="cl"><span class="s1">    &#34;model&#34;: &#34;Qwen/Qwen3-32B&#34;,
 </span></span></span><span class="line"><span class="cl"><span class="s1">    &#34;messages&#34;: [{&#34;role&#34;: &#34;user&#34;, &#34;content&#34;: &#34;Explain prefill and decode disaggregation.&#34;}],
 </span></span></span><span class="line"><span class="cl"><span class="s1">    &#34;max_tokens&#34;: 16
 </span></span></span><span class="line"><span class="cl"><span class="s1">  }&#39;</span></span></span></code></pre></div>

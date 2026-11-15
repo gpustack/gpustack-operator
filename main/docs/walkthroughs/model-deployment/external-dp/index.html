@@ -1576,7 +1576,7 @@ Use <a href="/gpustack-operator/main/docs/modules/model-deployment/external-dp-b
       </tr>
       <tr>
           <td>Model</td>
-          <td><code>deepseek-ai/DeepSeek-V2-Lite-Chat</code>, artifact <code>deepseek-v2-lite-chat</code>, served as <code>/models</code></td>
+          <td><code>deepseek-ai/DeepSeek-V2-Lite-Chat</code>, artifact <code>deepseek-v2-lite-chat</code></td>
       </tr>
       <tr>
           <td>Reusable <code>AcceleratorType</code></td>
@@ -1611,7 +1611,7 @@ Use an existing type that selects the same whole-GPU accelerator group.</p>
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">namespace</span><span class="p">:</span><span class="w"> </span><span class="l">gpustack-bench</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">spec</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">model</span><span class="p">:</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">/models</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">deepseek-v2-lite-chat</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">artifactRef</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">deepseek-v2-lite-chat</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">engine</span><span class="p">:</span><span class="w">
@@ -1742,13 +1742,13 @@ The direct checks below are additional verification commands; no direct nonstrea
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl"><span class="k">for</span> port in <span class="m">18000</span> <span class="m">18001</span> <span class="m">18002</span> 18003<span class="p">;</span> <span class="k">do</span>
 </span></span><span class="line"><span class="cl">  curl --fail-with-body --max-time <span class="m">60</span> <span class="s2">&#34;http://127.0.0.1:</span><span class="nv">$port</span><span class="s2">/v1/completions&#34;</span> <span class="se">\
 </span></span></span><span class="line"><span class="cl"><span class="se"></span>    -H <span class="s1">&#39;Content-Type: application/json&#39;</span> <span class="se">\
-</span></span></span><span class="line"><span class="cl"><span class="se"></span>    -d <span class="s1">&#39;{&#34;model&#34;:&#34;/models&#34;,&#34;prompt&#34;:&#34;The sky is&#34;,&#34;max_tokens&#34;:8,&#34;temperature&#34;:0}&#39;</span> <span class="se">\
+</span></span></span><span class="line"><span class="cl"><span class="se"></span>    -d <span class="s1">&#39;{&#34;model&#34;:&#34;deepseek-v2-lite-chat&#34;,&#34;prompt&#34;:&#34;The sky is&#34;,&#34;max_tokens&#34;:8,&#34;temperature&#34;:0}&#39;</span> <span class="se">\
 </span></span></span><span class="line"><span class="cl"><span class="se"></span>    -o <span class="s2">&#34;rank-</span><span class="nv">$port</span><span class="s2">.json&#34;</span>
 </span></span><span class="line"><span class="cl">  jq <span class="s1">&#39;{text: .choices[0].text, finish_reason: .choices[0].finish_reason,
 </span></span></span><span class="line"><span class="cl"><span class="s1">       completion_tokens: .usage.completion_tokens}&#39;</span> <span class="s2">&#34;rank-</span><span class="nv">$port</span><span class="s2">.json&#34;</span>
 </span></span><span class="line"><span class="cl">  curl --fail-with-body --no-buffer --max-time <span class="m">60</span> <span class="s2">&#34;http://127.0.0.1:</span><span class="nv">$port</span><span class="s2">/v1/completions&#34;</span> <span class="se">\
 </span></span></span><span class="line"><span class="cl"><span class="se"></span>    -H <span class="s1">&#39;Content-Type: application/json&#39;</span> <span class="se">\
-</span></span></span><span class="line"><span class="cl"><span class="se"></span>    -d <span class="s1">&#39;{&#34;model&#34;:&#34;/models&#34;,&#34;prompt&#34;:&#34;A GPU is&#34;,&#34;max_tokens&#34;:8,&#34;temperature&#34;:0,&#34;stream&#34;:true,&#34;stream_options&#34;:{&#34;include_usage&#34;:true}}&#39;</span> <span class="se">\
+</span></span></span><span class="line"><span class="cl"><span class="se"></span>    -d <span class="s1">&#39;{&#34;model&#34;:&#34;deepseek-v2-lite-chat&#34;,&#34;prompt&#34;:&#34;A GPU is&#34;,&#34;max_tokens&#34;:8,&#34;temperature&#34;:0,&#34;stream&#34;:true,&#34;stream_options&#34;:{&#34;include_usage&#34;:true}}&#39;</span> <span class="se">\
 </span></span></span><span class="line"><span class="cl"><span class="se"></span>    -o <span class="s2">&#34;rank-</span><span class="nv">$port</span><span class="s2">-stream.txt&#34;</span>
 </span></span><span class="line"><span class="cl"><span class="k">done</span></span></span></code></pre></div>
 </div>
@@ -1777,7 +1777,7 @@ Retain the responses per rank. These checks establish functional inference, not 
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl"><span class="k">for</span> request in <span class="m">1</span> <span class="m">2</span> <span class="m">3</span> <span class="m">4</span> <span class="m">5</span> <span class="m">6</span> <span class="m">7</span> 8<span class="p">;</span> <span class="k">do</span>
 </span></span><span class="line"><span class="cl">  curl --fail-with-body --max-time <span class="m">60</span> http://127.0.0.1:18080/v1/completions <span class="se">\
 </span></span></span><span class="line"><span class="cl"><span class="se"></span>    -H <span class="s1">&#39;Content-Type: application/json&#39;</span> <span class="se">\
-</span></span></span><span class="line"><span class="cl"><span class="se"></span>    -d <span class="s1">&#39;{&#34;model&#34;:&#34;/models&#34;,&#34;prompt&#34;:&#34;The sky is&#34;,&#34;max_tokens&#34;:8,&#34;temperature&#34;:0}&#39;</span> <span class="se">\
+</span></span></span><span class="line"><span class="cl"><span class="se"></span>    -d <span class="s1">&#39;{&#34;model&#34;:&#34;deepseek-v2-lite-chat&#34;,&#34;prompt&#34;:&#34;The sky is&#34;,&#34;max_tokens&#34;:8,&#34;temperature&#34;:0}&#39;</span> <span class="se">\
 </span></span></span><span class="line"><span class="cl"><span class="se"></span>    -o <span class="s2">&#34;router-</span><span class="nv">$request</span><span class="s2">.json&#34;</span>
 </span></span><span class="line"><span class="cl"><span class="k">done</span>
 </span></span><span class="line"><span class="cl">curl --fail-with-body http://127.0.0.1:19090/metrics &gt; router-after.prom

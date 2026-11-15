@@ -2,7 +2,7 @@
 
 > GPUStack Operator discovers accelerators, organizes capacity into pools, and schedules Kubernetes workloads for interactive use and model serving.
 
-Documentation version: main. Source revision: 7e33372fc3660f56c1d37293cb4d736d5ab8939d.
+Documentation version: main. Source revision: e2d4308907ed618bef1e63d9086fddc3738c3c99.
 These pages come from the repository's docs/ sources. For version-specific behavior, use the
 documentation and code for your release. This index routes questions; follow its links for evidence.
 
@@ -87,7 +87,7 @@ documentation and code for your release. This index routes questions; follow its
 - [Elastic EP Benchmark](https://docs.gpustack.ai/gpustack-operator/main/docs/modules/model-deployment/elastic-ep-benchmark/index.md): Compare four- and eight-GPU H100 collectives and measure requests during live expansion.
 - [External DP](https://docs.gpustack.ai/gpustack-operator/main/docs/modules/model-deployment/external-dp/index.md): Run one fixed data-parallel group with an HTTP endpoint on every rank.
 - [External DP Benchmark](https://docs.gpustack.ai/gpustack-operator/main/docs/modules/model-deployment/external-dp-benchmark/index.md): Compare External DP ranks with a monolithic wide tensor-parallel group.
-- [Model Deployment Scaling](https://docs.gpustack.ai/gpustack-operator/main/docs/modules/model-deployment/scaling/index.md): Plan a deployment's replica count from the signals it publishes.
+- [Model Deployment Scaling](https://docs.gpustack.ai/gpustack-operator/main/docs/modules/model-deployment/scaling/index.md): Plan replica counts and resolve whole-unit capacity from disaggregated or aggregated priors.
 - [Model Deployment Scaling Simulation](https://docs.gpustack.ai/gpustack-operator/main/docs/modules/model-deployment/scaling-simulation/index.md): Compare the three scaler algorithms on identical synthetic traffic with measured adjustment dynamics.
 - [Model Deployment Scaling Benchmark](https://docs.gpustack.ai/gpustack-operator/main/docs/modules/model-deployment/scaling-benchmark/index.md): Compare H100 and H200 scaling configurations and capacity priors with measured latency, throughput and lifecycle limits.
 - [Model Deployment Routing](https://docs.gpustack.ai/gpustack-operator/main/docs/modules/model-deployment/routing/index.md): Choose a routing policy, confirm a Router serves.
@@ -120,7 +120,7 @@ documentation and code for your release. This index routes questions; follow its
 
 ## Optional
 
-- [Repository navigation](https://github.com/gpustack/gpustack-operator/blob/7e33372fc3660f56c1d37293cb4d736d5ab8939d/docs/README.md): Module relationships, design records, code entry points and applicable skills for contributors.
+- [Repository navigation](https://github.com/gpustack/gpustack-operator/blob/e2d4308907ed618bef1e63d9086fddc3738c3c99/docs/README.md): Module relationships, design records, code entry points and applicable skills for contributors.
 - [Development](https://docs.gpustack.ai/gpustack-operator/main/docs/contribute/development/index.md): Build, generate and lint the project.
 - [Local Cluster Setup](https://docs.gpustack.ai/gpustack-operator/main/docs/contribute/local-cluster-setup/index.md): Install kind and provide a cluster for development tests.
 - [Internals](https://docs.gpustack.ai/gpustack-operator/main/docs/contribute/internals/index.md): Review startup and naming constraints.

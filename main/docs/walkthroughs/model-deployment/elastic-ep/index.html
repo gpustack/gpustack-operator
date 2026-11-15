@@ -1566,7 +1566,7 @@ Use <a href="/gpustack-operator/main/docs/modules/model-deployment/elastic-ep-be
       </tr>
       <tr>
           <td>Model</td>
-          <td><code>deepseek-ai/DeepSeek-V2-Lite-Chat</code>, <code>ModelArtifact</code> <code>deepseek-v2-lite-chat</code>, served as <code>/models</code></td>
+          <td><code>deepseek-ai/DeepSeek-V2-Lite-Chat</code>, <code>ModelArtifact</code> <code>deepseek-v2-lite-chat</code></td>
       </tr>
       <tr>
           <td>Captured <code>InstanceType</code></td>
@@ -1605,7 +1605,7 @@ Save the manifest as <code>elastic-ep.yaml</code>:</p>
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">namespace</span><span class="p">:</span><span class="w"> </span><span class="l">gpustack-bench</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">spec</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">model</span><span class="p">:</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">/models</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">deepseek-v2-lite-chat</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">artifactRef</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">deepseek-v2-lite-chat</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">engine</span><span class="p">:</span><span class="w">
@@ -1702,7 +1702,7 @@ Declared arguments also do not prove the effective runtime width.</p>
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">curl --fail-with-body --no-buffer --max-time <span class="m">60</span> <span class="se">\
 </span></span></span><span class="line"><span class="cl"><span class="se"></span>  http://127.0.0.1:8000/v1/chat/completions <span class="se">\
 </span></span></span><span class="line"><span class="cl"><span class="se"></span>  -H <span class="s1">&#39;Content-Type: application/json&#39;</span> <span class="se">\
-</span></span></span><span class="line"><span class="cl"><span class="se"></span>  -d <span class="s1">&#39;{&#34;model&#34;:&#34;/models&#34;,&#34;messages&#34;:[{&#34;role&#34;:&#34;user&#34;,&#34;content&#34;:&#34;Explain GPU scheduling briefly.&#34;}],&#34;max_tokens&#34;:64,&#34;temperature&#34;:0,&#34;stream&#34;:true,&#34;stream_options&#34;:{&#34;include_usage&#34;:true}}&#39;</span> <span class="se">\
+</span></span></span><span class="line"><span class="cl"><span class="se"></span>  -d <span class="s1">&#39;{&#34;model&#34;:&#34;deepseek-v2-lite-chat&#34;,&#34;messages&#34;:[{&#34;role&#34;:&#34;user&#34;,&#34;content&#34;:&#34;Explain GPU scheduling briefly.&#34;}],&#34;max_tokens&#34;:64,&#34;temperature&#34;:0,&#34;stream&#34;:true,&#34;stream_options&#34;:{&#34;include_usage&#34;:true}}&#39;</span> <span class="se">\
 </span></span></span><span class="line"><span class="cl"><span class="se"></span>  -o baseline-stream.txt
 </span></span><span class="line"><span class="cl">cat baseline-stream.txt</span></span></code></pre></div>
 </div>

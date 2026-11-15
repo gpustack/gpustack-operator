@@ -1583,7 +1583,7 @@ See <a href="/gpustack-operator/main/docs/modules/model-deployment/encode-prefil
       </tr>
       <tr>
           <td>Model</td>
-          <td><code>qwen2-5-vl-7b-instruct</code> for <code>Qwen/Qwen2.5-VL-7B-Instruct</code>; node model delivery mounts the weights at <code>/var/lib/gpustack/model</code>, served as <code>/models</code></td>
+          <td><code>qwen2-5-vl-7b-instruct</code> for <code>Qwen/Qwen2.5-VL-7B-Instruct</code>; node model delivery mounts the weights at <code>/var/lib/gpustack/model</code>.</td>
       </tr>
       <tr>
           <td>Runtime</td>
@@ -1600,7 +1600,7 @@ and prefetch it onto the H100 node using the <a href="/gpustack-operator/main/do
 name <code>gpustack--nvidia-h100-80gb-hbm3-linux-amd64</code>.</p>
 <p>The recorded run used its custom <code>bench-gpu</code> <code>InstanceType</code>, configured for the same accelerator group.</p>
 <p>One <em>Encode</em>, one <em>Prefill</em> and one <em>Decode</em> replica each request one GPU. The <code>artifactRef</code> points to
-the existing <code>ModelArtifact</code>; <em><code>spec.model.name</code></em> exposes it to vLLM as <code>/models</code>. The <em><code>spec.router</code></em>
+the existing <code>ModelArtifact</code>; <em><code>spec.model.name</code></em> exposes it to vLLM as <code>qwen2-5-vl-7b-instruct</code>. The <em><code>spec.router</code></em>
 stanza deploys <code>llm-d-router</code> in front of the roles.</p>
 <div class="code-block">
   <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
@@ -1611,7 +1611,7 @@ stanza deploys <code>llm-d-router</code> in front of the roles.</p>
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">namespace</span><span class="p">:</span><span class="w"> </span><span class="l">gpustack-bench</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">spec</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">model</span><span class="p">:</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">/models</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">qwen2-5-vl-7b-instruct</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">artifactRef</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">qwen2-5-vl-7b-instruct</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">engine</span><span class="p">:</span><span class="w">
@@ -1705,9 +1705,8 @@ role only, so <code>epd-deployment.yaml</code> declares neither in <em><code>ext
 <a href="/gpustack-operator/main/docs/modules/model-deployment/encode-prefill-decode/#keys-the-operator-owns">Keys the operator owns</a>
 
 for the rationale; do not copy <code>--enforce-eager</code> onto <em>Prefill</em> or <em>Decode</em>, which keep CUDA graphs.</p>
-<p>The following blocks are captured <code>Pod</code> excerpts, not manifests to apply. They include the <code>Pod</code>
-identity and container nesting so each generated field has its Kubernetes context; probes, volumes and
-other generated fields are omitted where they do not explain the configuration.</p>
+<p>The following <code>Pod</code> excerpts are captured examples, not manifests to apply. Probes, volumes and other
+generated fields are omitted where they do not explain the configuration.</p>
 <div class="code-block">
   <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">v1</span><span class="w">
@@ -1730,7 +1729,7 @@ other generated fields are omitted where they do not explain the configuration.<
 </span></span></span><span class="line"><span class="cl"><span class="w">        </span>- <span class="s2">&#34;114688&#34;</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">        </span>- --<span class="l">mm-encoder-only</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">        </span>- --<span class="l">served-model-name</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w">        </span>- <span class="l">/models</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span>- <span class="l">qwen2-5-vl-7b-instruct</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">        </span>- --<span class="l">max-model-len</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">        </span>- <span class="s2">&#34;16384&#34;</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">        </span>- --<span class="l">gpu-memory-utilization</span><span class="w">
@@ -1779,7 +1778,7 @@ producer and the KV event publisher that the router reads:</p>
 </span></span></span><span class="line"><span class="cl"><span class="w">        </span>- --<span class="l">kv-events-config</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">        </span>- <span class="s1">&#39;{&#34;enable_kv_cache_events&#34;:true,&#34;publisher&#34;:&#34;zmq&#34;,&#34;endpoint&#34;:&#34;tcp://*:5557&#34;,&#34;replay_endpoint&#34;:&#34;tcp://*:5558&#34;,&#34;buffer_steps&#34;:10000,&#34;hwm&#34;:100000,&#34;max_queue_size&#34;:100000,&#34;topic&#34;:&#34;kv@&#34;}&#39;</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">        </span>- --<span class="l">served-model-name</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w">        </span>- <span class="l">/models</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span>- <span class="l">qwen2-5-vl-7b-instruct</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">        </span>- --<span class="l">tensor-parallel-size</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">        </span>- <span class="s2">&#34;1&#34;</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">        </span>- --<span class="l">max-model-len</span><span class="w">
@@ -1822,7 +1821,7 @@ native sidecar:</p>
 </span></span></span><span class="line"><span class="cl"><span class="w">        </span>- --<span class="l">kv-transfer-config</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">        </span>- <span class="s1">&#39;{&#34;kv_connector&#34;:&#34;MooncakeConnector&#34;,&#34;kv_role&#34;:&#34;kv_consumer&#34;,&#34;kv_connector_extra_config&#34;:{&#34;mooncake_protocol&#34;:&#34;tcp&#34;}}&#39;</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">        </span>- --<span class="l">served-model-name</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w">        </span>- <span class="l">/models</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span>- <span class="l">qwen2-5-vl-7b-instruct</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">        </span>- --<span class="l">tensor-parallel-size</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">        </span>- <span class="s2">&#34;1&#34;</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">        </span>- --<span class="l">max-model-len</span><span class="w">
@@ -1848,6 +1847,7 @@ refused. See <a href="/gpustack-operator/main/docs/modules/model-deployment/enco
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-text" data-lang="text"><span class="line"><span class="cl">http://epd-arm3-epd-router.gpustack-bench.svc:8000</span></span></code></pre></div>
 </div>
 <p>Send a multimodal chat completion to that endpoint from inside the cluster.
+Set <code>&quot;model&quot;: &quot;qwen2-5-vl-7b-instruct&quot;</code> in <code>request.json</code>.
 Include a base64 PNG as an <code>image_url</code> part beside a text instruction to select the encoder:</p>
 <div class="code-block">
   <div class="code-toolbar"><span>bash</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
