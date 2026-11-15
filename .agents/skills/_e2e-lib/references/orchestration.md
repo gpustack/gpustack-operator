@@ -301,16 +301,19 @@ Mirrors the EKS run (`.claude/reports/2026-07-02-eks-e2e/run-log.md`, phases 6�
 
 1. From the summary, the lead picks the **fixable items** (real bugs — exclude test-design issues and
    awaiting-owner observations) and confirms with the user (`AskUserQuestion`) whether to fix now.
-2. On confirmation, ask again: **local packaging** vs **remote (SSH/RSYNC) packaging**. For remote,
-   **record the user's connection info** in the report (host, repo path, `PACKAGE_NAMESPACE`, tag — e.g.
-   `<user>@<builder-host>:<repo-path>`, `PACKAGE_NAMESPACE=<ns>`). **Run the remote build in a login
-   shell**: a non-interactive `ssh host '<cmd>'` does not source the profile, so `go`/the toolchain are
-   off PATH (`go: command not found`, `make package` exits 127/2) — wrap it as
-   `ssh host 'bash -lc "cd <repo> && … make package"'`.
+2. On confirmation, ask again: **local packaging** vs **remote (`build-load.sh` over SSH) packaging**.
+   Always package through `build-load.sh "$TAG"` — locally as `bash .agents/skills/_e2e-lib/scripts/build-load.sh "$TAG"`,
+   or remotely as `E2E_BUILDER_SSH=<user@builder-host> E2E_IMAGE_NAMESPACE=<ns> bash .agents/skills/_e2e-lib/scripts/build-load.sh "$TAG"`
+   (keep the builder host in the live command and redact it as `<builder-ssh>` in the report).
+   **Never run a raw `rsync ./` of the checkout root or strip `.git` into a side directory**: local ignored
+   directories (`.dist/`, `.terraform/`, `.gitnexus/`, `.claude/`) can exceed tens of gigabytes, whereas
+   `build-load.sh` syncs only `git ls-files -z --cached --others --exclude-standard` (carrying materialized
+   Git-LFS `*.so` files), initializes `.git` on first use, and passes `PACKAGE_CI=false` so iterative dev
+   builds run `make build` cleanly without failing on dirty trees.
 3. Fix loop, each step confirmed: edit code → `make lint` → commit with **`--signoff`** (conventional
    commit; fold fixes into their originating commit rather than a follow-up; add a test only when it guards
-   a real regression, per the project's testing conventions) → package (local `build-load.sh`, or remote
-   SSH login shell `bash -lc "… make package PACKAGE_PUSH=true"`) → deploy (`helm upgrade --reset-then-reuse-values --set image.tag=…` +
+   a real regression, per the project's testing conventions) → package via `build-load.sh "$TAG"` (local or
+   with `E2E_BUILDER_SSH` + `E2E_IMAGE_NAMESPACE`) → deploy (`helm upgrade --reset-then-reuse-values --set image.tag=…` +
    `rollout restart`) → retest the affected cases → append results to the report's fix-and-retest section.
 4. SSH / RSYNC / `git commit` / image push are outward-facing; none are on the allow-list, so each prompts.
    Only run teardown (Phase 8) after the loop ends.

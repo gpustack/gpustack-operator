@@ -2421,6 +2421,31 @@ func TestABoundEndpointNeedsTheIdentityTheWorkloadStates(t *testing.T) {
 			},
 			wantErr: "declares no container port",
 		},
+		{
+			name: "a native sidecar initContainer port satisfies the bound listener",
+			port: "8000",
+			mutate: func(pod *corev1.Pod) {
+				always := corev1.ContainerRestartPolicyAlways
+				pod.Spec.InitContainers = []corev1.Container{{
+					Name:          "routing-proxy",
+					RestartPolicy: &always,
+					Ports:         []corev1.ContainerPort{{Name: "http", ContainerPort: observationMemberPort}},
+				}}
+				pod.Spec.Containers[0].Ports = []corev1.ContainerPort{{Name: "http", ContainerPort: 8200}}
+			},
+		},
+		{
+			name: "a plain initContainer without RestartPolicy Always is not treated as a live listener",
+			port: "8000",
+			mutate: func(pod *corev1.Pod) {
+				pod.Spec.InitContainers = []corev1.Container{{
+					Name:  "bootstrap",
+					Ports: []corev1.ContainerPort{{Name: "http", ContainerPort: observationMemberPort}},
+				}}
+				pod.Spec.Containers[0].Ports = []corev1.ContainerPort{{Name: "http", ContainerPort: 8200}}
+			},
+			wantErr: "declares no container port",
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
@@ -4086,4 +4111,119 @@ func TestTheRestoreDecisionOverTheMembershipAndFreshnessBoundaries(t *testing.T)
 		assert.NotContains(t, leader.Labels, modelDeploymentLabelKeyEndpointEligible,
 			"an answer assembled from an old view restores nothing")
 	})
+}
+
+// TestSiblingReplicaTransitionRetainsUnchangedEligibleGroup pins that a newly scaled replica
+// transitioning phase or receiving a PodIP during router observation only invalidates that moved
+// group, leaving unaffected already-eligible groups retained so serving traffic does not drop.
+func TestSiblingReplicaTransitionRetainsUnchangedEligibleGroup(t *testing.T) {
+	t.Parallel()
+
+	fixture := newQualifiedGroupFixture(t)
+	sibling := observationLivePod("server-1-0", "", "pod-uid-sibling", false)
+	sibling.Labels[modelDeploymentLabelKeyInstance] = fixture.md.Name
+	sibling.Labels[modelDeploymentReplicaOrdinalLabel] = "1"
+	sibling.Labels[modelDeploymentMemberIndexLabel] = "0"
+	sibling.Annotations = map[string]string{
+		kueuepodconst.GroupTotalCountAnnotation: "1",
+	}
+	sibling.Status.Phase = corev1.PodPending
+	require.NoError(t, fixture.cli.Create(context.Background(), sibling))
+
+	siblingKey := modelDeploymentGroupKey{
+		Role:       "server",
+		Ordinal:    1,
+		Generation: modelDeploymentMembershipGeneration(sibling.UID),
+	}
+
+	now := time.Now()
+	r := &ModelDeploymentReconciler{
+		Client:    fixture.cli,
+		APIReader: fixture.cli,
+		Recorder:  ctrlrecord.NewFakeRecorder(64),
+		clock:     func() time.Time { return now },
+		servingViewFetch: func(context.Context, string) ([]byte, error) {
+			live := new(corev1.Pod)
+			require.NoError(t, fixture.cli.Get(context.Background(),
+				ctrlcli.ObjectKeyFromObject(sibling), live))
+			live.Status.Phase = corev1.PodRunning
+			live.Status.PodIP = "10.0.0.99"
+			require.NoError(t, fixture.cli.Status().Update(context.Background(), live))
+
+			return []byte(observerHealthyPayload), nil
+		},
+	}
+
+	observation := modelDeploymentPassObservation{
+		Serving: r.observeModelDeploymentServing(context.Background(), fixture.md),
+	}
+	assert.Equal(t, workercore.ModelDeploymentServingStateUnknown, observation.Serving.State)
+	assert.Contains(t, observation.Serving.Reason, "changed while the routers were being observed")
+
+	standingFact, standingObserved := observation.Serving.Groups[fixture.key]
+	require.True(t, standingObserved, "unchanged standing group must retain its observation entry")
+	assert.True(t, standingFact.Retained, "unchanged standing group must stay retained")
+
+	movedFact, movedObserved := observation.Serving.Groups[siblingKey]
+	if movedObserved {
+		assert.False(t, movedFact.Retained, "transitioning sibling group must not be retained")
+	}
+
+	fixture.write(t, r, observation)
+	assert.Equal(t, modelDeploymentEndpointEligibleValue, fixture.leaderLabel(t),
+		"standing eligible group must keep endpoint-eligible when a sibling replica transitions")
+}
+
+// TestReconcileRequeuesWithoutWithdrawingStandingGroupOnConcurrentGenerationBump verifies that
+// when ModelDeployment.Generation advances concurrently while router observation runs (for example,
+// a scaler patching spec.roles[*].replicas), Reconcile requeues before updating endpoint
+// eligibility rather than stripping endpoint-eligible from standing protected groups on nil Groups.
+func TestReconcileRequeuesWithoutWithdrawingStandingGroupOnConcurrentGenerationBump(t *testing.T) {
+	t.Parallel()
+
+	fixture := newQualifiedGroupFixture(t)
+	leaderLabelOfOrdinalZero := func() string {
+		for _, pod := range replicaPods(t, fixture.cli) {
+			if pod.Labels[modelDeploymentReplicaOrdinalLabel] == "0" &&
+				pod.Labels[modelDeploymentMemberIndexLabel] == "0" {
+				return pod.Labels[modelDeploymentLabelKeyEndpointEligible]
+			}
+		}
+		return ""
+	}
+	require.Equal(t, modelDeploymentEndpointEligibleValue, leaderLabelOfOrdinalZero())
+
+	now := time.Now()
+	bumped := false
+	r := &ModelDeploymentReconciler{
+		Client:            fixture.cli,
+		APIReader:         fixture.cli,
+		Recorder:          ctrlrecord.NewFakeRecorder(64),
+		clock:             func() time.Time { return now },
+		groupForwardFetch: boundProbeFetch,
+		servingViewFetch: func(context.Context, string) ([]byte, error) {
+			if !bumped {
+				bumped = true
+				live := new(workercore.ModelDeployment)
+				require.NoError(t, fixture.cli.Get(context.Background(),
+					ctrlcli.ObjectKeyFromObject(fixture.md), live))
+				live.Spec.Roles[0].Replicas = 2
+				live.Generation++
+				require.NoError(t, fixture.cli.Update(context.Background(), live))
+			}
+
+			return []byte(observerHealthyPayload), nil
+		},
+	}
+
+	res, err := reconcileModelDeploymentWith(t, r)
+	require.NoError(t, err)
+	assert.True(t, res.Requeue, "concurrent deployment generation bump during router observation must requeue")
+	assert.Equal(t, modelDeploymentEndpointEligibleValue, leaderLabelOfOrdinalZero(),
+		"requeued pass must preserve endpoint-eligible on standing protected group")
+
+	_, err = reconcileModelDeploymentWith(t, r)
+	require.NoError(t, err)
+	assert.Equal(t, modelDeploymentEndpointEligibleValue, leaderLabelOfOrdinalZero(),
+		"follow-up pass at the new generation must keep standing group eligible while scaling out")
 }

@@ -37,6 +37,7 @@ E2E_SHIM_DIR="$(cd "$(dirname "$0")/kubectl-shim" 2>/dev/null && pwd)"
 TAG="${1:?usage: build-load.sh <TAG>}"
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../../.." && pwd)"
 cd "$ROOT"
+PKG_CI="${E2E_PACKAGE_CI:-false}"
 
 # Quote one argument for the remote login shell, which may not be bash.
 shell_quote() { printf "'%s'" "${1//\'/\'\\\'\'}"; }
@@ -52,7 +53,13 @@ if [ -n "${E2E_BUILDER_SSH:-}" ]; then
   # shellcheck disable=SC1091 # ROOT identifies the checkout containing this script.
   source "${ROOT}/hack/lib/version.sh"
   ROOT_DIR="$ROOT" gpustack::version::get_version_vars
-  bssh() { ssh -o StrictHostKeyChecking=yes -o BatchMode=yes "$E2E_BUILDER_SSH" "$@"; }
+  SSH_HOST_KEY_CHECKING="${E2E_SSH_STRICT_HOST_KEY_CHECKING:-accept-new}"
+  case "$SSH_HOST_KEY_CHECKING" in
+    yes|accept-new|no) ;;
+    *) echo "invalid E2E_SSH_STRICT_HOST_KEY_CHECKING: ${SSH_HOST_KEY_CHECKING}"; exit 1 ;;
+  esac
+  bssh() { ssh -o "StrictHostKeyChecking=${SSH_HOST_KEY_CHECKING}" -o BatchMode=yes "$E2E_BUILDER_SSH" "$@"; }
+  RSYNC_RSH="ssh -o StrictHostKeyChecking=${SSH_HOST_KEY_CHECKING} -o BatchMode=yes"
   # SSH joins arguments for the remote shell; preserve the whole bash command as one argument.
   blogin() { bssh "bash -c $(shell_quote "$1")"; }
   QDIR="$(shell_quote "$DIR")"
@@ -61,10 +68,13 @@ if [ -n "${E2E_BUILDER_SSH:-}" ]; then
   QIMAGE="$(shell_quote "$IMAGE")"
   QVERSION="$(shell_quote "$GIT_VERSION")"
   QCOMMIT="$(shell_quote "$GIT_COMMIT")"
+  QPKG_CI="$(shell_quote "$PKG_CI")"
 
   echo "== remote build on the configured builder =="
   echo "commit ${SHA}  ->  ${IMAGE}  (repo dir ${DIR})"
   bssh true || { echo "builder unreachable over SSH"; exit 1; }
+  bssh "mkdir -p ${QDIR} && cd ${QDIR} && { [ -d .git ] || git init -q; }" || {
+    echo "initializing ${DIR} on the builder failed"; exit 1; }
 
   # Sync this checkout. The builder is not a clone that follows this branch:
   # a bare `make package` there builds whatever it happens to have checked out,
@@ -100,7 +110,7 @@ if [ -n "${E2E_BUILDER_SSH:-}" ]; then
     if [ -e "$file" ] || [ -L "$file" ]; then printf '%s\0' "$file"; fi
   done > "$FILES"
   # Keep remote-only state and ignored local files out of the sync. Apply deletions explicitly.
-  rsync -az --protect-args --from0 --files-from="$FILES" --filter='P .git' ./ "${E2E_BUILDER_SSH}:${DIR}/" || {
+  rsync -az -e "$RSYNC_RSH" --protect-args --from0 --files-from="$FILES" --filter='P .git' ./ "${E2E_BUILDER_SSH}:${DIR}/" || {
     echo "rsync to the builder failed"; rm -f "$FILES"; exit 1; }
   rm -f "$FILES"
 
@@ -108,7 +118,7 @@ if [ -n "${E2E_BUILDER_SSH:-}" ]; then
   # build (a stale .go file in a package still compiles). rsync --delete cannot
   # be used here, so the deletions are applied explicitly, from the diff against
   # whatever the builder currently has checked out.
-  PREV="$(bssh "cd ${QDIR} && git rev-parse HEAD 2>/dev/null" | tr -d '\r')"
+  PREV="$(bssh "cd ${QDIR} && git rev-parse --verify HEAD 2>/dev/null || true" | tr -d '\r')"
   if [ -n "$PREV" ] && git cat-file -e "${PREV}^{commit}" 2>/dev/null; then
     git diff --name-only -z --diff-filter=D "$PREV" HEAD > "$LOCAL_TMP/stale"
     git ls-files --deleted -z >> "$LOCAL_TMP/stale"
@@ -126,7 +136,7 @@ if [ -n "${E2E_BUILDER_SSH:-}" ]; then
   git bundle create "$BUNDLE" HEAD >/dev/null 2>&1 || { echo "git bundle failed"; exit 1; }
   REMOTE_BUNDLE="$(bssh 'mktemp /tmp/gpustack-e2e-head.XXXXXX')"
   [[ "$REMOTE_BUNDLE" == /tmp/gpustack-e2e-head.* ]] || { echo "invalid remote bundle path"; exit 1; }
-  scp -q -o StrictHostKeyChecking=yes -o BatchMode=yes "$BUNDLE" "${E2E_BUILDER_SSH}:${REMOTE_BUNDLE}" || exit 1
+  scp -q -o "StrictHostKeyChecking=${SSH_HOST_KEY_CHECKING}" -o BatchMode=yes "$BUNDLE" "${E2E_BUILDER_SSH}:${REMOTE_BUNDLE}" || exit 1
   rm -f "$BUNDLE"
   # fetch + update-ref + symbolic-ref + a MIXED reset: every one of these moves
   # refs or the index only. None of them writes a working-tree file, which is
@@ -143,10 +153,12 @@ if [ -n "${E2E_BUILDER_SSH:-}" ]; then
   echo
   echo "== remote package + push =="
   # hack/lib/init.sh discovers standard Go paths without depending on login profiles.
+  # PACKAGE_CI defaults to false for dev/E2E packaging so Docker runs `make build` rather than
+  # repeating `make ci` (which rejects dirty trees and re-runs the full lint/test suite).
   # PACKAGE_NAMESPACE retags only what this build produces; the operator's own
   # GPUSTACK_CONTAINER_NAMESPACE is deliberately left alone so the images the
   # operator installs still resolve upstream.
-  blogin "cd ${QDIR} && VERSION=${QVERSION} COMMIT=${QCOMMIT} PACKAGE_TAG=${QTAG} PACKAGE_PUSH=true PACKAGE_NAMESPACE=${QNSP} make package" || {
+  blogin "cd ${QDIR} && VERSION=${QVERSION} COMMIT=${QCOMMIT} PACKAGE_CI=${QPKG_CI} PACKAGE_TAG=${QTAG} PACKAGE_PUSH=true PACKAGE_NAMESPACE=${QNSP} make package" || {
     echo "remote package failed"; exit 1; }
 
   echo
@@ -176,7 +188,7 @@ IMAGE="${NSP}/gpustack-operator:${TAG}"
 
 echo "== build ${IMAGE} (local only, no push) =="
 # Explain build failures before any runtime import can use an older image of the same tag.
-if ! PACKAGE_TAG="$TAG" PACKAGE_NAMESPACE="$NSP" PACKAGE_PUSH=false make package; then
+if ! PACKAGE_CI="$PKG_CI" PACKAGE_TAG="$TAG" PACKAGE_NAMESPACE="$NSP" PACKAGE_PUSH=false make package; then
   echo
   echo "build FAILED — no ${IMAGE} was produced, so nothing was loaded."
   exit 1

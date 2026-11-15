@@ -3428,3 +3428,56 @@ func TestRefuseModelDeploymentRemoval_WorkloadListErrorFallsThroughToRetirementA
 	assert.Equal(t, int32(1), persisted.ReplicaOrdinal)
 	assert.Equal(t, []string{"pending-1"}, persisted.TargetMemberUIDs)
 }
+
+func TestAdoptsModelDeploymentRetirement_PairReplica(t *testing.T) {
+	md := healthPairDeployment(workercore.ModelDeploymentEngineSGLang, 1, 1)
+	md.Spec.Roles[0].Replicas = 2
+	md.Spec.Roles[1].Replicas = 1
+
+	p0 := healthPairPod("prefill", 0, 0, healthBool(true), "uid-p0", "8998")
+	p1 := healthPairPod("prefill", 1, 0, healthBool(true), "uid-p1", "8998")
+	d0 := healthPairPod("decode", 0, 0, healthBool(true), "uid-d0", "")
+	p0.Labels[modelDeploymentLabelKeyEndpointEligible] = modelDeploymentEndpointEligibleValue
+	p0.Annotations[modelDeploymentAnnotationKeyEndpointEligibleGeneration] = "uid-p0"
+	d0.Labels[modelDeploymentLabelKeyEndpointEligible] = modelDeploymentEndpointEligibleValue
+	d0.Annotations[modelDeploymentAnnotationKeyEndpointEligibleGeneration] = "uid-d0"
+	delete(p1.Labels, modelDeploymentLabelKeyEndpointEligible)
+
+	reservation := &workercore.ModelDeploymentRetirementStatus{
+		State:              workercore.ModelDeploymentRetirementStateDraining,
+		RoleName:           "prefill",
+		ReplicaOrdinal:     1,
+		ObservedGeneration: md.Generation,
+		TargetMemberUIDs:   []string{"uid-p1"},
+	}
+	md.Status.Retirement = reservation.DeepCopy()
+
+	pods := stampHealthGroupTotals(md, []core.Pod{p0, p1, d0})
+	storedPods := make([]ctrlcli.Object, 0, len(pods))
+	for i := range pods {
+		storedPods = append(storedPods, pods[i].DeepCopy())
+	}
+	cli := newModelDeploymentClient(append([]ctrlcli.Object{md.DeepCopy()}, storedPods...)...)
+	r := holdReconciler(cli, &scriptedDrainReader{}, time.Now())
+	fetch := &healthPairFetch{
+		prefillHosts: map[string]bool{
+			healthPairHost("prefill", 0, 0): true,
+			healthPairHost("prefill", 1, 0): true,
+		},
+	}
+	r.groupForwardFetch = boundProbeFetch
+	r.groupForwardPairFetch = fetch.fetch
+
+	plan := &modelDeploymentRetirementPlan{
+		Reservation: reservation.DeepCopy(),
+		Target: modelDeploymentReplicaView{
+			Role: "prefill", Ordinal: 1, Seated: true,
+			Members: []*core.Pod{pods[1].DeepCopy()},
+		},
+		held: sets.New[types.UID]("uid-p1"),
+	}
+
+	adopted, retry := r.adoptsModelDeploymentRetirement(context.Background(), md, plan, pods)
+	assert.True(t, adopted, "a healthy withdrawing prefill replica should be adopted via pair probe when spec scales back up")
+	assert.False(t, retry)
+}

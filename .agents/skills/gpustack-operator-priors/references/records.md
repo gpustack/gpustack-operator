@@ -1,34 +1,68 @@
 # Capacity prior provenance records
 
 This file records provenance for `pkg/worker/scaling/priors/priors.yaml`. The catalog contains
-only profiles (`role`, `model`, `quantization`, `engine`, `hardware`, `topology` and `points[]`);
+only mode-keyed profiles with shared identity, stage or replica shapes, and `points[]`;
 this ledger records upstream URLs, capture dates, SHA-256 checksums, import alignment rules, and
 retirements or refusals. Do not commit upstream snapshots: keep `gen/priors/snapshots/` out of git
 and put raw downloads in a temporary directory. Include a ledger entry with every catalog change.
 
 ## Alignment rules applied to accepted sources
 
-The 2026-10-27 InferenceX imports below were qualified under these rules:
+The 2026-11-14 InferenceX sync was qualified under these rules:
 
 - **Canonical model identity.** Every profile's `model` is the verified Hugging Face
   `<org>/<repo>` repository. Source-internal slugs (`dsr1`, `qwen3.5`, `llama70b`), ModelScope
   mirror orgs (`ZhipuAI/`, `MiniMax/`, `LLM-Research/`) and vendor-repackaged checkpoints
   (`amd/DeepSeek-R1-0528-MXFP4`, `nvidia/Llama-3.3-70B-Instruct-FP8`) adapt to the canonical
   repository before a profile is recorded; the repackaging shows up in the quantization token.
-- **Throughput denominator.** Per-GPU rates multiply by `gpusPerReplica` to reconstruct one
-  scaling replica (`PerGPU * gpusPerReplica`). Aggregated rows whose total-to-per-GPU ratio
-  contradicts the declared GPU count are refused.
+  The slug `minimaxm2.5` maps to `MiniMaxAI/MiniMax-M2.5`.
+- **Aggregated mode.** Accept `disagg: false` with `prefill_num_workers <= 1`. Require at most
+  2% error between system throughput and per-GPU throughput times GPU count. Rates are per replica.
+  Multi-node shapes, including 16, 32 and 64 GPUs, are allowed.
+- **Disaggregated mode.** Accept `disagg: true` only with positive stage worker counts and
+  integer GPUs per stage worker. Require at most 2% system throughput conservation error.
+  Keep each sweep's worker cohort fixed. Divide both worker counts and system rates by their
+  greatest common divisor to represent one minimal coupled unit.
+- **Engine families.** Map `dynamo-vllm`, `llmd-vllm` and `vllm-disagg` to `vllm`; map
+  `dynamo-sglang` and `mori-sglang` to `sglang`.
 - **Per-token ITL normalization.** The InferenceX collector records gaps between streamed
   messages, which can bundle more than one token. Chunk-gap percentiles divide by the measured
   mean chunk-to-token ratio (`mean_itl`/`mean_tpot`), falling back to *TPOT* quantiles when
   *ITL* is absent, to become per-token milliseconds.
 - **Quantile interpolation.** `P90`/`P99` bracketing quantiles interpolate linearly to the
   configured quantile before qualification.
-- **Topology bound.** Single-node sweeps only: `gpusPerReplica <= 8`.
-- **Role.** Non-disaggregated `Server` points only; disaggregated whole-system totals are not
-  assignable to one replica.
+## Active Sources
 
-## Accepted sources — InferenceX, captured 2026-10-27
+### 2026-11-14 — Sync InferenceX aggregated and disaggregated benchmarks
+
+This sync supersedes the 2026-10-27 record below. It retired one previously published shape:
+`aggregated / deepseek-ai/DeepSeek-V4-Pro / fp4 / sglang / nvidia-b300` with
+`gpusPerReplica=4, tensorParallel=4, expertParallel=1`. See the [retirement log](#retirement-log).
+It added 244 shapes: 64 aggregated and 180 disaggregated. The resulting catalog has 385 profiles:
+205 aggregated and 180 disaggregated. Counts below were read from the catalog.
+The benchmark URLs use `https://inferencex.semianalysis.com/api/v1/benchmarks?model=<query ID>`.
+The downloaded availability file from https://inferencex.semianalysis.com/api/v1/availability has
+SHA-256 `43bc03ac251697770697addc3e1c2b1ff64e78e444f2ed689fec6ed73d35ef23`.
+
+| Query ID | Rows | Aggregated | Disaggregated | SHA-256 |
+|---|---:|---:|---:|---|
+| `DeepSeek-R1-0528` | 1333 | 16 | 50 | `00aa63c54f0dcb71d8b3427891c74f669c800e73671f9639374f91f2127e655f` |
+| `DeepSeek-V4-Pro` | 935 | 18 | 11 | `c59dbd3c1cc7a10632b7eb1207f4619ed31527ac8e106490e1a367cf08026d40` |
+| `GLM-5` | 512 | 10 | 12 | `b19824dbb7a0fa07b731a99adf8e11638c2cc578bf76ee0bcbb8f23cecbfa4c3` |
+| `GLM-5.2` | 154 | 0 | 0 | `381da55b7b68b5734b2f87cdee45764ddf7a08f03cff16817f1c478c3e192bde` |
+| `gpt-oss-120b` | 439 | 22 | 0 | `52f3415e51a8be80ebf8e93673a444d967f1382090e41849fcb92ea26bcb7d95` |
+| `Kimi-K2.5` | 381 | 18 | 10 | `f39d8be9d7c7ce81eb4ad04ec513b9a23cb995ac17735394a0bcf32d9775d6a4` |
+| `Kimi-K3` | 114 | 1 | 0 | `855ffc967496da61ba888931e10d6797b8e79bff9f7d329253b9a10c37abc31a` |
+| `Llama-3.3-70B-Instruct-FP8` | 681 | 31 | 0 | `d2ce48fdbd84936994d68bb28413f0e842da3b01a2c7a0958e4041699dc19792` |
+| `MiniMax-M2.5` | 704 | 35 | 65 | `2d24657c2e27b03bf1d80c6ce8d4ea32296f7510e3b17f7ebbb576e3b509d85c` |
+| `MiniMax-M3` | 1247 | 32 | 22 | `72b3cb6446398b5c4698679b28778a39d671774d040806607c2a6d8469466197` |
+| `Qwen-3.5-397B-A17B` | 1034 | 22 | 10 | `a449e9529e7996eda73f867c0de1f4fa112e27985678595e487eeefe9fbaeff5` |
+| `Qwen3.8-Flash-Next` | 77 | 0 | 0 | `30c7befeb0cb61adf6c7aa53ba81ba09a7ee402d3b55c3d10477ec0457d10a2c` |
+
+All rows in the two zero-profile datasets used speculative decoding or unsupported engines.
+Checksums were computed from the downloaded JSON files with `shasum -a 256`.
+
+## Historical sources — InferenceX, captured 2026-10-27
 
 These eleven upstream datasets are licensed under `Apache-2.0`. Their source URLs follow the
 pattern `https://inferencex.semianalysis.com/api/v1/benchmarks?model=<query id>` and appear below.
@@ -76,10 +110,11 @@ source; any future import must pin the actual data snapshot and pass the same qu
 
 ## Retirement log
 
-Retirements remove profiles from `priors.yaml` through `go run ./gen/priors --retire`, selecting
-by `--role`, `--model`, `--quantization`, `--engine`, `--hardware` and optional `--tp` / `--gpus`,
-all normalized by the same identity rules, and are logged here.
+Use `go run ./gen/priors --retire` to remove profiles from `priors.yaml`. Select them by
+`--mode`, `--model`, `--quantization`, `--engine`, `--hardware` or `--tp` / `--ep` / `--gpus`.
+All selectors use the same identity rules. This table records those retirements and shapes
+removed because they are absent from a full upstream refresh.
 
 | Date | Removed | Reason |
 |---|---|---|
-| — | — | — |
+| 2026-11-14 | `aggregated / deepseek-ai/DeepSeek-V4-Pro / fp4 / sglang / nvidia-b300` (`gpus=4, tp=4, ep=1`) | The refreshed `DeepSeek-V4-Pro` snapshot (SHA-256 `c59dbd3c1cc7a10632b7eb1207f4619ed31527ac8e106490e1a367cf08026d40`) no longer contains a qualifying 4-GPU `TP=4, EP=1` sweep for this configuration. It retains the `gpus=64, tp=8, ep=8` sweep. |

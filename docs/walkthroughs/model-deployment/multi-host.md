@@ -75,7 +75,7 @@ metadata:
   namespace: gpustack-elastic
 spec:
   model:
-    name: /models
+    name: deepseek-v2-lite-chat
     artifactRef:
       name: deepseek-v2-lite-chat
   engine:

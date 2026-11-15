@@ -158,10 +158,12 @@ func TestEmbeddedCatalogMatchesOnTheLaunchArguments(t *testing.T) {
 
 	profile := catalog.Profiles[0]
 	request := Request{
-		Role:          profile.Role,
+		Mode:          profile.Mode,
 		Identity:      profile.Identity,
 		ServingConfig: profile.ServingConfig,
 		Topology:      profile.Topology,
+		Prefill:       profile.Prefill,
+		Decode:        profile.Decode,
 		Constraints: Constraints{
 			TTFTTargetMilliseconds: 2000,
 			ITLTargetMilliseconds:  100,
@@ -198,7 +200,7 @@ func TestEmbeddedCatalogRefusesTheEffectiveArgumentsAsLaunchArguments(t *testing
 	}
 
 	request := Request{
-		Role:     profile.Role,
+		Mode:     profile.Mode,
 		Identity: profile.Identity,
 		ServingConfig: ServingConfig{
 			Router:              profile.ServingConfig.Router,
@@ -209,6 +211,8 @@ func TestEmbeddedCatalogRefusesTheEffectiveArgumentsAsLaunchArguments(t *testing
 			LaunchParameters:    slices.Clone(profile.ServingConfig.EffectiveLaunchParameters),
 		},
 		Topology: profile.Topology,
+		Prefill:  profile.Prefill,
+		Decode:   profile.Decode,
 		Constraints: Constraints{
 			TTFTTargetMilliseconds: 2000,
 			ITLTargetMilliseconds:  100,

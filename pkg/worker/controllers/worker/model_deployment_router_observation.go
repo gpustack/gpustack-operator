@@ -562,15 +562,36 @@ func modelDeploymentDeclaredListenerOf(pod *corev1.Pod, urlPort string) int32 {
 	if err != nil {
 		return 0
 	}
-	for i := range pod.Spec.Containers {
-		for _, declared := range pod.Spec.Containers[i].Ports {
+	var matched int32
+	forEachModelDeploymentServingContainer(pod, func(c *corev1.Container) bool {
+		for _, declared := range c.Ports {
 			if int(declared.ContainerPort) == port {
-				return declared.ContainerPort
+				matched = declared.ContainerPort
+				return false
+			}
+		}
+		return true
+	})
+
+	return matched
+}
+
+// forEachModelDeploymentServingContainer visits containers that can host a live serving
+// listener: native sidecars in InitContainers (RestartPolicy Always) and regular Containers.
+func forEachModelDeploymentServingContainer(pod *corev1.Pod, visit func(*corev1.Container) bool) {
+	for i := range pod.Spec.InitContainers {
+		c := &pod.Spec.InitContainers[i]
+		if c.RestartPolicy != nil && *c.RestartPolicy == corev1.ContainerRestartPolicyAlways {
+			if !visit(c) {
+				return
 			}
 		}
 	}
-
-	return 0
+	for i := range pod.Spec.Containers {
+		if !visit(&pod.Spec.Containers[i]) {
+			return
+		}
+	}
 }
 
 // recentDispatchFromLastJob reads the journal field the shipped llm-d observer writes.
@@ -649,6 +670,10 @@ type ServingAnswer struct {
 	// answer is the freshness of its oldest evidence, so this is the instant the restore decision
 	// compares against the freshness window.
 	CollectedAt time.Time
+	// deploymentChanged records that the deployment object itself moved under observation, so a
+	// Reconcile pass can requeue cleanly against the current generation instead of stripping
+	// standing eligibility labels on a stale spec snapshot.
+	deploymentChanged bool
 }
 
 // modelDeploymentGroupKey identifies one group: the role it belongs to, the replica ordinal it
@@ -985,8 +1010,9 @@ func (r *ModelDeploymentReconciler) observeModelDeploymentServing(
 	observations, live, failure := r.collectModelDeploymentRouterObservationsWithMembers(ctx, md)
 	if failure.reason != "" {
 		answer := ServingAnswer{
-			State:  workercore.ModelDeploymentServingStateUnknown,
-			Reason: failure.reason,
+			State:             workercore.ModelDeploymentServingStateUnknown,
+			Reason:            failure.reason,
+			deploymentChanged: failure.deploymentChanged,
 		}
 		if !failure.retainable || len(live) == 0 {
 			// NO FRESH MEMBERSHIP, OR THE FAILURE PROVED THAT SOMETHING MOVED. There is no fact to
@@ -1001,6 +1027,12 @@ func (r *ModelDeploymentReconciler) observeModelDeploymentServing(
 		// on it names the group's current complete membership generation.
 		answer.CollectedAt = failure.readAt
 		answer.Groups, answer.Members = modelDeploymentServingGroups(md, live, nil, answer)
+		for key, fact := range answer.Groups {
+			if failure.movedGroups[key] {
+				fact.Retained = false
+				answer.Groups[key] = fact
+			}
+		}
 
 		return answer
 	}
@@ -1320,8 +1352,12 @@ func (r *ModelDeploymentReconciler) collectModelDeploymentRouterObservations(
 // is computed from a membership read that actually happened.
 type modelDeploymentCollectionFailure struct {
 	reason string
-	// retainable says the failure proved nothing about the group's identity.
+	// retainable says the failure proved nothing about unaffected groups' identity.
 	retainable bool
+	// deploymentChanged records that the deployment object itself moved under observation.
+	deploymentChanged bool
+	// movedGroups lists the groups whose own members changed between the opening and closing guards.
+	movedGroups map[modelDeploymentGroupKey]bool
 	// readAt is when the fresh membership was read. It is the instant a failure-path answer
 	// carries, because that membership is the only evidence such an answer holds.
 	readAt time.Time
@@ -1417,6 +1453,7 @@ func (r *ModelDeploymentReconciler) collectModelDeploymentRouterObservationsWith
 					"generation %d; the views would describe an object this pass was not asked about",
 				md.UID, md.Generation, before.deploymentUID, before.generation,
 			),
+			deploymentChanged: true,
 		}
 	}
 
@@ -1541,7 +1578,8 @@ func (r *ModelDeploymentReconciler) collectModelDeploymentRouterObservationsWith
 					"the deployment changed while the routers were being observed; the collected " +
 						"views describe an earlier snapshot and cannot confirm absence",
 				),
-				readAt: readAt,
+				deploymentChanged: true,
+				readAt:            readAt,
 			}
 		}
 		if before.membersMoved(after) {
@@ -1550,7 +1588,9 @@ func (r *ModelDeploymentReconciler) collectModelDeploymentRouterObservationsWith
 					"the membership changed while the routers were being observed; the collected " +
 						"views describe an earlier snapshot and cannot confirm absence",
 				),
-				readAt: readAt,
+				retainable:  true,
+				movedGroups: movedGroupKeys(before, after),
+				readAt:      readAt,
 			}
 		}
 
@@ -1562,13 +1602,25 @@ func (r *ModelDeploymentReconciler) collectModelDeploymentRouterObservationsWith
 			readAt:     readAt,
 		}
 	}
-	if before.identityMoved(after) {
+	if before.deploymentMoved(after) {
 		return nil, live, modelDeploymentCollectionFailure{
 			reason: fmt.Sprintf(
 				"the deployment or its membership changed while the routers were being observed; " +
 					"the collected views describe an earlier snapshot and cannot confirm absence",
 			),
-			readAt: readAt,
+			deploymentChanged: true,
+			readAt:            readAt,
+		}
+	}
+	if before.membersMoved(after) {
+		return nil, live, modelDeploymentCollectionFailure{
+			reason: fmt.Sprintf(
+				"the deployment or its membership changed while the routers were being observed; " +
+					"the collected views describe an earlier snapshot and cannot confirm absence",
+			),
+			retainable:  true,
+			movedGroups: movedGroupKeys(before, after),
+			readAt:      readAt,
 		}
 	}
 	if before.routerFacts != after.routerFacts {
@@ -1627,6 +1679,7 @@ type modelDeploymentObservationGuard struct {
 	// separate strings rather than folded into memberUIDs so a failure names which of the two
 	// changed, and memberUIDs keeps answering the plain membership question.
 	memberFacts string
+	groupFacts  map[modelDeploymentGroupKey]string
 	routerFacts string
 	// read records which of the facts above this snapshot actually read.
 	read modelDeploymentGuardRead
@@ -1728,6 +1781,20 @@ func (r *ModelDeploymentReconciler) snapshotModelDeploymentObservationGuard(
 	// fails. A member that left under the collection is a change the collection already proved.
 	guard.memberUIDs = strings.Join(memberUIDs, ",")
 	guard.memberFacts = strings.Join(memberFacts, ";")
+	guard.groupFacts = make(map[modelDeploymentGroupKey]string)
+	for _, view := range modelDeploymentGroupPods(owned, true) {
+		facts := make([]string, 0, len(view.Members))
+		for _, member := range view.Members {
+			facts = append(facts, modelDeploymentMemberFact(member))
+		}
+		sort.Strings(facts)
+		key := modelDeploymentGroupKey{
+			Role:       view.Role,
+			Ordinal:    view.Ordinal,
+			Generation: modelDeploymentGenerationOf(view),
+		}
+		guard.groupFacts[key] = strings.Join(facts, ";")
+	}
 	guard.read.members = true
 
 	// The Router processes are read under the same snapshot for the same reason: a process that
@@ -1760,16 +1827,6 @@ func (r *ModelDeploymentReconciler) snapshotModelDeploymentObservationGuard(
 	return guard, modelDeploymentGuardError{}
 }
 
-// identityMoved reports whether the deployment's own identity or the membership moved between two
-// bookends.
-//
-// THE ROUTER PROCESSES ARE NOT PART OF IT. A collection whose routers were reparented or replaced
-// describes a different set of processes, but the group's members did not move, and the retention
-// is proved by the fresh membership rather than by the view.
-func (g modelDeploymentObservationGuard) identityMoved(other modelDeploymentObservationGuard) bool {
-	return g.deploymentMoved(other) || g.membersMoved(other)
-}
-
 // deploymentMoved reports whether the deployment's own identity moved between two snapshots.
 //
 // ONLY THE FACTS BOTH SNAPSHOTS READ. A snapshot that failed before the deployment was read knows
@@ -1795,6 +1852,26 @@ func (g modelDeploymentObservationGuard) membersMoved(other modelDeploymentObser
 	}
 
 	return g.memberUIDs != other.memberUIDs || g.memberFacts != other.memberFacts
+}
+
+// movedGroupKeys identifies every group whose member set or member state moved between two
+// observation bookends so unaffected groups can retain standing eligibility while moved groups do not.
+func movedGroupKeys(
+	before, after modelDeploymentObservationGuard,
+) map[modelDeploymentGroupKey]bool {
+	moved := make(map[modelDeploymentGroupKey]bool)
+	for key, beforeFact := range before.groupFacts {
+		if afterFact, ok := after.groupFacts[key]; !ok || afterFact != beforeFact {
+			moved[key] = true
+		}
+	}
+	for key := range after.groupFacts {
+		if _, ok := before.groupFacts[key]; !ok {
+			moved[key] = true
+		}
+	}
+
+	return moved
 }
 
 // matchesCaller reports whether the first uncached read is still the object the caller passed in.
@@ -1827,12 +1904,13 @@ func modelDeploymentMemberFact(pod *corev1.Pod) string {
 	if ref := meta.GetControllerOf(pod); ref != nil {
 		owner = ref.APIVersion + "/" + ref.Kind + "/" + ref.Name + "/" + string(ref.UID)
 	}
-	listeners := make([]string, 0, len(pod.Spec.Containers))
-	for i := range pod.Spec.Containers {
-		for _, declared := range pod.Spec.Containers[i].Ports {
+	listeners := make([]string, 0, len(pod.Spec.InitContainers)+len(pod.Spec.Containers))
+	forEachModelDeploymentServingContainer(pod, func(c *corev1.Container) bool {
+		for _, declared := range c.Ports {
 			listeners = append(listeners, strconv.Itoa(int(declared.ContainerPort)))
 		}
-	}
+		return true
+	})
 	sort.Strings(listeners)
 	terminating := pod.DeletionTimestamp != nil
 
@@ -1846,6 +1924,7 @@ func modelDeploymentMemberFact(pod *corev1.Pod) string {
 		string(pod.Status.Phase),
 		strconv.FormatBool(terminating),
 		strconv.FormatBool(podIsReady(pod)),
+		strconv.FormatInt(modelDeploymentMemberRestartCount(pod), 10),
 		pod.Labels[modelDeploymentLabelKeyEndpointEligible],
 		pod.Annotations[modelDeploymentAnnotationKeyEndpointEligibleGeneration],
 	}, "|")

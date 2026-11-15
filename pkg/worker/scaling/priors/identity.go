@@ -1,6 +1,8 @@
 package priors
 
 import (
+	"slices"
+	"sort"
 	"strings"
 
 	"gpustack.ai/gpustack/pkg/nodefeature"
@@ -88,6 +90,7 @@ var canonicalModelNames = map[string]string{
 	"kimik2.6":    "moonshotai/Kimi-K2.5",
 	"kimik3":      "moonshotai/Kimi-K3",
 	"llama70b":    "meta-llama/Llama-3.3-70B-Instruct",
+	"minimaxm2.5": "MiniMaxAI/MiniMax-M2.5",
 	"minimaxm3":   "MiniMaxAI/MiniMax-M3",
 	"qwen3.5":     "Qwen/Qwen3.5-397B-A17B",
 	"qwen3.8next": "Qwen/Qwen3.8-Flash-Next",
@@ -300,4 +303,126 @@ func normalizeSpelling(spelling string) string {
 	spelling = strings.ToLower(strings.TrimSpace(spelling))
 	spelling = strings.ReplaceAll(spelling, "_", "-")
 	return strings.Join(strings.Fields(spelling), " ")
+}
+
+// MergeServingConfig merges a stage serving overlay onto a profile's shared serving configuration.
+//
+// LaunchParameters concatenates base tokens followed by overlay tokens without deduplicating by flag
+// name: launchParameterConflicts parses both token slices through ParseLaunchParameters and folds
+// repeated flags with last-write-wins semantics so stage flags override shared flags, while raw
+// concatenation keeps malformed tokens in either slice visible to ParseLaunchParameters.
+func MergeServingConfig(base, overlay ServingConfig) ServingConfig {
+	merged := ServingConfig{
+		Router:              base.Router,
+		KVCacheDType:        base.KVCacheDType,
+		Offload:             base.Offload,
+		PrefixCaching:       base.PrefixCaching,
+		SpeculativeDecoding: base.SpeculativeDecoding,
+		EngineEnvComplete:   base.EngineEnvComplete || overlay.EngineEnvComplete,
+	}
+	if overlay.Router != "" {
+		merged.Router = overlay.Router
+	}
+	if overlay.KVCacheDType != "" {
+		merged.KVCacheDType = overlay.KVCacheDType
+	}
+	if overlay.Offload != "" {
+		merged.Offload = overlay.Offload
+	}
+	if overlay.PrefixCaching != "" {
+		merged.PrefixCaching = overlay.PrefixCaching
+	}
+	if overlay.SpeculativeDecoding != "" {
+		merged.SpeculativeDecoding = overlay.SpeculativeDecoding
+	}
+	if len(base.LaunchParameters) > 0 || len(overlay.LaunchParameters) > 0 {
+		merged.LaunchParameters = append(slices.Clone(base.LaunchParameters), overlay.LaunchParameters...)
+	}
+	if len(base.EffectiveLaunchParameters) > 0 || len(overlay.EffectiveLaunchParameters) > 0 {
+		merged.EffectiveLaunchParameters = append(
+			slices.Clone(base.EffectiveLaunchParameters), overlay.EffectiveLaunchParameters...,
+		)
+	}
+	if len(base.EffectiveDefaults) > 0 || len(overlay.EffectiveDefaults) > 0 {
+		defaults := make(map[string]string, len(base.EffectiveDefaults)+len(overlay.EffectiveDefaults))
+		for k, v := range base.EffectiveDefaults {
+			defaults[k] = v
+		}
+		for k, v := range overlay.EffectiveDefaults {
+			defaults[k] = v
+		}
+		merged.EffectiveDefaults = defaults
+	}
+	if len(base.EngineEnv) > 0 || len(overlay.EngineEnv) > 0 {
+		merged.EngineEnv = mergeEngineEnvEntries(base.EngineEnv, overlay.EngineEnv)
+	}
+	return merged
+}
+
+type engineEnvLayer struct {
+	valid     map[string]string
+	conflicts map[string]bool
+	preserved []string
+}
+
+func collectEngineEnvLayer(entries []string) engineEnvLayer {
+	layer := engineEnvLayer{
+		valid:     make(map[string]string, len(entries)),
+		conflicts: make(map[string]bool),
+	}
+	for _, entry := range entries {
+		key, val, ok := strings.Cut(entry, "=")
+		if !ok || key == "" {
+			layer.preserved = append(layer.preserved, entry)
+			continue
+		}
+		if layer.conflicts[key] {
+			layer.preserved = append(layer.preserved, entry)
+			continue
+		}
+		if prev, seen := layer.valid[key]; seen {
+			if prev != val {
+				layer.conflicts[key] = true
+				layer.preserved = append(layer.preserved, key+"="+prev, entry)
+				delete(layer.valid, key)
+			}
+			continue
+		}
+		layer.valid[key] = val
+	}
+	return layer
+}
+
+// mergeEngineEnvEntries overlays valid stage KEY=VAL entries onto shared KEY=VAL entries.
+//
+// Malformed entries and intra-layer conflicting duplicate keys in either base or overlay are
+// preserved verbatim and never masked by the other layer, because a contradictory or malformed
+// catalog layer is invalid evidence that downstream environment matching must refuse rather than
+// silently repair via stage override.
+func mergeEngineEnvEntries(base, overlay []string) []string {
+	if len(overlay) == 0 {
+		return slices.Clone(base)
+	}
+	baseLayer := collectEngineEnvLayer(base)
+	overlayLayer := collectEngineEnvLayer(overlay)
+
+	byKey := make(map[string]string, len(baseLayer.valid)+len(overlayLayer.valid))
+	for key, val := range baseLayer.valid {
+		if !overlayLayer.conflicts[key] {
+			byKey[key] = val
+		}
+	}
+	for key, val := range overlayLayer.valid {
+		if !baseLayer.conflicts[key] {
+			byKey[key] = val
+		}
+	}
+	merged := make([]string, 0, len(byKey)+len(baseLayer.preserved)+len(overlayLayer.preserved))
+	for key, val := range byKey {
+		merged = append(merged, key+"="+val)
+	}
+	sort.Strings(merged)
+	merged = append(merged, baseLayer.preserved...)
+	merged = append(merged, overlayLayer.preserved...)
+	return merged
 }

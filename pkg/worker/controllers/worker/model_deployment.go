@@ -1473,6 +1473,11 @@ func (r *ModelDeploymentReconciler) convergeModelDeployment(
 		Serving:        r.observeModelDeploymentServing(ctx, md),
 		Qualifications: qualifications,
 	}
+	if observation.Serving.deploymentChanged {
+		logger.V(2).Info("deployment changed during router observation, requeuing before updating eligibility",
+			"reason", observation.Serving.Reason)
+		return ctrl.Result{Requeue: true}, nil
+	}
 
 	if err = r.convergeModelDeploymentEndpointEligibility(
 		ctx, md, actual, qualificationByMember, replacedByRole, observation,

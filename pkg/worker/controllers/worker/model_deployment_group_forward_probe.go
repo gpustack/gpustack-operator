@@ -303,6 +303,7 @@ func modelDeploymentQualifyFinishType(reason json.RawMessage) string {
 func observeModelDeploymentGroupForward(
 	ctx context.Context, md *workercore.ModelDeployment, role *workercore.ModelDeploymentRole,
 	view modelDeploymentReplicaView, fetch modelDeploymentGroupForwardFetch,
+	alreadyEligible ...bool,
 ) modelDeploymentGroupForward {
 	engineName := md.Spec.Engine.Name
 	engine, known := modelDeploymentGroupForwardEngines[engineName]
@@ -356,6 +357,10 @@ func observeModelDeploymentGroupForward(
 			State:  modelDeploymentGroupForwardUnknown,
 			Reason: "no group-forward transport is wired, so no member could be asked",
 		}
+	}
+
+	if len(alreadyEligible) > 0 && alreadyEligible[0] {
+		return modelDeploymentGroupForwardRetained(view)
 	}
 
 	return probeModelDeploymentGroupForward(ctx, engine, view, fetch)

@@ -85,8 +85,12 @@ func (r *ModelDeploymentScalerReconciler) applyCapacityPriorResolution(
 	}
 	scaler.Status.ResolvedCapacityPriors = resolved.Status
 	if modelDeploymentScalerPriorRequested(scaler) {
+		message := "all required capacities are explicit or resolved from compatible catalog profiles"
+		if resolved != nil && resolved.ConditionMessage != "" {
+			message = resolved.ConditionMessage
+		}
 		r.setCondition(scaler, workercore.ModelDeploymentScalerConditionTypeCapacityPriorsReady, meta.ConditionTrue,
-			"Resolved", "all required capacities are explicit or resolved from compatible catalog profiles", now)
+			"Resolved", message, now)
 	} else if modelDeploymentScalerConditionReason(scaler, workercore.ModelDeploymentScalerConditionTypeCapacityPriorsReady) != "" {
 		r.setCondition(scaler, workercore.ModelDeploymentScalerConditionTypeCapacityPriorsReady, meta.ConditionTrue,
 			"Manual", "every capacity is stated by hand", now)

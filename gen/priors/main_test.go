@@ -82,7 +82,7 @@ const measuredRows = `[
 const twoProfileCatalog = `apiVersion: worker.gpustack.ai/v1alpha1
 kind: ModelDeploymentScalerCapacityPriorCatalog
 profiles:
-  - role: Server
+  - mode: aggregated
     model: org/b-model
     quantization: fp8
     engine: vllm
@@ -100,7 +100,7 @@ profiles:
           p95: 100
         itlMilliseconds:
           p95: 10
-  - role: Server
+  - mode: aggregated
     model: org/a-model
     quantization: fp8
     engine: vllm
@@ -127,7 +127,7 @@ profiles:
 const threeProfileCatalog = `apiVersion: worker.gpustack.ai/v1alpha1
 kind: ModelDeploymentScalerCapacityPriorCatalog
 profiles:
-  - role: Server
+  - mode: aggregated
     model: deepseek-ai/DeepSeek-R1-0528
     quantization: fp8
     engine: sglang
@@ -145,7 +145,7 @@ profiles:
           p95: 100
         itlMilliseconds:
           p95: 10
-  - role: Server
+  - mode: aggregated
     model: deepseek-ai/DeepSeek-R1-0528
     quantization: fp8
     engine: vllm
@@ -163,7 +163,7 @@ profiles:
           p95: 100
         itlMilliseconds:
           p95: 10
-  - role: Server
+  - mode: aggregated
     model: org/other
     quantization: fp8
     engine: vllm
@@ -527,5 +527,88 @@ func TestTheMergedCatalogIsReadable(t *testing.T) {
 	var document map[string]any
 	if err := json.Unmarshal(raw, &document); err == nil {
 		t.Fatal("the catalog is not YAML")
+	}
+}
+
+func TestRetireDisaggregatedByModeAndStageEP(t *testing.T) {
+	const disaggCatalog = `apiVersion: worker.gpustack.ai/v1alpha1
+kind: ModelDeploymentScalerCapacityPriorCatalog
+profiles:
+  - mode: aggregated
+    model: deepseek-ai/DeepSeek-R1-0528
+    quantization: fp8
+    engine: sglang
+    hardware: nvidia-h200
+    topology:
+      gpusPerReplica: 8
+      tensorParallel: 8
+      expertParallel: 1
+    points:
+      - concurrency: 4
+        totalTokensPerSecond: 1000
+        inputTokensPerSecond: 900
+        outputTokensPerSecond: 100
+        ttftMilliseconds:
+          p95: 100
+        itlMilliseconds:
+          p95: 10
+      - concurrency: 8
+        totalTokensPerSecond: 1600
+        inputTokensPerSecond: 1400
+        outputTokensPerSecond: 200
+        ttftMilliseconds:
+          p95: 4000
+        itlMilliseconds:
+          p95: 100
+  - mode: disaggregated
+    model: deepseek-ai/DeepSeek-R1-0528
+    quantization: fp4
+    engine: trtllm
+    prefill:
+      replicas: 2
+      hardware: nvidia-b200
+      topology:
+        gpusPerReplica: 4
+        tensorParallel: 4
+        expertParallel: 4
+    decode:
+      replicas: 1
+      hardware: nvidia-b200
+      topology:
+        gpusPerReplica: 8
+        tensorParallel: 8
+        expertParallel: 8
+    points:
+      - concurrency: 8
+        totalTokensPerSecond: 1600
+        inputTokensPerSecond: 1200
+        outputTokensPerSecond: 400
+        ttftMilliseconds:
+          p95: 200
+        itlMilliseconds:
+          p95: 10
+      - concurrency: 16
+        totalTokensPerSecond: 2400
+        inputTokensPerSecond: 1800
+        outputTokensPerSecond: 600
+        ttftMilliseconds:
+          p95: 4000
+        itlMilliseconds:
+          p95: 100
+`
+	path := writeCatalog(t, disaggCatalog)
+	if err := retireFrom(path, retireFilter{Mode: "disaggregated", ExpertParallel: 8}); err != nil {
+		t.Fatalf("retireFrom failed: %v", err)
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read catalog: %v", err)
+	}
+	doc, err := priors.ParseCatalogDocument(raw)
+	if err != nil {
+		t.Fatalf("ParseCatalogDocument: %v", err)
+	}
+	if len(doc.Profiles) != 1 || doc.Profiles[0].Mode != "aggregated" {
+		t.Fatalf("expected only aggregated profile to remain, got %+v", doc.Profiles)
 	}
 }

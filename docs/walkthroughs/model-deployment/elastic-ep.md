@@ -46,7 +46,7 @@ Use [Elastic EP Benchmark](../../modules/model-deployment/elastic-ep-benchmark.m
 | Hardware | 8 × NVIDIA H100 80 GB HBM3 SXM5; physical NVLink bandwidth 900 GB/s |
 | Operator | GPUStack Operator v0.9.1 |
 | Runner | `gpustack/runner:cuda13.0-vllm0.30.0` |
-| Model | `deepseek-ai/DeepSeek-V2-Lite-Chat`, `ModelArtifact` `deepseek-v2-lite-chat`, served as `/models` |
+| Model | `deepseek-ai/DeepSeek-V2-Lite-Chat`, `ModelArtifact` `deepseek-v2-lite-chat` |
 | Captured `InstanceType` | Custom `bench-gpu`, selecting the H100 accelerator group |
 | Initial allocation | Two GPU members × 2 GPUs = 4 GPUs, plus one CPU-only Ray head |
 | Expanded allocation | Four GPU members × 2 GPUs = 8 GPUs, plus the retained Ray head |
@@ -75,7 +75,7 @@ metadata:
   namespace: gpustack-bench
 spec:
   model:
-    name: /models
+    name: deepseek-v2-lite-chat
     artifactRef:
       name: deepseek-v2-lite-chat
   engine:
@@ -180,7 +180,7 @@ Send a streaming generation request and preserve its response:
 curl --fail-with-body --no-buffer --max-time 60 \
   http://127.0.0.1:8000/v1/chat/completions \
   -H 'Content-Type: application/json' \
-  -d '{"model":"/models","messages":[{"role":"user","content":"Explain GPU scheduling briefly."}],"max_tokens":64,"temperature":0,"stream":true,"stream_options":{"include_usage":true}}' \
+  -d '{"model":"deepseek-v2-lite-chat","messages":[{"role":"user","content":"Explain GPU scheduling briefly."}],"max_tokens":64,"temperature":0,"stream":true,"stream_options":{"include_usage":true}}' \
   -o baseline-stream.txt
 cat baseline-stream.txt
 ```

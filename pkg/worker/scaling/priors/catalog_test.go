@@ -16,7 +16,7 @@ const flatCatalogHeader = "apiVersion: worker.gpustack.ai/v1alpha1\nkind: ModelD
 //
 // IT STATES THE FIELDS THE READER REQUIRES, because a document that leaves one
 // out is a document the reader refuses.
-const flatProfileDocument = `  - role: Server
+const flatProfileDocument = `  - mode: aggregated
     model: deepseek-ai/DeepSeek-R1-0528
     quantization: fp8
     engine: vllm
@@ -37,7 +37,7 @@ const flatProfileDocument = `  - role: Server
 `
 
 // flatProfileWithoutPointsDocument is one profile that measured nothing.
-const flatProfileWithoutPointsDocument = `  - role: Server
+const flatProfileWithoutPointsDocument = `  - mode: aggregated
     model: deepseek-ai/DeepSeek-R1-0528
     quantization: fp8
     engine: vllm
@@ -51,7 +51,7 @@ const flatProfileWithoutPointsDocument = `  - role: Server
 
 // flatProfileWithAnUnknownFieldDocument is one profile that carries a field
 // the reader does not know.
-const flatProfileWithAnUnknownFieldDocument = `  - role: Server
+const flatProfileWithAnUnknownFieldDocument = `  - mode: aggregated
     model: deepseek-ai/DeepSeek-R1-0528
     quantization: fp8
     engine: vllm
@@ -149,7 +149,7 @@ func TestParseCatalogRefusesTwoProfilesOfTheSameShape(t *testing.T) {
 	if !strings.Contains(err.Error(), "profiles[0]") || !strings.Contains(err.Error(), "profiles[1]") {
 		t.Fatalf("the refusal does not name both profiles: %v", err)
 	}
-	if !strings.Contains(err.Error(), "Server/deepseek-ai/DeepSeek-R1-0528/fp8/vllm/amd-mi325x/gpus=8,tp=8") {
+	if !strings.Contains(err.Error(), "aggregated/deepseek-ai/DeepSeek-R1-0528/fp8/vllm/amd-mi325x/gpus=8,tp=8") {
 		t.Fatalf("the refusal does not name the shape: %v", err)
 	}
 }
@@ -160,21 +160,21 @@ func TestParseCatalogRefusesTwoProfilesOfTheSameShape(t *testing.T) {
 // accepted when it should not be would let an unmeasured value into a
 // deployment.
 func TestValidateRefusesBadCatalogs(t *testing.T) {
-	unknownSource := testProfile(t, RoleKindServer, []MeasuredPoint{
+	unknownSource := testProfile(t, ModeAggregated, []MeasuredPoint{
 		serverPoint(4, 1000, 500, 20),
 		serverPoint(8, 1200, 5000, 20),
 	})
 	unknownSource.SourceID = "source-that-does-not-exist"
 	unknownSource = redigest(t, unknownSource)
 
-	emptyIdentity := testProfile(t, RoleKindServer, []MeasuredPoint{
+	emptyIdentity := testProfile(t, ModeAggregated, []MeasuredPoint{
 		serverPoint(4, 1000, 500, 20),
 		serverPoint(8, 1200, 5000, 20),
 	})
 	emptyIdentity.Identity.Model.Revision = ""
 	emptyIdentity = redigest(t, emptyIdentity)
 
-	wrongDigest := testCatalog(t, testProfile(t, RoleKindServer, []MeasuredPoint{
+	wrongDigest := testCatalog(t, testProfile(t, ModeAggregated, []MeasuredPoint{
 		serverPoint(4, 1000, 500, 20),
 		serverPoint(8, 1200, 5000, 20),
 	}))
@@ -221,7 +221,7 @@ func TestValidateRefusesBadCatalogs(t *testing.T) {
 // IT IS CHECKED ON THE CATALOG, because a value that is not finite cannot be
 // carried by a measurement that a resolver would trust.
 func TestValidateRefusesANonFiniteMeasurement(t *testing.T) {
-	profile := testProfile(t, RoleKindServer, []MeasuredPoint{
+	profile := testProfile(t, ModeAggregated, []MeasuredPoint{
 		serverPoint(4, 1000, 500, 20),
 		serverPoint(8, 1200, 5000, 20),
 	})
@@ -244,7 +244,7 @@ func TestValidateRefusesANonFiniteMeasurement(t *testing.T) {
 // TestValidateRefusesANotANumberLatency asserts a latency that is not a
 // number is refused.
 func TestValidateRefusesANotANumberLatency(t *testing.T) {
-	profile := testProfile(t, RoleKindServer, []MeasuredPoint{
+	profile := testProfile(t, ModeAggregated, []MeasuredPoint{
 		serverPoint(4, 1000, 500, 20),
 		serverPoint(8, 1200, 5000, 20),
 	})
@@ -302,7 +302,7 @@ func TestParseCatalogIsStrict(t *testing.T) {
 		},
 		{
 			name:     "a truncated catalog",
-			document: "apiVersion: worker.gpustack.ai/v1alpha1\nkind: ModelDeploymentScalerCapacityPriorCatalog\nprofiles:\n  - role: Server\n    model: \"deepseek-ai/DeepSeek-R1-0528\n",
+			document: "apiVersion: worker.gpustack.ai/v1alpha1\nkind: ModelDeploymentScalerCapacityPriorCatalog\nprofiles:\n  - mode: aggregated\n    model: \"deepseek-ai/DeepSeek-R1-0528\n",
 		},
 	}
 
@@ -327,7 +327,7 @@ func TestParseCatalogIsStrict(t *testing.T) {
 // that diffs the file cannot tell a new measurement from a reordered one.
 func TestCompareShapesOrdersTheSixElements(t *testing.T) {
 	base := Shape{
-		Role:         RoleKindServer,
+		Mode:         ModeAggregated,
 		Model:        "org/model",
 		Quantization: "fp8",
 		Engine:       "vllm",
@@ -343,8 +343,20 @@ func TestCompareShapesOrdersTheSixElements(t *testing.T) {
 		},
 	}
 
-	smallerRole := base
-	smallerRole.Role = RoleKindDecode
+	largerMode := base
+	largerMode.Mode = ModeDisaggregated
+	largerMode.Hardware = ""
+	largerMode.Topology = Topology{}
+	largerMode.Prefill = &StageShape{
+		Replicas: 1,
+		Hardware: "amd-mi325x",
+		Topology: Topology{GPUsPerReplica: 8, TensorParallel: 8, PipelineParallel: 1, DataParallel: 1, LocalDataParallel: 1, ContextParallel: 1, ExpertParallel: 1},
+	}
+	largerMode.Decode = &StageShape{
+		Replicas: 1,
+		Hardware: "amd-mi325x",
+		Topology: Topology{GPUsPerReplica: 8, TensorParallel: 8, PipelineParallel: 1, DataParallel: 1, LocalDataParallel: 1, ContextParallel: 1, ExpertParallel: 1},
+	}
 
 	smallerModel := base
 	smallerModel.Model = "org/a-model"
@@ -371,7 +383,7 @@ func TestCompareShapesOrdersTheSixElements(t *testing.T) {
 		order string
 	}{
 		{name: "the same shape", left: base, right: base, order: "equal"},
-		{name: "a smaller role comes first", left: smallerRole, right: base, order: "less"},
+		{name: "aggregated comes before disaggregated", left: base, right: largerMode, order: "less"},
 		{name: "a smaller model comes first", left: smallerModel, right: base, order: "less"},
 		{name: "a smaller recipe comes first", left: smallerQuantization, right: base, order: "less"},
 		{name: "a smaller engine comes first", left: smallerEngine, right: base, order: "less"},
@@ -410,11 +422,11 @@ func TestCompareShapesOrdersTheSixElements(t *testing.T) {
 // IT MATTERS BECAUSE A PROFILE KEEPS ITS SHAPE WHEN NEW MEASUREMENTS ARE ADDED
 // TO IT, and a shape that moved would make the profile a second profile.
 func TestProfileShapeIsStable(t *testing.T) {
-	first := testProfile(t, RoleKindServer, []MeasuredPoint{
+	first := testProfile(t, ModeAggregated, []MeasuredPoint{
 		serverPoint(4, 1000, 500, 20),
 		serverPoint(8, 1200, 5000, 20),
 	})
-	second := testProfile(t, RoleKindServer, []MeasuredPoint{
+	second := testProfile(t, ModeAggregated, []MeasuredPoint{
 		serverPoint(4, 1000, 500, 20),
 		serverPoint(8, 1200, 5000, 20),
 		serverPoint(16, 1300, 9000, 20),
@@ -434,7 +446,7 @@ func TestProfileShapeIsStable(t *testing.T) {
 // IT MATTERS BECAUSE THE SHAPE IS WHAT A PROFILE IS KNOWN BY, and two profiles
 // of one identity are one profile.
 func TestProfileShapeChangesWithTheIdentity(t *testing.T) {
-	first := testProfile(t, RoleKindServer, []MeasuredPoint{
+	first := testProfile(t, ModeAggregated, []MeasuredPoint{
 		serverPoint(4, 1000, 500, 20),
 		serverPoint(8, 1200, 5000, 20),
 	})
@@ -489,7 +501,7 @@ func TestEmbeddedCatalogIsValid(t *testing.T) {
 // TestValidateRefusesASourceWithoutItsReason asserts a source that was
 // refused is recorded with its reason, so an empty catalog still says why.
 func TestValidateRefusesASourceWithoutItsReason(t *testing.T) {
-	catalog := testCatalog(t, testProfile(t, RoleKindServer, []MeasuredPoint{
+	catalog := testCatalog(t, testProfile(t, ModeAggregated, []MeasuredPoint{
 		serverPoint(4, 1000, 500, 20),
 		serverPoint(8, 1200, 5000, 20),
 	}))
@@ -510,26 +522,26 @@ func TestValidateRefusesASourceWithoutItsReason(t *testing.T) {
 // not vary one comparable load model is refused, because a concurrency count
 // and a request rate are not comparable numbers.
 func TestValidateRefusesAMixedLoadAxis(t *testing.T) {
-	mixedKind := testProfile(t, RoleKindServer, []MeasuredPoint{
+	mixedKind := testProfile(t, ModeAggregated, []MeasuredPoint{
 		serverPoint(4, 1000, 500, 20),
 		ratePoint(10, 1200, 500, 20),
 	})
 
-	mixedClient := testProfile(t, RoleKindServer, []MeasuredPoint{
+	mixedClient := testProfile(t, ModeAggregated, []MeasuredPoint{
 		serverPoint(4, 1000, 500, 20),
 		serverPoint(8, 1200, 5000, 20),
 	})
 	mixedClient.Points[1].Load.ClientModel = ClientModelOpenLoop
 	mixedClient = redigest(t, mixedClient)
 
-	mixedUnit := testProfile(t, RoleKindServer, []MeasuredPoint{
+	mixedUnit := testProfile(t, ModeAggregated, []MeasuredPoint{
 		serverPoint(4, 1000, 500, 20),
 		serverPoint(8, 1200, 5000, 20),
 	})
 	mixedUnit.Points[1].Load.Unit = "queries/second"
 	mixedUnit = redigest(t, mixedUnit)
 
-	workloadMismatch := testProfile(t, RoleKindServer, []MeasuredPoint{
+	workloadMismatch := testProfile(t, ModeAggregated, []MeasuredPoint{
 		ratePoint(5, 1000, 500, 20),
 		ratePoint(10, 1200, 500, 20),
 	})
@@ -557,14 +569,14 @@ func TestValidateRefusesAMixedLoadAxis(t *testing.T) {
 // TestValidateRefusesAnUnknownWorkloadEnum asserts the declared workload
 // enums are checked, because a value no reader knows cannot be honored.
 func TestValidateRefusesAnUnknownWorkloadEnum(t *testing.T) {
-	unknownCache := testProfile(t, RoleKindServer, []MeasuredPoint{
+	unknownCache := testProfile(t, ModeAggregated, []MeasuredPoint{
 		serverPoint(4, 1000, 500, 20),
 		serverPoint(8, 1200, 5000, 20),
 	})
 	unknownCache.Workload.CacheBehavior = CacheBehavior("Sometimes")
 	unknownCache = redigest(t, unknownCache)
 
-	unknownArrival := testProfile(t, RoleKindServer, []MeasuredPoint{
+	unknownArrival := testProfile(t, ModeAggregated, []MeasuredPoint{
 		serverPoint(4, 1000, 500, 20),
 		serverPoint(8, 1200, 5000, 20),
 	})
@@ -606,7 +618,7 @@ func TestValidateRefusesAMissingRequiredTopologyWidth(t *testing.T) {
 
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
-			profile := testProfile(t, RoleKindServer, []MeasuredPoint{
+			profile := testProfile(t, ModeAggregated, []MeasuredPoint{
 				serverPoint(4, 1000, 500, 20),
 				serverPoint(8, 1200, 5000, 20),
 			})
@@ -625,7 +637,7 @@ func TestValidateRefusesAMissingRequiredTopologyWidth(t *testing.T) {
 // expert parallel may be zero, because a system that does not use them states
 // so with a zero width and those two fields are documented that way.
 func TestValidateAcceptsAnExplicitlyUnusedParallelWidth(t *testing.T) {
-	profile := testProfile(t, RoleKindServer, []MeasuredPoint{
+	profile := testProfile(t, ModeAggregated, []MeasuredPoint{
 		serverPoint(4, 1000, 500, 20),
 		serverPoint(8, 1200, 5000, 20),
 	})

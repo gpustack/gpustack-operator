@@ -14,6 +14,7 @@ import (
 
 	workerapi "gpustack.ai/gpustack/api/worker/v1"
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
+	"gpustack.ai/gpustack/pkg/nodefeature"
 	"gpustack.ai/gpustack/pkg/worker/kvcache/inject"
 	"gpustack.ai/gpustack/pkg/worker/scaling/priors"
 )
@@ -39,18 +40,24 @@ type modelDeploymentScalerPriorDeclaration struct {
 	accelerator *workerapi.AcceleratorType
 }
 
-// shape returns the shape the deployment states.
-//
-// IT NAMES THE SIX ELEMENTS, because the catalog is selected by a shape and not
-// by a name.
-func (d modelDeploymentScalerPriorDeclaration) shape(role priors.RoleKind) priors.Shape {
+// aggregatedShape returns the aggregated catalog selection shape the deployment states.
+func (d modelDeploymentScalerPriorDeclaration) aggregatedShape() priors.Shape {
 	return priors.Shape{
-		Role:         role,
+		Mode:         priors.ModeAggregated,
 		Model:        priors.CanonicalModelName(d.identity.Model.Name),
 		Quantization: priors.CanonicalQuantization(d.identity.Model.Quantization),
 		Engine:       d.engineFamily,
 		Hardware:     priors.CanonicalAcceleratorFamily(d.identity.Hardware.Accelerator),
 		Topology:     d.topology.Normalized(),
+	}
+}
+
+// stageShape returns one disaggregated stage shape with the given reduced replica count.
+func (d modelDeploymentScalerPriorDeclaration) stageShape(replicas int) *priors.StageShape {
+	return &priors.StageShape{
+		Replicas: replicas,
+		Hardware: priors.CanonicalAcceleratorFamily(d.identity.Hardware.Accelerator),
+		Topology: d.topology.Normalized(),
 	}
 }
 
@@ -128,7 +135,18 @@ func modelDeploymentScalerPriorRequest(
 	target *workercore.ModelDeployment, role *workercore.ModelDeploymentRole, profile *priors.Profile,
 	declaration modelDeploymentScalerPriorDeclaration,
 ) (priors.Request, error) {
-	request, err := modelDeploymentScalerPriorRequestMatched(target, role, profile, declaration)
+	request, err := modelDeploymentScalerPriorRequestMatched(target, role, profile, declaration, false)
+	if err == nil {
+		return request, nil
+	}
+	return request, modelDeploymentScalerRedactPriorRefusal(err, role, profile)
+}
+
+func modelDeploymentScalerPriorRequestForServerFallback(
+	target *workercore.ModelDeployment, role *workercore.ModelDeploymentRole, profile *priors.Profile,
+	declaration modelDeploymentScalerPriorDeclaration,
+) (priors.Request, error) {
+	request, err := modelDeploymentScalerPriorRequestMatched(target, role, profile, declaration, true)
 	if err == nil {
 		return request, nil
 	}
@@ -142,23 +160,22 @@ func modelDeploymentScalerPriorRequest(
 // the deployment it was taken on and not every deployment of the shape.
 func modelDeploymentScalerPriorRequestMatched(
 	target *workercore.ModelDeployment, role *workercore.ModelDeploymentRole, profile *priors.Profile,
-	declaration modelDeploymentScalerPriorDeclaration,
+	declaration modelDeploymentScalerPriorDeclaration, serverRouterFallback bool,
 ) (priors.Request, error) {
+	effectiveKind := ModelDeploymentEffectiveRoleKind(role)
+	if serverRouterFallback {
+		switch effectiveKind {
+		case workercore.ModelDeploymentRoleKindPrefill, workercore.ModelDeploymentRoleKindDecode:
+		default:
+			return priors.Request{}, modelDeploymentScalerPriorRefusal(role.Name, "role kind %q is not supported by aggregated fallback", effectiveKind)
+		}
+	} else if effectiveKind != workercore.ModelDeploymentRoleKindServer {
+		return priors.Request{}, modelDeploymentScalerPriorRefusal(role.Name, "role kind %q is not supported by aggregated catalog lookup", effectiveKind)
+	}
 	request := priors.Request{
-		Role:     modelDeploymentScalerRoleKind(ModelDeploymentEffectiveRoleKind(role)),
+		Mode:     priors.ModeAggregated,
 		Identity: declaration.identity,
 		Topology: declaration.topology,
-	}
-	// A MOUNTED VOLUME IS ALLOWED, because a deployment mounts the weights,
-	// the caches and the logs of its own role, and the engine is matched by
-	// its family rather than by the digest of the image it runs.
-	if target.Spec.KVCache != nil || target.Spec.KVTransfer != nil || target.Spec.Router != nil {
-		return request, modelDeploymentScalerPriorRefusal(role.Name, "generated cache, transfer and router configuration is not supported by Catalog")
-	}
-	for _, other := range target.Spec.Roles {
-		if ModelDeploymentEffectiveRoleKind(&other) == workercore.ModelDeploymentRoleKindEncode {
-			return request, modelDeploymentScalerPriorRefusal(role.Name, "generated encoder connector configuration is not supported by Catalog")
-		}
 	}
 	deploymentEnv, envErr := modelDeploymentScalerDeploymentEnv(role)
 	if envErr != nil {
@@ -185,18 +202,169 @@ func modelDeploymentScalerPriorRequestMatched(
 	if err := modelDeploymentScalerPriorHardware(role, profile.Identity.Hardware, declaration.accelerator); err != nil {
 		return request, err
 	}
-	serving, err := modelDeploymentScalerPriorServingConfig(target.Spec.Engine.Name, role, declaration.flags, profile.ServingConfig)
+	serving, err := modelDeploymentScalerPriorServingConfig(
+		target, role, declaration.flags, profile.ServingConfig, serverRouterFallback,
+	)
 	if err != nil {
 		return request, err
 	}
 	if err := modelDeploymentScalerPriorOmittedDefaultsGate(target.Spec.Engine.Name, profile.ServingConfig, declaration.flags); err != nil {
 		return request, modelDeploymentScalerPriorRefusal(role.Name, "%v", err)
 	}
-	if err := modelDeploymentScalerOperatorEnvGate(target.Spec.Engine.Name, target, role); err != nil {
+	manufacturer := ""
+	if declaration.accelerator != nil {
+		manufacturer = declaration.accelerator.Status.Detail.Manufacturer
+	}
+	if err := modelDeploymentScalerOperatorEnvGateWithManufacturer(target.Spec.Engine.Name, target, role, manufacturer); err != nil {
 		return request, modelDeploymentScalerPriorRefusal(role.Name, "%v", err)
 	}
 	request.ServingConfig = serving
 	return request, nil
+}
+
+// modelDeploymentScalerDisaggregatedPriorRequest builds and validates a
+// disaggregated catalog request across both prefill and decode stages.
+func modelDeploymentScalerDisaggregatedPriorRequest(
+	target *workercore.ModelDeployment,
+	prefillRole, decodeRole *workercore.ModelDeploymentRole,
+	profile *priors.Profile,
+	prefillDecl, decodeDecl modelDeploymentScalerPriorDeclaration,
+	prefillReplicas, decodeReplicas int,
+) (priors.Request, error) {
+	request, err := modelDeploymentScalerDisaggregatedPriorRequestMatched(
+		target, prefillRole, decodeRole, profile, prefillDecl, decodeDecl, prefillReplicas, decodeReplicas,
+	)
+	if err == nil {
+		return request, nil
+	}
+	return request, modelDeploymentScalerRedactDisaggregatedRefusal(err, prefillRole, decodeRole, profile)
+}
+
+func modelDeploymentScalerRedactDisaggregatedRefusal(
+	err error, prefillRole, decodeRole *workercore.ModelDeploymentRole, profile *priors.Profile,
+) error {
+	if err == nil {
+		return nil
+	}
+	err = modelDeploymentScalerRedactPriorRefusal(err, prefillRole, profile)
+	err = modelDeploymentScalerRedactPriorRefusal(err, decodeRole, profile)
+	return err
+}
+
+func modelDeploymentScalerDisaggregatedPriorRequestMatched(
+	target *workercore.ModelDeployment,
+	prefillRole, decodeRole *workercore.ModelDeploymentRole,
+	profile *priors.Profile,
+	prefillDecl, decodeDecl modelDeploymentScalerPriorDeclaration,
+	prefillReplicas, decodeReplicas int,
+) (priors.Request, error) {
+	if profile == nil || profile.Prefill == nil || profile.Decode == nil {
+		return priors.Request{}, modelDeploymentScalerPriorRefusal(prefillRole.Name, "disaggregated profile is missing stage definitions")
+	}
+	prefillStage, err := modelDeploymentScalerValidateDisaggregatedStage(
+		target, prefillRole, profile.Identity, profile.ServingConfig, profile.Prefill, prefillDecl, prefillReplicas,
+	)
+	if err != nil {
+		return priors.Request{}, err
+	}
+	decodeStage, err := modelDeploymentScalerValidateDisaggregatedStage(
+		target, decodeRole, profile.Identity, profile.ServingConfig, profile.Decode, decodeDecl, decodeReplicas,
+	)
+	if err != nil {
+		return priors.Request{}, err
+	}
+	if !priors.RevisionMatches(prefillDecl.identity.Model.Revision, decodeDecl.identity.Model.Revision) {
+		return priors.Request{}, modelDeploymentScalerPriorRefusal(decodeRole.Name, "prefill and decode roles declare conflicting model revisions")
+	}
+	if !priors.TokenizerMatches(prefillDecl.identity.Model.Tokenizer, decodeDecl.identity.Model.Tokenizer) {
+		return priors.Request{}, modelDeploymentScalerPriorRefusal(decodeRole.Name, "prefill and decode roles declare conflicting model tokenizers")
+	}
+	if prefillDecl.identity.Engine.Build != "" && decodeDecl.identity.Engine.Build != "" &&
+		prefillDecl.identity.Engine.Build != decodeDecl.identity.Engine.Build {
+		return priors.Request{}, modelDeploymentScalerPriorRefusal(decodeRole.Name, "prefill and decode roles declare conflicting engine builds")
+	}
+	identity := priors.Identity{
+		Model:  prefillDecl.identity.Model,
+		Engine: prefillDecl.identity.Engine,
+	}
+	if identity.Model.Revision == "" || identity.Model.Revision == priors.UnspecifiedRevision {
+		identity.Model.Revision = decodeDecl.identity.Model.Revision
+	}
+	if identity.Model.Tokenizer == "" || identity.Model.Tokenizer == priors.UnspecifiedRevision {
+		identity.Model.Tokenizer = decodeDecl.identity.Model.Tokenizer
+	}
+	if identity.Model.Quantization == "" {
+		identity.Model.Quantization = decodeDecl.identity.Model.Quantization
+	}
+	if identity.Engine.Build == "" {
+		identity.Engine.Build = decodeDecl.identity.Engine.Build
+	}
+	topServing := priors.ServingConfig{Router: prefillStage.ServingConfig.Router}
+	if target.Spec.KVCache != nil {
+		topServing.Offload = prefillStage.ServingConfig.Offload
+	}
+	return priors.Request{
+		Mode:          priors.ModeDisaggregated,
+		Identity:      identity,
+		ServingConfig: topServing,
+		Prefill:       &prefillStage,
+		Decode:        &decodeStage,
+	}, nil
+}
+
+func modelDeploymentScalerValidateDisaggregatedStage(
+	target *workercore.ModelDeployment, role *workercore.ModelDeploymentRole,
+	sharedIdentity priors.Identity, topServing priors.ServingConfig, stageProfile *priors.DisaggregatedStage,
+	declaration modelDeploymentScalerPriorDeclaration, replicas int,
+) (priors.DisaggregatedStage, error) {
+	deploymentEnv, envErr := modelDeploymentScalerDeploymentEnv(role)
+	if envErr != nil {
+		return priors.DisaggregatedStage{}, modelDeploymentScalerPriorRefusal(role.Name, "%v", envErr)
+	}
+	sortedEnv := sortedEnvironmentEntries(deploymentEnv)
+	stageMergedServing := priors.MergeServingConfig(topServing, stageProfile.ServingConfig)
+	if err := modelDeploymentScalerMatchEngineEnv(
+		stageMergedServing.EngineEnv, sortedEnv, stageMergedServing.EngineEnvComplete,
+	); err != nil {
+		return priors.DisaggregatedStage{}, modelDeploymentScalerPriorRefusal(role.Name, "%v", err)
+	}
+	if err := modelDeploymentScalerPriorModelAnnotation(target, role, sharedIdentity); err != nil {
+		return priors.DisaggregatedStage{}, err
+	}
+	if err := modelDeploymentScalerPriorHardwareAnnotation(target, role, priors.Identity{Hardware: stageProfile.Hardware}); err != nil {
+		return priors.DisaggregatedStage{}, err
+	}
+	if err := modelDeploymentScalerPriorEngine(target, role, sharedIdentity); err != nil {
+		return priors.DisaggregatedStage{}, err
+	}
+	if err := modelDeploymentScalerPriorModel(role, sharedIdentity.Model, declaration); err != nil {
+		return priors.DisaggregatedStage{}, err
+	}
+	if err := modelDeploymentScalerPriorHardware(role, stageProfile.Hardware, declaration.accelerator); err != nil {
+		return priors.DisaggregatedStage{}, err
+	}
+	stageRoleServing, err := modelDeploymentScalerPriorServingConfig(
+		target, role, declaration.flags, stageMergedServing, false,
+	)
+	if err != nil {
+		return priors.DisaggregatedStage{}, err
+	}
+	if err := modelDeploymentScalerPriorOmittedDefaultsGate(target.Spec.Engine.Name, stageMergedServing, declaration.flags); err != nil {
+		return priors.DisaggregatedStage{}, modelDeploymentScalerPriorRefusal(role.Name, "%v", err)
+	}
+	manufacturer := ""
+	if declaration.accelerator != nil {
+		manufacturer = declaration.accelerator.Status.Detail.Manufacturer
+	}
+	if err := modelDeploymentScalerOperatorEnvGateWithManufacturer(target.Spec.Engine.Name, target, role, manufacturer); err != nil {
+		return priors.DisaggregatedStage{}, modelDeploymentScalerPriorRefusal(role.Name, "%v", err)
+	}
+	return priors.DisaggregatedStage{
+		Replicas:      replicas,
+		Hardware:      declaration.identity.Hardware,
+		ServingConfig: stageRoleServing,
+		Topology:      declaration.topology,
+	}, nil
 }
 
 func modelDeploymentScalerPriorTopology(engine string, role *workercore.ModelDeploymentRole) (priors.Topology, error) {
@@ -467,9 +635,10 @@ func modelDeploymentScalerPriorEngine(
 	if image == "" {
 		image = target.Spec.Engine.Image
 	}
-	// THE ROLE IMAGE MUST RUN THE ENGINE THE DEPLOYMENT NAMES, when the image
-	// names a family at all.
-	if imageFamily := priors.EngineFamily(image); imageFamily != "" && imageFamily != family {
+	imageFamily := priors.EngineFamily(image)
+	// A role image that names a known engine family must match the deployment engine; an image
+	// that names no known family is accepted only when it matches the selected profile image.
+	if imageFamily != "" && imageFamily != family {
 		return modelDeploymentScalerPriorRefusal(role.Name, "the engine image of the role does not match the deployment engine")
 	}
 	// THE PROFILE MUST HAVE BEEN MEASURED WITH THE ENGINE THE DEPLOYMENT RUNS.
@@ -485,6 +654,12 @@ func modelDeploymentScalerPriorEngine(
 	}
 	if profileFamily != family {
 		return modelDeploymentScalerPriorRefusal(role.Name, "the engine family of the selected profile does not match the deployment engine")
+	}
+	if image != "" && imageFamily == "" && declared.Engine.Image != image {
+		return modelDeploymentScalerPriorRefusal(
+			role.Name,
+			"the engine image of the role names no known engine family and does not match the selected profile image",
+		)
 	}
 	return nil
 }
@@ -517,17 +692,39 @@ func modelDeploymentScalerEngineFamily(engine string) string {
 // IT KEEPS THE ROUTER OF THE DEPLOYMENT, because a deployment with a router
 // is refused before this gate and a measurement taken behind a router does
 // not describe a deployment without one.
+func modelDeploymentScalerPriorRouterName(target *workercore.ModelDeployment) string {
+	if target == nil || target.Spec.Router == nil {
+		return "none"
+	}
+	if name := strings.TrimSpace(target.Spec.Router.Name); name != "" {
+		return name
+	}
+	return "gpustack-router"
+}
+
 func modelDeploymentScalerPriorServingConfig(
-	engine string, role *workercore.ModelDeploymentRole, flags map[string]string, profile priors.ServingConfig,
+	target *workercore.ModelDeployment, role *workercore.ModelDeploymentRole, flags map[string]string,
+	profile priors.ServingConfig, serverRouterFallback bool,
 ) (priors.ServingConfig, error) {
 	deploymentEnv, err := modelDeploymentScalerDeploymentEnv(role)
 	if err != nil {
 		return priors.ServingConfig{}, err
 	}
+	engine := target.Spec.Engine.Name
+	router := modelDeploymentScalerPriorRouterName(target)
+	if serverRouterFallback {
+		router = "none"
+	}
+	offload := profile.Offload
+	if target.Spec.KVCache != nil {
+		offload = "external"
+	} else if off, stated := flags["--cpu-offload-gb"]; stated && off != "0" && profile.Offload == "none" {
+		offload = "cpu"
+	}
 	result := priors.ServingConfig{
-		Router:              "none",
+		Router:              router,
 		KVCacheDType:        profile.KVCacheDType,
-		Offload:             profile.Offload,
+		Offload:             offload,
 		PrefixCaching:       profile.PrefixCaching,
 		SpeculativeDecoding: profile.SpeculativeDecoding,
 		LaunchParameters:    slices.Clone(role.ExtraArgs),
@@ -535,9 +732,6 @@ func modelDeploymentScalerPriorServingConfig(
 	}
 	if dtype, stated := flags["--kv-cache-dtype"]; stated {
 		result.KVCacheDType = dtype
-	}
-	if offload, stated := flags["--cpu-offload-gb"]; stated && offload != "0" && profile.Offload == "none" {
-		result.Offload = "cpu"
 	}
 	switch {
 	case engine == workercore.ModelDeploymentEngineVLLM && flags["--enable-prefix-caching"] != "":
@@ -728,30 +922,98 @@ var modelDeploymentScalerDtypeSpellings = []string{
 func modelDeploymentScalerOperatorEnvGate(
 	engine string, target *workercore.ModelDeployment, role *workercore.ModelDeploymentRole,
 ) error {
+	return modelDeploymentScalerOperatorEnvGateWithManufacturer(engine, target, role, "")
+}
+
+func modelDeploymentScalerOperatorEnvGateWithManufacturer(
+	engine string, target *workercore.ModelDeployment, role *workercore.ModelDeploymentRole, manufacturer string,
+) error {
 	declared := slices.Clone(modelDeploymentDefaultedEnvNames)
 	if target.Spec.Model.ArtifactRef != nil {
 		declared = append(declared, modelDeploymentArtifactOwnedKeys[engine].Env...)
 	}
-	rendered := modelDeploymentScalerRenderedOperatorEnv(engine, role)
+	rendered, err := modelDeploymentScalerRenderedOperatorEnv(engine, target, role, manufacturer)
+	if err != nil {
+		return err
+	}
 	return modelDeploymentScalerAccountForInjectedEnv(append(declared, rendered...))
+}
+
+func modelDeploymentScalerConnectorRender(
+	engine string, target *workercore.ModelDeployment, role *workercore.ModelDeploymentRole, manufacturer string,
+) (ModelDeploymentConnectorRender, error) {
+	if target == nil || len(role.Command) != 0 {
+		return ModelDeploymentConnectorRender{}, nil
+	}
+	roleKind := ModelDeploymentEffectiveRoleKind(role)
+	kvTransfer := modelDeploymentUsesKVTransfer(target, role)
+	publishKVEvents := modelDeploymentPublishesKVEvents(target, role, manufacturer)
+	routingSidecar := modelDeploymentFrontsDecodeWithSidecar(target, role)
+	encoderLeg := modelDeploymentEPDEncoderLeg(target, role, manufacturer)
+	encoderURLs := modelDeploymentEPDEncoderURLs(target)
+	if roleKind != workercore.ModelDeploymentRoleKindEncode &&
+		ModelDeploymentMaySynthesizeConnector(target) &&
+		(kvTransfer || publishKVEvents || routingSidecar) {
+		var pair inject.ParallelismPair
+		if ModelDeploymentDeclaresBothHalves(target) {
+			var err error
+			pair, err = modelDeploymentDeclaredParallelismPair(target)
+			if err != nil {
+				return ModelDeploymentConnectorRender{}, err
+			}
+		}
+		effectiveKVBackend := ModelDeploymentEffectiveKVTransferBackend(target, manufacturer)
+		kvTransferProtocol := ""
+		if effectiveKVBackend == inject.KVTransferBackendMooncake {
+			switch manufacturer {
+			case nodefeature.ManufacturerAscend:
+				kvTransferProtocol = "ascend"
+			case nodefeature.ManufacturerAMD:
+				kvTransferProtocol = "hip"
+			}
+		}
+		in := ModelDeploymentConnectorInput{
+			Engine:             engine,
+			Manufacturer:       manufacturer,
+			Kind:               role.Kind,
+			Disaggregated:      ModelDeploymentDeclaresBothHalves(target),
+			Parallelism:        pair,
+			KVTransfer:         kvTransfer,
+			RoutingSidecar:     routingSidecar,
+			EncoderCache:       encoderLeg,
+			EncoderURLs:        encoderURLs,
+			KVTransferProtocol: kvTransferProtocol,
+			KVTransferBackend:  effectiveKVBackend,
+			PublishKVEvents:    publishKVEvents,
+		}
+		if in.PublishKVEvents {
+			in.KVEventsHost = target.Name + "-" + role.Name + "." + target.Namespace + ".svc"
+		}
+		return SynthesizeModelDeploymentConnector(in)
+	}
+	if roleKind == workercore.ModelDeploymentRoleKindEncode &&
+		modelDeploymentEPDReachesEncoderStage(target, manufacturer) {
+		return SynthesizeModelDeploymentConnector(ModelDeploymentConnectorInput{
+			Engine:       engine,
+			Manufacturer: manufacturer,
+			Kind:         role.Kind,
+			EncoderCache: encoderLeg,
+			EncoderURLs:  encoderURLs,
+		})
+	}
+	return ModelDeploymentConnectorRender{}, nil
 }
 
 // modelDeploymentScalerRenderedOperatorEnv returns the names the operator
 // writes into the engine container, as the renderer writes them.
-//
-// IT READS THE RENDER, because the render is the document the engine runs
-// with. A gate that reads a table cannot see a name the renderer starts
-// writing.
-//
-// IT LEAVES OUT THE NAMES THE ROLE SETS, because those are the deployment's
-// own variables. The recorded environment covers them, and the gate is about
-// what the operator adds to them.
-//
-// IT RENDERS WITHOUT A CONNECTOR AND WITHOUT AN ARTIFACT, because the
-// connector and the artifact are refused before this gate and their names are
-// accounted for where they are refused.
-func modelDeploymentScalerRenderedOperatorEnv(engine string, role *workercore.ModelDeploymentRole) []string {
-	env := mergeModelDeploymentEnv(engine, role, ModelDeploymentConnectorRender{}, nil, false)
+func modelDeploymentScalerRenderedOperatorEnv(
+	engine string, target *workercore.ModelDeployment, role *workercore.ModelDeploymentRole, manufacturer string,
+) ([]string, error) {
+	connector, err := modelDeploymentScalerConnectorRender(engine, target, role, manufacturer)
+	if err != nil {
+		return nil, err
+	}
+	env := mergeModelDeploymentEnv(engine, role, connector, nil, false)
 	names := make([]string, 0, len(env))
 	for _, entry := range env {
 		if modelDeploymentUserSetsEnv(role.Env, entry.Name) {
@@ -759,7 +1021,7 @@ func modelDeploymentScalerRenderedOperatorEnv(engine string, role *workercore.Mo
 		}
 		names = append(names, entry.Name)
 	}
-	return names
+	return names, nil
 }
 
 // modelDeploymentScalerAccountForInjectedEnv refuses an injected environment
@@ -803,7 +1065,12 @@ var modelDeploymentScalerCapacityNeutralEnvNames = []string{
 	"MC_TCP_MAX_PENDING_ADMISSIONS_PER_PEER", "MC_TCP_LANES_PER_PEER",
 	"MC_TCP_ADMISSION_TIMEOUT_MS",
 	// Transfer-backend transport and port variables do not affect serving capacity.
+	inject.VLLMNIXLSideChannelHostEnv,
 	inject.VLLMNIXLSideChannelPortEnv,
+	"VLLM_MOONCAKE_BOOTSTRAP_PORT",
+	"VLLM_EC_SIDE_CHANNEL_HOST",
+	"VLLM_EC_SIDE_CHANNEL_PORT",
+	"VLLM_USE_V2_MODEL_RUNNER",
 	inject.SGLangDisaggregationNIXLBackendEnv,
 	inject.AscendAutoConnectEnv,
 	inject.AscendGlobalResourceConfigEnv,
@@ -863,11 +1130,20 @@ func modelDeploymentScalerEnvValues(role *workercore.ModelDeploymentRole, profil
 	if profile == nil {
 		return values
 	}
-	for _, entry := range profile.ServingConfig.EngineEnv {
-		_, value, found := strings.Cut(entry, "=")
-		if found && value != "" {
-			values = append(values, value)
+	appendEnvEntries := func(entries []string) {
+		for _, entry := range entries {
+			_, value, found := strings.Cut(entry, "=")
+			if found && value != "" {
+				values = append(values, value)
+			}
 		}
+	}
+	appendEnvEntries(profile.ServingConfig.EngineEnv)
+	if profile.Prefill != nil {
+		appendEnvEntries(profile.Prefill.ServingConfig.EngineEnv)
+	}
+	if profile.Decode != nil {
+		appendEnvEntries(profile.Decode.ServingConfig.EngineEnv)
 	}
 	return values
 }

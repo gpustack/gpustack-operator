@@ -233,6 +233,7 @@ func GetOpenAPIDefinitions(ref common.ReferenceCallback) map[string]common.OpenA
 		v1alpha1.ModelDeploymentScalerCapacityPriorPoint{}.OpenAPIModelName():          schema_gpustack_api_worker_v1alpha1_ModelDeploymentScalerCapacityPriorPoint(ref),
 		v1alpha1.ModelDeploymentScalerCapacityPriorProfile{}.OpenAPIModelName():        schema_gpustack_api_worker_v1alpha1_ModelDeploymentScalerCapacityPriorProfile(ref),
 		v1alpha1.ModelDeploymentScalerCapacityPriorSpec{}.OpenAPIModelName():           schema_gpustack_api_worker_v1alpha1_ModelDeploymentScalerCapacityPriorSpec(ref),
+		v1alpha1.ModelDeploymentScalerCapacityPriorStage{}.OpenAPIModelName():          schema_gpustack_api_worker_v1alpha1_ModelDeploymentScalerCapacityPriorStage(ref),
 		v1alpha1.ModelDeploymentScalerCapacityPriorTopology{}.OpenAPIModelName():       schema_gpustack_api_worker_v1alpha1_ModelDeploymentScalerCapacityPriorTopology(ref),
 		v1alpha1.ModelDeploymentScalerCatalogReference{}.OpenAPIModelName():            schema_gpustack_api_worker_v1alpha1_ModelDeploymentScalerCatalogReference(ref),
 		v1alpha1.ModelDeploymentScalerCommitStatus{}.OpenAPIModelName():                schema_gpustack_api_worker_v1alpha1_ModelDeploymentScalerCommitStatus(ref),
@@ -12052,7 +12053,7 @@ func schema_gpustack_api_worker_v1alpha1_ModelDeploymentScalerCapacityPriorCatal
 	return common.OpenAPIDefinition{
 		Schema: spec.Schema{
 			SchemaProps: spec.SchemaProps{
-				Description: "ModelDeploymentScalerCapacityPriorCatalog is an offline catalog of measured per-replica token capacities and latency quantiles across load levels.",
+				Description: "ModelDeploymentScalerCapacityPriorCatalog is an offline catalog of measured per-replica or per-unit token capacities and latency quantiles across load levels.",
 				Type:        []string{"object"},
 				Properties: map[string]spec.Schema{
 					"kind": {
@@ -12112,7 +12113,7 @@ func schema_gpustack_api_worker_v1alpha1_ModelDeploymentScalerCapacityPriorPoint
 					},
 					"totalTokensPerSecond": {
 						SchemaProps: spec.SchemaProps{
-							Description: "TotalTokensPerSecond is the combined prompt and generated token rate of one replica.",
+							Description: "TotalTokensPerSecond is the combined prompt and generated token rate of one scaling replica or minimal coupled unit.",
 							Default:     0,
 							Type:        []string{"number"},
 							Format:      "double",
@@ -12120,7 +12121,7 @@ func schema_gpustack_api_worker_v1alpha1_ModelDeploymentScalerCapacityPriorPoint
 					},
 					"inputTokensPerSecond": {
 						SchemaProps: spec.SchemaProps{
-							Description: "InputTokensPerSecond is the prompt token rate of one replica.",
+							Description: "InputTokensPerSecond is the prompt token rate of one scaling replica or minimal coupled unit.",
 							Default:     0,
 							Type:        []string{"number"},
 							Format:      "double",
@@ -12128,7 +12129,7 @@ func schema_gpustack_api_worker_v1alpha1_ModelDeploymentScalerCapacityPriorPoint
 					},
 					"outputTokensPerSecond": {
 						SchemaProps: spec.SchemaProps{
-							Description: "OutputTokensPerSecond is the generated token rate of one replica.",
+							Description: "OutputTokensPerSecond is the generated token rate of one scaling replica or minimal coupled unit.",
 							Default:     0,
 							Type:        []string{"number"},
 							Format:      "double",
@@ -12178,9 +12179,9 @@ func schema_gpustack_api_worker_v1alpha1_ModelDeploymentScalerCapacityPriorProfi
 				Description: "ModelDeploymentScalerCapacityPriorProfile is one measured serving profile in a capacity prior catalog.",
 				Type:        []string{"object"},
 				Properties: map[string]spec.Schema{
-					"role": {
+					"mode": {
 						SchemaProps: spec.SchemaProps{
-							Description: "Role is the serving role the measurements describe.",
+							Description: "Mode is the serving architecture the measurements describe (\"aggregated\" or \"disaggregated\").",
 							Default:     "",
 							Type:        []string{"string"},
 							Format:      "",
@@ -12212,17 +12213,27 @@ func schema_gpustack_api_worker_v1alpha1_ModelDeploymentScalerCapacityPriorProfi
 					},
 					"hardware": {
 						SchemaProps: spec.SchemaProps{
-							Description: "Hardware is the accelerator family.",
-							Default:     "",
+							Description: "Hardware is the accelerator family for an aggregated profile.",
 							Type:        []string{"string"},
 							Format:      "",
 						},
 					},
 					"topology": {
 						SchemaProps: spec.SchemaProps{
-							Description: "Topology is the parallelism shape of one scaling replica.",
-							Default:     map[string]interface{}{},
+							Description: "Topology is the parallelism shape of one scaling replica in an aggregated profile.",
 							Ref:         ref(v1alpha1.ModelDeploymentScalerCapacityPriorTopology{}.OpenAPIModelName()),
+						},
+					},
+					"prefill": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Prefill is the prefill stage shape and minimal unit replica count in a disaggregated profile.",
+							Ref:         ref(v1alpha1.ModelDeploymentScalerCapacityPriorStage{}.OpenAPIModelName()),
+						},
+					},
+					"decode": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Decode is the decode stage shape and minimal unit replica count in a disaggregated profile.",
+							Ref:         ref(v1alpha1.ModelDeploymentScalerCapacityPriorStage{}.OpenAPIModelName()),
 						},
 					},
 					"points": {
@@ -12244,11 +12255,11 @@ func schema_gpustack_api_worker_v1alpha1_ModelDeploymentScalerCapacityPriorProfi
 						},
 					},
 				},
-				Required: []string{"role", "model", "quantization", "engine", "hardware", "topology", "points"},
+				Required: []string{"mode", "model", "quantization", "engine", "points"},
 			},
 		},
 		Dependencies: []string{
-			v1alpha1.ModelDeploymentScalerCapacityPriorPoint{}.OpenAPIModelName(), v1alpha1.ModelDeploymentScalerCapacityPriorTopology{}.OpenAPIModelName()},
+			v1alpha1.ModelDeploymentScalerCapacityPriorPoint{}.OpenAPIModelName(), v1alpha1.ModelDeploymentScalerCapacityPriorStage{}.OpenAPIModelName(), v1alpha1.ModelDeploymentScalerCapacityPriorTopology{}.OpenAPIModelName()},
 	}
 }
 
@@ -12276,6 +12287,45 @@ func schema_gpustack_api_worker_v1alpha1_ModelDeploymentScalerCapacityPriorSpec(
 		},
 		Dependencies: []string{
 			v1alpha1.ModelDeploymentScalerCatalogReference{}.OpenAPIModelName(), resource.Quantity{}.OpenAPIModelName()},
+	}
+}
+
+func schema_gpustack_api_worker_v1alpha1_ModelDeploymentScalerCapacityPriorStage(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "ModelDeploymentScalerCapacityPriorStage is the hardware, parallelism shape, and minimal unit replica count of one stage in a disaggregated capacity prior profile.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"replicas": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Replicas is the replica count of this stage within one minimal coupled serving unit.",
+							Default:     0,
+							Type:        []string{"integer"},
+							Format:      "int32",
+						},
+					},
+					"hardware": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Hardware is the accelerator family for this stage.",
+							Default:     "",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"topology": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Topology is the parallelism shape of one replica in this stage.",
+							Default:     map[string]interface{}{},
+							Ref:         ref(v1alpha1.ModelDeploymentScalerCapacityPriorTopology{}.OpenAPIModelName()),
+						},
+					},
+				},
+				Required: []string{"replicas", "hardware", "topology"},
+			},
+		},
+		Dependencies: []string{
+			v1alpha1.ModelDeploymentScalerCapacityPriorTopology{}.OpenAPIModelName()},
 	}
 }
 

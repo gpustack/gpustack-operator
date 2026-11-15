@@ -1518,16 +1518,18 @@ func (r *ModelDeploymentReconciler) adoptsModelDeploymentRetirement(
 		return false, false
 	}
 
-	members := make([]core.Pod, 0, len(plan.Target.Members))
-	for _, member := range plan.Target.Members {
-		members = append(members, *member)
-	}
 	fetch := r.groupForwardFetch
 	if fetch == nil {
 		fetch = defaultGroupForwardFetch
 	}
+	pairFetch := r.groupForwardPairFetch
+	if pairFetch == nil {
+		pairFetch = defaultGroupForwardPairFetch
+	}
+	probeMD := *md
+	probeMD.Status.Retirement = nil
 	qualifications := qualifyModelDeploymentInstances(
-		ctx, md, members, modelDeploymentPendingReplacement{}, fetch,
+		ctx, &probeMD, pods, modelDeploymentPendingReplacement{}, fetch, pairFetch,
 	)
 	for _, qualification := range qualifications {
 		if qualification.View.Role == plan.Reservation.RoleName &&

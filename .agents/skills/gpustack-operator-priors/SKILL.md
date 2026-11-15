@@ -28,7 +28,7 @@ which keeps user `ConfigMap` catalogs concise. Each profile is:
 apiVersion: worker.gpustack.ai/v1alpha1
 kind: ModelDeploymentScalerCapacityPriorCatalog
 profiles:
-  - role: Server                         # Server, Prefill or Decode
+  - mode: aggregated                     # aggregated or disaggregated
     model: deepseek-ai/DeepSeek-R1-0528  # verified Hugging Face org/repo ID
     quantization: fp8                    # canonical lowercase token
     engine: vllm                         # vllm or sglang
@@ -53,16 +53,27 @@ profiles:
           p99: 33
 ```
 
-- A profile is identified by its normalized `(role, model, quantization, engine, hardware,
-  topology)` tuple — never by a separate `id` field. `ParseCatalog` fails closed when two
-  entries normalize to the same tuple; `--merge` instead upserts one canonical sweep
-  deterministically and sorts profiles by role, model, quantization, engine, hardware and
-  parallelism widths.
+- An aggregated profile is identified by normalized `(mode, model, quantization, engine, hardware,
+  topology)`. A disaggregated profile replaces hardware and topology with both stage shapes.
+  `ParseCatalog` rejects duplicate shapes; `--merge` upserts one canonical sweep deterministically.
+- `mode: aggregated` imports `disagg: false` rows with `prefill_num_workers <= 1` and at most
+  2% throughput conservation error. Points are per replica; multi-node 16, 32 and 64 GPU shapes
+  are allowed.
+- `mode: disaggregated` imports `disagg: true` rows with positive prefill and decode worker counts.
+  Each stage's GPUs must divide evenly by its workers. System throughput conservation error must
+  not exceed 2%. Keep each sweep's worker cohort fixed. Divide stage replica counts and system
+  rates by `gcd(m_P, m_D)` to represent one minimal coupled unit.
+- Map `dynamo-vllm`, `llmd-vllm` and `vllm-disagg` to `vllm`; map `dynamo-sglang` and
+  `mori-sglang` to `sglang`.
 - `ttftMilliseconds` and `itlMilliseconds` accept any canonical `p<N>` percentile key in
   `(0, 100]` (for example `p25`, `p50`, `p70`, `p90`, `p95`, `p99`, `p99.9`). Latency quantiles
   a source did not publish stay absent.
-- Throughput units are per-replica `tokens/s`; latencies are milliseconds, and
-  `itlMilliseconds` is per token. Point values above are illustrative shapes, not measurements.
+- Throughput units are `tokens/s` per replica for aggregated profiles and per minimal coupled
+  unit for disaggregated profiles. Latencies are milliseconds; `itlMilliseconds` is per token.
+  Point values above are illustrative, not measurements.
+
+The T1 sync produced 385 profiles: 205 aggregated and 180 disaggregated, in 669,466 bytes.
+See [records](references/records.md) for model counts and source checksums.
 
 ## Canonical identity rules
 
@@ -109,7 +120,7 @@ Natural names (`mi325x`, `AMD Instinct MI325X`) normalize by the same Family rul
    upstream has removed, deprecated or superseded is reported to the user proactively, with an
    offer to retire the affected profiles (Workflow 2). Merge only after that review.
 3. Run `go run ./gen/priors --merge <path>` with the downloaded data. The merge upserts
-   profiles by their normalized 6-tuple, selects one canonical sweep deterministically and
+   profiles by their normalized mode-specific shape, selects one canonical sweep deterministically and
    refuses conflicting or unverifiable evidence.
 4. Verify: `make generate priors` (deterministic re-format) and
    `go test ./pkg/worker/scaling/priors/...`.
@@ -123,9 +134,11 @@ upstream has removed, deprecated or superseded but `priors.yaml` still carries. 
 profiles and offer to retire them; never remove them silently.
 
 Remove outdated or superseded profiles with `go run ./gen/priors --retire`, selecting by one or
-more of `--role`, `--model`, `--quantization`, `--engine`, `--hardware`, and optionally `--tp`
-or `--gpus` (for example `go run ./gen/priors --retire --model moonshotai/Kimi-K2.5 --hardware
-nvidia-h100`). All selectors normalize by the same identity rules. Then:
+more of `--mode`, `--model`, `--quantization`, `--engine`, `--hardware`, `--tp`, `--ep` or
+`--gpus`. For example, use `go run ./gen/priors --retire --mode aggregated --model
+moonshotai/Kimi-K2.5 --hardware nvidia-h100` or `go run ./gen/priors --retire --mode
+disaggregated --ep 8`. Stage selectors can match either disaggregated stage. All selectors
+normalize by the same identity rules. Then:
 
 1. Run `make generate priors` to re-format and re-validate the file.
 2. Log the retirement in `references/records.md`: what was removed, why, and the date.

@@ -24,6 +24,7 @@ package worker
 import (
 	"context"
 	"slices"
+	"strconv"
 	"strings"
 
 	core "k8s.io/api/core/v1"
@@ -84,14 +85,58 @@ type modelDeploymentQualificationLeg struct {
 type modelDeploymentMembershipGeneration string
 
 // modelDeploymentGenerationOf derives the generation of a replica's current membership.
+// In-place restarts of serving containers or RestartPolicy=Always sidecars advance the member's
+// token so standing endpoint eligibility is re-qualified against the restarted process once.
 func modelDeploymentGenerationOf(view modelDeploymentReplicaView) modelDeploymentMembershipGeneration {
 	uids := make([]string, 0, len(view.Members))
 	for _, member := range view.Members {
-		uids = append(uids, string(member.UID))
+		token := string(member.UID)
+		if token != "" {
+			if restarts := modelDeploymentMemberRestartCount(member); restarts > 0 {
+				token += "@r" + strconv.FormatInt(restarts, 10)
+			}
+		}
+		uids = append(uids, token)
 	}
 	slices.Sort(uids)
 
 	return modelDeploymentMembershipGeneration(strings.Join(uids, "/"))
+}
+
+// modelDeploymentMemberRestartCount sums restarts across regular serving containers and
+// RestartPolicy=Always native sidecar init containers. Regular init containers finish before
+// serving starts and cannot restart in place after a replica qualifies.
+func modelDeploymentMemberRestartCount(pod *core.Pod) int64 {
+	if pod == nil {
+		return 0
+	}
+	var total int64
+	for i := range pod.Status.ContainerStatuses {
+		if n := pod.Status.ContainerStatuses[i].RestartCount; n > 0 {
+			total += int64(n)
+		}
+	}
+	if len(pod.Status.InitContainerStatuses) == 0 {
+		return total
+	}
+	var alwaysSidecars map[string]bool
+	for i := range pod.Spec.InitContainers {
+		c := &pod.Spec.InitContainers[i]
+		if c.RestartPolicy != nil && *c.RestartPolicy == core.ContainerRestartPolicyAlways {
+			if alwaysSidecars == nil {
+				alwaysSidecars = make(map[string]bool, len(pod.Spec.InitContainers))
+			}
+			alwaysSidecars[c.Name] = true
+		}
+	}
+	for i := range pod.Status.InitContainerStatuses {
+		st := &pod.Status.InitContainerStatuses[i]
+		if alwaysSidecars[st.Name] && st.RestartCount > 0 {
+			total += int64(st.RestartCount)
+		}
+	}
+
+	return total
 }
 
 // modelDeploymentPendingReplacement records which ordinals of which roles this pass has already
@@ -411,7 +456,7 @@ func qualifyModelDeploymentInstances(
 	}
 
 	answers := modelDeploymentGroupForwardAnswers(
-		ctx, md, locals, fetch, modelDeploymentPairTransport(pairFetch),
+		ctx, md, locals, pending, fetch, modelDeploymentPairTransport(pairFetch),
 	)
 
 	qualifications := make([]modelDeploymentInstanceQualification, 0, len(locals))
@@ -604,6 +649,7 @@ type modelDeploymentGroupForwardAnswer struct {
 func modelDeploymentGroupForwardAnswers(
 	ctx context.Context, md *workercore.ModelDeployment,
 	locals []modelDeploymentReplicaLocal,
+	pending modelDeploymentPendingReplacement,
 	fetch modelDeploymentGroupForwardFetch,
 	pairFetch modelDeploymentGroupForwardPairFetch,
 ) []modelDeploymentGroupForwardAnswer {
@@ -622,26 +668,88 @@ func modelDeploymentGroupForwardAnswers(
 			continue
 		}
 
-		// A REPLICA CONDEMNED BY A DEFINITE MEMBER LEG OWES NOTHING TO A LIVE PROBE: the request
-		// would spend engine tokens on an answer that cannot soften the fault. The observation is
-		// still ASKED, with no transport: answers that never needed the network (a one-member
-		// replica is NotApplicable, an unverified shape is Unsupported) are unchanged, and only the
-		// probe leg comes back as an absence of evidence.
+		// A REPLICA CONDEMNED BY A DEFINITE LEG OWES NOTHING TO A LIVE PROBE: the request would
+		// spend engine tokens on an answer that cannot soften the fault. The observation is still
+		// ASKED, with no transport: answers that never needed the network (a one-member replica is
+		// NotApplicable, an unverified shape is Unsupported) are unchanged, and only the probe leg
+		// comes back as an absence of evidence.
 		transport := fetch
 		if local.membersComplete.Verdict == modelDeploymentLegFailed ||
-			local.membersReady.Verdict == modelDeploymentLegFailed {
+			local.membersReady.Verdict == modelDeploymentLegFailed ||
+			retirementTargets(md, local.view) ||
+			pending.modelDeploymentPending(local.view.Role, local.view.Ordinal) {
 			transport = nil
 		}
-		answers[i] = modelDeploymentGroupForwardAnswer{
-			forward: observeModelDeploymentGroupForward(ctx, md, local.role, local.view, transport),
-		}
+		forward := observeModelDeploymentGroupForward(
+			ctx, md, local.role, local.view, transport,
+			modelDeploymentReplicaAlreadyEligible(md, local, pending),
+		)
+		answers[i] = modelDeploymentGroupForwardAnswer{forward: forward}
 	}
 
-	for i, answer := range modelDeploymentPairAnswers(ctx, md, locals, prefills, decodes, pairFetch) {
+	for i, answer := range modelDeploymentPairAnswers(ctx, md, locals, prefills, decodes, pending, pairFetch) {
 		answers[i] = answer
 	}
 
 	return answers
+}
+
+// modelDeploymentReplicaAlreadyEligible reports whether a healthy, non-condemned replica already
+// carries endpoint eligibility bound to its current membership generation.
+//
+// An already-qualified replica whose membership has not moved and whose readiness holds is kept
+// verified without re-spending live completion tokens on every reconcile pass.
+func modelDeploymentReplicaAlreadyEligible(
+	md *workercore.ModelDeployment,
+	local modelDeploymentReplicaLocal,
+	pending modelDeploymentPendingReplacement,
+) bool {
+	if !local.localReady() {
+		return false
+	}
+	if retirementTargets(md, local.view) ||
+		pending.modelDeploymentPending(local.view.Role, local.view.Ordinal) {
+		return false
+	}
+	generation := string(modelDeploymentGenerationOf(local.view))
+	if generation == "" || len(local.view.Members) == 0 {
+		return false
+	}
+	prior := modelDeploymentGroupStatusOf(md.Status.Roles, &workercore.ModelDeploymentGroupStatus{
+		Role:    local.view.Role,
+		Ordinal: int32(local.view.Ordinal),
+	})
+	if prior == nil ||
+		prior.State != workercore.ModelDeploymentGroupStateEligible ||
+		prior.Generation != generation {
+		return false
+	}
+	shape := modelDeploymentDeployedAnsweringShape(local.view, md.Spec.Engine.Name)
+	all := shape == modelDeploymentAnsweringAll || shape == modelDeploymentAnsweringSole
+	answering := 0
+	for _, member := range local.view.Members {
+		if !all && !modelDeploymentAnsweringMemberLeader(member) {
+			continue
+		}
+		answering++
+		if member.Labels[modelDeploymentLabelKeyEndpointEligible] != modelDeploymentEndpointEligibleValue ||
+			member.Annotations[modelDeploymentAnnotationKeyEndpointEligibleGeneration] != generation {
+			return false
+		}
+	}
+
+	return answering > 0
+}
+
+// modelDeploymentGroupForwardRetained constructs the Verified forward answer for an unchanged,
+// already-eligible replica that was not re-probed in this pass.
+func modelDeploymentGroupForwardRetained(view modelDeploymentReplicaView) modelDeploymentGroupForward {
+	return modelDeploymentGroupForward{
+		State:       modelDeploymentGroupForwardVerified,
+		Reason:      "standing endpoint eligibility matches the current membership generation",
+		Generation:  modelDeploymentGenerationOf(view),
+		Observation: "retained from standing endpoint eligibility under the current membership generation",
+	}
 }
 
 // modelDeploymentPairAnswers answers the Prefill and the Decode replicas of one deployment.
@@ -653,6 +761,7 @@ func modelDeploymentPairAnswers(
 	ctx context.Context, md *workercore.ModelDeployment,
 	locals []modelDeploymentReplicaLocal,
 	prefills, decodes []int,
+	pending modelDeploymentPendingReplacement,
 	fetch modelDeploymentGroupForwardPairFetch,
 ) map[int]modelDeploymentGroupForwardAnswer {
 	answers := map[int]modelDeploymentGroupForwardAnswer{}
@@ -664,7 +773,8 @@ func modelDeploymentPairAnswers(
 
 	// THE CANDIDATES ARE THE ONES THAT MAY BE ASKED ABOUT. Every replica that is not a candidate
 	// already has its answer: the shape has no observation of it, or the replica is not ready
-	// enough to be asked about, or the transport is unwired.
+	// enough to be asked about, or it is condemned by retirement or replacement, or the transport
+	// is unwired.
 	candidates := func(group []int) []int {
 		ready := make([]int, 0, len(group))
 		for _, i := range group {
@@ -686,6 +796,18 @@ func modelDeploymentPairAnswers(
 					forward: modelDeploymentGroupForwardUnsupportedFor(
 						"no directed pair transport is wired, so this operator has no observation " +
 							"of a prefill-decode pair",
+					),
+				}
+			case retirementTargets(md, local.view):
+				answers[i] = modelDeploymentGroupForwardAnswer{
+					forward: modelDeploymentGroupForwardUnknownFor(
+						"the replica is targeted for retirement, so the pair was not asked",
+					),
+				}
+			case pending.modelDeploymentPending(local.view.Role, local.view.Ordinal):
+				answers[i] = modelDeploymentGroupForwardAnswer{
+					forward: modelDeploymentGroupForwardUnknownFor(
+						"the replica is condemned for replacement, so the pair was not asked",
 					),
 				}
 			default:
@@ -722,6 +844,25 @@ func modelDeploymentPairAnswers(
 	})
 
 	verified := map[int]bool{}
+	var retainedAttempt *modelDeploymentGroupForwardPairAttempt
+	if decodeRole := modelDeploymentGroupForwardPairDecodeRole(md); decodeRole != nil &&
+		ModelDeploymentRoleFrontedByProxy(md, decodeRole) {
+		retainedAttempt = &modelDeploymentGroupForwardPairAttempt{
+			Shape: modelDeploymentGroupForwardPairShapeViaRoutingProxy,
+		}
+	}
+	for _, group := range [][]int{readyPrefills, readyDecodes} {
+		for _, idx := range group {
+			if !modelDeploymentReplicaAlreadyEligible(md, locals[idx], pending) {
+				continue
+			}
+			verified[idx] = true
+			answers[idx] = modelDeploymentGroupForwardAnswer{
+				forward: modelDeploymentGroupForwardRetained(locals[idx].view),
+				attempt: retainedAttempt,
+			}
+		}
+	}
 	for _, prefill := range readyPrefills {
 		for _, decode := range readyDecodes {
 			if verified[prefill] && verified[decode] {

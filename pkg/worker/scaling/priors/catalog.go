@@ -32,14 +32,25 @@ const SchemaVersion = CatalogAPIVersion
 // hold an unbounded amount of data.
 const (
 	// MaxCatalogBytes is the largest decoded catalog the reader accepts.
-	MaxCatalogBytes = 512 * 1024
+	MaxCatalogBytes = 4 << 20
 
 	// MaxProfiles is the largest number of profiles a catalog may hold.
-	MaxProfiles = 256
+	MaxProfiles = 2048
 
 	// MaxPointsPerProfile is the largest number of measured load points one
 	// profile may hold.
 	MaxPointsPerProfile = 128
+)
+
+// ProfileMode is the serving architecture a catalog profile describes.
+type ProfileMode string
+
+const (
+	// ModeAggregated describes a single-role aggregated deployment scaled per replica.
+	ModeAggregated ProfileMode = "aggregated"
+
+	// ModeDisaggregated describes a coupled prefill/decode deployment scaled per minimal unit.
+	ModeDisaggregated ProfileMode = "disaggregated"
 )
 
 // RoleKind is the serving role a profile describes.
@@ -143,6 +154,10 @@ const (
 	// DenominatorPerReplica counts tokens per second over one complete
 	// scaling replica.
 	DenominatorPerReplica Denominator = "PerReplica"
+
+	// DenominatorPerUnit counts tokens per second over one minimal coupled
+	// serving unit.
+	DenominatorPerUnit Denominator = "PerUnit"
 
 	// DenominatorWholeSystem counts tokens per second over the whole measured
 	// system.
@@ -309,6 +324,22 @@ type Artifact struct {
 	SHA256 string `json:"sha256"`
 }
 
+// DisaggregatedStage describes one stage of a disaggregated capacity prior
+// profile or resolution request.
+type DisaggregatedStage struct {
+	// Replicas is the replica count of this stage within one minimal coupled serving unit.
+	Replicas int `json:"replicas"`
+
+	// Hardware is the accelerator the stage runs on.
+	Hardware HardwareIdentity `json:"hardware"`
+
+	// ServingConfig is the serving configuration the stage ran under.
+	ServingConfig ServingConfig `json:"servingConfig"`
+
+	// Topology is the parallelism shape of one replica in this stage.
+	Topology Topology `json:"topology"`
+}
+
 // Profile is one immutable measured profile.
 //
 // IT COVERS ONE SERVING CONFIGURATION AND ONE WORKLOAD ENVELOPE, because a
@@ -321,8 +352,8 @@ type Profile struct {
 	// SourceID names the source the profile was imported from.
 	SourceID string `json:"sourceID"`
 
-	// Role is the serving role the measurements describe.
-	Role RoleKind `json:"role"`
+	// Mode is the serving architecture the measurements describe.
+	Mode ProfileMode `json:"mode"`
 
 	// Identity is what the deployment must match.
 	Identity Identity `json:"identity"`
@@ -331,13 +362,22 @@ type Profile struct {
 	// under.
 	ServingConfig ServingConfig `json:"servingConfig"`
 
-	// Topology is the shape of one scaling replica.
+	// Topology is the shape of one scaling replica in an aggregated profile.
 	Topology Topology `json:"topology"`
 
-	// MeasuredReplicas is how many scaling replicas the measured system ran.
+	// Prefill is the prefill stage shape and minimal unit replica count in a
+	// disaggregated profile.
+	Prefill *DisaggregatedStage `json:"prefill,omitempty"`
+
+	// Decode is the decode stage shape and minimal unit replica count in a
+	// disaggregated profile.
+	Decode *DisaggregatedStage `json:"decode,omitempty"`
+
+	// MeasuredReplicas is how many scaling replicas or minimal coupled units
+	// the measured system ran.
 	//
 	// IT IS NOT PART OF THE MATCH, because the same shape measured on a
-	// different number of replicas is still the same profile.
+	// different number of replicas or units is still the same profile.
 	MeasuredReplicas int `json:"measuredReplicas"`
 
 	// Workload is the workload envelope the measurements were taken under.

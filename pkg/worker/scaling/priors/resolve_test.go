@@ -3,6 +3,7 @@ package priors
 import (
 	"errors"
 	"math"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -116,7 +117,7 @@ func TestResolveOutcomes(t *testing.T) {
 		{
 			name: "an exact match resolves the measured capacity",
 			profile: func(t *testing.T) Profile {
-				return testProfile(t, RoleKindServer, []MeasuredPoint{feasible, overLatency})
+				return testProfile(t, ModeAggregated, []MeasuredPoint{feasible, overLatency})
 			},
 			request: func(t *testing.T) Request { return testRequest() },
 			want:    "resolved",
@@ -125,7 +126,7 @@ func TestResolveOutcomes(t *testing.T) {
 		{
 			name: "the default headroom is applied",
 			profile: func(t *testing.T) Profile {
-				return testProfile(t, RoleKindServer, []MeasuredPoint{feasible, overLatency})
+				return testProfile(t, ModeAggregated, []MeasuredPoint{feasible, overLatency})
 			},
 			request: func(t *testing.T) Request { return testRequest() },
 			want:    "resolved",
@@ -134,7 +135,7 @@ func TestResolveOutcomes(t *testing.T) {
 		{
 			name: "a headroom above one is refused",
 			profile: func(t *testing.T) Profile {
-				return testProfile(t, RoleKindServer, []MeasuredPoint{feasible, overLatency})
+				return testProfile(t, ModeAggregated, []MeasuredPoint{feasible, overLatency})
 			},
 			request: func(t *testing.T) Request {
 				request := testRequest()
@@ -147,7 +148,7 @@ func TestResolveOutcomes(t *testing.T) {
 		{
 			name: "a different model revision is refused",
 			profile: func(t *testing.T) Profile {
-				return testProfile(t, RoleKindServer, []MeasuredPoint{feasible, overLatency})
+				return testProfile(t, ModeAggregated, []MeasuredPoint{feasible, overLatency})
 			},
 			request: func(t *testing.T) Request {
 				request := testRequest()
@@ -160,7 +161,7 @@ func TestResolveOutcomes(t *testing.T) {
 		{
 			name: "a different engine image is refused",
 			profile: func(t *testing.T) Profile {
-				return testProfile(t, RoleKindServer, []MeasuredPoint{feasible, overLatency})
+				return testProfile(t, ModeAggregated, []MeasuredPoint{feasible, overLatency})
 			},
 			request: func(t *testing.T) Request {
 				request := testRequest()
@@ -173,7 +174,7 @@ func TestResolveOutcomes(t *testing.T) {
 		{
 			name: "a different quantization is refused",
 			profile: func(t *testing.T) Profile {
-				return testProfile(t, RoleKindServer, []MeasuredPoint{feasible, overLatency})
+				return testProfile(t, ModeAggregated, []MeasuredPoint{feasible, overLatency})
 			},
 			request: func(t *testing.T) Request {
 				request := testRequest()
@@ -186,7 +187,7 @@ func TestResolveOutcomes(t *testing.T) {
 		{
 			name: "a different kv cache dtype is refused",
 			profile: func(t *testing.T) Profile {
-				return testProfile(t, RoleKindServer, []MeasuredPoint{feasible, overLatency})
+				return testProfile(t, ModeAggregated, []MeasuredPoint{feasible, overLatency})
 			},
 			request: func(t *testing.T) Request {
 				request := testRequest()
@@ -199,7 +200,7 @@ func TestResolveOutcomes(t *testing.T) {
 		{
 			name: "a different launch parameter set is refused",
 			profile: func(t *testing.T) Profile {
-				return testProfile(t, RoleKindServer, []MeasuredPoint{feasible, overLatency})
+				return testProfile(t, ModeAggregated, []MeasuredPoint{feasible, overLatency})
 			},
 			request: func(t *testing.T) Request {
 				request := testRequest()
@@ -212,7 +213,7 @@ func TestResolveOutcomes(t *testing.T) {
 		{
 			name: "a different tensor parallel width is refused",
 			profile: func(t *testing.T) Profile {
-				return testProfile(t, RoleKindServer, []MeasuredPoint{feasible, overLatency})
+				return testProfile(t, ModeAggregated, []MeasuredPoint{feasible, overLatency})
 			},
 			request: func(t *testing.T) Request {
 				request := testRequest()
@@ -225,7 +226,7 @@ func TestResolveOutcomes(t *testing.T) {
 		{
 			name: "a different expert parallel width is refused",
 			profile: func(t *testing.T) Profile {
-				return testProfile(t, RoleKindServer, []MeasuredPoint{feasible, overLatency})
+				return testProfile(t, ModeAggregated, []MeasuredPoint{feasible, overLatency})
 			},
 			request: func(t *testing.T) Request {
 				request := testRequest()
@@ -238,7 +239,7 @@ func TestResolveOutcomes(t *testing.T) {
 		{
 			name: "a missing latency target is refused",
 			profile: func(t *testing.T) Profile {
-				return testProfile(t, RoleKindServer, []MeasuredPoint{feasible, overLatency})
+				return testProfile(t, ModeAggregated, []MeasuredPoint{feasible, overLatency})
 			},
 			request: func(t *testing.T) Request {
 				request := testRequest()
@@ -251,7 +252,7 @@ func TestResolveOutcomes(t *testing.T) {
 		{
 			name: "a numerator the role does not use is refused",
 			profile: func(t *testing.T) Profile {
-				return testProfile(t, RoleKindServer, []MeasuredPoint{metricMismatch, overLatency})
+				return testProfile(t, ModeAggregated, []MeasuredPoint{metricMismatch, overLatency})
 			},
 			request: func(t *testing.T) Request { return testRequest() },
 			want:    "refused",
@@ -260,7 +261,7 @@ func TestResolveOutcomes(t *testing.T) {
 		{
 			name: "a token count convention that includes cache hits is refused",
 			profile: func(t *testing.T) Profile {
-				return testProfile(t, RoleKindServer, []MeasuredPoint{conventionMismatch, overLatency})
+				return testProfile(t, ModeAggregated, []MeasuredPoint{conventionMismatch, overLatency})
 			},
 			request: func(t *testing.T) Request { return testRequest() },
 			want:    "refused",
@@ -269,7 +270,7 @@ func TestResolveOutcomes(t *testing.T) {
 		{
 			name: "a workload with an unknown cache behavior is refused",
 			profile: func(t *testing.T) Profile {
-				profile := testProfile(t, RoleKindServer, []MeasuredPoint{feasible, overLatency})
+				profile := testProfile(t, ModeAggregated, []MeasuredPoint{feasible, overLatency})
 				profile.Workload.CacheBehavior = CacheBehaviorUnknown
 				return redigest(t, profile)
 			},
@@ -280,7 +281,7 @@ func TestResolveOutcomes(t *testing.T) {
 		{
 			name: "a single measured load level is refused",
 			profile: func(t *testing.T) Profile {
-				return testProfile(t, RoleKindServer, []MeasuredPoint{feasible})
+				return testProfile(t, ModeAggregated, []MeasuredPoint{feasible})
 			},
 			request: func(t *testing.T) Request { return testRequest() },
 			want:    "refused",
@@ -289,7 +290,7 @@ func TestResolveOutcomes(t *testing.T) {
 		{
 			name: "a curve without a boundary is refused",
 			profile: func(t *testing.T) Profile {
-				return testProfile(t, RoleKindServer, []MeasuredPoint{feasible, serverPoint(8, 1200, 500, 20)})
+				return testProfile(t, ModeAggregated, []MeasuredPoint{feasible, serverPoint(8, 1200, 500, 20)})
 			},
 			request: func(t *testing.T) Request { return testRequest() },
 			want:    "refused",
@@ -298,7 +299,7 @@ func TestResolveOutcomes(t *testing.T) {
 		{
 			name: "a higher quantile of the same metric is used as a bound",
 			profile: func(t *testing.T) Profile {
-				return testProfile(t, RoleKindServer, []MeasuredPoint{higherQuantile, overLatency})
+				return testProfile(t, ModeAggregated, []MeasuredPoint{higherQuantile, overLatency})
 			},
 			request: func(t *testing.T) Request { return testRequest() },
 			want:    "resolved",
@@ -307,7 +308,7 @@ func TestResolveOutcomes(t *testing.T) {
 		{
 			name: "a median cannot stand in for the required quantile",
 			profile: func(t *testing.T) Profile {
-				return testProfile(t, RoleKindServer, []MeasuredPoint{medianOnly, overLatency})
+				return testProfile(t, ModeAggregated, []MeasuredPoint{medianOnly, overLatency})
 			},
 			request: func(t *testing.T) Request { return testRequest() },
 			want:    "refused",
@@ -316,7 +317,7 @@ func TestResolveOutcomes(t *testing.T) {
 		{
 			name: "time per output token cannot stand in for inter token latency",
 			profile: func(t *testing.T) Profile {
-				return testProfile(t, RoleKindServer, []MeasuredPoint{tpotOnly, overLatency})
+				return testProfile(t, ModeAggregated, []MeasuredPoint{tpotOnly, overLatency})
 			},
 			request: func(t *testing.T) Request { return testRequest() },
 			want:    "refused",
@@ -325,7 +326,7 @@ func TestResolveOutcomes(t *testing.T) {
 		{
 			name: "a per gpu rate is reconstructed for one replica",
 			profile: func(t *testing.T) Profile {
-				profile := testProfile(t, RoleKindServer, []MeasuredPoint{perGPU, overLatency})
+				profile := testProfile(t, ModeAggregated, []MeasuredPoint{perGPU, overLatency})
 				profile.Topology.GPUsPerReplica = 4
 				return redigest(t, profile)
 			},
@@ -340,7 +341,7 @@ func TestResolveOutcomes(t *testing.T) {
 		{
 			name: "a whole system rate is divided by the measured replicas",
 			profile: func(t *testing.T) Profile {
-				profile := testProfile(t, RoleKindServer, []MeasuredPoint{wholeSystem, overLatency})
+				profile := testProfile(t, ModeAggregated, []MeasuredPoint{wholeSystem, overLatency})
 				profile.MeasuredReplicas = 4
 				return redigest(t, profile)
 			},
@@ -349,13 +350,13 @@ func TestResolveOutcomes(t *testing.T) {
 			seed:    250,
 		},
 		{
-			name: "the encode role needs no capacity prior",
+			name: "an unknown mode is refused",
 			profile: func(t *testing.T) Profile {
-				return testProfile(t, RoleKindEncode, []MeasuredPoint{feasible, overLatency})
+				return testProfile(t, ModeAggregated, []MeasuredPoint{feasible, overLatency})
 			},
 			request: func(t *testing.T) Request {
 				request := testRequest()
-				request.Role = RoleKindEncode
+				request.Mode = ProfileMode("encode")
 				return request
 			},
 			want:   "refused",
@@ -409,7 +410,7 @@ func TestResolveOutcomes(t *testing.T) {
 // TestResolveUsesTheConfiguredHeadroom asserts the headroom a request sets is
 // the one that is applied.
 func TestResolveUsesTheConfiguredHeadroom(t *testing.T) {
-	profile := testProfile(t, RoleKindServer, []MeasuredPoint{
+	profile := testProfile(t, ModeAggregated, []MeasuredPoint{
 		serverPoint(4, 1000, 500, 20),
 		serverPoint(8, 1200, 5000, 20),
 	})
@@ -439,7 +440,7 @@ func TestResolveLabelsAConservativeBound(t *testing.T) {
 		testLatency(LatencyMetricTTFT, 0.99, 500),
 		testLatency(LatencyMetricITL, 0.99, 20),
 	}
-	profile := testProfile(t, RoleKindServer, []MeasuredPoint{
+	profile := testProfile(t, ModeAggregated, []MeasuredPoint{
 		point,
 		serverPoint(8, 1200, 5000, 20),
 	})
@@ -462,7 +463,7 @@ func TestResolveLabelsAConservativeBound(t *testing.T) {
 // IT MATTERS BECAUSE THE SHAPE IS WHAT A PROFILE IS KNOWN BY, and a deployment
 // states its shape before it states anything else about the catalog.
 func TestResolveSelectsByShape(t *testing.T) {
-	profile := testProfile(t, RoleKindServer, []MeasuredPoint{
+	profile := testProfile(t, ModeAggregated, []MeasuredPoint{
 		serverPoint(4, 1000, 500, 20),
 		serverPoint(8, 1200, 5000, 20),
 	})
@@ -483,7 +484,7 @@ func TestResolveSelectsByShape(t *testing.T) {
 // TestResolveRefusesAnUnknownShape asserts a shape that names nothing is
 // refused.
 func TestResolveRefusesAnUnknownShape(t *testing.T) {
-	profile := testProfile(t, RoleKindServer, []MeasuredPoint{
+	profile := testProfile(t, ModeAggregated, []MeasuredPoint{
 		serverPoint(4, 1000, 500, 20),
 		serverPoint(8, 1200, 5000, 20),
 	})
@@ -507,7 +508,7 @@ func TestResolveRefusesAnUnknownShape(t *testing.T) {
 // TestResolveRefusesAnAmbiguousMatch asserts two profiles that match the same
 // deployment are refused, because the resolver must not choose between them.
 func TestResolveRefusesAnAmbiguousMatch(t *testing.T) {
-	first := testProfile(t, RoleKindServer, []MeasuredPoint{
+	first := testProfile(t, ModeAggregated, []MeasuredPoint{
 		serverPoint(4, 1000, 500, 20),
 		serverPoint(8, 1200, 5000, 20),
 	})
@@ -550,7 +551,7 @@ func TestResolveRefusesAMissingCatalog(t *testing.T) {
 func TestResolveUsesAnExplicitSaturationAsTheBoundary(t *testing.T) {
 	saturated := serverPoint(8, 1200, 500, 20)
 	saturated.Saturation = &Saturation{Measured: true, Note: "the queue grew without a throughput gain"}
-	profile := testProfile(t, RoleKindServer, []MeasuredPoint{
+	profile := testProfile(t, ModeAggregated, []MeasuredPoint{
 		serverPoint(4, 1000, 500, 20),
 		saturated,
 	})
@@ -575,7 +576,7 @@ func TestResolveRefusesAProfileThatMeasuresTwice(t *testing.T) {
 		testLatency(LatencyMetricTTFT, 0.95, 900),
 		testLatency(LatencyMetricITL, 0.95, 20),
 	}
-	profile := testProfile(t, RoleKindServer, []MeasuredPoint{
+	profile := testProfile(t, ModeAggregated, []MeasuredPoint{
 		conflicting,
 		serverPoint(8, 1200, 5000, 20),
 	})
@@ -639,7 +640,7 @@ func TestCheckEligibilityReportsEveryGap(t *testing.T) {
 
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
-			profile := testProfile(t, RoleKindServer, testCase.points)
+			profile := testProfile(t, ModeAggregated, testCase.points)
 			if testCase.detail == "cacheBehavior" {
 				profile.Workload.CacheBehavior = CacheBehaviorUnknown
 				profile = redigest(t, profile)
@@ -662,7 +663,7 @@ func TestCheckEligibilityReportsEveryGap(t *testing.T) {
 // TestCheckEligibilityAcceptsACompleteProfile asserts a profile that carries
 // the evidence the resolver needs is accepted.
 func TestCheckEligibilityAcceptsACompleteProfile(t *testing.T) {
-	profile := testProfile(t, RoleKindServer, []MeasuredPoint{
+	profile := testProfile(t, ModeAggregated, []MeasuredPoint{
 		serverPoint(4, 1000, 500, 20),
 		serverPoint(8, 1200, 5000, 20),
 	})
@@ -676,7 +677,7 @@ func TestCheckEligibilityAcceptsACompleteProfile(t *testing.T) {
 // different load models is refused, because a concurrency count and a request
 // rate are not comparable numbers and a boundary between them is invented.
 func TestResolveRefusesAMixedLoadAxis(t *testing.T) {
-	profile := testProfile(t, RoleKindServer, []MeasuredPoint{
+	profile := testProfile(t, ModeAggregated, []MeasuredPoint{
 		ratePoint(5, 1000, 500, 20),
 		ratePoint(10, 1200, 5000, 20),
 		serverPoint(64, 2000, 50000, 20),
@@ -697,7 +698,7 @@ func TestResolveRefusesAMixedLoadAxis(t *testing.T) {
 // refused, because the envelope the operator selected is not the envelope
 // that was measured.
 func TestResolveRefusesALoadModelTheWorkloadDoesNotDeclare(t *testing.T) {
-	profile := testProfile(t, RoleKindServer, []MeasuredPoint{
+	profile := testProfile(t, ModeAggregated, []MeasuredPoint{
 		ratePoint(5, 1000, 500, 20),
 		ratePoint(10, 1200, 5000, 20),
 	})
@@ -718,7 +719,7 @@ func TestResolveRefusesALoadModelTheWorkloadDoesNotDeclare(t *testing.T) {
 func TestResolveUsesTwoQualifiedPointsAndIgnoresADiagnostic(t *testing.T) {
 	saturated := serverPoint(8, 1200, 500, 20)
 	saturated.Saturation = &Saturation{Measured: true, Note: "the queue grew without a throughput gain"}
-	profile := testProfile(t, RoleKindServer, []MeasuredPoint{
+	profile := testProfile(t, ModeAggregated, []MeasuredPoint{
 		serverPoint(4, 1000, 500, 20),
 		saturated,
 		medianOnlyPoint(16, 1400),
@@ -749,7 +750,7 @@ func TestResolveRefusesOneQualifiedPointWithADiagnostic(t *testing.T) {
 		testLatency(LatencyMetricTTFT, 0.95, 500),
 		testLatency(LatencyMetricTPOT, 0.95, 20),
 	}
-	profile := testProfile(t, RoleKindServer, []MeasuredPoint{
+	profile := testProfile(t, ModeAggregated, []MeasuredPoint{
 		serverPoint(4, 1000, 500, 20),
 		tpotOnly,
 	})
@@ -772,7 +773,7 @@ func TestResolveRefusesOneQualifiedPointWithADiagnostic(t *testing.T) {
 // point above the feasible boundary does not establish it, because a point
 // that cannot be judged is neither feasible nor a failed load level.
 func TestResolveRefusesABoundaryEstablishedByADiagnostic(t *testing.T) {
-	profile := testProfile(t, RoleKindServer, []MeasuredPoint{
+	profile := testProfile(t, ModeAggregated, []MeasuredPoint{
 		serverPoint(4, 1000, 500, 20),
 		serverPoint(8, 1200, 500, 20),
 		medianOnlyPoint(16, 1400),
@@ -795,7 +796,7 @@ func TestResolveRefusesABoundaryEstablishedByADiagnostic(t *testing.T) {
 // a request that matched no profile would leave the deployment with no prior at
 // all.
 func TestResolveTreatsAnUnstatedWidthAsOne(t *testing.T) {
-	profile := testProfile(t, RoleKindServer, []MeasuredPoint{
+	profile := testProfile(t, ModeAggregated, []MeasuredPoint{
 		serverPoint(4, 1000, 500, 20),
 		serverPoint(8, 1200, 5000, 20),
 	})
@@ -836,7 +837,7 @@ func TestResolveLatencyBoundsDescribeSelectedSeed(t *testing.T) {
 			// that misses the target cannot prove that the requested quantile
 			// missed it.
 			points[1].Saturation = &Saturation{Measured: true, Note: "the queue grew without a throughput gain"}
-			profile := testProfile(t, RoleKindServer, points)
+			profile := testProfile(t, ModeAggregated, points)
 			resolution, err := testCatalog(t, profile).Resolve(testRequest())
 			if err != nil {
 				t.Fatal(err)
@@ -872,7 +873,7 @@ func TestResolveLatencyBoundsDescribeSelectedSeed(t *testing.T) {
 // AND CANNOT SAY WHETHER THE REQUESTED ONE MISSED THE TARGET, and a tolerance
 // WOULD LET A QUANTILE THAT IS NOT THE REQUESTED ONE PROVE THE FAILURE.
 func TestResolveDoesNotFailOnAQuantileAboveTheRequestedOne(t *testing.T) {
-	profile := testProfile(t, RoleKindServer, []MeasuredPoint{
+	profile := testProfile(t, ModeAggregated, []MeasuredPoint{
 		quantilePoint(4, 1000, 0.95, 500, 20),
 		quantilePoint(8, 1200, 0.9500000005, 5000, 20),
 	})
@@ -901,7 +902,7 @@ func TestResolveAcceptsTwoQuantilesThatAreCloseButDifferent(t *testing.T) {
 	seed := quantilePoint(4, 1000, 0.95, 500, 20)
 	seed.Latencies = append(seed.Latencies, testLatency(LatencyMetricTTFT, 0.9500000005, 5000))
 
-	profile := testProfile(t, RoleKindServer, []MeasuredPoint{
+	profile := testProfile(t, ModeAggregated, []MeasuredPoint{
 		seed,
 		quantilePoint(8, 1200, 0.95, 5000, 20),
 	})
@@ -943,7 +944,7 @@ func TestResolveReportsTheQuantileFaithfully(t *testing.T) {
 
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
-			profile := testProfile(t, RoleKindServer, []MeasuredPoint{
+			profile := testProfile(t, ModeAggregated, []MeasuredPoint{
 				quantilePoint(4, 1000, testCase.quantile, 500, 20),
 				quantilePoint(8, 1200, testCase.quantile, 5000, 20),
 			})
@@ -993,7 +994,7 @@ func TestResolveUsesTheRequestedQuantile(t *testing.T) {
 
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
-			profile := testProfile(t, RoleKindServer, []MeasuredPoint{
+			profile := testProfile(t, ModeAggregated, []MeasuredPoint{
 				quantilePoint(4, 1000, testCase.quantile, 500, 20),
 				quantilePoint(8, 1200, testCase.quantile, 5000, 20),
 			})
@@ -1055,7 +1056,7 @@ func TestResolveHandlesAnInvalidQuantile(t *testing.T) {
 
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
-			profile := testProfile(t, RoleKindServer, []MeasuredPoint{
+			profile := testProfile(t, ModeAggregated, []MeasuredPoint{
 				quantilePoint(4, 1000, 0.95, 500, 20),
 				quantilePoint(8, 1200, 0.95, 5000, 20),
 			})
@@ -1093,7 +1094,7 @@ func TestResolveHandlesAnInvalidQuantile(t *testing.T) {
 // IT MATTERS BECAUSE A REQUEST AT THE NINTH DECILE IS ANSWERED BY A SOURCE
 // THAT MEASURED THE NINETY NINTH PERCENTILE, AND THE ANSWER HAS TO SAY SO.
 func TestResolveUsesAHigherQuantileConservatively(t *testing.T) {
-	profile := testProfile(t, RoleKindServer, []MeasuredPoint{
+	profile := testProfile(t, ModeAggregated, []MeasuredPoint{
 		quantilePoint(4, 1000, 0.99, 500, 20),
 		quantilePoint(8, 1200, 0.90, 5000, 20),
 	})
@@ -1136,7 +1137,7 @@ func TestResolveUsesAHigherQuantileConservatively(t *testing.T) {
 // ONE FROM ABOVE AND CANNOT SAY WHETHER THE REQUESTED ONE MISSED THE TARGET,
 // SO IT MUST NOT ESTABLISH A FAILURE BOUNDARY.
 func TestResolveDoesNotFailOnAHigherQuantile(t *testing.T) {
-	profile := testProfile(t, RoleKindServer, []MeasuredPoint{
+	profile := testProfile(t, ModeAggregated, []MeasuredPoint{
 		quantilePoint(4, 1000, 0.99, 500, 20),
 		quantilePoint(8, 1200, 0.99, 5000, 20),
 	})
@@ -1176,7 +1177,7 @@ func TestResolveDoesNotFailOnAHigherQuantile(t *testing.T) {
 // measurement above the target comes from a higher quantile is refused,
 // because nothing in it decides the target.
 func TestResolveRefusesWhenNoPointCanBeDecided(t *testing.T) {
-	profile := testProfile(t, RoleKindServer, []MeasuredPoint{
+	profile := testProfile(t, ModeAggregated, []MeasuredPoint{
 		quantilePoint(4, 1000, 0.99, 5000, 100),
 		quantilePoint(8, 1200, 0.99, 5000, 100),
 	})
@@ -1223,7 +1224,7 @@ func TestResolveChangesTheSeedWithTheQuantile(t *testing.T) {
 	// request at the ninety ninth percentile.
 	highest := quantilePoint(16, 1400, 0.50, 6000, 40)
 
-	profile := testProfile(t, RoleKindServer, []MeasuredPoint{low, middle, highest})
+	profile := testProfile(t, ModeAggregated, []MeasuredPoint{low, middle, highest})
 	catalog := testCatalog(t, profile)
 
 	median := testRequest()
@@ -1272,7 +1273,7 @@ func TestResolveChangesTheSeedWithTheQuantile(t *testing.T) {
 // IT MATTERS BECAUSE A STATUS FIELD THAT SHOWS THE MEASURED QUANTILE AS THE
 // REQUESTED ONE REPORTS A MEASUREMENT THAT WAS NOT TAKEN.
 func TestResolveNeverReportsTheRequestedQuantileAsTheMeasuredOne(t *testing.T) {
-	profile := testProfile(t, RoleKindServer, []MeasuredPoint{
+	profile := testProfile(t, ModeAggregated, []MeasuredPoint{
 		quantilePoint(4, 1000, 0.99, 500, 20),
 		quantilePoint(8, 1200, 0.90, 5000, 20),
 	})
@@ -1313,7 +1314,7 @@ func TestCheckEligibilityAcceptsAProfileMeasuredBelowTheDefaultQuantile(t *testi
 
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
-			profile := testProfile(t, RoleKindServer, []MeasuredPoint{
+			profile := testProfile(t, ModeAggregated, []MeasuredPoint{
 				quantilePoint(4, 1000, testCase.quantile, 500, 20),
 				quantilePoint(8, 1200, testCase.quantile, 5000, 20),
 			})
@@ -1333,7 +1334,7 @@ func TestCheckEligibilityAcceptsAProfileMeasuredBelowTheDefaultQuantile(t *testi
 // QUESTIONS, AND A PROFILE THAT CARRIES EVIDENCE CAN STILL BE UNFIT FOR ONE
 // REQUEST.
 func TestResolveRefusesAProfileMeasuredBelowTheRequestedQuantile(t *testing.T) {
-	profile := testProfile(t, RoleKindServer, []MeasuredPoint{
+	profile := testProfile(t, ModeAggregated, []MeasuredPoint{
 		quantilePoint(4, 1000, 0.90, 500, 20),
 		quantilePoint(8, 1200, 0.90, 5000, 20),
 	})
@@ -1373,7 +1374,7 @@ func TestResolveInterpolatesBetweenTwoMeasuredQuantiles(t *testing.T) {
 		testLatency(LatencyMetricTTFT, 0.99, 5000),
 		testLatency(LatencyMetricITL, 0.99, 120),
 	}
-	profile := testProfile(t, RoleKindServer, []MeasuredPoint{feasible, failing})
+	profile := testProfile(t, ModeAggregated, []MeasuredPoint{feasible, failing})
 	catalog := testCatalog(t, profile)
 
 	request := testRequest()
@@ -1425,7 +1426,7 @@ func TestResolveDoesNotInterpolateAnOutOfOrderCurve(t *testing.T) {
 		testLatency(LatencyMetricTTFT, 0.99, 5000),
 		testLatency(LatencyMetricITL, 0.99, 120),
 	}
-	profile := testProfile(t, RoleKindServer, []MeasuredPoint{feasible, failing})
+	profile := testProfile(t, ModeAggregated, []MeasuredPoint{feasible, failing})
 	catalog := testCatalog(t, profile)
 
 	request := testRequest()
@@ -1448,7 +1449,7 @@ func TestResolveDoesNotInterpolateAnOutOfOrderCurve(t *testing.T) {
 // quantization is stated, and a revision mismatch reports model.revision rather
 // than model.name.
 func TestResolveAcceptsUnstatedDeploymentQuantization(t *testing.T) {
-	profile := testProfile(t, RoleKindServer, []MeasuredPoint{
+	profile := testProfile(t, ModeAggregated, []MeasuredPoint{
 		serverPoint(4, 1000, 500, 20),
 		serverPoint(8, 1200, 5000, 20),
 	})
@@ -1478,4 +1479,244 @@ func TestResolveAcceptsUnstatedDeploymentQuantization(t *testing.T) {
 	if refusal.Detail["mismatch"] != "model.revision" {
 		t.Fatalf("mismatch = %q, want model.revision", refusal.Detail["mismatch"])
 	}
+}
+
+func TestResolveDisaggregatedStagesAndMismatches(t *testing.T) {
+	prefillTopo := Topology{
+		GPUsPerReplica: 4, TensorParallel: 4, PipelineParallel: 1, DataParallel: 1, LocalDataParallel: 1, ExpertParallel: 4,
+	}
+	decodeTopo := Topology{
+		GPUsPerReplica: 8, TensorParallel: 8, PipelineParallel: 1, DataParallel: 1, LocalDataParallel: 1, ExpertParallel: 8,
+	}
+	points := []MeasuredPoint{
+		testPoint(8, 1600, 300, 10),
+		testPoint(16, 2400, 4000, 100),
+	}
+	for i := range points {
+		points[i].Throughput.Denominator = DenominatorPerUnit
+	}
+	profile := testDisaggregatedProfile(t, 2, prefillTopo, 1, decodeTopo, points)
+	catalog := testCatalog(t, profile)
+
+	req := testRequest()
+	req.Mode = ModeDisaggregated
+	req.Identity.Hardware = HardwareIdentity{}
+	req.Topology = Topology{}
+	req.Prefill = &DisaggregatedStage{Replicas: 2, Hardware: testIdentity().Hardware, Topology: prefillTopo}
+	req.Decode = &DisaggregatedStage{Replicas: 1, Hardware: testIdentity().Hardware, Topology: decodeTopo}
+
+	res, err := catalog.Resolve(req)
+	if err != nil {
+		t.Fatalf("Resolve disaggregated failed: %v", err)
+	}
+	if res.SeedTokensPerSecond != 1600 {
+		t.Fatalf("SeedTokensPerSecond = %v, want 1600", res.SeedTokensPerSecond)
+	}
+
+	if _, refusal := catalog.Select(profile.Shape()); refusal != nil {
+		t.Fatalf("Select disaggregated shape failed: %v", refusal)
+	}
+
+	// Mismatched decode replica ratio fails shape lookup (ProfileNotFound).
+	notFoundReq := req
+	decodeCopy := *req.Decode
+	decodeCopy.Replicas = 2
+	notFoundReq.Decode = &decodeCopy
+	_, err = catalog.Resolve(notFoundReq)
+	if !IsProfileNotFound(err) {
+		t.Fatalf("expected IsProfileNotFound for mismatched decode replicas, got %v", err)
+	}
+
+	// Matching shape with mismatched decode hardware memoryGB refuses with decode.hardware.memoryGB.
+	badReq := req
+	decodeMemCopy := *req.Decode
+	decodeMemCopy.Hardware.MemoryGB = 192
+	badReq.Decode = &decodeMemCopy
+	_, err = catalog.Resolve(badReq)
+	if err == nil {
+		t.Fatal("expected refusal for mismatched decode hardware memory")
+	}
+	ref := refusalOf(t, err)
+	if ref.Detail["mismatch"] != "decode.hardware.memoryGB" {
+		t.Fatalf("mismatch = %q, want decode.hardware.memoryGB", ref.Detail["mismatch"])
+	}
+}
+
+func TestResolveDisaggregatedBoundariesAndStageServingMerge(t *testing.T) {
+	topo := testTopology()
+	makePoints := func() []MeasuredPoint {
+		pts := []MeasuredPoint{
+			testPoint(8, 1600, 300, 10),
+			testPoint(16, 2400, 4000, 100),
+		}
+		for i := range pts {
+			pts[i].Throughput.Denominator = DenominatorPerUnit
+		}
+		return pts
+	}
+
+	t.Run("stage servingConfig overrides top-level servingConfig per stage", func(t *testing.T) {
+		profile := testDisaggregatedProfile(t, 1, topo, 1, topo, makePoints())
+		profile.ServingConfig.PrefixCaching = "enabled"
+		profile.Decode.ServingConfig.PrefixCaching = "disabled"
+		profile = redigest(t, profile)
+		catalog := testCatalog(t, profile)
+
+		req := testRequest()
+		req.Mode = ModeDisaggregated
+		req.Identity.Hardware = HardwareIdentity{}
+		req.Topology = Topology{}
+		req.Prefill = &DisaggregatedStage{
+			Replicas:      1,
+			Hardware:      testIdentity().Hardware,
+			ServingConfig: ServingConfig{PrefixCaching: "enabled"},
+			Topology:      topo,
+		}
+		req.Decode = &DisaggregatedStage{
+			Replicas:      1,
+			Hardware:      testIdentity().Hardware,
+			ServingConfig: ServingConfig{PrefixCaching: "disabled"},
+			Topology:      topo,
+		}
+		if _, err := catalog.Resolve(req); err != nil {
+			t.Fatalf("expected stage override to match, got %v", err)
+		}
+
+		mismatchReq := req
+		prefillBad := *req.Prefill
+		prefillBad.ServingConfig.PrefixCaching = "disabled"
+		mismatchReq.Prefill = &prefillBad
+		_, err := catalog.Resolve(mismatchReq)
+		if err == nil {
+			t.Fatal("expected prefill servingConfig mismatch")
+		}
+		if got := refusalOf(t, err).Detail["mismatch"]; got != "prefill.servingConfig.prefixCaching" {
+			t.Fatalf("mismatch = %q, want prefill.servingConfig.prefixCaching", got)
+		}
+	})
+
+	t.Run("unitGPUs and ValidateProfile reject integer overflow", func(t *testing.T) {
+		eightGPUTopo := topo
+		eightGPUTopo.GPUsPerReplica = 8
+		eightGPUTopo.TensorParallel = 8
+		profile := testDisaggregatedProfile(t, math.MaxInt/4, eightGPUTopo, math.MaxInt/4-1, eightGPUTopo, makePoints())
+		if got := unitGPUs(profile); got != 0 {
+			t.Fatalf("unitGPUs = %d, want 0 on overflow", got)
+		}
+		if err := validateProfile(profile); err == nil {
+			t.Fatal("expected validateProfile error on overflowing disaggregated unit GPU count")
+		}
+	})
+
+	t.Run("perReplicaTokensPerSecond rejects float64 overflow and non-finite latency targets", func(t *testing.T) {
+		agg := testProfile(t, ModeAggregated, []MeasuredPoint{
+			testPoint(8, 1e308, 300, 10),
+			testPoint(16, 1e308, 4000, 100),
+		})
+		agg.Topology.GPUsPerReplica = 8
+		agg.Topology.TensorParallel = 8
+		agg.Points[0].Throughput.Denominator = DenominatorPerGPU
+		agg.Points[1].Throughput.Denominator = DenominatorPerGPU
+		if _, ok := perReplicaTokensPerSecond(agg.Points[0].Throughput, agg); ok {
+			t.Fatal("expected perReplicaTokensPerSecond overflow to return false")
+		}
+
+		validCatalog := testCatalog(t, testProfile(t, ModeAggregated, []MeasuredPoint{
+			testPoint(8, 1600, 300, 10),
+			testPoint(16, 2400, 4000, 100),
+		}))
+		nanReq := testRequest()
+		nanReq.Constraints.TTFTTargetMilliseconds = math.NaN()
+		if _, err := validCatalog.Resolve(nanReq); err == nil {
+			t.Fatal("expected NaN TTFT target to be refused")
+		}
+	})
+
+	t.Run("stage LaunchParameters override shared flags via last-write-wins while preserving malformed tokens", func(t *testing.T) {
+		profile := testDisaggregatedProfile(t, 1, topo, 1, topo, makePoints())
+		profile.ServingConfig.LaunchParameters = []string{"--max-model-len=2048"}
+		profile.Decode.ServingConfig.LaunchParameters = []string{"--max-model-len=4096"}
+		profile = redigest(t, profile)
+		catalog := testCatalog(t, profile)
+
+		req := testRequest()
+		req.Mode = ModeDisaggregated
+		req.Identity.Hardware = HardwareIdentity{}
+		req.Topology = Topology{}
+		req.Prefill = &DisaggregatedStage{
+			Replicas:      1,
+			Hardware:      testIdentity().Hardware,
+			ServingConfig: ServingConfig{LaunchParameters: []string{"--max-model-len=2048"}},
+			Topology:      topo,
+		}
+		req.Decode = &DisaggregatedStage{
+			Replicas:      1,
+			Hardware:      testIdentity().Hardware,
+			ServingConfig: ServingConfig{LaunchParameters: []string{"--max-model-len=4096"}},
+			Topology:      topo,
+		}
+		if _, err := catalog.Resolve(req); err != nil {
+			t.Fatalf("expected stage LaunchParameters override to match, got %v", err)
+		}
+
+		badDecode := *req.Decode
+		badDecode.ServingConfig.LaunchParameters = []string{"--max-model-len=2048"}
+		mismatchReq := req
+		mismatchReq.Decode = &badDecode
+		if _, err := catalog.Resolve(mismatchReq); err == nil {
+			t.Fatal("expected mismatched decode LaunchParameters to be refused")
+		}
+	})
+
+	t.Run("MergeServingConfig preserves malformed and conflicting EngineEnv entries without aliasing inputs", func(t *testing.T) {
+		base := ServingConfig{
+			Router:                    "llmd",
+			LaunchParameters:          []string{"--max-model-len=2048"},
+			EffectiveLaunchParameters: []string{"--max-model-len=2048"},
+			EngineEnv:                 []string{"A=1", "B=2"},
+			EffectiveDefaults:         map[string]string{"--dtype": "bf16"},
+		}
+		overlay := ServingConfig{
+			EngineEnv:         []string{"B=20", "C=3"},
+			EffectiveDefaults: map[string]string{"--swap-space": "0"},
+		}
+		merged := MergeServingConfig(base, overlay)
+		wantEnv := []string{"A=1", "B=20", "C=3"}
+		if !slices.Equal(merged.EngineEnv, wantEnv) {
+			t.Fatalf("merged.EngineEnv = %v, want %v", merged.EngineEnv, wantEnv)
+		}
+		merged.LaunchParameters[0] = "--mutated"
+		merged.EffectiveDefaults["--dtype"] = "fp16"
+		if base.LaunchParameters[0] != "--max-model-len=2048" || base.EffectiveDefaults["--dtype"] != "bf16" {
+			t.Fatalf("MergeServingConfig aliased base collections: %+v", base)
+		}
+
+		emptyNonNil := ServingConfig{
+			LaunchParameters:          []string{},
+			EffectiveLaunchParameters: []string{},
+			EngineEnv:                 []string{},
+			EffectiveDefaults:         map[string]string{},
+		}
+		mergedEmpty := MergeServingConfig(emptyNonNil, emptyNonNil)
+		if mergedEmpty.LaunchParameters != nil || mergedEmpty.EffectiveLaunchParameters != nil ||
+			mergedEmpty.EngineEnv != nil || mergedEmpty.EffectiveDefaults != nil {
+			t.Fatalf("expected nil empty collections on MergeServingConfig, got %+v", mergedEmpty)
+		}
+
+		malformed := MergeServingConfig(
+			ServingConfig{EngineEnv: []string{"MALFORMED", "=empty"}},
+			ServingConfig{EngineEnv: []string{"VALID=1"}},
+		)
+		if !slices.Contains(malformed.EngineEnv, "MALFORMED") || !slices.Contains(malformed.EngineEnv, "=empty") {
+			t.Fatalf("expected malformed entries preserved verbatim, got %v", malformed.EngineEnv)
+		}
+
+		conflicting := MergeServingConfig(
+			ServingConfig{EngineEnv: []string{"DUP=1", "DUP=2"}},
+			ServingConfig{EngineEnv: []string{"DUP=3", "OTHER=1"}},
+		)
+		if !slices.Contains(conflicting.EngineEnv, "DUP=1") || !slices.Contains(conflicting.EngineEnv, "DUP=2") {
+			t.Fatalf("expected intra-slice duplicate conflict preserved, got %v", conflicting.EngineEnv)
+		}
+	})
 }

@@ -57,15 +57,66 @@ func ModelDeploymentScalerLatencyQuantile(
 
 	value, ok := modelDeploymentScalerQuantileValue(quantity)
 	if !ok {
-		return 0, fmt.Errorf("the latency quantile %s is not a number", quantity.String())
+		return 0, fmt.Errorf("the latency quantile %s is not a number", ModelDeploymentScalerFormatQuantity(quantity))
 	}
 	if value <= 0 || value > 1 {
 		return 0, fmt.Errorf(
 			"the latency quantile must be greater than zero and no greater than one, got %s",
-			quantity.String(),
+			ModelDeploymentScalerFormatQuantity(quantity),
 		)
 	}
 	return value, nil
+}
+
+const (
+	maxModelDeploymentScalerQuantityBitLen = 128
+	maxModelDeploymentScalerQuantityScale  = 38
+)
+
+// ModelDeploymentScalerBoundedRat converts a Quantity into an exact rational without
+// mutating the input Quantity or allocating unbounded powers of ten.
+func ModelDeploymentScalerBoundedRat(quantity *resource.Quantity) (*big.Rat, bool) {
+	if quantity == nil {
+		return nil, false
+	}
+
+	cp := quantity.DeepCopy()
+	dec := cp.AsDec()
+	unscaled := dec.UnscaledBig()
+	scale := int64(dec.Scale())
+	if unscaled.BitLen() > maxModelDeploymentScalerQuantityBitLen ||
+		scale < -maxModelDeploymentScalerQuantityScale ||
+		scale > maxModelDeploymentScalerQuantityScale {
+		return nil, false
+	}
+
+	num := new(big.Int).Set(unscaled)
+	den := big.NewInt(1)
+	if scale >= 0 {
+		den.Exp(big.NewInt(10), big.NewInt(scale), nil)
+	} else {
+		num.Mul(num, new(big.Int).Exp(big.NewInt(10), big.NewInt(-scale), nil))
+	}
+	return new(big.Rat).SetFrac(num, den), true
+}
+
+// ModelDeploymentScalerFormatQuantity renders a Quantity for diagnostics without
+// mutating the receiver or expanding out-of-range decimal exponents.
+func ModelDeploymentScalerFormatQuantity(quantity *resource.Quantity) string {
+	if quantity == nil {
+		return "<nil>"
+	}
+	cp := quantity.DeepCopy()
+	dec := cp.AsDec()
+	unscaled := dec.UnscaledBig()
+	scale := int64(dec.Scale())
+	if unscaled.BitLen() > maxModelDeploymentScalerQuantityBitLen {
+		return "<out-of-range>"
+	}
+	if scale < -maxModelDeploymentScalerQuantityScale || scale > maxModelDeploymentScalerQuantityScale {
+		return fmt.Sprintf("%se%d", unscaled.String(), -scale)
+	}
+	return cp.String()
 }
 
 // modelDeploymentScalerQuantileValue reads the value a quantity holds.
@@ -82,20 +133,10 @@ func ModelDeploymentScalerLatencyQuantile(
 // IT ROUNDS THE SAME WAY A READER OF THE DECIMAL WOULD, so the quantile a
 // scaler names is the quantile every other reader of that number sees.
 func modelDeploymentScalerQuantileValue(quantity *resource.Quantity) (float64, bool) {
-	if quantity == nil {
+	rat, ok := ModelDeploymentScalerBoundedRat(quantity)
+	if !ok {
 		return 0, false
 	}
-
-	dec := quantity.AsDec()
-	num := new(big.Int).Set(dec.UnscaledBig())
-	den := big.NewInt(1)
-	scale := int64(dec.Scale())
-	if scale >= 0 {
-		den.Exp(big.NewInt(10), big.NewInt(scale), nil)
-	} else {
-		num.Mul(num, new(big.Int).Exp(big.NewInt(10), big.NewInt(-scale), nil))
-	}
-
-	value, _ := new(big.Rat).SetFrac(num, den).Float64()
+	value, _ := rat.Float64()
 	return value, true
 }

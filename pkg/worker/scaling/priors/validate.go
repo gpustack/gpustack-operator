@@ -145,8 +145,8 @@ func Validate(catalog Catalog) error {
 // setting constrains nothing, and a profile that states one is compared on
 // that one alone.
 func validateProfile(profile Profile) error {
-	if _, known := requirementFor(profile.Role); !known {
-		return fmt.Errorf("carries the unknown role %q", profile.Role)
+	if _, known := requirementForMode(profile.Mode); !known {
+		return fmt.Errorf("carries the unknown mode %q", profile.Mode)
 	}
 	if err := requireNonEmpty(
 		field{"model name", profile.Identity.Model.Name},
@@ -154,63 +154,62 @@ func validateProfile(profile Profile) error {
 		field{"model tokenizer", profile.Identity.Model.Tokenizer},
 		field{"model quantization", profile.Identity.Model.Quantization},
 		field{"engine image", profile.Identity.Engine.Image},
-		field{"hardware accelerator", profile.Identity.Hardware.Accelerator},
-		field{"hardware form factor", profile.Identity.Hardware.FormFactor},
 		field{"workload id", profile.Workload.ID},
 		field{"workload revision", profile.Workload.Revision},
 		field{"workload modality", profile.Workload.Modality},
 	); err != nil {
 		return err
 	}
-	if profile.Identity.Hardware.MemoryGB <= 0 {
-		return fmt.Errorf("hardware memory %d is not positive", profile.Identity.Hardware.MemoryGB)
-	}
-	if profile.Topology.GPUsPerReplica <= 0 {
-		return fmt.Errorf("gpus per replica %d is not positive", profile.Topology.GPUsPerReplica)
-	}
 	if profile.MeasuredReplicas <= 0 {
 		return fmt.Errorf("measured replicas %d is not positive", profile.MeasuredReplicas)
-	}
-	// THE TENSOR, PIPELINE, DATA AND LOCAL DATA PARALLEL WIDTHS ARE REQUIRED,
-	// because a scaling replica is defined by them and a zero width must not
-	// match a deployment by both sides leaving it out.
-	//
-	// CONTEXT AND EXPERT PARALLEL MAY BE ZERO, because a measured system that
-	// does not use them states so with a zero width.
-	for _, entry := range []struct {
-		name  string
-		width int
-	}{
-		{"tensor parallel", profile.Topology.TensorParallel},
-		{"pipeline parallel", profile.Topology.PipelineParallel},
-		{"data parallel", profile.Topology.DataParallel},
-		{"local data parallel", profile.Topology.LocalDataParallel},
-	} {
-		if entry.width <= 0 {
-			return fmt.Errorf("%s width %d is not positive", entry.name, entry.width)
-		}
-	}
-	for _, entry := range []struct {
-		name  string
-		width int
-	}{
-		{"context parallel", profile.Topology.ContextParallel},
-		{"expert parallel", profile.Topology.ExpertParallel},
-	} {
-		if entry.width < 0 {
-			return fmt.Errorf("%s width %d is negative", entry.name, entry.width)
-		}
-	}
-	switch profile.Workload.CacheBehavior {
-	case CacheBehaviorAllMisses, CacheBehaviorIncludesHits, CacheBehaviorUnknown:
-	default:
-		return fmt.Errorf("workload cache behavior %q is not known", profile.Workload.CacheBehavior)
 	}
 	if err := CheckEffectiveLaunchParameters(
 		profile.ServingConfig.LaunchParameters,
 		profile.ServingConfig.EffectiveLaunchParameters,
 	); err != nil {
 		return fmt.Errorf("the effective launch parameters do not describe the launch: %w", err)
+	}
+	switch profile.Mode {
+	case ModeAggregated:
+		if profile.Prefill != nil || profile.Decode != nil {
+			return fmt.Errorf("aggregated profile must not carry prefill or decode stage")
+		}
+		if err := validateHardwareIdentity("", profile.Identity.Hardware); err != nil {
+			return err
+		}
+		if err := validateTopology("", profile.Topology); err != nil {
+			return err
+		}
+	case ModeDisaggregated:
+		if profile.Identity.Hardware != (HardwareIdentity{}) {
+			return fmt.Errorf("disaggregated profile must not carry top-level hardware")
+		}
+		if profile.Topology != (Topology{}) {
+			return fmt.Errorf("disaggregated profile must not carry top-level topology")
+		}
+		if profile.Prefill == nil || profile.Decode == nil {
+			return fmt.Errorf("disaggregated profile requires both prefill and decode stages")
+		}
+		if profile.Prefill.Replicas <= 0 || profile.Decode.Replicas <= 0 {
+			return fmt.Errorf("disaggregated stage replicas must be positive")
+		}
+		if gcdInt(profile.Prefill.Replicas, profile.Decode.Replicas) != 1 {
+			return fmt.Errorf("disaggregated stage replicas %d:%d must be coprime", profile.Prefill.Replicas, profile.Decode.Replicas)
+		}
+		if err := validateDisaggregatedStage("prefill", profile.Prefill); err != nil {
+			return err
+		}
+		if err := validateDisaggregatedStage("decode", profile.Decode); err != nil {
+			return err
+		}
+		if unitGPUs(profile) <= 0 {
+			return fmt.Errorf("disaggregated unit GPU count overflows supported integer bounds")
+		}
+	}
+	switch profile.Workload.CacheBehavior {
+	case CacheBehaviorAllMisses, CacheBehaviorIncludesHits, CacheBehaviorUnknown:
+	default:
+		return fmt.Errorf("workload cache behavior %q is not known", profile.Workload.CacheBehavior)
 	}
 	switch profile.Workload.ArrivalModel {
 	case ClientModelFixedConcurrency, ClientModelOpenLoop:
@@ -243,6 +242,74 @@ func validateProfile(profile Profile) error {
 	}
 	if profile.Digest != digest {
 		return fmt.Errorf("digest %q does not match the content digest %q", profile.Digest, digest)
+	}
+	return nil
+}
+
+func validateDisaggregatedStage(name string, stage *DisaggregatedStage) error {
+	if err := validateHardwareIdentity(name+" ", stage.Hardware); err != nil {
+		return err
+	}
+	if err := validateTopology(name+" ", stage.Topology); err != nil {
+		return err
+	}
+	if err := CheckEffectiveLaunchParameters(
+		stage.ServingConfig.LaunchParameters,
+		stage.ServingConfig.EffectiveLaunchParameters,
+	); err != nil {
+		return fmt.Errorf("%s effective launch parameters do not describe the launch: %w", name, err)
+	}
+	return nil
+}
+
+func validateHardwareIdentity(prefix string, hardware HardwareIdentity) error {
+	if err := requireNonEmpty(
+		field{prefix + "hardware accelerator", hardware.Accelerator},
+		field{prefix + "hardware form factor", hardware.FormFactor},
+	); err != nil {
+		return err
+	}
+	if hardware.MemoryGB <= 0 {
+		return fmt.Errorf("%shardware memory %d is not positive", prefix, hardware.MemoryGB)
+	}
+	return nil
+}
+
+// validateTopology checks replica parallelism widths and GPU count.
+//
+// THE TENSOR, PIPELINE, DATA AND LOCAL DATA PARALLEL WIDTHS ARE REQUIRED,
+// because a scaling replica is defined by them and a zero width must not
+// match a deployment by both sides leaving it out.
+//
+// CONTEXT AND EXPERT PARALLEL MAY BE ZERO, because a measured system that
+// does not use them states so with a zero width.
+func validateTopology(prefix string, topology Topology) error {
+	if topology.GPUsPerReplica <= 0 {
+		return fmt.Errorf("%sgpus per replica %d is not positive", prefix, topology.GPUsPerReplica)
+	}
+	for _, entry := range []struct {
+		name  string
+		width int
+	}{
+		{"tensor parallel", topology.TensorParallel},
+		{"pipeline parallel", topology.PipelineParallel},
+		{"data parallel", topology.DataParallel},
+		{"local data parallel", topology.LocalDataParallel},
+	} {
+		if entry.width <= 0 {
+			return fmt.Errorf("%s%s width %d is not positive", prefix, entry.name, entry.width)
+		}
+	}
+	for _, entry := range []struct {
+		name  string
+		width int
+	}{
+		{"context parallel", topology.ContextParallel},
+		{"expert parallel", topology.ExpertParallel},
+	} {
+		if entry.width < 0 {
+			return fmt.Errorf("%s%s width %d is negative", prefix, entry.name, entry.width)
+		}
 	}
 	return nil
 }
@@ -285,7 +352,7 @@ func validatePoint(point MeasuredPoint) error {
 		return fmt.Errorf("token count convention %q is not known", point.Throughput.TokenCountConvention)
 	}
 	switch point.Throughput.Denominator {
-	case DenominatorPerGPU, DenominatorPerReplica, DenominatorWholeSystem:
+	case DenominatorPerGPU, DenominatorPerReplica, DenominatorPerUnit, DenominatorWholeSystem:
 	default:
 		return fmt.Errorf("throughput denominator %q is not known", point.Throughput.Denominator)
 	}

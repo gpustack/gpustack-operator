@@ -736,6 +736,11 @@ func (in ModelDeploymentScalerCapacityPriorSpec) OpenAPIModelName() string {
 }
 
 // OpenAPIModelName returns the OpenAPI model name for this type.
+func (in ModelDeploymentScalerCapacityPriorStage) OpenAPIModelName() string {
+	return "ai.gpustack.worker.v1alpha1.ModelDeploymentScalerCapacityPriorStage"
+}
+
+// OpenAPIModelName returns the OpenAPI model name for this type.
 func (in ModelDeploymentScalerCapacityPriorTopology) OpenAPIModelName() string {
 	return "ai.gpustack.worker.v1alpha1.ModelDeploymentScalerCapacityPriorTopology"
 }
