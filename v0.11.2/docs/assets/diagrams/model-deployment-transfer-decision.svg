@@ -1,0 +1,198 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 980" role="img" aria-labelledby="title desc"><title id="title">KV Transfer Parameter Decision Flow</title><desc id="desc">Decision flowchart showing how ModelDeployment resolves KV transfer backends, fabric protocols, and engine parameters across Mooncake, NIXL, and HIXL.</desc><style>
+:root{color-scheme:light dark;--bg:#f8fbff;--card:#fff;--ink:#12233d;--muted:#52677f;--line:#c9d9e7;--blue:#2563eb;--purple:#7c3aed;--teal:#0d9488;--amber:#d97706;--emerald:#059669;--soft:#edf5fc;--grid:#dfeaf3}
+@media(prefers-color-scheme:dark){:root{--bg:#101d30;--card:#1a2c43;--ink:#f1f6ff;--muted:#bdcde0;--line:#526b83;--blue:#80adff;--purple:#c4a4ff;--teal:#58d6c8;--amber:#ffc273;--emerald:#5ce2af;--soft:#213b55;--grid:#29425b}}
+text{font-family:system-ui,-apple-system,BlinkMacSystemFont,sans-serif;fill:var(--ink)}
+.title{font-size:28px;font-weight:750;letter-spacing:-.4px}
+.sub{font-size:14px;fill:var(--muted)}
+.label{font-size:11.5px;font-weight:700;letter-spacing:1.1px;fill:var(--muted)}
+.head{font-size:15px;font-weight:700;fill:var(--ink)}
+.body{font-size:12.5px;font-weight:600;fill:var(--ink)}
+.detail{font-size:12px;fill:var(--muted)}
+.tiny{font:11.5px ui-monospace,SFMono-Regular,Menlo,monospace;fill:var(--ink)}
+.tinymuted{font:11px ui-monospace,SFMono-Regular,Menlo,monospace;fill:var(--muted)}
+.panel{fill:var(--soft);stroke:var(--line);stroke-width:1.3}
+.card{fill:var(--card);stroke:var(--line);stroke-width:1.3}
+.pill{fill:var(--card);stroke:var(--line);stroke-width:1.2}
+.wire{fill:none;stroke:var(--teal);stroke-width:1.8;marker-end:url(#arrow)}
+.wire-blue{fill:none;stroke:var(--blue);stroke-width:1.8;marker-end:url(#arrow-blue)}
+.wire-purple{fill:none;stroke:var(--purple);stroke-width:1.8;marker-end:url(#arrow-purple)}
+.wire-amber{fill:none;stroke:var(--amber);stroke-width:1.8;marker-end:url(#arrow-amber)}
+.headline{font-size:16px;font-weight:750;letter-spacing:.35px}
+</style><defs><pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse"><path d="M40 0H0V40" fill="none" stroke="var(--grid)" stroke-width="1"/></pattern><marker id="arrow" markerWidth="7" markerHeight="7" refX="6" refY="3.5" orient="auto"><path d="M0 0L7 3.5L0 7Z" fill="var(--teal)"/></marker><marker id="arrow-blue" markerWidth="7" markerHeight="7" refX="6" refY="3.5" orient="auto"><path d="M0 0L7 3.5L0 7Z" fill="var(--blue)"/></marker><marker id="arrow-purple" markerWidth="7" markerHeight="7" refX="6" refY="3.5" orient="auto"><path d="M0 0L7 3.5L0 7Z" fill="var(--purple)"/></marker><marker id="arrow-amber" markerWidth="7" markerHeight="7" refX="6" refY="3.5" orient="auto"><path d="M0 0L7 3.5L0 7Z" fill="var(--amber)"/></marker></defs><rect width="1200" height="980" fill="var(--bg)"/><rect width="1200" height="980" fill="url(#grid)" opacity=".65"/>
+<text x="36" y="42" class="label">MODEL DEPLOYMENT  ·  PARAMETER SYNTHESIS</text>
+<text x="36" y="80" class="title">KV Transfer Parameter Decision Flow</text>
+<text x="36" y="106" class="sub">How the operator resolves spec.kvTransfer.backend, fabric protocols, handshake ports, and engine parameters</text>
+<rect x="1124" y="34" width="38" height="38" rx="9" fill="var(--blue)"/>
+<text class="headline" x="1143" y="60" text-anchor="middle" fill="white" style="fill:white">G</text>
+
+<!-- STAGE 1: PAIR & BACKEND SELECTION -->
+<rect x="36" y="130" width="1128" height="118" rx="14" class="panel"/>
+<text x="56" y="154" class="label">STEP 1  ·  BACKEND RESOLUTION  (PREFILL + DECODE PAIR BEHIND SPEC.ROUTER)</text>
+
+<rect x="56" y="168" width="290" height="64" rx="10" class="card"/>
+<rect x="56" y="176" width="4" height="48" rx="2" fill="var(--blue)"/>
+<text x="72" y="194" class="head">spec.kvTransfer.backend</text>
+<text x="72" y="216" class="detail">Optional: Mooncake | NIXL | HIXL</text>
+
+<path d="M346 200 H402" class="wire-blue"/>
+
+<rect x="402" y="168" width="340" height="64" rx="10" class="card"/>
+<rect x="402" y="176" width="4" height="48" rx="2" fill="var(--purple)"/>
+<text x="418" y="194" class="head">When backend is omitted</text>
+<text x="418" y="216" class="tiny">Ascend -&gt; HIXL  |  NVIDIA / AMD -&gt; Mooncake</text>
+
+<path d="M742 200 H798" class="wire-purple"/>
+
+<rect x="798" y="168" width="346" height="64" rx="10" class="card"/>
+<rect x="798" y="176" width="4" height="48" rx="2" fill="var(--teal)"/>
+<text x="814" y="194" class="head">Unified Handshake Base Port</text>
+<text x="814" y="216" class="tiny">Port 8998 across all backends &amp; engines</text>
+
+<!-- ARROWS FROM STAGE 1 TO 3 COLUMNS -->
+<path d="M274 232 V276" class="wire-blue"/>
+<text x="160" y="264" class="tinymuted">Mooncake / omitted (NVIDIA, AMD)</text>
+<path d="M320 232 V252 H692 V276" class="wire-purple"/>
+<text x="615" y="268" class="tinymuted">NIXL (NVIDIA, AMD)</text>
+<path d="M572 232 V244 H1018 V276" class="wire-amber"/>
+<text x="895" y="264" class="tinymuted">HIXL / omitted (Ascend)</text>
+
+<!-- COLUMN 1: MOONCAKE -->
+<rect x="36" y="276" width="476" height="618" rx="14" class="panel"/>
+<rect x="36" y="276" width="476" height="36" rx="14" fill="var(--blue)" opacity=".14"/>
+<text x="56" y="299" class="head" style="fill:var(--blue)">Backend: Mooncake  (NVIDIA / AMD / Ascend)</text>
+<text x="56" y="330" class="detail">Evaluates vendor, pair resources.interface &gt; 0, and aws-efa-enabled:</text>
+
+<!-- Mooncake Case 1: Ascend -->
+<rect x="54" y="344" width="440" height="92" rx="10" class="card"/>
+<rect x="54" y="352" width="4" height="76" rx="2" fill="var(--amber)"/>
+<text x="70" y="368" class="body">1. Ascend Pool (manufacturer: ascend)  -&gt;  protocol = ascend</text>
+<text x="70" y="389" class="tiny">vLLM:   MooncakeConnectorV1 (kv_port: 8998, tp_size/dp_size)</text>
+<text x="70" y="407" class="tiny">SGLang: --disaggregation-transfer-backend=mooncake</text>
+<text x="70" y="425" class="tinymuted">Both mount /usr/local/Ascend/driver (RO)  ·  No MC_FORCE_TCP</text>
+
+<!-- Mooncake Case 2: EFA -->
+<rect x="54" y="448" width="440" height="92" rx="10" class="card"/>
+<rect x="54" y="456" width="4" height="76" rx="2" fill="var(--purple)"/>
+<text x="70" y="472" class="body">2. Pair interface &gt; 0 + EFA active  -&gt;  protocol = efa</text>
+<text x="70" y="493" class="tiny">vLLM:   MooncakeConnector (mooncake_protocol: efa)</text>
+<text x="70" y="511" class="tiny">SGLang: --disaggregation-transfer-backend=mooncake</text>
+<text x="70" y="529" class="tinymuted">Requests vpc.amazonaws.com/efa  ·  No MC_FORCE_TCP</text>
+
+<!-- Mooncake Case 3: AMD ROCm -->
+<rect x="54" y="552" width="440" height="92" rx="10" class="card"/>
+<rect x="54" y="560" width="4" height="76" rx="2" fill="var(--teal)"/>
+<text x="70" y="576" class="body">3. AMD ROCm Pool (manufacturer: amd)  -&gt;  protocol = hip</text>
+<text x="70" y="597" class="tiny">vLLM:   MooncakeConnector (mooncake_protocol: hip)</text>
+<text x="70" y="615" class="tiny">SGLang: --disaggregation-transfer-backend=mooncake</text>
+<text x="70" y="633" class="tinymuted">Auto-discovers intra-node XGMI + RDMA/TCP  ·  No MC_FORCE_TCP</text>
+
+<!-- Mooncake Case 4: NVIDIA RDMA -->
+<rect x="54" y="656" width="440" height="92" rx="10" class="card"/>
+<rect x="54" y="664" width="4" height="76" rx="2" fill="var(--blue)"/>
+<text x="70" y="680" class="body">4. NVIDIA + Pair interface &gt; 0  -&gt;  protocol = rdma</text>
+<text x="70" y="701" class="tiny">vLLM:   MooncakeConnector (mooncake_protocol: rdma)</text>
+<text x="70" y="719" class="tiny">SGLang: --disaggregation-transfer-backend=mooncake</text>
+<text x="70" y="737" class="tinymuted">Requests device.gpustack.ai/rdma*  ·  No MC_FORCE_TCP</text>
+
+<!-- Mooncake Case 5: NVIDIA TCP Fallback -->
+<rect x="54" y="760" width="440" height="116" rx="10" class="card"/>
+<rect x="54" y="768" width="4" height="100" rx="2" fill="var(--emerald)"/>
+<text x="70" y="784" class="body">5. NVIDIA without Pair interface &gt; 0  -&gt;  protocol = tcp</text>
+<text x="70" y="805" class="tiny">vLLM:   MooncakeConnector (mooncake_protocol: tcp)</text>
+<text x="70" y="823" class="tiny">SGLang: --disaggregation-transfer-backend=mooncake_tcp</text>
+<text x="70" y="841" class="tinymuted">Defaults MC_FORCE_TCP=1 (unless non-TCP store), MC_TCP_*,</text>
+<text x="70" y="859" class="tinymuted">vLLM --block-size 128  |  SGLang --page-size 64</text>
+
+<!-- COLUMN 2: NIXL -->
+<rect x="530" y="276" width="324" height="618" rx="14" class="panel"/>
+<rect x="530" y="276" width="324" height="36" rx="14" fill="var(--purple)" opacity=".14"/>
+<text x="550" y="299" class="head" style="fill:var(--purple)">Backend: NIXL  (NVIDIA / AMD)</text>
+<text x="550" y="330" class="detail">Checks aws-efa-enabled or EFA KV pool:</text>
+
+<!-- NIXL Case 1: EFA Active -->
+<rect x="546" y="344" width="292" height="168" rx="10" class="card"/>
+<rect x="546" y="352" width="4" height="152" rx="2" fill="var(--purple)"/>
+<text x="562" y="368" class="body">EFA Active  -&gt;  Plugin: LIBFABRIC</text>
+<text x="562" y="392" class="tiny">vLLM:</text>
+<text x="562" y="410" class="tinymuted">NixlConnector backends:[&quot;LIBFABRIC&quot;]</text>
+<text x="562" y="432" class="tiny">SGLang:</text>
+<text x="562" y="450" class="tinymuted">--disaggregation-transfer-backend=nixl</text>
+<text x="562" y="468" class="tinymuted">SGLANG_DISAGGREGATION_NIXL_BACKEND</text>
+<text x="562" y="486" class="tinymuted">  = LIBFABRIC (defaulted)</text>
+<text x="562" y="504" class="tinymuted">interface &gt; 0 -&gt; vpc.amazonaws.com/efa</text>
+
+<!-- NIXL Case 2: Standard RDMA / TCP -->
+<rect x="546" y="528" width="292" height="168" rx="10" class="card"/>
+<rect x="546" y="536" width="4" height="152" rx="2" fill="var(--blue)"/>
+<text x="562" y="552" class="body">Standard Cluster  -&gt;  Plugin: UCX</text>
+<text x="562" y="576" class="tiny">vLLM:</text>
+<text x="562" y="594" class="tinymuted">NixlConnector backends:[&quot;UCX&quot;]</text>
+<text x="562" y="616" class="tiny">SGLang:</text>
+<text x="562" y="634" class="tinymuted">--disaggregation-transfer-backend=nixl</text>
+<text x="562" y="652" class="tinymuted">SGLANG_DISAGGREGATION_NIXL_BACKEND</text>
+<text x="562" y="670" class="tinymuted">  = UCX (defaulted)</text>
+<text x="562" y="688" class="tinymuted">interface &gt; 0 -&gt; device.gpustack.ai/rdma*</text>
+
+<!-- NIXL Shared Side-Channel Box -->
+<rect x="546" y="712" width="292" height="164" rx="10" class="card"/>
+<rect x="546" y="720" width="4" height="148" rx="2" fill="var(--teal)"/>
+<text x="562" y="736" class="body">Handshake Listeners (Port 8998)</text>
+<text x="562" y="760" class="tiny">vLLM (Both Prefill &amp; Decode):</text>
+<text x="562" y="778" class="tinymuted">VLLM_NIXL_SIDE_CHANNEL_HOST=podIP</text>
+<text x="562" y="796" class="tinymuted">VLLM_NIXL_SIDE_CHANNEL_PORT=8998</text>
+<text x="562" y="820" class="tiny">SGLang (Prefill only):</text>
+<text x="562" y="838" class="tinymuted">--disaggregation-bootstrap-port=8998</text>
+<text x="562" y="858" class="tinymuted">UCX auto-picks IB / RoCE / NVLink / TCP</text>
+
+<!-- COLUMN 3: HIXL -->
+<rect x="872" y="276" width="292" height="618" rx="14" class="panel"/>
+<rect x="872" y="276" width="292" height="36" rx="14" fill="var(--amber)" opacity=".16"/>
+<text x="892" y="299" class="head" style="fill:var(--amber)">Backend: HIXL  (Ascend Only)</text>
+<text x="892" y="330" class="detail">Ascend CANN HCCS / RoCE fabric:</text>
+
+<!-- HIXL vLLM -->
+<rect x="888" y="344" width="260" height="168" rx="10" class="card"/>
+<rect x="888" y="352" width="4" height="152" rx="2" fill="var(--amber)"/>
+<text x="904" y="368" class="body">vLLM on Ascend</text>
+<text x="904" y="392" class="tiny">Owned Connector:</text>
+<text x="904" y="410" class="tinymuted">MooncakeConnectorV1</text>
+<text x="904" y="428" class="tinymuted">kv_port: 8998 (prefill &amp; decode</text>
+<text x="904" y="446" class="tinymuted">tp_size / dp_size blocks)</text>
+<text x="904" y="470" class="tiny">Defaulted Env:</text>
+<text x="904" y="488" class="tinymuted">ASCEND_AUTO_CONNECT=1</text>
+
+<!-- HIXL SGLang -->
+<rect x="888" y="528" width="260" height="168" rx="10" class="card"/>
+<rect x="888" y="536" width="4" height="152" rx="2" fill="var(--teal)"/>
+<text x="904" y="552" class="body">SGLang on Ascend</text>
+<text x="904" y="576" class="tiny">Owned Flags:</text>
+<text x="904" y="594" class="tinymuted">--disaggregation-transfer-backend</text>
+<text x="904" y="612" class="tinymuted">  = ascend</text>
+<text x="904" y="630" class="tinymuted">--disaggregation-bootstrap-port=8998</text>
+<text x="904" y="654" class="tiny">Defaulted Env:</text>
+<text x="904" y="672" class="tinymuted">ASCEND_MF_TRANSFER_PROTOCOL=sdma</text>
+
+<!-- HIXL Driver Mount -->
+<rect x="888" y="712" width="260" height="164" rx="10" class="card"/>
+<rect x="888" y="720" width="4" height="148" rx="2" fill="var(--emerald)"/>
+<text x="904" y="736" class="body">Host Driver &amp; Link Discovery</text>
+<text x="904" y="760" class="tiny">Owned Mount (Both Engines):</text>
+<text x="904" y="778" class="tinymuted">/usr/local/Ascend/driver (RO)</text>
+<text x="904" y="802" class="tiny">Runtime Link Selection:</text>
+<text x="904" y="820" class="tinymuted">Resolves NPU RoCE IP via hccn_tool;</text>
+<text x="904" y="838" class="tinymuted">selects intra-node HCCS / SDMA or</text>
+<text x="904" y="856" class="tinymuted">inter-node Device RoCE automatically</text>
+
+<!-- FOOTER PILLS -->
+<rect x="36" y="912" width="360" height="42" rx="10" class="pill"/>
+<circle cx="58" cy="933" r="5.5" fill="none" stroke="var(--emerald)" stroke-width="1.6"/><circle cx="58" cy="933" r="2.5" fill="var(--emerald)"/>
+<text x="74" y="938" class="body">Owned keys reject user duplicates</text>
+
+<rect x="420" y="912" width="360" height="42" rx="10" class="pill"/>
+<circle cx="442" cy="933" r="5.5" fill="none" stroke="var(--emerald)" stroke-width="1.6"/><circle cx="442" cy="933" r="2.5" fill="var(--emerald)"/>
+<text x="458" y="938" class="body">Defaulted keys yield to roles[].env / extraArgs</text>
+
+<rect x="804" y="912" width="360" height="42" rx="10" class="pill"/>
+<circle cx="826" cy="933" r="5.5" fill="none" stroke="var(--emerald)" stroke-width="1.6"/><circle cx="826" cy="933" r="2.5" fill="var(--emerald)"/>
+<text x="842" y="938" class="body">Shared KVCache wraps vLLM in MultiConnector</text>
+</svg>
