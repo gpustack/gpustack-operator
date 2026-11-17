@@ -1,7 +1,6 @@
 # Spec: Modular Loopwright Auto-Sync Architecture Across Six Domains
 
-Status: Built
-Blocked on: Implementation of tasks T1 through T11 and merge of the modular auto-sync pull requests.
+Status: Shipped
 Type: Feature
 
 ## Table of Contents
