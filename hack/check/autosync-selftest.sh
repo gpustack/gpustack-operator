@@ -344,9 +344,11 @@ EOF
   mkdir -p "${dangling_dir}"
   ln -s "${scratch}/missing-sbin-target" "${dangling_dir}/.sbin"
   ln -s "${scratch}/missing-git-target" "${dangling_dir}/.git"
-  if autosync::bootstrap_env "${stage_boot}" "${dangling_dir}" && \
-     autosync::ensure_ephemeral_git "${dangling_dir}" && \
-     [[ -L "${dangling_dir}/.sbin" && -L "${dangling_dir}/.git" ]]; then
+  if (
+    autosync::bootstrap_env "${stage_boot}" "${dangling_dir}" &&
+    autosync::ensure_ephemeral_git "${dangling_dir}" &&
+    [[ -L "${dangling_dir}/.sbin" && -L "${dangling_dir}/.git" ]]
+  ); then
     pass "bootstrap_env and ensure_ephemeral_git ignore dangling symlinks safely"
   else
     fail "bootstrap_env and ensure_ephemeral_git ignore dangling symlinks safely"
@@ -804,11 +806,13 @@ JSON
   assert_fails "preflight::snapshot_baselines rejects traversal path" \
     autosync::preflight::snapshot_baselines "${ext_stage}" "../outside"
 
-  if AUTOSYNC_SKIP_GO_MOD_DOWNLOAD=true autosync::preflight::warm_caches "${ext_stage}" --sbin --go --tools shellcheck && \
-     [[ -e "${ext_stage}/.sbin" && -e "${ext_stage}/go-cache" && -e "${ext_stage}/go-mod" && -e "${ext_stage}/deps-cache" ]] && \
-     [[ -f "${ext_stage}/toolchain.env" && -x "${ext_stage}/.sbin/shellcheck" ]] && \
-     grep -q '^AUTOSYNC_SAVED_GO_BIN_DIR=' "${ext_stage}/toolchain.env" && \
-     grep -q '^AUTOSYNC_SAVED_GOROOT=' "${ext_stage}/toolchain.env"; then
+  if (
+    AUTOSYNC_SKIP_GO_MOD_DOWNLOAD=true autosync::preflight::warm_caches "${ext_stage}" --sbin --go --tools shellcheck &&
+    [[ -e "${ext_stage}/.sbin" && -e "${ext_stage}/go-cache" && -e "${ext_stage}/go-mod" && -e "${ext_stage}/deps-cache" ]] &&
+    [[ -f "${ext_stage}/toolchain.env" && -x "${ext_stage}/.sbin/shellcheck" ]] &&
+    grep -q '^AUTOSYNC_SAVED_GO_BIN_DIR=' "${ext_stage}/toolchain.env" &&
+    grep -q '^AUTOSYNC_SAVED_GOROOT=' "${ext_stage}/toolchain.env"
+  ); then
     pass "preflight::warm_caches links shared .sbin/go caches, populates tools, and records toolchain.env"
   else
     fail "preflight::warm_caches links shared .sbin/go caches, populates tools, and records toolchain.env"
@@ -817,8 +821,10 @@ JSON
   local single_stage
   single_stage="$(mktemp -d "/tmp/autosync-single-stage.XXXXXXXX")"
   _CLEANUP_DIRS+=("${single_stage}")
-  if AUTOSYNC_SKIP_GO_MOD_DOWNLOAD=true autosync::preflight::warm_caches "${single_stage}" --sbin --go && \
-     [[ -d "${single_stage}/.shared/.sbin" && -L "${single_stage}/.sbin" && ! -e "/tmp/.sbin" ]]; then
+  if (
+    AUTOSYNC_SKIP_GO_MOD_DOWNLOAD=true autosync::preflight::warm_caches "${single_stage}" --sbin --go &&
+    [[ -d "${single_stage}/.shared/.sbin" && -L "${single_stage}/.sbin" && ! -e "/tmp/.sbin" ]]
+  ); then
     pass "preflight::warm_caches keeps single-level /tmp stage caches inside .shared"
   else
     fail "preflight::warm_caches keeps single-level /tmp stage caches inside .shared"
@@ -828,8 +834,10 @@ JSON
   local fake_host_mod="${scratch}/fake-host-gomod"
   mkdir -p "${gomod_stage}" "${fake_host_mod}/cache/download"
   printf 'sentinel\n' > "${fake_host_mod}/cache/download/marker"
-  if GOPROXY=off GOMODCACHE="${fake_host_mod}" autosync::preflight::warm_caches "${gomod_stage}" --go && \
-     [[ -f "${gomod_stage}/go-mod/cache/download/marker" ]]; then
+  if (
+    GOPROXY=off GOMODCACHE="${fake_host_mod}" autosync::preflight::warm_caches "${gomod_stage}" --go &&
+    [[ -f "${gomod_stage}/go-mod/cache/download/marker" ]]
+  ); then
     pass "preflight::warm_caches seeds empty go-mod from host GOMODCACHE when GOPROXY=off"
   else
     fail "preflight::warm_caches seeds empty go-mod from host GOMODCACHE when GOPROXY=off"

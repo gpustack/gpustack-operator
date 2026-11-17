@@ -1448,7 +1448,7 @@ assert_dockerfile_only_args() {
       Acceptance: `charts-taskpack.yaml` passes `validateTaskpackManifest`; `preflight-charts.sh` probes `gpustack/mirrored-*` manifests and pre-stages unpacked subcharts onto `source_revision` when ready; `validate_charts.sh` enforces `chart_staging()`-only diff guard on `hack/deps.sh`, zero `.rej`/`.orig`/`.tgz` artifacts, `make generate chart`, `make lint chart`, and `go test ./pkg/worker/kuberess/...`.
       Verify: `bash hack/check/autosync-selftest.sh charts && go test ./pkg/worker/kuberess/...`
 
-- [ ] **T9 · Domain 6 tracer bullet: `k8s-deps-sync` (6 CLI pins and same-minor K8s `v0.36.x` lockstep modules)**
+- [x] **T9 · Domain 6 tracer bullet: `k8s-deps-sync` (6 CLI pins and same-minor K8s `v0.36.x` lockstep modules)**
       Blocked by: T3
       Owns: `.auto-sync/k8s-deps-taskpack.yaml`, `.auto-sync/instructions/k8s-deps.md`, `.auto-sync/scripts/preflight-k8s-deps.sh`, `.auto-sync/checks/validate_k8s_deps.sh`, `.auto-sync/checks/selftest_k8s_deps.sh`, `.auto-sync/proposals/k8s-deps.json`
       Acceptance: `k8s-deps-taskpack.yaml` passes `validateTaskpackManifest` with `podman-container-tools/skopeo`, `helmfile/vals`, and same-minor `v0.36.x` lockstep constraint; `preflight-k8s-deps.sh` pre-stages `mod_staging()` + `make generate` onto `source_revision`; `validate_k8s_deps.sh` enforces CLI-only `Dockerfile` guard, `mod_staging()`-only `hack/deps.sh` guard, codegen-only `api/` guard, `upgrade-compat.sh modules`, `toolpins-selftest.sh`, double `make generate` + `make lint`, and `RACE=false make test`.
