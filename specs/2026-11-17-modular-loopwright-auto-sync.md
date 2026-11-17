@@ -1424,7 +1424,7 @@ assert_dockerfile_only_args() {
       Acceptance: `priors-taskpack.yaml` passes `validateTaskpackManifest`; `preflight-priors.sh` stages InferenceX snapshots and `source_revision` catalog updates under `/tmp/gpustack-autosync-stage/priors`; `validate_priors.sh` verifies SHA-256 ledger parity, `go test ./gen/priors/... ./pkg/worker/scaling/...`, and `make lint docs` in a gitless candidate directory.
       Verify: `bash hack/check/autosync-selftest.sh priors && go test ./gen/priors/... ./pkg/worker/scaling/...`
 
-- [ ] **T5 · Domain 1 tracer bullet: `slicing-sync` (`HAMi-core` and `ubs-virt` `vcann-rt`)**
+- [x] **T5 · Domain 1 tracer bullet: `slicing-sync` (`HAMi-core` and `ubs-virt` `vcann-rt`)**
       Blocked by: T3
       Owns: `.auto-sync/slicing-taskpack.yaml`, `.auto-sync/instructions/slicing.md`, `.auto-sync/scripts/preflight-slicing.sh`, `.auto-sync/checks/validate_slicing.sh`, `.auto-sync/checks/selftest_slicing.sh`, `.auto-sync/proposals/slicing.json`
       Acceptance: `slicing-taskpack.yaml` passes `validateTaskpackManifest`; `validate_slicing.sh` enforces `LIB_HAMI_CORE_COMMIT`/`LIB_UBS_VIRT_ENPU_COMMIT`-only diff guard on `pack/gpustack-operator/Dockerfile`, verifies CRLF-safe `vcann-rt` patch application, and runs non-root `XB_STAGE` xbuild + ELF verification (`nvidia-case-1`, `nvidia-case-4`, `ascend-case-1`).

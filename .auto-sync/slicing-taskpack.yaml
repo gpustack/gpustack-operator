@@ -1,0 +1,83 @@
+apiVersion: loopwright.dev/v1alpha1
+kind: Taskpack
+metadata:
+  name: slicing-sync
+spec:
+  goal:
+    candidate: Update LIB_HAMI_CORE_COMMIT and LIB_UBS_VIRT_ENPU_COMMIT in pack/gpustack-operator/Dockerfile, rebase Ascend vcann-rt patches if needed, and pass xbuild ELF verification.
+    noChange: Confirm HAMi-core and ubs-virt commits match pack/gpustack-operator/Dockerfile and settle as no_change.
+  scope:
+    writable:
+      - pack/gpustack-operator/Dockerfile
+      - pack/gpustack-operator/external/nvidia
+      - pack/gpustack-operator/external/ascend
+      - .auto-sync/proposals/slicing.json
+    protected:
+      - pack/gpustack-operator/external/amd
+      - pack/gpustack-operator/external/thead
+      - csrc
+      - binding
+      - gen/binding
+      - pkg/devicemanager/allocator
+  instructions:
+    - .auto-sync/instructions/slicing.md
+  upstreams:
+    - id: hami-core
+      kind: git-commit
+      source: Project-HAMi/HAMi-core
+      watchedPaths:
+        - src
+        - include
+        - CMakeLists.txt
+        - build.sh
+    - id: ubs-virt
+      kind: git-commit
+      source: https://gitcode.com/openeuler/ubs-virt.git
+      watchedPaths:
+        - ubs-virt-enpu/vcann-rt
+  proposal:
+    path: .auto-sync/proposals/slicing.json
+    requiredFields:
+      - schema_version
+      - summary
+      - versions
+      - subscriptions
+    schemaVersion: 1
+  verification:
+    localChecks:
+      - id: proposal-schema
+        implementation: json-artifact.v1
+      - id: scope-guard
+        implementation: scope.v1
+      - id: validate-slicing
+        implementation: command.v1
+        parameters:
+          script: .auto-sync/checks/validate_slicing.sh
+          timeoutSeconds: 2400
+          allowReadOnlyGitHubToken: false
+          env:
+            - AUTOSYNC_STAGE_DIR
+    externalGates: []
+  publication:
+    mode: pull_request
+    targetBranch: main
+    headBranchPrefix: auto-sync-slicing/
+    titleTemplate: "chore(pack): sync accelerator slicing shims"
+  memory:
+    directory: .auto-sync/memory/slicing-sync
+    apply: separate-pull-request
+    onNoModelBudget: deterministic-observations-only
+  triggers:
+    schedule: true
+    workflowDispatch: true
+    releasePublished: false
+    commentCommands:
+      - retry
+      - revise
+      - status
+    commentPrefixes:
+      - /loopwright
+      - /auto-sync
+  limits:
+    wallTimeSeconds: 3600
+    commandTimeoutSeconds: 2400

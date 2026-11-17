@@ -1,0 +1,31 @@
+{
+  "schema_version": 1,
+  "summary": "Pinned accelerator logical-slicing commits for HAMi-core and ubs-virt vcann-rt.",
+  "versions": {
+    "hami-core": "ec5d85a3d709e5ed138a1668ebfefd366c05ca1e",
+    "ubs-virt": "19a817e58e4c68bbfef6f4e2326e4877db9fc5f3"
+  },
+  "subscriptions": [
+    {
+      "id": "hami-core",
+      "source": "Project-HAMi/HAMi-core",
+      "dockerfile_arg": "LIB_HAMI_CORE_COMMIT",
+      "commit": "ec5d85a3d709e5ed138a1668ebfefd366c05ca1e",
+      "watched_paths": [
+        "src",
+        "include",
+        "CMakeLists.txt",
+        "build.sh"
+      ]
+    },
+    {
+      "id": "ubs-virt",
+      "source": "https://gitcode.com/openeuler/ubs-virt.git",
+      "dockerfile_arg": "LIB_UBS_VIRT_ENPU_COMMIT",
+      "commit": "19a817e58e4c68bbfef6f4e2326e4877db9fc5f3",
+      "watched_paths": [
+        "ubs-virt-enpu/vcann-rt"
+      ]
+    }
+  ]
+}
