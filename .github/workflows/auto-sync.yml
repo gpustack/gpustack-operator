@@ -471,7 +471,7 @@ jobs:
           models-json: ${{ steps.model-config.outputs.models-json }}
           allow-custom-base-url: 'true'
           provider-token-env: ${{ steps.model-config.outputs.provider-token-env }}
-          github-app-id: ${{ secrets.CI_GPUSTACK_LOOPWRIGHT_APP_ID || vars.CI_GPUSTACK_LOOPWRIGHT_APP_ID }}
-          github-app-private-key: ${{ secrets.CI_GPUSTACK_LOOPWRIGHT_APP_PRIVATE_KEY }}
+          github-app-id: ${{ secrets.CI_GPUSTACK_LOOPWRIGHT_APP_ID || vars.CI_GPUSTACK_LOOPWRIGHT_APP_ID || secrets.LOOPWRIGHT_APP_ID }}
+          github-app-private-key: ${{ secrets.CI_GPUSTACK_LOOPWRIGHT_APP_PRIVATE_KEY || secrets.LOOPWRIGHT_APP_PRIVATE_KEY }}
           dry-run: ${{ (inputs.dry-run == true || inputs.dry-run == 'true') && 'true' || 'false' }}
           output: json,github-step-summary

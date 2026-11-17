@@ -16,6 +16,24 @@ PROVIDER_ID_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{0,63}$")
 
 PI_WIRE_APIS = ("openai-completions", "openai-responses", "anthropic-messages")
 PI_THINKING_LEVELS = ("off", "minimal", "low", "medium", "high", "xhigh", "max")
+VALID_EFFORTS = frozenset({"minimal", "low", "medium", "high", "xhigh", "max"})
+ZAI_PROVIDER_IDS = frozenset({"zai", "zai-cn", "zai-coding-cn"})
+ZAI_CATALOG_THINKING_SUPPORT: dict[str, frozenset[str]] = {
+    "glm-5.2": frozenset({"high", "max"}),
+    "glm-5.2-highspeed": frozenset({"high", "max"}),
+    "glm-5.3": frozenset({"low", "high", "max"}),
+    "glm-5.3-flash": frozenset({"low", "high", "max"}),
+    "glm-5.3-highspeed": frozenset({"low", "high", "max"}),
+}
+THINKING_FALLBACKS_BY_DESIRED: dict[str, tuple[str, ...]] = {
+    "off": ("low", "minimal", "medium", "high", "max"),
+    "minimal": ("low", "medium", "high", "off", "max"),
+    "low": ("medium", "high", "minimal", "max", "off"),
+    "medium": ("high", "low", "max", "minimal", "off"),
+    "high": ("max", "medium", "low", "xhigh"),
+    "xhigh": ("high", "max", "medium", "low"),
+    "max": ("high", "xhigh", "medium", "low"),
+}
 PI_OAUTH_ONLY_PROVIDERS = frozenset(
     {
         "github-copilot",
@@ -143,21 +161,76 @@ def resolve_wire_api(protocol: str, use_anthropic: bool, provider: str) -> str:
     return "openai-completions"
 
 
-def resolve_thinking(raw_thinking: str, raw_effort: str) -> str:
-    if raw_thinking:
-        val = raw_thinking.strip().lower()
-    elif raw_effort:
-        val = raw_effort.strip().lower()
-        if val == "none":
-            val = "off"
-    else:
-        val = "high"
+def is_zai_or_glm_target(model_id: str, base_url: str, provider_id: str = "") -> bool:
+    if provider_id.strip().lower() in ZAI_PROVIDER_IDS:
+        return True
+    lower_model = model_id.strip().lower()
+    if lower_model.startswith("glm-") or "/glm-" in lower_model:
+        return True
+    try:
+        host = (urllib.parse.urlsplit(base_url).hostname or "").lower()
+    except ValueError:
+        return False
+    return (
+        host == "api.z.ai"
+        or host.endswith(".z.ai")
+        or host == "open.bigmodel.cn"
+        or host.endswith(".bigmodel.cn")
+    )
 
-    if val not in PI_THINKING_LEVELS:
-        raise ValueError(
-            f"unsupported thinking level {val!r}; expected one of {', '.join(PI_THINKING_LEVELS)}"
-        )
-    return val
+
+def snap_thinking_to_catalog_map(
+    thinking: str, model_id: str, base_url: str, provider: str
+) -> str:
+    if thinking == "off" or not is_zai_or_glm_target(model_id, base_url, provider):
+        return thinking
+    model_key = model_id.strip().lower().rsplit("/", 1)[-1]
+    supported = ZAI_CATALOG_THINKING_SUPPORT.get(model_key)
+    if supported is None or thinking in supported:
+        return thinking
+    for candidate in THINKING_FALLBACKS_BY_DESIRED.get(thinking, ("low", "high", "max", "off")):
+        if candidate in supported:
+            return candidate
+    return thinking
+
+
+def resolve_thinking(
+    raw_thinking: str,
+    raw_effort: str,
+    model_id: str = "",
+    base_url: str = "",
+    provider: str = "",
+) -> tuple[str, bool]:
+    think = raw_thinking.strip().lower()
+    effort = raw_effort.strip().lower()
+
+    if think in ("disabled", "off", "false", "0", "no"):
+        thinking = "off"
+    elif effort:
+        if effort == "off":
+            thinking = "off"
+        elif effort in VALID_EFFORTS:
+            thinking = effort
+        else:
+            raise ValueError(
+                f"unsupported reasoning effort {raw_effort!r}; expected one of {', '.join(PI_THINKING_LEVELS)}"
+            )
+    elif think:
+        if think in ("enabled", "true", "1", "yes"):
+            thinking = "low"
+        elif think in VALID_EFFORTS:
+            thinking = think
+        else:
+            raise ValueError(
+                f"unsupported thinking mode {raw_thinking!r}; expected enabled, disabled, or one of {', '.join(PI_THINKING_LEVELS)}"
+            )
+    elif is_zai_or_glm_target(model_id, base_url, provider):
+        thinking = "low"
+    else:
+        thinking = "off"
+
+    thinking = snap_thinking_to_catalog_map(thinking, model_id, base_url, provider)
+    return thinking, thinking != "off"
 
 
 def parse_float_param(raw: str, name: str, lo: float, hi: float) -> float | None:
@@ -294,7 +367,7 @@ def main(argv: list[str] | None = None) -> int:
             use_anthropic,
             provider,
         )
-        thinking = resolve_thinking(
+        thinking, reasoning = resolve_thinking(
             first_env(
                 "CI_GPUSTACK_LOOPWRIGHT_LLM_THINKING",
                 "CI_GPUSTACK_CODEREVIEW_LLM_THINKING",
@@ -303,6 +376,9 @@ def main(argv: list[str] | None = None) -> int:
                 "CI_GPUSTACK_LOOPWRIGHT_LLM_REASONING_EFFORT",
                 "CI_GPUSTACK_CODEREVIEW_LLM_REASONING_EFFORT",
             ),
+            raw_model,
+            base_url,
+            provider,
         )
         temperature = parse_float_param(
             first_env(
@@ -338,7 +414,6 @@ def main(argv: list[str] | None = None) -> int:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 1
 
-    reasoning = thinking != "off"
     model_entry: dict[str, object] = {
         "id": raw_model,
         "api": api,
@@ -360,10 +435,7 @@ def main(argv: list[str] | None = None) -> int:
     if sampling:
         model_entry["samplingParams"] = sampling
 
-    if api == "openai-completions" and (
-        provider in ("zai", "zai-cn", "zai-coding-cn")
-        or raw_model.lower().startswith("glm-")
-    ):
+    if api == "openai-completions" and is_zai_or_glm_target(raw_model, base_url, provider):
         model_entry["compat"] = {
             "thinkingFormat": "zai",
             "supportsReasoningEffort": True,
