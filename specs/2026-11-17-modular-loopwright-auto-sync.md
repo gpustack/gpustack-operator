@@ -1430,7 +1430,7 @@ assert_dockerfile_only_args() {
       Acceptance: `slicing-taskpack.yaml` passes `validateTaskpackManifest`; `validate_slicing.sh` enforces `LIB_HAMI_CORE_COMMIT`/`LIB_UBS_VIRT_ENPU_COMMIT`-only diff guard on `pack/gpustack-operator/Dockerfile`, verifies CRLF-safe `vcann-rt` patch application, and runs non-root `XB_STAGE` xbuild + ELF verification (`nvidia-case-1`, `nvidia-case-4`, `ascend-case-1`).
       Verify: `bash hack/check/autosync-selftest.sh slicing`
 
-- [ ] **T6 · Domain 2 tracer bullet: `kv-transfer-sync` (Mooncake, NIXL, UCX, HIXL, ModelExpress, and two-stage gate)**
+- [x] **T6 · Domain 2 tracer bullet: `kv-transfer-sync` (Mooncake, NIXL, UCX, HIXL, ModelExpress, and two-stage gate)**
       Blocked by: T3
       Owns: `.auto-sync/kv-transfer-taskpack.yaml`, `.auto-sync/instructions/kv-transfer.md`, `.auto-sync/scripts/preflight-kv-transfer.sh`, `.auto-sync/checks/validate_kv_transfer.sh`, `.auto-sync/checks/selftest_kv_transfer.sh`, `.auto-sync/proposals/kv-transfer.json`
       Acceptance: `kv-transfer-taskpack.yaml` passes `validateTaskpackManifest`; `preflight-kv-transfer.sh` probes `nixl`/`nixl-cu12`/`nixl-cu13` wheels, `gpustack/runner` HIXL parity, and `crane manifest` Stage A vs Stage B (`tag_promotion`) readiness; `validate_kv_transfer.sh` enforces all 5 `MOONCAKE_VERSION` `case` blocks, HIXL patch parity, shared-file guards on `value.go`/`settings.md`/`modelTransfer.images.*`, and `crane manifest` verification.
