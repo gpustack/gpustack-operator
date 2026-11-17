@@ -1835,7 +1835,7 @@ positive token capacities. Catalog resolution fails closed, with no online fallb
 <p>Omit <em><code>catalogRef</code></em> with <code>capacityPrior: {}</code> or set only <em><code>headroom</code></em> to use the embedded catalog. With <code>catalogRef: {name: my-priors}</code>, admission defaults <em><code>key</code></em> to <code>priors.yaml</code>.
 If <code>priors.yaml</code> is absent, the loader checks the legacy <code>priors.json</code> key. A referenced catalog is the sole source; it never falls back to the embedded catalog.</p>
 <p>An empty <code>catalogRef: {}</code> also defaults the key, but admission rejects it because <em><code>name</code></em> is required. A whitespace-only key fails admission on <code>spec.algorithm.capacityPrior.catalogRef.key</code>.</p>
-<p>The committed catalog, <code>pkg/worker/scaling/priors/priors.yaml</code>, is human-editable YAML. The parser also accepts JSON, so a hand-written <code>ConfigMap</code> catalog can use either format. Profiles have no provenance, serving configuration or workload details. Evidence pins live in <code>.agents/skills/gpustack-operator-priors/references/records.md</code>.
+<p>The committed catalog, <code>pkg/worker/scaling/priors/priors.yaml</code>, is human-editable YAML. The parser also accepts JSON, so a hand-written <code>ConfigMap</code> catalog can use either format. Profiles have no provenance, serving configuration or workload details. Evidence pins live in <code>pkg/worker/scaling/priors/records.md</code>.
 The illustrative schema below has one point per profile; resolution needs at least two distinct load levels.</p>
 <div class="code-block">
   <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
@@ -1973,7 +1973,7 @@ digest and the refused sources. To use other evidence, provide a reviewed offlin
 <h3 id="public-data-sources">Public data sources</h3>
 <p>Public benchmark sources (InferenceX and similar) qualify into <em><code>priors.yaml</code></em> under the following contract. Every import pins its upstream evidence; unattributed numbers are
 refused. The pins — source URLs, capture dates, artifact digests and refusal records — live in the <code>gpustack-operator-priors</code> skill&rsquo;s provenance records
-(<code>.agents/skills/gpustack-operator-priors/references/records.md</code>), not inside the catalog file.</p>
+(<code>pkg/worker/scaling/priors/records.md</code>), not inside the catalog file.</p>
 <table>
   <thead>
       <tr>
@@ -2044,7 +2044,7 @@ specs, identity annotations, effective algorithm, catalog digest, latency target
 prior quantities by semantic <code>Quantity</code> equality, keep the 256-sample <code>RingBuffer</code> in memory, and
 suppress <code>status</code> writes until control-plane state changes or a predictor advances by 16 samples.</p>
 <h3 id="local-evaluation">Local evaluation</h3>
-<p>The <a href="https://github.com/gpustack/gpustack-operator/blob/e2d4308907ed618bef1e63d9086fddc3738c3c99/specs/2026-10-26-inferencex-model-deployment-scaling.md">capacity priors and local evaluation spec</a>
+<p>The <a href="https://github.com/gpustack/gpustack-operator/blob/a95d94446930ee5d2884ecc50810b068e6e2d9cf/specs/2026-10-26-inferencex-model-deployment-scaling.md">capacity priors and local evaluation spec</a>
  records 48 deterministic synthetic result rows across eight
 tuning traces (<code>manual</code>, <code>resolved</code> and one <code>passive</code> candidate at seed factor <code>1</code>) plus two open-loop versus closed-loop examples.</p>
 <p>It also evaluates two held-out traces (<code>heldout_bursts</code> and <code>heldout_length_cache_shift</code>, 11 rows each across <code>manual</code> at factor <code>1</code> plus <code>resolved</code> and one <code>passive</code> candidate

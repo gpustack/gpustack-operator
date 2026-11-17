@@ -315,7 +315,7 @@ If `priors.yaml` is absent, the loader checks the legacy `priors.json` key. A re
 
 An empty `catalogRef: {}` also defaults the key, but admission rejects it because *`name`* is required. A whitespace-only key fails admission on `spec.algorithm.capacityPrior.catalogRef.key`.
 
-The committed catalog, `pkg/worker/scaling/priors/priors.yaml`, is human-editable YAML. The parser also accepts JSON, so a hand-written `ConfigMap` catalog can use either format. Profiles have no provenance, serving configuration or workload details. Evidence pins live in `.agents/skills/gpustack-operator-priors/references/records.md`.
+The committed catalog, `pkg/worker/scaling/priors/priors.yaml`, is human-editable YAML. The parser also accepts JSON, so a hand-written `ConfigMap` catalog can use either format. Profiles have no provenance, serving configuration or workload details. Evidence pins live in `pkg/worker/scaling/priors/records.md`.
 The illustrative schema below has one point per profile; resolution needs at least two distinct load levels.
 
 ```yaml
@@ -455,7 +455,7 @@ digest and the refused sources. To use other evidence, provide a reviewed offlin
 
 Public benchmark sources (InferenceX and similar) qualify into *`priors.yaml`* under the following contract. Every import pins its upstream evidence; unattributed numbers are
 refused. The pins — source URLs, capture dates, artifact digests and refusal records — live in the `gpustack-operator-priors` skill's provenance records
-(`.agents/skills/gpustack-operator-priors/references/records.md`), not inside the catalog file.
+(`pkg/worker/scaling/priors/records.md`), not inside the catalog file.
 
 | Data point | Requirement | Fallback handling |
 |---|---|---|
@@ -520,7 +520,7 @@ suppress `status` writes until control-plane state changes or a predictor advanc
 
 ### Local evaluation
 
-The [capacity priors and local evaluation spec](https://github.com/gpustack/gpustack-operator/blob/e2d4308907ed618bef1e63d9086fddc3738c3c99/specs/2026-10-26-inferencex-model-deployment-scaling.md) records 48 deterministic synthetic result rows across eight
+The [capacity priors and local evaluation spec](https://github.com/gpustack/gpustack-operator/blob/a95d94446930ee5d2884ecc50810b068e6e2d9cf/specs/2026-10-26-inferencex-model-deployment-scaling.md) records 48 deterministic synthetic result rows across eight
 tuning traces (`manual`, `resolved` and one `passive` candidate at seed factor `1`) plus two open-loop versus closed-loop examples.
 
 It also evaluates two held-out traces (`heldout_bursts` and `heldout_length_cache_shift`, 11 rows each across `manual` at factor `1` plus `resolved` and one `passive` candidate
