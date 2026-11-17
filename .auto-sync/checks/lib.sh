@@ -1,0 +1,914 @@
+#!/usr/bin/env bash
+# .auto-sync/checks/lib.sh - shared verification helpers for .auto-sync/checks/validate_*.sh.
+#
+# Provides sanitized command.v1 environment bootstrap, ephemeral git index initialization
+# and cleanup for gitless candidate directories, fail-closed diff -U0 shared-file guards,
+# and published multi-arch container image verification.
+set -euo pipefail
+
+# autosync::bootstrap_env [stage_dir] [candidate_dir]
+# Configures deterministic PATH, Go offline caches, and .sbin tools for command.v1 checks.
+autosync::bootstrap_env() {
+  local stage_dir="${1:-${AUTOSYNC_STAGE_DIR:-}}"
+  local candidate_dir="${2:-${LOOPWRIGHT_CANDIDATE_DIR:-$(pwd -P)}}"
+
+  if [[ -d "${candidate_dir}" ]]; then
+    candidate_dir="$(cd "${candidate_dir}" && pwd -P)"
+  fi
+  export AUTOSYNC_CANDIDATE_ROOT="${candidate_dir}"
+
+  local saved_go_bin_dir=""
+  local saved_goroot=""
+  local saved_hugo_bin_dir=""
+  local saved_node_bin_dir=""
+
+  if [[ -n "${stage_dir}" && -d "${stage_dir}" ]]; then
+    stage_dir="$(cd "${stage_dir}" && pwd -P)"
+    export AUTOSYNC_STAGE_DIR="${stage_dir}"
+
+    if [[ -f "${stage_dir}/toolchain.env" && ! -L "${stage_dir}/toolchain.env" ]]; then
+      local tc_line tc_key tc_val
+      while IFS= read -r tc_line || [[ -n "${tc_line}" ]]; do
+        [[ -z "${tc_line}" || "${tc_line}" == \#* ]] && continue
+        [[ "${tc_line}" == *=* ]] || continue
+        tc_key="${tc_line%%=*}"
+        tc_val="${tc_line#*=}"
+        if [[ "${tc_val}" == \"*\" && "${tc_val}" == *\" ]]; then
+          tc_val="${tc_val#\"}"
+          tc_val="${tc_val%\"}"
+        elif [[ "${tc_val}" == \'*\' && "${tc_val}" == *\' ]]; then
+          tc_val="${tc_val#\'}"
+          tc_val="${tc_val%\'}"
+        fi
+        [[ -n "${tc_val}" && -d "${tc_val}" ]] || continue
+        case "${tc_key}" in
+          AUTOSYNC_SAVED_GO_BIN_DIR)
+            saved_go_bin_dir="${tc_val}"
+            export AUTOSYNC_SAVED_GO_BIN_DIR="${tc_val}"
+            ;;
+          AUTOSYNC_SAVED_GOROOT)
+            saved_goroot="${tc_val}"
+            export AUTOSYNC_SAVED_GOROOT="${tc_val}"
+            ;;
+          AUTOSYNC_SAVED_HUGO_BIN_DIR)
+            saved_hugo_bin_dir="${tc_val}"
+            export AUTOSYNC_SAVED_HUGO_BIN_DIR="${tc_val}"
+            ;;
+          AUTOSYNC_SAVED_NODE_BIN_DIR)
+            saved_node_bin_dir="${tc_val}"
+            export AUTOSYNC_SAVED_NODE_BIN_DIR="${tc_val}"
+            ;;
+        esac
+      done < "${stage_dir}/toolchain.env"
+    fi
+
+    if [[ -n "${saved_goroot}" && -d "${saved_goroot}" ]]; then
+      export GOROOT="${saved_goroot}"
+    fi
+
+    if [[ -z "${GOCACHE:-}" ]]; then
+      if [[ -d "${stage_dir}/go-cache" && -w "${stage_dir}/go-cache" ]]; then
+        export GOCACHE="${stage_dir}/go-cache"
+      else
+        local ro_gocache="${TMPDIR:-/tmp}/autosync-go-cache"
+        mkdir -p "${ro_gocache}" 2>/dev/null || true
+        export GOCACHE="${ro_gocache}"
+      fi
+    fi
+
+    export GOMODCACHE="${GOMODCACHE:-${stage_dir}/go-mod}"
+    export GPUSTACK_DEPS_CACHE_DIR="${GPUSTACK_DEPS_CACHE_DIR:-${stage_dir}/deps-cache}"
+    export GPUSTACK_DEPS_OFFLINE="${GPUSTACK_DEPS_OFFLINE:-true}"
+    export GOPROXY="${GOPROXY:-off}"
+    export GOTOOLCHAIN="${GOTOOLCHAIN:-local}"
+
+    # Materialize pre-warmed .sbin entries as regular files (not a directory symlink)
+    # when candidate_dir is writable; in read-only sandboxes rely on stage_dir/.sbin on PATH.
+    if [[ -d "${stage_dir}/.sbin" && ! -e "${candidate_dir}/.sbin" && ! -L "${candidate_dir}/.sbin" ]]; then
+      if [[ -w "${candidate_dir}" ]]; then
+        mkdir -p "${candidate_dir}/.sbin"
+        cp -RLp "${stage_dir}/.sbin/." "${candidate_dir}/.sbin/" 2>/dev/null || true
+        : > "${candidate_dir}/.sbin/.autosync-materialized"
+      fi
+    fi
+  fi
+
+  local new_path=""
+  local seg
+  local prefix_dirs=()
+  if [[ -d "${candidate_dir}/.sbin" ]]; then
+    prefix_dirs+=("${candidate_dir}/.sbin")
+  fi
+  if [[ -n "${stage_dir}" && -d "${stage_dir}/.sbin" ]]; then
+    prefix_dirs+=("${stage_dir}/.sbin")
+  fi
+  if [[ -n "${stage_dir}" && -d "${stage_dir}/.sbin/protoc/bin" ]]; then
+    prefix_dirs+=("${stage_dir}/.sbin/protoc/bin")
+  fi
+  if [[ -n "${saved_go_bin_dir}" && -d "${saved_go_bin_dir}" ]]; then
+    prefix_dirs+=("${saved_go_bin_dir}")
+  fi
+  if [[ -n "${saved_hugo_bin_dir}" && -d "${saved_hugo_bin_dir}" ]]; then
+    prefix_dirs+=("${saved_hugo_bin_dir}")
+  fi
+  if [[ -n "${saved_node_bin_dir}" && -d "${saved_node_bin_dir}" ]]; then
+    prefix_dirs+=("${saved_node_bin_dir}")
+  fi
+
+  for seg in "${prefix_dirs[@]+"${prefix_dirs[@]}"}"; do
+    [[ -n "${seg}" ]] || continue
+    case ":${new_path}:" in
+      *":${seg}:"*) ;;
+      *) new_path="${new_path:+${new_path}:}${seg}" ;;
+    esac
+  done
+
+  if [[ -n "${PATH:-}" ]]; then
+    local old_ifs="${IFS}"
+    IFS=':'
+    for seg in ${PATH}; do
+      [[ -n "${seg}" ]] || continue
+      case ":${new_path}:" in
+        *":${seg}:"*) ;;
+        *) new_path="${new_path:+${new_path}:}${seg}" ;;
+      esac
+    done
+    IFS="${old_ifs}"
+  fi
+
+  local fallback_dirs=(
+    "/usr/local/go/bin"
+    "/opt/homebrew/bin"
+    "/usr/local/bin"
+    "/usr/bin"
+    "/bin"
+    "/usr/sbin"
+    "/sbin"
+  )
+  for seg in "${fallback_dirs[@]}"; do
+    case ":${new_path}:" in
+      *":${seg}:"*) ;;
+      *) new_path="${new_path:+${new_path}:}${seg}" ;;
+    esac
+  done
+  export PATH="${new_path}"
+}
+
+# autosync::ensure_ephemeral_git <dir>
+# Initializes a temporary git repository in a gitless candidate directory so repo linters
+# and git status/diff checks can run. Never modifies a pre-existing .git directory or file.
+autosync::ensure_ephemeral_git() {
+  local dir="${1:?directory required}"
+  if [[ ! -d "${dir}" ]]; then
+    printf 'FAIL: candidate directory does not exist: %s\n' "${dir}" >&2
+    return 1
+  fi
+  if [[ ! -e "${dir}/.git" && ! -L "${dir}/.git" ]]; then
+    git -C "${dir}" init -q -b main 2>/dev/null || {
+      git -C "${dir}" init -q
+      git -C "${dir}" symbolic-ref HEAD refs/heads/main
+    }
+    : > "${dir}/.git/.autosync-ephemeral"
+    mkdir -p "${dir}/.git/info"
+    printf '/.sbin/\n' >> "${dir}/.git/info/exclude"
+    git -C "${dir}" config user.name "autosync-validator"
+    git -C "${dir}" config user.email "autosync@gpustack.local"
+    git -C "${dir}" config commit.gpgsign false
+    git -C "${dir}" config core.autocrlf false
+    git -C "${dir}" add -A
+    git -C "${dir}" commit -q --allow-empty -m "chore(autosync): candidate baseline"
+    git -C "${dir}" update-ref refs/remotes/origin/main HEAD
+  fi
+}
+
+# autosync::cleanup_ephemeral_git <dir>
+# Removes ephemeral .git and materialized .sbin directories created by autosync helpers.
+autosync::cleanup_ephemeral_git() {
+  local dir="${1:?directory required}"
+  if [[ -d "${dir}/.git" && -f "${dir}/.git/.autosync-ephemeral" ]]; then
+    rm -rf "${dir}/.git"
+  fi
+  if [[ -d "${dir}/.sbin" && -f "${dir}/.sbin/.autosync-materialized" ]]; then
+    rm -rf "${dir}/.sbin"
+  fi
+}
+
+# autosync::run_in_module_path_copy <target_dir> <cmd> [args...]
+# Runs <cmd> inside a physical directory ending in /gpustack.ai/gpustack (required by
+# gen/api/main.go) and syncs regular-file additions, edits, and deletions back to <target_dir>.
+autosync::run_in_module_path_copy() {
+  local target_dir="${1:?target_dir required}"
+  shift
+  if (( $# == 0 )); then
+    printf 'FAIL: run_in_module_path_copy requires a command\n' >&2
+    return 1
+  fi
+  if [[ ! -d "${target_dir}" ]]; then
+    printf 'FAIL: target directory does not exist: %s\n' "${target_dir}" >&2
+    return 1
+  fi
+
+  local phys_target
+  phys_target="$(cd "${target_dir}" && pwd -P)"
+  if [[ "${phys_target}" == */gpustack.ai/gpustack ]]; then
+    (
+      cd "${phys_target}"
+      "$@"
+    )
+    return $?
+  fi
+
+  local tmp_base mod_base mod_copy
+  tmp_base="$(cd "${TMPDIR:-/tmp}" && pwd -P)"
+  mod_base="$(mktemp -d "${tmp_base}/autosync-modpath-XXXXXX")"
+  mod_copy="${mod_base}/gpustack.ai/gpustack"
+
+  local rc=0
+  (
+    trap 'rm -rf "${mod_base}"' EXIT
+    mkdir -p "${mod_copy}"
+    tar -cf - -C "${phys_target}" . | tar -xf - -C "${mod_copy}"
+    local cmd_rc=0
+    (
+      cd "${mod_copy}"
+      "$@"
+    ) || cmd_rc=$?
+    python3 - "${mod_copy}" "${phys_target}" <<'PY'
+import os
+import shutil
+import sys
+
+src_root, dst_root = sys.argv[1:3]
+EXCLUDED_TOP = {".git", ".sbin"}
+
+
+def collect_regular_files(root: str) -> dict[str, str]:
+    out: dict[str, str] = {}
+    for cur, dirs, names in os.walk(root, followlinks=False):
+        rel_cur = os.path.relpath(cur, root)
+        if rel_cur == ".":
+            dirs[:] = [d for d in sorted(dirs) if d not in EXCLUDED_TOP]
+        else:
+            dirs.sort()
+        dirs[:] = [d for d in dirs if not os.path.islink(os.path.join(cur, d))]
+        for name in sorted(names):
+            if rel_cur == "." and name in EXCLUDED_TOP:
+                continue
+            fp = os.path.join(cur, name)
+            if os.path.islink(fp) or not os.path.isfile(fp):
+                continue
+            rel = name if rel_cur == "." else os.path.join(rel_cur, name)
+            out[rel] = fp
+    return out
+
+
+src_files = collect_regular_files(src_root)
+dst_files = collect_regular_files(dst_root)
+
+for rel in sorted(set(dst_files.keys()) - set(src_files.keys())):
+    dst_fp = dst_files[rel]
+    os.unlink(dst_fp)
+    parent = os.path.dirname(dst_fp)
+    while parent and parent != dst_root:
+        try:
+            os.rmdir(parent)
+        except OSError:
+            break
+        parent = os.path.dirname(parent)
+
+for rel, src_fp in sorted(src_files.items()):
+    dst_fp = os.path.join(dst_root, rel)
+    os.makedirs(os.path.dirname(dst_fp), exist_ok=True)
+    need_copy = True
+    if os.path.isfile(dst_fp) and not os.path.islink(dst_fp):
+        with open(src_fp, "rb") as fs, open(dst_fp, "rb") as fd:
+            if fs.read() == fd.read() and (os.stat(src_fp).st_mode & 0o777) == (os.stat(dst_fp).st_mode & 0o777):
+                need_copy = False
+    if need_copy:
+        shutil.copy2(src_fp, dst_fp)
+PY
+    exit "${cmd_rc}"
+  ) || rc=$?
+  return "${rc}"
+}
+
+# assert_dockerfile_only_args <baseline_file> <candidate_file> <allowed_arg_regex>
+# Fails closed unless every modified line in pack/gpustack-operator/Dockerfile is an
+# ARG assignment whose name matches <allowed_arg_regex>.
+assert_dockerfile_only_args() {
+  local baseline_file="${1:?baseline Dockerfile path required}"
+  local candidate_file="${2:?candidate Dockerfile path required}"
+  local allowed_regex="${3:?allowed ARG regex required}"
+
+  if [[ ! -f "${baseline_file}" || ! -f "${candidate_file}" ]]; then
+    printf 'FAIL: missing baseline (%s) or candidate (%s) Dockerfile\n' \
+      "${baseline_file}" "${candidate_file}" >&2
+    return 1
+  fi
+
+  local raw_diff diff_rc=0
+  raw_diff="$(diff -U0 -- "${baseline_file}" "${candidate_file}")" || diff_rc=$?
+  if (( diff_rc == 0 )); then
+    return 0
+  fi
+  if (( diff_rc > 1 )); then
+    printf 'FAIL: diff exited %d comparing Dockerfile\n' "${diff_rc}" >&2
+    return 1
+  fi
+
+  local line
+  while IFS= read -r line; do
+    if [[ "${line}" =~ ^(\+\+\+\ |---\ |@@\ ) ]]; then
+      continue
+    fi
+    if [[ "${line}" =~ ^[+-] ]] && [[ ! "${line}" =~ ^[+-]ARG\ (${allowed_regex})=\"[0-9A-Za-z._+-]+\"$ ]]; then
+      printf 'FAIL: Dockerfile modified outside allowed ARGs (%s): %s\n' \
+        "${allowed_regex}" "${line}" >&2
+      return 1
+    fi
+  done <<<"${raw_diff}"
+
+  python3 - "${baseline_file}" "${candidate_file}" "${allowed_regex}" <<'PY'
+import re
+import sys
+
+baseline_path, candidate_path, allowed_pattern = sys.argv[1:4]
+allowed_re = re.compile(allowed_pattern)
+arg_re = re.compile(r'^(ARG )([A-Z0-9_]+)(=")([0-9A-Za-z._+-]+)(")$')
+from_re = re.compile(r'^\s*FROM\b')
+
+
+def mask_dockerfile(text: str) -> str:
+    out = []
+    seen_from = False
+    for line in text.splitlines(keepends=True):
+        stripped = line.rstrip("\r\n")
+        if from_re.match(stripped):
+            seen_from = True
+        if not seen_from:
+            m = arg_re.match(stripped)
+            if m and allowed_re.fullmatch(m.group(2)):
+                ending = line[len(stripped):]
+                line = f"{m.group(1)}{m.group(2)}{m.group(3)}__MASKED__{m.group(5)}{ending}"
+        out.append(line)
+    return "".join(out)
+
+
+with open(baseline_path, "r", encoding="utf-8") as f:
+    base_txt = f.read()
+with open(candidate_path, "r", encoding="utf-8") as f:
+    cand_txt = f.read()
+
+if mask_dockerfile(base_txt) != mask_dockerfile(cand_txt):
+    print(
+        f"FAIL: Dockerfile modified outside top-level allowed ARGs ({allowed_pattern})",
+        file=sys.stderr,
+    )
+    sys.exit(1)
+PY
+}
+
+# assert_value_go_only_keys <baseline_file> <candidate_file> <allowed_setting_keys_regex>
+# Verifies that only setting.InitializeFromEnv("...") literals belonging to settings whose
+# key matches <allowed_setting_keys_regex> changed in pkg/worker/settings/value.go.
+assert_value_go_only_keys() {
+  local baseline_file="${1:?baseline value.go path required}"
+  local candidate_file="${2:?candidate value.go path required}"
+  local allowed_regex="${3:?allowed setting keys regex required}"
+
+  if [[ ! -f "${baseline_file}" || ! -f "${candidate_file}" ]]; then
+    printf 'FAIL: missing baseline (%s) or candidate (%s) value.go\n' \
+      "${baseline_file}" "${candidate_file}" >&2
+    return 1
+  fi
+
+  local raw_diff diff_rc=0
+  raw_diff="$(diff -U0 -- "${baseline_file}" "${candidate_file}")" || diff_rc=$?
+  if (( diff_rc == 0 )); then
+    return 0
+  fi
+  if (( diff_rc > 1 )); then
+    printf 'FAIL: diff exited %d comparing value.go\n' "${diff_rc}" >&2
+    return 1
+  fi
+
+  local line
+  while IFS= read -r line; do
+    if [[ "${line}" =~ ^(\+\+\+|---|@@) ]]; then
+      continue
+    fi
+    if [[ "${line}" =~ ^[+-] ]] && [[ ! "${line}" =~ ^[+-][[:space:]]*setting\.InitializeFromEnv\(\"[^\"]+\"\),$ ]]; then
+      printf 'FAIL: value.go modified outside setting.InitializeFromEnv literal: %s\n' "${line}" >&2
+      return 1
+    fi
+  done <<<"${raw_diff}"
+
+  python3 - "${baseline_file}" "${candidate_file}" "${allowed_regex}" <<'PY'
+import re
+import sys
+
+baseline_path, candidate_path, allowed_pattern = sys.argv[1:4]
+allowed_re = re.compile(allowed_pattern)
+start_re = re.compile(r'settings\.NewEditable\(\s*"([^"]+)"')
+env_re = re.compile(r'(setting\.InitializeFromEnv\()"[^"]*"(\))')
+
+
+def find_call_end(text: str, open_paren_idx: int) -> int:
+    depth = 1
+    i = open_paren_idx + 1
+    n = len(text)
+    while i < n and depth > 0:
+        ch = text[i]
+        if ch == '"':
+            i += 1
+            while i < n:
+                if text[i] == "\\":
+                    i += 2
+                    continue
+                if text[i] == '"':
+                    break
+                i += 1
+        elif ch == "`":
+            i += 1
+            while i < n and text[i] != "`":
+                i += 1
+        elif ch == "/" and i + 1 < n and text[i + 1] == "/":
+            nl = text.find("\n", i)
+            i = n if nl == -1 else nl
+        elif ch == "/" and i + 1 < n and text[i + 1] == "*":
+            end_c = text.find("*/", i + 2)
+            i = n if end_c == -1 else end_c + 1
+        elif ch == "(":
+            depth += 1
+        elif ch == ")":
+            depth -= 1
+            if depth == 0:
+                return i
+        i += 1
+    return -1
+
+
+def mask_allowed(text: str) -> str:
+    out = []
+    pos = 0
+    for m in start_re.finditer(text):
+        key = m.group(1)
+        open_idx = text.find("(", m.start())
+        end_idx = find_call_end(text, open_idx)
+        if end_idx == -1:
+            raise SystemExit("FAIL: unbalanced parentheses in value.go")
+        if m.start() < pos:
+            continue
+        if allowed_re.fullmatch(key):
+            out.append(text[pos : m.start()])
+            block = text[m.start() : end_idx + 1]
+            masked_block, count = env_re.subn(r'\1"__MASKED__"\2', block, count=1)
+            if count != 1:
+                raise SystemExit(
+                    f"FAIL: allowlisted setting '{key}' lacks single-line setting.InitializeFromEnv(...)"
+                )
+            out.append(masked_block)
+            pos = end_idx + 1
+    out.append(text[pos:])
+    return "".join(out)
+
+
+with open(baseline_path, "r", encoding="utf-8") as f:
+    base_txt = f.read()
+with open(candidate_path, "r", encoding="utf-8") as f:
+    cand_txt = f.read()
+
+if mask_allowed(base_txt) != mask_allowed(cand_txt):
+    print(
+        f"FAIL: value.go modified outside allowed setting keys ({allowed_pattern})",
+        file=sys.stderr,
+    )
+    sys.exit(1)
+PY
+}
+
+# assert_settings_md_only_keys <baseline_file> <candidate_file> <allowed_setting_keys_regex>
+# Verifies that only Default: `...` values on table rows whose setting key matches
+# <allowed_setting_keys_regex> changed in docs/reference/settings.md.
+assert_settings_md_only_keys() {
+  local baseline_file="${1:?baseline settings.md path required}"
+  local candidate_file="${2:?candidate settings.md path required}"
+  local allowed_regex="${3:?allowed setting keys regex required}"
+
+  if [[ ! -f "${baseline_file}" || ! -f "${candidate_file}" ]]; then
+    printf 'FAIL: missing baseline (%s) or candidate (%s) settings.md\n' \
+      "${baseline_file}" "${candidate_file}" >&2
+    return 1
+  fi
+
+  local raw_diff diff_rc=0
+  raw_diff="$(diff -U0 -- "${baseline_file}" "${candidate_file}")" || diff_rc=$?
+  if (( diff_rc == 0 )); then
+    return 0
+  fi
+  if (( diff_rc > 1 )); then
+    printf 'FAIL: diff exited %d comparing settings.md\n' "${diff_rc}" >&2
+    return 1
+  fi
+
+  local line
+  while IFS= read -r line; do
+    if [[ "${line}" =~ ^(\+\+\+|---|@@) ]]; then
+      continue
+    fi
+    if [[ "${line}" =~ ^[+-] ]] && [[ ! "${line}" =~ ^[+-]\|\ \`(${allowed_regex})\`\<br/\> ]]; then
+      printf 'FAIL: settings.md modified outside allowed setting rows (%s): %s\n' \
+        "${allowed_regex}" "${line}" >&2
+      return 1
+    fi
+  done <<<"${raw_diff}"
+
+  python3 - "${baseline_file}" "${candidate_file}" "${allowed_regex}" <<'PY'
+import re
+import sys
+
+baseline_path, candidate_path, allowed_pattern = sys.argv[1:4]
+allowed_re = re.compile(allowed_pattern)
+row_re = re.compile(r'^\| `([a-z0-9-]+)`<br/>')
+default_re = re.compile(r'(<br/>Default: `)[^`]+(`)')
+
+
+def mask_rows(text: str) -> str:
+    out = []
+    for line in text.splitlines(keepends=True):
+        m = row_re.match(line)
+        if m and allowed_re.fullmatch(m.group(1)):
+            line, count = default_re.subn(r"\1__MASKED__\2", line, count=1)
+            if count != 1:
+                raise SystemExit(
+                    f"FAIL: settings.md row '{m.group(1)}' lacks Default: `...` cell"
+                )
+        out.append(line)
+    return "".join(out)
+
+
+with open(baseline_path, "r", encoding="utf-8") as f:
+    base_txt = f.read()
+with open(candidate_path, "r", encoding="utf-8") as f:
+    cand_txt = f.read()
+
+if mask_rows(base_txt) != mask_rows(cand_txt):
+    print(
+        f"FAIL: settings.md modified outside Default value of allowed keys ({allowed_pattern})",
+        file=sys.stderr,
+    )
+    sys.exit(1)
+PY
+}
+
+# assert_values_yaml_only_model_transfer_images <baseline_file> <candidate_file>
+# Verifies that only nvidia/amd/ascend image values under top-level modelTransfer.images
+# changed in deploy/gpustack-operator/chart/values.yaml.
+assert_values_yaml_only_model_transfer_images() {
+  local baseline_file="${1:?baseline values.yaml path required}"
+  local candidate_file="${2:?candidate values.yaml path required}"
+
+  if [[ ! -f "${baseline_file}" || ! -f "${candidate_file}" ]]; then
+    printf 'FAIL: missing baseline (%s) or candidate (%s) values.yaml\n' \
+      "${baseline_file}" "${candidate_file}" >&2
+    return 1
+  fi
+
+  local raw_diff diff_rc=0
+  raw_diff="$(diff -U0 -- "${baseline_file}" "${candidate_file}")" || diff_rc=$?
+  if (( diff_rc == 0 )); then
+    return 0
+  fi
+  if (( diff_rc > 1 )); then
+    printf 'FAIL: diff exited %d comparing values.yaml\n' "${diff_rc}" >&2
+    return 1
+  fi
+
+  local line
+  while IFS= read -r line; do
+    if [[ "${line}" =~ ^(\+\+\+|---|@@) ]]; then
+      continue
+    fi
+    if [[ "${line}" =~ ^[+-] ]] && [[ ! "${line}" =~ ^[+-]\ \ \ \ (nvidia|amd|ascend):[[:space:]]+[^[:space:]#]+ ]]; then
+      printf 'FAIL: values.yaml modified outside modelTransfer.images.{nvidia,amd,ascend}: %s\n' \
+        "${line}" >&2
+      return 1
+    fi
+  done <<<"${raw_diff}"
+
+  python3 - "${baseline_file}" "${candidate_file}" <<'PY'
+import re
+import sys
+
+baseline_path, candidate_path = sys.argv[1:3]
+img_re = re.compile(r'^(    (?:nvidia|amd|ascend):\s*)(?:"[^"]+"|\'[^\']+\'|[^#\s]+)(\s*(?:#.*)?)$')
+
+
+def mask_model_transfer_images(text: str) -> str:
+    out = []
+    in_mt = False
+    in_images = False
+    for line in text.splitlines(keepends=True):
+        stripped = line.rstrip("\r\n")
+        if stripped != "" and not stripped.lstrip().startswith("#"):
+            if not stripped.startswith(" "):
+                in_mt = stripped == "modelTransfer:" or stripped.startswith("modelTransfer: ")
+                in_images = False
+            elif in_mt and re.match(r'^  [A-Za-z0-9_-]+:', stripped):
+                in_images = stripped == "  images:" or stripped.startswith("  images: ")
+            elif in_mt and in_images and re.match(r'^    (nvidia|amd|ascend):', stripped):
+                m = img_re.match(stripped)
+                if m:
+                    ending = line[len(stripped):]
+                    line = f"{m.group(1)}__MASKED__{m.group(2)}{ending}"
+        out.append(line)
+    return "".join(out)
+
+
+with open(baseline_path, "r", encoding="utf-8") as f:
+    base_txt = f.read()
+with open(candidate_path, "r", encoding="utf-8") as f:
+    cand_txt = f.read()
+
+if mask_model_transfer_images(base_txt) != mask_model_transfer_images(cand_txt):
+    print(
+        "FAIL: values.yaml modified outside modelTransfer.images.{nvidia,amd,ascend}",
+        file=sys.stderr,
+    )
+    sys.exit(1)
+PY
+}
+
+# assert_deps_sh_only_section <baseline_file> <candidate_file> <charts|mods>
+# Verifies that only lines inside chart_staging() or mod_staging() heredoc changed in hack/deps.sh.
+assert_deps_sh_only_section() {
+  local baseline_file="${1:?baseline deps.sh path required}"
+  local candidate_file="${2:?candidate deps.sh path required}"
+  local section="${3:?section (charts|mods) required}"
+
+  if [[ ! -f "${baseline_file}" || ! -f "${candidate_file}" ]]; then
+    printf 'FAIL: missing baseline (%s) or candidate (%s) deps.sh\n' \
+      "${baseline_file}" "${candidate_file}" >&2
+    return 1
+  fi
+
+  local line_regex=""
+  case "${section}" in
+    charts)
+      line_regex='^[+-]https://[A-Za-z0-9._/%-]+ +v?[0-9][A-Za-z0-9._+-]* +\$\{charts_dir\}/(kueue|node-feature-discovery|csi-driver-nfs|csi-driver-s3|topograph)$'
+      ;;
+    mods)
+      line_regex='^[+-]https://github\.com/[A-Za-z0-9._-]+/[A-Za-z0-9._-]+ +v?[0-9][A-Za-z0-9._+-]* +\$\{staging_dir\}/(k8s\.io|github\.com)/[A-Za-z0-9._/-]+$'
+      ;;
+    *)
+      printf 'FAIL: unsupported deps.sh section "%s" (expected charts or mods)\n' "${section}" >&2
+      return 1
+      ;;
+  esac
+
+  local raw_diff diff_rc=0
+  raw_diff="$(diff -U0 -- "${baseline_file}" "${candidate_file}")" || diff_rc=$?
+  if (( diff_rc == 0 )); then
+    return 0
+  fi
+  if (( diff_rc > 1 )); then
+    printf 'FAIL: diff exited %d comparing deps.sh\n' "${diff_rc}" >&2
+    return 1
+  fi
+
+  local line
+  while IFS= read -r line; do
+    if [[ "${line}" =~ ^(\+\+\+\ |---\ |@@\ ) ]]; then
+      continue
+    fi
+    if [[ "${line}" =~ ^[+-] ]]; then
+      if [[ "${line}" == *..* ]] || [[ ! "${line}" =~ ${line_regex} ]]; then
+        printf 'FAIL: hack/deps.sh modified outside allowed %s heredoc entries: %s\n' \
+          "${section}" "${line}" >&2
+        return 1
+      fi
+    fi
+  done <<<"${raw_diff}"
+
+  python3 - "${baseline_file}" "${candidate_file}" "${section}" <<'PY'
+import re
+import sys
+import urllib.parse
+
+baseline_path, candidate_path, section = sys.argv[1:4]
+URL_RE = re.compile(r'^https://[A-Za-z0-9._/%-]+$')
+MOD_URL_RE = re.compile(r'^https://github\.com/[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$')
+VER_RE = re.compile(r'^v?[0-9][A-Za-z0-9._+-]*$')
+FORBIDDEN_CHARS = set('`();&|<>\\"\'')
+
+if section == "charts":
+    fn_name = "chart_staging"
+    dest_re = re.compile(
+        r'^\$\{charts_dir\}/(kueue|node-feature-discovery|csi-driver-nfs|csi-driver-s3|topograph)$'
+    )
+    prefix_token = "${charts_dir}/"
+else:
+    fn_name = "mod_staging"
+    dest_re = re.compile(
+        r'^\$\{staging_dir\}/(k8s\.io|github\.com)/[A-Za-z0-9._/-]+$'
+    )
+    prefix_token = "${staging_dir}/"
+
+fn_re = re.compile(
+    rf'(function {fn_name}\(\)\s*\{{.*?cat <<EOF\n)(.*?)(\nEOF\n.*?\n\}})',
+    re.DOTALL,
+)
+
+
+def chart_repo_identity(url: str) -> str:
+    parsed = urllib.parse.urlsplit(url)
+    segs = [s for s in parsed.path.split("/") if s]
+    host = parsed.netloc.lower()
+    if host in ("github.com", "raw.githubusercontent.com") and len(segs) >= 2:
+        return f"https://{host}/{segs[0]}/{segs[1]}"
+    if len(segs) >= 1:
+        return f"https://{host}/{segs[0]}"
+    return f"https://{host}"
+
+
+def mask_entry(entry: str, validate: bool) -> str:
+    if ".." in entry or any(ch in FORBIDDEN_CHARS for ch in entry):
+        raise SystemExit(f"FAIL: forbidden characters or '..' in {fn_name}() heredoc: {entry}")
+    parts = entry.split()
+    if len(parts) != 3 or " ".join(parts) != entry:
+        raise SystemExit(f"FAIL: malformed entry in {fn_name}() heredoc: {entry}")
+    url, version, dest = parts
+    if validate:
+        if "$" in url or "$" in version:
+            raise SystemExit(f"FAIL: '$' not allowed in URL/version in {fn_name}(): {entry}")
+        if not dest.startswith(prefix_token) or "$" in dest[len(prefix_token):]:
+            raise SystemExit(f"FAIL: invalid '$' in dest in {fn_name}(): {entry}")
+        if not URL_RE.fullmatch(url) or not VER_RE.fullmatch(version) or not dest_re.fullmatch(dest):
+            raise SystemExit(f"FAIL: invalid entry in {fn_name}() heredoc: {entry}")
+        if section == "mods" and not MOD_URL_RE.fullmatch(url):
+            raise SystemExit(f"FAIL: invalid mod repo URL in {fn_name}(): {entry}")
+    if section == "mods":
+        return f"{url} __VER__ {dest}"
+    return f"{chart_repo_identity(url)}/__MASKED_CHART__ __VER__ {dest}"
+
+
+def mask_section(text: str, validate: bool) -> str:
+    matches = list(fn_re.finditer(text))
+    if len(matches) != 1:
+        raise SystemExit(
+            f"FAIL: expected exactly 1 {fn_name}() heredoc in deps.sh, found {len(matches)}"
+        )
+    m = matches[0]
+    masked_lines = [mask_entry(line, validate) for line in m.group(2).splitlines()]
+    return text[: m.start(2)] + "\n".join(masked_lines) + text[m.end(2) :]
+
+
+with open(baseline_path, "r", encoding="utf-8") as f:
+    base_txt = f.read()
+with open(candidate_path, "r", encoding="utf-8") as f:
+    cand_txt = f.read()
+
+if mask_section(base_txt, False) != mask_section(cand_txt, True):
+    print(
+        f"FAIL: hack/deps.sh modified outside allowed {fn_name}() version/URL fields",
+        file=sys.stderr,
+    )
+    sys.exit(1)
+PY
+}
+
+# assert_api_only_generated <baseline_api_dir> <candidate_api_dir>
+# Fails closed if any file under api/ was added, deleted, or modified whose basename
+# is not a generated codegen file.
+assert_api_only_generated() {
+  local baseline_api_dir="${1:?baseline api dir required}"
+  local candidate_api_dir="${2:?candidate api dir required}"
+
+  if [[ ! -d "${baseline_api_dir}" || ! -d "${candidate_api_dir}" ]]; then
+    printf 'FAIL: missing baseline (%s) or candidate (%s) api directory\n' \
+      "${baseline_api_dir}" "${candidate_api_dir}" >&2
+    return 1
+  fi
+
+  python3 - "${baseline_api_dir}" "${candidate_api_dir}" <<'PY'
+import os
+import re
+import sys
+
+base_dir, cand_dir = sys.argv[1:3]
+gen_re = re.compile(
+    r'^(zz_generated.*\.go|zz_generated\.openapi\.violation_exceptions|generated\.pb\.go|generated\.protomessage\.pb\.go|generated\.proto)$'
+)
+
+
+def collect_files(root: str) -> dict[str, bytes]:
+    files: dict[str, bytes] = {}
+    for cur, dirs, names in os.walk(root, followlinks=False):
+        dirs.sort()
+        for d in dirs:
+            dp = os.path.join(cur, d)
+            if os.path.islink(dp):
+                raise SystemExit(f"FAIL: symlink not allowed in api dir: {dp}")
+        for name in sorted(names):
+            fp = os.path.join(cur, name)
+            if os.path.islink(fp):
+                raise SystemExit(f"FAIL: symlink not allowed in api dir: {fp}")
+            if os.path.isfile(fp):
+                rel = os.path.relpath(fp, root)
+                with open(fp, "rb") as f:
+                    files[rel] = f.read()
+    return files
+
+
+base_files = collect_files(base_dir)
+cand_files = collect_files(cand_dir)
+
+all_rels = sorted(set(base_files.keys()) | set(cand_files.keys()))
+for rel in all_rels:
+    if base_files.get(rel) != cand_files.get(rel):
+        bn = os.path.basename(rel)
+        if not gen_re.fullmatch(bn):
+            print(
+                f"FAIL: non-generated file changed under api/: {rel}",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+PY
+}
+
+# autosync::assert_image_published <manifests_json> <image_ref>
+# Fails closed unless <manifests_json> confirms <image_ref> is published with non-empty
+# sha256 digests for both linux/amd64 and linux/arm64.
+autosync::assert_image_published() {
+  local manifests_json="${1:?manifests json path required}"
+  local image_ref="${2:?image ref required}"
+
+  if [[ ! -f "${manifests_json}" ]]; then
+    printf 'FAIL: missing manifests report: %s\n' "${manifests_json}" >&2
+    return 1
+  fi
+
+  python3 - "${manifests_json}" "${image_ref}" <<'PY'
+import json
+import re
+import sys
+
+manifests_path, image_ref = sys.argv[1:3]
+DIGEST_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
+
+try:
+    with open(manifests_path, "r", encoding="utf-8") as f:
+        data = json.load(f)
+except Exception as exc:
+    print(f"FAIL: unreadable manifests JSON {manifests_path}: {exc}", file=sys.stderr)
+    sys.exit(1)
+
+images = data.get("images") if isinstance(data, dict) else None
+if not isinstance(images, dict):
+    print(f"FAIL: malformed manifests JSON {manifests_path}: missing 'images' object", file=sys.stderr)
+    sys.exit(1)
+
+candidates = [image_ref]
+if image_ref.startswith("docker.io/"):
+    candidates.append(image_ref[len("docker.io/"):])
+else:
+    candidates.append("docker.io/" + image_ref)
+
+entry = None
+for key in candidates:
+    if key in images:
+        entry = images[key]
+        break
+
+if entry is None:
+    for val in images.values():
+        if isinstance(val, dict) and (
+            val.get("image") in candidates or val.get("normalized") in candidates
+        ):
+            entry = val
+            break
+
+if not isinstance(entry, dict):
+    print(f"FAIL: image not found in manifests report: {image_ref}", file=sys.stderr)
+    sys.exit(1)
+
+if entry.get("published") is not True:
+    print(f"FAIL: image is not published: {image_ref}", file=sys.stderr)
+    sys.exit(1)
+
+digests = {}
+for field in ("amd64Digest", "arm64Digest"):
+    digest = entry.get(field)
+    if not isinstance(digest, str) or not DIGEST_RE.fullmatch(digest):
+        print(f"FAIL: image {image_ref} missing valid {field}", file=sys.stderr)
+        sys.exit(1)
+    digests[field] = digest
+
+if digests["amd64Digest"] == digests["arm64Digest"]:
+    print(
+        f"FAIL: image {image_ref} has identical amd64Digest and arm64Digest (single-arch manifest rejected)",
+        file=sys.stderr,
+    )
+    sys.exit(1)
+PY
+}

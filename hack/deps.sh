@@ -11,7 +11,7 @@ function mod_staging() {
   local staging_dir="${ROOT_DIR}/staging"
   mkdir -p "${staging_dir}"
 
-  local line repo version dest patch_dir staging_version rel_mod cache_tar cache_git cache_dir
+  local line repo version dest patch_dir staging_version rel_mod cache_tar cache_git cache_git_abs cache_dir
   while read -r line; do
     IFS=' ' read -r repo version dest <<<"${line}"
     mkdir -p "$(dirname "${dest}")"
@@ -34,8 +34,9 @@ function mod_staging() {
         tar -zxf "${cache_tar}" --directory "${dest}"
       elif [[ -d "${cache_git}" ]]; then
         gpustack::log::info "staging ${repo} ${version} from cache git mirror ${cache_git}"
+        cache_git_abs="$(cd "${cache_git}" && pwd -P)"
         rm -rf "${dest}" || true
-        git -C "$(dirname "${dest}")" clone --recursive --shallow-submodules --depth 1 --branch "${version}" --single-branch "file://${cache_git}"
+        git -C "$(dirname "${dest}")" -c protocol.file.allow=always clone --recursive --shallow-submodules --depth 1 --branch "${version}" --single-branch "file://${cache_git_abs}" "${dest}"
         rm -rf "${dest}/.git" "${dest}/.github" "${dest}/docs"
       elif [[ -d "${cache_dir}" ]]; then
         gpustack::log::info "staging ${repo} ${version} from cache directory ${cache_dir}"
@@ -49,10 +50,8 @@ function mod_staging() {
         rm -rf "${dest}" || true
         git -C "$(dirname "${dest}")" clone --recursive --shallow-submodules --depth 1 --branch "${version}" --single-branch "${repo}"
         rm -rf "${dest}/.git" "${dest}/.github" "${dest}/docs"
-        if [[ -d "${GPUSTACK_DEPS_CACHE_DIR}" ]]; then
-          mkdir -p "$(dirname "${cache_tar}")"
-          tar -zcf "${cache_tar}" -C "${dest}" .
-        fi
+        mkdir -p "$(dirname "${cache_tar}")"
+        tar -zcf "${cache_tar}" -C "${dest}" .
       fi
     else
       rm -rf "${dest}" || true
@@ -141,10 +140,8 @@ function chart_staging() {
         curl --retry 3 --retry-all-errors --retry-delay 3 \
           -o "${archive}" \
           -sSfL "${url}"
-        if [[ -d "${GPUSTACK_DEPS_CACHE_DIR}" ]]; then
-          mkdir -p "${GPUSTACK_DEPS_CACHE_DIR}/charts"
-          cp "${archive}" "${GPUSTACK_DEPS_CACHE_DIR}/charts/${chart_name}-${version}.tgz"
-        fi
+        mkdir -p "${GPUSTACK_DEPS_CACHE_DIR}/charts"
+        cp "${archive}" "${GPUSTACK_DEPS_CACHE_DIR}/charts/${chart_name}-${version}.tgz"
       fi
     else
       curl --retry 3 --retry-all-errors --retry-delay 3 \

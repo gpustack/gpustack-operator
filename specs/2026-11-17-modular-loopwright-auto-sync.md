@@ -1411,7 +1411,7 @@ assert_dockerfile_only_args() {
       Acceptance: `/.auto-sync` is excluded in `.dockerignore`; canonical provenance lives at `pkg/worker/scaling/priors/records.md` with valid relative pointers from `.agents/skills/gpustack-operator-priors/` and `docs/modules/model-deployment/scaling.md`; `hack/deps.sh` honors optional `GPUSTACK_DEPS_CACHE_DIR` for offline staging without altering default online behavior.
       Verify: `make lint docs && bash hack/check/symbols.sh`
 
-- [ ] **T3 · Shared `.auto-sync` common libraries, LLM gateway config writer, and gitless guard self-tests**
+- [x] **T3 · Shared `.auto-sync` common libraries, LLM gateway config writer, and gitless guard self-tests**
       Blocked by: T2
       Owns: `.auto-sync/checks/lib.sh`, `.auto-sync/scripts/lib-preflight.sh`, `.auto-sync/scripts/write_models_json.py`, `hack/check/autosync-selftest.sh`
       Gate: review
