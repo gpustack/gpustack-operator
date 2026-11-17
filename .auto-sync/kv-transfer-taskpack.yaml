@@ -1,0 +1,116 @@
+apiVersion: loopwright.dev/v1alpha1
+kind: Taskpack
+metadata:
+  name: kv-transfer-sync
+spec:
+  goal:
+    candidate: Synchronize Mooncake, NIXL, UCX, HIXL, and ModelExpress recipes with upstream and gpustack/runner, or promote published image tags verified by crane manifest.
+    noChange: Confirm KV-cache and model-transfer recipes and published image tags are aligned and settle as no_change.
+  scope:
+    writable:
+      - pack/mirrored-mooncake
+      - pack/model-transfer
+      - pack/mirrored-modelexpress-server
+      - pkg/worker/settings/value.go
+      - docs/reference/settings.md
+      - deploy/gpustack-operator/chart/values.yaml
+      - deploy/gpustack-operator/chart/values.schema.json
+      - deploy/gpustack-operator/chart/README.md
+      - .auto-sync/proposals/kv-transfer.json
+    protected:
+      - model-transfer/python
+      - pkg/modeltransfer
+      - pkg/worker/kvcache
+  instructions:
+    - .auto-sync/instructions/kv-transfer.md
+  upstreams:
+    - id: mooncake
+      kind: github-release
+      source: kvcache-ai/Mooncake
+      watchedPaths: []
+      allowPrerelease: false
+    - id: nixl-pypi
+      kind: http-json
+      source: https://pypi.org/pypi/nixl/json
+      watchedPaths: []
+    - id: nixl-rocm
+      kind: git-commit
+      source: ai-dynamo/nixl
+      watchedPaths:
+        - pyproject.toml
+        - src
+    - id: ucx-rocm
+      kind: git-commit
+      source: openucx/ucx
+      watchedPaths:
+        - src
+        - configure.ac
+    - id: hixl
+      kind: git-commit
+      source: hicann/hixl
+      watchedPaths:
+        - src
+        - include
+        - CMakeLists.txt
+    - id: modelexpress
+      kind: git-commit
+      source: ai-dynamo/modelexpress
+      watchedPaths:
+        - Cargo.toml
+        - Cargo.lock
+        - modelexpress_server
+    - id: gpustack-runner
+      kind: git-commit
+      source: gpustack/runner
+      watchedPaths:
+        - pack/cuda/Dockerfile.vllm
+        - pack/rocm/Dockerfile.vllm
+        - pack/cann/Dockerfile.vllm
+        - pack/cann/patches/hixl
+  proposal:
+    path: .auto-sync/proposals/kv-transfer.json
+    requiredFields:
+      - schema_version
+      - stage
+      - summary
+      - versions
+      - subscriptions
+    schemaVersion: 1
+  verification:
+    localChecks:
+      - id: proposal-schema
+        implementation: json-artifact.v1
+      - id: scope-guard
+        implementation: scope.v1
+      - id: validate-kv-transfer
+        implementation: command.v1
+        parameters:
+          script: .auto-sync/checks/validate_kv_transfer.sh
+          timeoutSeconds: 1800
+          allowReadOnlyGitHubToken: false
+          env:
+            - AUTOSYNC_STAGE_DIR
+    externalGates: []
+  publication:
+    mode: pull_request
+    targetBranch: main
+    headBranchPrefix: auto-sync-kv-transfer/
+    titleTemplate: "chore(model-transfer): sync kv-cache and transfer runtime recipes"
+  memory:
+    directory: .auto-sync/memory/kv-transfer-sync
+    apply: separate-pull-request
+    onNoModelBudget: deterministic-observations-only
+  triggers:
+    schedule: true
+    workflowDispatch: true
+    releasePublished: false
+    commentCommands:
+      - retry
+      - revise
+      - status
+    commentPrefixes:
+      - /loopwright
+      - /auto-sync
+  limits:
+    wallTimeSeconds: 3600
+    commandTimeoutSeconds: 1800

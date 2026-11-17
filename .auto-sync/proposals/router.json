@@ -1,0 +1,15 @@
+{
+  "schema_version": 1,
+  "stage": "aligned",
+  "summary": "Disaggregated inference router versions, patches, and published router image tags are aligned with upstream.",
+  "versions": {
+    "llm-d-router": "v0.11.0",
+    "vllm-router": "v0.1.16.1",
+    "sglang-gateway": "gateway-v0.3.1"
+  },
+  "subscriptions": [
+    "llm-d-router",
+    "vllm-router",
+    "sglang-gateway"
+  ]
+}

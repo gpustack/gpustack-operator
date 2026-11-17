@@ -153,6 +153,7 @@ CLASSIFY=(
   "review-config|none"
   "api-descriptions-selftest|none"
   "api-descriptions|none"
+  "autosync-selftest|none"
   "gpustack::commit::lint|none"
   "agents-shell-selftest|gate"
   "agents-shell|gate"
@@ -306,6 +307,38 @@ build
 mkdir -p "$TREE/model-transfer/python/gpustack_model_transfer"
 printf 'x = 1\n' > "$TREE/model-transfer/python/gpustack_model_transfer/mod.py"
 expect "a Python source runs the Python ruff gate and the code gate" "lint,lint python"
+
+# --- .auto-sync inputs, including markdown instructions ----------------------
+
+# autosync-selftest.sh runs inside `make lint` and validates .auto-sync/** taskpacks, check
+# scripts, helper scripts, and instruction markdown files. Every edit under .auto-sync/ must
+# trigger `make lint`, even when the file ends in .md or alongside .agents/skills shell.
+build
+mkdir -p "$TREE/.auto-sync"
+printf 'apiVersion: loopwright.dev/v1alpha1\n' > "$TREE/.auto-sync/priors-taskpack.yaml"
+expect "an auto-sync taskpack manifest runs the code gate" "lint"
+
+build
+mkdir -p "$TREE/.auto-sync/checks"
+printf '#!/usr/bin/env bash\necho ok\n' > "$TREE/.auto-sync/checks/validate_priors.sh"
+expect "an auto-sync check script runs the code gate" "lint"
+
+build
+mkdir -p "$TREE/.auto-sync/scripts"
+printf 'print("ok")\n' > "$TREE/.auto-sync/scripts/write_models_json.py"
+expect "an auto-sync Python helper runs the Python ruff gate and the code gate" "lint,lint python"
+
+build
+mkdir -p "$TREE/.auto-sync/instructions"
+printf '# Priors instructions\n' > "$TREE/.auto-sync/instructions/priors.md"
+expect "an auto-sync instruction markdown runs both the code gate and the docs gate" "lint,lint docs"
+
+build
+mkdir -p "$TREE/.auto-sync/instructions"
+printf '# Priors instructions\n' > "$TREE/.auto-sync/instructions/priors.md"
+printf '#!/usr/bin/env bash\necho case\n' > "$TREE/.agents/skills/demo/case.sh"
+expect "an auto-sync instruction markdown beside skills shell runs the full code gate, not agents-shell" \
+  "lint,lint docs"
 
 # --- the vendoring warning, whose test is anchored ---------------------------
 

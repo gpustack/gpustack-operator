@@ -1,0 +1,27 @@
+{
+  "schema_version": 1,
+  "summary": "Baseline CLI tool pins and Kubernetes v0.36.x lockstep Go module versions.",
+  "versions": {
+    "kubernetes": "v1.36.5",
+    "k8s-modules": "v0.36.5",
+    "controller-runtime": "v0.24.1",
+    "kueue-sdk": "v0.18.11",
+    "helm-cli": "v3.21.4",
+    "skopeo-cli": "1.24.1",
+    "vals-cli": "0.50.0",
+    "kustomize-cli": "5.8.3",
+    "ytt-cli": "0.55.4",
+    "kubectl-cli": "1.36.5",
+    "helm-module": "v3.21.4"
+  },
+  "subscriptions": [
+    "kubernetes",
+    "controller-runtime",
+    "kueue-sdk",
+    "helm-cli",
+    "skopeo-cli",
+    "vals-cli",
+    "kustomize-cli",
+    "ytt-cli"
+  ]
+}

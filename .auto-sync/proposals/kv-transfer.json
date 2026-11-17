@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "stage": "aligned",
+  "summary": "KV-cache and model-transfer recipes and published image tags are aligned with upstream.",
+  "versions": {
+    "mooncake": "0.3.13.post1",
+    "nixl-pypi": "1.5.2",
+    "nixl-rocm": "1683cf3b7f3d11674c03c5e861cea22339876c96",
+    "ucx-rocm": "2ff0b47ce7626584cb9b56c647d08f712c6c3edf",
+    "hixl": "60dbe9d1d7d9a7eef04bc3dbf84edbad2188230a",
+    "modelexpress": "ac6d03a87a550c8188c3ed59f187b90d4f0554f5",
+    "gpustack-runner": "aligned"
+  },
+  "subscriptions": [
+    "mooncake",
+    "nixl-pypi",
+    "nixl-rocm",
+    "ucx-rocm",
+    "hixl",
+    "modelexpress",
+    "gpustack-runner"
+  ]
+}

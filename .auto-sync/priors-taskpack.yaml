@@ -1,0 +1,76 @@
+apiVersion: loopwright.dev/v1alpha1
+kind: Taskpack
+metadata:
+  name: priors-sync
+spec:
+  goal:
+    candidate: Refresh pkg/worker/scaling/priors/priors.yaml and pkg/worker/scaling/priors/records.md from staged InferenceX benchmark snapshots and pass scaling unit and docs checks.
+    noChange: Confirm InferenceX benchmark snapshots produce no qualifying catalog changes and settle as no_change.
+  scope:
+    writable:
+      - pkg/worker/scaling/priors/priors.yaml
+      - pkg/worker/scaling/priors/records.md
+      - .auto-sync/proposals/priors.json
+    protected:
+      - pkg/worker/scaling/priors/catalog.go
+      - pkg/worker/scaling/priors/catalog_yaml.go
+      - pkg/worker/scaling/priors/resolve.go
+      - pkg/worker/scaling/priors/validate.go
+      - gen/priors
+  instructions:
+    - .auto-sync/instructions/priors.md
+  upstreams:
+    - id: inferencex-repo
+      kind: git-commit
+      source: SemiAnalysisAI/InferenceX
+      watchedPaths: []
+    - id: inferencex-availability
+      kind: http-json
+      source: https://inferencex.semianalysis.com/api/v1/availability
+      watchedPaths: []
+  proposal:
+    path: .auto-sync/proposals/priors.json
+    requiredFields:
+      - schema_version
+      - summary
+      - versions
+      - subscriptions
+    schemaVersion: 1
+  verification:
+    localChecks:
+      - id: proposal-schema
+        implementation: json-artifact.v1
+      - id: scope-guard
+        implementation: scope.v1
+      - id: validate-priors
+        implementation: command.v1
+        parameters:
+          script: .auto-sync/checks/validate_priors.sh
+          timeoutSeconds: 600
+          allowReadOnlyGitHubToken: false
+          env:
+            - AUTOSYNC_STAGE_DIR
+    externalGates: []
+  publication:
+    mode: pull_request
+    targetBranch: main
+    headBranchPrefix: auto-sync-priors/
+    titleTemplate: "chore(scaling): sync InferenceX capacity priors"
+  memory:
+    directory: .auto-sync/memory/priors-sync
+    apply: separate-pull-request
+    onNoModelBudget: deterministic-observations-only
+  triggers:
+    schedule: true
+    workflowDispatch: true
+    releasePublished: false
+    commentCommands:
+      - retry
+      - revise
+      - status
+    commentPrefixes:
+      - /loopwright
+      - /auto-sync
+  limits:
+    wallTimeSeconds: 1800
+    commandTimeoutSeconds: 600

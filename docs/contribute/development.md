@@ -360,7 +360,14 @@ copies under `./staging/`. `make deps` checks out their versions from `hack/deps
 patches from `hack/staging/`. Change the patch and re-run `make deps`; do not hand-edit `staging/`.
 
 `make deps` also stages the subcharts. Their versions are in `hack/deps.sh` and their patches
-are under `hack/deploy/`.
+are under `hack/deploy/`. Set `GPUSTACK_DEPS_CACHE_DIR` to cache downloaded CLI archives, staged git
+clones, and Helm tarballs across runs, and set `GPUSTACK_DEPS_OFFLINE=true` to refuse network fetches
+when the cache misses.
+
+Scheduled and manual upstream dependency refreshes across six domains (`priors`, `slicing`,
+`kv-transfer`, `router`, `charts`, and `k8s-deps`) live in `.auto-sync/` and `.github/workflows/auto-sync.yml`.
+Run `bash hack/check/autosync-selftest.sh` (`make lint` runs it in diff-aware fast mode) to validate the
+taskpack manifests, preflight staging helpers, and gitless verification gates offline.
 
 ---
 

@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "summary": "Baseline InferenceX capacity priors catalog state",
+  "versions": {
+    "inferencex-repo": "",
+    "inferencex-availability": "43bc03ac251697770697addc3e1c2b1ff64e78e444f2ed689fec6ed73d35ef23"
+  },
+  "subscriptions": [
+    {
+      "id": "inferencex-repo",
+      "kind": "git-commit",
+      "source": "SemiAnalysisAI/InferenceX",
+      "version": ""
+    },
+    {
+      "id": "inferencex-availability",
+      "kind": "http-json",
+      "source": "https://inferencex.semianalysis.com/api/v1/availability",
+      "version": "43bc03ac251697770697addc3e1c2b1ff64e78e444f2ed689fec6ed73d35ef23"
+    }
+  ]
+}
