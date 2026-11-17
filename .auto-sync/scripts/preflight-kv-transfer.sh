@@ -30,7 +30,10 @@ fi
 
 # Extract current repository pins and stage upstream data in Python.
 PROBE_LIST_FILE="$(mktemp "${TMPDIR:-/tmp}/autosync-kv-probes.XXXXXXXX")"
-trap 'rm -f "${PROBE_LIST_FILE}"' EXIT INT TERM HUP
+trap 'rm -f "${PROBE_LIST_FILE}"' EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+trap 'exit 129' HUP
 
 DISCOVERY_JSON="${STAGE_DIR}/kv-transfer-discovery.json"
 
@@ -52,8 +55,14 @@ def read_text(path: str) -> str:
 
 
 def extract_arg(text: str, name: str) -> str:
-    m = re.search(rf'^ARG {re.escape(name)}=(?:"([^"]+)"|\'([^\']+)\'|([^\s#]+))', text, re.MULTILINE)
+    m = re.search(
+        rf'^ARG {re.escape(name)}=(?:"([^"]+)"|\'([^\']+)\'|([^\s#"\']+))(?:\s+#.*)?\s*$',
+        text,
+        re.MULTILINE,
+    )
     if not m:
+        if re.search(rf'^ARG {re.escape(name)}=', text, re.MULTILINE):
+            raise SystemExit(f"FAIL: malformed quoted ARG {name}")
         raise SystemExit(f"FAIL: missing ARG {name}")
     return (m.group(1) or m.group(2) or m.group(3)).strip()
 
@@ -237,33 +246,94 @@ def sync_git_repo(url: str, dst: str, pin_commit: str = "") -> str:
             stderr=subprocess.DEVNULL,
         ).returncode
         if rc != 0:
-            fetch_rc = subprocess.run(
+            fetch_res = subprocess.run(
                 ["git", "-C", dst, "fetch", "--depth", "1", "origin", pin_commit],
                 stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-            ).returncode
-            if fetch_rc != 0:
-                is_shallow = (
-                    subprocess.check_output(
-                        ["git", "-C", dst, "rev-parse", "--is-shallow-repository"],
-                        text=True,
-                    ).strip()
-                    == "true"
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+            if fetch_res.returncode != 0:
+                err_txt = (fetch_res.stderr or "").strip()
+                err_lower = err_txt.lower()
+                # Fail fast on network/transport errors rather than escalating history fetches.
+                transport_markers = (
+                    "could not resolve host",
+                    "failed to connect",
+                    "connection refused",
+                    "connection timed out",
+                    "operation timed out",
+                    "network is unreachable",
+                    "ssl",
+                    "tls",
+                    "unable to access",
+                    "the requested url returned error",
+                    "authentication failed",
+                    "could not read username",
+                    "repository not found",
                 )
-                if is_shallow:
+                unadvertised_markers = (
+                    "unadvertised object",
+                    "not our ref",
+                    "no such remote ref",
+                    "couldn't find remote ref",
+                    "does not allow request for unadvertised object",
+                )
+                is_transport_err = any(m in err_lower for m in transport_markers) and not any(
+                    m in err_lower for m in unadvertised_markers
+                )
+                if is_transport_err:
+                    raise SystemExit(
+                        f"FAIL: git fetch of pinned commit {pin_commit} from {url} failed with transport error: {err_txt}"
+                    )
+
+                for depth in (64, 256, 1024):
                     subprocess.run(
-                        ["git", "-C", dst, "fetch", "--unshallow", "origin"],
+                        ["git", "-C", dst, "fetch", "--depth", str(depth), "origin"],
                         check=False,
                         stdout=subprocess.DEVNULL,
                         stderr=subprocess.DEVNULL,
                     )
-                else:
+                    if (
+                        subprocess.run(
+                            ["git", "-C", dst, "cat-file", "-e", f"{pin_commit}^{{commit}}"],
+                            stdout=subprocess.DEVNULL,
+                            stderr=subprocess.DEVNULL,
+                        ).returncode
+                        == 0
+                    ):
+                        break
+
+                still_missing = (
                     subprocess.run(
-                        ["git", "-C", dst, "fetch", "origin"],
-                        check=False,
+                        ["git", "-C", dst, "cat-file", "-e", f"{pin_commit}^{{commit}}"],
                         stdout=subprocess.DEVNULL,
                         stderr=subprocess.DEVNULL,
+                    ).returncode
+                    != 0
+                )
+                if still_missing and os.environ.get("AUTOSYNC_ALLOW_UNSHALLOW", "false") == "true":
+                    is_shallow = (
+                        subprocess.check_output(
+                            ["git", "-C", dst, "rev-parse", "--is-shallow-repository"],
+                            text=True,
+                        ).strip()
+                        == "true"
                     )
+                    if is_shallow:
+                        subprocess.run(
+                            ["git", "-C", dst, "fetch", "--unshallow", "origin"],
+                            check=False,
+                            stdout=subprocess.DEVNULL,
+                            stderr=subprocess.DEVNULL,
+                        )
+                    else:
+                        subprocess.run(
+                            ["git", "-C", dst, "fetch", "origin"],
+                            check=False,
+                            stdout=subprocess.DEVNULL,
+                            stderr=subprocess.DEVNULL,
+                        )
+
             recheck = subprocess.run(
                 ["git", "-C", dst, "cat-file", "-e", f"{pin_commit}^{{commit}}"],
                 stdout=subprocess.DEVNULL,
@@ -271,7 +341,8 @@ def sync_git_repo(url: str, dst: str, pin_commit: str = "") -> str:
             ).returncode
             if recheck != 0:
                 raise SystemExit(
-                    f"FAIL: pinned commit {pin_commit} not reachable in {url} after fetch/unshallow"
+                    f"FAIL: pinned commit {pin_commit} not reachable in {url} after bounded shallow fetch (depth 1024); "
+                    "set AUTOSYNC_ALLOW_UNSHALLOW=true to permit full history fetch"
                 )
     return head_sha
 
@@ -495,6 +566,7 @@ def discover_newer_mt_tags(current_images: dict[str, str], tags_list: list[str])
             cand_tuple = (int(m.group(1)), int(m.group(2)), int(m.group(3)))
             cand_flavor = m.group(4)
             if cand_flavor != cur_flavor:
+                # Non-numbered flavors (without a cudaXX/rocmXX/cannXX family) require an exact flavor match.
                 if not cur_fam:
                     continue
                 cand_fam_m = fam_re.match(cand_flavor)

@@ -21,7 +21,8 @@
 !AGENTS.md
 
 # Dirs
-/.auto-sync
+!.auto-sync
+.auto-sync/.stage
 /.idea
 /.vscode
 /.kube

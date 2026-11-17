@@ -104,7 +104,7 @@ PY
   fi
   if [[ "${RETIRE_0001}" == "true" && -f "${EPD_PATCH}" ]]; then
     printf 'FAIL: 0001-epd-routing.patch must be retired (retire_0001_epd_routing=true); target vllm-router version %s contains 516f1cb\n' \
-      "${TARGET_VLLM_VER}" >&2
+      "${TARGET_VLLM_VER:-${CAND_VLLM_VER:-unknown}}" >&2
     exit 1
   fi
 fi

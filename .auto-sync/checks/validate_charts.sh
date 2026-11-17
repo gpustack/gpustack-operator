@@ -436,7 +436,7 @@ base_entries = {}
 if stage_dir and os.path.isfile(os.path.join(stage_dir, "baseline", "hack", "deps.sh")):
     base_entries = parse_entries(os.path.join(stage_dir, "baseline", "hack", "deps.sh"))
 
-expected_hashes: dict[str, tuple[str, str]] = {}
+expected_hashes_by_ver: dict[str, dict[str, str]] = {}
 if stage_dir:
     for meta_name in ("charts-discovery.json", "charts-preflight-report.json"):
         meta_path = os.path.join(stage_dir, meta_name)
@@ -444,17 +444,30 @@ if stage_dir:
             with open(meta_path, "r", encoding="utf-8") as f:
                 meta_doc = json.load(f) or {}
             for cname, cinfo in (meta_doc.get("charts") or {}).items():
-                if isinstance(cinfo, dict):
+                if not isinstance(cinfo, dict):
+                    continue
+                by_ver: dict[str, str] = {}
+                raw_map = cinfo.get("archiveSha256ByVersion")
+                if isinstance(raw_map, dict):
+                    for k_ver, k_sha in raw_map.items():
+                        k_ver_s = str(k_ver or "").strip()
+                        k_sha_s = str(k_sha or "").strip().lower()
+                        if k_ver_s and k_sha_s:
+                            by_ver[k_ver_s] = k_sha_s
+                if not by_ver:
                     sha = str(cinfo.get("archiveSha256") or "").strip().lower()
-                    if sha:
-                        expected_hashes[cname] = (sha, str(cinfo.get("candidate_version") or ""))
+                    cand_v = str(cinfo.get("candidate_version") or "").strip()
+                    if sha and cand_v:
+                        by_ver[cand_v] = sha
+                if by_ver:
+                    expected_hashes_by_ver[cname] = by_ver
             break
 
 charts_cache = os.path.join(cache_dir, "charts") if cache_dir else ""
 to_restage = []
 
 for name, (url, ver) in cand_entries.items():
-    changed = bool(base_entries) and (
+    changed = (bool(base_entries) or bool(stage_dir)) and (
         (name not in base_entries) or (base_entries[name][1] != ver) or (base_entries[name][0] != url)
     )
     arc_name = os.path.basename(urllib.parse.urlsplit(url).path)
@@ -466,18 +479,23 @@ for name, (url, ver) in cand_entries.items():
                 cached_tgz_path = fp
                 break
     has_cached = bool(cached_tgz_path)
-    if has_cached and name in expected_hashes:
-        exp_sha, exp_ver = expected_hashes[name]
-        if not exp_ver or exp_ver == ver:
-            if not re.fullmatch(r"[0-9a-f]{64}", exp_sha):
-                raise SystemExit(f"FAIL: invalid archiveSha256 in staged charts metadata for {name}: {exp_sha!r}")
-            with open(cached_tgz_path, "rb") as f:
-                actual_sha = hashlib.sha256(f.read()).hexdigest()
-            if actual_sha != exp_sha:
-                raise SystemExit(
-                    f"FAIL: cached archive SHA-256 mismatch for {name} {ver} ({cached_tgz_path}): "
-                    f"expected {exp_sha}, got {actual_sha}"
-                )
+    if has_cached and name in expected_hashes_by_ver:
+        ver_hashes = expected_hashes_by_ver[name]
+        if ver not in ver_hashes:
+            raise SystemExit(
+                f"FAIL: staged charts metadata version mismatch for {name}: "
+                f"candidate={ver} not in {sorted(ver_hashes)}"
+            )
+        exp_sha = ver_hashes[ver]
+        if not re.fullmatch(r"[0-9a-f]{64}", exp_sha):
+            raise SystemExit(f"FAIL: invalid archiveSha256 in staged charts metadata for {name}: {exp_sha!r}")
+        with open(cached_tgz_path, "rb") as f:
+            actual_sha = hashlib.sha256(f.read()).hexdigest()
+        if actual_sha != exp_sha:
+            raise SystemExit(
+                f"FAIL: cached archive SHA-256 mismatch for {name} {ver} ({cached_tgz_path}): "
+                f"expected {exp_sha}, got {actual_sha}"
+            )
     if verify_all == "true":
         if changed or not base_entries:
             to_restage.append(name)

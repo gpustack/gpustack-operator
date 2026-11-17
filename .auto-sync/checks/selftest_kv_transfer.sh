@@ -953,6 +953,18 @@ with open(p, "w", encoding="utf-8") as f:
 PY
 assert_fails "validate_kv_transfer fails closed when amd64-only ROCm image has published=false" run_validate
 
+# 5p. Malformed unmatched quote in ARG MOONCAKE_VERSION fails closed (R2-S7).
+make_gitless_cand
+sed -i.bak 's|^ARG MOONCAKE_VERSION="0.3.13.post1"|ARG MOONCAKE_VERSION="0.3.14|' "${CAND_DIR}/pack/mirrored-mooncake/Dockerfile"
+rm -f "${CAND_DIR}/pack/mirrored-mooncake/Dockerfile.bak"
+bad_quote_err=""
+if ! bad_quote_err="$(run_validate 2>&1)" && \
+   grep -q "malformed quoted ARG MOONCAKE_VERSION" <<<"${bad_quote_err}"; then
+  pass "validate_kv_transfer fails closed on unmatched quote in ARG MOONCAKE_VERSION"
+else
+  fail "validate_kv_transfer fails closed on unmatched quote in ARG MOONCAKE_VERSION (${bad_quote_err})"
+fi
+
 echo
 if (( FAILS > 0 )); then
   echo "KV-TRANSFER SELFTEST FAILED: ${FAILS} failure(s), ${PASSES} passed" >&2

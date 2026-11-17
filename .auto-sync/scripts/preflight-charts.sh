@@ -50,7 +50,10 @@ cleanup_preflight() {
   rm -f "${PROBE_LIST_FILE}"
   rm -rf "${WORK_TMP}"
 }
-trap cleanup_preflight EXIT INT TERM HUP
+trap cleanup_preflight EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+trap 'exit 129' HUP
 
 # Discover upstream chart versions, cache .tgz archives, check patches, and gather probe refs.
 python3 - "${REPO_ROOT}" "${STAGE_DIR}" "${AUTOSYNC_CHARTS_FIXTURE_DIR:-}" "${DISCOVERY_JSON}" "${PROBE_LIST_FILE}" "${WORK_TMP}" <<'PY'
@@ -462,10 +465,10 @@ def extract_candidate_requirements(chart_name: str, unpacked_dir: str, cand_ver:
         })
         # Shared sidecars follow the higher of current pinned NFS/S3 sidecars and candidate S3 sidecars.
         cur_s3 = (current_values.get("csi-driver-s3") or {}).get("images") or {}
-        for key, mir_short in [
-            ("csiProvisioner", "csi-provisioner"),
-            ("livenessProbe", "csi-livenessprobe"),
-            ("nodeDriverRegistrar", "csi-node-driver-registrar"),
+        for key, mir_short, default_up_repo in [
+            ("csiProvisioner", "csi-provisioner", "registry.k8s.io/sig-storage/csi-provisioner"),
+            ("livenessProbe", "csi-livenessprobe", "registry.k8s.io/sig-storage/livenessprobe"),
+            ("nodeDriverRegistrar", "csi-node-driver-registrar", "registry.k8s.io/sig-storage/csi-node-driver-registrar"),
         ]:
             cur_ref = str(cur_s3.get(key) or "").strip()
             cand_ref = str(imgs.get(key) or "").strip()
@@ -479,14 +482,17 @@ def extract_candidate_requirements(chart_name: str, unpacked_dir: str, cand_ver:
                     "sync_spec": sync_spec_for(cand_ref, mir_short, m_sidecar_tag),
                 })
             elif cur_ref:
+                if cand_ref and "gpustack/mirrored-" not in cand_ref:
+                    up_repo = cand_ref.rsplit(":", 1)[0] if ":" in cand_ref.split("/")[-1] else cand_ref
+                elif "gpustack/mirrored-" not in cur_ref:
+                    up_repo = cur_ref.rsplit(":", 1)[0] if ":" in cur_ref.split("/")[-1] else cur_ref
+                else:
+                    up_repo = default_up_repo
+                up_ref = f"{up_repo}:{normalize_tag_v(cur_tag)}" if cur_tag else ""
                 reqs.append({
-                    "upstream": cand_ref,
+                    "upstream": up_ref,
                     "mirrored": cur_ref,
-                    "sync_spec": (
-                        sync_spec_for(cand_ref, mir_short, cur_tag)
-                        if (cand_ref and "gpustack/mirrored-" not in cand_ref)
-                        else ""
-                    ),
+                    "sync_spec": sync_spec_for(up_ref, mir_short, cur_tag) if up_ref else "",
                 })
     elif chart_name == "topograph":
         img = c_values.get("image") or {}
@@ -533,7 +539,9 @@ for name, up_id, kind, source in chart_specs:
     pinned_url = pin["url"]
 
     # Cache the pinned archive when available so offline hack/deps.sh always has it.
-    cache_archive(name, pinned_ver, pinned_url, fixture_dir, pin["archive_name"], required=(not fixture_dir))
+    _, pinned_sha256 = cache_archive(
+        name, pinned_ver, pinned_url, fixture_dir, pin["archive_name"], required=(not fixture_dir)
+    )
 
     expected_sha256 = ""
     if name in upstream_override:
@@ -607,6 +615,12 @@ for name, up_id, kind, source in chart_specs:
         if r["mirrored"] not in probe_refs:
             probe_refs.append(r["mirrored"])
 
+    archive_sha256_by_version = {}
+    if pinned_sha256:
+        archive_sha256_by_version[pinned_ver] = pinned_sha256
+    if cand_sha256:
+        archive_sha256_by_version[cand_ver] = cand_sha256
+
     charts_meta[name] = {
         "upstream_id": up_id,
         "kind": kind,
@@ -618,6 +632,7 @@ for name, up_id, kind, source in chart_specs:
         "changed": cand_ver != pinned_ver,
         "cache_archive": os.path.relpath(cand_tgz, stage_dir),
         "archiveSha256": cand_sha256,
+        "archiveSha256ByVersion": archive_sha256_by_version,
         "patch_clean": patch_clean,
         "required_images": reqs,
     }

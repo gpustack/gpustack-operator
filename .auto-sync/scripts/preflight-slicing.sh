@@ -23,7 +23,10 @@ cleanup_on_exit() {
     [[ -n "${d}" && -d "${d}" ]] && rm -rf "${d}"
   done
 }
-trap cleanup_on_exit EXIT INT TERM HUP
+trap cleanup_on_exit EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+trap 'exit 129' HUP
 
 sync_upstream_git() {
   local repo_url="${1:?repo url required}"
@@ -215,7 +218,7 @@ ubs_watched_changed = len(ubs_files) > 0
 if not hami_pin_reachable:
     hami_status = "available"
     hami_ver = head_hami
-    hami_recent = [head_hami, pinned_hami] if hami_head_changed else [head_hami]
+    hami_recent = [head_hami]
     hami_reason = (
         f"pinned commit {pinned_hami} is unreachable in upstream history; "
         f"advance to {head_hami} and verify patches"
@@ -237,7 +240,7 @@ else:
 if not ubs_pin_reachable:
     ubs_status = "available"
     ubs_ver = head_ubs
-    ubs_recent = [head_ubs, pinned_ubs] if ubs_head_changed else [head_ubs]
+    ubs_recent = [head_ubs]
     ubs_reason = (
         f"pinned commit {pinned_ubs} is unreachable in upstream history; "
         f"advance to {head_ubs} and verify patches (patch_clean={str(patch_clean).lower()})"

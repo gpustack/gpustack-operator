@@ -1078,21 +1078,35 @@ SH
   assert_fails "commit_staged_tree_revision rejects .. traversal" \
     autosync::preflight::commit_staged_tree_revision "${det_repo}" "${base_sha}" "bad" "${staged_root}" "../evil"
 
-  # 6c. GPUSTACK_IMAGE_BUILD=true skips cleanly only when .auto-sync is absent.
+  # 6c. GPUSTACK_IMAGE_BUILD=true runs static checks and skips domain simulation suites; missing .auto-sync still fails closed otherwise.
   local img_ctx="${scratch}/img-build-ctx"
-  mkdir -p "${img_ctx}/hack/check"
+  mkdir -p "${img_ctx}/hack/check" "${img_ctx}/.auto-sync"
   cp "${ROOT_DIR}/hack/check/autosync-selftest.sh" "${img_ctx}/hack/check/autosync-selftest.sh"
-  local sc_bin img_out=""
+  printf '#!/usr/bin/env bash\necho ok\n' > "${img_ctx}/.auto-sync/ok.sh"
+  local sc_bin img_out="" img_bad_out=""
   sc_bin="$(resolve_shellcheck)"
   if img_out="$(SHELLCHECK_BIN="${sc_bin}" GPUSTACK_IMAGE_BUILD=true bash "${img_ctx}/hack/check/autosync-selftest.sh" all "${img_ctx}" 2>&1)" && \
-     grep -q 'SKIP  \.auto-sync excluded from Docker image build context (GPUSTACK_IMAGE_BUILD=true)' <<<"${img_out}"; then
-    pass "GPUSTACK_IMAGE_BUILD=true skips cleanly when .auto-sync is absent"
+     grep -q 'PASS  bash -n \.auto-sync/ok\.sh' <<<"${img_out}" && \
+     grep -q 'PASS  shellcheck \.auto-sync/ok\.sh' <<<"${img_out}" && \
+     grep -q 'SKIP  domain simulation suites skipped inside Docker image build (GPUSTACK_IMAGE_BUILD=true)' <<<"${img_out}"; then
+    pass "GPUSTACK_IMAGE_BUILD=true runs static checks and skips domain simulation suites"
   else
-    fail "GPUSTACK_IMAGE_BUILD=true skips cleanly when .auto-sync is absent (${img_out})"
+    fail "GPUSTACK_IMAGE_BUILD=true runs static checks and skips domain simulation suites (${img_out})"
   fi
 
-  if ! SHELLCHECK_BIN="${sc_bin}" GPUSTACK_IMAGE_BUILD=false bash "${img_ctx}/hack/check/autosync-selftest.sh" all "${img_ctx}" >/dev/null 2>&1 && \
-     ! env -u GPUSTACK_IMAGE_BUILD SHELLCHECK_BIN="${sc_bin}" bash "${img_ctx}/hack/check/autosync-selftest.sh" all "${img_ctx}" >/dev/null 2>&1; then
+  printf '#!/usr/bin/env bash\nif true; then\n' > "${img_ctx}/.auto-sync/bad.sh"
+  if ! img_bad_out="$(SHELLCHECK_BIN="${sc_bin}" GPUSTACK_IMAGE_BUILD=true bash "${img_ctx}/hack/check/autosync-selftest.sh" all "${img_ctx}" 2>&1)" && \
+     grep -q 'FAIL  bash -n \.auto-sync/bad\.sh' <<<"${img_bad_out}"; then
+    pass "GPUSTACK_IMAGE_BUILD=true still fails closed on .auto-sync syntax error"
+  else
+    fail "GPUSTACK_IMAGE_BUILD=true still fails closed on .auto-sync syntax error (${img_bad_out})"
+  fi
+
+  local img_ctx_missing="${scratch}/img-build-ctx-missing"
+  mkdir -p "${img_ctx_missing}/hack/check"
+  cp "${ROOT_DIR}/hack/check/autosync-selftest.sh" "${img_ctx_missing}/hack/check/autosync-selftest.sh"
+  if ! SHELLCHECK_BIN="${sc_bin}" GPUSTACK_IMAGE_BUILD=false bash "${img_ctx_missing}/hack/check/autosync-selftest.sh" all "${img_ctx_missing}" >/dev/null 2>&1 && \
+     ! env -u GPUSTACK_IMAGE_BUILD SHELLCHECK_BIN="${sc_bin}" bash "${img_ctx_missing}/hack/check/autosync-selftest.sh" all "${img_ctx_missing}" >/dev/null 2>&1; then
     pass "missing .auto-sync still fails closed when GPUSTACK_IMAGE_BUILD is unset or false"
   else
     fail "missing .auto-sync still fails closed when GPUSTACK_IMAGE_BUILD is unset or false"
@@ -2070,12 +2084,12 @@ PY
 
 run_static_checks
 
-if [[ "${GPUSTACK_IMAGE_BUILD:-}" == "true" && ! -d "${ROOT_DIR}/.auto-sync" ]]; then
+if [[ "${GPUSTACK_IMAGE_BUILD:-}" == "true" ]]; then
   if (( FAILS > 0 )); then
     echo "AUTOSYNC SELFTEST FAILED: ${FAILS} failure(s), ${PASSES} passed" >&2
     exit 1
   fi
-  echo "SKIP  .auto-sync excluded from Docker image build context (GPUSTACK_IMAGE_BUILD=true)"
+  echo "SKIP  domain simulation suites skipped inside Docker image build (GPUSTACK_IMAGE_BUILD=true)"
   exit 0
 fi
 

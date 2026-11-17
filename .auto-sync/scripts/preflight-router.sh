@@ -30,7 +30,10 @@ fi
 
 PROBE_LIST_FILE="$(mktemp "${TMPDIR:-/tmp}/autosync-router-probes.XXXXXXXX")"
 DISCOVERY_JSON="${STAGE_DIR}/router-discovery.json"
-trap 'rm -f "${PROBE_LIST_FILE}" "${DISCOVERY_JSON}"' EXIT INT TERM HUP
+trap 'rm -f "${PROBE_LIST_FILE}" "${DISCOVERY_JSON}"' EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+trap 'exit 129' HUP
 
 python3 - "${REPO_ROOT}" "${STAGE_DIR}" "${AUTOSYNC_ROUTER_FIXTURE_DIR:-}" "${DISCOVERY_JSON}" "${PROBE_LIST_FILE}" <<'PY'
 import json

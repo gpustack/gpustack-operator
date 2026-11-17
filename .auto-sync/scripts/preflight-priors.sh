@@ -20,7 +20,10 @@ cleanup_work() {
     rm -rf "${work_dir}"
   fi
 }
-trap cleanup_work EXIT INT TERM HUP
+trap cleanup_work EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+trap 'exit 129' HUP
 
 stage_dir="$(autosync::preflight::init_stage "priors" "${1:-${AUTOSYNC_STAGE_DIR:-}}")"
 repo_root="$(autosync::preflight::repo_root)"

@@ -523,7 +523,8 @@ if ! env -i PATH=/usr/local/bin:/usr/bin:/bin \
   AUTOSYNC_XBUILD_RUNNER="${STUB_RUNNER}" \
   AUTOSYNC_TEST_LOG="${SCRATCH}/log-missing-ubs.txt" \
   bash "${CAND_NV}/.auto-sync/checks/validate_slicing.sh" >"${VAL_LOG_MISSING_UBS}" 2>&1 && \
-  grep -q "ubs-virt" "${VAL_LOG_MISSING_UBS}"; then
+  grep -qF "FAIL: AUTOSYNC_STAGE_DIR is set" "${VAL_LOG_MISSING_UBS}" && \
+  grep -qF "staged ubs-virt git clone is missing:" "${VAL_LOG_MISSING_UBS}"; then
   pass "validate_slicing.sh fails closed when AUTOSYNC_STAGE_DIR lacks ubs-virt/.git"
 else
   tail -n 50 "${VAL_LOG_MISSING_UBS}" >&2 || true

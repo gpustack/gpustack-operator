@@ -1191,15 +1191,22 @@ import sys
 
 path, arg_name = sys.argv[1:3]
 pat = re.compile(
-    rf'^ARG {re.escape(arg_name)}=(?:"([^"]*)"|\'([^\']*)\'|([^\s#]+))(?:\s+#.*)?\s*$'
+    rf'^ARG {re.escape(arg_name)}=(?:"([^"]*)"|\'([^\']*)\'|([^\s#"\']+))(?:\s+#.*)?\s*$'
 )
 matches = []
 with open(path, "r", encoding="utf-8") as f:
     for raw in f:
-        m = pat.match(raw.rstrip("\r\n"))
+        line = raw.rstrip("\r\n")
+        m = pat.match(line)
         if m:
             val = m.group(1) if m.group(1) is not None else (m.group(2) if m.group(2) is not None else m.group(3))
             matches.append(val.strip())
+        elif re.match(rf'^ARG {re.escape(arg_name)}=', line):
+            print(
+                f"FAIL: malformed quoted ARG {arg_name} in {path}: {line!r}",
+                file=sys.stderr,
+            )
+            sys.exit(1)
 
 if len(matches) != 1:
     print(
@@ -1261,12 +1268,13 @@ else:
         disagg_c = 0
         in_profiles = False
         item_indent = None
-        cur_item_has_mode = False
+        in_entry = False
+        entry_has_mode = False
         saw_profiles = False
         mode_re = re.compile(r'^mode:\s*(?:"([^"]*)"|\'([^\']*)\'|([^\s#]+))(?:\s+#.*)?\s*$')
 
         def check_mode(m_obj):
-            nonlocal agg_c, disagg_c, cur_item_has_mode
+            nonlocal agg_c, disagg_c, entry_has_mode
             val = (
                 m_obj.group(1)
                 if m_obj.group(1) is not None
@@ -1278,7 +1286,7 @@ else:
                 disagg_c += 1
             else:
                 raise SystemExit(f"FAIL: unexpected profile mode in {priors_path}: {val!r}")
-            cur_item_has_mode = True
+            entry_has_mode = True
 
         for line in text.splitlines():
             stripped = line.strip()
@@ -1286,9 +1294,13 @@ else:
                 continue
             indent = len(line) - len(line.lstrip(" "))
             if not in_profiles:
-                if indent == 0 and re.match(r"^profiles:\s*(?:#.*)?$", stripped):
-                    in_profiles = True
-                    saw_profiles = True
+                if indent == 0:
+                    m_prof = re.match(r"^profiles:\s*(\[\s*\])?\s*(?:#.*)?$", stripped)
+                    if m_prof:
+                        saw_profiles = True
+                        if m_prof.group(1) is not None:
+                            return 0, 0
+                        in_profiles = True
                 continue
             if indent == 0 and not stripped.startswith("-"):
                 break
@@ -1296,9 +1308,10 @@ else:
                 if item_indent is None:
                     item_indent = indent
                 if indent == item_indent:
-                    if not cur_item_has_mode and (agg_c + disagg_c) > 0:
-                        raise SystemExit(f"FAIL: profile entry missing mode in {priors_path}")
-                    cur_item_has_mode = False
+                    if in_entry and not entry_has_mode:
+                        raise SystemExit(f"FAIL: profile entry missing mode key in {priors_path}")
+                    in_entry = True
+                    entry_has_mode = False
                     after_dash = stripped[1:].strip()
                     m = mode_re.match(after_dash)
                     if m:
@@ -1311,8 +1324,8 @@ else:
 
         if not saw_profiles:
             raise SystemExit(f"FAIL: {priors_path} missing top-level 'profiles' list")
-        if item_indent is not None and not cur_item_has_mode:
-            raise SystemExit(f"FAIL: profile entry missing mode in {priors_path}")
+        if in_entry and not entry_has_mode:
+            raise SystemExit(f"FAIL: profile entry missing mode key in {priors_path}")
         return agg_c, disagg_c
 
     agg, disagg = count_modes_fallback(raw)

@@ -513,6 +513,53 @@ else
   fail "validate_priors.sh fails on mismatched proposals/priors.json availability SHA-256 (${bad_err})"
 fi
 
+# 3f. Fallback parser tests for autosync::count_priors_profiles (R2-I1 / R2-S4).
+NO_YAML_DIR="${SCRATCH}/no-yaml"
+mkdir -p "${NO_YAML_DIR}"
+printf 'raise ImportError("forced fallback")\n' > "${NO_YAML_DIR}/yaml.py"
+
+PRIORS_TWO_MISSING_MODE="${SCRATCH}/priors-two-missing.yaml"
+cat > "${PRIORS_TWO_MISSING_MODE}" <<'YAML'
+profiles:
+  - name: first
+    framework: vllm
+  - name: second
+    framework: vllm
+YAML
+bad_err=""
+if ! bad_err="$(PYTHONPATH="${NO_YAML_DIR}" bash -c 'source "$1"; autosync::count_priors_profiles "$2"' _ "${ROOT_DIR}/.auto-sync/checks/lib.sh" "${PRIORS_TWO_MISSING_MODE}" 2>&1)" && \
+   grep -q "profile entry missing mode key" <<<"${bad_err}"; then
+  pass "autosync::count_priors_profiles fallback fails closed when two entries lack mode"
+else
+  fail "autosync::count_priors_profiles fallback fails closed when two entries lack mode (${bad_err})"
+fi
+
+PRIORS_FIRST_MISSING_MODE="${SCRATCH}/priors-first-missing.yaml"
+cat > "${PRIORS_FIRST_MISSING_MODE}" <<'YAML'
+profiles:
+  - name: first
+    framework: vllm
+  - name: second
+    mode: aggregated
+YAML
+bad_err=""
+if ! bad_err="$(PYTHONPATH="${NO_YAML_DIR}" bash -c 'source "$1"; autosync::count_priors_profiles "$2"' _ "${ROOT_DIR}/.auto-sync/checks/lib.sh" "${PRIORS_FIRST_MISSING_MODE}" 2>&1)" && \
+   grep -q "profile entry missing mode key" <<<"${bad_err}"; then
+  pass "autosync::count_priors_profiles fallback fails closed when first entry lacks mode"
+else
+  fail "autosync::count_priors_profiles fallback fails closed when first entry lacks mode (${bad_err})"
+fi
+
+PRIORS_EMPTY_LIST="${SCRATCH}/priors-empty.yaml"
+printf 'profiles: []\n' > "${PRIORS_EMPTY_LIST}"
+empty_counts=""
+if empty_counts="$(PYTHONPATH="${NO_YAML_DIR}" bash -c 'source "$1"; autosync::count_priors_profiles "$2"' _ "${ROOT_DIR}/.auto-sync/checks/lib.sh" "${PRIORS_EMPTY_LIST}")" && \
+   [[ "${empty_counts}" == "0 0" ]]; then
+  pass "autosync::count_priors_profiles fallback accepts profiles: [] and returns 0 0"
+else
+  fail "autosync::count_priors_profiles fallback accepts profiles: [] (${empty_counts})"
+fi
+
 echo
 if (( FAILS > 0 )); then
   echo "PRIORS SELFTEST FAILED: ${FAILS} failure(s), ${PASSES} passed" >&2

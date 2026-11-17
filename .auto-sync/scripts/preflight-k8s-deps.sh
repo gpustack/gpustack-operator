@@ -23,7 +23,10 @@ cleanup_on_exit() {
     [[ -n "${d}" && -d "${d}" ]] && rm -rf "${d}"
   done
 }
-trap cleanup_on_exit EXIT INT TERM HUP
+trap cleanup_on_exit EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+trap 'exit 129' HUP
 
 repo_root="$(autosync::preflight::repo_root)"
 stage_dir="$(autosync::preflight::init_stage "k8s-deps" "${1:-${AUTOSYNC_STAGE_DIR:-}}")"

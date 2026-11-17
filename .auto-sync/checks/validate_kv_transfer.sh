@@ -62,9 +62,16 @@ df_path = sys.argv[1]
 with open(df_path, "r", encoding="utf-8") as f:
     text = f.read()
 
-m = re.search(r'^ARG MOONCAKE_VERSION=(?:"([^"]+)"|\'([^\']+)\'|([^\s#]+))', text, re.MULTILINE)
+m = re.search(
+    r'^ARG MOONCAKE_VERSION=(?:"([^"]+)"|\'([^\']+)\'|([^\s#"\']+))(?:\s+#.*)?\s*$',
+    text,
+    re.MULTILINE,
+)
 if not m:
-    print('FAIL: missing ARG MOONCAKE_VERSION="..." in pack/mirrored-mooncake/Dockerfile', file=sys.stderr)
+    if re.search(r'^ARG MOONCAKE_VERSION=', text, re.MULTILINE):
+        print(f"FAIL: malformed quoted ARG MOONCAKE_VERSION in {df_path}", file=sys.stderr)
+    else:
+        print('FAIL: missing ARG MOONCAKE_VERSION="..." in pack/mirrored-mooncake/Dockerfile', file=sys.stderr)
     sys.exit(1)
 pinned = (m.group(1) or m.group(2) or m.group(3)).strip()
 
@@ -123,7 +130,10 @@ def parse_case_arms(snippet: str, start_line: int) -> list[tuple[list[str], list
             pat_raw, rest = st.split(")", 1)
             if any(tok in pat_raw for tok in ("$(", "`", ";", "&")):
                 raise SystemExit(
-                    f"FAIL: unsafe shell construct in case arm at line {start_line}: {pat_raw!r}"
+                    f"FAIL: unsafe shell construct in case arm at line {start_line}: {pat_raw!r}; "
+                    "validate_kv_transfer.sh's static case-arm parser only supports simple shell globs "
+                    "([A-Za-z0-9.*?_-]) for sandbox safety; write Dockerfile arms as simple |-separated globs "
+                    "(or extend parse_case_arms)"
                 )
             pats: list[str] = []
             for p in pat_raw.split("|"):
@@ -132,7 +142,10 @@ def parse_case_arms(snippet: str, start_line: int) -> list[tuple[list[str], list
                     p = p[1:-1]
                 if not p or not re.fullmatch(r"[A-Za-z0-9.*?_-]+", p):
                     raise SystemExit(
-                        f"FAIL: unsupported glob pattern {p!r} in case arm at line {start_line}"
+                        f"FAIL: unsupported glob pattern {p!r} in case arm at line {start_line}; "
+                        "validate_kv_transfer.sh's static case-arm parser only supports simple shell globs "
+                        "([A-Za-z0-9.*?_-]) for sandbox safety; write Dockerfile arms as simple |-separated globs "
+                        "(or extend parse_case_arms)"
                     )
                 pats.append(p)
             cur_pats = pats
@@ -304,8 +317,14 @@ def read_text(p: str) -> str:
 
 
 def extract_arg(txt: str, name: str, path: str) -> str:
-    m = re.search(rf'^ARG {re.escape(name)}=(?:"([^"]+)"|\'([^\']+)\'|([^\s#]+))', txt, re.MULTILINE)
+    m = re.search(
+        rf'^ARG {re.escape(name)}=(?:"([^"]+)"|\'([^\']+)\'|([^\s#"\']+))(?:\s+#.*)?\s*$',
+        txt,
+        re.MULTILINE,
+    )
     if not m:
+        if re.search(rf'^ARG {re.escape(name)}=', txt, re.MULTILINE):
+            raise SystemExit(f"FAIL: malformed quoted ARG {name} in {path}")
         raise SystemExit(f"FAIL: missing ARG {name} in {path}")
     return (m.group(1) or m.group(2) or m.group(3)).strip()
 
@@ -624,8 +643,14 @@ for uid in required_ids:
 def read_arg(path: str, arg_name: str) -> str:
     with open(path, "r", encoding="utf-8") as f:
         txt = f.read()
-    m = re.search(rf'^ARG {re.escape(arg_name)}=(?:"([^"]+)"|\'([^\']+)\'|([^\s#]+))', txt, re.MULTILINE)
+    m = re.search(
+        rf'^ARG {re.escape(arg_name)}=(?:"([^"]+)"|\'([^\']+)\'|([^\s#"\']+))(?:\s+#.*)?\s*$',
+        txt,
+        re.MULTILINE,
+    )
     if not m:
+        if re.search(rf'^ARG {re.escape(arg_name)}=', txt, re.MULTILINE):
+            raise SystemExit(f"FAIL: malformed quoted ARG {arg_name} in {path}")
         raise SystemExit(f"FAIL: missing ARG {arg_name} in {path}")
     return (m.group(1) or m.group(2) or m.group(3)).strip()
 
@@ -649,7 +674,7 @@ check_pin("ucx-rocm", read_arg(mt_df_p, "NIXL_ROCM_UCX_REF"))
 check_pin("hixl", read_arg(mt_df_p, "HIXL_COMMIT"))
 check_pin("modelexpress", read_arg(mx_df_p, "MODELEXPRESS_COMMIT"), allow_sb=True)
 
-runner_v = versions["gpustack-runner"]
+runner_v = str(versions.get("gpustack-runner") or "")
 if runner_v not in ("aligned", "aligned+stage-b") and not re.fullmatch(r"[0-9a-f]{40}", runner_v):
     raise SystemExit(
         f"FAIL: proposals/kv-transfer.json versions.gpustack-runner ({runner_v!r}) "

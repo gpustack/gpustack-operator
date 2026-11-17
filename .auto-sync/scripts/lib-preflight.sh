@@ -695,7 +695,10 @@ autosync::preflight::commit_staged_tree_revision() {
   tmp_dir="$(mktemp -d "${TMPDIR:-/tmp}/autosync-gitidx.XXXXXXXX")"
 
   (
-    trap 'rm -rf "${tmp_dir}"' EXIT INT TERM HUP
+    trap 'rm -rf "${tmp_dir}"' EXIT
+    trap 'exit 130' INT
+    trap 'exit 143' TERM
+    trap 'exit 129' HUP
     local tmp_index="${tmp_dir}/index"
     local base_tree new_tree
 
@@ -705,7 +708,6 @@ autosync::preflight::commit_staged_tree_revision() {
 
     python3 - "${repo_root}" "${base_sha}" "${tmp_index}" "${staged_root}" "$@" <<'PY'
 import os
-import stat
 import subprocess
 import sys
 
@@ -772,7 +774,7 @@ if candidates:
         stdin_paths = "\n".join(fp for _, fp in reg_entries) + "\n"
         ho_res = subprocess.run(
             ["git", "-C", repo_root, "hash-object", "-w", "--no-filters", "--stdin-paths"],
-            input=stdin_paths.encode("utf-8"),
+            input=stdin_paths.encode("utf-8", errors="surrogateescape"),
             capture_output=True,
             check=True,
         )
@@ -780,8 +782,8 @@ if candidates:
         if len(blobs) != len(reg_entries):
             raise SystemExit(f"FAIL: hash-object count mismatch ({len(blobs)} != {len(reg_entries)})")
         for (r, fp), blob in zip(reg_entries, blobs):
-            mode = "100755" if (os.stat(fp).st_mode & stat.S_IXUSR) else "100644"
-            index_lines.append(f"{mode} {blob}\t{r}".encode("utf-8") + b"\0")
+            mode = "100755" if bool(os.stat(fp).st_mode & 0o111) else "100644"
+            index_lines.append(f"{mode} {blob}\t{r}".encode("utf-8", errors="surrogateescape") + b"\0")
 
     for r, fp in link_entries:
         link_target = os.readlink(fp).encode("utf-8", errors="surrogateescape")
@@ -792,7 +794,7 @@ if candidates:
             check=True,
         )
         blob = ho_res.stdout.decode("utf-8").strip()
-        index_lines.append(f"120000 {blob}\t{r}".encode("utf-8") + b"\0")
+        index_lines.append(f"120000 {blob}\t{r}".encode("utf-8", errors="surrogateescape") + b"\0")
 
     if index_lines:
         env = os.environ.copy()

@@ -125,7 +125,9 @@ assert km, f"unexpected kueue version format: {kueue_cur}"
 kueue_next = f"{km.group(1)}.{km.group(2)}.{int(km.group(3)) + 1}"
 
 k8s_mod_m = re.search(r"https://github\.com/kubernetes/api\s+(v0\.\d+\.\d+)\s+", deps_txt)
-k8s_mod_ver = k8s_mod_m.group(1) if k8s_mod_m else ""
+if k8s_mod_m is None:
+    raise SystemExit("FAIL: could not extract kubernetes/api version from hack/deps.sh")
+k8s_mod_ver = k8s_mod_m.group(1)
 
 with tempfile.TemporaryDirectory() as tmp:
     for name, ver, archive_name, _ in charts:
@@ -373,6 +375,11 @@ assert kueue.get("archiveSha256") == expected_sha, kueue
 with open(os.path.join(stage_dir, "charts-discovery.json"), "r", encoding="utf-8") as f:
     disc = json.load(f)
 assert disc["charts"]["kueue"]["archiveSha256"] == expected_sha, disc
+s3_reqs = disc["charts"]["csi-driver-s3"]["required_images"]
+assert len(s3_reqs) == 4, s3_reqs
+for req in s3_reqs:
+    assert req["upstream"] and "gpustack/mirrored-" not in req["upstream"], req
+    assert req["sync_spec"], req
 print(src_rev)
 PY
 )" && \
@@ -636,6 +643,98 @@ if ! bad_err="$(env -i PATH=/usr/local/bin:/usr/bin:/bin HOME="${SCRATCH}/env-ho
   pass "validate_charts.sh fails closed when AUTOSYNC_STAGE_DIR is unset"
 else
   fail "validate_charts.sh fails closed when AUTOSYNC_STAGE_DIR is unset (${bad_err})"
+fi
+
+# Negative case 9: stale charts-discovery.json with mismatched archiveSha256ByVersion fails closed (R2-I3).
+STAGE_STALE_META="${SCRATCH}/stage-stale-meta"
+cp -R "${STAGE_READY}" "${STAGE_STALE_META}"
+python3 - "${STAGE_STALE_META}/charts-discovery.json" "${STAGE_STALE_META}/charts-preflight-report.json" <<'PY'
+import json
+import sys
+
+for p in sys.argv[1:]:
+    with open(p, "r", encoding="utf-8") as f:
+        doc = json.load(f)
+    kueue_info = doc["charts"]["kueue"]
+    kueue_info["candidate_version"] = "0.0.1"
+    kueue_info["archiveSha256ByVersion"] = {"0.0.1": "0" * 64}
+    with open(p, "w", encoding="utf-8") as f:
+        json.dump(doc, f, indent=2)
+PY
+bad_err=""
+if ! bad_err="$(run_validator_env_i "${CAND_POS}" "${STAGE_STALE_META}" 2>&1)" && \
+   grep -q "metadata version mismatch" <<<"${bad_err}"; then
+  pass "validate_charts.sh fails closed on stale charts-discovery.json version mismatch"
+else
+  fail "validate_charts.sh fails closed on stale charts-discovery.json version mismatch (${bad_err})"
+fi
+
+# 3d. csi-driver-s3 sidecar fallback emits canonical upstream + non-empty sync_spec when cand_ref is dropped (R2-I5).
+FIXTURE_S3_DROPPED="${SCRATCH}/fixture-s3-dropped"
+cp -R "${FIXTURE_DIR}" "${FIXTURE_S3_DROPPED}"
+python3 - "${FIXTURE_S3_DROPPED}/archives" "${FIXTURE_S3_DROPPED}/upstream.json" <<'PY'
+import json
+import os
+import sys
+import tarfile
+import tempfile
+
+archives_dir, upstream_path = sys.argv[1:3]
+with open(upstream_path, "r", encoding="utf-8") as f:
+    up = json.load(f)
+s3_arc = os.path.join(archives_dir, up["charts"]["csi-driver-s3"]["archive"])
+with tempfile.TemporaryDirectory() as tmp:
+    with tarfile.open(s3_arc, "r:gz") as tf:
+        tf.extractall(tmp)
+    vy_path = os.path.join(tmp, "csi-driver-s3", "values.yaml")
+    with open(vy_path, "r", encoding="utf-8") as f:
+        lines = f.readlines()
+    filtered = [
+        ln for ln in lines
+        if not any(k in ln for k in ("csiProvisioner:", "livenessProbe:", "nodeDriverRegistrar:"))
+    ]
+    with open(vy_path, "w", encoding="utf-8") as f:
+        f.writelines(filtered)
+    with tarfile.open(s3_arc, "w:gz") as tf:
+        tf.add(os.path.join(tmp, "csi-driver-s3"), arcname="csi-driver-s3")
+PY
+STAGE_S3_DROPPED="${SCRATCH}/stage-s3-dropped/charts"
+if (
+  cd "${PREFLIGHT_REPO}" && \
+  AUTOSYNC_CHARTS_FIXTURE_DIR="${FIXTURE_S3_DROPPED}" \
+  AUTOSYNC_MOCK_MANIFESTS_JSON="${MOCK_READY}" \
+  AUTOSYNC_SKIP_GO_MOD_DOWNLOAD=true \
+  AUTOSYNC_SKIP_SOURCE_REVISION=true \
+  bash "${PREFLIGHT_REPO}/.auto-sync/scripts/preflight-charts.sh" "${STAGE_S3_DROPPED}"
+) >/dev/null && \
+python3 - "${STAGE_S3_DROPPED}/charts-discovery.json" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1], "r", encoding="utf-8") as f:
+    disc = json.load(f)
+reqs = disc["charts"]["csi-driver-s3"]["required_images"]
+assert len(reqs) == 4, reqs
+for r in reqs:
+    assert r["upstream"] and "gpustack/mirrored-" not in r["upstream"], r
+    assert r["sync_spec"], r
+assert any(
+    r["upstream"].startswith("registry.k8s.io/sig-storage/csi-provisioner:")
+    for r in reqs
+), reqs
+assert any(
+    r["upstream"].startswith("registry.k8s.io/sig-storage/livenessprobe:")
+    for r in reqs
+), reqs
+assert any(
+    r["upstream"].startswith("registry.k8s.io/sig-storage/csi-node-driver-registrar:")
+    for r in reqs
+), reqs
+PY
+then
+  pass "preflight-charts.sh emits canonical upstream and sync_spec when csi-driver-s3 drops sidecar refs"
+else
+  fail "preflight-charts.sh emits canonical upstream and sync_spec when csi-driver-s3 drops sidecar refs"
 fi
 fi
 

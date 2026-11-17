@@ -230,7 +230,7 @@ upgrades never block each other.
   - `.auto-sync/checks/validate_kv_transfer.sh` and `.auto-sync/checks/validate_router.sh` run `diff -U0` against baseline copies of [value.go](../pkg/worker/settings/value.go), [settings.md](../docs/reference/settings.md), and [values.yaml](../deploy/gpustack-operator/chart/values.yaml), rejecting edits outside their owned image variables.
   - `.auto-sync/checks/validate_charts.sh` and `.auto-sync/checks/validate_k8s_deps.sh` run `diff -U0` against baseline [hack/deps.sh](../hack/deps.sh) and restrict edits to `chart_staging()` versus `mod_staging()` respectively.
 - **F5 · Capacity prior provenance relocation and `.dockerignore` isolation:**
-  - Exclude `/.auto-sync` in [.dockerignore](../.dockerignore); move the canonical provenance ledger to `pkg/worker/scaling/priors/records.md`, update [SKILL.md](../.agents/skills/gpustack-operator-priors/SKILL.md), [records.md](../.agents/skills/gpustack-operator-priors/references/records.md), and [scaling.md](../docs/modules/model-deployment/scaling.md), and ensure `make lint docs` passes with `0` errors.
+  - Retain tracked `.auto-sync/**` in [.dockerignore](../.dockerignore) via `!.auto-sync` while excluding untracked `.auto-sync/.stage` (so BuildKit bind-mount `LINT_DIRTY=true` stays clean); move the canonical provenance ledger to `pkg/worker/scaling/priors/records.md`, update [SKILL.md](../.agents/skills/gpustack-operator-priors/SKILL.md), [records.md](../.agents/skills/gpustack-operator-priors/references/records.md), and [scaling.md](../docs/modules/model-deployment/scaling.md), and ensure `make lint docs` passes with `0` errors.
 - **F6 · Unified GitHub Actions workflow `.github/workflows/auto-sync.yml`:**
   - Support staggered weekly `schedule` cron triggers, manual `workflow_dispatch` (`domain` selector, `force`, `dry-run`, and `runner_profile` defaulting to `8x` for `ubuntu-24.04-8x`), and `/loopwright` or `/auto-sync` PR comment commands (`retry`, `revise`, `status`) routed on `main` (`refs/heads/main` preserved) by matching the PR's `headRefName` (`auto-sync-<domain>/main`) to `.auto-sync/<domain>-taskpack.yaml`.
 
@@ -1407,7 +1407,7 @@ assert_dockerfile_only_args() {
       Blocked by: None
       Owns: `.dockerignore`, `pkg/worker/scaling/priors/records.md`, `.agents/skills/gpustack-operator-priors/**`, `docs/modules/model-deployment/scaling.md`, `hack/deps.sh`
       Gate: review
-      Acceptance: `/.auto-sync` is excluded in `.dockerignore`; canonical provenance lives at `pkg/worker/scaling/priors/records.md` with valid relative pointers from `.agents/skills/gpustack-operator-priors/` and `docs/modules/model-deployment/scaling.md`; `hack/deps.sh` honors optional `GPUSTACK_DEPS_CACHE_DIR` for offline staging without altering default online behavior.
+      Acceptance: `.dockerignore` retains tracked `.auto-sync/**` via `!.auto-sync` and excludes untracked `.auto-sync/.stage` (so BuildKit bind-mount `LINT_DIRTY=true` stays clean); canonical provenance lives at `pkg/worker/scaling/priors/records.md` with valid relative pointers from `.agents/skills/gpustack-operator-priors/` and `docs/modules/model-deployment/scaling.md`; `hack/deps.sh` honors optional `GPUSTACK_DEPS_CACHE_DIR` for offline staging without altering default online behavior.
       Verify: `make lint docs && bash hack/check/symbols.sh`
 
 - [x] **T3 · Shared `.auto-sync` common libraries, LLM gateway config writer, and gitless guard self-tests**
