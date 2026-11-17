@@ -94,8 +94,11 @@ def main(argv: list[str]) -> int:
         )
     path, name = args[0], args[1]
     label = args[2] if len(args) == 3 else path
-    with open(path, "r", encoding="utf-8") as f:
-        txt = f.read()
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            txt = f.read()
+    except (OSError, UnicodeDecodeError) as exc:
+        raise SystemExit(f"FAIL: cannot read {path}: {exc}") from exc
     if optional and not has_dockerfile_arg(txt, name):
         return 0
     print(read_dockerfile_arg(txt, name, label))

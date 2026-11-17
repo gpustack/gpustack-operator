@@ -1019,6 +1019,13 @@ assert res.returncode == 0 and res.stdout.strip() == 'a"b', (res.returncode, res
 
 opt_res = subprocess.run([sys.executable, script, "--optional", cli_df, "MISSING", "cli-df"], capture_output=True, text=True)
 assert opt_res.returncode == 0 and opt_res.stdout == "", (opt_res.returncode, opt_res.stdout, opt_res.stderr)
+
+missing_res = subprocess.run([sys.executable, script, "/nonexistent/Dockerfile", "FOO"], capture_output=True, text=True)
+assert missing_res.returncode != 0 and "FAIL: cannot read" in missing_res.stderr and "Traceback" not in missing_res.stderr, (
+    missing_res.returncode,
+    missing_res.stdout,
+    missing_res.stderr,
+)
 PY
 then
   pass "dockerfile_arg.py parses valid/quoted/escaped ARGs and fails closed on malformed inputs"
