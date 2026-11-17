@@ -1,6 +1,6 @@
 # Spec: Modular Loopwright Auto-Sync Architecture Across Six Domains
 
-Status: Building
+Status: Built
 Blocked on: Implementation of tasks T1 through T11 and merge of the modular auto-sync pull requests.
 Type: Feature
 
@@ -1461,7 +1461,7 @@ assert_dockerfile_only_args() {
       Acceptance: `.github/workflows/auto-sync.yml` orchestrates staggered weekly cron schedules for all 6 domains, `workflow_dispatch` (`domain`, `force`, `dry-run`, `runner_profile` defaulting to `8x` -> `ubuntu-24.04-8x`), safe `issue_comment` routing on `main` (`refs/heads/main` preserved), `write_models_json.py` gateway resolution, and `gpustack/loopwright@main` invocation with `upstream-records`, `source-revision`, `event-name`, and `event-path`.
       Verify: `bash hack/check/autosync-selftest.sh workflow && bash hack/check/symbols.sh`
 
-- [ ] **T11 · Integrate `autosync-selftest.sh` into `hack/lint.sh`, Stop-hook dispatch, and full repo qualification**
+- [x] **T11 · Integrate `autosync-selftest.sh` into `hack/lint.sh`, Stop-hook dispatch, and full repo qualification**
       Blocked by: T10
       Owns: `hack/lint.sh`, `.agents/hooks/gpustack-operator-lint.sh`, `hack/check/hook-dispatch.sh`
       Gate: review
@@ -1470,7 +1470,7 @@ assert_dockerfile_only_args() {
 
 ### Test Plan
 
-[ ] I/we understand the owners of the involved components may require updates to existing tests to make this
+[x] I/we understand the owners of the involved components may require updates to existing tests to make this
 code solid enough prior to committing the changes necessary to implement this enhancement.
 
 #### Prerequisite testing updates

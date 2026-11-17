@@ -286,6 +286,14 @@ function lint() {
     gpustack::log::fatal "the API-description check could not run; its diagnostic is above"
   fi
 
+  # The modular auto-sync manifests, instructions, check scripts, helper scripts, and workflow
+  # wiring under .auto-sync/ and .github/workflows/auto-sync.yml, which golangci-lint and
+  # docs_lint do not validate. Its self-test exercises bash -n, pinned shellcheck, Loopwright
+  # manifest schema validation, and offline validator contracts.
+  if ! bash "${ROOT_DIR}/hack/check/autosync-selftest.sh" "${ROOT_DIR}"; then
+    gpustack::log::fatal "the auto-sync self-test failed"
+  fi
+
   # Shell under .agents/, which the review bot selects nothing from and which nothing above reads
   # for shell syntax or semantics — check-symbols.sh reads it for decorative symbols only. The
   # self-test runs first, for the same reason as every other gate here: a comparison gate that has
