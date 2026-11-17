@@ -1,0 +1,48 @@
+{
+  "schema_version": 1,
+  "summary": "Baseline vendored Helm subcharts and mirrored image pins are aligned with upstream.",
+  "versions": {
+    "kueue": "0.18.11",
+    "node-feature-discovery": "0.19.0",
+    "csi-driver-nfs": "4.13.4",
+    "csi-driver-s3": "0.43.7",
+    "topograph": "1.0.0"
+  },
+  "subscriptions": [
+    {
+      "id": "kueue-chart",
+      "chart": "kueue",
+      "kind": "github-release",
+      "source": "kubernetes-sigs/kueue",
+      "version": "0.18.11"
+    },
+    {
+      "id": "nfd-chart",
+      "chart": "node-feature-discovery",
+      "kind": "github-release",
+      "source": "kubernetes-sigs/node-feature-discovery",
+      "version": "0.19.0"
+    },
+    {
+      "id": "csi-driver-nfs-chart",
+      "chart": "csi-driver-nfs",
+      "kind": "git-tag",
+      "source": "kubernetes-csi/csi-driver-nfs",
+      "version": "4.13.4"
+    },
+    {
+      "id": "csi-driver-s3-chart",
+      "chart": "csi-driver-s3",
+      "kind": "git-tag",
+      "source": "thxcode/k8s-csi-s3",
+      "version": "0.43.7"
+    },
+    {
+      "id": "topograph-chart",
+      "chart": "topograph",
+      "kind": "git-tag",
+      "source": "NVIDIA/topograph",
+      "version": "1.0.0"
+    }
+  ]
+}

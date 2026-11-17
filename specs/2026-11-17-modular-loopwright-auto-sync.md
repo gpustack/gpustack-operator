@@ -1442,7 +1442,7 @@ assert_dockerfile_only_args() {
       Acceptance: `router-taskpack.yaml` passes `validateTaskpackManifest`; `preflight-router.sh` normalizes `gateway-v*` tags, detects `516f1cb` ancestor retirement for `0001-epd-routing.patch`, and probes router image manifests for Stage A/B; `validate_router.sh` verifies all remaining patches, `ObserverRouter` presence, changed builder targets via `docker buildx`, and `value.go` image guards.
       Verify: `bash hack/check/autosync-selftest.sh router`
 
-- [ ] **T8 · Domain 5 tracer bullet: `charts-sync` (5 vendored Helm subcharts and 11 `mirrored-*` images)**
+- [x] **T8 · Domain 5 tracer bullet: `charts-sync` (5 vendored Helm subcharts and 11 `mirrored-*` images)**
       Blocked by: T3
       Owns: `.auto-sync/charts-taskpack.yaml`, `.auto-sync/instructions/charts.md`, `.auto-sync/scripts/preflight-charts.sh`, `.auto-sync/checks/validate_charts.sh`, `.auto-sync/checks/selftest_charts.sh`, `.auto-sync/proposals/charts.json`
       Acceptance: `charts-taskpack.yaml` passes `validateTaskpackManifest`; `preflight-charts.sh` probes `gpustack/mirrored-*` manifests and pre-stages unpacked subcharts onto `source_revision` when ready; `validate_charts.sh` enforces `chart_staging()`-only diff guard on `hack/deps.sh`, zero `.rej`/`.orig`/`.tgz` artifacts, `make generate chart`, `make lint chart`, and `go test ./pkg/worker/kuberess/...`.

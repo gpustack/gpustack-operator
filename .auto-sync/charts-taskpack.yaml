@@ -1,0 +1,95 @@
+apiVersion: loopwright.dev/v1alpha1
+kind: Taskpack
+metadata:
+  name: charts-sync
+spec:
+  goal:
+    candidate: Update vendored Helm subcharts in hack/deps.sh and deploy/gpustack-operator/chart, rebase chart patches under hack/deploy/gpustack-operator/chart/charts, and pass chart lint and kuberess tests.
+    noChange: Confirm all vendored Helm subcharts and mirrored images are up to date and settle as no_change.
+  scope:
+    writable:
+      - hack/deps.sh
+      - hack/deploy/gpustack-operator/chart/charts
+      - deploy/gpustack-operator/chart
+      - pkg/worker/kuberess
+      - .auto-sync/proposals/charts.json
+    protected:
+      - hack/staging
+      - staging
+  instructions:
+    - .auto-sync/instructions/charts.md
+  upstreams:
+    - id: kueue-chart
+      kind: github-release
+      source: kubernetes-sigs/kueue
+      watchedPaths: []
+      allowPrerelease: false
+    - id: nfd-chart
+      kind: github-release
+      source: kubernetes-sigs/node-feature-discovery
+      watchedPaths: []
+      allowPrerelease: false
+    - id: csi-driver-nfs-chart
+      kind: git-tag
+      source: kubernetes-csi/csi-driver-nfs
+      watchedPaths:
+        - charts
+      allowPrerelease: false
+    - id: csi-driver-s3-chart
+      kind: git-tag
+      source: thxcode/k8s-csi-s3
+      watchedPaths:
+        - charts
+      allowPrerelease: false
+    - id: topograph-chart
+      kind: git-tag
+      source: NVIDIA/topograph
+      watchedPaths:
+        - charts
+      allowPrerelease: false
+  proposal:
+    path: .auto-sync/proposals/charts.json
+    requiredFields:
+      - schema_version
+      - summary
+      - versions
+      - subscriptions
+    schemaVersion: 1
+  verification:
+    localChecks:
+      - id: proposal-schema
+        implementation: json-artifact.v1
+      - id: scope-guard
+        implementation: scope.v1
+      - id: validate-charts
+        implementation: command.v1
+        parameters:
+          script: .auto-sync/checks/validate_charts.sh
+          timeoutSeconds: 1800
+          allowReadOnlyGitHubToken: false
+          env:
+            - AUTOSYNC_STAGE_DIR
+    externalGates: []
+  publication:
+    mode: pull_request
+    targetBranch: main
+    headBranchPrefix: auto-sync-charts/
+    titleTemplate: "chore(chart): sync vendored helm subcharts"
+  memory:
+    directory: .auto-sync/memory/charts-sync
+    apply: separate-pull-request
+    onNoModelBudget: deterministic-observations-only
+  triggers:
+    schedule: true
+    workflowDispatch: true
+    releasePublished: false
+    commentCommands:
+      - retry
+      - revise
+      - status
+    commentPrefixes:
+      - /loopwright
+      - /auto-sync
+  limits:
+    wallTimeSeconds: 3600
+    commandTimeoutSeconds: 1800
