@@ -457,7 +457,11 @@ if stage_dir:
                 if not by_ver:
                     sha = str(cinfo.get("archiveSha256") or "").strip().lower()
                     cand_v = str(cinfo.get("candidate_version") or "").strip()
-                    if sha and cand_v:
+                    if sha:
+                        if not cand_v:
+                            raise SystemExit(
+                                f"FAIL: staged charts metadata for {cname} has archiveSha256 but no candidate_version and no archiveSha256ByVersion"
+                            )
                         by_ver[cand_v] = sha
                 if by_ver:
                     expected_hashes_by_ver[cname] = by_ver

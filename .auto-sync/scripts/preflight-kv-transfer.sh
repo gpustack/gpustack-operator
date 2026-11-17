@@ -54,17 +54,44 @@ def read_text(path: str) -> str:
         return f.read()
 
 
-def extract_arg(text: str, name: str) -> str:
-    m = re.search(
-        rf'^ARG {re.escape(name)}=(?:"([^"]+)"|\'([^\']+)\'|([^\s#"\']+))(?:\s+#.*)?\s*$',
-        text,
-        re.MULTILINE,
+def read_dockerfile_arg(txt: str, name: str, label: str = "Dockerfile") -> str:
+    line_m = re.search(rf"^ARG {re.escape(name)}=(.*)$", txt, re.MULTILINE)
+    if not line_m:
+        raise SystemExit(f"FAIL: missing ARG {name} in {label}")
+    raw_rhs = line_m.group(1).rstrip("\r\n")
+
+    in_sq = False
+    in_dq = False
+    cleaned_chars: list[str] = []
+    for ch in raw_rhs:
+        if ch == "'" and not in_dq:
+            in_sq = not in_sq
+        elif ch == '"' and not in_sq:
+            in_dq = not in_dq
+        elif ch == "#" and not in_sq and not in_dq:
+            break
+        cleaned_chars.append(ch)
+    if in_sq or in_dq:
+        raise SystemExit(f"FAIL: malformed ARG {name} in {label}")
+
+    rhs = "".join(cleaned_chars).rstrip()
+    if rhs.endswith("\\"):
+        rhs = rhs[:-1].rstrip()
+
+    m = re.match(
+        r'^(?:"([^"\\]*)"|\'([^\']*)\'|([^\s#"\\\']+))(?:\s+(?:[A-Za-z_][A-Za-z0-9_]*=.*)?)?$',
+        rhs,
     )
     if not m:
-        if re.search(rf'^ARG {re.escape(name)}=', text, re.MULTILINE):
-            raise SystemExit(f"FAIL: malformed quoted ARG {name}")
-        raise SystemExit(f"FAIL: missing ARG {name}")
-    return (m.group(1) or m.group(2) or m.group(3)).strip()
+        raise SystemExit(f"FAIL: malformed ARG {name} in {label}")
+    val = (
+        m.group(1)
+        if m.group(1) is not None
+        else (m.group(2) if m.group(2) is not None else m.group(3))
+    ).strip()
+    if not val:
+        raise SystemExit(f"FAIL: malformed ARG {name} in {label}")
+    return val
 
 
 def extract_value_go_image(text: str, var_name: str) -> str:
@@ -231,73 +258,93 @@ def resolve_mooncake_release(fixture_root: str) -> tuple[str, list[str]]:
 
 
 def sync_git_repo(url: str, dst: str, pin_commit: str = "") -> str:
+    git_env = {**os.environ, "LC_ALL": "C"}
     if os.path.isdir(os.path.join(dst, ".git")):
-        subprocess.run(["git", "-C", dst, "fetch", "--depth", "1", "origin"], check=True)
-        subprocess.run(["git", "-C", dst, "checkout", "--detach", "FETCH_HEAD"], check=True)
+        subprocess.run(["git", "-C", dst, "fetch", "--depth", "1", "origin"], check=True, env=git_env)
+        subprocess.run(["git", "-C", dst, "checkout", "--detach", "FETCH_HEAD"], check=True, env=git_env)
     else:
         if os.path.exists(dst):
             shutil.rmtree(dst)
-        subprocess.run(["git", "clone", "--depth", "1", url, dst], check=True)
-    head_sha = subprocess.check_output(["git", "-C", dst, "rev-parse", "HEAD"], text=True).strip()
+        subprocess.run(["git", "clone", "--depth", "1", url, dst], check=True, env=git_env)
+    head_sha = subprocess.check_output(["git", "-C", dst, "rev-parse", "HEAD"], text=True, env=git_env).strip()
     if pin_commit and re.fullmatch(r"[0-9a-f]{40}", pin_commit):
         rc = subprocess.run(
             ["git", "-C", dst, "cat-file", "-e", f"{pin_commit}^{{commit}}"],
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
+            env=git_env,
         ).returncode
         if rc != 0:
+            # Fail fast on network/transport errors rather than escalating history fetches.
+            transport_markers = (
+                "unable to access",
+                "could not resolve host",
+                "failed to connect",
+                "connection timed out",
+                "connection refused",
+                "operation timed out",
+                "network is unreachable",
+                "ssl certificate",
+                "ssl_error",
+                "tls handshake",
+                "gnutls",
+                "the remote end hung up unexpectedly",
+                "early eof",
+                "recv failure",
+                "the requested url returned error",
+                "authentication failed",
+                "could not read username",
+                "repository not found",
+            )
+            unadvertised_markers = (
+                "unadvertised object",
+                "not our ref",
+                "no such remote ref",
+                "couldn't find remote ref",
+                "does not allow request for unadvertised object",
+            )
+
+            def raise_if_transport_error(stderr_txt: str, context: str) -> None:
+                err_txt = (stderr_txt or "").strip()
+                err_lower = err_txt.lower()
+                is_transport_err = any(m in err_lower for m in transport_markers) and not any(
+                    m in err_lower for m in unadvertised_markers
+                )
+                if is_transport_err:
+                    raise SystemExit(f"{context}: {err_txt}")
+
             fetch_res = subprocess.run(
                 ["git", "-C", dst, "fetch", "--depth", "1", "origin", pin_commit],
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.PIPE,
                 text=True,
+                env=git_env,
             )
             if fetch_res.returncode != 0:
-                err_txt = (fetch_res.stderr or "").strip()
-                err_lower = err_txt.lower()
-                # Fail fast on network/transport errors rather than escalating history fetches.
-                transport_markers = (
-                    "could not resolve host",
-                    "failed to connect",
-                    "connection refused",
-                    "connection timed out",
-                    "operation timed out",
-                    "network is unreachable",
-                    "ssl",
-                    "tls",
-                    "unable to access",
-                    "the requested url returned error",
-                    "authentication failed",
-                    "could not read username",
-                    "repository not found",
+                raise_if_transport_error(
+                    fetch_res.stderr or "",
+                    f"FAIL: git fetch of pinned commit {pin_commit} from {url} failed with transport error",
                 )
-                unadvertised_markers = (
-                    "unadvertised object",
-                    "not our ref",
-                    "no such remote ref",
-                    "couldn't find remote ref",
-                    "does not allow request for unadvertised object",
-                )
-                is_transport_err = any(m in err_lower for m in transport_markers) and not any(
-                    m in err_lower for m in unadvertised_markers
-                )
-                if is_transport_err:
-                    raise SystemExit(
-                        f"FAIL: git fetch of pinned commit {pin_commit} from {url} failed with transport error: {err_txt}"
-                    )
 
                 for depth in (64, 256, 1024):
-                    subprocess.run(
+                    f_res = subprocess.run(
                         ["git", "-C", dst, "fetch", "--depth", str(depth), "origin"],
-                        check=False,
-                        stdout=subprocess.DEVNULL,
-                        stderr=subprocess.DEVNULL,
+                        env=git_env,
+                        capture_output=True,
+                        text=True,
                     )
+                    if f_res.returncode != 0:
+                        raise_if_transport_error(
+                            f_res.stderr or "",
+                            f"FAIL: shallow git fetch (depth {depth}) from {url} failed with transport error",
+                        )
+                        break
                     if (
                         subprocess.run(
                             ["git", "-C", dst, "cat-file", "-e", f"{pin_commit}^{{commit}}"],
                             stdout=subprocess.DEVNULL,
                             stderr=subprocess.DEVNULL,
+                            env=git_env,
                         ).returncode
                         == 0
                     ):
@@ -308,14 +355,17 @@ def sync_git_repo(url: str, dst: str, pin_commit: str = "") -> str:
                         ["git", "-C", dst, "cat-file", "-e", f"{pin_commit}^{{commit}}"],
                         stdout=subprocess.DEVNULL,
                         stderr=subprocess.DEVNULL,
+                        env=git_env,
                     ).returncode
                     != 0
                 )
-                if still_missing and os.environ.get("AUTOSYNC_ALLOW_UNSHALLOW", "false") == "true":
+                allow_unshallow = os.environ.get("AUTOSYNC_ALLOW_UNSHALLOW", "false") == "true"
+                if still_missing and allow_unshallow:
                     is_shallow = (
                         subprocess.check_output(
                             ["git", "-C", dst, "rev-parse", "--is-shallow-repository"],
                             text=True,
+                            env=git_env,
                         ).strip()
                         == "true"
                     )
@@ -325,6 +375,7 @@ def sync_git_repo(url: str, dst: str, pin_commit: str = "") -> str:
                             check=False,
                             stdout=subprocess.DEVNULL,
                             stderr=subprocess.DEVNULL,
+                            env=git_env,
                         )
                     else:
                         subprocess.run(
@@ -332,17 +383,24 @@ def sync_git_repo(url: str, dst: str, pin_commit: str = "") -> str:
                             check=False,
                             stdout=subprocess.DEVNULL,
                             stderr=subprocess.DEVNULL,
+                            env=git_env,
                         )
 
             recheck = subprocess.run(
                 ["git", "-C", dst, "cat-file", "-e", f"{pin_commit}^{{commit}}"],
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
+                env=git_env,
             ).returncode
             if recheck != 0:
+                allow_unshallow = os.environ.get("AUTOSYNC_ALLOW_UNSHALLOW", "false") == "true"
+                hint = (
+                    "full history fetch (AUTOSYNC_ALLOW_UNSHALLOW=true) already attempted and pin still unreachable"
+                    if allow_unshallow
+                    else "set AUTOSYNC_ALLOW_UNSHALLOW=true to permit full history fetch"
+                )
                 raise SystemExit(
-                    f"FAIL: pinned commit {pin_commit} not reachable in {url} after bounded shallow fetch (depth 1024); "
-                    "set AUTOSYNC_ALLOW_UNSHALLOW=true to permit full history fetch"
+                    f"FAIL: pinned commit {pin_commit} not reachable in {url} after bounded shallow fetch (depth 1024); {hint}"
                 )
     return head_sha
 
@@ -366,12 +424,12 @@ with open(local_hixl_patch_path, "rb") as f:
     local_hixl_patch_bytes = f.read()
 
 recipe = {
-    "mooncake_version": extract_arg(mooncake_df, "MOONCAKE_VERSION"),
-    "nixl_version": extract_arg(mt_df, "NIXL_VERSION"),
-    "nixl_rocm_ref": extract_arg(mt_df, "NIXL_ROCM_REF"),
-    "ucx_rocm_ref": extract_arg(mt_df, "NIXL_ROCM_UCX_REF"),
-    "hixl_commit": extract_arg(mt_df, "HIXL_COMMIT"),
-    "modelexpress_commit": extract_arg(mx_df, "MODELEXPRESS_COMMIT"),
+    "mooncake_version": read_dockerfile_arg(mooncake_df, "MOONCAKE_VERSION", "pack/mirrored-mooncake/Dockerfile"),
+    "nixl_version": read_dockerfile_arg(mt_df, "NIXL_VERSION", "pack/model-transfer/Dockerfile"),
+    "nixl_rocm_ref": read_dockerfile_arg(mt_df, "NIXL_ROCM_REF", "pack/model-transfer/Dockerfile"),
+    "ucx_rocm_ref": read_dockerfile_arg(mt_df, "NIXL_ROCM_UCX_REF", "pack/model-transfer/Dockerfile"),
+    "hixl_commit": read_dockerfile_arg(mt_df, "HIXL_COMMIT", "pack/model-transfer/Dockerfile"),
+    "modelexpress_commit": read_dockerfile_arg(mx_df, "MODELEXPRESS_COMMIT", "pack/mirrored-modelexpress-server/Dockerfile"),
 }
 defaults = {
     "kv_cache_backend_image": extract_value_go_image(value_go, "KVCacheBackendImage"),
@@ -450,9 +508,9 @@ runner_hixl_commit = ""
 runner_patch_match = True
 runner_cann_df = os.path.join(runner_stage, "pack/cann/Dockerfile.vllm")
 if os.path.isfile(runner_cann_df):
-    m = re.search(r'^ARG VLLM_HIXL_COMMIT=(?:"([^"]+)"|([^\s#]+))', read_text(runner_cann_df), re.MULTILINE)
-    if m:
-        runner_hixl_commit = (m.group(1) or m.group(2)).strip()
+    runner_cann_txt = read_text(runner_cann_df)
+    if re.search(r"^ARG VLLM_HIXL_COMMIT=", runner_cann_txt, re.MULTILINE):
+        runner_hixl_commit = read_dockerfile_arg(runner_cann_txt, "VLLM_HIXL_COMMIT", runner_cann_df)
 runner_patch_path = os.path.join(runner_stage, "pack/cann/patches/hixl/001_channel_generation.patch")
 if os.path.isfile(runner_patch_path):
     with open(runner_patch_path, "rb") as f:

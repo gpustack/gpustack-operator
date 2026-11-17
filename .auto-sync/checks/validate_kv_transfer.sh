@@ -46,6 +46,68 @@ assert_values_yaml_only_model_transfer_images \
   "${BASELINE_DIR}/deploy/gpustack-operator/chart/values.yaml" \
   "${AUTOSYNC_CANDIDATE_ROOT}/deploy/gpustack-operator/chart/values.yaml"
 
+read_dockerfile_arg_py() {
+  cat <<'PY'
+import re
+
+
+def read_dockerfile_arg(txt: str, name: str, label: str = "Dockerfile") -> str:
+    line_m = re.search(rf"^ARG {re.escape(name)}=(.*)$", txt, re.MULTILINE)
+    if not line_m:
+        raise SystemExit(f"FAIL: missing ARG {name} in {label}")
+    raw_rhs = line_m.group(1).rstrip("\r\n")
+
+    in_sq = False
+    in_dq = False
+    cleaned_chars: list[str] = []
+    for ch in raw_rhs:
+        if ch == "'" and not in_dq:
+            in_sq = not in_sq
+        elif ch == '"' and not in_sq:
+            in_dq = not in_dq
+        elif ch == "#" and not in_sq and not in_dq:
+            break
+        cleaned_chars.append(ch)
+    if in_sq or in_dq:
+        raise SystemExit(f"FAIL: malformed ARG {name} in {label}")
+
+    rhs = "".join(cleaned_chars).rstrip()
+    if rhs.endswith("\\"):
+        rhs = rhs[:-1].rstrip()
+
+    m = re.match(
+        r'^(?:"([^"\\]*)"|\'([^\']*)\'|([^\s#"\\\']+))(?:\s+(?:[A-Za-z_][A-Za-z0-9_]*=.*)?)?$',
+        rhs,
+    )
+    if not m:
+        raise SystemExit(f"FAIL: malformed ARG {name} in {label}")
+    val = (
+        m.group(1)
+        if m.group(1) is not None
+        else (m.group(2) if m.group(2) is not None else m.group(3))
+    ).strip()
+    if not val:
+        raise SystemExit(f"FAIL: malformed ARG {name} in {label}")
+    return val
+PY
+}
+
+read_dockerfile_arg_from_file() {
+  local df_path="$1"
+  local arg_name="$2"
+  local required="${3:-true}"
+  { read_dockerfile_arg_py; cat <<'PY'; } | python3 - "${df_path}" "${arg_name}" "${required}"
+import sys
+
+df_path, arg_name, required = sys.argv[1:4]
+with open(df_path, "r", encoding="utf-8") as f:
+    txt = f.read()
+if required != "true" and not re.search(rf"^ARG {re.escape(arg_name)}=", txt, re.MULTILINE):
+    sys.exit(0)
+print(read_dockerfile_arg(txt, arg_name, df_path))
+PY
+}
+
 # 2. Five-block MOONCAKE_VERSION case guard in pack/mirrored-mooncake/Dockerfile.
 MOONCAKE_DF="${AUTOSYNC_CANDIDATE_ROOT}/pack/mirrored-mooncake/Dockerfile"
 if [[ ! -f "${MOONCAKE_DF}" ]]; then
@@ -53,27 +115,15 @@ if [[ ! -f "${MOONCAKE_DF}" ]]; then
   exit 1
 fi
 
-python3 - "${MOONCAKE_DF}" <<'PY'
+{ read_dockerfile_arg_py; cat <<'PY'; } | python3 - "${MOONCAKE_DF}"
 import fnmatch
-import re
 import sys
 
 df_path = sys.argv[1]
 with open(df_path, "r", encoding="utf-8") as f:
     text = f.read()
 
-m = re.search(
-    r'^ARG MOONCAKE_VERSION=(?:"([^"]+)"|\'([^\']+)\'|([^\s#"\']+))(?:\s+#.*)?\s*$',
-    text,
-    re.MULTILINE,
-)
-if not m:
-    if re.search(r'^ARG MOONCAKE_VERSION=', text, re.MULTILINE):
-        print(f"FAIL: malformed quoted ARG MOONCAKE_VERSION in {df_path}", file=sys.stderr)
-    else:
-        print('FAIL: missing ARG MOONCAKE_VERSION="..." in pack/mirrored-mooncake/Dockerfile', file=sys.stderr)
-    sys.exit(1)
-pinned = (m.group(1) or m.group(2) or m.group(3)).strip()
+pinned = read_dockerfile_arg(text, "MOONCAKE_VERSION", df_path)
 
 lines = text.splitlines(keepends=True)
 release_guards = []
@@ -229,32 +279,13 @@ fi
 
 MT_DF="${AUTOSYNC_CANDIDATE_ROOT}/pack/model-transfer/Dockerfile"
 HIXL_PATCH="${AUTOSYNC_CANDIDATE_ROOT}/pack/model-transfer/patches/hixl/001_channel_generation.patch"
-CAND_HIXL_COMMIT="$(python3 - "${MT_DF}" <<'PY'
-import re
-import sys
-with open(sys.argv[1], "r", encoding="utf-8") as f:
-    txt = f.read()
-m = re.search(r'^ARG HIXL_COMMIT="([^"]+)"', txt, re.MULTILINE)
-if not m:
-    raise SystemExit("FAIL: missing ARG HIXL_COMMIT in pack/model-transfer/Dockerfile")
-print(m.group(1).strip())
-PY
-)"
+CAND_HIXL_COMMIT="$(read_dockerfile_arg_from_file "${MT_DF}" "HIXL_COMMIT")"
 
 if [[ "${ENFORCE_RUNNER_PARITY}" == "true" && -d "${STAGE_DIR}/gpustack-runner" ]]; then
   RUNNER_CANN_DF="${STAGE_DIR}/gpustack-runner/pack/cann/Dockerfile.vllm"
   RUNNER_PATCH="${STAGE_DIR}/gpustack-runner/pack/cann/patches/hixl/001_channel_generation.patch"
   if [[ -f "${RUNNER_CANN_DF}" ]]; then
-    RUNNER_HIXL_COMMIT="$(python3 - "${RUNNER_CANN_DF}" <<'PY'
-import re
-import sys
-with open(sys.argv[1], "r", encoding="utf-8") as f:
-    txt = f.read()
-m = re.search(r'^ARG VLLM_HIXL_COMMIT=(?:"([^"]+)"|([^\s#]+))', txt, re.MULTILINE)
-if m:
-    print((m.group(1) or m.group(2)).strip())
-PY
-)"
+    RUNNER_HIXL_COMMIT="$(read_dockerfile_arg_from_file "${RUNNER_CANN_DF}" "VLLM_HIXL_COMMIT" "false")"
     if [[ -n "${RUNNER_HIXL_COMMIT}" && "${CAND_HIXL_COMMIT}" != "${RUNNER_HIXL_COMMIT}" ]]; then
       printf 'FAIL: HIXL_COMMIT (%s) != gpustack/runner VLLM_HIXL_COMMIT (%s)\n' \
         "${CAND_HIXL_COMMIT}" "${RUNNER_HIXL_COMMIT}" >&2
@@ -301,10 +332,9 @@ if [[ ! -f "${BASE_MT_DF}" || ! -f "${MT_DF}" ]]; then
   exit 1
 fi
 
-python3 - "${BASE_MT_DF}" "${MT_DF}" "${STAGE_DIR}" <<'PY'
+{ read_dockerfile_arg_py; cat <<'PY'; } | python3 - "${BASE_MT_DF}" "${MT_DF}" "${STAGE_DIR}"
 import json
 import os
-import re
 import subprocess
 import sys
 
@@ -316,27 +346,14 @@ def read_text(p: str) -> str:
         return f.read()
 
 
-def extract_arg(txt: str, name: str, path: str) -> str:
-    m = re.search(
-        rf'^ARG {re.escape(name)}=(?:"([^"]+)"|\'([^\']+)\'|([^\s#"\']+))(?:\s+#.*)?\s*$',
-        txt,
-        re.MULTILINE,
-    )
-    if not m:
-        if re.search(rf'^ARG {re.escape(name)}=', txt, re.MULTILINE):
-            raise SystemExit(f"FAIL: malformed quoted ARG {name} in {path}")
-        raise SystemExit(f"FAIL: missing ARG {name} in {path}")
-    return (m.group(1) or m.group(2) or m.group(3)).strip()
-
-
 base_df = read_text(base_df_p)
 cand_df = read_text(cand_df_p)
 
-base_nixl_ver = extract_arg(base_df, "NIXL_VERSION", base_df_p)
-cand_nixl_ver = extract_arg(cand_df, "NIXL_VERSION", cand_df_p)
-base_nixl_rocm_ref = extract_arg(base_df, "NIXL_ROCM_REF", base_df_p)
-cand_nixl_rocm_ref = extract_arg(cand_df, "NIXL_ROCM_REF", cand_df_p)
-cand_nixl_rocm_ver = extract_arg(cand_df, "NIXL_ROCM_VERSION", cand_df_p)
+base_nixl_ver = read_dockerfile_arg(base_df, "NIXL_VERSION", base_df_p)
+cand_nixl_ver = read_dockerfile_arg(cand_df, "NIXL_VERSION", cand_df_p)
+base_nixl_rocm_ref = read_dockerfile_arg(base_df, "NIXL_ROCM_REF", base_df_p)
+cand_nixl_rocm_ref = read_dockerfile_arg(cand_df, "NIXL_ROCM_REF", cand_df_p)
+cand_nixl_rocm_ver = read_dockerfile_arg(cand_df, "NIXL_ROCM_VERSION", cand_df_p)
 
 report_path = os.path.join(stage_dir, "kv-transfer-preflight-report.json")
 verified_nixl: set[str] = set()
@@ -416,19 +433,9 @@ PY
 BASE_MX_DF="${BASELINE_DIR}/pack/mirrored-modelexpress-server/Dockerfile"
 CAND_MX_DF="${AUTOSYNC_CANDIDATE_ROOT}/pack/mirrored-modelexpress-server/Dockerfile"
 if [[ -f "${BASE_MX_DF}" && -f "${CAND_MX_DF}" ]]; then
-  MX_CHANGED="$(python3 - "${BASE_MX_DF}" "${CAND_MX_DF}" <<'PY'
-import re
-import sys
-
-def get_commit(path: str) -> str:
-    with open(path, "r", encoding="utf-8") as f:
-        m = re.search(r'^ARG MODELEXPRESS_COMMIT=(?:"([^"]+)"|\'([^\']+)\'|([^\s#]+))', f.read(), re.MULTILINE)
-        return (m.group(1) or m.group(2) or m.group(3)).strip() if m else ""
-
-print("true" if get_commit(sys.argv[1]) != get_commit(sys.argv[2]) else "false")
-PY
-)"
-  if [[ "${MX_CHANGED}" == "true" ]]; then
+  BASE_MX_COMMIT="$(read_dockerfile_arg_from_file "${BASE_MX_DF}" "MODELEXPRESS_COMMIT" "false")"
+  CAND_MX_COMMIT="$(read_dockerfile_arg_from_file "${CAND_MX_DF}" "MODELEXPRESS_COMMIT" "false")"
+  if [[ "${BASE_MX_COMMIT}" != "${CAND_MX_COMMIT}" ]]; then
     BUILD_CMD="${AUTOSYNC_DOCKER_BUILD_CMD:-docker buildx build -f pack/mirrored-modelexpress-server/Dockerfile --target builder --platform linux/amd64 pack/mirrored-modelexpress-server}"
     if ! bash -c "${BUILD_CMD}"; then
       printf 'FAIL: ModelExpress builder verification failed\n' >&2
@@ -608,10 +615,9 @@ fi
 
 # 6. Proposal schema and version parity (.auto-sync/proposals/kv-transfer.json).
 CAND_PROPOSAL="${AUTOSYNC_CANDIDATE_ROOT}/.auto-sync/proposals/kv-transfer.json"
-python3 - "${CAND_PROPOSAL}" "${MOONCAKE_DF}" "${MT_DF}" "${CAND_MX_DF}" "${IMAGES_CHANGED}" <<'PY'
+{ read_dockerfile_arg_py; cat <<'PY'; } | python3 - "${CAND_PROPOSAL}" "${MOONCAKE_DF}" "${MT_DF}" "${CAND_MX_DF}" "${IMAGES_CHANGED}"
 import json
 import os
-import re
 import sys
 
 prop_p, mc_df_p, mt_df_p, mx_df_p, images_changed_str = sys.argv[1:6]
@@ -642,17 +648,7 @@ for uid in required_ids:
 
 def read_arg(path: str, arg_name: str) -> str:
     with open(path, "r", encoding="utf-8") as f:
-        txt = f.read()
-    m = re.search(
-        rf'^ARG {re.escape(arg_name)}=(?:"([^"]+)"|\'([^\']+)\'|([^\s#"\']+))(?:\s+#.*)?\s*$',
-        txt,
-        re.MULTILINE,
-    )
-    if not m:
-        if re.search(rf'^ARG {re.escape(arg_name)}=', txt, re.MULTILINE):
-            raise SystemExit(f"FAIL: malformed quoted ARG {arg_name} in {path}")
-        raise SystemExit(f"FAIL: missing ARG {arg_name} in {path}")
-    return (m.group(1) or m.group(2) or m.group(3)).strip()
+        return read_dockerfile_arg(f.read(), arg_name, path)
 
 
 allow_stage_b = (stage == "tag_promotion") or (images_changed_str == "true")

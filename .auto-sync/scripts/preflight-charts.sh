@@ -381,6 +381,14 @@ def normalize_tag_v(tag: str) -> str:
     return tag if tag.startswith("v") else f"v{tag}"
 
 
+def split_image_repo_and_tag(ref: str) -> tuple[str, str]:
+    base_ref = ref.split("@", 1)[0]
+    if ":" in base_ref.split("/")[-1]:
+        repo, tag = base_ref.rsplit(":", 1)
+        return repo, tag
+    return base_ref, ""
+
+
 def sync_spec_for(upstream_img: str, mirrored_repo_short: str, mirrored_tag: str) -> str:
     # mirrored_repo_short is e.g. "kueue" or "csi-nfs-driver" (without "mirrored-")
     src_base = upstream_img.split("/")[-1]
@@ -452,10 +460,8 @@ def extract_candidate_requirements(chart_name: str, unpacked_dir: str, cand_ver:
     elif chart_name == "csi-driver-s3":
         imgs = c_values.get("images") or {}
         s3_full = str(imgs.get("s3") or f"docker.io/thxcode/csi-s3-driver:{cand_ver}").strip()
-        if ":" in s3_full.split("/")[-1]:
-            s3_tag = s3_full.rsplit(":", 1)[1]
-        else:
-            s3_tag = cand_ver
+        _, parsed_s3_tag = split_image_repo_and_tag(s3_full)
+        s3_tag = parsed_s3_tag or cand_ver
         m_tag = normalize_tag_v(s3_tag)
         mir = f"docker.io/gpustack/mirrored-csi-s3-driver:{m_tag}"
         reqs.append({
@@ -472,8 +478,8 @@ def extract_candidate_requirements(chart_name: str, unpacked_dir: str, cand_ver:
         ]:
             cur_ref = str(cur_s3.get(key) or "").strip()
             cand_ref = str(imgs.get(key) or "").strip()
-            cur_tag = cur_ref.rsplit(":", 1)[1] if ":" in cur_ref.split("/")[-1] else ""
-            cand_tag = cand_ref.rsplit(":", 1)[1] if ":" in cand_ref.split("/")[-1] else ""
+            cur_repo, cur_tag = split_image_repo_and_tag(cur_ref)
+            cand_repo, cand_tag = split_image_repo_and_tag(cand_ref)
             if cand_tag and (not cur_tag or parse_semver_key(cand_tag) > parse_semver_key(cur_tag)):
                 m_sidecar_tag = normalize_tag_v(cand_tag)
                 reqs.append({
@@ -483,9 +489,9 @@ def extract_candidate_requirements(chart_name: str, unpacked_dir: str, cand_ver:
                 })
             elif cur_ref:
                 if cand_ref and "gpustack/mirrored-" not in cand_ref:
-                    up_repo = cand_ref.rsplit(":", 1)[0] if ":" in cand_ref.split("/")[-1] else cand_ref
+                    up_repo = cand_repo
                 elif "gpustack/mirrored-" not in cur_ref:
-                    up_repo = cur_ref.rsplit(":", 1)[0] if ":" in cur_ref.split("/")[-1] else cur_ref
+                    up_repo = cur_repo
                 else:
                     up_repo = default_up_repo
                 up_ref = f"{up_repo}:{normalize_tag_v(cur_tag)}" if cur_tag else ""

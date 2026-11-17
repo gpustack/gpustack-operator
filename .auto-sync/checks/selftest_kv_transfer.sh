@@ -959,7 +959,7 @@ sed -i.bak 's|^ARG MOONCAKE_VERSION="0.3.13.post1"|ARG MOONCAKE_VERSION="0.3.14|
 rm -f "${CAND_DIR}/pack/mirrored-mooncake/Dockerfile.bak"
 bad_quote_err=""
 if ! bad_quote_err="$(run_validate 2>&1)" && \
-   grep -q "malformed quoted ARG MOONCAKE_VERSION" <<<"${bad_quote_err}"; then
+   grep -q "malformed ARG MOONCAKE_VERSION" <<<"${bad_quote_err}"; then
   pass "validate_kv_transfer fails closed on unmatched quote in ARG MOONCAKE_VERSION"
 else
   fail "validate_kv_transfer fails closed on unmatched quote in ARG MOONCAKE_VERSION (${bad_quote_err})"
