@@ -1,6 +1,6 @@
 ---
 name: gpustack-operator-priors
-description: "Maintain pkg/worker/scaling/priors/priors.yaml: fetch and merge public benchmark curves, retire outdated profiles by model/engine/hardware, and record source checksums in references/records.md."
+description: "Maintain pkg/worker/scaling/priors/priors.yaml: fetch and merge public benchmark curves, retire outdated profiles by model/engine/hardware, and record source checksums in pkg/worker/scaling/priors/records.md."
 ---
 
 # Maintain the capacity prior catalog
@@ -11,8 +11,9 @@ same-namespace `ConfigMap`; it never fetches, benchmarks or profiles live traffi
 describes how to change the catalog and record provenance:
 
 - `SKILL.md` (this file) — the workflows, the identity rules and the schema.
-- `references/records.md` — the provenance ledger: upstream URLs, capture dates, SHA-256
-  checksums, alignment rules and retirement/refusal records.
+- [pkg/worker/scaling/priors/records.md](../../../pkg/worker/scaling/priors/records.md) — the
+  provenance ledger: upstream URLs, capture dates, SHA-256 checksums, alignment rules and
+  retirement/refusal records.
 
 Include each catalog change and its records entry in the same change. Either one without the
 other is incomplete.
@@ -21,7 +22,8 @@ other is incomplete.
 
 The committed catalog is a single `priors.yaml` with human-editable profiles. The parser
 also accepts JSON. Profiles carry no `digest`, `sources[]`, `servingConfig` or `workload`
-blocks — qualification and provenance live in the generator and in `references/records.md`,
+blocks — qualification and provenance live in the generator and in
+[pkg/worker/scaling/priors/records.md](../../../pkg/worker/scaling/priors/records.md),
 which keeps user `ConfigMap` catalogs concise. Each profile is:
 
 ```yaml
@@ -73,7 +75,7 @@ profiles:
   Point values above are illustrative, not measurements.
 
 The T1 sync produced 385 profiles: 205 aggregated and 180 disaggregated, in 669,466 bytes.
-See [records](references/records.md) for model counts and source checksums.
+See [pkg/worker/scaling/priors/records.md](../../../pkg/worker/scaling/priors/records.md) for model counts and source checksums.
 
 ## Canonical identity rules
 
@@ -116,7 +118,7 @@ Natural names (`mi325x`, `AMD Instinct MI325X`) normalize by the same Family rul
    ```
 
 2. Diff the fetched availability against the catalog before merging: any model, hardware family
-   or data source that `priors.yaml` or `references/records.md` still carries but the live
+   or data source that `priors.yaml` or `pkg/worker/scaling/priors/records.md` still carries but the live
    upstream has removed, deprecated or superseded is reported to the user proactively, with an
    offer to retire the affected profiles (Workflow 2). Merge only after that review.
 3. Run `go run ./gen/priors --merge <path>` with the downloaded data. The merge upserts
@@ -124,7 +126,7 @@ Natural names (`mi325x`, `AMD Instinct MI325X`) normalize by the same Family rul
    refuses conflicting or unverifiable evidence.
 4. Verify: `make generate priors` (deterministic re-format) and
    `go test ./pkg/worker/scaling/priors/...`.
-5. Record the source in `references/records.md`: upstream URL, capture date, canonical model
+5. Record the source in `pkg/worker/scaling/priors/records.md`: upstream URL, capture date, canonical model
    ID, row count and SHA-256 (`shasum -a 256 <file>`). One row per upstream dataset.
 
 ## Workflow 2 — Retire
@@ -141,7 +143,7 @@ disaggregated --ep 8`. Stage selectors can match either disaggregated stage. All
 normalize by the same identity rules. Then:
 
 1. Run `make generate priors` to re-format and re-validate the file.
-2. Log the retirement in `references/records.md`: what was removed, why, and the date.
+2. Log the retirement in `pkg/worker/scaling/priors/records.md`: what was removed, why, and the date.
 
 ## Workflow 3 — Validate and format
 

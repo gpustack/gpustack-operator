@@ -1404,7 +1404,7 @@ assert_dockerfile_only_args() {
       Acceptance: `action.yml` and `runActionCli` in `gpustack/loopwright` forward optional `source-revision` (`INPUT_SOURCE-REVISION`) into `runGitHubActionEntrypoint` so preflight-staged vendor commits (`sourceRevision !== baseRevision`) carry writable files into a single squashed PR commit parented on `baseRevision`.
       Verify: `npm test -- --pkg github-app` (executed in `gpustack/loopwright`)
 
-- [ ] **T2 · Repository prefactor: `.dockerignore`, priors `records.md` relocation, and offline `hack/deps.sh` cache**
+- [x] **T2 · Repository prefactor: `.dockerignore`, priors `records.md` relocation, and offline `hack/deps.sh` cache**
       Blocked by: None
       Owns: `.dockerignore`, `pkg/worker/scaling/priors/records.md`, `.agents/skills/gpustack-operator-priors/**`, `docs/modules/model-deployment/scaling.md`, `hack/deps.sh`
       Gate: review

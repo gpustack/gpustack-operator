@@ -8,23 +8,60 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 source "${ROOT_DIR}/hack/lib/init.sh"
 
 function mod_staging() {
-  staging_dir="${ROOT_DIR}/staging"
+  local staging_dir="${ROOT_DIR}/staging"
   mkdir -p "${staging_dir}"
 
+  local line repo version dest patch_dir staging_version rel_mod cache_tar cache_git cache_dir
   while read -r line; do
     IFS=' ' read -r repo version dest <<<"${line}"
-    mkdir -p "${dest}"
+    mkdir -p "$(dirname "${dest}")"
     patch_dir="${ROOT_DIR}/hack/${dest#"${ROOT_DIR}/"}"
     staging_version="$(cat "${dest}/_VERSION_" 2>/dev/null || echo "")"
     if [[ "${staging_version}" == "${version}" ]]; then
       gpustack::log::info "staging ${repo} modules are up to date"
       continue
     fi
-    rm -rf "${dest}" || true
-    git -C "$(dirname "${dest}")" clone --recursive --shallow-submodules --depth 1 --branch "${version}" --single-branch "${repo}"
-    rm -rf "${dest}/.git"
-    rm -rf "${dest}/.github"
-    rm -rf "${dest}/docs"
+
+    rel_mod="${dest#"${staging_dir}/"}"
+    if [[ -n "${GPUSTACK_DEPS_CACHE_DIR:-}" ]]; then
+      cache_tar="${GPUSTACK_DEPS_CACHE_DIR}/staging/${rel_mod}-${version}.tar.gz"
+      cache_git="${GPUSTACK_DEPS_CACHE_DIR}/mods/${rel_mod}"
+      cache_dir="${GPUSTACK_DEPS_CACHE_DIR}/staging/${rel_mod}@${version}"
+      if [[ -f "${cache_tar}" ]]; then
+        gpustack::log::info "staging ${repo} ${version} from cache tarball ${cache_tar}"
+        rm -rf "${dest}" || true
+        mkdir -p "${dest}"
+        tar -zxf "${cache_tar}" --directory "${dest}"
+      elif [[ -d "${cache_git}" ]]; then
+        gpustack::log::info "staging ${repo} ${version} from cache git mirror ${cache_git}"
+        rm -rf "${dest}" || true
+        git -C "$(dirname "${dest}")" clone --recursive --shallow-submodules --depth 1 --branch "${version}" --single-branch "file://${cache_git}"
+        rm -rf "${dest}/.git" "${dest}/.github" "${dest}/docs"
+      elif [[ -d "${cache_dir}" ]]; then
+        gpustack::log::info "staging ${repo} ${version} from cache directory ${cache_dir}"
+        rm -rf "${dest}" || true
+        cp -R "${cache_dir}" "${dest}"
+        rm -rf "${dest}/.git" "${dest}/.github" "${dest}/docs"
+      elif [[ "${GPUSTACK_DEPS_OFFLINE:-false}" == "true" ]]; then
+        gpustack::log::error "offline cache miss for module ${rel_mod} ${version} in ${GPUSTACK_DEPS_CACHE_DIR}"
+        return 1
+      else
+        rm -rf "${dest}" || true
+        git -C "$(dirname "${dest}")" clone --recursive --shallow-submodules --depth 1 --branch "${version}" --single-branch "${repo}"
+        rm -rf "${dest}/.git" "${dest}/.github" "${dest}/docs"
+        if [[ -d "${GPUSTACK_DEPS_CACHE_DIR}" ]]; then
+          mkdir -p "$(dirname "${cache_tar}")"
+          tar -zcf "${cache_tar}" -C "${dest}" .
+        fi
+      fi
+    else
+      rm -rf "${dest}" || true
+      git -C "$(dirname "${dest}")" clone --recursive --shallow-submodules --depth 1 --branch "${version}" --single-branch "${repo}"
+      rm -rf "${dest}/.git"
+      rm -rf "${dest}/.github"
+      rm -rf "${dest}/docs"
+    fi
+
     echo -n "${version}" >"${dest}/_VERSION_"
     # patch existing staging if any patches exist.
     if [[ -d "${patch_dir}" ]]; then
@@ -66,6 +103,7 @@ function chart_staging() {
   mkdir -p "${charts_dir}"
 
   local line url version dest staging_version patch_dir patch_file archive rejects
+  local chart_name archive_name cached_archive candidate
   while read -r line; do
     IFS=' ' read -r url version dest <<<"${line}"
 
@@ -76,14 +114,45 @@ function chart_staging() {
     fi
 
     gpustack::log::info "staging chart $(basename "${dest}") ${version} ..."
-    rm -rf "${dest}"
-    mkdir -p "${dest}"
+    chart_name="$(basename "${dest}")"
+    archive_name="$(basename "${url}")"
     # A private archive per download: a fixed path under "/tmp" makes two concurrent
     # "make deps" in one checkout overwrite each other's tarball.
     archive="$(mktemp "${TMPDIR:-/tmp}/gpustack-chart.XXXXXXXX")"
-    curl --retry 3 --retry-all-errors --retry-delay 3 \
-      -o "${archive}" \
-      -sSfL "${url}"
+    if [[ -n "${GPUSTACK_DEPS_CACHE_DIR:-}" ]]; then
+      cached_archive=""
+      for candidate in \
+        "${GPUSTACK_DEPS_CACHE_DIR}/charts/${chart_name}-${version}.tgz" \
+        "${GPUSTACK_DEPS_CACHE_DIR}/charts/${archive_name}" \
+        "${GPUSTACK_DEPS_CACHE_DIR}/${archive_name}"; do
+        if [[ -f "${candidate}" ]]; then
+          cached_archive="${candidate}"
+          break
+        fi
+      done
+      if [[ -n "${cached_archive}" ]]; then
+        gpustack::log::info "using cached chart archive ${cached_archive}"
+        cp "${cached_archive}" "${archive}"
+      elif [[ "${GPUSTACK_DEPS_OFFLINE:-false}" == "true" ]]; then
+        rm -f "${archive}"
+        gpustack::log::error "offline cache miss for chart ${chart_name} ${version} (${archive_name}) in ${GPUSTACK_DEPS_CACHE_DIR}"
+        return 1
+      else
+        curl --retry 3 --retry-all-errors --retry-delay 3 \
+          -o "${archive}" \
+          -sSfL "${url}"
+        if [[ -d "${GPUSTACK_DEPS_CACHE_DIR}" ]]; then
+          mkdir -p "${GPUSTACK_DEPS_CACHE_DIR}/charts"
+          cp "${archive}" "${GPUSTACK_DEPS_CACHE_DIR}/charts/${chart_name}-${version}.tgz"
+        fi
+      fi
+    else
+      curl --retry 3 --retry-all-errors --retry-delay 3 \
+        -o "${archive}" \
+        -sSfL "${url}"
+    fi
+    rm -rf "${dest}"
+    mkdir -p "${dest}"
     # Every upstream release archives its chart under a single top-level directory,
     # which is stripped so that the tree lands directly in the destination.
     tar -zxf "${archive}" \
@@ -141,17 +210,38 @@ EOF
 }
 
 function mod() {
-  mod_staging
+  local stage_only="${GPUSTACK_DEPS_STAGE_ONLY:-all}"
+  case "${stage_only}" in
+    charts)
+      chart_staging
+      return
+      ;;
+    mods)
+      mod_staging
+      return
+      ;;
+    all)
+      mod_staging
 
-  # The operator chart's upstream dependencies are staged the same way, and for the same
-  # reason, as the Kubernetes modules above.
-  chart_staging
+      # The operator chart's upstream dependencies are staged the same way, and for the same
+      # reason, as the Kubernetes modules above.
+      chart_staging
+      ;;
+    *)
+      gpustack::log::error "unsupported GPUSTACK_DEPS_STAGE_ONLY=${stage_only} (expected charts, mods, or all)"
+      return 1
+      ;;
+  esac
 
   if [[ "$*" =~ update ]]; then
     go get -u ./...
   fi
-  go mod tidy
-  go mod download
+  if [[ "${GPUSTACK_DEPS_OFFLINE:-false}" == "true" ]]; then
+    GOPROXY="${GOPROXY:-off}" go mod tidy
+  else
+    go mod tidy
+    go mod download
+  fi
 }
 
 gpustack::log::info "+++ MOD +++"
