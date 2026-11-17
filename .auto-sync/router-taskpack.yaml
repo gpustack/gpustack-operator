@@ -1,0 +1,83 @@
+apiVersion: loopwright.dev/v1alpha1
+kind: Taskpack
+metadata:
+  name: router-sync
+spec:
+  goal:
+    candidate: Update LLMD_ROUTER_VERSION, VLLM_ROUTER_VERSION, and SGLANG_GATEWAY_VERSION in pack/llm-router/Dockerfile, rebase or retire router patches under pack/llm-router/patches, and pass builder compilation gates.
+    noChange: Confirm llm-d-router, vllm-router, and sgl-model-gateway tags and published router images are up to date and settle as no_change.
+  scope:
+    writable:
+      - pack/llm-router
+      - pkg/worker/settings/value.go
+      - docs/reference/settings.md
+      - .auto-sync/proposals/router.json
+    protected:
+      - pkg/worker/controllers
+      - pkg/worker/webhooks
+  instructions:
+    - .auto-sync/instructions/router.md
+  upstreams:
+    - id: llm-d-router
+      kind: git-tag
+      source: llm-d/llm-d-router
+      watchedPaths: []
+      allowPrerelease: false
+    - id: vllm-router
+      kind: git-tag
+      source: vllm-project/router
+      watchedPaths: []
+      allowPrerelease: false
+    - id: sglang-gateway
+      kind: git-tag
+      source: sgl-project/sglang
+      watchedPaths:
+        - sgl-model-gateway
+      allowPrerelease: false
+  proposal:
+    path: .auto-sync/proposals/router.json
+    requiredFields:
+      - schema_version
+      - stage
+      - summary
+      - versions
+      - subscriptions
+    schemaVersion: 1
+  verification:
+    localChecks:
+      - id: proposal-schema
+        implementation: json-artifact.v1
+      - id: scope-guard
+        implementation: scope.v1
+      - id: validate-router
+        implementation: command.v1
+        parameters:
+          script: .auto-sync/checks/validate_router.sh
+          timeoutSeconds: 2400
+          allowReadOnlyGitHubToken: false
+          env:
+            - AUTOSYNC_STAGE_DIR
+    externalGates: []
+  publication:
+    mode: pull_request
+    targetBranch: main
+    headBranchPrefix: auto-sync-router/
+    titleTemplate: "chore(llm-router): sync disaggregated router versions and patches"
+  memory:
+    directory: .auto-sync/memory/router-sync
+    apply: separate-pull-request
+    onNoModelBudget: deterministic-observations-only
+  triggers:
+    schedule: true
+    workflowDispatch: true
+    releasePublished: false
+    commentCommands:
+      - retry
+      - revise
+      - status
+    commentPrefixes:
+      - /loopwright
+      - /auto-sync
+  limits:
+    wallTimeSeconds: 3600
+    commandTimeoutSeconds: 2400

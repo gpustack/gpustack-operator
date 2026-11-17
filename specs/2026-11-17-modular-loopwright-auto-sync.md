@@ -1436,7 +1436,7 @@ assert_dockerfile_only_args() {
       Acceptance: `kv-transfer-taskpack.yaml` passes `validateTaskpackManifest`; `preflight-kv-transfer.sh` probes `nixl`/`nixl-cu12`/`nixl-cu13` wheels, `gpustack/runner` HIXL parity, and `crane manifest` Stage A vs Stage B (`tag_promotion`) readiness; `validate_kv_transfer.sh` enforces all 5 `MOONCAKE_VERSION` `case` blocks, HIXL patch parity, shared-file guards on `value.go`/`settings.md`/`modelTransfer.images.*`, and `crane manifest` verification.
       Verify: `bash hack/check/autosync-selftest.sh kv-transfer && go test ./pkg/worker/settings/...`
 
-- [ ] **T7 · Domain 3 tracer bullet: `router-sync` (`llm-d-router`, `vllm-router`, and `sgl-model-gateway`)**
+- [x] **T7 · Domain 3 tracer bullet: `router-sync` (`llm-d-router`, `vllm-router`, and `sgl-model-gateway`)**
       Blocked by: T3
       Owns: `.auto-sync/router-taskpack.yaml`, `.auto-sync/instructions/router.md`, `.auto-sync/scripts/preflight-router.sh`, `.auto-sync/checks/validate_router.sh`, `.auto-sync/checks/selftest_router.sh`, `.auto-sync/proposals/router.json`
       Acceptance: `router-taskpack.yaml` passes `validateTaskpackManifest`; `preflight-router.sh` normalizes `gateway-v*` tags, detects `516f1cb` ancestor retirement for `0001-epd-routing.patch`, and probes router image manifests for Stage A/B; `validate_router.sh` verifies all remaining patches, `ObserverRouter` presence, changed builder targets via `docker buildx`, and `value.go` image guards.
