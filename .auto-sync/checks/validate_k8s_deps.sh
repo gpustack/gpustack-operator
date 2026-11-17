@@ -184,6 +184,38 @@ if not isinstance(prop.get("summary"), str) or not prop["summary"].strip():
     raise SystemExit("FAIL: k8s-deps.json summary must be a non-empty string")
 if not isinstance(prop.get("versions"), dict) or not isinstance(prop.get("subscriptions"), list):
     raise SystemExit("FAIL: k8s-deps.json must contain versions object and subscriptions list")
+
+
+def extract_df_arg(name: str) -> str:
+    m_arg = re.search(rf'^ARG {re.escape(name)}="([^"]+)"$', df_txt, re.MULTILINE)
+    if not m_arg:
+        raise SystemExit(f"FAIL: missing ARG {name} in pack/gpustack-operator/Dockerfile")
+    return m_arg.group(1).strip()
+
+
+def extract_gomod_ver(mod_name: str) -> str:
+    m_gm = re.search(rf'^\s*{re.escape(mod_name)}\s+(v\d+\.\d+\.\d+)\b', gomod_txt, re.MULTILINE)
+    if not m_gm:
+        raise SystemExit(f"FAIL: missing {mod_name} in go.mod")
+    return m_gm.group(1).strip()
+
+
+expected_versions = {
+    "kubernetes": f"v{df_kubectl}",
+    "controller-runtime": extract_gomod_ver("sigs.k8s.io/controller-runtime"),
+    "kueue-sdk": extract_gomod_ver("sigs.k8s.io/kueue"),
+    "helm-cli": f"v{df_helm}",
+    "skopeo-cli": extract_df_arg("SKOPEO_VERSION"),
+    "vals-cli": extract_df_arg("VALS_VERSION"),
+    "kustomize-cli": extract_df_arg("KUSTOMIZE_VERSION"),
+    "ytt-cli": extract_df_arg("YTT_VERSION"),
+}
+p_vers = prop["versions"]
+for uid, exp_v in expected_versions.items():
+    if p_vers.get(uid) != exp_v:
+        raise SystemExit(
+            f"FAIL: proposals/k8s-deps.json versions.{uid} ({p_vers.get(uid)!r}) != pinned ({exp_v!r})"
+        )
 PY
 
 # 3. Verify zero .rej/.orig artifacts under staging/.
@@ -206,7 +238,11 @@ fi
 
 # 5. Double make generate + make lint drift check and RACE=false make test.
 autosync::run_in_module_path_copy "${AUTOSYNC_CANDIDATE_ROOT}" make generate
-make -C "${AUTOSYNC_CANDIDATE_ROOT}" lint
+lint_env=("AUTOSYNC_IN_VALIDATOR=true")
+if [[ -z "${UV_CACHE_DIR:-}" || ! -d "${UV_CACHE_DIR}" ]]; then
+  lint_env+=("GPUSTACK_SKIP_PYTHON_LINT=true")
+fi
+env "${lint_env[@]}" make -C "${AUTOSYNC_CANDIDATE_ROOT}" lint
 autosync::run_in_module_path_copy "${AUTOSYNC_CANDIDATE_ROOT}" make generate
 
 git -C "${AUTOSYNC_CANDIDATE_ROOT}" diff --exit-code

@@ -300,7 +300,7 @@ fi
 
 # 3. Gitless sanitized env -i validation tests for validate_priors.sh.
 CAND_BASE="${SCRATCH}/cand-base"
-mkdir -p "${CAND_BASE}/.auto-sync/checks"
+mkdir -p "${CAND_BASE}/.auto-sync/checks" "${CAND_BASE}/.auto-sync/proposals"
 copy_priors_go_tree "${ROOT_DIR}" "${CAND_BASE}"
 cp "${ROOT_DIR}/.auto-sync/checks/lib.sh" "${CAND_BASE}/.auto-sync/checks/lib.sh"
 if [[ -f "${ROOT_DIR}/${VALIDATOR_REL}" ]]; then
@@ -308,6 +308,21 @@ if [[ -f "${ROOT_DIR}/${VALIDATOR_REL}" ]]; then
   chmod +x "${CAND_BASE}/${VALIDATOR_REL}"
 fi
 cp "${FIXTURE_SAME}/records.md" "${CAND_BASE}/pkg/worker/scaling/priors/records.md"
+python3 - "${ROOT_DIR}/.auto-sync/proposals/priors.json" "${FIXTURE_SAME}/availability.json" "${CAND_BASE}/.auto-sync/proposals/priors.json" <<'PY'
+import hashlib
+import json
+import sys
+
+src_p, avail_p, dst_p = sys.argv[1:4]
+with open(src_p, "r", encoding="utf-8") as f:
+    doc = json.load(f)
+with open(avail_p, "rb") as f:
+    avail_sha = hashlib.sha256(f.read()).hexdigest()
+doc["versions"]["inferencex-availability"] = avail_sha
+with open(dst_p, "w", encoding="utf-8") as f:
+    json.dump(doc, f, indent=2)
+    f.write("\n")
+PY
 
 run_validator_env_i() {
   local cand_dir="$1"
@@ -398,6 +413,30 @@ if [[ -x "${CAND_UNFMT}/${VALIDATOR_REL}" ]] && \
   pass "validate_priors.sh fails on unformatted priors.yaml"
 else
   fail "validate_priors.sh fails on unformatted priors.yaml (${bad_err})"
+fi
+
+# 3e. Negative case 4: mismatched proposals/priors.json availability SHA-256.
+CAND_BAD_PROP="${SCRATCH}/cand-bad-prop"
+cp -R "${CAND_BASE}" "${CAND_BAD_PROP}"
+python3 - "${CAND_BAD_PROP}/.auto-sync/proposals/priors.json" <<'PY'
+import json
+import sys
+
+p = sys.argv[1]
+with open(p, "r", encoding="utf-8") as f:
+    doc = json.load(f)
+doc["versions"]["inferencex-availability"] = "0" * 64
+with open(p, "w", encoding="utf-8") as f:
+    json.dump(doc, f, indent=2)
+    f.write("\n")
+PY
+bad_err=""
+if [[ -x "${CAND_BAD_PROP}/${VALIDATOR_REL}" ]] && \
+   ! bad_err="$(run_validator_env_i "${CAND_BAD_PROP}" "${STAGE_SAME}" 2>&1)" && \
+   grep -q "proposals/priors.json" <<<"${bad_err}"; then
+  pass "validate_priors.sh fails on mismatched proposals/priors.json availability SHA-256"
+else
+  fail "validate_priors.sh fails on mismatched proposals/priors.json availability SHA-256 (${bad_err})"
 fi
 
 echo

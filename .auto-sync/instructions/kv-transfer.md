@@ -23,7 +23,7 @@ Never reference an unpublished `gpustack/*` container image tag in `pkg/worker/s
   - Only when `$AUTOSYNC_STAGE_DIR/kv-transfer-preflight-report.json` reports `"stage": "tag_promotion"` AND `$AUTOSYNC_STAGE_DIR/image-manifests.json` confirms `crane manifest` digests exist for the promoted tags:
     - Update `KVCacheBackendImage` and/or `ModelDeploymentModelExpressServerImage` in `pkg/worker/settings/value.go` and their matching `Default:` entries in `docs/reference/settings.md`.
     - Update `modelTransfer.images.nvidia`, `modelTransfer.images.amd`, and/or `modelTransfer.images.ascend` in `deploy/gpustack-operator/chart/values.yaml`, then run `make generate chart` so `deploy/gpustack-operator/chart/values.schema.json` and `deploy/gpustack-operator/chart/README.md` stay in sync.
-    - Update `.auto-sync/proposals/kv-transfer.json` (`"stage": "tag_promotion"` and matching `versions` values including the `<version>+stage-b` token from `upstream-records`).
+    - Update `.auto-sync/proposals/kv-transfer.json`: set `"stage": "tag_promotion"`, and whenever `$AUTOSYNC_STAGE_DIR/upstream-records.json` carries `<ver>+stage-b` for an `upstreamId` (such as `mooncake`, `modelexpress`, or `gpustack-runner`), you MUST write that exact `<ver>+stage-b` string into `versions[<upstreamId>]` so open-PR deduplication settles cleanly on subsequent runs.
   - Do NOT modify any other settings in `value.go` or `settings.md` (such as `ModelDeploymentRouterImage`, `ModelDeploymentRouterProxyImage`, or `ModelDeploymentRoutingSidecarImage`) or any other keys in `deploy/gpustack-operator/chart/values.yaml`.
 
 ## 2. Five-Block `MOONCAKE_VERSION` `case` Audit

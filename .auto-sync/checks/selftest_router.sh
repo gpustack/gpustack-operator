@@ -354,6 +354,45 @@ else
   fail "preflight Stage B emits +stage-b and tag_promotion when multi-arch router image is published"
 fi
 
+# 3c. Offline repo_tags auto-discovery triggers Stage B tag_promotion without AUTOSYNC_*_TARGET_TAG.
+cat > "${FIXTURE_DIR}/upstream.json" <<'JSON'
+{
+  "repo_tags": {
+    "gpustack/llm-router": ["v0.4.0", "v0.5.0-rc1", "v0.5.0"],
+    "gpustack/mirrored-envoy": ["distroless-v1.33.2"]
+  }
+}
+JSON
+
+(
+  cd "${FAKE_REPO}"
+  AUTOSYNC_ROUTER_FIXTURE_DIR="${FIXTURE_DIR}" \
+  AUTOSYNC_SKIP_GO_MOD_DOWNLOAD=true \
+    bash "${FAKE_REPO}/.auto-sync/scripts/preflight-router.sh" "${STAGE_DIR}"
+)
+
+if python3 - "${STAGE_DIR}" <<'PY'
+import json
+import os
+import sys
+
+stage = sys.argv[1]
+with open(os.path.join(stage, "upstream-records.json"), "r", encoding="utf-8") as f:
+    recs = {r["upstreamId"]: r for r in json.load(f)}
+assert any(r["status"] == "available" and r["version"].endswith("+stage-b") for r in recs.values()), recs
+with open(os.path.join(stage, "router-preflight-report.json"), "r", encoding="utf-8") as f:
+    rep = json.load(f)
+assert rep["stage"] == "tag_promotion", rep
+assert rep["image_published"] is True, rep
+assert rep["targets"]["router_image"] == "gpustack/llm-router:v0.5.0", rep
+PY
+then
+  pass "preflight Stage B auto-discovers gpustack/llm-router:v0.5.0 via repo_tags without AUTOSYNC_*_TARGET_TAG"
+else
+  fail "preflight Stage B auto-discovers gpustack/llm-router:v0.5.0 via repo_tags without AUTOSYNC_*_TARGET_TAG"
+fi
+rm -f "${FIXTURE_DIR}/upstream.json"
+
 # ----------------------------------------------------------------------------
 # Test 4: Gitless env -i validate_router.sh tests with mock upstream repos and patches
 # ----------------------------------------------------------------------------
@@ -543,15 +582,37 @@ CAND_DIR="${SCRATCH}/candidate"
 make_gitless_cand() {
   rm -rf "${CAND_DIR}"
   mkdir -p "${CAND_DIR}/.auto-sync/checks" \
+    "${CAND_DIR}/.auto-sync/proposals" \
     "${CAND_DIR}/pkg/worker/settings" \
     "${CAND_DIR}/docs/reference" \
     "${CAND_DIR}/pack/llm-router/patches"
   cp "${ROOT_DIR}/.auto-sync/checks/lib.sh" "${CAND_DIR}/.auto-sync/checks/lib.sh"
   cp "${VALIDATE_SCRIPT}" "${CAND_DIR}/.auto-sync/checks/validate_router.sh"
+  cp "${ROOT_DIR}/.auto-sync/proposals/router.json" "${CAND_DIR}/.auto-sync/proposals/router.json"
   cp "${VAL_STAGE}/baseline/pkg/worker/settings/value.go" "${CAND_DIR}/pkg/worker/settings/value.go"
   cp "${VAL_STAGE}/baseline/docs/reference/settings.md" "${CAND_DIR}/docs/reference/settings.md"
   cp "${VAL_STAGE}/baseline/pack/llm-router/Dockerfile" "${CAND_DIR}/pack/llm-router/Dockerfile"
   cp -R "${VAL_STAGE}/baseline/pack/llm-router/patches/." "${CAND_DIR}/pack/llm-router/patches/"
+}
+
+set_router_proposal() {
+  local stage="$1"
+  local vllm_v="$2"
+  local llmd_v="${3:-v0.11.0}"
+  python3 - "${CAND_DIR}/.auto-sync/proposals/router.json" "${stage}" "${vllm_v}" "${llmd_v}" <<'PY'
+import json
+import sys
+
+p, stage, vllm_v, llmd_v = sys.argv[1:5]
+with open(p, "r", encoding="utf-8") as f:
+    doc = json.load(f)
+doc["stage"] = stage
+doc["versions"]["vllm-router"] = vllm_v
+doc["versions"]["llm-d-router"] = llmd_v
+with open(p, "w", encoding="utf-8") as f:
+    json.dump(doc, f, indent=2)
+    f.write("\n")
+PY
 }
 
 BUILD_LOG="${SCRATCH}/builder-calls.log"
@@ -581,6 +642,7 @@ run_validate_env_i() {
 # remaining patches apply cleanly, ObserverRouter present, and stubbed builder invoked ONLY for vllm-router-builder.
 write_preflight_report "true" "v0.1.17"
 make_gitless_cand
+set_router_proposal "recipe_sync" "v0.1.17"
 sed -i.bak 's/^ARG VLLM_ROUTER_VERSION=v0\.1\.16\.1/ARG VLLM_ROUTER_VERSION=v0.1.17/' "${CAND_DIR}/pack/llm-router/Dockerfile"
 rm -f "${CAND_DIR}/pack/llm-router/Dockerfile.bak"
 rm -f "${CAND_DIR}/pack/llm-router/patches/vllm-router/0001-epd-routing.patch"
@@ -652,6 +714,7 @@ with open(p, "w", encoding="utf-8") as f:
     json.dump(doc, f, indent=2)
 PY
 make_gitless_cand
+set_router_proposal "tag_promotion" "v0.1.16.1" "v0.11.0+stage-b"
 sed -i.bak 's|gpustack/llm-router:v0.4.0|gpustack/llm-router:v0.5.0|' \
   "${CAND_DIR}/pkg/worker/settings/value.go" "${CAND_DIR}/docs/reference/settings.md"
 rm -f "${CAND_DIR}/pkg/worker/settings/value.go.bak" "${CAND_DIR}/docs/reference/settings.md.bak"
@@ -660,6 +723,11 @@ if run_validate_env_i && [[ ! -s "${BUILD_LOG}" ]]; then
 else
   fail "validate_router Stage B passes for published multi-arch gpustack/llm-router:v0.5.0 without rebuilding router stages"
 fi
+
+# 4.8 Negative case 4: mismatched proposals/router.json fails closed.
+make_gitless_cand
+set_router_proposal "recipe_sync" "v0.99.0"
+assert_fails "validate_router fails closed on mismatched proposals/router.json version" run_validate_env_i
 
 echo
 if (( FAILS > 0 )); then

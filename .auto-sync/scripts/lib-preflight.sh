@@ -107,7 +107,7 @@ autosync::preflight::_write_toolchain_env() {
   local tmp_tc
   tmp_tc="$(mktemp "${stage_dir}/.toolchain.env.XXXXXXXX")"
 
-  local go_bin="" go_bin_dir="" goroot_val="" hugo_bin="" hugo_bin_dir="" node_bin="" node_bin_dir=""
+  local go_bin="" go_bin_dir="" goroot_val="" hugo_bin="" hugo_bin_dir="" node_bin="" node_bin_dir="" uv_bin="" uv_bin_dir=""
   if go_bin="$(command -v go 2>/dev/null || true)" && [[ -n "${go_bin}" ]]; then
     go_bin_dir="$(cd "$(dirname "${go_bin}")" && pwd -P)"
     goroot_val="$(go env GOROOT 2>/dev/null || true)"
@@ -117,6 +117,9 @@ autosync::preflight::_write_toolchain_env() {
   fi
   if node_bin="$(command -v node 2>/dev/null || true)" && [[ -n "${node_bin}" ]]; then
     node_bin_dir="$(cd "$(dirname "${node_bin}")" && pwd -P)"
+  fi
+  if uv_bin="$(command -v uv 2>/dev/null || true)" && [[ -n "${uv_bin}" ]]; then
+    uv_bin_dir="$(cd "$(dirname "${uv_bin}")" && pwd -P)"
   fi
 
   {
@@ -131,6 +134,9 @@ autosync::preflight::_write_toolchain_env() {
     fi
     if [[ -n "${node_bin_dir}" && -d "${node_bin_dir}" ]]; then
       printf 'AUTOSYNC_SAVED_NODE_BIN_DIR=%s\n' "${node_bin_dir}"
+    fi
+    if [[ -n "${uv_bin_dir}" && -d "${uv_bin_dir}" ]]; then
+      printf 'AUTOSYNC_SAVED_UV_BIN_DIR=%s\n' "${uv_bin_dir}"
     fi
   } > "${tmp_tc}"
   chmod 0600 "${tmp_tc}"
@@ -349,7 +355,7 @@ autosync::preflight::warm_caches() {
 
   if [[ "${want_go}" == "true" ]]; then
     local cache_name
-    for cache_name in go-cache go-mod deps-cache; do
+    for cache_name in go-cache go-mod deps-cache uv-cache; do
       mkdir -p "${shared_root}/${cache_name}"
       if [[ ! -e "${stage_dir}/${cache_name}" || -L "${stage_dir}/${cache_name}" ]]; then
         ln -sfn "${shared_root}/${cache_name}" "${stage_dir}/${cache_name}"
@@ -378,6 +384,17 @@ autosync::preflight::warm_caches() {
           )
         fi
       fi
+    fi
+
+    if [[ "${AUTOSYNC_SKIP_GO_MOD_DOWNLOAD:-false}" != "true" ]] && \
+       [[ "${GOPROXY:-}" != "off" ]] && \
+       command -v uv >/dev/null 2>&1 && \
+       [[ -d "${repo_root}/model-transfer/python" ]] && \
+       [[ -z "$(ls -A "${shared_root}/uv-cache" 2>/dev/null)" ]]; then
+      (
+        cd "${repo_root}/model-transfer/python"
+        UV_CACHE_DIR="${shared_root}/uv-cache" uv sync --frozen >/dev/null 2>&1 || true
+      )
     fi
   fi
 }

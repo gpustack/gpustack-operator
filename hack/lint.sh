@@ -107,6 +107,10 @@ function docs_lint() {
 # format verification run directly on model-transfer/python, plus check-symbols.sh which also scans tracked
 # sources for decorative symbols.
 function python_lint() {
+  if [[ "${GPUSTACK_SKIP_PYTHON_LINT:-}" == "true" ]]; then
+    gpustack::log::info "skipping python lint (GPUSTACK_SKIP_PYTHON_LINT=true)"
+    return 0
+  fi
   local py_dir="${ROOT_DIR}/model-transfer/python"
   if [[ ! -d "${py_dir}" ]]; then
     return 0
@@ -159,6 +163,43 @@ function agents_shell_lint() {
     gpustack::log::fatal "decorative symbols in commented sources"
   elif [[ ${symbols_rc} -gt 1 ]]; then
     gpustack::log::fatal "the decorative-symbol check could not run; its diagnostic is above"
+  fi
+}
+
+function autosync_selftest_mode() {
+  if [[ "${AUTOSYNC_IN_VALIDATOR:-}" == "true" ]]; then
+    printf 'fast\n'
+    return 0
+  fi
+  if [[ "${CI:-}" == "true" || "${GITHUB_ACTIONS:-}" == "true" || "${AUTOSYNC_FULL_SELFTEST:-}" == "true" ]]; then
+    printf 'all\n'
+    return 0
+  fi
+  if ! command -v git >/dev/null 2>&1 || ! git -c core.quotePath=false status --porcelain >/dev/null 2>&1; then
+    printf 'all\n'
+    return 0
+  fi
+
+  local autosync_path_re='^(\.auto-sync/|\.github/workflows/auto-sync\.yml$|hack/deps\.sh$|hack/check/autosync-selftest\.sh$|pkg/worker/scaling/priors/records\.md$)'
+  local changed_paths=""
+  changed_paths="$(
+    {
+      git -c core.quotePath=false status --porcelain 2>/dev/null | while IFS= read -r line; do
+        [[ -z "${line}" ]] && continue
+        local p="${line:3}"
+        if [[ "${p}" == *" -> "* ]]; then
+          printf '%s\n%s\n' "${p%% -> *}" "${p#* -> }"
+        else
+          printf '%s\n' "${p}"
+        fi
+      done
+      git -c core.quotePath=false diff --name-only origin/main...HEAD 2>/dev/null || true
+    }
+  )"
+  if grep -Eq "${autosync_path_re}" <<<"${changed_paths}"; then
+    printf 'all\n'
+  else
+    printf 'fast\n'
   fi
 }
 
@@ -290,7 +331,9 @@ function lint() {
   # wiring under .auto-sync/ and .github/workflows/auto-sync.yml, which golangci-lint and
   # docs_lint do not validate. Its self-test exercises bash -n, pinned shellcheck, Loopwright
   # manifest schema validation, and offline validator contracts.
-  if ! bash "${ROOT_DIR}/hack/check/autosync-selftest.sh" "${ROOT_DIR}"; then
+  local autosync_mode
+  autosync_mode="$(autosync_selftest_mode)"
+  if ! bash "${ROOT_DIR}/hack/check/autosync-selftest.sh" "${autosync_mode}" "${ROOT_DIR}"; then
     gpustack::log::fatal "the auto-sync self-test failed"
   fi
 

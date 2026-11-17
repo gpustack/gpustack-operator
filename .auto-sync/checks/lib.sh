@@ -16,11 +16,13 @@ autosync::bootstrap_env() {
     candidate_dir="$(cd "${candidate_dir}" && pwd -P)"
   fi
   export AUTOSYNC_CANDIDATE_ROOT="${candidate_dir}"
+  export AUTOSYNC_IN_VALIDATOR=true
 
   local saved_go_bin_dir=""
   local saved_goroot=""
   local saved_hugo_bin_dir=""
   local saved_node_bin_dir=""
+  local saved_uv_bin_dir=""
 
   if [[ -n "${stage_dir}" && -d "${stage_dir}" ]]; then
     stage_dir="$(cd "${stage_dir}" && pwd -P)"
@@ -58,6 +60,10 @@ autosync::bootstrap_env() {
             saved_node_bin_dir="${tc_val}"
             export AUTOSYNC_SAVED_NODE_BIN_DIR="${tc_val}"
             ;;
+          AUTOSYNC_SAVED_UV_BIN_DIR)
+            saved_uv_bin_dir="${tc_val}"
+            export AUTOSYNC_SAVED_UV_BIN_DIR="${tc_val}"
+            ;;
         esac
       done < "${stage_dir}/toolchain.env"
     fi
@@ -81,6 +87,11 @@ autosync::bootstrap_env() {
     export GPUSTACK_DEPS_OFFLINE="${GPUSTACK_DEPS_OFFLINE:-true}"
     export GOPROXY="${GOPROXY:-off}"
     export GOTOOLCHAIN="${GOTOOLCHAIN:-local}"
+
+    if [[ -n "${stage_dir}" && -d "${stage_dir}/uv-cache" && -n "$(ls -A "${stage_dir}/uv-cache" 2>/dev/null)" ]]; then
+      export UV_CACHE_DIR="${UV_CACHE_DIR:-${stage_dir}/uv-cache}"
+      export UV_OFFLINE="${UV_OFFLINE:-1}"
+    fi
 
     # Materialize pre-warmed .sbin entries as regular files (not a directory symlink)
     # when candidate_dir is writable; in read-only sandboxes rely on stage_dir/.sbin on PATH.
@@ -113,6 +124,9 @@ autosync::bootstrap_env() {
   fi
   if [[ -n "${saved_node_bin_dir}" && -d "${saved_node_bin_dir}" ]]; then
     prefix_dirs+=("${saved_node_bin_dir}")
+  fi
+  if [[ -n "${saved_uv_bin_dir}" && -d "${saved_uv_bin_dir}" ]]; then
+    prefix_dirs+=("${saved_uv_bin_dir}")
   fi
 
   for seg in "${prefix_dirs[@]+"${prefix_dirs[@]}"}"; do
@@ -636,6 +650,257 @@ if mask_model_transfer_images(base_txt) != mask_model_transfer_images(cand_txt):
         file=sys.stderr,
     )
     sys.exit(1)
+PY
+}
+
+# assert_values_yaml_only_chart_sections <baseline_file> <candidate_file>
+# Verifies that only the 5 vendored subchart blocks (kueue, node-feature-discovery,
+# csi-driver-nfs, csi-driver-s3, topograph) and modelManager.registrar.image.{repository,tag}
+# changed in deploy/gpustack-operator/chart/values.yaml.
+assert_values_yaml_only_chart_sections() {
+  local baseline_file="${1:?baseline values.yaml path required}"
+  local candidate_file="${2:?candidate values.yaml path required}"
+
+  if [[ ! -f "${baseline_file}" || ! -f "${candidate_file}" ]]; then
+    printf 'FAIL: missing baseline (%s) or candidate (%s) values.yaml\n' \
+      "${baseline_file}" "${candidate_file}" >&2
+    return 1
+  fi
+
+  if cmp -s "${baseline_file}" "${candidate_file}"; then
+    return 0
+  fi
+
+  python3 - "${baseline_file}" "${candidate_file}" <<'PY'
+import copy
+import json
+import re
+import subprocess
+import sys
+
+try:
+    import yaml as yaml_mod
+except ImportError:
+    yaml_mod = None
+
+OWNED_SUBCHARTS = {
+    "kueue",
+    "node-feature-discovery",
+    "csi-driver-nfs",
+    "csi-driver-s3",
+    "topograph",
+}
+OWNED_TOP = OWNED_SUBCHARTS | {"modelManager"}
+TOP_KEY_RE = re.compile(r"^([A-Za-z0-9_-]+):(?:\s|$)")
+IMG_VAL_RE = re.compile(
+    r'^(      (?:repository|tag):\s*)(?:"[^"]+"|\'[^\']+\'|[^#\s]+)(\s*(?:#.*)?)$'
+)
+
+
+def strict_load_yaml(raw: str, label: str):
+    if yaml_mod is None:
+        ruby_script = r'''
+require "yaml"
+require "json"
+raw = STDIN.read
+doc = YAML.parse(raw)
+abort("empty YAML document") unless doc
+walk = lambda do |node|
+  abort("YAML anchor rejected") if node.respond_to?(:anchor) && node.anchor
+  abort("YAML alias rejected") if node.is_a?(Psych::Nodes::Alias)
+  if node.is_a?(Psych::Nodes::Mapping)
+    seen = {}
+    node.children.each_slice(2) do |k, v|
+      if k.is_a?(Psych::Nodes::Scalar)
+        abort("duplicate YAML key: #{k.value}") if seen.key?(k.value)
+        seen[k.value] = true
+      end
+      walk.call(k)
+      walk.call(v) if v
+    end
+  elsif node.respond_to?(:children) && node.children
+    node.children.each { |c| walk.call(c) }
+  end
+end
+walk.call(doc)
+puts JSON.generate(YAML.safe_load(raw))
+'''
+        res = subprocess.run(
+            ["ruby", "-e", ruby_script],
+            input=raw,
+            text=True,
+            capture_output=True,
+        )
+        if res.returncode != 0:
+            raise SystemExit(f"FAIL: invalid {label} YAML: {res.stderr.strip()}")
+        doc = json.loads(res.stdout)
+    else:
+        docs = list(yaml_mod.safe_load_all(raw))
+        if len(docs) != 1:
+            raise SystemExit(f"FAIL: expected single YAML document in {label}")
+        stack = []
+
+        def mark_container_item():
+            if stack and stack[-1][0] == "map":
+                kind, seen, expect_key = stack[-1]
+                stack[-1] = (kind, seen, not expect_key)
+
+        for ev in yaml_mod.parse(raw):
+            if isinstance(ev, yaml_mod.AliasEvent):
+                raise SystemExit(f"FAIL: YAML alias rejected in {label}")
+            if getattr(ev, "anchor", None) is not None:
+                raise SystemExit(f"FAIL: YAML anchor rejected in {label}")
+            if isinstance(ev, yaml_mod.MappingStartEvent):
+                mark_container_item()
+                stack.append(("map", set(), True))
+            elif isinstance(ev, yaml_mod.MappingEndEvent):
+                stack.pop()
+            elif isinstance(ev, yaml_mod.SequenceStartEvent):
+                mark_container_item()
+                stack.append(("seq", None, False))
+            elif isinstance(ev, yaml_mod.SequenceEndEvent):
+                stack.pop()
+            elif isinstance(ev, yaml_mod.ScalarEvent):
+                if stack and stack[-1][0] == "map":
+                    kind, seen, expect_key = stack[-1]
+                    if expect_key:
+                        if ev.value in seen:
+                            raise SystemExit(f"FAIL: duplicate YAML key {ev.value!r} in {label}")
+                        seen.add(ev.value)
+                    stack[-1] = (kind, seen, not expect_key)
+        doc = docs[0]
+    if not isinstance(doc, dict):
+        raise SystemExit(f"FAIL: {label} YAML root must be a mapping")
+    return doc
+
+
+def split_top_sections(text: str):
+    lines = text.splitlines(keepends=True)
+    raw_starts = []
+    for idx, line in enumerate(lines):
+        if line.startswith("---"):
+            continue
+        m = TOP_KEY_RE.match(line)
+        if m:
+            raw_starts.append((idx, m.group(1)))
+    if not raw_starts:
+        return text, []
+
+    starts = []
+    for idx, key in raw_starts:
+        start = idx
+        if key in OWNED_SUBCHARTS:
+            j = idx - 1
+            while j >= 0 and lines[j].startswith("#"):
+                j -= 1
+            if j < idx - 1 and (j < 0 or lines[j].strip() == ""):
+                start = j + 1
+        starts.append((start, key))
+
+    preamble = "".join(lines[: starts[0][0]])
+    sections = []
+    for pos, (start, key) in enumerate(starts):
+        end = starts[pos + 1][0] if pos + 1 < len(starts) else len(lines)
+        sections.append((key, "".join(lines[start:end])))
+    return preamble, sections
+
+
+def mask_model_manager_dict(mm_obj, label: str):
+    if not isinstance(mm_obj, dict):
+        raise SystemExit(f"FAIL: {label} modelManager must be a mapping")
+    out = copy.deepcopy(mm_obj)
+    reg = out.get("registrar")
+    if isinstance(reg, dict) and isinstance(reg.get("image"), dict):
+        img = reg["image"]
+        for key in ("repository", "tag"):
+            if key in img:
+                val = img[key]
+                if not isinstance(val, str) or not val.strip():
+                    raise SystemExit(
+                        f"FAIL: {label} modelManager.registrar.image.{key} must be a non-empty string"
+                    )
+                img[key] = "__MASKED__"
+    return out
+
+
+def mask_model_manager_raw(section_text: str) -> str:
+    out = []
+    in_registrar = False
+    in_image = False
+    for line in section_text.splitlines(keepends=True):
+        stripped = line.rstrip("\r\n")
+        if stripped != "" and not stripped.lstrip().startswith("#"):
+            if re.match(r"^  [A-Za-z0-9_-]+:", stripped):
+                in_registrar = stripped == "  registrar:" or stripped.startswith("  registrar: ")
+                in_image = False
+            elif in_registrar and re.match(r"^    [A-Za-z0-9_-]+:", stripped):
+                in_image = stripped == "    image:" or stripped.startswith("    image: ")
+            elif in_registrar and in_image and re.match(r"^      (?:repository|tag):", stripped):
+                m = IMG_VAL_RE.match(stripped)
+                if m:
+                    ending = line[len(stripped):]
+                    line = f"{m.group(1)}__MASKED__{m.group(2)}{ending}"
+        out.append(line)
+    return "".join(out)
+
+
+base_path, cand_path = sys.argv[1:3]
+with open(base_path, "r", encoding="utf-8") as f:
+    base_txt = f.read()
+with open(cand_path, "r", encoding="utf-8") as f:
+    cand_txt = f.read()
+
+base_doc = strict_load_yaml(base_txt, "baseline values.yaml")
+cand_doc = strict_load_yaml(cand_txt, "candidate values.yaml")
+
+base_unowned = set(base_doc.keys()) - OWNED_TOP
+cand_unowned = set(cand_doc.keys()) - OWNED_TOP
+if base_unowned != cand_unowned:
+    added = sorted(cand_unowned - base_unowned)
+    removed = sorted(base_unowned - cand_unowned)
+    raise SystemExit(
+        f"FAIL: values.yaml unowned top-level keys changed (added={added}, removed={removed})"
+    )
+
+for key in sorted(base_unowned):
+    if base_doc[key] != cand_doc[key]:
+        raise SystemExit(f"FAIL: values.yaml modified outside owned chart sections: {key}")
+
+if "modelManager" in base_doc or "modelManager" in cand_doc:
+    if "modelManager" not in base_doc or "modelManager" not in cand_doc:
+        raise SystemExit("FAIL: values.yaml modelManager top-level key added or removed")
+    if mask_model_manager_dict(base_doc["modelManager"], "baseline") != mask_model_manager_dict(
+        cand_doc["modelManager"], "candidate"
+    ):
+        raise SystemExit(
+            "FAIL: values.yaml modelManager modified outside modelManager.registrar.image.{repository,tag}"
+        )
+
+base_preamble, base_sections = split_top_sections(base_txt)
+cand_preamble, cand_sections = split_top_sections(cand_txt)
+if base_preamble != cand_preamble:
+    raise SystemExit("FAIL: values.yaml preamble before first section was modified")
+
+base_unowned_order = [k for k, _ in base_sections if k not in OWNED_TOP]
+cand_unowned_order = [k for k, _ in cand_sections if k not in OWNED_TOP]
+if base_unowned_order != cand_unowned_order:
+    raise SystemExit("FAIL: values.yaml unowned top-level section ordering changed")
+
+base_sec_map = dict(base_sections)
+cand_sec_map = dict(cand_sections)
+for key in base_unowned_order:
+    if base_sec_map.get(key) != cand_sec_map.get(key):
+        raise SystemExit(
+            f"FAIL: values.yaml raw section outside owned chart sections changed: {key}"
+        )
+
+if "modelManager" in base_sec_map or "modelManager" in cand_sec_map:
+    if mask_model_manager_raw(base_sec_map.get("modelManager", "")) != mask_model_manager_raw(
+        cand_sec_map.get("modelManager", "")
+    ):
+        raise SystemExit(
+            "FAIL: values.yaml modelManager raw lines modified outside registrar.image.{repository,tag}"
+        )
 PY
 }
 

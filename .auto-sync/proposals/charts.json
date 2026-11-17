@@ -2,11 +2,11 @@
   "schema_version": 1,
   "summary": "Baseline vendored Helm subcharts and mirrored image pins are aligned with upstream.",
   "versions": {
-    "kueue": "0.18.11",
-    "node-feature-discovery": "0.19.0",
-    "csi-driver-nfs": "4.13.4",
-    "csi-driver-s3": "0.43.7",
-    "topograph": "1.0.0"
+    "kueue-chart": "0.18.11",
+    "nfd-chart": "0.19.0",
+    "csi-driver-nfs-chart": "4.13.4",
+    "csi-driver-s3-chart": "0.43.7",
+    "topograph-chart": "1.0.0"
   },
   "subscriptions": [
     {

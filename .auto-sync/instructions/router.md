@@ -22,7 +22,7 @@ Never reference an unpublished `gpustack/*` container image tag in `pkg/worker/s
 - **Stage B (`stage: "tag_promotion"`, `image_published: true`)**:
   - Only when `$AUTOSYNC_STAGE_DIR/router-preflight-report.json` reports `"stage": "tag_promotion"` AND `$AUTOSYNC_STAGE_DIR/image-manifests.json` confirms `crane manifest` multi-arch digests (`linux/amd64` and `linux/arm64`) exist for the promoted tags:
     - Update `ModelDeploymentRouterImage`, `ModelDeploymentRouterProxyImage`, and/or `ModelDeploymentRoutingSidecarImage` in `pkg/worker/settings/value.go` and their matching `Default:` entries (`model-deployment-router-image`, `model-deployment-router-proxy-image`, `model-deployment-routing-sidecar-image`) in `docs/reference/settings.md`.
-    - Update `.auto-sync/proposals/router.json` (`"stage": "tag_promotion"` and matching `versions` values including the `<tag>+stage-b` token from `upstream-records`).
+    - Update `.auto-sync/proposals/router.json`: set `"stage": "tag_promotion"`, and whenever `$AUTOSYNC_STAGE_DIR/upstream-records.json` carries `<ver>+stage-b` for an `upstreamId` (`llm-d-router`, `vllm-router`, `sglang-gateway`), you MUST write that exact `<ver>+stage-b` string into `versions[<upstreamId>]` so open-PR deduplication settles cleanly on subsequent runs.
   - Do NOT modify any other settings in `value.go` or `settings.md` (such as `KVCacheBackendImage` or `ModelDeploymentModelExpressServerImage`).
 - **No Change (`stage: "no_change"`)**:
   - When all three router upstreams are `up_to_date` and no promoted image tag is ready, settle cleanly as `no_change`.

@@ -57,6 +57,11 @@ on:
           - '8x'
           - '4x'
           - 'normal'
+      target_tag:
+        description: 'Optional target image tag override for Stage B promotion.'
+        required: false
+        type: string
+        default: ''
   issue_comment:
     types: [created]
 
@@ -288,6 +293,10 @@ jobs:
         with:
           go-version-file: go.mod
 
+      - name: Setup uv
+        if: matrix.domain == 'k8s-deps'
+        uses: astral-sh/setup-uv@v5
+
       - name: Setup Hugo
         if: matrix.domain == 'priors' || matrix.domain == 'kv-transfer' || matrix.domain == 'router'
         uses: peaceiris/actions-hugo@v3
@@ -296,7 +305,7 @@ jobs:
           extended: true
 
       - name: Setup onetrueawk
-        if: matrix.domain == 'priors'
+        if: matrix.domain == 'priors' || matrix.domain == 'kv-transfer' || matrix.domain == 'router'
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends original-awk
@@ -326,6 +335,7 @@ jobs:
           COMMENT_COMMAND: ${{ needs.resolve-domains.outputs.comment_command }}
           AUTOSYNC_STAGE_DIR: /tmp/gpustack-autosync-stage/${{ matrix.domain }}
           AUTOSYNC_FORCE: ${{ (inputs.force == true || inputs.force == 'true') && 'true' || 'false' }}
+          AUTOSYNC_TARGET_TAG: ${{ inputs.target_tag || '' }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           MAIN_SHA: ${{ steps.record-main.outputs.main_sha }}
           PR_BASE_SHA: ${{ steps.pr-head.outputs.pr_base_sha }}
@@ -342,13 +352,13 @@ jobs:
           fi
           test -z "$(git status --porcelain)"
 
-          python3 - "${preflight_out}" "${GITHUB_OUTPUT}" "${GITHUB_EVENT_NAME}" "${COMMENT_COMMAND}" "${PR_BASE_SHA}" <<'PY'
+          python3 - "${preflight_out}" "${GITHUB_OUTPUT}" "${GITHUB_EVENT_NAME}" "${COMMENT_COMMAND}" "${PR_BASE_SHA}" "${MAIN_SHA}" <<'PY'
           import os
           import subprocess
           import sys
           import uuid
 
-          src_path, dst_path, event_name, comment_cmd, pr_base_sha = sys.argv[1:6]
+          src_path, dst_path, event_name, comment_cmd, pr_base_sha, main_sha = sys.argv[1:7]
           outputs = {}
           with open(src_path, "r", encoding="utf-8") as f:
               lines = f.read().splitlines()
@@ -371,25 +381,34 @@ jobs:
 
           raw_rev = outputs.get("source_revision", "").strip()
           if event_name == "issue_comment" and comment_cmd in ("revise", "status"):
+              if not pr_base_sha:
+                  print(f"ERROR: missing PR_BASE_SHA for issue_comment {comment_cmd}", file=sys.stderr)
+                  sys.exit(1)
               final_rev = ""
+              effective_base_sha = pr_base_sha
+          elif event_name == "issue_comment" and comment_cmd == "retry":
+              if not main_sha:
+                  print("ERROR: missing MAIN_SHA for issue_comment retry", file=sys.stderr)
+                  sys.exit(1)
+              final_rev = raw_rev or main_sha
+              effective_base_sha = main_sha
           else:
+              if not main_sha:
+                  print("ERROR: missing MAIN_SHA", file=sys.stderr)
+                  sys.exit(1)
               if raw_rev:
                   head_tree = subprocess.check_output(["git", "rev-parse", "HEAD^{tree}"], text=True).strip()
                   rev_tree = subprocess.check_output(["git", "rev-parse", f"{raw_rev}^{{tree}}"], text=True).strip()
                   final_rev = raw_rev if rev_tree != head_tree else ""
               else:
                   final_rev = ""
-
-          if event_name == "issue_comment" and comment_cmd == "retry" and not final_rev:
-              if not pr_base_sha:
-                  print("ERROR: missing PR_BASE_SHA for issue_comment retry", file=sys.stderr)
-                  sys.exit(1)
-              subprocess.run(["git", "checkout", "--detach", pr_base_sha], check=True)
+              effective_base_sha = main_sha
 
           outputs["source_revision"] = final_rev
+          outputs["effective_base_sha"] = effective_base_sha
 
           with open(dst_path, "a", encoding="utf-8") as out:
-              for key in ("stage_dir", "upstream_records", "source_revision"):
+              for key in ("stage_dir", "upstream_records", "source_revision", "effective_base_sha"):
                   val = outputs.get(key, "")
                   delim = f"AUTOSYNC_OUT_{uuid.uuid4().hex}"
                   while delim in val:
@@ -436,6 +455,7 @@ jobs:
         env:
           LOOPWRIGHT_PROVIDER_TOKEN: ${{ secrets.CI_GPUSTACK_LOOPWRIGHT_LLM_AUTH_TOKEN || secrets.CI_GPUSTACK_CODEREVIEW_LLM_AUTH_TOKEN }}
           AUTOSYNC_STAGE_DIR: /tmp/gpustack-autosync-stage/${{ matrix.domain }}
+          GITHUB_SHA: ${{ steps.preflight.outputs.effective_base_sha }}
         with:
           taskpack-path: .auto-sync/${{ matrix.domain }}-taskpack.yaml
           upstream-records: ${{ steps.preflight.outputs.upstream_records }}

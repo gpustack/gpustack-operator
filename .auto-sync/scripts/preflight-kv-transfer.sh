@@ -352,16 +352,193 @@ if os.path.isfile(runner_patch_path):
     with open(runner_patch_path, "rb") as f:
         runner_patch_match = f.read() == local_hixl_patch_bytes
 
+def parse_generic_target_tags(raw_val: str) -> dict[str, str]:
+    parsed: dict[str, str] = {}
+    for item in (seg.strip() for seg in raw_val.split(",") if seg.strip()):
+        if ":" in item:
+            repo_part, tag_part = item.rsplit(":", 1)
+            repo_name = repo_part.strip().split("/")[-1]
+            tag_part = tag_part.strip()
+            if not tag_part:
+                continue
+            if repo_name in ("mirrored-modelexpress-server", "modelexpress"):
+                parsed["modelexpress"] = tag_part
+            elif repo_name in ("mirrored-mooncake", "mooncake"):
+                parsed["mooncake"] = tag_part
+            elif repo_name == "model-transfer":
+                if "-cuda" in tag_part:
+                    parsed["mt_nvidia"] = tag_part
+                elif "-rocm" in tag_part:
+                    parsed["mt_amd"] = tag_part
+                elif "-cann" in tag_part:
+                    parsed["mt_ascend"] = tag_part
+                else:
+                    parsed["mt_ver"] = tag_part
+        else:
+            if item.endswith("-cpu"):
+                parsed["mooncake"] = item
+            elif "-cuda" in item:
+                parsed["mt_nvidia"] = item
+            elif "-rocm" in item:
+                parsed["mt_amd"] = item
+            elif "-cann" in item:
+                parsed["mt_ascend"] = item
+            elif re.fullmatch(r"v\d+\.\d+\.\d+", item):
+                parsed["bare_v"] = item
+    return parsed
+
+
+def list_repo_tags(repo: str) -> list[str]:
+    repo_tags = upstream_override.get("repo_tags")
+    if isinstance(repo_tags, dict):
+        for key in (repo, f"docker.io/{repo}"):
+            if isinstance(repo_tags.get(key), list):
+                return [str(t).strip() for t in repo_tags[key] if str(t).strip()]
+    if fixture_dir:
+        return []
+    crane_bin = os.environ.get("AUTOSYNC_CRANE_BIN", "crane").strip() or "crane"
+    try:
+        res = subprocess.run(
+            [crane_bin, "ls", f"docker.io/{repo}"],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        if res.returncode != 0:
+            return []
+        return [ln.strip() for ln in res.stdout.splitlines() if ln.strip()]
+    except (OSError, subprocess.SubprocessError):
+        return []
+
+
+def extract_ref_tag(ref: str) -> str:
+    last_seg = ref.split("/")[-1]
+    if ":" not in last_seg:
+        return ""
+    return ref.rsplit(":", 1)[1].strip()
+
+
+def discover_newer_mx_tag(current_image: str) -> str:
+    cur_tag = extract_ref_tag(current_image)
+    m_cur = re.fullmatch(r"v(\d+)\.(\d+)\.(\d+)", cur_tag)
+    if not m_cur:
+        return ""
+    cur_tuple = (int(m_cur.group(1)), int(m_cur.group(2)), int(m_cur.group(3)))
+    best_tuple = cur_tuple
+    best_tag = ""
+    for tag in list_repo_tags("gpustack/mirrored-modelexpress-server"):
+        m = re.fullmatch(r"v(\d+)\.(\d+)\.(\d+)", tag)
+        if not m:
+            continue
+        cand_tuple = (int(m.group(1)), int(m.group(2)), int(m.group(3)))
+        if cand_tuple > best_tuple:
+            best_tuple = cand_tuple
+            best_tag = tag
+    return best_tag
+
+
+def discover_newer_mt_tags(current_images: dict[str, str], tags_list: list[str]) -> dict[str, str]:
+    discovered: dict[str, str] = {}
+    mt_tag_re = re.compile(r"^v(\d+)\.(\d+)\.(\d+)-([A-Za-z0-9._-]+)$")
+    for vendor in ("nvidia", "amd", "ascend"):
+        cur_ref = current_images.get(vendor, "")
+        cur_tag = extract_ref_tag(cur_ref)
+        m_cur = mt_tag_re.fullmatch(cur_tag)
+        if not m_cur:
+            continue
+        cur_tuple = (int(m_cur.group(1)), int(m_cur.group(2)), int(m_cur.group(3)))
+        cur_flavor = m_cur.group(4)
+        fam_m = re.match(r"^(cuda|rocm|cann)", cur_flavor)
+        fam = fam_m.group(1) if fam_m else cur_flavor
+        best_key = (cur_tuple, 0, "")
+        best_tag = ""
+        for tag in tags_list:
+            m = mt_tag_re.fullmatch(tag)
+            if not m:
+                continue
+            cand_tuple = (int(m.group(1)), int(m.group(2)), int(m.group(3)))
+            cand_flavor = m.group(4)
+            if cand_flavor != cur_flavor and not cand_flavor.startswith(fam):
+                continue
+            if cand_tuple <= cur_tuple:
+                continue
+            cand_key = (cand_tuple, 1 if cand_flavor == cur_flavor else 0, cand_flavor)
+            if cand_key > best_key:
+                best_key = cand_key
+                best_tag = tag
+        if best_tag:
+            discovered[vendor] = best_tag
+    return discovered
+
+
+generic_targets = parse_generic_target_tags(os.environ.get("AUTOSYNC_TARGET_TAG", ""))
+
 # Compute candidate target image tags for Stage B probing.
-target_mooncake_image = f"gpustack/mirrored-mooncake:{recipe['mooncake_version']}-cpu"
+target_mooncake_tag = generic_targets.get("mooncake", "")
+if target_mooncake_tag:
+    target_mooncake_image = f"gpustack/mirrored-mooncake:{target_mooncake_tag}"
+else:
+    target_mooncake_image = f"gpustack/mirrored-mooncake:{recipe['mooncake_version']}-cpu"
+
 target_mx_tag = os.environ.get("AUTOSYNC_MODELEXPRESS_TARGET_TAG", "").strip()
+if not target_mx_tag:
+    target_mx_tag = generic_targets.get("modelexpress", "")
 if not target_mx_tag and isinstance(upstream_override.get("modelexpress_target_tag"), str):
     target_mx_tag = upstream_override["modelexpress_target_tag"].strip()
+if not target_mx_tag and generic_targets.get("bare_v"):
+    cur_mx_tag = extract_ref_tag(defaults["modelexpress_server_image"])
+    if parse_version_key(generic_targets["bare_v"]) > parse_version_key(cur_mx_tag):
+        target_mx_tag = generic_targets["bare_v"]
+if not target_mx_tag:
+    target_mx_tag = discover_newer_mx_tag(defaults["modelexpress_server_image"])
 target_mx_image = (
     f"gpustack/mirrored-modelexpress-server:{target_mx_tag}"
     if target_mx_tag
     else defaults["modelexpress_server_image"]
 )
+
+mt_repo_tags = list_repo_tags("gpustack/model-transfer")
+discovered_mt_tags = discover_newer_mt_tags(defaults["model_transfer_images"], mt_repo_tags)
+
+explicit_mt_raw = os.environ.get("AUTOSYNC_MODEL_TRANSFER_TARGET_TAG", "").strip()
+if not explicit_mt_raw and isinstance(upstream_override.get("model_transfer_target_tag"), str):
+    explicit_mt_raw = upstream_override["model_transfer_target_tag"].strip()
+
+explicit_mt_by_vendor: dict[str, str] = {}
+explicit_mt_ver = generic_targets.get("mt_ver", "")
+for vk in ("nvidia", "amd", "ascend"):
+    if f"mt_{vk}" in generic_targets:
+        explicit_mt_by_vendor[vk] = generic_targets[f"mt_{vk}"]
+if explicit_mt_raw:
+    for part in (seg.strip() for seg in explicit_mt_raw.split(",") if seg.strip()):
+        if "-cuda" in part:
+            explicit_mt_by_vendor["nvidia"] = part
+        elif "-rocm" in part:
+            explicit_mt_by_vendor["amd"] = part
+        elif "-cann" in part:
+            explicit_mt_by_vendor["ascend"] = part
+        else:
+            explicit_mt_ver = part
+
+target_mt_images: dict[str, str] = {}
+for vendor in ("nvidia", "amd", "ascend"):
+    cur_ref = defaults["model_transfer_images"].get(vendor, "")
+    cur_tag = extract_ref_tag(cur_ref)
+    m_cur = re.fullmatch(r"v(\d+)\.(\d+)\.(\d+)-([A-Za-z0-9._-]+)", cur_tag)
+    cur_flavor = m_cur.group(4) if m_cur else ""
+    chosen_tag = explicit_mt_by_vendor.get(vendor, "")
+    if not chosen_tag and explicit_mt_ver and cur_flavor:
+        chosen_tag = f"{explicit_mt_ver}-{cur_flavor}"
+    if not chosen_tag and generic_targets.get("bare_v") and cur_flavor:
+        if parse_version_key(generic_targets["bare_v"]) > parse_version_key(cur_tag.split("-", 1)[0]):
+            chosen_tag = f"{generic_targets['bare_v']}-{cur_flavor}"
+    if not chosen_tag:
+        chosen_tag = discovered_mt_tags.get(vendor, "")
+    target_mt_images[vendor] = (
+        f"gpustack/model-transfer:{chosen_tag}"
+        if chosen_tag
+        else cur_ref
+    )
 
 probe_refs = []
 for ref in (
@@ -373,6 +550,9 @@ for ref in (
     defaults["model_transfer_images"].get("nvidia", ""),
     defaults["model_transfer_images"].get("amd", ""),
     defaults["model_transfer_images"].get("ascend", ""),
+    target_mt_images.get("nvidia", ""),
+    target_mt_images.get("amd", ""),
+    target_mt_images.get("ascend", ""),
 ):
     if ref and ref not in probe_refs:
         probe_refs.append(ref)
@@ -408,6 +588,7 @@ discovery = {
     "targets": {
         "mooncake_image": target_mooncake_image,
         "modelexpress_image": target_mx_image,
+        "model_transfer_images": target_mt_images,
     },
 }
 
@@ -434,6 +615,7 @@ PREFLIGHT_REPORT_JSON="${STAGE_DIR}/kv-transfer-preflight-report.json"
 
 python3 - "${DISCOVERY_JSON}" "${MANIFESTS_JSON}" "${UPSTREAM_RECORDS_JSON}" "${PREFLIGHT_REPORT_JSON}" <<'PY'
 import json
+import re
 import sys
 
 disc_path, man_path, recs_path, rep_path = sys.argv[1:5]
@@ -443,13 +625,38 @@ with open(man_path, "r", encoding="utf-8") as f:
     man = json.load(f)
 
 images = man.get("images", {})
+DIGEST_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
 
 
-def is_published(ref: str) -> bool:
+def get_image_entry(ref: str):
     entry = images.get(ref)
     if not isinstance(entry, dict):
         entry = images.get(f"docker.io/{ref}")
+    return entry if isinstance(entry, dict) else None
+
+
+def is_published(ref: str) -> bool:
+    entry = get_image_entry(ref)
     return isinstance(entry, dict) and entry.get("published") is True
+
+
+def is_rocm_amd64_published(ref: str) -> bool:
+    entry = get_image_entry(ref)
+    if not isinstance(entry, dict):
+        return False
+    amd64 = str(entry.get("amd64Digest") or "").strip()
+    if not DIGEST_RE.fullmatch(amd64):
+        return False
+    arm64 = str(entry.get("arm64Digest") or "").strip()
+    if arm64:
+        return bool(DIGEST_RE.fullmatch(arm64) and arm64 != amd64 and entry.get("published") is True)
+    return True
+
+
+def is_mt_vendor_published(vendor: str, ref: str) -> bool:
+    if vendor == "amd" and "-rocm" in ref:
+        return is_rocm_amd64_published(ref)
+    return is_published(ref)
 
 
 recipe = disc["recipe"]
@@ -483,7 +690,22 @@ mx_stage_b = (
     and targets["modelexpress_image"] != defaults["modelexpress_server_image"]
     and is_published(targets["modelexpress_image"])
 )
-has_stage_b = mooncake_stage_b or mx_stage_b
+
+cand_mt = targets.get("model_transfer_images") or {}
+def_mt = defaults.get("model_transfer_images") or {}
+effective_mt = {}
+mt_stage_b = False
+for vendor in ("nvidia", "amd", "ascend"):
+    cur_ref = def_mt.get(vendor, "")
+    cand_ref = cand_mt.get(vendor, cur_ref)
+    if not has_stage_a and cand_ref and cand_ref != cur_ref and is_mt_vendor_published(vendor, cand_ref):
+        effective_mt[vendor] = cand_ref
+        mt_stage_b = True
+    else:
+        effective_mt[vendor] = cur_ref
+
+targets["model_transfer_images"] = effective_mt
+has_stage_b = mooncake_stage_b or mx_stage_b or mt_stage_b
 
 records = []
 if has_stage_a:
@@ -567,8 +789,8 @@ elif has_stage_b:
         },
         {
             "upstreamId": "gpustack-runner",
-            "status": "up_to_date",
-            "version": "aligned",
+            "status": "available" if mt_stage_b else "up_to_date",
+            "version": "aligned+stage-b" if mt_stage_b else "aligned",
         },
     ]
 else:

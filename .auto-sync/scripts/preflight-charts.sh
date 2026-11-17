@@ -30,6 +30,16 @@ else
   autosync::preflight::warm_caches "${STAGE_DIR}" --sbin --go --tools shellcheck,helm,helm-docs,helm-schema
 fi
 
+if [[ -z "${AUTOSYNC_CHARTS_FIXTURE_DIR:-}" ]] && command -v docker >/dev/null 2>&1; then
+  CT_VERSION="${CHART_TESTING_VERSION:-}"
+  if [[ -z "${CT_VERSION}" && -f "${REPO_ROOT}/hack/lib/helm.sh" ]]; then
+    CT_VERSION="$(sed -n 's/^chart_testing_version=.*:-"\([^"]*\)".*$/\1/p' "${REPO_ROOT}/hack/lib/helm.sh" | head -n 1)"
+  fi
+  CT_VERSION="${CT_VERSION:-v3.14.0}"
+  CT_IMAGE="quay.io/helmpack/chart-testing:${CT_VERSION}"
+  docker image inspect "${CT_IMAGE}" >/dev/null 2>&1 || docker pull "${CT_IMAGE}" || true
+fi
+
 mkdir -p "${STAGE_DIR}/deps-cache/charts"
 
 DISCOVERY_JSON="${STAGE_DIR}/charts-discovery.json"

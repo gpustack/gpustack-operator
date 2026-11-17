@@ -402,6 +402,49 @@ if [[ "${IMAGES_CHANGED}" == "true" || -f "${MANIFESTS_JSON}" ]]; then
   autosync::assert_image_published "${MANIFESTS_JSON}" "${SIDECAR_IMG}"
 fi
 
+# 6b. Proposal schema and version parity (.auto-sync/proposals/router.json).
+CAND_PROPOSAL="${AUTOSYNC_CANDIDATE_ROOT}/.auto-sync/proposals/router.json"
+python3 - "${CAND_PROPOSAL}" "${CAND_LLMD_VER}" "${CAND_VLLM_VER}" "${CAND_SGLANG_VER}" "${IMAGES_CHANGED}" <<'PY'
+import json
+import os
+import sys
+
+prop_p, llmd_v, vllm_v, sglang_v, images_changed_str = sys.argv[1:6]
+if not os.path.isfile(prop_p):
+    raise SystemExit(f"FAIL: missing proposal artifact: {prop_p}")
+with open(prop_p, "r", encoding="utf-8") as f:
+    prop = json.load(f)
+
+if not isinstance(prop, dict) or prop.get("schema_version") != 1:
+    raise SystemExit("FAIL: proposals/router.json must have schema_version == 1")
+if not isinstance(prop.get("summary"), str) or not prop["summary"].strip():
+    raise SystemExit("FAIL: proposals/router.json summary must be a non-empty string")
+stage = prop.get("stage")
+if stage not in ("aligned", "recipe_sync", "tag_promotion"):
+    raise SystemExit(f"FAIL: proposals/router.json invalid stage: {stage!r}")
+if not isinstance(prop.get("subscriptions"), list):
+    raise SystemExit("FAIL: proposals/router.json subscriptions must be a JSON array")
+versions = prop.get("versions")
+if not isinstance(versions, dict):
+    raise SystemExit("FAIL: proposals/router.json versions must be a JSON object")
+
+allow_stage_b = (stage == "tag_promotion") or (images_changed_str == "true")
+expected = {
+    "llm-d-router": llmd_v,
+    "vllm-router": vllm_v,
+    "sglang-gateway": sglang_v,
+}
+for uid, exp_v in expected.items():
+    got = versions.get(uid)
+    if not isinstance(got, str) or not got.strip():
+        raise SystemExit(f"FAIL: proposals/router.json versions.{uid} must be a non-empty string")
+    if got == exp_v:
+        continue
+    if allow_stage_b and got == f"{exp_v}+stage-b":
+        continue
+    raise SystemExit(f"FAIL: proposals/router.json versions.{uid} ({got!r}) != pinned ({exp_v!r})")
+PY
+
 # 7. Go settings tests and docs lint when Stage B files changed.
 PROMOTED_FILES_CHANGED="false"
 for rel in "pkg/worker/settings/value.go" "docs/reference/settings.md"; do

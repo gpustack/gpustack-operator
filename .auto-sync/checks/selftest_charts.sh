@@ -377,7 +377,7 @@ with open(vy_path, "w", encoding="utf-8") as f:
 
 with open(prop_path, "r", encoding="utf-8") as f:
     prop = json.load(f)
-prop["versions"]["kueue"] = "0.18.12"
+prop["versions"]["kueue-chart"] = "0.18.12"
 for sub in prop.get("subscriptions", []):
     if isinstance(sub, dict) and sub.get("id") == "kueue-chart":
         sub["version"] = "0.18.12"
@@ -452,6 +452,46 @@ if ! bad_err="$(run_validator_env_i "${CAND_BAD_IMG}" "${STAGE_READY}" 2>&1)" &&
   pass "validate_charts.sh fails closed on unmirrored gpustack/mirrored-kueue:v0.99.0 tag"
 else
   fail "validate_charts.sh fails closed on unmirrored gpustack/mirrored-kueue:v0.99.0 tag (${bad_err})"
+fi
+
+# Negative case 4: mutating modelTransfer.images.nvidia in values.yaml fails closed.
+CAND_BAD_MT="${SCRATCH}/cand-bad-mt"
+cp -R "${CAND_BASE}" "${CAND_BAD_MT}"
+sed 's|nvidia: gpustack/model-transfer:v0.1.0-cuda12.9|nvidia: gpustack/model-transfer:v9.9.9-cuda12.9|' \
+  "${CAND_BASE}/deploy/gpustack-operator/chart/values.yaml" > "${CAND_BAD_MT}/deploy/gpustack-operator/chart/values.yaml"
+bad_err=""
+if ! bad_err="$(run_validator_env_i "${CAND_BAD_MT}" "${STAGE_READY}" 2>&1)" && \
+   grep -q "modelTransfer" <<<"${bad_err}"; then
+  pass "validate_charts.sh fails closed when modelTransfer.images.nvidia is mutated in values.yaml"
+else
+  fail "validate_charts.sh fails closed when modelTransfer.images.nvidia is mutated in values.yaml (${bad_err})"
+fi
+
+# Negative case 5: registrar tag mismatch across modelManager.registrar.image and CSI drivers fails closed.
+CAND_BAD_REG="${SCRATCH}/cand-bad-reg"
+cp -R "${CAND_BASE}" "${CAND_BAD_REG}"
+python3 - "${CAND_BAD_REG}/deploy/gpustack-operator/chart/values.yaml" <<'PY'
+import re
+import sys
+
+p = sys.argv[1]
+with open(p, "r", encoding="utf-8") as f:
+    txt = f.read()
+txt = re.sub(
+    r"(mirrored-csi-node-driver-registrar\s*\n\s*tag:\s*)v2\.17\.0",
+    r"\g<1>v2.99.0",
+    txt,
+    count=1,
+)
+with open(p, "w", encoding="utf-8") as f:
+    f.write(txt)
+PY
+bad_err=""
+if ! bad_err="$(run_validator_env_i "${CAND_BAD_REG}" "${STAGE_READY}" 2>&1)" && \
+   grep -q "registrar tag parity mismatch" <<<"${bad_err}"; then
+  pass "validate_charts.sh fails closed on modelManager.registrar.image tag parity mismatch"
+else
+  fail "validate_charts.sh fails closed on modelManager.registrar.image tag parity mismatch (${bad_err})"
 fi
 
 echo

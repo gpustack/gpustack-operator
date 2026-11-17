@@ -328,6 +328,18 @@ CAND_POS="${SCRATCH}/cand-pos"
 cp -R "${CAND_BASE}" "${CAND_POS}"
 sed 's/^ARG VALS_VERSION="0\.50\.0"$/ARG VALS_VERSION="0.50.1"/' \
   "${CAND_BASE}/pack/gpustack-operator/Dockerfile" > "${CAND_POS}/pack/gpustack-operator/Dockerfile"
+python3 - "${CAND_POS}/.auto-sync/proposals/k8s-deps.json" <<'PY'
+import json
+import sys
+
+p = sys.argv[1]
+with open(p, "r", encoding="utf-8") as f:
+    doc = json.load(f)
+doc["versions"]["vals-cli"] = "0.50.1"
+with open(p, "w", encoding="utf-8") as f:
+    json.dump(doc, f, indent=2)
+    f.write("\n")
+PY
 
 if run_validator_env_i "${CAND_POS}" "${STAGE_DISC}" >/dev/null 2>&1 && \
    [[ ! -e "${CAND_POS}/.git" ]] && [[ ! -e "${CAND_POS}/.sbin" ]]; then
@@ -407,6 +419,20 @@ if ! neg5_err="$(run_validator_env_i "${CAND_NEG5}" "${STAGE_DISC}" 2>&1)" && \
   pass "validate_k8s_deps.sh fails closed on cross-minor k8s.io/api v0.37.0 jump"
 else
   fail "validate_k8s_deps.sh fails closed on cross-minor k8s.io/api jump (${neg5_err})"
+fi
+
+# 3g. Negative case 6: mismatched proposals/k8s-deps.json fails closed.
+CAND_NEG6="${SCRATCH}/cand-neg6"
+cp -R "${CAND_BASE}" "${CAND_NEG6}"
+sed 's|"helm-cli": "v3.21.4"|"helm-cli": "3.21.4"|' \
+  "${CAND_BASE}/.auto-sync/proposals/k8s-deps.json" > "${CAND_NEG6}/.auto-sync/proposals/k8s-deps.json"
+
+neg6_err=""
+if ! neg6_err="$(run_validator_env_i "${CAND_NEG6}" "${STAGE_DISC}" 2>&1)" && \
+   [[ ! -e "${CAND_NEG6}/.git" ]]; then
+  pass "validate_k8s_deps.sh fails closed on mismatched proposals/k8s-deps.json"
+else
+  fail "validate_k8s_deps.sh fails closed on mismatched proposals/k8s-deps.json (${neg6_err})"
 fi
 
 echo

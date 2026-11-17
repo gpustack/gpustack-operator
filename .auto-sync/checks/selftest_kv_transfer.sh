@@ -430,6 +430,79 @@ else
   fail "preflight emits up_to_date (no_change) when recipes and value.go are aligned"
 fi
 
+# 4b. Preflight Stage B via repo_tags auto-discovery for model-transfer (no AUTOSYNC_*_TARGET_TAG).
+python3 - "${FIXTURE_DIR}/upstream.json" "${FIXTURE_DIR}/image-manifests.json" <<'PY'
+import json
+import sys
+
+up_p, man_p = sys.argv[1:3]
+with open(up_p, "r", encoding="utf-8") as f:
+    up = json.load(f)
+up["repo_tags"] = {
+    "gpustack/mirrored-modelexpress-server": ["v0.7.0"],
+    "gpustack/model-transfer": [
+        "v0.1.0-cuda12.9",
+        "v0.2.0-cuda12.9",
+        "v0.2.0-rocm7.2",
+        "v0.2.0-cann9.2-a5",
+    ],
+}
+with open(up_p, "w", encoding="utf-8") as f:
+    json.dump(up, f, indent=2)
+
+with open(man_p, "r", encoding="utf-8") as f:
+    man = json.load(f)
+man["images"]["docker.io/gpustack/model-transfer:v0.2.0-cuda12.9"] = {
+    "published": True,
+    "amd64Digest": "sha256:c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1",
+    "arm64Digest": "sha256:d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1",
+}
+man["images"]["docker.io/gpustack/model-transfer:v0.2.0-rocm7.2"] = {
+    "published": False,
+    "amd64Digest": "sha256:e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1",
+    "arm64Digest": "",
+}
+man["images"]["docker.io/gpustack/model-transfer:v0.2.0-cann9.2-a5"] = {
+    "published": True,
+    "amd64Digest": "sha256:f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1",
+    "arm64Digest": "sha256:0101010101010101010101010101010101010101010101010101010101010101",
+}
+with open(man_p, "w", encoding="utf-8") as f:
+    json.dump(man, f, indent=2)
+PY
+
+(
+  cd "${FAKE_REPO}"
+  AUTOSYNC_KV_FIXTURE_DIR="${FIXTURE_DIR}" \
+  AUTOSYNC_SKIP_GO_MOD_DOWNLOAD=true \
+    bash "${FAKE_REPO}/.auto-sync/scripts/preflight-kv-transfer.sh" "${STAGE_DIR}"
+)
+
+if python3 - "${STAGE_DIR}" <<'PY'
+import json
+import os
+import sys
+
+stage = sys.argv[1]
+with open(os.path.join(stage, "upstream-records.json"), "r", encoding="utf-8") as f:
+    recs = {r["upstreamId"]: r for r in json.load(f)}
+assert recs["gpustack-runner"]["status"] == "available", recs["gpustack-runner"]
+assert recs["gpustack-runner"]["version"] == "aligned+stage-b", recs["gpustack-runner"]
+with open(os.path.join(stage, "kv-transfer-preflight-report.json"), "r", encoding="utf-8") as f:
+    rep = json.load(f)
+assert rep["stage"] == "tag_promotion", rep
+assert rep["image_published"] is True, rep
+mt = rep["targets"]["model_transfer_images"]
+assert mt["nvidia"] == "gpustack/model-transfer:v0.2.0-cuda12.9", mt
+assert mt["amd"] == "gpustack/model-transfer:v0.2.0-rocm7.2", mt
+assert mt["ascend"] == "gpustack/model-transfer:v0.2.0-cann9.2-a5", mt
+PY
+then
+  pass "preflight Stage B auto-discovers model-transfer tags via repo_tags without AUTOSYNC_*_TARGET_TAG"
+else
+  fail "preflight Stage B auto-discovers model-transfer tags via repo_tags without AUTOSYNC_*_TARGET_TAG"
+fi
+
 # 5. Gitless candidate validator tests (Mooncake 5-block parser, two-stage gate, shared-file guards, HIXL parity, ModelExpress build).
 VAL_STAGE="${SCRATCH}/val-stage"
 mkdir -p "${VAL_STAGE}/baseline/pkg/worker/settings" \
@@ -516,7 +589,11 @@ cat > "${VAL_STAGE}/kv-transfer-preflight-report.json" <<'JSON'
   "schemaVersion": 1,
   "stage": "recipe_sync",
   "image_published": false,
-  "enforce_runner_hixl_parity": true
+  "enforce_runner_hixl_parity": true,
+  "nixl_pypi": {
+    "selected_version": "1.5.3",
+    "recent_versions": ["1.5.3", "1.5.2"]
+  }
 }
 JSON
 
@@ -524,6 +601,7 @@ CAND_DIR="${SCRATCH}/candidate"
 make_gitless_cand() {
   rm -rf "${CAND_DIR}"
   mkdir -p "${CAND_DIR}/.auto-sync/checks" \
+    "${CAND_DIR}/.auto-sync/proposals" \
     "${CAND_DIR}/pkg/worker/settings" \
     "${CAND_DIR}/docs/reference" \
     "${CAND_DIR}/deploy/gpustack-operator/chart" \
@@ -532,6 +610,7 @@ make_gitless_cand() {
     "${CAND_DIR}/pack/mirrored-modelexpress-server"
   cp "${ROOT_DIR}/.auto-sync/checks/lib.sh" "${CAND_DIR}/.auto-sync/checks/lib.sh"
   cp "${VALIDATE_SCRIPT}" "${CAND_DIR}/.auto-sync/checks/validate_kv_transfer.sh"
+  cp "${ROOT_DIR}/.auto-sync/proposals/kv-transfer.json" "${CAND_DIR}/.auto-sync/proposals/kv-transfer.json"
   cp "${VAL_STAGE}/baseline/pkg/worker/settings/value.go" "${CAND_DIR}/pkg/worker/settings/value.go"
   cp "${VAL_STAGE}/baseline/docs/reference/settings.md" "${CAND_DIR}/docs/reference/settings.md"
   cp "${VAL_STAGE}/baseline/deploy/gpustack-operator/chart/values.yaml" "${CAND_DIR}/deploy/gpustack-operator/chart/values.yaml"
@@ -544,6 +623,26 @@ make_gitless_cand() {
   # Align candidate HIXL_COMMIT with HIXL_FIXTURE_SHA when testing patch dry-run separately;
   # baseline runner and model-transfer already share 60dbe9d1d7d9a7eef04bc3dbf84edbad2188230a.
   # Add HIXL_FIXTURE_SHA only after testing baseline.
+}
+
+set_kv_proposal() {
+  local stage="$1"
+  shift
+  python3 - "${CAND_DIR}/.auto-sync/proposals/kv-transfer.json" "${stage}" "$@" <<'PY'
+import json
+import sys
+
+p, stage = sys.argv[1:3]
+with open(p, "r", encoding="utf-8") as f:
+    doc = json.load(f)
+doc["stage"] = stage
+for kv in sys.argv[3:]:
+    k, v = kv.split("=", 1)
+    doc["versions"][k] = v
+with open(p, "w", encoding="utf-8") as f:
+    json.dump(doc, f, indent=2)
+    f.write("\n")
+PY
 }
 
 run_validate() {
@@ -563,6 +662,7 @@ assert_ok "validate_kv_transfer passes on baseline 0.3.13.post1 in gitless candi
 
 # 5b. Mooncake 5-block case parser: bump ARG MOONCAKE_VERSION="0.3.14" without updating all 4 stage guards -> FAIL.
 make_gitless_cand
+set_kv_proposal "recipe_sync" "mooncake=0.3.14"
 sed -i.bak 's/^ARG MOONCAKE_VERSION="0.3.13.post1"/ARG MOONCAKE_VERSION="0.3.14"/' "${CAND_DIR}/pack/mirrored-mooncake/Dockerfile"
 rm -f "${CAND_DIR}/pack/mirrored-mooncake/Dockerfile.bak"
 assert_fails "validate_kv_transfer fails closed when ARG MOONCAKE_VERSION=0.3.14 lacks stage case guards" run_validate
@@ -579,7 +679,7 @@ with open(p, "w", encoding="utf-8") as f:
 PY
 assert_fails "validate_kv_transfer fails closed when only 3 of 4 Mooncake stage guards include 0.3.14*" run_validate
 
-# Update the 4th stage guard too -> Stage A PASSES (value.go untouched, even for unpublished tag).
+# Update the 4th stage guard WITHOUT updating the 5th context_manager.cpp block -> MUST still fail closed!
 python3 - "${CAND_DIR}/pack/mirrored-mooncake/Dockerfile" <<'PY'
 import sys
 p = sys.argv[1]
@@ -589,7 +689,19 @@ txt = txt.replace("0.3.10*|0.3.11*|0.3.12*|0.3.13*)", "0.3.10*|0.3.11*|0.3.12*|0
 with open(p, "w", encoding="utf-8") as f:
     f.write(txt)
 PY
-assert_ok "validate_kv_transfer Stage A passes when all 4 Mooncake stage guards include 0.3.14* and value.go untouched" run_validate
+assert_fails "validate_kv_transfer fails closed when 5th context_manager.cpp case block omits 0.3.14*" run_validate
+
+# Update the 5th context_manager.cpp case block too -> Stage A PASSES (value.go untouched, even for unpublished tag).
+python3 - "${CAND_DIR}/pack/mirrored-mooncake/Dockerfile" <<'PY'
+import sys
+p = sys.argv[1]
+with open(p, "r", encoding="utf-8") as f:
+    txt = f.read()
+txt = txt.replace("0.3.13*)", "0.3.13*|0.3.14*)", 1)
+with open(p, "w", encoding="utf-8") as f:
+    f.write(txt)
+PY
+assert_ok "validate_kv_transfer Stage A passes when all 5 Mooncake case blocks handle 0.3.14* and value.go untouched" run_validate
 
 # 5c. Unpublished tag written to value.go -> FAIL.
 make_gitless_cand
@@ -607,6 +719,7 @@ assert_fails "validate_kv_transfer fails closed when unpublished tag is written 
 
 # 5e. Stage B (value.go + settings.md updated to published multi-arch 0.3.14-cpu) -> PASS.
 make_gitless_cand
+set_kv_proposal "tag_promotion" "mooncake=0.3.13.post1+stage-b"
 sed -i.bak 's|gpustack/mirrored-mooncake:0.3.13.post1-cpu|gpustack/mirrored-mooncake:0.3.14-cpu|' \
   "${CAND_DIR}/pkg/worker/settings/value.go" "${CAND_DIR}/docs/reference/settings.md"
 rm -f "${CAND_DIR}/pkg/worker/settings/value.go.bak" "${CAND_DIR}/docs/reference/settings.md.bak"
@@ -635,6 +748,7 @@ mv "${SCRATCH}/hixl-repo-backup" "${VAL_STAGE}/hixl"
 sed -i.bak "s|60dbe9d1d7d9a7eef04bc3dbf84edbad2188230a|${HIXL_FIXTURE_SHA}|" "${VAL_STAGE}/gpustack-runner/pack/cann/Dockerfile.vllm"
 rm -f "${VAL_STAGE}/gpustack-runner/pack/cann/Dockerfile.vllm.bak"
 make_gitless_cand
+set_kv_proposal "recipe_sync" "hixl=${HIXL_FIXTURE_SHA}"
 sed -i.bak "s|60dbe9d1d7d9a7eef04bc3dbf84edbad2188230a|${HIXL_FIXTURE_SHA}|" "${CAND_DIR}/pack/model-transfer/Dockerfile"
 rm -f "${CAND_DIR}/pack/model-transfer/Dockerfile.bak"
 assert_ok "validate_kv_transfer passes HIXL patch --dry-run against staged hixl repo" run_validate
@@ -656,6 +770,7 @@ rm -f "${VAL_STAGE}/gpustack-runner/pack/cann/Dockerfile.vllm.bak"
 
 # 5j. ModelExpress builder check when MODELEXPRESS_COMMIT changes.
 make_gitless_cand
+set_kv_proposal "recipe_sync" "modelexpress=1111111111111111111111111111111111111111"
 sed -i.bak 's|^ARG MODELEXPRESS_COMMIT=.*|ARG MODELEXPRESS_COMMIT=1111111111111111111111111111111111111111|' \
   "${CAND_DIR}/pack/mirrored-modelexpress-server/Dockerfile"
 rm -f "${CAND_DIR}/pack/mirrored-modelexpress-server/Dockerfile.bak"
@@ -679,6 +794,48 @@ if AUTOSYNC_DOCKER_BUILD_CMD="false" \
 else
   pass "validate_kv_transfer fails closed when ModelExpress builder fails"
 fi
+
+# 5k. NIXL_VERSION PyPI wheel verification check (verified 1.5.3 passes; unverified 1.6.0 fails closed).
+make_gitless_cand
+set_kv_proposal "recipe_sync" "nixl-pypi=1.5.3"
+sed -i.bak 's|^ARG NIXL_VERSION="1.5.2"|ARG NIXL_VERSION="1.5.3"|' "${CAND_DIR}/pack/model-transfer/Dockerfile"
+rm -f "${CAND_DIR}/pack/model-transfer/Dockerfile.bak"
+assert_ok "validate_kv_transfer passes wheel-verified NIXL_VERSION=1.5.3" run_validate
+
+make_gitless_cand
+set_kv_proposal "recipe_sync" "nixl-pypi=1.6.0"
+sed -i.bak 's|^ARG NIXL_VERSION="1.5.2"|ARG NIXL_VERSION="1.6.0"|' "${CAND_DIR}/pack/model-transfer/Dockerfile"
+rm -f "${CAND_DIR}/pack/model-transfer/Dockerfile.bak"
+assert_fails "validate_kv_transfer fails closed on unverified NIXL_VERSION=1.6.0" run_validate
+
+# 5l. NIXL_ROCM_VERSION <-> pyproject.toml [project].version alignment check.
+NIXL_ROCM_MOCK="${VAL_STAGE}/nixl-rocm"
+init_mock_repo "${NIXL_ROCM_MOCK}"
+cat > "${NIXL_ROCM_MOCK}/pyproject.toml" <<'TOML'
+[project]
+name = "nixl"
+version = "1.5.1"
+TOML
+git -C "${NIXL_ROCM_MOCK}" add pyproject.toml
+git -C "${NIXL_ROCM_MOCK}" commit -q -m "nixl rocm 1.5.1"
+NIXL_ROCM_MOCK_SHA="$(git -C "${NIXL_ROCM_MOCK}" rev-parse HEAD)"
+
+make_gitless_cand
+set_kv_proposal "recipe_sync" "nixl-rocm=${NIXL_ROCM_MOCK_SHA}"
+sed -i.bak "s|^ARG NIXL_ROCM_REF=\"[^\"]*\"|ARG NIXL_ROCM_REF=\"${NIXL_ROCM_MOCK_SHA}\"|" "${CAND_DIR}/pack/model-transfer/Dockerfile"
+sed -i.bak 's|^ARG NIXL_ROCM_VERSION="[^"]*"|ARG NIXL_ROCM_VERSION="1.5.1"|' "${CAND_DIR}/pack/model-transfer/Dockerfile"
+rm -f "${CAND_DIR}/pack/model-transfer/Dockerfile.bak"
+assert_ok "validate_kv_transfer passes when NIXL_ROCM_VERSION matches pyproject.toml at NIXL_ROCM_REF" run_validate
+
+sed -i.bak 's|^ARG NIXL_ROCM_VERSION="1.5.1"|ARG NIXL_ROCM_VERSION="9.9.9"|' "${CAND_DIR}/pack/model-transfer/Dockerfile"
+rm -f "${CAND_DIR}/pack/model-transfer/Dockerfile.bak"
+assert_fails "validate_kv_transfer fails closed when NIXL_ROCM_VERSION disagrees with pyproject.toml" run_validate
+rm -rf "${NIXL_ROCM_MOCK}"
+
+# 5m. Mismatched proposals/kv-transfer.json fails closed.
+make_gitless_cand
+set_kv_proposal "recipe_sync" "mooncake=0.99.0"
+assert_fails "validate_kv_transfer fails closed on mismatched proposals/kv-transfer.json" run_validate
 
 echo
 if (( FAILS > 0 )); then

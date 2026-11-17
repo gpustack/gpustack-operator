@@ -10,7 +10,12 @@ source "${SCRIPT_DIR}/lib.sh"
 autosync::bootstrap_env "${AUTOSYNC_STAGE_DIR:-}" "${LOOPWRIGHT_CANDIDATE_DIR:-$(pwd -P)}"
 cd "${AUTOSYNC_CANDIDATE_ROOT}"
 
+_CLEANUP_PATHS=()
 cleanup_on_exit() {
+  local p
+  for p in "${_CLEANUP_PATHS[@]+"${_CLEANUP_PATHS[@]}"}"; do
+    [[ -n "${p}" && -e "${p}" ]] && rm -rf "${p}"
+  done
   autosync::cleanup_ephemeral_git "${AUTOSYNC_CANDIDATE_ROOT}"
 }
 trap cleanup_on_exit EXIT
@@ -112,6 +117,48 @@ for start_line, snippet in release_guards:
             file=sys.stderr,
         )
         sys.exit(1)
+
+for start_line, snippet in context_blocks:
+    arms = []
+    expect_arm = True
+    for raw_line in snippet.splitlines()[1:-1]:
+        stripped = raw_line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        if expect_arm:
+            m_arm = re.match(r"^([^()]+)\)(.*)$", stripped)
+            if m_arm:
+                pat = m_arm.group(1).strip()
+                rest = m_arm.group(2).strip()
+                patterns = [p.strip() for p in pat.split("|") if p.strip() and p.strip() != "*"]
+                if patterns:
+                    arms.append("|".join(patterns))
+                if not rest.endswith(";;"):
+                    expect_arm = False
+                continue
+        if stripped.endswith(";;"):
+            expect_arm = True
+    if not arms:
+        print(
+            f"FAIL: context_manager.cpp case block at line {start_line} has no explicit version arms",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+    harness = 'MOONCAKE_VERSION="$1"\ncase "${MOONCAKE_VERSION}" in\n'
+    for pat in arms:
+        harness += f"  {pat}) ;;\n"
+    harness += "  *) exit 1 ;;\nesac\n"
+    res = subprocess.run(
+        ["bash", "-e", "-c", harness, "_", pinned],
+        capture_output=True,
+        text=True,
+    )
+    if res.returncode != 0:
+        print(
+            f"FAIL: MOONCAKE_VERSION=\"{pinned}\" is not handled by an explicit arm in context_manager.cpp case block at line {start_line}",
+            file=sys.stderr,
+        )
+        sys.exit(1)
 PY
 
 # 3. Byte-level HIXL parity with gpustack/runner & patch dry-run against staged hixl.
@@ -174,6 +221,7 @@ fi
 
 if [[ -d "${STAGE_DIR}/hixl" ]]; then
   HIXL_TMP="$(mktemp -d "${TMPDIR:-/tmp}/autosync-hixl-check.XXXXXXXX")"
+  _CLEANUP_PATHS+=("${HIXL_TMP}")
   if ! cp -R "${STAGE_DIR}/hixl/." "${HIXL_TMP}/"; then
     rm -rf "${HIXL_TMP}"
     printf 'FAIL: unable to copy staged hixl directory\n' >&2
@@ -193,6 +241,118 @@ if [[ -d "${STAGE_DIR}/hixl" ]]; then
   fi
   rm -rf "${HIXL_TMP}"
 fi
+
+# 3b. NIXL_VERSION PyPI wheel parity and NIXL_ROCM_VERSION <-> pyproject.toml alignment.
+BASE_MT_DF="${BASELINE_DIR}/pack/model-transfer/Dockerfile"
+if [[ ! -f "${BASE_MT_DF}" || ! -f "${MT_DF}" ]]; then
+  printf 'FAIL: missing baseline or candidate pack/model-transfer/Dockerfile\n' >&2
+  exit 1
+fi
+
+python3 - "${BASE_MT_DF}" "${MT_DF}" "${STAGE_DIR}" <<'PY'
+import json
+import os
+import re
+import subprocess
+import sys
+
+base_df_p, cand_df_p, stage_dir = sys.argv[1:4]
+
+
+def read_text(p: str) -> str:
+    with open(p, "r", encoding="utf-8") as f:
+        return f.read()
+
+
+def extract_arg(txt: str, name: str, path: str) -> str:
+    m = re.search(rf'^ARG {re.escape(name)}=(?:"([^"]+)"|([^\s#]+))', txt, re.MULTILINE)
+    if not m:
+        raise SystemExit(f"FAIL: missing ARG {name} in {path}")
+    return (m.group(1) or m.group(2)).strip()
+
+
+base_df = read_text(base_df_p)
+cand_df = read_text(cand_df_p)
+
+base_nixl_ver = extract_arg(base_df, "NIXL_VERSION", base_df_p)
+cand_nixl_ver = extract_arg(cand_df, "NIXL_VERSION", cand_df_p)
+base_nixl_rocm_ref = extract_arg(base_df, "NIXL_ROCM_REF", base_df_p)
+cand_nixl_rocm_ref = extract_arg(cand_df, "NIXL_ROCM_REF", cand_df_p)
+cand_nixl_rocm_ver = extract_arg(cand_df, "NIXL_ROCM_VERSION", cand_df_p)
+
+report_path = os.path.join(stage_dir, "kv-transfer-preflight-report.json")
+verified_nixl: set[str] = set()
+if os.path.isfile(report_path):
+    with open(report_path, "r", encoding="utf-8") as f:
+        rep = json.load(f)
+    nixl_sec = rep.get("nixl_pypi")
+    if isinstance(nixl_sec, dict):
+        sel = nixl_sec.get("selected_version")
+        if isinstance(sel, str) and sel.strip():
+            verified_nixl.add(sel.strip())
+        for rv in nixl_sec.get("recent_versions") or []:
+            if isinstance(rv, str) and rv.strip():
+                verified_nixl.add(rv.strip())
+    elif isinstance(nixl_sec, str) and nixl_sec.strip():
+        verified_nixl.add(nixl_sec.strip())
+    for rv in rep.get("nixl_pypi_recent") or []:
+        if isinstance(rv, str) and rv.strip():
+            verified_nixl.add(rv.strip())
+
+if cand_nixl_ver != base_nixl_ver:
+    if not verified_nixl:
+        raise SystemExit(
+            f"FAIL: NIXL_VERSION changed ({base_nixl_ver} -> {cand_nixl_ver}) without wheel-verified nixl_pypi entries in kv-transfer-preflight-report.json"
+        )
+    if cand_nixl_ver not in verified_nixl:
+        raise SystemExit(
+            f"FAIL: NIXL_VERSION={cand_nixl_ver!r} is not in wheel-verified PyPI set {sorted(verified_nixl)}"
+        )
+
+nixl_repo = ""
+for cand_dir in (os.path.join(stage_dir, "nixl-rocm"), os.path.join(stage_dir, "nixl")):
+    if os.path.isdir(os.path.join(cand_dir, ".git")):
+        nixl_repo = cand_dir
+        break
+
+if nixl_repo:
+    obj_spec = f"{cand_nixl_rocm_ref}:pyproject.toml"
+    has_obj = subprocess.run(
+        ["git", "-C", nixl_repo, "cat-file", "-e", obj_spec],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    ).returncode == 0
+    if has_obj:
+        pyproject_raw = subprocess.check_output(
+            ["git", "-C", nixl_repo, "show", obj_spec],
+            text=True,
+        )
+        proj_ver = ""
+        try:
+            import tomllib
+            doc = tomllib.loads(pyproject_raw)
+            proj_ver = str((doc.get("project") or {}).get("version") or "").strip()
+        except ImportError:
+            in_proj = False
+            for raw_ln in pyproject_raw.splitlines():
+                st = raw_ln.strip()
+                if st.startswith("["):
+                    in_proj = st == "[project]"
+                    continue
+                if in_proj:
+                    m_v = re.match(r'^version\s*=\s*["\']([^"\']+)["\']', st)
+                    if m_v:
+                        proj_ver = m_v.group(1).strip()
+                        break
+        if proj_ver != cand_nixl_rocm_ver:
+            raise SystemExit(
+                f"FAIL: NIXL_ROCM_VERSION ({cand_nixl_rocm_ver!r}) != pyproject.toml [project].version ({proj_ver!r}) at {cand_nixl_rocm_ref}"
+            )
+    elif cand_nixl_rocm_ref != base_nixl_rocm_ref:
+        raise SystemExit(
+            f"FAIL: NIXL_ROCM_REF {cand_nixl_rocm_ref} (pyproject.toml) not found in staged nixl repository {nixl_repo}"
+        )
+PY
 
 # 4. ModelExpress --locked builder verification when MODELEXPRESS_COMMIT changed.
 BASE_MX_DF="${BASELINE_DIR}/pack/mirrored-modelexpress-server/Dockerfile"
@@ -222,6 +382,7 @@ fi
 # 5. Two-Stage Image Publication Gate and value.go <-> settings.md alignment.
 MANIFESTS_JSON="${STAGE_DIR}/image-manifests.json"
 IMAGE_META_FILE="$(mktemp "${TMPDIR:-/tmp}/autosync-kv-images.XXXXXXXX")"
+_CLEANUP_PATHS+=("${IMAGE_META_FILE}")
 python3 - \
   "${BASELINE_DIR}/pkg/worker/settings/value.go" \
   "${AUTOSYNC_CANDIDATE_ROOT}/pkg/worker/settings/value.go" \
@@ -380,7 +541,70 @@ if [[ "${IMAGES_CHANGED}" == "true" || -f "${MANIFESTS_JSON}" ]]; then
   fi
 fi
 
-# 6. Chart / settings / docs regeneration and test gate when Stage B files changed.
+# 6. Proposal schema and version parity (.auto-sync/proposals/kv-transfer.json).
+CAND_PROPOSAL="${AUTOSYNC_CANDIDATE_ROOT}/.auto-sync/proposals/kv-transfer.json"
+python3 - "${CAND_PROPOSAL}" "${MOONCAKE_DF}" "${MT_DF}" "${CAND_MX_DF}" "${IMAGES_CHANGED}" <<'PY'
+import json
+import os
+import re
+import sys
+
+prop_p, mc_df_p, mt_df_p, mx_df_p, images_changed_str = sys.argv[1:6]
+if not os.path.isfile(prop_p):
+    raise SystemExit(f"FAIL: missing proposal artifact: {prop_p}")
+with open(prop_p, "r", encoding="utf-8") as f:
+    prop = json.load(f)
+
+if not isinstance(prop, dict) or prop.get("schema_version") != 1:
+    raise SystemExit("FAIL: proposals/kv-transfer.json must have schema_version == 1")
+if not isinstance(prop.get("summary"), str) or not prop["summary"].strip():
+    raise SystemExit("FAIL: proposals/kv-transfer.json summary must be a non-empty string")
+stage = prop.get("stage")
+if stage not in ("aligned", "recipe_sync", "tag_promotion"):
+    raise SystemExit(f"FAIL: proposals/kv-transfer.json invalid stage: {stage!r}")
+if not isinstance(prop.get("subscriptions"), list):
+    raise SystemExit("FAIL: proposals/kv-transfer.json subscriptions must be a JSON array")
+versions = prop.get("versions")
+if not isinstance(versions, dict):
+    raise SystemExit("FAIL: proposals/kv-transfer.json versions must be a JSON object")
+
+required_ids = ("mooncake", "nixl-pypi", "nixl-rocm", "ucx-rocm", "hixl", "modelexpress", "gpustack-runner")
+for uid in required_ids:
+    val = versions.get(uid)
+    if not isinstance(val, str) or not val.strip():
+        raise SystemExit(f"FAIL: proposals/kv-transfer.json versions.{uid} must be a non-empty string")
+
+
+def read_arg(path: str, arg_name: str) -> str:
+    with open(path, "r", encoding="utf-8") as f:
+        txt = f.read()
+    m = re.search(rf'^ARG {re.escape(arg_name)}=(?:"([^"]+)"|([^\s#]+))', txt, re.MULTILINE)
+    if not m:
+        raise SystemExit(f"FAIL: missing ARG {arg_name} in {path}")
+    return (m.group(1) or m.group(2)).strip()
+
+
+allow_stage_b = (stage == "tag_promotion") or (images_changed_str == "true")
+
+
+def check_pin(uid: str, expected: str, allow_sb: bool = False) -> None:
+    got = versions[uid]
+    if got == expected:
+        return
+    if allow_sb and allow_stage_b and got == f"{expected}+stage-b":
+        return
+    raise SystemExit(f"FAIL: proposals/kv-transfer.json versions.{uid} ({got!r}) != pinned ({expected!r})")
+
+
+check_pin("mooncake", read_arg(mc_df_p, "MOONCAKE_VERSION"), allow_sb=True)
+check_pin("nixl-pypi", read_arg(mt_df_p, "NIXL_VERSION"), allow_sb=True)
+check_pin("nixl-rocm", read_arg(mt_df_p, "NIXL_ROCM_REF"))
+check_pin("ucx-rocm", read_arg(mt_df_p, "NIXL_ROCM_UCX_REF"))
+check_pin("hixl", read_arg(mt_df_p, "HIXL_COMMIT"))
+check_pin("modelexpress", read_arg(mx_df_p, "MODELEXPRESS_COMMIT"), allow_sb=True)
+PY
+
+# 7. Chart / settings / docs regeneration and test gate when Stage B files changed.
 PROMOTED_FILES_CHANGED="false"
 for rel in \
   "pkg/worker/settings/value.go" \

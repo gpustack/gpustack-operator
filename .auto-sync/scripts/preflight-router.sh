@@ -282,9 +282,82 @@ if os.path.isdir(os.path.join(vllm_stage, ".git")):
         )
         retire_0001 = anc_res.returncode == 0
 
+def parse_generic_target_tags(raw_val: str) -> dict[str, str]:
+    parsed = {}
+    for item in (seg.strip() for seg in raw_val.split(",") if seg.strip()):
+        if ":" in item:
+            repo_part, tag_part = item.rsplit(":", 1)
+            repo_name = repo_part.strip().split("/")[-1]
+            tag_part = tag_part.strip()
+            if not tag_part:
+                continue
+            if repo_name in ("llm-router", "router"):
+                parsed["router"] = tag_part
+            elif repo_name in ("mirrored-envoy", "envoy", "proxy"):
+                parsed["proxy"] = tag_part
+            elif repo_name in ("mirrored-llm-d-router-disagg-sidecar", "sidecar"):
+                parsed["sidecar"] = tag_part
+        else:
+            parsed["router"] = item
+    return parsed
+
+
+def list_repo_tags(repo: str) -> list[str]:
+    repo_tags = upstream_override.get("repo_tags")
+    if isinstance(repo_tags, dict):
+        for key in (repo, f"docker.io/{repo}"):
+            if isinstance(repo_tags.get(key), list):
+                return [str(t).strip() for t in repo_tags[key] if str(t).strip()]
+    if fixture_dir:
+        return []
+    crane_bin = os.environ.get("AUTOSYNC_CRANE_BIN", "crane").strip() or "crane"
+    try:
+        res = subprocess.run(
+            [crane_bin, "ls", f"docker.io/{repo}"],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        if res.returncode != 0:
+            return []
+        return [ln.strip() for ln in res.stdout.splitlines() if ln.strip()]
+    except (OSError, subprocess.SubprocessError):
+        return []
+
+
+def discover_newer_tag(repo: str, current_image: str) -> str:
+    last_seg = current_image.split("/")[-1]
+    if ":" not in last_seg:
+        return ""
+    current_tag = current_image.rsplit(":", 1)[1].strip()
+    m_cur = re.fullmatch(r"(.*?)v(\d+)\.(\d+)\.(\d+)", current_tag)
+    if not m_cur:
+        return ""
+    prefix = m_cur.group(1)
+    cur_tuple = (int(m_cur.group(2)), int(m_cur.group(3)), int(m_cur.group(4)))
+    tag_pat = re.compile(rf"^{re.escape(prefix)}v(\d+)\.(\d+)\.(\d+)$")
+    best_tuple = cur_tuple
+    best_tag = ""
+    for tag in list_repo_tags(repo):
+        m = tag_pat.fullmatch(tag)
+        if not m:
+            continue
+        cand_tuple = (int(m.group(1)), int(m.group(2)), int(m.group(3)))
+        if cand_tuple > best_tuple:
+            best_tuple = cand_tuple
+            best_tag = tag
+    return best_tag
+
+
+generic_targets = parse_generic_target_tags(os.environ.get("AUTOSYNC_TARGET_TAG", ""))
+
 target_router_tag = os.environ.get("AUTOSYNC_ROUTER_TARGET_TAG", "").strip()
+if not target_router_tag:
+    target_router_tag = generic_targets.get("router", "")
 if not target_router_tag and isinstance(upstream_override.get("router_target_tag"), str):
     target_router_tag = upstream_override["router_target_tag"].strip()
+if not target_router_tag:
+    target_router_tag = discover_newer_tag("gpustack/llm-router", defaults["router_image"])
 target_router_image = (
     f"gpustack/llm-router:{target_router_tag}"
     if target_router_tag
@@ -292,8 +365,12 @@ target_router_image = (
 )
 
 target_proxy_tag = os.environ.get("AUTOSYNC_ROUTER_PROXY_TARGET_TAG", "").strip()
+if not target_proxy_tag:
+    target_proxy_tag = generic_targets.get("proxy", "")
 if not target_proxy_tag and isinstance(upstream_override.get("proxy_target_tag"), str):
     target_proxy_tag = upstream_override["proxy_target_tag"].strip()
+if not target_proxy_tag:
+    target_proxy_tag = discover_newer_tag("gpustack/mirrored-envoy", defaults["proxy_image"])
 target_proxy_image = (
     f"gpustack/mirrored-envoy:{target_proxy_tag}"
     if target_proxy_tag
@@ -301,6 +378,8 @@ target_proxy_image = (
 )
 
 target_sidecar_tag = os.environ.get("AUTOSYNC_ROUTER_SIDECAR_TARGET_TAG", "").strip()
+if not target_sidecar_tag:
+    target_sidecar_tag = generic_targets.get("sidecar", "")
 if not target_sidecar_tag and isinstance(upstream_override.get("sidecar_target_tag"), str):
     target_sidecar_tag = upstream_override["sidecar_target_tag"].strip()
 if not target_sidecar_tag:

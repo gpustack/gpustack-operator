@@ -55,5 +55,5 @@ When updating Go modules or staging trees:
 
 ## Settlement
 
-- Update `.auto-sync/proposals/k8s-deps.json` (`schema_version: 1`, `summary`, `versions`, `subscriptions`) to reflect any updated pins and settle as `completed`.
+- Update `.auto-sync/proposals/k8s-deps.json` (`schema_version: 1`, `summary`, `versions`, `subscriptions`) to reflect any updated pins and settle as `completed`. Keep `versions` aligned with the exact 8 `upstream-records.json` IDs and version formats (`kubernetes`, `controller-runtime`, `kueue-sdk`, and `helm-cli` with leading `v`; `skopeo-cli`, `vals-cli`, `kustomize-cli`, and `ytt-cli` without leading `v`).
 - If all upstreams in `$AUTOSYNC_STAGE_DIR/upstream-records.json` are `up_to_date` and all repository pins already match, settle cleanly as `no_change` without modifying files.

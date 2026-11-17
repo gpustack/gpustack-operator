@@ -2,14 +2,14 @@
 # hack/check/autosync-selftest.sh - self-tests and schema/workflow gates for .auto-sync.
 #
 # Usage:
-#   bash hack/check/autosync-selftest.sh [all|common|priors|slicing|kv-transfer|router|charts|k8s-deps|workflow] [repo-root]
+#   bash hack/check/autosync-selftest.sh [all|fast|common|priors|slicing|kv-transfer|router|charts|k8s-deps|workflow] [repo-root]
 #   bash hack/check/autosync-selftest.sh <repo-root>
 set -euo pipefail
 
 usage() {
   cat >&2 <<'EOF'
 Usage:
-  bash hack/check/autosync-selftest.sh [all|common|priors|slicing|kv-transfer|router|charts|k8s-deps|workflow] [repo-root]
+  bash hack/check/autosync-selftest.sh [all|fast|common|priors|slicing|kv-transfer|router|charts|k8s-deps|workflow] [repo-root]
   bash hack/check/autosync-selftest.sh <repo-root>
 EOF
 }
@@ -26,7 +26,7 @@ if [[ $# -ge 1 ]]; then
     ROOT_DIR="$(cd "${1}" && pwd -P)"
   else
     case "${1}" in
-      all|common|priors|slicing|kv-transfer|router|charts|k8s-deps|workflow)
+      all|fast|common|priors|slicing|kv-transfer|router|charts|k8s-deps|workflow)
         MODE="${1}"
         if [[ $# -ge 2 ]]; then
           if [[ ! -d "${2}" ]]; then
@@ -62,7 +62,6 @@ cleanup_on_exit() {
 trap cleanup_on_exit EXIT
 
 resolve_loopwright_dist_js() {
-  local default_local="/Users/thxcode/Documents/github.com/thxcode/loopwright/packages/github-app/dist/index.js"
   if [[ -n "${LOOPWRIGHT_DIST_JS+set}" ]]; then
     if [[ -n "${LOOPWRIGHT_DIST_JS}" && -r "${LOOPWRIGHT_DIST_JS}" ]]; then
       printf '%s\n' "${LOOPWRIGHT_DIST_JS}"
@@ -70,10 +69,33 @@ resolve_loopwright_dist_js() {
     fi
     return 1
   fi
-  if [[ -r "${default_local}" ]]; then
-    printf '%s\n' "${default_local}"
-    return 0
+
+  local main_repo_root=""
+  if command -v git >/dev/null 2>&1; then
+    main_repo_root="$(git -C "${ROOT_DIR}" worktree list --porcelain 2>/dev/null | awk '/^worktree /{print substr($0, 10); exit}')"
   fi
+
+  local candidates=(
+    "${ROOT_DIR}/../loopwright/packages/github-app/dist/index.js"
+  )
+  local glob_cand
+  for glob_cand in "${ROOT_DIR}/../../github.com"/*/loopwright/packages/github-app/dist/index.js; do
+    [[ -e "${glob_cand}" ]] && candidates+=("${glob_cand}")
+  done
+  if [[ -n "${main_repo_root}" ]]; then
+    candidates+=("${main_repo_root}/../loopwright/packages/github-app/dist/index.js")
+    for glob_cand in "${main_repo_root}/../../github.com"/*/loopwright/packages/github-app/dist/index.js; do
+      [[ -e "${glob_cand}" ]] && candidates+=("${glob_cand}")
+    done
+  fi
+
+  local cand
+  for cand in "${candidates[@]}"; do
+    if [[ -r "${cand}" ]]; then
+      printf '%s\n' "${cand}"
+      return 0
+    fi
+  done
   return 1
 }
 
@@ -281,21 +303,25 @@ run_common_tests() {
   local saved_goroot="${scratch}/saved-go/root"
   local saved_hugo_dir="${scratch}/saved-hugo/bin"
   local saved_node_dir="${scratch}/saved-node/bin"
+  local saved_uv_dir="${scratch}/saved-uv/bin"
   local stage_tc="${scratch}/stage-tc"
   local cand_tc="${scratch}/cand-tc"
-  mkdir -p "${shadow_bin}" "${saved_go_dir}" "${saved_goroot}" "${saved_hugo_dir}" "${saved_node_dir}" "${stage_tc}/baseline" "${cand_tc}"
+  mkdir -p "${shadow_bin}" "${saved_go_dir}" "${saved_goroot}" "${saved_hugo_dir}" "${saved_node_dir}" "${saved_uv_dir}" "${stage_tc}/baseline" "${cand_tc}"
   printf '#!/bin/sh\necho shadow-go\n' > "${shadow_bin}/go"
   printf '#!/bin/sh\necho saved-go\n' > "${saved_go_dir}/go"
   printf '#!/bin/sh\necho saved-hugo\n' > "${saved_hugo_dir}/hugo"
   printf '#!/bin/sh\necho saved-node\n' > "${saved_node_dir}/node"
-  chmod +x "${shadow_bin}/go" "${saved_go_dir}/go" "${saved_hugo_dir}/hugo" "${saved_node_dir}/node"
+  printf '#!/bin/sh\necho saved-uv\n' > "${saved_uv_dir}/uv"
+  chmod +x "${shadow_bin}/go" "${saved_go_dir}/go" "${saved_hugo_dir}/hugo" "${saved_node_dir}/node" "${saved_uv_dir}/uv"
   cat > "${stage_tc}/toolchain.env" <<EOF
 AUTOSYNC_SAVED_GO_BIN_DIR=${saved_go_dir}
 AUTOSYNC_SAVED_GOROOT=${saved_goroot}
 AUTOSYNC_SAVED_HUGO_BIN_DIR=${saved_hugo_dir}
 AUTOSYNC_SAVED_NODE_BIN_DIR=${saved_node_dir}
+AUTOSYNC_SAVED_UV_BIN_DIR=${saved_uv_dir}
 EOF
-  mkdir -p "${stage_tc}/.sbin/protoc/bin" "${stage_tc}/go-cache" "${stage_tc}/go-mod" "${stage_tc}/deps-cache"
+  mkdir -p "${stage_tc}/.sbin/protoc/bin" "${stage_tc}/go-cache" "${stage_tc}/go-mod" "${stage_tc}/deps-cache" "${stage_tc}/uv-cache"
+  printf 'cached\n' > "${stage_tc}/uv-cache/sentinel"
   printf '#!/bin/sh\necho protoc-ok\n' > "${stage_tc}/.sbin/protoc/bin/protoc"
   chmod +x "${stage_tc}/.sbin/protoc/bin/protoc"
 
@@ -308,12 +334,16 @@ EOF
       [[ "$(go)" == "saved-go" ]]
       [[ "$(hugo)" == "saved-hugo" ]]
       [[ "$(node)" == "saved-node" ]]
+      [[ "$(uv)" == "saved-uv" ]]
       [[ "$(protoc)" == "protoc-ok" ]]
       [[ "${GOROOT:-}" == "$4" ]]
+      [[ "${AUTOSYNC_IN_VALIDATOR:-}" == "true" ]]
+      [[ "${UV_CACHE_DIR:-}" == "$1/uv-cache" ]]
+      [[ "${UV_OFFLINE:-}" == "1" ]]
     ' _ "${stage_tc}" "${cand_tc}" "${checks_lib}" "${saved_goroot}"; then
-    pass "bootstrap_env toolchain.env prepends saved toolchain and protoc before system PATH"
+    pass "bootstrap_env toolchain.env prepends saved toolchain/uv/protoc and sets offline uv cache"
   else
-    fail "bootstrap_env toolchain.env prepends saved toolchain and protoc before system PATH"
+    fail "bootstrap_env toolchain.env prepends saved toolchain/uv/protoc and sets offline uv cache"
   fi
 
   local ro_stage="${scratch}/ro-stage"
@@ -622,6 +652,74 @@ PY
   assert_fails "assert_values_yaml_only_model_transfer_images operator/subchart image edit fails" \
     assert_values_yaml_only_model_transfer_images "${vy_base}" "${vy_cand}"
 
+  # 3d-2. values.yaml chart sections guard (M-1).
+  cp "${vy_base}" "${vy_cand}"
+  assert_ok "assert_values_yaml_only_chart_sections unchanged passes" \
+    assert_values_yaml_only_chart_sections "${vy_base}" "${vy_cand}"
+
+  python3 - "${vy_base}" "${vy_cand}" <<'PY'
+import sys
+with open(sys.argv[1], "r", encoding="utf-8") as f:
+    txt = f.read()
+out = txt.replace(
+    "# -- [Kueue](https://kueue.sigs.k8s.io) subchart (chart 0.18.11).",
+    "# -- [Kueue](https://kueue.sigs.k8s.io) subchart (chart 0.18.12).",
+    1,
+)
+out = out.replace(
+    "      repository: docker.io/gpustack/mirrored-csi-node-driver-registrar\n      tag: v2.17.0",
+    "      repository: docker.io/gpustack/mirrored-csi-node-driver-registrar-next\n      tag: v2.18.0",
+    1,
+)
+out = out.replace(
+    "  repository: docker.io/gpustack/mirrored-nvidia-topograph",
+    "  repository: docker.io/gpustack/mirrored-nvidia-topograph-next",
+    1,
+)
+assert out != txt
+with open(sys.argv[2], "w", encoding="utf-8") as f:
+    f.write(out)
+PY
+  assert_ok "assert_values_yaml_only_chart_sections owned subcharts and modelManager.registrar.image edits pass" \
+    assert_values_yaml_only_chart_sections "${vy_base}" "${vy_cand}"
+
+  sed 's|nvidia: gpustack/model-transfer:v0.1.0-cuda12.9|nvidia: gpustack/model-transfer:v0.2.0-cuda12.9|' "${vy_base}" > "${vy_cand}"
+  assert_fails "assert_values_yaml_only_chart_sections modelTransfer.images edit fails" \
+    assert_values_yaml_only_chart_sections "${vy_base}" "${vy_cand}"
+
+  sed 's|cleanupDrainBudgetSeconds: 210|cleanupDrainBudgetSeconds: 220|' "${vy_base}" > "${vy_cand}"
+  assert_fails "assert_values_yaml_only_chart_sections unowned top-level key edit fails" \
+    assert_values_yaml_only_chart_sections "${vy_base}" "${vy_cand}"
+
+  sed 's|rootPath: /var/lib/gpustack/models|rootPath: /var/lib/gpustack/models-v2|' "${vy_base}" > "${vy_cand}"
+  assert_fails "assert_values_yaml_only_chart_sections modelManager.rootPath edit fails" \
+    assert_values_yaml_only_chart_sections "${vy_base}" "${vy_cand}"
+
+  sed 's|# -- Migration hook Jobs\.|# -- Migration hook Jobs edited.|' "${vy_base}" > "${vy_cand}"
+  assert_fails "assert_values_yaml_only_chart_sections unowned comment edit fails" \
+    assert_values_yaml_only_chart_sections "${vy_base}" "${vy_cand}"
+
+  python3 - "${vy_base}" "${vy_cand}" <<'PY'
+import sys
+with open(sys.argv[1], "r", encoding="utf-8") as f:
+    txt = f.read()
+out = txt.replace(
+    "      tag: v2.17.0\n",
+    "      tag: v2.17.0\n      pullPolicy: Always\n",
+    1,
+)
+assert out != txt
+with open(sys.argv[2], "w", encoding="utf-8") as f:
+    f.write(out)
+PY
+  assert_fails "assert_values_yaml_only_chart_sections extra key under modelManager.registrar.image fails" \
+    assert_values_yaml_only_chart_sections "${vy_base}" "${vy_cand}"
+
+  cp "${vy_base}" "${vy_cand}"
+  printf '\nextraUnownedKey: true\n' >> "${vy_cand}"
+  assert_fails "assert_values_yaml_only_chart_sections adding unowned top-level key fails" \
+    assert_values_yaml_only_chart_sections "${vy_base}" "${vy_cand}"
+
   # 3e. hack/deps.sh section guard.
   local ds_base="${base_dir}/deps.sh"
   local ds_cand="${cand_dir}/deps.sh"
@@ -808,7 +906,7 @@ JSON
 
   if (
     AUTOSYNC_SKIP_GO_MOD_DOWNLOAD=true autosync::preflight::warm_caches "${ext_stage}" --sbin --go --tools shellcheck &&
-    [[ -e "${ext_stage}/.sbin" && -e "${ext_stage}/go-cache" && -e "${ext_stage}/go-mod" && -e "${ext_stage}/deps-cache" ]] &&
+    [[ -e "${ext_stage}/.sbin" && -e "${ext_stage}/go-cache" && -e "${ext_stage}/go-mod" && -e "${ext_stage}/deps-cache" && -e "${ext_stage}/uv-cache" ]] &&
     [[ -f "${ext_stage}/toolchain.env" && -x "${ext_stage}/.sbin/shellcheck" ]] &&
     grep -q '^AUTOSYNC_SAVED_GO_BIN_DIR=' "${ext_stage}/toolchain.env" &&
     grep -q '^AUTOSYNC_SAVED_GOROOT=' "${ext_stage}/toolchain.env"
@@ -1799,7 +1897,7 @@ JS
     echo "INFO: skipping domain ${domain} Loopwright compiler check (LOOPWRIGHT_DIST_JS unset or unreadable)"
   fi
 
-  if [[ -f "${selftest}" ]]; then
+  if [[ "${MODE}" != "fast" && -f "${selftest}" ]]; then
     if bash "${selftest}" "${root_dir}"; then
       pass "domain ${domain}: selftest_${domain_under}.sh"
     else
@@ -1920,6 +2018,12 @@ run_static_checks
 case "${MODE}" in
   all)
     run_common_tests
+    run_domain_discovery
+    if [[ -f "${ROOT_DIR}/.github/workflows/auto-sync.yml" ]]; then
+      validate_workflow
+    fi
+    ;;
+  fast)
     run_domain_discovery
     if [[ -f "${ROOT_DIR}/.github/workflows/auto-sync.yml" ]]; then
       validate_workflow

@@ -380,6 +380,7 @@ function gpustack::helm::verify_images() {
 # gpustack::helm::lint lints the given chart with chart-testing in a container.
 function gpustack::helm::lint() {
   local target="$1"
+  local rel_target="${target#"${ROOT_DIR}/"}"
 
   local chart_repos
   chart_repos=$(gpustack::helm::ct::chart_repos "${target}")
@@ -387,15 +388,28 @@ function gpustack::helm::lint() {
   gpustack::log::info "linting ${target} ..."
   docker run \
     --rm \
+    --user "$(id -u):$(id -g)" \
+    -e HOME=/tmp \
     --network host \
-    --volume "${ROOT_DIR}:/workspace" \
-    --workdir /workspace \
+    --volume "${ROOT_DIR}:/workspace:ro" \
+    --workdir /tmp \
+    --entrypoint /bin/sh \
     "quay.io/helmpack/chart-testing:${chart_testing_version}" \
-    ct lint \
-    --charts "${target#"${ROOT_DIR}/"}" \
-    --chart-repos "${chart_repos}" \
-    --validate-maintainers=false \
-    --check-version-increment=false
+    -c '
+      set -eu
+      rel_target="$1"
+      chart_repos="$2"
+      work="$(mktemp -d /tmp/ct-lint.XXXXXX)"
+      trap '\''rm -rf "${work}"'\'' EXIT
+      mkdir -p "${work}/$(dirname "${rel_target}")"
+      cp -R "/workspace/${rel_target}" "${work}/${rel_target}"
+      cd "${work}"
+      ct lint \
+        --charts "${rel_target}" \
+        --chart-repos "${chart_repos}" \
+        --validate-maintainers=false \
+        --check-version-increment=false
+    ' _ "${rel_target}" "${chart_repos}"
 }
 
 # gpustack::helm::test installs the given chart onto the current cluster with

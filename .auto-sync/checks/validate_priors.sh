@@ -164,6 +164,48 @@ if report_path:
                 )
 PY
 
+# 2b. Verify .auto-sync/proposals/priors.json schema and availability SHA parity.
+CAND_PROPOSAL="${AUTOSYNC_CANDIDATE_ROOT}/.auto-sync/proposals/priors.json"
+python3 - "${CAND_PROPOSAL}" "${records_md}" <<'PY'
+import json
+import os
+import re
+import sys
+
+prop_p, records_p = sys.argv[1:3]
+if not os.path.isfile(prop_p):
+    raise SystemExit(f"FAIL: missing proposal artifact: {prop_p}")
+with open(prop_p, "r", encoding="utf-8") as f:
+    prop = json.load(f)
+
+if not isinstance(prop, dict) or prop.get("schema_version") != 1:
+    raise SystemExit("FAIL: proposals/priors.json must have schema_version == 1")
+if not isinstance(prop.get("summary"), str) or not prop["summary"].strip():
+    raise SystemExit("FAIL: proposals/priors.json summary must be a non-empty string")
+if not isinstance(prop.get("subscriptions"), list):
+    raise SystemExit("FAIL: proposals/priors.json subscriptions must be a JSON array")
+versions = prop.get("versions")
+if not isinstance(versions, dict):
+    raise SystemExit("FAIL: proposals/priors.json versions must be a JSON object")
+
+if "inferencex-repo" not in versions or not isinstance(versions["inferencex-repo"], str):
+    raise SystemExit("FAIL: proposals/priors.json versions.inferencex-repo must be a string")
+
+avail_v = versions.get("inferencex-availability")
+if not isinstance(avail_v, str) or not avail_v.strip():
+    raise SystemExit("FAIL: proposals/priors.json versions.inferencex-availability must be a non-empty string")
+
+with open(records_p, "r", encoding="utf-8") as f:
+    records_txt = f.read()
+sec_m = re.search(r"## Active Sources\b(.*?)(?:\n## |\Z)", records_txt, re.DOTALL)
+if sec_m:
+    avail_m = re.search(r"SHA-256\s+`([0-9a-f]{64})`", sec_m.group(1))
+    if avail_m and avail_v != avail_m.group(1):
+        raise SystemExit(
+            f"FAIL: proposals/priors.json versions.inferencex-availability ({avail_v}) != records.md ({avail_m.group(1)})"
+        )
+PY
+
 if [[ "${AUTOSYNC_FAST_SELFTEST:-false}" == "true" ]]; then
   exit 0
 fi
