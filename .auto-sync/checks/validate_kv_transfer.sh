@@ -46,66 +46,16 @@ assert_values_yaml_only_model_transfer_images \
   "${BASELINE_DIR}/deploy/gpustack-operator/chart/values.yaml" \
   "${AUTOSYNC_CANDIDATE_ROOT}/deploy/gpustack-operator/chart/values.yaml"
 
-read_dockerfile_arg_py() {
-  cat <<'PY'
-import re
-
-
-def read_dockerfile_arg(txt: str, name: str, label: str = "Dockerfile") -> str:
-    line_m = re.search(rf"^ARG {re.escape(name)}=(.*)$", txt, re.MULTILINE)
-    if not line_m:
-        raise SystemExit(f"FAIL: missing ARG {name} in {label}")
-    raw_rhs = line_m.group(1).rstrip("\r\n")
-
-    in_sq = False
-    in_dq = False
-    cleaned_chars: list[str] = []
-    for ch in raw_rhs:
-        if ch == "'" and not in_dq:
-            in_sq = not in_sq
-        elif ch == '"' and not in_sq:
-            in_dq = not in_dq
-        elif ch == "#" and not in_sq and not in_dq:
-            break
-        cleaned_chars.append(ch)
-    if in_sq or in_dq:
-        raise SystemExit(f"FAIL: malformed ARG {name} in {label}")
-
-    rhs = "".join(cleaned_chars).rstrip()
-    if rhs.endswith("\\"):
-        rhs = rhs[:-1].rstrip()
-
-    m = re.match(
-        r'^(?:"([^"\\]*)"|\'([^\']*)\'|([^\s#"\\\']+))(?:\s+(?:[A-Za-z_][A-Za-z0-9_]*=.*)?)?$',
-        rhs,
-    )
-    if not m:
-        raise SystemExit(f"FAIL: malformed ARG {name} in {label}")
-    val = (
-        m.group(1)
-        if m.group(1) is not None
-        else (m.group(2) if m.group(2) is not None else m.group(3))
-    ).strip()
-    if not val:
-        raise SystemExit(f"FAIL: malformed ARG {name} in {label}")
-    return val
-PY
-}
-
 read_dockerfile_arg_from_file() {
   local df_path="$1"
   local arg_name="$2"
   local required="${3:-true}"
-  { read_dockerfile_arg_py; cat <<'PY'; } | python3 - "${df_path}" "${arg_name}" "${required}"
-import sys
-
-df_path, arg_name, required = sys.argv[1:4]
-with open(df_path, "r", encoding="utf-8") as f:
-    txt = f.read()
-if required != "true" and not re.search(rf"^ARG {re.escape(arg_name)}=", txt, re.MULTILINE):
-    sys.exit(0)
-print(read_dockerfile_arg(txt, arg_name, df_path))
-PY
+  local args=()
+  if [[ "${required}" != "true" ]]; then
+    args+=("--optional")
+  fi
+  args+=("${df_path}" "${arg_name}" "${df_path}")
+  python3 "${SCRIPT_DIR}/dockerfile_arg.py" "${args[@]}"
 }
 
 # 2. Five-block MOONCAKE_VERSION case guard in pack/mirrored-mooncake/Dockerfile.
@@ -115,11 +65,16 @@ if [[ ! -f "${MOONCAKE_DF}" ]]; then
   exit 1
 fi
 
-{ read_dockerfile_arg_py; cat <<'PY'; } | python3 - "${MOONCAKE_DF}"
+python3 - "${MOONCAKE_DF}" "${AUTOSYNC_CANDIDATE_ROOT}" <<'PY'
 import fnmatch
+import os
+import re
 import sys
 
-df_path = sys.argv[1]
+df_path, cand_root = sys.argv[1:3]
+sys.path.insert(0, os.path.join(cand_root, ".auto-sync", "checks"))
+from dockerfile_arg import read_dockerfile_arg
+
 with open(df_path, "r", encoding="utf-8") as f:
     text = f.read()
 
@@ -332,13 +287,16 @@ if [[ ! -f "${BASE_MT_DF}" || ! -f "${MT_DF}" ]]; then
   exit 1
 fi
 
-{ read_dockerfile_arg_py; cat <<'PY'; } | python3 - "${BASE_MT_DF}" "${MT_DF}" "${STAGE_DIR}"
+python3 - "${BASE_MT_DF}" "${MT_DF}" "${STAGE_DIR}" "${AUTOSYNC_CANDIDATE_ROOT}" <<'PY'
 import json
 import os
+import re
 import subprocess
 import sys
 
-base_df_p, cand_df_p, stage_dir = sys.argv[1:4]
+base_df_p, cand_df_p, stage_dir, cand_root = sys.argv[1:5]
+sys.path.insert(0, os.path.join(cand_root, ".auto-sync", "checks"))
+from dockerfile_arg import read_dockerfile_arg
 
 
 def read_text(p: str) -> str:
@@ -615,12 +573,15 @@ fi
 
 # 6. Proposal schema and version parity (.auto-sync/proposals/kv-transfer.json).
 CAND_PROPOSAL="${AUTOSYNC_CANDIDATE_ROOT}/.auto-sync/proposals/kv-transfer.json"
-{ read_dockerfile_arg_py; cat <<'PY'; } | python3 - "${CAND_PROPOSAL}" "${MOONCAKE_DF}" "${MT_DF}" "${CAND_MX_DF}" "${IMAGES_CHANGED}"
+python3 - "${CAND_PROPOSAL}" "${MOONCAKE_DF}" "${MT_DF}" "${CAND_MX_DF}" "${IMAGES_CHANGED}" "${AUTOSYNC_CANDIDATE_ROOT}" <<'PY'
 import json
 import os
+import re
 import sys
 
-prop_p, mc_df_p, mt_df_p, mx_df_p, images_changed_str = sys.argv[1:6]
+prop_p, mc_df_p, mt_df_p, mx_df_p, images_changed_str, cand_root = sys.argv[1:7]
+sys.path.insert(0, os.path.join(cand_root, ".auto-sync", "checks"))
+from dockerfile_arg import read_dockerfile_arg
 if not os.path.isfile(prop_p):
     raise SystemExit(f"FAIL: missing proposal artifact: {prop_p}")
 with open(prop_p, "r", encoding="utf-8") as f:

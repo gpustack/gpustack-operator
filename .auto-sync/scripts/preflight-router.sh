@@ -44,51 +44,13 @@ import subprocess
 import sys
 
 repo_root, stage_dir, fixture_dir, discovery_path, probe_list_path = sys.argv[1:6]
+sys.path.insert(0, os.path.join(repo_root, ".auto-sync", "checks"))
+from dockerfile_arg import read_dockerfile_arg
 
 
 def read_text(path: str) -> str:
     with open(path, "r", encoding="utf-8") as f:
         return f.read()
-
-
-def read_dockerfile_arg(txt: str, name: str, label: str = "Dockerfile") -> str:
-    line_m = re.search(rf"^ARG {re.escape(name)}=(.*)$", txt, re.MULTILINE)
-    if not line_m:
-        raise SystemExit(f"FAIL: missing ARG {name} in {label}")
-    raw_rhs = line_m.group(1).rstrip("\r\n")
-
-    in_sq = False
-    in_dq = False
-    cleaned_chars: list[str] = []
-    for ch in raw_rhs:
-        if ch == "'" and not in_dq:
-            in_sq = not in_sq
-        elif ch == '"' and not in_sq:
-            in_dq = not in_dq
-        elif ch == "#" and not in_sq and not in_dq:
-            break
-        cleaned_chars.append(ch)
-    if in_sq or in_dq:
-        raise SystemExit(f"FAIL: malformed ARG {name} in {label}")
-
-    rhs = "".join(cleaned_chars).rstrip()
-    if rhs.endswith("\\"):
-        rhs = rhs[:-1].rstrip()
-
-    m = re.match(
-        r'^(?:"([^"\\]*)"|\'([^\']*)\'|([^\s#"\\\']+))(?:\s+(?:[A-Za-z_][A-Za-z0-9_]*=.*)?)?$',
-        rhs,
-    )
-    if not m:
-        raise SystemExit(f"FAIL: malformed ARG {name} in {label}")
-    val = (
-        m.group(1)
-        if m.group(1) is not None
-        else (m.group(2) if m.group(2) is not None else m.group(3))
-    ).strip()
-    if not val:
-        raise SystemExit(f"FAIL: malformed ARG {name} in {label}")
-    return val
 
 
 def extract_value_go_image(text: str, var_name: str) -> str:

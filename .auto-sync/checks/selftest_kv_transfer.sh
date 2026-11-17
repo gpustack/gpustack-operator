@@ -86,6 +86,7 @@ mkdir -p "${FAKE_REPO}/.auto-sync/scripts" "${FAKE_REPO}/.auto-sync/checks" "${F
 cp "${ROOT_DIR}/.auto-sync/scripts/lib-preflight.sh" "${FAKE_REPO}/.auto-sync/scripts/lib-preflight.sh"
 cp "${PREFLIGHT_SCRIPT}" "${FAKE_REPO}/.auto-sync/scripts/preflight-kv-transfer.sh"
 cp "${ROOT_DIR}/.auto-sync/checks/lib.sh" "${FAKE_REPO}/.auto-sync/checks/lib.sh"
+cp "${ROOT_DIR}/.auto-sync/checks/dockerfile_arg.py" "${FAKE_REPO}/.auto-sync/checks/dockerfile_arg.py"
 cp "${VALIDATE_SCRIPT}" "${FAKE_REPO}/.auto-sync/checks/validate_kv_transfer.sh"
 if [[ -f "${ROOT_DIR}/.auto-sync/proposals/kv-transfer.json" ]]; then
   cp "${ROOT_DIR}/.auto-sync/proposals/kv-transfer.json" "${FAKE_REPO}/.auto-sync/proposals/kv-transfer.json"
@@ -706,6 +707,7 @@ make_gitless_cand() {
     "${CAND_DIR}/pack/model-transfer/patches/hixl" \
     "${CAND_DIR}/pack/mirrored-modelexpress-server"
   cp "${ROOT_DIR}/.auto-sync/checks/lib.sh" "${CAND_DIR}/.auto-sync/checks/lib.sh"
+  cp "${ROOT_DIR}/.auto-sync/checks/dockerfile_arg.py" "${CAND_DIR}/.auto-sync/checks/dockerfile_arg.py"
   cp "${VALIDATE_SCRIPT}" "${CAND_DIR}/.auto-sync/checks/validate_kv_transfer.sh"
   cp "${ROOT_DIR}/.auto-sync/proposals/kv-transfer.json" "${CAND_DIR}/.auto-sync/proposals/kv-transfer.json"
   cp "${VAL_STAGE}/baseline/pkg/worker/settings/value.go" "${CAND_DIR}/pkg/worker/settings/value.go"
@@ -963,6 +965,65 @@ if ! bad_quote_err="$(run_validate 2>&1)" && \
   pass "validate_kv_transfer fails closed on unmatched quote in ARG MOONCAKE_VERSION"
 else
   fail "validate_kv_transfer fails closed on unmatched quote in ARG MOONCAKE_VERSION (${bad_quote_err})"
+fi
+
+# 6. Unit tests for canonical .auto-sync/checks/dockerfile_arg.py parser and CLI.
+if python3 - "${ROOT_DIR}/.auto-sync/checks" "${SCRATCH}" <<'PY'
+import os
+import subprocess
+import sys
+
+checks_dir, scratch = sys.argv[1:3]
+sys.path.insert(0, checks_dir)
+from dockerfile_arg import read_dockerfile_arg
+
+valid_cases = [
+    ("ARG FOO=0.3.14\n", "0.3.14"),
+    ('ARG FOO="0.3.14"\n', "0.3.14"),
+    ("ARG FOO='0.3.14'\n", "0.3.14"),
+    ("ARG FOO=0.3.14   # trailing comment\n", "0.3.14"),
+    ('ARG FOO="a\\"b" # comment\n', 'a"b'),
+    ("  ARG   FOO=0.3.14\n", "0.3.14"),
+]
+for txt, expected in valid_cases:
+    got = read_dockerfile_arg(txt, "FOO", "unit-test")
+    assert got == expected, f"for {txt!r}: got {got!r}, expected {expected!r}"
+
+invalid_cases = [
+    ('ARG FOO="0.3.14\n', "malformed ARG FOO"),
+    ("ARG FOO='0.3.14\n", "malformed ARG FOO"),
+    ("ARG FOO=0.3.14#bad\n", "unquoted '#'"),
+    ("ARG FOO=0.3.14 \\\n", "multi-line line continuation"),
+    ("ARG FOO=0.3.14 \\   \n", "multi-line line continuation"),
+    ("ARG FOO=0.3.14 \\ # comment\n", "multi-line line continuation"),
+    ("ARG FOO=0.3.14 BAR=1\n", "malformed ARG FOO"),
+    ("ARG FOO=\n", "malformed ARG FOO"),
+    ('ARG FOO=""\n', "malformed ARG FOO"),
+    ("ARG FOO\n", "missing ARG FOO"),
+]
+for txt, err_substr in invalid_cases:
+    try:
+        got = read_dockerfile_arg(txt, "FOO", "unit-test")
+    except SystemExit as exc:
+        assert err_substr in str(exc), f"for {txt!r}: unexpected error {exc!r} (expected {err_substr!r})"
+    else:
+        raise AssertionError(f"for {txt!r}: expected failure, got {got!r}")
+
+cli_df = os.path.join(scratch, "cli-test.Dockerfile")
+with open(cli_df, "w", encoding="utf-8") as f:
+    f.write('ARG FOO="a\\"b" # comment\n')
+
+script = os.path.join(checks_dir, "dockerfile_arg.py")
+res = subprocess.run([sys.executable, script, cli_df, "FOO", "cli-df"], capture_output=True, text=True)
+assert res.returncode == 0 and res.stdout.strip() == 'a"b', (res.returncode, res.stdout, res.stderr)
+
+opt_res = subprocess.run([sys.executable, script, "--optional", cli_df, "MISSING", "cli-df"], capture_output=True, text=True)
+assert opt_res.returncode == 0 and opt_res.stdout == "", (opt_res.returncode, opt_res.stdout, opt_res.stderr)
+PY
+then
+  pass "dockerfile_arg.py parses valid/quoted/escaped ARGs and fails closed on malformed inputs"
+else
+  fail "dockerfile_arg.py parses valid/quoted/escaped ARGs and fails closed on malformed inputs"
 fi
 
 echo

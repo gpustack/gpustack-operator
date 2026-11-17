@@ -88,6 +88,7 @@ mkdir -p "${FAKE_REPO}/.auto-sync/scripts" "${FAKE_REPO}/.auto-sync/checks" "${F
 cp "${ROOT_DIR}/.auto-sync/scripts/lib-preflight.sh" "${FAKE_REPO}/.auto-sync/scripts/lib-preflight.sh"
 cp "${PREFLIGHT_SCRIPT}" "${FAKE_REPO}/.auto-sync/scripts/preflight-router.sh"
 cp "${ROOT_DIR}/.auto-sync/checks/lib.sh" "${FAKE_REPO}/.auto-sync/checks/lib.sh"
+cp "${ROOT_DIR}/.auto-sync/checks/dockerfile_arg.py" "${FAKE_REPO}/.auto-sync/checks/dockerfile_arg.py"
 cp "${VALIDATE_SCRIPT}" "${FAKE_REPO}/.auto-sync/checks/validate_router.sh"
 if [[ -f "${ROOT_DIR}/.auto-sync/proposals/router.json" ]]; then
   cp "${ROOT_DIR}/.auto-sync/proposals/router.json" "${FAKE_REPO}/.auto-sync/proposals/router.json"

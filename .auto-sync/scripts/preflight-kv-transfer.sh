@@ -47,51 +47,13 @@ import sys
 import urllib.request
 
 repo_root, stage_dir, fixture_dir, discovery_path, probe_list_path = sys.argv[1:6]
+sys.path.insert(0, os.path.join(repo_root, ".auto-sync", "checks"))
+from dockerfile_arg import has_dockerfile_arg, read_dockerfile_arg
 
 
 def read_text(path: str) -> str:
     with open(path, "r", encoding="utf-8") as f:
         return f.read()
-
-
-def read_dockerfile_arg(txt: str, name: str, label: str = "Dockerfile") -> str:
-    line_m = re.search(rf"^ARG {re.escape(name)}=(.*)$", txt, re.MULTILINE)
-    if not line_m:
-        raise SystemExit(f"FAIL: missing ARG {name} in {label}")
-    raw_rhs = line_m.group(1).rstrip("\r\n")
-
-    in_sq = False
-    in_dq = False
-    cleaned_chars: list[str] = []
-    for ch in raw_rhs:
-        if ch == "'" and not in_dq:
-            in_sq = not in_sq
-        elif ch == '"' and not in_sq:
-            in_dq = not in_dq
-        elif ch == "#" and not in_sq and not in_dq:
-            break
-        cleaned_chars.append(ch)
-    if in_sq or in_dq:
-        raise SystemExit(f"FAIL: malformed ARG {name} in {label}")
-
-    rhs = "".join(cleaned_chars).rstrip()
-    if rhs.endswith("\\"):
-        rhs = rhs[:-1].rstrip()
-
-    m = re.match(
-        r'^(?:"([^"\\]*)"|\'([^\']*)\'|([^\s#"\\\']+))(?:\s+(?:[A-Za-z_][A-Za-z0-9_]*=.*)?)?$',
-        rhs,
-    )
-    if not m:
-        raise SystemExit(f"FAIL: malformed ARG {name} in {label}")
-    val = (
-        m.group(1)
-        if m.group(1) is not None
-        else (m.group(2) if m.group(2) is not None else m.group(3))
-    ).strip()
-    if not val:
-        raise SystemExit(f"FAIL: malformed ARG {name} in {label}")
-    return val
 
 
 def extract_value_go_image(text: str, var_name: str) -> str:
@@ -313,6 +275,7 @@ def sync_git_repo(url: str, dst: str, pin_commit: str = "") -> str:
                 if is_transport_err:
                     raise SystemExit(f"{context}: {err_txt}")
 
+            max_attempted_depth = 1
             fetch_res = subprocess.run(
                 ["git", "-C", dst, "fetch", "--depth", "1", "origin", pin_commit],
                 stdout=subprocess.DEVNULL,
@@ -327,6 +290,7 @@ def sync_git_repo(url: str, dst: str, pin_commit: str = "") -> str:
                 )
 
                 for depth in (64, 256, 1024):
+                    max_attempted_depth = depth
                     f_res = subprocess.run(
                         ["git", "-C", dst, "fetch", "--depth", str(depth), "origin"],
                         env=git_env,
@@ -338,7 +302,7 @@ def sync_git_repo(url: str, dst: str, pin_commit: str = "") -> str:
                             f_res.stderr or "",
                             f"FAIL: shallow git fetch (depth {depth}) from {url} failed with transport error",
                         )
-                        break
+                        continue
                     if (
                         subprocess.run(
                             ["git", "-C", dst, "cat-file", "-e", f"{pin_commit}^{{commit}}"],
@@ -400,7 +364,7 @@ def sync_git_repo(url: str, dst: str, pin_commit: str = "") -> str:
                     else "set AUTOSYNC_ALLOW_UNSHALLOW=true to permit full history fetch"
                 )
                 raise SystemExit(
-                    f"FAIL: pinned commit {pin_commit} not reachable in {url} after bounded shallow fetch (depth 1024); {hint}"
+                    f"FAIL: pinned commit {pin_commit} not reachable in {url} after bounded shallow fetch (depth {max_attempted_depth}); {hint}"
                 )
     return head_sha
 
@@ -509,7 +473,7 @@ runner_patch_match = True
 runner_cann_df = os.path.join(runner_stage, "pack/cann/Dockerfile.vllm")
 if os.path.isfile(runner_cann_df):
     runner_cann_txt = read_text(runner_cann_df)
-    if re.search(r"^ARG VLLM_HIXL_COMMIT=", runner_cann_txt, re.MULTILINE):
+    if has_dockerfile_arg(runner_cann_txt, "VLLM_HIXL_COMMIT"):
         runner_hixl_commit = read_dockerfile_arg(runner_cann_txt, "VLLM_HIXL_COMMIT", runner_cann_df)
 runner_patch_path = os.path.join(runner_stage, "pack/cann/patches/hixl/001_channel_generation.patch")
 if os.path.isfile(runner_patch_path):
