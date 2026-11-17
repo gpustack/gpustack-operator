@@ -1418,7 +1418,7 @@ assert_dockerfile_only_args() {
       Acceptance: `.auto-sync/checks/lib.sh` provides sanitized `command.v1` `PATH`/`GOCACHE`/`GOMODCACHE`/`.sbin` bootstrap, ephemeral git-index initialization, and `diff -U0` shared-file guards (`assert_dockerfile_only_args`, `assert_value_go_only_keys`, `assert_deps_sh_only_section`) that fail closed in gitless directories; `write_models_json.py` resolves org LLM gateway vars; `hack/check/autosync-selftest.sh` proves both positive and negative guard cases and auto-discovers domain manifests, scripts, validators, and optional `.auto-sync/checks/selftest_*.sh` suites via subcommands (`all`, `common`, `<domain>`, `workflow`).
       Verify: `bash hack/check/autosync-selftest.sh && bash hack/check/symbols.sh`
 
-- [ ] **T4 · Domain 4 tracer bullet: `priors-sync` (InferenceX capacity priors)**
+- [x] **T4 · Domain 4 tracer bullet: `priors-sync` (InferenceX capacity priors)**
       Blocked by: T3
       Owns: `.auto-sync/priors-taskpack.yaml`, `.auto-sync/instructions/priors.md`, `.auto-sync/scripts/preflight-priors.sh`, `.auto-sync/checks/validate_priors.sh`, `.auto-sync/checks/selftest_priors.sh`, `.auto-sync/proposals/priors.json`
       Acceptance: `priors-taskpack.yaml` passes `validateTaskpackManifest`; `preflight-priors.sh` stages InferenceX snapshots and `source_revision` catalog updates under `/tmp/gpustack-autosync-stage/priors`; `validate_priors.sh` verifies SHA-256 ledger parity, `go test ./gen/priors/... ./pkg/worker/scaling/...`, and `make lint docs` in a gitless candidate directory.
