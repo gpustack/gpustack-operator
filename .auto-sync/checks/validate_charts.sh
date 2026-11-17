@@ -404,13 +404,15 @@ fi
 
 RESTAGE_LIST_FILE="$(mktemp "${TMPDIR:-/tmp}/autosync-charts-restage.XXXXXXXX")"
 _CLEANUP_PATHS+=("${RESTAGE_LIST_FILE}")
-python3 - "${AUTOSYNC_STAGE_DIR:-}" "${CAND_DEPS}" "${GPUSTACK_DEPS_CACHE_DIR:-}" "${AUTOSYNC_VERIFY_RESTAGE:-false}" "${RESTAGE_LIST_FILE}" <<'PY'
+python3 - "${AUTOSYNC_STAGE_DIR:-}" "${CAND_DEPS}" "${GPUSTACK_DEPS_CACHE_DIR:-}" "${AUTOSYNC_VERIFY_RESTAGE:-false}" "${AUTOSYNC_SKIP_RESTAGE_CHECK:-false}" "${RESTAGE_LIST_FILE}" <<'PY'
+import hashlib
+import json
 import os
 import re
 import sys
 import urllib.parse
 
-stage_dir, cand_deps, cache_dir, verify_all, out_path = sys.argv[1:6]
+stage_dir, cand_deps, cache_dir, verify_all, skip_restage, out_path = sys.argv[1:7]
 
 
 def parse_entries(path: str) -> dict[str, tuple[str, str]]:
@@ -434,23 +436,59 @@ base_entries = {}
 if stage_dir and os.path.isfile(os.path.join(stage_dir, "baseline", "hack", "deps.sh")):
     base_entries = parse_entries(os.path.join(stage_dir, "baseline", "hack", "deps.sh"))
 
+expected_hashes: dict[str, tuple[str, str]] = {}
+if stage_dir:
+    for meta_name in ("charts-discovery.json", "charts-preflight-report.json"):
+        meta_path = os.path.join(stage_dir, meta_name)
+        if os.path.isfile(meta_path):
+            with open(meta_path, "r", encoding="utf-8") as f:
+                meta_doc = json.load(f) or {}
+            for cname, cinfo in (meta_doc.get("charts") or {}).items():
+                if isinstance(cinfo, dict):
+                    sha = str(cinfo.get("archiveSha256") or "").strip().lower()
+                    if sha:
+                        expected_hashes[cname] = (sha, str(cinfo.get("candidate_version") or ""))
+            break
+
 charts_cache = os.path.join(cache_dir, "charts") if cache_dir else ""
 to_restage = []
 
 for name, (url, ver) in cand_entries.items():
-    changed = (name not in base_entries) or (base_entries[name][1] != ver) or (base_entries[name][0] != url)
+    changed = bool(base_entries) and (
+        (name not in base_entries) or (base_entries[name][1] != ver) or (base_entries[name][0] != url)
+    )
     arc_name = os.path.basename(urllib.parse.urlsplit(url).path)
-    has_cached = False
+    cached_tgz_path = ""
     if charts_cache and os.path.isdir(charts_cache):
         for cand_tgz in (f"{name}-{ver}.tgz", arc_name):
-            if os.path.isfile(os.path.join(charts_cache, cand_tgz)):
-                has_cached = True
+            fp = os.path.join(charts_cache, cand_tgz)
+            if os.path.isfile(fp):
+                cached_tgz_path = fp
                 break
+    has_cached = bool(cached_tgz_path)
+    if has_cached and name in expected_hashes:
+        exp_sha, exp_ver = expected_hashes[name]
+        if not exp_ver or exp_ver == ver:
+            if not re.fullmatch(r"[0-9a-f]{64}", exp_sha):
+                raise SystemExit(f"FAIL: invalid archiveSha256 in staged charts metadata for {name}: {exp_sha!r}")
+            with open(cached_tgz_path, "rb") as f:
+                actual_sha = hashlib.sha256(f.read()).hexdigest()
+            if actual_sha != exp_sha:
+                raise SystemExit(
+                    f"FAIL: cached archive SHA-256 mismatch for {name} {ver} ({cached_tgz_path}): "
+                    f"expected {exp_sha}, got {actual_sha}"
+                )
     if verify_all == "true":
         if changed or not base_entries:
             to_restage.append(name)
-    elif changed and has_cached:
-        to_restage.append(name)
+    elif changed:
+        if has_cached:
+            to_restage.append(name)
+        elif skip_restage != "true":
+            raise SystemExit(
+                f"FAIL: chart {name} changed ({ver}) but cached archive is missing in {charts_cache or '<unset>'}; "
+                "cannot verify clean offline re-staging"
+            )
 
 with open(out_path, "w", encoding="utf-8") as f:
     for name in to_restage:
@@ -500,7 +538,12 @@ while IFS= read -r img_ref || [[ -n "${img_ref}" ]]; do
   [[ -n "${img_ref}" ]] && SUBCHART_IMAGES+=("${img_ref}")
 done <<<"${extracted_images_raw}"
 
-if [[ -n "${AUTOSYNC_STAGE_DIR:-}" ]]; then
+if [[ -z "${AUTOSYNC_STAGE_DIR:-}" ]]; then
+  if [[ "${AUTOSYNC_SKIP_IMAGE_CHECK:-false}" != "true" ]]; then
+    printf 'FAIL: AUTOSYNC_STAGE_DIR must be set for image publication verification (set AUTOSYNC_SKIP_IMAGE_CHECK=true only for local manual runs)\n' >&2
+    exit 1
+  fi
+else
   MANIFESTS_JSON="${AUTOSYNC_STAGE_DIR}/image-manifests.json"
   if [[ ! -f "${MANIFESTS_JSON}" ]]; then
     printf 'FAIL: AUTOSYNC_STAGE_DIR is set (%s) but image-manifests.json is missing\n' \

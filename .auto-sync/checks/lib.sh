@@ -1177,3 +1177,146 @@ if digests["amd64Digest"] == digests["arm64Digest"]:
     sys.exit(1)
 PY
 }
+
+# autosync::parse_dockerfile_arg_commit <dockerfile_path> <arg_name>
+# Extracts a single ARG <arg_name>=... assignment (stripping optional surrounding
+# single or double quotes) and verifies it is a 40-hex lowercase commit SHA.
+autosync::parse_dockerfile_arg_commit() {
+  local dockerfile_path="${1:?dockerfile path required}"
+  local arg_name="${2:?arg name required}"
+
+  python3 - "${dockerfile_path}" "${arg_name}" <<'PY'
+import re
+import sys
+
+path, arg_name = sys.argv[1:3]
+pat = re.compile(
+    rf'^ARG {re.escape(arg_name)}=(?:"([^"]*)"|\'([^\']*)\'|([^\s#]+))(?:\s+#.*)?\s*$'
+)
+matches = []
+with open(path, "r", encoding="utf-8") as f:
+    for raw in f:
+        m = pat.match(raw.rstrip("\r\n"))
+        if m:
+            val = m.group(1) if m.group(1) is not None else (m.group(2) if m.group(2) is not None else m.group(3))
+            matches.append(val.strip())
+
+if len(matches) != 1:
+    print(
+        f"FAIL: expected exactly 1 ARG {arg_name} in {path}, found {len(matches)}",
+        file=sys.stderr,
+    )
+    sys.exit(1)
+
+val = matches[0]
+if not re.fullmatch(r"[0-9a-f]{40}", val):
+    print(
+        f"FAIL: ARG {arg_name} must be a 40-hex lowercase SHA in {path}, got '{val}'",
+        file=sys.stderr,
+    )
+    sys.exit(1)
+print(val)
+PY
+}
+
+# autosync::count_priors_profiles <priors_yaml_path>
+# Counts aggregated and disaggregated profiles in priors.yaml structurally and prints
+# "<aggregated> <disaggregated>", failing closed on unknown or missing profile modes.
+autosync::count_priors_profiles() {
+  local priors_path="${1:?priors.yaml path required}"
+
+  python3 - "${priors_path}" <<'PY'
+import re
+import sys
+
+try:
+    import yaml as yaml_mod
+except ImportError:
+    yaml_mod = None
+
+priors_path = sys.argv[1]
+with open(priors_path, "r", encoding="utf-8") as f:
+    raw = f.read()
+
+agg = 0
+disagg = 0
+
+if yaml_mod is not None:
+    doc = yaml_mod.safe_load(raw)
+    if not isinstance(doc, dict) or not isinstance(doc.get("profiles"), list):
+        raise SystemExit(f"FAIL: {priors_path} missing top-level 'profiles' list")
+    for idx, entry in enumerate(doc["profiles"]):
+        if not isinstance(entry, dict):
+            raise SystemExit(f"FAIL: non-mapping profile entry #{idx} in {priors_path}")
+        mode = entry.get("mode")
+        if mode == "aggregated":
+            agg += 1
+        elif mode == "disaggregated":
+            disagg += 1
+        else:
+            raise SystemExit(f"FAIL: unexpected profile mode in {priors_path}: {mode!r}")
+else:
+    def count_modes_fallback(text: str) -> tuple[int, int]:
+        agg_c = 0
+        disagg_c = 0
+        in_profiles = False
+        item_indent = None
+        cur_item_has_mode = False
+        saw_profiles = False
+        mode_re = re.compile(r'^mode:\s*(?:"([^"]*)"|\'([^\']*)\'|([^\s#]+))(?:\s+#.*)?\s*$')
+
+        def check_mode(m_obj):
+            nonlocal agg_c, disagg_c, cur_item_has_mode
+            val = (
+                m_obj.group(1)
+                if m_obj.group(1) is not None
+                else (m_obj.group(2) if m_obj.group(2) is not None else m_obj.group(3))
+            ).strip()
+            if val == "aggregated":
+                agg_c += 1
+            elif val == "disaggregated":
+                disagg_c += 1
+            else:
+                raise SystemExit(f"FAIL: unexpected profile mode in {priors_path}: {val!r}")
+            cur_item_has_mode = True
+
+        for line in text.splitlines():
+            stripped = line.strip()
+            if not stripped or stripped.startswith("#"):
+                continue
+            indent = len(line) - len(line.lstrip(" "))
+            if not in_profiles:
+                if indent == 0 and re.match(r"^profiles:\s*(?:#.*)?$", stripped):
+                    in_profiles = True
+                    saw_profiles = True
+                continue
+            if indent == 0 and not stripped.startswith("-"):
+                break
+            if stripped.startswith("- ") or stripped == "-":
+                if item_indent is None:
+                    item_indent = indent
+                if indent == item_indent:
+                    if not cur_item_has_mode and (agg_c + disagg_c) > 0:
+                        raise SystemExit(f"FAIL: profile entry missing mode in {priors_path}")
+                    cur_item_has_mode = False
+                    after_dash = stripped[1:].strip()
+                    m = mode_re.match(after_dash)
+                    if m:
+                        check_mode(m)
+                continue
+            if item_indent is not None and indent == item_indent + 2:
+                m = mode_re.match(stripped)
+                if m:
+                    check_mode(m)
+
+        if not saw_profiles:
+            raise SystemExit(f"FAIL: {priors_path} missing top-level 'profiles' list")
+        if item_indent is not None and not cur_item_has_mode:
+            raise SystemExit(f"FAIL: profile entry missing mode in {priors_path}")
+        return agg_c, disagg_c
+
+    agg, disagg = count_modes_fallback(raw)
+
+print(f"{agg} {disagg}")
+PY
+}

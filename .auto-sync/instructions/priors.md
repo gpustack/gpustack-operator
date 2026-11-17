@@ -26,6 +26,10 @@ in the candidate tree already holds the merged catalog.
 
 1. Inspect `$AUTOSYNC_STAGE_DIR/priors-preflight-report.json` and compare `snapshots/` against the
    baseline catalog and `pkg/worker/scaling/priors/records.md`.
+   - If `digest_refresh_only` is `true`, upstream snapshot SHA-256 digests changed without altering
+     `priors.yaml` profiles (`source_revision == base_sha`); you MUST still refresh the SHA-256
+     digests and capture date in `pkg/worker/scaling/priors/records.md` (and
+     `.auto-sync/proposals/priors.json`) and settle as `completed` — never `no_change`.
 2. If upstream removed, deprecated, or superseded a sweep or model shape that `priors.yaml` still
    carries (check `removed_query_ids` or missing configurations in refreshed snapshots), retire the
    affected profiles explicitly with `go run ./gen/priors --retire ...`, re-run

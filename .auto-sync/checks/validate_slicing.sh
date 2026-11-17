@@ -45,37 +45,14 @@ if [[ -n "${AUTOSYNC_STAGE_DIR:-}" ]]; then
     "${base_dockerfile}" \
     "${cand_dockerfile}" \
     "LIB_(UBS_VIRT_ENPU|HAMI_CORE)_COMMIT"
+elif [[ "${AUTOSYNC_ALLOW_MISSING_STAGE_DIR:-false}" != "true" ]]; then
+  printf 'FAIL: AUTOSYNC_STAGE_DIR must be set (set AUTOSYNC_ALLOW_MISSING_STAGE_DIR=true only for minimal unit tests)\n' >&2
+  exit 1
 fi
 
 # 2. Validate 40-hex commit format in Dockerfile and parity with proposals/slicing.json.
-parse_dockerfile_commit() {
-  local dockerfile_path="${1:?dockerfile path required}"
-  local arg_name="${2:?arg name required}"
-  python3 - "${dockerfile_path}" "${arg_name}" <<'PY'
-import re
-import sys
-
-path, arg_name = sys.argv[1:3]
-pat = re.compile(rf'^ARG {re.escape(arg_name)}="([^"]*)"$')
-matches = []
-with open(path, "r", encoding="utf-8") as f:
-    for raw in f:
-        m = pat.match(raw.rstrip("\r\n"))
-        if m:
-            matches.append(m.group(1))
-if len(matches) != 1:
-    print(f"FAIL: expected exactly 1 ARG {arg_name} in {path}, found {len(matches)}", file=sys.stderr)
-    sys.exit(1)
-val = matches[0]
-if not re.fullmatch(r'[0-9a-f]{40}', val):
-    print(f"FAIL: ARG {arg_name} must be a 40-hex lowercase SHA in {path}, got '{val}'", file=sys.stderr)
-    sys.exit(1)
-print(val)
-PY
-}
-
-cand_hami_commit="$(parse_dockerfile_commit "${cand_dockerfile}" "LIB_HAMI_CORE_COMMIT")"
-cand_ubs_commit="$(parse_dockerfile_commit "${cand_dockerfile}" "LIB_UBS_VIRT_ENPU_COMMIT")"
+cand_hami_commit="$(autosync::parse_dockerfile_arg_commit "${cand_dockerfile}" "LIB_HAMI_CORE_COMMIT")"
+cand_ubs_commit="$(autosync::parse_dockerfile_arg_commit "${cand_dockerfile}" "LIB_UBS_VIRT_ENPU_COMMIT")"
 
 python3 - "${cand_proposal}" "${cand_hami_commit}" "${cand_ubs_commit}" <<'PY'
 import json
@@ -159,8 +136,13 @@ if (( ${#patch_files[@]} == 0 )); then
   exit 1
 fi
 
-if [[ -n "${AUTOSYNC_STAGE_DIR:-}" && -d "${AUTOSYNC_STAGE_DIR}/ubs-virt" ]]; then
+if [[ -n "${AUTOSYNC_STAGE_DIR:-}" ]]; then
   ubs_stage_repo="${AUTOSYNC_STAGE_DIR}/ubs-virt"
+  if [[ ! -d "${ubs_stage_repo}/.git" ]]; then
+    printf 'FAIL: AUTOSYNC_STAGE_DIR is set (%s) but staged ubs-virt git clone is missing: %s\n' \
+      "${AUTOSYNC_STAGE_DIR}" "${ubs_stage_repo}" >&2
+    exit 1
+  fi
   if ! git -C "${ubs_stage_repo}" cat-file -e "${cand_ubs_commit}^{commit}" 2>/dev/null; then
     printf 'FAIL: LIB_UBS_VIRT_ENPU_COMMIT %s not found in %s\n' \
       "${cand_ubs_commit}" "${ubs_stage_repo}" >&2
@@ -220,8 +202,8 @@ dir_differs() {
 }
 
 if [[ "${has_baseline}" == "true" ]]; then
-  base_hami_commit="$(parse_dockerfile_commit "${base_dockerfile}" "LIB_HAMI_CORE_COMMIT")"
-  base_ubs_commit="$(parse_dockerfile_commit "${base_dockerfile}" "LIB_UBS_VIRT_ENPU_COMMIT")"
+  base_hami_commit="$(autosync::parse_dockerfile_arg_commit "${base_dockerfile}" "LIB_HAMI_CORE_COMMIT")"
+  base_ubs_commit="$(autosync::parse_dockerfile_arg_commit "${base_dockerfile}" "LIB_UBS_VIRT_ENPU_COMMIT")"
 
   if [[ "${cand_hami_commit}" != "${base_hami_commit}" ]]; then
     nvidia_changed=true

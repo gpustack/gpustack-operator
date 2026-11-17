@@ -16,6 +16,7 @@ SCRATCH=""
 
 cleanup() {
   if [[ -n "${SCRATCH}" && -d "${SCRATCH}" ]]; then
+    chmod -R u+w "${SCRATCH}" 2>/dev/null || true
     rm -rf "${SCRATCH}"
   fi
 }
@@ -99,64 +100,195 @@ git -C "${PREFLIGHT_REPO}" add -A
 git -C "${PREFLIGHT_REPO}" commit -q -m "baseline"
 BASE_SHA="$(git -C "${PREFLIGHT_REPO}" rev-parse HEAD)"
 
+FIXTURE_META="${SCRATCH}/fixture-meta.json"
+python3 - "${ROOT_DIR}" "${FIXTURE_META}" <<'PY'
+import json
+import os
+import re
+import sys
+
+root_dir, meta_out = sys.argv[1:3]
+
+
+def read(rel: str) -> str:
+    with open(os.path.join(root_dir, rel), "r", encoding="utf-8") as f:
+        return f.read()
+
+
+df_txt = read("pack/gpustack-operator/Dockerfile")
+gomod_txt = read("go.mod")
+deps_txt = read("hack/deps.sh")
+
+
+def get_arg(name: str) -> str:
+    m = re.search(rf'^ARG {re.escape(name)}="([^"]+)"$', df_txt, re.MULTILINE)
+    assert m, f"missing ARG {name}"
+    return m.group(1).strip()
+
+
+def get_mod(mod: str) -> str:
+    m = re.search(rf'^\s*{re.escape(mod)}\s+(v\d+\.\d+\.\d+)\b', gomod_txt, re.MULTILINE)
+    assert m, f"missing {mod} in go.mod"
+    return m.group(1).strip()
+
+
+def bump_patch(ver: str) -> str:
+    prefix = "v" if ver.startswith("v") else ""
+    parts = ver.lstrip("v").split(".")
+    assert len(parts) == 3, f"unexpected semver {ver}"
+    return f"{prefix}{parts[0]}.{parts[1]}.{int(parts[2]) + 1}"
+
+
+def bump_minor(ver: str) -> str:
+    prefix = "v" if ver.startswith("v") else ""
+    parts = ver.lstrip("v").split(".")
+    assert len(parts) == 3, f"unexpected semver {ver}"
+    return f"{prefix}{parts[0]}.{int(parts[1]) + 1}.0"
+
+
+k8s_mod_cur = get_mod("k8s.io/api")
+k8s_mod_next = bump_patch(k8s_mod_cur)
+k8s_mod_cross_minor = bump_minor(k8s_mod_cur)
+kubectl_cur = get_arg("KUBECTL_VERSION")
+k8s_rel_cur = f"v{kubectl_cur}"
+k8s_rel_next = bump_patch(k8s_rel_cur)
+k8s_rel_cross_minor = bump_minor(k8s_rel_cur)
+
+helm_cur = get_arg("HELM_VERSION")
+helm_next = bump_patch(helm_cur)
+vals_cur = get_arg("VALS_VERSION")
+vals_next = bump_patch(vals_cur)
+kust_cur = get_arg("KUSTOMIZE_VERSION")
+kust_next = bump_patch(kust_cur)
+skopeo_cur = get_arg("SKOPEO_VERSION")
+ytt_cur = get_arg("YTT_VERSION")
+
+cr_cur = get_mod("sigs.k8s.io/controller-runtime")
+cr_next = bump_patch(cr_cur)
+cr_cross_minor = bump_minor(cr_cur)
+kueue_cur = get_mod("sigs.k8s.io/kueue")
+kueue_cross_minor = bump_minor(kueue_cur)
+
+m_chart = re.search(r"function chart_staging\(\)\s*\{.*?cat <<EOF\n(.*?)\nEOF", deps_txt, re.DOTALL)
+assert m_chart, "missing chart_staging() in hack/deps.sh"
+first_chart_line = next(ln.strip() for ln in m_chart.group(1).splitlines() if ln.strip())
+chart_url, chart_ver, chart_dest = first_chart_line.split()
+chart_name = os.path.basename(chart_dest)
+chart_ver_next = bump_patch(chart_ver)
+
+with open(meta_out, "w", encoding="utf-8") as f:
+    json.dump({
+        "k8s_minor": ".".join(k8s_mod_cur.lstrip("v").split(".")[:2]),
+        "k8s_mod_cur": k8s_mod_cur,
+        "k8s_mod_next": k8s_mod_next,
+        "k8s_mod_cross_minor": k8s_mod_cross_minor,
+        "k8s_rel_cur": k8s_rel_cur,
+        "k8s_rel_next": k8s_rel_next,
+        "k8s_rel_cross_minor": k8s_rel_cross_minor,
+        "helm_cur": helm_cur,
+        "helm_next": helm_next,
+        "vals_cur": vals_cur,
+        "vals_next": vals_next,
+        "kust_cur": kust_cur,
+        "kust_next": kust_next,
+        "skopeo_cur": skopeo_cur,
+        "ytt_cur": ytt_cur,
+        "cr_cur": cr_cur,
+        "cr_next": cr_next,
+        "cr_cross_minor": cr_cross_minor,
+        "kueue_cur": kueue_cur,
+        "kueue_cross_minor": kueue_cross_minor,
+        "first_chart_name": chart_name,
+        "first_chart_ver": chart_ver,
+        "first_chart_ver_next": chart_ver_next,
+    }, f, indent=2)
+PY
+
+read_meta() {
+  python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))[sys.argv[2]])' "${FIXTURE_META}" "$1"
+}
+
+K8S_MOD_CUR="$(read_meta k8s_mod_cur)"
+K8S_MOD_NEXT="$(read_meta k8s_mod_next)"
+K8S_MOD_CROSS_MINOR="$(read_meta k8s_mod_cross_minor)"
+K8S_REL_CUR="$(read_meta k8s_rel_cur)"
+K8S_REL_NEXT="$(read_meta k8s_rel_next)"
+K8S_REL_CROSS_MINOR="$(read_meta k8s_rel_cross_minor)"
+HELM_CUR="$(read_meta helm_cur)"
+HELM_NEXT="$(read_meta helm_next)"
+VALS_CUR="$(read_meta vals_cur)"
+VALS_NEXT="$(read_meta vals_next)"
+KUST_CUR="$(read_meta kust_cur)"
+KUST_NEXT="$(read_meta kust_next)"
+SKOPEO_CUR="$(read_meta skopeo_cur)"
+YTT_CUR="$(read_meta ytt_cur)"
+CR_CUR="$(read_meta cr_cur)"
+CR_NEXT="$(read_meta cr_next)"
+CR_CROSS_MINOR="$(read_meta cr_cross_minor)"
+KUEUE_CUR="$(read_meta kueue_cur)"
+KUEUE_CROSS_MINOR="$(read_meta kueue_cross_minor)"
+FIRST_CHART_NAME="$(read_meta first_chart_name)"
+FIRST_CHART_VER="$(read_meta first_chart_ver)"
+FIRST_CHART_VER_NEXT="$(read_meta first_chart_ver_next)"
+
 FIXTURE_DISCOVERY="${SCRATCH}/fixture-discovery"
 mkdir -p "${FIXTURE_DISCOVERY}"
 
-cat > "${FIXTURE_DISCOVERY}/kubernetes-releases.json" <<'JSON'
+cat > "${FIXTURE_DISCOVERY}/kubernetes-releases.json" <<JSON
 [
-  {"tag_name": "v1.37.0", "prerelease": false, "draft": false},
-  {"tag_name": "v1.36.7-rc.1", "prerelease": true, "draft": false},
-  {"tag_name": "v1.36.6", "prerelease": false, "draft": false},
-  {"tag_name": "v1.36.5", "prerelease": false, "draft": false}
+  {"tag_name": "${K8S_REL_CROSS_MINOR}", "prerelease": false, "draft": false},
+  {"tag_name": "${K8S_REL_NEXT}-rc.1", "prerelease": true, "draft": false},
+  {"tag_name": "${K8S_REL_NEXT}", "prerelease": false, "draft": false},
+  {"tag_name": "${K8S_REL_CUR}", "prerelease": false, "draft": false}
 ]
 JSON
 
-cat > "${FIXTURE_DISCOVERY}/helm-releases.json" <<'JSON'
+cat > "${FIXTURE_DISCOVERY}/helm-releases.json" <<JSON
 [
   {"tag_name": "v4.0.0", "prerelease": false, "draft": false},
-  {"tag_name": "v3.22.0-rc.1", "prerelease": true, "draft": false},
-  {"tag_name": "v3.21.5", "prerelease": false, "draft": false},
-  {"tag_name": "v3.21.4", "prerelease": false, "draft": false}
+  {"tag_name": "v${HELM_NEXT}-rc.1", "prerelease": true, "draft": false},
+  {"tag_name": "v${HELM_NEXT}", "prerelease": false, "draft": false},
+  {"tag_name": "v${HELM_CUR}", "prerelease": false, "draft": false}
 ]
 JSON
 
-cat > "${FIXTURE_DISCOVERY}/kustomize-tags.txt" <<'TXT'
-0000000000000000000000000000000000000001	refs/tags/kustomize/v5.8.4
-0000000000000000000000000000000000000002	refs/tags/kustomize/v5.8.5-rc.1
-0000000000000000000000000000000000000003	refs/tags/kustomize/v5.8.3
+cat > "${FIXTURE_DISCOVERY}/kustomize-tags.txt" <<TXT
+0000000000000000000000000000000000000001	refs/tags/kustomize/v${KUST_NEXT}
+0000000000000000000000000000000000000002	refs/tags/kustomize/v${KUST_NEXT}-rc.1
+0000000000000000000000000000000000000003	refs/tags/kustomize/v${KUST_CUR}
 TXT
 
-cat > "${FIXTURE_DISCOVERY}/skopeo-releases.json" <<'JSON'
+cat > "${FIXTURE_DISCOVERY}/skopeo-releases.json" <<JSON
 [
-  {"tag_name": "v1.24.1", "prerelease": false, "draft": false}
+  {"tag_name": "v${SKOPEO_CUR}", "prerelease": false, "draft": false}
 ]
 JSON
 
-cat > "${FIXTURE_DISCOVERY}/vals-releases.json" <<'JSON'
+cat > "${FIXTURE_DISCOVERY}/vals-releases.json" <<JSON
 [
-  {"tag_name": "v0.50.1", "prerelease": false, "draft": false},
-  {"tag_name": "v0.50.0", "prerelease": false, "draft": false}
+  {"tag_name": "v${VALS_NEXT}", "prerelease": false, "draft": false},
+  {"tag_name": "v${VALS_CUR}", "prerelease": false, "draft": false}
 ]
 JSON
 
-cat > "${FIXTURE_DISCOVERY}/ytt-releases.json" <<'JSON'
+cat > "${FIXTURE_DISCOVERY}/ytt-releases.json" <<JSON
 [
-  {"tag_name": "v0.55.4", "prerelease": false, "draft": false}
+  {"tag_name": "v${YTT_CUR}", "prerelease": false, "draft": false}
 ]
 JSON
 
-cat > "${FIXTURE_DISCOVERY}/controller-runtime-releases.json" <<'JSON'
+cat > "${FIXTURE_DISCOVERY}/controller-runtime-releases.json" <<JSON
 [
-  {"tag_name": "v0.25.0", "prerelease": false, "draft": false},
-  {"tag_name": "v0.24.2", "prerelease": false, "draft": false},
-  {"tag_name": "v0.24.1", "prerelease": false, "draft": false}
+  {"tag_name": "${CR_CROSS_MINOR}", "prerelease": false, "draft": false},
+  {"tag_name": "${CR_NEXT}", "prerelease": false, "draft": false},
+  {"tag_name": "${CR_CUR}", "prerelease": false, "draft": false}
 ]
 JSON
 
-cat > "${FIXTURE_DISCOVERY}/kueue-releases.json" <<'JSON'
+cat > "${FIXTURE_DISCOVERY}/kueue-releases.json" <<JSON
 [
-  {"tag_name": "v0.19.0", "prerelease": false, "draft": false},
-  {"tag_name": "v0.18.11", "prerelease": false, "draft": false}
+  {"tag_name": "${KUEUE_CROSS_MINOR}", "prerelease": false, "draft": false},
+  {"tag_name": "${KUEUE_CUR}", "prerelease": false, "draft": false}
 ]
 JSON
 
@@ -174,45 +306,47 @@ if (
   GITHUB_OUTPUT="${GHA_DISC}" \
   bash "${PREFLIGHT_REPO}/.auto-sync/scripts/preflight-k8s-deps.sh" "${STAGE_DISC}" >/dev/null
 ) && \
-python3 - "${STAGE_DISC}" "${GHA_DISC}" "${BASE_SHA}" <<'PY'
+python3 - "${STAGE_DISC}" "${GHA_DISC}" "${BASE_SHA}" "${FIXTURE_META}" <<'PY'
 import json
 import os
 import sys
 
-stage_dir, gha_path, base_sha = sys.argv[1:4]
+stage_dir, gha_path, base_sha, meta_path = sys.argv[1:5]
+with open(meta_path, "r", encoding="utf-8") as f:
+    meta = json.load(f)
 
 with open(os.path.join(stage_dir, "upstream-records.json"), "r", encoding="utf-8") as f:
     recs = json.load(f)
 assert isinstance(recs, list) and len(recs) == 8, recs
 by_id = {r["upstreamId"]: r for r in recs}
 
-assert by_id["kustomize-cli"]["version"] == "5.8.4", by_id["kustomize-cli"]
+assert by_id["kustomize-cli"]["version"] == meta["kust_next"], by_id["kustomize-cli"]
 assert by_id["kustomize-cli"]["status"] == "available", by_id["kustomize-cli"]
 
-assert by_id["helm-cli"]["version"] == "v3.21.5", by_id["helm-cli"]
+assert by_id["helm-cli"]["version"] == f"v{meta['helm_next']}", by_id["helm-cli"]
 assert by_id["helm-cli"]["status"] == "available", by_id["helm-cli"]
 
-assert by_id["kubernetes"]["version"] == "v1.36.6", by_id["kubernetes"]
+assert by_id["kubernetes"]["version"] == meta["k8s_rel_next"], by_id["kubernetes"]
 assert by_id["kubernetes"]["status"] == "available", by_id["kubernetes"]
 
-assert by_id["vals-cli"]["version"] == "0.50.1", by_id["vals-cli"]
+assert by_id["vals-cli"]["version"] == meta["vals_next"], by_id["vals-cli"]
 assert by_id["vals-cli"]["status"] == "available", by_id["vals-cli"]
 
-assert by_id["skopeo-cli"]["version"] == "1.24.1", by_id["skopeo-cli"]
+assert by_id["skopeo-cli"]["version"] == meta["skopeo_cur"], by_id["skopeo-cli"]
 assert by_id["skopeo-cli"]["status"] == "up_to_date", by_id["skopeo-cli"]
 
-assert by_id["ytt-cli"]["version"] == "0.55.4", by_id["ytt-cli"]
+assert by_id["ytt-cli"]["version"] == meta["ytt_cur"], by_id["ytt-cli"]
 assert by_id["ytt-cli"]["status"] == "up_to_date", by_id["ytt-cli"]
 
-assert by_id["controller-runtime"]["version"] == "v0.24.2", by_id["controller-runtime"]
+assert by_id["controller-runtime"]["version"] == meta["cr_next"], by_id["controller-runtime"]
 assert by_id["controller-runtime"]["status"] == "available", by_id["controller-runtime"]
 
-assert by_id["kueue-sdk"]["version"] == "v0.18.11", by_id["kueue-sdk"]
+assert by_id["kueue-sdk"]["version"] == meta["kueue_cur"], by_id["kueue-sdk"]
 assert by_id["kueue-sdk"]["status"] == "up_to_date", by_id["kueue-sdk"]
 
 with open(os.path.join(stage_dir, "k8s-deps-preflight-report.json"), "r", encoding="utf-8") as f:
     report = json.load(f)
-assert report["k8s_minor"] == "0.36", report
+assert report["k8s_minor"] == meta["k8s_minor"], report
 assert report["helm_major"] == "3", report
 assert report["base_sha"] == base_sha, report
 assert report["source_revision"] == base_sha, report
@@ -235,7 +369,7 @@ PY
 then
   if [[ -z "$(git -C "${PREFLIGHT_REPO}" status --porcelain)" ]] && \
      [[ "$(git -C "${PREFLIGHT_REPO}" rev-parse HEAD)" == "${BASE_SHA}" ]]; then
-    pass "preflight-k8s-deps.sh filters cross-minor k8s/helm v4, normalizes kustomize/v5.8.4, and snapshots baselines"
+    pass "preflight-k8s-deps.sh filters cross-minor k8s/helm v4, normalizes kustomize, and snapshots baselines"
   else
     fail "preflight-k8s-deps.sh discovery left dirty git tree"
   fi
@@ -249,18 +383,18 @@ cp -R "${FIXTURE_DISCOVERY}" "${FIXTURE_STAGE}"
 mkdir -p "${FIXTURE_STAGE}/deps-cache/staging/k8s.io"
 
 for mod_name in code-generator api apimachinery kube-aggregator apiextensions-apiserver; do
-  tar -zcf "${FIXTURE_STAGE}/deps-cache/staging/k8s.io/${mod_name}-v0.36.6.tar.gz" \
+  tar -zcf "${FIXTURE_STAGE}/deps-cache/staging/k8s.io/${mod_name}-${K8S_MOD_NEXT}.tar.gz" \
     --exclude='_VERSION_' \
     -C "${ROOT_DIR}/staging/k8s.io/${mod_name}" .
 done
 # Seed unpatched code-generator source so hack/staging/k8s.io/code-generator/001_enhanced.patch applies cleanly.
-rm -f "${FIXTURE_STAGE}/deps-cache/staging/k8s.io/code-generator-v0.36.6.tar.gz"
+rm -f "${FIXTURE_STAGE}/deps-cache/staging/k8s.io/code-generator-${K8S_MOD_NEXT}.tar.gz"
 CG_TMP="${SCRATCH}/cg-unpatched"
 mkdir -p "${CG_TMP}"
 cp -R "${ROOT_DIR}/staging/k8s.io/code-generator/." "${CG_TMP}/"
 rm -f "${CG_TMP}/_VERSION_"
 (cd "${CG_TMP}" && patch -p1 -R --silent < "${ROOT_DIR}/hack/staging/k8s.io/code-generator/001_enhanced.patch")
-tar -zcf "${FIXTURE_STAGE}/deps-cache/staging/k8s.io/code-generator-v0.36.6.tar.gz" -C "${CG_TMP}" .
+tar -zcf "${FIXTURE_STAGE}/deps-cache/staging/k8s.io/code-generator-${K8S_MOD_NEXT}.tar.gz" -C "${CG_TMP}" .
 
 STAGE_SRC_REV="${SCRATCH}/stage-srcrev/k8s-deps"
 GHA_SRC_REV="${SCRATCH}/gha-srcrev.txt"
@@ -291,14 +425,78 @@ print(report["source_revision"])
 PY
 )" && \
 [[ -n "${SRC_REV}" && "${SRC_REV}" != "${BASE_SHA}" ]] && \
-grep -q 'kubernetes/api v0.36.6' <<<"$(git -C "${PREFLIGHT_REPO}" show "${SRC_REV}:hack/deps.sh")" && \
-[[ "$(git -C "${PREFLIGHT_REPO}" show "${SRC_REV}:staging/k8s.io/api/_VERSION_")" == "v0.36.6" ]] && \
+grep -q "kubernetes/api ${K8S_MOD_NEXT}" <<<"$(git -C "${PREFLIGHT_REPO}" show "${SRC_REV}:hack/deps.sh")" && \
+[[ "$(git -C "${PREFLIGHT_REPO}" show "${SRC_REV}:staging/k8s.io/api/_VERSION_")" == "${K8S_MOD_NEXT}" ]] && \
 [[ -z "$(git -C "${PREFLIGHT_REPO}" status --porcelain)" ]] && \
 [[ "$(git -C "${PREFLIGHT_REPO}" rev-parse HEAD)" == "${BASE_SHA}" ]] && \
 [[ "$(git -C "${PREFLIGHT_REPO}" rev-parse refs/heads/main)" == "${BASE_SHA}" ]]; then
   pass "preflight-k8s-deps.sh stages mod_staging onto detached source_revision while preserving main"
 else
   fail "preflight-k8s-deps.sh detached source_revision staging"
+fi
+
+# 2b. Uncommitted local edit in repo_root survives preflight-k8s-deps.sh untouched (I12).
+printf '// local uncommitted edit\n' >> "${PREFLIGHT_REPO}/go.mod"
+STAGE_DIRTY="${SCRATCH}/stage-dirty/k8s-deps"
+if (
+  cd "${PREFLIGHT_REPO}" && \
+  AUTOSYNC_K8S_DEPS_FIXTURE_DIR="${FIXTURE_STAGE}" \
+  AUTOSYNC_SKIP_GO_MOD_DOWNLOAD=true \
+  AUTOSYNC_SKIP_GENERATE=true \
+  GOMODCACHE="${HOST_GOMODCACHE}" \
+  GOCACHE="${HOST_GOCACHE}" \
+  bash "${PREFLIGHT_REPO}/.auto-sync/scripts/preflight-k8s-deps.sh" "${STAGE_DIRTY}" >/dev/null
+) && \
+grep -q '// local uncommitted edit' "${PREFLIGHT_REPO}/go.mod"; then
+  pass "preflight-k8s-deps.sh preserves uncommitted local edits in repo_root"
+else
+  fail "preflight-k8s-deps.sh preserves uncommitted local edits in repo_root"
+fi
+git -C "${PREFLIGHT_REPO}" checkout -- go.mod
+
+# 2c. Partial upstream tag release / go mod tidy failure degrades gracefully without crashing (I11).
+WRAP_GO_BIN="${SCRATCH}/wrap-go-bin"
+mkdir -p "${WRAP_GO_BIN}"
+cat > "${WRAP_GO_BIN}/go" <<'SH'
+#!/usr/bin/env bash
+if [[ "${1:-}" == "mod" && "${2:-}" == "tidy" ]]; then
+  echo "simulated go mod tidy failure: unknown revision" >&2
+  exit 1
+fi
+exec "${REAL_GO_BIN}" "$@"
+SH
+chmod +x "${WRAP_GO_BIN}/go"
+REAL_GO_BIN="$(command -v go)"
+STAGE_FAIL_TIDY="${SCRATCH}/stage-fail-tidy/k8s-deps"
+mkdir -p "${SCRATCH}/stage-fail-tidy/go-mod"
+: > "${SCRATCH}/stage-fail-tidy/go-mod/.warmed"
+if (
+  cd "${PREFLIGHT_REPO}" && \
+  REAL_GO_BIN="${REAL_GO_BIN}" \
+  PATH="${WRAP_GO_BIN}:${PATH}" \
+  AUTOSYNC_K8S_DEPS_FIXTURE_DIR="${FIXTURE_STAGE}" \
+  AUTOSYNC_SKIP_GENERATE=true \
+  GOMODCACHE="${HOST_GOMODCACHE}" \
+  GOCACHE="${HOST_GOCACHE}" \
+  bash "${PREFLIGHT_REPO}/.auto-sync/scripts/preflight-k8s-deps.sh" "${STAGE_FAIL_TIDY}" >/dev/null 2>&1
+) && \
+python3 - "${STAGE_FAIL_TIDY}" "${BASE_SHA}" <<'PY'
+import json
+import os
+import sys
+
+stage_dir, base_sha = sys.argv[1:3]
+with open(os.path.join(stage_dir, "k8s-deps-preflight-report.json"), "r", encoding="utf-8") as f:
+    rep = json.load(f)
+assert rep["patch_clean"] is False, rep
+assert rep["staging_updated"] is False, rep
+assert rep["source_revision"] == base_sha, rep
+assert "go mod tidy/download failed" in rep.get("staging_error", ""), rep
+PY
+then
+  pass "preflight-k8s-deps.sh degrades gracefully when go mod tidy fails"
+else
+  fail "preflight-k8s-deps.sh degrades gracefully when go mod tidy fails"
 fi
 
 # 3. Gitless env -i validate_k8s_deps.sh tests (AUTOSYNC_FAST_SELFTEST=true).
@@ -323,19 +521,28 @@ run_validator_env_i() {
     bash "${cand_dir}/.auto-sync/checks/validate_k8s_deps.sh"
 }
 
-# 3a. Positive case: bumping VALS_VERSION="0.50.1" in pack/gpustack-operator/Dockerfile.
+# 3a. Positive case: bumping VALS_VERSION in pack/gpustack-operator/Dockerfile.
 CAND_POS="${SCRATCH}/cand-pos"
 cp -R "${CAND_BASE}" "${CAND_POS}"
-sed 's/^ARG VALS_VERSION="0\.50\.0"$/ARG VALS_VERSION="0.50.1"/' \
-  "${CAND_BASE}/pack/gpustack-operator/Dockerfile" > "${CAND_POS}/pack/gpustack-operator/Dockerfile"
-python3 - "${CAND_POS}/.auto-sync/proposals/k8s-deps.json" <<'PY'
+python3 - "${CAND_BASE}/pack/gpustack-operator/Dockerfile" "${CAND_POS}/pack/gpustack-operator/Dockerfile" "${VALS_CUR}" "${VALS_NEXT}" <<'PY'
+import re
+import sys
+src, dst, v_cur, v_next = sys.argv[1:5]
+with open(src, "r", encoding="utf-8") as f:
+    txt = f.read()
+out = re.sub(rf'^ARG VALS_VERSION="{re.escape(v_cur)}"$', f'ARG VALS_VERSION="{v_next}"', txt, count=1, flags=re.MULTILINE)
+assert out != txt, "failed to bump VALS_VERSION"
+with open(dst, "w", encoding="utf-8") as f:
+    f.write(out)
+PY
+python3 - "${CAND_POS}/.auto-sync/proposals/k8s-deps.json" "${VALS_NEXT}" <<'PY'
 import json
 import sys
 
-p = sys.argv[1]
+p, v_next = sys.argv[1:3]
 with open(p, "r", encoding="utf-8") as f:
     doc = json.load(f)
-doc["versions"]["vals-cli"] = "0.50.1"
+doc["versions"]["vals-cli"] = v_next
 with open(p, "w", encoding="utf-8") as f:
     json.dump(doc, f, indent=2)
     f.write("\n")
@@ -343,9 +550,9 @@ PY
 
 if run_validator_env_i "${CAND_POS}" "${STAGE_DISC}" >/dev/null 2>&1 && \
    [[ ! -e "${CAND_POS}/.git" ]] && [[ ! -e "${CAND_POS}/.sbin" ]]; then
-  pass "validate_k8s_deps.sh positive VALS_VERSION=0.50.1 bump passes guards, upgrade-compat, and toolpins-selftest"
+  pass "validate_k8s_deps.sh positive VALS_VERSION bump passes guards, upgrade-compat, and toolpins-selftest"
 else
-  fail "validate_k8s_deps.sh positive VALS_VERSION=0.50.1 bump"
+  fail "validate_k8s_deps.sh positive VALS_VERSION bump"
 fi
 
 # 3b. Negative case 1: mutating LIB_HAMI_CORE_COMMIT in pack/gpustack-operator/Dockerfile.
@@ -353,6 +560,9 @@ CAND_NEG1="${SCRATCH}/cand-neg1"
 cp -R "${CAND_BASE}" "${CAND_NEG1}"
 sed 's/^ARG LIB_HAMI_CORE_COMMIT="[^"]*"$/ARG LIB_HAMI_CORE_COMMIT="1111111111111111111111111111111111111111"/' \
   "${CAND_BASE}/pack/gpustack-operator/Dockerfile" > "${CAND_NEG1}/pack/gpustack-operator/Dockerfile"
+if cmp -s "${CAND_BASE}/pack/gpustack-operator/Dockerfile" "${CAND_NEG1}/pack/gpustack-operator/Dockerfile"; then
+  fail "negative test 3b failed to mutate LIB_HAMI_CORE_COMMIT"
+fi
 
 neg1_err=""
 if ! neg1_err="$(run_validator_env_i "${CAND_NEG1}" "${STAGE_DISC}" 2>&1)" && \
@@ -365,8 +575,18 @@ fi
 # 3c. Negative case 2: mutating chart_staging() in hack/deps.sh.
 CAND_NEG2="${SCRATCH}/cand-neg2"
 cp -R "${CAND_BASE}" "${CAND_NEG2}"
-sed 's|kueue-0\.18\.11\.tgz 0\.18\.11|kueue-0.18.12.tgz 0.18.12|' \
-  "${CAND_BASE}/hack/deps.sh" > "${CAND_NEG2}/hack/deps.sh"
+python3 - "${CAND_BASE}/hack/deps.sh" "${CAND_NEG2}/hack/deps.sh" "${FIRST_CHART_NAME}" "${FIRST_CHART_VER}" "${FIRST_CHART_VER_NEXT}" <<'PY'
+import sys
+src, dst, cname, cver, cnext = sys.argv[1:6]
+with open(src, "r", encoding="utf-8") as f:
+    txt = f.read()
+old_tok = f" {cver} ${{charts_dir}}/{cname}"
+new_tok = f" {cnext} ${{charts_dir}}/{cname}"
+out = txt.replace(old_tok, new_tok, 1)
+assert out != txt, f"failed to mutate {old_tok} in hack/deps.sh"
+with open(dst, "w", encoding="utf-8") as f:
+    f.write(out)
+PY
 
 neg2_err=""
 if ! neg2_err="$(run_validator_env_i "${CAND_NEG2}" "${STAGE_DISC}" 2>&1)" && \
@@ -393,11 +613,20 @@ else
   fi
 fi
 
-# 3e. Negative case 4: bumping HELM_VERSION="3.21.5" in Dockerfile without updating hack/lib/helm.sh.
+# 3e. Negative case 4: bumping HELM_VERSION in Dockerfile without updating hack/lib/helm.sh.
 CAND_NEG4="${SCRATCH}/cand-neg4"
 cp -R "${CAND_BASE}" "${CAND_NEG4}"
-sed 's/^ARG HELM_VERSION="3\.21\.4"$/ARG HELM_VERSION="3.21.5"/' \
-  "${CAND_BASE}/pack/gpustack-operator/Dockerfile" > "${CAND_NEG4}/pack/gpustack-operator/Dockerfile"
+python3 - "${CAND_BASE}/pack/gpustack-operator/Dockerfile" "${CAND_NEG4}/pack/gpustack-operator/Dockerfile" "${HELM_CUR}" "${HELM_NEXT}" <<'PY'
+import re
+import sys
+src, dst, h_cur, h_next = sys.argv[1:5]
+with open(src, "r", encoding="utf-8") as f:
+    txt = f.read()
+out = re.sub(rf'^ARG HELM_VERSION="{re.escape(h_cur)}"$', f'ARG HELM_VERSION="{h_next}"', txt, count=1, flags=re.MULTILINE)
+assert out != txt, f"failed to mutate HELM_VERSION from {h_cur}"
+with open(dst, "w", encoding="utf-8") as f:
+    f.write(out)
+PY
 
 neg4_err=""
 if ! neg4_err="$(run_validator_env_i "${CAND_NEG4}" "${STAGE_DISC}" 2>&1)" && \
@@ -407,25 +636,45 @@ else
   fail "validate_k8s_deps.sh fails closed on unaligned HELM_VERSION bump (${neg4_err})"
 fi
 
-# 3f. Negative case 5: cross-minor K8s jump (k8s.io/api v0.37.0 in go.mod) fails closed.
+# 3f. Negative case 5: cross-minor K8s jump (k8s.io/api in go.mod) fails closed.
 CAND_NEG5="${SCRATCH}/cand-neg5"
 cp -R "${CAND_BASE}" "${CAND_NEG5}"
-sed 's|k8s\.io/api v0\.36\.5|k8s.io/api v0.37.0|' \
-  "${CAND_BASE}/go.mod" > "${CAND_NEG5}/go.mod"
+python3 - "${CAND_BASE}/go.mod" "${CAND_NEG5}/go.mod" "${K8S_MOD_CUR}" "${K8S_MOD_CROSS_MINOR}" <<'PY'
+import sys
+src, dst, k_cur, k_cross = sys.argv[1:5]
+with open(src, "r", encoding="utf-8") as f:
+    txt = f.read()
+out = txt.replace(f"k8s.io/api {k_cur}", f"k8s.io/api {k_cross}", 1)
+assert out != txt, f"failed to mutate k8s.io/api {k_cur}"
+with open(dst, "w", encoding="utf-8") as f:
+    f.write(out)
+PY
 
 neg5_err=""
 if ! neg5_err="$(run_validator_env_i "${CAND_NEG5}" "${STAGE_DISC}" 2>&1)" && \
    [[ ! -e "${CAND_NEG5}/.git" ]]; then
-  pass "validate_k8s_deps.sh fails closed on cross-minor k8s.io/api v0.37.0 jump"
+  pass "validate_k8s_deps.sh fails closed on cross-minor k8s.io/api jump"
 else
   fail "validate_k8s_deps.sh fails closed on cross-minor k8s.io/api jump (${neg5_err})"
 fi
 
-# 3g. Negative case 6: mismatched proposals/k8s-deps.json fails closed.
+# 3g. Negative case 6: mismatched proposals/k8s-deps.json fails closed (missing/extra/mismatch across all 11 keys).
 CAND_NEG6="${SCRATCH}/cand-neg6"
 cp -R "${CAND_BASE}" "${CAND_NEG6}"
-sed 's|"helm-cli": "v3.21.4"|"helm-cli": "3.21.4"|' \
-  "${CAND_BASE}/.auto-sync/proposals/k8s-deps.json" > "${CAND_NEG6}/.auto-sync/proposals/k8s-deps.json"
+python3 - "${CAND_BASE}/.auto-sync/proposals/k8s-deps.json" "${CAND_NEG6}/.auto-sync/proposals/k8s-deps.json" <<'PY'
+import json
+import sys
+src, dst = sys.argv[1:3]
+with open(src, "r", encoding="utf-8") as f:
+    doc = json.load(f)
+old_v = doc["versions"]["helm-cli"]
+new_v = old_v.lstrip("v") if old_v.startswith("v") else f"v{old_v}"
+assert new_v != old_v
+doc["versions"]["helm-cli"] = new_v
+with open(dst, "w", encoding="utf-8") as f:
+    json.dump(doc, f, indent=2)
+    f.write("\n")
+PY
 
 neg6_err=""
 if ! neg6_err="$(run_validator_env_i "${CAND_NEG6}" "${STAGE_DISC}" 2>&1)" && \
@@ -433,6 +682,49 @@ if ! neg6_err="$(run_validator_env_i "${CAND_NEG6}" "${STAGE_DISC}" 2>&1)" && \
   pass "validate_k8s_deps.sh fails closed on mismatched proposals/k8s-deps.json"
 else
   fail "validate_k8s_deps.sh fails closed on mismatched proposals/k8s-deps.json (${neg6_err})"
+fi
+
+# 3h. Negative case 7: mismatched k8s-modules / extra key in proposals/k8s-deps.json fails closed (I4).
+CAND_NEG7="${SCRATCH}/cand-neg7"
+cp -R "${CAND_BASE}" "${CAND_NEG7}"
+python3 - "${CAND_BASE}/.auto-sync/proposals/k8s-deps.json" "${CAND_NEG7}/.auto-sync/proposals/k8s-deps.json" <<'PY'
+import json
+import sys
+src, dst = sys.argv[1:3]
+with open(src, "r", encoding="utf-8") as f:
+    doc = json.load(f)
+doc["versions"]["k8s-modules"] = "v0.0.0"
+with open(dst, "w", encoding="utf-8") as f:
+    json.dump(doc, f, indent=2)
+    f.write("\n")
+PY
+neg7_err=""
+if ! neg7_err="$(run_validator_env_i "${CAND_NEG7}" "${STAGE_DISC}" 2>&1)" && \
+   grep -q "k8s-modules" <<<"${neg7_err}"; then
+  pass "validate_k8s_deps.sh fails closed on mismatched proposals/k8s-deps.json k8s-modules"
+else
+  fail "validate_k8s_deps.sh fails closed on mismatched proposals/k8s-deps.json k8s-modules (${neg7_err})"
+fi
+
+CAND_NEG8="${SCRATCH}/cand-neg8"
+cp -R "${CAND_BASE}" "${CAND_NEG8}"
+python3 - "${CAND_BASE}/.auto-sync/proposals/k8s-deps.json" "${CAND_NEG8}/.auto-sync/proposals/k8s-deps.json" <<'PY'
+import json
+import sys
+src, dst = sys.argv[1:3]
+with open(src, "r", encoding="utf-8") as f:
+    doc = json.load(f)
+doc["versions"]["extra-key"] = "1.0.0"
+with open(dst, "w", encoding="utf-8") as f:
+    json.dump(doc, f, indent=2)
+    f.write("\n")
+PY
+neg8_err=""
+if ! neg8_err="$(run_validator_env_i "${CAND_NEG8}" "${STAGE_DISC}" 2>&1)" && \
+   grep -q "extra-key" <<<"${neg8_err}"; then
+  pass "validate_k8s_deps.sh fails closed on extra unexpected key in proposals/k8s-deps.json"
+else
+  fail "validate_k8s_deps.sh fails closed on extra unexpected key in proposals/k8s-deps.json (${neg8_err})"
 fi
 
 echo

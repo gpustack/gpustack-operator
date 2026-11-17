@@ -202,6 +202,7 @@ def extract_gomod_ver(mod_name: str) -> str:
 
 expected_versions = {
     "kubernetes": f"v{df_kubectl}",
+    "k8s-modules": extract_gomod_ver("k8s.io/api"),
     "controller-runtime": extract_gomod_ver("sigs.k8s.io/controller-runtime"),
     "kueue-sdk": extract_gomod_ver("sigs.k8s.io/kueue"),
     "helm-cli": f"v{df_helm}",
@@ -209,8 +210,16 @@ expected_versions = {
     "vals-cli": extract_df_arg("VALS_VERSION"),
     "kustomize-cli": extract_df_arg("KUSTOMIZE_VERSION"),
     "ytt-cli": extract_df_arg("YTT_VERSION"),
+    "kubectl-cli": df_kubectl,
+    "helm-module": extract_gomod_ver("helm.sh/helm/v3"),
 }
 p_vers = prop["versions"]
+if set(p_vers.keys()) != set(expected_versions.keys()):
+    missing_k = sorted(set(expected_versions.keys()) - set(p_vers.keys()))
+    extra_k = sorted(set(p_vers.keys()) - set(expected_versions.keys()))
+    raise SystemExit(
+        f"FAIL: proposals/k8s-deps.json versions keys mismatch (missing={missing_k}, extra={extra_k})"
+    )
 for uid, exp_v in expected_versions.items():
     if p_vers.get(uid) != exp_v:
         raise SystemExit(
@@ -245,7 +254,6 @@ fi
 env "${lint_env[@]}" make -C "${AUTOSYNC_CANDIDATE_ROOT}" lint
 autosync::run_in_module_path_copy "${AUTOSYNC_CANDIDATE_ROOT}" make generate
 
-git -C "${AUTOSYNC_CANDIDATE_ROOT}" diff --exit-code
 if [[ -n "$(git -C "${AUTOSYNC_CANDIDATE_ROOT}" status --porcelain)" ]]; then
   printf 'FAIL: candidate tree has uncommitted drift after make generate -> make lint -> make generate\n' >&2
   git -C "${AUTOSYNC_CANDIDATE_ROOT}" status --porcelain >&2

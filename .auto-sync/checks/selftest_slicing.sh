@@ -164,6 +164,7 @@ SYNTH_BASE_SHA="$(git -C "${SYNTH_REPO}" rev-parse HEAD)"
 # 3. Test preflight-slicing.sh: unwatched HAMi-core change vs watched ubs-virt change with CRLF patch clean.
 STAGE_1="${SCRATCH}/stage-1/slicing"
 GHA_1="${SCRATCH}/gha-1.txt"
+PREFLIGHT_LOG_1="${SCRATCH}/preflight-1.log"
 : > "${GHA_1}"
 if (
   cd "${SYNTH_REPO}" && \
@@ -171,7 +172,7 @@ if (
   AUTOSYNC_SLICING_UBS_REPO_URL="${UBS_MOCK}" \
   GITHUB_OUTPUT="${GHA_1}" \
   bash "${SYNTH_REPO}/.auto-sync/scripts/preflight-slicing.sh" "${STAGE_1}"
-) >/dev/null 2>&1 && \
+) >"${PREFLIGHT_LOG_1}" 2>&1 && \
 python3 - "${STAGE_1}" "${GHA_1}" "${HAMI_PINNED}" "${HAMI_UNWATCHED_HEAD}" "${UBS_PINNED}" "${UBS_WATCHED_HEAD}" "${SYNTH_BASE_SHA}" <<'PY'
 import json
 import os
@@ -191,7 +192,9 @@ with open(os.path.join(stage_dir, "slicing-preflight-report.json"), "r", encodin
     report = json.load(f)
 assert report["hami_core"]["head_changed"] is True, report
 assert report["hami_core"]["watched_changed"] is False, report
+assert report["hami_core"]["pinned_commit_reachable"] is True, report
 assert report["ubs_virt"]["watched_changed"] is True, report
+assert report["ubs_virt"]["pinned_commit_reachable"] is True, report
 assert report["patch_clean"] is True, report
 
 assert os.path.isfile(os.path.join(stage_dir, "baseline", "pack", "gpustack-operator", "Dockerfile"))
@@ -207,6 +210,7 @@ PY
 then
   pass "preflight-slicing.sh detects unwatched vs watched changes and CRLF dry-run patch clean"
 else
+  tail -n 50 "${PREFLIGHT_LOG_1}" >&2 || true
   fail "preflight-slicing.sh detects unwatched vs watched changes and CRLF dry-run patch clean"
 fi
 
@@ -230,12 +234,13 @@ git -C "${UBS_MOCK}" commit -q -m "ubs v3 lf breaks patch"
 UBS_BROKEN_HEAD="$(git -C "${UBS_MOCK}" rev-parse HEAD)"
 
 STAGE_2="${SCRATCH}/stage-2/slicing"
+PREFLIGHT_LOG_2="${SCRATCH}/preflight-2.log"
 if (
   cd "${SYNTH_REPO}" && \
   AUTOSYNC_SLICING_HAMI_REPO_URL="${HAMI_MOCK}" \
   AUTOSYNC_SLICING_UBS_REPO_URL="${UBS_MOCK}" \
   bash "${SYNTH_REPO}/.auto-sync/scripts/preflight-slicing.sh" "${STAGE_2}"
-) >/dev/null 2>&1 && \
+) >"${PREFLIGHT_LOG_2}" 2>&1 && \
 python3 - "${STAGE_2}" "${HAMI_WATCHED_HEAD}" <<'PY'
 import json
 import os
@@ -256,7 +261,47 @@ PY
 then
   pass "preflight-slicing.sh records watched HAMi-core change and patch_clean=false on LF mismatch"
 else
+  tail -n 50 "${PREFLIGHT_LOG_2}" >&2 || true
   fail "preflight-slicing.sh records watched HAMi-core change and patch_clean=false on LF mismatch"
+fi
+
+# 4b. Unreachable pinned commit in upstream history emits available at head_sha instead of aborting.
+SYNTH_UNREACH="${SCRATCH}/synth-unreach"
+cp -R "${SYNTH_REPO}" "${SYNTH_UNREACH}"
+UNREACH_SHA="deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"
+sed -i.bak "s/^ARG LIB_HAMI_CORE_COMMIT=\"[^\"]*\"/ARG LIB_HAMI_CORE_COMMIT=\"${UNREACH_SHA}\"/" \
+  "${SYNTH_UNREACH}/pack/gpustack-operator/Dockerfile"
+rm -f "${SYNTH_UNREACH}/pack/gpustack-operator/Dockerfile.bak"
+STAGE_UNREACH="${SCRATCH}/stage-unreach/slicing"
+PREFLIGHT_LOG_UNREACH="${SCRATCH}/preflight-unreach.log"
+if (
+  cd "${SYNTH_UNREACH}" && \
+  AUTOSYNC_SLICING_HAMI_REPO_URL="${HAMI_MOCK}" \
+  AUTOSYNC_SLICING_UBS_REPO_URL="${UBS_MOCK}" \
+  bash "${SYNTH_UNREACH}/.auto-sync/scripts/preflight-slicing.sh" "${STAGE_UNREACH}"
+) >"${PREFLIGHT_LOG_UNREACH}" 2>&1 && \
+python3 - "${STAGE_UNREACH}" "${UNREACH_SHA}" "${HAMI_WATCHED_HEAD}" <<'PY'
+import json
+import os
+import sys
+
+stage_dir, unreach_sha, hami_head = sys.argv[1:4]
+with open(os.path.join(stage_dir, "slicing-preflight-report.json"), "r", encoding="utf-8") as f:
+    report = json.load(f)
+assert report["hami_core"]["pinned_commit_reachable"] is False, report
+
+with open(os.path.join(stage_dir, "upstream-records.json"), "r", encoding="utf-8") as f:
+    by_id = {r["upstreamId"]: r for r in json.load(f)}
+hami_rec = by_id["hami-core"]
+assert hami_rec["status"] == "available", hami_rec
+assert hami_rec["version"] == hami_head, hami_rec
+assert f"pinned commit {unreach_sha} is unreachable" in hami_rec["reason"], hami_rec
+PY
+then
+  pass "preflight-slicing.sh records pinned_commit_reachable=false and available status when pinned commit is unreachable"
+else
+  tail -n 50 "${PREFLIGHT_LOG_UNREACH}" >&2 || true
+  fail "preflight-slicing.sh unreachable pinned commit handling"
 fi
 
 # 5. Gitless env -i validate_slicing.sh tests with stubbed AUTOSYNC_XBUILD_RUNNER.
@@ -321,6 +366,7 @@ PY
 # 5a. Positive NVIDIA-only bump.
 CAND_NV="${SCRATCH}/cand-nv"
 LOG_NV="${SCRATCH}/log-nv.txt"
+VAL_LOG_NV="${SCRATCH}/val-nv.log"
 : > "${LOG_NV}"
 make_gitless_candidate "${CAND_NV}"
 set_commits_in_candidate "${CAND_NV}" "${HAMI_WATCHED_HEAD}" "${UBS_PINNED}"
@@ -331,7 +377,7 @@ if env -i PATH=/usr/local/bin:/usr/bin:/bin \
   LOOPWRIGHT_CANDIDATE_DIR="${CAND_NV}" \
   AUTOSYNC_XBUILD_RUNNER="${STUB_RUNNER}" \
   AUTOSYNC_TEST_LOG="${LOG_NV}" \
-  bash "${CAND_NV}/.auto-sync/checks/validate_slicing.sh" >/dev/null 2>&1 && \
+  bash "${CAND_NV}/.auto-sync/checks/validate_slicing.sh" >"${VAL_LOG_NV}" 2>&1 && \
   [[ ! -e "${CAND_NV}/.git" ]] && \
   python3 - "${LOG_NV}" "${SCRATCH}" <<'PY'
 import sys
@@ -358,12 +404,14 @@ PY
 then
   pass "validate_slicing.sh gitless env -i NVIDIA-only bump runs only NVIDIA stages with non-root XB_STAGE"
 else
+  tail -n 50 "${VAL_LOG_NV}" >&2 || true
   fail "validate_slicing.sh gitless env -i NVIDIA-only bump runs only NVIDIA stages with non-root XB_STAGE"
 fi
 
 # 5b. Positive Ascend-only bump with CRLF vcann-rt patch.
 CAND_ASC="${SCRATCH}/cand-asc"
 LOG_ASC="${SCRATCH}/log-asc.txt"
+VAL_LOG_ASC="${SCRATCH}/val-asc.log"
 : > "${LOG_ASC}"
 make_gitless_candidate "${CAND_ASC}"
 set_commits_in_candidate "${CAND_ASC}" "${HAMI_PINNED}" "${UBS_WATCHED_HEAD}"
@@ -374,7 +422,7 @@ if env -i PATH=/usr/local/bin:/usr/bin:/bin \
   LOOPWRIGHT_CANDIDATE_DIR="${CAND_ASC}" \
   AUTOSYNC_XBUILD_RUNNER="${STUB_RUNNER}" \
   AUTOSYNC_TEST_LOG="${LOG_ASC}" \
-  bash "${CAND_ASC}/.auto-sync/checks/validate_slicing.sh" >/dev/null 2>&1 && \
+  bash "${CAND_ASC}/.auto-sync/checks/validate_slicing.sh" >"${VAL_LOG_ASC}" 2>&1 && \
   [[ ! -e "${CAND_ASC}/.git" ]] && \
   python3 - "${LOG_ASC}" "${SCRATCH}" <<'PY'
 import sys
@@ -399,11 +447,13 @@ PY
 then
   pass "validate_slicing.sh gitless env -i Ascend-only bump verifies CRLF patch and runs only Ascend stages"
 else
+  tail -n 50 "${VAL_LOG_ASC}" >&2 || true
   fail "validate_slicing.sh gitless env -i Ascend-only bump verifies CRLF patch and runs only Ascend stages"
 fi
 
 # 5c. Negative 1: mutating SKOPEO_VERSION or GO_VERSION in Dockerfile fails closed.
 CAND_BAD_DF="${SCRATCH}/cand-bad-df"
+VAL_LOG_BAD_DF="${SCRATCH}/val-bad-df.log"
 make_gitless_candidate "${CAND_BAD_DF}"
 sed 's/^ARG SKOPEO_VERSION="[^"]*"/ARG SKOPEO_VERSION="9.99.0"/' "${SYNTH_REPO}/pack/gpustack-operator/Dockerfile" > "${CAND_BAD_DF}/pack/gpustack-operator/Dockerfile"
 
@@ -413,16 +463,18 @@ if ! env -i PATH=/usr/local/bin:/usr/bin:/bin \
   LOOPWRIGHT_CANDIDATE_DIR="${CAND_BAD_DF}" \
   AUTOSYNC_XBUILD_RUNNER="${STUB_RUNNER}" \
   AUTOSYNC_TEST_LOG="${SCRATCH}/log-bad-df.txt" \
-  bash "${CAND_BAD_DF}/.auto-sync/checks/validate_slicing.sh" >/dev/null 2>&1 && \
+  bash "${CAND_BAD_DF}/.auto-sync/checks/validate_slicing.sh" >"${VAL_LOG_BAD_DF}" 2>&1 && \
   [[ ! -e "${CAND_BAD_DF}/.git" ]]; then
   pass "validate_slicing.sh fails closed on non-slicing Dockerfile ARG mutation (SKOPEO_VERSION)"
 else
+  tail -n 50 "${VAL_LOG_BAD_DF}" >&2 || true
   fail "validate_slicing.sh fails closed on non-slicing Dockerfile ARG mutation (SKOPEO_VERSION)"
 fi
 
 # 5d. Negative 2: broken vcann-rt patch hunk against target commit fails closed.
 CAND_BAD_PATCH="${SCRATCH}/cand-bad-patch"
 LOG_BAD_PATCH="${SCRATCH}/log-bad-patch.txt"
+VAL_LOG_BAD_PATCH="${SCRATCH}/val-bad-patch.log"
 : > "${LOG_BAD_PATCH}"
 make_gitless_candidate "${CAND_BAD_PATCH}"
 set_commits_in_candidate "${CAND_BAD_PATCH}" "${HAMI_PINNED}" "${UBS_BROKEN_HEAD}"
@@ -433,16 +485,18 @@ if ! env -i PATH=/usr/local/bin:/usr/bin:/bin \
   LOOPWRIGHT_CANDIDATE_DIR="${CAND_BAD_PATCH}" \
   AUTOSYNC_XBUILD_RUNNER="${STUB_RUNNER}" \
   AUTOSYNC_TEST_LOG="${LOG_BAD_PATCH}" \
-  bash "${CAND_BAD_PATCH}/.auto-sync/checks/validate_slicing.sh" >/dev/null 2>&1 && \
+  bash "${CAND_BAD_PATCH}/.auto-sync/checks/validate_slicing.sh" >"${VAL_LOG_BAD_PATCH}" 2>&1 && \
   [[ ! -e "${CAND_BAD_PATCH}/.git" ]] && \
   [[ ! -s "${LOG_BAD_PATCH}" ]]; then
   pass "validate_slicing.sh fails closed on broken vcann-rt patch hunk before xbuild"
 else
+  tail -n 50 "${VAL_LOG_BAD_PATCH}" >&2 || true
   fail "validate_slicing.sh fails closed on broken vcann-rt patch hunk before xbuild"
 fi
 
 # 5e. Negative 3: AUTOSYNC_STAGE_DIR set without baseline Dockerfile fails closed.
 MISSING_BASE_STAGE="${SCRATCH}/missing-base-stage"
+VAL_LOG_MISSING_BASE="${SCRATCH}/val-missing-base.log"
 mkdir -p "${MISSING_BASE_STAGE}"
 if ! env -i PATH=/usr/local/bin:/usr/bin:/bin \
   TMPDIR="${SCRATCH}" \
@@ -450,10 +504,44 @@ if ! env -i PATH=/usr/local/bin:/usr/bin:/bin \
   LOOPWRIGHT_CANDIDATE_DIR="${CAND_NV}" \
   AUTOSYNC_XBUILD_RUNNER="${STUB_RUNNER}" \
   AUTOSYNC_TEST_LOG="${SCRATCH}/log-missing-base.txt" \
-  bash "${CAND_NV}/.auto-sync/checks/validate_slicing.sh" >/dev/null 2>&1; then
+  bash "${CAND_NV}/.auto-sync/checks/validate_slicing.sh" >"${VAL_LOG_MISSING_BASE}" 2>&1; then
   pass "validate_slicing.sh fails closed when AUTOSYNC_STAGE_DIR lacks baseline Dockerfile"
 else
+  tail -n 50 "${VAL_LOG_MISSING_BASE}" >&2 || true
   fail "validate_slicing.sh fails closed when AUTOSYNC_STAGE_DIR lacks baseline Dockerfile"
+fi
+
+# 5f. Negative 4: AUTOSYNC_STAGE_DIR set without ubs-virt/.git fails closed.
+MISSING_UBS_STAGE="${SCRATCH}/missing-ubs-stage"
+VAL_LOG_MISSING_UBS="${SCRATCH}/val-missing-ubs.log"
+mkdir -p "${MISSING_UBS_STAGE}"
+cp -R "${STAGE_1}/baseline" "${MISSING_UBS_STAGE}/baseline"
+if ! env -i PATH=/usr/local/bin:/usr/bin:/bin \
+  TMPDIR="${SCRATCH}" \
+  AUTOSYNC_STAGE_DIR="${MISSING_UBS_STAGE}" \
+  LOOPWRIGHT_CANDIDATE_DIR="${CAND_NV}" \
+  AUTOSYNC_XBUILD_RUNNER="${STUB_RUNNER}" \
+  AUTOSYNC_TEST_LOG="${SCRATCH}/log-missing-ubs.txt" \
+  bash "${CAND_NV}/.auto-sync/checks/validate_slicing.sh" >"${VAL_LOG_MISSING_UBS}" 2>&1 && \
+  grep -q "ubs-virt" "${VAL_LOG_MISSING_UBS}"; then
+  pass "validate_slicing.sh fails closed when AUTOSYNC_STAGE_DIR lacks ubs-virt/.git"
+else
+  tail -n 50 "${VAL_LOG_MISSING_UBS}" >&2 || true
+  fail "validate_slicing.sh fails closed when AUTOSYNC_STAGE_DIR lacks ubs-virt/.git"
+fi
+
+# 5g. Negative 5: unset AUTOSYNC_STAGE_DIR fails closed unless AUTOSYNC_ALLOW_MISSING_STAGE_DIR=true.
+VAL_LOG_UNSET_STAGE="${SCRATCH}/val-unset-stage.log"
+if ! env -i PATH=/usr/local/bin:/usr/bin:/bin \
+  TMPDIR="${SCRATCH}" \
+  LOOPWRIGHT_CANDIDATE_DIR="${CAND_NV}" \
+  AUTOSYNC_XBUILD_RUNNER="${STUB_RUNNER}" \
+  AUTOSYNC_TEST_LOG="${SCRATCH}/log-unset-stage.txt" \
+  bash "${CAND_NV}/.auto-sync/checks/validate_slicing.sh" >"${VAL_LOG_UNSET_STAGE}" 2>&1; then
+  pass "validate_slicing.sh fails closed when AUTOSYNC_STAGE_DIR is unset"
+else
+  tail -n 50 "${VAL_LOG_UNSET_STAGE}" >&2 || true
+  fail "validate_slicing.sh fails closed when AUTOSYNC_STAGE_DIR is unset"
 fi
 
 if (( FAILS > 0 )); then

@@ -94,9 +94,16 @@ fi
 git -C "${FAKE_REPO}" add -A
 git -C "${FAKE_REPO}" commit -q -m "baseline"
 
-# Build offline fixtures for preflight-kv-transfer.sh.
-FIXTURE_DIR="${SCRATCH}/fixtures"
-mkdir -p "${FIXTURE_DIR}/pypi" "${FIXTURE_DIR}/repos"
+# Build offline fixtures for preflight-kv-transfer.sh (immutable template copied per test case).
+FIXTURE_BASE="${SCRATCH}/fixtures-base"
+mkdir -p "${FIXTURE_BASE}/pypi" "${FIXTURE_BASE}/repos"
+FIXTURE_DIR="${FIXTURE_BASE}"
+
+clone_fixture() {
+  local dst="$1"
+  rm -rf "${dst}"
+  cp -R "${FIXTURE_BASE}" "${dst}"
+}
 
 # PyPI JSON fixtures: 1.5.3 has all three packages with x86_64+aarch64; 1.6.0 lacks nixl-cu13 aarch64.
 cat > "${FIXTURE_DIR}/pypi/nixl.json" <<'JSON'
@@ -276,10 +283,12 @@ STAGE_DIR="${SCRATCH}/stage-kv"
 GHA_OUT="${SCRATCH}/gha-output.txt"
 
 # 1. Preflight Stage A: new Mooncake 0.3.14 + NIXL 1.5.3 (ignoring incomplete 1.6.0).
+FIX_1="${SCRATCH}/fix-1"
+clone_fixture "${FIX_1}"
 : > "${GHA_OUT}"
 (
   cd "${FAKE_REPO}"
-  AUTOSYNC_KV_FIXTURE_DIR="${FIXTURE_DIR}" \
+  AUTOSYNC_KV_FIXTURE_DIR="${FIX_1}" \
   AUTOSYNC_SKIP_GO_MOD_DOWNLOAD=true \
   GITHUB_OUTPUT="${GHA_OUT}" \
     bash "${FAKE_REPO}/.auto-sync/scripts/preflight-kv-transfer.sh" "${STAGE_DIR}"
@@ -328,9 +337,11 @@ PY
 git -C "${FAKE_REPO}" add -A
 git -C "${FAKE_REPO}" commit -q -m "stage a landed"
 
+FIX_2="${SCRATCH}/fix-2"
+clone_fixture "${FIX_2}"
 (
   cd "${FAKE_REPO}"
-  AUTOSYNC_KV_FIXTURE_DIR="${FIXTURE_DIR}" \
+  AUTOSYNC_KV_FIXTURE_DIR="${FIX_2}" \
   AUTOSYNC_SKIP_GO_MOD_DOWNLOAD=true \
     bash "${FAKE_REPO}/.auto-sync/scripts/preflight-kv-transfer.sh" "${STAGE_DIR}"
 )
@@ -355,7 +366,9 @@ else
 fi
 
 # 3. Preflight Stage B (tag_promotion): 0.3.14-cpu now published multi-arch, value.go still on 0.3.13.post1-cpu.
-python3 - "${FIXTURE_DIR}/image-manifests.json" <<'PY'
+FIX_3="${SCRATCH}/fix-3"
+clone_fixture "${FIX_3}"
+python3 - "${FIX_3}/image-manifests.json" <<'PY'
 import json
 import sys
 p = sys.argv[1]
@@ -372,7 +385,7 @@ PY
 
 (
   cd "${FAKE_REPO}"
-  AUTOSYNC_KV_FIXTURE_DIR="${FIXTURE_DIR}" \
+  AUTOSYNC_KV_FIXTURE_DIR="${FIX_3}" \
   AUTOSYNC_SKIP_GO_MOD_DOWNLOAD=true \
     bash "${FAKE_REPO}/.auto-sync/scripts/preflight-kv-transfer.sh" "${STAGE_DIR}"
 )
@@ -404,9 +417,25 @@ rm -f "${FAKE_REPO}/pkg/worker/settings/value.go.bak" "${FAKE_REPO}/docs/referen
 git -C "${FAKE_REPO}" add -A
 git -C "${FAKE_REPO}" commit -q -m "stage b landed"
 
+FIX_4="${SCRATCH}/fix-4"
+clone_fixture "${FIX_4}"
+python3 - "${FIX_4}/image-manifests.json" <<'PY'
+import json
+import sys
+p = sys.argv[1]
+with open(p, "r", encoding="utf-8") as f:
+    doc = json.load(f)
+doc["images"]["docker.io/gpustack/mirrored-mooncake:0.3.14-cpu"] = {
+    "published": True,
+    "amd64Digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "arm64Digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+}
+with open(p, "w", encoding="utf-8") as f:
+    json.dump(doc, f, indent=2)
+PY
 (
   cd "${FAKE_REPO}"
-  AUTOSYNC_KV_FIXTURE_DIR="${FIXTURE_DIR}" \
+  AUTOSYNC_KV_FIXTURE_DIR="${FIX_4}" \
   AUTOSYNC_SKIP_GO_MOD_DOWNLOAD=true \
     bash "${FAKE_REPO}/.auto-sync/scripts/preflight-kv-transfer.sh" "${STAGE_DIR}"
 )
@@ -431,7 +460,11 @@ else
 fi
 
 # 4b. Preflight Stage B via repo_tags auto-discovery for model-transfer (no AUTOSYNC_*_TARGET_TAG).
-python3 - "${FIXTURE_DIR}/upstream.json" "${FIXTURE_DIR}/image-manifests.json" <<'PY'
+# Verify: (1) v0.9.0-cuda13.0 is ignored for cuda12.9 flavor (major-line prefix),
+# (2) v0.2.0-rocm7.2 with published=false is NOT promoted, and (3) once published=true it IS promoted.
+FIX_4B="${SCRATCH}/fix-4b"
+clone_fixture "${FIX_4B}"
+python3 - "${FIX_4B}/upstream.json" "${FIX_4B}/image-manifests.json" <<'PY'
 import json
 import sys
 
@@ -443,6 +476,7 @@ up["repo_tags"] = {
     "gpustack/model-transfer": [
         "v0.1.0-cuda12.9",
         "v0.2.0-cuda12.9",
+        "v0.9.0-cuda13.0",
         "v0.2.0-rocm7.2",
         "v0.2.0-cann9.2-a5",
     ],
@@ -452,10 +486,20 @@ with open(up_p, "w", encoding="utf-8") as f:
 
 with open(man_p, "r", encoding="utf-8") as f:
     man = json.load(f)
+man["images"]["docker.io/gpustack/mirrored-mooncake:0.3.14-cpu"] = {
+    "published": True,
+    "amd64Digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "arm64Digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+}
 man["images"]["docker.io/gpustack/model-transfer:v0.2.0-cuda12.9"] = {
     "published": True,
     "amd64Digest": "sha256:c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1",
     "arm64Digest": "sha256:d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1",
+}
+man["images"]["docker.io/gpustack/model-transfer:v0.9.0-cuda13.0"] = {
+    "published": True,
+    "amd64Digest": "sha256:c9c9c9c9c9c9c9c9c9c9c9c9c9c9c9c9c9c9c9c9c9c9c9c9c9c9c9c9c9c9c9c9",
+    "arm64Digest": "sha256:d9d9d9d9d9d9d9d9d9d9d9d9d9d9d9d9d9d9d9d9d9d9d9d9d9d9d9d9d9d9d9d9",
 }
 man["images"]["docker.io/gpustack/model-transfer:v0.2.0-rocm7.2"] = {
     "published": False,
@@ -473,7 +517,45 @@ PY
 
 (
   cd "${FAKE_REPO}"
-  AUTOSYNC_KV_FIXTURE_DIR="${FIXTURE_DIR}" \
+  AUTOSYNC_KV_FIXTURE_DIR="${FIX_4B}" \
+  AUTOSYNC_SKIP_GO_MOD_DOWNLOAD=true \
+    bash "${FAKE_REPO}/.auto-sync/scripts/preflight-kv-transfer.sh" "${STAGE_DIR}"
+)
+
+if python3 - "${STAGE_DIR}" <<'PY'
+import json
+import os
+import sys
+
+stage = sys.argv[1]
+with open(os.path.join(stage, "kv-transfer-preflight-report.json"), "r", encoding="utf-8") as f:
+    rep = json.load(f)
+mt = rep["targets"]["model_transfer_images"]
+assert mt["nvidia"] == "gpustack/model-transfer:v0.2.0-cuda12.9", mt
+assert mt["amd"] == "gpustack/model-transfer:v0.1.0-rocm7.2", mt
+assert mt["ascend"] == "gpustack/model-transfer:v0.2.0-cann9.2-a5", mt
+PY
+then
+  pass "preflight Stage B ignores cuda13.0 for cuda12.9 and keeps unpublished rocm7.2 unpromoted"
+else
+  fail "preflight Stage B ignores cuda13.0 for cuda12.9 and keeps unpublished rocm7.2 unpromoted"
+fi
+
+python3 - "${FIX_4B}/image-manifests.json" <<'PY'
+import json
+import sys
+
+p = sys.argv[1]
+with open(p, "r", encoding="utf-8") as f:
+    man = json.load(f)
+man["images"]["docker.io/gpustack/model-transfer:v0.2.0-rocm7.2"]["published"] = True
+with open(p, "w", encoding="utf-8") as f:
+    json.dump(man, f, indent=2)
+PY
+
+(
+  cd "${FAKE_REPO}"
+  AUTOSYNC_KV_FIXTURE_DIR="${FIX_4B}" \
   AUTOSYNC_SKIP_GO_MOD_DOWNLOAD=true \
     bash "${FAKE_REPO}/.auto-sync/scripts/preflight-kv-transfer.sh" "${STAGE_DIR}"
 )
@@ -502,6 +584,21 @@ then
 else
   fail "preflight Stage B auto-discovers model-transfer tags via repo_tags without AUTOSYNC_*_TARGET_TAG"
 fi
+
+# 4c. Missing PyPI fixture file under AUTOSYNC_KV_FIXTURE_DIR fails closed.
+FIX_MISSING_PYPI="${SCRATCH}/fix-missing-pypi"
+clone_fixture "${FIX_MISSING_PYPI}"
+rm -f "${FIX_MISSING_PYPI}/pypi/nixl-cu13.json"
+run_kv_preflight_with_fixture() {
+  (
+    cd "$1"
+    AUTOSYNC_KV_FIXTURE_DIR="$2" \
+    AUTOSYNC_SKIP_GO_MOD_DOWNLOAD=true \
+      bash "$1/.auto-sync/scripts/preflight-kv-transfer.sh" "$3"
+  )
+}
+assert_fails "preflight fails closed when AUTOSYNC_KV_FIXTURE_DIR is missing pypi/nixl-cu13.json" \
+  run_kv_preflight_with_fixture "${FAKE_REPO}" "${FIX_MISSING_PYPI}" "${SCRATCH}/stage-missing-pypi"
 
 # 5. Gitless candidate validator tests (Mooncake 5-block parser, two-stage gate, shared-file guards, HIXL parity, ModelExpress build).
 VAL_STAGE="${SCRATCH}/val-stage"
@@ -569,7 +666,7 @@ cat > "${VAL_STAGE}/image-manifests.json" <<'JSON'
     "gpustack/model-transfer:v0.1.0-rocm7.2": {
       "image": "gpustack/model-transfer:v0.1.0-rocm7.2",
       "normalized": "docker.io/gpustack/model-transfer:v0.1.0-rocm7.2",
-      "published": false,
+      "published": true,
       "amd64Digest": "sha256:7777777777777777777777777777777777777777777777777777777777777777",
       "arm64Digest": ""
     },
@@ -836,6 +933,25 @@ rm -rf "${NIXL_ROCM_MOCK}"
 make_gitless_cand
 set_kv_proposal "recipe_sync" "mooncake=0.99.0"
 assert_fails "validate_kv_transfer fails closed on mismatched proposals/kv-transfer.json" run_validate
+
+# 5n. Invalid gpustack-runner value in proposals/kv-transfer.json fails closed.
+make_gitless_cand
+set_kv_proposal "aligned" "gpustack-runner=alinged"
+assert_fails "validate_kv_transfer fails closed on typo gpustack-runner=alinged" run_validate
+
+# 5o. ROCm amd64-only image marked published=false fails closed.
+make_gitless_cand
+python3 - "${VAL_STAGE}/image-manifests.json" <<'PY'
+import json
+import sys
+p = sys.argv[1]
+with open(p, "r", encoding="utf-8") as f:
+    doc = json.load(f)
+doc["images"]["gpustack/model-transfer:v0.1.0-rocm7.2"]["published"] = False
+with open(p, "w", encoding="utf-8") as f:
+    json.dump(doc, f, indent=2)
+PY
+assert_fails "validate_kv_transfer fails closed when amd64-only ROCm image has published=false" run_validate
 
 echo
 if (( FAILS > 0 )); then

@@ -50,10 +50,11 @@ cleanup_preflight() {
   rm -f "${PROBE_LIST_FILE}"
   rm -rf "${WORK_TMP}"
 }
-trap cleanup_preflight EXIT
+trap cleanup_preflight EXIT INT TERM HUP
 
 # Discover upstream chart versions, cache .tgz archives, check patches, and gather probe refs.
 python3 - "${REPO_ROOT}" "${STAGE_DIR}" "${AUTOSYNC_CHARTS_FIXTURE_DIR:-}" "${DISCOVERY_JSON}" "${PROBE_LIST_FILE}" "${WORK_TMP}" <<'PY'
+import hashlib
 import json
 import os
 import re
@@ -228,22 +229,53 @@ def find_fixture_archive(fix_root: str, chart_name: str, ver: str, url: str, arc
     return ""
 
 
-def cache_archive(chart_name: str, ver: str, url: str, fix_root: str, archive_hint: str = "", required: bool = True) -> str:
+def normalize_sha256_digest(raw_val) -> str:
+    val = str(raw_val or "").strip().lower()
+    if val.startswith("sha256:"):
+        val = val[len("sha256:"):]
+    return val if re.fullmatch(r"[0-9a-f]{64}", val) else ""
+
+
+def cache_archive(
+    chart_name: str,
+    ver: str,
+    url: str,
+    fix_root: str,
+    archive_hint: str = "",
+    required: bool = True,
+    expected_sha256: str = "",
+) -> tuple[str, str]:
     dst = os.path.join(deps_cache_charts, f"{chart_name}-{ver}.tgz")
+    expected_norm = normalize_sha256_digest(expected_sha256)
+    if expected_sha256 and not expected_norm:
+        raise SystemExit(f"FAIL: invalid expected SHA-256 digest for {chart_name} {ver}: {expected_sha256!r}")
+
     if os.path.isfile(dst):
-        return dst
-    if fix_root:
+        with open(dst, "rb") as f:
+            data = f.read()
+    elif fix_root:
         src = find_fixture_archive(fix_root, chart_name, ver, url, archive_hint)
         if src:
-            shutil.copyfile(src, dst)
-            return dst
-        if required:
+            with open(src, "rb") as f:
+                data = f.read()
+        elif required:
             raise SystemExit(f"FAIL: missing fixture chart archive for {chart_name} {ver} in {fix_root}")
-        return ""
-    data = fetch_bytes(url)
-    with open(dst, "wb") as f:
-        f.write(data)
-    return dst
+        else:
+            return "", ""
+    else:
+        data = fetch_bytes(url)
+
+    actual_sha256 = hashlib.sha256(data).hexdigest()
+    if expected_norm and actual_sha256 != expected_norm:
+        raise SystemExit(
+            f"FAIL: archive SHA-256 mismatch for {chart_name} {ver}: "
+            f"expected {expected_norm}, got {actual_sha256}"
+        )
+
+    if not os.path.isfile(dst):
+        with open(dst, "wb") as f:
+            f.write(data)
+    return dst, actual_sha256
 
 
 def resolve_github_release_chart(repo_slug: str, asset_prefix: str, fallback_url_tmpl: str, pinned_ver: str, pinned_url: str):
@@ -259,21 +291,23 @@ def resolve_github_release_chart(repo_slug: str, asset_prefix: str, fallback_url
         if not re.match(r"^\d+\.\d+\.\d+$", ver) or is_prerelease(ver):
             continue
         dl_url = ""
+        asset_sha = ""
         expected_asset = f"{asset_prefix}-{ver}.tgz"
         for asset in rel.get("assets") or []:
             if isinstance(asset, dict) and asset.get("name") == expected_asset:
                 dl_url = str(asset.get("browser_download_url") or "")
+                asset_sha = normalize_sha256_digest(asset.get("digest"))
                 break
         if not dl_url:
             dl_url = fallback_url_tmpl.format(tag=tag, ver=ver)
-        candidates.append((parse_semver_key(ver), ver, dl_url))
+        candidates.append((parse_semver_key(ver), ver, dl_url, asset_sha))
     if not candidates:
-        return pinned_ver, pinned_url
+        return pinned_ver, pinned_url, ""
     candidates.sort(key=lambda x: x[0], reverse=True)
-    _, best_ver, best_url = candidates[0]
+    _, best_ver, best_url, best_sha = candidates[0]
     if parse_semver_key(best_ver) < parse_semver_key(pinned_ver):
-        return pinned_ver, pinned_url
-    return best_ver, best_url
+        return pinned_ver, pinned_url, ""
+    return best_ver, best_url, best_sha
 
 
 def resolve_helm_index_chart(index_url: str, entry_name: str, base_url: str, pinned_ver: str, pinned_url: str):
@@ -290,14 +324,15 @@ def resolve_helm_index_chart(index_url: str, entry_name: str, base_url: str, pin
         if not urls:
             continue
         dl_url = urllib.parse.urljoin(base_url, str(urls[0]))
-        candidates.append((parse_semver_key(ver), ver, dl_url))
+        entry_sha = normalize_sha256_digest(item.get("digest"))
+        candidates.append((parse_semver_key(ver), ver, dl_url, entry_sha))
     if not candidates:
-        return pinned_ver, pinned_url
+        return pinned_ver, pinned_url, ""
     candidates.sort(key=lambda x: x[0], reverse=True)
-    _, best_ver, best_url = candidates[0]
+    _, best_ver, best_url, best_sha = candidates[0]
     if parse_semver_key(best_ver) < parse_semver_key(pinned_ver):
-        return pinned_ver, pinned_url
-    return best_ver, best_url
+        return pinned_ver, pinned_url, ""
+    return best_ver, best_url, best_sha
 
 
 def unpack_tgz_strip_one(tgz_path: str, dst_dir: str):
@@ -445,9 +480,13 @@ def extract_candidate_requirements(chart_name: str, unpacked_dir: str, cand_ver:
                 })
             elif cur_ref:
                 reqs.append({
-                    "upstream": cand_ref or cur_ref,
+                    "upstream": cand_ref,
                     "mirrored": cur_ref,
-                    "sync_spec": sync_spec_for(cand_ref or cur_ref, mir_short, cur_tag),
+                    "sync_spec": (
+                        sync_spec_for(cand_ref, mir_short, cur_tag)
+                        if (cand_ref and "gpustack/mirrored-" not in cand_ref)
+                        else ""
+                    ),
                 })
     elif chart_name == "topograph":
         img = c_values.get("image") or {}
@@ -496,11 +535,13 @@ for name, up_id, kind, source in chart_specs:
     # Cache the pinned archive when available so offline hack/deps.sh always has it.
     cache_archive(name, pinned_ver, pinned_url, fixture_dir, pin["archive_name"], required=(not fixture_dir))
 
+    expected_sha256 = ""
     if name in upstream_override:
         ov = upstream_override[name]
         cand_ver = str(ov.get("version") or pinned_ver).strip().lstrip("v")
         cand_url = str(ov.get("url") or pinned_url).strip()
         archive_hint = str(ov.get("archive") or "").strip()
+        expected_sha256 = str(ov.get("sha256") or ov.get("digest") or "").strip()
     elif fixture_dir:
         cand_ver = pinned_ver
         cand_url = pinned_url
@@ -508,7 +549,7 @@ for name, up_id, kind, source in chart_specs:
     else:
         archive_hint = ""
         if name == "kueue":
-            cand_ver, cand_url = resolve_github_release_chart(
+            cand_ver, cand_url, expected_sha256 = resolve_github_release_chart(
                 "kubernetes-sigs/kueue",
                 "kueue",
                 "https://github.com/kubernetes-sigs/kueue/releases/download/{tag}/kueue-{ver}.tgz",
@@ -516,7 +557,7 @@ for name, up_id, kind, source in chart_specs:
                 pinned_url,
             )
         elif name == "node-feature-discovery":
-            cand_ver, cand_url = resolve_github_release_chart(
+            cand_ver, cand_url, expected_sha256 = resolve_github_release_chart(
                 "kubernetes-sigs/node-feature-discovery",
                 "node-feature-discovery-chart",
                 "https://github.com/kubernetes-sigs/node-feature-discovery/releases/download/{tag}/node-feature-discovery-chart-{ver}.tgz",
@@ -524,7 +565,7 @@ for name, up_id, kind, source in chart_specs:
                 pinned_url,
             )
         elif name == "csi-driver-nfs":
-            cand_ver, cand_url = resolve_helm_index_chart(
+            cand_ver, cand_url, expected_sha256 = resolve_helm_index_chart(
                 "https://raw.githubusercontent.com/kubernetes-csi/csi-driver-nfs/master/charts/index.yaml",
                 "csi-driver-nfs",
                 "https://raw.githubusercontent.com/kubernetes-csi/csi-driver-nfs/master/charts/",
@@ -532,7 +573,7 @@ for name, up_id, kind, source in chart_specs:
                 pinned_url,
             )
         elif name == "csi-driver-s3":
-            cand_ver, cand_url = resolve_helm_index_chart(
+            cand_ver, cand_url, expected_sha256 = resolve_helm_index_chart(
                 "https://thxcode.github.io/k8s-csi-s3/charts/index.yaml",
                 "csi-s3",
                 "https://thxcode.github.io/k8s-csi-s3/charts/",
@@ -540,7 +581,7 @@ for name, up_id, kind, source in chart_specs:
                 pinned_url,
             )
         elif name == "topograph":
-            cand_ver, cand_url = resolve_helm_index_chart(
+            cand_ver, cand_url, expected_sha256 = resolve_helm_index_chart(
                 "https://dsx-ai-factory.github.io/topograph/index.yaml",
                 "topograph",
                 "https://dsx-ai-factory.github.io/topograph/",
@@ -548,7 +589,15 @@ for name, up_id, kind, source in chart_specs:
                 pinned_url,
             )
 
-    cand_tgz = cache_archive(name, cand_ver, cand_url, fixture_dir, archive_hint, required=True)
+    cand_tgz, cand_sha256 = cache_archive(
+        name,
+        cand_ver,
+        cand_url,
+        fixture_dir,
+        archive_hint,
+        required=True,
+        expected_sha256=expected_sha256,
+    )
     unpacked_dir = os.path.join(work_tmp, f"unpacked-{name}")
     unpack_tgz_strip_one(cand_tgz, unpacked_dir)
 
@@ -568,6 +617,7 @@ for name, up_id, kind, source in chart_specs:
         "candidate_url": cand_url,
         "changed": cand_ver != pinned_ver,
         "cache_archive": os.path.relpath(cand_tgz, stage_dir),
+        "archiveSha256": cand_sha256,
         "patch_clean": patch_clean,
         "required_images": reqs,
     }
@@ -633,7 +683,7 @@ for name, info in disc["charts"].items():
         if not is_published(mir):
             missing_images.append(mir)
             spec = req["sync_spec"]
-            if spec not in missing_specs:
+            if spec and spec not in missing_specs:
                 missing_specs.append(spec)
     info["mirrored_image_ready"] = len(missing_images) == 0
     info["missing_images"] = missing_images
@@ -662,17 +712,17 @@ while IFS= read -r cname || [[ -n "${cname}" ]]; do
 done < "${READY_LIST_FILE}"
 
 if (( ${#STAGED_CHARTS[@]} > 0 )) && [[ "${AUTOSYNC_SKIP_SOURCE_REVISION:-false}" != "true" ]]; then
-  restore_staged_on_err() {
-    autosync::preflight::_restore_paths "${REPO_ROOT}" "${BASE_SHA}" \
-      "hack/deps.sh" \
-      "deploy/gpustack-operator/chart" || true
-    cleanup_preflight
-  }
-  trap restore_staged_on_err EXIT
+  STAGE_WORK="${WORK_TMP}/staged-repo"
+  mkdir -p "${STAGE_WORK}/deploy/gpustack-operator"
+  cp -R "${REPO_ROOT}/hack" "${STAGE_WORK}/hack"
+  cp -R "${REPO_ROOT}/deploy/gpustack-operator/chart" "${STAGE_WORK}/deploy/gpustack-operator/chart"
+  if [[ -f "${REPO_ROOT}/Makefile" ]]; then
+    cp -f "${REPO_ROOT}/Makefile" "${STAGE_WORK}/Makefile"
+  fi
 
   python3 - "${DISCOVERY_JSON}" "${READY_LIST_FILE}" \
-    "${REPO_ROOT}/hack/deps.sh" \
-    "${REPO_ROOT}/deploy/gpustack-operator/chart/Chart.yaml" <<'PY'
+    "${STAGE_WORK}/hack/deps.sh" \
+    "${STAGE_WORK}/deploy/gpustack-operator/chart/Chart.yaml" <<'PY'
 import json
 import re
 import sys
@@ -726,30 +776,30 @@ with open(chart_yaml_path, "w", encoding="utf-8") as f:
 PY
 
   (
-    cd "${REPO_ROOT}"
+    cd "${STAGE_WORK}"
     GPUSTACK_DEPS_STAGE_ONLY=charts \
     GPUSTACK_DEPS_OFFLINE=true \
     GPUSTACK_DEPS_CACHE_DIR="${STAGE_DIR}/deps-cache" \
-      bash "${REPO_ROOT}/hack/deps.sh"
+      bash "${STAGE_WORK}/hack/deps.sh"
   )
 
   if [[ "${AUTOSYNC_SKIP_GENERATE_CHART:-false}" != "true" ]] && \
      command -v helm-docs >/dev/null 2>&1 && \
      command -v helm-schema >/dev/null 2>&1; then
     (
-      cd "${REPO_ROOT}"
-      PATH="${STAGE_DIR}/.sbin:${PATH}" make generate chart
+      cd "${STAGE_WORK}"
+      PATH="${STAGE_DIR}/.sbin:${PATH}" bash "${STAGE_WORK}/hack/generate.sh" chart
     )
   fi
 
   SOURCE_REVISION="$(
-    autosync::preflight::commit_detached_source_revision \
+    autosync::preflight::commit_staged_tree_revision \
       "${REPO_ROOT}" "${BASE_SHA}" \
       "chore(chart): stage vendored helm subcharts" \
+      "${STAGE_WORK}" \
       "hack/deps.sh" \
       "deploy/gpustack-operator/chart"
   )"
-  trap cleanup_preflight EXIT
 fi
 
 REPORT_JSON="${STAGE_DIR}/charts-preflight-report.json"
@@ -827,8 +877,6 @@ with open(records_path, "w", encoding="utf-8") as f:
     json.dump(upstream_records, f, indent=2)
     f.write("\n")
 PY
-
-rm -f "${DISCOVERY_JSON}"
 
 COMPACT_RECORDS="$(python3 -c 'import json,sys; print(json.dumps(json.load(open(sys.argv[1])), separators=(",", ":")))' "${UPSTREAM_RECORDS_JSON}")"
 autosync::preflight::write_github_output "stage_dir" "${STAGE_DIR}"

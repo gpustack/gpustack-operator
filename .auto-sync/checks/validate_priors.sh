@@ -50,26 +50,19 @@ if [[ -n "${AUTOSYNC_STAGE_DIR:-}" && -f "${AUTOSYNC_STAGE_DIR}/priors-preflight
   report_json="${AUTOSYNC_STAGE_DIR}/priors-preflight-report.json"
 fi
 
-python3 - "${priors_yaml}" "${records_md}" "${report_json}" <<'PY'
+profile_counts="$(autosync::count_priors_profiles "${priors_yaml}")"
+actual_agg="${profile_counts%% *}"
+actual_disagg="${profile_counts##* }"
+
+python3 - "${records_md}" "${report_json}" "${actual_agg}" "${actual_disagg}" <<'PY'
 import json
 import re
 import sys
 
-priors_path, records_path, report_path = sys.argv[1:4]
+records_path, report_path, actual_agg_str, actual_disagg_str = sys.argv[1:5]
 
-actual_agg = 0
-actual_disagg = 0
-with open(priors_path, "r", encoding="utf-8") as f:
-    for line in f:
-        m = re.match(r"^\s*-\s+mode:\s*(\S+)\s*$", line)
-        if m:
-            mode = m.group(1)
-            if mode == "aggregated":
-                actual_agg += 1
-            elif mode == "disaggregated":
-                actual_disagg += 1
-            else:
-                raise SystemExit(f"FAIL: unexpected profile mode in priors.yaml: {mode}")
+actual_agg = int(actual_agg_str)
+actual_disagg = int(actual_disagg_str)
 
 with open(records_path, "r", encoding="utf-8") as f:
     records_txt = f.read()

@@ -103,12 +103,9 @@ PY
     exit 1
   fi
   if [[ "${RETIRE_0001}" == "true" && -f "${EPD_PATCH}" ]]; then
-    if [[ -n "${TARGET_VLLM_VER}" && "${CAND_VLLM_VER}" == "${TARGET_VLLM_VER}" ]] || \
-       [[ "${CAND_VLLM_VER}" != "${BASE_VLLM_VER}" ]]; then
-      printf 'FAIL: 0001-epd-routing.patch must be retired when VLLM_ROUTER_VERSION advances to %s (516f1cb ancestor)\n' \
-        "${CAND_VLLM_VER}" >&2
-      exit 1
-    fi
+    printf 'FAIL: 0001-epd-routing.patch must be retired (retire_0001_epd_routing=true); target vllm-router version %s contains 516f1cb\n' \
+      "${TARGET_VLLM_VER}" >&2
+    exit 1
   fi
 fi
 
@@ -134,13 +131,17 @@ apply_staged_patches() {
   fi
 
   if [[ ! -d "${stage_repo}" ]]; then
-    if [[ "${name}" == "sglang" ]]; then
-      if ! grep -q "struct ObserverRouter" "${patches[@]}"; then
-        printf 'FAIL: struct ObserverRouter missing from sglang-gateway patches\n' >&2
-        return 1
+    if [[ "${AUTOSYNC_ALLOW_MISSING_STAGED_REPO:-false}" == "true" ]]; then
+      if [[ "${name}" == "sglang" ]]; then
+        if ! grep -q "struct ObserverRouter" "${patches[@]}"; then
+          printf 'FAIL: struct ObserverRouter missing from sglang-gateway patches\n' >&2
+          return 1
+        fi
       fi
+      return 0
     fi
-    return 0
+    printf 'FAIL: staged upstream repo missing for %s: %s\n' "${name}" "${stage_repo}" >&2
+    return 1
   fi
 
   if ! git -C "${stage_repo}" rev-parse --verify -q "${target_ver}^{commit}" >/dev/null 2>&1; then

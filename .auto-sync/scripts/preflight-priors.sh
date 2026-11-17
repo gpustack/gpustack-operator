@@ -10,6 +10,17 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 # shellcheck source=./lib-preflight.sh
 # shellcheck disable=SC1091
 source "${SCRIPT_DIR}/lib-preflight.sh"
+# shellcheck source=../checks/lib.sh
+# shellcheck disable=SC1091
+source "${SCRIPT_DIR}/../checks/lib.sh"
+
+work_dir="$(mktemp -d "${TMPDIR:-/tmp}/autosync-priors-work.XXXXXXXX")"
+cleanup_work() {
+  if [[ -n "${work_dir:-}" && -d "${work_dir}" ]]; then
+    rm -rf "${work_dir}"
+  fi
+}
+trap cleanup_work EXIT INT TERM HUP
 
 stage_dir="$(autosync::preflight::init_stage "priors" "${1:-${AUTOSYNC_STAGE_DIR:-}}")"
 repo_root="$(autosync::preflight::repo_root)"
@@ -52,10 +63,11 @@ else
     printf 'FAIL: unable to resolve SemiAnalysisAI/InferenceX HEAD commit: %s\n' "${ls_remote_out}" >&2
     exit 1
   fi
-  curl -fsSL --compressed "${availability_url}" -o "${snapshots_dir}/availability.json"
+  curl -fsSL --compressed --connect-timeout 15 --max-time 60 --retry 3 --retry-delay 5 --max-filesize 104857600 \
+    "${availability_url}" -o "${snapshots_dir}/availability.json"
 fi
 
-query_ids_file="${stage_dir}/query-ids.txt"
+query_ids_file="${work_dir}/query-ids.txt"
 python3 - "${snapshots_dir}/availability.json" "${query_ids_file}" <<'PY'
 import json
 import re
@@ -65,17 +77,24 @@ avail_path, out_path = sys.argv[1:3]
 with open(avail_path, "r", encoding="utf-8") as f:
     data = json.load(f)
 
+if not isinstance(data, (list, dict)):
+    raise SystemExit("FAIL: availability.json must be a JSON array or object")
+
+QID_RE = re.compile(r"^[A-Za-z0-9._-]+$")
+MAX_QUERY_IDS = 256
 seen = set()
 query_ids = []
 
 
 def add_qid(val):
     if not isinstance(val, str):
-        return
+        raise SystemExit(f"FAIL: non-string query ID in availability.json: {val!r}")
     qid = val.strip()
-    if not qid or "/" in qid or "\\" in qid or ".." in qid:
-        raise SystemExit(f"FAIL: unsafe or empty query ID in availability.json: {val!r}")
+    if not qid or ".." in qid or not QID_RE.fullmatch(qid):
+        raise SystemExit(f"FAIL: unsafe or malformed query ID in availability.json: {val!r}")
     if qid not in seen:
+        if len(query_ids) >= MAX_QUERY_IDS:
+            raise SystemExit(f"FAIL: availability.json exceeds max query ID cap ({MAX_QUERY_IDS})")
         seen.add(qid)
         query_ids.append(qid)
 
@@ -86,18 +105,25 @@ def extract(node):
             if isinstance(item, str):
                 add_qid(item)
             elif isinstance(item, dict):
+                found = False
                 for key in ("query_id", "query_model", "model", "id", "name"):
                     if isinstance(item.get(key), str) and item[key].strip():
                         add_qid(item[key])
+                        found = True
                         break
+                if not found:
+                    raise SystemExit(f"FAIL: malformed item in availability.json: {item!r}")
+            else:
+                raise SystemExit(f"FAIL: unexpected entry type in availability.json: {item!r}")
     elif isinstance(node, dict):
         for wrapper_key in ("models", "available", "data", "items", "results"):
             if wrapper_key in node and isinstance(node[wrapper_key], (list, dict)):
                 extract(node[wrapper_key])
                 return
         for key in sorted(node.keys()):
-            if re.match(r"^[A-Za-z0-9._-]+$", key):
-                add_qid(key)
+            add_qid(key)
+    else:
+        raise SystemExit(f"FAIL: unexpected JSON node in availability.json: {type(node).__name__}")
 
 
 extract(data)
@@ -124,7 +150,8 @@ while IFS= read -r qid || [[ -n "${qid}" ]]; do
     cp -f "${src_snap}" "${snapshots_dir}/${qid}.json"
   else
     encoded_qid="$(python3 -c 'import sys, urllib.parse; print(urllib.parse.quote(sys.argv[1], safe=""))' "${qid}")"
-    curl -fsSL --compressed "https://inferencex.semianalysis.com/api/v1/benchmarks?model=${encoded_qid}" \
+    curl -fsSL --compressed --connect-timeout 15 --max-time 60 --retry 3 --retry-delay 5 --max-filesize 104857600 \
+      "https://inferencex.semianalysis.com/api/v1/benchmarks?model=${encoded_qid}" \
       -o "${snapshots_dir}/${qid}.json"
   fi
 done < "${query_ids_file}"
@@ -235,12 +262,6 @@ source_revision="${base_sha}"
 merge_attempted=false
 catalog_changed=false
 
-work_dir="$(mktemp -d "${TMPDIR:-/tmp}/autosync-priors-work.XXXXXXXX")"
-cleanup_work() {
-  rm -rf "${work_dir}"
-}
-trap cleanup_work EXIT
-
 tmp_catalog="${work_dir}/priors.yaml"
 cp -f "${repo_root}/pkg/worker/scaling/priors/priors.yaml" "${tmp_catalog}"
 
@@ -287,36 +308,38 @@ PY
   )
 
   if ! cmp -s "${tmp_catalog}" "${repo_root}/pkg/worker/scaling/priors/priors.yaml"; then
-    catalog_changed=true
-    restore_catalog_on_err() {
-      cp -f "${stage_dir}/baseline/pkg/worker/scaling/priors/priors.yaml" \
-        "${repo_root}/pkg/worker/scaling/priors/priors.yaml" || true
-    }
-    trap 'restore_catalog_on_err; cleanup_work' EXIT
-    cp -f "${tmp_catalog}" "${repo_root}/pkg/worker/scaling/priors/priors.yaml"
+    staged_tree="${work_dir}/staged-tree"
+    mkdir -p "${staged_tree}/pkg/worker/scaling/priors"
+    cp -f "${tmp_catalog}" "${staged_tree}/pkg/worker/scaling/priors/priors.yaml"
     source_revision="$(
-      autosync::preflight::commit_detached_source_revision \
+      autosync::preflight::commit_staged_tree_revision \
         "${repo_root}" "${base_sha}" \
         "chore(priors): stage InferenceX catalog merge" \
+        "${staged_tree}" \
         "pkg/worker/scaling/priors/priors.yaml"
     )"
-    trap cleanup_work EXIT
+    if [[ "${source_revision}" != "${base_sha}" ]]; then
+      catalog_changed=true
+    fi
   fi
 fi
+
+profile_counts="$(autosync::count_priors_profiles "${tmp_catalog}")"
+agg_count="${profile_counts%% *}"
+disagg_count="${profile_counts##* }"
 
 report_json="${stage_dir}/priors-preflight-report.json"
 upstream_records_json="${stage_dir}/upstream-records.json"
 
-python3 - "${analysis_json}" "${tmp_catalog}" "${report_json}" "${upstream_records_json}" \
+python3 - "${analysis_json}" "${report_json}" "${upstream_records_json}" \
   "${capture_date}" "${base_sha}" "${source_revision}" "${inferencex_commit}" \
-  "${inferencex_repo_url}" "${merge_attempted}" "${catalog_changed}" <<'PY'
+  "${inferencex_repo_url}" "${merge_attempted}" "${catalog_changed}" \
+  "${agg_count}" "${disagg_count}" <<'PY'
 import json
-import re
 import sys
 
 (
     analysis_path,
-    catalog_path,
     report_path,
     records_out_path,
     capture_date,
@@ -326,26 +349,32 @@ import sys
     inferencex_repo_url,
     merge_attempted_str,
     catalog_changed_str,
-) = sys.argv[1:12]
+    agg_count_str,
+    disagg_count_str,
+) = sys.argv[1:13]
 
 with open(analysis_path, "r", encoding="utf-8") as f:
     analysis = json.load(f)
 
-agg_count = 0
-disagg_count = 0
-with open(catalog_path, "r", encoding="utf-8") as f:
-    for line in f:
-        m = re.match(r"^\s*-\s+mode:\s*(aggregated|disaggregated)\s*$", line)
-        if m:
-            if m.group(1) == "aggregated":
-                agg_count += 1
-            else:
-                disagg_count += 1
-
+agg_count = int(agg_count_str)
+disagg_count = int(disagg_count_str)
 merge_attempted = merge_attempted_str == "true"
 catalog_changed = catalog_changed_str == "true"
 snapshots_changed = bool(analysis["snapshots_changed"])
+digest_refresh_only = bool(snapshots_changed and not catalog_changed and source_revision == base_sha)
 overall_changed = snapshots_changed or (source_revision != base_sha)
+
+digest_refresh_reason = (
+    "InferenceX snapshot SHA-256 changed without altering priors.yaml profiles; "
+    "update pkg/worker/scaling/priors/records.md digests and commit"
+)
+
+if digest_refresh_only:
+    avail_reason = digest_refresh_reason
+elif overall_changed:
+    avail_reason = "InferenceX availability or benchmark snapshots changed relative to records.md"
+else:
+    avail_reason = "All InferenceX availability and benchmark snapshot SHA-256 digests match records.md"
 
 report = {
     "schema_version": 1,
@@ -353,6 +382,8 @@ report = {
     "base_sha": base_sha,
     "source_revision": source_revision,
     "changed": overall_changed,
+    "digest_refresh_only": digest_refresh_only,
+    "reason": avail_reason,
     "enforce_snapshot_digests": True,
     "inferencex_repo": {
         "url": inferencex_repo_url,
@@ -392,9 +423,7 @@ upstream_records = [
         "upstreamId": "inferencex-availability",
         "status": avail_status,
         "version": avail_sha,
-        "reason": "InferenceX availability or benchmark snapshots changed relative to records.md"
-        if avail_status == "available"
-        else "All InferenceX availability and benchmark snapshot SHA-256 digests match records.md",
+        "reason": avail_reason,
     },
 ]
 

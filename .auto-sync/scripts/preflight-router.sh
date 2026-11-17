@@ -30,7 +30,7 @@ fi
 
 PROBE_LIST_FILE="$(mktemp "${TMPDIR:-/tmp}/autosync-router-probes.XXXXXXXX")"
 DISCOVERY_JSON="${STAGE_DIR}/router-discovery.json"
-trap 'rm -f "${PROBE_LIST_FILE}" "${DISCOVERY_JSON}"' EXIT
+trap 'rm -f "${PROBE_LIST_FILE}" "${DISCOVERY_JSON}"' EXIT INT TERM HUP
 
 python3 - "${REPO_ROOT}" "${STAGE_DIR}" "${AUTOSYNC_ROUTER_FIXTURE_DIR:-}" "${DISCOVERY_JSON}" "${PROBE_LIST_FILE}" <<'PY'
 import json
@@ -74,7 +74,7 @@ def resolve_repo_url(env_var: str, fixture_name: str, default_url: str) -> tuple
         local_repo = os.path.join(fixture_dir, "repos", fixture_name)
         if os.path.isdir(local_repo):
             return local_repo, True
-        return "", True
+        raise SystemExit(f"FAIL: AUTOSYNC_ROUTER_FIXTURE_DIR is set but missing fixture repo: {local_repo}")
     return default_url, False
 
 

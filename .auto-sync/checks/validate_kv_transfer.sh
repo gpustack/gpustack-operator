@@ -54,19 +54,19 @@ if [[ ! -f "${MOONCAKE_DF}" ]]; then
 fi
 
 python3 - "${MOONCAKE_DF}" <<'PY'
+import fnmatch
 import re
-import subprocess
 import sys
 
 df_path = sys.argv[1]
 with open(df_path, "r", encoding="utf-8") as f:
     text = f.read()
 
-m = re.search(r'^ARG MOONCAKE_VERSION="([^"]+)"', text, re.MULTILINE)
+m = re.search(r'^ARG MOONCAKE_VERSION=(?:"([^"]+)"|\'([^\']+)\'|([^\s#]+))', text, re.MULTILINE)
 if not m:
-    print("FAIL: missing ARG MOONCAKE_VERSION=\"...\" in pack/mirrored-mooncake/Dockerfile", file=sys.stderr)
+    print('FAIL: missing ARG MOONCAKE_VERSION="..." in pack/mirrored-mooncake/Dockerfile', file=sys.stderr)
     sys.exit(1)
-pinned = m.group(1).strip()
+pinned = (m.group(1) or m.group(2) or m.group(3)).strip()
 
 lines = text.splitlines(keepends=True)
 release_guards = []
@@ -105,57 +105,96 @@ if len(context_blocks) < 1:
     )
     sys.exit(1)
 
+
+def parse_case_arms(snippet: str, start_line: int) -> list[tuple[list[str], list[str]]]:
+    arms: list[tuple[list[str], list[str]]] = []
+    in_arm = False
+    cur_pats: list[str] = []
+    cur_body: list[str] = []
+    for raw_line in snippet.splitlines()[1:-1]:
+        st = raw_line.strip()
+        if not st or st.startswith("#"):
+            continue
+        if not in_arm:
+            if ")" not in st:
+                raise SystemExit(
+                    f"FAIL: unexpected shell syntax inside case block at line {start_line}: {st!r}"
+                )
+            pat_raw, rest = st.split(")", 1)
+            if any(tok in pat_raw for tok in ("$(", "`", ";", "&")):
+                raise SystemExit(
+                    f"FAIL: unsafe shell construct in case arm at line {start_line}: {pat_raw!r}"
+                )
+            pats: list[str] = []
+            for p in pat_raw.split("|"):
+                p = p.strip()
+                if (p.startswith('"') and p.endswith('"')) or (p.startswith("'") and p.endswith("'")):
+                    p = p[1:-1]
+                if not p or not re.fullmatch(r"[A-Za-z0-9.*?_-]+", p):
+                    raise SystemExit(
+                        f"FAIL: unsupported glob pattern {p!r} in case arm at line {start_line}"
+                    )
+                pats.append(p)
+            cur_pats = pats
+            cur_body = []
+            rest = rest.strip()
+            if rest.endswith(";;"):
+                stmt = rest[:-2].strip()
+                if stmt:
+                    cur_body.append(stmt)
+                arms.append((cur_pats, cur_body))
+                in_arm = False
+            else:
+                if rest:
+                    cur_body.append(rest)
+                in_arm = True
+        else:
+            if st.endswith(";;"):
+                stmt = st[:-2].strip()
+                if stmt:
+                    cur_body.append(stmt)
+                arms.append((cur_pats, cur_body))
+                in_arm = False
+            else:
+                cur_body.append(st)
+    if in_arm:
+        raise SystemExit(f"FAIL: unterminated case arm (;;) at line {start_line}")
+    return arms
+
+
 for start_line, snippet in release_guards:
-    res = subprocess.run(
-        ["bash", "-e", "-c", 'MOONCAKE_VERSION="$1"\n' + snippet, "_", pinned],
-        capture_output=True,
-        text=True,
-    )
-    if res.returncode != 0:
+    arms = parse_case_arms(snippet, start_line)
+    matched_arm = None
+    for pats, body in arms:
+        if any(fnmatch.fnmatchcase(pinned, pat) for pat in pats):
+            matched_arm = (pats, body)
+            break
+    if matched_arm is None:
         print(
-            f"FAIL: MOONCAKE_VERSION=\"{pinned}\" rejected by release-guard case block at line {start_line}: {res.stderr.strip()}",
+            f'FAIL: MOONCAKE_VERSION="{pinned}" did not match any arm in release-guard case block at line {start_line}',
+            file=sys.stderr,
+        )
+        sys.exit(1)
+    m_pats, m_body = matched_arm
+    if m_pats == ["*"] or any(re.search(r"\bexit\s+[1-9]\d*\b", ln) for ln in m_body):
+        print(
+            f'FAIL: MOONCAKE_VERSION="{pinned}" rejected by release-guard case block at line {start_line}',
             file=sys.stderr,
         )
         sys.exit(1)
 
 for start_line, snippet in context_blocks:
-    arms = []
-    expect_arm = True
-    for raw_line in snippet.splitlines()[1:-1]:
-        stripped = raw_line.strip()
-        if not stripped or stripped.startswith("#"):
-            continue
-        if expect_arm:
-            m_arm = re.match(r"^([^()]+)\)(.*)$", stripped)
-            if m_arm:
-                pat = m_arm.group(1).strip()
-                rest = m_arm.group(2).strip()
-                patterns = [p.strip() for p in pat.split("|") if p.strip() and p.strip() != "*"]
-                if patterns:
-                    arms.append("|".join(patterns))
-                if not rest.endswith(";;"):
-                    expect_arm = False
-                continue
-        if stripped.endswith(";;"):
-            expect_arm = True
-    if not arms:
+    arms = parse_case_arms(snippet, start_line)
+    explicit_patterns = [pat for pats, _ in arms for pat in pats if pat != "*"]
+    if not explicit_patterns:
         print(
             f"FAIL: context_manager.cpp case block at line {start_line} has no explicit version arms",
             file=sys.stderr,
         )
         sys.exit(1)
-    harness = 'MOONCAKE_VERSION="$1"\ncase "${MOONCAKE_VERSION}" in\n'
-    for pat in arms:
-        harness += f"  {pat}) ;;\n"
-    harness += "  *) exit 1 ;;\nesac\n"
-    res = subprocess.run(
-        ["bash", "-e", "-c", harness, "_", pinned],
-        capture_output=True,
-        text=True,
-    )
-    if res.returncode != 0:
+    if not any(fnmatch.fnmatchcase(pinned, pat) for pat in explicit_patterns):
         print(
-            f"FAIL: MOONCAKE_VERSION=\"{pinned}\" is not handled by an explicit arm in context_manager.cpp case block at line {start_line}",
+            f'FAIL: MOONCAKE_VERSION="{pinned}" is not handled by an explicit arm in context_manager.cpp case block at line {start_line}',
             file=sys.stderr,
         )
         sys.exit(1)
@@ -265,10 +304,10 @@ def read_text(p: str) -> str:
 
 
 def extract_arg(txt: str, name: str, path: str) -> str:
-    m = re.search(rf'^ARG {re.escape(name)}=(?:"([^"]+)"|([^\s#]+))', txt, re.MULTILINE)
+    m = re.search(rf'^ARG {re.escape(name)}=(?:"([^"]+)"|\'([^\']+)\'|([^\s#]+))', txt, re.MULTILINE)
     if not m:
         raise SystemExit(f"FAIL: missing ARG {name} in {path}")
-    return (m.group(1) or m.group(2)).strip()
+    return (m.group(1) or m.group(2) or m.group(3)).strip()
 
 
 base_df = read_text(base_df_p)
@@ -364,8 +403,8 @@ import sys
 
 def get_commit(path: str) -> str:
     with open(path, "r", encoding="utf-8") as f:
-        m = re.search(r'^ARG MODELEXPRESS_COMMIT=([^\s#]+)', f.read(), re.MULTILINE)
-        return m.group(1).strip() if m else ""
+        m = re.search(r'^ARG MODELEXPRESS_COMMIT=(?:"([^"]+)"|\'([^\']+)\'|([^\s#]+))', f.read(), re.MULTILINE)
+        return (m.group(1) or m.group(2) or m.group(3)).strip() if m else ""
 
 print("true" if get_commit(sys.argv[1]) != get_commit(sys.argv[2]) else "false")
 PY
@@ -526,6 +565,13 @@ if arm64:
     if not DIGEST_RE.fullmatch(arm64) or arm64 == amd64 or entry.get("published") is not True:
         print(f"FAIL: image {image_ref} has invalid multi-arch manifest entry", file=sys.stderr)
         sys.exit(1)
+elif "amd64Published" in entry:
+    if entry.get("amd64Published") is not True:
+        print(f"FAIL: rocm image {image_ref} is not published", file=sys.stderr)
+        sys.exit(1)
+elif entry.get("published") is False:
+    print(f"FAIL: rocm image {image_ref} is marked published=false", file=sys.stderr)
+    sys.exit(1)
 PY
 }
 
@@ -578,10 +624,10 @@ for uid in required_ids:
 def read_arg(path: str, arg_name: str) -> str:
     with open(path, "r", encoding="utf-8") as f:
         txt = f.read()
-    m = re.search(rf'^ARG {re.escape(arg_name)}=(?:"([^"]+)"|([^\s#]+))', txt, re.MULTILINE)
+    m = re.search(rf'^ARG {re.escape(arg_name)}=(?:"([^"]+)"|\'([^\']+)\'|([^\s#]+))', txt, re.MULTILINE)
     if not m:
         raise SystemExit(f"FAIL: missing ARG {arg_name} in {path}")
-    return (m.group(1) or m.group(2)).strip()
+    return (m.group(1) or m.group(2) or m.group(3)).strip()
 
 
 allow_stage_b = (stage == "tag_promotion") or (images_changed_str == "true")
@@ -602,6 +648,13 @@ check_pin("nixl-rocm", read_arg(mt_df_p, "NIXL_ROCM_REF"))
 check_pin("ucx-rocm", read_arg(mt_df_p, "NIXL_ROCM_UCX_REF"))
 check_pin("hixl", read_arg(mt_df_p, "HIXL_COMMIT"))
 check_pin("modelexpress", read_arg(mx_df_p, "MODELEXPRESS_COMMIT"), allow_sb=True)
+
+runner_v = versions["gpustack-runner"]
+if runner_v not in ("aligned", "aligned+stage-b") and not re.fullmatch(r"[0-9a-f]{40}", runner_v):
+    raise SystemExit(
+        f"FAIL: proposals/kv-transfer.json versions.gpustack-runner ({runner_v!r}) "
+        "must be 'aligned', 'aligned+stage-b', or a 40-hex commit SHA"
+    )
 PY
 
 # 7. Chart / settings / docs regeneration and test gate when Stage B files changed.

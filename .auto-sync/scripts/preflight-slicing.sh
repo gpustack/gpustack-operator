@@ -11,6 +11,9 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 # shellcheck source=lib-preflight.sh
 # shellcheck disable=SC1091
 source "${SCRIPT_DIR}/lib-preflight.sh"
+# shellcheck source=../checks/lib.sh
+# shellcheck disable=SC1091
+source "${SCRIPT_DIR}/../checks/lib.sh"
 
 _PREFLIGHT_TMP_DIRS=()
 
@@ -20,39 +23,25 @@ cleanup_on_exit() {
     [[ -n "${d}" && -d "${d}" ]] && rm -rf "${d}"
   done
 }
-trap cleanup_on_exit EXIT
-
-parse_dockerfile_commit() {
-  local dockerfile_path="${1:?dockerfile path required}"
-  local arg_name="${2:?arg name required}"
-  python3 - "${dockerfile_path}" "${arg_name}" <<'PY'
-import re
-import sys
-
-path, arg_name = sys.argv[1:3]
-pat = re.compile(rf'^ARG {re.escape(arg_name)}="([0-9a-f]{{40}})"$')
-with open(path, "r", encoding="utf-8") as f:
-    for raw in f:
-        m = pat.match(raw.rstrip("\r\n"))
-        if m:
-            print(m.group(1))
-            sys.exit(0)
-print(f"FAIL: missing or invalid 40-hex ARG {arg_name} in {path}", file=sys.stderr)
-sys.exit(1)
-PY
-}
+trap cleanup_on_exit EXIT INT TERM HUP
 
 sync_upstream_git() {
   local repo_url="${1:?repo url required}"
   local dest_dir="${2:?dest dir required}"
   local pinned_sha="${3:?pinned sha required}"
+  local allow_file_proto="${4:-false}"
+
+  local proto_opts=()
+  if [[ "${allow_file_proto}" == "true" ]]; then
+    proto_opts=(-c protocol.file.allow=always)
+  fi
 
   if [[ -d "${dest_dir}/.git" ]]; then
     git -C "${dest_dir}" remote set-url origin "${repo_url}"
-    git -C "${dest_dir}" -c core.autocrlf=false -c protocol.file.allow=always fetch --prune origin
+    git -C "${dest_dir}" -c core.autocrlf=false "${proto_opts[@]+"${proto_opts[@]}"}" fetch --prune origin
   else
     rm -rf "${dest_dir}"
-    git -c core.autocrlf=false -c protocol.file.allow=always clone --no-single-branch "${repo_url}" "${dest_dir}"
+    git -c core.autocrlf=false "${proto_opts[@]+"${proto_opts[@]}"}" clone --no-single-branch "${repo_url}" "${dest_dir}"
   fi
 
   git -C "${dest_dir}" remote set-head origin -a >/dev/null 2>&1 || true
@@ -76,10 +65,7 @@ sync_upstream_git() {
   fi
 
   if ! git -C "${dest_dir}" cat-file -e "${pinned_sha}^{commit}" 2>/dev/null; then
-    git -C "${dest_dir}" -c protocol.file.allow=always fetch origin "${pinned_sha}" >/dev/null 2>&1 || {
-      printf 'FAIL: pinned commit %s not found in %s\n' "${pinned_sha}" "${repo_url}" >&2
-      return 1
-    }
+    git -C "${dest_dir}" "${proto_opts[@]+"${proto_opts[@]}"}" fetch origin "${pinned_sha}" >/dev/null 2>&1 || true
   fi
 
   git -C "${dest_dir}" -c core.autocrlf=false checkout -f -q "${head_sha}"
@@ -96,20 +82,52 @@ autosync::preflight::snapshot_baselines "${stage_dir}" \
 autosync::preflight::warm_caches "${stage_dir}" --sbin
 
 dockerfile="${repo_root}/pack/gpustack-operator/Dockerfile"
-pinned_hami="$(parse_dockerfile_commit "${dockerfile}" "LIB_HAMI_CORE_COMMIT")"
-pinned_ubs="$(parse_dockerfile_commit "${dockerfile}" "LIB_UBS_VIRT_ENPU_COMMIT")"
+pinned_hami="$(autosync::parse_dockerfile_arg_commit "${dockerfile}" "LIB_HAMI_CORE_COMMIT")"
+pinned_ubs="$(autosync::parse_dockerfile_arg_commit "${dockerfile}" "LIB_UBS_VIRT_ENPU_COMMIT")"
 
-hami_url="${AUTOSYNC_SLICING_HAMI_REPO_URL:-https://github.com/Project-HAMi/HAMi-core.git}"
-ubs_url="${AUTOSYNC_SLICING_UBS_REPO_URL:-https://gitcode.com/openeuler/ubs-virt.git}"
+# AUTOSYNC_SLICING_HAMI_REPO_URL and AUTOSYNC_SLICING_UBS_REPO_URL are test-only
+# overrides for offline self-tests using local directories or file:// repositories.
+hami_allow_file="false"
+if [[ -n "${AUTOSYNC_SLICING_HAMI_REPO_URL:-}" ]]; then
+  hami_url="${AUTOSYNC_SLICING_HAMI_REPO_URL}"
+  if [[ "${hami_url}" == file://* || "${hami_url}" != *"://"* ]]; then
+    hami_allow_file="true"
+  fi
+else
+  hami_url="https://github.com/Project-HAMi/HAMi-core.git"
+fi
+
+ubs_allow_file="false"
+if [[ -n "${AUTOSYNC_SLICING_UBS_REPO_URL:-}" ]]; then
+  ubs_url="${AUTOSYNC_SLICING_UBS_REPO_URL}"
+  if [[ "${ubs_url}" == file://* || "${ubs_url}" != *"://"* ]]; then
+    ubs_allow_file="true"
+  fi
+else
+  ubs_url="https://gitcode.com/openeuler/ubs-virt.git"
+fi
 
 hami_dir="${stage_dir}/hami-core"
 ubs_dir="${stage_dir}/ubs-virt"
 
-head_hami="$(sync_upstream_git "${hami_url}" "${hami_dir}" "${pinned_hami}")"
-head_ubs="$(sync_upstream_git "${ubs_url}" "${ubs_dir}" "${pinned_ubs}")"
+head_hami="$(sync_upstream_git "${hami_url}" "${hami_dir}" "${pinned_hami}" "${hami_allow_file}")"
+head_ubs="$(sync_upstream_git "${ubs_url}" "${ubs_dir}" "${pinned_ubs}" "${ubs_allow_file}")"
 
-hami_changed_files="$(git -C "${hami_dir}" diff --name-only "${pinned_hami}" "${head_hami}" -- src include CMakeLists.txt build.sh)"
-ubs_changed_files="$(git -C "${ubs_dir}" diff --name-only "${pinned_ubs}" "${head_ubs}" -- ubs-virt-enpu/vcann-rt)"
+hami_pin_reachable="true"
+hami_changed_files=""
+if git -C "${hami_dir}" cat-file -e "${pinned_hami}^{commit}" 2>/dev/null; then
+  hami_changed_files="$(git -C "${hami_dir}" diff --name-only "${pinned_hami}" "${head_hami}" -- src include CMakeLists.txt build.sh)"
+else
+  hami_pin_reachable="false"
+fi
+
+ubs_pin_reachable="true"
+ubs_changed_files=""
+if git -C "${ubs_dir}" cat-file -e "${pinned_ubs}^{commit}" 2>/dev/null; then
+  ubs_changed_files="$(git -C "${ubs_dir}" diff --name-only "${pinned_ubs}" "${head_ubs}" -- ubs-virt-enpu/vcann-rt)"
+else
+  ubs_pin_reachable="false"
+fi
 
 # Dry-run Ascend vcann-rt patches against a throwaway copy at target HEAD (CRLF-exact).
 tmp_patch_root="$(mktemp -d "${TMPDIR:-/tmp}/autosync-slicing-patch.XXXXXXXX")"
@@ -160,8 +178,8 @@ done
 
 records_compact="$(python3 - \
   "${stage_dir}" \
-  "${pinned_hami}" "${head_hami}" "${hami_changed_files}" \
-  "${pinned_ubs}" "${head_ubs}" "${ubs_changed_files}" \
+  "${pinned_hami}" "${head_hami}" "${hami_changed_files}" "${hami_pin_reachable}" \
+  "${pinned_ubs}" "${head_ubs}" "${ubs_changed_files}" "${ubs_pin_reachable}" \
   "${patch_clean}" "${patch_names_nl}" "${patch_errors}" <<'PY'
 import json
 import os
@@ -172,25 +190,37 @@ import sys
     pinned_hami,
     head_hami,
     hami_changed_raw,
+    hami_pin_reachable_raw,
     pinned_ubs,
     head_ubs,
     ubs_changed_raw,
+    ubs_pin_reachable_raw,
     patch_clean_raw,
     patch_names_raw,
     patch_errors,
-) = sys.argv[1:11]
+) = sys.argv[1:13]
 
 hami_files = [ln for ln in hami_changed_raw.splitlines() if ln.strip()]
 ubs_files = [ln for ln in ubs_changed_raw.splitlines() if ln.strip()]
 patch_names = [ln for ln in patch_names_raw.splitlines() if ln.strip()]
 patch_clean = patch_clean_raw == "true"
+hami_pin_reachable = hami_pin_reachable_raw == "true"
+ubs_pin_reachable = ubs_pin_reachable_raw == "true"
 
 hami_head_changed = pinned_hami != head_hami
 ubs_head_changed = pinned_ubs != head_ubs
 hami_watched_changed = len(hami_files) > 0
 ubs_watched_changed = len(ubs_files) > 0
 
-if hami_watched_changed:
+if not hami_pin_reachable:
+    hami_status = "available"
+    hami_ver = head_hami
+    hami_recent = [head_hami, pinned_hami] if hami_head_changed else [head_hami]
+    hami_reason = (
+        f"pinned commit {pinned_hami} is unreachable in upstream history; "
+        f"advance to {head_hami} and verify patches"
+    )
+elif hami_watched_changed:
     hami_status = "available"
     hami_ver = head_hami
     hami_recent = [head_hami, pinned_hami] if hami_head_changed else [head_hami]
@@ -204,7 +234,15 @@ else:
     else:
         hami_reason = f"already at upstream HEAD {pinned_hami[:12]}"
 
-if ubs_watched_changed:
+if not ubs_pin_reachable:
+    ubs_status = "available"
+    ubs_ver = head_ubs
+    ubs_recent = [head_ubs, pinned_ubs] if ubs_head_changed else [head_ubs]
+    ubs_reason = (
+        f"pinned commit {pinned_ubs} is unreachable in upstream history; "
+        f"advance to {head_ubs} and verify patches (patch_clean={str(patch_clean).lower()})"
+    )
+elif ubs_watched_changed:
     ubs_status = "available"
     ubs_ver = head_ubs
     ubs_recent = [head_ubs, pinned_ubs] if ubs_head_changed else [head_ubs]
@@ -242,6 +280,7 @@ report = {
     "schemaVersion": 1,
     "hami_core": {
         "pinned_commit": pinned_hami,
+        "pinned_commit_reachable": hami_pin_reachable,
         "head_commit": head_hami,
         "head_changed": hami_head_changed,
         "watched_paths": ["src", "include", "CMakeLists.txt", "build.sh"],
@@ -250,6 +289,7 @@ report = {
     },
     "ubs_virt": {
         "pinned_commit": pinned_ubs,
+        "pinned_commit_reachable": ubs_pin_reachable,
         "head_commit": head_ubs,
         "head_changed": ubs_head_changed,
         "watched_paths": ["ubs-virt-enpu/vcann-rt"],

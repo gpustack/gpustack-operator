@@ -1043,6 +1043,61 @@ SH
     fail "commit_detached_source_revision cleans up tmp_dir and restores paths on git failure"
   fi
 
+  # 6b. preflight::commit_staged_tree_revision commits purely via temporary index without touching det_repo.
+  local staged_root="${scratch}/staged-tree-root"
+  mkdir -p "${staged_root}/sub"
+  printf 'v1\n' > "${staged_root}/sub/data.txt"
+  local staged_noop
+  staged_noop="$(autosync::preflight::commit_staged_tree_revision "${det_repo}" "${base_sha}" "noop" "${staged_root}" "sub/data.txt")"
+  if [[ "${staged_noop}" == "${base_sha}" ]]; then
+    pass "commit_staged_tree_revision returns base_sha on no-op"
+  else
+    fail "commit_staged_tree_revision returns base_sha on no-op"
+  fi
+
+  printf 'uncommitted-local-edit\n' > "${det_repo}/sub/data.txt"
+  printf 'v2-staged\n' > "${staged_root}/sub/data.txt"
+  printf 'added-staged\n' > "${staged_root}/sub/added.txt"
+  printf 'lock-ignored\n' > "${staged_root}/sub/Chart.lock"
+  local staged_sha
+  staged_sha="$(autosync::preflight::commit_staged_tree_revision "${det_repo}" "${base_sha}" "chore: staged tree" "${staged_root}" "sub")"
+  if [[ "${staged_sha}" != "${base_sha}" ]] && \
+     [[ "${staged_sha}" =~ ^[0-9a-f]{40}$ ]] && \
+     [[ "$(git -C "${det_repo}" rev-parse HEAD)" == "${base_sha}" ]] && \
+     [[ "$(git -C "${det_repo}" rev-parse refs/heads/main)" == "${main_before}" ]] && \
+     [[ "$(cat "${det_repo}/sub/data.txt")" == "uncommitted-local-edit" ]] && \
+     [[ "$(git -C "${det_repo}" show "${staged_sha}:sub/data.txt")" == "v2-staged" ]] && \
+     [[ "$(git -C "${det_repo}" show "${staged_sha}:sub/added.txt")" == "added-staged" ]] && \
+     ! git -C "${det_repo}" cat-file -e "${staged_sha}:sub/Chart.lock" 2>/dev/null; then
+    pass "commit_staged_tree_revision writes detached commit without mutating repo_root working tree"
+  else
+    fail "commit_staged_tree_revision writes detached commit without mutating repo_root working tree"
+  fi
+  git -C "${det_repo}" checkout -q -- sub/data.txt
+
+  assert_fails "commit_staged_tree_revision rejects .. traversal" \
+    autosync::preflight::commit_staged_tree_revision "${det_repo}" "${base_sha}" "bad" "${staged_root}" "../evil"
+
+  # 6c. GPUSTACK_IMAGE_BUILD=true skips cleanly only when .auto-sync is absent.
+  local img_ctx="${scratch}/img-build-ctx"
+  mkdir -p "${img_ctx}/hack/check"
+  cp "${ROOT_DIR}/hack/check/autosync-selftest.sh" "${img_ctx}/hack/check/autosync-selftest.sh"
+  local sc_bin img_out=""
+  sc_bin="$(resolve_shellcheck)"
+  if img_out="$(SHELLCHECK_BIN="${sc_bin}" GPUSTACK_IMAGE_BUILD=true bash "${img_ctx}/hack/check/autosync-selftest.sh" all "${img_ctx}" 2>&1)" && \
+     grep -q 'SKIP  \.auto-sync excluded from Docker image build context (GPUSTACK_IMAGE_BUILD=true)' <<<"${img_out}"; then
+    pass "GPUSTACK_IMAGE_BUILD=true skips cleanly when .auto-sync is absent"
+  else
+    fail "GPUSTACK_IMAGE_BUILD=true skips cleanly when .auto-sync is absent (${img_out})"
+  fi
+
+  if ! SHELLCHECK_BIN="${sc_bin}" GPUSTACK_IMAGE_BUILD=false bash "${img_ctx}/hack/check/autosync-selftest.sh" all "${img_ctx}" >/dev/null 2>&1 && \
+     ! env -u GPUSTACK_IMAGE_BUILD SHELLCHECK_BIN="${sc_bin}" bash "${img_ctx}/hack/check/autosync-selftest.sh" all "${img_ctx}" >/dev/null 2>&1; then
+    pass "missing .auto-sync still fails closed when GPUSTACK_IMAGE_BUILD is unset or false"
+  else
+    fail "missing .auto-sync still fails closed when GPUSTACK_IMAGE_BUILD is unset or false"
+  fi
+
   # 7. Offline hack/deps.sh cache self-test (GPUSTACK_DEPS_CACHE_DIR + GPUSTACK_DEPS_OFFLINE=true).
   local deps_repo="${scratch}/deps-repo"
   local deps_cache="${scratch}/deps-cache"
@@ -2014,6 +2069,15 @@ PY
 }
 
 run_static_checks
+
+if [[ "${GPUSTACK_IMAGE_BUILD:-}" == "true" && ! -d "${ROOT_DIR}/.auto-sync" ]]; then
+  if (( FAILS > 0 )); then
+    echo "AUTOSYNC SELFTEST FAILED: ${FAILS} failure(s), ${PASSES} passed" >&2
+    exit 1
+  fi
+  echo "SKIP  .auto-sync excluded from Docker image build context (GPUSTACK_IMAGE_BUILD=true)"
+  exit 0
+fi
 
 case "${MODE}" in
   all)

@@ -63,9 +63,10 @@ HOST_GOCACHE="$(go env GOCACHE)"
 
 # Build an isolated scratch git repo for offline preflight tests so the real working tree stays untouched.
 PREFLIGHT_REPO="${SCRATCH}/preflight-repo"
-mkdir -p "${PREFLIGHT_REPO}/.auto-sync/scripts" "${PREFLIGHT_REPO}/.auto-sync/proposals"
+mkdir -p "${PREFLIGHT_REPO}/.auto-sync/scripts" "${PREFLIGHT_REPO}/.auto-sync/checks" "${PREFLIGHT_REPO}/.auto-sync/proposals"
 copy_priors_go_tree "${ROOT_DIR}" "${PREFLIGHT_REPO}"
 cp "${ROOT_DIR}/.auto-sync/scripts/lib-preflight.sh" "${PREFLIGHT_REPO}/.auto-sync/scripts/lib-preflight.sh"
+cp "${ROOT_DIR}/.auto-sync/checks/lib.sh" "${PREFLIGHT_REPO}/.auto-sync/checks/lib.sh"
 if [[ -f "${ROOT_DIR}/${PREFLIGHT_REL}" ]]; then
   cp "${ROOT_DIR}/${PREFLIGHT_REL}" "${PREFLIGHT_REPO}/${PREFLIGHT_REL}"
   chmod +x "${PREFLIGHT_REPO}/${PREFLIGHT_REL}"
@@ -298,6 +299,73 @@ else
   fail "preflight-priors.sh changed fixture"
 fi
 
+# 2b. Digest-refresh-only fixture test (snapshot SHA-256 changes without altering priors.yaml profiles).
+FIXTURE_DIGEST="${SCRATCH}/fixture-digest"
+cp -R "${FIXTURE_SAME}" "${FIXTURE_DIGEST}"
+python3 - "${FIXTURE_DIGEST}/availability.json" <<'PY'
+import json
+import sys
+
+p = sys.argv[1]
+with open(p, "r", encoding="utf-8") as f:
+    doc = json.load(f)
+# Re-serialize with compact formatting so SHA-256 changes while query IDs and snapshots stay identical.
+with open(p, "w", encoding="utf-8") as f:
+    json.dump(doc, f, separators=(",", ":"))
+PY
+
+STAGE_DIGEST="${SCRATCH}/stage-digest/priors"
+if (
+  cd "${PREFLIGHT_REPO}" && \
+  AUTOSYNC_PRIORS_FIXTURE_DIR="${FIXTURE_DIGEST}" \
+  AUTOSYNC_SKIP_GO_MOD_DOWNLOAD=true \
+  GOMODCACHE="${HOST_GOMODCACHE}" \
+  GOCACHE="${HOST_GOCACHE}" \
+  bash "${PREFLIGHT_REPO}/${PREFLIGHT_REL}" "${STAGE_DIGEST}" >/dev/null
+) && \
+python3 - "${STAGE_DIGEST}" "${BASE_SHA}" <<'PY'
+import json
+import os
+import sys
+
+stage_dir, base_sha = sys.argv[1:3]
+with open(os.path.join(stage_dir, "priors-preflight-report.json"), "r", encoding="utf-8") as f:
+    report = json.load(f)
+assert report["changed"] is True, report
+assert report["digest_refresh_only"] is True, report
+assert report["source_revision"] == base_sha, report
+assert "records.md" in report.get("reason", ""), report
+
+with open(os.path.join(stage_dir, "upstream-records.json"), "r", encoding="utf-8") as f:
+    recs = {r["upstreamId"]: r for r in json.load(f)}
+avail = recs["inferencex-availability"]
+assert avail["status"] == "available", avail
+assert "records.md digests" in avail["reason"], avail
+PY
+then
+  pass "preflight-priors.sh sets digest_refresh_only=true and explicit records.md reason"
+else
+  fail "preflight-priors.sh digest_refresh_only test"
+fi
+
+# 2c. Uncommitted local edit in repo_root survives preflight-priors.sh untouched.
+STAGE_DIRTY="${SCRATCH}/stage-dirty/priors"
+printf '\n# local uncommitted edit\n' >> "${PREFLIGHT_REPO}/pkg/worker/scaling/priors/priors.yaml"
+if (
+  cd "${PREFLIGHT_REPO}" && \
+  AUTOSYNC_PRIORS_FIXTURE_DIR="${FIXTURE_CHANGED}" \
+  AUTOSYNC_SKIP_GO_MOD_DOWNLOAD=true \
+  GOMODCACHE="${HOST_GOMODCACHE}" \
+  GOCACHE="${HOST_GOCACHE}" \
+  bash "${PREFLIGHT_REPO}/${PREFLIGHT_REL}" "${STAGE_DIRTY}" >/dev/null
+) && \
+grep -q '# local uncommitted edit' "${PREFLIGHT_REPO}/pkg/worker/scaling/priors/priors.yaml"; then
+  pass "preflight-priors.sh preserves uncommitted local edits in repo_root"
+else
+  fail "preflight-priors.sh preserves uncommitted local edits in repo_root"
+fi
+git -C "${PREFLIGHT_REPO}" checkout -- pkg/worker/scaling/priors/priors.yaml
+
 # 3. Gitless sanitized env -i validation tests for validate_priors.sh.
 CAND_BASE="${SCRATCH}/cand-base"
 mkdir -p "${CAND_BASE}/.auto-sync/checks" "${CAND_BASE}/.auto-sync/proposals"
@@ -388,8 +456,14 @@ import sys
 p = sys.argv[1]
 with open(p, "r", encoding="utf-8") as f:
     txt = f.read()
-out = re.sub(r"(\| `DeepSeek-R1-0528` \| 1333 \| )16( \| 50 \|)", r"\g<1>99\g<2>", txt, count=1)
-assert out != txt, "failed to mutate DeepSeek-R1-0528 count"
+m = re.search(r"(\|\s*`?DeepSeek-R1-0528`?\s*\|\s*\d+\s*\|\s*)(\d+)(\s*\|\s*\d+\s*\|)", txt)
+if not m:
+    m = re.search(r"(\|\s*`?[A-Za-z0-9._-]+`?\s*\|\s*\d+\s*\|\s*)(\d+)(\s*\|\s*\d+\s*\|)", txt)
+assert m, "failed to locate active row counts in records.md"
+old_agg = int(m.group(2))
+new_agg = old_agg + 83 if old_agg != 99 else 100
+out = txt[: m.start(2)] + str(new_agg) + txt[m.end(2) :]
+assert out != txt, "failed to mutate active row count"
 with open(p, "w", encoding="utf-8") as f:
     f.write(out)
 PY

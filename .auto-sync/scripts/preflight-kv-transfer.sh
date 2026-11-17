@@ -30,7 +30,7 @@ fi
 
 # Extract current repository pins and stage upstream data in Python.
 PROBE_LIST_FILE="$(mktemp "${TMPDIR:-/tmp}/autosync-kv-probes.XXXXXXXX")"
-trap 'rm -f "${PROBE_LIST_FILE}"' EXIT
+trap 'rm -f "${PROBE_LIST_FILE}"' EXIT INT TERM HUP
 
 DISCOVERY_JSON="${STAGE_DIR}/kv-transfer-discovery.json"
 
@@ -52,10 +52,10 @@ def read_text(path: str) -> str:
 
 
 def extract_arg(text: str, name: str) -> str:
-    m = re.search(rf'^ARG {re.escape(name)}=(?:"([^"]+)"|([^\s#]+))', text, re.MULTILINE)
+    m = re.search(rf'^ARG {re.escape(name)}=(?:"([^"]+)"|\'([^\']+)\'|([^\s#]+))', text, re.MULTILINE)
     if not m:
         raise SystemExit(f"FAIL: missing ARG {name}")
-    return (m.group(1) or m.group(2)).strip()
+    return (m.group(1) or m.group(2) or m.group(3)).strip()
 
 
 def extract_value_go_image(text: str, var_name: str) -> str:
@@ -144,11 +144,11 @@ def resolve_nixl_pypi(fixture_root: str) -> tuple[str, list[str]]:
     for pkg in ("nixl", "nixl-cu12", "nixl-cu13"):
         if fixture_root:
             fp = os.path.join(fixture_root, "pypi", f"{pkg}.json")
-            if os.path.isfile(fp):
-                with open(fp, "r", encoding="utf-8") as f:
-                    pkgs[pkg] = json.load(f)
-                continue
-            return "", []
+            if not os.path.isfile(fp):
+                raise SystemExit(f"FAIL: fixture dir set but missing {fp}")
+            with open(fp, "r", encoding="utf-8") as f:
+                pkgs[pkg] = json.load(f)
+            continue
         pkgs[pkg] = fetch_json(f"https://pypi.org/pypi/{pkg}/json")
 
     common = set(pkgs["nixl"].get("releases", {}).keys())
@@ -237,7 +237,42 @@ def sync_git_repo(url: str, dst: str, pin_commit: str = "") -> str:
             stderr=subprocess.DEVNULL,
         ).returncode
         if rc != 0:
-            subprocess.run(["git", "-C", dst, "fetch", "--depth", "1", "origin", pin_commit], check=False)
+            fetch_rc = subprocess.run(
+                ["git", "-C", dst, "fetch", "--depth", "1", "origin", pin_commit],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            ).returncode
+            if fetch_rc != 0:
+                is_shallow = (
+                    subprocess.check_output(
+                        ["git", "-C", dst, "rev-parse", "--is-shallow-repository"],
+                        text=True,
+                    ).strip()
+                    == "true"
+                )
+                if is_shallow:
+                    subprocess.run(
+                        ["git", "-C", dst, "fetch", "--unshallow", "origin"],
+                        check=False,
+                        stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL,
+                    )
+                else:
+                    subprocess.run(
+                        ["git", "-C", dst, "fetch", "origin"],
+                        check=False,
+                        stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL,
+                    )
+            recheck = subprocess.run(
+                ["git", "-C", dst, "cat-file", "-e", f"{pin_commit}^{{commit}}"],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            ).returncode
+            if recheck != 0:
+                raise SystemExit(
+                    f"FAIL: pinned commit {pin_commit} not reachable in {url} after fetch/unshallow"
+                )
     return head_sha
 
 
@@ -440,6 +475,7 @@ def discover_newer_mx_tag(current_image: str) -> str:
 def discover_newer_mt_tags(current_images: dict[str, str], tags_list: list[str]) -> dict[str, str]:
     discovered: dict[str, str] = {}
     mt_tag_re = re.compile(r"^v(\d+)\.(\d+)\.(\d+)-([A-Za-z0-9._-]+)$")
+    fam_re = re.compile(r"^(cuda\d+|rocm\d+|cann\d+)")
     for vendor in ("nvidia", "amd", "ascend"):
         cur_ref = current_images.get(vendor, "")
         cur_tag = extract_ref_tag(cur_ref)
@@ -448,8 +484,8 @@ def discover_newer_mt_tags(current_images: dict[str, str], tags_list: list[str])
             continue
         cur_tuple = (int(m_cur.group(1)), int(m_cur.group(2)), int(m_cur.group(3)))
         cur_flavor = m_cur.group(4)
-        fam_m = re.match(r"^(cuda|rocm|cann)", cur_flavor)
-        fam = fam_m.group(1) if fam_m else cur_flavor
+        fam_m = fam_re.match(cur_flavor)
+        cur_fam = fam_m.group(1) if fam_m else ""
         best_key = (cur_tuple, 0, "")
         best_tag = ""
         for tag in tags_list:
@@ -458,8 +494,12 @@ def discover_newer_mt_tags(current_images: dict[str, str], tags_list: list[str])
                 continue
             cand_tuple = (int(m.group(1)), int(m.group(2)), int(m.group(3)))
             cand_flavor = m.group(4)
-            if cand_flavor != cur_flavor and not cand_flavor.startswith(fam):
-                continue
+            if cand_flavor != cur_flavor:
+                if not cur_fam:
+                    continue
+                cand_fam_m = fam_re.match(cand_flavor)
+                if not cand_fam_m or cand_fam_m.group(1) != cur_fam:
+                    continue
             if cand_tuple <= cur_tuple:
                 continue
             cand_key = (cand_tuple, 1 if cand_flavor == cur_flavor else 0, cand_flavor)
@@ -650,7 +690,9 @@ def is_rocm_amd64_published(ref: str) -> bool:
     arm64 = str(entry.get("arm64Digest") or "").strip()
     if arm64:
         return bool(DIGEST_RE.fullmatch(arm64) and arm64 != amd64 and entry.get("published") is True)
-    return True
+    if "amd64Published" in entry:
+        return entry.get("amd64Published") is True
+    return entry.get("published") is not False
 
 
 def is_mt_vendor_published(vendor: str, ref: str) -> bool:

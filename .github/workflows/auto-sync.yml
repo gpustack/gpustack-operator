@@ -68,6 +68,7 @@ on:
 jobs:
   resolve-domains:
     runs-on: ubuntu-24.04
+    timeout-minutes: 10
     if: >-
       (github.event_name == 'schedule' && github.repository == 'gpustack/gpustack-operator') ||
       github.event_name == 'workflow_dispatch' ||
@@ -295,11 +296,11 @@ jobs:
 
       - name: Setup uv
         if: matrix.domain == 'k8s-deps'
-        uses: astral-sh/setup-uv@v5
+        uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v5
 
       - name: Setup Hugo
         if: matrix.domain == 'priors' || matrix.domain == 'kv-transfer' || matrix.domain == 'router'
-        uses: peaceiris/actions-hugo@v3
+        uses: peaceiris/actions-hugo@d1c81a15d4e6dca7086a17b9c2565cb70fd576bf # v3
         with:
           hugo-version: '0.152.2'
           extended: true

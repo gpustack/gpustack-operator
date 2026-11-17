@@ -54,27 +54,30 @@ fi
 REAL_VALUES="${ROOT_DIR}/deploy/gpustack-operator/chart/values.yaml"
 REAL_TOPO_CHART="${ROOT_DIR}/deploy/gpustack-operator/chart/charts/topograph/Chart.yaml"
 
+extracted_out=""
 if extracted_out="$("${VALIDATE_SCRIPT}" --extract-images "${REAL_VALUES}" "${REAL_TOPO_CHART}")" && \
    python3 - "${extracted_out}" <<'PY'
 import sys
 
 lines = [ln.strip() for ln in sys.argv[1].splitlines() if ln.strip()]
-expected = {
-    "docker.io/gpustack/mirrored-kueue:v0.18.11",
-    "docker.io/gpustack/mirrored-node-feature-discovery:v0.19.0-gpustack1",
-    "docker.io/gpustack/mirrored-csi-nfs-driver:v4.13.4",
-    "docker.io/gpustack/mirrored-csi-provisioner:v6.3.0",
-    "docker.io/gpustack/mirrored-csi-resizer:v2.2.0",
-    "docker.io/gpustack/mirrored-csi-snapshotter:v8.6.0",
-    "docker.io/gpustack/mirrored-csi-livenessprobe:v2.19.0",
-    "docker.io/gpustack/mirrored-csi-node-driver-registrar:v2.17.0",
-    "docker.io/gpustack/mirrored-csi-s3-driver:v0.43.7",
-    "docker.io/gpustack/mirrored-nvidia-topograph:v1.0.0",
-}
 got = set(lines)
-missing = sorted(expected - got)
-extra = sorted(got - expected)
-assert not missing and not extra, f"missing={missing} extra={extra} got={sorted(got)}"
+required_repos = {
+    "docker.io/gpustack/mirrored-kueue",
+    "docker.io/gpustack/mirrored-node-feature-discovery",
+    "docker.io/gpustack/mirrored-csi-nfs-driver",
+    "docker.io/gpustack/mirrored-csi-provisioner",
+    "docker.io/gpustack/mirrored-csi-resizer",
+    "docker.io/gpustack/mirrored-csi-snapshotter",
+    "docker.io/gpustack/mirrored-csi-livenessprobe",
+    "docker.io/gpustack/mirrored-csi-node-driver-registrar",
+    "docker.io/gpustack/mirrored-csi-s3-driver",
+    "docker.io/gpustack/mirrored-nvidia-topograph",
+}
+got_repos = {ref.rsplit(":", 1)[0] for ref in got if ":" in ref.split("/")[-1]}
+missing = sorted(required_repos - got_repos)
+extra = sorted(got_repos - required_repos)
+assert not missing and not extra, f"repo mismatch: missing={missing} extra={extra} got={sorted(got)}"
+assert len(got) >= len(required_repos), f"expected >= {len(required_repos)} refs, got {sorted(got)}"
 PY
 then
   pass "validate_charts.sh extracts all mirrored subchart images from real values.yaml"
@@ -86,27 +89,46 @@ fi
 FIXTURE_ARCHIVES="${SCRATCH}/fixture-archives"
 mkdir -p "${FIXTURE_ARCHIVES}"
 
-python3 - "${ROOT_DIR}" "${FIXTURE_ARCHIVES}" <<'PY'
+CHART_META_JSON="${SCRATCH}/chart-meta.json"
+python3 - "${ROOT_DIR}" "${FIXTURE_ARCHIVES}" "${CHART_META_JSON}" <<'PY'
 import glob
+import json
 import os
 import re
 import shutil
 import subprocess
+import sys
 import tarfile
 import tempfile
-import sys
+import urllib.parse
 
-root_dir, out_dir = sys.argv[1:3]
-charts = [
-    ("kueue", "0.18.11", "kueue-0.18.11.tgz"),
-    ("node-feature-discovery", "0.19.0", "node-feature-discovery-chart-0.19.0.tgz"),
-    ("csi-driver-nfs", "4.13.4", "csi-driver-nfs-4.13.4.tgz"),
-    ("csi-driver-s3", "0.43.7", "csi-s3-0.43.7.tgz"),
-    ("topograph", "1.0.0", "topograph-1.0.0.tgz"),
-]
+root_dir, out_dir, meta_out = sys.argv[1:4]
+deps_path = os.path.join(root_dir, "hack/deps.sh")
+with open(deps_path, "r", encoding="utf-8") as f:
+    deps_txt = f.read()
+m = re.search(r"function chart_staging\(\)\s*\{.*?cat <<EOF\n(.*?)\nEOF", deps_txt, re.DOTALL)
+assert m, "missing chart_staging() heredoc in hack/deps.sh"
+
+charts = []
+for raw in m.group(1).splitlines():
+    raw = raw.strip()
+    if not raw:
+        continue
+    url, ver, dest = raw.split()
+    name = os.path.basename(dest)
+    arc_name = os.path.basename(urllib.parse.urlsplit(url).path)
+    charts.append((name, ver, arc_name, url))
+
+kueue_cur = next(ver for n, ver, _, _ in charts if n == "kueue")
+km = re.fullmatch(r"(\d+)\.(\d+)\.(\d+)", kueue_cur)
+assert km, f"unexpected kueue version format: {kueue_cur}"
+kueue_next = f"{km.group(1)}.{km.group(2)}.{int(km.group(3)) + 1}"
+
+k8s_mod_m = re.search(r"https://github\.com/kubernetes/api\s+(v0\.\d+\.\d+)\s+", deps_txt)
+k8s_mod_ver = k8s_mod_m.group(1) if k8s_mod_m else ""
 
 with tempfile.TemporaryDirectory() as tmp:
-    for name, ver, archive_name in charts:
+    for name, ver, archive_name, _ in charts:
         src = os.path.join(root_dir, "deploy/gpustack-operator/chart/charts", name)
         unpatched = os.path.join(tmp, name)
         shutil.copytree(src, unpatched)
@@ -136,20 +158,34 @@ with tempfile.TemporaryDirectory() as tmp:
             chart_yaml = os.path.join(bumped, "Chart.yaml")
             with open(chart_yaml, "r", encoding="utf-8") as f:
                 cy = f.read()
-            cy = cy.replace("version: 0.18.11", "version: 0.18.12")
-            cy = cy.replace("appVersion: v0.18.11", "appVersion: v0.18.12")
+            cy_next = cy.replace(f"version: {kueue_cur}", f"version: {kueue_next}")
+            cy_next = cy_next.replace(f"appVersion: v{kueue_cur}", f"appVersion: v{kueue_next}")
+            assert cy_next != cy, f"failed to bump kueue Chart.yaml from {kueue_cur} to {kueue_next}"
             with open(chart_yaml, "w", encoding="utf-8") as f:
-                f.write(cy)
+                f.write(cy_next)
             values_yaml = os.path.join(bumped, "values.yaml")
             with open(values_yaml, "r", encoding="utf-8") as f:
                 vy = f.read()
-            vy = re.sub(r"tag:\s*v0\.18\.11\b", "tag: v0.18.12", vy, count=1)
+            vy_next = re.sub(rf"tag:\s*v{re.escape(kueue_cur)}\b", f"tag: v{kueue_next}", vy, count=1)
+            assert vy_next != vy, f"failed to bump kueue values.yaml tag from v{kueue_cur}"
             with open(values_yaml, "w", encoding="utf-8") as f:
-                f.write(vy)
-            bumped_tgz = os.path.join(out_dir, "kueue-0.18.12.tgz")
+                f.write(vy_next)
+            bumped_tgz = os.path.join(out_dir, f"kueue-{kueue_next}.tgz")
             with tarfile.open(bumped_tgz, "w:gz") as tf:
                 tf.add(bumped, arcname="kueue")
+
+with open(meta_out, "w", encoding="utf-8") as f:
+    json.dump({
+        "charts": {n: {"version": v, "archive": a, "url": u} for n, v, a, u in charts},
+        "kueue_cur": kueue_cur,
+        "kueue_next": kueue_next,
+        "k8s_mod_ver": k8s_mod_ver,
+    }, f, indent=2)
 PY
+
+KUEUE_CUR="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["kueue_cur"])' "${CHART_META_JSON}")"
+KUEUE_NEXT="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["kueue_next"])' "${CHART_META_JSON}")"
+K8S_MOD_VER="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["k8s_mod_ver"])' "${CHART_META_JSON}")"
 
 PREFLIGHT_REPO="${SCRATCH}/preflight-repo"
 mkdir -p \
@@ -187,57 +223,38 @@ FIXTURE_DIR="${SCRATCH}/fixture-charts"
 mkdir -p "${FIXTURE_DIR}/archives"
 cp "${FIXTURE_ARCHIVES}/"*.tgz "${FIXTURE_DIR}/archives/"
 
-cat > "${FIXTURE_DIR}/upstream.json" <<'JSON'
-{
-  "charts": {
-    "kueue": {
-      "version": "0.18.12",
-      "url": "https://github.com/kubernetes-sigs/kueue/releases/download/v0.18.12/kueue-0.18.12.tgz",
-      "archive": "kueue-0.18.12.tgz"
-    },
-    "node-feature-discovery": {
-      "version": "0.19.0",
-      "url": "https://github.com/kubernetes-sigs/node-feature-discovery/releases/download/v0.19.0/node-feature-discovery-chart-0.19.0.tgz",
-      "archive": "node-feature-discovery-0.19.0.tgz"
-    },
-    "csi-driver-nfs": {
-      "version": "4.13.4",
-      "url": "https://raw.githubusercontent.com/kubernetes-csi/csi-driver-nfs/refs/heads/master/charts/v4.13.4/csi-driver-nfs-4.13.4.tgz",
-      "archive": "csi-driver-nfs-4.13.4.tgz"
-    },
-    "csi-driver-s3": {
-      "version": "0.43.7",
-      "url": "https://thxcode.github.io/k8s-csi-s3/charts/csi-s3-0.43.7.tgz",
-      "archive": "csi-driver-s3-0.43.7.tgz"
-    },
-    "topograph": {
-      "version": "1.0.0",
-      "url": "https://dsx-ai-factory.github.io/topograph/topograph-1.0.0.tgz",
-      "archive": "topograph-1.0.0.tgz"
-    }
-  }
-}
-JSON
-
 MOCK_NOT_READY="${SCRATCH}/mock-not-ready.json"
 MOCK_READY="${SCRATCH}/mock-ready.json"
-python3 - "${MOCK_NOT_READY}" "${MOCK_READY}" <<'PY'
+python3 - "${CHART_META_JSON}" "${FIXTURE_DIR}/upstream.json" "${extracted_out}" "${MOCK_NOT_READY}" "${MOCK_READY}" <<'PY'
 import json
 import sys
 
-not_ready_path, ready_path = sys.argv[1:3]
-base_images = [
-    "docker.io/gpustack/mirrored-kueue:v0.18.11",
-    "docker.io/gpustack/mirrored-node-feature-discovery:v0.19.0-gpustack1",
-    "docker.io/gpustack/mirrored-csi-nfs-driver:v4.13.4",
-    "docker.io/gpustack/mirrored-csi-provisioner:v6.3.0",
-    "docker.io/gpustack/mirrored-csi-resizer:v2.2.0",
-    "docker.io/gpustack/mirrored-csi-snapshotter:v8.6.0",
-    "docker.io/gpustack/mirrored-csi-livenessprobe:v2.19.0",
-    "docker.io/gpustack/mirrored-csi-node-driver-registrar:v2.17.0",
-    "docker.io/gpustack/mirrored-csi-s3-driver:v0.43.7",
-    "docker.io/gpustack/mirrored-nvidia-topograph:v1.0.0",
-]
+meta_path, upstream_out, extracted_raw, not_ready_path, ready_path = sys.argv[1:6]
+with open(meta_path, "r", encoding="utf-8") as f:
+    meta = json.load(f)
+
+charts = {}
+for cname, cinfo in meta["charts"].items():
+    if cname == "kueue":
+        ver = meta["kueue_next"]
+        charts[cname] = {
+            "version": ver,
+            "url": f"https://github.com/kubernetes-sigs/kueue/releases/download/v{ver}/kueue-{ver}.tgz",
+            "archive": f"kueue-{ver}.tgz",
+        }
+    else:
+        charts[cname] = {
+            "version": cinfo["version"],
+            "url": cinfo["url"],
+            "archive": f"{cname}-{cinfo['version']}.tgz",
+        }
+
+with open(upstream_out, "w", encoding="utf-8") as f:
+    json.dump({"charts": charts}, f, indent=2)
+
+base_images = [ln.strip() for ln in extracted_raw.splitlines() if ln.strip()]
+kueue_next = meta["kueue_next"]
+
 
 def build_doc(kueue_ready: bool):
     images = {}
@@ -249,19 +266,21 @@ def build_doc(kueue_ready: bool):
             "amd64Digest": f"sha256:{h1}",
             "arm64Digest": f"sha256:{h2}",
         }
+    target_kueue = f"docker.io/gpustack/mirrored-kueue:v{kueue_next}"
     if kueue_ready:
-        images["docker.io/gpustack/mirrored-kueue:v0.18.12"] = {
+        images[target_kueue] = {
             "published": True,
             "amd64Digest": "sha256:" + ("aa" * 32),
             "arm64Digest": "sha256:" + ("bb" * 32),
         }
     else:
-        images["docker.io/gpustack/mirrored-kueue:v0.18.12"] = {
+        images[target_kueue] = {
             "published": False,
             "amd64Digest": "",
             "arm64Digest": "",
         }
     return {"images": images}
+
 
 with open(not_ready_path, "w", encoding="utf-8") as f:
     json.dump(build_doc(False), f, indent=2)
@@ -280,22 +299,24 @@ if (
   GITHUB_OUTPUT="${GHA_UNREADY}" \
   bash "${PREFLIGHT_REPO}/.auto-sync/scripts/preflight-charts.sh" "${STAGE_UNREADY}"
 ) >/dev/null && \
-python3 - "${STAGE_UNREADY}" "${GHA_UNREADY}" "${BASE_SHA}" <<'PY'
+python3 - "${STAGE_UNREADY}" "${GHA_UNREADY}" "${BASE_SHA}" "${KUEUE_NEXT}" <<'PY'
 import json
 import os
+import re
 import sys
 
-stage_dir, gha_path, base_sha = sys.argv[1:4]
+stage_dir, gha_path, base_sha, kueue_next = sys.argv[1:5]
 with open(os.path.join(stage_dir, "charts-preflight-report.json"), "r", encoding="utf-8") as f:
     report = json.load(f)
 assert report["source_revision"] == base_sha, report
 kueue = report["charts"]["kueue"]
 assert kueue["changed"] is True, kueue
-assert kueue["candidate_version"] == "0.18.12", kueue
+assert kueue["candidate_version"] == kueue_next, kueue
 assert kueue["mirrored_image_ready"] is False, kueue
+assert re.fullmatch(r"[0-9a-f]{64}", kueue.get("archiveSha256", "")), kueue
 sync_cmd = kueue.get("sync_image_command") or report.get("sync_image_command", "")
 assert "gh workflow run sync-image.yml -f images=" in sync_cmd, report
-assert "registry.k8s.io/kueue/kueue:v0.18.12" in sync_cmd, sync_cmd
+assert f"registry.k8s.io/kueue/kueue:v{kueue_next}" in sync_cmd, sync_cmd
 
 with open(os.path.join(stage_dir, "upstream-records.json"), "r", encoding="utf-8") as f:
     recs = json.load(f)
@@ -320,6 +341,7 @@ fi
 STAGE_READY="${SCRATCH}/stage-ready/charts"
 GHA_READY="${SCRATCH}/gha-ready.txt"
 : > "${GHA_READY}"
+SRC_REV=""
 if (
   cd "${PREFLIGHT_REPO}" && \
   AUTOSYNC_CHARTS_FIXTURE_DIR="${FIXTURE_DIR}" \
@@ -328,12 +350,13 @@ if (
   GITHUB_OUTPUT="${GHA_READY}" \
   bash "${PREFLIGHT_REPO}/.auto-sync/scripts/preflight-charts.sh" "${STAGE_READY}"
 ) >/dev/null && \
-SRC_REV="$(python3 - "${STAGE_READY}" "${BASE_SHA}" <<'PY'
+SRC_REV="$(python3 - "${STAGE_READY}" "${BASE_SHA}" "${KUEUE_NEXT}" <<'PY'
+import hashlib
 import json
 import os
 import sys
 
-stage_dir, base_sha = sys.argv[1:3]
+stage_dir, base_sha, kueue_next = sys.argv[1:4]
 with open(os.path.join(stage_dir, "charts-preflight-report.json"), "r", encoding="utf-8") as f:
     report = json.load(f)
 src_rev = report["source_revision"]
@@ -342,13 +365,20 @@ kueue = report["charts"]["kueue"]
 assert kueue["changed"] is True, kueue
 assert kueue["mirrored_image_ready"] is True, kueue
 assert kueue["patch_clean"] is True, kueue
-assert os.path.isfile(os.path.join(stage_dir, "deps-cache", "charts", "kueue-0.18.12.tgz"))
+tgz_path = os.path.join(stage_dir, "deps-cache", "charts", f"kueue-{kueue_next}.tgz")
+assert os.path.isfile(tgz_path)
+with open(tgz_path, "rb") as f:
+    expected_sha = hashlib.sha256(f.read()).hexdigest()
+assert kueue.get("archiveSha256") == expected_sha, kueue
+with open(os.path.join(stage_dir, "charts-discovery.json"), "r", encoding="utf-8") as f:
+    disc = json.load(f)
+assert disc["charts"]["kueue"]["archiveSha256"] == expected_sha, disc
 print(src_rev)
 PY
 )" && \
 [[ -n "${SRC_REV}" && "${SRC_REV}" != "${BASE_SHA}" ]] && \
-[[ "$(git -C "${PREFLIGHT_REPO}" show "${SRC_REV}:deploy/gpustack-operator/chart/charts/kueue/_VERSION_")" == "0.18.12" ]] && \
-grep -q 'kueue-0.18.12.tgz 0.18.12' <<<"$(git -C "${PREFLIGHT_REPO}" show "${SRC_REV}:hack/deps.sh")" && \
+[[ "$(git -C "${PREFLIGHT_REPO}" show "${SRC_REV}:deploy/gpustack-operator/chart/charts/kueue/_VERSION_")" == "${KUEUE_NEXT}" ]] && \
+grep -q "kueue-${KUEUE_NEXT}.tgz ${KUEUE_NEXT}" <<<"$(git -C "${PREFLIGHT_REPO}" show "${SRC_REV}:hack/deps.sh")" && \
 [[ -z "$(git -C "${PREFLIGHT_REPO}" status --porcelain)" ]] && \
 [[ "$(git -C "${PREFLIGHT_REPO}" rev-parse HEAD)" == "${BASE_SHA}" ]]; then
   pass "preflight-charts.sh stages mirrored-ready kueue bump onto clean detached source_revision"
@@ -356,31 +386,82 @@ else
   fail "preflight-charts.sh ready fixture test"
 fi
 
-# 4. Gitless env -i validate_charts.sh tests (positive + 3 negative cases).
+# 3b. Uncommitted local edit in repo_root survives preflight-charts.sh untouched.
+STAGE_DIRTY="${SCRATCH}/stage-dirty/charts"
+printf '\n# local uncommitted edit\n' >> "${PREFLIGHT_REPO}/hack/deps.sh"
+if (
+  cd "${PREFLIGHT_REPO}" && \
+  AUTOSYNC_CHARTS_FIXTURE_DIR="${FIXTURE_DIR}" \
+  AUTOSYNC_MOCK_MANIFESTS_JSON="${MOCK_READY}" \
+  AUTOSYNC_SKIP_GO_MOD_DOWNLOAD=true \
+  bash "${PREFLIGHT_REPO}/.auto-sync/scripts/preflight-charts.sh" "${STAGE_DIRTY}"
+) >/dev/null && \
+grep -q '# local uncommitted edit' "${PREFLIGHT_REPO}/hack/deps.sh"; then
+  pass "preflight-charts.sh preserves uncommitted local edits in repo_root"
+else
+  fail "preflight-charts.sh preserves uncommitted local edits in repo_root"
+fi
+git -C "${PREFLIGHT_REPO}" checkout -- hack/deps.sh
+
+# 3c. Upstream archive SHA-256 mismatch fails closed in preflight-charts.sh.
+FIXTURE_BAD_SHA="${SCRATCH}/fixture-bad-sha"
+cp -R "${FIXTURE_DIR}" "${FIXTURE_BAD_SHA}"
+python3 - "${FIXTURE_BAD_SHA}/upstream.json" <<'PY'
+import json
+import sys
+p = sys.argv[1]
+with open(p, "r", encoding="utf-8") as f:
+    doc = json.load(f)
+doc["charts"]["kueue"]["sha256"] = "0" * 64
+with open(p, "w", encoding="utf-8") as f:
+    json.dump(doc, f, indent=2)
+PY
+if ! (
+  cd "${PREFLIGHT_REPO}" && \
+  AUTOSYNC_CHARTS_FIXTURE_DIR="${FIXTURE_BAD_SHA}" \
+  AUTOSYNC_MOCK_MANIFESTS_JSON="${MOCK_READY}" \
+  AUTOSYNC_SKIP_GO_MOD_DOWNLOAD=true \
+  bash "${PREFLIGHT_REPO}/.auto-sync/scripts/preflight-charts.sh" "${SCRATCH}/stage-bad-sha/charts"
+) >/dev/null 2>&1; then
+  pass "preflight-charts.sh fails closed on archive SHA-256 mismatch"
+else
+  fail "preflight-charts.sh fails closed on archive SHA-256 mismatch"
+fi
+
+# 4. Gitless env -i validate_charts.sh tests (positive + negative cases).
+if [[ -z "${SRC_REV}" || "${SRC_REV}" == "${BASE_SHA}" ]]; then
+  fail "skipping validate_charts.sh tests because SRC_REV is empty or unchanged"
+else
 CAND_BASE="${SCRATCH}/cand-base"
 mkdir -p "${CAND_BASE}"
 git -C "${PREFLIGHT_REPO}" archive "${SRC_REV}" | tar -x -C "${CAND_BASE}"
 
-# Align values.yaml and proposals/charts.json with the bumped kueue 0.18.12 in the candidate tree.
-python3 - "${CAND_BASE}/deploy/gpustack-operator/chart/values.yaml" "${CAND_BASE}/.auto-sync/proposals/charts.json" <<'PY'
+# Align values.yaml and proposals/charts.json with the bumped kueue in the candidate tree.
+python3 - "${CAND_BASE}/deploy/gpustack-operator/chart/values.yaml" "${CAND_BASE}/.auto-sync/proposals/charts.json" "${KUEUE_CUR}" "${KUEUE_NEXT}" <<'PY'
 import json
 import re
 import sys
 
-vy_path, prop_path = sys.argv[1:3]
+vy_path, prop_path, kueue_cur, kueue_next = sys.argv[1:5]
 with open(vy_path, "r", encoding="utf-8") as f:
     vy = f.read()
-vy = vy.replace("chart 0.18.11", "chart 0.18.12")
-vy = re.sub(r"(repository:\s*docker\.io/gpustack/mirrored-kueue\n(?:[^\n]*\n){0,4}?\s*tag:\s*)v0\.18\.11\b", r"\g<1>v0.18.12", vy, count=1)
+vy_new = vy.replace(f"chart {kueue_cur}", f"chart {kueue_next}")
+vy_new = re.sub(
+    rf"(repository:\s*docker\.io/gpustack/mirrored-kueue\n(?:[^\n]*\n){{0,4}}?\s*tag:\s*)v{re.escape(kueue_cur)}\b",
+    rf"\g<1>v{kueue_next}",
+    vy_new,
+    count=1,
+)
+assert vy_new != vy, "failed to update kueue tag in values.yaml"
 with open(vy_path, "w", encoding="utf-8") as f:
-    f.write(vy)
+    f.write(vy_new)
 
 with open(prop_path, "r", encoding="utf-8") as f:
     prop = json.load(f)
-prop["versions"]["kueue-chart"] = "0.18.12"
+prop["versions"]["kueue-chart"] = kueue_next
 for sub in prop.get("subscriptions", []):
     if isinstance(sub, dict) and sub.get("id") == "kueue-chart":
-        sub["version"] = "0.18.12"
+        sub["version"] = kueue_next
 with open(prop_path, "w", encoding="utf-8") as f:
     json.dump(prop, f, indent=2)
     f.write("\n")
@@ -419,7 +500,16 @@ fi
 # Negative case 1: modifying mod_staging() in hack/deps.sh fails closed.
 CAND_BAD_MOD="${SCRATCH}/cand-bad-mod"
 cp -R "${CAND_BASE}" "${CAND_BAD_MOD}"
-sed 's|kubernetes/api v0.36.5|kubernetes/api v0.36.6|' "${CAND_BASE}/hack/deps.sh" > "${CAND_BAD_MOD}/hack/deps.sh"
+python3 - "${CAND_BASE}/hack/deps.sh" "${CAND_BAD_MOD}/hack/deps.sh" "${K8S_MOD_VER}" <<'PY'
+import sys
+src, dst, ver = sys.argv[1:4]
+with open(src, "r", encoding="utf-8") as f:
+    txt = f.read()
+out = txt.replace(f"kubernetes/api {ver}", "kubernetes/api v0.99.99", 1)
+assert out != txt, f"failed to mutate kubernetes/api {ver} in hack/deps.sh"
+with open(dst, "w", encoding="utf-8") as f:
+    f.write(out)
+PY
 bad_err=""
 if ! bad_err="$(run_validator_env_i "${CAND_BAD_MOD}" "${STAGE_READY}" 2>&1)" && \
    grep -qi "deps\.sh" <<<"${bad_err}"; then
@@ -445,7 +535,16 @@ done
 # Negative case 3: unmirrored gpustack/mirrored-kueue:v0.99.0 tag in values.yaml fails closed.
 CAND_BAD_IMG="${SCRATCH}/cand-bad-img"
 cp -R "${CAND_BASE}" "${CAND_BAD_IMG}"
-sed 's|tag: v0.18.12|tag: v0.99.0|' "${CAND_BASE}/deploy/gpustack-operator/chart/values.yaml" > "${CAND_BAD_IMG}/deploy/gpustack-operator/chart/values.yaml"
+python3 - "${CAND_BASE}/deploy/gpustack-operator/chart/values.yaml" "${CAND_BAD_IMG}/deploy/gpustack-operator/chart/values.yaml" "${KUEUE_NEXT}" <<'PY'
+import sys
+src, dst, ver = sys.argv[1:4]
+with open(src, "r", encoding="utf-8") as f:
+    txt = f.read()
+out = txt.replace(f"tag: v{ver}", "tag: v0.99.0", 1)
+assert out != txt, f"failed to mutate tag: v{ver} in values.yaml"
+with open(dst, "w", encoding="utf-8") as f:
+    f.write(out)
+PY
 bad_err=""
 if ! bad_err="$(run_validator_env_i "${CAND_BAD_IMG}" "${STAGE_READY}" 2>&1)" && \
    grep -q "mirrored-kueue:v0.99.0" <<<"${bad_err}"; then
@@ -457,8 +556,17 @@ fi
 # Negative case 4: mutating modelTransfer.images.nvidia in values.yaml fails closed.
 CAND_BAD_MT="${SCRATCH}/cand-bad-mt"
 cp -R "${CAND_BASE}" "${CAND_BAD_MT}"
-sed 's|nvidia: gpustack/model-transfer:v0.1.0-cuda12.9|nvidia: gpustack/model-transfer:v9.9.9-cuda12.9|' \
-  "${CAND_BASE}/deploy/gpustack-operator/chart/values.yaml" > "${CAND_BAD_MT}/deploy/gpustack-operator/chart/values.yaml"
+python3 - "${CAND_BASE}/deploy/gpustack-operator/chart/values.yaml" "${CAND_BAD_MT}/deploy/gpustack-operator/chart/values.yaml" <<'PY'
+import re
+import sys
+src, dst = sys.argv[1:3]
+with open(src, "r", encoding="utf-8") as f:
+    txt = f.read()
+out = re.sub(r"(nvidia:\s*gpustack/model-transfer:)[^\s]+", r"\g<1>v9.9.9-cuda12.9", txt, count=1)
+assert out != txt, "failed to mutate modelTransfer.images.nvidia in values.yaml"
+with open(dst, "w", encoding="utf-8") as f:
+    f.write(out)
+PY
 bad_err=""
 if ! bad_err="$(run_validator_env_i "${CAND_BAD_MT}" "${STAGE_READY}" 2>&1)" && \
    grep -q "modelTransfer" <<<"${bad_err}"; then
@@ -477,14 +585,15 @@ import sys
 p = sys.argv[1]
 with open(p, "r", encoding="utf-8") as f:
     txt = f.read()
-txt = re.sub(
-    r"(mirrored-csi-node-driver-registrar\s*\n\s*tag:\s*)v2\.17\.0",
+out = re.sub(
+    r"(mirrored-csi-node-driver-registrar\s*\n\s*tag:\s*)v[0-9A-Za-z._-]+",
     r"\g<1>v2.99.0",
     txt,
     count=1,
 )
+assert out != txt, "failed to mutate mirrored-csi-node-driver-registrar tag"
 with open(p, "w", encoding="utf-8") as f:
-    f.write(txt)
+    f.write(out)
 PY
 bad_err=""
 if ! bad_err="$(run_validator_env_i "${CAND_BAD_REG}" "${STAGE_READY}" 2>&1)" && \
@@ -492,6 +601,42 @@ if ! bad_err="$(run_validator_env_i "${CAND_BAD_REG}" "${STAGE_READY}" 2>&1)" &&
   pass "validate_charts.sh fails closed on modelManager.registrar.image tag parity mismatch"
 else
   fail "validate_charts.sh fails closed on modelManager.registrar.image tag parity mismatch (${bad_err})"
+fi
+
+# Negative case 6: missing cached .tgz when chart changed fails closed (I2).
+STAGE_NO_CACHE="${SCRATCH}/stage-no-cache"
+cp -R "${STAGE_READY}" "${STAGE_NO_CACHE}"
+rm -f "${STAGE_NO_CACHE}/deps-cache/charts/kueue-${KUEUE_NEXT}.tgz"
+bad_err=""
+if ! bad_err="$(run_validator_env_i "${CAND_POS}" "${STAGE_NO_CACHE}" 2>&1)" && \
+   grep -q "cached archive is missing" <<<"${bad_err}"; then
+  pass "validate_charts.sh fails closed when changed chart lacks cached .tgz"
+else
+  fail "validate_charts.sh fails closed when changed chart lacks cached .tgz (${bad_err})"
+fi
+
+# Negative case 7: corrupted cached .tgz fails archiveSha256 check (I10).
+STAGE_BAD_TGZ="${SCRATCH}/stage-bad-tgz"
+cp -R "${STAGE_READY}" "${STAGE_BAD_TGZ}"
+printf 'corrupt' >> "${STAGE_BAD_TGZ}/deps-cache/charts/kueue-${KUEUE_NEXT}.tgz"
+bad_err=""
+if ! bad_err="$(run_validator_env_i "${CAND_POS}" "${STAGE_BAD_TGZ}" 2>&1)" && \
+   grep -q "SHA-256 mismatch" <<<"${bad_err}"; then
+  pass "validate_charts.sh fails closed on cached .tgz archiveSha256 mismatch"
+else
+  fail "validate_charts.sh fails closed on cached .tgz archiveSha256 mismatch (${bad_err})"
+fi
+
+# Negative case 8: unset AUTOSYNC_STAGE_DIR fails closed unless AUTOSYNC_SKIP_IMAGE_CHECK=true (I3).
+bad_err=""
+if ! bad_err="$(env -i PATH=/usr/local/bin:/usr/bin:/bin HOME="${SCRATCH}/env-home" TMPDIR="${SCRATCH}" \
+  LOOPWRIGHT_CANDIDATE_DIR="${CAND_POS}" AUTOSYNC_FAST_SELFTEST=true \
+  bash "${CAND_POS}/.auto-sync/checks/validate_charts.sh" 2>&1)" && \
+   grep -q "AUTOSYNC_STAGE_DIR" <<<"${bad_err}"; then
+  pass "validate_charts.sh fails closed when AUTOSYNC_STAGE_DIR is unset"
+else
+  fail "validate_charts.sh fails closed when AUTOSYNC_STAGE_DIR is unset (${bad_err})"
+fi
 fi
 
 echo

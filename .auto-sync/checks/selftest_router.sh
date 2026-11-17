@@ -634,6 +634,7 @@ run_validate_env_i() {
     LOOPWRIGHT_CANDIDATE_DIR="${CAND_DIR}" \
     AUTOSYNC_ROUTER_BUILD_RUNNER="${STUB_BUILD_RUNNER}" \
     ROUTER_BUILD_LOG="${BUILD_LOG}" \
+    AUTOSYNC_ALLOW_MISSING_STAGED_REPO="${AUTOSYNC_ALLOW_MISSING_STAGED_REPO:-false}" \
     AUTOSYNC_FAST_SELFTEST=true \
     bash "${CAND_DIR}/.auto-sync/checks/validate_router.sh"
 }
@@ -728,6 +729,38 @@ fi
 make_gitless_cand
 set_router_proposal "recipe_sync" "v0.99.0"
 assert_fails "validate_router fails closed on mismatched proposals/router.json version" run_validate_env_i
+
+# 4.9 Negative case 5: retire_0001_epd_routing=true fails even without bumping VLLM_ROUTER_VERSION.
+write_preflight_report "true" "v0.1.17"
+make_gitless_cand
+assert_fails "validate_router fails closed when retire_0001_epd_routing=true and 0001-epd-routing.patch remains" run_validate_env_i
+
+# 4.10 Negative case 6: missing staged repo fails closed unless AUTOSYNC_ALLOW_MISSING_STAGED_REPO=true.
+write_preflight_report "false" "v0.1.16.1"
+make_gitless_cand
+mv "${VAL_STAGE}/vllm-router" "${SCRATCH}/vllm-router-backup"
+assert_fails "validate_router fails closed when staged vllm-router clone is missing" run_validate_env_i
+if AUTOSYNC_ALLOW_MISSING_STAGED_REPO=true run_validate_env_i >/dev/null 2>&1; then
+  pass "validate_router allows missing staged repo only when AUTOSYNC_ALLOW_MISSING_STAGED_REPO=true"
+else
+  fail "validate_router allows missing staged repo only when AUTOSYNC_ALLOW_MISSING_STAGED_REPO=true"
+fi
+mv "${SCRATCH}/vllm-router-backup" "${VAL_STAGE}/vllm-router"
+
+# 4.11 Negative case 7: missing fixture repo under AUTOSYNC_ROUTER_FIXTURE_DIR fails closed.
+FIX_MISSING_REPO="${SCRATCH}/fix-missing-router"
+cp -R "${FIXTURE_DIR}" "${FIX_MISSING_REPO}"
+rm -rf "${FIX_MISSING_REPO}/repos/sglang"
+run_router_preflight_with_fixture() {
+  (
+    cd "$1"
+    AUTOSYNC_ROUTER_FIXTURE_DIR="$2" \
+    AUTOSYNC_SKIP_GO_MOD_DOWNLOAD=true \
+      bash "$1/.auto-sync/scripts/preflight-router.sh" "$3"
+  )
+}
+assert_fails "preflight-router.sh fails closed when AUTOSYNC_ROUTER_FIXTURE_DIR lacks sglang repo" \
+  run_router_preflight_with_fixture "${FAKE_REPO}" "${FIX_MISSING_REPO}" "${SCRATCH}/stage-missing-router"
 
 echo
 if (( FAILS > 0 )); then

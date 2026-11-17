@@ -437,6 +437,7 @@ for key in (image_ref, normalized):
 amd64 = ""
 arm64 = ""
 published = False
+amd64_published = False
 if isinstance(entry, dict):
     amd64 = str(entry.get("amd64Digest") or "").strip()
     arm64 = str(entry.get("arm64Digest") or "").strip()
@@ -444,12 +445,15 @@ if isinstance(entry, dict):
         amd64 = ""
     if not DIGEST_RE.fullmatch(arm64):
         arm64 = ""
-    published = bool(entry.get("published")) and bool(amd64) and bool(arm64) and amd64 != arm64
+    raw_pub = entry.get("published") is True
+    amd64_published = raw_pub and bool(amd64)
+    published = raw_pub and bool(amd64) and bool(arm64) and amd64 != arm64
 
 print(json.dumps({
     "image": image_ref,
     "normalized": normalized,
     "published": published,
+    "amd64Published": amd64_published,
     "amd64Digest": amd64,
     "arm64Digest": arm64,
 }, separators=(",", ":")))
@@ -505,12 +509,14 @@ if not DIGEST_RE.fullmatch(amd64):
     amd64 = ""
 if not DIGEST_RE.fullmatch(arm64):
     arm64 = ""
+amd64_published = bool(amd64)
 published = bool(amd64 and arm64 and amd64 != arm64)
 
 print(json.dumps({
     "image": image_ref,
     "normalized": normalized,
     "published": published,
+    "amd64Published": amd64_published,
     "amd64Digest": amd64,
     "arm64Digest": arm64,
 }, separators=(",", ":")))
@@ -654,4 +660,165 @@ autosync::preflight::commit_detached_source_revision() {
     return 1
   fi
   printf '%s\n' "${new_commit}"
+}
+
+# autosync::preflight::commit_staged_tree_revision <repo_root> <base_sha> <commit_msg> <staged_root> <rel_path>...
+# Constructs a detached commit parented on <base_sha> purely in <repo_root>'s object
+# database using a temporary GIT_INDEX_FILE, replacing <rel_path>... from <staged_root>
+# without ever modifying <repo_root>'s working tree or .git/index.
+autosync::preflight::commit_staged_tree_revision() {
+  local repo_root="${1:?repo_root required}"
+  local base_sha="${2:?base_sha required}"
+  local commit_msg="${3:?commit_msg required}"
+  local staged_root="${4:?staged_root required}"
+  shift 4
+  if (( $# == 0 )); then
+    printf 'FAIL: commit_staged_tree_revision requires at least one relative path\n' >&2
+    return 1
+  fi
+  if [[ ! -d "${staged_root}" ]]; then
+    printf 'FAIL: commit_staged_tree_revision staged_root does not exist: %s\n' "${staged_root}" >&2
+    return 1
+  fi
+
+  local rel
+  for rel in "$@"; do
+    case "${rel}" in
+      ""|.|./*|/*|*../*|*/..|..|*/.|*/./*|*/)
+        printf 'FAIL: commit_staged_tree_revision path must be safe repo-relative: %s\n' "${rel}" >&2
+        return 1
+        ;;
+    esac
+  done
+
+  local tmp_dir
+  tmp_dir="$(mktemp -d "${TMPDIR:-/tmp}/autosync-gitidx.XXXXXXXX")"
+
+  (
+    trap 'rm -rf "${tmp_dir}"' EXIT INT TERM HUP
+    local tmp_index="${tmp_dir}/index"
+    local base_tree new_tree
+
+    base_tree="$(git -C "${repo_root}" rev-parse "${base_sha}^{tree}")"
+    GIT_INDEX_FILE="${tmp_index}" git -C "${repo_root}" read-tree "${base_sha}"
+    GIT_INDEX_FILE="${tmp_index}" git -C "${repo_root}" rm -q --cached -r --ignore-unmatch -- "$@"
+
+    python3 - "${repo_root}" "${base_sha}" "${tmp_index}" "${staged_root}" "$@" <<'PY'
+import os
+import stat
+import subprocess
+import sys
+
+repo_root, base_sha, tmp_index, staged_root = sys.argv[1:5]
+rel_paths = sys.argv[5:]
+
+tracked_res = subprocess.run(
+    ["git", "-C", repo_root, "ls-tree", "-r", "-z", "--name-only", base_sha, "--", *rel_paths],
+    capture_output=True,
+    check=True,
+)
+tracked = {
+    p.decode("utf-8", errors="surrogateescape")
+    for p in tracked_res.stdout.split(b"\0")
+    if p
+}
+
+candidates: list[tuple[str, str, bool]] = []
+for rel in rel_paths:
+    target = os.path.join(staged_root, rel)
+    if os.path.islink(target):
+        candidates.append((rel, target, True))
+    elif os.path.isfile(target):
+        candidates.append((rel, target, False))
+    elif os.path.isdir(target):
+        for cur, dirs, names in os.walk(target, followlinks=False):
+            dirs[:] = sorted(d for d in dirs if d not in (".git", ".sbin"))
+            for name in sorted(names):
+                fp = os.path.join(cur, name)
+                sub_rel = os.path.relpath(fp, staged_root).replace(os.sep, "/")
+                if os.path.islink(fp):
+                    candidates.append((sub_rel, fp, True))
+                elif os.path.isfile(fp):
+                    candidates.append((sub_rel, fp, False))
+
+if candidates:
+    untracked_rels = [r for r, _, _ in candidates if r not in tracked]
+    ignored: set[str] = set()
+    if untracked_rels:
+        ci_in = b"".join(r.encode("utf-8", errors="surrogateescape") + b"\0" for r in untracked_rels)
+        ci_res = subprocess.run(
+            ["git", "-C", repo_root, "check-ignore", "-z", "--stdin"],
+            input=ci_in,
+            capture_output=True,
+        )
+        if ci_res.returncode not in (0, 1):
+            raise SystemExit(f"FAIL: git check-ignore failed: {ci_res.stderr.decode('utf-8', errors='replace')}")
+        if ci_res.returncode == 0:
+            ignored = {
+                p.decode("utf-8", errors="surrogateescape")
+                for p in ci_res.stdout.split(b"\0")
+                if p
+            }
+
+    kept = [(r, fp, is_link) for r, fp, is_link in candidates if r not in ignored]
+    reg_entries = [(r, fp) for r, fp, is_link in kept if not is_link]
+    link_entries = [(r, fp) for r, fp, is_link in kept if is_link]
+
+    index_lines: list[bytes] = []
+    if reg_entries:
+        for _, fp in reg_entries:
+            if "\n" in fp:
+                raise SystemExit(f"FAIL: newline in staged file path: {fp!r}")
+        stdin_paths = "\n".join(fp for _, fp in reg_entries) + "\n"
+        ho_res = subprocess.run(
+            ["git", "-C", repo_root, "hash-object", "-w", "--no-filters", "--stdin-paths"],
+            input=stdin_paths.encode("utf-8"),
+            capture_output=True,
+            check=True,
+        )
+        blobs = [ln.strip() for ln in ho_res.stdout.decode("utf-8").splitlines() if ln.strip()]
+        if len(blobs) != len(reg_entries):
+            raise SystemExit(f"FAIL: hash-object count mismatch ({len(blobs)} != {len(reg_entries)})")
+        for (r, fp), blob in zip(reg_entries, blobs):
+            mode = "100755" if (os.stat(fp).st_mode & stat.S_IXUSR) else "100644"
+            index_lines.append(f"{mode} {blob}\t{r}".encode("utf-8") + b"\0")
+
+    for r, fp in link_entries:
+        link_target = os.readlink(fp).encode("utf-8", errors="surrogateescape")
+        ho_res = subprocess.run(
+            ["git", "-C", repo_root, "hash-object", "-w", "--stdin"],
+            input=link_target,
+            capture_output=True,
+            check=True,
+        )
+        blob = ho_res.stdout.decode("utf-8").strip()
+        index_lines.append(f"120000 {blob}\t{r}".encode("utf-8") + b"\0")
+
+    if index_lines:
+        env = os.environ.copy()
+        env["GIT_INDEX_FILE"] = tmp_index
+        subprocess.run(
+            ["git", "-C", repo_root, "update-index", "-z", "--index-info"],
+            input=b"".join(index_lines),
+            env=env,
+            check=True,
+        )
+PY
+
+    new_tree="$(GIT_INDEX_FILE="${tmp_index}" git -C "${repo_root}" write-tree)"
+    if [[ "${new_tree}" == "${base_tree}" ]]; then
+      printf '%s\n' "${base_sha}"
+      exit 0
+    fi
+
+    local new_commit
+    new_commit="$(
+      GIT_AUTHOR_NAME="autosync-preflight" \
+      GIT_AUTHOR_EMAIL="autosync@gpustack.local" \
+      GIT_COMMITTER_NAME="autosync-preflight" \
+      GIT_COMMITTER_EMAIL="autosync@gpustack.local" \
+      git -C "${repo_root}" commit-tree "${new_tree}" -p "${base_sha}" -m "${commit_msg}"
+    )"
+    printf '%s\n' "${new_commit}"
+  )
 }

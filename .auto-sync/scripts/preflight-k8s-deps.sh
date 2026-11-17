@@ -16,20 +16,14 @@ source "${SCRIPT_DIR}/lib-preflight.sh"
 source "${SCRIPT_DIR}/../checks/lib.sh"
 
 _PREFLIGHT_TMP_DIRS=()
-_RESTORE_PATHS=()
-_RESTORE_REPO=""
-_RESTORE_SHA=""
 
 cleanup_on_exit() {
-  if [[ -n "${_RESTORE_REPO}" && -n "${_RESTORE_SHA}" && ${#_RESTORE_PATHS[@]} -gt 0 ]]; then
-    autosync::preflight::_restore_paths "${_RESTORE_REPO}" "${_RESTORE_SHA}" "${_RESTORE_PATHS[@]}" || true
-  fi
   local d
   for d in "${_PREFLIGHT_TMP_DIRS[@]+"${_PREFLIGHT_TMP_DIRS[@]}"}"; do
     [[ -n "${d}" && -d "${d}" ]] && rm -rf "${d}"
   done
 }
-trap cleanup_on_exit EXIT
+trap cleanup_on_exit EXIT INT TERM HUP
 
 repo_root="$(autosync::preflight::repo_root)"
 stage_dir="$(autosync::preflight::init_stage "k8s-deps" "${1:-${AUTOSYNC_STAGE_DIR:-}}")"
@@ -372,6 +366,7 @@ source_revision="${base_sha}"
 patch_clean="true"
 staging_updated="false"
 generate_ran="false"
+staging_error=""
 
 has_fixture_dir="false"
 has_fixture_deps_cache="false"
@@ -427,10 +422,14 @@ PY
          GPUSTACK_DEPS_OFFLINE="${deps_offline}" \
          bash "${work_repo}/hack/deps.sh"; then
       patch_clean="false"
+      staging_error="hack/deps.sh mod_staging failed for ${tgt_k8s_mod}"
+      printf 'WARN: %s\n' "${staging_error}" >&2
     fi
 
     if [[ -n "$(find "${work_repo}/staging" -type f \( -name '*.rej' -o -name '*.orig' \) 2>/dev/null)" ]]; then
       patch_clean="false"
+      staging_error="staging patches produced .rej or .orig files"
+      printf 'WARN: %s\n' "${staging_error}" >&2
     fi
   fi
 
@@ -444,13 +443,31 @@ gomod_path, tgt_k8s, cur_cr, tgt_cr, cur_kueue, tgt_kueue, cur_helm, tgt_helm = 
 with open(gomod_path, "r", encoding="utf-8") as f:
     txt = f.read()
 
-k8s_minor = ".".join(tgt_k8s.split(".")[:2])
-txt = re.sub(
-    rf'(^\s*k8s\.io/[A-Za-z0-9._/-]+\s+){re.escape(k8s_minor)}\.\d+',
-    rf'\g<1>{tgt_k8s}',
-    txt,
-    flags=re.MULTILINE,
+# Only rewrite explicitly lockstepped direct core k8s.io/* modules (never indirect/lagging modules
+# such as k8s.io/dynamic-resource-allocation).
+LOCKSTEP_K8S_MODS = (
+    "k8s.io/api",
+    "k8s.io/apiextensions-apiserver",
+    "k8s.io/apimachinery",
+    "k8s.io/apiserver",
+    "k8s.io/cli-runtime",
+    "k8s.io/client-go",
+    "k8s.io/code-generator",
+    "k8s.io/component-base",
+    "k8s.io/component-helpers",
+    "k8s.io/cri-streaming",
+    "k8s.io/kube-aggregator",
+    "k8s.io/kubectl",
+    "k8s.io/kubelet",
 )
+k8s_minor = ".".join(tgt_k8s.split(".")[:2])
+for mod in LOCKSTEP_K8S_MODS:
+    txt = re.sub(
+        rf'(^\s*{re.escape(mod)}\s+){re.escape(k8s_minor)}\.\d+\s*$',
+        rf'\g<1>{tgt_k8s}',
+        txt,
+        flags=re.MULTILINE,
+    )
 if cur_cr != tgt_cr:
     txt = re.sub(
         r'(^\s*sigs\.k8s\.io/controller-runtime\s+)v\S+',
@@ -476,7 +493,7 @@ if cur_helm != tgt_helm:
 with open(gomod_path, "w", encoding="utf-8") as f:
     f.write(txt)
 PY
-      (
+      if ! (
         cd "${work_repo}"
         GOMODCACHE="${stage_dir}/go-mod" \
         GOCACHE="${stage_dir}/go-cache" \
@@ -484,47 +501,46 @@ PY
         GOMODCACHE="${stage_dir}/go-mod" \
         GOCACHE="${stage_dir}/go-cache" \
           go mod download
-      )
+      ); then
+        patch_clean="false"
+        staging_updated="false"
+        staging_error="go mod tidy/download failed while staging ${tgt_k8s_mod}; upstream release tags may still be propagating"
+        printf 'WARN: %s\n' "${staging_error}" >&2
+      fi
     fi
 
-    if [[ "${AUTOSYNC_SKIP_GENERATE:-false}" != "true" ]] && command -v make >/dev/null 2>&1; then
+    if [[ "${patch_clean}" == "true" && "${AUTOSYNC_SKIP_GENERATE:-false}" != "true" ]] && command -v make >/dev/null 2>&1; then
       if [[ -d "${stage_dir}/.sbin" ]]; then
         mkdir -p "${work_repo}/.sbin"
         cp -RLp "${stage_dir}/.sbin/." "${work_repo}/.sbin/" 2>/dev/null || true
       fi
-      GOMODCACHE="${stage_dir}/go-mod" \
-      GOCACHE="${stage_dir}/go-cache" \
-      PATH="${stage_dir}/.sbin:${stage_dir}/.sbin/protoc/bin:${PATH}" \
-        autosync::run_in_module_path_copy "${work_repo}" make generate
-      generate_ran="true"
+      if GOMODCACHE="${stage_dir}/go-mod" \
+         GOCACHE="${stage_dir}/go-cache" \
+         PATH="${stage_dir}/.sbin:${stage_dir}/.sbin/protoc/bin:${PATH}" \
+           autosync::run_in_module_path_copy "${work_repo}" make generate; then
+        generate_ran="true"
+      else
+        patch_clean="false"
+        staging_updated="false"
+        generate_ran="false"
+        staging_error="make generate failed inside staged work_repo"
+        printf 'WARN: %s\n' "${staging_error}" >&2
+      fi
     fi
 
-    stage_paths=(hack/deps.sh staging go.mod go.sum api pkg)
-    _RESTORE_REPO="${repo_root}"
-    _RESTORE_SHA="${base_sha}"
-    _RESTORE_PATHS=("${stage_paths[@]}")
-
-    for rel in "${stage_paths[@]}"; do
-      if [[ -e "${work_repo}/${rel}" ]]; then
-        rm -rf -- "${repo_root:?}/${rel:?}"
-        mkdir -p "$(dirname "${repo_root}/${rel}")"
-        cp -Rp "${work_repo}/${rel}" "${repo_root}/${rel}"
+    if [[ "${patch_clean}" == "true" ]]; then
+      stage_paths=(hack/deps.sh staging go.mod go.sum api pkg)
+      source_revision="$(
+        autosync::preflight::commit_staged_tree_revision \
+          "${repo_root}" \
+          "${base_sha}" \
+          "chore(deps): stage kubernetes modules and generated outputs" \
+          "${work_repo}" \
+          "${stage_paths[@]}"
+      )"
+      if [[ "${source_revision}" != "${base_sha}" ]]; then
+        staging_updated="true"
       fi
-    done
-
-    source_revision="$(
-      autosync::preflight::commit_detached_source_revision \
-        "${repo_root}" \
-        "${base_sha}" \
-        "chore(deps): stage kubernetes modules and generated outputs" \
-        "${stage_paths[@]}"
-    )"
-    _RESTORE_REPO=""
-    _RESTORE_SHA=""
-    _RESTORE_PATHS=()
-
-    if [[ "${source_revision}" != "${base_sha}" ]]; then
-      staging_updated="true"
     fi
   fi
 fi
@@ -533,7 +549,7 @@ report_json="${stage_dir}/k8s-deps-preflight-report.json"
 upstream_records_json="${stage_dir}/upstream-records.json"
 
 python3 - "${discovery_json}" "${report_json}" "${upstream_records_json}" \
-  "${base_sha}" "${source_revision}" "${patch_clean}" "${staging_updated}" "${generate_ran}" <<'PY'
+  "${base_sha}" "${source_revision}" "${patch_clean}" "${staging_updated}" "${generate_ran}" "${staging_error}" <<'PY'
 import json
 import sys
 
@@ -546,7 +562,8 @@ import sys
     patch_clean_str,
     staging_updated_str,
     generate_ran_str,
-) = sys.argv[1:9]
+    staging_error,
+) = sys.argv[1:10]
 
 with open(discovery_path, "r", encoding="utf-8") as f:
     disc = json.load(f)
@@ -636,6 +653,7 @@ report = {
     "patch_clean": patch_clean_str == "true",
     "staging_updated": staging_updated_str == "true",
     "generate_ran": generate_ran_str == "true",
+    "staging_error": staging_error,
     "current": cur,
     "target": tgt,
     "recent": recent,
