@@ -1397,7 +1397,7 @@ assert_dockerfile_only_args() {
 
 ### Implementation Plan
 
-- [ ] **T1 · Expose optional `source-revision` Action input in `gpustack/loopwright`**
+- [x] **T1 · Expose optional `source-revision` Action input in `gpustack/loopwright`**
       Blocked by: None
       Owns: `gpustack/loopwright:action.yml`, `gpustack/loopwright:packages/github-app/src/action.ts`, `gpustack/loopwright:packages/github-app/test/turnkey-action-overlay.test.ts`
       Gate: review
@@ -1454,7 +1454,7 @@ assert_dockerfile_only_args() {
       Acceptance: `k8s-deps-taskpack.yaml` passes `validateTaskpackManifest` with `podman-container-tools/skopeo`, `helmfile/vals`, and same-minor `v0.36.x` lockstep constraint; `preflight-k8s-deps.sh` pre-stages `mod_staging()` + `make generate` onto `source_revision`; `validate_k8s_deps.sh` enforces CLI-only `Dockerfile` guard, `mod_staging()`-only `hack/deps.sh` guard, codegen-only `api/` guard, `upgrade-compat.sh modules`, `toolpins-selftest.sh`, double `make generate` + `make lint`, and `RACE=false make test`.
       Verify: `bash hack/check/autosync-selftest.sh k8s-deps && bash hack/check/upgrade-compat.sh modules && bash hack/check/toolpins-selftest.sh`
 
-- [ ] **T10 · Unified `.github/workflows/auto-sync.yml` matrix, `ubuntu-24.04-8x` profile, and PR comment router**
+- [x] **T10 · Unified `.github/workflows/auto-sync.yml` matrix, `ubuntu-24.04-8x` profile, and PR comment router**
       Blocked by: T1, T4, T5, T6, T7, T8, T9
       Owns: `.github/workflows/auto-sync.yml`
       Gate: review
