@@ -1224,7 +1224,7 @@ SH
     [[ -f "${models_out}" ]] && \
     grep -q '^provider=zai-coding-cn$' "${gha_out}" && \
     grep -q '^model=glm-5.3$' "${gha_out}" && \
-    grep -q '^thinking=high$' "${gha_out}" && \
+    grep -q '^thinking=low$' "${gha_out}" && \
     grep -q '^api=openai-completions$' "${gha_out}" && \
     grep -q '^base-url=https://open.bigmodel.cn/api/coding/paas/v4$' "${gha_out}" && \
     grep -q '^provider-token-env=LOOPWRIGHT_PROVIDER_TOKEN$' "${gha_out}" && \
@@ -1410,11 +1410,187 @@ JS
     CI_GPUSTACK_CODEREVIEW_LLM_MODEL="gpt-4o" \
     python3 "${models_script}" --models-out "${models_out}" --github-output "${gha_out}" >/dev/null && \
     grep -q '^provider=openai$' "${gha_out}" && \
-    grep -q '^model=gpt-4o$' "${gha_out}"; then
-    pass "write_models_json.py fallback to CI_GPUSTACK_CODEREVIEW_LLM_*"
+    grep -q '^model=gpt-4o$' "${gha_out}" && \
+    grep -q '^thinking=off$' "${gha_out}" && \
+    python3 - "${models_out}" <<'PY'
+import json
+import sys
+with open(sys.argv[1], "r", encoding="utf-8") as f:
+    doc = json.load(f)
+m = doc["providers"]["openai"]["models"][0]
+assert m["reasoning"] is False, m
+PY
+  then
+    pass "write_models_json.py fallback to CI_GPUSTACK_CODEREVIEW_LLM_* defaults non-ZAI to thinking=off"
   else
-    fail "write_models_json.py fallback to CI_GPUSTACK_CODEREVIEW_LLM_*"
+    fail "write_models_json.py fallback to CI_GPUSTACK_CODEREVIEW_LLM_* defaults non-ZAI to thinking=off"
   fi
+
+  : > "${gha_out}"
+  rm -f "${models_out}"
+  if env -i PATH=/usr/local/bin:/usr/bin:/bin \
+    CI_GPUSTACK_CODEREVIEW_LLM_URL="https://open.bigmodel.cn/api/coding/paas/v4" \
+    CI_GPUSTACK_CODEREVIEW_LLM_MODEL="glm-5.3" \
+    CI_GPUSTACK_CODEREVIEW_LLM_THINKING="enabled" \
+    CI_GPUSTACK_CODEREVIEW_LLM_REASONING_EFFORT="low" \
+    CI_GPUSTACK_CODEREVIEW_LLM_TEMPERATURE="0.4" \
+    CI_GPUSTACK_CODEREVIEW_LLM_TOP_P="0.9" \
+    python3 "${models_script}" --models-out "${models_out}" --github-output "${gha_out}" >/dev/null && \
+    grep -q '^provider=zai-coding-cn$' "${gha_out}" && \
+    grep -q '^model=glm-5.3$' "${gha_out}" && \
+    grep -q '^thinking=low$' "${gha_out}" && \
+    grep -q '^api=openai-completions$' "${gha_out}" && \
+    grep -q '^base-url=https://open.bigmodel.cn/api/coding/paas/v4$' "${gha_out}" && \
+    python3 - "${models_out}" <<'PY'
+import json
+import sys
+with open(sys.argv[1], "r", encoding="utf-8") as f:
+    doc = json.load(f)
+prov = doc["providers"]["zai-coding-cn"]
+m = prov["models"][0]
+assert m["id"] == "glm-5.3", m
+assert m["reasoning"] is True, m
+assert m["samplingParams"] == {"temperature": 0.4, "top_p": 0.9}, m
+assert m["compat"] == {"thinkingFormat": "zai", "supportsReasoningEffort": True}, m
+PY
+  then
+    pass "write_models_json.py live org CODEREVIEW ZAI/glm-5.3 THINKING=enabled + REASONING_EFFORT=low -> thinking=low"
+  else
+    fail "write_models_json.py live org CODEREVIEW ZAI/glm-5.3 THINKING=enabled + REASONING_EFFORT=low -> thinking=low"
+  fi
+
+  if [[ -n "${lw_dist}" ]] && command -v node >/dev/null 2>&1; then
+    if LW_DIST="${lw_dist}" MODELS_PATH="${models_out}" node --input-type=module <<'JS'
+const {
+  loadPiModelsJson,
+  resolveTaskpackModelSelection,
+  DEFAULT_HOST_BUDGETS,
+  LOCAL_COMMAND_GATE_ENDPOINT_ID,
+  CANONICAL_TASKPACK_STEP_GATE_URL,
+  DEFAULT_LOCAL_COMMAND_GATE_ENV,
+} = await import(process.env.LW_DIST);
+const modelsConfig = await loadPiModelsJson(process.env.MODELS_PATH);
+const dummyManifest = {
+  apiVersion: 'loopwright.dev/v1alpha1',
+  kind: 'Taskpack',
+  metadata: { name: 'priors-sync' },
+  spec: {
+    goal: { candidate: 'c', noChange: 'n' },
+    scope: { writable: ['.auto-sync/proposals/priors.json'], protected: ['.auto-sync/checks'] },
+    proposal: { path: '.auto-sync/proposals/priors.json', requiredFields: ['summary'], schemaVersion: 1 },
+    upstreams: [{ id: 'u', kind: 'http-json', source: 'https://example.com', watchedPaths: [] }],
+    verification: { localChecks: [], externalGates: [] },
+    publication: { mode: 'pull_request', targetBranch: 'main', headBranchPrefix: 'auto-sync-priors/', titleTemplate: 't' },
+    memory: { directory: '.auto-sync/memory/priors-sync', apply: 'separate-pull-request', onNoModelBudget: 'skip' },
+    triggers: { schedule: true, workflowDispatch: true, releasePublished: false, commentCommands: [] },
+  },
+};
+const resolved = resolveTaskpackModelSelection(
+  dummyManifest,
+  {
+    mode: 'candidate',
+    repository: 'gpustack/gpustack-operator',
+    baseRevision: '0'.repeat(40),
+    sourceRevision: '0'.repeat(40),
+    budgets: DEFAULT_HOST_BUDGETS,
+    allowManifestCustomBaseUrl: true,
+    modelsJsonPath: process.env.MODELS_PATH,
+    roleSelection: { provider: 'zai-coding-cn', model: 'glm-5.3', thinking: 'low', api: 'openai-completions' },
+    credentialEnvMap: { provider: 'LOOPWRIGHT_PROVIDER_TOKEN', localCommandGate: DEFAULT_LOCAL_COMMAND_GATE_ENV },
+    gateEndpoints: [{
+      id: LOCAL_COMMAND_GATE_ENDPOINT_ID,
+      url: CANONICAL_TASKPACK_STEP_GATE_URL,
+      signingCredentialRef: 's',
+      authCredentialRef: null,
+      timeoutMs: 60_000,
+      maxPollMs: 75_000,
+      pollInitialMs: 100,
+      pollMaxMs: 500,
+      jitter: 0,
+    }],
+  },
+  modelsConfig,
+);
+if (resolved.selection.thinking !== 'low' || resolved.selection.provider !== 'zai-coding-cn') {
+  throw new Error(`unexpected selection: ${JSON.stringify(resolved)}`);
+}
+JS
+    then
+      pass "write_models_json.py live org zai-coding-cn/glm-5.3 thinking=low accepted by resolveTaskpackModelSelection"
+    else
+      fail "write_models_json.py live org zai-coding-cn/glm-5.3 thinking=low accepted by resolveTaskpackModelSelection"
+    fi
+  fi
+
+  : > "${gha_out}"
+  rm -f "${models_out}"
+  if env -i PATH=/usr/local/bin:/usr/bin:/bin \
+    CI_GPUSTACK_LOOPWRIGHT_LLM_URL="https://api.openai.com/v1" \
+    CI_GPUSTACK_LOOPWRIGHT_LLM_MODEL="gpt-4o" \
+    CI_GPUSTACK_LOOPWRIGHT_LLM_THINKING="enabled" \
+    python3 "${models_script}" --models-out "${models_out}" --github-output "${gha_out}" >/dev/null && \
+    grep -q '^thinking=low$' "${gha_out}" && \
+    python3 - "${models_out}" <<'PY'
+import json
+import sys
+with open(sys.argv[1], "r", encoding="utf-8") as f:
+    doc = json.load(f)
+assert doc["providers"]["openai"]["models"][0]["reasoning"] is True
+PY
+  then
+    pass "write_models_json.py THINKING=enabled alone resolves to low with reasoning=true"
+  else
+    fail "write_models_json.py THINKING=enabled alone resolves to low with reasoning=true"
+  fi
+
+  : > "${gha_out}"
+  rm -f "${models_out}"
+  if env -i PATH=/usr/local/bin:/usr/bin:/bin \
+    CI_GPUSTACK_LOOPWRIGHT_LLM_URL="https://open.bigmodel.cn/api/coding/paas/v4" \
+    CI_GPUSTACK_LOOPWRIGHT_LLM_MODEL="glm-5.3" \
+    CI_GPUSTACK_LOOPWRIGHT_LLM_THINKING="disabled" \
+    CI_GPUSTACK_LOOPWRIGHT_LLM_REASONING_EFFORT="high" \
+    python3 "${models_script}" --models-out "${models_out}" --github-output "${gha_out}" >/dev/null && \
+    grep -q '^thinking=off$' "${gha_out}" && \
+    python3 - "${models_out}" <<'PY'
+import json
+import sys
+with open(sys.argv[1], "r", encoding="utf-8") as f:
+    doc = json.load(f)
+assert doc["providers"]["zai-coding-cn"]["models"][0]["reasoning"] is False
+PY
+  then
+    pass "write_models_json.py THINKING=disabled overrides REASONING_EFFORT=high to off"
+  else
+    fail "write_models_json.py THINKING=disabled overrides REASONING_EFFORT=high to off"
+  fi
+
+  : > "${gha_out}"
+  rm -f "${models_out}"
+  if env -i PATH=/usr/local/bin:/usr/bin:/bin \
+    CI_GPUSTACK_LOOPWRIGHT_LLM_URL="https://open.bigmodel.cn/api/coding/paas/v4" \
+    CI_GPUSTACK_LOOPWRIGHT_LLM_MODEL="glm-5.3" \
+    CI_GPUSTACK_LOOPWRIGHT_LLM_REASONING_EFFORT="medium" \
+    python3 "${models_script}" --models-out "${models_out}" --github-output "${gha_out}" >/dev/null && \
+    grep -q '^thinking=high$' "${gha_out}"
+  then
+    pass "write_models_json.py snaps unsupported glm-5.3 thinking=medium to high"
+  else
+    fail "write_models_json.py snaps unsupported glm-5.3 thinking=medium to high"
+  fi
+
+  assert_fails "write_models_json.py rejects invalid THINKING=bogus" \
+    env -i PATH=/usr/local/bin:/usr/bin:/bin \
+    CI_GPUSTACK_LOOPWRIGHT_LLM_URL="https://api.openai.com/v1" \
+    CI_GPUSTACK_LOOPWRIGHT_LLM_MODEL="gpt-4o" \
+    CI_GPUSTACK_LOOPWRIGHT_LLM_THINKING="bogus" \
+    python3 "${models_script}" --models-out "${models_out}"
+  assert_fails "write_models_json.py rejects invalid REASONING_EFFORT=bogus" \
+    env -i PATH=/usr/local/bin:/usr/bin:/bin \
+    CI_GPUSTACK_LOOPWRIGHT_LLM_URL="https://api.openai.com/v1" \
+    CI_GPUSTACK_LOOPWRIGHT_LLM_MODEL="gpt-4o" \
+    CI_GPUSTACK_LOOPWRIGHT_LLM_REASONING_EFFORT="bogus" \
+    python3 "${models_script}" --models-out "${models_out}"
 
   assert_fails "write_models_json.py rejects partial config (URL without MODEL)" \
     env -i PATH=/usr/local/bin:/usr/bin:/bin \

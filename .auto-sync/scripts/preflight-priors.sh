@@ -71,30 +71,68 @@ else
 fi
 
 query_ids_file="${work_dir}/query-ids.txt"
-python3 - "${snapshots_dir}/availability.json" "${query_ids_file}" <<'PY'
+unmapped_slugs_json="${work_dir}/unmapped-slugs.json"
+python3 - "${snapshots_dir}/availability.json" "${repo_root}/pkg/worker/scaling/priors/records.md" "${query_ids_file}" "${unmapped_slugs_json}" "${AUTOSYNC_PRIORS_FIXTURE_DIR:-}" <<'PY'
 import json
+import os
 import re
 import sys
 
-avail_path, out_path = sys.argv[1:3]
+avail_path, records_path, out_path, unmapped_out_path, fixture_dir = sys.argv[1:6]
 with open(avail_path, "r", encoding="utf-8") as f:
     data = json.load(f)
 
 if not isinstance(data, (list, dict)):
     raise SystemExit("FAIL: availability.json must be a JSON array or object")
 
+with open(records_path, "r", encoding="utf-8") as f:
+    records_txt = f.read()
+
+sec_m = re.search(r"## Active Sources\b(.*?)(?:\n## |\Z)", records_txt, re.DOTALL)
+if not sec_m:
+    raise SystemExit(f"FAIL: missing '## Active Sources' section in {records_path}")
+active_sec = sec_m.group(1)
+
+active_record_qids = []
+for line in active_sec.splitlines():
+    stripped = line.strip()
+    if not stripped.startswith("|"):
+        continue
+    cells = [c.strip().strip("`") for c in stripped.strip("|").split("|")]
+    if len(cells) >= 5 and re.fullmatch(r"[0-9a-f]{64}", cells[4]):
+        active_record_qids.append(cells[0])
+
+SLUG_TO_QUERY_ID = {
+    "dsr1": "DeepSeek-R1-0528",
+    "dsv4": "DeepSeek-V4-Pro",
+    "glm5": "GLM-5",
+    "glm5.1": "GLM-5",
+    "glm5.2": "GLM-5.2",
+    "glm5.3": "GLM-5.2",
+    "gptoss120b": "gpt-oss-120b",
+    "kimik2.5": "Kimi-K2.5",
+    "kimik2.6": "Kimi-K2.5",
+    "kimik3": "Kimi-K3",
+    "llama70b": "Llama-3.3-70B-Instruct-FP8",
+    "minimaxm2.5": "MiniMax-M2.5",
+    "minimaxm3": "MiniMax-M3",
+    "qwen3.5": "Qwen-3.5-397B-A17B",
+    "qwen3.8next": "Qwen3.8-Flash-Next",
+}
+
+known_qids_by_lower = {}
+for q in list(active_record_qids) + list(SLUG_TO_QUERY_ID.values()):
+    known_qids_by_lower.setdefault(q.lower(), q)
+
 QID_RE = re.compile(r"^[A-Za-z0-9._-]+$")
 MAX_QUERY_IDS = 256
 seen = set()
 query_ids = []
+unmapped_slugs = set()
+saw_token = False
 
 
-def add_qid(val):
-    if not isinstance(val, str):
-        raise SystemExit(f"FAIL: non-string query ID in availability.json: {val!r}")
-    qid = val.strip()
-    if not qid or ".." in qid or not QID_RE.fullmatch(qid):
-        raise SystemExit(f"FAIL: unsafe or malformed query ID in availability.json: {val!r}")
+def add_qid(qid):
     if qid not in seen:
         if len(query_ids) >= MAX_QUERY_IDS:
             raise SystemExit(f"FAIL: availability.json exceeds max query ID cap ({MAX_QUERY_IDS})")
@@ -102,16 +140,43 @@ def add_qid(val):
         query_ids.append(qid)
 
 
+def has_fixture(tok):
+    if not fixture_dir:
+        return False
+    return os.path.isfile(os.path.join(fixture_dir, f"{tok}.json")) or os.path.isfile(
+        os.path.join(fixture_dir, "snapshots", f"{tok}.json")
+    )
+
+
+def handle_token(val):
+    global saw_token
+    if not isinstance(val, str):
+        raise SystemExit(f"FAIL: non-string query ID in availability.json: {val!r}")
+    tok = val.strip()
+    if not tok or ".." in tok or not QID_RE.fullmatch(tok):
+        raise SystemExit(f"FAIL: unsafe or malformed query ID in availability.json: {val!r}")
+    saw_token = True
+    lower_tok = tok.lower()
+    if lower_tok in SLUG_TO_QUERY_ID:
+        add_qid(SLUG_TO_QUERY_ID[lower_tok])
+    elif lower_tok in known_qids_by_lower:
+        add_qid(known_qids_by_lower[lower_tok])
+    elif has_fixture(tok):
+        add_qid(tok)
+    else:
+        unmapped_slugs.add(tok)
+
+
 def extract(node):
     if isinstance(node, list):
         for item in node:
             if isinstance(item, str):
-                add_qid(item)
+                handle_token(item)
             elif isinstance(item, dict):
                 found = False
                 for key in ("query_id", "query_model", "model", "id", "name"):
                     if isinstance(item.get(key), str) and item[key].strip():
-                        add_qid(item[key])
+                        handle_token(item[key])
                         found = True
                         break
                 if not found:
@@ -124,18 +189,30 @@ def extract(node):
                 extract(node[wrapper_key])
                 return
         for key in sorted(node.keys()):
-            add_qid(key)
+            handle_token(key)
     else:
         raise SystemExit(f"FAIL: unexpected JSON node in availability.json: {type(node).__name__}")
 
 
 extract(data)
+if not saw_token:
+    raise SystemExit("FAIL: availability.json yielded 0 model entries")
+
+if unmapped_slugs:
+    print(
+        f"WARN: skipping {len(unmapped_slugs)} unmapped InferenceX availability slug(s) not registered in SLUG_TO_QUERY_ID / identity.go: {', '.join(sorted(unmapped_slugs))}",
+        file=sys.stderr,
+    )
+
 if not query_ids:
     raise SystemExit("FAIL: availability.json yielded 0 active query IDs")
 
 with open(out_path, "w", encoding="utf-8") as f:
     for qid in query_ids:
         f.write(qid + "\n")
+
+with open(unmapped_out_path, "w", encoding="utf-8") as f:
+    json.dump(sorted(unmapped_slugs), f)
 PY
 
 while IFS= read -r qid || [[ -n "${qid}" ]]; do
@@ -334,7 +411,7 @@ disagg_count="${profile_counts##* }"
 report_json="${stage_dir}/priors-preflight-report.json"
 upstream_records_json="${stage_dir}/upstream-records.json"
 
-python3 - "${analysis_json}" "${report_json}" "${upstream_records_json}" \
+python3 - "${analysis_json}" "${unmapped_slugs_json}" "${report_json}" "${upstream_records_json}" \
   "${capture_date}" "${base_sha}" "${source_revision}" "${inferencex_commit}" \
   "${inferencex_repo_url}" "${merge_attempted}" "${catalog_changed}" \
   "${agg_count}" "${disagg_count}" <<'PY'
@@ -343,6 +420,7 @@ import sys
 
 (
     analysis_path,
+    unmapped_path,
     report_path,
     records_out_path,
     capture_date,
@@ -354,10 +432,12 @@ import sys
     catalog_changed_str,
     agg_count_str,
     disagg_count_str,
-) = sys.argv[1:13]
+) = sys.argv[1:14]
 
 with open(analysis_path, "r", encoding="utf-8") as f:
     analysis = json.load(f)
+with open(unmapped_path, "r", encoding="utf-8") as f:
+    unmapped_slugs = json.load(f)
 
 agg_count = int(agg_count_str)
 disagg_count = int(disagg_count_str)
@@ -394,6 +474,7 @@ report = {
         "changed": inferencex_commit != analysis["baseline_repo_commit"],
     },
     "availability": analysis["availability"],
+    "unmapped_availability_slugs": unmapped_slugs,
     "queries": analysis["queries"],
     "removed_query_ids": analysis["removed_query_ids"],
     "catalog_merge": {
@@ -435,7 +516,7 @@ with open(records_out_path, "w", encoding="utf-8") as f:
     f.write("\n")
 PY
 
-rm -f "${analysis_json}"
+rm -f "${analysis_json}" "${unmapped_slugs_json}"
 
 compact_records="$(python3 -c 'import json,sys; print(json.dumps(json.load(open(sys.argv[1])), separators=(",", ":")))' "${upstream_records_json}")"
 autosync::preflight::write_github_output "stage_dir" "${stage_dir}"

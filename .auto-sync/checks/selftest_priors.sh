@@ -366,6 +366,70 @@ else
 fi
 git -C "${PREFLIGHT_REPO}" checkout -- pkg/worker/scaling/priors/priors.yaml
 
+# 2d. Slug-to-QueryID mapping and unmapped availability slugs test.
+FIXTURE_SLUGS="${SCRATCH}/fixture-slugs"
+cp -R "${FIXTURE_SAME}" "${FIXTURE_SLUGS}"
+cat > "${FIXTURE_SLUGS}/availability.json" <<'JSON'
+[
+  {"model": "dsr1"},
+  {"model": "minimaxm2.5"},
+  {"model": "musespark"}
+]
+JSON
+
+STAGE_SLUGS="${SCRATCH}/stage-slugs/priors"
+SLUGS_STDERR="${SCRATCH}/stage-slugs.stderr"
+if (
+  cd "${PREFLIGHT_REPO}" && \
+  AUTOSYNC_PRIORS_FIXTURE_DIR="${FIXTURE_SLUGS}" \
+  AUTOSYNC_SKIP_GO_MOD_DOWNLOAD=true \
+  GOMODCACHE="${HOST_GOMODCACHE}" \
+  GOCACHE="${HOST_GOCACHE}" \
+  bash "${PREFLIGHT_REPO}/${PREFLIGHT_REL}" "${STAGE_SLUGS}" >/dev/null 2>"${SLUGS_STDERR}"
+) && \
+python3 - "${STAGE_SLUGS}" "${FIXTURE_SLUGS}/records.md" "${SLUGS_STDERR}" <<'PY'
+import json
+import os
+import re
+import sys
+
+stage_dir, records_path, stderr_path = sys.argv[1:4]
+with open(os.path.join(stage_dir, "priors-preflight-report.json"), "r", encoding="utf-8") as f:
+    report = json.load(f)
+
+with open(records_path, "r", encoding="utf-8") as f:
+    records_txt = f.read()
+
+sec_m = re.search(r"## Active Sources\b(.*?)(?:\n## |\Z)", records_txt, re.DOTALL)
+assert sec_m, f"missing ## Active Sources in {records_path}"
+active_qids = set()
+for line in sec_m.group(1).splitlines():
+    stripped = line.strip()
+    if not stripped.startswith("|"):
+        continue
+    cells = [c.strip().strip("`") for c in stripped.strip("|").split("|")]
+    if len(cells) >= 5 and re.fullmatch(r"[0-9a-f]{64}", cells[4]):
+        active_qids.add(cells[0])
+
+with open(stderr_path, "r", encoding="utf-8") as f:
+    stderr_txt = f.read()
+
+qids = {q["query_id"] for q in report.get("queries", [])}
+assert "DeepSeek-R1-0528" in qids, qids
+assert "MiniMax-M2.5" in qids, qids
+assert "musespark" not in qids, qids
+assert report.get("unmapped_availability_slugs") == ["musespark"], report
+assert "WARN: skipping 1 unmapped InferenceX availability slug(s) not registered in SLUG_TO_QUERY_ID / identity.go: musespark" in stderr_txt, stderr_txt
+expected_removed = active_qids - {"DeepSeek-R1-0528", "MiniMax-M2.5"}
+assert set(report["removed_query_ids"]) == expected_removed, (report["removed_query_ids"], expected_removed)
+assert len(report["removed_query_ids"]) == len(active_qids) - 2, report
+PY
+then
+  pass "preflight-priors.sh maps InferenceX slugs to Query IDs and records unmapped_availability_slugs"
+else
+  fail "preflight-priors.sh maps InferenceX slugs to Query IDs and records unmapped_availability_slugs"
+fi
+
 # 3. Gitless sanitized env -i validation tests for validate_priors.sh.
 CAND_BASE="${SCRATCH}/cand-base"
 mkdir -p "${CAND_BASE}/.auto-sync/checks" "${CAND_BASE}/.auto-sync/proposals"
