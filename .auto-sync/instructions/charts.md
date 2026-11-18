@@ -25,7 +25,7 @@ NEVER bump a subchart whose `mirrored_image_ready` is `false` in `$AUTOSYNC_STAG
 
 - If a subchart has `mirrored_image_ready: false`, leave that subchart's URL/version in `hack/deps.sh`, `deploy/gpustack-operator/chart/`, and `versions` unchanged.
 - Record the exact `gh workflow run sync-image.yml -f images="..."` command from `$AUTOSYNC_STAGE_DIR/charts-preflight-report.json` in the `summary` field of `.auto-sync/proposals/charts.json`.
-- If zero subcharts have updates with `mirrored_image_ready: true` (or all upstreams are already up to date), settle as `no_change` (or `blocked` with the exact `gh workflow run sync-image.yml` command recorded in the proposal summary if waiting on image mirroring).
+- If zero subcharts have updates with `mirrored_image_ready: true` (for example, when all upstreams are already up to date or a manual `force=true` dispatch runs while candidates await image mirroring), settle strictly as `no_change` (never `blocked`), with any exact `gh workflow run sync-image.yml -f images=...` command from `$AUTOSYNC_STAGE_DIR/charts-preflight-report.json` recorded in the proposal summary if applicable.
 - Only update subcharts whose `mirrored_image_ready` is `true` and whose multi-arch digests (`amd64Digest` and `arm64Digest`) are verified in `$AUTOSYNC_STAGE_DIR/image-manifests.json`.
 
 ## 3. Patch-First Staging and Chart Regeneration Rules

@@ -53,7 +53,7 @@ fi
 
 discovery_json="${stage_dir}/k8s-deps-discovery.json"
 
-python3 - "${repo_root}" "${AUTOSYNC_K8S_DEPS_FIXTURE_DIR:-}" "${discovery_json}" <<'PY'
+python3 - "${repo_root}" "${AUTOSYNC_K8S_DEPS_FIXTURE_DIR:-}" "${discovery_json}" "${stage_dir}" <<'PY'
 import json
 import os
 import re
@@ -61,7 +61,7 @@ import subprocess
 import sys
 import urllib.request
 
-repo_root, fixture_dir, out_path = sys.argv[1:4]
+repo_root, fixture_dir, out_path, stage_dir = sys.argv[1:5]
 
 
 def read_text(path: str) -> str:
@@ -264,6 +264,97 @@ ytt_candidates = select_releases(
 )
 
 
+def fetch_text(url: str) -> str:
+    req = urllib.request.Request(url, headers={"User-Agent": "gpustack-autosync/1.0"})
+    with urllib.request.urlopen(req, timeout=20) as resp:
+        return resp.read().decode("utf-8")
+
+
+def parse_helm_k8s_minor(gomod_text: str) -> tuple[int, int] | None:
+    in_require_block = False
+    found: list[tuple[int, int]] = []
+    block_re = re.compile(r'^"?k8s\.io/(?:api|client-go)"?\s+v(\d+)\.(\d+)\.')
+    single_re = re.compile(r'^require\s+"?k8s\.io/(?:api|client-go)"?\s+v(\d+)\.(\d+)\.')
+    for raw_line in gomod_text.splitlines():
+        line = raw_line.split("//", 1)[0].strip()
+        if not line:
+            continue
+        if in_require_block:
+            if line == ")":
+                in_require_block = False
+                continue
+            m = block_re.match(line)
+            if m:
+                found.append((int(m.group(1)), int(m.group(2))))
+            continue
+        if re.match(r"^require\s*\($", line):
+            in_require_block = True
+            continue
+        m_single = single_re.match(line)
+        if m_single:
+            found.append((int(m_single.group(1)), int(m_single.group(2))))
+    return max(found) if found else None
+
+
+def get_helm_k8s_minor(tag: str) -> tuple[bool, tuple[int, int] | None, str]:
+    if fixture_dir:
+        fp = os.path.join(fixture_dir, f"helm-{tag}-go.mod")
+        if not os.path.isfile(fp):
+            return True, None, ""
+        parsed = parse_helm_k8s_minor(read_text(fp))
+        if parsed is None:
+            return False, None, f"k8s.io/api or k8s.io/client-go requirement not found in {fp}"
+        return True, parsed, ""
+    cache_dir = os.path.join(stage_dir, "discovery")
+    os.makedirs(cache_dir, exist_ok=True)
+    cache_path = os.path.join(cache_dir, f"helm-{tag}-go.mod")
+    if os.path.isfile(cache_path) and os.path.getsize(cache_path) > 0:
+        parsed = parse_helm_k8s_minor(read_text(cache_path))
+        if parsed is None:
+            return False, None, f"k8s.io/api or k8s.io/client-go requirement not found in {cache_path}"
+        return True, parsed, ""
+    url = f"https://raw.githubusercontent.com/helm/helm/{tag}/go.mod"
+    try:
+        txt = fetch_text(url)
+    except Exception as exc:
+        return False, None, str(exc)
+    with open(cache_path, "w", encoding="utf-8") as f:
+        f.write(txt)
+    parsed = parse_helm_k8s_minor(txt)
+    if parsed is None:
+        return False, None, f"k8s.io/api or k8s.io/client-go requirement not found in {url}"
+    return True, parsed, ""
+
+
+def pick_compatible_helm(candidates: list[str], current_tag: str, max_k8s_minor: int) -> tuple[str, list[str]]:
+    cur_tuple = parse_semver_tuple(current_tag)
+    selected = current_tag
+    incompatible = set()
+    for cand in candidates:
+        if parse_semver_tuple(cand) <= cur_tuple:
+            break
+        ok, helm_k8s_ver, err = get_helm_k8s_minor(cand)
+        if not ok or (helm_k8s_ver is None and not fixture_dir):
+            incompatible.add(cand)
+            reason = err or "missing k8s.io requirement in go.mod"
+            print(
+                f"NOTICE: skipping Helm {cand} because its dependency manifest could not be verified ({reason})",
+                file=sys.stderr,
+            )
+            continue
+        if helm_k8s_ver is not None and helm_k8s_ver > (0, max_k8s_minor):
+            incompatible.add(cand)
+            print(
+                f"NOTICE: skipping Helm {cand} because it requires k8s.io v{helm_k8s_ver[0]}.{helm_k8s_ver[1]}.x > repo v0.{max_k8s_minor}.x",
+                file=sys.stderr,
+            )
+            continue
+        selected = cand
+        break
+    compatible_recent = [c for c in candidates if c not in incompatible]
+    return selected, compatible_recent
+
+
 def pick_latest(candidates: list[str], fallback: str) -> str:
     if not candidates:
         return fallback
@@ -279,7 +370,9 @@ target_kubectl = target_k8s_release.lstrip("v")
 
 target_cr = pick_latest(cr_candidates, current_cr)
 target_kueue = pick_latest(kueue_candidates, current_kueue)
-target_helm_tag = pick_latest(helm_candidates, f"v{current_helm}")
+target_helm_tag, compatible_helm_candidates = pick_compatible_helm(
+    helm_candidates, f"v{current_helm}", int(k8s_minor_num)
+)
 target_helm_cli = target_helm_tag.lstrip("v")
 target_skopeo = pick_latest(skopeo_candidates, current_skopeo)
 target_vals = pick_latest(vals_candidates, current_vals)
@@ -322,7 +415,7 @@ doc = {
         "kubernetes": k8s_candidates[:5],
         "controller_runtime": cr_candidates[:5],
         "kueue_sdk": kueue_candidates[:5],
-        "helm_cli": helm_candidates[:5],
+        "helm_cli": compatible_helm_candidates[:5],
         "skopeo_cli": skopeo_candidates[:5],
         "vals_cli": vals_candidates[:5],
         "kustomize_cli": kustomize_candidates[:5],
@@ -370,75 +463,40 @@ patch_clean="true"
 staging_updated="false"
 generate_ran="false"
 staging_error=""
+helm_fallback_applied="false"
+staging_log="${stage_dir}/preflight-staging.log"
 
-has_fixture_dir="false"
-has_fixture_deps_cache="false"
-if [[ -n "${AUTOSYNC_K8S_DEPS_FIXTURE_DIR:-}" ]]; then
-  has_fixture_dir="true"
-  if [[ -d "${AUTOSYNC_K8S_DEPS_FIXTURE_DIR}/deps-cache" ]]; then
-    has_fixture_deps_cache="true"
+emit_sanitized_log_tail() {
+  local log_file="$1"
+  local label="$2"
+  if [[ ! -s "${log_file}" ]]; then
+    return 0
   fi
-fi
-
-can_stage_mods="false"
-if [[ "${mods_changed}" == "true" && "${AUTOSYNC_SKIP_SOURCE_REVISION:-false}" != "true" ]]; then
-  if [[ "${has_fixture_dir}" == "false" || "${has_fixture_deps_cache}" == "true" ]]; then
-    can_stage_mods="true"
-  fi
-fi
-
-if [[ "${can_stage_mods}" == "true" ]]; then
-  work_base="$(mktemp -d "${TMPDIR:-/tmp}/autosync-k8s-deps-work.XXXXXXXX")"
-  _PREFLIGHT_TMP_DIRS+=("${work_base}")
-  work_repo="${work_base}/gpustack.ai/gpustack"
-  mkdir -p "${work_repo}"
-  tar --exclude='.git' -cf - -C "${repo_root}" . | tar -xf - -C "${work_repo}"
-
-  if [[ "${cur_k8s_mod}" != "${tgt_k8s_mod}" ]]; then
-    python3 - "${work_repo}/hack/deps.sh" "${tgt_k8s_mod}" <<'PY'
+  python3 - "${log_file}" "${label}" <<'PY' >&2
 import re
 import sys
 
-deps_path, target_ver = sys.argv[1:3]
-with open(deps_path, "r", encoding="utf-8") as f:
-    txt = f.read()
-
-mods = ("code-generator", "api", "apimachinery", "kube-aggregator", "apiextensions-apiserver")
-for mod in mods:
-    txt = re.sub(
-        rf'(https://github\.com/kubernetes/{re.escape(mod)}\s+)v0\.\d+\.\d+(\s+\$\{{staging_dir\}}/k8s\.io/{re.escape(mod)})',
-        rf'\g<1>{target_ver}\g<2>',
-        txt,
-    )
-
-with open(deps_path, "w", encoding="utf-8") as f:
-    f.write(txt)
+log_path, label = sys.argv[1:3]
+with open(log_path, "r", encoding="utf-8", errors="replace") as f:
+    lines = [ln.rstrip("\n") for ln in f]
+tail = lines[-20:]
+print(f"NOTICE: {label} (last {len(tail)} line(s) from {log_path}):", file=sys.stderr)
+for ln in tail:
+    sanitized = re.sub(r"\.go:", ".go@", ln)
+    sanitized = re.sub(r"::error\b", "::notice", sanitized, flags=re.IGNORECASE)
+    sanitized = re.sub(r"##\[error\]", "[error]", sanitized, flags=re.IGNORECASE)
+    print(f"  {sanitized}", file=sys.stderr)
 PY
+}
 
-    deps_offline="false"
-    if [[ "${has_fixture_dir}" == "true" ]]; then
-      deps_offline="true"
-    fi
+stage_go_mods_and_generate() {
+  local try_helm_tag="$1"
+  patch_clean="true"
+  staging_error=""
+  generate_ran="false"
 
-    if ! GPUSTACK_DEPS_STAGE_ONLY=mods \
-         GPUSTACK_DEPS_CACHE_DIR="${stage_dir}/deps-cache" \
-         GPUSTACK_DEPS_OFFLINE="${deps_offline}" \
-         bash "${work_repo}/hack/deps.sh"; then
-      patch_clean="false"
-      staging_error="hack/deps.sh mod_staging failed for ${tgt_k8s_mod}"
-      printf 'WARN: %s\n' "${staging_error}" >&2
-    fi
-
-    if [[ -n "$(find "${work_repo}/staging" -type f \( -name '*.rej' -o -name '*.orig' \) 2>/dev/null)" ]]; then
-      patch_clean="false"
-      staging_error="staging patches produced .rej or .orig files"
-      printf 'WARN: %s\n' "${staging_error}" >&2
-    fi
-  fi
-
-  if [[ "${patch_clean}" == "true" ]]; then
-    if [[ "${AUTOSYNC_SKIP_GO_MOD_DOWNLOAD:-false}" != "true" ]] && command -v go >/dev/null 2>&1; then
-      python3 - "${work_repo}/go.mod" "${tgt_k8s_mod}" "${cur_cr}" "${tgt_cr}" "${cur_kueue}" "${tgt_kueue}" "${cur_helm_tag}" "${tgt_helm_tag}" <<'PY'
+  if [[ "${AUTOSYNC_SKIP_GO_MOD_DOWNLOAD:-false}" != "true" ]] && command -v go >/dev/null 2>&1; then
+    python3 - "${work_repo}/go.mod" "${tgt_k8s_mod}" "${cur_cr}" "${tgt_cr}" "${cur_kueue}" "${tgt_kueue}" "${cur_helm_tag}" "${try_helm_tag}" <<'PY'
 import re
 import sys
 
@@ -496,38 +554,136 @@ if cur_helm != tgt_helm:
 with open(gomod_path, "w", encoding="utf-8") as f:
     f.write(txt)
 PY
-      if ! (
-        cd "${work_repo}"
-        GOMODCACHE="${stage_dir}/go-mod" \
-        GOCACHE="${stage_dir}/go-cache" \
-          go mod tidy
-        GOMODCACHE="${stage_dir}/go-mod" \
-        GOCACHE="${stage_dir}/go-cache" \
-          go mod download
-      ); then
-        patch_clean="false"
-        staging_updated="false"
-        staging_error="go mod tidy/download failed while staging ${tgt_k8s_mod}; upstream release tags may still be propagating"
-        printf 'WARN: %s\n' "${staging_error}" >&2
-      fi
+    if ! (
+      cd "${work_repo}"
+      GOMODCACHE="${stage_dir}/go-mod" \
+      GOCACHE="${stage_dir}/go-cache" \
+        go mod tidy
+      GOMODCACHE="${stage_dir}/go-mod" \
+      GOCACHE="${stage_dir}/go-cache" \
+        go mod download
+    ) >> "${staging_log}" 2>&1; then
+      patch_clean="false"
+      staging_updated="false"
+      staging_error="go mod tidy/download failed while staging ${tgt_k8s_mod}; upstream release tags may still be propagating"
+      printf 'WARN: %s\n' "${staging_error}" >&2
+      emit_sanitized_log_tail "${staging_log}" "go mod tidy/download output"
+      return 0
+    fi
+  fi
+
+  if [[ "${patch_clean}" == "true" && "${AUTOSYNC_SKIP_GENERATE:-false}" != "true" ]] && command -v make >/dev/null 2>&1; then
+    if [[ -d "${stage_dir}/.sbin" ]]; then
+      mkdir -p "${work_repo}/.sbin"
+      cp -RLp "${stage_dir}/.sbin/." "${work_repo}/.sbin/" 2>/dev/null || true
+    fi
+    if GOMODCACHE="${stage_dir}/go-mod" \
+       GOCACHE="${stage_dir}/go-cache" \
+       PATH="${stage_dir}/.sbin:${stage_dir}/.sbin/protoc/bin:${PATH}" \
+         autosync::run_in_module_path_copy "${work_repo}" make generate >> "${staging_log}" 2>&1; then
+      generate_ran="true"
+    else
+      patch_clean="false"
+      staging_updated="false"
+      generate_ran="false"
+      staging_error="make generate failed inside staged work_repo"
+      printf 'WARN: %s\n' "${staging_error}" >&2
+      emit_sanitized_log_tail "${staging_log}" "make generate output"
+      return 0
+    fi
+  fi
+}
+
+has_fixture_dir="false"
+has_fixture_deps_cache="false"
+if [[ -n "${AUTOSYNC_K8S_DEPS_FIXTURE_DIR:-}" ]]; then
+  has_fixture_dir="true"
+  if [[ -d "${AUTOSYNC_K8S_DEPS_FIXTURE_DIR}/deps-cache" ]]; then
+    has_fixture_deps_cache="true"
+  fi
+fi
+
+can_stage_mods="false"
+if [[ "${mods_changed}" == "true" && "${AUTOSYNC_SKIP_SOURCE_REVISION:-false}" != "true" ]]; then
+  if [[ "${has_fixture_dir}" == "false" || "${has_fixture_deps_cache}" == "true" ]]; then
+    can_stage_mods="true"
+  fi
+fi
+
+if [[ "${can_stage_mods}" == "true" ]]; then
+  work_base="$(mktemp -d "${TMPDIR:-/tmp}/autosync-k8s-deps-work.XXXXXXXX")"
+  _PREFLIGHT_TMP_DIRS+=("${work_base}")
+  work_repo="${work_base}/gpustack.ai/gpustack"
+  mkdir -p "${work_repo}"
+  tar --exclude='.git' -cf - -C "${repo_root}" . | tar -xf - -C "${work_repo}"
+
+  if [[ "${cur_k8s_mod}" != "${tgt_k8s_mod}" ]]; then
+    python3 - "${work_repo}/hack/deps.sh" "${tgt_k8s_mod}" <<'PY'
+import re
+import sys
+
+deps_path, target_ver = sys.argv[1:3]
+with open(deps_path, "r", encoding="utf-8") as f:
+    txt = f.read()
+
+mods = ("code-generator", "api", "apimachinery", "kube-aggregator", "apiextensions-apiserver")
+for mod in mods:
+    txt = re.sub(
+        rf'(https://github\.com/kubernetes/{re.escape(mod)}\s+)v0\.\d+\.\d+(\s+\$\{{staging_dir\}}/k8s\.io/{re.escape(mod)})',
+        rf'\g<1>{target_ver}\g<2>',
+        txt,
+    )
+
+with open(deps_path, "w", encoding="utf-8") as f:
+    f.write(txt)
+PY
+
+    deps_offline="false"
+    if [[ "${has_fixture_dir}" == "true" ]]; then
+      deps_offline="true"
     fi
 
-    if [[ "${patch_clean}" == "true" && "${AUTOSYNC_SKIP_GENERATE:-false}" != "true" ]] && command -v make >/dev/null 2>&1; then
-      if [[ -d "${stage_dir}/.sbin" ]]; then
-        mkdir -p "${work_repo}/.sbin"
-        cp -RLp "${stage_dir}/.sbin/." "${work_repo}/.sbin/" 2>/dev/null || true
+    : > "${staging_log}"
+    if ! GPUSTACK_DEPS_STAGE_ONLY=mods \
+         GPUSTACK_DEPS_CACHE_DIR="${stage_dir}/deps-cache" \
+         GPUSTACK_DEPS_OFFLINE="${deps_offline}" \
+         bash "${work_repo}/hack/deps.sh" >> "${staging_log}" 2>&1; then
+      patch_clean="false"
+      staging_error="hack/deps.sh mod_staging failed for ${tgt_k8s_mod}"
+      printf 'WARN: %s\n' "${staging_error}" >&2
+      emit_sanitized_log_tail "${staging_log}" "hack/deps.sh mod_staging output"
+    fi
+
+    if [[ -n "$(find "${work_repo}/staging" -type f \( -name '*.rej' -o -name '*.orig' \) 2>/dev/null)" ]]; then
+      patch_clean="false"
+      staging_error="staging patches produced .rej or .orig files"
+      printf 'WARN: %s\n' "${staging_error}" >&2
+    fi
+  fi
+
+  if [[ "${patch_clean}" == "true" ]]; then
+    : > "${staging_log}"
+    stage_go_mods_and_generate "${tgt_helm_tag}"
+
+    if [[ "${patch_clean}" != "true" && "${cur_helm_tag}" != "${tgt_helm_tag}" ]] && \
+       [[ "${cur_k8s_mod}" != "${tgt_k8s_mod}" || "${cur_cr}" != "${tgt_cr}" || "${cur_kueue}" != "${tgt_kueue}" ]]; then
+      printf 'NOTICE: staging failed with helm.sh/helm/v3 %s; retrying without helm bump (keeping %s)\n' \
+        "${tgt_helm_tag}" "${cur_helm_tag}" >&2
+      cp -f "${repo_root}/go.mod" "${work_repo}/go.mod"
+      cp -f "${repo_root}/go.sum" "${work_repo}/go.sum"
+      if [[ -d "${repo_root}/api" ]]; then
+        rm -rf "${work_repo}/api"
+        cp -Rp "${repo_root}/api" "${work_repo}/api"
       fi
-      if GOMODCACHE="${stage_dir}/go-mod" \
-         GOCACHE="${stage_dir}/go-cache" \
-         PATH="${stage_dir}/.sbin:${stage_dir}/.sbin/protoc/bin:${PATH}" \
-           autosync::run_in_module_path_copy "${work_repo}" make generate; then
-        generate_ran="true"
-      else
-        patch_clean="false"
-        staging_updated="false"
-        generate_ran="false"
-        staging_error="make generate failed inside staged work_repo"
-        printf 'WARN: %s\n' "${staging_error}" >&2
+      if [[ -d "${repo_root}/pkg" ]]; then
+        rm -rf "${work_repo}/pkg"
+        cp -Rp "${repo_root}/pkg" "${work_repo}/pkg"
+      fi
+      : > "${staging_log}"
+      stage_go_mods_and_generate "${cur_helm_tag}"
+      if [[ "${patch_clean}" == "true" ]]; then
+        tgt_helm_tag="${cur_helm_tag}"
+        helm_fallback_applied="true"
       fi
     fi
 
@@ -552,7 +708,8 @@ report_json="${stage_dir}/k8s-deps-preflight-report.json"
 upstream_records_json="${stage_dir}/upstream-records.json"
 
 python3 - "${discovery_json}" "${report_json}" "${upstream_records_json}" \
-  "${base_sha}" "${source_revision}" "${patch_clean}" "${staging_updated}" "${generate_ran}" "${staging_error}" <<'PY'
+  "${base_sha}" "${source_revision}" "${patch_clean}" "${staging_updated}" "${generate_ran}" \
+  "${staging_error}" "${helm_fallback_applied}" "${tgt_helm_tag}" <<'PY'
 import json
 import sys
 
@@ -566,7 +723,9 @@ import sys
     staging_updated_str,
     generate_ran_str,
     staging_error,
-) = sys.argv[1:10]
+    helm_fallback_applied,
+    effective_helm_tag,
+) = sys.argv[1:12]
 
 with open(discovery_path, "r", encoding="utf-8") as f:
     disc = json.load(f)
@@ -575,9 +734,25 @@ cur = disc["current"]
 tgt = disc["target"]
 recent = disc["recent"]
 
+if helm_fallback_applied == "true":
+    tgt["helm_tag"] = effective_helm_tag
+    tgt["helm_cli"] = effective_helm_tag.lstrip("v")
+    tgt["helm_module"] = effective_helm_tag
+
+patch_clean = patch_clean_str == "true"
+go_mod_uids = {"kubernetes", "controller-runtime", "kueue-sdk", "helm-cli"}
+
 
 def mk_rec(uid: str, cur_v: str, tgt_v: str, rec_list: list[str], note: str):
     changed = cur_v != tgt_v
+    if changed and not patch_clean and uid in go_mod_uids:
+        return {
+            "upstreamId": uid,
+            "status": "up_to_date",
+            "version": cur_v,
+            "recentVersions": rec_list if rec_list else [cur_v],
+            "reason": f"held at {cur_v} because preflight staging failed ({staging_error})",
+        }
     return {
         "upstreamId": uid,
         "status": "available" if changed else "up_to_date",
@@ -646,6 +821,21 @@ records = [
     ),
 ]
 
+failed_target = None
+if not patch_clean:
+    failed_target = dict(tgt)
+    for k in (
+        "kubernetes",
+        "k8s_modules",
+        "kubectl_cli",
+        "controller_runtime",
+        "kueue_sdk",
+        "helm_cli",
+        "helm_tag",
+        "helm_module",
+    ):
+        tgt[k] = cur[k]
+
 report = {
     "schemaVersion": 1,
     "base_sha": base_sha,
@@ -661,6 +851,8 @@ report = {
     "target": tgt,
     "recent": recent,
 }
+if failed_target is not None:
+    report["failed_target"] = failed_target
 
 with open(report_path, "w", encoding="utf-8") as f:
     json.dump(report, f, indent=2)

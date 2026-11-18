@@ -199,8 +199,9 @@ if not saw_token:
     raise SystemExit("FAIL: availability.json yielded 0 model entries")
 
 if unmapped_slugs:
+    joined = ", ".join(sorted(unmapped_slugs))
     print(
-        f"WARN: skipping {len(unmapped_slugs)} unmapped InferenceX availability slug(s) not registered in SLUG_TO_QUERY_ID / identity.go: {', '.join(sorted(unmapped_slugs))}",
+        f"NOTICE: skipping {len(unmapped_slugs)} unmapped InferenceX availability slug(s) absent from SLUG_TO_QUERY_ID and gen/priors identity registry ({joined})",
         file=sys.stderr,
     )
 

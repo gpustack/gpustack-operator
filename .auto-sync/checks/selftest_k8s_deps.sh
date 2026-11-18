@@ -377,6 +377,123 @@ else
   fail "preflight-k8s-deps.sh offline discovery fixture test"
 fi
 
+# 1b. Helm v3.22.1 (k8s.io v0.37.1) is skipped in favor of compatible Helm v3.21.5 (k8s.io v0.36.6).
+HELM_LOCKSTEP_REPO="${SCRATCH}/helm-lockstep-repo"
+cp -R "${PREFLIGHT_REPO}" "${HELM_LOCKSTEP_REPO}"
+python3 - "${HELM_LOCKSTEP_REPO}" <<'PY'
+import os
+import re
+import sys
+
+repo = sys.argv[1]
+df_p = os.path.join(repo, "pack/gpustack-operator/Dockerfile")
+helm_sh_p = os.path.join(repo, "hack/lib/helm.sh")
+gomod_p = os.path.join(repo, "go.mod")
+
+with open(df_p, "r", encoding="utf-8") as f:
+    df_txt = f.read()
+df_txt = re.sub(r'^ARG HELM_VERSION="[^"]+"$', 'ARG HELM_VERSION="3.21.4"', df_txt, count=1, flags=re.MULTILINE)
+with open(df_p, "w", encoding="utf-8") as f:
+    f.write(df_txt)
+
+with open(helm_sh_p, "r", encoding="utf-8") as f:
+    h_txt = f.read()
+h_txt = re.sub(r'default is v3\.\d+\.\d+\.', 'default is v3.21.4.', h_txt, count=1)
+h_txt = re.sub(r'^helm_version=\$\{HELM_VERSION:-"v3\.\d+\.\d+"\}$', 'helm_version=${HELM_VERSION:-"v3.21.4"}', h_txt, count=1, flags=re.MULTILINE)
+with open(helm_sh_p, "w", encoding="utf-8") as f:
+    f.write(h_txt)
+
+with open(gomod_p, "r", encoding="utf-8") as f:
+    gm_txt = f.read()
+gm_txt = re.sub(r'^(\s*helm\.sh/helm/v3\s+)v3\.\d+\.\d+', r'\g<1>v3.21.4', gm_txt, count=1, flags=re.MULTILINE)
+with open(gomod_p, "w", encoding="utf-8") as f:
+    f.write(gm_txt)
+PY
+git -C "${HELM_LOCKSTEP_REPO}" add -A
+git -C "${HELM_LOCKSTEP_REPO}" commit -q --allow-empty -m "pin helm 3.21.4 for lockstep test"
+
+FIXTURE_HELM_LOCKSTEP="${SCRATCH}/fixture-helm-lockstep"
+cp -R "${FIXTURE_DISCOVERY}" "${FIXTURE_HELM_LOCKSTEP}"
+cat > "${FIXTURE_HELM_LOCKSTEP}/helm-releases.json" <<'JSON'
+[
+  {"tag_name": "v4.0.0", "prerelease": false, "draft": false},
+  {"tag_name": "v3.22.2", "prerelease": false, "draft": false},
+  {"tag_name": "v3.22.1", "prerelease": false, "draft": false},
+  {"tag_name": "v3.21.5", "prerelease": false, "draft": false},
+  {"tag_name": "v3.21.4", "prerelease": false, "draft": false}
+]
+JSON
+cat > "${FIXTURE_HELM_LOCKSTEP}/helm-v3.22.2-go.mod" <<'GOMOD'
+module helm.sh/helm/v3
+
+go 1.24.0
+
+require k8s.io/api v1.0.0
+GOMOD
+cat > "${FIXTURE_HELM_LOCKSTEP}/helm-v3.22.1-go.mod" <<'GOMOD'
+module helm.sh/helm/v3
+
+go 1.24.0
+
+require (
+	k8s.io/api v0.35.0
+	k8s.io/client-go v0.37.1 // max(api, client-go) must select 0.37
+)
+GOMOD
+cat > "${FIXTURE_HELM_LOCKSTEP}/helm-v3.21.5-go.mod" <<'GOMOD'
+module helm.sh/helm/v3
+
+go 1.24.0
+
+exclude (
+	k8s.io/api v0.37.9 // ignored outside require
+)
+
+replace k8s.io/client-go => k8s.io/client-go v0.37.9 // ignored outside require
+
+require k8s.io/api v0.36.6 // indirect
+require (
+	k8s.io/client-go v0.36.6
+)
+GOMOD
+
+STAGE_HELM_LOCKSTEP="${SCRATCH}/stage-helm-lockstep/k8s-deps"
+HELM_LOCKSTEP_ERR="${SCRATCH}/helm-lockstep.stderr"
+if (
+  cd "${HELM_LOCKSTEP_REPO}" && \
+  AUTOSYNC_K8S_DEPS_FIXTURE_DIR="${FIXTURE_HELM_LOCKSTEP}" \
+  AUTOSYNC_SKIP_GO_MOD_DOWNLOAD=true \
+  AUTOSYNC_SKIP_SOURCE_REVISION=true \
+  GOMODCACHE="${HOST_GOMODCACHE}" \
+  GOCACHE="${HOST_GOCACHE}" \
+  bash "${HELM_LOCKSTEP_REPO}/.auto-sync/scripts/preflight-k8s-deps.sh" "${STAGE_HELM_LOCKSTEP}" >/dev/null 2>"${HELM_LOCKSTEP_ERR}"
+) && \
+python3 - "${STAGE_HELM_LOCKSTEP}" "${HELM_LOCKSTEP_ERR}" <<'PY'
+import json
+import os
+import re
+import sys
+
+stage_dir, err_path = sys.argv[1:3]
+with open(os.path.join(stage_dir, "upstream-records.json"), "r", encoding="utf-8") as f:
+    recs = json.load(f)
+by_id = {r["upstreamId"]: r for r in recs}
+assert by_id["helm-cli"]["status"] == "available", by_id["helm-cli"]
+assert by_id["helm-cli"]["version"] == "v3.21.5", by_id["helm-cli"]
+assert "v3.22.1" not in by_id["helm-cli"]["recentVersions"], by_id["helm-cli"]
+
+with open(err_path, "r", encoding="utf-8") as f:
+    err_txt = f.read()
+assert "skipping Helm v3.22.2" in err_txt, err_txt
+assert "skipping Helm v3.22.1" in err_txt, err_txt
+assert not re.search(r"\.go:", err_txt), err_txt
+PY
+then
+  pass "preflight-k8s-deps.sh skips Helm v3.22.1 (k8s.io v0.37.1) and selects compatible Helm v3.21.5"
+else
+  fail "preflight-k8s-deps.sh Helm k8s.io minor lockstep filter"
+fi
+
 # 2. Offline preflight-k8s-deps.sh detached source_revision test via cached mod_staging tarballs.
 FIXTURE_STAGE="${SCRATCH}/fixture-stage"
 cp -R "${FIXTURE_DISCOVERY}" "${FIXTURE_STAGE}"
@@ -460,7 +577,10 @@ mkdir -p "${WRAP_GO_BIN}"
 cat > "${WRAP_GO_BIN}/go" <<'SH'
 #!/usr/bin/env bash
 if [[ "${1:-}" == "mod" && "${2:-}" == "tidy" ]]; then
-  echo "simulated go mod tidy failure: unknown revision" >&2
+  echo "api/v1/zz_generated.apiservice.go:17:2: simulated go mod tidy failure: unknown revision" >&2
+  echo "open api/v1/doc.go: simulated error" >&2
+  echo "::error::simulated workflow command" >&2
+  echo "##[error]simulated azure matcher" >&2
   exit 1
 fi
 exec "${REAL_GO_BIN}" "$@"
@@ -468,6 +588,7 @@ SH
 chmod +x "${WRAP_GO_BIN}/go"
 REAL_GO_BIN="$(command -v go)"
 STAGE_FAIL_TIDY="${SCRATCH}/stage-fail-tidy/k8s-deps"
+FAIL_TIDY_ERR="${SCRATCH}/fail-tidy.stderr"
 mkdir -p "${SCRATCH}/stage-fail-tidy/go-mod"
 : > "${SCRATCH}/stage-fail-tidy/go-mod/.warmed"
 if (
@@ -478,25 +599,124 @@ if (
   AUTOSYNC_SKIP_GENERATE=true \
   GOMODCACHE="${HOST_GOMODCACHE}" \
   GOCACHE="${HOST_GOCACHE}" \
-  bash "${PREFLIGHT_REPO}/.auto-sync/scripts/preflight-k8s-deps.sh" "${STAGE_FAIL_TIDY}" >/dev/null 2>&1
+  bash "${PREFLIGHT_REPO}/.auto-sync/scripts/preflight-k8s-deps.sh" "${STAGE_FAIL_TIDY}" >/dev/null 2>"${FAIL_TIDY_ERR}"
 ) && \
-python3 - "${STAGE_FAIL_TIDY}" "${BASE_SHA}" <<'PY'
+python3 - "${STAGE_FAIL_TIDY}" "${FAIL_TIDY_ERR}" "${BASE_SHA}" "${FIXTURE_META}" <<'PY'
 import json
 import os
+import re
 import sys
 
-stage_dir, base_sha = sys.argv[1:3]
+stage_dir, err_path, base_sha, meta_path = sys.argv[1:5]
+with open(meta_path, "r", encoding="utf-8") as f:
+    meta = json.load(f)
 with open(os.path.join(stage_dir, "k8s-deps-preflight-report.json"), "r", encoding="utf-8") as f:
     rep = json.load(f)
 assert rep["patch_clean"] is False, rep
 assert rep["staging_updated"] is False, rep
 assert rep["source_revision"] == base_sha, rep
 assert "go mod tidy/download failed" in rep.get("staging_error", ""), rep
+for k in (
+    "kubernetes",
+    "k8s_modules",
+    "kubectl_cli",
+    "controller_runtime",
+    "kueue_sdk",
+    "helm_cli",
+    "helm_tag",
+    "helm_module",
+):
+    assert rep["target"][k] == rep["current"][k], (k, rep["target"], rep["current"])
+assert rep["target"]["vals_cli"] == meta["vals_next"], rep["target"]
+assert rep.get("failed_target", {}).get("kubernetes") == meta["k8s_rel_next"], rep
+
+with open(os.path.join(stage_dir, "upstream-records.json"), "r", encoding="utf-8") as f:
+    recs = json.load(f)
+by_id = {r["upstreamId"]: r for r in recs}
+for uid, cur_v in (
+    ("kubernetes", meta["k8s_rel_cur"]),
+    ("controller-runtime", meta["cr_cur"]),
+    ("kueue-sdk", meta["kueue_cur"]),
+    ("helm-cli", f"v{meta['helm_cur']}"),
+):
+    assert by_id[uid]["status"] == "up_to_date", by_id[uid]
+    assert by_id[uid]["version"] == cur_v, by_id[uid]
+assert by_id["vals-cli"]["status"] == "available", by_id["vals-cli"]
+assert by_id["kustomize-cli"]["status"] == "available", by_id["kustomize-cli"]
+
+with open(err_path, "r", encoding="utf-8") as f:
+    err_txt = f.read()
+assert not re.search(r"\.go:", err_txt), err_txt
+assert "::error" not in err_txt.lower(), err_txt
+assert "##[error]" not in err_txt.lower(), err_txt
+assert ".go@17:2" in err_txt, err_txt
+assert "open api/v1/doc.go@ simulated error" in err_txt, err_txt
 PY
 then
-  pass "preflight-k8s-deps.sh degrades gracefully when go mod tidy fails"
+  pass "preflight-k8s-deps.sh sanitizes .go:<line> errors, holds Go modules up_to_date on tidy failure"
 else
   fail "preflight-k8s-deps.sh degrades gracefully when go mod tidy fails"
+fi
+
+# 2d. When staging fails with both k8s and helm bumped, retry without helm bump succeeds.
+WRAP_GO_HELM_FAIL="${SCRATCH}/wrap-go-helm-fail"
+mkdir -p "${WRAP_GO_HELM_FAIL}"
+cat > "${WRAP_GO_HELM_FAIL}/go" <<'SH'
+#!/usr/bin/env bash
+if [[ "${1:-}" == "mod" && ( "${2:-}" == "tidy" || "${2:-}" == "download" ) ]]; then
+  if [[ -f "go.mod" ]] && grep -q "helm.sh/helm/v3 v${FAIL_HELM_NEXT}" go.mod; then
+    echo "simulated helm bump failure for v${FAIL_HELM_NEXT}" >&2
+    exit 1
+  fi
+  exit 0
+fi
+exec "${REAL_GO_BIN}" "$@"
+SH
+chmod +x "${WRAP_GO_HELM_FAIL}/go"
+STAGE_HELM_FB="${SCRATCH}/stage-helm-fb/k8s-deps"
+mkdir -p "${SCRATCH}/stage-helm-fb/go-mod"
+: > "${SCRATCH}/stage-helm-fb/go-mod/.warmed"
+if (
+  cd "${PREFLIGHT_REPO}" && \
+  REAL_GO_BIN="${REAL_GO_BIN}" \
+  FAIL_HELM_NEXT="${HELM_NEXT}" \
+  PATH="${WRAP_GO_HELM_FAIL}:${PATH}" \
+  AUTOSYNC_K8S_DEPS_FIXTURE_DIR="${FIXTURE_STAGE}" \
+  AUTOSYNC_SKIP_GENERATE=true \
+  GOMODCACHE="${HOST_GOMODCACHE}" \
+  GOCACHE="${HOST_GOCACHE}" \
+  bash "${PREFLIGHT_REPO}/.auto-sync/scripts/preflight-k8s-deps.sh" "${STAGE_HELM_FB}" >/dev/null 2>&1
+) && \
+FB_REV="$(python3 - "${STAGE_HELM_FB}" "${BASE_SHA}" "${FIXTURE_META}" <<'PY'
+import json
+import os
+import sys
+
+stage_dir, base_sha, meta_path = sys.argv[1:4]
+with open(meta_path, "r", encoding="utf-8") as f:
+    meta = json.load(f)
+with open(os.path.join(stage_dir, "k8s-deps-preflight-report.json"), "r", encoding="utf-8") as f:
+    rep = json.load(f)
+assert rep["patch_clean"] is True, rep
+assert rep["staging_updated"] is True, rep
+assert rep["source_revision"] != base_sha, rep
+assert rep["target"]["helm_tag"] == f"v{meta['helm_cur']}", rep["target"]
+
+with open(os.path.join(stage_dir, "upstream-records.json"), "r", encoding="utf-8") as f:
+    recs = json.load(f)
+by_id = {r["upstreamId"]: r for r in recs}
+assert by_id["kubernetes"]["status"] == "available", by_id["kubernetes"]
+assert by_id["kubernetes"]["version"] == meta["k8s_rel_next"], by_id["kubernetes"]
+assert by_id["helm-cli"]["status"] == "up_to_date", by_id["helm-cli"]
+assert by_id["helm-cli"]["version"] == f"v{meta['helm_cur']}", by_id["helm-cli"]
+print(rep["source_revision"])
+PY
+)" && \
+grep -q "k8s.io/api ${K8S_MOD_NEXT}" <<<"$(git -C "${PREFLIGHT_REPO}" show "${FB_REV}:go.mod")" && \
+grep -q "helm.sh/helm/v3 v${HELM_CUR}" <<<"$(git -C "${PREFLIGHT_REPO}" show "${FB_REV}:go.mod")"; then
+  pass "preflight-k8s-deps.sh retries without helm bump and stages k8s update cleanly"
+else
+  fail "preflight-k8s-deps.sh helm fallback retry"
 fi
 
 # 3. Gitless env -i validate_k8s_deps.sh tests (AUTOSYNC_FAST_SELFTEST=true).

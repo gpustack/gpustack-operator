@@ -419,7 +419,9 @@ assert "DeepSeek-R1-0528" in qids, qids
 assert "MiniMax-M2.5" in qids, qids
 assert "musespark" not in qids, qids
 assert report.get("unmapped_availability_slugs") == ["musespark"], report
-assert "WARN: skipping 1 unmapped InferenceX availability slug(s) not registered in SLUG_TO_QUERY_ID / identity.go: musespark" in stderr_txt, stderr_txt
+assert "NOTICE: skipping 1 unmapped InferenceX availability slug(s) absent from SLUG_TO_QUERY_ID and gen/priors identity registry (musespark)" in stderr_txt, stderr_txt
+assert "identity.go:" not in stderr_txt, stderr_txt
+assert not re.search(r"\.go:(?:\d+(?::\d+)?:)?\s", stderr_txt), stderr_txt
 expected_removed = active_qids - {"DeepSeek-R1-0528", "MiniMax-M2.5"}
 assert set(report["removed_query_ids"]) == expected_removed, (report["removed_query_ids"], expected_removed)
 assert len(report["removed_query_ids"]) == len(active_qids) - 2, report
