@@ -186,6 +186,7 @@ spec:
         - name: features-d
           hostPath:
             path: "/etc/kubernetes/node-feature-discovery/features.d/"
+            type: DirectoryOrCreate
         - name: nfd-worker-conf
           configMap:
             name: {{ include "node-feature-discovery.fullname" . }}-worker-conf
