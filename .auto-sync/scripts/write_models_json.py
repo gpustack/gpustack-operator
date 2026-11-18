@@ -26,10 +26,9 @@ ZAI_CATALOG_THINKING_SUPPORT: dict[str, frozenset[str]] = {
     "glm-5.3-highspeed": frozenset({"low", "high", "max"}),
 }
 THINKING_FALLBACKS_BY_DESIRED: dict[str, tuple[str, ...]] = {
-    "off": ("low", "minimal", "medium", "high", "max"),
-    "minimal": ("low", "medium", "high", "off", "max"),
-    "low": ("medium", "high", "minimal", "max", "off"),
-    "medium": ("high", "low", "max", "minimal", "off"),
+    "minimal": ("low", "medium", "high", "max"),
+    "low": ("medium", "high", "minimal", "max"),
+    "medium": ("high", "low", "max", "minimal"),
     "high": ("max", "medium", "low", "xhigh"),
     "xhigh": ("high", "max", "medium", "low"),
     "max": ("high", "xhigh", "medium", "low"),
@@ -207,7 +206,7 @@ def resolve_thinking(
     if think in ("disabled", "off", "false", "0", "no"):
         thinking = "off"
     elif effort:
-        if effort == "off":
+        if effort in ("off", "none"):
             thinking = "off"
         elif effort in VALID_EFFORTS:
             thinking = effort

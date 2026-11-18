@@ -198,6 +198,12 @@ extract(data)
 if not saw_token:
     raise SystemExit("FAIL: availability.json yielded 0 model entries")
 
+if unmapped_slugs:
+    print(
+        f"WARN: skipping {len(unmapped_slugs)} unmapped InferenceX availability slug(s) not registered in SLUG_TO_QUERY_ID / identity.go: {', '.join(sorted(unmapped_slugs))}",
+        file=sys.stderr,
+    )
+
 if not query_ids:
     raise SystemExit("FAIL: availability.json yielded 0 active query IDs")
 
