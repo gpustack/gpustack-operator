@@ -280,6 +280,180 @@ autosync::preflight::_ensure_tools() {
   )
 }
 
+# autosync::preflight::_stage_lfs_objects <repo_root> <shared_root> <stage_dir>
+# Stages Git-LFS objects referenced under site/ and docs/ into <shared_root>/lfs-objects
+# and links <stage_dir>/lfs-objects without smudging <repo_root>'s working tree.
+autosync::preflight::_stage_lfs_objects() {
+  local repo_root="${1:?repo_root required}"
+  local shared_root="${2:?shared_root required}"
+  local stage_dir="${3:?stage_dir required}"
+
+  command -v git >/dev/null 2>&1 || return 0
+  local git_common_dir=""
+  git_common_dir="$(git -C "${repo_root}" rev-parse --git-common-dir 2>/dev/null || true)"
+  [[ -n "${git_common_dir}" ]] || return 0
+  if [[ "${git_common_dir}" != /* ]]; then
+    git_common_dir="${repo_root}/${git_common_dir}"
+  fi
+
+  local oids=""
+  oids="$(python3 - "${repo_root}" <<'PY'
+import os
+import re
+import subprocess
+import sys
+
+repo_root = sys.argv[1]
+OID_RE = re.compile(r"^oid sha256:([0-9a-f]{64})$")
+oids = set()
+
+
+def parse_pointer(raw: bytes) -> None:
+    if not raw or len(raw) > 1024:
+        return
+    try:
+        lines = raw.decode("utf-8").splitlines()
+    except UnicodeDecodeError:
+        return
+    if not lines or lines[0] != "version https://git-lfs.github.com/spec/v1":
+        return
+    for ln in lines[1:]:
+        m = OID_RE.fullmatch(ln)
+        if m:
+            oids.add(m.group(1))
+            break
+
+
+for sub in ("site", "docs"):
+    base = os.path.join(repo_root, sub)
+    if not os.path.isdir(base) or os.path.islink(base):
+        continue
+    for cur, dirs, files in os.walk(base, followlinks=False):
+        dirs[:] = [d for d in dirs if not os.path.islink(os.path.join(cur, d))]
+        for name in files:
+            fpath = os.path.join(cur, name)
+            if os.path.islink(fpath):
+                continue
+            try:
+                st = os.lstat(fpath)
+            except OSError:
+                continue
+            if 0 < st.st_size <= 1024:
+                with open(fpath, "rb") as f:
+                    parse_pointer(f.read())
+
+refs = []
+if subprocess.run(
+    ["git", "-C", repo_root, "rev-parse", "--verify", "-q", "HEAD"],
+    stdout=subprocess.DEVNULL,
+    stderr=subprocess.DEVNULL,
+).returncode == 0:
+    refs.append("HEAD")
+pr_refs_res = subprocess.run(
+    ["git", "-C", repo_root, "for-each-ref", "--format=%(refname)", "refs/remotes/origin/pr/"],
+    capture_output=True,
+    text=True,
+)
+if pr_refs_res.returncode == 0:
+    for line in pr_refs_res.stdout.splitlines():
+        ref = line.strip()
+        if ref:
+            refs.append(ref)
+
+blob_shas = set()
+for ref in refs:
+    ls_res = subprocess.run(
+        ["git", "-C", repo_root, "ls-tree", "-r", "-l", "-z", ref, "--", "site", "docs"],
+        capture_output=True,
+    )
+    if ls_res.returncode != 0:
+        continue
+    for entry in ls_res.stdout.split(b"\0"):
+        if not entry or b"\t" not in entry:
+            continue
+        meta = entry.split(b"\t", 1)[0].split()
+        if len(meta) >= 4 and meta[1] == b"blob":
+            try:
+                sz = int(meta[3])
+            except ValueError:
+                continue
+            if 0 < sz <= 1024:
+                blob_shas.add(meta[2].decode("ascii", errors="ignore"))
+
+if blob_shas:
+    batch_in = "\n".join(sorted(blob_shas)) + "\n"
+    cat_res = subprocess.run(
+        ["git", "-C", repo_root, "cat-file", "--batch"],
+        input=batch_in.encode("ascii"),
+        capture_output=True,
+    )
+    if cat_res.returncode == 0:
+        buf = cat_res.stdout
+        pos = 0
+        n = len(buf)
+        while pos < n:
+            nl = buf.find(b"\n", pos)
+            if nl == -1:
+                break
+            hdr = buf[pos:nl].decode("utf-8", errors="replace").split()
+            pos = nl + 1
+            if len(hdr) >= 3 and hdr[1] == "blob":
+                sz = int(hdr[2])
+                parse_pointer(buf[pos : pos + sz])
+                pos += sz + 1
+
+for oid in sorted(oids):
+    print(oid)
+PY
+)"
+  [[ -n "${oids}" ]] || return 0
+
+  local missing_obj=false oid obj_rel
+  while IFS= read -r oid; do
+    [[ -n "${oid}" ]] || continue
+    obj_rel="${oid:0:2}/${oid:2:2}/${oid}"
+    if [[ ! -f "${git_common_dir}/lfs/objects/${obj_rel}" ]]; then
+      missing_obj=true
+      break
+    fi
+  done <<< "${oids}"
+
+  if [[ "${missing_obj}" == "true" ]] && \
+     [[ "${AUTOSYNC_SKIP_LFS_FETCH:-false}" != "true" ]] && \
+     git -C "${repo_root}" remote get-url origin >/dev/null 2>&1 && \
+     git lfs version >/dev/null 2>&1; then
+    git -C "${repo_root}" lfs fetch origin HEAD >/dev/null 2>&1 || true
+    local pr_sha=""
+    while IFS= read -r pr_sha; do
+      [[ -n "${pr_sha}" ]] || continue
+      git -C "${repo_root}" lfs fetch origin "${pr_sha}" >/dev/null 2>&1 || true
+    done < <(git -C "${repo_root}" for-each-ref --format='%(objectname)' 'refs/remotes/origin/pr/' 2>/dev/null)
+  fi
+
+  local staged_any=false src_obj dst_obj
+  while IFS= read -r oid; do
+    [[ -n "${oid}" ]] || continue
+    obj_rel="${oid:0:2}/${oid:2:2}/${oid}"
+    src_obj="${git_common_dir}/lfs/objects/${obj_rel}"
+    [[ -f "${src_obj}" ]] || continue
+    dst_obj="${shared_root}/lfs-objects/${obj_rel}"
+    mkdir -p "$(dirname "${dst_obj}")"
+    if [[ ! -f "${dst_obj}" ]]; then
+      if ! ln "${src_obj}" "${dst_obj}" 2>/dev/null && ! cp -f "${src_obj}" "${dst_obj}"; then
+        printf 'WARN: autosync: failed to stage LFS object %s into %s\n' "${oid}" "${shared_root}/lfs-objects" >&2
+        return 1
+      fi
+    fi
+    staged_any=true
+  done <<< "${oids}"
+
+  if [[ "${staged_any}" == "true" || -d "${shared_root}/lfs-objects" ]]; then
+    if [[ ! -e "${stage_dir}/lfs-objects" || -L "${stage_dir}/lfs-objects" ]]; then
+      ln -sfn "${shared_root}/lfs-objects" "${stage_dir}/lfs-objects"
+    fi
+  fi
+}
+
 # autosync::preflight::warm_caches <stage_dir> [--sbin] [--go] [--go-all] [--tools <comma-list>]
 # Populates shared /tmp/gpustack-autosync-stage/{.sbin,go-cache,go-mod,deps-cache,uv-cache,uv-python} caches,
 # records host toolchain paths into <stage_dir>/toolchain.env, and links caches into <stage_dir>.
@@ -359,6 +533,8 @@ autosync::preflight::warm_caches() {
       ;;
   esac
 
+  autosync::preflight::_stage_lfs_objects "${repo_root}" "${shared_root}" "${stage_dir}"
+
   if [[ "${want_sbin}" == "true" ]]; then
     mkdir -p "${shared_root}/.sbin"
     if [[ -d "${repo_root}/.sbin" ]]; then
@@ -405,8 +581,24 @@ autosync::preflight::warm_caches() {
           if [[ "${want_go_all}" == "true" ]]; then
             mod_dl_args+=(all)
           fi
+          local go_dl_tmp=""
+          go_dl_tmp="$(mktemp -d "${TMPDIR:-/tmp}/autosync-gomod-dl.XXXXXXXX")"
           (
-            cd "${repo_root}"
+            trap 'chmod u+w "${go_dl_tmp}/go.mod" "${go_dl_tmp}/go.sum" 2>/dev/null || true; rm -rf "${go_dl_tmp}"' EXIT
+            trap 'exit 130' INT
+            trap 'exit 143' TERM
+            trap 'exit 129' HUP
+            cp -f "${repo_root}/go.mod" "${go_dl_tmp}/go.mod"
+            if [[ -f "${repo_root}/go.sum" ]]; then
+              cp -f "${repo_root}/go.sum" "${go_dl_tmp}/go.sum"
+            fi
+            if [[ -d "${repo_root}/staging" ]]; then
+              cp -Rl "${repo_root}/staging" "${go_dl_tmp}/staging" 2>/dev/null || \
+                cp -R --reflink=auto "${repo_root}/staging" "${go_dl_tmp}/staging" 2>/dev/null || \
+                cp -Rc "${repo_root}/staging" "${go_dl_tmp}/staging" 2>/dev/null || \
+                cp -R "${repo_root}/staging" "${go_dl_tmp}/staging"
+            fi
+            cd "${go_dl_tmp}"
             GOMODCACHE="${shared_root}/go-mod" \
             GOCACHE="${shared_root}/go-cache" \
             GOPROXY="${effective_goproxy}" \

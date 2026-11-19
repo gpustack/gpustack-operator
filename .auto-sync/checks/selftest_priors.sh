@@ -785,6 +785,115 @@ else
   fail "preflight-priors.sh skips heavy warming on no_change and warms --tools hugo in live/AUTOSYNC_WARM_TOOLS mode"
 fi
 
+# 3i. ensure_ephemeral_git hydrates staged Git-LFS pointers in site/ before git commit so Hugo / make site passes offline.
+CAND_LFS="${SCRATCH}/cand-lfs"
+STAGE_LFS="${SCRATCH}/stage-lfs/priors"
+mkdir -p "${STAGE_LFS}"
+(
+  # shellcheck source=./lib.sh
+  # shellcheck disable=SC1091
+  source "${ROOT_DIR}/.auto-sync/checks/lib.sh"
+  autosync::copy_tree_without_git "${ROOT_DIR}" "${CAND_LFS}" .sbin .dist .claude .codex
+)
+rm -rf "${CAND_LFS}/site/public" "${CAND_LFS}/site/resources"
+LOGO_POINTER="${SCRATCH}/logo.pointer"
+git -C "${ROOT_DIR}" show HEAD:site/assets/images/logo.png > "${LOGO_POINTER}"
+cp -f "${LOGO_POINTER}" "${CAND_LFS}/site/assets/images/logo.png"
+LOGO_OID="$(awk '$1 == "oid" && $2 ~ /^sha256:[0-9a-f]+$/ && length($2) == 71 { print substr($2, 8); exit }' "${LOGO_POINTER}")"
+GIT_COMMON_DIR="$(git -C "${ROOT_DIR}" rev-parse --git-common-dir)"
+if [[ "${GIT_COMMON_DIR}" != /* ]]; then
+  GIT_COMMON_DIR="${ROOT_DIR}/${GIT_COMMON_DIR}"
+fi
+LOGO_OBJ_REL="${LOGO_OID:0:2}/${LOGO_OID:2:2}/${LOGO_OID}"
+FAVICON_OID="$(git -C "${ROOT_DIR}" show HEAD:pkg/extensionroute/swagger/ui/favicon-16x16.png | awk '$1 == "oid" && $2 ~ /^sha256:[0-9a-f]+$/ && length($2) == 71 { print substr($2, 8); exit }')"
+if [[ ! "${FAVICON_OID}" =~ ^[0-9a-f]{64}$ ]]; then
+  fail "failed to parse 64-hex Git-LFS OID from pkg/extensionroute/swagger/ui/favicon-16x16.png"
+fi
+
+if [[ -n "${LOGO_OID}" && -f "${GIT_COMMON_DIR}/lfs/objects/${LOGO_OBJ_REL}" ]]; then
+  if (
+    cd "${ROOT_DIR}"
+    # shellcheck source=../scripts/lib-preflight.sh
+    # shellcheck disable=SC1091
+    source "${ROOT_DIR}/.auto-sync/scripts/lib-preflight.sh"
+    AUTOSYNC_SKIP_GO_MOD_DOWNLOAD=true AUTOSYNC_SKIP_LFS_FETCH=true autosync::preflight::warm_caches "${STAGE_LFS}" --sbin
+    [[ -d "${STAGE_LFS}/lfs-objects" && -f "${STAGE_LFS}/lfs-objects/${LOGO_OBJ_REL}" ]]
+    [[ ! -e "${STAGE_LFS}/lfs-objects/${FAVICON_OID:0:2}/${FAVICON_OID:2:2}/${FAVICON_OID}" ]]
+    staged_lfs_files="$(find -L "${STAGE_LFS}/lfs-objects" -type f)"
+    [[ "${staged_lfs_files}" == "${STAGE_LFS}/lfs-objects/${LOGO_OBJ_REL}" ]]
+    # shellcheck source=./lib.sh
+    # shellcheck disable=SC1091
+    source "${CAND_LFS}/.auto-sync/checks/lib.sh"
+    AUTOSYNC_STAGE_DIR="${STAGE_LFS}" autosync::ensure_ephemeral_git "${CAND_LFS}"
+    hydrated_sha="$(python3 -c 'import hashlib,sys; print(hashlib.sha256(open(sys.argv[1],"rb").read()).hexdigest())' "${CAND_LFS}/site/assets/images/logo.png")"
+    [[ "${hydrated_sha}" == "${LOGO_OID}" ]]
+    [[ -z "$(git -C "${CAND_LFS}" status --porcelain)" ]]
+    if [[ -x "${ROOT_DIR}/.sbin/hugo" ]]; then
+      mkdir -p "${CAND_LFS}/.sbin"
+      cp -f "${ROOT_DIR}/.sbin/hugo" "${CAND_LFS}/.sbin/hugo"
+      make -C "${CAND_LFS}" site >/dev/null
+      [[ -f "${CAND_LFS}/site/public/index.html" ]]
+      [[ -z "$(git -C "${CAND_LFS}" status --porcelain)" ]]
+    fi
+    autosync::cleanup_ephemeral_git "${CAND_LFS}"
+  ); then
+    pass "ensure_ephemeral_git hydrates Git-LFS pointers from staged lfs-objects and Hugo make site succeeds"
+  else
+    fail "ensure_ephemeral_git hydrates Git-LFS pointers from staged lfs-objects and Hugo make site succeeds"
+  fi
+else
+  # Fallback synthetic check when the local checkout has not fetched LFS objects.
+  CAND_LFS_SYNTH="${SCRATCH}/cand-lfs-synth"
+  STAGE_LFS_SYNTH="${SCRATCH}/stage-lfs-synth"
+  mkdir -p "${CAND_LFS_SYNTH}/site/assets/images"
+  SYNTH_BYTES="synthetic-lfs-payload"
+  SYNTH_OID="$(printf '%s' "${SYNTH_BYTES}" | python3 -c 'import hashlib,sys; print(hashlib.sha256(sys.stdin.buffer.read()).hexdigest())')"
+  SYNTH_SIZE="${#SYNTH_BYTES}"
+  mkdir -p "${STAGE_LFS_SYNTH}/lfs-objects/${SYNTH_OID:0:2}/${SYNTH_OID:2:2}"
+  printf '%s' "${SYNTH_BYTES}" > "${STAGE_LFS_SYNTH}/lfs-objects/${SYNTH_OID:0:2}/${SYNTH_OID:2:2}/${SYNTH_OID}"
+  printf 'version https://git-lfs.github.com/spec/v1\noid sha256:%s\nsize %s\n' "${SYNTH_OID}" "${SYNTH_SIZE}" > "${CAND_LFS_SYNTH}/site/assets/images/logo.png"
+  if (
+    # shellcheck source=./lib.sh
+    # shellcheck disable=SC1091
+    source "${ROOT_DIR}/.auto-sync/checks/lib.sh"
+    AUTOSYNC_STAGE_DIR="${STAGE_LFS_SYNTH}" autosync::ensure_ephemeral_git "${CAND_LFS_SYNTH}"
+    [[ "$(cat "${CAND_LFS_SYNTH}/site/assets/images/logo.png")" == "${SYNTH_BYTES}" ]]
+    [[ -z "$(git -C "${CAND_LFS_SYNTH}" status --porcelain)" ]]
+    autosync::cleanup_ephemeral_git "${CAND_LFS_SYNTH}"
+  ); then
+    pass "ensure_ephemeral_git hydrates synthetic Git-LFS pointer from staged lfs-objects"
+  else
+    fail "ensure_ephemeral_git hydrates synthetic Git-LFS pointer from staged lfs-objects"
+  fi
+fi
+
+# 3j. ensure_ephemeral_git fails closed atomically on corrupted staged Git-LFS object digest without hydrating earlier files.
+CAND_LFS_BAD="${SCRATCH}/cand-lfs-bad"
+STAGE_LFS_BAD="${SCRATCH}/stage-lfs-bad"
+mkdir -p "${CAND_LFS_BAD}/site/assets/images"
+GOOD_FIRST_PAYLOAD="first-valid-payload"
+GOOD_FIRST_OID="$(printf '%s' "${GOOD_FIRST_PAYLOAD}" | python3 -c 'import hashlib,sys; print(hashlib.sha256(sys.stdin.buffer.read()).hexdigest())')"
+mkdir -p "${STAGE_LFS_BAD}/lfs-objects/${GOOD_FIRST_OID:0:2}/${GOOD_FIRST_OID:2:2}"
+printf '%s' "${GOOD_FIRST_PAYLOAD}" > "${STAGE_LFS_BAD}/lfs-objects/${GOOD_FIRST_OID:0:2}/${GOOD_FIRST_OID:2:2}/${GOOD_FIRST_OID}"
+printf 'version https://git-lfs.github.com/spec/v1\noid sha256:%s\nsize %s\n' "${GOOD_FIRST_OID}" "${#GOOD_FIRST_PAYLOAD}" > "${CAND_LFS_BAD}/site/assets/images/a.png"
+BAD_PAYLOAD="good-payload"
+BAD_OID="$(printf '%s' "${BAD_PAYLOAD}" | python3 -c 'import hashlib,sys; print(hashlib.sha256(sys.stdin.buffer.read()).hexdigest())')"
+mkdir -p "${STAGE_LFS_BAD}/lfs-objects/${BAD_OID:0:2}/${BAD_OID:2:2}"
+printf 'corrupted-payload' > "${STAGE_LFS_BAD}/lfs-objects/${BAD_OID:0:2}/${BAD_OID:2:2}/${BAD_OID}"
+printf 'version https://git-lfs.github.com/spec/v1\noid sha256:%s\nsize %s\n' "${BAD_OID}" "${#BAD_PAYLOAD}" > "${CAND_LFS_BAD}/site/assets/images/z.png"
+bad_lfs_err=""
+if ! bad_lfs_err="$(
+  # shellcheck source=./lib.sh
+  # shellcheck disable=SC1091
+  source "${ROOT_DIR}/.auto-sync/checks/lib.sh"
+  AUTOSYNC_STAGE_DIR="${STAGE_LFS_BAD}" autosync::ensure_ephemeral_git "${CAND_LFS_BAD}" 2>&1
+)" && grep -q "sha256 mismatch" <<<"${bad_lfs_err}" && \
+   grep -q '^version https://git-lfs.github.com/spec/v1$' "${CAND_LFS_BAD}/site/assets/images/a.png"; then
+  pass "ensure_ephemeral_git fails closed atomically on corrupted staged Git-LFS object digest"
+else
+  fail "ensure_ephemeral_git fails closed atomically on corrupted staged Git-LFS object digest (${bad_lfs_err})"
+fi
+
 echo
 if (( FAILS > 0 )); then
   echo "PRIORS SELFTEST FAILED: ${FAILS} failure(s), ${PASSES} passed" >&2

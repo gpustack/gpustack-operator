@@ -222,6 +222,101 @@ autosync::bootstrap_env() {
   export PATH="${new_path}"
 }
 
+# autosync::_hydrate_lfs_pointers <dir> <lfs_objects_dir>
+# Hydrates Git-LFS pointer files under site/ and docs/ from a staged lfs-objects directory
+# after verifying sha256 digests against the pointer oid.
+autosync::_hydrate_lfs_pointers() {
+  local dir="${1:?directory required}"
+  local lfs_objects="${2:-}"
+  [[ -n "${lfs_objects}" && -d "${lfs_objects}" ]] || return 0
+
+  python3 - "${dir}" "${lfs_objects}" <<'PY'
+import hashlib
+import os
+import re
+import sys
+
+root_dir, lfs_objects = sys.argv[1:3]
+OID_RE = re.compile(r"^oid sha256:([0-9a-f]{64})$")
+SIZE_RE = re.compile(r"^size (\d+)$")
+pending: list[tuple[str, str]] = []
+
+# First pass: validate every pointer's object before modifying any files so failure leaves the tree untouched.
+for sub in ("site", "docs"):
+    base = os.path.join(root_dir, sub)
+    if not os.path.isdir(base) or os.path.islink(base):
+        continue
+    for cur, dirs, files in os.walk(base, followlinks=False):
+        dirs[:] = sorted(d for d in dirs if not os.path.islink(os.path.join(cur, d)))
+        for name in sorted(files):
+            fpath = os.path.join(cur, name)
+            if os.path.islink(fpath):
+                continue
+            try:
+                st = os.lstat(fpath)
+            except OSError:
+                continue
+            if st.st_size == 0 or st.st_size > 1024:
+                continue
+            with open(fpath, "rb") as f:
+                raw = f.read()
+            try:
+                text = raw.decode("utf-8")
+            except UnicodeDecodeError:
+                continue
+            lines = text.splitlines()
+            if not lines or lines[0] != "version https://git-lfs.github.com/spec/v1":
+                continue
+            oid = ""
+            expected_size = None
+            for ln in lines[1:]:
+                m_oid = OID_RE.fullmatch(ln)
+                if m_oid:
+                    oid = m_oid.group(1)
+                    continue
+                m_sz = SIZE_RE.fullmatch(ln)
+                if m_sz:
+                    expected_size = int(m_sz.group(1))
+            if not oid:
+                continue
+            obj_path = os.path.join(lfs_objects, oid[:2], oid[2:4], oid)
+            if not os.path.isfile(obj_path):
+                raise SystemExit(
+                    f"FAIL: missing staged Git-LFS object for {os.path.relpath(fpath, root_dir)}: {obj_path}"
+                )
+            h = hashlib.sha256()
+            total = 0
+            with open(obj_path, "rb") as obj_f:
+                while True:
+                    chunk = obj_f.read(65536)
+                    if not chunk:
+                        break
+                    h.update(chunk)
+                    total += len(chunk)
+            actual_oid = h.hexdigest()
+            if actual_oid != oid:
+                raise SystemExit(
+                    f"FAIL: Git-LFS object sha256 mismatch for {os.path.relpath(fpath, root_dir)}: "
+                    f"expected {oid}, got {actual_oid}"
+                )
+            if expected_size is not None and total != expected_size:
+                raise SystemExit(
+                    f"FAIL: Git-LFS object size mismatch for {os.path.relpath(fpath, root_dir)}: "
+                    f"expected {expected_size}, got {total}"
+                )
+            pending.append((fpath, obj_path))
+
+# Second pass: hydrate verified payloads in place.
+for fpath, obj_path in pending:
+    with open(obj_path, "rb") as src_f, open(fpath, "wb") as dst_f:
+        while True:
+            chunk = src_f.read(65536)
+            if not chunk:
+                break
+            dst_f.write(chunk)
+PY
+}
+
 # autosync::ensure_ephemeral_git <dir>
 # Initializes a temporary git repository in a gitless candidate directory so repo linters
 # and git status/diff checks can run. Never modifies a pre-existing .git directory or file.
@@ -254,6 +349,11 @@ autosync::ensure_ephemeral_git() {
       ln -s ../.agents/hooks.json "${dir}/.codex/hooks.json"
       printf '.codex/hooks.json\n' >> "${dir}/.git/.autosync-ephemeral-symlinks"
     fi
+    local lfs_objects_dir=""
+    if [[ -n "${AUTOSYNC_STAGE_DIR:-}" && -d "${AUTOSYNC_STAGE_DIR}/lfs-objects" ]]; then
+      lfs_objects_dir="${AUTOSYNC_STAGE_DIR}/lfs-objects"
+    fi
+    autosync::_hydrate_lfs_pointers "${dir}" "${lfs_objects_dir}" || return 1
     git -C "${dir}" config user.name "autosync-validator"
     git -C "${dir}" config user.email "autosync@gpustack.local"
     git -C "${dir}" config commit.gpgsign false

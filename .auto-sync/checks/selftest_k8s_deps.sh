@@ -1412,6 +1412,58 @@ PY
   fi
 }
 
+# 3l. warm_caches --go-all keeps repo_root git status --porcelain empty even if go mod download all mutates go.sum.
+case_3l() {
+  local repo_3l="${SCRATCH}/repo-3l"
+  fast_cp_dir "${PREFLIGHT_REPO}" "${repo_3l}"
+  local wrap_go_3l="${SCRATCH}/wrap-go-3l"
+  local stage_3l="${SCRATCH}/stage-3l/k8s-deps"
+  mkdir -p "${wrap_go_3l}" "${stage_3l}"
+  cat > "${wrap_go_3l}/go" <<'SH'
+#!/usr/bin/env bash
+if [[ "${1:-}" == "env" && "${2:-}" == "GOMODCACHE" ]]; then
+  echo "${TMPDIR:-/tmp}/nonexistent-gomodcache"
+  exit 0
+fi
+if [[ "${1:-}" == "mod" && "${2:-}" == "download" ]]; then
+  [[ -f "go.mod" && -f "go.sum" && -d "staging" ]] || exit 1
+  if [[ "$(pwd -P)" == "${FORBIDDEN_REPO_ROOT}" ]]; then
+    echo "FAIL: go mod download ran directly inside repo_root" >&2
+    exit 1
+  fi
+  printf 'example.com/mutated v1.0.0 h1:deadbeef=\n' >> go.sum
+  mkdir -p "${GOMODCACHE}"
+  : > "${GOMODCACHE}/.warmed"
+  exit 0
+fi
+exec "${REAL_GO_BIN}" "$@"
+SH
+  chmod +x "${wrap_go_3l}/go"
+  local baseline_sum="${SCRATCH}/repo-3l-baseline.sum"
+  cp -f "${repo_3l}/go.sum" "${baseline_sum}"
+  # shellcheck disable=SC2016
+  if (
+    cd "${repo_3l}" && \
+    FORBIDDEN_REPO_ROOT="${repo_3l}" \
+    REAL_GO_BIN="${REAL_GO_BIN}" \
+    PATH="${wrap_go_3l}:${PATH}" \
+    GOPROXY="https://proxy.golang.org,direct" \
+    AUTOSYNC_SKIP_GO_MOD_DOWNLOAD=false \
+    bash -c '
+      set -euo pipefail
+      source "$1/.auto-sync/scripts/lib-preflight.sh"
+      autosync::preflight::warm_caches "$2" --go-all
+    ' _ "${ROOT_DIR}" "${stage_3l}" >/dev/null 2>&1
+  ) && \
+  [[ -z "$(git -C "${repo_3l}" status --porcelain)" ]] && \
+  cmp -s "${baseline_sum}" "${repo_3l}/go.sum" && \
+  [[ -f "${SCRATCH}/stage-3l/go-mod/.warmed" ]]; then
+    record_pass "warm_caches --go-all isolates go mod download all and leaves git status --porcelain empty"
+  else
+    record_fail "warm_caches --go-all dirtied repo_root or failed isolation"
+  fi
+}
+
 spawn_case "1bc" case_1bc
 spawn_case "2" case_2
 spawn_case "2b" case_2b
@@ -1430,6 +1482,7 @@ spawn_case "3h2" case_3h2
 spawn_case "3i" case_3i
 spawn_case "3j" case_3j
 spawn_case "3k" case_3k
+spawn_case "3l" case_3l
 
 for i in "${!CASE_NAMES[@]}"; do
   cid="${CASE_NAMES[$i]}"
