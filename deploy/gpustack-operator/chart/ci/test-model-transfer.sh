@@ -122,7 +122,20 @@ for manufacturer in amd ascend nvidia; do
   fi
 done
 amd_doc="$(awk '/^---$/{on=0} /^  name: gpustack-operator-model-transfer-amd$/{on=1} on' <<<"${default_fleets}")"
-if ! grep -Fq 'image: "gpustack/model-transfer:v0.1.0-rocm7.2"' <<<"${amd_doc}" \
+expected_amd_image="$(awk '
+  /^  images:$/ { in_images=1; next }
+  in_images && /^    amd:/ {
+    val=$0
+    sub(/^    amd:[[:space:]]*/, "", val)
+    sub(/[[:space:]]*#.*/, "", val)
+    gsub(/^["\047]|["\047]$/, "", val)
+    print val
+    exit
+  }
+  in_images && /^  [a-zA-Z0-9_-]+:/ { in_images=0 }
+' "${chart_dir}/values.yaml")"
+if [[ -z "${expected_amd_image}" ]] \
+  || ! grep -Fq "image: \"${expected_amd_image}\"" <<<"${amd_doc}" \
   || ! grep -q '^            - name: AMD_VISIBLE_DEVICES$' <<<"${amd_doc}"; then
   echo 'amd: the default fleet must use the published ROCm image and AMD device environment' >&2
   exit 1

@@ -35,16 +35,31 @@ sync_upstream_git() {
   local allow_file_proto="${4:-false}"
 
   local proto_opts=()
+  local filter_opts=()
   if [[ "${allow_file_proto}" == "true" ]]; then
     proto_opts=(-c protocol.file.allow=always)
+  else
+    filter_opts=(--filter=blob:none)
   fi
 
   if [[ -d "${dest_dir}/.git" ]]; then
     git -C "${dest_dir}" remote set-url origin "${repo_url}"
-    git -C "${dest_dir}" -c core.autocrlf=false "${proto_opts[@]+"${proto_opts[@]}"}" fetch --prune origin
+    if (( ${#filter_opts[@]} > 0 )); then
+      git -C "${dest_dir}" -c core.autocrlf=false "${proto_opts[@]+"${proto_opts[@]}"}" fetch "${filter_opts[@]}" --prune origin || \
+        git -C "${dest_dir}" -c core.autocrlf=false "${proto_opts[@]+"${proto_opts[@]}"}" fetch --prune origin
+    else
+      git -C "${dest_dir}" -c core.autocrlf=false "${proto_opts[@]+"${proto_opts[@]}"}" fetch --prune origin
+    fi
   else
     rm -rf "${dest_dir}"
-    git -c core.autocrlf=false "${proto_opts[@]+"${proto_opts[@]}"}" clone --no-single-branch "${repo_url}" "${dest_dir}"
+    if (( ${#filter_opts[@]} > 0 )); then
+      if ! git -c core.autocrlf=false "${proto_opts[@]+"${proto_opts[@]}"}" clone "${filter_opts[@]}" --no-single-branch "${repo_url}" "${dest_dir}"; then
+        rm -rf "${dest_dir}"
+        git -c core.autocrlf=false "${proto_opts[@]+"${proto_opts[@]}"}" clone --no-single-branch "${repo_url}" "${dest_dir}"
+      fi
+    else
+      git -c core.autocrlf=false "${proto_opts[@]+"${proto_opts[@]}"}" clone --no-single-branch "${repo_url}" "${dest_dir}"
+    fi
   fi
 
   git -C "${dest_dir}" remote set-head origin -a >/dev/null 2>&1 || true
@@ -322,6 +337,9 @@ with open(os.path.join(stage_dir, "slicing-preflight-report.json"), "w", encodin
 print(json.dumps(records, separators=(",", ":")))
 PY
 )"
+
+autosync::preflight::apply_force_to_upstream_records "${stage_dir}/upstream-records.json"
+records_compact="$(python3 -c 'import json,sys; print(json.dumps(json.load(open(sys.argv[1])), separators=(",", ":")))' "${stage_dir}/upstream-records.json")"
 
 if [[ "${AUTOSYNC_SKIP_SOURCE_REVISION:-false}" != "true" ]] && \
    autosync::preflight::has_available_upstreams "${stage_dir}/upstream-records.json"; then

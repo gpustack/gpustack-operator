@@ -10,10 +10,13 @@ spec:
     writable:
       - pack/llm-router
       - pkg/worker/settings/value.go
+      - pkg/worker/settings/value_test.go
+      - pkg/worker/controllers/worker/model_deployment_router_test.go
+      - pkg/worker/controllers/worker/model_deployment_render_test.go
       - docs/reference/settings.md
+      - docs/modules/model-deployment/routing.md
       - .auto-sync/proposals/router.json
     protected:
-      - pkg/worker/controllers
       - pkg/worker/webhooks
   instructions:
     - .auto-sync/instructions/router.md
@@ -78,6 +81,14 @@ spec:
     commentPrefixes:
       - /loopwright
       - /auto-sync
+  models:
+    - provider: zai-coding-cn
+      id: glm-5.3
+      thinking: low
+      samplingParams:
+        temperature: 0.4
+        top_p: 0.9
+      apiKeyEnv: LOOPWRIGHT_PROVIDER_TOKEN
   limits:
     wallTimeSeconds: 3600
     commandTimeoutSeconds: 2400

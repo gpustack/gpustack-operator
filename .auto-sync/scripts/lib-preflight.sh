@@ -280,8 +280,8 @@ autosync::preflight::_ensure_tools() {
   )
 }
 
-# autosync::preflight::warm_caches <stage_dir> [--sbin] [--go] [--tools <comma-list>]
-# Populates shared /tmp/gpustack-autosync-stage/{.sbin,go-cache,go-mod,deps-cache} caches,
+# autosync::preflight::warm_caches <stage_dir> [--sbin] [--go] [--go-all] [--tools <comma-list>]
+# Populates shared /tmp/gpustack-autosync-stage/{.sbin,go-cache,go-mod,deps-cache,uv-cache,uv-python} caches,
 # records host toolchain paths into <stage_dir>/toolchain.env, and links caches into <stage_dir>.
 autosync::preflight::warm_caches() {
   local stage_dir="${1:?stage_dir required}"
@@ -289,6 +289,7 @@ autosync::preflight::warm_caches() {
 
   local want_sbin=false
   local want_go=false
+  local want_go_all=false
   local saw_mode=false
   local tools_csv=""
   while (( $# > 0 )); do
@@ -300,6 +301,12 @@ autosync::preflight::warm_caches() {
         ;;
       --go)
         want_go=true
+        saw_mode=true
+        shift
+        ;;
+      --go-all)
+        want_go=true
+        want_go_all=true
         saw_mode=true
         shift
         ;;
@@ -367,19 +374,26 @@ autosync::preflight::warm_caches() {
 
   if [[ "${want_go}" == "true" ]]; then
     local cache_name
-    for cache_name in go-cache go-mod deps-cache uv-cache; do
+    for cache_name in go-cache go-mod deps-cache uv-cache uv-python; do
       mkdir -p "${shared_root}/${cache_name}"
+      if [[ -d "${stage_dir}/${cache_name}" && ! -L "${stage_dir}/${cache_name}" ]]; then
+        if cp -Rp "${stage_dir}/${cache_name}/." "${shared_root}/${cache_name}/" 2>/dev/null; then
+          rm -rf "${stage_dir:?}/${cache_name:?}"
+        else
+          printf 'WARN: autosync: failed to migrate %s into %s\n' "${cache_name}" "${shared_root}" >&2
+        fi
+      fi
       if [[ ! -e "${stage_dir}/${cache_name}" || -L "${stage_dir}/${cache_name}" ]]; then
         ln -sfn "${shared_root}/${cache_name}" "${stage_dir}/${cache_name}"
       fi
     done
 
     if [[ "${AUTOSYNC_SKIP_GO_MOD_DOWNLOAD:-false}" != "true" ]] && command -v go >/dev/null 2>&1; then
-      if [[ -z "$(ls -A "${shared_root}/go-mod" 2>/dev/null)" ]]; then
+      if [[ -z "$(ls -A "${shared_root}/go-mod/" 2>/dev/null)" ]]; then
         local host_gomodcache=""
         host_gomodcache="$(go env GOMODCACHE 2>/dev/null || true)"
         if [[ "${GOPROXY:-}" == "off" ]]; then
-          if [[ -n "${host_gomodcache}" && -d "${host_gomodcache}" && -r "${host_gomodcache}" && -n "$(ls -A "${host_gomodcache}" 2>/dev/null)" ]]; then
+          if [[ -n "${host_gomodcache}" && -d "${host_gomodcache}" && -r "${host_gomodcache}" && -n "$(ls -A "${host_gomodcache}/" 2>/dev/null)" ]]; then
             cp -RLp "${host_gomodcache}/." "${shared_root}/go-mod/" 2>/dev/null || true
           fi
         elif [[ -f "${repo_root}/go.mod" ]]; then
@@ -387,26 +401,70 @@ autosync::preflight::warm_caches() {
           if [[ -n "${host_gomodcache}" && -d "${host_gomodcache}/cache/download" && -r "${host_gomodcache}/cache/download" ]]; then
             effective_goproxy="file://${host_gomodcache}/cache/download,${effective_goproxy}"
           fi
+          local mod_dl_args=(mod download)
+          if [[ "${want_go_all}" == "true" ]]; then
+            mod_dl_args+=(all)
+          fi
           (
             cd "${repo_root}"
             GOMODCACHE="${shared_root}/go-mod" \
             GOCACHE="${shared_root}/go-cache" \
             GOPROXY="${effective_goproxy}" \
-              go mod download
+              go "${mod_dl_args[@]}"
           )
         fi
       fi
     fi
 
-    if [[ "${AUTOSYNC_SKIP_GO_MOD_DOWNLOAD:-false}" != "true" ]] && \
+    if [[ "${want_go_all}" == "true" || "${AUTOSYNC_WARM_UV:-false}" == "true" ]] && \
+       [[ "${AUTOSYNC_SKIP_GO_MOD_DOWNLOAD:-false}" != "true" ]] && \
        [[ "${GOPROXY:-}" != "off" ]] && \
        command -v uv >/dev/null 2>&1 && \
        [[ -d "${repo_root}/model-transfer/python" ]] && \
-       [[ -z "$(ls -A "${shared_root}/uv-cache" 2>/dev/null)" ]]; then
-      (
+       { [[ -z "$(ls -A "${shared_root}/uv-cache/" 2>/dev/null)" ]] || \
+         ! compgen -G "${shared_root}/uv-python/cpython-*" >/dev/null; }; then
+      local uv_tmp_root uv_tmp_cache uv_tmp_env uv_tmp_verify_env uv_tmp_py uv_tmp_home
+      uv_tmp_root="$(mktemp -d "${TMPDIR:-/tmp}/autosync-uv-warm.XXXXXXXX")"
+      uv_tmp_cache="${uv_tmp_root}/cache"
+      uv_tmp_env="${uv_tmp_root}/venv"
+      uv_tmp_verify_env="${uv_tmp_root}/venv-verify"
+      uv_tmp_py="${uv_tmp_root}/python"
+      uv_tmp_home="${uv_tmp_root}/home"
+      mkdir -p "${uv_tmp_cache}" "${uv_tmp_py}" "${uv_tmp_home}"
+      if [[ -n "$(ls -A "${shared_root}/uv-cache/" 2>/dev/null)" ]]; then
+        cp -RLp "${shared_root}/uv-cache/." "${uv_tmp_cache}/" 2>/dev/null || true
+      fi
+      if compgen -G "${shared_root}/uv-python/cpython-*" >/dev/null; then
+        cp -RPp "${shared_root}/uv-python/." "${uv_tmp_py}/" 2>/dev/null || true
+      fi
+      if (
         cd "${repo_root}/model-transfer/python"
-        UV_CACHE_DIR="${shared_root}/uv-cache" uv sync --frozen >/dev/null 2>&1 || true
-      )
+        UV_PYTHON_INSTALL_DIR="${uv_tmp_py}" uv python install >/dev/null 2>&1 && \
+        UV_CACHE_DIR="${uv_tmp_cache}" UV_PROJECT_ENVIRONMENT="${uv_tmp_env}" UV_PYTHON_INSTALL_DIR="${uv_tmp_py}" UV_PYTHON_PREFERENCE=only-managed uv sync --frozen >/dev/null 2>&1 && \
+        HOME="${uv_tmp_home}" UV_CACHE_DIR="${uv_tmp_cache}" UV_PROJECT_ENVIRONMENT="${uv_tmp_verify_env}" UV_PYTHON_INSTALL_DIR="${uv_tmp_py}" UV_PYTHON_PREFERENCE=only-managed UV_OFFLINE=1 uv run --frozen --offline ruff --version >/dev/null 2>&1
+      ); then
+        local staged_uv_cache staged_uv_py
+        staged_uv_cache="$(mktemp -d "${shared_root}/.uv-cache-stage.XXXXXXXX")"
+        staged_uv_py="$(mktemp -d "${shared_root}/.uv-python-stage.XXXXXXXX")"
+        if cp -RLp "${uv_tmp_cache}/." "${staged_uv_cache}/" 2>/dev/null && \
+           [[ -n "$(ls -A "${staged_uv_cache}/" 2>/dev/null)" ]] && \
+           cp -RPp "${uv_tmp_py}/." "${staged_uv_py}/" 2>/dev/null && \
+           compgen -G "${staged_uv_py}/cpython-*" >/dev/null; then
+          if [[ -z "$(ls -A "${shared_root}/uv-cache/" 2>/dev/null)" ]] && \
+             rmdir "${shared_root}/uv-cache" 2>/dev/null; then
+            mv "${staged_uv_cache}" "${shared_root}/uv-cache"
+          fi
+          if ! compgen -G "${shared_root}/uv-python/cpython-*" >/dev/null && \
+             [[ -z "$(ls -A "${shared_root}/uv-python/" 2>/dev/null)" ]] && \
+             rmdir "${shared_root}/uv-python" 2>/dev/null; then
+            mv "${staged_uv_py}" "${shared_root}/uv-python"
+          fi
+        else
+          printf 'WARN: autosync: failed to stage uv cache/python into %s\n' "${shared_root}" >&2
+        fi
+        rm -rf "${staged_uv_cache}" "${staged_uv_py}" 2>/dev/null || true
+      fi
+      rm -rf "${uv_tmp_root}" 2>/dev/null || true
     fi
   fi
 }
@@ -855,6 +913,42 @@ with open(sys.argv[1], "r", encoding="utf-8") as f:
 if isinstance(recs, list) and any(isinstance(r, dict) and r.get("status") == "available" for r in recs):
     sys.exit(0)
 sys.exit(1)
+PY
+}
+
+# autosync::preflight::apply_force_to_upstream_records <upstream_records_json>
+# When AUTOSYNC_FORCE=true and no record currently has status == "available",
+# promotes the first "up_to_date" record to "available" while keeping version unchanged.
+autosync::preflight::apply_force_to_upstream_records() {
+  local records_json="${1:?upstream_records_json required}"
+  [[ "${AUTOSYNC_FORCE:-false}" == "true" ]] || return 0
+  [[ -f "${records_json}" ]] || return 0
+  python3 - "${records_json}" <<'PY'
+import json
+import sys
+
+path = sys.argv[1]
+with open(path, "r", encoding="utf-8") as f:
+    recs = json.load(f)
+if not isinstance(recs, list):
+    sys.exit(0)
+if any(isinstance(r, dict) and r.get("status") == "available" for r in recs):
+    sys.exit(0)
+for rec in recs:
+    if isinstance(rec, dict) and rec.get("status") == "up_to_date":
+        rec["status"] = "available"
+        reason = str(rec.get("reason") or "").strip()
+        suffix = "(forced via AUTOSYNC_FORCE=true)"
+        rec["reason"] = f"{reason} {suffix}".strip()
+        print(
+            f"INFO: AUTOSYNC_FORCE=true force-promoted upstream '{rec.get('upstreamId', '')}' "
+            f"({rec.get('version', '')}) from up_to_date to available",
+            file=sys.stderr,
+        )
+        break
+with open(path, "w", encoding="utf-8") as f:
+    json.dump(recs, f, indent=2)
+    f.write("\n")
 PY
 }
 

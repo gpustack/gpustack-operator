@@ -31,6 +31,32 @@ cleanup() {
 }
 trap cleanup EXIT
 
+FAST_CP_MODE="plain"
+detect_fast_cp_mode() {
+  local probe_src="${SCRATCH}/.cp-probe-src"
+  local probe_dst="${SCRATCH}/.cp-probe-dst"
+  mkdir -p "${probe_src}"
+  : > "${probe_src}/f"
+  if cp -Rc "${probe_src}" "${probe_dst}" 2>/dev/null; then
+    FAST_CP_MODE="apfs"
+  else
+    rm -rf "${probe_dst}"
+    if cp -R --reflink=auto "${probe_src}" "${probe_dst}" 2>/dev/null && [[ -f "${probe_dst}/f" ]]; then
+      FAST_CP_MODE="reflink"
+    fi
+  fi
+  rm -rf "${probe_src}" "${probe_dst}"
+}
+detect_fast_cp_mode
+
+fast_cp_dir() {
+  case "${FAST_CP_MODE}" in
+    apfs) cp -Rc "$1" "$2" ;;
+    reflink) cp -R --reflink=auto "$1" "$2" ;;
+    *) cp -R "$1" "$2" ;;
+  esac
+}
+
 copy_priors_go_tree() {
   local src_root="$1"
   local dst_root="$2"
@@ -53,7 +79,7 @@ copy_priors_go_tree() {
   for rel in "${rel_paths[@]}"; do
     if [[ -e "${src_root}/${rel}" ]]; then
       mkdir -p "${dst_root}/$(dirname "${rel}")"
-      cp -R "${src_root}/${rel}" "${dst_root}/$(dirname "${rel}")/"
+      fast_cp_dir "${src_root}/${rel}" "${dst_root}/$(dirname "${rel}")/"
     fi
   done
 }
@@ -483,7 +509,7 @@ run_validator_env_i() {
 
 # 3a. Positive case: matching priors.yaml, records.md digests & counts, and clean ephemeral git cleanup.
 CAND_POS="${SCRATCH}/cand-pos"
-cp -R "${CAND_BASE}" "${CAND_POS}"
+fast_cp_dir "${CAND_BASE}" "${CAND_POS}"
 if [[ -x "${CAND_POS}/${VALIDATOR_REL}" ]] && \
    run_validator_env_i "${CAND_POS}" "${STAGE_SAME}" >/dev/null 2>&1 && \
    [[ ! -e "${CAND_POS}/.git" ]] && [[ ! -e "${CAND_POS}/.sbin" ]]; then
@@ -494,7 +520,7 @@ fi
 
 # 3b. Negative case 1: mismatched SHA-256 digest in records.md vs priors-preflight-report.json.
 CAND_BAD_SHA="${SCRATCH}/cand-bad-sha"
-cp -R "${CAND_BASE}" "${CAND_BAD_SHA}"
+fast_cp_dir "${CAND_BASE}" "${CAND_BAD_SHA}"
 python3 - "${CAND_BAD_SHA}/pkg/worker/scaling/priors/records.md" <<'PY'
 import re
 import sys
@@ -520,7 +546,7 @@ fi
 
 # 3c. Negative case 2: mismatched aggregated/disaggregated profile counts between records.md and priors.yaml.
 CAND_BAD_CNT="${SCRATCH}/cand-bad-cnt"
-cp -R "${CAND_BASE}" "${CAND_BAD_CNT}"
+fast_cp_dir "${CAND_BASE}" "${CAND_BAD_CNT}"
 python3 - "${CAND_BAD_CNT}/pkg/worker/scaling/priors/records.md" <<'PY'
 import re
 import sys
@@ -550,7 +576,7 @@ fi
 
 # 3d. Negative case 3: unformatted priors.yaml.
 CAND_UNFMT="${SCRATCH}/cand-unfmt"
-cp -R "${CAND_BASE}" "${CAND_UNFMT}"
+fast_cp_dir "${CAND_BASE}" "${CAND_UNFMT}"
 printf '\n# trailing unformatted comment\n' >> "${CAND_UNFMT}/pkg/worker/scaling/priors/priors.yaml"
 bad_err=""
 if [[ -x "${CAND_UNFMT}/${VALIDATOR_REL}" ]] && \
@@ -563,7 +589,7 @@ fi
 
 # 3e. Negative case 4: mismatched proposals/priors.json availability SHA-256.
 CAND_BAD_PROP="${SCRATCH}/cand-bad-prop"
-cp -R "${CAND_BASE}" "${CAND_BAD_PROP}"
+fast_cp_dir "${CAND_BASE}" "${CAND_BAD_PROP}"
 python3 - "${CAND_BAD_PROP}/.auto-sync/proposals/priors.json" <<'PY'
 import json
 import sys
@@ -635,10 +661,13 @@ fi
 # 3g. Ephemeral git restores tracked symlinks in symlink-stripped candidate copy, keeps
 #     git status clean (including site/public), passes docs/specs/crossrefs gates, and cleans up.
 CAND_SYMLINK="${SCRATCH}/cand-symlink"
-mkdir -p "${CAND_SYMLINK}"
-tar --exclude='.git' --exclude='.sbin' --exclude='.dist' --exclude='site/public' \
-  --exclude='.claude' --exclude='.codex' \
-  -cf - -C "${ROOT_DIR}" . | tar -xf - -C "${CAND_SYMLINK}"
+(
+  # shellcheck source=./lib.sh
+  # shellcheck disable=SC1091
+  source "${ROOT_DIR}/.auto-sync/checks/lib.sh"
+  autosync::copy_tree_without_git "${ROOT_DIR}" "${CAND_SYMLINK}" .sbin .dist .claude .codex
+)
+rm -rf "${CAND_SYMLINK}/site/public"
 
 if (
   # shellcheck source=./lib.sh
@@ -665,6 +694,95 @@ if (
   pass "ensure_ephemeral_git restores tracked symlinks, excludes site/public, passes docs/specs/crossrefs, and cleans up"
 else
   fail "ensure_ephemeral_git restores tracked symlinks, excludes site/public, passes docs/specs/crossrefs, and cleans up"
+fi
+
+# 3h. preflight-priors.sh skips heavy --go/--tools hugo warming on no_change and warms --tools hugo when needed.
+WARM_SPY_REPO="${SCRATCH}/warm-spy-repo"
+WARM_SPY_BIN="${SCRATCH}/warm-spy-bin"
+mkdir -p "${WARM_SPY_REPO}/.auto-sync/scripts" "${WARM_SPY_REPO}/.auto-sync/checks" "${WARM_SPY_REPO}/.auto-sync/proposals" "${WARM_SPY_REPO}/pkg/worker/scaling/priors" "${WARM_SPY_BIN}"
+cp "${ROOT_DIR}/.auto-sync/checks/lib.sh" "${WARM_SPY_REPO}/.auto-sync/checks/lib.sh"
+cp "${ROOT_DIR}/.auto-sync/scripts/preflight-priors.sh" "${WARM_SPY_REPO}/.auto-sync/scripts/preflight-priors.sh"
+cp "${PREFLIGHT_REPO}/pkg/worker/scaling/priors/priors.yaml" "${WARM_SPY_REPO}/pkg/worker/scaling/priors/priors.yaml"
+cp "${FIXTURE_SAME}/records.md" "${WARM_SPY_REPO}/pkg/worker/scaling/priors/records.md"
+cp "${PREFLIGHT_REPO}/pkg/worker/scaling/priors/identity.go" "${WARM_SPY_REPO}/pkg/worker/scaling/priors/identity.go"
+cp "${PREFLIGHT_REPO}/.auto-sync/proposals/priors.json" "${WARM_SPY_REPO}/.auto-sync/proposals/priors.json"
+cat > "${WARM_SPY_REPO}/.auto-sync/scripts/lib-preflight.sh" <<'SH'
+autosync::preflight::repo_root() { echo "${WARM_SPY_REPO}"; }
+autosync::preflight::init_stage() { mkdir -p "${2}"; echo "${2}"; }
+autosync::preflight::snapshot_baselines() { :; }
+autosync::preflight::apply_force_to_upstream_records() { :; }
+autosync::preflight::has_available_upstreams() { return 1; }
+autosync::preflight::write_github_output() { :; }
+autosync::preflight::warm_caches() {
+  printf '%s\n' "$*" >> "${WARM_CALL_LOG}"
+  case " $* " in
+    *" --go "*) exit 0 ;;
+  esac
+}
+SH
+REAL_GIT_BIN="$(command -v git)"
+cat > "${WARM_SPY_BIN}/git" <<'SH'
+#!/usr/bin/env bash
+if [[ "${1:-}" == "ls-remote" ]]; then
+  printf '2222222222222222222222222222222222222222\tHEAD\n'
+  exit 0
+fi
+exec "${REAL_GIT_BIN}" "$@"
+SH
+cat > "${WARM_SPY_BIN}/curl" <<'SH'
+#!/usr/bin/env bash
+out=""
+url=""
+while (( $# > 0 )); do
+  case "$1" in
+    -o|--output) out="$2"; shift 2 ;;
+    --output=*) out="${1#--output=}"; shift ;;
+    -o*) out="${1#-o}"; shift ;;
+    http://*|https://*) url="$1"; shift ;;
+    -*) shift ;;
+    *) url="${url:-$1}"; shift ;;
+  esac
+done
+if [[ -z "${out}" || -z "${url}" ]]; then
+  echo "ERROR: mock curl missing output or url" >&2
+  exit 1
+fi
+if [[ "${url}" == *"/availability" ]]; then
+  cp "${WARM_LIVE_FIXTURE}/availability.json" "${out}"
+elif [[ "${url}" == *"model="* ]]; then
+  qid="${url##*model=}"
+  cp "${WARM_LIVE_FIXTURE}/${qid}.json" "${out}"
+fi
+SH
+chmod +x "${WARM_SPY_BIN}/git" "${WARM_SPY_BIN}/curl"
+if (
+  cd "${WARM_SPY_REPO}"
+  git init -q -b main 2>/dev/null || git init -q
+  git config user.name test
+  git config user.email test@example.com
+  git config commit.gpgsign false
+  git commit -q --allow-empty -m base
+  export WARM_SPY_REPO REAL_GIT_BIN
+
+  WARM_CALL_LOG="${SCRATCH}/warm-nochange.log"
+  export WARM_CALL_LOG
+  AUTOSYNC_PRIORS_FIXTURE_DIR="${FIXTURE_SAME}" bash "${WARM_SPY_REPO}/.auto-sync/scripts/preflight-priors.sh" "${SCRATCH}/warm-stage-1" >/dev/null 2>&1
+  [[ -f "${WARM_CALL_LOG}" ]] && ! grep -q -- '--go' "${WARM_CALL_LOG}" && ! grep -q -- '--tools hugo' "${WARM_CALL_LOG}"
+
+  WARM_CALL_LOG="${SCRATCH}/warm-enabled.log"
+  export WARM_CALL_LOG
+  AUTOSYNC_PRIORS_FIXTURE_DIR="${FIXTURE_SAME}" AUTOSYNC_WARM_TOOLS=true bash "${WARM_SPY_REPO}/.auto-sync/scripts/preflight-priors.sh" "${SCRATCH}/warm-stage-2" >/dev/null 2>&1
+  [[ -f "${WARM_CALL_LOG}" ]] && grep -q -- '--tools hugo' "${WARM_CALL_LOG}"
+
+  WARM_CALL_LOG="${SCRATCH}/warm-live.log"
+  WARM_LIVE_FIXTURE="${FIXTURE_CHANGED}"
+  export WARM_CALL_LOG WARM_LIVE_FIXTURE
+  PATH="${WARM_SPY_BIN}:${PATH}" bash "${WARM_SPY_REPO}/.auto-sync/scripts/preflight-priors.sh" "${SCRATCH}/warm-stage-3" >/dev/null 2>&1
+  [[ -f "${WARM_CALL_LOG}" ]] && grep -q -- '--tools hugo' "${WARM_CALL_LOG}"
+); then
+  pass "preflight-priors.sh skips heavy warming on no_change and warms --tools hugo in live/AUTOSYNC_WARM_TOOLS mode"
+else
+  fail "preflight-priors.sh skips heavy warming on no_change and warms --tools hugo in live/AUTOSYNC_WARM_TOOLS mode"
 fi
 
 echo

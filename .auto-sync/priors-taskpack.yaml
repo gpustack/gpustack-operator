@@ -71,6 +71,14 @@ spec:
     commentPrefixes:
       - /loopwright
       - /auto-sync
+  models:
+    - provider: zai-coding-cn
+      id: glm-5.3
+      thinking: low
+      samplingParams:
+        temperature: 0.4
+        top_p: 0.9
+      apiKeyEnv: LOOPWRIGHT_PROVIDER_TOKEN
   limits:
     wallTimeSeconds: 1800
     commandTimeoutSeconds: 600

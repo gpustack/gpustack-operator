@@ -661,9 +661,12 @@ PY
 PROMOTED_FILES_CHANGED="false"
 for rel in \
   "pkg/worker/settings/value.go" \
+  "pkg/worker/settings/value_test.go" \
+  "pkg/worker/controllers/worker/model_deployment_transfer_test.go" \
   "docs/reference/settings.md" \
   "deploy/gpustack-operator/chart/values.yaml" \
   "deploy/gpustack-operator/chart/values.schema.json" \
+  "deploy/gpustack-operator/chart/README.md.gotmpl" \
   "deploy/gpustack-operator/chart/README.md"; do
   if [[ -f "${BASELINE_DIR}/${rel}" && -f "${AUTOSYNC_CANDIDATE_ROOT}/${rel}" ]]; then
     if ! cmp -s "${BASELINE_DIR}/${rel}" "${AUTOSYNC_CANDIDATE_ROOT}/${rel}"; then
@@ -677,6 +680,13 @@ if [[ "${PROMOTED_FILES_CHANGED}" == "true" && "${AUTOSYNC_FAST_SELFTEST:-false}
   make -C "${AUTOSYNC_CANDIDATE_ROOT}" generate chart
   make -C "${AUTOSYNC_CANDIDATE_ROOT}" lint chart
   make -C "${AUTOSYNC_CANDIDATE_ROOT}" lint docs
-  go test ./pkg/worker/settings/...
+  (
+    set -e
+    cd "${AUTOSYNC_CANDIDATE_ROOT}"
+    go test ./pkg/worker/settings/...
+    if [[ -d "${AUTOSYNC_CANDIDATE_ROOT}/pkg/worker/controllers/worker" ]]; then
+      go test ./pkg/worker/controllers/worker -run '^TestRenderModelDeploymentModelExpressObjects$'
+    fi
+  )
   git -C "${AUTOSYNC_CANDIDATE_ROOT}" diff --exit-code
 fi

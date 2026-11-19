@@ -112,7 +112,9 @@ jobs:
       # This pins the implementation, not the version: noble's original-awk is newer (2023-11-27) than
       # the 20200816 on a current macOS, so a feature added between the two still passes here.
       - name: Setup onetrueawk
-        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends original-awk
+        run: >-
+          sudo apt-get -o Acquire::Retries=5 -o Acquire::http::Timeout=15 update &&
+          sudo apt-get -o Acquire::Retries=5 -o Acquire::http::Timeout=15 install -y --no-install-recommends original-awk
       - name: Setup Go for Hugo
         uses: actions/setup-go@v5
         with:

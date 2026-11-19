@@ -38,25 +38,25 @@ on:
           - 'priors'
           - 'charts'
           - 'k8s-deps'
-      force:
-        description: 'Force sync execution even when upstream state appears unchanged.'
+      runner_profile:
+        description: 'Runner size profile (normal -> vars.AUTOSYNC_RUNNER or ubuntu-24.04, 4x -> ubuntu-24.04-4x, 8x -> ubuntu-24.04-8x).'
         required: false
-        type: boolean
-        default: false
+        type: choice
+        default: 'normal'
+        options:
+          - 'normal'
+          - '4x'
+          - '8x'
       dry-run:
         description: 'Compile and validate without publishing pull requests or memory updates.'
         required: false
         type: boolean
         default: false
-      runner_profile:
-        description: 'Runner size profile (8x -> ubuntu-24.04-8x, 4x -> ubuntu-24.04-4x, normal -> ubuntu-24.04).'
+      force:
+        description: 'Force sync execution even when upstream state appears unchanged.'
         required: false
-        type: choice
-        default: '8x'
-        options:
-          - '8x'
-          - '4x'
-          - 'normal'
+        type: boolean
+        default: false
       target_tag:
         description: 'Optional target image tag override for Stage B promotion.'
         required: false
@@ -86,7 +86,7 @@ jobs:
       has_domains: ${{ steps.resolve.outputs.has_domains }}
       comment_command: ${{ steps.resolve.outputs.comment_command }}
     steps:
-      - name: Resolve target domains and runner profile
+      - name: Resolve target domains
         id: resolve
         env:
           EVENT_NAME: ${{ github.event_name }}
@@ -94,7 +94,8 @@ jobs:
           DISPATCH_REF: ${{ github.ref }}
           INPUT_DOMAIN: ${{ inputs.domain || 'all' }}
           INPUT_DRY_RUN: ${{ (inputs.dry-run == true || inputs.dry-run == 'true') && 'true' || 'false' }}
-          INPUT_RUNNER_PROFILE: ${{ inputs.runner_profile || '8x' }}
+          INPUT_RUNNER_PROFILE: ${{ inputs.runner_profile || 'normal' }}
+          AUTOSYNC_RUNNER: ${{ vars.AUTOSYNC_RUNNER }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR_NUMBER: ${{ github.event.issue.number }}
           COMMENT_BODY: ${{ github.event.comment.body }}
@@ -122,14 +123,15 @@ jobs:
               "0 2 * * 3": ["charts"],
               "0 2 * * 4": ["k8s-deps"],
           }
+          normal_runner = os.environ.get("AUTOSYNC_RUNNER", "").strip() or "ubuntu-24.04"
           RUNNER_MAP = {
-              "8x": "ubuntu-24.04-8x",
+              "normal": normal_runner,
               "4x": "ubuntu-24.04-4x",
-              "normal": "ubuntu-24.04",
+              "8x": "ubuntu-24.04-8x",
           }
 
           event_name = os.environ.get("EVENT_NAME", "").strip()
-          profile = os.environ.get("INPUT_RUNNER_PROFILE", "8x").strip() or "8x"
+          profile = os.environ.get("INPUT_RUNNER_PROFILE", "normal").strip() or "normal"
           if profile not in RUNNER_MAP:
               print(f"ERROR: unsupported runner_profile: {profile!r}", file=sys.stderr)
               sys.exit(1)
@@ -224,14 +226,14 @@ jobs:
       matrix:
         domain: ${{ fromJSON(needs.resolve-domains.outputs.domains) }}
     steps:
-      - name: Checkout refs/heads/main
+      - name: Checkout main
         uses: actions/checkout@v4
         with:
           ref: refs/heads/main
           fetch-depth: 0
           persist-credentials: false
 
-      - name: Record main commit SHA
+      - name: Record main SHA
         id: record-main
         run: |
           MAIN_SHA="$(git rev-parse --verify 'HEAD^{commit}')"
@@ -241,7 +243,7 @@ jobs:
           echo "main_sha=${MAIN_SHA}" >> "${GITHUB_OUTPUT}"
           test -z "$(git status --porcelain)"
 
-      - name: Fetch PR head and align HEAD on issue_comment
+      - name: Fetch PR head
         id: pr-head
         if: github.event_name == 'issue_comment'
         env:
@@ -298,18 +300,11 @@ jobs:
         if: matrix.domain == 'k8s-deps'
         uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v5
 
-      - name: Setup Hugo
-        if: matrix.domain == 'priors' || matrix.domain == 'kv-transfer' || matrix.domain == 'router'
-        uses: peaceiris/actions-hugo@d1c81a15d4e6dca7086a17b9c2565cb70fd576bf # v3
-        with:
-          hugo-version: '0.152.2'
-          extended: true
-
-      - name: Setup onetrueawk
+      - name: Setup awk
         if: matrix.domain == 'priors' || matrix.domain == 'kv-transfer' || matrix.domain == 'router'
         run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends original-awk
+          sudo apt-get -o Acquire::Retries=5 -o Acquire::http::Timeout=15 update
+          sudo apt-get -o Acquire::Retries=5 -o Acquire::http::Timeout=15 install -y --no-install-recommends original-awk
           sudo update-alternatives --set awk /usr/bin/original-awk
           awk --version 2>&1 | head -1
 
@@ -325,11 +320,26 @@ jobs:
           echo "${RUNNER_TEMP}/bin" >> "${GITHUB_PATH}"
           "${RUNNER_TEMP}/bin/crane" version
 
-      - name: Setup Docker Buildx
+      - name: Setup Buildx
         if: matrix.domain == 'slicing' || matrix.domain == 'kv-transfer' || matrix.domain == 'router'
         uses: docker/setup-buildx-action@v3
 
-      - name: Run domain host preflight
+      - name: Cache preflight tools
+        uses: actions/cache@v4
+        with:
+          path: /tmp/gpustack-autosync-stage/.sbin
+          key: autosync-sbin-${{ runner.os }}-${{ runner.arch }}-${{ matrix.domain }}-${{ hashFiles('hack/lib/*.sh') }}
+
+      - name: Cache uv runtime
+        if: matrix.domain == 'k8s-deps'
+        uses: actions/cache@v4
+        with:
+          path: |
+            /tmp/gpustack-autosync-stage/uv-cache
+            /tmp/gpustack-autosync-stage/uv-python
+          key: autosync-uv-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('model-transfer/python/uv.lock', 'model-transfer/python/.python-version') }}
+
+      - name: Run preflight
         id: preflight
         env:
           DOMAIN: ${{ matrix.domain }}
@@ -423,54 +433,35 @@ jobs:
           fi
           test -z "$(git status --porcelain)"
 
-      - name: Resolve LLM gateway models.json
-        id: model-config
-        env:
-          DOMAIN: ${{ matrix.domain }}
-          CI_GPUSTACK_LOOPWRIGHT_LLM_URL: ${{ vars.CI_GPUSTACK_LOOPWRIGHT_LLM_URL }}
-          CI_GPUSTACK_LOOPWRIGHT_LLM_MODEL: ${{ vars.CI_GPUSTACK_LOOPWRIGHT_LLM_MODEL }}
-          CI_GPUSTACK_LOOPWRIGHT_LLM_PROVIDER: ${{ vars.CI_GPUSTACK_LOOPWRIGHT_LLM_PROVIDER }}
-          CI_GPUSTACK_LOOPWRIGHT_LLM_USE_ANTHROPIC: ${{ vars.CI_GPUSTACK_LOOPWRIGHT_LLM_USE_ANTHROPIC }}
-          CI_GPUSTACK_LOOPWRIGHT_LLM_PROTOCOL: ${{ vars.CI_GPUSTACK_LOOPWRIGHT_LLM_PROTOCOL }}
-          CI_GPUSTACK_LOOPWRIGHT_LLM_THINKING: ${{ vars.CI_GPUSTACK_LOOPWRIGHT_LLM_THINKING }}
-          CI_GPUSTACK_LOOPWRIGHT_LLM_REASONING_EFFORT: ${{ vars.CI_GPUSTACK_LOOPWRIGHT_LLM_REASONING_EFFORT }}
-          CI_GPUSTACK_LOOPWRIGHT_LLM_TEMPERATURE: ${{ vars.CI_GPUSTACK_LOOPWRIGHT_LLM_TEMPERATURE }}
-          CI_GPUSTACK_LOOPWRIGHT_LLM_TOP_P: ${{ vars.CI_GPUSTACK_LOOPWRIGHT_LLM_TOP_P }}
-          CI_GPUSTACK_LOOPWRIGHT_LLM_MAX_TOKENS: ${{ vars.CI_GPUSTACK_LOOPWRIGHT_LLM_MAX_TOKENS }}
-          CI_GPUSTACK_LOOPWRIGHT_LLM_CONTEXT_WINDOW_SIZE: ${{ vars.CI_GPUSTACK_LOOPWRIGHT_LLM_CONTEXT_WINDOW_SIZE }}
-          CI_GPUSTACK_CODEREVIEW_LLM_URL: ${{ vars.CI_GPUSTACK_CODEREVIEW_LLM_URL }}
-          CI_GPUSTACK_CODEREVIEW_LLM_MODEL: ${{ vars.CI_GPUSTACK_CODEREVIEW_LLM_MODEL }}
-          CI_GPUSTACK_CODEREVIEW_LLM_USE_ANTHROPIC: ${{ vars.CI_GPUSTACK_CODEREVIEW_LLM_USE_ANTHROPIC }}
-          CI_GPUSTACK_CODEREVIEW_LLM_THINKING: ${{ vars.CI_GPUSTACK_CODEREVIEW_LLM_THINKING }}
-          CI_GPUSTACK_CODEREVIEW_LLM_REASONING_EFFORT: ${{ vars.CI_GPUSTACK_CODEREVIEW_LLM_REASONING_EFFORT }}
-          CI_GPUSTACK_CODEREVIEW_LLM_TEMPERATURE: ${{ vars.CI_GPUSTACK_CODEREVIEW_LLM_TEMPERATURE }}
-          CI_GPUSTACK_CODEREVIEW_LLM_TOP_P: ${{ vars.CI_GPUSTACK_CODEREVIEW_LLM_TOP_P }}
+      - name: Setup bubblewrap
         run: |
-          python3 .auto-sync/scripts/write_models_json.py \
-            --models-out "${RUNNER_TEMP}/loopwright-models-${DOMAIN}.json" \
-            --github-output "${GITHUB_OUTPUT}" \
-            --token-env LOOPWRIGHT_PROVIDER_TOKEN
+          if ! command -v bwrap >/dev/null 2>&1; then
+            sudo apt-get -o Acquire::Retries=5 -o Acquire::http::Timeout=15 update
+            sudo apt-get -o Acquire::Retries=5 -o Acquire::http::Timeout=15 install -y --no-install-recommends bubblewrap
+          fi
+          bwrap --version
+          if ! bwrap --unshare-all --ro-bind / / "$(command -v true)" >/dev/null 2>&1; then
+            if ! sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0; then
+              echo "WARN: failed to disable kernel.apparmor_restrict_unprivileged_userns" >&2
+            fi
+            bwrap --unshare-all --ro-bind / / "$(command -v true)"
+          fi
 
-      - name: Run Loopwright auto-sync
+      - name: Run Loopwright
         uses: gpustack/loopwright@main
         env:
           LOOPWRIGHT_PROVIDER_TOKEN: ${{ secrets.CI_GPUSTACK_LOOPWRIGHT_LLM_AUTH_TOKEN || secrets.CI_GPUSTACK_CODEREVIEW_LLM_AUTH_TOKEN }}
           AUTOSYNC_STAGE_DIR: /tmp/gpustack-autosync-stage/${{ matrix.domain }}
           GITHUB_SHA: ${{ steps.preflight.outputs.effective_base_sha }}
+          INPUT_FORCE: ${{ (inputs.force == true || inputs.force == 'true') && 'true' || 'false' }}
         with:
           taskpack-path: .auto-sync/${{ matrix.domain }}-taskpack.yaml
           upstream-records: ${{ steps.preflight.outputs.upstream_records }}
           source-revision: ${{ steps.preflight.outputs.source_revision }}
           event-name: ${{ github.event_name }}
           event-path: ${{ github.event_path }}
-          provider: ${{ steps.model-config.outputs.provider }}
-          model: ${{ steps.model-config.outputs.model }}
-          thinking: ${{ steps.model-config.outputs.thinking }}
-          api: ${{ steps.model-config.outputs.api }}
-          base-url: ${{ steps.model-config.outputs.base-url }}
-          models-json: ${{ steps.model-config.outputs.models-json }}
           allow-custom-base-url: 'true'
-          provider-token-env: ${{ steps.model-config.outputs.provider-token-env }}
+          provider-token-env: LOOPWRIGHT_PROVIDER_TOKEN
           github-app-id: ${{ secrets.CI_GPUSTACK_LOOPWRIGHT_APP_ID || vars.CI_GPUSTACK_LOOPWRIGHT_APP_ID || secrets.LOOPWRIGHT_APP_ID }}
           github-app-private-key: ${{ secrets.CI_GPUSTACK_LOOPWRIGHT_APP_PRIVATE_KEY || secrets.LOOPWRIGHT_APP_PRIVATE_KEY }}
           dry-run: ${{ (inputs.dry-run == true || inputs.dry-run == 'true') && 'true' || 'false' }}

@@ -27,8 +27,6 @@ cleanup() {
 }
 trap cleanup EXIT
 
-autosync::ensure_ephemeral_git "${AUTOSYNC_CANDIDATE_ROOT}"
-
 priors_yaml="${AUTOSYNC_CANDIDATE_ROOT}/pkg/worker/scaling/priors/priors.yaml"
 records_md="${AUTOSYNC_CANDIDATE_ROOT}/pkg/worker/scaling/priors/records.md"
 
@@ -202,6 +200,8 @@ if sec_m:
             f"FAIL: proposals/priors.json versions.inferencex-availability ({avail_v}) != records.md ({avail_m.group(1)})"
         )
 PY
+
+autosync::ensure_ephemeral_git "${AUTOSYNC_CANDIDATE_ROOT}"
 
 if [[ "${AUTOSYNC_FAST_SELFTEST:-false}" == "true" ]]; then
   exit 0

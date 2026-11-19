@@ -26,6 +26,7 @@ on:
 
 jobs:
   review:
+    if: ${{ !startsWith(github.event.pull_request.head.ref, 'loopwright/memory/') }}
     uses: gpustack/.github/.github/workflows/code-review.yml@main
     with:
       # This repository's review backing: the org-level LLM endpoint/model

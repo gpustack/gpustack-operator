@@ -39,12 +39,7 @@ autosync::preflight::snapshot_baselines "${stage_dir}" \
   "go.mod" \
   "api"
 
-if [[ -n "${AUTOSYNC_K8S_DEPS_FIXTURE_DIR:-}" && "${AUTOSYNC_WARM_TOOLS:-false}" != "true" ]]; then
-  autosync::preflight::warm_caches "${stage_dir}" --sbin --go
-else
-  autosync::preflight::warm_caches "${stage_dir}" --sbin --go \
-    --tools protoc,protoc-gen-go,protoc-gen-gogo,goimports,golangci-lint,goimports-reviser,shellcheck,commitsar
-fi
+autosync::preflight::warm_caches "${stage_dir}" --sbin
 
 if [[ -n "${AUTOSYNC_K8S_DEPS_FIXTURE_DIR:-}" && -d "${AUTOSYNC_K8S_DEPS_FIXTURE_DIR}/deps-cache" ]]; then
   mkdir -p "${stage_dir}/deps-cache"
@@ -510,6 +505,40 @@ if [[ "${cur_k8s_mod}" != "${tgt_k8s_mod}" || \
   mods_changed="true"
 fi
 
+any_discovery_changed="$(python3 - "${discovery_json}" <<'PY'
+import json
+import sys
+
+doc = json.load(open(sys.argv[1], "r", encoding="utf-8"))
+cur = doc["current"]
+tgt = doc["target"]
+keys = (
+    "kubernetes",
+    "controller_runtime",
+    "kueue_sdk",
+    "helm_tag",
+    "skopeo_cli",
+    "vals_cli",
+    "kustomize_cli",
+    "ytt_cli",
+)
+print("true" if any(cur[k] != tgt[k] for k in keys) else "false")
+PY
+)"
+
+if [[ "${any_discovery_changed}" == "true" || \
+      "${AUTOSYNC_FORCE:-false}" == "true" || \
+      "${COMMENT_COMMAND:-}" == "revise" || \
+      "${COMMENT_COMMAND:-}" == "retry" || \
+      "${AUTOSYNC_WARM_TOOLS:-false}" == "true" ]]; then
+  if [[ -n "${AUTOSYNC_K8S_DEPS_FIXTURE_DIR:-}" && "${AUTOSYNC_WARM_TOOLS:-false}" != "true" ]]; then
+    autosync::preflight::warm_caches "${stage_dir}" --sbin --go-all
+  else
+    autosync::preflight::warm_caches "${stage_dir}" --sbin --go-all \
+      --tools protoc,protoc-gen-go,protoc-gen-gogo,goimports,golangci-lint,goimports-reviser,shellcheck,commitsar
+  fi
+fi
+
 source_revision="${base_sha}"
 patch_clean="true"
 staging_updated="false"
@@ -728,7 +757,7 @@ init_work_repo_and_stage_mods() {
     rm -rf "${work_repo}"
   fi
   mkdir -p "${work_repo}"
-  tar --exclude='.git' -cf - -C "${repo_root}" . | tar -xf - -C "${work_repo}"
+  autosync::copy_tree_without_git "${repo_root}" "${work_repo}"
 
   if [[ "${cur_k8s_mod}" != "${tgt_k8s_mod}" ]]; then
     python3 - "${work_repo}/hack/deps.sh" "${tgt_k8s_mod}" <<'PY'
@@ -991,6 +1020,8 @@ with open(records_path, "w", encoding="utf-8") as f:
     json.dump(records, f, indent=2)
     f.write("\n")
 PY
+
+autosync::preflight::apply_force_to_upstream_records "${upstream_records_json}"
 
 if [[ "${AUTOSYNC_SKIP_SOURCE_REVISION:-false}" != "true" ]] && \
    autosync::preflight::has_available_upstreams "${upstream_records_json}"; then

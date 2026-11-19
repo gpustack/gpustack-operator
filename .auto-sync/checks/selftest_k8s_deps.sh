@@ -34,6 +34,29 @@ fail() {
 
 SCRATCH="$(cd "$(mktemp -d)" && pwd -P)"
 
+FAST_CP_MODE="plain"
+detect_fast_cp_mode() {
+  local probe_src="${SCRATCH}/.cp-probe-src"
+  local probe_dst="${SCRATCH}/.cp-probe-dst"
+  mkdir -p "${probe_src}"
+  : > "${probe_src}/f"
+  if cp -Rc "${probe_src}" "${probe_dst}" 2>/dev/null; then
+    FAST_CP_MODE="apfs"
+  elif cp -R --reflink=auto "${probe_src}" "${probe_dst}" 2>/dev/null; then
+    FAST_CP_MODE="reflink"
+  fi
+  rm -rf "${probe_src}" "${probe_dst}"
+}
+detect_fast_cp_mode
+
+fast_cp_dir() {
+  case "${FAST_CP_MODE}" in
+    apfs) cp -Rc "$1" "$2" ;;
+    reflink) cp -R --reflink=auto "$1" "$2" ;;
+    *) cp -R "$1" "$2" ;;
+  esac
+}
+
 TASKPACK_FILE="${ROOT_DIR}/.auto-sync/k8s-deps-taskpack.yaml"
 INSTRUCTIONS_FILE="${ROOT_DIR}/.auto-sync/instructions/k8s-deps.md"
 PROPOSAL_FILE="${ROOT_DIR}/.auto-sync/proposals/k8s-deps.json"
@@ -79,7 +102,7 @@ copy_k8s_deps_tree() {
   for rel in "${rel_paths[@]}"; do
     if [[ -e "${src_root}/${rel}" ]]; then
       mkdir -p "${dst_root}/$(dirname "${rel}")"
-      cp -R "${src_root}/${rel}" "${dst_root}/$(dirname "${rel}")/"
+      fast_cp_dir "${src_root}/${rel}" "${dst_root}/$(dirname "${rel}")/"
     fi
   done
   cp "${PREFLIGHT_SCRIPT}" "${dst_root}/.auto-sync/scripts/preflight-k8s-deps.sh"
@@ -96,8 +119,9 @@ git -C "${PREFLIGHT_REPO}" init -q -b main
 git -C "${PREFLIGHT_REPO}" config user.name "k8s-deps-selftest"
 git -C "${PREFLIGHT_REPO}" config user.email "k8s-deps-selftest@gpustack.local"
 git -C "${PREFLIGHT_REPO}" config commit.gpgsign false
+git -C "${PREFLIGHT_REPO}" config gc.auto 0
 git -C "${PREFLIGHT_REPO}" add -A
-git -C "${PREFLIGHT_REPO}" commit -q -m "baseline"
+git -C "${PREFLIGHT_REPO}" -c gc.auto=0 commit -q -m "baseline"
 BASE_SHA="$(git -C "${PREFLIGHT_REPO}" rev-parse HEAD)"
 
 FIXTURE_META="${SCRATCH}/fixture-meta.json"
@@ -377,10 +401,136 @@ else
   fail "preflight-k8s-deps.sh offline discovery fixture test"
 fi
 
-# 1b. Helm v3.22.1 (k8s.io v0.37.1) is skipped in favor of compatible Helm v3.21.5 (k8s.io v0.36.6).
-HELM_LOCKSTEP_REPO="${SCRATCH}/helm-lockstep-repo"
-cp -R "${PREFLIGHT_REPO}" "${HELM_LOCKSTEP_REPO}"
-python3 - "${HELM_LOCKSTEP_REPO}" <<'PY'
+# Prepare shared immutable fixtures for concurrent subtests.
+FIXTURE_STAGE="${SCRATCH}/fixture-stage"
+fast_cp_dir "${FIXTURE_DISCOVERY}" "${FIXTURE_STAGE}"
+mkdir -p "${FIXTURE_STAGE}/deps-cache/staging/k8s.io"
+
+tar_pids=()
+for mod_name in api apimachinery kube-aggregator apiextensions-apiserver; do
+  (
+    GZIP=-1 tar -zcf "${FIXTURE_STAGE}/deps-cache/staging/k8s.io/${mod_name}-${K8S_MOD_NEXT}.tar.gz" \
+      --exclude='_VERSION_' \
+      -C "${ROOT_DIR}/staging/k8s.io/${mod_name}" .
+  ) &
+  tar_pids+=("$!")
+done
+# Seed unpatched code-generator source once so hack/staging/k8s.io/code-generator/001_enhanced.patch applies cleanly.
+(
+  cg_tmp="${SCRATCH}/cg-unpatched"
+  mkdir -p "${cg_tmp}"
+  fast_cp_dir "${ROOT_DIR}/staging/k8s.io/code-generator/." "${cg_tmp}/"
+  rm -f "${cg_tmp}/_VERSION_"
+  (cd "${cg_tmp}" && patch -p1 -R --silent < "${ROOT_DIR}/hack/staging/k8s.io/code-generator/001_enhanced.patch")
+  GZIP=-1 tar -zcf "${FIXTURE_STAGE}/deps-cache/staging/k8s.io/code-generator-${K8S_MOD_NEXT}.tar.gz" -C "${cg_tmp}" .
+) &
+tar_pids+=("$!")
+
+for tpid in "${tar_pids[@]}"; do
+  wait "${tpid}"
+done
+
+CAND_BASE="${SCRATCH}/cand-base"
+mkdir -p "${CAND_BASE}/.auto-sync/scripts" "${CAND_BASE}/.auto-sync/checks" "${CAND_BASE}/.auto-sync/proposals"
+copy_k8s_deps_tree "${ROOT_DIR}" "${CAND_BASE}"
+
+FIXTURE_NOCHANGE="${SCRATCH}/fixture-nochange"
+mkdir -p "${FIXTURE_NOCHANGE}"
+cat > "${FIXTURE_NOCHANGE}/kubernetes-releases.json" <<JSON
+[{"tag_name": "${K8S_REL_CUR}", "prerelease": false, "draft": false}]
+JSON
+cat > "${FIXTURE_NOCHANGE}/helm-releases.json" <<JSON
+[{"tag_name": "v${HELM_CUR}", "prerelease": false, "draft": false}]
+JSON
+cat > "${FIXTURE_NOCHANGE}/kustomize-tags.txt" <<TXT
+0000000000000000000000000000000000000003	refs/tags/kustomize/v${KUST_CUR}
+TXT
+cat > "${FIXTURE_NOCHANGE}/skopeo-releases.json" <<JSON
+[{"tag_name": "v${SKOPEO_CUR}", "prerelease": false, "draft": false}]
+JSON
+cat > "${FIXTURE_NOCHANGE}/vals-releases.json" <<JSON
+[{"tag_name": "v${VALS_CUR}", "prerelease": false, "draft": false}]
+JSON
+cat > "${FIXTURE_NOCHANGE}/ytt-releases.json" <<JSON
+[{"tag_name": "v${YTT_CUR}", "prerelease": false, "draft": false}]
+JSON
+cat > "${FIXTURE_NOCHANGE}/controller-runtime-releases.json" <<JSON
+[{"tag_name": "${CR_CUR}", "prerelease": false, "draft": false}]
+JSON
+cat > "${FIXTURE_NOCHANGE}/kueue-releases.json" <<JSON
+[{"tag_name": "${KUEUE_CUR}", "prerelease": false, "draft": false}]
+JSON
+
+REAL_GO_BIN="$(command -v go)"
+
+run_validator_env_i_isolated() {
+  local cand_dir="$1"
+  local stage_dir="$2"
+  local case_root="$3"
+  local home_dir="${case_root}/env-home"
+  local tmp_dir="${case_root}/tmp"
+  mkdir -p "${home_dir}" "${tmp_dir}"
+  env -i \
+    PATH=/usr/local/bin:/usr/bin:/bin \
+    HOME="${home_dir}" \
+    TMPDIR="${tmp_dir}" \
+    GOMODCACHE="${HOST_GOMODCACHE}" \
+    GOCACHE="${HOST_GOCACHE}" \
+    AUTOSYNC_STAGE_DIR="${stage_dir}" \
+    LOOPWRIGHT_CANDIDATE_DIR="${cand_dir}" \
+    AUTOSYNC_FAST_SELFTEST=true \
+    bash "${cand_dir}/.auto-sync/checks/validate_k8s_deps.sh"
+}
+
+RESULTS_DIR="${SCRATCH}/results"
+mkdir -p "${RESULTS_DIR}"
+CURRENT_CASE_RES=""
+CASE_NAMES=()
+CASE_PIDS=()
+CASE_RCS=()
+ACTIVE_PIDS=()
+ACTIVE_INDICES=()
+MAX_JOBS=4
+
+record_pass() {
+  printf 'PASS\t%s\n' "$1" >> "${CURRENT_CASE_RES}"
+}
+
+record_fail() {
+  local msg="${1//$'\n'/ }"
+  printf 'FAIL\t%s\n' "${msg}" >> "${CURRENT_CASE_RES}"
+}
+
+spawn_case() {
+  local cid="$1"
+  shift
+  if (( ${#ACTIVE_PIDS[@]} >= MAX_JOBS )); then
+    local reaped_idx="${ACTIVE_INDICES[0]}"
+    local reaped_pid="${ACTIVE_PIDS[0]}"
+    local reaped_rc=0
+    wait "${reaped_pid}" || reaped_rc=$?
+    CASE_RCS[reaped_idx]="${reaped_rc}"
+    ACTIVE_PIDS=("${ACTIVE_PIDS[@]:1}")
+    ACTIVE_INDICES=("${ACTIVE_INDICES[@]:1}")
+  fi
+  local next_idx="${#CASE_NAMES[@]}"
+  CASE_NAMES+=("${cid}")
+  (
+    CURRENT_CASE_RES="${RESULTS_DIR}/${cid}.res"
+    "$@"
+  ) &
+  local pid="$!"
+  CASE_PIDS+=("${pid}")
+  CASE_RCS+=("")
+  ACTIVE_PIDS+=("${pid}")
+  ACTIVE_INDICES+=("${next_idx}")
+}
+
+# 1b + 1c. Helm lockstep filter and HTTP retry / atomic cache tests.
+case_1bc() {
+  local helm_lockstep_repo="${SCRATCH}/helm-lockstep-repo"
+  fast_cp_dir "${PREFLIGHT_REPO}" "${helm_lockstep_repo}"
+  python3 - "${helm_lockstep_repo}" <<'PY'
 import os
 import re
 import sys
@@ -409,12 +559,12 @@ gm_txt = re.sub(r'^(\s*helm\.sh/helm/v3\s+)v3\.\d+\.\d+', r'\g<1>v3.21.4', gm_tx
 with open(gomod_p, "w", encoding="utf-8") as f:
     f.write(gm_txt)
 PY
-git -C "${HELM_LOCKSTEP_REPO}" add -A
-git -C "${HELM_LOCKSTEP_REPO}" commit -q --allow-empty -m "pin helm 3.21.4 for lockstep test"
+  git -C "${helm_lockstep_repo}" add -A
+  git -C "${helm_lockstep_repo}" -c gc.auto=0 commit -q --allow-empty -m "pin helm 3.21.4 for lockstep test"
 
-FIXTURE_HELM_LOCKSTEP="${SCRATCH}/fixture-helm-lockstep"
-cp -R "${FIXTURE_DISCOVERY}" "${FIXTURE_HELM_LOCKSTEP}"
-cat > "${FIXTURE_HELM_LOCKSTEP}/helm-releases.json" <<'JSON'
+  local fixture_helm_lockstep="${SCRATCH}/fixture-helm-lockstep"
+  fast_cp_dir "${FIXTURE_DISCOVERY}" "${fixture_helm_lockstep}"
+  cat > "${fixture_helm_lockstep}/helm-releases.json" <<'JSON'
 [
   {"tag_name": "v4.0.0", "prerelease": false, "draft": false},
   {"tag_name": "v3.22.2", "prerelease": false, "draft": false},
@@ -423,14 +573,14 @@ cat > "${FIXTURE_HELM_LOCKSTEP}/helm-releases.json" <<'JSON'
   {"tag_name": "v3.21.4", "prerelease": false, "draft": false}
 ]
 JSON
-cat > "${FIXTURE_HELM_LOCKSTEP}/helm-v3.22.2-go.mod" <<'GOMOD'
+  cat > "${fixture_helm_lockstep}/helm-v3.22.2-go.mod" <<'GOMOD'
 module helm.sh/helm/v3
 
 go 1.24.0
 
 require k8s.io/api v1.0.0
 GOMOD
-cat > "${FIXTURE_HELM_LOCKSTEP}/helm-v3.22.1-go.mod" <<'GOMOD'
+  cat > "${fixture_helm_lockstep}/helm-v3.22.1-go.mod" <<'GOMOD'
 module helm.sh/helm/v3
 
 go 1.24.0
@@ -440,7 +590,7 @@ require (
 	k8s.io/client-go v0.37.1 // max(api, client-go) must select 0.37
 )
 GOMOD
-cat > "${FIXTURE_HELM_LOCKSTEP}/helm-v3.21.5-go.mod" <<'GOMOD'
+  cat > "${fixture_helm_lockstep}/helm-v3.21.5-go.mod" <<'GOMOD'
 module helm.sh/helm/v3
 
 go 1.24.0
@@ -457,18 +607,18 @@ require (
 )
 GOMOD
 
-STAGE_HELM_LOCKSTEP="${SCRATCH}/stage-helm-lockstep/k8s-deps"
-HELM_LOCKSTEP_ERR="${SCRATCH}/helm-lockstep.stderr"
-if (
-  cd "${HELM_LOCKSTEP_REPO}" && \
-  AUTOSYNC_K8S_DEPS_FIXTURE_DIR="${FIXTURE_HELM_LOCKSTEP}" \
-  AUTOSYNC_SKIP_GO_MOD_DOWNLOAD=true \
-  AUTOSYNC_SKIP_SOURCE_REVISION=true \
-  GOMODCACHE="${HOST_GOMODCACHE}" \
-  GOCACHE="${HOST_GOCACHE}" \
-  bash "${HELM_LOCKSTEP_REPO}/.auto-sync/scripts/preflight-k8s-deps.sh" "${STAGE_HELM_LOCKSTEP}" >/dev/null 2>"${HELM_LOCKSTEP_ERR}"
-) && \
-python3 - "${STAGE_HELM_LOCKSTEP}" "${HELM_LOCKSTEP_ERR}" <<'PY'
+  local stage_helm_lockstep="${SCRATCH}/stage-helm-lockstep/k8s-deps"
+  local helm_lockstep_err="${SCRATCH}/helm-lockstep.stderr"
+  if (
+    cd "${helm_lockstep_repo}" && \
+    AUTOSYNC_K8S_DEPS_FIXTURE_DIR="${fixture_helm_lockstep}" \
+    AUTOSYNC_SKIP_GO_MOD_DOWNLOAD=true \
+    AUTOSYNC_SKIP_SOURCE_REVISION=true \
+    GOMODCACHE="${HOST_GOMODCACHE}" \
+    GOCACHE="${HOST_GOCACHE}" \
+    bash "${helm_lockstep_repo}/.auto-sync/scripts/preflight-k8s-deps.sh" "${stage_helm_lockstep}" >/dev/null 2>"${helm_lockstep_err}"
+  ) && \
+  python3 - "${stage_helm_lockstep}" "${helm_lockstep_err}" <<'PY'
 import json
 import os
 import re
@@ -494,18 +644,17 @@ assert "skipping Helm v3.22.2" in err_txt, err_txt
 assert "skipping Helm v3.22.1" in err_txt, err_txt
 assert not re.search(r"\.go:", err_txt), err_txt
 PY
-then
-  pass "preflight-k8s-deps.sh skips Helm v3.22.1 (k8s.io v0.37.1) and selects compatible Helm v3.21.5"
-else
-  fail "preflight-k8s-deps.sh Helm k8s.io minor lockstep filter"
-fi
+  then
+    record_pass "preflight-k8s-deps.sh skips Helm v3.22.1 (k8s.io v0.37.1) and selects compatible Helm v3.21.5"
+  else
+    record_fail "preflight-k8s-deps.sh Helm k8s.io minor lockstep filter"
+  fi
 
-# 1c. Helm go.mod HTTP retry, fetch_error diagnostics, atomic cache write, and poisoned cache recovery.
-STAGE_HELM_HTTP="${SCRATCH}/stage-helm-http/k8s-deps"
-mkdir -p "${STAGE_HELM_HTTP}/discovery"
-printf '<html>stale poisoned cache</html>\n' > "${STAGE_HELM_HTTP}/discovery/helm-v3.21.5-go.mod"
-HELM_HTTP_ERR="${SCRATCH}/helm-http.stderr"
-if python3 - "${HELM_LOCKSTEP_REPO}" "${FIXTURE_HELM_LOCKSTEP}" "${STAGE_HELM_HTTP}" "${HELM_HTTP_ERR}" "${HOST_GOMODCACHE}" "${HOST_GOCACHE}" <<'PY'
+  local stage_helm_http="${SCRATCH}/stage-helm-http/k8s-deps"
+  mkdir -p "${stage_helm_http}/discovery"
+  printf '<html>stale poisoned cache</html>\n' > "${stage_helm_http}/discovery/helm-v3.21.5-go.mod"
+  local helm_http_err="${SCRATCH}/helm-http.stderr"
+  if python3 - "${helm_lockstep_repo}" "${fixture_helm_lockstep}" "${stage_helm_http}" "${helm_http_err}" "${HOST_GOMODCACHE}" "${HOST_GOCACHE}" <<'PY'
 import http.server
 import json
 import os
@@ -592,46 +741,36 @@ with open(err_path, "r", encoding="utf-8") as f:
 assert "failed to fetch Helm v3.22.2 go.mod after retries" in err_txt, err_txt
 assert "failed to fetch Helm v3.22.1 go.mod after retries" in err_txt, err_txt
 PY
-then
-  pass "preflight-k8s-deps.sh retries transient Helm go.mod fetches, avoids cache poisoning, and records fetch_error"
-else
-  fail "preflight-k8s-deps.sh Helm go.mod retry and atomic cache"
-fi
+  then
+    record_pass "preflight-k8s-deps.sh retries transient Helm go.mod fetches, avoids cache poisoning, and records fetch_error"
+  else
+    record_fail "preflight-k8s-deps.sh Helm go.mod retry and atomic cache"
+  fi
+}
 
 # 2. Offline preflight-k8s-deps.sh detached source_revision test via cached mod_staging tarballs.
-FIXTURE_STAGE="${SCRATCH}/fixture-stage"
-cp -R "${FIXTURE_DISCOVERY}" "${FIXTURE_STAGE}"
-mkdir -p "${FIXTURE_STAGE}/deps-cache/staging/k8s.io"
+case_2() {
+  local repo_2="${SCRATCH}/repo-2"
+  fast_cp_dir "${PREFLIGHT_REPO}" "${repo_2}"
+  local stage_src_rev="${SCRATCH}/stage-srcrev/k8s-deps"
+  local gha_src_rev="${SCRATCH}/gha-srcrev.txt"
+  local tmp_2="${SCRATCH}/tmp-2"
+  mkdir -p "${tmp_2}"
+  : > "${gha_src_rev}"
 
-for mod_name in code-generator api apimachinery kube-aggregator apiextensions-apiserver; do
-  tar -zcf "${FIXTURE_STAGE}/deps-cache/staging/k8s.io/${mod_name}-${K8S_MOD_NEXT}.tar.gz" \
-    --exclude='_VERSION_' \
-    -C "${ROOT_DIR}/staging/k8s.io/${mod_name}" .
-done
-# Seed unpatched code-generator source so hack/staging/k8s.io/code-generator/001_enhanced.patch applies cleanly.
-rm -f "${FIXTURE_STAGE}/deps-cache/staging/k8s.io/code-generator-${K8S_MOD_NEXT}.tar.gz"
-CG_TMP="${SCRATCH}/cg-unpatched"
-mkdir -p "${CG_TMP}"
-cp -R "${ROOT_DIR}/staging/k8s.io/code-generator/." "${CG_TMP}/"
-rm -f "${CG_TMP}/_VERSION_"
-(cd "${CG_TMP}" && patch -p1 -R --silent < "${ROOT_DIR}/hack/staging/k8s.io/code-generator/001_enhanced.patch")
-tar -zcf "${FIXTURE_STAGE}/deps-cache/staging/k8s.io/code-generator-${K8S_MOD_NEXT}.tar.gz" -C "${CG_TMP}" .
-
-STAGE_SRC_REV="${SCRATCH}/stage-srcrev/k8s-deps"
-GHA_SRC_REV="${SCRATCH}/gha-srcrev.txt"
-: > "${GHA_SRC_REV}"
-
-if (
-  cd "${PREFLIGHT_REPO}" && \
-  AUTOSYNC_K8S_DEPS_FIXTURE_DIR="${FIXTURE_STAGE}" \
-  AUTOSYNC_SKIP_GO_MOD_DOWNLOAD=true \
-  AUTOSYNC_SKIP_GENERATE=true \
-  GOMODCACHE="${HOST_GOMODCACHE}" \
-  GOCACHE="${HOST_GOCACHE}" \
-  GITHUB_OUTPUT="${GHA_SRC_REV}" \
-  bash "${PREFLIGHT_REPO}/.auto-sync/scripts/preflight-k8s-deps.sh" "${STAGE_SRC_REV}" >/dev/null
-) && \
-SRC_REV="$(python3 - "${STAGE_SRC_REV}" "${BASE_SHA}" <<'PY'
+  local src_rev=""
+  if (
+    cd "${repo_2}" && \
+    TMPDIR="${tmp_2}" \
+    AUTOSYNC_K8S_DEPS_FIXTURE_DIR="${FIXTURE_STAGE}" \
+    AUTOSYNC_SKIP_GO_MOD_DOWNLOAD=true \
+    AUTOSYNC_SKIP_GENERATE=true \
+    GOMODCACHE="${HOST_GOMODCACHE}" \
+    GOCACHE="${HOST_GOCACHE}" \
+    GITHUB_OUTPUT="${gha_src_rev}" \
+    bash "${repo_2}/.auto-sync/scripts/preflight-k8s-deps.sh" "${stage_src_rev}" >/dev/null
+  ) && \
+  src_rev="$(python3 - "${stage_src_rev}" "${BASE_SHA}" <<'PY'
 import json
 import os
 import sys
@@ -644,44 +783,55 @@ assert report["patch_clean"] is True, report
 assert report["staging_updated"] is True, report
 print(report["source_revision"])
 PY
-)" && \
-[[ -n "${SRC_REV}" && "${SRC_REV}" != "${BASE_SHA}" ]] && \
-grep -q "kubernetes/api ${K8S_MOD_NEXT}" <<<"$(git -C "${PREFLIGHT_REPO}" show "${SRC_REV}:hack/deps.sh")" && \
-[[ "$(git -C "${PREFLIGHT_REPO}" show "${SRC_REV}:staging/k8s.io/api/_VERSION_")" == "${K8S_MOD_NEXT}" ]] && \
-grep -q '100644 blob .*\.auto-sync/\.stage/k8s-deps/k8s-deps-preflight-report\.json$' <<<"$(git -C "${PREFLIGHT_REPO}" ls-tree -r "${SRC_REV}" .auto-sync/.stage/k8s-deps)" && \
-grep -q '100644 blob .*\.auto-sync/\.stage/k8s-deps/upstream-records\.json$' <<<"$(git -C "${PREFLIGHT_REPO}" ls-tree -r "${SRC_REV}" .auto-sync/.stage/k8s-deps)" && \
-! grep -q '^120000 ' <<<"$(git -C "${PREFLIGHT_REPO}" ls-tree -r "${SRC_REV}" .auto-sync/.stage/k8s-deps)" && \
-[[ -z "$(git -C "${PREFLIGHT_REPO}" status --porcelain)" ]] && \
-[[ "$(git -C "${PREFLIGHT_REPO}" rev-parse HEAD)" == "${BASE_SHA}" ]] && \
-[[ "$(git -C "${PREFLIGHT_REPO}" rev-parse refs/heads/main)" == "${BASE_SHA}" ]]; then
-  pass "preflight-k8s-deps.sh stages mod_staging and .auto-sync/.stage/k8s-deps onto detached source_revision while preserving main"
-else
-  fail "preflight-k8s-deps.sh detached source_revision staging"
-fi
+  )" && \
+  [[ -n "${src_rev}" && "${src_rev}" != "${BASE_SHA}" ]] && \
+  grep -q "kubernetes/api ${K8S_MOD_NEXT}" <<<"$(git -C "${repo_2}" show "${src_rev}:hack/deps.sh")" && \
+  [[ "$(git -C "${repo_2}" show "${src_rev}:staging/k8s.io/api/_VERSION_")" == "${K8S_MOD_NEXT}" ]] && \
+  grep -q '100644 blob .*\.auto-sync/\.stage/k8s-deps/k8s-deps-preflight-report\.json$' <<<"$(git -C "${repo_2}" ls-tree -r "${src_rev}" .auto-sync/.stage/k8s-deps)" && \
+  grep -q '100644 blob .*\.auto-sync/\.stage/k8s-deps/upstream-records\.json$' <<<"$(git -C "${repo_2}" ls-tree -r "${src_rev}" .auto-sync/.stage/k8s-deps)" && \
+  ! grep -q '^120000 ' <<<"$(git -C "${repo_2}" ls-tree -r "${src_rev}" .auto-sync/.stage/k8s-deps)" && \
+  [[ -z "$(git -C "${repo_2}" status --porcelain)" ]] && \
+  [[ "$(git -C "${repo_2}" rev-parse HEAD)" == "${BASE_SHA}" ]] && \
+  [[ "$(git -C "${repo_2}" rev-parse refs/heads/main)" == "${BASE_SHA}" ]]; then
+    record_pass "preflight-k8s-deps.sh stages mod_staging and .auto-sync/.stage/k8s-deps onto detached source_revision while preserving main"
+  else
+    record_fail "preflight-k8s-deps.sh detached source_revision staging"
+  fi
+}
 
-# 2b. Uncommitted local edit in repo_root survives preflight-k8s-deps.sh untouched (I12).
-printf '// local uncommitted edit\n' >> "${PREFLIGHT_REPO}/go.mod"
-STAGE_DIRTY="${SCRATCH}/stage-dirty/k8s-deps"
-if (
-  cd "${PREFLIGHT_REPO}" && \
-  AUTOSYNC_K8S_DEPS_FIXTURE_DIR="${FIXTURE_STAGE}" \
-  AUTOSYNC_SKIP_GO_MOD_DOWNLOAD=true \
-  AUTOSYNC_SKIP_GENERATE=true \
-  GOMODCACHE="${HOST_GOMODCACHE}" \
-  GOCACHE="${HOST_GOCACHE}" \
-  bash "${PREFLIGHT_REPO}/.auto-sync/scripts/preflight-k8s-deps.sh" "${STAGE_DIRTY}" >/dev/null
-) && \
-grep -q '// local uncommitted edit' "${PREFLIGHT_REPO}/go.mod"; then
-  pass "preflight-k8s-deps.sh preserves uncommitted local edits in repo_root"
-else
-  fail "preflight-k8s-deps.sh preserves uncommitted local edits in repo_root"
-fi
-git -C "${PREFLIGHT_REPO}" checkout -- go.mod
+# 2b. Uncommitted local edit in repo_root survives preflight-k8s-deps.sh untouched.
+case_2b() {
+  local repo_2b="${SCRATCH}/repo-2b"
+  fast_cp_dir "${PREFLIGHT_REPO}" "${repo_2b}"
+  printf '// local uncommitted edit\n' >> "${repo_2b}/go.mod"
+  local stage_dirty="${SCRATCH}/stage-dirty/k8s-deps"
+  local tmp_2b="${SCRATCH}/tmp-2b"
+  mkdir -p "${tmp_2b}"
+  if (
+    cd "${repo_2b}" && \
+    TMPDIR="${tmp_2b}" \
+    AUTOSYNC_K8S_DEPS_FIXTURE_DIR="${FIXTURE_STAGE}" \
+    AUTOSYNC_SKIP_GO_MOD_DOWNLOAD=true \
+    AUTOSYNC_SKIP_GENERATE=true \
+    GOMODCACHE="${HOST_GOMODCACHE}" \
+    GOCACHE="${HOST_GOCACHE}" \
+    bash "${repo_2b}/.auto-sync/scripts/preflight-k8s-deps.sh" "${stage_dirty}" >/dev/null
+  ) && \
+  grep -q '// local uncommitted edit' "${repo_2b}/go.mod"; then
+    record_pass "preflight-k8s-deps.sh preserves uncommitted local edits in repo_root"
+  else
+    record_fail "preflight-k8s-deps.sh preserves uncommitted local edits in repo_root"
+  fi
+}
 
-# 2c. Partial upstream tag release / go mod tidy failure degrades gracefully without crashing (I11).
-WRAP_GO_BIN="${SCRATCH}/wrap-go-bin"
-mkdir -p "${WRAP_GO_BIN}"
-cat > "${WRAP_GO_BIN}/go" <<'SH'
+# 2c. Partial upstream tag release / go mod tidy failure degrades gracefully without crashing.
+case_2c() {
+  local repo_2c="${SCRATCH}/repo-2c"
+  fast_cp_dir "${PREFLIGHT_REPO}" "${repo_2c}"
+  local wrap_go_bin="${SCRATCH}/wrap-go-bin"
+  local tmp_2c="${SCRATCH}/tmp-2c"
+  mkdir -p "${wrap_go_bin}" "${tmp_2c}"
+  cat > "${wrap_go_bin}/go" <<'SH'
 #!/usr/bin/env bash
 if [[ "${1:-}" == "mod" && "${2:-}" == "tidy" ]]; then
   echo "api/v1/zz_generated.apiservice.go:17:2: simulated go mod tidy failure: unknown revision" >&2
@@ -696,23 +846,23 @@ if [[ "${1:-}" == "mod" && "${2:-}" == "tidy" ]]; then
 fi
 exec "${REAL_GO_BIN}" "$@"
 SH
-chmod +x "${WRAP_GO_BIN}/go"
-REAL_GO_BIN="$(command -v go)"
-STAGE_FAIL_TIDY="${SCRATCH}/stage-fail-tidy/k8s-deps"
-FAIL_TIDY_ERR="${SCRATCH}/fail-tidy.stderr"
-mkdir -p "${SCRATCH}/stage-fail-tidy/go-mod"
-: > "${SCRATCH}/stage-fail-tidy/go-mod/.warmed"
-if (
-  cd "${PREFLIGHT_REPO}" && \
-  REAL_GO_BIN="${REAL_GO_BIN}" \
-  PATH="${WRAP_GO_BIN}:${PATH}" \
-  AUTOSYNC_K8S_DEPS_FIXTURE_DIR="${FIXTURE_STAGE}" \
-  AUTOSYNC_SKIP_GENERATE=true \
-  GOMODCACHE="${HOST_GOMODCACHE}" \
-  GOCACHE="${HOST_GOCACHE}" \
-  bash "${PREFLIGHT_REPO}/.auto-sync/scripts/preflight-k8s-deps.sh" "${STAGE_FAIL_TIDY}" >/dev/null 2>"${FAIL_TIDY_ERR}"
-) && \
-python3 - "${STAGE_FAIL_TIDY}" "${FAIL_TIDY_ERR}" "${BASE_SHA}" "${FIXTURE_META}" <<'PY'
+  chmod +x "${wrap_go_bin}/go"
+  local stage_fail_tidy="${SCRATCH}/stage-fail-tidy/k8s-deps"
+  local fail_tidy_err="${SCRATCH}/fail-tidy.stderr"
+  mkdir -p "${SCRATCH}/stage-fail-tidy/go-mod"
+  : > "${SCRATCH}/stage-fail-tidy/go-mod/.warmed"
+  if (
+    cd "${repo_2c}" && \
+    TMPDIR="${tmp_2c}" \
+    REAL_GO_BIN="${REAL_GO_BIN}" \
+    PATH="${wrap_go_bin}:${PATH}" \
+    AUTOSYNC_K8S_DEPS_FIXTURE_DIR="${FIXTURE_STAGE}" \
+    AUTOSYNC_SKIP_GENERATE=true \
+    GOMODCACHE="${HOST_GOMODCACHE}" \
+    GOCACHE="${HOST_GOCACHE}" \
+    bash "${repo_2c}/.auto-sync/scripts/preflight-k8s-deps.sh" "${stage_fail_tidy}" >/dev/null 2>"${fail_tidy_err}"
+  ) && \
+  python3 - "${stage_fail_tidy}" "${fail_tidy_err}" "${BASE_SHA}" "${FIXTURE_META}" <<'PY'
 import json
 import os
 import re
@@ -766,16 +916,21 @@ for marker in ("::error", "::warning", "::add-mask", "##[error]", "##[warning]",
 assert ".go@17:2" in err_txt, err_txt
 assert "open api/v1/doc.go@ simulated error" in err_txt, err_txt
 PY
-then
-  pass "preflight-k8s-deps.sh sanitizes .go:<line> errors, holds Go modules up_to_date on tidy failure"
-else
-  fail "preflight-k8s-deps.sh degrades gracefully when go mod tidy fails"
-fi
+  then
+    record_pass "preflight-k8s-deps.sh sanitizes .go:<line> errors, holds Go modules up_to_date on tidy failure"
+  else
+    record_fail "preflight-k8s-deps.sh degrades gracefully when go mod tidy fails"
+  fi
+}
 
 # 2d. When staging fails with both k8s and helm bumped, retry without helm bump resets work_repo completely and succeeds.
-WRAP_GO_HELM_FAIL="${SCRATCH}/wrap-go-helm-fail"
-mkdir -p "${WRAP_GO_HELM_FAIL}"
-cat > "${WRAP_GO_HELM_FAIL}/go" <<'SH'
+case_2d() {
+  local repo_2d="${SCRATCH}/repo-2d"
+  fast_cp_dir "${PREFLIGHT_REPO}" "${repo_2d}"
+  local wrap_go_helm_fail="${SCRATCH}/wrap-go-helm-fail"
+  local tmp_2d="${SCRATCH}/tmp-2d"
+  mkdir -p "${wrap_go_helm_fail}" "${tmp_2d}"
+  cat > "${wrap_go_helm_fail}/go" <<'SH'
 #!/usr/bin/env bash
 if [[ "${1:-}" == "mod" && ( "${2:-}" == "tidy" || "${2:-}" == "download" ) ]]; then
   if [[ -f "go.mod" ]] && grep -q "helm.sh/helm/v3 v${FAIL_HELM_NEXT}" go.mod; then
@@ -788,22 +943,24 @@ if [[ "${1:-}" == "mod" && ( "${2:-}" == "tidy" || "${2:-}" == "download" ) ]]; 
 fi
 exec "${REAL_GO_BIN}" "$@"
 SH
-chmod +x "${WRAP_GO_HELM_FAIL}/go"
-STAGE_HELM_FB="${SCRATCH}/stage-helm-fb/k8s-deps"
-mkdir -p "${SCRATCH}/stage-helm-fb/go-mod"
-: > "${SCRATCH}/stage-helm-fb/go-mod/.warmed"
-if (
-  cd "${PREFLIGHT_REPO}" && \
-  REAL_GO_BIN="${REAL_GO_BIN}" \
-  FAIL_HELM_NEXT="${HELM_NEXT}" \
-  PATH="${WRAP_GO_HELM_FAIL}:${PATH}" \
-  AUTOSYNC_K8S_DEPS_FIXTURE_DIR="${FIXTURE_STAGE}" \
-  AUTOSYNC_SKIP_GENERATE=true \
-  GOMODCACHE="${HOST_GOMODCACHE}" \
-  GOCACHE="${HOST_GOCACHE}" \
-  bash "${PREFLIGHT_REPO}/.auto-sync/scripts/preflight-k8s-deps.sh" "${STAGE_HELM_FB}" >/dev/null 2>&1
-) && \
-FB_REV="$(python3 - "${STAGE_HELM_FB}" "${BASE_SHA}" "${FIXTURE_META}" <<'PY'
+  chmod +x "${wrap_go_helm_fail}/go"
+  local stage_helm_fb="${SCRATCH}/stage-helm-fb/k8s-deps"
+  mkdir -p "${SCRATCH}/stage-helm-fb/go-mod"
+  : > "${SCRATCH}/stage-helm-fb/go-mod/.warmed"
+  local fb_rev=""
+  if (
+    cd "${repo_2d}" && \
+    TMPDIR="${tmp_2d}" \
+    REAL_GO_BIN="${REAL_GO_BIN}" \
+    FAIL_HELM_NEXT="${HELM_NEXT}" \
+    PATH="${wrap_go_helm_fail}:${PATH}" \
+    AUTOSYNC_K8S_DEPS_FIXTURE_DIR="${FIXTURE_STAGE}" \
+    AUTOSYNC_SKIP_GENERATE=true \
+    GOMODCACHE="${HOST_GOMODCACHE}" \
+    GOCACHE="${HOST_GOCACHE}" \
+    bash "${repo_2d}/.auto-sync/scripts/preflight-k8s-deps.sh" "${stage_helm_fb}" >/dev/null 2>&1
+  ) && \
+  fb_rev="$(python3 - "${stage_helm_fb}" "${BASE_SHA}" "${FIXTURE_META}" <<'PY'
 import json
 import os
 import sys
@@ -829,84 +986,66 @@ assert by_id["helm-cli"]["status"] == "up_to_date", by_id["helm-cli"]
 assert by_id["helm-cli"]["version"] == f"v{meta['helm_cur']}", by_id["helm-cli"]
 print(rep["source_revision"])
 PY
-)" && \
-grep -q "k8s.io/api ${K8S_MOD_NEXT}" <<<"$(git -C "${PREFLIGHT_REPO}" show "${FB_REV}:go.mod")" && \
-grep -q "helm.sh/helm/v3 v${HELM_CUR}" <<<"$(git -C "${PREFLIGHT_REPO}" show "${FB_REV}:go.mod")" && \
-! git -C "${PREFLIGHT_REPO}" cat-file -e "${FB_REV}:staging/k8s.io/api/dirty_from_attempt1.txt" 2>/dev/null; then
-  pass "preflight-k8s-deps.sh retries without helm bump and stages k8s update cleanly"
-else
-  fail "preflight-k8s-deps.sh helm fallback retry"
-fi
+  )" && \
+  grep -q "k8s.io/api ${K8S_MOD_NEXT}" <<<"$(git -C "${repo_2d}" show "${fb_rev}:go.mod")" && \
+  grep -q "helm.sh/helm/v3 v${HELM_CUR}" <<<"$(git -C "${repo_2d}" show "${fb_rev}:go.mod")" && \
+  ! git -C "${repo_2d}" cat-file -e "${fb_rev}:staging/k8s.io/api/dirty_from_attempt1.txt" 2>/dev/null; then
+    record_pass "preflight-k8s-deps.sh retries without helm bump and stages k8s update cleanly"
+  else
+    record_fail "preflight-k8s-deps.sh helm fallback retry"
+  fi
+}
 
-# 2e. Gitless tar-unpacked work_repo copy passes hack/check/agents-shell.sh after ensure_ephemeral_git and cleans up .git.
-WORK_GITLESS="${SCRATCH}/work-repo-gitless/gpustack.ai/gpustack"
-mkdir -p "${WORK_GITLESS}"
-tar --exclude='.git' -cf - -C "${PREFLIGHT_REPO}" . | tar -xf - -C "${WORK_GITLESS}"
-SC_FOR_WORK="${SHELLCHECK_BIN:-}"
-if [[ -z "${SC_FOR_WORK}" && -x "${ROOT_DIR}/.sbin/shellcheck" ]]; then
-  SC_FOR_WORK="${ROOT_DIR}/.sbin/shellcheck"
-fi
-if [[ -z "${SC_FOR_WORK}" ]]; then
-  SC_FOR_WORK="$(type -P shellcheck 2>/dev/null || true)"
-fi
-if [[ -z "${SC_FOR_WORK}" ]]; then
-  SC_FOR_WORK="${SCRATCH}/stub-shellcheck.sh"
-  printf '#!/usr/bin/env bash\nexit 0\n' > "${SC_FOR_WORK}"
-  chmod +x "${SC_FOR_WORK}"
-fi
-pre_rc=0
-SHELLCHECK_BIN="${SC_FOR_WORK}" bash "${ROOT_DIR}/hack/check/agents-shell.sh" "${WORK_GITLESS}" >/dev/null 2>&1 || pre_rc=$?
-ensure_rc=0
-(
-  # shellcheck source=lib.sh
-  # shellcheck disable=SC1091
-  source "${ROOT_DIR}/.auto-sync/checks/lib.sh"
-  autosync::ensure_ephemeral_git "${WORK_GITLESS}"
-) || ensure_rc=$?
-post_rc=0
-SHELLCHECK_BIN="${SC_FOR_WORK}" bash "${ROOT_DIR}/hack/check/agents-shell.sh" "${WORK_GITLESS}" >/dev/null 2>&1 || post_rc=$?
-cleanup_rc=0
-(
-  # shellcheck source=lib.sh
-  # shellcheck disable=SC1091
-  source "${ROOT_DIR}/.auto-sync/checks/lib.sh"
-  autosync::cleanup_ephemeral_git "${WORK_GITLESS}"
-) || cleanup_rc=$?
-# shellcheck disable=SC2016
-if (( pre_rc == 2 && ensure_rc == 0 && post_rc == 0 && cleanup_rc == 0 )) && [[ ! -e "${WORK_GITLESS}/.git" ]] && \
-   grep -qF 'autosync::ensure_ephemeral_git "${work_repo}"' "${PREFLIGHT_SCRIPT}" && \
-   grep -qF 'autosync::cleanup_ephemeral_git "${work_repo}"' "${PREFLIGHT_SCRIPT}"; then
-  pass "ensure_ephemeral_git on gitless work_repo copy lets agents-shell.sh succeed (rc=0) and cleans up .git"
-else
-  fail "ensure_ephemeral_git on gitless work_repo copy (pre_rc=${pre_rc}, ensure_rc=${ensure_rc}, post_rc=${post_rc}, cleanup_rc=${cleanup_rc})"
-fi
-
-# 3. Gitless env -i validate_k8s_deps.sh tests (AUTOSYNC_FAST_SELFTEST=true).
-CAND_BASE="${SCRATCH}/cand-base"
-mkdir -p "${CAND_BASE}/.auto-sync/scripts" "${CAND_BASE}/.auto-sync/checks" "${CAND_BASE}/.auto-sync/proposals"
-copy_k8s_deps_tree "${ROOT_DIR}" "${CAND_BASE}"
-
-run_validator_env_i() {
-  local cand_dir="$1"
-  local stage_dir="$2"
-  local home_dir="${SCRATCH}/env-home"
-  mkdir -p "${home_dir}"
-  env -i \
-    PATH=/usr/local/bin:/usr/bin:/bin \
-    HOME="${home_dir}" \
-    TMPDIR="${SCRATCH}" \
-    GOMODCACHE="${HOST_GOMODCACHE}" \
-    GOCACHE="${HOST_GOCACHE}" \
-    AUTOSYNC_STAGE_DIR="${stage_dir}" \
-    LOOPWRIGHT_CANDIDATE_DIR="${cand_dir}" \
-    AUTOSYNC_FAST_SELFTEST=true \
-    bash "${cand_dir}/.auto-sync/checks/validate_k8s_deps.sh"
+# 2e. Gitless work_repo copy passes hack/check/agents-shell.sh after ensure_ephemeral_git and cleans up .git.
+case_2e() {
+  local work_gitless="${SCRATCH}/work-repo-gitless/gpustack.ai/gpustack"
+  mkdir -p "${SCRATCH}/work-repo-gitless/gpustack.ai"
+  fast_cp_dir "${CAND_BASE}" "${work_gitless}"
+  local sc_for_work="${SHELLCHECK_BIN:-}"
+  if [[ -z "${sc_for_work}" && -x "${ROOT_DIR}/.sbin/shellcheck" ]]; then
+    sc_for_work="${ROOT_DIR}/.sbin/shellcheck"
+  fi
+  if [[ -z "${sc_for_work}" ]]; then
+    sc_for_work="$(type -P shellcheck 2>/dev/null || true)"
+  fi
+  if [[ -z "${sc_for_work}" ]]; then
+    sc_for_work="${SCRATCH}/stub-shellcheck.sh"
+    printf '#!/usr/bin/env bash\nexit 0\n' > "${sc_for_work}"
+    chmod +x "${sc_for_work}"
+  fi
+  local pre_rc=0
+  SHELLCHECK_BIN="${sc_for_work}" bash "${ROOT_DIR}/hack/check/agents-shell.sh" "${work_gitless}" >/dev/null 2>&1 || pre_rc=$?
+  local ensure_rc=0
+  (
+    # shellcheck source=lib.sh
+    # shellcheck disable=SC1091
+    source "${ROOT_DIR}/.auto-sync/checks/lib.sh"
+    autosync::ensure_ephemeral_git "${work_gitless}"
+  ) || ensure_rc=$?
+  local post_rc=0
+  SHELLCHECK_BIN="${sc_for_work}" bash "${ROOT_DIR}/hack/check/agents-shell.sh" "${work_gitless}" >/dev/null 2>&1 || post_rc=$?
+  local cleanup_rc=0
+  (
+    # shellcheck source=lib.sh
+    # shellcheck disable=SC1091
+    source "${ROOT_DIR}/.auto-sync/checks/lib.sh"
+    autosync::cleanup_ephemeral_git "${work_gitless}"
+  ) || cleanup_rc=$?
+  # shellcheck disable=SC2016
+  if (( pre_rc == 2 && ensure_rc == 0 && post_rc == 0 && cleanup_rc == 0 )) && [[ ! -e "${work_gitless}/.git" ]] && \
+     grep -qF 'autosync::ensure_ephemeral_git "${work_repo}"' "${PREFLIGHT_SCRIPT}" && \
+     grep -qF 'autosync::cleanup_ephemeral_git "${work_repo}"' "${PREFLIGHT_SCRIPT}"; then
+    record_pass "ensure_ephemeral_git on gitless work_repo copy lets agents-shell.sh succeed (rc=0) and cleans up .git"
+  else
+    record_fail "ensure_ephemeral_git on gitless work_repo copy (pre_rc=${pre_rc}, ensure_rc=${ensure_rc}, post_rc=${post_rc}, cleanup_rc=${cleanup_rc})"
+  fi
 }
 
 # 3a. Positive case: bumping VALS_VERSION in pack/gpustack-operator/Dockerfile.
-CAND_POS="${SCRATCH}/cand-pos"
-cp -R "${CAND_BASE}" "${CAND_POS}"
-python3 - "${CAND_BASE}/pack/gpustack-operator/Dockerfile" "${CAND_POS}/pack/gpustack-operator/Dockerfile" "${VALS_CUR}" "${VALS_NEXT}" <<'PY'
+case_3a() {
+  local cand_pos="${SCRATCH}/cand-pos"
+  fast_cp_dir "${CAND_BASE}" "${cand_pos}"
+  python3 - "${CAND_BASE}/pack/gpustack-operator/Dockerfile" "${cand_pos}/pack/gpustack-operator/Dockerfile" "${VALS_CUR}" "${VALS_NEXT}" <<'PY'
 import re
 import sys
 src, dst, v_cur, v_next = sys.argv[1:5]
@@ -917,7 +1056,7 @@ assert out != txt, "failed to bump VALS_VERSION"
 with open(dst, "w", encoding="utf-8") as f:
     f.write(out)
 PY
-python3 - "${CAND_POS}/.auto-sync/proposals/k8s-deps.json" "${VALS_NEXT}" <<'PY'
+  python3 - "${cand_pos}/.auto-sync/proposals/k8s-deps.json" "${VALS_NEXT}" <<'PY'
 import json
 import sys
 
@@ -929,35 +1068,38 @@ with open(p, "w", encoding="utf-8") as f:
     json.dump(doc, f, indent=2)
     f.write("\n")
 PY
-
-if run_validator_env_i "${CAND_POS}" "${STAGE_DISC}" >/dev/null 2>&1 && \
-   [[ ! -e "${CAND_POS}/.git" ]] && [[ ! -e "${CAND_POS}/.sbin" ]]; then
-  pass "validate_k8s_deps.sh positive VALS_VERSION bump passes guards, upgrade-compat, and toolpins-selftest"
-else
-  fail "validate_k8s_deps.sh positive VALS_VERSION bump"
-fi
+  if run_validator_env_i_isolated "${cand_pos}" "${STAGE_DISC}" "${SCRATCH}/case-3a" >/dev/null 2>&1 && \
+     [[ ! -e "${cand_pos}/.git" ]] && [[ ! -e "${cand_pos}/.sbin" ]]; then
+    record_pass "validate_k8s_deps.sh positive VALS_VERSION bump passes guards, upgrade-compat, and toolpins-selftest"
+  else
+    record_fail "validate_k8s_deps.sh positive VALS_VERSION bump"
+  fi
+}
 
 # 3b. Negative case 1: mutating LIB_HAMI_CORE_COMMIT in pack/gpustack-operator/Dockerfile.
-CAND_NEG1="${SCRATCH}/cand-neg1"
-cp -R "${CAND_BASE}" "${CAND_NEG1}"
-sed 's/^ARG LIB_HAMI_CORE_COMMIT="[^"]*"$/ARG LIB_HAMI_CORE_COMMIT="1111111111111111111111111111111111111111"/' \
-  "${CAND_BASE}/pack/gpustack-operator/Dockerfile" > "${CAND_NEG1}/pack/gpustack-operator/Dockerfile"
-if cmp -s "${CAND_BASE}/pack/gpustack-operator/Dockerfile" "${CAND_NEG1}/pack/gpustack-operator/Dockerfile"; then
-  fail "negative test 3b failed to mutate LIB_HAMI_CORE_COMMIT"
-fi
-
-neg1_err=""
-if ! neg1_err="$(run_validator_env_i "${CAND_NEG1}" "${STAGE_DISC}" 2>&1)" && \
-   [[ ! -e "${CAND_NEG1}/.git" ]]; then
-  pass "validate_k8s_deps.sh fails closed on LIB_HAMI_CORE_COMMIT mutation in Dockerfile"
-else
-  fail "validate_k8s_deps.sh fails closed on LIB_HAMI_CORE_COMMIT mutation (${neg1_err})"
-fi
+case_3b() {
+  local cand_neg1="${SCRATCH}/cand-neg1"
+  fast_cp_dir "${CAND_BASE}" "${cand_neg1}"
+  sed 's/^ARG LIB_HAMI_CORE_COMMIT="[^"]*"$/ARG LIB_HAMI_CORE_COMMIT="1111111111111111111111111111111111111111"/' \
+    "${CAND_BASE}/pack/gpustack-operator/Dockerfile" > "${cand_neg1}/pack/gpustack-operator/Dockerfile"
+  if cmp -s "${CAND_BASE}/pack/gpustack-operator/Dockerfile" "${cand_neg1}/pack/gpustack-operator/Dockerfile"; then
+    record_fail "negative test 3b failed to mutate LIB_HAMI_CORE_COMMIT"
+    return
+  fi
+  local neg1_err=""
+  if ! neg1_err="$(run_validator_env_i_isolated "${cand_neg1}" "${STAGE_DISC}" "${SCRATCH}/case-3b" 2>&1)" && \
+     [[ ! -e "${cand_neg1}/.git" ]]; then
+    record_pass "validate_k8s_deps.sh fails closed on LIB_HAMI_CORE_COMMIT mutation in Dockerfile"
+  else
+    record_fail "validate_k8s_deps.sh fails closed on LIB_HAMI_CORE_COMMIT mutation (${neg1_err})"
+  fi
+}
 
 # 3c. Negative case 2: mutating chart_staging() in hack/deps.sh.
-CAND_NEG2="${SCRATCH}/cand-neg2"
-cp -R "${CAND_BASE}" "${CAND_NEG2}"
-python3 - "${CAND_BASE}/hack/deps.sh" "${CAND_NEG2}/hack/deps.sh" "${FIRST_CHART_NAME}" "${FIRST_CHART_VER}" "${FIRST_CHART_VER_NEXT}" <<'PY'
+case_3c() {
+  local cand_neg2="${SCRATCH}/cand-neg2"
+  fast_cp_dir "${CAND_BASE}" "${cand_neg2}"
+  python3 - "${CAND_BASE}/hack/deps.sh" "${cand_neg2}/hack/deps.sh" "${FIRST_CHART_NAME}" "${FIRST_CHART_VER}" "${FIRST_CHART_VER_NEXT}" <<'PY'
 import sys
 src, dst, cname, cver, cnext = sys.argv[1:6]
 with open(src, "r", encoding="utf-8") as f:
@@ -969,36 +1111,40 @@ assert out != txt, f"failed to mutate {old_tok} in hack/deps.sh"
 with open(dst, "w", encoding="utf-8") as f:
     f.write(out)
 PY
-
-neg2_err=""
-if ! neg2_err="$(run_validator_env_i "${CAND_NEG2}" "${STAGE_DISC}" 2>&1)" && \
-   [[ ! -e "${CAND_NEG2}/.git" ]]; then
-  pass "validate_k8s_deps.sh fails closed on chart_staging() mutation in hack/deps.sh"
-else
-  fail "validate_k8s_deps.sh fails closed on chart_staging() mutation (${neg2_err})"
-fi
+  local neg2_err=""
+  if ! neg2_err="$(run_validator_env_i_isolated "${cand_neg2}" "${STAGE_DISC}" "${SCRATCH}/case-3c" 2>&1)" && \
+     [[ ! -e "${cand_neg2}/.git" ]]; then
+    record_pass "validate_k8s_deps.sh fails closed on chart_staging() mutation in hack/deps.sh"
+  else
+    record_fail "validate_k8s_deps.sh fails closed on chart_staging() mutation (${neg2_err})"
+  fi
+}
 
 # 3d. Negative case 3: modifying a hand-written .go file under api/v1/.
-CAND_NEG3="${SCRATCH}/cand-neg3"
-cp -R "${CAND_BASE}" "${CAND_NEG3}"
-hand_api_file="$(find "${CAND_NEG3}/api/v1" -maxdepth 1 -type f -name '*.go' ! -name 'zz_generated*' ! -name 'generated.*' | sort | head -n 1)"
-if [[ -z "${hand_api_file}" ]]; then
-  fail "unable to locate hand-written api/v1/*.go file for negative test"
-else
-  printf '\n// illegal hand-written api edit\n' >> "${hand_api_file}"
-  neg3_err=""
-  if ! neg3_err="$(run_validator_env_i "${CAND_NEG3}" "${STAGE_DISC}" 2>&1)" && \
-     [[ ! -e "${CAND_NEG3}/.git" ]]; then
-    pass "validate_k8s_deps.sh fails closed on hand-written api/v1/*.go edit"
-  else
-    fail "validate_k8s_deps.sh fails closed on hand-written api/v1/*.go edit (${neg3_err})"
+case_3d() {
+  local cand_neg3="${SCRATCH}/cand-neg3"
+  fast_cp_dir "${CAND_BASE}" "${cand_neg3}"
+  local hand_api_file
+  hand_api_file="$(find "${cand_neg3}/api/v1" -maxdepth 1 -type f -name '*.go' ! -name 'zz_generated*' ! -name 'generated.*' | sort | head -n 1)"
+  if [[ -z "${hand_api_file}" ]]; then
+    record_fail "unable to locate hand-written api/v1/*.go file for negative test"
+    return
   fi
-fi
+  printf '\n// illegal hand-written api edit\n' >> "${hand_api_file}"
+  local neg3_err=""
+  if ! neg3_err="$(run_validator_env_i_isolated "${cand_neg3}" "${STAGE_DISC}" "${SCRATCH}/case-3d" 2>&1)" && \
+     [[ ! -e "${cand_neg3}/.git" ]]; then
+    record_pass "validate_k8s_deps.sh fails closed on hand-written api/v1/*.go edit"
+  else
+    record_fail "validate_k8s_deps.sh fails closed on hand-written api/v1/*.go edit (${neg3_err})"
+  fi
+}
 
 # 3e. Negative case 4: bumping HELM_VERSION in Dockerfile without updating hack/lib/helm.sh.
-CAND_NEG4="${SCRATCH}/cand-neg4"
-cp -R "${CAND_BASE}" "${CAND_NEG4}"
-python3 - "${CAND_BASE}/pack/gpustack-operator/Dockerfile" "${CAND_NEG4}/pack/gpustack-operator/Dockerfile" "${HELM_CUR}" "${HELM_NEXT}" <<'PY'
+case_3e() {
+  local cand_neg4="${SCRATCH}/cand-neg4"
+  fast_cp_dir "${CAND_BASE}" "${cand_neg4}"
+  python3 - "${CAND_BASE}/pack/gpustack-operator/Dockerfile" "${cand_neg4}/pack/gpustack-operator/Dockerfile" "${HELM_CUR}" "${HELM_NEXT}" <<'PY'
 import re
 import sys
 src, dst, h_cur, h_next = sys.argv[1:5]
@@ -1009,19 +1155,20 @@ assert out != txt, f"failed to mutate HELM_VERSION from {h_cur}"
 with open(dst, "w", encoding="utf-8") as f:
     f.write(out)
 PY
-
-neg4_err=""
-if ! neg4_err="$(run_validator_env_i "${CAND_NEG4}" "${STAGE_DISC}" 2>&1)" && \
-   [[ ! -e "${CAND_NEG4}/.git" ]]; then
-  pass "validate_k8s_deps.sh fails closed on unaligned HELM_VERSION bump in Dockerfile"
-else
-  fail "validate_k8s_deps.sh fails closed on unaligned HELM_VERSION bump (${neg4_err})"
-fi
+  local neg4_err=""
+  if ! neg4_err="$(run_validator_env_i_isolated "${cand_neg4}" "${STAGE_DISC}" "${SCRATCH}/case-3e" 2>&1)" && \
+     [[ ! -e "${cand_neg4}/.git" ]]; then
+    record_pass "validate_k8s_deps.sh fails closed on unaligned HELM_VERSION bump in Dockerfile"
+  else
+    record_fail "validate_k8s_deps.sh fails closed on unaligned HELM_VERSION bump (${neg4_err})"
+  fi
+}
 
 # 3f. Negative case 5: cross-minor K8s jump (k8s.io/api in go.mod) fails closed.
-CAND_NEG5="${SCRATCH}/cand-neg5"
-cp -R "${CAND_BASE}" "${CAND_NEG5}"
-python3 - "${CAND_BASE}/go.mod" "${CAND_NEG5}/go.mod" "${K8S_MOD_CUR}" "${K8S_MOD_CROSS_MINOR}" <<'PY'
+case_3f() {
+  local cand_neg5="${SCRATCH}/cand-neg5"
+  fast_cp_dir "${CAND_BASE}" "${cand_neg5}"
+  python3 - "${CAND_BASE}/go.mod" "${cand_neg5}/go.mod" "${K8S_MOD_CUR}" "${K8S_MOD_CROSS_MINOR}" <<'PY'
 import sys
 src, dst, k_cur, k_cross = sys.argv[1:5]
 with open(src, "r", encoding="utf-8") as f:
@@ -1031,19 +1178,20 @@ assert out != txt, f"failed to mutate k8s.io/api {k_cur}"
 with open(dst, "w", encoding="utf-8") as f:
     f.write(out)
 PY
+  local neg5_err=""
+  if ! neg5_err="$(run_validator_env_i_isolated "${cand_neg5}" "${STAGE_DISC}" "${SCRATCH}/case-3f" 2>&1)" && \
+     [[ ! -e "${cand_neg5}/.git" ]]; then
+    record_pass "validate_k8s_deps.sh fails closed on cross-minor k8s.io/api jump"
+  else
+    record_fail "validate_k8s_deps.sh fails closed on cross-minor k8s.io/api jump (${neg5_err})"
+  fi
+}
 
-neg5_err=""
-if ! neg5_err="$(run_validator_env_i "${CAND_NEG5}" "${STAGE_DISC}" 2>&1)" && \
-   [[ ! -e "${CAND_NEG5}/.git" ]]; then
-  pass "validate_k8s_deps.sh fails closed on cross-minor k8s.io/api jump"
-else
-  fail "validate_k8s_deps.sh fails closed on cross-minor k8s.io/api jump (${neg5_err})"
-fi
-
-# 3g. Negative case 6: mismatched proposals/k8s-deps.json fails closed (missing/extra/mismatch across all 11 keys).
-CAND_NEG6="${SCRATCH}/cand-neg6"
-cp -R "${CAND_BASE}" "${CAND_NEG6}"
-python3 - "${CAND_BASE}/.auto-sync/proposals/k8s-deps.json" "${CAND_NEG6}/.auto-sync/proposals/k8s-deps.json" <<'PY'
+# 3g. Negative case 6: mismatched proposals/k8s-deps.json fails closed.
+case_3g() {
+  local cand_neg6="${SCRATCH}/cand-neg6"
+  fast_cp_dir "${CAND_BASE}" "${cand_neg6}"
+  python3 - "${CAND_BASE}/.auto-sync/proposals/k8s-deps.json" "${cand_neg6}/.auto-sync/proposals/k8s-deps.json" <<'PY'
 import json
 import sys
 src, dst = sys.argv[1:3]
@@ -1057,19 +1205,20 @@ with open(dst, "w", encoding="utf-8") as f:
     json.dump(doc, f, indent=2)
     f.write("\n")
 PY
+  local neg6_err=""
+  if ! neg6_err="$(run_validator_env_i_isolated "${cand_neg6}" "${STAGE_DISC}" "${SCRATCH}/case-3g" 2>&1)" && \
+     [[ ! -e "${cand_neg6}/.git" ]]; then
+    record_pass "validate_k8s_deps.sh fails closed on mismatched proposals/k8s-deps.json"
+  else
+    record_fail "validate_k8s_deps.sh fails closed on mismatched proposals/k8s-deps.json (${neg6_err})"
+  fi
+}
 
-neg6_err=""
-if ! neg6_err="$(run_validator_env_i "${CAND_NEG6}" "${STAGE_DISC}" 2>&1)" && \
-   [[ ! -e "${CAND_NEG6}/.git" ]]; then
-  pass "validate_k8s_deps.sh fails closed on mismatched proposals/k8s-deps.json"
-else
-  fail "validate_k8s_deps.sh fails closed on mismatched proposals/k8s-deps.json (${neg6_err})"
-fi
-
-# 3h. Negative case 7: mismatched k8s-modules / extra key in proposals/k8s-deps.json fails closed (I4).
-CAND_NEG7="${SCRATCH}/cand-neg7"
-cp -R "${CAND_BASE}" "${CAND_NEG7}"
-python3 - "${CAND_BASE}/.auto-sync/proposals/k8s-deps.json" "${CAND_NEG7}/.auto-sync/proposals/k8s-deps.json" <<'PY'
+# 3h. Negative cases 7 & 8: mismatched k8s-modules / extra key in proposals/k8s-deps.json fail closed.
+case_3h1() {
+  local cand_neg7="${SCRATCH}/cand-neg7"
+  fast_cp_dir "${CAND_BASE}" "${cand_neg7}"
+  python3 - "${CAND_BASE}/.auto-sync/proposals/k8s-deps.json" "${cand_neg7}/.auto-sync/proposals/k8s-deps.json" <<'PY'
 import json
 import sys
 src, dst = sys.argv[1:3]
@@ -1080,17 +1229,19 @@ with open(dst, "w", encoding="utf-8") as f:
     json.dump(doc, f, indent=2)
     f.write("\n")
 PY
-neg7_err=""
-if ! neg7_err="$(run_validator_env_i "${CAND_NEG7}" "${STAGE_DISC}" 2>&1)" && \
-   grep -q "k8s-modules" <<<"${neg7_err}"; then
-  pass "validate_k8s_deps.sh fails closed on mismatched proposals/k8s-deps.json k8s-modules"
-else
-  fail "validate_k8s_deps.sh fails closed on mismatched proposals/k8s-deps.json k8s-modules (${neg7_err})"
-fi
+  local neg7_err=""
+  if ! neg7_err="$(run_validator_env_i_isolated "${cand_neg7}" "${STAGE_DISC}" "${SCRATCH}/case-3h1" 2>&1)" && \
+     grep -q "k8s-modules" <<<"${neg7_err}"; then
+    record_pass "validate_k8s_deps.sh fails closed on mismatched proposals/k8s-deps.json k8s-modules"
+  else
+    record_fail "validate_k8s_deps.sh fails closed on mismatched proposals/k8s-deps.json k8s-modules (${neg7_err})"
+  fi
+}
 
-CAND_NEG8="${SCRATCH}/cand-neg8"
-cp -R "${CAND_BASE}" "${CAND_NEG8}"
-python3 - "${CAND_BASE}/.auto-sync/proposals/k8s-deps.json" "${CAND_NEG8}/.auto-sync/proposals/k8s-deps.json" <<'PY'
+case_3h2() {
+  local cand_neg8="${SCRATCH}/cand-neg8"
+  fast_cp_dir "${CAND_BASE}" "${cand_neg8}"
+  python3 - "${CAND_BASE}/.auto-sync/proposals/k8s-deps.json" "${cand_neg8}/.auto-sync/proposals/k8s-deps.json" <<'PY'
 import json
 import sys
 src, dst = sys.argv[1:3]
@@ -1101,51 +1252,29 @@ with open(dst, "w", encoding="utf-8") as f:
     json.dump(doc, f, indent=2)
     f.write("\n")
 PY
-neg8_err=""
-if ! neg8_err="$(run_validator_env_i "${CAND_NEG8}" "${STAGE_DISC}" 2>&1)" && \
-   grep -q "extra-key" <<<"${neg8_err}"; then
-  pass "validate_k8s_deps.sh fails closed on extra unexpected key in proposals/k8s-deps.json"
-else
-  fail "validate_k8s_deps.sh fails closed on extra unexpected key in proposals/k8s-deps.json (${neg8_err})"
-fi
+  local neg8_err=""
+  if ! neg8_err="$(run_validator_env_i_isolated "${cand_neg8}" "${STAGE_DISC}" "${SCRATCH}/case-3h2" 2>&1)" && \
+     grep -q "extra-key" <<<"${neg8_err}"; then
+    record_pass "validate_k8s_deps.sh fails closed on extra unexpected key in proposals/k8s-deps.json"
+  else
+    record_fail "validate_k8s_deps.sh fails closed on extra unexpected key in proposals/k8s-deps.json (${neg8_err})"
+  fi
+}
 
-# 3i. no_change fixture (all upstreams up_to_date without AUTOSYNC_SKIP_SOURCE_REVISION) keeps source_revision == base_sha.
-FIXTURE_NOCHANGE="${SCRATCH}/fixture-nochange"
-mkdir -p "${FIXTURE_NOCHANGE}"
-cat > "${FIXTURE_NOCHANGE}/kubernetes-releases.json" <<JSON
-[{"tag_name": "${K8S_REL_CUR}", "prerelease": false, "draft": false}]
-JSON
-cat > "${FIXTURE_NOCHANGE}/helm-releases.json" <<JSON
-[{"tag_name": "v${HELM_CUR}", "prerelease": false, "draft": false}]
-JSON
-cat > "${FIXTURE_NOCHANGE}/kustomize-tags.txt" <<TXT
-0000000000000000000000000000000000000003	refs/tags/kustomize/v${KUST_CUR}
-TXT
-cat > "${FIXTURE_NOCHANGE}/skopeo-releases.json" <<JSON
-[{"tag_name": "v${SKOPEO_CUR}", "prerelease": false, "draft": false}]
-JSON
-cat > "${FIXTURE_NOCHANGE}/vals-releases.json" <<JSON
-[{"tag_name": "v${VALS_CUR}", "prerelease": false, "draft": false}]
-JSON
-cat > "${FIXTURE_NOCHANGE}/ytt-releases.json" <<JSON
-[{"tag_name": "v${YTT_CUR}", "prerelease": false, "draft": false}]
-JSON
-cat > "${FIXTURE_NOCHANGE}/controller-runtime-releases.json" <<JSON
-[{"tag_name": "${CR_CUR}", "prerelease": false, "draft": false}]
-JSON
-cat > "${FIXTURE_NOCHANGE}/kueue-releases.json" <<JSON
-[{"tag_name": "${KUEUE_CUR}", "prerelease": false, "draft": false}]
-JSON
-STAGE_NOCHANGE="${SCRATCH}/stage-nochange/k8s-deps"
-if (
-  cd "${PREFLIGHT_REPO}" && \
-  AUTOSYNC_K8S_DEPS_FIXTURE_DIR="${FIXTURE_NOCHANGE}" \
-  AUTOSYNC_SKIP_GO_MOD_DOWNLOAD=true \
-  GOMODCACHE="${HOST_GOMODCACHE}" \
-  GOCACHE="${HOST_GOCACHE}" \
-  bash "${PREFLIGHT_REPO}/.auto-sync/scripts/preflight-k8s-deps.sh" "${STAGE_NOCHANGE}" >/dev/null
-) && \
-python3 - "${STAGE_NOCHANGE}" "${BASE_SHA}" <<'PY'
+# 3i. no_change fixture keeps source_revision == base_sha.
+case_3i() {
+  local repo_3i="${SCRATCH}/repo-3i"
+  fast_cp_dir "${PREFLIGHT_REPO}" "${repo_3i}"
+  local stage_nochange="${SCRATCH}/stage-nochange/k8s-deps"
+  if (
+    cd "${repo_3i}" && \
+    AUTOSYNC_K8S_DEPS_FIXTURE_DIR="${FIXTURE_NOCHANGE}" \
+    AUTOSYNC_SKIP_GO_MOD_DOWNLOAD=true \
+    GOMODCACHE="${HOST_GOMODCACHE}" \
+    GOCACHE="${HOST_GOCACHE}" \
+    bash "${repo_3i}/.auto-sync/scripts/preflight-k8s-deps.sh" "${stage_nochange}" >/dev/null
+  ) && \
+  python3 - "${stage_nochange}" "${BASE_SHA}" <<'PY'
 import json
 import os
 import sys
@@ -1158,11 +1287,173 @@ with open(os.path.join(stage_dir, "k8s-deps-preflight-report.json"), "r", encodi
     rep = json.load(f)
 assert rep["source_revision"] == base_sha, rep
 PY
-then
-  pass "preflight-k8s-deps.sh keeps source_revision == base_sha when all upstreams are up_to_date"
-else
-  fail "preflight-k8s-deps.sh keeps source_revision == base_sha when all upstreams are up_to_date"
+  then
+    record_pass "preflight-k8s-deps.sh keeps source_revision == base_sha when all upstreams are up_to_date"
+  else
+    record_fail "preflight-k8s-deps.sh keeps source_revision == base_sha when all upstreams are up_to_date"
+  fi
+}
+
+# 3j. Regression coverage for offline uv-cache + uv-python + module-path copy failure safety + gc.auto=0.
+case_3j() {
+  local reg_stage="${SCRATCH}/reg-stage/k8s-deps"
+  local reg_cand="${SCRATCH}/reg-cand"
+  local reg_fakebin="${SCRATCH}/reg-fakebin"
+  local reg_empty_home="${SCRATCH}/reg-empty-home"
+  mkdir -p "${reg_stage}/.sbin" "${reg_stage}/uv-cache" "${reg_stage}/uv-python/cpython-3.11" "${reg_cand}/go.mod.dir" "${reg_fakebin}" "${reg_empty_home}"
+  printf 'cached-wheel\n' > "${reg_stage}/uv-cache/wheel.whl"
+  printf 'python-3.11\n' > "${reg_stage}/uv-python/cpython-3.11/python"
+  local reg_tmp="${SCRATCH}/reg-tmp"
+  mkdir -p "${reg_tmp}"
+  if [[ "$(id -u)" -ne 0 ]]; then
+    chmod -R a-w "${reg_stage}/uv-cache" "${reg_stage}/uv-python"
+    # shellcheck disable=SC2016
+    if env -i PATH=/usr/local/bin:/usr/bin:/bin HOME="${reg_empty_home}" TMPDIR="${reg_tmp}" bash -c '
+      source "$1/.auto-sync/checks/lib.sh"
+      autosync::bootstrap_env "$2" "$3"
+      [[ -n "${UV_CACHE_DIR:-}" && "${UV_CACHE_DIR}" != "$2/uv-cache" && -w "${UV_CACHE_DIR}" ]]
+      [[ -f "${UV_CACHE_DIR}/wheel.whl" && -w "${UV_CACHE_DIR}/wheel.whl" && "${UV_OFFLINE:-}" == "1" ]]
+      [[ -n "${UV_PYTHON_INSTALL_DIR:-}" && "${UV_PYTHON_INSTALL_DIR}" != "$2/uv-python" && -w "${UV_PYTHON_INSTALL_DIR}" ]]
+      [[ -f "${UV_PYTHON_INSTALL_DIR}/cpython-3.11/python" && "${UV_PYTHON_PREFERENCE:-}" == "only-managed" ]]
+    ' _ "${ROOT_DIR}" "${reg_stage}" "${reg_cand}"; then
+      record_pass "bootstrap_env copies read-only uv-cache and uv-python writable under empty HOME"
+    else
+      record_fail "bootstrap_env copies read-only uv-cache and uv-python writable under empty HOME"
+    fi
+    chmod -R u+w "${reg_stage}/uv-cache" "${reg_stage}/uv-python" 2>/dev/null || true
+  else
+    # root ignores permission bits; read-only fallback cannot be exercised
+    chmod -R u+w "${reg_stage}/uv-cache" "${reg_stage}/uv-python" 2>/dev/null || true
+    record_pass "bootstrap_env read-only uv-cache and uv-python fallback skipped as root"
+  fi
+
+  printf 'keep-me\n' > "${reg_cand}/sentinel.txt"
+  local reg_mod_rc=0
+  local reg_mod_err=""
+  # shellcheck disable=SC2016
+  reg_mod_err="$(TMPDIR="${reg_tmp}" bash -c '
+    source "$1"
+    autosync::ensure_ephemeral_git "$2"
+    [[ "$(git -C "$2" config --get gc.auto || true)" == "0" ]]
+    autosync::run_in_module_path_copy "$2" bash -c "rm -f sentinel.txt; exit 9"
+  ' _ "${ROOT_DIR}/.auto-sync/checks/lib.sh" "${reg_cand}" 2>&1)" || reg_mod_rc=$?
+  if (( reg_mod_rc == 9 )) && [[ -f "${reg_cand}/sentinel.txt" ]] && ! grep -q "unbound variable" <<<"${reg_mod_err}"; then
+    record_pass "run_in_module_path_copy preserves target files on command failure and sets gc.auto=0"
+  else
+    record_fail "run_in_module_path_copy preserves target files on command failure (rc=${reg_mod_rc}, err=${reg_mod_err})"
+  fi
+
+  local uv_fail_stage="${SCRATCH}/uv-fail-stage"
+  local uv_fail_repo="${SCRATCH}/uv-fail-repo"
+  mkdir -p "${uv_fail_stage}" "${uv_fail_repo}/model-transfer/python"
+  cat > "${reg_fakebin}/uv" <<'SH'
+#!/usr/bin/env bash
+if [[ -n "${UV_CACHE_DIR:-}" ]]; then
+  mkdir -p "${UV_CACHE_DIR}"
+  : > "${UV_CACHE_DIR}/CACHEDIR.TAG"
 fi
+if [[ -n "${UV_PYTHON_INSTALL_DIR:-}" ]]; then
+  mkdir -p "${UV_PYTHON_INSTALL_DIR}"
+  : > "${UV_PYTHON_INSTALL_DIR}/partial-python"
+fi
+exit 1
+SH
+  chmod +x "${reg_fakebin}/uv"
+  # shellcheck disable=SC2016
+  if bash -c '
+    export PATH="$4:${PATH}"
+    cd "$1"
+    git init -q
+    source "$2/.auto-sync/scripts/lib-preflight.sh"
+    export GOPROXY="https://proxy.golang.org,direct"
+    autosync::preflight::warm_caches "$3" --go-all >/dev/null 2>&1
+    [[ -z "$(ls -A "$3/uv-cache/" 2>/dev/null)" ]]
+    [[ -z "$(ls -A "$3/uv-python/" 2>/dev/null)" ]]
+  ' _ "${uv_fail_repo}" "${ROOT_DIR}" "${uv_fail_stage}" "${reg_fakebin}"; then
+    record_pass "warm_caches leaves uv-cache and uv-python empty when uv fails"
+  else
+    record_fail "warm_caches leaves uv-cache and uv-python empty when uv fails"
+  fi
+}
+
+# 3k. AUTOSYNC_FORCE=true promotes the first up_to_date record to available on no_change fixtures without altering versions.
+case_3k() {
+  local repo_3k="${SCRATCH}/repo-3k"
+  fast_cp_dir "${PREFLIGHT_REPO}" "${repo_3k}"
+  local stage_force="${SCRATCH}/stage-force/k8s-deps"
+  if (
+    cd "${repo_3k}" && \
+    AUTOSYNC_FORCE=true \
+    AUTOSYNC_K8S_DEPS_FIXTURE_DIR="${FIXTURE_NOCHANGE}" \
+    AUTOSYNC_SKIP_GO_MOD_DOWNLOAD=true \
+    GOMODCACHE="${HOST_GOMODCACHE}" \
+    GOCACHE="${HOST_GOCACHE}" \
+    bash "${repo_3k}/.auto-sync/scripts/preflight-k8s-deps.sh" "${stage_force}" >/dev/null
+  ) && \
+  python3 - "${stage_force}" "${BASE_SHA}" <<'PY'
+import json
+import os
+import sys
+
+stage_dir, base_sha = sys.argv[1:3]
+with open(os.path.join(stage_dir, "upstream-records.json"), "r", encoding="utf-8") as f:
+    recs = json.load(f)
+avail = [r for r in recs if r.get("status") == "available"]
+assert len(avail) == 1, recs
+assert "(forced via AUTOSYNC_FORCE=true)" in avail[0].get("reason", ""), avail[0]
+with open(os.path.join(stage_dir, "k8s-deps-preflight-report.json"), "r", encoding="utf-8") as f:
+    rep = json.load(f)
+assert rep["source_revision"] != base_sha, rep
+PY
+  then
+    record_pass "preflight-k8s-deps.sh honors AUTOSYNC_FORCE=true by promoting an up_to_date record and staging source_revision"
+  else
+    record_fail "preflight-k8s-deps.sh AUTOSYNC_FORCE=true promotion"
+  fi
+}
+
+spawn_case "1bc" case_1bc
+spawn_case "2" case_2
+spawn_case "2b" case_2b
+spawn_case "2c" case_2c
+spawn_case "2d" case_2d
+spawn_case "2e" case_2e
+spawn_case "3a" case_3a
+spawn_case "3b" case_3b
+spawn_case "3c" case_3c
+spawn_case "3d" case_3d
+spawn_case "3e" case_3e
+spawn_case "3f" case_3f
+spawn_case "3g" case_3g
+spawn_case "3h1" case_3h1
+spawn_case "3h2" case_3h2
+spawn_case "3i" case_3i
+spawn_case "3j" case_3j
+spawn_case "3k" case_3k
+
+for i in "${!CASE_NAMES[@]}"; do
+  cid="${CASE_NAMES[$i]}"
+  cpid="${CASE_PIDS[$i]}"
+  sub_rc="${CASE_RCS[$i]}"
+  if [[ -z "${sub_rc}" ]]; then
+    sub_rc=0
+    wait "${cpid}" || sub_rc=$?
+  fi
+  res_file="${RESULTS_DIR}/${cid}.res"
+  if [[ -f "${res_file}" ]]; then
+    while IFS=$'\t' read -r kind msg || [[ -n "${kind}" ]]; do
+      [[ -n "${kind}" ]] || continue
+      if [[ "${kind}" == "PASS" ]]; then
+        pass "${msg}"
+      else
+        fail "${msg}"
+      fi
+    done < "${res_file}"
+  fi
+  if (( sub_rc != 0 )); then
+    fail "subtest ${cid} exited with unexpected status ${sub_rc}"
+  fi
+done
 
 echo
 if (( FAILS > 0 )); then

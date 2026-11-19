@@ -36,9 +36,9 @@ Never reference an unpublished `gpustack/*` container image tag in `pkg/worker/s
     - `.auto-sync/proposals/kv-transfer.json` (`"stage": "recipe_sync"`)
   - Leave `pkg/worker/settings/value.go`, `docs/reference/settings.md`, and `deploy/gpustack-operator/chart/**` untouched.
 - **Stage B (`stage: "tag_promotion"`, `image_published: true`)**:
-  - Host preflight pre-stages promoted tags into `pkg/worker/settings/value.go`, `docs/reference/settings.md`, and `deploy/gpustack-operator/chart/{values.yaml,values.schema.json,README.md}` when `stage: "tag_promotion"` is ready; verify them against `kv-transfer-preflight-report.json` and `image-manifests.json` (confirming `crane manifest` digests exist for the promoted tags).
+  - Host preflight pre-stages promoted tags into `pkg/worker/settings/value.go`, `pkg/worker/settings/value_test.go`, `pkg/worker/controllers/worker/model_deployment_transfer_test.go`, `docs/reference/settings.md`, and `deploy/gpustack-operator/chart/{values.yaml,values.schema.json,README.md.gotmpl,README.md}` when `stage: "tag_promotion"` is ready; verify them against `kv-transfer-preflight-report.json` and `image-manifests.json` (confirming `crane manifest` digests exist for the promoted tags).
   - Update `.auto-sync/proposals/kv-transfer.json`: set `"stage": "tag_promotion"`, and whenever `upstream-records.json` carries `<ver>+stage-b` for an `upstreamId` (`mooncake`, `modelexpress`, or `gpustack-runner`), write that exact `<ver>+stage-b` string into `versions[<upstreamId>]` so open-PR deduplication settles cleanly on subsequent runs.
-  - Do NOT modify any other settings in `value.go` or `settings.md` (such as `ModelDeploymentRouterImage`, `ModelDeploymentRouterProxyImage`, or `ModelDeploymentRoutingSidecarImage`) or any other keys in `deploy/gpustack-operator/chart/values.yaml`.
+  - Do NOT modify any other settings in `value.go`, `value_test.go`, or `settings.md` (such as `ModelDeploymentRouterImage`, `ModelDeploymentRouterProxyImage`, or `ModelDeploymentRoutingSidecarImage`) or any other keys in `deploy/gpustack-operator/chart/values.yaml`.
 
 ## 2. Five-Block `MOONCAKE_VERSION` `case` Audit
 

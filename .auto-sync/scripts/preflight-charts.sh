@@ -24,22 +24,7 @@ autosync::preflight::snapshot_baselines "${STAGE_DIR}" \
   "deploy/gpustack-operator/chart/values.schema.json" \
   "deploy/gpustack-operator/chart/README.md"
 
-if [[ -n "${AUTOSYNC_CHARTS_FIXTURE_DIR:-}" && "${AUTOSYNC_WARM_TOOLS:-false}" != "true" ]]; then
-  autosync::preflight::warm_caches "${STAGE_DIR}" --sbin --go
-else
-  autosync::preflight::warm_caches "${STAGE_DIR}" --sbin --go --tools shellcheck,helm,helm-docs,helm-schema
-fi
-
-if [[ -z "${AUTOSYNC_CHARTS_FIXTURE_DIR:-}" ]] && command -v docker >/dev/null 2>&1; then
-  CT_VERSION="${CHART_TESTING_VERSION:-}"
-  if [[ -z "${CT_VERSION}" && -f "${REPO_ROOT}/hack/lib/helm.sh" ]]; then
-    CT_VERSION="$(sed -n 's/^chart_testing_version=.*:-"\([^"]*\)".*$/\1/p' "${REPO_ROOT}/hack/lib/helm.sh" | head -n 1)"
-  fi
-  CT_VERSION="${CT_VERSION:-v3.14.0}"
-  CT_IMAGE="quay.io/helmpack/chart-testing:${CT_VERSION}"
-  docker image inspect "${CT_IMAGE}" >/dev/null 2>&1 || docker pull "${CT_IMAGE}" || true
-fi
-
+autosync::preflight::warm_caches "${STAGE_DIR}" --sbin
 mkdir -p "${STAGE_DIR}/deps-cache/charts"
 
 DISCOVERY_JSON="${STAGE_DIR}/charts-discovery.json"
@@ -757,6 +742,29 @@ while IFS= read -r cname || [[ -n "${cname}" ]]; do
   [[ -n "${cname}" ]] && STAGED_CHARTS+=("${cname}")
 done < "${READY_LIST_FILE}"
 
+if (( ${#STAGED_CHARTS[@]} > 0 )) || \
+   [[ "${AUTOSYNC_FORCE:-false}" == "true" || \
+      "${COMMENT_COMMAND:-}" == "revise" || \
+      "${COMMENT_COMMAND:-}" == "retry" || \
+      "${AUTOSYNC_WARM_TOOLS:-false}" == "true" ]]; then
+  if [[ -n "${AUTOSYNC_CHARTS_FIXTURE_DIR:-}" && "${AUTOSYNC_WARM_TOOLS:-false}" != "true" ]]; then
+    autosync::preflight::warm_caches "${STAGE_DIR}" --sbin --go
+  else
+    autosync::preflight::warm_caches "${STAGE_DIR}" --sbin --go --tools shellcheck,helm,helm-docs,helm-schema
+  fi
+  if [[ -z "${AUTOSYNC_CHARTS_FIXTURE_DIR:-}" ]] && command -v docker >/dev/null 2>&1; then
+    CT_VERSION="${CHART_TESTING_VERSION:-}"
+    if [[ -z "${CT_VERSION}" && -f "${REPO_ROOT}/hack/lib/helm.sh" ]]; then
+      CT_VERSION="$(sed -n 's/^chart_testing_version=.*:-"\([^"]*\)".*$/\1/p' "${REPO_ROOT}/hack/lib/helm.sh" | head -n 1)"
+    fi
+    CT_VERSION="${CT_VERSION:-v3.14.0}"
+    CT_IMAGE="quay.io/helmpack/chart-testing:${CT_VERSION}"
+    docker image inspect "${CT_IMAGE}" >/dev/null 2>&1 || docker pull "${CT_IMAGE}" || true
+  fi
+fi
+
+STAGE_WORK=""
+
 if (( ${#STAGED_CHARTS[@]} > 0 )) && [[ "${AUTOSYNC_SKIP_SOURCE_REVISION:-false}" != "true" ]]; then
   STAGE_WORK="${WORK_TMP}/staged-repo"
   mkdir -p "${STAGE_WORK}/deploy/gpustack-operator"
@@ -1169,7 +1177,20 @@ if any_not_ready and summary_path and not os.path.islink(summary_path):
         pass
 PY
 
-if (( ${#STAGED_CHARTS[@]} > 0 )) && [[ "${AUTOSYNC_SKIP_SOURCE_REVISION:-false}" != "true" ]]; then
+autosync::preflight::apply_force_to_upstream_records "${UPSTREAM_RECORDS_JSON}"
+
+if ( (( ${#STAGED_CHARTS[@]} > 0 )) || autosync::preflight::has_available_upstreams "${UPSTREAM_RECORDS_JSON}" ) && [[ "${AUTOSYNC_SKIP_SOURCE_REVISION:-false}" != "true" ]]; then
+  CHARTS_COMMIT_PATHS=(".auto-sync/.stage/charts")
+  if (( ${#STAGED_CHARTS[@]} > 0 )); then
+    CHARTS_COMMIT_PATHS=(
+      "hack/deps.sh"
+      "deploy/gpustack-operator/chart"
+      ".auto-sync/.stage/charts"
+    )
+  else
+    STAGE_WORK="${WORK_TMP}/staged-bundle"
+    mkdir -p "${STAGE_WORK}"
+  fi
   autosync::preflight::populate_stage_bundle "${STAGE_WORK}" "charts" \
     "${REPORT_JSON}" \
     "${UPSTREAM_RECORDS_JSON}" \
@@ -1179,9 +1200,7 @@ if (( ${#STAGED_CHARTS[@]} > 0 )) && [[ "${AUTOSYNC_SKIP_SOURCE_REVISION:-false}
       "${REPO_ROOT}" "${BASE_SHA}" \
       "chore(chart): stage vendored helm subcharts and preflight bundle" \
       "${STAGE_WORK}" \
-      "hack/deps.sh" \
-      "deploy/gpustack-operator/chart" \
-      ".auto-sync/.stage/charts"
+      "${CHARTS_COMMIT_PATHS[@]}"
   )"
   if [[ "${SOURCE_REVISION}" != "${BASE_SHA}" ]]; then
     python3 - "${REPORT_JSON}" "${SOURCE_REVISION}" <<'PY'
