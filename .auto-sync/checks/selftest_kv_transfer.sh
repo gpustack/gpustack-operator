@@ -864,6 +864,7 @@ cp "${ROOT_DIR}/pack/mirrored-modelexpress-server/Dockerfile" \
 cp -R "${RUNNER_SRC}" "${VAL_STAGE}/gpustack-runner"
 rm -rf "${VAL_STAGE}/gpustack-runner/.git"
 cp -R "${HIXL_SRC}" "${VAL_STAGE}/hixl"
+cp -R "${MX_SRC}" "${VAL_STAGE}/modelexpress"
 
 cat > "${VAL_STAGE}/image-manifests.json" <<'JSON'
 {
@@ -1176,6 +1177,7 @@ sed -i.bak "s|${HIXL_BROKEN_SHA}|60dbe9d1d7d9a7eef04bc3dbf84edbad2188230a|" "${V
 rm -f "${VAL_STAGE}/gpustack-runner/pack/cann/Dockerfile.vllm.bak"
 
 # 5j. ModelExpress SemVer tag, Cargo.toml version, and builder check when MODELEXPRESS_VERSION changes.
+rm -rf "${VAL_STAGE}/modelexpress"
 mkdir -p "${VAL_STAGE}/modelexpress"
 cat > "${VAL_STAGE}/modelexpress/Cargo.toml" <<'TOML'
 [workspace]
@@ -1218,7 +1220,10 @@ assert_fails "validate_kv_transfer fails closed when MODELEXPRESS_VERSION disagr
 
 rm -f "${VAL_STAGE}/modelexpress/Cargo.toml"
 assert_fails "validate_kv_transfer fails closed when staged modelexpress directory lacks Cargo.toml" run_validate
+
 rm -rf "${VAL_STAGE}/modelexpress"
+assert_fails "validate_kv_transfer fails closed when staged modelexpress directory is missing" run_validate
+cp -R "${MX_SRC}" "${VAL_STAGE}/modelexpress"
 
 make_gitless_cand
 set_kv_proposal "recipe_sync" "modelexpress=v0.9.0-rc1"
@@ -1229,21 +1234,25 @@ assert_fails "validate_kv_transfer fails closed on non-SemVer/prerelease MODELEX
 
 # Empty BASE_MX_VERSION (migration from MODELEXPRESS_COMMIT) still triggers builder verification.
 make_gitless_cand
-cp "${VAL_STAGE}/baseline/pack/mirrored-modelexpress-server/Dockerfile" "${SCRATCH}/base-mx-df.bak"
-sed -i.bak 's|^ARG MODELEXPRESS_VERSION=.*|ARG MODELEXPRESS_COMMIT=508e4547970c545dc80d5585f7b9be7af9ec177e|' \
-  "${VAL_STAGE}/baseline/pack/mirrored-modelexpress-server/Dockerfile"
-rm -f "${VAL_STAGE}/baseline/pack/mirrored-modelexpress-server/Dockerfile.bak"
 MX_MIGRATE_MARKER="${SCRATCH}/mx-migrate-built"
-if AUTOSYNC_DOCKER_BUILD_CMD="touch '${MX_MIGRATE_MARKER}'" \
-   AUTOSYNC_STAGE_DIR="${VAL_STAGE}" \
-   LOOPWRIGHT_CANDIDATE_DIR="${CAND_DIR}" \
-   AUTOSYNC_FAST_SELFTEST=true \
-   bash "${CAND_DIR}/.auto-sync/checks/validate_kv_transfer.sh" && [[ -f "${MX_MIGRATE_MARKER}" ]]; then
+if (
+  base_mx_df="${VAL_STAGE}/baseline/pack/mirrored-modelexpress-server/Dockerfile"
+  base_mx_bak="${SCRATCH}/base-mx-df.bak"
+  cp "${base_mx_df}" "${base_mx_bak}"
+  trap 'mv -f "${base_mx_bak}" "${base_mx_df}"' EXIT
+  sed -i.bak 's|^ARG MODELEXPRESS_VERSION=.*|ARG MODELEXPRESS_COMMIT=508e4547970c545dc80d5585f7b9be7af9ec177e|' \
+    "${base_mx_df}"
+  rm -f "${base_mx_df}.bak"
+  AUTOSYNC_DOCKER_BUILD_CMD="touch '${MX_MIGRATE_MARKER}'" \
+  AUTOSYNC_STAGE_DIR="${VAL_STAGE}" \
+  LOOPWRIGHT_CANDIDATE_DIR="${CAND_DIR}" \
+  AUTOSYNC_FAST_SELFTEST=true \
+    bash "${CAND_DIR}/.auto-sync/checks/validate_kv_transfer.sh"
+) && [[ -f "${MX_MIGRATE_MARKER}" ]]; then
   pass "validate_kv_transfer triggers ModelExpress builder when migrating from empty BASE_MX_VERSION"
 else
   fail "validate_kv_transfer triggers ModelExpress builder when migrating from empty BASE_MX_VERSION"
 fi
-mv "${SCRATCH}/base-mx-df.bak" "${VAL_STAGE}/baseline/pack/mirrored-modelexpress-server/Dockerfile"
 
 # 5k. NIXL_VERSION PyPI wheel verification check (verified 1.5.3 passes; unverified 1.6.0 fails closed).
 make_gitless_cand

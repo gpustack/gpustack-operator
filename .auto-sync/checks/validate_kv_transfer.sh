@@ -457,37 +457,39 @@ def parse_ws_version(cargo_txt: str) -> str:
         return ws or pkg
 
 
-cargo_txt = ""
-if os.path.isdir(mx_stage):
-    if os.path.isdir(os.path.join(mx_stage, ".git")):
-        obj_spec = f"refs/tags/{cand_ver}:Cargo.toml"
-        has_obj = (
-            subprocess.run(
-                ["git", "-C", mx_stage, "cat-file", "-e", obj_spec],
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-            ).returncode
-            == 0
-        )
-        if not has_obj:
-            raise SystemExit(
-                f"FAIL: MODELEXPRESS_VERSION {cand_ver} (Cargo.toml) not found in staged modelexpress repository {mx_stage}"
-            )
-        cargo_txt = subprocess.check_output(["git", "-C", mx_stage, "show", obj_spec], text=True)
-    elif os.path.isfile(os.path.join(mx_stage, "Cargo.toml")):
-        with open(os.path.join(mx_stage, "Cargo.toml"), "r", encoding="utf-8") as f:
-            cargo_txt = f.read()
-    else:
-        raise SystemExit(
-            f"FAIL: staged modelexpress directory {mx_stage} is missing Cargo.toml and refs/tags/{cand_ver}:Cargo.toml"
-        )
+if not os.path.isdir(mx_stage):
+    raise SystemExit(f"FAIL: staged modelexpress directory {mx_stage} not found")
 
-    ws_ver = parse_ws_version(cargo_txt)
-    expected = cand_ver.lstrip("v")
-    if not ws_ver or ws_ver != expected:
+cargo_txt = ""
+if os.path.isdir(os.path.join(mx_stage, ".git")):
+    obj_spec = f"refs/tags/{cand_ver}:Cargo.toml"
+    has_obj = (
+        subprocess.run(
+            ["git", "-C", mx_stage, "cat-file", "-e", obj_spec],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        ).returncode
+        == 0
+    )
+    if not has_obj:
         raise SystemExit(
-            f"FAIL: MODELEXPRESS_VERSION {cand_ver} ({expected!r}) != staged Cargo.toml [workspace.package].version ({ws_ver!r})"
+            f"FAIL: MODELEXPRESS_VERSION {cand_ver} (Cargo.toml) not found in staged modelexpress repository {mx_stage}"
         )
+    cargo_txt = subprocess.check_output(["git", "-C", mx_stage, "show", obj_spec], text=True)
+elif os.path.isfile(os.path.join(mx_stage, "Cargo.toml")):
+    with open(os.path.join(mx_stage, "Cargo.toml"), "r", encoding="utf-8") as f:
+        cargo_txt = f.read()
+else:
+    raise SystemExit(
+        f"FAIL: staged modelexpress directory {mx_stage} is missing Cargo.toml and refs/tags/{cand_ver}:Cargo.toml"
+    )
+
+ws_ver = parse_ws_version(cargo_txt)
+expected = cand_ver.lstrip("v")
+if not ws_ver or ws_ver != expected:
+    raise SystemExit(
+        f"FAIL: MODELEXPRESS_VERSION {cand_ver} ({expected!r}) != staged Cargo.toml [workspace.package].version ({ws_ver!r})"
+    )
 PY
 
   if [[ -f "${BASE_MX_DF}" && "${BASE_MX_VERSION}" != "${CAND_MX_VERSION}" ]]; then
