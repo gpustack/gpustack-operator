@@ -141,6 +141,7 @@ cp "${ROOT_DIR}/.auto-sync/scripts/lib-preflight.sh" "${FAKE_REPO}/.auto-sync/sc
 cp "${PREFLIGHT_SCRIPT}" "${FAKE_REPO}/.auto-sync/scripts/preflight-router.sh"
 cp "${ROOT_DIR}/.auto-sync/checks/lib.sh" "${FAKE_REPO}/.auto-sync/checks/lib.sh"
 cp "${ROOT_DIR}/.auto-sync/checks/dockerfile_arg.py" "${FAKE_REPO}/.auto-sync/checks/dockerfile_arg.py"
+cp "${ROOT_DIR}/.auto-sync/checks/setting_image_holds.py" "${FAKE_REPO}/.auto-sync/checks/setting_image_holds.py"
 cp "${VALIDATE_SCRIPT}" "${FAKE_REPO}/.auto-sync/checks/validate_router.sh"
 if [[ -f "${ROOT_DIR}/.auto-sync/proposals/router.json" ]]; then
   cp "${ROOT_DIR}/.auto-sync/proposals/router.json" "${FAKE_REPO}/.auto-sync/proposals/router.json"
@@ -457,6 +458,80 @@ else
 fi
 rm -f "${FIXTURE_DIR}/upstream.json"
 
+# 3d. Setting-image holds (router, proxy, sidecar) suppress Stage B promotion in preflight-router.sh.
+cat > "${FIXTURE_DIR}/upstream.json" <<'JSON'
+{
+  "repo_tags": {
+    "gpustack/llm-router": ["v0.4.0", "v0.5.0"],
+    "gpustack/mirrored-envoy": ["distroless-v1.33.2", "distroless-v1.34.0"]
+  }
+}
+JSON
+cat > "${FIXTURE_DIR}/setting-image-holds.json" <<'JSON'
+{
+  "schema_version": 1,
+  "holds": {
+    "router": {
+      "tag": "v0.4.0",
+      "reason": "Hold router at v0.4.0 for compatibility."
+    },
+    "proxy": {
+      "tag": "distroless-v1.33.2",
+      "reason": "Hold proxy at distroless-v1.33.2."
+    },
+    "sidecar": {
+      "tag": "v0.11.0",
+      "reason": "Hold sidecar at v0.11.0."
+    }
+  }
+}
+JSON
+
+(
+  cd "${FAKE_REPO}"
+  AUTOSYNC_ROUTER_FIXTURE_DIR="${FIXTURE_DIR}" \
+  AUTOSYNC_SKIP_GO_MOD_DOWNLOAD=true \
+    bash "${FAKE_REPO}/.auto-sync/scripts/preflight-router.sh" "${STAGE_DIR}"
+)
+if python3 - "${STAGE_DIR}" <<'PY'
+import json
+import os
+import sys
+
+stage = sys.argv[1]
+with open(os.path.join(stage, "upstream-records.json"), "r", encoding="utf-8") as f:
+    recs = json.load(f)
+assert all(r["status"] == "up_to_date" for r in recs), recs
+with open(os.path.join(stage, "router-preflight-report.json"), "r", encoding="utf-8") as f:
+    rep = json.load(f)
+assert rep["stage"] == "no_change", rep
+assert rep["stage_b_flags"] == {"router": False, "proxy": False, "sidecar": False}, rep
+assert rep["targets"]["router_image"] == "gpustack/llm-router:v0.4.0", rep["targets"]
+assert rep["targets"]["proxy_image"] == "gpustack/mirrored-envoy:distroless-v1.33.2", rep["targets"]
+assert rep["targets"]["sidecar_image"] == "gpustack/mirrored-llm-d-router-disagg-sidecar:v0.11.0", rep["targets"]
+assert set(rep["held_setting_images"].keys()) == {"router", "proxy", "sidecar"}, rep
+PY
+then
+  pass "preflight-router suppresses Stage B for held router/proxy/sidecar and records held_setting_images"
+else
+  fail "preflight-router suppresses Stage B for held router/proxy/sidecar and records held_setting_images"
+fi
+
+# Explicit AUTOSYNC_TARGET_TAG targeting held router fails closed.
+router_hold_err=""
+if ! router_hold_err="$(
+  cd "${FAKE_REPO}"
+  AUTOSYNC_ROUTER_FIXTURE_DIR="${FIXTURE_DIR}" \
+  AUTOSYNC_TARGET_TAG="gpustack/llm-router:v0.5.0" \
+  AUTOSYNC_SKIP_GO_MOD_DOWNLOAD=true \
+    bash "${FAKE_REPO}/.auto-sync/scripts/preflight-router.sh" "${STAGE_DIR}" 2>&1
+)" && grep -q 'FAIL:' <<<"${router_hold_err}" && grep -q 'router' <<<"${router_hold_err}"; then
+  pass "preflight-router fails closed when AUTOSYNC_TARGET_TAG explicitly targets held router"
+else
+  fail "preflight-router fails closed when AUTOSYNC_TARGET_TAG explicitly targets held router (${router_hold_err})"
+fi
+rm -f "${FIXTURE_DIR}/upstream.json" "${FIXTURE_DIR}/setting-image-holds.json"
+
 # ----------------------------------------------------------------------------
 # Test 4: Gitless env -i validate_router.sh tests with mock upstream repos and patches
 # ----------------------------------------------------------------------------
@@ -654,6 +729,7 @@ make_gitless_cand() {
     "${CAND_DIR}/docs/reference" \
     "${CAND_DIR}/pack/llm-router/patches"
   cp "${ROOT_DIR}/.auto-sync/checks/lib.sh" "${CAND_DIR}/.auto-sync/checks/lib.sh"
+  cp "${ROOT_DIR}/.auto-sync/checks/setting_image_holds.py" "${CAND_DIR}/.auto-sync/checks/setting_image_holds.py"
   cp "${VALIDATE_SCRIPT}" "${CAND_DIR}/.auto-sync/checks/validate_router.sh"
   cp "${ROOT_DIR}/.auto-sync/proposals/router.json" "${CAND_DIR}/.auto-sync/proposals/router.json"
   cp "${VAL_STAGE}/baseline/pkg/worker/settings/value.go" "${CAND_DIR}/pkg/worker/settings/value.go"
@@ -694,6 +770,10 @@ chmod +x "${STUB_BUILD_RUNNER}"
 
 run_validate_env_i() {
   : > "${BUILD_LOG}"
+  local -a extra_env=()
+  if [[ -n "${AUTOSYNC_SETTING_IMAGE_HOLDS_FILE:-}" ]]; then
+    extra_env+=("AUTOSYNC_SETTING_IMAGE_HOLDS_FILE=${AUTOSYNC_SETTING_IMAGE_HOLDS_FILE}")
+  fi
   env -i \
     PATH="/usr/local/bin:/usr/bin:/bin" \
     HOME="${SCRATCH}" \
@@ -704,6 +784,7 @@ run_validate_env_i() {
     ROUTER_BUILD_LOG="${BUILD_LOG}" \
     AUTOSYNC_ALLOW_MISSING_STAGED_REPO="${AUTOSYNC_ALLOW_MISSING_STAGED_REPO:-false}" \
     AUTOSYNC_FAST_SELFTEST=true \
+    ${extra_env[@]+"${extra_env[@]}"} \
     bash "${CAND_DIR}/.auto-sync/checks/validate_router.sh"
 }
 
@@ -1101,6 +1182,61 @@ if grep -q 'FAIL: router builder target vllm-router-builder failed (src/router.r
 else
   fail "validate_router.sh inlines first compiler error onto FAIL: summary line (${fail_build_err})"
 fi
+
+# 4.16 validate_router.sh enforces setting-image-holds.json for router, proxy, and sidecar.
+write_preflight_report "false" "v0.1.16.1"
+ROUTER_HOLDS_FILE="${SCRATCH}/router-holds.json"
+cat > "${ROUTER_HOLDS_FILE}" <<'JSON'
+{
+  "schema_version": 1,
+  "holds": {
+    "router": {
+      "tag": "v0.4.0",
+      "reason": "Hold router at v0.4.0."
+    },
+    "proxy": {
+      "tag": "distroless-v1.33.2",
+      "reason": "Hold proxy."
+    },
+    "sidecar": {
+      "tag": "v0.11.0",
+      "reason": "Hold sidecar."
+    }
+  }
+}
+JSON
+make_gitless_cand
+if AUTOSYNC_SETTING_IMAGE_HOLDS_FILE="${ROUTER_HOLDS_FILE}" run_validate_env_i; then
+  pass "validate_router passes when held router/proxy/sidecar match setting-image-holds.json"
+else
+  fail "validate_router passes when held router/proxy/sidecar match setting-image-holds.json"
+fi
+if AUTOSYNC_SETTING_IMAGE_HOLDS_FILE="${SCRATCH}/missing-holds.json" run_validate_env_i >/dev/null 2>&1; then
+  fail "run_validate_env_i forwards AUTOSYNC_SETTING_IMAGE_HOLDS_FILE and fails closed on missing file"
+else
+  pass "run_validate_env_i forwards AUTOSYNC_SETTING_IMAGE_HOLDS_FILE and fails closed on missing file"
+fi
+
+# Even when v99.1.0 is published in image-manifests.json, promoting held router fails closed.
+make_gitless_cand
+set_router_proposal "tag_promotion" "v0.1.16.1" "v0.11.0+stage-b"
+set_router_image_fixture "v99.1.0" "${CAND_DIR}/pkg/worker/settings/value.go" "${CAND_DIR}/docs/reference/settings.md"
+assert_fails "validate_router fails closed when held router is promoted to published v99.1.0" \
+  env AUTOSYNC_SETTING_IMAGE_HOLDS_FILE="${ROUTER_HOLDS_FILE}" \
+  AUTOSYNC_STAGE_DIR="${VAL_STAGE}" \
+  LOOPWRIGHT_CANDIDATE_DIR="${CAND_DIR}" \
+  AUTOSYNC_ROUTER_BUILD_RUNNER="${STUB_BUILD_RUNNER}" \
+  ROUTER_BUILD_LOG="${BUILD_LOG}" \
+  AUTOSYNC_FAST_SELFTEST=true \
+  bash "${CAND_DIR}/.auto-sync/checks/validate_router.sh"
+
+# Modifying .auto-sync/setting-image-holds.json in candidate fails closed in live mode.
+make_gitless_cand
+mkdir -p "${VAL_STAGE}/baseline/.auto-sync" "${CAND_DIR}/.auto-sync"
+cp "${ROUTER_HOLDS_FILE}" "${VAL_STAGE}/baseline/.auto-sync/setting-image-holds.json"
+printf '{"schema_version":1,"holds":{}}\n' > "${CAND_DIR}/.auto-sync/setting-image-holds.json"
+assert_fails "validate_router fails closed when candidate modifies .auto-sync/setting-image-holds.json" run_validate_env_i
+rm -f "${VAL_STAGE}/baseline/.auto-sync/setting-image-holds.json"
 
 echo
 if (( FAILS > 0 )); then

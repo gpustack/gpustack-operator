@@ -1475,7 +1475,7 @@ YAML
 name: Auto Sync
 on:
   schedule:
-    - cron: "0 1 * * 1"
+    - cron: "0 1 1 */2 *"
     - cron: "0 2 * * 1"
     - cron: "0 2 * * 2"
     - cron: "0 3 * * 2"
@@ -1548,6 +1548,7 @@ YAML
   mkdir -p "${gate_cand}/.git" "${gate_cand}/.auto-sync/checks"
   cp "${ROOT_DIR}/.auto-sync/checks/lib.sh" "${gate_cand}/.auto-sync/checks/lib.sh"
   cp "${ROOT_DIR}/.auto-sync/checks/dockerfile_arg.py" "${gate_cand}/.auto-sync/checks/dockerfile_arg.py"
+  cp "${ROOT_DIR}/.auto-sync/checks/setting_image_holds.py" "${gate_cand}/.auto-sync/checks/setting_image_holds.py"
   local expected_checks_dir
   expected_checks_dir="$(cd "${gate_cand}/.auto-sync/checks" && pwd -P)"
   local clean_path="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin"
@@ -1997,7 +1998,7 @@ assert isinstance(on_block, dict) and on_block, "missing workflow 'on' block"
 
 schedules = on_block.get("schedule", [])
 crons = {item.get("cron") for item in schedules if isinstance(item, dict)}
-expected_crons = {"0 1 * * 1", "0 2 * * 1", "0 2 * * 2", "0 3 * * 2", "0 2 * * 3", "0 2 * * 4"}
+expected_crons = {"0 1 1 */2 *", "0 2 * * 1", "0 2 * * 2", "0 3 * * 2", "0 2 * * 3", "0 2 * * 4"}
 missing_crons = expected_crons - crons
 assert not missing_crons, f"missing schedule crons: {sorted(missing_crons)}"
 

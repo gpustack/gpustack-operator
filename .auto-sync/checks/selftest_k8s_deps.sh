@@ -1464,6 +1464,140 @@ SH
   fi
 }
 
+# 3m. preflight-k8s-deps.sh isolates go mod download all from work_repo/go.sum and validate_k8s_deps.sh step 5 fails closed on untidy go.sum.
+case_3m() {
+  local repo_3m="${SCRATCH}/repo-3m"
+  fast_cp_dir "${PREFLIGHT_REPO}" "${repo_3m}"
+  local wrap_go_3m="${SCRATCH}/wrap-go-3m"
+  local stage_3m="${SCRATCH}/stage-3m/k8s-deps"
+  local tmp_3m="${SCRATCH}/tmp-3m"
+  mkdir -p "${wrap_go_3m}" "${stage_3m}/go-mod" "${stage_3m}/go-cache" "${tmp_3m}"
+  : > "${stage_3m}/go-mod/.warmed"
+
+  cat > "${wrap_go_3m}/go" <<'SH'
+#!/usr/bin/env bash
+if [[ "${1:-}" == "mod" && "${2:-}" == "tidy" ]]; then
+  if [[ -f go.sum ]]; then
+    grep -v '^example\.com/bloated ' go.sum > go.sum.tmp || true
+    mv -f go.sum.tmp go.sum
+  fi
+  exit 0
+fi
+if [[ "${1:-}" == "mod" && "${2:-}" == "download" ]]; then
+  if [[ "${3:-}" == "all" ]]; then
+    [[ -f "go.mod" && -f "go.sum" && -d "staging" ]] || exit 1
+    if [[ -d ".git" ]]; then
+      echo "FAIL: go mod download all ran inside work_repo instead of isolated temp dir" >&2
+      exit 1
+    fi
+    printf 'example.com/bloated v1.0.0 h1:deadbeef=\n' >> go.sum
+    mkdir -p "${GOMODCACHE}"
+    : > "${GOMODCACHE}/.all-warmed"
+  fi
+  exit 0
+fi
+if [[ "${WRAP_INTERCEPT_LIST_ALL:-0}" == "1" && "${1:-}" == "list" && "${2:-}" == "-m" && "${3:-}" == "-json" && "${4:-}" == "all" ]]; then
+  [[ -f "${GOMODCACHE}/.all-warmed" ]] || exit 1
+  exit 0
+fi
+exec "${REAL_GO_BIN}" "$@"
+SH
+  chmod +x "${wrap_go_3m}/go"
+
+  local preflight_log_3m="${tmp_3m}/preflight.log"
+  local src_rev_3m=""
+  if (
+    cd "${repo_3m}" && \
+    TMPDIR="${tmp_3m}" \
+    REAL_GO_BIN="${REAL_GO_BIN}" \
+    WRAP_INTERCEPT_LIST_ALL=1 \
+    PATH="${wrap_go_3m}:${PATH}" \
+    AUTOSYNC_K8S_DEPS_FIXTURE_DIR="${FIXTURE_STAGE}" \
+    AUTOSYNC_SKIP_GENERATE=true \
+    AUTOSYNC_WARM_GO_LIST_ALL=true \
+    GOCACHE="${stage_3m}/go-cache" \
+    bash "${repo_3m}/.auto-sync/scripts/preflight-k8s-deps.sh" "${stage_3m}" >"${preflight_log_3m}" 2>&1
+  ) && \
+  src_rev_3m="$(python3 - "${stage_3m}" "${BASE_SHA}" <<'PY'
+import json
+import os
+import sys
+
+stage_dir, base_sha = sys.argv[1:3]
+with open(os.path.join(stage_dir, "k8s-deps-preflight-report.json"), "r", encoding="utf-8") as f:
+    rep = json.load(f)
+assert rep["patch_clean"] is True, rep
+assert rep["staging_updated"] is True, rep
+assert rep["source_revision"] != base_sha, rep
+print(rep["source_revision"])
+PY
+  )" && \
+  [[ -f "${stage_3m}/go-mod/.all-warmed" ]] && \
+  ! git -C "${repo_3m}" show "${src_rev_3m}:go.sum" | grep -q '^example\.com/bloated '; then
+    record_pass "preflight-k8s-deps.sh isolates go mod download all and keeps staged go.sum tidy"
+  else
+    local preflight_err_3m=""
+    if [[ -f "${preflight_log_3m}" ]]; then
+      preflight_err_3m="$(cat "${preflight_log_3m}")"
+    fi
+    record_fail "preflight-k8s-deps.sh isolates go mod download all and keeps staged go.sum tidy (${preflight_err_3m})"
+    return
+  fi
+
+  local cand_3m="${SCRATCH}/cand-3m"
+  fast_cp_dir "${CAND_BASE}" "${cand_3m}"
+  cat > "${cand_3m}/Makefile" <<'MK'
+.PHONY: generate lint test
+generate:
+	@true
+lint:
+	@true
+test:
+	@true
+MK
+
+  local stage_val_3m="${SCRATCH}/stage-val-3m"
+  fast_cp_dir "${STAGE_DISC}" "${stage_val_3m}"
+  rm -f "${stage_val_3m}/toolchain.env"
+  local make_bin_dir git_bin_dir py_bin_dir
+  make_bin_dir="$(dirname "$(command -v make)")"
+  git_bin_dir="$(dirname "$(command -v git)")"
+  py_bin_dir="$(dirname "$(command -v python3)")"
+  local val_path="${wrap_go_3m}:${make_bin_dir}:${git_bin_dir}:${py_bin_dir}:/usr/local/bin:/usr/bin:/bin"
+
+  run_val_3m() {
+    local case_root="$1"
+    mkdir -p "${case_root}/home" "${case_root}/tmp"
+    env -i \
+      PATH="${val_path}" \
+      HOME="${case_root}/home" \
+      TMPDIR="${case_root}/tmp" \
+      REAL_GO_BIN="${REAL_GO_BIN}" \
+      GOMODCACHE="${HOST_GOMODCACHE}" \
+      GOCACHE="${HOST_GOCACHE}" \
+      AUTOSYNC_STAGE_DIR="${stage_val_3m}" \
+      LOOPWRIGHT_CANDIDATE_DIR="${cand_3m}" \
+      AUTOSYNC_FAST_SELFTEST=false \
+      bash "${cand_3m}/.auto-sync/checks/validate_k8s_deps.sh"
+  }
+
+  if run_val_3m "${SCRATCH}/val-3m-ok" >/dev/null 2>&1; then
+    record_pass "validate_k8s_deps.sh step 5 passes when go.sum is tidy"
+  else
+    record_fail "validate_k8s_deps.sh step 5 passes when go.sum is tidy"
+  fi
+
+  printf 'example.com/bloated v1.0.0 h1:deadbeef=\n' >> "${cand_3m}/go.sum"
+  local bloat_err=""
+  if ! bloat_err="$(run_val_3m "${SCRATCH}/val-3m-bloat" 2>&1)" && \
+     grep -q "uncommitted drift" <<<"${bloat_err}" && \
+     grep -q "go.sum" <<<"${bloat_err}"; then
+    record_pass "validate_k8s_deps.sh step 5 fails closed on bloated go.sum via go mod tidy"
+  else
+    record_fail "validate_k8s_deps.sh step 5 fails closed on bloated go.sum (${bloat_err})"
+  fi
+}
+
 spawn_case "1bc" case_1bc
 spawn_case "2" case_2
 spawn_case "2b" case_2b
@@ -1483,6 +1617,7 @@ spawn_case "3i" case_3i
 spawn_case "3j" case_3j
 spawn_case "3k" case_3k
 spawn_case "3l" case_3l
+spawn_case "3m" case_3m
 
 for i in "${!CASE_NAMES[@]}"; do
   cid="${CASE_NAMES[$i]}"

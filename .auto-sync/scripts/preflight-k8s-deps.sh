@@ -652,7 +652,7 @@ PY
       return 0
     fi
 
-    if [[ -z "${AUTOSYNC_K8S_DEPS_FIXTURE_DIR:-}" || "${AUTOSYNC_WARM_TOOLS:-false}" == "true" ]]; then
+    if [[ -z "${AUTOSYNC_K8S_DEPS_FIXTURE_DIR:-}" || "${AUTOSYNC_WARM_TOOLS:-false}" == "true" || "${AUTOSYNC_WARM_GO_LIST_ALL:-false}" == "true" ]]; then
       if ! (
         cd "${work_repo}"
         GOMODCACHE="${stage_dir}/go-mod" \
@@ -661,10 +661,13 @@ PY
           go list -m -json all >/dev/null
       ) >> "${staging_log}" 2>&1; then
         if ! (
-          cd "${work_repo}"
-          GOMODCACHE="${stage_dir}/go-mod" \
-          GOCACHE="${stage_dir}/go-cache" \
-            go mod download all
+          autosync::preflight::isolated_go_mod_download \
+            "${work_repo}" \
+            "${stage_dir}/go-mod" \
+            "${stage_dir}/go-cache" \
+            "${GOPROXY:-}" \
+            all && \
+          cd "${work_repo}" && \
           GOMODCACHE="${stage_dir}/go-mod" \
           GOCACHE="${stage_dir}/go-cache" \
           GOPROXY=off \

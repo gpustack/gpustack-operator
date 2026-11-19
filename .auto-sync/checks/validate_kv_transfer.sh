@@ -511,12 +511,31 @@ python3 - \
   "${AUTOSYNC_CANDIDATE_ROOT}/docs/reference/settings.md" \
   "${BASELINE_DIR}/deploy/gpustack-operator/chart/values.yaml" \
   "${AUTOSYNC_CANDIDATE_ROOT}/deploy/gpustack-operator/chart/values.yaml" \
+  "${BASELINE_DIR}" \
+  "${AUTOSYNC_CANDIDATE_ROOT}" \
+  "${SCRIPT_DIR}" \
   > "${IMAGE_META_FILE}" <<'PY'
 import os
 import re
 import sys
 
-base_vg_p, cand_vg_p, cand_sm_p, base_vy_p, cand_vy_p = sys.argv[1:6]
+(
+    base_vg_p,
+    cand_vg_p,
+    cand_sm_p,
+    base_vy_p,
+    cand_vy_p,
+    baseline_dir,
+    cand_root,
+    checks_dir,
+) = sys.argv[1:9]
+sys.path.insert(0, checks_dir)
+from setting_image_holds import (
+    domain_holds,
+    load_setting_image_holds,
+    resolve_holds_file_for_validate,
+    verify_kv_transfer_holds,
+)
 
 
 def read(p: str) -> str:
@@ -608,7 +627,27 @@ images_changed = (
     or cand_mt != base_mt
 )
 
+holds_path = resolve_holds_file_for_validate(baseline_dir, cand_root, "kv-transfer")
+holds_label = holds_path or ".auto-sync/setting-image-holds.json"
+kv_holds = domain_holds(load_setting_image_holds(holds_path), "kv-transfer")
+verify_kv_transfer_holds(kv_holds, kv_img, mx_img, cand_mt, holds_label)
+
+if "mooncake" in kv_holds and kv_img != base_kv:
+    raise SystemExit(
+        f"FAIL: KVCacheBackendImage changed ({base_kv} -> {kv_img}) while mooncake is held by {holds_label}"
+    )
+if "modelexpress" in kv_holds and mx_img != base_mx:
+    raise SystemExit(
+        f"FAIL: ModelDeploymentModelExpressServerImage changed ({base_mx} -> {mx_img}) while modelexpress is held by {holds_label}"
+    )
+for k in ("nvidia", "amd", "ascend"):
+    if ("model-transfer" in kv_holds or f"model-transfer.{k}" in kv_holds) and cand_mt[k] != base_mt[k]:
+        raise SystemExit(
+            f"FAIL: modelTransfer.images.{k} changed ({base_mt[k]} -> {cand_mt[k]}) while held by {holds_label}"
+        )
+
 print(f"IMAGES_CHANGED={'true' if images_changed else 'false'}")
+print(f"HELD_KV_KEYS={','.join(sorted(kv_holds))}")
 print(f"KV_IMG={kv_img}")
 print(f"MX_IMG={mx_img}")
 print(f"MT_NVIDIA={cand_mt['nvidia']}")
@@ -617,6 +656,7 @@ print(f"MT_ASCEND={cand_mt['ascend']}")
 PY
 
 IMAGES_CHANGED=""
+HELD_KV_KEYS=""
 KV_IMG=""
 MX_IMG=""
 MT_NVIDIA=""
@@ -625,6 +665,7 @@ MT_ASCEND=""
 while IFS='=' read -r k v; do
   case "${k}" in
     IMAGES_CHANGED) IMAGES_CHANGED="${v}" ;;
+    HELD_KV_KEYS) HELD_KV_KEYS="${v}" ;;
     KV_IMG) KV_IMG="${v}" ;;
     MX_IMG) MX_IMG="${v}" ;;
     MT_NVIDIA) MT_NVIDIA="${v}" ;;
@@ -692,13 +733,14 @@ fi
 
 # 6. Proposal schema and version parity (.auto-sync/proposals/kv-transfer.json).
 CAND_PROPOSAL="${AUTOSYNC_CANDIDATE_ROOT}/.auto-sync/proposals/kv-transfer.json"
-python3 - "${CAND_PROPOSAL}" "${MOONCAKE_DF}" "${MT_DF}" "${CAND_MX_DF}" "${IMAGES_CHANGED}" "${AUTOSYNC_CANDIDATE_ROOT}" <<'PY'
+python3 - "${CAND_PROPOSAL}" "${MOONCAKE_DF}" "${MT_DF}" "${CAND_MX_DF}" "${IMAGES_CHANGED}" "${AUTOSYNC_CANDIDATE_ROOT}" "${HELD_KV_KEYS}" <<'PY'
 import json
 import os
 import re
 import sys
 
-prop_p, mc_df_p, mt_df_p, mx_df_p, images_changed_str, cand_root = sys.argv[1:7]
+prop_p, mc_df_p, mt_df_p, mx_df_p, images_changed_str, cand_root, held_keys_csv = sys.argv[1:8]
+held_keys = {k for k in held_keys_csv.split(",") if k}
 sys.path.insert(0, os.path.join(cand_root, ".auto-sync", "checks"))
 from dockerfile_arg import read_dockerfile_arg
 if not os.path.isfile(prop_p):
@@ -743,12 +785,12 @@ def check_pin(uid: str, expected: str, allow_sb: bool = False) -> None:
     raise SystemExit(f"FAIL: proposals/kv-transfer.json versions.{uid} ({got!r}) != pinned ({expected!r})")
 
 
-check_pin("mooncake", read_arg(mc_df_p, "MOONCAKE_VERSION"), allow_sb=True)
+check_pin("mooncake", read_arg(mc_df_p, "MOONCAKE_VERSION"), allow_sb=("mooncake" not in held_keys))
 check_pin("nixl-pypi", read_arg(mt_df_p, "NIXL_VERSION"), allow_sb=True)
 check_pin("nixl-rocm", read_arg(mt_df_p, "NIXL_ROCM_REF"))
 check_pin("ucx-rocm", read_arg(mt_df_p, "NIXL_ROCM_UCX_REF"))
 check_pin("hixl", read_arg(mt_df_p, "HIXL_COMMIT"))
-check_pin("modelexpress", read_arg(mx_df_p, "MODELEXPRESS_VERSION"), allow_sb=True)
+check_pin("modelexpress", read_arg(mx_df_p, "MODELEXPRESS_VERSION"), allow_sb=("modelexpress" not in held_keys))
 if not re.fullmatch(r"v\d+\.\d+\.\d+(?:\+stage-b)?", str(versions.get("modelexpress") or "")):
     raise SystemExit(
         f"FAIL: proposals/kv-transfer.json versions.modelexpress ({versions.get('modelexpress')!r}) "
@@ -756,6 +798,13 @@ if not re.fullmatch(r"v\d+\.\d+\.\d+(?:\+stage-b)?", str(versions.get("modelexpr
     )
 
 runner_v = str(versions.get("gpustack-runner") or "")
+all_mt_held = ("model-transfer" in held_keys) or all(
+    f"model-transfer.{v}" in held_keys for v in ("nvidia", "amd", "ascend")
+)
+if all_mt_held and runner_v == "aligned+stage-b":
+    raise SystemExit(
+        "FAIL: proposals/kv-transfer.json versions.gpustack-runner cannot be 'aligned+stage-b' while all model-transfer images are held"
+    )
 if runner_v not in ("aligned", "aligned+stage-b") and not re.fullmatch(r"[0-9a-f]{40}", runner_v):
     raise SystemExit(
         f"FAIL: proposals/kv-transfer.json versions.gpustack-runner ({runner_v!r}) "

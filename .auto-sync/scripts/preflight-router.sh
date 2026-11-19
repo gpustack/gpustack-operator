@@ -22,6 +22,10 @@ autosync::preflight::snapshot_baselines "${STAGE_DIR}" \
   "pkg/worker/settings/value.go" \
   "docs/reference/settings.md"
 
+if [[ -f "${REPO_ROOT}/.auto-sync/setting-image-holds.json" ]]; then
+  autosync::preflight::snapshot_baselines "${STAGE_DIR}" ".auto-sync/setting-image-holds.json"
+fi
+
 autosync::preflight::warm_caches "${STAGE_DIR}" --sbin
 
 PROBE_LIST_FILE="$(mktemp "${TMPDIR:-/tmp}/autosync-router-probes.XXXXXXXX")"
@@ -49,6 +53,12 @@ import sys
 repo_root, stage_dir, fixture_dir, discovery_path, probe_list_path, base_sha = sys.argv[1:7]
 sys.path.insert(0, os.path.join(repo_root, ".auto-sync", "checks"))
 from dockerfile_arg import read_dockerfile_arg
+from setting_image_holds import (
+    domain_holds,
+    load_setting_image_holds,
+    resolve_holds_file_for_preflight,
+    verify_router_holds,
+)
 
 
 def read_text(path: str) -> str:
@@ -196,6 +206,17 @@ defaults = {
     "proxy_image": extract_value_go_image(value_go, "ModelDeploymentRouterProxyImage"),
     "sidecar_image": extract_value_go_image(value_go, "ModelDeploymentRoutingSidecarImage"),
 }
+
+holds_path = resolve_holds_file_for_preflight(repo_root, fixture_dir)
+holds_label = holds_path or ".auto-sync/setting-image-holds.json"
+router_holds = domain_holds(load_setting_image_holds(holds_path), "router")
+verify_router_holds(
+    router_holds,
+    defaults["router_image"],
+    defaults["proxy_image"],
+    defaults["sidecar_image"],
+    holds_label,
+)
 
 upstream_override = {}
 if fixture_dir and os.path.isfile(os.path.join(fixture_dir, "upstream.json")):
@@ -406,40 +427,70 @@ def discover_newer_tag(repo: str, current_image: str) -> str:
 
 generic_targets = parse_generic_target_tags(os.environ.get("AUTOSYNC_TARGET_TAG", ""))
 
-target_router_tag = os.environ.get("AUTOSYNC_ROUTER_TARGET_TAG", "").strip()
-if not target_router_tag:
-    target_router_tag = generic_targets.get("router", "")
-if not target_router_tag and isinstance(upstream_override.get("router_target_tag"), str):
-    target_router_tag = upstream_override["router_target_tag"].strip()
-if not target_router_tag:
-    target_router_tag = discover_newer_tag("gpustack/llm-router", defaults["router_image"])
-target_router_image = (
-    f"gpustack/llm-router:{target_router_tag}"
-    if target_router_tag
-    else defaults["router_image"]
-)
+env_router_tag = os.environ.get("AUTOSYNC_ROUTER_TARGET_TAG", "").strip()
+if "router" in router_holds:
+    if env_router_tag or generic_targets.get("router"):
+        req_router = env_router_tag or generic_targets.get("router", "")
+        raise SystemExit(
+            f"FAIL: target tag targets router ({req_router!r}), "
+            f"which is held at {router_holds['router']['tag']!r} by {holds_label}; update {holds_label} first"
+        )
+    target_router_image = defaults["router_image"]
+else:
+    target_router_tag = env_router_tag
+    if not target_router_tag:
+        target_router_tag = generic_targets.get("router", "")
+    if not target_router_tag and isinstance(upstream_override.get("router_target_tag"), str):
+        target_router_tag = upstream_override["router_target_tag"].strip()
+    if not target_router_tag:
+        target_router_tag = discover_newer_tag("gpustack/llm-router", defaults["router_image"])
+    target_router_image = (
+        f"gpustack/llm-router:{target_router_tag}"
+        if target_router_tag
+        else defaults["router_image"]
+    )
 
-target_proxy_tag = os.environ.get("AUTOSYNC_ROUTER_PROXY_TARGET_TAG", "").strip()
-if not target_proxy_tag:
-    target_proxy_tag = generic_targets.get("proxy", "")
-if not target_proxy_tag and isinstance(upstream_override.get("proxy_target_tag"), str):
-    target_proxy_tag = upstream_override["proxy_target_tag"].strip()
-if not target_proxy_tag:
-    target_proxy_tag = discover_newer_tag("gpustack/mirrored-envoy", defaults["proxy_image"])
-target_proxy_image = (
-    f"gpustack/mirrored-envoy:{target_proxy_tag}"
-    if target_proxy_tag
-    else defaults["proxy_image"]
-)
+env_proxy_tag = os.environ.get("AUTOSYNC_ROUTER_PROXY_TARGET_TAG", "").strip()
+if "proxy" in router_holds:
+    if env_proxy_tag or generic_targets.get("proxy"):
+        req_proxy = env_proxy_tag or generic_targets.get("proxy", "")
+        raise SystemExit(
+            f"FAIL: target tag targets proxy ({req_proxy!r}), "
+            f"which is held at {router_holds['proxy']['tag']!r} by {holds_label}; update {holds_label} first"
+        )
+    target_proxy_image = defaults["proxy_image"]
+else:
+    target_proxy_tag = env_proxy_tag
+    if not target_proxy_tag:
+        target_proxy_tag = generic_targets.get("proxy", "")
+    if not target_proxy_tag and isinstance(upstream_override.get("proxy_target_tag"), str):
+        target_proxy_tag = upstream_override["proxy_target_tag"].strip()
+    if not target_proxy_tag:
+        target_proxy_tag = discover_newer_tag("gpustack/mirrored-envoy", defaults["proxy_image"])
+    target_proxy_image = (
+        f"gpustack/mirrored-envoy:{target_proxy_tag}"
+        if target_proxy_tag
+        else defaults["proxy_image"]
+    )
 
-target_sidecar_tag = os.environ.get("AUTOSYNC_ROUTER_SIDECAR_TARGET_TAG", "").strip()
-if not target_sidecar_tag:
-    target_sidecar_tag = generic_targets.get("sidecar", "")
-if not target_sidecar_tag and isinstance(upstream_override.get("sidecar_target_tag"), str):
-    target_sidecar_tag = upstream_override["sidecar_target_tag"].strip()
-if not target_sidecar_tag:
-    target_sidecar_tag = recipe["llm-d-router"]
-target_sidecar_image = f"gpustack/mirrored-llm-d-router-disagg-sidecar:{target_sidecar_tag}"
+env_sidecar_tag = os.environ.get("AUTOSYNC_ROUTER_SIDECAR_TARGET_TAG", "").strip()
+if "sidecar" in router_holds:
+    if env_sidecar_tag or generic_targets.get("sidecar"):
+        req_sidecar = env_sidecar_tag or generic_targets.get("sidecar", "")
+        raise SystemExit(
+            f"FAIL: target tag targets sidecar ({req_sidecar!r}), "
+            f"which is held at {router_holds['sidecar']['tag']!r} by {holds_label}; update {holds_label} first"
+        )
+    target_sidecar_image = defaults["sidecar_image"]
+else:
+    target_sidecar_tag = env_sidecar_tag
+    if not target_sidecar_tag:
+        target_sidecar_tag = generic_targets.get("sidecar", "")
+    if not target_sidecar_tag and isinstance(upstream_override.get("sidecar_target_tag"), str):
+        target_sidecar_tag = upstream_override["sidecar_target_tag"].strip()
+    if not target_sidecar_tag:
+        target_sidecar_tag = recipe["llm-d-router"]
+    target_sidecar_image = f"gpustack/mirrored-llm-d-router-disagg-sidecar:{target_sidecar_tag}"
 
 probe_refs = []
 for ref in (
@@ -478,6 +529,7 @@ discovery = {
         "vllm-router": up_vllm_recent,
         "sglang-gateway": up_sglang_recent,
     },
+    "held_setting_images": router_holds,
     "targets": {
         "router_image": target_router_image,
         "proxy_image": target_proxy_image,
@@ -627,6 +679,7 @@ report = {
         "proxy": proxy_stage_b,
         "sidecar": sidecar_stage_b,
     },
+    "held_setting_images": disc.get("held_setting_images") or {},
     "recipe": recipe,
     "target_tags": target_tags,
     "recent_tags": recent_tags,

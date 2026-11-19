@@ -23,6 +23,10 @@ autosync::preflight::snapshot_baselines "${STAGE_DIR}" \
   "pack/model-transfer/patches/hixl/001_channel_generation.patch" \
   "pack/mirrored-modelexpress-server/Dockerfile"
 
+if [[ -f "${REPO_ROOT}/.auto-sync/setting-image-holds.json" ]]; then
+  autosync::preflight::snapshot_baselines "${STAGE_DIR}" ".auto-sync/setting-image-holds.json"
+fi
+
 autosync::preflight::warm_caches "${STAGE_DIR}" --sbin
 
 # Extract current repository pins and stage upstream data in Python.
@@ -53,6 +57,12 @@ import urllib.request
 repo_root, stage_dir, fixture_dir, discovery_path, probe_list_path, base_sha = sys.argv[1:7]
 sys.path.insert(0, os.path.join(repo_root, ".auto-sync", "checks"))
 from dockerfile_arg import has_dockerfile_arg, read_dockerfile_arg
+from setting_image_holds import (
+    domain_holds,
+    load_setting_image_holds,
+    resolve_holds_file_for_preflight,
+    verify_kv_transfer_holds,
+)
 
 
 def read_text(path: str) -> str:
@@ -549,6 +559,17 @@ defaults = {
     "model_transfer_images": extract_values_yaml_mt_images(values_yaml),
 }
 
+holds_path = resolve_holds_file_for_preflight(repo_root, fixture_dir)
+holds_label = holds_path or ".auto-sync/setting-image-holds.json"
+kv_holds = domain_holds(load_setting_image_holds(holds_path), "kv-transfer")
+verify_kv_transfer_holds(
+    kv_holds,
+    defaults["kv_cache_backend_image"],
+    defaults["modelexpress_server_image"],
+    defaults["model_transfer_images"],
+    holds_label,
+)
+
 upstream_override = {}
 if fixture_dir and os.path.isfile(os.path.join(fixture_dir, "upstream.json")):
     with open(os.path.join(fixture_dir, "upstream.json"), "r", encoding="utf-8") as f:
@@ -892,27 +913,51 @@ generic_targets = parse_generic_target_tags(os.environ.get("AUTOSYNC_TARGET_TAG"
 
 # Compute candidate target image tags for Stage B probing.
 target_mooncake_tag = generic_targets.get("mooncake", "")
-if target_mooncake_tag:
+if "mooncake" in kv_holds:
+    if target_mooncake_tag:
+        raise SystemExit(
+            f"FAIL: AUTOSYNC_TARGET_TAG targets mooncake ({target_mooncake_tag!r}), "
+            f"which is held at {kv_holds['mooncake']['tag']!r} by {holds_label}; update {holds_label} first"
+        )
+    target_mooncake_image = defaults["kv_cache_backend_image"]
+elif target_mooncake_tag:
     target_mooncake_image = f"gpustack/mirrored-mooncake:{target_mooncake_tag}"
 else:
     target_mooncake_image = f"gpustack/mirrored-mooncake:{recipe['mooncake_version']}-cpu"
 
-target_mx_tag = os.environ.get("AUTOSYNC_MODELEXPRESS_TARGET_TAG", "").strip()
-if not target_mx_tag:
-    target_mx_tag = generic_targets.get("modelexpress", "")
-if not target_mx_tag and isinstance(upstream_override.get("modelexpress_target_tag"), str):
-    target_mx_tag = upstream_override["modelexpress_target_tag"].strip()
-if not target_mx_tag and generic_targets.get("bare_v"):
-    cur_mx_tag = extract_ref_tag(defaults["modelexpress_server_image"])
-    if parse_version_key(generic_targets["bare_v"]) > parse_version_key(cur_mx_tag):
-        target_mx_tag = generic_targets["bare_v"]
-if not target_mx_tag:
-    target_mx_tag = discover_newer_mx_tag(defaults["modelexpress_server_image"])
-target_mx_image = (
-    f"gpustack/mirrored-modelexpress-server:{target_mx_tag}"
-    if target_mx_tag
-    else defaults["modelexpress_server_image"]
-)
+env_mx_tag = os.environ.get("AUTOSYNC_MODELEXPRESS_TARGET_TAG", "").strip()
+if "modelexpress" in kv_holds:
+    if env_mx_tag or generic_targets.get("modelexpress"):
+        req_mx = env_mx_tag or generic_targets.get("modelexpress", "")
+        raise SystemExit(
+            f"FAIL: target tag targets modelexpress ({req_mx!r}), "
+            f"which is held at {kv_holds['modelexpress']['tag']!r} by {holds_label}; update {holds_label} first"
+        )
+    if generic_targets.get("bare_v"):
+        cur_mx_tag = extract_ref_tag(defaults["modelexpress_server_image"])
+        if parse_version_key(generic_targets["bare_v"]) > parse_version_key(cur_mx_tag):
+            raise SystemExit(
+                f"FAIL: AUTOSYNC_TARGET_TAG={generic_targets['bare_v']!r} targets modelexpress, "
+                f"which is held at {kv_holds['modelexpress']['tag']!r} by {holds_label}; update {holds_label} first"
+            )
+    target_mx_image = defaults["modelexpress_server_image"]
+else:
+    target_mx_tag = env_mx_tag
+    if not target_mx_tag:
+        target_mx_tag = generic_targets.get("modelexpress", "")
+    if not target_mx_tag and isinstance(upstream_override.get("modelexpress_target_tag"), str):
+        target_mx_tag = upstream_override["modelexpress_target_tag"].strip()
+    if not target_mx_tag and generic_targets.get("bare_v"):
+        cur_mx_tag = extract_ref_tag(defaults["modelexpress_server_image"])
+        if parse_version_key(generic_targets["bare_v"]) > parse_version_key(cur_mx_tag):
+            target_mx_tag = generic_targets["bare_v"]
+    if not target_mx_tag:
+        target_mx_tag = discover_newer_mx_tag(defaults["modelexpress_server_image"])
+    target_mx_image = (
+        f"gpustack/mirrored-modelexpress-server:{target_mx_tag}"
+        if target_mx_tag
+        else defaults["modelexpress_server_image"]
+    )
 
 mt_repo_tags = list_repo_tags("gpustack/model-transfer")
 discovered_mt_tags = discover_newer_mt_tags(defaults["model_transfer_images"], mt_repo_tags)
@@ -937,10 +982,34 @@ if explicit_mt_raw:
         else:
             explicit_mt_ver = part
 
+if "model-transfer" in kv_holds and (
+    explicit_mt_raw or explicit_mt_ver or explicit_mt_by_vendor
+):
+    raise SystemExit(
+        f"FAIL: target tag targets model-transfer, "
+        f"which is held at {kv_holds['model-transfer']['tag']!r} by {holds_label}; update {holds_label} first"
+    )
+
 target_mt_images: dict[str, str] = {}
 for vendor in ("nvidia", "amd", "ascend"):
     cur_ref = defaults["model_transfer_images"].get(vendor, "")
     cur_tag = extract_ref_tag(cur_ref)
+    vk = f"model-transfer.{vendor}"
+    hold_key = vk if vk in kv_holds else ("model-transfer" if "model-transfer" in kv_holds else "")
+    if hold_key:
+        if explicit_mt_by_vendor.get(vendor) or explicit_mt_ver:
+            raise SystemExit(
+                f"FAIL: target tag targets {vk}, "
+                f"which is held at {kv_holds[hold_key]['tag']!r} by {holds_label}; update {holds_label} first"
+            )
+        if generic_targets.get("bare_v"):
+            if parse_version_key(generic_targets["bare_v"]) > parse_version_key(cur_tag.split("-", 1)[0]):
+                raise SystemExit(
+                    f"FAIL: AUTOSYNC_TARGET_TAG={generic_targets['bare_v']!r} targets {vk}, "
+                    f"which is held at {kv_holds[hold_key]['tag']!r} by {holds_label}; update {holds_label} first"
+                )
+        target_mt_images[vendor] = cur_ref
+        continue
     m_cur = re.fullmatch(r"v(\d+)\.(\d+)\.(\d+)-([A-Za-z0-9._-]+)", cur_tag)
     cur_flavor = m_cur.group(4) if m_cur else ""
     chosen_tag = explicit_mt_by_vendor.get(vendor, "")
@@ -1006,6 +1075,7 @@ discovery = {
     "nixl_rocm_project_version": nixl_rocm_project_version,
     "modelexpress_workspace_version": mx_workspace_version,
     "base_sha": base_sha,
+    "held_setting_images": kv_holds,
     "targets": {
         "mooncake_image": target_mooncake_image,
         "modelexpress_image": target_mx_image,
@@ -1298,6 +1368,7 @@ report = {
         "modelexpress": mx_stage_b,
         "model_transfer": mt_stage_b,
     },
+    "held_setting_images": disc.get("held_setting_images") or {},
     "recipe": recipe,
     "defaults": defaults,
     "targets": targets,

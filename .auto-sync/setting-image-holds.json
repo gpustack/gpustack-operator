@@ -1,0 +1,9 @@
+{
+  "schema_version": 1,
+  "holds": {
+    "mooncake": {
+      "tag": "0.3.13.post1-cpu",
+      "reason": "Keep kv-cache-backend-image at 0.3.13.post1-cpu while most inference engines still use Mooncake 0.3.13.post1."
+    }
+  }
+}

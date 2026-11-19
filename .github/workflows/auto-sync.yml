@@ -17,7 +17,7 @@ concurrency:
 
 on:
   schedule:
-    - cron: '0 1 * * 1'
+    - cron: '0 1 1 */2 *'
     - cron: '0 2 * * 1'
     - cron: '0 2 * * 2'
     - cron: '0 3 * * 2'
@@ -116,7 +116,7 @@ jobs:
               "k8s-deps",
           ]
           SCHEDULE_MAP = {
-              "0 1 * * 1": ["priors"],
+              "0 1 1 */2 *": ["priors"],
               "0 2 * * 1": ["slicing"],
               "0 2 * * 2": ["kv-transfer"],
               "0 3 * * 2": ["router"],
