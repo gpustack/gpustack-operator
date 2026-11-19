@@ -632,6 +632,41 @@ else
   fail "autosync::count_priors_profiles fallback accepts profiles: [] (${empty_counts})"
 fi
 
+# 3g. Ephemeral git restores tracked symlinks in symlink-stripped candidate copy, keeps
+#     git status clean (including site/public), passes docs/specs/crossrefs gates, and cleans up.
+CAND_SYMLINK="${SCRATCH}/cand-symlink"
+mkdir -p "${CAND_SYMLINK}"
+tar --exclude='.git' --exclude='.sbin' --exclude='.dist' --exclude='site/public' \
+  --exclude='.claude' --exclude='.codex' \
+  -cf - -C "${ROOT_DIR}" . | tar -xf - -C "${CAND_SYMLINK}"
+
+if (
+  # shellcheck source=./lib.sh
+  # shellcheck disable=SC1091
+  source "${CAND_SYMLINK}/.auto-sync/checks/lib.sh"
+  autosync::ensure_ephemeral_git "${CAND_SYMLINK}"
+  [[ -L "${CAND_SYMLINK}/.claude/skills" && "$(readlink "${CAND_SYMLINK}/.claude/skills")" == "../.agents/skills" ]]
+  [[ -L "${CAND_SYMLINK}/.claude/settings.json" && "$(readlink "${CAND_SYMLINK}/.claude/settings.json")" == "../.agents/hooks.json" ]]
+  [[ -L "${CAND_SYMLINK}/.codex/hooks.json" && "$(readlink "${CAND_SYMLINK}/.codex/hooks.json")" == "../.agents/hooks.json" ]]
+  mkdir -p "${CAND_SYMLINK}/site/public"
+  printf '<html></html>\n' > "${CAND_SYMLINK}/site/public/index.html"
+  [[ -z "$(git -C "${CAND_SYMLINK}" status --porcelain)" ]]
+  docs_scripts="${CAND_SYMLINK}/.claude/skills/gpustack-operator-docs/scripts"
+  bash "${docs_scripts}/check-docs.sh" "${CAND_SYMLINK}" >/dev/null
+  bash "${docs_scripts}/check-specs.sh" "${CAND_SYMLINK}" >/dev/null
+  bash "${docs_scripts}/check-crossrefs.sh" "${CAND_SYMLINK}" >/dev/null
+  autosync::cleanup_ephemeral_git "${CAND_SYMLINK}"
+  [[ ! -e "${CAND_SYMLINK}/.git" ]]
+  [[ ! -L "${CAND_SYMLINK}/.claude/skills" && ! -e "${CAND_SYMLINK}/.claude/skills" ]]
+  [[ ! -L "${CAND_SYMLINK}/.claude/settings.json" && ! -e "${CAND_SYMLINK}/.claude/settings.json" ]]
+  [[ ! -L "${CAND_SYMLINK}/.codex/hooks.json" && ! -e "${CAND_SYMLINK}/.codex/hooks.json" ]]
+  [[ ! -e "${CAND_SYMLINK}/site/public" ]]
+); then
+  pass "ensure_ephemeral_git restores tracked symlinks, excludes site/public, passes docs/specs/crossrefs, and cleans up"
+else
+  fail "ensure_ephemeral_git restores tracked symlinks, excludes site/public, passes docs/specs/crossrefs, and cleans up"
+fi
+
 echo
 if (( FAILS > 0 )); then
   echo "PRIORS SELFTEST FAILED: ${FAILS} failure(s), ${PASSES} passed" >&2

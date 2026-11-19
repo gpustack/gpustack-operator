@@ -227,14 +227,20 @@ def resolve_mooncake_release(fixture_root: str) -> tuple[str, list[str]]:
 
 
 def sync_git_repo(url: str, dst: str, pin_commit: str = "") -> str:
-    git_env = {**os.environ, "LC_ALL": "C"}
+    git_env = {**os.environ, "LC_ALL": "C", "GIT_LFS_SKIP_SMUDGE": "1"}
+    lfs_opts = [
+        "-c", "filter.lfs.smudge=",
+        "-c", "filter.lfs.process=",
+        "-c", "filter.lfs.clean=",
+        "-c", "filter.lfs.required=false",
+    ]
     if os.path.isdir(os.path.join(dst, ".git")):
-        subprocess.run(["git", "-C", dst, "fetch", "--depth", "1", "origin"], check=True, env=git_env)
-        subprocess.run(["git", "-C", dst, "checkout", "--detach", "FETCH_HEAD"], check=True, env=git_env)
+        subprocess.run(["git", *lfs_opts, "-C", dst, "fetch", "--depth", "1", "origin"], check=True, env=git_env)
+        subprocess.run(["git", *lfs_opts, "-C", dst, "checkout", "-f", "--detach", "FETCH_HEAD"], check=True, env=git_env)
     else:
         if os.path.exists(dst):
             shutil.rmtree(dst)
-        subprocess.run(["git", "clone", "--depth", "1", url, dst], check=True, env=git_env)
+        subprocess.run(["git", *lfs_opts, "clone", "--depth", "1", url, dst], check=True, env=git_env)
     head_sha = subprocess.check_output(["git", "-C", dst, "rev-parse", "HEAD"], text=True, env=git_env).strip()
     if pin_commit and re.fullmatch(r"[0-9a-f]{40}", pin_commit):
         rc = subprocess.run(
@@ -482,12 +488,17 @@ if os.path.isfile(runner_cann_df):
     runner_cann_txt = read_text(runner_cann_df)
     if has_dockerfile_arg(runner_cann_txt, "VLLM_HIXL_COMMIT"):
         runner_hixl_commit = read_dockerfile_arg(runner_cann_txt, "VLLM_HIXL_COMMIT", runner_cann_df)
-if (
-    not fixture_dir
-    and re.fullmatch(r"[0-9a-f]{40}", runner_hixl_commit)
-    and runner_hixl_commit != recipe["hixl_commit"]
-):
-    sync_git_repo("https://github.com/hicann/hixl.git", hixl_stage, runner_hixl_commit)
+if not fixture_dir and re.fullmatch(r"[0-9a-f]{40}", runner_hixl_commit):
+    has_runner_commit = (
+        subprocess.run(
+            ["git", "-C", hixl_stage, "cat-file", "-e", f"{runner_hixl_commit}^{{commit}}"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        ).returncode
+        == 0
+    )
+    if not has_runner_commit:
+        sync_git_repo("https://github.com/hicann/hixl.git", hixl_stage, runner_hixl_commit)
 runner_patch_path = os.path.join(runner_stage, "pack/cann/patches/hixl/001_channel_generation.patch")
 if os.path.isfile(runner_patch_path):
     with open(runner_patch_path, "rb") as f:

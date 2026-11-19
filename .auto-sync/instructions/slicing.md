@@ -34,8 +34,9 @@ The candidate sandbox runs offline (`networkMode: none`) inside `linux-bwrap`. H
   `head_commit`, `watched_changed`, `changed_files`, and `patch_clean` (`true|false`) from running
   `patch -p1 --dry-run --batch --forward` against `ubs-virt-enpu/vcann-rt` at target HEAD.
 - `.auto-sync/.stage/slicing/upstream-records.json` — normalized `TaskpackUpstreamRecord` entries.
-- `.auto-sync/.stage/slicing/ubs-virt/ubs-virt-enpu/vcann-rt/` — CRLF-exact snapshot at `ubs-virt`
-  target HEAD (present when `ubs-virt` is `available` or `patch_clean` is `false`).
+- `.auto-sync/.stage/slicing/ubs-virt/ubs-virt-enpu/vcann-rt/` (and `ubs-virt-enpu/common/` when
+  present) — CRLF-exact snapshot at `ubs-virt` target HEAD (present when `ubs-virt` is `available`
+  or `patch_clean` is `false`).
 - `.auto-sync/.stage/slicing/hami-core/` — `CMakeLists.txt`, `src/CMakeLists.txt`, and `build.sh`
   at `hami-core` target HEAD (present when `hami-core` is `available`).
 
@@ -48,7 +49,7 @@ publishing the Pull Request.
 ## Settlement and No-Change Behavior
 
 - Check both `slicing-preflight-report.json` and the `upstream-records` input.
-- If an upstream's `watched_changed` is `false` (for example, commits only touched documentation or CI outside `src`, `include`, `CMakeLists.txt`, `build.sh` for `HAMi-core`, or outside `ubs-virt-enpu/vcann-rt` for `ubs-virt`), do NOT bump its commit in `pack/gpustack-operator/Dockerfile`.
+- If an upstream's `watched_changed` is `false` (for example, commits only touched documentation or CI outside `src`, `include`, `CMakeLists.txt`, `build.sh` for `HAMi-core`, or outside `ubs-virt-enpu/vcann-rt` and `ubs-virt-enpu/common` for `ubs-virt`), do NOT bump its commit in `pack/gpustack-operator/Dockerfile`.
 - If neither upstream has watched-path changes (or both already match `pack/gpustack-operator/Dockerfile`), settle cleanly as `no_change` without editing files.
 
 ## Critical Ascend `vcann-rt` Patch and CRLF Rules

@@ -213,7 +213,11 @@ go test ./gen/priors/... ./pkg/worker/scaling/...
 # 4. Run repository docs lint (full make lint docs when hugo + make are available,
 #    otherwise direct docs/specs/crossrefs/skills gates).
 if command -v hugo >/dev/null 2>&1 && command -v make >/dev/null 2>&1; then
-  make lint docs
+  lint_env=("AUTOSYNC_IN_VALIDATOR=true")
+  if [[ -z "${UV_CACHE_DIR:-}" || ! -d "${UV_CACHE_DIR}" ]] || ! command -v uv >/dev/null 2>&1; then
+    lint_env+=("GPUSTACK_SKIP_PYTHON_LINT=true")
+  fi
+  env "${lint_env[@]}" make lint docs
 else
   docs_scripts="${AUTOSYNC_CANDIDATE_ROOT}/.agents/skills/gpustack-operator-docs/scripts"
   bash "${docs_scripts}/check-docs.sh" "${AUTOSYNC_CANDIDATE_ROOT}"

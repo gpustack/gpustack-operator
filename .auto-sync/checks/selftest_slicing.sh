@@ -362,6 +362,42 @@ else
   fail "preflight-slicing.sh keeps source_revision == base_sha on up_to_date no_change"
 fi
 
+# 4d. ubs-virt-enpu/common watched-path change triggers available status and stages ../common.
+mkdir -p "${UBS_MOCK}/ubs-virt-enpu/common/include"
+printf '#define COMMON_VER 1\n' > "${UBS_MOCK}/ubs-virt-enpu/common/include/common.h"
+git -C "${UBS_MOCK}" add -A
+git -C "${UBS_MOCK}" commit -q -m "ubs v4 common change"
+UBS_COMMON_HEAD="$(git -C "${UBS_MOCK}" rev-parse HEAD)"
+
+STAGE_COMMON="${SCRATCH}/stage-common/slicing"
+if (
+  cd "${SYNTH_NOCHANGE}" && \
+  AUTOSYNC_SLICING_HAMI_REPO_URL="${HAMI_MOCK}" \
+  AUTOSYNC_SLICING_UBS_REPO_URL="${UBS_MOCK}" \
+  bash "${SYNTH_NOCHANGE}/.auto-sync/scripts/preflight-slicing.sh" "${STAGE_COMMON}"
+) >/dev/null 2>&1 && \
+COMMON_SRC_REV="$(python3 - "${STAGE_COMMON}" "${UBS_COMMON_HEAD}" <<'PY'
+import json
+import os
+import sys
+stage_dir, ubs_head = sys.argv[1:3]
+with open(os.path.join(stage_dir, "upstream-records.json"), "r", encoding="utf-8") as f:
+    by_id = {r["upstreamId"]: r for r in json.load(f)}
+assert by_id["ubs-virt"]["status"] == "available", by_id["ubs-virt"]
+assert by_id["ubs-virt"]["version"] == ubs_head, by_id["ubs-virt"]
+with open(os.path.join(stage_dir, "slicing-preflight-report.json"), "r", encoding="utf-8") as f:
+    rep = json.load(f)
+assert rep["ubs_virt"]["watched_changed"] is True, rep["ubs_virt"]
+assert "ubs-virt-enpu/common" in rep["ubs_virt"]["watched_paths"], rep["ubs_virt"]
+print(rep["source_revision"])
+PY
+)" && \
+git -C "${SYNTH_NOCHANGE}" ls-tree -r --name-only "${COMMON_SRC_REV}" .auto-sync/.stage/slicing | grep -qF ".auto-sync/.stage/slicing/ubs-virt/ubs-virt-enpu/common/include/common.h"; then
+  pass "preflight-slicing.sh watches and stages ubs-virt-enpu/common changes"
+else
+  fail "preflight-slicing.sh watches and stages ubs-virt-enpu/common changes"
+fi
+
 # 5. Gitless env -i validate_slicing.sh tests with stubbed AUTOSYNC_XBUILD_RUNNER.
 STUB_RUNNER="${SCRATCH}/stub-xbuild-runner.sh"
 cat > "${STUB_RUNNER}" <<'SH'

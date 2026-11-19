@@ -4,8 +4,9 @@
 #
 # Build the vcann-rt logical-slicing runtime (libvruntime.so + enpu-monitor) inside a
 # CANN base image. <src-dir> is the vcann-rt source tree (the Dockerfile stage clones
-# ubs-virt and passes its ubs-virt-enpu/vcann-rt subdir), and the stage must also
-# bind-mount external/ascend/vcann-rt at /vcann-rt-patches, whose *.patch files are
+# ubs-virt and passes its ubs-virt-enpu/vcann-rt subdir), and sibling ../common is
+# staged alongside vcann-rt when present. The stage must also bind-mount
+# external/ascend/vcann-rt at /vcann-rt-patches, whose *.patch files are
 # applied to a copy of that tree before the build; the build products are installed
 # under:
 #   <out-dir>/lib/libvruntime.so
@@ -21,11 +22,17 @@ out="${2:?usage: build-libvnpu.sh <src-dir> <out-dir>}"
 # CANN toolkit path (the base image already exports ASCEND_HOME_PATH; be defensive).
 export ASCEND_HOME_PATH="${ASCEND_HOME_PATH:-/usr/local/Ascend/ascend-toolkit/latest}"
 
-# Copy the source into a writable work dir.
-work="/tmp/vcann-rt"
-rm -rf "${work}"
+# Copy the source (and sibling ../common when present) into a writable work dir.
+work_root="/tmp/ubs-virt-enpu"
+work="${work_root}/vcann-rt"
+rm -rf "${work_root}"
 mkdir -p "${work}"
 cp -r "${src}/." "${work}/"
+common_src="$(dirname "${src}")/common"
+if [ -d "${common_src}" ]; then
+    mkdir -p "${work_root}/common"
+    cp -r "${common_src}/." "${work_root}/common/"
+fi
 cd "${work}"
 
 # Apply GPUStack's vendored patches to the pinned upstream source. The build stage
