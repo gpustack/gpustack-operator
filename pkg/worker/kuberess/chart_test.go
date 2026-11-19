@@ -600,6 +600,65 @@ func TestChartComponentNodeSelectorReplacesTheGlobalOne(t *testing.T) {
 		"a component that sets none still falls back")
 }
 
+// TestChartNFDWorkerCreatesFeaturesDOnTheHost pins the hostPath type of the NFD worker's
+// features.d volume. The directory is a drop-in point for user-supplied feature files, and
+// nothing in the cluster creates it: the subchart's other hostPaths can stay untyped because
+// every Linux node carries /boot or /sys, but a node that never ran NFD has no features.d, and
+// an untyped hostPath makes kubelet skip the existence check, so the bind mount fails at
+// container start and the node stays unlabelled. The mount stays read-only — the files in it
+// belong to the administrator, not to the worker.
+func TestChartNFDWorkerCreatesFeaturesDOnTheHost(t *testing.T) {
+	worker, ok := renderChart(t, nil)["DaemonSet/"+SystemNamespaceName+"/node-feature-discovery-worker"]
+	require.True(t, ok, "the render carries the NFD worker DaemonSet")
+
+	var daemonSet struct {
+		Spec struct {
+			Template struct {
+				Spec struct {
+					Volumes []struct {
+						Name     string `yaml:"name"`
+						HostPath *struct {
+							Path string `yaml:"path"`
+							Type string `yaml:"type"`
+						} `yaml:"hostPath"`
+					} `yaml:"volumes"`
+					Containers []struct {
+						VolumeMounts []struct {
+							Name     string `yaml:"name"`
+							ReadOnly *bool  `yaml:"readOnly"`
+						} `yaml:"volumeMounts"`
+					} `yaml:"containers"`
+				} `yaml:"spec"`
+			} `yaml:"template"`
+		} `yaml:"spec"`
+	}
+	require.NoError(t, yaml.Unmarshal([]byte(worker.manifest), &daemonSet))
+
+	featuresD := -1
+	for i, volume := range daemonSet.Spec.Template.Spec.Volumes {
+		if volume.Name == "features-d" {
+			featuresD = i
+		}
+	}
+	require.GreaterOrEqual(t, featuresD, 0, "the NFD worker mounts the features.d hostPath")
+	volume := daemonSet.Spec.Template.Spec.Volumes[featuresD]
+	require.NotNil(t, volume.HostPath, "features-d is a hostPath volume")
+	assert.Equal(t, "/etc/kubernetes/node-feature-discovery/features.d/", volume.HostPath.Path,
+		"features.d is mounted where NFD reads user-supplied feature files")
+	assert.Equal(t, "DirectoryOrCreate", volume.HostPath.Type,
+		"kubelet creates the directory on first use so a fresh node starts the worker")
+
+	for _, container := range daemonSet.Spec.Template.Spec.Containers {
+		for _, mount := range container.VolumeMounts {
+			if mount.Name == "features-d" {
+				require.NotNil(t, mount.ReadOnly, "features-d states its read-only mode")
+				assert.True(t, *mount.ReadOnly,
+					"the worker reads features.d without writing it")
+			}
+		}
+	}
+}
+
 // renderedWorkload is one workload of a rendered chart, and whether Helm runs it as a hook —
 // which decides whether the placement contract covers it at all.
 type renderedWorkload struct {
