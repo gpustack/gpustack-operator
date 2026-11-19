@@ -1,22 +1,22 @@
 {
   "schema_version": 1,
-  "summary": "Baseline InferenceX capacity priors catalog state",
+  "summary": "Digest-only InferenceX refresh captured 2026-11-19: availability and four benchmark snapshots changed SHA-256 without altering priors.yaml profiles; records.md digests, capture date and proposal versions updated",
   "versions": {
-    "inferencex-repo": "",
-    "inferencex-availability": "43bc03ac251697770697addc3e1c2b1ff64e78e444f2ed689fec6ed73d35ef23"
+    "inferencex-repo": "6ed37742453271fc5851b873fd1c8009f37520b1",
+    "inferencex-availability": "77a0706ff087420d56728cd351dc2baae70bcd4643ea20b9cd6b082b36f5a786"
   },
   "subscriptions": [
     {
       "id": "inferencex-repo",
       "kind": "git-commit",
       "source": "SemiAnalysisAI/InferenceX",
-      "version": ""
+      "version": "6ed37742453271fc5851b873fd1c8009f37520b1"
     },
     {
       "id": "inferencex-availability",
       "kind": "http-json",
       "source": "https://inferencex.semianalysis.com/api/v1/availability",
-      "version": "43bc03ac251697770697addc3e1c2b1ff64e78e444f2ed689fec6ed73d35ef23"
+      "version": "77a0706ff087420d56728cd351dc2baae70bcd4643ea20b9cd6b082b36f5a786"
     }
   ]
 }
