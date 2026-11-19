@@ -921,21 +921,29 @@ def copy_regular(src_file: str, rel_dest: str) -> None:
         raise SystemExit(f"FAIL: stage bundle source is not a regular file: {src_file}")
     safe_rel = validate_rel(rel_dest)
     size = os.path.getsize(real_src)
+    dst = os.path.join(bundle_root, *safe_rel.split("/"))
+    if os.path.isfile(dst):
+        total_bytes -= os.path.getsize(dst)
     total_bytes += size
     if total_bytes > max_bytes:
         raise SystemExit(
             f"FAIL: stage bundle for {domain} exceeds {max_bytes} byte cap ({total_bytes} bytes)"
         )
-    dst = os.path.join(bundle_root, *safe_rel.split("/"))
     os.makedirs(os.path.dirname(dst), exist_ok=True)
     with open(real_src, "rb") as sf, open(dst, "wb") as df:
         shutil.copyfileobj(sf, df)
     os.chmod(dst, 0o644)
 
 
+# Non-cyclic sibling directory symlinks are intentionally materialized into regular files at each distinct
+# destination path (bounded by max_bytes); tracking ancestors avoids dropping valid aliased subtrees.
 def walk_bundle_dir(
-    cur_dir: str, rel_prefix: str, ancestors: frozenset[tuple[int, int]]
+    cur_dir: str, rel_prefix: str, ancestors: frozenset[tuple[int, int]], depth: int = 0
 ) -> None:
+    if depth > 64:
+        raise SystemExit(
+            f"FAIL: stage bundle directory nesting exceeds max depth 64: {cur_dir}"
+        )
     if os.path.islink(cur_dir) and not os.path.exists(cur_dir):
         raise SystemExit(f"FAIL: stage bundle source contains dangling symlink: {cur_dir}")
     st = os.stat(cur_dir)
@@ -948,6 +956,7 @@ def walk_bundle_dir(
         return
     next_ancestors = ancestors | {inode_key}
     for entry in sorted(os.listdir(cur_dir)):
+        # Git refuses any '.git' path segment (directory or worktree/submodule gitfile) when staging trees.
         if entry == ".git":
             continue
         entry_path = os.path.join(cur_dir, entry)
@@ -961,7 +970,7 @@ def walk_bundle_dir(
             else entry
         )
         if os.path.isdir(entry_path):
-            walk_bundle_dir(entry_path, entry_rel, next_ancestors)
+            walk_bundle_dir(entry_path, entry_rel, next_ancestors, depth + 1)
         else:
             copy_regular(entry_path, entry_rel)
 
