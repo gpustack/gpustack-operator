@@ -211,11 +211,12 @@ func modelDeploymentScalerPriorRequestMatched(
 	if err := modelDeploymentScalerPriorOmittedDefaultsGate(target.Spec.Engine.Name, profile.ServingConfig, declaration.flags); err != nil {
 		return request, modelDeploymentScalerPriorRefusal(role.Name, "%v", err)
 	}
-	manufacturer := ""
+	manufacturer, family := "", ""
 	if declaration.accelerator != nil {
 		manufacturer = declaration.accelerator.Status.Detail.Manufacturer
+		family = declaration.accelerator.Status.Detail.Family
 	}
-	if err := modelDeploymentScalerOperatorEnvGateWithManufacturer(target.Spec.Engine.Name, target, role, manufacturer); err != nil {
+	if err := modelDeploymentScalerOperatorEnvGateWithManufacturer(target.Spec.Engine.Name, target, role, manufacturer, family); err != nil {
 		return request, modelDeploymentScalerPriorRefusal(role.Name, "%v", err)
 	}
 	request.ServingConfig = serving
@@ -352,11 +353,12 @@ func modelDeploymentScalerValidateDisaggregatedStage(
 	if err := modelDeploymentScalerPriorOmittedDefaultsGate(target.Spec.Engine.Name, stageMergedServing, declaration.flags); err != nil {
 		return priors.DisaggregatedStage{}, modelDeploymentScalerPriorRefusal(role.Name, "%v", err)
 	}
-	manufacturer := ""
+	manufacturer, family := "", ""
 	if declaration.accelerator != nil {
 		manufacturer = declaration.accelerator.Status.Detail.Manufacturer
+		family = declaration.accelerator.Status.Detail.Family
 	}
-	if err := modelDeploymentScalerOperatorEnvGateWithManufacturer(target.Spec.Engine.Name, target, role, manufacturer); err != nil {
+	if err := modelDeploymentScalerOperatorEnvGateWithManufacturer(target.Spec.Engine.Name, target, role, manufacturer, family); err != nil {
 		return priors.DisaggregatedStage{}, modelDeploymentScalerPriorRefusal(role.Name, "%v", err)
 	}
 	return priors.DisaggregatedStage{
@@ -922,17 +924,17 @@ var modelDeploymentScalerDtypeSpellings = []string{
 func modelDeploymentScalerOperatorEnvGate(
 	engine string, target *workercore.ModelDeployment, role *workercore.ModelDeploymentRole,
 ) error {
-	return modelDeploymentScalerOperatorEnvGateWithManufacturer(engine, target, role, "")
+	return modelDeploymentScalerOperatorEnvGateWithManufacturer(engine, target, role, "", "")
 }
 
 func modelDeploymentScalerOperatorEnvGateWithManufacturer(
-	engine string, target *workercore.ModelDeployment, role *workercore.ModelDeploymentRole, manufacturer string,
+	engine string, target *workercore.ModelDeployment, role *workercore.ModelDeploymentRole, manufacturer, family string,
 ) error {
 	declared := slices.Clone(modelDeploymentDefaultedEnvNames)
 	if target.Spec.Model.ArtifactRef != nil {
 		declared = append(declared, modelDeploymentArtifactOwnedKeys[engine].Env...)
 	}
-	rendered, err := modelDeploymentScalerRenderedOperatorEnv(engine, target, role, manufacturer)
+	rendered, err := modelDeploymentScalerRenderedOperatorEnv(engine, target, role, manufacturer, family)
 	if err != nil {
 		return err
 	}
@@ -940,7 +942,7 @@ func modelDeploymentScalerOperatorEnvGateWithManufacturer(
 }
 
 func modelDeploymentScalerConnectorRender(
-	engine string, target *workercore.ModelDeployment, role *workercore.ModelDeploymentRole, manufacturer string,
+	engine string, target *workercore.ModelDeployment, role *workercore.ModelDeploymentRole, manufacturer, family string,
 ) (ModelDeploymentConnectorRender, error) {
 	if target == nil || len(role.Command) != 0 {
 		return ModelDeploymentConnectorRender{}, nil
@@ -972,9 +974,14 @@ func modelDeploymentScalerConnectorRender(
 				kvTransferProtocol = "hip"
 			}
 		}
+		directProtocol := ModelDeploymentDirectInterfaceProtocol(
+			target, role, manufacturer, family, target.Spec.Model.ArtifactRef != nil, false,
+		)
 		in := ModelDeploymentConnectorInput{
 			Engine:             engine,
 			Manufacturer:       manufacturer,
+			AcceleratorFamily:  family,
+			AscendHostRoCE:     modelDeploymentAscendHostRoCE(engine, manufacturer, family, directProtocol, role),
 			Kind:               role.Kind,
 			Disaggregated:      ModelDeploymentDeclaresBothHalves(target),
 			Parallelism:        pair,
@@ -994,11 +1001,12 @@ func modelDeploymentScalerConnectorRender(
 	if roleKind == workercore.ModelDeploymentRoleKindEncode &&
 		modelDeploymentEPDReachesEncoderStage(target, manufacturer) {
 		return SynthesizeModelDeploymentConnector(ModelDeploymentConnectorInput{
-			Engine:       engine,
-			Manufacturer: manufacturer,
-			Kind:         role.Kind,
-			EncoderCache: encoderLeg,
-			EncoderURLs:  encoderURLs,
+			Engine:            engine,
+			Manufacturer:      manufacturer,
+			AcceleratorFamily: family,
+			Kind:              role.Kind,
+			EncoderCache:      encoderLeg,
+			EncoderURLs:       encoderURLs,
 		})
 	}
 	return ModelDeploymentConnectorRender{}, nil
@@ -1007,9 +1015,9 @@ func modelDeploymentScalerConnectorRender(
 // modelDeploymentScalerRenderedOperatorEnv returns the names the operator
 // writes into the engine container, as the renderer writes them.
 func modelDeploymentScalerRenderedOperatorEnv(
-	engine string, target *workercore.ModelDeployment, role *workercore.ModelDeploymentRole, manufacturer string,
+	engine string, target *workercore.ModelDeployment, role *workercore.ModelDeploymentRole, manufacturer, family string,
 ) ([]string, error) {
-	connector, err := modelDeploymentScalerConnectorRender(engine, target, role, manufacturer)
+	connector, err := modelDeploymentScalerConnectorRender(engine, target, role, manufacturer, family)
 	if err != nil {
 		return nil, err
 	}
@@ -1073,6 +1081,7 @@ var modelDeploymentScalerCapacityNeutralEnvNames = []string{
 	"VLLM_USE_V2_MODEL_RUNNER",
 	inject.SGLangDisaggregationNIXLBackendEnv,
 	inject.AscendAutoConnectEnv,
+	inject.AscendLocalCommResEnv,
 	inject.AscendGlobalResourceConfigEnv,
 	inject.HCCLIntraRoCEEnableEnv,
 	inject.AscendMFTransferProtocolEnv,

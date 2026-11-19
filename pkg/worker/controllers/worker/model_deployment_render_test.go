@@ -1549,8 +1549,236 @@ func TestModelDeploymentDirectInterfaceProtocol(t *testing.T) {
 				}
 			})
 			assert.Equal(t, tc.want, ModelDeploymentDirectInterfaceProtocol(
-				md, &md.Spec.Roles[0], tc.manufacturer, false, tc.awsEFAEnabled,
+				md, &md.Spec.Roles[0], tc.manufacturer, "", false, tc.awsEFAEnabled,
 			))
+		})
+	}
+}
+
+func TestModelDeploymentDirectInterfaceProtocol_AscendA5(t *testing.T) {
+	qty1 := resource.MustParse("1")
+	routedPair := func(engine, kvBackend string, prefillIface, decodeIface, withKVCache, withEncode bool) *workercore.ModelDeployment {
+		return newRenderDeployment(func(md *workercore.ModelDeployment) {
+			md.Spec.Engine.Name = engine
+			if !withKVCache {
+				md.Spec.KVCache = nil
+			}
+			md.Spec.Router = &workercore.ModelDeploymentRouter{Name: workercore.ModelDeploymentRouterLLMD}
+			if kvBackend != "" {
+				md.Spec.KVTransfer = &workercore.ModelDeploymentKVTransfer{Backend: kvBackend}
+			}
+			md.Spec.Roles = []workercore.ModelDeploymentRole{
+				{
+					Name: "prefill",
+					Kind: workercore.ModelDeploymentRoleKindPrefill,
+				},
+				{
+					Name: "decode",
+					Kind: workercore.ModelDeploymentRoleKindDecode,
+				},
+			}
+			if prefillIface {
+				md.Spec.Roles[0].Resources = &workercore.ModelDeploymentRoleResources{Interface: ptr.To(qty1)}
+			}
+			if decodeIface {
+				md.Spec.Roles[1].Resources = &workercore.ModelDeploymentRoleResources{Interface: ptr.To(qty1)}
+			}
+			if withEncode {
+				md.Spec.Roles = append(md.Spec.Roles, workercore.ModelDeploymentRole{
+					Name:      "encode",
+					Kind:      workercore.ModelDeploymentRoleKindEncode,
+					Resources: &workercore.ModelDeploymentRoleResources{Interface: ptr.To(qty1)},
+				})
+			}
+		})
+	}
+
+	cases := []struct {
+		name           string
+		md             *workercore.ModelDeployment
+		roleIndex      int
+		family         string
+		remoteDelivery bool
+		awsEFAEnabled  bool
+		want           string
+	}{
+		{
+			name:   "A5 vLLM routed P/D default HIXL grants rdma",
+			md:     routedPair(workercore.ModelDeploymentEngineVLLM, "", true, true, false, false),
+			family: nodefeature.AcceleratorFamilyAscend950,
+			want:   "rdma",
+		},
+		{
+			name:          "A5 vLLM routed P/D explicit HIXL grants rdma even when awsEFAEnabled is true",
+			md:            routedPair(workercore.ModelDeploymentEngineVLLM, workercore.ModelDeploymentKVTransferBackendHIXL, true, true, false, false),
+			family:        nodefeature.AcceleratorFamilyAscend950,
+			awsEFAEnabled: true,
+			want:          "rdma",
+		},
+		{
+			name:          "A5 vLLM routed P/D explicit Mooncake grants rdma even when awsEFAEnabled is true",
+			md:            routedPair(workercore.ModelDeploymentEngineVLLM, workercore.ModelDeploymentKVTransferBackendMooncake, true, true, true, false),
+			family:        nodefeature.AcceleratorFamilyAscend950,
+			awsEFAEnabled: true,
+			want:          "rdma",
+		},
+		{
+			name:      "A5 vLLM routed P/D decode half also grants rdma",
+			md:        routedPair(workercore.ModelDeploymentEngineVLLM, workercore.ModelDeploymentKVTransferBackendHIXL, true, true, true, true),
+			roleIndex: 1,
+			family:    nodefeature.AcceleratorFamilyAscend950,
+			want:      "rdma",
+		},
+		{
+			name:      "A5 vLLM Encode role returns empty even with KVCache and P/D siblings",
+			md:        routedPair(workercore.ModelDeploymentEngineVLLM, workercore.ModelDeploymentKVTransferBackendHIXL, true, true, true, true),
+			roleIndex: 2,
+			family:    nodefeature.AcceleratorFamilyAscend950,
+			want:      "",
+		},
+		{
+			name:   "A5 vLLM asymmetric P/D without KVCache rejected",
+			md:     routedPair(workercore.ModelDeploymentEngineVLLM, workercore.ModelDeploymentKVTransferBackendHIXL, true, false, false, false),
+			family: nodefeature.AcceleratorFamilyAscend950,
+			want:   "",
+		},
+		{
+			name:   "A5 vLLM asymmetric P/D with KVCache still rejected",
+			md:     routedPair(workercore.ModelDeploymentEngineVLLM, workercore.ModelDeploymentKVTransferBackendHIXL, true, false, true, false),
+			family: nodefeature.AcceleratorFamilyAscend950,
+			want:   "",
+		},
+		{
+			name: "A5 vLLM unrouted pair with KVCache returns empty",
+			md: func() *workercore.ModelDeployment {
+				md := routedPair(workercore.ModelDeploymentEngineVLLM, "", true, true, true, false)
+				md.Spec.Router = nil
+				return md
+			}(),
+			family: nodefeature.AcceleratorFamilyAscend950,
+			want:   "",
+		},
+		{
+			name: "A5 vLLM lone Prefill with KVCache grants rdma",
+			md: newRenderDeployment(func(md *workercore.ModelDeployment) {
+				md.Spec.Roles[0].Kind = workercore.ModelDeploymentRoleKindPrefill
+				md.Spec.Roles[0].Resources = &workercore.ModelDeploymentRoleResources{Interface: ptr.To(qty1)}
+			}),
+			family: nodefeature.AcceleratorFamilyAscend950,
+			want:   "rdma",
+		},
+		{
+			name: "A5 vLLM lone Decode without KVCache returns empty",
+			md: newRenderDeployment(func(md *workercore.ModelDeployment) {
+				md.Spec.KVCache = nil
+				md.Spec.Roles[0].Kind = workercore.ModelDeploymentRoleKindDecode
+				md.Spec.Roles[0].Resources = &workercore.ModelDeploymentRoleResources{Interface: ptr.To(qty1)}
+			}),
+			family: nodefeature.AcceleratorFamilyAscend950,
+			want:   "",
+		},
+		{
+			name: "A5 vLLM single-Pod Server with KVCache grants rdma even when awsEFAEnabled is true",
+			md: newRenderDeployment(func(md *workercore.ModelDeployment) {
+				md.Spec.Roles[0].Kind = workercore.ModelDeploymentRoleKindServer
+				md.Spec.Roles[0].ReplicaSize = 1
+				md.Spec.Roles[0].Resources = &workercore.ModelDeploymentRoleResources{Interface: ptr.To(qty1)}
+			}),
+			family:        nodefeature.AcceleratorFamilyAscend950,
+			awsEFAEnabled: true,
+			want:          "rdma",
+		},
+		{
+			name: "A5 vLLM single-Pod Server without KVCache returns empty even on remote delivery",
+			md: newRenderDeployment(func(md *workercore.ModelDeployment) {
+				md.Spec.KVCache = nil
+				md.Spec.Roles[0].Kind = workercore.ModelDeploymentRoleKindServer
+				md.Spec.Roles[0].ReplicaSize = 1
+				md.Spec.Roles[0].Resources = &workercore.ModelDeploymentRoleResources{Interface: ptr.To(qty1)}
+			}),
+			family:         nodefeature.AcceleratorFamilyAscend950,
+			remoteDelivery: true,
+			awsEFAEnabled:  true,
+			want:           "",
+		},
+		{
+			name: "A5 vLLM multi-Pod Server without KVCache grants rdma",
+			md: newRenderDeployment(func(md *workercore.ModelDeployment) {
+				md.Spec.KVCache = nil
+				md.Spec.Roles[0].Kind = workercore.ModelDeploymentRoleKindServer
+				md.Spec.Roles[0].ReplicaSize = 2
+				md.Spec.Roles[0].Resources = &workercore.ModelDeploymentRoleResources{Interface: ptr.To(qty1)}
+			}),
+			family:        nodefeature.AcceleratorFamilyAscend950,
+			awsEFAEnabled: true,
+			want:          "rdma",
+		},
+		{
+			name: "A5 vLLM elasticEp Server without KVCache grants rdma",
+			md: newRenderDeployment(func(md *workercore.ModelDeployment) {
+				md.Spec.KVCache = nil
+				md.Spec.Roles[0].Kind = workercore.ModelDeploymentRoleKindServer
+				md.Spec.Roles[0].ReplicaSize = 1
+				md.Spec.Roles[0].ElasticEP = &workercore.ModelDeploymentRoleElasticEP{Width: 2}
+				md.Spec.Roles[0].Resources = &workercore.ModelDeploymentRoleResources{Interface: ptr.To(qty1)}
+			}),
+			family:        nodefeature.AcceleratorFamilyAscend950,
+			awsEFAEnabled: true,
+			want:          "rdma",
+		},
+		{
+			name: "A5 vLLM command take-over returns empty",
+			md: func() *workercore.ModelDeployment {
+				md := routedPair(workercore.ModelDeploymentEngineVLLM, workercore.ModelDeploymentKVTransferBackendHIXL, true, true, true, false)
+				md.Spec.Roles[0].Command = []string{"vllm", "serve", "m"}
+				return md
+			}(),
+			family: nodefeature.AcceleratorFamilyAscend950,
+			want:   "",
+		},
+		{
+			name:   "A5 SGLang routed P/D returns empty",
+			md:     routedPair(workercore.ModelDeploymentEngineSGLang, workercore.ModelDeploymentKVTransferBackendHIXL, true, true, true, false),
+			family: nodefeature.AcceleratorFamilyAscend950,
+			want:   "",
+		},
+		{
+			name: "A5 SGLang single-Pod Server with KVCache returns empty",
+			md: newRenderDeployment(func(md *workercore.ModelDeployment) {
+				md.Spec.Engine.Name = workercore.ModelDeploymentEngineSGLang
+				md.Spec.Roles[0].Kind = workercore.ModelDeploymentRoleKindServer
+				md.Spec.Roles[0].Resources = &workercore.ModelDeploymentRoleResources{Interface: ptr.To(qty1)}
+			}),
+			family: nodefeature.AcceleratorFamilyAscend950,
+			want:   "",
+		},
+		{
+			name:   "A2 910B routed P/D returns empty",
+			md:     routedPair(workercore.ModelDeploymentEngineVLLM, workercore.ModelDeploymentKVTransferBackendHIXL, true, true, true, false),
+			family: "910B",
+			want:   "",
+		},
+		{
+			name:   "A3 910C Server with KVCache returns empty",
+			md:     newRenderDeployment(),
+			family: "910C",
+			want:   "",
+		},
+		{
+			name:   "unconverged empty family Ascend returns empty",
+			md:     routedPair(workercore.ModelDeploymentEngineVLLM, workercore.ModelDeploymentKVTransferBackendHIXL, true, true, true, false),
+			family: "",
+			want:   "",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := ModelDeploymentDirectInterfaceProtocol(
+				tc.md, &tc.md.Spec.Roles[tc.roleIndex], nodefeature.ManufacturerAscend, tc.family,
+				tc.remoteDelivery, tc.awsEFAEnabled,
+			)
+			assert.Equal(t, tc.want, got)
 		})
 	}
 }
@@ -3961,5 +4189,345 @@ func TestRenderModelDeploymentPod_CPUOnlyUnqueuedRole(t *testing.T) {
 		assert.Equal(t, "true", pod.Spec.NodeSelector["gpustack.ai/managed"])
 		assert.NotContains(t, pod.Spec.NodeSelector, nodefeature.NodeCPUOnlyLabelKey)
 		assert.Contains(t, pod.Spec.Tolerations, core.Toleration{Operator: core.TolerationOpExists})
+	})
+}
+
+func TestRenderModelDeploymentPod_UpgradeHashStabilityWithFamily(t *testing.T) {
+	require.Equal(t, 5, modelDeploymentRenderVersion, "render version must stay 5")
+
+	storeConnection := func(protocol string) *ModelDeploymentConnectorInput {
+		return &ModelDeploymentConnectorInput{
+			Domain:              "chat",
+			Dtype:               "bfloat16",
+			MasterServerAddress: "shared-kv-master.gpustack-system.svc:50051",
+			Protocols:           []string{protocol},
+		}
+	}
+
+	nonA5Cases := []struct {
+		name          string
+		manufacturer  string
+		family        string
+		engine        string
+		router        string
+		kvBackend     string
+		storeProtocol string
+		disaggregated bool
+	}{
+		{
+			name:         "NVIDIA Hopper aggregated Server",
+			manufacturer: nodefeature.ManufacturerNVIDIA,
+			family:       "hopper",
+			engine:       workercore.ModelDeploymentEngineVLLM,
+		},
+		{
+			name:          "NVIDIA Hopper Server with KVCache",
+			manufacturer:  nodefeature.ManufacturerNVIDIA,
+			family:        "hopper",
+			engine:        workercore.ModelDeploymentEngineVLLM,
+			storeProtocol: "rdma",
+		},
+		{
+			name:          "NVIDIA Hopper vLLM P/D NIXL",
+			manufacturer:  nodefeature.ManufacturerNVIDIA,
+			family:        "hopper",
+			engine:        workercore.ModelDeploymentEngineVLLM,
+			router:        workercore.ModelDeploymentRouterLLMD,
+			kvBackend:     workercore.ModelDeploymentKVTransferBackendNIXL,
+			disaggregated: true,
+		},
+		{
+			name:          "AMD CDNA3 vLLM P/D NIXL",
+			manufacturer:  nodefeature.ManufacturerAMD,
+			family:        "cdna3",
+			engine:        workercore.ModelDeploymentEngineVLLM,
+			router:        workercore.ModelDeploymentRouterLLMD,
+			kvBackend:     workercore.ModelDeploymentKVTransferBackendNIXL,
+			disaggregated: true,
+		},
+		{
+			name:          "Ascend A2 910B Server with CANN KVCache",
+			manufacturer:  nodefeature.ManufacturerAscend,
+			family:        "910B",
+			engine:        workercore.ModelDeploymentEngineVLLM,
+			storeProtocol: "ascend",
+		},
+		{
+			name:          "Ascend A2 910B vLLM P/D HIXL",
+			manufacturer:  nodefeature.ManufacturerAscend,
+			family:        "910B",
+			engine:        workercore.ModelDeploymentEngineVLLM,
+			router:        workercore.ModelDeploymentRouterLLMD,
+			kvBackend:     workercore.ModelDeploymentKVTransferBackendHIXL,
+			disaggregated: true,
+		},
+		{
+			name:          "Ascend A3 910C vLLM P/D HIXL with CANN KVCache",
+			manufacturer:  nodefeature.ManufacturerAscend,
+			family:        "910C",
+			engine:        workercore.ModelDeploymentEngineVLLM,
+			router:        workercore.ModelDeploymentRouterLLMD,
+			kvBackend:     workercore.ModelDeploymentKVTransferBackendHIXL,
+			storeProtocol: "ascend",
+			disaggregated: true,
+		},
+		{
+			name:          "Ascend A3 910C SGLang P/D HIXL",
+			manufacturer:  nodefeature.ManufacturerAscend,
+			family:        "910C",
+			engine:        workercore.ModelDeploymentEngineSGLang,
+			router:        workercore.ModelDeploymentRouterSGLang,
+			kvBackend:     workercore.ModelDeploymentKVTransferBackendHIXL,
+			disaggregated: true,
+		},
+	}
+
+	renderForFamily := func(t *testing.T, md *workercore.ModelDeployment, manufacturer, family, storeProtocol string) map[string]map[int][]*core.Pod {
+		t.Helper()
+		at := newRenderAcceleratorType(func(at *worker.AcceleratorType) {
+			at.Name = "pool-type"
+			at.Status.Entrance = "queue-for-pool-type"
+			at.Status.Detail.Manufacturer = manufacturer
+			at.Status.Detail.Family = family
+		})
+		cli := newModelDeploymentClient(md, at)
+		r := &ModelDeploymentReconciler{Client: cli, APIReader: cli}
+		var conn *ModelDeploymentConnectorInput
+		var ifaceProtocols []string
+		if storeProtocol != "" {
+			conn = storeConnection(storeProtocol)
+			ifaceProtocols = []string{storeProtocol}
+		}
+		pods, err := r.renderModelDeploymentRolePods(t.Context(), md, conn, ifaceProtocols, nil, false)
+		require.NoError(t, err)
+		return pods
+	}
+
+	for _, tc := range nonA5Cases {
+		t.Run(tc.name, func(t *testing.T) {
+			qty1 := resource.MustParse("1")
+			md := newRenderDeployment(func(md *workercore.ModelDeployment) {
+				md.Spec.Engine.Name = tc.engine
+				if tc.storeProtocol == "" {
+					md.Spec.KVCache = nil
+				}
+				if tc.router != "" {
+					md.Spec.Router = &workercore.ModelDeploymentRouter{Name: tc.router}
+				}
+				if tc.kvBackend != "" {
+					md.Spec.KVTransfer = &workercore.ModelDeploymentKVTransfer{Backend: tc.kvBackend}
+				}
+				if tc.disaggregated {
+					md.Spec.Roles = []workercore.ModelDeploymentRole{
+						{
+							Name:            "prefill",
+							Kind:            workercore.ModelDeploymentRoleKindPrefill,
+							AcceleratorType: "pool-type",
+							Image:           md.Spec.Engine.Image,
+							Replicas:        1,
+							ReplicaSize:     1,
+							Resources:       &workercore.ModelDeploymentRoleResources{Accelerator: ptr.To(qty1)},
+						},
+						{
+							Name:            "decode",
+							Kind:            workercore.ModelDeploymentRoleKindDecode,
+							AcceleratorType: "pool-type",
+							Image:           md.Spec.Engine.Image,
+							Replicas:        1,
+							ReplicaSize:     1,
+							Resources:       &workercore.ModelDeploymentRoleResources{Accelerator: ptr.To(qty1)},
+						},
+					}
+				} else {
+					md.Spec.Roles = []workercore.ModelDeploymentRole{{
+						Name:            "server",
+						Kind:            workercore.ModelDeploymentRoleKindServer,
+						AcceleratorType: "pool-type",
+						Image:           md.Spec.Engine.Image,
+						Replicas:        1,
+						ReplicaSize:     1,
+						Resources:       &workercore.ModelDeploymentRoleResources{Accelerator: ptr.To(qty1)},
+					}}
+				}
+			})
+
+			withoutFamily := renderForFamily(t, md, tc.manufacturer, "", tc.storeProtocol)
+			withFamily := renderForFamily(t, md, tc.manufacturer, tc.family, tc.storeProtocol)
+
+			for roleName, byOrdinal := range withoutFamily {
+				for ord, wantMembers := range byOrdinal {
+					gotMembers := withFamily[roleName][ord]
+					require.Len(t, gotMembers, len(wantMembers))
+					for m := range wantMembers {
+						assert.Equal(t,
+							wantMembers[m].Annotations[modelDeploymentPodSpecHashAnnotation],
+							gotMembers[m].Annotations[modelDeploymentPodSpecHashAnnotation],
+							"role %s must produce identical pod-spec-hash when Family is %q vs empty",
+							roleName, tc.family,
+						)
+						wantJSON, err := json.Marshal(wantMembers[m])
+						require.NoError(t, err)
+						gotJSON, err := json.Marshal(gotMembers[m])
+						require.NoError(t, err)
+						assert.Equal(t, string(wantJSON), string(gotJSON))
+					}
+				}
+			}
+		})
+	}
+
+	t.Run("Ascend A5 convergence moves pod-spec-hash when A5 alters connector output", func(t *testing.T) {
+		qty1 := resource.MustParse("1")
+		vllmPD := newRenderDeployment(func(md *workercore.ModelDeployment) {
+			md.Spec.KVCache = nil
+			md.Spec.Router = &workercore.ModelDeploymentRouter{Name: workercore.ModelDeploymentRouterLLMD}
+			md.Spec.KVTransfer = &workercore.ModelDeploymentKVTransfer{Backend: workercore.ModelDeploymentKVTransferBackendHIXL}
+			md.Spec.Roles = []workercore.ModelDeploymentRole{
+				{
+					Name: "prefill", Kind: workercore.ModelDeploymentRoleKindPrefill,
+					AcceleratorType: "pool-type", Image: md.Spec.Engine.Image, Replicas: 1, ReplicaSize: 1,
+					Resources: &workercore.ModelDeploymentRoleResources{Accelerator: ptr.To(qty1)},
+				},
+				{
+					Name: "decode", Kind: workercore.ModelDeploymentRoleKindDecode,
+					AcceleratorType: "pool-type", Image: md.Spec.Engine.Image, Replicas: 1, ReplicaSize: 1,
+					Resources: &workercore.ModelDeploymentRoleResources{Accelerator: ptr.To(qty1)},
+				},
+			}
+		})
+		unconverged := renderForFamily(t, vllmPD, nodefeature.ManufacturerAscend, "", "")
+		convergedA5 := renderForFamily(t, vllmPD, nodefeature.ManufacturerAscend, nodefeature.AcceleratorFamilyAscend950, "")
+		assert.NotEqual(t,
+			unconverged["prefill"][0][0].Annotations[modelDeploymentPodSpecHashAnnotation],
+			convergedA5["prefill"][0][0].Annotations[modelDeploymentPodSpecHashAnnotation],
+		)
+
+		sglangPD := vllmPD.DeepCopy()
+		sglangPD.Spec.Engine.Name = workercore.ModelDeploymentEngineSGLang
+		sglangPD.Spec.Router.Name = workercore.ModelDeploymentRouterSGLang
+		unconvergedSG := renderForFamily(t, sglangPD, nodefeature.ManufacturerAscend, "", "")
+		convergedSGA5 := renderForFamily(t, sglangPD, nodefeature.ManufacturerAscend, nodefeature.AcceleratorFamilyAscend950, "")
+		assert.NotEqual(t,
+			unconvergedSG["prefill"][0][0].Annotations[modelDeploymentPodSpecHashAnnotation],
+			convergedSGA5["prefill"][0][0].Annotations[modelDeploymentPodSpecHashAnnotation],
+		)
+	})
+}
+
+func TestRenderModelDeploymentPod_AscendA5HIXLEPYield(t *testing.T) {
+	qty1 := resource.MustParse("1")
+	atlas950 := newRenderAcceleratorType(func(at *worker.AcceleratorType) {
+		at.Name = "atlas-950"
+		at.Status.Entrance = "queue-for-atlas-950"
+		at.Status.Detail.Manufacturer = nodefeature.ManufacturerAscend
+		at.Status.Detail.Family = nodefeature.AcceleratorFamilyAscend950
+	})
+	storeConn := &ModelDeploymentConnectorInput{
+		Domain:              "chat",
+		Dtype:               "bfloat16",
+		MasterServerAddress: "shared-kv-master.gpustack-system.svc:50051",
+		Protocols:           []string{"ascend"},
+	}
+
+	for _, mountPath := range []string{"", "/etc/hixlep", "/etc/hixlep/"} {
+		name := "default_operator_mount"
+		if mountPath != "" {
+			name = "yields_to_user_mount_" + strings.Trim(mountPath, "/")
+		}
+		t.Run(name, func(t *testing.T) {
+			md := newRenderDeployment(func(md *workercore.ModelDeployment) {
+				md.Spec.Router = &workercore.ModelDeploymentRouter{Name: workercore.ModelDeploymentRouterLLMD}
+				md.Spec.KVTransfer = &workercore.ModelDeploymentKVTransfer{Backend: workercore.ModelDeploymentKVTransferBackendHIXL}
+				var avs []workercore.ModelDeploymentAdditionalVolume
+				if mountPath != "" {
+					avs = []workercore.ModelDeploymentAdditionalVolume{{
+						MountPath: mountPath,
+						ReadOnly:  true,
+						ConfigMap: &core.LocalObjectReference{Name: "custom-hixlep"},
+					}}
+				}
+				md.Spec.Roles = []workercore.ModelDeploymentRole{
+					{
+						Name: "prefill", Kind: workercore.ModelDeploymentRoleKindPrefill,
+						AcceleratorType: "atlas-950", Image: md.Spec.Engine.Image, Replicas: 1, ReplicaSize: 1,
+						AdditionalVolumes: avs,
+						Resources: &workercore.ModelDeploymentRoleResources{
+							Accelerator: ptr.To(qty1),
+							Interface:   ptr.To(qty1),
+						},
+					},
+					{
+						Name: "decode", Kind: workercore.ModelDeploymentRoleKindDecode,
+						AcceleratorType: "atlas-950", Image: md.Spec.Engine.Image, Replicas: 1, ReplicaSize: 1,
+						AdditionalVolumes: avs,
+						Resources: &workercore.ModelDeploymentRoleResources{
+							Accelerator: ptr.To(qty1),
+							Interface:   ptr.To(qty1),
+						},
+					},
+				}
+			})
+
+			cli := newModelDeploymentClient(md, atlas950)
+			r := &ModelDeploymentReconciler{Client: cli, APIReader: cli}
+			pods, err := r.renderModelDeploymentRolePods(t.Context(), md, storeConn, []string{"ascend"}, nil, false)
+			require.NoError(t, err)
+
+			for _, roleName := range []string{"prefill", "decode"} {
+				pod := pods[roleName][0][0]
+				ctr := &pod.Spec.Containers[0]
+				assert.Contains(t, strings.Join(ctr.Command, " "), `"ascend_local_comm_res_path":"/etc/hixlep"`)
+				assert.Nil(t, envByName(ctr.Env, inject.AscendLocalCommResEnv))
+				assert.NotNil(t, findVolume(pod, "gpustack-ascend-driver"))
+				if roleName == "prefill" {
+					assert.NotNil(t, findVolume(pod, inject.ConfigVolumeName))
+				}
+
+				if mountPath == "" {
+					vol := findVolume(pod, inject.AscendHIXLEPVolumeName)
+					require.NotNil(t, vol)
+					require.NotNil(t, vol.HostPath)
+					assert.Equal(t, inject.AscendHIXLEPPath, vol.HostPath.Path)
+					mnt := findMount(ctr, inject.AscendHIXLEPVolumeName)
+					require.NotNil(t, mnt)
+					assert.Equal(t, inject.AscendHIXLEPPath, mnt.MountPath)
+					assert.True(t, mnt.ReadOnly)
+				} else {
+					assert.Nil(t, findVolume(pod, inject.AscendHIXLEPVolumeName),
+						"operator must omit gpustack-ascend-hixlep volume when user mounts %q", mountPath)
+					assert.Nil(t, findMount(ctr, inject.AscendHIXLEPVolumeName),
+						"operator must omit gpustack-ascend-hixlep volumeMount when user mounts %q", mountPath)
+					userVol := findVolume(pod, "additional-0")
+					require.NotNil(t, userVol)
+					require.NotNil(t, userVol.ConfigMap)
+					assert.Equal(t, "custom-hixlep", userVol.ConfigMap.Name)
+				}
+			}
+		})
+	}
+
+	t.Run("multi-Pod A5 Server without KVCache gets rdma without hixlep or ASCEND_LOCAL_COMM_RES", func(t *testing.T) {
+		md := newRenderDeployment(func(md *workercore.ModelDeployment) {
+			md.Spec.KVCache = nil
+			md.Spec.Roles = []workercore.ModelDeploymentRole{{
+				Name: "server", Kind: workercore.ModelDeploymentRoleKindServer,
+				AcceleratorType: "atlas-950", Image: md.Spec.Engine.Image, Replicas: 1, ReplicaSize: 2,
+				Resources: &workercore.ModelDeploymentRoleResources{
+					Accelerator: ptr.To(qty1),
+					Interface:   ptr.To(qty1),
+				},
+			}}
+		})
+		cli := newModelDeploymentClient(md, atlas950)
+		r := &ModelDeploymentReconciler{Client: cli, APIReader: cli}
+		pods, err := r.renderModelDeploymentRolePods(t.Context(), md, nil, nil, nil, true)
+		require.NoError(t, err)
+		pod := pods["server"][0][0]
+		ctr := &pod.Spec.Containers[0]
+		rdmaShared := nodefeature.GetRDMAResourceName(workercore.DeviceAllocationModeShared)
+		assert.Equal(t, qty1, ctr.Resources.Limits[rdmaShared])
+		assert.Nil(t, findVolume(pod, inject.AscendHIXLEPVolumeName))
+		assert.Nil(t, envByName(ctr.Env, inject.AscendLocalCommResEnv))
+		assert.NotContains(t, strings.Join(ctr.Command, " "), "ascend_local_comm_res_path")
 	})
 }

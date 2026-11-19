@@ -1748,34 +1748,64 @@ func TestModelDeploymentOwnedAndDefaultedCannotDisagree(t *testing.T) {
 	// Exercise the valid NIXL, HIXL, and EFA combinations so backend-specific owned and
 	// defaulted variables are verified alongside the Mooncake rows above.
 	backendCarriers := []struct {
-		engine, manufacturer, backend string
-		efa                           bool
+		engine, manufacturer, family, backend string
+		efa, ascendHostRoCE                   bool
 	}{
-		{workercore.ModelDeploymentEngineVLLM, nodefeature.ManufacturerNVIDIA, inject.KVTransferBackendMooncake, false},
-		{workercore.ModelDeploymentEngineVLLM, nodefeature.ManufacturerNVIDIA, inject.KVTransferBackendNIXL, false},
-		{workercore.ModelDeploymentEngineVLLM, nodefeature.ManufacturerNVIDIA, inject.KVTransferBackendNIXL, true},
-		{workercore.ModelDeploymentEngineVLLM, nodefeature.ManufacturerAscend, inject.KVTransferBackendHIXL, false},
-		{workercore.ModelDeploymentEngineVLLM, nodefeature.ManufacturerAscend, inject.KVTransferBackendHIXL, true},
-		{workercore.ModelDeploymentEngineSGLang, nodefeature.ManufacturerNVIDIA, inject.KVTransferBackendMooncake, false},
-		{workercore.ModelDeploymentEngineSGLang, nodefeature.ManufacturerNVIDIA, inject.KVTransferBackendNIXL, false},
-		{workercore.ModelDeploymentEngineSGLang, nodefeature.ManufacturerNVIDIA, inject.KVTransferBackendNIXL, true},
-		{workercore.ModelDeploymentEngineSGLang, nodefeature.ManufacturerAscend, inject.KVTransferBackendHIXL, false},
+		{workercore.ModelDeploymentEngineVLLM, nodefeature.ManufacturerNVIDIA, "", inject.KVTransferBackendMooncake, false, false},
+		{workercore.ModelDeploymentEngineVLLM, nodefeature.ManufacturerNVIDIA, "", inject.KVTransferBackendNIXL, false, false},
+		{workercore.ModelDeploymentEngineVLLM, nodefeature.ManufacturerNVIDIA, "", inject.KVTransferBackendNIXL, true, false},
+		{workercore.ModelDeploymentEngineVLLM, nodefeature.ManufacturerAscend, "", inject.KVTransferBackendHIXL, false, false},
+		{workercore.ModelDeploymentEngineVLLM, nodefeature.ManufacturerAscend, "", inject.KVTransferBackendHIXL, true, false},
+		{workercore.ModelDeploymentEngineVLLM, nodefeature.ManufacturerAscend, nodefeature.AcceleratorFamilyAscend950, inject.KVTransferBackendHIXL, false, false},
+		{workercore.ModelDeploymentEngineVLLM, nodefeature.ManufacturerAscend, nodefeature.AcceleratorFamilyAscend950, inject.KVTransferBackendHIXL, false, true},
+		{workercore.ModelDeploymentEngineSGLang, nodefeature.ManufacturerNVIDIA, "", inject.KVTransferBackendMooncake, false, false},
+		{workercore.ModelDeploymentEngineSGLang, nodefeature.ManufacturerNVIDIA, "", inject.KVTransferBackendNIXL, false, false},
+		{workercore.ModelDeploymentEngineSGLang, nodefeature.ManufacturerNVIDIA, "", inject.KVTransferBackendNIXL, true, false},
+		{workercore.ModelDeploymentEngineSGLang, nodefeature.ManufacturerAscend, "", inject.KVTransferBackendHIXL, false, false},
+		{workercore.ModelDeploymentEngineSGLang, nodefeature.ManufacturerAscend, nodefeature.AcceleratorFamilyAscend950, inject.KVTransferBackendHIXL, false, false},
 	}
 	for _, bc := range backendCarriers {
 		backend := bc.backend
 		efa := bc.efa
 		for _, kind := range kinds[1:] {
-			t.Run(bc.engine+"_on_"+bc.manufacturer+"_backend_"+backend+"_efa_"+boolWord(efa)+"_as_"+string(kind), func(t *testing.T) {
+			name := bc.engine + "_on_" + bc.manufacturer
+			if bc.family != "" {
+				name += "_" + bc.family
+			}
+			if bc.ascendHostRoCE {
+				name += "_host_roce"
+			}
+			name += "_backend_" + backend + "_efa_" + boolWord(efa) + "_as_" + string(kind)
+			t.Run(name, func(t *testing.T) {
 				in := connectorInputForKind(bc.engine, bc.manufacturer, kind)
 				if bc.engine == workercore.ModelDeploymentEngineSGLang && bc.manufacturer == nodefeature.ManufacturerAscend {
 					in.Protocols = []string{"tcp"}
 				}
+				in.AcceleratorFamily = bc.family
+				in.AscendHostRoCE = bc.ascendHostRoCE
 				in.KVTransfer = true
 				in.KVTransferBackend = backend
 				in.KVTransferEFA = efa
 				assertOwnedAndDefaultedAgree(t, in)
 			})
 		}
+	}
+
+	for _, hostRoCE := range []bool{false, true} {
+		label := "ub"
+		if hostRoCE {
+			label = "host_roce"
+		}
+		t.Run("vllm_on_ascend_950_"+label+"_store_server", func(t *testing.T) {
+			in := connectorInputForKind(
+				workercore.ModelDeploymentEngineVLLM,
+				nodefeature.ManufacturerAscend,
+				workercore.ModelDeploymentRoleKindServer,
+			)
+			in.AcceleratorFamily = nodefeature.AcceleratorFamilyAscend950
+			in.AscendHostRoCE = hostRoCE
+			assertOwnedAndDefaultedAgree(t, in)
+		})
 	}
 }
 
@@ -2287,6 +2317,123 @@ func TestSynthesizeModelDeploymentConnector_TransferBackends(t *testing.T) {
 		require.NotNil(t, storeRender.binding)
 		assert.Empty(t, storeRender.binding.KVTransferBackend)
 		assert.False(t, storeRender.binding.KVTransferEFA)
+	})
+}
+
+func TestSynthesizeModelDeploymentConnector_AscendA5(t *testing.T) {
+	t.Run("vLLM A5 UB defaults ASCEND_LOCAL_COMM_RES without hixlep mount", func(t *testing.T) {
+		in := connectorInputForKind(
+			workercore.ModelDeploymentEngineVLLM,
+			nodefeature.ManufacturerAscend,
+			workercore.ModelDeploymentRoleKindPrefill,
+		)
+		in.AcceleratorFamily = nodefeature.AcceleratorFamilyAscend950
+		in.AscendHostRoCE = false
+		in.KVTransfer = true
+		in.KVTransferBackend = inject.KVTransferBackendHIXL
+
+		got, err := SynthesizeModelDeploymentConnector(in)
+		require.NoError(t, err)
+		assert.Contains(t, got.DefaultedEnv, core.EnvVar{
+			Name:  inject.AscendLocalCommResEnv,
+			Value: inject.AscendLocalCommResAutoGenValue,
+		})
+		for _, v := range got.Volumes {
+			assert.NotEqual(t, inject.AscendHIXLEPVolumeName, v.Name)
+		}
+		assert.NotContains(t, strings.Join(got.Args, " "), "ascend_local_comm_res_path")
+		require.NotNil(t, got.binding)
+		assert.Equal(t, "autogen", got.binding.AscendLocalCommRes)
+		assert.Empty(t, got.binding.AscendTransferProtocol)
+	})
+
+	t.Run("vLLM A5 Host RoCE mounts hixlep and sets outer ascend_local_comm_res_path on MultiConnector", func(t *testing.T) {
+		in := connectorInputForKind(
+			workercore.ModelDeploymentEngineVLLM,
+			nodefeature.ManufacturerAscend,
+			workercore.ModelDeploymentRoleKindPrefill,
+		)
+		in.AcceleratorFamily = nodefeature.AcceleratorFamilyAscend950
+		in.AscendHostRoCE = true
+		in.KVTransfer = true
+		in.KVTransferBackend = inject.KVTransferBackendHIXL
+
+		got, err := SynthesizeModelDeploymentConnector(in)
+		require.NoError(t, err)
+		assert.Nil(t, envByName(got.DefaultedEnv, inject.AscendLocalCommResEnv))
+		require.Len(t, got.Args, 2)
+		var doc map[string]any
+		require.NoError(t, json.Unmarshal([]byte(got.Args[1]), &doc))
+		assert.Equal(t, "MultiConnector", doc["kv_connector"])
+		extra := doc["kv_connector_extra_config"].(map[string]any)
+		assert.Equal(t, inject.AscendHIXLEPPath, extra["ascend_local_comm_res_path"])
+		for _, child := range extra["connectors"].([]any) {
+			childMap := child.(map[string]any)
+			if childExtra, ok := childMap["kv_connector_extra_config"].(map[string]any); ok {
+				assert.NotContains(t, childExtra, "ascend_local_comm_res_path")
+			}
+		}
+		hasHIXLEP := slices.ContainsFunc(got.Volumes, func(v core.Volume) bool {
+			return v.Name == inject.AscendHIXLEPVolumeName
+		})
+		assert.True(t, hasHIXLEP)
+		require.NotNil(t, got.binding)
+		assert.Equal(t, "hixlep", got.binding.AscendLocalCommRes)
+		assert.Empty(t, got.binding.AscendTransferProtocol)
+	})
+
+	t.Run("SGLang A5 HIXL defaults device_urma and fingerprints transfer protocol", func(t *testing.T) {
+		in := connectorInputForKind(
+			workercore.ModelDeploymentEngineSGLang,
+			nodefeature.ManufacturerAscend,
+			workercore.ModelDeploymentRoleKindPrefill,
+		)
+		in.Protocols = nil
+		in.MasterServerAddress = ""
+		in.Domain = ""
+		in.AcceleratorFamily = nodefeature.AcceleratorFamilyAscend950
+		in.KVTransfer = true
+		in.KVTransferBackend = inject.KVTransferBackendHIXL
+
+		got, err := SynthesizeModelDeploymentConnector(in)
+		require.NoError(t, err)
+		assert.Contains(t, got.DefaultedEnv, core.EnvVar{
+			Name:  inject.AscendMFTransferProtocolEnv,
+			Value: inject.AscendMFTransferProtocolDeviceURMA,
+		})
+		for _, v := range got.Volumes {
+			assert.NotEqual(t, inject.AscendHIXLEPVolumeName, v.Name)
+		}
+		assert.Nil(t, envByName(got.DefaultedEnv, inject.AscendLocalCommResEnv))
+		require.NotNil(t, got.binding)
+		assert.Empty(t, got.binding.AscendLocalCommRes)
+		assert.Equal(t, inject.AscendMFTransferProtocolDeviceURMA, got.binding.AscendTransferProtocol)
+	})
+
+	t.Run("non-A5 families keep Ascend binding fields empty", func(t *testing.T) {
+		for _, tc := range []struct {
+			engine, manufacturer, family, backend string
+		}{
+			{workercore.ModelDeploymentEngineVLLM, nodefeature.ManufacturerNVIDIA, "hopper", inject.KVTransferBackendNIXL},
+			{workercore.ModelDeploymentEngineVLLM, nodefeature.ManufacturerAscend, "910B", inject.KVTransferBackendHIXL},
+			{workercore.ModelDeploymentEngineVLLM, nodefeature.ManufacturerAscend, "910C", inject.KVTransferBackendHIXL},
+			{workercore.ModelDeploymentEngineSGLang, nodefeature.ManufacturerAscend, "910C", inject.KVTransferBackendHIXL},
+		} {
+			in := connectorInputForKind(tc.engine, tc.manufacturer, workercore.ModelDeploymentRoleKindPrefill)
+			if tc.engine == workercore.ModelDeploymentEngineSGLang && tc.manufacturer == nodefeature.ManufacturerAscend {
+				in.Protocols = []string{"tcp"}
+			}
+			in.AcceleratorFamily = tc.family
+			in.AscendHostRoCE = true
+			in.KVTransfer = true
+			in.KVTransferBackend = tc.backend
+
+			got, err := SynthesizeModelDeploymentConnector(in)
+			require.NoError(t, err)
+			require.NotNil(t, got.binding)
+			assert.Empty(t, got.binding.AscendLocalCommRes)
+			assert.Empty(t, got.binding.AscendTransferProtocol)
+		}
 	})
 }
 

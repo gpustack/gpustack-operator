@@ -62,7 +62,7 @@ func TestModelDeploymentGoldenYAML(t *testing.T) {
 	})
 
 	scenarios := buildGoldenYAMLScenarios()
-	require.Len(t, scenarios, 33)
+	require.Len(t, scenarios, 37)
 
 	goldenDir := filepath.Join("testdata", "golden-render")
 	if *legacyRenderUpdate {
@@ -484,12 +484,23 @@ func goldenBaseClusterFixtures() []ctrlcli.Object {
 		at.Status.Detail.RuntimeVersions = []string{"8.2"}
 	})
 
+	atlas950 := newRenderAcceleratorType(func(at *worker.AcceleratorType) {
+		at.Name = "atlas-950"
+		at.Status.Entrance = "queue-for-atlas-950"
+		at.Status.Detail.Manufacturer = nodefeature.ManufacturerAscend
+		at.Status.Detail.Family = nodefeature.AcceleratorFamilyAscend950
+		at.Status.Detail.Memory = "128Gi"
+		at.Status.Detail.RuntimeVersion = "9.2"
+		at.Status.Detail.RuntimeVersions = []string{"9.2"}
+	})
+
 	return []ctrlcli.Object{
 		h20,
 		h20Sliced,
 		a100Mig,
 		mi300x,
 		atlas910b,
+		atlas950,
 		&nodev1.RuntimeClass{ObjectMeta: meta.ObjectMeta{Name: "nvidia"}, Handler: "nvidia"},
 		&nodev1.RuntimeClass{ObjectMeta: meta.ObjectMeta{Name: "rocm"}, Handler: "rocm"},
 		&nodev1.RuntimeClass{ObjectMeta: meta.ObjectMeta{Name: "ascend"}, Handler: "ascend"},
@@ -928,7 +939,7 @@ func buildGoldenYAMLScenarios() []goldenYAMLScenario {
 			},
 		},
 
-		// 2. Shared KVCache Pool Attachment (3 scenarios)
+		// 2. Shared KVCache Pool Attachment (4 scenarios)
 		{
 			name:    "server-kvcache-tcp",
 			objects: goldenKVCacheFixtures("shared-kv", "TCP"),
@@ -1004,8 +1015,34 @@ func buildGoldenYAMLScenarios() []goldenYAMLScenario {
 				},
 			},
 		},
+		{
+			name:    "server-vllm-ascend-a5-kvcache-host-roce",
+			objects: goldenKVCacheFixtures("shared-kv", "CANN"),
+			md: &workercore.ModelDeployment{
+				ObjectMeta: meta.ObjectMeta{Namespace: "default", Name: "qwen"},
+				Spec: workercore.ModelDeploymentSpec{
+					Model:   workercore.ModelDeploymentModel{Name: modelID},
+					Engine:  workercore.ModelDeploymentEngine{Name: workercore.ModelDeploymentEngineVLLM, Image: vllmAscendImage},
+					KVCache: &workercore.ModelDeploymentKVCache{PoolRef: core.LocalObjectReference{Name: "shared-kv"}},
+					Roles: []workercore.ModelDeploymentRole{
+						{
+							Name:            "main",
+							Kind:            workercore.ModelDeploymentRoleKindServer,
+							AcceleratorType: "atlas-950",
+							Image:           vllmAscendImage,
+							Replicas:        1,
+							ReplicaSize:     1,
+							Resources: &workercore.ModelDeploymentRoleResources{
+								Accelerator: ptr.To(qty1),
+								Interface:   ptr.To(qty1),
+							},
+						},
+					},
+				},
+			},
+		},
 
-		// 3. Disaggregated Prefill + Decode (14 scenarios)
+		// 3. Disaggregated Prefill + Decode (17 scenarios)
 		{
 			name: "pd-unrouted-lone-pair",
 			md: newGoldenPDDeployment(
@@ -1070,6 +1107,24 @@ func buildGoldenYAMLScenarios() []goldenYAMLScenario {
 			),
 		},
 		{
+			name: "pd-vllm-ascend-a5-ub",
+			md: newGoldenPDDeployment(
+				"qwen", modelID, workercore.ModelDeploymentEngineVLLM, "atlas-950", vllmAscendImage,
+				workercore.ModelDeploymentRouterLLMD,
+				&workercore.ModelDeploymentKVTransfer{Backend: "HIXL"}, nil, 0,
+			),
+		},
+		{
+			name:    "pd-vllm-ascend-a5-host-roce-multiconnector",
+			objects: goldenKVCacheFixtures("shared-kv", "CANN"),
+			md: newGoldenPDDeployment(
+				"qwen", modelID, workercore.ModelDeploymentEngineVLLM, "atlas-950", vllmAscendImage,
+				workercore.ModelDeploymentRouterLLMD,
+				&workercore.ModelDeploymentKVTransfer{Backend: "HIXL"},
+				&workercore.ModelDeploymentKVCache{PoolRef: core.LocalObjectReference{Name: "shared-kv"}}, 1,
+			),
+		},
+		{
 			name:    "pd-vllm-nvidia-multiconnector-kvcache",
 			objects: goldenKVCacheFixtures("shared-kv", "TCP"),
 			md: newGoldenPDDeployment(
@@ -1108,6 +1163,14 @@ func buildGoldenYAMLScenarios() []goldenYAMLScenario {
 			name: "pd-sglang-ascend-hixl",
 			md: newGoldenPDDeployment(
 				"qwen", modelID, workercore.ModelDeploymentEngineSGLang, "atlas-910b", sglangImage,
+				workercore.ModelDeploymentRouterSGLang,
+				&workercore.ModelDeploymentKVTransfer{Backend: "HIXL"}, nil, 0,
+			),
+		},
+		{
+			name: "pd-sglang-ascend-a5-urma",
+			md: newGoldenPDDeployment(
+				"qwen", modelID, workercore.ModelDeploymentEngineSGLang, "atlas-950", sglangImage,
 				workercore.ModelDeploymentRouterSGLang,
 				&workercore.ModelDeploymentKVTransfer{Backend: "HIXL"}, nil, 0,
 			),

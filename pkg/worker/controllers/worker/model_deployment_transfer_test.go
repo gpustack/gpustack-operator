@@ -2292,7 +2292,7 @@ func TestModelTransferInterfaceFollowsResolvedDelivery(t *testing.T) {
 			md := mdWithModelTransferStatus()
 			role := &workercore.ModelDeploymentRole{Name: "server"}
 			remoteDelivery := tc.delivery == workercore.ModelDeploymentModelDeliveryRemote
-			actual := ModelDeploymentDirectInterfaceProtocol(md, role, nodefeature.ManufacturerNVIDIA,
+			actual := ModelDeploymentDirectInterfaceProtocol(md, role, nodefeature.ManufacturerNVIDIA, "",
 				remoteDelivery, false)
 			assert.Equal(t, tc.want, actual)
 		})
@@ -2940,14 +2940,14 @@ func TestModelDeploymentDirectInterfaceProtocol_SGLangAndRemoteEFA(t *testing.T)
 	t.Run("an SGLang pair resolves rdma when both halves request interfaces", func(t *testing.T) {
 		md := pair(workercore.ModelDeploymentEngineSGLang)
 		assert.Equal(t, "rdma", ModelDeploymentDirectInterfaceProtocol(
-			md, &md.Spec.Roles[0], nodefeature.ManufacturerNVIDIA, false, false,
+			md, &md.Spec.Roles[0], nodefeature.ManufacturerNVIDIA, "", false, false,
 		))
 	})
 
 	t.Run("an SGLang pair resolves efa when awsEFAEnabled is true", func(t *testing.T) {
 		md := pair(workercore.ModelDeploymentEngineSGLang)
 		assert.Equal(t, "efa", ModelDeploymentDirectInterfaceProtocol(
-			md, &md.Spec.Roles[0], nodefeature.ManufacturerNVIDIA, false, true,
+			md, &md.Spec.Roles[0], nodefeature.ManufacturerNVIDIA, "", false, true,
 		))
 	})
 
@@ -2957,7 +2957,7 @@ func TestModelDeploymentDirectInterfaceProtocol_SGLangAndRemoteEFA(t *testing.T)
 		md.Spec.Roles[0].ReplicaSize = 2
 		md.Spec.Roles = md.Spec.Roles[:1]
 		assert.Equal(t, "", ModelDeploymentDirectInterfaceProtocol(
-			md, &md.Spec.Roles[0], nodefeature.ManufacturerNVIDIA, false, false,
+			md, &md.Spec.Roles[0], nodefeature.ManufacturerNVIDIA, "", false, false,
 		),
 			"the collective shape is vLLM's alone; SGLang Server roles are not a granted leg")
 	})
@@ -2965,7 +2965,7 @@ func TestModelDeploymentDirectInterfaceProtocol_SGLangAndRemoteEFA(t *testing.T)
 	t.Run("remote weight delivery prefers efa when awsEFAEnabled is true", func(t *testing.T) {
 		md := pair(workercore.ModelDeploymentEngineVLLM)
 		assert.Equal(t, "efa", ModelDeploymentDirectInterfaceProtocol(
-			md, &md.Spec.Roles[0], nodefeature.ManufacturerNVIDIA, true, true,
+			md, &md.Spec.Roles[0], nodefeature.ManufacturerNVIDIA, "", true, true,
 		),
 			"the weight source resolves to EFA when awsEFAEnabled is true")
 	})
@@ -2973,14 +2973,14 @@ func TestModelDeploymentDirectInterfaceProtocol_SGLangAndRemoteEFA(t *testing.T)
 	t.Run("remote weight delivery keeps rdma without awsEFAEnabled", func(t *testing.T) {
 		md := pair(workercore.ModelDeploymentEngineVLLM)
 		assert.Equal(t, "rdma", ModelDeploymentDirectInterfaceProtocol(
-			md, &md.Spec.Roles[0], nodefeature.ManufacturerNVIDIA, true, false,
+			md, &md.Spec.Roles[0], nodefeature.ManufacturerNVIDIA, "", true, false,
 		))
 	})
 
 	t.Run("remote weight delivery on SGLang resolves efa when awsEFAEnabled is true", func(t *testing.T) {
 		md := pair(workercore.ModelDeploymentEngineSGLang)
 		assert.Equal(t, "efa", ModelDeploymentDirectInterfaceProtocol(
-			md, &md.Spec.Roles[0], nodefeature.ManufacturerNVIDIA, true, true,
+			md, &md.Spec.Roles[0], nodefeature.ManufacturerNVIDIA, "", true, true,
 		))
 	})
 }

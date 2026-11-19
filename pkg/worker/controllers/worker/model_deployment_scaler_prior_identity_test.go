@@ -16,6 +16,7 @@ import (
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
 	"gpustack.ai/gpustack/pkg/kubeclients/kubernetes/scheme"
 	"gpustack.ai/gpustack/pkg/nodefeature"
+	"gpustack.ai/gpustack/pkg/worker/kvcache/inject"
 	"gpustack.ai/gpustack/pkg/worker/scaling/priors"
 )
 
@@ -869,6 +870,7 @@ func TestModelDeploymentScalerOperatorEnvGateDisaggregatedConnectors(t *testing.
 	cases := []struct {
 		name         string
 		manufacturer string
+		family       string
 		deployment   *workercore.ModelDeployment
 	}{
 		{
@@ -892,8 +894,34 @@ func TestModelDeploymentScalerOperatorEnvGateDisaggregatedConnectors(t *testing.
 			deployment:   newDisagg(workercore.ModelDeploymentEngineVLLM, workercore.ModelDeploymentRouterLLMD, workercore.ModelDeploymentKVTransferBackendHIXL, false, inferenceXVLLMLaunchArguments()),
 		},
 		{
+			name:         "vLLM-Ascend Ascend A5 UB PD HIXL",
+			manufacturer: nodefeature.ManufacturerAscend,
+			family:       nodefeature.AcceleratorFamilyAscend950,
+			deployment:   newDisagg(workercore.ModelDeploymentEngineVLLM, workercore.ModelDeploymentRouterLLMD, workercore.ModelDeploymentKVTransferBackendHIXL, false, inferenceXVLLMLaunchArguments()),
+		},
+		{
+			name:         "vLLM-Ascend Ascend A5 Host RoCE PD HIXL",
+			manufacturer: nodefeature.ManufacturerAscend,
+			family:       nodefeature.AcceleratorFamilyAscend950,
+			deployment: func() *workercore.ModelDeployment {
+				md := newDisagg(workercore.ModelDeploymentEngineVLLM, workercore.ModelDeploymentRouterLLMD, workercore.ModelDeploymentKVTransferBackendHIXL, false, inferenceXVLLMLaunchArguments())
+				for i := range md.Spec.Roles {
+					md.Spec.Roles[i].Resources = &workercore.ModelDeploymentRoleResources{
+						Interface: capacityPriorQuantity("1"),
+					}
+				}
+				return md
+			}(),
+		},
+		{
 			name:         "vLLM-Ascend Ascend EPD Mooncake",
 			manufacturer: nodefeature.ManufacturerAscend,
+			deployment:   newDisagg(workercore.ModelDeploymentEngineVLLM, workercore.ModelDeploymentRouterLLMD, workercore.ModelDeploymentKVTransferBackendMooncake, true, inferenceXVLLMLaunchArguments()),
+		},
+		{
+			name:         "vLLM-Ascend Ascend A5 EPD Mooncake",
+			manufacturer: nodefeature.ManufacturerAscend,
+			family:       nodefeature.AcceleratorFamilyAscend950,
 			deployment:   newDisagg(workercore.ModelDeploymentEngineVLLM, workercore.ModelDeploymentRouterLLMD, workercore.ModelDeploymentKVTransferBackendMooncake, true, inferenceXVLLMLaunchArguments()),
 		},
 		{
@@ -906,6 +934,12 @@ func TestModelDeploymentScalerOperatorEnvGateDisaggregatedConnectors(t *testing.
 			manufacturer: nodefeature.ManufacturerNVIDIA,
 			deployment:   newDisagg(workercore.ModelDeploymentEngineSGLang, workercore.ModelDeploymentRouterSGLang, workercore.ModelDeploymentKVTransferBackendNIXL, true, inferenceXLaunchArguments()),
 		},
+		{
+			name:         "SGLang Ascend A5 PD HIXL",
+			manufacturer: nodefeature.ManufacturerAscend,
+			family:       nodefeature.AcceleratorFamilyAscend950,
+			deployment:   newDisagg(workercore.ModelDeploymentEngineSGLang, workercore.ModelDeploymentRouterSGLang, workercore.ModelDeploymentKVTransferBackendHIXL, false, inferenceXLaunchArguments()),
+		},
 	}
 
 	for _, tc := range cases {
@@ -913,12 +947,22 @@ func TestModelDeploymentScalerOperatorEnvGateDisaggregatedConnectors(t *testing.
 			for i := range tc.deployment.Spec.Roles {
 				role := &tc.deployment.Spec.Roles[i]
 				err := modelDeploymentScalerOperatorEnvGateWithManufacturer(
-					tc.deployment.Spec.Engine.Name, tc.deployment, role, tc.manufacturer,
+					tc.deployment.Spec.Engine.Name, tc.deployment, role, tc.manufacturer, tc.family,
 				)
 				require.NoError(t, err, "role %s should pass connector env gate", role.Name)
 			}
 		})
 	}
+
+	t.Run("rendered operator env on Ascend A5 UB includes ASCEND_LOCAL_COMM_RES", func(t *testing.T) {
+		md := newDisagg(workercore.ModelDeploymentEngineVLLM, workercore.ModelDeploymentRouterLLMD, workercore.ModelDeploymentKVTransferBackendHIXL, false, inferenceXVLLMLaunchArguments())
+		rendered, err := modelDeploymentScalerRenderedOperatorEnv(
+			workercore.ModelDeploymentEngineVLLM, md, &md.Spec.Roles[0],
+			nodefeature.ManufacturerAscend, nodefeature.AcceleratorFamilyAscend950,
+		)
+		require.NoError(t, err)
+		assert.Contains(t, rendered, inject.AscendLocalCommResEnv)
+	})
 }
 
 func TestModelDeploymentScalerPriorRequestDisaggregatedAndKVCache(t *testing.T) {
