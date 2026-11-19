@@ -557,6 +557,19 @@
           "title": "extraArgs",
           "type": "array"
         },
+        "hostRootMount": {
+          "properties": {
+            "enabled": {
+              "default": true,
+              "description": "Mount the host root filesystem (/) read-only at /host on the device-manager main container.\nSet to false on policy-restricted clusters that forbid hostPath \"/\" or when disabling host file inspection.",
+              "title": "enabled",
+              "type": "boolean"
+            }
+          },
+          "required": [],
+          "title": "hostRootMount",
+          "type": "object"
+        },
         "image": {
           "description": "Per-device-manager image overrides (`repository`/`tag`/`pullPolicy`); unset keys\nfall back to the chart-level `image`.",
           "required": [],

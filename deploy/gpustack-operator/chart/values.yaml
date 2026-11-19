@@ -441,6 +441,10 @@ deviceManager:
   extraArgs: []
   # -- Extra environment variables for the device-manager, as a name/value map.
   env: {}
+  hostRootMount:
+    # -- Mount the host root filesystem (/) read-only at /host on the device-manager main container.
+    # Set to false on policy-restricted clusters that forbid hostPath "/" or when disabling host file inspection.
+    enabled: true
 
 modelManager:
   # -- Deploy the model-manager: the CSI node plugin that delivers a Hugging Face ModelArtifact's
