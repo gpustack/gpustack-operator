@@ -1,17 +1,17 @@
 {
   "schema_version": 1,
-  "summary": "Baseline CLI tool pins and Kubernetes v0.36.x lockstep Go module versions.",
+  "summary": "Sync Kubernetes v1.36.6/v0.36.6 lockstep modules (host-staged) and bump skopeo to 1.25.2, vals to 0.51.1, ytt to 0.56.0, kubectl to 1.36.6; helm 3.21.4, kustomize 5.8.3, controller-runtime v0.24.1 and kueue v0.18.11 unchanged.",
   "versions": {
-    "kubernetes": "v1.36.5",
-    "k8s-modules": "v0.36.5",
+    "kubernetes": "v1.36.6",
+    "k8s-modules": "v0.36.6",
     "controller-runtime": "v0.24.1",
     "kueue-sdk": "v0.18.11",
     "helm-cli": "v3.21.4",
-    "skopeo-cli": "1.24.1",
-    "vals-cli": "0.50.0",
+    "skopeo-cli": "1.25.2",
+    "vals-cli": "0.51.1",
     "kustomize-cli": "5.8.3",
-    "ytt-cli": "0.55.4",
-    "kubectl-cli": "1.36.5",
+    "ytt-cli": "0.56.0",
+    "kubectl-cli": "1.36.6",
     "helm-module": "v3.21.4"
   },
   "subscriptions": [
