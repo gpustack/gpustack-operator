@@ -199,6 +199,7 @@ mkdir -p \
   "${PREFLIGHT_REPO}/deploy/gpustack-operator"
 
 cp "${ROOT_DIR}/.auto-sync/scripts/lib-preflight.sh" "${PREFLIGHT_REPO}/.auto-sync/scripts/lib-preflight.sh"
+cp "${ROOT_DIR}/.auto-sync/scripts/charts_oci.py" "${PREFLIGHT_REPO}/.auto-sync/scripts/charts_oci.py"
 cp "${PREFLIGHT_SCRIPT}" "${PREFLIGHT_REPO}/.auto-sync/scripts/preflight-charts.sh"
 chmod +x "${PREFLIGHT_REPO}/.auto-sync/scripts/preflight-charts.sh"
 cp "${ROOT_DIR}/.auto-sync/checks/lib.sh" "${PREFLIGHT_REPO}/.auto-sync/checks/lib.sh"
@@ -292,25 +293,30 @@ PY
 
 STAGE_UNREADY="${SCRATCH}/stage-unready/charts"
 GHA_UNREADY="${SCRATCH}/gha-unready.txt"
+SUMMARY_UNREADY="${SCRATCH}/summary-unready.md"
 : > "${GHA_UNREADY}"
+: > "${SUMMARY_UNREADY}"
 if (
   cd "${PREFLIGHT_REPO}" && \
   AUTOSYNC_CHARTS_FIXTURE_DIR="${FIXTURE_DIR}" \
   AUTOSYNC_MOCK_MANIFESTS_JSON="${MOCK_NOT_READY}" \
   AUTOSYNC_SKIP_GO_MOD_DOWNLOAD=true \
   GITHUB_OUTPUT="${GHA_UNREADY}" \
+  GITHUB_STEP_SUMMARY="${SUMMARY_UNREADY}" \
   bash "${PREFLIGHT_REPO}/.auto-sync/scripts/preflight-charts.sh" "${STAGE_UNREADY}"
 ) >/dev/null && \
-python3 - "${STAGE_UNREADY}" "${GHA_UNREADY}" "${BASE_SHA}" "${KUEUE_NEXT}" <<'PY'
+python3 - "${STAGE_UNREADY}" "${GHA_UNREADY}" "${SUMMARY_UNREADY}" "${BASE_SHA}" "${KUEUE_CUR}" "${KUEUE_NEXT}" <<'PY'
 import json
 import os
 import re
 import sys
 
-stage_dir, gha_path, base_sha, kueue_next = sys.argv[1:5]
+stage_dir, gha_path, summary_path, base_sha, kueue_cur, kueue_next = sys.argv[1:7]
 with open(os.path.join(stage_dir, "charts-preflight-report.json"), "r", encoding="utf-8") as f:
     report = json.load(f)
 assert report["source_revision"] == base_sha, report
+assert report["changed"] is True, report
+assert report["ready_updates_count"] == 0, report
 kueue = report["charts"]["kueue"]
 assert kueue["changed"] is True, kueue
 assert kueue["candidate_version"] == kueue_next, kueue
@@ -323,16 +329,24 @@ assert f"registry.k8s.io/kueue/kueue:v{kueue_next}" in sync_cmd, sync_cmd
 with open(os.path.join(stage_dir, "upstream-records.json"), "r", encoding="utf-8") as f:
     recs = json.load(f)
 by_id = {r["upstreamId"]: r for r in recs}
-assert by_id["kueue-chart"]["status"] == "available", by_id
+assert by_id["kueue-chart"]["status"] == "up_to_date", by_id
+assert by_id["kueue-chart"]["version"] == kueue_cur, by_id
+assert f"awaits mirrored images; run: {sync_cmd}" in by_id["kueue-chart"]["reason"], by_id
 assert by_id["nfd-chart"]["status"] == "up_to_date", by_id
 
 with open(gha_path, "r", encoding="utf-8") as f:
     gha_txt = f.read()
 assert f"\n{base_sha}\n" in gha_txt, gha_txt
+
+with open(summary_path, "r", encoding="utf-8") as f:
+    summary_txt = f.read()
+assert "Pending Mirrored Images" in summary_txt, summary_txt
+assert f"`kueue` | `{kueue_cur}` | `{kueue_next}`" in summary_txt, summary_txt
+assert sync_cmd in summary_txt, summary_txt
 PY
 then
   if [[ -z "$(git -C "${PREFLIGHT_REPO}" status --porcelain)" ]] && [[ "$(git -C "${PREFLIGHT_REPO}" rev-parse HEAD)" == "${BASE_SHA}" ]]; then
-    pass "preflight-charts.sh marks unmirrored kueue image mirrored_image_ready=false and emits sync-image.yml command"
+    pass "preflight-charts.sh holds unmirrored kueue at pinned up_to_date, records sync_image_command, and writes step summary"
   else
     fail "preflight-charts.sh unready case dirtied git tree"
   fi
@@ -363,10 +377,16 @@ with open(os.path.join(stage_dir, "charts-preflight-report.json"), "r", encoding
     report = json.load(f)
 src_rev = report["source_revision"]
 assert src_rev and src_rev != base_sha, report
+assert report["ready_updates_count"] == 1, report
 kueue = report["charts"]["kueue"]
 assert kueue["changed"] is True, kueue
 assert kueue["mirrored_image_ready"] is True, kueue
 assert kueue["patch_clean"] is True, kueue
+with open(os.path.join(stage_dir, "upstream-records.json"), "r", encoding="utf-8") as f:
+    recs = json.load(f)
+by_id = {r["upstreamId"]: r for r in recs}
+assert by_id["kueue-chart"]["status"] == "available", by_id
+assert by_id["kueue-chart"]["version"] == kueue_next, by_id
 tgz_path = os.path.join(stage_dir, "deps-cache", "charts", f"kueue-{kueue_next}.tgz")
 assert os.path.isfile(tgz_path)
 with open(tgz_path, "rb") as f:
@@ -735,6 +755,140 @@ then
   pass "preflight-charts.sh emits canonical upstream and sync_spec when csi-driver-s3 drops sidecar refs"
 else
   fail "preflight-charts.sh emits canonical upstream and sync_spec when csi-driver-s3 drops sidecar refs"
+fi
+
+# 3e. Malformed image ref/tag in upstream chart values.yaml is rejected cleanly without shell/Markdown injection.
+FIXTURE_MALFORMED_IMG="${SCRATCH}/fixture-malformed-img"
+cp -R "${FIXTURE_DIR}" "${FIXTURE_MALFORMED_IMG}"
+python3 - "${FIXTURE_MALFORMED_IMG}/archives" "${FIXTURE_MALFORMED_IMG}/upstream.json" <<'PY'
+import json
+import os
+import sys
+import tarfile
+import tempfile
+
+archives_dir, upstream_path = sys.argv[1:3]
+with open(upstream_path, "r", encoding="utf-8") as f:
+    up = json.load(f)
+kueue_arc = os.path.join(archives_dir, up["charts"]["kueue"]["archive"])
+with tempfile.TemporaryDirectory() as tmp:
+    with tarfile.open(kueue_arc, "r:gz") as tf:
+        tf.extractall(tmp)
+    vy_path = os.path.join(tmp, "kueue", "values.yaml")
+    with open(vy_path, "r", encoding="utf-8") as f:
+        vy = f.read()
+    lines = vy.splitlines()
+    replaced = False
+    for idx, ln in enumerate(lines):
+        if "tag:" in ln and not replaced:
+            indent = ln[: len(ln) - len(ln.lstrip())]
+            lines[idx] = f'{indent}tag: "v1.0.0$(evil)|`<b>"'
+            replaced = True
+            break
+    assert replaced, "failed to inject malformed tag in kueue values.yaml"
+    with open(vy_path, "w", encoding="utf-8") as f:
+        f.write("\n".join(lines) + "\n")
+    with tarfile.open(kueue_arc, "w:gz") as tf:
+        tf.add(os.path.join(tmp, "kueue"), arcname="kueue")
+PY
+STAGE_MALFORMED="${SCRATCH}/stage-malformed/charts"
+SUMMARY_MALFORMED="${SCRATCH}/summary-malformed.md"
+: > "${SUMMARY_MALFORMED}"
+if (
+  cd "${PREFLIGHT_REPO}" && \
+  AUTOSYNC_CHARTS_FIXTURE_DIR="${FIXTURE_MALFORMED_IMG}" \
+  AUTOSYNC_MOCK_MANIFESTS_JSON="${MOCK_NOT_READY}" \
+  AUTOSYNC_SKIP_GO_MOD_DOWNLOAD=true \
+  AUTOSYNC_SKIP_SOURCE_REVISION=true \
+  GITHUB_STEP_SUMMARY="${SUMMARY_MALFORMED}" \
+  bash "${PREFLIGHT_REPO}/.auto-sync/scripts/preflight-charts.sh" "${STAGE_MALFORMED}"
+) >/dev/null 2>&1 && \
+python3 - "${STAGE_MALFORMED}" "${SUMMARY_MALFORMED}" "${KUEUE_CUR}" <<'PY'
+import json
+import os
+import sys
+
+stage_dir, summary_path, kueue_cur = sys.argv[1:4]
+with open(os.path.join(stage_dir, "charts-preflight-report.json"), "r", encoding="utf-8") as f:
+    raw_report = f.read()
+assert "$(evil)" not in raw_report, raw_report
+report = json.loads(raw_report)
+kueue = report["charts"]["kueue"]
+assert kueue["mirrored_image_ready"] is False, kueue
+assert kueue["has_malformed_image_refs"] is True, kueue
+assert kueue["missing_sync_specs"] == [], kueue
+assert kueue["sync_image_command"] == "", kueue
+assert report["sync_image_command"] == "", report
+
+with open(os.path.join(stage_dir, "upstream-records.json"), "r", encoding="utf-8") as f:
+    raw_records = f.read()
+assert "$(evil)" not in raw_records, raw_records
+recs = json.loads(raw_records)
+by_id = {r["upstreamId"]: r for r in recs}
+assert by_id["kueue-chart"]["status"] == "up_to_date", by_id
+assert by_id["kueue-chart"]["version"] == kueue_cur, by_id
+
+with open(summary_path, "r", encoding="utf-8") as f:
+    summary_txt = f.read()
+assert "$(evil)" not in summary_txt, summary_txt
+assert "<b>" not in summary_txt, summary_txt
+assert "&lt;" not in summary_txt and "&gt;" not in summary_txt, summary_txt
+assert f"| `kueue` | `{kueue_cur}` |" in summary_txt, summary_txt
+assert "malformed or invalid image reference(s) rejected" in summary_txt, summary_txt
+assert "```sh" not in summary_txt, summary_txt
+PY
+then
+  pass "preflight-charts.sh rejects malformed candidate image refs without shell or markdown injection"
+else
+  fail "preflight-charts.sh rejects malformed candidate image refs without shell or markdown injection"
+fi
+
+# 3f. Changed chart held back due to patch_clean == False still renders a step summary row without empty sh block.
+PATCH_FAIL_REPO="${SCRATCH}/patch-fail-repo"
+cp -R "${PREFLIGHT_REPO}" "${PATCH_FAIL_REPO}"
+mkdir -p "${PATCH_FAIL_REPO}/hack/deploy/gpustack-operator/chart/charts/kueue"
+cat > "${PATCH_FAIL_REPO}/hack/deploy/gpustack-operator/chart/charts/kueue/001-fail.patch" <<'PATCH'
+--- a/nonexistent-file-for-selftest.yaml
++++ b/nonexistent-file-for-selftest.yaml
+@@ -1 +1 @@
+-a
++b
+PATCH
+git -C "${PATCH_FAIL_REPO}" add -A
+git -C "${PATCH_FAIL_REPO}" commit -q -m "add failing patch fixture"
+STAGE_PATCH_FAIL="${SCRATCH}/stage-patch-fail/charts"
+SUMMARY_PATCH_FAIL="${SCRATCH}/summary-patch-fail.md"
+: > "${SUMMARY_PATCH_FAIL}"
+if (
+  cd "${PATCH_FAIL_REPO}" && \
+  AUTOSYNC_CHARTS_FIXTURE_DIR="${FIXTURE_DIR}" \
+  AUTOSYNC_MOCK_MANIFESTS_JSON="${MOCK_READY}" \
+  AUTOSYNC_SKIP_GO_MOD_DOWNLOAD=true \
+  AUTOSYNC_SKIP_SOURCE_REVISION=true \
+  GITHUB_STEP_SUMMARY="${SUMMARY_PATCH_FAIL}" \
+  bash "${PATCH_FAIL_REPO}/.auto-sync/scripts/preflight-charts.sh" "${STAGE_PATCH_FAIL}"
+) >/dev/null 2>&1 && \
+python3 - "${STAGE_PATCH_FAIL}" "${SUMMARY_PATCH_FAIL}" "${KUEUE_CUR}" "${KUEUE_NEXT}" <<'PY'
+import json
+import os
+import sys
+
+stage_dir, summary_path, kueue_cur, kueue_next = sys.argv[1:5]
+with open(os.path.join(stage_dir, "charts-preflight-report.json"), "r", encoding="utf-8") as f:
+    report = json.load(f)
+assert report["charts"]["kueue"]["patch_clean"] is False, report
+assert report["charts"]["kueue"]["mirrored_image_ready"] is True, report
+assert report["sync_image_command"] == "", report
+
+with open(summary_path, "r", encoding="utf-8") as f:
+    summary_txt = f.read()
+assert f"| `kueue` | `{kueue_cur}` | `{kueue_next}` | chart staging/patch failed |" in summary_txt, summary_txt
+assert "```sh" not in summary_txt, summary_txt
+PY
+then
+  pass "preflight-charts.sh writes step summary row for patch-failed held-back chart without empty sh block"
+else
+  fail "preflight-charts.sh writes step summary row for patch-failed held-back chart without empty sh block"
 fi
 fi
 

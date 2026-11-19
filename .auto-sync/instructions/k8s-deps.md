@@ -23,9 +23,9 @@ You are synchronizing the six CLI tool pins and Kubernetes `v0.36.x` lockstep Go
 - Keep `sigs.k8s.io/controller-runtime` on its current `v0.24.x` minor series and `sigs.k8s.io/kueue` on its current `v0.18.x` minor series.
 - Every staged module under `staging/` must carry an exact `_VERSION_` stamp matching `go.mod`, apply all patches under `hack/staging/` cleanly with zero `.rej` or `.orig` files, and pass `bash hack/check/upgrade-compat.sh modules`.
 
-## Helm `v3.*` Three-Place Lockstep Rule
+## Helm `v3.*` Three-Place Lockstep and `k8s.io/*` Compatibility Rule
 
-- `HELM_VERSION` in `pack/gpustack-operator/Dockerfile` must stay on `v3.*` (never `v4.*`, which preflight filters out).
+- `HELM_VERSION` in `pack/gpustack-operator/Dockerfile` must stay on `v3.*` (never `v4.*`, which preflight filters out) and its `go.mod` must stay compatible with the repository's current Kubernetes minor (`k8s.io/*` minor `<= v0.36.x`; `preflight-k8s-deps.sh` skips newer Helm `v3.y.z` releases that bump `k8s.io/*` to `v0.37+`).
 - Keep all three Helm pins aligned to the exact same `3.y.z` / `v3.y.z` version:
   1. `ARG HELM_VERSION="<x.y.z>"` in `pack/gpustack-operator/Dockerfile`
   2. BOTH the header comment on line 7 (`default is v<x.y.z>.`) AND `helm_version=${HELM_VERSION:-"v<x.y.z>"}` on line 14 of `hack/lib/helm.sh` (`hack/check/toolpins-selftest.sh` checks both!)
@@ -55,5 +55,5 @@ When updating Go modules or staging trees:
 
 ## Settlement
 
-- Update `.auto-sync/proposals/k8s-deps.json` (`schema_version: 1`, `summary`, `versions`, `subscriptions`) to reflect any updated pins and settle as `completed`. Keep `versions` aligned with the exact 8 `upstream-records.json` IDs and version formats (`kubernetes`, `controller-runtime`, `kueue-sdk`, and `helm-cli` with leading `v`; `skopeo-cli`, `vals-cli`, `kustomize-cli`, and `ytt-cli` without leading `v`).
+- Update `.auto-sync/proposals/k8s-deps.json` (`schema_version: 1`, `summary`, `versions`, `subscriptions`) to reflect any updated pins and settle as `completed`. `versions` must contain all 11 pinned keys matching `validate_k8s_deps.sh`: `kubernetes`, `k8s-modules`, `controller-runtime`, `kueue-sdk`, `helm-cli`, and `helm-module` with leading `v`; `skopeo-cli`, `vals-cli`, `kustomize-cli`, `ytt-cli`, and `kubectl-cli` without leading `v`. Keep `subscriptions` aligned with the 8 `upstream-records.json` IDs (`kubernetes`, `controller-runtime`, `kueue-sdk`, `helm-cli`, `skopeo-cli`, `vals-cli`, `kustomize-cli`, `ytt-cli`).
 - If all upstreams in `$AUTOSYNC_STAGE_DIR/upstream-records.json` are `up_to_date` and all repository pins already match, settle cleanly as `no_change` without modifying files.

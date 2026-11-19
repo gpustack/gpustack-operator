@@ -42,6 +42,9 @@ on:
       # it compares are JSON and prose, so each needs its own trigger or the gate misses the edit.
       - ".agents/skills/**"
       - ".opencodereview/rule.json"
+      - ".auto-sync/**"
+      - ".github/workflows/auto-sync.yml"
+      - "hack/check/autosync-selftest.sh"
       - "hack/check/skills.sh"
       - "hack/check/skills-selftest.sh"
       - "hack/lint.sh"
@@ -74,6 +77,9 @@ on:
       # it compares are JSON and prose, so each needs its own trigger or the gate misses the edit.
       - ".agents/skills/**"
       - ".opencodereview/rule.json"
+      - ".auto-sync/**"
+      - ".github/workflows/auto-sync.yml"
+      - "hack/check/autosync-selftest.sh"
       - "hack/check/skills.sh"
       - "hack/check/skills-selftest.sh"
       - "hack/lint.sh"
@@ -116,6 +122,11 @@ jobs:
           sudo update-alternatives --set awk /usr/bin/original-awk
           awk --version 2>&1 | head -1
           make lint docs
+          # Run the fast (~5s) auto-sync gate here to validate shell/Python syntax, all taskpack
+          # YAML manifests, proposal JSON schemas, instruction files, and auto-sync.yml routing
+          # without pulling in the slower (~21s) common library suite or domain fixture simulations
+          # already covered by "make lint".
+          bash hack/check/autosync-selftest.sh fast .
       - name: Check versioned build
         env:
           SITE_BASE_URL: https://docs.gpustack.ai/gpustack-operator/main/

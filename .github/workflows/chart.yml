@@ -254,7 +254,7 @@ jobs:
       # was checked out — without this step a version bump committed without its
       # re-vendored tree would read as clean.
       - name: Vendor Charts
-        run: make deps
+        run: GPUSTACK_DEPS_STAGE_ONLY=charts make deps
       - name: Verify Vendored Charts
         run: |
           # Assert the re-vendor above didn't drift from the committed, patched trees,
