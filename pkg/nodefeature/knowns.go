@@ -31,6 +31,11 @@ const (
 )
 
 const (
+	// AcceleratorFamilyAscend950 is the accelerator family reported for Ascend A5 devices.
+	AcceleratorFamilyAscend950 = "950"
+)
+
+const (
 	// GeneralManufacturerGeneric is the fallback general(CPU) manufacturer used
 	// when the NFD cpu-model labels are absent or unrecognizable.
 	GeneralManufacturerGeneric = "generic"

@@ -29,6 +29,7 @@ import (
 
 	core "k8s.io/api/core/v1"
 
+	"gpustack.ai/gpustack/pkg/nodefeature"
 	"gpustack.ai/gpustack/pkg/utils/json"
 )
 
@@ -93,7 +94,8 @@ const (
 	sglangDisaggregationBackendNIXL = "nixl"
 
 	// sglangDisaggregationBackendAscend selects the Ascend MemFabric point-to-point backend
-	// (--disaggregation-transfer-backend ascend), with AscendMFTransferProtocolEnv defaulted to sdma.
+	// (--disaggregation-transfer-backend ascend), with AscendMFTransferProtocolEnv defaulted to
+	// sdma on A2/A3 and device_urma on Ascend A5.
 	sglangDisaggregationBackendAscend = "ascend"
 
 	// The two variables the NIXL and Ascend backends read at engine start. Both are rendered
@@ -101,6 +103,10 @@ const (
 	// different value.
 	SGLangDisaggregationNIXLBackendEnv = "SGLANG_DISAGGREGATION_NIXL_BACKEND"
 	AscendMFTransferProtocolEnv        = "ASCEND_MF_TRANSFER_PROTOCOL"
+
+	// Default Ascend MemFabric transfer protocols for SGLang HIXL disaggregation.
+	AscendMFTransferProtocolSDMA       = "sdma"
+	AscendMFTransferProtocolDeviceURMA = "device_urma"
 
 	// sglangRetractionBackupArg selects where a decode half keeps the KV cache of a request it
 	// retracts (v0.5.18 `server_args.py` ServerArgs.disaggregation_decode_retraction_backup,
@@ -408,8 +414,12 @@ func renderSGLang(in Input) (*Result, error) {
 			})
 		case KVTransferBackendHIXL:
 			backend = sglangDisaggregationBackendAscend
+			mfTransferProtocol := AscendMFTransferProtocolSDMA
+			if in.AcceleratorFamily == nodefeature.AcceleratorFamilyAscend950 {
+				mfTransferProtocol = AscendMFTransferProtocolDeviceURMA
+			}
 			result.DefaultedEnv = append(result.DefaultedEnv, core.EnvVar{
-				Name: AscendMFTransferProtocolEnv, Value: "sdma",
+				Name: AscendMFTransferProtocolEnv, Value: mfTransferProtocol,
 			})
 			// Both halves mount the host driver tree, read-only, for the reason the vLLM-Ascend
 			// leg does: the transfer reads each NPU's NIC address through hccn_tool, which ships

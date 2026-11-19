@@ -295,6 +295,15 @@ type Input struct {
 	// render nothing from it.
 	KVTransferEFA bool
 
+	// AcceleratorFamily is the accelerator family reported by AcceleratorType.Status.Detail.Family
+	// (for example, "950" for Ascend A5). Empty preserves legacy behavior.
+	AcceleratorFamily string
+
+	// AscendHostRoCE reports that an Ascend A5 vLLM workload uses Host RoCE (roce:host)
+	// rather than on-die UB/UBG/UBoE. Ignored unless Engine is EngineVLLMAscend and
+	// AcceleratorFamily is nodefeature.AcceleratorFamilyAscend950.
+	AscendHostRoCE bool
+
 	// Parallelism is the pair's declared parallel shape, resolved by the caller off each
 	// role's own books. Only the document that asserts on it reads it -- the Ascend transfer
 	// leg's -- and the zero value renders 1/1 there, exactly what the leg's inline literals
