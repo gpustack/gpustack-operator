@@ -56,10 +56,15 @@ _CLEANUP_DIRS=()
 cleanup_on_exit() {
   local d
   for d in "${_CLEANUP_DIRS[@]+"${_CLEANUP_DIRS[@]}"}"; do
-    [[ -n "${d}" ]] && rm -rf "${d}"
+    if [[ -n "${d}" && -e "${d}" ]]; then
+      chmod -R u+w "${d}" 2>/dev/null || true
+      rm -rf "${d}"
+    fi
   done
 }
 trap cleanup_on_exit EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 resolve_loopwright_dist_js() {
   if [[ -n "${LOOPWRIGHT_DIST_JS+set}" ]]; then
@@ -1857,6 +1862,105 @@ YAML
   grep -v 'models-json:' "${synth_repo}/.github/workflows/auto-sync.yml" > "${synth_wf_bad}/.github/workflows/auto-sync.yml"
   assert_fails "validate_workflow rejects workflow missing models-json input" \
     validate_workflow_isolated "${synth_wf_bad}"
+
+  # 10. Standalone gate-script.sh resolution of .auto-sync/checks/lib.sh from candidate cwd.
+  local gate_cand="${scratch}/gate-cand"
+  mkdir -p "${gate_cand}/.git" "${gate_cand}/.auto-sync/checks"
+  cp "${ROOT_DIR}/.auto-sync/checks/lib.sh" "${gate_cand}/.auto-sync/checks/lib.sh"
+  cp "${ROOT_DIR}/.auto-sync/checks/dockerfile_arg.py" "${gate_cand}/.auto-sync/checks/dockerfile_arg.py"
+  local expected_checks_dir
+  expected_checks_dir="$(cd "${gate_cand}/.auto-sync/checks" && pwd -P)"
+  local clean_path="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin"
+  local gate_domain gate_exec_dir gate_script gate_preamble gate_out="" expected_fail_re=""
+  for gate_domain in charts k8s_deps kv_transfer priors router slicing; do
+    gate_exec_dir="${scratch}/gate-exec-${gate_domain}"
+    mkdir -p "${gate_exec_dir}"
+    gate_script="${gate_exec_dir}/gate-script.sh"
+    gate_preamble="${gate_exec_dir}/gate-preamble.sh"
+    cp "${ROOT_DIR}/.auto-sync/checks/validate_${gate_domain}.sh" "${gate_script}"
+    chmod +x "${gate_script}"
+
+    if ! awk '
+      { print }
+      /^source "\$\{SCRIPT_DIR\}\/lib\.sh"$/ { found = 1; exit }
+      END { exit !found }
+    ' "${gate_script}" > "${gate_preamble}"; then
+      fail "standalone gate-script.sh (validate_${gate_domain}.sh) contains expected source \"\${SCRIPT_DIR}/lib.sh\" line"
+      continue
+    fi
+    cat >> "${gate_preamble}" <<'EOF'
+declare -F autosync::bootstrap_env >/dev/null
+[[ -f "${SCRIPT_DIR}/dockerfile_arg.py" ]]
+printf 'SCRIPT_DIR=%s\n' "${SCRIPT_DIR}"
+EOF
+
+    if gate_out="$(
+      cd "${gate_cand}" && \
+      env -i PATH="${clean_path}" HOME="${scratch}" bash "${gate_preamble}" 2>&1
+    )" && [[ "${gate_out}" == "SCRIPT_DIR=${expected_checks_dir}" ]]; then
+      pass "standalone gate-script.sh (validate_${gate_domain}.sh) resolves lib.sh from candidate cwd"
+    else
+      fail "standalone gate-script.sh (validate_${gate_domain}.sh) resolves lib.sh from candidate cwd (${gate_out})"
+    fi
+
+    if gate_out="$(
+      cd "${scratch}" && \
+      env -i PATH="${clean_path}" HOME="${scratch}" LOOPWRIGHT_CANDIDATE_DIR="${gate_cand}" bash "${gate_preamble}" 2>&1
+    )" && [[ "${gate_out}" == "SCRIPT_DIR=${expected_checks_dir}" ]]; then
+      pass "standalone gate-script.sh (validate_${gate_domain}.sh) resolves lib.sh via LOOPWRIGHT_CANDIDATE_DIR"
+    else
+      fail "standalone gate-script.sh (validate_${gate_domain}.sh) resolves lib.sh via LOOPWRIGHT_CANDIDATE_DIR (${gate_out})"
+    fi
+
+    if [[ "${gate_domain}" == "charts" ]]; then
+      if gate_out="$(
+        cd "${gate_cand}" && \
+        env -i PATH="${clean_path}" HOME="${scratch}" bash "${gate_script}" \
+          --extract-images \
+          "${ROOT_DIR}/deploy/gpustack-operator/chart/values.yaml" \
+          "${ROOT_DIR}/deploy/gpustack-operator/chart/charts/topograph/Chart.yaml" 2>&1
+      )" && [[ -n "${gate_out}" ]] && ! grep -q 'lib\.sh: No such file or directory' <<<"${gate_out}"; then
+        pass "standalone gate-script.sh (validate_charts.sh --extract-images) executes from candidate cwd"
+      else
+        fail "standalone gate-script.sh (validate_charts.sh --extract-images) executes from candidate cwd (${gate_out})"
+      fi
+
+      if gate_out="$(
+        cd "${scratch}" && \
+        env -i PATH="${clean_path}" HOME="${scratch}" LOOPWRIGHT_CANDIDATE_DIR="${gate_cand}" bash "${gate_script}" \
+          --extract-images \
+          "${ROOT_DIR}/deploy/gpustack-operator/chart/values.yaml" \
+          "${ROOT_DIR}/deploy/gpustack-operator/chart/charts/topograph/Chart.yaml" 2>&1
+      )" && [[ -n "${gate_out}" ]] && ! grep -q 'lib\.sh: No such file or directory' <<<"${gate_out}"; then
+        pass "standalone gate-script.sh (validate_charts.sh --extract-images) executes via LOOPWRIGHT_CANDIDATE_DIR"
+      else
+        fail "standalone gate-script.sh (validate_charts.sh --extract-images) executes via LOOPWRIGHT_CANDIDATE_DIR (${gate_out})"
+      fi
+    else
+      expected_fail_re='AUTOSYNC_STAGE_DIR'
+      if [[ "${gate_domain}" == "priors" ]]; then
+        expected_fail_re='missing priors\.yaml or records\.md'
+      fi
+
+      if ! gate_out="$(
+        cd "${gate_cand}" && \
+        env -i PATH="${clean_path}" HOME="${scratch}" bash "${gate_script}" 2>&1
+      )" && grep -q 'FAIL:' <<<"${gate_out}" && grep -q "${expected_fail_re}" <<<"${gate_out}" && ! grep -q 'lib\.sh: No such file or directory' <<<"${gate_out}"; then
+        pass "standalone gate-script.sh (validate_${gate_domain}.sh) sources lib.sh from candidate cwd"
+      else
+        fail "standalone gate-script.sh (validate_${gate_domain}.sh) sources lib.sh from candidate cwd (${gate_out})"
+      fi
+
+      if ! gate_out="$(
+        cd "${scratch}" && \
+        env -i PATH="${clean_path}" HOME="${scratch}" LOOPWRIGHT_CANDIDATE_DIR="${gate_cand}" bash "${gate_script}" 2>&1
+      )" && grep -q 'FAIL:' <<<"${gate_out}" && grep -q "${expected_fail_re}" <<<"${gate_out}" && ! grep -q 'lib\.sh: No such file or directory' <<<"${gate_out}"; then
+        pass "standalone gate-script.sh (validate_${gate_domain}.sh) sources lib.sh via LOOPWRIGHT_CANDIDATE_DIR"
+      else
+        fail "standalone gate-script.sh (validate_${gate_domain}.sh) sources lib.sh via LOOPWRIGHT_CANDIDATE_DIR (${gate_out})"
+      fi
+    fi
+  done
 }
 
 strict_yaml_to_json() {
