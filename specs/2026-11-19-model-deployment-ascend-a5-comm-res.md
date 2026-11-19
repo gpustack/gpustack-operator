@@ -263,7 +263,7 @@ Parallel entry frontier: `T1`, `T2`, and `T4` own disjoint paths and run concurr
       Acceptance: `values.yaml` adds `deviceManager.hostRootMount.enabled: true` with clear comments; `device-manager` DaemonSet mounts `host-root-dir` (`hostPath.path: /`, `hostPath.type: Directory`) at `/host` with `readOnly: true` on container `main` only (never `initContainers[stage-libs]`) across all manufacturers when `enabled` is `true`, and omits both volume and mount when `false`; `make generate chart` leaves `values.schema.json` and `chart/README.md` in sync; `TestChartDeviceManagerMountsHostRootReadOnly` asserts both enabled and disabled renders across manufacturers; `make lint chart` exits 0.
       Verify: `CGO_ENABLED=1 go test -race ./pkg/worker/kuberess/... -run TestChart && make lint chart`
 
-- [ ] **T3 · Wire `HostRoot` and Ascend A5 conditional `/etc/hccl_rootinfo.json` and `/lib/route.conf` mounts in `device-manager` allocator and preflight**
+- [x] **T3 · Wire `HostRoot` and Ascend A5 conditional `/etc/hccl_rootinfo.json` and `/lib/route.conf` mounts in `device-manager` allocator and preflight**
       Blocked by: T1
       Owns: `pkg/device/types.go`, `pkg/devicemanager/option.go`, `pkg/devicemanager/config.go`, `pkg/devicemanager/allocator/option.go`, `pkg/devicemanager/allocator/config.go`, `pkg/devicemanager/allocator/allocator.go`, `pkg/devicemanager/allocator/ascend/**`
       Gate: review

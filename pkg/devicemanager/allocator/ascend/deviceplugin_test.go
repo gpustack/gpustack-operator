@@ -2,8 +2,10 @@ package ascend
 
 import (
 	"context"
+	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/go-logr/logr"
@@ -15,8 +17,10 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
+	"gpustack.ai/gpustack/pkg/device"
 	"gpustack.ai/gpustack/pkg/deviceplugin"
 	"gpustack.ai/gpustack/pkg/nodefeature"
+	"gpustack.ai/gpustack/pkg/utils/hostfs"
 )
 
 const (
@@ -605,6 +609,486 @@ func TestGetContainerAllocateResponse_MountsAscendDriver(t *testing.T) {
 			assert.Equal(t, driverDir, m.ContainerPath)
 			assert.Equal(t, driverDir, m.HostPath)
 			assert.True(t, m.ReadOnly, "the driver tree is mounted read-only")
+		})
+	}
+}
+
+func makeFakeHostRoot(t *testing.T) string {
+	t.Helper()
+	root := t.TempDir()
+	for _, dir := range []string{"etc", "proc", "usr"} {
+		require.NoError(t, os.MkdirAll(filepath.Join(root, dir), 0o755))
+	}
+	return root
+}
+
+func ascend950DevicesFixture() *workercore.Devices {
+	devs := ascendDevicesFixture()
+	devs.Spec.Groups[0].ID = "950"
+	devs.Spec.Groups[0].Family = family950
+	devs.Spec.Groups[0].RuntimeVersion = "9.0"
+	devs.Spec.Groups[0].Accelerators = []workercore.Accelerator{
+		{ID: testAccelID0, Index: 0, PhysicalIndexes: []uint32{7, 3, 0}},
+		{ID: testAccelID1, Index: 1, PhysicalIndexes: []uint32{8, 4, 0}},
+	}
+	return devs
+}
+
+func mountsMatching(resp *deviceplugin.ContainerAllocateResponse, target string) []*deviceplugin.Mount {
+	var out []*deviceplugin.Mount
+	for _, m := range resp.Mounts {
+		if m.ContainerPath == target {
+			out = append(out, m)
+		}
+	}
+	return out
+}
+
+func TestGetContainerAllocateResponse_Ascend950HostMounts_AllModesAndMergedUsr(t *testing.T) {
+	libLayouts := []struct {
+		name  string
+		setup func(t *testing.T, root string)
+	}{
+		{
+			name: "plain /lib directory",
+			setup: func(t *testing.T, root string) {
+				require.NoError(t, os.MkdirAll(filepath.Join(root, "lib"), 0o755))
+				require.NoError(t, os.WriteFile(filepath.Join(root, "lib", "route.conf"), []byte("route=1\n"), 0o644))
+			},
+		},
+		{
+			name: "merged-usr absolute symlink /lib -> /usr/lib",
+			setup: func(t *testing.T, root string) {
+				require.NoError(t, os.MkdirAll(filepath.Join(root, "usr", "lib"), 0o755))
+				require.NoError(t, os.WriteFile(filepath.Join(root, "usr", "lib", "route.conf"), []byte("route=1\n"), 0o644))
+				require.NoError(t, os.Symlink("/usr/lib", filepath.Join(root, "lib")))
+			},
+		},
+		{
+			name: "merged-usr relative symlink /lib -> usr/lib",
+			setup: func(t *testing.T, root string) {
+				require.NoError(t, os.MkdirAll(filepath.Join(root, "usr", "lib"), 0o755))
+				require.NoError(t, os.WriteFile(filepath.Join(root, "usr", "lib", "route.conf"), []byte("route=1\n"), 0o644))
+				require.NoError(t, os.Symlink("usr/lib", filepath.Join(root, "lib")))
+			},
+		},
+	}
+
+	modes := []workercore.DeviceAllocationMode{
+		workercore.DeviceAllocationModeExclusive,
+		workercore.DeviceAllocationModeShared,
+		workercore.DeviceAllocationModeSliced,
+		workercore.DeviceAllocationModeVisibility,
+	}
+
+	for _, layout := range libLayouts {
+		for _, mode := range modes {
+			t.Run(layout.name+"/"+mode.String(), func(t *testing.T) {
+				absentAscendDriverHostPath(t)
+				root := makeFakeHostRoot(t)
+				require.NoError(t, os.WriteFile(filepath.Join(root, "etc", "hccl_rootinfo.json"), []byte(rankTableV20), 0o644))
+				layout.setup(t, root)
+
+				hfs, err := hostfs.OpenHostRoot(root)
+				require.NoError(t, err)
+				t.Cleanup(func() { _ = hfs.Close() })
+
+				var (
+					s   *server
+					pod *core.Pod
+					ctr *core.Container
+				)
+				if mode == workercore.DeviceAllocationModeSliced {
+					redirectLogicalSliceDirs(t)
+					s = newSlicedServerWithShare(&fakeShareDriver{enabled: map[[2]int32]bool{{3, 0}: true}})
+					s.hostFS = hfs
+					pod, ctr = slicedPod("uid-a5-mounts", "train", 10, 25)
+				} else {
+					s = &server{
+						ResourceServer: deviceplugin.ResourceServer{
+							Logger:         logr.Discard(),
+							Manufacturer:   Manufacturer,
+							AllocationMode: mode,
+						},
+						share:   &fakeShareDriver{enabled: map[[2]int32]bool{{3, 0}: true}},
+						product: newFakeProductResolver(),
+						hostFS:  hfs,
+					}
+					pod = &core.Pod{ObjectMeta: meta.ObjectMeta{UID: types.UID("uid-a5-mounts")}}
+				}
+
+				resp, err := s.GetContainerAllocateResponse(context.Background(), pod, ctr, ascend950DevicesFixture(),
+					map[deviceplugin.Resource]int32{{Group: "950", Device: testAccelID0}: 1})
+				require.NoError(t, err)
+
+				for _, wantPath := range []string{hcclRootInfoPath, routeConfPath} {
+					ms := mountsMatching(resp, wantPath)
+					require.Len(t, ms, 1, "expected exactly one mount for %s", wantPath)
+					assert.Equal(t, wantPath, ms[0].HostPath)
+					assert.Equal(t, wantPath, ms[0].ContainerPath)
+					assert.True(t, ms[0].ReadOnly)
+				}
+			})
+		}
+	}
+}
+
+func TestGetContainerAllocateResponse_Ascend950HostMounts_MultiCardDedup(t *testing.T) {
+	absentAscendDriverHostPath(t)
+	root := makeFakeHostRoot(t)
+	require.NoError(t, os.WriteFile(filepath.Join(root, "etc", "hccl_rootinfo.json"), []byte(rankTableV20), 0o644))
+	require.NoError(t, os.MkdirAll(filepath.Join(root, "lib"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(root, "lib", "route.conf"), []byte("route=1\n"), 0o644))
+
+	hfs, err := hostfs.OpenHostRoot(root)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = hfs.Close() })
+
+	s := &server{
+		ResourceServer: deviceplugin.ResourceServer{
+			Logger:         logr.Discard(),
+			Manufacturer:   Manufacturer,
+			AllocationMode: workercore.DeviceAllocationModeExclusive,
+		},
+		product: newFakeProductResolver(),
+		hostFS:  hfs,
+	}
+	pod := &core.Pod{ObjectMeta: meta.ObjectMeta{UID: types.UID("uid-a5-multi")}}
+	resp, err := s.GetContainerAllocateResponse(context.Background(), pod, nil, ascend950DevicesFixture(),
+		map[deviceplugin.Resource]int32{
+			{Group: "950", Device: testAccelID0}: 1,
+			{Group: "950", Device: testAccelID1}: 1,
+		})
+	require.NoError(t, err)
+
+	assert.Len(t, mountsMatching(resp, hcclRootInfoPath), 1)
+	assert.Len(t, mountsMatching(resp, routeConfPath), 1)
+}
+
+func TestGetContainerAllocateResponse_Ascend950HostMounts_ValidationAndSkipCases(t *testing.T) {
+	cases := []struct {
+		name          string
+		setup         func(t *testing.T, root string)
+		wantRankTable bool
+		wantRouteConf bool
+	}{
+		{
+			name:          "both absent",
+			setup:         func(t *testing.T, root string) {},
+			wantRankTable: false,
+			wantRouteConf: false,
+		},
+		{
+			name: "invalid JSON ranktable skipped while valid route.conf mounted",
+			setup: func(t *testing.T, root string) {
+				require.NoError(t, os.WriteFile(filepath.Join(root, "etc", "hccl_rootinfo.json"), []byte("not json"), 0o644))
+				require.NoError(t, os.MkdirAll(filepath.Join(root, "lib"), 0o755))
+				require.NoError(t, os.WriteFile(filepath.Join(root, "lib", "route.conf"), []byte("ok"), 0o644))
+			},
+			wantRankTable: false,
+			wantRouteConf: true,
+		},
+		{
+			name: "missing version ranktable skipped",
+			setup: func(t *testing.T, root string) {
+				require.NoError(t, os.WriteFile(filepath.Join(root, "etc", "hccl_rootinfo.json"), []byte(`{"status":"completed"}`), 0o644))
+			},
+			wantRankTable: false,
+			wantRouteConf: false,
+		},
+		{
+			name: "v1.0 ranktable skipped",
+			setup: func(t *testing.T, root string) {
+				require.NoError(t, os.WriteFile(filepath.Join(root, "etc", "hccl_rootinfo.json"), []byte(rankTableV10), 0o644))
+			},
+			wantRankTable: false,
+			wantRouteConf: false,
+		},
+		{
+			name: "v1.2 ranktable skipped",
+			setup: func(t *testing.T, root string) {
+				require.NoError(t, os.WriteFile(filepath.Join(root, "etc", "hccl_rootinfo.json"), []byte(`{"version":"1.2"}`), 0o644))
+			},
+			wantRankTable: false,
+			wantRouteConf: false,
+		},
+		{
+			name: "oversized ranktable (> 1 MiB) skipped",
+			setup: func(t *testing.T, root string) {
+				oversized := `{"version":"2.0","pad":"` + strings.Repeat("a", int(maxRankTableBytes)+16) + `"}`
+				require.NoError(t, os.WriteFile(filepath.Join(root, "etc", "hccl_rootinfo.json"), []byte(oversized), 0o644))
+			},
+			wantRankTable: false,
+			wantRouteConf: false,
+		},
+		{
+			name: "leaf symlinks skipped for both files",
+			setup: func(t *testing.T, root string) {
+				require.NoError(t, os.WriteFile(filepath.Join(root, "etc", "real.json"), []byte(rankTableV20), 0o644))
+				require.NoError(t, os.Symlink("real.json", filepath.Join(root, "etc", "hccl_rootinfo.json")))
+				require.NoError(t, os.MkdirAll(filepath.Join(root, "lib"), 0o755))
+				require.NoError(t, os.WriteFile(filepath.Join(root, "lib", "real.conf"), []byte("ok"), 0o644))
+				require.NoError(t, os.Symlink("real.conf", filepath.Join(root, "lib", "route.conf")))
+			},
+			wantRankTable: false,
+			wantRouteConf: false,
+		},
+		{
+			name: "directories skipped for both files",
+			setup: func(t *testing.T, root string) {
+				require.NoError(t, os.MkdirAll(filepath.Join(root, "etc", "hccl_rootinfo.json"), 0o755))
+				require.NoError(t, os.MkdirAll(filepath.Join(root, "lib", "route.conf"), 0o755))
+			},
+			wantRankTable: false,
+			wantRouteConf: false,
+		},
+		{
+			name: "non-directory /lib fails Lstat cleanly without failing allocation",
+			setup: func(t *testing.T, root string) {
+				require.NoError(t, os.WriteFile(filepath.Join(root, "etc", "hccl_rootinfo.json"), []byte(rankTableV20), 0o644))
+				require.NoError(t, os.WriteFile(filepath.Join(root, "lib"), []byte("not a dir"), 0o644))
+			},
+			wantRankTable: true,
+			wantRouteConf: false,
+		},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			absentAscendDriverHostPath(t)
+			root := makeFakeHostRoot(t)
+			c.setup(t, root)
+
+			hfs, err := hostfs.OpenHostRoot(root)
+			require.NoError(t, err)
+			t.Cleanup(func() { _ = hfs.Close() })
+
+			s := &server{
+				ResourceServer: deviceplugin.ResourceServer{
+					Logger:         logr.Discard(),
+					Manufacturer:   Manufacturer,
+					AllocationMode: workercore.DeviceAllocationModeExclusive,
+				},
+				product: newFakeProductResolver(),
+				hostFS:  hfs,
+			}
+			pod := &core.Pod{ObjectMeta: meta.ObjectMeta{UID: types.UID("uid-a5-skip")}}
+			resp, err := s.GetContainerAllocateResponse(context.Background(), pod, nil, ascend950DevicesFixture(),
+				map[deviceplugin.Resource]int32{{Group: "950", Device: testAccelID0}: 1})
+			require.NoError(t, err)
+
+			if c.wantRankTable {
+				assert.Len(t, mountsMatching(resp, hcclRootInfoPath), 1)
+			} else {
+				assert.Empty(t, mountsMatching(resp, hcclRootInfoPath))
+			}
+			if c.wantRouteConf {
+				assert.Len(t, mountsMatching(resp, routeConfPath), 1)
+			} else {
+				assert.Empty(t, mountsMatching(resp, routeConfPath))
+			}
+		})
+	}
+}
+
+func TestGetContainerAllocateResponse_Ascend950HostMounts_NonA5FamiliesEmitNeither(t *testing.T) {
+	absentAscendDriverHostPath(t)
+	root := makeFakeHostRoot(t)
+	require.NoError(t, os.WriteFile(filepath.Join(root, "etc", "hccl_rootinfo.json"), []byte(rankTableV20), 0o644))
+	require.NoError(t, os.MkdirAll(filepath.Join(root, "lib"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(root, "lib", "route.conf"), []byte("route=1\n"), 0o644))
+
+	hfs, err := hostfs.OpenHostRoot(root)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = hfs.Close() })
+
+	for _, family := range []string{"910", "910B", "910C", "310P", "310B"} {
+		t.Run(family, func(t *testing.T) {
+			s := &server{
+				ResourceServer: deviceplugin.ResourceServer{
+					Logger:         logr.Discard(),
+					Manufacturer:   Manufacturer,
+					AllocationMode: workercore.DeviceAllocationModeExclusive,
+				},
+				product: newFakeProductResolver(),
+				hostFS:  hfs,
+			}
+			devs := ascendDevicesFixture()
+			devs.Spec.Groups[0].Family = family
+
+			pod := &core.Pod{ObjectMeta: meta.ObjectMeta{UID: types.UID("uid-non-a5-" + family)}}
+			resp, err := s.GetContainerAllocateResponse(context.Background(), pod, nil, devs,
+				map[deviceplugin.Resource]int32{{Group: "910b2", Device: testAccelID0}: 1})
+			require.NoError(t, err)
+
+			assert.Empty(t, mountsMatching(resp, hcclRootInfoPath))
+			assert.Empty(t, mountsMatching(resp, routeConfPath))
+		})
+	}
+}
+
+func TestGetContainerAllocateResponse_Ascend950HostMounts_ContainerMountDedupAndNilSafety(t *testing.T) {
+	absentAscendDriverHostPath(t)
+	root := makeFakeHostRoot(t)
+	require.NoError(t, os.WriteFile(filepath.Join(root, "etc", "hccl_rootinfo.json"), []byte(rankTableV20), 0o644))
+	require.NoError(t, os.MkdirAll(filepath.Join(root, "lib"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(root, "lib", "route.conf"), []byte("route=1\n"), 0o644))
+
+	hfs, err := hostfs.OpenHostRoot(root)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = hfs.Close() })
+
+	cases := []struct {
+		name          string
+		ctr           *core.Container
+		wantRankTable bool
+		wantRouteConf bool
+	}{
+		{
+			name:          "nil container emits both",
+			ctr:           nil,
+			wantRankTable: true,
+			wantRouteConf: true,
+		},
+		{
+			name: "container already mounts hccl_rootinfo with trailing slash",
+			ctr: &core.Container{
+				Name: "app",
+				VolumeMounts: []core.VolumeMount{
+					{Name: "custom-ranktable", MountPath: "/etc/hccl_rootinfo.json/"},
+				},
+			},
+			wantRankTable: false,
+			wantRouteConf: true,
+		},
+		{
+			name: "container already mounts route.conf with double slash",
+			ctr: &core.Container{
+				Name: "app",
+				VolumeMounts: []core.VolumeMount{
+					{Name: "custom-route", MountPath: "/lib//route.conf"},
+				},
+			},
+			wantRankTable: true,
+			wantRouteConf: false,
+		},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			s := &server{
+				ResourceServer: deviceplugin.ResourceServer{
+					Logger:         logr.Discard(),
+					Manufacturer:   Manufacturer,
+					AllocationMode: workercore.DeviceAllocationModeExclusive,
+				},
+				product: newFakeProductResolver(),
+				hostFS:  hfs,
+			}
+			pod := &core.Pod{ObjectMeta: meta.ObjectMeta{UID: types.UID("uid-a5-dedup")}}
+			resp, err := s.GetContainerAllocateResponse(context.Background(), pod, c.ctr, ascend950DevicesFixture(),
+				map[deviceplugin.Resource]int32{{Group: "950", Device: testAccelID0}: 1})
+			require.NoError(t, err)
+
+			assert.Equal(t, c.wantRankTable, len(mountsMatching(resp, hcclRootInfoPath)) == 1)
+			assert.Equal(t, c.wantRouteConf, len(mountsMatching(resp, routeConfPath)) == 1)
+		})
+	}
+
+	t.Run("existing response mounts are not duplicated", func(t *testing.T) {
+		s := &server{
+			ResourceServer: deviceplugin.ResourceServer{
+				Logger:         logr.Discard(),
+				Manufacturer:   Manufacturer,
+				AllocationMode: workercore.DeviceAllocationModeExclusive,
+			},
+			product: newFakeProductResolver(),
+			hostFS:  hfs,
+		}
+		accels := deviceplugin.AllocatedAccelerators(ascend950DevicesFixture(),
+			map[deviceplugin.Resource]int32{{Group: "950", Device: testAccelID0}: 1})
+		resp := &deviceplugin.ContainerAllocateResponse{
+			Mounts: []*deviceplugin.Mount{
+				{HostPath: hcclRootInfoPath, ContainerPath: "/etc/hccl_rootinfo.json/", ReadOnly: true},
+				{HostPath: routeConfPath, ContainerPath: "/lib//route.conf", ReadOnly: true},
+			},
+		}
+
+		s.appendAscend950HostMounts(resp, nil, accels)
+		assert.Len(t, resp.Mounts, 2)
+	})
+}
+
+func TestGetContainerAllocateResponse_Ascend950HostMounts_ZeroValueServerSafety(t *testing.T) {
+	absentAscendDriverHostPath(t)
+	s := &server{
+		ResourceServer: deviceplugin.ResourceServer{
+			AllocationMode: workercore.DeviceAllocationModeExclusive,
+		},
+		product: newFakeProductResolver(),
+	}
+	pod := &core.Pod{ObjectMeta: meta.ObjectMeta{UID: types.UID("uid-a5-zero")}}
+	resp, err := s.GetContainerAllocateResponse(context.Background(), pod, nil, ascend950DevicesFixture(),
+		map[deviceplugin.Resource]int32{{Group: "950", Device: testAccelID0}: 1})
+	require.NoError(t, err)
+	assert.Empty(t, mountsMatching(resp, hcclRootInfoPath))
+	assert.Empty(t, mountsMatching(resp, routeConfPath))
+}
+
+func TestNewAndStop_HostRootLifecycle(t *testing.T) {
+	cases := []struct {
+		name         string
+		hostRoot     func(t *testing.T) string
+		wantHostOpen bool
+	}{
+		{
+			name:         "valid host root opens and Stop closes it",
+			hostRoot:     makeFakeHostRoot,
+			wantHostOpen: true,
+		},
+		{
+			name:         "empty host root leaves hostFS nil",
+			hostRoot:     func(t *testing.T) string { return "" },
+			wantHostOpen: false,
+		},
+		{
+			name: "missing or invalid host root skips cleanly without failing New",
+			hostRoot: func(t *testing.T) string {
+				return filepath.Join(t.TempDir(), "unmounted")
+			},
+			wantHostOpen: false,
+		},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			alloc, ok := New(device.AllocatorOptions{
+				Logger:   logr.Discard(),
+				HostRoot: c.hostRoot(t),
+			}).(*aggregated)
+			require.True(t, ok)
+
+			if !c.wantHostOpen {
+				assert.Nil(t, alloc.hostFS)
+				alloc.Stop()
+				return
+			}
+
+			require.NotNil(t, alloc.hostFS)
+			for _, srv := range alloc.servers {
+				s, ok := srv.(*server)
+				require.True(t, ok)
+				assert.Same(t, alloc.hostFS, s.hostFS)
+			}
+
+			_, err := alloc.hostFS.Stat("/etc")
+			require.NoError(t, err)
+
+			alloc.Stop()
+
+			_, err = alloc.hostFS.Stat("/etc")
+			require.Error(t, err)
+			assert.ErrorIs(t, err, fs.ErrClosed)
 		})
 	}
 }

@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -13,6 +15,7 @@ import (
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
 	"gpustack.ai/gpustack/pkg/device"
 	"gpustack.ai/gpustack/pkg/deviceplugin"
+	"gpustack.ai/gpustack/pkg/utils/hostfs"
 )
 
 // classifyShareCall is what turns a driver's answer into the three states an operator acts on, and
@@ -306,7 +309,7 @@ func TestPreflightResponder_RecordsTheWriteItWithheld(t *testing.T) {
 
 	rec := &recordingShareDriver{read: &fakeShareDriver{enabled: map[[2]int32]bool{}}}
 	srv, ok := newServer(klog.Background(), workercore.DeviceAllocationModeShared, rec,
-		newFakeProductResolver()).(*server)
+		newFakeProductResolver(), nil).(*server)
 	require.True(t, ok)
 
 	pod, ctr := slicedPod("recorded", "train", 10, 25)
@@ -332,9 +335,10 @@ func TestPreflightResponder_MatchesTheProductionResponder(t *testing.T) {
 		workercore.DeviceAllocationModeExclusive,
 		workercore.DeviceAllocationModeShared,
 		workercore.DeviceAllocationModeSliced,
+		workercore.DeviceAllocationModeVisibility,
 	}
 	for _, mode := range modes {
-		t.Run(mode.String(), func(t *testing.T) {
+		t.Run("910B/"+mode.String(), func(t *testing.T) {
 			enabled := map[[2]int32]bool{{0, 0}: true, {1, 0}: true}
 			devs := ascendDevicesFixture()
 			allocated := map[deviceplugin.Resource]int32{{Group: "910b2", Device: testAccelID0}: 1}
@@ -354,7 +358,7 @@ func TestPreflightResponder_MatchesTheProductionResponder(t *testing.T) {
 
 			// Production: the server an allocation is served by, over a driver that answers.
 			prodSrv, ok := newServer(klog.Background(), mode, &fakeShareDriver{enabled: enabled},
-				newFakeProductResolver()).(deviceplugin.ContainerAllocateResponder)
+				newFakeProductResolver(), nil).(deviceplugin.ContainerAllocateResponder)
 			require.True(t, ok)
 			prodPod, prodCtr := slicedPod("drift", "train", 10, 25)
 			want, err := prodSrv.GetContainerAllocateResponse(context.Background(), prodPod, prodCtr,
@@ -372,6 +376,51 @@ func TestPreflightResponder_MatchesTheProductionResponder(t *testing.T) {
 			require.NotEmpty(t, want.Envs, "the production injection must carry something to compare")
 			assert.Equal(t, want, got,
 				"a preflight answer and the allocation it predicts must not be able to disagree")
+		})
+
+		t.Run("950/"+mode.String(), func(t *testing.T) {
+			absentAscendDriverHostPath(t)
+			root := makeFakeHostRoot(t)
+			require.NoError(t, os.WriteFile(filepath.Join(root, "etc", "hccl_rootinfo.json"), []byte(rankTableV20), 0o644))
+			require.NoError(t, os.MkdirAll(filepath.Join(root, "lib"), 0o755))
+			require.NoError(t, os.WriteFile(filepath.Join(root, "lib", "route.conf"), []byte("route=1\n"), 0o644))
+
+			enabled := map[[2]int32]bool{{3, 0}: true, {4, 0}: true}
+			devs := ascend950DevicesFixture()
+			allocated := map[deviceplugin.Resource]int32{{Group: "950", Device: testAccelID0}: 1}
+
+			p := &preflighter{
+				logger:   klog.Background(),
+				share:    &fakeShareDriver{enabled: enabled},
+				product:  newFakeProductResolver(),
+				hostRoot: root,
+			}
+			preSrv, restore, err := p.PreflightResponder(mode)
+			require.NoError(t, err)
+			defer restore()
+
+			prodHostFS, err := hostfs.OpenHostRoot(root)
+			require.NoError(t, err)
+			defer func() { _ = prodHostFS.Close() }()
+
+			prodSrv, ok := newServer(klog.Background(), mode, &fakeShareDriver{enabled: enabled},
+				newFakeProductResolver(), prodHostFS).(deviceplugin.ContainerAllocateResponder)
+			require.True(t, ok)
+
+			prodPod, prodCtr := slicedPod("drift-a5", "train", 10, 25)
+			want, err := prodSrv.GetContainerAllocateResponse(context.Background(), prodPod, prodCtr,
+				devs, allocated)
+			require.NoError(t, err)
+
+			prePod, preCtr := slicedPod("drift-a5", "train", 10, 25)
+			got, err := preSrv.GetContainerAllocateResponse(context.Background(), prePod, preCtr,
+				devs, allocated)
+			require.NoError(t, err)
+
+			require.Len(t, mountsMatching(want, hcclRootInfoPath), 1)
+			require.Len(t, mountsMatching(want, routeConfPath), 1)
+			assert.Equal(t, want, got,
+				"A5 preflight responder and production responder must produce identical injections")
 		})
 	}
 }
@@ -401,6 +450,50 @@ func TestPreflightResponder_RedirectsTheSharedHostPathsAndPutsThemBack(t *testin
 	assert.Equal(t, origLib, deviceplugin.OperatorLibDir,
 		"and the restore puts them back, or the rest of this process points at a directory that is gone")
 	assert.Equal(t, origPods, deviceplugin.OperatorPodsDir)
+}
+
+func TestPreflightResponder_HostRootLifecycle(t *testing.T) {
+	t.Run("NewPreflighter stays lazy and restore closes opened hostFS", func(t *testing.T) {
+		root := makeFakeHostRoot(t)
+		p, ok := NewPreflighter(device.PreflighterOptions{
+			Logger:   klog.Background(),
+			HostRoot: root,
+		}).(*preflighter)
+		require.True(t, ok)
+		assert.Equal(t, root, p.hostRoot)
+
+		resp, restore, err := p.PreflightResponder(workercore.DeviceAllocationModeExclusive)
+		require.NoError(t, err)
+
+		srv, ok := resp.(*server)
+		require.True(t, ok)
+		require.NotNil(t, srv.hostFS)
+
+		_, err = srv.hostFS.Stat("/etc")
+		require.NoError(t, err)
+
+		restore()
+
+		_, err = srv.hostFS.Stat("/etc")
+		require.Error(t, err)
+	})
+
+	t.Run("unmounted host root leaves hostFS nil without failing PreflightResponder", func(t *testing.T) {
+		p := &preflighter{
+			logger:   klog.Background(),
+			share:    &fakeShareDriver{},
+			product:  newFakeProductResolver(),
+			hostRoot: filepath.Join(t.TempDir(), "unmounted"),
+		}
+
+		resp, restore, err := p.PreflightResponder(workercore.DeviceAllocationModeExclusive)
+		require.NoError(t, err)
+		defer restore()
+
+		srv, ok := resp.(*server)
+		require.True(t, ok)
+		assert.Nil(t, srv.hostFS)
+	})
 }
 
 // panickingShareDriver crashes on one nominated write, the way a vendor library can.

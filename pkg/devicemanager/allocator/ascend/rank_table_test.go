@@ -275,3 +275,36 @@ func TestPreflightAccelerator_RankTableRowIsA5Only(t *testing.T) {
 	}, carried, "the ranktable row is filed on the A5 accelerator alone, once per mode it is a "+
 		"precondition for, so a report filtered by either still carries it")
 }
+
+func TestValidateRankTableVersion950_ParityWithCheckRankTable(t *testing.T) {
+	cases := []struct {
+		name    string
+		content string
+		wantOK  bool
+	}{
+		{name: "valid v2.0", content: rankTableV20, wantOK: true},
+		{name: "minimal v2.0", content: `{"version":"2.0"}`, wantOK: true},
+		{name: "v1.0 rejected", content: rankTableV10, wantOK: false},
+		{name: "v1.2 rejected", content: `{"version":"1.2"}`, wantOK: false},
+		{name: "missing version rejected", content: `{"status":"completed"}`, wantOK: false},
+		{name: "empty version rejected", content: `{"version":""}`, wantOK: false},
+		{name: "null json rejected", content: `null`, wantOK: false},
+		{name: "invalid json rejected", content: `not json`, wantOK: false},
+		{name: "non-string version rejected", content: `{"version":2.0}`, wantOK: false},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			err := validateRankTableVersion950([]byte(c.content))
+			check := checkRankTable(writeRankTable(t, c.content))
+
+			if c.wantOK {
+				assert.NoError(t, err)
+				assert.Equal(t, device.PreflightStateOK, check.State)
+				return
+			}
+			assert.Error(t, err)
+			assert.Equal(t, device.PreflightStateUnavailable, check.State)
+		})
+	}
+}

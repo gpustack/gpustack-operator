@@ -8,6 +8,7 @@ import (
 
 type Config struct {
 	KubeSocket              string
+	HostRoot                string
 	NoShared                bool
 	NoSliced                bool
 	NoPartitioned           bool

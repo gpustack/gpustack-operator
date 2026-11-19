@@ -347,6 +347,7 @@ type (
 	AllocatorOptions struct {
 		Logger        klog.Logger
 		KubeSocket    string
+		HostRoot      string
 		NoShared      bool
 		NoSliced      bool
 		NoPartitioned bool
