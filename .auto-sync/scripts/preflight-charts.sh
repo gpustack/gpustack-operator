@@ -56,7 +56,7 @@ trap 'exit 143' TERM
 trap 'exit 129' HUP
 
 # Discover upstream chart versions, cache .tgz archives, check patches, and gather probe refs.
-python3 - "${REPO_ROOT}" "${STAGE_DIR}" "${AUTOSYNC_CHARTS_FIXTURE_DIR:-}" "${DISCOVERY_JSON}" "${PROBE_LIST_FILE}" "${WORK_TMP}" <<'PY'
+python3 -B - "${REPO_ROOT}" "${STAGE_DIR}" "${AUTOSYNC_CHARTS_FIXTURE_DIR:-}" "${DISCOVERY_JSON}" "${PROBE_LIST_FILE}" "${WORK_TMP}" "${SCRIPT_DIR}" <<'PY'
 import hashlib
 import json
 import os
@@ -68,9 +68,9 @@ import tarfile
 import urllib.parse
 import urllib.request
 
-VERSION_RE = re.compile(r"^[0-9A-Za-z._+-]+$")
-OCI_REF_RE = re.compile(r"^[A-Za-z0-9._/@:-]+$")
-OCI_SPEC_RE = re.compile(r"^[A-Za-z0-9._/@:>-]+$")
+sys.dont_write_bytecode = True
+sys.path.insert(0, sys.argv[7])
+from charts_oci import OCI_REF_RE, VERSION_RE
 
 try:
     import yaml as yaml_mod
@@ -365,7 +365,7 @@ def check_patches_clean(chart_name: str, unpacked_dir: str) -> bool:
         pfile = os.path.join(patch_dir, pname)
         with open(pfile, "rb") as pf:
             res = subprocess.run(
-                ["patch", "-p1", "-N", "--forward", "--silent", "-F0", "--no-backup-if-mismatch", "--directory", test_dir],
+                ["patch", "-p1", "-t", "-N", "--forward", "--silent", "-F0", "--no-backup-if-mismatch", "--directory", test_dir],
                 input=pf.read(),
                 capture_output=True,
             )
@@ -674,23 +674,15 @@ MANIFESTS_JSON="${STAGE_DIR}/image-manifests.json"
 autosync::preflight::record_image_probes "${MANIFESTS_JSON}" "${PROBE_ARGS[@]}"
 
 READY_LIST_FILE="${WORK_TMP}/ready-charts.txt"
-python3 - "${DISCOVERY_JSON}" "${MANIFESTS_JSON}" "${READY_LIST_FILE}" <<'PY'
+python3 -B - "${DISCOVERY_JSON}" "${MANIFESTS_JSON}" "${READY_LIST_FILE}" "${SCRIPT_DIR}" <<'PY'
 import json
-import re
-import shlex
 import sys
 
+sys.dont_write_bytecode = True
+sys.path.insert(0, sys.argv[4])
+from charts_oci import DIGEST_RE, OCI_REF_RE, OCI_SPEC_RE, format_sync_image_command
+
 disc_path, manifests_path, ready_out = sys.argv[1:4]
-DIGEST_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
-OCI_REF_RE = re.compile(r"^[A-Za-z0-9._/@:-]+$")
-OCI_SPEC_RE = re.compile(r"^[A-Za-z0-9._/@:>-]+$")
-
-
-def format_sync_image_command(specs: list[str]) -> str:
-    valid_specs = [s for s in specs if s and OCI_SPEC_RE.fullmatch(s)]
-    if not valid_specs:
-        return ""
-    return f"gh workflow run sync-image.yml -f images={shlex.quote(' '.join(valid_specs))}"
 
 with open(disc_path, "r", encoding="utf-8") as f:
     disc = json.load(f)
@@ -721,14 +713,17 @@ def is_published(ref: str) -> bool:
 ready_names = []
 for name, info in disc["charts"].items():
     all_ready = True
+    has_malformed = False
     missing_specs = []
     missing_images = []
     for req in info["required_images"]:
+        up = str(req.get("upstream") or "")
         mir = str(req.get("mirrored") or "")
         spec = str(req.get("sync_spec") or "")
-        if not OCI_REF_RE.fullmatch(mir):
+        if not OCI_REF_RE.fullmatch(mir) or (up and not OCI_REF_RE.fullmatch(up)):
             all_ready = False
-            print(f"WARN: rejecting malformed mirrored image ref for {name}: {mir!r}", file=sys.stderr)
+            has_malformed = True
+            print(f"WARN: rejecting malformed image ref for {name}: {mir!r}", file=sys.stderr)
             continue
         if not is_published(mir):
             all_ready = False
@@ -737,8 +732,10 @@ for name, info in disc["charts"].items():
                 if spec not in missing_specs:
                     missing_specs.append(spec)
             elif spec:
+                has_malformed = True
                 print(f"WARN: skipping malformed sync spec for {name}: {spec!r}", file=sys.stderr)
     info["mirrored_image_ready"] = all_ready
+    info["has_malformed_image_refs"] = has_malformed
     info["missing_images"] = missing_images
     info["missing_sync_specs"] = missing_specs
     info["sync_image_command"] = format_sync_image_command(missing_specs)
@@ -854,35 +851,44 @@ fi
 REPORT_JSON="${STAGE_DIR}/charts-preflight-report.json"
 UPSTREAM_RECORDS_JSON="${STAGE_DIR}/upstream-records.json"
 
-python3 - "${DISCOVERY_JSON}" "${REPORT_JSON}" "${UPSTREAM_RECORDS_JSON}" \
-  "${BASE_SHA}" "${SOURCE_REVISION}" "${MANIFESTS_JSON}" <<'PY'
+python3 -B - "${DISCOVERY_JSON}" "${REPORT_JSON}" "${UPSTREAM_RECORDS_JSON}" \
+  "${BASE_SHA}" "${SOURCE_REVISION}" "${MANIFESTS_JSON}" "${SCRIPT_DIR}" <<'PY'
+import copy
 import json
 import os
-import re
-import shlex
 import sys
 
+sys.dont_write_bytecode = True
+sys.path.insert(0, sys.argv[7])
+from charts_oci import OCI_REF_RE, OCI_SPEC_RE, format_sync_image_command, sanitize_md_inline_code
+
 disc_path, report_path, records_path, base_sha, src_rev, manifests_path = sys.argv[1:7]
-OCI_SPEC_RE = re.compile(r"^[A-Za-z0-9._/@:>-]+$")
 
 
-def format_sync_image_command(specs: list[str]) -> str:
-    valid_specs = [s for s in specs if s and OCI_SPEC_RE.fullmatch(s)]
-    if not valid_specs:
-        return ""
-    return f"gh workflow run sync-image.yml -f images={shlex.quote(' '.join(valid_specs))}"
-
-
-def sanitize_md_cell(val: str) -> str:
-    return (
-        str(val)
-        .replace("\r", " ")
-        .replace("\n", " ")
-        .replace("`", "'")
-        .replace("|", "\\|")
-        .replace("<", "&lt;")
-        .replace(">", "&gt;")
-    )
+def sanitize_report_charts(raw_charts: dict) -> dict:
+    out = copy.deepcopy(raw_charts)
+    for info in out.values():
+        sanitized_reqs = []
+        for req in info.get("required_images") or []:
+            entry = dict(req)
+            up = str(entry.get("upstream") or "")
+            mir = str(entry.get("mirrored") or "")
+            spec = str(entry.get("sync_spec") or "")
+            malformed = False
+            if up and not OCI_REF_RE.fullmatch(up):
+                entry["upstream"] = "<rejected-malformed-ref>"
+                malformed = True
+            if mir and not OCI_REF_RE.fullmatch(mir):
+                entry["mirrored"] = "<rejected-malformed-ref>"
+                malformed = True
+            if spec and not OCI_SPEC_RE.fullmatch(spec):
+                entry["sync_spec"] = "<rejected-malformed-spec>"
+                malformed = True
+            if malformed:
+                entry["malformed"] = True
+            sanitized_reqs.append(entry)
+        info["required_images"] = sanitized_reqs
+    return out
 
 
 with open(disc_path, "r", encoding="utf-8") as f:
@@ -912,7 +918,7 @@ report = {
     "ready_updates_count": ready_count,
     "image_manifests_path": os.path.basename(manifests_path),
     "sync_image_command": global_sync_cmd,
-    "charts": charts,
+    "charts": sanitize_report_charts(charts),
 }
 
 with open(report_path, "w", encoding="utf-8") as f:
@@ -961,24 +967,37 @@ with open(records_path, "w", encoding="utf-8") as f:
     json.dump(upstream_records, f, indent=2)
     f.write("\n")
 
+any_not_ready = any(
+    i["changed"] and not (i["mirrored_image_ready"] and i["patch_clean"])
+    for i in charts.values()
+)
 summary_path = os.environ.get("GITHUB_STEP_SUMMARY", "").strip()
-if all_missing_specs and summary_path and not os.path.islink(summary_path):
+if any_not_ready and summary_path and not os.path.islink(summary_path):
     try:
         with open(summary_path, "a", encoding="utf-8") as sf:
-            sf.write("### Auto Sync Charts: Pending Mirrored Images\n\n")
-            sf.write("| Chart | Pinned | Candidate | Missing Mirrored Images |\n")
+            sf.write("### Auto Sync Charts: Pending Mirrored Images and Held-Back Updates\n\n")
+            sf.write("| Chart | Pinned | Candidate | Holdback Reason / Missing Mirrored Images |\n")
             sf.write("| --- | --- | --- | --- |\n")
             for name in ("kueue", "node-feature-discovery", "csi-driver-nfs", "csi-driver-s3", "topograph"):
                 info = charts[name]
+                if not (info["changed"] and not (info["mirrored_image_ready"] and info["patch_clean"])):
+                    continue
+                details = []
                 missing = info.get("missing_images") or []
                 if missing:
-                    sf.write(
-                        f"| `{sanitize_md_cell(name)}` | `{sanitize_md_cell(info['pinned_version'])}` | "
-                        f"`{sanitize_md_cell(info['candidate_version'])}` | "
-                        f"{', '.join(f'`{sanitize_md_cell(img)}`' for img in missing)} |\n"
-                    )
-            safe_cmd = global_sync_cmd.replace("\r", " ").replace("\n", " ").replace("`", "")
-            sf.write(f"\nRun image sync:\n\n```sh\n{safe_cmd}\n```\n\n")
+                    details.append(", ".join(f"`{sanitize_md_inline_code(img)}`" for img in missing))
+                if info.get("has_malformed_image_refs") or (not info["mirrored_image_ready"] and not missing):
+                    details.append("malformed or invalid image reference(s) rejected (see preflight log)")
+                if not info["patch_clean"]:
+                    details.append("chart staging/patch failed")
+                sf.write(
+                    f"| `{sanitize_md_inline_code(name)}` | `{sanitize_md_inline_code(info['pinned_version'])}` | "
+                    f"`{sanitize_md_inline_code(info['candidate_version'])}` | "
+                    f"{'; '.join(details)} |\n"
+                )
+            if global_sync_cmd:
+                safe_cmd = global_sync_cmd.replace("\r", " ").replace("\n", " ").replace("`", "")
+                sf.write(f"\nRun image sync:\n\n```sh\n{safe_cmd}\n```\n\n")
     except OSError:
         pass
 PY

@@ -59,6 +59,9 @@ import os
 import re
 import subprocess
 import sys
+import tempfile
+import time
+import urllib.error
 import urllib.request
 
 repo_root, fixture_dir, out_path, stage_dir = sys.argv[1:5]
@@ -270,6 +273,37 @@ def fetch_text(url: str) -> str:
         return resp.read().decode("utf-8")
 
 
+def fetch_text_with_retry(url: str, backoffs: tuple[float, ...] = (0.5, 1.0)) -> str:
+    attempts = len(backoffs) + 1
+    last_exc: Exception | None = None
+    for idx in range(attempts):
+        try:
+            return fetch_text(url)
+        except (urllib.error.URLError, TimeoutError, OSError) as exc:
+            last_exc = exc
+            if idx < len(backoffs):
+                time.sleep(backoffs[idx])
+    assert last_exc is not None
+    raise last_exc
+
+
+def write_text_atomic(dest_path: str, content: str) -> None:
+    dest_dir = os.path.dirname(dest_path)
+    fd, tmp_path = tempfile.mkstemp(prefix=".tmp-", dir=dest_dir)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(content)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp_path, dest_path)
+    except Exception:
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
+        raise
+
+
 def parse_helm_k8s_minor(gomod_text: str) -> tuple[int, int] | None:
     in_require_block = False
     found: list[tuple[int, int]] = []
@@ -296,63 +330,80 @@ def parse_helm_k8s_minor(gomod_text: str) -> tuple[int, int] | None:
     return max(found) if found else None
 
 
-def get_helm_k8s_minor(tag: str) -> tuple[bool, tuple[int, int] | None, str]:
-    if fixture_dir:
+def get_helm_k8s_minor(tag: str) -> tuple[str, tuple[int, int] | None, str]:
+    helm_gomod_base_url = os.environ.get("AUTOSYNC_HELM_GOMOD_BASE_URL", "").strip().rstrip("/")
+    if fixture_dir and not helm_gomod_base_url:
         fp = os.path.join(fixture_dir, f"helm-{tag}-go.mod")
         if not os.path.isfile(fp):
-            return True, None, ""
+            return "ok", None, ""
         parsed = parse_helm_k8s_minor(read_text(fp))
         if parsed is None:
-            return False, None, f"k8s.io/api or k8s.io/client-go requirement not found in {fp}"
-        return True, parsed, ""
+            return "fetch_error", None, f"k8s.io/api or k8s.io/client-go requirement not found in {fp}"
+        return "ok", parsed, ""
     cache_dir = os.path.join(stage_dir, "discovery")
     os.makedirs(cache_dir, exist_ok=True)
     cache_path = os.path.join(cache_dir, f"helm-{tag}-go.mod")
     if os.path.isfile(cache_path) and os.path.getsize(cache_path) > 0:
         parsed = parse_helm_k8s_minor(read_text(cache_path))
-        if parsed is None:
-            return False, None, f"k8s.io/api or k8s.io/client-go requirement not found in {cache_path}"
-        return True, parsed, ""
-    url = f"https://raw.githubusercontent.com/helm/helm/{tag}/go.mod"
+        if parsed is not None:
+            return "ok", parsed, ""
+        try:
+            os.unlink(cache_path)
+        except OSError:
+            pass
+    base_url = helm_gomod_base_url or "https://raw.githubusercontent.com/helm/helm"
+    url = f"{base_url}/{tag}/go.mod"
     try:
-        txt = fetch_text(url)
+        txt = fetch_text_with_retry(url)
     except Exception as exc:
-        return False, None, str(exc)
-    with open(cache_path, "w", encoding="utf-8") as f:
-        f.write(txt)
+        return "fetch_error", None, str(exc)
     parsed = parse_helm_k8s_minor(txt)
     if parsed is None:
-        return False, None, f"k8s.io/api or k8s.io/client-go requirement not found in {url}"
-    return True, parsed, ""
+        return "fetch_error", None, f"k8s.io/api or k8s.io/client-go requirement not found in {url}"
+    write_text_atomic(cache_path, txt)
+    return "ok", parsed, ""
 
 
-def pick_compatible_helm(candidates: list[str], current_tag: str, max_k8s_minor: int) -> tuple[str, list[str]]:
+def pick_compatible_helm(
+    candidates: list[str], current_tag: str, max_k8s_minor: int
+) -> tuple[str, list[str], list[dict[str, str]]]:
     cur_tuple = parse_semver_tuple(current_tag)
     selected = current_tag
     incompatible = set()
+    skipped: list[dict[str, str]] = []
     for cand in candidates:
         if parse_semver_tuple(cand) <= cur_tuple:
             break
-        ok, helm_k8s_ver, err = get_helm_k8s_minor(cand)
-        if not ok or (helm_k8s_ver is None and not fixture_dir):
+        status, helm_k8s_ver, err = get_helm_k8s_minor(cand)
+        if status != "ok" or (helm_k8s_ver is None and not fixture_dir):
             incompatible.add(cand)
             reason = err or "missing k8s.io requirement in go.mod"
+            skipped.append({
+                "tag": cand,
+                "reason": "fetch_error",
+                "detail": reason,
+            })
             print(
-                f"NOTICE: skipping Helm {cand} because its dependency manifest could not be verified ({reason})",
+                f"NOTICE: failed to fetch Helm {cand} go.mod after retries ({reason}); skipping unverified candidate for this cycle",
                 file=sys.stderr,
             )
             continue
         if helm_k8s_ver is not None and helm_k8s_ver > (0, max_k8s_minor):
             incompatible.add(cand)
+            skipped.append({
+                "tag": cand,
+                "reason": "incompatible_k8s_minor",
+                "k8s_minor": f"v{helm_k8s_ver[0]}.{helm_k8s_ver[1]}",
+            })
             print(
-                f"NOTICE: skipping Helm {cand} because it requires k8s.io v{helm_k8s_ver[0]}.{helm_k8s_ver[1]}.x > repo v0.{max_k8s_minor}.x",
+                f"NOTICE: skipping Helm {cand} (requires k8s.io v{helm_k8s_ver[0]}.{helm_k8s_ver[1]}.x > repo v0.{max_k8s_minor}.x)",
                 file=sys.stderr,
             )
             continue
         selected = cand
         break
     compatible_recent = [c for c in candidates if c not in incompatible]
-    return selected, compatible_recent
+    return selected, compatible_recent, skipped
 
 
 def pick_latest(candidates: list[str], fallback: str) -> str:
@@ -370,7 +421,7 @@ target_kubectl = target_k8s_release.lstrip("v")
 
 target_cr = pick_latest(cr_candidates, current_cr)
 target_kueue = pick_latest(kueue_candidates, current_kueue)
-target_helm_tag, compatible_helm_candidates = pick_compatible_helm(
+target_helm_tag, compatible_helm_candidates, skipped_helm_candidates = pick_compatible_helm(
     helm_candidates, f"v{current_helm}", int(k8s_minor_num)
 )
 target_helm_cli = target_helm_tag.lstrip("v")
@@ -421,6 +472,7 @@ doc = {
         "kustomize_cli": kustomize_candidates[:5],
         "ytt_cli": ytt_candidates[:5],
     },
+    "skipped_helm_candidates": skipped_helm_candidates,
 }
 
 with open(out_path, "w", encoding="utf-8") as f:
@@ -483,8 +535,8 @@ tail = lines[-20:]
 print(f"NOTICE: {label} (last {len(tail)} line(s) from {log_path}):", file=sys.stderr)
 for ln in tail:
     sanitized = re.sub(r"\.go:", ".go@", ln)
-    sanitized = re.sub(r"::error\b", "::notice", sanitized, flags=re.IGNORECASE)
-    sanitized = re.sub(r"##\[error\]", "[error]", sanitized, flags=re.IGNORECASE)
+    sanitized = re.sub(r"::([a-zA-Z0-9_-]+)( [^:\r\n]*)?::", r"[\1]", sanitized)
+    sanitized = re.sub(r"##\[([a-zA-Z0-9_-]+)\]", r"[\1]", sanitized)
     print(f"  {sanitized}", file=sys.stderr)
 PY
 }
@@ -610,10 +662,13 @@ if [[ "${mods_changed}" == "true" && "${AUTOSYNC_SKIP_SOURCE_REVISION:-false}" !
   fi
 fi
 
-if [[ "${can_stage_mods}" == "true" ]]; then
-  work_base="$(mktemp -d "${TMPDIR:-/tmp}/autosync-k8s-deps-work.XXXXXXXX")"
-  _PREFLIGHT_TMP_DIRS+=("${work_base}")
-  work_repo="${work_base}/gpustack.ai/gpustack"
+init_work_repo_and_stage_mods() {
+  patch_clean="true"
+  staging_error=""
+  if [[ -d "${work_repo}" ]]; then
+    chmod -R u+w "${work_repo}" 2>/dev/null || true
+    rm -rf "${work_repo}"
+  fi
   mkdir -p "${work_repo}"
   tar --exclude='.git' -cf - -C "${repo_root}" . | tar -xf - -C "${work_repo}"
 
@@ -638,7 +693,7 @@ with open(deps_path, "w", encoding="utf-8") as f:
     f.write(txt)
 PY
 
-    deps_offline="false"
+    local deps_offline="false"
     if [[ "${has_fixture_dir}" == "true" ]]; then
       deps_offline="true"
     fi
@@ -652,6 +707,7 @@ PY
       staging_error="hack/deps.sh mod_staging failed for ${tgt_k8s_mod}"
       printf 'WARN: %s\n' "${staging_error}" >&2
       emit_sanitized_log_tail "${staging_log}" "hack/deps.sh mod_staging output"
+      return 0
     fi
 
     if [[ -n "$(find "${work_repo}/staging" -type f \( -name '*.rej' -o -name '*.orig' \) 2>/dev/null)" ]]; then
@@ -660,6 +716,14 @@ PY
       printf 'WARN: %s\n' "${staging_error}" >&2
     fi
   fi
+}
+
+if [[ "${can_stage_mods}" == "true" ]]; then
+  work_base="$(mktemp -d "${TMPDIR:-/tmp}/autosync-k8s-deps-work.XXXXXXXX")"
+  _PREFLIGHT_TMP_DIRS+=("${work_base}")
+  work_repo="${work_base}/gpustack.ai/gpustack"
+
+  init_work_repo_and_stage_mods
 
   if [[ "${patch_clean}" == "true" ]]; then
     : > "${staging_log}"
@@ -667,23 +731,16 @@ PY
 
     if [[ "${patch_clean}" != "true" && "${cur_helm_tag}" != "${tgt_helm_tag}" ]] && \
        [[ "${cur_k8s_mod}" != "${tgt_k8s_mod}" || "${cur_cr}" != "${tgt_cr}" || "${cur_kueue}" != "${tgt_kueue}" ]]; then
-      printf 'NOTICE: staging failed with helm.sh/helm/v3 %s; retrying without helm bump (keeping %s)\n' \
+      printf 'NOTICE: staging failed with helm.sh/helm/v3 %s; retrying with clean work_repo without helm bump (keeping %s)\n' \
         "${tgt_helm_tag}" "${cur_helm_tag}" >&2
-      cp -f "${repo_root}/go.mod" "${work_repo}/go.mod"
-      cp -f "${repo_root}/go.sum" "${work_repo}/go.sum"
-      if [[ -d "${repo_root}/api" ]]; then
-        rm -rf "${work_repo}/api"
-        cp -Rp "${repo_root}/api" "${work_repo}/api"
-      fi
-      if [[ -d "${repo_root}/pkg" ]]; then
-        rm -rf "${work_repo}/pkg"
-        cp -Rp "${repo_root}/pkg" "${work_repo}/pkg"
-      fi
-      : > "${staging_log}"
-      stage_go_mods_and_generate "${cur_helm_tag}"
+      init_work_repo_and_stage_mods
       if [[ "${patch_clean}" == "true" ]]; then
-        tgt_helm_tag="${cur_helm_tag}"
-        helm_fallback_applied="true"
+        : > "${staging_log}"
+        stage_go_mods_and_generate "${cur_helm_tag}"
+        if [[ "${patch_clean}" == "true" ]]; then
+          tgt_helm_tag="${cur_helm_tag}"
+          helm_fallback_applied="true"
+        fi
       fi
     fi
 
@@ -733,11 +790,21 @@ with open(discovery_path, "r", encoding="utf-8") as f:
 cur = disc["current"]
 tgt = disc["target"]
 recent = disc["recent"]
+orig_helm_tag = tgt["helm_tag"]
+held_back_upstreams: dict[str, dict[str, str]] = {}
 
 if helm_fallback_applied == "true":
     tgt["helm_tag"] = effective_helm_tag
     tgt["helm_cli"] = effective_helm_tag.lstrip("v")
     tgt["helm_module"] = effective_helm_tag
+    if orig_helm_tag != effective_helm_tag:
+        held_back_upstreams["helm-cli"] = {
+            "candidate": orig_helm_tag,
+            "reason": (
+                f"held at {effective_helm_tag} because staging failed with "
+                f"helm.sh/helm/v3 {orig_helm_tag}; fell back to pinned helm"
+            ),
+        }
 
 patch_clean = patch_clean_str == "true"
 go_mod_uids = {"kubernetes", "controller-runtime", "kueue-sdk", "helm-cli"}
@@ -746,12 +813,23 @@ go_mod_uids = {"kubernetes", "controller-runtime", "kueue-sdk", "helm-cli"}
 def mk_rec(uid: str, cur_v: str, tgt_v: str, rec_list: list[str], note: str):
     changed = cur_v != tgt_v
     if changed and not patch_clean and uid in go_mod_uids:
+        reason = f"held at {cur_v} because preflight staging failed ({staging_error})"
+        held_back_upstreams[uid] = {
+            "candidate": tgt_v,
+            "reason": reason,
+        }
+        # Loopwright's TaskpackUpstreamRecord schema only permits
+        # 'available' | 'up_to_date' | 'failed' | 'blocked', and 'failed' /
+        # 'blocked' causes Loopwright intake to exit 1. Keep 'up_to_date' here
+        # so non-Go-module CLI updates can still proceed, while
+        # held_back_upstreams in k8s-deps-preflight-report.json distinguishes
+        # held-back upstreams from genuinely current pins.
         return {
             "upstreamId": uid,
             "status": "up_to_date",
             "version": cur_v,
             "recentVersions": rec_list if rec_list else [cur_v],
-            "reason": f"held at {cur_v} because preflight staging failed ({staging_error})",
+            "reason": reason,
         }
     return {
         "upstreamId": uid,
@@ -847,6 +925,8 @@ report = {
     "staging_updated": staging_updated_str == "true",
     "generate_ran": generate_ran_str == "true",
     "staging_error": staging_error,
+    "held_back_upstreams": held_back_upstreams,
+    "skipped_helm_candidates": disc.get("skipped_helm_candidates", []),
     "current": cur,
     "target": tgt,
     "recent": recent,

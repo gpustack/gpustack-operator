@@ -199,6 +199,7 @@ mkdir -p \
   "${PREFLIGHT_REPO}/deploy/gpustack-operator"
 
 cp "${ROOT_DIR}/.auto-sync/scripts/lib-preflight.sh" "${PREFLIGHT_REPO}/.auto-sync/scripts/lib-preflight.sh"
+cp "${ROOT_DIR}/.auto-sync/scripts/charts_oci.py" "${PREFLIGHT_REPO}/.auto-sync/scripts/charts_oci.py"
 cp "${PREFLIGHT_SCRIPT}" "${PREFLIGHT_REPO}/.auto-sync/scripts/preflight-charts.sh"
 chmod +x "${PREFLIGHT_REPO}/.auto-sync/scripts/preflight-charts.sh"
 cp "${ROOT_DIR}/.auto-sync/checks/lib.sh" "${PREFLIGHT_REPO}/.auto-sync/checks/lib.sh"
@@ -809,16 +810,20 @@ import sys
 
 stage_dir, summary_path, kueue_cur = sys.argv[1:4]
 with open(os.path.join(stage_dir, "charts-preflight-report.json"), "r", encoding="utf-8") as f:
-    report = json.load(f)
+    raw_report = f.read()
+assert "$(evil)" not in raw_report, raw_report
+report = json.loads(raw_report)
 kueue = report["charts"]["kueue"]
 assert kueue["mirrored_image_ready"] is False, kueue
+assert kueue["has_malformed_image_refs"] is True, kueue
 assert kueue["missing_sync_specs"] == [], kueue
 assert kueue["sync_image_command"] == "", kueue
 assert report["sync_image_command"] == "", report
-assert "$(evil)" not in report["sync_image_command"]
 
 with open(os.path.join(stage_dir, "upstream-records.json"), "r", encoding="utf-8") as f:
-    recs = json.load(f)
+    raw_records = f.read()
+assert "$(evil)" not in raw_records, raw_records
+recs = json.loads(raw_records)
 by_id = {r["upstreamId"]: r for r in recs}
 assert by_id["kueue-chart"]["status"] == "up_to_date", by_id
 assert by_id["kueue-chart"]["version"] == kueue_cur, by_id
@@ -827,11 +832,63 @@ with open(summary_path, "r", encoding="utf-8") as f:
     summary_txt = f.read()
 assert "$(evil)" not in summary_txt, summary_txt
 assert "<b>" not in summary_txt, summary_txt
+assert "&lt;" not in summary_txt and "&gt;" not in summary_txt, summary_txt
+assert f"| `kueue` | `{kueue_cur}` |" in summary_txt, summary_txt
+assert "malformed or invalid image reference(s) rejected" in summary_txt, summary_txt
+assert "```sh" not in summary_txt, summary_txt
 PY
 then
   pass "preflight-charts.sh rejects malformed candidate image refs without shell or markdown injection"
 else
   fail "preflight-charts.sh rejects malformed candidate image refs without shell or markdown injection"
+fi
+
+# 3f. Changed chart held back due to patch_clean == False still renders a step summary row without empty sh block.
+PATCH_FAIL_REPO="${SCRATCH}/patch-fail-repo"
+cp -R "${PREFLIGHT_REPO}" "${PATCH_FAIL_REPO}"
+mkdir -p "${PATCH_FAIL_REPO}/hack/deploy/gpustack-operator/chart/charts/kueue"
+cat > "${PATCH_FAIL_REPO}/hack/deploy/gpustack-operator/chart/charts/kueue/001-fail.patch" <<'PATCH'
+--- a/nonexistent-file-for-selftest.yaml
++++ b/nonexistent-file-for-selftest.yaml
+@@ -1 +1 @@
+-a
++b
+PATCH
+git -C "${PATCH_FAIL_REPO}" add -A
+git -C "${PATCH_FAIL_REPO}" commit -q -m "add failing patch fixture"
+STAGE_PATCH_FAIL="${SCRATCH}/stage-patch-fail/charts"
+SUMMARY_PATCH_FAIL="${SCRATCH}/summary-patch-fail.md"
+: > "${SUMMARY_PATCH_FAIL}"
+if (
+  cd "${PATCH_FAIL_REPO}" && \
+  AUTOSYNC_CHARTS_FIXTURE_DIR="${FIXTURE_DIR}" \
+  AUTOSYNC_MOCK_MANIFESTS_JSON="${MOCK_READY}" \
+  AUTOSYNC_SKIP_GO_MOD_DOWNLOAD=true \
+  AUTOSYNC_SKIP_SOURCE_REVISION=true \
+  GITHUB_STEP_SUMMARY="${SUMMARY_PATCH_FAIL}" \
+  bash "${PATCH_FAIL_REPO}/.auto-sync/scripts/preflight-charts.sh" "${STAGE_PATCH_FAIL}"
+) >/dev/null 2>&1 && \
+python3 - "${STAGE_PATCH_FAIL}" "${SUMMARY_PATCH_FAIL}" "${KUEUE_CUR}" "${KUEUE_NEXT}" <<'PY'
+import json
+import os
+import sys
+
+stage_dir, summary_path, kueue_cur, kueue_next = sys.argv[1:5]
+with open(os.path.join(stage_dir, "charts-preflight-report.json"), "r", encoding="utf-8") as f:
+    report = json.load(f)
+assert report["charts"]["kueue"]["patch_clean"] is False, report
+assert report["charts"]["kueue"]["mirrored_image_ready"] is True, report
+assert report["sync_image_command"] == "", report
+
+with open(summary_path, "r", encoding="utf-8") as f:
+    summary_txt = f.read()
+assert f"| `kueue` | `{kueue_cur}` | `{kueue_next}` | chart staging/patch failed |" in summary_txt, summary_txt
+assert "```sh" not in summary_txt, summary_txt
+PY
+then
+  pass "preflight-charts.sh writes step summary row for patch-failed held-back chart without empty sh block"
+else
+  fail "preflight-charts.sh writes step summary row for patch-failed held-back chart without empty sh block"
 fi
 fi
 
