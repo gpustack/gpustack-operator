@@ -44,10 +44,22 @@ sync_upstream_git() {
 
   if [[ -d "${dest_dir}/.git" ]]; then
     git -C "${dest_dir}" remote set-url origin "${repo_url}"
-    git -C "${dest_dir}" -c core.autocrlf=false "${proto_opts[@]+"${proto_opts[@]}"}" fetch "${filter_opts[@]+"${filter_opts[@]}"}" --prune origin
+    if (( ${#filter_opts[@]} > 0 )); then
+      git -C "${dest_dir}" -c core.autocrlf=false "${proto_opts[@]+"${proto_opts[@]}"}" fetch "${filter_opts[@]}" --prune origin || \
+        git -C "${dest_dir}" -c core.autocrlf=false "${proto_opts[@]+"${proto_opts[@]}"}" fetch --prune origin
+    else
+      git -C "${dest_dir}" -c core.autocrlf=false "${proto_opts[@]+"${proto_opts[@]}"}" fetch --prune origin
+    fi
   else
     rm -rf "${dest_dir}"
-    git -c core.autocrlf=false "${proto_opts[@]+"${proto_opts[@]}"}" clone "${filter_opts[@]+"${filter_opts[@]}"}" --no-single-branch "${repo_url}" "${dest_dir}"
+    if (( ${#filter_opts[@]} > 0 )); then
+      if ! git -c core.autocrlf=false "${proto_opts[@]+"${proto_opts[@]}"}" clone "${filter_opts[@]}" --no-single-branch "${repo_url}" "${dest_dir}"; then
+        rm -rf "${dest_dir}"
+        git -c core.autocrlf=false "${proto_opts[@]+"${proto_opts[@]}"}" clone --no-single-branch "${repo_url}" "${dest_dir}"
+      fi
+    else
+      git -c core.autocrlf=false "${proto_opts[@]+"${proto_opts[@]}"}" clone --no-single-branch "${repo_url}" "${dest_dir}"
+    fi
   fi
 
   git -C "${dest_dir}" remote set-head origin -a >/dev/null 2>&1 || true

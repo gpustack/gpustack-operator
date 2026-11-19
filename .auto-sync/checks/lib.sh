@@ -324,9 +324,9 @@ autosync::copy_tree_without_git() {
       done
       [[ "${skip}" == "true" ]] && continue
       if [[ "${cp_mode}" == "apfs" ]]; then
-        cp -Rc "${entry}" "${dst_dir}/${base}"
+        cp -Rc "${entry}" "${dst_dir}/${base}" || return 1
       else
-        cp -R --reflink=auto "${entry}" "${dst_dir}/${base}"
+        cp -R --reflink=auto "${entry}" "${dst_dir}/${base}" || return 1
       fi
     done < <(find "${src_dir}" -mindepth 1 -maxdepth 1 -print0)
     return 0
@@ -337,7 +337,10 @@ autosync::copy_tree_without_git() {
   for ex_item in "$@"; do
     tar_excludes+=(--exclude="${ex_item}")
   done
-  tar "${tar_excludes[@]}" -cf - -C "${src_dir}" . | tar -xf - -C "${dst_dir}"
+  (
+    set -o pipefail
+    tar "${tar_excludes[@]}" -cf - -C "${src_dir}" . | tar -xf - -C "${dst_dir}"
+  ) || return 1
 }
 
 # autosync::run_in_module_path_copy <target_dir> <cmd> [args...]

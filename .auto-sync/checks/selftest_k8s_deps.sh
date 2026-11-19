@@ -487,7 +487,9 @@ mkdir -p "${RESULTS_DIR}"
 CURRENT_CASE_RES=""
 CASE_NAMES=()
 CASE_PIDS=()
+CASE_RCS=()
 ACTIVE_PIDS=()
+ACTIVE_INDICES=()
 MAX_JOBS=4
 
 record_pass() {
@@ -503,9 +505,15 @@ spawn_case() {
   local cid="$1"
   shift
   if (( ${#ACTIVE_PIDS[@]} >= MAX_JOBS )); then
-    wait "${ACTIVE_PIDS[0]}" || true
+    local reaped_idx="${ACTIVE_INDICES[0]}"
+    local reaped_pid="${ACTIVE_PIDS[0]}"
+    local reaped_rc=0
+    wait "${reaped_pid}" || reaped_rc=$?
+    CASE_RCS[reaped_idx]="${reaped_rc}"
     ACTIVE_PIDS=("${ACTIVE_PIDS[@]:1}")
+    ACTIVE_INDICES=("${ACTIVE_INDICES[@]:1}")
   fi
+  local next_idx="${#CASE_NAMES[@]}"
   CASE_NAMES+=("${cid}")
   (
     CURRENT_CASE_RES="${RESULTS_DIR}/${cid}.res"
@@ -513,7 +521,9 @@ spawn_case() {
   ) &
   local pid="$!"
   CASE_PIDS+=("${pid}")
+  CASE_RCS+=("")
   ACTIVE_PIDS+=("${pid}")
+  ACTIVE_INDICES+=("${next_idx}")
 }
 
 # 1b + 1c. Helm lockstep filter and HTTP retry / atomic cache tests.
@@ -1424,8 +1434,11 @@ spawn_case "3k" case_3k
 for i in "${!CASE_NAMES[@]}"; do
   cid="${CASE_NAMES[$i]}"
   cpid="${CASE_PIDS[$i]}"
-  sub_rc=0
-  wait "${cpid}" || sub_rc=$?
+  sub_rc="${CASE_RCS[$i]}"
+  if [[ -z "${sub_rc}" ]]; then
+    sub_rc=0
+    wait "${cpid}" || sub_rc=$?
+  fi
   res_file="${RESULTS_DIR}/${cid}.res"
   if [[ -f "${res_file}" ]]; then
     while IFS=$'\t' read -r kind msg || [[ -n "${kind}" ]]; do

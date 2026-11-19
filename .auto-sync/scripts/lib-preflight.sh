@@ -377,8 +377,11 @@ autosync::preflight::warm_caches() {
     for cache_name in go-cache go-mod deps-cache uv-cache uv-python; do
       mkdir -p "${shared_root}/${cache_name}"
       if [[ -d "${stage_dir}/${cache_name}" && ! -L "${stage_dir}/${cache_name}" ]]; then
-        cp -Rp "${stage_dir}/${cache_name}/." "${shared_root}/${cache_name}/" 2>/dev/null || true
-        rm -rf "${stage_dir:?}/${cache_name:?}"
+        if cp -Rp "${stage_dir}/${cache_name}/." "${shared_root}/${cache_name}/" 2>/dev/null; then
+          rm -rf "${stage_dir:?}/${cache_name:?}"
+        else
+          printf 'WARN: autosync: failed to migrate %s into %s\n' "${cache_name}" "${shared_root}" >&2
+        fi
       fi
       if [[ ! -e "${stage_dir}/${cache_name}" || -L "${stage_dir}/${cache_name}" ]]; then
         ln -sfn "${shared_root}/${cache_name}" "${stage_dir}/${cache_name}"
@@ -452,7 +455,8 @@ autosync::preflight::warm_caches() {
             mv "${staged_uv_cache}" "${shared_root}/uv-cache"
           fi
           if ! compgen -G "${shared_root}/uv-python/cpython-*" >/dev/null && \
-             { rmdir "${shared_root}/uv-python" 2>/dev/null || rm -rf "${shared_root}/uv-python"; }; then
+             [[ -z "$(ls -A "${shared_root}/uv-python/" 2>/dev/null)" ]] && \
+             rmdir "${shared_root}/uv-python" 2>/dev/null; then
             mv "${staged_uv_py}" "${shared_root}/uv-python"
           fi
         else

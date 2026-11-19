@@ -39,8 +39,11 @@ detect_fast_cp_mode() {
   : > "${probe_src}/f"
   if cp -Rc "${probe_src}" "${probe_dst}" 2>/dev/null; then
     FAST_CP_MODE="apfs"
-  elif cp -R --reflink=auto "${probe_src}" "${probe_dst}" 2>/dev/null; then
-    FAST_CP_MODE="reflink"
+  else
+    rm -rf "${probe_dst}"
+    if cp -R --reflink=auto "${probe_src}" "${probe_dst}" 2>/dev/null && [[ -f "${probe_dst}/f" ]]; then
+      FAST_CP_MODE="reflink"
+    fi
   fi
   rm -rf "${probe_src}" "${probe_dst}"
 }
@@ -732,11 +735,18 @@ out=""
 url=""
 while (( $# > 0 )); do
   case "$1" in
-    -o) out="$2"; shift 2 ;;
+    -o|--output) out="$2"; shift 2 ;;
+    --output=*) out="${1#--output=}"; shift ;;
+    -o*) out="${1#-o}"; shift ;;
     http://*|https://*) url="$1"; shift ;;
-    *) shift ;;
+    -*) shift ;;
+    *) url="${url:-$1}"; shift ;;
   esac
 done
+if [[ -z "${out}" || -z "${url}" ]]; then
+  echo "ERROR: mock curl missing output or url" >&2
+  exit 1
+fi
 if [[ "${url}" == *"/availability" ]]; then
   cp "${WARM_LIVE_FIXTURE}/availability.json" "${out}"
 elif [[ "${url}" == *"model="* ]]; then

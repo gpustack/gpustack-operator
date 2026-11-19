@@ -325,11 +325,10 @@ jobs:
         uses: docker/setup-buildx-action@v3
 
       - name: Cache preflight tools
-        if: matrix.domain != 'slicing'
         uses: actions/cache@v4
         with:
           path: /tmp/gpustack-autosync-stage/.sbin
-          key: autosync-sbin-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('hack/lib/*.sh') }}
+          key: autosync-sbin-${{ runner.os }}-${{ runner.arch }}-${{ matrix.domain }}-${{ hashFiles('hack/lib/*.sh') }}
 
       - name: Cache uv runtime
         if: matrix.domain == 'k8s-deps'
