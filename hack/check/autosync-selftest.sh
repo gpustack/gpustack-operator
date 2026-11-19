@@ -1160,6 +1160,17 @@ EOF
     fail "populate_stage_bundle fails cleanly with FAIL: on dangling symlink inside directory walk (${broken_err})"
   fi
 
+  mkdir -p "${scratch}/bundle-cycle-src/subdir"
+  printf 'cycle-ok\n' > "${scratch}/bundle-cycle-src/subdir/keep.txt"
+  ln -s . "${scratch}/bundle-cycle-src/subdir/loop"
+  if autosync::preflight::populate_stage_bundle "${scratch}/bundle-cycle-stage" "demo" "${scratch}/bundle-cycle-src" && \
+     [[ -f "${scratch}/bundle-cycle-stage/.auto-sync/.stage/demo/bundle-cycle-src/subdir/keep.txt" ]] && \
+     [[ ! -e "${scratch}/bundle-cycle-stage/.auto-sync/.stage/demo/bundle-cycle-src/subdir/loop" ]]; then
+    pass "populate_stage_bundle terminates cleanly on directory symlink cycle"
+  else
+    fail "populate_stage_bundle terminates cleanly on directory symlink cycle"
+  fi
+
   local bundle_rev
   bundle_rev=$(autosync::preflight::commit_staged_tree_revision "${bundle_repo}" "${bundle_base}" "stage demo bundle" "${bundle_stage}" ".auto-sync/.stage/demo")
   local bundle_ls

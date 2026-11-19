@@ -115,9 +115,9 @@ PY
       "${TARGET_VLLM_VER:-${CAND_VLLM_VER:-unknown}}" >&2
     exit 1
   fi
-  if [[ "${RETIRE_0004}" == "true" && -n "${TARGET_VLLM_VER}" && "${CAND_VLLM_VER}" == "${TARGET_VLLM_VER}" && -f "${DISCOVERY_PATCH}" ]]; then
+  if [[ "${RETIRE_0004}" == "true" && ( -z "${TARGET_VLLM_VER}" || "${CAND_VLLM_VER}" == "${TARGET_VLLM_VER}" ) && -f "${DISCOVERY_PATCH}" ]]; then
     printf 'FAIL: 0004-discovery-readiness-and-deselect-removal.patch must be retired (retire_0004_discovery_readiness=true) when targeting vllm-router %s\n' \
-      "${TARGET_VLLM_VER}" >&2
+      "${TARGET_VLLM_VER:-${CAND_VLLM_VER:-unknown}}" >&2
     exit 1
   fi
 fi

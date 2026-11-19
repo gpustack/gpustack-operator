@@ -856,27 +856,29 @@ if [[ -z "${SC_FOR_WORK}" ]]; then
 fi
 pre_rc=0
 SHELLCHECK_BIN="${SC_FOR_WORK}" bash "${ROOT_DIR}/hack/check/agents-shell.sh" "${WORK_GITLESS}" >/dev/null 2>&1 || pre_rc=$?
+ensure_rc=0
 (
   # shellcheck source=lib.sh
   # shellcheck disable=SC1091
   source "${ROOT_DIR}/.auto-sync/checks/lib.sh"
   autosync::ensure_ephemeral_git "${WORK_GITLESS}"
-)
+) || ensure_rc=$?
 post_rc=0
 SHELLCHECK_BIN="${SC_FOR_WORK}" bash "${ROOT_DIR}/hack/check/agents-shell.sh" "${WORK_GITLESS}" >/dev/null 2>&1 || post_rc=$?
+cleanup_rc=0
 (
   # shellcheck source=lib.sh
   # shellcheck disable=SC1091
   source "${ROOT_DIR}/.auto-sync/checks/lib.sh"
   autosync::cleanup_ephemeral_git "${WORK_GITLESS}"
-)
+) || cleanup_rc=$?
 # shellcheck disable=SC2016
-if (( pre_rc == 2 && post_rc == 0 )) && [[ ! -e "${WORK_GITLESS}/.git" ]] && \
+if (( pre_rc == 2 && ensure_rc == 0 && post_rc == 0 && cleanup_rc == 0 )) && [[ ! -e "${WORK_GITLESS}/.git" ]] && \
    grep -qF 'autosync::ensure_ephemeral_git "${work_repo}"' "${PREFLIGHT_SCRIPT}" && \
    grep -qF 'autosync::cleanup_ephemeral_git "${work_repo}"' "${PREFLIGHT_SCRIPT}"; then
   pass "ensure_ephemeral_git on gitless work_repo copy lets agents-shell.sh succeed (rc=0) and cleans up .git"
 else
-  fail "ensure_ephemeral_git on gitless work_repo copy (pre_rc=${pre_rc}, post_rc=${post_rc})"
+  fail "ensure_ephemeral_git on gitless work_repo copy (pre_rc=${pre_rc}, ensure_rc=${ensure_rc}, post_rc=${post_rc}, cleanup_rc=${cleanup_rc})"
 fi
 
 # 3. Gitless env -i validate_k8s_deps.sh tests (AUTOSYNC_FAST_SELFTEST=true).

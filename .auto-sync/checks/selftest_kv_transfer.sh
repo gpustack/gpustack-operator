@@ -413,11 +413,14 @@ with open(os.path.join(stage, "upstream-records.json"), "r", encoding="utf-8") a
     recs = {r["upstreamId"]: r for r in json.load(f)}
 assert recs["hixl"]["status"] == "up_to_date", recs["hixl"]
 assert recs["hixl"]["version"] == "60dbe9d1d7d9a7eef04bc3dbf84edbad2188230a", recs["hixl"]
+assert "held at gpustack/runner VLLM_HIXL_COMMIT 60dbe9d1d7d9 while upstream hicann/hixl is at 111111111111" == recs["hixl"].get("reason"), recs["hixl"]
 with open(os.path.join(stage, "kv-transfer-preflight-report.json"), "r", encoding="utf-8") as f:
     rep = json.load(f)
 assert rep["stage"] == "no_change", rep
 assert rep["source_revision"] == base_sha, rep
 assert rep["enforce_runner_hixl_parity"] is True, rep
+assert rep["hixl_upstream_head"] == "1111111111111111111111111111111111111111", rep
+assert rep["hixl_upstream_held_by_runner"] is True, rep
 assert rep["runner"]["hixl_commit"] == "60dbe9d1d7d9a7eef04bc3dbf84edbad2188230a", rep
 PY
 then

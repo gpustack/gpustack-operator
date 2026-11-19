@@ -948,7 +948,20 @@ for spec in specs:
     if os.path.isfile(real_root):
         copy_regular(real_root, safe_base)
     elif os.path.isdir(real_root):
+        seen_dirs: set[tuple[int, int]] = set()
         for cur, dirs, names in os.walk(real_root, followlinks=True):
+            if os.path.islink(cur) and not os.path.exists(cur):
+                raise SystemExit(f"FAIL: stage bundle source contains dangling symlink: {cur}")
+            st = os.stat(cur)
+            dir_key = (st.st_dev, st.st_ino)
+            if dir_key in seen_dirs:
+                dirs[:] = []
+                continue
+            seen_dirs.add(dir_key)
+            for d in list(dirs):
+                dp = os.path.join(cur, d)
+                if os.path.islink(dp) and not os.path.exists(dp):
+                    raise SystemExit(f"FAIL: stage bundle source contains dangling symlink: {dp}")
             dirs[:] = sorted(d for d in dirs if d != ".git")
             for name in sorted(names):
                 fp = os.path.join(cur, name)

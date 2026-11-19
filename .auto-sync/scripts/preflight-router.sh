@@ -661,9 +661,8 @@ PY
 )"
 
   if [[ "${ROUTER_STAGE_NAME}" == "recipe_sync" ]]; then
-    while IFS= read -r rel_p; do
-      [[ -n "${rel_p}" ]] && COMMIT_PATHS+=("${rel_p}")
-    done < <(python3 - "${REPO_ROOT}" "${STAGE_DIR}" "${PREFLIGHT_REPORT_JSON}" "${STAGED_TREE}" "${BUNDLE_WORK}" "${ROUTER_STAGE_TMP}" <<'PY'
+    STAGED_PATCH_DIRS_FILE="${ROUTER_STAGE_TMP}/staged-patch-dirs.txt"
+    python3 - "${REPO_ROOT}" "${STAGE_DIR}" "${PREFLIGHT_REPORT_JSON}" "${STAGED_TREE}" "${BUNDLE_WORK}" "${ROUTER_STAGE_TMP}" <<'PY' > "${STAGED_PATCH_DIRS_FILE}"
 import json
 import os
 import re
@@ -773,6 +772,43 @@ def write_rebased_patch_file(r_repo: str, p: dict, new_sha: str, out_dir: str, o
         f.write(hdr.encode("utf-8"))
         f.write(diff_bytes)
     return out_pf
+
+
+def collect_target_extras(
+    uid: str, kept: list[dict], conflicted_files: list[str], r_repo: str, env: dict
+) -> list[str]:
+    all_touched = []
+    for p in kept:
+        for rel in p["touched"]:
+            if rel not in all_touched:
+                all_touched.append(rel)
+    for cf in conflicted_files:
+        if cf not in all_touched:
+            all_touched.append(cf)
+    porcelain_res = subprocess.run(
+        ["git", "-C", r_repo, "status", "--porcelain"],
+        capture_output=True,
+        text=True,
+        env=env,
+    )
+    for ln in porcelain_res.stdout.splitlines():
+        if len(ln) > 3:
+            rp = ln[3:].split(" -> ")[-1].strip()
+            if rp and rp not in all_touched:
+                all_touched.append(rp)
+
+    target_extras = list(all_touched)
+    if uid == "llm-d-router":
+        for extra in ("go.mod", "pkg/epp/config/loader/defaults.go"):
+            if extra not in target_extras:
+                target_extras.append(extra)
+    elif uid == "vllm-router":
+        if "Cargo.toml" not in target_extras:
+            target_extras.append("Cargo.toml")
+    elif uid == "sglang-gateway":
+        if "sgl-model-gateway/Cargo.toml" not in target_extras:
+            target_extras.append("sgl-model-gateway/Cargo.toml")
+    return target_extras
 
 
 git_env = {
@@ -933,10 +969,14 @@ for uid, stage_repo, subdir, sparse_subpath in ROUTER_SPECS:
         shutil.copytree(r_target, chk_tree)
         subprocess.run(["git", "-C", chk_tree, "init", "-q"], check=True, env=git_env)
         verify_ok = True
+        failed_patch_name = ""
+        verify_err = ""
         for out_pf in sorted(exported_paths):
             chk = subprocess.run(["git", "-C", chk_tree, "apply", "--check", out_pf], capture_output=True, text=True, env=git_env)
             if chk.returncode != 0:
                 verify_ok = False
+                failed_patch_name = os.path.basename(out_pf)
+                verify_err = chk.stderr.strip()
                 break
             subprocess.run(["git", "-C", chk_tree, "apply", out_pf], check=True, env=git_env)
 
@@ -950,61 +990,46 @@ for uid, stage_repo, subdir, sparse_subpath in ROUTER_SPECS:
             staged_patch_dirs.append(f"pack/llm-router/patches/{subdir}")
             continue
 
-    # Conflict (or verify fallback): stage target-files, cherry-pick-working, conflicts, and any already-rebased patches.
-    rebased_before_conflict = [p["name"] for p, _ in rebased_commits] if conflict_patch else []
-    if conflict_patch and rebased_commits:
+        shutil.rmtree(out_patch_dir, ignore_errors=True)
+        tgt_out = os.path.join(bundle_work, "target-files", subdir)
+        os.makedirs(tgt_out, exist_ok=True)
+        for rel in collect_target_extras(uid, kept, [], r_repo, git_env):
+            copy_rel_file(r_target, tgt_out, rel)
+        rebase_results[uid] = {
+            "auto_rebased": False,
+            "verify_failed": True,
+            "reason": f"rebased patch {failed_patch_name} failed git apply --check on {new_tag}: {verify_err}",
+            "conflict_patch": "",
+            "conflicted_patch": "",
+            "rebased_before_conflict": [],
+            "retired_patches": retired_names,
+            "conflicted_files": [],
+        }
+        continue
+
+    # Conflict: stage target-files, cherry-pick-working, conflicts, and any already-rebased patches.
+    rebased_before_conflict = [p["name"] for p, _ in rebased_commits]
+    if rebased_commits:
         pre_conf_patch_dir = os.path.join(bundle_work, "rebased-patches", subdir)
         os.makedirs(pre_conf_patch_dir, exist_ok=True)
         for p, new_sha in rebased_commits:
             write_rebased_patch_file(r_repo, p, new_sha, pre_conf_patch_dir, old_tag, new_tag, git_env)
 
-    base_src_tree = r_target
-    if conflict_patch:
-        r_pre_conflict = os.path.join(r_work, "pre-conflict")
-        os.makedirs(r_pre_conflict, exist_ok=True)
-        arch = subprocess.Popen(
-            ["git", "-C", r_repo, "archive", "HEAD"],
-            stdout=subprocess.PIPE,
-            env=git_env,
-        )
-        assert arch.stdout is not None
-        subprocess.run(["tar", "-x", "-C", r_pre_conflict], stdin=arch.stdout, check=True)
-        arch.stdout.close()
-        if arch.wait() != 0:
-            raise RuntimeError(f"git archive HEAD failed for {subdir}")
-        base_src_tree = r_pre_conflict
-
-    all_touched = []
-    for p in kept:
-        for rel in p["touched"]:
-            if rel not in all_touched:
-                all_touched.append(rel)
-    for cf in conflicted_files:
-        if cf not in all_touched:
-            all_touched.append(cf)
-    porcelain_res = subprocess.run(
-        ["git", "-C", r_repo, "status", "--porcelain"],
-        capture_output=True,
-        text=True,
+    r_pre_conflict = os.path.join(r_work, "pre-conflict")
+    os.makedirs(r_pre_conflict, exist_ok=True)
+    arch = subprocess.Popen(
+        ["git", "-C", r_repo, "archive", "HEAD"],
+        stdout=subprocess.PIPE,
         env=git_env,
     )
-    for ln in porcelain_res.stdout.splitlines():
-        if len(ln) > 3:
-            rp = ln[3:].split(" -> ")[-1].strip()
-            if rp and rp not in all_touched:
-                all_touched.append(rp)
+    assert arch.stdout is not None
+    subprocess.run(["tar", "-x", "-C", r_pre_conflict], stdin=arch.stdout, check=True)
+    arch.stdout.close()
+    if arch.wait() != 0:
+        raise RuntimeError(f"git archive HEAD failed for {subdir}")
+    base_src_tree = r_pre_conflict
 
-    target_extras = list(all_touched)
-    if uid == "llm-d-router":
-        for extra in ("go.mod", "pkg/epp/config/loader/defaults.go"):
-            if extra not in target_extras:
-                target_extras.append(extra)
-    elif uid == "vllm-router":
-        if "Cargo.toml" not in target_extras:
-            target_extras.append("Cargo.toml")
-    elif uid == "sglang-gateway":
-        if "sgl-model-gateway/Cargo.toml" not in target_extras:
-            target_extras.append("sgl-model-gateway/Cargo.toml")
+    target_extras = collect_target_extras(uid, kept, conflicted_files, r_repo, git_env)
 
     tgt_out = os.path.join(bundle_work, "target-files", subdir)
     cp_out = os.path.join(bundle_work, "cherry-pick-working", subdir)
@@ -1017,12 +1042,12 @@ for uid, stage_repo, subdir, sparse_subpath in ROUTER_SPECS:
         copy_rel_file(base_src_tree, tgt_out, rel)
         copy_rel_file(r_repo, cp_out, rel)
 
-    if conflict_patch:
-        with open(os.path.join(conf_out, f"{conflict_patch}.txt"), "w", encoding="utf-8") as f:
-            f.write(conflict_detail)
+    with open(os.path.join(conf_out, f"{conflict_patch}.txt"), "w", encoding="utf-8") as f:
+        f.write(conflict_detail)
 
     rebase_results[uid] = {
         "auto_rebased": False,
+        "reason": f"cherry-pick conflict in {conflict_patch} onto {new_tag}",
         "conflict_patch": conflict_patch,
         "conflicted_patch": conflict_patch,
         "rebased_before_conflict": rebased_before_conflict,
@@ -1038,7 +1063,9 @@ with open(rep_path, "w", encoding="utf-8") as f:
 for pdir in staged_patch_dirs:
     print(pdir)
 PY
-)
+    while IFS= read -r rel_p; do
+      [[ -n "${rel_p}" ]] && COMMIT_PATHS+=("${rel_p}")
+    done < "${STAGED_PATCH_DIRS_FILE}"
   elif [[ "${ROUTER_STAGE_NAME}" == "tag_promotion" ]]; then
     mkdir -p "${STAGED_TREE}/pkg/worker/settings" "${STAGED_TREE}/docs/reference"
     cp -f "${REPO_ROOT}/pkg/worker/settings/value.go" "${STAGED_TREE}/pkg/worker/settings/value.go"

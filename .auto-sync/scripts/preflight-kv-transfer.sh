@@ -904,6 +904,7 @@ targets = disc["targets"]
 runner_hixl_drift = bool(runner["hixl_commit"] and runner["hixl_commit"] != recipe["hixl_commit"])
 runner_patch_drift = not bool(runner["patch_match"])
 effective_hixl_target = runner["hixl_commit"] if runner["hixl_commit"] else up["hixl"]
+hixl_upstream_held_by_runner = bool(runner["hixl_commit"] and up["hixl"] and up["hixl"] != runner["hixl_commit"])
 
 stage_a_drifts = {
     "mooncake": up["mooncake"] != recipe["mooncake_version"],
@@ -916,6 +917,16 @@ stage_a_drifts = {
 }
 
 has_stage_a = any(stage_a_drifts.values())
+hixl_held_extra = (
+    {
+        "reason": (
+            f"held at gpustack/runner VLLM_HIXL_COMMIT {recipe['hixl_commit'][:12]} "
+            f"while upstream hicann/hixl is at {up['hixl'][:12]}"
+        )
+    }
+    if not stage_a_drifts["hixl"] and hixl_upstream_held_by_runner
+    else {}
+)
 
 mooncake_stage_b = (
     not has_stage_a
@@ -975,6 +986,7 @@ if has_stage_a:
             "upstreamId": "hixl",
             "status": "available" if stage_a_drifts["hixl"] else "up_to_date",
             "version": effective_hixl_target if stage_a_drifts["hixl"] else recipe["hixl_commit"],
+            **hixl_held_extra,
         },
         {
             "upstreamId": "modelexpress",
@@ -1017,6 +1029,7 @@ elif has_stage_b:
             "upstreamId": "hixl",
             "status": "up_to_date",
             "version": recipe["hixl_commit"],
+            **hixl_held_extra,
         },
         {
             "upstreamId": "modelexpress",
@@ -1062,6 +1075,7 @@ else:
             "upstreamId": "hixl",
             "status": "up_to_date",
             "version": recipe["hixl_commit"],
+            **hixl_held_extra,
         },
         {
             "upstreamId": "modelexpress",
@@ -1086,6 +1100,8 @@ report = {
     "stage": stage,
     "image_published": image_published,
     "enforce_runner_hixl_parity": True,
+    "hixl_upstream_head": up["hixl"],
+    "hixl_upstream_held_by_runner": hixl_upstream_held_by_runner,
     "runner_patch_drift": runner_patch_drift,
     "stage_b_flags": {
         "mooncake": mooncake_stage_b,

@@ -565,8 +565,15 @@ for q in analysis["queries"]:
     q["aggregated"] = counts["aggregated"]
     q["disaggregated"] = counts["disaggregated"]
 
+unresolved_queries = [q["query_id"] for q in analysis["queries"] if not q.get("model")]
+if unresolved_queries:
+    print(
+        f"WARN: unable to resolve canonical Hugging Face model for query ID(s): {', '.join(unresolved_queries)}",
+        file=sys.stderr,
+    )
+
 represented_models = {q["model"] for q in analysis["queries"] if q.get("model")}
-if set(catalog_models_by_mode.keys()).issubset(represented_models):
+if not unresolved_queries and set(catalog_models_by_mode.keys()).issubset(represented_models):
     sum_agg = sum(q["aggregated"] for q in analysis["queries"])
     sum_disagg = sum(q["disaggregated"] for q in analysis["queries"])
     if sum_agg != agg_count or sum_disagg != disagg_count:
@@ -603,6 +610,7 @@ report = {
     },
     "availability": analysis["availability"],
     "unmapped_availability_slugs": unmapped_slugs,
+    "unresolved_query_models": unresolved_queries,
     "queries": analysis["queries"],
     "removed_query_ids": analysis["removed_query_ids"],
     "catalog_models_by_mode": catalog_models_by_mode,

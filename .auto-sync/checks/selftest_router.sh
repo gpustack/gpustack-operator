@@ -935,6 +935,7 @@ with open(os.path.join(stage, "router-preflight-report.json"), "r", encoding="ut
     rep = json.load(f)
 vr = rep["rebase"]["vllm-router"]
 assert vr["auto_rebased"] is False, vr
+assert "cherry-pick conflict in 0002-mooncake-lazy-bootstrap-lookup.patch" in vr["reason"], vr
 assert vr["conflict_patch"] == "0002-mooncake-lazy-bootstrap-lookup.patch", vr
 assert vr["conflicted_patch"] == "0002-mooncake-lazy-bootstrap-lookup.patch", vr
 assert vr["rebased_before_conflict"] == [], vr
@@ -960,8 +961,6 @@ with tempfile.TemporaryDirectory() as td:
     cp_dir = os.path.join(td, ".auto-sync/.stage/router/cherry-pick-working/vllm-router")
     diff_res = subprocess.run(["git", "diff", "--no-index", "--", tgt_dir, cp_dir], capture_output=True, text=True)
     assert diff_res.returncode in (0, 1), diff_res.stderr
-    for extra_name in ("Cargo.toml", "go.mod", "defaults.go"):
-        assert f"deleted file mode" not in diff_res.stdout or extra_name not in diff_res.stdout, diff_res.stdout
     assert "deleted file mode" not in diff_res.stdout, diff_res.stdout
 PY
 then

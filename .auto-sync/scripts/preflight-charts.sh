@@ -969,10 +969,11 @@ if ready & {"csi-driver-nfs", "csi-driver-s3"}:
         if mir_short in shared_sidecars:
             s_tag = shared_sidecars[mir_short]
             vy_txt = re.sub(
-                rf"(repository:\s*/gpustack/{re.escape(mir_short)}\n\s*tag:\s*)\S+",
+                rf"(^\s*repository:\s*/gpustack/{re.escape(mir_short)}\n\s*tag:\s*)\S+",
                 rf"\g<1>{s_tag}",
                 vy_txt,
                 count=1,
+                flags=re.MULTILINE,
             )
             vy_txt = re.sub(
                 rf"(^\s*{re.escape(sidecar_key)}:\s*docker\.io/gpustack/{re.escape(mir_short)}:)\S+",
@@ -981,12 +982,15 @@ if ready & {"csi-driver-nfs", "csi-driver-s3"}:
                 count=1,
                 flags=re.MULTILINE,
             )
+    # Update the two-line modelManager.registrar.image map in values.yaml;
+    # line 978 above updates the single-line csi-driver-s3.images.<sidecar> string.
     if "mirrored-csi-node-driver-registrar" in shared_sidecars:
         vy_txt = re.sub(
-            r"(repository:\s*docker\.io/gpustack/mirrored-csi-node-driver-registrar\n\s*tag:\s*)\S+",
+            r"(^\s*repository:\s*docker\.io/gpustack/mirrored-csi-node-driver-registrar\n\s*tag:\s*)\S+",
             rf"\g<1>{shared_sidecars['mirrored-csi-node-driver-registrar']}",
             vy_txt,
             count=1,
+            flags=re.MULTILINE,
         )
 
 with open(values_yaml_path, "w", encoding="utf-8") as f:
