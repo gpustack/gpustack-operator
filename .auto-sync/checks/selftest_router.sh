@@ -72,16 +72,68 @@ copy_repo_file() {
 for rel in \
   "pkg/worker/settings/value.go" \
   "docs/reference/settings.md" \
-  "pack/llm-router/Dockerfile" \
-  "pack/llm-router/patches/llm-d/0001-observer-endpoints-and-dispatch.patch" \
-  "pack/llm-router/patches/vllm-router/0001-epd-routing.patch" \
-  "pack/llm-router/patches/vllm-router/0002-mooncake-lazy-bootstrap-lookup.patch" \
-  "pack/llm-router/patches/vllm-router/0003-observer-read-only-endpoint-view.patch" \
-  "pack/llm-router/patches/vllm-router/0004-discovery-readiness-and-deselect-removal.patch" \
-  "pack/llm-router/patches/sglang-gateway/0001-discovery-readiness-and-deselect-removal.patch" \
-  "pack/llm-router/patches/sglang-gateway/0002-observer-read-only-endpoint-view.patch" \
-  "pack/llm-router/patches/sglang-gateway/0003-attn-dp-aware-worker-registration.patch"; do
+  "pack/llm-router/Dockerfile"; do
   copy_repo_file "${rel}"
+done
+
+mkdir -p "${FAKE_REPO}/pack/llm-router/patches"
+cp -R "${ROOT_DIR}/pack/llm-router/patches/." "${FAKE_REPO}/pack/llm-router/patches/"
+
+set_router_image_fixture() {
+  local tag="$1"
+  local vg_path="$2"
+  local sm_path="$3"
+  python3 - "${tag}" "${vg_path}" "${sm_path}" <<'PY'
+import re
+import sys
+
+tag, vg_p, sm_p = sys.argv[1:4]
+with open(vg_p, "r", encoding="utf-8") as f:
+    vg = f.read()
+vg_out, n1 = re.subn(
+    r'(setting\.InitializeFromEnv\("gpustack/llm-router:)[^"]+("\))',
+    rf'\g<1>{tag}\g<2>',
+    vg,
+    count=1,
+)
+assert n1 == 1, f"failed to rewrite router image in {vg_p}"
+with open(vg_p, "w", encoding="utf-8") as f:
+    f.write(vg_out)
+
+with open(sm_p, "r", encoding="utf-8") as f:
+    sm = f.read()
+sm_out, n2 = re.subn(
+    r'(Default: `gpustack/llm-router:)[^`]+(`)',
+    rf'\g<1>{tag}\g<2>',
+    sm,
+    count=1,
+)
+assert n2 == 1, f"failed to rewrite router image in {sm_p}"
+with open(sm_p, "w", encoding="utf-8") as f:
+    f.write(sm_out)
+PY
+}
+
+# Normalize FAKE_REPO to a version-agnostic, patch-retirement-agnostic baseline (v0.11.0 / v0.1.16.1 / gateway-v0.3.1, router v0.4.0).
+sed -i.bak -E \
+  -e 's|^ARG LLMD_ROUTER_VERSION=.*|ARG LLMD_ROUTER_VERSION=v0.11.0|' \
+  -e 's|^ARG VLLM_ROUTER_VERSION=.*|ARG VLLM_ROUTER_VERSION=v0.1.16.1|' \
+  -e 's|^ARG SGLANG_GATEWAY_VERSION=.*|ARG SGLANG_GATEWAY_VERSION=gateway-v0.3.1|' \
+  "${FAKE_REPO}/pack/llm-router/Dockerfile"
+rm -f "${FAKE_REPO}/pack/llm-router/Dockerfile.bak"
+set_router_image_fixture "v0.4.0" "${FAKE_REPO}/pkg/worker/settings/value.go" "${FAKE_REPO}/docs/reference/settings.md"
+
+mkdir -p "${FAKE_REPO}/pack/llm-router/patches/vllm-router"
+for retired_patch in \
+  "0001-epd-routing.patch" \
+  "0004-discovery-readiness-and-deselect-removal.patch"; do
+  if [[ ! -f "${FAKE_REPO}/pack/llm-router/patches/vllm-router/${retired_patch}" ]]; then
+    cat > "${FAKE_REPO}/pack/llm-router/patches/vllm-router/${retired_patch}" <<'PATCH'
+diff --git a/src/placeholder.rs b/src/placeholder.rs
+new file mode 100644
+index 0000000..e69de29
+PATCH
+  fi
 done
 
 mkdir -p "${FAKE_REPO}/.auto-sync/scripts" "${FAKE_REPO}/.auto-sync/checks" "${FAKE_REPO}/.auto-sync/proposals"
@@ -418,6 +470,7 @@ mkdir -p "${VAL_STAGE}/baseline/pkg/worker/settings" \
 
 cp "${ROOT_DIR}/pkg/worker/settings/value.go" "${VAL_STAGE}/baseline/pkg/worker/settings/value.go"
 cp "${ROOT_DIR}/docs/reference/settings.md" "${VAL_STAGE}/baseline/docs/reference/settings.md"
+set_router_image_fixture "v0.4.0" "${VAL_STAGE}/baseline/pkg/worker/settings/value.go" "${VAL_STAGE}/baseline/docs/reference/settings.md"
 
 cat > "${VAL_STAGE}/baseline/pack/llm-router/Dockerfile" <<'DF'
 ARG UBUNTU_VERSION=24.04
@@ -607,6 +660,7 @@ make_gitless_cand() {
   cp "${VAL_STAGE}/baseline/docs/reference/settings.md" "${CAND_DIR}/docs/reference/settings.md"
   cp "${VAL_STAGE}/baseline/pack/llm-router/Dockerfile" "${CAND_DIR}/pack/llm-router/Dockerfile"
   cp -R "${VAL_STAGE}/baseline/pack/llm-router/patches/." "${CAND_DIR}/pack/llm-router/patches/"
+  set_router_proposal "aligned" "v0.1.16.1" "v0.11.0"
 }
 
 set_router_proposal() {
@@ -696,13 +750,15 @@ sed -i.bak 's/^ARG VLLM_ROUTER_VERSION=v0\.1\.16\.1/ARG VLLM_ROUTER_VERSION=v0.1
 rm -f "${CAND_DIR}/pack/llm-router/Dockerfile.bak"
 assert_fails "validate_router fails closed when 0001-epd-routing.patch is NOT retired after rebasing onto v0.1.17" run_validate_env_i
 
-# 4.5 Negative case 3a: promoting unpublished gpustack/llm-router:v0.5.0 in value.go -> FAIL.
+# 4.5 Negative case 3a: promoting unpublished gpustack/llm-router:v99.0.0 in value.go -> FAIL.
 write_preflight_report "false" "v0.1.16.1"
 make_gitless_cand
-sed -i.bak 's|gpustack/llm-router:v0.4.0|gpustack/llm-router:v0.5.0|' \
-  "${CAND_DIR}/pkg/worker/settings/value.go" "${CAND_DIR}/docs/reference/settings.md"
-rm -f "${CAND_DIR}/pkg/worker/settings/value.go.bak" "${CAND_DIR}/docs/reference/settings.md.bak"
-assert_fails "validate_router fails closed when unpublished gpustack/llm-router:v0.5.0 is promoted in value.go" run_validate_env_i
+set_router_image_fixture "v99.0.0" "${CAND_DIR}/pkg/worker/settings/value.go" "${CAND_DIR}/docs/reference/settings.md"
+if cmp -s "${VAL_STAGE}/baseline/pkg/worker/settings/value.go" "${CAND_DIR}/pkg/worker/settings/value.go" || \
+   cmp -s "${VAL_STAGE}/baseline/docs/reference/settings.md" "${CAND_DIR}/docs/reference/settings.md"; then
+  fail "selftest setup: ModelDeploymentRouterImage mutation in 4.5 was a no-op"
+fi
+assert_fails "validate_router fails closed when unpublished gpustack/llm-router:v99.0.0 is promoted in value.go" run_validate_env_i
 
 # 4.6 Negative case 3b: mutating KVCacheBackendImage in value.go -> FAIL.
 make_gitless_cand
@@ -711,16 +767,16 @@ sed -i.bak 's|gpustack/mirrored-mooncake:0.3.13.post1-cpu|gpustack/mirrored-moon
 rm -f "${CAND_DIR}/pkg/worker/settings/value.go.bak"
 assert_fails "validate_router fails closed when KVCacheBackendImage is mutated in value.go" run_validate_env_i
 
-# 4.7 Positive Stage B case: promoting published multi-arch gpustack/llm-router:v0.5.0 -> PASS.
+# 4.7 Positive Stage B case: promoting published multi-arch gpustack/llm-router:v99.1.0 -> PASS.
 python3 - "${VAL_STAGE}/image-manifests.json" <<'PY'
 import json
 import sys
 p = sys.argv[1]
 with open(p, "r", encoding="utf-8") as f:
     doc = json.load(f)
-doc["images"]["gpustack/llm-router:v0.5.0"] = {
-    "image": "gpustack/llm-router:v0.5.0",
-    "normalized": "docker.io/gpustack/llm-router:v0.5.0",
+doc["images"]["gpustack/llm-router:v99.1.0"] = {
+    "image": "gpustack/llm-router:v99.1.0",
+    "normalized": "docker.io/gpustack/llm-router:v99.1.0",
     "published": True,
     "amd64Digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
     "arm64Digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
@@ -730,13 +786,15 @@ with open(p, "w", encoding="utf-8") as f:
 PY
 make_gitless_cand
 set_router_proposal "tag_promotion" "v0.1.16.1" "v0.11.0+stage-b"
-sed -i.bak 's|gpustack/llm-router:v0.4.0|gpustack/llm-router:v0.5.0|' \
-  "${CAND_DIR}/pkg/worker/settings/value.go" "${CAND_DIR}/docs/reference/settings.md"
-rm -f "${CAND_DIR}/pkg/worker/settings/value.go.bak" "${CAND_DIR}/docs/reference/settings.md.bak"
+set_router_image_fixture "v99.1.0" "${CAND_DIR}/pkg/worker/settings/value.go" "${CAND_DIR}/docs/reference/settings.md"
+if cmp -s "${VAL_STAGE}/baseline/pkg/worker/settings/value.go" "${CAND_DIR}/pkg/worker/settings/value.go" || \
+   cmp -s "${VAL_STAGE}/baseline/docs/reference/settings.md" "${CAND_DIR}/docs/reference/settings.md"; then
+  fail "selftest setup: ModelDeploymentRouterImage mutation in 4.7 was a no-op"
+fi
 if run_validate_env_i && [[ ! -s "${BUILD_LOG}" ]]; then
-  pass "validate_router Stage B passes for published multi-arch gpustack/llm-router:v0.5.0 without rebuilding router stages"
+  pass "validate_router Stage B passes for published multi-arch gpustack/llm-router:v99.1.0 without rebuilding router stages"
 else
-  fail "validate_router Stage B passes for published multi-arch gpustack/llm-router:v0.5.0 without rebuilding router stages"
+  fail "validate_router Stage B passes for published multi-arch gpustack/llm-router:v99.1.0 without rebuilding router stages"
 fi
 
 # 4.8 Negative case 4: mismatched proposals/router.json fails closed.

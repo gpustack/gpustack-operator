@@ -583,7 +583,10 @@ PY
   assert_fails "assert_value_go_only_keys KVCacheBackendImage fails router regex" \
     assert_value_go_only_keys "${vg_base}" "${vg_cand}" "${router_keys_re}"
 
-  sed 's|gpustack/llm-router:v0.4.0|gpustack/llm-router:v0.5.0|' "${vg_base}" > "${vg_cand}"
+  sed -E 's|(setting\.InitializeFromEnv\("gpustack/llm-router:)[^"]+(")|\1v99.0.0\2|' "${vg_base}" > "${vg_cand}"
+  if cmp -s "${vg_base}" "${vg_cand}"; then
+    fail "selftest setup: ModelDeploymentRouterImage mutation in value.go was a no-op"
+  fi
   assert_ok "assert_value_go_only_keys ModelDeploymentRouterImage passes router regex" \
     assert_value_go_only_keys "${vg_base}" "${vg_cand}" "${router_keys_re}"
   assert_fails "assert_value_go_only_keys ModelDeploymentRouterImage fails kv-transfer regex" \

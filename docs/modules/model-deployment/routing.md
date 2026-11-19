@@ -62,9 +62,9 @@ the gateway registers one worker per attention-DP rank: each rank is a logical w
 carries a rank suffix (`http://host:port@0`, `http://host:port@1`), and every suffix dials the
 member's one physical serving listener — the suffix is a rank, not a port.
 
-That registration is the gateway patch this project ships: an image carrying it is
-`gpustack/llm-router:v0.4.0` or later, which is also the default
-[`model-deployment-router-image`](../../reference/settings.md), so a deployment that names no
+That registration is the gateway patch this project ships: it is carried by
+`gpustack/llm-router:v0.4.0` and later releases (including the default
+[`model-deployment-router-image`](../../reference/settings.md)), so a deployment that names no
 image of its own registers per rank out of the box. An older default or a named image that
 predates the patch runs the gateway without the fan-out.
 
