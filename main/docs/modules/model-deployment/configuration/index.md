@@ -130,9 +130,17 @@ An unset or zero count adds no device request. Both vLLM and SGLang prefill/deco
 request interfaces for RDMA or EFA transfer paths.
 
 The key follows the bound cache backend's effective group protocol and any direct *prefill/decode*
-transport the engine actually renders. A managed, non-Ascend vLLM Server collective can select RDMA
-or EFA when it has multiple members or Elastic EP. Eligible NIXL-based remote weight delivery can also
-select RDMA or EFA. See [Remote Weight Delivery](/gpustack-operator/main/docs/modules/model-delivery/remote/index.md) for its qualification limits.
+transport the engine actually renders. Non-Ascend pools select RDMA or EFA on routed *PD* pairs,
+multi-member or Elastic EP `vLLM` `Server` collectives, and eligible `NIXL` remote weight delivery.
+
+On Ascend A5 (converged `status.detail.family` `"950"`), managed `vLLM` roles select Linux Host
+RDMA (`device.gpustack.ai/rdma.shared` or `device.gpustack.ai/rdma`, never EFA) for symmetric routed
+*PD* pairs, multi-member or Elastic EP `Server` roles, and non-`Encode` `KVCache` roles. See [Ascend
+A5 topologies](prefill-decode.md#ascend-a5-topologies) for UB (`interface: 0`) versus Host RoCE.
+
+`SGLang` Ascend, `Encode`, and Ascend A2/A3 (`family` other than `"950"`) select no direct
+interface resource. A bound `KVCache` pool using `RDMA` still grants interfaces on those roles.
+See [Remote Weight Delivery](/gpustack-operator/main/docs/modules/model-delivery/remote/index.md) for NIXL remote delivery limits.
 
 A device grant does not establish that a transport has been validated. Different backend-group
 protocols or an RDMA and EFA mix are refused for a positive count.
@@ -491,7 +499,10 @@ not in the table because it is conditional:
   comes later on the command line and wins. Its next update is refused until the flag is removed; the
   update that clears its finalizer on deletion is not.
 
-Transfer defaults add several defaulted environment variables; see [Parameters](/gpustack-operator/main/docs/modules/model-deployment/parameterize/index.md#transfer-parameters) for the complete table.
+Transfer defaults add several defaulted environment variables (including `ASCEND_LOCAL_COMM_RES` on
+Ascend A5 `vLLM` UB/UBG/UBoE and `ASCEND_MF_TRANSFER_PROTOCOL` on `SGLang` `HIXL`);
+`ASCEND_GLOBAL_RESOURCE_CONFIG` is accepted in *`roles[].env`* without refusal. See
+[Parameters](/gpustack-operator/main/docs/modules/model-deployment/parameterize/index.md#transfer-parameters) for the complete table.
 
 **Defaulted** is the other case, and `MC_TE_METRIC` is the one that matters: the operator sets it to
 `1`, and a user's own value wins with no refusal. It turns on the transfer engine's metrics, without
@@ -853,7 +864,7 @@ depends on the `AcceleratorType` the role names.
 | an edit to an identity field — `model`, *`engine.name`*, *`kvCache`*, the role set, or a role's *`kind`* | the field path, and that a different value describes a different **deployment**, which is created rather than edited. See [Deployment identity fields](#deployment-identity-fields) |
 | a resource mode the named `AcceleratorType` does not offer | the mode and the type — a slice on a type that offers no slicing, a partition profile on a type that cannot partition, or one outside its profile inventory, with the offered list |
 | a whole-accelerator count over the type's whole-accelerator capacity | the capacity itself, not only that the request was too large, so the next attempt is not a guess. The bound is the pool's total, not what is free, so a deployment submitted while every accelerator is held is admitted and waits in its queue; one above the largest node but within the total is admitted and stays queued — see [Accelerator Requests](/gpustack-operator/main/docs/modules/devices/requests/index.md#limitations) |
-| a negative or fractional *`resources.interface`*, or one with no effective RDMA/EFA path | the role's interface field and the protocol that prevents allocation; mixed backend groups and mixed fabric paths are rejected |
+| a negative or fractional *`resources.interface`*, or one with no effective RDMA/EFA path (including asymmetric Ascend A5 *PD* pairs, `SGLang` Ascend, A2/A3, or unconverged `status.detail.family`) | the role's interface field and the protocol that prevents allocation; mixed backend groups, mixed fabric paths, and unconverged or asymmetric Ascend A5 pairs are rejected |
 | an accelerator request (whole card, slice percentage, or partition profile) without `acceleratorType` | omit accelerator resources for a CPU-only role, or select an `AcceleratorType` |
 | an incompatible *`kvTransfer.backend`* or mixed Ascend pair — `HIXL` on a non-Ascend or CPU-only role, `NIXL` on an Ascend `AcceleratorType`, or a *Prefill*/*Decode* pair mixing an Ascend role with a non-Ascend or CPU-only role | *`spec.kvTransfer.backend`* or *`spec.roles`* and the incompatible manufacturer (or CPU-only omission) |
 | a *Prefill* and a *Decode* role both requesting a **logical slice** from types that draw on the same accelerator group | both roles and the slice field. Whole cards and partition profiles are accepted — including on one card, because partitions are isolated by the device |

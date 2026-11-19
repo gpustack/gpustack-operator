@@ -1652,6 +1652,20 @@ rules are described in <a href="/gpustack-operator/main/docs/modules/kv-cache/in
       <tr>
           <td>vLLM</td>
           <td>Defaulted</td>
+          <td>Bound pool, Ascend A5 (<code>Family == &quot;950&quot;</code>), <code>interface: 0</code></td>
+          <td><code>ASCEND_LOCAL_COMM_RES='{&quot;version&quot;:&quot;1.3&quot;}'</code></td>
+          <td>Non-<code>Encode</code> roles only; user <code>roles[].env</code> wins; capacity-neutral for scaler priors.</td>
+      </tr>
+      <tr>
+          <td>vLLM</td>
+          <td>Owned</td>
+          <td>Bound pool, Ascend A5 (<code>Family == &quot;950&quot;</code>), <code>interface &gt; 0</code></td>
+          <td>Outer <code>kv_connector_extra_config.ascend_local_comm_res_path: &quot;/etc/hixlep&quot;</code> and read-only <code>/etc/hixlep</code> (<code>gpustack-ascend-hixlep</code>, <code>HostPathDirectory</code>)</td>
+          <td>Non-<code>Encode</code> roles only; user <code>additionalVolumes</code> at <code>/etc/hixlep</code> replaces the operator mount while keeping the JSON key.</td>
+      </tr>
+      <tr>
+          <td>vLLM</td>
+          <td>Defaulted</td>
           <td>Bound TCP pool</td>
           <td><code>--block-size 128</code>, <code>MC_TCP_MAX_QUEUED_TRANSFERS_PER_PEER=65535</code>, <code>MC_TCP_MAX_PENDING_ADMISSIONS_PER_PEER=65535</code>, <code>MC_TCP_LANES_PER_PEER=16</code>, <code>MC_TCP_ADMISSION_TIMEOUT_MS=60000</code></td>
           <td>User <code>roles[].extraArgs</code> <code>--block-size</code> or <code>roles[].env</code> takes precedence.</td>
@@ -1712,14 +1726,17 @@ flowchart TD
     BACKEND ->|"Mooncake or omitted on NVIDIA/AMD"| MC{"Mooncake link resolution"}
     BACKEND ->|"NIXL on NVIDIA/AMD"| NIXL{"aws-efa-enabled or EFA pool?"}
     BACKEND ->|"HIXL or omitted on Ascend"| HIXL["HIXL on Ascend: mount /usr/local/Ascend/driver RO, port 8998"]
-    MC ->|"1. Ascend pool"| MC_ASC["protocol=ascend: vLLM MooncakeConnectorV1 or SGLang mooncake + driver mount"]
+    MC ->|"1. Ascend pool"| MC_ASC["protocol=ascend: vLLM MooncakeConnectorV1 (A5 UB ASCEND_LOCAL_COMM_RES or Host RoCE /etc/hixlep) or SGLang mooncake + driver mount"]
     MC ->|"2. Pair interface > 0 + EFA"| MC_EFA["protocol=efa: vLLM mooncake_protocol=efa or SGLang mooncake + vpc.amazonaws.com/efa"]
     MC ->|"3. AMD ROCm pool"| MC_HIP["protocol=hip: vLLM mooncake_protocol=hip or SGLang mooncake (XGMI + RDMA/TCP auto-discovery)"]
     MC ->|"4. NVIDIA + Pair interface > 0"| MC_RDMA["protocol=rdma: vLLM mooncake_protocol=rdma or SGLang mooncake + device.gpustack.ai/rdma*"]
     MC ->|"5. NVIDIA without Pair interface > 0"| MC_TCP["protocol=tcp: vLLM mooncake_protocol=tcp or SGLang mooncake_tcp + defaulted MC_FORCE_TCP=1"]
     NIXL ->|"Yes"| NIXL_EFA["Plugin LIBFABRIC: vLLM NixlConnector or SGLang nixl, port 8998"]
     NIXL ->|"No"| NIXL_UCX["Plugin UCX: vLLM NixlConnector or SGLang nixl, port 8998"]
-    HIXL -> HIXL_OUT["vLLM MooncakeConnectorV1 + ASCEND_AUTO_CONNECT=1 | SGLang ascend + ASCEND_MF_TRANSFER_PROTOCOL=sdma"]
+    HIXL ->|"vLLM"| HIXL_VLLM["vLLM: MooncakeConnectorV1 + ASCEND_AUTO_CONNECT=1"]
+    HIXL_VLLM ->|"A5 UB (interface: 0)"| HIXL_VLLM_UB["Default ASCEND_LOCAL_COMM_RES='{&quot;version&quot;:&quot;1.3&quot;}', no /etc/hixlep"]
+    HIXL_VLLM ->|"A5 Host RoCE (interface > 0)"| HIXL_VLLM_ROCE["Outer ascend_local_comm_res_path: /etc/hixlep + /etc/hixlep RO mount"]
+    HIXL ->|"SGLang"| HIXL_SGL["SGLang: ascend + ASCEND_MF_TRANSFER_PROTOCOL=sdma (A2/A3) or device_urma (A5), no /etc/hixlep"]
 -->
 <p>The operator resolves transfer parameters in two steps:</p>
 <ul>
@@ -1736,7 +1753,7 @@ flowchart TD
 </ol>
 </li>
 <li><strong>NIXL</strong>: Selects <code>LIBFABRIC</code> when the <code>aws-efa-enabled</code> <code>Setting</code> is <code>true</code> or a bound <code>KVCache</code> pool uses EFA; otherwise selects <code>UCX</code> (which negotiates InfiniBand, RoCE, NVLink/IPC, or TCP at runtime). On vLLM, both <em>Prefill</em> and <em>Decode</em> open side-channel port <code>8998</code>.</li>
-<li><strong>HIXL</strong>: Mounts <code>/usr/local/Ascend/driver</code> read-only on both engines so CANN <code>hccn_tool</code> resolves NPU RoCE endpoints, and defaults <code>ASCEND_AUTO_CONNECT=1</code> on vLLM or <code>ASCEND_MF_TRANSFER_PROTOCOL=sdma</code> on SGLang.</li>
+<li><strong>HIXL</strong>: Mounts <code>/usr/local/Ascend/driver</code> read-only on both engines so CANN <code>hccn_tool</code> resolves NPU RoCE endpoints, and defaults <code>ASCEND_AUTO_CONNECT=1</code> on vLLM. On Ascend A2/A3 (<code>Family != &quot;950&quot;</code>), SGLang defaults <code>ASCEND_MF_TRANSFER_PROTOCOL=sdma</code>; on Ascend A5 (<code>Family == &quot;950&quot;</code>), SGLang defaults <code>ASCEND_MF_TRANSFER_PROTOCOL=device_urma</code> and never mounts <code>/etc/hixlep</code>. On Ascend A5 <code>vLLM</code> (with <code>HIXL</code> or <code>Mooncake</code>), <code>interface: 0</code> defaults <code>ASCEND_LOCAL_COMM_RES='{&quot;version&quot;:&quot;1.3&quot;}'</code> without <code>/etc/hixlep</code>, while <code>interface &gt; 0</code> mounts <code>/etc/hixlep</code> read-only and sets outer <code>kv_connector_extra_config.ascend_local_comm_res_path: &quot;/etc/hixlep&quot;</code>.</li>
 </ul>
 </li>
 </ul>
@@ -1792,6 +1809,20 @@ flowchart TD
           <td>HIXL, Ascend</td>
           <td><code>MooncakeConnectorV1</code> (<code>kv_port: 8998</code> and <code>prefill</code>/<code>decode</code> <code>tp_size</code> and <code>dp_size</code> in <code>--kv-transfer-config</code>), prefill container port <code>8998</code>, and read-only <code>/usr/local/Ascend/driver</code> mount</td>
           <td>Operator owns connector document.</td>
+      </tr>
+      <tr>
+          <td>vLLM</td>
+          <td>Owned</td>
+          <td>Ascend A5 (<code>Family == &quot;950&quot;</code>), P/D (<code>Mooncake</code> or <code>HIXL</code>), <code>interface &gt; 0</code></td>
+          <td>Outer <code>kv_connector_extra_config.ascend_local_comm_res_path: &quot;/etc/hixlep&quot;</code> (including outer <code>MultiConnector</code>), read-only <code>/etc/hixlep</code> (<code>gpustack-ascend-hixlep</code>, <code>HostPathDirectory</code>)</td>
+          <td>Never set on inner <code>MultiConnector</code> child connectors; omits <code>ASCEND_LOCAL_COMM_RES</code>. User <code>additionalVolumes</code> at <code>/etc/hixlep</code> replaces the operator mount while keeping the JSON key.</td>
+      </tr>
+      <tr>
+          <td>vLLM</td>
+          <td>Defaulted</td>
+          <td>Ascend A5 (<code>Family == &quot;950&quot;</code>), P/D (<code>Mooncake</code> or <code>HIXL</code>), <code>interface: 0</code></td>
+          <td><code>ASCEND_LOCAL_COMM_RES='{&quot;version&quot;:&quot;1.3&quot;}'</code></td>
+          <td>Triggers in-memory HIXL auto-generation; user <code>roles[].env</code> wins; capacity-neutral for scaler priors.</td>
       </tr>
       <tr>
           <td>vLLM</td>
@@ -1860,11 +1891,17 @@ flowchart TD
           <td>SGLang</td>
           <td>Defaulted</td>
           <td>HIXL, Ascend</td>
-          <td><code>ASCEND_MF_TRANSFER_PROTOCOL=sdma</code></td>
-          <td>User environment wins.</td>
+          <td><code>ASCEND_MF_TRANSFER_PROTOCOL=sdma</code> (Ascend A2/A3) or <code>device_urma</code> (Ascend A5, <code>Family == &quot;950&quot;</code>)</td>
+          <td>User environment wins; SGLang never mounts <code>/etc/hixlep</code> or receives <code>ASCEND_LOCAL_COMM_RES</code>.</td>
       </tr>
   </tbody>
 </table>
+<ul>
+<li><strong>A5 exclusions</strong>: <code>RoleEncode</code>, <code>SGLang</code>, and Ascend A2/A3 (<code>Family != &quot;950&quot;</code>) never receive <code>/etc/hixlep</code> or <code>ASCEND_LOCAL_COMM_RES</code>.</li>
+<li><strong>Scaler neutrality</strong>: <code>ASCEND_LOCAL_COMM_RES</code>, <code>ASCEND_GLOBAL_RESOURCE_CONFIG</code>, and <code>ASCEND_MF_TRANSFER_PROTOCOL</code> are capacity-neutral for <code>ModelDeploymentScaler</code> priors.</li>
+<li><strong>UBG and UBoE override</strong>: <code>ASCEND_GLOBAL_RESOURCE_CONFIG</code> in <em><code>roles[].env</code></em> is accepted without owned-env refusal; see <a href="/gpustack-operator/main/docs/modules/model-deployment/prefill-decode/#ascend-a5-topologies">Ascend A5 topologies</a>
+.</li>
+</ul>
 <h2 id="router-parameters">Router parameters</h2>
 <table>
   <thead>

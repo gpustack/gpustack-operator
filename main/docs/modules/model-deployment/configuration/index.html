@@ -1620,10 +1620,17 @@ and accelerator requests are rejected.</p>
 An unset or zero count adds no device request. Both vLLM and SGLang prefill/decode roles can
 request interfaces for RDMA or EFA transfer paths.</p>
 <p>The key follows the bound cache backend&rsquo;s effective group protocol and any direct <em>prefill/decode</em>
-transport the engine actually renders. A managed, non-Ascend vLLM Server collective can select RDMA
-or EFA when it has multiple members or Elastic EP. Eligible NIXL-based remote weight delivery can also
-select RDMA or EFA. See <a href="/gpustack-operator/main/docs/modules/model-delivery/remote/">Remote Weight Delivery</a>
- for its qualification limits.</p>
+transport the engine actually renders. Non-Ascend pools select RDMA or EFA on routed <em>PD</em> pairs,
+multi-member or Elastic EP <code>vLLM</code> <code>Server</code> collectives, and eligible <code>NIXL</code> remote weight delivery.</p>
+<p>On Ascend A5 (converged <code>status.detail.family</code> <code>&quot;950&quot;</code>), managed <code>vLLM</code> roles select Linux Host
+RDMA (<code>device.gpustack.ai/rdma.shared</code> or <code>device.gpustack.ai/rdma</code>, never EFA) for symmetric routed
+<em>PD</em> pairs, multi-member or Elastic EP <code>Server</code> roles, and non-<code>Encode</code> <code>KVCache</code> roles. See <a href="/gpustack-operator/main/docs/modules/model-deployment/prefill-decode/#ascend-a5-topologies">Ascend
+A5 topologies</a>
+ for UB (<code>interface: 0</code>) versus Host RoCE.</p>
+<p><code>SGLang</code> Ascend, <code>Encode</code>, and Ascend A2/A3 (<code>family</code> other than <code>&quot;950&quot;</code>) select no direct
+interface resource. A bound <code>KVCache</code> pool using <code>RDMA</code> still grants interfaces on those roles.
+See <a href="/gpustack-operator/main/docs/modules/model-delivery/remote/">Remote Weight Delivery</a>
+ for NIXL remote delivery limits.</p>
 <p>A device grant does not establish that a transport has been validated. Different backend-group
 protocols or an RDMA and EFA mix are refused for a positive count.</p>
 <p>A count with no managed RDMA or EFA transfer path is also refused, whenever the request, the
@@ -1996,7 +2003,10 @@ not in the table because it is conditional:</p>
 comes later on the command line and wins. Its next update is refused until the flag is removed; the
 update that clears its finalizer on deletion is not.</li>
 </ul>
-<p>Transfer defaults add several defaulted environment variables; see <a href="/gpustack-operator/main/docs/modules/model-deployment/parameterize/#transfer-parameters">Parameters</a>
+<p>Transfer defaults add several defaulted environment variables (including <code>ASCEND_LOCAL_COMM_RES</code> on
+Ascend A5 <code>vLLM</code> UB/UBG/UBoE and <code>ASCEND_MF_TRANSFER_PROTOCOL</code> on <code>SGLang</code> <code>HIXL</code>);
+<code>ASCEND_GLOBAL_RESOURCE_CONFIG</code> is accepted in <em><code>roles[].env</code></em> without refusal. See
+<a href="/gpustack-operator/main/docs/modules/model-deployment/parameterize/#transfer-parameters">Parameters</a>
  for the complete table.</p>
 <p><strong>Defaulted</strong> is the other case, and <code>MC_TE_METRIC</code> is the one that matters: the operator sets it to
 <code>1</code>, and a user&rsquo;s own value wins with no refusal. It turns on the transfer engine&rsquo;s metrics, without
@@ -2386,8 +2396,8 @@ depends on the <code>AcceleratorType</code> the role names.</p>
 </td>
       </tr>
       <tr>
-          <td>a negative or fractional <em><code>resources.interface</code></em>, or one with no effective RDMA/EFA path</td>
-          <td>the role&rsquo;s interface field and the protocol that prevents allocation; mixed backend groups and mixed fabric paths are rejected</td>
+          <td>a negative or fractional <em><code>resources.interface</code></em>, or one with no effective RDMA/EFA path (including asymmetric Ascend A5 <em>PD</em> pairs, <code>SGLang</code> Ascend, A2/A3, or unconverged <code>status.detail.family</code>)</td>
+          <td>the role&rsquo;s interface field and the protocol that prevents allocation; mixed backend groups, mixed fabric paths, and unconverged or asymmetric Ascend A5 pairs are rejected</td>
       </tr>
       <tr>
           <td>an accelerator request (whole card, slice percentage, or partition profile) without <code>acceleratorType</code></td>

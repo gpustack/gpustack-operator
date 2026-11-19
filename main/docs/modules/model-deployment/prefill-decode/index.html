@@ -1492,73 +1492,17 @@ flowchart LR
 -->
 <h2 id="contents">Contents</h2>
 <ul>
-<li><a href="#pair-connections">Pair connections</a>
-</li>
 <li><a href="#configuration">Configuration</a>
 </li>
 <li><a href="#router-configuration">Router configuration</a>
 </li>
-<li><a href="#router-fields">Router fields</a>
-</li>
-<li><a href="#counting-engine-tokens">Counting engine tokens</a>
-</li>
 <li><a href="#direct-transfer-transport">Direct transfer transport</a>
 </li>
-<li><a href="#different-hardware-per-role">Different hardware per role</a>
+<li><a href="#vendor-specific-behavior">Vendor-specific behavior</a>
 </li>
-<li><a href="#addressing-a-role">Addressing a role</a>
+<li><a href="#role-placement-and-services">Role placement and services</a>
 </li>
 </ul>
-<h2 id="pair-connections">Pair connections</h2>
-<p>Without <em><code>spec.router</code></em>, <em><code>kind</code></em> adds the role discriminator to the engine&rsquo;s shared-store connector and
-nothing pairs the two roles.</p>
-<p>For a multi-<code>Pod</code> <em>PD</em> replica, managed HTTP routing selects its leader (<code>member-index=0</code>).
-A router policy such as <code>round_robin</code> chooses among those leaders; it does not add non-HTTP members.
-<em>External data parallelism (External DP)</em> inside a <em>Prefill</em> or <em>Decode</em> role has not been validated;
-the shape&rsquo;s own contract, including its Router requirement, is on <a href="/gpustack-operator/main/docs/modules/model-deployment/external-dp/">External DP</a>
-.
-<a href="https://github.com/gpustack/gpustack-operator/issues/754">Issue #754</a>
- tracks that deferred combination.</p>
-<p>With a managed router, the direct connector depends on the engine, platform and <code>spec.kvTransfer.backend</code>. On
-vLLM pairs with a shared <code>spec.kvCache</code> pool, <em>Prefill</em> wraps the direct connector first in <code>MultiConnector</code>
-alongside the store connector, while <em>Decode</em> runs the direct connector alone and keeps pool dtype and
-block-size alignment. See <a href="/gpustack-operator/main/docs/modules/model-deployment/parameterize/#transfer-parameters">Transfer parameters</a>
- for connector and
-environment mappings.</p>
-<p>A pair needs no shared pool to hand blocks over. With <code>llm-d-router</code>, the decode <code>Pod</code> runs a
-routing-proxy sidecar. vLLM NIXL and Ascend use <code>--kv-connector=nixlv2</code>; vLLM Mooncake uses
-<code>mooncake</code> and SGLang uses <code>sglang</code>. Ascend vLLM pairs also render behind <code>vllm-router</code>, which
-uses <code>--kv-connector=nixl</code> for their relay handshake.</p>
-<p>Both role containers then mount the host&rsquo;s <code>/usr/local/Ascend/driver</code> tree read-only: the connector&rsquo;s
-transport builds Device RoCE endpoints and reads each NPU&rsquo;s NIC address through the <code>hccn_tool</code>
-that ships with the driver, while the engine image carries the driver libraries but not the tool.</p>
-<p>Without the mount the operator renders the connector, but the engine dies at startup, unable to resolve a device IP; a
-node with no driver installation fails the <code>Pod</code>&rsquo;s volume setup instead, naming the path. The mount
-ships with the transfer path alone; an Ascend deployment without one carries no host path.</p>
-<p>The operator reads each role&rsquo;s parallel size from that role&rsquo;s own command line: a managed role&rsquo;s
-<em><code>extraArgs</code></em>, or a take-over role&rsquo;s whole <em><code>command</code></em>, never both. The one degree vLLM accepts as a
-literal environment entry, <code>VLLM_DP_SIZE</code>, rides alongside either. A role declaring none renders
-<code>1/1</code>, exactly as before.</p>
-<p><em><code>resources.accelerator</code></em> is a scheduling request. It does not become <code>--tensor-parallel-size</code>,
-<code>--pipeline-parallel-size</code> or <code>--data-parallel-size</code>. If one engine process must use two cards,
-declare the engine&rsquo;s parallel arguments on that role. The operator reads those declarations for the
-transfer document and validates them against the role&rsquo;s card request; it does not choose a topology
-from the card count.</p>
-<p>The command line is the only source the operator reads. A degree arriving any other way is invisible
-to it: the image&rsquo;s own entrypoint (never part of the rendered argv), a config file, a flag inside a
-<code>sh -c</code> string, <code>--additional-config</code>&rsquo;s JSON value, an environment value pulled from a <code>ConfigMap</code> or
-<code>Secret</code>. An invisibly widened role keeps its <code>1/1</code> half.</p>
-<p>The connector&rsquo;s startup assert compares the document against itself, not against the engine. An
-invisibly widened pair therefore fails loudly only when the document&rsquo;s <em>decode</em> degree exceeds its
-<em>prefill</em> one. A pair widened symmetrically starts, answers, and pulls a wrong layout.</p>
-<p>Admission holds the visible side of the contract: a degree the command line does not state legibly
-is refused, and so is a declared per-member width the role&rsquo;s card request cannot hold; see
-<a href="/gpustack-operator/main/docs/modules/model-deployment/configuration/#admission-refusals">Admission refusals</a>
-.</p>
-<p>SGLang renders its halves through the engine&rsquo;s own disaggregation arguments rather than this
-connector path; the two engines&rsquo; paths differ by <a href="#direct-transfer-transport">their handshake</a>
-
-alone.</p>
 <h2 id="configuration">Configuration</h2>
 <p>Both are complete objects. The only difference is the <em><code>kvCache</code></em> block, and it is the difference
 between &ldquo;these two roles hand blocks to each other&rdquo; and &ldquo;these two roles hand blocks to each other
@@ -1633,7 +1577,8 @@ by default.</p>
 deployment declaring <em>Prefill</em> and <em>Decode</em> with no router is admitted and renders two roles that
 nothing routes between: each gets the shared-store connector with its role discriminator, and no
 request is ever split across them. Attaching a pool does not change that.</p>
-<p>Conversely a router with no pool is complete. What each configuration renders is the table under <a href="#pair-connections">Pair connections</a>
+<p>Conversely a router with no pool is complete. What each configuration renders is described under
+<a href="#pair-connections">Pair connections</a>
 .</p>
 <p><em><code>spec.router.replicas</code></em> is optional, and absent means one. More than one trades cache consistency for
 availability: a router scoring on a prefix cache holds that state per replica; upstream reports radix
@@ -1686,7 +1631,7 @@ connector; the gateway has no such flag, because its transfer backend is the eng
 <p><code>llm-d-router</code> takes both engines because upstream carries a handshake connector and a metrics
 configuration for each. The other two are each one project&rsquo;s router for that project&rsquo;s own engine,
 and admitting a cross pairing would be a claim this repository has not measured.</p>
-<h2 id="router-fields">Router fields</h2>
+<h3 id="router-fields">Router fields</h3>
 <p><em><code>spec.router.requestTimeoutSeconds</code></em> is how long the router waits for a reply. <strong>Leaving it out does
 not mean one thing across the three.</strong> It renders nothing, so each router keeps its own upstream
 default: <strong>one day</strong> under <code>llm-d-router</code>, whose proxy carries the timeout, against <strong>half an hour</strong>
@@ -1715,7 +1660,7 @@ are <strong>north-south</strong> concerns owned by the gateway that admits traff
 picker&rsquo;s gRPC server, whose only client is the proxy container <strong>in the same <code>Pod</code></strong> dialing
 <code>127.0.0.1</code>; <code>--metrics-endpoint-auth</code> guards the picker&rsquo;s own <code>/metrics</code>, scraped in-cluster. So
 there is no field for either, and neither is reachable through <em><code>extraArgs</code></em>.</p>
-<h2 id="counting-engine-tokens">Counting engine tokens</h2>
+<h3 id="counting-engine-tokens">Counting engine tokens</h3>
 <p><strong>A deployment that declares no <em>Encode</em> role needs <code>--enable-scale-out</code> on its vLLM roles,
 behind <code>llm-d-router</code>.</strong> The router counts prompt tokens by calling the engine: it POSTs
 <code>/v1/chat/completions/render</code>. vLLM serves that endpoint only under <code>--enable-scale-out</code>. The
@@ -1790,7 +1735,7 @@ This diff shows the fields to add to the <a href="#configuration">complete deplo
  predate the
 flag, so adding it to them can make the engine reject its command line.
 The operator does not choose between these cases from the image tag.</p>
-<h3 id="version-and-configuration-limits">Version and configuration limits</h3>
+<h4 id="version-and-configuration-limits">Version and configuration limits</h4>
 <p>For each configuration, name an image that meets the documented floor and add the engine-specific arguments
 it needs.</p>
 <p>The <code>llm-d-router</code> plus vLLM requirement and supported floors are documented under
@@ -1847,19 +1792,198 @@ can refuse an incompatible combination after it resolves.</p>
 <p>Mooncake derives <code>ascend</code> on Ascend, <code>efa</code> when both roles request <code>resources.interface &gt; 0</code>
 under EFA, <code>hip</code> on AMD ROCm, <code>rdma</code> when both roles request <code>resources.interface &gt; 0</code>, and
 <code>tcp</code> otherwise. NIXL selects <code>LIBFABRIC</code> when <code>aws-efa-enabled</code> is true or a bound KV cache
-pool uses EFA, and <code>UCX</code> otherwise. HIXL uses the Ascend driver mount.
-See <a href="/gpustack-operator/main/docs/modules/model-deployment/parameterize/#transfer-parameters">Transfer parameters</a>
- for the injected settings.</p>
-<p>For AWS EFA, supply an EFA-enabled runner through <code>spec.engine.image</code> or <code>roles[].image</code>, and
-an EFA-enabled <code>model-transfer</code> image through Helm <code>modelTransfer.images.nvidia</code> for remote
-weight delivery. The default image builds do not include the EFA provider.</p>
+pool uses EFA, and <code>UCX</code> otherwise.</p>
+<p>Platform-specific mounts, topologies, and image requirements live under
+<a href="#vendor-specific-behavior">Vendor-specific behavior</a>
+ and
+<a href="/gpustack-operator/main/docs/modules/model-deployment/parameterize/#transfer-parameters">Transfer parameters</a>
+.</p>
 <p>The engine image must support its chosen transport. <a href="/gpustack-operator/main/docs/modules/model-deployment/engine-versions/">Engine Compatibility</a>
 
 lists existing compatibility evidence; these rendered combinations require their own validation.
 <a href="/gpustack-operator/main/docs/modules/model-deployment/parameterize/">Parameters</a>
  lists synthesized parameters and defaults.
 Changing transfer settings rolls the roles; transfers can fail until both ends converge.</p>
-<h2 id="different-hardware-per-role">Different hardware per role</h2>
+<h3 id="pair-connections">Pair connections</h3>
+<p>Without <em><code>spec.router</code></em>, <em><code>kind</code></em> adds the role discriminator to the engine&rsquo;s shared-store connector and
+nothing pairs the two roles.</p>
+<p>For a multi-<code>Pod</code> <em>PD</em> replica, managed HTTP routing selects its leader (<code>member-index=0</code>).
+A router policy such as <code>round_robin</code> chooses among those leaders; it does not add non-HTTP members.
+<em>External data parallelism (External DP)</em> inside a <em>Prefill</em> or <em>Decode</em> role has not been validated;
+the shape&rsquo;s own contract, including its Router requirement, is on <a href="/gpustack-operator/main/docs/modules/model-deployment/external-dp/">External DP</a>
+.
+<a href="https://github.com/gpustack/gpustack-operator/issues/754">Issue #754</a>
+ tracks that deferred combination.</p>
+<p>With a managed router, the direct connector depends on the engine, platform and <code>spec.kvTransfer.backend</code>. On
+vLLM pairs with a shared <code>spec.kvCache</code> pool, <em>Prefill</em> wraps the direct connector first in <code>MultiConnector</code>
+alongside the store connector, while <em>Decode</em> runs the direct connector alone and keeps pool dtype and
+block-size alignment. See <a href="/gpustack-operator/main/docs/modules/model-deployment/parameterize/#transfer-parameters">Transfer parameters</a>
+ for connector and
+environment mappings.</p>
+<p>A pair needs no shared pool to hand blocks over. With <code>llm-d-router</code>, the decode <code>Pod</code> runs a
+routing-proxy sidecar. vLLM NIXL and Ascend use <code>--kv-connector=nixlv2</code>; vLLM Mooncake uses
+<code>mooncake</code> and SGLang uses <code>sglang</code>. Ascend vLLM pairs also render behind <code>vllm-router</code>, which
+uses <code>--kv-connector=nixl</code> for their relay handshake.</p>
+<p>On Ascend pools, both role containers also mount the host driver tree read-only; see
+<a href="#ascend-driver-mount">Ascend driver mount</a>
+. SGLang renders its halves through the engine&rsquo;s own
+disaggregation arguments rather than this connector path; the two engines&rsquo; paths differ by
+<a href="#direct-transfer-transport">their handshake</a>
+ alone.</p>
+<h3 id="parallelism-declarations">Parallelism declarations</h3>
+<p>The operator reads each role&rsquo;s parallel size from that role&rsquo;s own command line: a managed role&rsquo;s
+<em><code>extraArgs</code></em>, or a take-over role&rsquo;s whole <em><code>command</code></em>, never both. The one degree vLLM accepts as a
+literal environment entry, <code>VLLM_DP_SIZE</code>, rides alongside either. A role declaring none renders
+<code>1/1</code>, exactly as before.</p>
+<p><em><code>resources.accelerator</code></em> is a scheduling request. It does not become <code>--tensor-parallel-size</code>,
+<code>--pipeline-parallel-size</code> or <code>--data-parallel-size</code>. If one engine process must use two cards,
+declare the engine&rsquo;s parallel arguments on that role. The operator reads those declarations for the
+transfer document and validates them against the role&rsquo;s card request; it does not choose a topology
+from the card count.</p>
+<p>The command line is the only source the operator reads. A degree arriving any other way is invisible
+to it: the image&rsquo;s own entrypoint (never part of the rendered argv), a config file, a flag inside a
+<code>sh -c</code> string, <code>--additional-config</code>&rsquo;s JSON value, an environment value pulled from a <code>ConfigMap</code> or
+<code>Secret</code>. An invisibly widened role keeps its <code>1/1</code> half.</p>
+<p>The connector&rsquo;s startup assert compares the document against itself, not against the engine. An
+invisibly widened pair therefore fails loudly only when the document&rsquo;s <em>decode</em> degree exceeds its
+<em>prefill</em> one. A pair widened symmetrically starts, answers, and pulls a wrong layout.</p>
+<p>Admission holds the visible side of the contract: a degree the command line does not state legibly
+is refused, and so is a declared per-member width the role&rsquo;s card request cannot hold; see
+<a href="/gpustack-operator/main/docs/modules/model-deployment/configuration/#admission-refusals">Admission refusals</a>
+.</p>
+<h2 id="vendor-specific-behavior">Vendor-specific behavior</h2>
+<p>Accelerator platforms and fabrics add host mounts, topology rules, or custom image requirements
+beyond generic backend selection.</p>
+<h3 id="ascend-driver-mount">Ascend driver mount</h3>
+<p>On Ascend <em>PD</em> pairs, both role containers mount the host&rsquo;s <code>/usr/local/Ascend/driver</code> tree
+read-only: the connector&rsquo;s transport builds Device RoCE endpoints and reads each NPU&rsquo;s NIC address
+through the <code>hccn_tool</code> that ships with the driver, while the engine image carries the driver
+libraries without the tool.</p>
+<p>Without the mount the operator renders the connector, but the engine dies at startup, unable to
+resolve a device IP; a node with no driver installation fails the <code>Pod</code>&rsquo;s volume setup instead,
+naming the path. The mount ships with the transfer path alone; an Ascend deployment without one
+carries no host path.</p>
+<h3 id="ascend-a5-topologies">Ascend A5 topologies</h3>
+<p>On Ascend A5 (<code>AcceleratorType</code> <em><code>status.detail.family</code></em> <code>&quot;950&quot;</code>, <code>Ascend950PR</code> and <code>Ascend950DT</code>),
+<code>ModelDeployment</code> selects communication resources from the engine and <em><code>roles[].resources.interface</code></em>.
+Ascend A2 and A3 (<code>family</code> other than <code>&quot;950&quot;</code>) retain legacy rendering unchanged.</p>
+<h4 id="ub-versus-host-roce">UB versus Host RoCE</h4>
+<p>Ascend A5 distinguishes on-die UnifiedBus (<em>UB</em>) / Unified Remote Memory Access (<em>URMA</em>) from
+Linux Host RDMA (<em>Host RoCE</em>):</p>
+<ul>
+<li><strong>UB and URMA (<code>interface: 0</code>)</strong>: Nodes publish <code>fabric.kind=ub</code> (<a href="/gpustack-operator/main/docs/modules/rdma/network-topology/#scale-up-fabric">Scale-up fabric</a>
+); workloads omit <em><code>resources.interface</code></em> and request no Linux RDMA devices.</li>
+<li><strong>Host RoCE (<code>interface &gt; 0</code>)</strong>: Workloads set <em><code>roles[].resources.interface &gt; 0</code></em> on <code>vLLM</code> roles with converged <code>family</code> <code>&quot;950&quot;</code>.</li>
+<li><strong>RDMA resource keys</strong>: Operator grants <code>device.gpustack.ai/rdma.shared</code> (<code>1</code>) or <code>device.gpustack.ai/rdma</code> (<code>&gt; 1</code>), never AWS EFA.</li>
+</ul>
+<h4 id="six-a5-scenarios">Six A5 scenarios</h4>
+<p>The table below maps each Ascend A5 topology to its selection trigger; exact injected variables,
+connector fields, and mounts are owned by <a href="/gpustack-operator/main/docs/modules/model-deployment/parameterize/#transfer-parameters">Transfer parameters</a>
+
+and <a href="/gpustack-operator/main/docs/modules/model-deployment/parameterize/#shared-cache-parameters">Shared cache parameters</a>
+:</p>
+<table>
+  <thead>
+      <tr>
+          <th>Scenario</th>
+          <th>Interface</th>
+          <th>Operator selection</th>
+          <th>User requirement</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td><strong>UB (<code>ub_ctp</code>)</strong>, intra-SuperPod</td>
+          <td><code>0</code> (omitted)</td>
+          <td>Selects on-die UB/URMA defaults (<code>vLLM</code> in-memory auto-gen, <code>SGLang</code> URMA transfer) with no <code>/etc/hixlep</code> mount.</td>
+          <td>Managed role; omit <em><code>resources.interface</code></em>.</td>
+      </tr>
+      <tr>
+          <td><strong>UBG (<code>ub_rtp:device</code>)</strong>, cross-SuperPod</td>
+          <td><code>0</code> (omitted)</td>
+          <td>Same on-die UB path with no <code>/etc/hixlep</code> mount.</td>
+          <td>Pass <code>ASCEND_GLOBAL_RESOURCE_CONFIG</code> in <em><code>roles[].env</code></em>.</td>
+      </tr>
+      <tr>
+          <td><strong>UBoE (<code>uboe:device</code>)</strong></td>
+          <td><code>0</code> (omitted)</td>
+          <td>Same on-die UB path with no <code>/etc/hixlep</code> mount.</td>
+          <td>Pass <code>ASCEND_GLOBAL_RESOURCE_CONFIG</code> in <em><code>roles[].env</code></em>.</td>
+      </tr>
+      <tr>
+          <td><strong>Host RoCE (<code>roce:host</code>)</strong></td>
+          <td><code>&gt; 0</code> on both <code>Prefill</code> and <code>Decode</code>, or <code>KVCache</code> <code>Server</code></td>
+          <td>Grants <code>device.gpustack.ai/rdma*</code> and enables the <code>vLLM</code> Host RoCE endpoint path and read-only <code>/etc/hixlep</code> mount.</td>
+          <td><code>vLLM</code> only with converged <code>&quot;950&quot;</code>; admin provisions <a href="/gpustack-operator/main/docs/getting-started/vendor-prerequisites/#a5-host-roce-endpoints">host endpoint files</a>
+.</td>
+      </tr>
+      <tr>
+          <td><strong>Aggregated <code>Server</code></strong> (no KV connector)</td>
+          <td><code>0</code>, or <code>&gt; 0</code> on multi-Pod/<code>elasticEp</code> <code>vLLM</code></td>
+          <td>Renders no KV connector or A5 transfer resources.</td>
+          <td>Set <code>interface &gt; 0</code> only on multi-Pod or <code>elasticEp</code> <code>vLLM</code> <code>Server</code> roles.</td>
+      </tr>
+      <tr>
+          <td><strong>Constrained static-UB fallback</strong></td>
+          <td><code>0</code> (omitted)</td>
+          <td>Skips operator CLI and KV/transfer env synthesis; marks <code>status.roles[].unmanaged: true</code>.</td>
+          <td>Use <em><code>roles[].command</code></em> take-over and <em><code>additionalVolumes</code></em> with admin <code>instance-host-path-volume-allowed</code> enabled.</td>
+      </tr>
+  </tbody>
+</table>
+<p>Example Ascend A5 Host RoCE <em>PD</em> deployment with a shared <code>CANN</code> <code>KVCache</code> pool:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">worker.gpustack.ai/v1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">ModelDeployment</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">metadata</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">qwen-a5-roce</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">namespace</span><span class="p">:</span><span class="w"> </span><span class="l">team-a</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">model</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">Qwen/Qwen2.5-72B-Instruct</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">engine</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">vLLM </span><span class="w"> </span><span class="c"># Host RoCE /etc/hixlep applies to vLLM only</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">image</span><span class="p">:</span><span class="w"> </span><span class="l">&lt;vllm-ascend runner image&gt;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">kvCache</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">poolRef</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">ascend-shared-kv </span><span class="w"> </span><span class="c"># homogeneous CANN KVCachePoolBinding</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">kvTransfer</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">backend</span><span class="p">:</span><span class="w"> </span><span class="l">HIXL</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">router</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">llm-d-router</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">roles</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">prefill</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">Prefill</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">replicas</span><span class="p">:</span><span class="w"> </span><span class="m">1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">acceleratorType: atlas-950  # converged status.detail.family</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;950&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">resources</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">accelerator</span><span class="p">:</span><span class="w"> </span><span class="m">1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">interface</span><span class="p">:</span><span class="w"> </span><span class="m">1</span><span class="w">  </span><span class="c"># required on both Prefill and Decode for Host RoCE</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">decode</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">Decode</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">replicas</span><span class="p">:</span><span class="w"> </span><span class="m">1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">acceleratorType</span><span class="p">:</span><span class="w"> </span><span class="l">atlas-950</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">resources</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">accelerator</span><span class="p">:</span><span class="w"> </span><span class="m">1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">interface</span><span class="p">:</span><span class="w"> </span><span class="m">1</span><span class="w">  </span><span class="c"># grants device.gpustack.ai/rdma.shared</span></span></span></code></pre></div>
+</div>
+<ul>
+<li><strong>Symmetric pair interfaces</strong>: Set <em><code>resources.interface &gt; 0</code></em> on both <code>Prefill</code> and <code>Decode</code>; asymmetric requests fail admission.</li>
+<li><strong>Outer connector path</strong>: Operator sets <code>ascend_local_comm_res_path</code> on outer <code>kv_connector_extra_config</code> (including <code>MultiConnector</code>), never child connectors.</li>
+<li><strong>Mount yielding</strong>: User <em><code>additionalVolumes</code></em> at <code>/etc/hixlep</code> replaces <code>gpustack-ascend-hixlep</code> while keeping <code>ascend_local_comm_res_path</code>.</li>
+<li><strong>Unsupported roles</strong>: <code>RoleEncode</code> (<code>kind: Encode</code>) and <code>SGLang</code> never receive <code>/etc/hixlep</code> or <code>ASCEND_LOCAL_COMM_RES</code>.</li>
+<li><strong>SGLang interfaces</strong>: <code>SGLang</code> A5 <em>PD</em> rejects <em><code>resources.interface &gt; 0</code></em> unless a bound <code>KVCache</code> pool uses <code>RDMA</code>.</li>
+<li><strong>Host-path permission</strong>: Operator-managed <code>/etc/hixlep</code> works with <code>instance-host-path-volume-allowed</code> at <code>false</code>; static-UB <em><code>command</code></em> take-over needs <code>true</code>.</li>
+</ul>
+<h3 id="aws-efa">AWS EFA</h3>
+<p>For AWS EFA, supply an EFA-enabled runner through <code>spec.engine.image</code> or <code>roles[].image</code>, and an
+EFA-enabled <code>model-transfer</code> image through Helm <code>modelTransfer.images.nvidia</code> for remote weight
+delivery. The default image builds do not include the EFA provider.</p>
+<h2 id="role-placement-and-services">Role placement and services</h2>
+<p>Each role binds to its own pool queue and publishes a dedicated <code>Service</code> alongside the
+deployment-wide endpoint.</p>
+<h3 id="different-hardware-per-role">Different hardware per role</h3>
 <p>A Kueue <code>Workload</code> carries one <code>queueName</code>, and that name is the one the role&rsquo;s <em><code>acceleratorType</code></em>
 publishes as its <em><code>status.entrance</code></em>. Every replica is its own group regardless, so two roles were
 never going to share a <code>Workload</code>, on two *<code>acceleratorType</code>*s or on one. The set is admitted together by an
@@ -1882,7 +2006,7 @@ using a pool has separate <a href="/gpustack-operator/main/docs/modules/kv-cache
 PodSet</a>
 , so a role still takes whatever
 its own pool assigns; what selects the hardware is the <em><code>acceleratorType</code></em> the role names.</p>
-<h2 id="addressing-a-role">Addressing a role</h2>
+<h3 id="addressing-a-role">Addressing a role</h3>
 <p>Each role gets a <code>ClusterIP</code> <code>Service</code> named <code>&lt;deployment&gt;-&lt;role&gt;</code>, beside the deployment-wide one, so a
 decoder is reachable <strong>as</strong> a decoder. The managed router uses these stable role addresses for the
 tokenizer and cache-event contracts; they also remain useful for addressing one half directly while
@@ -1917,18 +2041,32 @@ comparison of a disaggregated pair with an aggregated group on equal GPUs.</li><
           <nav id="TableOfContents">
   <ul>
     <li><a href="#contents">Contents</a></li>
-    <li><a href="#pair-connections">Pair connections</a></li>
     <li><a href="#configuration">Configuration</a></li>
-    <li><a href="#router-configuration">Router configuration</a></li>
-    <li><a href="#router-fields">Router fields</a></li>
-    <li><a href="#counting-engine-tokens">Counting engine tokens</a>
+    <li><a href="#router-configuration">Router configuration</a>
       <ul>
-        <li><a href="#version-and-configuration-limits">Version and configuration limits</a></li>
+        <li><a href="#router-fields">Router fields</a></li>
+        <li><a href="#counting-engine-tokens">Counting engine tokens</a></li>
       </ul>
     </li>
-    <li><a href="#direct-transfer-transport">Direct transfer transport</a></li>
-    <li><a href="#different-hardware-per-role">Different hardware per role</a></li>
-    <li><a href="#addressing-a-role">Addressing a role</a></li>
+    <li><a href="#direct-transfer-transport">Direct transfer transport</a>
+      <ul>
+        <li><a href="#pair-connections">Pair connections</a></li>
+        <li><a href="#parallelism-declarations">Parallelism declarations</a></li>
+      </ul>
+    </li>
+    <li><a href="#vendor-specific-behavior">Vendor-specific behavior</a>
+      <ul>
+        <li><a href="#ascend-driver-mount">Ascend driver mount</a></li>
+        <li><a href="#ascend-a5-topologies">Ascend A5 topologies</a></li>
+        <li><a href="#aws-efa">AWS EFA</a></li>
+      </ul>
+    </li>
+    <li><a href="#role-placement-and-services">Role placement and services</a>
+      <ul>
+        <li><a href="#different-hardware-per-role">Different hardware per role</a></li>
+        <li><a href="#addressing-a-role">Addressing a role</a></li>
+      </ul>
+    </li>
   </ul>
 </nav>
         

@@ -143,6 +143,6 @@ The hardware terms Device, Accelerator and Resource are defined in
 ---
 
 **See also** — [Accelerator Requests](/gpustack-operator/main/docs/modules/devices/requests/index.md) ·
-[Settings](/gpustack-operator/main/docs/reference/settings/index.md) · [All documentation](https://github.com/gpustack/gpustack-operator/blob/1271e913c290d029fd84f06880c61acfca2a11af/docs/README.md)
+[Settings](/gpustack-operator/main/docs/reference/settings/index.md) · [All documentation](https://github.com/gpustack/gpustack-operator/blob/6a2e7d33c19c29a3e935b0a3c3017c99d32e08e2/docs/README.md)
 
 **Next** → [Walkthrough](/gpustack-operator/main/docs/walkthroughs/devices/scheduling/index.md) — follow a workload from submission to allocation.
