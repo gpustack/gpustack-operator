@@ -898,8 +898,12 @@ assert_ok "validate_kv_transfer Stage B passes when value.go + settings.md use p
 
 # 5f. Mutating ModelDeploymentRouterImage in value.go -> FAIL.
 make_gitless_cand
-sed -i.bak 's|gpustack/llm-router:v0.4.0|gpustack/llm-router:v0.5.0|' "${CAND_DIR}/pkg/worker/settings/value.go"
+sed -i.bak -E 's|(setting\.InitializeFromEnv\("gpustack/llm-router:)[^"]+(")|\1v99.0.0\2|' \
+  "${CAND_DIR}/pkg/worker/settings/value.go"
 rm -f "${CAND_DIR}/pkg/worker/settings/value.go.bak"
+if cmp -s "${VAL_STAGE}/baseline/pkg/worker/settings/value.go" "${CAND_DIR}/pkg/worker/settings/value.go"; then
+  fail "selftest setup: ModelDeploymentRouterImage mutation in value.go was a no-op"
+fi
 assert_fails "validate_kv_transfer fails closed on ModelDeploymentRouterImage mutation in value.go" run_validate
 
 # 5g. HIXL patch byte mismatch against gpustack/runner fixture -> FAIL.

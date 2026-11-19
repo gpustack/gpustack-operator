@@ -108,7 +108,7 @@ func TestModelDeploymentImageSettings(t *testing.T) {
 			ModelDeploymentRouterImage,
 			"model-deployment-router-image",
 			"GPUSTACK_MODEL_DEPLOYMENT_ROUTER_IMAGE",
-			"gpustack/llm-router:v0.4.0",
+			"gpustack/llm-router:v0.5.0",
 		},
 		{
 			ModelDeploymentModelExpressServerImage,
