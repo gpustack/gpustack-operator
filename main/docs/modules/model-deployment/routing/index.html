@@ -1594,10 +1594,10 @@ The replica&rsquo;s headless <code>Service</code> always publishes every member 
 the gateway registers one worker per attention-DP rank: each rank is a logical worker whose URL
 carries a rank suffix (<code>http://host:port@0</code>, <code>http://host:port@1</code>), and every suffix dials the
 member&rsquo;s one physical serving listener — the suffix is a rank, not a port.</p>
-<p>That registration is the gateway patch this project ships: an image carrying it is
-<code>gpustack/llm-router:v0.4.0</code> or later, which is also the default
+<p>That registration is the gateway patch this project ships: it is carried by
+<code>gpustack/llm-router:v0.4.0</code> and later releases (including the default
 <a href="/gpustack-operator/main/docs/reference/settings/"><code>model-deployment-router-image</code></a>
-, so a deployment that names no
+), so a deployment that names no
 image of its own registers per rank out of the box. An older default or a named image that
 predates the patch runs the gateway without the fan-out.</p>
 <p>No runtime run has exercised the flag: the render gate and the patched fan-out are verified in
