@@ -520,7 +520,7 @@ suppress `status` writes until control-plane state changes or a predictor advanc
 
 ### Local evaluation
 
-The [capacity priors and local evaluation spec](https://github.com/gpustack/gpustack-operator/blob/0d45a0cb6fbdbcbb34d38e62df441209637ba7b1/specs/2026-10-26-inferencex-model-deployment-scaling.md) records 48 deterministic synthetic result rows across eight
+The [capacity priors and local evaluation spec](https://github.com/gpustack/gpustack-operator/blob/bbc933020966e3c6e86af71662d0f32fcc1e9c1a/specs/2026-10-26-inferencex-model-deployment-scaling.md) records 48 deterministic synthetic result rows across eight
 tuning traces (`manual`, `resolved` and one `passive` candidate at seed factor `1`) plus two open-loop versus closed-loop examples.
 
 It also evaluates two held-out traces (`heldout_bursts` and `heldout_length_cache_shift`, 11 rows each across `manual` at factor `1` plus `resolved` and one `passive` candidate
