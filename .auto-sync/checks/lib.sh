@@ -239,14 +239,16 @@ import sys
 root_dir, lfs_objects = sys.argv[1:3]
 OID_RE = re.compile(r"^oid sha256:([0-9a-f]{64})$")
 SIZE_RE = re.compile(r"^size (\d+)$")
+pending: list[tuple[str, str]] = []
 
+# First pass: validate every pointer's object before modifying any files so failure leaves the tree untouched.
 for sub in ("site", "docs"):
     base = os.path.join(root_dir, sub)
     if not os.path.isdir(base) or os.path.islink(base):
         continue
     for cur, dirs, files in os.walk(base, followlinks=False):
-        dirs[:] = [d for d in dirs if not os.path.islink(os.path.join(cur, d))]
-        for name in files:
+        dirs[:] = sorted(d for d in dirs if not os.path.islink(os.path.join(cur, d)))
+        for name in sorted(files):
             fpath = os.path.join(cur, name)
             if os.path.islink(fpath):
                 continue
@@ -302,12 +304,16 @@ for sub in ("site", "docs"):
                     f"FAIL: Git-LFS object size mismatch for {os.path.relpath(fpath, root_dir)}: "
                     f"expected {expected_size}, got {total}"
                 )
-            with open(obj_path, "rb") as src_f, open(fpath, "wb") as dst_f:
-                while True:
-                    chunk = src_f.read(65536)
-                    if not chunk:
-                        break
-                    dst_f.write(chunk)
+            pending.append((fpath, obj_path))
+
+# Second pass: hydrate verified payloads in place.
+for fpath, obj_path in pending:
+    with open(obj_path, "rb") as src_f, open(fpath, "wb") as dst_f:
+        while True:
+            chunk = src_f.read(65536)
+            if not chunk:
+                break
+            dst_f.write(chunk)
 PY
 }
 

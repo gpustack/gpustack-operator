@@ -298,9 +298,16 @@ jobs:
           fi
 
       - name: Fetch LFS objects
+        env:
+          PR_NUMBER: ${{ github.event.issue.number }}
         run: |
           if git lfs version >/dev/null 2>&1; then
-            git lfs fetch origin HEAD
+            lfs_refs=(HEAD)
+            if [[ "${GITHUB_EVENT_NAME}" == "issue_comment" && -n "${PR_NUMBER}" ]] && \
+               pr_head_sha="$(git rev-parse --verify -q "refs/remotes/origin/pr/${PR_NUMBER}^{commit}" 2>/dev/null)"; then
+              lfs_refs+=("${pr_head_sha}")
+            fi
+            git lfs fetch origin "${lfs_refs[@]}"
           fi
           if [[ -n "$(git status --porcelain)" ]]; then
             git status --porcelain >&2

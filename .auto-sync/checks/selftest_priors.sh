@@ -812,8 +812,9 @@ if [[ -n "${LOGO_OID}" && -f "${GIT_COMMON_DIR}/lfs/objects/${LOGO_OBJ_REL}" ]];
     # shellcheck source=../scripts/lib-preflight.sh
     # shellcheck disable=SC1091
     source "${ROOT_DIR}/.auto-sync/scripts/lib-preflight.sh"
-    AUTOSYNC_SKIP_GO_MOD_DOWNLOAD=true autosync::preflight::warm_caches "${STAGE_LFS}" --sbin
+    AUTOSYNC_SKIP_GO_MOD_DOWNLOAD=true AUTOSYNC_SKIP_LFS_FETCH=true autosync::preflight::warm_caches "${STAGE_LFS}" --sbin
     [[ -d "${STAGE_LFS}/lfs-objects" && -f "${STAGE_LFS}/lfs-objects/${LOGO_OBJ_REL}" ]]
+    [[ ! -e "${STAGE_LFS}/lfs-objects/ea/af/eaafa0e1df9cd79ca0ef98ba1572c1a75ed5e2789c98b64ba2cd9ac289b8c2ab" ]]
     # shellcheck source=./lib.sh
     # shellcheck disable=SC1091
     source "${CAND_LFS}/.auto-sync/checks/lib.sh"
@@ -860,25 +861,31 @@ else
   fi
 fi
 
-# 3j. ensure_ephemeral_git fails closed on corrupted staged Git-LFS object digest.
+# 3j. ensure_ephemeral_git fails closed atomically on corrupted staged Git-LFS object digest without hydrating earlier files.
 CAND_LFS_BAD="${SCRATCH}/cand-lfs-bad"
 STAGE_LFS_BAD="${SCRATCH}/stage-lfs-bad"
 mkdir -p "${CAND_LFS_BAD}/site/assets/images"
+GOOD_FIRST_PAYLOAD="first-valid-payload"
+GOOD_FIRST_OID="$(printf '%s' "${GOOD_FIRST_PAYLOAD}" | python3 -c 'import hashlib,sys; print(hashlib.sha256(sys.stdin.buffer.read()).hexdigest())')"
+mkdir -p "${STAGE_LFS_BAD}/lfs-objects/${GOOD_FIRST_OID:0:2}/${GOOD_FIRST_OID:2:2}"
+printf '%s' "${GOOD_FIRST_PAYLOAD}" > "${STAGE_LFS_BAD}/lfs-objects/${GOOD_FIRST_OID:0:2}/${GOOD_FIRST_OID:2:2}/${GOOD_FIRST_OID}"
+printf 'version https://git-lfs.github.com/spec/v1\noid sha256:%s\nsize %s\n' "${GOOD_FIRST_OID}" "${#GOOD_FIRST_PAYLOAD}" > "${CAND_LFS_BAD}/site/assets/images/a.png"
 BAD_PAYLOAD="good-payload"
 BAD_OID="$(printf '%s' "${BAD_PAYLOAD}" | python3 -c 'import hashlib,sys; print(hashlib.sha256(sys.stdin.buffer.read()).hexdigest())')"
 mkdir -p "${STAGE_LFS_BAD}/lfs-objects/${BAD_OID:0:2}/${BAD_OID:2:2}"
 printf 'corrupted-payload' > "${STAGE_LFS_BAD}/lfs-objects/${BAD_OID:0:2}/${BAD_OID:2:2}/${BAD_OID}"
-printf 'version https://git-lfs.github.com/spec/v1\noid sha256:%s\nsize %s\n' "${BAD_OID}" "${#BAD_PAYLOAD}" > "${CAND_LFS_BAD}/site/assets/images/logo.png"
+printf 'version https://git-lfs.github.com/spec/v1\noid sha256:%s\nsize %s\n' "${BAD_OID}" "${#BAD_PAYLOAD}" > "${CAND_LFS_BAD}/site/assets/images/z.png"
 bad_lfs_err=""
 if ! bad_lfs_err="$(
   # shellcheck source=./lib.sh
   # shellcheck disable=SC1091
   source "${ROOT_DIR}/.auto-sync/checks/lib.sh"
   AUTOSYNC_STAGE_DIR="${STAGE_LFS_BAD}" autosync::ensure_ephemeral_git "${CAND_LFS_BAD}" 2>&1
-)" && grep -q "sha256 mismatch" <<<"${bad_lfs_err}"; then
-  pass "ensure_ephemeral_git fails closed on corrupted staged Git-LFS object digest"
+)" && grep -q "sha256 mismatch" <<<"${bad_lfs_err}" && \
+   grep -q '^version https://git-lfs.github.com/spec/v1$' "${CAND_LFS_BAD}/site/assets/images/a.png"; then
+  pass "ensure_ephemeral_git fails closed atomically on corrupted staged Git-LFS object digest"
 else
-  fail "ensure_ephemeral_git fails closed on corrupted staged Git-LFS object digest (${bad_lfs_err})"
+  fail "ensure_ephemeral_git fails closed atomically on corrupted staged Git-LFS object digest (${bad_lfs_err})"
 fi
 
 echo
