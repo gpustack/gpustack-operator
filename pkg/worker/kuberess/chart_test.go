@@ -823,3 +823,140 @@ func TestChartWorkerStrategyType(t *testing.T) {
 		})
 	}
 }
+
+// TestChartDeviceManagerMountsHostRootReadOnly verifies that device-manager DaemonSets mount
+// the host root filesystem read-only at /host on the main container when enabled, never mount it
+// on initContainers, and omit both volume and mount when disabled.
+func TestChartDeviceManagerMountsHostRootReadOnly(t *testing.T) {
+	manufacturers := nodefeature.GetKnownAcceleratableManufacturers()
+	require.NotEmpty(t, manufacturers, "known manufacturers are non-empty")
+
+	testCases := []struct {
+		name      string
+		values    map[string]any
+		wantMount bool
+	}{
+		{
+			name:      "default enables host root mount",
+			values:    nil,
+			wantMount: true,
+		},
+		{
+			name: "explicitly enabled mounts host root",
+			values: map[string]any{
+				"deviceManager": map[string]any{
+					"hostRootMount": map[string]any{"enabled": true},
+				},
+			},
+			wantMount: true,
+		},
+		{
+			name: "disabled omits host root volume and mount",
+			values: map[string]any{
+				"deviceManager": map[string]any{
+					"hostRootMount": map[string]any{"enabled": false},
+				},
+			},
+			wantMount: false,
+		},
+	}
+
+	type volumeMountSpec struct {
+		Name      string `yaml:"name"`
+		MountPath string `yaml:"mountPath"`
+		ReadOnly  *bool  `yaml:"readOnly"`
+	}
+	type containerSpec struct {
+		Name         string            `yaml:"name"`
+		VolumeMounts []volumeMountSpec `yaml:"volumeMounts"`
+	}
+	type daemonSetSpec struct {
+		Spec struct {
+			Template struct {
+				Spec struct {
+					InitContainers []containerSpec `yaml:"initContainers"`
+					Containers     []containerSpec `yaml:"containers"`
+					Volumes        []struct {
+						Name     string `yaml:"name"`
+						HostPath *struct {
+							Path string `yaml:"path"`
+							Type string `yaml:"type"`
+						} `yaml:"hostPath"`
+					} `yaml:"volumes"`
+				} `yaml:"spec"`
+			} `yaml:"template"`
+		} `yaml:"spec"`
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			objects := renderChart(t, tc.values)
+
+			for _, manu := range manufacturers {
+				key := "DaemonSet/" + SystemNamespaceName + "/gpustack-operator-device-manager-" + manu
+				obj, ok := objects[key]
+				require.True(t, ok, "render carries DaemonSet %s", key)
+
+				var ds daemonSetSpec
+				require.NoError(t, yaml.Unmarshal([]byte(obj.manifest), &ds))
+
+				podSpec := ds.Spec.Template.Spec
+
+				var hostRootVolumes int
+				for _, v := range podSpec.Volumes {
+					if v.Name == "host-root-dir" {
+						hostRootVolumes++
+						if tc.wantMount {
+							require.NotNil(t, v.HostPath, "%s host-root-dir uses hostPath", manu)
+							assert.Equal(t, "/", v.HostPath.Path, "%s host-root-dir path", manu)
+							assert.Equal(t, "Directory", v.HostPath.Type, "%s host-root-dir type", manu)
+						}
+					}
+				}
+				if tc.wantMount {
+					assert.Equal(t, 1, hostRootVolumes, "%s has exactly one host-root-dir volume", manu)
+				} else {
+					assert.Zero(t, hostRootVolumes, "%s omits host-root-dir volume", manu)
+				}
+
+				for _, ic := range podSpec.InitContainers {
+					for _, vm := range ic.VolumeMounts {
+						assert.NotEqual(t, "host-root-dir", vm.Name,
+							"%s initContainer %s must not mount host-root-dir", manu, ic.Name)
+						assert.NotEqual(t, "/host", vm.MountPath,
+							"%s initContainer %s must not mount /host", manu, ic.Name)
+					}
+				}
+
+				var mainFound bool
+				for _, c := range podSpec.Containers {
+					var hostRootMounts int
+					for _, vm := range c.VolumeMounts {
+						if !tc.wantMount {
+							assert.NotEqual(t, "host-root-dir", vm.Name,
+								"%s container %s must not mount host-root-dir when disabled", manu, c.Name)
+							assert.NotEqual(t, "/host", vm.MountPath,
+								"%s container %s must not mount /host when disabled", manu, c.Name)
+							continue
+						}
+						if vm.Name == "host-root-dir" || vm.MountPath == "/host" {
+							hostRootMounts++
+							assert.Equal(t, "main", c.Name, "%s only main container mounts host-root-dir", manu)
+							assert.Equal(t, "host-root-dir", vm.Name, "%s volumeMount name", manu)
+							assert.Equal(t, "/host", vm.MountPath, "%s volumeMount path", manu)
+							require.NotNil(t, vm.ReadOnly, "%s host-root-dir readOnly must be set", manu)
+							assert.True(t, *vm.ReadOnly, "%s host-root-dir must be readOnly", manu)
+						}
+					}
+					if c.Name == "main" {
+						mainFound = true
+						if tc.wantMount {
+							assert.Equal(t, 1, hostRootMounts, "%s main container has host-root-dir mount", manu)
+						}
+					}
+				}
+				assert.True(t, mainFound, "%s has main container", manu)
+			}
+		})
+	}
+}

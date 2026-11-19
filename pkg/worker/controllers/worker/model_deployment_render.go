@@ -3,6 +3,7 @@ package worker
 import (
 	"context"
 	"fmt"
+	"path"
 	"slices"
 	"strconv"
 	"strings"
@@ -561,8 +562,7 @@ func renderModelDeploymentPodTemplate(ctx context.Context, in ModelDeploymentRen
 	// delivery can read the same digest a mount was skipped for.
 	var compileCacheSubPath string
 	if !takeOver {
-		vols = append(vols, in.Connector.Volumes...)
-		mounts = append(mounts, in.Connector.VolumeMounts...)
+		vols, mounts = appendModelDeploymentConnectorVolumes(vols, mounts, in.Connector)
 		// THE COMPILATION CACHE IS MOUNTED AT ONE PATH FOR EVERY MANAGED ROLE UNLESS THE ROLE'S
 		// OWN VOLUMES ALREADY COVER IT, and each role's own subdirectory of it is what the default
 		// volume carries. The path is therefore a constant to the engine -- which is what lets one
@@ -918,6 +918,30 @@ func modelDeploymentStampRouterCandidate(
 		pod.Labels = map[string]string{}
 	}
 	pod.Labels[modelDeploymentRouterCandidateLabel] = modelDeploymentEndpointEligibleValue
+}
+
+// appendModelDeploymentConnectorVolumes appends connector-synthesized volumes and mounts onto the
+// Pod, yielding the operator-owned /etc/hixlep mount when user additionalVolumes already cover
+// that path while leaving all other connector mounts and --kv-transfer-config intact.
+func appendModelDeploymentConnectorVolumes(
+	vols []core.Volume, mounts []core.VolumeMount, connector ModelDeploymentConnectorRender,
+) ([]core.Volume, []core.VolumeMount) {
+	hixlepOverridden := slices.ContainsFunc(mounts, func(m core.VolumeMount) bool {
+		return path.Clean(m.MountPath) == inject.AscendHIXLEPPath
+	})
+	for _, v := range connector.Volumes {
+		if hixlepOverridden && v.Name == inject.AscendHIXLEPVolumeName {
+			continue
+		}
+		vols = append(vols, v)
+	}
+	for _, m := range connector.VolumeMounts {
+		if hixlepOverridden && m.Name == inject.AscendHIXLEPVolumeName {
+			continue
+		}
+		mounts = append(mounts, m)
+	}
+	return vols, mounts
 }
 
 // modelDeploymentSharedMemoryVolumes adds the role's default mount unless one is explicit.

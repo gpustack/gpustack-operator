@@ -8,6 +8,7 @@ import (
 
 	core "k8s.io/api/core/v1"
 
+	"gpustack.ai/gpustack/pkg/nodefeature"
 	"gpustack.ai/gpustack/pkg/utils/json"
 )
 
@@ -78,6 +79,13 @@ const (
 
 	// vllmAscendDriverVolumeName names the projection of that tree on a Pod.
 	vllmAscendDriverVolumeName = "gpustack-ascend-driver"
+
+	// AscendHIXLEPPath is the host directory holding static Ascend A5 Host RoCE
+	// endpoint JSON files read by vllm-ascend when ascend_local_comm_res_path is set.
+	AscendHIXLEPPath = "/etc/hixlep"
+
+	// AscendHIXLEPVolumeName names the read-only hostPath volume for AscendHIXLEPPath.
+	AscendHIXLEPVolumeName = "gpustack-ascend-hixlep"
 )
 
 // The NIXL side channel and the Ascend transfer variables. The two NIXL names are read by vLLM's
@@ -103,6 +111,14 @@ const (
 	// what a prefill/decode pair needs to find each other without a bootstrap address.
 	AscendAutoConnectEnv = "ASCEND_AUTO_CONNECT"
 
+	// AscendLocalCommResEnv carries the Ascend A5 local communication resource JSON.
+	// Emitted in DefaultedEnv on A5 UB/UBG/UBoE so a role env entry can override it.
+	AscendLocalCommResEnv = "ASCEND_LOCAL_COMM_RES"
+
+	// AscendLocalCommResAutoGenValue enables in-memory HIXL endpoint auto-generation on Ascend A5
+	// UB/UBG/UBoE without reading /etc/hixlep.
+	AscendLocalCommResAutoGenValue = `{"version":"1.3"}`
+
 	// AscendGlobalResourceConfigEnv is a recognized Ascend MemFabric link-selection variable,
 	// retained as a recognize-but-never-render marker for scaler prior identity filtering.
 	AscendGlobalResourceConfigEnv = "ASCEND_GLOBAL_RESOURCE_CONFIG"
@@ -123,6 +139,20 @@ func ascendDriverProjection() (core.Volume, core.VolumeMount) {
 		},
 	}, core.VolumeMount{
 		Name: vllmAscendDriverVolumeName, MountPath: vllmAscendDriverPath, ReadOnly: true,
+	}
+}
+
+// ascendHIXLEPProjection returns the read-only hostPath volume and mount for /etc/hixlep
+// used by Ascend A5 Host RoCE vLLM workloads.
+func ascendHIXLEPProjection() (core.Volume, core.VolumeMount) {
+	hostPathDirectory := core.HostPathDirectory
+	return core.Volume{
+		Name: AscendHIXLEPVolumeName,
+		VolumeSource: core.VolumeSource{
+			HostPath: &core.HostPathVolumeSource{Path: AscendHIXLEPPath, Type: &hostPathDirectory},
+		},
+	}, core.VolumeMount{
+		Name: AscendHIXLEPVolumeName, MountPath: AscendHIXLEPPath, ReadOnly: true,
 	}
 }
 
@@ -194,6 +224,9 @@ type vllmConnectorExtraConfig struct {
 	MooncakeProtocol string               `json:"mooncake_protocol,omitempty"`
 	Prefill          *vllmRoleParallelism `json:"prefill,omitempty"`
 	Decode           *vllmRoleParallelism `json:"decode,omitempty"`
+	// AscendLocalCommResPath names the directory vllm-ascend reads per-NPU Host RoCE
+	// endpoint JSON files from on Ascend A5. Set on the outer kv_connector_extra_config only.
+	AscendLocalCommResPath string `json:"ascend_local_comm_res_path,omitempty"`
 }
 
 // vllmRoleParallelism is the per-half parallel shape vLLM-Ascend's point-to-point connector
@@ -469,6 +502,23 @@ func renderVLLMWithEncoderCache(in Input, ec EncoderCache) (*Result, error) {
 		}
 	}
 
+	// Ascend A5 vLLM communication resource configuration applies only when a KV connector is
+	// rendered on a non-Encode role. Host RoCE mounts /etc/hixlep read-only and points the outer
+	// kv_connector_extra_config at it; UB/UBG/UBoE defaults ASCEND_LOCAL_COMM_RES below.
+	ascendA5KVConnector := !encoderOnly &&
+		transferConfigValue != nil &&
+		in.Engine == EngineVLLMAscend &&
+		in.AcceleratorFamily == nodefeature.AcceleratorFamilyAscend950
+	if ascendA5KVConnector && in.AscendHostRoCE {
+		if transferConfigValue.KVConnectorExtraConfig == nil {
+			transferConfigValue.KVConnectorExtraConfig = &vllmConnectorExtraConfig{}
+		}
+		transferConfigValue.KVConnectorExtraConfig.AscendLocalCommResPath = AscendHIXLEPPath
+		hixlepVolume, hixlepMount := ascendHIXLEPProjection()
+		legVolumes = append(legVolumes, hixlepVolume)
+		legVolumeMounts = append(legVolumeMounts, hixlepMount)
+	}
+
 	result := &Result{
 		KVTransfer: in.KVTransfer,
 	}
@@ -570,6 +620,12 @@ func renderVLLMWithEncoderCache(in Input, ec EncoderCache) (*Result, error) {
 		if in.Engine == EngineVLLMAscend && in.KVTransferBackend == KVTransferBackendHIXL {
 			result.DefaultedEnv = append(result.DefaultedEnv, core.EnvVar{Name: AscendAutoConnectEnv, Value: "1"})
 		}
+	}
+	if ascendA5KVConnector && !in.AscendHostRoCE {
+		result.DefaultedEnv = append(result.DefaultedEnv, core.EnvVar{
+			Name:  AscendLocalCommResEnv,
+			Value: AscendLocalCommResAutoGenValue,
+		})
 	}
 	if forceTCP {
 		// Defaulted rather than owned: the transfer engine only checks that the variable is

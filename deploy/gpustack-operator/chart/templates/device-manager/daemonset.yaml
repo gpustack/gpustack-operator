@@ -231,6 +231,11 @@ spec:
             - name: kubelet-pod-resources-dir
               mountPath: /var/lib/kubelet/pod-resources
               readOnly: true
+            {{- if $root.Values.deviceManager.hostRootMount.enabled }}
+            - name: host-root-dir
+              mountPath: /host
+              readOnly: true
+            {{- end }}
             {{- if eq $manu "amd" }}
             - name: gpustack-amd-driver
               mountPath: /opt/rocm
@@ -346,6 +351,12 @@ spec:
           hostPath:
             path: {{ . }}
             type: DirectoryOrCreate
+        {{- end }}
+        {{- if $root.Values.deviceManager.hostRootMount.enabled }}
+        - name: host-root-dir
+          hostPath:
+            path: /
+            type: Directory
         {{- end }}
         {{- if eq $manu "amd" }}
         - name: gpustack-amd-driver

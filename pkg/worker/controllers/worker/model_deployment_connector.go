@@ -55,6 +55,13 @@ type ModelDeploymentConnectorInput struct {
 	// has not converged.
 	Manufacturer string
 
+	// AcceleratorFamily is the accelerator generation reported by AcceleratorType.Status.Detail.Family,
+	// such as "950" on Ascend A5. Empty preserves legacy non-A5 rendering.
+	AcceleratorFamily string
+
+	// AscendHostRoCE reports that an Ascend A5 vLLM role uses Host RoCE rather than on-die UB/UBG/UBoE.
+	AscendHostRoCE bool
+
 	// Domain is the reuse identity the Binding declares — or empty, when the pool's master holds no
 	// tenant ledger to keep it apart in: a ledger-less master is handed no tenant at all rather than
 	// one it would collapse into its default. Whether the engine build reads a rendered value is the
@@ -218,22 +225,24 @@ type ModelDeploymentConnectorRender struct {
 }
 
 type modelDeploymentConnectorBinding struct {
-	Domain              string                 `json:"domain,omitempty"`
-	Dtype               string                 `json:"dtype,omitempty"`
-	CachePrefix         string                 `json:"cachePrefix,omitempty"`
-	MasterServerAddress string                 `json:"masterServerAddress,omitempty"`
-	Protocol            string                 `json:"protocol,omitempty"`
-	KVTransfer          bool                   `json:"kvTransfer,omitempty"`
-	KVTransferProtocol  string                 `json:"kvTransferProtocol,omitempty"`
-	KVTransferBackend   string                 `json:"kvTransferBackend,omitempty"`
-	KVTransferEFA       bool                   `json:"kvTransferEFA,omitempty"`
-	PublishKVEvents     bool                   `json:"publishKVEvents,omitempty"`
-	KVEventsHost        string                 `json:"kvEventsHost,omitempty"`
-	RoutingSidecar      bool                   `json:"routingSidecar,omitempty"`
-	Disaggregated       bool                   `json:"disaggregated,omitempty"`
-	Parallelism         inject.ParallelismPair `json:"parallelism,omitempty"`
-	EncoderCache        inject.EncoderCache    `json:"encoderCache,omitempty"`
-	EncoderURLs         []string               `json:"encoderURLs,omitempty"`
+	Domain                 string                 `json:"domain,omitempty"`
+	Dtype                  string                 `json:"dtype,omitempty"`
+	CachePrefix            string                 `json:"cachePrefix,omitempty"`
+	MasterServerAddress    string                 `json:"masterServerAddress,omitempty"`
+	Protocol               string                 `json:"protocol,omitempty"`
+	KVTransfer             bool                   `json:"kvTransfer,omitempty"`
+	KVTransferProtocol     string                 `json:"kvTransferProtocol,omitempty"`
+	KVTransferBackend      string                 `json:"kvTransferBackend,omitempty"`
+	KVTransferEFA          bool                   `json:"kvTransferEFA,omitempty"`
+	AscendLocalCommRes     string                 `json:"ascendLocalCommRes,omitempty"`
+	AscendTransferProtocol string                 `json:"ascendTransferProtocol,omitempty"`
+	PublishKVEvents        bool                   `json:"publishKVEvents,omitempty"`
+	KVEventsHost           string                 `json:"kvEventsHost,omitempty"`
+	RoutingSidecar         bool                   `json:"routingSidecar,omitempty"`
+	Disaggregated          bool                   `json:"disaggregated,omitempty"`
+	Parallelism            inject.ParallelismPair `json:"parallelism,omitempty"`
+	EncoderCache           inject.EncoderCache    `json:"encoderCache,omitempty"`
+	EncoderURLs            []string               `json:"encoderURLs,omitempty"`
 }
 
 // modelDeploymentRoutesManaged is now the KV EVENTS gate alone: a managed router is in front of
@@ -658,6 +667,7 @@ var modelDeploymentDefaultedEnvNames = slices.Concat([]string{
 	inject.VLLMNIXLSideChannelPortEnv,
 	inject.SGLangDisaggregationNIXLBackendEnv,
 	inject.AscendAutoConnectEnv,
+	inject.AscendLocalCommResEnv,
 	inject.AscendMFTransferProtocolEnv,
 	"VLLM_CACHE_ROOT",
 	"SGLANG_CACHE_DIR",
@@ -870,6 +880,8 @@ func SynthesizeModelDeploymentConnector(in ModelDeploymentConnectorInput) (Model
 		KVTransferProtocol: kvTransferProtocol,
 		KVTransferBackend:  in.KVTransferBackend,
 		KVTransferEFA:      in.KVTransferEFA,
+		AcceleratorFamily:  in.AcceleratorFamily,
+		AscendHostRoCE:     in.AscendHostRoCE,
 		// The pair is threaded rather than resolved here for the same reason the role is: the
 		// resolution reads every role of the deployment, and synthesis sees one role's input.
 		Parallelism: in.Parallelism,
@@ -891,6 +903,25 @@ func SynthesizeModelDeploymentConnector(in ModelDeploymentConnectorInput) (Model
 	if res.KVTransfer {
 		backendFingerprint = in.KVTransferBackend
 		efaFingerprint = in.KVTransferBackend == inject.KVTransferBackendNIXL && in.KVTransferEFA
+	}
+
+	// Ascend A5 binding fields stay empty on every non-A5 and A2/A3 render so existing Pod spec
+	// hashes are unchanged across upgrades. They are populated only when Family "950" alters the
+	// synthesized connector output.
+	ascendLocalCommRes, ascendTransferProtocol := "", ""
+	if in.Manufacturer == nodefeature.ManufacturerAscend &&
+		in.AcceleratorFamily == nodefeature.AcceleratorFamilyAscend950 {
+		if engine == inject.EngineVLLMAscend && role != inject.RoleEncode &&
+			(in.MasterServerAddress != "" || res.KVTransfer) {
+			if in.AscendHostRoCE {
+				ascendLocalCommRes = "hixlep"
+			} else {
+				ascendLocalCommRes = "autogen"
+			}
+		} else if engine == inject.EngineSGLang && res.KVTransfer &&
+			in.KVTransferBackend == inject.KVTransferBackendHIXL {
+			ascendTransferProtocol = inject.AscendMFTransferProtocolDeviceURMA
+		}
 	}
 
 	// Disaggregated vLLM decode legs omit the shared-store connector (renderVLLM sets rendersStore=false),
@@ -919,22 +950,24 @@ func SynthesizeModelDeploymentConnector(in ModelDeploymentConnectorInput) (Model
 		// front, and deriving it from the transfer leg is exactly the inheritance this split ends.
 		RoutingSidecar: in.RoutingSidecar,
 		binding: &modelDeploymentConnectorBinding{
-			Domain:              domainFingerprint,
-			Dtype:               in.Dtype,
-			CachePrefix:         cachePrefixFingerprint,
-			MasterServerAddress: in.MasterServerAddress,
-			Protocol:            protocol,
-			KVTransfer:          res.KVTransfer,
-			KVTransferProtocol:  kvTransferProtocol,
-			KVTransferBackend:   backendFingerprint,
-			KVTransferEFA:       efaFingerprint,
-			PublishKVEvents:     in.PublishKVEvents,
-			KVEventsHost:        in.KVEventsHost,
-			RoutingSidecar:      in.RoutingSidecar,
-			Disaggregated:       in.Disaggregated && (role == inject.RolePrefill || role == inject.RoleDecode),
-			Parallelism:         parallelism,
-			EncoderCache:        in.EncoderCache,
-			EncoderURLs:         in.EncoderURLs,
+			Domain:                 domainFingerprint,
+			Dtype:                  in.Dtype,
+			CachePrefix:            cachePrefixFingerprint,
+			MasterServerAddress:    in.MasterServerAddress,
+			Protocol:               protocol,
+			KVTransfer:             res.KVTransfer,
+			KVTransferProtocol:     kvTransferProtocol,
+			KVTransferBackend:      backendFingerprint,
+			KVTransferEFA:          efaFingerprint,
+			AscendLocalCommRes:     ascendLocalCommRes,
+			AscendTransferProtocol: ascendTransferProtocol,
+			PublishKVEvents:        in.PublishKVEvents,
+			KVEventsHost:           in.KVEventsHost,
+			RoutingSidecar:         in.RoutingSidecar,
+			Disaggregated:          in.Disaggregated && (role == inject.RolePrefill || role == inject.RoleDecode),
+			Parallelism:            parallelism,
+			EncoderCache:           in.EncoderCache,
+			EncoderURLs:            in.EncoderURLs,
 		},
 	}, nil
 }

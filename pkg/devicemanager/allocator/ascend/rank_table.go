@@ -37,6 +37,45 @@ const hcclRootInfoPath = "/etc/hccl_rootinfo.json"
 // beside Version1 and Version1Dot2 at ranktable/common/common.go:37-38).
 const rankTableVersion950 = "2.0"
 
+var errRankTableMissingVersion = errors.New("ranktable carries no version entry")
+
+type rankTableParseError struct {
+	err error
+}
+
+func (e *rankTableParseError) Error() string {
+	return fmt.Sprintf("ranktable is not valid JSON: %v", e.err)
+}
+
+func (e *rankTableParseError) Unwrap() error {
+	return e.err
+}
+
+type rankTableVersionMismatchError struct {
+	version string
+}
+
+func (e *rankTableVersionMismatchError) Error() string {
+	return fmt.Sprintf("ranktable version %q does not match expected %q", e.version, rankTableVersion950)
+}
+
+// validateRankTableVersion950 verifies that content is a JSON object declaring version "2.0".
+func validateRankTableVersion950(content []byte) error {
+	var table struct {
+		Version string `json:"version"`
+	}
+	if err := json.Unmarshal(content, &table); err != nil {
+		return &rankTableParseError{err: err}
+	}
+	if table.Version == "" {
+		return errRankTableMissingVersion
+	}
+	if table.Version != rankTableVersion950 {
+		return &rankTableVersionMismatchError{version: table.Version}
+	}
+	return nil
+}
+
 // checkRankTable establishes whether a ranktable on this host would stop HCCL coming up on an A5
 // node, by reading the version out of the file the vendor runtime mounts into every container.
 //
@@ -135,27 +174,25 @@ func checkRankTable(path string) device.PreflightCheck {
 		return c
 	}
 
-	var table struct {
-		Version string `json:"version"`
-	}
-	if err := json.Unmarshal(content, &table); err != nil {
-		c.Reason = fmt.Sprintf("%s is not readable as JSON, so the ranktable generation it carries is "+
-			"unknown while the vendor runtime mounts it regardless: %v", hcclRootInfoPath, err)
-		return c
-	}
-
-	if table.Version == "" {
-		c.Reason = fmt.Sprintf("%s carries no version entry, so the ranktable generation it carries "+
-			"is unknown while the vendor runtime mounts it regardless", hcclRootInfoPath)
-		return c
-	}
-
-	if table.Version != rankTableVersion950 {
-		c.Reason = fmt.Sprintf("%s is a version %s ranktable and A5 accepts only %s, so the vendor "+
-			"runtime mounting it into every container makes multi-card HCCL fail to initialise with "+
-			"Config_Error_Ranktable (EI0014); single-card allocations are unaffected. Remove the file "+
-			"or replace it with a %s table -- no environment variable disables the check",
-			hcclRootInfoPath, table.Version, rankTableVersion950, rankTableVersion950)
+	if err := validateRankTableVersion950(content); err != nil {
+		var parseErr *rankTableParseError
+		var mismatchErr *rankTableVersionMismatchError
+		switch {
+		case errors.As(err, &parseErr):
+			c.Reason = fmt.Sprintf("%s is not readable as JSON, so the ranktable generation it carries is "+
+				"unknown while the vendor runtime mounts it regardless: %v", hcclRootInfoPath, parseErr.err)
+		case errors.Is(err, errRankTableMissingVersion):
+			c.Reason = fmt.Sprintf("%s carries no version entry, so the ranktable generation it carries "+
+				"is unknown while the vendor runtime mounts it regardless", hcclRootInfoPath)
+		case errors.As(err, &mismatchErr):
+			c.Reason = fmt.Sprintf("%s is a version %s ranktable and A5 accepts only %s, so the vendor "+
+				"runtime mounting it into every container makes multi-card HCCL fail to initialise with "+
+				"Config_Error_Ranktable (EI0014); single-card allocations are unaffected. Remove the file "+
+				"or replace it with a %s table -- no environment variable disables the check",
+				hcclRootInfoPath, mismatchErr.version, rankTableVersion950, rankTableVersion950)
+		default:
+			c.Reason = err.Error()
+		}
 		return c
 	}
 

@@ -54,6 +54,8 @@ rules are described in [KV Cache Injection](../kv-cache/injection.md).
 | Engine | Defaulted | Cache injection | `MC_TE_METRIC=1` | User environment wins. |
 | vLLM | Owned | Bound pool | `MooncakeStoreConnector`; Ascend uses `AscendStoreConnector` | Operator owns `--kv-transfer-config`. |
 | vLLM | Owned | Bound pool | `MOONCAKE_CONFIG_PATH=/etc/gpustack/kvcache/mooncake.json` and generated file | Do not supply the environment key. |
+| vLLM | Defaulted | Bound pool, Ascend A5 (`Family == "950"`), `interface: 0` | `ASCEND_LOCAL_COMM_RES='{"version":"1.3"}'` | Non-`Encode` roles only; user `roles[].env` wins; capacity-neutral for scaler priors. |
+| vLLM | Owned | Bound pool, Ascend A5 (`Family == "950"`), `interface > 0` | Outer `kv_connector_extra_config.ascend_local_comm_res_path: "/etc/hixlep"` and read-only `/etc/hixlep` (`gpustack-ascend-hixlep`, `HostPathDirectory`) | Non-`Encode` roles only; user `additionalVolumes` at `/etc/hixlep` replaces the operator mount while keeping the JSON key. |
 | vLLM | Defaulted | Bound TCP pool | `--block-size 128`, `MC_TCP_MAX_QUEUED_TRANSFERS_PER_PEER=65535`, `MC_TCP_MAX_PENDING_ADMISSIONS_PER_PEER=65535`, `MC_TCP_LANES_PER_PEER=16`, `MC_TCP_ADMISSION_TIMEOUT_MS=60000` | User `roles[].extraArgs` `--block-size` or `roles[].env` takes precedence. |
 | SGLang | Owned | Bound pool | `--hicache-storage-backend=mooncake`, `--hicache-storage-backend-extra-config=<json>` | Carries `extra_backend_tag` when a cache prefix is resolved. |
 | SGLang | Owned | Bound pool | `MOONCAKE_MASTER`, `MOONCAKE_TE_META_DATA_SERVER`, `MOONCAKE_PROTOCOL`, `MOONCAKE_DEVICE`, `MOONCAKE_GLOBAL_SEGMENT_SIZE`, `MOONCAKE_LOCAL_HOSTNAME`, `MOONCAKE_TENANT_ID` | Operator derives values from the binding and Pod. |
@@ -76,14 +78,17 @@ flowchart TD
     BACKEND ->|"Mooncake or omitted on NVIDIA/AMD"| MC{"Mooncake link resolution"}
     BACKEND ->|"NIXL on NVIDIA/AMD"| NIXL{"aws-efa-enabled or EFA pool?"}
     BACKEND ->|"HIXL or omitted on Ascend"| HIXL["HIXL on Ascend: mount /usr/local/Ascend/driver RO, port 8998"]
-    MC ->|"1. Ascend pool"| MC_ASC["protocol=ascend: vLLM MooncakeConnectorV1 or SGLang mooncake + driver mount"]
+    MC ->|"1. Ascend pool"| MC_ASC["protocol=ascend: vLLM MooncakeConnectorV1 (A5 UB ASCEND_LOCAL_COMM_RES or Host RoCE /etc/hixlep) or SGLang mooncake + driver mount"]
     MC ->|"2. Pair interface > 0 + EFA"| MC_EFA["protocol=efa: vLLM mooncake_protocol=efa or SGLang mooncake + vpc.amazonaws.com/efa"]
     MC ->|"3. AMD ROCm pool"| MC_HIP["protocol=hip: vLLM mooncake_protocol=hip or SGLang mooncake (XGMI + RDMA/TCP auto-discovery)"]
     MC ->|"4. NVIDIA + Pair interface > 0"| MC_RDMA["protocol=rdma: vLLM mooncake_protocol=rdma or SGLang mooncake + device.gpustack.ai/rdma*"]
     MC ->|"5. NVIDIA without Pair interface > 0"| MC_TCP["protocol=tcp: vLLM mooncake_protocol=tcp or SGLang mooncake_tcp + defaulted MC_FORCE_TCP=1"]
     NIXL ->|"Yes"| NIXL_EFA["Plugin LIBFABRIC: vLLM NixlConnector or SGLang nixl, port 8998"]
     NIXL ->|"No"| NIXL_UCX["Plugin UCX: vLLM NixlConnector or SGLang nixl, port 8998"]
-    HIXL -> HIXL_OUT["vLLM MooncakeConnectorV1 + ASCEND_AUTO_CONNECT=1 | SGLang ascend + ASCEND_MF_TRANSFER_PROTOCOL=sdma"]
+    HIXL ->|"vLLM"| HIXL_VLLM["vLLM: MooncakeConnectorV1 + ASCEND_AUTO_CONNECT=1"]
+    HIXL_VLLM ->|"A5 UB (interface: 0)"| HIXL_VLLM_UB["Default ASCEND_LOCAL_COMM_RES='{&quot;version&quot;:&quot;1.3&quot;}', no /etc/hixlep"]
+    HIXL_VLLM ->|"A5 Host RoCE (interface > 0)"| HIXL_VLLM_ROCE["Outer ascend_local_comm_res_path: /etc/hixlep + /etc/hixlep RO mount"]
+    HIXL ->|"SGLang"| HIXL_SGL["SGLang: ascend + ASCEND_MF_TRANSFER_PROTOCOL=sdma (A2/A3) or device_urma (A5), no /etc/hixlep"]
 -->
 
 The operator resolves transfer parameters in two steps:
@@ -97,7 +102,7 @@ The operator resolves transfer parameters in two steps:
     4. **NVIDIA RDMA (`rdma`)**: When both roles request *`interface > 0`* on NVIDIA, allocates `device.gpustack.ai/rdma*` and renders `mooncake_protocol: rdma` on vLLM or `mooncake` on SGLang without `MC_FORCE_TCP`.
     5. **NVIDIA TCP fallback (`tcp`)**: Without pair *`interface > 0`* on NVIDIA, renders `mooncake_protocol: tcp` on vLLM or `mooncake_tcp` on SGLang and defaults `MC_FORCE_TCP=1` (unless a non-TCP store shares the process) to prevent unconfigured cross-host NVLink selection.
   - **NIXL**: Selects `LIBFABRIC` when the `aws-efa-enabled` `Setting` is `true` or a bound `KVCache` pool uses EFA; otherwise selects `UCX` (which negotiates InfiniBand, RoCE, NVLink/IPC, or TCP at runtime). On vLLM, both *Prefill* and *Decode* open side-channel port `8998`.
-  - **HIXL**: Mounts `/usr/local/Ascend/driver` read-only on both engines so CANN `hccn_tool` resolves NPU RoCE endpoints, and defaults `ASCEND_AUTO_CONNECT=1` on vLLM or `ASCEND_MF_TRANSFER_PROTOCOL=sdma` on SGLang.
+  - **HIXL**: Mounts `/usr/local/Ascend/driver` read-only on both engines so CANN `hccn_tool` resolves NPU RoCE endpoints, and defaults `ASCEND_AUTO_CONNECT=1` on vLLM. On Ascend A2/A3 (`Family != "950"`), SGLang defaults `ASCEND_MF_TRANSFER_PROTOCOL=sdma`; on Ascend A5 (`Family == "950"`), SGLang defaults `ASCEND_MF_TRANSFER_PROTOCOL=device_urma` and never mounts `/etc/hixlep`. On Ascend A5 `vLLM` (with `HIXL` or `Mooncake`), `interface: 0` defaults `ASCEND_LOCAL_COMM_RES='{"version":"1.3"}'` without `/etc/hixlep`, while `interface > 0` mounts `/etc/hixlep` read-only and sets outer `kv_connector_extra_config.ascend_local_comm_res_path: "/etc/hixlep"`.
 
 | Component | Tier | Trigger | Injected | Note |
 |---|---|---|---|---|
@@ -107,6 +112,8 @@ The operator resolves transfer parameters in two steps:
 | vLLM | Owned | NIXL, NVIDIA/AMD | `VLLM_NIXL_SIDE_CHANNEL_HOST` from `status.podIP`, container port `8998` on both roles | Host is reserved. |
 | vLLM | Owned | Mooncake, Ascend | `MooncakeConnectorV1` (`kv_port: 8998` and `prefill`/`decode` `tp_size` and `dp_size` in `--kv-transfer-config`), prefill container port `8998`, and read-only `/usr/local/Ascend/driver` mount | Connector document derives parallel sizes from role configuration. |
 | vLLM | Owned | HIXL, Ascend | `MooncakeConnectorV1` (`kv_port: 8998` and `prefill`/`decode` `tp_size` and `dp_size` in `--kv-transfer-config`), prefill container port `8998`, and read-only `/usr/local/Ascend/driver` mount | Operator owns connector document. |
+| vLLM | Owned | Ascend A5 (`Family == "950"`), P/D (`Mooncake` or `HIXL`), `interface > 0` | Outer `kv_connector_extra_config.ascend_local_comm_res_path: "/etc/hixlep"` (including outer `MultiConnector`), read-only `/etc/hixlep` (`gpustack-ascend-hixlep`, `HostPathDirectory`) | Never set on inner `MultiConnector` child connectors; omits `ASCEND_LOCAL_COMM_RES`. User `additionalVolumes` at `/etc/hixlep` replaces the operator mount while keeping the JSON key. |
+| vLLM | Defaulted | Ascend A5 (`Family == "950"`), P/D (`Mooncake` or `HIXL`), `interface: 0` | `ASCEND_LOCAL_COMM_RES='{"version":"1.3"}'` | Triggers in-memory HIXL auto-generation; user `roles[].env` wins; capacity-neutral for scaler priors. |
 | vLLM | Defaulted | Mooncake TCP | `MC_FORCE_TCP=1`, `--block-size 128`, `MC_TCP_MAX_QUEUED_TRANSFERS_PER_PEER=65535`, `MC_TCP_MAX_PENDING_ADMISSIONS_PER_PEER=65535`, `MC_TCP_LANES_PER_PEER=16`, `MC_TCP_ADMISSION_TIMEOUT_MS=60000` | Skipped for `MC_FORCE_TCP` when a shared store uses a non-TCP transport; user values win. |
 | vLLM | Defaulted | NIXL, NVIDIA/AMD | `VLLM_NIXL_SIDE_CHANNEL_PORT=8998` | Overrides upstream vLLM default `5600`; user environment wins. |
 | vLLM | Defaulted | HIXL, Ascend | `ASCEND_AUTO_CONNECT=1` | User environment wins. |
@@ -116,7 +123,11 @@ The operator resolves transfer parameters in two steps:
 | SGLang | Owned | HIXL, Ascend | `--disaggregation-mode=prefill` or `decode`, `--disaggregation-transfer-backend=ascend`, prefill `--disaggregation-bootstrap-port=8998`, read-only `/usr/local/Ascend/driver` mount | Operator owns disaggregation flags. |
 | SGLang | Defaulted | Mooncake TCP | `MC_FORCE_TCP=1`, `--page-size 64`, `MC_TCP_MAX_QUEUED_TRANSFERS_PER_PEER=65535`, `MC_TCP_MAX_PENDING_ADMISSIONS_PER_PEER=65535`, `MC_TCP_LANES_PER_PEER=16`, `MC_TCP_ADMISSION_TIMEOUT_MS=60000` | `MC_FORCE_TCP=1` applies on an eligible TCP path; user values win. |
 | SGLang | Defaulted | NIXL, NVIDIA/AMD | `SGLANG_DISAGGREGATION_NIXL_BACKEND=UCX` or `LIBFABRIC` on EFA | User environment wins. |
-| SGLang | Defaulted | HIXL, Ascend | `ASCEND_MF_TRANSFER_PROTOCOL=sdma` | User environment wins. |
+| SGLang | Defaulted | HIXL, Ascend | `ASCEND_MF_TRANSFER_PROTOCOL=sdma` (Ascend A2/A3) or `device_urma` (Ascend A5, `Family == "950"`) | User environment wins; SGLang never mounts `/etc/hixlep` or receives `ASCEND_LOCAL_COMM_RES`. |
+
+- **A5 exclusions**: `RoleEncode`, `SGLang`, and Ascend A2/A3 (`Family != "950"`) never receive `/etc/hixlep` or `ASCEND_LOCAL_COMM_RES`.
+- **Scaler neutrality**: `ASCEND_LOCAL_COMM_RES`, `ASCEND_GLOBAL_RESOURCE_CONFIG`, and `ASCEND_MF_TRANSFER_PROTOCOL` are capacity-neutral for `ModelDeploymentScaler` priors.
+- **UBG and UBoE override**: `ASCEND_GLOBAL_RESOURCE_CONFIG` in *`roles[].env`* is accepted without owned-env refusal; see [Ascend A5 topologies](prefill-decode.md#ascend-a5-topologies).
 
 ## Router parameters
 

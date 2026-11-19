@@ -527,16 +527,21 @@ func modelDeploymentPoolTransportInputsChanged(old, md *workercore.ModelDeployme
 	return false
 }
 
-// modelDeploymentDirectLegProbe renders one role's direct-transfer leg the way any non-Ascend
-// type with a computed status would. The manufacturer only ever forces the leg empty or hands
-// back the declared protocol, so equal probes mean the leg kept its value whatever this role's
-// type reports.
+// modelDeploymentDirectLegProbe evaluates one role's direct-transfer leg on both non-Ascend and
+// Ascend A5 reference hardware. Equal probes mean the edit cannot change the direct leg for any
+// manufacturer or family, avoiding an unnecessary AcceleratorType read on updates.
 func modelDeploymentDirectLegProbe(
 	md *workercore.ModelDeployment, role *workercore.ModelDeploymentRole, awsEFAEnabled bool,
-) string {
-	return workerctrl.ModelDeploymentDirectInterfaceProtocol(
-		md, role, nodefeature.ManufacturerNVIDIA, md.Spec.Model.ArtifactRef != nil, awsEFAEnabled,
-	)
+) [2]string {
+	remoteDelivery := md.Spec.Model.ArtifactRef != nil
+	return [2]string{
+		workerctrl.ModelDeploymentDirectInterfaceProtocol(
+			md, role, nodefeature.ManufacturerNVIDIA, "", remoteDelivery, awsEFAEnabled,
+		),
+		workerctrl.ModelDeploymentDirectInterfaceProtocol(
+			md, role, nodefeature.ManufacturerAscend, nodefeature.AcceleratorFamilyAscend950, remoteDelivery, awsEFAEnabled,
+		),
+	}
 }
 
 // modelDeploymentRoleInterfaceInputsChanged reports whether an update touched the inputs the
@@ -575,9 +580,10 @@ func (r *ModelDeploymentWebhook) modelDeploymentRoleNeedsInterfaceRejudge(
 	if modelDeploymentDirectLegProbe(old, was, awsEFAEnabled) == modelDeploymentDirectLegProbe(md, role, awsEFAEnabled) {
 		return false, nil
 	}
-	// The probes differ, which only a non-Ascend manufacturer can turn into a real leg change,
-	// so the rendered legs are compared at the type's own manufacturer before rejudging.
+	// The probes differ, so compare the rendered legs at the role's actual manufacturer and family
+	// before rejudging.
 	manufacturer := ""
+	family := ""
 	if role.AcceleratorType != "" && (md.Spec.Engine.Name == workercore.ModelDeploymentEngineVLLM ||
 		md.Spec.Engine.Name == workercore.ModelDeploymentEngineSGLang || md.Spec.Model.ArtifactRef != nil) {
 		accType, err := r.getAcceleratorType(ctx, role.AcceleratorType, i)
@@ -585,9 +591,10 @@ func (r *ModelDeploymentWebhook) modelDeploymentRoleNeedsInterfaceRejudge(
 			return false, err
 		}
 		manufacturer = accType.Status.Detail.Manufacturer
+		family = accType.Status.Detail.Family
 	}
-	return workerctrl.ModelDeploymentDirectInterfaceProtocol(old, was, manufacturer, old.Spec.Model.ArtifactRef != nil, awsEFAEnabled) !=
-		workerctrl.ModelDeploymentDirectInterfaceProtocol(md, role, manufacturer, md.Spec.Model.ArtifactRef != nil, awsEFAEnabled), nil
+	return workerctrl.ModelDeploymentDirectInterfaceProtocol(old, was, manufacturer, family, old.Spec.Model.ArtifactRef != nil, awsEFAEnabled) !=
+		workerctrl.ModelDeploymentDirectInterfaceProtocol(md, role, manufacturer, family, md.Spec.Model.ArtifactRef != nil, awsEFAEnabled), nil
 }
 
 // validateModelDeploymentInterfaceRequests checks the device key against the resolved cache
@@ -671,6 +678,7 @@ func (r *ModelDeploymentWebhook) validateModelDeploymentInterfaceRequests(
 			continue
 		}
 		manufacturer := ""
+		family := ""
 		if role.AcceleratorType != "" && (md.Spec.Engine.Name == workercore.ModelDeploymentEngineVLLM ||
 			md.Spec.Engine.Name == workercore.ModelDeploymentEngineSGLang || md.Spec.Model.ArtifactRef != nil) {
 			accType, err := r.getAcceleratorType(ctx, role.AcceleratorType, i)
@@ -678,6 +686,7 @@ func (r *ModelDeploymentWebhook) validateModelDeploymentInterfaceRequests(
 				return nil, err
 			}
 			manufacturer = accType.Status.Detail.Manufacturer
+			family = accType.Status.Detail.Family
 		}
 		roleProtocols := protocols
 		if len(role.Command) > 0 {
@@ -685,7 +694,7 @@ func (r *ModelDeploymentWebhook) validateModelDeploymentInterfaceRequests(
 		}
 		efaActive := awsEFAEnabled || slices.Contains(roleProtocols, "efa")
 		directProtocol := workerctrl.ModelDeploymentDirectInterfaceProtocol(
-			md, role, manufacturer, md.Spec.Model.ArtifactRef != nil, efaActive,
+			md, role, manufacturer, family, md.Spec.Model.ArtifactRef != nil, efaActive,
 		)
 		_, err := workerctrl.ModelDeploymentInterfaceResource(roleProtocols, directProtocol, count)
 		if err != nil {

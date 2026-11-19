@@ -538,15 +538,16 @@ func modelDeploymentScalerValidateEncodeRole(
 	if len(role.Command) != 0 || role.ReplicaSize > 1 || role.ElasticEP != nil {
 		return modelDeploymentScalerPriorRefusal(role.Name, "Catalog requires a managed single-serving-Pod replica")
 	}
-	manufacturer := ""
+	manufacturer, family := "", ""
 	if role.AcceleratorType != "" {
 		acc, _, accErr := modelDeploymentScalerPriorHardwareIdentity(ctx, reader, role)
 		if accErr != nil {
 			return accErr
 		}
 		manufacturer = acc.Status.Detail.Manufacturer
+		family = acc.Status.Detail.Family
 	}
-	if gateErr := modelDeploymentScalerOperatorEnvGateWithManufacturer(target.Spec.Engine.Name, target, role, manufacturer); gateErr != nil {
+	if gateErr := modelDeploymentScalerOperatorEnvGateWithManufacturer(target.Spec.Engine.Name, target, role, manufacturer, family); gateErr != nil {
 		return modelDeploymentScalerPriorRefusal(role.Name, "%v", gateErr)
 	}
 	return nil

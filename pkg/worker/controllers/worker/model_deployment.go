@@ -2366,6 +2366,7 @@ func (r *ModelDeploymentReconciler) renderModelDeploymentRolePods(
 
 		var accType *worker.AcceleratorType
 		var manufacturer string
+		var family string
 		if role.AcceleratorType != "" {
 			var err error
 			accType, err = r.getModelDeploymentAcceleratorType(ctx, role.AcceleratorType)
@@ -2373,6 +2374,7 @@ func (r *ModelDeploymentReconciler) renderModelDeploymentRolePods(
 				return nil, err
 			}
 			manufacturer = accType.Status.Detail.Manufacturer
+			family = accType.Status.Detail.Family
 		}
 
 		in := ModelDeploymentRenderInput{
@@ -2434,8 +2436,11 @@ func (r *ModelDeploymentReconciler) renderModelDeploymentRolePods(
 		}
 		remoteDelivery := in.Artifact != nil &&
 			in.Artifact.Delivery == workercore.ModelDeploymentModelDeliveryRemote
+		directProtocol := ModelDeploymentDirectInterfaceProtocol(
+			md, role, manufacturer, family, remoteDelivery, efaActive,
+		)
 		var interfaceResource core.ResourceName
-		if role.Resources != nil && role.Resources.Interface != nil && role.Resources.Interface.Sign() > 0 {
+		if modelDeploymentRoleRequestsInterfaces(role) {
 			count, whole := role.Resources.Interface.AsInt64()
 			if !whole {
 				return nil, fmt.Errorf("role %q requests a fractional interface count", role.Name)
@@ -2444,16 +2449,16 @@ func (r *ModelDeploymentReconciler) renderModelDeploymentRolePods(
 			if len(role.Command) == 0 {
 				protocols = interfaceProtocols
 			}
-			resource, err := ModelDeploymentInterfaceResource(protocols,
-				ModelDeploymentDirectInterfaceProtocol(
-					md, role, manufacturer, remoteDelivery, efaActive,
-				), count)
+			resource, err := ModelDeploymentInterfaceResource(protocols, directProtocol, count)
 			if err != nil {
 				return nil, fmt.Errorf("role %q interface request: %w", role.Name, err)
 			}
 			interfaceResource = resource
 			in.InterfaceResource = resource
 		}
+		ascendHostRoCE := modelDeploymentAscendHostRoCE(
+			md.Spec.Engine.Name, manufacturer, family, directProtocol, role,
+		)
 		effectiveKVBackend := ModelDeploymentEffectiveKVTransferBackend(md, manufacturer)
 		kvTransferProtocol := ""
 		if effectiveKVBackend == inject.KVTransferBackendMooncake {
@@ -2478,6 +2483,8 @@ func (r *ModelDeploymentReconciler) renderModelDeploymentRolePods(
 			}
 			roleConnection.Engine = md.Spec.Engine.Name
 			roleConnection.Manufacturer = manufacturer
+			roleConnection.AcceleratorFamily = family
+			roleConnection.AscendHostRoCE = ascendHostRoCE
 			// The kind is the role's, and it is the only per-role term in the synthesized
 			// configuration: it is what makes a prefiller and a decoder two configurations rather
 			// than two copies of one, which is what the atomic admission of the pair is FOR.
@@ -2523,11 +2530,12 @@ func (r *ModelDeploymentReconciler) renderModelDeploymentRolePods(
 			// what it rendered before any of this existed and what a reconcile of an object admission
 			// refuses should keep doing rather than fail over a field nothing consumes.
 			connector, err := SynthesizeModelDeploymentConnector(ModelDeploymentConnectorInput{
-				Engine:       md.Spec.Engine.Name,
-				Manufacturer: manufacturer,
-				Kind:         role.Kind,
-				EncoderCache: encoderLeg,
-				EncoderURLs:  encoderURLs,
+				Engine:            md.Spec.Engine.Name,
+				Manufacturer:      manufacturer,
+				AcceleratorFamily: family,
+				Kind:              role.Kind,
+				EncoderCache:      encoderLeg,
+				EncoderURLs:       encoderURLs,
 			})
 			if err != nil {
 				return nil, fmt.Errorf("role %q cannot be given an encoder leg: %w", role.Name, err)

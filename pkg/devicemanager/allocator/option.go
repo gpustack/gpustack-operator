@@ -7,12 +7,14 @@ import (
 	"github.com/spf13/pflag"
 	deviceplugin "k8s.io/kubelet/pkg/apis/deviceplugin/v1beta1"
 
+	"gpustack.ai/gpustack/pkg/utils/hostfs"
 	"gpustack.ai/gpustack/pkg/utils/osx"
 )
 
 type Options struct {
 	// Connect.
 	KubeSocket string
+	HostRoot   string
 
 	// Control.
 	NoShared      bool
@@ -24,6 +26,7 @@ func NewOptions() *Options {
 	return &Options{
 		// Connect.
 		KubeSocket: deviceplugin.KubeletSocket,
+		HostRoot:   hostfs.DefaultHostRoot,
 
 		// Control.
 		NoShared:      false,
@@ -36,6 +39,8 @@ func (o *Options) AddFlags(fs *pflag.FlagSet) {
 	// Connect.
 	fs.StringVar(&o.KubeSocket, "kube-socket", o.KubeSocket,
 		"the kubelet socket path to connect.")
+	fs.StringVar(&o.HostRoot, "host-root", o.HostRoot,
+		"the mount path of the host root filesystem used for read-only inspection.")
 
 	// Control.
 	fs.BoolVar(&o.NoShared, "no-shared", o.NoShared,
@@ -61,6 +66,7 @@ func (o *Options) Validate(_ context.Context) error {
 func (o *Options) Complete(_ context.Context) (*Config, error) {
 	return &Config{
 		KubeSocket:    o.KubeSocket,
+		HostRoot:      o.HostRoot,
 		NoShared:      o.NoShared,
 		NoSliced:      o.NoSliced,
 		NoPartitioned: o.NoPartitioned,

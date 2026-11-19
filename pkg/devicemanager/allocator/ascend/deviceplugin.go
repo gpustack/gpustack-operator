@@ -3,8 +3,11 @@ package ascend
 import (
 	"bufio"
 	"context"
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
+	"path"
 	"path/filepath"
 	"slices"
 	"strconv"
@@ -20,12 +23,21 @@ import (
 	"gpustack.ai/gpustack/pkg/deviceplugin"
 	"gpustack.ai/gpustack/pkg/nodefeature"
 	"gpustack.ai/gpustack/pkg/utils/gox"
+	"gpustack.ai/gpustack/pkg/utils/hostfs"
 	"gpustack.ai/gpustack/pkg/utils/osx"
 	"gpustack.ai/gpustack/pkg/utils/strconvx"
 	"gpustack.ai/gpustack/pkg/utils/stringx"
 )
 
-const Manufacturer = nodefeature.ManufacturerAscend
+const (
+	Manufacturer = nodefeature.ManufacturerAscend
+
+	// routeConfPath is the host route table file read by Ascend A5 communication stacks when present.
+	routeConfPath = "/lib/route.conf"
+
+	// maxRankTableBytes caps how much of /etc/hccl_rootinfo.json is read during allocation.
+	maxRankTableBytes int64 = 1 << 20
+)
 
 // ascendDriverHostPath is where the node's Ascend driver tree lives on the host. HIXL and HCCL
 // read it directly -- hccn_tool and the driver libraries among it -- and ascend-docker-runtime
@@ -33,6 +45,19 @@ const Manufacturer = nodefeature.ManufacturerAscend
 // container it serves. A var rather than a const for the same reason this package's other host
 // paths are: a test cannot create /usr/local/Ascend/driver, so it redirects this to a fixture.
 var ascendDriverHostPath = "/usr/local/Ascend/driver"
+
+func openHostRoot(logger klog.Logger, hostRoot string) *hostfs.ReadOnlyHostFS {
+	if hostRoot == "" {
+		return nil
+	}
+	hfs, err := hostfs.OpenHostRoot(hostRoot)
+	if err != nil {
+		logger.Info("host root unavailable, skipping ascend A5 host file mounts",
+			"hostRoot", hostRoot, "error", err)
+		return nil
+	}
+	return hfs
+}
 
 func New(opts device.AllocatorOptions) device.Allocator {
 	logger := opts.Logger.WithName(Manufacturer)
@@ -43,18 +68,19 @@ func New(opts device.AllocatorOptions) device.Allocator {
 	// The A5 product is a node-level fact every mode injects a topology file from alike, so one
 	// resolver is shared by all of them and the node is read once rather than once per server.
 	product := productascend.NewResolver(newProductDriver(logger))
+	hostFS := openHostRoot(logger, opts.HostRoot)
 
 	servers := []deviceplugin.Server{
-		newServer(logger, workercore.DeviceAllocationModeExclusive, nil, product),
+		newServer(logger, workercore.DeviceAllocationModeExclusive, nil, product, hostFS),
 	}
 	if !opts.NoShared {
 		servers = append(servers,
-			newServer(logger, workercore.DeviceAllocationModeShared, share, product),
+			newServer(logger, workercore.DeviceAllocationModeShared, share, product, hostFS),
 		)
 	}
 	if !opts.NoSliced {
 		servers = append(servers,
-			newServer(logger, workercore.DeviceAllocationModeSliced, share, product),
+			newServer(logger, workercore.DeviceAllocationModeSliced, share, product, hostFS),
 		)
 	}
 	// The visibility server co-allocates a container to the same physical NPU(s) its owner
@@ -63,13 +89,14 @@ func New(opts device.AllocatorOptions) device.Allocator {
 	// wildcard — which is exactly what a device-cgroup grant needs (no vcann-rt
 	// logical-slicing artifacts).
 	servers = append(servers,
-		newServer(logger, workercore.DeviceAllocationModeVisibility, share, product),
+		newServer(logger, workercore.DeviceAllocationModeVisibility, share, product, hostFS),
 	)
 
 	return &aggregated{
 		logger:     logger,
 		servers:    servers,
 		kubeSocket: opts.KubeSocket,
+		hostFS:     hostFS,
 	}
 }
 
@@ -77,6 +104,7 @@ type aggregated struct {
 	logger     klog.Logger
 	servers    []deviceplugin.Server
 	kubeSocket string
+	hostFS     *hostfs.ReadOnlyHostFS
 	// lifecycle owns the context the tasks below run under, so that stopping this allocator ends
 	// every one of them and not only the ones watching a server.
 	lifecycle gox.Lifecycle
@@ -107,6 +135,9 @@ func (in *aggregated) Stop() {
 	in.logger.Info("stopping")
 
 	in.lifecycle.Stop()
+	if in.hostFS != nil {
+		_ = in.hostFS.Close()
+	}
 }
 
 type server struct {
@@ -119,6 +150,10 @@ type server struct {
 	// product is the A5 shape this node is, which names the fabric topology file its accelerators
 	// describe themselves with. Every mode carries it, so unlike share it is never nil.
 	product *productascend.Resolver
+
+	// hostFS provides read-only inspection of host files for conditional A5 mounts. Nil when the
+	// host root is disabled or unavailable.
+	hostFS *hostfs.ReadOnlyHostFS
 }
 
 func newServer(
@@ -126,6 +161,7 @@ func newServer(
 	mode workercore.DeviceAllocationMode,
 	share shareDriver,
 	product *productascend.Resolver,
+	hostFS *hostfs.ReadOnlyHostFS,
 ) deviceplugin.Server {
 	logger = logger.WithName(strings.ToLower(mode.String()))
 
@@ -138,6 +174,7 @@ func newServer(
 		},
 		share:   share,
 		product: product,
+		hostFS:  hostFS,
 	}
 	s.Responder = s
 
@@ -162,6 +199,7 @@ func (s *server) GetContainerAllocateResponse(
 	// the node rather than of the injection: a sliced container on an A5 reads the same fabric a
 	// whole-accelerator one does.
 	s.setHcclTopoFilePath(resp, accelerators)
+	s.appendAscend950HostMounts(resp, ctr, accelerators)
 	// The driver tree rides along on the same terms: it is a node fact every mode reads, not a
 	// property of any one injection. A host without the directory gets no mount, which is the
 	// tolerated absence this responder already extends to the connection manager and the
@@ -171,6 +209,86 @@ func (s *server) GetContainerAllocateResponse(
 	}
 
 	return resp, nil
+}
+
+// appendAscend950HostMounts conditionally mounts /etc/hccl_rootinfo.json (when it is a valid
+// version 2.0 regular file) and /lib/route.conf (when it is a regular file) read-only for A5
+// allocations. Any absence, collision, or validation error is logged and skipped without failing
+// container allocation.
+func (s *server) appendAscend950HostMounts(
+	resp *deviceplugin.ContainerAllocateResponse,
+	ctr *core.Container,
+	accels []deviceplugin.AllocatedAccelerator,
+) {
+	if s.hostFS == nil {
+		return
+	}
+	if !slices.ContainsFunc(accels, func(a deviceplugin.AllocatedAccelerator) bool {
+		return a.Group.Family == family950
+	}) {
+		return
+	}
+
+	if !hasMountPath(ctr, resp, hcclRootInfoPath) {
+		content, err := s.hostFS.ReadRegularFile(hcclRootInfoPath, maxRankTableBytes)
+		switch {
+		case errors.Is(err, fs.ErrNotExist):
+			s.Logger.V(4).Info("skipping ascend A5 host mount, file absent", "path", hcclRootInfoPath)
+		case err != nil:
+			s.Logger.V(2).Info("skipping ascend A5 host mount, file unreadable or not regular",
+				"path", hcclRootInfoPath, "error", err)
+		default:
+			if valErr := validateRankTableVersion950(content); valErr != nil {
+				s.Logger.V(2).Info("skipping ascend A5 host mount, invalid ranktable",
+					"path", hcclRootInfoPath, "error", valErr)
+			} else {
+				resp.Mounts = append(resp.Mounts, &deviceplugin.Mount{
+					HostPath:      hcclRootInfoPath,
+					ContainerPath: hcclRootInfoPath,
+					ReadOnly:      true,
+				})
+			}
+		}
+	}
+
+	if !hasMountPath(ctr, resp, routeConfPath) {
+		info, err := s.hostFS.Lstat(routeConfPath)
+		switch {
+		case errors.Is(err, fs.ErrNotExist):
+			s.Logger.V(4).Info("skipping ascend A5 host mount, file absent", "path", routeConfPath)
+		case err != nil:
+			s.Logger.V(2).Info("skipping ascend A5 host mount, file inspect failed",
+				"path", routeConfPath, "error", err)
+		case !info.Mode().IsRegular():
+			s.Logger.V(2).Info("skipping ascend A5 host mount, path is not a regular file",
+				"path", routeConfPath, "mode", info.Mode().Type().String())
+		default:
+			resp.Mounts = append(resp.Mounts, &deviceplugin.Mount{
+				HostPath:      routeConfPath,
+				ContainerPath: routeConfPath,
+				ReadOnly:      true,
+			})
+		}
+	}
+}
+
+func hasMountPath(ctr *core.Container, resp *deviceplugin.ContainerAllocateResponse, target string) bool {
+	cleanTarget := path.Clean(target)
+	if ctr != nil {
+		for i := range ctr.VolumeMounts {
+			if path.Clean(ctr.VolumeMounts[i].MountPath) == cleanTarget {
+				return true
+			}
+		}
+	}
+	if resp != nil {
+		for _, m := range resp.Mounts {
+			if m != nil && path.Clean(m.ContainerPath) == cleanTarget {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // setHcclTopoFilePath names the file HCCL reads this node's fabric topology from, on the one

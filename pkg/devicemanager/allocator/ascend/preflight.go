@@ -63,6 +63,7 @@ func NewPreflighter(opts device.PreflighterOptions) device.AcceleratorPreflighte
 		// written -- and /etc is not mounted anywhere, so reading this one unjoined would read the
 		// container's /etc, find nothing, and report the healthy answer on every node.
 		rootInfo: hostRankTablePath(opts.HostRoot),
+		hostRoot: opts.HostRoot,
 		dryRun:   opts.DryRun,
 	}
 }
@@ -100,6 +101,8 @@ type preflighter struct {
 	// rootInfo is the host ranktable the vendor runtime mounts into every container. A field for the
 	// same reason installInfo is, and read on the same nodes: A5 and no other.
 	rootInfo string
+	// hostRoot is the mounted host root path opened lazily when PreflightResponder builds a server.
+	hostRoot string
 	dryRun   bool
 }
 
@@ -155,12 +158,20 @@ func (p *preflighter) PreflightAccelerator(groups device.DevicesGroupList) devic
 func (p *preflighter) PreflightResponder(
 	mode workercore.DeviceAllocationMode,
 ) (deviceplugin.ContainerAllocateResponder, func(), error) {
-	_, restore, err := deviceplugin.NewPreflightRedirect()
+	_, restoreRedirect, err := deviceplugin.NewPreflightRedirect()
 	if err != nil {
 		return nil, nil, err
 	}
 
-	srv := newServer(p.logger, mode, &recordingShareDriver{read: p.share}, p.product)
+	hostFS := openHostRoot(p.logger, p.hostRoot)
+	restore := func() {
+		if hostFS != nil {
+			_ = hostFS.Close()
+		}
+		restoreRedirect()
+	}
+
+	srv := newServer(p.logger, mode, &recordingShareDriver{read: p.share}, p.product, hostFS)
 
 	responder, ok := srv.(deviceplugin.ContainerAllocateResponder)
 	if !ok {

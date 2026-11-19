@@ -43,15 +43,43 @@ func ModelDeploymentDirectPairRequestsInterfaces(md *workercore.ModelDeployment)
 }
 
 // ModelDeploymentDirectInterfaceProtocol returns the protocol a managed direct-transfer or
-// multi-member Server collective leg actually renders. It covers NIXL remote weight delivery,
-// managed multi-Pod vLLM Server roles, and routed prefill/decode pairs on vLLM and SGLang when
-// every Prefill and Decode half requests interfaces on a non-Ascend pool.
+// multi-member Server collective leg actually renders. On non-Ascend pools it covers NIXL remote
+// weight delivery, managed multi-Pod vLLM Server roles, and routed prefill/decode pairs on vLLM
+// and SGLang when every Prefill and Decode half requests interfaces. On Ascend A5 (Family "950")
+// it returns "rdma" (never "efa") for managed vLLM Host RoCE workloads: routed prefill/decode
+// pairs with interfaces on both halves, multi-Pod or elasticEp Server roles, and non-Encode
+// KVCache-backed roles.
 func ModelDeploymentDirectInterfaceProtocol(
-	md *workercore.ModelDeployment, role *workercore.ModelDeploymentRole, manufacturer string,
+	md *workercore.ModelDeployment, role *workercore.ModelDeploymentRole, manufacturer, family string,
 	remoteDelivery, awsEFAEnabled bool,
 ) string {
-	if md == nil || role == nil || len(role.Command) > 0 ||
-		manufacturer == "" || manufacturer == nodefeature.ManufacturerAscend {
+	if md == nil || role == nil || len(role.Command) > 0 || manufacturer == "" {
+		return ""
+	}
+	if manufacturer == nodefeature.ManufacturerAscend {
+		if family != nodefeature.AcceleratorFamilyAscend950 ||
+			md.Spec.Engine.Name != workercore.ModelDeploymentEngineVLLM {
+			return ""
+		}
+		kind := ModelDeploymentEffectiveRoleKind(role)
+		if (kind == workercore.ModelDeploymentRoleKindPrefill ||
+			kind == workercore.ModelDeploymentRoleKindDecode) &&
+			ModelDeploymentDeclaresBothHalves(md) {
+			if modelDeploymentUsesKVTransfer(md, role) && ModelDeploymentDirectPairRequestsInterfaces(md) {
+				return "rdma"
+			}
+			return ""
+		}
+		if kind == workercore.ModelDeploymentRoleKindServer &&
+			(modelDeploymentRoleSize(role) > 1 || role.ElasticEP != nil) {
+			return "rdma"
+		}
+		if md.Spec.KVCache != nil &&
+			(kind == workercore.ModelDeploymentRoleKindServer ||
+				kind == workercore.ModelDeploymentRoleKindPrefill ||
+				kind == workercore.ModelDeploymentRoleKindDecode) {
+			return "rdma"
+		}
 		return ""
 	}
 	directProtocol := "rdma"
@@ -123,4 +151,19 @@ func ModelDeploymentInterfaceResource(
 		width = 2
 	}
 	return mooncake.FabricDeviceResource(fabric, width), nil
+}
+
+func modelDeploymentRoleRequestsInterfaces(role *workercore.ModelDeploymentRole) bool {
+	return role != nil && role.Resources != nil &&
+		role.Resources.Interface != nil && role.Resources.Interface.Sign() > 0
+}
+
+func modelDeploymentAscendHostRoCE(
+	engine, manufacturer, family, directProtocol string, role *workercore.ModelDeploymentRole,
+) bool {
+	return manufacturer == nodefeature.ManufacturerAscend &&
+		family == nodefeature.AcceleratorFamilyAscend950 &&
+		engine == workercore.ModelDeploymentEngineVLLM &&
+		directProtocol == "rdma" &&
+		modelDeploymentRoleRequestsInterfaces(role)
 }

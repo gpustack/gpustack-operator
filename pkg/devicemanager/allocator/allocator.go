@@ -14,6 +14,7 @@ var logger = klog.Background().WithName("allocator")
 
 type Allocator struct {
 	kubeSocket              string
+	hostRoot                string
 	noShared                bool
 	noSliced                bool
 	noPartitioned           bool
@@ -23,6 +24,7 @@ type Allocator struct {
 func New(c *Config) (*Allocator, error) {
 	return &Allocator{
 		kubeSocket:              c.KubeSocket,
+		hostRoot:                c.HostRoot,
 		noShared:                c.NoShared,
 		noSliced:                c.NoSliced,
 		noPartitioned:           c.NoPartitioned,
@@ -45,6 +47,7 @@ func (a *Allocator) Start(ctx context.Context) error {
 	createOpts := device.AllocatorOptions{
 		Logger:        logger.V(3),
 		KubeSocket:    a.kubeSocket,
+		HostRoot:      a.hostRoot,
 		NoShared:      a.noShared,
 		NoSliced:      a.noSliced,
 		NoPartitioned: a.noPartitioned,
