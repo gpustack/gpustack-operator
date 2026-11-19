@@ -1,7 +1,6 @@
 # Spec: Ascend A5 Conditional Communication Resource Configuration and Read-Only Host Root Utility
 
-Status: Building
-Blocked on: implementation and verification of T1–T6 on this branch before opening a pull request
+Status: Shipped
 Type: Feature
 
 - **Related Specs**: [2026-11-10-model-deployment-kvtransfer-nixl-hixl.md](2026-11-10-model-deployment-kvtransfer-nixl-hixl.md) · [2026-11-11-model-deployment-kvtransfer-peer-backends.md](2026-11-11-model-deployment-kvtransfer-peer-backends.md)
@@ -284,14 +283,14 @@ Parallel entry frontier: `T1`, `T2`, and `T4` own disjoint paths and run concurr
       Acceptance: `ModelDeploymentDirectInterfaceProtocol` takes `family string` and allows `"rdma"` (never `"efa"`) on Ascend A5 `vLLM` (`Family == "950"`, `len(role.Command) == 0`) for routed P/D pairs with both halves requesting interfaces (bypassing `HIXL` early return), managed multi-Pod/`elasticEp` `Server`, and non-P/D non-`Encode` `KVCache` roles — while rejecting asymmetric P/D (even with `KVCache`), `RoleEncode`, `SGLang`, and `Family != "950"`; `modelDeploymentRoleNeedsInterfaceRejudge` probes both `(ManufacturerNVIDIA, "")` and `(ManufacturerAscend, "950")` so `ValidateUpdate` rejudges dropped sibling interfaces or router removal under `HIXL`; `validateModelDeploymentInterfaceRequests` requires converged `Family == "950"` for A5 Host RoCE; `renderModelDeploymentPodTemplate` yields `gpustack-ascend-hixlep` if a user `additionalVolume` overlaps `/etc/hixlep` (via `path.Clean`) while preserving `ascend_local_comm_res_path`; `modelDeploymentConnectorBinding` fingerprints A5-effective connector state (`omitempty`) without adding raw `Family` to `modelDeploymentAcceleratorTypeHashInput` (unit test proves identical `pod-spec-hash` for live NVIDIA/A2/A3 with non-empty `Family`); `ASCEND_LOCAL_COMM_RES` is registered in `modelDeploymentDefaultedEnvNames` and `modelDeploymentScalerCapacityNeutralEnvNames`, and `family` is threaded into `modelDeploymentScalerOperatorEnvGateWithManufacturer` and `TestModelDeploymentOwnedAndDefaultedCannotDisagree`; 4 new A5 golden YAML scenarios pass (`len == 37`: A5 UB `vLLM` P/D, A5 Host RoCE `vLLM` P/D + `MultiConnector`, A5 Host RoCE `vLLM` single-Pod `Server` + `KVCache`, A5 `SGLang` P/D `device_urma`) with zero diff on all 33 existing golden scenarios, all 7 legacy fixtures, and `modelDeploymentRenderVersion = 5`.
       Verify: `CGO_ENABLED=1 go test -race ./pkg/worker/controllers/worker/... ./pkg/worker/webhooks/worker/... -run 'TestModelDeploymentGoldenYAML|TestModelDeploymentLegacyRender|TestSynthesizeModelDeploymentConnector|TestModelDeploymentConnector|TestRenderModelDeployment|TestModelDeploymentDirectInterfaceProtocol|TestModelDeploymentOwnedAndDefaultedCannotDisagree|TestModelDeploymentWebhook|TestValidateModelDeployment|TestModelDeploymentScaler' && make lint`
 
-- [ ] **T6 · Document Ascend A5 interconnect topologies, parameter injection, and read-only `/host` mounts**
+- [x] **T6 · Document Ascend A5 interconnect topologies, parameter injection, and read-only `/host` mounts**
       Blocked by: T2, T3, T5
       Owns: `docs/modules/model-deployment/parameterize.md`, `docs/modules/model-deployment/prefill-decode.md`, `docs/modules/model-deployment/configuration.md`, `docs/getting-started/vendor-prerequisites.md`, `docs/README.md`
       Acceptance: Documents all 6 Ascend A5 scenarios (UB `ub_ctp`, UBG `ub_rtp:device`, UBoE `uboe:device`, Host RoCE `roce:host` via `resources.interface > 0`, Aggregated `Server`, and constrained static-UB `command` take-over + administrator `instance-host-path-volume-allowed`); clarifies UB/URMA (`fabric.kind=ub`, `interface: 0`) vs Linux Host RDMA (`device.gpustack.ai/rdma*`, `interface > 0`); updates `parameterize.md` for `ASCEND_LOCAL_COMM_RES`, outer `ascend_local_comm_res_path`, `/etc/hixlep` user-mount yielding, and SGLang `device_urma`; documents `deviceManager.hostRootMount.enabled` (default `true`, layered read-only boundary, policy/runtime disable path) and A5 conditional `/etc/hccl_rootinfo.json` + `/lib/route.conf` behavior across MindCluster `26.0.x` and `26.2+`; `make lint docs` exits 0.
       Verify: `make lint docs`
 
 ### Test Plan
-[ ] I/we understand the owners of the involved components may require updates to existing tests to make this
+[x] I/we understand the owners of the involved components may require updates to existing tests to make this
 code solid enough prior to committing the changes necessary to implement this enhancement.
 
 #### Prerequisite testing updates
