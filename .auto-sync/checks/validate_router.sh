@@ -499,6 +499,7 @@ done
 
 if [[ "${PROMOTED_FILES_CHANGED}" == "true" && "${AUTOSYNC_FAST_SELFTEST:-false}" != "true" ]]; then
   (
+    set -e
     cd "${AUTOSYNC_CANDIDATE_ROOT}"
     go test ./pkg/worker/settings/...
     if [[ -d "${AUTOSYNC_CANDIDATE_ROOT}/pkg/worker/controllers/worker" ]]; then

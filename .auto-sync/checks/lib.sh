@@ -98,25 +98,47 @@ autosync::bootstrap_env() {
     export GOPROXY="${GOPROXY:-off}"
     export GOTOOLCHAIN="${GOTOOLCHAIN:-local}"
 
-    if [[ -n "${stage_dir}" && -d "${stage_dir}/uv-cache" && -n "$(ls -A "${stage_dir}/uv-cache" 2>/dev/null)" ]]; then
+    if [[ -n "${stage_dir}" && -d "${stage_dir}/uv-cache" && -n "$(ls -A "${stage_dir}/uv-cache/" 2>/dev/null)" ]]; then
       if [[ -z "${UV_CACHE_DIR:-}" ]]; then
         if [[ -w "${stage_dir}/uv-cache" ]]; then
           export UV_CACHE_DIR="${stage_dir}/uv-cache"
         else
-          local ro_uvcache="${TMPDIR:-/tmp}/autosync-uv-cache"
-          mkdir -p "${ro_uvcache}" 2>/dev/null || true
-          cp -RLp "${stage_dir}/uv-cache/." "${ro_uvcache}/" 2>/dev/null || true
-          chmod -R u+w "${ro_uvcache}" 2>/dev/null || true
-          export UV_CACHE_DIR="${ro_uvcache}"
+          local ro_uvcache
+          ro_uvcache="$(mktemp -d "${TMPDIR:-/tmp}/autosync-uv-cache-XXXXXX")"
+          if ! cp -RLp "${stage_dir}/uv-cache/." "${ro_uvcache}/" 2>/dev/null || \
+             [[ -z "$(ls -A "${ro_uvcache}/" 2>/dev/null)" ]]; then
+            printf 'WARN: autosync: failed to copy read-only uv-cache from %s\n' "${stage_dir}/uv-cache" >&2
+          else
+            chmod -R u+w "${ro_uvcache}" 2>/dev/null || true
+            export UV_CACHE_DIR="${ro_uvcache}"
+          fi
         fi
       fi
       export UV_OFFLINE="${UV_OFFLINE:-1}"
-    fi
-    if [[ -n "${stage_dir}" && -d "${stage_dir}/uv-python" && -n "$(ls -A "${stage_dir}/uv-python" 2>/dev/null)" ]]; then
-      if [[ -z "${UV_PYTHON_INSTALL_DIR:-}" ]]; then
-        export UV_PYTHON_INSTALL_DIR="${stage_dir}/uv-python"
+      if [[ -z "${UV_PROJECT_ENVIRONMENT:-}" ]]; then
+        export UV_PROJECT_ENVIRONMENT="${TMPDIR:-/tmp}/autosync-uv-venv-$$"
+        export AUTOSYNC_EPHEMERAL_UV_ENV="${UV_PROJECT_ENVIRONMENT}"
       fi
-      export UV_PYTHON_PREFERENCE="${UV_PYTHON_PREFERENCE:-only-managed}"
+    fi
+    if [[ -n "${stage_dir}" && -d "${stage_dir}/uv-python" ]] && compgen -G "${stage_dir}/uv-python/cpython-*" >/dev/null; then
+      if [[ -z "${UV_PYTHON_INSTALL_DIR:-}" ]]; then
+        if [[ -w "${stage_dir}/uv-python" ]]; then
+          export UV_PYTHON_INSTALL_DIR="${stage_dir}/uv-python"
+        else
+          local ro_uvpy
+          ro_uvpy="$(mktemp -d "${TMPDIR:-/tmp}/autosync-uv-python-XXXXXX")"
+          if ! cp -RPp "${stage_dir}/uv-python/." "${ro_uvpy}/" 2>/dev/null || \
+             ! compgen -G "${ro_uvpy}/cpython-*" >/dev/null; then
+            printf 'WARN: autosync: failed to copy read-only uv-python from %s\n' "${stage_dir}/uv-python" >&2
+          else
+            chmod -R u+w "${ro_uvpy}" 2>/dev/null || true
+            export UV_PYTHON_INSTALL_DIR="${ro_uvpy}"
+          fi
+        fi
+      fi
+      if [[ "${UV_OFFLINE:-}" == "1" ]]; then
+        export UV_PYTHON_PREFERENCE="${UV_PYTHON_PREFERENCE:-only-managed}"
+      fi
     fi
 
     # Materialize pre-warmed .sbin entries as regular files (not a directory symlink)
@@ -263,6 +285,59 @@ autosync::cleanup_ephemeral_git() {
   if [[ -d "${dir}/.sbin" && -f "${dir}/.sbin/.autosync-materialized" ]]; then
     rm -rf "${dir}/.sbin"
   fi
+  if [[ -n "${AUTOSYNC_EPHEMERAL_UV_ENV:-}" && -d "${AUTOSYNC_EPHEMERAL_UV_ENV}" ]]; then
+    rm -rf "${AUTOSYNC_EPHEMERAL_UV_ENV}" 2>/dev/null || true
+  fi
+}
+
+# autosync::copy_tree_without_git <src_dir> <dst_dir> [extra_excluded_top...]
+# Copies <src_dir> into <dst_dir> excluding top-level .git (and any extra top-level names),
+# using APFS clonefile (cp -Rc) or Linux reflink (cp -R --reflink=auto) when supported.
+autosync::copy_tree_without_git() {
+  local src_dir="${1:?src_dir required}"
+  local dst_dir="${2:?dst_dir required}"
+  shift 2
+  mkdir -p "${dst_dir}"
+
+  local cp_mode="tar"
+  local probe_root="${dst_dir}/.autosync-cp-probe-$$"
+  if mkdir -p "${probe_root}/s" 2>/dev/null && : > "${probe_root}/s/f" 2>/dev/null; then
+    if cp -Rc "${probe_root}/s" "${probe_root}/d" 2>/dev/null; then
+      cp_mode="apfs"
+    elif cp -R --reflink=auto "${probe_root}/s" "${probe_root}/d" 2>/dev/null; then
+      cp_mode="reflink"
+    fi
+  fi
+  rm -rf "${probe_root}" 2>/dev/null || true
+
+  if [[ "${cp_mode}" == "apfs" || "${cp_mode}" == "reflink" ]]; then
+    local entry base skip ex
+    while IFS= read -r -d '' entry; do
+      base="$(basename "${entry}")"
+      [[ "${base}" == "." || "${base}" == ".." || "${base}" == ".git" ]] && continue
+      skip=false
+      for ex in "$@"; do
+        if [[ "${base}" == "${ex}" ]]; then
+          skip=true
+          break
+        fi
+      done
+      [[ "${skip}" == "true" ]] && continue
+      if [[ "${cp_mode}" == "apfs" ]]; then
+        cp -Rc "${entry}" "${dst_dir}/${base}"
+      else
+        cp -R --reflink=auto "${entry}" "${dst_dir}/${base}"
+      fi
+    done < <(find "${src_dir}" -mindepth 1 -maxdepth 1 -print0)
+    return 0
+  fi
+
+  local tar_excludes=(--exclude='.git')
+  local ex_item
+  for ex_item in "$@"; do
+    tar_excludes+=(--exclude="${ex_item}")
+  done
+  tar "${tar_excludes[@]}" -cf - -C "${src_dir}" . | tar -xf - -C "${dst_dir}"
 }
 
 # autosync::run_in_module_path_copy <target_dir> <cmd> [args...]
@@ -298,8 +373,7 @@ autosync::run_in_module_path_copy() {
   local rc=0
   (
     trap 'rm -rf "${mod_base:-}"' EXIT
-    mkdir -p "${mod_copy}"
-    tar --exclude='.git' -cf - -C "${phys_target}" . | tar -xf - -C "${mod_copy}"
+    autosync::copy_tree_without_git "${phys_target}" "${mod_copy}"
     local cmd_rc=0
     (
       cd "${mod_copy}"

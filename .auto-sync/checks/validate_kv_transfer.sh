@@ -666,6 +666,7 @@ for rel in \
   "docs/reference/settings.md" \
   "deploy/gpustack-operator/chart/values.yaml" \
   "deploy/gpustack-operator/chart/values.schema.json" \
+  "deploy/gpustack-operator/chart/README.md.gotmpl" \
   "deploy/gpustack-operator/chart/README.md"; do
   if [[ -f "${BASELINE_DIR}/${rel}" && -f "${AUTOSYNC_CANDIDATE_ROOT}/${rel}" ]]; then
     if ! cmp -s "${BASELINE_DIR}/${rel}" "${AUTOSYNC_CANDIDATE_ROOT}/${rel}"; then
@@ -680,6 +681,7 @@ if [[ "${PROMOTED_FILES_CHANGED}" == "true" && "${AUTOSYNC_FAST_SELFTEST:-false}
   make -C "${AUTOSYNC_CANDIDATE_ROOT}" lint chart
   make -C "${AUTOSYNC_CANDIDATE_ROOT}" lint docs
   (
+    set -e
     cd "${AUTOSYNC_CANDIDATE_ROOT}"
     go test ./pkg/worker/settings/...
     if [[ -d "${AUTOSYNC_CANDIDATE_ROOT}/pkg/worker/controllers/worker" ]]; then

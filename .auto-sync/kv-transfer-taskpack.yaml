@@ -17,6 +17,7 @@ spec:
       - docs/reference/settings.md
       - deploy/gpustack-operator/chart/values.yaml
       - deploy/gpustack-operator/chart/values.schema.json
+      - deploy/gpustack-operator/chart/README.md.gotmpl
       - deploy/gpustack-operator/chart/README.md
       - .auto-sync/proposals/kv-transfer.json
     protected:

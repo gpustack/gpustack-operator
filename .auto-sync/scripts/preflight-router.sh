@@ -22,11 +22,7 @@ autosync::preflight::snapshot_baselines "${STAGE_DIR}" \
   "pkg/worker/settings/value.go" \
   "docs/reference/settings.md"
 
-if [[ -n "${AUTOSYNC_ROUTER_FIXTURE_DIR:-}" && "${AUTOSYNC_WARM_TOOLS:-false}" != "true" ]]; then
-  autosync::preflight::warm_caches "${STAGE_DIR}" --sbin --go
-else
-  autosync::preflight::warm_caches "${STAGE_DIR}" --sbin --go --tools shellcheck,hugo
-fi
+autosync::preflight::warm_caches "${STAGE_DIR}" --sbin
 
 PROBE_LIST_FILE="$(mktemp "${TMPDIR:-/tmp}/autosync-router-probes.XXXXXXXX")"
 DISCOVERY_JSON="${STAGE_DIR}/router-discovery.json"
@@ -130,23 +126,25 @@ def ensure_tag_fetched(dst: str, repo_url: str, tag: str, filter_blobless: bool 
 
 
 def sync_full_history_repo(repo_url: str, dst: str, pinned_tag: str, target_tag: str) -> None:
+    is_local_repo = os.path.isdir(repo_url) or repo_url.startswith("file://")
+    filter_args = [] if is_local_repo else ["--filter=blob:none"]
     if os.path.isdir(os.path.join(dst, ".git")):
         subprocess.run(["git", "-C", dst, "remote", "set-url", "origin", repo_url], check=True)
         subprocess.run(
-            ["git", "-C", dst, "-c", "protocol.file.allow=always", "fetch", "--tags", "--force", "--prune", "origin"],
+            ["git", "-C", dst, "-c", "protocol.file.allow=always", "fetch", *filter_args, "--tags", "--force", "--prune", "origin"],
             check=True,
         )
     else:
         if os.path.exists(dst):
             shutil.rmtree(dst)
         subprocess.run(
-            ["git", "-c", "protocol.file.allow=always", "clone", "--no-single-branch", repo_url, dst],
+            ["git", "-c", "protocol.file.allow=always", "clone", *filter_args, "--no-single-branch", repo_url, dst],
             check=True,
         )
-    ensure_tag_fetched(dst, repo_url, target_tag)
+    ensure_tag_fetched(dst, repo_url, target_tag, filter_blobless=not is_local_repo)
     if pinned_tag and pinned_tag != target_tag:
         try:
-            ensure_tag_fetched(dst, repo_url, pinned_tag)
+            ensure_tag_fetched(dst, repo_url, pinned_tag, filter_blobless=not is_local_repo)
         except subprocess.CalledProcessError:
             pass
     subprocess.run(["git", "-C", dst, "checkout", "-f", "-q", f"refs/tags/{target_tag}"], check=True)
@@ -643,6 +641,17 @@ with open(rep_path, "w", encoding="utf-8") as f:
 PY
 
 autosync::preflight::apply_force_to_upstream_records "${UPSTREAM_RECORDS_JSON}"
+
+if autosync::preflight::has_available_upstreams "${UPSTREAM_RECORDS_JSON}" || \
+   [[ "${COMMENT_COMMAND:-}" == "revise" || \
+      "${COMMENT_COMMAND:-}" == "retry" || \
+      "${AUTOSYNC_WARM_TOOLS:-false}" == "true" ]]; then
+  if [[ -n "${AUTOSYNC_ROUTER_FIXTURE_DIR:-}" && "${AUTOSYNC_WARM_TOOLS:-false}" != "true" ]]; then
+    autosync::preflight::warm_caches "${STAGE_DIR}" --sbin --go
+  else
+    autosync::preflight::warm_caches "${STAGE_DIR}" --sbin --go --tools shellcheck,hugo
+  fi
+fi
 
 SOURCE_REVISION="${BASE_SHA}"
 if [[ "${AUTOSYNC_SKIP_SOURCE_REVISION:-false}" != "true" ]] && \
@@ -1217,41 +1226,49 @@ import sys
 p = sys.argv[1]
 with open(p, "r", encoding="utf-8") as f:
     txt = f.read()
-txt_empty = re.sub(
+txt_empty, n = re.subn(
     r'(pinned\s*:=\s*map\[string\]string\{).*?(\n\t\})',
     r'\1\2',
     txt,
     count=1,
     flags=re.DOTALL,
 )
+if n != 1:
+    raise SystemExit("FAIL: could not empty pinned digest map for rebase")
 with open(p, "w", encoding="utf-8") as f:
     f.write(txt_empty)
 PY
       PIN_OUT_FILE="${PIN_WORK}/pin.out"
+      pin_rc=0
       (
         cd "${PIN_WORK}"
         go test ./pkg/worker/controllers/worker \
           -run '^TestRenderModelDeploymentRouterObjects_SerializedOutputIsPinnedToThePreSplitRender$' \
-          > "${PIN_OUT_FILE}" 2>&1 || true
-      )
-      python3 - "${STAGED_TREE}/pkg/worker/controllers/worker/model_deployment_router_test.go" "${PIN_OUT_FILE}" <<'PY'
+          > "${PIN_OUT_FILE}" 2>&1
+      ) || pin_rc=$?
+      python3 - "${STAGED_TREE}/pkg/worker/controllers/worker/model_deployment_router_test.go" "${PIN_OUT_FILE}" "${pin_rc}" <<'PY'
 import re
 import sys
 
-test_p, out_p = sys.argv[1:3]
+test_p, out_p, rc_s = sys.argv[1:4]
 with open(out_p, "r", encoding="utf-8", errors="replace") as f:
     out_txt = f.read()
 found = {}
 for m in re.finditer(r'no pinned digest for "([^"]+)"; the digest this build produces is ([0-9a-f]{64}) -- pin it in the table', out_txt):
     found[m.group(1)] = m.group(2)
-if found:
-    with open(test_p, "r", encoding="utf-8") as f:
-        txt = f.read()
-    for case_name, digest in found.items():
-        pat = re.compile(rf'("{re.escape(case_name)}"\s*:\s*")[0-9a-f]{{64}}(")')
-        txt = pat.sub(rf'\g<1>{digest}\g<2>', txt, count=1)
-    with open(test_p, "w", encoding="utf-8") as f:
-        f.write(txt)
+if not found:
+    print(f"FAIL: router pin rebase produced no digests (go test exit {rc_s}); output:", file=sys.stderr)
+    print(out_txt[:2000], file=sys.stderr)
+    raise SystemExit(1)
+with open(test_p, "r", encoding="utf-8") as f:
+    txt = f.read()
+for case_name, digest in found.items():
+    pat = re.compile(rf'("{re.escape(case_name)}"\s*:\s*")[0-9a-f]{{64}}(")')
+    txt, n = pat.subn(rf'\g<1>{digest}\g<2>', txt, count=1)
+    if n != 1:
+        raise SystemExit(f"FAIL: could not update pinned digest for {case_name!r} in {test_p}")
+with open(test_p, "w", encoding="utf-8") as f:
+    f.write(txt)
 PY
       rm -rf "${PIN_WORK}" 2>/dev/null || true
     fi

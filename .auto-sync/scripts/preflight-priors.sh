@@ -32,11 +32,7 @@ base_sha="$(git -C "${repo_root}" rev-parse HEAD)"
 autosync::preflight::snapshot_baselines "${stage_dir}" \
   "pkg/worker/scaling/priors/priors.yaml" \
   "pkg/worker/scaling/priors/records.md"
-if [[ -n "${AUTOSYNC_PRIORS_FIXTURE_DIR:-}" && "${AUTOSYNC_WARM_TOOLS:-false}" != "true" ]]; then
-  autosync::preflight::warm_caches "${stage_dir}" --sbin --go
-else
-  autosync::preflight::warm_caches "${stage_dir}" --sbin --go --tools hugo
-fi
+autosync::preflight::warm_caches "${stage_dir}" --sbin
 
 snapshots_dir="${stage_dir}/snapshots"
 rm -rf "${snapshots_dir}"
@@ -343,6 +339,17 @@ with open(out_path, "w", encoding="utf-8") as f:
 PY
 
 snapshots_changed="$(python3 -c 'import json,sys; print("true" if json.load(open(sys.argv[1]))["snapshots_changed"] else "false")' "${analysis_json}")"
+if [[ "${snapshots_changed}" == "true" || \
+      "${AUTOSYNC_FORCE:-false}" == "true" || \
+      "${COMMENT_COMMAND:-}" == "revise" || \
+      "${COMMENT_COMMAND:-}" == "retry" || \
+      "${AUTOSYNC_WARM_TOOLS:-false}" == "true" ]]; then
+  if [[ -n "${AUTOSYNC_PRIORS_FIXTURE_DIR:-}" && "${AUTOSYNC_WARM_TOOLS:-false}" != "true" ]]; then
+    autosync::preflight::warm_caches "${stage_dir}" --sbin --go
+  else
+    autosync::preflight::warm_caches "${stage_dir}" --sbin --go --tools hugo
+  fi
+fi
 source_revision="${base_sha}"
 merge_attempted=false
 catalog_changed=false

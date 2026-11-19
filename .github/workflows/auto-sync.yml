@@ -324,6 +324,22 @@ jobs:
         if: matrix.domain == 'slicing' || matrix.domain == 'kv-transfer' || matrix.domain == 'router'
         uses: docker/setup-buildx-action@v3
 
+      - name: Cache preflight tools
+        if: matrix.domain != 'slicing'
+        uses: actions/cache@v4
+        with:
+          path: /tmp/gpustack-autosync-stage/.sbin
+          key: autosync-sbin-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('hack/lib/*.sh') }}
+
+      - name: Cache uv runtime
+        if: matrix.domain == 'k8s-deps'
+        uses: actions/cache@v4
+        with:
+          path: |
+            /tmp/gpustack-autosync-stage/uv-cache
+            /tmp/gpustack-autosync-stage/uv-python
+          key: autosync-uv-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('model-transfer/python/uv.lock', 'model-transfer/python/.python-version') }}
+
       - name: Run preflight
         id: preflight
         env:
@@ -425,8 +441,12 @@ jobs:
             sudo apt-get -o Acquire::Retries=5 -o Acquire::http::Timeout=15 install -y --no-install-recommends bubblewrap
           fi
           bwrap --version
-          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 || true
-          bwrap --unshare-all --ro-bind / / "$(command -v true)"
+          if ! bwrap --unshare-all --ro-bind / / "$(command -v true)" >/dev/null 2>&1; then
+            if ! sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0; then
+              echo "WARN: failed to disable kernel.apparmor_restrict_unprivileged_userns" >&2
+            fi
+            bwrap --unshare-all --ro-bind / / "$(command -v true)"
+          fi
 
       - name: Run Loopwright
         uses: gpustack/loopwright@main
@@ -434,6 +454,7 @@ jobs:
           LOOPWRIGHT_PROVIDER_TOKEN: ${{ secrets.CI_GPUSTACK_LOOPWRIGHT_LLM_AUTH_TOKEN || secrets.CI_GPUSTACK_CODEREVIEW_LLM_AUTH_TOKEN }}
           AUTOSYNC_STAGE_DIR: /tmp/gpustack-autosync-stage/${{ matrix.domain }}
           GITHUB_SHA: ${{ steps.preflight.outputs.effective_base_sha }}
+          INPUT_FORCE: ${{ (inputs.force == true || inputs.force == 'true') && 'true' || 'false' }}
         with:
           taskpack-path: .auto-sync/${{ matrix.domain }}-taskpack.yaml
           upstream-records: ${{ steps.preflight.outputs.upstream_records }}
@@ -445,5 +466,4 @@ jobs:
           github-app-id: ${{ secrets.CI_GPUSTACK_LOOPWRIGHT_APP_ID || vars.CI_GPUSTACK_LOOPWRIGHT_APP_ID || secrets.LOOPWRIGHT_APP_ID }}
           github-app-private-key: ${{ secrets.CI_GPUSTACK_LOOPWRIGHT_APP_PRIVATE_KEY || secrets.LOOPWRIGHT_APP_PRIVATE_KEY }}
           dry-run: ${{ (inputs.dry-run == true || inputs.dry-run == 'true') && 'true' || 'false' }}
-          force: ${{ (inputs.force == true || inputs.force == 'true') && 'true' || 'false' }}
           output: json,github-step-summary

@@ -22,11 +22,7 @@ autosync::preflight::snapshot_baselines "${STAGE_DIR}" \
   "pack/model-transfer/patches/hixl/001_channel_generation.patch" \
   "pack/mirrored-modelexpress-server/Dockerfile"
 
-if [[ -n "${AUTOSYNC_KV_FIXTURE_DIR:-}" && "${AUTOSYNC_WARM_TOOLS:-false}" != "true" ]]; then
-  autosync::preflight::warm_caches "${STAGE_DIR}" --sbin --go
-else
-  autosync::preflight::warm_caches "${STAGE_DIR}" --sbin --go --tools shellcheck,helm,helm-docs,helm-schema,hugo
-fi
+autosync::preflight::warm_caches "${STAGE_DIR}" --sbin
 
 # Extract current repository pins and stage upstream data in Python.
 PROBE_LIST_FILE="$(mktemp "${TMPDIR:-/tmp}/autosync-kv-probes.XXXXXXXX")"
@@ -1140,6 +1136,17 @@ PY
 
 autosync::preflight::apply_force_to_upstream_records "${UPSTREAM_RECORDS_JSON}"
 
+if autosync::preflight::has_available_upstreams "${UPSTREAM_RECORDS_JSON}" || \
+   [[ "${COMMENT_COMMAND:-}" == "revise" || \
+      "${COMMENT_COMMAND:-}" == "retry" || \
+      "${AUTOSYNC_WARM_TOOLS:-false}" == "true" ]]; then
+  if [[ -n "${AUTOSYNC_KV_FIXTURE_DIR:-}" && "${AUTOSYNC_WARM_TOOLS:-false}" != "true" ]]; then
+    autosync::preflight::warm_caches "${STAGE_DIR}" --sbin --go
+  else
+    autosync::preflight::warm_caches "${STAGE_DIR}" --sbin --go --tools shellcheck,helm,helm-docs,helm-schema,hugo
+  fi
+fi
+
 SOURCE_REVISION="${BASE_SHA}"
 if [[ "${AUTOSYNC_SKIP_SOURCE_REVISION:-false}" != "true" ]] && \
    autosync::preflight::has_available_upstreams "${UPSTREAM_RECORDS_JSON}"; then
@@ -1218,6 +1225,7 @@ PY
       "${STAGED_TREE}/pkg/worker/settings/value.go" \
       "${STAGED_TREE}/docs/reference/settings.md" \
       "${STAGED_TREE}/deploy/gpustack-operator/chart/values.yaml" \
+      "${STAGED_TREE}/deploy/gpustack-operator/chart/README.md.gotmpl" \
       "${STAGED_TREE}/pkg/worker/settings/value_test.go" \
       "${STAGED_TREE}/pkg/worker/controllers/worker/model_deployment_transfer_test.go" <<'PY'
 import json
@@ -1225,7 +1233,7 @@ import os
 import re
 import sys
 
-rep_p, vg_p, sm_p, vy_p, vt_p, tt_p = sys.argv[1:7]
+rep_p, vg_p, sm_p, vy_p, rgt_p, vt_p, tt_p = sys.argv[1:8]
 with open(rep_p, "r", encoding="utf-8") as f:
     rep = json.load(f)
 
@@ -1257,38 +1265,24 @@ def update_settings_md(text: str, key: str, new_img: str) -> str:
 
 
 def replace_exact_image_literal(path: str, old_img: str, new_img: str) -> None:
-    if not os.path.isfile(path) or not old_img or not new_img or old_img == new_img:
+    if not os.path.isfile(path) or not new_img or old_img == new_img:
         return
+    if not old_img:
+        raise SystemExit(f"FAIL: missing default image while promoting {new_img!r} in {path}")
     with open(path, "r", encoding="utf-8") as f:
         txt = f.read()
-    if f'"{old_img}"' in txt:
-        txt = txt.replace(f'"{old_img}"', f'"{new_img}"')
-        with open(path, "w", encoding="utf-8") as f:
-            f.write(txt)
+    token = f'"{old_img}"'
+    if token not in txt:
+        raise SystemExit(f"FAIL: could not find {token} in {path} for Stage B target {new_img!r}")
+    txt = txt.replace(token, f'"{new_img}"')
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(txt)
 
 
-with open(vg_p, "r", encoding="utf-8") as f:
-    vg_txt = f.read()
-with open(sm_p, "r", encoding="utf-8") as f:
-    sm_txt = f.read()
-
-if sb.get("mooncake"):
-    vg_txt = update_value_go(vg_txt, "KVCacheBackendImage", targets["mooncake_image"])
-    sm_txt = update_settings_md(sm_txt, "kv-cache-backend-image", targets["mooncake_image"])
-if sb.get("modelexpress"):
-    vg_txt = update_value_go(vg_txt, "ModelDeploymentModelExpressServerImage", targets["modelexpress_image"])
-    sm_txt = update_settings_md(sm_txt, "model-deployment-modelexpress-server-image", targets["modelexpress_image"])
-    replace_exact_image_literal(vt_p, defaults.get("modelexpress_image", ""), targets["modelexpress_image"])
-    replace_exact_image_literal(tt_p, defaults.get("modelexpress_image", ""), targets["modelexpress_image"])
-
-with open(vg_p, "w", encoding="utf-8") as f:
-    f.write(vg_txt)
-with open(sm_p, "w", encoding="utf-8") as f:
-    f.write(sm_txt)
-
-if sb.get("model_transfer") and os.path.isfile(vy_p):
-    mt_targets = targets.get("model_transfer_images") or {}
-    with open(vy_p, "r", encoding="utf-8") as f:
+def update_mt_images_yaml_file(path: str, mt_targets: dict[str, str]) -> None:
+    if not os.path.isfile(path) or not mt_targets:
+        return
+    with open(path, "r", encoding="utf-8") as f:
         lines = f.readlines()
     in_mt = False
     in_images = False
@@ -1306,8 +1300,34 @@ if sb.get("model_transfer") and os.path.isfile(vy_p):
                 if m and m.group(2) in mt_targets and mt_targets[m.group(2)]:
                     raw = f"{m.group(1)}{mt_targets[m.group(2)]}{m.group(6)}\n"
         out_lines.append(raw)
-    with open(vy_p, "w", encoding="utf-8") as f:
+    with open(path, "w", encoding="utf-8") as f:
         f.writelines(out_lines)
+
+
+with open(vg_p, "r", encoding="utf-8") as f:
+    vg_txt = f.read()
+with open(sm_p, "r", encoding="utf-8") as f:
+    sm_txt = f.read()
+
+if sb.get("mooncake"):
+    vg_txt = update_value_go(vg_txt, "KVCacheBackendImage", targets["mooncake_image"])
+    sm_txt = update_settings_md(sm_txt, "kv-cache-backend-image", targets["mooncake_image"])
+if sb.get("modelexpress"):
+    old_mx = defaults.get("modelexpress_server_image") or defaults.get("modelexpress_image") or ""
+    vg_txt = update_value_go(vg_txt, "ModelDeploymentModelExpressServerImage", targets["modelexpress_image"])
+    sm_txt = update_settings_md(sm_txt, "model-deployment-modelexpress-server-image", targets["modelexpress_image"])
+    replace_exact_image_literal(vt_p, old_mx, targets["modelexpress_image"])
+    replace_exact_image_literal(tt_p, old_mx, targets["modelexpress_image"])
+
+with open(vg_p, "w", encoding="utf-8") as f:
+    f.write(vg_txt)
+with open(sm_p, "w", encoding="utf-8") as f:
+    f.write(sm_txt)
+
+if sb.get("model_transfer"):
+    mt_targets = targets.get("model_transfer_images") or {}
+    update_mt_images_yaml_file(vy_p, mt_targets)
+    update_mt_images_yaml_file(rgt_p, mt_targets)
 PY
 
     if [[ "${MT_STAGE_B}" == "true" && "${AUTOSYNC_SKIP_GENERATE_CHART:-false}" != "true" ]] && \
@@ -1335,6 +1355,9 @@ PY
       COMMIT_PATHS+=("deploy/gpustack-operator/chart/values.yaml")
       if [[ -f "${STAGED_TREE}/deploy/gpustack-operator/chart/values.schema.json" ]]; then
         COMMIT_PATHS+=("deploy/gpustack-operator/chart/values.schema.json")
+      fi
+      if [[ -f "${STAGED_TREE}/deploy/gpustack-operator/chart/README.md.gotmpl" ]]; then
+        COMMIT_PATHS+=("deploy/gpustack-operator/chart/README.md.gotmpl")
       fi
       if [[ -f "${STAGED_TREE}/deploy/gpustack-operator/chart/README.md" ]]; then
         COMMIT_PATHS+=("deploy/gpustack-operator/chart/README.md")

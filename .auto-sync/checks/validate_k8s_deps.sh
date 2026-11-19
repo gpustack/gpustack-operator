@@ -25,8 +25,6 @@ cleanup_on_exit() {
 }
 trap cleanup_on_exit EXIT
 
-autosync::ensure_ephemeral_git "${AUTOSYNC_CANDIDATE_ROOT}"
-
 STAGE_DIR="${AUTOSYNC_STAGE_DIR:-}"
 if [[ -z "${STAGE_DIR}" || ! -d "${STAGE_DIR}/baseline" ]]; then
   printf 'FAIL: AUTOSYNC_STAGE_DIR must point to a preflight stage directory with baseline/\n' >&2
@@ -241,6 +239,7 @@ if [[ -d "${cand_staging}" ]]; then
 fi
 
 # 4. Run upgrade-compat.sh modules and toolpins-selftest.sh.
+autosync::ensure_ephemeral_git "${AUTOSYNC_CANDIDATE_ROOT}"
 bash "${AUTOSYNC_CANDIDATE_ROOT}/hack/check/upgrade-compat.sh" modules
 bash "${AUTOSYNC_CANDIDATE_ROOT}/hack/check/toolpins-selftest.sh"
 
