@@ -75,10 +75,13 @@
 #     excludes libfabric from the repaired wheel, and mc_store_rest_server is still the broken
 #     async entry point. The build patches all four below.
 #   - 0.3.12: packaging is whole -- wrapper copied, libfabric excluded, sync_main entry point.
-#   - 0.3.13 (the default): as 0.3.12.
+#   - 0.3.13: as 0.3.12.
+#   - 0.3.14 (the default): as 0.3.13, except the ubshmem ASCEND_SOURCES glob is wrapped onto
+#     multiple lines whose last line names ascend_direct_transport/utils.cpp -- the cann stage's
+#     fifth case block carries a 0.3.14 arm that adds context_manager.cpp beside that entry.
 #
-# Build evidence exists for 0.3.10.post2 and 0.3.13.post1; 0.3.11 and 0.3.12 follow from reading
-# the tags, and their first build is the check.
+# Build evidence exists for 0.3.10.post2 and 0.3.13.post1; 0.3.11, 0.3.12 and 0.3.14 follow from
+# reading the tags, and their first build is the check.
 
 # REQUIRED: both stages carry the SAME Python and the SAME Debian release. The wheel's extension
 # modules are built WITH_SOABI, so they are tagged for one interpreter version and will not import
@@ -98,7 +101,7 @@ ARG RUNTIME_IMAGE="python:3.12-slim-bookworm"
 # ARGs is overridable at dispatch time through the base-image workflow's `args` input (plumbed
 # to docker build as build-args). Repointing a variant at another toolchain release, say a
 # CUDA 12.9 base, is then a dispatch decision that touches no file here, and the toolchain
-# version lives only in the dispatch-time image tag (e.g. 0.3.13.post1-cuda), never in a
+# version lives only in the dispatch-time image tag (e.g. 0.3.14-cuda), never in a
 # target or stage name.
 #
 #   - cuda: upstream's own CUDA image (docker/master-cuda13.Dockerfile) takes its CUDA
@@ -138,7 +141,7 @@ ARG ROCM_RUNTIME_IMAGE="rocm/dev-ubuntu-22.04:7.2.3"
 # It is asserted after the build rather than trusted -- the smoke test below reads the version out of
 # the INSTALLED package, so a tag that moved to a different release fails the build instead of
 # producing an image whose name and contents disagree.
-ARG MOONCAKE_VERSION="0.3.13.post1"
+ARG MOONCAKE_VERSION="0.3.14"
 
 # The AWS EFA installer release whose libfabric the runtime stage installs. AWS also serves an
 # "-latest" name, which is what this must NOT use: the userspace the image carries has to stay a
@@ -203,12 +206,12 @@ RUN <<EOF
     set -exo pipefail
 
     # Assert the release before anything consumes it: every version-conditional block below is
-    # written against 0.3.10 through 0.3.13, so a dispatch of a newer release must fail here
+    # written against 0.3.10 through 0.3.14, so a dispatch of a newer release must fail here
     # rather than take branches that were never reviewed against it.
     case "${MOONCAKE_VERSION}" in
-        0.3.10*|0.3.11*|0.3.12*|0.3.13*) ;;
+        0.3.10*|0.3.11*|0.3.12*|0.3.13*|0.3.14*) ;;
         *)
-            echo "[ERROR] unrecognized release '${MOONCAKE_VERSION}': the version-conditional blocks know 0.3.10 through 0.3.13; audit them before dispatching a newer one." >&2
+            echo "[ERROR] unrecognized release '${MOONCAKE_VERSION}': the version-conditional blocks know 0.3.10 through 0.3.14; audit them before dispatching a newer one." >&2
             exit 1
             ;;
     esac
@@ -469,12 +472,12 @@ RUN <<EOF
     set -exo pipefail
 
     # Assert the release before anything consumes it: every version-conditional block below is
-    # written against 0.3.10 through 0.3.13, so a dispatch of a newer release must fail here
+    # written against 0.3.10 through 0.3.14, so a dispatch of a newer release must fail here
     # rather than take branches that were never reviewed against it.
     case "${MOONCAKE_VERSION}" in
-        0.3.10*|0.3.11*|0.3.12*|0.3.13*) ;;
+        0.3.10*|0.3.11*|0.3.12*|0.3.13*|0.3.14*) ;;
         *)
-            echo "[ERROR] unrecognized release '${MOONCAKE_VERSION}': the version-conditional blocks know 0.3.10 through 0.3.13; audit them before dispatching a newer one." >&2
+            echo "[ERROR] unrecognized release '${MOONCAKE_VERSION}': the version-conditional blocks know 0.3.10 through 0.3.14; audit them before dispatching a newer one." >&2
             exit 1
             ;;
     esac
@@ -917,12 +920,12 @@ RUN <<EOF
     set -exo pipefail
 
     # Assert the release before anything consumes it: every version-conditional block below is
-    # written against 0.3.10 through 0.3.13, so a dispatch of a newer release must fail here
+    # written against 0.3.10 through 0.3.14, so a dispatch of a newer release must fail here
     # rather than take branches that were never reviewed against it.
     case "${MOONCAKE_VERSION}" in
-        0.3.10*|0.3.11*|0.3.12*|0.3.13*) ;;
+        0.3.10*|0.3.11*|0.3.12*|0.3.13*|0.3.14*) ;;
         *)
-            echo "[ERROR] unrecognized release '${MOONCAKE_VERSION}': the version-conditional blocks know 0.3.10 through 0.3.13; audit them before dispatching a newer one." >&2
+            echo "[ERROR] unrecognized release '${MOONCAKE_VERSION}': the version-conditional blocks know 0.3.10 through 0.3.14; audit them before dispatching a newer one." >&2
             exit 1
             ;;
     esac
@@ -1018,10 +1021,19 @@ RUN <<EOF
         # ascend_direct_transport/context_manager.cpp out of the shared library, so importing the
         # wheel dies on undefined ContextManager symbols. Add the file to the glob; older releases
         # never reference ContextManager from the ubshmem sources and build untouched. The grep
-        # proves the patch landed rather than rotting silently.
+        # proves the patch landed rather than rotting silently. v0.3.14 still reaches
+        # ContextManager::getInstance() from ascend_allocator.cpp but wraps the glob onto multiple
+        # lines whose last line names ascend_direct_transport/utils.cpp, so its arm inserts
+        # context_manager.cpp beside that entry instead of rewriting 0.3.13's one-line glob.
         case "${MOONCAKE_VERSION}" in
             0.3.13*)
                 sed -i 's|file(GLOB ASCEND_SOURCES "ubshmem_transport/\*\.cpp" "\*\.cpp")|file(GLOB ASCEND_SOURCES "ubshmem_transport/*.cpp" "ascend_direct_transport/context_manager.cpp" "*.cpp")|' \
+                    /work/mooncake-transfer-engine/src/transport/ascend_transport/CMakeLists.txt
+                grep -q 'ascend_direct_transport/context_manager\.cpp' \
+                    /work/mooncake-transfer-engine/src/transport/ascend_transport/CMakeLists.txt
+                ;;
+            0.3.14*)
+                sed -i 's|"ascend_direct_transport/utils\.cpp")|"ascend_direct_transport/utils.cpp" "ascend_direct_transport/context_manager.cpp")|' \
                     /work/mooncake-transfer-engine/src/transport/ascend_transport/CMakeLists.txt
                 grep -q 'ascend_direct_transport/context_manager\.cpp' \
                     /work/mooncake-transfer-engine/src/transport/ascend_transport/CMakeLists.txt
@@ -1396,12 +1408,12 @@ RUN <<EOF
     set -exo pipefail
 
     # Assert the release before anything consumes it: every version-conditional block below is
-    # written against 0.3.10 through 0.3.13, so a dispatch of a newer release must fail here
+    # written against 0.3.10 through 0.3.14, so a dispatch of a newer release must fail here
     # rather than take branches that were never reviewed against it.
     case "${MOONCAKE_VERSION}" in
-        0.3.10*|0.3.11*|0.3.12*|0.3.13*) ;;
+        0.3.10*|0.3.11*|0.3.12*|0.3.13*|0.3.14*) ;;
         *)
-            echo "[ERROR] unrecognized release '${MOONCAKE_VERSION}': the version-conditional blocks know 0.3.10 through 0.3.13; audit them before dispatching a newer one." >&2
+            echo "[ERROR] unrecognized release '${MOONCAKE_VERSION}': the version-conditional blocks know 0.3.10 through 0.3.14; audit them before dispatching a newer one." >&2
             exit 1
             ;;
     esac

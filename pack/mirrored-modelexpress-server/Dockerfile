@@ -18,7 +18,7 @@
 FROM rust:1.95-bookworm AS builder
 SHELL ["/bin/bash", "-c"]
 
-ARG MODELEXPRESS_COMMIT=ac6d03a87a550c8188c3ed59f187b90d4f0554f5
+ARG MODELEXPRESS_COMMIT=508e4547970c545dc80d5585f7b9be7af9ec177e
 
 RUN <<EOF
     set -exo pipefail
