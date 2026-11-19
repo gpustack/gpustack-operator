@@ -280,6 +280,48 @@ autosync::preflight::_ensure_tools() {
   )
 }
 
+# autosync::preflight::_stage_lfs_objects <repo_root> <shared_root> <stage_dir>
+# Stages .git/lfs/objects into <shared_root>/lfs-objects and links <stage_dir>/lfs-objects
+# without smudging <repo_root>'s working tree.
+autosync::preflight::_stage_lfs_objects() {
+  local repo_root="${1:?repo_root required}"
+  local shared_root="${2:?shared_root required}"
+  local stage_dir="${3:?stage_dir required}"
+
+  command -v git >/dev/null 2>&1 || return 0
+  local git_common_dir=""
+  git_common_dir="$(git -C "${repo_root}" rev-parse --git-common-dir 2>/dev/null || true)"
+  [[ -n "${git_common_dir}" ]] || return 0
+  if [[ "${git_common_dir}" != /* ]]; then
+    git_common_dir="${repo_root}/${git_common_dir}"
+  fi
+
+  local logo_file="${repo_root}/site/assets/images/logo.png"
+  local logo_oid=""
+  if [[ -f "${logo_file}" ]] && (( $(wc -c < "${logo_file}") < 1024 )); then
+    logo_oid="$(awk '$1 == "oid" && $2 ~ /^sha256:[0-9a-f]+$/ && length($2) == 71 { print substr($2, 8); exit }' "${logo_file}")"
+  fi
+  if [[ -z "${logo_oid}" ]]; then
+    logo_oid="$(git -C "${repo_root}" show HEAD:site/assets/images/logo.png 2>/dev/null | awk '$1 == "oid" && $2 ~ /^sha256:[0-9a-f]+$/ && length($2) == 71 { print substr($2, 8); exit }' || true)"
+  fi
+
+  if [[ -n "${logo_oid}" ]] && \
+     [[ ! -f "${git_common_dir}/lfs/objects/${logo_oid:0:2}/${logo_oid:2:2}/${logo_oid}" ]] && \
+     [[ "${AUTOSYNC_SKIP_GO_MOD_DOWNLOAD:-false}" != "true" && "${GOPROXY:-}" != "off" ]] && \
+     git -C "${repo_root}" remote get-url origin >/dev/null 2>&1 && \
+     git lfs version >/dev/null 2>&1; then
+    git -C "${repo_root}" lfs fetch origin HEAD >/dev/null 2>&1 || true
+  fi
+
+  if [[ -d "${git_common_dir}/lfs/objects" ]]; then
+    mkdir -p "${shared_root}/lfs-objects"
+    cp -RL "${git_common_dir}/lfs/objects/." "${shared_root}/lfs-objects/" 2>/dev/null || true
+    if [[ ! -e "${stage_dir}/lfs-objects" || -L "${stage_dir}/lfs-objects" ]]; then
+      ln -sfn "${shared_root}/lfs-objects" "${stage_dir}/lfs-objects"
+    fi
+  fi
+}
+
 # autosync::preflight::warm_caches <stage_dir> [--sbin] [--go] [--go-all] [--tools <comma-list>]
 # Populates shared /tmp/gpustack-autosync-stage/{.sbin,go-cache,go-mod,deps-cache,uv-cache,uv-python} caches,
 # records host toolchain paths into <stage_dir>/toolchain.env, and links caches into <stage_dir>.
@@ -359,6 +401,8 @@ autosync::preflight::warm_caches() {
       ;;
   esac
 
+  autosync::preflight::_stage_lfs_objects "${repo_root}" "${shared_root}" "${stage_dir}"
+
   if [[ "${want_sbin}" == "true" ]]; then
     mkdir -p "${shared_root}/.sbin"
     if [[ -d "${repo_root}/.sbin" ]]; then
@@ -405,8 +449,21 @@ autosync::preflight::warm_caches() {
           if [[ "${want_go_all}" == "true" ]]; then
             mod_dl_args+=(all)
           fi
+          local go_dl_tmp=""
+          go_dl_tmp="$(mktemp -d "${TMPDIR:-/tmp}/autosync-gomod-dl.XXXXXXXX")"
           (
-            cd "${repo_root}"
+            trap 'chmod -R u+w "${go_dl_tmp}" 2>/dev/null || true; rm -rf "${go_dl_tmp}"' EXIT
+            trap 'exit 130' INT
+            trap 'exit 143' TERM
+            trap 'exit 129' HUP
+            cp -f "${repo_root}/go.mod" "${go_dl_tmp}/go.mod"
+            if [[ -f "${repo_root}/go.sum" ]]; then
+              cp -f "${repo_root}/go.sum" "${go_dl_tmp}/go.sum"
+            fi
+            if [[ -d "${repo_root}/staging" ]]; then
+              cp -R "${repo_root}/staging" "${go_dl_tmp}/staging"
+            fi
+            cd "${go_dl_tmp}"
             GOMODCACHE="${shared_root}/go-mod" \
             GOCACHE="${shared_root}/go-cache" \
             GOPROXY="${effective_goproxy}" \

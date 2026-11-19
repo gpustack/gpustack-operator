@@ -241,7 +241,10 @@ jobs:
             git branch -f main "${MAIN_SHA}"
           fi
           echo "main_sha=${MAIN_SHA}" >> "${GITHUB_OUTPUT}"
-          test -z "$(git status --porcelain)"
+          if [[ -n "$(git status --porcelain)" ]]; then
+            git status --porcelain >&2
+            exit 1
+          fi
 
       - name: Fetch PR head
         id: pr-head
@@ -289,7 +292,20 @@ jobs:
             echo "ERROR: refs/heads/main drifted from ${MAIN_SHA}" >&2
             exit 1
           fi
-          test -z "$(git status --porcelain)"
+          if [[ -n "$(git status --porcelain)" ]]; then
+            git status --porcelain >&2
+            exit 1
+          fi
+
+      - name: Fetch LFS objects
+        run: |
+          if git lfs version >/dev/null 2>&1; then
+            git lfs fetch origin HEAD
+          fi
+          if [[ -n "$(git status --porcelain)" ]]; then
+            git status --porcelain >&2
+            exit 1
+          fi
 
       - name: Setup Go
         uses: actions/setup-go@v5
@@ -361,7 +377,10 @@ jobs:
             GITHUB_OUTPUT="${preflight_out}" \
               bash ".auto-sync/scripts/preflight-${DOMAIN}.sh" "${AUTOSYNC_STAGE_DIR}"
           fi
-          test -z "$(git status --porcelain)"
+          if [[ -n "$(git status --porcelain)" ]]; then
+            git status --porcelain >&2
+            exit 1
+          fi
 
           python3 - "${preflight_out}" "${GITHUB_OUTPUT}" "${GITHUB_EVENT_NAME}" "${COMMENT_COMMAND}" "${PR_BASE_SHA}" "${MAIN_SHA}" <<'PY'
           import os
@@ -431,7 +450,10 @@ jobs:
             echo "ERROR: refs/heads/main drifted from ${MAIN_SHA}" >&2
             exit 1
           fi
-          test -z "$(git status --porcelain)"
+          if [[ -n "$(git status --porcelain)" ]]; then
+            git status --porcelain >&2
+            exit 1
+          fi
 
       - name: Setup bubblewrap
         run: |
