@@ -768,12 +768,13 @@ if (( ${#STAGED_CHARTS[@]} > 0 )) && [[ "${AUTOSYNC_SKIP_SOURCE_REVISION:-false}
 
   python3 - "${DISCOVERY_JSON}" "${READY_LIST_FILE}" \
     "${STAGE_WORK}/hack/deps.sh" \
-    "${STAGE_WORK}/deploy/gpustack-operator/chart/Chart.yaml" <<'PY'
+    "${STAGE_WORK}/deploy/gpustack-operator/chart/Chart.yaml" \
+    "${STAGE_WORK}/deploy/gpustack-operator/chart/values.yaml" <<'PY'
 import json
 import re
 import sys
 
-disc_path, ready_path, deps_path, chart_yaml_path = sys.argv[1:5]
+disc_path, ready_path, deps_path, chart_yaml_path, values_yaml_path = sys.argv[1:6]
 with open(disc_path, "r", encoding="utf-8") as f:
     disc = json.load(f)
 with open(ready_path, "r", encoding="utf-8") as f:
@@ -819,6 +820,177 @@ for name in sorted(ready):
 
 with open(chart_yaml_path, "w", encoding="utf-8") as f:
     f.write(cy_txt)
+
+
+def parse_semver_key(ver: str) -> tuple[int, ...]:
+    nums = [int(x) for x in re.findall(r"\d+", ver or "")]
+    return tuple(nums) if nums else (0,)
+
+
+def mirrored_tags_for(info: dict) -> dict[str, str]:
+    out = {}
+    for req in info.get("required_images") or []:
+        mir = str(req.get("mirrored") or "").strip()
+        if ":" in mir.split("/")[-1]:
+            repo, tag = mir.rsplit(":", 1)
+            short = repo.split("/")[-1]
+            out[short] = tag
+    return out
+
+
+with open(values_yaml_path, "r", encoding="utf-8") as f:
+    vy_txt = f.read()
+
+shared_sidecars: dict[str, str] = {}
+for sidecar_key, mir_short in (
+    ("csiProvisioner", "mirrored-csi-provisioner"),
+    ("livenessProbe", "mirrored-csi-livenessprobe"),
+    ("nodeDriverRegistrar", "mirrored-csi-node-driver-registrar"),
+):
+    m_cur = re.search(
+        rf"^\s*{re.escape(sidecar_key)}:\s*docker\.io/gpustack/{re.escape(mir_short)}:([^\s#]+)",
+        vy_txt,
+        re.MULTILINE,
+    )
+    if m_cur:
+        shared_sidecars[mir_short] = m_cur.group(1).strip()
+
+for name in sorted(ready):
+    info = disc["charts"][name]
+    pinned_ver = str(info["pinned_version"])
+    cand_ver = str(info["candidate_version"])
+    tags = mirrored_tags_for(info)
+
+    if name == "kueue":
+        vy_txt = re.sub(
+            rf"(\[Kueue\]\([^\n]+\)\s+subchart\s+\(chart\s+){re.escape(pinned_ver)}(\))",
+            rf"\g<1>{cand_ver}\g<2>",
+            vy_txt,
+            count=1,
+        )
+        if "mirrored-kueue" in tags:
+            vy_txt = re.sub(
+                r"(repository:\s*docker\.io/gpustack/mirrored-kueue\n(?:[^\n]*\n){0,6}?\s*tag:\s*)\S+",
+                rf"\g<1>{tags['mirrored-kueue']}",
+                vy_txt,
+                count=1,
+            )
+    elif name == "node-feature-discovery":
+        vy_txt = re.sub(
+            rf"(\[Node Feature Discovery\]\([^\n]+\)\s*(?:#\s*)?subchart\s+\(chart\s+){re.escape(pinned_ver)}(\))",
+            rf"\g<1>{cand_ver}\g<2>",
+            vy_txt,
+            count=1,
+        )
+        if "mirrored-node-feature-discovery" in tags:
+            vy_txt = re.sub(
+                r"(repository:\s*docker\.io/gpustack/mirrored-node-feature-discovery\n(?:[^\n]*\n){0,6}?\s*tag:\s*)\S+",
+                rf"\g<1>{tags['mirrored-node-feature-discovery']}",
+                vy_txt,
+                count=1,
+            )
+    elif name == "csi-driver-nfs":
+        vy_txt = re.sub(
+            rf"(\[csi-driver-nfs\]\([^\n]+\)\s*subchart\s+\(chart\s*(?:#\s*)?){re.escape(pinned_ver)}(\))",
+            rf"\g<1>{cand_ver}\g<2>",
+            vy_txt,
+            count=1,
+        )
+        vy_txt = re.sub(
+            rf"(These are the tags chart\s*(?:#\s*)?){re.escape(pinned_ver)}(\s+ships)",
+            rf"\g<1>{cand_ver}\g<2>",
+            vy_txt,
+            count=1,
+        )
+        for mir_short in (
+            "mirrored-csi-nfs-driver",
+            "mirrored-csi-resizer",
+            "mirrored-csi-snapshotter",
+        ):
+            if mir_short in tags:
+                vy_txt = re.sub(
+                    rf"(repository:\s*/gpustack/{re.escape(mir_short)}\n\s*tag:\s*)\S+",
+                    rf"\g<1>{tags[mir_short]}",
+                    vy_txt,
+                    count=1,
+                )
+        for mir_short in (
+            "mirrored-csi-provisioner",
+            "mirrored-csi-livenessprobe",
+            "mirrored-csi-node-driver-registrar",
+        ):
+            if mir_short in tags:
+                cur_t = shared_sidecars.get(mir_short, "")
+                if not cur_t or parse_semver_key(tags[mir_short]) > parse_semver_key(cur_t):
+                    shared_sidecars[mir_short] = tags[mir_short]
+    elif name == "csi-driver-s3":
+        vy_txt = re.sub(
+            rf"(\[csi-driver-s3\]\([^\n]+\)\s*subchart\s+\(chart\s*(?:#\s*)?){re.escape(pinned_ver)}(\))",
+            rf"\g<1>{cand_ver}\g<2>",
+            vy_txt,
+            count=1,
+        )
+        if "mirrored-csi-s3-driver" in tags:
+            vy_txt = re.sub(
+                r"(^\s*s3:\s*docker\.io/gpustack/mirrored-csi-s3-driver:)\S+",
+                rf"\g<1>{tags['mirrored-csi-s3-driver']}",
+                vy_txt,
+                count=1,
+                flags=re.MULTILINE,
+            )
+        for mir_short in (
+            "mirrored-csi-provisioner",
+            "mirrored-csi-livenessprobe",
+            "mirrored-csi-node-driver-registrar",
+        ):
+            if mir_short in tags:
+                cur_t = shared_sidecars.get(mir_short, "")
+                if not cur_t or parse_semver_key(tags[mir_short]) > parse_semver_key(cur_t):
+                    shared_sidecars[mir_short] = tags[mir_short]
+    elif name == "topograph":
+        if "mirrored-nvidia-topograph" in tags:
+            m_topo = re.search(
+                r"(repository:\s*docker\.io/gpustack/mirrored-nvidia-topograph\n(?:[^\n]*\n){0,4}?\s*tag:\s*)(\S+)",
+                vy_txt,
+            )
+            if m_topo and m_topo.group(2) not in ('""', "''"):
+                vy_txt = (
+                    vy_txt[: m_topo.start(2)]
+                    + tags["mirrored-nvidia-topograph"]
+                    + vy_txt[m_topo.end(2) :]
+                )
+
+if ready & {"csi-driver-nfs", "csi-driver-s3"}:
+    for sidecar_key, mir_short in (
+        ("csiProvisioner", "mirrored-csi-provisioner"),
+        ("livenessProbe", "mirrored-csi-livenessprobe"),
+        ("nodeDriverRegistrar", "mirrored-csi-node-driver-registrar"),
+    ):
+        if mir_short in shared_sidecars:
+            s_tag = shared_sidecars[mir_short]
+            vy_txt = re.sub(
+                rf"(repository:\s*/gpustack/{re.escape(mir_short)}\n\s*tag:\s*)\S+",
+                rf"\g<1>{s_tag}",
+                vy_txt,
+                count=1,
+            )
+            vy_txt = re.sub(
+                rf"(^\s*{re.escape(sidecar_key)}:\s*docker\.io/gpustack/{re.escape(mir_short)}:)\S+",
+                rf"\g<1>{s_tag}",
+                vy_txt,
+                count=1,
+                flags=re.MULTILINE,
+            )
+    if "mirrored-csi-node-driver-registrar" in shared_sidecars:
+        vy_txt = re.sub(
+            r"(repository:\s*docker\.io/gpustack/mirrored-csi-node-driver-registrar\n\s*tag:\s*)\S+",
+            rf"\g<1>{shared_sidecars['mirrored-csi-node-driver-registrar']}",
+            vy_txt,
+            count=1,
+        )
+
+with open(values_yaml_path, "w", encoding="utf-8") as f:
+    f.write(vy_txt)
 PY
 
   (
@@ -830,22 +1002,13 @@ PY
   )
 
   if [[ "${AUTOSYNC_SKIP_GENERATE_CHART:-false}" != "true" ]] && \
-     command -v helm-docs >/dev/null 2>&1 && \
-     command -v helm-schema >/dev/null 2>&1; then
+     PATH="${STAGE_DIR}/.sbin:${PATH}" command -v helm-docs >/dev/null 2>&1 && \
+     PATH="${STAGE_DIR}/.sbin:${PATH}" command -v helm-schema >/dev/null 2>&1; then
     (
       cd "${STAGE_WORK}"
       PATH="${STAGE_DIR}/.sbin:${PATH}" bash "${STAGE_WORK}/hack/generate.sh" chart
     )
   fi
-
-  SOURCE_REVISION="$(
-    autosync::preflight::commit_staged_tree_revision \
-      "${REPO_ROOT}" "${BASE_SHA}" \
-      "chore(chart): stage vendored helm subcharts" \
-      "${STAGE_WORK}" \
-      "hack/deps.sh" \
-      "deploy/gpustack-operator/chart"
-  )"
 fi
 
 REPORT_JSON="${STAGE_DIR}/charts-preflight-report.json"
@@ -1001,6 +1164,36 @@ if any_not_ready and summary_path and not os.path.islink(summary_path):
     except OSError:
         pass
 PY
+
+if (( ${#STAGED_CHARTS[@]} > 0 )) && [[ "${AUTOSYNC_SKIP_SOURCE_REVISION:-false}" != "true" ]]; then
+  autosync::preflight::populate_stage_bundle "${STAGE_WORK}" "charts" \
+    "${REPORT_JSON}" \
+    "${UPSTREAM_RECORDS_JSON}" \
+    "${MANIFESTS_JSON}"
+  SOURCE_REVISION="$(
+    autosync::preflight::commit_staged_tree_revision \
+      "${REPO_ROOT}" "${BASE_SHA}" \
+      "chore(chart): stage vendored helm subcharts and preflight bundle" \
+      "${STAGE_WORK}" \
+      "hack/deps.sh" \
+      "deploy/gpustack-operator/chart" \
+      ".auto-sync/.stage/charts"
+  )"
+  if [[ "${SOURCE_REVISION}" != "${BASE_SHA}" ]]; then
+    python3 - "${REPORT_JSON}" "${SOURCE_REVISION}" <<'PY'
+import json
+import sys
+
+p, src_rev = sys.argv[1:3]
+with open(p, "r", encoding="utf-8") as f:
+    rep = json.load(f)
+rep["source_revision"] = src_rev
+with open(p, "w", encoding="utf-8") as f:
+    json.dump(rep, f, indent=2)
+    f.write("\n")
+PY
+  fi
+fi
 
 COMPACT_RECORDS="$(python3 -c 'import json,sys; print(json.dumps(json.load(open(sys.argv[1])), separators=(",", ":")))' "${UPSTREAM_RECORDS_JSON}")"
 autosync::preflight::write_github_output "stage_dir" "${STAGE_DIR}"

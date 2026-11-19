@@ -292,23 +292,24 @@ git -C "${FAKE_REPO}" commit -q -m "stage a aligned"
     bash "${FAKE_REPO}/.auto-sync/scripts/preflight-router.sh" "${STAGE_DIR}"
 )
 
-if python3 - "${STAGE_DIR}" <<'PY'
+if python3 - "${STAGE_DIR}" "$(git -C "${FAKE_REPO}" rev-parse HEAD)" <<'PY'
 import json
 import os
 import sys
 
-stage = sys.argv[1]
+stage, base_sha = sys.argv[1:3]
 with open(os.path.join(stage, "upstream-records.json"), "r", encoding="utf-8") as f:
     recs = json.load(f)
 assert all(r["status"] == "up_to_date" for r in recs), recs
 with open(os.path.join(stage, "router-preflight-report.json"), "r", encoding="utf-8") as f:
     rep = json.load(f)
 assert rep["stage"] == "no_change", rep
+assert rep["source_revision"] == base_sha, rep
 PY
 then
-  pass "preflight emits no_change while target gpustack/llm-router:v0.5.0 is unpublished"
+  pass "preflight emits no_change and keeps source_revision == base_sha while target gpustack/llm-router:v0.5.0 is unpublished"
 else
-  fail "preflight emits no_change while target gpustack/llm-router:v0.5.0 is unpublished"
+  fail "preflight emits no_change and keeps source_revision == base_sha while target gpustack/llm-router:v0.5.0 is unpublished"
 fi
 
 # 3b. Publish gpustack/llm-router:v0.5.0 multi-arch -> Stage B tag_promotion (+stage-b).
@@ -335,12 +336,13 @@ PY
     bash "${FAKE_REPO}/.auto-sync/scripts/preflight-router.sh" "${STAGE_DIR}"
 )
 
-if python3 - "${STAGE_DIR}" <<'PY'
+if python3 - "${STAGE_DIR}" "${FAKE_REPO}" "$(git -C "${FAKE_REPO}" rev-parse HEAD)" <<'PY'
 import json
 import os
+import subprocess
 import sys
 
-stage = sys.argv[1]
+stage, repo, base_sha = sys.argv[1:4]
 with open(os.path.join(stage, "upstream-records.json"), "r", encoding="utf-8") as f:
     recs = {r["upstreamId"]: r for r in json.load(f)}
 assert any(r["status"] == "available" and r["version"].endswith("+stage-b") for r in recs.values()), recs
@@ -348,11 +350,20 @@ with open(os.path.join(stage, "router-preflight-report.json"), "r", encoding="ut
     rep = json.load(f)
 assert rep["stage"] == "tag_promotion", rep
 assert rep["image_published"] is True, rep
+src_rev = rep.get("source_revision", "")
+assert src_rev and src_rev != base_sha, rep
+ls = subprocess.check_output(
+    ["git", "-C", repo, "ls-tree", "-r", src_rev, ".auto-sync/.stage/router"], text=True
+)
+assert "100644 blob " in ls and "router-preflight-report.json" in ls, ls
+assert "120000 " not in ls, ls
+st = subprocess.check_output(["git", "-C", repo, "status", "--porcelain"], text=True).strip()
+assert st == "", repr(st)
 PY
 then
-  pass "preflight Stage B emits +stage-b and tag_promotion when multi-arch router image is published"
+  pass "preflight Stage B emits +stage-b, tag_promotion, and stages .auto-sync/.stage/router cleanly"
 else
-  fail "preflight Stage B emits +stage-b and tag_promotion when multi-arch router image is published"
+  fail "preflight Stage B emits +stage-b, tag_promotion, and stages .auto-sync/.stage/router cleanly"
 fi
 
 # 3c. Offline repo_tags auto-discovery triggers Stage B tag_promotion without AUTOSYNC_*_TARGET_TAG.
@@ -564,12 +575,14 @@ JSON
 write_preflight_report() {
   local retire_bool="$1"
   local vllm_target="$2"
+  local retire_0004_bool="${3:-false}"
   cat > "${VAL_STAGE}/router-preflight-report.json" <<JSON
 {
   "schemaVersion": 1,
   "stage": "recipe_sync",
   "image_published": false,
   "retire_0001_epd_routing": ${retire_bool},
+  "retire_0004_discovery_readiness": ${retire_0004_bool},
   "target_tags": {
     "llm-d-router": "v0.11.0",
     "vllm-router": "${vllm_target}",
@@ -633,7 +646,7 @@ run_validate_env_i() {
     TMPDIR="${SCRATCH}" \
     AUTOSYNC_STAGE_DIR="${VAL_STAGE}" \
     LOOPWRIGHT_CANDIDATE_DIR="${CAND_DIR}" \
-    AUTOSYNC_ROUTER_BUILD_RUNNER="${STUB_BUILD_RUNNER}" \
+    AUTOSYNC_ROUTER_BUILD_RUNNER="${AUTOSYNC_ROUTER_BUILD_RUNNER:-${STUB_BUILD_RUNNER}}" \
     ROUTER_BUILD_LOG="${BUILD_LOG}" \
     AUTOSYNC_ALLOW_MISSING_STAGED_REPO="${AUTOSYNC_ALLOW_MISSING_STAGED_REPO:-false}" \
     AUTOSYNC_FAST_SELFTEST=true \
@@ -731,10 +744,18 @@ make_gitless_cand
 set_router_proposal "recipe_sync" "v0.99.0"
 assert_fails "validate_router fails closed on mismatched proposals/router.json version" run_validate_env_i
 
-# 4.9 Negative case 5: retire_0001_epd_routing=true fails even without bumping VLLM_ROUTER_VERSION.
+# 4.9 Symmetric retire_0001_epd_routing guard: allow keeping 0001 when VLLM_ROUTER_VERSION != TARGET_VLLM_VER,
+# fail closed when TARGET_VLLM_VER is empty (or matches CAND_VLLM_VER, tested in 4.4) and 0001 remains.
 write_preflight_report "true" "v0.1.17"
 make_gitless_cand
-assert_fails "validate_router fails closed when retire_0001_epd_routing=true and 0001-epd-routing.patch remains" run_validate_env_i
+if run_validate_env_i; then
+  pass "validate_router allows keeping 0001-epd-routing.patch when retire_0001=true but VLLM_ROUTER_VERSION stays below target"
+else
+  fail "validate_router allows keeping 0001-epd-routing.patch when retire_0001=true but VLLM_ROUTER_VERSION stays below target"
+fi
+write_preflight_report "true" ""
+make_gitless_cand
+assert_fails "validate_router fails closed when retire_0001_epd_routing=true (empty target) and 0001-epd-routing.patch remains" run_validate_env_i
 
 # 4.10 Negative case 6: missing staged repo fails closed unless AUTOSYNC_ALLOW_MISSING_STAGED_REPO=true.
 write_preflight_report "false" "v0.1.16.1"
@@ -762,6 +783,267 @@ run_router_preflight_with_fixture() {
 }
 assert_fails "preflight-router.sh fails closed when AUTOSYNC_ROUTER_FIXTURE_DIR lacks sglang repo" \
   run_router_preflight_with_fixture "${FAKE_REPO}" "${FIX_MISSING_REPO}" "${SCRATCH}/stage-missing-router"
+
+# 4.12 retire_0004_discovery_readiness enforcement in validate_router.sh + clean 3-way auto-rebase in preflight-router.sh.
+write_preflight_report "false" "v0.1.17" "true"
+make_gitless_cand
+sed -i.bak 's/^ARG VLLM_ROUTER_VERSION=v0\.1\.16\.1/ARG VLLM_ROUTER_VERSION=v0.1.17/' "${CAND_DIR}/pack/llm-router/Dockerfile"
+rm -f "${CAND_DIR}/pack/llm-router/Dockerfile.bak"
+assert_fails "validate_router fails closed when retire_0004_discovery_readiness=true and 0004 patch remains" run_validate_env_i
+
+REB_REPO="${SCRATCH}/reb-repo"
+REB_FIX="${SCRATCH}/reb-fixtures"
+cp -R "${FAKE_REPO}" "${REB_REPO}"
+cp -R "${FIXTURE_DIR}" "${REB_FIX}"
+python3 - "${REB_REPO}/pack/llm-router/Dockerfile" <<'PY'
+import sys
+p = sys.argv[1]
+with open(p, "r", encoding="utf-8") as f:
+    txt = f.read()
+txt = txt.replace("ARG VLLM_ROUTER_VERSION=v0.1.17", "ARG VLLM_ROUTER_VERSION=v0.1.16.1", 1)
+txt = txt.replace("ARG SGLANG_GATEWAY_VERSION=gateway-v0.3.2", "ARG SGLANG_GATEWAY_VERSION=gateway-v0.3.1", 1)
+with open(p, "w", encoding="utf-8") as f:
+    f.write(txt)
+PY
+rm -rf "${REB_FIX}/repos/vllm-router"
+init_mock_repo "${REB_FIX}/repos/vllm-router"
+mkdir -p "${REB_FIX}/repos/vllm-router/src"
+printf '[package]\nname = "vllm-router"\nversion = "0.1.16"\n' > "${REB_FIX}/repos/vllm-router/Cargo.toml"
+printf 'pub fn v16() {}\n' > "${REB_FIX}/repos/vllm-router/src/lib.rs"
+printf 'pub fn old_disc() {}\n' > "${REB_FIX}/repos/vllm-router/src/service_discovery.rs"
+git -C "${REB_FIX}/repos/vllm-router" add -A
+git -C "${REB_FIX}/repos/vllm-router" commit -q -m "base v0.1.16.1"
+git -C "${REB_FIX}/repos/vllm-router" tag v0.1.16.1
+
+# Generate 4 real patches against v0.1.16.1 in a temp clone.
+PWORK="${SCRATCH}/reb-patch-work"
+git clone -q "${REB_FIX}/repos/vllm-router" "${PWORK}"
+git -C "${PWORK}" config user.name "selftest"
+git -C "${PWORK}" config user.email "selftest@gpustack.local"
+printf 'pub fn epd_patch() {}\n' >> "${PWORK}/src/lib.rs"
+git -C "${PWORK}" add -A && git -C "${PWORK}" commit -q -m "0001 epd routing"
+git -C "${PWORK}" format-patch -1 HEAD --stdout > "${REB_REPO}/pack/llm-router/patches/vllm-router/0001-epd-routing.patch"
+printf 'pub fn mc() {}\n' > "${PWORK}/src/mooncake.rs"
+git -C "${PWORK}" add -A && git -C "${PWORK}" commit -q -m "0002 mooncake lazy bootstrap"
+git -C "${PWORK}" format-patch -1 HEAD --stdout > "${REB_REPO}/pack/llm-router/patches/vllm-router/0002-mooncake-lazy-bootstrap-lookup.patch"
+printf 'pub fn obs() {}\n' > "${PWORK}/src/observer.rs"
+git -C "${PWORK}" add -A && git -C "${PWORK}" commit -q -m "0003 observer view"
+git -C "${PWORK}" format-patch -1 HEAD --stdout > "${REB_REPO}/pack/llm-router/patches/vllm-router/0003-observer-read-only-endpoint-view.patch"
+printf 'pub fn new_disc() {}\n' > "${PWORK}/src/service_discovery.rs"
+git -C "${PWORK}" add -A && git -C "${PWORK}" commit -q -m "0004 discovery readiness"
+git -C "${PWORK}" format-patch -1 HEAD --stdout > "${REB_REPO}/pack/llm-router/patches/vllm-router/0004-discovery-readiness-and-deselect-removal.patch"
+
+# Hold sglang-gateway at gateway-v0.3.1 so only vllm-router advances cleanly onto v0.1.17.
+rm -rf "${REB_FIX}/repos/sglang"
+init_mock_repo "${REB_FIX}/repos/sglang"
+mkdir -p "${REB_FIX}/repos/sglang/sgl-model-gateway/src"
+printf 'pub fn base() {}\n' > "${REB_FIX}/repos/sglang/sgl-model-gateway/src/lib.rs"
+git -C "${REB_FIX}/repos/sglang" add -A
+git -C "${REB_FIX}/repos/sglang" commit -q -m "gateway v0.3.1"
+git -C "${REB_FIX}/repos/sglang" tag gateway-v0.3.1
+
+# Advance vllm-router mock to v0.1.17 containing 516f1cb and TrackedPod + uid: Option<String>.
+printf 'pub fn upstream_epd() {}\n' > "${REB_FIX}/repos/vllm-router/src/epd.rs"
+git -C "${REB_FIX}/repos/vllm-router" add -A && git -C "${REB_FIX}/repos/vllm-router" commit -q -m "516f1cb"
+git -C "${REB_FIX}/repos/vllm-router" tag 516f1cb
+cat > "${REB_FIX}/repos/vllm-router/src/service_discovery.rs" <<'RS'
+pub struct TrackedPod {
+    pub uid: Option<String>,
+}
+RS
+git -C "${REB_FIX}/repos/vllm-router" add -A && git -C "${REB_FIX}/repos/vllm-router" commit -q -m "tracked pod uid"
+git -C "${REB_FIX}/repos/vllm-router" tag v0.1.17
+
+rm -rf "${REB_REPO}/.auto-sync/checks/__pycache__"
+git -C "${REB_REPO}" add -A && git -C "${REB_REPO}" commit -q -m "add rebase patch fixtures"
+REB_BASE_SHA="$(git -C "${REB_REPO}" rev-parse HEAD)"
+STAGE_REB="${SCRATCH}/stage-reb"
+if (
+  cd "${REB_REPO}"
+  PYTHONDONTWRITEBYTECODE=1 \
+  AUTOSYNC_ROUTER_FIXTURE_DIR="${REB_FIX}" \
+  AUTOSYNC_SKIP_GO_MOD_DOWNLOAD=true \
+    bash "${REB_REPO}/.auto-sync/scripts/preflight-router.sh" "${STAGE_REB}"
+) >/dev/null 2>&1 && \
+python3 - "${STAGE_REB}" "${REB_REPO}" "${REB_BASE_SHA}" <<'PY'
+import json
+import os
+import subprocess
+import sys
+
+stage, repo, base_sha = sys.argv[1:4]
+with open(os.path.join(stage, "router-preflight-report.json"), "r", encoding="utf-8") as f:
+    rep = json.load(f)
+assert rep["retire_0001_epd_routing"] is True, rep
+assert rep["retire_0004_discovery_readiness"] is True, rep
+vr = rep["rebase"]["vllm-router"]
+assert vr["auto_rebased"] is True, vr
+assert sorted(vr["retired_patches"]) == [
+    "0001-epd-routing.patch",
+    "0004-discovery-readiness-and-deselect-removal.patch",
+], vr
+assert sorted(vr["kept_patches"]) == [
+    "0002-mooncake-lazy-bootstrap-lookup.patch",
+    "0003-observer-read-only-endpoint-view.patch",
+], vr
+assert vr["conflicted_files"] == [], vr
+src_rev = rep["source_revision"]
+assert src_rev and src_rev != base_sha, rep
+ls_patches = subprocess.check_output(
+    ["git", "-C", repo, "ls-tree", "-r", "--name-only", src_rev, "pack/llm-router/patches/vllm-router"],
+    text=True,
+).splitlines()
+assert sorted(ls_patches) == [
+    "pack/llm-router/patches/vllm-router/0002-mooncake-lazy-bootstrap-lookup.patch",
+    "pack/llm-router/patches/vllm-router/0003-observer-read-only-endpoint-view.patch",
+], ls_patches
+ls_stage = subprocess.check_output(
+    ["git", "-C", repo, "ls-tree", "-r", src_rev, ".auto-sync/.stage/router"], text=True
+)
+assert "100644 blob " in ls_stage and "router-preflight-report.json" in ls_stage, ls_stage
+assert "120000 " not in ls_stage, ls_stage
+st = subprocess.check_output(["git", "-C", repo, "status", "--porcelain"], text=True).strip()
+assert st == "", repr(st)
+PY
+then
+  pass "preflight-router detects retire_0004_discovery_readiness, auto-rebases clean patches onto v0.1.17, and stages .auto-sync/.stage/router"
+else
+  fail "preflight-router detects retire_0004_discovery_readiness, auto-rebases clean patches onto v0.1.17, and stages .auto-sync/.stage/router"
+fi
+
+# 4.13 Conflicting 3-way cherry-pick stages target-files/, cherry-pick-working/, and conflicts/ in .auto-sync/.stage/router.
+git -C "${REB_FIX}/repos/vllm-router" tag -d v0.1.17 >/dev/null
+printf 'pub fn conflicting_upstream_mc() {}\n' > "${REB_FIX}/repos/vllm-router/src/mooncake.rs"
+git -C "${REB_FIX}/repos/vllm-router" add -A && git -C "${REB_FIX}/repos/vllm-router" commit -q -m "conflict mooncake"
+git -C "${REB_FIX}/repos/vllm-router" tag v0.1.17
+STAGE_CONF="${SCRATCH}/stage-conf"
+if (
+  cd "${REB_REPO}"
+  AUTOSYNC_ROUTER_FIXTURE_DIR="${REB_FIX}" \
+  AUTOSYNC_SKIP_GO_MOD_DOWNLOAD=true \
+    bash "${REB_REPO}/.auto-sync/scripts/preflight-router.sh" "${STAGE_CONF}"
+) >/dev/null 2>&1 && \
+python3 - "${STAGE_CONF}" "${REB_REPO}" <<'PY'
+import json
+import os
+import subprocess
+import sys
+import tempfile
+
+stage, repo = sys.argv[1:3]
+with open(os.path.join(stage, "router-preflight-report.json"), "r", encoding="utf-8") as f:
+    rep = json.load(f)
+vr = rep["rebase"]["vllm-router"]
+assert vr["auto_rebased"] is False, vr
+assert vr["conflict_patch"] == "0002-mooncake-lazy-bootstrap-lookup.patch", vr
+assert vr["conflicted_patch"] == "0002-mooncake-lazy-bootstrap-lookup.patch", vr
+assert vr["rebased_before_conflict"] == [], vr
+assert "src/mooncake.rs" in vr["conflicted_files"], vr
+src_rev = rep["source_revision"]
+ls_stage = subprocess.check_output(
+    ["git", "-C", repo, "ls-tree", "-r", src_rev, ".auto-sync/.stage/router"], text=True
+)
+assert "100644 blob " in ls_stage
+assert ".auto-sync/.stage/router/target-files/vllm-router/src/mooncake.rs" in ls_stage, ls_stage
+assert ".auto-sync/.stage/router/cherry-pick-working/vllm-router/src/mooncake.rs" in ls_stage, ls_stage
+assert ".auto-sync/.stage/router/target-files/vllm-router/Cargo.toml" in ls_stage, ls_stage
+assert ".auto-sync/.stage/router/cherry-pick-working/vllm-router/Cargo.toml" in ls_stage, ls_stage
+assert ".auto-sync/.stage/router/conflicts/vllm-router/0002-mooncake-lazy-bootstrap-lookup.patch.txt" in ls_stage, ls_stage
+assert "120000 " not in ls_stage, ls_stage
+with tempfile.TemporaryDirectory() as td:
+    arch = subprocess.Popen(["git", "-C", repo, "archive", src_rev, ".auto-sync/.stage/router"], stdout=subprocess.PIPE)
+    assert arch.stdout is not None
+    subprocess.run(["tar", "-x", "-C", td], stdin=arch.stdout, check=True)
+    arch.stdout.close()
+    assert arch.wait() == 0
+    tgt_dir = os.path.join(td, ".auto-sync/.stage/router/target-files/vllm-router")
+    cp_dir = os.path.join(td, ".auto-sync/.stage/router/cherry-pick-working/vllm-router")
+    diff_res = subprocess.run(["git", "diff", "--no-index", "--", tgt_dir, cp_dir], capture_output=True, text=True)
+    assert diff_res.returncode in (0, 1), diff_res.stderr
+    for extra_name in ("Cargo.toml", "go.mod", "defaults.go"):
+        assert f"deleted file mode" not in diff_res.stdout or extra_name not in diff_res.stdout, diff_res.stdout
+    assert "deleted file mode" not in diff_res.stdout, diff_res.stdout
+PY
+then
+  pass "preflight-router stages symmetric target-files/ and cherry-pick-working/ (no deleted target_extras) plus conflicts/ on conflict"
+else
+  fail "preflight-router stages symmetric target-files/ and cherry-pick-working/ (no deleted target_extras) plus conflicts/ on conflict"
+fi
+
+# 4.14 Multi-patch partial rebase: earlier patch 0002 applies cleanly, later patch 0003 conflicts ->
+# rebased-patches/vllm-router/0002... is staged and target-files/vllm-router reflects post-0002 HEAD.
+git -C "${REB_FIX}/repos/vllm-router" tag -d v0.1.17 >/dev/null
+git -C "${REB_FIX}/repos/vllm-router" reset --hard -q HEAD~1
+printf 'pub fn conflicting_upstream_observer() {}\n' > "${REB_FIX}/repos/vllm-router/src/observer.rs"
+git -C "${REB_FIX}/repos/vllm-router" add -A && git -C "${REB_FIX}/repos/vllm-router" commit -q -m "conflict observer"
+git -C "${REB_FIX}/repos/vllm-router" tag v0.1.17
+STAGE_PARTIAL="${SCRATCH}/stage-partial-conf"
+if (
+  cd "${REB_REPO}"
+  AUTOSYNC_ROUTER_FIXTURE_DIR="${REB_FIX}" \
+  AUTOSYNC_SKIP_GO_MOD_DOWNLOAD=true \
+    bash "${REB_REPO}/.auto-sync/scripts/preflight-router.sh" "${STAGE_PARTIAL}"
+) >/dev/null 2>&1 && \
+python3 - "${STAGE_PARTIAL}" "${REB_REPO}" <<'PY'
+import json
+import os
+import subprocess
+import sys
+import tempfile
+
+stage, repo = sys.argv[1:3]
+with open(os.path.join(stage, "router-preflight-report.json"), "r", encoding="utf-8") as f:
+    rep = json.load(f)
+vr = rep["rebase"]["vllm-router"]
+assert vr["auto_rebased"] is False, vr
+assert vr["conflicted_patch"] == "0003-observer-read-only-endpoint-view.patch", vr
+assert vr["rebased_before_conflict"] == ["0002-mooncake-lazy-bootstrap-lookup.patch"], vr
+assert "src/observer.rs" in vr["conflicted_files"], vr
+src_rev = rep["source_revision"]
+ls_stage = subprocess.check_output(
+    ["git", "-C", repo, "ls-tree", "-r", src_rev, ".auto-sync/.stage/router"], text=True
+)
+assert ".auto-sync/.stage/router/rebased-patches/vllm-router/0002-mooncake-lazy-bootstrap-lookup.patch" in ls_stage, ls_stage
+with tempfile.TemporaryDirectory() as td:
+    arch = subprocess.Popen(["git", "-C", repo, "archive", src_rev, ".auto-sync/.stage/router"], stdout=subprocess.PIPE)
+    assert arch.stdout is not None
+    subprocess.run(["tar", "-x", "-C", td], stdin=arch.stdout, check=True)
+    arch.stdout.close()
+    assert arch.wait() == 0
+    tgt_dir = os.path.join(td, ".auto-sync/.stage/router/target-files/vllm-router")
+    cp_dir = os.path.join(td, ".auto-sync/.stage/router/cherry-pick-working/vllm-router")
+    diff_res = subprocess.run(["git", "diff", "--no-index", "--", tgt_dir, cp_dir], capture_output=True, text=True)
+    assert diff_res.returncode in (0, 1), diff_res.stderr
+    assert "mooncake.rs" not in diff_res.stdout, diff_res.stdout
+    assert "src/observer.rs" in diff_res.stdout, diff_res.stdout
+    assert "deleted file mode" not in diff_res.stdout, diff_res.stdout
+PY
+then
+  pass "preflight-router stages rebased-patches/ and post-earlier-patch target-files/ on multi-patch partial rebase conflict"
+else
+  fail "preflight-router stages rebased-patches/ and post-earlier-patch target-files/ on multi-patch partial rebase conflict"
+fi
+
+# 4.15 validate_router.sh inlines first compiler error onto FAIL: line with BuildKit prefix stripped.
+FAIL_BUILD_RUNNER="${SCRATCH}/fail-build-runner.sh"
+cat > "${FAIL_BUILD_RUNNER}" <<'SH'
+#!/usr/bin/env bash
+echo "#12 1.23 src/router.rs:42: error[E0425]: cannot find value in this scope"
+exit 1
+SH
+chmod +x "${FAIL_BUILD_RUNNER}"
+write_preflight_report "true" "v0.1.17"
+make_gitless_cand
+set_router_proposal "recipe_sync" "v0.1.17"
+sed -i.bak 's/^ARG VLLM_ROUTER_VERSION=v0\.1\.16\.1/ARG VLLM_ROUTER_VERSION=v0.1.17/' "${CAND_DIR}/pack/llm-router/Dockerfile"
+rm -f "${CAND_DIR}/pack/llm-router/Dockerfile.bak"
+rm -f "${CAND_DIR}/pack/llm-router/patches/vllm-router/0001-epd-routing.patch"
+fail_build_err="$(AUTOSYNC_ROUTER_BUILD_RUNNER="${FAIL_BUILD_RUNNER}" run_validate_env_i 2>&1 || true)"
+if grep -q 'FAIL: router builder target vllm-router-builder failed (src/router.rs:42: error\[E0425\]: cannot find value in this scope)' <<<"${fail_build_err}"; then
+  pass "validate_router.sh inlines first compiler error onto FAIL: summary line"
+else
+  fail "validate_router.sh inlines first compiler error onto FAIL: summary line (${fail_build_err})"
+fi
 
 echo
 if (( FAILS > 0 )); then

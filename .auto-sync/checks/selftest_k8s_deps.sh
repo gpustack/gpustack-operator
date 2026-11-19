@@ -648,10 +648,13 @@ PY
 [[ -n "${SRC_REV}" && "${SRC_REV}" != "${BASE_SHA}" ]] && \
 grep -q "kubernetes/api ${K8S_MOD_NEXT}" <<<"$(git -C "${PREFLIGHT_REPO}" show "${SRC_REV}:hack/deps.sh")" && \
 [[ "$(git -C "${PREFLIGHT_REPO}" show "${SRC_REV}:staging/k8s.io/api/_VERSION_")" == "${K8S_MOD_NEXT}" ]] && \
+grep -q '100644 blob .*\.auto-sync/\.stage/k8s-deps/k8s-deps-preflight-report\.json$' <<<"$(git -C "${PREFLIGHT_REPO}" ls-tree -r "${SRC_REV}" .auto-sync/.stage/k8s-deps)" && \
+grep -q '100644 blob .*\.auto-sync/\.stage/k8s-deps/upstream-records\.json$' <<<"$(git -C "${PREFLIGHT_REPO}" ls-tree -r "${SRC_REV}" .auto-sync/.stage/k8s-deps)" && \
+! grep -q '^120000 ' <<<"$(git -C "${PREFLIGHT_REPO}" ls-tree -r "${SRC_REV}" .auto-sync/.stage/k8s-deps)" && \
 [[ -z "$(git -C "${PREFLIGHT_REPO}" status --porcelain)" ]] && \
 [[ "$(git -C "${PREFLIGHT_REPO}" rev-parse HEAD)" == "${BASE_SHA}" ]] && \
 [[ "$(git -C "${PREFLIGHT_REPO}" rev-parse refs/heads/main)" == "${BASE_SHA}" ]]; then
-  pass "preflight-k8s-deps.sh stages mod_staging onto detached source_revision while preserving main"
+  pass "preflight-k8s-deps.sh stages mod_staging and .auto-sync/.stage/k8s-deps onto detached source_revision while preserving main"
 else
   fail "preflight-k8s-deps.sh detached source_revision staging"
 fi
@@ -722,7 +725,7 @@ with open(os.path.join(stage_dir, "k8s-deps-preflight-report.json"), "r", encodi
     rep = json.load(f)
 assert rep["patch_clean"] is False, rep
 assert rep["staging_updated"] is False, rep
-assert rep["source_revision"] == base_sha, rep
+assert rep["source_revision"] != base_sha, rep
 assert "go mod tidy/download failed" in rep.get("staging_error", ""), rep
 for k in (
     "kubernetes",
@@ -833,6 +836,47 @@ grep -q "helm.sh/helm/v3 v${HELM_CUR}" <<<"$(git -C "${PREFLIGHT_REPO}" show "${
   pass "preflight-k8s-deps.sh retries without helm bump and stages k8s update cleanly"
 else
   fail "preflight-k8s-deps.sh helm fallback retry"
+fi
+
+# 2e. Gitless tar-unpacked work_repo copy passes hack/check/agents-shell.sh after ensure_ephemeral_git and cleans up .git.
+WORK_GITLESS="${SCRATCH}/work-repo-gitless/gpustack.ai/gpustack"
+mkdir -p "${WORK_GITLESS}"
+tar --exclude='.git' -cf - -C "${PREFLIGHT_REPO}" . | tar -xf - -C "${WORK_GITLESS}"
+SC_FOR_WORK="${SHELLCHECK_BIN:-}"
+if [[ -z "${SC_FOR_WORK}" && -x "${ROOT_DIR}/.sbin/shellcheck" ]]; then
+  SC_FOR_WORK="${ROOT_DIR}/.sbin/shellcheck"
+fi
+if [[ -z "${SC_FOR_WORK}" ]]; then
+  SC_FOR_WORK="$(type -P shellcheck 2>/dev/null || true)"
+fi
+if [[ -z "${SC_FOR_WORK}" ]]; then
+  SC_FOR_WORK="${SCRATCH}/stub-shellcheck.sh"
+  printf '#!/usr/bin/env bash\nexit 0\n' > "${SC_FOR_WORK}"
+  chmod +x "${SC_FOR_WORK}"
+fi
+pre_rc=0
+SHELLCHECK_BIN="${SC_FOR_WORK}" bash "${ROOT_DIR}/hack/check/agents-shell.sh" "${WORK_GITLESS}" >/dev/null 2>&1 || pre_rc=$?
+(
+  # shellcheck source=lib.sh
+  # shellcheck disable=SC1091
+  source "${ROOT_DIR}/.auto-sync/checks/lib.sh"
+  autosync::ensure_ephemeral_git "${WORK_GITLESS}"
+)
+post_rc=0
+SHELLCHECK_BIN="${SC_FOR_WORK}" bash "${ROOT_DIR}/hack/check/agents-shell.sh" "${WORK_GITLESS}" >/dev/null 2>&1 || post_rc=$?
+(
+  # shellcheck source=lib.sh
+  # shellcheck disable=SC1091
+  source "${ROOT_DIR}/.auto-sync/checks/lib.sh"
+  autosync::cleanup_ephemeral_git "${WORK_GITLESS}"
+)
+# shellcheck disable=SC2016
+if (( pre_rc == 2 && post_rc == 0 )) && [[ ! -e "${WORK_GITLESS}/.git" ]] && \
+   grep -qF 'autosync::ensure_ephemeral_git "${work_repo}"' "${PREFLIGHT_SCRIPT}" && \
+   grep -qF 'autosync::cleanup_ephemeral_git "${work_repo}"' "${PREFLIGHT_SCRIPT}"; then
+  pass "ensure_ephemeral_git on gitless work_repo copy lets agents-shell.sh succeed (rc=0) and cleans up .git"
+else
+  fail "ensure_ephemeral_git on gitless work_repo copy (pre_rc=${pre_rc}, post_rc=${post_rc})"
 fi
 
 # 3. Gitless env -i validate_k8s_deps.sh tests (AUTOSYNC_FAST_SELFTEST=true).
@@ -1061,6 +1105,61 @@ if ! neg8_err="$(run_validator_env_i "${CAND_NEG8}" "${STAGE_DISC}" 2>&1)" && \
   pass "validate_k8s_deps.sh fails closed on extra unexpected key in proposals/k8s-deps.json"
 else
   fail "validate_k8s_deps.sh fails closed on extra unexpected key in proposals/k8s-deps.json (${neg8_err})"
+fi
+
+# 3i. no_change fixture (all upstreams up_to_date without AUTOSYNC_SKIP_SOURCE_REVISION) keeps source_revision == base_sha.
+FIXTURE_NOCHANGE="${SCRATCH}/fixture-nochange"
+mkdir -p "${FIXTURE_NOCHANGE}"
+cat > "${FIXTURE_NOCHANGE}/kubernetes-releases.json" <<JSON
+[{"tag_name": "${K8S_REL_CUR}", "prerelease": false, "draft": false}]
+JSON
+cat > "${FIXTURE_NOCHANGE}/helm-releases.json" <<JSON
+[{"tag_name": "v${HELM_CUR}", "prerelease": false, "draft": false}]
+JSON
+cat > "${FIXTURE_NOCHANGE}/kustomize-tags.txt" <<TXT
+0000000000000000000000000000000000000003	refs/tags/kustomize/v${KUST_CUR}
+TXT
+cat > "${FIXTURE_NOCHANGE}/skopeo-releases.json" <<JSON
+[{"tag_name": "v${SKOPEO_CUR}", "prerelease": false, "draft": false}]
+JSON
+cat > "${FIXTURE_NOCHANGE}/vals-releases.json" <<JSON
+[{"tag_name": "v${VALS_CUR}", "prerelease": false, "draft": false}]
+JSON
+cat > "${FIXTURE_NOCHANGE}/ytt-releases.json" <<JSON
+[{"tag_name": "v${YTT_CUR}", "prerelease": false, "draft": false}]
+JSON
+cat > "${FIXTURE_NOCHANGE}/controller-runtime-releases.json" <<JSON
+[{"tag_name": "${CR_CUR}", "prerelease": false, "draft": false}]
+JSON
+cat > "${FIXTURE_NOCHANGE}/kueue-releases.json" <<JSON
+[{"tag_name": "${KUEUE_CUR}", "prerelease": false, "draft": false}]
+JSON
+STAGE_NOCHANGE="${SCRATCH}/stage-nochange/k8s-deps"
+if (
+  cd "${PREFLIGHT_REPO}" && \
+  AUTOSYNC_K8S_DEPS_FIXTURE_DIR="${FIXTURE_NOCHANGE}" \
+  AUTOSYNC_SKIP_GO_MOD_DOWNLOAD=true \
+  GOMODCACHE="${HOST_GOMODCACHE}" \
+  GOCACHE="${HOST_GOCACHE}" \
+  bash "${PREFLIGHT_REPO}/.auto-sync/scripts/preflight-k8s-deps.sh" "${STAGE_NOCHANGE}" >/dev/null
+) && \
+python3 - "${STAGE_NOCHANGE}" "${BASE_SHA}" <<'PY'
+import json
+import os
+import sys
+
+stage_dir, base_sha = sys.argv[1:3]
+with open(os.path.join(stage_dir, "upstream-records.json"), "r", encoding="utf-8") as f:
+    recs = json.load(f)
+assert all(r["status"] == "up_to_date" for r in recs), recs
+with open(os.path.join(stage_dir, "k8s-deps-preflight-report.json"), "r", encoding="utf-8") as f:
+    rep = json.load(f)
+assert rep["source_revision"] == base_sha, rep
+PY
+then
+  pass "preflight-k8s-deps.sh keeps source_revision == base_sha when all upstreams are up_to_date"
+else
+  fail "preflight-k8s-deps.sh keeps source_revision == base_sha when all upstreams are up_to_date"
 fi
 
 echo

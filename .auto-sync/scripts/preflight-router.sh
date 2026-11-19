@@ -30,12 +30,19 @@ fi
 
 PROBE_LIST_FILE="$(mktemp "${TMPDIR:-/tmp}/autosync-router-probes.XXXXXXXX")"
 DISCOVERY_JSON="${STAGE_DIR}/router-discovery.json"
-trap 'rm -f "${PROBE_LIST_FILE}" "${DISCOVERY_JSON}"' EXIT
+ROUTER_STAGE_TMP=""
+cleanup_router_preflight() {
+  rm -f "${PROBE_LIST_FILE}" "${DISCOVERY_JSON}"
+  if [[ -n "${ROUTER_STAGE_TMP:-}" && -d "${ROUTER_STAGE_TMP}" ]]; then
+    rm -rf "${ROUTER_STAGE_TMP}"
+  fi
+}
+trap cleanup_router_preflight EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
 trap 'exit 129' HUP
 
-python3 - "${REPO_ROOT}" "${STAGE_DIR}" "${AUTOSYNC_ROUTER_FIXTURE_DIR:-}" "${DISCOVERY_JSON}" "${PROBE_LIST_FILE}" <<'PY'
+python3 - "${REPO_ROOT}" "${STAGE_DIR}" "${AUTOSYNC_ROUTER_FIXTURE_DIR:-}" "${DISCOVERY_JSON}" "${PROBE_LIST_FILE}" "${BASE_SHA}" <<'PY'
 import json
 import os
 import re
@@ -43,7 +50,7 @@ import shutil
 import subprocess
 import sys
 
-repo_root, stage_dir, fixture_dir, discovery_path, probe_list_path = sys.argv[1:6]
+repo_root, stage_dir, fixture_dir, discovery_path, probe_list_path, base_sha = sys.argv[1:7]
 sys.path.insert(0, os.path.join(repo_root, ".auto-sync", "checks"))
 from dockerfile_arg import read_dockerfile_arg
 
@@ -280,6 +287,58 @@ if os.path.isdir(os.path.join(vllm_stage, ".git")):
         )
         retire_0001 = anc_res.returncode == 0
 
+# Check if vllm-router target tag implements UID-keyed TrackedPod withdrawal (0004 retirement).
+retire_0004 = False
+
+
+def read_git_tag_file(repo_dir: str, tag: str, rel_path: str) -> str:
+    if not os.path.isdir(os.path.join(repo_dir, ".git")):
+        return ""
+    res = subprocess.run(
+        ["git", "-C", repo_dir, "show", f"refs/tags/{tag}:{rel_path}"],
+        capture_output=True,
+        text=True,
+    )
+    return res.stdout if res.returncode == 0 else ""
+
+
+sd_txt = read_git_tag_file(vllm_stage, up_vllm, "src/service_discovery.rs")
+if sd_txt and re.search(r"\bstruct\s+TrackedPod\b", sd_txt) and re.search(r"\buid\s*:\s*Option<String>", sd_txt):
+    retire_0004 = True
+
+# Parse upstream Go / Rust toolchain directives at target tags.
+llmd_gomod = read_git_tag_file(llmd_stage, up_llmd, "go.mod")
+llmd_go_directive = ""
+recommended_go_version_arg = ""
+m_go = re.search(r"^\s*go\s+((\d+\.\d+)(?:\.\d+)?)\b", llmd_gomod, re.MULTILINE)
+if m_go:
+    llmd_go_directive = m_go.group(1)
+    recommended_go_version_arg = f"{m_go.group(2)}-bookworm"
+
+
+def parse_cargo_meta(cargo_txt: str) -> dict[str, str]:
+    if not cargo_txt:
+        return {}
+    out: dict[str, str] = {}
+    in_pkg = False
+    for raw_ln in cargo_txt.splitlines():
+        st = raw_ln.strip()
+        if not st or st.startswith("#"):
+            continue
+        if st.startswith("["):
+            in_pkg = st == "[package]"
+            continue
+        if in_pkg:
+            for key in ("edition", "rust-version"):
+                m_k = re.match(rf'^{re.escape(key)}\s*=\s*["\']([^"\']+)["\']', st)
+                if m_k:
+                    out[key.replace("-", "_")] = m_k.group(1).strip()
+    return out
+
+
+vllm_cargo_meta = parse_cargo_meta(read_git_tag_file(vllm_stage, up_vllm, "Cargo.toml"))
+sglang_cargo_meta = parse_cargo_meta(read_git_tag_file(sglang_stage, up_sglang, "sgl-model-gateway/Cargo.toml"))
+
 def parse_generic_target_tags(raw_val: str) -> dict[str, str]:
     parsed = {}
     for item in (seg.strip() for seg in raw_val.split(",") if seg.strip()):
@@ -408,6 +467,7 @@ with open(probe_list_path, "w", encoding="utf-8") as f:
         f.write(ref + "\n")
 
 discovery = {
+    "base_sha": base_sha,
     "recipe": recipe,
     "defaults": defaults,
     "target_tags": {
@@ -427,6 +487,13 @@ discovery = {
     },
     "epd_commit": epd_commit or epd_ref,
     "retire_0001_epd_routing": retire_0001,
+    "retire_0004_discovery_readiness": retire_0004,
+    "toolchain": {
+        "llm_d_go_directive": llmd_go_directive,
+        "recommended_go_version_arg": recommended_go_version_arg,
+        "vllm_router_cargo": vllm_cargo_meta,
+        "sglang_gateway_cargo": sglang_cargo_meta,
+    },
 }
 
 with open(discovery_path, "w", encoding="utf-8") as f:
@@ -549,15 +616,25 @@ with open(recs_path, "w", encoding="utf-8") as f:
 
 report = {
     "schemaVersion": 1,
+    "base_sha": disc.get("base_sha", ""),
+    "source_revision": disc.get("base_sha", ""),
     "stage": stage,
     "image_published": image_published,
     "retire_0001_epd_routing": disc["retire_0001_epd_routing"],
+    "retire_0004_discovery_readiness": disc.get("retire_0004_discovery_readiness", False),
     "epd_commit": disc["epd_commit"],
+    "toolchain": disc.get("toolchain") or {},
+    "stage_b_flags": {
+        "router": router_stage_b,
+        "proxy": proxy_stage_b,
+        "sidecar": sidecar_stage_b,
+    },
     "recipe": recipe,
     "target_tags": target_tags,
     "recent_tags": recent_tags,
     "defaults": defaults,
     "targets": targets,
+    "rebase": {},
 }
 
 with open(rep_path, "w", encoding="utf-8") as f:
@@ -565,7 +642,505 @@ with open(rep_path, "w", encoding="utf-8") as f:
     f.write("\n")
 PY
 
+SOURCE_REVISION="${BASE_SHA}"
+if [[ "${AUTOSYNC_SKIP_SOURCE_REVISION:-false}" != "true" ]] && \
+   autosync::preflight::has_available_upstreams "${UPSTREAM_RECORDS_JSON}"; then
+  ROUTER_STAGE_TMP="$(mktemp -d "${TMPDIR:-/tmp}/autosync-router-stage.XXXXXXXX")"
+  STAGED_TREE="${ROUTER_STAGE_TMP}/staged-tree"
+  BUNDLE_WORK="${ROUTER_STAGE_TMP}/bundle-work"
+  mkdir -p "${STAGED_TREE}" "${BUNDLE_WORK}"
+
+  COMMIT_PATHS=(".auto-sync/.stage/router")
+
+  ROUTER_STAGE_NAME="$(python3 - "${PREFLIGHT_REPORT_JSON}" <<'PY'
+import json
+import sys
+with open(sys.argv[1], "r", encoding="utf-8") as f:
+    print(json.load(f).get("stage", ""))
+PY
+)"
+
+  if [[ "${ROUTER_STAGE_NAME}" == "recipe_sync" ]]; then
+    while IFS= read -r rel_p; do
+      [[ -n "${rel_p}" ]] && COMMIT_PATHS+=("${rel_p}")
+    done < <(python3 - "${REPO_ROOT}" "${STAGE_DIR}" "${PREFLIGHT_REPORT_JSON}" "${STAGED_TREE}" "${BUNDLE_WORK}" "${ROUTER_STAGE_TMP}" <<'PY'
+import json
+import os
+import re
+import shutil
+import subprocess
+import sys
+
+repo_root, stage_dir, rep_path, staged_tree, bundle_work, tmp_root = sys.argv[1:7]
+
+with open(rep_path, "r", encoding="utf-8") as f:
+    rep = json.load(f)
+
+recipe = rep["recipe"]
+target_tags = rep["target_tags"]
+retire_0001 = bool(rep.get("retire_0001_epd_routing"))
+retire_0004 = bool(rep.get("retire_0004_discovery_readiness"))
+
+ROUTER_SPECS = [
+    ("llm-d-router", os.path.join(stage_dir, "llm-d-router"), "llm-d", ""),
+    ("vllm-router", os.path.join(stage_dir, "vllm-router"), "vllm-router", ""),
+    ("sglang-gateway", os.path.join(stage_dir, "sglang"), "sglang-gateway", "sgl-model-gateway"),
+]
+
+
+def archive_tag(stage_repo: str, tag: str, dst_dir: str, sparse_subpath: str) -> None:
+    if os.path.exists(dst_dir):
+        shutil.rmtree(dst_dir)
+    os.makedirs(dst_dir, exist_ok=True)
+    promisor = (
+        subprocess.run(
+            ["git", "-C", stage_repo, "config", "--bool", "remote.origin.promisor"],
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+        == "true"
+    )
+    cmd = ["git", "-C", stage_repo, "archive", f"refs/tags/{tag}"]
+    if promisor and sparse_subpath:
+        cmd.extend(["--", sparse_subpath])
+    arc = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    if arc.returncode != 0:
+        raise RuntimeError(f"git archive {tag} failed: {arc.stderr.decode('utf-8', 'replace')}")
+    tar_res = subprocess.run(["tar", "-x", "-C", dst_dir], input=arc.stdout, stderr=subprocess.PIPE)
+    if tar_res.returncode != 0:
+        raise RuntimeError(f"tar extract {tag} failed: {tar_res.stderr.decode('utf-8', 'replace')}")
+
+
+def has_tag(stage_repo: str, tag: str) -> bool:
+    if not os.path.isdir(os.path.join(stage_repo, ".git")):
+        return False
+    return (
+        subprocess.run(
+            ["git", "-C", stage_repo, "rev-parse", "--verify", "-q", f"refs/tags/{tag}^{{commit}}"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        ).returncode
+        == 0
+    )
+
+
+def split_patch_header_and_files(patch_text: str) -> tuple[str, list[str]]:
+    lines = patch_text.splitlines(keepends=True)
+    header_end = 0
+    for idx, ln in enumerate(lines):
+        if ln.startswith("diff --git "):
+            header_end = idx
+            break
+    else:
+        header_end = len(lines)
+    header = "".join(lines[:header_end])
+    touched = []
+    for ln in lines[header_end:]:
+        m = re.match(r"^diff --git a/(.+?) b/(.+?)$", ln.rstrip("\r\n"))
+        if m:
+            for p in (m.group(1), m.group(2)):
+                if p != "/dev/null" and p not in touched:
+                    touched.append(p)
+    return header, touched
+
+
+def copy_rel_file(src_root: str, dst_root: str, rel: str) -> bool:
+    src = os.path.join(src_root, *rel.split("/"))
+    if not os.path.isfile(src):
+        return False
+    dst = os.path.join(dst_root, *rel.split("/"))
+    os.makedirs(os.path.dirname(dst), exist_ok=True)
+    shutil.copyfile(src, dst)
+    return True
+
+
+def write_rebased_patch_file(r_repo: str, p: dict, new_sha: str, out_dir: str, old_tag: str, new_tag: str, env: dict) -> str:
+    diff_bytes = subprocess.check_output(
+        ["git", "-C", r_repo, "diff", "--full-index", f"{new_sha}^", new_sha],
+        env=env,
+    )
+    hdr = p["header"]
+    if old_tag in hdr:
+        hdr = re.sub(
+            rf"(AGAINST:.*?){re.escape(old_tag)}",
+            rf"\g<1>{new_tag}",
+            hdr,
+            count=1,
+            flags=re.DOTALL,
+        )
+    out_pf = os.path.join(out_dir, p["name"])
+    with open(out_pf, "wb") as f:
+        f.write(hdr.encode("utf-8"))
+        f.write(diff_bytes)
+    return out_pf
+
+
+git_env = {
+    **os.environ,
+    "LC_ALL": "C",
+    "GIT_AUTHOR_NAME": "autosync-preflight",
+    "GIT_AUTHOR_EMAIL": "autosync@gpustack.local",
+    "GIT_COMMITTER_NAME": "autosync-preflight",
+    "GIT_COMMITTER_EMAIL": "autosync@gpustack.local",
+}
+
+rebase_results = {}
+staged_patch_dirs = []
+
+for uid, stage_repo, subdir, sparse_subpath in ROUTER_SPECS:
+    old_tag = recipe[uid]
+    new_tag = target_tags[uid]
+    if old_tag == new_tag:
+        continue
+    if not (has_tag(stage_repo, old_tag) and has_tag(stage_repo, new_tag)):
+        rebase_results[uid] = {
+            "auto_rebased": False,
+            "reason": "missing recipe or target tag in staged clone",
+            "retired_patches": [],
+            "conflicted_files": [],
+        }
+        continue
+
+    patch_dir = os.path.join(repo_root, "pack/llm-router/patches", subdir)
+    patch_names = sorted(p for p in os.listdir(patch_dir) if p.endswith(".patch")) if os.path.isdir(patch_dir) else []
+
+    retired_names = []
+    if uid == "vllm-router":
+        if retire_0001 and "0001-epd-routing.patch" in patch_names:
+            retired_names.append("0001-epd-routing.patch")
+        if retire_0004 and "0004-discovery-readiness-and-deselect-removal.patch" in patch_names:
+            retired_names.append("0004-discovery-readiness-and-deselect-removal.patch")
+    retired_set = set(retired_names)
+
+    r_work = os.path.join(tmp_root, f"rebase-{subdir}")
+    r_repo = os.path.join(r_work, "repo")
+    r_target = os.path.join(r_work, "target")
+    os.makedirs(r_work, exist_ok=True)
+
+    try:
+        archive_tag(stage_repo, old_tag, r_repo, sparse_subpath)
+        archive_tag(stage_repo, new_tag, r_target, sparse_subpath)
+    except RuntimeError as exc:
+        rebase_results[uid] = {
+            "auto_rebased": False,
+            "reason": str(exc),
+            "retired_patches": retired_names,
+            "conflicted_files": [],
+        }
+        continue
+
+    subprocess.run(["git", "-C", r_repo, "init", "-q", "-b", "base"], check=True, env=git_env)
+    subprocess.run(["git", "-C", r_repo, "config", "commit.gpgsign", "false"], check=True, env=git_env)
+    subprocess.run(["git", "-C", r_repo, "add", "-A"], check=True, env=git_env)
+    subprocess.run(["git", "-C", r_repo, "commit", "-q", "-m", f"base {old_tag}"], check=True, env=git_env)
+
+    applied = []
+    base_apply_err = ""
+    for pname in patch_names:
+        pf = os.path.join(patch_dir, pname)
+        with open(pf, "r", encoding="utf-8") as f:
+            ptxt = f.read()
+        header_txt, touched = split_patch_header_and_files(ptxt)
+        ap = subprocess.run(["git", "-C", r_repo, "apply", "--index", pf], capture_output=True, text=True, env=git_env)
+        if ap.returncode != 0:
+            base_apply_err = f"baseline patch {pname} failed to apply onto {old_tag}: {ap.stderr.strip()}"
+            break
+        subprocess.run(["git", "-C", r_repo, "commit", "-q", "-m", pname], check=True, env=git_env)
+        sha = subprocess.check_output(["git", "-C", r_repo, "rev-parse", "HEAD"], text=True, env=git_env).strip()
+        applied.append({
+            "name": pname,
+            "sha": sha,
+            "header": header_txt,
+            "touched": touched,
+        })
+
+    if base_apply_err:
+        rebase_results[uid] = {
+            "auto_rebased": False,
+            "reason": base_apply_err,
+            "retired_patches": retired_names,
+            "conflicted_files": [],
+        }
+        continue
+
+    # Switch to orphan target branch holding exact new_tag tree.
+    subprocess.run(["git", "-C", r_repo, "checkout", "--orphan", "target"], check=True, env=git_env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    subprocess.run(["git", "-C", r_repo, "rm", "-rfq", "--", "."], check=True, env=git_env)
+    for item in os.listdir(r_repo):
+        if item == ".git":
+            continue
+        p = os.path.join(r_repo, item)
+        if os.path.isdir(p) and not os.path.islink(p):
+            shutil.rmtree(p)
+        else:
+            os.unlink(p)
+    for item in os.listdir(r_target):
+        src_p = os.path.join(r_target, item)
+        dst_p = os.path.join(r_repo, item)
+        if os.path.isdir(src_p) and not os.path.islink(src_p):
+            shutil.copytree(src_p, dst_p)
+        else:
+            shutil.copy2(src_p, dst_p)
+    subprocess.run(["git", "-C", r_repo, "add", "-A"], check=True, env=git_env)
+    subprocess.run(["git", "-C", r_repo, "commit", "-q", "-m", f"target {new_tag}"], check=True, env=git_env)
+
+    kept = [p for p in applied if p["name"] not in retired_set]
+    rebased_commits = []
+    conflict_patch = ""
+    conflicted_files: list[str] = []
+    conflict_detail = ""
+
+    for p in kept:
+        cp = subprocess.run(["git", "-C", r_repo, "cherry-pick", p["sha"]], capture_output=True, text=True, env=git_env)
+        if cp.returncode == 0:
+            new_sha = subprocess.check_output(["git", "-C", r_repo, "rev-parse", "HEAD"], text=True, env=git_env).strip()
+            rebased_commits.append((p, new_sha))
+        else:
+            conflict_patch = p["name"]
+            u_res = subprocess.run(
+                ["git", "-C", r_repo, "diff", "--name-only", "--diff-filter=U"],
+                capture_output=True,
+                text=True,
+                env=git_env,
+            )
+            conflicted_files = [ln.strip() for ln in u_res.stdout.splitlines() if ln.strip()]
+            st_short = subprocess.run(
+                ["git", "-C", r_repo, "status", "--short"],
+                capture_output=True,
+                text=True,
+                env=git_env,
+            ).stdout
+            conflict_detail = (
+                f"patch: {conflict_patch}\n"
+                f"target: {new_tag}\n"
+                f"conflicted_files:\n"
+                + "".join(f"  - {cf}\n" for cf in conflicted_files)
+                + f"\ngit status --short:\n{st_short}\n"
+                + f"cherry-pick stderr:\n{cp.stderr.strip()}\n"
+            )
+            break
+
+    if not conflict_patch:
+        out_patch_dir = os.path.join(staged_tree, "pack/llm-router/patches", subdir)
+        os.makedirs(out_patch_dir, exist_ok=True)
+        exported_paths = [
+            write_rebased_patch_file(r_repo, p, new_sha, out_patch_dir, old_tag, new_tag, git_env)
+            for p, new_sha in rebased_commits
+        ]
+
+        # Verify git apply --check in lexical order on fresh target tree.
+        chk_tree = os.path.join(r_work, "verify")
+        shutil.copytree(r_target, chk_tree)
+        subprocess.run(["git", "-C", chk_tree, "init", "-q"], check=True, env=git_env)
+        verify_ok = True
+        for out_pf in sorted(exported_paths):
+            chk = subprocess.run(["git", "-C", chk_tree, "apply", "--check", out_pf], capture_output=True, text=True, env=git_env)
+            if chk.returncode != 0:
+                verify_ok = False
+                break
+            subprocess.run(["git", "-C", chk_tree, "apply", out_pf], check=True, env=git_env)
+
+        if verify_ok:
+            rebase_results[uid] = {
+                "auto_rebased": True,
+                "retired_patches": retired_names,
+                "kept_patches": [p["name"] for p, _ in rebased_commits],
+                "conflicted_files": [],
+            }
+            staged_patch_dirs.append(f"pack/llm-router/patches/{subdir}")
+            continue
+
+    # Conflict (or verify fallback): stage target-files, cherry-pick-working, conflicts, and any already-rebased patches.
+    rebased_before_conflict = [p["name"] for p, _ in rebased_commits] if conflict_patch else []
+    if conflict_patch and rebased_commits:
+        pre_conf_patch_dir = os.path.join(bundle_work, "rebased-patches", subdir)
+        os.makedirs(pre_conf_patch_dir, exist_ok=True)
+        for p, new_sha in rebased_commits:
+            write_rebased_patch_file(r_repo, p, new_sha, pre_conf_patch_dir, old_tag, new_tag, git_env)
+
+    base_src_tree = r_target
+    if conflict_patch:
+        r_pre_conflict = os.path.join(r_work, "pre-conflict")
+        os.makedirs(r_pre_conflict, exist_ok=True)
+        arch = subprocess.Popen(
+            ["git", "-C", r_repo, "archive", "HEAD"],
+            stdout=subprocess.PIPE,
+            env=git_env,
+        )
+        assert arch.stdout is not None
+        subprocess.run(["tar", "-x", "-C", r_pre_conflict], stdin=arch.stdout, check=True)
+        arch.stdout.close()
+        if arch.wait() != 0:
+            raise RuntimeError(f"git archive HEAD failed for {subdir}")
+        base_src_tree = r_pre_conflict
+
+    all_touched = []
+    for p in kept:
+        for rel in p["touched"]:
+            if rel not in all_touched:
+                all_touched.append(rel)
+    for cf in conflicted_files:
+        if cf not in all_touched:
+            all_touched.append(cf)
+    porcelain_res = subprocess.run(
+        ["git", "-C", r_repo, "status", "--porcelain"],
+        capture_output=True,
+        text=True,
+        env=git_env,
+    )
+    for ln in porcelain_res.stdout.splitlines():
+        if len(ln) > 3:
+            rp = ln[3:].split(" -> ")[-1].strip()
+            if rp and rp not in all_touched:
+                all_touched.append(rp)
+
+    target_extras = list(all_touched)
+    if uid == "llm-d-router":
+        for extra in ("go.mod", "pkg/epp/config/loader/defaults.go"):
+            if extra not in target_extras:
+                target_extras.append(extra)
+    elif uid == "vllm-router":
+        if "Cargo.toml" not in target_extras:
+            target_extras.append("Cargo.toml")
+    elif uid == "sglang-gateway":
+        if "sgl-model-gateway/Cargo.toml" not in target_extras:
+            target_extras.append("sgl-model-gateway/Cargo.toml")
+
+    tgt_out = os.path.join(bundle_work, "target-files", subdir)
+    cp_out = os.path.join(bundle_work, "cherry-pick-working", subdir)
+    conf_out = os.path.join(bundle_work, "conflicts", subdir)
+    os.makedirs(tgt_out, exist_ok=True)
+    os.makedirs(cp_out, exist_ok=True)
+    os.makedirs(conf_out, exist_ok=True)
+
+    for rel in target_extras:
+        copy_rel_file(base_src_tree, tgt_out, rel)
+        copy_rel_file(r_repo, cp_out, rel)
+
+    if conflict_patch:
+        with open(os.path.join(conf_out, f"{conflict_patch}.txt"), "w", encoding="utf-8") as f:
+            f.write(conflict_detail)
+
+    rebase_results[uid] = {
+        "auto_rebased": False,
+        "conflict_patch": conflict_patch,
+        "conflicted_patch": conflict_patch,
+        "rebased_before_conflict": rebased_before_conflict,
+        "retired_patches": retired_names,
+        "conflicted_files": conflicted_files,
+    }
+
+rep["rebase"] = rebase_results
+with open(rep_path, "w", encoding="utf-8") as f:
+    json.dump(rep, f, indent=2)
+    f.write("\n")
+
+for pdir in staged_patch_dirs:
+    print(pdir)
+PY
+)
+  elif [[ "${ROUTER_STAGE_NAME}" == "tag_promotion" ]]; then
+    mkdir -p "${STAGED_TREE}/pkg/worker/settings" "${STAGED_TREE}/docs/reference"
+    cp -f "${REPO_ROOT}/pkg/worker/settings/value.go" "${STAGED_TREE}/pkg/worker/settings/value.go"
+    cp -f "${REPO_ROOT}/docs/reference/settings.md" "${STAGED_TREE}/docs/reference/settings.md"
+    python3 - "${PREFLIGHT_REPORT_JSON}" \
+      "${STAGED_TREE}/pkg/worker/settings/value.go" \
+      "${STAGED_TREE}/docs/reference/settings.md" <<'PY'
+import json
+import re
+import sys
+
+rep_p, vg_p, sm_p = sys.argv[1:4]
+with open(rep_p, "r", encoding="utf-8") as f:
+    rep = json.load(f)
+
+sb = rep.get("stage_b_flags") or {}
+targets = rep.get("targets") or {}
+
+
+def update_value_go(text: str, var_name: str, new_img: str) -> str:
+    pat = re.compile(
+        rf'({re.escape(var_name)}\s*=\s*settings\.NewEditable\([^)]*?setting\.InitializeFromEnv\(")([^"]+)("\))',
+        re.DOTALL,
+    )
+    out, n = pat.subn(rf'\g<1>{new_img}\g<3>', text, count=1)
+    if n != 1:
+        raise SystemExit(f"FAIL: could not update {var_name} in value.go")
+    return out
+
+
+def update_settings_md(text: str, key: str, new_img: str) -> str:
+    pat = re.compile(
+        rf'^(\| `{re.escape(key)}`<br/>.*?<br/>Default: `)([^`]+)(`)',
+        re.MULTILINE,
+    )
+    out, n = pat.subn(rf'\g<1>{new_img}\g<3>', text, count=1)
+    if n != 1:
+        raise SystemExit(f"FAIL: could not update {key} in settings.md")
+    return out
+
+
+with open(vg_p, "r", encoding="utf-8") as f:
+    vg_txt = f.read()
+with open(sm_p, "r", encoding="utf-8") as f:
+    sm_txt = f.read()
+
+if sb.get("router"):
+    vg_txt = update_value_go(vg_txt, "ModelDeploymentRouterImage", targets["router_image"])
+    sm_txt = update_settings_md(sm_txt, "model-deployment-router-image", targets["router_image"])
+if sb.get("proxy"):
+    vg_txt = update_value_go(vg_txt, "ModelDeploymentRouterProxyImage", targets["proxy_image"])
+    sm_txt = update_settings_md(sm_txt, "model-deployment-router-proxy-image", targets["proxy_image"])
+if sb.get("sidecar"):
+    vg_txt = update_value_go(vg_txt, "ModelDeploymentRoutingSidecarImage", targets["sidecar_image"])
+    sm_txt = update_settings_md(sm_txt, "model-deployment-routing-sidecar-image", targets["sidecar_image"])
+
+with open(vg_p, "w", encoding="utf-8") as f:
+    f.write(vg_txt)
+with open(sm_p, "w", encoding="utf-8") as f:
+    f.write(sm_txt)
+PY
+    COMMIT_PATHS+=(
+      "pkg/worker/settings/value.go"
+      "docs/reference/settings.md"
+    )
+  fi
+
+  BUNDLE_SPECS=(
+    "${PREFLIGHT_REPORT_JSON}"
+    "${UPSTREAM_RECORDS_JSON}"
+    "${MANIFESTS_JSON}"
+  )
+  for sub_dir_name in target-files cherry-pick-working conflicts rebased-patches; do
+    if [[ -d "${BUNDLE_WORK}/${sub_dir_name}" ]]; then
+      BUNDLE_SPECS+=("${BUNDLE_WORK}/${sub_dir_name}")
+    fi
+  done
+  autosync::preflight::populate_stage_bundle "${STAGED_TREE}" "router" "${BUNDLE_SPECS[@]}"
+
+  SOURCE_REVISION="$(
+    autosync::preflight::commit_staged_tree_revision \
+      "${REPO_ROOT}" "${BASE_SHA}" \
+      "chore(router): stage preflight bundle and rebased patches" \
+      "${STAGED_TREE}" \
+      "${COMMIT_PATHS[@]}"
+  )"
+  if [[ "${SOURCE_REVISION}" != "${BASE_SHA}" ]]; then
+    python3 - "${PREFLIGHT_REPORT_JSON}" "${SOURCE_REVISION}" <<'PY'
+import json
+import sys
+p, src_rev = sys.argv[1:3]
+with open(p, "r", encoding="utf-8") as f:
+    rep = json.load(f)
+rep["source_revision"] = src_rev
+with open(p, "w", encoding="utf-8") as f:
+    json.dump(rep, f, indent=2)
+    f.write("\n")
+PY
+  fi
+fi
+
 COMPACT_RECORDS="$(python3 -c 'import json,sys; print(json.dumps(json.load(open(sys.argv[1])), separators=(",",":")))' "${UPSTREAM_RECORDS_JSON}")"
 autosync::preflight::write_github_output "stage_dir" "${STAGE_DIR}"
 autosync::preflight::write_github_output "upstream_records" "${COMPACT_RECORDS}"
-autosync::preflight::write_github_output "source_revision" "${BASE_SHA}"
+autosync::preflight::write_github_output "source_revision" "${SOURCE_REVISION}"

@@ -23,6 +23,8 @@ autosync::bootstrap_env() {
   local saved_hugo_bin_dir=""
   local saved_node_bin_dir=""
   local saved_uv_bin_dir=""
+  local saved_crane_bin_dir=""
+  local saved_docker_bin_dir=""
 
   if [[ -n "${stage_dir}" && -d "${stage_dir}" ]]; then
     stage_dir="$(cd "${stage_dir}" && pwd -P)"
@@ -63,6 +65,14 @@ autosync::bootstrap_env() {
           AUTOSYNC_SAVED_UV_BIN_DIR)
             saved_uv_bin_dir="${tc_val}"
             export AUTOSYNC_SAVED_UV_BIN_DIR="${tc_val}"
+            ;;
+          AUTOSYNC_SAVED_CRANE_BIN_DIR)
+            saved_crane_bin_dir="${tc_val}"
+            export AUTOSYNC_SAVED_CRANE_BIN_DIR="${tc_val}"
+            ;;
+          AUTOSYNC_SAVED_DOCKER_BIN_DIR)
+            saved_docker_bin_dir="${tc_val}"
+            export AUTOSYNC_SAVED_DOCKER_BIN_DIR="${tc_val}"
             ;;
         esac
       done < "${stage_dir}/toolchain.env"
@@ -127,6 +137,12 @@ autosync::bootstrap_env() {
   fi
   if [[ -n "${saved_uv_bin_dir}" && -d "${saved_uv_bin_dir}" ]]; then
     prefix_dirs+=("${saved_uv_bin_dir}")
+  fi
+  if [[ -n "${saved_crane_bin_dir}" && -d "${saved_crane_bin_dir}" ]]; then
+    prefix_dirs+=("${saved_crane_bin_dir}")
+  fi
+  if [[ -n "${saved_docker_bin_dir}" && -d "${saved_docker_bin_dir}" ]]; then
+    prefix_dirs+=("${saved_docker_bin_dir}")
   fi
 
   for seg in "${prefix_dirs[@]+"${prefix_dirs[@]}"}"; do

@@ -6,7 +6,23 @@ You maintain the KV-cache and remote-weight transfer recipes and default image t
 - `pack/mirrored-modelexpress-server/Dockerfile` (`ai-dynamo/modelexpress`)
 - `pkg/worker/settings/value.go`, `docs/reference/settings.md`, and `deploy/gpustack-operator/chart/values.yaml` (Stage B tag promotion only)
 
-Before editing any file, inspect `$AUTOSYNC_STAGE_DIR/kv-transfer-preflight-report.json` and `$AUTOSYNC_STAGE_DIR/image-manifests.json`.
+## Staged Preflight Artifacts (`.auto-sync/.stage/kv-transfer/`)
+
+Inside the offline `linux-bwrap` sandbox, host toolchains (`go`, `hugo`, `helm-docs`, `helm-schema`,
+`docker`) and external host staging directories are NOT mounted. Always inspect
+`.auto-sync/.stage/kv-transfer/` FIRST (falling back to `$AUTOSYNC_STAGE_DIR` only if
+`.auto-sync/.stage/kv-transfer/` is absent):
+
+- `.auto-sync/.stage/kv-transfer/kv-transfer-preflight-report.json`
+- `.auto-sync/.stage/kv-transfer/upstream-records.json`
+- `.auto-sync/.stage/kv-transfer/image-manifests.json`
+- `.auto-sync/.stage/kv-transfer/runner-001_channel_generation.patch` (when staged from `gpustack/runner`)
+- `.auto-sync/.stage/kv-transfer/mooncake/` (upstream `CMakeLists.txt`, `scripts/build_wheel.sh`, `mooncake-transfer-engine/example/CMakeLists.txt`, and `mooncake-transfer-engine/src/transport/ascend_transport/` when `mooncake` drifted)
+
+**Read-only stage rule:** `.auto-sync/.stage/**` is read-only host-staged context outside
+`scope.writable`. **NEVER** edit, move, or delete any file under `.auto-sync/.stage/**` (doing so
+fails `scope-guard`). Loopwright automatically strips `.auto-sync/.stage/**` when running
+`validate_kv_transfer.sh` on the host and when publishing the Pull Request.
 
 ## 1. Two-Stage Image Publication Gate
 
@@ -20,31 +36,29 @@ Never reference an unpublished `gpustack/*` container image tag in `pkg/worker/s
     - `.auto-sync/proposals/kv-transfer.json` (`"stage": "recipe_sync"`)
   - Leave `pkg/worker/settings/value.go`, `docs/reference/settings.md`, and `deploy/gpustack-operator/chart/**` untouched.
 - **Stage B (`stage: "tag_promotion"`, `image_published: true`)**:
-  - Only when `$AUTOSYNC_STAGE_DIR/kv-transfer-preflight-report.json` reports `"stage": "tag_promotion"` AND `$AUTOSYNC_STAGE_DIR/image-manifests.json` confirms `crane manifest` digests exist for the promoted tags:
-    - Update `KVCacheBackendImage` and/or `ModelDeploymentModelExpressServerImage` in `pkg/worker/settings/value.go` and their matching `Default:` entries in `docs/reference/settings.md`.
-    - Update `modelTransfer.images.nvidia`, `modelTransfer.images.amd`, and/or `modelTransfer.images.ascend` in `deploy/gpustack-operator/chart/values.yaml`, then run `make generate chart` so `deploy/gpustack-operator/chart/values.schema.json` and `deploy/gpustack-operator/chart/README.md` stay in sync.
-    - Update `.auto-sync/proposals/kv-transfer.json`: set `"stage": "tag_promotion"`, and whenever `$AUTOSYNC_STAGE_DIR/upstream-records.json` carries `<ver>+stage-b` for an `upstreamId` (such as `mooncake`, `modelexpress`, or `gpustack-runner`), you MUST write that exact `<ver>+stage-b` string into `versions[<upstreamId>]` so open-PR deduplication settles cleanly on subsequent runs.
+  - Host preflight pre-stages promoted tags into `pkg/worker/settings/value.go`, `docs/reference/settings.md`, and `deploy/gpustack-operator/chart/{values.yaml,values.schema.json,README.md}` when `stage: "tag_promotion"` is ready; verify them against `kv-transfer-preflight-report.json` and `image-manifests.json` (confirming `crane manifest` digests exist for the promoted tags).
+  - Update `.auto-sync/proposals/kv-transfer.json`: set `"stage": "tag_promotion"`, and whenever `upstream-records.json` carries `<ver>+stage-b` for an `upstreamId` (`mooncake`, `modelexpress`, or `gpustack-runner`), write that exact `<ver>+stage-b` string into `versions[<upstreamId>]` so open-PR deduplication settles cleanly on subsequent runs.
   - Do NOT modify any other settings in `value.go` or `settings.md` (such as `ModelDeploymentRouterImage`, `ModelDeploymentRouterProxyImage`, or `ModelDeploymentRoutingSidecarImage`) or any other keys in `deploy/gpustack-operator/chart/values.yaml`.
 
 ## 2. Five-Block `MOONCAKE_VERSION` `case` Audit
 
 `pack/mirrored-mooncake/Dockerfile` contains four stage release guards (`builder`, `cuda`, `cann`, `rocm`) plus a fifth `context_manager.cpp` conditional patch block in the `cann` stage:
-1. Before changing `ARG MOONCAKE_VERSION="..."`, inspect the upstream Mooncake release in `$AUTOSYNC_STAGE_DIR` (or release notes) to verify whether the existing CMake/wheel/wrapper steps and the `ascend_direct_transport/context_manager.cpp` glob fix still apply or need adjustment.
-2. Update all four `case "${MOONCAKE_VERSION}" in ...` release-guard blocks AND audit the fifth `context_manager.cpp` `case` block in lockstep so every build stage accepts the pinned `MOONCAKE_VERSION`.
+1. Before changing `ARG MOONCAKE_VERSION="..."`, inspect the staged upstream Mooncake files under `.auto-sync/.stage/kv-transfer/mooncake/` to verify whether the existing CMake/wheel/wrapper steps and the `ascend_direct_transport/context_manager.cpp` glob fix still apply or need adjustment.
+2. `validate_kv_transfer.sh`'s `parse_case_arms` is a line-oriented static parser that requires `pattern1|pattern2)` and `;;` in standard `case "${MOONCAKE_VERSION}" in` format, and requires an explicit version arm (e.g. `0.3.14*`) in all 4 release-guard blocks AND the 5th `context_manager.cpp` block.
+3. When Mooncake `0.3.14+` wraps `file(GLOB ASCEND_SOURCES ...)` onto multiple lines (`"ubshmem_transport/*.cpp" "*.cpp"` followed by `"ascend_direct_transport/utils.cpp"`) while `ascend_allocator.cpp` still references `ContextManager::getInstance()`, add a separate `0.3.14*)` arm in the `context_manager.cpp` `case` block that patches `"ascend_direct_transport/context_manager.cpp"` alongside `"ascend_direct_transport/utils.cpp"` and verifies with `grep -q 'ascend_direct_transport/context_manager\.cpp'`.
 
-## 3. Byte-Identical `gpustack/runner` HIXL Parity
+## 3. `gpustack/runner` HIXL Parity & `NIXL_ROCM_VERSION`
 
-`HIXL_COMMIT` in `pack/model-transfer/Dockerfile` and `pack/model-transfer/patches/hixl/001_channel_generation.patch` MUST remain aligned with `VLLM_HIXL_COMMIT` and `pack/cann/patches/hixl/001_channel_generation.patch` in `$AUTOSYNC_STAGE_DIR/gpustack-runner`:
-- If `gpustack/runner` moved `VLLM_HIXL_COMMIT` or updated `pack/cann/patches/hixl/001_channel_generation.patch`, synchronize `HIXL_COMMIT` and copy the exact patch bytes into `pack/model-transfer/patches/hixl/001_channel_generation.patch`.
-- Verify `patch --dry-run --batch --fuzz=0 -p1` succeeds against `$AUTOSYNC_STAGE_DIR/hixl` at `HIXL_COMMIT`.
+- When `runner.hixl_commit` is non-empty in `kv-transfer-preflight-report.json`, `HIXL_COMMIT` in `pack/model-transfer/Dockerfile` MUST match `runner.hixl_commit` (not `hicann/hixl` HEAD if `gpustack/runner` has not bumped `VLLM_HIXL_COMMIT`), and `pack/model-transfer/patches/hixl/001_channel_generation.patch` MUST stay byte-identical to `runner-001_channel_generation.patch` (pre-copied by host preflight when drifted).
+- When updating `ARG NIXL_ROCM_REF`, set `ARG NIXL_ROCM_VERSION` to the exact `nixl_rocm.project_version` recorded in `kv-transfer-preflight-report.json` (parsed from `pyproject.toml` `[project].version` at `NIXL_ROCM_REF`).
 
 ## 4. PyPI Wheel Parity for `NIXL_VERSION`
 
-Only bump `ARG NIXL_VERSION="..."` in `pack/model-transfer/Dockerfile` to a stable version where ALL THREE PyPI packages (`nixl`, `nixl-cu12`, and `nixl-cu13`) publish Linux `x86_64` and `aarch64` wheels (using the `selected_version` reported in `$AUTOSYNC_STAGE_DIR/kv-transfer-preflight-report.json`).
+Only bump `ARG NIXL_VERSION="..."` in `pack/model-transfer/Dockerfile` to a stable version where ALL THREE PyPI packages (`nixl`, `nixl-cu12`, and `nixl-cu13`) publish Linux `x86_64` and `aarch64` wheels (using `nixl_pypi.selected_version` in `kv-transfer-preflight-report.json`).
 
 ## 5. ModelExpress `--locked` Cargo Verification
 
-When bumping `ARG MODELEXPRESS_COMMIT=...` in `pack/mirrored-modelexpress-server/Dockerfile`, confirm the upstream `Cargo.lock` builds cleanly with `--locked --bin modelexpress-server --features memory-backend`.
+When bumping `ARG MODELEXPRESS_COMMIT=...` in `pack/mirrored-modelexpress-server/Dockerfile`, full `docker buildx` builder verification runs on the host in `validate_kv_transfer.sh` after you submit.
 
 ## 6. Proposal Artifact
 
