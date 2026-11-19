@@ -1160,15 +1160,23 @@ EOF
     fail "populate_stage_bundle fails cleanly with FAIL: on dangling symlink inside directory walk (${broken_err})"
   fi
 
-  mkdir -p "${scratch}/bundle-cycle-src/subdir"
+  mkdir -p "${scratch}/bundle-cycle-src/subdir" "${scratch}/bundle-cycle-src/real_sibling"
   printf 'cycle-ok\n' > "${scratch}/bundle-cycle-src/subdir/keep.txt"
-  ln -s . "${scratch}/bundle-cycle-src/subdir/loop"
-  if autosync::preflight::populate_stage_bundle "${scratch}/bundle-cycle-stage" "demo" "${scratch}/bundle-cycle-src" && \
+  printf 'sibling-ok\n' > "${scratch}/bundle-cycle-src/real_sibling/sibling.txt"
+  ln -s .. "${scratch}/bundle-cycle-src/subdir/loop"
+  ln -s real_sibling "${scratch}/bundle-cycle-src/alias"
+  local cycle_err=""
+  if cycle_err="$(autosync::preflight::populate_stage_bundle "${scratch}/bundle-cycle-stage" "demo" "${scratch}/bundle-cycle-src" 2>&1)" && \
+     grep -q '^WARN: skipping directory symlink cycle in stage bundle:' <<<"${cycle_err}" && \
      [[ -f "${scratch}/bundle-cycle-stage/.auto-sync/.stage/demo/bundle-cycle-src/subdir/keep.txt" ]] && \
-     [[ ! -e "${scratch}/bundle-cycle-stage/.auto-sync/.stage/demo/bundle-cycle-src/subdir/loop" ]]; then
-    pass "populate_stage_bundle terminates cleanly on directory symlink cycle"
+     [[ ! -e "${scratch}/bundle-cycle-stage/.auto-sync/.stage/demo/bundle-cycle-src/subdir/loop" ]] && \
+     [[ -f "${scratch}/bundle-cycle-stage/.auto-sync/.stage/demo/bundle-cycle-src/real_sibling/sibling.txt" ]] && \
+     [[ -f "${scratch}/bundle-cycle-stage/.auto-sync/.stage/demo/bundle-cycle-src/alias/sibling.txt" ]] && \
+     grep -qx 'sibling-ok' "${scratch}/bundle-cycle-stage/.auto-sync/.stage/demo/bundle-cycle-src/real_sibling/sibling.txt" && \
+     grep -qx 'sibling-ok' "${scratch}/bundle-cycle-stage/.auto-sync/.stage/demo/bundle-cycle-src/alias/sibling.txt"; then
+    pass "populate_stage_bundle skips ancestor symlink cycle with WARN and copies non-cyclic sibling directory symlinks"
   else
-    fail "populate_stage_bundle terminates cleanly on directory symlink cycle"
+    fail "populate_stage_bundle skips ancestor symlink cycle with WARN and copies non-cyclic sibling directory symlinks (${cycle_err})"
   fi
 
   local bundle_rev

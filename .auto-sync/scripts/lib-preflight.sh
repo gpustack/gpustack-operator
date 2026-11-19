@@ -933,6 +933,39 @@ def copy_regular(src_file: str, rel_dest: str) -> None:
     os.chmod(dst, 0o644)
 
 
+def walk_bundle_dir(
+    cur_dir: str, rel_prefix: str, ancestors: frozenset[tuple[int, int]]
+) -> None:
+    if os.path.islink(cur_dir) and not os.path.exists(cur_dir):
+        raise SystemExit(f"FAIL: stage bundle source contains dangling symlink: {cur_dir}")
+    st = os.stat(cur_dir)
+    inode_key = (st.st_dev, st.st_ino)
+    if inode_key in ancestors:
+        print(
+            f"WARN: skipping directory symlink cycle in stage bundle: {cur_dir}",
+            file=sys.stderr,
+        )
+        return
+    next_ancestors = ancestors | {inode_key}
+    for entry in sorted(os.listdir(cur_dir)):
+        if entry == ".git":
+            continue
+        entry_path = os.path.join(cur_dir, entry)
+        if os.path.islink(entry_path) and not os.path.exists(entry_path):
+            raise SystemExit(
+                f"FAIL: stage bundle source contains dangling symlink: {entry_path}"
+            )
+        entry_rel = (
+            posixpath.join(rel_prefix, entry)
+            if rel_prefix and rel_prefix != "."
+            else entry
+        )
+        if os.path.isdir(entry_path):
+            walk_bundle_dir(entry_path, entry_rel, next_ancestors)
+        else:
+            copy_regular(entry_path, entry_rel)
+
+
 for spec in specs:
     if "::" in spec:
         raw_src, raw_dest = spec.split("::", 1)
@@ -948,30 +981,7 @@ for spec in specs:
     if os.path.isfile(real_root):
         copy_regular(real_root, safe_base)
     elif os.path.isdir(real_root):
-        seen_dirs: set[tuple[int, int]] = set()
-        for cur, dirs, names in os.walk(real_root, followlinks=True):
-            if os.path.islink(cur) and not os.path.exists(cur):
-                raise SystemExit(f"FAIL: stage bundle source contains dangling symlink: {cur}")
-            st = os.stat(cur)
-            dir_key = (st.st_dev, st.st_ino)
-            if dir_key in seen_dirs:
-                dirs[:] = []
-                continue
-            seen_dirs.add(dir_key)
-            for d in list(dirs):
-                dp = os.path.join(cur, d)
-                if os.path.islink(dp) and not os.path.exists(dp):
-                    raise SystemExit(f"FAIL: stage bundle source contains dangling symlink: {dp}")
-            dirs[:] = sorted(d for d in dirs if d != ".git")
-            for name in sorted(names):
-                fp = os.path.join(cur, name)
-                if os.path.islink(fp) and not os.path.exists(fp):
-                    raise SystemExit(f"FAIL: stage bundle source contains dangling symlink: {fp}")
-                rel_sub = os.path.relpath(fp, real_root).replace(os.sep, "/")
-                if rel_sub == ".git" or rel_sub.startswith(".git/"):
-                    continue
-                target_rel = posixpath.join(safe_base, rel_sub) if safe_base != "." else rel_sub
-                copy_regular(fp, target_rel)
+        walk_bundle_dir(real_root, safe_base, frozenset())
     else:
         raise SystemExit(f"FAIL: unsupported stage bundle source type: {raw_src}")
 PY
