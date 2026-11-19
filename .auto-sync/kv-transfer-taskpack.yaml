@@ -12,6 +12,8 @@ spec:
       - pack/model-transfer
       - pack/mirrored-modelexpress-server
       - pkg/worker/settings/value.go
+      - pkg/worker/settings/value_test.go
+      - pkg/worker/controllers/worker/model_deployment_transfer_test.go
       - docs/reference/settings.md
       - deploy/gpustack-operator/chart/values.yaml
       - deploy/gpustack-operator/chart/values.schema.json
@@ -111,6 +113,14 @@ spec:
     commentPrefixes:
       - /loopwright
       - /auto-sync
+  models:
+    - provider: zai-coding-cn
+      id: glm-5.3
+      thinking: low
+      samplingParams:
+        temperature: 0.4
+        top_p: 0.9
+      apiKeyEnv: LOOPWRIGHT_PROVIDER_TOKEN
   limits:
     wallTimeSeconds: 3600
     commandTimeoutSeconds: 1800

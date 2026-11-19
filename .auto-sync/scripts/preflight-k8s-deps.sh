@@ -992,6 +992,8 @@ with open(records_path, "w", encoding="utf-8") as f:
     f.write("\n")
 PY
 
+autosync::preflight::apply_force_to_upstream_records "${upstream_records_json}"
+
 if [[ "${AUTOSYNC_SKIP_SOURCE_REVISION:-false}" != "true" ]] && \
    autosync::preflight::has_available_upstreams "${upstream_records_json}"; then
   stage_commit_root=""

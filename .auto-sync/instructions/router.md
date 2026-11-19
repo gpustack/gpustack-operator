@@ -45,9 +45,9 @@ Never reference an unpublished `gpustack/*` container image tag in `pkg/worker/s
   - Update ONLY `pack/llm-router/Dockerfile`, `pack/llm-router/patches/**`, and `.auto-sync/proposals/router.json` (`"stage": "recipe_sync"`).
   - Leave `pkg/worker/settings/value.go` and `docs/reference/settings.md` untouched.
 - **Stage B (`stage: "tag_promotion"`, `image_published: true`)**:
-  - Host preflight pre-stages promoted image updates into `pkg/worker/settings/value.go` and `docs/reference/settings.md`; verify them against `router-preflight-report.json` and `image-manifests.json`.
+  - Host preflight pre-stages promoted image updates into `pkg/worker/settings/value.go`, `pkg/worker/settings/value_test.go`, `pkg/worker/controllers/worker/model_deployment_router_test.go`, `pkg/worker/controllers/worker/model_deployment_render_test.go`, and `docs/reference/settings.md`; verify them against `router-preflight-report.json` and `image-manifests.json`.
   - Update `.auto-sync/proposals/router.json`: set `"stage": "tag_promotion"`, and whenever `upstream-records.json` carries `<ver>+stage-b` for an `upstreamId`, write that exact `<ver>+stage-b` string into `versions[<upstreamId>]`.
-  - Do NOT modify any other settings in `value.go` or `settings.md` (such as `KVCacheBackendImage` or `ModelDeploymentModelExpressServerImage`).
+  - Do NOT modify any other settings in `value.go`, `value_test.go`, or `settings.md` (such as `KVCacheBackendImage` or `ModelDeploymentModelExpressServerImage`).
 - **No Change (`stage: "no_change"`)**:
   - When all three router upstreams are `up_to_date` and no promoted image tag is ready, settle cleanly as `no_change`.
 

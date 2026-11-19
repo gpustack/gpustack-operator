@@ -1169,7 +1169,9 @@ if any_not_ready and summary_path and not os.path.islink(summary_path):
         pass
 PY
 
-if (( ${#STAGED_CHARTS[@]} > 0 )) && [[ "${AUTOSYNC_SKIP_SOURCE_REVISION:-false}" != "true" ]]; then
+autosync::preflight::apply_force_to_upstream_records "${UPSTREAM_RECORDS_JSON}"
+
+if ( (( ${#STAGED_CHARTS[@]} > 0 )) || autosync::preflight::has_available_upstreams "${UPSTREAM_RECORDS_JSON}" ) && [[ "${AUTOSYNC_SKIP_SOURCE_REVISION:-false}" != "true" ]]; then
   autosync::preflight::populate_stage_bundle "${STAGE_WORK}" "charts" \
     "${REPORT_JSON}" \
     "${UPSTREAM_RECORDS_JSON}" \

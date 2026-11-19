@@ -1164,6 +1164,112 @@ else
   fail "preflight-k8s-deps.sh keeps source_revision == base_sha when all upstreams are up_to_date"
 fi
 
+# 3j. Regression coverage for offline uv-cache + uv-python + module-path copy failure safety + gc.auto=0 + AUTOSYNC_FORCE.
+REG_STAGE="${SCRATCH}/reg-stage/k8s-deps"
+REG_CAND="${SCRATCH}/reg-cand"
+REG_FAKEBIN="${SCRATCH}/reg-fakebin"
+REG_EMPTY_HOME="${SCRATCH}/reg-empty-home"
+mkdir -p "${REG_STAGE}/.sbin" "${REG_STAGE}/uv-cache" "${REG_STAGE}/uv-python/cpython-3.11" "${REG_CAND}/go.mod.dir" "${REG_FAKEBIN}" "${REG_EMPTY_HOME}"
+printf 'cached-wheel\n' > "${REG_STAGE}/uv-cache/wheel.whl"
+printf 'python-3.11\n' > "${REG_STAGE}/uv-python/cpython-3.11/python"
+chmod -R a-w "${REG_STAGE}/uv-cache" "${REG_STAGE}/uv-python"
+REG_TMP="${SCRATCH}/reg-tmp"
+mkdir -p "${REG_TMP}"
+# shellcheck disable=SC2016
+if env -i PATH=/usr/local/bin:/usr/bin:/bin HOME="${REG_EMPTY_HOME}" TMPDIR="${REG_TMP}" bash -c '
+  source "$1/.auto-sync/checks/lib.sh"
+  autosync::bootstrap_env "$2" "$3"
+  [[ -n "${UV_CACHE_DIR:-}" && "${UV_CACHE_DIR}" != "$2/uv-cache" && -w "${UV_CACHE_DIR}" ]]
+  [[ -f "${UV_CACHE_DIR}/wheel.whl" && -w "${UV_CACHE_DIR}/wheel.whl" && "${UV_OFFLINE:-}" == "1" ]]
+  [[ "${UV_PYTHON_INSTALL_DIR:-}" == "$2/uv-python" ]]
+  [[ "${UV_PYTHON_PREFERENCE:-}" == "only-managed" ]]
+' _ "${ROOT_DIR}" "${REG_STAGE}" "${REG_CAND}"; then
+  pass "bootstrap_env copies read-only uv-cache writable and exports UV_PYTHON_INSTALL_DIR under empty HOME"
+else
+  fail "bootstrap_env copies read-only uv-cache writable and exports UV_PYTHON_INSTALL_DIR under empty HOME"
+fi
+chmod -R u+w "${REG_STAGE}/uv-cache" "${REG_STAGE}/uv-python" 2>/dev/null || true
+
+# Failing command in run_in_module_path_copy must preserve target files and exit cleanly without unbound variable.
+printf 'keep-me\n' > "${REG_CAND}/sentinel.txt"
+reg_mod_rc=0
+reg_mod_err=""
+reg_mod_err="$(TMPDIR="${REG_TMP}" bash -c '
+  source "$1"
+  autosync::ensure_ephemeral_git "$2"
+  [[ "$(git -C "$2" config --get gc.auto || true)" == "0" ]]
+  autosync::run_in_module_path_copy "$2" bash -c "rm -f sentinel.txt; exit 9"
+' _ "${ROOT_DIR}/.auto-sync/checks/lib.sh" "${REG_CAND}" 2>&1)" || reg_mod_rc=$?
+if (( reg_mod_rc == 9 )) && [[ -f "${REG_CAND}/sentinel.txt" ]] && ! grep -q "unbound variable" <<<"${reg_mod_err}"; then
+  pass "run_in_module_path_copy preserves target files on command failure and sets gc.auto=0"
+else
+  fail "run_in_module_path_copy preserves target files on command failure (rc=${reg_mod_rc}, err=${reg_mod_err})"
+fi
+
+# warm_caches must leave uv-cache and uv-python empty when uv fails so offline validators do not see partial state.
+UV_FAIL_STAGE="${SCRATCH}/uv-fail-stage"
+UV_FAIL_REPO="${SCRATCH}/uv-fail-repo"
+mkdir -p "${UV_FAIL_STAGE}" "${UV_FAIL_REPO}/model-transfer/python"
+cat > "${REG_FAKEBIN}/uv" <<'SH'
+#!/usr/bin/env bash
+if [[ -n "${UV_CACHE_DIR:-}" ]]; then
+  mkdir -p "${UV_CACHE_DIR}"
+  : > "${UV_CACHE_DIR}/CACHEDIR.TAG"
+fi
+if [[ -n "${UV_PYTHON_INSTALL_DIR:-}" ]]; then
+  mkdir -p "${UV_PYTHON_INSTALL_DIR}"
+  : > "${UV_PYTHON_INSTALL_DIR}/partial-python"
+fi
+exit 1
+SH
+chmod +x "${REG_FAKEBIN}/uv"
+if bash -c '
+  export PATH="$4:${PATH}"
+  cd "$1"
+  git init -q
+  source "$2/.auto-sync/scripts/lib-preflight.sh"
+  export GOPROXY="https://proxy.golang.org,direct"
+  autosync::preflight::warm_caches "$3" --go >/dev/null 2>&1
+  [[ -z "$(ls -A "$3/uv-cache" 2>/dev/null)" ]]
+  [[ -z "$(ls -A "$3/uv-python" 2>/dev/null)" ]]
+' _ "${UV_FAIL_REPO}" "${ROOT_DIR}" "${UV_FAIL_STAGE}" "${REG_FAKEBIN}"; then
+  pass "warm_caches leaves uv-cache and uv-python empty when uv fails"
+else
+  fail "warm_caches leaves uv-cache and uv-python empty when uv fails"
+fi
+
+# 3k. AUTOSYNC_FORCE=true promotes the first up_to_date record to available on no_change fixtures without altering versions.
+STAGE_FORCE="${SCRATCH}/stage-force/k8s-deps"
+if (
+  cd "${PREFLIGHT_REPO}" && \
+  AUTOSYNC_FORCE=true \
+  AUTOSYNC_K8S_DEPS_FIXTURE_DIR="${FIXTURE_NOCHANGE}" \
+  AUTOSYNC_SKIP_GO_MOD_DOWNLOAD=true \
+  GOMODCACHE="${HOST_GOMODCACHE}" \
+  GOCACHE="${HOST_GOCACHE}" \
+  bash "${PREFLIGHT_REPO}/.auto-sync/scripts/preflight-k8s-deps.sh" "${STAGE_FORCE}" >/dev/null
+) && \
+python3 - "${STAGE_FORCE}" "${BASE_SHA}" <<'PY'
+import json
+import os
+import sys
+
+stage_dir, base_sha = sys.argv[1:3]
+with open(os.path.join(stage_dir, "upstream-records.json"), "r", encoding="utf-8") as f:
+    recs = json.load(f)
+avail = [r for r in recs if r.get("status") == "available"]
+assert len(avail) == 1, recs
+assert "(forced via AUTOSYNC_FORCE=true)" in avail[0].get("reason", ""), avail[0]
+with open(os.path.join(stage_dir, "k8s-deps-preflight-report.json"), "r", encoding="utf-8") as f:
+    rep = json.load(f)
+assert rep["source_revision"] != base_sha, rep
+PY
+then
+  pass "preflight-k8s-deps.sh honors AUTOSYNC_FORCE=true by promoting an up_to_date record and staging source_revision"
+else
+  fail "preflight-k8s-deps.sh AUTOSYNC_FORCE=true promotion"
+fi
+
 echo
 if (( FAILS > 0 )); then
   printf 'K8S-DEPS SELFTEST FAILED: %d failure(s), %d passed\n' "${FAILS}" "${PASSES}" >&2

@@ -667,6 +667,48 @@ else
   fail "ensure_ephemeral_git restores tracked symlinks, excludes site/public, passes docs/specs/crossrefs, and cleans up"
 fi
 
+# 3h. preflight-priors.sh passes --tools hugo to warm_caches when live or AUTOSYNC_WARM_TOOLS=true.
+WARM_SPY_REPO="${SCRATCH}/warm-spy-repo"
+mkdir -p "${WARM_SPY_REPO}/.auto-sync/scripts" "${WARM_SPY_REPO}/.auto-sync/checks"
+: > "${WARM_SPY_REPO}/.auto-sync/checks/lib.sh"
+cp "${ROOT_DIR}/.auto-sync/scripts/preflight-priors.sh" "${WARM_SPY_REPO}/.auto-sync/scripts/preflight-priors.sh"
+cat > "${WARM_SPY_REPO}/.auto-sync/scripts/lib-preflight.sh" <<'SH'
+autosync::preflight::repo_root() { echo "${WARM_SPY_REPO}"; }
+autosync::preflight::init_stage() { mkdir -p "${2}"; echo "${2}"; }
+autosync::preflight::snapshot_baselines() { :; }
+autosync::preflight::warm_caches() {
+  printf '%s\n' "$*" > "${WARM_CALL_LOG}"
+  exit 0
+}
+SH
+if (
+  cd "${WARM_SPY_REPO}"
+  git init -q -b main 2>/dev/null || git init -q
+  git config user.name test
+  git config user.email test@example.com
+  git config commit.gpgsign false
+  git commit -q --allow-empty -m base
+  export WARM_SPY_REPO
+  WARM_CALL_LOG="${SCRATCH}/warm-default.log"
+  export WARM_CALL_LOG
+  AUTOSYNC_PRIORS_FIXTURE_DIR="${SCRATCH}/no-such" bash "${WARM_SPY_REPO}/.auto-sync/scripts/preflight-priors.sh" "${SCRATCH}/warm-stage-1" >/dev/null 2>&1 || true
+  [[ -f "${WARM_CALL_LOG}" ]] && ! grep -q -- '--tools hugo' "${WARM_CALL_LOG}"
+
+  WARM_CALL_LOG="${SCRATCH}/warm-enabled.log"
+  export WARM_CALL_LOG
+  AUTOSYNC_PRIORS_FIXTURE_DIR="${SCRATCH}/no-such" AUTOSYNC_WARM_TOOLS=true bash "${WARM_SPY_REPO}/.auto-sync/scripts/preflight-priors.sh" "${SCRATCH}/warm-stage-2" >/dev/null 2>&1 || true
+  [[ -f "${WARM_CALL_LOG}" ]] && grep -q -- '--tools hugo' "${WARM_CALL_LOG}"
+
+  WARM_CALL_LOG="${SCRATCH}/warm-live.log"
+  export WARM_CALL_LOG
+  bash "${WARM_SPY_REPO}/.auto-sync/scripts/preflight-priors.sh" "${SCRATCH}/warm-stage-3" >/dev/null 2>&1 || true
+  [[ -f "${WARM_CALL_LOG}" ]] && grep -q -- '--tools hugo' "${WARM_CALL_LOG}"
+); then
+  pass "preflight-priors.sh warms --tools hugo in live mode and when AUTOSYNC_WARM_TOOLS=true"
+else
+  fail "preflight-priors.sh warms --tools hugo in live mode and when AUTOSYNC_WARM_TOOLS=true"
+fi
+
 echo
 if (( FAILS > 0 )); then
   echo "PRIORS SELFTEST FAILED: ${FAILS} failure(s), ${PASSES} passed" >&2

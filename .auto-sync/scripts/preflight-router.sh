@@ -642,6 +642,8 @@ with open(rep_path, "w", encoding="utf-8") as f:
     f.write("\n")
 PY
 
+autosync::preflight::apply_force_to_upstream_records "${UPSTREAM_RECORDS_JSON}"
+
 SOURCE_REVISION="${BASE_SHA}"
 if [[ "${AUTOSYNC_SKIP_SOURCE_REVISION:-false}" != "true" ]] && \
    autosync::preflight::has_available_upstreams "${UPSTREAM_RECORDS_JSON}"; then
@@ -1067,21 +1069,40 @@ PY
       [[ -n "${rel_p}" ]] && COMMIT_PATHS+=("${rel_p}")
     done < "${STAGED_PATCH_DIRS_FILE}"
   elif [[ "${ROUTER_STAGE_NAME}" == "tag_promotion" ]]; then
-    mkdir -p "${STAGED_TREE}/pkg/worker/settings" "${STAGED_TREE}/docs/reference"
+    mkdir -p \
+      "${STAGED_TREE}/pkg/worker/settings" \
+      "${STAGED_TREE}/pkg/worker/controllers/worker" \
+      "${STAGED_TREE}/docs/reference"
     cp -f "${REPO_ROOT}/pkg/worker/settings/value.go" "${STAGED_TREE}/pkg/worker/settings/value.go"
+    if [[ -f "${REPO_ROOT}/pkg/worker/settings/value_test.go" ]]; then
+      cp -f "${REPO_ROOT}/pkg/worker/settings/value_test.go" "${STAGED_TREE}/pkg/worker/settings/value_test.go"
+    fi
+    if [[ -f "${REPO_ROOT}/pkg/worker/controllers/worker/model_deployment_router_test.go" ]]; then
+      cp -f "${REPO_ROOT}/pkg/worker/controllers/worker/model_deployment_router_test.go" \
+        "${STAGED_TREE}/pkg/worker/controllers/worker/model_deployment_router_test.go"
+    fi
+    if [[ -f "${REPO_ROOT}/pkg/worker/controllers/worker/model_deployment_render_test.go" ]]; then
+      cp -f "${REPO_ROOT}/pkg/worker/controllers/worker/model_deployment_render_test.go" \
+        "${STAGED_TREE}/pkg/worker/controllers/worker/model_deployment_render_test.go"
+    fi
     cp -f "${REPO_ROOT}/docs/reference/settings.md" "${STAGED_TREE}/docs/reference/settings.md"
     python3 - "${PREFLIGHT_REPORT_JSON}" \
       "${STAGED_TREE}/pkg/worker/settings/value.go" \
-      "${STAGED_TREE}/docs/reference/settings.md" <<'PY'
+      "${STAGED_TREE}/docs/reference/settings.md" \
+      "${STAGED_TREE}/pkg/worker/settings/value_test.go" \
+      "${STAGED_TREE}/pkg/worker/controllers/worker/model_deployment_router_test.go" \
+      "${STAGED_TREE}/pkg/worker/controllers/worker/model_deployment_render_test.go" <<'PY'
 import json
+import os
 import re
 import sys
 
-rep_p, vg_p, sm_p = sys.argv[1:4]
+rep_p, vg_p, sm_p, vt_p, rt_p, rn_p = sys.argv[1:7]
 with open(rep_p, "r", encoding="utf-8") as f:
     rep = json.load(f)
 
 sb = rep.get("stage_b_flags") or {}
+defaults = rep.get("defaults") or {}
 targets = rep.get("targets") or {}
 
 
@@ -1107,30 +1128,146 @@ def update_settings_md(text: str, key: str, new_img: str) -> str:
     return out
 
 
+def replace_exact_image_literals(path: str, pairs: list[tuple[str, str]]) -> None:
+    if not os.path.isfile(path) or not pairs:
+        return
+    with open(path, "r", encoding="utf-8") as f:
+        txt = f.read()
+    changed = False
+    for old_img, new_img in pairs:
+        if old_img and new_img and old_img != new_img and f'"{old_img}"' in txt:
+            txt = txt.replace(f'"{old_img}"', f'"{new_img}"')
+            changed = True
+    if changed:
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(txt)
+
+
 with open(vg_p, "r", encoding="utf-8") as f:
     vg_txt = f.read()
 with open(sm_p, "r", encoding="utf-8") as f:
     sm_txt = f.read()
 
+router_pairs = []
+sidecar_pairs = []
 if sb.get("router"):
     vg_txt = update_value_go(vg_txt, "ModelDeploymentRouterImage", targets["router_image"])
     sm_txt = update_settings_md(sm_txt, "model-deployment-router-image", targets["router_image"])
+    router_pairs.append((defaults.get("router_image", ""), targets["router_image"]))
 if sb.get("proxy"):
     vg_txt = update_value_go(vg_txt, "ModelDeploymentRouterProxyImage", targets["proxy_image"])
     sm_txt = update_settings_md(sm_txt, "model-deployment-router-proxy-image", targets["proxy_image"])
+    router_pairs.append((defaults.get("proxy_image", ""), targets["proxy_image"]))
 if sb.get("sidecar"):
     vg_txt = update_value_go(vg_txt, "ModelDeploymentRoutingSidecarImage", targets["sidecar_image"])
     sm_txt = update_settings_md(sm_txt, "model-deployment-routing-sidecar-image", targets["sidecar_image"])
+    sidecar_pairs.append((defaults.get("sidecar_image", ""), targets["sidecar_image"]))
 
 with open(vg_p, "w", encoding="utf-8") as f:
     f.write(vg_txt)
 with open(sm_p, "w", encoding="utf-8") as f:
     f.write(sm_txt)
+
+replace_exact_image_literals(vt_p, router_pairs + sidecar_pairs)
+replace_exact_image_literals(rt_p, router_pairs)
+replace_exact_image_literals(rn_p, sidecar_pairs)
 PY
+
+    ROUTER_PIN_REBASE="$(python3 - "${PREFLIGHT_REPORT_JSON}" <<'PY'
+import json
+import sys
+with open(sys.argv[1], "r", encoding="utf-8") as f:
+    sb = (json.load(f).get("stage_b_flags") or {})
+print("true" if (sb.get("router") or sb.get("proxy")) else "false")
+PY
+)"
+    if [[ "${ROUTER_PIN_REBASE}" == "true" && "${AUTOSYNC_SKIP_GO_TEST:-false}" != "true" ]] && \
+       [[ -f "${REPO_ROOT}/go.mod" && -f "${STAGED_TREE}/pkg/worker/controllers/worker/model_deployment_router_test.go" ]] && \
+       command -v go >/dev/null 2>&1; then
+      PIN_WORK="$(mktemp -d "${TMPDIR:-/tmp}/autosync-router-pin.XXXXXXXX")"
+      for entry in "${REPO_ROOT}"/*; do
+        base_entry="$(basename "${entry}")"
+        if [[ "${base_entry}" != "pkg" ]]; then
+          ln -sfn "${entry}" "${PIN_WORK}/${base_entry}"
+        fi
+      done
+      mkdir -p "${PIN_WORK}/pkg"
+      for pkg_entry in "${REPO_ROOT}/pkg"/*; do
+        pkg_base="$(basename "${pkg_entry}")"
+        if [[ "${pkg_base}" != "worker" ]]; then
+          ln -sfn "${pkg_entry}" "${PIN_WORK}/pkg/${pkg_base}"
+        fi
+      done
+      mkdir -p "${PIN_WORK}/pkg/worker"
+      for wk_entry in "${REPO_ROOT}/pkg/worker"/*; do
+        wk_base="$(basename "${wk_entry}")"
+        if [[ "${wk_base}" != "settings" && "${wk_base}" != "controllers" ]]; then
+          ln -sfn "${wk_entry}" "${PIN_WORK}/pkg/worker/${wk_base}"
+        fi
+      done
+      cp -R "${REPO_ROOT}/pkg/worker/settings" "${PIN_WORK}/pkg/worker/settings"
+      cp -R "${REPO_ROOT}/pkg/worker/controllers" "${PIN_WORK}/pkg/worker/controllers"
+      cp -f "${STAGED_TREE}/pkg/worker/settings/value.go" "${PIN_WORK}/pkg/worker/settings/value.go"
+      cp -f "${STAGED_TREE}/pkg/worker/controllers/worker/model_deployment_router_test.go" \
+        "${PIN_WORK}/pkg/worker/controllers/worker/model_deployment_router_test.go"
+      python3 - "${PIN_WORK}/pkg/worker/controllers/worker/model_deployment_router_test.go" <<'PY'
+import re
+import sys
+
+p = sys.argv[1]
+with open(p, "r", encoding="utf-8") as f:
+    txt = f.read()
+txt_empty = re.sub(
+    r'(pinned\s*:=\s*map\[string\]string\{).*?(\n\t\})',
+    r'\1\2',
+    txt,
+    count=1,
+    flags=re.DOTALL,
+)
+with open(p, "w", encoding="utf-8") as f:
+    f.write(txt_empty)
+PY
+      PIN_OUT_FILE="${PIN_WORK}/pin.out"
+      (
+        cd "${PIN_WORK}"
+        go test ./pkg/worker/controllers/worker \
+          -run '^TestRenderModelDeploymentRouterObjects_SerializedOutputIsPinnedToThePreSplitRender$' \
+          > "${PIN_OUT_FILE}" 2>&1 || true
+      )
+      python3 - "${STAGED_TREE}/pkg/worker/controllers/worker/model_deployment_router_test.go" "${PIN_OUT_FILE}" <<'PY'
+import re
+import sys
+
+test_p, out_p = sys.argv[1:3]
+with open(out_p, "r", encoding="utf-8", errors="replace") as f:
+    out_txt = f.read()
+found = {}
+for m in re.finditer(r'no pinned digest for "([^"]+)"; the digest this build produces is ([0-9a-f]{64}) -- pin it in the table', out_txt):
+    found[m.group(1)] = m.group(2)
+if found:
+    with open(test_p, "r", encoding="utf-8") as f:
+        txt = f.read()
+    for case_name, digest in found.items():
+        pat = re.compile(rf'("{re.escape(case_name)}"\s*:\s*")[0-9a-f]{{64}}(")')
+        txt = pat.sub(rf'\g<1>{digest}\g<2>', txt, count=1)
+    with open(test_p, "w", encoding="utf-8") as f:
+        f.write(txt)
+PY
+      rm -rf "${PIN_WORK}" 2>/dev/null || true
+    fi
+
     COMMIT_PATHS+=(
       "pkg/worker/settings/value.go"
       "docs/reference/settings.md"
     )
+    for extra_test_rel in \
+      "pkg/worker/settings/value_test.go" \
+      "pkg/worker/controllers/worker/model_deployment_router_test.go" \
+      "pkg/worker/controllers/worker/model_deployment_render_test.go"; do
+      if [[ -f "${STAGED_TREE}/${extra_test_rel}" ]]; then
+        COMMIT_PATHS+=("${extra_test_rel}")
+      fi
+    done
   fi
 
   BUNDLE_SPECS=(

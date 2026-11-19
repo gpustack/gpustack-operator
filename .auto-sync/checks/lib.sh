@@ -99,8 +99,24 @@ autosync::bootstrap_env() {
     export GOTOOLCHAIN="${GOTOOLCHAIN:-local}"
 
     if [[ -n "${stage_dir}" && -d "${stage_dir}/uv-cache" && -n "$(ls -A "${stage_dir}/uv-cache" 2>/dev/null)" ]]; then
-      export UV_CACHE_DIR="${UV_CACHE_DIR:-${stage_dir}/uv-cache}"
+      if [[ -z "${UV_CACHE_DIR:-}" ]]; then
+        if [[ -w "${stage_dir}/uv-cache" ]]; then
+          export UV_CACHE_DIR="${stage_dir}/uv-cache"
+        else
+          local ro_uvcache="${TMPDIR:-/tmp}/autosync-uv-cache"
+          mkdir -p "${ro_uvcache}" 2>/dev/null || true
+          cp -RLp "${stage_dir}/uv-cache/." "${ro_uvcache}/" 2>/dev/null || true
+          chmod -R u+w "${ro_uvcache}" 2>/dev/null || true
+          export UV_CACHE_DIR="${ro_uvcache}"
+        fi
+      fi
       export UV_OFFLINE="${UV_OFFLINE:-1}"
+    fi
+    if [[ -n "${stage_dir}" && -d "${stage_dir}/uv-python" && -n "$(ls -A "${stage_dir}/uv-python" 2>/dev/null)" ]]; then
+      if [[ -z "${UV_PYTHON_INSTALL_DIR:-}" ]]; then
+        export UV_PYTHON_INSTALL_DIR="${stage_dir}/uv-python"
+      fi
+      export UV_PYTHON_PREFERENCE="${UV_PYTHON_PREFERENCE:-only-managed}"
     fi
 
     # Materialize pre-warmed .sbin entries as regular files (not a directory symlink)
@@ -220,8 +236,9 @@ autosync::ensure_ephemeral_git() {
     git -C "${dir}" config user.email "autosync@gpustack.local"
     git -C "${dir}" config commit.gpgsign false
     git -C "${dir}" config core.autocrlf false
+    git -C "${dir}" config gc.auto 0
     git -C "${dir}" add -A
-    git -C "${dir}" commit -q --allow-empty -m "chore(autosync): candidate baseline"
+    git -C "${dir}" -c gc.auto=0 commit -q --allow-empty -m "chore(autosync): candidate baseline"
     git -C "${dir}" update-ref refs/remotes/origin/main HEAD
   fi
 }
@@ -280,14 +297,17 @@ autosync::run_in_module_path_copy() {
 
   local rc=0
   (
-    trap 'rm -rf "${mod_base}"' EXIT
+    trap 'rm -rf "${mod_base:-}"' EXIT
     mkdir -p "${mod_copy}"
-    tar -cf - -C "${phys_target}" . | tar -xf - -C "${mod_copy}"
+    tar --exclude='.git' -cf - -C "${phys_target}" . | tar -xf - -C "${mod_copy}"
     local cmd_rc=0
     (
       cd "${mod_copy}"
       "$@"
     ) || cmd_rc=$?
+    if (( cmd_rc != 0 )); then
+      exit "${cmd_rc}"
+    fi
     python3 - "${mod_copy}" "${phys_target}" <<'PY'
 import os
 import shutil
@@ -344,6 +364,7 @@ for rel, src_fp in sorted(src_files.items()):
 PY
     exit "${cmd_rc}"
   ) || rc=$?
+  rm -rf "${mod_base}" 2>/dev/null || true
   return "${rc}"
 }
 

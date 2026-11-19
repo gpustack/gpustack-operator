@@ -367,7 +367,7 @@ autosync::preflight::warm_caches() {
 
   if [[ "${want_go}" == "true" ]]; then
     local cache_name
-    for cache_name in go-cache go-mod deps-cache uv-cache; do
+    for cache_name in go-cache go-mod deps-cache uv-cache uv-python; do
       mkdir -p "${shared_root}/${cache_name}"
       if [[ ! -e "${stage_dir}/${cache_name}" || -L "${stage_dir}/${cache_name}" ]]; then
         ln -sfn "${shared_root}/${cache_name}" "${stage_dir}/${cache_name}"
@@ -392,7 +392,7 @@ autosync::preflight::warm_caches() {
             GOMODCACHE="${shared_root}/go-mod" \
             GOCACHE="${shared_root}/go-cache" \
             GOPROXY="${effective_goproxy}" \
-              go mod download
+              go mod download all
           )
         fi
       fi
@@ -402,11 +402,26 @@ autosync::preflight::warm_caches() {
        [[ "${GOPROXY:-}" != "off" ]] && \
        command -v uv >/dev/null 2>&1 && \
        [[ -d "${repo_root}/model-transfer/python" ]] && \
-       [[ -z "$(ls -A "${shared_root}/uv-cache" 2>/dev/null)" ]]; then
-      (
+       [[ -z "$(ls -A "${shared_root}/uv-cache" 2>/dev/null)" || -z "$(ls -A "${shared_root}/uv-python" 2>/dev/null)" ]]; then
+      local uv_tmp_root uv_tmp_cache uv_tmp_env uv_tmp_py
+      uv_tmp_root="$(mktemp -d "${TMPDIR:-/tmp}/autosync-uv-warm.XXXXXXXX")"
+      uv_tmp_cache="${uv_tmp_root}/cache"
+      uv_tmp_env="${uv_tmp_root}/venv"
+      uv_tmp_py="${uv_tmp_root}/python"
+      if (
         cd "${repo_root}/model-transfer/python"
-        UV_CACHE_DIR="${shared_root}/uv-cache" uv sync --frozen >/dev/null 2>&1 || true
-      )
+        UV_PYTHON_INSTALL_DIR="${uv_tmp_py}" uv python install >/dev/null 2>&1 && \
+        UV_CACHE_DIR="${uv_tmp_cache}" UV_PROJECT_ENVIRONMENT="${uv_tmp_env}" UV_PYTHON_INSTALL_DIR="${uv_tmp_py}" UV_PYTHON_PREFERENCE=only-managed uv sync --frozen >/dev/null 2>&1 && \
+        UV_CACHE_DIR="${uv_tmp_cache}" UV_PROJECT_ENVIRONMENT="${uv_tmp_env}" UV_PYTHON_INSTALL_DIR="${uv_tmp_py}" UV_PYTHON_PREFERENCE=only-managed UV_OFFLINE=1 uv run --frozen --offline ruff --version >/dev/null 2>&1
+      ); then
+        if cp -RLp "${uv_tmp_cache}/." "${shared_root}/uv-cache/" 2>/dev/null && \
+           cp -RPp "${uv_tmp_py}/." "${shared_root}/uv-python/" 2>/dev/null; then
+          true
+        else
+          rm -rf "${shared_root:?}/uv-cache/"* "${shared_root:?}/uv-python/"* 2>/dev/null || true
+        fi
+      fi
+      rm -rf "${uv_tmp_root}" 2>/dev/null || true
     fi
   fi
 }
@@ -855,6 +870,37 @@ with open(sys.argv[1], "r", encoding="utf-8") as f:
 if isinstance(recs, list) and any(isinstance(r, dict) and r.get("status") == "available" for r in recs):
     sys.exit(0)
 sys.exit(1)
+PY
+}
+
+# autosync::preflight::apply_force_to_upstream_records <upstream_records_json>
+# When AUTOSYNC_FORCE=true and no record currently has status == "available",
+# promotes the first "up_to_date" record to "available" while keeping version unchanged.
+autosync::preflight::apply_force_to_upstream_records() {
+  local records_json="${1:?upstream_records_json required}"
+  [[ "${AUTOSYNC_FORCE:-false}" == "true" ]] || return 0
+  [[ -f "${records_json}" ]] || return 0
+  python3 - "${records_json}" <<'PY'
+import json
+import sys
+
+path = sys.argv[1]
+with open(path, "r", encoding="utf-8") as f:
+    recs = json.load(f)
+if not isinstance(recs, list):
+    sys.exit(0)
+if any(isinstance(r, dict) and r.get("status") == "available" for r in recs):
+    sys.exit(0)
+for rec in recs:
+    if isinstance(rec, dict) and rec.get("status") == "up_to_date":
+        rec["status"] = "available"
+        reason = str(rec.get("reason") or "").strip()
+        suffix = "(forced via AUTOSYNC_FORCE=true)"
+        rec["reason"] = f"{reason} {suffix}".strip()
+        break
+with open(path, "w", encoding="utf-8") as f:
+    json.dump(recs, f, indent=2)
+    f.write("\n")
 PY
 }
 

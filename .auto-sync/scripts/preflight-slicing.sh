@@ -323,6 +323,9 @@ print(json.dumps(records, separators=(",", ":")))
 PY
 )"
 
+autosync::preflight::apply_force_to_upstream_records "${stage_dir}/upstream-records.json"
+records_compact="$(python3 -c 'import json,sys; print(json.dumps(json.load(open(sys.argv[1])), separators=(",", ":")))' "${stage_dir}/upstream-records.json")"
+
 if [[ "${AUTOSYNC_SKIP_SOURCE_REVISION:-false}" != "true" ]] && \
    autosync::preflight::has_available_upstreams "${stage_dir}/upstream-records.json"; then
   tmp_stage_bundle="$(mktemp -d "${TMPDIR:-/tmp}/autosync-slicing-bundle.XXXXXXXX")"

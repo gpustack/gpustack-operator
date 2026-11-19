@@ -1138,6 +1138,8 @@ with open(rep_path, "w", encoding="utf-8") as f:
     f.write("\n")
 PY
 
+autosync::preflight::apply_force_to_upstream_records "${UPSTREAM_RECORDS_JSON}"
+
 SOURCE_REVISION="${BASE_SHA}"
 if [[ "${AUTOSYNC_SKIP_SOURCE_REVISION:-false}" != "true" ]] && \
    autosync::preflight::has_available_upstreams "${UPSTREAM_RECORDS_JSON}"; then
@@ -1188,8 +1190,18 @@ PY
     cp -f "${RUNNER_PATCH_FILE}" "${STAGED_TREE}/pack/model-transfer/patches/hixl/001_channel_generation.patch"
     COMMIT_PATHS+=("pack/model-transfer/patches/hixl/001_channel_generation.patch")
   elif [[ "${KV_STAGE_NAME}" == "tag_promotion" ]]; then
-    mkdir -p "${STAGED_TREE}/pkg/worker/settings" "${STAGED_TREE}/docs/reference"
+    mkdir -p \
+      "${STAGED_TREE}/pkg/worker/settings" \
+      "${STAGED_TREE}/pkg/worker/controllers/worker" \
+      "${STAGED_TREE}/docs/reference"
     cp -f "${REPO_ROOT}/pkg/worker/settings/value.go" "${STAGED_TREE}/pkg/worker/settings/value.go"
+    if [[ -f "${REPO_ROOT}/pkg/worker/settings/value_test.go" ]]; then
+      cp -f "${REPO_ROOT}/pkg/worker/settings/value_test.go" "${STAGED_TREE}/pkg/worker/settings/value_test.go"
+    fi
+    if [[ -f "${REPO_ROOT}/pkg/worker/controllers/worker/model_deployment_transfer_test.go" ]]; then
+      cp -f "${REPO_ROOT}/pkg/worker/controllers/worker/model_deployment_transfer_test.go" \
+        "${STAGED_TREE}/pkg/worker/controllers/worker/model_deployment_transfer_test.go"
+    fi
     cp -f "${REPO_ROOT}/docs/reference/settings.md" "${STAGED_TREE}/docs/reference/settings.md"
     if [[ -d "${REPO_ROOT}/deploy/gpustack-operator/chart" ]]; then
       mkdir -p "${STAGED_TREE}/deploy/gpustack-operator"
@@ -1205,13 +1217,15 @@ PY
     python3 - "${PREFLIGHT_REPORT_JSON}" \
       "${STAGED_TREE}/pkg/worker/settings/value.go" \
       "${STAGED_TREE}/docs/reference/settings.md" \
-      "${STAGED_TREE}/deploy/gpustack-operator/chart/values.yaml" <<'PY'
+      "${STAGED_TREE}/deploy/gpustack-operator/chart/values.yaml" \
+      "${STAGED_TREE}/pkg/worker/settings/value_test.go" \
+      "${STAGED_TREE}/pkg/worker/controllers/worker/model_deployment_transfer_test.go" <<'PY'
 import json
 import os
 import re
 import sys
 
-rep_p, vg_p, sm_p, vy_p = sys.argv[1:5]
+rep_p, vg_p, sm_p, vy_p, vt_p, tt_p = sys.argv[1:7]
 with open(rep_p, "r", encoding="utf-8") as f:
     rep = json.load(f)
 
@@ -1242,6 +1256,17 @@ def update_settings_md(text: str, key: str, new_img: str) -> str:
     return out
 
 
+def replace_exact_image_literal(path: str, old_img: str, new_img: str) -> None:
+    if not os.path.isfile(path) or not old_img or not new_img or old_img == new_img:
+        return
+    with open(path, "r", encoding="utf-8") as f:
+        txt = f.read()
+    if f'"{old_img}"' in txt:
+        txt = txt.replace(f'"{old_img}"', f'"{new_img}"')
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(txt)
+
+
 with open(vg_p, "r", encoding="utf-8") as f:
     vg_txt = f.read()
 with open(sm_p, "r", encoding="utf-8") as f:
@@ -1253,6 +1278,8 @@ if sb.get("mooncake"):
 if sb.get("modelexpress"):
     vg_txt = update_value_go(vg_txt, "ModelDeploymentModelExpressServerImage", targets["modelexpress_image"])
     sm_txt = update_settings_md(sm_txt, "model-deployment-modelexpress-server-image", targets["modelexpress_image"])
+    replace_exact_image_literal(vt_p, defaults.get("modelexpress_image", ""), targets["modelexpress_image"])
+    replace_exact_image_literal(tt_p, defaults.get("modelexpress_image", ""), targets["modelexpress_image"])
 
 with open(vg_p, "w", encoding="utf-8") as f:
     f.write(vg_txt)
@@ -1297,6 +1324,13 @@ PY
       "pkg/worker/settings/value.go"
       "docs/reference/settings.md"
     )
+    for extra_test_rel in \
+      "pkg/worker/settings/value_test.go" \
+      "pkg/worker/controllers/worker/model_deployment_transfer_test.go"; do
+      if [[ -f "${STAGED_TREE}/${extra_test_rel}" ]]; then
+        COMMIT_PATHS+=("${extra_test_rel}")
+      fi
+    done
     if [[ "${MT_STAGE_B}" == "true" && -d "${STAGED_TREE}/deploy/gpustack-operator/chart" ]]; then
       COMMIT_PATHS+=("deploy/gpustack-operator/chart/values.yaml")
       if [[ -f "${STAGED_TREE}/deploy/gpustack-operator/chart/values.schema.json" ]]; then
