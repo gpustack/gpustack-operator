@@ -1504,6 +1504,7 @@ exec "${REAL_GO_BIN}" "$@"
 SH
   chmod +x "${wrap_go_3m}/go"
 
+  local preflight_log_3m="${tmp_3m}/preflight.log"
   local src_rev_3m=""
   if (
     cd "${repo_3m}" && \
@@ -1515,7 +1516,7 @@ SH
     AUTOSYNC_SKIP_GENERATE=true \
     AUTOSYNC_WARM_GO_LIST_ALL=true \
     GOCACHE="${stage_3m}/go-cache" \
-    bash "${repo_3m}/.auto-sync/scripts/preflight-k8s-deps.sh" "${stage_3m}" >/dev/null 2>&1
+    bash "${repo_3m}/.auto-sync/scripts/preflight-k8s-deps.sh" "${stage_3m}" >"${preflight_log_3m}" 2>&1
   ) && \
   src_rev_3m="$(python3 - "${stage_3m}" "${BASE_SHA}" <<'PY'
 import json
@@ -1535,7 +1536,11 @@ PY
   ! git -C "${repo_3m}" show "${src_rev_3m}:go.sum" | grep -q '^example\.com/bloated '; then
     record_pass "preflight-k8s-deps.sh isolates go mod download all and keeps staged go.sum tidy"
   else
-    record_fail "preflight-k8s-deps.sh leaked go mod download all checksums into staged go.sum"
+    local preflight_err_3m=""
+    if [[ -f "${preflight_log_3m}" ]]; then
+      preflight_err_3m="$(cat "${preflight_log_3m}")"
+    fi
+    record_fail "preflight-k8s-deps.sh isolates go mod download all and keeps staged go.sum tidy (${preflight_err_3m})"
     return
   fi
 
@@ -1554,9 +1559,11 @@ MK
   local stage_val_3m="${SCRATCH}/stage-val-3m"
   fast_cp_dir "${STAGE_DISC}" "${stage_val_3m}"
   rm -f "${stage_val_3m}/toolchain.env"
-  local make_bin_dir
+  local make_bin_dir git_bin_dir py_bin_dir
   make_bin_dir="$(dirname "$(command -v make)")"
-  local val_path="${wrap_go_3m}:${make_bin_dir}:/usr/local/bin:/usr/bin:/bin"
+  git_bin_dir="$(dirname "$(command -v git)")"
+  py_bin_dir="$(dirname "$(command -v python3)")"
+  local val_path="${wrap_go_3m}:${make_bin_dir}:${git_bin_dir}:${py_bin_dir}:/usr/local/bin:/usr/bin:/bin"
 
   run_val_3m() {
     local case_root="$1"

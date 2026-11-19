@@ -770,6 +770,10 @@ chmod +x "${STUB_BUILD_RUNNER}"
 
 run_validate_env_i() {
   : > "${BUILD_LOG}"
+  local -a extra_env=()
+  if [[ -n "${AUTOSYNC_SETTING_IMAGE_HOLDS_FILE:-}" ]]; then
+    extra_env+=("AUTOSYNC_SETTING_IMAGE_HOLDS_FILE=${AUTOSYNC_SETTING_IMAGE_HOLDS_FILE}")
+  fi
   env -i \
     PATH="/usr/local/bin:/usr/bin:/bin" \
     HOME="${SCRATCH}" \
@@ -780,6 +784,7 @@ run_validate_env_i() {
     ROUTER_BUILD_LOG="${BUILD_LOG}" \
     AUTOSYNC_ALLOW_MISSING_STAGED_REPO="${AUTOSYNC_ALLOW_MISSING_STAGED_REPO:-false}" \
     AUTOSYNC_FAST_SELFTEST=true \
+    ${extra_env[@]+"${extra_env[@]}"} \
     bash "${CAND_DIR}/.auto-sync/checks/validate_router.sh"
 }
 
@@ -1205,6 +1210,11 @@ if AUTOSYNC_SETTING_IMAGE_HOLDS_FILE="${ROUTER_HOLDS_FILE}" run_validate_env_i; 
   pass "validate_router passes when held router/proxy/sidecar match setting-image-holds.json"
 else
   fail "validate_router passes when held router/proxy/sidecar match setting-image-holds.json"
+fi
+if AUTOSYNC_SETTING_IMAGE_HOLDS_FILE="${SCRATCH}/missing-holds.json" run_validate_env_i >/dev/null 2>&1; then
+  fail "run_validate_env_i forwards AUTOSYNC_SETTING_IMAGE_HOLDS_FILE and fails closed on missing file"
+else
+  pass "run_validate_env_i forwards AUTOSYNC_SETTING_IMAGE_HOLDS_FILE and fails closed on missing file"
 fi
 
 # Even when v99.1.0 is published in image-manifests.json, promoting held router fails closed.
