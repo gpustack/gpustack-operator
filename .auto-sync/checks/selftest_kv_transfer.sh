@@ -89,6 +89,7 @@ cp "${ROOT_DIR}/.auto-sync/scripts/lib-preflight.sh" "${FAKE_REPO}/.auto-sync/sc
 cp "${PREFLIGHT_SCRIPT}" "${FAKE_REPO}/.auto-sync/scripts/preflight-kv-transfer.sh"
 cp "${ROOT_DIR}/.auto-sync/checks/lib.sh" "${FAKE_REPO}/.auto-sync/checks/lib.sh"
 cp "${ROOT_DIR}/.auto-sync/checks/dockerfile_arg.py" "${FAKE_REPO}/.auto-sync/checks/dockerfile_arg.py"
+cp "${ROOT_DIR}/.auto-sync/checks/setting_image_holds.py" "${FAKE_REPO}/.auto-sync/checks/setting_image_holds.py"
 cp "${VALIDATE_SCRIPT}" "${FAKE_REPO}/.auto-sync/checks/validate_kv_transfer.sh"
 if [[ -f "${ROOT_DIR}/.auto-sync/proposals/kv-transfer.json" ]]; then
   cp "${ROOT_DIR}/.auto-sync/proposals/kv-transfer.json" "${FAKE_REPO}/.auto-sync/proposals/kv-transfer.json"
@@ -964,6 +965,7 @@ make_gitless_cand() {
     "${CAND_DIR}/pack/mirrored-modelexpress-server"
   cp "${ROOT_DIR}/.auto-sync/checks/lib.sh" "${CAND_DIR}/.auto-sync/checks/lib.sh"
   cp "${ROOT_DIR}/.auto-sync/checks/dockerfile_arg.py" "${CAND_DIR}/.auto-sync/checks/dockerfile_arg.py"
+  cp "${ROOT_DIR}/.auto-sync/checks/setting_image_holds.py" "${CAND_DIR}/.auto-sync/checks/setting_image_holds.py"
   cp "${VALIDATE_SCRIPT}" "${CAND_DIR}/.auto-sync/checks/validate_kv_transfer.sh"
   cp "${ROOT_DIR}/.auto-sync/proposals/kv-transfer.json" "${CAND_DIR}/.auto-sync/proposals/kv-transfer.json"
   cp "${VAL_STAGE}/baseline/pkg/worker/settings/value.go" "${CAND_DIR}/pkg/worker/settings/value.go"
@@ -1343,6 +1345,248 @@ if ! bad_quote_err="$(run_validate 2>&1)" && \
 else
   fail "validate_kv_transfer fails closed on unmatched quote in ARG MOONCAKE_VERSION (${bad_quote_err})"
 fi
+
+# 5q. Setting-image hold policy (.auto-sync/setting-image-holds.json) in preflight and validate_kv_transfer.
+HOLD_REPO="${SCRATCH}/hold-repo"
+cp -R "${FAKE_REPO}" "${HOLD_REPO}"
+python3 - "${ROOT_DIR}" "${HOLD_REPO}" <<'PY'
+import os
+import shutil
+import sys
+
+root_dir, hold_repo = sys.argv[1:3]
+for rel in (
+    "pkg/worker/settings/value.go",
+    "docs/reference/settings.md",
+    "docs/modules/model-delivery/remote.md",
+    "deploy/gpustack-operator/chart/values.yaml",
+    "pack/mirrored-mooncake/Dockerfile",
+    "pack/model-transfer/Dockerfile",
+    "pack/mirrored-modelexpress-server/Dockerfile",
+):
+    shutil.copyfile(os.path.join(root_dir, rel), os.path.join(hold_repo, rel))
+PY
+git -C "${HOLD_REPO}" add -A
+git -C "${HOLD_REPO}" commit -q -m "reset to root defaults for hold test"
+
+FIX_HOLD="${SCRATCH}/fix-hold"
+clone_fixture "${FIX_HOLD}"
+python3 - "${FIX_HOLD}" "${ROOT_DIR}" <<'PY'
+import json
+import os
+import sys
+
+fix_dir, root_dir = sys.argv[1:3]
+sys.path.insert(0, os.path.join(root_dir, ".auto-sync", "checks"))
+from dockerfile_arg import read_dockerfile_arg
+
+with open(os.path.join(root_dir, "pack/mirrored-mooncake/Dockerfile"), "r", encoding="utf-8") as f:
+    mc_ver = read_dockerfile_arg(f.read(), "MOONCAKE_VERSION")
+with open(os.path.join(root_dir, "pack/model-transfer/Dockerfile"), "r", encoding="utf-8") as f:
+    mt_txt = f.read()
+    nixl_ver = read_dockerfile_arg(mt_txt, "NIXL_VERSION")
+    nixl_rocm_ref = read_dockerfile_arg(mt_txt, "NIXL_ROCM_REF")
+    ucx_rocm_ref = read_dockerfile_arg(mt_txt, "NIXL_ROCM_UCX_REF")
+    hixl_commit = read_dockerfile_arg(mt_txt, "HIXL_COMMIT")
+with open(os.path.join(root_dir, "pack/mirrored-modelexpress-server/Dockerfile"), "r", encoding="utf-8") as f:
+    mx_ver = read_dockerfile_arg(f.read(), "MODELEXPRESS_VERSION")
+
+with open(os.path.join(fix_dir, "mooncake-release.json"), "w", encoding="utf-8") as f:
+    json.dump([{"tag_name": f"v{mc_ver}", "prerelease": False, "draft": False}], f)
+
+with open(os.path.join(fix_dir, "upstream.json"), "w", encoding="utf-8") as f:
+    json.dump({
+        "mooncake": mc_ver,
+        "nixl_pypi": nixl_ver,
+        "nixl_rocm": nixl_rocm_ref,
+        "ucx_rocm": ucx_rocm_ref,
+        "hixl": hixl_commit,
+        "modelexpress": mx_ver,
+        "repo_tags": {
+            "gpustack/mirrored-modelexpress-server": ["v0.7.0", "v0.8.0"],
+            "gpustack/model-transfer": ["v0.1.0-cuda12.9", "v0.1.0-rocm7.2", "v0.1.0-cann9.2-a5"],
+        },
+    }, f, indent=2)
+
+with open(os.path.join(fix_dir, "image-manifests.json"), "r", encoding="utf-8") as f:
+    man = json.load(f)
+man["images"]["docker.io/gpustack/mirrored-mooncake:0.3.14-cpu"] = {
+    "published": True,
+    "amd64Digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "arm64Digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+}
+man["images"]["docker.io/gpustack/mirrored-modelexpress-server:v0.8.0"] = {
+    "published": True,
+    "amd64Digest": "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+    "arm64Digest": "sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+}
+with open(os.path.join(fix_dir, "image-manifests.json"), "w", encoding="utf-8") as f:
+    json.dump(man, f, indent=2)
+PY
+
+STAGE_HOLD="${SCRATCH}/stage-hold"
+(
+  cd "${HOLD_REPO}"
+  AUTOSYNC_KV_FIXTURE_DIR="${FIX_HOLD}" \
+  AUTOSYNC_SETTING_IMAGE_HOLDS_FILE="${ROOT_DIR}/.auto-sync/setting-image-holds.json" \
+  AUTOSYNC_SKIP_GO_MOD_DOWNLOAD=true \
+    bash "${HOLD_REPO}/.auto-sync/scripts/preflight-kv-transfer.sh" "${STAGE_HOLD}"
+)
+if python3 - "${STAGE_HOLD}" <<'PY'
+import json
+import os
+import sys
+
+stage = sys.argv[1]
+with open(os.path.join(stage, "upstream-records.json"), "r", encoding="utf-8") as f:
+    recs = {r["upstreamId"]: r for r in json.load(f)}
+assert recs["mooncake"]["status"] == "up_to_date", recs["mooncake"]
+assert recs["modelexpress"]["status"] == "available" and recs["modelexpress"]["version"] == "v0.8.0+stage-b", recs["modelexpress"]
+with open(os.path.join(stage, "kv-transfer-preflight-report.json"), "r", encoding="utf-8") as f:
+    rep = json.load(f)
+assert rep["stage"] == "tag_promotion", rep
+assert rep["stage_b_flags"]["mooncake"] is False, rep
+assert rep["stage_b_flags"]["modelexpress"] is True, rep
+assert rep["targets"]["mooncake_image"] == "gpustack/mirrored-mooncake:0.3.13.post1-cpu", rep["targets"]
+assert rep["targets"]["modelexpress_image"] == "gpustack/mirrored-modelexpress-server:v0.8.0", rep["targets"]
+assert rep["held_setting_images"]["mooncake"]["tag"] == "0.3.13.post1-cpu", rep
+PY
+then
+  pass "repo .auto-sync/setting-image-holds.json holds mooncake at 0.3.13.post1-cpu even with 0.3.14-cpu published while promoting unheld modelexpress:v0.8.0"
+else
+  fail "repo .auto-sync/setting-image-holds.json holds mooncake at 0.3.13.post1-cpu while promoting modelexpress:v0.8.0"
+fi
+
+# Explicit AUTOSYNC_TARGET_TAG targeting a held component fails closed.
+hold_target_err=""
+if ! hold_target_err="$(
+  cd "${HOLD_REPO}"
+  AUTOSYNC_KV_FIXTURE_DIR="${FIX_HOLD}" \
+  AUTOSYNC_SETTING_IMAGE_HOLDS_FILE="${ROOT_DIR}/.auto-sync/setting-image-holds.json" \
+  AUTOSYNC_TARGET_TAG="gpustack/mirrored-mooncake:0.3.14-cpu" \
+  AUTOSYNC_SKIP_GO_MOD_DOWNLOAD=true \
+    bash "${HOLD_REPO}/.auto-sync/scripts/preflight-kv-transfer.sh" "${STAGE_HOLD}" 2>&1
+)" && grep -q 'FAIL:' <<<"${hold_target_err}" && grep -q 'mooncake' <<<"${hold_target_err}"; then
+  pass "preflight-kv-transfer fails closed when AUTOSYNC_TARGET_TAG explicitly targets held mooncake"
+else
+  fail "preflight-kv-transfer fails closed when AUTOSYNC_TARGET_TAG explicitly targets held mooncake (${hold_target_err})"
+fi
+
+# Vendor-specific model-transfer.nvidia hold suppresses nvidia promotion while allowing amd/ascend to promote.
+FIX_MT_HOLD="${SCRATCH}/fix-mt-hold"
+clone_fixture "${FIX_MT_HOLD}"
+cp "${FIX_HOLD}/mooncake-release.json" "${FIX_MT_HOLD}/mooncake-release.json"
+cp "${FIX_HOLD}/image-manifests.json" "${FIX_MT_HOLD}/image-manifests.json"
+python3 - "${FIX_HOLD}/upstream.json" "${FIX_MT_HOLD}/upstream.json" "${FIX_MT_HOLD}/image-manifests.json" "${FIX_MT_HOLD}/setting-image-holds.json" <<'PY'
+import json
+import sys
+
+src_up, dst_up, man_p, holds_p = sys.argv[1:5]
+with open(src_up, "r", encoding="utf-8") as f:
+    up = json.load(f)
+up["repo_tags"] = {
+    "gpustack/mirrored-modelexpress-server": ["v0.7.0"],
+    "gpustack/model-transfer": [
+        "v0.1.0-cuda12.9",
+        "v0.2.0-cuda12.9",
+        "v0.2.0-rocm7.2",
+        "v0.2.0-cann9.2-a5",
+    ],
+}
+with open(dst_up, "w", encoding="utf-8") as f:
+    json.dump(up, f, indent=2)
+
+with open(man_p, "r", encoding="utf-8") as f:
+    man = json.load(f)
+for tag, a, b in (
+    ("v0.2.0-cuda12.9", "11", "22"),
+    ("v0.2.0-rocm7.2", "33", ""),
+    ("v0.2.0-cann9.2-a5", "44", "55"),
+):
+    man["images"][f"docker.io/gpustack/model-transfer:{tag}"] = {
+        "published": True,
+        "amd64Digest": f"sha256:{a * 32}",
+        "arm64Digest": f"sha256:{b * 32}" if b else "",
+    }
+with open(man_p, "w", encoding="utf-8") as f:
+    json.dump(man, f, indent=2)
+
+with open(holds_p, "w", encoding="utf-8") as f:
+    json.dump({
+        "schema_version": 1,
+        "holds": {
+            "mooncake": {"tag": "0.3.13.post1-cpu", "reason": "hold mooncake"},
+            "model-transfer.nvidia": {"tag": "v0.1.0-cuda12.9", "reason": "hold nvidia only"},
+        },
+    }, f, indent=2)
+PY
+
+STAGE_MT_HOLD="${SCRATCH}/stage-mt-hold"
+(
+  cd "${HOLD_REPO}"
+  AUTOSYNC_KV_FIXTURE_DIR="${FIX_MT_HOLD}" \
+  AUTOSYNC_SKIP_GO_MOD_DOWNLOAD=true \
+    bash "${HOLD_REPO}/.auto-sync/scripts/preflight-kv-transfer.sh" "${STAGE_MT_HOLD}"
+)
+if python3 - "${STAGE_MT_HOLD}" <<'PY'
+import json
+import os
+import sys
+
+with open(os.path.join(sys.argv[1], "kv-transfer-preflight-report.json"), "r", encoding="utf-8") as f:
+    rep = json.load(f)
+mt = rep["targets"]["model_transfer_images"]
+assert mt["nvidia"] == "gpustack/model-transfer:v0.1.0-cuda12.9", mt
+assert mt["amd"] == "gpustack/model-transfer:v0.2.0-rocm7.2", mt
+assert mt["ascend"] == "gpustack/model-transfer:v0.2.0-cann9.2-a5", mt
+assert "model-transfer.nvidia" in rep["held_setting_images"], rep
+PY
+then
+  pass "fixture setting-image-holds.json holds model-transfer.nvidia while allowing unheld amd/ascend to promote"
+else
+  fail "fixture setting-image-holds.json holds model-transfer.nvidia while allowing unheld amd/ascend to promote"
+fi
+
+# Unknown hold key and stale hold tag fail closed.
+BAD_HOLD_JSON="${SCRATCH}/bad-holds.json"
+printf '{"schema_version":1,"holds":{"unknown-key":{"tag":"v1","reason":"bad"}}}\n' > "${BAD_HOLD_JSON}"
+assert_fails "preflight-kv-transfer fails closed on unknown key in setting-image-holds.json" \
+  env AUTOSYNC_SETTING_IMAGE_HOLDS_FILE="${BAD_HOLD_JSON}" \
+  run_kv_preflight_with_fixture "${HOLD_REPO}" "${FIX_HOLD}" "${SCRATCH}/stage-bad-hold"
+
+STALE_HOLD_JSON="${SCRATCH}/stale-holds.json"
+printf '{"schema_version":1,"holds":{"mooncake":{"tag":"0.3.12-cpu","reason":"stale"}}}\n' > "${STALE_HOLD_JSON}"
+assert_fails "preflight-kv-transfer fails closed when held mooncake tag disagrees with value.go" \
+  env AUTOSYNC_SETTING_IMAGE_HOLDS_FILE="${STALE_HOLD_JSON}" \
+  run_kv_preflight_with_fixture "${HOLD_REPO}" "${FIX_HOLD}" "${SCRATCH}/stage-stale-hold"
+
+# validate_kv_transfer live enforcement of .auto-sync/setting-image-holds.json:
+make_gitless_cand
+mkdir -p "${VAL_STAGE}/baseline/.auto-sync"
+cp "${ROOT_DIR}/.auto-sync/setting-image-holds.json" "${VAL_STAGE}/baseline/.auto-sync/setting-image-holds.json"
+cp "${ROOT_DIR}/.auto-sync/setting-image-holds.json" "${CAND_DIR}/.auto-sync/setting-image-holds.json"
+assert_ok "validate_kv_transfer passes with repo setting-image-holds.json when mooncake stays at 0.3.13.post1-cpu" run_validate
+
+set_kv_proposal "tag_promotion" "modelexpress=v0.8.0+stage-b"
+sed -i.bak 's|gpustack/mirrored-modelexpress-server:v0.7.0|gpustack/mirrored-modelexpress-server:v0.8.0|' \
+  "${CAND_DIR}/pkg/worker/settings/value.go" "${CAND_DIR}/docs/reference/settings.md" "${CAND_DIR}/docs/modules/model-delivery/remote.md"
+rm -f "${CAND_DIR}/pkg/worker/settings/value.go.bak" "${CAND_DIR}/docs/reference/settings.md.bak" "${CAND_DIR}/docs/modules/model-delivery/remote.md.bak"
+assert_ok "validate_kv_transfer passes Stage B promotion of unheld modelexpress:v0.8.0 while mooncake is held" run_validate
+
+make_gitless_cand
+cp "${ROOT_DIR}/.auto-sync/setting-image-holds.json" "${CAND_DIR}/.auto-sync/setting-image-holds.json"
+set_kv_proposal "tag_promotion" "mooncake=0.3.14+stage-b"
+sed -i.bak 's|gpustack/mirrored-mooncake:0.3.13.post1-cpu|gpustack/mirrored-mooncake:0.3.14-cpu|' \
+  "${CAND_DIR}/pkg/worker/settings/value.go" "${CAND_DIR}/docs/reference/settings.md"
+rm -f "${CAND_DIR}/pkg/worker/settings/value.go.bak" "${CAND_DIR}/docs/reference/settings.md.bak"
+assert_fails "validate_kv_transfer fails closed when held mooncake is promoted to published 0.3.14-cpu" run_validate
+
+make_gitless_cand
+cp "${ROOT_DIR}/.auto-sync/setting-image-holds.json" "${CAND_DIR}/.auto-sync/setting-image-holds.json"
+printf '{"schema_version":1,"holds":{}}\n' > "${CAND_DIR}/.auto-sync/setting-image-holds.json"
+assert_fails "validate_kv_transfer fails closed when candidate modifies .auto-sync/setting-image-holds.json" run_validate
+rm -f "${VAL_STAGE}/baseline/.auto-sync/setting-image-holds.json"
+make_gitless_cand
 
 # 6. Unit tests for canonical .auto-sync/checks/dockerfile_arg.py parser and CLI.
 if python3 - "${ROOT_DIR}/.auto-sync/checks" "${SCRATCH}" <<'PY'

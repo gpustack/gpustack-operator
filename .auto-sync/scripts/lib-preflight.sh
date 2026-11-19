@@ -454,6 +454,47 @@ PY
   fi
 }
 
+# autosync::preflight::isolated_go_mod_download <src_dir> <gomodcache> <gocache> <goproxy> [download_arg...]
+# Runs `go mod download [download_arg...]` inside an isolated copy of go.mod, go.sum,
+# and staging/ so go.sum in <src_dir> is never mutated by `go mod download all`.
+autosync::preflight::isolated_go_mod_download() {
+  local src_dir="${1:?src_dir required}"
+  local gomodcache="${2:?gomodcache required}"
+  local gocache="${3:?gocache required}"
+  local goproxy="${4-}"
+  shift 4
+
+  local go_dl_tmp=""
+  go_dl_tmp="$(mktemp -d "${TMPDIR:-/tmp}/autosync-gomod-dl.XXXXXXXX")"
+  (
+    trap 'chmod u+w "${go_dl_tmp}/go.mod" "${go_dl_tmp}/go.sum" 2>/dev/null || true; rm -rf "${go_dl_tmp}"' EXIT
+    trap 'exit 130' INT
+    trap 'exit 143' TERM
+    trap 'exit 129' HUP
+    cp -f "${src_dir}/go.mod" "${go_dl_tmp}/go.mod"
+    if [[ -f "${src_dir}/go.sum" ]]; then
+      cp -f "${src_dir}/go.sum" "${go_dl_tmp}/go.sum"
+    fi
+    if [[ -d "${src_dir}/staging" ]]; then
+      cp -Rl "${src_dir}/staging" "${go_dl_tmp}/staging" 2>/dev/null || \
+        cp -R --reflink=auto "${src_dir}/staging" "${go_dl_tmp}/staging" 2>/dev/null || \
+        cp -Rc "${src_dir}/staging" "${go_dl_tmp}/staging" 2>/dev/null || \
+        cp -R "${src_dir}/staging" "${go_dl_tmp}/staging"
+    fi
+    cd "${go_dl_tmp}"
+    if [[ -n "${goproxy}" ]]; then
+      GOMODCACHE="${gomodcache}" \
+      GOCACHE="${gocache}" \
+      GOPROXY="${goproxy}" \
+        go mod download "$@"
+    else
+      GOMODCACHE="${gomodcache}" \
+      GOCACHE="${gocache}" \
+        go mod download "$@"
+    fi
+  )
+}
+
 # autosync::preflight::warm_caches <stage_dir> [--sbin] [--go] [--go-all] [--tools <comma-list>]
 # Populates shared /tmp/gpustack-autosync-stage/{.sbin,go-cache,go-mod,deps-cache,uv-cache,uv-python} caches,
 # records host toolchain paths into <stage_dir>/toolchain.env, and links caches into <stage_dir>.
@@ -577,33 +618,16 @@ autosync::preflight::warm_caches() {
           if [[ -n "${host_gomodcache}" && -d "${host_gomodcache}/cache/download" && -r "${host_gomodcache}/cache/download" ]]; then
             effective_goproxy="file://${host_gomodcache}/cache/download,${effective_goproxy}"
           fi
-          local mod_dl_args=(mod download)
+          local mod_dl_args=()
           if [[ "${want_go_all}" == "true" ]]; then
             mod_dl_args+=(all)
           fi
-          local go_dl_tmp=""
-          go_dl_tmp="$(mktemp -d "${TMPDIR:-/tmp}/autosync-gomod-dl.XXXXXXXX")"
-          (
-            trap 'chmod u+w "${go_dl_tmp}/go.mod" "${go_dl_tmp}/go.sum" 2>/dev/null || true; rm -rf "${go_dl_tmp}"' EXIT
-            trap 'exit 130' INT
-            trap 'exit 143' TERM
-            trap 'exit 129' HUP
-            cp -f "${repo_root}/go.mod" "${go_dl_tmp}/go.mod"
-            if [[ -f "${repo_root}/go.sum" ]]; then
-              cp -f "${repo_root}/go.sum" "${go_dl_tmp}/go.sum"
-            fi
-            if [[ -d "${repo_root}/staging" ]]; then
-              cp -Rl "${repo_root}/staging" "${go_dl_tmp}/staging" 2>/dev/null || \
-                cp -R --reflink=auto "${repo_root}/staging" "${go_dl_tmp}/staging" 2>/dev/null || \
-                cp -Rc "${repo_root}/staging" "${go_dl_tmp}/staging" 2>/dev/null || \
-                cp -R "${repo_root}/staging" "${go_dl_tmp}/staging"
-            fi
-            cd "${go_dl_tmp}"
-            GOMODCACHE="${shared_root}/go-mod" \
-            GOCACHE="${shared_root}/go-cache" \
-            GOPROXY="${effective_goproxy}" \
-              go "${mod_dl_args[@]}"
-          )
+          autosync::preflight::isolated_go_mod_download \
+            "${repo_root}" \
+            "${shared_root}/go-mod" \
+            "${shared_root}/go-cache" \
+            "${effective_goproxy}" \
+            ${mod_dl_args[@]+"${mod_dl_args[@]}"}
         fi
       fi
     fi

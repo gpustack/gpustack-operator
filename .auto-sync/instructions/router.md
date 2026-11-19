@@ -46,6 +46,7 @@ Never reference an unpublished `gpustack/*` container image tag in `pkg/worker/s
   - Leave `pkg/worker/settings/value.go` and `docs/reference/settings.md` untouched.
 - **Stage B (`stage: "tag_promotion"`, `image_published: true`)**:
   - Host preflight pre-stages promoted image updates into `pkg/worker/settings/value.go`, `pkg/worker/settings/value_test.go`, `pkg/worker/controllers/worker/model_deployment_router_test.go`, `pkg/worker/controllers/worker/model_deployment_render_test.go`, and `docs/reference/settings.md`; verify them against `router-preflight-report.json` and `image-manifests.json`.
+  - Setting-image holds in `.auto-sync/setting-image-holds.json` (outside `scope.writable`, keys `router`, `proxy`, `sidecar`) keep held components pinned to their existing defaults even when newer images are published on Docker Hub; never promote or modify a held setting image (check `held_setting_images` in `router-preflight-report.json`).
   - Update `.auto-sync/proposals/router.json`: set `"stage": "tag_promotion"`, and whenever `upstream-records.json` carries `<ver>+stage-b` for an `upstreamId`, write that exact `<ver>+stage-b` string into `versions[<upstreamId>]`.
   - Do NOT modify any other settings in `value.go`, `value_test.go`, or `settings.md` (such as `KVCacheBackendImage` or `ModelDeploymentModelExpressServerImage`).
 - **No Change (`stage: "no_change"`)**:

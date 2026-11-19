@@ -256,9 +256,10 @@ if [[ -z "${UV_CACHE_DIR:-}" || ! -d "${UV_CACHE_DIR}" ]]; then
 fi
 env "${lint_env[@]}" make -C "${AUTOSYNC_CANDIDATE_ROOT}" lint
 autosync::run_in_module_path_copy "${AUTOSYNC_CANDIDATE_ROOT}" make generate
+(cd "${AUTOSYNC_CANDIDATE_ROOT}" && GOFLAGS="" go mod tidy)
 
 if [[ -n "$(git -C "${AUTOSYNC_CANDIDATE_ROOT}" status --porcelain)" ]]; then
-  printf 'FAIL: candidate tree has uncommitted drift after make generate -> make lint -> make generate\n' >&2
+  printf 'FAIL: candidate tree has uncommitted drift after make generate -> make lint -> make generate -> go mod tidy\n' >&2
   git -C "${AUTOSYNC_CANDIDATE_ROOT}" status --porcelain >&2
   exit 1
 fi

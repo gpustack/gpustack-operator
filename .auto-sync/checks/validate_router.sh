@@ -365,11 +365,21 @@ python3 - \
   "${BASELINE_DIR}/pkg/worker/settings/value.go" \
   "${AUTOSYNC_CANDIDATE_ROOT}/pkg/worker/settings/value.go" \
   "${AUTOSYNC_CANDIDATE_ROOT}/docs/reference/settings.md" \
+  "${BASELINE_DIR}" \
+  "${AUTOSYNC_CANDIDATE_ROOT}" \
+  "${SCRIPT_DIR}" \
   > "${IMAGE_META_FILE}" <<'PY'
 import re
 import sys
 
-base_vg_p, cand_vg_p, cand_sm_p = sys.argv[1:4]
+base_vg_p, cand_vg_p, cand_sm_p, baseline_dir, cand_root, checks_dir = sys.argv[1:7]
+sys.path.insert(0, checks_dir)
+from setting_image_holds import (
+    domain_holds,
+    load_setting_image_holds,
+    resolve_holds_file_for_validate,
+    verify_router_holds,
+)
 
 
 def read(p: str) -> str:
@@ -400,13 +410,15 @@ cand_vg = read(cand_vg_p)
 cand_sm = read(cand_sm_p)
 
 pairs = (
-    ("ModelDeploymentRouterImage", "model-deployment-router-image", "ROUTER_IMG"),
-    ("ModelDeploymentRouterProxyImage", "model-deployment-router-proxy-image", "PROXY_IMG"),
-    ("ModelDeploymentRoutingSidecarImage", "model-deployment-routing-sidecar-image", "SIDECAR_IMG"),
+    ("router", "ModelDeploymentRouterImage", "model-deployment-router-image", "ROUTER_IMG"),
+    ("proxy", "ModelDeploymentRouterProxyImage", "model-deployment-router-proxy-image", "PROXY_IMG"),
+    ("sidecar", "ModelDeploymentRoutingSidecarImage", "model-deployment-routing-sidecar-image", "SIDECAR_IMG"),
 )
 
 changed = False
-for var_name, key_name, out_name in pairs:
+cand_by_role = {}
+base_by_role = {}
+for role, var_name, key_name, out_name in pairs:
     cand_val = vg_image(cand_vg, var_name)
     base_val = vg_image(base_vg, var_name)
     doc_val = sm_default(cand_sm, key_name)
@@ -414,18 +426,39 @@ for var_name, key_name, out_name in pairs:
         raise SystemExit(f"FAIL: value.go {var_name} ({cand_val}) disagrees with settings.md {key_name} Default ({doc_val})")
     if cand_val != base_val:
         changed = True
+    cand_by_role[role] = cand_val
+    base_by_role[role] = base_val
     print(f"{out_name}={cand_val}")
 
+holds_path = resolve_holds_file_for_validate(baseline_dir, cand_root, "router")
+holds_label = holds_path or ".auto-sync/setting-image-holds.json"
+router_holds = domain_holds(load_setting_image_holds(holds_path), "router")
+verify_router_holds(
+    router_holds,
+    cand_by_role["router"],
+    cand_by_role["proxy"],
+    cand_by_role["sidecar"],
+    holds_label,
+)
+for role in ("router", "proxy", "sidecar"):
+    if role in router_holds and cand_by_role[role] != base_by_role[role]:
+        raise SystemExit(
+            f"FAIL: router {role} image changed ({base_by_role[role]} -> {cand_by_role[role]}) while held by {holds_label}"
+        )
+
 print(f"IMAGES_CHANGED={'true' if changed else 'false'}")
+print(f"HELD_ROUTER_KEYS={','.join(sorted(router_holds))}")
 PY
 
 IMAGES_CHANGED=""
+HELD_ROUTER_KEYS=""
 ROUTER_IMG=""
 PROXY_IMG=""
 SIDECAR_IMG=""
 while IFS='=' read -r k v; do
   case "${k}" in
     IMAGES_CHANGED) IMAGES_CHANGED="${v}" ;;
+    HELD_ROUTER_KEYS) HELD_ROUTER_KEYS="${v}" ;;
     ROUTER_IMG) ROUTER_IMG="${v}" ;;
     PROXY_IMG) PROXY_IMG="${v}" ;;
     SIDECAR_IMG) SIDECAR_IMG="${v}" ;;
@@ -440,12 +473,13 @@ fi
 
 # 6b. Proposal schema and version parity (.auto-sync/proposals/router.json).
 CAND_PROPOSAL="${AUTOSYNC_CANDIDATE_ROOT}/.auto-sync/proposals/router.json"
-python3 - "${CAND_PROPOSAL}" "${CAND_LLMD_VER}" "${CAND_VLLM_VER}" "${CAND_SGLANG_VER}" "${IMAGES_CHANGED}" <<'PY'
+python3 - "${CAND_PROPOSAL}" "${CAND_LLMD_VER}" "${CAND_VLLM_VER}" "${CAND_SGLANG_VER}" "${IMAGES_CHANGED}" "${HELD_ROUTER_KEYS}" <<'PY'
 import json
 import os
 import sys
 
-prop_p, llmd_v, vllm_v, sglang_v, images_changed_str = sys.argv[1:6]
+prop_p, llmd_v, vllm_v, sglang_v, images_changed_str, held_keys_csv = sys.argv[1:7]
+held_keys = {k for k in held_keys_csv.split(",") if k}
 if not os.path.isfile(prop_p):
     raise SystemExit(f"FAIL: missing proposal artifact: {prop_p}")
 with open(prop_p, "r", encoding="utf-8") as f:
@@ -466,17 +500,17 @@ if not isinstance(versions, dict):
 
 allow_stage_b = (stage == "tag_promotion") or (images_changed_str == "true")
 expected = {
-    "llm-d-router": llmd_v,
-    "vllm-router": vllm_v,
-    "sglang-gateway": sglang_v,
+    "llm-d-router": (llmd_v, not ({"router", "proxy", "sidecar"} <= held_keys)),
+    "vllm-router": (vllm_v, "router" not in held_keys),
+    "sglang-gateway": (sglang_v, "router" not in held_keys),
 }
-for uid, exp_v in expected.items():
+for uid, (exp_v, uid_allow_sb) in expected.items():
     got = versions.get(uid)
     if not isinstance(got, str) or not got.strip():
         raise SystemExit(f"FAIL: proposals/router.json versions.{uid} must be a non-empty string")
     if got == exp_v:
         continue
-    if allow_stage_b and got == f"{exp_v}+stage-b":
+    if allow_stage_b and uid_allow_sb and got == f"{exp_v}+stage-b":
         continue
     raise SystemExit(f"FAIL: proposals/router.json versions.{uid} ({got!r}) != pinned ({exp_v!r})")
 PY
