@@ -3,9 +3,15 @@ The view refuses pending selection/send windows, unsynchronized membership and
 unsupported native profiles. GET does not mutate routing or expire native state.
 Removed dispatched listeners retain false selection flags with recent-dispatch evidence.
 
-Rebased from v0.10.0 (commit 71f4f0999f95b96c49a9d0c4afbd18dfdb943c26) to v0.11.0.
+AGAINST: llm-d/llm-d-router v1.0.0.
 
-The constructor-based ExtProcServerRunner in v0.11.0 surfaces every field through
+Rebased from v0.11.0 to v1.0.0. v1.0.0 added the native responder plugin chain
+(StreamingServer.SetResponders, ExtProcServerRunner.Responders) and narrowed
+ExtProcServerRunner.GrpcPort from int to uint16; both upstream changes are kept
+and the Observer field/setter ride alongside them, with the drift-guard test's
+callerSet gaining "Responders" as well as "Observer".
+
+The constructor-based ExtProcServerRunner surfaces every field through
 NewExtProcServerRunner, and TestNewExtProcServerRunnerPopulatesEveryField fails
 when any new field is zero. Observer is wired by post-constructor assignment in
 runner.go and is added to the test's callerSet (the smaller change; the
@@ -35,7 +41,7 @@ The five short-block sites release observerMu before mutating ds.pods, so a
 snapshot racing between bump and mutation can see a revision that leads the
 data by one change; no production code reads registry_revision.
 
-The director -> dispatch-evidence leg has a v0.11.0-compatible test
+The director -> dispatch-evidence leg has a test
 pkg/epp/requestcontrol/observer_test.go that builds the director with
 NewDirectorWithConfig + a canned mockScheduler (mockScheduler returns the
 pre-baked SchedulingResult) and verifies every ProfileResults TargetEndpoint
@@ -47,7 +53,7 @@ this view.
 
 diff --git a/cmd/epp/runner/observer_test.go b/cmd/epp/runner/observer_test.go
 new file mode 100644
-index 00000000..7188e6d1
+index 0000000000000000000000000000000000000000..7188e6d13c72cb0428355cb09a7acf4eba60898d
 --- /dev/null
 +++ b/cmd/epp/runner/observer_test.go
 @@ -0,0 +1,42 @@
@@ -95,7 +101,7 @@ index 00000000..7188e6d1
 +}
 diff --git a/cmd/epp/runner/observer_testdata/pd.yaml b/cmd/epp/runner/observer_testdata/pd.yaml
 new file mode 100644
-index 00000000..e18abb13
+index 0000000000000000000000000000000000000000..e18abb1336c8749767e7bb8d3cba5464df447ec9
 --- /dev/null
 +++ b/cmd/epp/runner/observer_testdata/pd.yaml
 @@ -0,0 +1,57 @@
@@ -158,7 +164,7 @@ index 00000000..e18abb13
 +    weight: 3
 diff --git a/cmd/epp/runner/observer_testdata/server.yaml b/cmd/epp/runner/observer_testdata/server.yaml
 new file mode 100644
-index 00000000..532453de
+index 0000000000000000000000000000000000000000..532453deaa7df528dbec8cf54e724a374eb593d5
 --- /dev/null
 +++ b/cmd/epp/runner/observer_testdata/server.yaml
 @@ -0,0 +1,33 @@
@@ -196,10 +202,10 @@ index 00000000..532453de
 +  - pluginRef: prefix-cache-scorer
 +    weight: 3
 diff --git a/cmd/epp/runner/runner.go b/cmd/epp/runner/runner.go
-index 27080fa4..a660b966 100644
+index 7422e01e7e0935c09f36d696428d63d8e3909b21..883d903d58ce8d1e5be9c363fc0642c4acce91ad 100644
 --- a/cmd/epp/runner/runner.go
 +++ b/cmd/epp/runner/runner.go
-@@ -154,6 +154,7 @@ import (
+@@ -164,6 +164,7 @@ import (
  	"github.com/llm-d/llm-d-router/pkg/epp/handlers"
  	"github.com/llm-d/llm-d-router/pkg/epp/metrics"
  	"github.com/llm-d/llm-d-router/pkg/epp/metrics/collectors"
@@ -207,7 +213,7 @@ index 27080fa4..a660b966 100644
  	"github.com/llm-d/llm-d-router/pkg/epp/requestcontrol"
  	"github.com/llm-d/llm-d-router/pkg/epp/scheduling"
  	runserver "github.com/llm-d/llm-d-router/pkg/epp/server"
-@@ -487,6 +488,15 @@ func (r *Runner) setup(ctx context.Context, cfg *rest.Config, opts *runserver.Op
+@@ -549,6 +550,15 @@ func (r *Runner) setup(ctx context.Context, cfg *rest.Config, opts *
  		serverRunner.EvictChannelLookup = requestEvictor.EvictionRegistry()
  	}
  
@@ -224,10 +230,10 @@ index 27080fa4..a660b966 100644
  		setupLog.Error(err, "Failed to setup EPP controllers")
  		return nil, nil, err
 diff --git a/pkg/epp/datastore/datastore.go b/pkg/epp/datastore/datastore.go
-index 98999dce..faf4c849 100644
+index aad867ef96c6ef510465c3669bedbb9039dfe6a5..023427b2366750e5bbd41b28f0e629f9ad081a4a 100644
 --- a/pkg/epp/datastore/datastore.go
 +++ b/pkg/epp/datastore/datastore.go
-@@ -128,6 +128,8 @@ func NewDatastore(parentCtx context.Context, epFactory datalayer.EndpointFactory
+@@ -126,6 +126,8 @@ func NewDatastore(parentCtx context.Context, epFactory datalayer.EndpointFactory
  }
  
  type datastore struct {
@@ -236,7 +242,7 @@ index 98999dce..faf4c849 100644
  	// parentCtx controls the lifecycle of the background metrics goroutines that spawn up by the datastore.
  	parentCtx context.Context
  	// mu is used to synchronize access to pool, objectives, and rewrites.
-@@ -148,11 +150,19 @@ type datastore struct {
+@@ -146,11 +148,19 @@ type datastore struct {
  }
  
  func (ds *datastore) WithEndpointPool(pool *datalayer.EndpointPool) Datastore {
@@ -256,7 +262,7 @@ index 98999dce..faf4c849 100644
  	ds.mu.Lock()
  	defer ds.mu.Unlock()
  	ds.pool = nil
-@@ -172,6 +182,9 @@ func (ds *datastore) PoolSet(ctx context.Context, reader client.Reader, endpoint
+@@ -170,6 +180,9 @@ func (ds *datastore) PoolSet(ctx context.Context, reader client.Reader, endpoint
  		ds.Clear()
  		return nil
  	}
@@ -266,7 +272,7 @@ index 98999dce..faf4c849 100644
  	logger := log.FromContext(ctx)
  	ds.mu.Lock()
  	defer ds.mu.Unlock()
-@@ -300,6 +313,9 @@ func (ds *datastore) PodList(predicate func(fwkdl.Endpoint) bool) []fwkdl.Endpoi
+@@ -298,6 +311,9 @@ func (ds *datastore) PodList(predicate func(fwkdl.Endpoint) bool) []fwkdl.Endpoi
  }
  
  func (ds *datastore) PodUpdateOrAddIfNotExist(ctx context.Context, pod *corev1.Pod) error {
@@ -276,7 +282,7 @@ index 98999dce..faf4c849 100644
  	// Take a reference to pool under read lock to avoid racing with PoolSet().
  	// This is safe because PoolSet() replaces the entire pool struct rather than
  	// updating it in-place.
-@@ -393,6 +409,9 @@ func (ds *datastore) podUpdateOrAddIfNotExist(ctx context.Context, pod *corev1.P
+@@ -391,6 +407,9 @@ func (ds *datastore) podUpdateOrAddIfNotExist(ctx context.Context, pod *corev1.P
  }
  
  func (ds *datastore) PodDelete(podName string) {
@@ -286,7 +292,7 @@ index 98999dce..faf4c849 100644
  	ds.pods.Range(func(k, v any) bool {
  		ep := v.(fwkdl.Endpoint)
  		if ep.GetMetadata().Name == podName {
-@@ -404,12 +423,18 @@ func (ds *datastore) PodDelete(podName string) {
+@@ -402,12 +421,18 @@ func (ds *datastore) PodDelete(podName string) {
  }
  
  func (ds *datastore) EndpointUpsert(ctx context.Context, meta *fwkdl.EndpointMetadata) {
@@ -305,7 +311,7 @@ index 98999dce..faf4c849 100644
  	if v, ok := ds.pods.LoadAndDelete(id); ok {
  		ds.epf.ReleaseEndpoint(v.(fwkdl.Endpoint))
  	}
-@@ -535,3 +560,22 @@ func selectorEqual(a, b labels.Selector) bool {
+@@ -530,3 +555,22 @@ func selectorEqual(a, b labels.Selector) bool {
  	}
  	return a.String() == b.String()
  }
@@ -330,7 +336,7 @@ index 98999dce..faf4c849 100644
 +}
 diff --git a/pkg/epp/datastore/observer_lock_order_test.go b/pkg/epp/datastore/observer_lock_order_test.go
 new file mode 100644
-index 00000000..9e676a90
+index 0000000000000000000000000000000000000000..9e676a90c628cbde9c6f90ae019c6a6195b028bc
 --- /dev/null
 +++ b/pkg/epp/datastore/observer_lock_order_test.go
 @@ -0,0 +1,119 @@
@@ -455,7 +461,7 @@ index 00000000..9e676a90
 +}
 diff --git a/pkg/epp/datastore/observer_test.go b/pkg/epp/datastore/observer_test.go
 new file mode 100644
-index 00000000..3949725f
+index 0000000000000000000000000000000000000000..3949725f05c8bae35a1e13f29f1ac911d2e9c5c5
 --- /dev/null
 +++ b/pkg/epp/datastore/observer_test.go
 @@ -0,0 +1,75 @@
@@ -536,7 +542,7 @@ index 00000000..3949725f
 +}
 diff --git a/pkg/epp/handlers/observer_test.go b/pkg/epp/handlers/observer_test.go
 new file mode 100644
-index 00000000..9d0297d0
+index 0000000000000000000000000000000000000000..9d0297d05a444b833d898cd77ac6662caa9167e9
 --- /dev/null
 +++ b/pkg/epp/handlers/observer_test.go
 @@ -0,0 +1,135 @@
@@ -676,10 +682,10 @@ index 00000000..9d0297d0
 +	}
 +}
 diff --git a/pkg/epp/handlers/request.go b/pkg/epp/handlers/request.go
-index 90e13a1e..2cf34af6 100644
+index a0d646e1d0fa96e56145c458e90c08edc0eedaf5..575d329e27c214c927ac083448bce739e395a179 100644
 --- a/pkg/epp/handlers/request.go
 +++ b/pkg/epp/handlers/request.go
-@@ -60,10 +60,13 @@ func (s *StreamingServer) HandleRequestHeaders(ctx context.Context, reqCtx *Requ
+@@ -70,10 +70,13 @@ func (s *StreamingServer) HandleRequestHeaders(ctx context.Context, reqCtx *Requ
  }
  
  func (s *StreamingServer) fallbackToRandomEndpoint(ctx context.Context, reqCtx *RequestContext, requestSize int) error {
@@ -694,7 +700,7 @@ index 90e13a1e..2cf34af6 100644
  	reqCtx.RequestSize = requestSize
  	reqCtx.reqHeaderResp = s.generateRequestHeaderResponse(ctx, reqCtx)
 diff --git a/pkg/epp/handlers/server.go b/pkg/epp/handlers/server.go
-index 5bcb9bdf..0587df65 100644
+index bf96e6faff498acbf08e19afe5da3c5c1cdc2e9a..e493f92bc3b68182de487fa48166063a24a4c11e 100644
 --- a/pkg/epp/handlers/server.go
 +++ b/pkg/epp/handlers/server.go
 @@ -54,6 +54,7 @@ import (
@@ -705,8 +711,8 @@ index 5bcb9bdf..0587df65 100644
  )
  
  // EvictChannelLookup is an optional interface for looking up eviction channels by request ID.
-@@ -90,6 +91,9 @@ func (s *StreamingServer) SetEmitEndpointScores(enabled bool) {
- 	s.emitEndpointScores = enabled
+@@ -96,6 +97,9 @@ func (s *StreamingServer) SetResponders(responders []fwkrc.Responder) {
+ 	s.responders = responders
  }
  
 +// SetObserver attaches the admin observer to the native selection-to-send lifecycle.
@@ -715,7 +721,7 @@ index 5bcb9bdf..0587df65 100644
  type Director interface {
  	HandleRequest(ctx context.Context, reqCtx *RequestContext, inferenceRequestBody *fwkrh.InferenceRequestBody) (*RequestContext, error)
  	HandleResponseHeader(ctx context.Context, reqCtx *RequestContext) *RequestContext
-@@ -104,6 +108,7 @@ type Datastore interface {
+@@ -111,6 +115,7 @@ type Datastore interface {
  // Server implements the Envoy external processing server.
  // https://www.envoyproxy.io/docs/envoy/latest/api-v3/service/ext_proc/v3/external_processor.proto
  type StreamingServer struct {
@@ -723,7 +729,7 @@ index 5bcb9bdf..0587df65 100644
  	datastore         Datastore
  	director          Director
  	parserRegistry    *ParserRegistry
-@@ -120,8 +125,10 @@ type StreamingServer struct {
+@@ -129,8 +134,10 @@ type StreamingServer struct {
  // Exported fields are read and written by the request-control layers (director and
  // admission control). Unexported fields are private to this package.
  type RequestContext struct {
@@ -736,7 +742,7 @@ index 5bcb9bdf..0587df65 100644
  	// TargetEndpointScores maps endpoint address to the scheduler's score for it, covering
  	// every endpoint the primary profile scored rather than only those in TargetEndpoint.
  	// Nil when the primary profile ran no scorers.
-@@ -362,6 +369,8 @@ func (s *StreamingServer) Process(srv extProcPb.ExternalProcessor_ProcessServer)
+@@ -421,6 +428,8 @@ func (s *StreamingServer) Process(srv extProcPb.ExternalProcessor_ProcessServer)
  	var respBody []byte
  	var evictionRequestID string
  
@@ -745,15 +751,15 @@ index 5bcb9bdf..0587df65 100644
  	// Start a single reader goroutine for the lifetime of the stream.
  	// This avoids spawning a new goroutine per message and allows the main loop to
  	// select on both incoming messages and the eviction channel.
-@@ -524,6 +533,7 @@ func (s *StreamingServer) Process(srv extProcPb.ExternalProcessor_ProcessServer)
+@@ -611,6 +620,7 @@ func (s *StreamingServer) Process(srv extProcPb.ExternalProcessor_ProcessServer)
  					break
  				}
  
 +				reqCtx.ObserverWindow = s.observer.Begin()
  				reqCtx, err = s.director.HandleRequest(ctx, reqCtx, parseResult.Body)
- 				if err != nil {
- 					logger.Error(err, "Error handling request")
-@@ -646,6 +656,9 @@ func (s *StreamingServer) Process(srv extProcPb.ExternalProcessor_ProcessServer)
+ 				// The Director may resolve agent identity after this request span opened.
+ 				tracing.AttributeRequest(ctx, span)
+@@ -746,6 +756,9 @@ func (s *StreamingServer) Process(srv extProcPb.ExternalProcessor_ProcessServer)
  		if err := reqCtx.updateStateAndSendIfNeeded(srv, logger); err != nil {
  			return err
  		}
@@ -765,7 +771,7 @@ index 5bcb9bdf..0587df65 100644
  				"targetEndpoint", reqCtx.TargetEndpoint,
 diff --git a/pkg/epp/observer/endpoints.go b/pkg/epp/observer/endpoints.go
 new file mode 100644
-index 00000000..b6db1667
+index 0000000000000000000000000000000000000000..47d878a7d3c74aed66fe2485d07a2569f73b8cd2
 --- /dev/null
 +++ b/pkg/epp/observer/endpoints.go
 @@ -0,0 +1,262 @@
@@ -1033,7 +1039,7 @@ index 00000000..b6db1667
 +}
 diff --git a/pkg/epp/observer/endpoints_test.go b/pkg/epp/observer/endpoints_test.go
 new file mode 100644
-index 00000000..45d030eb
+index 0000000000000000000000000000000000000000..ebfc1f035ccfa34d776cd28ad3605393c7be0fcf
 --- /dev/null
 +++ b/pkg/epp/observer/endpoints_test.go
 @@ -0,0 +1,165 @@
@@ -1203,10 +1209,10 @@ index 00000000..45d030eb
 +	}
 +}
 diff --git a/pkg/epp/requestcontrol/director.go b/pkg/epp/requestcontrol/director.go
-index e4971a05..4dfc6997 100644
+index 7b902fdc400c7f5f9b2781423338bfe028b18939..8bbca33b2cf88db61675098afbee6c4ac2bfb303 100644
 --- a/pkg/epp/requestcontrol/director.go
 +++ b/pkg/epp/requestcontrol/director.go
-@@ -300,6 +300,15 @@ func (d *Director) HandleRequest(ctx context.Context, reqCtx *handlers.RequestCo
+@@ -328,6 +328,15 @@ func (d *Director) HandleRequest(ctx context.Context, reqCtx *handlers.RequestCo
  	}
  
  	reqCtx.SchedulingRequest.SchedulingResult = result
@@ -1224,7 +1230,7 @@ index e4971a05..4dfc6997 100644
  	// Insert target endpoint to instruct Envoy to route requests to the specified target pod and attach the port number.
 diff --git a/pkg/epp/requestcontrol/observer_test.go b/pkg/epp/requestcontrol/observer_test.go
 new file mode 100644
-index 00000000..b6a67887
+index 0000000000000000000000000000000000000000..b6a67887e1dd1a3383e4476217691d1ee76498a4
 --- /dev/null
 +++ b/pkg/epp/requestcontrol/observer_test.go
 @@ -0,0 +1,96 @@
@@ -1325,11 +1331,11 @@ index 00000000..b6a67887
 +	}
 +}
 diff --git a/pkg/epp/server/runserver.go b/pkg/epp/server/runserver.go
-index a8a63640..635d7a98 100644
+index 0c46244237b409bf4e1dd1fb5b4989282ebd4a10..a4da118c83ee8eb2da7249470b40296ce5bff21d 100644
 --- a/pkg/epp/server/runserver.go
 +++ b/pkg/epp/server/runserver.go
-@@ -46,11 +46,13 @@ import (
- 	fwkfc "github.com/llm-d/llm-d-router/pkg/epp/framework/interface/flowcontrol"
+@@ -48,11 +48,13 @@ import (
+ 	fwkrc "github.com/llm-d/llm-d-router/pkg/epp/framework/interface/requestcontrol"
  	"github.com/llm-d/llm-d-router/pkg/epp/handlers"
  	"github.com/llm-d/llm-d-router/pkg/epp/metrics"
 +	"github.com/llm-d/llm-d-router/pkg/epp/observer"
@@ -1339,27 +1345,27 @@ index a8a63640..635d7a98 100644
  // ExtProcServerRunner provides methods to manage an external process server.
  type ExtProcServerRunner struct {
 +	Observer *observer.Observer
- 	GrpcPort int
+ 	GrpcPort uint16
  	// GrpcListener is an optional pre-bound listener for the ext_proc server.
  	// When set, GrpcPort is ignored. Reserving the port in advance of this
-@@ -263,6 +265,7 @@ func (r *ExtProcServerRunner) AsRunnable(logger logr.Logger) manager.Runnable {
+@@ -277,6 +279,7 @@ func (r *ExtProcServerRunner) AsRunnable(logger logr.Logger) manager.Runnable {
  			poolCap = 4 * 1024 * 1024 // gRPC default 4MB
  		}
  		extProcServer := handlers.NewStreamingServer(r.Datastore, r.Director, r.ParserRegistry, poolCap)
 +		extProcServer.SetObserver(r.Observer)
  		extProcServer.SetEmitEndpointScores(r.EmitEndpointScores)
+ 		extProcServer.SetResponders(r.Responders)
  		if r.EvictChannelLookup != nil {
- 			extProcServer.SetEvictChannelLookup(r.EvictChannelLookup)
 diff --git a/pkg/epp/server/runserver_test.go b/pkg/epp/server/runserver_test.go
-index 55bbb132..4b3f60e1 100644
+index 1b42791953298167c9ad7062ea381b7575139b52..f66aee907b9cef14ee5654d679f46d4c84131063 100644
 --- a/pkg/epp/server/runserver_test.go
 +++ b/pkg/epp/server/runserver_test.go
 @@ -62,7 +62,7 @@ type stubBands struct {
  // a new Options flag reach only one of the two hand-written composite literals.
  func TestNewExtProcServerRunnerPopulatesEveryField(t *testing.T) {
  	// Fields the caller sets after construction, not the factory.
--	callerSet := map[string]bool{"GrpcListener": true, "EvictChannelLookup": true}
-+	callerSet := map[string]bool{"GrpcListener": true, "EvictChannelLookup": true, "Observer": true}
+-	callerSet := map[string]bool{"GrpcListener": true, "EvictChannelLookup": true, "Responders": true}
++	callerSet := map[string]bool{"GrpcListener": true, "EvictChannelLookup": true, "Responders": true, "Observer": true}
  
  	opts := server.NewOptions()
  	// AddFlags registers the logging flag set that Complete() dereferences.

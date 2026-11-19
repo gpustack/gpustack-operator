@@ -1,10 +1,10 @@
 {
   "schema_version": 1,
-  "stage": "aligned",
-  "summary": "Disaggregated inference router versions, patches, and published router image tags are aligned with upstream.",
+  "stage": "recipe_sync",
+  "summary": "Stage A recipe sync: bump llm-d-router to v1.0.0 (observer patch rebased onto v1.0.0, resolving SetResponders/GrpcPort/callerSet conflicts), bump vllm-router to v0.1.17 (retired 0001-epd-routing and 0004-discovery-readiness patches, host-rebased 0002/0003 kept), pin Go toolchain to 1.27-bookworm; sglang-gateway already at gateway-v0.3.1. Router image tag promotion deferred to Stage B pending published gpustack/llm-router image.",
   "versions": {
-    "llm-d-router": "v0.11.0",
-    "vllm-router": "v0.1.16.1",
+    "llm-d-router": "v1.0.0",
+    "vllm-router": "v0.1.17",
     "sglang-gateway": "gateway-v0.3.1"
   },
   "subscriptions": [

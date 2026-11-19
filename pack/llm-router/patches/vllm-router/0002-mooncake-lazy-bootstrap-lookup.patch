@@ -41,25 +41,28 @@ handshake -- query the bootstrap server inside the request handler, against the
 prefill address at hand (llm-d/llm-d-router@v0.10.0,
 pkg/sidecar/proxy/connector_mooncake.go).
 
-AGAINST: vllm-project/router v0.1.16.1 (commit
+AGAINST: vllm-project/router v0.1.17 (commit
 91b65ee4bdfbe98863a32a2205dced5dbb249ffe), the pin named by
-VLLM_ROUTER_VERSION in pack/llm-router/Dockerfile, with the EPD feature
-cherry-picked from upstream PR 266 (commit 516f1cb90eefe565c9fc894d72c8748eae25085b)
-on top -- see 0001-epd-routing.patch. The defect is present in the same shape
+VLLM_ROUTER_VERSION in pack/llm-router/Dockerfile. v0.1.17 is the first
+upstream tag whose tree already contains the EPD feature from PR 266 (commit
+516f1cb90eefe565c9fc894d72c8748eae25085b), so the former
+0001-epd-routing.patch cherry-pick was retired. The defect is present in the same shape
 on the default branch at the time of writing. The image build applies this
 patch with git apply, which fails loudly on a pin whose hunks no longer
 match, so a version bump that absorbs or breaks the patch is detected at
 build time rather than in a cluster.
 
-WHEN TO REMOVE: 0001-epd-routing.patch goes away when upstream cuts a tag
-that contains PR 266's EPD commit (516f1cb). This patch (0002) is
+WHEN TO REMOVE: 0001-epd-routing.patch already went away -- upstream cut the v0.1.17
+tag containing PR 266's EPD commit (516f1cb). This patch (0002) is
 independent of EPD and stays until upstream either ships the lazy Mooncake
 fix or restructures the file enough to absorb it.
 
 diff --git a/src/routers/http/vllm_pd_router.rs b/src/routers/http/vllm_pd_router.rs
+index 3acff13608a00091cf2dc22d5054a9d5018b2430..0a456a7d52fd978c4a5786baf4aa1f8297082bc1 100644
 --- a/src/routers/http/vllm_pd_router.rs
 +++ b/src/routers/http/vllm_pd_router.rs
-@@ -95,11 +95,12 @@ fn build_prefill_request_builder(
+@@ -340,13 +340,14 @@ fn finalize_decode_body(
+ 
  impl VllmPDRouter {
      /// Query the Mooncake bootstrap server on a prefill node to get engine_id per dp_rank.
 -    /// Retries with backoff since the prefill server may not be ready at router startup.
@@ -73,11 +76,12 @@ diff --git a/src/routers/http/vllm_pd_router.rs b/src/routers/http/vllm_pd_route
          let url = format!("{}/query", bootstrap_addr);
 -        let max_retries = 30;
          let mut backoff_secs = 1u64;
-
-@@ -354,12 +355,26 @@ impl VllmPDRouter {
+ 
+         for attempt in 1..=max_retries {
+@@ -617,12 +618,26 @@ impl VllmPDRouter {
          })
      }
-
+ 
 -    /// Look up Mooncake prefill info for a given prefill URL and dp_rank
 +    /// Look up Mooncake prefill info for a given prefill URL and dp_rank.
 +    ///
@@ -102,10 +106,10 @@ diff --git a/src/routers/http/vllm_pd_router.rs b/src/routers/http/vllm_pd_route
          let info = self.mooncake_prefill_info.lock().await;
          if let Some(prefill_info) = info.get(prefill_url) {
              let rank = dp_rank.unwrap_or(0);
-@@ -374,6 +389,79 @@ impl VllmPDRouter {
+@@ -637,6 +652,79 @@ impl VllmPDRouter {
          None
      }
-
+ 
 +    /// Query one prefiller's Mooncake bootstrap server and cache the result under
 +    /// the prefiller's URL.
 +    ///
@@ -182,16 +186,16 @@ diff --git a/src/routers/http/vllm_pd_router.rs b/src/routers/http/vllm_pd_route
      fn is_nixl_push_mode(kvt: &Value) -> bool {
          kvt.get("transfer_mode")
              .and_then(|v| v.as_str())
-@@ -2099,7 +2187,7 @@ impl VllmPDRouter {
+@@ -2575,7 +2663,7 @@ impl VllmPDRouter {
+                         "Querying Mooncake bootstrap at {} for prefill {}",
+                         bootstrap_addr, base_url
                      );
 -                    match Self::query_mooncake_bootstrap(&http_client, &bootstrap_addr).await {
 +                    match Self::query_mooncake_bootstrap(&http_client, &bootstrap_addr, 30).await {
                          Ok(dp_engine_ids) => {
                              info!(
                                  "Got Mooncake engine_ids for {}: {:?}",
-                                 base_url, dp_engine_ids
-                             );
-@@ -2164,6 +2252,10 @@ impl VllmPDRouter {
+@@ -2647,6 +2735,10 @@ impl VllmPDRouter {
      /// Remove a prefill server from the router
      /// Delegates to the underlying PdRouterBase
      pub async fn remove_prefill_server(&self, url: &str) -> Result<String, PDRouterError> {
@@ -200,6 +204,5 @@ diff --git a/src/routers/http/vllm_pd_router.rs b/src/routers/http/vllm_pd_route
 +        // owner's engine ids.
 +        self.mooncake_prefill_info.lock().await.remove(url);
          self.evict_nixl_info(url);
+         self.grpc_frontend.remove_worker(url);
          self.pd_router.remove_prefill_server(url).await
-     }
-
