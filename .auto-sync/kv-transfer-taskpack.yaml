@@ -15,6 +15,7 @@ spec:
       - pkg/worker/settings/value_test.go
       - pkg/worker/controllers/worker/model_deployment_transfer_test.go
       - docs/reference/settings.md
+      - docs/modules/model-delivery/remote.md
       - deploy/gpustack-operator/chart/values.yaml
       - deploy/gpustack-operator/chart/values.schema.json
       - deploy/gpustack-operator/chart/README.md.gotmpl
@@ -56,12 +57,10 @@ spec:
         - include
         - CMakeLists.txt
     - id: modelexpress
-      kind: git-commit
+      kind: github-release
       source: ai-dynamo/modelexpress
-      watchedPaths:
-        - Cargo.toml
-        - Cargo.lock
-        - modelexpress_server
+      watchedPaths: []
+      allowPrerelease: false
     - id: gpustack-runner
       kind: git-commit
       source: gpustack/runner

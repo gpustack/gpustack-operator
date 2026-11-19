@@ -1,14 +1,14 @@
 {
   "schema_version": 1,
   "stage": "recipe_sync",
-  "summary": "Stage A recipe sync: Mooncake recipe to 0.3.14 (0.3.14* admitted in all four release guards plus a new 0.3.14 arm in the cann context_manager.cpp ASCEND_SOURCES glob block); NIXL ROCm source pins to ai-dynamo/nixl 95cbd342679c3c0262e9334b6f2847308601e56d (pyproject version 1.6.0) with UCX at openucx/ucx a910af25760ef4c6c99c8491919e21efffa34657; ModelExpress to ai-dynamo/modelexpress 508e4547970c545dc80d5585f7b9be7af9ec177e. HIXL stays held at gpustack/runner VLLM_HIXL_COMMIT 60dbe9d1d7d9a7eef04bc3dbf84edbad2188230a and the channel-generation patch is byte-identical to runner's; NIXL PyPI stays at 1.5.2. Promoted gpustack/* tags in value.go, settings.md and the chart are unchanged: gpustack/mirrored-mooncake:0.3.14-cpu is not yet published on Docker Hub, so tag promotion waits for Stage B.",
+  "summary": "Stage A recipe sync: Mooncake recipe to 0.3.14 (0.3.14* admitted in all four release guards plus a new 0.3.14 arm in the cann context_manager.cpp ASCEND_SOURCES glob block); NIXL ROCm source pins to ai-dynamo/nixl 95cbd342679c3c0262e9334b6f2847308601e56d (pyproject version 1.6.0) with UCX at openucx/ucx a910af25760ef4c6c99c8491919e21efffa34657; ModelExpress to ai-dynamo/modelexpress v0.8.0. HIXL stays held at gpustack/runner VLLM_HIXL_COMMIT 60dbe9d1d7d9a7eef04bc3dbf84edbad2188230a and the channel-generation patch is byte-identical to runner's; NIXL PyPI stays at 1.5.2. Promoted gpustack/* tags in value.go, settings.md and the chart are unchanged: gpustack/mirrored-mooncake:0.3.14-cpu is not yet published on Docker Hub, so tag promotion waits for Stage B.",
   "versions": {
     "mooncake": "0.3.14",
     "nixl-pypi": "1.5.2",
     "nixl-rocm": "95cbd342679c3c0262e9334b6f2847308601e56d",
     "ucx-rocm": "a910af25760ef4c6c99c8491919e21efffa34657",
     "hixl": "60dbe9d1d7d9a7eef04bc3dbf84edbad2188230a",
-    "modelexpress": "508e4547970c545dc80d5585f7b9be7af9ec177e",
+    "modelexpress": "v0.8.0",
     "gpustack-runner": "aligned"
   },
   "subscriptions": [

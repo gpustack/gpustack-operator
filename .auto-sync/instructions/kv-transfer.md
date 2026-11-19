@@ -4,7 +4,7 @@ You maintain the KV-cache and remote-weight transfer recipes and default image t
 - `pack/mirrored-mooncake/Dockerfile` (`kvcache-ai/Mooncake`)
 - `pack/model-transfer/Dockerfile` and `pack/model-transfer/patches/hixl/001_channel_generation.patch` (`ai-dynamo/nixl`, `openucx/ucx`, `hicann/hixl`, `gpustack/runner` parity)
 - `pack/mirrored-modelexpress-server/Dockerfile` (`ai-dynamo/modelexpress`)
-- `pkg/worker/settings/value.go`, `docs/reference/settings.md`, and `deploy/gpustack-operator/chart/values.yaml` (Stage B tag promotion only)
+- `pkg/worker/settings/value.go`, `docs/reference/settings.md`, `docs/modules/model-delivery/remote.md`, and `deploy/gpustack-operator/chart/values.yaml` (Stage B tag promotion only)
 
 ## Staged Preflight Artifacts (`.auto-sync/.stage/kv-transfer/`)
 
@@ -18,6 +18,7 @@ Inside the offline `linux-bwrap` sandbox, host toolchains (`go`, `hugo`, `helm-d
 - `.auto-sync/.stage/kv-transfer/image-manifests.json`
 - `.auto-sync/.stage/kv-transfer/runner-001_channel_generation.patch` (when staged from `gpustack/runner`)
 - `.auto-sync/.stage/kv-transfer/mooncake/` (upstream `CMakeLists.txt`, `scripts/build_wheel.sh`, `mooncake-transfer-engine/example/CMakeLists.txt`, and `mooncake-transfer-engine/src/transport/ascend_transport/` when `mooncake` drifted)
+- `.auto-sync/.stage/kv-transfer/modelexpress/` (upstream `Cargo.toml` and `Cargo.lock` at the resolved `vX.Y.Z` tag)
 
 **Read-only stage rule:** `.auto-sync/.stage/**` is read-only host-staged context outside
 `scope.writable`. **NEVER** edit, move, or delete any file under `.auto-sync/.stage/**` (doing so
@@ -26,7 +27,7 @@ fails `scope-guard`). Loopwright automatically strips `.auto-sync/.stage/**` whe
 
 ## 1. Two-Stage Image Publication Gate
 
-Never reference an unpublished `gpustack/*` container image tag in `pkg/worker/settings/value.go`, `docs/reference/settings.md`, or `deploy/gpustack-operator/chart/values.yaml`.
+Never reference an unpublished `gpustack/*` container image tag in `pkg/worker/settings/value.go`, `docs/reference/settings.md`, `docs/modules/model-delivery/remote.md`, or `deploy/gpustack-operator/chart/values.yaml`.
 
 - **Stage A (`stage: "recipe_sync"`, `image_published: false`)**:
   - When upstream recipes advance and the target `gpustack/*` image tag is NOT yet published on Docker Hub, update ONLY:
@@ -34,9 +35,9 @@ Never reference an unpublished `gpustack/*` container image tag in `pkg/worker/s
     - `pack/model-transfer/**`
     - `pack/mirrored-modelexpress-server/**`
     - `.auto-sync/proposals/kv-transfer.json` (`"stage": "recipe_sync"`)
-  - Leave `pkg/worker/settings/value.go`, `docs/reference/settings.md`, and `deploy/gpustack-operator/chart/**` untouched.
+  - Leave `pkg/worker/settings/value.go`, `docs/reference/settings.md`, `docs/modules/model-delivery/remote.md`, and `deploy/gpustack-operator/chart/**` untouched.
 - **Stage B (`stage: "tag_promotion"`, `image_published: true`)**:
-  - Host preflight pre-stages promoted tags into `pkg/worker/settings/value.go`, `pkg/worker/settings/value_test.go`, `pkg/worker/controllers/worker/model_deployment_transfer_test.go`, `docs/reference/settings.md`, and `deploy/gpustack-operator/chart/{values.yaml,values.schema.json,README.md.gotmpl,README.md}` when `stage: "tag_promotion"` is ready; verify them against `kv-transfer-preflight-report.json` and `image-manifests.json` (confirming `crane manifest` digests exist for the promoted tags).
+  - Host preflight pre-stages promoted tags into `pkg/worker/settings/value.go`, `pkg/worker/settings/value_test.go`, `pkg/worker/controllers/worker/model_deployment_transfer_test.go`, `docs/reference/settings.md`, `docs/modules/model-delivery/remote.md`, and `deploy/gpustack-operator/chart/{values.yaml,values.schema.json,README.md.gotmpl,README.md}` when `stage: "tag_promotion"` is ready; verify them against `kv-transfer-preflight-report.json` and `image-manifests.json` (confirming `crane manifest` digests exist for the promoted tags).
   - Update `.auto-sync/proposals/kv-transfer.json`: set `"stage": "tag_promotion"`, and whenever `upstream-records.json` carries `<ver>+stage-b` for an `upstreamId` (`mooncake`, `modelexpress`, or `gpustack-runner`), write that exact `<ver>+stage-b` string into `versions[<upstreamId>]` so open-PR deduplication settles cleanly on subsequent runs.
   - Do NOT modify any other settings in `value.go`, `value_test.go`, or `settings.md` (such as `ModelDeploymentRouterImage`, `ModelDeploymentRouterProxyImage`, or `ModelDeploymentRoutingSidecarImage`) or any other keys in `deploy/gpustack-operator/chart/values.yaml`.
 
@@ -56,9 +57,11 @@ Never reference an unpublished `gpustack/*` container image tag in `pkg/worker/s
 
 Only bump `ARG NIXL_VERSION="..."` in `pack/model-transfer/Dockerfile` to a stable version where ALL THREE PyPI packages (`nixl`, `nixl-cu12`, and `nixl-cu13`) publish Linux `x86_64` and `aarch64` wheels (using `nixl_pypi.selected_version` in `kv-transfer-preflight-report.json`).
 
-## 5. ModelExpress `--locked` Cargo Verification
+## 5. ModelExpress SemVer Tag & `--locked` Cargo Verification
 
-When bumping `ARG MODELEXPRESS_COMMIT=...` in `pack/mirrored-modelexpress-server/Dockerfile`, full `docker buildx` builder verification runs on the host in `validate_kv_transfer.sh` after you submit.
+- Set `ARG MODELEXPRESS_VERSION=vX.Y.Z` in `pack/mirrored-modelexpress-server/Dockerfile` to a stable SemVer release tag `vX.Y.Z` from `ai-dynamo/modelexpress` (never a commit SHA, pre-release, or non-SemVer tag like `weight-sync-pre-removal`).
+- When `.auto-sync/.stage/kv-transfer/modelexpress/Cargo.toml` is staged, verify `MODELEXPRESS_VERSION` (without the leading `v`) matches `[workspace.package].version` in `Cargo.toml`.
+- When bumping `ARG MODELEXPRESS_VERSION=vX.Y.Z` in `pack/mirrored-modelexpress-server/Dockerfile`, full `docker buildx` `--target builder` (`--locked` Cargo) verification runs on the host in `validate_kv_transfer.sh` after you submit.
 
 ## 6. Proposal Artifact
 

@@ -88,11 +88,11 @@ function pack() {
     if [[ "${task}" == "thead-ppu-devel" ]] && [[ -n "${PPU_SDK_URL:-}" ]]; then
       extra_args+=("--build-arg" "PPU_SDK_URL=${PPU_SDK_URL}")
     fi
-    # The ModelExpress server is built at a pinned upstream commit; the environment can
+    # The ModelExpress server is built at a pinned upstream release tag; the environment can
     # re-pin it for a review build. An ordinary build passes nothing and the Dockerfile's
-    # default — the reviewed commit — is what ships.
-    if [[ "${task}" == "mirrored-modelexpress-server" ]] && [[ -n "${MODELEXPRESS_COMMIT:-}" ]]; then
-      extra_args+=("--build-arg" "MODELEXPRESS_COMMIT=${MODELEXPRESS_COMMIT}")
+    # default — the reviewed release — is what ships.
+    if [[ "${task}" == "mirrored-modelexpress-server" ]] && [[ -n "${MODELEXPRESS_VERSION:-}" ]]; then
+      extra_args+=("--build-arg" "MODELEXPRESS_VERSION=${MODELEXPRESS_VERSION}")
     fi
     tag="${PACKAGE_NAMESPACE}/${task}:${PACKAGE_TAG}"
     if [[ "${task}" == "model-transfer" ]]; then

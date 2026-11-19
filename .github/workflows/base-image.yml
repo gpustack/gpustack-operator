@@ -39,9 +39,9 @@ on:
         default: ""
       # Allow passing build arguments at pack time, for an image input that must not be
       # committed. Required by thead-ppu-devel: "PPU_SDK_URL=<presigned url>". Optional for
-      # mirrored-modelexpress-server: "MODELEXPRESS_COMMIT=<sha>" re-pins the review build.
+      # mirrored-modelexpress-server: "MODELEXPRESS_VERSION=v0.8.0" re-pins the review build.
       args:
-        description: 'Build arguments (space-separated KEY=VALUE), e.g. PPU_SDK_URL=<presigned url> or MODELEXPRESS_COMMIT=<sha>.'
+        description: 'Build arguments (space-separated KEY=VALUE), e.g. PPU_SDK_URL=<presigned url> or MODELEXPRESS_VERSION=v0.8.0.'
         required: false
         type: string
         default: ""

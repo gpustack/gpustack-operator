@@ -14,6 +14,7 @@ BASE_SHA="$(git -C "${REPO_ROOT}" rev-parse HEAD)"
 autosync::preflight::snapshot_baselines "${STAGE_DIR}" \
   "pkg/worker/settings/value.go" \
   "docs/reference/settings.md" \
+  "docs/modules/model-delivery/remote.md" \
   "deploy/gpustack-operator/chart/values.yaml" \
   "deploy/gpustack-operator/chart/values.schema.json" \
   "deploy/gpustack-operator/chart/README.md" \
@@ -387,6 +388,144 @@ def stage_fixture_repo(src: str, dst: str) -> str:
     return "fixture"
 
 
+def ls_remote_stable_tags(
+    repo_url: str, ref_glob: str, tag_re: re.Pattern[str], strip_prefix: str
+) -> tuple[str, list[str]]:
+    out = subprocess.check_output(
+        ["git", "-c", "protocol.file.allow=always", "ls-remote", "--tags", "--refs", repo_url, ref_glob],
+        text=True,
+    )
+    tags = []
+    for raw in out.splitlines():
+        raw = raw.strip()
+        if not raw:
+            continue
+        parts = raw.split("\t", 1)
+        if len(parts) != 2:
+            continue
+        ref = parts[1].strip()
+        if not ref.startswith("refs/tags/"):
+            continue
+        tag = ref[len("refs/tags/"):]
+        if tag_re.fullmatch(tag):
+            tags.append(tag)
+
+    if not tags:
+        raise SystemExit(f"FAIL: no stable tags matching {tag_re.pattern} found in {repo_url} ({ref_glob})")
+
+    def ver_key(t: str) -> tuple[int, ...]:
+        num_part = t[len(strip_prefix):]
+        return tuple(int(seg) for seg in num_part.split("."))
+
+    tags = sorted(set(tags), key=ver_key, reverse=True)
+    return tags[0], tags[:5]
+
+
+def ensure_tag_fetched(dst: str, repo_url: str, tag: str, filter_blobless: bool = False) -> None:
+    rc = subprocess.run(
+        ["git", "-C", dst, "rev-parse", "--verify", "-q", f"refs/tags/{tag}^{{commit}}"],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    ).returncode
+    if rc == 0:
+        return
+    cmd = ["git", "-C", dst, "-c", "protocol.file.allow=always", "fetch", "--depth", "1"]
+    if filter_blobless:
+        cmd.append("--filter=blob:none")
+    cmd.extend([repo_url, f"refs/tags/{tag}:refs/tags/{tag}"])
+    subprocess.run(cmd, check=True)
+
+
+def sync_tagged_repo(
+    repo_url: str, dst: str, target_tag: str, pinned_tag: str = "", is_local: bool = False
+) -> None:
+    git_env = {**os.environ, "LC_ALL": "C", "GIT_LFS_SKIP_SMUDGE": "1"}
+    lfs_opts = [
+        "-c", "filter.lfs.smudge=",
+        "-c", "filter.lfs.process=",
+        "-c", "filter.lfs.clean=",
+        "-c", "filter.lfs.required=false",
+    ]
+    if is_local:
+        if os.path.isdir(os.path.join(dst, ".git")):
+            subprocess.run(["git", "-C", dst, "remote", "set-url", "origin", repo_url], check=True, env=git_env)
+            subprocess.run(
+                ["git", *lfs_opts, "-C", dst, "-c", "protocol.file.allow=always", "fetch", "--tags", "--force", "--prune", "origin"],
+                check=True,
+                env=git_env,
+            )
+        else:
+            if os.path.exists(dst):
+                shutil.rmtree(dst)
+            subprocess.run(
+                ["git", *lfs_opts, "-c", "protocol.file.allow=always", "clone", "--no-single-branch", repo_url, dst],
+                check=True,
+                env=git_env,
+            )
+        ensure_tag_fetched(dst, repo_url, target_tag, filter_blobless=False)
+    else:
+        if not os.path.isdir(os.path.join(dst, ".git")):
+            if os.path.exists(dst):
+                shutil.rmtree(dst)
+            subprocess.run(
+                ["git", *lfs_opts, "-c", "protocol.file.allow=always", "clone", "--depth", "1", "--branch", target_tag, repo_url, dst],
+                check=True,
+                env=git_env,
+            )
+        else:
+            subprocess.run(["git", "-C", dst, "remote", "set-url", "origin", repo_url], check=True, env=git_env)
+            ensure_tag_fetched(dst, repo_url, target_tag, filter_blobless=False)
+
+    if pinned_tag and pinned_tag != target_tag:
+        try:
+            ensure_tag_fetched(dst, repo_url, pinned_tag, filter_blobless=False)
+        except subprocess.CalledProcessError:
+            pass
+
+    subprocess.run(["git", *lfs_opts, "-C", dst, "checkout", "-f", "-q", f"refs/tags/{target_tag}"], check=True, env=git_env)
+
+
+def read_git_tag_file(repo_dir: str, tag: str, rel_path: str) -> str:
+    if not os.path.isdir(os.path.join(repo_dir, ".git")):
+        return ""
+    res = subprocess.run(
+        ["git", "-C", repo_dir, "show", f"refs/tags/{tag}:{rel_path}"],
+        capture_output=True,
+        text=True,
+    )
+    return res.stdout if res.returncode == 0 else ""
+
+
+def parse_cargo_workspace_version(cargo_txt: str) -> str:
+    if not cargo_txt:
+        return ""
+    try:
+        import tomllib
+        doc = tomllib.loads(cargo_txt)
+        ws_ver = str(((doc.get("workspace") or {}).get("package") or {}).get("version") or "").strip()
+        if ws_ver:
+            return ws_ver
+        return str((doc.get("package") or {}).get("version") or "").strip()
+    except ImportError:
+        section = ""
+        ws_ver = ""
+        pkg_ver = ""
+        for raw_ln in cargo_txt.splitlines():
+            st = raw_ln.strip()
+            if not st or st.startswith("#"):
+                continue
+            if st.startswith("["):
+                section = st
+                continue
+            m_v = re.match(r'^version\s*=\s*["\']([^"\']+)["\']', st)
+            if m_v:
+                if section == "[workspace.package]":
+                    ws_ver = m_v.group(1).strip()
+                elif section == "[package]":
+                    pkg_ver = m_v.group(1).strip()
+        return ws_ver or pkg_ver
+
+
 mooncake_df = read_text(os.path.join(repo_root, "pack/mirrored-mooncake/Dockerfile"))
 mt_df = read_text(os.path.join(repo_root, "pack/model-transfer/Dockerfile"))
 mx_df = read_text(os.path.join(repo_root, "pack/mirrored-modelexpress-server/Dockerfile"))
@@ -402,7 +541,7 @@ recipe = {
     "nixl_rocm_ref": read_dockerfile_arg(mt_df, "NIXL_ROCM_REF", "pack/model-transfer/Dockerfile"),
     "ucx_rocm_ref": read_dockerfile_arg(mt_df, "NIXL_ROCM_UCX_REF", "pack/model-transfer/Dockerfile"),
     "hixl_commit": read_dockerfile_arg(mt_df, "HIXL_COMMIT", "pack/model-transfer/Dockerfile"),
-    "modelexpress_commit": read_dockerfile_arg(mx_df, "MODELEXPRESS_COMMIT", "pack/mirrored-modelexpress-server/Dockerfile"),
+    "modelexpress_version": read_dockerfile_arg(mx_df, "MODELEXPRESS_VERSION", "pack/mirrored-modelexpress-server/Dockerfile"),
 }
 defaults = {
     "kv_cache_backend_image": extract_value_go_image(value_go, "KVCacheBackendImage"),
@@ -440,6 +579,9 @@ nixl_stage = os.path.join(stage_dir, "nixl")
 ucx_stage = os.path.join(stage_dir, "ucx")
 mx_stage = os.path.join(stage_dir, "modelexpress")
 
+mx_tag_re = re.compile(r"^v\d+\.\d+\.\d+$")
+mx_url = os.environ.get("AUTOSYNC_KV_MODELEXPRESS_REPO_URL", "").strip() or "https://github.com/ai-dynamo/modelexpress.git"
+
 if fixture_dir:
     runner_fix = os.path.join(fixture_dir, "repos/gpustack-runner")
     if os.path.isdir(runner_fix):
@@ -457,13 +599,35 @@ if fixture_dir:
     up_ucx_rocm = stage_fixture_repo(ucx_fix, ucx_stage) if os.path.isdir(ucx_fix) else recipe["ucx_rocm_ref"]
 
     mx_fix = os.path.join(fixture_dir, "repos/modelexpress")
-    up_mx = stage_fixture_repo(mx_fix, mx_stage) if os.path.isdir(mx_fix) else recipe["modelexpress_commit"]
+    if "modelexpress" in upstream_override:
+        up_mx = str(upstream_override["modelexpress"]).strip()
+        up_mx_recent = [up_mx]
+    elif os.path.isdir(mx_fix):
+        up_mx, up_mx_recent = ls_remote_stable_tags(mx_fix, "refs/tags/v*", mx_tag_re, "v")
+    else:
+        up_mx = recipe["modelexpress_version"]
+        up_mx_recent = [up_mx]
+
+    if os.path.isdir(mx_fix):
+        if os.path.isdir(os.path.join(mx_fix, ".git")) and subprocess.run(
+            ["git", "-C", mx_fix, "rev-parse", "--verify", "-q", f"refs/tags/{up_mx}^{{commit}}"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        ).returncode == 0:
+            sync_tagged_repo(mx_fix, mx_stage, up_mx, recipe["modelexpress_version"], is_local=True)
+        else:
+            stage_fixture_repo(mx_fix, mx_stage)
 else:
     runner_head = sync_git_repo("https://github.com/gpustack/runner.git", runner_stage)
     up_hixl = sync_git_repo("https://github.com/hicann/hixl.git", hixl_stage, recipe["hixl_commit"])
     up_nixl_rocm = sync_git_repo("https://github.com/ai-dynamo/nixl.git", nixl_stage, recipe["nixl_rocm_ref"])
     up_ucx_rocm = sync_git_repo("https://github.com/openucx/ucx.git", ucx_stage, recipe["ucx_rocm_ref"])
-    up_mx = sync_git_repo("https://github.com/ai-dynamo/modelexpress.git", mx_stage, recipe["modelexpress_commit"])
+    if "modelexpress" in upstream_override:
+        up_mx = str(upstream_override["modelexpress"]).strip()
+        up_mx_recent = [up_mx]
+    else:
+        up_mx, up_mx_recent = ls_remote_stable_tags(mx_url, "refs/tags/v*", mx_tag_re, "v")
+    sync_tagged_repo(mx_url, mx_stage, up_mx, recipe["modelexpress_version"], is_local=False)
 
 if "hixl" in upstream_override:
     up_hixl = str(upstream_override["hixl"])
@@ -471,10 +635,16 @@ if "nixl_rocm" in upstream_override:
     up_nixl_rocm = str(upstream_override["nixl_rocm"])
 if "ucx_rocm" in upstream_override:
     up_ucx_rocm = str(upstream_override["ucx_rocm"])
-if "modelexpress" in upstream_override:
-    up_mx = str(upstream_override["modelexpress"])
 if "gpustack_runner" in upstream_override:
     runner_head = str(upstream_override["gpustack_runner"])
+
+mx_workspace_version = ""
+if os.path.isdir(os.path.join(mx_stage, ".git")):
+    mx_cargo_txt = read_git_tag_file(mx_stage, up_mx, "Cargo.toml")
+    if mx_cargo_txt:
+        mx_workspace_version = parse_cargo_workspace_version(mx_cargo_txt)
+if not mx_workspace_version and os.path.isfile(os.path.join(mx_stage, "Cargo.toml")):
+    mx_workspace_version = parse_cargo_workspace_version(read_text(os.path.join(mx_stage, "Cargo.toml")))
 
 # Inspect gpustack/runner HIXL commit and patch parity.
 runner_hixl_commit = ""
@@ -818,6 +988,7 @@ discovery = {
         "ucx_rocm": up_ucx_rocm,
         "hixl": up_hixl,
         "modelexpress": up_mx,
+        "modelexpress_recent": up_mx_recent,
         "gpustack_runner": runner_head,
     },
     "runner": {
@@ -825,6 +996,7 @@ discovery = {
         "patch_match": runner_patch_match,
     },
     "nixl_rocm_project_version": nixl_rocm_project_version,
+    "modelexpress_workspace_version": mx_workspace_version,
     "base_sha": base_sha,
     "targets": {
         "mooncake_image": target_mooncake_image,
@@ -919,7 +1091,7 @@ stage_a_drifts = {
     "nixl-rocm": up["nixl_rocm"] != recipe["nixl_rocm_ref"],
     "ucx-rocm": up["ucx_rocm"] != recipe["ucx_rocm_ref"],
     "hixl": effective_hixl_target != recipe["hixl_commit"],
-    "modelexpress": up["modelexpress"] != recipe["modelexpress_commit"],
+    "modelexpress": up["modelexpress"] != recipe["modelexpress_version"],
     "gpustack-runner": runner_hixl_drift or runner_patch_drift,
 }
 
@@ -998,7 +1170,8 @@ if has_stage_a:
         {
             "upstreamId": "modelexpress",
             "status": "available" if stage_a_drifts["modelexpress"] else "up_to_date",
-            "version": up["modelexpress"] if stage_a_drifts["modelexpress"] else recipe["modelexpress_commit"],
+            "version": up["modelexpress"] if stage_a_drifts["modelexpress"] else recipe["modelexpress_version"],
+            "recentVersions": up["modelexpress_recent"],
         },
         {
             "upstreamId": "gpustack-runner",
@@ -1041,7 +1214,8 @@ elif has_stage_b:
         {
             "upstreamId": "modelexpress",
             "status": "available" if mx_stage_b else "up_to_date",
-            "version": f"{recipe['modelexpress_commit']}+stage-b" if mx_stage_b else recipe["modelexpress_commit"],
+            "version": f"{recipe['modelexpress_version']}+stage-b" if mx_stage_b else recipe["modelexpress_version"],
+            "recentVersions": up["modelexpress_recent"],
         },
         {
             "upstreamId": "gpustack-runner",
@@ -1087,7 +1261,8 @@ else:
         {
             "upstreamId": "modelexpress",
             "status": "up_to_date",
-            "version": recipe["modelexpress_commit"],
+            "version": recipe["modelexpress_version"],
+            "recentVersions": up["modelexpress_recent"],
         },
         {
             "upstreamId": "gpustack-runner",
@@ -1125,6 +1300,11 @@ report = {
     "nixl_rocm": {
         "target_ref": up["nixl_rocm"],
         "project_version": disc.get("nixl_rocm_project_version", ""),
+    },
+    "modelexpress": {
+        "selected_version": up["modelexpress"],
+        "recent_versions": up["modelexpress_recent"],
+        "workspace_version": disc.get("modelexpress_workspace_version", ""),
     },
     "runner": runner,
 }
@@ -1174,6 +1354,13 @@ if [[ "${AUTOSYNC_SKIP_SOURCE_REVISION:-false}" != "true" ]] && \
       fi
     done
   fi
+  if [[ -d "${STAGE_DIR}/modelexpress" ]]; then
+    for mx_rel in "Cargo.toml" "Cargo.lock"; do
+      if [[ -f "${STAGE_DIR}/modelexpress/${mx_rel}" ]]; then
+        BUNDLE_SPECS+=("${STAGE_DIR}/modelexpress/${mx_rel}::modelexpress/${mx_rel}")
+      fi
+    done
+  fi
   autosync::preflight::populate_stage_bundle "${STAGED_TREE}" "kv-transfer" "${BUNDLE_SPECS[@]}"
 
   COMMIT_PATHS=(".auto-sync/.stage/kv-transfer")
@@ -1184,13 +1371,10 @@ import sys
 with open(sys.argv[1], "r", encoding="utf-8") as f:
     rep = json.load(f)
 sb = rep.get("stage_b_flags") or {}
-print(f"{rep.get('stage','')}|{str(bool(rep.get('runner_patch_drift'))).lower()}|{str(bool(sb.get('model_transfer'))).lower()}")
+print(f"{rep.get('stage','')}|{str(bool(rep.get('runner_patch_drift'))).lower()}|{str(bool(sb.get('model_transfer'))).lower()}|{str(bool(sb.get('modelexpress'))).lower()}")
 PY
 )"
-  KV_STAGE_NAME="${KV_STAGE_INFO%%|*}"
-  KV_REST="${KV_STAGE_INFO#*|}"
-  RUNNER_PATCH_DRIFT="${KV_REST%%|*}"
-  MT_STAGE_B="${KV_REST#*|}"
+  IFS='|' read -r KV_STAGE_NAME RUNNER_PATCH_DRIFT MT_STAGE_B MX_STAGE_B <<<"${KV_STAGE_INFO}"
 
   if [[ "${KV_STAGE_NAME}" == "recipe_sync" && "${RUNNER_PATCH_DRIFT}" == "true" && -f "${RUNNER_PATCH_FILE}" ]]; then
     mkdir -p "${STAGED_TREE}/pack/model-transfer/patches/hixl"
@@ -1200,7 +1384,8 @@ PY
     mkdir -p \
       "${STAGED_TREE}/pkg/worker/settings" \
       "${STAGED_TREE}/pkg/worker/controllers/worker" \
-      "${STAGED_TREE}/docs/reference"
+      "${STAGED_TREE}/docs/reference" \
+      "${STAGED_TREE}/docs/modules/model-delivery"
     cp -f "${REPO_ROOT}/pkg/worker/settings/value.go" "${STAGED_TREE}/pkg/worker/settings/value.go"
     if [[ -f "${REPO_ROOT}/pkg/worker/settings/value_test.go" ]]; then
       cp -f "${REPO_ROOT}/pkg/worker/settings/value_test.go" "${STAGED_TREE}/pkg/worker/settings/value_test.go"
@@ -1210,6 +1395,9 @@ PY
         "${STAGED_TREE}/pkg/worker/controllers/worker/model_deployment_transfer_test.go"
     fi
     cp -f "${REPO_ROOT}/docs/reference/settings.md" "${STAGED_TREE}/docs/reference/settings.md"
+    if [[ -f "${REPO_ROOT}/docs/modules/model-delivery/remote.md" ]]; then
+      cp -f "${REPO_ROOT}/docs/modules/model-delivery/remote.md" "${STAGED_TREE}/docs/modules/model-delivery/remote.md"
+    fi
     if [[ -d "${REPO_ROOT}/deploy/gpustack-operator/chart" ]]; then
       mkdir -p "${STAGED_TREE}/deploy/gpustack-operator"
       cp -R "${REPO_ROOT}/deploy/gpustack-operator/chart" "${STAGED_TREE}/deploy/gpustack-operator/chart"
@@ -1224,6 +1412,7 @@ PY
     python3 - "${PREFLIGHT_REPORT_JSON}" \
       "${STAGED_TREE}/pkg/worker/settings/value.go" \
       "${STAGED_TREE}/docs/reference/settings.md" \
+      "${STAGED_TREE}/docs/modules/model-delivery/remote.md" \
       "${STAGED_TREE}/deploy/gpustack-operator/chart/values.yaml" \
       "${STAGED_TREE}/deploy/gpustack-operator/chart/README.md.gotmpl" \
       "${STAGED_TREE}/pkg/worker/settings/value_test.go" \
@@ -1233,7 +1422,7 @@ import os
 import re
 import sys
 
-rep_p, vg_p, sm_p, vy_p, rgt_p, vt_p, tt_p = sys.argv[1:8]
+rep_p, vg_p, sm_p, rm_p, vy_p, rgt_p, vt_p, tt_p = sys.argv[1:9]
 with open(rep_p, "r", encoding="utf-8") as f:
     rep = json.load(f)
 
@@ -1279,6 +1468,24 @@ def replace_exact_image_literal(path: str, old_img: str, new_img: str) -> None:
         f.write(txt)
 
 
+def update_remote_md_mx(path: str, old_img: str, new_img: str) -> None:
+    if not os.path.isfile(path) or not new_img or old_img == new_img:
+        return
+    if not old_img:
+        raise SystemExit(f"FAIL: missing default image while promoting {new_img!r} in {path}")
+    with open(path, "r", encoding="utf-8") as f:
+        txt = f.read()
+    pat = re.compile(
+        rf'(name:\s*model-deployment-modelexpress-server-image\b.*?\n\s*value:\s*){re.escape(old_img)}(?=\s|#|$)',
+        re.DOTALL,
+    )
+    out, n = pat.subn(rf'\g<1>{new_img}', txt, count=1)
+    if n != 1:
+        raise SystemExit(f"FAIL: could not update model-deployment-modelexpress-server-image in {path}")
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(out)
+
+
 def update_mt_images_yaml_file(path: str, mt_targets: dict[str, str]) -> None:
     if not os.path.isfile(path) or not mt_targets:
         return
@@ -1316,6 +1523,7 @@ if sb.get("modelexpress"):
     old_mx = defaults.get("modelexpress_server_image") or defaults.get("modelexpress_image") or ""
     vg_txt = update_value_go(vg_txt, "ModelDeploymentModelExpressServerImage", targets["modelexpress_image"])
     sm_txt = update_settings_md(sm_txt, "model-deployment-modelexpress-server-image", targets["modelexpress_image"])
+    update_remote_md_mx(rm_p, old_mx, targets["modelexpress_image"])
     replace_exact_image_literal(vt_p, old_mx, targets["modelexpress_image"])
     replace_exact_image_literal(tt_p, old_mx, targets["modelexpress_image"])
 
@@ -1344,6 +1552,9 @@ PY
       "pkg/worker/settings/value.go"
       "docs/reference/settings.md"
     )
+    if [[ "${MX_STAGE_B}" == "true" && -f "${STAGED_TREE}/docs/modules/model-delivery/remote.md" ]]; then
+      COMMIT_PATHS+=("docs/modules/model-delivery/remote.md")
+    fi
     for extra_test_rel in \
       "pkg/worker/settings/value_test.go" \
       "pkg/worker/controllers/worker/model_deployment_transfer_test.go"; do
