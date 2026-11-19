@@ -2,14 +2,14 @@
 
 # The mirrored ModelExpress metadata server: the rendezvous one ModelDeployment's engines
 # read when a role loads weights through the modelexpress load format. Built from source at
-# a pinned upstream commit -- the operator renders the client half against this server's
+# a pinned upstream release tag -- the operator renders the client half against this server's
 # exact contract, so a moving upstream would move that contract underneath it.
 # Build target: modelexpress-server (default final stage); the builder stage is its input.
 # Platforms: linux/amd64 and linux/arm64.
 # Run from the repository root:
 #   PACKAGE_ARCH=amd64 PACKAGE_TAG=dev make package mirrored-modelexpress-server
 # Set PACKAGE_NAMESPACE to select the image namespace; PACKAGE_PUSH=true publishes.
-# MODELEXPRESS_COMMIT re-pins the upstream commit; the default is the reviewed one.
+# MODELEXPRESS_VERSION re-pins the upstream release tag; the default is the reviewed one.
 
 # =============================================================================
 # Stage: builder
@@ -18,7 +18,9 @@
 FROM rust:1.95-bookworm AS builder
 SHELL ["/bin/bash", "-c"]
 
-ARG MODELEXPRESS_COMMIT=508e4547970c545dc80d5585f7b9be7af9ec177e
+# Pinned to an official upstream GitHub release tag (refs/tags/vX.Y.Z) rather than tracking
+# main HEAD, matching mirrored-mooncake (MOONCAKE_VERSION) and llm-router (*_VERSION).
+ARG MODELEXPRESS_VERSION=v0.8.0
 
 RUN <<EOF
     set -exo pipefail
@@ -40,16 +42,17 @@ EOF
 
 WORKDIR /src
 
-# The clone is its own layer so a re-build with the same commit skips it, and the checkout
-# is by commit rather than by tag so a force-push upstream cannot change what this image
-# serves.
+# The fetch is its own layer so a re-build with the same tag skips it, and fetching
+# refs/tags/${MODELEXPRESS_VERSION} selects the upstream release tag directly rather than main.
 RUN <<EOF
     set -exo pipefail
-    git clone https://github.com/ai-dynamo/modelexpress.git .
-    git checkout "${MODELEXPRESS_COMMIT}"
+    git init .
+    git remote add origin https://github.com/ai-dynamo/modelexpress.git
+    git fetch --depth 1 origin "refs/tags/${MODELEXPRESS_VERSION}:refs/tags/${MODELEXPRESS_VERSION}"
+    git checkout --detach "refs/tags/${MODELEXPRESS_VERSION}"
 EOF
 
-# --locked builds exactly the Cargo.lock the reviewed commit ships: the server is the
+# --locked builds exactly the Cargo.lock the reviewed release ships: the server is the
 # reviewed entry only when its dependency graph is, too.
 RUN cargo build --release --locked --bin modelexpress-server --features memory-backend
 

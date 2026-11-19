@@ -73,6 +73,7 @@ copy_repo_file() {
 for rel in \
   "pkg/worker/settings/value.go" \
   "docs/reference/settings.md" \
+  "docs/modules/model-delivery/remote.md" \
   "deploy/gpustack-operator/chart/values.yaml" \
   "deploy/gpustack-operator/chart/values.schema.json" \
   "deploy/gpustack-operator/chart/README.md" \
@@ -226,24 +227,47 @@ cp "${FAKE_REPO}/pack/model-transfer/patches/hixl/001_channel_generation.patch" 
 git -C "${RUNNER_SRC}" add -A
 git -C "${RUNNER_SRC}" commit -q -m "runner base"
 
+MX_SRC="${FIXTURE_DIR}/repos/modelexpress"
+init_mock_repo "${MX_SRC}"
+cat > "${MX_SRC}/Cargo.toml" <<'TOML'
+[workspace]
+members = ["modelexpress_server"]
+
+[workspace.package]
+version = "0.8.0"
+edition = "2024"
+TOML
+cat > "${MX_SRC}/Cargo.lock" <<'LOCK'
+# mock Cargo.lock
+version = 3
+LOCK
+git -C "${MX_SRC}" add -A
+git -C "${MX_SRC}" commit -q -m "modelexpress v0.8.0"
+git -C "${MX_SRC}" tag v0.8.0
+git -C "${MX_SRC}" tag weight-sync-pre-removal
+git -C "${MX_SRC}" tag v0.9.0-rc1
+
 cat > "${FIXTURE_DIR}/mooncake-release.json" <<'JSON'
 [
-  {"tag_name": "v0.3.14-rc1", "prerelease": true, "draft": false},
-  {"tag_name": "v0.3.14", "prerelease": false, "draft": false},
-  {"tag_name": "v0.3.13.post1", "prerelease": false, "draft": false}
+  {"tag_name": "v0.3.15-rc1", "prerelease": true, "draft": false},
+  {"tag_name": "v0.3.15", "prerelease": false, "draft": false},
+  {"tag_name": "v0.3.14", "prerelease": false, "draft": false}
 ]
 JSON
 
-cat > "${FIXTURE_DIR}/upstream.json" <<'JSON'
+NIXL_ROCM_BASE_REF="$(python3 "${ROOT_DIR}/.auto-sync/checks/dockerfile_arg.py" "${ROOT_DIR}/pack/model-transfer/Dockerfile" NIXL_ROCM_REF)"
+UCX_ROCM_BASE_REF="$(python3 "${ROOT_DIR}/.auto-sync/checks/dockerfile_arg.py" "${ROOT_DIR}/pack/model-transfer/Dockerfile" NIXL_ROCM_UCX_REF)"
+HIXL_BASE_REF="$(python3 "${ROOT_DIR}/.auto-sync/checks/dockerfile_arg.py" "${ROOT_DIR}/pack/model-transfer/Dockerfile" HIXL_COMMIT)"
+
+cat > "${FIXTURE_DIR}/upstream.json" <<JSON
 {
-  "nixl_rocm": "1683cf3b7f3d11674c03c5e861cea22339876c96",
-  "ucx_rocm": "2ff0b47ce7626584cb9b56c647d08f712c6c3edf",
-  "hixl": "60dbe9d1d7d9a7eef04bc3dbf84edbad2188230a",
-  "modelexpress": "ac6d03a87a550c8188c3ed59f187b90d4f0554f5"
+  "nixl_rocm": "${NIXL_ROCM_BASE_REF}",
+  "ucx_rocm": "${UCX_ROCM_BASE_REF}",
+  "hixl": "${HIXL_BASE_REF}"
 }
 JSON
 
-# Manifests JSON: 0.3.13.post1-cpu published, 0.3.14-cpu UNPUBLISHED initially.
+# Manifests JSON: 0.3.13.post1-cpu published, 0.3.15-cpu UNPUBLISHED initially.
 cat > "${FIXTURE_DIR}/image-manifests.json" <<'JSON'
 {
   "images": {
@@ -252,7 +276,7 @@ cat > "${FIXTURE_DIR}/image-manifests.json" <<'JSON'
       "amd64Digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
       "arm64Digest": "sha256:2222222222222222222222222222222222222222222222222222222222222222"
     },
-    "docker.io/gpustack/mirrored-mooncake:0.3.14-cpu": {
+    "docker.io/gpustack/mirrored-mooncake:0.3.15-cpu": {
       "published": false,
       "amd64Digest": "",
       "arm64Digest": ""
@@ -284,7 +308,7 @@ JSON
 STAGE_DIR="${SCRATCH}/stage-kv"
 GHA_OUT="${SCRATCH}/gha-output.txt"
 
-# 1. Preflight Stage A: new Mooncake 0.3.14 + NIXL 1.5.3 (ignoring incomplete 1.6.0).
+# 1. Preflight Stage A: new Mooncake 0.3.15 + NIXL 1.5.3 (ignoring incomplete 1.6.0).
 FIX_1="${SCRATCH}/fix-1"
 clone_fixture "${FIX_1}"
 : > "${GHA_OUT}"
@@ -306,14 +330,17 @@ import sys
 stage, repo, base_sha = sys.argv[1:4]
 with open(os.path.join(stage, "upstream-records.json"), "r", encoding="utf-8") as f:
     recs = {r["upstreamId"]: r for r in json.load(f)}
-assert recs["mooncake"]["status"] == "available" and recs["mooncake"]["version"] == "0.3.14", recs["mooncake"]
+assert recs["mooncake"]["status"] == "available" and recs["mooncake"]["version"] == "0.3.15", recs["mooncake"]
 assert recs["nixl-pypi"]["status"] == "available" and recs["nixl-pypi"]["version"] == "1.5.3", recs["nixl-pypi"]
 assert recs["hixl"]["status"] == "up_to_date", recs["hixl"]
+assert recs["modelexpress"]["status"] == "up_to_date" and recs["modelexpress"]["version"] == "v0.8.0", recs["modelexpress"]
 with open(os.path.join(stage, "kv-transfer-preflight-report.json"), "r", encoding="utf-8") as f:
     rep = json.load(f)
 assert rep["stage"] == "recipe_sync", rep
 assert rep["image_published"] is False, rep
 assert rep["nixl_pypi"]["selected_version"] == "1.5.3", rep
+assert rep["modelexpress"]["selected_version"] == "v0.8.0", rep
+assert rep["modelexpress"]["workspace_version"] == "0.8.0", rep
 src_rev = rep.get("source_revision", "")
 assert src_rev and src_rev != base_sha, rep
 ls = subprocess.check_output(
@@ -322,6 +349,8 @@ ls = subprocess.check_output(
 assert "100644 blob " in ls and "kv-transfer-preflight-report.json" in ls, ls
 assert "100644 blob " in ls and "runner-001_channel_generation.patch" in ls, ls
 assert "100644 blob " in ls and "upstream-records.json" in ls, ls
+assert "100644 blob " in ls and "modelexpress/Cargo.toml" in ls, ls
+assert "100644 blob " in ls and "modelexpress/Cargo.lock" in ls, ls
 assert "120000 " not in ls, ls
 assert subprocess.check_output(["git", "-C", repo, "status", "--porcelain"], text=True).strip() == ""
 PY
@@ -331,14 +360,15 @@ else
   fail "preflight Stage A emits recipe_sync, selects NIXL 1.5.3, and stages .auto-sync/.stage/kv-transfer cleanly"
 fi
 
-# 2. Preflight waiting state (no_change): recipes already updated to 0.3.14 & 1.5.3, image still unpublished.
+# 2. Preflight waiting state (no_change): recipes already updated to 0.3.15 & 1.5.3, image still unpublished.
 python3 - "${FAKE_REPO}/pack/mirrored-mooncake/Dockerfile" "${FAKE_REPO}/pack/model-transfer/Dockerfile" <<'PY'
 import sys
 mc_path, mt_path = sys.argv[1:3]
 with open(mc_path, "r", encoding="utf-8") as f:
     mc = f.read()
-mc = mc.replace('ARG MOONCAKE_VERSION="0.3.13.post1"', 'ARG MOONCAKE_VERSION="0.3.14"', 1)
-mc = mc.replace('0.3.10*|0.3.11*|0.3.12*|0.3.13*)', '0.3.10*|0.3.11*|0.3.12*|0.3.13*|0.3.14*)')
+mc = mc.replace('ARG MOONCAKE_VERSION="0.3.14"', 'ARG MOONCAKE_VERSION="0.3.15"', 1)
+mc = mc.replace('0.3.10*|0.3.11*|0.3.12*|0.3.13*|0.3.14*)', '0.3.10*|0.3.11*|0.3.12*|0.3.13*|0.3.14*|0.3.15*)')
+mc = mc.replace('            0.3.14*)', '            0.3.14*|0.3.15*)')
 with open(mc_path, "w", encoding="utf-8") as f:
     f.write(mc)
 
@@ -429,7 +459,7 @@ else
   fail "preflight holds hixl up_to_date when hicann/hixl advances ahead of gpustack/runner VLLM_HIXL_COMMIT"
 fi
 
-# 3. Preflight Stage B (tag_promotion): 0.3.14-cpu now published multi-arch, value.go still on 0.3.13.post1-cpu.
+# 3. Preflight Stage B (tag_promotion): 0.3.15-cpu now published multi-arch, value.go still on 0.3.13.post1-cpu.
 FIX_3="${SCRATCH}/fix-3"
 clone_fixture "${FIX_3}"
 python3 - "${FIX_3}/image-manifests.json" <<'PY'
@@ -438,7 +468,7 @@ import sys
 p = sys.argv[1]
 with open(p, "r", encoding="utf-8") as f:
     doc = json.load(f)
-doc["images"]["docker.io/gpustack/mirrored-mooncake:0.3.14-cpu"] = {
+doc["images"]["docker.io/gpustack/mirrored-mooncake:0.3.15-cpu"] = {
     "published": True,
     "amd64Digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
     "arm64Digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
@@ -463,7 +493,7 @@ import sys
 stage, repo, base_sha = sys.argv[1:4]
 with open(os.path.join(stage, "upstream-records.json"), "r", encoding="utf-8") as f:
     recs = {r["upstreamId"]: r for r in json.load(f)}
-assert recs["mooncake"]["status"] == "available" and recs["mooncake"]["version"] == "0.3.14+stage-b", recs["mooncake"]
+assert recs["mooncake"]["status"] == "available" and recs["mooncake"]["version"] == "0.3.15+stage-b", recs["mooncake"]
 with open(os.path.join(stage, "kv-transfer-preflight-report.json"), "r", encoding="utf-8") as f:
     rep = json.load(f)
 assert rep["stage"] == "tag_promotion", rep
@@ -478,14 +508,14 @@ assert "120000 " not in ls, ls
 assert subprocess.check_output(["git", "-C", repo, "status", "--porcelain"], text=True).strip() == ""
 PY
 then
-  pass "preflight Stage B emits 0.3.14+stage-b and stages .auto-sync/.stage/kv-transfer cleanly"
+  pass "preflight Stage B emits 0.3.15+stage-b and stages .auto-sync/.stage/kv-transfer cleanly"
 else
-  fail "preflight Stage B emits 0.3.14+stage-b and stages .auto-sync/.stage/kv-transfer cleanly"
+  fail "preflight Stage B emits 0.3.15+stage-b and stages .auto-sync/.stage/kv-transfer cleanly"
 fi
 
-# 4. Preflight fully aligned (no_change) after value.go + settings.md updated to 0.3.14-cpu.
-sed -i.bak 's|gpustack/mirrored-mooncake:0.3.13.post1-cpu|gpustack/mirrored-mooncake:0.3.14-cpu|' "${FAKE_REPO}/pkg/worker/settings/value.go"
-sed -i.bak 's|gpustack/mirrored-mooncake:0.3.13.post1-cpu|gpustack/mirrored-mooncake:0.3.14-cpu|' "${FAKE_REPO}/docs/reference/settings.md"
+# 4. Preflight fully aligned (no_change) after value.go + settings.md updated to 0.3.15-cpu.
+sed -i.bak 's|gpustack/mirrored-mooncake:0.3.13.post1-cpu|gpustack/mirrored-mooncake:0.3.15-cpu|' "${FAKE_REPO}/pkg/worker/settings/value.go"
+sed -i.bak 's|gpustack/mirrored-mooncake:0.3.13.post1-cpu|gpustack/mirrored-mooncake:0.3.15-cpu|' "${FAKE_REPO}/docs/reference/settings.md"
 rm -f "${FAKE_REPO}/pkg/worker/settings/value.go.bak" "${FAKE_REPO}/docs/reference/settings.md.bak"
 git -C "${FAKE_REPO}" add -A
 git -C "${FAKE_REPO}" commit -q -m "stage b landed"
@@ -498,7 +528,7 @@ import sys
 p = sys.argv[1]
 with open(p, "r", encoding="utf-8") as f:
     doc = json.load(f)
-doc["images"]["docker.io/gpustack/mirrored-mooncake:0.3.14-cpu"] = {
+doc["images"]["docker.io/gpustack/mirrored-mooncake:0.3.15-cpu"] = {
     "published": True,
     "amd64Digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
     "arm64Digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
@@ -559,7 +589,7 @@ with open(up_p, "w", encoding="utf-8") as f:
 
 with open(man_p, "r", encoding="utf-8") as f:
     man = json.load(f)
-man["images"]["docker.io/gpustack/mirrored-mooncake:0.3.14-cpu"] = {
+man["images"]["docker.io/gpustack/mirrored-mooncake:0.3.15-cpu"] = {
     "published": True,
     "amd64Digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
     "arm64Digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
@@ -658,6 +688,126 @@ else
   fail "preflight Stage B auto-discovers model-transfer tags via repo_tags without AUTOSYNC_*_TARGET_TAG"
 fi
 
+# 4b-2. Preflight Stage B auto-discovers mirrored-modelexpress-server:v0.8.0 via repo_tags when published.
+FIX_4B_MX="${SCRATCH}/fix-4b-mx"
+clone_fixture "${FIX_4B_MX}"
+python3 - "${FIX_4B_MX}/upstream.json" "${FIX_4B_MX}/image-manifests.json" <<'PY'
+import json
+import sys
+
+up_p, man_p = sys.argv[1:3]
+with open(up_p, "r", encoding="utf-8") as f:
+    up = json.load(f)
+up["repo_tags"] = {
+    "gpustack/mirrored-modelexpress-server": ["v0.7.0", "v0.8.0", "v0.9.0-rc1"],
+    "gpustack/model-transfer": ["v0.1.0-cuda12.9", "v0.1.0-rocm7.2", "v0.1.0-cann9.2-a5"],
+}
+with open(up_p, "w", encoding="utf-8") as f:
+    json.dump(up, f, indent=2)
+
+with open(man_p, "r", encoding="utf-8") as f:
+    man = json.load(f)
+man["images"]["docker.io/gpustack/mirrored-mooncake:0.3.15-cpu"] = {
+    "published": True,
+    "amd64Digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "arm64Digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+}
+man["images"]["docker.io/gpustack/mirrored-modelexpress-server:v0.8.0"] = {
+    "published": True,
+    "amd64Digest": "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+    "arm64Digest": "sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+}
+with open(man_p, "w", encoding="utf-8") as f:
+    json.dump(man, f, indent=2)
+PY
+
+(
+  cd "${FAKE_REPO}"
+  AUTOSYNC_KV_FIXTURE_DIR="${FIX_4B_MX}" \
+  AUTOSYNC_SKIP_GO_MOD_DOWNLOAD=true \
+    bash "${FAKE_REPO}/.auto-sync/scripts/preflight-kv-transfer.sh" "${STAGE_DIR}"
+)
+
+if python3 - "${STAGE_DIR}" "${FAKE_REPO}" <<'PY'
+import json
+import os
+import subprocess
+import sys
+
+stage, repo = sys.argv[1:3]
+with open(os.path.join(stage, "upstream-records.json"), "r", encoding="utf-8") as f:
+    recs = {r["upstreamId"]: r for r in json.load(f)}
+assert recs["modelexpress"]["status"] == "available", recs["modelexpress"]
+assert recs["modelexpress"]["version"] == "v0.8.0+stage-b", recs["modelexpress"]
+with open(os.path.join(stage, "kv-transfer-preflight-report.json"), "r", encoding="utf-8") as f:
+    rep = json.load(f)
+assert rep["stage"] == "tag_promotion", rep
+assert rep["stage_b_flags"]["modelexpress"] is True, rep
+assert rep["targets"]["modelexpress_image"] == "gpustack/mirrored-modelexpress-server:v0.8.0", rep
+src_rev = rep.get("source_revision", "")
+assert src_rev, rep
+remote_md = subprocess.check_output(
+    ["git", "-C", repo, "show", f"{src_rev}:docs/modules/model-delivery/remote.md"], text=True
+)
+assert "value: gpustack/mirrored-modelexpress-server:v0.8.0" in remote_md, "remote.md not promoted in Stage B"
+PY
+then
+  pass "preflight Stage B auto-discovers mirrored-modelexpress-server:v0.8.0 via repo_tags and stages remote.md"
+else
+  fail "preflight Stage B auto-discovers mirrored-modelexpress-server:v0.8.0 via repo_tags and stages remote.md"
+fi
+
+# 4b-3. Annotated tag (refs/tags/v0.9.0^{}) in mock modelexpress repo resolves Stage A cleanly.
+FIX_4B_ANN="${SCRATCH}/fix-4b-ann"
+clone_fixture "${FIX_4B_ANN}"
+MX_ANN="${FIX_4B_ANN}/repos/modelexpress"
+cat > "${MX_ANN}/Cargo.toml" <<'TOML'
+[workspace]
+members = ["modelexpress_server"]
+
+[workspace.package]
+version = "0.9.0"
+edition = "2024"
+TOML
+git -C "${MX_ANN}" add Cargo.toml
+git -C "${MX_ANN}" commit -q -m "modelexpress v0.9.0"
+git -C "${MX_ANN}" tag -a v0.9.0 -m "release v0.9.0"
+if ! git ls-remote --tags "${MX_ANN}" | grep -q 'refs/tags/v0\.9\.0\^{}'; then
+  fail "selftest setup: expected annotated tag refs/tags/v0.9.0^{}"
+fi
+(
+  cd "${FAKE_REPO}"
+  AUTOSYNC_KV_FIXTURE_DIR="${FIX_4B_ANN}" \
+  AUTOSYNC_SKIP_GO_MOD_DOWNLOAD=true \
+    bash "${FAKE_REPO}/.auto-sync/scripts/preflight-kv-transfer.sh" "${STAGE_DIR}"
+)
+if python3 - "${STAGE_DIR}" "${FAKE_REPO}" <<'PY'
+import json
+import os
+import subprocess
+import sys
+
+stage, repo = sys.argv[1:3]
+with open(os.path.join(stage, "upstream-records.json"), "r", encoding="utf-8") as f:
+    recs = {r["upstreamId"]: r for r in json.load(f)}
+assert recs["modelexpress"]["status"] == "available" and recs["modelexpress"]["version"] == "v0.9.0", recs["modelexpress"]
+with open(os.path.join(stage, "kv-transfer-preflight-report.json"), "r", encoding="utf-8") as f:
+    rep = json.load(f)
+assert rep["stage"] == "recipe_sync", rep
+assert rep["modelexpress"]["selected_version"] == "v0.9.0", rep
+assert rep["modelexpress"]["workspace_version"] == "0.9.0", rep
+src_rev = rep.get("source_revision", "")
+cargo = subprocess.check_output(
+    ["git", "-C", repo, "show", f"{src_rev}:.auto-sync/.stage/kv-transfer/modelexpress/Cargo.toml"], text=True
+)
+assert 'version = "0.9.0"' in cargo, cargo
+PY
+then
+  pass "preflight resolves annotated tag refs/tags/v0.9.0^{} in modelexpress and stages Cargo.toml"
+else
+  fail "preflight resolves annotated tag refs/tags/v0.9.0^{} in modelexpress and stages Cargo.toml"
+fi
+
 # 4c. Missing PyPI fixture file under AUTOSYNC_KV_FIXTURE_DIR fails closed.
 FIX_MISSING_PYPI="${SCRATCH}/fix-missing-pypi"
 clone_fixture "${FIX_MISSING_PYPI}"
@@ -673,10 +823,34 @@ run_kv_preflight_with_fixture() {
 assert_fails "preflight fails closed when AUTOSYNC_KV_FIXTURE_DIR is missing pypi/nixl-cu13.json" \
   run_kv_preflight_with_fixture "${FAKE_REPO}" "${FIX_MISSING_PYPI}" "${SCRATCH}/stage-missing-pypi"
 
+# 4d. Non-SemVer modelexpress upstream override in upstream.json fails closed.
+FIX_BAD_MX_OVR="${SCRATCH}/fix-bad-mx-ovr"
+clone_fixture "${FIX_BAD_MX_OVR}"
+python3 - "${FIX_BAD_MX_OVR}/upstream.json" <<'PY'
+import json
+import sys
+p = sys.argv[1]
+with open(p, "r", encoding="utf-8") as f:
+    doc = json.load(f)
+doc["modelexpress"] = "v0.9.0-rc1"
+with open(p, "w", encoding="utf-8") as f:
+    json.dump(doc, f, indent=2)
+PY
+assert_fails "preflight fails closed on non-SemVer modelexpress upstream override" \
+  run_kv_preflight_with_fixture "${FAKE_REPO}" "${FIX_BAD_MX_OVR}" "${SCRATCH}/stage-bad-mx-ovr"
+
+# 4e. Missing repos/modelexpress in AUTOSYNC_KV_FIXTURE_DIR fails closed.
+FIX_MISSING_MX="${SCRATCH}/fix-missing-mx"
+clone_fixture "${FIX_MISSING_MX}"
+rm -rf "${FIX_MISSING_MX}/repos/modelexpress"
+assert_fails "preflight fails closed when AUTOSYNC_KV_FIXTURE_DIR is missing repos/modelexpress" \
+  run_kv_preflight_with_fixture "${FAKE_REPO}" "${FIX_MISSING_MX}" "${SCRATCH}/stage-missing-mx"
+
 # 5. Gitless candidate validator tests (Mooncake 5-block parser, two-stage gate, shared-file guards, HIXL parity, ModelExpress build).
 VAL_STAGE="${SCRATCH}/val-stage"
 mkdir -p "${VAL_STAGE}/baseline/pkg/worker/settings" \
   "${VAL_STAGE}/baseline/docs/reference" \
+  "${VAL_STAGE}/baseline/docs/modules/model-delivery" \
   "${VAL_STAGE}/baseline/deploy/gpustack-operator/chart" \
   "${VAL_STAGE}/baseline/pack/mirrored-mooncake" \
   "${VAL_STAGE}/baseline/pack/model-transfer/patches/hixl" \
@@ -685,6 +859,7 @@ mkdir -p "${VAL_STAGE}/baseline/pkg/worker/settings" \
 
 cp "${ROOT_DIR}/pkg/worker/settings/value.go" "${VAL_STAGE}/baseline/pkg/worker/settings/value.go"
 cp "${ROOT_DIR}/docs/reference/settings.md" "${VAL_STAGE}/baseline/docs/reference/settings.md"
+cp "${ROOT_DIR}/docs/modules/model-delivery/remote.md" "${VAL_STAGE}/baseline/docs/modules/model-delivery/remote.md"
 cp "${ROOT_DIR}/deploy/gpustack-operator/chart/values.yaml" "${VAL_STAGE}/baseline/deploy/gpustack-operator/chart/values.yaml"
 cp "${ROOT_DIR}/pack/mirrored-mooncake/Dockerfile" "${VAL_STAGE}/baseline/pack/mirrored-mooncake/Dockerfile"
 cp "${ROOT_DIR}/pack/model-transfer/Dockerfile" "${VAL_STAGE}/baseline/pack/model-transfer/Dockerfile"
@@ -696,6 +871,7 @@ cp "${ROOT_DIR}/pack/mirrored-modelexpress-server/Dockerfile" \
 cp -R "${RUNNER_SRC}" "${VAL_STAGE}/gpustack-runner"
 rm -rf "${VAL_STAGE}/gpustack-runner/.git"
 cp -R "${HIXL_SRC}" "${VAL_STAGE}/hixl"
+cp -R "${MX_SRC}" "${VAL_STAGE}/modelexpress"
 
 cat > "${VAL_STAGE}/image-manifests.json" <<'JSON'
 {
@@ -728,6 +904,13 @@ cat > "${VAL_STAGE}/image-manifests.json" <<'JSON'
       "published": true,
       "amd64Digest": "sha256:3333333333333333333333333333333333333333333333333333333333333333",
       "arm64Digest": "sha256:4444444444444444444444444444444444444444444444444444444444444444"
+    },
+    "gpustack/mirrored-modelexpress-server:v0.8.0": {
+      "image": "gpustack/mirrored-modelexpress-server:v0.8.0",
+      "normalized": "docker.io/gpustack/mirrored-modelexpress-server:v0.8.0",
+      "published": true,
+      "amd64Digest": "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+      "arm64Digest": "sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
     },
     "gpustack/model-transfer:v0.1.0-cuda12.9": {
       "image": "gpustack/model-transfer:v0.1.0-cuda12.9",
@@ -774,6 +957,7 @@ make_gitless_cand() {
     "${CAND_DIR}/.auto-sync/proposals" \
     "${CAND_DIR}/pkg/worker/settings" \
     "${CAND_DIR}/docs/reference" \
+    "${CAND_DIR}/docs/modules/model-delivery" \
     "${CAND_DIR}/deploy/gpustack-operator/chart" \
     "${CAND_DIR}/pack/mirrored-mooncake" \
     "${CAND_DIR}/pack/model-transfer/patches/hixl" \
@@ -784,6 +968,7 @@ make_gitless_cand() {
   cp "${ROOT_DIR}/.auto-sync/proposals/kv-transfer.json" "${CAND_DIR}/.auto-sync/proposals/kv-transfer.json"
   cp "${VAL_STAGE}/baseline/pkg/worker/settings/value.go" "${CAND_DIR}/pkg/worker/settings/value.go"
   cp "${VAL_STAGE}/baseline/docs/reference/settings.md" "${CAND_DIR}/docs/reference/settings.md"
+  cp "${VAL_STAGE}/baseline/docs/modules/model-delivery/remote.md" "${CAND_DIR}/docs/modules/model-delivery/remote.md"
   cp "${VAL_STAGE}/baseline/deploy/gpustack-operator/chart/values.yaml" "${CAND_DIR}/deploy/gpustack-operator/chart/values.yaml"
   cp "${VAL_STAGE}/baseline/pack/mirrored-mooncake/Dockerfile" "${CAND_DIR}/pack/mirrored-mooncake/Dockerfile"
   cp "${VAL_STAGE}/baseline/pack/model-transfer/Dockerfile" "${CAND_DIR}/pack/model-transfer/Dockerfile"
@@ -827,16 +1012,16 @@ run_validate() {
 # then add HIXL_FIXTURE_SHA test explicitly below.
 mv "${VAL_STAGE}/hixl" "${SCRATCH}/hixl-repo-backup"
 
-# 5a. Baseline unchanged (0.3.13.post1) passes in gitless candidate dir.
+# 5a. Baseline unchanged (0.3.14) passes in gitless candidate dir.
 make_gitless_cand
-assert_ok "validate_kv_transfer passes on baseline 0.3.13.post1 in gitless candidate dir" run_validate
+assert_ok "validate_kv_transfer passes on baseline 0.3.14 in gitless candidate dir" run_validate
 
-# 5b. Mooncake 5-block case parser: bump ARG MOONCAKE_VERSION="0.3.14" without updating all 4 stage guards -> FAIL.
+# 5b. Mooncake 5-block case parser: bump ARG MOONCAKE_VERSION="0.3.15" without updating all 4 stage guards -> FAIL.
 make_gitless_cand
-set_kv_proposal "recipe_sync" "mooncake=0.3.14"
-sed -i.bak 's/^ARG MOONCAKE_VERSION="0.3.13.post1"/ARG MOONCAKE_VERSION="0.3.14"/' "${CAND_DIR}/pack/mirrored-mooncake/Dockerfile"
+set_kv_proposal "recipe_sync" "mooncake=0.3.15"
+sed -i.bak 's/^ARG MOONCAKE_VERSION="0.3.14"/ARG MOONCAKE_VERSION="0.3.15"/' "${CAND_DIR}/pack/mirrored-mooncake/Dockerfile"
 rm -f "${CAND_DIR}/pack/mirrored-mooncake/Dockerfile.bak"
-assert_fails "validate_kv_transfer fails closed when ARG MOONCAKE_VERSION=0.3.14 lacks stage case guards" run_validate
+assert_fails "validate_kv_transfer fails closed when ARG MOONCAKE_VERSION=0.3.15 lacks stage case guards" run_validate
 
 # Update only 3 of the 4 stage guards -> MUST still fail closed!
 python3 - "${CAND_DIR}/pack/mirrored-mooncake/Dockerfile" <<'PY'
@@ -844,11 +1029,11 @@ import sys
 p = sys.argv[1]
 with open(p, "r", encoding="utf-8") as f:
     txt = f.read()
-txt = txt.replace("0.3.10*|0.3.11*|0.3.12*|0.3.13*)", "0.3.10*|0.3.11*|0.3.12*|0.3.13*|0.3.14*)", 3)
+txt = txt.replace("0.3.10*|0.3.11*|0.3.12*|0.3.13*|0.3.14*)", "0.3.10*|0.3.11*|0.3.12*|0.3.13*|0.3.14*|0.3.15*)", 3)
 with open(p, "w", encoding="utf-8") as f:
     f.write(txt)
 PY
-assert_fails "validate_kv_transfer fails closed when only 3 of 4 Mooncake stage guards include 0.3.14*" run_validate
+assert_fails "validate_kv_transfer fails closed when only 3 of 4 Mooncake stage guards include 0.3.15*" run_validate
 
 # Update the 4th stage guard WITHOUT updating the 5th context_manager.cpp block -> MUST still fail closed!
 python3 - "${CAND_DIR}/pack/mirrored-mooncake/Dockerfile" <<'PY'
@@ -856,11 +1041,11 @@ import sys
 p = sys.argv[1]
 with open(p, "r", encoding="utf-8") as f:
     txt = f.read()
-txt = txt.replace("0.3.10*|0.3.11*|0.3.12*|0.3.13*)", "0.3.10*|0.3.11*|0.3.12*|0.3.13*|0.3.14*)")
+txt = txt.replace("0.3.10*|0.3.11*|0.3.12*|0.3.13*|0.3.14*)", "0.3.10*|0.3.11*|0.3.12*|0.3.13*|0.3.14*|0.3.15*)")
 with open(p, "w", encoding="utf-8") as f:
     f.write(txt)
 PY
-assert_fails "validate_kv_transfer fails closed when 5th context_manager.cpp case block omits 0.3.14*" run_validate
+assert_fails "validate_kv_transfer fails closed when 5th context_manager.cpp case block omits 0.3.15*" run_validate
 
 # Update the 5th context_manager.cpp case block too -> Stage A PASSES (value.go untouched, even for unpublished tag).
 python3 - "${CAND_DIR}/pack/mirrored-mooncake/Dockerfile" <<'PY'
@@ -868,11 +1053,11 @@ import sys
 p = sys.argv[1]
 with open(p, "r", encoding="utf-8") as f:
     txt = f.read()
-txt = txt.replace("0.3.13*)", "0.3.13*|0.3.14*)", 1)
+txt = txt.replace("            0.3.14*)", "            0.3.14*|0.3.15*)", 1)
 with open(p, "w", encoding="utf-8") as f:
     f.write(txt)
 PY
-assert_ok "validate_kv_transfer Stage A passes when all 5 Mooncake case blocks handle 0.3.14* and value.go untouched" run_validate
+assert_ok "validate_kv_transfer Stage A passes when all 5 Mooncake case blocks handle 0.3.15* and value.go untouched" run_validate
 
 # 5c. Unpublished tag written to value.go -> FAIL.
 make_gitless_cand
@@ -890,11 +1075,33 @@ assert_fails "validate_kv_transfer fails closed when unpublished tag is written 
 
 # 5e. Stage B (value.go + settings.md updated to published multi-arch 0.3.14-cpu) -> PASS.
 make_gitless_cand
-set_kv_proposal "tag_promotion" "mooncake=0.3.13.post1+stage-b"
+set_kv_proposal "tag_promotion" "mooncake=0.3.14+stage-b"
 sed -i.bak 's|gpustack/mirrored-mooncake:0.3.13.post1-cpu|gpustack/mirrored-mooncake:0.3.14-cpu|' \
   "${CAND_DIR}/pkg/worker/settings/value.go" "${CAND_DIR}/docs/reference/settings.md"
 rm -f "${CAND_DIR}/pkg/worker/settings/value.go.bak" "${CAND_DIR}/docs/reference/settings.md.bak"
 assert_ok "validate_kv_transfer Stage B passes when value.go + settings.md use published multi-arch tag" run_validate
+
+# 5e-2. ModelExpress Stage B (v0.7.0 -> v0.8.0 across value.go + settings.md + remote.md) -> PASS, stale remote.md or unpublished tag -> FAIL.
+make_gitless_cand
+set_kv_proposal "tag_promotion" "modelexpress=v0.8.0+stage-b"
+sed -i.bak 's|gpustack/mirrored-modelexpress-server:v0.7.0|gpustack/mirrored-modelexpress-server:v0.8.0|' \
+  "${CAND_DIR}/pkg/worker/settings/value.go" "${CAND_DIR}/docs/reference/settings.md"
+rm -f "${CAND_DIR}/pkg/worker/settings/value.go.bak" "${CAND_DIR}/docs/reference/settings.md.bak"
+assert_fails "validate_kv_transfer Stage B fails closed when remote.md stays at v0.7.0" run_validate
+
+sed -i.bak 's|gpustack/mirrored-modelexpress-server:v0.7.0|gpustack/mirrored-modelexpress-server:v0.8.0|' \
+  "${CAND_DIR}/docs/modules/model-delivery/remote.md"
+rm -f "${CAND_DIR}/docs/modules/model-delivery/remote.md.bak"
+assert_ok "validate_kv_transfer Stage B passes when value.go + settings.md + remote.md promote modelexpress v0.7.0 -> v0.8.0" run_validate
+
+sed -i.bak 's|gpustack/mirrored-modelexpress-server:v0.8.0|gpustack/mirrored-modelexpress-server:v0.9.9|' \
+  "${CAND_DIR}/pkg/worker/settings/value.go" "${CAND_DIR}/docs/reference/settings.md" "${CAND_DIR}/docs/modules/model-delivery/remote.md"
+rm -f "${CAND_DIR}/pkg/worker/settings/value.go.bak" "${CAND_DIR}/docs/reference/settings.md.bak" "${CAND_DIR}/docs/modules/model-delivery/remote.md.bak"
+assert_fails "validate_kv_transfer Stage B fails closed when modelexpress tag v0.9.9 is unpublished" run_validate
+
+make_gitless_cand
+rm -f "${CAND_DIR}/docs/modules/model-delivery/remote.md"
+assert_fails "validate_kv_transfer fails closed when docs/modules/model-delivery/remote.md is missing" run_validate
 
 # 5f. Mutating ModelDeploymentRouterImage in value.go -> FAIL.
 make_gitless_cand
@@ -976,10 +1183,19 @@ rm -rf "${VAL_STAGE}/hixl"
 sed -i.bak "s|${HIXL_BROKEN_SHA}|60dbe9d1d7d9a7eef04bc3dbf84edbad2188230a|" "${VAL_STAGE}/gpustack-runner/pack/cann/Dockerfile.vllm"
 rm -f "${VAL_STAGE}/gpustack-runner/pack/cann/Dockerfile.vllm.bak"
 
-# 5j. ModelExpress builder check when MODELEXPRESS_COMMIT changes.
+# 5j. ModelExpress SemVer tag, Cargo.toml version, and builder check when MODELEXPRESS_VERSION changes.
+rm -rf "${VAL_STAGE}/modelexpress"
+mkdir -p "${VAL_STAGE}/modelexpress"
+cat > "${VAL_STAGE}/modelexpress/Cargo.toml" <<'TOML'
+[workspace]
+members = ["modelexpress_server"]
+
+[workspace.package]
+version = "0.9.0"
+TOML
 make_gitless_cand
-set_kv_proposal "recipe_sync" "modelexpress=1111111111111111111111111111111111111111"
-sed -i.bak 's|^ARG MODELEXPRESS_COMMIT=.*|ARG MODELEXPRESS_COMMIT=1111111111111111111111111111111111111111|' \
+set_kv_proposal "recipe_sync" "modelexpress=v0.9.0"
+sed -i.bak 's|^ARG MODELEXPRESS_VERSION=.*|ARG MODELEXPRESS_VERSION=v0.9.0|' \
   "${CAND_DIR}/pack/mirrored-modelexpress-server/Dockerfile"
 rm -f "${CAND_DIR}/pack/mirrored-modelexpress-server/Dockerfile.bak"
 MX_MARKER="${SCRATCH}/mx-built"
@@ -988,9 +1204,9 @@ if AUTOSYNC_DOCKER_BUILD_CMD="touch '${MX_MARKER}'" \
    LOOPWRIGHT_CANDIDATE_DIR="${CAND_DIR}" \
    AUTOSYNC_FAST_SELFTEST=true \
    bash "${CAND_DIR}/.auto-sync/checks/validate_kv_transfer.sh" && [[ -f "${MX_MARKER}" ]]; then
-  pass "validate_kv_transfer triggers ModelExpress builder command when MODELEXPRESS_COMMIT changes"
+  pass "validate_kv_transfer triggers ModelExpress builder command when MODELEXPRESS_VERSION changes"
 else
-  fail "validate_kv_transfer triggers ModelExpress builder command when MODELEXPRESS_COMMIT changes"
+  fail "validate_kv_transfer triggers ModelExpress builder command when MODELEXPRESS_VERSION changes"
 fi
 
 if AUTOSYNC_DOCKER_BUILD_CMD="false" \
@@ -1001,6 +1217,48 @@ if AUTOSYNC_DOCKER_BUILD_CMD="false" \
   fail "validate_kv_transfer fails closed when ModelExpress builder fails"
 else
   pass "validate_kv_transfer fails closed when ModelExpress builder fails"
+fi
+
+cat > "${VAL_STAGE}/modelexpress/Cargo.toml" <<'TOML'
+[workspace.package]
+version = "0.8.0"
+TOML
+assert_fails "validate_kv_transfer fails closed when MODELEXPRESS_VERSION disagrees with Cargo.toml" run_validate
+
+rm -f "${VAL_STAGE}/modelexpress/Cargo.toml"
+assert_fails "validate_kv_transfer fails closed when staged modelexpress directory lacks Cargo.toml" run_validate
+
+rm -rf "${VAL_STAGE}/modelexpress"
+assert_fails "validate_kv_transfer fails closed when staged modelexpress directory is missing" run_validate
+cp -R "${MX_SRC}" "${VAL_STAGE}/modelexpress"
+
+make_gitless_cand
+set_kv_proposal "recipe_sync" "modelexpress=v0.9.0-rc1"
+sed -i.bak 's|^ARG MODELEXPRESS_VERSION=.*|ARG MODELEXPRESS_VERSION=v0.9.0-rc1|' \
+  "${CAND_DIR}/pack/mirrored-modelexpress-server/Dockerfile"
+rm -f "${CAND_DIR}/pack/mirrored-modelexpress-server/Dockerfile.bak"
+assert_fails "validate_kv_transfer fails closed on non-SemVer/prerelease MODELEXPRESS_VERSION" run_validate
+
+# Empty BASE_MX_VERSION (migration from MODELEXPRESS_COMMIT) still triggers builder verification.
+make_gitless_cand
+MX_MIGRATE_MARKER="${SCRATCH}/mx-migrate-built"
+if (
+  base_mx_df="${VAL_STAGE}/baseline/pack/mirrored-modelexpress-server/Dockerfile"
+  base_mx_bak="${SCRATCH}/base-mx-df.bak"
+  cp "${base_mx_df}" "${base_mx_bak}"
+  trap 'mv -f "${base_mx_bak}" "${base_mx_df}"' EXIT
+  sed -i.bak 's|^ARG MODELEXPRESS_VERSION=.*|ARG MODELEXPRESS_COMMIT=508e4547970c545dc80d5585f7b9be7af9ec177e|' \
+    "${base_mx_df}"
+  rm -f "${base_mx_df}.bak"
+  AUTOSYNC_DOCKER_BUILD_CMD="touch '${MX_MIGRATE_MARKER}'" \
+  AUTOSYNC_STAGE_DIR="${VAL_STAGE}" \
+  LOOPWRIGHT_CANDIDATE_DIR="${CAND_DIR}" \
+  AUTOSYNC_FAST_SELFTEST=true \
+    bash "${CAND_DIR}/.auto-sync/checks/validate_kv_transfer.sh"
+) && [[ -f "${MX_MIGRATE_MARKER}" ]]; then
+  pass "validate_kv_transfer triggers ModelExpress builder when migrating from empty BASE_MX_VERSION"
+else
+  fail "validate_kv_transfer triggers ModelExpress builder when migrating from empty BASE_MX_VERSION"
 fi
 
 # 5k. NIXL_VERSION PyPI wheel verification check (verified 1.5.3 passes; unverified 1.6.0 fails closed).
@@ -1063,10 +1321,20 @@ with open(p, "w", encoding="utf-8") as f:
     json.dump(doc, f, indent=2)
 PY
 assert_fails "validate_kv_transfer fails closed when amd64-only ROCm image has published=false" run_validate
+python3 - "${VAL_STAGE}/image-manifests.json" <<'PY'
+import json
+import sys
+p = sys.argv[1]
+with open(p, "r", encoding="utf-8") as f:
+    doc = json.load(f)
+doc["images"]["gpustack/model-transfer:v0.1.0-rocm7.2"]["published"] = True
+with open(p, "w", encoding="utf-8") as f:
+    json.dump(doc, f, indent=2)
+PY
 
 # 5p. Malformed unmatched quote in ARG MOONCAKE_VERSION fails closed (R2-S7).
 make_gitless_cand
-sed -i.bak 's|^ARG MOONCAKE_VERSION="0.3.13.post1"|ARG MOONCAKE_VERSION="0.3.14|' "${CAND_DIR}/pack/mirrored-mooncake/Dockerfile"
+sed -i.bak 's|^ARG MOONCAKE_VERSION="0.3.14"|ARG MOONCAKE_VERSION="0.3.15|' "${CAND_DIR}/pack/mirrored-mooncake/Dockerfile"
 rm -f "${CAND_DIR}/pack/mirrored-mooncake/Dockerfile.bak"
 bad_quote_err=""
 if ! bad_quote_err="$(run_validate 2>&1)" && \

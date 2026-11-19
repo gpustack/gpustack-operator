@@ -405,13 +405,94 @@ if nixl_repo:
         )
 PY
 
-# 4. ModelExpress --locked builder verification when MODELEXPRESS_COMMIT changed.
+# 4. ModelExpress SemVer tag, Cargo.toml version, and --locked builder verification.
 BASE_MX_DF="${BASELINE_DIR}/pack/mirrored-modelexpress-server/Dockerfile"
 CAND_MX_DF="${AUTOSYNC_CANDIDATE_ROOT}/pack/mirrored-modelexpress-server/Dockerfile"
-if [[ -f "${BASE_MX_DF}" && -f "${CAND_MX_DF}" ]]; then
-  BASE_MX_COMMIT="$(read_dockerfile_arg_from_file "${BASE_MX_DF}" "MODELEXPRESS_COMMIT" "false")"
-  CAND_MX_COMMIT="$(read_dockerfile_arg_from_file "${CAND_MX_DF}" "MODELEXPRESS_COMMIT" "false")"
-  if [[ "${BASE_MX_COMMIT}" != "${CAND_MX_COMMIT}" ]]; then
+if [[ -f "${CAND_MX_DF}" ]]; then
+  BASE_MX_VERSION=""
+  if [[ -f "${BASE_MX_DF}" ]]; then
+    BASE_MX_VERSION="$(read_dockerfile_arg_from_file "${BASE_MX_DF}" "MODELEXPRESS_VERSION" "false")"
+  fi
+  CAND_MX_VERSION="$(read_dockerfile_arg_from_file "${CAND_MX_DF}" "MODELEXPRESS_VERSION")"
+  if [[ ! "${CAND_MX_VERSION}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+    printf 'FAIL: MODELEXPRESS_VERSION must be a SemVer tag vX.Y.Z, got %q\n' "${CAND_MX_VERSION}" >&2
+    exit 1
+  fi
+
+  python3 - "${STAGE_DIR}" "${BASE_MX_VERSION}" "${CAND_MX_VERSION}" <<'PY'
+import os
+import re
+import subprocess
+import sys
+
+stage_dir, base_ver, cand_ver = sys.argv[1:4]
+mx_stage = os.path.join(stage_dir, "modelexpress")
+
+
+def parse_ws_version(cargo_txt: str) -> str:
+    try:
+        import tomllib
+        doc = tomllib.loads(cargo_txt)
+        ws = str(((doc.get("workspace") or {}).get("package") or {}).get("version") or "").strip()
+        if ws:
+            return ws
+        return str((doc.get("package") or {}).get("version") or "").strip()
+    except ImportError:
+        section = ""
+        ws = ""
+        pkg = ""
+        for raw_ln in cargo_txt.splitlines():
+            st = raw_ln.strip()
+            if not st or st.startswith("#"):
+                continue
+            if st.startswith("["):
+                section = st
+                continue
+            m_v = re.match(r'^version\s*=\s*["\']([^"\']+)["\']', st)
+            if m_v:
+                if section == "[workspace.package]":
+                    ws = m_v.group(1).strip()
+                elif section == "[package]":
+                    pkg = m_v.group(1).strip()
+        return ws or pkg
+
+
+if not os.path.isdir(mx_stage):
+    raise SystemExit(f"FAIL: staged modelexpress directory {mx_stage} not found")
+
+cargo_txt = ""
+if os.path.isdir(os.path.join(mx_stage, ".git")):
+    obj_spec = f"refs/tags/{cand_ver}:Cargo.toml"
+    has_obj = (
+        subprocess.run(
+            ["git", "-C", mx_stage, "cat-file", "-e", obj_spec],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        ).returncode
+        == 0
+    )
+    if not has_obj:
+        raise SystemExit(
+            f"FAIL: MODELEXPRESS_VERSION {cand_ver} (Cargo.toml) not found in staged modelexpress repository {mx_stage}"
+        )
+    cargo_txt = subprocess.check_output(["git", "-C", mx_stage, "show", obj_spec], text=True)
+elif os.path.isfile(os.path.join(mx_stage, "Cargo.toml")):
+    with open(os.path.join(mx_stage, "Cargo.toml"), "r", encoding="utf-8") as f:
+        cargo_txt = f.read()
+else:
+    raise SystemExit(
+        f"FAIL: staged modelexpress directory {mx_stage} is missing Cargo.toml and refs/tags/{cand_ver}:Cargo.toml"
+    )
+
+ws_ver = parse_ws_version(cargo_txt)
+expected = cand_ver.lstrip("v")
+if not ws_ver or ws_ver != expected:
+    raise SystemExit(
+        f"FAIL: MODELEXPRESS_VERSION {cand_ver} ({expected!r}) != staged Cargo.toml [workspace.package].version ({ws_ver!r})"
+    )
+PY
+
+  if [[ -f "${BASE_MX_DF}" && "${BASE_MX_VERSION}" != "${CAND_MX_VERSION}" ]]; then
     BUILD_CMD="${AUTOSYNC_DOCKER_BUILD_CMD:-docker buildx build -f pack/mirrored-modelexpress-server/Dockerfile --target builder --platform linux/amd64 pack/mirrored-modelexpress-server}"
     if ! bash -c "${BUILD_CMD}"; then
       printf 'FAIL: ModelExpress builder verification failed\n' >&2
@@ -431,6 +512,7 @@ python3 - \
   "${BASELINE_DIR}/deploy/gpustack-operator/chart/values.yaml" \
   "${AUTOSYNC_CANDIDATE_ROOT}/deploy/gpustack-operator/chart/values.yaml" \
   > "${IMAGE_META_FILE}" <<'PY'
+import os
 import re
 import sys
 
@@ -491,6 +573,25 @@ if kv_img != sm_default(cand_sm, "kv-cache-backend-image"):
     raise SystemExit("FAIL: value.go KVCacheBackendImage disagrees with settings.md kv-cache-backend-image Default")
 if mx_img != sm_default(cand_sm, "model-deployment-modelexpress-server-image"):
     raise SystemExit("FAIL: value.go ModelDeploymentModelExpressServerImage disagrees with settings.md model-deployment-modelexpress-server-image Default")
+
+cand_rm_p = os.path.join(os.path.dirname(os.path.dirname(cand_sm_p)), "modules", "model-delivery", "remote.md")
+if not os.path.isfile(cand_rm_p):
+    raise SystemExit("FAIL: missing docs/modules/model-delivery/remote.md")
+rm_txt = read(cand_rm_p)
+m_rm = re.search(
+    r'name:\s*model-deployment-modelexpress-server-image\b.*?\n\s*value:\s*([^\s#]+)',
+    rm_txt,
+    re.DOTALL,
+)
+if not m_rm:
+    raise SystemExit(
+        "FAIL: missing model-deployment-modelexpress-server-image value in docs/modules/model-delivery/remote.md"
+    )
+if m_rm.group(1).strip() != mx_img:
+    raise SystemExit(
+        f"FAIL: value.go ModelDeploymentModelExpressServerImage ({mx_img}) disagrees with "
+        f"docs/modules/model-delivery/remote.md ({m_rm.group(1).strip()})"
+    )
 
 base_kv = vg_image(base_vg, "KVCacheBackendImage")
 base_mx = vg_image(base_vg, "ModelDeploymentModelExpressServerImage")
@@ -647,7 +748,12 @@ check_pin("nixl-pypi", read_arg(mt_df_p, "NIXL_VERSION"), allow_sb=True)
 check_pin("nixl-rocm", read_arg(mt_df_p, "NIXL_ROCM_REF"))
 check_pin("ucx-rocm", read_arg(mt_df_p, "NIXL_ROCM_UCX_REF"))
 check_pin("hixl", read_arg(mt_df_p, "HIXL_COMMIT"))
-check_pin("modelexpress", read_arg(mx_df_p, "MODELEXPRESS_COMMIT"), allow_sb=True)
+check_pin("modelexpress", read_arg(mx_df_p, "MODELEXPRESS_VERSION"), allow_sb=True)
+if not re.fullmatch(r"v\d+\.\d+\.\d+(?:\+stage-b)?", str(versions.get("modelexpress") or "")):
+    raise SystemExit(
+        f"FAIL: proposals/kv-transfer.json versions.modelexpress ({versions.get('modelexpress')!r}) "
+        "must be a SemVer tag vX.Y.Z (optionally with +stage-b)"
+    )
 
 runner_v = str(versions.get("gpustack-runner") or "")
 if runner_v not in ("aligned", "aligned+stage-b") and not re.fullmatch(r"[0-9a-f]{40}", runner_v):
@@ -664,6 +770,7 @@ for rel in \
   "pkg/worker/settings/value_test.go" \
   "pkg/worker/controllers/worker/model_deployment_transfer_test.go" \
   "docs/reference/settings.md" \
+  "docs/modules/model-delivery/remote.md" \
   "deploy/gpustack-operator/chart/values.yaml" \
   "deploy/gpustack-operator/chart/values.schema.json" \
   "deploy/gpustack-operator/chart/README.md.gotmpl" \
