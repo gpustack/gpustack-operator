@@ -8,7 +8,11 @@
 # make generate + make lint drift check, and RACE=false make test.
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+SCRIPT_DIR="$(CDPATH="" cd -P -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
+# Inline bootstrap: Loopwright copies gate.script alone to workDir/gate-script.sh.
+if [[ ! -f "${SCRIPT_DIR}/lib.sh" && -f "${LOOPWRIGHT_CANDIDATE_DIR:-.}/.auto-sync/checks/lib.sh" ]]; then
+  SCRIPT_DIR="$(CDPATH="" cd -P -- "${LOOPWRIGHT_CANDIDATE_DIR:-.}/.auto-sync/checks" && pwd -P)"
+fi
 # shellcheck source=lib.sh
 # shellcheck disable=SC1091
 source "${SCRIPT_DIR}/lib.sh"
