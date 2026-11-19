@@ -270,9 +270,23 @@ if [[ -d "${STAGE_DIR}/hixl" ]]; then
     exit 1
   fi
   if [[ -d "${HIXL_TMP}/.git" ]]; then
-    if ! git -C "${HIXL_TMP}" checkout -q --detach "${CAND_HIXL_COMMIT}" 2>/dev/null; then
+    if ! git -C "${HIXL_TMP}" cat-file -e "${CAND_HIXL_COMMIT}^{commit}" 2>/dev/null; then
       rm -rf "${HIXL_TMP}"
       printf 'FAIL: HIXL_COMMIT %s not present in staged hixl tree\n' "${CAND_HIXL_COMMIT}" >&2
+      exit 1
+    fi
+    checkout_err=""
+    if ! checkout_err="$(
+      GIT_LFS_SKIP_SMUDGE=1 git -C "${HIXL_TMP}" \
+        -c filter.lfs.smudge= \
+        -c filter.lfs.process= \
+        -c filter.lfs.clean= \
+        -c filter.lfs.required=false \
+        checkout -f -q --detach "${CAND_HIXL_COMMIT}" 2>&1
+    )"; then
+      rm -rf "${HIXL_TMP}"
+      printf 'FAIL: unable to checkout HIXL_COMMIT %s in staged hixl tree: %s\n' \
+        "${CAND_HIXL_COMMIT}" "${checkout_err}" >&2
       exit 1
     fi
   fi

@@ -35,6 +35,7 @@ spec:
       source: https://gitcode.com/openeuler/ubs-virt.git
       watchedPaths:
         - ubs-virt-enpu/vcann-rt
+        - ubs-virt-enpu/common
   proposal:
     path: .auto-sync/proposals/slicing.json
     requiredFields:

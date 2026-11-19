@@ -200,7 +200,22 @@ autosync::ensure_ephemeral_git() {
     }
     : > "${dir}/.git/.autosync-ephemeral"
     mkdir -p "${dir}/.git/info"
-    printf '/.sbin/\n' >> "${dir}/.git/info/exclude"
+    printf '/.sbin/\n/site/public/\n' >> "${dir}/.git/info/exclude"
+    if [[ -d "${dir}/.agents/skills" && ! -e "${dir}/.claude/skills" && ! -L "${dir}/.claude/skills" ]]; then
+      mkdir -p "${dir}/.claude"
+      ln -s ../.agents/skills "${dir}/.claude/skills"
+      printf '.claude/skills\n' >> "${dir}/.git/.autosync-ephemeral-symlinks"
+    fi
+    if [[ -f "${dir}/.agents/hooks.json" && ! -e "${dir}/.claude/settings.json" && ! -L "${dir}/.claude/settings.json" ]]; then
+      mkdir -p "${dir}/.claude"
+      ln -s ../.agents/hooks.json "${dir}/.claude/settings.json"
+      printf '.claude/settings.json\n' >> "${dir}/.git/.autosync-ephemeral-symlinks"
+    fi
+    if [[ -f "${dir}/.agents/hooks.json" && ! -e "${dir}/.codex/hooks.json" && ! -L "${dir}/.codex/hooks.json" ]]; then
+      mkdir -p "${dir}/.codex"
+      ln -s ../.agents/hooks.json "${dir}/.codex/hooks.json"
+      printf '.codex/hooks.json\n' >> "${dir}/.git/.autosync-ephemeral-symlinks"
+    fi
     git -C "${dir}" config user.name "autosync-validator"
     git -C "${dir}" config user.email "autosync@gpustack.local"
     git -C "${dir}" config commit.gpgsign false
@@ -212,10 +227,20 @@ autosync::ensure_ephemeral_git() {
 }
 
 # autosync::cleanup_ephemeral_git <dir>
-# Removes ephemeral .git and materialized .sbin directories created by autosync helpers.
+# Removes ephemeral .git, symlinks, site/public, and materialized .sbin directories created by autosync helpers.
 autosync::cleanup_ephemeral_git() {
   local dir="${1:?directory required}"
   if [[ -d "${dir}/.git" && -f "${dir}/.git/.autosync-ephemeral" ]]; then
+    if [[ -f "${dir}/.git/.autosync-ephemeral-symlinks" ]]; then
+      local rel
+      while IFS= read -r rel || [[ -n "${rel}" ]]; do
+        [[ -n "${rel}" && -L "${dir}/${rel}" ]] && rm -f "${dir}/${rel}"
+      done < "${dir}/.git/.autosync-ephemeral-symlinks"
+      rmdir "${dir}/.claude" "${dir}/.codex" 2>/dev/null || true
+    fi
+    if [[ -d "${dir}/site/public" ]]; then
+      rm -rf "${dir}/site/public"
+    fi
     rm -rf "${dir}/.git"
   fi
   if [[ -d "${dir}/.sbin" && -f "${dir}/.sbin/.autosync-materialized" ]]; then

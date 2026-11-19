@@ -467,6 +467,15 @@ function image_tool_pin_violations() {
 
 # A check that has only ever been seen to pass cannot be told apart from one that cannot fail, so
 # every rule above is shown to bite on a Dockerfile that breaks it and only that one.
+function assert_mutated() {
+  local label="$1" orig="$2" mutated="$3"
+  if cmp -s "$orig" "$mutated"; then
+    fail "${label}: fixture mutation produced an identical file"
+    return 1
+  fi
+  return 0
+}
+
 function assert_image_tool_pin_rejected() {
   local label="$1" expect="$2" dockerfile="$3"
   local violations
@@ -499,8 +508,10 @@ assert_image_tool_pin_rejected "one fetch reading two pins" "also reads" "$MINI/
 sed 's/\${HELM_VERSION}/3.21.4/g' "$DOCKERFILE" > "$MINI/pin-hardcoded.Dockerfile"
 assert_image_tool_pin_rejected "a fetch naming a version of its own" "names a version of its own" "$MINI/pin-hardcoded.Dockerfile"
 
-sed 's/^ARG YTT_VERSION="0.55.4"$/ARG YTT_VERSION="0.55"/' "$DOCKERFILE" > "$MINI/pin-malformed.Dockerfile"
-assert_image_tool_pin_rejected "a malformed pin" "is not an x.y.z version" "$MINI/pin-malformed.Dockerfile"
+sed -E 's/^ARG YTT_VERSION="[0-9]+\.[0-9]+\.[0-9]+"$/ARG YTT_VERSION="0.55"/' "$DOCKERFILE" > "$MINI/pin-malformed.Dockerfile"
+if assert_mutated "a malformed pin" "$DOCKERFILE" "$MINI/pin-malformed.Dockerfile"; then
+  assert_image_tool_pin_rejected "a malformed pin" "is not an x.y.z version" "$MINI/pin-malformed.Dockerfile"
+fi
 
 # ---------------------------------------------------------------------------- the Helm helper pin
 
@@ -534,20 +545,24 @@ else
   while IFS= read -r violation; do fail "$violation"; done <<<"$violations"
 fi
 
-sed 's/default is v3.21.4/default is v3.21.0/' "$ROOT/hack/lib/helm.sh" > "$MINI/helm-comment.sh"
-violations="$(helm_helper_pin_violations "$MINI/helm-comment.sh")"
-if [ -n "$violations" ]; then
-  pass "a helper whose comment names another version is rejected"
-else
-  fail "a helper whose comment names another version was accepted"
+sed -E 's/(HELM_VERSION.*default is )v[0-9]+\.[0-9]+\.[0-9]+/\1v0.0.0/' "$ROOT/hack/lib/helm.sh" > "$MINI/helm-comment.sh"
+if assert_mutated "a helper whose comment names another version" "$ROOT/hack/lib/helm.sh" "$MINI/helm-comment.sh"; then
+  violations="$(helm_helper_pin_violations "$MINI/helm-comment.sh")"
+  if [ -n "$violations" ]; then
+    pass "a helper whose comment names another version is rejected"
+  else
+    fail "a helper whose comment names another version was accepted"
+  fi
 fi
 
-sed 's/\${HELM_VERSION:-"v3.21.4"}/\${HELM_VERSION:-"v3.21.0"}/' "$ROOT/hack/lib/helm.sh" > "$MINI/helm-variable.sh"
-violations="$(helm_helper_pin_violations "$MINI/helm-variable.sh")"
-if [ -n "$violations" ]; then
-  pass "a helper whose variable names another version is rejected"
-else
-  fail "a helper whose variable names another version was accepted"
+sed -E 's/\$\{HELM_VERSION:-"v[0-9]+\.[0-9]+\.[0-9]+"\}/\${HELM_VERSION:-"v0.0.0"}/' "$ROOT/hack/lib/helm.sh" > "$MINI/helm-variable.sh"
+if assert_mutated "a helper whose variable names another version" "$ROOT/hack/lib/helm.sh" "$MINI/helm-variable.sh"; then
+  violations="$(helm_helper_pin_violations "$MINI/helm-variable.sh")"
+  if [ -n "$violations" ]; then
+    pass "a helper whose variable names another version is rejected"
+  else
+    fail "a helper whose variable names another version was accepted"
+  fi
 fi
 
 # ---------------------------------------------------------------------------- the SSH image default
@@ -592,20 +607,24 @@ else
   while IFS= read -r violation; do fail "$violation"; done <<<"$violations"
 fi
 
-sed 's|gpustack/ssh-server:v1.4.0|gpustack/ssh-server:v1.3.0|' "$ROOT/pkg/worker/settings/value.go" > "$MINI/value-moved.go"
-violations="$(ssh_image_default_violations "$MINI/value-moved.go" "$ROOT/docs/reference/settings.md")"
-if [ -n "$violations" ]; then
-  pass "a settings source that moves alone is rejected"
-else
-  fail "a settings source that moves alone was accepted"
+sed -E 's|gpustack/ssh-server:v[0-9]+\.[0-9]+\.[0-9]+|gpustack/ssh-server:v0.0.0|' "$ROOT/pkg/worker/settings/value.go" > "$MINI/value-moved.go"
+if assert_mutated "a settings source that moves alone" "$ROOT/pkg/worker/settings/value.go" "$MINI/value-moved.go"; then
+  violations="$(ssh_image_default_violations "$MINI/value-moved.go" "$ROOT/docs/reference/settings.md")"
+  if [ -n "$violations" ]; then
+    pass "a settings source that moves alone is rejected"
+  else
+    fail "a settings source that moves alone was accepted"
+  fi
 fi
 
-sed 's|gpustack/ssh-server:v1.4.0|gpustack/ssh-server:v1.3.0|' "$ROOT/docs/reference/settings.md" > "$MINI/settings-moved.md"
-violations="$(ssh_image_default_violations "$ROOT/pkg/worker/settings/value.go" "$MINI/settings-moved.md")"
-if [ -n "$violations" ]; then
-  pass "a settings reference that moves alone is rejected"
-else
-  fail "a settings reference that moves alone was accepted"
+sed -E 's|gpustack/ssh-server:v[0-9]+\.[0-9]+\.[0-9]+|gpustack/ssh-server:v0.0.0|' "$ROOT/docs/reference/settings.md" > "$MINI/settings-moved.md"
+if assert_mutated "a settings reference that moves alone" "$ROOT/docs/reference/settings.md" "$MINI/settings-moved.md"; then
+  violations="$(ssh_image_default_violations "$ROOT/pkg/worker/settings/value.go" "$MINI/settings-moved.md")"
+  if [ -n "$violations" ]; then
+    pass "a settings reference that moves alone is rejected"
+  else
+    fail "a settings reference that moves alone was accepted"
+  fi
 fi
 
 # ---------------------------------------------------------------------------- the comparison

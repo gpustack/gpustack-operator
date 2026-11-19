@@ -129,7 +129,7 @@ fi
 ubs_pin_reachable="true"
 ubs_changed_files=""
 if git -C "${ubs_dir}" cat-file -e "${pinned_ubs}^{commit}" 2>/dev/null; then
-  ubs_changed_files="$(git -C "${ubs_dir}" diff --name-only "${pinned_ubs}" "${head_ubs}" -- ubs-virt-enpu/vcann-rt)"
+  ubs_changed_files="$(git -C "${ubs_dir}" diff --name-only "${pinned_ubs}" "${head_ubs}" -- ubs-virt-enpu/vcann-rt ubs-virt-enpu/common)"
 else
   ubs_pin_reachable="false"
 fi
@@ -254,7 +254,7 @@ elif ubs_watched_changed:
     ubs_ver = head_ubs
     ubs_recent = [head_ubs, pinned_ubs] if ubs_head_changed else [head_ubs]
     ubs_reason = (
-        f"watched path ubs-virt-enpu/vcann-rt changed ({len(ubs_files)} file(s)) "
+        f"watched paths ubs-virt-enpu/{{vcann-rt,common}} changed ({len(ubs_files)} file(s)) "
         f"between {pinned_ubs[:12]} and {head_ubs[:12]}; patch_clean={str(patch_clean).lower()}"
     )
 else:
@@ -301,7 +301,7 @@ report = {
         "pinned_commit_reachable": ubs_pin_reachable,
         "head_commit": head_ubs,
         "head_changed": ubs_head_changed,
-        "watched_paths": ["ubs-virt-enpu/vcann-rt"],
+        "watched_paths": ["ubs-virt-enpu/vcann-rt", "ubs-virt-enpu/common"],
         "watched_changed": ubs_watched_changed,
         "changed_files": ubs_files,
         "patch_clean": patch_clean,
@@ -351,9 +351,16 @@ PY
   if [[ "${ubs_stage_ctx}" == "true" ]]; then
     ubs_extract="${tmp_stage_bundle}/ubs-extract"
     mkdir -p "${ubs_extract}"
-    if git -C "${ubs_dir}" archive "${head_ubs}" ubs-virt-enpu/vcann-rt | tar -x -C "${ubs_extract}" && \
+    ubs_archive_paths=(ubs-virt-enpu/vcann-rt)
+    if git -C "${ubs_dir}" cat-file -e "${head_ubs}:ubs-virt-enpu/common" 2>/dev/null; then
+      ubs_archive_paths+=(ubs-virt-enpu/common)
+    fi
+    if git -C "${ubs_dir}" archive "${head_ubs}" "${ubs_archive_paths[@]}" | tar -x -C "${ubs_extract}" && \
        [[ -d "${ubs_extract}/ubs-virt-enpu/vcann-rt" ]]; then
       bundle_specs+=("${ubs_extract}/ubs-virt-enpu/vcann-rt::ubs-virt/ubs-virt-enpu/vcann-rt")
+      if [[ -d "${ubs_extract}/ubs-virt-enpu/common" ]]; then
+        bundle_specs+=("${ubs_extract}/ubs-virt-enpu/common::ubs-virt/ubs-virt-enpu/common")
+      fi
     fi
   fi
 

@@ -924,6 +924,39 @@ sed -i.bak "s|60dbe9d1d7d9a7eef04bc3dbf84edbad2188230a|${HIXL_FIXTURE_SHA}|" "${
 rm -f "${CAND_DIR}/pack/model-transfer/Dockerfile.bak"
 assert_ok "validate_kv_transfer passes HIXL patch --dry-run against staged hixl repo" run_validate
 
+# 5i-2. Dirty tracked LFS file at HEAD in staged hixl repo still checks out earlier HIXL_COMMIT cleanly.
+mkdir -p "${VAL_STAGE}/hixl/docs/en/figures"
+printf '*.png filter=lfs diff=lfs merge=lfs -text\n' > "${VAL_STAGE}/hixl/.gitattributes"
+printf 'png-placeholder\n' > "${VAL_STAGE}/hixl/docs/en/figures/benchmark_perf_a2_dual.png"
+git -C "${VAL_STAGE}/hixl" add .gitattributes docs/en/figures/benchmark_perf_a2_dual.png
+git -C "${VAL_STAGE}/hixl" commit -q -m "add lfs png at head"
+git -C "${VAL_STAGE}/hixl" config filter.lfs.smudge false
+git -C "${VAL_STAGE}/hixl" config filter.lfs.clean false
+git -C "${VAL_STAGE}/hixl" config filter.lfs.required true
+printf 'dirty-lfs-pointer-or-bytes\n' > "${VAL_STAGE}/hixl/docs/en/figures/benchmark_perf_a2_dual.png"
+assert_ok "validate_kv_transfer checks out earlier HIXL_COMMIT cleanly despite dirty LFS-tracked file at HEAD" run_validate
+
+# Missing HIXL_COMMIT fails with explicit commit-not-present message.
+MISSING_HIXL_SHA="1234567890abcdef1234567890abcdef12345678"
+sed -i.bak "s|${HIXL_FIXTURE_SHA}|${MISSING_HIXL_SHA}|" "${VAL_STAGE}/gpustack-runner/pack/cann/Dockerfile.vllm"
+sed -i.bak "s|${HIXL_FIXTURE_SHA}|${MISSING_HIXL_SHA}|" "${CAND_DIR}/pack/model-transfer/Dockerfile"
+rm -f "${VAL_STAGE}/gpustack-runner/pack/cann/Dockerfile.vllm.bak" "${CAND_DIR}/pack/model-transfer/Dockerfile.bak"
+set_kv_proposal "recipe_sync" "hixl=${MISSING_HIXL_SHA}"
+missing_hixl_err=""
+if ! missing_hixl_err="$(run_validate 2>&1)" && \
+   grep -q "HIXL_COMMIT ${MISSING_HIXL_SHA} not present in staged hixl tree" <<<"${missing_hixl_err}"; then
+  pass "validate_kv_transfer reports missing HIXL_COMMIT via cat-file -e"
+else
+  fail "validate_kv_transfer reports missing HIXL_COMMIT via cat-file -e (${missing_hixl_err})"
+fi
+sed -i.bak "s|${MISSING_HIXL_SHA}|${HIXL_FIXTURE_SHA}|" "${VAL_STAGE}/gpustack-runner/pack/cann/Dockerfile.vllm"
+sed -i.bak "s|${MISSING_HIXL_SHA}|${HIXL_FIXTURE_SHA}|" "${CAND_DIR}/pack/model-transfer/Dockerfile"
+rm -f "${VAL_STAGE}/gpustack-runner/pack/cann/Dockerfile.vllm.bak" "${CAND_DIR}/pack/model-transfer/Dockerfile.bak"
+set_kv_proposal "recipe_sync" "hixl=${HIXL_FIXTURE_SHA}"
+git -C "${VAL_STAGE}/hixl" config --unset filter.lfs.smudge || true
+git -C "${VAL_STAGE}/hixl" config --unset filter.lfs.clean || true
+git -C "${VAL_STAGE}/hixl" config --unset filter.lfs.required || true
+
 # Corrupt target file in hixl fixture -> patch --dry-run MUST fail closed.
 printf 'broken context\n' > "${VAL_STAGE}/hixl/src/hixl/cs/hixl_cs_server.cc"
 git -C "${VAL_STAGE}/hixl" add -A

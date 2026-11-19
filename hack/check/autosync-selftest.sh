@@ -424,7 +424,8 @@ EOF
   # 2b. run_in_module_path_copy helper (F-03).
   local mod_cand="${scratch}/mod-cand"
   local mod_tmp="${scratch}/mod-tmp"
-  mkdir -p "${mod_cand}/.git" "${mod_cand}/.sbin" "${mod_cand}/sub" "${mod_tmp}"
+  mkdir -p "${mod_cand}/.git" "${mod_cand}/.sbin" "${mod_cand}/sub" "${mod_cand}/.agents/skills" "${mod_cand}/.claude" "${mod_tmp}"
+  ln -s ../.agents/skills "${mod_cand}/.claude/skills"
   printf 'keep-git\n' > "${mod_cand}/.git/sentinel"
   printf 'keep-sbin\n' > "${mod_cand}/.sbin/sentinel"
   printf 'v1\n' > "${mod_cand}/existing.txt"
@@ -435,6 +436,7 @@ EOF
       set -euo pipefail
       phys="$(pwd -P)"
       [[ "${phys}" == */gpustack.ai/gpustack ]]
+      [[ -L .claude/skills ]]
       printf "v2\n" > existing.txt
       mkdir -p gen
       printf "gen\n" > gen/new.txt
@@ -443,6 +445,7 @@ EOF
     [[ "$(cat "${mod_cand}/existing.txt")" == "v2" ]] && \
     [[ "$(cat "${mod_cand}/gen/new.txt")" == "gen" ]] && \
     [[ ! -e "${mod_cand}/sub/obsolete.txt" ]] && \
+    [[ -L "${mod_cand}/.claude/skills" ]] && \
     [[ "$(cat "${mod_cand}/.git/sentinel")" == "keep-git" ]] && \
     [[ "$(cat "${mod_cand}/.sbin/sentinel")" == "keep-sbin" ]] && \
     [[ -z "$(ls -A "${mod_tmp}")" ]]; then
