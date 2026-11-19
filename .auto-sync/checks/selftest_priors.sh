@@ -805,6 +805,10 @@ if [[ "${GIT_COMMON_DIR}" != /* ]]; then
   GIT_COMMON_DIR="${ROOT_DIR}/${GIT_COMMON_DIR}"
 fi
 LOGO_OBJ_REL="${LOGO_OID:0:2}/${LOGO_OID:2:2}/${LOGO_OID}"
+FAVICON_OID="$(git -C "${ROOT_DIR}" show HEAD:pkg/extensionroute/swagger/ui/favicon-16x16.png | awk '$1 == "oid" && $2 ~ /^sha256:[0-9a-f]+$/ && length($2) == 71 { print substr($2, 8); exit }')"
+if [[ ! "${FAVICON_OID}" =~ ^[0-9a-f]{64}$ ]]; then
+  fail "failed to parse 64-hex Git-LFS OID from pkg/extensionroute/swagger/ui/favicon-16x16.png"
+fi
 
 if [[ -n "${LOGO_OID}" && -f "${GIT_COMMON_DIR}/lfs/objects/${LOGO_OBJ_REL}" ]]; then
   if (
@@ -814,7 +818,9 @@ if [[ -n "${LOGO_OID}" && -f "${GIT_COMMON_DIR}/lfs/objects/${LOGO_OBJ_REL}" ]];
     source "${ROOT_DIR}/.auto-sync/scripts/lib-preflight.sh"
     AUTOSYNC_SKIP_GO_MOD_DOWNLOAD=true AUTOSYNC_SKIP_LFS_FETCH=true autosync::preflight::warm_caches "${STAGE_LFS}" --sbin
     [[ -d "${STAGE_LFS}/lfs-objects" && -f "${STAGE_LFS}/lfs-objects/${LOGO_OBJ_REL}" ]]
-    [[ ! -e "${STAGE_LFS}/lfs-objects/ea/af/eaafa0e1df9cd79ca0ef98ba1572c1a75ed5e2789c98b64ba2cd9ac289b8c2ab" ]]
+    [[ ! -e "${STAGE_LFS}/lfs-objects/${FAVICON_OID:0:2}/${FAVICON_OID:2:2}/${FAVICON_OID}" ]]
+    staged_lfs_files="$(find -L "${STAGE_LFS}/lfs-objects" -type f)"
+    [[ "${staged_lfs_files}" == "${STAGE_LFS}/lfs-objects/${LOGO_OBJ_REL}" ]]
     # shellcheck source=./lib.sh
     # shellcheck disable=SC1091
     source "${CAND_LFS}/.auto-sync/checks/lib.sh"

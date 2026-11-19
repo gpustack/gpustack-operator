@@ -419,10 +419,15 @@ PY
   done <<< "${oids}"
 
   if [[ "${missing_obj}" == "true" ]] && \
-     [[ "${AUTOSYNC_SKIP_LFS_FETCH:-false}" != "true" && "${GOPROXY:-}" != "off" ]] && \
+     [[ "${AUTOSYNC_SKIP_LFS_FETCH:-false}" != "true" ]] && \
      git -C "${repo_root}" remote get-url origin >/dev/null 2>&1 && \
      git lfs version >/dev/null 2>&1; then
     git -C "${repo_root}" lfs fetch origin HEAD >/dev/null 2>&1 || true
+    local pr_sha=""
+    while IFS= read -r pr_sha; do
+      [[ -n "${pr_sha}" ]] || continue
+      git -C "${repo_root}" lfs fetch origin "${pr_sha}" >/dev/null 2>&1 || true
+    done < <(git -C "${repo_root}" for-each-ref --format='%(objectname)' 'refs/remotes/origin/pr/' 2>/dev/null)
   fi
 
   local staged_any=false src_obj dst_obj
