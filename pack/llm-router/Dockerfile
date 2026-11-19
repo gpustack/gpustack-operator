@@ -5,7 +5,7 @@
 # Router source versions are the LLMD_ROUTER_VERSION, VLLM_ROUTER_VERSION and
 # SGLANG_GATEWAY_VERSION build arguments below. Pass overrides with Docker Buildx:
 #   docker buildx build --platform linux/amd64 --load -t gpustack/llm-router:dev \
-#     --build-arg VLLM_ROUTER_VERSION=v0.1.16.1 -f pack/llm-router/Dockerfile .
+#     --build-arg VLLM_ROUTER_VERSION=v0.1.17 -f pack/llm-router/Dockerfile .
 
 # One image carrying every router a ModelDeployment can name.
 #
@@ -35,11 +35,11 @@
 # router Pod, so putting it here would pull a router image into every decoder.
 
 ARG UBUNTU_VERSION=24.04
-ARG GO_VERSION=1.26-bookworm
+ARG GO_VERSION=1.27-bookworm
 ARG RUST_VERSION=1.95-bookworm
 
-ARG LLMD_ROUTER_VERSION=v0.11.0
-ARG VLLM_ROUTER_VERSION=v0.1.16.1
+ARG LLMD_ROUTER_VERSION=v1.0.0
+ARG VLLM_ROUTER_VERSION=v0.1.17
 ARG SGLANG_GATEWAY_VERSION=gateway-v0.3.1
 
 ######################## llm-d endpoint picker ########################
@@ -159,18 +159,14 @@ EOF
 # the same names but different contents, and the failure would be a confusing reject
 # rather than a missing patch.
 #
-# This stage also carries upstream PR 266 -- commit 516f1cb, the encoder-prefill-decode
-# routing -- as 0001-epd-routing.patch, a cherry-pick onto v0.1.16.1. That tag is the
-# last vllm-project/router release cut before 516f1cb landed, so its tree does not
-# contain the commit and the feature is carried here rather than waited out. The three
-# patches above it (lazy Mooncake, the read-only observer endpoint, the Kubernetes
-# discovery readiness-loss deselect) rebase onto the tree that cherry-pick produces,
-# which is why they travel with it.
-#
-# THE IMAGE MOVES TO THE FIRST UPSTREAM TAG THAT CONTAINS THE COMMIT: when upstream
-# cuts a tag whose tree carries 516f1cb, bump VLLM_ROUTER_VERSION to that tag and delete
-# 0001. The other three patches stay until their own WHEN TO REMOVE condition holds, and
-# each patch header names the tag it is written against under AGAINST.
+# This stage previously carried upstream PR 266 -- commit 516f1cb, the encoder-prefill-decode
+# routing -- as 0001-epd-routing.patch, a cherry-pick onto v0.1.16.1. RETIRED at v0.1.17: that
+# tag's tree contains the commit, so the cherry-pick patch was deleted and VLLM_ROUTER_VERSION
+# moved to the first upstream tag carrying it. The former 0004-discovery-readiness-and-
+# deselect-removal.patch (the Kubernetes discovery readiness-loss deselect) is likewise retired
+# at this tag; the two remaining patches (lazy Mooncake 0002, the read-only observer endpoint
+# 0003) stay until their own WHEN TO REMOVE condition holds, and each patch header names the
+# tag it is written against under AGAINST.
 #
 # Applied with git apply, which fails the build loudly on a version bump whose hunks no
 # longer match -- that failure is the tripwire, and git is already in the base stage so no

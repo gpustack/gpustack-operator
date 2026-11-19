@@ -4,10 +4,11 @@ address echoes; the operator binds them to Kubernetes identities. Boot
 generation is initialized once per process. The view revision changes when
 the serialized worker array differs from the preceding observer response.
 
-AGAINST: vllm-project/router v0.1.16.1 (commit
+AGAINST: vllm-project/router v0.1.17 (commit
 91b65ee4bdfbe98863a32a2205dced5dbb249ffe) with PR 266 (EPD, commit
-516f1cb90eefe565c9fc894d72c8748eae25085b) cherry-picked on top (see
-0001-epd-routing.patch), plus the lazy-Mooncake patch (0002). The image
+516f1cb90eefe565c9fc894d72c8748eae25085b) already in the tag's tree (the
+former 0001-epd-routing.patch cherry-pick was retired at v0.1.17), plus the
+lazy-Mooncake patch (0002). The image
 build applies this patch with git apply; a pin whose hunks no longer
 match fails loudly and surfaces at build time, not in a cluster.
 
@@ -17,10 +18,10 @@ then the operator's SGLang detection and its ClusterQueue-aware admission
 both depend on the read-only observer view that this patch defines.
 
 diff --git a/src/core/circuit_breaker.rs b/src/core/circuit_breaker.rs
+index 45f6b7816c17f306961782ffde4884488eb2a5a5..71e3d542828579c1ad9338f338036292bd6f47ab 100644
 --- a/src/core/circuit_breaker.rs
 +++ b/src/core/circuit_breaker.rs
 @@ -100,6 +100,54 @@ impl CircuitBreaker {
-         self.check_and_update_state();
          *self.state.read().unwrap()
      }
  
@@ -75,12 +76,11 @@ diff --git a/src/core/circuit_breaker.rs b/src/core/circuit_breaker.rs
      /// Record the outcome of a request
      pub fn record_outcome(&self, success: bool) {
          if success {
-
 diff --git a/src/lib.rs b/src/lib.rs
+index 6fda3622826f2b5e9fc0a88113c20a6304431873..24997e0463ff414802b7d22e57126f72e42ae022 100644
 --- a/src/lib.rs
 +++ b/src/lib.rs
-@@ -15,6 +15,7 @@ pub mod core;
- pub mod data_connector;
+@@ -9,6 +9,7 @@ pub mod data_connector;
  pub mod kv_hash;
  pub mod kv_index;
  pub mod metrics;
@@ -90,7 +90,7 @@ diff --git a/src/lib.rs b/src/lib.rs
  pub mod otel_trace;
 diff --git a/src/observer.rs b/src/observer.rs
 new file mode 100644
-index 0000000..9c20b98
+index 0000000000000000000000000000000000000000..9c20b98dc61b0dce2b9cb37610df8097cdcfe994
 --- /dev/null
 +++ b/src/observer.rs
 @@ -0,0 +1,298 @@
@@ -392,11 +392,11 @@ index 0000000..9c20b98
 +        run_case(CircuitState::HalfOpen, false, false).await;
 +    }
 +}
-
 diff --git a/src/server.rs b/src/server.rs
+index 45cdb202ce99851b0d52871f434f67729d6c1fca..31a85fdf38b65b33cd57ae0a0c48413959ef7094 100644
 --- a/src/server.rs
 +++ b/src/server.rs
-@@ -849,7 +849,9 @@ pub fn build_app_with_request_tracing(
+@@ -925,7 +925,9 @@ pub fn build_app_with_wasm_middleware(
          .route("/health_generate", get(health_generate))
          .route("/v1/models", get(v1_models))
          .route("/get_model_info", get(get_model_info))
