@@ -38,22 +38,40 @@ You are synchronizing the six CLI tool pins and Kubernetes `v0.36.x` lockstep Go
 - **`api/`**: ONLY codegen outputs (`zz_generated*.go`, `zz_generated.openapi.violation_exceptions`, `generated.pb.go`, `generated.protomessage.pb.go`, `generated.proto`) may change. Never edit hand-written API types.
 - **Protected paths**: Never modify `pkg/devicemanager/allocator`, `pkg/worker/scaling/priors/priors.yaml`, `pkg/worker/scaling/priors/records.md`, `pkg/worker/settings/value.go`, `csrc`, `binding`, or `gen/binding`.
 
-## Preflight Staging Inputs and Codegen Cycle
+## Staged Preflight Artifacts (`.auto-sync/.stage/k8s-deps/`)
 
-Host preflight (`preflight-k8s-deps.sh`) prepares `$AUTOSYNC_STAGE_DIR`:
+Inside the offline `linux-bwrap` sandbox, host toolchains (`go`, `golangci-lint`, `goimports-reviser`,
+`protoc`, `hugo`, etc.) and external host staging directories are NOT mounted. Always inspect
+`.auto-sync/.stage/k8s-deps/` FIRST (falling back to `$AUTOSYNC_STAGE_DIR` only if
+`.auto-sync/.stage/k8s-deps/` is absent):
 
-- `$AUTOSYNC_STAGE_DIR/k8s-deps-preflight-report.json` and `$AUTOSYNC_STAGE_DIR/upstream-records.json` — filtered same-minor and `v3.*` upstream versions and patch status.
-- `$AUTOSYNC_STAGE_DIR/deps-cache` and `$AUTOSYNC_STAGE_DIR/go-mod` — offline staging tarballs and Go module cache (`GOPROXY=off`).
-- `$AUTOSYNC_STAGE_DIR/baseline/` — baseline copies used by diff guards.
+- `.auto-sync/.stage/k8s-deps/k8s-deps-preflight-report.json` — filtered same-minor and `v3.*`
+  upstream versions, `staging_updated`, `patch_clean`, `held_back_upstreams`, and `target` pins.
+- `.auto-sync/.stage/k8s-deps/upstream-records.json` — normalized `TaskpackUpstreamRecord` entries.
 
-When updating Go modules or staging trees:
+**Read-only stage rule:** `.auto-sync/.stage/**` is read-only host-staged context outside
+`scope.writable`. **NEVER** edit, move, or delete any file under `.auto-sync/.stage/**` (doing so
+fails `scope-guard`). Loopwright automatically strips `.auto-sync/.stage/**` when running
+`validate_k8s_deps.sh` on the host and when publishing the Pull Request.
 
-1. Run `make generate` (note: `gen/api/main.go` requires a physical path ending in `/gpustack.ai/gpustack`).
-2. Run `make lint` (`golangci-lint --fix` and `goimports-reviser` may rewrite Go files in place).
-3. Run `make generate` **again** after `make lint` so `goimports-reviser` leaves zero regeneration drift (`git diff --exit-code`).
-4. Run `bash hack/check/upgrade-compat.sh modules`, `bash hack/check/toolpins-selftest.sh`, and `RACE=false make test`.
+**CRITICAL — Do NOT hand-edit pre-staged Go modules or generated trees:**
+When `staging_updated` is `true` in `k8s-deps-preflight-report.json`, `hack/deps.sh`, `staging/`,
+`go.mod`, `go.sum`, `api/`, and `pkg/` are **already staged, linted, and double-generated** in
+your workspace by host preflight! Do **NOT** hand-edit `go.mod`, `go.sum`, `hack/deps.sh`,
+`staging/`, `api/`, or `pkg/` inside `bwrap`.
+
+Your edits inside `bwrap` are strictly:
+1. Update the changed CLI `ARG` pins (`SKOPEO_VERSION`, `HELM_VERSION`, `VALS_VERSION`,
+   `KUSTOMIZE_VERSION`, `YTT_VERSION`, `KUBECTL_VERSION`) in `pack/gpustack-operator/Dockerfile`.
+2. When `HELM_VERSION` changed, update BOTH line 7 (`default is v<x.y.z>.`) and line 14
+   (`helm_version=${HELM_VERSION:-"v<x.y.z>"}`) in `hack/lib/helm.sh`.
+3. Update `.auto-sync/proposals/k8s-deps.json` (`schema_version: 1`, `summary`, `versions`,
+   `subscriptions`) to match `target` in `k8s-deps-preflight-report.json`.
+
+Full verification (`upgrade-compat.sh modules`, `toolpins-selftest.sh`, `make generate`, `make lint`,
+and `RACE=false make test`) executes on the host in `validate_k8s_deps.sh` after you submit.
 
 ## Settlement
 
-- Update `.auto-sync/proposals/k8s-deps.json` (`schema_version: 1`, `summary`, `versions`, `subscriptions`) to reflect any updated pins and settle as `completed`. `versions` must contain all 11 pinned keys matching `validate_k8s_deps.sh`: `kubernetes`, `k8s-modules`, `controller-runtime`, `kueue-sdk`, `helm-cli`, and `helm-module` with leading `v`; `skopeo-cli`, `vals-cli`, `kustomize-cli`, `ytt-cli`, and `kubectl-cli` without leading `v`. Keep `subscriptions` aligned with the 8 `upstream-records.json` IDs (`kubernetes`, `controller-runtime`, `kueue-sdk`, `helm-cli`, `skopeo-cli`, `vals-cli`, `kustomize-cli`, `ytt-cli`).
-- If all upstreams in `$AUTOSYNC_STAGE_DIR/upstream-records.json` are `up_to_date` and all repository pins already match, settle cleanly as `no_change` without modifying files.
+- Settle as `completed` after updating the CLI pins (`Dockerfile`, `hack/lib/helm.sh` if Helm changed) and `.auto-sync/proposals/k8s-deps.json`. `versions` must contain all 11 pinned keys matching `validate_k8s_deps.sh`: `kubernetes`, `k8s-modules`, `controller-runtime`, `kueue-sdk`, `helm-cli`, and `helm-module` with leading `v`; `skopeo-cli`, `vals-cli`, `kustomize-cli`, `ytt-cli`, and `kubectl-cli` without leading `v`. Keep `subscriptions` aligned with the 8 `upstream-records.json` IDs (`kubernetes`, `controller-runtime`, `kueue-sdk`, `helm-cli`, `skopeo-cli`, `vals-cli`, `kustomize-cli`, `ytt-cli`).
+- If all upstreams in `upstream-records.json` are `up_to_date` and all repository pins already match, settle cleanly as `no_change` without modifying files.

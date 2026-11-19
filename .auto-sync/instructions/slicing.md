@@ -23,14 +23,27 @@ Strictly off-limits (protected):
 - `gen/binding`
 - `pkg/devicemanager/allocator`
 
-## Preflight Staging Inputs
+## Preflight Staging Inputs (`.auto-sync/.stage/slicing/`)
 
-The candidate sandbox runs offline (`networkMode: none`). Host preflight (`preflight-slicing.sh`) has already prepared `$AUTOSYNC_STAGE_DIR`:
+The candidate sandbox runs offline (`networkMode: none`) inside `linux-bwrap`. Host toolchains
+(`docker`, `cmake`, `go`) and external host staging directories are NOT mounted. Always inspect
+`.auto-sync/.stage/slicing/` FIRST (falling back to `$AUTOSYNC_STAGE_DIR` only if
+`.auto-sync/.stage/slicing/` is absent):
 
-- `$AUTOSYNC_STAGE_DIR/hami-core` — full git clone checked out at upstream HEAD.
-- `$AUTOSYNC_STAGE_DIR/ubs-virt` — full git clone checked out at upstream HEAD (with `core.autocrlf=false` so CRLF line endings are preserved).
-- `$AUTOSYNC_STAGE_DIR/slicing-preflight-report.json` — records `pinned_commit`, `head_commit`, `watched_changed`, `changed_files`, and `patch_clean` (`true|false`) from running `patch -p1 --dry-run --batch --forward` against `ubs-virt-enpu/vcann-rt` at target HEAD.
-- `$AUTOSYNC_STAGE_DIR/upstream-records.json` — normalized `TaskpackUpstreamRecord` entries.
+- `.auto-sync/.stage/slicing/slicing-preflight-report.json` — records `pinned_commit`,
+  `head_commit`, `watched_changed`, `changed_files`, and `patch_clean` (`true|false`) from running
+  `patch -p1 --dry-run --batch --forward` against `ubs-virt-enpu/vcann-rt` at target HEAD.
+- `.auto-sync/.stage/slicing/upstream-records.json` — normalized `TaskpackUpstreamRecord` entries.
+- `.auto-sync/.stage/slicing/ubs-virt/ubs-virt-enpu/vcann-rt/` — CRLF-exact snapshot at `ubs-virt`
+  target HEAD (present when `ubs-virt` is `available` or `patch_clean` is `false`).
+- `.auto-sync/.stage/slicing/hami-core/` — `CMakeLists.txt`, `src/CMakeLists.txt`, and `build.sh`
+  at `hami-core` target HEAD (present when `hami-core` is `available`).
+
+**Read-only stage rule:** `.auto-sync/.stage/**` is read-only host-staged context outside
+`scope.writable`. **NEVER** edit, move, or delete any file under `.auto-sync/.stage/**` (doing so
+fails `scope-guard`). Loopwright automatically strips `.auto-sync/.stage/**` when running
+`validate_slicing.sh` (including `docker buildx` xbuild + ELF verification) on the host and when
+publishing the Pull Request.
 
 ## Settlement and No-Change Behavior
 

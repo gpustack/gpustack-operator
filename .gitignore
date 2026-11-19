@@ -46,3 +46,6 @@ site/public/
 
 # Hugo image processing cache.
 site/resources/
+
+# Auto-sync staged host context.
+.auto-sync/.stage/

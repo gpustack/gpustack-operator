@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # .auto-sync/checks/selftest_kv_transfer.sh - self-tests for kv-transfer-sync domain.
 set -euo pipefail
+export PYTHONDONTWRITEBYTECODE=1
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 DEFAULT_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd -P)"
@@ -287,6 +288,7 @@ GHA_OUT="${SCRATCH}/gha-output.txt"
 FIX_1="${SCRATCH}/fix-1"
 clone_fixture "${FIX_1}"
 : > "${GHA_OUT}"
+BASE_SHA_KV="$(git -C "${FAKE_REPO}" rev-parse HEAD)"
 (
   cd "${FAKE_REPO}"
   AUTOSYNC_KV_FIXTURE_DIR="${FIX_1}" \
@@ -295,12 +297,13 @@ clone_fixture "${FIX_1}"
     bash "${FAKE_REPO}/.auto-sync/scripts/preflight-kv-transfer.sh" "${STAGE_DIR}"
 )
 
-if python3 - "${STAGE_DIR}" <<'PY'
+if python3 - "${STAGE_DIR}" "${FAKE_REPO}" "${BASE_SHA_KV}" <<'PY'
 import json
 import os
+import subprocess
 import sys
 
-stage = sys.argv[1]
+stage, repo, base_sha = sys.argv[1:4]
 with open(os.path.join(stage, "upstream-records.json"), "r", encoding="utf-8") as f:
     recs = {r["upstreamId"]: r for r in json.load(f)}
 assert recs["mooncake"]["status"] == "available" and recs["mooncake"]["version"] == "0.3.14", recs["mooncake"]
@@ -311,11 +314,21 @@ with open(os.path.join(stage, "kv-transfer-preflight-report.json"), "r", encodin
 assert rep["stage"] == "recipe_sync", rep
 assert rep["image_published"] is False, rep
 assert rep["nixl_pypi"]["selected_version"] == "1.5.3", rep
+src_rev = rep.get("source_revision", "")
+assert src_rev and src_rev != base_sha, rep
+ls = subprocess.check_output(
+    ["git", "-C", repo, "ls-tree", "-r", src_rev, ".auto-sync/.stage/kv-transfer"], text=True
+)
+assert "100644 blob " in ls and "kv-transfer-preflight-report.json" in ls, ls
+assert "100644 blob " in ls and "runner-001_channel_generation.patch" in ls, ls
+assert "100644 blob " in ls and "upstream-records.json" in ls, ls
+assert "120000 " not in ls, ls
+assert subprocess.check_output(["git", "-C", repo, "status", "--porcelain"], text=True).strip() == ""
 PY
 then
-  pass "preflight Stage A emits recipe_sync and selects NIXL 1.5.3 with 3-package wheel parity"
+  pass "preflight Stage A emits recipe_sync, selects NIXL 1.5.3, and stages .auto-sync/.stage/kv-transfer cleanly"
 else
-  fail "preflight Stage A emits recipe_sync and selects NIXL 1.5.3 with 3-package wheel parity"
+  fail "preflight Stage A emits recipe_sync, selects NIXL 1.5.3, and stages .auto-sync/.stage/kv-transfer cleanly"
 fi
 
 # 2. Preflight waiting state (no_change): recipes already updated to 0.3.14 & 1.5.3, image still unpublished.
@@ -340,6 +353,7 @@ git -C "${FAKE_REPO}" commit -q -m "stage a landed"
 
 FIX_2="${SCRATCH}/fix-2"
 clone_fixture "${FIX_2}"
+BASE_SHA_KV2="$(git -C "${FAKE_REPO}" rev-parse HEAD)"
 (
   cd "${FAKE_REPO}"
   AUTOSYNC_KV_FIXTURE_DIR="${FIX_2}" \
@@ -347,23 +361,72 @@ clone_fixture "${FIX_2}"
     bash "${FAKE_REPO}/.auto-sync/scripts/preflight-kv-transfer.sh" "${STAGE_DIR}"
 )
 
-if python3 - "${STAGE_DIR}" <<'PY'
+if python3 - "${STAGE_DIR}" "${BASE_SHA_KV2}" <<'PY'
 import json
 import os
 import sys
 
-stage = sys.argv[1]
+stage, base_sha = sys.argv[1:3]
 with open(os.path.join(stage, "upstream-records.json"), "r", encoding="utf-8") as f:
     recs = json.load(f)
 assert all(r["status"] == "up_to_date" for r in recs), recs
 with open(os.path.join(stage, "kv-transfer-preflight-report.json"), "r", encoding="utf-8") as f:
     rep = json.load(f)
 assert rep["stage"] == "no_change", rep
+assert rep["source_revision"] == base_sha, rep
 PY
 then
-  pass "preflight emits up_to_date (no_change) while Stage A target image is unpublished"
+  pass "preflight emits up_to_date (no_change) and keeps source_revision == base_sha while Stage A image is unpublished"
 else
-  fail "preflight emits up_to_date (no_change) while Stage A target image is unpublished"
+  fail "preflight emits up_to_date (no_change) and keeps source_revision == base_sha while Stage A image is unpublished"
+fi
+
+# 2b. hicann/hixl HEAD != recipe HIXL_COMMIT while gpustack/runner matches recipe HIXL_COMMIT -> hixl stays up_to_date.
+FIX_2B="${SCRATCH}/fix-2b"
+clone_fixture "${FIX_2B}"
+python3 - "${FIX_2B}/upstream.json" "${FIX_2B}/repos/gpustack-runner/pack/cann/Dockerfile.vllm" <<'PY'
+import json
+import sys
+up_path, runner_df = sys.argv[1:3]
+with open(up_path, "r", encoding="utf-8") as f:
+    doc = json.load(f)
+doc["hixl"] = "1111111111111111111111111111111111111111"
+with open(up_path, "w", encoding="utf-8") as f:
+    json.dump(doc, f, indent=2)
+with open(runner_df, "r", encoding="utf-8") as f:
+    txt = f.read()
+assert "60dbe9d1d7d9a7eef04bc3dbf84edbad2188230a" in txt, txt
+PY
+(
+  cd "${FAKE_REPO}"
+  AUTOSYNC_KV_FIXTURE_DIR="${FIX_2B}" \
+  AUTOSYNC_SKIP_GO_MOD_DOWNLOAD=true \
+    bash "${FAKE_REPO}/.auto-sync/scripts/preflight-kv-transfer.sh" "${STAGE_DIR}"
+)
+if python3 - "${STAGE_DIR}" "${BASE_SHA_KV2}" <<'PY'
+import json
+import os
+import sys
+
+stage, base_sha = sys.argv[1:3]
+with open(os.path.join(stage, "upstream-records.json"), "r", encoding="utf-8") as f:
+    recs = {r["upstreamId"]: r for r in json.load(f)}
+assert recs["hixl"]["status"] == "up_to_date", recs["hixl"]
+assert recs["hixl"]["version"] == "60dbe9d1d7d9a7eef04bc3dbf84edbad2188230a", recs["hixl"]
+assert "held at gpustack/runner VLLM_HIXL_COMMIT 60dbe9d1d7d9 while upstream hicann/hixl is at 111111111111" == recs["hixl"].get("reason"), recs["hixl"]
+with open(os.path.join(stage, "kv-transfer-preflight-report.json"), "r", encoding="utf-8") as f:
+    rep = json.load(f)
+assert rep["stage"] == "no_change", rep
+assert rep["source_revision"] == base_sha, rep
+assert rep["enforce_runner_hixl_parity"] is True, rep
+assert rep["hixl_upstream_head"] == "1111111111111111111111111111111111111111", rep
+assert rep["hixl_upstream_held_by_runner"] is True, rep
+assert rep["runner"]["hixl_commit"] == "60dbe9d1d7d9a7eef04bc3dbf84edbad2188230a", rep
+PY
+then
+  pass "preflight holds hixl up_to_date when hicann/hixl advances ahead of gpustack/runner VLLM_HIXL_COMMIT"
+else
+  fail "preflight holds hixl up_to_date when hicann/hixl advances ahead of gpustack/runner VLLM_HIXL_COMMIT"
 fi
 
 # 3. Preflight Stage B (tag_promotion): 0.3.14-cpu now published multi-arch, value.go still on 0.3.13.post1-cpu.
@@ -391,12 +454,13 @@ PY
     bash "${FAKE_REPO}/.auto-sync/scripts/preflight-kv-transfer.sh" "${STAGE_DIR}"
 )
 
-if python3 - "${STAGE_DIR}" <<'PY'
+if python3 - "${STAGE_DIR}" "${FAKE_REPO}" "${BASE_SHA_KV2}" <<'PY'
 import json
 import os
+import subprocess
 import sys
 
-stage = sys.argv[1]
+stage, repo, base_sha = sys.argv[1:4]
 with open(os.path.join(stage, "upstream-records.json"), "r", encoding="utf-8") as f:
     recs = {r["upstreamId"]: r for r in json.load(f)}
 assert recs["mooncake"]["status"] == "available" and recs["mooncake"]["version"] == "0.3.14+stage-b", recs["mooncake"]
@@ -404,11 +468,19 @@ with open(os.path.join(stage, "kv-transfer-preflight-report.json"), "r", encodin
     rep = json.load(f)
 assert rep["stage"] == "tag_promotion", rep
 assert rep["image_published"] is True, rep
+src_rev = rep.get("source_revision", "")
+assert src_rev and src_rev != base_sha, rep
+ls = subprocess.check_output(
+    ["git", "-C", repo, "ls-tree", "-r", src_rev, ".auto-sync/.stage/kv-transfer"], text=True
+)
+assert "100644 blob " in ls and "kv-transfer-preflight-report.json" in ls, ls
+assert "120000 " not in ls, ls
+assert subprocess.check_output(["git", "-C", repo, "status", "--porcelain"], text=True).strip() == ""
 PY
 then
-  pass "preflight Stage B emits synthetic 0.3.14+stage-b when multi-arch manifest is published"
+  pass "preflight Stage B emits 0.3.14+stage-b and stages .auto-sync/.stage/kv-transfer cleanly"
 else
-  fail "preflight Stage B emits synthetic 0.3.14+stage-b when multi-arch manifest is published"
+  fail "preflight Stage B emits 0.3.14+stage-b and stages .auto-sync/.stage/kv-transfer cleanly"
 fi
 
 # 4. Preflight fully aligned (no_change) after value.go + settings.md updated to 0.3.14-cpu.

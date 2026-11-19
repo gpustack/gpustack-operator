@@ -107,7 +107,7 @@ autosync::preflight::_write_toolchain_env() {
   local tmp_tc
   tmp_tc="$(mktemp "${stage_dir}/.toolchain.env.XXXXXXXX")"
 
-  local go_bin="" go_bin_dir="" goroot_val="" hugo_bin="" hugo_bin_dir="" node_bin="" node_bin_dir="" uv_bin="" uv_bin_dir=""
+  local go_bin="" go_bin_dir="" goroot_val="" hugo_bin="" hugo_bin_dir="" node_bin="" node_bin_dir="" uv_bin="" uv_bin_dir="" crane_bin="" crane_bin_dir="" docker_bin="" docker_bin_dir=""
   if go_bin="$(command -v go 2>/dev/null || true)" && [[ -n "${go_bin}" ]]; then
     go_bin_dir="$(cd "$(dirname "${go_bin}")" && pwd -P)"
     goroot_val="$(go env GOROOT 2>/dev/null || true)"
@@ -120,6 +120,12 @@ autosync::preflight::_write_toolchain_env() {
   fi
   if uv_bin="$(command -v uv 2>/dev/null || true)" && [[ -n "${uv_bin}" ]]; then
     uv_bin_dir="$(cd "$(dirname "${uv_bin}")" && pwd -P)"
+  fi
+  if crane_bin="$(command -v crane 2>/dev/null || true)" && [[ -n "${crane_bin}" ]]; then
+    crane_bin_dir="$(cd "$(dirname "${crane_bin}")" && pwd -P)"
+  fi
+  if docker_bin="$(command -v docker 2>/dev/null || true)" && [[ -n "${docker_bin}" ]]; then
+    docker_bin_dir="$(cd "$(dirname "${docker_bin}")" && pwd -P)"
   fi
 
   {
@@ -137,6 +143,12 @@ autosync::preflight::_write_toolchain_env() {
     fi
     if [[ -n "${uv_bin_dir}" && -d "${uv_bin_dir}" ]]; then
       printf 'AUTOSYNC_SAVED_UV_BIN_DIR=%s\n' "${uv_bin_dir}"
+    fi
+    if [[ -n "${crane_bin_dir}" && -d "${crane_bin_dir}" ]]; then
+      printf 'AUTOSYNC_SAVED_CRANE_BIN_DIR=%s\n' "${crane_bin_dir}"
+    fi
+    if [[ -n "${docker_bin_dir}" && -d "${docker_bin_dir}" ]]; then
+      printf 'AUTOSYNC_SAVED_DOCKER_BIN_DIR=%s\n' "${docker_bin_dir}"
     fi
   } > "${tmp_tc}"
   chmod 0600 "${tmp_tc}"
@@ -744,7 +756,11 @@ for rel in rel_paths:
                     candidates.append((sub_rel, fp, False))
 
 if candidates:
-    untracked_rels = [r for r, _, _ in candidates if r not in tracked]
+    untracked_rels = [
+        r
+        for r, _, _ in candidates
+        if r not in tracked and r != ".auto-sync/.stage" and not r.startswith(".auto-sync/.stage/")
+    ]
     ignored: set[str] = set()
     if untracked_rels:
         ci_in = b"".join(r.encode("utf-8", errors="surrogateescape") + b"\0" for r in untracked_rels)
@@ -823,4 +839,163 @@ PY
     )"
     printf '%s\n' "${new_commit}"
   )
+}
+
+# autosync::preflight::has_available_upstreams <upstream_records_json>
+# Returns 0 when at least one record has status == "available", otherwise 1.
+autosync::preflight::has_available_upstreams() {
+  local records_json="${1:?upstream_records_json required}"
+  [[ -f "${records_json}" ]] || return 1
+  python3 - "${records_json}" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1], "r", encoding="utf-8") as f:
+    recs = json.load(f)
+if isinstance(recs, list) and any(isinstance(r, dict) and r.get("status") == "available" for r in recs):
+    sys.exit(0)
+sys.exit(1)
+PY
+}
+
+# autosync::preflight::populate_stage_bundle <staged_tree_dir> <domain> <file_or_dir_or_spec>...
+# Copies read-only host context into <staged_tree_dir>/.auto-sync/.stage/<domain>/ as 0644
+# regular files (resolving symlinks, skipping .git, rejecting unsafe paths and size > 8 MiB).
+# Each entry may be "<src>" (lands at basename) or "<src>::<rel_dest>".
+autosync::preflight::populate_stage_bundle() {
+  local staged_tree_dir="${1:?staged_tree_dir required}"
+  local domain="${2:?domain required}"
+  shift 2
+  if [[ ! "${domain}" =~ ^[a-z0-9-]+$ ]]; then
+    printf 'FAIL: invalid domain name for stage bundle: %s\n' "${domain}" >&2
+    return 1
+  fi
+  if (( $# == 0 )); then
+    printf 'FAIL: populate_stage_bundle requires at least one source path\n' >&2
+    return 1
+  fi
+
+  local max_bytes="${AUTOSYNC_STAGE_BUNDLE_MAX_BYTES:-8388608}"
+  python3 - "${staged_tree_dir}" "${domain}" "${max_bytes}" "$@" <<'PY'
+import os
+import posixpath
+import shutil
+import sys
+
+staged_tree_dir, domain, max_bytes_str = sys.argv[1:4]
+specs = sys.argv[4:]
+max_bytes = int(max_bytes_str)
+if max_bytes <= 0:
+    raise SystemExit(f"FAIL: invalid AUTOSYNC_STAGE_BUNDLE_MAX_BYTES: {max_bytes_str}")
+
+bundle_root = os.path.join(staged_tree_dir, ".auto-sync", ".stage", domain)
+os.makedirs(bundle_root, exist_ok=True)
+
+
+def validate_rel(rel: str) -> str:
+    if not rel or "\n" in rel or "\r" in rel or "\x00" in rel:
+        raise SystemExit(f"FAIL: unsafe stage bundle relative path: {rel!r}")
+    if rel.startswith("/") or rel.startswith("\\"):
+        raise SystemExit(f"FAIL: absolute stage bundle relative path rejected: {rel!r}")
+    norm = posixpath.normpath(rel.replace("\\", "/"))
+    if norm in ("", ".", "..") or norm.startswith("../") or "/../" in norm:
+        raise SystemExit(f"FAIL: path traversal rejected in stage bundle path: {rel!r}")
+    if ".git" in norm.split("/"):
+        raise SystemExit(f"FAIL: '.git' path segment rejected in stage bundle path: {rel!r}")
+    return norm
+
+
+total_bytes = 0
+for cur, _, names in os.walk(bundle_root, followlinks=False):
+    for name in names:
+        fp = os.path.join(cur, name)
+        if os.path.isfile(fp):
+            total_bytes += os.path.getsize(fp)
+
+
+def copy_regular(src_file: str, rel_dest: str) -> None:
+    global total_bytes
+    if not os.path.exists(src_file):
+        kind = "dangling symlink" if os.path.islink(src_file) else "missing path"
+        raise SystemExit(f"FAIL: stage bundle source is a {kind}: {src_file}")
+    real_src = os.path.realpath(src_file)
+    if not os.path.isfile(real_src):
+        raise SystemExit(f"FAIL: stage bundle source is not a regular file: {src_file}")
+    safe_rel = validate_rel(rel_dest)
+    size = os.path.getsize(real_src)
+    dst = os.path.join(bundle_root, *safe_rel.split("/"))
+    if os.path.isfile(dst):
+        if os.path.samefile(real_src, dst):
+            raise SystemExit(f"FAIL: stage bundle source and destination are the same file: {src_file}")
+        total_bytes -= os.path.getsize(dst)
+    total_bytes += size
+    if total_bytes > max_bytes:
+        raise SystemExit(
+            f"FAIL: stage bundle for {domain} exceeds {max_bytes} byte cap ({total_bytes} bytes)"
+        )
+    os.makedirs(os.path.dirname(dst), exist_ok=True)
+    with open(real_src, "rb") as sf, open(dst, "wb") as df:
+        shutil.copyfileobj(sf, df)
+    os.chmod(dst, 0o644)
+
+
+# Non-cyclic sibling directory symlinks are intentionally materialized into regular files at each distinct
+# destination path (bounded by max_bytes); tracking ancestors avoids dropping valid aliased subtrees.
+def walk_bundle_dir(
+    cur_dir: str, rel_prefix: str, ancestors: frozenset[tuple[int, int]], depth: int = 0
+) -> None:
+    if depth > 64:
+        raise SystemExit(
+            f"FAIL: stage bundle directory nesting exceeds max depth 64: {cur_dir}"
+        )
+    if os.path.islink(cur_dir) and not os.path.exists(cur_dir):
+        raise SystemExit(f"FAIL: stage bundle source contains dangling symlink: {cur_dir}")
+    st = os.stat(cur_dir)
+    inode_key = (st.st_dev, st.st_ino)
+    if inode_key in ancestors:
+        print(
+            f"WARN: skipping directory symlink cycle in stage bundle: {cur_dir}",
+            file=sys.stderr,
+        )
+        return
+    next_ancestors = ancestors | {inode_key}
+    for entry in sorted(os.listdir(cur_dir)):
+        # Git refuses any '.git' path segment (directory or worktree/submodule gitfile) when staging trees.
+        if entry == ".git":
+            continue
+        entry_path = os.path.join(cur_dir, entry)
+        if os.path.islink(entry_path) and not os.path.exists(entry_path):
+            raise SystemExit(
+                f"FAIL: stage bundle source contains dangling symlink: {entry_path}"
+            )
+        entry_rel = (
+            posixpath.join(rel_prefix, entry)
+            if rel_prefix and rel_prefix != "."
+            else entry
+        )
+        if os.path.isdir(entry_path):
+            walk_bundle_dir(entry_path, entry_rel, next_ancestors, depth + 1)
+        else:
+            copy_regular(entry_path, entry_rel)
+
+
+for spec in specs:
+    if "::" in spec:
+        raw_src, raw_dest = spec.split("::", 1)
+    else:
+        raw_src = spec
+        raw_dest = os.path.basename(os.path.normpath(raw_src))
+    if os.path.islink(raw_src) and not os.path.exists(raw_src):
+        raise SystemExit(f"FAIL: stage bundle source is a dangling symlink: {raw_src}")
+    if not os.path.exists(raw_src):
+        raise SystemExit(f"FAIL: stage bundle source does not exist: {raw_src}")
+    safe_base = validate_rel(raw_dest)
+    real_root = os.path.realpath(raw_src)
+    if os.path.isfile(real_root):
+        copy_regular(real_root, safe_base)
+    elif os.path.isdir(real_root):
+        walk_bundle_dir(real_root, safe_base, frozenset())
+    else:
+        raise SystemExit(f"FAIL: unsupported stage bundle source type: {raw_src}")
+PY
 }

@@ -406,9 +406,14 @@ PY
 [[ -n "${SRC_REV}" && "${SRC_REV}" != "${BASE_SHA}" ]] && \
 [[ "$(git -C "${PREFLIGHT_REPO}" show "${SRC_REV}:deploy/gpustack-operator/chart/charts/kueue/_VERSION_")" == "${KUEUE_NEXT}" ]] && \
 grep -q "kueue-${KUEUE_NEXT}.tgz ${KUEUE_NEXT}" <<<"$(git -C "${PREFLIGHT_REPO}" show "${SRC_REV}:hack/deps.sh")" && \
+grep -q "chart ${KUEUE_NEXT}" <<<"$(git -C "${PREFLIGHT_REPO}" show "${SRC_REV}:deploy/gpustack-operator/chart/values.yaml")" && \
+grep -q "tag: v${KUEUE_NEXT}" <<<"$(git -C "${PREFLIGHT_REPO}" show "${SRC_REV}:deploy/gpustack-operator/chart/values.yaml")" && \
+grep -q '100644 blob .*\.auto-sync/\.stage/charts/charts-preflight-report\.json$' <<<"$(git -C "${PREFLIGHT_REPO}" ls-tree -r "${SRC_REV}" .auto-sync/.stage/charts)" && \
+grep -q '100644 blob .*\.auto-sync/\.stage/charts/upstream-records\.json$' <<<"$(git -C "${PREFLIGHT_REPO}" ls-tree -r "${SRC_REV}" .auto-sync/.stage/charts)" && \
+! grep -q '^120000 ' <<<"$(git -C "${PREFLIGHT_REPO}" ls-tree -r "${SRC_REV}" .auto-sync/.stage/charts)" && \
 [[ -z "$(git -C "${PREFLIGHT_REPO}" status --porcelain)" ]] && \
 [[ "$(git -C "${PREFLIGHT_REPO}" rev-parse HEAD)" == "${BASE_SHA}" ]]; then
-  pass "preflight-charts.sh stages mirrored-ready kueue bump onto clean detached source_revision"
+  pass "preflight-charts.sh stages mirrored-ready kueue bump and .auto-sync/.stage/charts onto clean detached source_revision"
 else
   fail "preflight-charts.sh ready fixture test"
 fi
@@ -463,7 +468,7 @@ CAND_BASE="${SCRATCH}/cand-base"
 mkdir -p "${CAND_BASE}"
 git -C "${PREFLIGHT_REPO}" archive "${SRC_REV}" | tar -x -C "${CAND_BASE}"
 
-# Align values.yaml and proposals/charts.json with the bumped kueue in the candidate tree.
+# Verify values.yaml was already pre-updated in SRC_REV, and align proposals/charts.json with the bumped kueue.
 python3 - "${CAND_BASE}/deploy/gpustack-operator/chart/values.yaml" "${CAND_BASE}/.auto-sync/proposals/charts.json" "${KUEUE_CUR}" "${KUEUE_NEXT}" <<'PY'
 import json
 import re
@@ -472,16 +477,11 @@ import sys
 vy_path, prop_path, kueue_cur, kueue_next = sys.argv[1:5]
 with open(vy_path, "r", encoding="utf-8") as f:
     vy = f.read()
-vy_new = vy.replace(f"chart {kueue_cur}", f"chart {kueue_next}")
-vy_new = re.sub(
-    rf"(repository:\s*docker\.io/gpustack/mirrored-kueue\n(?:[^\n]*\n){{0,4}}?\s*tag:\s*)v{re.escape(kueue_cur)}\b",
-    rf"\g<1>v{kueue_next}",
-    vy_new,
-    count=1,
-)
-assert vy_new != vy, "failed to update kueue tag in values.yaml"
-with open(vy_path, "w", encoding="utf-8") as f:
-    f.write(vy_new)
+assert f"chart {kueue_next}" in vy, f"expected pre-updated chart {kueue_next} comment in values.yaml"
+assert re.search(
+    rf"repository:\s*docker\.io/gpustack/mirrored-kueue\n(?:[^\n]*\n){{0,6}}?\s*tag:\s*v{re.escape(kueue_next)}\b",
+    vy,
+), f"expected pre-updated mirrored-kueue tag v{kueue_next} in values.yaml"
 
 with open(prop_path, "r", encoding="utf-8") as f:
     prop = json.load(f)

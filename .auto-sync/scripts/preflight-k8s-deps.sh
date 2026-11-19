@@ -622,6 +622,34 @@ PY
       emit_sanitized_log_tail "${staging_log}" "go mod tidy/download output"
       return 0
     fi
+
+    if [[ -z "${AUTOSYNC_K8S_DEPS_FIXTURE_DIR:-}" || "${AUTOSYNC_WARM_TOOLS:-false}" == "true" ]]; then
+      if ! (
+        cd "${work_repo}"
+        GOMODCACHE="${stage_dir}/go-mod" \
+        GOCACHE="${stage_dir}/go-cache" \
+        GOPROXY=off \
+          go list -m -json all >/dev/null
+      ) >> "${staging_log}" 2>&1; then
+        if ! (
+          cd "${work_repo}"
+          GOMODCACHE="${stage_dir}/go-mod" \
+          GOCACHE="${stage_dir}/go-cache" \
+            go mod download all
+          GOMODCACHE="${stage_dir}/go-mod" \
+          GOCACHE="${stage_dir}/go-cache" \
+          GOPROXY=off \
+            go list -m -json all >/dev/null
+        ) >> "${staging_log}" 2>&1; then
+          patch_clean="false"
+          staging_updated="false"
+          staging_error="go list -m -json all failed while warming go-mod cache"
+          printf 'WARN: %s\n' "${staging_error}" >&2
+          emit_sanitized_log_tail "${staging_log}" "go list -m -json all output"
+          return 0
+        fi
+      fi
+    fi
   fi
 
   if [[ "${patch_clean}" == "true" && "${AUTOSYNC_SKIP_GENERATE:-false}" != "true" ]] && command -v make >/dev/null 2>&1; then
@@ -642,6 +670,36 @@ PY
       printf 'WARN: %s\n' "${staging_error}" >&2
       emit_sanitized_log_tail "${staging_log}" "make generate output"
       return 0
+    fi
+
+    if [[ -z "${AUTOSYNC_K8S_DEPS_FIXTURE_DIR:-}" || "${AUTOSYNC_WARM_TOOLS:-false}" == "true" ]]; then
+      local lint_env=(
+        "AUTOSYNC_IN_VALIDATOR=true"
+        "GOMODCACHE=${stage_dir}/go-mod"
+        "GOCACHE=${stage_dir}/go-cache"
+        "PATH=${stage_dir}/.sbin:${stage_dir}/.sbin/protoc/bin:${PATH}"
+      )
+      if [[ -z "${UV_CACHE_DIR:-}" || ! -d "${UV_CACHE_DIR}" ]]; then
+        lint_env+=("GPUSTACK_SKIP_PYTHON_LINT=true")
+      fi
+      if ! autosync::ensure_ephemeral_git "${work_repo}" >> "${staging_log}" 2>&1 || \
+         ! env "${lint_env[@]}" make -C "${work_repo}" lint >> "${staging_log}" 2>&1 || \
+         ! GOMODCACHE="${stage_dir}/go-mod" \
+           GOCACHE="${stage_dir}/go-cache" \
+           PATH="${stage_dir}/.sbin:${stage_dir}/.sbin/protoc/bin:${PATH}" \
+             autosync::run_in_module_path_copy "${work_repo}" make generate >> "${staging_log}" 2>&1; then
+        autosync::cleanup_ephemeral_git "${work_repo}"
+        rm -rf "${work_repo}/.git"
+        patch_clean="false"
+        staging_updated="false"
+        generate_ran="false"
+        staging_error="make lint and second make generate failed inside staged work_repo"
+        printf 'WARN: %s\n' "${staging_error}" >&2
+        emit_sanitized_log_tail "${staging_log}" "make lint/generate output"
+        return 0
+      fi
+      autosync::cleanup_ephemeral_git "${work_repo}"
+      rm -rf "${work_repo}/.git"
     fi
   fi
 }
@@ -718,6 +776,7 @@ PY
   fi
 }
 
+staged_mods_ready="false"
 if [[ "${can_stage_mods}" == "true" ]]; then
   work_base="$(mktemp -d "${TMPDIR:-/tmp}/autosync-k8s-deps-work.XXXXXXXX")"
   _PREFLIGHT_TMP_DIRS+=("${work_base}")
@@ -745,18 +804,8 @@ if [[ "${can_stage_mods}" == "true" ]]; then
     fi
 
     if [[ "${patch_clean}" == "true" ]]; then
-      stage_paths=(hack/deps.sh staging go.mod go.sum api pkg)
-      source_revision="$(
-        autosync::preflight::commit_staged_tree_revision \
-          "${repo_root}" \
-          "${base_sha}" \
-          "chore(deps): stage kubernetes modules and generated outputs" \
-          "${work_repo}" \
-          "${stage_paths[@]}"
-      )"
-      if [[ "${source_revision}" != "${base_sha}" ]]; then
-        staging_updated="true"
-      fi
+      staged_mods_ready="true"
+      staging_updated="true"
     fi
   fi
 fi
@@ -942,6 +991,47 @@ with open(records_path, "w", encoding="utf-8") as f:
     json.dump(records, f, indent=2)
     f.write("\n")
 PY
+
+if [[ "${AUTOSYNC_SKIP_SOURCE_REVISION:-false}" != "true" ]] && \
+   autosync::preflight::has_available_upstreams "${upstream_records_json}"; then
+  stage_commit_root=""
+  commit_paths=(".auto-sync/.stage/k8s-deps")
+  if [[ "${staged_mods_ready}" == "true" && -n "${work_repo:-}" && -d "${work_repo}" ]]; then
+    stage_commit_root="${work_repo}"
+    commit_paths+=(hack/deps.sh staging go.mod go.sum api pkg)
+  else
+    stage_commit_root="$(mktemp -d "${TMPDIR:-/tmp}/autosync-k8s-deps-bundle.XXXXXXXX")"
+    _PREFLIGHT_TMP_DIRS+=("${stage_commit_root}")
+  fi
+
+  autosync::preflight::populate_stage_bundle "${stage_commit_root}" "k8s-deps" \
+    "${report_json}" \
+    "${upstream_records_json}"
+
+  source_revision="$(
+    autosync::preflight::commit_staged_tree_revision \
+      "${repo_root}" \
+      "${base_sha}" \
+      "chore(deps): stage kubernetes modules, generated outputs, and preflight bundle" \
+      "${stage_commit_root}" \
+      "${commit_paths[@]}"
+  )"
+
+  if [[ "${source_revision}" != "${base_sha}" ]]; then
+    python3 - "${report_json}" "${source_revision}" <<'PY'
+import json
+import sys
+
+p, src_rev = sys.argv[1:3]
+with open(p, "r", encoding="utf-8") as f:
+    rep = json.load(f)
+rep["source_revision"] = src_rev
+with open(p, "w", encoding="utf-8") as f:
+    json.dump(rep, f, indent=2)
+    f.write("\n")
+PY
+  fi
+fi
 
 rm -f "${discovery_json}"
 

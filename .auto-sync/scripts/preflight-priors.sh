@@ -389,19 +389,7 @@ PY
   )
 
   if ! cmp -s "${tmp_catalog}" "${repo_root}/pkg/worker/scaling/priors/priors.yaml"; then
-    staged_tree="${work_dir}/staged-tree"
-    mkdir -p "${staged_tree}/pkg/worker/scaling/priors"
-    cp -f "${tmp_catalog}" "${staged_tree}/pkg/worker/scaling/priors/priors.yaml"
-    source_revision="$(
-      autosync::preflight::commit_staged_tree_revision \
-        "${repo_root}" "${base_sha}" \
-        "chore(priors): stage InferenceX catalog merge" \
-        "${staged_tree}" \
-        "pkg/worker/scaling/priors/priors.yaml"
-    )"
-    if [[ "${source_revision}" != "${base_sha}" ]]; then
-      catalog_changed=true
-    fi
+    catalog_changed=true
   fi
 fi
 
@@ -415,8 +403,11 @@ upstream_records_json="${stage_dir}/upstream-records.json"
 python3 - "${analysis_json}" "${unmapped_slugs_json}" "${report_json}" "${upstream_records_json}" \
   "${capture_date}" "${base_sha}" "${source_revision}" "${inferencex_commit}" \
   "${inferencex_repo_url}" "${merge_attempted}" "${catalog_changed}" \
-  "${agg_count}" "${disagg_count}" <<'PY'
+  "${agg_count}" "${disagg_count}" "${tmp_catalog}" "${stage_dir}" \
+  "${repo_root}/pkg/worker/scaling/priors/identity.go" <<'PY'
 import json
+import os
+import re
 import sys
 
 (
@@ -433,20 +424,163 @@ import sys
     catalog_changed_str,
     agg_count_str,
     disagg_count_str,
-) = sys.argv[1:14]
+    catalog_path,
+    stage_dir,
+    identity_go_path,
+) = sys.argv[1:17]
 
 with open(analysis_path, "r", encoding="utf-8") as f:
     analysis = json.load(f)
 with open(unmapped_path, "r", encoding="utf-8") as f:
     unmapped_slugs = json.load(f)
 
+SLUG_TO_QUERY_ID = {
+    "dsr1": "DeepSeek-R1-0528",
+    "dsv4": "DeepSeek-V4-Pro",
+    "glm5": "GLM-5",
+    "glm5.1": "GLM-5",
+    "glm5.2": "GLM-5.2",
+    "glm5.3": "GLM-5.2",
+    "gptoss120b": "gpt-oss-120b",
+    "kimik2.5": "Kimi-K2.5",
+    "kimik2.6": "Kimi-K2.5",
+    "kimik3": "Kimi-K3",
+    "llama70b": "Llama-3.3-70B-Instruct-FP8",
+    "minimaxm2.5": "MiniMax-M2.5",
+    "minimaxm3": "MiniMax-M3",
+    "qwen3.5": "Qwen-3.5-397B-A17B",
+    "qwen3.8next": "Qwen3.8-Flash-Next",
+}
+
+canonical_by_slug = {}
+if os.path.isfile(identity_go_path):
+    with open(identity_go_path, "r", encoding="utf-8") as f:
+        id_txt = f.read()
+    m_map = re.search(r"var\s+canonicalModelNames\s*=\s*map\[string\]string\s*\{(.*?)\}", id_txt, re.DOTALL)
+    if m_map:
+        for slug, repo in re.findall(r'"([^"]+)"\s*:\s*"([^"]+)"', m_map.group(1)):
+            canonical_by_slug[slug.strip().lower()] = repo.strip()
+
+qid_to_canonical = {}
+for slug, qid in SLUG_TO_QUERY_ID.items():
+    if slug.lower() in canonical_by_slug and qid not in qid_to_canonical:
+        qid_to_canonical[qid] = canonical_by_slug[slug.lower()]
+
+
+def parse_catalog_models_by_mode(path: str) -> dict[str, dict[str, int]]:
+    by_model: dict[str, dict[str, int]] = {}
+    try:
+        import yaml  # type: ignore
+
+        with open(path, "r", encoding="utf-8") as f:
+            doc = yaml.safe_load(f) or {}
+        for prof in doc.get("profiles") or []:
+            if not isinstance(prof, dict):
+                continue
+            mode = str(prof.get("mode") or "").strip()
+            model = str(prof.get("model") or "").strip()
+            if not model or mode not in ("aggregated", "disaggregated"):
+                continue
+            entry = by_model.setdefault(model, {"aggregated": 0, "disaggregated": 0})
+            entry[mode] += 1
+        return by_model
+    except ImportError:
+        pass
+
+    cur_mode = ""
+    cur_model = ""
+    in_profiles = False
+
+    def flush():
+        nonlocal cur_mode, cur_model
+        if cur_model and cur_mode in ("aggregated", "disaggregated"):
+            entry = by_model.setdefault(cur_model, {"aggregated": 0, "disaggregated": 0})
+            entry[cur_mode] += 1
+        cur_mode = ""
+        cur_model = ""
+
+    with open(path, "r", encoding="utf-8") as f:
+        for raw in f:
+            st = raw.strip()
+            if not st or st.startswith("#"):
+                continue
+            if not raw.startswith(" ") and st.startswith("profiles:"):
+                in_profiles = True
+                continue
+            if not in_profiles:
+                continue
+            if re.match(r"^\s{2}-\s+", raw):
+                flush()
+                m_mode = re.match(r"^\s{2}-\s+mode:\s*(\S+)", raw)
+                if m_mode:
+                    cur_mode = m_mode.group(1).strip("'\"")
+            elif re.match(r"^\s{4}mode:\s*", raw):
+                cur_mode = raw.split(":", 1)[1].strip().strip("'\"")
+            elif re.match(r"^\s{4}model:\s*", raw):
+                cur_model = raw.split(":", 1)[1].strip().strip("'\"")
+    flush()
+    return by_model
+
+
+def resolve_query_model(qid: str, snap_rel: str) -> str:
+    snap_abs = os.path.join(stage_dir, snap_rel)
+    if os.path.isfile(snap_abs):
+        try:
+            with open(snap_abs, "r", encoding="utf-8") as f:
+                raw_snap = json.load(f)
+            rows = raw_snap if isinstance(raw_snap, list) else (raw_snap.get("rows") or raw_snap.get("data") or [])
+            for row in rows:
+                if not isinstance(row, dict):
+                    continue
+                can = str(row.get("canonical_model") or "").strip()
+                if can and "/" in can:
+                    return can
+                for key in ("model", "query_model"):
+                    val = str(row.get(key) or "").strip()
+                    if val.lower() in canonical_by_slug:
+                        return canonical_by_slug[val.lower()]
+        except Exception:
+            pass
+    if qid in qid_to_canonical:
+        return qid_to_canonical[qid]
+    if qid.lower() in canonical_by_slug:
+        return canonical_by_slug[qid.lower()]
+    return ""
+
+
+catalog_models_by_mode = parse_catalog_models_by_mode(catalog_path)
+
 agg_count = int(agg_count_str)
 disagg_count = int(disagg_count_str)
 merge_attempted = merge_attempted_str == "true"
 catalog_changed = catalog_changed_str == "true"
 snapshots_changed = bool(analysis["snapshots_changed"])
-digest_refresh_only = bool(snapshots_changed and not catalog_changed and source_revision == base_sha)
-overall_changed = snapshots_changed or (source_revision != base_sha)
+digest_refresh_only = bool(snapshots_changed and not catalog_changed)
+overall_changed = snapshots_changed or catalog_changed
+
+for q in analysis["queries"]:
+    model_name = resolve_query_model(q["query_id"], q["snapshot_path"])
+    counts = catalog_models_by_mode.get(model_name, {"aggregated": 0, "disaggregated": 0})
+    q["model"] = model_name
+    q["aggregated"] = counts["aggregated"]
+    q["disaggregated"] = counts["disaggregated"]
+
+unresolved_queries = [q["query_id"] for q in analysis["queries"] if not q.get("model")]
+if unresolved_queries:
+    print(
+        f"WARN: unable to resolve canonical Hugging Face model for query ID(s): {', '.join(unresolved_queries)}",
+        file=sys.stderr,
+    )
+
+represented_models = {q["model"] for q in analysis["queries"] if q.get("model")}
+if not unresolved_queries and set(catalog_models_by_mode.keys()).issubset(represented_models):
+    sum_agg = sum(q["aggregated"] for q in analysis["queries"])
+    sum_disagg = sum(q["disaggregated"] for q in analysis["queries"])
+    if sum_agg != agg_count or sum_disagg != disagg_count:
+        raise SystemExit(
+            f"FAIL: per-query profile count sum ({sum_agg} agg / {sum_disagg} disagg) != "
+            f"catalog totals ({agg_count} agg / {disagg_count} disagg)"
+        )
 
 digest_refresh_reason = (
     "InferenceX snapshot SHA-256 changed without altering priors.yaml profiles; "
@@ -476,8 +610,10 @@ report = {
     },
     "availability": analysis["availability"],
     "unmapped_availability_slugs": unmapped_slugs,
+    "unresolved_query_models": unresolved_queries,
     "queries": analysis["queries"],
     "removed_query_ids": analysis["removed_query_ids"],
+    "catalog_models_by_mode": catalog_models_by_mode,
     "catalog_merge": {
         "attempted": merge_attempted,
         "catalog_changed": catalog_changed,
@@ -516,6 +652,42 @@ with open(records_out_path, "w", encoding="utf-8") as f:
     json.dump(upstream_records, f, indent=2)
     f.write("\n")
 PY
+
+if [[ "${AUTOSYNC_SKIP_SOURCE_REVISION:-false}" != "true" ]] && \
+   autosync::preflight::has_available_upstreams "${upstream_records_json}"; then
+  staged_tree="${work_dir}/staged-tree"
+  mkdir -p "${staged_tree}"
+  autosync::preflight::populate_stage_bundle "${staged_tree}" "priors" \
+    "${report_json}" \
+    "${upstream_records_json}"
+  commit_paths=(".auto-sync/.stage/priors")
+  if [[ "${catalog_changed}" == "true" ]]; then
+    mkdir -p "${staged_tree}/pkg/worker/scaling/priors"
+    cp -f "${tmp_catalog}" "${staged_tree}/pkg/worker/scaling/priors/priors.yaml"
+    commit_paths+=("pkg/worker/scaling/priors/priors.yaml")
+  fi
+  source_revision="$(
+    autosync::preflight::commit_staged_tree_revision \
+      "${repo_root}" "${base_sha}" \
+      "chore(priors): stage InferenceX preflight bundle and catalog" \
+      "${staged_tree}" \
+      "${commit_paths[@]}"
+  )"
+  if [[ "${source_revision}" != "${base_sha}" ]]; then
+    python3 - "${report_json}" "${source_revision}" <<'PY'
+import json
+import sys
+
+rep_path, src_rev = sys.argv[1:3]
+with open(rep_path, "r", encoding="utf-8") as f:
+    rep = json.load(f)
+rep["source_revision"] = src_rev
+with open(rep_path, "w", encoding="utf-8") as f:
+    json.dump(rep, f, indent=2)
+    f.write("\n")
+PY
+  fi
+fi
 
 rm -f "${analysis_json}" "${unmapped_slugs_json}"
 

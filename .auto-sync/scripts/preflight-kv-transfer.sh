@@ -30,14 +30,21 @@ fi
 
 # Extract current repository pins and stage upstream data in Python.
 PROBE_LIST_FILE="$(mktemp "${TMPDIR:-/tmp}/autosync-kv-probes.XXXXXXXX")"
-trap 'rm -f "${PROBE_LIST_FILE}"' EXIT
+KV_STAGE_TMP=""
+cleanup_kv_preflight() {
+  rm -f "${PROBE_LIST_FILE}"
+  if [[ -n "${KV_STAGE_TMP:-}" && -d "${KV_STAGE_TMP}" ]]; then
+    rm -rf "${KV_STAGE_TMP}"
+  fi
+}
+trap cleanup_kv_preflight EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
 trap 'exit 129' HUP
 
 DISCOVERY_JSON="${STAGE_DIR}/kv-transfer-discovery.json"
 
-python3 - "${REPO_ROOT}" "${STAGE_DIR}" "${AUTOSYNC_KV_FIXTURE_DIR:-}" "${DISCOVERY_JSON}" "${PROBE_LIST_FILE}" <<'PY'
+python3 - "${REPO_ROOT}" "${STAGE_DIR}" "${AUTOSYNC_KV_FIXTURE_DIR:-}" "${DISCOVERY_JSON}" "${PROBE_LIST_FILE}" "${BASE_SHA}" <<'PY'
 import json
 import os
 import re
@@ -46,7 +53,7 @@ import subprocess
 import sys
 import urllib.request
 
-repo_root, stage_dir, fixture_dir, discovery_path, probe_list_path = sys.argv[1:6]
+repo_root, stage_dir, fixture_dir, discovery_path, probe_list_path, base_sha = sys.argv[1:7]
 sys.path.insert(0, os.path.join(repo_root, ".auto-sync", "checks"))
 from dockerfile_arg import has_dockerfile_arg, read_dockerfile_arg
 
@@ -475,10 +482,101 @@ if os.path.isfile(runner_cann_df):
     runner_cann_txt = read_text(runner_cann_df)
     if has_dockerfile_arg(runner_cann_txt, "VLLM_HIXL_COMMIT"):
         runner_hixl_commit = read_dockerfile_arg(runner_cann_txt, "VLLM_HIXL_COMMIT", runner_cann_df)
+if (
+    not fixture_dir
+    and re.fullmatch(r"[0-9a-f]{40}", runner_hixl_commit)
+    and runner_hixl_commit != recipe["hixl_commit"]
+):
+    sync_git_repo("https://github.com/hicann/hixl.git", hixl_stage, runner_hixl_commit)
 runner_patch_path = os.path.join(runner_stage, "pack/cann/patches/hixl/001_channel_generation.patch")
 if os.path.isfile(runner_patch_path):
     with open(runner_patch_path, "rb") as f:
         runner_patch_match = f.read() == local_hixl_patch_bytes
+
+# Extract nixl-rocm pyproject.toml [project].version at up_nixl_rocm when available.
+nixl_rocm_project_version = ""
+for cand_nixl_dir in (os.path.join(stage_dir, "nixl-rocm"), nixl_stage):
+    if not os.path.isdir(os.path.join(cand_nixl_dir, ".git")):
+        continue
+    obj_spec = f"{up_nixl_rocm}:pyproject.toml"
+    has_obj = subprocess.run(
+        ["git", "-C", cand_nixl_dir, "cat-file", "-e", obj_spec],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    ).returncode == 0
+    if has_obj:
+        pyproject_raw = subprocess.check_output(
+            ["git", "-C", cand_nixl_dir, "show", obj_spec],
+            text=True,
+        )
+        try:
+            import tomllib
+            doc = tomllib.loads(pyproject_raw)
+            nixl_rocm_project_version = str((doc.get("project") or {}).get("version") or "").strip()
+        except ImportError:
+            in_proj = False
+            for raw_ln in pyproject_raw.splitlines():
+                st = raw_ln.strip()
+                if st.startswith("["):
+                    in_proj = st == "[project]"
+                    continue
+                if in_proj:
+                    m_v = re.match(r'^version\s*=\s*["\']([^"\']+)["\']', st)
+                    if m_v:
+                        nixl_rocm_project_version = m_v.group(1).strip()
+                        break
+        break
+
+# Stage key Mooncake upstream files when Mooncake version drifted.
+mooncake_stage = os.path.join(stage_dir, "mooncake")
+mooncake_sparse_paths = [
+    "CMakeLists.txt",
+    "scripts/build_wheel.sh",
+    "mooncake-transfer-engine/example/CMakeLists.txt",
+    "mooncake-transfer-engine/src/transport/ascend_transport",
+]
+if up_mooncake != recipe["mooncake_version"]:
+    if fixture_dir:
+        mc_fix = os.path.join(fixture_dir, "repos/mooncake")
+        if os.path.isdir(mc_fix):
+            stage_fixture_repo(mc_fix, mooncake_stage)
+    else:
+        mc_tag = f"v{up_mooncake}"
+        git_env = {**os.environ, "LC_ALL": "C"}
+        try:
+            if os.path.isdir(os.path.join(mooncake_stage, ".git")):
+                subprocess.run(
+                    ["git", "-C", mooncake_stage, "sparse-checkout", "set", *mooncake_sparse_paths],
+                    check=True,
+                    env=git_env,
+                )
+                subprocess.run(
+                    ["git", "-C", mooncake_stage, "fetch", "--depth", "1", "--filter=blob:none",
+                     "https://github.com/kvcache-ai/Mooncake.git", f"refs/tags/{mc_tag}:refs/tags/{mc_tag}"],
+                    check=True,
+                    env=git_env,
+                )
+                subprocess.run(
+                    ["git", "-C", mooncake_stage, "checkout", "-f", "-q", f"refs/tags/{mc_tag}"],
+                    check=True,
+                    env=git_env,
+                )
+            else:
+                if os.path.exists(mooncake_stage):
+                    shutil.rmtree(mooncake_stage)
+                subprocess.run(
+                    ["git", "clone", "--depth", "1", "--filter=blob:none", "--sparse",
+                     "--branch", mc_tag, "https://github.com/kvcache-ai/Mooncake.git", mooncake_stage],
+                    check=True,
+                    env=git_env,
+                )
+                subprocess.run(
+                    ["git", "-C", mooncake_stage, "sparse-checkout", "set", *mooncake_sparse_paths],
+                    check=True,
+                    env=git_env,
+                )
+        except (OSError, subprocess.SubprocessError) as exc:
+            print(f"WARN: unable to stage Mooncake {mc_tag} context: {exc}", file=sys.stderr)
 
 def parse_generic_target_tags(raw_val: str) -> dict[str, str]:
     parsed: dict[str, str] = {}
@@ -719,6 +817,8 @@ discovery = {
         "hixl_commit": runner_hixl_commit,
         "patch_match": runner_patch_match,
     },
+    "nixl_rocm_project_version": nixl_rocm_project_version,
+    "base_sha": base_sha,
     "targets": {
         "mooncake_image": target_mooncake_image,
         "modelexpress_image": target_mx_image,
@@ -803,18 +903,30 @@ targets = disc["targets"]
 
 runner_hixl_drift = bool(runner["hixl_commit"] and runner["hixl_commit"] != recipe["hixl_commit"])
 runner_patch_drift = not bool(runner["patch_match"])
+effective_hixl_target = runner["hixl_commit"] if runner["hixl_commit"] else up["hixl"]
+hixl_upstream_held_by_runner = bool(runner["hixl_commit"] and up["hixl"] and up["hixl"] != runner["hixl_commit"])
 
 stage_a_drifts = {
     "mooncake": up["mooncake"] != recipe["mooncake_version"],
     "nixl-pypi": up["nixl_pypi"] != recipe["nixl_version"],
     "nixl-rocm": up["nixl_rocm"] != recipe["nixl_rocm_ref"],
     "ucx-rocm": up["ucx_rocm"] != recipe["ucx_rocm_ref"],
-    "hixl": (up["hixl"] != recipe["hixl_commit"]) or runner_hixl_drift,
+    "hixl": effective_hixl_target != recipe["hixl_commit"],
     "modelexpress": up["modelexpress"] != recipe["modelexpress_commit"],
     "gpustack-runner": runner_hixl_drift or runner_patch_drift,
 }
 
 has_stage_a = any(stage_a_drifts.values())
+hixl_held_extra = (
+    {
+        "reason": (
+            f"held at gpustack/runner VLLM_HIXL_COMMIT {recipe['hixl_commit'][:12]} "
+            f"while upstream hicann/hixl is at {up['hixl'][:12]}"
+        )
+    }
+    if not stage_a_drifts["hixl"] and hixl_upstream_held_by_runner
+    else {}
+)
 
 mooncake_stage_b = (
     not has_stage_a
@@ -847,7 +959,6 @@ records = []
 if has_stage_a:
     stage = "recipe_sync"
     image_published = False
-    target_hixl = runner["hixl_commit"] if runner_hixl_drift else up["hixl"]
     records = [
         {
             "upstreamId": "mooncake",
@@ -874,7 +985,8 @@ if has_stage_a:
         {
             "upstreamId": "hixl",
             "status": "available" if stage_a_drifts["hixl"] else "up_to_date",
-            "version": target_hixl if stage_a_drifts["hixl"] else recipe["hixl_commit"],
+            "version": effective_hixl_target if stage_a_drifts["hixl"] else recipe["hixl_commit"],
+            **hixl_held_extra,
         },
         {
             "upstreamId": "modelexpress",
@@ -917,6 +1029,7 @@ elif has_stage_b:
             "upstreamId": "hixl",
             "status": "up_to_date",
             "version": recipe["hixl_commit"],
+            **hixl_held_extra,
         },
         {
             "upstreamId": "modelexpress",
@@ -962,6 +1075,7 @@ else:
             "upstreamId": "hixl",
             "status": "up_to_date",
             "version": recipe["hixl_commit"],
+            **hixl_held_extra,
         },
         {
             "upstreamId": "modelexpress",
@@ -981,15 +1095,29 @@ with open(recs_path, "w", encoding="utf-8") as f:
 
 report = {
     "schemaVersion": 1,
+    "base_sha": disc.get("base_sha", ""),
+    "source_revision": disc.get("base_sha", ""),
     "stage": stage,
     "image_published": image_published,
     "enforce_runner_hixl_parity": True,
+    "hixl_upstream_head": up["hixl"],
+    "hixl_upstream_held_by_runner": hixl_upstream_held_by_runner,
+    "runner_patch_drift": runner_patch_drift,
+    "stage_b_flags": {
+        "mooncake": mooncake_stage_b,
+        "modelexpress": mx_stage_b,
+        "model_transfer": mt_stage_b,
+    },
     "recipe": recipe,
     "defaults": defaults,
     "targets": targets,
     "nixl_pypi": {
         "selected_version": up["nixl_pypi"],
         "recent_versions": up["nixl_pypi_recent"],
+    },
+    "nixl_rocm": {
+        "target_ref": up["nixl_rocm"],
+        "project_version": disc.get("nixl_rocm_project_version", ""),
     },
     "runner": runner,
 }
@@ -999,9 +1127,201 @@ with open(rep_path, "w", encoding="utf-8") as f:
     f.write("\n")
 PY
 
+SOURCE_REVISION="${BASE_SHA}"
+if [[ "${AUTOSYNC_SKIP_SOURCE_REVISION:-false}" != "true" ]] && \
+   autosync::preflight::has_available_upstreams "${UPSTREAM_RECORDS_JSON}"; then
+  KV_STAGE_TMP="$(mktemp -d "${TMPDIR:-/tmp}/autosync-kv-stage.XXXXXXXX")"
+  STAGED_TREE="${KV_STAGE_TMP}/staged-tree"
+  mkdir -p "${STAGED_TREE}"
+
+  BUNDLE_SPECS=(
+    "${PREFLIGHT_REPORT_JSON}"
+    "${UPSTREAM_RECORDS_JSON}"
+    "${MANIFESTS_JSON}"
+  )
+  RUNNER_PATCH_FILE="${STAGE_DIR}/gpustack-runner/pack/cann/patches/hixl/001_channel_generation.patch"
+  if [[ -f "${RUNNER_PATCH_FILE}" ]]; then
+    BUNDLE_SPECS+=("${RUNNER_PATCH_FILE}::runner-001_channel_generation.patch")
+  fi
+  if [[ -d "${STAGE_DIR}/mooncake" ]]; then
+    for mc_rel in \
+      "CMakeLists.txt" \
+      "scripts/build_wheel.sh" \
+      "mooncake-transfer-engine/example/CMakeLists.txt" \
+      "mooncake-transfer-engine/src/transport/ascend_transport"; do
+      if [[ -e "${STAGE_DIR}/mooncake/${mc_rel}" ]]; then
+        BUNDLE_SPECS+=("${STAGE_DIR}/mooncake/${mc_rel}::mooncake/${mc_rel}")
+      fi
+    done
+  fi
+  autosync::preflight::populate_stage_bundle "${STAGED_TREE}" "kv-transfer" "${BUNDLE_SPECS[@]}"
+
+  COMMIT_PATHS=(".auto-sync/.stage/kv-transfer")
+
+  KV_STAGE_INFO="$(python3 - "${PREFLIGHT_REPORT_JSON}" <<'PY'
+import json
+import sys
+with open(sys.argv[1], "r", encoding="utf-8") as f:
+    rep = json.load(f)
+sb = rep.get("stage_b_flags") or {}
+print(f"{rep.get('stage','')}|{str(bool(rep.get('runner_patch_drift'))).lower()}|{str(bool(sb.get('model_transfer'))).lower()}")
+PY
+)"
+  KV_STAGE_NAME="${KV_STAGE_INFO%%|*}"
+  KV_REST="${KV_STAGE_INFO#*|}"
+  RUNNER_PATCH_DRIFT="${KV_REST%%|*}"
+  MT_STAGE_B="${KV_REST#*|}"
+
+  if [[ "${KV_STAGE_NAME}" == "recipe_sync" && "${RUNNER_PATCH_DRIFT}" == "true" && -f "${RUNNER_PATCH_FILE}" ]]; then
+    mkdir -p "${STAGED_TREE}/pack/model-transfer/patches/hixl"
+    cp -f "${RUNNER_PATCH_FILE}" "${STAGED_TREE}/pack/model-transfer/patches/hixl/001_channel_generation.patch"
+    COMMIT_PATHS+=("pack/model-transfer/patches/hixl/001_channel_generation.patch")
+  elif [[ "${KV_STAGE_NAME}" == "tag_promotion" ]]; then
+    mkdir -p "${STAGED_TREE}/pkg/worker/settings" "${STAGED_TREE}/docs/reference"
+    cp -f "${REPO_ROOT}/pkg/worker/settings/value.go" "${STAGED_TREE}/pkg/worker/settings/value.go"
+    cp -f "${REPO_ROOT}/docs/reference/settings.md" "${STAGED_TREE}/docs/reference/settings.md"
+    if [[ -d "${REPO_ROOT}/deploy/gpustack-operator/chart" ]]; then
+      mkdir -p "${STAGED_TREE}/deploy/gpustack-operator"
+      cp -R "${REPO_ROOT}/deploy/gpustack-operator/chart" "${STAGED_TREE}/deploy/gpustack-operator/chart"
+    fi
+    if [[ -d "${REPO_ROOT}/hack" ]]; then
+      cp -R "${REPO_ROOT}/hack" "${STAGED_TREE}/hack"
+    fi
+    if [[ -f "${REPO_ROOT}/Makefile" ]]; then
+      cp -f "${REPO_ROOT}/Makefile" "${STAGED_TREE}/Makefile"
+    fi
+
+    python3 - "${PREFLIGHT_REPORT_JSON}" \
+      "${STAGED_TREE}/pkg/worker/settings/value.go" \
+      "${STAGED_TREE}/docs/reference/settings.md" \
+      "${STAGED_TREE}/deploy/gpustack-operator/chart/values.yaml" <<'PY'
+import json
+import os
+import re
+import sys
+
+rep_p, vg_p, sm_p, vy_p = sys.argv[1:5]
+with open(rep_p, "r", encoding="utf-8") as f:
+    rep = json.load(f)
+
+sb = rep.get("stage_b_flags") or {}
+defaults = rep.get("defaults") or {}
+targets = rep.get("targets") or {}
+
+
+def update_value_go(text: str, var_name: str, new_img: str) -> str:
+    pat = re.compile(
+        rf'({re.escape(var_name)}\s*=\s*settings\.NewEditable\([^)]*?setting\.InitializeFromEnv\(")([^"]+)("\))',
+        re.DOTALL,
+    )
+    out, n = pat.subn(rf'\g<1>{new_img}\g<3>', text, count=1)
+    if n != 1:
+        raise SystemExit(f"FAIL: could not update {var_name} in value.go")
+    return out
+
+
+def update_settings_md(text: str, key: str, new_img: str) -> str:
+    pat = re.compile(
+        rf'^(\| `{re.escape(key)}`<br/>.*?<br/>Default: `)([^`]+)(`)',
+        re.MULTILINE,
+    )
+    out, n = pat.subn(rf'\g<1>{new_img}\g<3>', text, count=1)
+    if n != 1:
+        raise SystemExit(f"FAIL: could not update {key} in settings.md")
+    return out
+
+
+with open(vg_p, "r", encoding="utf-8") as f:
+    vg_txt = f.read()
+with open(sm_p, "r", encoding="utf-8") as f:
+    sm_txt = f.read()
+
+if sb.get("mooncake"):
+    vg_txt = update_value_go(vg_txt, "KVCacheBackendImage", targets["mooncake_image"])
+    sm_txt = update_settings_md(sm_txt, "kv-cache-backend-image", targets["mooncake_image"])
+if sb.get("modelexpress"):
+    vg_txt = update_value_go(vg_txt, "ModelDeploymentModelExpressServerImage", targets["modelexpress_image"])
+    sm_txt = update_settings_md(sm_txt, "model-deployment-modelexpress-server-image", targets["modelexpress_image"])
+
+with open(vg_p, "w", encoding="utf-8") as f:
+    f.write(vg_txt)
+with open(sm_p, "w", encoding="utf-8") as f:
+    f.write(sm_txt)
+
+if sb.get("model_transfer") and os.path.isfile(vy_p):
+    mt_targets = targets.get("model_transfer_images") or {}
+    with open(vy_p, "r", encoding="utf-8") as f:
+        lines = f.readlines()
+    in_mt = False
+    in_images = False
+    out_lines = []
+    for raw in lines:
+        st = raw.strip()
+        if st and not st.startswith("#"):
+            if not raw.startswith(" "):
+                in_mt = raw.rstrip("\r\n") == "modelTransfer:" or raw.startswith("modelTransfer: ")
+                in_images = False
+            elif in_mt and re.match(r"^  [A-Za-z0-9_-]+:", raw):
+                in_images = raw.rstrip("\r\n") == "  images:" or raw.startswith("  images: ")
+            elif in_mt and in_images:
+                m = re.match(r'^(    (nvidia|amd|ascend):\s*)(?:"([^"]+)"|\'([^\']+)\'|([^\s#]+))(.*)$', raw.rstrip("\r\n"))
+                if m and m.group(2) in mt_targets and mt_targets[m.group(2)]:
+                    raw = f"{m.group(1)}{mt_targets[m.group(2)]}{m.group(6)}\n"
+        out_lines.append(raw)
+    with open(vy_p, "w", encoding="utf-8") as f:
+        f.writelines(out_lines)
+PY
+
+    if [[ "${MT_STAGE_B}" == "true" && "${AUTOSYNC_SKIP_GENERATE_CHART:-false}" != "true" ]] && \
+       [[ -f "${STAGED_TREE}/hack/generate.sh" && -d "${STAGED_TREE}/deploy/gpustack-operator/chart" ]] && \
+       PATH="${STAGE_DIR}/.sbin:${PATH}" command -v helm-docs >/dev/null 2>&1 && \
+       PATH="${STAGE_DIR}/.sbin:${PATH}" command -v helm-schema >/dev/null 2>&1; then
+      (
+        cd "${STAGED_TREE}"
+        PATH="${STAGE_DIR}/.sbin:${PATH}" bash "${STAGED_TREE}/hack/generate.sh" chart
+      )
+    fi
+
+    COMMIT_PATHS+=(
+      "pkg/worker/settings/value.go"
+      "docs/reference/settings.md"
+    )
+    if [[ "${MT_STAGE_B}" == "true" && -d "${STAGED_TREE}/deploy/gpustack-operator/chart" ]]; then
+      COMMIT_PATHS+=("deploy/gpustack-operator/chart/values.yaml")
+      if [[ -f "${STAGED_TREE}/deploy/gpustack-operator/chart/values.schema.json" ]]; then
+        COMMIT_PATHS+=("deploy/gpustack-operator/chart/values.schema.json")
+      fi
+      if [[ -f "${STAGED_TREE}/deploy/gpustack-operator/chart/README.md" ]]; then
+        COMMIT_PATHS+=("deploy/gpustack-operator/chart/README.md")
+      fi
+    fi
+  fi
+
+  SOURCE_REVISION="$(
+    autosync::preflight::commit_staged_tree_revision \
+      "${REPO_ROOT}" "${BASE_SHA}" \
+      "chore(kv-transfer): stage preflight bundle and deterministic updates" \
+      "${STAGED_TREE}" \
+      "${COMMIT_PATHS[@]}"
+  )"
+  if [[ "${SOURCE_REVISION}" != "${BASE_SHA}" ]]; then
+    python3 - "${PREFLIGHT_REPORT_JSON}" "${SOURCE_REVISION}" <<'PY'
+import json
+import sys
+p, src_rev = sys.argv[1:3]
+with open(p, "r", encoding="utf-8") as f:
+    rep = json.load(f)
+rep["source_revision"] = src_rev
+with open(p, "w", encoding="utf-8") as f:
+    json.dump(rep, f, indent=2)
+    f.write("\n")
+PY
+  fi
+fi
+
 rm -f "${DISCOVERY_JSON}"
 
 COMPACT_RECORDS="$(python3 -c 'import json,sys; print(json.dumps(json.load(open(sys.argv[1])), separators=(",",":")))' "${UPSTREAM_RECORDS_JSON}")"
 autosync::preflight::write_github_output "stage_dir" "${STAGE_DIR}"
 autosync::preflight::write_github_output "upstream_records" "${COMPACT_RECORDS}"
-autosync::preflight::write_github_output "source_revision" "${BASE_SHA}"
+autosync::preflight::write_github_output "source_revision" "${SOURCE_REVISION}"

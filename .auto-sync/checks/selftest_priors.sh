@@ -315,6 +315,7 @@ with open(p, "w", encoding="utf-8") as f:
 PY
 
 STAGE_DIGEST="${SCRATCH}/stage-digest/priors"
+DIGEST_SRC_REV=""
 if (
   cd "${PREFLIGHT_REPO}" && \
   AUTOSYNC_PRIORS_FIXTURE_DIR="${FIXTURE_DIGEST}" \
@@ -323,7 +324,7 @@ if (
   GOCACHE="${HOST_GOCACHE}" \
   bash "${PREFLIGHT_REPO}/${PREFLIGHT_REL}" "${STAGE_DIGEST}" >/dev/null
 ) && \
-python3 - "${STAGE_DIGEST}" "${BASE_SHA}" <<'PY'
+DIGEST_SRC_REV="$(python3 - "${STAGE_DIGEST}" "${BASE_SHA}" <<'PY'
 import json
 import os
 import sys
@@ -333,7 +334,7 @@ with open(os.path.join(stage_dir, "priors-preflight-report.json"), "r", encoding
     report = json.load(f)
 assert report["changed"] is True, report
 assert report["digest_refresh_only"] is True, report
-assert report["source_revision"] == base_sha, report
+assert report["source_revision"] != base_sha, report
 assert "records.md" in report.get("reason", ""), report
 
 with open(os.path.join(stage_dir, "upstream-records.json"), "r", encoding="utf-8") as f:
@@ -341,9 +342,14 @@ with open(os.path.join(stage_dir, "upstream-records.json"), "r", encoding="utf-8
 avail = recs["inferencex-availability"]
 assert avail["status"] == "available", avail
 assert "records.md digests" in avail["reason"], avail
+print(report["source_revision"])
 PY
-then
-  pass "preflight-priors.sh sets digest_refresh_only=true and explicit records.md reason"
+)" && \
+[[ -n "${DIGEST_SRC_REV}" && "${DIGEST_SRC_REV}" != "${BASE_SHA}" ]] && \
+git -C "${PREFLIGHT_REPO}" cat-file -e "${DIGEST_SRC_REV}:.auto-sync/.stage/priors/priors-preflight-report.json" 2>/dev/null && \
+git -C "${PREFLIGHT_REPO}" cat-file -e "${DIGEST_SRC_REV}:.auto-sync/.stage/priors/upstream-records.json" 2>/dev/null && \
+cmp -s <(git -C "${PREFLIGHT_REPO}" show "${BASE_SHA}:pkg/worker/scaling/priors/priors.yaml") <(git -C "${PREFLIGHT_REPO}" show "${DIGEST_SRC_REV}:pkg/worker/scaling/priors/priors.yaml"); then
+  pass "preflight-priors.sh sets digest_refresh_only=true, stages bundle, and keeps priors.yaml unchanged"
 else
   fail "preflight-priors.sh digest_refresh_only test"
 fi

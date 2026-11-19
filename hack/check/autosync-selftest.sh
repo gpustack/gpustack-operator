@@ -309,21 +309,27 @@ run_common_tests() {
   local saved_hugo_dir="${scratch}/saved-hugo/bin"
   local saved_node_dir="${scratch}/saved-node/bin"
   local saved_uv_dir="${scratch}/saved-uv/bin"
+  local saved_crane_dir="${scratch}/saved-crane/bin"
+  local saved_docker_dir="${scratch}/saved-docker/bin"
   local stage_tc="${scratch}/stage-tc"
   local cand_tc="${scratch}/cand-tc"
-  mkdir -p "${shadow_bin}" "${saved_go_dir}" "${saved_goroot}" "${saved_hugo_dir}" "${saved_node_dir}" "${saved_uv_dir}" "${stage_tc}/baseline" "${cand_tc}"
+  mkdir -p "${shadow_bin}" "${saved_go_dir}" "${saved_goroot}" "${saved_hugo_dir}" "${saved_node_dir}" "${saved_uv_dir}" "${saved_crane_dir}" "${saved_docker_dir}" "${stage_tc}/baseline" "${cand_tc}"
   printf '#!/bin/sh\necho shadow-go\n' > "${shadow_bin}/go"
   printf '#!/bin/sh\necho saved-go\n' > "${saved_go_dir}/go"
   printf '#!/bin/sh\necho saved-hugo\n' > "${saved_hugo_dir}/hugo"
   printf '#!/bin/sh\necho saved-node\n' > "${saved_node_dir}/node"
   printf '#!/bin/sh\necho saved-uv\n' > "${saved_uv_dir}/uv"
-  chmod +x "${shadow_bin}/go" "${saved_go_dir}/go" "${saved_hugo_dir}/hugo" "${saved_node_dir}/node" "${saved_uv_dir}/uv"
+  printf '#!/bin/sh\necho saved-crane\n' > "${saved_crane_dir}/crane"
+  printf '#!/bin/sh\necho saved-docker\n' > "${saved_docker_dir}/docker"
+  chmod +x "${shadow_bin}/go" "${saved_go_dir}/go" "${saved_hugo_dir}/hugo" "${saved_node_dir}/node" "${saved_uv_dir}/uv" "${saved_crane_dir}/crane" "${saved_docker_dir}/docker"
   cat > "${stage_tc}/toolchain.env" <<EOF
 AUTOSYNC_SAVED_GO_BIN_DIR=${saved_go_dir}
 AUTOSYNC_SAVED_GOROOT=${saved_goroot}
 AUTOSYNC_SAVED_HUGO_BIN_DIR=${saved_hugo_dir}
 AUTOSYNC_SAVED_NODE_BIN_DIR=${saved_node_dir}
 AUTOSYNC_SAVED_UV_BIN_DIR=${saved_uv_dir}
+AUTOSYNC_SAVED_CRANE_BIN_DIR=${saved_crane_dir}
+AUTOSYNC_SAVED_DOCKER_BIN_DIR=${saved_docker_dir}
 EOF
   mkdir -p "${stage_tc}/.sbin/protoc/bin" "${stage_tc}/go-cache" "${stage_tc}/go-mod" "${stage_tc}/deps-cache" "${stage_tc}/uv-cache"
   printf 'cached\n' > "${stage_tc}/uv-cache/sentinel"
@@ -340,15 +346,17 @@ EOF
       [[ "$(hugo)" == "saved-hugo" ]]
       [[ "$(node)" == "saved-node" ]]
       [[ "$(uv)" == "saved-uv" ]]
+      [[ "$(crane)" == "saved-crane" ]]
+      [[ "$(docker)" == "saved-docker" ]]
       [[ "$(protoc)" == "protoc-ok" ]]
       [[ "${GOROOT:-}" == "$4" ]]
       [[ "${AUTOSYNC_IN_VALIDATOR:-}" == "true" ]]
       [[ "${UV_CACHE_DIR:-}" == "$1/uv-cache" ]]
       [[ "${UV_OFFLINE:-}" == "1" ]]
     ' _ "${stage_tc}" "${cand_tc}" "${checks_lib}" "${saved_goroot}"; then
-    pass "bootstrap_env toolchain.env prepends saved toolchain/uv/protoc and sets offline uv cache"
+    pass "bootstrap_env toolchain.env prepends saved toolchain/uv/crane/docker/protoc and sets offline uv cache"
   else
-    fail "bootstrap_env toolchain.env prepends saved toolchain/uv/protoc and sets offline uv cache"
+    fail "bootstrap_env toolchain.env prepends saved toolchain/uv/crane/docker/protoc and sets offline uv cache"
   fi
 
   local ro_stage="${scratch}/ro-stage"
@@ -393,16 +401,24 @@ EOF
   local gitless_dir="${scratch}/gitless"
   mkdir -p "${gitless_dir}"
   printf 'hello\n' > "${gitless_dir}/file.txt"
+  local sc_ephem
+  sc_ephem="$(resolve_shellcheck)"
+  local pre_agents_rc=0
+  SHELLCHECK_BIN="${sc_ephem}" bash "${ROOT_DIR}/hack/check/agents-shell.sh" "${gitless_dir}" >/dev/null 2>&1 || pre_agents_rc=$?
   autosync::ensure_ephemeral_git "${gitless_dir}"
-  if [[ -d "${gitless_dir}/.git" ]] && \
+  local post_agents_rc=0
+  SHELLCHECK_BIN="${sc_ephem}" bash "${ROOT_DIR}/hack/check/agents-shell.sh" "${gitless_dir}" >/dev/null 2>&1 || post_agents_rc=$?
+  if (( pre_agents_rc == 2 )) && \
+     (( post_agents_rc == 0 )) && \
+     [[ -d "${gitless_dir}/.git" ]] && \
      [[ -z "$(git -C "${gitless_dir}" status --porcelain)" ]] && \
      git -C "${gitless_dir}" diff --exit-code >/dev/null && \
      git -C "${gitless_dir}" rev-parse --verify refs/heads/main >/dev/null && \
      git -C "${gitless_dir}" rev-parse --verify refs/remotes/origin/main >/dev/null && \
      [[ "$(git -C "${gitless_dir}" rev-parse refs/heads/main)" == "$(git -C "${gitless_dir}" rev-parse refs/remotes/origin/main)" ]]; then
-    pass "ensure_ephemeral_git initializes clean main + origin/main git index in gitless dir"
+    pass "ensure_ephemeral_git initializes clean main + origin/main git index in gitless dir and unblocks agents-shell.sh"
   else
-    fail "ensure_ephemeral_git initializes clean main + origin/main git index in gitless dir"
+    fail "ensure_ephemeral_git initializes clean main + origin/main git index in gitless dir and unblocks agents-shell.sh (pre_rc=${pre_agents_rc}, post_rc=${post_agents_rc})"
   fi
 
   # 2b. run_in_module_path_copy helper (F-03).
@@ -1082,6 +1098,115 @@ SH
 
   assert_fails "commit_staged_tree_revision rejects .. traversal" \
     autosync::preflight::commit_staged_tree_revision "${det_repo}" "${base_sha}" "bad" "${staged_root}" "../evil"
+
+  # 6b-2. has_available_upstreams + populate_stage_bundle + .gitignore exemption for .auto-sync/.stage/
+  local bundle_upstreams="${scratch}/bundle-upstreams.json"
+  cat > "${bundle_upstreams}" <<'EOF'
+[{"upstreamId": "foo", "status": "up_to_date"}, {"upstreamId": "bar", "status": "up_to_date"}]
+EOF
+  if ! autosync::preflight::has_available_upstreams "${bundle_upstreams}"; then
+    pass "has_available_upstreams returns non-zero when all upstreams are up_to_date"
+  else
+    fail "has_available_upstreams returns non-zero when all upstreams are up_to_date"
+  fi
+  cat > "${bundle_upstreams}" <<'EOF'
+[{"upstreamId": "foo", "status": "up_to_date"}, {"upstreamId": "bar", "status": "available"}]
+EOF
+  if autosync::preflight::has_available_upstreams "${bundle_upstreams}"; then
+    pass "has_available_upstreams returns zero when at least one upstream is available"
+  else
+    fail "has_available_upstreams returns zero when at least one upstream is available"
+  fi
+
+  local bundle_repo="${scratch}/bundle-repo"
+  local bundle_src="${scratch}/bundle-src"
+  local bundle_stage="${scratch}/bundle-stage"
+  mkdir -p "${bundle_repo}" "${bundle_src}/dir/.git" "${bundle_stage}"
+  git -C "${bundle_repo}" init -q -b main
+  git -C "${bundle_repo}" config user.name test
+  git -C "${bundle_repo}" config user.email test@example.com
+  printf '.auto-sync/.stage/\n' > "${bundle_repo}/.gitignore"
+  printf 'base\n' > "${bundle_repo}/README.md"
+  git -C "${bundle_repo}" add .gitignore README.md
+  git -C "${bundle_repo}" commit -q -m init
+  local bundle_base
+  bundle_base=$(git -C "${bundle_repo}" rev-parse HEAD)
+
+  printf 'report\n' > "${bundle_src}/report.json"
+  printf 'real-content\n' > "${bundle_src}/dir/real.txt"
+  printf 'git-internal\n' > "${bundle_src}/dir/.git/HEAD"
+  ln -s "${bundle_src}/dir/real.txt" "${bundle_src}/link.txt"
+
+  autosync::preflight::populate_stage_bundle "${bundle_stage}" "demo" \
+    "${bundle_src}/report.json" \
+    "${bundle_src}/dir" \
+    "${bundle_src}/link.txt::mapped/link.txt"
+
+  assert_fails "populate_stage_bundle rejects .. destination traversal" \
+    autosync::preflight::populate_stage_bundle "${bundle_stage}" "demo" "${bundle_src}/report.json::../escape.json"
+
+  assert_fails "populate_stage_bundle enforces AUTOSYNC_STAGE_BUNDLE_MAX_BYTES cap" \
+    env AUTOSYNC_STAGE_BUNDLE_MAX_BYTES=5 \
+    autosync::preflight::populate_stage_bundle "${scratch}/bundle-stage-cap" "demo" "${bundle_src}/dir/real.txt"
+
+  mkdir -p "${scratch}/bundle-broken-src/sub"
+  ln -s "${scratch}/nonexistent-target" "${scratch}/bundle-broken-src/sub/broken-link"
+  local broken_err=""
+  if ! broken_err="$(autosync::preflight::populate_stage_bundle "${scratch}/bundle-broken-stage" "demo" "${scratch}/bundle-broken-src" 2>&1)" && \
+     grep -q '^FAIL: ' <<<"${broken_err}" && \
+     ! grep -q 'Traceback' <<<"${broken_err}"; then
+    pass "populate_stage_bundle fails cleanly with FAIL: on dangling symlink inside directory walk"
+  else
+    fail "populate_stage_bundle fails cleanly with FAIL: on dangling symlink inside directory walk (${broken_err})"
+  fi
+
+  mkdir -p "${scratch}/bundle-cycle-src/subdir" "${scratch}/bundle-cycle-src/real_sibling"
+  printf 'cycle-ok\n' > "${scratch}/bundle-cycle-src/subdir/keep.txt"
+  printf 'sibling-ok\n' > "${scratch}/bundle-cycle-src/real_sibling/sibling.txt"
+  ln -s .. "${scratch}/bundle-cycle-src/subdir/loop"
+  ln -s real_sibling "${scratch}/bundle-cycle-src/alias"
+  local cycle_err=""
+  if cycle_err="$(autosync::preflight::populate_stage_bundle "${scratch}/bundle-cycle-stage" "demo" "${scratch}/bundle-cycle-src" 2>&1)" && \
+     grep -q '^WARN: skipping directory symlink cycle in stage bundle:' <<<"${cycle_err}" && \
+     [[ -f "${scratch}/bundle-cycle-stage/.auto-sync/.stage/demo/bundle-cycle-src/subdir/keep.txt" ]] && \
+     [[ ! -e "${scratch}/bundle-cycle-stage/.auto-sync/.stage/demo/bundle-cycle-src/subdir/loop" ]] && \
+     [[ -f "${scratch}/bundle-cycle-stage/.auto-sync/.stage/demo/bundle-cycle-src/real_sibling/sibling.txt" ]] && \
+     [[ -f "${scratch}/bundle-cycle-stage/.auto-sync/.stage/demo/bundle-cycle-src/alias/sibling.txt" ]] && \
+     grep -qx 'sibling-ok' "${scratch}/bundle-cycle-stage/.auto-sync/.stage/demo/bundle-cycle-src/real_sibling/sibling.txt" && \
+     grep -qx 'sibling-ok' "${scratch}/bundle-cycle-stage/.auto-sync/.stage/demo/bundle-cycle-src/alias/sibling.txt"; then
+    pass "populate_stage_bundle skips ancestor symlink cycle with WARN and copies non-cyclic sibling directory symlinks"
+  else
+    fail "populate_stage_bundle skips ancestor symlink cycle with WARN and copies non-cyclic sibling directory symlinks (${cycle_err})"
+  fi
+
+  local bundle_rev
+  bundle_rev=$(autosync::preflight::commit_staged_tree_revision "${bundle_repo}" "${bundle_base}" "stage demo bundle" "${bundle_stage}" ".auto-sync/.stage/demo")
+  local bundle_ls
+  bundle_ls=$(git -C "${bundle_repo}" ls-tree -r "${bundle_rev}" .auto-sync/.stage/demo)
+  if [[ "${bundle_rev}" != "${bundle_base}" ]] \
+    && grep -q '100644 blob .*	\.auto-sync/\.stage/demo/report\.json$' <<<"${bundle_ls}" \
+    && grep -q '100644 blob .*	\.auto-sync/\.stage/demo/dir/real\.txt$' <<<"${bundle_ls}" \
+    && grep -q '100644 blob .*	\.auto-sync/\.stage/demo/mapped/link\.txt$' <<<"${bundle_ls}" \
+    && ! grep -q '^120000 ' <<<"${bundle_ls}" \
+    && ! grep -q '\.git/HEAD' <<<"${bundle_ls}" \
+    && [[ -z "$(git -C "${bundle_repo}" status --porcelain)" ]] \
+    && [[ "$(git -C "${bundle_repo}" rev-parse HEAD)" == "${bundle_base}" ]]; then
+    pass "populate_stage_bundle + commit_staged_tree_revision bypass .gitignore for .auto-sync/.stage/, dereference symlinks to 100644, skip .git, and leave tree clean"
+  else
+    fail "populate_stage_bundle + commit_staged_tree_revision bypass .gitignore for .auto-sync/.stage/, dereference symlinks to 100644, skip .git, and leave tree clean"
+  fi
+
+  # 6b-3. build-libvgpu.sh compiles vgpu + opportunistic test_postinit_owner_death instead of broken all-tests bash build.sh
+  local libvgpu_script="${ROOT_DIR}/pack/gpustack-operator/external/nvidia/build-libvgpu.sh"
+  if bash -n "${libvgpu_script}" \
+    && bash "${ROOT_DIR}/hack/check/symbols.sh" "${libvgpu_script}" >/dev/null 2>&1 \
+    && grep -q -- '--target vgpu' "${libvgpu_script}" \
+    && grep -q 'test_postinit_owner_death' "${libvgpu_script}" \
+    && ! grep -q 'bash build\.sh' "${libvgpu_script}"; then
+    pass "build-libvgpu.sh targets vgpu + opportunistic test_postinit_owner_death and passes bash -n + symbols check"
+  else
+    fail "build-libvgpu.sh targets vgpu + opportunistic test_postinit_owner_death and passes bash -n + symbols check"
+  fi
 
   # 6c. GPUSTACK_IMAGE_BUILD=true runs static checks and skips domain simulation suites; missing .auto-sync still fails closed otherwise.
   local img_ctx="${scratch}/img-build-ctx"

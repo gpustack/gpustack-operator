@@ -85,8 +85,9 @@ BASE_LLMD_VER="$(extract_df_arg "${BASE_DOCKERFILE}" "LLMD_ROUTER_VERSION")"
 BASE_VLLM_VER="$(extract_df_arg "${BASE_DOCKERFILE}" "VLLM_ROUTER_VERSION")"
 BASE_SGLANG_VER="$(extract_df_arg "${BASE_DOCKERFILE}" "SGLANG_GATEWAY_VERSION")"
 
-# 3. Validate 0001-epd-routing.patch retirement invariant when router-preflight-report.json exists.
+# 3. Validate 0001-epd-routing.patch and 0004-discovery-readiness-and-deselect-removal.patch retirement invariants when router-preflight-report.json exists.
 EPD_PATCH="${AUTOSYNC_CANDIDATE_ROOT}/pack/llm-router/patches/vllm-router/0001-epd-routing.patch"
+DISCOVERY_PATCH="${AUTOSYNC_CANDIDATE_ROOT}/pack/llm-router/patches/vllm-router/0004-discovery-readiness-and-deselect-removal.patch"
 PREFLIGHT_REPORT="${STAGE_DIR}/router-preflight-report.json"
 if [[ -f "${PREFLIGHT_REPORT}" ]]; then
   RETIRE_INFO="$(python3 - "${PREFLIGHT_REPORT}" <<'PY'
@@ -95,19 +96,27 @@ import sys
 
 with open(sys.argv[1], "r", encoding="utf-8") as f:
     rep = json.load(f)
-retire = "true" if rep.get("retire_0001_epd_routing") is True else "false"
+retire_0001 = "true" if rep.get("retire_0001_epd_routing") is True else "false"
+retire_0004 = "true" if rep.get("retire_0004_discovery_readiness") is True else "false"
 target_vllm = str((rep.get("target_tags") or {}).get("vllm-router") or "")
-print(f"{retire}|{target_vllm}")
+print(f"{retire_0001}|{retire_0004}|{target_vllm}")
 PY
 )"
   RETIRE_0001="${RETIRE_INFO%%|*}"
-  TARGET_VLLM_VER="${RETIRE_INFO#*|}"
+  RETIRE_REST="${RETIRE_INFO#*|}"
+  RETIRE_0004="${RETIRE_REST%%|*}"
+  TARGET_VLLM_VER="${RETIRE_REST#*|}"
   if [[ "${RETIRE_0001}" == "false" && ! -f "${EPD_PATCH}" ]]; then
     printf 'FAIL: 0001-epd-routing.patch was deleted while retire_0001_epd_routing is false\n' >&2
     exit 1
   fi
-  if [[ "${RETIRE_0001}" == "true" && -f "${EPD_PATCH}" ]]; then
+  if [[ "${RETIRE_0001}" == "true" && ( -z "${TARGET_VLLM_VER}" || "${CAND_VLLM_VER}" == "${TARGET_VLLM_VER}" ) && -f "${EPD_PATCH}" ]]; then
     printf 'FAIL: 0001-epd-routing.patch must be retired (retire_0001_epd_routing=true); target vllm-router version %s contains 516f1cb\n' \
+      "${TARGET_VLLM_VER:-${CAND_VLLM_VER:-unknown}}" >&2
+    exit 1
+  fi
+  if [[ "${RETIRE_0004}" == "true" && ( -z "${TARGET_VLLM_VER}" || "${CAND_VLLM_VER}" == "${TARGET_VLLM_VER}" ) && -f "${DISCOVERY_PATCH}" ]]; then
+    printf 'FAIL: 0004-discovery-readiness-and-deselect-removal.patch must be retired (retire_0004_discovery_readiness=true) when targeting vllm-router %s\n' \
       "${TARGET_VLLM_VER:-${CAND_VLLM_VER:-unknown}}" >&2
     exit 1
   fi
@@ -316,10 +325,32 @@ PY
 
 if [[ -n "${CHANGED_STAGES}" ]]; then
   read -r -a BUILD_CMD <<< "${AUTOSYNC_ROUTER_BUILD_RUNNER:-docker buildx build}"
+  BUILD_LOG="$(mktemp "${TMPDIR:-/tmp}/autosync-router-build.XXXXXXXX")"
+  _CLEANUP_DIRS+=("${BUILD_LOG}")
   while IFS= read -r target_stage; do
     [[ -n "${target_stage}" ]] || continue
-    if ! "${BUILD_CMD[@]}" -f pack/llm-router/Dockerfile --platform linux/amd64 --target "${target_stage}" .; then
-      printf 'FAIL: router builder target %s failed\n' "${target_stage}" >&2
+    : > "${BUILD_LOG}"
+    build_rc=0
+    set +e
+    "${BUILD_CMD[@]}" -f pack/llm-router/Dockerfile --platform linux/amd64 --target "${target_stage}" . >"${BUILD_LOG}" 2>&1
+    build_rc=$?
+    set -e
+    cat "${BUILD_LOG}"
+    if (( build_rc != 0 )); then
+      err_tail="$(grep -E 'error:|\.go:[0-9]+|error\[E|FAIL' "${BUILD_LOG}" | tail -n 15 || true)"
+      if [[ -z "${err_tail}" ]]; then
+        err_tail="$(tail -n 15 "${BUILD_LOG}" || true)"
+      fi
+      first_err=""
+      if [[ -n "${err_tail}" ]]; then
+        printf '%s\n' "${err_tail}" >&2
+        first_err="$(printf '%s\n' "${err_tail}" | sed -E 's/^#[0-9]+ [0-9.]+ //' | grep -m 1 -E '\S' || true)"
+      fi
+      if [[ -n "${first_err}" ]]; then
+        printf 'FAIL: router builder target %s failed (%s)\n' "${target_stage}" "${first_err}" >&2
+      else
+        printf 'FAIL: router builder target %s failed\n' "${target_stage}" >&2
+      fi
       exit 1
     fi
   done <<<"${CHANGED_STAGES}"

@@ -196,6 +196,7 @@ assert report["hami_core"]["pinned_commit_reachable"] is True, report
 assert report["ubs_virt"]["watched_changed"] is True, report
 assert report["ubs_virt"]["pinned_commit_reachable"] is True, report
 assert report["patch_clean"] is True, report
+assert report["source_revision"] != base_sha, report
 
 assert os.path.isfile(os.path.join(stage_dir, "baseline", "pack", "gpustack-operator", "Dockerfile"))
 assert os.path.isdir(os.path.join(stage_dir, "hami-core", ".git"))
@@ -204,11 +205,21 @@ assert os.path.isdir(os.path.join(stage_dir, "ubs-virt", ".git"))
 with open(gha_path, "r", encoding="utf-8") as f:
     gha_txt = f.read()
 assert f"\n{stage_dir}\n" in gha_txt
-assert f"\n{base_sha}\n" in gha_txt
+assert f"\n{report['source_revision']}\n" in gha_txt
 assert "upstream_records<<" in gha_txt
 PY
 then
-  pass "preflight-slicing.sh detects unwatched vs watched changes and CRLF dry-run patch clean"
+  ls_slicing="$(git -C "${SYNTH_REPO}" ls-tree -r "$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["source_revision"])' "${STAGE_1}/slicing-preflight-report.json")" .auto-sync/.stage/slicing)"
+  if grep -q '100644 blob .*\.auto-sync/\.stage/slicing/slicing-preflight-report\.json$' <<<"${ls_slicing}" \
+    && grep -q '100644 blob .*\.auto-sync/\.stage/slicing/upstream-records\.json$' <<<"${ls_slicing}" \
+    && grep -q '100644 blob .*\.auto-sync/\.stage/slicing/ubs-virt/ubs-virt-enpu/vcann-rt/' <<<"${ls_slicing}" \
+    && ! grep -q '^120000 ' <<<"${ls_slicing}" \
+    && [[ -z "$(git -C "${SYNTH_REPO}" status --porcelain)" ]] \
+    && [[ "$(git -C "${SYNTH_REPO}" rev-parse HEAD)" == "${SYNTH_BASE_SHA}" ]]; then
+    pass "preflight-slicing.sh detects unwatched vs watched changes, CRLF patch clean, and commits .auto-sync/.stage/slicing"
+  else
+    fail "preflight-slicing.sh missing or malformed .auto-sync/.stage/slicing bundle (${ls_slicing})"
+  fi
 else
   tail -n 50 "${PREFLIGHT_LOG_1}" >&2 || true
   fail "preflight-slicing.sh detects unwatched vs watched changes and CRLF dry-run patch clean"
@@ -302,6 +313,53 @@ then
 else
   tail -n 50 "${PREFLIGHT_LOG_UNREACH}" >&2 || true
   fail "preflight-slicing.sh unreachable pinned commit handling"
+fi
+
+# 4c. no_change case: aligned pinned commits -> source_revision == base_sha (zero .auto-sync/.stage commits).
+SYNTH_NOCHANGE="${SCRATCH}/synth-nochange"
+cp -R "${SYNTH_REPO}" "${SYNTH_NOCHANGE}"
+HAMI_CUR_HEAD="$(git -C "${HAMI_MOCK}" rev-parse HEAD)"
+UBS_CUR_HEAD="$(git -C "${UBS_MOCK}" rev-parse HEAD)"
+python3 - "${SYNTH_NOCHANGE}/pack/gpustack-operator/Dockerfile" "${HAMI_CUR_HEAD}" "${UBS_CUR_HEAD}" <<'PY'
+import re
+import sys
+df, hami_sha, ubs_sha = sys.argv[1:4]
+with open(df, "r", encoding="utf-8") as f:
+    txt = f.read()
+txt = re.sub(r'^ARG LIB_HAMI_CORE_COMMIT="[^"]*"', f'ARG LIB_HAMI_CORE_COMMIT="{hami_sha}"', txt, flags=re.M)
+txt = re.sub(r'^ARG LIB_UBS_VIRT_ENPU_COMMIT="[^"]*"', f'ARG LIB_UBS_VIRT_ENPU_COMMIT="{ubs_sha}"', txt, flags=re.M)
+with open(df, "w", encoding="utf-8") as f:
+    f.write(txt)
+PY
+git -C "${SYNTH_NOCHANGE}" add -A
+git -C "${SYNTH_NOCHANGE}" commit -q -m "align slicing commits"
+NOCHANGE_BASE_SHA="$(git -C "${SYNTH_NOCHANGE}" rev-parse HEAD)"
+STAGE_NOCHANGE="${SCRATCH}/stage-nochange/slicing"
+GHA_NOCHANGE="${SCRATCH}/gha-nochange.txt"
+: > "${GHA_NOCHANGE}"
+if (
+  cd "${SYNTH_NOCHANGE}" && \
+  AUTOSYNC_SLICING_HAMI_REPO_URL="${HAMI_MOCK}" \
+  AUTOSYNC_SLICING_UBS_REPO_URL="${UBS_MOCK}" \
+  GITHUB_OUTPUT="${GHA_NOCHANGE}" \
+  bash "${SYNTH_NOCHANGE}/.auto-sync/scripts/preflight-slicing.sh" "${STAGE_NOCHANGE}"
+) >/dev/null 2>&1 && \
+python3 - "${STAGE_NOCHANGE}" "${NOCHANGE_BASE_SHA}" <<'PY'
+import json
+import os
+import sys
+stage_dir, base_sha = sys.argv[1:3]
+with open(os.path.join(stage_dir, "upstream-records.json"), "r", encoding="utf-8") as f:
+    recs = json.load(f)
+assert all(r["status"] == "up_to_date" for r in recs), recs
+with open(os.path.join(stage_dir, "slicing-preflight-report.json"), "r", encoding="utf-8") as f:
+    rep = json.load(f)
+assert rep["source_revision"] == base_sha, rep
+PY
+then
+  pass "preflight-slicing.sh keeps source_revision == base_sha on up_to_date no_change"
+else
+  fail "preflight-slicing.sh keeps source_revision == base_sha on up_to_date no_change"
 fi
 
 # 5. Gitless env -i validate_slicing.sh tests with stubbed AUTOSYNC_XBUILD_RUNNER.
