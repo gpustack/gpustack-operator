@@ -900,6 +900,8 @@ def validate_rel(rel: str) -> str:
     norm = posixpath.normpath(rel.replace("\\", "/"))
     if norm in ("", ".", "..") or norm.startswith("../") or "/../" in norm:
         raise SystemExit(f"FAIL: path traversal rejected in stage bundle path: {rel!r}")
+    if ".git" in norm.split("/"):
+        raise SystemExit(f"FAIL: '.git' path segment rejected in stage bundle path: {rel!r}")
     return norm
 
 
@@ -923,6 +925,8 @@ def copy_regular(src_file: str, rel_dest: str) -> None:
     size = os.path.getsize(real_src)
     dst = os.path.join(bundle_root, *safe_rel.split("/"))
     if os.path.isfile(dst):
+        if os.path.samefile(real_src, dst):
+            raise SystemExit(f"FAIL: stage bundle source and destination are the same file: {src_file}")
         total_bytes -= os.path.getsize(dst)
     total_bytes += size
     if total_bytes > max_bytes:
