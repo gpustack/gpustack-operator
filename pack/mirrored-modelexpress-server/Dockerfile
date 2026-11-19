@@ -18,6 +18,8 @@
 FROM rust:1.95-bookworm AS builder
 SHELL ["/bin/bash", "-c"]
 
+# Pinned to an official upstream GitHub release tag (refs/tags/vX.Y.Z) rather than tracking
+# main HEAD, matching mirrored-mooncake (MOONCAKE_VERSION) and llm-router (*_VERSION).
 ARG MODELEXPRESS_VERSION=v0.8.0
 
 RUN <<EOF
@@ -40,8 +42,8 @@ EOF
 
 WORKDIR /src
 
-# The clone is its own layer so a re-build with the same tag skips it, and the checkout
-# resolves refs/tags/${MODELEXPRESS_VERSION} explicitly so only an upstream tag is fetched.
+# The fetch is its own layer so a re-build with the same tag skips it, and fetching
+# refs/tags/${MODELEXPRESS_VERSION} selects the upstream release tag directly rather than main.
 RUN <<EOF
     set -exo pipefail
     git init .

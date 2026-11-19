@@ -582,6 +582,16 @@ mx_stage = os.path.join(stage_dir, "modelexpress")
 mx_tag_re = re.compile(r"^v\d+\.\d+\.\d+$")
 mx_url = os.environ.get("AUTOSYNC_KV_MODELEXPRESS_REPO_URL", "").strip() or "https://github.com/ai-dynamo/modelexpress.git"
 
+
+def parse_mx_override(val: object) -> str:
+    tag = str(val).strip()
+    if not mx_tag_re.fullmatch(tag):
+        raise SystemExit(
+            f"FAIL: modelexpress upstream override must be a stable vX.Y.Z release tag, got: {tag!r}"
+        )
+    return tag
+
+
 if fixture_dir:
     runner_fix = os.path.join(fixture_dir, "repos/gpustack-runner")
     if os.path.isdir(runner_fix):
@@ -600,7 +610,7 @@ if fixture_dir:
 
     mx_fix = os.path.join(fixture_dir, "repos/modelexpress")
     if "modelexpress" in upstream_override:
-        up_mx = str(upstream_override["modelexpress"]).strip()
+        up_mx = parse_mx_override(upstream_override["modelexpress"])
         up_mx_recent = [up_mx]
     elif os.path.isdir(mx_fix):
         up_mx, up_mx_recent = ls_remote_stable_tags(mx_fix, "refs/tags/v*", mx_tag_re, "v")
@@ -623,7 +633,7 @@ else:
     up_nixl_rocm = sync_git_repo("https://github.com/ai-dynamo/nixl.git", nixl_stage, recipe["nixl_rocm_ref"])
     up_ucx_rocm = sync_git_repo("https://github.com/openucx/ucx.git", ucx_stage, recipe["ucx_rocm_ref"])
     if "modelexpress" in upstream_override:
-        up_mx = str(upstream_override["modelexpress"]).strip()
+        up_mx = parse_mx_override(upstream_override["modelexpress"])
         up_mx_recent = [up_mx]
     else:
         up_mx, up_mx_recent = ls_remote_stable_tags(mx_url, "refs/tags/v*", mx_tag_re, "v")
@@ -1395,9 +1405,7 @@ PY
         "${STAGED_TREE}/pkg/worker/controllers/worker/model_deployment_transfer_test.go"
     fi
     cp -f "${REPO_ROOT}/docs/reference/settings.md" "${STAGED_TREE}/docs/reference/settings.md"
-    if [[ -f "${REPO_ROOT}/docs/modules/model-delivery/remote.md" ]]; then
-      cp -f "${REPO_ROOT}/docs/modules/model-delivery/remote.md" "${STAGED_TREE}/docs/modules/model-delivery/remote.md"
-    fi
+    cp -f "${REPO_ROOT}/docs/modules/model-delivery/remote.md" "${STAGED_TREE}/docs/modules/model-delivery/remote.md"
     if [[ -d "${REPO_ROOT}/deploy/gpustack-operator/chart" ]]; then
       mkdir -p "${STAGED_TREE}/deploy/gpustack-operator"
       cp -R "${REPO_ROOT}/deploy/gpustack-operator/chart" "${STAGED_TREE}/deploy/gpustack-operator/chart"

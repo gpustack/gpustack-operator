@@ -823,6 +823,22 @@ run_kv_preflight_with_fixture() {
 assert_fails "preflight fails closed when AUTOSYNC_KV_FIXTURE_DIR is missing pypi/nixl-cu13.json" \
   run_kv_preflight_with_fixture "${FAKE_REPO}" "${FIX_MISSING_PYPI}" "${SCRATCH}/stage-missing-pypi"
 
+# 4d. Non-SemVer modelexpress upstream override in upstream.json fails closed.
+FIX_BAD_MX_OVR="${SCRATCH}/fix-bad-mx-ovr"
+clone_fixture "${FIX_BAD_MX_OVR}"
+python3 - "${FIX_BAD_MX_OVR}/upstream.json" <<'PY'
+import json
+import sys
+p = sys.argv[1]
+with open(p, "r", encoding="utf-8") as f:
+    doc = json.load(f)
+doc["modelexpress"] = "v0.9.0-rc1"
+with open(p, "w", encoding="utf-8") as f:
+    json.dump(doc, f, indent=2)
+PY
+assert_fails "preflight fails closed on non-SemVer modelexpress upstream override" \
+  run_kv_preflight_with_fixture "${FAKE_REPO}" "${FIX_BAD_MX_OVR}" "${SCRATCH}/stage-bad-mx-ovr"
+
 # 5. Gitless candidate validator tests (Mooncake 5-block parser, two-stage gate, shared-file guards, HIXL parity, ModelExpress build).
 VAL_STAGE="${SCRATCH}/val-stage"
 mkdir -p "${VAL_STAGE}/baseline/pkg/worker/settings" \
@@ -1075,6 +1091,10 @@ sed -i.bak 's|gpustack/mirrored-modelexpress-server:v0.8.0|gpustack/mirrored-mod
 rm -f "${CAND_DIR}/pkg/worker/settings/value.go.bak" "${CAND_DIR}/docs/reference/settings.md.bak" "${CAND_DIR}/docs/modules/model-delivery/remote.md.bak"
 assert_fails "validate_kv_transfer Stage B fails closed when modelexpress tag v0.9.9 is unpublished" run_validate
 
+make_gitless_cand
+rm -f "${CAND_DIR}/docs/modules/model-delivery/remote.md"
+assert_fails "validate_kv_transfer fails closed when docs/modules/model-delivery/remote.md is missing" run_validate
+
 # 5f. Mutating ModelDeploymentRouterImage in value.go -> FAIL.
 make_gitless_cand
 sed -i.bak -E 's|(setting\.InitializeFromEnv\("gpustack/llm-router:)[^"]+(")|\1v99.0.0\2|' \
@@ -1195,6 +1215,9 @@ cat > "${VAL_STAGE}/modelexpress/Cargo.toml" <<'TOML'
 version = "0.8.0"
 TOML
 assert_fails "validate_kv_transfer fails closed when MODELEXPRESS_VERSION disagrees with Cargo.toml" run_validate
+
+rm -f "${VAL_STAGE}/modelexpress/Cargo.toml"
+assert_fails "validate_kv_transfer fails closed when staged modelexpress directory lacks Cargo.toml" run_validate
 rm -rf "${VAL_STAGE}/modelexpress"
 
 make_gitless_cand
@@ -1203,6 +1226,24 @@ sed -i.bak 's|^ARG MODELEXPRESS_VERSION=.*|ARG MODELEXPRESS_VERSION=v0.9.0-rc1|'
   "${CAND_DIR}/pack/mirrored-modelexpress-server/Dockerfile"
 rm -f "${CAND_DIR}/pack/mirrored-modelexpress-server/Dockerfile.bak"
 assert_fails "validate_kv_transfer fails closed on non-SemVer/prerelease MODELEXPRESS_VERSION" run_validate
+
+# Empty BASE_MX_VERSION (migration from MODELEXPRESS_COMMIT) still triggers builder verification.
+make_gitless_cand
+cp "${VAL_STAGE}/baseline/pack/mirrored-modelexpress-server/Dockerfile" "${SCRATCH}/base-mx-df.bak"
+sed -i.bak 's|^ARG MODELEXPRESS_VERSION=.*|ARG MODELEXPRESS_COMMIT=508e4547970c545dc80d5585f7b9be7af9ec177e|' \
+  "${VAL_STAGE}/baseline/pack/mirrored-modelexpress-server/Dockerfile"
+rm -f "${VAL_STAGE}/baseline/pack/mirrored-modelexpress-server/Dockerfile.bak"
+MX_MIGRATE_MARKER="${SCRATCH}/mx-migrate-built"
+if AUTOSYNC_DOCKER_BUILD_CMD="touch '${MX_MIGRATE_MARKER}'" \
+   AUTOSYNC_STAGE_DIR="${VAL_STAGE}" \
+   LOOPWRIGHT_CANDIDATE_DIR="${CAND_DIR}" \
+   AUTOSYNC_FAST_SELFTEST=true \
+   bash "${CAND_DIR}/.auto-sync/checks/validate_kv_transfer.sh" && [[ -f "${MX_MIGRATE_MARKER}" ]]; then
+  pass "validate_kv_transfer triggers ModelExpress builder when migrating from empty BASE_MX_VERSION"
+else
+  fail "validate_kv_transfer triggers ModelExpress builder when migrating from empty BASE_MX_VERSION"
+fi
+mv "${SCRATCH}/base-mx-df.bak" "${VAL_STAGE}/baseline/pack/mirrored-modelexpress-server/Dockerfile"
 
 # 5k. NIXL_VERSION PyPI wheel verification check (verified 1.5.3 passes; unverified 1.6.0 fails closed).
 make_gitless_cand

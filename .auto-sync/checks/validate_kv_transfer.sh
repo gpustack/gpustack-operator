@@ -458,36 +458,39 @@ def parse_ws_version(cargo_txt: str) -> str:
 
 
 cargo_txt = ""
-if os.path.isdir(os.path.join(mx_stage, ".git")):
-    obj_spec = f"refs/tags/{cand_ver}:Cargo.toml"
-    has_obj = (
-        subprocess.run(
-            ["git", "-C", mx_stage, "cat-file", "-e", obj_spec],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-        ).returncode
-        == 0
-    )
-    if has_obj:
-        cargo_txt = subprocess.check_output(["git", "-C", mx_stage, "show", obj_spec], text=True)
-    elif cand_ver != base_ver:
-        raise SystemExit(
-            f"FAIL: MODELEXPRESS_VERSION {cand_ver} (Cargo.toml) not found in staged modelexpress repository {mx_stage}"
+if os.path.isdir(mx_stage):
+    if os.path.isdir(os.path.join(mx_stage, ".git")):
+        obj_spec = f"refs/tags/{cand_ver}:Cargo.toml"
+        has_obj = (
+            subprocess.run(
+                ["git", "-C", mx_stage, "cat-file", "-e", obj_spec],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            ).returncode
+            == 0
         )
-elif os.path.isfile(os.path.join(mx_stage, "Cargo.toml")):
-    with open(os.path.join(mx_stage, "Cargo.toml"), "r", encoding="utf-8") as f:
-        cargo_txt = f.read()
+        if not has_obj:
+            raise SystemExit(
+                f"FAIL: MODELEXPRESS_VERSION {cand_ver} (Cargo.toml) not found in staged modelexpress repository {mx_stage}"
+            )
+        cargo_txt = subprocess.check_output(["git", "-C", mx_stage, "show", obj_spec], text=True)
+    elif os.path.isfile(os.path.join(mx_stage, "Cargo.toml")):
+        with open(os.path.join(mx_stage, "Cargo.toml"), "r", encoding="utf-8") as f:
+            cargo_txt = f.read()
+    else:
+        raise SystemExit(
+            f"FAIL: staged modelexpress directory {mx_stage} is missing Cargo.toml and refs/tags/{cand_ver}:Cargo.toml"
+        )
 
-if cargo_txt:
     ws_ver = parse_ws_version(cargo_txt)
     expected = cand_ver.lstrip("v")
-    if ws_ver and ws_ver != expected:
+    if not ws_ver or ws_ver != expected:
         raise SystemExit(
             f"FAIL: MODELEXPRESS_VERSION {cand_ver} ({expected!r}) != staged Cargo.toml [workspace.package].version ({ws_ver!r})"
         )
 PY
 
-  if [[ -n "${BASE_MX_VERSION}" && "${BASE_MX_VERSION}" != "${CAND_MX_VERSION}" ]]; then
+  if [[ -f "${BASE_MX_DF}" && "${BASE_MX_VERSION}" != "${CAND_MX_VERSION}" ]]; then
     BUILD_CMD="${AUTOSYNC_DOCKER_BUILD_CMD:-docker buildx build -f pack/mirrored-modelexpress-server/Dockerfile --target builder --platform linux/amd64 pack/mirrored-modelexpress-server}"
     if ! bash -c "${BUILD_CMD}"; then
       printf 'FAIL: ModelExpress builder verification failed\n' >&2
@@ -570,22 +573,23 @@ if mx_img != sm_default(cand_sm, "model-deployment-modelexpress-server-image"):
     raise SystemExit("FAIL: value.go ModelDeploymentModelExpressServerImage disagrees with settings.md model-deployment-modelexpress-server-image Default")
 
 cand_rm_p = os.path.join(os.path.dirname(os.path.dirname(cand_sm_p)), "modules", "model-delivery", "remote.md")
-if os.path.isfile(cand_rm_p):
-    rm_txt = read(cand_rm_p)
-    m_rm = re.search(
-        r'name:\s*model-deployment-modelexpress-server-image\b.*?\n\s*value:\s*([^\s#]+)',
-        rm_txt,
-        re.DOTALL,
+if not os.path.isfile(cand_rm_p):
+    raise SystemExit("FAIL: missing docs/modules/model-delivery/remote.md")
+rm_txt = read(cand_rm_p)
+m_rm = re.search(
+    r'name:\s*model-deployment-modelexpress-server-image\b.*?\n\s*value:\s*([^\s#]+)',
+    rm_txt,
+    re.DOTALL,
+)
+if not m_rm:
+    raise SystemExit(
+        "FAIL: missing model-deployment-modelexpress-server-image value in docs/modules/model-delivery/remote.md"
     )
-    if not m_rm:
-        raise SystemExit(
-            "FAIL: missing model-deployment-modelexpress-server-image value in docs/modules/model-delivery/remote.md"
-        )
-    if m_rm.group(1).strip() != mx_img:
-        raise SystemExit(
-            f"FAIL: value.go ModelDeploymentModelExpressServerImage ({mx_img}) disagrees with "
-            f"docs/modules/model-delivery/remote.md ({m_rm.group(1).strip()})"
-        )
+if m_rm.group(1).strip() != mx_img:
+    raise SystemExit(
+        f"FAIL: value.go ModelDeploymentModelExpressServerImage ({mx_img}) disagrees with "
+        f"docs/modules/model-delivery/remote.md ({m_rm.group(1).strip()})"
+    )
 
 base_kv = vg_image(base_vg, "KVCacheBackendImage")
 base_mx = vg_image(base_vg, "ModelDeploymentModelExpressServerImage")
