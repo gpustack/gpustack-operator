@@ -609,24 +609,22 @@ if fixture_dir:
     up_ucx_rocm = stage_fixture_repo(ucx_fix, ucx_stage) if os.path.isdir(ucx_fix) else recipe["ucx_rocm_ref"]
 
     mx_fix = os.path.join(fixture_dir, "repos/modelexpress")
+    if not os.path.isdir(mx_fix):
+        raise SystemExit(f"FAIL: fixture missing required directory: {mx_fix}")
     if "modelexpress" in upstream_override:
         up_mx = parse_mx_override(upstream_override["modelexpress"])
         up_mx_recent = [up_mx]
-    elif os.path.isdir(mx_fix):
-        up_mx, up_mx_recent = ls_remote_stable_tags(mx_fix, "refs/tags/v*", mx_tag_re, "v")
     else:
-        up_mx = recipe["modelexpress_version"]
-        up_mx_recent = [up_mx]
+        up_mx, up_mx_recent = ls_remote_stable_tags(mx_fix, "refs/tags/v*", mx_tag_re, "v")
 
-    if os.path.isdir(mx_fix):
-        if os.path.isdir(os.path.join(mx_fix, ".git")) and subprocess.run(
-            ["git", "-C", mx_fix, "rev-parse", "--verify", "-q", f"refs/tags/{up_mx}^{{commit}}"],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-        ).returncode == 0:
-            sync_tagged_repo(mx_fix, mx_stage, up_mx, recipe["modelexpress_version"], is_local=True)
-        else:
-            stage_fixture_repo(mx_fix, mx_stage)
+    if os.path.isdir(os.path.join(mx_fix, ".git")) and subprocess.run(
+        ["git", "-C", mx_fix, "rev-parse", "--verify", "-q", f"refs/tags/{up_mx}^{{commit}}"],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    ).returncode == 0:
+        sync_tagged_repo(mx_fix, mx_stage, up_mx, recipe["modelexpress_version"], is_local=True)
+    else:
+        stage_fixture_repo(mx_fix, mx_stage)
 else:
     runner_head = sync_git_repo("https://github.com/gpustack/runner.git", runner_stage)
     up_hixl = sync_git_repo("https://github.com/hicann/hixl.git", hixl_stage, recipe["hixl_commit"])

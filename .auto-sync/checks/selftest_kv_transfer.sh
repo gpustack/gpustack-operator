@@ -839,6 +839,13 @@ PY
 assert_fails "preflight fails closed on non-SemVer modelexpress upstream override" \
   run_kv_preflight_with_fixture "${FAKE_REPO}" "${FIX_BAD_MX_OVR}" "${SCRATCH}/stage-bad-mx-ovr"
 
+# 4e. Missing repos/modelexpress in AUTOSYNC_KV_FIXTURE_DIR fails closed.
+FIX_MISSING_MX="${SCRATCH}/fix-missing-mx"
+clone_fixture "${FIX_MISSING_MX}"
+rm -rf "${FIX_MISSING_MX}/repos/modelexpress"
+assert_fails "preflight fails closed when AUTOSYNC_KV_FIXTURE_DIR is missing repos/modelexpress" \
+  run_kv_preflight_with_fixture "${FAKE_REPO}" "${FIX_MISSING_MX}" "${SCRATCH}/stage-missing-mx"
+
 # 5. Gitless candidate validator tests (Mooncake 5-block parser, two-stage gate, shared-file guards, HIXL parity, ModelExpress build).
 VAL_STAGE="${SCRATCH}/val-stage"
 mkdir -p "${VAL_STAGE}/baseline/pkg/worker/settings" \
