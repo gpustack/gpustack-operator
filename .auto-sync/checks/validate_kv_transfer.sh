@@ -223,24 +223,87 @@ for start_line, snippet in context_blocks:
 PY
 
 # 3. Byte-level HIXL parity with gpustack/runner & patch dry-run against staged hixl.
-ENFORCE_RUNNER_PARITY="true"
-if [[ -f "${STAGE_DIR}/kv-transfer-preflight-report.json" ]]; then
-  ENFORCE_RUNNER_PARITY="$(python3 - "${STAGE_DIR}/kv-transfer-preflight-report.json" <<'PY'
+KV_REPORT="${STAGE_DIR}/kv-transfer-preflight-report.json"
+if [[ ! -f "${KV_REPORT}" ]]; then
+  printf 'FAIL: missing preflight report: %s\n' "${KV_REPORT}" >&2
+  exit 1
+fi
+
+if ! REPORT_META="$(python3 - "${KV_REPORT}" <<'PY'
 import json
 import sys
-with open(sys.argv[1], "r", encoding="utf-8") as f:
+
+path = sys.argv[1]
+with open(path, "r", encoding="utf-8") as f:
     rep = json.load(f)
+if not isinstance(rep, dict):
+    raise SystemExit(f"FAIL: {path} must be a JSON object")
 val = rep.get("enforce_runner_hixl_parity", True)
-print("true" if val else "false")
+if not isinstance(val, bool):
+    raise SystemExit(f"FAIL: {path} enforce_runner_hixl_parity must be a boolean")
+stage = rep.get("stage")
+if not isinstance(stage, str) or stage not in ("recipe_sync", "tag_promotion", "no_change"):
+    raise SystemExit(
+        f"FAIL: {path} stage must be one of recipe_sync, tag_promotion, no_change (got {stage!r})"
+    )
+raw_files = rep.get("stage_a_recipe_files")
+if (
+    not isinstance(raw_files, list)
+    or not raw_files
+    or not all(
+        isinstance(p, str)
+        and (sp := p.strip())
+        and sp.startswith("pack/")
+        and not sp.startswith("/")
+        and ".." not in sp.split("/")
+        for p in raw_files
+    )
+):
+    raise SystemExit(
+        f"FAIL: {path} stage_a_recipe_files must be a non-empty list of pack/-scoped relative paths"
+    )
+recipe_files = [p.strip() for p in raw_files]
+print(f"{'true' if val else 'false'}|{stage}")
+for rf in recipe_files:
+    print(rf)
 PY
-)"
+)"; then
+  printf 'FAIL: unable to parse %s\n' "${KV_REPORT}" >&2
+  exit 1
+fi
+
+REPORT_HEADER="${REPORT_META%%$'\n'*}"
+IFS='|' read -r ENFORCE_RUNNER_PARITY PREFLIGHT_STAGE <<<"${REPORT_HEADER}"
+if [[ -z "${PREFLIGHT_STAGE}" ]]; then
+  printf 'FAIL: empty stage in %s\n' "${KV_REPORT}" >&2
+  exit 1
+fi
+STAGE_A_RECIPE_FILES_LIST="${REPORT_META#*$'\n'}"
+
+if [[ "${PREFLIGHT_STAGE}" == "tag_promotion" ]]; then
+  while IFS= read -r recipe_rel; do
+    [[ -n "${recipe_rel}" ]] || continue
+    base_f="${BASELINE_DIR}/${recipe_rel}"
+    cand_f="${AUTOSYNC_CANDIDATE_ROOT}/${recipe_rel}"
+    if [[ -f "${base_f}" && ! -f "${cand_f}" ]]; then
+      printf 'FAIL: Stage B tag_promotion must not delete Stage A recipe file %s\n' "${recipe_rel}" >&2
+      exit 1
+    fi
+    if [[ -f "${base_f}" && -f "${cand_f}" ]]; then
+      if ! cmp -s "${base_f}" "${cand_f}"; then
+        printf 'FAIL: Stage B tag_promotion must not modify Stage A recipe file %s\n' "${recipe_rel}" >&2
+        exit 1
+      fi
+    fi
+  done <<<"${STAGE_A_RECIPE_FILES_LIST}"
 fi
 
 MT_DF="${AUTOSYNC_CANDIDATE_ROOT}/pack/model-transfer/Dockerfile"
 HIXL_PATCH="${AUTOSYNC_CANDIDATE_ROOT}/pack/model-transfer/patches/hixl/001_channel_generation.patch"
 CAND_HIXL_COMMIT="$(read_dockerfile_arg_from_file "${MT_DF}" "HIXL_COMMIT")"
 
-if [[ "${ENFORCE_RUNNER_PARITY}" == "true" && -d "${STAGE_DIR}/gpustack-runner" ]]; then
+# Stage B tag_promotion leaves pack/model-transfer/** untouched, so deferred gpustack/runner drift waits for Stage A.
+if [[ "${ENFORCE_RUNNER_PARITY}" == "true" && "${PREFLIGHT_STAGE}" != "tag_promotion" && -d "${STAGE_DIR}/gpustack-runner" ]]; then
   RUNNER_CANN_DF="${STAGE_DIR}/gpustack-runner/pack/cann/Dockerfile.vllm"
   RUNNER_PATCH="${STAGE_DIR}/gpustack-runner/pack/cann/patches/hixl/001_channel_generation.patch"
   if [[ -f "${RUNNER_CANN_DF}" ]]; then

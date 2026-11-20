@@ -41,11 +41,14 @@ Pull Request.
 
 Never reference an unpublished `gpustack/*` container image tag in `pkg/worker/settings/value.go` or `docs/reference/settings.md`.
 
+Stage B (`tag_promotion`) takes precedence over Stage A (`recipe_sync`): once un-held `gpustack/*` Base Images are published on Docker Hub (or explicitly targeted via `target_tag`), host preflight selects `stage: "tag_promotion"` first without being starved by newer upstream router releases. Any concurrent upstream release drift is recorded in `has_stage_a` / `stage_a_drifts` in `router-preflight-report.json` and runs in a follow-up Stage A PR after Stage B merges, while `.auto-sync/setting-image-holds.json` continues to hold specific setting images.
+
 - **Stage A (`stage: "recipe_sync"`, `image_published: false`)**:
   - Update ONLY `pack/llm-router/Dockerfile`, `pack/llm-router/patches/**`, and `.auto-sync/proposals/router.json` (`"stage": "recipe_sync"`).
   - Leave `pkg/worker/settings/value.go` and `docs/reference/settings.md` untouched.
 - **Stage B (`stage: "tag_promotion"`, `image_published: true`)**:
   - Host preflight pre-stages promoted image updates into `pkg/worker/settings/value.go`, `pkg/worker/settings/value_test.go`, `pkg/worker/controllers/worker/model_deployment_router_test.go`, `pkg/worker/controllers/worker/model_deployment_render_test.go`, and `docs/reference/settings.md`; verify them against `router-preflight-report.json` and `image-manifests.json`.
+  - Leave `pack/llm-router/Dockerfile` and `pack/llm-router/patches/**` untouched during Stage B even when `has_stage_a: true` / `stage_a_drifts` indicates concurrent upstream router release drift.
   - Setting-image holds in `.auto-sync/setting-image-holds.json` (outside `scope.writable`, keys `router`, `proxy`, `sidecar`) keep held components pinned to their existing defaults even when newer images are published on Docker Hub; never promote or modify a held setting image (check `held_setting_images` in `router-preflight-report.json`).
   - Update `.auto-sync/proposals/router.json`: set `"stage": "tag_promotion"`, and whenever `upstream-records.json` carries `<ver>+stage-b` for an `upstreamId`, write that exact `<ver>+stage-b` string into `versions[<upstreamId>]`.
   - Do NOT modify any other settings in `value.go`, `value_test.go`, or `settings.md` (such as `KVCacheBackendImage` or `ModelDeploymentModelExpressServerImage`).
