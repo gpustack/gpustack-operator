@@ -105,3 +105,6 @@ returning 0 says nothing about a `.sh` in the same commit.
 - Use table-driven tests with declarative cases and a shared execution loop; build fixtures with
   helpers. Verify one behavior per case with deterministic, repeatable execution.
 - Prefer fake clients, fail on invalid setup, and assert observable state and semantic equivalence.
+- Keep tests lean, neutral, and focused on real contracts and critical boundaries; avoid complex,
+  bloated, or change-coupled tests (such as mock-heavy scaffolding, hardcoded current version literals,
+  or ad-hoc counterexample tests added merely to mirror a config change).
