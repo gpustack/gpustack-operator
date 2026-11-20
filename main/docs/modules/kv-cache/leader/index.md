@@ -147,7 +147,7 @@ availability is a compile-time switch and every option ships **off**:
 | leader | answers `UNAVAILABLE_IN_CURRENT_MODE`, runs as a permanent standby |
 | member | answers `Invalid HA backend entry`, exits, CrashLoopBackOffs |
 
-Use an image built from [`pack/mirrored-mooncake`](https://github.com/gpustack/gpustack-operator/blob/ec8650bc63071add211cbd4ae1055e92e2999ee0/pack/mirrored-mooncake/Dockerfile) for
+Use an image built from [`pack/mirrored-mooncake`](https://github.com/gpustack/gpustack-operator/blob/2975d1e148d2b9a21ea8f2d8698c1a24ff3a9478/pack/mirrored-mooncake/Dockerfile) for
 *`spec.image`* **and for every *`members[].image`***, on Mooncake 0.3.12 or later: an electing leader is
 also rendered `-pod_name` and `-pod_namespace` to label the winner, and a 0.3.11 master exits on both.
 
