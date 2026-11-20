@@ -366,8 +366,8 @@ when the cache misses.
 
 Scheduled and manual upstream dependency refreshes across six domains (`priors`, `slicing`,
 `kv-transfer`, `router`, `charts`, and `k8s-deps`) live in `.auto-sync/` and `.github/workflows/auto-sync.yml`.
-Run `bash hack/check/autosync-selftest.sh` (`make lint` runs it in diff-aware fast mode) to validate the
-taskpack manifests, preflight staging helpers, and gitless verification gates offline.
+Run `bash hack/check/autosync-selftest.sh` (also invoked by `make lint`) to run fast static syntax,
+shellcheck, Python compile, and manifest/schema checks for `.auto-sync/` and `auto-sync.yml`.
 
 ---
 

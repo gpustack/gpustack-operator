@@ -166,43 +166,6 @@ function agents_shell_lint() {
   fi
 }
 
-function autosync_selftest_mode() {
-  if [[ "${AUTOSYNC_IN_VALIDATOR:-}" == "true" ]]; then
-    printf 'fast\n'
-    return 0
-  fi
-  if [[ "${CI:-}" == "true" || "${GITHUB_ACTIONS:-}" == "true" || "${AUTOSYNC_FULL_SELFTEST:-}" == "true" ]]; then
-    printf 'all\n'
-    return 0
-  fi
-  if ! command -v git >/dev/null 2>&1 || ! git -c core.quotePath=false status --porcelain >/dev/null 2>&1; then
-    printf 'all\n'
-    return 0
-  fi
-
-  local autosync_path_re='^(\.auto-sync/|\.github/workflows/auto-sync\.yml$|hack/deps\.sh$|hack/check/autosync-selftest\.sh$|pkg/worker/scaling/priors/records\.md$)'
-  local changed_paths=""
-  changed_paths="$(
-    {
-      git -c core.quotePath=false status --porcelain 2>/dev/null | while IFS= read -r line; do
-        [[ -z "${line}" ]] && continue
-        local p="${line:3}"
-        if [[ "${p}" == *" -> "* ]]; then
-          printf '%s\n%s\n' "${p%% -> *}" "${p#* -> }"
-        else
-          printf '%s\n' "${p}"
-        fi
-      done
-      git -c core.quotePath=false diff --name-only origin/main...HEAD 2>/dev/null || true
-    }
-  )"
-  if grep -Eq "${autosync_path_re}" <<<"${changed_paths}"; then
-    printf 'all\n'
-  else
-    printf 'fast\n'
-  fi
-}
-
 function lint() {
   if [[ "${1:-}" == "chart" ]]; then
     chart_lint
@@ -327,14 +290,10 @@ function lint() {
     gpustack::log::fatal "the API-description check could not run; its diagnostic is above"
   fi
 
-  # The modular auto-sync manifests, instructions, check scripts, helper scripts, and workflow
-  # wiring under .auto-sync/ and .github/workflows/auto-sync.yml, which golangci-lint and
-  # docs_lint do not validate. Its self-test exercises bash -n, pinned shellcheck, Loopwright
-  # manifest schema validation, and offline validator contracts.
-  local autosync_mode
-  autosync_mode="$(autosync_selftest_mode)"
-  if ! bash "${ROOT_DIR}/hack/check/autosync-selftest.sh" "${autosync_mode}" "${ROOT_DIR}"; then
-    gpustack::log::fatal "the auto-sync self-test failed"
+  # Static syntax, shellcheck, Python compile, and manifest/schema checks for .auto-sync/
+  # and .github/workflows/auto-sync.yml, which golangci-lint and docs_lint do not cover.
+  if ! bash "${ROOT_DIR}/hack/check/autosync-selftest.sh" "${ROOT_DIR}"; then
+    gpustack::log::fatal "the auto-sync static check failed"
   fi
 
   # Shell under .agents/, which the review bot selects nothing from and which nothing above reads
