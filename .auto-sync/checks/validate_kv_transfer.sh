@@ -247,21 +247,22 @@ if not isinstance(stage, str) or stage not in ("recipe_sync", "tag_promotion", "
         f"FAIL: {path} stage must be one of recipe_sync, tag_promotion, no_change (got {stage!r})"
     )
 raw_files = rep.get("stage_a_recipe_files")
-if raw_files is None:
-    recipe_files = [
-        "pack/mirrored-mooncake/Dockerfile",
-        "pack/model-transfer/Dockerfile",
-        "pack/model-transfer/patches/hixl/001_channel_generation.patch",
-        "pack/mirrored-modelexpress-server/Dockerfile",
-    ]
-else:
-    if (
-        not isinstance(raw_files, list)
-        or not raw_files
-        or not all(isinstance(p, str) and p.strip() and not p.startswith("/") and ".." not in p.split("/") for p in raw_files)
-    ):
-        raise SystemExit(f"FAIL: {path} stage_a_recipe_files must be a non-empty list of relative paths")
-    recipe_files = [p.strip() for p in raw_files]
+if (
+    not isinstance(raw_files, list)
+    or not raw_files
+    or not all(
+        isinstance(p, str)
+        and (sp := p.strip())
+        and sp.startswith("pack/")
+        and not sp.startswith("/")
+        and ".." not in sp.split("/")
+        for p in raw_files
+    )
+):
+    raise SystemExit(
+        f"FAIL: {path} stage_a_recipe_files must be a non-empty list of pack/-scoped relative paths"
+    )
+recipe_files = [p.strip() for p in raw_files]
 print(f"{'true' if val else 'false'}|{stage}")
 for rf in recipe_files:
     print(rf)

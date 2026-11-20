@@ -944,6 +944,12 @@ cat > "${VAL_STAGE}/kv-transfer-preflight-report.json" <<'JSON'
   "stage": "recipe_sync",
   "image_published": false,
   "enforce_runner_hixl_parity": true,
+  "stage_a_recipe_files": [
+    "pack/mirrored-mooncake/Dockerfile",
+    "pack/model-transfer/Dockerfile",
+    "pack/model-transfer/patches/hixl/001_channel_generation.patch",
+    "pack/mirrored-modelexpress-server/Dockerfile"
+  ],
   "nixl_pypi": {
     "selected_version": "1.5.3",
     "recent_versions": ["1.5.3", "1.5.2"]
@@ -1801,6 +1807,18 @@ PY
     LOOPWRIGHT_CANDIDATE_DIR="${CAND_SB_PRIO}" \
     AUTOSYNC_FAST_SELFTEST=true \
     bash "${CAND_SB_PRIO}/.auto-sync/checks/validate_kv_transfer.sh"
+  printf '{"schemaVersion":1,"stage":"tag_promotion"}\n' > "${SB_PRIO_REPORT}"
+  assert_fails "validate_kv_transfer fails closed when kv-transfer-preflight-report.json omits stage_a_recipe_files" \
+    env AUTOSYNC_STAGE_DIR="${STAGE_SB_PRIO}" \
+    LOOPWRIGHT_CANDIDATE_DIR="${CAND_SB_PRIO}" \
+    AUTOSYNC_FAST_SELFTEST=true \
+    bash "${CAND_SB_PRIO}/.auto-sync/checks/validate_kv_transfer.sh"
+  printf '{"schemaVersion":1,"stage":"tag_promotion","stage_a_recipe_files":["pkg/worker/settings/value.go"]}\n' > "${SB_PRIO_REPORT}"
+  assert_fails "validate_kv_transfer fails closed when stage_a_recipe_files contains non-pack path" \
+    env AUTOSYNC_STAGE_DIR="${STAGE_SB_PRIO}" \
+    LOOPWRIGHT_CANDIDATE_DIR="${CAND_SB_PRIO}" \
+    AUTOSYNC_FAST_SELFTEST=true \
+    bash "${CAND_SB_PRIO}/.auto-sync/checks/validate_kv_transfer.sh"
   rm -f "${SB_PRIO_REPORT}"
   assert_fails "validate_kv_transfer fails closed when kv-transfer-preflight-report.json is missing" \
     env AUTOSYNC_STAGE_DIR="${STAGE_SB_PRIO}" \
@@ -1814,6 +1832,8 @@ else
   fail "validate_kv_transfer fails closed when Stage B tag_promotion modifies pack/model-transfer/Dockerfile"
   fail "validate_kv_transfer fails closed on malformed kv-transfer-preflight-report.json"
   fail "validate_kv_transfer fails closed when kv-transfer-preflight-report.json omits stage"
+  fail "validate_kv_transfer fails closed when kv-transfer-preflight-report.json omits stage_a_recipe_files"
+  fail "validate_kv_transfer fails closed when stage_a_recipe_files contains non-pack path"
   fail "validate_kv_transfer fails closed when kv-transfer-preflight-report.json is missing"
 fi
 
