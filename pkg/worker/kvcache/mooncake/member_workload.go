@@ -349,47 +349,42 @@ func TransportProtocol(protocol string) string {
 	return memberProtocols[protocol]
 }
 
-// memberProtocolIsHostFabric reports whether a RESOLVED protocol is one of the two that reach the
-// host's fabric: the ones that take hostNetwork, get the two capabilities and are granted a device.
+// memberProtocolIsHostFabric reports whether a RESOLVED protocol unconditionally reaches the
+// host's fabric: taking hostNetwork, the two memory-locking capabilities and a fabric device.
 // It takes MemberProtocol's output, not the API's spelling.
 //
-// rdma and efa are the only two. musa and maca are intra-node IPC transports, not host fabrics, and
-// the rest never leave the member's own network namespace, so none of them earns hostNetwork, the
-// capabilities or a device.
+// rdma and efa are the only two unconditional host fabrics. ascend (CANN) stays off the host
+// fabric by default and opts into Ascend A5 Host RoCE only when paired with a positive
+// fabricInterfaceCount via MemberGroupUsesCANNHostRoCE; musa, maca and the remaining protocols
+// never earn hostNetwork, the capabilities or a fabric device.
 //
-// Both of the two DO get a device request. The effective protocol selects its resource family and
-// the member's interface count selects its quantity and RDMA allocation mode, so this predicate
-// answers "is a device granted" as well. Neither mounts the device tree; RDMADevicePath says why.
+// Both unconditional host fabrics get a device request: the effective protocol selects its
+// resource family and the member's interface count selects its quantity and RDMA allocation mode.
+// Neither mounts the device tree; RDMADevicePath says why.
 //
-// It is UNEXPORTED so that the pair is stated in exactly two places, both in this file and both
-// total over it — here and in FabricDeviceResource. A second spelling anywhere else is what would
-// let them drift apart the day a third fabric joins. Admission asks the same question through
-// MemberGroupIsHostFabric, which delegates here.
+// It is UNEXPORTED so that the unconditional pair is stated in exactly two places, both in this
+// file and both total over it -- here and in FabricDeviceResource. Admission asks the same
+// question through MemberGroupIsHostFabric, alongside MemberGroupUsesCANNHostRoCE for CANN.
 func memberProtocolIsHostFabric(protocol string) bool {
 	return protocol == memberProtocolRDMA || protocol == memberProtocolEFA
 }
 
-// MemberGroupIsHostFabric reports whether one member group's effective protocol is RDMA or EFA,
-// which is where the group's fabric interface count selects a device request.
+// MemberGroupIsHostFabric reports whether one member group's effective protocol is an
+// unconditional host fabric (RDMA or EFA), where an unset or positive fabricInterfaceCount
+// selects a device request. CANN groups opt into Ascend A5 Host RoCE separately via
+// MemberGroupUsesCANNHostRoCE.
 func MemberGroupIsHostFabric(kvcb *workercore.KVCacheBackend, group workercore.KVCacheBackendMember) bool {
 	return memberProtocolIsHostFabric(MemberProtocolForGroup(kvcb, group))
 }
 
-// memberGroupUsesCANNHostRoCE reports whether a member group opts into Ascend A5 Host RoCE by
+// MemberGroupUsesCANNHostRoCE reports whether a member group opts into Ascend A5 Host RoCE by
 // combining effective protocol "ascend" (CANN) with an explicit positive fabricInterfaceCount.
-func memberGroupUsesCANNHostRoCE(
-	kvcb *workercore.KVCacheBackend, member workercore.KVCacheBackendMember,
-) bool {
-	return MemberProtocolForGroup(kvcb, member) == memberProtocolAscend &&
-		member.FabricInterfaceCount != nil &&
-		*member.FabricInterfaceCount > 0
-}
-
-// MemberGroupUsesCANNHostRoCE reports whether a member group enables Ascend A5 Host RoCE.
 func MemberGroupUsesCANNHostRoCE(
 	kvcb *workercore.KVCacheBackend, group workercore.KVCacheBackendMember,
 ) bool {
-	return memberGroupUsesCANNHostRoCE(kvcb, group)
+	return MemberProtocolForGroup(kvcb, group) == memberProtocolAscend &&
+		group.FabricInterfaceCount != nil &&
+		*group.FabricInterfaceCount > 0
 }
 
 // PathsOverlap reports whether two cleaned POSIX paths are equal or one contains the other.
@@ -559,7 +554,7 @@ func RenderMemberDaemonSet(
 	}
 
 	// Check explicit fabricInterfaceCount before ptr.Deref so CANN with nil never activates Host RoCE.
-	cannHostRoCE := memberGroupUsesCANNHostRoCE(kvcb, member)
+	cannHostRoCE := MemberGroupUsesCANNHostRoCE(kvcb, member)
 	fabricProtocol := MemberProtocolForGroup(kvcb, member)
 	if cannHostRoCE {
 		fabricProtocol = memberProtocolRDMA
@@ -790,7 +785,7 @@ func renderMemberEnv(
 	for _, e := range member.ExtraEnv {
 		extraEnv = append(extraEnv, core.EnvVar{Name: e.Name, Value: e.Value})
 	}
-	if memberGroupUsesCANNHostRoCE(kvcb, member) {
+	if MemberGroupUsesCANNHostRoCE(kvcb, member) {
 		env = appendCANNHostRoCEDefaultEnvs(env, extraEnv)
 	}
 	env = append(env, extraEnv...)

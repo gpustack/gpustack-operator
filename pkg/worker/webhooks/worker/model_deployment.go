@@ -567,18 +567,44 @@ func interfaceQuantity(ress *workercore.ModelDeploymentRoleResources) *resource.
 	return ress.Interface
 }
 
+func (r *ModelDeploymentWebhook) modelDeploymentDirectRemoteEligible(
+	ctx context.Context, md *workercore.ModelDeployment, manufacturer, family string,
+	remotePolicyActive bool, errPath *field.Path,
+) (bool, error) {
+	if md.Spec.Model.ArtifactRef == nil {
+		return false, nil
+	}
+	if manufacturer != nodefeature.ManufacturerAscend {
+		return true, nil
+	}
+	if family != nodefeature.AcceleratorFamilyAscend950 || !remotePolicyActive {
+		return false, nil
+	}
+	ma := &workercore.ModelArtifact{}
+	if err := r.APIReader.Get(ctx, ctrlcli.ObjectKey{
+		Namespace: md.Namespace, Name: md.Spec.Model.ArtifactRef.Name,
+	}, ma); err != nil {
+		if kerrors.IsNotFound(err) {
+			return false, nil
+		}
+		return false, field.InternalError(errPath, fmt.Errorf("get model artifact: %w", err))
+	}
+	return ma.Spec.Source.HuggingFace != nil || ma.Spec.Source.ModelScope != nil, nil
+}
+
 // modelDeploymentRoleNeedsInterfaceRejudge reports whether this write must rejudge one requesting
 // role. A create judges every role. An update judges the roles whose own inputs moved; the router
 // and the transfer declaration reach a role only through the direct leg the production helper
 // renders, so a role whose leg kept its value keeps the escape hatch its stored verdict provides.
 func (r *ModelDeploymentWebhook) modelDeploymentRoleNeedsInterfaceRejudge(
 	ctx context.Context, old, md *workercore.ModelDeployment, was, role *workercore.ModelDeploymentRole, i int,
-	awsEFAEnabled bool,
+	awsEFAEnabled, remotePolicyActive bool,
 ) (bool, error) {
 	if modelDeploymentRoleInterfaceInputsChanged(was, role) {
 		return true, nil
 	}
-	if modelDeploymentDirectLegProbe(old, was, awsEFAEnabled) == modelDeploymentDirectLegProbe(md, role, awsEFAEnabled) {
+	if kubemeta.DeepEqual(old.Spec.Model.ArtifactRef, md.Spec.Model.ArtifactRef) &&
+		modelDeploymentDirectLegProbe(old, was, awsEFAEnabled) == modelDeploymentDirectLegProbe(md, role, awsEFAEnabled) {
 		return false, nil
 	}
 	// The probes differ, so compare the rendered legs at the role's actual manufacturer and family
@@ -586,7 +612,8 @@ func (r *ModelDeploymentWebhook) modelDeploymentRoleNeedsInterfaceRejudge(
 	manufacturer := ""
 	family := ""
 	if role.AcceleratorType != "" && (md.Spec.Engine.Name == workercore.ModelDeploymentEngineVLLM ||
-		md.Spec.Engine.Name == workercore.ModelDeploymentEngineSGLang || md.Spec.Model.ArtifactRef != nil) {
+		md.Spec.Engine.Name == workercore.ModelDeploymentEngineSGLang ||
+		old.Spec.Model.ArtifactRef != nil || md.Spec.Model.ArtifactRef != nil) {
 		accType, err := r.getAcceleratorType(ctx, role.AcceleratorType, i)
 		if err != nil {
 			return false, err
@@ -594,8 +621,21 @@ func (r *ModelDeploymentWebhook) modelDeploymentRoleNeedsInterfaceRejudge(
 		manufacturer = accType.Status.Detail.Manufacturer
 		family = accType.Status.Detail.Family
 	}
-	return workerctrl.ModelDeploymentDirectInterfaceProtocol(old, was, manufacturer, family, old.Spec.Model.ArtifactRef != nil, awsEFAEnabled) !=
-		workerctrl.ModelDeploymentDirectInterfaceProtocol(md, role, manufacturer, family, md.Spec.Model.ArtifactRef != nil, awsEFAEnabled), nil
+	errPath := field.NewPath("spec", "roles").Index(i).Child("resources", "interface")
+	oldRemoteEligible, err := r.modelDeploymentDirectRemoteEligible(
+		ctx, old, manufacturer, family, remotePolicyActive, errPath,
+	)
+	if err != nil {
+		return false, err
+	}
+	newRemoteEligible, err := r.modelDeploymentDirectRemoteEligible(
+		ctx, md, manufacturer, family, remotePolicyActive, errPath,
+	)
+	if err != nil {
+		return false, err
+	}
+	return workerctrl.ModelDeploymentDirectInterfaceProtocol(old, was, manufacturer, family, oldRemoteEligible, awsEFAEnabled) !=
+		workerctrl.ModelDeploymentDirectInterfaceProtocol(md, role, manufacturer, family, newRemoteEligible, awsEFAEnabled), nil
 }
 
 // validateModelDeploymentInterfaceRequests checks the device key against the resolved cache
@@ -609,6 +649,9 @@ func (r *ModelDeploymentWebhook) validateModelDeploymentInterfaceRequests(
 	ctx context.Context, old, md *workercore.ModelDeployment,
 ) (field.ErrorList, error) {
 	awsEFAEnabled := settings.AWSEFAEnabled.ShouldValueBool(ctx)
+	remotePolicy := settings.ModelArtifactRemoteDeliveryPolicy.ShouldValue(ctx)
+	remotePolicyActive := remotePolicy == settings.ModelArtifactRemoteDeliveryPrefer ||
+		remotePolicy == settings.ModelArtifactRemoteDeliveryRequire
 	stored := make(map[string]*workercore.ModelDeploymentRole, len(md.Spec.Roles))
 	if old != nil {
 		for i := range old.Spec.Roles {
@@ -624,7 +667,8 @@ func (r *ModelDeploymentWebhook) validateModelDeploymentInterfaceRequests(
 		}
 		if old != nil {
 			judge, err := r.modelDeploymentRoleNeedsInterfaceRejudge(
-				ctx, old, md, stored[md.Spec.Roles[i].Name], &md.Spec.Roles[i], i, awsEFAEnabled,
+				ctx, old, md, stored[md.Spec.Roles[i].Name], &md.Spec.Roles[i], i,
+				awsEFAEnabled, remotePolicyActive,
 			)
 			if err != nil {
 				return nil, err
@@ -693,14 +737,20 @@ func (r *ModelDeploymentWebhook) validateModelDeploymentInterfaceRequests(
 		if len(role.Command) > 0 {
 			roleProtocols = nil
 		}
+		rolePath := field.NewPath("spec", "roles").Index(i).Child("resources", "interface")
+		remoteEligible, err := r.modelDeploymentDirectRemoteEligible(
+			ctx, md, manufacturer, family, remotePolicyActive, rolePath,
+		)
+		if err != nil {
+			return nil, err
+		}
 		efaActive := awsEFAEnabled || slices.Contains(roleProtocols, "efa")
 		directProtocol := workerctrl.ModelDeploymentDirectInterfaceProtocol(
-			md, role, manufacturer, family, md.Spec.Model.ArtifactRef != nil, efaActive,
+			md, role, manufacturer, family, remoteEligible, efaActive,
 		)
-		_, err := workerctrl.ModelDeploymentInterfaceResource(roleProtocols, directProtocol, count)
+		_, err = workerctrl.ModelDeploymentInterfaceResource(roleProtocols, directProtocol, count)
 		if err != nil {
-			errs = append(errs, field.Invalid(field.NewPath("spec", "roles").Index(i).Child("resources", "interface"),
-				role.Resources.Interface.String(), err.Error()))
+			errs = append(errs, field.Invalid(rolePath, role.Resources.Interface.String(), err.Error()))
 		}
 	}
 	return errs, nil

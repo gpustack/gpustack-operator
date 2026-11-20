@@ -90,8 +90,9 @@ const (
 
 // The NIXL side channel and the Ascend transfer variables. The two NIXL names are read by vLLM's
 // NixlConnector, which registers its side-channel listener from them; AscendAutoConnectEnv is
-// rendered on vLLM-Ascend HIXL legs, while AscendGlobalResourceConfigEnv and HCCLIntraRoCEEnableEnv
-// are retained as recognize-but-never-render markers so scaler prior identity filtering strips them.
+// rendered on vLLM-Ascend HIXL legs, AscendGlobalResourceConfigEnv is defaulted by Ascend A5 Host
+// RoCE remote weight delivery (and recognized by scaler prior identity filtering), and
+// HCCLIntraRoCEEnableEnv is retained as a recognize-but-never-render marker for scaler filtering.
 const (
 	// VLLMNIXLSideChannelPort is where the NIXL connector listens for the peer's handshake. It is
 	// declared on BOTH halves: the producer announces its side channel there and the consumer
@@ -119,8 +120,9 @@ const (
 	// UB/UBG/UBoE without reading /etc/hixlep.
 	AscendLocalCommResAutoGenValue = `{"version":"1.3"}`
 
-	// AscendGlobalResourceConfigEnv is a recognized Ascend MemFabric link-selection variable,
-	// retained as a recognize-but-never-render marker for scaler prior identity filtering.
+	// AscendGlobalResourceConfigEnv is the Ascend HIXL/MemFabric link-selection variable. The KV
+	// connector renderer does not emit it, while Ascend A5 Host RoCE remote weight delivery
+	// defaults it and scaler prior identity filtering recognizes it.
 	AscendGlobalResourceConfigEnv = "ASCEND_GLOBAL_RESOURCE_CONFIG"
 
 	// HCCLIntraRoCEEnableEnv is a recognized Ascend HCCL intra-node RoCE variable, retained as a

@@ -2321,7 +2321,7 @@ func TestMemberWorkload_AscendA5HostRoCE(t *testing.T) {
 					}
 				})
 
-				assert.Equal(t, tc.wantHostRoCE, memberGroupUsesCANNHostRoCE(kvcb, kvcb.Spec.Connection.Managed.Members[0]))
+				assert.Equal(t, tc.wantHostRoCE, MemberGroupUsesCANNHostRoCE(kvcb, kvcb.Spec.Connection.Managed.Members[0]))
 				assert.Equal(t, []string{tc.wantWireProtocol}, MemberProtocols(kvcb),
 					"MemberProtocols must keep returning ascend for CANN groups, never rdma")
 

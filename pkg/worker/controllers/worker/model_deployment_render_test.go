@@ -4784,6 +4784,61 @@ func TestRenderModelDeploymentPod_AscendA5HIXLEPYield(t *testing.T) {
 		assert.Nil(t, envByName(ctr.Env, inject.AscendLocalCommResEnv))
 		assert.NotContains(t, strings.Join(ctr.Command, " "), "ascend_local_comm_res_path")
 	})
+
+	t.Run("legacy KV-only sub-mount under /etc/hixlep keeps operator mount while A5 remote Host RoCE yields", func(t *testing.T) {
+		subMount := []workercore.ModelDeploymentAdditionalVolume{{
+			MountPath: "/etc/hixlep/custom.json",
+			ReadOnly:  true,
+			ConfigMap: &core.LocalObjectReference{Name: "sub-hixlep"},
+		}}
+		md := newRenderDeployment(func(md *workercore.ModelDeployment) {
+			md.Spec.Model.ArtifactRef = &core.LocalObjectReference{Name: "weights"}
+			md.Spec.Router = &workercore.ModelDeploymentRouter{Name: workercore.ModelDeploymentRouterLLMD}
+			md.Spec.KVTransfer = &workercore.ModelDeploymentKVTransfer{Backend: workercore.ModelDeploymentKVTransferBackendHIXL}
+			md.Spec.Roles = []workercore.ModelDeploymentRole{
+				{
+					Name: "prefill", Kind: workercore.ModelDeploymentRoleKindPrefill,
+					AcceleratorType: "atlas-950", Image: md.Spec.Engine.Image, Replicas: 1, ReplicaSize: 1,
+					AdditionalVolumes: subMount,
+					Resources: &workercore.ModelDeploymentRoleResources{
+						Accelerator: ptr.To(qty1),
+						Interface:   ptr.To(qty1),
+					},
+				},
+				{
+					Name: "decode", Kind: workercore.ModelDeploymentRoleKindDecode,
+					AcceleratorType: "atlas-950", Image: md.Spec.Engine.Image, Replicas: 1, ReplicaSize: 1,
+					AdditionalVolumes: subMount,
+					Resources: &workercore.ModelDeploymentRoleResources{
+						Accelerator: ptr.To(qty1),
+						Interface:   ptr.To(qty1),
+					},
+				},
+			}
+		})
+		cli := newModelDeploymentClient(md, atlas950)
+		r := &ModelDeploymentReconciler{Client: cli, APIReader: cli}
+
+		kvOnlyPods, err := r.renderModelDeploymentRolePods(t.Context(), md, storeConn, []string{"ascend"}, nil, false)
+		require.NoError(t, err)
+		kvPod := kvOnlyPods["prefill"][0][0]
+		assert.NotNil(t, findVolume(kvPod, inject.AscendHIXLEPVolumeName),
+			"KV-only render must preserve exact-path yielding so sub-mounts keep gpustack-ascend-hixlep")
+		assert.NotNil(t, findMount(&kvPod.Spec.Containers[0], inject.AscendHIXLEPVolumeName))
+		assert.NotNil(t, findVolume(kvPod, "additional-0"))
+
+		remoteRender := modelTransferRemoteRender()
+		remoteRender.SourceReady = true
+		remotePods, err := r.renderModelDeploymentRolePods(
+			t.Context(), md, storeConn, []string{"ascend"}, &modelArtifactWeights{Render: remoteRender}, false,
+		)
+		require.NoError(t, err)
+		remotePod := remotePods["prefill"][0][0]
+		assert.Nil(t, findVolume(remotePod, inject.AscendHIXLEPVolumeName),
+			"A5 remote Host RoCE must yield gpustack-ascend-hixlep on sub-mount overlap")
+		assert.Nil(t, findMount(&remotePod.Spec.Containers[0], inject.AscendHIXLEPVolumeName))
+		assert.NotNil(t, findVolume(remotePod, "additional-0"))
+	})
 }
 
 func TestModelDeploymentPodSpecHash_RouterProjectionAndRuntimeControlDecoupling(t *testing.T) {
@@ -5715,5 +5770,166 @@ func TestRenderModelDeploymentPod_AscendA5RemoteModelTransfer(t *testing.T) {
 			podA5UB.Annotations[modelDeploymentPodSpecHashAnnotation],
 			podA5RoCE.Annotations[modelDeploymentPodSpecHashAnnotation],
 		)
+	})
+
+	t.Run("role requesting interface with empty InterfaceResource never injects hixlep or ASCEND_GLOBAL_RESOURCE_CONFIG", func(t *testing.T) {
+		mdNoGrant := newRenderDeployment(func(md *workercore.ModelDeployment) {
+			md.Spec.KVCache = nil
+			md.Spec.Roles[0].AcceleratorType = "atlas-950"
+			md.Spec.Roles[0].Resources = &workercore.ModelDeploymentRoleResources{
+				Accelerator: ptr.To(qty1),
+				Interface:   ptr.To(qty1),
+			}
+		})
+		artPreSet := modelTransferRemoteRender()
+		artPreSet.ModelTransferBackend = "hixl"
+		artPreSet.ModelTransferAscendA5 = true
+		artPreSet.ModelTransferAscendHostRoCE = true
+
+		inNoGrant := ModelDeploymentRenderInput{
+			Deployment:      mdNoGrant,
+			Role:            &mdNoGrant.Spec.Roles[0],
+			AcceleratorType: atlas950,
+			Artifact:        artPreSet,
+		}
+		norm := normalizeModelDeploymentArtifactForRole(inNoGrant, false)
+		require.NotNil(t, norm)
+		assert.True(t, norm.ModelTransferAscendA5)
+		assert.False(t, norm.ModelTransferAscendHostRoCE,
+			"Host RoCE must stay false when InterfaceResource is empty even if role.Resources.Interface is 1")
+
+		vols, mounts := appendModelDeploymentConnectorVolumes(nil, nil, ModelDeploymentConnectorRender{}, norm)
+		assert.Empty(t, vols)
+		assert.Empty(t, mounts)
+		ctr := core.Container{
+			Name:    modelDeploymentMainContainerName,
+			Command: []string{"vllm", "serve", "/var/lib/gpustack/model"},
+		}
+		norm.applyModelTransfer(&ctr, workercore.ModelDeploymentEngineVLLM)
+		assert.Nil(t, envByName(ctr.Env, inject.AscendGlobalResourceConfigEnv))
+		localEnv := envByName(ctr.Env, inject.AscendLocalCommResEnv)
+		require.NotNil(t, localEnv)
+		assert.Equal(t, inject.AscendLocalCommResAutoGenValue, localEnv.Value)
+
+		// Fallback branch when AcceleratorType is nil must also clear Host RoCE without InterfaceResource.
+		inNilAcc := inNoGrant
+		inNilAcc.AcceleratorType = nil
+		normNil := normalizeModelDeploymentArtifactForRole(inNilAcc, false)
+		require.NotNil(t, normNil)
+		assert.False(t, normNil.ModelTransferAscendHostRoCE)
+
+		// Direct Pod render with pre-set ModelTransferAscendHostRoCE=true and empty InterfaceResource.
+		mdUB := newRenderDeployment(func(md *workercore.ModelDeployment) {
+			md.Spec.KVCache = nil
+			md.Spec.Roles[0].AcceleratorType = "atlas-950"
+		})
+		podUB, err := renderModelDeploymentPod(t.Context(), ModelDeploymentRenderInput{
+			Deployment: mdUB, Role: &mdUB.Spec.Roles[0], AcceleratorType: atlas950, Artifact: artPreSet,
+		})
+		require.NoError(t, err)
+		volCount, mountCount := countHIXLEP(podUB)
+		assert.Zero(t, volCount)
+		assert.Zero(t, mountCount)
+		assert.Nil(t, envByName(podUB.Spec.Containers[0].Env, inject.AscendGlobalResourceConfigEnv))
+	})
+}
+
+func TestModelDeploymentScaler_AscendA5ConnectorIgnoresRemoteWeightLeg(t *testing.T) {
+	qty1 := resource.MustParse("1")
+
+	t.Run("single-Pod A5 Server with ArtifactRef keeps kvDirectProtocol empty while directProtocol is rdma", func(t *testing.T) {
+		md := newRenderDeployment(func(md *workercore.ModelDeployment) {
+			md.Spec.KVCache = nil
+			md.Spec.Model.ArtifactRef = &core.LocalObjectReference{Name: "weights"}
+			md.Spec.Router = &workercore.ModelDeploymentRouter{Name: workercore.ModelDeploymentRouterVLLM}
+			md.Spec.Roles = []workercore.ModelDeploymentRole{{
+				Name:            "server",
+				Kind:            workercore.ModelDeploymentRoleKindServer,
+				AcceleratorType: "atlas-950",
+				Image:           md.Spec.Engine.Image,
+				Replicas:        1,
+				ReplicaSize:     1,
+				Resources: &workercore.ModelDeploymentRoleResources{
+					Accelerator: ptr.To(qty1),
+					Interface:   ptr.To(qty1),
+				},
+			}}
+		})
+		role := &md.Spec.Roles[0]
+		assert.Equal(t, "rdma", ModelDeploymentDirectInterfaceProtocol(
+			md, role, nodefeature.ManufacturerAscend, nodefeature.AcceleratorFamilyAscend950, true, false,
+		))
+		kvDirect := modelDeploymentAscendKVDirectProtocol(
+			md, role, nodefeature.ManufacturerAscend, nodefeature.AcceleratorFamilyAscend950,
+		)
+		assert.Empty(t, kvDirect)
+		assert.False(t, modelDeploymentAscendHostRoCE(
+			workercore.ModelDeploymentEngineVLLM, nodefeature.ManufacturerAscend,
+			nodefeature.AcceleratorFamilyAscend950, kvDirect, role,
+		))
+
+		conn, err := modelDeploymentScalerConnectorRender(
+			workercore.ModelDeploymentEngineVLLM, md, role,
+			nodefeature.ManufacturerAscend, nodefeature.AcceleratorFamilyAscend950,
+		)
+		require.NoError(t, err)
+		assert.False(t, slices.ContainsFunc(conn.Volumes, func(v core.Volume) bool {
+			return v.Name == inject.AscendHIXLEPVolumeName
+		}))
+		require.NoError(t, modelDeploymentScalerOperatorEnvGateWithManufacturer(
+			workercore.ModelDeploymentEngineVLLM, md, role,
+			nodefeature.ManufacturerAscend, nodefeature.AcceleratorFamilyAscend950,
+		))
+	})
+
+	t.Run("asymmetric vs symmetric A5 P/D with ArtifactRef follows KV direct leg", func(t *testing.T) {
+		md := newRenderDeployment(func(md *workercore.ModelDeployment) {
+			md.Spec.KVCache = nil
+			md.Spec.Model.ArtifactRef = &core.LocalObjectReference{Name: "weights"}
+			md.Spec.Router = &workercore.ModelDeploymentRouter{Name: workercore.ModelDeploymentRouterLLMD}
+			md.Spec.KVTransfer = &workercore.ModelDeploymentKVTransfer{Backend: workercore.ModelDeploymentKVTransferBackendHIXL}
+			md.Spec.Roles = []workercore.ModelDeploymentRole{
+				{
+					Name: "prefill", Kind: workercore.ModelDeploymentRoleKindPrefill,
+					AcceleratorType: "atlas-950", Image: md.Spec.Engine.Image, Replicas: 1, ReplicaSize: 1,
+					Resources: &workercore.ModelDeploymentRoleResources{
+						Accelerator: ptr.To(qty1),
+						Interface:   ptr.To(qty1),
+					},
+				},
+				{
+					Name: "decode", Kind: workercore.ModelDeploymentRoleKindDecode,
+					AcceleratorType: "atlas-950", Image: md.Spec.Engine.Image, Replicas: 1, ReplicaSize: 1,
+					Resources: &workercore.ModelDeploymentRoleResources{Accelerator: ptr.To(qty1)},
+				},
+			}
+		})
+
+		asymConn, err := modelDeploymentScalerConnectorRender(
+			workercore.ModelDeploymentEngineVLLM, md, &md.Spec.Roles[0],
+			nodefeature.ManufacturerAscend, nodefeature.AcceleratorFamilyAscend950,
+		)
+		require.NoError(t, err)
+		assert.False(t, slices.ContainsFunc(asymConn.Volumes, func(v core.Volume) bool {
+			return v.Name == inject.AscendHIXLEPVolumeName
+		}))
+		assert.NotNil(t, envByName(asymConn.DefaultedEnv, inject.AscendLocalCommResEnv))
+		renderedEnv, err := modelDeploymentScalerRenderedOperatorEnv(
+			workercore.ModelDeploymentEngineVLLM, md, &md.Spec.Roles[0],
+			nodefeature.ManufacturerAscend, nodefeature.AcceleratorFamilyAscend950,
+		)
+		require.NoError(t, err)
+		assert.Contains(t, renderedEnv, inject.AscendLocalCommResEnv)
+
+		md.Spec.Roles[1].Resources.Interface = ptr.To(qty1)
+		symConn, err := modelDeploymentScalerConnectorRender(
+			workercore.ModelDeploymentEngineVLLM, md, &md.Spec.Roles[0],
+			nodefeature.ManufacturerAscend, nodefeature.AcceleratorFamilyAscend950,
+		)
+		require.NoError(t, err)
+		assert.True(t, slices.ContainsFunc(symConn.Volumes, func(v core.Volume) bool {
+			return v.Name == inject.AscendHIXLEPVolumeName
+		}))
+		assert.Nil(t, envByName(symConn.DefaultedEnv, inject.AscendLocalCommResEnv))
 	})
 }

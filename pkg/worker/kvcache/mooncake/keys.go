@@ -317,8 +317,9 @@ var MemberExtraArgsRules = ExtraArgsRules{
 	},
 }
 
-// MemberDerivedEnvs is every environment variable name the member renderer emits, which is what
-// admission refuses in a group's extraEnv.
+// MemberDerivedEnvs lists environment variable names the member renderer owns unconditionally and
+// admission refuses in a group's extraEnv. Overridable defaults that yield to extraEnv live in
+// MemberDefaultedEnvs instead.
 //
 // It is a PLAIN LIST and not an ExtraArgsRules, because the other two kinds that type carries would
 // both be empty and an empty field invites a reader to wonder what belongs in it. No two of these
@@ -335,11 +336,9 @@ var MemberExtraArgsRules = ExtraArgsRules{
 //
 // The transfer metrics switch is reserved on the same ground, and it is the one entry whose
 // reservation COSTS something a reader should see stated: the engine side treats the same switch as
-// a default a user may turn off, and here it cannot be. The asymmetry is the rendering shape rather
-// than a second opinion about the switch -- a member's extraEnv appends, so a name this renderer
-// emits would arrive twice with the winner left to the runtime, and the engine side has a
-// yields-if-declared step that this one does not. Giving it that step would mean an entry rendered
-// conditionally on the hatch's own contents, which is the shape the list above exists to keep out.
+// a default a user may turn off, and here it cannot be. Unlike MemberDefaultedEnvs, entries in
+// MemberDerivedEnvs are emitted unconditionally without yielding to extraEnv, so allowing one in
+// extraEnv would append a duplicate variable whose winner is left to the runtime.
 var MemberDerivedEnvs = []string{
 	memberEnvGlobalSegmentSize,
 	memberEnvLocalBufferSize,

@@ -2525,10 +2525,14 @@ func (r *ModelDeploymentReconciler) renderModelDeploymentRolePodsWithSentinel(
 		}
 		remoteDelivery := in.Artifact != nil &&
 			in.Artifact.Delivery == workercore.ModelDeploymentModelDeliveryRemote
+		remotePolicy := modelDeploymentModelTransferPolicy(ctx)
 		remoteInterfaceEligible := remoteDelivery ||
 			(manufacturer == nodefeature.ManufacturerAscend &&
 				family == nodefeature.AcceleratorFamilyAscend950 &&
-				md.Spec.Model.ArtifactRef != nil)
+				in.Artifact != nil &&
+				in.Artifact.Hub != "" &&
+				(remotePolicy == settings.ModelArtifactRemoteDeliveryPrefer ||
+					remotePolicy == settings.ModelArtifactRemoteDeliveryRequire))
 		directProtocol := ModelDeploymentDirectInterfaceProtocol(
 			md, role, manufacturer, family, remoteInterfaceEligible, efaActive,
 		)

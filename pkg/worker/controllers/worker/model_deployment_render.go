@@ -27,6 +27,7 @@ import (
 	"gpustack.ai/gpustack/pkg/utils/stringx"
 	"gpustack.ai/gpustack/pkg/worker/kuberequest"
 	"gpustack.ai/gpustack/pkg/worker/kvcache/inject"
+	"gpustack.ai/gpustack/pkg/worker/kvcache/mooncake"
 	"gpustack.ai/gpustack/pkg/worker/runtimecontrol"
 	"gpustack.ai/gpustack/pkg/worker/settings"
 )
@@ -974,7 +975,8 @@ func modelDeploymentStampRouterCandidate(
 
 // normalizeModelDeploymentArtifactForRole returns a copy of in.Artifact with Ascend A5 remote
 // HIXL flags normalized for the rendered role, zeroing both fields on take-over, non-Remote,
-// non-hixl, or non-A5 renders so unaffected Pod hashes stay unchanged.
+// non-hixl, or non-A5 renders and gating Host RoCE on a granted InterfaceResource so unaffected
+// Pod hashes stay unchanged.
 func normalizeModelDeploymentArtifactForRole(
 	in ModelDeploymentRenderInput, takeOver bool,
 ) *ModelDeploymentArtifactRender {
@@ -1000,35 +1002,30 @@ func normalizeModelDeploymentArtifactForRole(
 			return &a
 		}
 		a.ModelTransferAscendA5 = true
-		a.ModelTransferAscendHostRoCE = modelDeploymentRoleRequestsInterfaces(in.Role)
+		a.ModelTransferAscendHostRoCE = in.InterfaceResource != ""
 		return &a
 	}
-	if !a.ModelTransferAscendA5 {
-		a.ModelTransferAscendHostRoCE = false
-	}
+	a.ModelTransferAscendHostRoCE = a.ModelTransferAscendA5 && a.ModelTransferAscendHostRoCE && in.InterfaceResource != ""
 	return &a
 }
 
-func modelDeploymentPathsOverlap(a, b string) bool {
-	if a == "" || b == "" {
-		return false
-	}
-	a, b = path.Clean(a), path.Clean(b)
-	if a == "/" || b == "/" {
-		return true
-	}
-	return a == b || strings.HasPrefix(a, b+"/") || strings.HasPrefix(b, a+"/")
-}
-
 // appendModelDeploymentConnectorVolumes appends connector-synthesized and Ascend A5 remote Host
-// RoCE volumes and mounts onto the Pod, mounting /etc/hixlep at most once and yielding whenever
-// user additionalVolumes overlap that path (exact, ancestor, or descendant).
+// RoCE volumes and mounts onto the Pod, mounting /etc/hixlep at most once. Legacy KV-only renders
+// preserve exact-path yielding so existing sub-mounts keep their pod-spec-hash, while Ascend A5
+// remote Host RoCE yields whenever user additionalVolumes overlap /etc/hixlep.
 func appendModelDeploymentConnectorVolumes(
 	vols []core.Volume, mounts []core.VolumeMount,
 	connector ModelDeploymentConnectorRender, artifact *ModelDeploymentArtifactRender,
 ) ([]core.Volume, []core.VolumeMount) {
+	remoteHostRoCE := artifact != nil && artifact.ModelTransferAscendHostRoCE
 	hixlepOverridden := slices.ContainsFunc(mounts, func(m core.VolumeMount) bool {
-		return modelDeploymentPathsOverlap(m.MountPath, inject.AscendHIXLEPPath)
+		if m.MountPath == "" {
+			return false
+		}
+		if remoteHostRoCE {
+			return mooncake.PathsOverlap(m.MountPath, inject.AscendHIXLEPPath)
+		}
+		return path.Clean(m.MountPath) == inject.AscendHIXLEPPath
 	})
 	hixlepMounted := hixlepOverridden
 	for _, v := range connector.Volumes {
@@ -1046,7 +1043,7 @@ func appendModelDeploymentConnectorVolumes(
 		}
 		mounts = append(mounts, m)
 	}
-	if !hixlepMounted && artifact != nil && artifact.ModelTransferAscendHostRoCE {
+	if !hixlepMounted && remoteHostRoCE {
 		hostPathDirectory := core.HostPathDirectory
 		vols = append(vols, core.Volume{
 			Name: inject.AscendHIXLEPVolumeName,

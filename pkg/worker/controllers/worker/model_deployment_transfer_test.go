@@ -3358,4 +3358,96 @@ func TestModelDeploymentModelTransferAscendA5PreferLifecycle(t *testing.T) {
 			assert.Nil(t, findVolume(&pods[i], "gpustack-ascend-hixlep"))
 		}
 	})
+
+	t.Run("PVC Image and Disabled-policy Hub artifacts do not grant Ascend A5 remote RDMA interfaces", func(t *testing.T) {
+		baseMD := func() *workercore.ModelDeployment {
+			return newRenderDeployment(func(m *workercore.ModelDeployment) {
+				m.Spec.Model.ArtifactRef = &core.LocalObjectReference{Name: "weights"}
+				m.Spec.KVCache = nil
+				m.Spec.Roles[0].Replicas = 1
+				m.Spec.Roles[0].Resources = &workercore.ModelDeploymentRoleResources{
+					Accelerator: ptr.To(qty1),
+					Interface:   ptr.To(qty1),
+				}
+			})
+		}
+		a5Type := newRenderAcceleratorType(func(it *worker.AcceleratorType) {
+			it.Status.Detail.Manufacturer = nodefeature.ManufacturerAscend
+			it.Status.Detail.Family = nodefeature.AcceleratorFamilyAscend950
+		})
+		csi := &storage.CSIDriver{ObjectMeta: meta.ObjectMeta{Name: modelstore.DriverName}}
+
+		t.Run("PVC ModelArtifact under Prefer rejected", func(t *testing.T) {
+			modelTransferPolicyStub(t, settings.ModelArtifactRemoteDeliveryPrefer)
+			pvcArtifact := &workercore.ModelArtifact{
+				ObjectMeta: meta.ObjectMeta{Namespace: "team-a", Name: "weights", UID: "artifact-pvc"},
+				Spec: workercore.ModelArtifactSpec{
+					Source: workercore.ModelArtifactSource{
+						PersistentVolumeClaim: &workercore.ModelArtifactPersistentVolumeClaimSource{ClaimName: "model-pvc"},
+					},
+				},
+				Status: workercore.ModelArtifactStatus{
+					Resolved: &workercore.ModelArtifactResolved{SizeBytes: 5 << 30},
+					Conditions: []gpustack.Condition{{
+						Type: string(ModelArtifactConditionResolved), Status: meta.ConditionTrue,
+					}},
+				},
+			}
+			pvc := &core.PersistentVolumeClaim{
+				ObjectMeta: meta.ObjectMeta{Namespace: "team-a", Name: "model-pvc"},
+				Spec:       core.PersistentVolumeClaimSpec{AccessModes: []core.PersistentVolumeAccessMode{core.ReadOnlyMany}},
+			}
+			cli := newModelDeploymentClient(baseMD(), a5Type, pvcArtifact, pvc, csi, jointCheckObject())
+			_, err := reconcileModelDeployment(t, cli)
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "no effective RDMA or EFA")
+		})
+
+		t.Run("Image ModelArtifact under Prefer rejected", func(t *testing.T) {
+			modelTransferPolicyStub(t, settings.ModelArtifactRemoteDeliveryPrefer)
+			imgArtifact := &workercore.ModelArtifact{
+				ObjectMeta: meta.ObjectMeta{Namespace: "team-a", Name: "weights", UID: "artifact-img"},
+				Spec: workercore.ModelArtifactSpec{
+					Source: workercore.ModelArtifactSource{
+						Image: &workercore.ModelArtifactImageSource{
+							Reference: "registry.example.com/models/qwen@sha256:" + strings.Repeat("a", 64),
+						},
+					},
+				},
+				Status: workercore.ModelArtifactStatus{
+					Resolved: &workercore.ModelArtifactResolved{},
+					Conditions: []gpustack.Condition{{
+						Type: string(ModelArtifactConditionResolved), Status: meta.ConditionTrue,
+					}},
+				},
+			}
+			cli := newModelDeploymentClient(baseMD(), a5Type, imgArtifact, csi, jointCheckObject())
+			_, err := reconcileModelDeployment(t, cli)
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "no effective RDMA or EFA")
+		})
+
+		t.Run("Hub ModelArtifact with Disabled remote policy rejected", func(t *testing.T) {
+			modelTransferPolicyStub(t, settings.ModelArtifactRemoteDeliveryDisabled)
+			modelTransferSourceReadyStub(t, false)
+			cli := newA5Client(t, baseMD())
+			_, err := reconcileModelDeployment(t, cli)
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "no effective RDMA or EFA")
+		})
+
+		t.Run("ModelScope Hub ModelArtifact under Require grants RDMA", func(t *testing.T) {
+			modelTransferPolicyStub(t, settings.ModelArtifactRemoteDeliveryRequire)
+			modelTransferSourceReadyStub(t, false)
+			msArtifact := modelTransferFixtureArtifact()
+			msArtifact.Spec.Source.HuggingFace = nil
+			msArtifact.Spec.Source.ModelScope = &workercore.ModelArtifactHubSource{Repository: "Qwen/Qwen2.5-7B-Instruct"}
+			cli := newModelDeploymentClient(baseMD(), a5Type, msArtifact, csi, jointCheckObject())
+			_, err := reconcileModelDeployment(t, cli)
+			require.NoError(t, err)
+			pods := replicaPods(t, cli)
+			require.Len(t, pods, 1)
+			assert.Equal(t, qty1, pods[0].Spec.Containers[0].Resources.Limits[rdmaShared])
+		})
+	})
 }
