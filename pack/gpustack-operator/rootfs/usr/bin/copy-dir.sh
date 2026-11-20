@@ -35,8 +35,8 @@ while IFS= read -r -d '' rel; do
     d_dir="$(dirname "${d}")"
     mkdir -p "${d_dir}"
     tmp="$(mktemp "${d_dir}/.$(basename "${d}").stage-XXXXXX")"
-    if cp --preserve=mode,timestamps "${s}" "${tmp}"; then
-        mv -f "${tmp}" "${d}"
+    if cp --preserve=mode,timestamps "${s}" "${tmp}" && mv -f "${tmp}" "${d}"; then
+        continue
     else
         rm -f "${tmp}"
         exit 1

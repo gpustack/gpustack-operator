@@ -11,15 +11,18 @@ dist_name = "gpustack-engine-sentinel"
 version_scheme = "guess-next-dev"
 local_scheme = "no-local-version"
 
-[build.force-include]
-"sitecustomize.py" = "sitecustomize.py"
-
 [build.targets.sdist]
 exclude = [
     "/.venv",
     "/dist",
 ]
 
+[build.targets.sdist.force-include]
+"sitecustomize.py" = "sitecustomize.py"
+
 [build.targets.wheel]
 macos-max-compat = true
 packages = ["gpustack_engine_sentinel"]
+
+[build.targets.wheel.force-include]
+"sitecustomize.py" = "sitecustomize.py"

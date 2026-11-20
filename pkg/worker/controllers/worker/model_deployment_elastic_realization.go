@@ -367,7 +367,11 @@ func (r *ModelDeploymentReconciler) convergeModelDeploymentElasticWithIsolation(
 		); valid && boot > 0 {
 			repairWidth = int(boot)
 		}
-		if cm, obsErr := r.elasticObservationDocument(ctx, md); obsErr == nil && cm != nil {
+		cm, obsErr := r.elasticObservationDocument(ctx, md)
+		if obsErr != nil && !kerrors.IsNotFound(obsErr) {
+			return true, modelDeploymentPassObservation{}, obsErr
+		}
+		if cm != nil {
 			var prior modelDeploymentElasticStatus
 			if uErr := json.Unmarshal([]byte(cm.Data["observation.json"]), &prior); uErr == nil &&
 				prior.MasterUID == masters[0].UID && prior.StableWidth > repairWidth {

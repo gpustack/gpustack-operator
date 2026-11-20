@@ -1704,6 +1704,10 @@ func (r *ModelDeploymentReconciler) convergeModelDeploymentEndpointEligibility(
 			liveSelectors[role.Name], modelDeploymentEligibilityDecided(md))
 		answering := modelDeploymentPodAnswersAPI(pod, view, md.Spec.Engine.Name,
 			eligible, gated, replacedByRole[role.Name])
+		if modelDeploymentRolePaused(md, role) ||
+			(observation.RuntimeControl != nil && observation.RuntimeControl.HeldRoles[role.Name]) {
+			answering = false
+		}
 		// THE CANDIDATE FOLLOWS THE ROLE THE OPERATOR CONTROLS. A role it can ask about has its
 		// members judged, and the marker follows that judgement in the same write. A role it can
 		// never ask about has no judgement to follow, and its members keep the discovery membership
@@ -1903,17 +1907,11 @@ func modelDeploymentPodAnswersAPI(
 
 	managed, readable := modelDeploymentMemberExecution(pod)
 	if !readable {
-		if gated {
-			return eligible
-		}
 		// A member whose mode cannot be read keeps what readiness alone allows, which is the legacy
 		// behavior rather than a new judgement about it.
 		return true
 	}
 	if !managed {
-		if gated {
-			return eligible
-		}
 		return true
 	}
 	if !gated {

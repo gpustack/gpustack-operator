@@ -430,9 +430,7 @@ def _chunked_prefill_ceiling(scheduler: Any, defaults: dict[str, Any]) -> int:
     limits = [boot_chunk]
     max_prefill = getattr(scheduler, "max_prefill_tokens", None)
     if isinstance(max_prefill, int) and max_prefill > 0:
-        limits.append(
-            min(boot_chunk, max_prefill) if max_prefill < boot_chunk else boot_chunk
-        )
+        limits.append(min(boot_chunk, max_prefill))
     runner = getattr(getattr(scheduler, "tp_worker", None), "model_runner", None)
     graph_max_tokens = getattr(runner, "extend_cuda_graph_max_tokens", None)
     if isinstance(graph_max_tokens, int) and graph_max_tokens > 0:

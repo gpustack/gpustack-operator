@@ -285,10 +285,18 @@ func init() {
 		entry := parameterEntry{spec: sp}
 		if sp.Kind == ParameterKindDecimal {
 			if sp.MinDecimal != "" {
-				entry.minDecimalRat, _ = new(big.Rat).SetString(sp.MinDecimal)
+				r, ok := new(big.Rat).SetString(sp.MinDecimal)
+				if !ok {
+					panic(fmt.Sprintf("invalid MinDecimal %q for runtime-control parameter %q", sp.MinDecimal, sp.Key))
+				}
+				entry.minDecimalRat = r
 			}
 			if sp.MaxDecimal != "" {
-				entry.maxDecimalRat, _ = new(big.Rat).SetString(sp.MaxDecimal)
+				r, ok := new(big.Rat).SetString(sp.MaxDecimal)
+				if !ok {
+					panic(fmt.Sprintf("invalid MaxDecimal %q for runtime-control parameter %q", sp.MaxDecimal, sp.Key))
+				}
+				entry.maxDecimalRat = r
 			}
 		}
 		parameterRegistry[sp.Key] = entry

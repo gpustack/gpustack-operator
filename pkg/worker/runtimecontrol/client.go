@@ -236,17 +236,23 @@ func WithMaxResponseBytes(n int64) ClientOption {
 
 // Client is a bounded-timeout, no-redirect, TLS-aware HTTP client for the engine sentinel.
 type Client struct {
-	timeout          time.Duration
-	maxResponseBytes int64
-	baseTransport    *http.Transport
+	timeout           time.Duration
+	maxResponseBytes  int64
+	baseTransport     *http.Transport
+	insecureTransport *http.Transport
 }
 
 // NewClient constructs an immutable Client with safe defaults.
 func NewClient(opts ...ClientOption) *Client {
+	base := defaultBaseTransport()
+	insecure := base.Clone()
+	// #nosec G402 -- explicit caller opt-in for cluster-internal self-signed engine TLS.
+	insecure.TLSClientConfig = &tls.Config{MinVersion: tls.VersionTLS12, InsecureSkipVerify: true}
 	c := &Client{
-		timeout:          DefaultRequestTimeout,
-		maxResponseBytes: DefaultMaxResponseBytes,
-		baseTransport:    defaultBaseTransport(),
+		timeout:           DefaultRequestTimeout,
+		maxResponseBytes:  DefaultMaxResponseBytes,
+		baseTransport:     base,
+		insecureTransport: insecure,
 	}
 	for _, opt := range opts {
 		if opt != nil {
@@ -273,14 +279,11 @@ func (c *Client) httpClientFor(target Target) (*http.Client, func()) {
 	transport := c.baseTransport
 	cleanup := func() {}
 
-	if target.TLSConfig != nil || target.InsecureSkipVerify {
+	if target.TLSConfig == nil && target.InsecureSkipVerify {
+		transport = c.insecureTransport
+	} else if target.TLSConfig != nil {
 		cloned := c.baseTransport.Clone()
-		var tlsCfg *tls.Config
-		if target.TLSConfig != nil {
-			tlsCfg = target.TLSConfig.Clone()
-		} else {
-			tlsCfg = &tls.Config{MinVersion: tls.VersionTLS12}
-		}
+		tlsCfg := target.TLSConfig.Clone()
 		if target.InsecureSkipVerify {
 			// #nosec G402 -- explicit caller opt-in for cluster-internal self-signed engine TLS.
 			tlsCfg.InsecureSkipVerify = true

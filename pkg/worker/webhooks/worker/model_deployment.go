@@ -2047,7 +2047,7 @@ func validateModelDeploymentRoleReservedMountPaths(
 	md *workercore.ModelDeployment, role *workercore.ModelDeploymentRole, rolePath *field.Path,
 ) field.ErrorList {
 	var errs field.ErrorList
-	sentinelInjected := modelDeploymentRoleInjectsEngineSentinel(md, role)
+	sentinelInjected := workerctrl.ModelDeploymentRoleSupportsEngineSentinel(md, role)
 	for i, av := range role.AdditionalVolumes {
 		if md.Spec.Model.ArtifactRef != nil {
 			matched := false
@@ -3352,7 +3352,7 @@ func modelDeploymentRequiresRouterIsolation(md *workercore.ModelDeployment) bool
 			continue
 		}
 		if engine == workercore.ModelDeploymentEngineVLLM ||
-			(engine == workercore.ModelDeploymentEngineSGLang && !modelDeploymentRoleUsesSGLangRay(engine, role)) {
+			(engine == workercore.ModelDeploymentEngineSGLang && !workerctrl.ModelDeploymentRoleUsesSGLangRay(engine, role)) {
 			return true
 		}
 	}
@@ -3388,32 +3388,10 @@ func validateModelDeploymentRoleRuntimeControlScope(
 			"not supported for engine %q; supported engines are vLLM and SGLang", engine,
 		)))
 	}
-	if modelDeploymentRoleUsesSGLangRay(engine, role) {
+	if workerctrl.ModelDeploymentRoleUsesSGLangRay(engine, role) {
 		errs = append(errs, field.Forbidden(ctrlPath, "not supported on SGLang Ray roles"))
 	}
 	return errs
-}
-
-func modelDeploymentRoleInjectsEngineSentinel(
-	md *workercore.ModelDeployment, role *workercore.ModelDeploymentRole,
-) bool {
-	if md == nil || role == nil {
-		return false
-	}
-	if len(role.Command) > 0 {
-		return false
-	}
-	if role.Kind == workercore.ModelDeploymentRoleKindEncode {
-		return false
-	}
-	if strings.TrimSpace(role.AcceleratorType) == "" {
-		return false
-	}
-	engine := strings.TrimSpace(md.Spec.Engine.Name)
-	if engine != workercore.ModelDeploymentEngineVLLM && engine != workercore.ModelDeploymentEngineSGLang {
-		return false
-	}
-	return !modelDeploymentRoleUsesSGLangRay(engine, role)
 }
 
 // validateModelDeploymentRoleRuntimeControl enforces role eligibility and engine sentinel env
@@ -3431,7 +3409,7 @@ func validateModelDeploymentRoleRuntimeControl(
 		}
 	}
 
-	if role.RuntimeControl != nil || modelDeploymentRoleInjectsEngineSentinel(md, role) {
+	if role.RuntimeControl != nil || workerctrl.ModelDeploymentRoleSupportsEngineSentinel(md, role) {
 		for i := range role.Env {
 			name := role.Env[i].Name
 			if !modelDeploymentEngineSentinelOwnedEnv.Has(name) {
@@ -3531,55 +3509,4 @@ func modelDeploymentRoleHasKVConnector(
 		}
 	}
 	return false
-}
-
-func modelDeploymentRoleUsesSGLangRay(engine string, role *workercore.ModelDeploymentRole) bool {
-	if engine != workercore.ModelDeploymentEngineSGLang {
-		return false
-	}
-	for i := 0; i < len(role.ExtraArgs); i++ {
-		arg := role.ExtraArgs[i]
-		if arg == "--" {
-			break
-		}
-		name, val, hasVal := strings.Cut(arg, "=")
-		switch {
-		case name == "--distributed-executor-backend":
-			if !hasVal && i+1 < len(role.ExtraArgs) {
-				i++
-				val = role.ExtraArgs[i]
-			}
-			if strings.EqualFold(strings.TrimSpace(val), "ray") {
-				return true
-			}
-		case name == "--enable-ray" || name == "--use-ray":
-			if !hasVal || runtimeControlTruthyString(val) {
-				return true
-			}
-		case name == "--ray-address" || strings.HasPrefix(name, "--ray-"):
-			return true
-		}
-	}
-	for i := range role.Env {
-		switch role.Env[i].Name {
-		case "RAY_ADDRESS":
-			if strings.TrimSpace(role.Env[i].Value) != "" {
-				return true
-			}
-		case "SGLANG_USE_RAY":
-			if runtimeControlTruthyString(role.Env[i].Value) {
-				return true
-			}
-		}
-	}
-	return false
-}
-
-func runtimeControlTruthyString(s string) bool {
-	switch strings.ToLower(strings.TrimSpace(s)) {
-	case "1", "true", "yes", "on":
-		return true
-	default:
-		return false
-	}
 }

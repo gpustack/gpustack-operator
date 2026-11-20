@@ -88,6 +88,16 @@ def stage_unpacked(
     src_root: Path, output_dir: Path, version: str | None = None
 ) -> Path:
     resolved_version = normalize_package_version(version)
+    resolved_src = src_root.resolve()
+    resolved_out = output_dir.resolve()
+    if (
+        resolved_out == resolved_out.parent
+        or resolved_out == resolved_src
+        or resolved_out in resolved_src.parents
+    ):
+        raise ValueError(
+            f"Refusing to clear unsafe output_dir {resolved_out} relative to src_root {resolved_src}"
+        )
     if output_dir.exists():
         shutil.rmtree(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)

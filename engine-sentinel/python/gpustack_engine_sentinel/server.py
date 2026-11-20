@@ -92,6 +92,21 @@ class EngineSentinelBackend(Protocol):
         ...
 
 
+class _ClientDisconnectedError(Exception):
+    """Raised internally when the peer disconnects before completing the request body."""
+
+
+def _parse_json_bytes(raw: bytes) -> Any:
+    if len(raw) > MAX_REQUEST_BODY_BYTES:
+        raise InvalidRequestError("Request body exceeds 1 MiB limit")
+    if not raw.strip():
+        raise InvalidRequestError("Request body must not be empty")
+    try:
+        return json.loads(raw.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise InvalidRequestError(f"Malformed JSON body: {exc}") from exc
+
+
 async def _read_json_body(receive: Any) -> Any:
     chunks: list[bytes] = []
     total = 0
@@ -108,17 +123,11 @@ async def _read_json_body(receive: Any) -> Any:
             if not message.get("more_body", False):
                 break
         elif msg_type == "http.disconnect":
-            raise InvalidRequestError("Client disconnected before body completed")
+            raise _ClientDisconnectedError
         else:
             break
 
-    raw = b"".join(chunks)
-    if not raw.strip():
-        raise InvalidRequestError("Request body must not be empty")
-    try:
-        return json.loads(raw.decode("utf-8"))
-    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
-        raise InvalidRequestError(f"Malformed JSON body: {exc}") from exc
+    return _parse_json_bytes(b"".join(chunks))
 
 
 class SentinelControlPlane:
@@ -432,6 +441,8 @@ class SentinelControlPlane:
                 },
                 head_only=head_only,
             )
+        except _ClientDisconnectedError:
+            return
         except SentinelError as exc:
             await send_json_response(
                 send, exc.status_code, exc.to_dict(), head_only=head_only
@@ -468,8 +479,27 @@ class SentinelControlPlane:
                 code, data = await self.handle_live()
                 return JSONResponse(content=data, status_code=code)
 
+            async def _read_bounded_json(request: Request) -> Any:
+                chunks: list[bytes] = []
+                total = 0
+                async for piece in request.stream():
+                    if not piece:
+                        continue
+                    total += len(piece)
+                    if total > MAX_REQUEST_BODY_BYTES:
+                        raise InvalidRequestError("Request body exceeds 1 MiB limit")
+                    chunks.append(piece)
+                return _parse_json_bytes(b"".join(chunks))
+
             async def _ack_ep(request: Request) -> JSONResponse:
-                code, data = await self.handle_ack(await request.json())
+                try:
+                    code, data = await self.handle_ack(
+                        await _read_bounded_json(request)
+                    )
+                except SentinelError as exc:
+                    return JSONResponse(
+                        content=exc.to_dict(), status_code=exc.status_code
+                    )
                 return JSONResponse(content=data, status_code=code)
 
             async def _pause_get_ep(request: Request) -> JSONResponse:
@@ -478,7 +508,14 @@ class SentinelControlPlane:
                 return JSONResponse(content=data, status_code=code)
 
             async def _pause_post_ep(request: Request) -> JSONResponse:
-                code, data = await self.handle_post_pause(await request.json())
+                try:
+                    code, data = await self.handle_post_pause(
+                        await _read_bounded_json(request)
+                    )
+                except SentinelError as exc:
+                    return JSONResponse(
+                        content=exc.to_dict(), status_code=exc.status_code
+                    )
                 return JSONResponse(content=data, status_code=code)
 
             async def _rc_get_ep(request: Request) -> JSONResponse:
@@ -487,7 +524,14 @@ class SentinelControlPlane:
                 return JSONResponse(content=data, status_code=code)
 
             async def _rc_post_ep(request: Request) -> JSONResponse:
-                code, data = await self.handle_post_runtime_config(await request.json())
+                try:
+                    code, data = await self.handle_post_runtime_config(
+                        await _read_bounded_json(request)
+                    )
+                except SentinelError as exc:
+                    return JSONResponse(
+                        content=exc.to_dict(), status_code=exc.status_code
+                    )
                 return JSONResponse(content=data, status_code=code)
 
             add_api_route(READY_PATH, _ready_ep, methods=["GET"])
@@ -498,18 +542,6 @@ class SentinelControlPlane:
             add_api_route(RUNTIME_CONFIG_PATH, _rc_get_ep, methods=["GET"])
             add_api_route(RUNTIME_CONFIG_PATH, _rc_post_ep, methods=["POST"])
             return
-
-        async def _asgi_delegate(
-            scope: dict[str, Any], receive: Any, send: Any
-        ) -> None:
-            await self.handle_asgi(scope, receive, send)
-
-        if inspect.iscoroutinefunction(_asgi_delegate):
-            add_api_route(READY_PATH, _asgi_delegate, methods=["GET"])
-            add_api_route(LIVE_PATH, _asgi_delegate, methods=["GET"])
-            add_api_route(ACK_PATH, _asgi_delegate, methods=["POST"])
-            add_api_route(PAUSE_PATH, _asgi_delegate, methods=["GET", "POST"])
-            add_api_route(RUNTIME_CONFIG_PATH, _asgi_delegate, methods=["GET", "POST"])
 
 
 class SentinelASGIMiddleware:

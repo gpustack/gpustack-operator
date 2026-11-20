@@ -1952,5 +1952,5 @@ func TestElasticConvergenceHeldWhileRolePaused(t *testing.T) {
 
 	require.NoError(t, f.reconciler.reconcileModelDeploymentElasticResize(ctx, f.md))
 	require.Zero(t, f.scaleCalls.Load(), "desired pause must serialize and hold /scale_elastic_ep")
-	require.Contains(t, f.observation(t).Reason, "paused")
+	require.Contains(t, f.observation(t).Reason, "pause")
 }

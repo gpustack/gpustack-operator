@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -362,13 +363,17 @@ func (r *ModelDeploymentReconciler) modelDeploymentElasticResizeInFlight(
 				return true, fmt.Sprintf("unable to read elastic EP observation: %v", err)
 			}
 		} else if cm != nil {
-			raw := cm.Data["observation.json"]
-			if strings.Contains(raw, `"state":"Recorded"`) ||
-				strings.Contains(raw, `"state":"CommandSent"`) ||
-				strings.Contains(raw, `"state":"AwaitingWidth"`) ||
-				strings.Contains(raw, `"state":"NativeComplete"`) ||
-				strings.Contains(raw, `"state":"Withdrawn"`) ||
-				strings.Contains(raw, `"state":"Released"`) {
+			var obs modelDeploymentElasticStatus
+			if uErr := json.Unmarshal([]byte(cm.Data["observation.json"]), &obs); uErr != nil {
+				return true, fmt.Sprintf("unable to decode elastic EP observation: %v", uErr)
+			}
+			switch obs.State {
+			case elasticStateRecorded,
+				elasticStateCommandSent,
+				elasticStateAwaitingWidth,
+				elasticStateNativeDone,
+				elasticStateWithdrawn,
+				elasticStateReleased:
 				return true, "waiting for active elastic EP resize state to complete"
 			}
 		}
@@ -2064,32 +2069,14 @@ func (r *ModelDeploymentReconciler) handleMutatingError(
 		}
 	}
 
+	// Definitive 4xx refusals (e.g., value above actual engine boot ceiling or boot ID mismatch)
+	// did not apply; clear the pending intent durably so a corrected spec is not fenced.
 	var statusErr *runtimecontrol.HTTPStatusError
-	if errors.As(err, &statusErr) &&
-		statusErr.StatusCode == http.StatusUnprocessableEntity &&
-		statusErr.ErrorCode == "unsupported_fields" {
-		clearErr := clearDefinitivePending()
-		msg := fmt.Sprintf("Pod %s rejected unsupported engine version: %v", pod.Name, err)
-		if clearErr != nil {
-			msg = fmt.Sprintf("%s (failed to clear pending ledger entry: %v)", msg, clearErr)
-		}
-		return podRuntimeControlResult{
-			condStatus: meta.ConditionFalse,
-			reason:     ModelDeploymentReasonRuntimeControlUnsupportedEngineVersion,
-			message:    msg,
-			requeue:    clearErr != nil,
-			preserveEligibility: clearErr == nil && podIsReady(pod) &&
-				pod.Labels[modelDeploymentLabelKeyEndpointEligible] == modelDeploymentEndpointEligibleValue,
-		}
-	}
-
-	// Definitive 4xx refusals (e.g., value above actual engine boot ceiling) did not apply; clear
-	// the pending intent durably so a corrected spec is not fenced as AmbiguousOperation.
 	if errors.Is(err, runtimecontrol.ErrInvalidArgument) ||
+		errors.Is(err, runtimecontrol.ErrBootIDMismatch) ||
 		(errors.As(err, &statusErr) &&
 			(statusErr.StatusCode == http.StatusBadRequest ||
-				statusErr.StatusCode == http.StatusUnprocessableEntity ||
-				statusErr.StatusCode == http.StatusConflict)) {
+				statusErr.StatusCode == http.StatusUnprocessableEntity)) {
 		if clearErr := clearDefinitivePending(); clearErr != nil {
 			return podRuntimeControlResult{
 				condStatus: meta.ConditionFalse,

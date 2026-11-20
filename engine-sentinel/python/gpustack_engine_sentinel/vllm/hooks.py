@@ -317,6 +317,40 @@ class VLLMSentinelBackend:
         if not applied_entries:
             return True
 
+        by_boot_id = {
+            str(res["boot_id"]): {
+                "snapshot": res["previous_snapshot"],
+                "previous_digest": str(res.get("previous_digest", "")),
+            }
+            for res in applied_entries
+            if res.get("boot_id")
+        }
+        if len(by_boot_id) != len(applied_entries):
+            return False
+
+        # Prefer order-independent boot_id-keyed broadcast over positional index zipping.
+        call_all = getattr(engine_core, "call_utility_all_async", None)
+        if callable(call_all):
+            try:
+                rb_results = await call_all(
+                    UTILITY_METHOD_NAME,
+                    {"op": "rollback", "by_boot_id": by_boot_id},
+                )
+            except Exception:
+                return False
+            restored_boots: set[str] = set()
+            for r in rb_results or ():
+                if not isinstance(r, dict) or not r.get("ok") or r.get("skipped"):
+                    continue
+                bid = str(r.get("boot_id", ""))
+                if (
+                    bid in by_boot_id
+                    and str(r.get("applied_digest", ""))
+                    == by_boot_id[bid]["previous_digest"]
+                ):
+                    restored_boots.add(bid)
+            return set(by_boot_id.keys()).issubset(restored_boots)
+
         engines = list(getattr(engine_core, "core_engines", ()) or ())
         call_one = getattr(engine_core, "_call_utility_async", None)
         if callable(call_one) and len(engines) == len(raw_results):
@@ -325,9 +359,6 @@ class VLLMSentinelBackend:
                 if res.get("ok") and "previous_snapshot" in res:
                     want_boot = str(res.get("boot_id", ""))
                     want_prev = str(res.get("previous_digest", ""))
-                    if not want_boot:
-                        all_ok = False
-                        continue
                     try:
                         rb = await call_one(
                             UTILITY_METHOD_NAME,
@@ -361,9 +392,6 @@ class VLLMSentinelBackend:
                 if res.get("ok") and "previous_snapshot" in res:
                     want_boot = str(res.get("boot_id", ""))
                     want_prev = str(res.get("previous_digest", ""))
-                    if not want_boot:
-                        all_ok = False
-                        continue
                     rpc_fn = getattr(core_obj, UTILITY_METHOD_NAME, None)
                     if callable(rpc_fn):
                         try:
@@ -391,38 +419,6 @@ class VLLMSentinelBackend:
                     else:
                         all_ok = False
             return all_ok
-
-        by_boot_id = {
-            str(res["boot_id"]): {
-                "snapshot": res["previous_snapshot"],
-                "previous_digest": str(res.get("previous_digest", "")),
-            }
-            for res in applied_entries
-            if res.get("boot_id")
-        }
-        if len(by_boot_id) != len(applied_entries):
-            return False
-        call_all = getattr(engine_core, "call_utility_all_async", None)
-        if by_boot_id and callable(call_all):
-            try:
-                rb_results = await call_all(
-                    UTILITY_METHOD_NAME,
-                    {"op": "rollback", "by_boot_id": by_boot_id},
-                )
-            except Exception:
-                return False
-            restored_boots: set[str] = set()
-            for r in rb_results or ():
-                if not isinstance(r, dict) or not r.get("ok") or r.get("skipped"):
-                    continue
-                bid = str(r.get("boot_id", ""))
-                if (
-                    bid in by_boot_id
-                    and str(r.get("applied_digest", ""))
-                    == by_boot_id[bid]["previous_digest"]
-                ):
-                    restored_boots.add(bid)
-            return set(by_boot_id.keys()).issubset(restored_boots)
         return False
 
 

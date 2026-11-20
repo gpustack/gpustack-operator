@@ -1086,7 +1086,7 @@ func stampModelDeploymentPod(
 
 		stampModelDeploymentRankEnv(pod, md, role, ordinal)
 		if member != modelDeploymentLeaderMemberIndex &&
-			modelDeploymentPodHasVolume(pod, modelDeploymentEngineSentinelVolumeName) &&
+			modelDeploymentPodHasRuntimeControlEnable(pod) &&
 			!modelDeploymentRoleExternalDP(md, role) {
 			clearModelDeploymentMainContainerProbes(pod)
 		}
@@ -2542,10 +2542,11 @@ func modelDeploymentRoleSupportsEngineSentinelCommon(
 	if engine != workercore.ModelDeploymentEngineVLLM && engine != workercore.ModelDeploymentEngineSGLang {
 		return false
 	}
-	return !modelDeploymentRoleUsesSGLangRay(engine, role)
+	return !ModelDeploymentRoleUsesSGLangRay(engine, role)
 }
 
-func modelDeploymentRoleUsesSGLangRay(engine string, role *workercore.ModelDeploymentRole) bool {
+// ModelDeploymentRoleUsesSGLangRay reports whether an SGLang role configures Ray-backed execution.
+func ModelDeploymentRoleUsesSGLangRay(engine string, role *workercore.ModelDeploymentRole) bool {
 	if engine != workercore.ModelDeploymentEngineSGLang || role == nil {
 		return false
 	}
