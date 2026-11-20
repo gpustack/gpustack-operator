@@ -5657,6 +5657,52 @@ func crd_gpustack_api_worker_v1alpha1_ModelDeployment() *v1.CustomResourceDefini
 													},
 													Nullable: true,
 												},
+												"loraAdapters": {
+													Description: "LoRAAdapters is a reserved entry point for deployment-level LoRA adapters backed by\nModelArtifact. Non-empty adapter lists are rejected until ModelArtifact supports LoRA\nweight delivery and digest verification.",
+													Type:        "array",
+													Items: &v1.JSONSchemaPropsOrArray{
+														Schema: &v1.JSONSchemaProps{
+															Type: "object",
+															Required: []string{
+																"name",
+																"artifactRef",
+															},
+															Properties: map[string]v1.JSONSchemaProps{
+																"artifactRef": {
+																	Description: "ArtifactRef names a ModelArtifact in this namespace holding the LoRA adapter weights.",
+																	Type:        "object",
+																	Properties: map[string]v1.JSONSchemaProps{
+																		"name": {
+																			Description: "Name of the referent.\nThis field is effectively required, but due to backwards compatibility is\nallowed to be empty. Instances of this type with an empty value here are\nalmost certainly wrong.\nMore info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names\nTODO: Drop `kubebuilder:default` when controller-gen doesn't need it https://github.com/kubernetes-sigs/kubebuilder/issues/3896.",
+																			Type:        "string",
+																			Default: &v1.JSON{
+																				Raw: []byte(`""`),
+																			},
+																		},
+																	},
+																},
+																"name": {
+																	Description: "Name is the unique adapter name exposed to inference clients.",
+																	Type:        "string",
+																	MinLength:   ptr.To[int64](1),
+																},
+																"pinned": {
+																	Description: "Pinned marks the adapter as preferred for retention under slot pressure.",
+																	Type:        "boolean",
+																},
+																"subPath": {
+																	Description: "SubPath selects a subdirectory within the referenced ModelArtifact containing the adapter weights.",
+																	Type:        "string",
+																},
+															},
+														},
+													},
+													Nullable: true,
+													XListMapKeys: []string{
+														"name",
+													},
+													XListType: ptr.To[string]("map"),
+												},
 												"name": {
 													Description: "Name is the identifier the engine serves, e.g. \"Qwen/Qwen2.5-72B-Instruct\".\nServing name exposed by the inference engine. When a role leaves its command unset, any\nexplicit served-model-name argument in that role's ExtraArgs must equal Name.",
 													Type:        "string",
@@ -5789,23 +5835,6 @@ func crd_gpustack_api_worker_v1alpha1_ModelDeployment() *v1.CustomResourceDefini
 															Nullable:  true,
 															XListType: ptr.To[string]("atomic"),
 														},
-														"elasticEp": {
-															Description: "ElasticEP opts this role into the managed elastic-EP profile: the operator then renders\none dedicated logical Ray cluster for the deployment, with a CPU-only control-plane head\nand one whole-GPU TP group per DP engine rank. PRESENCE IS THE PROFILE DISCRIMINANT: a role\nwithout it renders exactly as it did before this field existed, and a profile that is\nturned on and off again describes a different deployment. The field's presence is frozen\nat creation. Width is editable for scale-up; scale-down is\nrefused by admission in this release.\nThe profile admits exactly one such role per deployment, running the vLLM engine as a\nsingle Server role of one instance of one Pod. Every member -- the reserved API/DP-master\nand every Ray-only worker -- takes a complete TP group declared through ExtraArgs.\nAll GPUs are whole, unsliced and unpartitioned. Admission binds the resource count to TP.\nThe auxiliary head requests no container resources and never counts toward Width.",
-															Type:        "object",
-															Required: []string{
-																"width",
-															},
-															Properties: map[string]v1.JSONSchemaProps{
-																"width": {
-																	Description: "Width is the total number of GPU engines in the elastic collective, INCLUDING the\nreserved API/DP-master member; width-1 of them are Ray-only workers. It is the total\nengine world the engine is told to run, not a Pod count and not a rank mapping: which\nmember holds which rank is the engine's own runtime fact and is never implied by this\nnumber.",
-																	Type:        "integer",
-																	Format:      "int32",
-																	Maximum:     ptr.To[float64](64),
-																	Minimum:     ptr.To[float64](2),
-																},
-															},
-															Nullable: true,
-														},
 														"env": {
 															Description: "Env is appended the same way and refused on the same terms. Keys the operator merely defaults\nare not owned: a user's value wins there and no rejection follows.\nThere is ONE list here rather than an overlay beside it: the former second tier was appended\nand refused for owned names on exactly the same terms, so the nesting expressed a precedence\nthat never existed.",
 															Type:        "array",
@@ -5902,6 +5931,10 @@ func crd_gpustack_api_worker_v1alpha1_ModelDeployment() *v1.CustomResourceDefini
 															MaxLength:   ptr.To[int64](63),
 															MinLength:   ptr.To[int64](1),
 															Pattern:     `^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`,
+														},
+														"pause": {
+															Description: "Pause withdraws this role from inference traffic, drains in-flight work, and holds scaler\nand elastic resizes without rolling Pods.",
+															Type:        "boolean",
 														},
 														"ports": {
 															Description: "Ports are the container ports to expose in addition to the engine's own. They do not\nreserve or select the transfer engine's runtime port window.",
@@ -6058,6 +6091,24 @@ func crd_gpustack_api_worker_v1alpha1_ModelDeployment() *v1.CustomResourceDefini
 															},
 															Nullable: true,
 														},
+														"runtimeControl": {
+															Description: "RuntimeControl defines live-reconciled engine control parameters applied without rolling\nworker Pods.",
+															Type:        "object",
+															Properties: map[string]v1.JSONSchemaProps{
+																"parameters": {
+																	Description: "Parameters holds loosely-coupled canonical runtime parameter overrides (such as\nscheduling.*, speculative.*, and elastic.dataParallelWidth) translated per engine.",
+																	Type:        "object",
+																	AdditionalProperties: &v1.JSONSchemaPropsOrBool{
+																		Allows: true,
+																		Schema: &v1.JSONSchemaProps{
+																			Type: "string",
+																		},
+																	},
+																	Nullable: true,
+																},
+															},
+															Nullable: true,
+														},
 														"shmSize": {
 															Description: "ShmSize limits the memory-backed /dev/shm volume in each role Pod. It must be positive.\nOmission renders 16Gi. An explicit /dev/shm mount in AdditionalVolumes takes precedence.\nUsed shared memory counts toward the container's memory limit; this is not a reservation.\nExisting elastic members keep their mounts; new and replacement Pods use the current value.",
 															Pattern:     `^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$`,
@@ -6073,7 +6124,7 @@ func crd_gpustack_api_worker_v1alpha1_ModelDeployment() *v1.CustomResourceDefini
 															XIntOrString: true,
 														},
 														"size": {
-															Description: "ReplicaSize is how many Pods form ONE serving instance. Those Pods are fate-sharing: they\nstart together, they are replaced together, and none of them serves alone — the instance,\nnot the Pod, is the unit that appears and disappears.\nIT IS EDITABLE. The edit replaces the role's replicas one at a time: an old replica and its\nWorkload are deleted first, its replacement is created only after that slot is free, and the\nreplacement's fresh admission gates deleting the next old replica. Surviving replicas keep\ntheir deployed configuration until each is selected for replacement; continuous serving is\nnot guaranteed -- a one-replica role stops for the length of its swap. Scaling WITHOUT\nreplacement is what replicas is for.\nTHE ELASTIC-EP PROFILE PINS THIS NUMBER AT ONE; see ElasticEP.\nABOVE ONE, THE PODS OF AN INSTANCE NEED EACH OTHER'S ADDRESSES, so an instance of several Pods\nis rendered with stable names and publishes the first Pod's address, this instance's size and\neach Pod's own rank to every container. What an engine does with those facts -- which\nparallelism it turns on, and over how many ranks -- stays the author's to say.\nTHE GO IDENTIFIER IS NOT Size BECAUSE gogo protobuf generates a Size() method on this type and\nGo forbids a field and a method sharing a name; the API field is size.\nTHE UPPER BOUND IS THE SAME LIMIT REPLICAS CARRIES, AND IT MULTIPLIES WITH IT: this number is\nhow many Pods one instance is rendered as, so a pass renders replicas times this many before it\nwrites any of them. It is set far above the sizes an accelerator topology makes sense at, and\nfar below the range that turns one accepted field value into an out-of-memory worker.",
+															Description: "ReplicaSize is how many Pods form ONE serving instance. Those Pods are fate-sharing: they\nstart together, they are replaced together, and none of them serves alone — the instance,\nnot the Pod, is the unit that appears and disappears.\nIT IS EDITABLE. The edit replaces the role's replicas one at a time: an old replica and its\nWorkload are deleted first, its replacement is created only after that slot is free, and the\nreplacement's fresh admission gates deleting the next old replica. Surviving replicas keep\ntheir deployed configuration until each is selected for replacement; continuous serving is\nnot guaranteed -- a one-replica role stops for the length of its swap. Scaling WITHOUT\nreplacement is what replicas is for.\nTHE ELASTIC-EP PROFILE PINS THIS NUMBER AT ONE; see runtimeControl.\nABOVE ONE, THE PODS OF AN INSTANCE NEED EACH OTHER'S ADDRESSES, so an instance of several Pods\nis rendered with stable names and publishes the first Pod's address, this instance's size and\neach Pod's own rank to every container. What an engine does with those facts -- which\nparallelism it turns on, and over how many ranks -- stays the author's to say.\nTHE GO IDENTIFIER IS NOT Size BECAUSE gogo protobuf generates a Size() method on this type and\nGo forbids a field and a method sharing a name; the API field is size.\nTHE UPPER BOUND IS THE SAME LIMIT REPLICAS CARRIES, AND IT MULTIPLIES WITH IT: this number is\nhow many Pods one instance is rendered as, so a pass renders replicas times this many before it\nwrites any of them. It is set far above the sizes an accelerator topology makes sense at, and\nfar below the range that turns one accepted field value into an out-of-memory worker.",
 															Type:        "integer",
 															Format:      "int32",
 															Default: &v1.JSON{
@@ -6214,7 +6265,7 @@ func crd_gpustack_api_worker_v1alpha1_ModelDeployment() *v1.CustomResourceDefini
 									Type: "object",
 									Properties: map[string]v1.JSONSchemaProps{
 										"conditions": {
-											Description: "Conditions is the finer view, one condition per axis: DomainRegistered, QuotaReserved,\nCacheAttached, ReplicasUpToDate, RoleKindsReady, KVEventsPublishing, RouterReady,\nWeightsReady. They are independent —\n\"quota reserved but cache not attached\" is a real and actionable state — which is what a single\nphase string cannot carry.\nKVEventsPublishing reports rendered configuration rather than observing the stream. A publisher\nthat was configured and then crashed therefore remains True until a live consumer observes it.\nWeightsReady reports whether every engine role's weights are available: a claim artifact\nmounted, or an engine's own download of a hub artifact finished. While it is False for a\nreason other than a Pod still starting, no replica is created and none that runs is touched.",
+											Description: "Conditions is the finer view, one condition per axis: DomainRegistered, QuotaReserved,\nCacheAttached, ReplicasUpToDate, RoleKindsReady, KVEventsPublishing, RouterReady,\nWeightsReady, RuntimeControlSynced. They are independent —\n\"quota reserved but cache not attached\" is a real and actionable state — which is what a single\nphase string cannot carry.\nKVEventsPublishing reports rendered configuration rather than observing the stream. A publisher\nthat was configured and then crashed therefore remains True until a live consumer observes it.\nWeightsReady reports whether every engine role's weights are available: a claim artifact\nmounted, or an engine's own download of a hub artifact finished. While it is False for a\nreason other than a Pod still starting, no replica is created and none that runs is touched.",
 											Type:        "array",
 											Items: &v1.JSONSchemaPropsOrArray{
 												Schema: &v1.JSONSchemaProps{
@@ -6994,6 +7045,64 @@ func crd_gpustack_api_worker_v1alpha1_ModelDeployment() *v1.CustomResourceDefini
 														"ready": {
 															Type:   "integer",
 															Format: "int32",
+														},
+														"runtimeControl": {
+															Description: "RuntimeControl reports the latest live runtime-control convergence state for this role.",
+															Type:        "object",
+															Required: []string{
+																"synced",
+																"convergedPods",
+																"totalAnsweringPods",
+															},
+															Properties: map[string]v1.JSONSchemaProps{
+																"appliedConfigDigest": {
+																	Description: "AppliedConfigDigest is the canonical digest of the runtime-control configuration confirmed across converged instances.",
+																	Type:        "string",
+																},
+																"convergedPods": {
+																	Description: "ConvergedPods is the number of answering Pods confirmed at the desired runtime-control digest and pause state.",
+																	Type:        "integer",
+																	Format:      "int32",
+																},
+																"message": {
+																	Description: "Message provides human-readable details about the runtime-control convergence state.",
+																	Type:        "string",
+																},
+																"observedGeneration": {
+																	Description: "ObservedGeneration is the metadata generation last evaluated for runtime control on this role.",
+																	Type:        "integer",
+																	Format:      "int64",
+																},
+																"paused": {
+																	Description: "Paused reports whether this role has completed withdrawal, drain, and pause enforcement.",
+																	Type:        "boolean",
+																},
+																"reason": {
+																	Description: "Reason summarizes the current runtime-control convergence state.",
+																	Type:        "string",
+																},
+																"synced": {
+																	Description: "Synced reports whether all answering instances of the role have converged to the desired runtime control.",
+																	Type:        "boolean",
+																},
+																"totalAnsweringPods": {
+																	Description: "TotalAnsweringPods is the total number of API-answering Pods evaluated for runtime control in this role.",
+																	Type:        "integer",
+																	Format:      "int32",
+																},
+																"unsupportedFields": {
+																	Description: "UnsupportedFields lists runtime-control fields rejected as unsupported by the running engine version.",
+																	Type:        "array",
+																	Items: &v1.JSONSchemaPropsOrArray{
+																		Schema: &v1.JSONSchemaProps{
+																			Type: "string",
+																		},
+																	},
+																	Nullable:  true,
+																	XListType: ptr.To[string]("atomic"),
+																},
+															},
+															Nullable: true,
 														},
 														"unmanaged": {
 															Description: "Unmanaged is true when the role replaced the whole command line, so the operator synthesized\nno engine argument and no client environment for it. It is ALWAYS present, for the same reason\nthe counts are: false is the ordinary case and has to be visible as an answer rather than as a\nmissing field.",

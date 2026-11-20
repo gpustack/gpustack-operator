@@ -203,6 +203,7 @@ func GetOpenAPIDefinitions(ref common.ReferenceCallback) map[string]common.OpenA
 		v1alpha1.ModelDeploymentKVCacheStatus{}.OpenAPIModelName():                     schema_gpustack_api_worker_v1alpha1_ModelDeploymentKVCacheStatus(ref),
 		v1alpha1.ModelDeploymentKVTransfer{}.OpenAPIModelName():                        schema_gpustack_api_worker_v1alpha1_ModelDeploymentKVTransfer(ref),
 		v1alpha1.ModelDeploymentList{}.OpenAPIModelName():                              schema_gpustack_api_worker_v1alpha1_ModelDeploymentList(ref),
+		v1alpha1.ModelDeploymentLoRAAdapter{}.OpenAPIModelName():                       schema_gpustack_api_worker_v1alpha1_ModelDeploymentLoRAAdapter(ref),
 		v1alpha1.ModelDeploymentModel{}.OpenAPIModelName():                             schema_gpustack_api_worker_v1alpha1_ModelDeploymentModel(ref),
 		v1alpha1.ModelDeploymentModelRemoteStatus{}.OpenAPIModelName():                 schema_gpustack_api_worker_v1alpha1_ModelDeploymentModelRemoteStatus(ref),
 		v1alpha1.ModelDeploymentModelStatus{}.OpenAPIModelName():                       schema_gpustack_api_worker_v1alpha1_ModelDeploymentModelStatus(ref),
@@ -213,10 +214,11 @@ func GetOpenAPIDefinitions(ref common.ReferenceCallback) map[string]common.OpenA
 		v1alpha1.ModelDeploymentRemoteRoleStatus{}.OpenAPIModelName():                  schema_gpustack_api_worker_v1alpha1_ModelDeploymentRemoteRoleStatus(ref),
 		v1alpha1.ModelDeploymentRetirementStatus{}.OpenAPIModelName():                  schema_gpustack_api_worker_v1alpha1_ModelDeploymentRetirementStatus(ref),
 		v1alpha1.ModelDeploymentRole{}.OpenAPIModelName():                              schema_gpustack_api_worker_v1alpha1_ModelDeploymentRole(ref),
-		v1alpha1.ModelDeploymentRoleElasticEP{}.OpenAPIModelName():                     schema_gpustack_api_worker_v1alpha1_ModelDeploymentRoleElasticEP(ref),
 		v1alpha1.ModelDeploymentRoleEndpointsStatus{}.OpenAPIModelName():               schema_gpustack_api_worker_v1alpha1_ModelDeploymentRoleEndpointsStatus(ref),
 		v1alpha1.ModelDeploymentRoleParallelismStatus{}.OpenAPIModelName():             schema_gpustack_api_worker_v1alpha1_ModelDeploymentRoleParallelismStatus(ref),
 		v1alpha1.ModelDeploymentRoleResources{}.OpenAPIModelName():                     schema_gpustack_api_worker_v1alpha1_ModelDeploymentRoleResources(ref),
+		v1alpha1.ModelDeploymentRoleRuntimeControl{}.OpenAPIModelName():                schema_gpustack_api_worker_v1alpha1_ModelDeploymentRoleRuntimeControl(ref),
+		v1alpha1.ModelDeploymentRoleRuntimeControlStatus{}.OpenAPIModelName():          schema_gpustack_api_worker_v1alpha1_ModelDeploymentRoleRuntimeControlStatus(ref),
 		v1alpha1.ModelDeploymentRoleStatus{}.OpenAPIModelName():                        schema_gpustack_api_worker_v1alpha1_ModelDeploymentRoleStatus(ref),
 		v1alpha1.ModelDeploymentRoleTopology{}.OpenAPIModelName():                      schema_gpustack_api_worker_v1alpha1_ModelDeploymentRoleTopology(ref),
 		v1alpha1.ModelDeploymentRouter{}.OpenAPIModelName():                            schema_gpustack_api_worker_v1alpha1_ModelDeploymentRouter(ref),
@@ -10489,6 +10491,52 @@ func schema_gpustack_api_worker_v1alpha1_ModelDeploymentList(ref common.Referenc
 	}
 }
 
+func schema_gpustack_api_worker_v1alpha1_ModelDeploymentLoRAAdapter(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "ModelDeploymentLoRAAdapter defines one deployment-level LoRA adapter backed by a ModelArtifact.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"name": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Name is the unique adapter name exposed to inference clients.",
+							Default:     "",
+							MinLength:   ptr.To[int64](1),
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"artifactRef": {
+						SchemaProps: spec.SchemaProps{
+							Description: "ArtifactRef names a ModelArtifact in this namespace holding the LoRA adapter weights.",
+							Default:     map[string]interface{}{},
+							Ref:         ref(corev1.LocalObjectReference{}.OpenAPIModelName()),
+						},
+					},
+					"subPath": {
+						SchemaProps: spec.SchemaProps{
+							Description: "SubPath selects a subdirectory within the referenced ModelArtifact containing the adapter weights.",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"pinned": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Pinned marks the adapter as preferred for retention under slot pressure.",
+							Type:        []string{"boolean"},
+							Format:      "",
+						},
+					},
+				},
+				Required: []string{"name", "artifactRef"},
+			},
+		},
+		Dependencies: []string{
+			corev1.LocalObjectReference{}.OpenAPIModelName()},
+	}
+}
+
 func schema_gpustack_api_worker_v1alpha1_ModelDeploymentModel(ref common.ReferenceCallback) common.OpenAPIDefinition {
 	return common.OpenAPIDefinition{
 		Schema: spec.Schema{
@@ -10512,12 +10560,33 @@ func schema_gpustack_api_worker_v1alpha1_ModelDeploymentModel(ref common.Referen
 							Ref:         ref(corev1.LocalObjectReference{}.OpenAPIModelName()),
 						},
 					},
+					"loraAdapters": {
+						VendorExtensible: spec.VendorExtensible{
+							Extensions: spec.Extensions{
+								"x-kubernetes-list-map-keys": []interface{}{
+									"name",
+								},
+								"x-kubernetes-list-type": "map",
+							},
+						},
+						SchemaProps: spec.SchemaProps{
+							Description: "LoRAAdapters is a reserved entry point for deployment-level LoRA adapters backed by ModelArtifact. Non-empty adapter lists are rejected until ModelArtifact supports LoRA weight delivery and digest verification.",
+							Type:        []string{"array"},
+							Items: &spec.SchemaOrArray{
+								Schema: &spec.Schema{
+									SchemaProps: spec.SchemaProps{
+										Ref: ref(v1alpha1.ModelDeploymentLoRAAdapter{}.OpenAPIModelName()),
+									},
+								},
+							},
+						},
+					},
 				},
 				Required: []string{"name"},
 			},
 		},
 		Dependencies: []string{
-			corev1.LocalObjectReference{}.OpenAPIModelName()},
+			v1alpha1.ModelDeploymentLoRAAdapter{}.OpenAPIModelName(), corev1.LocalObjectReference{}.OpenAPIModelName()},
 	}
 }
 
@@ -11006,7 +11075,7 @@ func schema_gpustack_api_worker_v1alpha1_ModelDeploymentRole(ref common.Referenc
 					},
 					"size": {
 						SchemaProps: spec.SchemaProps{
-							Description: "ReplicaSize is how many Pods form ONE serving instance. Those Pods are fate-sharing: they start together, they are replaced together, and none of them serves alone — the instance, not the Pod, is the unit that appears and disappears.\n\nIT IS EDITABLE. The edit replaces the role's replicas one at a time: an old replica and its Workload are deleted first, its replacement is created only after that slot is free, and the replacement's fresh admission gates deleting the next old replica. Surviving replicas keep their deployed configuration until each is selected for replacement; continuous serving is not guaranteed -- a one-replica role stops for the length of its swap. Scaling WITHOUT replacement is what replicas is for.\n\nTHE ELASTIC-EP PROFILE PINS THIS NUMBER AT ONE; see ElasticEP.\n\nABOVE ONE, THE PODS OF AN INSTANCE NEED EACH OTHER'S ADDRESSES, so an instance of several Pods is rendered with stable names and publishes the first Pod's address, this instance's size and each Pod's own rank to every container. What an engine does with those facts -- which parallelism it turns on, and over how many ranks -- stays the author's to say.\n\nTHE GO IDENTIFIER IS NOT Size BECAUSE gogo protobuf generates a Size() method on this type and Go forbids a field and a method sharing a name; the API field is size.\n\nTHE UPPER BOUND IS THE SAME LIMIT REPLICAS CARRIES, AND IT MULTIPLIES WITH IT: this number is how many Pods one instance is rendered as, so a pass renders replicas times this many before it writes any of them. It is set far above the sizes an accelerator topology makes sense at, and far below the range that turns one accepted field value into an out-of-memory worker.",
+							Description: "ReplicaSize is how many Pods form ONE serving instance. Those Pods are fate-sharing: they start together, they are replaced together, and none of them serves alone — the instance, not the Pod, is the unit that appears and disappears.\n\nIT IS EDITABLE. The edit replaces the role's replicas one at a time: an old replica and its Workload are deleted first, its replacement is created only after that slot is free, and the replacement's fresh admission gates deleting the next old replica. Surviving replicas keep their deployed configuration until each is selected for replacement; continuous serving is not guaranteed -- a one-replica role stops for the length of its swap. Scaling WITHOUT replacement is what replicas is for.\n\nTHE ELASTIC-EP PROFILE PINS THIS NUMBER AT ONE; see runtimeControl.\n\nABOVE ONE, THE PODS OF AN INSTANCE NEED EACH OTHER'S ADDRESSES, so an instance of several Pods is rendered with stable names and publishes the first Pod's address, this instance's size and each Pod's own rank to every container. What an engine does with those facts -- which parallelism it turns on, and over how many ranks -- stays the author's to say.\n\nTHE GO IDENTIFIER IS NOT Size BECAUSE gogo protobuf generates a Size() method on this type and Go forbids a field and a method sharing a name; the API field is size.\n\nTHE UPPER BOUND IS THE SAME LIMIT REPLICAS CARRIES, AND IT MULTIPLIES WITH IT: this number is how many Pods one instance is rendered as, so a pass renders replicas times this many before it writes any of them. It is set far above the sizes an accelerator topology makes sense at, and far below the range that turns one accepted field value into an out-of-memory worker.",
 							Minimum:     ptr.To[float64](1),
 							Maximum:     ptr.To[float64](64),
 							Type:        []string{"integer"},
@@ -11193,12 +11262,6 @@ func schema_gpustack_api_worker_v1alpha1_ModelDeploymentRole(ref common.Referenc
 							Format:      "int64",
 						},
 					},
-					"elasticEp": {
-						SchemaProps: spec.SchemaProps{
-							Description: "ElasticEP opts this role into the managed elastic-EP profile: the operator then renders one dedicated logical Ray cluster for the deployment, with a CPU-only control-plane head and one whole-GPU TP group per DP engine rank. PRESENCE IS THE PROFILE DISCRIMINANT: a role without it renders exactly as it did before this field existed, and a profile that is turned on and off again describes a different deployment. The field's presence is frozen at creation. Width is editable for scale-up; scale-down is refused by admission in this release.\n\nThe profile admits exactly one such role per deployment, running the vLLM engine as a single Server role of one instance of one Pod. Every member -- the reserved API/DP-master and every Ray-only worker -- takes a complete TP group declared through ExtraArgs. All GPUs are whole, unsliced and unpartitioned. Admission binds the resource count to TP. The auxiliary head requests no container resources and never counts toward Width.",
-							Ref:         ref(v1alpha1.ModelDeploymentRoleElasticEP{}.OpenAPIModelName()),
-						},
-					},
 					"startupTimeoutSeconds": {
 						SchemaProps: spec.SchemaProps{
 							Description: "StartupTimeoutSeconds is the maximum time in seconds that a role replica's main container is given to pass its startup probe before kubelet restarts it. Unset defaults to 1800 (30 minutes), which renders a startupProbe with periodSeconds 10 and failureThreshold 180.",
@@ -11208,36 +11271,25 @@ func schema_gpustack_api_worker_v1alpha1_ModelDeploymentRole(ref common.Referenc
 							Format:      "int32",
 						},
 					},
+					"pause": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Pause withdraws this role from inference traffic, drains in-flight work, and holds scaler and elastic resizes without rolling Pods.",
+							Type:        []string{"boolean"},
+							Format:      "",
+						},
+					},
+					"runtimeControl": {
+						SchemaProps: spec.SchemaProps{
+							Description: "RuntimeControl defines live-reconciled engine control parameters applied without rolling worker Pods.",
+							Ref:         ref(v1alpha1.ModelDeploymentRoleRuntimeControl{}.OpenAPIModelName()),
+						},
+					},
 				},
 				Required: []string{"name"},
 			},
 		},
 		Dependencies: []string{
-			v1alpha1.ModelDeploymentAdditionalVolume{}.OpenAPIModelName(), v1alpha1.ModelDeploymentEnvVar{}.OpenAPIModelName(), v1alpha1.ModelDeploymentPort{}.OpenAPIModelName(), v1alpha1.ModelDeploymentRoleElasticEP{}.OpenAPIModelName(), v1alpha1.ModelDeploymentRoleResources{}.OpenAPIModelName(), v1alpha1.ModelDeploymentRoleTopology{}.OpenAPIModelName(), corev1.LocalObjectReference{}.OpenAPIModelName(), resource.Quantity{}.OpenAPIModelName()},
-	}
-}
-
-func schema_gpustack_api_worker_v1alpha1_ModelDeploymentRoleElasticEP(ref common.ReferenceCallback) common.OpenAPIDefinition {
-	return common.OpenAPIDefinition{
-		Schema: spec.Schema{
-			SchemaProps: spec.SchemaProps{
-				Description: "ModelDeploymentRoleElasticEP is the elastic-EP profile of one role.\n\nWidth is the only mutable field: it answers how large the collective currently should be, which is a running-state question. This release accepts increases and unchanged values; admission refuses a decrease until Elastic EP scale-down support is complete. The role cannot enable or disable this profile after creation. Its tensor parallel size comes from ExtraArgs and cannot change after creation. The ordinary role fields' editability does not reach this role: acceleratorType, resources and command are frozen with the profile, and replicas and size stay at one.",
-				Type:        []string{"object"},
-				Properties: map[string]spec.Schema{
-					"width": {
-						SchemaProps: spec.SchemaProps{
-							Description: "Width is the total number of GPU engines in the elastic collective, INCLUDING the reserved API/DP-master member; width-1 of them are Ray-only workers. It is the total engine world the engine is told to run, not a Pod count and not a rank mapping: which member holds which rank is the engine's own runtime fact and is never implied by this number.",
-							Default:     0,
-							Minimum:     ptr.To[float64](2),
-							Maximum:     ptr.To[float64](64),
-							Type:        []string{"integer"},
-							Format:      "int32",
-						},
-					},
-				},
-				Required: []string{"width"},
-			},
-		},
+			v1alpha1.ModelDeploymentAdditionalVolume{}.OpenAPIModelName(), v1alpha1.ModelDeploymentEnvVar{}.OpenAPIModelName(), v1alpha1.ModelDeploymentPort{}.OpenAPIModelName(), v1alpha1.ModelDeploymentRoleResources{}.OpenAPIModelName(), v1alpha1.ModelDeploymentRoleRuntimeControl{}.OpenAPIModelName(), v1alpha1.ModelDeploymentRoleTopology{}.OpenAPIModelName(), corev1.LocalObjectReference{}.OpenAPIModelName(), resource.Quantity{}.OpenAPIModelName()},
 	}
 }
 
@@ -11400,6 +11452,126 @@ func schema_gpustack_api_worker_v1alpha1_ModelDeploymentRoleResources(ref common
 	}
 }
 
+func schema_gpustack_api_worker_v1alpha1_ModelDeploymentRoleRuntimeControl(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "ModelDeploymentRoleRuntimeControl defines live-reconciled engine control parameters applied without changing pod-spec-hash or restarting worker containers.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"parameters": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Parameters holds loosely-coupled canonical runtime parameter overrides (such as scheduling.*, speculative.*, and elastic.dataParallelWidth) translated per engine.",
+							Type:        []string{"object"},
+							AdditionalProperties: &spec.SchemaOrBool{
+								Allows: true,
+								Schema: &spec.Schema{
+									SchemaProps: spec.SchemaProps{
+										Type:   []string{"string"},
+										Format: "",
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+}
+
+func schema_gpustack_api_worker_v1alpha1_ModelDeploymentRoleRuntimeControlStatus(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "ModelDeploymentRoleRuntimeControlStatus reports live runtime-control convergence for one role.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"observedGeneration": {
+						SchemaProps: spec.SchemaProps{
+							Description: "ObservedGeneration is the metadata generation last evaluated for runtime control on this role.",
+							Type:        []string{"integer"},
+							Format:      "int64",
+						},
+					},
+					"synced": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Synced reports whether all answering instances of the role have converged to the desired runtime control.",
+							Default:     false,
+							Type:        []string{"boolean"},
+							Format:      "",
+						},
+					},
+					"reason": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Reason summarizes the current runtime-control convergence state.",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"message": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Message provides human-readable details about the runtime-control convergence state.",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"paused": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Paused reports whether this role has completed withdrawal, drain, and pause enforcement.",
+							Type:        []string{"boolean"},
+							Format:      "",
+						},
+					},
+					"appliedConfigDigest": {
+						SchemaProps: spec.SchemaProps{
+							Description: "AppliedConfigDigest is the canonical digest of the runtime-control configuration confirmed across converged instances.",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"convergedPods": {
+						SchemaProps: spec.SchemaProps{
+							Description: "ConvergedPods is the number of answering Pods confirmed at the desired runtime-control digest and pause state.",
+							Default:     0,
+							Type:        []string{"integer"},
+							Format:      "int32",
+						},
+					},
+					"totalAnsweringPods": {
+						SchemaProps: spec.SchemaProps{
+							Description: "TotalAnsweringPods is the total number of API-answering Pods evaluated for runtime control in this role.",
+							Default:     0,
+							Type:        []string{"integer"},
+							Format:      "int32",
+						},
+					},
+					"unsupportedFields": {
+						VendorExtensible: spec.VendorExtensible{
+							Extensions: spec.Extensions{
+								"x-kubernetes-list-type": "atomic",
+							},
+						},
+						SchemaProps: spec.SchemaProps{
+							Description: "UnsupportedFields lists runtime-control fields rejected as unsupported by the running engine version.",
+							Type:        []string{"array"},
+							Items: &spec.SchemaOrArray{
+								Schema: &spec.Schema{
+									SchemaProps: spec.SchemaProps{
+										Type:   []string{"string"},
+										Format: "",
+									},
+								},
+							},
+						},
+					},
+				},
+				Required: []string{"synced", "convergedPods", "totalAnsweringPods"},
+			},
+		},
+	}
+}
+
 func schema_gpustack_api_worker_v1alpha1_ModelDeploymentRoleStatus(ref common.ReferenceCallback) common.OpenAPIDefinition {
 	return common.OpenAPIDefinition{
 		Schema: spec.Schema{
@@ -11506,12 +11678,18 @@ func schema_gpustack_api_worker_v1alpha1_ModelDeploymentRoleStatus(ref common.Re
 							},
 						},
 					},
+					"runtimeControl": {
+						SchemaProps: spec.SchemaProps{
+							Description: "RuntimeControl reports the latest live runtime-control convergence state for this role.",
+							Ref:         ref(v1alpha1.ModelDeploymentRoleRuntimeControlStatus{}.OpenAPIModelName()),
+						},
+					},
 				},
 				Required: []string{"name", "desired", "ready", "quotaReserved", "unmanaged", "kind"},
 			},
 		},
 		Dependencies: []string{
-			v1alpha1.ModelDeploymentGroupStatus{}.OpenAPIModelName(), v1alpha1.ModelDeploymentRoleEndpointsStatus{}.OpenAPIModelName(), v1alpha1.ModelDeploymentRoleParallelismStatus{}.OpenAPIModelName()},
+			v1alpha1.ModelDeploymentGroupStatus{}.OpenAPIModelName(), v1alpha1.ModelDeploymentRoleEndpointsStatus{}.OpenAPIModelName(), v1alpha1.ModelDeploymentRoleParallelismStatus{}.OpenAPIModelName(), v1alpha1.ModelDeploymentRoleRuntimeControlStatus{}.OpenAPIModelName()},
 	}
 }
 
@@ -14299,7 +14477,7 @@ func schema_gpustack_api_worker_v1alpha1_ModelDeploymentStatus(ref common.Refere
 							},
 						},
 						SchemaProps: spec.SchemaProps{
-							Description: "Conditions is the finer view, one condition per axis: DomainRegistered, QuotaReserved, CacheAttached, ReplicasUpToDate, RoleKindsReady, KVEventsPublishing, RouterReady, WeightsReady. They are independent — \"quota reserved but cache not attached\" is a real and actionable state — which is what a single phase string cannot carry.\n\nKVEventsPublishing reports rendered configuration rather than observing the stream. A publisher that was configured and then crashed therefore remains True until a live consumer observes it.\n\nWeightsReady reports whether every engine role's weights are available: a claim artifact mounted, or an engine's own download of a hub artifact finished. While it is False for a reason other than a Pod still starting, no replica is created and none that runs is touched.",
+							Description: "Conditions is the finer view, one condition per axis: DomainRegistered, QuotaReserved, CacheAttached, ReplicasUpToDate, RoleKindsReady, KVEventsPublishing, RouterReady, WeightsReady, RuntimeControlSynced. They are independent — \"quota reserved but cache not attached\" is a real and actionable state — which is what a single phase string cannot carry.\n\nKVEventsPublishing reports rendered configuration rather than observing the stream. A publisher that was configured and then crashed therefore remains True until a live consumer observes it.\n\nWeightsReady reports whether every engine role's weights are available: a claim artifact mounted, or an engine's own download of a hub artifact finished. While it is False for a reason other than a Pod still starting, no replica is created and none that runs is touched.",
 							Type:        []string{"array"},
 							Items: &spec.SchemaOrArray{
 								Schema: &spec.Schema{

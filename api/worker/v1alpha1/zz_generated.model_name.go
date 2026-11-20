@@ -586,6 +586,11 @@ func (in ModelDeploymentList) OpenAPIModelName() string {
 }
 
 // OpenAPIModelName returns the OpenAPI model name for this type.
+func (in ModelDeploymentLoRAAdapter) OpenAPIModelName() string {
+	return "ai.gpustack.worker.v1alpha1.ModelDeploymentLoRAAdapter"
+}
+
+// OpenAPIModelName returns the OpenAPI model name for this type.
 func (in ModelDeploymentModel) OpenAPIModelName() string {
 	return "ai.gpustack.worker.v1alpha1.ModelDeploymentModel"
 }
@@ -636,11 +641,6 @@ func (in ModelDeploymentRole) OpenAPIModelName() string {
 }
 
 // OpenAPIModelName returns the OpenAPI model name for this type.
-func (in ModelDeploymentRoleElasticEP) OpenAPIModelName() string {
-	return "ai.gpustack.worker.v1alpha1.ModelDeploymentRoleElasticEP"
-}
-
-// OpenAPIModelName returns the OpenAPI model name for this type.
 func (in ModelDeploymentRoleEndpointsStatus) OpenAPIModelName() string {
 	return "ai.gpustack.worker.v1alpha1.ModelDeploymentRoleEndpointsStatus"
 }
@@ -653,6 +653,16 @@ func (in ModelDeploymentRoleParallelismStatus) OpenAPIModelName() string {
 // OpenAPIModelName returns the OpenAPI model name for this type.
 func (in ModelDeploymentRoleResources) OpenAPIModelName() string {
 	return "ai.gpustack.worker.v1alpha1.ModelDeploymentRoleResources"
+}
+
+// OpenAPIModelName returns the OpenAPI model name for this type.
+func (in ModelDeploymentRoleRuntimeControl) OpenAPIModelName() string {
+	return "ai.gpustack.worker.v1alpha1.ModelDeploymentRoleRuntimeControl"
+}
+
+// OpenAPIModelName returns the OpenAPI model name for this type.
+func (in ModelDeploymentRoleRuntimeControlStatus) OpenAPIModelName() string {
+	return "ai.gpustack.worker.v1alpha1.ModelDeploymentRoleRuntimeControlStatus"
 }
 
 // OpenAPIModelName returns the OpenAPI model name for this type.

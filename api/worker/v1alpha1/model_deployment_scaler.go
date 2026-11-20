@@ -150,6 +150,10 @@ const (
 	// ModelDeploymentScalerReasonIncompatibleMetric says the matched profile does not measure the
 	// throughput numerator, latency quantile, or cache convention the role requires.
 	ModelDeploymentScalerReasonIncompatibleMetric = "IncompatibleMetric"
+
+	// ModelDeploymentScalerReasonRolePaused says a target role is paused or completing pause drain
+	// at the current generation.
+	ModelDeploymentScalerReasonRolePaused = "RolePaused"
 )
 
 const (

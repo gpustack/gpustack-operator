@@ -104,6 +104,9 @@ type ModelDeploymentRoleStatusApplyConfiguration struct {
 	// membership. The identity is carried in the entry instead.
 	//
 	Groups []ModelDeploymentGroupStatusApplyConfiguration `json:"groups,omitempty"`
+	// RuntimeControl reports the latest live runtime-control convergence state for this role.
+	//
+	RuntimeControl *ModelDeploymentRoleRuntimeControlStatusApplyConfiguration `json:"runtimeControl,omitempty"`
 }
 
 // ModelDeploymentRoleStatusApplyConfiguration constructs a declarative configuration of the ModelDeploymentRoleStatus type for use with
@@ -196,5 +199,13 @@ func (b *ModelDeploymentRoleStatusApplyConfiguration) WithGroups(values ...*Mode
 		}
 		b.Groups = append(b.Groups, *values[i])
 	}
+	return b
+}
+
+// WithRuntimeControl sets the RuntimeControl field in the declarative configuration to the given value
+// and returns the receiver, so that objects can be built by chaining "With" function invocations.
+// If called multiple times, the RuntimeControl field is set to the value of the last call.
+func (b *ModelDeploymentRoleStatusApplyConfiguration) WithRuntimeControl(value *ModelDeploymentRoleRuntimeControlStatusApplyConfiguration) *ModelDeploymentRoleStatusApplyConfiguration {
+	b.RuntimeControl = value
 	return b
 }
