@@ -217,6 +217,156 @@ for start_line, snippet in context_blocks:
         sys.exit(1)
 PY
 
+# 2b. Official mirrored-mooncake builds must keep USE_VRAM_SEGMENT=OFF.
+python3 - "${MOONCAKE_DF}" <<'PY'
+import re
+import sys
+
+df_path = sys.argv[1]
+with open(df_path, "r", encoding="utf-8") as f:
+    lines = f.readlines()
+
+
+def strip_unquoted_comment(line: str) -> str:
+    in_single = False
+    in_double = False
+    escaped = False
+    for idx, ch in enumerate(line):
+        if escaped:
+            escaped = False
+            continue
+        if ch == "\\" and not in_single:
+            escaped = True
+            continue
+        if ch == "'" and not in_double:
+            in_single = not in_single
+            continue
+        if ch == '"' and not in_single:
+            in_double = not in_double
+            continue
+        if ch == "#" and not in_single and not in_double:
+            return line[:idx]
+    return line
+
+
+on_re = re.compile(
+    r'(?:^|[^A-Za-z0-9_])(?:-D\s*)?USE_VRAM_SEGMENT\s*=\s*["\']?(?:ON|TRUE|YES|1)(?:\b|$)',
+    re.IGNORECASE,
+)
+for lineno, raw_line in enumerate(lines, 1):
+    code = strip_unquoted_comment(raw_line)
+    if on_re.search(code):
+        print(
+            f"FAIL: {df_path}:{lineno} contains executable USE_VRAM_SEGMENT=ON; "
+            "official mirrored-mooncake builds must keep USE_VRAM_SEGMENT=OFF",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+stages: dict[str, list[tuple[int, str]]] = {}
+cur_stage = ""
+from_re = re.compile(r"^\s*FROM\b.*?\bAS\s+([A-Za-z0-9_.-]+)", re.IGNORECASE)
+from_bare_re = re.compile(r"^\s*FROM\b", re.IGNORECASE)
+for lineno, raw_line in enumerate(lines, 1):
+    code = strip_unquoted_comment(raw_line)
+    m_as = from_re.match(code)
+    if m_as:
+        cur_stage = m_as.group(1)
+        stages.setdefault(cur_stage, [])
+        continue
+    if from_bare_re.match(code):
+        cur_stage = ""
+        continue
+    if cur_stage:
+        stages[cur_stage].append((lineno, raw_line))
+
+if "builder-cuda" not in stages:
+    print(f"FAIL: missing builder-cuda stage in {df_path}", file=sys.stderr)
+    sys.exit(1)
+
+cuda_lines = stages["builder-cuda"]
+run_blocks: list[list[str]] = []
+idx = 0
+heredoc_re = re.compile(r"^\s*RUN\b.*?<<-?\s*['\"]?([A-Za-z0-9_]+)['\"]?\s*(?:#.*)?$", re.IGNORECASE)
+run_re = re.compile(r"^\s*RUN\b(.*)$", re.IGNORECASE)
+
+while idx < len(cuda_lines):
+    _, raw = cuda_lines[idx]
+    m_hd = heredoc_re.match(raw)
+    if m_hd:
+        tag = m_hd.group(1)
+        idx += 1
+        body: list[str] = []
+        while idx < len(cuda_lines):
+            _, b_raw = cuda_lines[idx]
+            if b_raw.strip() == tag:
+                idx += 1
+                break
+            body.append(b_raw)
+            idx += 1
+        run_blocks.append(body)
+        continue
+    m_run = run_re.match(raw)
+    if m_run:
+        body = [m_run.group(1)]
+        while body[-1].rstrip("\r\n").endswith("\\") and idx + 1 < len(cuda_lines):
+            idx += 1
+            body.append(cuda_lines[idx][1])
+        run_blocks.append(body)
+    idx += 1
+
+assign_re = re.compile(r"^(?:(?:then|else|do|export|local)\s+)*([A-Za-z_][A-Za-z0-9_]*)=(.*)$")
+off_token_re = re.compile(r"(?:^|[^A-Za-z0-9_])-D\s*USE_VRAM_SEGMENT=OFF(?=$|[^A-Za-z0-9_])")
+cmake_cfg_re = re.compile(r"(?:^|\s|&&|\|\||;)cmake\s+(?!--build\b)(.+)$")
+var_ref_re = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}|\$([A-Za-z_][A-Za-z0-9_]*)\b")
+
+saw_cmake_configure = False
+for block in run_blocks:
+    logical_lines: list[str] = []
+    cur = ""
+    for raw_ln in block:
+        stripped = strip_unquoted_comment(raw_ln).rstrip("\r\n")
+        part = stripped.lstrip() if cur else stripped
+        if part.endswith("\\") and not part.endswith("\\\\"):
+            cur += part[:-1] + " "
+        else:
+            cur += part
+            if cur.strip():
+                logical_lines.append(cur.strip())
+            cur = ""
+    if cur.strip():
+        logical_lines.append(cur.strip())
+
+    assigned_off_vars: set[str] = set()
+    for ln in logical_lines:
+        for stmt in re.split(r"(?:;|&&|\|\|)", ln):
+            st = stmt.strip()
+            m_asgn = assign_re.match(st)
+            if m_asgn and off_token_re.search(m_asgn.group(2)):
+                assigned_off_vars.add(m_asgn.group(1))
+        m_cmake = cmake_cfg_re.search(ln)
+        if m_cmake:
+            saw_cmake_configure = True
+            cmake_args = m_cmake.group(1)
+            cmake_cmd_only = re.split(r"(?:&&|\|\||;|\|)", cmake_args, maxsplit=1)[0]
+            direct_off = bool(off_token_re.search(cmake_cmd_only))
+            referenced_vars = {
+                g1 or g2 for g1, g2 in var_ref_re.findall(cmake_cmd_only)
+            }
+            var_off = bool(referenced_vars & assigned_off_vars)
+            if not (direct_off or var_off):
+                print(
+                    f"FAIL: builder-cuda cmake configure invocation in {df_path} must wire "
+                    "-DUSE_VRAM_SEGMENT=OFF (unused variable assignments and comments are rejected)",
+                    file=sys.stderr,
+                )
+                sys.exit(1)
+
+if not saw_cmake_configure:
+    print(f"FAIL: no cmake configure invocation found in builder-cuda of {df_path}", file=sys.stderr)
+    sys.exit(1)
+PY
+
 # 3. Byte-level HIXL parity with gpustack/runner & patch dry-run against staged hixl.
 KV_REPORT="$(autosync::resolve_staged_file "kv-transfer-preflight-report.json" "${STAGE_DIR}")"
 if [[ -z "${KV_REPORT}" || ! -f "${KV_REPORT}" ]]; then
