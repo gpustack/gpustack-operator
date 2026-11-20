@@ -3339,20 +3339,9 @@ func validateModelDeploymentModel(md *workercore.ModelDeployment) field.ErrorLis
 // modelDeploymentRequiresRouterIsolation reports whether the deployment has any role that
 // configures runtimeControl or runs the default managed engine sentinel.
 func modelDeploymentRequiresRouterIsolation(md *workercore.ModelDeployment) bool {
-	engine := md.Spec.Engine.Name
 	for i := range md.Spec.Roles {
 		role := &md.Spec.Roles[i]
-		if role.RuntimeControl != nil {
-			return true
-		}
-		if len(role.Command) > 0 || role.AcceleratorType == "" {
-			continue
-		}
-		if workerctrl.ModelDeploymentEffectiveRoleKind(role) == workercore.ModelDeploymentRoleKindEncode {
-			continue
-		}
-		if engine == workercore.ModelDeploymentEngineVLLM ||
-			(engine == workercore.ModelDeploymentEngineSGLang && !workerctrl.ModelDeploymentRoleUsesSGLangRay(engine, role)) {
+		if role.RuntimeControl != nil || workerctrl.ModelDeploymentRoleSupportsEngineSentinel(md, role) {
 			return true
 		}
 	}
@@ -3404,9 +3393,6 @@ func validateModelDeploymentRoleRuntimeControl(
 	var errs field.ErrorList
 	if role.RuntimeControl != nil {
 		errs = append(errs, validateModelDeploymentRoleRuntimeControlScope(md, role, rolePath)...)
-		if len(errs) > 0 {
-			return errs
-		}
 	}
 
 	if role.RuntimeControl != nil || workerctrl.ModelDeploymentRoleSupportsEngineSentinel(md, role) {

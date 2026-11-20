@@ -342,18 +342,21 @@ class SentinelControlPlane:
             await send_json_response(send, 200, {"ok": True})
             return
 
+        async def _method_not_allowed(allow: bytes) -> None:
+            await send_json_response(
+                send,
+                405,
+                {
+                    "error": "method_not_allowed",
+                    "message": f"Method {method} not allowed on {path}",
+                },
+                extra_headers=[(b"allow", allow)],
+            )
+
         try:
             if path == READY_PATH:
                 if method not in ("GET", "HEAD"):
-                    await send_json_response(
-                        send,
-                        405,
-                        {
-                            "error": "method_not_allowed",
-                            "message": f"Method {method} not allowed on {path}",
-                        },
-                        extra_headers=[(b"allow", b"GET, HEAD")],
-                    )
+                    await _method_not_allowed(b"GET, HEAD")
                     return
                 status, payload = await self.handle_ready()
                 await send_json_response(send, status, payload, head_only=head_only)
@@ -361,15 +364,7 @@ class SentinelControlPlane:
 
             if path == LIVE_PATH:
                 if method not in ("GET", "HEAD"):
-                    await send_json_response(
-                        send,
-                        405,
-                        {
-                            "error": "method_not_allowed",
-                            "message": f"Method {method} not allowed on {path}",
-                        },
-                        extra_headers=[(b"allow", b"GET, HEAD")],
-                    )
+                    await _method_not_allowed(b"GET, HEAD")
                     return
                 status, payload = await self.handle_live()
                 await send_json_response(send, status, payload, head_only=head_only)
@@ -377,15 +372,7 @@ class SentinelControlPlane:
 
             if path == ACK_PATH:
                 if method != "POST":
-                    await send_json_response(
-                        send,
-                        405,
-                        {
-                            "error": "method_not_allowed",
-                            "message": f"Method {method} not allowed on {path}",
-                        },
-                        extra_headers=[(b"allow", b"POST")],
-                    )
+                    await _method_not_allowed(b"POST")
                     return
                 body = await _read_json_body(receive)
                 status, payload = await self.handle_ack(body)
@@ -402,15 +389,7 @@ class SentinelControlPlane:
                     status, payload = await self.handle_post_pause(body)
                     await send_json_response(send, status, payload)
                     return
-                await send_json_response(
-                    send,
-                    405,
-                    {
-                        "error": "method_not_allowed",
-                        "message": f"Method {method} not allowed on {path}",
-                    },
-                    extra_headers=[(b"allow", b"GET, HEAD, POST")],
-                )
+                await _method_not_allowed(b"GET, HEAD, POST")
                 return
 
             if path == RUNTIME_CONFIG_PATH:
@@ -423,15 +402,7 @@ class SentinelControlPlane:
                     status, payload = await self.handle_post_runtime_config(body)
                     await send_json_response(send, status, payload)
                     return
-                await send_json_response(
-                    send,
-                    405,
-                    {
-                        "error": "method_not_allowed",
-                        "message": f"Method {method} not allowed on {path}",
-                    },
-                    extra_headers=[(b"allow", b"GET, HEAD, POST")],
-                )
+                await _method_not_allowed(b"GET, HEAD, POST")
                 return
 
             await send_json_response(

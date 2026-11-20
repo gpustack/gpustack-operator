@@ -358,7 +358,12 @@ def _restore_sglang_snapshot(
     snap: dict[str, Any],
 ) -> None:
     if "by_boot_id" in snap and isinstance(snap.get("by_boot_id"), dict):
-        snap = snap["by_boot_id"].get(state.boot_id, {})
+        rank_snap = snap["by_boot_id"].get(state.boot_id)
+        if not isinstance(rank_snap, dict):
+            raise ValueError(
+                f"missing per-rank rollback snapshot for boot_id={state.boot_id!r}"
+            )
+        snap = rank_snap
     scheduler._gpustack_live_max_active_requests = snap.get("live_max_active")
     rb = getattr(scheduler, "running_batch", None)
     if rb is not None and hasattr(rb, "batch_is_full"):
@@ -1288,8 +1293,9 @@ class SGLangSentinelBackend:
                         len(rb_rcs) == len(before_rcs)
                         and rb_rank_boots == before_rank_boots
                         and all(
-                            str(rc.get("applied_digest", ""))
-                            == before_digests_by_boot[str(rc.get("boot_id", ""))]
+                            str(rc.get("boot_id", "")) in before_digests_by_boot
+                            and str(rc.get("applied_digest", ""))
+                            == before_digests_by_boot.get(str(rc.get("boot_id", "")))
                             for rc in rb_rcs
                         )
                     )
@@ -1351,8 +1357,9 @@ class SGLangSentinelBackend:
                 and len(after_rcs) == len(before_rcs)
                 and after_rank_boots == before_rank_boots
                 and all(
-                    str(rc.get("applied_digest", ""))
-                    == before_digests_by_boot[str(rc.get("boot_id", ""))]
+                    str(rc.get("boot_id", "")) in before_digests_by_boot
+                    and str(rc.get("applied_digest", ""))
+                    == before_digests_by_boot.get(str(rc.get("boot_id", "")))
                     and rc.get("last_error_code")
                     in ("unsupported_fields", "invalid_argument")
                     for rc in after_rcs

@@ -420,24 +420,9 @@ func (r *ModelDeploymentReconciler) ensureModelDeploymentElasticMasterRuntimeCon
 		return true, "", nil
 	}
 
-	owner := runtimecontrol.LedgerOwnerFromModelDeployment(md)
-	ledgerStore := r.runtimeControlLedgerStore()
-	ledger, err := ledgerStore.Read(ctx, owner, role.Name)
-	if err != nil {
-		return false, "", err
-	}
-	// Clear prior digest confirmation so newly joined elastic DP ranks receive a fresh replay and ACK.
-	if entry, ok := ledger.GetEntry(master.Name); ok && entry.ConfirmedAppliedDigest != "" {
-		entry.ConfirmedAppliedDigest = ""
-		ledger.SetEntry(master.Name, entry)
-		if saveErr := ledgerStore.Save(ctx, owner, ledger); saveErr != nil {
-			if runtimecontrol.IsLedgerConflict(saveErr) {
-				return false, "retrying runtime-control ledger update after conflict", nil
-			}
-			return false, "", saveErr
-		}
-	}
-
+	// reconcileRoleRuntimeControlWithOptions verifies all expectedRanks match desiredDigest on the
+	// fast path, so newly joined ranks trigger replay and ACK automatically while already-converged
+	// passes stay read-only without rewriting the ledger.
 	budgetCtx, cancel := context.WithTimeout(ctx, modelDeploymentRuntimeControlPassBudget)
 	defer cancel()
 	outcome, err := r.reconcileRoleRuntimeControlWithOptions(

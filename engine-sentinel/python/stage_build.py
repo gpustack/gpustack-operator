@@ -94,14 +94,16 @@ def stage_unpacked(
     if (
         resolved_out in (resolved_out.parent, resolved_src, resolved_cwd)
         or resolved_out in resolved_src.parents
+        or resolved_out in resolved_cwd.parents
         or resolved_src in resolved_out.parents
     ):
         raise ValueError(
             f"Refusing to clear unsafe output_dir {resolved_out} relative to src_root {resolved_src}"
         )
-    if output_dir.exists():
-        shutil.rmtree(output_dir)
-    output_dir.mkdir(parents=True, exist_ok=True)
+    if resolved_out.exists():
+        shutil.rmtree(resolved_out)
+    resolved_out.mkdir(parents=True, exist_ok=True)
+    output_dir = resolved_out
 
     # Copy sitecustomize.py.
     shutil.copy2(src_root / "sitecustomize.py", output_dir / "sitecustomize.py")
@@ -139,19 +141,23 @@ def stage_unpacked(
     verify_env = {
         k: v
         for k, v in os.environ.items()
-        if not k.startswith("GPUSTACK_ENGINE_SENTINEL") and k != "VLLM_PLUGINS"
+        if not k.startswith("GPUSTACK_ENGINE_SENTINEL")
+        and k not in ("VLLM_PLUGINS", "PYTHONOPTIMIZE")
     }
     verify_env["PYTHONDONTWRITEBYTECODE"] = "1"
     verify_env["PYTHONPATH"] = str(output_dir)
     verify_code = (
-        "import importlib.metadata as m, os, sys; "
-        "assert 'gpustack_engine_sentinel' not in sys.modules; "
-        "assert os.environ.get('VLLM_PLUGINS') is None; "
-        f"assert m.version({PACKAGE_NAME!r}) == {resolved_version!r}; "
-        "assert not [e for e in m.entry_points(group='vllm.endpoint_plugins') if 'gpustack' in e.name]; "
-        "assert not [e for e in m.entry_points(group='vllm.general_plugins') if 'gpustack' in e.name]; "
-        "import gpustack_engine_sentinel as es; "
-        f"assert es.__version__ == {resolved_version!r}, es.__version__"
+        "import importlib.metadata as m, os, sys\n"
+        "def check(cond, msg):\n"
+        "    if not cond:\n"
+        "        raise SystemExit(msg)\n"
+        "check('gpustack_engine_sentinel' not in sys.modules, 'sentinel imported while dormant')\n"
+        "check(os.environ.get('VLLM_PLUGINS') is None, 'VLLM_PLUGINS mutated')\n"
+        f"check(m.version({PACKAGE_NAME!r}) == {resolved_version!r}, 'dist-info version mismatch')\n"
+        "check(not [e for e in m.entry_points(group='vllm.endpoint_plugins') if 'gpustack' in e.name], 'unexpected endpoint plugin')\n"
+        "check(not [e for e in m.entry_points(group='vllm.general_plugins') if 'gpustack' in e.name], 'unexpected general plugin')\n"
+        "import gpustack_engine_sentinel as es\n"
+        f"check(es.__version__ == {resolved_version!r}, f'unexpected __version__: {{es.__version__}}')\n"
     )
     subprocess.run(
         [sys.executable, "-B", "-c", verify_code],
