@@ -15,10 +15,13 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 	core "k8s.io/api/core/v1"
 	storage "k8s.io/api/storage/v1"
+	kerrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
+	k8sruntime "k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/apimachinery/pkg/util/sets"
+	k8stesting "k8s.io/client-go/testing"
 	"k8s.io/utils/ptr"
 	ctrlcli "sigs.k8s.io/controller-runtime/pkg/client"
 	ctrlfake "sigs.k8s.io/controller-runtime/pkg/client/fake"
@@ -30,10 +33,13 @@ import (
 	gpustack "gpustack.ai/gpustack/api/v1"
 	worker "gpustack.ai/gpustack/api/worker/v1"
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
+	kubefake "gpustack.ai/gpustack/pkg/kubeclients/kubernetes/fake"
 	"gpustack.ai/gpustack/pkg/kubeclients/kubernetes/scheme"
 	"gpustack.ai/gpustack/pkg/modelstore"
 	"gpustack.ai/gpustack/pkg/modeltransfer/authorization"
 	"gpustack.ai/gpustack/pkg/nodefeature"
+	"gpustack.ai/gpustack/pkg/setting"
+	"gpustack.ai/gpustack/pkg/system"
 	"gpustack.ai/gpustack/pkg/worker/settings"
 )
 
@@ -55,8 +61,13 @@ func modelTransferRemoteRender() *ModelDeploymentArtifactRender {
 func modelTransferPolicyStub(t *testing.T, policy string) {
 	t.Helper()
 	orig := modelDeploymentModelTransferPolicy
-	t.Cleanup(func() { modelDeploymentModelTransferPolicy = orig })
+	origStrict := modelDeploymentModelTransferPolicyStrict
+	t.Cleanup(func() {
+		modelDeploymentModelTransferPolicy = orig
+		modelDeploymentModelTransferPolicyStrict = origStrict
+	})
 	modelDeploymentModelTransferPolicy = func(context.Context) string { return policy }
+	modelDeploymentModelTransferPolicyStrict = func(context.Context) (string, error) { return policy, nil }
 }
 
 func modelTransferTestEnv(t *testing.T, objs ...ctrlcli.Object) ctrlcli.WithWatch {
@@ -3449,5 +3460,62 @@ func TestModelDeploymentModelTransferAscendA5PreferLifecycle(t *testing.T) {
 			require.Len(t, pods, 1)
 			assert.Equal(t, qty1, pods[0].Spec.Containers[0].Resources.Limits[rdmaShared])
 		})
+	})
+
+	t.Run("transient remote policy read error fails closed on weight-only A5 Hub Server while independent A5 KV leg succeeds", func(t *testing.T) {
+		modelTransferSourceReadyStub(t, false)
+		setting.InvalidateCache()
+		defaultPolicy, err := readModelDeploymentModelTransferPolicyStrict(context.Background())
+		require.NoError(t, err, "missing settings secret must resolve default Prefer cleanly")
+		assert.Equal(t, settings.ModelArtifactRemoteDeliveryPrefer, defaultPolicy)
+
+		kubeCli := system.LoopbackKubeClient.Get().(*kubefake.Clientset)
+		origChain := slices.Clone(kubeCli.ReactionChain)
+		setting.InvalidateCache()
+		t.Cleanup(func() {
+			kubeCli.ReactionChain = origChain
+			setting.InvalidateCache()
+		})
+		kubeCli.PrependReactor("get", "secrets", func(action k8stesting.Action) (bool, k8sruntime.Object, error) {
+			getAction, ok := action.(k8stesting.GetAction)
+			if ok && getAction.GetNamespace() == setting.DelegatedSecretNamespace && getAction.GetName() == setting.DelegatedSecretName {
+				return true, nil, kerrors.NewServiceUnavailable("settings secret transiently unreadable")
+			}
+			return false, nil, nil
+		})
+
+		weightOnlyMD := newRenderDeployment(func(m *workercore.ModelDeployment) {
+			m.Spec.Model.ArtifactRef = &core.LocalObjectReference{Name: "weights"}
+			m.Spec.KVCache = nil
+			m.Spec.Roles[0].Replicas = 1
+			m.Spec.Roles[0].Resources = &workercore.ModelDeploymentRoleResources{
+				Accelerator: ptr.To(qty1),
+				Interface:   ptr.To(qty1),
+			}
+		})
+		weightOnlyCli := newA5Client(t, weightOnlyMD)
+		_, err = reconcileModelDeployment(t, weightOnlyCli)
+		require.Error(t, err, "transient remote policy read error must fail closed instead of granting RDMA")
+		assert.Contains(t, err.Error(), "read remote delivery policy")
+		assert.Empty(t, replicaPods(t, weightOnlyCli))
+
+		kvCoveredMD := newRenderDeployment(func(m *workercore.ModelDeployment) {
+			m.Spec.Model.ArtifactRef = &core.LocalObjectReference{Name: "weights"}
+			m.Spec.Roles[0].Replicas = 1
+			m.Spec.Roles[0].Resources = &workercore.ModelDeploymentRoleResources{
+				Accelerator: ptr.To(qty1),
+				Interface:   ptr.To(qty1),
+			}
+		})
+		kvCoveredCli := newA5Client(t, kvCoveredMD)
+		cannBackend := newRenderBackend()
+		cannBackend.Spec.Transport.Protocol = "CANN"
+		require.NoError(t, kvCoveredCli.Create(context.Background(), newRenderPool()))
+		require.NoError(t, kvCoveredCli.Create(context.Background(), cannBackend))
+		_, err = reconcileModelDeployment(t, kvCoveredCli)
+		require.NoError(t, err, "independent A5 KV leg must succeed without reading remote policy")
+		pods := replicaPods(t, kvCoveredCli)
+		require.Len(t, pods, 1)
+		assert.Equal(t, qty1, pods[0].Spec.Containers[0].Resources.Limits[rdmaShared])
 	})
 }

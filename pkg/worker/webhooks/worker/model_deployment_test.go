@@ -6730,4 +6730,122 @@ func TestModelDeploymentWebhook_AscendA5InterfaceUpdateRejudge(t *testing.T) {
 		assert.Contains(t, err.Error(), "spec.roles[0].resources.interface")
 		assert.Contains(t, err.Error(), "spec.roles[1].resources.interface")
 	})
+
+	t.Run("resizing PVC-backed A5 vLLM Server from size 2 to 1 with interface=1 rejudges and rejects", func(t *testing.T) {
+		pvcWeights := &workercore.ModelArtifact{
+			ObjectMeta: meta.ObjectMeta{Namespace: "team-a", Name: "pvc-weights"},
+			Spec: workercore.ModelArtifactSpec{
+				Source: workercore.ModelArtifactSource{
+					PersistentVolumeClaim: &workercore.ModelArtifactPersistentVolumeClaimSource{ClaimName: "model-pvc"},
+				},
+			},
+		}
+		w := newModelDeploymentWebhookWith([]ctrlcli.Object{ascendA5, pvcWeights})
+		old := modelDeployment(workercore.ModelDeploymentEngineVLLM,
+			role(func(r *workercore.ModelDeploymentRole) {
+				r.Name = "server"
+				r.Kind = workercore.ModelDeploymentRoleKindServer
+				r.AcceleratorType = "atlas-950"
+				r.ReplicaSize = 2
+				r.Resources = &workercore.ModelDeploymentRoleResources{
+					Accelerator: ptr.To(qty1),
+					Interface:   ptr.To(qty1),
+				}
+			}),
+		)
+		old.Spec.KVCache = nil
+		old.Spec.Model.ArtifactRef = &core.LocalObjectReference{Name: "pvc-weights"}
+		_, err := w.ValidateCreate(context.Background(), old)
+		require.NoError(t, err, "size=2 collective leg grants RDMA on create even with PVC artifact")
+
+		newer := old.DeepCopy()
+		newer.Spec.Roles[0].ReplicaSize = 1
+		_, err = w.ValidateUpdate(context.Background(), old, newer)
+		require.Error(t, err, "dropping size from 2 to 1 removes the collective leg and PVC artifact is ineligible")
+		assert.Contains(t, err.Error(), "spec.roles[0].resources.interface")
+		assert.Contains(t, err.Error(), "no effective RDMA or EFA")
+	})
+}
+
+func TestModelDeploymentWebhook_AscendA5RemotePolicyReadFailClosed(t *testing.T) {
+	qty1 := resource.MustParse("1")
+	ascendA5 := servingInstanceType("atlas-950", 8, func(it *worker.InstanceType) {
+		it.Status.Detail.Manufacturer = nodefeature.ManufacturerAscend
+		it.Status.Detail.Family = nodefeature.AcceleratorFamilyAscend950
+	})
+	hubWeights := &workercore.ModelArtifact{
+		ObjectMeta: meta.ObjectMeta{Namespace: "team-a", Name: "weights"},
+		Spec: workercore.ModelArtifactSpec{
+			Source: workercore.ModelArtifactSource{
+				HuggingFace: &workercore.ModelArtifactHubSource{Repository: "Qwen/Qwen2.5-72B-Instruct"},
+			},
+		},
+	}
+	objs := kvCacheFixture()
+	objs[2].(*workercore.KVCacheBackend).Spec.Transport.Protocol = "CANN"
+	objs = append(objs, ascendA5, hubWeights)
+	w := newModelDeploymentWebhookWith(objs)
+
+	origPolicyReader := modelDeploymentRemoteDeliveryPolicyValue
+	t.Cleanup(func() { modelDeploymentRemoteDeliveryPolicyValue = origPolicyReader })
+
+	t.Run("missing settings secret or key resolves default Prefer cleanly", func(t *testing.T) {
+		settingtest.MergeDelegatedSettings(t, map[string]string{"aws-efa-enabled": "false"})
+		val, err := resolveModelDeploymentRemoteDeliveryPolicy(context.Background())
+		require.NoError(t, err)
+		assert.Equal(t, settings.ModelArtifactRemoteDeliveryPrefer, val)
+	})
+
+	var policyReadCalls int
+	modelDeploymentRemoteDeliveryPolicyValue = func(context.Context) (string, error) {
+		policyReadCalls++
+		return settings.ModelArtifactRemoteDeliveryPrefer, fmt.Errorf(
+			"get value of setting %s: %w",
+			settings.ModelArtifactRemoteDeliveryPolicy.Name(),
+			kerrors.NewServiceUnavailable("settings store unavailable"),
+		)
+	}
+
+	t.Run("weight-only Ascend A5 Hub Server fails closed on transient policy read error", func(t *testing.T) {
+		policyReadCalls = 0
+		md := modelDeployment(workercore.ModelDeploymentEngineVLLM,
+			role(func(r *workercore.ModelDeploymentRole) {
+				r.Name = "server"
+				r.Kind = workercore.ModelDeploymentRoleKindServer
+				r.AcceleratorType = "atlas-950"
+				r.Resources = &workercore.ModelDeploymentRoleResources{
+					Accelerator: ptr.To(qty1),
+					Interface:   ptr.To(qty1),
+				}
+			}),
+		)
+		md.Spec.KVCache = nil
+		md.Spec.Model.ArtifactRef = &core.LocalObjectReference{Name: "weights"}
+
+		_, err := w.ValidateCreate(context.Background(), md)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "read remote delivery policy")
+		assert.Equal(t, 1, policyReadCalls)
+	})
+
+	t.Run("independent Ascend A5 KV leg succeeds without reading remote policy", func(t *testing.T) {
+		policyReadCalls = 0
+		md := modelDeployment(workercore.ModelDeploymentEngineVLLM,
+			role(func(r *workercore.ModelDeploymentRole) {
+				r.Name = "server"
+				r.Kind = workercore.ModelDeploymentRoleKindServer
+				r.AcceleratorType = "atlas-950"
+				r.Resources = &workercore.ModelDeploymentRoleResources{
+					Accelerator: ptr.To(qty1),
+					Interface:   ptr.To(qty1),
+				}
+			}),
+		)
+		md.Spec.KVCache.PoolRef.Name = "chat"
+		md.Spec.Model.ArtifactRef = &core.LocalObjectReference{Name: "weights"}
+
+		_, err := w.ValidateCreate(context.Background(), md)
+		require.NoError(t, err)
+		assert.Zero(t, policyReadCalls)
+	})
 }

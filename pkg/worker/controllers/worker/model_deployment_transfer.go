@@ -218,6 +218,23 @@ var modelDeploymentModelTransferPolicy = func(ctx context.Context) string {
 	return settings.ModelArtifactRemoteDeliveryPolicy.ShouldValueFromRemote(ctx)
 }
 
+// modelDeploymentModelTransferPolicyStrict reads the cluster's remote delivery policy
+// from the delegated settings Secret, returning the setting's default when the Secret or
+// key is absent and surfacing transient API read errors instead of falling back to Prefer.
+var modelDeploymentModelTransferPolicyStrict = readModelDeploymentModelTransferPolicyStrict
+
+func readModelDeploymentModelTransferPolicyStrict(ctx context.Context) (string, error) {
+	val, err := settings.ModelArtifactRemoteDeliveryPolicy.ValueFromRemote(ctx)
+	if err == nil {
+		return val, nil
+	}
+	notFoundMsg := fmt.Sprintf("get value of setting %s: not found", settings.ModelArtifactRemoteDeliveryPolicy.Name())
+	if kerrors.IsNotFound(err) || err.Error() == notFoundMsg {
+		return val, nil
+	}
+	return "", err
+}
+
 // modelDeploymentModelTransferEngines are the engines a remote delivery qualifies: a
 // managed role whose engine loads weights through one of the local-reader
 // adapters. vLLM-Ascend is not a separate engine here — it is the vLLM

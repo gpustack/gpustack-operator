@@ -529,15 +529,22 @@ func modelDeploymentPoolTransportInputsChanged(old, md *workercore.ModelDeployme
 }
 
 // modelDeploymentDirectLegProbe evaluates one role's direct-transfer leg on both non-Ascend and
-// Ascend A5 reference hardware. Equal probes mean the edit cannot change the direct leg for any
-// manufacturer or family, avoiding an unnecessary AcceleratorType read on updates.
+// Ascend A5 reference hardware with and without remote weight delivery. Equal probes mean the edit
+// cannot change the direct leg for any manufacturer, family or artifact eligibility, avoiding an
+// unnecessary AcceleratorType read on updates.
 func modelDeploymentDirectLegProbe(
 	md *workercore.ModelDeployment, role *workercore.ModelDeploymentRole, awsEFAEnabled bool,
-) [2]string {
+) [4]string {
 	remoteDelivery := md.Spec.Model.ArtifactRef != nil
-	return [2]string{
+	return [4]string{
+		workerctrl.ModelDeploymentDirectInterfaceProtocol(
+			md, role, nodefeature.ManufacturerNVIDIA, "", false, awsEFAEnabled,
+		),
 		workerctrl.ModelDeploymentDirectInterfaceProtocol(
 			md, role, nodefeature.ManufacturerNVIDIA, "", remoteDelivery, awsEFAEnabled,
+		),
+		workerctrl.ModelDeploymentDirectInterfaceProtocol(
+			md, role, nodefeature.ManufacturerAscend, nodefeature.AcceleratorFamilyAscend950, false, awsEFAEnabled,
 		),
 		workerctrl.ModelDeploymentDirectInterfaceProtocol(
 			md, role, nodefeature.ManufacturerAscend, nodefeature.AcceleratorFamilyAscend950, remoteDelivery, awsEFAEnabled,
@@ -567,9 +574,27 @@ func interfaceQuantity(ress *workercore.ModelDeploymentRoleResources) *resource.
 	return ress.Interface
 }
 
+// modelDeploymentRemoteDeliveryPolicyValue reads ModelArtifactRemoteDeliveryPolicy via its
+// error-returning lookup. It is a variable so tests can inject transient API read errors.
+var modelDeploymentRemoteDeliveryPolicyValue = func(ctx context.Context) (string, error) {
+	return settings.ModelArtifactRemoteDeliveryPolicy.Value(ctx)
+}
+
+func resolveModelDeploymentRemoteDeliveryPolicy(ctx context.Context) (string, error) {
+	val, err := modelDeploymentRemoteDeliveryPolicyValue(ctx)
+	if err == nil {
+		return val, nil
+	}
+	notFoundMsg := fmt.Sprintf("get value of setting %s: not found", settings.ModelArtifactRemoteDeliveryPolicy.Name())
+	if kerrors.IsNotFound(err) || err.Error() == notFoundMsg {
+		return val, nil
+	}
+	return "", err
+}
+
 func (r *ModelDeploymentWebhook) modelDeploymentDirectRemoteEligible(
 	ctx context.Context, md *workercore.ModelDeployment, manufacturer, family string,
-	remotePolicyActive bool, errPath *field.Path,
+	resolveRemotePolicy func(*field.Path) (bool, error), errPath *field.Path,
 ) (bool, error) {
 	if md.Spec.Model.ArtifactRef == nil {
 		return false, nil
@@ -577,7 +602,14 @@ func (r *ModelDeploymentWebhook) modelDeploymentDirectRemoteEligible(
 	if manufacturer != nodefeature.ManufacturerAscend {
 		return true, nil
 	}
-	if family != nodefeature.AcceleratorFamilyAscend950 || !remotePolicyActive {
+	if family != nodefeature.AcceleratorFamilyAscend950 {
+		return false, nil
+	}
+	remotePolicyActive, err := resolveRemotePolicy(errPath)
+	if err != nil {
+		return false, err
+	}
+	if !remotePolicyActive {
 		return false, nil
 	}
 	ma := &workercore.ModelArtifact{}
@@ -592,13 +624,42 @@ func (r *ModelDeploymentWebhook) modelDeploymentDirectRemoteEligible(
 	return ma.Spec.Source.HuggingFace != nil || ma.Spec.Source.ModelScope != nil, nil
 }
 
+func (r *ModelDeploymentWebhook) modelDeploymentResolvedDirectProtocol(
+	ctx context.Context, md *workercore.ModelDeployment, role *workercore.ModelDeploymentRole,
+	manufacturer, family string, efaActive bool,
+	resolveRemotePolicy func(*field.Path) (bool, error), errPath *field.Path,
+) (string, error) {
+	direct := workerctrl.ModelDeploymentDirectInterfaceProtocol(
+		md, role, manufacturer, family, false, efaActive,
+	)
+	if direct != "" {
+		return direct, nil
+	}
+	withRemote := workerctrl.ModelDeploymentDirectInterfaceProtocol(
+		md, role, manufacturer, family, true, efaActive,
+	)
+	if withRemote == "" {
+		return "", nil
+	}
+	remoteEligible, err := r.modelDeploymentDirectRemoteEligible(
+		ctx, md, manufacturer, family, resolveRemotePolicy, errPath,
+	)
+	if err != nil {
+		return "", err
+	}
+	if !remoteEligible {
+		return "", nil
+	}
+	return withRemote, nil
+}
+
 // modelDeploymentRoleNeedsInterfaceRejudge reports whether this write must rejudge one requesting
 // role. A create judges every role. An update judges the roles whose own inputs moved; the router
 // and the transfer declaration reach a role only through the direct leg the production helper
 // renders, so a role whose leg kept its value keeps the escape hatch its stored verdict provides.
 func (r *ModelDeploymentWebhook) modelDeploymentRoleNeedsInterfaceRejudge(
 	ctx context.Context, old, md *workercore.ModelDeployment, was, role *workercore.ModelDeploymentRole, i int,
-	awsEFAEnabled, remotePolicyActive bool,
+	awsEFAEnabled bool, resolveRemotePolicy func(*field.Path) (bool, error),
 ) (bool, error) {
 	if modelDeploymentRoleInterfaceInputsChanged(was, role) {
 		return true, nil
@@ -622,20 +683,19 @@ func (r *ModelDeploymentWebhook) modelDeploymentRoleNeedsInterfaceRejudge(
 		family = accType.Status.Detail.Family
 	}
 	errPath := field.NewPath("spec", "roles").Index(i).Child("resources", "interface")
-	oldRemoteEligible, err := r.modelDeploymentDirectRemoteEligible(
-		ctx, old, manufacturer, family, remotePolicyActive, errPath,
+	oldDirect, err := r.modelDeploymentResolvedDirectProtocol(
+		ctx, old, was, manufacturer, family, awsEFAEnabled, resolveRemotePolicy, errPath,
 	)
 	if err != nil {
 		return false, err
 	}
-	newRemoteEligible, err := r.modelDeploymentDirectRemoteEligible(
-		ctx, md, manufacturer, family, remotePolicyActive, errPath,
+	newDirect, err := r.modelDeploymentResolvedDirectProtocol(
+		ctx, md, role, manufacturer, family, awsEFAEnabled, resolveRemotePolicy, errPath,
 	)
 	if err != nil {
 		return false, err
 	}
-	return workerctrl.ModelDeploymentDirectInterfaceProtocol(old, was, manufacturer, family, oldRemoteEligible, awsEFAEnabled) !=
-		workerctrl.ModelDeploymentDirectInterfaceProtocol(md, role, manufacturer, family, newRemoteEligible, awsEFAEnabled), nil
+	return oldDirect != newDirect, nil
 }
 
 // validateModelDeploymentInterfaceRequests checks the device key against the resolved cache
@@ -649,9 +709,22 @@ func (r *ModelDeploymentWebhook) validateModelDeploymentInterfaceRequests(
 	ctx context.Context, old, md *workercore.ModelDeployment,
 ) (field.ErrorList, error) {
 	awsEFAEnabled := settings.AWSEFAEnabled.ShouldValueBool(ctx)
-	remotePolicy := settings.ModelArtifactRemoteDeliveryPolicy.ShouldValue(ctx)
-	remotePolicyActive := remotePolicy == settings.ModelArtifactRemoteDeliveryPrefer ||
-		remotePolicy == settings.ModelArtifactRemoteDeliveryRequire
+	var (
+		remotePolicyResolved bool
+		remotePolicyActive   bool
+	)
+	resolveRemotePolicy := func(errPath *field.Path) (bool, error) {
+		if !remotePolicyResolved {
+			remotePolicy, err := resolveModelDeploymentRemoteDeliveryPolicy(ctx)
+			if err != nil {
+				return false, field.InternalError(errPath, fmt.Errorf("read remote delivery policy: %w", err))
+			}
+			remotePolicyActive = remotePolicy == settings.ModelArtifactRemoteDeliveryPrefer ||
+				remotePolicy == settings.ModelArtifactRemoteDeliveryRequire
+			remotePolicyResolved = true
+		}
+		return remotePolicyActive, nil
+	}
 	stored := make(map[string]*workercore.ModelDeploymentRole, len(md.Spec.Roles))
 	if old != nil {
 		for i := range old.Spec.Roles {
@@ -668,7 +741,7 @@ func (r *ModelDeploymentWebhook) validateModelDeploymentInterfaceRequests(
 		if old != nil {
 			judge, err := r.modelDeploymentRoleNeedsInterfaceRejudge(
 				ctx, old, md, stored[md.Spec.Roles[i].Name], &md.Spec.Roles[i], i,
-				awsEFAEnabled, remotePolicyActive,
+				awsEFAEnabled, resolveRemotePolicy,
 			)
 			if err != nil {
 				return nil, err
@@ -738,17 +811,20 @@ func (r *ModelDeploymentWebhook) validateModelDeploymentInterfaceRequests(
 			roleProtocols = nil
 		}
 		rolePath := field.NewPath("spec", "roles").Index(i).Child("resources", "interface")
-		remoteEligible, err := r.modelDeploymentDirectRemoteEligible(
-			ctx, md, manufacturer, family, remotePolicyActive, rolePath,
-		)
-		if err != nil {
-			return nil, err
-		}
 		efaActive := awsEFAEnabled || slices.Contains(roleProtocols, "efa")
-		directProtocol := workerctrl.ModelDeploymentDirectInterfaceProtocol(
-			md, role, manufacturer, family, remoteEligible, efaActive,
-		)
-		_, err = workerctrl.ModelDeploymentInterfaceResource(roleProtocols, directProtocol, count)
+		directProtocol := ""
+		if !(manufacturer == nodefeature.ManufacturerAscend &&
+			len(roleProtocols) > 0 &&
+			!slices.ContainsFunc(roleProtocols, func(p string) bool { return p != "rdma" })) {
+			var err error
+			directProtocol, err = r.modelDeploymentResolvedDirectProtocol(
+				ctx, md, role, manufacturer, family, efaActive, resolveRemotePolicy, rolePath,
+			)
+			if err != nil {
+				return nil, err
+			}
+		}
+		_, err := workerctrl.ModelDeploymentInterfaceResource(roleProtocols, directProtocol, count)
 		if err != nil {
 			errs = append(errs, field.Invalid(rolePath, role.Resources.Interface.String(), err.Error()))
 		}
