@@ -130,8 +130,8 @@ if paths_match '\.md$|/check-docs\.sh$|^hack/check/skills\.sh$|\.agents/skills/|
   run_lint "make lint docs" make lint docs
 fi
 
-# Lint Python sources under model-transfer/python with uv and ruff when any Python source or project config changes.
-if paths_match '\.py$|^model-transfer/python/(pyproject\.toml|ruff\.toml|pytest\.ini|uv\.lock|Makefile)$'; then
+# Lint Python sources under model-transfer/python and engine-sentinel/python with uv and ruff when any Python source or project config changes.
+if paths_match '\.py$|^(model-transfer|engine-sentinel)/python/(pyproject\.toml|ruff\.toml|pytest\.ini|uv\.lock|hatch\.toml|Makefile)$'; then
   run_lint "make lint python" make lint python
 fi
 

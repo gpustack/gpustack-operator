@@ -308,6 +308,11 @@ mkdir -p "$TREE/model-transfer/python/gpustack_model_transfer"
 printf 'x = 1\n' > "$TREE/model-transfer/python/gpustack_model_transfer/mod.py"
 expect "a Python source runs the Python ruff gate and the code gate" "lint,lint python"
 
+build
+mkdir -p "$TREE/engine-sentinel/python"
+printf '[project]\nname = "gpustack-engine-sentinel"\n' > "$TREE/engine-sentinel/python/pyproject.toml"
+expect "an engine-sentinel Python config runs the Python ruff gate and the code gate" "lint,lint python"
+
 # --- .auto-sync inputs, including markdown instructions ----------------------
 
 # autosync-selftest.sh runs inside `make lint` and validates .auto-sync/** taskpacks, check
