@@ -164,14 +164,25 @@ autosync::bootstrap_env() {
   fi
 
   if [[ -n "${LOOPWRIGHT_STAGED_DIR:-}" && -f "${LOOPWRIGHT_STAGED_DIR}/deps-charts-cache.tgz" ]]; then
-    if [[ -z "${GPUSTACK_DEPS_CACHE_DIR:-}" ]] || ! compgen -G "${GPUSTACK_DEPS_CACHE_DIR}/charts/*.tgz" >/dev/null 2>&1; then
+    local has_cached_tgz="false"
+    if [[ -n "${GPUSTACK_DEPS_CACHE_DIR:-}" && -d "${GPUSTACK_DEPS_CACHE_DIR}/charts" ]]; then
+      if (
+        shopt -s nullglob
+        cached_tgzs=("${GPUSTACK_DEPS_CACHE_DIR}/charts/"*.tgz)
+        (( ${#cached_tgzs[@]} > 0 ))
+      ); then
+        has_cached_tgz="true"
+      fi
+    fi
+    if [[ "${has_cached_tgz}" != "true" ]]; then
       local staged_deps_cache
       staged_deps_cache="$(mktemp -d "${TMPDIR:-/tmp}/autosync-deps-cache-XXXXXX")"
       mkdir -p "${staged_deps_cache}/charts"
-      if tar -xzf "${LOOPWRIGHT_STAGED_DIR}/deps-charts-cache.tgz" -C "${staged_deps_cache}/charts" 2>/dev/null; then
+      if tar -xzf "${LOOPWRIGHT_STAGED_DIR}/deps-charts-cache.tgz" -C "${staged_deps_cache}/charts"; then
         export GPUSTACK_DEPS_CACHE_DIR="${staged_deps_cache}"
         export AUTOSYNC_EPHEMERAL_DEPS_CACHE="${staged_deps_cache}"
       else
+        printf 'WARN: autosync: failed to extract deps-charts-cache.tgz from %s\n' "${LOOPWRIGHT_STAGED_DIR}" >&2
         rm -rf "${staged_deps_cache}" 2>/dev/null || true
       fi
     fi
@@ -421,6 +432,7 @@ autosync::cleanup_ephemeral_git() {
 # autosync::resolve_baseline_dir [stage_dir]
 # Prints canonical LOOPWRIGHT_BASE_DIR when provided by Taskpack 2.0 command.v1,
 # falling back to <stage_dir>/baseline for standalone invocations.
+# Intentionally returns 0 with empty stdout when absent so `set -e` callers handle optional modes.
 autosync::resolve_baseline_dir() {
   local stage_dir="${1:-${AUTOSYNC_STAGE_DIR:-}}"
   if [[ -n "${LOOPWRIGHT_BASE_DIR:-}" && -d "${LOOPWRIGHT_BASE_DIR}" ]]; then
@@ -436,7 +448,7 @@ autosync::resolve_baseline_dir() {
 
 # autosync::resolve_staged_file <filename> [stage_dir]
 # Prints path in LOOPWRIGHT_STAGED_DIR (Taskpack 2.0 exposeToChecks) when present,
-# falling back to <stage_dir>/<filename>.
+# falling back to <stage_dir>/<filename>. Intentionally returns 0 with empty stdout when absent.
 autosync::resolve_staged_file() {
   local filename="${1:?filename required}"
   local stage_dir="${2:-${AUTOSYNC_STAGE_DIR:-}}"
@@ -458,6 +470,7 @@ autosync::is_check_only_unchanged() {
   local base_dir="${1:-}"
   local cand_dir="${2:-}"
   shift 2 || return 1
+  (( $# > 0 )) || return 1
   [[ -n "${LOOPWRIGHT_BASE_DIR:-}" && "${AUTOSYNC_VERIFY_UNCHANGED:-false}" != "true" ]] || return 1
   [[ -n "${base_dir}" && -d "${base_dir}" && -n "${cand_dir}" && -d "${cand_dir}" ]] || return 1
 

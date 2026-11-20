@@ -182,6 +182,10 @@ MANIFESTS_JSON="$(autosync::resolve_staged_file "image-manifests.json" "${AUTOSY
 
 # 1. Shared-file diff guards on hack/deps.sh (chart_staging() only) and values.yaml.
 if [[ -n "${BASELINE_DIR}" || -n "${AUTOSYNC_STAGE_DIR:-}" ]]; then
+  if [[ -z "${BASELINE_DIR}" ]]; then
+    printf 'FAIL: baseline directory is missing: %s/baseline\n' "${AUTOSYNC_STAGE_DIR}" >&2
+    exit 1
+  fi
   BASE_DEPS="${BASELINE_DIR}/hack/deps.sh"
   if [[ ! -f "${BASE_DEPS}" ]]; then
     printf 'FAIL: baseline hack/deps.sh is missing: %s\n' "${BASE_DEPS}" >&2
@@ -571,10 +575,11 @@ if [[ -z "${MANIFESTS_JSON}" ]]; then
     printf 'FAIL: staged image-manifests.json is missing\n' >&2
     exit 1
   fi
-  if [[ "${AUTOSYNC_SKIP_IMAGE_CHECK:-false}" != "true" ]]; then
-    printf 'FAIL: image-manifests.json required for image publication verification (set AUTOSYNC_SKIP_IMAGE_CHECK=true only for local manual runs)\n' >&2
+  if [[ "${AUTOSYNC_SKIP_IMAGE_CHECK:-false}" != "true" || "${GITHUB_ACTIONS:-}" == "true" ]]; then
+    printf 'FAIL: image-manifests.json required for image publication verification (AUTOSYNC_SKIP_IMAGE_CHECK=true is permitted only for local manual runs outside CI)\n' >&2
     exit 1
   fi
+  printf 'WARN: skipping mirrored-image publication verification (AUTOSYNC_SKIP_IMAGE_CHECK=true)\n' >&2
 else
   for img_ref in "${SUBCHART_IMAGES[@]+"${SUBCHART_IMAGES[@]}"}"; do
     autosync::assert_image_published "${MANIFESTS_JSON}" "${img_ref}"

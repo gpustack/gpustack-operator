@@ -45,6 +45,9 @@ if [[ -n "${BASELINE_DIR}" ]]; then
     "${base_dockerfile}" \
     "${cand_dockerfile}" \
     "LIB_(UBS_VIRT_ENPU|HAMI_CORE)_COMMIT"
+elif [[ -n "${AUTOSYNC_STAGE_DIR:-}" ]]; then
+  printf 'FAIL: baseline directory is missing: %s/baseline\n' "${AUTOSYNC_STAGE_DIR}" >&2
+  exit 1
 elif [[ "${AUTOSYNC_ALLOW_MISSING_STAGE_DIR:-false}" != "true" ]]; then
   printf 'FAIL: LOOPWRIGHT_BASE_DIR or AUTOSYNC_STAGE_DIR must be set (set AUTOSYNC_ALLOW_MISSING_STAGE_DIR=true only for minimal unit tests)\n' >&2
   exit 1

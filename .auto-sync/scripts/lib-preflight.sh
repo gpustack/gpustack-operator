@@ -1160,7 +1160,12 @@ def copy_fresh_regular_file(src_path: str, dst_path: str) -> None:
     os.chmod(dst_path, 0o644)
 
 
-def pack_dir_to_tgz(src_root: str, dst_tgz: str, exclude_basenames: set[str] | None = None) -> int:
+def pack_dir_to_tgz(
+    src_root: str,
+    dst_tgz: str,
+    exclude_basenames: set[str] | None = None,
+    max_compressed_bytes: int | None = None,
+) -> tuple[int, bool]:
     excl = exclude_basenames or set()
     entries: list[tuple[str, str]] = []
     for cur, dirs, files in os.walk(src_root, followlinks=False):
@@ -1174,9 +1179,10 @@ def pack_dir_to_tgz(src_root: str, dst_tgz: str, exclude_basenames: set[str] | N
                 continue
             entries.append((rel, fp))
     if not entries:
-        return 0
+        return 0, False
     if os.path.lexists(dst_tgz):
         os.unlink(dst_tgz)
+    exceeded = False
     with open(dst_tgz, "wb") as raw_f:
         with gzip.GzipFile(filename="", mode="wb", fileobj=raw_f, mtime=0) as gz_f:
             with tarfile.open(mode="w", fileobj=gz_f) as tf:
@@ -1192,8 +1198,15 @@ def pack_dir_to_tgz(src_root: str, dst_tgz: str, exclude_basenames: set[str] | N
                     ti.gname = ""
                     with open(fp, "rb") as rf:
                         tf.addfile(ti, rf)
+                    if max_compressed_bytes is not None and raw_f.tell() > max_compressed_bytes:
+                        exceeded = True
+                        break
+    if exceeded or (max_compressed_bytes is not None and os.path.getsize(dst_tgz) > max_compressed_bytes):
+        if os.path.lexists(dst_tgz):
+            os.unlink(dst_tgz)
+        return len(entries), True
     os.chmod(dst_tgz, 0o644)
-    return len(entries)
+    return len(entries), False
 
 
 with open(records_path, "r", encoding="utf-8") as f:
@@ -1439,7 +1452,7 @@ has_stage_bundle = False
 if bundle_dir and os.path.isdir(bundle_dir):
     bundle_tgz_name = f"{domain}-stage-bundle.tgz"
     bundle_tgz_path = os.path.join(staging_dir, bundle_tgz_name)
-    packed_cnt = pack_dir_to_tgz(
+    packed_cnt, _ = pack_dir_to_tgz(
         bundle_dir,
         bundle_tgz_path,
         exclude_basenames={report_bn, "upstream-records.json", "image-manifests.json"},
@@ -1454,7 +1467,7 @@ if bundle_dir and os.path.isdir(bundle_dir):
             "exposeToChecks": False,
         })
 
-# 4. Pack optional check-exposed archives (bounded <= 64 MiB).
+# 4. Pack optional check-exposed archives (bounded <= 64 MiB with streaming early abort).
 MAX_CHECK_ARCHIVE_BYTES = 64 * 1024 * 1024
 for spec in check_archive_specs:
     if "::" not in spec:
@@ -1464,10 +1477,9 @@ for spec in check_archive_specs:
         continue
     arc_name = f"{arc_id}.tgz"
     arc_dst = os.path.join(staging_dir, arc_name)
-    cnt = pack_dir_to_tgz(arc_src, arc_dst)
+    cnt, over_limit = pack_dir_to_tgz(arc_src, arc_dst, max_compressed_bytes=MAX_CHECK_ARCHIVE_BYTES)
     if cnt > 0:
-        arc_size = os.path.getsize(arc_dst)
-        if arc_size <= MAX_CHECK_ARCHIVE_BYTES:
+        if not over_limit:
             staged_resources.append({
                 "id": arc_id,
                 "kind": "document",
@@ -1476,10 +1488,9 @@ for spec in check_archive_specs:
                 "exposeToChecks": True,
             })
         else:
-            os.unlink(arc_dst)
             print(
-                f"WARN: check archive '{arc_id}' ({arc_size} bytes) exceeds "
-                f"{MAX_CHECK_ARCHIVE_BYTES} bytes and was omitted from stagedResources",
+                f"WARN: check archive '{arc_id}' exceeded {MAX_CHECK_ARCHIVE_BYTES} bytes "
+                "during compression and was omitted from stagedResources",
                 file=sys.stderr,
             )
 

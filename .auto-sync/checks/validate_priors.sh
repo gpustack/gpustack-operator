@@ -207,8 +207,13 @@ PY
 
 autosync::ensure_ephemeral_git "${AUTOSYNC_CANDIDATE_ROOT}"
 
-if [[ "${AUTOSYNC_FAST_SELFTEST:-false}" == "true" || "${check_only_unchanged}" == "true" ]]; then
-  autosync::write_check_out true "validate_priors passed"
+if [[ "${AUTOSYNC_FAST_SELFTEST:-false}" == "true" ]]; then
+  autosync::write_check_out true "validate_priors passed (fast selftest mode)"
+  exit 0
+fi
+
+if [[ "${check_only_unchanged}" == "true" ]]; then
+  autosync::write_check_out true "validate_priors passed (check-only no_change)"
   exit 0
 fi
 

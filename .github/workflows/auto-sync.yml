@@ -354,16 +354,18 @@ jobs:
           fi
           bwrap --version
           if ! bwrap --unshare-all --ro-bind / / "$(command -v true)" >/dev/null 2>&1; then
-            if [[ "${RUNNER_ENVIRONMENT:-}" == "github-hosted" ]]; then
+            if [[ "${RUNNER_ENVIRONMENT:-}" == "github-hosted" || "${ALLOW_USERNS_SYSCTL:-false}" == "true" ]]; then
               if ! sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0; then
                 echo "WARN: failed to disable kernel.apparmor_restrict_unprivileged_userns" >&2
               fi
             else
-              echo "ERROR: bubblewrap unprivileged user namespaces are restricted on this self-hosted runner; configure an AppArmor profile for /usr/bin/bwrap on the host instead of mutating global sysctl state" >&2
+              echo "ERROR: bubblewrap unprivileged user namespaces are restricted on this runner (RUNNER_ENVIRONMENT='${RUNNER_ENVIRONMENT:-}'); configure an AppArmor profile for /usr/bin/bwrap on the host or set repository variable AUTOSYNC_ALLOW_USERNS_SYSCTL=true for ephemeral runners" >&2
               exit 1
             fi
             bwrap --unshare-all --ro-bind / / "$(command -v true)"
           fi
+        env:
+          ALLOW_USERNS_SYSCTL: ${{ vars.AUTOSYNC_ALLOW_USERNS_SYSCTL }}
 
       - name: Cache preflight tools
         uses: actions/cache@v4
@@ -382,6 +384,12 @@ jobs:
 
       - name: Run Loopwright
         id: loopwright
+        # Env-visibility contract (verified at pinned SHA in packages/github-app/src/{preflight,action,turnkey}.ts):
+        # - spec.preflight and command.v1 gates construct scrubbed child environments forwarding ONLY
+        #   non-secret names listed in spec.preflight.env / command.v1 parameters.env (enforced in-repo
+        #   by hack/check/autosync-selftest.sh) and unconditionally strip INPUT_*, GITHUB_TOKEN,
+        #   GitHub App credentials, Loopwright signing keys, and LOOPWRIGHT_PROVIDER_TOKEN.
+        # - Candidate model turns and command.v1 checks run inside bubblewrap under spec.execution.mode: strict.
         uses: gpustack/loopwright@6d281028848473fc52b96a5a3b1cea49fc1a731f # main
         env:
           LOOPWRIGHT_PROVIDER_TOKEN: ${{ secrets.CI_GPUSTACK_LOOPWRIGHT_LLM_AUTH_TOKEN || secrets.CI_GPUSTACK_CODEREVIEW_LLM_AUTH_TOKEN }}
@@ -416,9 +424,43 @@ jobs:
         if: always()
         env:
           DIAG_ROOT: ${{ runner.temp }}/loopwright-${{ matrix.domain }}
+          CHECK_PROVIDER_TOKEN: ${{ secrets.CI_GPUSTACK_LOOPWRIGHT_LLM_AUTH_TOKEN || secrets.CI_GPUSTACK_CODEREVIEW_LLM_AUTH_TOKEN }}
+          CHECK_GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           if [[ -d "${DIAG_ROOT}" ]]; then
             find "${DIAG_ROOT}" \( -name 'secrets.json' -o -name '*.sqlite*' \) -type f -delete
+            python3 - "${DIAG_ROOT}" <<'PY'
+          import glob
+          import os
+          import re
+          import sys
+
+          diag_root = sys.argv[1]
+          patterns = [
+              os.path.join(diag_root, "*", "run.json"),
+              os.path.join(diag_root, "*", "memory-publication.json"),
+              os.path.join(diag_root, "*", "artifacts", "**", "*.json"),
+              os.path.join(diag_root, "lw-action-*", "config", "config.yaml"),
+              os.path.join(diag_root, "lw-action-*", "registry", "registry.yaml"),
+          ]
+          secrets_to_block = [
+              val for key in ("CHECK_PROVIDER_TOKEN", "CHECK_GH_TOKEN")
+              if len(val := os.environ.get(key, "").strip()) >= 8
+          ]
+          pem_re = re.compile(r"BEGIN [A-Z0-9 ]*PRIVATE KEY")
+          leaked = []
+          for pat in patterns:
+              for path in glob.glob(pat, recursive=True):
+                  if not os.path.isfile(path):
+                      continue
+                  txt = open(path, "r", encoding="utf-8", errors="replace").read()
+                  if pem_re.search(txt) or any(tok in txt for tok in secrets_to_block):
+                      os.unlink(path)
+                      leaked.append(os.path.relpath(path, diag_root))
+          if leaked:
+              print(f"ERROR: removed diagnostic file(s) containing credential material: {', '.join(leaked)}", file=sys.stderr)
+              sys.exit(1)
+          PY
           fi
 
       - name: Upload diagnostics
