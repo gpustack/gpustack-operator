@@ -153,6 +153,8 @@ import glob
 import importlib.util
 import json
 import os
+import re
+import shutil
 import subprocess
 import sys
 
@@ -165,20 +167,136 @@ except ImportError:
     yaml = None
 
 
+def _strip_yaml_scalar(val: str) -> object:
+    val = val.strip()
+    if not val:
+        return ""
+    if len(val) >= 2 and val[0] == val[-1] and val[0] in ("'", '"'):
+        return val[1:-1]
+    val = re.sub(r"\s+#.*$", "", val).strip()
+    if val == "[]":
+        return []
+    if val.startswith("[") and val.endswith("]"):
+        inner = val[1:-1].strip()
+        return [_strip_yaml_scalar(x) for x in inner.split(",")] if inner else []
+    if val in ("true", "True"):
+        return True
+    if val in ("false", "False"):
+        return False
+    return val
+
+
+def _parse_yaml_stdlib(raw: str, path: str) -> dict:
+    root_obj: dict = {}
+    stack: list[tuple[int, object]] = [(-1, root_obj)]
+    pending: tuple[int, dict, str] | None = None
+    block_indent: int | None = None
+    key_val_re = re.compile(r"^([^:\s][^:]*?):(?:\s+(.*)|)$")
+
+    for lineno, line in enumerate(raw.splitlines(), start=1):
+        if not line.strip():
+            continue
+        indent = len(line) - len(line.lstrip(" "))
+        if "\t" in line[:indent]:
+            raise ValueError(f"{path}:{lineno}: tab indentation is not allowed in YAML")
+        stripped = line.strip()
+        if block_indent is not None:
+            if indent > block_indent:
+                continue
+            block_indent = None
+        if stripped.startswith("#"):
+            continue
+
+        is_seq = stripped.startswith("- ") or stripped == "-"
+        if pending is not None and (indent > pending[0] or (indent == pending[0] and is_seq)):
+            p_indent, p_dict, p_key = pending
+            new_container: object = [] if is_seq else {}
+            p_dict[p_key] = new_container
+            stack.append((p_indent, new_container))
+            pending = None
+        elif pending is not None:
+            _, p_dict, p_key = pending
+            p_dict[p_key] = None
+            pending = None
+
+        while len(stack) > 1 and indent <= stack[-1][0]:
+            stack.pop()
+
+        cur = stack[-1][1]
+        if is_seq:
+            if not isinstance(cur, list):
+                raise ValueError(f"{path}:{lineno}: unexpected list item")
+            rest = stripped[1:].strip()
+            m = key_val_re.match(rest) if rest else None
+            if not rest:
+                item_dict: dict = {}
+                cur.append(item_dict)
+                stack.append((indent, item_dict))
+            elif m:
+                k = m.group(1).strip().strip("'\"")
+                v = (m.group(2) or "").strip()
+                item_dict = {}
+                cur.append(item_dict)
+                stack.append((indent, item_dict))
+                if not v or v.startswith("#"):
+                    pending = (indent + 2, item_dict, k)
+                elif v[0] in ("|", ">") and len(v) <= 2:
+                    item_dict[k] = ""
+                    block_indent = indent + 2
+                else:
+                    item_dict[k] = _strip_yaml_scalar(v)
+            else:
+                cur.append(_strip_yaml_scalar(rest))
+        else:
+            if not isinstance(cur, dict):
+                raise ValueError(f"{path}:{lineno}: expected mapping entry")
+            m = key_val_re.match(stripped)
+            if not m:
+                raise ValueError(f"{path}:{lineno}: expected 'key: value'")
+            k = m.group(1).strip().strip("'\"")
+            v = (m.group(2) or "").strip()
+            if not v or v.startswith("#"):
+                pending = (indent, cur, k)
+            elif v[0] in ("|", ">") and len(v) <= 2:
+                cur[k] = ""
+                block_indent = indent
+            else:
+                cur[k] = _strip_yaml_scalar(v)
+
+    if pending is not None:
+        _, p_dict, p_key = pending
+        p_dict[p_key] = None
+    return root_obj
+
+
 def load_yaml(path: str):
     with open(path, "r", encoding="utf-8") as f:
         raw = f.read()
     if yaml is not None:
         return yaml.safe_load(raw)
-    res = subprocess.run(
-        ["ruby", "-ryaml", "-rjson", "-e", "puts JSON.generate(YAML.safe_load(STDIN.read))"],
-        input=raw,
-        text=True,
-        capture_output=True,
-    )
-    if res.returncode != 0:
-        raise RuntimeError(res.stderr.strip() or f"ruby YAML parse failed for {path}")
-    return json.loads(res.stdout)
+    ruby_bin = shutil.which("ruby")
+    if ruby_bin:
+        res = subprocess.run(
+            [ruby_bin, "-ryaml", "-rjson", "-e", "puts JSON.generate(YAML.safe_load(STDIN.read))"],
+            input=raw,
+            text=True,
+            capture_output=True,
+        )
+        if res.returncode != 0:
+            raise RuntimeError(res.stderr.strip() or f"ruby YAML parse failed for {path}")
+        return json.loads(res.stdout)
+    yq_bin = shutil.which("yq")
+    if yq_bin:
+        res = subprocess.run(
+            [yq_bin, "-o=json", "."],
+            input=raw,
+            text=True,
+            capture_output=True,
+        )
+        if res.returncode != 0:
+            raise RuntimeError(res.stderr.strip() or f"yq YAML parse failed for {path}")
+        return json.loads(res.stdout)
+    return _parse_yaml_stdlib(raw, path)
 
 
 def check_repo_file(rel_path: object, label: str) -> None:
