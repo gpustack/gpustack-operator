@@ -393,9 +393,30 @@ cand_nixl_ver = read_dockerfile_arg(cand_df, "NIXL_VERSION", cand_df_p)
 base_nixl_rocm_ref = read_dockerfile_arg(base_df, "NIXL_ROCM_REF", base_df_p)
 cand_nixl_rocm_ref = read_dockerfile_arg(cand_df, "NIXL_ROCM_REF", cand_df_p)
 cand_nixl_rocm_ver = read_dockerfile_arg(cand_df, "NIXL_ROCM_VERSION", cand_df_p)
+base_ucx_rocm_ref = read_dockerfile_arg(base_df, "NIXL_ROCM_UCX_REF", base_df_p)
+cand_ucx_rocm_ref = read_dockerfile_arg(cand_df, "NIXL_ROCM_UCX_REF", cand_df_p)
+
+SEMVER_TAG_RE = re.compile(r"^v[0-9]+\.[0-9]+\.[0-9]+$")
+if not SEMVER_TAG_RE.fullmatch(cand_nixl_rocm_ref):
+    raise SystemExit(
+        f"FAIL: NIXL_ROCM_REF must be a stable SemVer release tag vX.Y.Z, got {cand_nixl_rocm_ref!r}"
+    )
+if not SEMVER_TAG_RE.fullmatch(cand_ucx_rocm_ref):
+    raise SystemExit(
+        f"FAIL: NIXL_ROCM_UCX_REF must be a stable SemVer release tag vX.Y.Z, got {cand_ucx_rocm_ref!r}"
+    )
+if cand_nixl_rocm_ver != cand_nixl_ver:
+    raise SystemExit(
+        f"FAIL: NIXL_ROCM_VERSION ({cand_nixl_rocm_ver!r}) must match CUDA NIXL_VERSION ({cand_nixl_ver!r})"
+    )
+if cand_nixl_rocm_ref != f"v{cand_nixl_rocm_ver}":
+    raise SystemExit(
+        f"FAIL: NIXL_ROCM_REF ({cand_nixl_rocm_ref!r}) must equal 'v' + NIXL_ROCM_VERSION ({f'v{cand_nixl_rocm_ver}'!r})"
+    )
 
 report_path = os.path.join(stage_dir, "kv-transfer-preflight-report.json")
 verified_nixl: set[str] = set()
+verified_ucx: set[str] = set()
 if os.path.isfile(report_path):
     with open(report_path, "r", encoding="utf-8") as f:
         rep = json.load(f)
@@ -412,6 +433,19 @@ if os.path.isfile(report_path):
     for rv in rep.get("nixl_pypi_recent") or []:
         if isinstance(rv, str) and rv.strip():
             verified_nixl.add(rv.strip())
+    ucx_sec = rep.get("ucx_rocm")
+    if isinstance(ucx_sec, dict):
+        ucx_target = ucx_sec.get("target_ref")
+        if isinstance(ucx_target, str) and ucx_target.strip():
+            verified_ucx.add(ucx_target.strip())
+        for rv in ucx_sec.get("recent_versions") or []:
+            if isinstance(rv, str) and rv.strip():
+                verified_ucx.add(rv.strip())
+    elif isinstance(ucx_sec, str) and ucx_sec.strip():
+        verified_ucx.add(ucx_sec.strip())
+    for rv in rep.get("ucx_rocm_recent") or []:
+        if isinstance(rv, str) and rv.strip():
+            verified_ucx.add(rv.strip())
 
 if cand_nixl_ver != base_nixl_ver:
     if not verified_nixl:
@@ -423,48 +457,67 @@ if cand_nixl_ver != base_nixl_ver:
             f"FAIL: NIXL_VERSION={cand_nixl_ver!r} is not in wheel-verified PyPI set {sorted(verified_nixl)}"
         )
 
+if cand_ucx_rocm_ref != base_ucx_rocm_ref:
+    if not verified_ucx:
+        raise SystemExit(
+            f"FAIL: NIXL_ROCM_UCX_REF changed ({base_ucx_rocm_ref} -> {cand_ucx_rocm_ref}) without verified ucx_rocm entries in kv-transfer-preflight-report.json"
+        )
+    if cand_ucx_rocm_ref not in verified_ucx:
+        raise SystemExit(
+            f"FAIL: NIXL_ROCM_UCX_REF={cand_ucx_rocm_ref!r} is not in verified UCX release set {sorted(verified_ucx)}"
+        )
+
 nixl_repo = ""
 for cand_dir in (os.path.join(stage_dir, "nixl-rocm"), os.path.join(stage_dir, "nixl")):
     if os.path.isdir(os.path.join(cand_dir, ".git")):
         nixl_repo = cand_dir
         break
 
+pyproject_raw = ""
 if nixl_repo:
-    obj_spec = f"{cand_nixl_rocm_ref}:pyproject.toml"
+    obj_spec = f"refs/tags/{cand_nixl_rocm_ref}:pyproject.toml"
     has_obj = subprocess.run(
         ["git", "-C", nixl_repo, "cat-file", "-e", obj_spec],
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
     ).returncode == 0
-    if has_obj:
-        pyproject_raw = subprocess.check_output(
-            ["git", "-C", nixl_repo, "show", obj_spec],
-            text=True,
-        )
-        proj_ver = ""
-        try:
-            import tomllib
-            doc = tomllib.loads(pyproject_raw)
-            proj_ver = str((doc.get("project") or {}).get("version") or "").strip()
-        except ImportError:
-            in_proj = False
-            for raw_ln in pyproject_raw.splitlines():
-                st = raw_ln.strip()
-                if st.startswith("["):
-                    in_proj = st == "[project]"
-                    continue
-                if in_proj:
-                    m_v = re.match(r'^version\s*=\s*["\']([^"\']+)["\']', st)
-                    if m_v:
-                        proj_ver = m_v.group(1).strip()
-                        break
-        if proj_ver != cand_nixl_rocm_ver:
-            raise SystemExit(
-                f"FAIL: NIXL_ROCM_VERSION ({cand_nixl_rocm_ver!r}) != pyproject.toml [project].version ({proj_ver!r}) at {cand_nixl_rocm_ref}"
-            )
-    elif cand_nixl_rocm_ref != base_nixl_rocm_ref:
+    if not has_obj:
         raise SystemExit(
-            f"FAIL: NIXL_ROCM_REF {cand_nixl_rocm_ref} (pyproject.toml) not found in staged nixl repository {nixl_repo}"
+            f"FAIL: NIXL_ROCM_REF {cand_nixl_rocm_ref} (refs/tags/{cand_nixl_rocm_ref}:pyproject.toml) not found in staged nixl repository {nixl_repo}"
+        )
+    pyproject_raw = subprocess.check_output(
+        ["git", "-C", nixl_repo, "show", obj_spec],
+        text=True,
+    )
+elif os.path.isfile(os.path.join(stage_dir, "nixl-rocm", "pyproject.toml")):
+    pyproject_raw = read_text(os.path.join(stage_dir, "nixl-rocm", "pyproject.toml"))
+elif cand_nixl_rocm_ref != base_nixl_rocm_ref:
+    raise SystemExit(
+        f"FAIL: NIXL_ROCM_REF changed ({base_nixl_rocm_ref} -> {cand_nixl_rocm_ref}) "
+        f"without staged nixl-rocm repository or pyproject.toml in {stage_dir}"
+    )
+
+if pyproject_raw:
+    proj_ver = ""
+    try:
+        import tomllib
+        doc = tomllib.loads(pyproject_raw)
+        proj_ver = str((doc.get("project") or {}).get("version") or "").strip()
+    except ImportError:
+        in_proj = False
+        for raw_ln in pyproject_raw.splitlines():
+            st = raw_ln.strip()
+            if st.startswith("["):
+                in_proj = st == "[project]"
+                continue
+            if in_proj:
+                m_v = re.match(r'^version\s*=\s*["\']([^"\']+)["\']', st)
+                if m_v:
+                    proj_ver = m_v.group(1).strip()
+                    break
+    if proj_ver != cand_nixl_rocm_ver:
+        raise SystemExit(
+            f"FAIL: NIXL_ROCM_VERSION ({cand_nixl_rocm_ver!r}) != pyproject.toml [project].version ({proj_ver!r}) at {cand_nixl_rocm_ref}"
         )
 PY
 
@@ -852,6 +905,12 @@ check_pin("mooncake", read_arg(mc_df_p, "MOONCAKE_VERSION"), allow_sb=("mooncake
 check_pin("nixl-pypi", read_arg(mt_df_p, "NIXL_VERSION"), allow_sb=True)
 check_pin("nixl-rocm", read_arg(mt_df_p, "NIXL_ROCM_REF"))
 check_pin("ucx-rocm", read_arg(mt_df_p, "NIXL_ROCM_UCX_REF"))
+for rocm_uid in ("nixl-rocm", "ucx-rocm"):
+    if not re.fullmatch(r"v\d+\.\d+\.\d+", str(versions.get(rocm_uid) or "")):
+        raise SystemExit(
+            f"FAIL: proposals/kv-transfer.json versions.{rocm_uid} ({versions.get(rocm_uid)!r}) "
+            "must be a stable SemVer tag vX.Y.Z"
+        )
 check_pin("hixl", read_arg(mt_df_p, "HIXL_COMMIT"))
 check_pin("modelexpress", read_arg(mx_df_p, "MODELEXPRESS_VERSION"), allow_sb=("modelexpress" not in held_keys))
 if not re.fullmatch(r"v\d+\.\d+\.\d+(?:\+stage-b)?", str(versions.get("modelexpress") or "")):

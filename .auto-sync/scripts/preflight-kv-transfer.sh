@@ -155,7 +155,7 @@ def has_meta_wheel(files: list[dict]) -> bool:
     return has_manylinux_arch(files, "x86_64") and has_manylinux_arch(files, "aarch64")
 
 
-def resolve_nixl_pypi(fixture_root: str) -> tuple[str, list[str]]:
+def resolve_nixl_pypi_candidates(fixture_root: str) -> list[str]:
     pkgs = {}
     for pkg in ("nixl", "nixl-cu12", "nixl-cu13"):
         if fixture_root:
@@ -190,30 +190,92 @@ def resolve_nixl_pypi(fixture_root: str) -> tuple[str, list[str]]:
     if not candidates:
         raise SystemExit("FAIL: no NIXL version with 3-package x86_64+aarch64 wheel parity found")
     candidates.sort(key=parse_version_key, reverse=True)
-    return candidates[0], candidates[:5]
+    return candidates
+
+
+def parse_semver_tag_key(tag: str) -> tuple[int, int, int] | None:
+    m = re.fullmatch(r"v(\d+)\.(\d+)\.(\d+)", tag.strip())
+    if not m:
+        return None
+    return (int(m.group(1)), int(m.group(2)), int(m.group(3)))
+
+
+def parse_next_link(link_header: str) -> str:
+    if not link_header:
+        return ""
+    for part in link_header.split(","):
+        segs = [s.strip() for s in part.split(";")]
+        if len(segs) < 2:
+            continue
+        url_part = segs[0]
+        if not (url_part.startswith("<") and url_part.endswith(">")):
+            continue
+        if any(re.fullmatch(r'rel\s*=\s*"?next"?', s, re.IGNORECASE) for s in segs[1:]):
+            return url_part[1:-1]
+    return ""
+
+
+def fetch_github_releases(repo: str, fixture_file: str, fixture_root: str, max_pages: int = 5) -> list | None:
+    if fixture_root:
+        fp = os.path.join(fixture_root, fixture_file)
+        if not os.path.isfile(fp):
+            return None
+        with open(fp, "r", encoding="utf-8") as f:
+            raw = json.load(f)
+        return raw if isinstance(raw, list) else [raw]
+
+    headers = {
+        "User-Agent": "gpustack-autosync/1.0",
+        "Accept": "application/vnd.github+json",
+    }
+    tok = os.environ.get("GH_TOKEN") or os.environ.get("GITHUB_TOKEN") or ""
+    if tok:
+        headers["Authorization"] = f"Bearer {tok}"
+
+    url = f"https://api.github.com/repos/{repo}/releases?per_page=100"
+    all_releases: list = []
+    for _ in range(max_pages):
+        req = urllib.request.Request(url, headers=headers)
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            page_data = json.loads(resp.read().decode("utf-8"))
+            link_hdr = resp.headers.get("Link") or ""
+        if isinstance(page_data, list):
+            all_releases.extend(page_data)
+        elif page_data is not None:
+            all_releases.append(page_data)
+        next_url = parse_next_link(link_hdr)
+        if not next_url:
+            break
+        url = next_url
+    return all_releases
+
+
+def resolve_github_semver_releases(repo: str, fixture_file: str, fixture_root: str) -> tuple[str, list[str]]:
+    releases = fetch_github_releases(repo, fixture_file, fixture_root)
+    if not releases:
+        return "", []
+    tags_with_keys: list[tuple[tuple[int, int, int], str]] = []
+    seen: set[str] = set()
+    for rel in releases:
+        if not isinstance(rel, dict):
+            continue
+        if rel.get("prerelease") or rel.get("draft"):
+            continue
+        tag = str(rel.get("tag_name") or "").strip()
+        key = parse_semver_tag_key(tag)
+        if key is None or tag in seen:
+            continue
+        seen.add(tag)
+        tags_with_keys.append((key, tag))
+    if not tags_with_keys:
+        return "", []
+    tags_with_keys.sort(key=lambda item: item[0], reverse=True)
+    tags = [tag for _, tag in tags_with_keys]
+    return tags[0], tags
 
 
 def resolve_mooncake_release(fixture_root: str) -> tuple[str, list[str]]:
-    releases = None
-    if fixture_root:
-        fp = os.path.join(fixture_root, "mooncake-release.json")
-        if os.path.isfile(fp):
-            with open(fp, "r", encoding="utf-8") as f:
-                raw = json.load(f)
-            releases = raw if isinstance(raw, list) else [raw]
-    else:
-        headers = {
-            "User-Agent": "gpustack-autosync/1.0",
-            "Accept": "application/vnd.github+json",
-        }
-        tok = os.environ.get("GH_TOKEN") or os.environ.get("GITHUB_TOKEN") or ""
-        if tok:
-            headers["Authorization"] = f"Bearer {tok}"
-        releases = fetch_json(
-            "https://api.github.com/repos/kvcache-ai/Mooncake/releases?per_page=20",
-            headers=headers,
-        )
-
+    releases = fetch_github_releases("kvcache-ai/Mooncake", "mooncake-release.json", fixture_root)
     if not releases:
         return "", []
 
@@ -549,9 +611,31 @@ local_hixl_patch_path = os.path.join(repo_root, "pack/model-transfer/patches/hix
 with open(local_hixl_patch_path, "rb") as f:
     local_hixl_patch_bytes = f.read()
 
+def parse_pyproject_version(pyproject_raw: str) -> str:
+    if not pyproject_raw:
+        return ""
+    try:
+        import tomllib
+        doc = tomllib.loads(pyproject_raw)
+        return str((doc.get("project") or {}).get("version") or "").strip()
+    except ImportError:
+        in_proj = False
+        for raw_ln in pyproject_raw.splitlines():
+            st = raw_ln.strip()
+            if st.startswith("["):
+                in_proj = st == "[project]"
+                continue
+            if in_proj:
+                m_v = re.match(r'^version\s*=\s*["\']([^"\']+)["\']', st)
+                if m_v:
+                    return m_v.group(1).strip()
+        return ""
+
+
 recipe = {
     "mooncake_version": read_dockerfile_arg(mooncake_df, "MOONCAKE_VERSION", "pack/mirrored-mooncake/Dockerfile"),
     "nixl_version": read_dockerfile_arg(mt_df, "NIXL_VERSION", "pack/model-transfer/Dockerfile"),
+    "nixl_rocm_version": read_dockerfile_arg(mt_df, "NIXL_ROCM_VERSION", "pack/model-transfer/Dockerfile"),
     "nixl_rocm_ref": read_dockerfile_arg(mt_df, "NIXL_ROCM_REF", "pack/model-transfer/Dockerfile"),
     "ucx_rocm_ref": read_dockerfile_arg(mt_df, "NIXL_ROCM_UCX_REF", "pack/model-transfer/Dockerfile"),
     "hixl_commit": read_dockerfile_arg(mt_df, "HIXL_COMMIT", "pack/model-transfer/Dockerfile"),
@@ -588,33 +672,93 @@ else:
         up_mooncake = recipe["mooncake_version"]
         up_mooncake_recent = [up_mooncake]
 
-if "nixl_pypi" in upstream_override:
-    up_nixl_pypi = str(upstream_override["nixl_pypi"])
-    up_nixl_recent = [up_nixl_pypi]
+semver_tag_re = re.compile(r"^v\d+\.\d+\.\d+$")
+
+
+def parse_semver_tag_override(name: str, val: object) -> str:
+    tag = str(val).strip()
+    if not semver_tag_re.fullmatch(tag):
+        raise SystemExit(
+            f"FAIL: {name} upstream override must be a stable vX.Y.Z release tag, got: {tag!r}"
+        )
+    return tag
+
+
+nixl_pypi_candidates = [] if "nixl_pypi" in upstream_override else resolve_nixl_pypi_candidates(fixture_dir)
+if "nixl_rocm" in upstream_override:
+    up_nixl_rocm_latest, nixl_rocm_releases = "", []
 else:
-    up_nixl_pypi, up_nixl_recent = resolve_nixl_pypi(fixture_dir)
-    if not up_nixl_pypi:
+    up_nixl_rocm_latest, nixl_rocm_releases = resolve_github_semver_releases(
+        "ai-dynamo/nixl", "nixl-release.json", fixture_dir
+    )
+
+if "nixl_rocm" in upstream_override:
+    up_nixl_rocm = parse_semver_tag_override("nixl_rocm", upstream_override["nixl_rocm"])
+    up_nixl_rocm_recent = [up_nixl_rocm]
+    if "nixl_pypi" in upstream_override:
+        up_nixl_pypi = str(upstream_override["nixl_pypi"]).strip()
+        up_nixl_recent = [up_nixl_pypi]
+    else:
+        expected_pypi = up_nixl_rocm.lstrip("v")
+        if expected_pypi not in set(nixl_pypi_candidates):
+            raise SystemExit(
+                f"FAIL: nixl_rocm override {up_nixl_rocm!r} requires {expected_pypi!r} in 3-package PyPI wheel parity set ({nixl_pypi_candidates[:5]})"
+            )
+        up_nixl_pypi = expected_pypi
+        up_nixl_recent = nixl_pypi_candidates[:5]
+elif "nixl_pypi" in upstream_override:
+    up_nixl_pypi = str(upstream_override["nixl_pypi"]).strip()
+    up_nixl_recent = [up_nixl_pypi]
+    up_nixl_rocm = f"v{up_nixl_pypi}"
+    if nixl_rocm_releases and up_nixl_rocm not in set(nixl_rocm_releases):
+        raise SystemExit(
+            f"FAIL: nixl_pypi={up_nixl_pypi!r} has no matching non-prerelease GitHub release {up_nixl_rocm!r} in ai-dynamo/nixl"
+        )
+    up_nixl_rocm_recent = [up_nixl_rocm]
+else:
+    if nixl_rocm_releases:
+        nixl_release_set = set(nixl_rocm_releases)
+        aligned_nixl = [v for v in nixl_pypi_candidates if f"v{v}" in nixl_release_set]
+        if not aligned_nixl:
+            raise SystemExit(
+                f"FAIL: no NIXL version has both 3-package PyPI parity ({nixl_pypi_candidates[:5]}) "
+                f"and an ai-dynamo/nixl non-prerelease GitHub release ({nixl_rocm_releases[:5]})"
+            )
+        up_nixl_pypi = aligned_nixl[0]
+        up_nixl_recent = aligned_nixl[:5]
+        up_nixl_rocm = f"v{up_nixl_pypi}"
+        up_nixl_rocm_recent = [f"v{v}" for v in aligned_nixl[:5]]
+    else:
         up_nixl_pypi = recipe["nixl_version"]
         up_nixl_recent = [up_nixl_pypi]
+        up_nixl_rocm = recipe["nixl_rocm_ref"]
+        up_nixl_rocm_recent = [up_nixl_rocm]
 
-# Stage gpustack/runner, hixl, nixl, ucx, modelexpress.
+if "ucx_rocm" in upstream_override:
+    up_ucx_rocm = parse_semver_tag_override("ucx_rocm", upstream_override["ucx_rocm"])
+    up_ucx_rocm_recent = [up_ucx_rocm]
+else:
+    up_ucx_rocm_latest, ucx_rocm_releases = resolve_github_semver_releases("openucx/ucx", "ucx-release.json", fixture_dir)
+    if up_ucx_rocm_latest:
+        up_ucx_rocm = up_ucx_rocm_latest
+        up_ucx_rocm_recent = ucx_rocm_releases[:5]
+    else:
+        up_ucx_rocm = recipe["ucx_rocm_ref"]
+        up_ucx_rocm_recent = [up_ucx_rocm]
+
+# Stage gpustack/runner, hixl, nixl-rocm, modelexpress.
 runner_stage = os.path.join(stage_dir, "gpustack-runner")
 hixl_stage = os.path.join(stage_dir, "hixl")
-nixl_stage = os.path.join(stage_dir, "nixl")
-ucx_stage = os.path.join(stage_dir, "ucx")
+nixl_rocm_stage = os.path.join(stage_dir, "nixl-rocm")
 mx_stage = os.path.join(stage_dir, "modelexpress")
 
-mx_tag_re = re.compile(r"^v\d+\.\d+\.\d+$")
+mx_tag_re = semver_tag_re
+nixl_url = os.environ.get("AUTOSYNC_KV_NIXL_REPO_URL", "").strip() or "https://github.com/ai-dynamo/nixl.git"
 mx_url = os.environ.get("AUTOSYNC_KV_MODELEXPRESS_REPO_URL", "").strip() or "https://github.com/ai-dynamo/modelexpress.git"
 
 
 def parse_mx_override(val: object) -> str:
-    tag = str(val).strip()
-    if not mx_tag_re.fullmatch(tag):
-        raise SystemExit(
-            f"FAIL: modelexpress upstream override must be a stable vX.Y.Z release tag, got: {tag!r}"
-        )
-    return tag
+    return parse_semver_tag_override("modelexpress", val)
 
 
 if fixture_dir:
@@ -628,10 +772,19 @@ if fixture_dir:
     up_hixl = stage_fixture_repo(hixl_fix, hixl_stage) if os.path.isdir(hixl_fix) else recipe["hixl_commit"]
 
     nixl_fix = os.path.join(fixture_dir, "repos/nixl")
-    up_nixl_rocm = stage_fixture_repo(nixl_fix, nixl_stage) if os.path.isdir(nixl_fix) else recipe["nixl_rocm_ref"]
-
-    ucx_fix = os.path.join(fixture_dir, "repos/ucx")
-    up_ucx_rocm = stage_fixture_repo(ucx_fix, ucx_stage) if os.path.isdir(ucx_fix) else recipe["ucx_rocm_ref"]
+    if os.path.isdir(nixl_fix):
+        if os.path.isdir(os.path.join(nixl_fix, ".git")):
+            if subprocess.run(
+                ["git", "-C", nixl_fix, "rev-parse", "--verify", "-q", f"refs/tags/{up_nixl_rocm}^{{commit}}"],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            ).returncode != 0:
+                raise SystemExit(
+                    f"FAIL: fixture nixl repo {nixl_fix} is missing expected tag refs/tags/{up_nixl_rocm}"
+                )
+            sync_tagged_repo(nixl_fix, nixl_rocm_stage, up_nixl_rocm, recipe["nixl_rocm_ref"], is_local=True)
+        else:
+            stage_fixture_repo(nixl_fix, nixl_rocm_stage)
 
     mx_fix = os.path.join(fixture_dir, "repos/modelexpress")
     if not os.path.isdir(mx_fix):
@@ -653,8 +806,7 @@ if fixture_dir:
 else:
     runner_head = sync_git_repo("https://github.com/gpustack/runner.git", runner_stage)
     up_hixl = sync_git_repo("https://github.com/hicann/hixl.git", hixl_stage, recipe["hixl_commit"])
-    up_nixl_rocm = sync_git_repo("https://github.com/ai-dynamo/nixl.git", nixl_stage, recipe["nixl_rocm_ref"])
-    up_ucx_rocm = sync_git_repo("https://github.com/openucx/ucx.git", ucx_stage, recipe["ucx_rocm_ref"])
+    sync_tagged_repo(nixl_url, nixl_rocm_stage, up_nixl_rocm, recipe["nixl_rocm_ref"], is_local=False)
     if "modelexpress" in upstream_override:
         up_mx = parse_mx_override(upstream_override["modelexpress"])
         up_mx_recent = [up_mx]
@@ -664,10 +816,6 @@ else:
 
 if "hixl" in upstream_override:
     up_hixl = str(upstream_override["hixl"])
-if "nixl_rocm" in upstream_override:
-    up_nixl_rocm = str(upstream_override["nixl_rocm"])
-if "ucx_rocm" in upstream_override:
-    up_ucx_rocm = str(upstream_override["ucx_rocm"])
 if "gpustack_runner" in upstream_override:
     runner_head = str(upstream_override["gpustack_runner"])
 
@@ -703,39 +851,14 @@ if os.path.isfile(runner_patch_path):
     with open(runner_patch_path, "rb") as f:
         runner_patch_match = f.read() == local_hixl_patch_bytes
 
-# Extract nixl-rocm pyproject.toml [project].version at up_nixl_rocm when available.
+# Extract nixl-rocm pyproject.toml [project].version at refs/tags/<up_nixl_rocm> when available.
 nixl_rocm_project_version = ""
-for cand_nixl_dir in (os.path.join(stage_dir, "nixl-rocm"), nixl_stage):
-    if not os.path.isdir(os.path.join(cand_nixl_dir, ".git")):
-        continue
-    obj_spec = f"{up_nixl_rocm}:pyproject.toml"
-    has_obj = subprocess.run(
-        ["git", "-C", cand_nixl_dir, "cat-file", "-e", obj_spec],
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-    ).returncode == 0
-    if has_obj:
-        pyproject_raw = subprocess.check_output(
-            ["git", "-C", cand_nixl_dir, "show", obj_spec],
-            text=True,
-        )
-        try:
-            import tomllib
-            doc = tomllib.loads(pyproject_raw)
-            nixl_rocm_project_version = str((doc.get("project") or {}).get("version") or "").strip()
-        except ImportError:
-            in_proj = False
-            for raw_ln in pyproject_raw.splitlines():
-                st = raw_ln.strip()
-                if st.startswith("["):
-                    in_proj = st == "[project]"
-                    continue
-                if in_proj:
-                    m_v = re.match(r'^version\s*=\s*["\']([^"\']+)["\']', st)
-                    if m_v:
-                        nixl_rocm_project_version = m_v.group(1).strip()
-                        break
-        break
+if os.path.isdir(os.path.join(nixl_rocm_stage, ".git")):
+    pyproject_raw = read_git_tag_file(nixl_rocm_stage, up_nixl_rocm, "pyproject.toml")
+    if pyproject_raw:
+        nixl_rocm_project_version = parse_pyproject_version(pyproject_raw)
+if not nixl_rocm_project_version and os.path.isfile(os.path.join(nixl_rocm_stage, "pyproject.toml")):
+    nixl_rocm_project_version = parse_pyproject_version(read_text(os.path.join(nixl_rocm_stage, "pyproject.toml")))
 
 # Stage key Mooncake upstream files when Mooncake version drifted.
 mooncake_stage = os.path.join(stage_dir, "mooncake")
@@ -1066,7 +1189,9 @@ discovery = {
         "nixl_pypi": up_nixl_pypi,
         "nixl_pypi_recent": up_nixl_recent,
         "nixl_rocm": up_nixl_rocm,
+        "nixl_rocm_recent": up_nixl_rocm_recent,
         "ucx_rocm": up_ucx_rocm,
+        "ucx_rocm_recent": up_ucx_rocm_recent,
         "hixl": up_hixl,
         "modelexpress": up_mx,
         "modelexpress_recent": up_mx_recent,
@@ -1171,7 +1296,11 @@ hixl_upstream_held_by_runner = bool(runner["hixl_commit"] and up["hixl"] and up[
 stage_a_drifts = {
     "mooncake": up["mooncake"] != recipe["mooncake_version"],
     "nixl-pypi": up["nixl_pypi"] != recipe["nixl_version"],
-    "nixl-rocm": up["nixl_rocm"] != recipe["nixl_rocm_ref"],
+    "nixl-rocm": (
+        up["nixl_rocm"] != recipe["nixl_rocm_ref"]
+        or recipe["nixl_rocm_version"] != recipe["nixl_version"]
+        or recipe["nixl_rocm_ref"] != f"v{recipe['nixl_rocm_version']}"
+    ),
     "ucx-rocm": up["ucx_rocm"] != recipe["ucx_rocm_ref"],
     "hixl": effective_hixl_target != recipe["hixl_commit"],
     "modelexpress": up["modelexpress"] != recipe["modelexpress_version"],
@@ -1236,11 +1365,13 @@ if has_stage_b:
             "upstreamId": "nixl-rocm",
             "status": "up_to_date",
             "version": recipe["nixl_rocm_ref"],
+            "recentVersions": up["nixl_rocm_recent"],
         },
         {
             "upstreamId": "ucx-rocm",
             "status": "up_to_date",
             "version": recipe["ucx_rocm_ref"],
+            "recentVersions": up["ucx_rocm_recent"],
         },
         {
             "upstreamId": "hixl",
@@ -1280,11 +1411,13 @@ elif has_stage_a:
             "upstreamId": "nixl-rocm",
             "status": "available" if stage_a_drifts["nixl-rocm"] else "up_to_date",
             "version": up["nixl_rocm"] if stage_a_drifts["nixl-rocm"] else recipe["nixl_rocm_ref"],
+            "recentVersions": up["nixl_rocm_recent"],
         },
         {
             "upstreamId": "ucx-rocm",
             "status": "available" if stage_a_drifts["ucx-rocm"] else "up_to_date",
             "version": up["ucx_rocm"] if stage_a_drifts["ucx-rocm"] else recipe["ucx_rocm_ref"],
+            "recentVersions": up["ucx_rocm_recent"],
         },
         {
             "upstreamId": "hixl",
@@ -1327,11 +1460,13 @@ else:
             "upstreamId": "nixl-rocm",
             "status": "up_to_date",
             "version": recipe["nixl_rocm_ref"],
+            "recentVersions": up["nixl_rocm_recent"],
         },
         {
             "upstreamId": "ucx-rocm",
             "status": "up_to_date",
             "version": recipe["ucx_rocm_ref"],
+            "recentVersions": up["ucx_rocm_recent"],
         },
         {
             "upstreamId": "hixl",
@@ -1384,7 +1519,12 @@ report = {
     },
     "nixl_rocm": {
         "target_ref": up["nixl_rocm"],
+        "recent_versions": up["nixl_rocm_recent"],
         "project_version": disc.get("nixl_rocm_project_version", ""),
+    },
+    "ucx_rocm": {
+        "target_ref": up["ucx_rocm"],
+        "recent_versions": up["ucx_rocm_recent"],
     },
     "modelexpress": {
         "selected_version": up["modelexpress"],
@@ -1439,6 +1579,9 @@ if [[ "${AUTOSYNC_SKIP_SOURCE_REVISION:-false}" != "true" ]] && \
       fi
     done
   fi
+  if [[ -f "${STAGE_DIR}/nixl-rocm/pyproject.toml" ]]; then
+    BUNDLE_SPECS+=("${STAGE_DIR}/nixl-rocm/pyproject.toml::nixl-rocm/pyproject.toml")
+  fi
   if [[ -d "${STAGE_DIR}/modelexpress" ]]; then
     for mx_rel in "Cargo.toml" "Cargo.lock"; do
       if [[ -f "${STAGE_DIR}/modelexpress/${mx_rel}" ]]; then
@@ -1461,10 +1604,76 @@ PY
 )"
   IFS='|' read -r KV_STAGE_NAME RUNNER_PATCH_DRIFT MT_STAGE_B MX_STAGE_B <<<"${KV_STAGE_INFO}"
 
-  if [[ "${KV_STAGE_NAME}" == "recipe_sync" && "${RUNNER_PATCH_DRIFT}" == "true" && -f "${RUNNER_PATCH_FILE}" ]]; then
-    mkdir -p "${STAGED_TREE}/pack/model-transfer/patches/hixl"
-    cp -f "${RUNNER_PATCH_FILE}" "${STAGED_TREE}/pack/model-transfer/patches/hixl/001_channel_generation.patch"
-    COMMIT_PATHS+=("pack/model-transfer/patches/hixl/001_channel_generation.patch")
+  if [[ "${KV_STAGE_NAME}" == "recipe_sync" ]]; then
+    if [[ "${RUNNER_PATCH_DRIFT}" == "true" && -f "${RUNNER_PATCH_FILE}" ]]; then
+      mkdir -p "${STAGED_TREE}/pack/model-transfer/patches/hixl"
+      cp -f "${RUNNER_PATCH_FILE}" "${STAGED_TREE}/pack/model-transfer/patches/hixl/001_channel_generation.patch"
+      COMMIT_PATHS+=("pack/model-transfer/patches/hixl/001_channel_generation.patch")
+    fi
+    df_rc=0
+    python3 - "${PREFLIGHT_REPORT_JSON}" "${REPO_ROOT}/pack/model-transfer/Dockerfile" "${STAGED_TREE}/pack/model-transfer/Dockerfile" <<'PY' || df_rc=$?
+import json
+import os
+import re
+import sys
+
+rep_p, src_df_p, dst_df_p = sys.argv[1:4]
+with open(rep_p, "r", encoding="utf-8") as f:
+    rep = json.load(f)
+
+drifts = rep.get("stage_a_drifts") or {}
+update_nixl = bool(drifts.get("nixl-pypi") or drifts.get("nixl-rocm"))
+update_ucx = bool(drifts.get("ucx-rocm"))
+if not update_nixl and not update_ucx:
+    sys.exit(3)
+
+with open(src_df_p, "r", encoding="utf-8") as f:
+    txt = f.read()
+
+
+def set_arg(df_txt: str, name: str, value: str) -> str:
+    pat = re.compile(rf'^(ARG {re.escape(name)}=)(?:"[^"]*"|\'[^\']*\'|[^\s#]+)', re.MULTILINE)
+    out, n = pat.subn(rf'\g<1>"{value}"', df_txt, count=1)
+    if n != 1:
+        sys.stderr.write(f"FAIL: could not update ARG {name} in {src_df_p}\n")
+        sys.exit(2)
+    return out
+
+
+new_txt = txt
+if update_nixl:
+    nixl_ver = str((rep.get("nixl_pypi") or {}).get("selected_version") or "").strip()
+    nixl_rocm_sec = rep.get("nixl_rocm") or {}
+    nixl_rocm_ref = str(nixl_rocm_sec.get("target_ref") or "").strip()
+    nixl_rocm_ver = str(nixl_rocm_sec.get("project_version") or "").strip() or nixl_ver
+    if not nixl_ver or not nixl_rocm_ref or not nixl_rocm_ver:
+        sys.stderr.write(
+            f"FAIL: missing nixl target metadata for Stage A rewrite (nixl_ver={nixl_ver!r}, nixl_rocm_ver={nixl_rocm_ver!r}, nixl_rocm_ref={nixl_rocm_ref!r})\n"
+        )
+        sys.exit(2)
+    new_txt = set_arg(new_txt, "NIXL_VERSION", nixl_ver)
+    new_txt = set_arg(new_txt, "NIXL_ROCM_VERSION", nixl_rocm_ver)
+    new_txt = set_arg(new_txt, "NIXL_ROCM_REF", nixl_rocm_ref)
+if update_ucx:
+    ucx_rocm_ref = str((rep.get("ucx_rocm") or {}).get("target_ref") or "").strip()
+    if not ucx_rocm_ref:
+        sys.stderr.write("FAIL: missing ucx_rocm.target_ref for Stage A rewrite\n")
+        sys.exit(2)
+    new_txt = set_arg(new_txt, "NIXL_ROCM_UCX_REF", ucx_rocm_ref)
+
+if new_txt == txt:
+    sys.exit(3)
+os.makedirs(os.path.dirname(dst_df_p), exist_ok=True)
+with open(dst_df_p, "w", encoding="utf-8") as f:
+    f.write(new_txt)
+PY
+    if [[ "${df_rc}" -eq 0 ]]; then
+      COMMIT_PATHS+=("pack/model-transfer/Dockerfile")
+    elif [[ "${df_rc}" -eq 3 ]]; then
+      :
+    else
+      exit "${df_rc}"
+    fi
   elif [[ "${KV_STAGE_NAME}" == "tag_promotion" ]]; then
     mkdir -p \
       "${STAGED_TREE}/pkg/worker/settings" \

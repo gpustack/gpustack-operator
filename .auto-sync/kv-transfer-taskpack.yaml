@@ -38,17 +38,15 @@ spec:
       source: https://pypi.org/pypi/nixl/json
       watchedPaths: []
     - id: nixl-rocm
-      kind: git-commit
+      kind: github-release
       source: ai-dynamo/nixl
-      watchedPaths:
-        - pyproject.toml
-        - src
+      watchedPaths: []
+      allowPrerelease: false
     - id: ucx-rocm
-      kind: git-commit
+      kind: github-release
       source: openucx/ucx
-      watchedPaths:
-        - src
-        - configure.ac
+      watchedPaths: []
+      allowPrerelease: false
     - id: hixl
       kind: git-commit
       source: hicann/hixl

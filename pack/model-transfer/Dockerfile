@@ -26,9 +26,10 @@
 #
 # All ARG defaults are below. hack/package.sh forwards UBUNTU_IMAGE and the
 # selected target's image and NIXL arguments. NIXL_* selects CUDA packages;
-# NIXL_ROCM_* selects ROCm packages and source commits. Update the ROCm version
-# and source commit together. The Torch indexes and checks target CUDA 12.9 and
-# ROCm 7.2. GPUSTACK_GIT_VERSION is supplied by the packaging script.
+# NIXL_ROCM_* selects ROCm packages and release tags. Update NIXL_ROCM_VERSION
+# and NIXL_ROCM_REF together, aligned with NIXL_VERSION. The Torch indexes and
+# checks target CUDA 12.9 and ROCm 7.2. GPUSTACK_GIT_VERSION is supplied by the
+# packaging script.
 # CANN forwards HIXL_COMMIT, HIXL_CMAKE_COMMIT and CMAKE_MAX_JOBS. The pinned
 # HIXL host build includes the channel-generation fix used by GPUStack Runner;
 # CANN supplies its Python binding and device libraries.
@@ -53,9 +54,9 @@ ARG NIXL_TORCH_VERSION="2.13.0+cu129"
 
 # ROCm 7.2 packages, built for CPython 3.12.
 ARG ROCM_RUNTIME_IMAGE="rocm/dev-ubuntu-24.04:7.2.3"
-ARG NIXL_ROCM_VERSION="1.6.0"
-ARG NIXL_ROCM_REF="95cbd342679c3c0262e9334b6f2847308601e56d"
-ARG NIXL_ROCM_UCX_REF="a910af25760ef4c6c99c8491919e21efffa34657"
+ARG NIXL_ROCM_VERSION="1.5.2"
+ARG NIXL_ROCM_REF="v1.5.2"
+ARG NIXL_ROCM_UCX_REF="v1.22.0"
 ARG NIXL_ROCM_TORCH_VERSION="2.13.0+rocm7.2"
 
 # CANN toolkit and runtime.
@@ -194,9 +195,9 @@ RUN <<EOF
     set -exo pipefail
     git init /tmp/ucx
     git -C /tmp/ucx remote add origin https://github.com/openucx/ucx.git
-    git -C /tmp/ucx fetch --depth 1 origin "${NIXL_ROCM_UCX_REF}"
-    git -C /tmp/ucx checkout --detach FETCH_HEAD
-    test "$(git -C /tmp/ucx rev-parse HEAD)" = "${NIXL_ROCM_UCX_REF}"
+    git -C /tmp/ucx fetch --depth 1 origin "refs/tags/${NIXL_ROCM_UCX_REF}:refs/tags/${NIXL_ROCM_UCX_REF}"
+    git -C /tmp/ucx checkout --detach "refs/tags/${NIXL_ROCM_UCX_REF}"
+    echo "[info] ucx ${NIXL_ROCM_UCX_REF} resolves to $(git -C /tmp/ucx rev-parse HEAD)"
     cd /tmp/ucx
     ./autogen.sh
     ./configure --prefix=/opt/ucx --enable-shared --disable-static \
@@ -212,9 +213,9 @@ RUN <<EOF
     set -exo pipefail
     git init /tmp/nixl
     git -C /tmp/nixl remote add origin https://github.com/ai-dynamo/nixl.git
-    git -C /tmp/nixl fetch --depth 1 origin "${NIXL_ROCM_REF}"
-    git -C /tmp/nixl checkout --detach FETCH_HEAD
-    test "$(git -C /tmp/nixl rev-parse HEAD)" = "${NIXL_ROCM_REF}"
+    git -C /tmp/nixl fetch --depth 1 origin "refs/tags/${NIXL_ROCM_REF}:refs/tags/${NIXL_ROCM_REF}"
+    git -C /tmp/nixl checkout --detach "refs/tags/${NIXL_ROCM_REF}"
+    echo "[info] nixl ${NIXL_ROCM_REF} resolves to $(git -C /tmp/nixl rev-parse HEAD)"
     cd /tmp/nixl
     python3 -c 'import sys, tomllib; assert tomllib.load(open("pyproject.toml", "rb"))["project"]["version"] == sys.argv[1]' "${NIXL_ROCM_VERSION}"
     python3 contrib/tomlutil.py --wheel-name nixl-rocm pyproject.toml

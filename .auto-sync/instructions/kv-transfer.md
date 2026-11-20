@@ -18,6 +18,7 @@ Inside the offline `linux-bwrap` sandbox, host toolchains (`go`, `hugo`, `helm-d
 - `.auto-sync/.stage/kv-transfer/image-manifests.json`
 - `.auto-sync/.stage/kv-transfer/runner-001_channel_generation.patch` (when staged from `gpustack/runner`)
 - `.auto-sync/.stage/kv-transfer/mooncake/` (upstream `CMakeLists.txt`, `scripts/build_wheel.sh`, `mooncake-transfer-engine/example/CMakeLists.txt`, and `mooncake-transfer-engine/src/transport/ascend_transport/` when `mooncake` drifted)
+- `.auto-sync/.stage/kv-transfer/nixl-rocm/` (upstream `pyproject.toml` at the resolved `vX.Y.Z` tag)
 - `.auto-sync/.stage/kv-transfer/modelexpress/` (upstream `Cargo.toml` and `Cargo.lock` at the resolved `vX.Y.Z` tag)
 
 **Read-only stage rule:** `.auto-sync/.stage/**` is read-only host-staged context outside
@@ -52,14 +53,15 @@ Stage B (`tag_promotion`) takes precedence over Stage A (`recipe_sync`): once un
 2. `validate_kv_transfer.sh`'s `parse_case_arms` is a line-oriented static parser that requires `pattern1|pattern2)` and `;;` in standard `case "${MOONCAKE_VERSION}" in` format, and requires an explicit version arm (e.g. `0.3.14*`) in all 4 release-guard blocks AND the 5th `context_manager.cpp` block.
 3. When Mooncake `0.3.14+` wraps `file(GLOB ASCEND_SOURCES ...)` onto multiple lines (`"ubshmem_transport/*.cpp" "*.cpp"` followed by `"ascend_direct_transport/utils.cpp"`) while `ascend_allocator.cpp` still references `ContextManager::getInstance()`, add a separate `0.3.14*)` arm in the `context_manager.cpp` `case` block that patches `"ascend_direct_transport/context_manager.cpp"` alongside `"ascend_direct_transport/utils.cpp"` and verifies with `grep -q 'ascend_direct_transport/context_manager\.cpp'`.
 
-## 3. `gpustack/runner` HIXL Parity & `NIXL_ROCM_VERSION`
+## 3. `gpustack/runner` HIXL Parity & ROCm Release-Tag Pinning (`NIXL_ROCM_*`)
 
 - When `runner.hixl_commit` is non-empty in `kv-transfer-preflight-report.json`, `HIXL_COMMIT` in `pack/model-transfer/Dockerfile` MUST match `runner.hixl_commit` (not `hicann/hixl` HEAD if `gpustack/runner` has not bumped `VLLM_HIXL_COMMIT`), and `pack/model-transfer/patches/hixl/001_channel_generation.patch` MUST stay byte-identical to `runner-001_channel_generation.patch` (pre-copied by host preflight when drifted).
-- When updating `ARG NIXL_ROCM_REF`, set `ARG NIXL_ROCM_VERSION` to the exact `nixl_rocm.project_version` recorded in `kv-transfer-preflight-report.json` (parsed from `pyproject.toml` `[project].version` at `NIXL_ROCM_REF`).
+- `NIXL_ROCM_REF` MUST be a stable non-prerelease SemVer release tag `vX.Y.Z` from `ai-dynamo/nixl` (`allowPrerelease: false`, never a raw commit SHA or `-rc*` prerelease) aligned to CUDA `NIXL_VERSION`: `NIXL_ROCM_VERSION == NIXL_VERSION` and `NIXL_ROCM_REF == "v${NIXL_ROCM_VERSION}"`. Also verify `NIXL_ROCM_VERSION` matches `nixl_rocm.project_version` recorded in `kv-transfer-preflight-report.json` (parsed from `pyproject.toml` `[project].version` at `refs/tags/${NIXL_ROCM_REF}`).
+- `NIXL_ROCM_UCX_REF` MUST be a stable non-prerelease SemVer release tag `vX.Y.Z` from `openucx/ucx` (`allowPrerelease: false`, sorted by numeric SemVer tuple so older-branch maintenance releases never downgrade a newer minor release, and never a raw commit SHA or `-rc*` prerelease).
 
 ## 4. PyPI Wheel Parity for `NIXL_VERSION`
 
-Only bump `ARG NIXL_VERSION="..."` in `pack/model-transfer/Dockerfile` to a stable version where ALL THREE PyPI packages (`nixl`, `nixl-cu12`, and `nixl-cu13`) publish Linux `x86_64` and `aarch64` wheels (using `nixl_pypi.selected_version` in `kv-transfer-preflight-report.json`).
+Only bump `ARG NIXL_VERSION="..."` (together with `ARG NIXL_ROCM_VERSION="..."` and `ARG NIXL_ROCM_REF="v..."`) in `pack/model-transfer/Dockerfile` to a stable version where ALL THREE PyPI packages (`nixl`, `nixl-cu12`, and `nixl-cu13`) publish Linux `x86_64` and `aarch64` wheels AND `ai-dynamo/nixl` has published the corresponding non-prerelease `vX.Y.Z` GitHub release (using `nixl_pypi.selected_version` and `nixl_rocm.target_ref` in `kv-transfer-preflight-report.json`).
 
 ## 5. ModelExpress SemVer Tag & `--locked` Cargo Verification
 

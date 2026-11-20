@@ -248,6 +248,20 @@ git -C "${MX_SRC}" tag v0.8.0
 git -C "${MX_SRC}" tag weight-sync-pre-removal
 git -C "${MX_SRC}" tag v0.9.0-rc1
 
+NIXL_SRC="${FIXTURE_DIR}/repos/nixl"
+init_mock_repo "${NIXL_SRC}"
+for nixl_ver in "1.5.2" "1.5.3" "1.6.0"; do
+  cat > "${NIXL_SRC}/pyproject.toml" <<TOML
+[project]
+name = "nixl"
+version = "${nixl_ver}"
+TOML
+  git -C "${NIXL_SRC}" add pyproject.toml
+  git -C "${NIXL_SRC}" commit -q -m "nixl v${nixl_ver}"
+  git -C "${NIXL_SRC}" tag "v${nixl_ver}"
+done
+git -C "${NIXL_SRC}" tag v1.6.0-rc1
+
 cat > "${FIXTURE_DIR}/mooncake-release.json" <<'JSON'
 [
   {"tag_name": "v0.3.15-rc1", "prerelease": true, "draft": false},
@@ -256,14 +270,27 @@ cat > "${FIXTURE_DIR}/mooncake-release.json" <<'JSON'
 ]
 JSON
 
-NIXL_ROCM_BASE_REF="$(python3 "${ROOT_DIR}/.auto-sync/checks/dockerfile_arg.py" "${ROOT_DIR}/pack/model-transfer/Dockerfile" NIXL_ROCM_REF)"
-UCX_ROCM_BASE_REF="$(python3 "${ROOT_DIR}/.auto-sync/checks/dockerfile_arg.py" "${ROOT_DIR}/pack/model-transfer/Dockerfile" NIXL_ROCM_UCX_REF)"
+cat > "${FIXTURE_DIR}/nixl-release.json" <<'JSON'
+[
+  {"tag_name": "v1.6.0-rc1", "prerelease": true, "draft": false},
+  {"tag_name": "v1.6.0", "prerelease": false, "draft": false},
+  {"tag_name": "v1.5.3", "prerelease": false, "draft": false},
+  {"tag_name": "v1.5.2", "prerelease": false, "draft": false}
+]
+JSON
+
+cat > "${FIXTURE_DIR}/ucx-release.json" <<'JSON'
+[
+  {"tag_name": "v1.23.0-rc4", "prerelease": true, "draft": false, "published_at": "2026-11-12T00:00:00Z"},
+  {"tag_name": "v1.21.1", "prerelease": false, "draft": false, "published_at": "2026-11-11T00:00:00Z"},
+  {"tag_name": "v1.22.0", "prerelease": false, "draft": false, "published_at": "2026-08-03T00:00:00Z"}
+]
+JSON
+
 HIXL_BASE_REF="$(python3 "${ROOT_DIR}/.auto-sync/checks/dockerfile_arg.py" "${ROOT_DIR}/pack/model-transfer/Dockerfile" HIXL_COMMIT)"
 
 cat > "${FIXTURE_DIR}/upstream.json" <<JSON
 {
-  "nixl_rocm": "${NIXL_ROCM_BASE_REF}",
-  "ucx_rocm": "${UCX_ROCM_BASE_REF}",
   "hixl": "${HIXL_BASE_REF}"
 }
 JSON
@@ -333,6 +360,8 @@ with open(os.path.join(stage, "upstream-records.json"), "r", encoding="utf-8") a
     recs = {r["upstreamId"]: r for r in json.load(f)}
 assert recs["mooncake"]["status"] == "available" and recs["mooncake"]["version"] == "0.3.15", recs["mooncake"]
 assert recs["nixl-pypi"]["status"] == "available" and recs["nixl-pypi"]["version"] == "1.5.3", recs["nixl-pypi"]
+assert recs["nixl-rocm"]["status"] == "available" and recs["nixl-rocm"]["version"] == "v1.5.3", recs["nixl-rocm"]
+assert recs["ucx-rocm"]["status"] == "up_to_date" and recs["ucx-rocm"]["version"] == "v1.22.0", recs["ucx-rocm"]
 assert recs["hixl"]["status"] == "up_to_date", recs["hixl"]
 assert recs["modelexpress"]["status"] == "up_to_date" and recs["modelexpress"]["version"] == "v0.8.0", recs["modelexpress"]
 with open(os.path.join(stage, "kv-transfer-preflight-report.json"), "r", encoding="utf-8") as f:
@@ -340,6 +369,9 @@ with open(os.path.join(stage, "kv-transfer-preflight-report.json"), "r", encodin
 assert rep["stage"] == "recipe_sync", rep
 assert rep["image_published"] is False, rep
 assert rep["nixl_pypi"]["selected_version"] == "1.5.3", rep
+assert rep["nixl_rocm"]["target_ref"] == "v1.5.3", rep["nixl_rocm"]
+assert rep["nixl_rocm"]["project_version"] == "1.5.3", rep["nixl_rocm"]
+assert rep["ucx_rocm"]["target_ref"] == "v1.22.0", rep["ucx_rocm"]
 assert rep["modelexpress"]["selected_version"] == "v0.8.0", rep
 assert rep["modelexpress"]["workspace_version"] == "0.8.0", rep
 src_rev = rep.get("source_revision", "")
@@ -350,15 +382,23 @@ ls = subprocess.check_output(
 assert "100644 blob " in ls and "kv-transfer-preflight-report.json" in ls, ls
 assert "100644 blob " in ls and "runner-001_channel_generation.patch" in ls, ls
 assert "100644 blob " in ls and "upstream-records.json" in ls, ls
+assert "100644 blob " in ls and "nixl-rocm/pyproject.toml" in ls, ls
 assert "100644 blob " in ls and "modelexpress/Cargo.toml" in ls, ls
 assert "100644 blob " in ls and "modelexpress/Cargo.lock" in ls, ls
 assert "120000 " not in ls, ls
+staged_mt_df = subprocess.check_output(
+    ["git", "-C", repo, "show", f"{src_rev}:pack/model-transfer/Dockerfile"], text=True
+)
+assert 'ARG NIXL_VERSION="1.5.3"' in staged_mt_df, staged_mt_df
+assert 'ARG NIXL_ROCM_VERSION="1.5.3"' in staged_mt_df, staged_mt_df
+assert 'ARG NIXL_ROCM_REF="v1.5.3"' in staged_mt_df, staged_mt_df
+assert 'ARG NIXL_ROCM_UCX_REF="v1.22.0"' in staged_mt_df, staged_mt_df
 assert subprocess.check_output(["git", "-C", repo, "status", "--porcelain"], text=True).strip() == ""
 PY
 then
-  pass "preflight Stage A emits recipe_sync, selects NIXL 1.5.3, and stages .auto-sync/.stage/kv-transfer cleanly"
+  pass "preflight Stage A emits recipe_sync, selects NIXL 1.5.3 / v1.5.3, keeps UCX v1.22.0, and stages .auto-sync/.stage/kv-transfer cleanly"
 else
-  fail "preflight Stage A emits recipe_sync, selects NIXL 1.5.3, and stages .auto-sync/.stage/kv-transfer cleanly"
+  fail "preflight Stage A emits recipe_sync, selects NIXL 1.5.3 / v1.5.3, keeps UCX v1.22.0, and stages .auto-sync/.stage/kv-transfer cleanly"
 fi
 
 # 2. Preflight waiting state (no_change): recipes already updated to 0.3.15 & 1.5.3, image still unpublished.
@@ -376,6 +416,8 @@ with open(mc_path, "w", encoding="utf-8") as f:
 with open(mt_path, "r", encoding="utf-8") as f:
     mt = f.read()
 mt = mt.replace('ARG NIXL_VERSION="1.5.2"', 'ARG NIXL_VERSION="1.5.3"', 1)
+mt = mt.replace('ARG NIXL_ROCM_VERSION="1.5.2"', 'ARG NIXL_ROCM_VERSION="1.5.3"', 1)
+mt = mt.replace('ARG NIXL_ROCM_REF="v1.5.2"', 'ARG NIXL_ROCM_REF="v1.5.3"', 1)
 with open(mt_path, "w", encoding="utf-8") as f:
     f.write(mt)
 PY
@@ -458,6 +500,157 @@ then
   pass "preflight holds hixl up_to_date when hicann/hixl advances ahead of gpustack/runner VLLM_HIXL_COMMIT"
 else
   fail "preflight holds hixl up_to_date when hicann/hixl advances ahead of gpustack/runner VLLM_HIXL_COMMIT"
+fi
+
+# 2c. UCX SemVer sorting (v1.22.0 > v1.21.1 published later, v1.23.0-rc4 ignored) and NIXL PyPI/GitHub release alignment.
+UCX_REPO="${SCRATCH}/ucx-semver-repo"
+cp -R "${FAKE_REPO}" "${UCX_REPO}"
+sed -i.bak 's|^ARG NIXL_ROCM_UCX_REF="v1.22.0"|ARG NIXL_ROCM_UCX_REF="v1.21.0"|' "${UCX_REPO}/pack/model-transfer/Dockerfile"
+rm -f "${UCX_REPO}/pack/model-transfer/Dockerfile.bak"
+git -C "${UCX_REPO}" add -A
+git -C "${UCX_REPO}" commit -q -m "pin ucx v1.21.0"
+
+FIX_2C="${SCRATCH}/fix-2c"
+clone_fixture "${FIX_2C}"
+cat > "${FIX_2C}/ucx-release.json" <<'JSON'
+[
+  {"tag_name": "v1.23.0-rc4", "prerelease": false, "draft": false, "published_at": "2026-11-12T00:00:00Z"},
+  {"tag_name": "v1.21.1", "prerelease": false, "draft": false, "published_at": "2026-11-11T00:00:00Z"},
+  {"tag_name": "v1.22.0", "prerelease": false, "draft": false, "published_at": "2026-08-03T00:00:00Z"}
+]
+JSON
+STAGE_2C="${SCRATCH}/stage-2c"
+(
+  cd "${UCX_REPO}"
+  AUTOSYNC_KV_FIXTURE_DIR="${FIX_2C}" \
+  AUTOSYNC_SKIP_GO_MOD_DOWNLOAD=true \
+    bash "${UCX_REPO}/.auto-sync/scripts/preflight-kv-transfer.sh" "${STAGE_2C}"
+)
+if python3 - "${STAGE_2C}" "${UCX_REPO}" <<'PY'
+import json
+import os
+import subprocess
+import sys
+
+stage, repo = sys.argv[1:3]
+with open(os.path.join(stage, "upstream-records.json"), "r", encoding="utf-8") as f:
+    recs = {r["upstreamId"]: r for r in json.load(f)}
+assert recs["ucx-rocm"]["status"] == "available", recs["ucx-rocm"]
+assert recs["ucx-rocm"]["version"] == "v1.22.0", recs["ucx-rocm"]
+with open(os.path.join(stage, "kv-transfer-preflight-report.json"), "r", encoding="utf-8") as f:
+    rep = json.load(f)
+assert rep["stage"] == "recipe_sync", rep
+assert rep["ucx_rocm"]["target_ref"] == "v1.22.0", rep["ucx_rocm"]
+src_rev = rep["source_revision"]
+staged_df = subprocess.check_output(["git", "-C", repo, "show", f"{src_rev}:pack/model-transfer/Dockerfile"], text=True)
+assert 'ARG NIXL_ROCM_UCX_REF="v1.22.0"' in staged_df, staged_df
+PY
+then
+  pass "preflight ucx-rocm ignores v1.23.0-rc4 and selects v1.22.0 over newer-date v1.21.1"
+else
+  fail "preflight ucx-rocm ignores v1.23.0-rc4 and selects v1.22.0 over newer-date v1.21.1"
+fi
+
+# When nixl-release.json only has v1.5.2 while PyPI has 1.5.3 parity, nixl-pypi and nixl-rocm stay aligned at 1.5.2 / v1.5.2.
+NIXL_LAG_REPO="${SCRATCH}/nixl-lag-repo"
+cp -R "${FAKE_REPO}" "${NIXL_LAG_REPO}"
+sed -i.bak \
+  -e 's|^ARG NIXL_VERSION="1.5.3"|ARG NIXL_VERSION="1.5.2"|' \
+  -e 's|^ARG NIXL_ROCM_VERSION="1.5.3"|ARG NIXL_ROCM_VERSION="1.5.2"|' \
+  -e 's|^ARG NIXL_ROCM_REF="v1.5.3"|ARG NIXL_ROCM_REF="v1.5.2"|' \
+  "${NIXL_LAG_REPO}/pack/model-transfer/Dockerfile"
+rm -f "${NIXL_LAG_REPO}/pack/model-transfer/Dockerfile.bak"
+git -C "${NIXL_LAG_REPO}" add -A
+git -C "${NIXL_LAG_REPO}" commit -q -m "pin nixl 1.5.2"
+
+FIX_2D="${SCRATCH}/fix-2d"
+clone_fixture "${FIX_2D}"
+cat > "${FIX_2D}/nixl-release.json" <<'JSON'
+[
+  {"tag_name": "v1.5.3-rc1", "prerelease": true, "draft": false},
+  {"tag_name": "v1.5.2", "prerelease": false, "draft": false}
+]
+JSON
+cat > "${FIX_2D}/mooncake-release.json" <<'JSON'
+[
+  {"tag_name": "v0.3.15", "prerelease": false, "draft": false}
+]
+JSON
+STAGE_2D="${SCRATCH}/stage-2d"
+(
+  cd "${NIXL_LAG_REPO}"
+  AUTOSYNC_KV_FIXTURE_DIR="${FIX_2D}" \
+  AUTOSYNC_SKIP_GO_MOD_DOWNLOAD=true \
+    bash "${NIXL_LAG_REPO}/.auto-sync/scripts/preflight-kv-transfer.sh" "${STAGE_2D}"
+)
+if python3 - "${STAGE_2D}" <<'PY'
+import json
+import os
+import sys
+
+stage = sys.argv[1]
+with open(os.path.join(stage, "upstream-records.json"), "r", encoding="utf-8") as f:
+    recs = {r["upstreamId"]: r for r in json.load(f)}
+assert recs["nixl-pypi"]["status"] == "up_to_date" and recs["nixl-pypi"]["version"] == "1.5.2", recs["nixl-pypi"]
+assert recs["nixl-rocm"]["status"] == "up_to_date" and recs["nixl-rocm"]["version"] == "v1.5.2", recs["nixl-rocm"]
+with open(os.path.join(stage, "kv-transfer-preflight-report.json"), "r", encoding="utf-8") as f:
+    rep = json.load(f)
+assert rep["nixl_pypi"]["selected_version"] == "1.5.2", rep["nixl_pypi"]
+assert rep["nixl_rocm"]["target_ref"] == "v1.5.2", rep["nixl_rocm"]
+assert rep["nixl_rocm"]["project_version"] == "1.5.2", rep["nixl_rocm"]
+PY
+then
+  pass "preflight aligns nixl-pypi and nixl-rocm to v1.5.2 when GitHub release lags behind PyPI"
+else
+  fail "preflight aligns nixl-pypi and nixl-rocm to v1.5.2 when GitHub release lags behind PyPI"
+fi
+
+# 2e. Prerelease-only GitHub releases degrade gracefully to pinned recipe refs instead of failing.
+FIX_2E="${SCRATCH}/fix-2e"
+clone_fixture "${FIX_2E}"
+cat > "${FIX_2E}/ucx-release.json" <<'JSON'
+[
+  {"tag_name": "v1.23.0-rc4", "prerelease": true, "draft": false}
+]
+JSON
+cat > "${FIX_2E}/nixl-release.json" <<'JSON'
+[
+  {"tag_name": "v1.6.0-rc1", "prerelease": true, "draft": false}
+]
+JSON
+cat > "${FIX_2E}/mooncake-release.json" <<'JSON'
+[
+  {"tag_name": "v0.3.15", "prerelease": false, "draft": false}
+]
+JSON
+STAGE_2E="${SCRATCH}/stage-2e"
+(
+  cd "${NIXL_LAG_REPO}"
+  AUTOSYNC_KV_FIXTURE_DIR="${FIX_2E}" \
+  AUTOSYNC_SKIP_GO_MOD_DOWNLOAD=true \
+    bash "${NIXL_LAG_REPO}/.auto-sync/scripts/preflight-kv-transfer.sh" "${STAGE_2E}"
+)
+if python3 - "${STAGE_2E}" <<'PY'
+import json
+import os
+import sys
+
+stage = sys.argv[1]
+with open(os.path.join(stage, "upstream-records.json"), "r", encoding="utf-8") as f:
+    recs = {r["upstreamId"]: r for r in json.load(f)}
+assert recs["ucx-rocm"]["status"] == "up_to_date" and recs["ucx-rocm"]["version"] == "v1.22.0", recs["ucx-rocm"]
+assert recs["nixl-rocm"]["status"] == "up_to_date" and recs["nixl-rocm"]["version"] == "v1.5.2", recs["nixl-rocm"]
+assert recs["nixl-pypi"]["status"] == "up_to_date" and recs["nixl-pypi"]["version"] == "1.5.2", recs["nixl-pypi"]
+with open(os.path.join(stage, "kv-transfer-preflight-report.json"), "r", encoding="utf-8") as f:
+    rep = json.load(f)
+assert rep["stage"] == "no_change", rep
+assert rep["ucx_rocm"]["target_ref"] == "v1.22.0", rep["ucx_rocm"]
+assert rep["nixl_rocm"]["target_ref"] == "v1.5.2", rep["nixl_rocm"]
+PY
+then
+  pass "preflight degrades gracefully to pinned recipe refs when GitHub releases contain only prereleases"
+else
+  fail "preflight degrades gracefully to pinned recipe refs when GitHub releases contain only prereleases"
 fi
 
 # 3. Preflight Stage B (tag_promotion): 0.3.15-cpu now published multi-arch, value.go still on 0.3.13.post1-cpu.
@@ -1269,42 +1462,167 @@ else
   fail "validate_kv_transfer triggers ModelExpress builder when migrating from empty BASE_MX_VERSION"
 fi
 
-# 5k. NIXL_VERSION PyPI wheel verification check (verified 1.5.3 passes; unverified 1.6.0 fails closed).
-make_gitless_cand
-set_kv_proposal "recipe_sync" "nixl-pypi=1.5.3"
-sed -i.bak 's|^ARG NIXL_VERSION="1.5.2"|ARG NIXL_VERSION="1.5.3"|' "${CAND_DIR}/pack/model-transfer/Dockerfile"
-rm -f "${CAND_DIR}/pack/model-transfer/Dockerfile.bak"
-assert_ok "validate_kv_transfer passes wheel-verified NIXL_VERSION=1.5.3" run_validate
-
-make_gitless_cand
-set_kv_proposal "recipe_sync" "nixl-pypi=1.6.0"
-sed -i.bak 's|^ARG NIXL_VERSION="1.5.2"|ARG NIXL_VERSION="1.6.0"|' "${CAND_DIR}/pack/model-transfer/Dockerfile"
-rm -f "${CAND_DIR}/pack/model-transfer/Dockerfile.bak"
-assert_fails "validate_kv_transfer fails closed on unverified NIXL_VERSION=1.6.0" run_validate
-
-# 5l. NIXL_ROCM_VERSION <-> pyproject.toml [project].version alignment check.
+# 5k. NIXL_VERSION PyPI wheel verification check (verified 1.5.3 passes when aligned with ROCm; unverified 1.6.0 fails closed).
 NIXL_ROCM_MOCK="${VAL_STAGE}/nixl-rocm"
 init_mock_repo "${NIXL_ROCM_MOCK}"
 cat > "${NIXL_ROCM_MOCK}/pyproject.toml" <<'TOML'
 [project]
 name = "nixl"
-version = "1.5.1"
+version = "1.5.3"
 TOML
 git -C "${NIXL_ROCM_MOCK}" add pyproject.toml
-git -C "${NIXL_ROCM_MOCK}" commit -q -m "nixl rocm 1.5.1"
-NIXL_ROCM_MOCK_SHA="$(git -C "${NIXL_ROCM_MOCK}" rev-parse HEAD)"
+git -C "${NIXL_ROCM_MOCK}" commit -q -m "nixl rocm 1.5.3"
+git -C "${NIXL_ROCM_MOCK}" tag v1.5.3
 
 make_gitless_cand
-set_kv_proposal "recipe_sync" "nixl-rocm=${NIXL_ROCM_MOCK_SHA}"
-sed -i.bak "s|^ARG NIXL_ROCM_REF=\"[^\"]*\"|ARG NIXL_ROCM_REF=\"${NIXL_ROCM_MOCK_SHA}\"|" "${CAND_DIR}/pack/model-transfer/Dockerfile"
-sed -i.bak 's|^ARG NIXL_ROCM_VERSION="[^"]*"|ARG NIXL_ROCM_VERSION="1.5.1"|' "${CAND_DIR}/pack/model-transfer/Dockerfile"
+set_kv_proposal "recipe_sync" "nixl-pypi=1.5.3" "nixl-rocm=v1.5.3"
+sed -i.bak \
+  -e 's|^ARG NIXL_VERSION="1.5.2"|ARG NIXL_VERSION="1.5.3"|' \
+  -e 's|^ARG NIXL_ROCM_VERSION="1.5.2"|ARG NIXL_ROCM_VERSION="1.5.3"|' \
+  -e 's|^ARG NIXL_ROCM_REF="v1.5.2"|ARG NIXL_ROCM_REF="v1.5.3"|' \
+  "${CAND_DIR}/pack/model-transfer/Dockerfile"
 rm -f "${CAND_DIR}/pack/model-transfer/Dockerfile.bak"
-assert_ok "validate_kv_transfer passes when NIXL_ROCM_VERSION matches pyproject.toml at NIXL_ROCM_REF" run_validate
+assert_ok "validate_kv_transfer passes wheel-verified NIXL_VERSION=1.5.3 aligned with NIXL_ROCM_REF=v1.5.3" run_validate
 
-sed -i.bak 's|^ARG NIXL_ROCM_VERSION="1.5.1"|ARG NIXL_ROCM_VERSION="9.9.9"|' "${CAND_DIR}/pack/model-transfer/Dockerfile"
+make_gitless_cand
+set_kv_proposal "recipe_sync" "nixl-pypi=1.6.0" "nixl-rocm=v1.6.0"
+sed -i.bak \
+  -e 's|^ARG NIXL_VERSION="1.5.2"|ARG NIXL_VERSION="1.6.0"|' \
+  -e 's|^ARG NIXL_ROCM_VERSION="1.5.2"|ARG NIXL_ROCM_VERSION="1.6.0"|' \
+  -e 's|^ARG NIXL_ROCM_REF="v1.5.2"|ARG NIXL_ROCM_REF="v1.6.0"|' \
+  "${CAND_DIR}/pack/model-transfer/Dockerfile"
 rm -f "${CAND_DIR}/pack/model-transfer/Dockerfile.bak"
-assert_fails "validate_kv_transfer fails closed when NIXL_ROCM_VERSION disagrees with pyproject.toml" run_validate
+assert_fails "validate_kv_transfer fails closed on unverified NIXL_VERSION=1.6.0" run_validate
+
+# 5l. NIXL_ROCM_VERSION <-> pyproject.toml, CUDA alignment, UCX preflight verification, and strict SemVer tag enforcement.
+make_gitless_cand
+set_kv_proposal "recipe_sync" "nixl-pypi=1.5.3" "nixl-rocm=v1.5.3"
+sed -i.bak \
+  -e 's|^ARG NIXL_VERSION="1.5.2"|ARG NIXL_VERSION="1.5.3"|' \
+  -e 's|^ARG NIXL_ROCM_VERSION="1.5.2"|ARG NIXL_ROCM_VERSION="1.5.3"|' \
+  -e 's|^ARG NIXL_ROCM_REF="v1.5.2"|ARG NIXL_ROCM_REF="v1.5.3"|' \
+  "${CAND_DIR}/pack/model-transfer/Dockerfile"
+rm -f "${CAND_DIR}/pack/model-transfer/Dockerfile.bak"
+assert_ok "validate_kv_transfer passes when NIXL_ROCM_VERSION matches pyproject.toml at refs/tags/NIXL_ROCM_REF" run_validate
+
+# Disagreeing pyproject.toml at refs/tags/v1.5.3 fails closed.
+cat > "${NIXL_ROCM_MOCK}/pyproject.toml" <<'TOML'
+[project]
+name = "nixl"
+version = "9.9.9"
+TOML
+git -C "${NIXL_ROCM_MOCK}" add pyproject.toml
+git -C "${NIXL_ROCM_MOCK}" commit -q -m "mismatch"
+git -C "${NIXL_ROCM_MOCK}" tag -f v1.5.3
+assert_fails "validate_kv_transfer fails closed when NIXL_ROCM_VERSION disagrees with pyproject.toml at tag" run_validate
+
+# Staged .git repo missing refs/tags/<NIXL_ROCM_REF> fails closed even when working-tree pyproject.toml matches.
+make_gitless_cand
+set_kv_proposal "recipe_sync" "nixl-pypi=1.5.3" "nixl-rocm=v1.5.3"
+sed -i.bak \
+  -e 's|^ARG NIXL_VERSION="1.5.2"|ARG NIXL_VERSION="1.5.3"|' \
+  -e 's|^ARG NIXL_ROCM_VERSION="1.5.2"|ARG NIXL_ROCM_VERSION="1.5.3"|' \
+  -e 's|^ARG NIXL_ROCM_REF="v1.5.2"|ARG NIXL_ROCM_REF="v1.5.3"|' \
+  "${CAND_DIR}/pack/model-transfer/Dockerfile"
+rm -f "${CAND_DIR}/pack/model-transfer/Dockerfile.bak"
+git -C "${NIXL_ROCM_MOCK}" tag -d v1.5.3 >/dev/null
+cat > "${NIXL_ROCM_MOCK}/pyproject.toml" <<'TOML'
+[project]
+name = "nixl"
+version = "1.5.3"
+TOML
+git -C "${NIXL_ROCM_MOCK}" add pyproject.toml
+git -C "${NIXL_ROCM_MOCK}" commit -q -m "untagged working tree 1.5.3"
+missing_nixl_tag_err=""
+if ! missing_nixl_tag_err="$(run_validate 2>&1)" && \
+   grep -q "refs/tags/v1\.5\.3:pyproject\.toml) not found" <<<"${missing_nixl_tag_err}"; then
+  pass "validate_kv_transfer fails closed when staged nixl-rocm .git repo lacks refs/tags/v1.5.3 despite matching working-tree pyproject.toml"
+else
+  fail "validate_kv_transfer fails closed when staged nixl-rocm .git repo lacks refs/tags/v1.5.3 despite matching working-tree pyproject.toml (${missing_nixl_tag_err})"
+fi
 rm -rf "${NIXL_ROCM_MOCK}"
+
+# Missing staged nixl-rocm repo and pyproject.toml when NIXL_ROCM_REF changes fails closed.
+make_gitless_cand
+set_kv_proposal "recipe_sync" "nixl-pypi=1.5.3" "nixl-rocm=v1.5.3"
+sed -i.bak \
+  -e 's|^ARG NIXL_VERSION="1.5.2"|ARG NIXL_VERSION="1.5.3"|' \
+  -e 's|^ARG NIXL_ROCM_VERSION="1.5.2"|ARG NIXL_ROCM_VERSION="1.5.3"|' \
+  -e 's|^ARG NIXL_ROCM_REF="v1.5.2"|ARG NIXL_ROCM_REF="v1.5.3"|' \
+  "${CAND_DIR}/pack/model-transfer/Dockerfile"
+rm -f "${CAND_DIR}/pack/model-transfer/Dockerfile.bak"
+assert_fails "validate_kv_transfer fails closed when NIXL_ROCM_REF changes without staged nixl-rocm" run_validate
+
+# NIXL_ROCM_UCX_REF changes require verified ucx_rocm entries in kv-transfer-preflight-report.json.
+make_gitless_cand
+set_kv_proposal "recipe_sync" "ucx-rocm=v1.23.0"
+sed -i.bak 's|^ARG NIXL_ROCM_UCX_REF="v1.22.0"|ARG NIXL_ROCM_UCX_REF="v1.23.0"|' "${CAND_DIR}/pack/model-transfer/Dockerfile"
+rm -f "${CAND_DIR}/pack/model-transfer/Dockerfile.bak"
+assert_fails "validate_kv_transfer fails closed when NIXL_ROCM_UCX_REF changes without ucx_rocm in preflight report" run_validate
+
+cp -f "${VAL_STAGE}/kv-transfer-preflight-report.json" "${SCRATCH}/val-report-bak.json"
+python3 - "${VAL_STAGE}/kv-transfer-preflight-report.json" <<'PY'
+import json
+import sys
+p = sys.argv[1]
+with open(p, "r", encoding="utf-8") as f:
+    rep = json.load(f)
+rep["ucx_rocm"] = {"target_ref": "v1.23.0", "recent_versions": ["v1.23.0", "v1.22.0"]}
+with open(p, "w", encoding="utf-8") as f:
+    json.dump(rep, f, indent=2)
+PY
+assert_ok "validate_kv_transfer passes when NIXL_ROCM_UCX_REF matches verified ucx_rocm in preflight report" run_validate
+
+set_kv_proposal "recipe_sync" "ucx-rocm=v9.9.9"
+sed -i.bak 's|^ARG NIXL_ROCM_UCX_REF="v1.23.0"|ARG NIXL_ROCM_UCX_REF="v9.9.9"|' "${CAND_DIR}/pack/model-transfer/Dockerfile"
+rm -f "${CAND_DIR}/pack/model-transfer/Dockerfile.bak"
+assert_fails "validate_kv_transfer rejects unverified NIXL_ROCM_UCX_REF not in preflight ucx_rocm set" run_validate
+mv -f "${SCRATCH}/val-report-bak.json" "${VAL_STAGE}/kv-transfer-preflight-report.json"
+
+# Reject raw commit SHA in NIXL_ROCM_REF.
+make_gitless_cand
+set_kv_proposal "recipe_sync" "nixl-rocm=95cbd342679c3c0262e9334b6f2847308601e56d"
+sed -i.bak 's|^ARG NIXL_ROCM_REF="[^"]*"|ARG NIXL_ROCM_REF="95cbd342679c3c0262e9334b6f2847308601e56d"|' "${CAND_DIR}/pack/model-transfer/Dockerfile"
+rm -f "${CAND_DIR}/pack/model-transfer/Dockerfile.bak"
+assert_fails "validate_kv_transfer rejects raw commit SHA in NIXL_ROCM_REF" run_validate
+
+# Reject prerelease tag in NIXL_ROCM_REF.
+make_gitless_cand
+set_kv_proposal "recipe_sync" "nixl-rocm=v1.5.2-rc1"
+sed -i.bak 's|^ARG NIXL_ROCM_REF="[^"]*"|ARG NIXL_ROCM_REF="v1.5.2-rc1"|' "${CAND_DIR}/pack/model-transfer/Dockerfile"
+rm -f "${CAND_DIR}/pack/model-transfer/Dockerfile.bak"
+assert_fails "validate_kv_transfer rejects prerelease tag in NIXL_ROCM_REF" run_validate
+
+# Reject raw commit SHA in NIXL_ROCM_UCX_REF.
+make_gitless_cand
+set_kv_proposal "recipe_sync" "ucx-rocm=a910af25760ef4c6c99c8491919e21efffa34657"
+sed -i.bak 's|^ARG NIXL_ROCM_UCX_REF="[^"]*"|ARG NIXL_ROCM_UCX_REF="a910af25760ef4c6c99c8491919e21efffa34657"|' "${CAND_DIR}/pack/model-transfer/Dockerfile"
+rm -f "${CAND_DIR}/pack/model-transfer/Dockerfile.bak"
+assert_fails "validate_kv_transfer rejects raw commit SHA in NIXL_ROCM_UCX_REF" run_validate
+
+# Reject prerelease tag in NIXL_ROCM_UCX_REF.
+make_gitless_cand
+set_kv_proposal "recipe_sync" "ucx-rocm=v1.23.0-rc4"
+sed -i.bak 's|^ARG NIXL_ROCM_UCX_REF="[^"]*"|ARG NIXL_ROCM_UCX_REF="v1.23.0-rc4"|' "${CAND_DIR}/pack/model-transfer/Dockerfile"
+rm -f "${CAND_DIR}/pack/model-transfer/Dockerfile.bak"
+assert_fails "validate_kv_transfer rejects prerelease tag in NIXL_ROCM_UCX_REF" run_validate
+
+# Reject NIXL_ROCM_VERSION != NIXL_VERSION.
+make_gitless_cand
+set_kv_proposal "recipe_sync" "nixl-rocm=v1.5.3"
+sed -i.bak \
+  -e 's|^ARG NIXL_ROCM_VERSION="1.5.2"|ARG NIXL_ROCM_VERSION="1.5.3"|' \
+  -e 's|^ARG NIXL_ROCM_REF="v1.5.2"|ARG NIXL_ROCM_REF="v1.5.3"|' \
+  "${CAND_DIR}/pack/model-transfer/Dockerfile"
+rm -f "${CAND_DIR}/pack/model-transfer/Dockerfile.bak"
+assert_fails "validate_kv_transfer rejects NIXL_ROCM_VERSION != NIXL_VERSION" run_validate
+
+# Reject NIXL_ROCM_REF != v + NIXL_ROCM_VERSION.
+make_gitless_cand
+set_kv_proposal "recipe_sync" "nixl-rocm=v1.5.3"
+sed -i.bak 's|^ARG NIXL_ROCM_REF="v1.5.2"|ARG NIXL_ROCM_REF="v1.5.3"|' "${CAND_DIR}/pack/model-transfer/Dockerfile"
+rm -f "${CAND_DIR}/pack/model-transfer/Dockerfile.bak"
+assert_fails "validate_kv_transfer rejects NIXL_ROCM_REF != v + NIXL_ROCM_VERSION" run_validate
 
 # 5m. Mismatched proposals/kv-transfer.json fails closed.
 make_gitless_cand
@@ -1618,8 +1936,8 @@ src_up, dst_up, man_p, hixl_sha = sys.argv[1:5]
 with open(src_up, "r", encoding="utf-8") as f:
     up = json.load(f)
 up["hixl"] = hixl_sha
-up["nixl_rocm"] = "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"
-up["ucx_rocm"] = "cafebabecafebabecafebabecafebabecafebabe"
+up["nixl_rocm"] = "v1.5.3"
+up["ucx_rocm"] = "v1.23.0"
 up["repo_tags"] = {
     "gpustack/mirrored-modelexpress-server": ["v0.7.0", "v9.9.0"],
     "gpustack/model-transfer": [
@@ -1783,7 +2101,7 @@ PY
   cp -f "${SB_PRIO_REPO}/pack/model-transfer/patches/hixl/001_channel_generation.patch" \
     "${CAND_SB_PRIO}/pack/model-transfer/patches/hixl/001_channel_generation.patch"
 
-  sed -i.bak 's|^ARG NIXL_ROCM_REF="[^"]*"|ARG NIXL_ROCM_REF="deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"|' \
+  sed -i.bak 's|^ARG NIXL_ROCM_REF="[^"]*"|ARG NIXL_ROCM_REF="v9.9.9"|' \
     "${CAND_SB_PRIO}/pack/model-transfer/Dockerfile"
   rm -f "${CAND_SB_PRIO}/pack/model-transfer/Dockerfile.bak"
   assert_fails "validate_kv_transfer fails closed when Stage B tag_promotion modifies pack/model-transfer/Dockerfile" \
@@ -1850,8 +2168,8 @@ src_up, dst_up, src_man, dst_man, hixl_sha = sys.argv[1:6]
 with open(src_up, "r", encoding="utf-8") as f:
     up = json.load(f)
 up["hixl"] = hixl_sha
-up["nixl_rocm"] = "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"
-up["ucx_rocm"] = "cafebabecafebabecafebabecafebabecafebabe"
+up["nixl_rocm"] = "v1.5.3"
+up["ucx_rocm"] = "v1.23.0"
 up["repo_tags"] = {
     "gpustack/mirrored-modelexpress-server": ["v0.7.0"],
     "gpustack/model-transfer": ["v0.1.0-cuda12.9", "v0.1.0-rocm7.2", "v0.1.0-cann9.2-a5"],
