@@ -222,6 +222,17 @@ RUN --mount=type=cache,target=/root/.cache/go-build,sharing=locked \
     /out/bin/gpustack-operator --version
 EOF
 
+# Stage pure-Python gpustack-engine-sentinel unpacked with PEP 376 .dist-info metadata
+# (version locked to GPUSTACK_GIT_VERSION) and sitecustomize.py so device-manager copies it
+# atomically into /var/lib/gpustack/operator/lib/engine-sentinel.
+RUN --mount=type=bind,src=engine-sentinel/python,target=/tmp/engine-sentinel-src,ro <<EOF
+    set -exo pipefail
+    python3 -B /tmp/engine-sentinel-src/stage_build.py \
+        --output-dir /out/engine-sentinel \
+        --version "${GPUSTACK_GIT_VERSION}"
+    ls -la /out/engine-sentinel/
+EOF
+
 # =============================================================================
 # Stages: xbuild-ascend-cann-* (Ascend logical-slicing)
 # Build the vcann-rt runtime (libvruntime.so + enpu-monitor) once per CANN/family
@@ -501,6 +512,9 @@ COPY --from=xbuild-thead-ppu /out ${GPUSTACK_LIB_DIR}/thead
 ## Flat, with no ROCm-version subdirectory: the library links no ROCm object, so one build
 ## serves every runtime the workload brings. Empty on arm64, by design.
 COPY --from=xbuild-amd-rocm /out ${GPUSTACK_LIB_DIR}/amd
+
+## Copy the unpacked pure-Python engine-sentinel package (version locked to GPUSTACK_GIT_VERSION).
+COPY --from=builder /out/engine-sentinel ${GPUSTACK_LIB_DIR}/engine-sentinel
 
 ## Copy CLI binaries from the build stages
 

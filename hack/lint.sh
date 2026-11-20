@@ -102,17 +102,23 @@ function docs_lint() {
   fi
 }
 
-# The covering set for a turn that dirtied only Python sources under model-transfer/python/. The Stop hook
-# routes such a turn here in addition to or instead of the full code gate so uv + ruff check and
-# format verification run directly on model-transfer/python, plus check-symbols.sh which also scans tracked
-# sources for decorative symbols.
+# The covering set for a turn that dirtied Python sources under model-transfer/python/ or
+# engine-sentinel/python/. The Stop hook routes such a turn here in addition to or instead of the
+# full code gate so uv + ruff check and format verification run directly on both Python packages,
+# plus check-symbols.sh which also scans tracked sources for decorative symbols.
 function python_lint() {
   if [[ "${GPUSTACK_SKIP_PYTHON_LINT:-}" == "true" ]]; then
     gpustack::log::info "skipping python lint (GPUSTACK_SKIP_PYTHON_LINT=true)"
     return 0
   fi
-  local py_dir="${ROOT_DIR}/model-transfer/python"
-  if [[ ! -d "${py_dir}" ]]; then
+  local py_dirs=()
+  local rel_dir
+  for rel_dir in "model-transfer/python" "engine-sentinel/python"; do
+    if [[ -d "${ROOT_DIR}/${rel_dir}" ]]; then
+      py_dirs+=("${rel_dir}")
+    fi
+  done
+  if [[ ${#py_dirs[@]} -eq 0 ]]; then
     return 0
   fi
   if [[ -z "$(command -v uv 2>/dev/null)" ]]; then
@@ -122,12 +128,14 @@ function python_lint() {
     fi
     gpustack::log::fatal "cannot execute python lint as uv is not found"
   fi
-  gpustack::log::info "linting Python sources in model-transfer/python with uv and ruff"
-  (
-    cd "${py_dir}"
-    uv run ruff check .
-    uv run ruff format --check .
-  )
+  for rel_dir in "${py_dirs[@]}"; do
+    gpustack::log::info "linting Python sources in ${rel_dir} with uv and ruff"
+    (
+      cd "${ROOT_DIR}/${rel_dir}"
+      uv run ruff check .
+      uv run ruff format --check .
+    )
+  done
 }
 
 # The covering set for a turn that dirtied only shell under .agents/ outside hooks/. The Stop hook
