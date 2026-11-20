@@ -961,9 +961,9 @@ if [[ "${PROMOTED_FILES_CHANGED}" == "true" && "${AUTOSYNC_FAST_SELFTEST:-false}
   (
     set -e
     cd "${AUTOSYNC_CANDIDATE_ROOT}"
-    go test ./pkg/worker/settings/...
+    autosync::go_test ./pkg/worker/settings/...
     if [[ -d "${AUTOSYNC_CANDIDATE_ROOT}/pkg/worker/controllers/worker" ]]; then
-      go test ./pkg/worker/controllers/worker -run '^TestRenderModelDeploymentModelExpressObjects$'
+      autosync::go_test ./pkg/worker/controllers/worker -run '^TestRenderModelDeploymentModelExpressObjects$'
     fi
   )
   git -C "${AUTOSYNC_CANDIDATE_ROOT}" diff --exit-code

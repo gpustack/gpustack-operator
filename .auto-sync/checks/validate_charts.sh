@@ -590,7 +590,7 @@ make -C "${AUTOSYNC_CANDIDATE_ROOT}" generate chart
 make -C "${AUTOSYNC_CANDIDATE_ROOT}" lint chart
 (
   cd "${AUTOSYNC_CANDIDATE_ROOT}"
-  go test ./pkg/worker/kuberess/...
+  autosync::go_test ./pkg/worker/kuberess/...
 )
 
 if [[ -f "${AUTOSYNC_CANDIDATE_ROOT}/hack/check/symbols.sh" ]]; then
