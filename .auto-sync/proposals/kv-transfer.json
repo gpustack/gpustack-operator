@@ -1,12 +1,12 @@
 {
   "schema_version": 1,
   "stage": "recipe_sync",
-  "summary": "Stage A recipe sync: Mooncake recipe to 0.3.14 (0.3.14* admitted in all four release guards plus a new 0.3.14 arm in the cann context_manager.cpp ASCEND_SOURCES glob block); NIXL ROCm source pins to ai-dynamo/nixl 95cbd342679c3c0262e9334b6f2847308601e56d (pyproject version 1.6.0) with UCX at openucx/ucx a910af25760ef4c6c99c8491919e21efffa34657; ModelExpress to ai-dynamo/modelexpress v0.8.0. HIXL stays held at gpustack/runner VLLM_HIXL_COMMIT 60dbe9d1d7d9a7eef04bc3dbf84edbad2188230a and the channel-generation patch is byte-identical to runner's; NIXL PyPI stays at 1.5.2. Promoted gpustack/* tags in value.go, settings.md and the chart are unchanged: gpustack/mirrored-mooncake:0.3.14-cpu is not yet published on Docker Hub, so tag promotion waits for Stage B.",
+  "summary": "Stage A recipe sync: NIXL ROCm source pins advance to ai-dynamo/nixl 754b7d49445bce7551da2a46f194db562f96e884 (pyproject [project].version 1.6.0 at that ref, so NIXL_ROCM_VERSION stays 1.6.0) and openucx/ucx ffbb1aa4c8ffdf2a93628b222f1594a70f76625c; Mooncake stays at 0.3.14 (0.3.14* admitted in all four release guards plus the cann context_manager.cpp ASCEND_SOURCES glob arm); NIXL PyPI stays at 1.5.2; ModelExpress stays at ai-dynamo/modelexpress v0.8.0. HIXL stays held at gpustack/runner VLLM_HIXL_COMMIT 60dbe9d1d7d9a7eef04bc3dbf84edbad2188230a and the channel-generation patch is byte-identical to runner's. Promoted gpustack/* tags in value.go, settings.md, remote.md and the chart are unchanged: this run is stage recipe_sync with image_published false, and kv-cache-backend-image remains held at gpustack/mirrored-mooncake:0.3.13.post1-cpu, so tag promotion waits for Stage B.",
   "versions": {
     "mooncake": "0.3.14",
     "nixl-pypi": "1.5.2",
-    "nixl-rocm": "95cbd342679c3c0262e9334b6f2847308601e56d",
-    "ucx-rocm": "a910af25760ef4c6c99c8491919e21efffa34657",
+    "nixl-rocm": "754b7d49445bce7551da2a46f194db562f96e884",
+    "ucx-rocm": "ffbb1aa4c8ffdf2a93628b222f1594a70f76625c",
     "hixl": "60dbe9d1d7d9a7eef04bc3dbf84edbad2188230a",
     "modelexpress": "v0.8.0",
     "gpustack-runner": "aligned"
