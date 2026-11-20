@@ -1,7 +1,7 @@
 # Spec: Ascend A5 KVCacheBackend and ModelTransfer Communication Resource Support, HIXL Routing Admission, and Mooncake DRAM Normalization
 
-Status: Building
-Blocked on: implementation and verification of this specification via `/my-build`.
+Status: Built
+Blocked on: end-of-build review and shipping via `/my-ship`.
 Type: Feature
 
 - **Related Specs**: [2026-11-19-model-deployment-ascend-a5-comm-res.md](2026-11-19-model-deployment-ascend-a5-comm-res.md) · [2026-09-05-kv-cache-media-and-scaling.md](2026-09-05-kv-cache-media-and-scaling.md) · [2026-11-17-modular-loopwright-auto-sync.md](2026-11-17-modular-loopwright-auto-sync.md)
@@ -349,7 +349,7 @@ Parallel entry frontier: `T1`, `T2`, `T3`, `T4`, and `T5` own strictly disjoint 
       Acceptance: `modelDeploymentModelTransferDefaultQualified` admits `(ManufacturerAscend, vLLM/SGLang, "hixl")` alongside `(ManufacturerNVIDIA, vLLM/SGLang, "nixl")` (existing unqualified-gate tests inject explicit unqualified tuples); KV/collective Host RoCE eligibility stays strictly separated from role-local remote weight Host RoCE eligibility so `modelDeploymentAscendHostRoCE` (`vLLM` KV connector) is driven only by the KV leg, while `Encode` and asymmetric P/D pairs continue rejecting `resources.interface > 0`; Ascend A5 (`Family == "950"`) eligible `Server` (including single-Pod `Server` on `vLLM` and `SGLang`) and symmetric P/D roles with `Model.ArtifactRef != nil` resolve `"rdma"` (never `"efa"`) consistently across admission, no-source `Prefer` wait, remote delivery, and per-ordinal fallback (while non-remote SGLang A5 P/D rejection stays intact); `ModelDeploymentArtifactRender` adds `omitempty` `ModelTransferAscendA5` and `ModelTransferAscendHostRoCE` (zeroed on non-A5, A2/A3, and non-Remote renders so unaffected Pod hashes remain byte-for-byte identical and `modelDeploymentRenderVersion` stays `5`); `model_deployment_render.go` performs one unified `/etc/hixlep` overlap-aware yield across user `additionalVolumes`, KV connector mounts, and A5 remote Host RoCE mounts; A5 `remoteDelivery && hixl` appends flat-key `ASCEND_GLOBAL_RESOURCE_CONFIG` (`roce:host` + `/etc/hixlep`) on `interface > 0` or `ASCEND_LOCAL_COMM_RES='{"version":"1.3"}'` on `interface == 0` via append-if-absent after role/connector env merge; `inject.AscendGlobalResourceConfigEnv` is registered in `modelDeploymentDefaultedEnvNames` with `TestModelDeploymentOwnedAndDefaultedCannotDisagree` and scaler prior-identity tests green; unit, webhook, and golden YAML tests cover UB, Host RoCE (weights-only and KV+weights), SGLang remote vs non-remote, asymmetric P/D, `Encode`, webhook→reconcile fallback, and legacy hash stability.
       Verify: `CGO_ENABLED=1 go test -race ./pkg/worker/controllers/worker/... ./pkg/worker/webhooks/worker/... -run 'TestModelDeploymentModelTransfer|TestModelTransfer|TestModelDeploymentDirectInterfaceProtocol|TestModelDeploymentGoldenYAML|TestModelDeploymentLegacyRender|TestModelDeploymentOwnedAndDefaultedCannotDisagree|TestModelDeploymentScaler|TestRenderModelDeploymentPod_AscendA5|TestModelDeploymentWebhook_AscendA5' && make lint`
 
-- [ ] **T6 · Converge KV Cache docs to `DRAM`, document `hixl` admission, and add Ascend A5 scenario matrices**
+- [x] **T6 · Converge KV Cache docs to `DRAM`, document `hixl` admission, and add Ascend A5 scenario matrices**
       Blocked by: T1, T2, T3, T4, T5
       Owns: `docs/modules/kv-cache/**`, `docs/modules/model-delivery/remote.md`, `docs/modules/model-deployment/parameterize.md`, `docs/README.md`
       Gate: None

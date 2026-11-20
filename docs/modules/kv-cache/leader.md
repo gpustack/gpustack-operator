@@ -159,9 +159,11 @@ A member group on `RDMA`, `ROCM` or `CANN` runs under high availability on the b
 its transport: every `mirrored-mooncake` target (the default build and the `cuda`, `cann` and
 `rocm` variants alike) compiles the `Lease` backend in. Transport support and leader election support are independent.
 
-The matching rule is unchanged from [the backend page](backend.md#image): the default build
-covers `RDMA` over DRAM (the transport has no compile switch to leave off, and rdma-core is
-installed), and a `ROCM` or `CANN` group names its variant.
+The matching rule is unchanged from [the backend page](backend.md#gpustack-build-variants): all
+official `mirrored-mooncake` builds (`-cpu`, `cuda`, `cann`, `rocm`) disable `USE_VRAM_SEGMENT` and
+allocate store segments in Host RAM (`DRAM`) only. The `-cpu` build ships *RDMA* (`libibverbs`) and
+EFA (`libfabric`) for NVIDIA and AMD Host-RAM stores, while `-cann` is required on Ascend because
+`vllm-ascend` speaks HIXL (`protocol: ascend`), and `-rocm` adds ROCm transport support.
 
 What none of those three has is a real-machine run under an election: the `Lease` backend's
 presence is asserted per build target, the fabric data path is not.

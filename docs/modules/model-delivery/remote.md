@@ -24,6 +24,7 @@ so the successful remote path does not store a complete checkpoint on the target
 - [Benchmarks](#benchmarks)
 - [Require and Prefer](#require-and-prefer)
 - [Networks](#networks)
+- [Ascend A5 topologies](#ascend-a5-topologies)
 - [Observing status](#observing-status)
 - [Troubleshooting](#troubleshooting)
 - [Rollback](#rollback)
@@ -72,14 +73,15 @@ directly through Helm. Perform this maintenance when the affected workload is st
 it does not wait for the image-rollout drain acknowledgement.
 Host driver versions do not rewrite the map. Disk warm-up retains its independent Python Alpine image.
 
-Remote delivery targets **hub artifacts on managed roles**. The routing candidates are `nixl`
-for vLLM and SGLang on NVIDIA, and `hixl` for vLLM-Ascend and SGLang on Ascend. The current
-allowlist admits only the NVIDIA candidates; Ascend is not yet admitted. Routing admission does
-not establish production acceptance, which remains open.
+Remote delivery targets **hub artifacts on managed roles**. Default routing admits `nixl` for `vLLM`
+and `SGLang` on NVIDIA, and `hixl` for `vLLM` and `SGLang` on Ascend. Routing admission does not
+establish production acceptance, which remains open.
 
 Setting `Require` or `Prefer` starts nothing on its own. A role with its own command is never
 rewritten, and claim and image artifacts keep their existing delivery paths. On Ascend (`hixl`),
-the engine runner image must include CANN 9.2 or newer so the Python `hixl` module is present.
+the engine runner image must include CANN 9.2 or newer (for Python `hixl`), and Ascend A5 or Host
+RoCE features require rebuilt `model-transfer` source and `gpustack_model_transfer` wheel images
+beyond early `v0.1.0-cann9.2-a5` tags.
 
 ## Source preparation
 
@@ -136,8 +138,8 @@ Treat source Pods and their vendor images as trusted cluster infrastructure.
 
 Use the benchmark models `Qwen/Qwen3-8B` and `Qwen/Qwen3.6-35B-A3B` in namespace
 `gpustack-default`. Both sources share the `model-source-pool` store and `qwen-source` Binding.
-These are configuration examples, not captured benchmark manifests. HIXL remains outside the
-managed replica routing allowlist.
+These are configuration examples, not captured benchmark manifests; default routing admits Ascend
+`hixl` for `vLLM` and `SGLang`.
 
 #### Node and source limits
 
@@ -393,10 +395,11 @@ The reader coalesces contiguous safetensors spans into a registered transfer win
 possible. Window and concurrency budgets bound staging; retained output tensors still contribute
 to peak device memory until load completion.
 
-The target staging window uses pinned host RAM. Ascend uses `aclrtMallocHost` and HIXL `MEM_HOST`;
-NVIDIA uses pinned `DRAM` with NIXL. The source writes into the host window, then the loader copies
-to the target tensor. `GPUSTACK_MODEL_TRANSFER_TARGET_MEMORY` is no longer read. The loaders close
-the session after `load_weights`; unknown native outcomes retain resources for safety.
+The target staging window uses pinned host RAM. Ascend uses `aclrtMallocHost` (or `2 MiB`-aligned
+anonymous `mmap` when `protocol_desc` selects `roce:host`) and HIXL `MEM_HOST`; NVIDIA uses pinned
+`DRAM` with NIXL. The source writes into the host window, then the loader copies to the target
+tensor. `GPUSTACK_MODEL_TRANSFER_TARGET_MEMORY` is no longer read. The loaders close the session
+after `load_weights`; unknown native outcomes retain resources for safety.
 
 HIXL owned host regions always use `2 MiB`-aligned addresses and registration lengths, including
 small or oddly sized requests. The allocator reserves the rounded extent plus `2 MiB` for address
@@ -476,7 +479,7 @@ remote runs cross nodes.
 
 The runs used two Ascend 910B2 nodes, vLLM-Ascend `cann9.2-910b-vllm0.30.0`, eager mode and host
 transfer buffers with pre-warmed source weights. These runs used an isolated qualification setup;
-HIXL remains outside the managed routing allowlist.
+default routing now admits Ascend `hixl` for `vLLM` and `SGLang`.
 
 The source host had 2014 GiB of total RAM and approximately 1514 GiB available. With
 *`source.maxMemoryBytes: 0`*, the default node Source budget is `2014 / 16` (`125.88 GiB`), subject
@@ -783,6 +786,82 @@ The source chart keeps the existing `modelTransfer.env` map and appended `modelT
 Use backend environment variables there when a server needs explicit device selection. Client
 east-west network selection is owned by the RDMA selection work; this feature adds no server-client
 NIC negotiation. HIXL Device RoCE and Host RoCE require separate qualification.
+
+## Ascend A5 topologies
+
+On Ascend A5 (`Family == "950"`), `modelTransfer.ascend.hostRoCE.enabled` (default `false`) opts
+the Ascend source `DaemonSet` into Host RoCE, while `roles[].resources.interface > 0` enables Host
+RoCE on eligible `ModelDeployment` `vLLM` and `SGLang` targets (`Server` and symmetric *PD* pairs;
+`Encode` and asymmetric *PD* pairs remain rejected).
+
+- **Source Host RoCE toggle**: Setting `modelTransfer.ascend.hostRoCE.enabled: true` applies `hostNetwork: true`, `ClusterFirstWithHostNet`, read-only `/etc/hixlep` (`HostPathDirectory`), and default `ASCEND_GLOBAL_RESOURCE_CONFIG` (`roce:host` + `/etc/hixlep`) on `gpustack-operator-model-transfer-ascend` only.
+- **Node loopback ports**: With `hostNetwork: true`, broker `:9251` (TLS sessions, headless Service SNI `status.podIP:9251`), broker `127.0.0.1:9250`, and worker `127.0.0.1:9252` share the host network namespace.
+- **Mixed Ascend fleets**: Because the Ascend source `DaemonSet` selects all Ascend PCI nodes (`pci-19e5.present=true`), scope mixed A2/A3 and A5 clusters via `modelTransfer.nodeSelector`.
+- **Same-image drained rollout**: Source `Pod` templates stamp `model-transfer.gpustack.ai/config-hash` covering image, `hostNetwork`, `dnsPolicy`, `env`, and `/etc/hixlep`, so `ModelTransferImageReconciler` drains and replaces Pods when toggling `hostRoCE.enabled` at an identical worker image.
+
+The Python SDK forwards `ASCEND_LOCAL_COMM_RES` (`LocalCommRes`) and `ASCEND_GLOBAL_RESOURCE_CONFIG`
+(`GlobalResourceConfig`) into `Hixl.initialize()` on both source and target while preserving
+`"BufferPool": "0:0"` and normalizing nested `comm_resource_config.protocol_desc` to HIXL's literal
+flat dotted key `"comm_resource_config.protocol_desc"`.
+
+When `ASCEND_LOCAL_COMM_RES` is empty and `local_comm_res_path` is a directory, the SDK resolves
+`aclrtGetDevice` and `aclrtGetPhyDevIdByUserDevId` to `<dir>/ub_endpoint_npu_<phy_id>.json` and
+fails closed with `SourceUnavailableError` on missing symbols, lookup errors, or absent files
+(never guessing NPU `0`).
+
+When `protocol_desc` selects `"roce:host"`, both source (`AclHostOwner`) and target
+(`BorrowedAclOwner`) allocate owned `2 MiB`-aligned private anonymous `mmap` buffers registered as
+`MEM_HOST`, release idempotently by recorded allocator kind, and quarantine mappings if `close()` is
+refused; non-`roce:host` paths continue using `aclrtMallocHost`.
+
+| Scenario | Configuration | Resulting behavior |
+|---|---|---|
+| **A5 UB default** | `hostRoCE.enabled: false`, target `interface: 0` | Target defaults `ASCEND_LOCAL_COMM_RES='{"version":"1.3"}'`; uses `ub_ctp:device` and `aclrtMallocHost` with no `/etc/hixlep`. |
+| **A5 UB H2H** | Set `ASCEND_GLOBAL_RESOURCE_CONFIG='{"comm_resource_config.protocol_desc":["ub_ctp:host"]}'` on source and target | Pure Host-to-Host UB over `ub_ctp:host` using `aclrtMallocHost`; no `/etc/hixlep` or `hostNetwork`. |
+| **A5 UBG** | Set `ASCEND_GLOBAL_RESOURCE_CONFIG='{"comm_resource_config.protocol_desc":["ub_rtp:device"]}'` on source and target | Cross-SuperPod UBG over `ub_rtp:device` using `aclrtMallocHost`; no `/etc/hixlep` or `hostNetwork`. |
+| **A5 UBoE** | Set `ASCEND_GLOBAL_RESOURCE_CONFIG='{"comm_resource_config.protocol_desc":["uboe:device"]}'` on source and target | UBoE over `uboe:device` using `aclrtMallocHost`; no `/etc/hixlep` or `hostNetwork`. |
+| **A5 Host RoCE** | Source `hostRoCE.enabled: true` + target `interface > 0` | Grants target `device.gpustack.ai/rdma*`, mounts `/etc/hixlep` RO, fails closed on physical NPU resolution, and uses `2 MiB`-aligned `mmap`. |
+| **Non-A5 A2/A3** | `910B`/`910C`, `hostRoCE.enabled: false`, `interface: 0` | Unchanged legacy `hixl` path using `aclrtMallocHost`; no `/etc/hixlep` or `hostNetwork`. |
+
+Source Helm values for Ascend A5 Host RoCE (replace `modelTransfer.env` with `"ub_ctp:host"`,
+`"ub_rtp:device"`, or `"uboe:device"` for UB H2H, UBG, or UBoE):
+
+```yaml
+modelTransfer:
+  nodeSelector:
+    ascend.gpustack.ai/generation: a5  # scope mixed A2/A3 + A5 fleets
+  ascend:
+    hostRoCE:
+      enabled: true  # grants hostNetwork, RO /etc/hixlep, and flat-key roce:host default
+```
+
+Target `ModelDeployment` for Ascend A5 Host RoCE remote weight delivery (`vLLM` or `SGLang`):
+
+```yaml
+apiVersion: worker.gpustack.ai/v1
+kind: ModelDeployment
+metadata:
+  name: qwen3-8b-a5-roce
+  namespace: gpustack-default
+spec:
+  model:
+    name: Qwen/Qwen3-8B
+    artifactRef:
+      name: qwen3-8b
+  engine:
+    name: vLLM  # vLLM or SGLang on CANN 9.2+
+    image: example/vllm-ascend:cann9.2
+  roles:
+    - name: server
+      replicas: 1
+      acceleratorType: atlas-950  # converged status.detail.family: "950"
+      resources:
+        accelerator: 1
+        interface: 1  # grants RDMA, RO /etc/hixlep, and flat-key roce:host default
+```
+
+For UB H2H, UBG, or UBoE on target `ModelDeployment` roles, omit *`resources.interface`* and set
+`ASCEND_GLOBAL_RESOURCE_CONFIG` in *`roles[].env`* with `"comm_resource_config.protocol_desc"`.
 
 ## Observing status
 

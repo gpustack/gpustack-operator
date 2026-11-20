@@ -152,7 +152,7 @@ before the engine profiles KV memory. Configuration and behavior live in
 | Engine | Adapter entry | Qualification state |
 | --- | --- | --- |
 | vLLM | `NativeModelTransferLoader`, `--load-format model-transfer` on CUDA | H100 loading and inference observed for full-resident and paged 80B sources and full-resident 235B broadcast; production qualification remains open |
-| vLLM-Ascend | `NativeModelTransferLoader` through the vLLM general plugin, with `vllm_ascend` (requires CANN 9.2+ runner image with Python `hixl`, such as `cann9.2-910b-vllm0.30.0`) | loading and inference measured on two Ascend 910B2 nodes for Qwen3-8B, Qwen3.6-35B-A3B and Qwen3-235B-A22B-W8A8; managed HIXL routing and production qualification remain closed |
+| vLLM-Ascend | `NativeModelTransferLoader` through the vLLM general plugin, with `vllm_ascend` (requires CANN 9.2+ runner image with Python `hixl`, such as `cann9.2-910b-vllm0.30.0`) | loading and inference measured on two Ascend 910B2 nodes for Qwen3-8B, Qwen3.6-35B-A3B and Qwen3-235B-A22B-W8A8; managed HIXL routing is admitted by default, while production qualification remains open |
 | SGLang | `NativeSGLangModelTransferLoader`, `--load-format model-transfer` via `.pth` CLI and `LoadFormat` enum hooks (requires CANN 9.2+ runner image on Ascend for Python `hixl`) | H100 80B loading and inference observed; Ascend evidence covers CLI, `LoadFormat`, probe and session-open, with full loading qualification still open |
 
 Recorded loading and inference establish only the listed configuration. Each engine's hardware
