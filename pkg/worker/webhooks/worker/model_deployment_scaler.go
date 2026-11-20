@@ -19,6 +19,7 @@ import (
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
 	"gpustack.ai/gpustack/pkg/webhook"
 	workerctrl "gpustack.ai/gpustack/pkg/worker/controllers/worker"
+	"gpustack.ai/gpustack/pkg/worker/runtimecontrol"
 	"gpustack.ai/gpustack/pkg/worker/scaling/priors"
 )
 
@@ -1352,7 +1353,7 @@ func (r *ModelDeploymentScalerWebhook) validateModelDeploymentScalerAgainstTarge
 				"this role runs a command of its own, and a scaler cannot tell what that command "+
 					"serves, so it cannot tell when the role is busy"))
 		}
-		if role.ElasticEP != nil {
+		if runtimecontrol.RoleHasElasticEP(role) {
 			errs = append(errs, field.Invalid(rolePath.Child("name"), bounds.Name,
 				"this role runs the elastic-EP profile, which spreads its width across the "+
 					"members of one replica, so another replica would add no capacity"))

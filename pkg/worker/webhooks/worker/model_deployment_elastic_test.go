@@ -26,6 +26,7 @@ import (
 
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
 	"gpustack.ai/gpustack/pkg/worker/elasticprofile"
+	"gpustack.ai/gpustack/pkg/worker/runtimecontrol"
 )
 
 func elasticRole(mutate func(*workercore.ModelDeploymentRole)) workercore.ModelDeploymentRole {
@@ -35,10 +36,8 @@ func elasticRole(mutate func(*workercore.ModelDeploymentRole)) workercore.ModelD
 		Replicas:        1,
 		ReplicaSize:     1,
 		AcceleratorType: "h20-8x",
-		ElasticEP: &workercore.ModelDeploymentRoleElasticEP{
-			Width: 2,
-		},
 	}
+	runtimecontrol.SetElasticWidth(&role, 2)
 	if mutate != nil {
 		mutate(&role)
 	}
@@ -77,30 +76,38 @@ func TestValidateModelDeploymentElasticSpec(t *testing.T) {
 		name: "width at upper bound admitted",
 		md: func() *workercore.ModelDeployment {
 			return elasticMD(elasticRole(func(r *workercore.ModelDeploymentRole) {
-				r.ElasticEP.Width = elasticprofile.WidthMax
+				runtimecontrol.SetElasticWidth(r, elasticprofile.WidthMax)
 			}))
 		},
 	}, {
 		name: "width below minimum refused",
 		md: func() *workercore.ModelDeployment {
 			return elasticMD(elasticRole(func(r *workercore.ModelDeploymentRole) {
-				r.ElasticEP.Width = elasticprofile.WidthMin - 1
+				runtimecontrol.SetElasticWidth(r, elasticprofile.WidthMin-1)
 			}))
 		},
-		wantErr: []string{"width"},
+		wantErr: []string{runtimecontrol.ParamElasticDataParallelWidth},
 	}, {
 		name: "width above maximum refused",
 		md: func() *workercore.ModelDeployment {
 			return elasticMD(elasticRole(func(r *workercore.ModelDeploymentRole) {
-				r.ElasticEP.Width = elasticprofile.WidthMax + 1
+				runtimecontrol.SetElasticWidth(r, elasticprofile.WidthMax+1)
 			}))
 		},
-		wantErr: []string{"width"},
+		wantErr: []string{runtimecontrol.ParamElasticDataParallelWidth},
+	}, {
+		name: "non-integer width refused",
+		md: func() *workercore.ModelDeployment {
+			return elasticMD(elasticRole(func(r *workercore.ModelDeploymentRole) {
+				r.RuntimeControl.Parameters[runtimecontrol.ParamElasticDataParallelWidth] = "not-a-number"
+			}))
+		},
+		wantErr: []string{runtimecontrol.ParamElasticDataParallelWidth},
 	}, {
 		name: "width edit on update admitted",
 		md: func() *workercore.ModelDeployment {
 			md := elasticMD()
-			md.Spec.Roles[0].ElasticEP.Width = 4
+			runtimecontrol.SetElasticWidth(&md.Spec.Roles[0], 4)
 			return md
 		},
 		old: func() *workercore.ModelDeployment { return elasticMD() },
@@ -153,19 +160,28 @@ func TestValidateModelDeploymentElasticSpec(t *testing.T) {
 		},
 		old: func() *workercore.ModelDeployment {
 			old := elasticMD()
-			old.Spec.Roles[0].ElasticEP.Width = 4
+			runtimecontrol.SetElasticWidth(&old.Spec.Roles[0], 4)
 			return old
 		},
-		wantErr: []string{"width", "scale-down is not supported"},
+		wantErr: []string{runtimecontrol.ParamElasticDataParallelWidth, "scale-down is not supported"},
 	}, {
 		name: "presence removed on update refused",
 		md: func() *workercore.ModelDeployment {
 			md := elasticMD()
-			md.Spec.Roles[0].ElasticEP = nil
+			md.Spec.Roles[0].RuntimeControl = nil
 			return md
 		},
 		old:     func() *workercore.ModelDeployment { return elasticMD() },
-		wantErr: []string{"elasticEp"},
+		wantErr: []string{runtimecontrol.ParamElasticDataParallelWidth},
+	}, {
+		name: "presence added on update refused",
+		md:   func() *workercore.ModelDeployment { return elasticMD() },
+		old: func() *workercore.ModelDeployment {
+			old := elasticMD()
+			old.Spec.Roles[0].RuntimeControl = nil
+			return old
+		},
+		wantErr: []string{runtimecontrol.ParamElasticDataParallelWidth},
 	}, {
 		name: "second elastic role refused",
 		md: func() *workercore.ModelDeployment {
@@ -173,7 +189,7 @@ func TestValidateModelDeploymentElasticSpec(t *testing.T) {
 				r.Name = "vllm-elastic-2"
 			}))
 		},
-		wantErr: []string{"elasticEp"},
+		wantErr: []string{runtimecontrol.ParamElasticDataParallelWidth},
 	}, {
 		name: "non-elastic second role refused",
 		md: func() *workercore.ModelDeployment {
@@ -184,7 +200,7 @@ func TestValidateModelDeploymentElasticSpec(t *testing.T) {
 				AcceleratorType: "h20-8x",
 			})
 		},
-		wantErr: []string{"elasticEp"},
+		wantErr: []string{runtimecontrol.ParamElasticDataParallelWidth},
 	}, {
 		name: "replicas above one refused",
 		md: func() *workercore.ModelDeployment {
@@ -334,13 +350,8 @@ func TestValidateModelDeploymentElasticSpec(t *testing.T) {
 	}
 }
 
-// TestValidateModelDeploymentElasticEPWidthBounds is the admission half of the elastic profile
-// contract: every width the profile declares is admitted here, and the first width on each
-// side of that range is refused.
-//
-// THE RANGE IS ASKED FOR, NEVER RESTATED. A bound written into this file instead of read from
-// the shared profile is what this test catches, because the widths it asks about come from the
-// profile and a webhook carrying a different pair would admit or refuse one of them.
+// TestValidateModelDeploymentElasticEPWidthBounds verifies that every width the elastic profile
+// declares is admitted and the first width outside either side of that range is refused.
 func TestValidateModelDeploymentElasticEPWidthBounds(t *testing.T) {
 	t.Parallel()
 
@@ -355,6 +366,7 @@ func TestValidateModelDeploymentElasticEPWidthBounds(t *testing.T) {
 	}).Build()
 	webhook := &ModelDeploymentWebhook{APIReader: cli}
 
+	wantField := "spec.roles[0].runtimeControl.parameters[" + runtimecontrol.ParamElasticDataParallelWidth + "]"
 	cases := []struct {
 		name     string
 		width    int32
@@ -370,13 +382,13 @@ func TestValidateModelDeploymentElasticEPWidthBounds(t *testing.T) {
 			t.Parallel()
 
 			md := elasticMD(elasticRole(func(r *workercore.ModelDeploymentRole) {
-				r.ElasticEP.Width = tc.width
+				runtimecontrol.SetElasticWidth(r, tc.width)
 			}))
 			errs := webhook.ValidateModelDeploymentElasticEP(context.Background(), md, nil)
 
 			widthRefused := false
 			for _, e := range errs {
-				if e.Field == "spec.roles[0].elasticEp.width" {
+				if e.Field == wantField {
 					widthRefused = true
 				}
 			}
