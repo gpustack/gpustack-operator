@@ -969,6 +969,11 @@ func TestChartModelTransferAscendHostRoCE(t *testing.T) {
 		configHashAnnotation = "model-transfer.gpustack.ai/config-hash"
 		ascendGlobalResEnv   = "ASCEND_GLOBAL_RESOURCE_CONFIG"
 		ascendLocalResEnv    = "ASCEND_LOCAL_COMM_RES"
+		brokerAddressEnv     = "GPUSTACK_MODEL_TRANSFER_BROKER_ADDRESS"
+		workerAddressEnv     = "GPUSTACK_MODEL_TRANSFER_WORKER_ADDRESS"
+		defaultControlAddr   = "127.0.0.1:9250"
+		udsControlAddr       = "unix:///run/model-transfer/control.sock"
+		udsWorkerAddr        = "unix:///run/model-transfer/worker.sock"
 		defaultGlobalResCfg  = `{"comm_resource_config.protocol_desc":["roce:host"],"local_comm_res_path":"/etc/hixlep"}`
 		customGlobalResCfg   = `{"comm_resource_config.protocol_desc":["roce:host"],"local_comm_res_path":"/etc/hixlep/custom.json"}`
 	)
@@ -984,6 +989,7 @@ func TestChartModelTransferAscendHostRoCE(t *testing.T) {
 	}
 	type containerSpec struct {
 		Name         string            `yaml:"name"`
+		Args         []string          `yaml:"args"`
 		Env          []envVarSpec      `yaml:"env"`
 		VolumeMounts []volumeMountSpec `yaml:"volumeMounts"`
 	}
@@ -1160,28 +1166,64 @@ func TestChartModelTransferAscendHostRoCE(t *testing.T) {
 						}
 					}
 
-					var globalResValues []string
+					var globalResValues, brokerAddrValues, workerAddrValues []string
 					for _, env := range c.Env {
 						assert.NotEqual(t, ascendLocalResEnv, env.Name,
 							"%s container %s leaves ASCEND_LOCAL_COMM_RES unset", vendor, c.Name)
-						if env.Name == ascendGlobalResEnv {
+						switch env.Name {
+						case ascendGlobalResEnv:
 							globalResValues = append(globalResValues, env.Value)
+						case brokerAddressEnv:
+							brokerAddrValues = append(brokerAddrValues, env.Value)
+						case workerAddressEnv:
+							workerAddrValues = append(workerAddrValues, env.Value)
 						}
 					}
 
-					if c.Name == "broker" && tc.name == "enabled wires ascend hostRoCE and default env" {
-						assert.Empty(t, globalResValues, "%s broker must not receive default ASCEND_GLOBAL_RESOURCE_CONFIG", vendor)
+					if c.Name == "broker" {
+						if tc.name == "enabled wires ascend hostRoCE and default env" {
+							assert.Empty(t, globalResValues, "%s broker must not receive default ASCEND_GLOBAL_RESOURCE_CONFIG", vendor)
+						}
+						if wantHostRoCE {
+							assert.Contains(t, c.Args, "--control-addr="+udsControlAddr, "%s broker uses UDS control-addr", vendor)
+							assert.Contains(t, c.Args, "--worker-addr="+udsWorkerAddr, "%s broker uses UDS worker-addr", vendor)
+							assert.NotContains(t, c.Args, "--control-addr="+defaultControlAddr, "%s broker omits loopback control-addr", vendor)
+						} else {
+							assert.Contains(t, c.Args, "--control-addr="+defaultControlAddr, "%s broker keeps default loopback control-addr", vendor)
+							assert.NotContains(t, c.Args, "--control-addr="+udsControlAddr, "%s broker omits UDS control-addr", vendor)
+							assert.NotContains(t, c.Args, "--worker-addr="+udsWorkerAddr, "%s broker omits UDS worker-addr", vendor)
+						}
 					}
 
 					if c.Name == "worker" {
 						workerFound = true
+						var bootstrapMount *volumeMountSpec
+						for i := range c.VolumeMounts {
+							if c.VolumeMounts[i].Name == "bootstrap" {
+								bootstrapMount = &c.VolumeMounts[i]
+								break
+							}
+						}
+						require.NotNil(t, bootstrapMount, "%s worker mounts bootstrap volume", vendor)
 						if wantHostRoCE {
 							assert.Equal(t, 1, hixlepMounts, "%s worker mounts /etc/hixlep once", vendor)
 							require.NotNil(t, tc.wantAscendEnv)
 							assert.Equal(t, []string{*tc.wantAscendEnv}, globalResValues,
 								"%s worker gets expected ASCEND_GLOBAL_RESOURCE_CONFIG without duplicates", vendor)
+							assert.Equal(t, []string{udsControlAddr}, brokerAddrValues,
+								"%s worker uses UDS broker address without duplicates", vendor)
+							assert.Equal(t, []string{udsWorkerAddr}, workerAddrValues,
+								"%s worker uses UDS worker address without duplicates", vendor)
+							assert.True(t, bootstrapMount.ReadOnly == nil || !*bootstrapMount.ReadOnly,
+								"%s worker mounts /run/model-transfer writable for worker.sock", vendor)
 						} else {
 							assert.Zero(t, hixlepMounts, "%s worker omits /etc/hixlep", vendor)
+							assert.Equal(t, []string{defaultControlAddr}, brokerAddrValues,
+								"%s worker keeps default loopback broker address", vendor)
+							assert.Empty(t, workerAddrValues,
+								"%s worker omits GPUSTACK_MODEL_TRANSFER_WORKER_ADDRESS by default", vendor)
+							require.NotNil(t, bootstrapMount.ReadOnly, "%s worker keeps read-only bootstrap mount", vendor)
+							assert.True(t, *bootstrapMount.ReadOnly, "%s worker keeps read-only bootstrap mount", vendor)
 							if tc.name != "enabled respects custom ASCEND_GLOBAL_RESOURCE_CONFIG without duplicates" &&
 								tc.name != "enabled respects empty ASCEND_GLOBAL_RESOURCE_CONFIG without duplicates" {
 								assert.Empty(t, globalResValues, "%s worker omits ASCEND_GLOBAL_RESOURCE_CONFIG", vendor)

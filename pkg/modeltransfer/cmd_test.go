@@ -2,8 +2,29 @@ package modeltransfer
 
 import (
 	"context"
+	"io"
+	"net"
+	"net/http"
+	"os"
+	"path/filepath"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
+
+func shortSocketPath(t *testing.T, name string) string {
+	t.Helper()
+	dir := t.TempDir()
+	path := filepath.Join(dir, name)
+	if len(path) < 96 {
+		return path
+	}
+	shortDir, err := os.MkdirTemp("/tmp", "mt-*")
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = os.RemoveAll(shortDir) })
+	return filepath.Join(shortDir, name)
+}
 
 func TestCanceledLeaseMonitorDoesNotReportSuccessAsFailure(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
@@ -16,4 +37,59 @@ func TestCanceledLeaseMonitorDoesNotReportSuccessAsFailure(t *testing.T) {
 		t.Fatalf("cancellation must not race the server shutdown with a monitor result: %v", err)
 	default:
 	}
+}
+
+func TestListenControlUnixAndTCP(t *testing.T) {
+	t.Run("unix removes stale file sets 0600 serves HTTP and removes on close", func(t *testing.T) {
+		sockPath := shortSocketPath(t, "control.sock")
+		require.NoError(t, os.WriteFile(sockPath, []byte("stale"), 0o644))
+
+		ln, err := listenControl("unix://" + sockPath)
+		require.NoError(t, err)
+
+		info, err := os.Stat(sockPath)
+		require.NoError(t, err)
+		assert.Equal(t, os.FileMode(0o600), info.Mode().Perm())
+
+		srv := &http.Server{
+			Handler: http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				_, _ = w.Write([]byte("ok"))
+			}),
+		}
+		go func() { _ = srv.Serve(ln) }()
+
+		client := &http.Client{
+			Transport: &http.Transport{
+				DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
+					return (&net.Dialer{}).DialContext(ctx, "unix", sockPath)
+				},
+			},
+		}
+		resp, err := client.Get("http://unix/ping")
+		require.NoError(t, err)
+		body, err := io.ReadAll(resp.Body)
+		require.NoError(t, resp.Body.Close())
+		require.NoError(t, err)
+		assert.Equal(t, "ok", string(body))
+
+		require.NoError(t, srv.Close())
+		_ = ln.Close()
+		_, err = os.Stat(sockPath)
+		assert.True(t, os.IsNotExist(err), "closing unix control listener must remove socket file")
+	})
+
+	t.Run("unix rejects empty and relative paths", func(t *testing.T) {
+		for _, addr := range []string{"unix://", "unix://relative.sock", "unix:///"} {
+			ln, err := listenControl(addr)
+			require.Error(t, err, "address %q should fail", addr)
+			assert.Nil(t, ln)
+		}
+	})
+
+	t.Run("tcp preserves default TCP listen behavior", func(t *testing.T) {
+		ln, err := listenControl("127.0.0.1:0")
+		require.NoError(t, err)
+		defer ln.Close()
+		assert.Equal(t, "tcp", ln.Addr().Network())
+	})
 }

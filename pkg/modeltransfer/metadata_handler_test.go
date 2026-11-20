@@ -269,3 +269,110 @@ func TestMetadataHandlerVerifiesSourceAndExportsHeaders(t *testing.T) {
 func (a metadataTestAuth) AuthenticateActivePod(ctx context.Context, req authorization.Request) (authorization.PodIdentity, *protocol.Error) {
 	return a.AuthenticatePod(ctx, req)
 }
+
+func TestSourcePodConfigHashEligibility(t *testing.T) {
+	labels := map[string]string{
+		"app.kubernetes.io/component": SourceWorkerComponent,
+		"gpustack.ai/manufacturer":    "nvidia",
+	}
+	node := &core.Node{ObjectMeta: meta.ObjectMeta{Name: "node-1"}}
+
+	cases := []struct {
+		name     string
+		dsHash   string
+		podHash  string
+		drainFor string
+		wantErr  error
+	}{
+		{
+			name:    "matching image and mismatched config-hash without drain-for is ineligible",
+			dsHash:  "hash-new",
+			podHash: "hash-old",
+			wantErr: errSourceIneligible,
+		},
+		{
+			name:    "matching image and matching config-hash is eligible",
+			dsHash:  "hash-same",
+			podHash: "hash-same",
+			wantErr: nil,
+		},
+		{
+			name:    "matching image with both unannotated preserves image-only eligibility",
+			dsHash:  "",
+			podHash: "",
+			wantErr: nil,
+		},
+		{
+			name:    "matching image with ds annotated and pod unannotated is ineligible",
+			dsHash:  "hash-new",
+			podHash: "",
+			wantErr: errSourceIneligible,
+		},
+		{
+			name:    "matching image with ds unannotated and pod annotated is ineligible",
+			dsHash:  "",
+			podHash: "hash-old",
+			wantErr: errSourceIneligible,
+		},
+		{
+			name:     "matching image and config-hash with drain-for set is ineligible",
+			dsHash:   "hash-same",
+			podHash:  "hash-same",
+			drainFor: "worker:v1#hash-new",
+			wantErr:  errSourceIneligible,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			dsAnnotations := map[string]string{}
+			if tc.dsHash != "" {
+				dsAnnotations[configHashAnnotation] = tc.dsHash
+			}
+			podAnnotations := map[string]string{}
+			if tc.podHash != "" {
+				podAnnotations[configHashAnnotation] = tc.podHash
+			}
+			if tc.drainFor != "" {
+				podAnnotations[drainForAnnotation] = tc.drainFor
+			}
+
+			ds := &apps.DaemonSet{
+				ObjectMeta: meta.ObjectMeta{Name: "transfer", Namespace: "operator", UID: "ds-uid", Labels: labels},
+				Spec: apps.DaemonSetSpec{
+					Template: core.PodTemplateSpec{
+						ObjectMeta: meta.ObjectMeta{Annotations: dsAnnotations},
+						Spec:       core.PodSpec{Containers: []core.Container{{Name: "worker", Image: "worker:v1"}}},
+					},
+				},
+			}
+			pod := &core.Pod{
+				ObjectMeta: meta.ObjectMeta{
+					Name: "source", Namespace: "operator", UID: "pod-uid", Labels: labels,
+					Annotations: podAnnotations,
+					OwnerReferences: []meta.OwnerReference{{
+						APIVersion: "apps/v1", Kind: "DaemonSet", Name: "transfer", UID: "ds-uid", Controller: ptr.To(true),
+					}},
+				},
+				Spec: core.PodSpec{
+					NodeName:   "node-1",
+					Containers: []core.Container{{Name: "worker", Image: "worker:v1"}},
+				},
+			}
+			cfg := &Config{
+				Client:          kubefake.NewSimpleClientset(ds, pod, node),
+				NodeName:        "node-1",
+				WorkerNamespace: "operator",
+				WorkerID:        "pod-uid",
+				VendorScope:     "nvidia",
+			}
+
+			err := cfg.sourcePod(context.Background())
+			if tc.wantErr == nil {
+				assert.NoError(t, err)
+				return
+			}
+			assert.ErrorIs(t, err, tc.wantErr)
+		})
+	}
+}

@@ -182,6 +182,11 @@ func (c *Config) sourcePod(ctx context.Context) error {
 	if matches != 1 {
 		return errSourceIneligible
 	}
+	desiredHash := ds.Spec.Template.Annotations[configHashAnnotation]
+	actualHash := pod.Annotations[configHashAnnotation]
+	if (desiredHash != "" || actualHash != "") && desiredHash != actualHash {
+		return errSourceIneligible
+	}
 	return nil
 }
 

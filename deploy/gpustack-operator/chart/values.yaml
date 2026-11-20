@@ -652,8 +652,13 @@ modelTransfer:
       # `ASCEND_GLOBAL_RESOURCE_CONFIG` to
       # `{"comm_resource_config.protocol_desc":["roce:host"],"local_comm_res_path":"/etc/hixlep"}`
       # on the `worker` container when `modelTransfer.env` does not declare it.
-      # Broker ports `:9251`, `127.0.0.1:9250`, and worker `127.0.0.1:9252` run on the
-      # host network namespace when enabled; scope mixed Ascend fleets via `modelTransfer.nodeSelector`.
+      # When enabled, broker-worker private control traffic uses Unix-domain sockets inside
+      # the Pod-private `/run/model-transfer` volume (`control.sock` / `worker.sock`), so
+      # only the TLS session port `:9251` binds on the host network namespace.
+      # Warning: `modelTransfer.nodeSelector` applies to ALL vendor source DaemonSets
+      # (`nvidia`, `amd`, `ascend`), and changing it causes the Kubernetes DaemonSet
+      # controller to delete Pods on excluded nodes immediately (bypassing `OnDelete` drain);
+      # use it at fresh installation or only after draining excluded nodes.
       enabled: false
 
 # -- Migration hook Jobs. A pre-install/pre-upgrade Job reaps a Kueue left stranded by an

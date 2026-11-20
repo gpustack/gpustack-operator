@@ -11,8 +11,11 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"net"
+	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -58,8 +61,11 @@ type Options struct {
 	// not inside the cache root's layout.
 	BrokerRoot string
 	// ControlAddr is where the worker control service listens; the transport
-	// workers, on the same node, reach it there.
+	// workers, on the same node, reach it there (host:port or unix://<abs-path>).
 	ControlAddr string
+	// WorkerAddr is where the broker reaches the local source worker runtime
+	// (host:port, http://host:port, or unix://<abs-path>).
+	WorkerAddr string
 	// WorkerNamespace is the operator namespace containing the shared source Pod.
 	WorkerNamespace string
 
@@ -107,6 +113,7 @@ func NewOptions() *Options {
 		CacheRoot:       "/var/lib/gpustack/models",
 		BrokerRoot:      "/var/lib/gpustack/model-transfer",
 		ControlAddr:     "127.0.0.1:9250",
+		WorkerAddr:      defaultWorkerAddr,
 		WorkerNamespace: "",
 
 		PhysicalBytes:   0, // zero derives the ceiling from the node's total RAM
@@ -145,6 +152,7 @@ func (o *Options) Validate() error {
 		{o.CacheRoot == "", errors.New("cache-root is required")},
 		{o.BrokerRoot == "", errors.New("broker-root is required")},
 		{o.ControlAddr == "", errors.New("control-addr is required")},
+		{o.WorkerAddr == "", errors.New("worker-addr is required")},
 		{o.WorkerNamespace == "", errors.New("worker-namespace is required")},
 		{o.PhysicalBytes < 0, errors.New("physical-bytes must not be negative")},
 		{o.MaxGenerations < 1, errors.New("max-generations must be positive")},
@@ -161,7 +169,56 @@ func (o *Options) Validate() error {
 			return check.err
 		}
 	}
+	if _, _, err := parseUnixAddr(o.ControlAddr); err != nil {
+		return fmt.Errorf("control-addr: %w", err)
+	}
+	if _, _, err := parseUnixAddr(o.WorkerAddr); err != nil {
+		return fmt.Errorf("worker-addr: %w", err)
+	}
 	return nil
+}
+
+const (
+	defaultWorkerAddr = "127.0.0.1:9252"
+	unixAddrPrefix    = "unix://"
+)
+
+func parseUnixAddr(addr string) (string, bool, error) {
+	if !strings.HasPrefix(addr, unixAddrPrefix) {
+		return "", false, nil
+	}
+	sockPath := strings.TrimPrefix(addr, unixAddrPrefix)
+	if sockPath == "" || !filepath.IsAbs(sockPath) || filepath.Clean(sockPath) == "/" {
+		return "", true, fmt.Errorf("unix socket path %q must be a non-empty absolute path", addr)
+	}
+	return sockPath, true, nil
+}
+
+func newRuntimeTransport(workerAddr string) (string, *http.Client) {
+	if sockPath, isUnix, err := parseUnixAddr(workerAddr); isUnix {
+		if err != nil {
+			return "", &http.Client{Timeout: 5 * time.Second}
+		}
+		dialer := &net.Dialer{Timeout: 5 * time.Second}
+		return "http://unix/v1/runtime", &http.Client{
+			Timeout: 5 * time.Second,
+			Transport: &http.Transport{
+				Proxy:           nil,
+				MaxConnsPerHost: 64,
+				DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
+					return dialer.DialContext(ctx, "unix", sockPath)
+				},
+			},
+		}
+	}
+	base := strings.TrimRight(workerAddr, "/")
+	if base == "" {
+		base = defaultWorkerAddr
+	}
+	if !strings.HasPrefix(base, "http://") && !strings.HasPrefix(base, "https://") {
+		base = "http://" + base
+	}
+	return base + "/v1/runtime", &http.Client{Timeout: 5 * time.Second}
 }
 
 // defaultSessions is the node's session cap when its configured value is
@@ -223,6 +280,8 @@ type Config struct {
 	WorkerLabel     labels.Selector
 	// ControlAddr is where the control service listens.
 	ControlAddr string
+	// WorkerAddr is where the broker reaches the local source worker runtime.
+	WorkerAddr string
 	// TickEvery is how often leases are swept.
 	TickEvery time.Duration
 	// SessionAddr and the TLS pair configure the engine session listener.
@@ -248,6 +307,7 @@ type Config struct {
 	snapshot         sourceSnapshot
 	bootstrapToken   string
 	runtimeURL       string
+	runtimeClient    *http.Client
 	metadataOnce     sync.Once
 	metadataSlots    chan struct{}
 	manifestPageRoot string
@@ -356,14 +416,14 @@ func (o *Options) complete(restCfg *rest.Config) (*Config, error) {
 		manifestPageRoot: manifestRoot,
 		NodeName:         o.NodeName, Store: st, Broker: b, RestConfig: cfgCopy, Client: client,
 		WorkerNamespace: o.WorkerNamespace, WorkerLabel: SourceWorkerLabel,
-		ControlAddr: o.ControlAddr, TickEvery: o.LeaseTTL / 2,
+		ControlAddr: o.ControlAddr, WorkerAddr: o.WorkerAddr, TickEvery: o.LeaseTTL / 2,
 		SessionAddr: o.SessionAddr, SessionTLSCert: o.SessionTLSCert,
 		SessionTLSKey: o.SessionTLSKey, BootstrapFile: o.BootstrapFile,
 		WorkerID: o.WorkerID, VendorScope: o.VendorScope,
 		Authorizer: authorizer,
 	}
 	b.SetAssignmentsFrozen(true)
-	cfg.runtimeURL = "http://127.0.0.1:9252/v1/runtime"
+	cfg.runtimeURL, cfg.runtimeClient = newRuntimeTransport(o.WorkerAddr)
 	cfg.snapshot = discovery
 	cfg.Intents = &kubernetesIntentSource{config: cfg, client: reader}
 	b.SetIntentValidator(cfg.validateLiveIntent)

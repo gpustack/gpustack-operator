@@ -6,6 +6,9 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"os"
+	"path/filepath"
+	"sync"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -64,7 +67,9 @@ func (o *Options) AddFlags(fs *pflag.FlagSet) {
 	fs.StringVar(&o.BrokerRoot, "broker-root", o.BrokerRoot,
 		"the broker's durable ledger root.")
 	fs.StringVar(&o.ControlAddr, "control-addr", o.ControlAddr,
-		"where the worker control service listens, on this node.")
+		"where the worker control service listens, on this node (host:port or unix://<abs-path>).")
+	fs.StringVar(&o.WorkerAddr, "worker-addr", o.WorkerAddr,
+		"where the broker reaches the local source worker runtime (host:port, http://host:port, or unix://<abs-path>).")
 	fs.StringVar(&o.WorkerNamespace, "worker-namespace", o.WorkerNamespace,
 		"the namespace the admitted source-worker Pods run in (required).")
 	fs.Int64Var(&o.PhysicalBytes, "physical-bytes", o.PhysicalBytes,
@@ -125,7 +130,7 @@ func (c *Config) Run(ctx context.Context) error {
 		}
 	}
 
-	listener, err := net.Listen("tcp", c.ControlAddr)
+	listener, err := listenControl(c.ControlAddr)
 	if err != nil {
 		return fmt.Errorf("listen on the control address %s: %w", c.ControlAddr, err)
 	}
@@ -143,7 +148,11 @@ func (c *Config) Run(ctx context.Context) error {
 		return err
 	}
 	c.Broker.SetBootstrapCredential(bootstrap)
-	c.Broker.SetPrivateSource(broker.NewPrivateSource(bootstrap))
+	workerAddr := c.WorkerAddr
+	if workerAddr == "" {
+		workerAddr = defaultWorkerAddr
+	}
+	c.Broker.SetPrivateSource(broker.NewPrivateSourceWithAddress(workerAddr, bootstrap))
 	c.bootstrapToken = bootstrap
 	if err := c.reconcileSource(ctx); err != nil {
 		klog.ErrorS(err, "initial source-intent reconciliation failed")
@@ -212,6 +221,46 @@ func (c *Config) Run(ctx context.Context) error {
 		_ = server.Close()
 		return err
 	}
+}
+
+type unixControlListener struct {
+	net.Listener
+	path string
+	once sync.Once
+}
+
+func (l *unixControlListener) Close() error {
+	err := l.Listener.Close()
+	l.once.Do(func() {
+		_ = os.Remove(l.path)
+	})
+	return err
+}
+
+func listenControl(addr string) (net.Listener, error) {
+	sockPath, isUnix, err := parseUnixAddr(addr)
+	if err != nil {
+		return nil, err
+	}
+	if !isUnix {
+		return net.Listen("tcp", addr)
+	}
+	if err := os.MkdirAll(filepath.Dir(sockPath), 0o700); err != nil {
+		return nil, fmt.Errorf("prepare control socket directory: %w", err)
+	}
+	if err := os.Remove(sockPath); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return nil, fmt.Errorf("remove stale control socket %s: %w", sockPath, err)
+	}
+	ln, err := net.Listen("unix", sockPath)
+	if err != nil {
+		return nil, err
+	}
+	if err := os.Chmod(sockPath, 0o600); err != nil {
+		_ = ln.Close()
+		_ = os.Remove(sockPath)
+		return nil, fmt.Errorf("chmod control socket %s: %w", sockPath, err)
+	}
+	return &unixControlListener{Listener: ln, path: sockPath}, nil
 }
 
 // sweepLeases reports lifecycle failures; cancellation only ends the monitor.

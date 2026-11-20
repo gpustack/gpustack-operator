@@ -52,6 +52,16 @@ func TestOptionsValidate(t *testing.T) {
 		{"no cache root", func(o *Options) { o.CacheRoot = "" }, "cache-root"},
 		{"no broker root", func(o *Options) { o.BrokerRoot = "" }, "broker-root"},
 		{"no control address", func(o *Options) { o.ControlAddr = "" }, "control-addr"},
+		{"valid unix control address", func(o *Options) { o.ControlAddr = "unix:///run/model-transfer/control.sock" }, ""},
+		{"empty unix control path", func(o *Options) { o.ControlAddr = "unix://" }, "control-addr"},
+		{"relative unix control path", func(o *Options) { o.ControlAddr = "unix://control.sock" }, "control-addr"},
+		{"root unix control path", func(o *Options) { o.ControlAddr = "unix:///" }, "control-addr"},
+		{"no worker address", func(o *Options) { o.WorkerAddr = "" }, "worker-addr"},
+		{"valid http worker address", func(o *Options) { o.WorkerAddr = "http://127.0.0.1:9252" }, ""},
+		{"valid unix worker address", func(o *Options) { o.WorkerAddr = "unix:///run/model-transfer/worker.sock" }, ""},
+		{"empty unix worker path", func(o *Options) { o.WorkerAddr = "unix://" }, "worker-addr"},
+		{"relative unix worker path", func(o *Options) { o.WorkerAddr = "unix://worker.sock" }, "worker-addr"},
+		{"root unix worker path", func(o *Options) { o.WorkerAddr = "unix:///" }, "worker-addr"},
 		{"zero physical bytes derives one at start", func(o *Options) { o.PhysicalBytes = 0 }, ""},
 		{"negative physical bytes", func(o *Options) { o.PhysicalBytes = -1 }, "physical-bytes"},
 		{"no generations", func(o *Options) { o.MaxGenerations = 0 }, "max-generations"},
@@ -100,6 +110,44 @@ func TestMemoryLimitFlags(t *testing.T) {
 		"--max-memory-bytes drives the same ceiling as --physical-bytes")
 	assert.Equal(t, int64(2<<30), opts.MinMemoryBytes)
 	assert.Equal(t, int32(32), opts.MaxSessions)
+}
+
+func TestWorkerAndControlAddrFlagsAndComplete(t *testing.T) {
+	defaults := NewOptions()
+	assert.Equal(t, "127.0.0.1:9250", defaults.ControlAddr)
+	assert.Equal(t, "127.0.0.1:9252", defaults.WorkerAddr)
+
+	opts := validOptions()
+	fs := pflag.NewFlagSet("model-transfer", pflag.ContinueOnError)
+	opts.AddFlags(fs)
+	require.NoError(t, fs.Parse([]string{
+		"--control-addr=unix:///run/model-transfer/control.sock",
+		"--worker-addr=unix:///run/model-transfer/worker.sock",
+	}))
+	assert.Equal(t, "unix:///run/model-transfer/control.sock", opts.ControlAddr)
+	assert.Equal(t, "unix:///run/model-transfer/worker.sock", opts.WorkerAddr)
+
+	for _, tc := range []struct {
+		name           string
+		workerAddr     string
+		wantRuntimeURL string
+	}{
+		{name: "default tcp host:port", workerAddr: "127.0.0.1:9252", wantRuntimeURL: "http://127.0.0.1:9252/v1/runtime"},
+		{name: "http scheme", workerAddr: "http://127.0.0.1:9252", wantRuntimeURL: "http://127.0.0.1:9252/v1/runtime"},
+		{name: "unix socket", workerAddr: "unix:///run/model-transfer/worker.sock", wantRuntimeURL: "http://unix/v1/runtime"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			o := validOptions()
+			o.CacheRoot, o.BrokerRoot = t.TempDir(), t.TempDir()
+			o.WorkerAddr = tc.workerAddr
+			cfg, err := o.complete(&rest.Config{Host: "https://127.0.0.1"})
+			require.NoError(t, err)
+			t.Cleanup(func() { require.NoError(t, cfg.Close()) })
+			assert.Equal(t, tc.workerAddr, cfg.WorkerAddr)
+			assert.Equal(t, tc.wantRuntimeURL, cfg.runtimeURL)
+			assert.NotNil(t, cfg.runtimeClient)
+		})
+	}
 }
 
 // TestResolveMemoryLimits pins the silent corrections: a floor below 1 GiB

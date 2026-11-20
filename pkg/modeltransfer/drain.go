@@ -152,16 +152,28 @@ func (c *Config) acknowledgeDrain(ctx context.Context, src *kubernetesIntentSour
 	return errors.New("drain acknowledgement stayed contested")
 }
 
+func (c *Config) runtimeEndpoint() (string, *http.Client) {
+	if c.runtimeURL == "" && c.WorkerAddr != "" {
+		return newRuntimeTransport(c.WorkerAddr)
+	}
+	client := c.runtimeClient
+	if client == nil {
+		client = &http.Client{Timeout: 5 * time.Second}
+	}
+	return c.runtimeURL, client
+}
+
 func (c *Config) freezeRuntime(ctx context.Context) (string, error) {
-	if c.runtimeURL == "" || c.bootstrapToken == "" {
+	runtimeURL, client := c.runtimeEndpoint()
+	if runtimeURL == "" || c.bootstrapToken == "" {
 		return "", errors.New("runtime freeze is unavailable")
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, strings.TrimSuffix(c.runtimeURL, "/v1/runtime")+"/v1/runtime/drain", nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, strings.TrimSuffix(runtimeURL, "/v1/runtime")+"/v1/runtime/drain", nil)
 	if err != nil {
 		return "", err
 	}
 	req.Header.Set("Authorization", "Bearer "+c.bootstrapToken)
-	resp, err := (&http.Client{Timeout: 5 * time.Second}).Do(req)
+	resp, err := client.Do(req)
 	if err != nil {
 		return "", fmt.Errorf("runtime freeze is unavailable: %w", err)
 	}
@@ -193,15 +205,15 @@ func (c *Config) observeEmptyRuntime(ctx context.Context, instance string) error
 }
 
 func (c *Config) inspectEmptyRuntime(ctx context.Context, instance string) (string, error) {
-	if c.runtimeURL == "" || c.bootstrapToken == "" {
+	runtimeURL, client := c.runtimeEndpoint()
+	if runtimeURL == "" || c.bootstrapToken == "" {
 		return "", errors.New("runtime attestation is unavailable")
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.runtimeURL, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, runtimeURL, nil)
 	if err != nil {
 		return "", err
 	}
 	req.Header.Set("Authorization", "Bearer "+c.bootstrapToken)
-	client := &http.Client{Timeout: 5 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
 		return "", fmt.Errorf("runtime attestation is unavailable: %w", err)

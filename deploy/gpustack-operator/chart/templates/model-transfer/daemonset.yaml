@@ -46,9 +46,13 @@
 {{- $ascendHostRoCE := and (eq $manufacturer "ascend") (eq ($ascendHostRoCECfg.enabled | default false) true) }}
 {{- $defaultAscendGlobalResourceConfig := `{"comm_resource_config.protocol_desc":["roce:host"],"local_comm_res_path":"/etc/hixlep"}` }}
 {{- $hasAscendGlobalResCfg := hasKey $mtEnv "ASCEND_GLOBAL_RESOURCE_CONFIG" }}
+{{- $controlAddr := "127.0.0.1:9250" }}
+{{- $workerAddr := "127.0.0.1:9252" }}
 {{- $workerDNSPolicy := "" }}
 {{- $workerHixlep := dict }}
 {{- if $ascendHostRoCE }}
+{{-   $controlAddr = "unix:///run/model-transfer/control.sock" }}
+{{-   $workerAddr = "unix:///run/model-transfer/worker.sock" }}
 {{-   $workerDNSPolicy = "ClusterFirstWithHostNet" }}
 {{-   $workerHixlep = dict "name" "ascend-hixlep" "path" "/etc/hixlep" "type" "Directory" "readOnly" true }}
 {{- end }}
@@ -69,6 +73,8 @@
       "image" $image
       "hostNetwork" $ascendHostRoCE
       "dnsPolicy" $workerDNSPolicy
+      "controlAddr" $controlAddr
+      "workerAddr" $workerAddr
       "env" $workerEnvHash
       "hixlep" $workerHixlep
     | toJson | sha256sum }}
@@ -187,7 +193,10 @@ spec:
             # The node's concurrent source-session cap; a figure below one
             # resolves to the broker's default of 64.
             - --max-sessions={{ $maxSessions }}
-            - --control-addr=127.0.0.1:9250
+            - --control-addr={{ $controlAddr }}
+            {{- if $ascendHostRoCE }}
+            - --worker-addr={{ $workerAddr }}
+            {{- end }}
             - --session-addr=:9251
             - --bootstrap-file=/run/model-transfer/bootstrap
             # Sessions are never served in plaintext, so the pair is passed unconditionally;
@@ -313,7 +322,11 @@ spec:
                 fieldRef:
                   fieldPath: status.podIP
             - name: GPUSTACK_MODEL_TRANSFER_BROKER_ADDRESS
-              value: 127.0.0.1:9250
+              value: {{ $controlAddr }}
+            {{- if $ascendHostRoCE }}
+            - name: GPUSTACK_MODEL_TRANSFER_WORKER_ADDRESS
+              value: {{ $workerAddr }}
+            {{- end }}
             - name: GPUSTACK_MODEL_TRANSFER_BOOTSTRAP_FILE
               value: /run/model-transfer/bootstrap
             - name: GPUSTACK_MODEL_TRANSFER_VENDOR_SCOPE
@@ -331,11 +344,20 @@ spec:
             - name: cache
               mountPath: {{ $cacheRoot }}
               readOnly: true
+            {{- if $ascendHostRoCE }}
+            # Shared Pod-local emptyDir for the broker's bootstrap credential and the
+            # private Unix-domain control sockets (control.sock / worker.sock); mounted
+            # writable so the worker can bind worker.sock without exposing loopback TCP
+            # on the host network namespace.
+            - name: bootstrap
+              mountPath: /run/model-transfer
+            {{- else }}
             # Written by the broker only; mounted read-only here so the credential is
             # readable and nothing else about the handshake is writable from this side.
             - name: bootstrap
               mountPath: /run/model-transfer
               readOnly: true
+            {{- end }}
             - name: dev-dir
               mountPath: /dev
             - name: sys-dir

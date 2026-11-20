@@ -8,6 +8,8 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"path/filepath"
+	"strings"
 	"time"
 )
 
@@ -56,11 +58,39 @@ func unavailableObservation(err error) error {
 
 // NewPrivateSource constructs the production loopback transport.
 func NewPrivateSource(token string) PrivateSource {
-	return &httpPrivateSource{address: "http://127.0.0.1:9252", token: token, client: &http.Client{
-		Timeout:       5 * time.Second,
-		Transport:     &http.Transport{Proxy: nil, MaxConnsPerHost: 64},
-		CheckRedirect: func(*http.Request, []*http.Request) error { return errPrivateRedirect },
-	}}
+	return NewPrivateSourceWithAddress("http://127.0.0.1:9252", token)
+}
+
+// NewPrivateSourceWithAddress constructs a bounded private-source client over
+// either TCP ("host:port" / "http://host:port") or a Unix domain socket
+// ("unix://<abs-path>").
+func NewPrivateSourceWithAddress(address, token string) PrivateSource {
+	transport := &http.Transport{Proxy: nil, MaxConnsPerHost: 64}
+	base := ""
+	if strings.HasPrefix(address, "unix://") {
+		sockPath := strings.TrimPrefix(address, "unix://")
+		if sockPath != "" && filepath.IsAbs(sockPath) && filepath.Clean(sockPath) != "/" {
+			base = "http://unix"
+			dialer := &net.Dialer{Timeout: 5 * time.Second}
+			transport.DialContext = func(ctx context.Context, _, _ string) (net.Conn, error) {
+				return dialer.DialContext(ctx, "unix", sockPath)
+			}
+		}
+	} else {
+		base = strings.TrimRight(address, "/")
+		if base != "" && !strings.HasPrefix(base, "http://") && !strings.HasPrefix(base, "https://") {
+			base = "http://" + base
+		}
+	}
+	return &httpPrivateSource{
+		address: base,
+		token:   token,
+		client: &http.Client{
+			Timeout:       5 * time.Second,
+			Transport:     transport,
+			CheckRedirect: func(*http.Request, []*http.Request) error { return errPrivateRedirect },
+		},
+	}
 }
 
 func (s *httpPrivateSource) Call(ctx context.Context, path string, payload any) (PrivateReply, error) {

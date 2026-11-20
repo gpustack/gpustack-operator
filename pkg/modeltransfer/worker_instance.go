@@ -12,6 +12,7 @@ import (
 const (
 	workerInstanceAnnotation = "model-transfer.gpustack.ai/worker-instance"
 	drainForAnnotation       = "model-transfer.gpustack.ai/drain-for"
+	configHashAnnotation     = "model-transfer.gpustack.ai/config-hash"
 )
 
 var workerInstancePattern = regexp.MustCompile(`^[0-9a-f]{32}$`)
