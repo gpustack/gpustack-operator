@@ -250,7 +250,7 @@ def strip_unquoted_comment(line: str) -> str:
 
 
 on_re = re.compile(
-    r'(?:^|[^A-Za-z0-9_])(?:-D\s*)?USE_VRAM_SEGMENT\s*=\s*["\']?(?:ON|TRUE|YES|1)(?:\b|$)',
+    r'(?:^|[^A-Za-z0-9_])(?:-D\s*)?USE_VRAM_SEGMENT(?::[A-Za-z_][A-Za-z0-9_]*)?\s*=\s*["\']?(?:ON|TRUE|YES|1)(?:\b|$)',
     re.IGNORECASE,
 )
 for lineno, raw_line in enumerate(lines, 1):
@@ -316,7 +316,12 @@ while idx < len(cuda_lines):
     idx += 1
 
 assign_re = re.compile(r"^(?:(?:then|else|do|export|local)\s+)*([A-Za-z_][A-Za-z0-9_]*)=(.*)$")
-off_token_re = re.compile(r"(?:^|[^A-Za-z0-9_])-D\s*USE_VRAM_SEGMENT=OFF(?=$|[^A-Za-z0-9_])")
+unset_re = re.compile(
+    r"^(?:(?:then|else|do)\s+)*unset(?:\s+-[vf])*((?:\s+[A-Za-z_][A-Za-z0-9_]*)+)\s*$"
+)
+off_token_re = re.compile(
+    r'(?:^|[^A-Za-z0-9_])-D\s*USE_VRAM_SEGMENT(?::[A-Za-z_][A-Za-z0-9_]*)?\s*=\s*["\']?OFF(?=$|[^A-Za-z0-9_])'
+)
 cmake_cfg_re = re.compile(r"(?:^|\s|&&|\|\||;)cmake\s+(?!--build\b)(.+)$")
 var_ref_re = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}|\$([A-Za-z_][A-Za-z0-9_]*)\b")
 
@@ -341,26 +346,40 @@ for block in run_blocks:
     for ln in logical_lines:
         for stmt in re.split(r"(?:;|&&|\|\|)", ln):
             st = stmt.strip()
+            if not st:
+                continue
+            m_unset = unset_re.match(st)
+            if m_unset:
+                for var_name in m_unset.group(1).split():
+                    assigned_off_vars.discard(var_name)
+                continue
             m_asgn = assign_re.match(st)
-            if m_asgn and off_token_re.search(m_asgn.group(2)):
-                assigned_off_vars.add(m_asgn.group(1))
-        m_cmake = cmake_cfg_re.search(ln)
-        if m_cmake:
-            saw_cmake_configure = True
-            cmake_args = m_cmake.group(1)
-            cmake_cmd_only = re.split(r"(?:&&|\|\||;|\|)", cmake_args, maxsplit=1)[0]
-            direct_off = bool(off_token_re.search(cmake_cmd_only))
-            referenced_vars = {
-                g1 or g2 for g1, g2 in var_ref_re.findall(cmake_cmd_only)
-            }
-            var_off = bool(referenced_vars & assigned_off_vars)
-            if not (direct_off or var_off):
-                print(
-                    f"FAIL: builder-cuda cmake configure invocation in {df_path} must wire "
-                    "-DUSE_VRAM_SEGMENT=OFF (unused variable assignments and comments are rejected)",
-                    file=sys.stderr,
-                )
-                sys.exit(1)
+            if m_asgn:
+                var_name, rhs = m_asgn.group(1), m_asgn.group(2)
+                rhs_vars = {g1 or g2 for g1, g2 in var_ref_re.findall(rhs)}
+                if off_token_re.search(rhs):
+                    assigned_off_vars.add(var_name)
+                elif (rhs_vars & assigned_off_vars) and not cmake_cfg_re.search(st):
+                    assigned_off_vars.add(var_name)
+                else:
+                    assigned_off_vars.discard(var_name)
+            m_cmake = cmake_cfg_re.search(st)
+            if m_cmake:
+                saw_cmake_configure = True
+                cmake_args = m_cmake.group(1)
+                cmake_cmd_only = re.split(r"(?:&&|\|\||;|\|)", cmake_args, maxsplit=1)[0]
+                direct_off = bool(off_token_re.search(cmake_cmd_only))
+                referenced_vars = {
+                    g1 or g2 for g1, g2 in var_ref_re.findall(cmake_cmd_only)
+                }
+                var_off = bool(referenced_vars & assigned_off_vars)
+                if not (direct_off or var_off):
+                    print(
+                        f"FAIL: builder-cuda cmake configure invocation in {df_path} must wire "
+                        "-DUSE_VRAM_SEGMENT=OFF (unused variable assignments and comments are rejected)",
+                        file=sys.stderr,
+                    )
+                    sys.exit(1)
 
 if not saw_cmake_configure:
     print(f"FAIL: no cmake configure invocation found in builder-cuda of {df_path}", file=sys.stderr)

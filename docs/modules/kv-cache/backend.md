@@ -471,8 +471,7 @@ with `protocol: CANN` and require node driver mounts. The matrix maps Ascend A2/
 | **A5 Host RoCE override** | `protocol: CANN`, *`fabricInterfaceCount >= 1`*, user *`extraEnv`* or *`hostPaths`* at `/etc/hixlep` | Keeps Host RDMA grant; yields `/etc/hixlep` mount on path overlap and yields `ASCEND_*` defaults when declared. |
 | **Non-A5 Ascend A2/A3** | `910B`/`910C`, `protocol: CANN`, `medium: DRAM`, omit *`fabricInterfaceCount`* | Unchanged legacy `ascend` rendering (`aclrtMallocHost`); no Host RDMA grant or `/etc/hixlep` mount. |
 
-Converted Ascend worked example (`medium: DRAM` + `protocol: CANN` for A2/A3 or A5 UB, plus
-optional Host RoCE and UBG/UBoE overrides):
+Ascend A2/A3 (`910B`/`910C`) worked example (`medium: DRAM`, `protocol: CANN`, no *`fabricInterfaceCount`*):
 
 ```yaml
 apiVersion: worker.gpustack.ai/v1
@@ -491,7 +490,6 @@ spec:
           medium: DRAM
           image: gpustack/mirrored-mooncake:0.3.14-cann9.1-910b
           capacityPerMember: 32Gi
-          fabricInterfaceCount: 1  # omit for A2/A3 or A5 UB/UBG/UBoE; >=1 enables Host RoCE
           hostPaths:
             - path: /usr/local/Ascend/driver
               mountPath: /usr/local/Ascend/driver
@@ -507,28 +505,26 @@ spec:
               readOnly: true
 ```
 
-For UBG or UBoE (`fabricInterfaceCount` omitted), or custom Host RoCE topology overrides, set
-*`extraEnv`* with HIXL's flat dotted key `"comm_resource_config.protocol_desc"`:
+Ascend A5 Host RoCE worked example (`medium: DRAM`, `protocol: CANN`, *`fabricInterfaceCount: 1`*):
 
 ```yaml
 apiVersion: worker.gpustack.ai/v1
 kind: KVCacheBackend
 metadata:
-  name: ascend-a5-ubg-cache
+  name: ascend-a5-roce-cache
 spec:
   transport:
     protocol: CANN
   connection:
     managed:
+      leader: {}  # replicas, allocationStrategy and multiTenancy default
       members:
         - nodeSelector:
             kvcache-ascend-a5: "true"
           medium: DRAM
-          image: gpustack/mirrored-mooncake:0.3.14-cann9.2-a5
+          image: gpustack/mirrored-mooncake:0.3.14-cann9.2-a5  # placeholder tag for an A5 (950PR/950DT) build
           capacityPerMember: 32Gi
-          extraEnv:
-            - name: ASCEND_GLOBAL_RESOURCE_CONFIG
-              value: '{"comm_resource_config.protocol_desc":["ub_rtp:device"]}'
+          fabricInterfaceCount: 1  # >=1 enables Host RoCE on CANN
           hostPaths:
             - path: /usr/local/Ascend/driver
               mountPath: /usr/local/Ascend/driver
@@ -541,6 +537,36 @@ spec:
             - path: /usr/local/bin/npu-smi
               mountPath: /usr/local/bin/npu-smi
               type: File
+              readOnly: true
+```
+
+For UBG or UBoE (*`fabricInterfaceCount`* omitted), or custom Host RoCE topology overrides, set
+*`extraEnv`* with HIXL's flat dotted key `"comm_resource_config.protocol_desc"`:
+
+```yaml
+apiVersion: worker.gpustack.ai/v1
+kind: KVCacheBackend
+metadata:
+  name: ascend-a5-ubg-cache
+spec:
+  transport:
+    protocol: CANN
+  connection:
+    managed:
+      leader: {}  # replicas, allocationStrategy and multiTenancy default
+      members:
+        - nodeSelector:
+            kvcache-ascend-a5: "true"
+          medium: DRAM
+          image: gpustack/mirrored-mooncake:0.3.14-cann9.2-a5  # placeholder tag for an A5 (950PR/950DT) build
+          capacityPerMember: 32Gi
+          extraEnv:
+            - name: ASCEND_GLOBAL_RESOURCE_CONFIG
+              value: '{"comm_resource_config.protocol_desc":["ub_rtp:device"]}'
+          hostPaths:  # plus /usr/local/dcmi and /usr/local/bin/npu-smi as above
+            - path: /usr/local/Ascend/driver
+              mountPath: /usr/local/Ascend/driver
+              type: Directory
               readOnly: true
 ```
 

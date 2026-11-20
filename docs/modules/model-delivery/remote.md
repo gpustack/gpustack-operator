@@ -80,8 +80,12 @@ establish production acceptance, which remains open.
 Setting `Require` or `Prefer` starts nothing on its own. A role with its own command is never
 rewritten, and claim and image artifacts keep their existing delivery paths. On Ascend (`hixl`),
 the engine runner image must include CANN 9.2 or newer (for Python `hixl`), and Ascend A5 or Host
-RoCE features require rebuilt `model-transfer` source and `gpustack_model_transfer` wheel images
-beyond early `v0.1.0-cann9.2-a5` tags.
+RoCE features require rebuilt `model-transfer` source images beyond early `v0.1.0-cann9.2-a5` tags.
+
+The target engine bootstrap skips installing the host-staged wheel whenever
+`gpustack_model_transfer` is already preinstalled in the engine image. CANN 9.2+ engine images
+carrying an older bundled `gpustack_model_transfer` wheel must upgrade or omit that preinstalled
+wheel to pick up A5 options and `roce:host` `mmap`.
 
 ## Source preparation
 
@@ -795,8 +799,9 @@ RoCE on eligible `ModelDeployment` `vLLM` and `SGLang` targets (`Server` and sym
 `Encode` and asymmetric *PD* pairs remain rejected).
 
 - **Source Host RoCE toggle**: Setting `modelTransfer.ascend.hostRoCE.enabled: true` applies `hostNetwork: true`, `ClusterFirstWithHostNet`, read-only `/etc/hixlep` (`HostPathDirectory`), and default `ASCEND_GLOBAL_RESOURCE_CONFIG` (`roce:host` + `/etc/hixlep`) on `gpustack-operator-model-transfer-ascend` only.
-- **Node loopback ports**: With `hostNetwork: true`, broker `:9251` (TLS sessions, headless Service SNI `status.podIP:9251`), broker `127.0.0.1:9250`, and worker `127.0.0.1:9252` share the host network namespace.
-- **Mixed Ascend fleets**: Because the Ascend source `DaemonSet` selects all Ascend PCI nodes (`pci-19e5.present=true`), scope mixed A2/A3 and A5 clusters via `modelTransfer.nodeSelector`.
+- **Host network listener**: With `hostNetwork: true`, only the TLS session endpoint `:9251` binds the host network namespace; CSI clients dial `<sourcePodIP>:9251` (the host IP) and verify TLS SNI `<daemonSetName>.<namespace>.svc`.
+- **Private UDS control**: When `modelTransfer.ascend.hostRoCE.enabled: true`, broker-worker private control traffic switches to Unix-domain sockets inside the Pod-private `/run/model-transfer` volume (`control.sock` and `worker.sock`) instead of host loopback ports `9250`/`9252`.
+- **Mixed-fleet `nodeSelector` warning**: `modelTransfer.nodeSelector` applies to all vendor source `DaemonSet`s (`nvidia`, `amd`, `ascend`), and narrowing it on a running cluster causes Kubernetes's `DaemonSet` controller to delete `Pod`s on non-matching nodes immediately (bypassing `OnDelete` drain). Stop new work and confirm release on excluded nodes before migrating, or use isolated placement if other vendor source fleets share the cluster.
 - **Same-image drained rollout**: Source `Pod` templates stamp `model-transfer.gpustack.ai/config-hash` covering image, `hostNetwork`, `dnsPolicy`, `env`, and `/etc/hixlep`, so `ModelTransferImageReconciler` drains and replaces Pods when toggling `hostRoCE.enabled` at an identical worker image.
 
 The Python SDK forwards `ASCEND_LOCAL_COMM_RES` (`LocalCommRes`) and `ASCEND_GLOBAL_RESOURCE_CONFIG`
@@ -823,13 +828,17 @@ refused; non-`roce:host` paths continue using `aclrtMallocHost`.
 | **A5 Host RoCE** | Source `hostRoCE.enabled: true` + target `interface > 0` | Grants target `device.gpustack.ai/rdma*`, mounts `/etc/hixlep` RO, fails closed on physical NPU resolution, and uses `2 MiB`-aligned `mmap`. |
 | **Non-A5 A2/A3** | `910B`/`910C`, `hostRoCE.enabled: false`, `interface: 0` | Unchanged legacy `hixl` path using `aclrtMallocHost`; no `/etc/hixlep` or `hostNetwork`. |
 
-Source Helm values for Ascend A5 Host RoCE (replace `modelTransfer.env` with `"ub_ctp:host"`,
-`"ub_rtp:device"`, or `"uboe:device"` for UB H2H, UBG, or UBoE):
+Source Helm values for Ascend A5 Host RoCE on a fresh installation or post-drain migration (stop new
+work and confirm release on excluded nodes first; use isolated placement if NVIDIA or AMD source
+fleets share the cluster). Replace `modelTransfer.env` with `"ub_ctp:host"`, `"ub_rtp:device"`, or
+`"uboe:device"` for UB H2H, UBG, or UBoE:
 
 ```yaml
 modelTransfer:
   nodeSelector:
-    ascend.gpustack.ai/generation: a5  # scope mixed A2/A3 + A5 fleets
+    # Applies to all vendor source DaemonSets (nvidia, amd, ascend); only narrow on
+    # fresh installs or after draining excluded nodes.
+    ascend.gpustack.ai/generation: a5
   ascend:
     hostRoCE:
       enabled: true  # grants hostNetwork, RO /etc/hixlep, and flat-key roce:host default
