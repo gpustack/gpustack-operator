@@ -29,8 +29,10 @@ fails `scope-guard`). Loopwright automatically strips `.auto-sync/.stage/**` whe
 
 Never reference an unpublished `gpustack/*` container image tag in `pkg/worker/settings/value.go`, `docs/reference/settings.md`, `docs/modules/model-delivery/remote.md`, or `deploy/gpustack-operator/chart/values.yaml`.
 
+Stage B (`tag_promotion`) takes precedence over Stage A (`recipe_sync`): once un-held `gpustack/*` Base Images are published on Docker Hub (or explicitly targeted via `target_tag`), host preflight selects `stage: "tag_promotion"` first without being starved by newer upstream recipe commits/releases. Any concurrent upstream recipe drift is recorded in `has_stage_a` / `stage_a_drifts` in `kv-transfer-preflight-report.json` and runs in a follow-up Stage A PR after Stage B merges, while `.auto-sync/setting-image-holds.json` continues to hold specific setting images.
+
 - **Stage A (`stage: "recipe_sync"`, `image_published: false`)**:
-  - When upstream recipes advance and the target `gpustack/*` image tag is NOT yet published on Docker Hub, update ONLY:
+  - When upstream recipes advance and no un-held target `gpustack/*` image tag is published on Docker Hub yet, update ONLY:
     - `pack/mirrored-mooncake/**`
     - `pack/model-transfer/**`
     - `pack/mirrored-modelexpress-server/**`
@@ -38,6 +40,7 @@ Never reference an unpublished `gpustack/*` container image tag in `pkg/worker/s
   - Leave `pkg/worker/settings/value.go`, `docs/reference/settings.md`, `docs/modules/model-delivery/remote.md`, and `deploy/gpustack-operator/chart/**` untouched.
 - **Stage B (`stage: "tag_promotion"`, `image_published: true`)**:
   - Host preflight pre-stages promoted tags into `pkg/worker/settings/value.go`, `pkg/worker/settings/value_test.go`, `pkg/worker/controllers/worker/model_deployment_transfer_test.go`, `docs/reference/settings.md`, `docs/modules/model-delivery/remote.md`, and `deploy/gpustack-operator/chart/{values.yaml,values.schema.json,README.md.gotmpl,README.md}` when `stage: "tag_promotion"` is ready; verify them against `kv-transfer-preflight-report.json` and `image-manifests.json` (confirming `crane manifest` digests exist for the promoted tags).
+  - Leave `pack/mirrored-mooncake/**`, `pack/model-transfer/**`, and `pack/mirrored-modelexpress-server/**` untouched during Stage B even when `has_stage_a: true` / `stage_a_drifts` indicates concurrent upstream recipe drift.
   - Setting-image holds in `.auto-sync/setting-image-holds.json` (outside `scope.writable`, keys `mooncake`, `modelexpress`, `model-transfer`, `model-transfer.nvidia`, `model-transfer.amd`, `model-transfer.ascend`) keep held components pinned to their existing defaults even when newer images are published on Docker Hub; never promote or modify a held setting image (check `held_setting_images` in `kv-transfer-preflight-report.json`).
   - Update `.auto-sync/proposals/kv-transfer.json`: set `"stage": "tag_promotion"`, and whenever `upstream-records.json` carries `<ver>+stage-b` for an `upstreamId` (`mooncake`, `modelexpress`, or `gpustack-runner`), write that exact `<ver>+stage-b` string into `versions[<upstreamId>]` so open-PR deduplication settles cleanly on subsequent runs.
   - Do NOT modify any other settings in `value.go`, `value_test.go`, or `settings.md` (such as `ModelDeploymentRouterImage`, `ModelDeploymentRouterProxyImage`, or `ModelDeploymentRoutingSidecarImage`) or any other keys in `deploy/gpustack-operator/chart/values.yaml`.

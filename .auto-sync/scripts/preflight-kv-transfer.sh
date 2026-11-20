@@ -1186,13 +1186,11 @@ hixl_held_extra = (
 )
 
 mooncake_stage_b = (
-    not has_stage_a
-    and targets["mooncake_image"] != defaults["kv_cache_backend_image"]
+    targets["mooncake_image"] != defaults["kv_cache_backend_image"]
     and is_published(targets["mooncake_image"])
 )
 mx_stage_b = (
-    not has_stage_a
-    and targets["modelexpress_image"] != defaults["modelexpress_server_image"]
+    targets["modelexpress_image"] != defaults["modelexpress_server_image"]
     and is_published(targets["modelexpress_image"])
 )
 
@@ -1203,7 +1201,7 @@ mt_stage_b = False
 for vendor in ("nvidia", "amd", "ascend"):
     cur_ref = def_mt.get(vendor, "")
     cand_ref = cand_mt.get(vendor, cur_ref)
-    if not has_stage_a and cand_ref and cand_ref != cur_ref and is_mt_vendor_published(vendor, cand_ref):
+    if cand_ref and cand_ref != cur_ref and is_mt_vendor_published(vendor, cand_ref):
         effective_mt[vendor] = cand_ref
         mt_stage_b = True
     else:
@@ -1213,51 +1211,7 @@ targets["model_transfer_images"] = effective_mt
 has_stage_b = mooncake_stage_b or mx_stage_b or mt_stage_b
 
 records = []
-if has_stage_a:
-    stage = "recipe_sync"
-    image_published = False
-    records = [
-        {
-            "upstreamId": "mooncake",
-            "status": "available" if stage_a_drifts["mooncake"] else "up_to_date",
-            "version": up["mooncake"] if stage_a_drifts["mooncake"] else recipe["mooncake_version"],
-            "recentVersions": up["mooncake_recent"],
-        },
-        {
-            "upstreamId": "nixl-pypi",
-            "status": "available" if stage_a_drifts["nixl-pypi"] else "up_to_date",
-            "version": up["nixl_pypi"] if stage_a_drifts["nixl-pypi"] else recipe["nixl_version"],
-            "recentVersions": up["nixl_pypi_recent"],
-        },
-        {
-            "upstreamId": "nixl-rocm",
-            "status": "available" if stage_a_drifts["nixl-rocm"] else "up_to_date",
-            "version": up["nixl_rocm"] if stage_a_drifts["nixl-rocm"] else recipe["nixl_rocm_ref"],
-        },
-        {
-            "upstreamId": "ucx-rocm",
-            "status": "available" if stage_a_drifts["ucx-rocm"] else "up_to_date",
-            "version": up["ucx_rocm"] if stage_a_drifts["ucx-rocm"] else recipe["ucx_rocm_ref"],
-        },
-        {
-            "upstreamId": "hixl",
-            "status": "available" if stage_a_drifts["hixl"] else "up_to_date",
-            "version": effective_hixl_target if stage_a_drifts["hixl"] else recipe["hixl_commit"],
-            **hixl_held_extra,
-        },
-        {
-            "upstreamId": "modelexpress",
-            "status": "available" if stage_a_drifts["modelexpress"] else "up_to_date",
-            "version": up["modelexpress"] if stage_a_drifts["modelexpress"] else recipe["modelexpress_version"],
-            "recentVersions": up["modelexpress_recent"],
-        },
-        {
-            "upstreamId": "gpustack-runner",
-            "status": "available" if stage_a_drifts["gpustack-runner"] else "up_to_date",
-            "version": up["gpustack_runner"] if stage_a_drifts["gpustack-runner"] else "aligned",
-        },
-    ]
-elif has_stage_b:
+if has_stage_b:
     stage = "tag_promotion"
     image_published = True
     records = [
@@ -1299,6 +1253,50 @@ elif has_stage_b:
             "upstreamId": "gpustack-runner",
             "status": "available" if mt_stage_b else "up_to_date",
             "version": "aligned+stage-b" if mt_stage_b else "aligned",
+        },
+    ]
+elif has_stage_a:
+    stage = "recipe_sync"
+    image_published = False
+    records = [
+        {
+            "upstreamId": "mooncake",
+            "status": "available" if stage_a_drifts["mooncake"] else "up_to_date",
+            "version": up["mooncake"] if stage_a_drifts["mooncake"] else recipe["mooncake_version"],
+            "recentVersions": up["mooncake_recent"],
+        },
+        {
+            "upstreamId": "nixl-pypi",
+            "status": "available" if stage_a_drifts["nixl-pypi"] else "up_to_date",
+            "version": up["nixl_pypi"] if stage_a_drifts["nixl-pypi"] else recipe["nixl_version"],
+            "recentVersions": up["nixl_pypi_recent"],
+        },
+        {
+            "upstreamId": "nixl-rocm",
+            "status": "available" if stage_a_drifts["nixl-rocm"] else "up_to_date",
+            "version": up["nixl_rocm"] if stage_a_drifts["nixl-rocm"] else recipe["nixl_rocm_ref"],
+        },
+        {
+            "upstreamId": "ucx-rocm",
+            "status": "available" if stage_a_drifts["ucx-rocm"] else "up_to_date",
+            "version": up["ucx_rocm"] if stage_a_drifts["ucx-rocm"] else recipe["ucx_rocm_ref"],
+        },
+        {
+            "upstreamId": "hixl",
+            "status": "available" if stage_a_drifts["hixl"] else "up_to_date",
+            "version": effective_hixl_target if stage_a_drifts["hixl"] else recipe["hixl_commit"],
+            **hixl_held_extra,
+        },
+        {
+            "upstreamId": "modelexpress",
+            "status": "available" if stage_a_drifts["modelexpress"] else "up_to_date",
+            "version": up["modelexpress"] if stage_a_drifts["modelexpress"] else recipe["modelexpress_version"],
+            "recentVersions": up["modelexpress_recent"],
+        },
+        {
+            "upstreamId": "gpustack-runner",
+            "status": "available" if stage_a_drifts["gpustack-runner"] else "up_to_date",
+            "version": up["gpustack_runner"] if stage_a_drifts["gpustack-runner"] else "aligned",
         },
     ]
 else:
@@ -1363,6 +1361,8 @@ report = {
     "hixl_upstream_head": up["hixl"],
     "hixl_upstream_held_by_runner": hixl_upstream_held_by_runner,
     "runner_patch_drift": runner_patch_drift,
+    "has_stage_a": has_stage_a,
+    "stage_a_drifts": stage_a_drifts,
     "stage_b_flags": {
         "mooncake": mooncake_stage_b,
         "modelexpress": mx_stage_b,

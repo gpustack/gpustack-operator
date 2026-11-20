@@ -1238,6 +1238,188 @@ printf '{"schema_version":1,"holds":{}}\n' > "${CAND_DIR}/.auto-sync/setting-ima
 assert_fails "validate_router fails closed when candidate modifies .auto-sync/setting-image-holds.json" run_validate_env_i
 rm -f "${VAL_STAGE}/baseline/.auto-sync/setting-image-holds.json"
 
+# 4.17 Stage B (tag_promotion) prioritizes un-held published images over simultaneous Stage A release drift.
+printf 'pub fn v018() {}\n' >> "${VLLM_SRC}/src/lib.rs"
+git -C "${VLLM_SRC}" add -A
+git -C "${VLLM_SRC}" commit -q -m "v0.1.18"
+git -C "${VLLM_SRC}" tag v0.1.18
+
+printf 'pub fn v033() {}\n' >> "${SGLANG_SRC}/sgl-model-gateway/src/lib.rs"
+git -C "${SGLANG_SRC}" add -A
+git -C "${SGLANG_SRC}" commit -q -m "gateway v0.3.3"
+git -C "${SGLANG_SRC}" tag gateway-v0.3.3
+
+cat > "${FIXTURE_DIR}/upstream.json" <<'JSON'
+{
+  "repo_tags": {
+    "gpustack/llm-router": ["v0.4.0", "v0.5.0"],
+    "gpustack/mirrored-envoy": ["distroless-v1.33.2", "distroless-v1.34.0"]
+  }
+}
+JSON
+cat > "${FIXTURE_DIR}/setting-image-holds.json" <<'JSON'
+{
+  "schema_version": 1,
+  "holds": {
+    "proxy": {
+      "tag": "distroless-v1.33.2",
+      "reason": "Hold proxy while testing un-held router Stage B priority."
+    },
+    "sidecar": {
+      "tag": "v0.11.0",
+      "reason": "Hold sidecar."
+    }
+  }
+}
+JSON
+python3 - "${FIXTURE_DIR}/image-manifests.json" <<'PY'
+import json
+import sys
+p = sys.argv[1]
+with open(p, "r", encoding="utf-8") as f:
+    doc = json.load(f)
+doc["images"]["docker.io/gpustack/mirrored-envoy:distroless-v1.34.0"] = {
+    "published": True,
+    "amd64Digest": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+    "arm64Digest": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+}
+with open(p, "w", encoding="utf-8") as f:
+    json.dump(doc, f, indent=2)
+PY
+
+ROUTER_BASE_SHA_417="$(git -C "${FAKE_REPO}" rev-parse HEAD)"
+STAGE_ROUTER_SB_PRIO="${SCRATCH}/stage-router-sb-prio"
+(
+  cd "${FAKE_REPO}"
+  AUTOSYNC_ROUTER_FIXTURE_DIR="${FIXTURE_DIR}" \
+  AUTOSYNC_SKIP_GO_MOD_DOWNLOAD=true \
+    bash "${FAKE_REPO}/.auto-sync/scripts/preflight-router.sh" "${STAGE_ROUTER_SB_PRIO}"
+)
+
+if python3 - "${STAGE_ROUTER_SB_PRIO}" "${FAKE_REPO}" "${ROUTER_BASE_SHA_417}" <<'PY'
+import json
+import os
+import subprocess
+import sys
+
+stage, repo, base_sha = sys.argv[1:4]
+with open(os.path.join(stage, "upstream-records.json"), "r", encoding="utf-8") as f:
+    recs = {r["upstreamId"]: r for r in json.load(f)}
+assert recs["llm-d-router"]["status"] == "available" and recs["llm-d-router"]["version"] == "v0.11.0+stage-b", recs["llm-d-router"]
+assert recs["vllm-router"]["status"] == "available" and recs["vllm-router"]["version"] == "v0.1.17+stage-b", recs["vllm-router"]
+assert recs["sglang-gateway"]["status"] == "available" and recs["sglang-gateway"]["version"] == "gateway-v0.3.2+stage-b", recs["sglang-gateway"]
+
+with open(os.path.join(stage, "router-preflight-report.json"), "r", encoding="utf-8") as f:
+    rep = json.load(f)
+assert rep["stage"] == "tag_promotion", rep
+assert rep["image_published"] is True, rep
+assert rep["has_stage_a"] is True, rep
+assert rep["stage_a_drifts"]["vllm-router"] is True, rep["stage_a_drifts"]
+assert rep["stage_a_drifts"]["sglang-gateway"] is True, rep["stage_a_drifts"]
+assert rep["stage_b_flags"] == {"router": True, "proxy": False, "sidecar": False}, rep["stage_b_flags"]
+assert rep["targets"]["router_image"] == "gpustack/llm-router:v0.5.0", rep["targets"]
+assert rep["targets"]["proxy_image"] == "gpustack/mirrored-envoy:distroless-v1.33.2", rep["targets"]
+
+src_rev = rep["source_revision"]
+assert src_rev and src_rev != base_sha, rep
+diff_pack = subprocess.check_output(["git", "-C", repo, "diff", base_sha, src_rev, "--", "pack/llm-router"], text=True)
+assert diff_pack == "", f"Stage B must not touch pack/llm-router: {diff_pack}"
+val_go = subprocess.check_output(["git", "-C", repo, "show", f"{src_rev}:pkg/worker/settings/value.go"], text=True)
+assert "gpustack/llm-router:v0.5.0" in val_go, "router image not promoted"
+assert "gpustack/mirrored-envoy:distroless-v1.33.2" in val_go, "held proxy changed"
+PY
+then
+  pass "preflight-router prioritizes Stage B tag_promotion over concurrent Stage A drift while respecting held proxy"
+else
+  fail "preflight-router prioritizes Stage B tag_promotion over concurrent Stage A drift while respecting held proxy"
+fi
+
+# validate_router.sh passes Stage B tag_promotion with concurrent Stage A drift (retire_0001/0004=true) and rejects Dockerfile edits.
+cat > "${VAL_STAGE}/router-preflight-report.json" <<'JSON'
+{
+  "schemaVersion": 1,
+  "stage": "tag_promotion",
+  "image_published": true,
+  "has_stage_a": true,
+  "stage_a_drifts": {
+    "llm-d-router": false,
+    "vllm-router": true,
+    "sglang-gateway": false
+  },
+  "retire_0001_epd_routing": true,
+  "retire_0004_discovery_readiness": true,
+  "target_tags": {
+    "llm-d-router": "v0.11.0",
+    "vllm-router": "v0.1.17",
+    "sglang-gateway": "gateway-v0.3.1"
+  }
+}
+JSON
+make_gitless_cand
+set_router_proposal "tag_promotion" "v0.1.16.1+stage-b" "v0.11.0+stage-b"
+set_router_image_fixture "v99.1.0" "${CAND_DIR}/pkg/worker/settings/value.go" "${CAND_DIR}/docs/reference/settings.md"
+if run_validate_env_i && [[ ! -s "${BUILD_LOG}" ]]; then
+  pass "validate_router passes Stage B tag_promotion candidate despite concurrent Stage A vllm-router drift"
+else
+  fail "validate_router passes Stage B tag_promotion candidate despite concurrent Stage A vllm-router drift"
+fi
+
+sed -i.bak 's/^ARG VLLM_ROUTER_VERSION=v0\.1\.16\.1/ARG VLLM_ROUTER_VERSION=v0.1.17/' "${CAND_DIR}/pack/llm-router/Dockerfile"
+rm -f "${CAND_DIR}/pack/llm-router/Dockerfile.bak"
+rm -f "${CAND_DIR}/pack/llm-router/patches/vllm-router/0001-epd-routing.patch"
+assert_fails "validate_router fails closed when Stage B tag_promotion modifies pack/llm-router/Dockerfile" run_validate_env_i
+
+# When Stage A has drift and NO un-held newer image tag is published (only held router has v0.5.0 published), preflight selects recipe_sync.
+cat > "${FIXTURE_DIR}/setting-image-holds.json" <<'JSON'
+{
+  "schema_version": 1,
+  "holds": {
+    "router": {
+      "tag": "v0.4.0",
+      "reason": "Hold router at v0.4.0."
+    },
+    "proxy": {
+      "tag": "distroless-v1.33.2",
+      "reason": "Hold proxy at distroless-v1.33.2."
+    },
+    "sidecar": {
+      "tag": "v0.11.0",
+      "reason": "Hold sidecar at v0.11.0."
+    }
+  }
+}
+JSON
+STAGE_ROUTER_HELD_ONLY="${SCRATCH}/stage-router-held-only"
+(
+  cd "${FAKE_REPO}"
+  AUTOSYNC_ROUTER_FIXTURE_DIR="${FIXTURE_DIR}" \
+  AUTOSYNC_SKIP_GO_MOD_DOWNLOAD=true \
+    bash "${FAKE_REPO}/.auto-sync/scripts/preflight-router.sh" "${STAGE_ROUTER_HELD_ONLY}"
+)
+if python3 - "${STAGE_ROUTER_HELD_ONLY}" <<'PY'
+import json
+import os
+import sys
+
+stage = sys.argv[1]
+with open(os.path.join(stage, "upstream-records.json"), "r", encoding="utf-8") as f:
+    recs = {r["upstreamId"]: r for r in json.load(f)}
+assert recs["vllm-router"]["status"] == "available" and recs["vllm-router"]["version"] == "v0.1.18", recs["vllm-router"]
+assert recs["sglang-gateway"]["status"] == "available" and recs["sglang-gateway"]["version"] == "gateway-v0.3.3", recs["sglang-gateway"]
+with open(os.path.join(stage, "router-preflight-report.json"), "r", encoding="utf-8") as f:
+    rep = json.load(f)
+assert rep["stage"] == "recipe_sync", rep
+assert rep["image_published"] is False, rep
+assert rep["has_stage_a"] is True, rep
+assert rep["stage_b_flags"] == {"router": False, "proxy": False, "sidecar": False}, rep["stage_b_flags"]
+PY
+then
+  pass "preflight-router selects recipe_sync when Stage A has drift and only held images have newer published tags"
+else
+  fail "preflight-router selects recipe_sync when Stage A has drift and only held images have newer published tags"
+fi
+rm -f "${FIXTURE_DIR}/upstream.json" "${FIXTURE_DIR}/setting-image-holds.json"
+
 echo
 if (( FAILS > 0 )); then
   echo "ROUTER SELFTEST FAILED: ${FAILS} failure(s), ${PASSES} passed" >&2

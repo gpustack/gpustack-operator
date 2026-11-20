@@ -600,35 +600,20 @@ stage_a_drifts = {
 has_stage_a = any(stage_a_drifts.values())
 
 router_stage_b = (
-    not has_stage_a
-    and targets["router_image"] != defaults["router_image"]
+    targets["router_image"] != defaults["router_image"]
     and is_published(targets["router_image"])
 )
 proxy_stage_b = (
-    not has_stage_a
-    and targets["proxy_image"] != defaults["proxy_image"]
+    targets["proxy_image"] != defaults["proxy_image"]
     and is_published(targets["proxy_image"])
 )
 sidecar_stage_b = (
-    not has_stage_a
-    and targets["sidecar_image"] != defaults["sidecar_image"]
+    targets["sidecar_image"] != defaults["sidecar_image"]
     and is_published(targets["sidecar_image"])
 )
 has_stage_b = router_stage_b or proxy_stage_b or sidecar_stage_b
 
-if has_stage_a:
-    stage = "recipe_sync"
-    image_published = False
-    records = [
-        {
-            "upstreamId": uid,
-            "status": "available" if stage_a_drifts[uid] else "up_to_date",
-            "version": target_tags[uid] if stage_a_drifts[uid] else recipe[uid],
-            "recentVersions": recent_tags[uid],
-        }
-        for uid in ("llm-d-router", "vllm-router", "sglang-gateway")
-    ]
-elif has_stage_b:
+if has_stage_b:
     stage = "tag_promotion"
     image_published = True
     records = []
@@ -640,6 +625,18 @@ elif has_stage_b:
             "version": f"{recipe[uid]}+stage-b" if promote else recipe[uid],
             "recentVersions": recent_tags[uid],
         })
+elif has_stage_a:
+    stage = "recipe_sync"
+    image_published = False
+    records = [
+        {
+            "upstreamId": uid,
+            "status": "available" if stage_a_drifts[uid] else "up_to_date",
+            "version": target_tags[uid] if stage_a_drifts[uid] else recipe[uid],
+            "recentVersions": recent_tags[uid],
+        }
+        for uid in ("llm-d-router", "vllm-router", "sglang-gateway")
+    ]
 else:
     stage = "no_change"
     image_published = (
@@ -674,6 +671,8 @@ report = {
     "retire_0004_discovery_readiness": disc.get("retire_0004_discovery_readiness", False),
     "epd_commit": disc["epd_commit"],
     "toolchain": disc.get("toolchain") or {},
+    "has_stage_a": has_stage_a,
+    "stage_a_drifts": stage_a_drifts,
     "stage_b_flags": {
         "router": router_stage_b,
         "proxy": proxy_stage_b,

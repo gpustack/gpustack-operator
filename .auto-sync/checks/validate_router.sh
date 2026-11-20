@@ -89,6 +89,7 @@ BASE_SGLANG_VER="$(extract_df_arg "${BASE_DOCKERFILE}" "SGLANG_GATEWAY_VERSION")
 EPD_PATCH="${AUTOSYNC_CANDIDATE_ROOT}/pack/llm-router/patches/vllm-router/0001-epd-routing.patch"
 DISCOVERY_PATCH="${AUTOSYNC_CANDIDATE_ROOT}/pack/llm-router/patches/vllm-router/0004-discovery-readiness-and-deselect-removal.patch"
 PREFLIGHT_REPORT="${STAGE_DIR}/router-preflight-report.json"
+PREFLIGHT_STAGE=""
 if [[ -f "${PREFLIGHT_REPORT}" ]]; then
   RETIRE_INFO="$(python3 - "${PREFLIGHT_REPORT}" <<'PY'
 import json
@@ -99,13 +100,11 @@ with open(sys.argv[1], "r", encoding="utf-8") as f:
 retire_0001 = "true" if rep.get("retire_0001_epd_routing") is True else "false"
 retire_0004 = "true" if rep.get("retire_0004_discovery_readiness") is True else "false"
 target_vllm = str((rep.get("target_tags") or {}).get("vllm-router") or "")
-print(f"{retire_0001}|{retire_0004}|{target_vllm}")
+stage = str(rep.get("stage") or "")
+print(f"{retire_0001}|{retire_0004}|{target_vllm}|{stage}")
 PY
 )"
-  RETIRE_0001="${RETIRE_INFO%%|*}"
-  RETIRE_REST="${RETIRE_INFO#*|}"
-  RETIRE_0004="${RETIRE_REST%%|*}"
-  TARGET_VLLM_VER="${RETIRE_REST#*|}"
+  IFS='|' read -r RETIRE_0001 RETIRE_0004 TARGET_VLLM_VER PREFLIGHT_STAGE <<<"${RETIRE_INFO}"
   if [[ "${RETIRE_0001}" == "false" && ! -f "${EPD_PATCH}" ]]; then
     printf 'FAIL: 0001-epd-routing.patch was deleted while retire_0001_epd_routing is false\n' >&2
     exit 1
@@ -322,6 +321,12 @@ for b in ALL_BUILDERS:
         print(b)
 PY
 )"
+
+if [[ "${PREFLIGHT_STAGE}" == "tag_promotion" && -n "${CHANGED_STAGES}" ]]; then
+  printf 'FAIL: Stage B tag_promotion must not modify pack/llm-router/Dockerfile or patches (changed stages: %s)\n' \
+    "$(printf '%s' "${CHANGED_STAGES}" | tr '\n' ' ' | sed 's/ *$//')" >&2
+  exit 1
+fi
 
 if [[ -n "${CHANGED_STAGES}" ]]; then
   read -r -a BUILD_CMD <<< "${AUTOSYNC_ROUTER_BUILD_RUNNER:-docker buildx build}"
