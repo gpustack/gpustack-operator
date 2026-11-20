@@ -725,15 +725,23 @@ class TestSourceWorkerPreflightVsQuarantine:
                 return 0
 
             def _malloc(self, out_ptr, size):
-                raise AssertionError(
-                    "host allocation must not run on preflight or init failure"
+                raw_size = int(getattr(size, "value", size))
+                buf = (ctypes.c_ubyte * raw_size)()
+                addr = ctypes.addressof(buf)
+                self.allocs = getattr(self, "allocs", {})
+                self.allocs[addr] = buf
+                ctypes.cast(out_ptr, ctypes.POINTER(ctypes.c_void_p))[0] = (
+                    ctypes.c_void_p(addr)
                 )
+                return 0
 
         return FullFakeAcl()
 
-    def test_missing_endpoint_file_stops_cleanly_without_quarantine_while_init_failure_quarantines(
+    def test_native_start_precedes_acl_and_missing_endpoint_retries_until_repaired_or_drained(
         self, monkeypatch, tmp_path, caplog
     ):
+        import time
+
         from gpustack_model_transfer.source import memory as source_memory
         from gpustack_model_transfer.source.backend import (
             release_source_retained,
@@ -741,7 +749,16 @@ class TestSourceWorkerPreflightVsQuarantine:
         )
         from gpustack_model_transfer.source.memory import AclHostOwner
         from gpustack_model_transfer.source.native_worker import NativeSourceWorker
+        from gpustack_model_transfer.source.supervisor import SourceSupervisor
         from gpustack_model_transfer.source.transfer_service import OperationRegistry
+
+        def eventually(pred, timeout: float = 3.0):
+            deadline = time.monotonic() + timeout
+            while time.monotonic() < deadline:
+                if pred():
+                    return
+                time.sleep(0.005)
+            raise AssertionError("condition timed out")
 
         hixlep = tmp_path / "hixlep"
         hixlep.mkdir()
@@ -754,91 +771,191 @@ class TestSourceWorkerPreflightVsQuarantine:
                 }
             ),
         )
+
+        import hashlib
+        from pathlib import Path
+
+        fixture = self._assignment("gen-probe").tree_path
+        raw_manifest = (Path(fixture) / "manifest.json").read_bytes()
+        manifest_obj = json.loads(raw_manifest)
+
+        def make_order(gen: str):
+            return {
+                "generation": gen,
+                "workerSecret": "super-secret-worker-token",
+                "digest": "sha256:" + "a" * 64,
+                "namespace": "test",
+                "artifactUID": manifest_obj["artifact_uid"],
+                "sourceGeneration": manifest_obj["source_generation"],
+                "manifestSHA256": hashlib.sha256(raw_manifest).hexdigest(),
+                "manifestJSON": raw_manifest.decode(),
+                "treePath": str(fixture),
+                "totalBytes": sum(f["size"] for f in manifest_obj["files"]),
+                "registrations": len(manifest_obj["files"]),
+                "residentBudgetBytes": 4 << 20,
+            }
+
+        before_retained = set(retained_source_states())
         acl = self._acl_runtime_lib(phy_id=6)
+        call_order: list[str] = []
+        orig_acl_init = acl.aclInit.fn
+
+        def tracked_acl_init(cfg):
+            call_order.append("aclInit")
+            return orig_acl_init(cfg)
+
+        acl.aclInit.fn = tracked_acl_init
         native_starts: list[str] = []
         quarantines: list[str] = []
+        filled_reports: list[tuple[str, int]] = []
+        drain_acks: list[tuple[str, bool]] = []
+        actions: dict[str, str] = {}
+        preflight_attempts = {"gen-recover": 0, "gen-drain": 0}
+        port_released: list[str] = []
 
         def make_control(gen: str):
+            def on_native_start():
+                call_order.append(f"native_start:{gen}")
+                native_starts.append(gen)
+
             return SimpleNamespace(
                 generation=gen,
                 worker_id="pod-uid",
                 worker_instance_id="inst-1",
                 lease_id="lease-1",
+                _secret="super-secret-worker-token",
                 register=lambda: "lease-1",
-                native_start=lambda: native_starts.append(gen),
+                native_start=on_native_start,
                 heartbeat=lambda **kw: {
-                    "action": "none",
+                    "action": actions.get(gen, "none"),
                     "activeSessions": 0,
                     "unknownSessions": 0,
                 },
-                filled=lambda count, descs: None,
-                drain_ack=lambda native_released: None,
+                filled=lambda count, descs: filled_reports.append((gen, count)),
+                drain_ack=lambda native_released: drain_acks.append(
+                    (gen, native_released)
+                ),
                 quarantine=lambda reason: quarantines.append(reason),
                 close=lambda: None,
             )
 
-        before_retained = set(retained_source_states())
-        assignment_missing = self._assignment("gen-missing-ep")
-        port_released = []
-        worker_missing = NativeSourceWorker(
-            make_control("gen-missing-ep"),
-            assignment_missing,
-            backend=lambda: self._backend_with_finalizer(port_released),
-            allocator=lambda: AclHostOwner(loader=lambda _: acl),
-            worker_instance_id="inst-1",
+        def make_allocator_for(gen: str, acl_lib):
+            assert f"native_start:{gen}" in call_order, (
+                "allocator_factory ran before durable control.native_start"
+            )
+            call_order.append(f"allocator:{gen}")
+            return AclHostOwner(loader=lambda _: acl_lib)
+
+        def make_recovering_backend(gen: str):
+            backend = HixlSourceBackend(
+                engine_factory=lambda: SimpleNamespace(
+                    initialize=lambda addr, opts: 0,
+                    register_mem=lambda desc, mtype: (0, 77),
+                    deregister_mem=lambda handle: 0,
+                    finalize=lambda: 0,
+                ),
+                engine_address="127.0.0.1:29701",
+            )
+            orig_preflight = backend.preflight
+
+            def counted_preflight():
+                preflight_attempts[gen] += 1
+                return orig_preflight()
+
+            backend.preflight = counted_preflight
+            backend.on_finalized = lambda: port_released.append(gen)
+            return backend
+
+        # 1) Same offer: missing ub_endpoint_npu_6.json retries cleanly after native_start,
+        #    then automatically reaches "serving" once the admin installs the file.
+        orders = [make_order("gen-recover")]
+        sup = SourceSupervisor(
+            SimpleNamespace(assignments=lambda: list(orders)),
+            control_factory=lambda a: make_control(a.generation),
+            backend_factory=lambda a: make_recovering_backend(a.generation),
+            allocator_factory=lambda a: make_allocator_for(a.generation, acl),
+            worker_id="pod-uid",
+            backend="hixl",
             poll_interval=0.01,
         )
+        sup.worker_instance_id = "inst-1"
         with caplog.at_level("WARNING"):
-            worker_missing.start()
-        worker_missing.close()
+            assert sup.poll_once() == 1
+            worker_recover = sup.workers["gen-recover"]
+            eventually(lambda: preflight_attempts["gen-recover"] >= 2)
+            # Identical offer stays admitted on the retrying worker without quarantining.
+            assert sup.poll_once() == 0
+            assert call_order[0] == "native_start:gen-recover"
+            assert call_order.index("native_start:gen-recover") < call_order.index(
+                "aclInit"
+            )
+            assert native_starts == ["gen-recover"]
+            assert worker_recover._native_attempted is False
+            assert worker_recover.state == "starting"
+            assert quarantines == []
+            assert set(retained_source_states()) == before_retained
+            warnings = [
+                rec.message
+                for rec in caplog.records
+                if "preflight refused" in rec.message
+            ]
+            assert len(warnings) == 1
+            assert "ub_endpoint_npu_6.json" in warnings[0]
+            assert "ASCEND_LOCAL_COMM_RES" in warnings[0]
+            assert "super-secret-worker-token" not in caplog.text
+            assert len(port_released) >= 2
 
-        assert worker_missing.state == "stopped"
-        assert worker_missing._native_attempted is False
-        assert native_starts == []
-        assert quarantines == []
-        assert set(retained_source_states()) == before_retained
+            # Install the missing endpoint file on the SAME offer -> worker recovers to serving!
+            (hixlep / "ub_endpoint_npu_6.json").write_text('{"phy":6}')
+            eventually(lambda: worker_recover.state == "serving")
+            assert worker_recover.wait_until_filled(1)
+            assert worker_recover._native_attempted is True
+            assert filled_reports == [("gen-recover", 1)]
+            assert quarantines == []
+
+            actions["gen-recover"] = "drain"
+            eventually(lambda: worker_recover.state == "drained")
+            orders.clear()
+            sup.poll_once()
+            assert "gen-recover" not in sup.workers
+            assert drain_acks == [("gen-recover", True)]
         assert source_memory._ACL_RUNTIME is None
-        assert acl.disposed is True
-        assert port_released == ["released"]
-        assert "ub_endpoint_npu_6.json" in caplog.text
-        assert "ASCEND_LOCAL_COMM_RES" in caplog.text
-        assert "super-secret-worker-token" not in caplog.text
 
-        # Unavailable ACL physical ID symbol also stops cleanly in preflight without quarantine.
+        # 2) Drain during preflight retry (missing ACL symbol) exits cleanly with 0 retained
+        #    generations and acknowledges broker drain immediately.
         caplog.clear()
+        (hixlep / "ub_endpoint_npu_6.json").unlink()
         acl_no_sym = self._acl_runtime_lib(phy_id=6)
         del acl_no_sym.aclrtGetPhyDevIdByUserDevId
-        worker_no_sym = NativeSourceWorker(
-            make_control("gen-no-sym"),
-            self._assignment("gen-no-sym"),
-            backend=lambda: self._backend_with_finalizer(port_released),
-            allocator=lambda: AclHostOwner(loader=lambda _: acl_no_sym),
-            worker_instance_id="inst-1",
+        orders[:] = [make_order("gen-drain")]
+        sup_drain = SourceSupervisor(
+            SimpleNamespace(assignments=lambda: list(orders)),
+            control_factory=lambda a: make_control(a.generation),
+            backend_factory=lambda a: make_recovering_backend(a.generation),
+            allocator_factory=lambda a: make_allocator_for(a.generation, acl_no_sym),
+            worker_id="pod-uid",
+            backend="hixl",
             poll_interval=0.01,
         )
+        sup_drain.worker_instance_id = "inst-1"
         with caplog.at_level("WARNING"):
-            worker_no_sym.start()
-        worker_no_sym.close()
-        assert worker_no_sym.state == "stopped"
-        assert worker_no_sym._native_attempted is False
-        assert native_starts == []
+            assert sup_drain.poll_once() == 1
+            worker_drain = sup_drain.workers["gen-drain"]
+            eventually(lambda: preflight_attempts["gen-drain"] >= 2)
+            assert "aclrtGetPhyDevIdByUserDevId" in caplog.text
+            assert "super-secret-worker-token" not in caplog.text
+
+            sup_drain.operations.freeze()
+            actions["gen-drain"] = "drain"
+            eventually(lambda: worker_drain.state == "drained")
+            sup_drain.threads["gen-drain"].join(timeout=2)
+
+        assert worker_drain._native_attempted is False
         assert quarantines == []
+        assert ("gen-drain", True) in drain_acks
         assert source_memory._ACL_RUNTIME is None
         assert acl_no_sym.disposed is True
-        assert "aclrtGetPhyDevIdByUserDevId" in caplog.text
-        assert "super-secret-worker-token" not in caplog.text
-
-        supervisor_stub = SimpleNamespace(
-            workers={"gen-missing-ep": worker_missing},
-            worker_id="pod-uid",
-            worker_instance_id="inst-1",
-            _starting=0,
-            _admission_closed=threading.Event(),
-            _lock=threading.Lock(),
-        )
-        registry = OperationRegistry(supervisor_stub)
-        registry.freeze()
-        assert registry.runtime() == {
+        assert sup_drain.operations.runtime() == {
             "workerID": "pod-uid",
             "workerInstanceID": "inst-1",
             "generations": [],
@@ -847,8 +964,32 @@ class TestSourceWorkerPreflightVsQuarantine:
             "retainedGenerations": [],
         }
 
-        # Now provide the endpoint file so preflight passes, and fail engine.initialize():
-        # native_start runs and the generation MUST still be quarantined.
+        # Direct abort/close during preflight retry also stops cleanly with 0 retained state.
+        acl_abort = self._acl_runtime_lib(phy_id=6)
+        worker_abort = NativeSourceWorker(
+            make_control("gen-abort"),
+            self._assignment("gen-abort"),
+            backend=lambda: self._backend_with_finalizer(port_released),
+            allocator=lambda: make_allocator_for("gen-abort", acl_abort),
+            worker_instance_id="inst-1",
+            poll_interval=0.01,
+        )
+        t_abort = threading.Thread(target=worker_abort.start, daemon=True)
+        t_abort.start()
+        try:
+            eventually(lambda: "native_start:gen-abort" in call_order)
+            worker_abort.close()
+            t_abort.join(timeout=2)
+            assert not t_abort.is_alive()
+            assert worker_abort.state == "stopped"
+            assert worker_abort._native_attempted is False
+            assert quarantines == []
+            assert source_memory._ACL_RUNTIME is None
+        finally:
+            worker_abort.close()
+
+        # 3) Now provide the endpoint file so preflight passes, and fail engine.initialize():
+        #    native_start runs and the generation MUST still be quarantined.
         (hixlep / "ub_endpoint_npu_6.json").write_text('{"phy":6}')
         acl2 = self._acl_runtime_lib(phy_id=6)
         assignment_init_fail = self._assignment("gen-init-fail")
@@ -862,17 +1003,26 @@ class TestSourceWorkerPreflightVsQuarantine:
             make_control("gen-init-fail"),
             assignment_init_fail,
             backend=lambda: failing_backend,
-            allocator=lambda: AclHostOwner(loader=lambda _: acl2),
+            allocator=lambda: make_allocator_for("gen-init-fail", acl2),
             worker_instance_id="inst-1",
             poll_interval=0.01,
         )
+        supervisor_stub = SimpleNamespace(
+            workers={"gen-init-fail": worker_init_fail},
+            worker_id="pod-uid",
+            worker_instance_id="inst-1",
+            _starting=0,
+            _admission_closed=threading.Event(),
+            _lock=threading.Lock(),
+        )
+        registry = OperationRegistry(supervisor_stub)
+        registry.freeze()
         try:
             worker_init_fail.start()
-            assert native_starts == ["gen-init-fail"]
+            assert "gen-init-fail" in native_starts
             assert worker_init_fail._native_attempted is True
             assert worker_init_fail.state == "quarantined"
             assert quarantines == ["SourceUnavailableError"]
-            supervisor_stub.workers["gen-init-fail"] = worker_init_fail
             snap = registry.runtime()
             assert snap["retainedGenerations"] == ["gen-init-fail"]
         finally:

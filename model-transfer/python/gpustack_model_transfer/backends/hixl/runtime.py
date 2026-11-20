@@ -558,29 +558,50 @@ def _buffer_extent(buffer) -> tuple:
     raise TypeError("registered buffer must be writable or expose data_ptr()")
 
 
-def _registered_extent(buffer, extent: int) -> int:
+def _registered_extent(buffer, extent: int, addr: int) -> int:
     """Return verified registration byte length for owned padded blocks, else extent."""
     if isinstance(buffer, AlignedHostBuffer):
         return buffer.registration_bytes
     from gpustack_model_transfer.source.memory import AclBlock
 
     if isinstance(buffer, AclBlock):
+        alloc_addr = buffer.allocation_address
         aligned_offset = buffer.aligned_offset
         reg_bytes = buffer.registration_bytes
         alloc_bytes = buffer.allocation_bytes
         if (
-            isinstance(aligned_offset, bool)
+            isinstance(alloc_addr, bool)
+            or not isinstance(alloc_addr, int)
+            or alloc_addr <= 0
+            or isinstance(addr, bool)
+            or not isinstance(addr, int)
+            or addr < alloc_addr
+            or isinstance(aligned_offset, bool)
             or not isinstance(aligned_offset, int)
             or isinstance(reg_bytes, bool)
             or not isinstance(reg_bytes, int)
             or isinstance(alloc_bytes, bool)
             or not isinstance(alloc_bytes, int)
-            or aligned_offset < 0
-            or reg_bytes < extent
-            or aligned_offset + reg_bytes > alloc_bytes
         ):
             raise ValueError(
                 "AclBlock registration bounds are inconsistent with its allocation"
+            )
+        actual_offset = addr - alloc_addr
+        if (
+            actual_offset != aligned_offset
+            or actual_offset < 0
+            or reg_bytes < extent
+            or actual_offset + reg_bytes > alloc_bytes
+        ):
+            raise ValueError(
+                "AclBlock registration bounds are inconsistent with its allocation"
+            )
+        if (
+            buffer.mapping is not None
+            and len(buffer.mapping) < actual_offset + reg_bytes
+        ):
+            raise ValueError(
+                "AclBlock mapping length is shorter than its registered range"
             )
         return reg_bytes
     return extent
@@ -712,7 +733,7 @@ class RealHixlAPI:
             for name, buffer in buffers.items():
                 addr = _address_of(buffer)
                 extent, memory_class = _buffer_extent(buffer)
-                registered_extent = _registered_extent(buffer, extent)
+                registered_extent = _registered_extent(buffer, extent, addr)
                 mem_type = (
                     hixl.MemType.MEM_DEVICE
                     if memory_class == "DEVICE"

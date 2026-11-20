@@ -162,10 +162,10 @@ class TargetNative:
         self.thread_id = None
         self._pending_devices = {}
 
-    def _check_thread(self):
+    def _check_thread(self, *, require_acl_context: bool = True):
         if self.thread_id != threading.get_ident():
             raise SourceUnavailableError("native target called from a different thread")
-        if self.backend == "hixl" and self.owner is not None:
+        if require_acl_context and self.backend == "hixl" and self.owner is not None:
             self.owner.ensure_current()
 
     def _initialize_endpoint(self, options=None):
@@ -359,7 +359,16 @@ class TargetNative:
     def close(self):
         if self.closed:
             return
-        self._check_thread()
+        needs_acl_context = (
+            bool(self._pending_devices)
+            or self.registration is not None
+            or self.agent is not None
+            or (
+                self.block is not None
+                and getattr(self.block, "allocator_kind", "acl") != "mmap"
+            )
+        )
+        self._check_thread(require_acl_context=needs_acl_context)
         for key, device in list(self._pending_devices.items()):
             self._synchronize_device(device)
             del self._pending_devices[key]

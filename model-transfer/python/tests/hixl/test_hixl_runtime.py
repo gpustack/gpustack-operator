@@ -352,6 +352,53 @@ class TestRealApiSurface(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     api.register_memory(agent, {"bad": bad_block})
 
+        # Mismatched aligned_offset (e.g. default 0 when address > allocation_address),
+        # invalid allocation_address, or truncated mmap must fail before register_mem.
+        import mmap
+
+        before_calls = len(agent.client.calls)
+        mismatched_offset = AclBlock("sub", 64, None, 4 << 20)
+        mismatched_offset.allocation_address = 2 << 20
+        mismatched_offset.allocation_bytes = 4 << 20
+        mismatched_offset.registration_bytes = 4 << 20
+        with self.assertRaises(ValueError):
+            api.register_memory(agent, {"sub": mismatched_offset})
+
+        below_base = AclBlock("below", 64, None, 2 << 20, aligned_offset=0)
+        below_base.allocation_address = 4 << 20
+        below_base.allocation_bytes = 4 << 20
+        below_base.registration_bytes = 2 << 20
+        with self.assertRaises(ValueError):
+            api.register_memory(agent, {"below": below_base})
+
+        nonpositive_base = AclBlock("zero-base", 64, None, 2 << 20, aligned_offset=0)
+        nonpositive_base.allocation_address = 0
+        nonpositive_base.allocation_bytes = 4 << 20
+        nonpositive_base.registration_bytes = 2 << 20
+        with self.assertRaises(ValueError):
+            api.register_memory(agent, {"zero-base": nonpositive_base})
+
+        short_map = mmap.mmap(-1, 4096)
+        try:
+            truncated_map = AclBlock(
+                "trunc",
+                64,
+                None,
+                2 << 20,
+                allocator_kind="mmap",
+                mapping=short_map,
+                aligned_offset=0,
+            )
+            truncated_map.allocation_address = 2 << 20
+            truncated_map.allocation_bytes = 4 << 20
+            truncated_map.registration_bytes = 2 << 20
+            with self.assertRaises(ValueError):
+                api.register_memory(agent, {"trunc": truncated_map})
+        finally:
+            short_map.close()
+
+        self.assertEqual(len(agent.client.calls), before_calls)
+
     def test_a_device_tensor_registers_as_device_memory(self):
         api = self.api()
 

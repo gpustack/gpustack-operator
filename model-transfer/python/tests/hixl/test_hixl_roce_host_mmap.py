@@ -517,8 +517,9 @@ class TestRoceHostAnonymousMmap:
         )
 
         # Mutate env between preflight() and allocator construction/idle rebuild!
-        def flip_on_native_start():
+        def make_allocator_after_env_flip():
             monkeypatch.setenv("ASCEND_GLOBAL_RESOURCE_CONFIG", ub_cfg)
+            return AclHostOwner(loader=lambda _: acl)
 
         state = {"active": 0, "action": "none"}
         control = SimpleNamespace(
@@ -526,7 +527,7 @@ class TestRoceHostAnonymousMmap:
             worker_id="pod-uid",
             worker_instance_id="inst-snap",
             register=lambda: "lease",
-            native_start=flip_on_native_start,
+            native_start=lambda: None,
             heartbeat=lambda **kw: {
                 "action": state["action"],
                 "activeSessions": state["active"],
@@ -541,7 +542,7 @@ class TestRoceHostAnonymousMmap:
             control,
             assignment,
             backend=lambda: backend,
-            allocator=lambda: AclHostOwner(loader=lambda _: acl),
+            allocator=make_allocator_after_env_flip,
             worker_instance_id="inst-snap",
             poll_interval=0.01,
         )

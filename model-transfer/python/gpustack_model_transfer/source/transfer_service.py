@@ -2,6 +2,7 @@
 
 import base64
 import binascii
+import errno
 import hashlib
 import hmac
 import ipaddress
@@ -735,7 +736,26 @@ def _unlink_stale_unix_socket(sock_path: str) -> None:
         return
     if not stat.S_ISSOCK(st.st_mode):
         raise OSError(f"refusing to unlink non-socket path {sock_path!r}")
-    os.unlink(sock_path)
+    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as probe:
+        probe.setblocking(False)
+        try:
+            probe.connect(sock_path)
+        except (ConnectionRefusedError, FileNotFoundError):
+            pass
+        except OSError as exc:
+            if isinstance(exc, BlockingIOError) or exc.errno in (
+                errno.EINPROGRESS,
+                errno.EAGAIN,
+                errno.EWOULDBLOCK,
+            ):
+                raise OSError(f"unix socket already active: {sock_path}") from exc
+            raise
+        else:
+            raise OSError(f"unix socket already active: {sock_path}")
+    try:
+        os.unlink(sock_path)
+    except FileNotFoundError:
+        return
 
 
 class PrivateServer(ThreadingHTTPServer):

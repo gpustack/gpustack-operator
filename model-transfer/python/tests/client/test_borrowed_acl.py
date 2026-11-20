@@ -100,3 +100,61 @@ def test_borrowed_acl_releases_mmap_block_after_context_change(monkeypatch):
     assert mapping.closed
     assert block.address == 0
     assert "free" not in acl.calls
+
+
+def test_target_native_close_releases_mmap_tail_after_acl_context_change(monkeypatch):
+    import threading
+    from types import SimpleNamespace
+
+    from gpustack_model_transfer.client_native import TargetNative
+
+    monkeypatch.setenv(
+        "ASCEND_GLOBAL_RESOURCE_CONFIG",
+        '{"comm_resource_config.protocol_desc":["roce:host"]}',
+    )
+    acl = ACL()
+    owner = BorrowedAclOwner(loader=lambda _: acl)
+    block = owner.allocate("window", 4096)
+    mapping = block.mapping
+    assert block.allocator_kind == "mmap"
+    assert mapping is not None and not mapping.closed
+
+    target = TargetNative("hixl", "127.0.0.1", 4 << 20)
+    target.thread_id = threading.get_ident()
+    target.owner = owner
+    target.block = block
+
+    acl.context = 456
+    with pytest.raises(SourceUnavailableError):
+        owner.ensure_current()
+
+    # Cross-thread close is still rejected.
+    cross_thread_err = []
+
+    def call_from_other_thread():
+        try:
+            target.close()
+        except SourceUnavailableError as exc:
+            cross_thread_err.append(str(exc))
+
+    other = threading.Thread(target=call_from_other_thread)
+    other.start()
+    other.join(timeout=2)
+    assert cross_thread_err == ["native target called from a different thread"]
+    assert not mapping.closed
+    assert not target.closed
+
+    # If native HIXL agent state still remains, switched ACL context is still refused.
+    target.agent = SimpleNamespace(client=SimpleNamespace(finalize=lambda: 0))
+    with pytest.raises(SourceUnavailableError, match="engine ACL context changed"):
+        target.close()
+    assert not mapping.closed
+    assert not target.closed
+
+    # Once pending devices, registration, and agent are clear, mmap-only tail closes cleanly.
+    target.agent = None
+    target.close()
+    assert target.closed is True
+    assert mapping.closed
+    assert block.address == 0
+    assert "free" not in acl.calls

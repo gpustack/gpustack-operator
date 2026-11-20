@@ -140,7 +140,48 @@ class NativeSourceWorker:
             return False
         return True
 
-    def _cleanup_preflight(self) -> bool:
+    def _preflight_cancelled(self) -> bool:
+        return (
+            self._abort_fill_requested.is_set()
+            or self._drain_requested.is_set()
+            or self._stop_event.is_set()
+        )
+
+    def _wait_preflight_retry(self, delay: float) -> bool:
+        deadline = time.monotonic() + delay
+        step = max(min(self.poll_interval, 0.05), 0.005)
+        while not self._preflight_cancelled():
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                return False
+            if self._abort_fill_requested.wait(min(remaining, step)):
+                return True
+        return True
+
+    def _finish_pre_native_cancel(self) -> None:
+        if (
+            self._drain_requested.is_set()
+            and self.state != "quarantined"
+            and not self._unknown_event.is_set()
+            and self.registration is None
+        ):
+            self.state = "draining"
+            return
+        if self.state != "quarantined":
+            self.state = "stopped"
+            self._stop_event.set()
+            self._wake_event.set()
+
+    def _redact_secret(self, text: str) -> str:
+        for candidate in (
+            getattr(self.control, "_secret", ""),
+            getattr(self.assignment, "worker_secret", ""),
+        ):
+            if candidate:
+                text = text.replace(candidate, "<redacted>")
+        return text
+
+    def _cleanup_preflight(self, *, check_acl_broken: bool = True) -> bool:
         """Release pre-native backend and allocator owners; False if ambiguous."""
         from gpustack_model_transfer.source import memory
 
@@ -162,12 +203,82 @@ class NativeSourceWorker:
                 except BaseException:
                     self.allocator = allocator
                     ambiguous = True
-        if memory._ACL_BROKEN is not None:
+            if (
+                not ambiguous
+                and backend is not None
+                and getattr(backend, "allocator", None) is allocator
+            ):
+                backend.allocator = None
+        if check_acl_broken and (
+            memory._ACL_BROKEN is not None
+            or (memory._ACL_RUNTIME is not None and memory._ACL_RUNTIME.broken)
+        ):
             ambiguous = True
         return not ambiguous
 
+    def _run_hixl_preflight(self) -> bool:
+        """Run HIXL preflight with bounded retry on clean recoverable refusals."""
+        from gpustack_model_transfer.core.errors import SourceUnavailableError
+
+        attempt = 0
+        last_warning = None
+        entered = False
+        while True:
+            if self._preflight_cancelled():
+                if not self._cleanup_preflight(check_acl_broken=entered):
+                    self._native_attempted = True
+                    self._quarantine("preflight-cleanup-unknown")
+                    return False
+                self._finish_pre_native_cancel()
+                return False
+            entered = True
+            try:
+                self.backend = self._backend_factory()
+                preflight = getattr(self.backend, "preflight", None)
+                if callable(preflight):
+                    needs_acl = getattr(
+                        self.backend, "needs_acl_preflight_context", None
+                    )
+                    if callable(needs_acl) and needs_acl():
+                        self.allocator = self._allocator_factory()
+                        if hasattr(self.backend, "allocator"):
+                            self.backend.allocator = self.allocator
+                    preflight()
+                return True
+            except SourceUnavailableError as exc:
+                if not self._cleanup_preflight(check_acl_broken=True):
+                    self._native_attempted = True
+                    self._quarantine(type(exc).__name__)
+                    logger.warning(
+                        "generation %s: start failed (%s)",
+                        self.control.generation,
+                        type(exc).__name__,
+                    )
+                    return False
+                detail = self._redact_secret(str(exc))
+                warning_key = (type(exc).__name__, detail)
+                if warning_key != last_warning:
+                    last_warning = warning_key
+                    logger.warning(
+                        "generation %s: preflight refused (%s): %s",
+                        self.control.generation,
+                        type(exc).__name__,
+                        detail,
+                    )
+                if self._preflight_cancelled():
+                    self._finish_pre_native_cancel()
+                    return False
+                delay = min(
+                    30.0,
+                    max(self.poll_interval, 0.005) * (2 ** min(attempt, 8)),
+                )
+                attempt += 1
+                if self._wait_preflight_retry(delay):
+                    self._finish_pre_native_cancel()
+                    return False
+
     def start(self):
-        preflight_failed = False
+        preflight_entered = False
         try:
             self._retry(self.control.register)
             self._control_thread = threading.Thread(
@@ -180,33 +291,27 @@ class NativeSourceWorker:
                     return
                 if self._abort_fill_requested.wait(max(self.poll_interval, 1.0)):
                     return
-            if self.assignment.backend == "hixl":
-                if self._abort_fill_requested.is_set():
-                    return
-                try:
-                    self.backend = self._backend_factory()
-                    preflight = getattr(self.backend, "preflight", None)
-                    if callable(preflight):
-                        needs_acl = getattr(
-                            self.backend, "needs_acl_preflight_context", None
-                        )
-                        if callable(needs_acl) and needs_acl():
-                            self.allocator = self._allocator_factory()
-                            if hasattr(self.backend, "allocator"):
-                                self.backend.allocator = self.allocator
-                        preflight()
-                except BaseException:
-                    preflight_failed = True
-                    raise
+            if self._preflight_cancelled():
+                self._finish_pre_native_cancel()
+                return
             self._retry(self.control.native_start)
+            if self._preflight_cancelled():
+                self._finish_pre_native_cancel()
+                return
+            if self.assignment.backend == "hixl":
+                preflight_entered = True
+                if not self._run_hixl_preflight():
+                    return
             with self._lock:
-                abort = self._abort_fill_requested.is_set()
+                abort = self._preflight_cancelled()
                 if not abort:
                     self._native_attempted = True
             if abort:
-                if not self._drain_requested.is_set() and not self._cleanup_preflight():
+                if not self._cleanup_preflight(check_acl_broken=preflight_entered):
                     self._native_attempted = True
                     self._quarantine("preflight-cleanup-unknown")
+                    return
+                self._finish_pre_native_cancel()
                 return
             if self.allocator is None:
                 self.allocator = self._allocator_factory()
@@ -259,48 +364,17 @@ class NativeSourceWorker:
             if self.state != "quarantined":
                 self.state = "serving"
         except BaseException as exc:
-            from gpustack_model_transfer.core.errors import SourceUnavailableError
-
             if not self._native_attempted:
-                if (
-                    self._drain_requested.is_set()
-                    and not preflight_failed
-                    and self.state != "quarantined"
-                    and self.registration is None
-                ):
-                    self.state = "draining"
-                    return
-                if not self._cleanup_preflight():
+                if not self._cleanup_preflight(check_acl_broken=preflight_entered):
                     self._native_attempted = True
                     self._quarantine(type(exc).__name__)
-                elif (
-                    self._drain_requested.is_set()
-                    and self.state != "quarantined"
-                    and self.registration is None
-                ):
-                    self.state = "draining"
-                    return
                 else:
-                    self.state = "stopped"
-                    self._stop_event.set()
-                    self._wake_event.set()
-                if preflight_failed and isinstance(exc, SourceUnavailableError):
-                    secret = getattr(self.control, "_secret", "")
-                    detail = str(exc)
-                    if secret:
-                        detail = detail.replace(secret, "<redacted>")
-                    logger.warning(
-                        "generation %s: preflight refused (%s): %s",
-                        self.control.generation,
-                        type(exc).__name__,
-                        detail,
-                    )
-                else:
-                    logger.warning(
-                        "generation %s: start failed (%s)",
-                        self.control.generation,
-                        type(exc).__name__,
-                    )
+                    self._finish_pre_native_cancel()
+                logger.warning(
+                    "generation %s: start failed (%s)",
+                    self.control.generation,
+                    type(exc).__name__,
+                )
                 return
             if (
                 isinstance(exc, FillAborted)

@@ -409,6 +409,73 @@ def test_uds_private_server_operations_runtime_and_drain(short_sock_dir):
     assert not sock_path.exists()
 
 
+def test_uds_private_server_refuses_active_socket_and_reclaims_stale_socket(
+    short_sock_dir,
+):
+    from types import SimpleNamespace
+
+    from gpustack_model_transfer.source.transfer_service import OperationRegistry
+
+    sock_path = short_sock_dir / "active.sock"
+    bootstrap_file = short_sock_dir / "bootstrap"
+    bootstrap_file.write_text("active-uds-token")
+
+    # 1) Dead stale socket on disk is reclaimed cleanly.
+    stale_srv = socketserver.UnixStreamServer(str(sock_path), BaseHTTPRequestHandler)
+    stale_inode = (os.lstat(sock_path).st_dev, os.lstat(sock_path).st_ino)
+    stale_srv.server_close()
+    assert sock_path.exists()
+
+    closed_ev = threading.Event()
+    closed_ev.set()
+    registry = OperationRegistry(
+        SimpleNamespace(
+            workers={},
+            worker_id="pod-uid",
+            worker_instance_id="inst-active",
+            _starting=0,
+            _admission_closed=closed_ev,
+            _lock=threading.Lock(),
+        )
+    )
+    uds_addr = f"unix://{sock_path}"
+    first = PrivateServer(registry, str(bootstrap_file), uds_addr)
+    first_thread = threading.Thread(target=first.serve_forever, daemon=True)
+    first_thread.start()
+    try:
+        active_st = os.lstat(sock_path)
+        active_inode = (active_st.st_dev, active_st.st_ino)
+        assert active_inode != stale_inode
+
+        # 2) Starting a second PrivateServer on the active socket fails closed
+        #    without unlinking or detaching the first listener.
+        with pytest.raises(OSError, match="unix socket already active"):
+            PrivateServer(registry, str(bootstrap_file), uds_addr)
+
+        after_st = os.lstat(sock_path)
+        assert (after_st.st_dev, after_st.st_ino) == active_inode
+
+        conn = control_mod._open_connection(uds_addr, timeout=2.0)
+        try:
+            conn.request(
+                "GET",
+                "/v1/runtime",
+                headers={"Authorization": "Bearer active-uds-token"},
+            )
+            resp = conn.getresponse()
+            body = json.loads(resp.read())
+            assert resp.status == 200
+            assert body["workerInstanceID"] == "inst-active"
+        finally:
+            conn.close()
+    finally:
+        first.shutdown()
+        first.server_close()
+        first_thread.join(timeout=3)
+
+    assert not sock_path.exists()
+
+
 def test_source_main_accepts_uds_broker_and_worker_addresses(
     short_sock_dir, monkeypatch
 ):
