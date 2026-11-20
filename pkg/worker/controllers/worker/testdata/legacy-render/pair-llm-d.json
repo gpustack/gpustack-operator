@@ -20,7 +20,7 @@
         "kueue.x-k8s.io/pod-group-total-count": "1",
         "kueue.x-k8s.io/role-hash": "prefill",
         "modeldeployment.gpustack.ai/pod-spec-hash": "53e65a62f104889c29829452adeab9bfb5ab9bffc8993e192b32b782ef172ab6",
-        "modeldeployment.gpustack.ai/render-version": "5",
+        "modeldeployment.gpustack.ai/render-version": "6",
         "note.gpustack.ai/role": "prefill",
         "prometheus.io/path": "/metrics",
         "prometheus.io/port": "8000",
@@ -52,6 +52,13 @@
           "emptyDir": {
             "medium": "Memory",
             "sizeLimit": "16Gi"
+          }
+        },
+        {
+          "name": "gpustack-engine-sentinel",
+          "hostPath": {
+            "path": "/var/lib/gpustack/operator/lib/engine-sentinel",
+            "type": "DirectoryOrCreate"
           }
         }
       ],
@@ -156,6 +163,10 @@
             {
               "name": "TRITON_CACHE_DIR",
               "value": "/var/lib/gpustack/cache/triton"
+            },
+            {
+              "name": "PYTHONPATH",
+              "value": "/var/lib/gpustack/operator/lib/engine-sentinel"
             }
           ],
           "resources": {
@@ -174,6 +185,11 @@
             {
               "name": "model-shm",
               "mountPath": "/dev/shm"
+            },
+            {
+              "name": "gpustack-engine-sentinel",
+              "readOnly": true,
+              "mountPath": "/var/lib/gpustack/operator/lib/engine-sentinel"
             }
           ],
           "livenessProbe": {
@@ -211,8 +227,18 @@
               "exec": {
                 "command": [
                   "python3",
-                  "-c",
-                  "import socket, ssl, sys, time, urllib.request\nstart = time.monotonic()\ntime.sleep(5)\nnames = [\"vllm:num_requests_running\", \"vllm:num_requests_waiting\"]\ncontext = ssl.create_default_context()\ncontext.check_hostname = False\ncontext.verify_mode = ssl.CERT_NONE\nidle = 0\nwhile time.monotonic() - start \u003c 25:\n    try:\n        body = urllib.request.urlopen(\"http://127.0.0.1:8000/metrics\", timeout=1, context=context).read().decode()\n    except Exception as err:\n        if not isinstance(getattr(err, \"reason\", err), (TimeoutError, socket.timeout)):\n            sys.exit(0)\n        body = None\n    busy = 1.0 if body is None else 0.0\n    for line in (body or \"\").splitlines():\n        name = line.split(\"{\", 1)[0].split(\" \", 1)[0]\n        if name not in names:\n            continue\n        sample = line.rsplit(\"}\", 1)[1] if \"{\" in line else line[len(name):]\n        try:\n            busy += float(sample.split()[0])\n        except (IndexError, ValueError):\n            busy += 1.0\n    idle = idle + 1 if busy == 0 else 0\n    if idle == 2:\n        sys.exit(0)\n    time.sleep(1)\nsys.exit(0)\n"
+                  "-m",
+                  "gpustack_engine_sentinel.drain",
+                  "--engine",
+                  "vLLM",
+                  "--port",
+                  "8000",
+                  "--scheme",
+                  "http",
+                  "--settle",
+                  "5",
+                  "--deadline",
+                  "25"
                 ]
               }
             }
@@ -248,7 +274,7 @@
         "kueue.x-k8s.io/pod-group-total-count": "1",
         "kueue.x-k8s.io/role-hash": "decode",
         "modeldeployment.gpustack.ai/pod-spec-hash": "9971c471ff4fb88170ebc8d27c2cd4386afdd3dfe82d9e813c029bae59b4e212",
-        "modeldeployment.gpustack.ai/render-version": "5",
+        "modeldeployment.gpustack.ai/render-version": "6",
         "note.gpustack.ai/role": "decode",
         "prometheus.io/path": "/metrics",
         "prometheus.io/port": "8200",
@@ -280,6 +306,13 @@
           "emptyDir": {
             "medium": "Memory",
             "sizeLimit": "16Gi"
+          }
+        },
+        {
+          "name": "gpustack-engine-sentinel",
+          "hostPath": {
+            "path": "/var/lib/gpustack/operator/lib/engine-sentinel",
+            "type": "DirectoryOrCreate"
           }
         }
       ],
@@ -400,6 +433,10 @@
             {
               "name": "TRITON_CACHE_DIR",
               "value": "/var/lib/gpustack/cache/triton"
+            },
+            {
+              "name": "PYTHONPATH",
+              "value": "/var/lib/gpustack/operator/lib/engine-sentinel"
             }
           ],
           "resources": {
@@ -418,6 +455,11 @@
             {
               "name": "model-shm",
               "mountPath": "/dev/shm"
+            },
+            {
+              "name": "gpustack-engine-sentinel",
+              "readOnly": true,
+              "mountPath": "/var/lib/gpustack/operator/lib/engine-sentinel"
             }
           ],
           "livenessProbe": {
@@ -455,8 +497,18 @@
               "exec": {
                 "command": [
                   "python3",
-                  "-c",
-                  "import socket, ssl, sys, time, urllib.request\nstart = time.monotonic()\ntime.sleep(5)\nnames = [\"vllm:num_requests_running\", \"vllm:num_requests_waiting\"]\ncontext = ssl.create_default_context()\ncontext.check_hostname = False\ncontext.verify_mode = ssl.CERT_NONE\nidle = 0\nwhile time.monotonic() - start \u003c 25:\n    try:\n        body = urllib.request.urlopen(\"http://127.0.0.1:8200/metrics\", timeout=1, context=context).read().decode()\n    except Exception as err:\n        if not isinstance(getattr(err, \"reason\", err), (TimeoutError, socket.timeout)):\n            sys.exit(0)\n        body = None\n    busy = 1.0 if body is None else 0.0\n    for line in (body or \"\").splitlines():\n        name = line.split(\"{\", 1)[0].split(\" \", 1)[0]\n        if name not in names:\n            continue\n        sample = line.rsplit(\"}\", 1)[1] if \"{\" in line else line[len(name):]\n        try:\n            busy += float(sample.split()[0])\n        except (IndexError, ValueError):\n            busy += 1.0\n    idle = idle + 1 if busy == 0 else 0\n    if idle == 2:\n        sys.exit(0)\n    time.sleep(1)\nsys.exit(0)\n"
+                  "-m",
+                  "gpustack_engine_sentinel.drain",
+                  "--engine",
+                  "vLLM",
+                  "--port",
+                  "8200",
+                  "--scheme",
+                  "http",
+                  "--settle",
+                  "5",
+                  "--deadline",
+                  "25"
                 ]
               }
             }

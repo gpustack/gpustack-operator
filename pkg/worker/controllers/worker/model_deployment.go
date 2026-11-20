@@ -23,6 +23,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/sets"
 	corev1client "k8s.io/client-go/kubernetes/typed/core/v1"
 	ctrlrecord "k8s.io/client-go/tools/record"
+	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
 	ctrlbuilder "sigs.k8s.io/controller-runtime/pkg/builder"
 	ctrlcli "sigs.k8s.io/controller-runtime/pkg/client"
@@ -50,6 +51,7 @@ import (
 	"gpustack.ai/gpustack/pkg/utils/ctrlclix"
 	"gpustack.ai/gpustack/pkg/worker/elasticengine"
 	"gpustack.ai/gpustack/pkg/worker/kvcache/inject"
+	"gpustack.ai/gpustack/pkg/worker/runtimecontrol"
 	"gpustack.ai/gpustack/pkg/worker/settings"
 )
 
@@ -106,6 +108,23 @@ type ModelDeploymentReconciler struct {
 	drainReader     modelDeploymentDrainReader
 	elasticObserver modelDeploymentElasticRayReader
 	elasticClient   func(*core.Pod) (*elasticengine.Client, error)
+
+	// RuntimeControlClient dials sentinel runtime-control endpoints on running worker Pods.
+	// A nil client uses the production bounded HTTP client.
+	RuntimeControlClient ModelDeploymentRuntimeControlClient
+	// LedgerStore persists per-role runtime-control convergence ledgers. A nil store builds one
+	// over APIReader and Client on demand.
+	LedgerStore *runtimecontrol.LedgerStore
+	// DrainReader scrapes incarnation-relative Prometheus in-flight request metrics before pause
+	// transitions. A nil reader builds the default bounded reader on demand.
+	DrainReader *runtimecontrol.DrainReader
+
+	runtimeControlTarget func(
+		ctx context.Context,
+		md *workercore.ModelDeployment,
+		role *workercore.ModelDeploymentRole,
+		pod *core.Pod,
+	) (runtimecontrol.Target, error)
 
 	// clock reads the retirement protocol's budgets. It is a field rather than a call to time.Now
 	// so a test can place a phase's start and its expiry at moments of its choosing instead of
@@ -374,7 +393,15 @@ func (r *ModelDeploymentReconciler) convergeModelDeployment(
 		}
 	}
 
-	desired, err := r.renderModelDeploymentPods(ctx, md, connection, interfaceProtocols, weights)
+	routerIsolationReady, routerIsolationMessage, err := r.resolveModelDeploymentRouterIsolation(ctx, md)
+	if err != nil {
+		logger.Error(err, "resolve router isolation readiness")
+		return ctrl.Result{}, err
+	}
+
+	desired, err := r.renderModelDeploymentPodsWithIsolation(
+		ctx, md, connection, interfaceProtocols, weights, ptr.To(routerIsolationReady),
+	)
 	if err != nil {
 		// A render failure is the AcceleratorType not being ready, or a role the renderer cannot build
 		// a container from. The pass aborts before any status is written, so an Event is the only
@@ -469,8 +496,8 @@ func (r *ModelDeploymentReconciler) convergeModelDeployment(
 	// one deletable by a count, which is the withdrawal this slice explicitly does not own.
 	//
 	// A fixed-profile deployment is untouched by this branch and keeps the path below unchanged.
-	if elastic, observation, err := r.convergeModelDeploymentElastic(
-		ctx, md, actual, desired, weights,
+	if elastic, observation, err := r.convergeModelDeploymentElasticWithIsolation(
+		ctx, md, actual, desired, weights, routerIsolationReady, routerIsolationMessage,
 	); err != nil {
 		return ctrl.Result{}, err
 	} else if elastic {
@@ -484,6 +511,9 @@ func (r *ModelDeploymentReconciler) convergeModelDeployment(
 		// Pods, and a status could publish a verdict the labels were never written from.
 		if err = r.syncModelDeploymentStatus(ctx, md, masters, domain, nil, weights, observation); err != nil {
 			return ctrl.Result{}, err
+		}
+		if observation.RuntimeControl != nil && observation.RuntimeControl.Requeue {
+			return ctrl.Result{RequeueAfter: 2 * time.Second}, nil
 		}
 		return ctrl.Result{RequeueAfter: 15 * time.Second}, nil
 	}
@@ -749,7 +779,7 @@ func (r *ModelDeploymentReconciler) convergeModelDeployment(
 		// its Workload with it: leaving the excess standing would have Kueue evict a member of its
 		// own choosing on every pass.
 		if surplus := modelDeploymentSurplusCount(kept); surplus > 0 {
-			shedSurplus := modelDeploymentSurplusReplicas(kept, want, surplus, minRenderVersion)
+			shedSurplus := modelDeploymentSurplusReplicasWithLegacy(md, role, kept, want, surplus, minRenderVersion)
 			// THE SHED IS ONE DECISION AND IT IS NOT PARTLY TAKEN. The protocol is handed the
 			// whole set rather than the first member of it, because a replica is removed as a
 			// replica: shedding one member of a set the protocol is about to take as a whole would
@@ -838,7 +868,9 @@ func (r *ModelDeploymentReconciler) convergeModelDeployment(
 			member := modelDeploymentPodMemberIndex(pod)
 			members := want[ordinal]
 			if member < len(members) &&
-				modelDeploymentPodMatchesCurrency(pod, members[member], minRenderVersion) {
+				modelDeploymentControllerPodMatchesCurrency(
+					md, role, ordinal, member, pod, members[member], minRenderVersion,
+				) {
 				continue
 			}
 
@@ -1479,6 +1511,16 @@ func (r *ModelDeploymentReconciler) convergeModelDeployment(
 		return ctrl.Result{Requeue: true}, nil
 	}
 
+	if err = r.reconcileModelDeploymentRuntimeControl(
+		ctx, md, actual, replacedByRole, routerIsolationReady, routerIsolationMessage, &observation,
+	); err != nil {
+		logger.Error(err, "reconcile runtime control")
+		return ctrl.Result{}, err
+	}
+	if observation.RuntimeControl != nil && observation.RuntimeControl.Requeue {
+		requeue = true
+	}
+
 	if err = r.convergeModelDeploymentEndpointEligibility(
 		ctx, md, actual, qualificationByMember, replacedByRole, observation,
 	); err != nil {
@@ -1861,11 +1903,17 @@ func modelDeploymentPodAnswersAPI(
 
 	managed, readable := modelDeploymentMemberExecution(pod)
 	if !readable {
+		if gated {
+			return eligible
+		}
 		// A member whose mode cannot be read keeps what readiness alone allows, which is the legacy
 		// behavior rather than a new judgement about it.
 		return true
 	}
 	if !managed {
+		if gated {
+			return eligible
+		}
 		return true
 	}
 	if !gated {
@@ -1907,7 +1955,10 @@ func modelDeploymentPodEligible(
 	qualification modelDeploymentInstanceQualification, evaluated bool,
 	decision modelDeploymentGroupDecision,
 ) bool {
-	if role.ElasticEP != nil {
+	if decision.RuntimeControlHeld {
+		return false
+	}
+	if runtimecontrol.RoleHasElasticEP(role) {
 		if pod.Annotations[modelDeploymentElasticWithdrawnAnnotation] == modelDeploymentTrueValue {
 			return false
 		}
@@ -2038,6 +2089,9 @@ type modelDeploymentGroupDecision struct {
 	// with a cross-member fact, and the deployment declares a Router. WITHOUT A ROUTER THERE IS NO
 	// OBSERVATION TO WAIT FOR, and the group's existing qualification contract stands.
 	Protected bool
+	// RuntimeControlHeld withholds endpoint eligibility until runtime-control replay and boot-latch
+	// acknowledgement succeed across all required answering members and lifecycle state is active.
+	RuntimeControlHeld bool
 }
 
 // modelDeploymentGroupDecisionOf reads the collected answer for one member's group.
@@ -2063,6 +2117,8 @@ func (r *ModelDeploymentReconciler) modelDeploymentGroupDecisionOf(
 		GenerationNamed: pod.Annotations[modelDeploymentAnnotationKeyEndpointEligibleGeneration] ==
 			string(generation),
 		Protected: protected,
+		RuntimeControlHeld: observation.RuntimeControl != nil &&
+			observation.RuntimeControl.HoldsGroup(role, view, pod),
 	}
 }
 
@@ -2311,24 +2367,58 @@ func (r *ModelDeploymentReconciler) syncModelDeploymentOwnedChildren(
 // The render is still ONE TEMPLATE PER ROLE, stamped per member -- the template is every Pod of the
 // role's, and nothing that names one replica or one member may be produced inside it. What separates
 // two members is what the stamp writes: a name, a hostname and an index label.
+//
+//nolint:unparam // wrapper retains full render signature for tests
 func (r *ModelDeploymentReconciler) renderModelDeploymentPods(
 	ctx context.Context, md *workercore.ModelDeployment,
 	connection *ModelDeploymentConnectorInput, interfaceProtocols []string, weights *modelArtifactWeights,
+) (map[string]map[int][]*core.Pod, error) {
+	var engineSentinelEnabled *bool
+	if r.APIReader != nil || r.Client != nil {
+		ready, _, err := r.resolveModelDeploymentRouterIsolation(ctx, md)
+		if err != nil {
+			return nil, err
+		}
+		engineSentinelEnabled = ptr.To(ready)
+	}
+	return r.renderModelDeploymentPodsWithIsolation(
+		ctx, md, connection, interfaceProtocols, weights, engineSentinelEnabled,
+	)
+}
+
+func (r *ModelDeploymentReconciler) renderModelDeploymentPodsWithIsolation(
+	ctx context.Context, md *workercore.ModelDeployment,
+	connection *ModelDeploymentConnectorInput, interfaceProtocols []string, weights *modelArtifactWeights,
+	engineSentinelEnabled *bool,
 ) (map[string]map[int][]*core.Pod, error) {
 	if err := r.reconcileModelTransferClientConfig(ctx, md, weights); err != nil {
 		return nil, err
 	}
 	awsEFAEnabled := settings.AWSEFAEnabled.ShouldValueBool(ctx)
 	if ModelDeploymentElasticRole(md) != nil {
-		return r.renderModelDeploymentElasticPods(ctx, md, connection, interfaceProtocols, weights, awsEFAEnabled)
+		return r.renderModelDeploymentElasticPodsWithSentinel(
+			ctx, md, connection, interfaceProtocols, weights, awsEFAEnabled, engineSentinelEnabled,
+		)
 	}
-	return r.renderModelDeploymentRolePods(ctx, md, connection, interfaceProtocols, weights, awsEFAEnabled)
+	return r.renderModelDeploymentRolePodsWithSentinel(
+		ctx, md, connection, interfaceProtocols, weights, awsEFAEnabled, engineSentinelEnabled,
+	)
 }
 
 func (r *ModelDeploymentReconciler) renderModelDeploymentRolePods(
 	ctx context.Context, md *workercore.ModelDeployment,
 	connection *ModelDeploymentConnectorInput, interfaceProtocols []string, weights *modelArtifactWeights,
 	awsEFAEnabled bool,
+) (map[string]map[int][]*core.Pod, error) {
+	return r.renderModelDeploymentRolePodsWithSentinel(
+		ctx, md, connection, interfaceProtocols, weights, awsEFAEnabled, nil,
+	)
+}
+
+func (r *ModelDeploymentReconciler) renderModelDeploymentRolePodsWithSentinel(
+	ctx context.Context, md *workercore.ModelDeployment,
+	connection *ModelDeploymentConnectorInput, interfaceProtocols []string, weights *modelArtifactWeights,
+	awsEFAEnabled bool, engineSentinelEnabled *bool,
 ) (map[string]map[int][]*core.Pod, error) {
 	// The overcommit setting is the Instance path's, deliberately: it decides how a declared
 	// resource becomes a request, and this renderer derives the same values the Instance webhook
@@ -2386,6 +2476,7 @@ func (r *ModelDeploymentReconciler) renderModelDeploymentRolePods(
 			MixedOnNode:                mixedOnNode,
 			TCPTWReuse:                 tcpTWReuse,
 			NativeSidecar:              nativeSidecar,
+			EngineSentinelEnabled:      engineSentinelEnabled,
 		}
 		if weights != nil && weights.Render != nil {
 			roleArtifact := *weights.Render
@@ -2880,6 +2971,13 @@ func modelDeploymentSurplusCount(kept []*core.Pod) int {
 func modelDeploymentSurplusReplicas(
 	kept []*core.Pod, want map[int][]*core.Pod, surplus, minRenderVersion int,
 ) []*core.Pod {
+	return modelDeploymentSurplusReplicasWithLegacy(nil, nil, kept, want, surplus, minRenderVersion)
+}
+
+func modelDeploymentSurplusReplicasWithLegacy(
+	md *workercore.ModelDeployment, role *workercore.ModelDeploymentRole,
+	kept []*core.Pod, want map[int][]*core.Pod, surplus, minRenderVersion int,
+) []*core.Pod {
 	type seat struct{ ordinal, member int }
 
 	var shed []*core.Pod
@@ -2928,8 +3026,12 @@ func modelDeploymentSurplusReplicas(
 			}
 		}
 		slices.SortFunc(occupants, func(a, b *core.Pod) int {
-			am := modelDeploymentPodMatchesCurrency(a, wantMember, minRenderVersion)
-			bm := modelDeploymentPodMatchesCurrency(b, wantMember, minRenderVersion)
+			am := modelDeploymentControllerPodMatchesCurrency(
+				md, role, at.ordinal, at.member, a, wantMember, minRenderVersion,
+			)
+			bm := modelDeploymentControllerPodMatchesCurrency(
+				md, role, at.ordinal, at.member, b, wantMember, minRenderVersion,
+			)
 			if am != bm {
 				if am {
 					return -1

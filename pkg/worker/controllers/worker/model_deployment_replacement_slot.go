@@ -465,8 +465,14 @@ func (r *ModelDeploymentReconciler) modelDeploymentPartialGroupMembers(
 	}
 	for index, rendered := range want {
 		if member, present := seated[index]; present &&
-			(member.Annotations[modelDeploymentPodSpecHashAnnotation] !=
-				rendered.Annotations[modelDeploymentPodSpecHashAnnotation] ||
+			(!modelDeploymentPodMatchesCurrencyWithLegacy(
+				member,
+				rendered,
+				modelDeploymentDesiredPodLegacyRouterHash(
+					md, replacementRoleByName(md, slot.Role), slot.Ordinal, index, rendered,
+				),
+				modelDeploymentEffectiveMinRenderVersion(md),
+			) ||
 				modelDeploymentPodRenderVersion(member) != modelDeploymentPodRenderVersion(rendered)) {
 			return nil, false, nil
 		}
@@ -606,7 +612,10 @@ func (r *ModelDeploymentReconciler) replacementAdmitted(
 		standing = append(standing, &members[i])
 	}
 
-	if reason := replacementMembersMatch(want, standing, modelDeploymentEffectiveMinRenderVersion(md)); reason != "" {
+	legacyHashes := replacementLegacyRenderHashes(md, replacementRoleByName(md, slot.Role), slot.Ordinal, want)
+	if reason := replacementMembersMatchWithLegacy(
+		want, standing, legacyHashes, modelDeploymentEffectiveMinRenderVersion(md),
+	); reason != "" {
 		return false, reason, nil
 	}
 
@@ -915,6 +924,12 @@ func resourceQuantityListEqual(got, want core.ResourceList) bool {
 // replacementMembersMatch reports whether a standing group matches the desired spec and render
 // version requirements, and names the first difference.
 func replacementMembersMatch(want, standing []*core.Pod, minRenderVersion int) string {
+	return replacementMembersMatchWithLegacy(want, standing, nil, minRenderVersion)
+}
+
+func replacementMembersMatchWithLegacy(
+	want, standing []*core.Pod, legacyHashes []string, minRenderVersion int,
+) string {
 	if len(standing) != len(want) {
 		return fmt.Sprintf("the replica holds %d of the %d members it is rendered at",
 			len(standing), len(want))
@@ -934,7 +949,11 @@ func replacementMembersMatch(want, standing []*core.Pod, minRenderVersion int) s
 		if !seated {
 			return fmt.Sprintf("no member sits at index %d", index)
 		}
-		if !modelDeploymentPodMatchesCurrency(member, rendered, minRenderVersion) {
+		var legacyHash string
+		if index < len(legacyHashes) {
+			legacyHash = legacyHashes[index]
+		}
+		if !modelDeploymentPodMatchesCurrencyWithLegacy(member, rendered, legacyHash, minRenderVersion) {
 			return fmt.Sprintf("member %s does not carry the render this pass produced", member.Name)
 		}
 	}
@@ -944,6 +963,31 @@ func replacementMembersMatch(want, standing []*core.Pod, minRenderVersion int) s
 	}
 
 	return ""
+}
+
+func replacementRoleByName(md *workercore.ModelDeployment, roleName string) *workercore.ModelDeploymentRole {
+	if md == nil {
+		return nil
+	}
+	for i := range md.Spec.Roles {
+		if md.Spec.Roles[i].Name == roleName {
+			return &md.Spec.Roles[i]
+		}
+	}
+
+	return nil
+}
+
+func replacementLegacyRenderHashes(
+	md *workercore.ModelDeployment, role *workercore.ModelDeploymentRole,
+	ordinal int, want []*core.Pod,
+) []string {
+	hashes := make([]string, len(want))
+	for index, rendered := range want {
+		hashes[index] = modelDeploymentDesiredPodLegacyRouterHash(md, role, ordinal, index, rendered)
+	}
+
+	return hashes
 }
 
 // replacementQueueName is the LocalQueue a rendered replica submits to, read off the render so
@@ -975,6 +1019,12 @@ func replacementRenderHashes(want []*core.Pod) []string {
 // the generation without moving any member's render, and treating that as a configuration change
 // would tear down a healthy replacement and rebuild it identically.
 func replacementSuperseded(slot modelDeploymentReplacementSlot, want []*core.Pod) bool {
+	return replacementSupersededWithLegacy(slot, want, nil)
+}
+
+func replacementSupersededWithLegacy(
+	slot modelDeploymentReplacementSlot, want []*core.Pod, legacyHashes []string,
+) bool {
 	if len(slot.MemberHashes) == 0 {
 		// The slot has not recorded its target render yet, so nothing is known to be obsolete.
 		return false
@@ -983,7 +1033,21 @@ func replacementSuperseded(slot modelDeploymentReplacementSlot, want []*core.Pod
 		return true
 	}
 
-	return !slices.Equal(slot.MemberHashes, replacementRenderHashes(want))
+	projected := replacementRenderHashes(want)
+	for i := range want {
+		if slot.MemberHashes[i] == projected[i] {
+			continue
+		}
+		if i < len(legacyHashes) && legacyHashes[i] != "" &&
+			modelDeploymentPodRenderVersion(want[i]) <= modelDeploymentRenderVersion &&
+			slot.MemberHashes[i] == legacyHashes[i] {
+			continue
+		}
+
+		return true
+	}
+
+	return false
 }
 
 // modelDeploymentReplacementProgress is what one pass did about a role's active slot.
@@ -1065,13 +1129,15 @@ func (r *ModelDeploymentReconciler) resolveReplacementSlot(
 		return progress, wlErr
 	}
 	if slot.Phase == modelDeploymentReplacementWaitingForAdmission {
+		legacyHashes := replacementLegacyRenderHashes(md, role, slot.Ordinal, want)
 		present := sets.New[types.UID]()
 		broken := false
 		for _, member := range standing {
 			present.Insert(member.UID)
 			broken = broken || member.DeletionTimestamp != nil
 			seat := modelDeploymentPodMemberIndex(member)
-			if seat >= len(want) || !modelDeploymentPodMatchesCurrency(member, want[seat], minRenderVersion) {
+			if seat >= len(want) ||
+				!modelDeploymentPodMatchesCurrencyWithLegacy(member, want[seat], legacyHashes[seat], minRenderVersion) {
 				broken = true
 			} else if len(standing) < len(want) &&
 				modelDeploymentPodRenderVersion(member) != modelDeploymentPodRenderVersion(want[seat]) {
@@ -1090,7 +1156,7 @@ func (r *ModelDeploymentReconciler) resolveReplacementSlot(
 		if ownsCurrent && len(standing) < len(want) {
 			broken = true
 		}
-		if broken || replacementSuperseded(slot, want) {
+		if broken || replacementSupersededWithLegacy(slot, want, legacyHashes) {
 			next := modelDeploymentReplacementSlot{
 				Role: slot.Role, Ordinal: slot.Ordinal, Phase: modelDeploymentReplacementCleanup,
 				MemberUIDs:  sets.List(present.Union(sets.New(slot.CurrentMemberUIDs...))),

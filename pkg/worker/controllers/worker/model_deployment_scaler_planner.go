@@ -19,6 +19,7 @@ import (
 
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
 	"gpustack.ai/gpustack/pkg/utils/ctrlclix"
+	"gpustack.ai/gpustack/pkg/worker/runtimecontrol"
 	"gpustack.ai/gpustack/pkg/worker/scaling/algorithm"
 )
 
@@ -71,6 +72,7 @@ func (r *ModelDeploymentScalerReconciler) planWithPriors(
 	hasActiveRetirement := retirementInFlight || hasSurplusPods
 	interval := r.interval(scaler)
 	r.resetRebalanceForGenerationChange(scaler, md)
+	rolesUnpaused, rolePausedMsg := modelDeploymentScalerRolesUnpaused(scaler, md)
 
 	if scaler.Status.PendingCohort != nil {
 		cohort := scaler.Status.PendingCohort
@@ -80,6 +82,9 @@ func (r *ModelDeploymentScalerReconciler) planWithPriors(
 		case addedOrdinalsAdmitted(cohort, cohorts):
 			scaler.Status.PendingCohort = nil
 		case active && cohort.StartedAt != nil && !now.Before(cohort.StartedAt.Add(r.pendingTimeout(scaler))):
+			if !rolesUnpaused {
+				return r.holdForPausedRole(ctx, before, scaler, rolePausedMsg, resolutionErr, now, interval)
+			}
 			owned, err := r.ensureOwnedBinding(ctx, before, scaler, md, now)
 			if err != nil {
 				return ctrlreconcile.Result{}, err
@@ -114,6 +119,9 @@ func (r *ModelDeploymentScalerReconciler) planWithPriors(
 
 	if retirement := md.Status.Retirement; active &&
 		shouldRestoreScaleDownAbort(retirement, scaler.Status.LastScaleDown, scaler.Status.LastCommit, current) {
+		if !rolesUnpaused {
+			return r.holdForPausedRole(ctx, before, scaler, rolePausedMsg, resolutionErr, now, interval)
+		}
 		owned, err := r.ensureOwnedBinding(ctx, before, scaler, md, now)
 		if err != nil {
 			return ctrlreconcile.Result{}, err
@@ -163,7 +171,7 @@ func (r *ModelDeploymentScalerReconciler) planWithPriors(
 		)
 	}
 
-	if active && !hasActiveRetirement &&
+	if active && rolesUnpaused && !hasActiveRetirement &&
 		scaler.Status.LastScaleDown != nil &&
 		scaler.Status.LastScaleDown.Outcome == workercore.ModelDeploymentScalerScaleDownOutcomeCommitted &&
 		((md.Status.Retirement != nil &&
@@ -314,7 +322,7 @@ func (r *ModelDeploymentScalerReconciler) planWithPriors(
 	r.sampler.RecordPredictorStates(scaler, predictorByRole)
 	vector := cloneReplicaVector(constraint.Replicas)
 	var rebalanceReason string
-	vector, rebalanceReason, err = r.planRebalance(ctx, scaler, md, current, vector, algorithmByRole, now, active)
+	vector, rebalanceReason, err = r.planRebalance(ctx, scaler, md, current, vector, algorithmByRole, now, active && rolesUnpaused)
 	if err != nil {
 		return ctrlreconcile.Result{}, err
 	}
@@ -334,17 +342,21 @@ func (r *ModelDeploymentScalerReconciler) planWithPriors(
 	if rebalanceReason != "" {
 		blockingReason = rebalanceReason
 	}
-	if blockingReason != "" {
+	switch {
+	case !rolesUnpaused:
+		r.setCondition(scaler, workercore.ModelDeploymentScalerConditionTypeBlocked, meta.ConditionTrue,
+			workercore.ModelDeploymentScalerReasonRolePaused, rolePausedMsg, now)
+	case blockingReason != "":
 		r.setCondition(scaler, workercore.ModelDeploymentScalerConditionTypeBlocked, meta.ConditionTrue,
 			blockingReason, "the recommendation is held by bounds, ratios, pacing, or quota-pool rebalance", now)
-	} else {
+	default:
 		r.setCondition(
 			scaler, workercore.ModelDeploymentScalerConditionTypeBlocked, meta.ConditionFalse,
 			"Ready", "no planning constraint is blocking a replica change", now,
 		)
 	}
 
-	if active && !equalReplicaVectors(current, vector) {
+	if active && rolesUnpaused && !equalReplicaVectors(current, vector) {
 		if err := r.recheckCapacityPriors(ctx, scaler, md, resolved); err != nil {
 			r.applyCapacityPriorResolution(scaler, nil, err, now)
 			return r.stopForCapacityPrior(ctx, before, scaler, err, now)
@@ -627,7 +639,7 @@ func targetRolesEligibility(
 		if len(role.Command) > 0 {
 			return fmt.Sprintf("the target role %q runs a custom command and cannot be autoscaled", bound.Name)
 		}
-		if role.ElasticEP != nil {
+		if runtimecontrol.RoleHasElasticEP(&role) {
 			return fmt.Sprintf("the target role %q runs elastic-EP and cannot be autoscaled", bound.Name)
 		}
 	}
@@ -643,7 +655,7 @@ func targetRolesEligibility(
 			if len(role.Command) > 0 {
 				return fmt.Sprintf("the ratio role %q runs a custom command and cannot be autoscaled", name)
 			}
-			if role.ElasticEP != nil {
+			if runtimecontrol.RoleHasElasticEP(&role) {
 				return fmt.Sprintf("the ratio role %q runs elastic-EP and cannot be autoscaled", name)
 			}
 		}
@@ -1051,4 +1063,90 @@ func (r *ModelDeploymentScalerReconciler) planWholeUnitStates(
 		})
 	}
 	return algorithmByRole, predictorByRole, states, roleStatuses, metricsReady, metricsReasons, nil
+}
+
+func (r *ModelDeploymentScalerReconciler) holdForPausedRole(
+	ctx context.Context,
+	before, scaler *workercore.ModelDeploymentScaler,
+	message string,
+	resolutionErr error,
+	now time.Time,
+	interval time.Duration,
+) (ctrlreconcile.Result, error) {
+	r.setCondition(
+		scaler,
+		workercore.ModelDeploymentScalerConditionTypeBlocked,
+		meta.ConditionTrue,
+		workercore.ModelDeploymentScalerReasonRolePaused,
+		message,
+		now,
+	)
+	scaler.Status.ObservedGeneration = scaler.Generation
+	return ctrlreconcile.Result{RequeueAfter: interval}, errors.Join(
+		modelDeploymentScalerPriorAPIError(resolutionErr),
+		r.updateStatus(ctx, before, scaler),
+	)
+}
+
+func modelDeploymentScalerRolesUnpaused(
+	scaler *workercore.ModelDeploymentScaler,
+	md *workercore.ModelDeployment,
+) (bool, string) {
+	if scaler == nil || md == nil {
+		return true, ""
+	}
+	for i := range scaler.Spec.Roles {
+		if ok, reason := modelDeploymentRoleIsUnpaused(md, scaler.Spec.Roles[i].Name); !ok {
+			return false, reason
+		}
+	}
+	return true, ""
+}
+
+// modelDeploymentRoleIsUnpaused reports whether a role's desired pause flag and observed
+// runtime-control pause state allow replica scaling at the deployment's current generation.
+func modelDeploymentRoleIsUnpaused(
+	md *workercore.ModelDeployment,
+	roleName string,
+) (bool, string) {
+	if md == nil {
+		return true, ""
+	}
+	var specRole *workercore.ModelDeploymentRole
+	for i := range md.Spec.Roles {
+		if md.Spec.Roles[i].Name == roleName {
+			specRole = &md.Spec.Roles[i]
+			break
+		}
+	}
+	if specRole != nil && specRole.Pause {
+		return false, fmt.Sprintf("role %q desired pause is true", roleName)
+	}
+
+	var statusRole *workercore.ModelDeploymentRoleStatus
+	for i := range md.Status.Roles {
+		if md.Status.Roles[i].Name == roleName {
+			statusRole = &md.Status.Roles[i]
+			break
+		}
+	}
+	if statusRole != nil && statusRole.RuntimeControl != nil {
+		observed := statusRole.RuntimeControl
+		if observed.ObservedGeneration != md.Generation {
+			return false, fmt.Sprintf(
+				"role %q observed runtimeControl generation %d lags deployment generation %d",
+				roleName, observed.ObservedGeneration, md.Generation,
+			)
+		}
+		if observed.Paused {
+			return false, fmt.Sprintf("role %q observed runtimeControl paused is true", roleName)
+		}
+		if !observed.Synced &&
+			(observed.Reason == ModelDeploymentReasonRuntimeControlDraining ||
+				observed.Reason == ModelDeploymentReasonRuntimeControlDrainFailed ||
+				observed.Reason == ModelDeploymentReasonRuntimeControlAmbiguousOperation) {
+			return false, fmt.Sprintf("role %q runtimeControl pause transition is not settled (%s)", roleName, observed.Reason)
+		}
+	}
+	return true, ""
 }

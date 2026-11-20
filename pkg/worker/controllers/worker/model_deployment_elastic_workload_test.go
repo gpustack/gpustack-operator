@@ -24,6 +24,7 @@ import (
 	"gpustack.ai/gpustack/pkg/nodefeature"
 	"gpustack.ai/gpustack/pkg/systemmeta"
 	"gpustack.ai/gpustack/pkg/worker/elasticprofile"
+	"gpustack.ai/gpustack/pkg/worker/runtimecontrol"
 )
 
 func TestElasticRayLoggingEnvironment(t *testing.T) {
@@ -59,7 +60,7 @@ func TestElasticRayLoggingEnvironment(t *testing.T) {
 			md.Spec.Roles[0].Env = append(slices.Clone(tc.env), workercore.ModelDeploymentEnvVar{Name: "VLLM_LOGGING_LEVEL", Value: "DEBUG"})
 			if !tc.ordinary {
 				md.Spec.Roles[0].Replicas = 1
-				md.Spec.Roles[0].ElasticEP = &workercore.ModelDeploymentRoleElasticEP{Width: 2}
+				runtimecontrol.SetElasticWidth(&md.Spec.Roles[0], 2)
 			}
 			cli := newModelDeploymentClient(md, newRenderAcceleratorType())
 			r := &ModelDeploymentReconciler{Client: cli, APIReader: cli}
@@ -110,7 +111,7 @@ func TestElasticConvergenceCreatesChildren(t *testing.T) {
 				CPU:         &wantCPU,
 				RAM:         &wantMemory,
 			}
-			md.Spec.Roles[0].ElasticEP = &workercore.ModelDeploymentRoleElasticEP{Width: 2}
+			runtimecontrol.SetElasticWidth(&md.Spec.Roles[0], 2)
 			md.Spec.Roles[0].ExtraArgs = []string{"--tensor-parallel-size", strconv.Itoa(tp)}
 			cli := newModelDeploymentClient(md, newRenderAcceleratorType())
 			r := &ModelDeploymentReconciler{Client: cli, APIReader: cli}
@@ -168,7 +169,7 @@ func TestElasticConvergenceCreatesChildren(t *testing.T) {
 				}
 			}
 			for _, width := range []int32{4, 2} {
-				md.Spec.Roles[0].ElasticEP.Width = width
+				runtimecontrol.SetElasticWidth(&md.Spec.Roles[0], width)
 				md.Annotations = map[string]string{ModelDeploymentElasticBootWidthAnnotation: "63"}
 				_, err = r.convergeModelDeployment(context.Background(), md)
 				require.NoError(t, err)
@@ -433,7 +434,7 @@ func TestModelDeploymentRolesSharedMemory(t *testing.T) {
 			md.Spec.KVCache = nil
 			md.Spec.Roles[0].Replicas = 1
 			if !tc.ordinary {
-				md.Spec.Roles[0].ElasticEP = &workercore.ModelDeploymentRoleElasticEP{Width: 2}
+				runtimecontrol.SetElasticWidth(&md.Spec.Roles[0], 2)
 			}
 			md.Spec.Roles[0].AdditionalVolumes = tc.additional
 			if tc.engine != "" {
@@ -472,18 +473,17 @@ func TestModelDeploymentRolesSharedMemory(t *testing.T) {
 				require.Len(t, shmNames, 1, "%s must mount /dev/shm exactly once", pod.Name)
 				var backing *core.Volume
 				for j := range pod.Spec.Volumes {
-					// ONE host-backed volume is expected, and it is the operator's own: the managed
-					// role's compilation cache, which is what keeps a warm cache across replicas of
-					// a role. A take-over role gets no part of it, so a HostPath there would mean
-					// the renderer had reached past a command line it did not build. Every other
-					// volume, /dev/shm included, stays off the host.
-					if pod.Spec.Volumes[j].Name == ModelDeploymentCompileCacheVolumeName {
+					// Managed roles mount only operator-owned host paths: the compilation cache and,
+					// on accelerated worker Pods, the read-only engine-sentinel package. A take-over
+					// role gets neither, and /dev/shm stays off the host.
+					if pod.Spec.Volumes[j].Name == ModelDeploymentCompileCacheVolumeName ||
+						pod.Spec.Volumes[j].Name == modelDeploymentEngineSentinelVolumeName {
 						require.False(t, tc.takeOver,
 							"%s mounts %s although its role took over the command line", pod.Name,
-							ModelDeploymentCompileCacheVolumeName)
+							pod.Spec.Volumes[j].Name)
 						require.NotNil(t, pod.Spec.Volumes[j].HostPath,
 							"%s declares %s with no host path behind it", pod.Name,
-							ModelDeploymentCompileCacheVolumeName)
+							pod.Spec.Volumes[j].Name)
 						continue
 					}
 					require.Nil(t, pod.Spec.Volumes[j].HostPath, "%s reaches the host filesystem", pod.Name)
@@ -577,11 +577,13 @@ func TestElasticSharedMemoryEditRetainsExistingMembers(t *testing.T) {
 	assertRetained()
 
 	widthEdit := persist(func(role *workercore.ModelDeploymentRole) {
-		role.ElasticEP.Width = 3
+		runtimecontrol.SetElasticWidth(role, 3)
 	})
-	require.NotNil(t, widthEdit.ElasticEP,
+	parsedWidth, hasWidth, widthErr := runtimecontrol.ParseElasticWidth(&widthEdit)
+	require.NoError(t, widthErr)
+	require.True(t, hasWidth,
 		"the width edit must be in the API server before the pass that acts on it")
-	require.Equal(t, int32(3), widthEdit.ElasticEP.Width,
+	require.Equal(t, int32(3), parsedWidth,
 		"the width edit must be in the API server before the pass that acts on it")
 
 	_, err = f.reconciler.convergeModelDeployment(ctx, f.md)
@@ -617,7 +619,7 @@ func TestElasticUnknownBootstrapRetainsMembers(t *testing.T) {
 			md := newRenderDeployment()
 			md.Spec.KVCache = nil
 			md.Spec.Roles[0].Replicas = 1
-			md.Spec.Roles[0].ElasticEP = &workercore.ModelDeploymentRoleElasticEP{Width: 2}
+			runtimecontrol.SetElasticWidth(&md.Spec.Roles[0], 2)
 			cli := newModelDeploymentClient(md, newRenderAcceleratorType())
 			r := &ModelDeploymentReconciler{Client: cli, APIReader: cli}
 			_, err := r.convergeModelDeployment(context.Background(), md)
@@ -632,7 +634,7 @@ func TestElasticUnknownBootstrapRetainsMembers(t *testing.T) {
 					require.NoError(t, cli.Update(context.Background(), pod))
 				}
 			}
-			md.Spec.Roles[0].ElasticEP.Width = 4
+			runtimecontrol.SetElasticWidth(&md.Spec.Roles[0], 4)
 			_, err = r.convergeModelDeployment(context.Background(), md)
 			require.NoError(t, err)
 			require.NoError(t, cli.List(context.Background(), pods))
@@ -645,7 +647,7 @@ func TestElasticCreateUsesUncachedOccupancy(t *testing.T) {
 	md := newRenderDeployment()
 	md.Spec.KVCache = nil
 	md.Spec.Roles[0].Replicas = 1
-	md.Spec.Roles[0].ElasticEP = &workercore.ModelDeploymentRoleElasticEP{Width: 2}
+	runtimecontrol.SetElasticWidth(&md.Spec.Roles[0], 2)
 	fresh := newModelDeploymentClient(md, newRenderAcceleratorType())
 	r := &ModelDeploymentReconciler{Client: fresh, APIReader: fresh}
 	_, err := r.convergeModelDeployment(context.Background(), md)
@@ -675,7 +677,7 @@ func TestElasticAuxiliaryHeadRoleSettings(t *testing.T) {
 			md := newRenderDeployment()
 			md.Spec.KVCache = nil
 			md.Spec.Roles[0].Replicas = 1
-			md.Spec.Roles[0].ElasticEP = &workercore.ModelDeploymentRoleElasticEP{Width: 2}
+			runtimecontrol.SetElasticWidth(&md.Spec.Roles[0], 2)
 			md.Spec.Roles[0].Privileged = tc.privileged
 			md.Spec.Roles[0].TerminationGracePeriodSeconds = tc.grace
 			cli := newModelDeploymentClient(md, newRenderAcceleratorType())
@@ -825,9 +827,7 @@ func TestModelDeploymentElasticBootstrapFromMasterWidthBounds(t *testing.T) {
 			t.Parallel()
 
 			md := newRenderDeployment(func(md *workercore.ModelDeployment) {
-				md.Spec.Roles[0].ElasticEP = &workercore.ModelDeploymentRoleElasticEP{
-					Width: tc.width,
-				}
+				runtimecontrol.SetElasticWidth(&md.Spec.Roles[0], tc.width)
 			})
 
 			// A new master takes the width from the request; a live one takes it from the

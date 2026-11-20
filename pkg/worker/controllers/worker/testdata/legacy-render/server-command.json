@@ -20,7 +20,7 @@
         "kueue.x-k8s.io/pod-group-total-count": "1",
         "kueue.x-k8s.io/role-hash": "server",
         "modeldeployment.gpustack.ai/pod-spec-hash": "ecec5ee7d42b2e4254ab61c77a1764849da3b3a19c27cc9debf05a15effc84a4",
-        "modeldeployment.gpustack.ai/render-version": "5",
+        "modeldeployment.gpustack.ai/render-version": "6",
         "note.gpustack.ai/role": "server"
       },
       "ownerReferences": [

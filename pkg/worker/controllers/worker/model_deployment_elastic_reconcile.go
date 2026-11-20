@@ -26,6 +26,7 @@ import (
 	"gpustack.ai/gpustack/pkg/utils/json"
 	"gpustack.ai/gpustack/pkg/worker/elasticengine"
 	"gpustack.ai/gpustack/pkg/worker/elasticprofile"
+	"gpustack.ai/gpustack/pkg/worker/runtimecontrol"
 )
 
 const (
@@ -592,9 +593,20 @@ func (r *ModelDeploymentReconciler) reconcileModelDeploymentElasticResize(ctx co
 	ctx, cancel := context.WithTimeout(ctx, 3*time.Minute)
 	defer cancel()
 	role := ModelDeploymentElasticRole(md)
+	if role == nil {
+		return nil
+	}
+	desiredWidth32, ok, widthErr := runtimecontrol.ParseElasticWidth(role)
+	if widthErr != nil {
+		return widthErr
+	}
+	if !ok {
+		return nil
+	}
+	desiredWidth := int(desiredWidth32)
 	status := modelDeploymentElasticStatus{
 		DeploymentUID: md.UID, ObservedGeneration: md.Generation,
-		Desired: knownLayer(int(role.ElasticEP.Width)), Admitted: unknownLayer("not collected"),
+		Desired: knownLayer(desiredWidth), Admitted: unknownLayer("not collected"),
 		Allocated: unknownLayer("not collected"), Ray: unknownLayer("not collected"), Effective: unknownLayer("not collected"),
 	}
 	finish := func(reason string) error { status.Reason = reason; return r.persistElasticObservation(ctx, md, status) }
@@ -725,26 +737,29 @@ func (r *ModelDeploymentReconciler) reconcileModelDeploymentElasticResize(ctx co
 				status.Ray = unknownLayer(ray.RegisteredGPUUnknownReason)
 			}
 			if !proven {
-				return r.finishElasticWorldUnprovable(ctx, md, &status, finish, int(role.ElasticEP.Width))
+				return r.finishElasticWorldUnprovable(ctx, md, &status, finish, desiredWidth)
 			}
 			width = live
 		}
 		if !proven {
-			return r.finishElasticWorldUnprovable(ctx, md, &status, finish, int(role.ElasticEP.Width))
+			return r.finishElasticWorldUnprovable(ctx, md, &status, finish, desiredWidth)
 		}
 		status.StableWidth = width
-		if width == int(role.ElasticEP.Width) {
+		if width == desiredWidth {
 			return finish("native ranks and forwards agree")
 		}
-		if int(role.ElasticEP.Width) > width &&
-			(!status.Admitted.Known || status.Admitted.Value < int(role.ElasticEP.Width) ||
-				!status.Allocated.Known || status.Allocated.Value < int(role.ElasticEP.Width) ||
-				!status.Ray.Known || status.Ray.Value < int(role.ElasticEP.Width)) {
+		if blocked, blockReason := modelDeploymentElasticRuntimeControlBlocksResize(md); blocked {
+			return finish(blockReason)
+		}
+		if desiredWidth > width &&
+			(!status.Admitted.Known || status.Admitted.Value < desiredWidth ||
+				!status.Allocated.Known || status.Allocated.Value < desiredWidth ||
+				!status.Ray.Known || status.Ray.Value < desiredWidth) {
 			return finish("new members are not admitted, allocated and registered")
 		}
 		op = &elasticOperation{
 			Name: md.Name, Namespace: md.Namespace, DeploymentUID: md.UID, Generation: md.Generation,
-			Width:  elasticWidth{Old: width, Target: int(role.ElasticEP.Width)},
+			Width:  elasticWidth{Old: width, Target: desiredWidth},
 			Master: elasticCapturedIdentity{Name: master.Name, UID: master.UID}, State: elasticStateRecorded,
 		}
 		var retiring []core.Pod
@@ -853,6 +868,9 @@ func (r *ModelDeploymentReconciler) reconcileModelDeploymentElasticResize(ctx co
 	decision := decideElasticOperation(op, facts)
 	switch decision.Action {
 	case elasticActionRequestScale:
+		if blocked, blockReason := modelDeploymentElasticRuntimeControlBlocksResize(md); blocked {
+			return finish(blockReason)
+		}
 		// Fresh deployment and every member are checked again after the intent-producing observations.
 		live, err := r.elasticLiveMembers(ctx, md)
 		if err != nil || !elasticSameRuntime(pods, live) {
@@ -883,6 +901,9 @@ func (r *ModelDeploymentReconciler) reconcileModelDeploymentElasticResize(ctx co
 		status.State = op.State
 		return finish("native command recorded and sent; completion unobserved")
 	case elasticActionRetryScale:
+		if blocked, blockReason := modelDeploymentElasticRuntimeControlBlocksResize(md); blocked {
+			return finish(blockReason)
+		}
 		// The same identity re-check the first send makes: a command re-issued to a world that
 		// moved since the observations is a command about members this pass cannot vouch for.
 		live, err := r.elasticLiveMembers(ctx, md)
@@ -935,6 +956,13 @@ func (r *ModelDeploymentReconciler) reconcileModelDeploymentElasticResize(ctx co
 			return finish(err.Error())
 		}
 	case elasticActionComplete:
+		if ready, holdReason, err := r.ensureModelDeploymentElasticMasterRuntimeControlForWidth(
+			ctx, md, role, master, op.Width.Target,
+		); err != nil {
+			return err
+		} else if !ready {
+			return finish(holdReason)
+		}
 		status.StableWidth = op.Width.Target
 		status.State = elasticStateCompleted
 		if err := r.persistElasticObservation(ctx, md, status); err != nil {
@@ -1004,6 +1032,16 @@ func (r *ModelDeploymentReconciler) reconstructElasticGeneration(
 	reason, safe := r.elasticGenerationExit(ctx, md, status, client, ray, proven, op)
 	if !safe {
 		return finish(reason)
+	}
+
+	if op.SentState() {
+		if ready, holdReason, err := r.ensureModelDeploymentElasticMasterRuntimeControlForWidth(
+			ctx, md, ModelDeploymentElasticRole(md), master, observed,
+		); err != nil {
+			return err
+		} else if !ready {
+			return finish(holdReason)
+		}
 	}
 
 	// The record goes only after the proof is durable and the instance it withheld is given back, so

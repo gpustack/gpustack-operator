@@ -17,12 +17,14 @@ import (
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
 	"gpustack.ai/gpustack/pkg/kubemeta"
 	"gpustack.ai/gpustack/pkg/systemmeta"
+	"gpustack.ai/gpustack/pkg/utils/json"
+	"gpustack.ai/gpustack/pkg/worker/runtimecontrol"
 )
 
 // ModelDeploymentElasticTensorParallelSize reads the fixed TP degree from extraArgs.
 // Non-elastic roles retain their ordinary accelerator default of one.
 func ModelDeploymentElasticTensorParallelSize(role *workercore.ModelDeploymentRole) (int, error) {
-	if role == nil || role.ElasticEP == nil {
+	if !runtimecontrol.RoleHasElasticEP(role) {
 		return 1, nil
 	}
 	declared, err := ParseModelDeploymentDeclaredParallelism(workercore.ModelDeploymentEngineVLLM, role.ExtraArgs, role.Env)
@@ -78,15 +80,23 @@ func modelDeploymentElasticCollectiveMembers(
 	return members
 }
 
-func (r *ModelDeploymentReconciler) renderModelDeploymentElasticPods(ctx context.Context, md *workercore.ModelDeployment,
+func (r *ModelDeploymentReconciler) renderModelDeploymentElasticPodsWithSentinel(ctx context.Context, md *workercore.ModelDeployment,
 	connection *ModelDeploymentConnectorInput, protocols []string, weights *modelArtifactWeights, awsEFAEnabled bool,
+	engineSentinelEnabled *bool,
 ) (map[string]map[int][]*core.Pod, error) {
 	role := ModelDeploymentElasticRole(md)
 	_, err := ModelDeploymentElasticTensorParallelSize(role)
 	if err != nil {
 		return nil, err
 	}
-	boot := role.ElasticEP.Width
+	desiredWidth, ok, err := runtimecontrol.ParseElasticWidth(role)
+	if err != nil {
+		return nil, err
+	}
+	if !ok {
+		return nil, fmt.Errorf("elastic role %q declares no elastic.dataParallelWidth", role.Name)
+	}
+	boot := desiredWidth
 	pods, err := r.listModelDeploymentPods(ctx, md)
 	if err != nil {
 		return nil, err
@@ -109,7 +119,7 @@ func (r *ModelDeploymentReconciler) renderModelDeploymentElasticPods(ctx context
 	}
 	copyMD := md.DeepCopy()
 	gpu := copyMD.Spec.Roles[0].DeepCopy()
-	gpu.Replicas = role.ElasticEP.Width
+	gpu.Replicas = desiredWidth
 	for _, env := range []workercore.ModelDeploymentEnvVar{
 		{Name: "RAY_LOG_TO_STDERR", Value: "1"},
 		{Name: "RAY_LOGGER_LEVEL", Value: "info"},
@@ -120,11 +130,13 @@ func (r *ModelDeploymentReconciler) renderModelDeploymentElasticPods(ctx context
 		}
 	}
 	copyMD.Spec.Roles = []workercore.ModelDeploymentRole{*gpu}
-	desired, err := r.renderModelDeploymentRolePods(ctx, copyMD, connection, protocols, weights, awsEFAEnabled)
+	desired, err := r.renderModelDeploymentRolePodsWithSentinel(
+		ctx, copyMD, connection, protocols, weights, awsEFAEnabled, engineSentinelEnabled,
+	)
 	if err != nil {
 		return nil, err
 	}
-	gpu.ElasticEP = nil
+	gpu.RuntimeControl = nil
 	address := modelDeploymentElasticHeadName(md) + "." + md.Namespace + ".svc:6379"
 	for ordinal, members := range desired[role.Name] {
 		pod := members[0]
@@ -295,6 +307,17 @@ func (r *ModelDeploymentReconciler) deleteModelDeploymentTerminalPods(
 func (r *ModelDeploymentReconciler) convergeModelDeploymentElastic(ctx context.Context, md *workercore.ModelDeployment,
 	actual []core.Pod, desired map[string]map[int][]*core.Pod, weights *modelArtifactWeights,
 ) (bool, modelDeploymentPassObservation, error) {
+	ready, msg, err := r.resolveModelDeploymentRouterIsolation(ctx, md)
+	if err != nil {
+		return true, modelDeploymentPassObservation{}, err
+	}
+	return r.convergeModelDeploymentElasticWithIsolation(ctx, md, actual, desired, weights, ready, msg)
+}
+
+func (r *ModelDeploymentReconciler) convergeModelDeploymentElasticWithIsolation(ctx context.Context, md *workercore.ModelDeployment,
+	actual []core.Pod, desired map[string]map[int][]*core.Pod, weights *modelArtifactWeights,
+	routerIsolationReady bool, routerIsolationMessage string,
+) (bool, modelDeploymentPassObservation, error) {
 	role := ModelDeploymentElasticRole(md)
 	if role == nil {
 		return false, modelDeploymentPassObservation{}, nil
@@ -321,51 +344,93 @@ func (r *ModelDeploymentReconciler) convergeModelDeploymentElastic(ctx context.C
 	if len(desired) == 0 {
 		return true, modelDeploymentPassObservation{}, r.reconcileModelDeploymentElasticResize(ctx, md)
 	}
-	for name, ordinals := range desired {
-		taken, err := r.modelDeploymentTakenGroups(ctx, md, name, false)
-		if err != nil {
-			return true, modelDeploymentPassObservation{}, err
+	// Defer initial managed elastic Pod creation (and missing answering-master repair) until the
+	// router enforces the Envoy allowlist so an elastic master is never created permanently without
+	// GPUSTACK_ENGINE_SENTINEL_ENABLE=1.
+	routerBlocksMaster := md.Spec.Router != nil &&
+		modelDeploymentRouterRequiresAllowlistProxy(md) &&
+		!routerIsolationReady
+	deferInitialCreation := routerBlocksMaster && len(actual) == 0
+	desiredWidth, ok, err := runtimecontrol.ParseElasticWidth(role)
+	if err != nil {
+		return true, modelDeploymentPassObservation{}, err
+	}
+	if !ok {
+		return false, modelDeploymentPassObservation{}, nil
+	}
+	repairWidth := int(desiredWidth)
+	if masters := modelDeploymentElasticMasters(md, actual); len(masters) == 1 && masters[0].UID != "" {
+		if boot, valid := ModelDeploymentElasticBootstrapFromMaster(
+			string(masters[0].UID),
+			masters[0].Annotations[ModelDeploymentElasticMasterBootWidthAnnotation],
+			md,
+		); valid && boot > 0 {
+			repairWidth = int(boot)
 		}
-		gpuCount := 0
-		for i := range actual {
-			if actual[i].Status.Phase == core.PodSucceeded || actual[i].Status.Phase == core.PodFailed {
-				continue
-			}
-			if modelDeploymentPodRole(&actual[i]) == role.Name {
-				gpuCount++
+		if cm, obsErr := r.elasticObservationDocument(ctx, md); obsErr == nil && cm != nil {
+			var prior modelDeploymentElasticStatus
+			if uErr := json.Unmarshal([]byte(cm.Data["observation.json"]), &prior); uErr == nil &&
+				prior.MasterUID == masters[0].UID && prior.StableWidth > repairWidth {
+				repairWidth = prior.StableWidth
 			}
 		}
-		for ordinal, members := range ordinals {
-			if name == role.Name && gpuCount >= int(role.ElasticEP.Width) {
-				continue
+	}
+	if !deferInitialCreation {
+		for name, ordinals := range desired {
+			taken, err := r.modelDeploymentTakenGroups(ctx, md, name, false)
+			if err != nil {
+				return true, modelDeploymentPassObservation{}, err
 			}
-			present := false
+			gpuCount := 0
 			for i := range actual {
 				if actual[i].Status.Phase == core.PodSucceeded || actual[i].Status.Phase == core.PodFailed {
 					continue
 				}
-				if modelDeploymentPodRole(&actual[i]) == name && modelDeploymentOrdinalOrFloor(&actual[i]) == ordinal {
-					present = true
-					break
+				if modelDeploymentPodRole(&actual[i]) == role.Name {
+					gpuCount++
 				}
 			}
-			if present || taken.Has(modelDeploymentReplicaGroupName(md, name, ordinal)) {
-				continue
-			}
-			pod := members[0].DeepCopy()
-			if weights != nil && name == role.Name {
-				injectModelArtifactAffinity(pod, weights.Affinity)
-			}
-			if err := r.Client.Create(ctx, pod); err != nil {
-				return true, modelDeploymentPassObservation{}, err
-			}
-			if name == role.Name {
-				gpuCount++
+			resizeBlocked, _ := modelDeploymentElasticRuntimeControlBlocksResize(md)
+			for ordinal, members := range ordinals {
+				if name == role.Name && gpuCount >= int(desiredWidth) {
+					continue
+				}
+				if name == role.Name && ordinal == 0 && routerBlocksMaster {
+					continue
+				}
+				// Pause blocks expansion beyond the active collective width, while allowing initial
+				// bootstrap and repair of ordinals 0..repairWidth-1 to complete cleanly.
+				if name == role.Name && resizeBlocked && ordinal >= repairWidth {
+					continue
+				}
+				present := false
+				for i := range actual {
+					if actual[i].Status.Phase == core.PodSucceeded || actual[i].Status.Phase == core.PodFailed {
+						continue
+					}
+					if modelDeploymentPodRole(&actual[i]) == name && modelDeploymentOrdinalOrFloor(&actual[i]) == ordinal {
+						present = true
+						break
+					}
+				}
+				if present || taken.Has(modelDeploymentReplicaGroupName(md, name, ordinal)) {
+					continue
+				}
+				pod := members[0].DeepCopy()
+				if weights != nil && name == role.Name {
+					injectModelArtifactAffinity(pod, weights.Affinity)
+				}
+				if err := r.Client.Create(ctx, pod); err != nil {
+					return true, modelDeploymentPassObservation{}, err
+				}
+				if name == role.Name {
+					gpuCount++
+				}
 			}
 		}
-	}
-	if err := r.reconcileModelDeploymentElasticResize(ctx, md); err != nil {
-		return true, modelDeploymentPassObservation{}, err
+		if err := r.reconcileModelDeploymentElasticResize(ctx, md); err != nil {
+			return true, modelDeploymentPassObservation{}, err
+		}
 	}
 	if r.APIReader != nil {
 		live, err := r.elasticLiveMembers(ctx, md)
@@ -403,6 +468,11 @@ func (r *ModelDeploymentReconciler) convergeModelDeploymentElastic(ctx context.C
 		// THE COLLECTIVE'S MEMBERSHIP IS THE LIST THIS PASS ALREADY READ, and the head is
 		// excluded by construction. The status publishes the collective's own entry from it.
 		CollectiveMembers: modelDeploymentElasticCollectiveMembers(md, actual),
+	}
+	if err := r.reconcileModelDeploymentRuntimeControl(
+		ctx, md, masters, nil, routerIsolationReady, routerIsolationMessage, &observation,
+	); err != nil {
+		return true, observation, err
 	}
 	if err := r.convergeModelDeploymentEndpointEligibility(
 		ctx, md, actual, byMember, nil, observation,

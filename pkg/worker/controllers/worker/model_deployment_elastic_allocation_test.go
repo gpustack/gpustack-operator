@@ -21,6 +21,7 @@ import (
 	"gpustack.ai/gpustack/pkg/nodefeature"
 	"gpustack.ai/gpustack/pkg/utils/json"
 	"gpustack.ai/gpustack/pkg/worker/elasticprofile"
+	"gpustack.ai/gpustack/pkg/worker/runtimecontrol"
 )
 
 // The cases here are behavioral: a fake server carrying the production annotation shape,
@@ -39,7 +40,7 @@ func allocationDeployment() *workercore.ModelDeployment {
 	md := newRenderDeployment(func(md *workercore.ModelDeployment) {
 		md.Generation = allocationGeneration
 		md.Spec.KVCache = nil
-		md.Spec.Roles[0].ElasticEP = &workercore.ModelDeploymentRoleElasticEP{Width: 4}
+		runtimecontrol.SetElasticWidth(&md.Spec.Roles[0], 4)
 	})
 	md.UID = allocationDeployUID
 

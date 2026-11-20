@@ -902,9 +902,14 @@ func TestModelDeploymentRouterObjects_TheEncoderListReachesTheVLLMRouterAlone(t 
 			objects, err := renderModelDeploymentRouterObjects(context.Background(), md, nil, false)
 			require.NoError(t, err)
 
-			routerContainer := objects.Deployment.Spec.Template.Spec.Containers[0]
-			require.Equal(t, "router", routerContainer.Name,
-				"an argv router renders its program in one container")
+			var routerContainer *core.Container
+			for i := range objects.Deployment.Spec.Template.Spec.Containers {
+				if objects.Deployment.Spec.Template.Spec.Containers[i].Name == "router" {
+					routerContainer = &objects.Deployment.Spec.Template.Spec.Containers[i]
+					break
+				}
+			}
+			require.NotNil(t, routerContainer, "an argv router renders a container named router")
 
 			document := ""
 			for _, arg := range routerContainer.Args {

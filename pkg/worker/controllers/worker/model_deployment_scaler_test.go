@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -24,6 +25,7 @@ import (
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
 	"gpustack.ai/gpustack/pkg/kubeclients/kubernetes/scheme"
 	"gpustack.ai/gpustack/pkg/utils/datax"
+	"gpustack.ai/gpustack/pkg/worker/runtimecontrol"
 	"gpustack.ai/gpustack/pkg/worker/scaling/algorithm"
 )
 
@@ -684,7 +686,7 @@ func TestModelDeploymentScalerTargetRolesEligibility(t *testing.T) {
 
 	t.Run("elastic-ep role blocks planning", func(t *testing.T) {
 		md := scalerTestDeployment("target", "target-uid", map[string]int32{"server": 1})
-		md.Spec.Roles[0].ElasticEP = &workercore.ModelDeploymentRoleElasticEP{Width: 2}
+		runtimecontrol.SetElasticWidth(&md.Spec.Roles[0], 2)
 		scaler := scalerTestScaler("scaler", "scaler-uid", workercore.ModelDeploymentScalerModeActive)
 		cli := scalerTestClient(t, md, scaler)
 		r := scalerTestReconciler(cli, now)
@@ -1961,6 +1963,748 @@ func TestModelDeploymentScalerWholeUnitObservationAndPanicExpiry(t *testing.T) {
 			{Name: "prefill", Replicas: 1},
 		}, map[string]int32{"prefill": 1, "decode": 0}); ok {
 			t.Fatal("expected duplicate roles in wholeUnitMultiplier to return false")
+		}
+	})
+}
+
+func TestModelDeploymentScalerPauseGuard(t *testing.T) {
+	now := time.Date(2026, 11, 20, 8, 0, 0, 0, time.UTC)
+
+	newServingPod := func(md *workercore.ModelDeployment, role string, ordinal int32) *core.Pod {
+		controller := true
+		podName := fmt.Sprintf("%s-%s-%d", md.Name, role, ordinal)
+		pod := scalerSamplerPod(podName, role, types.UID(podName+"-uid"), int(ordinal))
+		pod.Namespace = md.Namespace
+		pod.Labels[modelDeploymentLabelKeyName] = modelDeploymentLabelValueName
+		pod.Labels[modelDeploymentLabelKeyInstance] = md.Name
+		pod.OwnerReferences = []meta.OwnerReference{{
+			APIVersion: workercore.SchemeGroupVersion.String(),
+			Kind:       "ModelDeployment",
+			Name:       md.Name,
+			UID:        md.UID,
+			Controller: &controller,
+		}}
+		return &pod
+	}
+
+	newDemandReconciler := func(cli ctrlcli.Client, clockNow *time.Time, runningReqs int) *ModelDeploymentScalerReconciler {
+		r := &ModelDeploymentScalerReconciler{
+			Client:  cli,
+			clock:   func() time.Time { return *clockNow },
+			sampler: &modelDeploymentScalerSampler{Clock: func() time.Time { return *clockNow }},
+		}
+		r.sampler.Scrape = func(_ context.Context, _ *core.Pod) ([]byte, error) {
+			return []byte(fmt.Sprintf(
+				"# TYPE vllm:num_requests_running gauge\nvllm:num_requests_running %d\n"+
+					"# TYPE vllm:num_requests_waiting gauge\nvllm:num_requests_waiting 0\n"+
+					"# TYPE vllm:kv_cache_usage_perc gauge\nvllm:kv_cache_usage_perc 0.1\n",
+				runningReqs,
+			)), nil
+		}
+		return r
+	}
+
+	assertPreservedOwnership := func(t *testing.T, cli ctrlcli.Client, scalerName, wantUID string) {
+		t.Helper()
+		storedScaler := scalerTestGetScaler(t, cli, scalerName)
+		if !slices.Contains(storedScaler.Finalizers, workercore.ModelDeploymentScalerFinalizerKey) {
+			t.Fatalf("finalizer missing: %v", storedScaler.Finalizers)
+		}
+		storedMD := scalerTestGetDeployment(t, cli)
+		binding := scalerTestBinding(t, storedMD)
+		if binding.ScalerUID != wantUID {
+			t.Fatalf("scaler-binding owner = %q, want %q", binding.ScalerUID, wantUID)
+		}
+	}
+
+	newTestDeployment := func(name, uid string, replicas map[string]int32) *workercore.ModelDeployment {
+		md := scalerTestDeployment(name, uid, replicas)
+		md.Spec.Engine = workercore.ModelDeploymentEngine{Name: workercore.ModelDeploymentEngineVLLM}
+		return md
+	}
+
+	t.Run("unpaused deployment without runtimeControl status scales unchanged", func(t *testing.T) {
+		clockNow := now
+		md := newTestDeployment("target", "target-uid", map[string]int32{"server": 1})
+		scaler := scalerTestScaler("scaler", "scaler-uid", workercore.ModelDeploymentScalerModeActive)
+		scaler.Spec.Sampling.IntervalSeconds = 5
+		cli := scalerTestClient(t, md, scaler, newServingPod(md, "server", 0))
+		r := newDemandReconciler(cli, &clockNow, 2)
+
+		reconcileScaler(t, r, scaler.Name)
+
+		storedMD := scalerTestGetDeployment(t, cli)
+		if got := storedMD.Spec.Roles[0].Replicas; got != 2 {
+			t.Fatalf("replicas = %d, want 2", got)
+		}
+		storedScaler := scalerTestGetScaler(t, cli, scaler.Name)
+		if cond := scalerCondition(storedScaler, workercore.ModelDeploymentScalerConditionTypeBlocked); cond.Status != meta.ConditionFalse {
+			t.Fatalf("Blocked = %#v, want False", cond)
+		}
+	})
+
+	t.Run("unpaused deployment with runtimeControl status converged at generation scales normally", func(t *testing.T) {
+		clockNow := now
+		md := newTestDeployment("target", "target-uid", map[string]int32{"server": 1})
+		md.Generation = 3
+		md.Spec.Roles[0].RuntimeControl = &workercore.ModelDeploymentRoleRuntimeControl{
+			Parameters: map[string]string{runtimecontrol.ParamSchedulingMaxActiveRequests: "32"},
+		}
+		md.Status.Roles = []workercore.ModelDeploymentRoleStatus{{
+			Name: "server",
+			RuntimeControl: &workercore.ModelDeploymentRoleRuntimeControlStatus{
+				ObservedGeneration: 3,
+				Synced:             true,
+				Paused:             false,
+			},
+		}}
+		scaler := scalerTestScaler("scaler", "scaler-uid", workercore.ModelDeploymentScalerModeActive)
+		scaler.Spec.Sampling.IntervalSeconds = 5
+		cli := scalerTestClient(t, md, scaler, newServingPod(md, "server", 0))
+		r := newDemandReconciler(cli, &clockNow, 2)
+
+		reconcileScaler(t, r, scaler.Name)
+
+		storedMD := scalerTestGetDeployment(t, cli)
+		if got := storedMD.Spec.Roles[0].Replicas; got != 2 {
+			t.Fatalf("replicas = %d, want 2", got)
+		}
+		storedScaler := scalerTestGetScaler(t, cli, scaler.Name)
+		if cond := scalerCondition(storedScaler, workercore.ModelDeploymentScalerConditionTypeBlocked); cond.Status != meta.ConditionFalse {
+			t.Fatalf("Blocked = %#v, want False", cond)
+		}
+	})
+
+	t.Run("desired pause blocks normal scaling and resumes after unpause", func(t *testing.T) {
+		clockNow := now
+		md := newTestDeployment("target", "target-uid", map[string]int32{"server": 1})
+		md.Generation = 3
+		md.Spec.Roles[0].Pause = true
+		scaler := scalerTestScaler("scaler", "scaler-uid", workercore.ModelDeploymentScalerModeActive)
+		scaler.Spec.Sampling.IntervalSeconds = 5
+		cli := scalerTestClient(t, md, scaler, newServingPod(md, "server", 0))
+		r := newDemandReconciler(cli, &clockNow, 2)
+
+		reconcileScaler(t, r, scaler.Name)
+
+		storedMD := scalerTestGetDeployment(t, cli)
+		if got := storedMD.Spec.Roles[0].Replicas; got != 1 {
+			t.Fatalf("replicas mutated to %d while paused, want 1", got)
+		}
+		assertPreservedOwnership(t, cli, scaler.Name, string(scaler.UID))
+		storedScaler := scalerTestGetScaler(t, cli, scaler.Name)
+		blocked := scalerCondition(storedScaler, workercore.ModelDeploymentScalerConditionTypeBlocked)
+		if blocked.Status != meta.ConditionTrue || blocked.Reason != workercore.ModelDeploymentScalerReasonRolePaused {
+			t.Fatalf("Blocked = %#v, want True/RolePaused", blocked)
+		}
+		if !strings.Contains(blocked.Message, "server") {
+			t.Fatalf("Blocked message = %q, want role server", blocked.Message)
+		}
+		if activeCond := scalerCondition(storedScaler, workercore.ModelDeploymentScalerConditionTypeActive); activeCond.Status != meta.ConditionTrue {
+			t.Fatalf("Active = %#v, want True", activeCond)
+		}
+
+		// Complete unpause at generation 4 and verify scaling resumes.
+		clockNow = clockNow.Add(10 * time.Second)
+		storedMD.Generation = 4
+		storedMD.Spec.Roles[0].Pause = false
+		if err := cli.Update(context.Background(), storedMD); err != nil {
+			t.Fatal(err)
+		}
+		storedMD = scalerTestGetDeployment(t, cli)
+		storedMD.Status.Roles = []workercore.ModelDeploymentRoleStatus{{
+			Name: "server",
+			RuntimeControl: &workercore.ModelDeploymentRoleRuntimeControlStatus{
+				ObservedGeneration: 4,
+				Synced:             true,
+				Paused:             false,
+			},
+		}}
+		if err := cli.Status().Update(context.Background(), storedMD); err != nil {
+			t.Fatal(err)
+		}
+
+		reconcileScaler(t, r, scaler.Name)
+
+		resumedMD := scalerTestGetDeployment(t, cli)
+		if got := resumedMD.Spec.Roles[0].Replicas; got != 2 {
+			t.Fatalf("resumed replicas = %d, want 2", got)
+		}
+		resumedScaler := scalerTestGetScaler(t, cli, scaler.Name)
+		if blocked := scalerCondition(resumedScaler, workercore.ModelDeploymentScalerConditionTypeBlocked); blocked.Status != meta.ConditionFalse {
+			t.Fatalf("Blocked after resume = %#v, want False", blocked)
+		}
+	})
+
+	t.Run("desired pause blocks pending cohort rollback and resumes after unpause", func(t *testing.T) {
+		clockNow := now
+		md := scalerTestDeployment("target", "target-uid", map[string]int32{"prefill": 2, "decode": 2})
+		md.Generation = 3
+		md.Spec.Roles[1].Pause = true
+		scaler := scalerTestCoupledScaler()
+		scaler.Status.Binding = &workercore.ModelDeploymentScalerBindingStatus{TargetUID: string(md.UID), TargetName: md.Name, Term: 3}
+		started := meta.NewTime(clockNow.Add(-2 * time.Minute))
+		scaler.Status.PendingCohort = &workercore.ModelDeploymentScalerPendingCohortStatus{
+			DecisionID:     "decision-1",
+			Term:           3,
+			BaselineVector: map[string]int32{"prefill": 1, "decode": 1},
+			TargetVector:   map[string]int32{"prefill": 2, "decode": 2},
+			StartedAt:      &started,
+		}
+		scaler.Status.LastCommit = &workercore.ModelDeploymentScalerCommitStatus{
+			DecisionID: "decision-1", Term: 3, Vector: map[string]int32{"prefill": 2, "decode": 2},
+		}
+		md.Annotations = map[string]string{
+			workercore.ModelDeploymentScalerBindingAnnotationKey:  scalerTestBindingJSON(scaler, 3),
+			workercore.ModelDeploymentScalerDecisionAnnotationKey: scalerTestDecisionJSON(scaler, 3, "decision-1", map[string]int32{"prefill": 2, "decode": 2}),
+		}
+		cli := scalerTestClient(t, md, scaler)
+		r := newDemandReconciler(cli, &clockNow, 0)
+
+		reconcileScaler(t, r, scaler.Name)
+
+		storedMD := scalerTestGetDeployment(t, cli)
+		if got := scalerTestVector(storedMD); !scalerTestVectorsEqual(got, map[string]int32{"prefill": 2, "decode": 2}) {
+			t.Fatalf("PendingCohort retracted while paused: got %v", got)
+		}
+		assertPreservedOwnership(t, cli, scaler.Name, string(scaler.UID))
+		storedScaler := scalerTestGetScaler(t, cli, scaler.Name)
+		if storedScaler.Status.PendingCohort == nil {
+			t.Fatalf("PendingCohort cleared while held")
+		}
+		blocked := scalerCondition(storedScaler, workercore.ModelDeploymentScalerConditionTypeBlocked)
+		if blocked.Status != meta.ConditionTrue || blocked.Reason != workercore.ModelDeploymentScalerReasonRolePaused {
+			t.Fatalf("Blocked = %#v, want True/RolePaused", blocked)
+		}
+		if !strings.Contains(blocked.Message, "decode") {
+			t.Fatalf("Blocked message = %q, want blocked role decode", blocked.Message)
+		}
+
+		// Unpause decode and verify timed-out cohort retraction executes.
+		clockNow = clockNow.Add(10 * time.Second)
+		storedMD.Generation = 4
+		storedMD.Spec.Roles[1].Pause = false
+		if err := cli.Update(context.Background(), storedMD); err != nil {
+			t.Fatal(err)
+		}
+		storedMD = scalerTestGetDeployment(t, cli)
+		storedMD.Status.Roles = []workercore.ModelDeploymentRoleStatus{{
+			Name: "decode",
+			RuntimeControl: &workercore.ModelDeploymentRoleRuntimeControlStatus{
+				ObservedGeneration: 4,
+				Synced:             true,
+				Paused:             false,
+			},
+		}}
+		if err := cli.Status().Update(context.Background(), storedMD); err != nil {
+			t.Fatal(err)
+		}
+
+		reconcileScaler(t, r, scaler.Name)
+
+		resumedMD := scalerTestGetDeployment(t, cli)
+		if got := scalerTestVector(resumedMD); !scalerTestVectorsEqual(got, map[string]int32{"prefill": 1, "decode": 1}) {
+			t.Fatalf("PendingCohort after unpause = %v, want {prefill:1, decode:1}", got)
+		}
+		resumedScaler := scalerTestGetScaler(t, cli, scaler.Name)
+		if resumedScaler.Status.PendingCohort != nil {
+			t.Fatalf("PendingCohort still present after unpause retraction: %#v", resumedScaler.Status.PendingCohort)
+		}
+		if blocked := scalerCondition(resumedScaler, workercore.ModelDeploymentScalerConditionTypeBlocked); blocked.Reason != workercore.ModelDeploymentScalerReasonResourceExhausted {
+			t.Fatalf("Blocked after retraction = %#v, want ResourceExhausted", blocked)
+		}
+	})
+
+	t.Run("desired pause blocks aborted retirement restore and resumes after unpause", func(t *testing.T) {
+		clockNow := now
+		md := scalerTestDeployment("target", "target-uid", map[string]int32{"prefill": 1, "decode": 1})
+		md.Generation = 3
+		md.Spec.Roles[0].Pause = true
+		md.Status.Retirement = &workercore.ModelDeploymentRetirementStatus{
+			RoleName: "prefill", ReplicaOrdinal: 1,
+			State:  workercore.ModelDeploymentRetirementStateAborted,
+			Reason: "DrainTimeout",
+		}
+		scaler := scalerTestCoupledScaler()
+		scaler.Spec.Behavior.ScaleDown.CooldownAfterAbortSeconds = 90
+		scaler.Status.Binding = &workercore.ModelDeploymentScalerBindingStatus{TargetUID: string(md.UID), TargetName: md.Name, Term: 4}
+		scaler.Status.LastCommit = &workercore.ModelDeploymentScalerCommitStatus{
+			DecisionID: "decision-2", Term: 4, Vector: map[string]int32{"prefill": 1, "decode": 1},
+		}
+		scaler.Status.LastScaleDown = &workercore.ModelDeploymentScalerScaleDownStatus{
+			Role: "prefill", Ordinal: 1, Outcome: workercore.ModelDeploymentScalerScaleDownOutcomeCommitted,
+			PreScaleDownVector: map[string]int32{"prefill": 2, "decode": 2},
+		}
+		md.Annotations = map[string]string{
+			workercore.ModelDeploymentScalerBindingAnnotationKey:  scalerTestBindingJSON(scaler, 4),
+			workercore.ModelDeploymentScalerDecisionAnnotationKey: scalerTestDecisionJSON(scaler, 4, "decision-2", map[string]int32{"prefill": 1, "decode": 1}),
+		}
+		cli := scalerTestClient(t, md, scaler, newServingPod(md, "prefill", 0), newServingPod(md, "decode", 0))
+		r := newDemandReconciler(cli, &clockNow, 0)
+
+		reconcileScaler(t, r, scaler.Name)
+
+		storedMD := scalerTestGetDeployment(t, cli)
+		if got := scalerTestVector(storedMD); !scalerTestVectorsEqual(got, map[string]int32{"prefill": 1, "decode": 1}) {
+			t.Fatalf("abort restore ran while paused: got %v", got)
+		}
+		assertPreservedOwnership(t, cli, scaler.Name, string(scaler.UID))
+		storedScaler := scalerTestGetScaler(t, cli, scaler.Name)
+		if storedScaler.Status.LastScaleDown == nil || storedScaler.Status.LastScaleDown.Outcome != workercore.ModelDeploymentScalerScaleDownOutcomeCommitted {
+			t.Fatalf("LastScaleDown = %#v, want Committed preserved while held", storedScaler.Status.LastScaleDown)
+		}
+		blocked := scalerCondition(storedScaler, workercore.ModelDeploymentScalerConditionTypeBlocked)
+		if blocked.Status != meta.ConditionTrue || blocked.Reason != workercore.ModelDeploymentScalerReasonRolePaused {
+			t.Fatalf("Blocked = %#v, want True/RolePaused", blocked)
+		}
+
+		// Unpause prefill and verify abort restore executes.
+		clockNow = clockNow.Add(10 * time.Second)
+		storedMD.Generation = 4
+		storedMD.Spec.Roles[0].Pause = false
+		if err := cli.Update(context.Background(), storedMD); err != nil {
+			t.Fatal(err)
+		}
+		storedMD = scalerTestGetDeployment(t, cli)
+		storedMD.Status.Roles = []workercore.ModelDeploymentRoleStatus{{
+			Name: "prefill",
+			RuntimeControl: &workercore.ModelDeploymentRoleRuntimeControlStatus{
+				ObservedGeneration: 4,
+				Synced:             true,
+				Paused:             false,
+			},
+		}}
+		if err := cli.Status().Update(context.Background(), storedMD); err != nil {
+			t.Fatal(err)
+		}
+
+		reconcileScaler(t, r, scaler.Name)
+
+		resumedMD := scalerTestGetDeployment(t, cli)
+		if got := scalerTestVector(resumedMD); !scalerTestVectorsEqual(got, map[string]int32{"prefill": 2, "decode": 2}) {
+			t.Fatalf("restored vector after unpause = %v, want {prefill:2, decode:2}", got)
+		}
+		resumedScaler := scalerTestGetScaler(t, cli, scaler.Name)
+		if resumedScaler.Status.LastScaleDown.Outcome != workercore.ModelDeploymentScalerScaleDownOutcomeAborted {
+			t.Fatalf("LastScaleDown.Outcome = %q, want Aborted", resumedScaler.Status.LastScaleDown.Outcome)
+		}
+		if blocked := scalerCondition(resumedScaler, workercore.ModelDeploymentScalerConditionTypeBlocked); blocked.Reason != workercore.ModelDeploymentScalerReasonScaleDownAborted {
+			t.Fatalf("Blocked after restore = %#v, want ScaleDownAborted", blocked)
+		}
+	})
+
+	t.Run("multi-role deployment holds all roles when one role is paused", func(t *testing.T) {
+		clockNow := now
+		md := scalerTestDeployment("target", "target-uid", map[string]int32{"prefill": 1, "decode": 1})
+		md.Generation = 2
+		md.Spec.Roles[1].Pause = true
+		md.Status.Roles = []workercore.ModelDeploymentRoleStatus{
+			{
+				Name: "prefill",
+				RuntimeControl: &workercore.ModelDeploymentRoleRuntimeControlStatus{
+					ObservedGeneration: 2,
+					Synced:             true,
+					Paused:             false,
+				},
+			},
+			{
+				Name: "decode",
+				RuntimeControl: &workercore.ModelDeploymentRoleRuntimeControlStatus{
+					ObservedGeneration: 2,
+					Synced:             true,
+					Paused:             true,
+				},
+			},
+		}
+		scaler := scalerTestCoupledScaler()
+		scaler.Spec.Sampling.IntervalSeconds = 5
+		cli := scalerTestClient(t, md, scaler, newServingPod(md, "prefill", 0), newServingPod(md, "decode", 0))
+		r := newDemandReconciler(cli, &clockNow, 3)
+
+		reconcileScaler(t, r, scaler.Name)
+
+		storedMD := scalerTestGetDeployment(t, cli)
+		if got := scalerTestVector(storedMD); !scalerTestVectorsEqual(got, map[string]int32{"prefill": 1, "decode": 1}) {
+			t.Fatalf("replicas mutated while decode paused: got %v", got)
+		}
+		storedScaler := scalerTestGetScaler(t, cli, scaler.Name)
+		blocked := scalerCondition(storedScaler, workercore.ModelDeploymentScalerConditionTypeBlocked)
+		if blocked.Status != meta.ConditionTrue || blocked.Reason != workercore.ModelDeploymentScalerReasonRolePaused {
+			t.Fatalf("Blocked = %#v, want True/RolePaused", blocked)
+		}
+		if !strings.Contains(blocked.Message, "decode") {
+			t.Fatalf("Blocked message = %q, want role decode named", blocked.Message)
+		}
+	})
+
+	t.Run("unpause in progress holds until observed state confirms unpaused at current generation", func(t *testing.T) {
+		unpauseCases := []struct {
+			name            string
+			observedGen     int64
+			observedPaused  bool
+			reason          string
+			wantMsgFragment string
+		}{
+			{
+				name:            "observed generation lags desired generation while observed paused still true",
+				observedGen:     4,
+				observedPaused:  true,
+				wantMsgFragment: "generation 4 lags deployment generation 5",
+			},
+			{
+				name:            "observed generation lags desired generation even with observed paused false",
+				observedGen:     4,
+				observedPaused:  false,
+				wantMsgFragment: "generation 4 lags deployment generation 5",
+			},
+			{
+				name:            "observed generation matches while observed paused still true after spec pause cleared",
+				observedGen:     5,
+				observedPaused:  true,
+				wantMsgFragment: "paused is true",
+			},
+			{
+				name:            "observed runtimeControl ambiguous operation blocks scaler writes fail-closed",
+				observedGen:     5,
+				observedPaused:  false,
+				reason:          ModelDeploymentReasonRuntimeControlAmbiguousOperation,
+				wantMsgFragment: "pause transition is not settled (AmbiguousOperation)",
+			},
+		}
+
+		for _, tc := range unpauseCases {
+			t.Run(tc.name, func(t *testing.T) {
+				clockNow := now
+				md := newTestDeployment("target", "target-uid", map[string]int32{"server": 1})
+				md.Generation = 5
+				md.Spec.Roles[0].Pause = false
+				md.Status.Roles = []workercore.ModelDeploymentRoleStatus{{
+					Name: "server",
+					RuntimeControl: &workercore.ModelDeploymentRoleRuntimeControlStatus{
+						ObservedGeneration: tc.observedGen,
+						Synced:             false,
+						Reason:             tc.reason,
+						Paused:             tc.observedPaused,
+					},
+				}}
+				scaler := scalerTestScaler("scaler", "scaler-uid", workercore.ModelDeploymentScalerModeActive)
+				scaler.Spec.Sampling.IntervalSeconds = 5
+				cli := scalerTestClient(t, md, scaler, newServingPod(md, "server", 0))
+				r := newDemandReconciler(cli, &clockNow, 2)
+
+				reconcileScaler(t, r, scaler.Name)
+
+				storedMD := scalerTestGetDeployment(t, cli)
+				if got := storedMD.Spec.Roles[0].Replicas; got != 1 {
+					t.Fatalf("replicas mutated to %d while unpause in progress, want 1", got)
+				}
+				storedScaler := scalerTestGetScaler(t, cli, scaler.Name)
+				blocked := scalerCondition(storedScaler, workercore.ModelDeploymentScalerConditionTypeBlocked)
+				if blocked.Status != meta.ConditionTrue || blocked.Reason != workercore.ModelDeploymentScalerReasonRolePaused {
+					t.Fatalf("Blocked = %#v, want True/RolePaused", blocked)
+				}
+				if !strings.Contains(blocked.Message, tc.wantMsgFragment) {
+					t.Fatalf("Blocked message = %q, want substring %q", blocked.Message, tc.wantMsgFragment)
+				}
+
+				// Confirm unpause completion at generation 5 and verify scaling resumes.
+				clockNow = clockNow.Add(10 * time.Second)
+				storedMD.Status.Roles[0].RuntimeControl = &workercore.ModelDeploymentRoleRuntimeControlStatus{
+					ObservedGeneration: 5,
+					Synced:             true,
+					Paused:             false,
+				}
+				if err := cli.Status().Update(context.Background(), storedMD); err != nil {
+					t.Fatal(err)
+				}
+
+				reconcileScaler(t, r, scaler.Name)
+
+				resumedMD := scalerTestGetDeployment(t, cli)
+				if got := resumedMD.Spec.Roles[0].Replicas; got != 2 {
+					t.Fatalf("replicas after unpause = %d, want 2", got)
+				}
+				resumedScaler := scalerTestGetScaler(t, cli, scaler.Name)
+				if blocked := scalerCondition(resumedScaler, workercore.ModelDeploymentScalerConditionTypeBlocked); blocked.Status != meta.ConditionFalse {
+					t.Fatalf("Blocked after unpause = %#v, want False", blocked)
+				}
+			})
+		}
+	})
+
+	t.Run("unadmitted pending cohort still rolls back when unpaused role runtimeControl is Reconciling", func(t *testing.T) {
+		clockNow := now
+		rollbackMD := scalerTestDeployment("target", "target-uid", map[string]int32{"prefill": 2, "decode": 2})
+		rollbackMD.Generation = 4
+		rollbackMD.Spec.Roles[1].Pause = false
+		rollbackMD.Spec.Roles[1].RuntimeControl = &workercore.ModelDeploymentRoleRuntimeControl{
+			Parameters: map[string]string{runtimecontrol.ParamSchedulingMaxActiveRequests: "32"},
+		}
+		rollbackMD.Status.Roles = []workercore.ModelDeploymentRoleStatus{{
+			Name: "decode",
+			RuntimeControl: &workercore.ModelDeploymentRoleRuntimeControlStatus{
+				ObservedGeneration: 4,
+				Synced:             false,
+				Reason:             ModelDeploymentReasonRuntimeControlReconciling,
+				Paused:             false,
+			},
+		}}
+		rollbackScaler := scalerTestCoupledScaler()
+		rollbackScaler.Status.Binding = &workercore.ModelDeploymentScalerBindingStatus{TargetUID: string(rollbackMD.UID), TargetName: rollbackMD.Name, Term: 3}
+		started := meta.NewTime(clockNow.Add(-2 * time.Minute))
+		rollbackScaler.Status.PendingCohort = &workercore.ModelDeploymentScalerPendingCohortStatus{
+			DecisionID:     "decision-reconciling-1",
+			Term:           3,
+			BaselineVector: map[string]int32{"prefill": 1, "decode": 1},
+			TargetVector:   map[string]int32{"prefill": 2, "decode": 2},
+			StartedAt:      &started,
+		}
+		rollbackMD.Annotations = map[string]string{
+			workercore.ModelDeploymentScalerBindingAnnotationKey:  scalerTestBindingJSON(rollbackScaler, 3),
+			workercore.ModelDeploymentScalerDecisionAnnotationKey: scalerTestDecisionJSON(rollbackScaler, 3, "decision-reconciling-1", map[string]int32{"prefill": 2, "decode": 2}),
+		}
+		rollbackCli := scalerTestClient(t, rollbackMD, rollbackScaler, newServingPod(rollbackMD, "prefill", 0), newServingPod(rollbackMD, "decode", 0))
+		reconcileScaler(t, newDemandReconciler(rollbackCli, &clockNow, 0), rollbackScaler.Name)
+		if got := scalerTestVector(scalerTestGetDeployment(t, rollbackCli)); !scalerTestVectorsEqual(got, map[string]int32{"prefill": 1, "decode": 1}) {
+			t.Fatalf("PendingCohort failed to retract while unpaused role runtimeControl was Reconciling: got %v, want {prefill:1 decode:1}", got)
+		}
+		storedScaler := scalerTestGetScaler(t, rollbackCli, rollbackScaler.Name)
+		if storedScaler.Status.PendingCohort != nil {
+			t.Fatalf("PendingCohort = %#v, want nil after timeout retraction", storedScaler.Status.PendingCohort)
+		}
+	})
+
+	t.Run("observed paused holds rollback and restore even after desired pause flips false", func(t *testing.T) {
+		// Pending cohort rollback blocked by observed Paused=true.
+		clockNow := now
+		rollbackMD := scalerTestDeployment("target", "target-uid", map[string]int32{"prefill": 2, "decode": 2})
+		rollbackMD.Generation = 4
+		rollbackMD.Spec.Roles[1].Pause = false
+		rollbackMD.Status.Roles = []workercore.ModelDeploymentRoleStatus{{
+			Name: "decode",
+			RuntimeControl: &workercore.ModelDeploymentRoleRuntimeControlStatus{
+				ObservedGeneration: 4,
+				Synced:             false,
+				Paused:             true,
+			},
+		}}
+		rollbackScaler := scalerTestCoupledScaler()
+		rollbackScaler.Status.Binding = &workercore.ModelDeploymentScalerBindingStatus{TargetUID: string(rollbackMD.UID), TargetName: rollbackMD.Name, Term: 3}
+		started := meta.NewTime(clockNow.Add(-2 * time.Minute))
+		rollbackScaler.Status.PendingCohort = &workercore.ModelDeploymentScalerPendingCohortStatus{
+			DecisionID:     "decision-obs-1",
+			Term:           3,
+			BaselineVector: map[string]int32{"prefill": 1, "decode": 1},
+			TargetVector:   map[string]int32{"prefill": 2, "decode": 2},
+			StartedAt:      &started,
+		}
+		rollbackMD.Annotations = map[string]string{
+			workercore.ModelDeploymentScalerBindingAnnotationKey:  scalerTestBindingJSON(rollbackScaler, 3),
+			workercore.ModelDeploymentScalerDecisionAnnotationKey: scalerTestDecisionJSON(rollbackScaler, 3, "decision-obs-1", map[string]int32{"prefill": 2, "decode": 2}),
+		}
+		rollbackCli := scalerTestClient(t, rollbackMD, rollbackScaler)
+		reconcileScaler(t, newDemandReconciler(rollbackCli, &clockNow, 0), rollbackScaler.Name)
+		if got := scalerTestVector(scalerTestGetDeployment(t, rollbackCli)); !scalerTestVectorsEqual(got, map[string]int32{"prefill": 2, "decode": 2}) {
+			t.Fatalf("PendingCohort retracted while observed Paused=true: got %v", got)
+		}
+		if blocked := scalerCondition(scalerTestGetScaler(t, rollbackCli, rollbackScaler.Name), workercore.ModelDeploymentScalerConditionTypeBlocked); blocked.Status != meta.ConditionTrue || blocked.Reason != workercore.ModelDeploymentScalerReasonRolePaused {
+			t.Fatalf("rollback Blocked = %#v, want True/RolePaused", blocked)
+		}
+
+		// Aborted retirement restore blocked by observed Paused=true.
+		restoreMD := scalerTestDeployment("target", "target-uid", map[string]int32{"prefill": 1, "decode": 1})
+		restoreMD.Generation = 4
+		restoreMD.Spec.Roles[0].Pause = false
+		restoreMD.Status.Roles = []workercore.ModelDeploymentRoleStatus{{
+			Name: "prefill",
+			RuntimeControl: &workercore.ModelDeploymentRoleRuntimeControlStatus{
+				ObservedGeneration: 4,
+				Synced:             false,
+				Paused:             true,
+			},
+		}}
+		restoreMD.Status.Retirement = &workercore.ModelDeploymentRetirementStatus{
+			RoleName: "prefill", ReplicaOrdinal: 1,
+			State:  workercore.ModelDeploymentRetirementStateAborted,
+			Reason: "DrainTimeout",
+		}
+		restoreScaler := scalerTestCoupledScaler()
+		restoreScaler.Status.Binding = &workercore.ModelDeploymentScalerBindingStatus{TargetUID: string(restoreMD.UID), TargetName: restoreMD.Name, Term: 4}
+		restoreScaler.Status.LastScaleDown = &workercore.ModelDeploymentScalerScaleDownStatus{
+			Role: "prefill", Ordinal: 1, Outcome: workercore.ModelDeploymentScalerScaleDownOutcomeCommitted,
+			PreScaleDownVector: map[string]int32{"prefill": 2, "decode": 2},
+		}
+		restoreMD.Annotations = map[string]string{
+			workercore.ModelDeploymentScalerBindingAnnotationKey:  scalerTestBindingJSON(restoreScaler, 4),
+			workercore.ModelDeploymentScalerDecisionAnnotationKey: scalerTestDecisionJSON(restoreScaler, 4, "decision-obs-2", map[string]int32{"prefill": 1, "decode": 1}),
+		}
+		restoreCli := scalerTestClient(t, restoreMD, restoreScaler, newServingPod(restoreMD, "prefill", 0), newServingPod(restoreMD, "decode", 0))
+		reconcileScaler(t, newDemandReconciler(restoreCli, &clockNow, 0), restoreScaler.Name)
+		if got := scalerTestVector(scalerTestGetDeployment(t, restoreCli)); !scalerTestVectorsEqual(got, map[string]int32{"prefill": 1, "decode": 1}) {
+			t.Fatalf("abort restore ran while observed Paused=true: got %v", got)
+		}
+		if blocked := scalerCondition(scalerTestGetScaler(t, restoreCli, restoreScaler.Name), workercore.ModelDeploymentScalerConditionTypeBlocked); blocked.Status != meta.ConditionTrue || blocked.Reason != workercore.ModelDeploymentScalerReasonRolePaused {
+			t.Fatalf("restore Blocked = %#v, want True/RolePaused", blocked)
+		}
+	})
+
+	t.Run("shadow mode coexistence and decision recovery across hold and resume", func(t *testing.T) {
+		clockNow := now
+		md := newTestDeployment("target", "target-uid", map[string]int32{"server": 2})
+		md.Generation = 2
+		md.Spec.Roles[0].Pause = true
+		shadowScaler := scalerTestScaler("shadow", "shadow-uid", workercore.ModelDeploymentScalerModeShadow)
+		shadowScaler.Spec.Sampling.IntervalSeconds = 5
+		cli := scalerTestClient(t, md, shadowScaler, newServingPod(md, "server", 0), newServingPod(md, "server", 1))
+		r := newDemandReconciler(cli, &clockNow, 4)
+
+		reconcileScaler(t, r, shadowScaler.Name)
+
+		storedMD := scalerTestGetDeployment(t, cli)
+		if got := storedMD.Spec.Roles[0].Replicas; got != 2 {
+			t.Fatalf("Shadow mutated replicas to %d", got)
+		}
+		if got := storedMD.Annotations[workercore.ModelDeploymentScalerBindingAnnotationKey]; got != "" {
+			t.Fatalf("Shadow wrote binding annotation %q", got)
+		}
+		storedShadow := scalerTestGetScaler(t, cli, shadowScaler.Name)
+		if activeCond := scalerCondition(storedShadow, workercore.ModelDeploymentScalerConditionTypeActive); activeCond.Status != meta.ConditionFalse || activeCond.Reason != workercore.ModelDeploymentScalerReasonShadowMode {
+			t.Fatalf("Shadow Active = %#v, want False/ShadowMode", activeCond)
+		}
+		if blocked := scalerCondition(storedShadow, workercore.ModelDeploymentScalerConditionTypeBlocked); blocked.Status != meta.ConditionTrue || blocked.Reason != workercore.ModelDeploymentScalerReasonRolePaused {
+			t.Fatalf("Shadow Blocked = %#v, want True/RolePaused", blocked)
+		}
+		if len(storedShadow.Status.Roles) != 1 || storedShadow.Status.Roles[0].RawRecommendedReplicas != 8 {
+			t.Fatalf("Shadow status roles = %#v, want raw recommendation 8", storedShadow.Status.Roles)
+		}
+
+		// Active scaler with prior committed decision restarts while role is paused.
+		activeMD := newTestDeployment("target", "target-uid", map[string]int32{"server": 2})
+		activeMD.Generation = 2
+		activeMD.Spec.Roles[0].Pause = true
+		activeScaler := scalerTestScaler("scaler", "scaler-uid", workercore.ModelDeploymentScalerModeActive)
+		activeScaler.Spec.Sampling.IntervalSeconds = 5
+		activeMD.Annotations = map[string]string{
+			workercore.ModelDeploymentScalerBindingAnnotationKey: scalerTestBindingJSON(activeScaler, 4),
+			workercore.ModelDeploymentScalerDecisionAnnotationKey: scalerTestDecisionJSONWithStatus(
+				activeScaler, 4, "recovered-1", map[string]int32{"server": 2}, map[string]int32{"server": 1}, timePointer(clockNow.Add(-time.Minute)), 2,
+			),
+		}
+		activeCli := scalerTestClient(t, activeMD, activeScaler, newServingPod(activeMD, "server", 0), newServingPod(activeMD, "server", 1))
+		restartedReconciler := newDemandReconciler(activeCli, &clockNow, 4)
+
+		reconcileScaler(t, restartedReconciler, activeScaler.Name)
+
+		heldMD := scalerTestGetDeployment(t, activeCli)
+		if got := heldMD.Spec.Roles[0].Replicas; got != 2 {
+			t.Fatalf("replicas mutated to %d while paused", got)
+		}
+		assertPreservedOwnership(t, activeCli, activeScaler.Name, string(activeScaler.UID))
+		heldScaler := scalerTestGetScaler(t, activeCli, activeScaler.Name)
+		if heldScaler.Status.LastCommit == nil || heldScaler.Status.LastCommit.DecisionID != "recovered-1" {
+			t.Fatalf("LastCommit = %#v, want recovered-1 preserved while held", heldScaler.Status.LastCommit)
+		}
+		if blocked := scalerCondition(heldScaler, workercore.ModelDeploymentScalerConditionTypeBlocked); blocked.Status != meta.ConditionTrue || blocked.Reason != workercore.ModelDeploymentScalerReasonRolePaused {
+			t.Fatalf("Blocked = %#v, want True/RolePaused", blocked)
+		}
+
+		// Unpause completes; scaler clears RolePaused and scales up cleanly.
+		clockNow = clockNow.Add(10 * time.Second)
+		heldMD.Generation = 3
+		heldMD.Spec.Roles[0].Pause = false
+		if err := activeCli.Update(context.Background(), heldMD); err != nil {
+			t.Fatal(err)
+		}
+		heldMD = scalerTestGetDeployment(t, activeCli)
+		heldMD.Status.Roles = []workercore.ModelDeploymentRoleStatus{{
+			Name: "server",
+			RuntimeControl: &workercore.ModelDeploymentRoleRuntimeControlStatus{
+				ObservedGeneration: 3,
+				Synced:             true,
+				Paused:             false,
+			},
+		}}
+		if err := activeCli.Status().Update(context.Background(), heldMD); err != nil {
+			t.Fatal(err)
+		}
+
+		reconcileScaler(t, restartedReconciler, activeScaler.Name)
+
+		resumedMD := scalerTestGetDeployment(t, activeCli)
+		if got := resumedMD.Spec.Roles[0].Replicas; got != 4 {
+			t.Fatalf("resumed replicas = %d, want 4", got)
+		}
+		resumedScaler := scalerTestGetScaler(t, activeCli, activeScaler.Name)
+		if blocked := scalerCondition(resumedScaler, workercore.ModelDeploymentScalerConditionTypeBlocked); blocked.Status != meta.ConditionFalse {
+			t.Fatalf("Blocked after resume = %#v, want False", blocked)
+		}
+		if resumedScaler.Status.LastCommit == nil || resumedScaler.Status.LastCommit.DecisionID == "recovered-1" {
+			t.Fatalf("LastCommit = %#v, want new commit after resume", resumedScaler.Status.LastCommit)
+		}
+	})
+}
+
+func TestModelDeploymentScalerElasticEPFoldedParameter(t *testing.T) {
+	t.Run("targetRolesEligibility blocks folded elastic.dataParallelWidth on target and ratio roles", func(t *testing.T) {
+		coupled := scalerTestCoupledScaler()
+		decodeElasticRoles := []workercore.ModelDeploymentRole{
+			{Name: "prefill", Kind: workercore.ModelDeploymentRoleKindPrefill, Replicas: 1},
+			{
+				Name:     "decode",
+				Kind:     workercore.ModelDeploymentRoleKindDecode,
+				Replicas: 1,
+				RuntimeControl: &workercore.ModelDeploymentRoleRuntimeControl{
+					Parameters: map[string]string{runtimecontrol.ParamElasticDataParallelWidth: "4"},
+				},
+			},
+		}
+		if reason := targetRolesEligibility(coupled.Spec, decodeElasticRoles); !strings.Contains(reason, "elastic-EP") {
+			t.Fatalf("targetRolesEligibility = %q, want elastic-EP refusal", reason)
+		}
+
+		nonElasticScaler := scalerTestScaler("scaler", "scaler-uid", workercore.ModelDeploymentScalerModeActive)
+		nonElasticRoles := []workercore.ModelDeploymentRole{{
+			Name:     "server",
+			Replicas: 1,
+			RuntimeControl: &workercore.ModelDeploymentRoleRuntimeControl{
+				Parameters: map[string]string{runtimecontrol.ParamSchedulingMaxActiveRequests: "32"},
+			},
+		}}
+		if reason := targetRolesEligibility(nonElasticScaler.Spec, nonElasticRoles); reason != "" {
+			t.Fatalf("targetRolesEligibility with non-elastic parameter = %q, want empty", reason)
+		}
+	})
+
+	t.Run("prior identity and encode validation reject folded elastic.dataParallelWidth", func(t *testing.T) {
+		md := scalerTestDeployment("target", "target-uid", map[string]int32{"server": 1})
+		md.Spec.Engine = workercore.ModelDeploymentEngine{Name: workercore.ModelDeploymentEngineVLLM}
+		cli := scalerTestClient(t, md)
+
+		for _, widthValue := range []string{"2", "invalid"} {
+			role := workercore.ModelDeploymentRole{
+				Name:     "server",
+				Replicas: 1,
+				RuntimeControl: &workercore.ModelDeploymentRoleRuntimeControl{
+					Parameters: map[string]string{runtimecontrol.ParamElasticDataParallelWidth: widthValue},
+				},
+			}
+			_, err := modelDeploymentScalerPriorDeclarationOf(context.Background(), cli, md, &role)
+			if err == nil || !strings.Contains(err.Error(), "Catalog requires a managed single-serving-Pod replica") {
+				t.Fatalf("modelDeploymentScalerPriorDeclarationOf(width=%q) err = %v, want single-serving-Pod refusal", widthValue, err)
+			}
+
+			encodeRole := workercore.ModelDeploymentRole{
+				Name:     "encode",
+				Kind:     workercore.ModelDeploymentRoleKindEncode,
+				Replicas: 1,
+				RuntimeControl: &workercore.ModelDeploymentRoleRuntimeControl{
+					Parameters: map[string]string{runtimecontrol.ParamElasticDataParallelWidth: widthValue},
+				},
+			}
+			err = modelDeploymentScalerValidateEncodeRole(context.Background(), cli, md, &encodeRole)
+			if err == nil || !strings.Contains(err.Error(), "Catalog requires a managed single-serving-Pod replica") {
+				t.Fatalf("modelDeploymentScalerValidateEncodeRole(width=%q) err = %v, want single-serving-Pod refusal", widthValue, err)
+			}
 		}
 	})
 }

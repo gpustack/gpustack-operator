@@ -385,10 +385,15 @@ func modelDeploymentGroupForwardActivatable(
 func modelDeploymentRoleJudged(
 	md *workercore.ModelDeployment, role *workercore.ModelDeploymentRole,
 ) bool {
+	if modelDeploymentRolePaused(md, role) {
+		return true
+	}
 	if !modelDeploymentGroupForwardActivatable(md, role) {
 		return false
 	}
-	if modelDeploymentProtectedRole(md, role) {
+	if modelDeploymentProtectedRole(md, role) ||
+		modelDeploymentRoleDeclaresPauseOrRuntimeControl(role) ||
+		modelDeploymentRoleHasObservedRuntimeControl(md, role.Name) {
 		return true
 	}
 	switch ModelDeploymentEffectiveRoleKind(role) {
@@ -536,13 +541,18 @@ func modelDeploymentEligibilitySelectorActive(
 	md *workercore.ModelDeployment, role *workercore.ModelDeploymentRole,
 	liveSelector map[string]string, passDecided bool,
 ) bool {
+	if modelDeploymentRolePaused(md, role) {
+		return true
+	}
 	if _, known := modelDeploymentGroupForwardEngines[md.Spec.Engine.Name]; !known {
 		return false
 	}
 	if len(role.Command) > 0 {
 		return false
 	}
-	if modelDeploymentProtectedRole(md, role) {
+	if modelDeploymentProtectedRole(md, role) ||
+		modelDeploymentRoleDeclaresPauseOrRuntimeControl(role) ||
+		modelDeploymentRoleHasObservedRuntimeControl(md, role.Name) {
 		return true
 	}
 	if !modelDeploymentGroupForwardActivatable(md, role) {

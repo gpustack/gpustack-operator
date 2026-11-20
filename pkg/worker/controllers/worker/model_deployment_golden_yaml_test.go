@@ -12,6 +12,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	app "k8s.io/api/apps/v1"
 	core "k8s.io/api/core/v1"
 	nodev1 "k8s.io/api/node/v1"
 	storagev1 "k8s.io/api/storage/v1"
@@ -36,22 +37,25 @@ import (
 	"gpustack.ai/gpustack/pkg/nodefeature"
 	"gpustack.ai/gpustack/pkg/setting"
 	"gpustack.ai/gpustack/pkg/setting/settingtest"
+	"gpustack.ai/gpustack/pkg/worker/runtimecontrol"
 	"gpustack.ai/gpustack/pkg/worker/settings"
 )
 
 type goldenYAMLScenario struct {
-	name             string
-	md               *workercore.ModelDeployment
-	objects          []ctrlcli.Object
-	awsEFAEnabled    bool
-	deliveryMode     string
-	secondPassMode   string
-	secondPassScale  map[string]int32
-	remotePolicy     string
-	sourceReady      bool
-	qualifyAllTuples bool
-	markPodsReady    bool
-	statusMutate     func(*workercore.ModelDeployment)
+	name                         string
+	md                           *workercore.ModelDeployment
+	objects                      []ctrlcli.Object
+	awsEFAEnabled                bool
+	deliveryMode                 string
+	secondPassMode               string
+	secondPassScale              map[string]int32
+	remotePolicy                 string
+	sourceReady                  bool
+	qualifyAllTuples             bool
+	markPodsReady                bool
+	convergeRouterIsolation      bool
+	includeRuntimeControlObjects bool
+	statusMutate                 func(*workercore.ModelDeployment)
 }
 
 func TestModelDeploymentGoldenYAML(t *testing.T) {
@@ -62,7 +66,7 @@ func TestModelDeploymentGoldenYAML(t *testing.T) {
 	})
 
 	scenarios := buildGoldenYAMLScenarios()
-	require.Len(t, scenarios, 37)
+	require.Len(t, scenarios, 40)
 
 	goldenDir := filepath.Join("testdata", "golden-render")
 	if *legacyRenderUpdate {
@@ -365,6 +369,36 @@ func runGoldenYAMLScenario(
 		}
 		require.NoError(t, cli.Update(ctx, &current))
 	}
+	if tc.convergeRouterIsolation {
+		var deps app.DeploymentList
+		require.NoError(t, cli.List(ctx, &deps, ctrlcli.InNamespace(md.Namespace)))
+		for i := range deps.Items {
+			dep := deps.Items[i].DeepCopy()
+			desired := ptr.Deref(dep.Spec.Replicas, 1)
+			dep.Status.ObservedGeneration = dep.Generation
+			dep.Status.Replicas = desired
+			dep.Status.UpdatedReplicas = desired
+			dep.Status.ReadyReplicas = desired
+			require.NoError(t, cli.Status().Update(ctx, dep))
+		}
+		var pods core.PodList
+		require.NoError(t, cli.List(ctx, &pods, ctrlcli.InNamespace(md.Namespace)))
+		grouped := map[string][]*core.Pod{}
+		for i := range pods.Items {
+			pod := pods.Items[i].DeepCopy()
+			group := pod.Labels[kueuepodconst.GroupNameLabel]
+			if group == "" {
+				continue
+			}
+			grouped[group] = append(grouped[group], pod)
+		}
+		for _, groupPods := range grouped {
+			wl := admittedReplicaWorkload(groupPods, true)
+			require.NoError(t, cli.Create(ctx, wl))
+		}
+		_, err = reconciler.Reconcile(ctx, req)
+		require.NoError(t, err)
+	}
 	if tc.markPodsReady {
 		var pods core.PodList
 		require.NoError(t, cli.List(ctx, &pods, ctrlcli.InNamespace(md.Namespace)))
@@ -430,6 +464,51 @@ func runGoldenYAMLScenario(
 		svcBytes, mErr := yaml.Marshal(svc)
 		require.NoError(t, mErr)
 		dstDocs = append(dstDocs, strings.TrimSpace(string(svcBytes)))
+	}
+
+	if tc.includeRuntimeControlObjects {
+		var depList app.DeploymentList
+		require.NoError(t, cli.List(ctx, &depList, ctrlcli.InNamespace(md.Namespace)))
+		sort.Slice(depList.Items, func(i, j int) bool {
+			return depList.Items[i].Name < depList.Items[j].Name
+		})
+		for i := range depList.Items {
+			dep := depList.Items[i].DeepCopy()
+			dep.TypeMeta = meta.TypeMeta{
+				APIVersion: "apps/v1",
+				Kind:       "Deployment",
+			}
+			dep.UID = ""
+			dep.ResourceVersion = ""
+			dep.CreationTimestamp = meta.Time{}
+			dep.ManagedFields = nil
+			dep.Generation = 0
+			dep.Status = app.DeploymentStatus{}
+			depBytes, mErr := yaml.Marshal(dep)
+			require.NoError(t, mErr)
+			dstDocs = append(dstDocs, strings.TrimSpace(string(depBytes)))
+		}
+
+		var cmList core.ConfigMapList
+		require.NoError(t, cli.List(ctx, &cmList, ctrlcli.InNamespace(md.Namespace)))
+		sort.Slice(cmList.Items, func(i, j int) bool {
+			return cmList.Items[i].Name < cmList.Items[j].Name
+		})
+		for i := range cmList.Items {
+			cm := cmList.Items[i].DeepCopy()
+			cm.TypeMeta = meta.TypeMeta{
+				APIVersion: "v1",
+				Kind:       "ConfigMap",
+			}
+			cm.UID = ""
+			cm.ResourceVersion = ""
+			cm.CreationTimestamp = meta.Time{}
+			cm.ManagedFields = nil
+			cm.Generation = 0
+			cmBytes, mErr := yaml.Marshal(cm)
+			require.NoError(t, mErr)
+			dstDocs = append(dstDocs, strings.TrimSpace(string(cmBytes)))
+		}
 	}
 
 	return inputYAML, strings.Join(dstDocs, "\n---\n") + "\n"
@@ -900,8 +979,10 @@ func buildGoldenYAMLScenarios() []goldenYAMLScenario {
 							Image:           vllmImage,
 							Replicas:        2,
 							ReplicaSize:     1,
-							ElasticEP: &workercore.ModelDeploymentRoleElasticEP{
-								Width: 2,
+							RuntimeControl: &workercore.ModelDeploymentRoleRuntimeControl{
+								Parameters: map[string]string{
+									runtimecontrol.ParamElasticDataParallelWidth: "2",
+								},
 							},
 							ExtraArgs: []string{
 								"--tensor-parallel-size=1",
@@ -1452,6 +1533,118 @@ func buildGoldenYAMLScenarios() []goldenYAMLScenario {
 							ReplicaSize:     1,
 							ExtraArgs:       []string{"--load-format", "modelexpress"},
 							Resources:       &workercore.ModelDeploymentRoleResources{Accelerator: ptr.To(qty1)},
+						},
+					},
+				},
+			},
+		},
+
+		// 6. Online Runtime Control (3 scenarios)
+		{
+			name:                         "runtime-control-vllm-nvidia",
+			convergeRouterIsolation:      true,
+			includeRuntimeControlObjects: true,
+			md: &workercore.ModelDeployment{
+				ObjectMeta: meta.ObjectMeta{Namespace: "default", Name: "qwen"},
+				Spec: workercore.ModelDeploymentSpec{
+					Model:  workercore.ModelDeploymentModel{Name: modelID},
+					Engine: workercore.ModelDeploymentEngine{Name: workercore.ModelDeploymentEngineVLLM, Image: vllmImage},
+					Router: &workercore.ModelDeploymentRouter{Name: workercore.ModelDeploymentRouterVLLM},
+					Roles: []workercore.ModelDeploymentRole{
+						{
+							Name:            "main",
+							Kind:            workercore.ModelDeploymentRoleKindServer,
+							AcceleratorType: "h20-8x",
+							Image:           vllmImage,
+							Replicas:        1,
+							ReplicaSize:     1,
+							Resources:       &workercore.ModelDeploymentRoleResources{Accelerator: ptr.To(qty1)},
+							ExtraArgs: []string{
+								"--max-num-seqs=64",
+								"--max-num-batched-tokens=8192",
+							},
+							RuntimeControl: &workercore.ModelDeploymentRoleRuntimeControl{
+								Parameters: map[string]string{
+									runtimecontrol.ParamSchedulingMaxActiveRequests:         "32",
+									runtimecontrol.ParamSchedulingMaxBatchedTokens:          "4096",
+									runtimecontrol.ParamSchedulingLongPrefillTokenThreshold: "2048",
+									runtimecontrol.ParamSchedulingCacheAwareWindow:          "128",
+									runtimecontrol.ParamSchedulingCacheAwareThreshold:       "0.5",
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+		{
+			name:                         "runtime-control-vllm-ascend",
+			includeRuntimeControlObjects: true,
+			md: &workercore.ModelDeployment{
+				ObjectMeta: meta.ObjectMeta{Namespace: "default", Name: "qwen"},
+				Spec: workercore.ModelDeploymentSpec{
+					Model:  workercore.ModelDeploymentModel{Name: modelID},
+					Engine: workercore.ModelDeploymentEngine{Name: workercore.ModelDeploymentEngineVLLM, Image: vllmAscendImage},
+					Roles: []workercore.ModelDeploymentRole{
+						{
+							Name:            "main",
+							Kind:            workercore.ModelDeploymentRoleKindServer,
+							AcceleratorType: "atlas-910b",
+							Image:           vllmAscendImage,
+							Replicas:        1,
+							ReplicaSize:     1,
+							Pause:           true,
+							Resources:       &workercore.ModelDeploymentRoleResources{Accelerator: ptr.To(qty1)},
+							ExtraArgs: []string{
+								"--max-num-seqs=64",
+								"--max-num-batched-tokens=8192",
+							},
+							RuntimeControl: &workercore.ModelDeploymentRoleRuntimeControl{
+								Parameters: map[string]string{
+									runtimecontrol.ParamSchedulingMaxActiveRequests: "32",
+									runtimecontrol.ParamSchedulingMaxBatchedTokens:  "4096",
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+		{
+			name:                         "runtime-control-sglang-nvidia",
+			convergeRouterIsolation:      true,
+			includeRuntimeControlObjects: true,
+			md: &workercore.ModelDeployment{
+				ObjectMeta: meta.ObjectMeta{Namespace: "default", Name: "qwen"},
+				Spec: workercore.ModelDeploymentSpec{
+					Model:  workercore.ModelDeploymentModel{Name: modelID},
+					Engine: workercore.ModelDeploymentEngine{Name: workercore.ModelDeploymentEngineSGLang, Image: sglangImage},
+					Router: &workercore.ModelDeploymentRouter{Name: workercore.ModelDeploymentRouterSGLang},
+					Roles: []workercore.ModelDeploymentRole{
+						{
+							Name:            "main",
+							Kind:            workercore.ModelDeploymentRoleKindServer,
+							AcceleratorType: "h20-8x",
+							Image:           sglangImage,
+							Replicas:        1,
+							ReplicaSize:     1,
+							Resources:       &workercore.ModelDeploymentRoleResources{Accelerator: ptr.To(qty1)},
+							ExtraArgs: []string{
+								"--max-running-requests=64",
+								"--chunked-prefill-size=8192",
+							},
+							RuntimeControl: &workercore.ModelDeploymentRoleRuntimeControl{
+								Parameters: map[string]string{
+									runtimecontrol.ParamSchedulingMaxActiveRequests:        "32",
+									runtimecontrol.ParamSchedulingMaxBatchedTokens:         "4096",
+									runtimecontrol.ParamSchedulingPrefillMaxRequests:       "16",
+									runtimecontrol.ParamSchedulingScheduleConservativeness: "0.8",
+									runtimecontrol.ParamSchedulingPrefillDecodeInterval:    "2",
+									runtimecontrol.ParamSpeculativeAcceptThresholdSingle:   "0.5",
+									runtimecontrol.ParamSpeculativeAcceptThresholdAcc:      "0.7",
+									runtimecontrol.ParamSpeculativeDraftBudgetFraction:     "0.8",
+								},
+							},
 						},
 					},
 				},

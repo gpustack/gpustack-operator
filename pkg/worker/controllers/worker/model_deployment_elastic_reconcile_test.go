@@ -29,6 +29,7 @@ import (
 	"gpustack.ai/gpustack/pkg/kubeclients/kubernetes/scheme"
 	"gpustack.ai/gpustack/pkg/utils/json"
 	"gpustack.ai/gpustack/pkg/worker/elasticengine"
+	"gpustack.ai/gpustack/pkg/worker/runtimecontrol"
 )
 
 func TestElasticRecordDeletionChecksOwnerAndVersion(t *testing.T) {
@@ -78,7 +79,7 @@ func newElasticConvergenceFixture(t *testing.T) *elasticConvergenceFixture {
 	md.Spec.KVCache = nil
 	md.Spec.Roles[0].Replicas = 1
 	md.Spec.Roles[0].Resources = &workercore.ModelDeploymentRoleResources{Accelerator: resource.NewQuantity(1, resource.DecimalSI)}
-	md.Spec.Roles[0].ElasticEP = &workercore.ModelDeploymentRoleElasticEP{Width: 2}
+	runtimecontrol.SetElasticWidth(&md.Spec.Roles[0], 2)
 	md.ResourceVersion = "1"
 	cli := ctrlfake.NewClientBuilder().WithScheme(scheme.Scheme).
 		WithObjectTracker(clitesting.NewObjectTracker(scheme.Scheme, scheme.Codecs.UniversalDecoder())).
@@ -239,7 +240,7 @@ func TestElasticConvergenceResumesSentRecordWithoutReplay(t *testing.T) {
 	for _, state := range []elasticOperationState{elasticStateCommandSent, elasticStateAwaitingWidth, elasticStateNativeDone} {
 		t.Run(string(state), func(t *testing.T) {
 			f := newElasticConvergenceFixture(t)
-			f.md.Spec.Roles[0].ElasticEP.Width = 4
+			runtimecontrol.SetElasticWidth(&f.md.Spec.Roles[0], 4)
 			f.md.Generation++
 			require.NoError(t, f.reconciler.Client.Update(context.Background(), f.md))
 			_, err := f.reconciler.convergeModelDeployment(context.Background(), f.md)
@@ -339,7 +340,7 @@ func TestElasticConvergenceRecordsOneNativeMutation(t *testing.T) {
 			f := newElasticConvergenceFixture(t)
 			f.scaleStatus.Store(code)
 			f.commitBeforeError.Store(code != 200)
-			f.md.Spec.Roles[0].ElasticEP.Width = 4
+			runtimecontrol.SetElasticWidth(&f.md.Spec.Roles[0], 4)
 			f.md.Generation++
 			require.NoError(t, f.reconciler.Client.Update(context.Background(), f.md))
 			_, err := f.reconciler.convergeModelDeployment(context.Background(), f.md)
@@ -381,7 +382,7 @@ func TestElasticConvergenceCompletesTwoFourTwo(t *testing.T) {
 			}
 			require.NotEmpty(t, masterBefore.UID)
 			f.md.Spec.Router = &workercore.ModelDeploymentRouter{Name: "llm-d-router"}
-			f.md.Spec.Roles[0].ElasticEP.Width = 4
+			runtimecontrol.SetElasticWidth(&f.md.Spec.Roles[0], 4)
 			f.md.Generation++
 			require.NoError(t, f.reconciler.Client.Update(context.Background(), f.md))
 			_, err = f.reconciler.convergeModelDeployment(context.Background(), f.md)
@@ -408,7 +409,7 @@ func TestElasticConvergenceCompletesTwoFourTwo(t *testing.T) {
 			collector := newModelDeploymentDrainCollector(f.reconciler.Client, f.reconciler.APIReader, nil, nil)
 			collector.exec = func(context.Context, *core.Pod, string, []string) (string, error) { return vllmZero(), nil }
 			f.reconciler.drainReader = collector
-			f.md.Spec.Roles[0].ElasticEP.Width = 2
+			runtimecontrol.SetElasticWidth(&f.md.Spec.Roles[0], 2)
 			f.md.Generation++
 			require.NoError(t, f.reconciler.Client.Update(context.Background(), f.md))
 			// Request then observe actor retirement. Published allocation still retains both cards.
@@ -520,7 +521,7 @@ func TestElasticConvergenceHoldsUnresolvedOperation(t *testing.T) {
 		t.Run(failure, func(t *testing.T) {
 			ctx := context.Background()
 			f := newElasticConvergenceFixture(t)
-			f.md.Spec.Roles[0].ElasticEP.Width = 4
+			runtimecontrol.SetElasticWidth(&f.md.Spec.Roles[0], 4)
 			f.md.Generation++
 			require.NoError(t, f.reconciler.Client.Update(ctx, f.md))
 			_, err := f.reconciler.convergeModelDeployment(ctx, f.md)
@@ -549,7 +550,7 @@ func TestElasticConvergenceHoldsUnresolvedOperation(t *testing.T) {
 			require.NoError(t, err)
 			if failure != "old world unknown" {
 				if failure == "generation target changed" {
-					f.md.Spec.Roles[0].ElasticEP.Width = 2
+					runtimecontrol.SetElasticWidth(&f.md.Spec.Roles[0], 2)
 				}
 				f.md.Generation++
 				require.NoError(t, f.reconciler.Client.Update(ctx, f.md))
@@ -610,7 +611,7 @@ func TestElasticGenerationDriftReconstructs(t *testing.T) {
 		t.Run(failure.name, func(t *testing.T) {
 			ctx := context.Background()
 			f := newElasticConvergenceFixture(t)
-			f.md.Spec.Roles[0].ElasticEP.Width = 4
+			runtimecontrol.SetElasticWidth(&f.md.Spec.Roles[0], 4)
 			require.NoError(t, f.reconciler.Client.Update(ctx, f.md))
 			_, err := f.reconciler.convergeModelDeployment(ctx, f.md)
 			require.NoError(t, err)
@@ -653,7 +654,7 @@ func TestElasticGenerationDriftReconstructs(t *testing.T) {
 				f.forwardsFail.Store(true)
 			}
 			if failure.desiredOld {
-				f.md.Spec.Roles[0].ElasticEP.Width = 2
+				runtimecontrol.SetElasticWidth(&f.md.Spec.Roles[0], 2)
 			}
 			f.md.Generation++
 			require.NoError(t, f.reconciler.Client.Update(ctx, f.md))
@@ -715,7 +716,7 @@ func (f *elasticConvergenceFixture) stageRecovery(t *testing.T, withExcess bool)
 	t.Helper()
 	ctx := context.Background()
 	if withExcess {
-		f.md.Spec.Roles[0].ElasticEP.Width = 4
+		runtimecontrol.SetElasticWidth(&f.md.Spec.Roles[0], 4)
 		f.md.Generation++
 		require.NoError(t, f.reconciler.Client.Update(ctx, f.md))
 		_, err := f.reconciler.convergeModelDeployment(ctx, f.md)
@@ -724,7 +725,7 @@ func (f *elasticConvergenceFixture) stageRecovery(t *testing.T, withExcess bool)
 		f.admitMembers(t)
 		// The desired width returns to the record's own old width, which is what makes the
 		// recorded upward command stale.
-		f.md.Spec.Roles[0].ElasticEP.Width = 2
+		runtimecontrol.SetElasticWidth(&f.md.Spec.Roles[0], 2)
 	} else {
 		f.startMembers(t)
 	}
@@ -916,7 +917,7 @@ func TestANodeLossRecoversFromTheLiveWorldInsteadOfHolding(t *testing.T) {
 func TestTheSameGenerationMemberDriftStillHolds(t *testing.T) {
 	ctx := context.Background()
 	f := newElasticConvergenceFixture(t)
-	f.md.Spec.Roles[0].ElasticEP.Width = 4
+	runtimecontrol.SetElasticWidth(&f.md.Spec.Roles[0], 4)
 	f.md.Generation++
 	require.NoError(t, f.reconciler.Client.Update(ctx, f.md))
 	_, err := f.reconciler.convergeModelDeployment(ctx, f.md)
@@ -1017,7 +1018,7 @@ func TestRetiringAnUnsentDriftRecordRebuildsTheCurrentScaleDown(t *testing.T) {
 	f.md.Spec.Router = &workercore.ModelDeploymentRouter{Name: "llm-d-router"}
 	f.md.Generation++
 	require.NoError(t, f.reconciler.Client.Update(ctx, f.md))
-	f.md.Spec.Roles[0].ElasticEP.Width = 4
+	runtimecontrol.SetElasticWidth(&f.md.Spec.Roles[0], 4)
 	f.md.Generation++
 	require.NoError(t, f.reconciler.Client.Update(ctx, f.md))
 	_, err := f.reconciler.convergeModelDeployment(ctx, f.md)
@@ -1039,7 +1040,7 @@ func TestRetiringAnUnsentDriftRecordRebuildsTheCurrentScaleDown(t *testing.T) {
 	}
 
 	// The desired width moves back to two while the proven native world remains four.
-	f.md.Spec.Roles[0].ElasticEP.Width = 2
+	runtimecontrol.SetElasticWidth(&f.md.Spec.Roles[0], 2)
 	f.md.Generation++
 	require.NoError(t, f.reconciler.Client.Update(ctx, f.md))
 	stale := &elasticOperation{
@@ -1169,7 +1170,7 @@ func TestAPartialNodeLossStillHolds(t *testing.T) {
 func (f *elasticConvergenceFixture) stageLostUpscaleWorld(t *testing.T) {
 	t.Helper()
 	ctx := context.Background()
-	f.md.Spec.Roles[0].ElasticEP.Width = 4
+	runtimecontrol.SetElasticWidth(&f.md.Spec.Roles[0], 4)
 	f.md.Generation++
 	require.NoError(t, f.reconciler.Client.Update(ctx, f.md))
 	_, err := f.reconciler.convergeModelDeployment(ctx, f.md)
@@ -1185,7 +1186,7 @@ func (f *elasticConvergenceFixture) stageLostUpscaleWorld(t *testing.T) {
 		Namespace: f.md.Namespace, Name: elasticOperationRecordName(f.md.UID),
 	}, record), "the staged world must hold a record before it is lost")
 	require.NoError(t, f.reconciler.Client.Delete(ctx, record))
-	f.md.Spec.Roles[0].ElasticEP.Width = 2
+	runtimecontrol.SetElasticWidth(&f.md.Spec.Roles[0], 2)
 	f.md.Generation++
 	require.NoError(t, f.reconciler.Client.Update(ctx, f.md))
 }
@@ -1637,7 +1638,7 @@ func TestAFailedMemberReadRefusesTheEndpointSync(t *testing.T) {
 func TestANativeReadFailureIsNotAWidthTheEngineHasNotReported(t *testing.T) {
 	ctx := context.Background()
 	f := newElasticConvergenceFixture(t)
-	f.md.Spec.Roles[0].ElasticEP.Width = 4
+	runtimecontrol.SetElasticWidth(&f.md.Spec.Roles[0], 4)
 	f.md.Generation++
 	require.NoError(t, f.reconciler.Client.Update(ctx, f.md))
 	_, err := f.reconciler.convergeModelDeployment(ctx, f.md)
@@ -1732,7 +1733,7 @@ func TestElasticConvergenceRetriesARefusedScaleCommand(t *testing.T) {
 			elasticCondition.GetMessage(live)
 	}
 
-	f.md.Spec.Roles[0].ElasticEP.Width = 4
+	runtimecontrol.SetElasticWidth(&f.md.Spec.Roles[0], 4)
 	f.md.Generation++
 	require.NoError(t, f.reconciler.Client.Update(ctx, f.md))
 	_, err := f.reconciler.convergeModelDeployment(ctx, f.md)
@@ -1801,7 +1802,7 @@ func TestElasticConvergenceRetriesARefusedScaleCommand(t *testing.T) {
 	// The escape is the ordinary one: a spec returned to the proven old width recovers the
 	// abandoned record. Two members beyond the old width are still admitted, so the recovery
 	// swaps the record for the release-only retirement they owe — and no refusal stands.
-	f.md.Spec.Roles[0].ElasticEP.Width = 2
+	runtimecontrol.SetElasticWidth(&f.md.Spec.Roles[0], 2)
 	f.md.Generation++
 	require.NoError(t, f.reconciler.Client.Update(ctx, f.md))
 	_, err = f.reconciler.convergeModelDeployment(ctx, f.md)
@@ -1833,7 +1834,7 @@ func TestAnUnansweredScaleCommandIsNotARefusal(t *testing.T) {
 	now := time.Now()
 	f.reconciler.clock = func() time.Time { return now }
 
-	f.md.Spec.Roles[0].ElasticEP.Width = 4
+	runtimecontrol.SetElasticWidth(&f.md.Spec.Roles[0], 4)
 	f.md.Generation++
 	require.NoError(t, f.reconciler.Client.Update(ctx, f.md))
 	_, err := f.reconciler.convergeModelDeployment(ctx, f.md)
@@ -1886,7 +1887,7 @@ func TestAnUnansweredRetryStillEscalatesTheBackoff(t *testing.T) {
 		return doc
 	}
 
-	f.md.Spec.Roles[0].ElasticEP.Width = 4
+	runtimecontrol.SetElasticWidth(&f.md.Spec.Roles[0], 4)
 	f.md.Generation++
 	require.NoError(t, f.reconciler.Client.Update(ctx, f.md))
 	_, err := f.reconciler.convergeModelDeployment(ctx, f.md)
@@ -1931,4 +1932,25 @@ func TestAnUnansweredRetryStillEscalatesTheBackoff(t *testing.T) {
 	require.Equal(t, float64(1), doc["scaleAttempts"])
 	require.Equal(t, float64(2), doc["scaleAmbiguousAttempts"])
 	require.Contains(t, doc["scaleLastError"], "status 500")
+}
+
+func TestElasticConvergenceHeldWhileRolePaused(t *testing.T) {
+	ctx := context.Background()
+	f := newElasticConvergenceFixture(t)
+	f.scaleStatus.Store(200)
+	f.admitMembers(t)
+
+	runtimecontrol.SetElasticWidth(&f.md.Spec.Roles[0], 4)
+	f.md.Spec.Roles[0].Pause = true
+	f.md.Generation++
+	require.NoError(t, f.reconciler.Client.Update(ctx, f.md))
+
+	_, err := f.reconciler.convergeModelDeployment(ctx, f.md)
+	require.NoError(t, err)
+	f.startMembers(t)
+	f.admitMembers(t)
+
+	require.NoError(t, f.reconciler.reconcileModelDeploymentElasticResize(ctx, f.md))
+	require.Zero(t, f.scaleCalls.Load(), "desired pause must serialize and hold /scale_elastic_ep")
+	require.Contains(t, f.observation(t).Reason, "paused")
 }

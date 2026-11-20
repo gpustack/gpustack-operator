@@ -42,7 +42,7 @@ func TestExternalDPRoutingSelectsQualifiedMembers(t *testing.T) {
 				}
 				objects, err := renderModelDeploymentRouterObjects(context.Background(), md, nil, false)
 				require.NoError(t, err)
-				discovery := routingDiscoverySelector(t, objects.Deployment.Spec.Template.Spec.Containers[0].Args, objects.ConfigMap)
+				discovery := routingDiscoverySelector(t, routerContainerArgs(objects.Deployment.Spec.Template.Spec.Containers), objects.ConfigMap)
 				for i := range md.Spec.Roles {
 					role := &md.Spec.Roles[i]
 					published := labels.SelectorFromSet(objects.Contract.Roles[i].Selector)
@@ -82,9 +82,21 @@ func TestExternalDPRoutingSelectsQualifiedMembers(t *testing.T) {
 	}
 }
 
+func routerContainerArgs(containers []core.Container) []string {
+	for i := range containers {
+		if containers[i].Name == "router" {
+			return containers[i].Args
+		}
+	}
+	if len(containers) > 0 {
+		return containers[0].Args
+	}
+	return nil
+}
+
 func routingDiscoverySelector(t *testing.T, args []string, config *core.ConfigMap, flags ...string) labels.Selector {
 	t.Helper()
-	if config != nil {
+	if config != nil && config.Data[modelDeploymentRouterSelectorKey] != "" {
 		selector, err := labels.Parse(config.Data[modelDeploymentRouterSelectorKey])
 		require.NoError(t, err)
 		return selector
@@ -137,7 +149,7 @@ func TestPDRoutingKeepsReplicaLeaders(t *testing.T) {
 
 				for i := range md.Spec.Roles {
 					role := &md.Spec.Roles[i]
-					discovery := routingDiscoverySelector(t, objects.Deployment.Spec.Template.Spec.Containers[0].Args, objects.ConfigMap, "--"+role.Name+"-selector")
+					discovery := routingDiscoverySelector(t, routerContainerArgs(objects.Deployment.Spec.Template.Spec.Containers), objects.ConfigMap, "--"+role.Name+"-selector")
 					service := renderModelDeploymentRoleService(md, role, nil, nil, false)
 					selectors := []labels.Selector{labels.SelectorFromSet(service.Spec.Selector), labels.SelectorFromSet(objects.Contract.Roles[i].Selector)}
 					if i == 0 {

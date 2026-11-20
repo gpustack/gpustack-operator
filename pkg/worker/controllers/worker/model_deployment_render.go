@@ -7,6 +7,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 
 	core "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -26,6 +27,7 @@ import (
 	"gpustack.ai/gpustack/pkg/utils/stringx"
 	"gpustack.ai/gpustack/pkg/worker/kuberequest"
 	"gpustack.ai/gpustack/pkg/worker/kvcache/inject"
+	"gpustack.ai/gpustack/pkg/worker/runtimecontrol"
 	"gpustack.ai/gpustack/pkg/worker/settings"
 )
 
@@ -106,7 +108,7 @@ const (
 
 	// modelDeploymentRenderVersion is the current operator Pod rendering baseline. Bump this
 	// constant whenever a change modifies the rendered Pod output of any ModelDeployment shape.
-	modelDeploymentRenderVersion = 5
+	modelDeploymentRenderVersion = 6
 	// modelDeploymentMinSupportedRenderVersion is the lowest render version that remains compatible
 	// with the current controller without replacing running Pods.
 	modelDeploymentMinSupportedRenderVersion = 1
@@ -265,6 +267,26 @@ const (
 	// engine settings that place an Engram lookup table in pinned host DRAM.
 	modelDeploymentVLLMEngramConfigArg      = "--engram-config"
 	modelDeploymentSGLangEngramHostTableEnv = "SGLANG_ENABLE_DSV41_ENGRAM_HOST_TABLE"
+
+	// modelDeploymentEngineSentinelVolumeName names the read-only hostPath volume mounting the
+	// unpacked gpustack-engine-sentinel Python package.
+	modelDeploymentEngineSentinelVolumeName = "gpustack-engine-sentinel"
+	// modelDeploymentEngineSentinelHostPath is the flat node path staged atomically by
+	// device-manager stage-libs (version locked to gpustack-operator via hatch-vcs).
+	modelDeploymentEngineSentinelHostPath = "/var/lib/gpustack/operator/lib/engine-sentinel"
+	// modelDeploymentEngineSentinelMountPath is the read-only in-container path prepended to PYTHONPATH.
+	modelDeploymentEngineSentinelMountPath = modelDeploymentEngineSentinelHostPath
+	// ModelDeploymentEngineSentinelMountPath exposes the reserved read-only mount path for validation.
+	ModelDeploymentEngineSentinelMountPath = modelDeploymentEngineSentinelMountPath
+
+	modelDeploymentEngineSentinelReadyPath = "/gpustack/v1/ready"
+	modelDeploymentEngineSentinelLivePath  = "/gpustack/v1/live"
+
+	modelDeploymentEngineSentinelEnableEnv     = "GPUSTACK_ENGINE_SENTINEL_ENABLE"
+	modelDeploymentEngineSentinelRequireAckEnv = "GPUSTACK_ENGINE_SENTINEL_REQUIRE_ACK"
+	modelDeploymentEngineSentinelEngineEnv     = "GPUSTACK_ENGINE_SENTINEL_ENGINE"
+
+	modelDeploymentSpecHashElasticEPSentinel = "enabled"
 )
 
 // modelDeploymentListenArgs are the listen and TLS flags each engine registers: the set the render
@@ -371,6 +393,11 @@ type ModelDeploymentRenderInput struct {
 	// The zero value is the leader, which is what a caller with no particular member in mind gets
 	// and is also the only member a replica of size one has.
 	Member int
+
+	// EngineSentinelEnabled gates activation of gpustack-engine-sentinel routes and probes on
+	// deployments fronted by a managed router until the router Deployment converges to the
+	// inference allowlist. Nil defaults to true.
+	EngineSentinelEnabled *bool
 }
 
 // modelDeploymentSelectorLabels is what fronts a role's replicas: the identity of the deployment and
@@ -462,6 +489,8 @@ func renderModelDeploymentPodTemplate(ctx context.Context, in ModelDeploymentRen
 	// A role that replaces the command owns the whole argv, so the operator contributes neither
 	// engine arguments nor the client environment that only its own arguments would have used.
 	takeOver := len(role.Command) > 0
+	sentinelConfigured := modelDeploymentRoleUsesEngineSentinel(md, role, in.AcceleratorType)
+	sentinelActive := sentinelConfigured && modelDeploymentEngineSentinelEnabled(in)
 
 	command := role.Command
 	// READ OFF THE PROXY'S OWN FLAG, not off the transfer leg. A transfer leg renders under every
@@ -643,6 +672,9 @@ func renderModelDeploymentPodTemplate(ctx context.Context, in ModelDeploymentRen
 			))
 	}
 	vols, mounts = modelDeploymentSharedMemoryVolumes(role, vols, mounts)
+	if sentinelConfigured {
+		vols, mounts = appendModelDeploymentEngineSentinelVolumes(vols, mounts)
+	}
 
 	probePath := modelDeploymentProbePath
 	probeScheme := scheme
@@ -654,6 +686,17 @@ func renderModelDeploymentPodTemplate(ctx context.Context, in ModelDeploymentRen
 		servingPort, probeScheme, probePath, gradable,
 		modelDeploymentProbesEncoderStage(md, role, takeOver), role.StartupTimeoutSeconds,
 	)
+	if sentinelActive {
+		if startupProbe != nil && startupProbe.HTTPGet != nil {
+			startupProbe.HTTPGet.Path = modelDeploymentEngineSentinelLivePath
+		}
+		if readinessProbe != nil && readinessProbe.HTTPGet != nil {
+			readinessProbe.HTTPGet.Path = modelDeploymentEngineSentinelReadyPath
+		}
+		if livenessProbe != nil && livenessProbe.HTTPGet != nil {
+			livenessProbe.HTTPGet.Path = modelDeploymentEngineSentinelLivePath
+		}
+	}
 	ports, err := appendModelDeploymentConnectorPorts(declaredPorts, in.Connector, takeOver)
 	if err != nil {
 		return nil, err
@@ -690,6 +733,9 @@ func renderModelDeploymentPodTemplate(ctx context.Context, in ModelDeploymentRen
 	if staging != nil {
 		staging.applyToContainer(&mainC)
 	}
+	if sentinelConfigured {
+		applyModelDeploymentEngineSentinelToContainer(&mainC, md.Spec.Engine.Name, sentinelActive)
+	}
 	if role.Resources != nil && role.Resources.Interface != nil && role.Resources.Interface.Sign() > 0 {
 		if in.InterfaceResource == "" {
 			return nil, fmt.Errorf("role %q requests interfaces without a fabric resource", role.Name)
@@ -714,9 +760,12 @@ func renderModelDeploymentPodTemplate(ctx context.Context, in ModelDeploymentRen
 	// A take-over role gets no drain, for the reason it gets no probes: the operator did not build
 	// that command line, so it cannot claim the container serves the metrics the hook reads.
 	if !takeOver {
+		sentinelMounted := sentinelConfigured && slices.ContainsFunc(mainC.VolumeMounts, func(m core.VolumeMount) bool {
+			return m.Name == modelDeploymentEngineSentinelVolumeName
+		})
 		mainC.Lifecycle = &core.Lifecycle{
 			PreStop: modelDeploymentDrainHook(md.Spec.Engine.Name, enginePort, scheme,
-				modelDeploymentTerminationGracePeriodSeconds(role)),
+				modelDeploymentTerminationGracePeriodSeconds(role), sentinelMounted),
 		}
 	}
 
@@ -1036,6 +1085,11 @@ func stampModelDeploymentPod(
 		pod.Spec.Subdomain = modelDeploymentReplicaServiceName(md, role.Name, ordinal)
 
 		stampModelDeploymentRankEnv(pod, md, role, ordinal)
+		if member != modelDeploymentLeaderMemberIndex &&
+			modelDeploymentPodHasVolume(pod, modelDeploymentEngineSentinelVolumeName) &&
+			!modelDeploymentRoleExternalDP(md, role) {
+			clearModelDeploymentMainContainerProbes(pod)
+		}
 	}
 
 	// The Kueue group metadata, which is what makes a replica's admission unit that replica alone:
@@ -2200,6 +2254,55 @@ func modelDeploymentExplicitSpecHash(
 	md *workercore.ModelDeployment, role *workercore.ModelDeploymentRole,
 	ordinal, member int, bindingHash string,
 ) string {
+	projected := modelDeploymentSpecHashWithRouter(
+		md, role, modelDeploymentProjectRouterForSpecHash(md.Spec.Router), ordinal, member, bindingHash,
+	)
+	if bindingHash != "" {
+		recordModelDeploymentBindingHash(projected, bindingHash)
+	}
+
+	return projected
+}
+
+// modelDeploymentLegacyFullRouterSpecHash computes the pre-decoupling explicit spec hash retaining
+// the full Router spec while still excluding mutable runtime fields, allowing render-version <= 6
+// Pods created before upgrade to remain current without rollout churn.
+func modelDeploymentLegacyFullRouterSpecHash(
+	md *workercore.ModelDeployment, role *workercore.ModelDeploymentRole,
+	ordinal, member int, bindingHash string,
+) string {
+	return modelDeploymentSpecHashWithRouter(md, role, md.Spec.Router, ordinal, member, bindingHash)
+}
+
+func modelDeploymentProjectRouterForSpecHash(
+	router *workercore.ModelDeploymentRouter,
+) *workercore.ModelDeploymentRouter {
+	if router == nil {
+		return nil
+	}
+
+	return &workercore.ModelDeploymentRouter{Name: router.Name}
+}
+
+func modelDeploymentRouterHasDecoupledFields(router *workercore.ModelDeploymentRouter) bool {
+	if router == nil {
+		return false
+	}
+
+	return router.Replicas != nil ||
+		router.Image != "" ||
+		len(router.ExtraArgs) > 0 ||
+		router.ImagePullPolicy != "" ||
+		len(router.ImagePullSecrets) > 0 ||
+		router.RequestTimeoutSeconds != nil ||
+		router.DisaggregationThresholdTokens != nil
+}
+
+func modelDeploymentSpecHashWithRouter(
+	md *workercore.ModelDeployment, role *workercore.ModelDeploymentRole,
+	router *workercore.ModelDeploymentRouter,
+	ordinal, member int, bindingHash string,
+) string {
 	canonicalRole := *role.DeepCopy()
 	canonicalRole.Kind = ModelDeploymentEffectiveRoleKind(&canonicalRole)
 	if canonicalRole.Image == "" {
@@ -2213,7 +2316,19 @@ func modelDeploymentExplicitSpecHash(
 		canonicalRole.ExtraArgs = nil
 	}
 	canonicalRole.Replicas = 0
-	canonicalRole.ElasticEP = nil
+	canonicalRole.Pause = false
+	if runtimecontrol.RoleHasElasticEP(&canonicalRole) {
+		canonicalRole.RuntimeControl = &workercore.ModelDeploymentRoleRuntimeControl{
+			Parameters: map[string]string{
+				runtimecontrol.ParamElasticDataParallelWidth: modelDeploymentSpecHashElasticEPSentinel,
+			},
+		}
+	} else {
+		canonicalRole.RuntimeControl = nil
+	}
+
+	canonicalModel := *md.Spec.Model.DeepCopy()
+	canonicalModel.LoRAAdapters = nil
 
 	siblings := make([]modelDeploymentRoleSiblingHashInput, 0, len(md.Spec.Roles))
 	for i := range md.Spec.Roles {
@@ -2247,8 +2362,8 @@ func modelDeploymentExplicitSpecHash(
 		Name:        md.Name,
 		Namespace:   md.Namespace,
 		Engine:      md.Spec.Engine.Name,
-		Model:       md.Spec.Model,
-		Router:      md.Spec.Router,
+		Model:       canonicalModel,
+		Router:      router,
 		KVCache:     kvCache,
 		KVTransfer:  md.Spec.KVTransfer,
 		Role:        canonicalRole,
@@ -2264,6 +2379,61 @@ func modelDeploymentExplicitSpecHash(
 	}
 
 	return stringx.SumBytesBySHA256(encoded)
+}
+
+const modelDeploymentBindingHashCacheMaxEntries = 8192
+
+var (
+	modelDeploymentBindingHashCacheMu sync.RWMutex
+	modelDeploymentBindingHashCache   = make(map[string]string)
+)
+
+func recordModelDeploymentBindingHash(projectedSpecHash, bindingHash string) {
+	modelDeploymentBindingHashCacheMu.Lock()
+	defer modelDeploymentBindingHashCacheMu.Unlock()
+
+	if existing, ok := modelDeploymentBindingHashCache[projectedSpecHash]; ok && existing == bindingHash {
+		return
+	}
+	if len(modelDeploymentBindingHashCache) >= modelDeploymentBindingHashCacheMaxEntries {
+		clear(modelDeploymentBindingHashCache)
+	}
+	modelDeploymentBindingHashCache[projectedSpecHash] = bindingHash
+}
+
+func lookupModelDeploymentBindingHash(projectedSpecHash string) (string, bool) {
+	modelDeploymentBindingHashCacheMu.RLock()
+	defer modelDeploymentBindingHashCacheMu.RUnlock()
+
+	bindingHash, ok := modelDeploymentBindingHashCache[projectedSpecHash]
+	return bindingHash, ok
+}
+
+// modelDeploymentDesiredPodLegacyRouterHash resolves the legacy full-router pod-spec-hash
+// corresponding to a stamped desired Pod without adding annotations to the Pod object.
+func modelDeploymentDesiredPodLegacyRouterHash(
+	md *workercore.ModelDeployment, role *workercore.ModelDeploymentRole,
+	ordinal, member int, desired *core.Pod,
+) string {
+	if md == nil || role == nil || desired == nil {
+		return ""
+	}
+	projectedHash := desired.Annotations[modelDeploymentPodSpecHashAnnotation]
+	if projectedHash == "" {
+		return ""
+	}
+	if !modelDeploymentRouterHasDecoupledFields(md.Spec.Router) {
+		return projectedHash
+	}
+	bindingHash, ok := lookupModelDeploymentBindingHash(projectedHash)
+	if !ok && modelDeploymentExplicitSpecHash(md, role, ordinal, member, "") == projectedHash {
+		ok = true
+	}
+	if !ok {
+		return ""
+	}
+
+	return modelDeploymentLegacyFullRouterSpecHash(md, role, ordinal, member, bindingHash)
 }
 
 // modelDeploymentEffectiveMinRenderVersion computes the minimum acceptable render version for a
@@ -2299,13 +2469,32 @@ func modelDeploymentPodRenderVersion(pod *core.Pod) int {
 // modelDeploymentPodMatchesCurrency reports whether a live Pod matches the desired explicit spec
 // hash and meets the deployment's minimum render version floor.
 func modelDeploymentPodMatchesCurrency(actual, desired *core.Pod, minRenderVersion int) bool {
+	return modelDeploymentPodMatchesCurrencyWithLegacy(actual, desired, "", minRenderVersion)
+}
+
+// modelDeploymentPodMatchesCurrencyWithLegacy reports whether a live Pod meets minRenderVersion
+// and matches either the projected pod-spec-hash on desired or, for live Pods rendered at
+// render-version <= modelDeploymentRenderVersion, the pre-upgrade legacyFullRouterHash.
+func modelDeploymentPodMatchesCurrencyWithLegacy(
+	actual, desired *core.Pod, legacyFullRouterHash string, minRenderVersion int,
+) bool {
 	if actual == nil || desired == nil {
 		return false
 	}
+	rv := modelDeploymentPodRenderVersion(actual)
+	if rv < minRenderVersion {
+		return false
+	}
+	actualHash := actual.Annotations[modelDeploymentPodSpecHashAnnotation]
+	if actualHash == desired.Annotations[modelDeploymentPodSpecHashAnnotation] {
+		return true
+	}
 
-	return actual.Annotations[modelDeploymentPodSpecHashAnnotation] ==
-		desired.Annotations[modelDeploymentPodSpecHashAnnotation] &&
-		modelDeploymentPodRenderVersion(actual) >= minRenderVersion
+	return legacyFullRouterHash != "" &&
+		actualHash != "" &&
+		rv > 0 &&
+		rv <= modelDeploymentRenderVersion &&
+		actualHash == legacyFullRouterHash
 }
 
 // modelDeploymentReplicaRenderVersionUniform reports whether all members of a replica carry the
@@ -2322,4 +2511,190 @@ func modelDeploymentReplicaRenderVersionUniform(members []*core.Pod) bool {
 	}
 
 	return true
+}
+
+// ModelDeploymentRoleSupportsEngineSentinel reports whether a role spec is eligible for default
+// gpustack-engine-sentinel injection.
+func ModelDeploymentRoleSupportsEngineSentinel(
+	md *workercore.ModelDeployment, role *workercore.ModelDeploymentRole,
+) bool {
+	return role != nil &&
+		role.AcceleratorType != "" &&
+		modelDeploymentRoleSupportsEngineSentinelCommon(md, role)
+}
+
+func modelDeploymentRoleUsesEngineSentinel(
+	md *workercore.ModelDeployment, role *workercore.ModelDeploymentRole, accType *worker.AcceleratorType,
+) bool {
+	return accType != nil && modelDeploymentRoleSupportsEngineSentinelCommon(md, role)
+}
+
+func modelDeploymentRoleSupportsEngineSentinelCommon(
+	md *workercore.ModelDeployment, role *workercore.ModelDeploymentRole,
+) bool {
+	if md == nil || role == nil || len(role.Command) > 0 {
+		return false
+	}
+	if ModelDeploymentEffectiveRoleKind(role) == workercore.ModelDeploymentRoleKindEncode {
+		return false
+	}
+	engine := md.Spec.Engine.Name
+	if engine != workercore.ModelDeploymentEngineVLLM && engine != workercore.ModelDeploymentEngineSGLang {
+		return false
+	}
+	return !modelDeploymentRoleUsesSGLangRay(engine, role)
+}
+
+func modelDeploymentRoleUsesSGLangRay(engine string, role *workercore.ModelDeploymentRole) bool {
+	if engine != workercore.ModelDeploymentEngineSGLang || role == nil {
+		return false
+	}
+	for i := 0; i < len(role.ExtraArgs); i++ {
+		arg := role.ExtraArgs[i]
+		if arg == "--" {
+			break
+		}
+		name, val, hasVal := strings.Cut(arg, "=")
+		switch {
+		case name == "--distributed-executor-backend":
+			if !hasVal && i+1 < len(role.ExtraArgs) && modelDeploymentConsumableValue(role.ExtraArgs[i+1]) {
+				i++
+				val = role.ExtraArgs[i]
+			}
+			if strings.EqualFold(strings.TrimSpace(val), "ray") {
+				return true
+			}
+		case name == "--enable-ray" || name == "--use-ray":
+			if !hasVal || (!modelDeploymentFalsyString(val) && strings.TrimSpace(val) != "") {
+				return true
+			}
+		case name == "--ray-address" || strings.HasPrefix(name, "--ray-"):
+			return true
+		}
+	}
+	if val, ok := modelDeploymentEnvValue(role.Env, "RAY_ADDRESS"); ok && strings.TrimSpace(val) != "" {
+		return true
+	}
+	if val, ok := modelDeploymentEnvValue(role.Env, "SGLANG_USE_RAY"); ok &&
+		strings.TrimSpace(val) != "" && !modelDeploymentFalsyString(val) {
+		return true
+	}
+
+	return false
+}
+
+func modelDeploymentEngineSentinelEnabled(in ModelDeploymentRenderInput) bool {
+	if in.Deployment != nil && in.Deployment.Spec.Router == nil {
+		return true
+	}
+	if in.EngineSentinelEnabled != nil {
+		return *in.EngineSentinelEnabled
+	}
+
+	return true
+}
+
+func appendModelDeploymentEngineSentinelVolumes(
+	vols []core.Volume, mounts []core.VolumeMount,
+) ([]core.Volume, []core.VolumeMount) {
+	if slices.ContainsFunc(mounts, func(m core.VolumeMount) bool {
+		return path.Clean(m.MountPath) == modelDeploymentEngineSentinelMountPath
+	}) {
+		return vols, mounts
+	}
+
+	vols = append(vols, core.Volume{
+		Name: modelDeploymentEngineSentinelVolumeName,
+		VolumeSource: core.VolumeSource{
+			HostPath: &core.HostPathVolumeSource{
+				Path: modelDeploymentEngineSentinelHostPath,
+				Type: ptr.To(core.HostPathDirectoryOrCreate),
+			},
+		},
+	})
+	mounts = append(mounts, core.VolumeMount{
+		Name:      modelDeploymentEngineSentinelVolumeName,
+		MountPath: modelDeploymentEngineSentinelMountPath,
+		ReadOnly:  true,
+	})
+
+	return vols, mounts
+}
+
+func applyModelDeploymentEngineSentinelToContainer(
+	c *core.Container, engine string, sentinelActive bool,
+) {
+	c.Env = prependModelDeploymentPythonPath(c.Env, modelDeploymentEngineSentinelMountPath)
+	c.Env = slices.DeleteFunc(c.Env, func(e core.EnvVar) bool {
+		return e.Name == modelDeploymentEngineSentinelRequireAckEnv
+	})
+	if !sentinelActive {
+		c.Env = slices.DeleteFunc(c.Env, func(e core.EnvVar) bool {
+			return e.Name == modelDeploymentEngineSentinelEnableEnv ||
+				e.Name == modelDeploymentEngineSentinelEngineEnv
+		})
+		return
+	}
+
+	c.Env = setModelDeploymentEnv(c.Env, modelDeploymentEngineSentinelEnableEnv, "1")
+	if sentinelEngine := modelDeploymentEngineSentinelEngineValue(engine); sentinelEngine != "" {
+		c.Env = setModelDeploymentEnv(c.Env, modelDeploymentEngineSentinelEngineEnv, sentinelEngine)
+	}
+}
+
+func modelDeploymentEngineSentinelEngineValue(engine string) string {
+	switch engine {
+	case workercore.ModelDeploymentEngineVLLM:
+		return "vllm"
+	case workercore.ModelDeploymentEngineSGLang:
+		return "sglang"
+	default:
+		return ""
+	}
+}
+
+func prependModelDeploymentPythonPath(env []core.EnvVar, entry string) []core.EnvVar {
+	for i := range env {
+		if env[i].Name != "PYTHONPATH" {
+			continue
+		}
+		if env[i].ValueFrom != nil {
+			return env
+		}
+		parts := strings.Split(env[i].Value, ":")
+		if slices.Contains(parts, entry) {
+			return env
+		}
+		if env[i].Value == "" {
+			env[i].Value = entry
+		} else {
+			env[i].Value = entry + ":" + env[i].Value
+		}
+
+		return env
+	}
+
+	return append(env, core.EnvVar{Name: "PYTHONPATH", Value: entry})
+}
+
+func modelDeploymentPodHasVolume(pod *core.Pod, volumeName string) bool {
+	if pod == nil {
+		return false
+	}
+	return slices.ContainsFunc(pod.Spec.Volumes, func(v core.Volume) bool {
+		return v.Name == volumeName
+	})
+}
+
+func clearModelDeploymentMainContainerProbes(pod *core.Pod) {
+	for i := range pod.Spec.Containers {
+		if pod.Spec.Containers[i].Name != modelDeploymentMainContainerName {
+			continue
+		}
+		pod.Spec.Containers[i].StartupProbe = nil
+		pod.Spec.Containers[i].ReadinessProbe = nil
+		pod.Spec.Containers[i].LivenessProbe = nil
+
+		return
+	}
 }

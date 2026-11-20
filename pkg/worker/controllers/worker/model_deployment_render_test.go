@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
 	"reflect"
 	"slices"
 	"strconv"
@@ -26,6 +28,7 @@ import (
 	"gpustack.ai/gpustack/pkg/systemmeta"
 	"gpustack.ai/gpustack/pkg/utils/stringx"
 	"gpustack.ai/gpustack/pkg/worker/kvcache/inject"
+	"gpustack.ai/gpustack/pkg/worker/runtimecontrol"
 )
 
 // newRenderDeployment builds a deployment whose single role every case then varies.
@@ -516,11 +519,38 @@ func TestRenderModelDeploymentRoutingSidecar_SGLangBootstrapPortPairsWithThePref
 // however either of them drifted, which is exactly the drift the direct-decode shape introduced --
 // the shared route stayed in place while the port underneath it changed owners.
 func TestRenderModelDeploymentPod_ProbeRouteFollowsTheServingShape(t *testing.T) {
-	t.Run("engine-only keeps the shared route", func(t *testing.T) {
+	t.Run("engine-only uses sentinel live and ready routes by default", func(t *testing.T) {
 		md := newRenderDeployment()
 
 		pod, err := renderModelDeploymentPod(context.Background(), ModelDeploymentRenderInput{
 			Deployment: md, Role: &md.Spec.Roles[0], AcceleratorType: newRenderAcceleratorType(),
+		})
+		require.NoError(t, err)
+
+		c := pod.Spec.Containers[0]
+		require.NotNil(t, c.StartupProbe)
+		require.NotNil(t, c.StartupProbe.HTTPGet)
+		assert.Equal(t, "/gpustack/v1/live", c.StartupProbe.HTTPGet.Path)
+		assert.Equal(t, modelDeploymentDefaultPort, c.StartupProbe.HTTPGet.Port.IntVal)
+
+		require.NotNil(t, c.ReadinessProbe)
+		require.NotNil(t, c.ReadinessProbe.HTTPGet)
+		assert.Equal(t, "/gpustack/v1/ready", c.ReadinessProbe.HTTPGet.Path)
+		assert.Equal(t, modelDeploymentDefaultPort, c.ReadinessProbe.HTTPGet.Port.IntVal)
+
+		require.NotNil(t, c.LivenessProbe)
+		require.NotNil(t, c.LivenessProbe.HTTPGet)
+		assert.Equal(t, "/gpustack/v1/live", c.LivenessProbe.HTTPGet.Path)
+		assert.Equal(t, modelDeploymentDefaultPort, c.LivenessProbe.HTTPGet.Port.IntVal)
+	})
+
+	t.Run("non-sentinel CPU-only role keeps the shared /health route", func(t *testing.T) {
+		md := newRenderDeployment(func(md *workercore.ModelDeployment) {
+			md.Spec.Roles[0].AcceleratorType = ""
+		})
+
+		pod, err := renderModelDeploymentPod(context.Background(), ModelDeploymentRenderInput{
+			Deployment: md, Role: &md.Spec.Roles[0],
 		})
 		require.NoError(t, err)
 
@@ -536,11 +566,11 @@ func TestRenderModelDeploymentPod_ProbeRouteFollowsTheServingShape(t *testing.T)
 		}
 	})
 
-	t.Run("direct decode reads the route the sidecar forwards to the engine", func(t *testing.T) {
+	t.Run("direct decode uses sentinel routes on the sidecar port when active and /v1/models when held", func(t *testing.T) {
 		// THE DEFECT THIS CASE GUARDS: the sidecar owns the service port and answers /health itself,
 		// in every state, so a gate on that route grades the sidecar and reports Ready for the whole
-		// model load. /v1/models is the route the sidecar forwards, and the forward fails until the
-		// engine serves -- which is what makes the gate below an engine gate again.
+		// model load. Both /gpustack/v1/{live,ready} and /v1/models are forwarded by the sidecar to
+		// the engine, failing with 503 until the engine serves.
 		md := newRenderDeployment(func(md *workercore.ModelDeployment) {
 			md.Spec.Router = &workercore.ModelDeploymentRouter{Name: workercore.ModelDeploymentRouterLLMD}
 			md.Spec.Roles[0].Kind = workercore.ModelDeploymentRoleKindDecode
@@ -549,7 +579,7 @@ func TestRenderModelDeploymentPod_ProbeRouteFollowsTheServingShape(t *testing.T)
 			}}
 		})
 
-		pod, err := renderModelDeploymentPod(context.Background(), ModelDeploymentRenderInput{
+		activePod, err := renderModelDeploymentPod(context.Background(), ModelDeploymentRenderInput{
 			Deployment: md, Role: &md.Spec.Roles[0], AcceleratorType: newRenderAcceleratorType(),
 			Connector: ModelDeploymentConnectorRender{
 				Args: []string{"--kv-transfer-config", `{}`}, KVTransfer: true, RoutingSidecar: true,
@@ -558,9 +588,30 @@ func TestRenderModelDeploymentPod_ProbeRouteFollowsTheServingShape(t *testing.T)
 		})
 		require.NoError(t, err)
 
-		c := pod.Spec.Containers[0]
+		activeCtr := activePod.Spec.Containers[0]
+		assert.Equal(t, "/gpustack/v1/live", activeCtr.StartupProbe.HTTPGet.Path)
+		assert.Equal(t, "/gpustack/v1/ready", activeCtr.ReadinessProbe.HTTPGet.Path)
+		assert.Equal(t, "/gpustack/v1/live", activeCtr.LivenessProbe.HTTPGet.Path)
 		for name, p := range map[string]*core.Probe{
-			"startup": c.StartupProbe, "readiness": c.ReadinessProbe, "liveness": c.LivenessProbe,
+			"startup": activeCtr.StartupProbe, "readiness": activeCtr.ReadinessProbe, "liveness": activeCtr.LivenessProbe,
+		} {
+			assert.Equal(t, int32(8000), p.HTTPGet.Port.IntVal,
+				"%s gate still grades the address the Service fronts -- the sidecar's port, not the engine's", name)
+		}
+
+		heldPod, err := renderModelDeploymentPod(context.Background(), ModelDeploymentRenderInput{
+			Deployment: md, Role: &md.Spec.Roles[0], AcceleratorType: newRenderAcceleratorType(),
+			Connector: ModelDeploymentConnectorRender{
+				Args: []string{"--kv-transfer-config", `{}`}, KVTransfer: true, RoutingSidecar: true,
+			},
+			NativeSidecar:         true,
+			EngineSentinelEnabled: ptr.To(false),
+		})
+		require.NoError(t, err)
+
+		heldCtr := heldPod.Spec.Containers[0]
+		for name, p := range map[string]*core.Probe{
+			"startup": heldCtr.StartupProbe, "readiness": heldCtr.ReadinessProbe, "liveness": heldCtr.LivenessProbe,
 		} {
 			require.NotNil(t, p, "%s gate", name)
 			require.NotNil(t, p.HTTPGet, "%s gate must read the engine's route, not accept a socket", name)
@@ -1495,7 +1546,7 @@ func TestModelDeploymentDirectInterfaceProtocol(t *testing.T) {
 		manufacturer    string
 		command         []string
 		serverSize      int32
-		elasticEP       *workercore.ModelDeploymentRoleElasticEP
+		elasticWidth    int32
 		awsEFAEnabled   bool
 		omitDecodeIface bool
 		includeEncode   bool
@@ -1511,7 +1562,7 @@ func TestModelDeploymentDirectInterfaceProtocol(t *testing.T) {
 		{name: "user command owns transfer", engine: workercore.ModelDeploymentEngineVLLM, manufacturer: nodefeature.ManufacturerNVIDIA, command: []string{"custom"}},
 		{name: "multi-member Server role selects RDMA", engine: workercore.ModelDeploymentEngineVLLM, manufacturer: nodefeature.ManufacturerNVIDIA, serverSize: 2, want: "rdma"},
 		{name: "multi-member Server role selects EFA when enabled", engine: workercore.ModelDeploymentEngineVLLM, manufacturer: nodefeature.ManufacturerNVIDIA, serverSize: 2, awsEFAEnabled: true, want: "efa"},
-		{name: "elastic EP Server role selects RDMA", engine: workercore.ModelDeploymentEngineVLLM, manufacturer: nodefeature.ManufacturerNVIDIA, serverSize: 1, elasticEP: &workercore.ModelDeploymentRoleElasticEP{Width: 2}, want: "rdma"},
+		{name: "elastic EP Server role selects RDMA", engine: workercore.ModelDeploymentEngineVLLM, manufacturer: nodefeature.ManufacturerNVIDIA, serverSize: 1, elasticWidth: 2, want: "rdma"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -1521,7 +1572,9 @@ func TestModelDeploymentDirectInterfaceProtocol(t *testing.T) {
 				if tc.serverSize > 0 {
 					md.Spec.Roles[0].Kind = workercore.ModelDeploymentRoleKindServer
 					md.Spec.Roles[0].ReplicaSize = tc.serverSize
-					md.Spec.Roles[0].ElasticEP = tc.elasticEP
+					if tc.elasticWidth > 0 {
+						runtimecontrol.SetElasticWidth(&md.Spec.Roles[0], tc.elasticWidth)
+					}
 					md.Spec.Roles[0].Command = tc.command
 					return
 				}
@@ -1714,12 +1767,12 @@ func TestModelDeploymentDirectInterfaceProtocol_AscendA5(t *testing.T) {
 			want:          "rdma",
 		},
 		{
-			name: "A5 vLLM elasticEp Server without KVCache grants rdma",
+			name: "A5 vLLM elastic-EP Server without KVCache grants rdma",
 			md: newRenderDeployment(func(md *workercore.ModelDeployment) {
 				md.Spec.KVCache = nil
 				md.Spec.Roles[0].Kind = workercore.ModelDeploymentRoleKindServer
 				md.Spec.Roles[0].ReplicaSize = 1
-				md.Spec.Roles[0].ElasticEP = &workercore.ModelDeploymentRoleElasticEP{Width: 2}
+				runtimecontrol.SetElasticWidth(&md.Spec.Roles[0], 2)
 				md.Spec.Roles[0].Resources = &workercore.ModelDeploymentRoleResources{Interface: ptr.To(qty1)}
 			}),
 			family:        nodefeature.AcceleratorFamilyAscend950,
@@ -1909,11 +1962,9 @@ func TestRenderModelDeploymentPod_ClientConfigMount(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	// Three volumes: the client configuration projection below, the connector's own, and the
-	// operator's compilation cache. The cache is asserted by name rather than by position because
-	// it is not what this test is about, and a positional assertion would report every future
-	// managed volume as a failure of the client configuration.
-	require.Len(t, pod.Spec.Volumes, 3)
+	// Four volumes: the client configuration projection below, the compilation cache, shared
+	// memory, and the default read-only gpustack-engine-sentinel package.
+	require.Len(t, pod.Spec.Volumes, 4)
 	require.NotNil(t, pod.Spec.Volumes[0].DownwardAPI,
 		"the file is a projection of an annotation, not a ConfigMap: there is no second object")
 	require.Len(t, pod.Spec.Volumes[0].DownwardAPI.Items, 1)
@@ -1927,9 +1978,12 @@ func TestRenderModelDeploymentPod_ClientConfigMount(t *testing.T) {
 	assert.NotNil(t, findVolume(pod, ModelDeploymentCompileCacheVolumeName),
 		"a managed replica carries the compilation cache")
 	assert.NotNil(t, findMount(&pod.Spec.Containers[0], ModelDeploymentCompileCacheVolumeName))
+	assert.NotNil(t, findVolume(pod, modelDeploymentEngineSentinelVolumeName),
+		"a managed accelerated replica carries gpustack-engine-sentinel")
+	assert.NotNil(t, findMount(&pod.Spec.Containers[0], modelDeploymentEngineSentinelVolumeName))
 
 	mounts := pod.Spec.Containers[0].VolumeMounts
-	require.Len(t, mounts, 3)
+	require.Len(t, mounts, 4)
 	assert.Equal(t, inject.ConfigMountPath, mounts[0].MountPath)
 	assert.True(t, mounts[0].ReadOnly)
 }
@@ -2543,13 +2597,17 @@ func TestModelDeploymentPodSpecHash_IgnoresImplicitOperatorDefaultsAndSettings(t
 }
 
 // TestModelDeploymentPodSpecHash_CoversEverySpecField uses reflection to ensure every field on
-// ModelDeploymentSpec is explicitly accounted for in modelDeploymentExplicitSpecHash.
+// ModelDeploymentSpec, ModelDeploymentModel, ModelDeploymentRouter, ModelDeploymentRole, and
+// ModelDeploymentRoleRuntimeControl is explicitly accounted for in modelDeploymentExplicitSpecHash.
 func TestModelDeploymentPodSpecHash_CoversEverySpecField(t *testing.T) {
-	specType := reflect.TypeFor[workercore.ModelDeploymentSpec]()
-	got := make([]string, 0, specType.NumField())
-	for i := 0; i < specType.NumField(); i++ {
-		got = append(got, specType.Field(i).Name)
+	fieldNames := func(typ reflect.Type) []string {
+		got := make([]string, 0, typ.NumField())
+		for i := 0; i < typ.NumField(); i++ {
+			got = append(got, typ.Field(i).Name)
+		}
+		return got
 	}
+
 	assert.Equal(t, []string{
 		"Model",
 		"Engine",
@@ -2557,7 +2615,57 @@ func TestModelDeploymentPodSpecHash_CoversEverySpecField(t *testing.T) {
 		"Roles",
 		"Router",
 		"KVTransfer",
-	}, got, "new ModelDeploymentSpec fields must be wired into modelDeploymentExplicitSpecHash")
+	}, fieldNames(reflect.TypeFor[workercore.ModelDeploymentSpec]()),
+		"new ModelDeploymentSpec fields must be wired into modelDeploymentExplicitSpecHash")
+
+	assert.Equal(t, []string{
+		"Name",
+		"ArtifactRef",
+		"LoRAAdapters",
+	}, fieldNames(reflect.TypeFor[workercore.ModelDeploymentModel]()),
+		"new ModelDeploymentModel fields must be wired into modelDeploymentExplicitSpecHash")
+
+	assert.Equal(t, []string{
+		"Name",
+		"Replicas",
+		"Image",
+		"ExtraArgs",
+		"ImagePullPolicy",
+		"ImagePullSecrets",
+		"RequestTimeoutSeconds",
+		"DisaggregationThresholdTokens",
+	}, fieldNames(reflect.TypeFor[workercore.ModelDeploymentRouter]()),
+		"new ModelDeploymentRouter fields must be classified as projected or router-only in modelDeploymentExplicitSpecHash")
+
+	assert.Equal(t, []string{
+		"Name",
+		"Kind",
+		"Replicas",
+		"ReplicaSize",
+		"AcceleratorType",
+		"Resources",
+		"Image",
+		"ImagePullPolicy",
+		"ImagePullSecrets",
+		"Privileged",
+		"Ports",
+		"AdditionalVolumes",
+		"ShmSize",
+		"Command",
+		"ExtraArgs",
+		"Env",
+		"Topology",
+		"TerminationGracePeriodSeconds",
+		"StartupTimeoutSeconds",
+		"Pause",
+		"RuntimeControl",
+	}, fieldNames(reflect.TypeFor[workercore.ModelDeploymentRole]()),
+		"new ModelDeploymentRole fields must be wired into modelDeploymentExplicitSpecHash")
+
+	assert.Equal(t, []string{
+		"Parameters",
+	}, fieldNames(reflect.TypeFor[workercore.ModelDeploymentRoleRuntimeControl]()),
+		"new ModelDeploymentRoleRuntimeControl fields must be wired into modelDeploymentExplicitSpecHash")
 }
 
 // TestModelDeploymentPodSpecHash_MovesWithEveryRenderedInput walks the inputs a rollout must react
@@ -2966,9 +3074,12 @@ func TestRenderModelDeploymentPod_Probes(t *testing.T) {
 		require.NotNil(t, c.ReadinessProbe)
 		require.NotNil(t, c.StartupProbe)
 
-		assert.Equal(t, modelDeploymentProbePath, c.LivenessProbe.HTTPGet.Path,
-			"the liveness gate reads the same route, which is safe only because the startup gate "+
-				"suppresses it for the whole load")
+		assert.Equal(t, modelDeploymentEngineSentinelLivePath, c.StartupProbe.HTTPGet.Path,
+			"startup gate reads sentinel live route on managed accelerated roles")
+		assert.Equal(t, modelDeploymentEngineSentinelLivePath, c.LivenessProbe.HTTPGet.Path,
+			"liveness gate reads sentinel live route once startup succeeds")
+		assert.Equal(t, modelDeploymentEngineSentinelReadyPath, c.ReadinessProbe.HTTPGet.Path,
+			"readiness gate reads sentinel ready route")
 		assert.Greater(t, c.LivenessProbe.FailureThreshold, c.ReadinessProbe.FailureThreshold,
 			"a stall must cost readiness before it costs a restart")
 		assert.Greater(t, c.StartupProbe.FailureThreshold, c.LivenessProbe.FailureThreshold,
@@ -3056,12 +3167,17 @@ func TestRenderModelDeploymentPod_Probes(t *testing.T) {
 			require.NotNil(t, c.LivenessProbe,
 				"an engine that answered once and then stopped has no other way back")
 
-			for name, p := range map[string]*core.Probe{
-				"startup": c.StartupProbe, "readiness": c.ReadinessProbe, "liveness": c.LivenessProbe,
+			for name, entry := range map[string]struct {
+				probe *core.Probe
+				path  string
+			}{
+				"startup":   {c.StartupProbe, modelDeploymentEngineSentinelLivePath},
+				"readiness": {c.ReadinessProbe, modelDeploymentEngineSentinelReadyPath},
+				"liveness":  {c.LivenessProbe, modelDeploymentEngineSentinelLivePath},
 			} {
-				require.NotNil(t, p.HTTPGet, "%s gate must read the engine's route, not accept a socket", name)
-				assert.Equal(t, modelDeploymentProbePath, p.HTTPGet.Path, "%s gate path", name)
-				assert.Equal(t, tc.wantPort, p.HTTPGet.Port.IntVal, "%s gate port", name)
+				require.NotNil(t, entry.probe.HTTPGet, "%s gate must read the engine's route, not accept a socket", name)
+				assert.Equal(t, entry.path, entry.probe.HTTPGet.Path, "%s gate path", name)
+				assert.Equal(t, tc.wantPort, entry.probe.HTTPGet.Port.IntVal, "%s gate port", name)
 			}
 
 			// THE GATE AND THE SERVICE MUST NAME ONE PORT, and the comparison is against the
@@ -3091,7 +3207,7 @@ func TestRenderModelDeploymentPod_Probes(t *testing.T) {
 //
 // THE ORIGINAL DIGESTS WERE CAPTURED FROM THE RENDERER AS IT STOOD BEFORE IT WAS SPLIT into a
 // template half and a stamp half, and that split had to reproduce every one of them exactly. The
-// table has been RE-BASELINED seven times since, each time for a rendering change that was
+// table has been RE-BASELINED nine times since, each time for a rendering change that was
 // intended: once for the per-replica groups, where the stamp began naming a (role, ordinal) group,
 // declaring a total of one and writing the ordinal label; once when the ordinal label's key took the
 // modeldeployment prefix the role-kind label and the spec-hash annotation already carry, so that one
@@ -3116,22 +3232,24 @@ func TestRenderModelDeploymentPod_Probes(t *testing.T) {
 // runtime-cache update was narrowed from one XDG root to the scoped cache names huggingface_hub,
 // hf_xet, pip and torch read, so the Hub token and the datasets cache stay on the container's own
 // filesystem instead of a host-backed mount, and the render-version annotation every Pod carries
-// advanced to 4 with that change. Each case renders ORDINAL ZERO -- the
+// advanced to 4 with that change. The ninth re-baselining advances render-version to 6 and injects
+// the read-only gpustack-engine-sentinel package, unified sentinel probes and sentinel PreStop drain
+// module across managed accelerated roles. Each case renders ORDINAL ZERO -- the
 // composite's zero value -- which is the
 // one ordinal a digest can name without the table growing a dimension. To re-baseline after an
 // intended rendering change: empty the table, run this case, and pin the digests the failures
 // print.
 func TestRenderModelDeploymentPod_SerializedOutputIsPinnedToThePreSplitRender(t *testing.T) {
 	pinned := map[string]string{
-		"a sole server role": "4e8bd9a4d85da4f3ecbe436806836ce5d3d9b8ecbfda107db29f1faeacd5cbdd",
-		"a sole server role with a synthesized cache connector":                              "fb59c6e7467638df3163a203238b5727a9044a4c794c1bde5bfd4515d388aaae",
-		"a take-over role carrying a connector it must be given no part of":                  "78f891f79b600820ab889365047f94e39f47c56ec51b140d9719d5344818b55b",
-		"a direct decoder with a native routing sidecar":                                     "c89cad40333e6a080b7a8f7ad1e1a8039c70bdb771827b2c72aeea8edb9c07c2",
-		"a direct decoder with a classic routing sidecar":                                    "b2fbdc3a5d6cd0ae7c426e135721aa48e52ace318d6bed91adf22a97c006e6bb",
-		"a role naming no image, which runs the engine's image":                              "4e8bd9a4d85da4f3ecbe436806836ce5d3d9b8ecbfda107db29f1faeacd5cbdd",
-		"a TLS-listening role with declared ports, privileges, a runtime class and a volume": "9cef99f51a7e03903e14733df94301113624c4618592552a759b9e4b173922c8",
-		"the prefill role of a two-role deployment":                                          "0a58d16f9ea5c4b17e0f748df601bf1f95cb4443f5483bf30c8084b4600ac713",
-		"the decode role of a two-role deployment":                                           "f65d8e35c4e6fd942d4f674f8822d7f606f60a17f98b9d6a40692fcfa9ea7baa",
+		"a sole server role": "5b7f01201b3d9a0ac127182ce99acb8835b2b555d909b17dc9170672ee90b1af",
+		"a sole server role with a synthesized cache connector":                              "64d8a6626350842e125ebc86980bbee5dd0f839c5bfde46dc95ce1c925164bf4",
+		"a take-over role carrying a connector it must be given no part of":                  "8edb212ec09aa8f59888c296b38b13d367e29986de99dbfaf4fafca61eac46e0",
+		"a direct decoder with a native routing sidecar":                                     "1aeaa6db8a371e450a64178418bf50852a81dabb3126ad42c29240185591157e",
+		"a direct decoder with a classic routing sidecar":                                    "d7cea6dac278d8eb9e1f3824bdbd948b3d2552fe442adb37fcadee1ba71638a3",
+		"a role naming no image, which runs the engine's image":                              "5b7f01201b3d9a0ac127182ce99acb8835b2b555d909b17dc9170672ee90b1af",
+		"a TLS-listening role with declared ports, privileges, a runtime class and a volume": "c7b74044d2f4e6b41d093ea217b1564c029d5d58968a600344b76af921869892",
+		"the prefill role of a two-role deployment":                                          "5ff43b908c5346e84843c824e52a4f71b26bd10e2b800c9f72f45e2032e46ceb",
+		"the decode role of a two-role deployment":                                           "769841e63bd25f8b09328f2bae3dae0cfc736971e6ac10ad54d3418dc791aba0",
 	}
 
 	// newPinnedInput builds the render input the way the reconciler does: the deployment and its
@@ -3435,37 +3553,84 @@ func TestStampModelDeploymentPod_AboveOneMemberNamesAndAddressesEachMember(t *te
 // nothing erroring. So the comparison is on the serialized PodSpec with the two per-member fields
 // blanked: anything else that differs is a defect this case exists to name.
 func TestStampModelDeploymentPod_MembersOfAReplicaDifferOnlyInTheirIdentity(t *testing.T) {
-	md := newRenderDeployment(func(md *workercore.ModelDeployment) {
-		md.Spec.Roles[0].ReplicaSize = 4
-	})
-	role := &md.Spec.Roles[0]
-
-	specOf := func(member int) string {
+	renderMember := func(md *workercore.ModelDeployment, member int) *core.Pod {
 		t.Helper()
 
+		role := &md.Spec.Roles[0]
 		pod, err := renderModelDeploymentPodTemplate(context.Background(), ModelDeploymentRenderInput{
 			Deployment: md, Role: role, AcceleratorType: newRenderAcceleratorType(),
 		})
 		require.NoError(t, err)
 		stampModelDeploymentPod(pod, md, role, 0, member)
-
-		// The two fields the stamp is ALLOWED to vary per member. Blanking them is what makes the
-		// comparison discriminating rather than vacuous: without it the test would be asserting
-		// that two different Pods are different.
-		pod.Spec.Hostname = ""
-
-		encoded, err := json.Marshal(pod.Spec)
-		require.NoError(t, err)
-
-		return string(encoded)
+		return pod
 	}
 
-	first := specOf(0)
-	for member := 1; member < 4; member++ {
-		assert.Equal(t, first, specOf(member),
-			"member %d's PodSpec differs from the leader's beyond its hostname: "+
-				"a per-member value has leaked into the render", member)
-	}
+	t.Run("leader-served multi-member replica clears follower probes and matches everywhere else", func(t *testing.T) {
+		md := newRenderDeployment(func(md *workercore.ModelDeployment) {
+			md.Spec.Roles[0].ReplicaSize = 4
+		})
+
+		leader := renderMember(md, 0)
+		require.NotNil(t, leader.Spec.Containers[0].StartupProbe)
+		require.NotNil(t, leader.Spec.Containers[0].ReadinessProbe)
+		require.NotNil(t, leader.Spec.Containers[0].LivenessProbe)
+
+		normalize := func(pod *core.Pod, clearProbes bool) string {
+			cp := pod.DeepCopy()
+			cp.Spec.Hostname = ""
+			if clearProbes {
+				clearModelDeploymentMainContainerProbes(cp)
+			}
+			encoded, err := json.Marshal(cp.Spec)
+			require.NoError(t, err)
+			return string(encoded)
+		}
+
+		leaderNormalized := normalize(leader, true)
+		var firstFollower string
+		for member := 1; member < 4; member++ {
+			follower := renderMember(md, member)
+			assert.Nil(t, follower.Spec.Containers[0].StartupProbe)
+			assert.Nil(t, follower.Spec.Containers[0].ReadinessProbe)
+			assert.Nil(t, follower.Spec.Containers[0].LivenessProbe)
+
+			followerSpec := normalize(follower, false)
+			if member == 1 {
+				firstFollower = followerSpec
+			} else {
+				assert.Equal(t, firstFollower, followerSpec,
+					"follower %d's PodSpec differs from follower 1's beyond its hostname", member)
+			}
+			assert.Equal(t, leaderNormalized, followerSpec,
+				"member %d's PodSpec differs from the leader's beyond hostname and leader-only probes", member)
+		}
+	})
+
+	t.Run("external-DP multi-member replica keeps probes on every member and differs only in hostname", func(t *testing.T) {
+		md := newRenderDeployment(func(md *workercore.ModelDeployment) {
+			md.Spec.Roles[0].ReplicaSize = 4
+			md.Spec.Roles[0].ExtraArgs = []string{
+				"--data-parallel-size=4",
+				"--data-parallel-size-local=1",
+				"--data-parallel-external-lb",
+			}
+		})
+
+		specOf := func(member int) string {
+			pod := renderMember(md, member)
+			require.NotNil(t, pod.Spec.Containers[0].ReadinessProbe)
+			pod.Spec.Hostname = ""
+			encoded, err := json.Marshal(pod.Spec)
+			require.NoError(t, err)
+			return string(encoded)
+		}
+
+		first := specOf(0)
+		for member := 1; member < 4; member++ {
+			assert.Equal(t, first, specOf(member),
+				"member %d's PodSpec differs from member 0's beyond its hostname", member)
+		}
+	})
 }
 
 // renderStampedMember is one member of one replica, rendered and stamped the way the converger does.
@@ -4193,7 +4358,7 @@ func TestRenderModelDeploymentPod_CPUOnlyUnqueuedRole(t *testing.T) {
 }
 
 func TestRenderModelDeploymentPod_UpgradeHashStabilityWithFamily(t *testing.T) {
-	require.Equal(t, 5, modelDeploymentRenderVersion, "render version must stay 5")
+	require.Equal(t, 6, modelDeploymentRenderVersion, "render version must stay 6")
 
 	storeConnection := func(protocol string) *ModelDeploymentConnectorInput {
 		return &ModelDeploymentConnectorInput{
@@ -4529,5 +4694,590 @@ func TestRenderModelDeploymentPod_AscendA5HIXLEPYield(t *testing.T) {
 		assert.Nil(t, findVolume(pod, inject.AscendHIXLEPVolumeName))
 		assert.Nil(t, envByName(ctr.Env, inject.AscendLocalCommResEnv))
 		assert.NotContains(t, strings.Join(ctr.Command, " "), "ascend_local_comm_res_path")
+	})
+}
+
+func TestModelDeploymentPodSpecHash_RouterProjectionAndRuntimeControlDecoupling(t *testing.T) {
+	at := newRenderAcceleratorType()
+	baseNoRouter := newRenderDeployment()
+	noRouterHash := renderOne(t, baseNoRouter, at).Annotations[modelDeploymentPodSpecHashAnnotation]
+
+	baseLLMD := newRenderDeployment(func(md *workercore.ModelDeployment) {
+		md.Spec.Router = &workercore.ModelDeploymentRouter{Name: workercore.ModelDeploymentRouterLLMD}
+	})
+	llmdPod := renderOne(t, baseLLMD, at)
+	llmdHash := llmdPod.Annotations[modelDeploymentPodSpecHashAnnotation]
+	require.NotEqual(t, noRouterHash, llmdHash, "attaching a router must move pod-spec-hash")
+
+	baseVLLMRouter := newRenderDeployment(func(md *workercore.ModelDeployment) {
+		md.Spec.Router = &workercore.ModelDeploymentRouter{Name: workercore.ModelDeploymentRouterVLLM}
+	})
+	vllmRouterHash := renderOne(t, baseVLLMRouter, at).Annotations[modelDeploymentPodSpecHashAnnotation]
+	require.NotEqual(t, llmdHash, vllmRouterHash, "changing router.name must move pod-spec-hash")
+
+	decoupledRouterCases := []struct {
+		name   string
+		mutate func(*workercore.ModelDeploymentRouter)
+	}{
+		{
+			name:   "replicas",
+			mutate: func(r *workercore.ModelDeploymentRouter) { r.Replicas = ptr.To[int32](3) },
+		},
+		{
+			name:   "image",
+			mutate: func(r *workercore.ModelDeploymentRouter) { r.Image = "registry.example/router:v2" },
+		},
+		{
+			name:   "imagePullPolicy",
+			mutate: func(r *workercore.ModelDeploymentRouter) { r.ImagePullPolicy = core.PullAlways },
+		},
+		{
+			name: "imagePullSecrets",
+			mutate: func(r *workercore.ModelDeploymentRouter) {
+				r.ImagePullSecrets = []core.LocalObjectReference{{Name: "pull-sec"}}
+			},
+		},
+		{
+			name:   "extraArgs",
+			mutate: func(r *workercore.ModelDeploymentRouter) { r.ExtraArgs = []string{"--log-level=debug"} },
+		},
+		{
+			name:   "requestTimeoutSeconds",
+			mutate: func(r *workercore.ModelDeploymentRouter) { r.RequestTimeoutSeconds = ptr.To[int32](120) },
+		},
+		{
+			name: "disaggregationThresholdTokens",
+			mutate: func(r *workercore.ModelDeploymentRouter) {
+				r.DisaggregationThresholdTokens = ptr.To[int32](512)
+			},
+		},
+	}
+
+	for _, tc := range decoupledRouterCases {
+		t.Run("router."+tc.name+" does not move projected pod-spec-hash", func(t *testing.T) {
+			md := baseLLMD.DeepCopy()
+			tc.mutate(md.Spec.Router)
+			pod := renderOne(t, md, at)
+			assert.Equal(t, llmdHash, pod.Annotations[modelDeploymentPodSpecHashAnnotation])
+
+			legacyHash := modelDeploymentDesiredPodLegacyRouterHash(md, &md.Spec.Roles[0], 0, 0, pod)
+			assert.NotEmpty(t, legacyHash)
+			assert.NotEqual(t, llmdHash, legacyHash,
+				"legacy full-router hash must retain router.%s for pre-upgrade currency", tc.name)
+		})
+	}
+
+	t.Run("role.replicas, role.pause, spec.model.loraAdapters, and non-elastic runtimeControl.parameters do not move pod-spec-hash", func(t *testing.T) {
+		mutated := baseNoRouter.DeepCopy()
+		mutated.Spec.Roles[0].Replicas = 8
+		mutated.Spec.Roles[0].Pause = true
+		mutated.Spec.Model.LoRAAdapters = []workercore.ModelDeploymentLoRAAdapter{
+			{
+				Name:        "tenant-a",
+				ArtifactRef: core.LocalObjectReference{Name: "lora-artifact-a"},
+				SubPath:     "adapters/a",
+				Pinned:      true,
+			},
+		}
+		mutated.Spec.Roles[0].RuntimeControl = &workercore.ModelDeploymentRoleRuntimeControl{
+			Parameters: map[string]string{
+				runtimecontrol.ParamSchedulingMaxActiveRequests:         "16",
+				runtimecontrol.ParamSchedulingMaxBatchedTokens:          "2048",
+				runtimecontrol.ParamSchedulingLongPrefillTokenThreshold: "512",
+				runtimecontrol.ParamSchedulingCacheAwareWindow:          "4",
+				runtimecontrol.ParamSchedulingCacheAwareThreshold:       "0.5",
+			},
+		}
+		pod := renderOne(t, mutated, at)
+		assert.Equal(t, noRouterHash, pod.Annotations[modelDeploymentPodSpecHashAnnotation])
+
+		tuned := mutated.DeepCopy()
+		tuned.Spec.Roles[0].Pause = false
+		tuned.Spec.Model.LoRAAdapters = nil
+		tuned.Spec.Roles[0].RuntimeControl.Parameters = map[string]string{
+			runtimecontrol.ParamSchedulingMaxActiveRequests: "32",
+			runtimecontrol.ParamSchedulingMaxBatchedTokens:  "4096",
+		}
+		assert.Equal(t, noRouterHash, renderOne(t, tuned, at).Annotations[modelDeploymentPodSpecHashAnnotation])
+
+		emptyCtrl := baseNoRouter.DeepCopy()
+		emptyCtrl.Spec.Roles[0].RuntimeControl = &workercore.ModelDeploymentRoleRuntimeControl{}
+		assert.Equal(t, noRouterHash, renderOne(t, emptyCtrl, at).Annotations[modelDeploymentPodSpecHashAnnotation])
+	})
+
+	t.Run("elastic.dataParallelWidth presence moves pod-spec-hash while scaling its value keeps pod-spec-hash identical", func(t *testing.T) {
+		elasticWidth2 := baseNoRouter.DeepCopy()
+		runtimecontrol.SetElasticWidth(&elasticWidth2.Spec.Roles[0], 2)
+		width2Hash := renderOne(t, elasticWidth2, at).Annotations[modelDeploymentPodSpecHashAnnotation]
+		assert.NotEqual(t, noRouterHash, width2Hash,
+			"enabling elastic.dataParallelWidth changes Pod topology and must move pod-spec-hash")
+
+		elasticWidth4 := baseNoRouter.DeepCopy()
+		runtimecontrol.SetElasticWidth(&elasticWidth4.Spec.Roles[0], 4)
+		assert.Equal(t, width2Hash, renderOne(t, elasticWidth4, at).Annotations[modelDeploymentPodSpecHashAnnotation],
+			"scaling elastic.dataParallelWidth from 2 to 4 must keep pod-spec-hash identical")
+
+		elasticWidth4WithTuningAndPause := elasticWidth4.DeepCopy()
+		elasticWidth4WithTuningAndPause.Spec.Roles[0].Pause = true
+		elasticWidth4WithTuningAndPause.Spec.Model.LoRAAdapters = []workercore.ModelDeploymentLoRAAdapter{
+			{Name: "adapter-b", ArtifactRef: core.LocalObjectReference{Name: "art-b"}},
+		}
+		elasticWidth4WithTuningAndPause.Spec.Roles[0].RuntimeControl.Parameters[runtimecontrol.ParamSchedulingMaxActiveRequests] = "24"
+		assert.Equal(t, width2Hash,
+			renderOne(t, elasticWidth4WithTuningAndPause, at).Annotations[modelDeploymentPodSpecHashAnnotation],
+			"co-present live parameters, pause, and loraAdapters must keep elastic pod-spec-hash identical")
+	})
+}
+
+func TestModelDeploymentPodMatchesCurrencyWithLegacy(t *testing.T) {
+	desired := &core.Pod{
+		ObjectMeta: meta.ObjectMeta{
+			Annotations: map[string]string{
+				modelDeploymentPodSpecHashAnnotation:   "projected-hash",
+				modelDeploymentRenderVersionAnnotation: strconv.Itoa(modelDeploymentRenderVersion),
+			},
+		},
+	}
+	podWith := func(hash, rv string) *core.Pod {
+		ann := map[string]string{}
+		if hash != "" {
+			ann[modelDeploymentPodSpecHashAnnotation] = hash
+		}
+		if rv != "" {
+			ann[modelDeploymentRenderVersionAnnotation] = rv
+		}
+		return &core.Pod{ObjectMeta: meta.ObjectMeta{Annotations: ann}}
+	}
+
+	cases := []struct {
+		name       string
+		actual     *core.Pod
+		desired    *core.Pod
+		legacyHash string
+		minVersion int
+		want       bool
+	}{
+		{
+			name:       "projected hash matches at current render version",
+			actual:     podWith("projected-hash", "6"),
+			desired:    desired,
+			legacyHash: "legacy-hash",
+			minVersion: 1,
+			want:       true,
+		},
+		{
+			name:       "legacy full-router hash matches at render version 6",
+			actual:     podWith("legacy-hash", "6"),
+			desired:    desired,
+			legacyHash: "legacy-hash",
+			minVersion: 1,
+			want:       true,
+		},
+		{
+			name:       "legacy full-router hash matches at render version 5",
+			actual:     podWith("legacy-hash", "5"),
+			desired:    desired,
+			legacyHash: "legacy-hash",
+			minVersion: 1,
+			want:       true,
+		},
+		{
+			name:       "legacy full-router hash matches at render version 1 when floor is 1",
+			actual:     podWith("legacy-hash", "1"),
+			desired:    desired,
+			legacyHash: "legacy-hash",
+			minVersion: 1,
+			want:       true,
+		},
+		{
+			name:       "legacy full-router hash is rejected above render version 6",
+			actual:     podWith("legacy-hash", "7"),
+			desired:    desired,
+			legacyHash: "legacy-hash",
+			minVersion: 1,
+			want:       false,
+		},
+		{
+			name:       "legacy full-router hash is rejected below minRenderVersion floor",
+			actual:     podWith("legacy-hash", "3"),
+			desired:    desired,
+			legacyHash: "legacy-hash",
+			minVersion: 4,
+			want:       false,
+		},
+		{
+			name:       "stale hash matching neither projected nor legacy is rejected",
+			actual:     podWith("other-hash", "6"),
+			desired:    desired,
+			legacyHash: "legacy-hash",
+			minVersion: 1,
+			want:       false,
+		},
+		{
+			name:       "missing render-version annotation is rejected",
+			actual:     podWith("legacy-hash", ""),
+			desired:    desired,
+			legacyHash: "legacy-hash",
+			minVersion: 1,
+			want:       false,
+		},
+		{
+			name:       "nil actual or desired is rejected",
+			actual:     nil,
+			desired:    desired,
+			legacyHash: "legacy-hash",
+			minVersion: 1,
+			want:       false,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.Equal(t, tc.want,
+				modelDeploymentPodMatchesCurrencyWithLegacy(tc.actual, tc.desired, tc.legacyHash, tc.minVersion))
+		})
+	}
+}
+
+func TestRenderModelDeploymentPod_EngineSentinelMountPathMatchesPythonLayout(t *testing.T) {
+	assert.Equal(t, "/var/lib/gpustack/operator/lib/engine-sentinel", modelDeploymentEngineSentinelHostPath)
+	assert.Equal(t, modelDeploymentEngineSentinelHostPath, modelDeploymentEngineSentinelMountPath)
+
+	pyRoot := filepath.Join("..", "..", "..", "..", "engine-sentinel", "python")
+	_, err := os.Stat(filepath.Join(pyRoot, "sitecustomize.py"))
+	require.NoError(t, err)
+	_, err = os.Stat(filepath.Join(pyRoot, "hatch.toml"))
+	require.NoError(t, err)
+}
+
+func TestRenderModelDeploymentPod_EngineSentinel(t *testing.T) {
+	stageMountPath := "/var/lib/gpustack/operator/lib/engine-sentinel"
+	nvidiaAT := newRenderAcceleratorType()
+	ascendAT := newRenderAcceleratorType(func(at *worker.AcceleratorType) {
+		at.Name = "atlas-910b"
+		at.Status.Entrance = "queue-for-atlas-910b"
+		at.Status.Detail.Manufacturer = nodefeature.ManufacturerAscend
+	})
+
+	t.Run("take-over, encode, cpu-only, and SGLang Ray roles render zero sentinel additions", func(t *testing.T) {
+		plainMD := newRenderDeployment()
+		assert.True(t, ModelDeploymentRoleSupportsEngineSentinel(plainMD, &plainMD.Spec.Roles[0]))
+		assert.False(t, ModelDeploymentRoleSupportsEngineSentinel(nil, &plainMD.Spec.Roles[0]))
+		assert.False(t, ModelDeploymentRoleSupportsEngineSentinel(plainMD, nil))
+
+		takeOverMD := newRenderDeployment(func(md *workercore.ModelDeployment) {
+			md.Spec.Roles[0].Command = []string{"/bin/custom-engine"}
+		})
+		assert.False(t, ModelDeploymentRoleSupportsEngineSentinel(takeOverMD, &takeOverMD.Spec.Roles[0]))
+		takeOverPod := renderOne(t, takeOverMD, nvidiaAT)
+		assert.Equal(t, []string{"/bin/custom-engine"}, takeOverPod.Spec.Containers[0].Command)
+		assert.Nil(t, findVolume(takeOverPod, modelDeploymentEngineSentinelVolumeName))
+		assert.Nil(t, envByName(takeOverPod.Spec.Containers[0].Env, "PYTHONPATH"))
+		assert.Nil(t, envByName(takeOverPod.Spec.Containers[0].Env, modelDeploymentEngineSentinelEnableEnv))
+
+		encodeMD := newRenderDeployment(func(md *workercore.ModelDeployment) {
+			md.Spec.Roles[0].Kind = workercore.ModelDeploymentRoleKindEncode
+		})
+		assert.False(t, ModelDeploymentRoleSupportsEngineSentinel(encodeMD, &encodeMD.Spec.Roles[0]))
+		encodePod := renderOne(t, encodeMD, nvidiaAT)
+		assert.Nil(t, findVolume(encodePod, modelDeploymentEngineSentinelVolumeName))
+		assert.Nil(t, envByName(encodePod.Spec.Containers[0].Env, modelDeploymentEngineSentinelEnableEnv))
+		assert.Equal(t, "/health", encodePod.Spec.Containers[0].StartupProbe.HTTPGet.Path)
+		assert.Equal(t, "/health", encodePod.Spec.Containers[0].ReadinessProbe.HTTPGet.Path)
+		assert.Equal(t, "/health", encodePod.Spec.Containers[0].LivenessProbe.HTTPGet.Path)
+
+		cpuMD := newRenderDeployment(func(md *workercore.ModelDeployment) {
+			md.Spec.Roles[0].AcceleratorType = ""
+		})
+		assert.False(t, ModelDeploymentRoleSupportsEngineSentinel(cpuMD, &cpuMD.Spec.Roles[0]))
+		cpuPod, err := renderModelDeploymentPod(t.Context(), ModelDeploymentRenderInput{
+			Deployment: cpuMD,
+			Role:       &cpuMD.Spec.Roles[0],
+		})
+		require.NoError(t, err)
+		assert.Nil(t, findVolume(cpuPod, modelDeploymentEngineSentinelVolumeName))
+		assert.Nil(t, envByName(cpuPod.Spec.Containers[0].Env, modelDeploymentEngineSentinelEnableEnv))
+		assert.Equal(t, "/health", cpuPod.Spec.Containers[0].ReadinessProbe.HTTPGet.Path)
+
+		rayCases := []struct {
+			name      string
+			extraArgs []string
+			env       []workercore.ModelDeploymentEnvVar
+		}{
+			{name: "distributed-executor-backend=ray", extraArgs: []string{"--distributed-executor-backend=ray"}},
+			{name: "distributed-executor-backend separate value", extraArgs: []string{"--distributed-executor-backend", "ray"}},
+			{name: "enable-ray", extraArgs: []string{"--enable-ray"}},
+			{name: "use-ray", extraArgs: []string{"--use-ray"}},
+			{name: "ray-address", extraArgs: []string{"--ray-address=auto"}},
+			{name: "ray-prefix flag", extraArgs: []string{"--ray-port=6379"}},
+			{name: "RAY_ADDRESS env", env: []workercore.ModelDeploymentEnvVar{{Name: "RAY_ADDRESS", Value: "127.0.0.1:6379"}}},
+			{name: "SGLANG_USE_RAY env", env: []workercore.ModelDeploymentEnvVar{{Name: "SGLANG_USE_RAY", Value: "1"}}},
+		}
+		for _, rc := range rayCases {
+			sglangRayMD := newRenderDeployment(func(md *workercore.ModelDeployment) {
+				md.Spec.Engine.Name = workercore.ModelDeploymentEngineSGLang
+				md.Spec.Roles[0].ExtraArgs = rc.extraArgs
+				md.Spec.Roles[0].Env = rc.env
+			})
+			assert.False(t, ModelDeploymentRoleSupportsEngineSentinel(sglangRayMD, &sglangRayMD.Spec.Roles[0]), rc.name)
+			rayPod := renderOne(t, sglangRayMD, nvidiaAT)
+			assert.Nil(t, findVolume(rayPod, modelDeploymentEngineSentinelVolumeName), rc.name)
+			assert.Nil(t, envByName(rayPod.Spec.Containers[0].Env, modelDeploymentEngineSentinelEnableEnv), rc.name)
+			assert.Equal(t, "/health", rayPod.Spec.Containers[0].ReadinessProbe.HTTPGet.Path, rc.name)
+		}
+
+		// SGLang with non-ray backend and vLLM with Ray backend still support engine-sentinel.
+		sglangMP := newRenderDeployment(func(md *workercore.ModelDeployment) {
+			md.Spec.Engine.Name = workercore.ModelDeploymentEngineSGLang
+			md.Spec.Roles[0].ExtraArgs = []string{"--distributed-executor-backend=mp", "--enable-ray=false"}
+		})
+		assert.True(t, ModelDeploymentRoleSupportsEngineSentinel(sglangMP, &sglangMP.Spec.Roles[0]))
+
+		vllmRay := newRenderDeployment(func(md *workercore.ModelDeployment) {
+			md.Spec.Engine.Name = workercore.ModelDeploymentEngineVLLM
+			md.Spec.Roles[0].ExtraArgs = []string{"--distributed-executor-backend=ray"}
+		})
+		assert.True(t, ModelDeploymentRoleSupportsEngineSentinel(vllmRay, &vllmRay.Spec.Roles[0]))
+	})
+
+	for _, profile := range []struct {
+		name string
+		at   *worker.AcceleratorType
+	}{
+		{name: "vLLM NVIDIA", at: nvidiaAT},
+		{name: "vLLM Ascend", at: ascendAT},
+	} {
+		t.Run(profile.name+" injects read-only PYTHONPATH, sentinel env, untouched argv, and HTTPS probes by default", func(t *testing.T) {
+			md := newRenderDeployment(func(md *workercore.ModelDeployment) {
+				md.Spec.Roles[0].AcceleratorType = profile.at.Name
+				md.Spec.Roles[0].Ports = []workercore.ModelDeploymentPort{
+					{Port: 9443, Protocol: core.ProtocolTCP},
+				}
+				md.Spec.Roles[0].ExtraArgs = []string{
+					"--max-num-seqs=64",
+					"--ssl-certfile=/etc/tls/tls.crt",
+					"--ssl-keyfile=/etc/tls/tls.key",
+				}
+				md.Spec.Roles[0].Env = []workercore.ModelDeploymentEnvVar{
+					{Name: "PYTHONPATH", Value: "/opt/user/py"},
+				}
+			})
+
+			pod := renderOne(t, md, profile.at)
+			ctr := &pod.Spec.Containers[0]
+
+			assert.Equal(t, []string{
+				"vllm", "serve", "Qwen/Qwen2.5-72B-Instruct",
+				"--max-num-seqs=64",
+				"--ssl-certfile=/etc/tls/tls.crt",
+				"--ssl-keyfile=/etc/tls/tls.key",
+				"--host", "0.0.0.0",
+				"--port", "9443",
+			}, ctr.Command, "sentinel must never wrap container argv")
+			assert.Nil(t, envByName(ctr.Env, "VLLM_PLUGINS"),
+				"renderer must never mutate VLLM_PLUGINS")
+			for _, e := range ctr.Env {
+				if e.ValueFrom != nil {
+					assert.Nil(t, e.ValueFrom.SecretKeyRef, "sentinel must never mount SecretKeyRef auth tokens")
+				}
+			}
+
+			vol := findVolume(pod, modelDeploymentEngineSentinelVolumeName)
+			require.NotNil(t, vol)
+			require.NotNil(t, vol.HostPath)
+			assert.Equal(t, stageMountPath, vol.HostPath.Path)
+			assert.Equal(t, ptr.To(core.HostPathDirectoryOrCreate), vol.HostPath.Type)
+
+			mnt := findMount(ctr, modelDeploymentEngineSentinelVolumeName)
+			require.NotNil(t, mnt)
+			assert.Equal(t, stageMountPath, mnt.MountPath)
+			assert.True(t, mnt.ReadOnly)
+
+			pyPath := envByName(ctr.Env, "PYTHONPATH")
+			require.NotNil(t, pyPath)
+			assert.Equal(t, stageMountPath+":/opt/user/py", pyPath.Value)
+
+			enableEnv := envByName(ctr.Env, modelDeploymentEngineSentinelEnableEnv)
+			require.NotNil(t, enableEnv)
+			assert.Equal(t, "1", enableEnv.Value)
+
+			engineEnv := envByName(ctr.Env, modelDeploymentEngineSentinelEngineEnv)
+			require.NotNil(t, engineEnv)
+			assert.Equal(t, "vllm", engineEnv.Value)
+
+			require.NotNil(t, ctr.StartupProbe)
+			assert.Equal(t, "/gpustack/v1/live", ctr.StartupProbe.HTTPGet.Path)
+			assert.Equal(t, intstr.FromInt32(9443), ctr.StartupProbe.HTTPGet.Port)
+			assert.Equal(t, core.URISchemeHTTPS, ctr.StartupProbe.HTTPGet.Scheme)
+
+			require.NotNil(t, ctr.ReadinessProbe)
+			assert.Equal(t, "/gpustack/v1/ready", ctr.ReadinessProbe.HTTPGet.Path)
+			assert.Equal(t, intstr.FromInt32(9443), ctr.ReadinessProbe.HTTPGet.Port)
+			assert.Equal(t, core.URISchemeHTTPS, ctr.ReadinessProbe.HTTPGet.Scheme)
+
+			require.NotNil(t, ctr.LivenessProbe)
+			assert.Equal(t, "/gpustack/v1/live", ctr.LivenessProbe.HTTPGet.Path)
+			assert.Equal(t, intstr.FromInt32(9443), ctr.LivenessProbe.HTTPGet.Port)
+			assert.Equal(t, core.URISchemeHTTPS, ctr.LivenessProbe.HTTPGet.Scheme)
+		})
+	}
+
+	t.Run("SGLang injects read-only PYTHONPATH, sglang sentinel env, untouched argv, and unified probes", func(t *testing.T) {
+		md := newRenderDeployment(func(md *workercore.ModelDeployment) {
+			md.UID = ""
+			md.Spec.Engine = workercore.ModelDeploymentEngine{
+				Name:  workercore.ModelDeploymentEngineSGLang,
+				Image: "lmsysorg/sglang:v0.5.9",
+			}
+			md.Spec.Roles[0].Image = ""
+			md.Spec.Roles[0].ExtraArgs = []string{"--max-running-requests=128"}
+		})
+
+		pod := renderOne(t, md, nvidiaAT)
+		ctr := &pod.Spec.Containers[0]
+
+		assert.Equal(t, []string{
+			"python3", "-m", "sglang.launch_server",
+			"--model-path", "Qwen/Qwen2.5-72B-Instruct",
+			"--enable-metrics",
+			"--max-running-requests=128",
+			"--host", "0.0.0.0",
+			"--port", "8000",
+		}, ctr.Command)
+
+		pyPath := envByName(ctr.Env, "PYTHONPATH")
+		require.NotNil(t, pyPath)
+		assert.Equal(t, stageMountPath, pyPath.Value)
+
+		enableEnv := envByName(ctr.Env, modelDeploymentEngineSentinelEnableEnv)
+		require.NotNil(t, enableEnv)
+		assert.Equal(t, "1", enableEnv.Value)
+
+		engineEnv := envByName(ctr.Env, modelDeploymentEngineSentinelEngineEnv)
+		require.NotNil(t, engineEnv)
+		assert.Equal(t, "sglang", engineEnv.Value)
+
+		assert.Equal(t, "/gpustack/v1/live", ctr.StartupProbe.HTTPGet.Path)
+		assert.Equal(t, "/gpustack/v1/ready", ctr.ReadinessProbe.HTTPGet.Path)
+		assert.Equal(t, "/gpustack/v1/live", ctr.LivenessProbe.HTTPGet.Path)
+	})
+
+	t.Run("vLLM composes cleanly with model-transfer without wrapping argv or altering load-format", func(t *testing.T) {
+		md := newRenderDeployment()
+		artifact := &ModelDeploymentArtifactRender{
+			Delivery:             workercore.ModelDeploymentModelDeliveryRemote,
+			ModelTransferPolicy:  "Require",
+			SourceReady:          true,
+			ModelTransferBackend: "nixl",
+			ArtifactName:         "qwen-weights",
+			ArtifactUID:          "art-uid-1",
+			ManifestDigest:       "sha256:fea7da0c5227e595df7f4fa5822011e7a33cabe1dff13e3ffa7be6898dd1c363",
+		}
+		pod, err := renderModelDeploymentPod(t.Context(), ModelDeploymentRenderInput{
+			Deployment:      md,
+			Role:            &md.Spec.Roles[0],
+			AcceleratorType: nvidiaAT,
+			Artifact:        artifact,
+		})
+		require.NoError(t, err)
+		ctr := &pod.Spec.Containers[0]
+
+		require.GreaterOrEqual(t, len(ctr.Command), 6)
+		assert.Equal(t, "sh", ctr.Command[0])
+		assert.Equal(t, "-c", ctr.Command[1])
+		assert.Contains(t, ctr.Command[2], "gpustack-model-transfer")
+		assert.Equal(t, []string{"sh", "vllm", "serve"}, ctr.Command[3:6],
+			"model-transfer shell invokes vllm serve directly with zero sentinel argv wrapper")
+		assert.Equal(t, []string{"--load-format", "model-transfer"}, ctr.Args,
+			"sentinel must never alter --load-format")
+		assert.NotNil(t, findVolume(pod, modelDeploymentModelTransferWheelVolumeName))
+		assert.NotNil(t, findVolume(pod, modelDeploymentEngineSentinelVolumeName))
+	})
+
+	t.Run("router rollout sentinel gate mounts PYTHONPATH while holding activation until router isolation converges", func(t *testing.T) {
+		md := newRenderDeployment(func(md *workercore.ModelDeployment) {
+			md.Spec.Router = &workercore.ModelDeploymentRouter{Name: workercore.ModelDeploymentRouterVLLM}
+		})
+
+		heldPod, err := renderModelDeploymentPod(t.Context(), ModelDeploymentRenderInput{
+			Deployment:            md,
+			Role:                  &md.Spec.Roles[0],
+			AcceleratorType:       nvidiaAT,
+			EngineSentinelEnabled: ptr.To(false),
+		})
+		require.NoError(t, err)
+		heldCtr := &heldPod.Spec.Containers[0]
+		assert.Equal(t, "vllm", heldCtr.Command[0])
+		assert.NotNil(t, findVolume(heldPod, modelDeploymentEngineSentinelVolumeName),
+			"read-only sentinel volume stays mounted even while activation is held")
+		pyPath := envByName(heldCtr.Env, "PYTHONPATH")
+		require.NotNil(t, pyPath)
+		assert.Equal(t, stageMountPath, pyPath.Value)
+		assert.Nil(t, envByName(heldCtr.Env, modelDeploymentEngineSentinelEnableEnv))
+		assert.Nil(t, envByName(heldCtr.Env, modelDeploymentEngineSentinelEngineEnv))
+		assert.Equal(t, "/health", heldCtr.StartupProbe.HTTPGet.Path)
+		assert.Equal(t, "/health", heldCtr.ReadinessProbe.HTTPGet.Path)
+		assert.Equal(t, "/health", heldCtr.LivenessProbe.HTTPGet.Path)
+
+		releasedPod, err := renderModelDeploymentPod(t.Context(), ModelDeploymentRenderInput{
+			Deployment:            md,
+			Role:                  &md.Spec.Roles[0],
+			AcceleratorType:       nvidiaAT,
+			EngineSentinelEnabled: ptr.To(true),
+		})
+		require.NoError(t, err)
+		releasedCtr := &releasedPod.Spec.Containers[0]
+		assert.Equal(t, "vllm", releasedCtr.Command[0])
+		require.NotNil(t, envByName(releasedCtr.Env, modelDeploymentEngineSentinelEnableEnv))
+		require.NotNil(t, envByName(releasedCtr.Env, modelDeploymentEngineSentinelEngineEnv))
+		assert.Equal(t, "/gpustack/v1/live", releasedCtr.StartupProbe.HTTPGet.Path)
+		assert.Equal(t, "/gpustack/v1/ready", releasedCtr.ReadinessProbe.HTTPGet.Path)
+		assert.Equal(t, "/gpustack/v1/live", releasedCtr.LivenessProbe.HTTPGet.Path)
+		assert.Equal(t,
+			heldPod.Annotations[modelDeploymentPodSpecHashAnnotation],
+			releasedPod.Annotations[modelDeploymentPodSpecHashAnnotation],
+		)
+	})
+
+	t.Run("multi-member leader-served follower omits probes while External-DP follower keeps probes", func(t *testing.T) {
+		leaderServed := newRenderDeployment(func(md *workercore.ModelDeployment) {
+			md.Spec.Roles[0].ReplicaSize = 2
+		})
+		leaderPod, err := renderModelDeploymentPod(t.Context(), ModelDeploymentRenderInput{
+			Deployment: leaderServed, Role: &leaderServed.Spec.Roles[0], AcceleratorType: nvidiaAT, Member: 0,
+		})
+		require.NoError(t, err)
+		followerPod, err := renderModelDeploymentPod(t.Context(), ModelDeploymentRenderInput{
+			Deployment: leaderServed, Role: &leaderServed.Spec.Roles[0], AcceleratorType: nvidiaAT, Member: 1,
+		})
+		require.NoError(t, err)
+		require.NotNil(t, leaderPod.Spec.Containers[0].StartupProbe)
+		require.NotNil(t, leaderPod.Spec.Containers[0].ReadinessProbe)
+		require.NotNil(t, leaderPod.Spec.Containers[0].LivenessProbe)
+		assert.Equal(t, "/gpustack/v1/live", leaderPod.Spec.Containers[0].StartupProbe.HTTPGet.Path)
+		assert.Equal(t, "/gpustack/v1/ready", leaderPod.Spec.Containers[0].ReadinessProbe.HTTPGet.Path)
+		assert.Equal(t, "/gpustack/v1/live", leaderPod.Spec.Containers[0].LivenessProbe.HTTPGet.Path)
+		assert.Nil(t, followerPod.Spec.Containers[0].StartupProbe)
+		assert.Nil(t, followerPod.Spec.Containers[0].ReadinessProbe)
+		assert.Nil(t, followerPod.Spec.Containers[0].LivenessProbe)
+
+		externalDP := newRenderDeployment(func(md *workercore.ModelDeployment) {
+			md.Spec.Roles[0].ReplicaSize = 2
+			md.Spec.Roles[0].ExtraArgs = []string{
+				"--data-parallel-size=2",
+				"--data-parallel-size-local=1",
+				"--data-parallel-external-lb",
+			}
+		})
+		dpFollowerPod, err := renderModelDeploymentPod(t.Context(), ModelDeploymentRenderInput{
+			Deployment: externalDP, Role: &externalDP.Spec.Roles[0], AcceleratorType: nvidiaAT, Member: 1,
+		})
+		require.NoError(t, err)
+		require.NotNil(t, dpFollowerPod.Spec.Containers[0].StartupProbe)
+		require.NotNil(t, dpFollowerPod.Spec.Containers[0].ReadinessProbe)
+		require.NotNil(t, dpFollowerPod.Spec.Containers[0].LivenessProbe)
+		assert.Equal(t, "/gpustack/v1/live", dpFollowerPod.Spec.Containers[0].StartupProbe.HTTPGet.Path)
+		assert.Equal(t, "/gpustack/v1/ready", dpFollowerPod.Spec.Containers[0].ReadinessProbe.HTTPGet.Path)
+		assert.Equal(t, "/gpustack/v1/live", dpFollowerPod.Spec.Containers[0].LivenessProbe.HTTPGet.Path)
 	})
 }

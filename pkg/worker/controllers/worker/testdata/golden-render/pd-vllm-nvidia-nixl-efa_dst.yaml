@@ -6,7 +6,7 @@ metadata:
     kueue.x-k8s.io/pod-group-total-count: "1"
     kueue.x-k8s.io/role-hash: decode
     modeldeployment.gpustack.ai/pod-spec-hash: c4ed6fef18a34f02189e93fc63546be92fbede2dab69647561d1c32acb8ae743
-    modeldeployment.gpustack.ai/render-version: "5"
+    modeldeployment.gpustack.ai/render-version: "6"
     note.gpustack.ai/role: decode
     prometheus.io/path: /metrics
     prometheus.io/port: "8200"
@@ -71,44 +71,26 @@ spec:
       value: /var/lib/gpustack/cache/inductor
     - name: TRITON_CACHE_DIR
       value: /var/lib/gpustack/cache/triton
+    - name: PYTHONPATH
+      value: /var/lib/gpustack/operator/lib/engine-sentinel
     image: vllm/vllm-openai:v0.19.0
     lifecycle:
       preStop:
         exec:
           command:
           - python3
-          - -c
-          - |
-            import socket, ssl, sys, time, urllib.request
-            start = time.monotonic()
-            time.sleep(5)
-            names = ["vllm:num_requests_running", "vllm:num_requests_waiting"]
-            context = ssl.create_default_context()
-            context.check_hostname = False
-            context.verify_mode = ssl.CERT_NONE
-            idle = 0
-            while time.monotonic() - start < 25:
-                try:
-                    body = urllib.request.urlopen("http://127.0.0.1:8200/metrics", timeout=1, context=context).read().decode()
-                except Exception as err:
-                    if not isinstance(getattr(err, "reason", err), (TimeoutError, socket.timeout)):
-                        sys.exit(0)
-                    body = None
-                busy = 1.0 if body is None else 0.0
-                for line in (body or "").splitlines():
-                    name = line.split("{", 1)[0].split(" ", 1)[0]
-                    if name not in names:
-                        continue
-                    sample = line.rsplit("}", 1)[1] if "{" in line else line[len(name):]
-                    try:
-                        busy += float(sample.split()[0])
-                    except (IndexError, ValueError):
-                        busy += 1.0
-                idle = idle + 1 if busy == 0 else 0
-                if idle == 2:
-                    sys.exit(0)
-                time.sleep(1)
-            sys.exit(0)
+          - -m
+          - gpustack_engine_sentinel.drain
+          - --engine
+          - vLLM
+          - --port
+          - "8200"
+          - --scheme
+          - http
+          - --settle
+          - "5"
+          - --deadline
+          - "25"
     livenessProbe:
       failureThreshold: 6
       httpGet:
@@ -157,6 +139,9 @@ spec:
       name: gpustack-compile-cache
     - mountPath: /dev/shm
       name: model-shm
+    - mountPath: /var/lib/gpustack/operator/lib/engine-sentinel
+      name: gpustack-engine-sentinel
+      readOnly: true
   enableServiceLinks: false
   initContainers:
   - args:
@@ -193,6 +178,10 @@ spec:
       medium: Memory
       sizeLimit: 16Gi
     name: model-shm
+  - hostPath:
+      path: /var/lib/gpustack/operator/lib/engine-sentinel
+      type: DirectoryOrCreate
+    name: gpustack-engine-sentinel
 status: {}
 ---
 apiVersion: v1
@@ -203,7 +192,7 @@ metadata:
     kueue.x-k8s.io/pod-group-total-count: "1"
     kueue.x-k8s.io/role-hash: prefill
     modeldeployment.gpustack.ai/pod-spec-hash: f411fee6881f935b99b35cbe77266eae128643cc1aae4b7e1772a223907d6bfb
-    modeldeployment.gpustack.ai/render-version: "5"
+    modeldeployment.gpustack.ai/render-version: "6"
     note.gpustack.ai/role: prefill
     prometheus.io/path: /metrics
     prometheus.io/port: "8000"
@@ -270,44 +259,26 @@ spec:
       value: /var/lib/gpustack/cache/inductor
     - name: TRITON_CACHE_DIR
       value: /var/lib/gpustack/cache/triton
+    - name: PYTHONPATH
+      value: /var/lib/gpustack/operator/lib/engine-sentinel
     image: vllm/vllm-openai:v0.19.0
     lifecycle:
       preStop:
         exec:
           command:
           - python3
-          - -c
-          - |
-            import socket, ssl, sys, time, urllib.request
-            start = time.monotonic()
-            time.sleep(5)
-            names = ["vllm:num_requests_running", "vllm:num_requests_waiting"]
-            context = ssl.create_default_context()
-            context.check_hostname = False
-            context.verify_mode = ssl.CERT_NONE
-            idle = 0
-            while time.monotonic() - start < 25:
-                try:
-                    body = urllib.request.urlopen("http://127.0.0.1:8000/metrics", timeout=1, context=context).read().decode()
-                except Exception as err:
-                    if not isinstance(getattr(err, "reason", err), (TimeoutError, socket.timeout)):
-                        sys.exit(0)
-                    body = None
-                busy = 1.0 if body is None else 0.0
-                for line in (body or "").splitlines():
-                    name = line.split("{", 1)[0].split(" ", 1)[0]
-                    if name not in names:
-                        continue
-                    sample = line.rsplit("}", 1)[1] if "{" in line else line[len(name):]
-                    try:
-                        busy += float(sample.split()[0])
-                    except (IndexError, ValueError):
-                        busy += 1.0
-                idle = idle + 1 if busy == 0 else 0
-                if idle == 2:
-                    sys.exit(0)
-                time.sleep(1)
-            sys.exit(0)
+          - -m
+          - gpustack_engine_sentinel.drain
+          - --engine
+          - vLLM
+          - --port
+          - "8000"
+          - --scheme
+          - http
+          - --settle
+          - "5"
+          - --deadline
+          - "25"
     livenessProbe:
       failureThreshold: 6
       httpGet:
@@ -362,6 +333,9 @@ spec:
       name: gpustack-compile-cache
     - mountPath: /dev/shm
       name: model-shm
+    - mountPath: /var/lib/gpustack/operator/lib/engine-sentinel
+      name: gpustack-engine-sentinel
+      readOnly: true
   enableServiceLinks: false
   restartPolicy: Always
   runtimeClassName: nvidia
@@ -375,6 +349,10 @@ spec:
       medium: Memory
       sizeLimit: 16Gi
     name: model-shm
+  - hostPath:
+      path: /var/lib/gpustack/operator/lib/engine-sentinel
+      type: DirectoryOrCreate
+    name: gpustack-engine-sentinel
 status: {}
 ---
 apiVersion: v1

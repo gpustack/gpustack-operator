@@ -6,8 +6,12 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -59,13 +63,15 @@ func TestRenderModelDeploymentPod_DrainsBeforeTheEngineStops(t *testing.T) {
 		name   string
 		input  func(*testing.T) ModelDeploymentRenderInput
 		engine string
-		url    string
+		port   string
+		scheme string
 	}{
 		{
 			name:   "a vLLM server",
 			input:  plain(0),
 			engine: workercore.ModelDeploymentEngineVLLM,
-			url:    "http://127.0.0.1:8000/metrics",
+			port:   "8000",
+			scheme: "http",
 		},
 		{
 			name: "an SGLang server",
@@ -76,31 +82,36 @@ func TestRenderModelDeploymentPod_DrainsBeforeTheEngineStops(t *testing.T) {
 				md.Spec.Roles[0].Image = "lmsysorg/sglang:v0.5.18"
 			}),
 			engine: workercore.ModelDeploymentEngineSGLang,
-			url:    "http://127.0.0.1:8000/metrics",
+			port:   "8000",
+			scheme: "http",
 		},
 		{
 			name:   "the prefill role of a two-role deployment",
 			input:  plain(0, twoRoleDeploymentMutations()...),
 			engine: workercore.ModelDeploymentEngineVLLM,
-			url:    "http://127.0.0.1:8000/metrics",
+			port:   "8000",
+			scheme: "http",
 		},
 		{
 			name:   "the decode role of a two-role deployment",
 			input:  plain(1, twoRoleDeploymentMutations()...),
 			engine: workercore.ModelDeploymentEngineVLLM,
-			url:    "http://127.0.0.1:8000/metrics",
+			port:   "8000",
+			scheme: "http",
 		},
 		{
 			name:   "a direct decoder with a native routing sidecar",
 			input:  directDecoder(true),
 			engine: workercore.ModelDeploymentEngineVLLM,
-			url:    "http://127.0.0.1:8200/metrics",
+			port:   "8200",
+			scheme: "http",
 		},
 		{
 			name:   "a direct decoder with a classic routing sidecar",
 			input:  directDecoder(false),
 			engine: workercore.ModelDeploymentEngineVLLM,
-			url:    "http://127.0.0.1:8200/metrics",
+			port:   "8200",
+			scheme: "http",
 		},
 		{
 			name: "a TLS-listening role on a declared port",
@@ -109,7 +120,8 @@ func TestRenderModelDeploymentPod_DrainsBeforeTheEngineStops(t *testing.T) {
 				md.Spec.Roles[0].ExtraArgs = []string{"--ssl-certfile", "/etc/tls/tls.crt"}
 			}),
 			engine: workercore.ModelDeploymentEngineVLLM,
-			url:    "https://127.0.0.1:9000/metrics",
+			port:   "9000",
+			scheme: "https",
 		},
 	}
 
@@ -136,6 +148,71 @@ func TestRenderModelDeploymentPod_DrainsBeforeTheEngineStops(t *testing.T) {
 					"a native sidecar is stopped only after the engine exits, so it needs no hook")
 			}
 			require.NotNil(t, engineC)
+			require.NotNil(t, engineC.Lifecycle)
+			require.NotNil(t, engineC.Lifecycle.PreStop)
+			require.NotNil(t, engineC.Lifecycle.PreStop.Exec)
+
+			assert.Equal(t, tc.port, pod.Annotations["prometheus.io/port"],
+				"the hook reads the listener the scrape annotations name")
+			assert.Equal(t, tc.scheme, pod.Annotations["prometheus.io/scheme"],
+				"the hook reads the scheme the scrape annotations name")
+			assert.Equal(t, []string{
+				"python3", "-m", "gpustack_engine_sentinel.drain",
+				"--engine", tc.engine,
+				"--port", tc.port,
+				"--scheme", tc.scheme,
+				"--settle", strconv.Itoa(int(modelDeploymentDrainSettleSeconds)),
+				"--deadline", "25",
+			}, engineC.Lifecycle.PreStop.Exec.Command)
+		})
+	}
+
+	fallbackCases := []struct {
+		name   string
+		input  func(*testing.T) ModelDeploymentRenderInput
+		engine string
+		url    string
+	}{
+		{
+			name: "CPU-only role falls back to inline drain script",
+			input: func(t *testing.T) ModelDeploymentRenderInput {
+				md := newRenderDeployment(func(md *workercore.ModelDeployment) {
+					md.Spec.Roles[0].AcceleratorType = ""
+				})
+				return ModelDeploymentRenderInput{Deployment: md, Role: &md.Spec.Roles[0]}
+			},
+			engine: workercore.ModelDeploymentEngineVLLM,
+			url:    "http://127.0.0.1:8000/metrics",
+		},
+		{
+			name: "Encode role falls back to inline drain script",
+			input: plain(0, func(md *workercore.ModelDeployment) {
+				md.Spec.Roles[0].Kind = workercore.ModelDeploymentRoleKindEncode
+			}),
+			engine: workercore.ModelDeploymentEngineVLLM,
+			url:    "http://127.0.0.1:8000/metrics",
+		},
+		{
+			name: "SGLang Ray role falls back to inline drain script",
+			input: plain(0, func(md *workercore.ModelDeployment) {
+				md.Spec.Engine = workercore.ModelDeploymentEngine{
+					Name: workercore.ModelDeploymentEngineSGLang, Image: "lmsysorg/sglang:v0.5.18",
+				}
+				md.Spec.Roles[0].Image = "lmsysorg/sglang:v0.5.18"
+				md.Spec.Roles[0].ExtraArgs = []string{"--distributed-executor-backend=ray"}
+			}),
+			engine: workercore.ModelDeploymentEngineSGLang,
+			url:    "http://127.0.0.1:8000/metrics",
+		},
+	}
+
+	for _, tc := range fallbackCases {
+		t.Run(tc.name, func(t *testing.T) {
+			pod, err := renderModelDeploymentPod(context.Background(), tc.input(t))
+			require.NoError(t, err)
+			assert.False(t, modelDeploymentPodHasVolume(pod, modelDeploymentEngineSentinelVolumeName))
+
+			engineC := &pod.Spec.Containers[0]
 			require.NotNil(t, engineC.Lifecycle)
 			require.NotNil(t, engineC.Lifecycle.PreStop)
 			require.NotNil(t, engineC.Lifecycle.PreStop.Exec)
@@ -177,6 +254,7 @@ func TestRenderModelDeploymentPod_GraceIsTheRoles(t *testing.T) {
 	testCases := []struct {
 		name         string
 		command      []string
+		cpuOnly      bool
 		grace        *int64
 		wantGrace    *int64
 		wantDeadline int64
@@ -188,6 +266,13 @@ func TestRenderModelDeploymentPod_GraceIsTheRoles(t *testing.T) {
 		},
 		{
 			name:         "a role's grace moves the hook's deadline with it",
+			grace:        ptr.To[int64](45),
+			wantGrace:    ptr.To[int64](45),
+			wantDeadline: 40,
+		},
+		{
+			name:         "a non-sentinel CPU-only role's grace moves the fallback script deadline",
+			cpuOnly:      true,
 			grace:        ptr.To[int64](45),
 			wantGrace:    ptr.To[int64](45),
 			wantDeadline: 40,
@@ -207,10 +292,17 @@ func TestRenderModelDeploymentPod_GraceIsTheRoles(t *testing.T) {
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			md := newRenderDeployment(func(md *workercore.ModelDeployment) {
+				if tc.cpuOnly {
+					md.Spec.Roles[0].AcceleratorType = ""
+				}
 				md.Spec.Roles[0].Command = tc.command
 				md.Spec.Roles[0].TerminationGracePeriodSeconds = tc.grace
 			})
-			pod := renderOne(t, md, newRenderAcceleratorType())
+			at := newRenderAcceleratorType()
+			if tc.cpuOnly {
+				at = nil
+			}
+			pod := renderOne(t, md, at)
 
 			assert.Equal(t, tc.wantGrace, pod.Spec.TerminationGracePeriodSeconds)
 			require.Len(t, pod.Spec.Containers, 1)
@@ -222,8 +314,20 @@ func TestRenderModelDeploymentPod_GraceIsTheRoles(t *testing.T) {
 			require.NotNil(t, pod.Spec.Containers[0].Lifecycle)
 			require.NotNil(t, pod.Spec.Containers[0].Lifecycle.PreStop)
 			require.NotNil(t, pod.Spec.Containers[0].Lifecycle.PreStop.Exec)
-			script := pod.Spec.Containers[0].Lifecycle.PreStop.Exec.Command[2]
-			assert.Contains(t, script, fmt.Sprintf("start < %d:", tc.wantDeadline))
+			cmd := pod.Spec.Containers[0].Lifecycle.PreStop.Exec.Command
+			if tc.cpuOnly {
+				require.Len(t, cmd, 3)
+				assert.Contains(t, cmd[2], fmt.Sprintf("start < %d:", tc.wantDeadline))
+				return
+			}
+			assert.Equal(t, []string{
+				"python3", "-m", "gpustack_engine_sentinel.drain",
+				"--engine", workercore.ModelDeploymentEngineVLLM,
+				"--port", "8000",
+				"--scheme", "http",
+				"--settle", "5",
+				"--deadline", strconv.FormatInt(tc.wantDeadline, 10),
+			}, cmd)
 		})
 	}
 }
@@ -408,4 +512,62 @@ func TestModelDeploymentDrainScript_WaitsForTheEngine(t *testing.T) {
 		assert.GreaterOrEqual(t, took, settle*time.Second, "the settle is served even then")
 		assert.Less(t, took, (settle+2)*time.Second)
 	})
+}
+
+func TestModelDeploymentDrainSentinelModule_WaitsForTheEngine(t *testing.T) {
+	python, err := exec.LookPath("python3")
+	if err != nil {
+		t.Skip("python3 is not on PATH; the sentinel drain module cannot be run here")
+	}
+	sentinelSrc, err := filepath.Abs(filepath.Join("..", "..", "..", "..", "engine-sentinel", "python"))
+	require.NoError(t, err)
+
+	var reads atomic.Int64
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		running := "0.0"
+		if reads.Add(1) == 1 {
+			running = "1.0"
+		}
+		_, _ = fmt.Fprintf(w, "vllm:num_requests_running %s\nvllm:num_requests_waiting 0\n", running)
+	}))
+	defer srv.Close()
+
+	parsedURL, err := url.Parse(srv.URL)
+	require.NoError(t, err)
+	port, err := strconv.Atoi(parsedURL.Port())
+	require.NoError(t, err)
+
+	hook := modelDeploymentDrainHook(workercore.ModelDeploymentEngineVLLM, int32(port), core.URISchemeHTTPS, 15, true)
+	require.NotNil(t, hook)
+	require.NotNil(t, hook.Exec)
+
+	args := append([]string(nil), hook.Exec.Command[1:]...)
+	for i := 0; i+1 < len(args); i++ {
+		if args[i] == "--settle" {
+			args[i+1] = "1"
+		}
+		if args[i] == "--deadline" {
+			args[i+1] = "8"
+		}
+	}
+
+	cmd := exec.Command(python, args...)
+	env := make([]string, 0, len(os.Environ())+1)
+	for _, entry := range os.Environ() {
+		if strings.HasPrefix(entry, "PYTHONPATH=") {
+			continue
+		}
+		env = append(env, entry)
+	}
+	env = append(env, "PYTHONPATH="+sentinelSrc)
+	cmd.Env = env
+
+	began := time.Now()
+	out, err := cmd.CombinedOutput()
+	require.NoError(t, err, "sentinel drain CLI must exit 0; output: %s", out)
+	took := time.Since(began)
+
+	assert.EqualValues(t, 3, reads.Load(), "one busy read followed by two consecutive idle reads")
+	assert.GreaterOrEqual(t, took, 3*time.Second)
+	assert.Less(t, took, 8*time.Second)
 }
