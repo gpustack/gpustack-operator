@@ -302,3 +302,31 @@ def test_sitecustomize_symlinked_downstream_does_not_hang(tmp_path: Path):
         check=True,
     )
     assert res.stdout.strip() == "1"
+
+
+def test_sitecustomize_broken_downstream_does_not_abort_bootstrap(tmp_path: Path):
+    broken_dir = tmp_path / "broken_dir"
+    broken_dir.mkdir()
+    (broken_dir / "sitecustomize.py").write_text(
+        "raise RuntimeError('boom in downstream sitecustomize')\n",
+        encoding="utf-8",
+    )
+
+    env = dict(os.environ)
+    env["GPUSTACK_ENGINE_SENTINEL_ENABLE"] = "1"
+    env["PYTHONPATH"] = os.pathsep.join([str(REPO_PYTHON_ROOT), str(broken_dir)])
+    probe = (
+        "import json, sys; "
+        "finders = [f for f in sys.meta_path if type(f).__name__.endswith('PostImportFinder')]; "
+        "print(json.dumps({'finders': len(finders)}))"
+    )
+    res = subprocess.run(
+        [sys.executable, "-c", probe],
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=10,
+        check=True,
+    )
+    assert json.loads(res.stdout.strip())["finders"] == 1
+    assert "boom in downstream sitecustomize" in res.stderr

@@ -356,14 +356,9 @@ def _restore_sglang_snapshot(
     scheduler: Any,
     state: _SGLangRankState,
     snap: dict[str, Any],
+    rejection_cls: type[Exception] = ValueError,
 ) -> None:
-    if "by_boot_id" in snap and isinstance(snap.get("by_boot_id"), dict):
-        rank_snap = snap["by_boot_id"].get(state.boot_id)
-        if not isinstance(rank_snap, dict):
-            raise ValueError(
-                f"missing per-rank rollback snapshot for boot_id={state.boot_id!r}"
-            )
-        snap = rank_snap
+    snap = _resolve_rank_rollback_snapshot(state, snap, rejection_cls)
     scheduler._gpustack_live_max_active_requests = snap.get("live_max_active")
     rb = getattr(scheduler, "running_batch", None)
     if rb is not None and hasattr(rb, "batch_is_full"):
@@ -1056,6 +1051,7 @@ def patch_sglang_internal_state_module(mod: Any) -> None:
                 _resolve_rank_rollback_snapshot(
                     _ensure_sglang_rank_state(self.scheduler), val, rejection_cls
                 ),
+                rejection_cls=rejection_cls,
             ),
         )
         return handlers

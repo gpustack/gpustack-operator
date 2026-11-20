@@ -544,6 +544,12 @@ class SentinelControlPlane:
             add_api_route(RUNTIME_CONFIG_PATH, _rc_post_ep, methods=["POST"])
             return
 
+        LOGGER.warning(
+            "Skipping sentinel route registration on non-FastAPI/Starlette app %s.%s",
+            app_module,
+            type(app).__name__,
+        )
+
 
 class SentinelASGIMiddleware:
     """Pure ASGI wrapper routing /gpustack/v1/* and rejecting inference with 503 while paused."""

@@ -172,7 +172,11 @@ def patch_uvicorn_config_module(mod: Any) -> None:
         def _wrapped_load(self: Any, *args: Any, **kwargs: Any) -> Any:
             result = orig_load(self, *args, **kwargs)
             loaded_app = getattr(self, "loaded_app", None)
-            if loaded_app is not None and not is_sentinel_installed(loaded_app):
+            if (
+                loaded_app is not None
+                and getattr(self, "interface", "auto") != "wsgi"
+                and not is_sentinel_installed(loaded_app)
+            ):
                 self.loaded_app = ensure_fallback_sentinel_on_app(loaded_app)
             return result
 

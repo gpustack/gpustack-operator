@@ -21,6 +21,11 @@ fi
 
 mkdir -p "${dst}"
 
+if command -v flock >/dev/null 2>&1; then
+    exec 9>"${dst}/.copy-dir.lock"
+    flock 9
+fi
+
 # Sweep any orphaned staging temp files left behind by an interrupted copy.
 find "${dst}" -type f -name '.*.stage-*' -delete 2>/dev/null || true
 

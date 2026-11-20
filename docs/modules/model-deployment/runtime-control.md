@@ -40,7 +40,7 @@ spec:
     name: Qwen/Qwen2.5-72B-Instruct
   engine:
     name: vLLM
-    image: vllm/vllm-openai:v0.19.0
+    image: gpustack/runner:cuda13.0-vllm0.32.0
   router:
     name: vllm-router
   roles:

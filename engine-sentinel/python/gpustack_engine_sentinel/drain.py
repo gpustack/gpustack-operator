@@ -180,7 +180,9 @@ def main(argv: list[str] | None = None) -> int:
             poll_interval=args.poll_interval,
             request_timeout=args.request_timeout,
         )
-    except BaseException:
+    except KeyboardInterrupt:
+        raise
+    except (Exception, SystemExit):
         # PreStop always exits 0 so Kubelet never records FailedPreStopHook events.
         return 0
 

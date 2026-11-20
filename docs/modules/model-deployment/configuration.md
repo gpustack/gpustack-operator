@@ -651,7 +651,7 @@ rendering changes are evaluated separately:
 | `modeldeployment.gpustack.ai/render-version` (on `Pod`) | operator-synthesized flags (`--host`, `--port`, `--served-model-name`, connector flags), defaulted environment entries, probes, `preStop` drain hook, sidecars (`routing-proxy`, `wait-for-worker`), implicit labels/annotations, and worker `Setting` values | upgrading to an operator release with a newer rendering baseline | keeps running replicas in place while `render-version` meets the effective minimum floor; applies to newly created or replaced `Pod`s |
 | `modeldeployment.gpustack.ai/min-render-version` (on `ModelDeployment`) | per-deployment render-version floor, clamped to `[minSupportedRenderVersion, currentRenderVersion]` | setting or raising the annotation on `ModelDeployment.metadata.annotations` | rolls replicas whose `render-version` is below the effective floor, one per role per pass |
 
-Live fields in *`roles[].runtimeControl.parameters`*, *`roles[].pause`*, and the seven mutable *`spec.router`* subfields (`replicas`, `image`, `imagePullPolicy`, `imagePullSecrets`, `extraArgs`, `requestTimeoutSeconds`, `disaggregationThresholdTokens`) do not roll worker `Pod`s; see [Online Runtime Control](runtime-control.md#router-hash-decoupling).
+Live fields in *`roles[].runtimeControl.parameters`*, *`roles[].pause`*, and the mutable *`spec.router`* subfields do not roll worker `Pod`s; see [Online Runtime Control](runtime-control.md#router-hash-decoupling) for the full list.
 
 Set `modeldeployment.gpustack.ai/min-render-version` on the `ModelDeployment` to roll running replicas onto a newer rendering baseline on your own schedule; see [Model Deployment
 Status](status.md#status) for how `ReplicasUpToDate` reports older compatible replicas:

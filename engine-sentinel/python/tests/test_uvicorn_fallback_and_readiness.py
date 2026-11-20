@@ -355,3 +355,31 @@ def test_ready_503_when_sglang_starting_and_starts_open_with_require_ack_zero(
         run_sync(send_asgi_request(sgl_app, "GET", "/gpustack/v1/ready")).status_code
         == 200
     )
+
+
+def test_uvicorn_config_load_skips_wsgi_interface():
+    from gpustack_engine_sentinel.uvicorn_hook import (
+        is_sentinel_installed,
+        patch_uvicorn_config_module,
+    )
+
+    def wsgi_app(environ: Any, start_response: Any) -> list[bytes]:
+        del environ, start_response
+        return [b"ok"]
+
+    class FakeConfig:
+        def __init__(self, app: Any, *, interface: str = "auto") -> None:
+            self.app = app
+            self.interface = interface
+            self.loaded_app: Any = None
+
+        def load(self) -> None:
+            self.loaded_app = self.app
+
+    fake_mod = SimpleNamespace(Config=FakeConfig)
+    patch_uvicorn_config_module(fake_mod)
+
+    cfg = FakeConfig(wsgi_app, interface="wsgi")
+    cfg.load()
+    assert cfg.loaded_app is wsgi_app
+    assert not is_sentinel_installed(cfg.loaded_app)

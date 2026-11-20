@@ -760,9 +760,11 @@ func renderModelDeploymentPodTemplate(ctx context.Context, in ModelDeploymentRen
 	// A take-over role gets no drain, for the reason it gets no probes: the operator did not build
 	// that command line, so it cannot claim the container serves the metrics the hook reads.
 	if !takeOver {
-		sentinelMounted := sentinelConfigured && slices.ContainsFunc(mainC.VolumeMounts, func(m core.VolumeMount) bool {
-			return m.Name == modelDeploymentEngineSentinelVolumeName
-		})
+		sentinelMounted := sentinelConfigured &&
+			slices.ContainsFunc(mainC.VolumeMounts, func(m core.VolumeMount) bool {
+				return m.Name == modelDeploymentEngineSentinelVolumeName
+			}) &&
+			modelDeploymentContainerHasPythonPathEntry(&mainC, modelDeploymentEngineSentinelMountPath)
 		mainC.Lifecycle = &core.Lifecycle{
 			PreStop: modelDeploymentDrainHook(md.Spec.Engine.Name, enginePort, scheme,
 				modelDeploymentTerminationGracePeriodSeconds(role), sentinelMounted),
@@ -2676,6 +2678,22 @@ func prependModelDeploymentPythonPath(env []core.EnvVar, entry string) []core.En
 	}
 
 	return append(env, core.EnvVar{Name: "PYTHONPATH", Value: entry})
+}
+
+func modelDeploymentContainerHasPythonPathEntry(c *core.Container, entry string) bool {
+	if c == nil {
+		return false
+	}
+	for i := range c.Env {
+		if c.Env[i].Name != "PYTHONPATH" {
+			continue
+		}
+		if c.Env[i].ValueFrom != nil {
+			return false
+		}
+		return slices.Contains(strings.Split(c.Env[i].Value, ":"), entry)
+	}
+	return false
 }
 
 func modelDeploymentPodHasVolume(pod *core.Pod, volumeName string) bool {

@@ -571,3 +571,48 @@ func TestModelDeploymentDrainSentinelModule_WaitsForTheEngine(t *testing.T) {
 	assert.GreaterOrEqual(t, took, 3*time.Second)
 	assert.Less(t, took, 8*time.Second)
 }
+
+func TestModelDeploymentContainerHasPythonPathEntry(t *testing.T) {
+	entry := modelDeploymentEngineSentinelMountPath
+	cases := []struct {
+		name string
+		env  []core.EnvVar
+		want bool
+	}{
+		{
+			name: "missing pythonpath",
+			env:  nil,
+			want: false,
+		},
+		{
+			name: "valueFrom pythonpath",
+			env: []core.EnvVar{{
+				Name: "PYTHONPATH",
+				ValueFrom: &core.EnvVarSource{
+					ConfigMapKeyRef: &core.ConfigMapKeySelector{
+						LocalObjectReference: core.LocalObjectReference{Name: "env-cfg"},
+						Key:                  "pythonpath",
+					},
+				},
+			}},
+			want: false,
+		},
+		{
+			name: "prepended sentinel path",
+			env:  prependModelDeploymentPythonPath([]core.EnvVar{{Name: "PYTHONPATH", Value: "/opt/custom"}}, entry),
+			want: true,
+		},
+		{
+			name: "different pythonpath without sentinel",
+			env:  []core.EnvVar{{Name: "PYTHONPATH", Value: "/opt/custom"}},
+			want: false,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			c := &core.Container{Env: tc.env}
+			assert.Equal(t, tc.want, modelDeploymentContainerHasPythonPathEntry(c, entry))
+		})
+	}
+}

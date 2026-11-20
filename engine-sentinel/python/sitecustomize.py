@@ -77,7 +77,14 @@ def _chain_downstream_sitecustomize(current_file: Path, visited: set[str]) -> No
             continue
 
         chained_mod = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(chained_mod)
+        try:
+            spec.loader.exec_module(chained_mod)
+        except Exception as err:
+            # Match CPython site.execsitecustomize resilience so a broken downstream
+            # sitecustomize never blocks engine startup or sentinel bootstrap.
+            sys.stderr.write(
+                f"Error in chained sitecustomize ({origin}): {err.__class__.__name__}: {err}\n"
+            )
         visited.add(origin_key)
         return
 

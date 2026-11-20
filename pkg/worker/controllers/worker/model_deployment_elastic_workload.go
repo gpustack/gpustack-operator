@@ -75,22 +75,25 @@ func ModelDeploymentElasticBootstrapFromMaster(masterUID, raw string, md *worker
 	return int32(width), true
 }
 
-// modelDeploymentElasticRuntimeControlBlocksResize reports whether any role has a desired or
-// observed paused state that blocks elastic EP resize.
+// modelDeploymentElasticRuntimeControlBlocksResize reports whether the elastic role has a desired
+// or observed paused state that blocks elastic EP resize.
 func modelDeploymentElasticRuntimeControlBlocksResize(md *workercore.ModelDeployment) (bool, string) {
-	if md == nil {
+	role := ModelDeploymentElasticRole(md)
+	if role == nil {
 		return false, ""
 	}
-	for i := range md.Spec.Roles {
-		if md.Spec.Roles[i].Pause {
-			return true, fmt.Sprintf("elastic resize is held while role %q desired pause is true", md.Spec.Roles[i].Name)
-		}
+	if role.Pause {
+		return true, fmt.Sprintf("elastic resize is held while role %q desired pause is true", role.Name)
 	}
 	for i := range md.Status.Roles {
+		if md.Status.Roles[i].Name != role.Name {
+			continue
+		}
 		rc := md.Status.Roles[i].RuntimeControl
 		if rc != nil && rc.Paused {
-			return true, fmt.Sprintf("elastic resize is held while role %q observed paused is true", md.Status.Roles[i].Name)
+			return true, fmt.Sprintf("elastic resize is held while role %q observed paused is true", role.Name)
 		}
+		break
 	}
 	return false, ""
 }
