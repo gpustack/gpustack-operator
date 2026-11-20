@@ -1057,7 +1057,7 @@ emit_args=()
 if [[ "${staged_mods_ready}" == "true" && -n "${work_repo:-}" && -d "${work_repo}" ]]; then
   emit_args+=(
     --candidate-tree "${work_repo}"
-    --candidate-paths "hack/deps.sh,staging,go.mod,go.sum,api,pkg"
+    --candidate-paths "hack/deps.sh,hack/staging,staging,go.mod,go.sum,api,pkg"
   )
 fi
 

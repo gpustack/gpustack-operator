@@ -5,7 +5,7 @@
     {
       "path": ".auto-sync/checks",
       "kind": "directory",
-      "sha256": "3b39d83a9506eda72d3ef2cb98602207e8b23c27c121d4e9d4dcd6f66c78ad51"
+      "sha256": "bed8feb73fdb4c34fb87da5d4e2ac7c98f5a9ed66341cf64bc73deede4f9f78f"
     },
     {
       "path": ".auto-sync/instructions/k8s-deps.md",
@@ -15,7 +15,7 @@
     {
       "path": ".auto-sync/scripts/preflight-k8s-deps.sh",
       "kind": "file",
-      "sha256": "7f6a7ea193d735d10a5f4c6d7c200ca599b837e40af08c9a8c89e5fc2fdc4268"
+      "sha256": "9d3f497d77d47fa1bd2d6be65bf6840490773813ed43dbd0a562c10867350c28"
     }
   ]
 }

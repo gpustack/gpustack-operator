@@ -34,10 +34,14 @@ autosync::preflight::warm_caches "${STAGE_DIR}" --sbin
 PROBE_LIST_FILE="$(mktemp "${TMPDIR:-/tmp}/autosync-router-probes.XXXXXXXX")"
 DISCOVERY_JSON="${STAGE_DIR}/router-discovery.json"
 ROUTER_STAGE_TMP=""
+PIN_WORK=""
 cleanup_router_preflight() {
   rm -f "${PROBE_LIST_FILE}" "${DISCOVERY_JSON}"
   if [[ -n "${ROUTER_STAGE_TMP:-}" && -d "${ROUTER_STAGE_TMP}" ]]; then
     rm -rf "${ROUTER_STAGE_TMP}"
+  fi
+  if [[ -n "${PIN_WORK:-}" && -d "${PIN_WORK}" ]]; then
+    rm -rf "${PIN_WORK}"
   fi
 }
 trap cleanup_router_preflight EXIT
@@ -699,7 +703,8 @@ PY
 autosync::preflight::apply_force_to_upstream_records "${UPSTREAM_RECORDS_JSON}"
 
 if autosync::preflight::has_available_upstreams "${UPSTREAM_RECORDS_JSON}" || \
-   [[ "${COMMENT_COMMAND:-}" == "revise" || \
+   [[ "${AUTOSYNC_FORCE:-false}" == "true" || \
+      "${COMMENT_COMMAND:-}" == "revise" || \
       "${COMMENT_COMMAND:-}" == "retry" || \
       "${AUTOSYNC_WARM_TOOLS:-false}" == "true" ]]; then
   if [[ -n "${AUTOSYNC_ROUTER_FIXTURE_DIR:-}" && "${AUTOSYNC_WARM_TOOLS:-false}" != "true" ]]; then

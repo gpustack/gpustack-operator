@@ -872,6 +872,9 @@ PY
 # autosync::preflight::apply_force_to_upstream_records <upstream_records_json>
 # When AUTOSYNC_FORCE=true and no record currently has status == "available",
 # promotes the first "up_to_date" record to "available" while keeping version unchanged.
+# Records with status == "held_back" intentionally stay "held_back" so mirror, patch, and
+# setting-image holds are never bypassed; emit_taskpack_v2 and Loopwright force=true still
+# enter candidate mode when every upstream is held back.
 autosync::preflight::apply_force_to_upstream_records() {
   local records_json="${1:?upstream_records_json required}"
   [[ "${AUTOSYNC_FORCE:-false}" == "true" ]] || return 0
@@ -1333,6 +1336,9 @@ if candidate_tree and os.path.isdir(candidate_tree) and cand_paths:
             input=ci_in,
             capture_output=True,
         )
+        if ci_res.returncode not in (0, 1):
+            err_msg = ci_res.stderr.decode("utf-8", errors="replace").strip()
+            raise SystemExit(f"FAIL: git check-ignore failed (rc={ci_res.returncode}): {err_msg}")
         if ci_res.returncode == 0:
             ignored = {
                 p.decode("utf-8", errors="surrogateescape")
@@ -1346,6 +1352,9 @@ if candidate_tree and os.path.isdir(candidate_tree) and cand_paths:
     reg_items = [(r, cand_entries[r][0]) for r in kept_rels if not cand_entries[r][1]]
     reg_hashes: dict[str, tuple[str, str]] = {}
     if reg_items:
+        for r, fp in reg_items:
+            if "\n" in fp or "\r" in fp:
+                raise SystemExit(f"FAIL: candidate file path contains newline: {r!r}")
         stdin_paths = "\n".join(fp for _, fp in reg_items) + "\n"
         ho_res = subprocess.run(
             ["git", "-C", repo_root, "hash-object", "--no-filters", "--stdin-paths"],
@@ -1354,6 +1363,10 @@ if candidate_tree and os.path.isdir(candidate_tree) and cand_paths:
             check=True,
         )
         blobs = [ln.strip() for ln in ho_res.stdout.decode("utf-8").splitlines() if ln.strip()]
+        if len(blobs) != len(reg_items):
+            raise SystemExit(
+                f"FAIL: git hash-object count mismatch ({len(blobs)} != {len(reg_items)})"
+            )
         for (r, fp), blob in zip(reg_items, blobs):
             mode = "100755" if bool(os.stat(fp).st_mode & 0o111) else "100644"
             reg_hashes[r] = (mode, blob)
@@ -1453,7 +1466,8 @@ for spec in check_archive_specs:
     arc_dst = os.path.join(staging_dir, arc_name)
     cnt = pack_dir_to_tgz(arc_src, arc_dst)
     if cnt > 0:
-        if os.path.getsize(arc_dst) <= MAX_CHECK_ARCHIVE_BYTES:
+        arc_size = os.path.getsize(arc_dst)
+        if arc_size <= MAX_CHECK_ARCHIVE_BYTES:
             staged_resources.append({
                 "id": arc_id,
                 "kind": "document",
@@ -1463,6 +1477,11 @@ for spec in check_archive_specs:
             })
         else:
             os.unlink(arc_dst)
+            print(
+                f"WARN: check archive '{arc_id}' ({arc_size} bytes) exceeds "
+                f"{MAX_CHECK_ARCHIVE_BYTES} bytes and was omitted from stagedResources",
+                file=sys.stderr,
+            )
 
 # 5. Stage compact prompt summary JSON (strictly <= 32 KiB UTF-8).
 summary_highlights: dict = {}
@@ -1494,7 +1513,7 @@ summary_doc = {
     "base_sha": base_sha,
     "disposition": disposition,
     "reason": top_reason,
-    "upstreams": v2_upstreams,
+    "upstreams": [dict(u) for u in v2_upstreams],
     "has_candidate_overlay": has_overlay,
     "prestaged_changed_files_total": len(changed_rels),
     "prestaged_changed_files": changed_rels[:80],
@@ -1509,6 +1528,19 @@ if len(summary_bytes) > 32768:
     summary_doc["prestaged_changed_files"] = changed_rels[:20]
     summary_doc["prestaged_deleted_files"] = deleted_rels[:20]
     summary_bytes = (json.dumps(summary_doc, separators=(",", ":")) + "\n").encode("utf-8")
+if len(summary_bytes) > 32768:
+    summary_doc["highlights"] = {}
+    summary_doc["prestaged_changed_files"] = changed_rels[:10]
+    summary_doc["prestaged_deleted_files"] = deleted_rels[:10]
+    for u in summary_doc["upstreams"]:
+        u.pop("metadata", None)
+        if "reason" in u:
+            u["reason"] = str(u["reason"])[:256]
+    summary_bytes = (json.dumps(summary_doc, separators=(",", ":")) + "\n").encode("utf-8")
+if len(summary_bytes) > 32768:
+    raise SystemExit(
+        f"FAIL: {domain} prompt summary ({len(summary_bytes)} bytes) exceeds 32768-byte limit"
+    )
 write_fresh_regular_bytes(os.path.join(staging_dir, summary_bn), summary_bytes)
 staged_resources.insert(0, {
     "id": f"{domain}-preflight-summary",
@@ -1517,6 +1549,23 @@ staged_resources.insert(0, {
     "mount": "prompt",
     "exposeToChecks": False,
 })
+
+prompt_total = 0
+workspace_total = 0
+for res in staged_resources:
+    res_size = os.path.getsize(os.path.join(staging_dir, res["path"]))
+    if res["mount"] == "prompt":
+        if res_size > 65536:
+            raise SystemExit(f"FAIL: prompt resource {res['id']} ({res_size} bytes) exceeds 64 KiB")
+        prompt_total += res_size
+    else:
+        if res_size > 128 * 1024 * 1024:
+            raise SystemExit(f"FAIL: workspace resource {res['id']} ({res_size} bytes) exceeds 128 MiB")
+        workspace_total += res_size
+if prompt_total > 262144:
+    raise SystemExit(f"FAIL: total prompt resources ({prompt_total} bytes) exceed 256 KiB")
+if workspace_total > 256 * 1024 * 1024:
+    raise SystemExit(f"FAIL: total workspace resources ({workspace_total} bytes) exceed 256 MiB")
 
 out_payload = (
     json.dumps(

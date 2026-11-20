@@ -94,15 +94,7 @@ autosync::bootstrap_env() {
     fi
 
     if [[ -z "${GOMODCACHE:-}" ]]; then
-      if [[ -d "${stage_dir}/go-mod" && -n "$(ls -A "${stage_dir}/go-mod/" 2>/dev/null)" ]]; then
-        export GOMODCACHE="${stage_dir}/go-mod"
-      elif [[ -n "${saved_go_bin_dir}" && -x "${saved_go_bin_dir}/go" ]]; then
-        local fallback_gomod
-        fallback_gomod="$("${saved_go_bin_dir}/go" env GOMODCACHE 2>/dev/null || printf '%s/go-mod' "${stage_dir}")"
-        export GOMODCACHE="${fallback_gomod}"
-      else
-        export GOMODCACHE="${stage_dir}/go-mod"
-      fi
+      export GOMODCACHE="${stage_dir}/go-mod"
     fi
     export GPUSTACK_DEPS_CACHE_DIR="${GPUSTACK_DEPS_CACHE_DIR:-${stage_dir}/deps-cache}"
     export GPUSTACK_DEPS_OFFLINE="${GPUSTACK_DEPS_OFFLINE:-true}"
@@ -158,7 +150,11 @@ autosync::bootstrap_env() {
     if [[ -n "${LOOPWRIGHT_BASE_DIR:-}" && -d "${LOOPWRIGHT_BASE_DIR}" ]]; then
       base_phys="$(cd "${LOOPWRIGHT_BASE_DIR}" && pwd -P)"
     fi
-    if [[ -d "${stage_dir}/.sbin" && ! -e "${candidate_dir}/.sbin" && ! -L "${candidate_dir}/.sbin" && "${candidate_dir}" != "${base_phys}" ]]; then
+    local cand_phys="${candidate_dir}"
+    if [[ -d "${candidate_dir}" ]]; then
+      cand_phys="$(cd "${candidate_dir}" && pwd -P)"
+    fi
+    if [[ -d "${stage_dir}/.sbin" && ! -e "${candidate_dir}/.sbin" && ! -L "${candidate_dir}/.sbin" && "${cand_phys}" != "${base_phys}" ]]; then
       if [[ -w "${candidate_dir}" ]]; then
         mkdir -p "${candidate_dir}/.sbin"
         cp -RLp "${stage_dir}/.sbin/." "${candidate_dir}/.sbin/" 2>/dev/null || true

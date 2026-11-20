@@ -528,6 +528,13 @@ sync_steps = ((jobs.get("auto-sync") or {}).get("steps")) or []
 lw_steps = [s for s in sync_steps if isinstance(s, dict) and str(s.get("uses") or "").startswith("gpustack/loopwright@")]
 if len(lw_steps) != 1:
     raise AssertionError(".github/workflows/auto-sync.yml: expected exactly one gpustack/loopwright step")
+lw_uses = str(lw_steps[0].get("uses") or "")
+lw_ref = lw_uses.split("@", 1)[1].strip()
+if not re.fullmatch(r"[0-9a-f]{40}", lw_ref):
+    raise AssertionError(f"auto-sync.yml: gpustack/loopwright must be pinned to a 40-char commit SHA, got {lw_uses!r}")
+fetch_pr_steps = [s for s in sync_steps if isinstance(s, dict) and s.get("name") == "Fetch PR head"]
+if len(fetch_pr_steps) != 1 or "needs.resolve-domains.outputs.pr_head_sha" not in str((fetch_pr_steps[0].get("env") or {}).get("EXPECTED_PR_HEAD_SHA") or ""):
+    raise AssertionError("auto-sync.yml: Fetch PR head step must verify EXPECTED_PR_HEAD_SHA from resolve-domains")
 lw_with = lw_steps[0].get("with") or {}
 if lw_with.get("mode") != "auto":
     raise AssertionError(f"auto-sync.yml: Loopwright step must set mode: auto, got {lw_with.get('mode')!r}")

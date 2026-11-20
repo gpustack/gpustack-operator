@@ -77,6 +77,7 @@ jobs:
         github.event.issue.pull_request != null &&
         github.event.issue.state == 'open' &&
         github.event.comment.user.type != 'Bot' &&
+        !endsWith(github.event.comment.user.login, '[bot]') &&
         contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association) &&
         (contains(github.event.comment.body, '/loopwright') || contains(github.event.comment.body, '/auto-sync'))
       )
@@ -258,11 +259,16 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR_NUMBER: ${{ github.event.issue.number }}
+          EXPECTED_PR_HEAD_SHA: ${{ needs.resolve-domains.outputs.pr_head_sha }}
           MAIN_SHA: ${{ steps.record-main.outputs.main_sha }}
           SERVER_URL: ${{ github.server_url }}
         run: |
           if [[ ! "${PR_NUMBER}" =~ ^[1-9][0-9]*$ ]]; then
             echo "ERROR: invalid PR_NUMBER '${PR_NUMBER}'" >&2
+            exit 1
+          fi
+          if [[ ! "${EXPECTED_PR_HEAD_SHA}" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "ERROR: missing or invalid expected PR head SHA '${EXPECTED_PR_HEAD_SHA}'" >&2
             exit 1
           fi
           if [[ -n "${GH_TOKEN}" ]]; then
@@ -275,6 +281,11 @@ jobs:
           else
             git -c core.hooksPath=/dev/null fetch --no-tags --no-recurse-submodules origin \
               "+refs/pull/${PR_NUMBER}/head:refs/remotes/origin/pr/${PR_NUMBER}"
+          fi
+          FETCHED_PR_HEAD_SHA="$(git rev-parse --verify "refs/remotes/origin/pr/${PR_NUMBER}^{commit}")"
+          if [[ "${FETCHED_PR_HEAD_SHA}" != "${EXPECTED_PR_HEAD_SHA}" ]]; then
+            echo "ERROR: PR #${PR_NUMBER} head moved from ${EXPECTED_PR_HEAD_SHA} to ${FETCHED_PR_HEAD_SHA} after comment event" >&2
+            exit 1
           fi
           if [[ "$(git rev-parse --verify 'HEAD^{commit}')" != "${MAIN_SHA}" ]]; then
             echo "ERROR: HEAD moved unexpectedly from ${MAIN_SHA}" >&2
@@ -343,8 +354,13 @@ jobs:
           fi
           bwrap --version
           if ! bwrap --unshare-all --ro-bind / / "$(command -v true)" >/dev/null 2>&1; then
-            if ! sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0; then
-              echo "WARN: failed to disable kernel.apparmor_restrict_unprivileged_userns" >&2
+            if [[ "${RUNNER_ENVIRONMENT:-}" == "github-hosted" ]]; then
+              if ! sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0; then
+                echo "WARN: failed to disable kernel.apparmor_restrict_unprivileged_userns" >&2
+              fi
+            else
+              echo "ERROR: bubblewrap unprivileged user namespaces are restricted on this self-hosted runner; configure an AppArmor profile for /usr/bin/bwrap on the host instead of mutating global sysctl state" >&2
+              exit 1
             fi
             bwrap --unshare-all --ro-bind / / "$(command -v true)"
           fi
@@ -366,7 +382,7 @@ jobs:
 
       - name: Run Loopwright
         id: loopwright
-        uses: gpustack/loopwright@main
+        uses: gpustack/loopwright@6d281028848473fc52b96a5a3b1cea49fc1a731f # main
         env:
           LOOPWRIGHT_PROVIDER_TOKEN: ${{ secrets.CI_GPUSTACK_LOOPWRIGHT_LLM_AUTH_TOKEN || secrets.CI_GPUSTACK_CODEREVIEW_LLM_AUTH_TOKEN }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -379,6 +395,9 @@ jobs:
         with:
           taskpack-path: .auto-sync/${{ matrix.domain }}-taskpack.yaml
           mode: auto
+          # Dual-key operator unlock required for strict-mode taskpacks declaring spec.preflight,
+          # read-only command.v1 toolchainPaths (allowHostPath), or check-only allowCheckNetwork.
+          # Candidate model turns and command.v1 checks still run inside bubblewrap without tokens.
           allow-privileged-execution: 'true'
           event-name: ${{ github.event_name }}
           event-path: ${{ github.event_path }}
@@ -393,11 +412,23 @@ jobs:
           force: ${{ (inputs.force == true || inputs.force == 'true') && 'true' || 'false' }}
           output: json,github-step-summary
 
+      - name: Sanitize diagnostics
+        if: always()
+        env:
+          DIAG_ROOT: ${{ runner.temp }}/loopwright-${{ matrix.domain }}
+        run: |
+          if [[ -d "${DIAG_ROOT}" ]]; then
+            find "${DIAG_ROOT}" \( -name 'secrets.json' -o -name '*.sqlite*' \) -type f -delete
+          fi
+
       - name: Upload diagnostics
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: auto-sync-diagnostics-${{ matrix.domain }}-${{ github.run_id }}-${{ github.run_attempt }}
+          # Loopwright runs assertCleanArtifact(scrubber) before writing config.yaml and registry.yaml
+          # (which store credential env-var names, never secret values); Sanitize diagnostics also
+          # deletes secrets.json and *.sqlite* before upload.
           path: |
             ${{ runner.temp }}/loopwright-${{ matrix.domain }}/*/run.json
             ${{ runner.temp }}/loopwright-${{ matrix.domain }}/*/memory-publication.json

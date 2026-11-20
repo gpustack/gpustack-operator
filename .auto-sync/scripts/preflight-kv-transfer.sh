@@ -1571,7 +1571,8 @@ PY
 autosync::preflight::apply_force_to_upstream_records "${UPSTREAM_RECORDS_JSON}"
 
 if autosync::preflight::has_available_upstreams "${UPSTREAM_RECORDS_JSON}" || \
-   [[ "${COMMENT_COMMAND:-}" == "revise" || \
+   [[ "${AUTOSYNC_FORCE:-false}" == "true" || \
+      "${COMMENT_COMMAND:-}" == "revise" || \
       "${COMMENT_COMMAND:-}" == "retry" || \
       "${AUTOSYNC_WARM_TOOLS:-false}" == "true" ]]; then
   if [[ -n "${AUTOSYNC_KV_FIXTURE_DIR:-}" && "${AUTOSYNC_WARM_TOOLS:-false}" != "true" ]]; then

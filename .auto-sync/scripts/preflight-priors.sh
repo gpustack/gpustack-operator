@@ -360,8 +360,21 @@ if [[ "${snapshots_changed}" == "true" ]]; then
   merge_attempted=true
   effective_gocache="${GOCACHE:-${stage_dir}/go-cache}"
   effective_gomodcache="${GOMODCACHE:-${stage_dir}/go-mod}"
-  if [[ -z "${GOMODCACHE:-}" && -z "$(ls -A "${effective_gomodcache}/" 2>/dev/null)" ]] && command -v go >/dev/null 2>&1; then
-    effective_gomodcache="$(go env GOMODCACHE)"
+  if [[ -z "${GOMODCACHE:-}" && -z "$(ls -A "${effective_gomodcache}/" 2>/dev/null)" ]]; then
+    if [[ "${AUTOSYNC_SKIP_GO_MOD_DOWNLOAD:-false}" == "true" ]] && command -v go >/dev/null 2>&1; then
+      host_gomodcache="$(go env GOMODCACHE 2>/dev/null || true)"
+      if [[ -n "${host_gomodcache}" && -d "${host_gomodcache}" && -r "${host_gomodcache}" && -n "$(ls -A "${host_gomodcache}/" 2>/dev/null)" ]]; then
+        printf 'WARN: preflight-priors: %s is empty under AUTOSYNC_SKIP_GO_MOD_DOWNLOAD=true; using host GOMODCACHE=%s\n' \
+          "${effective_gomodcache}" "${host_gomodcache}" >&2
+        effective_gomodcache="${host_gomodcache}"
+      else
+        printf 'WARN: preflight-priors: %s is empty and host GOMODCACHE is unavailable; offline go run may fail\n' \
+          "${effective_gomodcache}" >&2
+      fi
+    else
+      printf 'WARN: preflight-priors: staged Go module cache %s is empty; offline go run may fail\n' \
+        "${effective_gomodcache}" >&2
+    fi
   fi
   effective_goproxy="${GOPROXY:-off}"
 

@@ -5,7 +5,7 @@
     {
       "path": ".auto-sync/checks",
       "kind": "directory",
-      "sha256": "3b39d83a9506eda72d3ef2cb98602207e8b23c27c121d4e9d4dcd6f66c78ad51"
+      "sha256": "bed8feb73fdb4c34fb87da5d4e2ac7c98f5a9ed66341cf64bc73deede4f9f78f"
     },
     {
       "path": ".auto-sync/instructions/kv-transfer.md",
@@ -15,7 +15,7 @@
     {
       "path": ".auto-sync/scripts/preflight-kv-transfer.sh",
       "kind": "file",
-      "sha256": "ee92800820cd5d1cecfe584700da3bd9357a2572260f7a3d53e0f0a6e5664830"
+      "sha256": "eb5b712deb0d77b18184880a285b317c36703f1dacb50d897be046a53064664a"
     }
   ]
 }
