@@ -125,9 +125,6 @@ spec:
           script: .auto-sync/checks/validate_k8s_deps.sh
           timeoutSeconds: 3600
           allowReadOnlyGitHubToken: false
-          toolchainPaths:
-            - /usr/local/bin
-            - /usr/bin
           env:
             - AUTOSYNC_STAGE_DIR
             - AUTOSYNC_FAST_SELFTEST
