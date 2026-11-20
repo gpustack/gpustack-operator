@@ -78,7 +78,9 @@
 #   - 0.3.13: as 0.3.12.
 #   - 0.3.14 (the default): as 0.3.13, except the ubshmem ASCEND_SOURCES glob is wrapped onto
 #     multiple lines whose last line names ascend_direct_transport/utils.cpp -- the cann stage's
-#     fifth case block carries a 0.3.14 arm that adds context_manager.cpp beside that entry.
+#     fifth case block carries a 0.3.14 arm that adds context_manager.cpp beside that entry --
+#     and builder-cuda's 0.3.14 arm patches <ylt/util/tl/expected.hpp> into
+#     client_buffer_allocation.cpp for USE_VRAM_SEGMENT=ON.
 #
 # Build evidence exists for 0.3.10.post2 and 0.3.13.post1; 0.3.11, 0.3.12 and 0.3.14 follow from
 # reading the tags, and their first build is the check.
@@ -548,11 +550,25 @@ RUN <<EOF
 
     # 0.3.11 needs the same include_directories patch as the default builder; the reason and
     # the failure mode are documented there.
+    #
+    # 0.3.14's client_buffer_allocation.cpp uses tl::expected in allocate_vram_memory under
+    # #ifdef USE_VRAM_SEGMENT without including <ylt/util/tl/expected.hpp> (other mooncake-store
+    # headers include it directly). Non-CUDA targets leave USE_VRAM_SEGMENT off and compile
+    # untouched; here USE_VRAM_SEGMENT=ON exposes the missing header. The pre-check skips the
+    # edit if a 0.3.14.post* release backports the include upstream, and the trailing grep fails
+    # closed if sed matched nothing.
     case "${MOONCAKE_VERSION}" in
         0.3.11*)
             sed -i 's|^include_directories(mooncake-common/etcd)$|include_directories(mooncake-common/etcd)\ninclude_directories(mooncake-common/k8s-lease)|' \
                 /work/CMakeLists.txt
             grep -q '^include_directories(mooncake-common/k8s-lease)$' /work/CMakeLists.txt
+            ;;
+        0.3.14*)
+            if ! grep -Eq '^[[:space:]]*#include [<"]ylt/util/tl/expected\.hpp[>"]' /work/mooncake-store/src/common/client_buffer_allocation.cpp; then
+                sed -i 's|^#include <glog/logging\.h>$|#include <glog/logging.h>\n#include <ylt/util/tl/expected.hpp>|' \
+                    /work/mooncake-store/src/common/client_buffer_allocation.cpp
+            fi
+            grep -Eq '^[[:space:]]*#include [<"]ylt/util/tl/expected\.hpp[>"]' /work/mooncake-store/src/common/client_buffer_allocation.cpp
             ;;
     esac
 
