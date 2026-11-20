@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"slices"
 	"strconv"
 	"testing"
 
@@ -1033,6 +1034,19 @@ func TestMemberDerivedEnvs_CoversEveryNameTheRendererEmits(t *testing.T) {
 		{"the transport that mounts the host's libfabric", []func(*workercore.KVCacheBackend){
 			func(k *workercore.KVCacheBackend) { k.Spec.Transport.Protocol = "EFA" },
 		}},
+		{"a CANN group with Ascend A5 Host RoCE defaults", []func(*workercore.KVCacheBackend){
+			func(k *workercore.KVCacheBackend) {
+				k.Spec.Transport.Protocol = "CANN"
+				k.Spec.Connection.Managed.Members[0].FabricInterfaceCount = ptr.To[int32](1)
+			},
+		}},
+	}
+
+	// Derived and defaulted lists must be strictly disjoint: derived names are refused in extraEnv,
+	// while defaulted names must remain overridable there.
+	for _, name := range MemberDefaultedEnvs {
+		assert.NotContains(t, MemberDerivedEnvs, name,
+			"%s is defaulted and must not be in MemberDerivedEnvs, or admission would refuse overrides", name)
 	}
 
 	rendered := make(map[string]string)
@@ -1044,9 +1058,10 @@ func TestMemberDerivedEnvs_CoversEveryNameTheRendererEmits(t *testing.T) {
 	}
 
 	for name, fixture := range rendered {
-		assert.Contains(t, MemberDerivedEnvs, name,
-			"%s is rendered by %q and is not reserved, so a group could define it a second time "+
-				"through extraEnv and nothing would report the collision", name, fixture)
+		inDerived := slices.Contains(MemberDerivedEnvs, name)
+		inDefaulted := slices.Contains(MemberDefaultedEnvs, name)
+		assert.True(t, inDerived || inDefaulted,
+			"%s is rendered by %q and is in neither MemberDerivedEnvs nor MemberDefaultedEnvs", name, fixture)
 	}
 	for _, name := range MemberDerivedEnvs {
 		_, ok := rendered[name]
@@ -1054,6 +1069,12 @@ func TestMemberDerivedEnvs_CoversEveryNameTheRendererEmits(t *testing.T) {
 			"%s is reserved and no fixture here renders it: either the renderer stopped emitting it, "+
 				"in which case the reservation refuses a hatch entry for a collision that cannot "+
 				"happen, or this test is missing the path that does", name)
+	}
+	for _, name := range MemberDefaultedEnvs {
+		_, ok := rendered[name]
+		assert.True(t, ok,
+			"%s is defaulted and no fixture here renders it: either the renderer stopped emitting it "+
+				"or this test is missing the path that does", name)
 	}
 }
 
@@ -2012,8 +2033,27 @@ func TestMemberWorkload_FabricGrantFollowsTheProtocol(t *testing.T) {
 			protocol: "TCP", medium: "DRAM", interfaceCount: ptr.To[int32](2),
 		},
 		{
-			name:     "a count declared on CANN grants nothing",
+			name:     "CANN without fabricInterfaceCount grants nothing",
+			protocol: "CANN", medium: "DRAM",
+		},
+		{
+			name:     "CANN with fabricInterfaceCount 1 grants shared RDMA for Ascend A5 Host RoCE",
 			protocol: "CANN", medium: "DRAM", interfaceCount: ptr.To[int32](1),
+			want: rdmaSharedKey, wantCount: 1,
+		},
+		{
+			name:     "CANN with fabricInterfaceCount 2 grants exclusive RDMA for Ascend A5 Host RoCE",
+			protocol: "CANN", medium: "DRAM", interfaceCount: ptr.To[int32](2),
+			want: rdmaExclusiveKey, wantCount: 2,
+		},
+		{
+			name:     "group-override CANN with fabricInterfaceCount 1 grants shared RDMA",
+			protocol: "TCP", groupProtocol: "CANN", medium: "DRAM", interfaceCount: ptr.To[int32](1),
+			want: rdmaSharedKey, wantCount: 1,
+		},
+		{
+			name:     "group-override TCP on CANN backend with fabricInterfaceCount 1 grants nothing",
+			protocol: "CANN", groupProtocol: "TCP", medium: "DRAM", interfaceCount: ptr.To[int32](1),
 		},
 		{
 			name:     "ROCM grants no device",
@@ -2207,4 +2247,321 @@ func TestMemberProtocols_EveryEnumValueResolves(t *testing.T) {
 				"which reaches the member as an empty MOONCAKE_PROTOCOL rather than as an error", value)
 		assert.NotEmpty(t, resolved, "enum value %q maps to the empty string", value)
 	}
+}
+
+func TestMemberWorkload_AscendA5HostRoCE(t *testing.T) {
+	const (
+		rdmaSharedKey    core.ResourceName = "device.gpustack.ai/rdma.shared"
+		rdmaExclusiveKey core.ResourceName = "device.gpustack.ai/rdma"
+		wantGlobalCfg                      = `{"comm_resource_config.protocol_desc":["roce:host"],"local_comm_res_path":"/etc/hixlep/ub_endpoint_npu_0.json"}`
+	)
+
+	t.Run("CANN fabricInterfaceCount nil, 1, 2 and protocol inheritance", func(t *testing.T) {
+		cases := []struct {
+			name             string
+			backendProtocol  string
+			groupProtocol    string
+			interfaceCount   *int32
+			wantHostRoCE     bool
+			wantRDMAKey      core.ResourceName
+			wantRDMACount    int64
+			wantWireProtocol string
+		}{
+			{
+				name:             "CANN with nil fabricInterfaceCount stays off Host RoCE",
+				backendProtocol:  "CANN",
+				wantHostRoCE:     false,
+				wantWireProtocol: "ascend",
+			},
+			{
+				name:             "CANN with fabricInterfaceCount 1 enables Host RoCE with shared RDMA",
+				backendProtocol:  "CANN",
+				interfaceCount:   ptr.To[int32](1),
+				wantHostRoCE:     true,
+				wantRDMAKey:      rdmaSharedKey,
+				wantRDMACount:    1,
+				wantWireProtocol: "ascend",
+			},
+			{
+				name:             "CANN with fabricInterfaceCount 2 enables Host RoCE with exclusive RDMA",
+				backendProtocol:  "CANN",
+				interfaceCount:   ptr.To[int32](2),
+				wantHostRoCE:     true,
+				wantRDMAKey:      rdmaExclusiveKey,
+				wantRDMACount:    2,
+				wantWireProtocol: "ascend",
+			},
+			{
+				name:             "group override CANN on TCP backend with count 1 enables Host RoCE",
+				backendProtocol:  "TCP",
+				groupProtocol:    "CANN",
+				interfaceCount:   ptr.To[int32](1),
+				wantHostRoCE:     true,
+				wantRDMAKey:      rdmaSharedKey,
+				wantRDMACount:    1,
+				wantWireProtocol: "ascend",
+			},
+			{
+				name:             "group override CANN on RDMA backend with nil count stays off Host RoCE",
+				backendProtocol:  "RDMA",
+				groupProtocol:    "CANN",
+				wantHostRoCE:     false,
+				wantWireProtocol: "ascend",
+			},
+		}
+
+		for _, tc := range cases {
+			t.Run(tc.name, func(t *testing.T) {
+				kvcb := testMemberBackend(func(k *workercore.KVCacheBackend) {
+					k.Spec.Transport.Protocol = tc.backendProtocol
+					m := &k.Spec.Connection.Managed.Members[0]
+					m.FabricInterfaceCount = tc.interfaceCount
+					if tc.groupProtocol != "" {
+						m.Transport = &workercore.KVCacheBackendMemberTransport{Protocol: tc.groupProtocol}
+					}
+				})
+
+				assert.Equal(t, tc.wantHostRoCE, memberGroupUsesCANNHostRoCE(kvcb, kvcb.Spec.Connection.Managed.Members[0]))
+				assert.Equal(t, []string{tc.wantWireProtocol}, MemberProtocols(kvcb),
+					"MemberProtocols must keep returning ascend for CANN groups, never rdma")
+
+				ds := RenderMemberDaemonSet(kvcb, 0, "mooncake:v0.3.14")
+				podSpec := ds.Spec.Template.Spec
+				ctr := podSpec.Containers[0]
+				env := envWithoutDownwardAPI(t, kvcb, "mooncake:v0.3.14")
+
+				assert.Equal(t, tc.wantWireProtocol, env["MOONCAKE_PROTOCOL"])
+
+				if !tc.wantHostRoCE {
+					assert.False(t, podSpec.HostNetwork)
+					assert.Equal(t, core.DNSClusterFirst, podSpec.DNSPolicy)
+					assert.Nil(t, ctr.SecurityContext)
+					assert.Empty(t, ctr.Resources.Limits)
+					assert.Empty(t, podSpec.Volumes)
+					assert.Empty(t, ctr.VolumeMounts)
+					assert.NotContains(t, env, "ASCEND_LOCAL_COMM_RES")
+					assert.NotContains(t, env, "ASCEND_GLOBAL_RESOURCE_CONFIG")
+					return
+				}
+
+				assert.True(t, podSpec.HostNetwork)
+				assert.Equal(t, core.DNSClusterFirstWithHostNet, podSpec.DNSPolicy)
+				require.NotNil(t, ctr.SecurityContext)
+				require.NotNil(t, ctr.SecurityContext.Capabilities)
+				assert.Equal(t, []core.Capability{"IPC_LOCK", "SYS_RESOURCE"}, ctr.SecurityContext.Capabilities.Add)
+				assert.Nil(t, ctr.SecurityContext.Privileged)
+
+				require.Len(t, ctr.Resources.Limits, 1)
+				rdmaQty := ctr.Resources.Limits[tc.wantRDMAKey]
+				assert.Equal(t, tc.wantRDMACount, rdmaQty.Value())
+
+				require.Len(t, podSpec.Volumes, 1)
+				vol := podSpec.Volumes[0]
+				assert.Equal(t, "ascend-hixlep", vol.Name)
+				require.NotNil(t, vol.HostPath)
+				assert.Equal(t, "/etc/hixlep", vol.HostPath.Path)
+				require.NotNil(t, vol.HostPath.Type)
+				assert.Equal(t, core.HostPathDirectory, *vol.HostPath.Type)
+
+				require.Len(t, ctr.VolumeMounts, 1)
+				mount := ctr.VolumeMounts[0]
+				assert.Equal(t, "ascend-hixlep", mount.Name)
+				assert.Equal(t, "/etc/hixlep", mount.MountPath)
+				assert.True(t, mount.ReadOnly)
+
+				val, ok := env["ASCEND_LOCAL_COMM_RES"]
+				require.True(t, ok, "ASCEND_LOCAL_COMM_RES must be emitted explicitly as empty string")
+				assert.Equal(t, "", val)
+				assert.Equal(t, wantGlobalCfg, env["ASCEND_GLOBAL_RESOURCE_CONFIG"])
+
+				// Assert deterministic ordering: ASCEND_LOCAL_COMM_RES immediately before ASCEND_GLOBAL_RESOURCE_CONFIG.
+				idxLocal, idxGlobal := -1, -1
+				for i, e := range ctr.Env {
+					switch e.Name {
+					case "ASCEND_LOCAL_COMM_RES":
+						idxLocal = i
+					case "ASCEND_GLOBAL_RESOURCE_CONFIG":
+						idxGlobal = i
+					}
+				}
+				require.GreaterOrEqual(t, idxLocal, 0)
+				assert.Equal(t, idxLocal+1, idxGlobal, "ASCEND_LOCAL_COMM_RES must precede ASCEND_GLOBAL_RESOURCE_CONFIG")
+			})
+		}
+	})
+
+	t.Run("hixlep mount yields on overlapping hostPaths", func(t *testing.T) {
+		cases := []struct {
+			name           string
+			mountPath      string
+			wantAutoHIXLEP bool
+		}{
+			{name: "exact match yields", mountPath: "/etc/hixlep", wantAutoHIXLEP: false},
+			{name: "exact match with trailing slash yields", mountPath: "/etc/hixlep/", wantAutoHIXLEP: false},
+			{name: "ancestor path yields", mountPath: "/etc", wantAutoHIXLEP: false},
+			{name: "descendant path yields", mountPath: "/etc/hixlep/ub_endpoint_npu_0.json", wantAutoHIXLEP: false},
+			{name: "non-overlapping sibling keeps auto mount", mountPath: "/etc/hixlep2", wantAutoHIXLEP: true},
+			{name: "unrelated hostPath keeps auto mount", mountPath: "/usr/local/Ascend/driver", wantAutoHIXLEP: true},
+		}
+
+		for _, tc := range cases {
+			t.Run(tc.name, func(t *testing.T) {
+				kvcb := testMemberBackend(func(k *workercore.KVCacheBackend) {
+					k.Spec.Transport.Protocol = "CANN"
+					m := &k.Spec.Connection.Managed.Members[0]
+					m.FabricInterfaceCount = ptr.To[int32](1)
+					m.HostPaths = []workercore.KVCacheBackendMemberHostPath{{
+						Path:      tc.mountPath,
+						MountPath: tc.mountPath,
+						ReadOnly:  true,
+					}}
+				})
+
+				podSpec := RenderMemberDaemonSet(kvcb, 0, "mooncake:v0.3.14").Spec.Template.Spec
+				var hasAutoVol, hasAutoMount bool
+				for _, v := range podSpec.Volumes {
+					if v.Name == "ascend-hixlep" {
+						hasAutoVol = true
+					}
+				}
+				for _, m := range podSpec.Containers[0].VolumeMounts {
+					if m.Name == "ascend-hixlep" {
+						hasAutoMount = true
+					}
+				}
+				assert.Equal(t, tc.wantAutoHIXLEP, hasAutoVol)
+				assert.Equal(t, tc.wantAutoHIXLEP, hasAutoMount)
+			})
+		}
+	})
+
+	t.Run("extraEnv overrides defaulted Ascend variables without duplicates", func(t *testing.T) {
+		customGlobal := `{"comm_resource_config.protocol_desc":["roce:host"],"local_comm_res_path":"/etc/hixlep/ub_endpoint_npu_6.json"}`
+		cases := []struct {
+			name       string
+			extraEnv   []workercore.InstanceEnvVar
+			wantLocal  string
+			wantGlobal string
+		}{
+			{
+				name: "non-empty overrides for both",
+				extraEnv: []workercore.InstanceEnvVar{
+					{Name: "ASCEND_LOCAL_COMM_RES", Value: `{"version":"1.3"}`},
+					{Name: "ASCEND_GLOBAL_RESOURCE_CONFIG", Value: customGlobal},
+				},
+				wantLocal:  `{"version":"1.3"}`,
+				wantGlobal: customGlobal,
+			},
+			{
+				name: "empty string override yields cleanly for global config",
+				extraEnv: []workercore.InstanceEnvVar{
+					{Name: "ASCEND_GLOBAL_RESOURCE_CONFIG", Value: ""},
+				},
+				wantLocal:  "",
+				wantGlobal: "",
+			},
+			{
+				name: "empty string override yields cleanly for local comm res",
+				extraEnv: []workercore.InstanceEnvVar{
+					{Name: "ASCEND_LOCAL_COMM_RES", Value: ""},
+				},
+				wantLocal:  "",
+				wantGlobal: wantGlobalCfg,
+			},
+		}
+
+		for _, tc := range cases {
+			t.Run(tc.name, func(t *testing.T) {
+				kvcb := testMemberBackend(func(k *workercore.KVCacheBackend) {
+					k.Spec.Transport.Protocol = "CANN"
+					m := &k.Spec.Connection.Managed.Members[0]
+					m.FabricInterfaceCount = ptr.To[int32](1)
+					m.ExtraEnv = tc.extraEnv
+				})
+
+				ctr := memberContainer(t, kvcb, "mooncake:v0.3.14")
+				counts := map[string]int{}
+				values := map[string]string{}
+				for _, e := range ctr.Env {
+					counts[e.Name]++
+					values[e.Name] = e.Value
+				}
+				assert.Equal(t, 1, counts["ASCEND_LOCAL_COMM_RES"], "no duplicate ASCEND_LOCAL_COMM_RES")
+				assert.Equal(t, 1, counts["ASCEND_GLOBAL_RESOURCE_CONFIG"], "no duplicate ASCEND_GLOBAL_RESOURCE_CONFIG")
+				assert.Equal(t, tc.wantLocal, values["ASCEND_LOCAL_COMM_RES"])
+				assert.Equal(t, tc.wantGlobal, values["ASCEND_GLOBAL_RESOURCE_CONFIG"])
+			})
+		}
+
+		t.Run("valueFrom declaration yields cleanly", func(t *testing.T) {
+			declared := []core.EnvVar{
+				{
+					Name: "ASCEND_LOCAL_COMM_RES",
+					ValueFrom: &core.EnvVarSource{
+						ConfigMapKeyRef: &core.ConfigMapKeySelector{
+							LocalObjectReference: core.LocalObjectReference{Name: "hixlep-cm"},
+							Key:                  "local",
+						},
+					},
+				},
+				{
+					Name: "ASCEND_GLOBAL_RESOURCE_CONFIG",
+					ValueFrom: &core.EnvVarSource{
+						ConfigMapKeyRef: &core.ConfigMapKeySelector{
+							LocalObjectReference: core.LocalObjectReference{Name: "hixlep-cm"},
+							Key:                  "global",
+						},
+					},
+				},
+			}
+			got := appendCANNHostRoCEDefaultEnvs(nil, declared)
+			assert.Empty(t, got, "both defaults must yield when declared via valueFrom")
+		})
+	})
+
+	t.Run("securityContext unions user capabilities with fabric IPC_LOCK and SYS_RESOURCE", func(t *testing.T) {
+		kvcb := testMemberBackend(func(k *workercore.KVCacheBackend) {
+			k.Spec.Transport.Protocol = "CANN"
+			m := &k.Spec.Connection.Managed.Members[0]
+			m.FabricInterfaceCount = ptr.To[int32](1)
+			m.SecurityContext = &core.SecurityContext{
+				RunAsUser:    ptr.To[int64](0),
+				Capabilities: &core.Capabilities{Add: []core.Capability{"SYS_ADMIN"}},
+			}
+		})
+
+		ctr := memberContainer(t, kvcb, "mooncake:v0.3.14")
+		require.NotNil(t, ctr.SecurityContext)
+		require.NotNil(t, ctr.SecurityContext.RunAsUser)
+		assert.Equal(t, int64(0), *ctr.SecurityContext.RunAsUser)
+		require.NotNil(t, ctr.SecurityContext.Capabilities)
+		assert.Equal(t, []core.Capability{"IPC_LOCK", "SYS_ADMIN", "SYS_RESOURCE"}, ctr.SecurityContext.Capabilities.Add)
+	})
+
+	t.Run("hash stability for unaffected protocols and CANN transition", func(t *testing.T) {
+		for _, proto := range []string{"Auto", "TCP", "RDMA", "EFA", "CANN", "ROCM", "MUSA", "MACA"} {
+			kvcb := testMemberBackend(func(k *workercore.KVCacheBackend) {
+				k.Spec.Transport.Protocol = proto
+			})
+			first := RenderMemberDaemonSet(kvcb, 0, "mooncake:v0.3.14")
+			second := RenderMemberDaemonSet(kvcb, 0, "mooncake:v0.3.14")
+			assert.Equal(t, first, second, "deterministic render for %s", proto)
+			assert.Equal(t,
+				first.Spec.Template.Annotations[MemberPodSpecHashAnnotation],
+				second.Spec.Template.Annotations[MemberPodSpecHashAnnotation],
+				"stable pod spec hash for %s", proto)
+		}
+
+		cannUB := testMemberBackend(func(k *workercore.KVCacheBackend) {
+			k.Spec.Transport.Protocol = "CANN"
+		})
+		cannRoCE := testMemberBackend(func(k *workercore.KVCacheBackend) {
+			k.Spec.Transport.Protocol = "CANN"
+			k.Spec.Connection.Managed.Members[0].FabricInterfaceCount = ptr.To[int32](1)
+		})
+		assert.NotEqual(t,
+			RenderMemberDaemonSet(cannUB, 0, "mooncake:v0.3.14").Spec.Template.Annotations[MemberPodSpecHashAnnotation],
+			RenderMemberDaemonSet(cannRoCE, 0, "mooncake:v0.3.14").Spec.Template.Annotations[MemberPodSpecHashAnnotation],
+			"enabling CANN Host RoCE must move the pod spec hash")
+	})
 }

@@ -1508,6 +1508,13 @@ func TestKVCacheBackendWebhook_ExtraEnv(t *testing.T) {
 		{"a name with a dash", withMemberEnvs(
 			workercore.InstanceEnvVar{Name: "MOONCAKE-OFFLOAD-MINE", Value: "1"},
 		), ""},
+		{"defaulted Ascend A5 Host RoCE env overrides are accepted", withMemberEnvs(
+			workercore.InstanceEnvVar{Name: "ASCEND_LOCAL_COMM_RES", Value: ""},
+			workercore.InstanceEnvVar{
+				Name:  "ASCEND_GLOBAL_RESOURCE_CONFIG",
+				Value: `{"comm_resource_config.protocol_desc":["roce:host"],"local_comm_res_path":"/etc/hixlep/ub_endpoint_npu_6.json"}`,
+			},
+		), ""},
 	}, func(wh *KVCacheBackendWebhook, _, newKvcb *workercore.KVCacheBackend) error {
 		_, err := wh.ValidateCreate(context.Background(), newKvcb)
 		return err
@@ -1924,6 +1931,26 @@ func TestKVCacheBackendWebhook_AnInterfaceCountOffAHostFabricOnlyWarns(t *testin
 			wantWarn: true,
 		},
 		{
+			name:     "a create declaring a count on Auto warns",
+			new:      state{protocol: "Auto", count: 1},
+			wantWarn: true,
+		},
+		{
+			name:     "a create declaring a count on ROCM warns",
+			new:      state{protocol: "ROCM", count: 1},
+			wantWarn: true,
+		},
+		{
+			name:     "a create declaring a count on MUSA warns",
+			new:      state{protocol: "MUSA", count: 1},
+			wantWarn: true,
+		},
+		{
+			name:     "a create declaring a count on MACA warns",
+			new:      state{protocol: "MACA", count: 1},
+			wantWarn: true,
+		},
+		{
 			name:     "a create declaring a count on a group overriding RDMA with TCP warns",
 			new:      state{protocol: "RDMA", groupProtocol: "TCP", count: 1},
 			wantWarn: true,
@@ -1935,6 +1962,14 @@ func TestKVCacheBackendWebhook_AnInterfaceCountOffAHostFabricOnlyWarns(t *testin
 		{
 			name: "a create declaring a count on EFA is silent",
 			new:  state{protocol: "EFA", count: 1},
+		},
+		{
+			name: "a create declaring a count on CANN is silent",
+			new:  state{protocol: "CANN", count: 1},
+		},
+		{
+			name: "a create declaring a count on group-override CANN is silent",
+			new:  state{protocol: "TCP", groupProtocol: "CANN", count: 2},
 		},
 		{
 			name: "a create leaving the count unset on TCP is silent",
@@ -1958,6 +1993,12 @@ func TestKVCacheBackendWebhook_AnInterfaceCountOffAHostFabricOnlyWarns(t *testin
 			wantWarn: true,
 		},
 		{
+			name:     "an update moving the backend from CANN to TCP with the count kept warns",
+			old:      &state{protocol: "CANN", count: 1},
+			new:      state{protocol: "TCP", count: 1},
+			wantWarn: true,
+		},
+		{
 			name:     "an update moving the group from RDMA to TCP with the count kept warns",
 			old:      &state{protocol: "RDMA", count: 2},
 			new:      state{protocol: "RDMA", groupProtocol: "TCP", count: 2},
@@ -1967,6 +2008,11 @@ func TestKVCacheBackendWebhook_AnInterfaceCountOffAHostFabricOnlyWarns(t *testin
 			name: "an update moving the backend from TCP to RDMA is silent",
 			old:  &state{protocol: "TCP", count: 2},
 			new:  state{protocol: "RDMA", count: 2},
+		},
+		{
+			name: "an update moving the backend from TCP to CANN is silent",
+			old:  &state{protocol: "TCP", count: 1},
+			new:  state{protocol: "CANN", count: 1},
 		},
 	}
 
@@ -1995,6 +2041,111 @@ func TestKVCacheBackendWebhook_AnInterfaceCountOffAHostFabricOnlyWarns(t *testin
 			require.Len(t, warnings, 1)
 			assert.Contains(t, warnings[0], "spec.connection.managed.members[0].fabricInterfaceCount")
 			assert.Contains(t, warnings[0], "has no effect")
+			assert.Contains(t, warnings[0], "RDMA, EFA, or CANN")
+		})
+	}
+}
+
+func TestKVCacheBackendWebhook_CANNHostRoCELocalDiskHIXLEPOverlap(t *testing.T) {
+	type state struct {
+		protocol      string
+		groupProtocol string
+		count         *int32
+		diskPath      string
+	}
+
+	build := func(s state) *workercore.KVCacheBackend {
+		k := newKVCacheBackend()
+		k.Spec.Transport.Protocol = s.protocol
+		m := &k.Spec.Connection.Managed.Members[0]
+		m.FabricInterfaceCount = s.count
+		if s.groupProtocol != "" {
+			m.Transport = &workercore.KVCacheBackendMemberTransport{Protocol: s.groupProtocol}
+		}
+		if s.diskPath != "" {
+			withDiskPath(s.diskPath)(k)
+		}
+		return k
+	}
+
+	cases := []struct {
+		name    string
+		old     *state
+		new     state
+		wantMsg string
+	}{
+		{
+			name:    "create rejects exact /etc/hixlep overlap on CANN Host RoCE",
+			new:     state{protocol: "CANN", count: ptr.To[int32](1), diskPath: "/etc/hixlep"},
+			wantMsg: "must not overlap /etc/hixlep",
+		},
+		{
+			name:    "create rejects trailing-slash /etc/hixlep/ overlap on CANN Host RoCE",
+			new:     state{protocol: "CANN", count: ptr.To[int32](1), diskPath: "/etc/hixlep/"},
+			wantMsg: "must not overlap /etc/hixlep",
+		},
+		{
+			name:    "create rejects ancestor /etc overlap on CANN Host RoCE",
+			new:     state{protocol: "CANN", count: ptr.To[int32](1), diskPath: "/etc"},
+			wantMsg: "must not overlap /etc/hixlep",
+		},
+		{
+			name:    "create rejects descendant /etc/hixlep/tier overlap on group-override CANN Host RoCE",
+			new:     state{protocol: "TCP", groupProtocol: "CANN", count: ptr.To[int32](2), diskPath: "/etc/hixlep/tier"},
+			wantMsg: "must not overlap /etc/hixlep",
+		},
+		{
+			name: "create allows sibling /etc/hixlep2 on CANN Host RoCE",
+			new:  state{protocol: "CANN", count: ptr.To[int32](1), diskPath: "/etc/hixlep2"},
+		},
+		{
+			name: "create allows /etc/hixlep on CANN without fabricInterfaceCount",
+			new:  state{protocol: "CANN", diskPath: "/etc/hixlep"},
+		},
+		{
+			name: "create allows /etc/hixlep on TCP with fabricInterfaceCount",
+			new:  state{protocol: "TCP", count: ptr.To[int32](1), diskPath: "/etc/hixlep"},
+		},
+		{
+			name:    "update switching from CANN UB to CANN Host RoCE rejects /etc/hixlep disk path",
+			old:     &state{protocol: "CANN", diskPath: "/etc/hixlep"},
+			new:     state{protocol: "CANN", count: ptr.To[int32](1), diskPath: "/etc/hixlep"},
+			wantMsg: "must not overlap /etc/hixlep",
+		},
+		{
+			name:    "update switching from TCP to CANN Host RoCE rejects ancestor /etc disk path",
+			old:     &state{protocol: "TCP", count: ptr.To[int32](1), diskPath: "/etc"},
+			new:     state{protocol: "CANN", count: ptr.To[int32](1), diskPath: "/etc"},
+			wantMsg: "must not overlap /etc/hixlep",
+		},
+		{
+			name:    "update switching group transport to CANN Host RoCE rejects descendant disk path",
+			old:     &state{protocol: "TCP", count: ptr.To[int32](1), diskPath: "/etc/hixlep/cache"},
+			new:     state{protocol: "TCP", groupProtocol: "CANN", count: ptr.To[int32](1), diskPath: "/etc/hixlep/cache"},
+			wantMsg: "must not overlap /etc/hixlep",
+		},
+		{
+			name: "update switching into CANN Host RoCE with non-overlapping disk path is admitted",
+			old:  &state{protocol: "CANN", diskPath: "/var/lib/kvcache"},
+			new:  state{protocol: "CANN", count: ptr.To[int32](1), diskPath: "/var/lib/kvcache"},
+		},
+	}
+
+	wh := &KVCacheBackendWebhook{}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var err error
+			if tc.old == nil {
+				_, err = wh.ValidateCreate(context.Background(), build(tc.new))
+			} else {
+				_, err = wh.ValidateUpdate(context.Background(), build(*tc.old), build(tc.new))
+			}
+			if tc.wantMsg == "" {
+				require.NoError(t, err)
+				return
+			}
+			require.Error(t, err)
+			require.Contains(t, err.Error(), tc.wantMsg)
 		})
 	}
 }

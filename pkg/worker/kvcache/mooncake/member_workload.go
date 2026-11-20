@@ -3,6 +3,7 @@ package mooncake
 import (
 	"encoding/json"
 	"fmt"
+	"path"
 	"slices"
 	"strconv"
 	"strings"
@@ -96,8 +97,16 @@ const (
 	// fabric, in the store's own spelling rather than the API's. They are constants because two
 	// places have to agree on the pair -- the host-fabric predicate and the resource derived from
 	// it -- and a third spelling of "efa" is how the two would drift.
-	memberProtocolRDMA = "rdma"
-	memberProtocolEFA  = "efa"
+	memberProtocolRDMA   = "rdma"
+	memberProtocolEFA    = "efa"
+	memberProtocolAscend = "ascend"
+
+	// AscendHIXLEPPath is the host directory carrying static Ascend A5 Host RoCE endpoint JSON
+	// files. Exported so admission rejects localDisks overlapping it on CANN Host RoCE groups.
+	AscendHIXLEPPath = "/etc/hixlep"
+
+	// memberAscendHIXLEPVolumeName names the read-only hostPath volume for AscendHIXLEPPath.
+	memberAscendHIXLEPVolumeName = "ascend-hixlep"
 
 	// efaDeviceResource is the extended resource AWS's EFA device plugin advertises. EFA is AWS's own
 	// fabric and its plugin advertises exactly one name, so the protocol selects the resource family.
@@ -257,6 +266,14 @@ const (
 	memberEnvOffloadWatermarkEnabled = "MOONCAKE_OFFLOAD_ENABLE_DISK_WATERMARK_EVICTION"
 	memberEnvOffloadWatermarkHigh    = "MOONCAKE_OFFLOAD_DISK_EVICTION_HIGH_WATERMARK_RATIO"
 	memberEnvOffloadWatermarkLow     = "MOONCAKE_OFFLOAD_DISK_EVICTION_LOW_WATERMARK_RATIO"
+
+	// Ascend A5 Host RoCE defaulted environment variables. Emitted only when absent from
+	// members[].extraEnv on CANN groups with fabricInterfaceCount >= 1.
+	memberEnvAscendLocalCommRes         = "ASCEND_LOCAL_COMM_RES"
+	memberEnvAscendGlobalResourceConfig = "ASCEND_GLOBAL_RESOURCE_CONFIG"
+	// Flat dotted comm_resource_config.protocol_desc key required by pinned HIXL.
+	memberAscendHostRoCEGlobalResourceConfig = `{"comm_resource_config.protocol_desc":["roce:host"],` +
+		`"local_comm_res_path":"/etc/hixlep/ub_endpoint_npu_0.json"}`
 )
 
 // MemberBucketSizeLimit and MemberBucketKeysLimit are the size and the object count at which the
@@ -356,6 +373,38 @@ func memberProtocolIsHostFabric(protocol string) bool {
 // which is where the group's fabric interface count selects a device request.
 func MemberGroupIsHostFabric(kvcb *workercore.KVCacheBackend, group workercore.KVCacheBackendMember) bool {
 	return memberProtocolIsHostFabric(MemberProtocolForGroup(kvcb, group))
+}
+
+// memberGroupUsesCANNHostRoCE reports whether a member group opts into Ascend A5 Host RoCE by
+// combining effective protocol "ascend" (CANN) with an explicit positive fabricInterfaceCount.
+func memberGroupUsesCANNHostRoCE(
+	kvcb *workercore.KVCacheBackend, member workercore.KVCacheBackendMember,
+) bool {
+	return MemberProtocolForGroup(kvcb, member) == memberProtocolAscend &&
+		member.FabricInterfaceCount != nil &&
+		*member.FabricInterfaceCount > 0
+}
+
+// MemberGroupUsesCANNHostRoCE reports whether a member group enables Ascend A5 Host RoCE.
+func MemberGroupUsesCANNHostRoCE(
+	kvcb *workercore.KVCacheBackend, group workercore.KVCacheBackendMember,
+) bool {
+	return memberGroupUsesCANNHostRoCE(kvcb, group)
+}
+
+// PathsOverlap reports whether two cleaned POSIX paths are equal or one contains the other.
+func PathsOverlap(a, b string) bool {
+	a, b = path.Clean(a), path.Clean(b)
+	if a == b {
+		return true
+	}
+	if a == "/" && strings.HasPrefix(b, "/") {
+		return true
+	}
+	if b == "/" && strings.HasPrefix(a, "/") {
+		return true
+	}
+	return strings.HasPrefix(a, b+"/") || strings.HasPrefix(b, a+"/")
 }
 
 // MemberObjectName is the name of the objects rendered for one member group.
@@ -509,13 +558,22 @@ func RenderMemberDaemonSet(
 		},
 	}
 
-	// An unset count is one: the schema stores no default, so a group that never wrote it renders
-	// exactly what a group that wrote one does.
-	applyMemberFabric(ds, MemberProtocolForGroup(kvcb, member), ptr.Deref(member.FabricInterfaceCount, 1))
+	// Check explicit fabricInterfaceCount before ptr.Deref so CANN with nil never activates Host RoCE.
+	cannHostRoCE := memberGroupUsesCANNHostRoCE(kvcb, member)
+	fabricProtocol := MemberProtocolForGroup(kvcb, member)
+	if cannHostRoCE {
+		fabricProtocol = memberProtocolRDMA
+	}
+	// An unset count is one for RDMA and EFA: the schema stores no default, so a group that never
+	// wrote it renders exactly what a group that wrote one does.
+	applyMemberFabric(ds, fabricProtocol, ptr.Deref(member.FabricInterfaceCount, 1))
 	applyMemberLocalDisk(ds, kvcb, member, group)
 	applyMemberHostPaths(ds, member)
-	// Last of the four, because it merges onto whatever the fabric path put there and so has to see
-	// the finished context rather than race it.
+	if cannHostRoCE {
+		applyMemberAscendHIXLEP(ds, member)
+	}
+	// Last, because it merges onto whatever the fabric path put there and so has to see the
+	// finished context rather than race it.
 	applyMemberSecurityContext(ds, member)
 
 	if member.RuntimeClassName != "" {
@@ -726,14 +784,40 @@ func renderMemberEnv(
 		env = append(env, renderMemberEviction(disk.Eviction)...)
 	}
 
-	// The escape hatch goes last and in the order written, so two renders of one spec are
-	// byte-identical. It cannot shade anything above it: admission refuses a name this renderer
-	// derives, which is what keeps every variable here single-sourced -- Kubernetes accepts a
-	// container carrying one name twice and leaves the winner to the runtime.
+	// Defaulted Ascend A5 Host RoCE variables yield when already declared in extraEnv, and the
+	// escape hatch stays last in the order written so two renders of one spec are byte-identical.
+	extraEnv := make([]core.EnvVar, 0, len(member.ExtraEnv))
 	for _, e := range member.ExtraEnv {
-		env = append(env, core.EnvVar{Name: e.Name, Value: e.Value})
+		extraEnv = append(extraEnv, core.EnvVar{Name: e.Name, Value: e.Value})
 	}
+	if memberGroupUsesCANNHostRoCE(kvcb, member) {
+		env = appendCANNHostRoCEDefaultEnvs(env, extraEnv)
+	}
+	env = append(env, extraEnv...)
 
+	return env
+}
+
+// appendCANNHostRoCEDefaultEnvs appends Ascend A5 Host RoCE defaults in deterministic order when
+// absent from declared env entries (yielding even when declared with an empty value or valueFrom).
+func appendCANNHostRoCEDefaultEnvs(env, declared []core.EnvVar) []core.EnvVar {
+	hasName := func(name string) bool {
+		return slices.ContainsFunc(declared, func(e core.EnvVar) bool {
+			return e.Name == name
+		})
+	}
+	if !hasName(memberEnvAscendLocalCommRes) {
+		env = append(env, core.EnvVar{
+			Name:  memberEnvAscendLocalCommRes,
+			Value: "",
+		})
+	}
+	if !hasName(memberEnvAscendGlobalResourceConfig) {
+		env = append(env, core.EnvVar{
+			Name:  memberEnvAscendGlobalResourceConfig,
+			Value: memberAscendHostRoCEGlobalResourceConfig,
+		})
+	}
 	return env
 }
 
@@ -1034,6 +1118,34 @@ func applyMemberHostPaths(ds *apps.DaemonSet, member workercore.KVCacheBackendMe
 			ReadOnly:  hp.ReadOnly,
 		})
 	}
+}
+
+// applyMemberAscendHIXLEP mounts /etc/hixlep read-only for Ascend A5 Host RoCE members unless a
+// declared hostPaths entry already overlaps /etc/hixlep.
+func applyMemberAscendHIXLEP(ds *apps.DaemonSet, member workercore.KVCacheBackendMember) {
+	for _, hp := range member.HostPaths {
+		if PathsOverlap(hp.MountPath, AscendHIXLEPPath) {
+			return
+		}
+	}
+
+	podSpec := &ds.Spec.Template.Spec
+	podSpec.Volumes = append(podSpec.Volumes, core.Volume{
+		Name: memberAscendHIXLEPVolumeName,
+		VolumeSource: core.VolumeSource{
+			HostPath: &core.HostPathVolumeSource{
+				Path: AscendHIXLEPPath,
+				Type: ptr.To(core.HostPathDirectory),
+			},
+		},
+	})
+
+	container := &podSpec.Containers[0]
+	container.VolumeMounts = append(container.VolumeMounts, core.VolumeMount{
+		Name:      memberAscendHIXLEPVolumeName,
+		MountPath: AscendHIXLEPPath,
+		ReadOnly:  true,
+	})
 }
 
 // applyMemberSecurityContext merges the group's declared security context ONTO the one the fabric

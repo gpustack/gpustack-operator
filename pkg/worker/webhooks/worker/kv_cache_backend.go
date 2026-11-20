@@ -118,8 +118,8 @@ func (r *KVCacheBackendWebhook) ValidateDelete(
 }
 
 // warnKVCacheBackendIdleFabricInterfaceCount warns about a member group that writes a fabric
-// interface count while its effective protocol is neither RDMA nor EFA, where the count renders
-// nothing.
+// interface count while its effective protocol is none of RDMA, EFA, or CANN, where the count
+// renders nothing.
 //
 // It warns and never refuses, because the update that moves a group from RDMA back to TCP usually
 // still carries the count, and refusing it would block that change. old is nil on create. On an
@@ -139,7 +139,9 @@ func warnKVCacheBackendIdleFabricInterfaceCount(kvcb, old *workercore.KVCacheBac
 	var warnings ctrladmission.Warnings
 	membersPath := field.NewPath("spec", "connection", "managed", "members")
 	for i, member := range managed.Members {
-		if member.FabricInterfaceCount == nil || mooncake.MemberGroupIsHostFabric(kvcb, member) {
+		if member.FabricInterfaceCount == nil ||
+			mooncake.MemberGroupIsHostFabric(kvcb, member) ||
+			mooncake.MemberGroupUsesCANNHostRoCE(kvcb, member) {
 			continue
 		}
 		if old != nil && i < len(oldMembers) &&
@@ -148,9 +150,9 @@ func warnKVCacheBackendIdleFabricInterfaceCount(kvcb, old *workercore.KVCacheBac
 			continue
 		}
 		warnings = append(warnings, fmt.Sprintf(
-			"%s has no effect: the group's effective protocol is neither RDMA nor EFA, so no "+
-				"fabric device is requested; remove it, or it applies again if the group moves "+
-				"to RDMA or EFA",
+			"%s has no effect: the group's effective protocol is none of RDMA, EFA, or CANN, so "+
+				"no fabric device is requested; remove it, or it applies again if the group moves "+
+				"to RDMA, EFA, or CANN",
 			membersPath.Index(i).Child("fabricInterfaceCount"),
 		))
 	}
@@ -184,12 +186,8 @@ func validateKVCacheBackendSpec(
 	errs = append(errs, validateKVCacheBackendPullSecrets(
 		kvcb.Spec.ImagePullSecrets, specPath.Child("imagePullSecrets"),
 	)...)
-	var oldSpec *workercore.KVCacheBackendSpec
-	if old != nil {
-		oldSpec = &old.Spec
-	}
 	errs = append(errs, validateKVCacheBackendConnection(
-		&kvcb.Spec, oldSpec, specPath.Child("connection"),
+		kvcb, old, specPath.Child("connection"),
 	)...)
 
 	return errs
@@ -323,9 +321,9 @@ func validateKVCacheBackendImage(
 // validateKVCacheBackendConnection enforces the branch choice and everything inside the branch that
 // was taken.
 func validateKVCacheBackendConnection(
-	spec, oldSpec *workercore.KVCacheBackendSpec, fldPath *field.Path,
+	kvcb, old *workercore.KVCacheBackend, fldPath *field.Path,
 ) field.ErrorList {
-	managed, external := spec.Connection.Managed, spec.Connection.External
+	managed, external := kvcb.Spec.Connection.Managed, kvcb.Spec.Connection.External
 
 	switch {
 	case managed == nil && external == nil:
@@ -338,10 +336,10 @@ func validateKVCacheBackendConnection(
 		return validateKVCacheBackendExternal(external, fldPath.Child("external"))
 	default:
 		var oldManaged *workercore.KVCacheBackendManaged
-		if oldSpec != nil {
-			oldManaged = oldSpec.Connection.Managed
+		if old != nil {
+			oldManaged = old.Spec.Connection.Managed
 		}
-		return validateKVCacheBackendManaged(managed, oldManaged, fldPath.Child("managed"))
+		return validateKVCacheBackendManaged(kvcb, managed, oldManaged, fldPath.Child("managed"))
 	}
 }
 
@@ -466,6 +464,7 @@ func checkHostPort(address string) error {
 // oldManaged is nil on create. It is used for one thing: skipping the escape-hatch rules over a
 // list no update touched. See unchangedPassthrough.
 func validateKVCacheBackendManaged(
+	kvcb *workercore.KVCacheBackend,
 	managed, oldManaged *workercore.KVCacheBackendManaged, fldPath *field.Path,
 ) field.ErrorList {
 	var errs field.ErrorList
@@ -533,8 +532,9 @@ func validateKVCacheBackendManaged(
 		if oldManaged != nil && i < len(oldManaged.Members) {
 			oldMember = &oldManaged.Members[i]
 		}
+		usesCANNHostRoCE := mooncake.MemberGroupUsesCANNHostRoCE(kvcb, managed.Members[i])
 		errs = append(errs, validateKVCacheBackendMember(&managed.Members[i], oldMember,
-			fldPath.Child("members").Index(i))...)
+			usesCANNHostRoCE, fldPath.Child("members").Index(i))...)
 	}
 
 	errs = append(errs, validateKVCacheBackendLocalDiskUniqueness(managed, fldPath)...)
@@ -643,7 +643,8 @@ var memberBucketSize = *resource.NewQuantity(mooncake.MemberBucketSizeLimit, res
 // resource named on a group with no device to charge, and two quantities whose schema type is a
 // string.
 func validateKVCacheBackendMember(
-	member, oldMember *workercore.KVCacheBackendMember, fldPath *field.Path,
+	member, oldMember *workercore.KVCacheBackendMember,
+	usesCANNHostRoCE bool, fldPath *field.Path,
 ) field.ErrorList {
 	var errs field.ErrorList
 
@@ -661,7 +662,7 @@ func validateKVCacheBackendMember(
 			oldDisk = &oldMember.LocalDisks[i]
 		}
 		errs = append(errs, validateKVCacheBackendLocalDisk(&member.LocalDisks[i], oldDisk,
-			fldPath.Child("localDisks").Index(i))...)
+			usesCANNHostRoCE, fldPath.Child("localDisks").Index(i))...)
 	}
 
 	errs = append(errs, validateKVCacheBackendMemberHostPaths(member, fldPath.Child("hostPaths"))...)
@@ -892,7 +893,8 @@ func validateExtraEnvs(
 // a third-party container, and no tier is served by it. A blocklist of "dangerous" paths would also
 // be unclosable — every entry invites a reader to trust that what is missing from it is safe.
 func validateKVCacheBackendLocalDisk(
-	disk, oldDisk *workercore.KVCacheBackendMemberLocalDisk, fldPath *field.Path,
+	disk, oldDisk *workercore.KVCacheBackendMemberLocalDisk,
+	usesCANNHostRoCE bool, fldPath *field.Path,
 ) field.ErrorList {
 	if disk == nil {
 		return nil
@@ -946,6 +948,13 @@ func validateKVCacheBackendLocalDisk(
 				"nodes into the same container: the tier would shadow them or be shadowed, and "+
 				"the transport can be switched to one after this path is set",
 			mooncake.RDMADevicePath,
+		)))
+	case usesCANNHostRoCE && mooncake.PathsOverlap(path, mooncake.AscendHIXLEPPath):
+		errs = append(errs, field.Invalid(pathPath, disk.Path, fmt.Sprintf(
+			"must not overlap %s on a CANN member group with fabricInterfaceCount set: Ascend A5 "+
+				"Host RoCE mounts %s read-only into the same container, so choose a different "+
+				"localDisks path or unset fabricInterfaceCount",
+			mooncake.AscendHIXLEPPath, mooncake.AscendHIXLEPPath,
 		)))
 	}
 

@@ -366,6 +366,14 @@ var MemberDerivedEnvs = []string{
 	memberEnvVisibleDevicesNVIDIA,
 }
 
+// MemberDefaultedEnvs lists environment variable names the member renderer supplies as defaults
+// only when absent from members[].extraEnv. Admission must allow these names in extraEnv so
+// operators can override them, so this list is strictly disjoint from MemberDerivedEnvs.
+var MemberDefaultedEnvs = []string{
+	memberEnvAscendLocalCommRes,
+	memberEnvAscendGlobalResourceConfig,
+}
+
 // LeaderDerivedEnvs is every environment variable name the leader renderer emits, which is what
 // admission refuses in the leader's extraEnv.
 //
