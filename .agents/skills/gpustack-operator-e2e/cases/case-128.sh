@@ -556,8 +556,9 @@ spec:
       replicas: 1
       size: 1
       acceleratorType: ${IT}
-      elasticEp:
-        width: 2
+      runtimeControl:
+        parameters:
+          elastic.dataParallelWidth: "2"
       resources:
         accelerator: "1"
 EOF

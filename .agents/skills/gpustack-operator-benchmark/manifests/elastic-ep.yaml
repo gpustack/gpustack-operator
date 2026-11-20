@@ -21,8 +21,9 @@ spec:
       imagePullPolicy: IfNotPresent
       resources:
         accelerator: "2"
-      elasticEp:
-        width: 2
+      runtimeControl:
+        parameters:
+          elastic.dataParallelWidth: "2"
       extraArgs:
         - --tensor-parallel-size
         - "2"

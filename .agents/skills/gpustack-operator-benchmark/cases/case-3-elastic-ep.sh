@@ -6,9 +6,9 @@
 #
 # Goal:        Verify and measure online Elastic Expert Parallelism scaling on an MoE model
 #              (deepseek-ai/DeepSeek-V2-Lite-Chat BF16):
-#              State 1 (elasticEp.width=2, 4 GPUs, c=1..64 sweep),
-#              State 2 (live patch elasticEp.width: 2 -> 4 under continuous c=8 load),
-#              State 3 (elasticEp.width=4, 8 GPUs, c=1..64 sweep).
+#              State 1 (elastic.dataParallelWidth=2, 4 GPUs, c=1..64 sweep),
+#              State 2 (live patch elastic.dataParallelWidth: "2" -> "4" under continuous c=8 load),
+#              State 3 (elastic.dataParallelWidth=4, 8 GPUs, c=1..64 sweep).
 # Environment: A cluster with 8 free GPUs on InstanceType bench-gpu, NodeModelStore caching
 #              deepseek-v2-lite-chat, and an in-cluster default/bench-driver Pod.
 #              The shape this run was on is written to OUT_DIR/cluster-shape.txt: the context and
@@ -337,7 +337,7 @@ LOAD_PID=$!
 sleep 35
 PATCH_T0="$(date +%s)"
 kubectl -n "$NS" patch modeldeployment "$DEPLOY" --type=json \
-  -p "[{\"op\":\"replace\",\"path\":\"/spec/roles/0/elasticEp/width\",\"value\":${ELASTIC_WIDTH_TARGET}}]" 2>&1 | tee "$OUT/patch.log"
+  -p "[{\"op\":\"replace\",\"path\":\"/spec/roles/0/runtimeControl/parameters/elastic.dataParallelWidth\",\"value\":\"${ELASTIC_WIDTH_TARGET}\"}]" 2>&1 | tee "$OUT/patch.log"
 
 (
   for _ in $(seq 1 240); do
