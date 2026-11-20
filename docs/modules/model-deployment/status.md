@@ -480,7 +480,7 @@ saw, and no pass that reports this has seen any.
 #### ElasticResize
 
 Whether an elastic scale stands blocked or terminally refused. It is
-written only for a deployment with an *`elasticEp`* role; [Elastic EP](elastic-ep.md) owns the
+written only for a deployment with an `elastic.dataParallelWidth` role; [Elastic EP](elastic-ep.md) owns the
 resize lifecycle it reports on.
 
 | Value | Reason | Meaning |
@@ -491,6 +491,10 @@ resize lifecycle it reports on.
 
 A refusal still inside its retry bound stays `True`: it is not terminal yet. `WorldUnprovable`
 levels back to `True` on its own once a later pass proves the live world again.
+
+#### RuntimeControlSynced
+
+Reports live convergence across answering `Pod`s and per-role status (`observedGeneration`, `synced`, `reason`, `message`, `paused`, `appliedConfigDigest`, `convergedPods`, `totalAnsweringPods`, `unsupportedFields`) in *`status.roles[*].runtimeControl`*; see [Online Runtime Control](runtime-control.md#step-3-verify-convergence-status) for condition reasons and troubleshooting.
 
 ## Scaler annotations
 

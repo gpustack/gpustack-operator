@@ -418,7 +418,7 @@ family (`vllm` / `sglang`); registry or model aliases are never inferred.
 Catalog resolution supports a single `Server`, PD `Prefill` / `Decode`, and EPD `Encode` / `Prefill` / `Decode` targets with managed *`spec.router`* and *`spec.kvTransfer`*.
 Each catalog-backed role needs a managed single-serving-`Pod` replica and explicit whole-accelerator resources without slicing.
 
-External *`spec.kvCache`*, `elasticEp`, external DP and custom commands remain gated unless the profile explicitly matches the configuration.
+External *`spec.kvCache`*, Elastic EP (`elastic.dataParallelWidth`), external DP and custom commands remain gated unless the profile explicitly matches the configuration.
 Unknown injected environment variables fail closed. Supported engines use internal load balance, `DP = 1`, `localDP <= 1`, and a complete single-`Pod` metric denominator.
 
 ### Catalog qualification
@@ -947,11 +947,12 @@ constraints. Inspect each condition's generation because early exits can leave o
 | `Active` | `Active` | `TargetNotFound`, `AlreadyBound`, `TargetReplaced`, `InvalidBinding`, `Suspended`, `ShadowMode`, `CapacityPriorUnresolved`, `InsufficientLoadCoverage`, `IncompatibleMetric` |
 | `MetricsReady` | `Observed` | `WaitingForMetrics`, `ResourceExhausted`, `BoundsConflict`, `RatioConflict` |
 | `CapacityPriorsReady` | `Resolved`, `Disabled` | `CapacityPriorUnresolved`, `InsufficientLoadCoverage`, `IncompatibleMetric`, `TargetNotFound`, `TargetReplaced`, `InvalidBinding`, `Suspended` |
-| `Blocked` | `Ready` (`False`) | `BoundsConflict`, `RatioConflict`, `PacingBounded`, `ResourceExhausted`, `ScaleDownAborted`, `RebalanceNotApplicable`, `RebalanceBlocked`, `CapacityPriorUnresolved`, `InsufficientLoadCoverage`, `IncompatibleMetric` |
+| `Blocked` | `Ready` (`False`) | `BoundsConflict`, `RatioConflict`, `PacingBounded`, `ResourceExhausted`, `ScaleDownAborted`, `RebalanceNotApplicable`, `RebalanceBlocked`, `CapacityPriorUnresolved`, `InsufficientLoadCoverage`, `IncompatibleMetric`, `RolePaused` |
 
 `BoundsConflict` means bounds are missing, inconsistent or exclude the current vector.
 `RatioConflict` means the current vector violates a ratio band or no feasible projection was found.
 `PacingBounded` means a step limit or guard held the recommendation.
+`RolePaused` holds replica writes while a target role's desired or observed pause state is `true`; see [Online Runtime Control](runtime-control.md#scaler-pause-guard).
 
 `WaitingForMetrics` means required readings or complete coverage are unavailable, and
 `PredictorWarmingUp` is a role reason. `CapacityPriorUnresolved`, `InsufficientLoadCoverage` and
@@ -959,7 +960,7 @@ constraints. Inspect each condition's generation because early exits can leave o
 
 ## Limitations
 
-Admission refuses roles with a custom *`command`* because their serving signals are unmanaged. It also refuses *`elasticEp`* roles, whose width grows one collective rather than
+Admission refuses roles with a custom *`command`* because their serving signals are unmanaged. It also refuses roles setting `elastic.dataParallelWidth`, whose width grows one collective rather than
 adding independent replicas. At *`maxReplicas`*, generated group and member names must still fit the 63-character Kubernetes label limit. Shorten the deployment or role name if
 that maximum cannot be represented.
 

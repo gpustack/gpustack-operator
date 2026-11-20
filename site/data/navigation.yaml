@@ -36,6 +36,7 @@ order:
     - prefill-decode
     - encode-prefill-decode
     - scaling
+    - runtime-control
     - elastic-ep
     - external-dp
     - multi-host
@@ -85,6 +86,7 @@ order:
     - scaling
     - scaling-simulation
     - scaling-benchmark
+    - runtime-control
     - routing
     - metrics
     - status
@@ -137,6 +139,7 @@ labels:
   /docs/walkthroughs/model-deployment/prefill-decode/: Prefill and Decode
   /docs/walkthroughs/model-deployment/encode-prefill-decode/: Encode, Prefill and Decode
   /docs/walkthroughs/model-deployment/scaling/: Scaling
+  /docs/walkthroughs/model-deployment/runtime-control/: Online Runtime Control
   /docs/walkthroughs/model-deployment/elastic-ep/: Elastic EP
   /docs/walkthroughs/model-deployment/external-dp/: External DP
   /docs/walkthroughs/model-deployment/multi-host/: Multi-Host Serving
@@ -173,6 +176,7 @@ labels:
   /docs/modules/model-deployment/scaling/: Scaling
   /docs/modules/model-deployment/scaling-simulation/: Simulation
   /docs/modules/model-deployment/scaling-benchmark/: Benchmark
+  /docs/modules/model-deployment/runtime-control/: Online Runtime Control
   /docs/modules/model-deployment/prefill-decode/: Prefill and Decode
   /docs/modules/model-deployment/prefill-decode-benchmark/: Benchmark
   /docs/modules/model-deployment/encode-prefill-decode/: Encode, Prefill and Decode

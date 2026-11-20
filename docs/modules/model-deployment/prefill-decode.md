@@ -4,9 +4,6 @@ A *prefill/decode (PD)* deployment with *Prefill* and *Decode* roles is admitted
 operator connects them through a router and a transfer path. [Prefill and
 decode](configuration.md#prefill-and-decode) describes the role fields and admission rules.
 
-The recorded runs apply to vLLM `v0.30.0` and SGLang `0.5.22`. Other versions must be re-verified
-before they inherit a claim on this page.
-
 ![Prefill and decode request and KV transfer flow](../../assets/diagrams/model-deployment-pd.svg)
 
 <!--
@@ -381,7 +378,7 @@ and [Shared cache parameters](parameterize.md#shared-cache-parameters):
 | **UBG (`ub_rtp:device`)**, cross-SuperPod | `0` (omitted) | Same on-die UB path with no `/etc/hixlep` mount. | Pass `ASCEND_GLOBAL_RESOURCE_CONFIG` in *`roles[].env`*. |
 | **UBoE (`uboe:device`)** | `0` (omitted) | Same on-die UB path with no `/etc/hixlep` mount. | Pass `ASCEND_GLOBAL_RESOURCE_CONFIG` in *`roles[].env`*. |
 | **Host RoCE (`roce:host`)** | `> 0` on both `Prefill` and `Decode`, or `KVCache` `Server` | Grants `device.gpustack.ai/rdma*` and enables the `vLLM` Host RoCE endpoint path and read-only `/etc/hixlep` mount. | `vLLM` only with converged `"950"`; admin provisions [host endpoint files](../../getting-started/vendor-prerequisites.md#a5-host-roce-endpoints). |
-| **Aggregated `Server`** (no KV connector) | `0`, or `> 0` on multi-Pod/`elasticEp` `vLLM` | Renders no KV connector or A5 transfer resources. | Set `interface > 0` only on multi-Pod or `elasticEp` `vLLM` `Server` roles. |
+| **Aggregated `Server`** (no KV connector) | `0`, or `> 0` on multi-Pod/Elastic EP `vLLM` | Renders no KV connector or A5 transfer resources. | Set `interface > 0` only on multi-Pod or Elastic EP `vLLM` `Server` roles. |
 | **Constrained static-UB fallback** | `0` (omitted) | Skips operator CLI and KV/transfer env synthesis; marks `status.roles[].unmanaged: true`. | Use *`roles[].command`* take-over and *`additionalVolumes`* with admin `instance-host-path-volume-allowed` enabled. |
 
 Example Ascend A5 Host RoCE *PD* deployment with a shared `CANN` `KVCache` pool:

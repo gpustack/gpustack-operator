@@ -51,7 +51,7 @@ The crossover at concurrency 64 concerns median first-token latency; total reque
 | Serving | `--api-server-count 1`; no managed Router |
 
 The deployment used one *Server* role with *`replicas: 1`* and *`size: 1`*.
-Only *`elasticEp.width`* changed. The CPU-only Ray head remained outside the GPU allocation.
+Only `elastic.dataParallelWidth` under *`runtimeControl.parameters`* changed. The CPU-only Ray head remained outside the GPU allocation.
 The head and all GPU members ran on the same GPU node.
 The [walkthrough](../../walkthroughs/model-deployment/elastic-ep.md) provides the manifest and verification commands.
 
@@ -227,8 +227,9 @@ The diff uses current interface allocation; the recorded run used manual device 
        resources:
          accelerator: "2"
 +        interface: "2"
-       elasticEp:
-         width: 2
+       runtimeControl:
+         parameters:
+           elastic.dataParallelWidth: "2"
        extraArgs:
          - --gpu-memory-utilization
 -        - "0.90"

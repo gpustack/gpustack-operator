@@ -635,7 +635,7 @@ members.
 - **Sibling roles**: Editing one role leaves others intact, except for shared parallel-degree edits on vLLM-Ascend.
   See [Prefill and Decode](prefill-decode.md#direct-transfer-transport).
 - **Admission**: Interface and pool-transport checks run again only when a role's interface, type, command, router or transfer path changes.
-- **Elastic EP**: A role with *`elasticEp`* pins its member configuration and only resizes width.
+- **Elastic EP**: A role with `elastic.dataParallelWidth` pins its member configuration and only resizes width.
   See [Elastic EP](elastic-ep.md#changing-the-width).
 - **Departure**: A departing replica drops its block heartbeat and emits `ReplicaEvicted`, `ReplicaLeaving` or `ReplicaRestarted`.
   See [Workload impact](../kv-cache/injection.md#workload-impact).
@@ -650,6 +650,8 @@ rendering changes are evaluated separately:
 | `modeldeployment.gpustack.ai/pod-spec-hash` (on `Pod`) | explicit `ModelDeployment` fields (`model`, *`engine`*, *`router`*, *`kvCache.poolRef`*, *`kvTransfer`*, and the role's configuration) plus resolved external bindings (`AcceleratorType` entrance/manufacturer/resources, `KVCachePoolBinding` endpoint/domain/dtype, `ModelArtifact` source/digest, fabric interface key, `RuntimeClassName`, and seat `ordinal`/`member`) | editing any covered `ModelDeployment` field or changing a bound external resource | rolls affected replicas one per role per pass |
 | `modeldeployment.gpustack.ai/render-version` (on `Pod`) | operator-synthesized flags (`--host`, `--port`, `--served-model-name`, connector flags), defaulted environment entries, probes, `preStop` drain hook, sidecars (`routing-proxy`, `wait-for-worker`), implicit labels/annotations, and worker `Setting` values | upgrading to an operator release with a newer rendering baseline | keeps running replicas in place while `render-version` meets the effective minimum floor; applies to newly created or replaced `Pod`s |
 | `modeldeployment.gpustack.ai/min-render-version` (on `ModelDeployment`) | per-deployment render-version floor, clamped to `[minSupportedRenderVersion, currentRenderVersion]` | setting or raising the annotation on `ModelDeployment.metadata.annotations` | rolls replicas whose `render-version` is below the effective floor, one per role per pass |
+
+Live fields in *`roles[].runtimeControl.parameters`*, *`roles[].pause`*, and the seven mutable *`spec.router`* subfields (`replicas`, `image`, `imagePullPolicy`, `imagePullSecrets`, `extraArgs`, `requestTimeoutSeconds`, `disaggregationThresholdTokens`) do not roll worker `Pod`s; see [Online Runtime Control](runtime-control.md#router-hash-decoupling).
 
 Set `modeldeployment.gpustack.ai/min-render-version` on the `ModelDeployment` to roll running replicas onto a newer rendering baseline on your own schedule; see [Model Deployment
 Status](status.md#status) for how `ReplicasUpToDate` reports older compatible replicas:
@@ -734,6 +736,7 @@ metadata:
 spec:
   model:
     name: Qwen/Qwen3-8B  # Frozen.
+    loraAdapters: []  # Reserved; non-empty values are currently rejected by admission.
   engine:
     name: vLLM     # Frozen.
     image: example/engine:tag  # Editable.
@@ -743,16 +746,19 @@ spec:
   kvTransfer: {}   # Editable.
   router:          # The block may be added or removed.
     name: llm-d-router  # Frozen in place.
-    replicas: 1    # Editable.
-    extraArgs: []  # Editable.
+    replicas: 1    # Editable without rolling worker Pods.
+    extraArgs: []  # Editable without rolling worker Pods.
   roles:           # The role set is frozen.
     - name: server # Frozen.
       kind: Server # Frozen.
       replicas: 1  # Editable.
-      size: 1  # Editable, except on an elasticEp role.
-      acceleratorType: gpu-pool  # Editable, except on an elasticEp role.
-      resources: {}  # Editable, except on an elasticEp role.
-      command: []  # Editable, except on an elasticEp role.
+      pause: false  # Editable on any role without rolling worker Pods.
+      size: 1  # Editable, except on an Elastic EP role.
+      acceleratorType: gpu-pool  # Editable, except on an Elastic EP role.
+      resources: {}  # Editable, except on an Elastic EP role.
+      command: []  # Editable, except on an Elastic EP role.
+      runtimeControl:  # Editable without rolling Pods; elastic.dataParallelWidth presence is frozen.
+        parameters: {}
       extraArgs: []  # Editable.
       env: []  # Editable.
       image: example/engine:tag  # Editable Pod field.
