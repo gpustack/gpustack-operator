@@ -223,27 +223,65 @@ for start_line, snippet in context_blocks:
 PY
 
 # 3. Byte-level HIXL parity with gpustack/runner & patch dry-run against staged hixl.
-ENFORCE_RUNNER_PARITY="true"
-PREFLIGHT_STAGE=""
-if [[ -f "${STAGE_DIR}/kv-transfer-preflight-report.json" ]]; then
-  read -r ENFORCE_RUNNER_PARITY PREFLIGHT_STAGE < <(python3 - "${STAGE_DIR}/kv-transfer-preflight-report.json" <<'PY'
-import json
-import sys
-with open(sys.argv[1], "r", encoding="utf-8") as f:
-    rep = json.load(f)
-val = rep.get("enforce_runner_hixl_parity", True)
-stage = str(rep.get("stage") or "")
-print(f"{'true' if val else 'false'} {stage}")
-PY
-)
+KV_REPORT="${STAGE_DIR}/kv-transfer-preflight-report.json"
+if [[ ! -f "${KV_REPORT}" ]]; then
+  printf 'FAIL: missing preflight report: %s\n' "${KV_REPORT}" >&2
+  exit 1
 fi
 
+if ! REPORT_META="$(python3 - "${KV_REPORT}" <<'PY'
+import json
+import sys
+
+path = sys.argv[1]
+with open(path, "r", encoding="utf-8") as f:
+    rep = json.load(f)
+if not isinstance(rep, dict):
+    raise SystemExit(f"FAIL: {path} must be a JSON object")
+val = rep.get("enforce_runner_hixl_parity", True)
+if not isinstance(val, bool):
+    raise SystemExit(f"FAIL: {path} enforce_runner_hixl_parity must be a boolean")
+stage = rep.get("stage")
+if not isinstance(stage, str) or stage not in ("recipe_sync", "tag_promotion", "no_change"):
+    raise SystemExit(
+        f"FAIL: {path} stage must be one of recipe_sync, tag_promotion, no_change (got {stage!r})"
+    )
+raw_files = rep.get("stage_a_recipe_files")
+if raw_files is None:
+    recipe_files = [
+        "pack/mirrored-mooncake/Dockerfile",
+        "pack/model-transfer/Dockerfile",
+        "pack/model-transfer/patches/hixl/001_channel_generation.patch",
+        "pack/mirrored-modelexpress-server/Dockerfile",
+    ]
+else:
+    if (
+        not isinstance(raw_files, list)
+        or not raw_files
+        or not all(isinstance(p, str) and p.strip() and not p.startswith("/") and ".." not in p.split("/") for p in raw_files)
+    ):
+        raise SystemExit(f"FAIL: {path} stage_a_recipe_files must be a non-empty list of relative paths")
+    recipe_files = [p.strip() for p in raw_files]
+print(f"{'true' if val else 'false'}|{stage}")
+for rf in recipe_files:
+    print(rf)
+PY
+)"; then
+  printf 'FAIL: unable to parse %s\n' "${KV_REPORT}" >&2
+  exit 1
+fi
+
+REPORT_HEADER="${REPORT_META%%$'\n'*}"
+IFS='|' read -r ENFORCE_RUNNER_PARITY PREFLIGHT_STAGE <<<"${REPORT_HEADER}"
+if [[ -z "${PREFLIGHT_STAGE}" ]]; then
+  printf 'FAIL: empty stage in %s\n' "${KV_REPORT}" >&2
+  exit 1
+fi
+STAGE_A_RECIPE_FILES_LIST="${REPORT_META#*$'\n'}"
+
 if [[ "${PREFLIGHT_STAGE}" == "tag_promotion" ]]; then
-  for recipe_rel in \
-    "pack/mirrored-mooncake/Dockerfile" \
-    "pack/model-transfer/Dockerfile" \
-    "pack/model-transfer/patches/hixl/001_channel_generation.patch" \
-    "pack/mirrored-modelexpress-server/Dockerfile"; do
+  while IFS= read -r recipe_rel; do
+    [[ -n "${recipe_rel}" ]] || continue
     base_f="${BASELINE_DIR}/${recipe_rel}"
     cand_f="${AUTOSYNC_CANDIDATE_ROOT}/${recipe_rel}"
     if [[ -f "${base_f}" && ! -f "${cand_f}" ]]; then
@@ -256,7 +294,7 @@ if [[ "${PREFLIGHT_STAGE}" == "tag_promotion" ]]; then
         exit 1
       fi
     fi
-  done
+  done <<<"${STAGE_A_RECIPE_FILES_LIST}"
 fi
 
 MT_DF="${AUTOSYNC_CANDIDATE_ROOT}/pack/model-transfer/Dockerfile"

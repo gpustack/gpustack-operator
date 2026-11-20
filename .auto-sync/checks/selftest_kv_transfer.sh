@@ -1689,6 +1689,12 @@ assert rep["has_stage_a"] is True, rep
 assert rep["stage_a_drifts"]["nixl-rocm"] is True, rep["stage_a_drifts"]
 assert rep["stage_a_drifts"]["ucx-rocm"] is True, rep["stage_a_drifts"]
 assert rep["stage_a_drifts"]["gpustack-runner"] is True, rep["stage_a_drifts"]
+assert rep["stage_a_recipe_files"] == [
+    "pack/mirrored-mooncake/Dockerfile",
+    "pack/model-transfer/Dockerfile",
+    "pack/model-transfer/patches/hixl/001_channel_generation.patch",
+    "pack/mirrored-modelexpress-server/Dockerfile",
+], rep.get("stage_a_recipe_files")
 assert rep["stage_b_flags"] == {"mooncake": False, "modelexpress": True, "model_transfer": True}, rep["stage_b_flags"]
 assert rep["targets"]["mooncake_image"] == "gpustack/mirrored-mooncake:0.3.13.post1-cpu", rep["targets"]
 assert rep["targets"]["modelexpress_image"] == "gpustack/mirrored-modelexpress-server:v9.9.0", rep["targets"]
@@ -1719,12 +1725,25 @@ else
 fi
 
 # Extract preflight Stage B tree into gitless candidate and verify validate_kv_transfer.sh passes (even with runner drift).
-CAND_SB_PRIO="${SCRATCH}/cand-sb-prio"
-mkdir -p "${CAND_SB_PRIO}"
-SB_PRIO_SRC_REV="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["source_revision"])' "${STAGE_SB_PRIO}/kv-transfer-preflight-report.json")"
-git -C "${SB_PRIO_REPO}" archive "${SB_PRIO_SRC_REV}" | tar -x -C "${CAND_SB_PRIO}"
-rm -rf "${CAND_SB_PRIO}/.auto-sync/.stage"
-python3 - "${STAGE_SB_PRIO}/upstream-records.json" "${CAND_SB_PRIO}/.auto-sync/proposals/kv-transfer.json" <<'PY'
+SB_PRIO_REPORT="${STAGE_SB_PRIO}/kv-transfer-preflight-report.json"
+SB_PRIO_SRC_REV=""
+if [[ -f "${SB_PRIO_REPORT}" ]]; then
+  SB_PRIO_SRC_REV="$(python3 - "${SB_PRIO_REPORT}" <<'PY' || true
+import json
+import sys
+with open(sys.argv[1], "r", encoding="utf-8") as f:
+    rep = json.load(f)
+if rep.get("stage") == "tag_promotion":
+    print(str(rep.get("source_revision") or "").strip())
+PY
+)"
+fi
+if [[ -n "${SB_PRIO_SRC_REV}" ]]; then
+  CAND_SB_PRIO="${SCRATCH}/cand-sb-prio"
+  mkdir -p "${CAND_SB_PRIO}"
+  git -C "${SB_PRIO_REPO}" archive "${SB_PRIO_SRC_REV}" | tar -x -C "${CAND_SB_PRIO}"
+  rm -rf "${CAND_SB_PRIO}/.auto-sync/.stage"
+  python3 - "${STAGE_SB_PRIO}/upstream-records.json" "${CAND_SB_PRIO}/.auto-sync/proposals/kv-transfer.json" <<'PY'
 import json
 import sys
 
@@ -1739,34 +1758,64 @@ with open(prop_p, "w", encoding="utf-8") as f:
     json.dump(prop, f, indent=2)
     f.write("\n")
 PY
-if AUTOSYNC_STAGE_DIR="${STAGE_SB_PRIO}" \
-   LOOPWRIGHT_CANDIDATE_DIR="${CAND_SB_PRIO}" \
-   AUTOSYNC_FAST_SELFTEST=true \
-   bash "${CAND_SB_PRIO}/.auto-sync/checks/validate_kv_transfer.sh"; then
-  pass "validate_kv_transfer passes Stage B tag_promotion candidate despite concurrent Stage A nixl/ucx/runner drift"
+  if AUTOSYNC_STAGE_DIR="${STAGE_SB_PRIO}" \
+     LOOPWRIGHT_CANDIDATE_DIR="${CAND_SB_PRIO}" \
+     AUTOSYNC_FAST_SELFTEST=true \
+     bash "${CAND_SB_PRIO}/.auto-sync/checks/validate_kv_transfer.sh"; then
+    pass "validate_kv_transfer passes Stage B tag_promotion candidate despite concurrent Stage A nixl/ucx/runner drift"
+  else
+    fail "validate_kv_transfer passes Stage B tag_promotion candidate despite concurrent Stage A nixl/ucx/runner drift"
+  fi
+
+  # Mutating or deleting a Stage A recipe file inside a Stage B tag_promotion candidate must fail closed.
+  rm -f "${CAND_SB_PRIO}/pack/model-transfer/patches/hixl/001_channel_generation.patch"
+  assert_fails "validate_kv_transfer fails closed when Stage B tag_promotion deletes HIXL patch" \
+    env AUTOSYNC_STAGE_DIR="${STAGE_SB_PRIO}" \
+    LOOPWRIGHT_CANDIDATE_DIR="${CAND_SB_PRIO}" \
+    AUTOSYNC_FAST_SELFTEST=true \
+    bash "${CAND_SB_PRIO}/.auto-sync/checks/validate_kv_transfer.sh"
+  cp -f "${SB_PRIO_REPO}/pack/model-transfer/patches/hixl/001_channel_generation.patch" \
+    "${CAND_SB_PRIO}/pack/model-transfer/patches/hixl/001_channel_generation.patch"
+
+  sed -i.bak 's|^ARG NIXL_ROCM_REF="[^"]*"|ARG NIXL_ROCM_REF="deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"|' \
+    "${CAND_SB_PRIO}/pack/model-transfer/Dockerfile"
+  rm -f "${CAND_SB_PRIO}/pack/model-transfer/Dockerfile.bak"
+  assert_fails "validate_kv_transfer fails closed when Stage B tag_promotion modifies pack/model-transfer/Dockerfile" \
+    env AUTOSYNC_STAGE_DIR="${STAGE_SB_PRIO}" \
+    LOOPWRIGHT_CANDIDATE_DIR="${CAND_SB_PRIO}" \
+    AUTOSYNC_FAST_SELFTEST=true \
+    bash "${CAND_SB_PRIO}/.auto-sync/checks/validate_kv_transfer.sh"
+  cp -f "${SB_PRIO_REPO}/pack/model-transfer/Dockerfile" "${CAND_SB_PRIO}/pack/model-transfer/Dockerfile"
+
+  # Malformed, missing-stage, or absent kv-transfer-preflight-report.json must fail closed.
+  cp -f "${SB_PRIO_REPORT}" "${SB_PRIO_REPORT}.bak"
+  printf '{invalid json\n' > "${SB_PRIO_REPORT}"
+  assert_fails "validate_kv_transfer fails closed on malformed kv-transfer-preflight-report.json" \
+    env AUTOSYNC_STAGE_DIR="${STAGE_SB_PRIO}" \
+    LOOPWRIGHT_CANDIDATE_DIR="${CAND_SB_PRIO}" \
+    AUTOSYNC_FAST_SELFTEST=true \
+    bash "${CAND_SB_PRIO}/.auto-sync/checks/validate_kv_transfer.sh"
+  printf '{"schemaVersion":1}\n' > "${SB_PRIO_REPORT}"
+  assert_fails "validate_kv_transfer fails closed when kv-transfer-preflight-report.json omits stage" \
+    env AUTOSYNC_STAGE_DIR="${STAGE_SB_PRIO}" \
+    LOOPWRIGHT_CANDIDATE_DIR="${CAND_SB_PRIO}" \
+    AUTOSYNC_FAST_SELFTEST=true \
+    bash "${CAND_SB_PRIO}/.auto-sync/checks/validate_kv_transfer.sh"
+  rm -f "${SB_PRIO_REPORT}"
+  assert_fails "validate_kv_transfer fails closed when kv-transfer-preflight-report.json is missing" \
+    env AUTOSYNC_STAGE_DIR="${STAGE_SB_PRIO}" \
+    LOOPWRIGHT_CANDIDATE_DIR="${CAND_SB_PRIO}" \
+    AUTOSYNC_FAST_SELFTEST=true \
+    bash "${CAND_SB_PRIO}/.auto-sync/checks/validate_kv_transfer.sh"
+  mv -f "${SB_PRIO_REPORT}.bak" "${SB_PRIO_REPORT}"
 else
   fail "validate_kv_transfer passes Stage B tag_promotion candidate despite concurrent Stage A nixl/ucx/runner drift"
+  fail "validate_kv_transfer fails closed when Stage B tag_promotion deletes HIXL patch"
+  fail "validate_kv_transfer fails closed when Stage B tag_promotion modifies pack/model-transfer/Dockerfile"
+  fail "validate_kv_transfer fails closed on malformed kv-transfer-preflight-report.json"
+  fail "validate_kv_transfer fails closed when kv-transfer-preflight-report.json omits stage"
+  fail "validate_kv_transfer fails closed when kv-transfer-preflight-report.json is missing"
 fi
-
-# Mutating or deleting a Stage A recipe file inside a Stage B tag_promotion candidate must fail closed.
-cp -f "${SB_PRIO_REPO}/pack/model-transfer/Dockerfile" "${CAND_SB_PRIO}/pack/model-transfer/Dockerfile"
-rm -f "${CAND_SB_PRIO}/pack/model-transfer/patches/hixl/001_channel_generation.patch"
-assert_fails "validate_kv_transfer fails closed when Stage B tag_promotion deletes HIXL patch" \
-  env AUTOSYNC_STAGE_DIR="${STAGE_SB_PRIO}" \
-  LOOPWRIGHT_CANDIDATE_DIR="${CAND_SB_PRIO}" \
-  AUTOSYNC_FAST_SELFTEST=true \
-  bash "${CAND_SB_PRIO}/.auto-sync/checks/validate_kv_transfer.sh"
-cp -f "${SB_PRIO_REPO}/pack/model-transfer/patches/hixl/001_channel_generation.patch" \
-  "${CAND_SB_PRIO}/pack/model-transfer/patches/hixl/001_channel_generation.patch"
-
-sed -i.bak 's|^ARG NIXL_ROCM_REF="[^"]*"|ARG NIXL_ROCM_REF="deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"|' \
-  "${CAND_SB_PRIO}/pack/model-transfer/Dockerfile"
-rm -f "${CAND_SB_PRIO}/pack/model-transfer/Dockerfile.bak"
-assert_fails "validate_kv_transfer fails closed when Stage B tag_promotion modifies pack/model-transfer/Dockerfile" \
-  env AUTOSYNC_STAGE_DIR="${STAGE_SB_PRIO}" \
-  LOOPWRIGHT_CANDIDATE_DIR="${CAND_SB_PRIO}" \
-  AUTOSYNC_FAST_SELFTEST=true \
-  bash "${CAND_SB_PRIO}/.auto-sync/checks/validate_kv_transfer.sh"
 
 # When Stage A has drift and ONLY held mooncake has a newer published image, preflight selects recipe_sync.
 FIX_SB_HELD_ONLY="${SCRATCH}/fix-sb-held-only"

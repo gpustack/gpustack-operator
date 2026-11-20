@@ -1239,17 +1239,19 @@ assert_fails "validate_router fails closed when candidate modifies .auto-sync/se
 rm -f "${VAL_STAGE}/baseline/.auto-sync/setting-image-holds.json"
 
 # 4.17 Stage B (tag_promotion) prioritizes un-held published images over simultaneous Stage A release drift.
-printf 'pub fn v018() {}\n' >> "${VLLM_SRC}/src/lib.rs"
-git -C "${VLLM_SRC}" add -A
-git -C "${VLLM_SRC}" commit -q -m "v0.1.18"
-git -C "${VLLM_SRC}" tag v0.1.18
+FIX_417="${SCRATCH}/fix-417"
+cp -R "${FIXTURE_DIR}" "${FIX_417}"
+printf 'pub fn v018() {}\n' >> "${FIX_417}/repos/vllm-router/src/lib.rs"
+git -C "${FIX_417}/repos/vllm-router" add -A
+git -C "${FIX_417}/repos/vllm-router" commit -q -m "v0.1.18"
+git -C "${FIX_417}/repos/vllm-router" tag v0.1.18
 
-printf 'pub fn v033() {}\n' >> "${SGLANG_SRC}/sgl-model-gateway/src/lib.rs"
-git -C "${SGLANG_SRC}" add -A
-git -C "${SGLANG_SRC}" commit -q -m "gateway v0.3.3"
-git -C "${SGLANG_SRC}" tag gateway-v0.3.3
+printf 'pub fn v033() {}\n' >> "${FIX_417}/repos/sglang/sgl-model-gateway/src/lib.rs"
+git -C "${FIX_417}/repos/sglang" add -A
+git -C "${FIX_417}/repos/sglang" commit -q -m "gateway v0.3.3"
+git -C "${FIX_417}/repos/sglang" tag gateway-v0.3.3
 
-cat > "${FIXTURE_DIR}/upstream.json" <<'JSON'
+cat > "${FIX_417}/upstream.json" <<'JSON'
 {
   "repo_tags": {
     "gpustack/llm-router": ["v0.4.0", "v0.5.0"],
@@ -1257,7 +1259,7 @@ cat > "${FIXTURE_DIR}/upstream.json" <<'JSON'
   }
 }
 JSON
-cat > "${FIXTURE_DIR}/setting-image-holds.json" <<'JSON'
+cat > "${FIX_417}/setting-image-holds.json" <<'JSON'
 {
   "schema_version": 1,
   "holds": {
@@ -1272,7 +1274,7 @@ cat > "${FIXTURE_DIR}/setting-image-holds.json" <<'JSON'
   }
 }
 JSON
-python3 - "${FIXTURE_DIR}/image-manifests.json" <<'PY'
+python3 - "${FIX_417}/image-manifests.json" <<'PY'
 import json
 import sys
 p = sys.argv[1]
@@ -1291,7 +1293,7 @@ ROUTER_BASE_SHA_417="$(git -C "${FAKE_REPO}" rev-parse HEAD)"
 STAGE_ROUTER_SB_PRIO="${SCRATCH}/stage-router-sb-prio"
 (
   cd "${FAKE_REPO}"
-  AUTOSYNC_ROUTER_FIXTURE_DIR="${FIXTURE_DIR}" \
+  AUTOSYNC_ROUTER_FIXTURE_DIR="${FIX_417}" \
   AUTOSYNC_SKIP_GO_MOD_DOWNLOAD=true \
     bash "${FAKE_REPO}/.auto-sync/scripts/preflight-router.sh" "${STAGE_ROUTER_SB_PRIO}"
 )
@@ -1335,6 +1337,7 @@ else
 fi
 
 # validate_router.sh passes Stage B tag_promotion with concurrent Stage A drift (retire_0001/0004=true) and rejects Dockerfile edits.
+cp -f "${VAL_STAGE}/router-preflight-report.json" "${VAL_STAGE}/router-preflight-report.json.bak"
 cat > "${VAL_STAGE}/router-preflight-report.json" <<'JSON'
 {
   "schemaVersion": 1,
@@ -1369,8 +1372,18 @@ rm -f "${CAND_DIR}/pack/llm-router/Dockerfile.bak"
 rm -f "${CAND_DIR}/pack/llm-router/patches/vllm-router/0001-epd-routing.patch"
 assert_fails "validate_router fails closed when Stage B tag_promotion modifies pack/llm-router/Dockerfile" run_validate_env_i
 
+# Malformed, missing-stage, or absent router-preflight-report.json must fail closed even on a valid candidate.
+make_gitless_cand
+printf '{invalid json\n' > "${VAL_STAGE}/router-preflight-report.json"
+assert_fails "validate_router fails closed on malformed router-preflight-report.json" run_validate_env_i
+printf '{"schemaVersion":1}\n' > "${VAL_STAGE}/router-preflight-report.json"
+assert_fails "validate_router fails closed when router-preflight-report.json omits stage" run_validate_env_i
+rm -f "${VAL_STAGE}/router-preflight-report.json"
+assert_fails "validate_router fails closed when router-preflight-report.json is missing" run_validate_env_i
+mv -f "${VAL_STAGE}/router-preflight-report.json.bak" "${VAL_STAGE}/router-preflight-report.json"
+
 # When Stage A has drift and NO un-held newer image tag is published (only held router has v0.5.0 published), preflight selects recipe_sync.
-cat > "${FIXTURE_DIR}/setting-image-holds.json" <<'JSON'
+cat > "${FIX_417}/setting-image-holds.json" <<'JSON'
 {
   "schema_version": 1,
   "holds": {
@@ -1392,7 +1405,7 @@ JSON
 STAGE_ROUTER_HELD_ONLY="${SCRATCH}/stage-router-held-only"
 (
   cd "${FAKE_REPO}"
-  AUTOSYNC_ROUTER_FIXTURE_DIR="${FIXTURE_DIR}" \
+  AUTOSYNC_ROUTER_FIXTURE_DIR="${FIX_417}" \
   AUTOSYNC_SKIP_GO_MOD_DOWNLOAD=true \
     bash "${FAKE_REPO}/.auto-sync/scripts/preflight-router.sh" "${STAGE_ROUTER_HELD_ONLY}"
 )
@@ -1418,7 +1431,6 @@ then
 else
   fail "preflight-router selects recipe_sync when Stage A has drift and only held images have newer published tags"
 fi
-rm -f "${FIXTURE_DIR}/upstream.json" "${FIXTURE_DIR}/setting-image-holds.json"
 
 echo
 if (( FAILS > 0 )); then

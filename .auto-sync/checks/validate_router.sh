@@ -89,36 +89,51 @@ BASE_SGLANG_VER="$(extract_df_arg "${BASE_DOCKERFILE}" "SGLANG_GATEWAY_VERSION")
 EPD_PATCH="${AUTOSYNC_CANDIDATE_ROOT}/pack/llm-router/patches/vllm-router/0001-epd-routing.patch"
 DISCOVERY_PATCH="${AUTOSYNC_CANDIDATE_ROOT}/pack/llm-router/patches/vllm-router/0004-discovery-readiness-and-deselect-removal.patch"
 PREFLIGHT_REPORT="${STAGE_DIR}/router-preflight-report.json"
-PREFLIGHT_STAGE=""
-if [[ -f "${PREFLIGHT_REPORT}" ]]; then
-  RETIRE_INFO="$(python3 - "${PREFLIGHT_REPORT}" <<'PY'
+if [[ ! -f "${PREFLIGHT_REPORT}" ]]; then
+  printf 'FAIL: missing preflight report: %s\n' "${PREFLIGHT_REPORT}" >&2
+  exit 1
+fi
+if ! RETIRE_INFO="$(python3 - "${PREFLIGHT_REPORT}" <<'PY'
 import json
 import sys
 
-with open(sys.argv[1], "r", encoding="utf-8") as f:
+path = sys.argv[1]
+with open(path, "r", encoding="utf-8") as f:
     rep = json.load(f)
+if not isinstance(rep, dict):
+    raise SystemExit(f"FAIL: {path} must be a JSON object")
+stage = rep.get("stage")
+if not isinstance(stage, str) or stage not in ("recipe_sync", "tag_promotion", "no_change"):
+    raise SystemExit(
+        f"FAIL: {path} stage must be one of recipe_sync, tag_promotion, no_change (got {stage!r})"
+    )
 retire_0001 = "true" if rep.get("retire_0001_epd_routing") is True else "false"
 retire_0004 = "true" if rep.get("retire_0004_discovery_readiness") is True else "false"
 target_vllm = str((rep.get("target_tags") or {}).get("vllm-router") or "")
-stage = str(rep.get("stage") or "")
 print(f"{retire_0001}|{retire_0004}|{target_vllm}|{stage}")
 PY
-)"
-  IFS='|' read -r RETIRE_0001 RETIRE_0004 TARGET_VLLM_VER PREFLIGHT_STAGE <<<"${RETIRE_INFO}"
-  if [[ "${RETIRE_0001}" == "false" && ! -f "${EPD_PATCH}" ]]; then
-    printf 'FAIL: 0001-epd-routing.patch was deleted while retire_0001_epd_routing is false\n' >&2
-    exit 1
-  fi
-  if [[ "${RETIRE_0001}" == "true" && ( -z "${TARGET_VLLM_VER}" || "${CAND_VLLM_VER}" == "${TARGET_VLLM_VER}" ) && -f "${EPD_PATCH}" ]]; then
-    printf 'FAIL: 0001-epd-routing.patch must be retired (retire_0001_epd_routing=true); target vllm-router version %s contains 516f1cb\n' \
-      "${TARGET_VLLM_VER:-${CAND_VLLM_VER:-unknown}}" >&2
-    exit 1
-  fi
-  if [[ "${RETIRE_0004}" == "true" && ( -z "${TARGET_VLLM_VER}" || "${CAND_VLLM_VER}" == "${TARGET_VLLM_VER}" ) && -f "${DISCOVERY_PATCH}" ]]; then
-    printf 'FAIL: 0004-discovery-readiness-and-deselect-removal.patch must be retired (retire_0004_discovery_readiness=true) when targeting vllm-router %s\n' \
-      "${TARGET_VLLM_VER:-${CAND_VLLM_VER:-unknown}}" >&2
-    exit 1
-  fi
+)"; then
+  printf 'FAIL: unable to parse %s\n' "${PREFLIGHT_REPORT}" >&2
+  exit 1
+fi
+IFS='|' read -r RETIRE_0001 RETIRE_0004 TARGET_VLLM_VER PREFLIGHT_STAGE <<<"${RETIRE_INFO}"
+if [[ -z "${PREFLIGHT_STAGE}" ]]; then
+  printf 'FAIL: empty stage in %s\n' "${PREFLIGHT_REPORT}" >&2
+  exit 1
+fi
+if [[ "${RETIRE_0001}" == "false" && ! -f "${EPD_PATCH}" ]]; then
+  printf 'FAIL: 0001-epd-routing.patch was deleted while retire_0001_epd_routing is false\n' >&2
+  exit 1
+fi
+if [[ "${RETIRE_0001}" == "true" && ( -z "${TARGET_VLLM_VER}" || "${CAND_VLLM_VER}" == "${TARGET_VLLM_VER}" ) && -f "${EPD_PATCH}" ]]; then
+  printf 'FAIL: 0001-epd-routing.patch must be retired (retire_0001_epd_routing=true); target vllm-router version %s contains 516f1cb\n' \
+    "${TARGET_VLLM_VER:-${CAND_VLLM_VER:-unknown}}" >&2
+  exit 1
+fi
+if [[ "${RETIRE_0004}" == "true" && ( -z "${TARGET_VLLM_VER}" || "${CAND_VLLM_VER}" == "${TARGET_VLLM_VER}" ) && -f "${DISCOVERY_PATCH}" ]]; then
+  printf 'FAIL: 0004-discovery-readiness-and-deselect-removal.patch must be retired (retire_0004_discovery_readiness=true) when targeting vllm-router %s\n' \
+    "${TARGET_VLLM_VER:-${CAND_VLLM_VER:-unknown}}" >&2
+  exit 1
 fi
 
 # 4. Apply patches cleanly against staged upstream clones and verify struct ObserverRouter.
@@ -321,6 +336,11 @@ for b in ALL_BUILDERS:
         print(b)
 PY
 )"
+
+if [[ -z "${PREFLIGHT_STAGE}" ]]; then
+  printf 'FAIL: missing stage in %s\n' "${PREFLIGHT_REPORT}" >&2
+  exit 1
+fi
 
 if [[ "${PREFLIGHT_STAGE}" == "tag_promotion" && -n "${CHANGED_STAGES}" ]]; then
   printf 'FAIL: Stage B tag_promotion must not modify pack/llm-router/Dockerfile or patches (changed stages: %s)\n' \
