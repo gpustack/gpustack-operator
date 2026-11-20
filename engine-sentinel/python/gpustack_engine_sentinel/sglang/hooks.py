@@ -97,6 +97,12 @@ def _read_dspark_force_budget_frac(
     return None
 
 
+def _positive_int(val: Any) -> int | None:
+    if isinstance(val, bool) or not isinstance(val, int) or val <= 0:
+        return None
+    return val
+
+
 def _probe_sglang_capabilities(scheduler: Any) -> tuple[list[str], list[str]]:
     supported: list[str] = []
     unsupported: list[str] = []
@@ -105,7 +111,7 @@ def _probe_sglang_capabilities(scheduler: Any) -> tuple[list[str], list[str]]:
 
     if (
         scheduler is not None
-        and hasattr(scheduler, "max_running_requests")
+        and _positive_int(getattr(scheduler, "max_running_requests", None)) is not None
         and callable(getattr(scheduler, "get_num_allocatable_reqs", None))
     ):
         supported.append(FIELD_MAX_ACTIVE_REQUESTS)
@@ -215,7 +221,9 @@ def _ensure_sglang_rank_state(scheduler: Any) -> _SGLangRankState:
                 ctx_dict = {}
 
         defaults: dict[str, Any] = {
-            "max_running_requests": int(getattr(scheduler, "max_running_requests", 1)),
+            "max_running_requests": _positive_int(
+                getattr(scheduler, "max_running_requests", None)
+            ),
             "chunked_prefill_size": getattr(scheduler, "chunked_prefill_size", None),
             "prefill_max_requests": getattr(sched_ctx, "prefill_max_requests", None),
             "schedule_conservativeness": float(
@@ -444,7 +452,11 @@ def _read_sglang_boot_defaults(
     supported_set = set(supported)
     out: dict[str, Any] = {}
     if FIELD_MAX_ACTIVE_REQUESTS in supported_set:
-        out[FIELD_MAX_ACTIVE_REQUESTS] = int(defaults.get("max_running_requests", 1))
+        max_reqs = _positive_int(defaults.get("max_running_requests")) or _positive_int(
+            getattr(scheduler, "max_running_requests", None)
+        )
+        if max_reqs is not None:
+            out[FIELD_MAX_ACTIVE_REQUESTS] = max_reqs
     if FIELD_MAX_BATCHED_TOKENS in supported_set:
         out[FIELD_MAX_BATCHED_TOKENS] = _chunked_prefill_ceiling(scheduler, defaults)
     if FIELD_PREFILL_MAX_REQUESTS in supported_set:
@@ -489,11 +501,12 @@ def _read_sglang_values(
     values: dict[str, Any] = {}
     if FIELD_MAX_ACTIVE_REQUESTS in supported_set:
         live_cap = getattr(scheduler, "_gpustack_live_max_active_requests", None)
-        values[FIELD_MAX_ACTIVE_REQUESTS] = (
-            int(live_cap)
-            if live_cap is not None
-            else int(getattr(scheduler, "max_running_requests", 0))
-        )
+        if live_cap is not None:
+            values[FIELD_MAX_ACTIVE_REQUESTS] = int(live_cap)
+        else:
+            max_reqs = _positive_int(getattr(scheduler, "max_running_requests", None))
+            if max_reqs is not None:
+                values[FIELD_MAX_ACTIVE_REQUESTS] = max_reqs
     if FIELD_MAX_BATCHED_TOKENS in supported_set:
         values[FIELD_MAX_BATCHED_TOKENS] = getattr(
             scheduler, "chunked_prefill_size", None
@@ -566,22 +579,21 @@ def _parse_sglang_bundle(
     resets: list[str],
     target_digest: str,
 ) -> _ParsedSGLangBundle:
-    boot_max_reqs = int(
-        defaults.get(
-            "max_running_requests",
-            getattr(scheduler, "max_running_requests", 1),
-        )
-    )
-    parsed_active = (
-        parse_strict_int(
+    boot_max_reqs = _positive_int(
+        defaults.get("max_running_requests")
+    ) or _positive_int(getattr(scheduler, "max_running_requests", None))
+    parsed_active: int | None = None
+    if FIELD_MAX_ACTIVE_REQUESTS in parameters:
+        if boot_max_reqs is None:
+            raise InvalidRequestError(
+                f"{FIELD_MAX_ACTIVE_REQUESTS} boot ceiling is unavailable"
+            )
+        parsed_active = parse_strict_int(
             parameters[FIELD_MAX_ACTIVE_REQUESTS],
             FIELD_MAX_ACTIVE_REQUESTS,
             minimum=1,
             maximum=boot_max_reqs,
         )
-        if FIELD_MAX_ACTIVE_REQUESTS in parameters
-        else None
-    )
 
     parsed_batched: int | None = None
     if FIELD_MAX_BATCHED_TOKENS in parameters:
@@ -1104,17 +1116,8 @@ class SGLangSentinelBackend:
         if status_name == "UnHealthy":
             return False, False, "server_unhealthy"
 
+        # Read local TokenizerManager pause state directly without fanning out ZMQ RPCs on every probe.
         paused = bool(getattr(tm, "is_pause", False))
-        get_state_fn = getattr(tm, "get_internal_state", None)
-        if callable(get_state_fn):
-            try:
-                states = await get_state_fn()
-                for st in states or ():
-                    rc = st.get(STATE_NAMESPACE_KEY) if isinstance(st, dict) else None
-                    if isinstance(rc, dict):
-                        paused = paused or bool(rc.get("paused", False))
-            except Exception:
-                pass
         return True, paused, None
 
     async def check_ready(self) -> tuple[bool, str | None]:

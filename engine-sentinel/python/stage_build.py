@@ -90,10 +90,11 @@ def stage_unpacked(
     resolved_version = normalize_package_version(version)
     resolved_src = src_root.resolve()
     resolved_out = output_dir.resolve()
+    resolved_cwd = Path.cwd().resolve()
     if (
-        resolved_out == resolved_out.parent
-        or resolved_out == resolved_src
+        resolved_out in (resolved_out.parent, resolved_src, resolved_cwd)
         or resolved_out in resolved_src.parents
+        or resolved_src in resolved_out.parents
     ):
         raise ValueError(
             f"Refusing to clear unsafe output_dir {resolved_out} relative to src_root {resolved_src}"

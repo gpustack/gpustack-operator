@@ -564,12 +564,12 @@ class SentinelControlPlane:
                     )
                 return JSONResponse(content=data, status_code=code)
 
-            add_api_route(READY_PATH, _ready_ep, methods=["GET"])
-            add_api_route(LIVE_PATH, _live_ep, methods=["GET"])
+            add_api_route(READY_PATH, _ready_ep, methods=["GET", "HEAD"])
+            add_api_route(LIVE_PATH, _live_ep, methods=["GET", "HEAD"])
             add_api_route(ACK_PATH, _ack_ep, methods=["POST"])
-            add_api_route(PAUSE_PATH, _pause_get_ep, methods=["GET"])
+            add_api_route(PAUSE_PATH, _pause_get_ep, methods=["GET", "HEAD"])
             add_api_route(PAUSE_PATH, _pause_post_ep, methods=["POST"])
-            add_api_route(RUNTIME_CONFIG_PATH, _rc_get_ep, methods=["GET"])
+            add_api_route(RUNTIME_CONFIG_PATH, _rc_get_ep, methods=["GET", "HEAD"])
             add_api_route(RUNTIME_CONFIG_PATH, _rc_post_ep, methods=["POST"])
             return
 

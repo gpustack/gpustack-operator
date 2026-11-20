@@ -43,9 +43,10 @@ const (
 	// modelDeploymentRouterMetricsPort is where every router serves Prometheus metrics, so that one
 	// scrape configuration reaches all of them. The llm-d picker listens here by default; the
 	// routers configured by argv are told to, because their own default is elsewhere.
-	modelDeploymentRouterMetricsPort       int32 = 9090
-	modelDeploymentRouterObserverProxyPort int32 = 9091
-	modelDeploymentResourceNoteRouter            = "router"
+	modelDeploymentRouterMetricsPort        int32 = 9090
+	modelDeploymentRouterObserverProxyPort  int32 = 9091
+	modelDeploymentRouterEnvoyContainerName       = "envoy"
+	modelDeploymentResourceNoteRouter             = "router"
 )
 
 // ModelDeploymentRouterObjects carries the complete namespaced object set one managed router needs
@@ -178,7 +179,7 @@ func modelDeploymentRouterIsolationReady(
 	}
 	hasEnvoy := false
 	for i := range dep.Spec.Template.Spec.Containers {
-		if dep.Spec.Template.Spec.Containers[i].Name == "envoy" {
+		if dep.Spec.Template.Spec.Containers[i].Name == modelDeploymentRouterEnvoyContainerName {
 			hasEnvoy = true
 			break
 		}
@@ -231,7 +232,7 @@ func modelDeploymentRouterIsolationReady(
 		liveRouterPods++
 		podHasEnvoy := false
 		for j := range p.Spec.Containers {
-			if p.Spec.Containers[j].Name == "envoy" {
+			if p.Spec.Containers[j].Name == modelDeploymentRouterEnvoyContainerName {
 				podHasEnvoy = true
 				break
 			}
@@ -833,7 +834,7 @@ func renderModelDeploymentRouterEnvoyContainer(
 		settings.ModelDeploymentRouterProxyImage.ShouldValue(ctx))
 
 	return core.Container{
-		Name: "envoy", Image: proxyImage,
+		Name: modelDeploymentRouterEnvoyContainerName, Image: proxyImage,
 		// Resolved rather than passed through so an empty policy does not drift against
 		// API server defaulting on subsequent reconciles.
 		ImagePullPolicy: kvcache.ResolvePullPolicy(md.Spec.Router.ImagePullPolicy, proxyImage),
@@ -1296,7 +1297,11 @@ func buildModelDeploymentRouterEnvoyConfig(
 	b.WriteString("          http_filters:\n")
 	b.WriteString(httpFilters)
 	if includeObserverListener {
-		b.WriteString(modelDeploymentRouterEnvoyObserverListener)
+		b.WriteString(strings.ReplaceAll(
+			modelDeploymentRouterEnvoyObserverListener,
+			"__OBSERVER_PROXY_PORT__",
+			strconvx.Itoa(modelDeploymentRouterObserverProxyPort),
+		))
 	}
 	b.WriteString("  clusters:\n")
 	b.WriteString(clusters)
@@ -1446,9 +1451,12 @@ const modelDeploymentRouterEnvoyLoopbackHTTPFilters = `          - name: envoy.f
               "@type": type.googleapis.com/envoy.extensions.filters.http.router.v3.Router
 `
 
+// modelDeploymentRouterEnvoyObserverListener binds 0.0.0.0:__OBSERVER_PROXY_PORT__ inside the
+// router Pod for kubelet readiness probes and cluster-internal controller observation (not exposed
+// on the router Service).
 const modelDeploymentRouterEnvoyObserverListener = `  - name: observer
     address:
-      socket_address: {address: 0.0.0.0, port_value: 9091}
+      socket_address: {address: 0.0.0.0, port_value: __OBSERVER_PROXY_PORT__}
     filter_chains:
     - filters:
       - name: envoy.filters.network.http_connection_manager

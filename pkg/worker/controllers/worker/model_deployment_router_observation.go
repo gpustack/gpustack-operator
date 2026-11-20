@@ -304,7 +304,7 @@ func modelDeploymentRouterObserverPortForPod(profile string, routerPod *corev1.P
 	}
 	if routerPod != nil {
 		for i := range routerPod.Spec.Containers {
-			if routerPod.Spec.Containers[i].Name == "envoy" {
+			if routerPod.Spec.Containers[i].Name == modelDeploymentRouterEnvoyContainerName {
 				return modelDeploymentRouterObserverProxyPort
 			}
 		}

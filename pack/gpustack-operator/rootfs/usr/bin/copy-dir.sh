@@ -21,6 +21,9 @@ fi
 
 mkdir -p "${dst}"
 
+# Sweep any orphaned staging temp files left behind by an interrupted copy.
+find "${dst}" -type f -name '.*.stage-*' -delete 2>/dev/null || true
+
 # Walk regular files under <src>, relative to <src>, NUL-separated for safety.
 while IFS= read -r -d '' rel; do
     s="${src}/${rel}"

@@ -558,13 +558,15 @@ func (r *ModelDeploymentReconciler) reconcileModelDeploymentRuntimeControl(
 		serving = observation.Serving
 	}
 
+	passCtx, passCancel := context.WithTimeout(ctx, modelDeploymentRuntimeControlPassBudget)
+	defer passCancel()
 	roleCount := max(len(md.Spec.Roles), 1)
-	roleBudget := max(modelDeploymentRuntimeControlPassBudget/time.Duration(roleCount), 5*time.Second)
+	roleBudget := max(modelDeploymentRuntimeControlPassBudget/time.Duration(roleCount), 3*time.Second)
 
 	outcomes := make([]roleRuntimeControlOutcome, 0, len(md.Spec.Roles))
 	for i := range md.Spec.Roles {
 		role := &md.Spec.Roles[i]
-		roleCtx, roleCancel := context.WithTimeout(ctx, roleBudget)
+		roleCtx, roleCancel := context.WithTimeout(passCtx, roleBudget)
 		outcome, roleErr := r.reconcileRoleRuntimeControl(
 			roleCtx,
 			md,
@@ -964,15 +966,18 @@ func (r *ModelDeploymentReconciler) reconcileRoleRuntimeControlWithOptions(
 		return out, nil
 	}
 
-	var ledgerMu sync.Mutex
+	var ledgerMu sync.RWMutex
+	var saveMu sync.Mutex
 	var ledgerConflict atomic.Bool
 	saveLedger := func(mutator func(*runtimecontrol.RoleLedger)) error {
 		if ledger == nil || md.UID == "" {
 			return nil
 		}
-		ledgerMu.Lock()
-		defer ledgerMu.Unlock()
+		saveMu.Lock()
+		defer saveMu.Unlock()
+		ledgerMu.RLock()
 		candidate := ledger.DeepCopy()
+		ledgerMu.RUnlock()
 		mutator(candidate)
 		saveCtx, saveCancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 		defer saveCancel()
@@ -983,15 +988,17 @@ func (r *ModelDeploymentReconciler) reconcileRoleRuntimeControlWithOptions(
 			}
 			return saveErr
 		}
+		ledgerMu.Lock()
 		*ledger = *candidate
+		ledgerMu.Unlock()
 		return nil
 	}
 	readEntry := func(podName string) (runtimecontrol.PodLedgerEntry, bool) {
 		if ledger == nil {
 			return runtimecontrol.PodLedgerEntry{}, false
 		}
-		ledgerMu.Lock()
-		defer ledgerMu.Unlock()
+		ledgerMu.RLock()
+		defer ledgerMu.RUnlock()
 		return ledger.GetEntry(podName)
 	}
 
