@@ -38,27 +38,24 @@ You are synchronizing the six CLI tool pins and Kubernetes `v0.36.x` lockstep Go
 - **`api/`**: ONLY codegen outputs (`zz_generated*.go`, `zz_generated.openapi.violation_exceptions`, `generated.pb.go`, `generated.protomessage.pb.go`, `generated.proto`) may change. Never edit hand-written API types.
 - **Protected paths**: Never modify `pkg/devicemanager/allocator`, `pkg/worker/scaling/priors/priors.yaml`, `pkg/worker/scaling/priors/records.md`, `pkg/worker/settings/value.go`, `csrc`, `binding`, or `gen/binding`.
 
-## Staged Preflight Artifacts (`.auto-sync/.stage/k8s-deps/`)
+## Taskpack 2.0 Preflight Resources
 
 Inside the offline `linux-bwrap` sandbox, host toolchains (`go`, `golangci-lint`, `goimports-reviser`,
-`protoc`, `hugo`, etc.) and external host staging directories are NOT mounted. Always inspect
-`.auto-sync/.stage/k8s-deps/` FIRST (falling back to `$AUTOSYNC_STAGE_DIR` only if
-`.auto-sync/.stage/k8s-deps/` is absent):
+`protoc`, `hugo`, etc.) are not mounted; preflight resources are mounted natively via Taskpack 2.0:
 
-- `.auto-sync/.stage/k8s-deps/k8s-deps-preflight-report.json` — filtered same-minor and `v3.*`
-  upstream versions, `staging_updated`, `patch_clean`, `held_back_upstreams`, and `target` pins.
-- `.auto-sync/.stage/k8s-deps/upstream-records.json` — normalized `TaskpackUpstreamRecord` entries.
+1. **Prompt summary (`mount: 'prompt'`)**: Read `.loopwright-preflight/k8s-deps-preflight-summary.json` first.
+2. **Read-only workspace resources (`mount: 'workspace'`)**: Inspect the `readOnlyPath` entries under `## Preflight Staged Workspace Resources` in your prompt:
+   - `k8s-deps-preflight-report.json` — filtered same-minor and `v3.*` upstream versions, `staging_updated`, `patch_clean`, `held_back_upstreams`, and `target` pins.
+   - `candidate-overlay.tgz` (and optional `candidate-deleted-files.txt`) — present when `staging_updated` is `true`.
 
-**Read-only stage rule:** `.auto-sync/.stage/**` is read-only host-staged context outside
-`scope.writable`. **NEVER** edit, move, or delete any file under `.auto-sync/.stage/**` (doing so
-fails `scope-guard`). Loopwright automatically strips `.auto-sync/.stage/**` when running
-`validate_k8s_deps.sh` on the host and when publishing the Pull Request.
-
-**CRITICAL — Do NOT hand-edit pre-staged Go modules or generated trees:**
-When `staging_updated` is `true` in `k8s-deps-preflight-report.json`, `hack/deps.sh`, `staging/`,
-`go.mod`, `go.sum`, `api/`, and `pkg/` are **already staged, linted, and double-generated** in
-your workspace by host preflight! Do **NOT** hand-edit `go.mod`, `go.sum`, `hack/deps.sh`,
-`staging/`, `api/`, or `pkg/` inside `bwrap`.
+**CRITICAL — Apply `candidate-overlay.tgz` and do NOT hand-edit pre-staged Go modules or generated trees:**
+When `staging_updated` is `true` in `k8s-deps-preflight-report.json`, host preflight has already staged, linted, and double-generated `hack/deps.sh`, `staging/`, `go.mod`, `go.sum`, `api/`, and `pkg/` inside `candidate-overlay.tgz`. Apply it cleanly into the workspace root:
+```sh
+tar -xzf "<readOnlyPath of candidate-overlay.tgz>" -C .
+# If candidate-deleted-files.txt is also listed under workspace resources:
+xargs -r rm -f < "<readOnlyPath of candidate-deleted-files.txt>"
+```
+Do **NOT** hand-edit `go.mod`, `go.sum`, `hack/deps.sh`, `staging/`, `api/`, or `pkg/` inside `bwrap` unless resolving a reported compile/call-site adaptation within writable scope.
 
 Your edits inside `bwrap` are strictly:
 1. Update the changed CLI `ARG` pins (`SKOPEO_VERSION`, `HELM_VERSION`, `VALS_VERSION`,

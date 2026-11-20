@@ -1,0 +1,21 @@
+{
+  "version": 1,
+  "taskpack": "kv-transfer-sync",
+  "entries": [
+    {
+      "path": ".auto-sync/checks",
+      "kind": "directory",
+      "sha256": "3b39d83a9506eda72d3ef2cb98602207e8b23c27c121d4e9d4dcd6f66c78ad51"
+    },
+    {
+      "path": ".auto-sync/instructions/kv-transfer.md",
+      "kind": "file",
+      "sha256": "9a409bd2151490d8684178f587461de119f78902e191019c095e6180358b4c14"
+    },
+    {
+      "path": ".auto-sync/scripts/preflight-kv-transfer.sh",
+      "kind": "file",
+      "sha256": "ee92800820cd5d1cecfe584700da3bd9357a2572260f7a3d53e0f0a6e5664830"
+    }
+  ]
+}

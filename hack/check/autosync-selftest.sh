@@ -147,9 +147,10 @@ for pf in "${PY_FILES[@]}"; do
   fi
 done
 
-echo "== manifest, proposal, holds, and workflow validation =="
+echo "== Taskpack 2.0 manifest, digest lockfile, proposal, holds, and workflow validation =="
 if python3 -B - "${ROOT_DIR}" <<'PY'
 import glob
+import hashlib
 import importlib.util
 import json
 import os
@@ -183,6 +184,8 @@ def _strip_yaml_scalar(val: str) -> object:
         return True
     if val in ("false", "False"):
         return False
+    if re.fullmatch(r"-?\d+", val):
+        return int(val)
     return val
 
 
@@ -299,7 +302,7 @@ def load_yaml(path: str):
     return _parse_yaml_stdlib(raw, path)
 
 
-def check_repo_file(rel_path: object, label: str) -> None:
+def check_repo_file(rel_path: object, label: str) -> str:
     if not isinstance(rel_path, str) or not rel_path.strip():
         raise AssertionError(f"{label}: expected non-empty path string, got {rel_path!r}")
     if os.path.isabs(rel_path):
@@ -307,12 +310,66 @@ def check_repo_file(rel_path: object, label: str) -> None:
     full = os.path.join(root, rel_path)
     if not os.path.isfile(full):
         raise AssertionError(f"{label}: referenced file does not exist: {rel_path}")
+    return full
 
+
+def check_scope_glob(pattern: object, label: str) -> None:
+    if not isinstance(pattern, str) or not pattern.strip():
+        raise AssertionError(f"{label}: expected non-empty glob string, got {pattern!r}")
+    if os.path.isabs(pattern) or pattern.startswith("./") or pattern.endswith("/"):
+        raise AssertionError(f"{label}: invalid scope pattern {pattern!r}")
+    if pattern.endswith("/**"):
+        base_rel = pattern[:-3]
+        if "**" in base_rel:
+            raise AssertionError(f"{label}: '**' is only allowed as trailing '/**' in {pattern!r}")
+        if "*" not in base_rel and "?" not in base_rel:
+            full = os.path.join(root, base_rel)
+            if os.path.isfile(full):
+                raise AssertionError(f"{label}: exact file {base_rel!r} must not end with '/**'")
+            if not os.path.isdir(full):
+                raise AssertionError(f"{label}: directory {base_rel!r} does not exist for {pattern!r}")
+    else:
+        if "**" in pattern:
+            raise AssertionError(f"{label}: invalid '**' placement in {pattern!r}")
+        if "*" not in pattern and "?" not in pattern:
+            full = os.path.join(root, pattern)
+            if os.path.isdir(full):
+                raise AssertionError(
+                    f"{label}: directory {pattern!r} MUST use explicit '{pattern}/**' under Taskpack 2.0"
+                )
+            if not os.path.isfile(full):
+                raise AssertionError(f"{label}: exact file {pattern!r} does not exist")
+
+
+def sha256_tree(dir_path: str) -> str:
+    # Matches Loopwright's computeDirectoryTreeDigest in packages/github-app/src/digests.ts.
+    rows: list[tuple[str, int, str]] = []
+    for cur_root, dirs, files in os.walk(dir_path):
+        dirs.sort()
+        for fn in sorted(files):
+            full = os.path.join(cur_root, fn)
+            rel = os.path.relpath(full, dir_path).replace(os.sep, "/")
+            data = open(full, "rb").read()
+            fhash = hashlib.sha256(data).hexdigest()
+            rows.append((rel, len(data), fhash))
+    rows.sort(key=lambda item: item[0])
+    h = hashlib.sha256()
+    h.update(b"loopwright.dev/digests/tree/v1\n")
+    for rel, size, fhash in rows:
+        h.update(f"{rel}\0{size}\0{fhash}\n".encode("utf-8"))
+    return h.hexdigest()
+
+
+FORBIDDEN_ENV_RE = re.compile(
+    r"(?:^|_)(?:TOKEN|SECRET|PASSWORD|PASSWD|API_KEY|APIKEY|PRIVATE_KEY|ACCESS_KEY|CREDENTIAL)(?:$|_)"
+)
+FORBIDDEN_ENV_PREFIXES = ("LOOPWRIGHT_", "GITHUB_APP_", "INPUT_", "ACTIONS_", "RUNNER_", "GIT_")
 
 taskpacks = sorted(glob.glob(os.path.join(autosync_dir, "*-taskpack.yaml")))
-if not taskpacks:
-    raise AssertionError("no *-taskpack.yaml files found under .auto-sync")
+if len(taskpacks) != 6:
+    raise AssertionError(f"expected 6 *-taskpack.yaml files under .auto-sync, found {len(taskpacks)}")
 
+seen_lockfiles: set[str] = set()
 for tp in taskpacks:
     rel_tp = os.path.relpath(tp, root)
     doc = load_yaml(tp)
@@ -323,9 +380,74 @@ for tp in taskpacks:
     if doc.get("kind") != "Taskpack":
         raise AssertionError(f"{rel_tp}: kind must be Taskpack")
 
+    meta = doc.get("metadata") or {}
+    tp_name = meta.get("name")
+    if not isinstance(tp_name, str) or not tp_name:
+        raise AssertionError(f"{rel_tp}: missing metadata.name")
+
     spec = doc.get("spec")
     if not isinstance(spec, dict):
         raise AssertionError(f"{rel_tp}: missing spec mapping")
+
+    execution = spec.get("execution")
+    if not isinstance(execution, dict) or execution.get("mode") != "strict":
+        raise AssertionError(f"{rel_tp}: spec.execution.mode must be 'strict'")
+    digests_cfg = execution.get("digests")
+    if not isinstance(digests_cfg, dict) or digests_cfg.get("pinDigests") is not True:
+        raise AssertionError(f"{rel_tp}: spec.execution.digests.pinDigests must be true")
+    lockfile_rel = digests_cfg.get("lockfile")
+    lockfile_full = check_repo_file(lockfile_rel, f"{rel_tp} spec.execution.digests.lockfile")
+    if lockfile_rel in seen_lockfiles:
+        raise AssertionError(f"{rel_tp}: duplicate digest lockfile {lockfile_rel!r} across taskpacks")
+    seen_lockfiles.add(lockfile_rel)
+
+    lock_doc = json.load(open(lockfile_full, "r", encoding="utf-8"))
+    if lock_doc.get("taskpack") != tp_name:
+        raise AssertionError(
+            f"{lockfile_rel}: taskpack {lock_doc.get('taskpack')!r} != manifest {tp_name!r}"
+        )
+    for entry in lock_doc.get("entries") or []:
+        epath = entry.get("path", "")
+        ekind = entry.get("kind", "")
+        ewant = entry.get("sha256", "")
+        efull = os.path.join(root, epath)
+        if ekind == "directory":
+            egot = sha256_tree(efull)
+        else:
+            egot = hashlib.sha256(open(efull, "rb").read()).hexdigest()
+        if egot != ewant:
+            raise AssertionError(
+                f"{lockfile_rel}: digest drift for {epath} ({ekind}): lockfile={ewant[:12]} != actual={egot[:12]}"
+            )
+
+    preflight = spec.get("preflight")
+    if not isinstance(preflight, dict):
+        raise AssertionError(f"{rel_tp}: missing spec.preflight mapping")
+    pf_script = check_repo_file(preflight.get("script"), f"{rel_tp} spec.preflight.script")
+    if not os.access(pf_script, os.X_OK):
+        raise AssertionError(f"{rel_tp}: preflight script {preflight.get('script')} must be executable")
+    for env_name in preflight.get("env") or []:
+        if (
+            not isinstance(env_name, str)
+            or env_name in ("GITHUB_TOKEN", "GH_TOKEN")
+            or env_name.startswith(FORBIDDEN_ENV_PREFIXES)
+            or FORBIDDEN_ENV_RE.search(env_name)
+        ):
+            raise AssertionError(f"{rel_tp}: forbidden preflight env variable {env_name!r}")
+
+    scope = spec.get("scope")
+    if not isinstance(scope, dict):
+        raise AssertionError(f"{rel_tp}: missing spec.scope mapping")
+    writable = scope.get("writable")
+    protected = scope.get("protected")
+    if not isinstance(writable, list) or not writable:
+        raise AssertionError(f"{rel_tp}: spec.scope.writable must be non-empty")
+    if not isinstance(protected, list):
+        raise AssertionError(f"{rel_tp}: spec.scope.protected must be a list")
+    for idx, pat in enumerate(writable):
+        check_scope_glob(pat, f"{rel_tp} spec.scope.writable[{idx}]")
+    for idx, pat in enumerate(protected):
+        check_scope_glob(pat, f"{rel_tp} spec.scope.protected[{idx}]")
 
     instructions = spec.get("instructions")
     if not isinstance(instructions, list) or not instructions:
@@ -337,6 +459,8 @@ for tp in taskpacks:
     if not isinstance(proposal, dict):
         raise AssertionError(f"{rel_tp}: missing spec.proposal mapping")
     check_repo_file(proposal.get("path"), f"{rel_tp} spec.proposal.path")
+    if proposal.get("path") not in writable:
+        raise AssertionError(f"{rel_tp}: spec.proposal.path must appear as an exact file in spec.scope.writable")
 
     verification = spec.get("verification")
     if not isinstance(verification, dict):
@@ -344,20 +468,34 @@ for tp in taskpacks:
     local_checks = verification.get("localChecks")
     if not isinstance(local_checks, list):
         raise AssertionError(f"{rel_tp}: spec.verification.localChecks must be a list")
+    has_cmd_v1 = False
     for idx, chk in enumerate(local_checks):
         if not isinstance(chk, dict):
             raise AssertionError(f"{rel_tp}: localChecks[{idx}] must be a mapping")
         params = chk.get("parameters")
-        if isinstance(params, dict) and "script" in params:
+        if chk.get("implementation") == "command.v1":
+            has_cmd_v1 = True
+            if not isinstance(params, dict):
+                raise AssertionError(f"{rel_tp}: command.v1 missing parameters")
             check_repo_file(
                 params.get("script"),
                 f"{rel_tp} spec.verification.localChecks[{idx}].parameters.script",
             )
+            toolchains = params.get("toolchainPaths")
+            if not isinstance(toolchains, list) or not toolchains:
+                raise AssertionError(f"{rel_tp}: command.v1 should declare non-empty toolchainPaths")
+    if not has_cmd_v1:
+        raise AssertionError(f"{rel_tp}: expected at least one command.v1 check")
+
+    output_cfg = spec.get("output")
+    if not isinstance(output_cfg, dict) or set(output_cfg.get("formats") or []) < {"json", "github-step-summary"}:
+        raise AssertionError(f"{rel_tp}: spec.output.formats must include json and github-step-summary")
+
     print(f"PASS  taskpack {rel_tp}")
 
 proposals = sorted(glob.glob(os.path.join(autosync_dir, "proposals", "*.json")))
-if not proposals:
-    raise AssertionError("no proposal JSON files found under .auto-sync/proposals")
+if len(proposals) != 6:
+    raise AssertionError(f"expected 6 proposal JSON files under .auto-sync/proposals, found {len(proposals)}")
 for prop in proposals:
     rel_prop = os.path.relpath(prop, root)
     with open(prop, "r", encoding="utf-8") as f:
@@ -385,12 +523,27 @@ if not os.path.isfile(workflow_path):
 wf_doc = load_yaml(workflow_path)
 if not isinstance(wf_doc, dict):
     raise AssertionError(".github/workflows/auto-sync.yml: expected YAML mapping")
+jobs = wf_doc.get("jobs") or {}
+sync_steps = ((jobs.get("auto-sync") or {}).get("steps")) or []
+lw_steps = [s for s in sync_steps if isinstance(s, dict) and str(s.get("uses") or "").startswith("gpustack/loopwright@")]
+if len(lw_steps) != 1:
+    raise AssertionError(".github/workflows/auto-sync.yml: expected exactly one gpustack/loopwright step")
+lw_with = lw_steps[0].get("with") or {}
+if lw_with.get("mode") != "auto":
+    raise AssertionError(f"auto-sync.yml: Loopwright step must set mode: auto, got {lw_with.get('mode')!r}")
+if str(lw_with.get("allow-privileged-execution")).lower() != "true":
+    raise AssertionError("auto-sync.yml: Loopwright step must set allow-privileged-execution: 'true'")
+if lw_with.get("output") != "json,github-step-summary":
+    raise AssertionError("auto-sync.yml: Loopwright step must set output: json,github-step-summary")
+for legacy_key in ("upstream-records", "source-revision"):
+    if legacy_key in lw_with:
+        raise AssertionError(f"auto-sync.yml: legacy input {legacy_key!r} must be removed under Taskpack 2.0")
 print("PASS  workflow .github/workflows/auto-sync.yml")
 PY
 then
-  pass "manifest, proposal, holds, and workflow static checks"
+  pass "Taskpack 2.0 manifest, digest lockfile, proposal, holds, and workflow static checks"
 else
-  fail "manifest, proposal, holds, and workflow static checks"
+  fail "Taskpack 2.0 manifest, digest lockfile, proposal, holds, and workflow static checks"
 fi
 
 echo

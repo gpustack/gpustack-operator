@@ -3,10 +3,6 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(CDPATH="" cd -P -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
-# Inline bootstrap: Loopwright copies gate.script alone to workDir/gate-script.sh.
-if [[ ! -f "${SCRIPT_DIR}/lib.sh" && -f "${LOOPWRIGHT_CANDIDATE_DIR:-.}/.auto-sync/checks/lib.sh" ]]; then
-  SCRIPT_DIR="$(CDPATH="" cd -P -- "${LOOPWRIGHT_CANDIDATE_DIR:-.}/.auto-sync/checks" && pwd -P)"
-fi
 # shellcheck source=./lib.sh
 # shellcheck disable=SC1091
 source "${SCRIPT_DIR}/lib.sh"
@@ -27,12 +23,11 @@ trap cleanup_on_exit EXIT
 autosync::ensure_ephemeral_git "${AUTOSYNC_CANDIDATE_ROOT}"
 
 STAGE_DIR="${AUTOSYNC_STAGE_DIR:-}"
-if [[ -z "${STAGE_DIR}" || ! -d "${STAGE_DIR}/baseline" ]]; then
-  printf 'FAIL: AUTOSYNC_STAGE_DIR must point to a preflight stage directory with baseline/\n' >&2
+BASELINE_DIR="$(autosync::resolve_baseline_dir "${STAGE_DIR}")"
+if [[ -z "${BASELINE_DIR}" || ! -d "${BASELINE_DIR}" ]]; then
+  printf 'FAIL: LOOPWRIGHT_BASE_DIR or AUTOSYNC_STAGE_DIR/baseline must point to baseline directory\n' >&2
   exit 1
 fi
-
-BASELINE_DIR="${STAGE_DIR}/baseline"
 
 # 1. Shared-file variable-level diff guards.
 KV_SETTING_KEYS='kv-cache-backend-image|model-deployment-modelexpress-server-image'
@@ -223,9 +218,9 @@ for start_line, snippet in context_blocks:
 PY
 
 # 3. Byte-level HIXL parity with gpustack/runner & patch dry-run against staged hixl.
-KV_REPORT="${STAGE_DIR}/kv-transfer-preflight-report.json"
-if [[ ! -f "${KV_REPORT}" ]]; then
-  printf 'FAIL: missing preflight report: %s\n' "${KV_REPORT}" >&2
+KV_REPORT="$(autosync::resolve_staged_file "kv-transfer-preflight-report.json" "${STAGE_DIR}")"
+if [[ -z "${KV_REPORT}" || ! -f "${KV_REPORT}" ]]; then
+  printf 'FAIL: missing preflight report (kv-transfer-preflight-report.json)\n' >&2
   exit 1
 fi
 
@@ -368,14 +363,14 @@ if [[ ! -f "${BASE_MT_DF}" || ! -f "${MT_DF}" ]]; then
   exit 1
 fi
 
-python3 - "${BASE_MT_DF}" "${MT_DF}" "${STAGE_DIR}" "${AUTOSYNC_CANDIDATE_ROOT}" <<'PY'
+python3 - "${BASE_MT_DF}" "${MT_DF}" "${STAGE_DIR}" "${KV_REPORT}" "${AUTOSYNC_CANDIDATE_ROOT}" <<'PY'
 import json
 import os
 import re
 import subprocess
 import sys
 
-base_df_p, cand_df_p, stage_dir, cand_root = sys.argv[1:5]
+base_df_p, cand_df_p, stage_dir, report_path, cand_root = sys.argv[1:6]
 sys.path.insert(0, os.path.join(cand_root, ".auto-sync", "checks"))
 from dockerfile_arg import read_dockerfile_arg
 
@@ -414,10 +409,9 @@ if cand_nixl_rocm_ref != f"v{cand_nixl_rocm_ver}":
         f"FAIL: NIXL_ROCM_REF ({cand_nixl_rocm_ref!r}) must equal 'v' + NIXL_ROCM_VERSION ({f'v{cand_nixl_rocm_ver}'!r})"
     )
 
-report_path = os.path.join(stage_dir, "kv-transfer-preflight-report.json")
 verified_nixl: set[str] = set()
 verified_ucx: set[str] = set()
-if os.path.isfile(report_path):
+if report_path and os.path.isfile(report_path):
     with open(report_path, "r", encoding="utf-8") as f:
         rep = json.load(f)
     nixl_sec = rep.get("nixl_pypi")
@@ -618,7 +612,7 @@ PY
 fi
 
 # 5. Two-Stage Image Publication Gate and value.go <-> settings.md alignment.
-MANIFESTS_JSON="${STAGE_DIR}/image-manifests.json"
+MANIFESTS_JSON="$(autosync::resolve_staged_file "image-manifests.json" "${STAGE_DIR}")"
 IMAGE_META_FILE="$(mktemp "${TMPDIR:-/tmp}/autosync-kv-images.XXXXXXXX")"
 _CLEANUP_PATHS+=("${IMAGE_META_FILE}")
 python3 - \
@@ -968,3 +962,5 @@ if [[ "${PROMOTED_FILES_CHANGED}" == "true" && "${AUTOSYNC_FAST_SELFTEST:-false}
   )
   git -C "${AUTOSYNC_CANDIDATE_ROOT}" diff --exit-code
 fi
+
+autosync::write_check_out true "validate_kv_transfer passed (images_changed=${IMAGES_CHANGED})"

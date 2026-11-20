@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# .auto-sync/scripts/preflight-kv-transfer.sh - host-side preflight for kv-transfer-sync.
+# .auto-sync/scripts/preflight-kv-transfer.sh - Taskpack 2.0 preflight for kv-transfer-sync.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
@@ -49,7 +49,7 @@ trap 'exit 129' HUP
 
 DISCOVERY_JSON="${STAGE_DIR}/kv-transfer-discovery.json"
 
-python3 - "${REPO_ROOT}" "${STAGE_DIR}" "${AUTOSYNC_KV_FIXTURE_DIR:-}" "${DISCOVERY_JSON}" "${PROBE_LIST_FILE}" "${BASE_SHA}" <<'PY'
+python3 -B - "${REPO_ROOT}" "${STAGE_DIR}" "${AUTOSYNC_KV_FIXTURE_DIR:-}" "${DISCOVERY_JSON}" "${PROBE_LIST_FILE}" "${BASE_SHA}" <<'PY'
 import json
 import os
 import re
@@ -1308,16 +1308,63 @@ stage_a_drifts = {
 }
 
 has_stage_a = any(stage_a_drifts.values())
-hixl_held_extra = (
-    {
-        "reason": (
-            f"held at gpustack/runner VLLM_HIXL_COMMIT {recipe['hixl_commit'][:12]} "
-            f"while upstream hicann/hixl is at {up['hixl'][:12]}"
-        )
+kv_holds = disc.get("held_setting_images") or {}
+
+
+def hixl_record(avail: bool, target_ver: str) -> dict:
+    if avail:
+        return {
+            "id": "hixl",
+            "status": "available",
+            "version": target_ver,
+            "currentVersion": recipe["hixl_commit"],
+        }
+    if hixl_upstream_held_by_runner:
+        return {
+            "id": "hixl",
+            "status": "held_back",
+            "version": up["hixl"],
+            "currentVersion": recipe["hixl_commit"],
+            "reason": (
+                f"held at gpustack/runner VLLM_HIXL_COMMIT {recipe['hixl_commit'][:12]} "
+                f"while upstream hicann/hixl is at {up['hixl'][:12]}"
+            ),
+        }
+    return {
+        "id": "hixl",
+        "status": "up_to_date",
+        "version": recipe["hixl_commit"],
     }
-    if not stage_a_drifts["hixl"] and hixl_upstream_held_by_runner
-    else {}
-)
+
+
+def mooncake_non_stage_a_record(stage_b: bool) -> dict:
+    if stage_b:
+        return {
+            "id": "mooncake",
+            "status": "available",
+            "version": f"{recipe['mooncake_version']}+stage-b",
+            "currentVersion": recipe["mooncake_version"],
+            "recentVersions": up["mooncake_recent"],
+        }
+    if (
+        "mooncake" in kv_holds
+        and f"gpustack/mirrored-mooncake:{recipe['mooncake_version']}-cpu" != defaults["kv_cache_backend_image"]
+    ):
+        return {
+            "id": "mooncake",
+            "status": "held_back",
+            "version": f"{recipe['mooncake_version']}+stage-b",
+            "currentVersion": recipe["mooncake_version"],
+            "recentVersions": up["mooncake_recent"],
+            "reason": str(kv_holds["mooncake"].get("reason") or "mooncake image held by setting-image-holds.json"),
+        }
+    return {
+        "id": "mooncake",
+        "status": "up_to_date",
+        "version": recipe["mooncake_version"],
+        "recentVersions": up["mooncake_recent"],
+    }
+
 
 mooncake_stage_b = (
     targets["mooncake_image"] != defaults["kv_cache_backend_image"]
@@ -1349,46 +1396,38 @@ if has_stage_b:
     stage = "tag_promotion"
     image_published = True
     records = [
+        mooncake_non_stage_a_record(mooncake_stage_b),
         {
-            "upstreamId": "mooncake",
-            "status": "available" if mooncake_stage_b else "up_to_date",
-            "version": f"{recipe['mooncake_version']}+stage-b" if mooncake_stage_b else recipe["mooncake_version"],
-            "recentVersions": up["mooncake_recent"],
-        },
-        {
-            "upstreamId": "nixl-pypi",
+            "id": "nixl-pypi",
             "status": "up_to_date",
             "version": recipe["nixl_version"],
             "recentVersions": up["nixl_pypi_recent"],
         },
         {
-            "upstreamId": "nixl-rocm",
+            "id": "nixl-rocm",
             "status": "up_to_date",
             "version": recipe["nixl_rocm_ref"],
             "recentVersions": up["nixl_rocm_recent"],
         },
         {
-            "upstreamId": "ucx-rocm",
+            "id": "ucx-rocm",
             "status": "up_to_date",
             "version": recipe["ucx_rocm_ref"],
             "recentVersions": up["ucx_rocm_recent"],
         },
+        hixl_record(False, recipe["hixl_commit"]),
         {
-            "upstreamId": "hixl",
-            "status": "up_to_date",
-            "version": recipe["hixl_commit"],
-            **hixl_held_extra,
-        },
-        {
-            "upstreamId": "modelexpress",
+            "id": "modelexpress",
             "status": "available" if mx_stage_b else "up_to_date",
             "version": f"{recipe['modelexpress_version']}+stage-b" if mx_stage_b else recipe["modelexpress_version"],
+            **({"currentVersion": recipe["modelexpress_version"]} if mx_stage_b else {}),
             "recentVersions": up["modelexpress_recent"],
         },
         {
-            "upstreamId": "gpustack-runner",
+            "id": "gpustack-runner",
             "status": "available" if mt_stage_b else "up_to_date",
             "version": "aligned+stage-b" if mt_stage_b else "aligned",
+            **({"currentVersion": "aligned"} if mt_stage_b else {}),
         },
     ]
 elif has_stage_a:
@@ -1396,45 +1435,46 @@ elif has_stage_a:
     image_published = False
     records = [
         {
-            "upstreamId": "mooncake",
+            "id": "mooncake",
             "status": "available" if stage_a_drifts["mooncake"] else "up_to_date",
             "version": up["mooncake"] if stage_a_drifts["mooncake"] else recipe["mooncake_version"],
+            **({"currentVersion": recipe["mooncake_version"]} if stage_a_drifts["mooncake"] else {}),
             "recentVersions": up["mooncake_recent"],
         },
         {
-            "upstreamId": "nixl-pypi",
+            "id": "nixl-pypi",
             "status": "available" if stage_a_drifts["nixl-pypi"] else "up_to_date",
             "version": up["nixl_pypi"] if stage_a_drifts["nixl-pypi"] else recipe["nixl_version"],
+            **({"currentVersion": recipe["nixl_version"]} if stage_a_drifts["nixl-pypi"] else {}),
             "recentVersions": up["nixl_pypi_recent"],
         },
         {
-            "upstreamId": "nixl-rocm",
+            "id": "nixl-rocm",
             "status": "available" if stage_a_drifts["nixl-rocm"] else "up_to_date",
             "version": up["nixl_rocm"] if stage_a_drifts["nixl-rocm"] else recipe["nixl_rocm_ref"],
+            **({"currentVersion": recipe["nixl_rocm_ref"]} if stage_a_drifts["nixl-rocm"] else {}),
             "recentVersions": up["nixl_rocm_recent"],
         },
         {
-            "upstreamId": "ucx-rocm",
+            "id": "ucx-rocm",
             "status": "available" if stage_a_drifts["ucx-rocm"] else "up_to_date",
             "version": up["ucx_rocm"] if stage_a_drifts["ucx-rocm"] else recipe["ucx_rocm_ref"],
+            **({"currentVersion": recipe["ucx_rocm_ref"]} if stage_a_drifts["ucx-rocm"] else {}),
             "recentVersions": up["ucx_rocm_recent"],
         },
+        hixl_record(stage_a_drifts["hixl"], effective_hixl_target),
         {
-            "upstreamId": "hixl",
-            "status": "available" if stage_a_drifts["hixl"] else "up_to_date",
-            "version": effective_hixl_target if stage_a_drifts["hixl"] else recipe["hixl_commit"],
-            **hixl_held_extra,
-        },
-        {
-            "upstreamId": "modelexpress",
+            "id": "modelexpress",
             "status": "available" if stage_a_drifts["modelexpress"] else "up_to_date",
             "version": up["modelexpress"] if stage_a_drifts["modelexpress"] else recipe["modelexpress_version"],
+            **({"currentVersion": recipe["modelexpress_version"]} if stage_a_drifts["modelexpress"] else {}),
             "recentVersions": up["modelexpress_recent"],
         },
         {
-            "upstreamId": "gpustack-runner",
+            "id": "gpustack-runner",
             "status": "available" if stage_a_drifts["gpustack-runner"] else "up_to_date",
             "version": up["gpustack_runner"] if stage_a_drifts["gpustack-runner"] else "aligned",
+            **({"currentVersion": "aligned"} if stage_a_drifts["gpustack-runner"] else {}),
         },
     ]
 else:
@@ -1444,44 +1484,34 @@ else:
         and is_published(targets["mooncake_image"])
     )
     records = [
+        mooncake_non_stage_a_record(False),
         {
-            "upstreamId": "mooncake",
-            "status": "up_to_date",
-            "version": recipe["mooncake_version"],
-            "recentVersions": up["mooncake_recent"],
-        },
-        {
-            "upstreamId": "nixl-pypi",
+            "id": "nixl-pypi",
             "status": "up_to_date",
             "version": recipe["nixl_version"],
             "recentVersions": up["nixl_pypi_recent"],
         },
         {
-            "upstreamId": "nixl-rocm",
+            "id": "nixl-rocm",
             "status": "up_to_date",
             "version": recipe["nixl_rocm_ref"],
             "recentVersions": up["nixl_rocm_recent"],
         },
         {
-            "upstreamId": "ucx-rocm",
+            "id": "ucx-rocm",
             "status": "up_to_date",
             "version": recipe["ucx_rocm_ref"],
             "recentVersions": up["ucx_rocm_recent"],
         },
+        hixl_record(False, recipe["hixl_commit"]),
         {
-            "upstreamId": "hixl",
-            "status": "up_to_date",
-            "version": recipe["hixl_commit"],
-            **hixl_held_extra,
-        },
-        {
-            "upstreamId": "modelexpress",
+            "id": "modelexpress",
             "status": "up_to_date",
             "version": recipe["modelexpress_version"],
             "recentVersions": up["modelexpress_recent"],
         },
         {
-            "upstreamId": "gpustack-runner",
+            "id": "gpustack-runner",
             "status": "up_to_date",
             "version": "aligned",
         },
@@ -1494,7 +1524,6 @@ with open(recs_path, "w", encoding="utf-8") as f:
 report = {
     "schemaVersion": 1,
     "base_sha": disc.get("base_sha", ""),
-    "source_revision": disc.get("base_sha", ""),
     "stage": stage,
     "image_published": image_published,
     "enforce_runner_hixl_parity": True,
@@ -1552,9 +1581,9 @@ if autosync::preflight::has_available_upstreams "${UPSTREAM_RECORDS_JSON}" || \
   fi
 fi
 
-SOURCE_REVISION="${BASE_SHA}"
-if [[ "${AUTOSYNC_SKIP_SOURCE_REVISION:-false}" != "true" ]] && \
-   autosync::preflight::has_available_upstreams "${UPSTREAM_RECORDS_JSON}"; then
+STAGED_TREE=""
+COMMIT_PATHS=()
+if autosync::preflight::has_available_upstreams "${UPSTREAM_RECORDS_JSON}"; then
   KV_STAGE_TMP="$(mktemp -d "${TMPDIR:-/tmp}/autosync-kv-stage.XXXXXXXX")"
   STAGED_TREE="${KV_STAGE_TMP}/staged-tree"
   mkdir -p "${STAGED_TREE}"
@@ -1867,32 +1896,31 @@ PY
       fi
     fi
   fi
-
-  SOURCE_REVISION="$(
-    autosync::preflight::commit_staged_tree_revision \
-      "${REPO_ROOT}" "${BASE_SHA}" \
-      "chore(kv-transfer): stage preflight bundle and deterministic updates" \
-      "${STAGED_TREE}" \
-      "${COMMIT_PATHS[@]}"
-  )"
-  if [[ "${SOURCE_REVISION}" != "${BASE_SHA}" ]]; then
-    python3 - "${PREFLIGHT_REPORT_JSON}" "${SOURCE_REVISION}" <<'PY'
-import json
-import sys
-p, src_rev = sys.argv[1:3]
-with open(p, "r", encoding="utf-8") as f:
-    rep = json.load(f)
-rep["source_revision"] = src_rev
-with open(p, "w", encoding="utf-8") as f:
-    json.dump(rep, f, indent=2)
-    f.write("\n")
-PY
-  fi
 fi
 
 rm -f "${DISCOVERY_JSON}"
 
-COMPACT_RECORDS="$(python3 -c 'import json,sys; print(json.dumps(json.load(open(sys.argv[1])), separators=(",",":")))' "${UPSTREAM_RECORDS_JSON}")"
-autosync::preflight::write_github_output "stage_dir" "${STAGE_DIR}"
-autosync::preflight::write_github_output "upstream_records" "${COMPACT_RECORDS}"
-autosync::preflight::write_github_output "source_revision" "${SOURCE_REVISION}"
+EMIT_ARGS=(
+  --manifests "${MANIFESTS_JSON}"
+)
+if [[ -n "${STAGED_TREE}" && -d "${STAGED_TREE}" ]]; then
+  if [[ -d "${STAGED_TREE}/.auto-sync/.stage/kv-transfer" ]]; then
+    EMIT_ARGS+=(--bundle-dir "${STAGED_TREE}/.auto-sync/.stage/kv-transfer")
+  fi
+  CAND_PATHS_CSV=""
+  for cp_rel in "${COMMIT_PATHS[@]+"${COMMIT_PATHS[@]}"}"; do
+    [[ "${cp_rel}" == ".auto-sync/.stage"* ]] && continue
+    CAND_PATHS_CSV="${CAND_PATHS_CSV:+${CAND_PATHS_CSV},}${cp_rel}"
+  done
+  if [[ -n "${CAND_PATHS_CSV}" ]]; then
+    EMIT_ARGS+=(
+      --candidate-tree "${STAGED_TREE}"
+      --candidate-paths "${CAND_PATHS_CSV}"
+    )
+  fi
+fi
+
+autosync::preflight::emit_taskpack_v2 \
+  "kv-transfer" "${REPO_ROOT}" "${BASE_SHA}" "${STAGE_DIR}" \
+  "${UPSTREAM_RECORDS_JSON}" "${PREFLIGHT_REPORT_JSON}" \
+  "${EMIT_ARGS[@]}"

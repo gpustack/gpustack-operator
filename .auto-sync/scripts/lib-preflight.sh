@@ -3,6 +3,7 @@
 #
 # Sourced by .auto-sync/scripts/preflight-<domain>.sh before invoking Loopwright.
 set -euo pipefail
+export PYTHONDONTWRITEBYTECODE=1
 
 # autosync::preflight::repo_root
 # Prints the canonical physical path of the repository root.
@@ -851,270 +852,6 @@ PY
   rm -f "${tmp_lines}"
 }
 
-# autosync::preflight::write_github_output <key> <value>
-# Appends a delimiter-safe output block to GITHUB_OUTPUT when set.
-autosync::preflight::write_github_output() {
-  local key="${1:?output key required}"
-  local value="${2-}"
-  if [[ -z "${GITHUB_OUTPUT:-}" ]]; then
-    return 0
-  fi
-  local delim="AUTOSYNC_EOF_$$_${RANDOM:-0}"
-  while [[ "${value}" == *"${delim}"* ]]; do
-    delim="${delim}_X"
-  done
-  {
-    printf '%s<<%s\n' "${key}" "${delim}"
-    printf '%s\n' "${value}"
-    printf '%s\n' "${delim}"
-  } >> "${GITHUB_OUTPUT}"
-}
-
-# autosync::preflight::_restore_paths <repo_root> <base_sha> <rel_path>...
-# Removes <rel_path>... from <repo_root> (including .gitignore-matched artifacts) and
-# restores <base_sha>:<rel_path> cleanly without touching .git/index.
-autosync::preflight::_restore_paths() {
-  local rr="${1:?repo_root required}"
-  local bs="${2:?base_sha required}"
-  shift 2
-  local p restore_rc=0
-  for p in "$@"; do
-    rm -rf -- "${rr:?}/${p:?}"
-    if git -C "${rr}" cat-file -e "${bs}:${p}" 2>/dev/null; then
-      if ! git -C "${rr}" archive "${bs}" -- "${p}" | tar -x -C "${rr}"; then
-        restore_rc=1
-      fi
-    fi
-  done
-  return "${restore_rc}"
-}
-
-# autosync::preflight::commit_detached_source_revision <repo_root> <base_sha> <commit_msg> <rel_path>...
-# Captures modifications under <rel_path>... into a detached commit object parented on
-# <base_sha> using a temporary index, restores the working tree cleanly, and prints the SHA.
-autosync::preflight::commit_detached_source_revision() {
-  local repo_root="${1:?repo_root required}"
-  local base_sha="${2:?base_sha required}"
-  local commit_msg="${3:?commit_msg required}"
-  shift 3
-  if (( $# == 0 )); then
-    printf 'FAIL: commit_detached_source_revision requires at least one relative path\n' >&2
-    return 1
-  fi
-
-  local rel
-  for rel in "$@"; do
-    case "${rel}" in
-      ""|.|./*|/*|*../*|*/..|..|*/.|*/./*|*/)
-        printf 'FAIL: commit_detached_source_revision path must be safe repo-relative: %s\n' "${rel}" >&2
-        return 1
-        ;;
-    esac
-  done
-
-  local base_tree tmp_dir tmp_index new_tree
-  base_tree="$(git -C "${repo_root}" rev-parse "${base_sha}^{tree}")"
-  tmp_dir="$(mktemp -d "${TMPDIR:-/tmp}/autosync-gitidx.XXXXXXXX")"
-  tmp_index="${tmp_dir}/index"
-
-  if ! GIT_INDEX_FILE="${tmp_index}" git -C "${repo_root}" read-tree "${base_sha}" || \
-     ! GIT_INDEX_FILE="${tmp_index}" git -C "${repo_root}" add -A -- "$@" || \
-     ! new_tree="$(GIT_INDEX_FILE="${tmp_index}" git -C "${repo_root}" write-tree)"; then
-    rm -rf "${tmp_dir}"
-    autosync::preflight::_restore_paths "${repo_root}" "${base_sha}" "$@" || true
-    return 1
-  fi
-  rm -rf "${tmp_dir}"
-
-  if ! autosync::preflight::_restore_paths "${repo_root}" "${base_sha}" "$@"; then
-    return 1
-  fi
-
-  if [[ "${new_tree}" == "${base_tree}" ]]; then
-    printf '%s\n' "${base_sha}"
-    return 0
-  fi
-
-  local new_commit
-  if ! new_commit="$(
-    GIT_AUTHOR_NAME="autosync-preflight" \
-    GIT_AUTHOR_EMAIL="autosync@gpustack.local" \
-    GIT_COMMITTER_NAME="autosync-preflight" \
-    GIT_COMMITTER_EMAIL="autosync@gpustack.local" \
-    git -C "${repo_root}" commit-tree "${new_tree}" -p "${base_sha}" -m "${commit_msg}"
-  )"; then
-    return 1
-  fi
-  printf '%s\n' "${new_commit}"
-}
-
-# autosync::preflight::commit_staged_tree_revision <repo_root> <base_sha> <commit_msg> <staged_root> <rel_path>...
-# Constructs a detached commit parented on <base_sha> purely in <repo_root>'s object
-# database using a temporary GIT_INDEX_FILE, replacing <rel_path>... from <staged_root>
-# without ever modifying <repo_root>'s working tree or .git/index.
-autosync::preflight::commit_staged_tree_revision() {
-  local repo_root="${1:?repo_root required}"
-  local base_sha="${2:?base_sha required}"
-  local commit_msg="${3:?commit_msg required}"
-  local staged_root="${4:?staged_root required}"
-  shift 4
-  if (( $# == 0 )); then
-    printf 'FAIL: commit_staged_tree_revision requires at least one relative path\n' >&2
-    return 1
-  fi
-  if [[ ! -d "${staged_root}" ]]; then
-    printf 'FAIL: commit_staged_tree_revision staged_root does not exist: %s\n' "${staged_root}" >&2
-    return 1
-  fi
-
-  local rel
-  for rel in "$@"; do
-    case "${rel}" in
-      ""|.|./*|/*|*../*|*/..|..|*/.|*/./*|*/)
-        printf 'FAIL: commit_staged_tree_revision path must be safe repo-relative: %s\n' "${rel}" >&2
-        return 1
-        ;;
-    esac
-  done
-
-  local tmp_dir
-  tmp_dir="$(mktemp -d "${TMPDIR:-/tmp}/autosync-gitidx.XXXXXXXX")"
-
-  (
-    trap 'rm -rf "${tmp_dir}"' EXIT
-    trap 'exit 130' INT
-    trap 'exit 143' TERM
-    trap 'exit 129' HUP
-    local tmp_index="${tmp_dir}/index"
-    local base_tree new_tree
-
-    base_tree="$(git -C "${repo_root}" rev-parse "${base_sha}^{tree}")"
-    GIT_INDEX_FILE="${tmp_index}" git -C "${repo_root}" read-tree "${base_sha}"
-    GIT_INDEX_FILE="${tmp_index}" git -C "${repo_root}" rm -q --cached -r --ignore-unmatch -- "$@"
-
-    python3 - "${repo_root}" "${base_sha}" "${tmp_index}" "${staged_root}" "$@" <<'PY'
-import os
-import subprocess
-import sys
-
-repo_root, base_sha, tmp_index, staged_root = sys.argv[1:5]
-rel_paths = sys.argv[5:]
-
-tracked_res = subprocess.run(
-    ["git", "-C", repo_root, "ls-tree", "-r", "-z", "--name-only", base_sha, "--", *rel_paths],
-    capture_output=True,
-    check=True,
-)
-tracked = {
-    p.decode("utf-8", errors="surrogateescape")
-    for p in tracked_res.stdout.split(b"\0")
-    if p
-}
-
-candidates: list[tuple[str, str, bool]] = []
-for rel in rel_paths:
-    target = os.path.join(staged_root, rel)
-    if os.path.islink(target):
-        candidates.append((rel, target, True))
-    elif os.path.isfile(target):
-        candidates.append((rel, target, False))
-    elif os.path.isdir(target):
-        for cur, dirs, names in os.walk(target, followlinks=False):
-            dirs[:] = sorted(d for d in dirs if d not in (".git", ".sbin"))
-            for name in sorted(names):
-                fp = os.path.join(cur, name)
-                sub_rel = os.path.relpath(fp, staged_root).replace(os.sep, "/")
-                if os.path.islink(fp):
-                    candidates.append((sub_rel, fp, True))
-                elif os.path.isfile(fp):
-                    candidates.append((sub_rel, fp, False))
-
-if candidates:
-    untracked_rels = [
-        r
-        for r, _, _ in candidates
-        if r not in tracked and r != ".auto-sync/.stage" and not r.startswith(".auto-sync/.stage/")
-    ]
-    ignored: set[str] = set()
-    if untracked_rels:
-        ci_in = b"".join(r.encode("utf-8", errors="surrogateescape") + b"\0" for r in untracked_rels)
-        ci_res = subprocess.run(
-            ["git", "-C", repo_root, "check-ignore", "-z", "--stdin"],
-            input=ci_in,
-            capture_output=True,
-        )
-        if ci_res.returncode not in (0, 1):
-            raise SystemExit(f"FAIL: git check-ignore failed: {ci_res.stderr.decode('utf-8', errors='replace')}")
-        if ci_res.returncode == 0:
-            ignored = {
-                p.decode("utf-8", errors="surrogateescape")
-                for p in ci_res.stdout.split(b"\0")
-                if p
-            }
-
-    kept = [(r, fp, is_link) for r, fp, is_link in candidates if r not in ignored]
-    reg_entries = [(r, fp) for r, fp, is_link in kept if not is_link]
-    link_entries = [(r, fp) for r, fp, is_link in kept if is_link]
-
-    index_lines: list[bytes] = []
-    if reg_entries:
-        for _, fp in reg_entries:
-            if "\n" in fp:
-                raise SystemExit(f"FAIL: newline in staged file path: {fp!r}")
-        stdin_paths = "\n".join(fp for _, fp in reg_entries) + "\n"
-        ho_res = subprocess.run(
-            ["git", "-C", repo_root, "hash-object", "-w", "--no-filters", "--stdin-paths"],
-            input=stdin_paths.encode("utf-8", errors="surrogateescape"),
-            capture_output=True,
-            check=True,
-        )
-        blobs = [ln.strip() for ln in ho_res.stdout.decode("utf-8").splitlines() if ln.strip()]
-        if len(blobs) != len(reg_entries):
-            raise SystemExit(f"FAIL: hash-object count mismatch ({len(blobs)} != {len(reg_entries)})")
-        for (r, fp), blob in zip(reg_entries, blobs):
-            mode = "100755" if bool(os.stat(fp).st_mode & 0o111) else "100644"
-            index_lines.append(f"{mode} {blob}\t{r}".encode("utf-8", errors="surrogateescape") + b"\0")
-
-    for r, fp in link_entries:
-        link_target = os.readlink(fp).encode("utf-8", errors="surrogateescape")
-        ho_res = subprocess.run(
-            ["git", "-C", repo_root, "hash-object", "-w", "--stdin"],
-            input=link_target,
-            capture_output=True,
-            check=True,
-        )
-        blob = ho_res.stdout.decode("utf-8").strip()
-        index_lines.append(f"120000 {blob}\t{r}".encode("utf-8", errors="surrogateescape") + b"\0")
-
-    if index_lines:
-        env = os.environ.copy()
-        env["GIT_INDEX_FILE"] = tmp_index
-        subprocess.run(
-            ["git", "-C", repo_root, "update-index", "-z", "--index-info"],
-            input=b"".join(index_lines),
-            env=env,
-            check=True,
-        )
-PY
-
-    new_tree="$(GIT_INDEX_FILE="${tmp_index}" git -C "${repo_root}" write-tree)"
-    if [[ "${new_tree}" == "${base_tree}" ]]; then
-      printf '%s\n' "${base_sha}"
-      exit 0
-    fi
-
-    local new_commit
-    new_commit="$(
-      GIT_AUTHOR_NAME="autosync-preflight" \
-      GIT_AUTHOR_EMAIL="autosync@gpustack.local" \
-      GIT_COMMITTER_NAME="autosync-preflight" \
-      GIT_COMMITTER_EMAIL="autosync@gpustack.local" \
-      git -C "${repo_root}" commit-tree "${new_tree}" -p "${base_sha}" -m "${commit_msg}"
-    )"
-    printf '%s\n' "${new_commit}"
-  )
-}
-
 # autosync::preflight::has_available_upstreams <upstream_records_json>
 # Returns 0 when at least one record has status == "available", otherwise 1.
 autosync::preflight::has_available_upstreams() {
@@ -1156,8 +893,9 @@ for rec in recs:
         reason = str(rec.get("reason") or "").strip()
         suffix = "(forced via AUTOSYNC_FORCE=true)"
         rec["reason"] = f"{reason} {suffix}".strip()
+        uid = rec.get("id") or rec.get("upstreamId") or ""
         print(
-            f"INFO: AUTOSYNC_FORCE=true force-promoted upstream '{rec.get('upstreamId', '')}' "
+            f"INFO: AUTOSYNC_FORCE=true force-promoted upstream '{uid}' "
             f"({rec.get('version', '')}) from up_to_date to available",
             file=sys.stderr,
         )
@@ -1307,5 +1045,493 @@ for spec in specs:
         walk_bundle_dir(real_root, safe_base, frozenset())
     else:
         raise SystemExit(f"FAIL: unsupported stage bundle source type: {raw_src}")
+PY
+}
+
+# autosync::preflight::emit_taskpack_v2 <domain> <repo_root> <base_sha> <stage_dir> <upstream_records_json> <report_json> [options...]
+# Emits Taskpack 2.0 $LOOPWRIGHT_PREFLIGHT_OUT and stages regular non-symlink files into
+# $LOOPWRIGHT_STAGING_DIR (splitting prompt summary <= 32 KiB from workspace/check resources)
+# without mutating <repo_root>'s working tree or git object database.
+autosync::preflight::emit_taskpack_v2() {
+  local domain="${1:?domain required}"
+  local repo_root="${2:?repo_root required}"
+  local base_sha="${3:?base_sha required}"
+  local stage_dir="${4:?stage_dir required}"
+  local records_json="${5:?upstream_records_json required}"
+  local report_json="${6:?report_json required}"
+  shift 6
+
+  local manifests_json=""
+  local candidate_tree=""
+  local candidate_paths=""
+  local bundle_dir=""
+  local check_archives=()
+
+  while (( $# > 0 )); do
+    case "$1" in
+      --manifests)
+        manifests_json="${2:-}"
+        shift 2
+        ;;
+      --candidate-tree)
+        candidate_tree="${2:-}"
+        shift 2
+        ;;
+      --candidate-paths)
+        candidate_paths="${2:-}"
+        shift 2
+        ;;
+      --bundle-dir)
+        bundle_dir="${2:-}"
+        shift 2
+        ;;
+      --check-archive)
+        check_archives+=("${2:?--check-archive requires id::dir}")
+        shift 2
+        ;;
+      *)
+        printf 'FAIL: emit_taskpack_v2 unknown option: %s\n' "$1" >&2
+        return 1
+        ;;
+    esac
+  done
+
+  python3 - "${domain}" "${repo_root}" "${base_sha}" "${stage_dir}" \
+    "${records_json}" "${report_json}" "${manifests_json}" \
+    "${candidate_tree}" "${candidate_paths}" "${bundle_dir}" \
+    "${check_archives[@]+"${check_archives[@]}"}" <<'PY'
+import gzip
+import io
+import json
+import os
+import shutil
+import subprocess
+import sys
+import tarfile
+
+(
+    domain,
+    repo_root,
+    base_sha,
+    stage_dir,
+    records_path,
+    report_path,
+    manifests_path,
+    candidate_tree,
+    candidate_paths_raw,
+    bundle_dir,
+) = sys.argv[1:11]
+check_archive_specs = sys.argv[11:]
+
+staging_dir = os.environ.get("LOOPWRIGHT_STAGING_DIR", "").strip()
+if not staging_dir:
+    staging_dir = os.path.join(stage_dir, "preflight-staging")
+    if os.path.exists(staging_dir):
+        shutil.rmtree(staging_dir)
+os.makedirs(staging_dir, exist_ok=True)
+
+preflight_out = os.environ.get("LOOPWRIGHT_PREFLIGHT_OUT", "").strip()
+stage_out_copy = os.path.join(stage_dir, f"{domain}-preflight-out.json")
+if not preflight_out:
+    preflight_out = stage_out_copy
+
+
+def write_fresh_regular_bytes(dst_path: str, data: bytes) -> None:
+    os.makedirs(os.path.dirname(dst_path), exist_ok=True)
+    if os.path.lexists(dst_path):
+        os.unlink(dst_path)
+    with open(dst_path, "wb") as f:
+        f.write(data)
+    os.chmod(dst_path, 0o644)
+
+
+def copy_fresh_regular_file(src_path: str, dst_path: str) -> None:
+    real_src = os.path.realpath(src_path)
+    if not os.path.isfile(real_src):
+        raise SystemExit(f"FAIL: staged file source is not a regular file: {src_path}")
+    os.makedirs(os.path.dirname(dst_path), exist_ok=True)
+    if os.path.lexists(dst_path):
+        os.unlink(dst_path)
+    with open(real_src, "rb") as sf, open(dst_path, "wb") as df:
+        shutil.copyfileobj(sf, df)
+    os.chmod(dst_path, 0o644)
+
+
+def pack_dir_to_tgz(src_root: str, dst_tgz: str, exclude_basenames: set[str] | None = None) -> int:
+    excl = exclude_basenames or set()
+    entries: list[tuple[str, str]] = []
+    for cur, dirs, files in os.walk(src_root, followlinks=False):
+        dirs[:] = sorted(d for d in dirs if d not in (".git", ".sbin") and not os.path.islink(os.path.join(cur, d)))
+        for fn in sorted(files):
+            fp = os.path.join(cur, fn)
+            if os.path.islink(fp) or not os.path.isfile(fp):
+                continue
+            rel = os.path.relpath(fp, src_root).replace(os.sep, "/")
+            if rel in excl:
+                continue
+            entries.append((rel, fp))
+    if not entries:
+        return 0
+    if os.path.lexists(dst_tgz):
+        os.unlink(dst_tgz)
+    with open(dst_tgz, "wb") as raw_f:
+        with gzip.GzipFile(filename="", mode="wb", fileobj=raw_f, mtime=0) as gz_f:
+            with tarfile.open(mode="w", fileobj=gz_f) as tf:
+                for rel, fp in entries:
+                    st = os.stat(fp)
+                    ti = tarfile.TarInfo(name=rel)
+                    ti.size = st.st_size
+                    ti.mode = 0o755 if (st.st_mode & 0o111) else 0o644
+                    ti.mtime = 0
+                    ti.uid = 0
+                    ti.gid = 0
+                    ti.uname = ""
+                    ti.gname = ""
+                    with open(fp, "rb") as rf:
+                        tf.addfile(ti, rf)
+    os.chmod(dst_tgz, 0o644)
+    return len(entries)
+
+
+with open(records_path, "r", encoding="utf-8") as f:
+    raw_records = json.load(f)
+with open(report_path, "r", encoding="utf-8") as f:
+    report_doc = json.load(f)
+
+ALLOWED_STATUS = {"available", "up_to_date", "held_back", "blocked", "failed"}
+v2_upstreams = []
+for idx, rec in enumerate(raw_records if isinstance(raw_records, list) else []):
+    if not isinstance(rec, dict):
+        continue
+    uid = str(rec.get("id") or rec.get("upstreamId") or "").strip()
+    if not uid:
+        raise SystemExit(f"FAIL: upstream record #{idx} missing id/upstreamId")
+    status = str(rec.get("status") or "").strip()
+    if status not in ALLOWED_STATUS:
+        raise SystemExit(f"FAIL: upstream '{uid}' has invalid status: {status!r}")
+    item: dict = {"id": uid, "status": status}
+    ver = str(rec.get("version") or "").strip()
+    if ver:
+        item["version"] = ver[:256]
+    cur_ver = str(rec.get("currentVersion") or "").strip()
+    if cur_ver:
+        item["currentVersion"] = cur_ver[:256]
+    reason = str(rec.get("reason") or "").strip()
+    if reason:
+        item["reason"] = reason[:2048]
+    meta: dict = {}
+    if isinstance(rec.get("metadata"), dict):
+        meta.update(rec["metadata"])
+    recent = rec.get("recentVersions")
+    if isinstance(recent, list) and recent:
+        meta["recentVersions"] = [str(x) for x in recent[:10] if str(x).strip()]
+    if meta:
+        item["metadata"] = meta
+    v2_upstreams.append(item)
+
+with open(records_path, "w", encoding="utf-8") as f:
+    json.dump(v2_upstreams, f, indent=2)
+    f.write("\n")
+
+force_mode = os.environ.get("AUTOSYNC_FORCE", "false").strip().lower() == "true"
+avail_ids = [u["id"] for u in v2_upstreams if u["status"] == "available"]
+held_ids = [u["id"] for u in v2_upstreams if u["status"] == "held_back"]
+bad_ids = [u["id"] for u in v2_upstreams if u["status"] in ("blocked", "failed")]
+
+if avail_ids or force_mode:
+    disposition = "candidate"
+    if avail_ids:
+        top_reason = f"{domain}: candidate updates available ({', '.join(avail_ids)})"
+    else:
+        top_reason = f"{domain}: candidate execution forced via AUTOSYNC_FORCE=true"
+elif bad_ids:
+    disposition = "blocked"
+    top_reason = f"{domain}: upstream acquisition blocked/failed ({', '.join(bad_ids)})"
+else:
+    disposition = "no_change"
+    if held_ids:
+        top_reason = f"{domain}: no eligible updates ready; held back ({', '.join(held_ids)})"
+    else:
+        top_reason = str(report_doc.get("reason") or f"{domain}: all upstreams up to date")
+top_reason = top_reason[:4096]
+
+staged_resources: list[dict] = []
+
+# 1. Stage full preflight report and image manifests for both workspace and command.v1 checks.
+report_bn = f"{domain}-preflight-report.json"
+copy_fresh_regular_file(report_path, os.path.join(staging_dir, report_bn))
+staged_resources.append({
+    "id": f"{domain}-preflight-report",
+    "kind": "document",
+    "path": report_bn,
+    "mount": "workspace",
+    "exposeToChecks": True,
+})
+
+if manifests_path and os.path.isfile(manifests_path):
+    copy_fresh_regular_file(manifests_path, os.path.join(staging_dir, "image-manifests.json"))
+    staged_resources.append({
+        "id": "image-manifests",
+        "kind": "document",
+        "path": "image-manifests.json",
+        "mount": "workspace",
+        "exposeToChecks": True,
+    })
+
+# 2. Compute candidate-overlay.tgz + deleted tracked files when pre-staged writable files exist.
+changed_rels: list[str] = []
+deleted_rels: list[str] = []
+has_overlay = False
+cand_paths = [p.strip() for p in candidate_paths_raw.replace(":", ",").split(",") if p.strip()]
+cand_paths = [
+    p for p in cand_paths
+    if p != ".auto-sync/.stage" and not p.startswith(".auto-sync/.stage/")
+]
+
+if candidate_tree and os.path.isdir(candidate_tree) and cand_paths:
+    ls_res = subprocess.run(
+        ["git", "-C", repo_root, "ls-tree", "-r", "-z", base_sha, "--", *cand_paths],
+        capture_output=True,
+        check=True,
+    )
+    tracked_blobs: dict[str, tuple[str, str]] = {}
+    for raw_entry in ls_res.stdout.split(b"\0"):
+        if not raw_entry or b"\t" not in raw_entry:
+            continue
+        meta_b, path_b = raw_entry.split(b"\t", 1)
+        meta_parts = meta_b.decode("ascii", errors="replace").split()
+        if len(meta_parts) >= 3:
+            rel_p = path_b.decode("utf-8", errors="surrogateescape")
+            tracked_blobs[rel_p] = (meta_parts[0], meta_parts[2])
+
+    cand_entries: dict[str, tuple[str, bool]] = {}
+    for rel in cand_paths:
+        target = os.path.join(candidate_tree, rel)
+        if os.path.islink(target):
+            cand_entries[rel] = (target, True)
+        elif os.path.isfile(target):
+            cand_entries[rel] = (target, False)
+        elif os.path.isdir(target):
+            for cur, dirs, names in os.walk(target, followlinks=False):
+                dirs[:] = sorted(d for d in dirs if d not in (".git", ".sbin"))
+                for name in sorted(names):
+                    fp = os.path.join(cur, name)
+                    sub_rel = os.path.relpath(fp, candidate_tree).replace(os.sep, "/")
+                    if sub_rel == ".auto-sync/.stage" or sub_rel.startswith(".auto-sync/.stage/"):
+                        continue
+                    if os.path.islink(fp):
+                        cand_entries[sub_rel] = (fp, True)
+                    elif os.path.isfile(fp):
+                        cand_entries[sub_rel] = (fp, False)
+
+    untracked = [r for r in sorted(cand_entries) if r not in tracked_blobs]
+    ignored: set[str] = set()
+    if untracked:
+        ci_in = b"".join(r.encode("utf-8", errors="surrogateescape") + b"\0" for r in untracked)
+        ci_res = subprocess.run(
+            ["git", "-C", repo_root, "check-ignore", "-z", "--stdin"],
+            input=ci_in,
+            capture_output=True,
+        )
+        if ci_res.returncode == 0:
+            ignored = {
+                p.decode("utf-8", errors="surrogateescape")
+                for p in ci_res.stdout.split(b"\0")
+                if p
+            }
+
+    kept_rels = [r for r in sorted(cand_entries) if r not in ignored]
+    deleted_rels = sorted(set(tracked_blobs.keys()) - set(kept_rels))
+
+    reg_items = [(r, cand_entries[r][0]) for r in kept_rels if not cand_entries[r][1]]
+    reg_hashes: dict[str, tuple[str, str]] = {}
+    if reg_items:
+        stdin_paths = "\n".join(fp for _, fp in reg_items) + "\n"
+        ho_res = subprocess.run(
+            ["git", "-C", repo_root, "hash-object", "--no-filters", "--stdin-paths"],
+            input=stdin_paths.encode("utf-8", errors="surrogateescape"),
+            capture_output=True,
+            check=True,
+        )
+        blobs = [ln.strip() for ln in ho_res.stdout.decode("utf-8").splitlines() if ln.strip()]
+        for (r, fp), blob in zip(reg_items, blobs):
+            mode = "100755" if bool(os.stat(fp).st_mode & 0o111) else "100644"
+            reg_hashes[r] = (mode, blob)
+
+    for r in kept_rels:
+        fp, is_link = cand_entries[r]
+        if is_link:
+            link_target = os.readlink(fp).encode("utf-8", errors="surrogateescape")
+            ho_res = subprocess.run(
+                ["git", "-C", repo_root, "hash-object", "--stdin"],
+                input=link_target,
+                capture_output=True,
+                check=True,
+            )
+            cur_pair = ("120000", ho_res.stdout.decode("utf-8").strip())
+        else:
+            cur_pair = reg_hashes[r]
+        if tracked_blobs.get(r) != cur_pair:
+            changed_rels.append(r)
+
+    if changed_rels:
+        overlay_tgz = os.path.join(staging_dir, "candidate-overlay.tgz")
+        if os.path.lexists(overlay_tgz):
+            os.unlink(overlay_tgz)
+        with open(overlay_tgz, "wb") as raw_f:
+            with gzip.GzipFile(filename="", mode="wb", fileobj=raw_f, mtime=0) as gz_f:
+                with tarfile.open(mode="w", fileobj=gz_f) as tf:
+                    for r in changed_rels:
+                        fp, is_link = cand_entries[r]
+                        ti = tarfile.TarInfo(name=r)
+                        ti.mtime = 0
+                        ti.uid = 0
+                        ti.gid = 0
+                        ti.uname = ""
+                        ti.gname = ""
+                        if is_link:
+                            ti.type = tarfile.SYMTYPE
+                            ti.linkname = os.readlink(fp)
+                            ti.mode = 0o777
+                            tf.addfile(ti)
+                        else:
+                            st = os.stat(fp)
+                            ti.size = st.st_size
+                            ti.mode = 0o755 if (st.st_mode & 0o111) else 0o644
+                            with open(fp, "rb") as rf:
+                                tf.addfile(ti, rf)
+        os.chmod(overlay_tgz, 0o644)
+        has_overlay = True
+        staged_resources.append({
+            "id": "candidate-overlay",
+            "kind": "document",
+            "path": "candidate-overlay.tgz",
+            "mount": "workspace",
+            "exposeToChecks": False,
+        })
+
+    if deleted_rels:
+        del_txt = ("\n".join(deleted_rels) + "\n").encode("utf-8")
+        write_fresh_regular_bytes(os.path.join(staging_dir, "candidate-deleted-files.txt"), del_txt)
+        staged_resources.append({
+            "id": "candidate-deleted-files",
+            "kind": "document",
+            "path": "candidate-deleted-files.txt",
+            "mount": "workspace",
+            "exposeToChecks": False,
+        })
+
+# 3. Pack optional read-only stage context bundle for the agent.
+has_stage_bundle = False
+if bundle_dir and os.path.isdir(bundle_dir):
+    bundle_tgz_name = f"{domain}-stage-bundle.tgz"
+    bundle_tgz_path = os.path.join(staging_dir, bundle_tgz_name)
+    packed_cnt = pack_dir_to_tgz(
+        bundle_dir,
+        bundle_tgz_path,
+        exclude_basenames={report_bn, "upstream-records.json", "image-manifests.json"},
+    )
+    if packed_cnt > 0:
+        has_stage_bundle = True
+        staged_resources.append({
+            "id": f"{domain}-stage-bundle",
+            "kind": "document",
+            "path": bundle_tgz_name,
+            "mount": "workspace",
+            "exposeToChecks": False,
+        })
+
+# 4. Pack optional check-exposed archives (bounded <= 64 MiB).
+MAX_CHECK_ARCHIVE_BYTES = 64 * 1024 * 1024
+for spec in check_archive_specs:
+    if "::" not in spec:
+        raise SystemExit(f"FAIL: invalid --check-archive spec (expected id::dir): {spec!r}")
+    arc_id, arc_src = spec.split("::", 1)
+    if not arc_src or not os.path.isdir(arc_src):
+        continue
+    arc_name = f"{arc_id}.tgz"
+    arc_dst = os.path.join(staging_dir, arc_name)
+    cnt = pack_dir_to_tgz(arc_src, arc_dst)
+    if cnt > 0:
+        if os.path.getsize(arc_dst) <= MAX_CHECK_ARCHIVE_BYTES:
+            staged_resources.append({
+                "id": arc_id,
+                "kind": "document",
+                "path": arc_name,
+                "mount": "workspace",
+                "exposeToChecks": True,
+            })
+        else:
+            os.unlink(arc_dst)
+
+# 5. Stage compact prompt summary JSON (strictly <= 32 KiB UTF-8).
+summary_highlights: dict = {}
+for k in (
+    "stage",
+    "changed",
+    "ready_updates_count",
+    "sync_image_command",
+    "patch_clean",
+    "staging_updated",
+    "generate_ran",
+    "staging_error",
+    "held_back_upstreams",
+    "held_setting_images",
+    "has_stage_a",
+    "stage_a_drifts",
+    "stage_b_flags",
+    "retire_0001_epd_routing",
+    "retire_0004_discovery_readiness",
+    "digest_refresh_only",
+    "capture_date",
+    "catalog_merge",
+):
+    if k in report_doc:
+        summary_highlights[k] = report_doc[k]
+
+summary_doc = {
+    "domain": domain,
+    "base_sha": base_sha,
+    "disposition": disposition,
+    "reason": top_reason,
+    "upstreams": v2_upstreams,
+    "has_candidate_overlay": has_overlay,
+    "prestaged_changed_files_total": len(changed_rels),
+    "prestaged_changed_files": changed_rels[:80],
+    "prestaged_deleted_files_total": len(deleted_rels),
+    "prestaged_deleted_files": deleted_rels[:80],
+    "has_stage_bundle": has_stage_bundle,
+    "highlights": summary_highlights,
+}
+summary_bn = f"{domain}-preflight-summary.json"
+summary_bytes = (json.dumps(summary_doc, indent=2) + "\n").encode("utf-8")
+if len(summary_bytes) > 32768:
+    summary_doc["prestaged_changed_files"] = changed_rels[:20]
+    summary_doc["prestaged_deleted_files"] = deleted_rels[:20]
+    summary_bytes = (json.dumps(summary_doc, separators=(",", ":")) + "\n").encode("utf-8")
+write_fresh_regular_bytes(os.path.join(staging_dir, summary_bn), summary_bytes)
+staged_resources.insert(0, {
+    "id": f"{domain}-preflight-summary",
+    "kind": "document",
+    "path": summary_bn,
+    "mount": "prompt",
+    "exposeToChecks": False,
+})
+
+out_payload = (
+    json.dumps(
+        {
+            "disposition": disposition,
+            "reason": top_reason,
+            "upstreams": v2_upstreams,
+            "stagedResources": staged_resources,
+        },
+        indent=2,
+    )
+    + "\n"
+).encode("utf-8")
+write_fresh_regular_bytes(preflight_out, out_payload)
+if os.path.abspath(preflight_out) != os.path.abspath(stage_out_copy):
+    write_fresh_regular_bytes(stage_out_copy, out_payload)
 PY
 }

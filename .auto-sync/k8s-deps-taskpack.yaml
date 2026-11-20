@@ -4,28 +4,60 @@ metadata:
   name: k8s-deps-sync
 spec:
   goal:
-    candidate: Update CLI tool versions in pack/gpustack-operator/Dockerfile and hack/lib/helm.sh, and update Kubernetes v0.36.x lockstep Go modules and staging trees in hack/deps.sh and go.mod while passing upgrade-compat, toolpins-selftest, make generate, make lint, and make test.
-    noChange: Confirm CLI tool pins and Kubernetes Go modules match current versions and settle as no_change.
+    candidate: >-
+      Synchronize CLI tool pins in pack/gpustack-operator/Dockerfile (helm, skopeo, vals, kustomize,
+      ytt, kubectl) and/or Kubernetes v0.36.x lockstep Go modules, controller-runtime, helm/v3, and
+      kueue using preflight-staged resources, adapt staging patches and Go call sites within writable
+      scope, update .auto-sync/proposals/k8s-deps.json, and pass upgrade-compat, toolpins-selftest,
+      codegen, lint, and unit test gates.
+    noChange: >-
+      Confirm all CLI tool pins in pack/gpustack-operator/Dockerfile and Kubernetes lockstep Go
+      dependencies are aligned with eligible upstream releases with zero repository modifications.
+  execution:
+    mode: strict
+    capabilities:
+      allowHostPath: true
+      allowCheckNetwork: true
+    digests:
+      pinDigests: true
+      lockfile: .auto-sync/digests/k8s-deps.lock.json
+  preflight:
+    script: .auto-sync/scripts/preflight-k8s-deps.sh
+    timeoutSeconds: 1800
+    env:
+      - AUTOSYNC_STAGE_DIR
+      - AUTOSYNC_FORCE
+      - COMMENT_COMMAND
+      - AUTOSYNC_WARM_TOOLS
+      - AUTOSYNC_WARM_UV
+      - AUTOSYNC_WARM_GO_LIST_ALL
+      - AUTOSYNC_SKIP_GO_MOD_DOWNLOAD
+      - AUTOSYNC_SKIP_LFS_FETCH
+      - AUTOSYNC_SKIP_GENERATE
+      - AUTOSYNC_K8S_DEPS_FIXTURE_DIR
+      - AUTOSYNC_HELM_GOMOD_BASE_URL
+      - GITHUB_EVENT_NAME
+      - GITHUB_STEP_SUMMARY
   scope:
     writable:
       - pack/gpustack-operator/Dockerfile
       - hack/deps.sh
       - hack/lib/helm.sh
-      - hack/staging
-      - staging
+      - hack/staging/**
+      - staging/**
       - go.mod
       - go.sum
-      - api
-      - pkg
+      - api/**
+      - pkg/**
       - .auto-sync/proposals/k8s-deps.json
     protected:
-      - pkg/devicemanager/allocator
+      - pkg/devicemanager/allocator/**
       - pkg/worker/scaling/priors/priors.yaml
       - pkg/worker/scaling/priors/records.md
       - pkg/worker/settings/value.go
-      - csrc
-      - binding
-      - gen/binding
+      - csrc/**
+      - binding/**
+      - gen/binding/**
   instructions:
     - .auto-sync/instructions/k8s-deps.md
   upstreams:
@@ -90,8 +122,13 @@ spec:
           script: .auto-sync/checks/validate_k8s_deps.sh
           timeoutSeconds: 3600
           allowReadOnlyGitHubToken: false
+          toolchainPaths:
+            - /usr/local/bin
+            - /usr/bin
           env:
             - AUTOSYNC_STAGE_DIR
+            - AUTOSYNC_FAST_SELFTEST
+            - GITHUB_ACTIONS
     externalGates: []
   publication:
     mode: pull_request
@@ -124,3 +161,10 @@ spec:
   limits:
     wallTimeSeconds: 3600
     commandTimeoutSeconds: 3600
+    overlay:
+      maxFiles: 4096
+      maxBytes: 67108864
+  output:
+    formats:
+      - json
+      - github-step-summary

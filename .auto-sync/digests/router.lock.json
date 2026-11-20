@@ -1,0 +1,21 @@
+{
+  "version": 1,
+  "taskpack": "router-sync",
+  "entries": [
+    {
+      "path": ".auto-sync/checks",
+      "kind": "directory",
+      "sha256": "3b39d83a9506eda72d3ef2cb98602207e8b23c27c121d4e9d4dcd6f66c78ad51"
+    },
+    {
+      "path": ".auto-sync/instructions/router.md",
+      "kind": "file",
+      "sha256": "f9bf32a7531463e2c5c295be1dab17ee97af01d996be1cc6675c1cf01b8976bf"
+    },
+    {
+      "path": ".auto-sync/scripts/preflight-router.sh",
+      "kind": "file",
+      "sha256": "d25f9cb9523a0e6cdac49a83c32c7035c5a408d90fa1cc1b0d8a60bb2783ac8b"
+    }
+  ]
+}

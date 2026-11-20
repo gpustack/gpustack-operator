@@ -1,0 +1,21 @@
+{
+  "version": 1,
+  "taskpack": "priors-sync",
+  "entries": [
+    {
+      "path": ".auto-sync/checks",
+      "kind": "directory",
+      "sha256": "3b39d83a9506eda72d3ef2cb98602207e8b23c27c121d4e9d4dcd6f66c78ad51"
+    },
+    {
+      "path": ".auto-sync/instructions/priors.md",
+      "kind": "file",
+      "sha256": "c83bdb8e7506020bfa402fde9415a4503ec897044f99e7c041c97cf1a5da790c"
+    },
+    {
+      "path": ".auto-sync/scripts/preflight-priors.sh",
+      "kind": "file",
+      "sha256": "89c0627d9ff87a1cfcfc0d7bfc68d4393f24704e2de6c69aa54343e41354d086"
+    }
+  ]
+}

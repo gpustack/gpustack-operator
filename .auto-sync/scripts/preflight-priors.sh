@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# .auto-sync/scripts/preflight-priors.sh - host-side preflight for priors-sync.
+# .auto-sync/scripts/preflight-priors.sh - Taskpack 2.0 preflight for priors-sync.
 #
 # Discovers SemiAnalysisAI/InferenceX commit + availability/benchmark JSON snapshots,
-# stages go run ./gen/priors merges onto a detached source_revision when qualifying
-# changes occur, and writes priors-preflight-report.json + upstream-records.json.
+# stages go run ./gen/priors merges into a candidate overlay archive when qualifying
+# changes occur, and emits Taskpack 2.0 preflight outputs and staged resources.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
@@ -350,17 +350,19 @@ if [[ "${snapshots_changed}" == "true" || \
     autosync::preflight::warm_caches "${stage_dir}" --sbin --go --tools hugo
   fi
 fi
-source_revision="${base_sha}"
 merge_attempted=false
 catalog_changed=false
 
 tmp_catalog="${work_dir}/priors.yaml"
 cp -f "${repo_root}/pkg/worker/scaling/priors/priors.yaml" "${tmp_catalog}"
 
-if [[ "${snapshots_changed}" == "true" && "${AUTOSYNC_SKIP_SOURCE_REVISION:-false}" != "true" ]]; then
+if [[ "${snapshots_changed}" == "true" ]]; then
   merge_attempted=true
   effective_gocache="${GOCACHE:-${stage_dir}/go-cache}"
   effective_gomodcache="${GOMODCACHE:-${stage_dir}/go-mod}"
+  if [[ -z "${GOMODCACHE:-}" && -z "$(ls -A "${effective_gomodcache}/" 2>/dev/null)" ]] && command -v go >/dev/null 2>&1; then
+    effective_gomodcache="$(go env GOMODCACHE)"
+  fi
   effective_goproxy="${GOPROXY:-off}"
 
   changed_snaps_file="${work_dir}/changed-snaps.txt"
@@ -412,7 +414,7 @@ report_json="${stage_dir}/priors-preflight-report.json"
 upstream_records_json="${stage_dir}/upstream-records.json"
 
 python3 - "${analysis_json}" "${unmapped_slugs_json}" "${report_json}" "${upstream_records_json}" \
-  "${capture_date}" "${base_sha}" "${source_revision}" "${inferencex_commit}" \
+  "${capture_date}" "${base_sha}" "${inferencex_commit}" \
   "${inferencex_repo_url}" "${merge_attempted}" "${catalog_changed}" \
   "${agg_count}" "${disagg_count}" "${tmp_catalog}" "${stage_dir}" \
   "${repo_root}/pkg/worker/scaling/priors/identity.go" <<'PY'
@@ -428,7 +430,6 @@ import sys
     records_out_path,
     capture_date,
     base_sha,
-    source_revision,
     inferencex_commit,
     inferencex_repo_url,
     merge_attempted_str,
@@ -438,7 +439,7 @@ import sys
     catalog_path,
     stage_dir,
     identity_go_path,
-) = sys.argv[1:17]
+) = sys.argv[1:16]
 
 with open(analysis_path, "r", encoding="utf-8") as f:
     analysis = json.load(f)
@@ -609,7 +610,6 @@ report = {
     "schema_version": 1,
     "capture_date": capture_date,
     "base_sha": base_sha,
-    "source_revision": source_revision,
     "changed": overall_changed,
     "digest_refresh_only": digest_refresh_only,
     "reason": avail_reason,
@@ -639,22 +639,26 @@ with open(report_path, "w", encoding="utf-8") as f:
     f.write("\n")
 
 avail_sha = analysis["availability"]["sha256"]
-repo_status = "available" if (overall_changed and inferencex_commit != analysis["baseline_repo_commit"]) else "up_to_date"
+base_avail_sha = analysis["availability"]["baseline_sha256"]
+base_repo_commit = analysis["baseline_repo_commit"]
+repo_status = "available" if (overall_changed and inferencex_commit != base_repo_commit) else "up_to_date"
 avail_status = "available" if overall_changed else "up_to_date"
 
 upstream_records = [
     {
-        "upstreamId": "inferencex-repo",
+        "id": "inferencex-repo",
         "status": repo_status,
         "version": inferencex_commit,
+        **({"currentVersion": base_repo_commit} if (repo_status == "available" and base_repo_commit) else {}),
         "reason": "InferenceX repository HEAD updated alongside snapshot changes"
         if repo_status == "available"
         else "No qualifying snapshot changes triggered by InferenceX HEAD",
     },
     {
-        "upstreamId": "inferencex-availability",
+        "id": "inferencex-availability",
         "status": avail_status,
         "version": avail_sha,
+        **({"currentVersion": base_avail_sha} if (avail_status == "available" and base_avail_sha) else {}),
         "reason": avail_reason,
     },
 ]
@@ -666,45 +670,20 @@ PY
 
 autosync::preflight::apply_force_to_upstream_records "${upstream_records_json}"
 
-if [[ "${AUTOSYNC_SKIP_SOURCE_REVISION:-false}" != "true" ]] && \
-   autosync::preflight::has_available_upstreams "${upstream_records_json}"; then
-  staged_tree="${work_dir}/staged-tree"
-  mkdir -p "${staged_tree}"
-  autosync::preflight::populate_stage_bundle "${staged_tree}" "priors" \
-    "${report_json}" \
-    "${upstream_records_json}"
-  commit_paths=(".auto-sync/.stage/priors")
-  if [[ "${catalog_changed}" == "true" ]]; then
-    mkdir -p "${staged_tree}/pkg/worker/scaling/priors"
-    cp -f "${tmp_catalog}" "${staged_tree}/pkg/worker/scaling/priors/priors.yaml"
-    commit_paths+=("pkg/worker/scaling/priors/priors.yaml")
-  fi
-  source_revision="$(
-    autosync::preflight::commit_staged_tree_revision \
-      "${repo_root}" "${base_sha}" \
-      "chore(priors): stage InferenceX preflight bundle and catalog" \
-      "${staged_tree}" \
-      "${commit_paths[@]}"
-  )"
-  if [[ "${source_revision}" != "${base_sha}" ]]; then
-    python3 - "${report_json}" "${source_revision}" <<'PY'
-import json
-import sys
-
-rep_path, src_rev = sys.argv[1:3]
-with open(rep_path, "r", encoding="utf-8") as f:
-    rep = json.load(f)
-rep["source_revision"] = src_rev
-with open(rep_path, "w", encoding="utf-8") as f:
-    json.dump(rep, f, indent=2)
-    f.write("\n")
-PY
-  fi
-fi
-
 rm -f "${analysis_json}" "${unmapped_slugs_json}"
 
-compact_records="$(python3 -c 'import json,sys; print(json.dumps(json.load(open(sys.argv[1])), separators=(",", ":")))' "${upstream_records_json}")"
-autosync::preflight::write_github_output "stage_dir" "${stage_dir}"
-autosync::preflight::write_github_output "upstream_records" "${compact_records}"
-autosync::preflight::write_github_output "source_revision" "${source_revision}"
+emit_args=()
+if [[ "${catalog_changed}" == "true" ]] && autosync::preflight::has_available_upstreams "${upstream_records_json}"; then
+  staged_tree="${work_dir}/staged-tree"
+  mkdir -p "${staged_tree}/pkg/worker/scaling/priors"
+  cp -f "${tmp_catalog}" "${staged_tree}/pkg/worker/scaling/priors/priors.yaml"
+  emit_args+=(
+    --candidate-tree "${staged_tree}"
+    --candidate-paths "pkg/worker/scaling/priors/priors.yaml"
+  )
+fi
+
+autosync::preflight::emit_taskpack_v2 \
+  "priors" "${repo_root}" "${base_sha}" "${stage_dir}" \
+  "${upstream_records_json}" "${report_json}" \
+  "${emit_args[@]+"${emit_args[@]}"}"

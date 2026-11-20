@@ -1,4 +1,4 @@
-# Unified Loopwright auto-sync workflow for all six external dependency domains.
+# Unified Loopwright Taskpack 2.0 auto-sync workflow for all six external dependency domains.
 
 name: Auto Sync
 
@@ -53,7 +53,7 @@ on:
         type: boolean
         default: false
       force:
-        description: 'Force sync execution even when upstream state appears unchanged.'
+        description: 'Force candidate execution even when upstream state appears unchanged.'
         required: false
         type: boolean
         default: false
@@ -85,6 +85,7 @@ jobs:
       runner: ${{ steps.resolve.outputs.runner }}
       has_domains: ${{ steps.resolve.outputs.has_domains }}
       comment_command: ${{ steps.resolve.outputs.comment_command }}
+      pr_head_sha: ${{ steps.resolve.outputs.pr_head_sha }}
     steps:
       - name: Resolve target domains
         id: resolve
@@ -139,6 +140,7 @@ jobs:
 
           domains = []
           comment_command = ""
+          pr_head_sha = ""
 
           if event_name == "schedule":
               cron = os.environ.get("SCHEDULE_CRON", "").strip()
@@ -164,10 +166,14 @@ jobs:
                   print(f"ERROR: unsupported dispatch domain: {selected!r}", file=sys.stderr)
                   sys.exit(1)
           elif event_name == "issue_comment":
-              body = os.environ.get("COMMENT_BODY", "").lstrip()
-              m = re.match(r"^/(?:loopwright|auto-sync)[ \t]+(retry|revise|status)(?=$|\s)", body)
-              if m:
-                  comment_command = m.group(1)
+              lines = os.environ.get("COMMENT_BODY", "").lstrip().splitlines()
+              first = lines[0].strip() if lines else ""
+              rest = "\n".join(lines[1:]).strip()
+              cmd_match = re.match(r"^/(?:loopwright|auto-sync)(?:[ \t]+(retry|revise|status))?(?=$|\s)", first)
+              valid_cmd = cmd_match is not None and (
+                  cmd_match.group(1) is not None or (first in ("/loopwright", "/auto-sync") and bool(rest))
+              )
+              if valid_cmd:
                   pr_number = os.environ.get("PR_NUMBER", "").strip()
                   repo = os.environ.get("GITHUB_REPOSITORY", "").strip()
                   if not pr_number.isdigit() or not repo:
@@ -182,7 +188,7 @@ jobs:
                           "--repo",
                           repo,
                           "--json",
-                          "headRefName,baseRefName",
+                          "headRefName,baseRefName,headRefOid",
                       ],
                       text=True,
                   )
@@ -195,8 +201,8 @@ jobs:
                   )
                   if base_ref == "main" and branch_match:
                       domains = [branch_match.group(1)]
-                  else:
-                      comment_command = ""
+                      comment_command = cmd_match.group(1) or "revise"
+                      pr_head_sha = str(pr_info.get("headRefOid") or "")
           else:
               print(f"ERROR: unsupported event_name: {event_name!r}", file=sys.stderr)
               sys.exit(1)
@@ -210,6 +216,7 @@ jobs:
               f.write(f"runner={runner}\n")
               f.write(f"has_domains={has_domains}\n")
               f.write(f"comment_command={comment_command}\n")
+              f.write(f"pr_head_sha={pr_head_sha}\n")
           PY
 
   auto-sync:
@@ -247,49 +254,30 @@ jobs:
           fi
 
       - name: Fetch PR head
-        id: pr-head
         if: github.event_name == 'issue_comment'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR_NUMBER: ${{ github.event.issue.number }}
-          COMMENT_BODY: ${{ github.event.comment.body }}
           MAIN_SHA: ${{ steps.record-main.outputs.main_sha }}
+          SERVER_URL: ${{ github.server_url }}
         run: |
-          git fetch --no-tags origin "+refs/pull/${PR_NUMBER}/head:refs/remotes/origin/pr/${PR_NUMBER}"
-
-          CMD="$(python3 - <<'PY'
-          import os
-          import re
-          import sys
-
-          body = os.environ.get("COMMENT_BODY", "").lstrip()
-          m = re.match(r"^/(?:loopwright|auto-sync)[ \t]+(retry|revise|status)(?=$|\s)", body)
-          if not m:
-              print("ERROR: failed to parse comment command", file=sys.stderr)
-              sys.exit(1)
-          print(m.group(1))
-          PY
-          )"
-
-          PR_SHAS="$(gh pr view "${PR_NUMBER}" --repo "${GITHUB_REPOSITORY}" --json baseRefOid,headRefOid)"
-          PR_BASE_SHA="$(python3 -c 'import json,sys; print(json.loads(sys.argv[1])["baseRefOid"])' "${PR_SHAS}")"
-          PR_HEAD_SHA="$(python3 -c 'import json,sys; print(json.loads(sys.argv[1])["headRefOid"])' "${PR_SHAS}")"
-
-          if ! git cat-file -e "${PR_BASE_SHA}^{commit}" 2>/dev/null; then
-            git fetch --no-tags origin "${PR_BASE_SHA}"
+          if [[ ! "${PR_NUMBER}" =~ ^[1-9][0-9]*$ ]]; then
+            echo "ERROR: invalid PR_NUMBER '${PR_NUMBER}'" >&2
+            exit 1
           fi
-          if ! git cat-file -e "${PR_HEAD_SHA}^{commit}" 2>/dev/null; then
-            git fetch --no-tags origin "${PR_HEAD_SHA}"
+          if [[ -n "${GH_TOKEN}" ]]; then
+            AUTH_B64="$(printf 'x-access-token:%s' "${GH_TOKEN}" | base64 | tr -d '\r\n')"
+            GIT_CONFIG_COUNT=1 \
+            GIT_CONFIG_KEY_0="http.${SERVER_URL}/.extraheader" \
+            GIT_CONFIG_VALUE_0="AUTHORIZATION: basic ${AUTH_B64}" \
+            git -c core.hooksPath=/dev/null fetch --no-tags --no-recurse-submodules origin \
+              "+refs/pull/${PR_NUMBER}/head:refs/remotes/origin/pr/${PR_NUMBER}"
+          else
+            git -c core.hooksPath=/dev/null fetch --no-tags --no-recurse-submodules origin \
+              "+refs/pull/${PR_NUMBER}/head:refs/remotes/origin/pr/${PR_NUMBER}"
           fi
-
-          echo "pr_base_sha=${PR_BASE_SHA}" >> "${GITHUB_OUTPUT}"
-
-          if [[ "${CMD}" == "revise" || "${CMD}" == "status" ]]; then
-            git checkout --detach "${PR_BASE_SHA}"
-          fi
-
-          if [[ "$(git rev-parse --verify 'refs/heads/main^{commit}')" != "${MAIN_SHA}" ]]; then
-            echo "ERROR: refs/heads/main drifted from ${MAIN_SHA}" >&2
+          if [[ "$(git rev-parse --verify 'HEAD^{commit}')" != "${MAIN_SHA}" ]]; then
+            echo "ERROR: HEAD moved unexpectedly from ${MAIN_SHA}" >&2
             exit 1
           fi
           if [[ -n "$(git status --porcelain)" ]]; then
@@ -347,6 +335,20 @@ jobs:
         if: matrix.domain == 'slicing' || matrix.domain == 'kv-transfer' || matrix.domain == 'router'
         uses: docker/setup-buildx-action@v3
 
+      - name: Setup bubblewrap
+        run: |
+          if ! command -v bwrap >/dev/null 2>&1; then
+            sudo apt-get -o Acquire::Retries=5 -o Acquire::http::Timeout=15 update
+            sudo apt-get -o Acquire::Retries=5 -o Acquire::http::Timeout=15 install -y --no-install-recommends bubblewrap
+          fi
+          bwrap --version
+          if ! bwrap --unshare-all --ro-bind / / "$(command -v true)" >/dev/null 2>&1; then
+            if ! sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0; then
+              echo "WARN: failed to disable kernel.apparmor_restrict_unprivileged_userns" >&2
+            fi
+            bwrap --unshare-all --ro-bind / / "$(command -v true)"
+          fi
+
       - name: Cache preflight tools
         uses: actions/cache@v4
         with:
@@ -362,136 +364,47 @@ jobs:
             /tmp/gpustack-autosync-stage/uv-python
           key: autosync-uv-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('model-transfer/python/uv.lock', 'model-transfer/python/.python-version') }}
 
-      - name: Run preflight
-        id: preflight
-        env:
-          DOMAIN: ${{ matrix.domain }}
-          COMMENT_COMMAND: ${{ needs.resolve-domains.outputs.comment_command }}
-          AUTOSYNC_STAGE_DIR: /tmp/gpustack-autosync-stage/${{ matrix.domain }}
-          AUTOSYNC_FORCE: ${{ (inputs.force == true || inputs.force == 'true') && 'true' || 'false' }}
-          AUTOSYNC_TARGET_TAG: ${{ inputs.target_tag || '' }}
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          MAIN_SHA: ${{ steps.record-main.outputs.main_sha }}
-          PR_BASE_SHA: ${{ steps.pr-head.outputs.pr_base_sha }}
-        run: |
-          preflight_out="$(mktemp "${RUNNER_TEMP}/preflight-out-${DOMAIN}.XXXXXXXX")"
-          trap 'rm -f "${preflight_out}"' EXIT
-
-          if [[ "${GITHUB_EVENT_NAME}" == "issue_comment" && ( "${COMMENT_COMMAND}" == "revise" || "${COMMENT_COMMAND}" == "status" ) ]]; then
-            AUTOSYNC_SKIP_SOURCE_REVISION=true GITHUB_OUTPUT="${preflight_out}" \
-              bash ".auto-sync/scripts/preflight-${DOMAIN}.sh" "${AUTOSYNC_STAGE_DIR}"
-          else
-            GITHUB_OUTPUT="${preflight_out}" \
-              bash ".auto-sync/scripts/preflight-${DOMAIN}.sh" "${AUTOSYNC_STAGE_DIR}"
-          fi
-          if [[ -n "$(git status --porcelain)" ]]; then
-            git status --porcelain >&2
-            exit 1
-          fi
-
-          python3 - "${preflight_out}" "${GITHUB_OUTPUT}" "${GITHUB_EVENT_NAME}" "${COMMENT_COMMAND}" "${PR_BASE_SHA}" "${MAIN_SHA}" <<'PY'
-          import os
-          import subprocess
-          import sys
-          import uuid
-
-          src_path, dst_path, event_name, comment_cmd, pr_base_sha, main_sha = sys.argv[1:7]
-          outputs = {}
-          with open(src_path, "r", encoding="utf-8") as f:
-              lines = f.read().splitlines()
-
-          i = 0
-          while i < len(lines):
-              line = lines[i]
-              if "<<" in line:
-                  key, delim = line.split("<<", 1)
-                  val_lines = []
-                  i += 1
-                  while i < len(lines) and lines[i] != delim:
-                      val_lines.append(lines[i])
-                      i += 1
-                  outputs[key] = "\n".join(val_lines)
-              elif "=" in line:
-                  key, val = line.split("=", 1)
-                  outputs[key] = val
-              i += 1
-
-          raw_rev = outputs.get("source_revision", "").strip()
-          if event_name == "issue_comment" and comment_cmd in ("revise", "status"):
-              if not pr_base_sha:
-                  print(f"ERROR: missing PR_BASE_SHA for issue_comment {comment_cmd}", file=sys.stderr)
-                  sys.exit(1)
-              final_rev = ""
-              effective_base_sha = pr_base_sha
-          elif event_name == "issue_comment" and comment_cmd == "retry":
-              if not main_sha:
-                  print("ERROR: missing MAIN_SHA for issue_comment retry", file=sys.stderr)
-                  sys.exit(1)
-              final_rev = raw_rev or main_sha
-              effective_base_sha = main_sha
-          else:
-              if not main_sha:
-                  print("ERROR: missing MAIN_SHA", file=sys.stderr)
-                  sys.exit(1)
-              if raw_rev:
-                  head_tree = subprocess.check_output(["git", "rev-parse", "HEAD^{tree}"], text=True).strip()
-                  rev_tree = subprocess.check_output(["git", "rev-parse", f"{raw_rev}^{{tree}}"], text=True).strip()
-                  final_rev = raw_rev if rev_tree != head_tree else ""
-              else:
-                  final_rev = ""
-              effective_base_sha = main_sha
-
-          outputs["source_revision"] = final_rev
-          outputs["effective_base_sha"] = effective_base_sha
-
-          with open(dst_path, "a", encoding="utf-8") as out:
-              for key in ("stage_dir", "upstream_records", "source_revision", "effective_base_sha"):
-                  val = outputs.get(key, "")
-                  delim = f"AUTOSYNC_OUT_{uuid.uuid4().hex}"
-                  while delim in val:
-                      delim = f"AUTOSYNC_OUT_{uuid.uuid4().hex}"
-                  out.write(f"{key}<<{delim}\n{val}\n{delim}\n")
-          PY
-
-          if [[ "$(git rev-parse --verify 'refs/heads/main^{commit}')" != "${MAIN_SHA}" ]]; then
-            echo "ERROR: refs/heads/main drifted from ${MAIN_SHA}" >&2
-            exit 1
-          fi
-          if [[ -n "$(git status --porcelain)" ]]; then
-            git status --porcelain >&2
-            exit 1
-          fi
-
-      - name: Setup bubblewrap
-        run: |
-          if ! command -v bwrap >/dev/null 2>&1; then
-            sudo apt-get -o Acquire::Retries=5 -o Acquire::http::Timeout=15 update
-            sudo apt-get -o Acquire::Retries=5 -o Acquire::http::Timeout=15 install -y --no-install-recommends bubblewrap
-          fi
-          bwrap --version
-          if ! bwrap --unshare-all --ro-bind / / "$(command -v true)" >/dev/null 2>&1; then
-            if ! sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0; then
-              echo "WARN: failed to disable kernel.apparmor_restrict_unprivileged_userns" >&2
-            fi
-            bwrap --unshare-all --ro-bind / / "$(command -v true)"
-          fi
-
       - name: Run Loopwright
+        id: loopwright
         uses: gpustack/loopwright@main
         env:
           LOOPWRIGHT_PROVIDER_TOKEN: ${{ secrets.CI_GPUSTACK_LOOPWRIGHT_LLM_AUTH_TOKEN || secrets.CI_GPUSTACK_CODEREVIEW_LLM_AUTH_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_SHA: ${{ steps.record-main.outputs.main_sha }}
+          GITHUB_REF: refs/heads/main
           AUTOSYNC_STAGE_DIR: /tmp/gpustack-autosync-stage/${{ matrix.domain }}
-          GITHUB_SHA: ${{ steps.preflight.outputs.effective_base_sha }}
-          INPUT_FORCE: ${{ (inputs.force == true || inputs.force == 'true') && 'true' || 'false' }}
+          AUTOSYNC_FORCE: ${{ (inputs.force == true || inputs.force == 'true') && 'true' || 'false' }}
+          AUTOSYNC_TARGET_TAG: ${{ inputs.target_tag || '' }}
+          COMMENT_COMMAND: ${{ needs.resolve-domains.outputs.comment_command }}
         with:
           taskpack-path: .auto-sync/${{ matrix.domain }}-taskpack.yaml
-          upstream-records: ${{ steps.preflight.outputs.upstream_records }}
-          source-revision: ${{ steps.preflight.outputs.source_revision }}
+          mode: auto
+          allow-privileged-execution: 'true'
           event-name: ${{ github.event_name }}
           event-path: ${{ github.event_path }}
+          run-root: ${{ runner.temp }}/loopwright-${{ matrix.domain }}
+          run-id: auto-sync-${{ matrix.domain }}-${{ github.run_id }}-${{ github.run_attempt }}
+          storage-profile: actions-basic
           allow-custom-base-url: 'true'
           provider-token-env: LOOPWRIGHT_PROVIDER_TOKEN
           github-app-id: ${{ secrets.CI_GPUSTACK_LOOPWRIGHT_APP_ID || vars.CI_GPUSTACK_LOOPWRIGHT_APP_ID || secrets.LOOPWRIGHT_APP_ID }}
           github-app-private-key: ${{ secrets.CI_GPUSTACK_LOOPWRIGHT_APP_PRIVATE_KEY || secrets.LOOPWRIGHT_APP_PRIVATE_KEY }}
           dry-run: ${{ (inputs.dry-run == true || inputs.dry-run == 'true') && 'true' || 'false' }}
+          force: ${{ (inputs.force == true || inputs.force == 'true') && 'true' || 'false' }}
           output: json,github-step-summary
+
+      - name: Upload diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: auto-sync-diagnostics-${{ matrix.domain }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/loopwright-${{ matrix.domain }}/*/run.json
+            ${{ runner.temp }}/loopwright-${{ matrix.domain }}/*/memory-publication.json
+            ${{ runner.temp }}/loopwright-${{ matrix.domain }}/*/artifacts/**/*.json
+            ${{ runner.temp }}/loopwright-${{ matrix.domain }}/lw-action-*/config/config.yaml
+            ${{ runner.temp }}/loopwright-${{ matrix.domain }}/lw-action-*/registry/registry.yaml
+            !${{ runner.temp }}/loopwright-${{ matrix.domain }}/**/secrets.json
+            !${{ runner.temp }}/loopwright-${{ matrix.domain }}/**/*.sqlite*
+          retention-days: 30
+          if-no-files-found: ignore

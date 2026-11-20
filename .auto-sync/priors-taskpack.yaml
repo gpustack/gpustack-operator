@@ -4,8 +4,35 @@ metadata:
   name: priors-sync
 spec:
   goal:
-    candidate: Refresh pkg/worker/scaling/priors/priors.yaml and pkg/worker/scaling/priors/records.md from staged InferenceX benchmark snapshots and pass scaling unit and docs checks.
-    noChange: Confirm InferenceX benchmark snapshots produce no qualifying catalog changes and settle as no_change.
+    candidate: >-
+      Synchronize pkg/worker/scaling/priors/priors.yaml and pkg/worker/scaling/priors/records.md
+      with the preflight-staged SemiAnalysisAI/InferenceX benchmark snapshots, update
+      .auto-sync/proposals/priors.json, and pass all schema, unit test, and documentation lint gates.
+    noChange: >-
+      Confirm pkg/worker/scaling/priors/priors.yaml, pkg/worker/scaling/priors/records.md, and
+      .auto-sync/proposals/priors.json already match the upstream SemiAnalysisAI/InferenceX snapshots
+      with zero repository modifications.
+  execution:
+    mode: strict
+    capabilities:
+      allowHostPath: true
+    digests:
+      pinDigests: true
+      lockfile: .auto-sync/digests/priors.lock.json
+  preflight:
+    script: .auto-sync/scripts/preflight-priors.sh
+    timeoutSeconds: 600
+    env:
+      - AUTOSYNC_STAGE_DIR
+      - AUTOSYNC_FORCE
+      - COMMENT_COMMAND
+      - AUTOSYNC_WARM_TOOLS
+      - AUTOSYNC_SKIP_GO_MOD_DOWNLOAD
+      - AUTOSYNC_SKIP_LFS_FETCH
+      - AUTOSYNC_PRIORS_FIXTURE_DIR
+      - AUTOSYNC_PRIORS_FIXTURE_HEAD
+      - GITHUB_EVENT_NAME
+      - GITHUB_STEP_SUMMARY
   scope:
     writable:
       - pkg/worker/scaling/priors/priors.yaml
@@ -16,7 +43,7 @@ spec:
       - pkg/worker/scaling/priors/catalog_yaml.go
       - pkg/worker/scaling/priors/resolve.go
       - pkg/worker/scaling/priors/validate.go
-      - gen/priors
+      - gen/priors/**
   instructions:
     - .auto-sync/instructions/priors.md
   upstreams:
@@ -28,6 +55,7 @@ spec:
       kind: http-json
       source: https://inferencex.semianalysis.com/api/v1/availability
       watchedPaths: []
+      monotonicSemver: false
   proposal:
     path: .auto-sync/proposals/priors.json
     requiredFields:
@@ -48,8 +76,13 @@ spec:
           script: .auto-sync/checks/validate_priors.sh
           timeoutSeconds: 600
           allowReadOnlyGitHubToken: false
+          toolchainPaths:
+            - /usr/local/bin
+            - /usr/bin
           env:
             - AUTOSYNC_STAGE_DIR
+            - AUTOSYNC_FAST_SELFTEST
+            - GITHUB_ACTIONS
     externalGates: []
   publication:
     mode: pull_request
@@ -82,3 +115,10 @@ spec:
   limits:
     wallTimeSeconds: 1800
     commandTimeoutSeconds: 600
+    overlay:
+      maxFiles: 256
+      maxBytes: 16777216
+  output:
+    formats:
+      - json
+      - github-step-summary

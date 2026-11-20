@@ -9,10 +9,6 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(CDPATH="" cd -P -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
-# Inline bootstrap: Loopwright copies gate.script alone to workDir/gate-script.sh.
-if [[ ! -f "${SCRIPT_DIR}/lib.sh" && -f "${LOOPWRIGHT_CANDIDATE_DIR:-.}/.auto-sync/checks/lib.sh" ]]; then
-  SCRIPT_DIR="$(CDPATH="" cd -P -- "${LOOPWRIGHT_CANDIDATE_DIR:-.}/.auto-sync/checks" && pwd -P)"
-fi
 # shellcheck source=lib.sh
 # shellcheck disable=SC1091
 source "${SCRIPT_DIR}/lib.sh"
@@ -25,12 +21,11 @@ cleanup_on_exit() {
 }
 trap cleanup_on_exit EXIT
 
-STAGE_DIR="${AUTOSYNC_STAGE_DIR:-}"
-if [[ -z "${STAGE_DIR}" || ! -d "${STAGE_DIR}/baseline" ]]; then
-  printf 'FAIL: AUTOSYNC_STAGE_DIR must point to a preflight stage directory with baseline/\n' >&2
+BASELINE_DIR="$(autosync::resolve_baseline_dir "${AUTOSYNC_STAGE_DIR:-}")"
+if [[ -z "${BASELINE_DIR}" || ! -d "${BASELINE_DIR}" ]]; then
+  printf 'FAIL: LOOPWRIGHT_BASE_DIR or AUTOSYNC_STAGE_DIR/baseline must point to baseline directory\n' >&2
   exit 1
 fi
-BASELINE_DIR="${STAGE_DIR}/baseline"
 
 cand_dockerfile="${AUTOSYNC_CANDIDATE_ROOT}/pack/gpustack-operator/Dockerfile"
 cand_deps_sh="${AUTOSYNC_CANDIDATE_ROOT}/hack/deps.sh"
@@ -244,7 +239,24 @@ bash "${AUTOSYNC_CANDIDATE_ROOT}/hack/check/upgrade-compat.sh" modules
 bash "${AUTOSYNC_CANDIDATE_ROOT}/hack/check/toolpins-selftest.sh"
 
 if [[ "${AUTOSYNC_FAST_SELFTEST:-false}" == "true" ]]; then
+  autosync::write_check_out true "validate_k8s_deps passed (fast selftest mode)"
   printf 'OK: validate_k8s_deps passed (fast selftest mode)\n'
+  exit 0
+fi
+
+if autosync::is_check_only_unchanged "${BASELINE_DIR}" "${AUTOSYNC_CANDIDATE_ROOT}" \
+   "pack/gpustack-operator/Dockerfile" \
+   "hack/deps.sh" \
+   "hack/lib/helm.sh" \
+   "hack/staging" \
+   "staging" \
+   "go.mod" \
+   "go.sum" \
+   "api" \
+   "pkg" \
+   ".auto-sync/proposals/k8s-deps.json"; then
+  autosync::write_check_out true "validate_k8s_deps passed (check-only no_change)"
+  printf 'OK: validate_k8s_deps passed (check-only no_change)\n'
   exit 0
 fi
 
@@ -268,4 +280,5 @@ if [[ -n "$(git -C "${AUTOSYNC_CANDIDATE_ROOT}" status --porcelain)" ]]; then
 fi
 
 RACE=false make -C "${AUTOSYNC_CANDIDATE_ROOT}" test
+autosync::write_check_out true "validate_k8s_deps passed"
 printf 'OK: validate_k8s_deps passed\n'

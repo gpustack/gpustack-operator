@@ -7,10 +7,6 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(CDPATH="" cd -P -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
-# Inline bootstrap: Loopwright copies gate.script alone to workDir/gate-script.sh.
-if [[ ! -f "${SCRIPT_DIR}/lib.sh" && -f "${LOOPWRIGHT_CANDIDATE_DIR:-.}/.auto-sync/checks/lib.sh" ]]; then
-  SCRIPT_DIR="$(CDPATH="" cd -P -- "${LOOPWRIGHT_CANDIDATE_DIR:-.}/.auto-sync/checks" && pwd -P)"
-fi
 # shellcheck source=./lib.sh
 # shellcheck disable=SC1091
 source "${SCRIPT_DIR}/lib.sh"
@@ -27,6 +23,7 @@ cleanup() {
 }
 trap cleanup EXIT
 
+BASELINE_DIR="$(autosync::resolve_baseline_dir "${AUTOSYNC_STAGE_DIR:-}")"
 priors_yaml="${AUTOSYNC_CANDIDATE_ROOT}/pkg/worker/scaling/priors/priors.yaml"
 records_md="${AUTOSYNC_CANDIDATE_ROOT}/pkg/worker/scaling/priors/records.md"
 
@@ -35,22 +32,29 @@ if [[ ! -f "${priors_yaml}" || ! -f "${records_md}" ]]; then
   exit 1
 fi
 
-# 1. Verify deterministic formatting of pkg/worker/scaling/priors/priors.yaml.
-tmp_priors="$(mktemp "${TMPDIR:-/tmp}/autosync-priors-fmt.XXXXXXXX.yaml")"
-cp -f "${priors_yaml}" "${tmp_priors}"
-go run ./gen/priors --catalog "${tmp_priors}"
-if ! cmp -s "${tmp_priors}" "${priors_yaml}"; then
-  printf 'FAIL: pkg/worker/scaling/priors/priors.yaml is not deterministically formatted (run go run ./gen/priors)\n' >&2
-  exit 1
+check_only_unchanged=false
+if autosync::is_check_only_unchanged "${BASELINE_DIR}" "${AUTOSYNC_CANDIDATE_ROOT}" \
+   "pkg/worker/scaling/priors/priors.yaml" \
+   "pkg/worker/scaling/priors/records.md" \
+   ".auto-sync/proposals/priors.json"; then
+  check_only_unchanged=true
 fi
-rm -f "${tmp_priors}"
-tmp_priors=""
+
+# 1. Verify deterministic formatting of pkg/worker/scaling/priors/priors.yaml.
+if [[ "${check_only_unchanged}" != "true" ]]; then
+  tmp_priors="$(mktemp "${TMPDIR:-/tmp}/autosync-priors-fmt.XXXXXXXX.yaml")"
+  cp -f "${priors_yaml}" "${tmp_priors}"
+  go run ./gen/priors --catalog "${tmp_priors}"
+  if ! cmp -s "${tmp_priors}" "${priors_yaml}"; then
+    printf 'FAIL: pkg/worker/scaling/priors/priors.yaml is not deterministically formatted (run go run ./gen/priors)\n' >&2
+    exit 1
+  fi
+  rm -f "${tmp_priors}"
+  tmp_priors=""
+fi
 
 # 2. Verify SHA-256 provenance ledger and aggregated/disaggregated profile count parity.
-report_json=""
-if [[ -n "${AUTOSYNC_STAGE_DIR:-}" && -f "${AUTOSYNC_STAGE_DIR}/priors-preflight-report.json" ]]; then
-  report_json="${AUTOSYNC_STAGE_DIR}/priors-preflight-report.json"
-fi
+report_json="$(autosync::resolve_staged_file "priors-preflight-report.json" "${AUTOSYNC_STAGE_DIR:-}")"
 
 profile_counts="$(autosync::count_priors_profiles "${priors_yaml}")"
 actual_agg="${profile_counts%% *}"
@@ -203,7 +207,8 @@ PY
 
 autosync::ensure_ephemeral_git "${AUTOSYNC_CANDIDATE_ROOT}"
 
-if [[ "${AUTOSYNC_FAST_SELFTEST:-false}" == "true" ]]; then
+if [[ "${AUTOSYNC_FAST_SELFTEST:-false}" == "true" || "${check_only_unchanged}" == "true" ]]; then
+  autosync::write_check_out true "validate_priors passed"
   exit 0
 fi
 
@@ -225,3 +230,5 @@ else
   bash "${docs_scripts}/check-crossrefs.sh" "${AUTOSYNC_CANDIDATE_ROOT}"
   bash "${AUTOSYNC_CANDIDATE_ROOT}/hack/check/skills.sh" "${AUTOSYNC_CANDIDATE_ROOT}"
 fi
+
+autosync::write_check_out true "validate_priors passed"

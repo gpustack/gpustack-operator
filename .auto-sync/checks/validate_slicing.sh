@@ -8,10 +8,6 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(CDPATH="" cd -P -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
-# Inline bootstrap: Loopwright copies gate.script alone to workDir/gate-script.sh.
-if [[ ! -f "${SCRIPT_DIR}/lib.sh" && -f "${LOOPWRIGHT_CANDIDATE_DIR:-.}/.auto-sync/checks/lib.sh" ]]; then
-  SCRIPT_DIR="$(CDPATH="" cd -P -- "${LOOPWRIGHT_CANDIDATE_DIR:-.}/.auto-sync/checks" && pwd -P)"
-fi
 # shellcheck source=lib.sh
 # shellcheck disable=SC1091
 source "${SCRIPT_DIR}/lib.sh"
@@ -32,16 +28,16 @@ trap cleanup_on_exit EXIT
 
 autosync::ensure_ephemeral_git "${AUTOSYNC_CANDIDATE_ROOT}"
 
+BASELINE_DIR="$(autosync::resolve_baseline_dir "${AUTOSYNC_STAGE_DIR:-}")"
 cand_dockerfile="${AUTOSYNC_CANDIDATE_ROOT}/pack/gpustack-operator/Dockerfile"
 cand_proposal="${AUTOSYNC_CANDIDATE_ROOT}/.auto-sync/proposals/slicing.json"
 
 # 1. Shared-file diff guard on pack/gpustack-operator/Dockerfile.
 has_baseline=false
-if [[ -n "${AUTOSYNC_STAGE_DIR:-}" ]]; then
-  base_dockerfile="${AUTOSYNC_STAGE_DIR}/baseline/pack/gpustack-operator/Dockerfile"
+if [[ -n "${BASELINE_DIR}" ]]; then
+  base_dockerfile="${BASELINE_DIR}/pack/gpustack-operator/Dockerfile"
   if [[ ! -f "${base_dockerfile}" ]]; then
-    printf 'FAIL: AUTOSYNC_STAGE_DIR is set (%s) but baseline Dockerfile is missing: %s\n' \
-      "${AUTOSYNC_STAGE_DIR}" "${base_dockerfile}" >&2
+    printf 'FAIL: baseline Dockerfile is missing: %s\n' "${base_dockerfile}" >&2
     exit 1
   fi
   has_baseline=true
@@ -50,7 +46,7 @@ if [[ -n "${AUTOSYNC_STAGE_DIR:-}" ]]; then
     "${cand_dockerfile}" \
     "LIB_(UBS_VIRT_ENPU|HAMI_CORE)_COMMIT"
 elif [[ "${AUTOSYNC_ALLOW_MISSING_STAGE_DIR:-false}" != "true" ]]; then
-  printf 'FAIL: AUTOSYNC_STAGE_DIR must be set (set AUTOSYNC_ALLOW_MISSING_STAGE_DIR=true only for minimal unit tests)\n' >&2
+  printf 'FAIL: LOOPWRIGHT_BASE_DIR or AUTOSYNC_STAGE_DIR must be set (set AUTOSYNC_ALLOW_MISSING_STAGE_DIR=true only for minimal unit tests)\n' >&2
   exit 1
 fi
 
@@ -213,7 +209,7 @@ if [[ "${has_baseline}" == "true" ]]; then
     nvidia_changed=true
   else
     rc_nv=0
-    dir_differs "${AUTOSYNC_STAGE_DIR}/baseline/pack/gpustack-operator/external/nvidia" \
+    dir_differs "${BASELINE_DIR}/pack/gpustack-operator/external/nvidia" \
       "${AUTOSYNC_CANDIDATE_ROOT}/pack/gpustack-operator/external/nvidia" || rc_nv=$?
     if (( rc_nv == 0 )); then
       nvidia_changed=true
@@ -226,7 +222,7 @@ if [[ "${has_baseline}" == "true" ]]; then
     ascend_changed=true
   else
     rc_asc=0
-    dir_differs "${AUTOSYNC_STAGE_DIR}/baseline/pack/gpustack-operator/external/ascend" \
+    dir_differs "${BASELINE_DIR}/pack/gpustack-operator/external/ascend" \
       "${AUTOSYNC_CANDIDATE_ROOT}/pack/gpustack-operator/external/ascend" || rc_asc=$?
     if (( rc_asc == 0 )); then
       ascend_changed=true
@@ -304,5 +300,6 @@ if [[ "${ascend_changed}" == "true" ]]; then
   run_xbuild_step ".agents/skills/gpustack-operator-xbuild-and-verify/cases/ascend-case-1.sh" "xbuild-ascend-cann-9-910b"
 fi
 
+autosync::write_check_out true "validate_slicing passed (nvidia_changed=${nvidia_changed}, ascend_changed=${ascend_changed})"
 printf 'OK: validate_slicing passed (nvidia_changed=%s, ascend_changed=%s)\n' \
   "${nvidia_changed}" "${ascend_changed}"

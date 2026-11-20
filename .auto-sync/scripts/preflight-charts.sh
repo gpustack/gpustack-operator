@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
-# .auto-sync/scripts/preflight-charts.sh - host-side preflight for charts-sync.
+# .auto-sync/scripts/preflight-charts.sh - Taskpack 2.0 preflight for charts-sync.
 #
 # Discovers upstream Helm chart versions for kueue, node-feature-discovery,
 # csi-driver-nfs, csi-driver-s3, and topograph, caches .tgz archives into
 # $AUTOSYNC_STAGE_DIR/deps-cache/charts/, checks patch application, probes
-# docker.io/gpustack/mirrored-* multi-arch manifests, and stages ready updates
-# onto a detached source_revision commit while leaving HEAD and working tree clean.
+# docker.io/gpustack/mirrored-* multi-arch manifests, and emits Taskpack 2.0
+# preflight outputs and staged resources while leaving HEAD and working tree clean.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
@@ -736,7 +736,6 @@ with open(ready_out, "w", encoding="utf-8") as f:
         f.write(name + "\n")
 PY
 
-SOURCE_REVISION="${BASE_SHA}"
 STAGED_CHARTS=()
 while IFS= read -r cname || [[ -n "${cname}" ]]; do
   [[ -n "${cname}" ]] && STAGED_CHARTS+=("${cname}")
@@ -765,7 +764,7 @@ fi
 
 STAGE_WORK=""
 
-if (( ${#STAGED_CHARTS[@]} > 0 )) && [[ "${AUTOSYNC_SKIP_SOURCE_REVISION:-false}" != "true" ]]; then
+if (( ${#STAGED_CHARTS[@]} > 0 )); then
   STAGE_WORK="${WORK_TMP}/staged-repo"
   mkdir -p "${STAGE_WORK}/deploy/gpustack-operator"
   cp -R "${REPO_ROOT}/hack" "${STAGE_WORK}/hack"
@@ -1027,17 +1026,17 @@ REPORT_JSON="${STAGE_DIR}/charts-preflight-report.json"
 UPSTREAM_RECORDS_JSON="${STAGE_DIR}/upstream-records.json"
 
 python3 -B - "${DISCOVERY_JSON}" "${REPORT_JSON}" "${UPSTREAM_RECORDS_JSON}" \
-  "${BASE_SHA}" "${SOURCE_REVISION}" "${MANIFESTS_JSON}" "${SCRIPT_DIR}" <<'PY'
+  "${BASE_SHA}" "${MANIFESTS_JSON}" "${SCRIPT_DIR}" <<'PY'
 import copy
 import json
 import os
 import sys
 
 sys.dont_write_bytecode = True
-sys.path.insert(0, sys.argv[7])
+sys.path.insert(0, sys.argv[6])
 from charts_oci import OCI_REF_RE, OCI_SPEC_RE, format_sync_image_command, sanitize_md_inline_code
 
-disc_path, report_path, records_path, base_sha, src_rev, manifests_path = sys.argv[1:7]
+disc_path, report_path, records_path, base_sha, manifests_path = sys.argv[1:6]
 
 
 def sanitize_report_charts(raw_charts: dict) -> dict:
@@ -1088,7 +1087,6 @@ global_sync_cmd = format_sync_image_command(all_missing_specs)
 report = {
     "schema_version": 1,
     "base_sha": base_sha,
-    "source_revision": src_rev,
     "changed": any_changed,
     "ready_updates_count": ready_count,
     "image_manifests_path": os.path.basename(manifests_path),
@@ -1103,40 +1101,47 @@ with open(report_path, "w", encoding="utf-8") as f:
 upstream_records = []
 for name in ("kueue", "node-feature-discovery", "csi-driver-nfs", "csi-driver-s3", "topograph"):
     info = charts[name]
+    cur_ver = ""
     if info["changed"] and info["mirrored_image_ready"] and info["patch_clean"]:
         status = "available"
         version = info["candidate_version"]
+        cur_ver = info["pinned_version"]
         reason = f"{name} {info['candidate_version']} available with mirrored images ready"
     elif info["changed"] and not info["mirrored_image_ready"]:
-        status = "up_to_date"
-        version = info["pinned_version"]
+        status = "held_back"
+        version = info["candidate_version"]
+        cur_ver = info["pinned_version"]
         if info["sync_image_command"]:
             reason = (
-                f"{name} stays at {info['pinned_version']} while upstream {info['candidate_version']} "
+                f"{name} held at {info['pinned_version']} while upstream {info['candidate_version']} "
                 f"awaits mirrored images; run: {info['sync_image_command']}"
             )
         else:
             reason = (
-                f"{name} stays at {info['pinned_version']} because candidate "
+                f"{name} held at {info['pinned_version']} because candidate "
                 f"{info['candidate_version']} has invalid or unmirrored image references"
             )
     elif info["changed"]:
-        status = "up_to_date"
-        version = info["pinned_version"]
+        status = "held_back"
+        version = info["candidate_version"]
+        cur_ver = info["pinned_version"]
         reason = (
-            f"{name} stays at {info['pinned_version']} because candidate "
+            f"{name} held at {info['pinned_version']} because candidate "
             f"{info['candidate_version']} failed chart staging"
         )
     else:
         status = "up_to_date"
         version = info["pinned_version"]
         reason = f"{name} matches pinned version {info['pinned_version']}"
-    upstream_records.append({
-        "upstreamId": info["upstream_id"],
+    rec = {
+        "id": info["upstream_id"],
         "status": status,
         "version": version,
         "reason": reason,
-    })
+    }
+    if cur_ver:
+        rec["currentVersion"] = cur_ver
+    upstream_records.append(rec)
 
 with open(records_path, "w", encoding="utf-8") as f:
     json.dump(upstream_records, f, indent=2)
@@ -1179,46 +1184,18 @@ PY
 
 autosync::preflight::apply_force_to_upstream_records "${UPSTREAM_RECORDS_JSON}"
 
-if ( (( ${#STAGED_CHARTS[@]} > 0 )) || autosync::preflight::has_available_upstreams "${UPSTREAM_RECORDS_JSON}" ) && [[ "${AUTOSYNC_SKIP_SOURCE_REVISION:-false}" != "true" ]]; then
-  CHARTS_COMMIT_PATHS=(".auto-sync/.stage/charts")
-  if (( ${#STAGED_CHARTS[@]} > 0 )); then
-    CHARTS_COMMIT_PATHS=(
-      "hack/deps.sh"
-      "deploy/gpustack-operator/chart"
-      ".auto-sync/.stage/charts"
-    )
-  else
-    STAGE_WORK="${WORK_TMP}/staged-bundle"
-    mkdir -p "${STAGE_WORK}"
-  fi
-  autosync::preflight::populate_stage_bundle "${STAGE_WORK}" "charts" \
-    "${REPORT_JSON}" \
-    "${UPSTREAM_RECORDS_JSON}" \
-    "${MANIFESTS_JSON}"
-  SOURCE_REVISION="$(
-    autosync::preflight::commit_staged_tree_revision \
-      "${REPO_ROOT}" "${BASE_SHA}" \
-      "chore(chart): stage vendored helm subcharts and preflight bundle" \
-      "${STAGE_WORK}" \
-      "${CHARTS_COMMIT_PATHS[@]}"
-  )"
-  if [[ "${SOURCE_REVISION}" != "${BASE_SHA}" ]]; then
-    python3 - "${REPORT_JSON}" "${SOURCE_REVISION}" <<'PY'
-import json
-import sys
-
-p, src_rev = sys.argv[1:3]
-with open(p, "r", encoding="utf-8") as f:
-    rep = json.load(f)
-rep["source_revision"] = src_rev
-with open(p, "w", encoding="utf-8") as f:
-    json.dump(rep, f, indent=2)
-    f.write("\n")
-PY
-  fi
+EMIT_ARGS=(
+  --manifests "${MANIFESTS_JSON}"
+  --check-archive "deps-charts-cache::${STAGE_DIR}/deps-cache/charts"
+)
+if (( ${#STAGED_CHARTS[@]} > 0 )) && [[ -n "${STAGE_WORK}" && -d "${STAGE_WORK}" ]]; then
+  EMIT_ARGS+=(
+    --candidate-tree "${STAGE_WORK}"
+    --candidate-paths "hack/deps.sh,deploy/gpustack-operator/chart"
+  )
 fi
 
-COMPACT_RECORDS="$(python3 -c 'import json,sys; print(json.dumps(json.load(open(sys.argv[1])), separators=(",", ":")))' "${UPSTREAM_RECORDS_JSON}")"
-autosync::preflight::write_github_output "stage_dir" "${STAGE_DIR}"
-autosync::preflight::write_github_output "upstream_records" "${COMPACT_RECORDS}"
-autosync::preflight::write_github_output "source_revision" "${SOURCE_REVISION}"
+autosync::preflight::emit_taskpack_v2 \
+  "charts" "${REPO_ROOT}" "${BASE_SHA}" "${STAGE_DIR}" \
+  "${UPSTREAM_RECORDS_JSON}" "${REPORT_JSON}" \
+  "${EMIT_ARGS[@]}"
