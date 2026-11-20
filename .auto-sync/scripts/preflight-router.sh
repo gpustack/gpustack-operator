@@ -12,6 +12,9 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 # shellcheck source=./lib-preflight.sh
 # shellcheck disable=SC1091
 source "${SCRIPT_DIR}/lib-preflight.sh"
+# shellcheck source=../checks/lib.sh
+# shellcheck disable=SC1091
+source "${SCRIPT_DIR}/../checks/lib.sh"
 
 REPO_ROOT="$(autosync::preflight::repo_root)"
 STAGE_DIR="$(autosync::preflight::init_stage "router" "${1:-${AUTOSYNC_STAGE_DIR:-}}")"
@@ -1294,7 +1297,7 @@ PY
       pin_rc=0
       (
         cd "${PIN_WORK}"
-        go test ./pkg/worker/controllers/worker \
+        autosync::go_test ./pkg/worker/controllers/worker \
           -run '^TestRenderModelDeploymentRouterObjects_SerializedOutputIsPinnedToThePreSplitRender$' \
           > "${PIN_OUT_FILE}" 2>&1
       ) || pin_rc=$?

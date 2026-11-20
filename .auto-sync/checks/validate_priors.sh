@@ -208,7 +208,7 @@ if [[ "${AUTOSYNC_FAST_SELFTEST:-false}" == "true" ]]; then
 fi
 
 # 3. Run Go unit tests for gen/priors and pkg/worker/scaling.
-go test ./gen/priors/... ./pkg/worker/scaling/...
+autosync::go_test ./gen/priors/... ./pkg/worker/scaling/...
 
 # 4. Run repository docs lint (full make lint docs when hugo + make are available,
 #    otherwise direct docs/specs/crossrefs/skills gates).

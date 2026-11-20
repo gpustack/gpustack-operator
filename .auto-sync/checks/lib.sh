@@ -1572,3 +1572,19 @@ else:
 print(f"{agg} {disagg}")
 PY
 }
+
+# autosync::go_test <go_test_args...>
+# Runs go test in a subshell with -buildvcs=false and, on Linux, the same CGO and lazy
+# symbol-binding linker flags as hack/test.sh and hack/lib/build.sh for vendor CGO bindings.
+autosync::go_test() (
+  local target_os
+  target_os="$(go env GOOS)"
+  if [[ "${target_os}" == "linux" ]]; then
+    export CGO_ENABLED=1
+    export CGO_CFLAGS="${CGO_CFLAGS:--O2 -g} -std=gnu17"
+    export CGO_LDFLAGS="${CGO_LDFLAGS:--O2 -g} -Wl,-z,lazy"
+    go test -buildvcs=false -ldflags="-extldflags=-Wl,-z,lazy" "$@"
+  else
+    go test -buildvcs=false "$@"
+  fi
+)

@@ -570,7 +570,10 @@ PY
   assert_ok "assert_value_go_only_keys unchanged passes" \
     assert_value_go_only_keys "${vg_base}" "${vg_cand}" "${kv_keys_re}"
 
-  sed 's|gpustack/mirrored-mooncake:0.3.13.post1-cpu|gpustack/mirrored-mooncake:0.3.14-cpu|' "${vg_base}" > "${vg_cand}"
+  sed -E 's|(setting\.InitializeFromEnv\("gpustack/mirrored-mooncake:)[^"]+("\))|\10.99.0-cpu\2|' "${vg_base}" > "${vg_cand}"
+  if cmp -s "${vg_base}" "${vg_cand}"; then
+    fail "selftest setup: KVCacheBackendImage mutation in value.go was a no-op"
+  fi
   assert_ok "assert_value_go_only_keys KVCacheBackendImage passes kv-transfer regex" \
     assert_value_go_only_keys "${vg_base}" "${vg_cand}" "${kv_keys_re}"
   assert_fails "assert_value_go_only_keys KVCacheBackendImage fails router regex" \
@@ -604,15 +607,17 @@ PY
     assert_settings_md_only_keys "${sm_base}" "${sm_cand}" "${kv_keys_re}"
 
   python3 - "${sm_base}" "${sm_cand}" <<'PY'
+import re
 import sys
 with open(sys.argv[1], "r", encoding="utf-8") as f:
     txt = f.read()
-out = txt.replace(
-    "`kv-cache-backend-image`<br/>(`GPUSTACK_KV_CACHE_BACKEND_IMAGE`) | Effect window: Next trigger<br/>Default: `gpustack/mirrored-mooncake:0.3.13.post1-cpu`",
-    "`kv-cache-backend-image`<br/>(`GPUSTACK_KV_CACHE_BACKEND_IMAGE`) | Effect window: Next trigger<br/>Default: `gpustack/mirrored-mooncake:0.3.14-cpu`",
-    1,
+out, n = re.subn(
+    r"(`kv-cache-backend-image`<br/>\(`GPUSTACK_KV_CACHE_BACKEND_IMAGE`\) \| [^\n]*?Default: `gpustack/mirrored-mooncake:)[^`]+(`)",
+    r"\g<1>0.99.0-cpu\g<2>",
+    txt,
+    count=1,
 )
-assert out != txt
+assert n == 1 and out != txt
 with open(sys.argv[2], "w", encoding="utf-8") as f:
     f.write(out)
 PY
@@ -645,7 +650,10 @@ PY
   assert_ok "assert_values_yaml_only_model_transfer_images unchanged passes" \
     assert_values_yaml_only_model_transfer_images "${vy_base}" "${vy_cand}"
 
-  sed 's|nvidia: gpustack/model-transfer:v0.1.0-cuda12.9|nvidia: gpustack/model-transfer:v0.2.0-cuda12.9|' "${vy_base}" > "${vy_cand}"
+  sed -E 's|(nvidia: gpustack/model-transfer:)[^[:space:]]+|\1v99.0.0-cuda12.9|' "${vy_base}" > "${vy_cand}"
+  if cmp -s "${vy_base}" "${vy_cand}"; then
+    fail "selftest setup: modelTransfer.images.nvidia mutation in values.yaml was a no-op"
+  fi
   assert_ok "assert_values_yaml_only_model_transfer_images nvidia edit passes" \
     assert_values_yaml_only_model_transfer_images "${vy_base}" "${vy_cand}"
 
@@ -678,32 +686,39 @@ PY
     assert_values_yaml_only_chart_sections "${vy_base}" "${vy_cand}"
 
   python3 - "${vy_base}" "${vy_cand}" <<'PY'
+import re
 import sys
 with open(sys.argv[1], "r", encoding="utf-8") as f:
     txt = f.read()
-out = txt.replace(
-    "# -- [Kueue](https://kueue.sigs.k8s.io) subchart (chart 0.18.11).",
-    "# -- [Kueue](https://kueue.sigs.k8s.io) subchart (chart 0.18.12).",
-    1,
+out, n1 = re.subn(
+    r"(# -- \[Kueue\]\(https://kueue\.sigs\.k8s\.io\) subchart \(chart )[0-9.]+(\)\.)",
+    r"\g<1>99.0.0\g<2>",
+    txt,
+    count=1,
 )
-out = out.replace(
-    "      repository: docker.io/gpustack/mirrored-csi-node-driver-registrar\n      tag: v2.17.0",
-    "      repository: docker.io/gpustack/mirrored-csi-node-driver-registrar-next\n      tag: v2.18.0",
-    1,
+out, n2 = re.subn(
+    r"(      repository: docker\.io/gpustack/mirrored-csi-node-driver-registrar\n      tag: )[^\n]+",
+    r"\g<1>v99.0.0",
+    out,
+    count=1,
 )
-out = out.replace(
-    "  repository: docker.io/gpustack/mirrored-nvidia-topograph",
-    "  repository: docker.io/gpustack/mirrored-nvidia-topograph-next",
-    1,
+out, n3 = re.subn(
+    r"(  repository: docker\.io/gpustack/mirrored-nvidia-topograph)\b",
+    r"\g<1>-next",
+    out,
+    count=1,
 )
-assert out != txt
+assert n1 == 1 and n2 == 1 and n3 == 1 and out != txt
 with open(sys.argv[2], "w", encoding="utf-8") as f:
     f.write(out)
 PY
   assert_ok "assert_values_yaml_only_chart_sections owned subcharts and modelManager.registrar.image edits pass" \
     assert_values_yaml_only_chart_sections "${vy_base}" "${vy_cand}"
 
-  sed 's|nvidia: gpustack/model-transfer:v0.1.0-cuda12.9|nvidia: gpustack/model-transfer:v0.2.0-cuda12.9|' "${vy_base}" > "${vy_cand}"
+  sed -E 's|(nvidia: gpustack/model-transfer:)[^[:space:]]+|\1v99.0.0-cuda12.9|' "${vy_base}" > "${vy_cand}"
+  if cmp -s "${vy_base}" "${vy_cand}"; then
+    fail "selftest setup: modelTransfer.images.nvidia mutation in values.yaml (chart_sections) was a no-op"
+  fi
   assert_fails "assert_values_yaml_only_chart_sections modelTransfer.images edit fails" \
     assert_values_yaml_only_chart_sections "${vy_base}" "${vy_cand}"
 
@@ -720,15 +735,17 @@ PY
     assert_values_yaml_only_chart_sections "${vy_base}" "${vy_cand}"
 
   python3 - "${vy_base}" "${vy_cand}" <<'PY'
+import re
 import sys
 with open(sys.argv[1], "r", encoding="utf-8") as f:
     txt = f.read()
-out = txt.replace(
-    "      tag: v2.17.0\n",
-    "      tag: v2.17.0\n      pullPolicy: Always\n",
-    1,
+out, n = re.subn(
+    r"(      repository: docker\.io/gpustack/mirrored-csi-node-driver-registrar\n      tag: [^\n]+\n)",
+    r"\g<1>      pullPolicy: Always\n",
+    txt,
+    count=1,
 )
-assert out != txt
+assert n == 1 and out != txt
 with open(sys.argv[2], "w", encoding="utf-8") as f:
     f.write(out)
 PY
@@ -748,13 +765,19 @@ PY
   assert_ok "assert_deps_sh_only_section unchanged passes charts" \
     assert_deps_sh_only_section "${ds_base}" "${ds_cand}" charts
 
-  sed 's|kueue-0.18.11.tgz 0.18.11|kueue-0.18.12.tgz 0.18.12|' "${ds_base}" > "${ds_cand}"
+  sed -E 's|(kueue-)[0-9.]+\.tgz [0-9.]+|\199.0.0.tgz 99.0.0|' "${ds_base}" > "${ds_cand}"
+  if cmp -s "${ds_base}" "${ds_cand}"; then
+    fail "selftest setup: kueue chart mutation in deps.sh was a no-op"
+  fi
   assert_ok "assert_deps_sh_only_section kueue chart edit passes charts" \
     assert_deps_sh_only_section "${ds_base}" "${ds_cand}" charts
   assert_fails "assert_deps_sh_only_section kueue chart edit fails mods" \
     assert_deps_sh_only_section "${ds_base}" "${ds_cand}" mods
 
-  sed 's|kubernetes/api v0.36.5|kubernetes/api v0.36.6|' "${ds_base}" > "${ds_cand}"
+  sed -E 's|(https://github\.com/kubernetes/api )v[0-9.]+|\1v99.0.0|' "${ds_base}" > "${ds_cand}"
+  if cmp -s "${ds_base}" "${ds_cand}"; then
+    fail "selftest setup: kubernetes/api mutation in deps.sh was a no-op"
+  fi
   assert_ok "assert_deps_sh_only_section k8s.io/api edit passes mods" \
     assert_deps_sh_only_section "${ds_base}" "${ds_cand}" mods
   assert_fails "assert_deps_sh_only_section k8s.io/api edit fails charts" \
@@ -768,17 +791,26 @@ PY
 
   # Literal command substitution/variable tokens are test fixtures for assert_deps_sh_only_section.
   # shellcheck disable=SC2016
-  sed 's|kueue-0.18.11.tgz 0.18.11|kueue-0.18.11.tgz $(id)|' "${ds_base}" > "${ds_cand}"
+  sed -E 's|(kueue-[0-9.]+\.tgz )[0-9.]+|\1$(id)|' "${ds_base}" > "${ds_cand}"
+  if cmp -s "${ds_base}" "${ds_cand}"; then
+    fail "selftest setup: kueue $(id) version mutation in deps.sh was a no-op"
+  fi
   assert_fails "assert_deps_sh_only_section rejects \$(id) command substitution in charts version" \
     assert_deps_sh_only_section "${ds_base}" "${ds_cand}" charts
 
   # shellcheck disable=SC2016
-  sed 's|https://github.com/kubernetes-sigs/kueue/releases/download/v0.18.11/kueue-0.18.11.tgz|https://github.com/kubernetes-sigs/kueue/releases/download/$(id)/kueue-0.18.11.tgz|' "${ds_base}" > "${ds_cand}"
+  sed -E 's|(https://github\.com/kubernetes-sigs/kueue/releases/download/)[^/]+(/kueue-[0-9.]+\.tgz)|\1$(id)\2|' "${ds_base}" > "${ds_cand}"
+  if cmp -s "${ds_base}" "${ds_cand}"; then
+    fail "selftest setup: kueue $(id) URL mutation in deps.sh was a no-op"
+  fi
   assert_fails "assert_deps_sh_only_section rejects \$(id) command substitution in charts URL" \
     assert_deps_sh_only_section "${ds_base}" "${ds_cand}" charts
 
   # shellcheck disable=SC2016
-  sed 's|kubernetes/api v0.36.5|kubernetes/api `id`|' "${ds_base}" > "${ds_cand}"
+  sed -E 's|(https://github\.com/kubernetes/api )v[0-9.]+|\1`id`|' "${ds_base}" > "${ds_cand}"
+  if cmp -s "${ds_base}" "${ds_cand}"; then
+    fail "selftest setup: kubernetes/api backtick mutation in deps.sh was a no-op"
+  fi
   assert_fails "assert_deps_sh_only_section rejects backtick substitution in mods" \
     assert_deps_sh_only_section "${ds_base}" "${ds_cand}" mods
 
@@ -787,7 +819,10 @@ PY
   assert_fails "assert_deps_sh_only_section rejects .. traversal in mods dest" \
     assert_deps_sh_only_section "${ds_base}" "${ds_cand}" mods
 
-  grep -v 'topograph-1.0.0.tgz' "${ds_base}" > "${ds_cand}"
+  grep -vE 'topograph-[0-9.]+\.tgz' "${ds_base}" > "${ds_cand}"
+  if cmp -s "${ds_base}" "${ds_cand}"; then
+    fail "selftest setup: topograph row deletion in deps.sh was a no-op"
+  fi
   assert_fails "assert_deps_sh_only_section rejects row deletion in charts" \
     assert_deps_sh_only_section "${ds_base}" "${ds_cand}" charts
 
@@ -796,16 +831,17 @@ PY
     assert_deps_sh_only_section "${ds_base}" "${ds_cand}" mods
 
   python3 - "${ds_base}" "${ds_cand}" <<'PY'
+import re
 import sys
 with open(sys.argv[1], "r", encoding="utf-8") as f:
     txt = f.read()
-out = txt.replace(
-    "https://github.com/gogo/protobuf v1.3.2 ${staging_dir}/github.com/gogo/protobuf\n",
-    "https://github.com/gogo/protobuf v1.3.2 ${staging_dir}/github.com/gogo/protobuf\n"
-    "https://github.com/evil/extra v1.0.0 ${staging_dir}/github.com/evil/extra\n",
-    1,
+out, n = re.subn(
+    r"(https://github\.com/gogo/protobuf [^\n]+\n)",
+    r"\1https://github.com/evil/extra v1.0.0 ${staging_dir}/github.com/evil/extra\n",
+    txt,
+    count=1,
 )
-assert out != txt
+assert n == 1 and out != txt
 with open(sys.argv[2], "w", encoding="utf-8") as f:
     f.write(out)
 PY
@@ -1254,10 +1290,13 @@ EOF
   done < <(sed -n '/function chart_staging/,/^}/p' "${deps_repo}/hack/deps.sh" | sed -n '/cat <<EOF/,/^EOF/p' | grep -E '^https://')
 
   local sample_src="${scratch}/sample-chart"
-  local line ver dest cname
+  local line ver dest cname kueue_ver=""
   for line in "${chart_spec_list[@]}"; do
     read -r _ ver dest <<<"${line}"
     cname="$(basename "${dest}")"
+    if [[ "${cname}" == "kueue" ]]; then
+      kueue_ver="${ver}"
+    fi
     rm -rf "${sample_src}"
     mkdir -p "${sample_src}/${cname}"
     printf 'apiVersion: v2\nname: %s\nversion: %s\n' "${cname}" "${ver}" > "${sample_src}/${cname}/Chart.yaml"
@@ -1265,15 +1304,16 @@ EOF
     tar -zcf "${deps_cache}/charts/${cname}-${ver}.tgz" -C "${sample_src}" "${cname}"
   done
 
-  if GPUSTACK_DEPS_STAGE_ONLY=charts GPUSTACK_DEPS_OFFLINE=true GPUSTACK_DEPS_CACHE_DIR="${deps_cache}" \
-    bash "${deps_repo}/hack/deps.sh" >/dev/null 2>&1 && \
-    [[ "$(cat "${deps_repo}/deploy/gpustack-operator/chart/charts/kueue/_VERSION_")" == "0.18.11" ]]; then
+  if [[ -n "${kueue_ver}" ]] && \
+     GPUSTACK_DEPS_STAGE_ONLY=charts GPUSTACK_DEPS_OFFLINE=true GPUSTACK_DEPS_CACHE_DIR="${deps_cache}" \
+     bash "${deps_repo}/hack/deps.sh" >/dev/null 2>&1 && \
+     [[ "$(cat "${deps_repo}/deploy/gpustack-operator/chart/charts/kueue/_VERSION_")" == "${kueue_ver}" ]]; then
     pass "hack/deps.sh offline charts staging succeeds from GPUSTACK_DEPS_CACHE_DIR"
   else
     fail "hack/deps.sh offline charts staging succeeds from GPUSTACK_DEPS_CACHE_DIR"
   fi
 
-  rm -rf "${deps_repo}/deploy/gpustack-operator/chart/charts/kueue" "${deps_cache}/charts/kueue-0.18.11.tgz"
+  rm -rf "${deps_repo}/deploy/gpustack-operator/chart/charts/kueue" "${deps_cache}/charts/kueue-${kueue_ver}.tgz"
   if GPUSTACK_DEPS_STAGE_ONLY=charts GPUSTACK_DEPS_OFFLINE=true GPUSTACK_DEPS_CACHE_DIR="${deps_cache}" \
     bash "${deps_repo}/hack/deps.sh" >/dev/null 2>&1; then
     fail "hack/deps.sh offline cache-miss fails closed (expected non-zero)"
