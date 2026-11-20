@@ -61,6 +61,9 @@ spec:
       - model-transfer/python/**
       - pkg/modeltransfer/**
       - pkg/worker/kvcache/**
+      - .claude/**
+      - .codex/**
+      - AGENTS.md
   instructions:
     - .auto-sync/instructions/kv-transfer.md
   upstreams:
