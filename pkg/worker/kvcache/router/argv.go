@@ -142,8 +142,13 @@ func renderArgvRouter(name string, input Input) (Output, error) {
 		}
 	}
 
+	listenHost := input.ListenHost
+	if listenHost == "" {
+		listenHost = argvRouterBindAddress
+	}
+
 	args := []string{
-		argvRouterHostArg + "=" + argvRouterBindAddress,
+		argvRouterHostArg + "=" + listenHost,
 		argvRouterPortArg + "=" + strconv.Itoa(int(input.ListenPort)),
 		argvRouterMetricsHostArg + "=" + argvRouterBindAddress,
 		argvRouterMetricsPortArg + "=" + strconv.Itoa(int(input.MetricsPort)),

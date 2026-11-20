@@ -25,6 +25,19 @@ func TestRenderLLMD_IsDeterministicAcrossRoleOrder(t *testing.T) {
 	assert.NotContains(t, left.Document, "replicas")
 }
 
+func TestRenderLLMD_IgnoresListenHost(t *testing.T) {
+	base := Input{Roles: []Role{{Kind: "server", RoleLabelKey: "modeldeployment.gpustack.ai/role-kind"}}}
+	withHost := base
+	withHost.ListenHost = "127.0.0.1"
+
+	left, err := Render(LLMD, base)
+	require.NoError(t, err)
+	right, err := Render(LLMD, withHost)
+	require.NoError(t, err)
+
+	assert.Equal(t, left, right)
+}
+
 func TestRender_RefusesAnUnknownRouter(t *testing.T) {
 	_, err := Render("unknown", Input{})
 	require.EqualError(t, err, `unsupported router "unknown"`)
