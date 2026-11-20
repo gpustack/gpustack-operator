@@ -114,7 +114,7 @@ func TestModelDeploymentImageSettings(t *testing.T) {
 			ModelDeploymentModelExpressServerImage,
 			"model-deployment-modelexpress-server-image",
 			"GPUSTACK_MODEL_DEPLOYMENT_MODELEXPRESS_SERVER_IMAGE",
-			"gpustack/mirrored-modelexpress-server:v0.7.0",
+			"gpustack/mirrored-modelexpress-server:v0.8.0",
 		},
 		{
 			ModelDeploymentRoutingSidecarImage,

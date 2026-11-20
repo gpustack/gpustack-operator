@@ -2507,7 +2507,7 @@ func TestRenderModelDeploymentModelExpressObjects(t *testing.T) {
 				"two servers at once would split the replicas' registrations")
 			assert.Equal(t, int32(1), *deploy.Spec.Replicas)
 			assert.Equal(t, []string{"modelexpress-server"}, server.Command)
-			assert.Equal(t, "gpustack/mirrored-modelexpress-server:v0.7.0",
+			assert.Equal(t, "gpustack/mirrored-modelexpress-server:v0.8.0",
 				strings.TrimSpace(server.Image))
 			env := map[string]string{}
 			for _, e := range server.Env {

@@ -558,9 +558,9 @@ modelTransfer:
   #   minLength: 1
   # @schema
   images:
-    nvidia: gpustack/model-transfer:v0.1.0-cuda12.9
-    amd: gpustack/model-transfer:v0.1.0-rocm7.2
-    ascend: gpustack/model-transfer:v0.1.0-cann9.2-a5
+    nvidia: gpustack/model-transfer:v0.1.1-cuda12.9
+    amd: gpustack/model-transfer:v0.1.1-rocm7.2
+    ascend: gpustack/model-transfer:v0.1.1-cann9.2-a5
   # -- The source broker's node memory window and session policy. `maxMemoryBytes`
   # is the transfer buffer ceiling: `0` derives one sixteenth of the node's total
   # RAM at node start, floored at `minMemoryBytes`, and a positive value below

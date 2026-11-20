@@ -728,7 +728,7 @@ metadata:
   name: model-deployment-modelexpress-server-image
   namespace: gpustack-system  # use the system namespace
 spec:
-  value: gpustack/mirrored-modelexpress-server:v0.7.0  # default image
+  value: gpustack/mirrored-modelexpress-server:v0.8.0  # default image
 ```
 
 - **Image**: Use the [Setting](../../reference/settings.md) for registry redirection or image pinning.
