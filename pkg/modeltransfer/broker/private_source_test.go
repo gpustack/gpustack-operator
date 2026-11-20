@@ -106,12 +106,66 @@ func TestNewPrivateSourceWithAddress(t *testing.T) {
 		}
 	})
 
-	t.Run("invalid unix socket paths are refused", func(t *testing.T) {
-		for _, addr := range []string{"unix://", "unix://relative.sock", "unix:///"} {
+	t.Run("invalid and non-local addresses are refused", func(t *testing.T) {
+		for _, addr := range []string{
+			"",
+			"unix://",
+			"unix://relative.sock",
+			"unix:///",
+			"unix:///run/model-transfer/worker.sock?x=1",
+			"unix:///run/model-transfer/worker.sock#frag",
+			"http://10.0.0.2:9252",
+			"example.com:9252",
+			"https://127.0.0.1:9252",
+			"0.0.0.0:9252",
+			"[::]:9252",
+			":9252",
+			"127.0.0.1",
+			"127.0.0.1:0",
+			"127.0.0.1:70000",
+			"http://user@127.0.0.1:9252",
+			"http://127.0.0.1:9252/extra",
+			"http://127.0.0.1:9252?a=1",
+			"http://127.0.0.1:9252#frag",
+		} {
+			require.Error(t, ValidatePrivateAddress(addr), "address %q should fail validation", addr)
 			src := NewPrivateSourceWithAddress(addr, "token")
 			_, err := src.Call(context.Background(), "/v1/operations/status", map[string]string{"requestID": reqID})
-			require.Error(t, err, "address %q should fail", addr)
+			require.Error(t, err, "address %q should fail closed", addr)
 		}
+	})
+
+	t.Run("valid local addresses pass validation", func(t *testing.T) {
+		for _, addr := range []string{
+			"127.0.0.1:9252",
+			"http://127.0.0.1:9252",
+			"[::1]:9252",
+			"http://[::1]:9252",
+			"localhost:9252",
+			"http://localhost:9252",
+			"unix:///run/model-transfer/worker.sock",
+		} {
+			require.NoError(t, ValidatePrivateAddress(addr), "address %q should be valid", addr)
+		}
+	})
+
+	t.Run("http redirect on loopback tcp is refused", func(t *testing.T) {
+		var redirected bool
+		target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			redirected = true
+			_ = json.NewEncoder(w).Encode(PrivateReply{RequestID: reqID, State: "submitted"})
+		}))
+		t.Cleanup(target.Close)
+
+		redirector := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			http.Redirect(w, r, target.URL+r.URL.Path, http.StatusFound)
+		}))
+		t.Cleanup(redirector.Close)
+
+		src := NewPrivateSourceWithAddress(redirector.URL, "tcp-token")
+		_, err := src.Call(context.Background(), "/v1/operations/status", map[string]string{"requestID": reqID})
+		require.ErrorIs(t, err, errPrivateRedirect)
+		assert.False(t, redirected)
 	})
 
 	t.Run("unreachable unix socket reports observation unavailable", func(t *testing.T) {

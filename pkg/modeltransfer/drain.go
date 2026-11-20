@@ -9,7 +9,6 @@ import (
 	"io"
 	"net/http"
 	"strings"
-	"time"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -158,14 +157,14 @@ func (c *Config) runtimeEndpoint() (string, *http.Client) {
 	}
 	client := c.runtimeClient
 	if client == nil {
-		client = &http.Client{Timeout: 5 * time.Second}
+		_, client, _ = broker.NewPrivateHTTPClient(defaultWorkerAddr)
 	}
 	return c.runtimeURL, client
 }
 
 func (c *Config) freezeRuntime(ctx context.Context) (string, error) {
 	runtimeURL, client := c.runtimeEndpoint()
-	if runtimeURL == "" || c.bootstrapToken == "" {
+	if runtimeURL == "" || client == nil || c.bootstrapToken == "" {
 		return "", errors.New("runtime freeze is unavailable")
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, strings.TrimSuffix(runtimeURL, "/v1/runtime")+"/v1/runtime/drain", nil)
@@ -206,7 +205,7 @@ func (c *Config) observeEmptyRuntime(ctx context.Context, instance string) error
 
 func (c *Config) inspectEmptyRuntime(ctx context.Context, instance string) (string, error) {
 	runtimeURL, client := c.runtimeEndpoint()
-	if runtimeURL == "" || c.bootstrapToken == "" {
+	if runtimeURL == "" || client == nil || c.bootstrapToken == "" {
 		return "", errors.New("runtime attestation is unavailable")
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, runtimeURL, nil)

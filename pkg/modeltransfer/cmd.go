@@ -225,42 +225,70 @@ func (c *Config) Run(ctx context.Context) error {
 
 type unixControlListener struct {
 	net.Listener
-	path string
-	once sync.Once
+	path      string
+	boundInfo os.FileInfo
+	once      sync.Once
 }
 
 func (l *unixControlListener) Close() error {
 	err := l.Listener.Close()
 	l.once.Do(func() {
-		_ = os.Remove(l.path)
+		curInfo, statErr := os.Lstat(l.path)
+		if statErr == nil && l.boundInfo != nil && os.SameFile(l.boundInfo, curInfo) {
+			_ = os.Remove(l.path)
+		}
 	})
 	return err
 }
 
 func listenControl(addr string) (net.Listener, error) {
-	sockPath, isUnix, err := parseUnixAddr(addr)
+	parsed, err := broker.ParsePrivateAddress(addr, true)
 	if err != nil {
 		return nil, err
 	}
-	if !isUnix {
-		return net.Listen("tcp", addr)
+	if parsed.UnixPath == "" {
+		return net.Listen("tcp", parsed.HostPort)
 	}
+	sockPath := parsed.UnixPath
 	if err := os.MkdirAll(filepath.Dir(sockPath), 0o700); err != nil {
 		return nil, fmt.Errorf("prepare control socket directory: %w", err)
 	}
-	if err := os.Remove(sockPath); err != nil && !errors.Is(err, os.ErrNotExist) {
-		return nil, fmt.Errorf("remove stale control socket %s: %w", sockPath, err)
+	fi, err := os.Lstat(sockPath)
+	switch {
+	case err == nil:
+		if fi.Mode()&os.ModeSocket == 0 {
+			return nil, fmt.Errorf("refuse to remove non-socket control path %s", sockPath)
+		}
+		conn, dialErr := net.DialTimeout("unix", sockPath, 100*time.Millisecond)
+		if dialErr == nil {
+			_ = conn.Close()
+			return nil, fmt.Errorf("control socket %s already has an active listener", sockPath)
+		}
+		if err := os.Remove(sockPath); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return nil, fmt.Errorf("remove stale control socket %s: %w", sockPath, err)
+		}
+	case !os.IsNotExist(err):
+		return nil, fmt.Errorf("stat control socket %s: %w", sockPath, err)
 	}
 	ln, err := net.Listen("unix", sockPath)
 	if err != nil {
 		return nil, err
+	}
+	if ul, ok := ln.(*net.UnixListener); ok {
+		ul.SetUnlinkOnClose(false)
 	}
 	if err := os.Chmod(sockPath, 0o600); err != nil {
 		_ = ln.Close()
 		_ = os.Remove(sockPath)
 		return nil, fmt.Errorf("chmod control socket %s: %w", sockPath, err)
 	}
-	return &unixControlListener{Listener: ln, path: sockPath}, nil
+	boundInfo, err := os.Lstat(sockPath)
+	if err != nil {
+		_ = ln.Close()
+		_ = os.Remove(sockPath)
+		return nil, fmt.Errorf("stat bound control socket %s: %w", sockPath, err)
+	}
+	return &unixControlListener{Listener: ln, path: sockPath, boundInfo: boundInfo}, nil
 }
 
 // sweepLeases reports lifecycle failures; cancellation only ends the monitor.

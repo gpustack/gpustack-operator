@@ -374,4 +374,46 @@ func TestRuntimeFreezeAndInspectOverUnixAndTCP(t *testing.T) {
 			assert.Equal(t, instance, observed)
 		}
 	})
+
+	t.Run("runtime client refuses HTTP redirects and disables proxy", func(t *testing.T) {
+		var redirected bool
+		target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			redirected = true
+			_, _ = fmt.Fprintf(w, `{"workerID":"pod","workerInstanceID":"%s","draining":true}`, instance)
+		}))
+		t.Cleanup(target.Close)
+
+		redirector := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			http.Redirect(w, r, target.URL+r.URL.Path, http.StatusFound)
+		}))
+		t.Cleanup(redirector.Close)
+
+		runtimeURL, runtimeClient := newRuntimeTransport(redirector.URL)
+		require.NotNil(t, runtimeClient)
+		transport, ok := runtimeClient.Transport.(*http.Transport)
+		require.True(t, ok)
+		assert.Nil(t, transport.Proxy)
+		assert.Equal(t, 64, transport.MaxConnsPerHost)
+
+		cfg := &Config{
+			WorkerID:       "pod",
+			WorkerAddr:     redirector.URL,
+			bootstrapToken: "secret",
+			runtimeURL:     runtimeURL,
+			runtimeClient:  runtimeClient,
+		}
+		_, err := cfg.freezeRuntime(context.Background())
+		require.Error(t, err)
+		_, err = cfg.inspectEmptyRuntime(context.Background(), instance)
+		require.Error(t, err)
+		assert.False(t, redirected, "runtime client must never follow HTTP redirects")
+	})
+
+	t.Run("runtime transport fails closed for non-local worker addresses", func(t *testing.T) {
+		for _, addr := range []string{"http://10.0.0.2:9252", "example.com:9252", "https://127.0.0.1:9252"} {
+			runtimeURL, runtimeClient := newRuntimeTransport(addr)
+			assert.Empty(t, runtimeURL, "address %q should fail closed", addr)
+			assert.Nil(t, runtimeClient, "address %q should fail closed", addr)
+		}
+	})
 }
