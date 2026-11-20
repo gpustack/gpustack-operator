@@ -4,18 +4,51 @@ metadata:
   name: charts-sync
 spec:
   goal:
-    candidate: Update vendored Helm subcharts in hack/deps.sh and deploy/gpustack-operator/chart, rebase chart patches under hack/deploy/gpustack-operator/chart/charts, and pass chart lint and kuberess tests.
-    noChange: Confirm all vendored Helm subcharts and mirrored images are up to date and settle as no_change.
+    candidate: >-
+      Synchronize vendored Helm subcharts (kueue, node-feature-discovery, csi-driver-nfs,
+      csi-driver-s3, topograph) and their gpustack/mirrored-* subchart image pins using
+      preflight-staged resources, adapt local chart patches under hack/deploy/gpustack-operator/chart/charts/
+      and Go embed sites under pkg/worker/kuberess/ only when required, regenerate chart schema and
+      README, update .auto-sync/proposals/charts.json, and pass all verification gates.
+    noChange: >-
+      Confirm all five vendored Helm subcharts and subchart gpustack/mirrored-* image pins are aligned
+      with eligible upstream releases (or held back awaiting mirrored multi-arch images) with zero
+      repository modifications.
+  execution:
+    mode: strict
+    capabilities:
+      allowHostPath: true
+      allowCheckNetwork: true
+    digests:
+      pinDigests: true
+      lockfile: .auto-sync/digests/charts.lock.json
+  preflight:
+    script: .auto-sync/scripts/preflight-charts.sh
+    timeoutSeconds: 900
+    env:
+      - AUTOSYNC_STAGE_DIR
+      - AUTOSYNC_FORCE
+      - COMMENT_COMMAND
+      - AUTOSYNC_WARM_TOOLS
+      - AUTOSYNC_SKIP_GO_MOD_DOWNLOAD
+      - AUTOSYNC_SKIP_LFS_FETCH
+      - AUTOSYNC_CHARTS_FIXTURE_DIR
+      - AUTOSYNC_MOCK_MANIFESTS_JSON
+      - AUTOSYNC_CRANE_BIN
+      - AUTOSYNC_SKIP_GENERATE_CHART
+      - CHART_TESTING_VERSION
+      - GITHUB_EVENT_NAME
+      - GITHUB_STEP_SUMMARY
   scope:
     writable:
       - hack/deps.sh
-      - hack/deploy/gpustack-operator/chart/charts
-      - deploy/gpustack-operator/chart
-      - pkg/worker/kuberess
+      - hack/deploy/gpustack-operator/chart/charts/**
+      - deploy/gpustack-operator/chart/**
+      - pkg/worker/kuberess/**
       - .auto-sync/proposals/charts.json
     protected:
-      - hack/staging
-      - staging
+      - hack/staging/**
+      - staging/**
   instructions:
     - .auto-sync/instructions/charts.md
   upstreams:
@@ -67,8 +100,16 @@ spec:
           script: .auto-sync/checks/validate_charts.sh
           timeoutSeconds: 1800
           allowReadOnlyGitHubToken: false
+          toolchainPaths:
+            - /usr/local/bin
+            - /usr/bin
           env:
             - AUTOSYNC_STAGE_DIR
+            - AUTOSYNC_FAST_SELFTEST
+            - AUTOSYNC_VERIFY_RESTAGE
+            - AUTOSYNC_SKIP_RESTAGE_CHECK
+            - AUTOSYNC_SKIP_IMAGE_CHECK
+            - GITHUB_ACTIONS
     externalGates: []
   publication:
     mode: pull_request
@@ -101,3 +142,10 @@ spec:
   limits:
     wallTimeSeconds: 3600
     commandTimeoutSeconds: 1800
+    overlay:
+      maxFiles: 1024
+      maxBytes: 33554432
+  output:
+    formats:
+      - json
+      - github-step-summary

@@ -6,25 +6,23 @@ You maintain the KV-cache and remote-weight transfer recipes and default image t
 - `pack/mirrored-modelexpress-server/Dockerfile` (`ai-dynamo/modelexpress`)
 - `pkg/worker/settings/value.go`, `docs/reference/settings.md`, `docs/modules/model-delivery/remote.md`, and `deploy/gpustack-operator/chart/values.yaml` (Stage B tag promotion only)
 
-## Staged Preflight Artifacts (`.auto-sync/.stage/kv-transfer/`)
+## Taskpack 2.0 Preflight Resources
 
 Inside the offline `linux-bwrap` sandbox, host toolchains (`go`, `hugo`, `helm-docs`, `helm-schema`,
-`docker`) and external host staging directories are NOT mounted. Always inspect
-`.auto-sync/.stage/kv-transfer/` FIRST (falling back to `$AUTOSYNC_STAGE_DIR` only if
-`.auto-sync/.stage/kv-transfer/` is absent):
+`docker`) are not mounted; preflight resources are mounted natively via Taskpack 2.0:
 
-- `.auto-sync/.stage/kv-transfer/kv-transfer-preflight-report.json`
-- `.auto-sync/.stage/kv-transfer/upstream-records.json`
-- `.auto-sync/.stage/kv-transfer/image-manifests.json`
-- `.auto-sync/.stage/kv-transfer/runner-001_channel_generation.patch` (when staged from `gpustack/runner`)
-- `.auto-sync/.stage/kv-transfer/mooncake/` (upstream `CMakeLists.txt`, `scripts/build_wheel.sh`, `mooncake-transfer-engine/example/CMakeLists.txt`, and `mooncake-transfer-engine/src/transport/ascend_transport/` when `mooncake` drifted)
-- `.auto-sync/.stage/kv-transfer/nixl-rocm/` (upstream `pyproject.toml` at the resolved `vX.Y.Z` tag)
-- `.auto-sync/.stage/kv-transfer/modelexpress/` (upstream `Cargo.toml` and `Cargo.lock` at the resolved `vX.Y.Z` tag)
-
-**Read-only stage rule:** `.auto-sync/.stage/**` is read-only host-staged context outside
-`scope.writable`. **NEVER** edit, move, or delete any file under `.auto-sync/.stage/**` (doing so
-fails `scope-guard`). Loopwright automatically strips `.auto-sync/.stage/**` when running
-`validate_kv_transfer.sh` on the host and when publishing the Pull Request.
+1. **Prompt summary (`mount: 'prompt'`)**: Read `.loopwright-preflight/kv-transfer-preflight-summary.json` first.
+2. **Read-only workspace resources (`mount: 'workspace'`)**: Inspect the `readOnlyPath` entries under `## Preflight Staged Workspace Resources` in your prompt:
+   - `kv-transfer-preflight-report.json` — active `stage` (`recipe_sync`, `tag_promotion`, or `no_change`), verified `nixl_pypi`/`nixl_rocm`/`ucx_rocm`/`modelexpress` versions, `runner` HIXL parity, and `held_setting_images`.
+   - `image-manifests.json` — multi-arch manifest probe digests.
+   - `candidate-overlay.tgz` (and optional `candidate-deleted-files.txt`) — present when preflight pre-staged deterministic updates (`has_candidate_overlay: true`, such as NIXL/UCX/HIXL updates in Stage A or promoted settings/chart/docs updates in Stage B). Apply into the workspace root first:
+     ```sh
+     tar -xzf "<readOnlyPath of candidate-overlay.tgz>" -C .
+     ```
+   - `kv-transfer-stage-bundle.tgz` — read-only upstream context archive containing `runner-001_channel_generation.patch`, `mooncake/` (`CMakeLists.txt`, `scripts/build_wheel.sh`, `mooncake-transfer-engine/...`), `nixl-rocm/pyproject.toml`, and `modelexpress/{Cargo.toml,Cargo.lock}` when staged. Extract into `/tmp/kv-stage` (NEVER inside the repository root):
+     ```sh
+     mkdir -p /tmp/kv-stage && tar -xzf "<readOnlyPath of kv-transfer-stage-bundle.tgz>" -C /tmp/kv-stage
+     ```
 
 ## 1. Two-Stage Image Publication Gate
 
@@ -49,7 +47,7 @@ Stage B (`tag_promotion`) takes precedence over Stage A (`recipe_sync`): once un
 ## 2. Five-Block `MOONCAKE_VERSION` `case` Audit
 
 `pack/mirrored-mooncake/Dockerfile` contains four stage release guards (`builder`, `cuda`, `cann`, `rocm`) plus a fifth `context_manager.cpp` conditional patch block in the `cann` stage:
-1. Before changing `ARG MOONCAKE_VERSION="..."`, inspect the staged upstream Mooncake files under `.auto-sync/.stage/kv-transfer/mooncake/` to verify whether the existing CMake/wheel/wrapper steps and the `ascend_direct_transport/context_manager.cpp` glob fix still apply or need adjustment.
+1. Before changing `ARG MOONCAKE_VERSION="..."`, inspect the unpacked upstream Mooncake files under `/tmp/kv-stage/mooncake/` (from `kv-transfer-stage-bundle.tgz`) to verify whether the existing CMake/wheel/wrapper steps and the `ascend_direct_transport/context_manager.cpp` glob fix still apply or need adjustment.
 2. `validate_kv_transfer.sh`'s `parse_case_arms` is a line-oriented static parser that requires `pattern1|pattern2)` and `;;` in standard `case "${MOONCAKE_VERSION}" in` format, and requires an explicit version arm (e.g. `0.3.14*`) in all 4 release-guard blocks AND the 5th `context_manager.cpp` block.
 3. When Mooncake `0.3.14+` wraps `file(GLOB ASCEND_SOURCES ...)` onto multiple lines (`"ubshmem_transport/*.cpp" "*.cpp"` followed by `"ascend_direct_transport/utils.cpp"`) while `ascend_allocator.cpp` still references `ContextManager::getInstance()`, add a separate `0.3.14*)` arm in the `context_manager.cpp` `case` block that patches `"ascend_direct_transport/context_manager.cpp"` alongside `"ascend_direct_transport/utils.cpp"` and verifies with `grep -q 'ascend_direct_transport/context_manager\.cpp'`.
 
@@ -66,7 +64,7 @@ Only bump `ARG NIXL_VERSION="..."` (together with `ARG NIXL_ROCM_VERSION="..."` 
 ## 5. ModelExpress SemVer Tag & `--locked` Cargo Verification
 
 - Set `ARG MODELEXPRESS_VERSION=vX.Y.Z` in `pack/mirrored-modelexpress-server/Dockerfile` to a stable SemVer release tag `vX.Y.Z` from `ai-dynamo/modelexpress` (never a commit SHA, pre-release, or non-SemVer tag like `weight-sync-pre-removal`).
-- When `.auto-sync/.stage/kv-transfer/modelexpress/Cargo.toml` is staged, verify `MODELEXPRESS_VERSION` (without the leading `v`) matches `[workspace.package].version` in `Cargo.toml`.
+- When `modelexpress/Cargo.toml` is staged in `kv-transfer-stage-bundle.tgz` (or `modelexpress.workspace_version` is recorded in `kv-transfer-preflight-report.json`), verify `MODELEXPRESS_VERSION` (without the leading `v`) matches `[workspace.package].version` in `Cargo.toml`.
 - When bumping `ARG MODELEXPRESS_VERSION=vX.Y.Z` in `pack/mirrored-modelexpress-server/Dockerfile`, full `docker buildx` `--target builder` (`--locked` Cargo) verification runs on the host in `validate_kv_transfer.sh` after you submit.
 
 ## 6. Proposal Artifact

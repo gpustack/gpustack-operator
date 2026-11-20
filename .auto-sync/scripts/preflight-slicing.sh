@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# .auto-sync/scripts/preflight-slicing.sh - host-side preflight for slicing-sync.
+# .auto-sync/scripts/preflight-slicing.sh - Taskpack 2.0 preflight for slicing-sync.
 #
 # Clones/fetches upstream HAMi-core and ubs-virt repositories into $AUTOSYNC_STAGE_DIR,
 # evaluates watched-path changes against pinned Dockerfile commits, tests Ascend vcann-rt
 # patches with CRLF preservation, snapshots baselines, warms .sbin, and emits
-# upstream-records.json + slicing-preflight-report.json.
+# Taskpack 2.0 preflight outputs and staged resources.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
@@ -93,7 +93,6 @@ sync_upstream_git() {
 repo_root="$(autosync::preflight::repo_root)"
 stage_dir="$(autosync::preflight::init_stage "slicing" "${1:-${AUTOSYNC_STAGE_DIR:-}}")"
 base_sha="$(git -C "${repo_root}" rev-parse HEAD)"
-source_revision="${base_sha}"
 
 autosync::preflight::snapshot_baselines "${stage_dir}" \
   "pack/gpustack-operator/Dockerfile" \
@@ -196,11 +195,11 @@ for pf in "${patch_files[@]+"${patch_files[@]}"}"; do
   patch_names_nl="${patch_names_nl}${patch_names_nl:+$'\n'}$(basename "${pf}")"
 done
 
-records_compact="$(python3 - \
+python3 - \
   "${stage_dir}" \
   "${pinned_hami}" "${head_hami}" "${hami_changed_files}" "${hami_pin_reachable}" \
   "${pinned_ubs}" "${head_ubs}" "${ubs_changed_files}" "${ubs_pin_reachable}" \
-  "${patch_clean}" "${patch_names_nl}" "${patch_errors}" "${base_sha}" "${source_revision}" <<'PY'
+  "${patch_clean}" "${patch_names_nl}" "${patch_errors}" "${base_sha}" <<'PY'
 import json
 import os
 import sys
@@ -219,8 +218,7 @@ import sys
     patch_names_raw,
     patch_errors,
     base_sha,
-    source_revision,
-) = sys.argv[1:15]
+) = sys.argv[1:14]
 
 hami_files = [ln for ln in hami_changed_raw.splitlines() if ln.strip()]
 ubs_files = [ln for ln in ubs_changed_raw.splitlines() if ln.strip()]
@@ -283,16 +281,18 @@ else:
 
 records = [
     {
-        "upstreamId": "hami-core",
+        "id": "hami-core",
         "status": hami_status,
         "version": hami_ver,
+        **({"currentVersion": pinned_hami} if hami_status == "available" else {}),
         "recentVersions": hami_recent,
         "reason": hami_reason,
     },
     {
-        "upstreamId": "ubs-virt",
+        "id": "ubs-virt",
         "status": ubs_status,
         "version": ubs_ver,
+        **({"currentVersion": pinned_ubs} if ubs_status == "available" else {}),
         "recentVersions": ubs_recent,
         "reason": ubs_reason,
     },
@@ -301,7 +301,6 @@ records = [
 report = {
     "schemaVersion": 1,
     "base_sha": base_sha,
-    "source_revision": source_revision,
     "hami_core": {
         "pinned_commit": pinned_hami,
         "pinned_commit_reachable": hami_pin_reachable,
@@ -333,16 +332,12 @@ with open(os.path.join(stage_dir, "upstream-records.json"), "w", encoding="utf-8
 with open(os.path.join(stage_dir, "slicing-preflight-report.json"), "w", encoding="utf-8") as f:
     json.dump(report, f, indent=2)
     f.write("\n")
-
-print(json.dumps(records, separators=(",", ":")))
 PY
-)"
 
 autosync::preflight::apply_force_to_upstream_records "${stage_dir}/upstream-records.json"
-records_compact="$(python3 -c 'import json,sys; print(json.dumps(json.load(open(sys.argv[1])), separators=(",", ":")))' "${stage_dir}/upstream-records.json")"
 
-if [[ "${AUTOSYNC_SKIP_SOURCE_REVISION:-false}" != "true" ]] && \
-   autosync::preflight::has_available_upstreams "${stage_dir}/upstream-records.json"; then
+emit_args=()
+if autosync::preflight::has_available_upstreams "${stage_dir}/upstream-records.json"; then
   tmp_stage_bundle="$(mktemp -d "${TMPDIR:-/tmp}/autosync-slicing-bundle.XXXXXXXX")"
   _PREFLIGHT_TMP_DIRS+=("${tmp_stage_bundle}")
   staged_tree="${tmp_stage_bundle}/staged-tree"
@@ -357,7 +352,7 @@ if [[ "${AUTOSYNC_SKIP_SOURCE_REVISION:-false}" != "true" ]] && \
 import json
 import sys
 with open(sys.argv[1], "r", encoding="utf-8") as f:
-    by_id = {r["upstreamId"]: r["status"] for r in json.load(f)}
+    by_id = {(r.get("id") or r.get("upstreamId")): r["status"] for r in json.load(f)}
 hami_avail = by_id.get("hami-core") == "available"
 ubs_avail = by_id.get("ubs-virt") == "available" or sys.argv[2] == "false"
 print(f"{str(hami_avail).lower()}|{str(ubs_avail).lower()}")
@@ -391,30 +386,12 @@ PY
   fi
 
   autosync::preflight::populate_stage_bundle "${staged_tree}" "slicing" "${bundle_specs[@]}"
-  source_revision="$(
-    autosync::preflight::commit_staged_tree_revision \
-      "${repo_root}" "${base_sha}" \
-      "chore(slicing): stage preflight bundle and upstream context" \
-      "${staged_tree}" \
-      ".auto-sync/.stage/slicing"
-  )"
-  if [[ "${source_revision}" != "${base_sha}" ]]; then
-    python3 - "${stage_dir}/slicing-preflight-report.json" "${source_revision}" <<'PY'
-import json
-import sys
-p, src_rev = sys.argv[1:3]
-with open(p, "r", encoding="utf-8") as f:
-    rep = json.load(f)
-rep["source_revision"] = src_rev
-with open(p, "w", encoding="utf-8") as f:
-    json.dump(rep, f, indent=2)
-    f.write("\n")
-PY
-  fi
+  emit_args+=(--bundle-dir "${staged_tree}/.auto-sync/.stage/slicing")
 fi
 
-autosync::preflight::write_github_output "stage_dir" "${stage_dir}"
-autosync::preflight::write_github_output "upstream_records" "${records_compact}"
-autosync::preflight::write_github_output "source_revision" "${source_revision}"
+autosync::preflight::emit_taskpack_v2 \
+  "slicing" "${repo_root}" "${base_sha}" "${stage_dir}" \
+  "${stage_dir}/upstream-records.json" "${stage_dir}/slicing-preflight-report.json" \
+  "${emit_args[@]+"${emit_args[@]}"}"
 
-printf 'OK: preflight-slicing staged at %s (base=%s, source_revision=%s)\n' "${stage_dir}" "${base_sha}" "${source_revision}"
+printf 'OK: preflight-slicing staged at %s (base=%s)\n' "${stage_dir}" "${base_sha}"

@@ -23,28 +23,18 @@ Strictly off-limits (protected):
 - `gen/binding`
 - `pkg/devicemanager/allocator`
 
-## Preflight Staging Inputs (`.auto-sync/.stage/slicing/`)
+## Taskpack 2.0 Preflight Resources
 
 The candidate sandbox runs offline (`networkMode: none`) inside `linux-bwrap`. Host toolchains
-(`docker`, `cmake`, `go`) and external host staging directories are NOT mounted. Always inspect
-`.auto-sync/.stage/slicing/` FIRST (falling back to `$AUTOSYNC_STAGE_DIR` only if
-`.auto-sync/.stage/slicing/` is absent):
+(`docker`, `cmake`, `go`) are not mounted; preflight resources are mounted natively via Taskpack 2.0:
 
-- `.auto-sync/.stage/slicing/slicing-preflight-report.json` — records `pinned_commit`,
-  `head_commit`, `watched_changed`, `changed_files`, and `patch_clean` (`true|false`) from running
-  `patch -p1 --dry-run --batch --forward` against `ubs-virt-enpu/vcann-rt` at target HEAD.
-- `.auto-sync/.stage/slicing/upstream-records.json` — normalized `TaskpackUpstreamRecord` entries.
-- `.auto-sync/.stage/slicing/ubs-virt/ubs-virt-enpu/vcann-rt/` (and `ubs-virt-enpu/common/` when
-  present) — CRLF-exact snapshot at `ubs-virt` target HEAD (present when `ubs-virt` is `available`
-  or `patch_clean` is `false`).
-- `.auto-sync/.stage/slicing/hami-core/` — `CMakeLists.txt`, `src/CMakeLists.txt`, and `build.sh`
-  at `hami-core` target HEAD (present when `hami-core` is `available`).
-
-**Read-only stage rule:** `.auto-sync/.stage/**` is read-only host-staged context outside
-`scope.writable`. **NEVER** edit, move, or delete any file under `.auto-sync/.stage/**` (doing so
-fails `scope-guard`). Loopwright automatically strips `.auto-sync/.stage/**` when running
-`validate_slicing.sh` (including `docker buildx` xbuild + ELF verification) on the host and when
-publishing the Pull Request.
+1. **Prompt summary (`mount: 'prompt'`)**: Read `.loopwright-preflight/slicing-preflight-summary.json` first.
+2. **Read-only workspace resources (`mount: 'workspace'`)**: Inspect the `readOnlyPath` entries under `## Preflight Staged Workspace Resources` in your prompt:
+   - `slicing-preflight-report.json` — records `pinned_commit`, `head_commit`, `watched_changed`, `changed_files`, and `patch_clean` (`true|false`) from running `patch -p1 --dry-run --batch --forward` against `ubs-virt-enpu/vcann-rt` at target HEAD.
+   - `slicing-stage-bundle.tgz` — present when `ubs-virt` or `hami-core` is `available` (or `patch_clean` is `false`), containing `ubs-virt/ubs-virt-enpu/vcann-rt/` (CRLF-exact snapshot at `ubs-virt` target HEAD, plus `ubs-virt-enpu/common/` when present) and `hami-core/{CMakeLists.txt,src/CMakeLists.txt,build.sh}`. Extract into `/tmp/slicing-stage` (NEVER inside the repository root):
+     ```sh
+     mkdir -p /tmp/slicing-stage && tar -xzf "<readOnlyPath of slicing-stage-bundle.tgz>" -C /tmp/slicing-stage
+     ```
 
 ## Settlement and No-Change Behavior
 

@@ -1,0 +1,21 @@
+{
+  "version": 1,
+  "taskpack": "k8s-deps-sync",
+  "entries": [
+    {
+      "path": ".auto-sync/checks",
+      "kind": "directory",
+      "sha256": "55d17f81dba1355a916652dca613dcadb1851c0e7f4deddb28c4434ebdd9fbf3"
+    },
+    {
+      "path": ".auto-sync/instructions/k8s-deps.md",
+      "kind": "file",
+      "sha256": "cc7fad0b8c9c92685dd7fce59f502132fd3203695db85fadb3ccf1ab590a428d"
+    },
+    {
+      "path": ".auto-sync/scripts/preflight-k8s-deps.sh",
+      "kind": "file",
+      "sha256": "9d3f497d77d47fa1bd2d6be65bf6840490773813ed43dbd0a562c10867350c28"
+    }
+  ]
+}

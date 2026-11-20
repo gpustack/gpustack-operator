@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
-# .auto-sync/scripts/preflight-router.sh - host-side preflight for router-sync.
+# .auto-sync/scripts/preflight-router.sh - Taskpack 2.0 preflight for router-sync.
 #
 # Discovers highest stable upstream tags for llm-d/llm-d-router (v*),
 # vllm-project/router (v*), and sgl-project/sglang (strictly gateway-v*),
 # stages clones into $AUTOSYNC_STAGE_DIR, checks commit 516f1cb ancestry for
 # automatic retirement of 0001-epd-routing.patch, probes multi-arch image
-# manifests via crane, and emits upstream-records.json + router-preflight-report.json.
+# manifests via crane, and emits Taskpack 2.0 preflight outputs and staged resources.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
@@ -34,10 +34,14 @@ autosync::preflight::warm_caches "${STAGE_DIR}" --sbin
 PROBE_LIST_FILE="$(mktemp "${TMPDIR:-/tmp}/autosync-router-probes.XXXXXXXX")"
 DISCOVERY_JSON="${STAGE_DIR}/router-discovery.json"
 ROUTER_STAGE_TMP=""
+PIN_WORK=""
 cleanup_router_preflight() {
   rm -f "${PROBE_LIST_FILE}" "${DISCOVERY_JSON}"
   if [[ -n "${ROUTER_STAGE_TMP:-}" && -d "${ROUTER_STAGE_TMP}" ]]; then
     rm -rf "${ROUTER_STAGE_TMP}"
+  fi
+  if [[ -n "${PIN_WORK:-}" && -d "${PIN_WORK}" ]]; then
+    rm -rf "${PIN_WORK}"
   fi
 }
 trap cleanup_router_preflight EXIT
@@ -45,7 +49,7 @@ trap 'exit 130' INT
 trap 'exit 143' TERM
 trap 'exit 129' HUP
 
-python3 - "${REPO_ROOT}" "${STAGE_DIR}" "${AUTOSYNC_ROUTER_FIXTURE_DIR:-}" "${DISCOVERY_JSON}" "${PROBE_LIST_FILE}" "${BASE_SHA}" <<'PY'
+python3 -B - "${REPO_ROOT}" "${STAGE_DIR}" "${AUTOSYNC_ROUTER_FIXTURE_DIR:-}" "${DISCOVERY_JSON}" "${PROBE_LIST_FILE}" "${BASE_SHA}" <<'PY'
 import json
 import os
 import re
@@ -623,9 +627,10 @@ if has_stage_b:
     for uid in ("llm-d-router", "vllm-router", "sglang-gateway"):
         promote = router_stage_b or (uid == "llm-d-router" and (sidecar_stage_b or proxy_stage_b))
         records.append({
-            "upstreamId": uid,
+            "id": uid,
             "status": "available" if promote else "up_to_date",
             "version": f"{recipe[uid]}+stage-b" if promote else recipe[uid],
+            **({"currentVersion": recipe[uid]} if promote else {}),
             "recentVersions": recent_tags[uid],
         })
 elif has_stage_a:
@@ -633,9 +638,10 @@ elif has_stage_a:
     image_published = False
     records = [
         {
-            "upstreamId": uid,
+            "id": uid,
             "status": "available" if stage_a_drifts[uid] else "up_to_date",
             "version": target_tags[uid] if stage_a_drifts[uid] else recipe[uid],
+            **({"currentVersion": recipe[uid]} if stage_a_drifts[uid] else {}),
             "recentVersions": recent_tags[uid],
         }
         for uid in ("llm-d-router", "vllm-router", "sglang-gateway")
@@ -652,7 +658,7 @@ else:
     )
     records = [
         {
-            "upstreamId": uid,
+            "id": uid,
             "status": "up_to_date",
             "version": recipe[uid],
             "recentVersions": recent_tags[uid],
@@ -667,7 +673,6 @@ with open(recs_path, "w", encoding="utf-8") as f:
 report = {
     "schemaVersion": 1,
     "base_sha": disc.get("base_sha", ""),
-    "source_revision": disc.get("base_sha", ""),
     "stage": stage,
     "image_published": image_published,
     "retire_0001_epd_routing": disc["retire_0001_epd_routing"],
@@ -698,7 +703,8 @@ PY
 autosync::preflight::apply_force_to_upstream_records "${UPSTREAM_RECORDS_JSON}"
 
 if autosync::preflight::has_available_upstreams "${UPSTREAM_RECORDS_JSON}" || \
-   [[ "${COMMENT_COMMAND:-}" == "revise" || \
+   [[ "${AUTOSYNC_FORCE:-false}" == "true" || \
+      "${COMMENT_COMMAND:-}" == "revise" || \
       "${COMMENT_COMMAND:-}" == "retry" || \
       "${AUTOSYNC_WARM_TOOLS:-false}" == "true" ]]; then
   if [[ -n "${AUTOSYNC_ROUTER_FIXTURE_DIR:-}" && "${AUTOSYNC_WARM_TOOLS:-false}" != "true" ]]; then
@@ -708,9 +714,9 @@ if autosync::preflight::has_available_upstreams "${UPSTREAM_RECORDS_JSON}" || \
   fi
 fi
 
-SOURCE_REVISION="${BASE_SHA}"
-if [[ "${AUTOSYNC_SKIP_SOURCE_REVISION:-false}" != "true" ]] && \
-   autosync::preflight::has_available_upstreams "${UPSTREAM_RECORDS_JSON}"; then
+STAGED_TREE=""
+COMMIT_PATHS=()
+if autosync::preflight::has_available_upstreams "${UPSTREAM_RECORDS_JSON}"; then
   ROUTER_STAGE_TMP="$(mktemp -d "${TMPDIR:-/tmp}/autosync-router-stage.XXXXXXXX")"
   STAGED_TREE="${ROUTER_STAGE_TMP}/staged-tree"
   BUNDLE_WORK="${ROUTER_STAGE_TMP}/bundle-work"
@@ -1353,30 +1359,29 @@ PY
     fi
   done
   autosync::preflight::populate_stage_bundle "${STAGED_TREE}" "router" "${BUNDLE_SPECS[@]}"
+fi
 
-  SOURCE_REVISION="$(
-    autosync::preflight::commit_staged_tree_revision \
-      "${REPO_ROOT}" "${BASE_SHA}" \
-      "chore(router): stage preflight bundle and rebased patches" \
-      "${STAGED_TREE}" \
-      "${COMMIT_PATHS[@]}"
-  )"
-  if [[ "${SOURCE_REVISION}" != "${BASE_SHA}" ]]; then
-    python3 - "${PREFLIGHT_REPORT_JSON}" "${SOURCE_REVISION}" <<'PY'
-import json
-import sys
-p, src_rev = sys.argv[1:3]
-with open(p, "r", encoding="utf-8") as f:
-    rep = json.load(f)
-rep["source_revision"] = src_rev
-with open(p, "w", encoding="utf-8") as f:
-    json.dump(rep, f, indent=2)
-    f.write("\n")
-PY
+EMIT_ARGS=(
+  --manifests "${MANIFESTS_JSON}"
+)
+if [[ -n "${STAGED_TREE}" && -d "${STAGED_TREE}" ]]; then
+  if [[ -d "${STAGED_TREE}/.auto-sync/.stage/router" ]]; then
+    EMIT_ARGS+=(--bundle-dir "${STAGED_TREE}/.auto-sync/.stage/router")
+  fi
+  CAND_PATHS_CSV=""
+  for cp_rel in "${COMMIT_PATHS[@]+"${COMMIT_PATHS[@]}"}"; do
+    [[ "${cp_rel}" == ".auto-sync/.stage"* ]] && continue
+    CAND_PATHS_CSV="${CAND_PATHS_CSV:+${CAND_PATHS_CSV},}${cp_rel}"
+  done
+  if [[ -n "${CAND_PATHS_CSV}" ]]; then
+    EMIT_ARGS+=(
+      --candidate-tree "${STAGED_TREE}"
+      --candidate-paths "${CAND_PATHS_CSV}"
+    )
   fi
 fi
 
-COMPACT_RECORDS="$(python3 -c 'import json,sys; print(json.dumps(json.load(open(sys.argv[1])), separators=(",",":")))' "${UPSTREAM_RECORDS_JSON}")"
-autosync::preflight::write_github_output "stage_dir" "${STAGE_DIR}"
-autosync::preflight::write_github_output "upstream_records" "${COMPACT_RECORDS}"
-autosync::preflight::write_github_output "source_revision" "${SOURCE_REVISION}"
+autosync::preflight::emit_taskpack_v2 \
+  "router" "${REPO_ROOT}" "${BASE_SHA}" "${STAGE_DIR}" \
+  "${UPSTREAM_RECORDS_JSON}" "${PREFLIGHT_REPORT_JSON}" \
+  "${EMIT_ARGS[@]}"

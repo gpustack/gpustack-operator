@@ -7,35 +7,25 @@ You maintain the disaggregated inference router build recipe, local patches, and
 - `sgl-project/sglang` (filtered strictly to `gateway-v*` tags; never engine `v0.4.*` tags) -> `ARG SGLANG_GATEWAY_VERSION` -> `sglang-gateway-builder` stage in `pack/llm-router/Dockerfile` (`pack/llm-router/patches/sglang-gateway/*.patch`)
 - `pkg/worker/settings/value.go` and `docs/reference/settings.md` (Stage B tag promotion only)
 
-## Staged Preflight Artifacts (`.auto-sync/.stage/router/`)
+## Taskpack 2.0 Preflight Resources
 
-Inside the offline `linux-bwrap` sandbox, host toolchains (`docker`, `go`, `cargo`, `hugo`) and
-external host staging directories are NOT mounted. Always inspect `.auto-sync/.stage/router/` FIRST
-(falling back to `$AUTOSYNC_STAGE_DIR` only if `.auto-sync/.stage/router/` is absent):
+Inside the offline `linux-bwrap` sandbox, host toolchains (`docker`, `go`, `cargo`, `hugo`) are
+not mounted; preflight resources are mounted natively via Taskpack 2.0:
 
-- `.auto-sync/.stage/router/router-preflight-report.json` — includes `stage`, `target_tags`,
-  `retire_0001_epd_routing`, `retire_0004_discovery_readiness`, `toolchain` (e.g.
-  `recommended_go_version_arg`), and `rebase` per-router status (`auto_rebased`, `retired_patches`,
-  `rebased_before_conflict`, `conflicted_patch`, `conflicted_files`).
-- `.auto-sync/.stage/router/upstream-records.json`
-- `.auto-sync/.stage/router/image-manifests.json`
-- `.auto-sync/.stage/router/rebased-patches/<subdir>/` (if present) — already-rebased `.patch`
-  files for earlier patch(es) of a multi-patch router that cherry-picked cleanly before a later
-  patch conflicted (`rebase[<uid>].rebased_before_conflict`).
-- `.auto-sync/.stage/router/target-files/<subdir>/` — pre-conflict base files (i.e. `target_tag`
-  plus any `rebased_before_conflict` patches already applied) for routers whose patches had
-  conflicts during host 3-way cherry-pick.
-- `.auto-sync/.stage/router/cherry-pick-working/<subdir>/` — working-tree files at the conflict
-  stop (auto-merged hunks already applied; only conflicted files have `<<<<<<<` / `=======` /
-  `>>>>>>>` markers).
-- `.auto-sync/.stage/router/conflicts/<subdir>/<patch>.txt` — conflicted file paths and `git status`
-  summary.
-
-**Read-only stage rule:** `.auto-sync/.stage/**` is read-only host-staged context outside
-`scope.writable`. **NEVER** edit, move, or delete any file under `.auto-sync/.stage/**` (doing so
-fails `scope-guard`). Loopwright automatically strips `.auto-sync/.stage/**` when running
-`validate_router.sh` (including `docker buildx` builder targets) on the host and when publishing the
-Pull Request.
+1. **Prompt summary (`mount: 'prompt'`)**: Read `.loopwright-preflight/router-preflight-summary.json` first.
+2. **Read-only workspace resources (`mount: 'workspace'`)**: Inspect the `readOnlyPath` entries under `## Preflight Staged Workspace Resources` in your prompt:
+   - `router-preflight-report.json` — includes `stage`, `target_tags`, `retire_0001_epd_routing`, `retire_0004_discovery_readiness`, `toolchain` (e.g. `recommended_go_version_arg`), and `rebase` per-router status (`auto_rebased`, `retired_patches`, `rebased_before_conflict`, `conflicted_patch`, `conflicted_files`).
+   - `image-manifests.json` — multi-arch manifest probe digests.
+   - `candidate-overlay.tgz` (and optional `candidate-deleted-files.txt`) — present when auto-rebased patches or Stage B promoted settings/tests/docs were staged (`has_candidate_overlay: true`). Apply into the workspace root first:
+     ```sh
+     tar -xzf "<readOnlyPath of candidate-overlay.tgz>" -C .
+     # If candidate-deleted-files.txt is also listed (e.g. retired vllm-router patches):
+     xargs -r rm -f < "<readOnlyPath of candidate-deleted-files.txt>"
+     ```
+   - `router-stage-bundle.tgz` — present when any router patch encountered a 3-way cherry-pick conflict (`has_stage_bundle: true`), containing `rebased-patches/<subdir>/`, `target-files/<subdir>/`, `cherry-pick-working/<subdir>/`, and `conflicts/<subdir>/<patch>.txt`. Extract into `/tmp/router-stage` (NEVER inside the repository root):
+     ```sh
+     mkdir -p /tmp/router-stage && tar -xzf "<readOnlyPath of router-stage-bundle.tgz>" -C /tmp/router-stage
+     ```
 
 ## 1. Two-Stage Image Publication Gate
 
@@ -65,13 +55,13 @@ Stage B (`tag_promotion`) takes precedence over Stage A (`recipe_sync`): once un
 
 ## 3. Rebase & Toolchain Workflow Inside `bwrap`
 
-1. **Keep auto-rebased patches**: For any router with `rebase[<uid>].auto_rebased == true`, host preflight has already rebased `pack/llm-router/patches/<subdir>/` and verified `git apply --check` onto the target tag — keep those staged patches intact.
-2. **Resolve conflicts via staged 3-way working tree**: For any router with `rebase[<uid>].auto_rebased == false`:
-   - Read `.auto-sync/.stage/router/conflicts/<subdir>/*.txt`.
-   - If `.auto-sync/.stage/router/rebased-patches/<subdir>/` is present, copy those already-rebased earlier `.patch` files into `pack/llm-router/patches/<subdir>/` as-is (`target-files/<subdir>/` already includes them so your diff below covers only the conflicted patch).
-   - Copy `.auto-sync/.stage/router/cherry-pick-working/<subdir>/` to a scratch directory under `/tmp`, resolve all `<<<<<<<` / `=======` / `>>>>>>>` conflict markers (preserving all observer/dispatch/readiness semantics), and generate a unified diff against `.auto-sync/.stage/router/target-files/<subdir>/` (using `git diff --no-index --full-index` with `a/` and `b/` prefixes rewritten to repo-relative paths, or a scratch git repo initialized from `target-files/<subdir>/`).
+1. **Keep auto-rebased patches**: For any router with `rebase[<uid>].auto_rebased == true`, host preflight has already rebased `pack/llm-router/patches/<subdir>/` (in `candidate-overlay.tgz`) and verified `git apply --check` onto the target tag — keep those extracted patches intact.
+2. **Resolve conflicts via staged 3-way working tree**: For any router with `rebase[<uid>].auto_rebased == false` (after unpacking `router-stage-bundle.tgz` into `/tmp/router-stage`):
+   - Read `/tmp/router-stage/conflicts/<subdir>/*.txt`.
+   - If `/tmp/router-stage/rebased-patches/<subdir>/` is present, copy those already-rebased earlier `.patch` files into `pack/llm-router/patches/<subdir>/` as-is (`target-files/<subdir>/` already includes them so your diff below covers only the conflicted patch).
+   - Copy `/tmp/router-stage/cherry-pick-working/<subdir>/` to a scratch directory under `/tmp`, resolve all `<<<<<<<` / `=======` / `>>>>>>>` conflict markers (preserving all observer/dispatch/readiness semantics), and generate a unified diff against `/tmp/router-stage/target-files/<subdir>/` (using `git diff --no-index --full-index` with `a/` and `b/` prefixes rewritten to repo-relative paths, or a scratch git repo initialized from `/tmp/router-stage/target-files/<subdir>/`).
    - Prepend the original patch's descriptive header (updating `AGAINST:` to the target tag) and write the updated `.patch` file under `pack/llm-router/patches/<subdir>/` (and rebase any remaining patches after `conflicted_patch` in order if a multi-patch series had further patches).
-   - Verify `git apply --check` cleanly against a fresh copy of `target-files/<subdir>/` (with zero `.rej`).
+   - Verify `git apply --check` cleanly against a fresh copy of `/tmp/router-stage/target-files/<subdir>/` (with zero `.rej`).
 3. **Update `ARG GO_VERSION` and `ARG RUST_VERSION` when needed**: Check `toolchain.recommended_go_version_arg` in `router-preflight-report.json` (e.g., `1.27-bookworm` when `llm-d-router` `go.mod` advances to `go 1.27.*`) and update `ARG GO_VERSION=...` in `pack/llm-router/Dockerfile`.
 4. **Update router version ARGs** (`LLMD_ROUTER_VERSION`, `VLLM_ROUTER_VERSION`, `SGLANG_GATEWAY_VERSION`) in `pack/llm-router/Dockerfile` and any patch references/comments if patches were retired.
 5. Never drop `struct ObserverRouter` in `sglang-gateway` or observer/Mooncake/discovery semantics across any router.

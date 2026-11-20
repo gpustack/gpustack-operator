@@ -5,6 +5,7 @@
 # and cleanup for gitless candidate directories, fail-closed diff -U0 shared-file guards,
 # and published multi-arch container image verification.
 set -euo pipefail
+export PYTHONDONTWRITEBYTECODE=1
 
 # autosync::bootstrap_env [stage_dir] [candidate_dir]
 # Configures deterministic PATH, Go offline caches, and .sbin tools for command.v1 checks.
@@ -92,7 +93,9 @@ autosync::bootstrap_env() {
       fi
     fi
 
-    export GOMODCACHE="${GOMODCACHE:-${stage_dir}/go-mod}"
+    if [[ -z "${GOMODCACHE:-}" ]]; then
+      export GOMODCACHE="${stage_dir}/go-mod"
+    fi
     export GPUSTACK_DEPS_CACHE_DIR="${GPUSTACK_DEPS_CACHE_DIR:-${stage_dir}/deps-cache}"
     export GPUSTACK_DEPS_OFFLINE="${GPUSTACK_DEPS_OFFLINE:-true}"
     export GOPROXY="${GOPROXY:-off}"
@@ -142,12 +145,45 @@ autosync::bootstrap_env() {
     fi
 
     # Materialize pre-warmed .sbin entries as regular files (not a directory symlink)
-    # when candidate_dir is writable; in read-only sandboxes rely on stage_dir/.sbin on PATH.
-    if [[ -d "${stage_dir}/.sbin" && ! -e "${candidate_dir}/.sbin" && ! -L "${candidate_dir}/.sbin" ]]; then
+    # when candidate_dir is a distinct writable copy; skip when candidate_dir == LOOPWRIGHT_BASE_DIR.
+    local base_phys=""
+    if [[ -n "${LOOPWRIGHT_BASE_DIR:-}" && -d "${LOOPWRIGHT_BASE_DIR}" ]]; then
+      base_phys="$(cd "${LOOPWRIGHT_BASE_DIR}" && pwd -P)"
+    fi
+    local cand_phys="${candidate_dir}"
+    if [[ -d "${candidate_dir}" ]]; then
+      cand_phys="$(cd "${candidate_dir}" && pwd -P)"
+    fi
+    if [[ -d "${stage_dir}/.sbin" && ! -e "${candidate_dir}/.sbin" && ! -L "${candidate_dir}/.sbin" && "${cand_phys}" != "${base_phys}" ]]; then
       if [[ -w "${candidate_dir}" ]]; then
         mkdir -p "${candidate_dir}/.sbin"
         cp -RLp "${stage_dir}/.sbin/." "${candidate_dir}/.sbin/" 2>/dev/null || true
         : > "${candidate_dir}/.sbin/.autosync-materialized"
+      fi
+    fi
+  fi
+
+  if [[ -n "${LOOPWRIGHT_STAGED_DIR:-}" && -f "${LOOPWRIGHT_STAGED_DIR}/deps-charts-cache.tgz" ]]; then
+    local has_cached_tgz="false"
+    if [[ -n "${GPUSTACK_DEPS_CACHE_DIR:-}" && -d "${GPUSTACK_DEPS_CACHE_DIR}/charts" ]]; then
+      if (
+        shopt -s nullglob
+        cached_tgzs=("${GPUSTACK_DEPS_CACHE_DIR}/charts/"*.tgz)
+        (( ${#cached_tgzs[@]} > 0 ))
+      ); then
+        has_cached_tgz="true"
+      fi
+    fi
+    if [[ "${has_cached_tgz}" != "true" ]]; then
+      local staged_deps_cache
+      staged_deps_cache="$(mktemp -d "${TMPDIR:-/tmp}/autosync-deps-cache-XXXXXX")"
+      mkdir -p "${staged_deps_cache}/charts"
+      if tar -xzf "${LOOPWRIGHT_STAGED_DIR}/deps-charts-cache.tgz" -C "${staged_deps_cache}/charts"; then
+        export GPUSTACK_DEPS_CACHE_DIR="${staged_deps_cache}"
+        export AUTOSYNC_EPHEMERAL_DEPS_CACHE="${staged_deps_cache}"
+      else
+        printf 'WARN: autosync: failed to extract deps-charts-cache.tgz from %s\n' "${LOOPWRIGHT_STAGED_DIR}" >&2
+        rm -rf "${staged_deps_cache}" 2>/dev/null || true
       fi
     fi
   fi
@@ -388,6 +424,98 @@ autosync::cleanup_ephemeral_git() {
   if [[ -n "${AUTOSYNC_EPHEMERAL_UV_ENV:-}" && -d "${AUTOSYNC_EPHEMERAL_UV_ENV}" ]]; then
     rm -rf "${AUTOSYNC_EPHEMERAL_UV_ENV}" 2>/dev/null || true
   fi
+  if [[ -n "${AUTOSYNC_EPHEMERAL_DEPS_CACHE:-}" && -d "${AUTOSYNC_EPHEMERAL_DEPS_CACHE}" ]]; then
+    rm -rf "${AUTOSYNC_EPHEMERAL_DEPS_CACHE}" 2>/dev/null || true
+  fi
+}
+
+# autosync::resolve_baseline_dir [stage_dir]
+# Prints canonical LOOPWRIGHT_BASE_DIR when provided by Taskpack 2.0 command.v1,
+# falling back to <stage_dir>/baseline for standalone invocations.
+# Intentionally returns 0 with empty stdout when absent so `set -e` callers handle optional modes.
+autosync::resolve_baseline_dir() {
+  local stage_dir="${1:-${AUTOSYNC_STAGE_DIR:-}}"
+  if [[ -n "${LOOPWRIGHT_BASE_DIR:-}" && -d "${LOOPWRIGHT_BASE_DIR}" ]]; then
+    (cd "${LOOPWRIGHT_BASE_DIR}" && pwd -P)
+    return 0
+  fi
+  if [[ -n "${stage_dir}" && -d "${stage_dir}/baseline" ]]; then
+    (cd "${stage_dir}/baseline" && pwd -P)
+    return 0
+  fi
+  return 0
+}
+
+# autosync::resolve_staged_file <filename> [stage_dir]
+# Prints path in LOOPWRIGHT_STAGED_DIR (Taskpack 2.0 exposeToChecks) when present,
+# falling back to <stage_dir>/<filename>. Intentionally returns 0 with empty stdout when absent.
+autosync::resolve_staged_file() {
+  local filename="${1:?filename required}"
+  local stage_dir="${2:-${AUTOSYNC_STAGE_DIR:-}}"
+  if [[ -n "${LOOPWRIGHT_STAGED_DIR:-}" && -f "${LOOPWRIGHT_STAGED_DIR}/${filename}" ]]; then
+    printf '%s\n' "${LOOPWRIGHT_STAGED_DIR}/${filename}"
+    return 0
+  fi
+  if [[ -n "${stage_dir}" && -f "${stage_dir}/${filename}" ]]; then
+    printf '%s\n' "${stage_dir}/${filename}"
+    return 0
+  fi
+  return 0
+}
+
+# autosync::is_check_only_unchanged <baseline_dir> <candidate_dir> <rel_path>...
+# Returns 0 when running under LOOPWRIGHT_BASE_DIR and every listed relative file/dir
+# in <candidate_dir> is byte-identical to <baseline_dir>.
+autosync::is_check_only_unchanged() {
+  local base_dir="${1:-}"
+  local cand_dir="${2:-}"
+  shift 2 || return 1
+  (( $# > 0 )) || return 1
+  [[ -n "${LOOPWRIGHT_BASE_DIR:-}" && "${AUTOSYNC_VERIFY_UNCHANGED:-false}" != "true" ]] || return 1
+  [[ -n "${base_dir}" && -d "${base_dir}" && -n "${cand_dir}" && -d "${cand_dir}" ]] || return 1
+
+  local rel bp cp
+  for rel in "$@"; do
+    bp="${base_dir}/${rel}"
+    cp="${cand_dir}/${rel}"
+    if [[ ! -e "${bp}" && ! -e "${cp}" ]]; then
+      continue
+    fi
+    if [[ -f "${bp}" && -f "${cp}" ]]; then
+      cmp -s "${bp}" "${cp}" || return 1
+    elif [[ -d "${bp}" && -d "${cp}" ]]; then
+      diff -rq -- "${bp}" "${cp}" >/dev/null 2>&1 || return 1
+    else
+      return 1
+    fi
+  done
+  return 0
+}
+
+# autosync::write_check_out <passed_bool> <summary>
+# Writes structured command.v1 output JSON to LOOPWRIGHT_CHECK_OUT when set.
+autosync::write_check_out() {
+  local passed="${1:?passed boolean required}"
+  local summary="${2:?summary required}"
+  [[ -n "${LOOPWRIGHT_CHECK_OUT:-}" ]] || return 0
+  python3 - "${LOOPWRIGHT_CHECK_OUT}" "${passed}" "${summary}" <<'PY'
+import json
+import os
+import sys
+
+out_path, passed_str, summary = sys.argv[1:4]
+os.makedirs(os.path.dirname(os.path.abspath(out_path)), exist_ok=True)
+with open(out_path, "w", encoding="utf-8") as f:
+    json.dump(
+        {
+            "passed": passed_str == "true",
+            "summary": summary[:1024],
+        },
+        f,
+        indent=2,
+    )
+    f.write("\n")
+PY
 }
 
 # autosync::copy_tree_without_git <src_dir> <dst_dir> [extra_excluded_top...]

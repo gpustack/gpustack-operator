@@ -1,0 +1,21 @@
+{
+  "version": 1,
+  "taskpack": "slicing-sync",
+  "entries": [
+    {
+      "path": ".auto-sync/checks",
+      "kind": "directory",
+      "sha256": "55d17f81dba1355a916652dca613dcadb1851c0e7f4deddb28c4434ebdd9fbf3"
+    },
+    {
+      "path": ".auto-sync/instructions/slicing.md",
+      "kind": "file",
+      "sha256": "67cb696b2448944f932ec073eacd8bdd0c56c748afdbf8d03733aba61dfe5e41"
+    },
+    {
+      "path": ".auto-sync/scripts/preflight-slicing.sh",
+      "kind": "file",
+      "sha256": "e8e905368b2d3acefbb4978b8e5eafb026856a7464f163d5594326254970b34b"
+    }
+  ]
+}

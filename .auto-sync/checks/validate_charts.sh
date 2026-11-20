@@ -9,10 +9,6 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(CDPATH="" cd -P -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
-# Inline bootstrap: Loopwright copies gate.script alone to workDir/gate-script.sh.
-if [[ ! -f "${SCRIPT_DIR}/lib.sh" && -f "${LOOPWRIGHT_CANDIDATE_DIR:-.}/.auto-sync/checks/lib.sh" ]]; then
-  SCRIPT_DIR="$(CDPATH="" cd -P -- "${LOOPWRIGHT_CANDIDATE_DIR:-.}/.auto-sync/checks" && pwd -P)"
-fi
 # shellcheck source=./lib.sh
 # shellcheck disable=SC1091
 source "${SCRIPT_DIR}/lib.sh"
@@ -180,20 +176,26 @@ CAND_CHART_YAML="${AUTOSYNC_CANDIDATE_ROOT}/deploy/gpustack-operator/chart/Chart
 CAND_CHARTS_DIR="${AUTOSYNC_CANDIDATE_ROOT}/deploy/gpustack-operator/chart/charts"
 CAND_PROPOSAL="${AUTOSYNC_CANDIDATE_ROOT}/.auto-sync/proposals/charts.json"
 
+BASELINE_DIR="$(autosync::resolve_baseline_dir "${AUTOSYNC_STAGE_DIR:-}")"
+CHARTS_REPORT_JSON="$(autosync::resolve_staged_file "charts-preflight-report.json" "${AUTOSYNC_STAGE_DIR:-}")"
+MANIFESTS_JSON="$(autosync::resolve_staged_file "image-manifests.json" "${AUTOSYNC_STAGE_DIR:-}")"
+
 # 1. Shared-file diff guards on hack/deps.sh (chart_staging() only) and values.yaml.
-if [[ -n "${AUTOSYNC_STAGE_DIR:-}" ]]; then
-  BASE_DEPS="${AUTOSYNC_STAGE_DIR}/baseline/hack/deps.sh"
+if [[ -n "${BASELINE_DIR}" || -n "${AUTOSYNC_STAGE_DIR:-}" ]]; then
+  if [[ -z "${BASELINE_DIR}" ]]; then
+    printf 'FAIL: baseline directory is missing: %s/baseline\n' "${AUTOSYNC_STAGE_DIR}" >&2
+    exit 1
+  fi
+  BASE_DEPS="${BASELINE_DIR}/hack/deps.sh"
   if [[ ! -f "${BASE_DEPS}" ]]; then
-    printf 'FAIL: AUTOSYNC_STAGE_DIR is set (%s) but baseline hack/deps.sh is missing: %s\n' \
-      "${AUTOSYNC_STAGE_DIR}" "${BASE_DEPS}" >&2
+    printf 'FAIL: baseline hack/deps.sh is missing: %s\n' "${BASE_DEPS}" >&2
     exit 1
   fi
   assert_deps_sh_only_section "${BASE_DEPS}" "${CAND_DEPS}" "charts"
 
-  BASE_VALUES="${AUTOSYNC_STAGE_DIR}/baseline/deploy/gpustack-operator/chart/values.yaml"
+  BASE_VALUES="${BASELINE_DIR}/deploy/gpustack-operator/chart/values.yaml"
   if [[ ! -f "${BASE_VALUES}" ]]; then
-    printf 'FAIL: AUTOSYNC_STAGE_DIR is set (%s) but baseline values.yaml is missing: %s\n' \
-      "${AUTOSYNC_STAGE_DIR}" "${BASE_VALUES}" >&2
+    printf 'FAIL: baseline values.yaml is missing: %s\n' "${BASE_VALUES}" >&2
     exit 1
   fi
   python3 - "${BASE_VALUES}" "${CAND_VALUES}" <<'PY'
@@ -408,7 +410,7 @@ fi
 
 RESTAGE_LIST_FILE="$(mktemp "${TMPDIR:-/tmp}/autosync-charts-restage.XXXXXXXX")"
 _CLEANUP_PATHS+=("${RESTAGE_LIST_FILE}")
-python3 - "${AUTOSYNC_STAGE_DIR:-}" "${CAND_DEPS}" "${GPUSTACK_DEPS_CACHE_DIR:-}" "${AUTOSYNC_VERIFY_RESTAGE:-false}" "${AUTOSYNC_SKIP_RESTAGE_CHECK:-false}" "${RESTAGE_LIST_FILE}" <<'PY'
+python3 - "${BASELINE_DIR}" "${CHARTS_REPORT_JSON}" "${AUTOSYNC_STAGE_DIR:-}" "${CAND_DEPS}" "${GPUSTACK_DEPS_CACHE_DIR:-}" "${AUTOSYNC_VERIFY_RESTAGE:-false}" "${AUTOSYNC_SKIP_RESTAGE_CHECK:-false}" "${RESTAGE_LIST_FILE}" <<'PY'
 import hashlib
 import json
 import os
@@ -416,7 +418,7 @@ import re
 import sys
 import urllib.parse
 
-stage_dir, cand_deps, cache_dir, verify_all, skip_restage, out_path = sys.argv[1:7]
+baseline_dir, report_json_path, stage_dir, cand_deps, cache_dir, verify_all, skip_restage, out_path = sys.argv[1:9]
 
 
 def parse_entries(path: str) -> dict[str, tuple[str, str]]:
@@ -437,39 +439,43 @@ def parse_entries(path: str) -> dict[str, tuple[str, str]]:
 
 cand_entries = parse_entries(cand_deps)
 base_entries = {}
-if stage_dir and os.path.isfile(os.path.join(stage_dir, "baseline", "hack", "deps.sh")):
-    base_entries = parse_entries(os.path.join(stage_dir, "baseline", "hack", "deps.sh"))
+if baseline_dir and os.path.isfile(os.path.join(baseline_dir, "hack", "deps.sh")):
+    base_entries = parse_entries(os.path.join(baseline_dir, "hack", "deps.sh"))
 
 expected_hashes_by_ver: dict[str, dict[str, str]] = {}
+meta_candidates = []
+if report_json_path:
+    meta_candidates.append(report_json_path)
 if stage_dir:
-    for meta_name in ("charts-discovery.json", "charts-preflight-report.json"):
-        meta_path = os.path.join(stage_dir, meta_name)
-        if os.path.isfile(meta_path):
-            with open(meta_path, "r", encoding="utf-8") as f:
-                meta_doc = json.load(f) or {}
-            for cname, cinfo in (meta_doc.get("charts") or {}).items():
-                if not isinstance(cinfo, dict):
-                    continue
-                by_ver: dict[str, str] = {}
-                raw_map = cinfo.get("archiveSha256ByVersion")
-                if isinstance(raw_map, dict):
-                    for k_ver, k_sha in raw_map.items():
-                        k_ver_s = str(k_ver or "").strip()
-                        k_sha_s = str(k_sha or "").strip().lower()
-                        if k_ver_s and k_sha_s:
-                            by_ver[k_ver_s] = k_sha_s
-                if not by_ver:
-                    sha = str(cinfo.get("archiveSha256") or "").strip().lower()
-                    cand_v = str(cinfo.get("candidate_version") or "").strip()
-                    if sha:
-                        if not cand_v:
-                            raise SystemExit(
-                                f"FAIL: staged charts metadata for {cname} has archiveSha256 but no candidate_version and no archiveSha256ByVersion"
-                            )
-                        by_ver[cand_v] = sha
-                if by_ver:
-                    expected_hashes_by_ver[cname] = by_ver
-            break
+    meta_candidates.append(os.path.join(stage_dir, "charts-discovery.json"))
+    meta_candidates.append(os.path.join(stage_dir, "charts-preflight-report.json"))
+for meta_path in meta_candidates:
+    if os.path.isfile(meta_path):
+        with open(meta_path, "r", encoding="utf-8") as f:
+            meta_doc = json.load(f) or {}
+        for cname, cinfo in (meta_doc.get("charts") or {}).items():
+            if not isinstance(cinfo, dict):
+                continue
+            by_ver: dict[str, str] = {}
+            raw_map = cinfo.get("archiveSha256ByVersion")
+            if isinstance(raw_map, dict):
+                for k_ver, k_sha in raw_map.items():
+                    k_ver_s = str(k_ver or "").strip()
+                    k_sha_s = str(k_sha or "").strip().lower()
+                    if k_ver_s and k_sha_s:
+                        by_ver[k_ver_s] = k_sha_s
+            if not by_ver:
+                sha = str(cinfo.get("archiveSha256") or "").strip().lower()
+                cand_v = str(cinfo.get("candidate_version") or "").strip()
+                if sha:
+                    if not cand_v:
+                        raise SystemExit(
+                            f"FAIL: staged charts metadata for {cname} has archiveSha256 but no candidate_version and no archiveSha256ByVersion"
+                        )
+                    by_ver[cand_v] = sha
+            if by_ver:
+                expected_hashes_by_ver[cname] = by_ver
+        break
 
 charts_cache = os.path.join(cache_dir, "charts") if cache_dir else ""
 to_restage = []
@@ -564,24 +570,37 @@ while IFS= read -r img_ref || [[ -n "${img_ref}" ]]; do
   [[ -n "${img_ref}" ]] && SUBCHART_IMAGES+=("${img_ref}")
 done <<<"${extracted_images_raw}"
 
-if [[ -z "${AUTOSYNC_STAGE_DIR:-}" ]]; then
-  if [[ "${AUTOSYNC_SKIP_IMAGE_CHECK:-false}" != "true" ]]; then
-    printf 'FAIL: AUTOSYNC_STAGE_DIR must be set for image publication verification (set AUTOSYNC_SKIP_IMAGE_CHECK=true only for local manual runs)\n' >&2
+if [[ -z "${MANIFESTS_JSON}" ]]; then
+  if [[ -n "${AUTOSYNC_STAGE_DIR:-}" || -n "${LOOPWRIGHT_STAGED_DIR:-}" ]]; then
+    printf 'FAIL: staged image-manifests.json is missing\n' >&2
     exit 1
   fi
+  if [[ "${AUTOSYNC_SKIP_IMAGE_CHECK:-false}" != "true" || "${GITHUB_ACTIONS:-}" == "true" ]]; then
+    printf 'FAIL: image-manifests.json required for image publication verification (AUTOSYNC_SKIP_IMAGE_CHECK=true is permitted only for local manual runs outside CI)\n' >&2
+    exit 1
+  fi
+  printf 'WARN: skipping mirrored-image publication verification (AUTOSYNC_SKIP_IMAGE_CHECK=true)\n' >&2
 else
-  MANIFESTS_JSON="${AUTOSYNC_STAGE_DIR}/image-manifests.json"
-  if [[ ! -f "${MANIFESTS_JSON}" ]]; then
-    printf 'FAIL: AUTOSYNC_STAGE_DIR is set (%s) but image-manifests.json is missing\n' \
-      "${AUTOSYNC_STAGE_DIR}" >&2
-    exit 1
-  fi
   for img_ref in "${SUBCHART_IMAGES[@]+"${SUBCHART_IMAGES[@]}"}"; do
     autosync::assert_image_published "${MANIFESTS_JSON}" "${img_ref}"
   done
 fi
 
 if [[ "${AUTOSYNC_FAST_SELFTEST:-false}" == "true" ]]; then
+  autosync::write_check_out true "validate_charts passed (fast selftest mode)"
+  exit 0
+fi
+
+if autosync::is_check_only_unchanged "${BASELINE_DIR}" "${AUTOSYNC_CANDIDATE_ROOT}" \
+   "hack/deps.sh" \
+   "hack/deploy/gpustack-operator/chart/charts" \
+   "deploy/gpustack-operator/chart" \
+   "pkg/worker/kuberess" \
+   ".auto-sync/proposals/charts.json"; then
+  if [[ -f "${AUTOSYNC_CANDIDATE_ROOT}/hack/check/symbols.sh" ]]; then
+    bash "${AUTOSYNC_CANDIDATE_ROOT}/hack/check/symbols.sh" "${AUTOSYNC_CANDIDATE_ROOT}" >/dev/null
+  fi
+  autosync::write_check_out true "validate_charts passed (check-only no_change)"
   exit 0
 fi
 
@@ -602,3 +621,5 @@ if [[ -n "${drift}" ]]; then
   printf 'FAIL: working tree has unstaged drift after make generate chart:\n%s\n' "${drift}" >&2
   exit 1
 fi
+
+autosync::write_check_out true "validate_charts passed"

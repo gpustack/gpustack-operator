@@ -4,33 +4,22 @@ You are maintaining the offline capacity prior catalog (`pkg/worker/scaling/prio
 and its provenance ledger (`pkg/worker/scaling/priors/records.md`) inside an offline sandbox
 (`networkMode: none`).
 
-## Staged Preflight Artifacts (`.auto-sync/.stage/priors/`)
+## Taskpack 2.0 Preflight Resources
 
-Inside the offline `linux-bwrap` sandbox, host toolchains (`go`, `hugo`, etc.) and external host
-staging directories are NOT mounted. Always inspect `.auto-sync/.stage/priors/` FIRST (falling back
-to `$AUTOSYNC_STAGE_DIR` only if `.auto-sync/.stage/priors/` is absent, e.g. manual local runs):
+Inside the offline `linux-bwrap` sandbox, host toolchains (`go`, `hugo`, etc.) are not mounted;
+preflight resources are mounted natively via Taskpack 2.0:
 
-- `.auto-sync/.stage/priors/priors-preflight-report.json` — normalized summary containing
-  `capture_date`, `inferencex_repo.commit`, `availability` (`url`, `sha256`, `changed`),
-  `queries[]` (`query_id`, `model`, `url`, `rows`, `aggregated`, `disaggregated`, `sha256`,
-  `changed`), `removed_query_ids[]`, `catalog_models_by_mode`, and `catalog_merge` counts.
-- `.auto-sync/.stage/priors/upstream-records.json` — normalized `TaskpackUpstreamRecord` entries.
-
-**Read-only stage rule:** `.auto-sync/.stage/**` is read-only host-staged context outside
-`scope.writable`. **NEVER** edit, move, or delete any file under `.auto-sync/.stage/**` (doing so
-fails `scope-guard`). Loopwright automatically strips `.auto-sync/.stage/**` when running the
-host verification gate (`validate_priors.sh`, which runs `go run ./gen/priors`, `go test`, and
-`make lint docs`) and when publishing the Pull Request.
-
-When qualifying sweeps changed, host preflight already executed `go run ./gen/priors --merge ...`
-and deterministic `go run ./gen/priors` onto `source_revision`, so
-`pkg/worker/scaling/priors/priors.yaml` in your workspace already holds the merged and
-deterministically formatted catalog.
+1. **Prompt summary (`mount: 'prompt'`)**: Read `.loopwright-preflight/priors-preflight-summary.json` first.
+2. **Read-only workspace resources (`mount: 'workspace'`)**: Inspect the `readOnlyPath` entries under `## Preflight Staged Workspace Resources` in your prompt:
+   - `priors-preflight-report.json` — normalized summary containing `capture_date`, `inferencex_repo.commit`, `availability` (`url`, `sha256`, `changed`), `queries[]` (`query_id`, `model`, `url`, `rows`, `aggregated`, `disaggregated`, `sha256`, `changed`), `removed_query_ids[]`, `catalog_models_by_mode`, and `catalog_merge` counts.
+   - `candidate-overlay.tgz` — present when qualifying sweeps changed `priors.yaml` (`has_candidate_overlay: true`, already merged via `go run ./gen/priors --merge ...` and deterministically formatted). Extract into the workspace root before editing `records.md`:
+     ```sh
+     tar -xzf "<readOnlyPath of candidate-overlay.tgz>" -C .
+     ```
 
 ## Required Reconciliation Steps
 
-1. Read `.auto-sync/.stage/priors/priors-preflight-report.json` (and `upstream-records.json`)
-   before editing any file.
+1. Read `.loopwright-preflight/priors-preflight-summary.json` and the `readOnlyPath` of `priors-preflight-report.json` before editing any file, and extract `candidate-overlay.tgz` when present.
    - Leave `pkg/worker/scaling/priors/priors.yaml` untouched unless retiring obsolete shapes.
    - If `digest_refresh_only` is `true`, upstream snapshot SHA-256 digests changed without altering
      `priors.yaml` profiles; you MUST still refresh the SHA-256 digests and capture date in

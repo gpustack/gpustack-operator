@@ -1,0 +1,21 @@
+{
+  "version": 1,
+  "taskpack": "charts-sync",
+  "entries": [
+    {
+      "path": ".auto-sync/checks",
+      "kind": "directory",
+      "sha256": "55d17f81dba1355a916652dca613dcadb1851c0e7f4deddb28c4434ebdd9fbf3"
+    },
+    {
+      "path": ".auto-sync/instructions/charts.md",
+      "kind": "file",
+      "sha256": "55d6a918f8d6871cdf33a97c3e968b68c5167407b8fb9b6c7fc69518d91615f9"
+    },
+    {
+      "path": ".auto-sync/scripts/preflight-charts.sh",
+      "kind": "file",
+      "sha256": "5fcd421e9d5ea8076d79d0c2be2bd0e836676bda870ede77ac021c59977ee131"
+    }
+  ]
+}

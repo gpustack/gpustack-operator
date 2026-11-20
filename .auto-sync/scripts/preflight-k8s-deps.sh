@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# .auto-sync/scripts/preflight-k8s-deps.sh - host-side preflight for k8s-deps-sync.
+# .auto-sync/scripts/preflight-k8s-deps.sh - Taskpack 2.0 preflight for k8s-deps-sync.
 #
 # Discovers same-minor Kubernetes v0.36.x, controller-runtime, kueue, Helm v3.*,
 # and CLI tool releases (skopeo, vals, kustomize, ytt), snapshots baselines, warms
-# .sbin + Go + deps-cache, and stages mod_staging() + make generate onto a
-# detached source_revision when Go module updates occur and patches apply cleanly.
+# .sbin + Go + deps-cache, and stages mod_staging() + make generate into a
+# candidate overlay archive when Go module updates occur and patches apply cleanly.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
@@ -539,7 +539,6 @@ if [[ "${any_discovery_changed}" == "true" || \
   fi
 fi
 
-source_revision="${base_sha}"
 patch_clean="true"
 staging_updated="false"
 generate_ran="false"
@@ -746,7 +745,7 @@ if [[ -n "${AUTOSYNC_K8S_DEPS_FIXTURE_DIR:-}" ]]; then
 fi
 
 can_stage_mods="false"
-if [[ "${mods_changed}" == "true" && "${AUTOSYNC_SKIP_SOURCE_REVISION:-false}" != "true" ]]; then
+if [[ "${mods_changed}" == "true" ]]; then
   if [[ "${has_fixture_dir}" == "false" || "${has_fixture_deps_cache}" == "true" ]]; then
     can_stage_mods="true"
   fi
@@ -846,7 +845,7 @@ report_json="${stage_dir}/k8s-deps-preflight-report.json"
 upstream_records_json="${stage_dir}/upstream-records.json"
 
 python3 - "${discovery_json}" "${report_json}" "${upstream_records_json}" \
-  "${base_sha}" "${source_revision}" "${patch_clean}" "${staging_updated}" "${generate_ran}" \
+  "${base_sha}" "${patch_clean}" "${staging_updated}" "${generate_ran}" \
   "${staging_error}" "${helm_fallback_applied}" "${tgt_helm_tag}" <<'PY'
 import json
 import sys
@@ -856,14 +855,13 @@ import sys
     report_path,
     records_path,
     base_sha,
-    source_revision,
     patch_clean_str,
     staging_updated_str,
     generate_ran_str,
     staging_error,
     helm_fallback_applied,
     effective_helm_tag,
-) = sys.argv[1:12]
+) = sys.argv[1:11]
 
 with open(discovery_path, "r", encoding="utf-8") as f:
     disc = json.load(f)
@@ -887,6 +885,26 @@ if helm_fallback_applied == "true":
             ),
         }
 
+skipped_helm = disc.get("skipped_helm_candidates") or []
+if "helm-cli" not in held_back_upstreams and cur["helm_tag"] == tgt["helm_tag"] and skipped_helm:
+    top_skip = skipped_helm[0]
+    skip_tag = str(top_skip.get("tag") or "").strip()
+    if skip_tag:
+        if top_skip.get("reason") == "incompatible_k8s_minor":
+            skip_reason = (
+                f"held at {cur['helm_tag']} because Helm {skip_tag} requires "
+                f"{top_skip.get('k8s_minor', 'newer k8s.io')} (> repo v{disc['k8s_minor']}.x)"
+            )
+        else:
+            skip_reason = (
+                f"held at {cur['helm_tag']} because Helm {skip_tag} go.mod verification failed "
+                f"({top_skip.get('detail', 'fetch_error')})"
+            )
+        held_back_upstreams["helm-cli"] = {
+            "candidate": skip_tag,
+            "reason": skip_reason,
+        }
+
 patch_clean = patch_clean_str == "true"
 go_mod_uids = {"kubernetes", "controller-runtime", "kueue-sdk", "helm-cli"}
 
@@ -899,26 +917,34 @@ def mk_rec(uid: str, cur_v: str, tgt_v: str, rec_list: list[str], note: str):
             "candidate": tgt_v,
             "reason": reason,
         }
-        # Loopwright's TaskpackUpstreamRecord schema only permits
-        # 'available' | 'up_to_date' | 'failed' | 'blocked', and 'failed' /
-        # 'blocked' causes Loopwright intake to exit 1. Keep 'up_to_date' here
-        # so non-Go-module CLI updates can still proceed, while
-        # held_back_upstreams in k8s-deps-preflight-report.json distinguishes
-        # held-back upstreams from genuinely current pins.
         return {
-            "upstreamId": uid,
-            "status": "up_to_date",
-            "version": cur_v,
+            "id": uid,
+            "status": "held_back",
+            "version": tgt_v,
+            "currentVersion": cur_v,
             "recentVersions": rec_list if rec_list else [cur_v],
             "reason": reason,
         }
-    return {
-        "upstreamId": uid,
+    if not changed and uid in held_back_upstreams:
+        hb = held_back_upstreams[uid]
+        return {
+            "id": uid,
+            "status": "held_back",
+            "version": hb["candidate"],
+            "currentVersion": cur_v,
+            "recentVersions": rec_list if rec_list else [cur_v],
+            "reason": hb["reason"],
+        }
+    out = {
+        "id": uid,
         "status": "available" if changed else "up_to_date",
         "version": tgt_v if changed else cur_v,
         "recentVersions": rec_list if rec_list else [cur_v],
         "reason": note if changed else f"already at latest compatible version {cur_v}",
     }
+    if changed:
+        out["currentVersion"] = cur_v
+    return out
 
 
 records = [
@@ -998,7 +1024,6 @@ if not patch_clean:
 report = {
     "schemaVersion": 1,
     "base_sha": base_sha,
-    "source_revision": source_revision,
     "k8s_minor": disc["k8s_minor"],
     "k8s_release_minor": disc["k8s_release_minor"],
     "helm_major": disc["helm_major"],
@@ -1007,7 +1032,7 @@ report = {
     "generate_ran": generate_ran_str == "true",
     "staging_error": staging_error,
     "held_back_upstreams": held_back_upstreams,
-    "skipped_helm_candidates": disc.get("skipped_helm_candidates", []),
+    "skipped_helm_candidates": skipped_helm,
     "current": cur,
     "target": tgt,
     "recent": recent,
@@ -1026,52 +1051,19 @@ PY
 
 autosync::preflight::apply_force_to_upstream_records "${upstream_records_json}"
 
-if [[ "${AUTOSYNC_SKIP_SOURCE_REVISION:-false}" != "true" ]] && \
-   autosync::preflight::has_available_upstreams "${upstream_records_json}"; then
-  stage_commit_root=""
-  commit_paths=(".auto-sync/.stage/k8s-deps")
-  if [[ "${staged_mods_ready}" == "true" && -n "${work_repo:-}" && -d "${work_repo}" ]]; then
-    stage_commit_root="${work_repo}"
-    commit_paths+=(hack/deps.sh staging go.mod go.sum api pkg)
-  else
-    stage_commit_root="$(mktemp -d "${TMPDIR:-/tmp}/autosync-k8s-deps-bundle.XXXXXXXX")"
-    _PREFLIGHT_TMP_DIRS+=("${stage_commit_root}")
-  fi
-
-  autosync::preflight::populate_stage_bundle "${stage_commit_root}" "k8s-deps" \
-    "${report_json}" \
-    "${upstream_records_json}"
-
-  source_revision="$(
-    autosync::preflight::commit_staged_tree_revision \
-      "${repo_root}" \
-      "${base_sha}" \
-      "chore(deps): stage kubernetes modules, generated outputs, and preflight bundle" \
-      "${stage_commit_root}" \
-      "${commit_paths[@]}"
-  )"
-
-  if [[ "${source_revision}" != "${base_sha}" ]]; then
-    python3 - "${report_json}" "${source_revision}" <<'PY'
-import json
-import sys
-
-p, src_rev = sys.argv[1:3]
-with open(p, "r", encoding="utf-8") as f:
-    rep = json.load(f)
-rep["source_revision"] = src_rev
-with open(p, "w", encoding="utf-8") as f:
-    json.dump(rep, f, indent=2)
-    f.write("\n")
-PY
-  fi
-fi
-
 rm -f "${discovery_json}"
 
-compact_records="$(python3 -c 'import json,sys; print(json.dumps(json.load(open(sys.argv[1])), separators=(",",":")))' "${upstream_records_json}")"
-autosync::preflight::write_github_output "stage_dir" "${stage_dir}"
-autosync::preflight::write_github_output "upstream_records" "${compact_records}"
-autosync::preflight::write_github_output "source_revision" "${source_revision}"
+emit_args=()
+if [[ "${staged_mods_ready}" == "true" && -n "${work_repo:-}" && -d "${work_repo}" ]]; then
+  emit_args+=(
+    --candidate-tree "${work_repo}"
+    --candidate-paths "hack/deps.sh,hack/staging,staging,go.mod,go.sum,api,pkg"
+  )
+fi
 
-printf 'OK: preflight-k8s-deps staged at %s (source_revision=%s)\n' "${stage_dir}" "${source_revision}"
+autosync::preflight::emit_taskpack_v2 \
+  "k8s-deps" "${repo_root}" "${base_sha}" "${stage_dir}" \
+  "${upstream_records_json}" "${report_json}" \
+  "${emit_args[@]+"${emit_args[@]}"}"
+
+printf 'OK: preflight-k8s-deps staged at %s\n' "${stage_dir}"

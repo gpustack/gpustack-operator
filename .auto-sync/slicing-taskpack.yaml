@@ -4,21 +4,49 @@ metadata:
   name: slicing-sync
 spec:
   goal:
-    candidate: Update LIB_HAMI_CORE_COMMIT and LIB_UBS_VIRT_ENPU_COMMIT in pack/gpustack-operator/Dockerfile, rebase Ascend vcann-rt patches if needed, and pass xbuild ELF verification.
-    noChange: Confirm HAMi-core and ubs-virt commits match pack/gpustack-operator/Dockerfile and settle as no_change.
+    candidate: >-
+      Synchronize accelerator logical-slicing preload library commits in pack/gpustack-operator/Dockerfile
+      (LIB_HAMI_CORE_COMMIT and LIB_UBS_VIRT_ENPU_COMMIT), rebase the byte-exact CRLF Ascend vcann-rt
+      patch when ubs-virt changes using preflight-staged resources, update .auto-sync/proposals/slicing.json,
+      and pass the isolated Docker builder stage verification gate.
+    noChange: >-
+      Confirm LIB_HAMI_CORE_COMMIT, LIB_UBS_VIRT_ENPU_COMMIT, and .auto-sync/proposals/slicing.json
+      already match eligible upstream commits on watched paths with zero repository modifications.
+  execution:
+    mode: strict
+    capabilities:
+      allowHostPath: true
+      allowCheckNetwork: true
+    digests:
+      pinDigests: true
+      lockfile: .auto-sync/digests/slicing.lock.json
+  preflight:
+    script: .auto-sync/scripts/preflight-slicing.sh
+    timeoutSeconds: 600
+    env:
+      - AUTOSYNC_STAGE_DIR
+      - AUTOSYNC_FORCE
+      - COMMENT_COMMAND
+      - AUTOSYNC_WARM_TOOLS
+      - AUTOSYNC_SKIP_GO_MOD_DOWNLOAD
+      - AUTOSYNC_SKIP_LFS_FETCH
+      - AUTOSYNC_SLICING_HAMI_REPO_URL
+      - AUTOSYNC_SLICING_UBS_REPO_URL
+      - GITHUB_EVENT_NAME
+      - GITHUB_STEP_SUMMARY
   scope:
     writable:
       - pack/gpustack-operator/Dockerfile
-      - pack/gpustack-operator/external/nvidia
-      - pack/gpustack-operator/external/ascend
+      - pack/gpustack-operator/external/nvidia/**
+      - pack/gpustack-operator/external/ascend/**
       - .auto-sync/proposals/slicing.json
     protected:
-      - pack/gpustack-operator/external/amd
-      - pack/gpustack-operator/external/thead
-      - csrc
-      - binding
-      - gen/binding
-      - pkg/devicemanager/allocator
+      - pack/gpustack-operator/external/amd/**
+      - pack/gpustack-operator/external/thead/**
+      - csrc/**
+      - binding/**
+      - gen/binding/**
+      - pkg/devicemanager/allocator/**
   instructions:
     - .auto-sync/instructions/slicing.md
   upstreams:
@@ -56,8 +84,16 @@ spec:
           script: .auto-sync/checks/validate_slicing.sh
           timeoutSeconds: 2400
           allowReadOnlyGitHubToken: false
+          toolchainPaths:
+            - /usr/local/bin
+            - /usr/bin
           env:
             - AUTOSYNC_STAGE_DIR
+            - AUTOSYNC_FAST_SELFTEST
+            - AUTOSYNC_SLICING_FORCE_XBUILD
+            - AUTOSYNC_XBUILD_RUNNER
+            - AUTOSYNC_ALLOW_MISSING_STAGE_DIR
+            - GITHUB_ACTIONS
     externalGates: []
   publication:
     mode: pull_request
@@ -90,3 +126,10 @@ spec:
   limits:
     wallTimeSeconds: 3600
     commandTimeoutSeconds: 2400
+    overlay:
+      maxFiles: 256
+      maxBytes: 16777216
+  output:
+    formats:
+      - json
+      - github-step-summary

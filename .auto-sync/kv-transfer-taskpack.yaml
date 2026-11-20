@@ -4,13 +4,49 @@ metadata:
   name: kv-transfer-sync
 spec:
   goal:
-    candidate: Synchronize Mooncake, NIXL, UCX, HIXL, and ModelExpress recipes with upstream and gpustack/runner, or promote published image tags verified by crane manifest.
-    noChange: Confirm KV-cache and model-transfer recipes and published image tags are aligned and settle as no_change.
+    candidate: >-
+      Synchronize KV-cache and remote-weight transfer container recipes (Mooncake, NIXL, UCX, HIXL,
+      ModelExpress) in Stage A and promote published multi-arch gpustack/* image tags in Stage B
+      using preflight-staged resources, update .auto-sync/proposals/kv-transfer.json, and pass all
+      verification gates.
+    noChange: >-
+      Confirm all KV-cache and model-transfer upstream recipes and published image tags are already
+      aligned with eligible upstream releases with zero repository modifications.
+  execution:
+    mode: strict
+    capabilities:
+      allowHostPath: true
+      allowCheckNetwork: true
+    digests:
+      pinDigests: true
+      lockfile: .auto-sync/digests/kv-transfer.lock.json
+  preflight:
+    script: .auto-sync/scripts/preflight-kv-transfer.sh
+    timeoutSeconds: 900
+    env:
+      - AUTOSYNC_STAGE_DIR
+      - AUTOSYNC_FORCE
+      - COMMENT_COMMAND
+      - AUTOSYNC_WARM_TOOLS
+      - AUTOSYNC_SKIP_GO_MOD_DOWNLOAD
+      - AUTOSYNC_SKIP_LFS_FETCH
+      - AUTOSYNC_SKIP_GENERATE_CHART
+      - AUTOSYNC_TARGET_TAG
+      - AUTOSYNC_MODELEXPRESS_TARGET_TAG
+      - AUTOSYNC_MODEL_TRANSFER_TARGET_TAG
+      - AUTOSYNC_KV_FIXTURE_DIR
+      - AUTOSYNC_MOCK_MANIFESTS_JSON
+      - AUTOSYNC_CRANE_BIN
+      - AUTOSYNC_KV_NIXL_REPO_URL
+      - AUTOSYNC_KV_MODELEXPRESS_REPO_URL
+      - AUTOSYNC_ALLOW_UNSHALLOW
+      - GITHUB_EVENT_NAME
+      - GITHUB_STEP_SUMMARY
   scope:
     writable:
-      - pack/mirrored-mooncake
-      - pack/model-transfer
-      - pack/mirrored-modelexpress-server
+      - pack/mirrored-mooncake/**
+      - pack/model-transfer/**
+      - pack/mirrored-modelexpress-server/**
       - pkg/worker/settings/value.go
       - pkg/worker/settings/value_test.go
       - pkg/worker/controllers/worker/model_deployment_transfer_test.go
@@ -22,9 +58,9 @@ spec:
       - deploy/gpustack-operator/chart/README.md
       - .auto-sync/proposals/kv-transfer.json
     protected:
-      - model-transfer/python
-      - pkg/modeltransfer
-      - pkg/worker/kvcache
+      - model-transfer/python/**
+      - pkg/modeltransfer/**
+      - pkg/worker/kvcache/**
   instructions:
     - .auto-sync/instructions/kv-transfer.md
   upstreams:
@@ -37,6 +73,9 @@ spec:
       kind: http-json
       source: https://pypi.org/pypi/nixl/json
       watchedPaths: []
+      allowPrerelease: false
+      versionPath: info.version
+      monotonicSemver: true
     - id: nixl-rocm
       kind: github-release
       source: ai-dynamo/nixl
@@ -88,8 +127,14 @@ spec:
           script: .auto-sync/checks/validate_kv_transfer.sh
           timeoutSeconds: 1800
           allowReadOnlyGitHubToken: false
+          toolchainPaths:
+            - /usr/local/bin
+            - /usr/bin
           env:
             - AUTOSYNC_STAGE_DIR
+            - AUTOSYNC_FAST_SELFTEST
+            - AUTOSYNC_DOCKER_BUILD_CMD
+            - GITHUB_ACTIONS
     externalGates: []
   publication:
     mode: pull_request
@@ -122,3 +167,10 @@ spec:
   limits:
     wallTimeSeconds: 3600
     commandTimeoutSeconds: 1800
+    overlay:
+      maxFiles: 256
+      maxBytes: 16777216
+  output:
+    formats:
+      - json
+      - github-step-summary

@@ -3,10 +3,6 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(CDPATH="" cd -P -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
-# Inline bootstrap: Loopwright copies gate.script alone to workDir/gate-script.sh.
-if [[ ! -f "${SCRIPT_DIR}/lib.sh" && -f "${LOOPWRIGHT_CANDIDATE_DIR:-.}/.auto-sync/checks/lib.sh" ]]; then
-  SCRIPT_DIR="$(CDPATH="" cd -P -- "${LOOPWRIGHT_CANDIDATE_DIR:-.}/.auto-sync/checks" && pwd -P)"
-fi
 # shellcheck source=./lib.sh
 # shellcheck disable=SC1091
 source "${SCRIPT_DIR}/lib.sh"
@@ -28,12 +24,11 @@ trap cleanup_on_exit EXIT
 autosync::ensure_ephemeral_git "${AUTOSYNC_CANDIDATE_ROOT}"
 
 STAGE_DIR="${AUTOSYNC_STAGE_DIR:-}"
-if [[ -z "${STAGE_DIR}" || ! -d "${STAGE_DIR}/baseline" ]]; then
-  printf 'FAIL: AUTOSYNC_STAGE_DIR must point to a preflight stage directory with baseline/\n' >&2
+BASELINE_DIR="$(autosync::resolve_baseline_dir "${STAGE_DIR}")"
+if [[ -z "${BASELINE_DIR}" || ! -d "${BASELINE_DIR}" ]]; then
+  printf 'FAIL: LOOPWRIGHT_BASE_DIR or AUTOSYNC_STAGE_DIR/baseline must point to baseline directory\n' >&2
   exit 1
 fi
-
-BASELINE_DIR="${STAGE_DIR}/baseline"
 
 # 1. Shared-file variable-level diff guards.
 ROUTER_SETTING_KEYS='model-deployment-router-image|model-deployment-router-proxy-image|model-deployment-routing-sidecar-image'
@@ -88,9 +83,9 @@ BASE_SGLANG_VER="$(extract_df_arg "${BASE_DOCKERFILE}" "SGLANG_GATEWAY_VERSION")
 # 3. Validate 0001-epd-routing.patch and 0004-discovery-readiness-and-deselect-removal.patch retirement invariants when router-preflight-report.json exists.
 EPD_PATCH="${AUTOSYNC_CANDIDATE_ROOT}/pack/llm-router/patches/vllm-router/0001-epd-routing.patch"
 DISCOVERY_PATCH="${AUTOSYNC_CANDIDATE_ROOT}/pack/llm-router/patches/vllm-router/0004-discovery-readiness-and-deselect-removal.patch"
-PREFLIGHT_REPORT="${STAGE_DIR}/router-preflight-report.json"
-if [[ ! -f "${PREFLIGHT_REPORT}" ]]; then
-  printf 'FAIL: missing preflight report: %s\n' "${PREFLIGHT_REPORT}" >&2
+PREFLIGHT_REPORT="$(autosync::resolve_staged_file "router-preflight-report.json" "${STAGE_DIR}")"
+if [[ -z "${PREFLIGHT_REPORT}" || ! -f "${PREFLIGHT_REPORT}" ]]; then
+  printf 'FAIL: missing preflight report (router-preflight-report.json)\n' >&2
   exit 1
 fi
 if ! RETIRE_INFO="$(python3 - "${PREFLIGHT_REPORT}" <<'PY'
@@ -382,7 +377,7 @@ if [[ -n "${CHANGED_STAGES}" ]]; then
 fi
 
 # 6. Two-Stage Image Publication Gate and value.go <-> settings.md alignment.
-MANIFESTS_JSON="${STAGE_DIR}/image-manifests.json"
+MANIFESTS_JSON="$(autosync::resolve_staged_file "image-manifests.json" "${STAGE_DIR}")"
 IMAGE_META_FILE="$(mktemp "${TMPDIR:-/tmp}/autosync-router-images.XXXXXXXX")"
 _CLEANUP_DIRS+=("${IMAGE_META_FILE}")
 
@@ -570,4 +565,5 @@ if [[ "${PROMOTED_FILES_CHANGED}" == "true" && "${AUTOSYNC_FAST_SELFTEST:-false}
   git -C "${AUTOSYNC_CANDIDATE_ROOT}" diff --exit-code
 fi
 
+autosync::write_check_out true "validate_router passed (images_changed=${IMAGES_CHANGED})"
 printf 'OK: validate_router passed (images_changed=%s)\n' "${IMAGES_CHANGED}"

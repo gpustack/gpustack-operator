@@ -4,11 +4,50 @@ metadata:
   name: router-sync
 spec:
   goal:
-    candidate: Update LLMD_ROUTER_VERSION, VLLM_ROUTER_VERSION, and SGLANG_GATEWAY_VERSION in pack/llm-router/Dockerfile, rebase or retire router patches under pack/llm-router/patches, and pass builder compilation gates.
-    noChange: Confirm llm-d-router, vllm-router, and sgl-model-gateway tags and published router images are up to date and settle as no_change.
+    candidate: >-
+      Synchronize disaggregated inference router recipes and patches (llm-d-router, vllm-router,
+      sgl-model-gateway) in pack/llm-router/ for Stage A, or promote a published multi-arch
+      gpustack/llm-router image tag across settings, tests, and docs for Stage B using
+      preflight-staged resources, update .auto-sync/proposals/router.json, and pass all verification
+      gates.
+    noChange: >-
+      Confirm llm-d-router, vllm-router, sgl-model-gateway, and the default gpustack/llm-router
+      image tag are already aligned with eligible upstream releases with zero repository modifications.
+  execution:
+    mode: strict
+    capabilities:
+      allowHostPath: true
+      allowCheckNetwork: true
+    digests:
+      pinDigests: true
+      lockfile: .auto-sync/digests/router.lock.json
+  preflight:
+    script: .auto-sync/scripts/preflight-router.sh
+    timeoutSeconds: 900
+    env:
+      - AUTOSYNC_STAGE_DIR
+      - AUTOSYNC_FORCE
+      - COMMENT_COMMAND
+      - AUTOSYNC_WARM_TOOLS
+      - AUTOSYNC_SKIP_GO_MOD_DOWNLOAD
+      - AUTOSYNC_SKIP_LFS_FETCH
+      - AUTOSYNC_SKIP_GO_TEST
+      - AUTOSYNC_TARGET_TAG
+      - AUTOSYNC_ROUTER_TARGET_TAG
+      - AUTOSYNC_ROUTER_PROXY_TARGET_TAG
+      - AUTOSYNC_ROUTER_SIDECAR_TARGET_TAG
+      - AUTOSYNC_ROUTER_FIXTURE_DIR
+      - AUTOSYNC_MOCK_MANIFESTS_JSON
+      - AUTOSYNC_CRANE_BIN
+      - AUTOSYNC_ROUTER_LLMD_REPO_URL
+      - AUTOSYNC_ROUTER_VLLM_REPO_URL
+      - AUTOSYNC_ROUTER_SGLANG_REPO_URL
+      - AUTOSYNC_ROUTER_EPD_COMMIT
+      - GITHUB_EVENT_NAME
+      - GITHUB_STEP_SUMMARY
   scope:
     writable:
-      - pack/llm-router
+      - pack/llm-router/**
       - pkg/worker/settings/value.go
       - pkg/worker/settings/value_test.go
       - pkg/worker/controllers/worker/model_deployment_router_test.go
@@ -17,7 +56,7 @@ spec:
       - docs/modules/model-deployment/routing.md
       - .auto-sync/proposals/router.json
     protected:
-      - pkg/worker/webhooks
+      - pkg/worker/webhooks/**
   instructions:
     - .auto-sync/instructions/router.md
   upstreams:
@@ -58,8 +97,15 @@ spec:
           script: .auto-sync/checks/validate_router.sh
           timeoutSeconds: 2400
           allowReadOnlyGitHubToken: false
+          toolchainPaths:
+            - /usr/local/bin
+            - /usr/bin
           env:
             - AUTOSYNC_STAGE_DIR
+            - AUTOSYNC_FAST_SELFTEST
+            - AUTOSYNC_ROUTER_BUILD_RUNNER
+            - AUTOSYNC_ALLOW_MISSING_STAGED_REPO
+            - GITHUB_ACTIONS
     externalGates: []
   publication:
     mode: pull_request
@@ -92,3 +138,10 @@ spec:
   limits:
     wallTimeSeconds: 3600
     commandTimeoutSeconds: 2400
+    overlay:
+      maxFiles: 256
+      maxBytes: 16777216
+  output:
+    formats:
+      - json
+      - github-step-summary

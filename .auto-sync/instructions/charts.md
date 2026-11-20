@@ -2,27 +2,22 @@
 
 You maintain the 5 vendored Helm subcharts under `deploy/gpustack-operator/chart/charts/`, their staging definitions in `hack/deps.sh` (`chart_staging()`), their 16 patch files under `hack/deploy/gpustack-operator/chart/charts/`, the parent chart's `Chart.yaml` and `values.yaml` (plus generated `values.schema.json` and `README.md`), and any alignment in `pkg/worker/kuberess/`.
 
-## Staged Preflight Artifacts (`.auto-sync/.stage/charts/`)
+## Taskpack 2.0 Preflight Resources
 
 Inside the offline `linux-bwrap` sandbox, host toolchains (`helm`, `helm-docs`, `helm-schema`, `go`,
-`hugo`, `docker`) and external host staging directories are NOT mounted. Always inspect
-`.auto-sync/.stage/charts/` FIRST (falling back to `$AUTOSYNC_STAGE_DIR` only if
-`.auto-sync/.stage/charts/` is absent):
+`hugo`, `docker`) are not mounted; preflight resources are mounted natively via Taskpack 2.0:
 
-- `.auto-sync/.stage/charts/charts-preflight-report.json`
-- `.auto-sync/.stage/charts/upstream-records.json`
-- `.auto-sync/.stage/charts/image-manifests.json`
-
-**Read-only stage rule:** `.auto-sync/.stage/**` is read-only host-staged context outside
-`scope.writable`. **NEVER** edit, move, or delete any file under `.auto-sync/.stage/**` (doing so
-fails `scope-guard`). Loopwright automatically strips `.auto-sync/.stage/**` when running
-`validate_charts.sh` (including `make generate chart`, `make lint chart`, and `go test`) on the
-host and when publishing the Pull Request.
-
-When ready subchart updates exist, host preflight has already staged `hack/deps.sh`,
-`deploy/gpustack-operator/chart/Chart.yaml`, `deploy/gpustack-operator/chart/values.yaml`
-(ready subchart mirrored image tags and header version comments), unpacked subchart patches,
-and regenerated `values.schema.json` / `README.md` onto `source_revision`.
+1. **Prompt summary (`mount: 'prompt'`)**: Read `.loopwright-preflight/charts-preflight-summary.json` first.
+2. **Read-only workspace resources (`mount: 'workspace'`)**: Inspect the `readOnlyPath` entries under `## Preflight Staged Workspace Resources` in your prompt:
+   - `charts-preflight-report.json` — per-subchart candidate versions, `mirrored_image_ready`, `patch_clean`, and `sync_image_command`.
+   - `image-manifests.json` — verified multi-arch (`amd64Digest` / `arm64Digest`) probe report.
+   - `candidate-overlay.tgz` (and optional `candidate-deleted-files.txt`) — present when ready subchart updates exist (`has_candidate_overlay: true`). Apply the pre-staged `hack/deps.sh`, `Chart.yaml`, `values.yaml`, unpacked subchart patches, and regenerated `values.schema.json` / `README.md` into your workspace root first:
+     ```sh
+     tar -xzf "<readOnlyPath of candidate-overlay.tgz>" -C .
+     # If candidate-deleted-files.txt is also listed under workspace resources:
+     xargs -r rm -f < "<readOnlyPath of candidate-deleted-files.txt>"
+     ```
+   - Never leave archive extraction scratch directories inside the repository root; use `/tmp` for any temporary inspection.
 
 ## 1. Vendored Subcharts, Patches, and Mirrored Images
 
@@ -41,12 +36,12 @@ and regenerated `values.schema.json` / `README.md` onto `source_revision`.
 
 ## 2. Strict Mirrored-Image Readiness Gate
 
-NEVER bump a subchart whose `mirrored_image_ready` is `false` in `.auto-sync/.stage/charts/charts-preflight-report.json` (falling back to `$AUTOSYNC_STAGE_DIR/charts-preflight-report.json` only if `.auto-sync/.stage/charts/` is absent):
+NEVER bump a subchart whose `mirrored_image_ready` is `false` in `charts-preflight-report.json`:
 
 - If a subchart has `mirrored_image_ready: false`, leave that subchart's URL/version in `hack/deps.sh`, `deploy/gpustack-operator/chart/`, and `versions` unchanged.
-- Record the exact `gh workflow run sync-image.yml -f images="..."` command from `.auto-sync/.stage/charts/charts-preflight-report.json` in the `summary` field of `.auto-sync/proposals/charts.json`.
-- If zero subcharts have updates with `mirrored_image_ready: true` (for example, when all upstreams are already up to date or a manual `force=true` dispatch runs while candidates await image mirroring), settle strictly as `no_change` (never `blocked`), with any exact `gh workflow run sync-image.yml -f images=...` command from `.auto-sync/.stage/charts/charts-preflight-report.json` recorded in the proposal summary if applicable.
-- Only update subcharts whose `mirrored_image_ready` is `true` and whose multi-arch digests (`amd64Digest` and `arm64Digest`) are verified in `.auto-sync/.stage/charts/image-manifests.json`.
+- Record the exact `gh workflow run sync-image.yml -f images="..."` command from `charts-preflight-report.json` in the `summary` field of `.auto-sync/proposals/charts.json`.
+- If zero subcharts have updates with `mirrored_image_ready: true` (for example, when all upstreams are already up to date or a manual `force=true` dispatch runs while candidates await image mirroring), settle strictly as `no_change` (never `blocked`), with any exact `gh workflow run sync-image.yml -f images=...` command from `charts-preflight-report.json` recorded in the proposal summary if applicable.
+- Only update subcharts whose `mirrored_image_ready` is `true` and whose multi-arch digests (`amd64Digest` and `arm64Digest`) are verified in `image-manifests.json`.
 
 ## 3. Patch-First Staging and Chart Regeneration Rules
 
