@@ -34,7 +34,7 @@ flowchart TD
 ### Instance configuration
 
 This minimal example requests one accelerator and exposes a service port. For the
-`InstanceSSHPublicKey` manifest and SSH login commands, see [Usage](https://github.com/gpustack/gpustack-operator/blob/2975d1e148d2b9a21ea8f2d8698c1a24ff3a9478/README.md#usage).
+`InstanceSSHPublicKey` manifest and SSH login commands, see [Usage](https://github.com/gpustack/gpustack-operator/blob/bbcecc593200616573b6cbcaeceed056f5e21b8c/README.md#usage).
 
 ```yaml
 apiVersion: worker.gpustack.ai/v1
@@ -156,4 +156,4 @@ For Kueue `Workload` inspection, capacity checks and admission fixes, see the
 **See also** — [Heterogeneous Devices](/gpustack-operator/main/docs/modules/devices/index.md) (resource families) ·
 [Model Delivery](/gpustack-operator/main/docs/modules/model-delivery/index.md) (mounting model weights)
 
-**Next** → [Usage](https://github.com/gpustack/gpustack-operator/blob/2975d1e148d2b9a21ea8f2d8698c1a24ff3a9478/README.md#usage) — launch a sliced `Instance`.
+**Next** → [Usage](https://github.com/gpustack/gpustack-operator/blob/bbcecc593200616573b6cbcaeceed056f5e21b8c/README.md#usage) — launch a sliced `Instance`.
