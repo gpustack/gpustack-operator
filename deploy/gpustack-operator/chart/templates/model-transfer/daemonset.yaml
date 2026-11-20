@@ -40,6 +40,38 @@
 {{- if hasKey $root.Values.modelTransfer.images $manufacturer }}
 {{- $image := include "gpustack-operator.imageRef" (dict "root" $root "ref" (index $root.Values.modelTransfer.images $manufacturer)) }}
 {{- $identity := index $root.Values.global.manufacturers $manufacturer }}
+{{- $mtEnv := $root.Values.modelTransfer.env | default dict }}
+{{- $ascendCfg := $root.Values.modelTransfer.ascend | default dict }}
+{{- $ascendHostRoCECfg := $ascendCfg.hostRoCE | default dict }}
+{{- $ascendHostRoCE := and (eq $manufacturer "ascend") (eq ($ascendHostRoCECfg.enabled | default false) true) }}
+{{- $defaultAscendGlobalResourceConfig := `{"comm_resource_config.protocol_desc":["roce:host"],"local_comm_res_path":"/etc/hixlep"}` }}
+{{- $hasAscendGlobalResCfg := hasKey $mtEnv "ASCEND_GLOBAL_RESOURCE_CONFIG" }}
+{{- $workerDNSPolicy := "" }}
+{{- $workerHixlep := dict }}
+{{- if $ascendHostRoCE }}
+{{-   $workerDNSPolicy = "ClusterFirstWithHostNet" }}
+{{-   $workerHixlep = dict "name" "ascend-hixlep" "path" "/etc/hixlep" "type" "Directory" "readOnly" true }}
+{{- end }}
+{{- $workerEnvHash := deepCopy $mtEnv }}
+{{- $_ := "" }}
+{{- if eq $manufacturer "amd" }}
+{{-   $_ = set $workerEnvHash "AMD_VISIBLE_DEVICES" "all" }}
+{{- else if eq $manufacturer "nvidia" }}
+{{-   $_ = set $workerEnvHash "NVIDIA_VISIBLE_DEVICES" "all" }}
+{{-   $_ = set $workerEnvHash "NVIDIA_DRIVER_CAPABILITIES" "compute,utility" }}
+{{- else if and $ascendHostRoCE (not $hasAscendGlobalResCfg) }}
+{{-   $_ = set $workerEnvHash "ASCEND_GLOBAL_RESOURCE_CONFIG" $defaultAscendGlobalResourceConfig }}
+{{- end }}
+{{- $_ = set $workerEnvHash "GPUSTACK_MODEL_TRANSFER_VENDOR_SCOPE" $manufacturer }}
+{{- $_ = set $workerEnvHash "GPUSTACK_MODEL_TRANSFER_SOURCE_MAX_MEMORY_BYTES" (toString $maxMemoryBytes) }}
+{{- $_ = set $workerEnvHash "GPUSTACK_MODEL_TRANSFER_SOURCE_MIN_MEMORY_BYTES" (toString $minMemoryBytes) }}
+{{- $configHash := dict
+      "image" $image
+      "hostNetwork" $ascendHostRoCE
+      "dnsPolicy" $workerDNSPolicy
+      "env" $workerEnvHash
+      "hixlep" $workerHixlep
+    | toJson | sha256sum }}
 ---
 apiVersion: apps/v1
 kind: DaemonSet
@@ -67,7 +99,13 @@ spec:
       labels:
         {{- include "gpustack-operator.modelTransfer.labels" $root | nindent 8 }}
         gpustack.ai/manufacturer: {{ $manufacturer }}
+      annotations:
+        model-transfer.gpustack.ai/config-hash: {{ $configHash | quote }}
     spec:
+      {{- if $ascendHostRoCE }}
+      hostNetwork: true
+      dnsPolicy: ClusterFirstWithHostNet
+      {{- end }}
       {{- with $root.Values.global.imagePullSecrets }}
       imagePullSecrets:
         {{- range . }}
@@ -238,7 +276,7 @@ spec:
             {{- toYaml $workerResources | nindent 12 }}
           {{- end }}
           env:
-            {{- range $key, $value := $root.Values.modelTransfer.env }}
+            {{- range $key, $value := $mtEnv }}
             - name: {{ $key }}
               value: {{ $value | quote }}
             {{- end }}
@@ -250,6 +288,9 @@ spec:
               value: "all"
             - name: NVIDIA_DRIVER_CAPABILITIES
               value: "compute,utility"
+            {{- else if and $ascendHostRoCE (not $hasAscendGlobalResCfg) }}
+            - name: ASCEND_GLOBAL_RESOURCE_CONFIG
+              value: '{{ $defaultAscendGlobalResourceConfig }}'
             {{- end }}
             - name: KUBERNETES_POD_UID
               valueFrom:
@@ -311,6 +352,11 @@ spec:
             - name: ascend-dcmi
               mountPath: /usr/local/dcmi
               readOnly: true
+            {{- if $ascendHostRoCE }}
+            - name: ascend-hixlep
+              mountPath: /etc/hixlep
+              readOnly: true
+            {{- end }}
             {{- end }}
       volumes:
         - name: gpustack-lib-dir
@@ -352,6 +398,12 @@ spec:
           hostPath:
             path: /usr/local/dcmi
             type: DirectoryOrCreate
+        {{- if $ascendHostRoCE }}
+        - name: ascend-hixlep
+          hostPath:
+            path: /etc/hixlep
+            type: Directory
+        {{- end }}
         {{- end }}
 {{- end }}
 {{- end }}

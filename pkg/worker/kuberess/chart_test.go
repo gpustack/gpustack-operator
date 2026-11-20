@@ -960,3 +960,237 @@ func TestChartDeviceManagerMountsHostRootReadOnly(t *testing.T) {
 		})
 	}
 }
+
+// TestChartModelTransferAscendHostRoCE verifies opt-in Host RoCE wiring on the Ascend
+// model-transfer source DaemonSet, vendor isolation for AMD and NVIDIA, env override handling
+// without duplicate keys, and deterministic config-hash updates across toggles.
+func TestChartModelTransferAscendHostRoCE(t *testing.T) {
+	const (
+		configHashAnnotation = "model-transfer.gpustack.ai/config-hash"
+		ascendGlobalResEnv   = "ASCEND_GLOBAL_RESOURCE_CONFIG"
+		ascendLocalResEnv    = "ASCEND_LOCAL_COMM_RES"
+		defaultGlobalResCfg  = `{"comm_resource_config.protocol_desc":["roce:host"],"local_comm_res_path":"/etc/hixlep"}`
+		customGlobalResCfg   = `{"comm_resource_config.protocol_desc":["roce:host"],"local_comm_res_path":"/etc/hixlep/custom.json"}`
+	)
+
+	type envVarSpec struct {
+		Name  string `yaml:"name"`
+		Value string `yaml:"value"`
+	}
+	type volumeMountSpec struct {
+		Name      string `yaml:"name"`
+		MountPath string `yaml:"mountPath"`
+		ReadOnly  *bool  `yaml:"readOnly"`
+	}
+	type containerSpec struct {
+		Name         string            `yaml:"name"`
+		Env          []envVarSpec      `yaml:"env"`
+		VolumeMounts []volumeMountSpec `yaml:"volumeMounts"`
+	}
+	type mtDaemonSet struct {
+		Spec struct {
+			Template struct {
+				Metadata struct {
+					Annotations map[string]string `yaml:"annotations"`
+				} `yaml:"metadata"`
+				Spec struct {
+					HostNetwork    bool            `yaml:"hostNetwork"`
+					DNSPolicy      string          `yaml:"dnsPolicy"`
+					InitContainers []containerSpec `yaml:"initContainers"`
+					Containers     []containerSpec `yaml:"containers"`
+					Volumes        []struct {
+						Name     string `yaml:"name"`
+						HostPath *struct {
+							Path string `yaml:"path"`
+							Type string `yaml:"type"`
+						} `yaml:"hostPath"`
+					} `yaml:"volumes"`
+				} `yaml:"spec"`
+			} `yaml:"template"`
+		} `yaml:"spec"`
+	}
+
+	parseVendorDS := func(t *testing.T, objects map[string]renderedObject, vendor string) mtDaemonSet {
+		t.Helper()
+		key := "DaemonSet/" + SystemNamespaceName + "/gpustack-operator-model-transfer-" + vendor
+		obj, ok := objects[key]
+		require.True(t, ok, "render carries %s", key)
+		var ds mtDaemonSet
+		require.NoError(t, yaml.Unmarshal([]byte(obj.manifest), &ds))
+		return ds
+	}
+
+	defaultObjects := renderChart(t, nil)
+	defaultHashes := map[string]string{}
+	for _, vendor := range []string{"amd", "ascend", "nvidia"} {
+		ds := parseVendorDS(t, defaultObjects, vendor)
+		hash := ds.Spec.Template.Metadata.Annotations[configHashAnnotation]
+		require.Regexp(t, `^[0-9a-f]{64}$`, hash, "%s has deterministic sha256 config-hash", vendor)
+		defaultHashes[vendor] = hash
+	}
+
+	testCases := []struct {
+		name               string
+		values             map[string]any
+		wantAscendHostRoCE bool
+		wantAscendEnv      *string
+	}{
+		{
+			name:               "default disables ascend hostRoCE",
+			values:             nil,
+			wantAscendHostRoCE: false,
+		},
+		{
+			name: "explicitly disabled matches default",
+			values: map[string]any{
+				"modelTransfer": map[string]any{
+					"ascend": map[string]any{
+						"hostRoCE": map[string]any{"enabled": false},
+					},
+				},
+			},
+			wantAscendHostRoCE: false,
+		},
+		{
+			name: "enabled wires ascend hostRoCE and default env",
+			values: map[string]any{
+				"modelTransfer": map[string]any{
+					"ascend": map[string]any{
+						"hostRoCE": map[string]any{"enabled": true},
+					},
+				},
+			},
+			wantAscendHostRoCE: true,
+			wantAscendEnv:      new(string(defaultGlobalResCfg)),
+		},
+		{
+			name: "enabled respects custom ASCEND_GLOBAL_RESOURCE_CONFIG without duplicates",
+			values: map[string]any{
+				"modelTransfer": map[string]any{
+					"ascend": map[string]any{
+						"hostRoCE": map[string]any{"enabled": true},
+					},
+					"env": map[string]any{
+						ascendGlobalResEnv: customGlobalResCfg,
+					},
+				},
+			},
+			wantAscendHostRoCE: true,
+			wantAscendEnv:      new(string(customGlobalResCfg)),
+		},
+		{
+			name: "enabled respects empty ASCEND_GLOBAL_RESOURCE_CONFIG without duplicates",
+			values: map[string]any{
+				"modelTransfer": map[string]any{
+					"ascend": map[string]any{
+						"hostRoCE": map[string]any{"enabled": true},
+					},
+					"env": map[string]any{
+						ascendGlobalResEnv: "",
+					},
+				},
+			},
+			wantAscendHostRoCE: true,
+			wantAscendEnv:      new(string("")),
+		},
+	}
+
+	var enabledDefaultHash string
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			objects := renderChart(t, tc.values)
+			for _, vendor := range []string{"amd", "ascend", "nvidia"} {
+				ds := parseVendorDS(t, objects, vendor)
+				podSpec := ds.Spec.Template.Spec
+				wantHostRoCE := vendor == "ascend" && tc.wantAscendHostRoCE
+				hash := ds.Spec.Template.Metadata.Annotations[configHashAnnotation]
+				require.Regexp(t, `^[0-9a-f]{64}$`, hash, "%s config-hash", vendor)
+
+				if wantHostRoCE {
+					assert.True(t, podSpec.HostNetwork, "%s sets hostNetwork", vendor)
+					assert.Equal(t, "ClusterFirstWithHostNet", podSpec.DNSPolicy, "%s sets ClusterFirstWithHostNet", vendor)
+					assert.NotEqual(t, defaultHashes[vendor], hash, "%s config-hash changes when hostRoCE enabled", vendor)
+					if tc.name == "enabled wires ascend hostRoCE and default env" {
+						enabledDefaultHash = hash
+					} else if enabledDefaultHash != "" {
+						assert.NotEqual(t, enabledDefaultHash, hash, "%s config-hash changes when env overrides default", vendor)
+					}
+				} else {
+					assert.False(t, podSpec.HostNetwork, "%s omits hostNetwork", vendor)
+					assert.Empty(t, podSpec.DNSPolicy, "%s omits dnsPolicy", vendor)
+					if tc.values == nil || tc.name == "explicitly disabled matches default" || tc.name == "enabled wires ascend hostRoCE and default env" {
+						assert.Equal(t, defaultHashes[vendor], hash, "%s config-hash stays unchanged", vendor)
+					}
+				}
+
+				var hixlepVolumes int
+				for _, v := range podSpec.Volumes {
+					if v.Name == "ascend-hixlep" {
+						hixlepVolumes++
+						require.NotNil(t, v.HostPath, "%s ascend-hixlep uses hostPath", vendor)
+						assert.Equal(t, "/etc/hixlep", v.HostPath.Path)
+						assert.Equal(t, "Directory", v.HostPath.Type)
+					}
+				}
+				if wantHostRoCE {
+					assert.Equal(t, 1, hixlepVolumes, "%s mounts ascend-hixlep volume", vendor)
+				} else {
+					assert.Zero(t, hixlepVolumes, "%s omits ascend-hixlep volume", vendor)
+				}
+
+				for _, ic := range podSpec.InitContainers {
+					for _, vm := range ic.VolumeMounts {
+						assert.NotEqual(t, "ascend-hixlep", vm.Name)
+						assert.NotEqual(t, "/etc/hixlep", vm.MountPath)
+					}
+				}
+
+				var workerFound bool
+				for _, c := range podSpec.Containers {
+					var hixlepMounts int
+					for _, vm := range c.VolumeMounts {
+						if vm.Name == "ascend-hixlep" || vm.MountPath == "/etc/hixlep" {
+							hixlepMounts++
+							assert.True(t, wantHostRoCE && c.Name == "worker",
+								"%s container %s must mount /etc/hixlep only on ascend worker when enabled", vendor, c.Name)
+							assert.Equal(t, "ascend-hixlep", vm.Name)
+							assert.Equal(t, "/etc/hixlep", vm.MountPath)
+							require.NotNil(t, vm.ReadOnly)
+							assert.True(t, *vm.ReadOnly)
+						}
+					}
+
+					var globalResValues []string
+					for _, env := range c.Env {
+						assert.NotEqual(t, ascendLocalResEnv, env.Name,
+							"%s container %s leaves ASCEND_LOCAL_COMM_RES unset", vendor, c.Name)
+						if env.Name == ascendGlobalResEnv {
+							globalResValues = append(globalResValues, env.Value)
+						}
+					}
+
+					if c.Name == "broker" && tc.name == "enabled wires ascend hostRoCE and default env" {
+						assert.Empty(t, globalResValues, "%s broker must not receive default ASCEND_GLOBAL_RESOURCE_CONFIG", vendor)
+					}
+
+					if c.Name == "worker" {
+						workerFound = true
+						if wantHostRoCE {
+							assert.Equal(t, 1, hixlepMounts, "%s worker mounts /etc/hixlep once", vendor)
+							require.NotNil(t, tc.wantAscendEnv)
+							assert.Equal(t, []string{*tc.wantAscendEnv}, globalResValues,
+								"%s worker gets expected ASCEND_GLOBAL_RESOURCE_CONFIG without duplicates", vendor)
+						} else {
+							assert.Zero(t, hixlepMounts, "%s worker omits /etc/hixlep", vendor)
+							if tc.name != "enabled respects custom ASCEND_GLOBAL_RESOURCE_CONFIG without duplicates" &&
+								tc.name != "enabled respects empty ASCEND_GLOBAL_RESOURCE_CONFIG without duplicates" {
+								assert.Empty(t, globalResValues, "%s worker omits ASCEND_GLOBAL_RESOURCE_CONFIG", vendor)
+							}
+						}
+					}
+				}
+				assert.True(t, workerFound, "%s has worker container", vendor)
+			}
+		})
+	}
+}
