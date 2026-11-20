@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import inspect
 import json
+import logging
 import re
 from typing import Any, Protocol
 
@@ -27,6 +28,7 @@ from gpustack_engine_sentinel.protocol import (
 )
 
 MAX_REQUEST_BODY_BYTES = 1 << 20
+LOGGER = logging.getLogger(__name__)
 PAUSE_EXEMPT_PATHS: frozenset[str] = frozenset({"/health", "/metrics"})
 SENTINEL_INSTALLED_ATTR = "_gpustack_sentinel_installed"
 _MULTI_SLASH_RE = re.compile(r"/+")
@@ -447,13 +449,14 @@ class SentinelControlPlane:
             await send_json_response(
                 send, exc.status_code, exc.to_dict(), head_only=head_only
             )
-        except Exception as exc:
+        except Exception:
+            LOGGER.exception("Unhandled error serving %s %s", method, path)
             await send_json_response(
                 send,
                 500,
                 {
                     "error": "internal_error",
-                    "message": str(exc),
+                    "message": "Internal server error",
                 },
                 head_only=head_only,
             )
@@ -500,6 +503,15 @@ class SentinelControlPlane:
                     return JSONResponse(
                         content=exc.to_dict(), status_code=exc.status_code
                     )
+                except Exception:
+                    LOGGER.exception("Unhandled error in %s", ACK_PATH)
+                    return JSONResponse(
+                        content={
+                            "error": "internal_error",
+                            "message": "Internal server error",
+                        },
+                        status_code=500,
+                    )
                 return JSONResponse(content=data, status_code=code)
 
             async def _pause_get_ep(request: Request) -> JSONResponse:
@@ -516,6 +528,15 @@ class SentinelControlPlane:
                     return JSONResponse(
                         content=exc.to_dict(), status_code=exc.status_code
                     )
+                except Exception:
+                    LOGGER.exception("Unhandled error in %s", PAUSE_PATH)
+                    return JSONResponse(
+                        content={
+                            "error": "internal_error",
+                            "message": "Internal server error",
+                        },
+                        status_code=500,
+                    )
                 return JSONResponse(content=data, status_code=code)
 
             async def _rc_get_ep(request: Request) -> JSONResponse:
@@ -531,6 +552,15 @@ class SentinelControlPlane:
                 except SentinelError as exc:
                     return JSONResponse(
                         content=exc.to_dict(), status_code=exc.status_code
+                    )
+                except Exception:
+                    LOGGER.exception("Unhandled error in %s", RUNTIME_CONFIG_PATH)
+                    return JSONResponse(
+                        content={
+                            "error": "internal_error",
+                            "message": "Internal server error",
+                        },
+                        status_code=500,
                     )
                 return JSONResponse(content=data, status_code=code)
 

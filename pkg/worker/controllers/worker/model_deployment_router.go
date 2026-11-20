@@ -209,56 +209,56 @@ func modelDeploymentRouterIsolationReady(
 	}
 	// Verify that every non-terminated router Pod (including terminating legacy Pods) enforces the
 	// Envoy sidecar with the desired router config hash before trusting Deployment status counts.
-	var routerPods core.PodList
-	var listOpts []ctrlcli.ListOption
-	listOpts = append(listOpts, ctrlcli.InNamespace(md.Namespace))
-	if dep.Spec.Selector != nil && len(dep.Spec.Selector.MatchLabels) > 0 {
-		listOpts = append(listOpts, ctrlcli.MatchingLabels(dep.Spec.Selector.MatchLabels))
+	if dep.Spec.Selector == nil || len(dep.Spec.Selector.MatchLabels) == 0 {
+		return false, fmt.Sprintf("router deployment %q has empty selector", dep.Name), nil
 	}
-	if len(listOpts) > 1 {
-		if listErr := reader.List(ctx, &routerPods, listOpts...); listErr != nil {
-			return false, "", listErr
+	var routerPods core.PodList
+	listOpts := []ctrlcli.ListOption{
+		ctrlcli.InNamespace(md.Namespace),
+		ctrlcli.MatchingLabels(dep.Spec.Selector.MatchLabels),
+	}
+	if listErr := reader.List(ctx, &routerPods, listOpts...); listErr != nil {
+		return false, "", listErr
+	}
+	liveRouterPods := 0
+	readyEnvoyPods := 0
+	allEnforceEnvoy := true
+	for i := range routerPods.Items {
+		p := &routerPods.Items[i]
+		if p.Status.Phase == core.PodSucceeded || p.Status.Phase == core.PodFailed {
+			continue
 		}
-		liveRouterPods := 0
-		readyEnvoyPods := 0
-		allEnforceEnvoy := true
-		for i := range routerPods.Items {
-			p := &routerPods.Items[i]
-			if p.Status.Phase == core.PodSucceeded || p.Status.Phase == core.PodFailed {
-				continue
-			}
-			liveRouterPods++
-			podHasEnvoy := false
-			for j := range p.Spec.Containers {
-				if p.Spec.Containers[j].Name == "envoy" {
-					podHasEnvoy = true
-					break
-				}
-			}
-			if !podHasEnvoy || p.Annotations[modelDeploymentRouterConfigHash] != wantHash {
-				allEnforceEnvoy = false
+		liveRouterPods++
+		podHasEnvoy := false
+		for j := range p.Spec.Containers {
+			if p.Spec.Containers[j].Name == "envoy" {
+				podHasEnvoy = true
 				break
 			}
-			if p.DeletionTimestamp == nil && podIsReady(p) {
-				readyEnvoyPods++
-			}
 		}
-		if liveRouterPods > 0 {
-			if allEnforceEnvoy && readyEnvoyPods > 0 {
-				return true, "", nil
-			}
-			return false, fmt.Sprintf(
-				"waiting for router deployment %q rollout (observedGeneration=%d/%d, replicas=%d, updated=%d/%d, ready=%d/%d)",
-				dep.Name,
-				dep.Status.ObservedGeneration,
-				dep.Generation,
-				dep.Status.Replicas,
-				dep.Status.UpdatedReplicas,
-				desired,
-				dep.Status.ReadyReplicas,
-				desired,
-			), nil
+		if !podHasEnvoy || p.Annotations[modelDeploymentRouterConfigHash] != wantHash {
+			allEnforceEnvoy = false
+			break
 		}
+		if p.DeletionTimestamp == nil && podIsReady(p) {
+			readyEnvoyPods++
+		}
+	}
+	if liveRouterPods > 0 {
+		if allEnforceEnvoy && readyEnvoyPods > 0 {
+			return true, "", nil
+		}
+		return false, fmt.Sprintf(
+			"waiting for router deployment %q rollout (observedGeneration=%d/%d, replicas=%d, updated=%d/%d, ready=%d/%d)",
+			dep.Name,
+			dep.Status.ObservedGeneration,
+			dep.Generation,
+			dep.Status.Replicas,
+			dep.Status.UpdatedReplicas,
+			desired,
+			dep.Status.ReadyReplicas,
+			desired,
+		), nil
 	}
 	// When no router Pod objects exist (for example in unit tests driving Deployment status
 	// directly), fall back to Deployment status counts once every replica matches the latest revision.

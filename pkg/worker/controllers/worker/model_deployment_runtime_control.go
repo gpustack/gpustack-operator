@@ -338,21 +338,21 @@ func (r *ModelDeploymentReconciler) modelDeploymentRetainedRouterEligibility(
 func (r *ModelDeploymentReconciler) modelDeploymentElasticResizeInFlight(
 	ctx context.Context,
 	md *workercore.ModelDeployment,
-) (bool, string) {
+) (bool, string, error) {
 	role := ModelDeploymentElasticRole(md)
 	if role == nil || !runtimecontrol.RoleHasElasticEP(role) {
-		return false, ""
+		return false, "", nil
 	}
 	if r.Client != nil && md.UID != "" {
 		store := newElasticOperationStore(r.Client)
 		op, err := store.Read(ctx, md.Namespace, md.Name, md.UID)
 		if err != nil {
 			if !kerrors.IsNotFound(err) {
-				return true, fmt.Sprintf("unable to read elastic EP resize operation: %v", err)
+				return false, "", fmt.Errorf("read elastic EP resize operation: %w", err)
 			}
 		} else if op != nil {
 			if op.State != elasticStateCompleted && op.State != elasticStateAbandoned {
-				return true, "waiting for in-flight elastic EP resize operation to settle"
+				return true, "waiting for in-flight elastic EP resize operation to settle", nil
 			}
 		}
 	}
@@ -360,12 +360,12 @@ func (r *ModelDeploymentReconciler) modelDeploymentElasticResizeInFlight(
 		cm, err := r.elasticObservationDocument(ctx, md)
 		if err != nil {
 			if !kerrors.IsNotFound(err) {
-				return true, fmt.Sprintf("unable to read elastic EP observation: %v", err)
+				return false, "", fmt.Errorf("read elastic EP observation: %w", err)
 			}
 		} else if cm != nil {
 			var obs modelDeploymentElasticStatus
 			if uErr := json.Unmarshal([]byte(cm.Data["observation.json"]), &obs); uErr != nil {
-				return true, fmt.Sprintf("unable to decode elastic EP observation: %v", uErr)
+				return true, fmt.Sprintf("unable to decode elastic EP observation: %v", uErr), nil
 			}
 			switch obs.State {
 			case elasticStateRecorded,
@@ -374,11 +374,11 @@ func (r *ModelDeploymentReconciler) modelDeploymentElasticResizeInFlight(
 				elasticStateNativeDone,
 				elasticStateWithdrawn,
 				elasticStateReleased:
-				return true, "waiting for active elastic EP resize state to complete"
+				return true, "waiting for active elastic EP resize state to complete", nil
 			}
 		}
 	}
-	return false, ""
+	return false, "", nil
 }
 
 // ensureModelDeploymentElasticMasterRuntimeControl replays desired runtimeControl parameters and
@@ -549,7 +549,10 @@ func (r *ModelDeploymentReconciler) reconcileModelDeploymentRuntimeControl(
 		return nil
 	}
 
-	elasticInFlight, elasticInFlightMsg := r.modelDeploymentElasticResizeInFlight(ctx, md)
+	elasticInFlight, elasticInFlightMsg, elasticErr := r.modelDeploymentElasticResizeInFlight(ctx, md)
+	if elasticErr != nil {
+		return elasticErr
+	}
 	var serving ServingAnswer
 	if observation != nil {
 		serving = observation.Serving
@@ -1452,6 +1455,7 @@ func (r *ModelDeploymentReconciler) reconcilePodRuntimeControl(
 				condStatus:        meta.ConditionFalse,
 				reason:            ModelDeploymentReasonRuntimeControlAmbiguousOperation,
 				message:           fenceMsg,
+				requeue:           true,
 				observedPaused:    effectiveObservedPaused,
 				confirmedUnpaused: !effectiveObservedPaused,
 			}

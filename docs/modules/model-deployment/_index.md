@@ -48,7 +48,7 @@ for distributed multi-node serving.
 
 ## Service operations
 
-[Status](status.md), [Metrics](metrics.md), [Online Runtime Control](runtime-control.md) and
+[Online Runtime Control](runtime-control.md), [Status](status.md), [Metrics](metrics.md) and
 [Routing](routing.md) explain live parameter tuning, what the running service reports, and how requests
 are directed.
 

@@ -2498,7 +2498,7 @@ func (r *ModelDeploymentWebhook) validateRoleResourcesAgainstAcceleratorTypes(
 	ctx context.Context, old, md *workercore.ModelDeployment,
 ) (field.ErrorList, error) {
 	if md.DeletionTimestamp != nil {
-		return validateModelDeploymentRuntimeControlAgainstAcceleratorTypes(md, nil), nil
+		return nil, nil
 	}
 
 	rolesPath := field.NewPath("spec", "roles")

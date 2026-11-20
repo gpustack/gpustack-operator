@@ -621,7 +621,9 @@ func verifyLedgerOwner(stored *corev1.ConfigMap, owner LedgerOwner) error {
 	if ctrl == nil {
 		return fmt.Errorf("%w: ConfigMap %s/%s has no controlling owner", ErrLedgerOwnerMismatch, stored.Namespace, stored.Name)
 	}
-	if ctrl.Kind != "ModelDeployment" || ctrl.APIVersion != workercore.SchemeGroupVersion.String() {
+	validAPIVersion := ctrl.APIVersion == workercore.SchemeGroupVersion.String() ||
+		strings.HasPrefix(ctrl.APIVersion, workercore.GroupName+"/")
+	if ctrl.Kind != "ModelDeployment" || !validAPIVersion {
 		return fmt.Errorf(
 			"%w: ConfigMap %s/%s controlled by %s/%s",
 			ErrLedgerOwnerMismatch, stored.Namespace, stored.Name, ctrl.APIVersion, ctrl.Kind,

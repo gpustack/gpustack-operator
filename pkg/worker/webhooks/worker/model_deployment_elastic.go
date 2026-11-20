@@ -79,10 +79,20 @@ func (r *ModelDeploymentWebhook) ValidateModelDeploymentElasticEP(
 		if old != nil {
 			if oldElastic := elasticRoleOf(old); oldElastic != nil {
 				rolePath := field.NewPath("spec", "roles")
+				matched := false
 				for i := range md.Spec.Roles {
 					if md.Spec.Roles[i].Name == oldElastic.Name {
 						rolePath = rolePath.Index(i)
+						matched = true
 						break
+					}
+				}
+				if !matched {
+					for i := range old.Spec.Roles {
+						if old.Spec.Roles[i].Name == oldElastic.Name {
+							rolePath = rolePath.Index(i)
+							break
+						}
 					}
 				}
 				errs = append(errs, field.Forbidden(

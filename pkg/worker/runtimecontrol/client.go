@@ -473,7 +473,7 @@ func (c *Client) Ack(ctx context.Context, target Target, req AckRequest) (*Ready
 	}
 	var out ReadyResponse
 	if err := json.Unmarshal(resp.Body, &out); err != nil {
-		return nil, fmt.Errorf("decode %s response: %w", PathAck, err)
+		return nil, wrapAmbiguous(http.MethodPost+" "+PathAck, "", fmt.Errorf("decode %s response: %w", PathAck, err))
 	}
 	if out.BootID != req.BootID {
 		return nil, fmt.Errorf("%w: ack response boot_id=%q expected=%q", ErrBootIDMismatch, out.BootID, req.BootID)
@@ -521,7 +521,7 @@ func (c *Client) SetPause(ctx context.Context, target Target, req PauseRequest) 
 	}
 	var out PauseResponse
 	if err := json.Unmarshal(resp.Body, &out); err != nil {
-		return nil, fmt.Errorf("decode %s response: %w", PathPause, err)
+		return nil, wrapAmbiguous(http.MethodPost+" "+PathPause, "", fmt.Errorf("decode %s response: %w", PathPause, err))
 	}
 	if req.ExpectedBootID != "" && out.BootID != req.ExpectedBootID {
 		return nil, fmt.Errorf("%w: response boot_id=%q expected=%q", ErrBootIDMismatch, out.BootID, req.ExpectedBootID)
@@ -566,7 +566,10 @@ func (c *Client) ApplyRuntimeConfig(
 
 	var out RuntimeConfigState
 	if err := json.Unmarshal(resp.Body, &out); err != nil {
-		return nil, fmt.Errorf("decode %s response: %w", PathRuntimeConfig, err)
+		return nil, wrapAmbiguous(
+			http.MethodPost+" "+PathRuntimeConfig, req.OperationID,
+			fmt.Errorf("decode %s response: %w", PathRuntimeConfig, err),
+		)
 	}
 	if err := verifyRankReceipts(&out, req.ExpectedBootID, req.AppliedConfigDigest); err != nil {
 		return nil, err
