@@ -537,7 +537,7 @@ var (
 		"model-deployment-modelexpress-server-image",
 		"Indicates the ModelExpress metadata server image a ModelDeployment runs when one of its "+
 			"roles loads weights through the ModelExpress load format.",
-		setting.InitializeFromEnv("gpustack/mirrored-modelexpress-server:v0.7.0"),
+		setting.InitializeFromEnv("gpustack/mirrored-modelexpress-server:v0.8.0"),
 		setting.AllowContainerImageReference(),
 	)
 

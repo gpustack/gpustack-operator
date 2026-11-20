@@ -1,15 +1,15 @@
 {
   "schema_version": 1,
-  "stage": "recipe_sync",
-  "summary": "Stage A recipe sync: Mooncake recipe to 0.3.14 (0.3.14* admitted in all four release guards plus a new 0.3.14 arm in the cann context_manager.cpp ASCEND_SOURCES glob block); NIXL ROCm pins to ai-dynamo/nixl release tag v1.5.2 (pyproject version 1.5.2, aligned with NIXL PyPI 1.5.2) with UCX at openucx/ucx release tag v1.22.0; ModelExpress to ai-dynamo/modelexpress v0.8.0. HIXL stays held at gpustack/runner VLLM_HIXL_COMMIT 60dbe9d1d7d9a7eef04bc3dbf84edbad2188230a and the channel-generation patch is byte-identical to runner's; NIXL PyPI stays at 1.5.2. Promoted gpustack/* tags in value.go, settings.md and the chart are unchanged: gpustack/mirrored-mooncake:0.3.14-cpu is not yet published on Docker Hub, so tag promotion waits for Stage B.",
+  "stage": "tag_promotion",
+  "summary": "Stage B tag promotion: host preflight pre-staged the published gpustack/* tags and this pass verifies them against kv-transfer-preflight-report.json and image-manifests.json (crane digests confirmed). ModelExpress setting image promoted to the published gpustack/mirrored-modelexpress-server:v0.8.0 across value.go, value_test.go, model_deployment_transfer_test.go, docs/reference/settings.md and docs/modules/model-delivery/remote.md; modelTransfer.images promoted to the published gpustack/model-transfer:v0.1.1-cuda12.9, v0.1.1-rocm7.2 (amd64-published) and v0.1.1-cann9.2-a5 in deploy/gpustack-operator/chart/{values.yaml,values.schema.json,README.md.gotmpl,README.md}. kv-cache-backend-image stays held at gpustack/mirrored-mooncake:0.3.13.post1-cpu per .auto-sync/setting-image-holds.json even though 0.3.14-cpu is published. Stage A recipes stay untouched (has_stage_a false): Mooncake 0.3.14 admitted in all four release guards plus the 0.3.14 arm of the cann context_manager.cpp block, NIXL 1.5.2 with NIXL_ROCM_REF v1.5.2 (pyproject version 1.5.2) and NIXL_ROCM_UCX_REF v1.22.0, and HIXL held at gpustack/runner VLLM_HIXL_COMMIT 60dbe9d1d7d9a7eef04bc3dbf84edbad2188230a with 001_channel_generation.patch byte-identical to runner's.",
   "versions": {
     "mooncake": "0.3.14",
     "nixl-pypi": "1.5.2",
     "nixl-rocm": "v1.5.2",
     "ucx-rocm": "v1.22.0",
     "hixl": "60dbe9d1d7d9a7eef04bc3dbf84edbad2188230a",
-    "modelexpress": "v0.8.0",
-    "gpustack-runner": "aligned"
+    "modelexpress": "v0.8.0+stage-b",
+    "gpustack-runner": "aligned+stage-b"
   },
   "subscriptions": [
     "mooncake",
