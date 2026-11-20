@@ -481,15 +481,14 @@ if nixl_repo:
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
     ).returncode == 0
-    if has_obj:
-        pyproject_raw = subprocess.check_output(
-            ["git", "-C", nixl_repo, "show", obj_spec],
-            text=True,
-        )
-    elif cand_nixl_rocm_ref != base_nixl_rocm_ref:
+    if not has_obj:
         raise SystemExit(
             f"FAIL: NIXL_ROCM_REF {cand_nixl_rocm_ref} (refs/tags/{cand_nixl_rocm_ref}:pyproject.toml) not found in staged nixl repository {nixl_repo}"
         )
+    pyproject_raw = subprocess.check_output(
+        ["git", "-C", nixl_repo, "show", obj_spec],
+        text=True,
+    )
 elif os.path.isfile(os.path.join(stage_dir, "nixl-rocm", "pyproject.toml")):
     pyproject_raw = read_text(os.path.join(stage_dir, "nixl-rocm", "pyproject.toml"))
 elif cand_nixl_rocm_ref != base_nixl_rocm_ref:

@@ -200,7 +200,22 @@ def parse_semver_tag_key(tag: str) -> tuple[int, int, int] | None:
     return (int(m.group(1)), int(m.group(2)), int(m.group(3)))
 
 
-def fetch_github_releases(repo: str, fixture_file: str, fixture_root: str) -> list | None:
+def parse_next_link(link_header: str) -> str:
+    if not link_header:
+        return ""
+    for part in link_header.split(","):
+        segs = [s.strip() for s in part.split(";")]
+        if len(segs) < 2:
+            continue
+        url_part = segs[0]
+        if not (url_part.startswith("<") and url_part.endswith(">")):
+            continue
+        if any(re.fullmatch(r'rel\s*=\s*"?next"?', s, re.IGNORECASE) for s in segs[1:]):
+            return url_part[1:-1]
+    return ""
+
+
+def fetch_github_releases(repo: str, fixture_file: str, fixture_root: str, max_pages: int = 5) -> list | None:
     if fixture_root:
         fp = os.path.join(fixture_root, fixture_file)
         if not os.path.isfile(fp):
@@ -216,16 +231,29 @@ def fetch_github_releases(repo: str, fixture_file: str, fixture_root: str) -> li
     tok = os.environ.get("GH_TOKEN") or os.environ.get("GITHUB_TOKEN") or ""
     if tok:
         headers["Authorization"] = f"Bearer {tok}"
-    return fetch_json(
-        f"https://api.github.com/repos/{repo}/releases?per_page=100",
-        headers=headers,
-    )
+
+    url = f"https://api.github.com/repos/{repo}/releases?per_page=100"
+    all_releases: list = []
+    for _ in range(max_pages):
+        req = urllib.request.Request(url, headers=headers)
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            page_data = json.loads(resp.read().decode("utf-8"))
+            link_hdr = resp.headers.get("Link") or ""
+        if isinstance(page_data, list):
+            all_releases.extend(page_data)
+        elif page_data is not None:
+            all_releases.append(page_data)
+        next_url = parse_next_link(link_hdr)
+        if not next_url:
+            break
+        url = next_url
+    return all_releases
 
 
-def resolve_github_semver_releases(repo: str, fixture_file: str, fixture_root: str) -> list[str]:
+def resolve_github_semver_releases(repo: str, fixture_file: str, fixture_root: str) -> tuple[str, list[str]]:
     releases = fetch_github_releases(repo, fixture_file, fixture_root)
-    if releases is None:
-        return []
+    if not releases:
+        return "", []
     tags_with_keys: list[tuple[tuple[int, int, int], str]] = []
     seen: set[str] = set()
     for rel in releases:
@@ -239,10 +267,11 @@ def resolve_github_semver_releases(repo: str, fixture_file: str, fixture_root: s
             continue
         seen.add(tag)
         tags_with_keys.append((key, tag))
-    tags_with_keys.sort(key=lambda item: item[0], reverse=True)
     if not tags_with_keys:
-        raise SystemExit(f"FAIL: no stable vX.Y.Z non-prerelease GitHub releases found for {repo}")
-    return [tag for _, tag in tags_with_keys]
+        return "", []
+    tags_with_keys.sort(key=lambda item: item[0], reverse=True)
+    tags = [tag for _, tag in tags_with_keys]
+    return tags[0], tags
 
 
 def resolve_mooncake_release(fixture_root: str) -> tuple[str, list[str]]:
@@ -656,11 +685,12 @@ def parse_semver_tag_override(name: str, val: object) -> str:
 
 
 nixl_pypi_candidates = [] if "nixl_pypi" in upstream_override else resolve_nixl_pypi_candidates(fixture_dir)
-nixl_rocm_releases = (
-    []
-    if "nixl_rocm" in upstream_override
-    else resolve_github_semver_releases("ai-dynamo/nixl", "nixl-release.json", fixture_dir)
-)
+if "nixl_rocm" in upstream_override:
+    up_nixl_rocm_latest, nixl_rocm_releases = "", []
+else:
+    up_nixl_rocm_latest, nixl_rocm_releases = resolve_github_semver_releases(
+        "ai-dynamo/nixl", "nixl-release.json", fixture_dir
+    )
 
 if "nixl_rocm" in upstream_override:
     up_nixl_rocm = parse_semver_tag_override("nixl_rocm", upstream_override["nixl_rocm"])
@@ -669,7 +699,12 @@ if "nixl_rocm" in upstream_override:
         up_nixl_pypi = str(upstream_override["nixl_pypi"]).strip()
         up_nixl_recent = [up_nixl_pypi]
     else:
-        up_nixl_pypi = nixl_pypi_candidates[0]
+        expected_pypi = up_nixl_rocm.lstrip("v")
+        if expected_pypi not in set(nixl_pypi_candidates):
+            raise SystemExit(
+                f"FAIL: nixl_rocm override {up_nixl_rocm!r} requires {expected_pypi!r} in 3-package PyPI wheel parity set ({nixl_pypi_candidates[:5]})"
+            )
+        up_nixl_pypi = expected_pypi
         up_nixl_recent = nixl_pypi_candidates[:5]
 elif "nixl_pypi" in upstream_override:
     up_nixl_pypi = str(upstream_override["nixl_pypi"]).strip()
@@ -694,18 +729,18 @@ else:
         up_nixl_rocm = f"v{up_nixl_pypi}"
         up_nixl_rocm_recent = [f"v{v}" for v in aligned_nixl[:5]]
     else:
-        up_nixl_pypi = nixl_pypi_candidates[0]
-        up_nixl_recent = nixl_pypi_candidates[:5]
-        up_nixl_rocm = f"v{up_nixl_pypi}"
-        up_nixl_rocm_recent = [f"v{v}" for v in nixl_pypi_candidates[:5]]
+        up_nixl_pypi = recipe["nixl_version"]
+        up_nixl_recent = [up_nixl_pypi]
+        up_nixl_rocm = recipe["nixl_rocm_ref"]
+        up_nixl_rocm_recent = [up_nixl_rocm]
 
 if "ucx_rocm" in upstream_override:
     up_ucx_rocm = parse_semver_tag_override("ucx_rocm", upstream_override["ucx_rocm"])
     up_ucx_rocm_recent = [up_ucx_rocm]
 else:
-    ucx_rocm_releases = resolve_github_semver_releases("openucx/ucx", "ucx-release.json", fixture_dir)
-    if ucx_rocm_releases:
-        up_ucx_rocm = ucx_rocm_releases[0]
+    up_ucx_rocm_latest, ucx_rocm_releases = resolve_github_semver_releases("openucx/ucx", "ucx-release.json", fixture_dir)
+    if up_ucx_rocm_latest:
+        up_ucx_rocm = up_ucx_rocm_latest
         up_ucx_rocm_recent = ucx_rocm_releases[:5]
     else:
         up_ucx_rocm = recipe["ucx_rocm_ref"]
@@ -738,11 +773,15 @@ if fixture_dir:
 
     nixl_fix = os.path.join(fixture_dir, "repos/nixl")
     if os.path.isdir(nixl_fix):
-        if os.path.isdir(os.path.join(nixl_fix, ".git")) and subprocess.run(
-            ["git", "-C", nixl_fix, "rev-parse", "--verify", "-q", f"refs/tags/{up_nixl_rocm}^{{commit}}"],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-        ).returncode == 0:
+        if os.path.isdir(os.path.join(nixl_fix, ".git")):
+            if subprocess.run(
+                ["git", "-C", nixl_fix, "rev-parse", "--verify", "-q", f"refs/tags/{up_nixl_rocm}^{{commit}}"],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            ).returncode != 0:
+                raise SystemExit(
+                    f"FAIL: fixture nixl repo {nixl_fix} is missing expected tag refs/tags/{up_nixl_rocm}"
+                )
             sync_tagged_repo(nixl_fix, nixl_rocm_stage, up_nixl_rocm, recipe["nixl_rocm_ref"], is_local=True)
         else:
             stage_fixture_repo(nixl_fix, nixl_rocm_stage)
@@ -1571,7 +1610,8 @@ PY
       cp -f "${RUNNER_PATCH_FILE}" "${STAGED_TREE}/pack/model-transfer/patches/hixl/001_channel_generation.patch"
       COMMIT_PATHS+=("pack/model-transfer/patches/hixl/001_channel_generation.patch")
     fi
-    if python3 - "${PREFLIGHT_REPORT_JSON}" "${REPO_ROOT}/pack/model-transfer/Dockerfile" "${STAGED_TREE}/pack/model-transfer/Dockerfile" <<'PY'
+    df_rc=0
+    python3 - "${PREFLIGHT_REPORT_JSON}" "${REPO_ROOT}/pack/model-transfer/Dockerfile" "${STAGED_TREE}/pack/model-transfer/Dockerfile" <<'PY' || df_rc=$?
 import json
 import os
 import re
@@ -1585,7 +1625,7 @@ drifts = rep.get("stage_a_drifts") or {}
 update_nixl = bool(drifts.get("nixl-pypi") or drifts.get("nixl-rocm"))
 update_ucx = bool(drifts.get("ucx-rocm"))
 if not update_nixl and not update_ucx:
-    sys.exit(1)
+    sys.exit(3)
 
 with open(src_df_p, "r", encoding="utf-8") as f:
     txt = f.read()
@@ -1595,7 +1635,8 @@ def set_arg(df_txt: str, name: str, value: str) -> str:
     pat = re.compile(rf'^(ARG {re.escape(name)}=)(?:"[^"]*"|\'[^\']*\'|[^\s#]+)', re.MULTILINE)
     out, n = pat.subn(rf'\g<1>"{value}"', df_txt, count=1)
     if n != 1:
-        raise SystemExit(f"FAIL: could not update ARG {name} in {src_df_p}")
+        sys.stderr.write(f"FAIL: could not update ARG {name} in {src_df_p}\n")
+        sys.exit(2)
     return out
 
 
@@ -1605,23 +1646,33 @@ if update_nixl:
     nixl_rocm_sec = rep.get("nixl_rocm") or {}
     nixl_rocm_ref = str(nixl_rocm_sec.get("target_ref") or "").strip()
     nixl_rocm_ver = str(nixl_rocm_sec.get("project_version") or "").strip() or nixl_ver
-    if nixl_ver and nixl_rocm_ref:
-        new_txt = set_arg(new_txt, "NIXL_VERSION", nixl_ver)
-        new_txt = set_arg(new_txt, "NIXL_ROCM_VERSION", nixl_rocm_ver)
-        new_txt = set_arg(new_txt, "NIXL_ROCM_REF", nixl_rocm_ref)
+    if not nixl_ver or not nixl_rocm_ref or not nixl_rocm_ver:
+        sys.stderr.write(
+            f"FAIL: missing nixl target metadata for Stage A rewrite (nixl_ver={nixl_ver!r}, nixl_rocm_ver={nixl_rocm_ver!r}, nixl_rocm_ref={nixl_rocm_ref!r})\n"
+        )
+        sys.exit(2)
+    new_txt = set_arg(new_txt, "NIXL_VERSION", nixl_ver)
+    new_txt = set_arg(new_txt, "NIXL_ROCM_VERSION", nixl_rocm_ver)
+    new_txt = set_arg(new_txt, "NIXL_ROCM_REF", nixl_rocm_ref)
 if update_ucx:
     ucx_rocm_ref = str((rep.get("ucx_rocm") or {}).get("target_ref") or "").strip()
-    if ucx_rocm_ref:
-        new_txt = set_arg(new_txt, "NIXL_ROCM_UCX_REF", ucx_rocm_ref)
+    if not ucx_rocm_ref:
+        sys.stderr.write("FAIL: missing ucx_rocm.target_ref for Stage A rewrite\n")
+        sys.exit(2)
+    new_txt = set_arg(new_txt, "NIXL_ROCM_UCX_REF", ucx_rocm_ref)
 
 if new_txt == txt:
-    sys.exit(1)
+    sys.exit(3)
 os.makedirs(os.path.dirname(dst_df_p), exist_ok=True)
 with open(dst_df_p, "w", encoding="utf-8") as f:
     f.write(new_txt)
 PY
-    then
+    if [[ "${df_rc}" -eq 0 ]]; then
       COMMIT_PATHS+=("pack/model-transfer/Dockerfile")
+    elif [[ "${df_rc}" -eq 3 ]]; then
+      :
+    else
+      exit "${df_rc}"
     fi
   elif [[ "${KV_STAGE_NAME}" == "tag_promotion" ]]; then
     mkdir -p \

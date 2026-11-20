@@ -605,6 +605,54 @@ else
   fail "preflight aligns nixl-pypi and nixl-rocm to v1.5.2 when GitHub release lags behind PyPI"
 fi
 
+# 2e. Prerelease-only GitHub releases degrade gracefully to pinned recipe refs instead of failing.
+FIX_2E="${SCRATCH}/fix-2e"
+clone_fixture "${FIX_2E}"
+cat > "${FIX_2E}/ucx-release.json" <<'JSON'
+[
+  {"tag_name": "v1.23.0-rc4", "prerelease": true, "draft": false}
+]
+JSON
+cat > "${FIX_2E}/nixl-release.json" <<'JSON'
+[
+  {"tag_name": "v1.6.0-rc1", "prerelease": true, "draft": false}
+]
+JSON
+cat > "${FIX_2E}/mooncake-release.json" <<'JSON'
+[
+  {"tag_name": "v0.3.15", "prerelease": false, "draft": false}
+]
+JSON
+STAGE_2E="${SCRATCH}/stage-2e"
+(
+  cd "${NIXL_LAG_REPO}"
+  AUTOSYNC_KV_FIXTURE_DIR="${FIX_2E}" \
+  AUTOSYNC_SKIP_GO_MOD_DOWNLOAD=true \
+    bash "${NIXL_LAG_REPO}/.auto-sync/scripts/preflight-kv-transfer.sh" "${STAGE_2E}"
+)
+if python3 - "${STAGE_2E}" <<'PY'
+import json
+import os
+import sys
+
+stage = sys.argv[1]
+with open(os.path.join(stage, "upstream-records.json"), "r", encoding="utf-8") as f:
+    recs = {r["upstreamId"]: r for r in json.load(f)}
+assert recs["ucx-rocm"]["status"] == "up_to_date" and recs["ucx-rocm"]["version"] == "v1.22.0", recs["ucx-rocm"]
+assert recs["nixl-rocm"]["status"] == "up_to_date" and recs["nixl-rocm"]["version"] == "v1.5.2", recs["nixl-rocm"]
+assert recs["nixl-pypi"]["status"] == "up_to_date" and recs["nixl-pypi"]["version"] == "1.5.2", recs["nixl-pypi"]
+with open(os.path.join(stage, "kv-transfer-preflight-report.json"), "r", encoding="utf-8") as f:
+    rep = json.load(f)
+assert rep["stage"] == "no_change", rep
+assert rep["ucx_rocm"]["target_ref"] == "v1.22.0", rep["ucx_rocm"]
+assert rep["nixl_rocm"]["target_ref"] == "v1.5.2", rep["nixl_rocm"]
+PY
+then
+  pass "preflight degrades gracefully to pinned recipe refs when GitHub releases contain only prereleases"
+else
+  fail "preflight degrades gracefully to pinned recipe refs when GitHub releases contain only prereleases"
+fi
+
 # 3. Preflight Stage B (tag_promotion): 0.3.15-cpu now published multi-arch, value.go still on 0.3.13.post1-cpu.
 FIX_3="${SCRATCH}/fix-3"
 clone_fixture "${FIX_3}"
@@ -1467,9 +1515,28 @@ git -C "${NIXL_ROCM_MOCK}" add pyproject.toml
 git -C "${NIXL_ROCM_MOCK}" commit -q -m "mismatch"
 git -C "${NIXL_ROCM_MOCK}" tag -f v1.5.3
 assert_fails "validate_kv_transfer fails closed when NIXL_ROCM_VERSION disagrees with pyproject.toml at tag" run_validate
+
+# Staged .git repo missing refs/tags/<NIXL_ROCM_REF> fails closed even when working-tree pyproject.toml matches.
+make_gitless_cand
+cat > "${NIXL_ROCM_MOCK}/pyproject.toml" <<'TOML'
+[project]
+name = "nixl"
+version = "1.5.2"
+TOML
+git -C "${NIXL_ROCM_MOCK}" add pyproject.toml
+git -C "${NIXL_ROCM_MOCK}" commit -q -m "untagged working tree 1.5.2"
+assert_fails "validate_kv_transfer fails closed when staged nixl-rocm .git repo lacks refs/tags/v1.5.2 despite matching working-tree pyproject.toml" run_validate
 rm -rf "${NIXL_ROCM_MOCK}"
 
 # Missing staged nixl-rocm repo and pyproject.toml when NIXL_ROCM_REF changes fails closed.
+make_gitless_cand
+set_kv_proposal "recipe_sync" "nixl-pypi=1.5.3" "nixl-rocm=v1.5.3"
+sed -i.bak \
+  -e 's|^ARG NIXL_VERSION="1.5.2"|ARG NIXL_VERSION="1.5.3"|' \
+  -e 's|^ARG NIXL_ROCM_VERSION="1.5.2"|ARG NIXL_ROCM_VERSION="1.5.3"|' \
+  -e 's|^ARG NIXL_ROCM_REF="v1.5.2"|ARG NIXL_ROCM_REF="v1.5.3"|' \
+  "${CAND_DIR}/pack/model-transfer/Dockerfile"
+rm -f "${CAND_DIR}/pack/model-transfer/Dockerfile.bak"
 assert_fails "validate_kv_transfer fails closed when NIXL_ROCM_REF changes without staged nixl-rocm" run_validate
 
 # NIXL_ROCM_UCX_REF changes require verified ucx_rocm entries in kv-transfer-preflight-report.json.
