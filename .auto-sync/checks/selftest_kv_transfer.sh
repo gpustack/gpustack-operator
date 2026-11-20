@@ -1518,14 +1518,28 @@ assert_fails "validate_kv_transfer fails closed when NIXL_ROCM_VERSION disagrees
 
 # Staged .git repo missing refs/tags/<NIXL_ROCM_REF> fails closed even when working-tree pyproject.toml matches.
 make_gitless_cand
+set_kv_proposal "recipe_sync" "nixl-pypi=1.5.3" "nixl-rocm=v1.5.3"
+sed -i.bak \
+  -e 's|^ARG NIXL_VERSION="1.5.2"|ARG NIXL_VERSION="1.5.3"|' \
+  -e 's|^ARG NIXL_ROCM_VERSION="1.5.2"|ARG NIXL_ROCM_VERSION="1.5.3"|' \
+  -e 's|^ARG NIXL_ROCM_REF="v1.5.2"|ARG NIXL_ROCM_REF="v1.5.3"|' \
+  "${CAND_DIR}/pack/model-transfer/Dockerfile"
+rm -f "${CAND_DIR}/pack/model-transfer/Dockerfile.bak"
+git -C "${NIXL_ROCM_MOCK}" tag -d v1.5.3 >/dev/null
 cat > "${NIXL_ROCM_MOCK}/pyproject.toml" <<'TOML'
 [project]
 name = "nixl"
-version = "1.5.2"
+version = "1.5.3"
 TOML
 git -C "${NIXL_ROCM_MOCK}" add pyproject.toml
-git -C "${NIXL_ROCM_MOCK}" commit -q -m "untagged working tree 1.5.2"
-assert_fails "validate_kv_transfer fails closed when staged nixl-rocm .git repo lacks refs/tags/v1.5.2 despite matching working-tree pyproject.toml" run_validate
+git -C "${NIXL_ROCM_MOCK}" commit -q -m "untagged working tree 1.5.3"
+missing_nixl_tag_err=""
+if ! missing_nixl_tag_err="$(run_validate 2>&1)" && \
+   grep -q "refs/tags/v1\.5\.3:pyproject\.toml) not found" <<<"${missing_nixl_tag_err}"; then
+  pass "validate_kv_transfer fails closed when staged nixl-rocm .git repo lacks refs/tags/v1.5.3 despite matching working-tree pyproject.toml"
+else
+  fail "validate_kv_transfer fails closed when staged nixl-rocm .git repo lacks refs/tags/v1.5.3 despite matching working-tree pyproject.toml (${missing_nixl_tag_err})"
+fi
 rm -rf "${NIXL_ROCM_MOCK}"
 
 # Missing staged nixl-rocm repo and pyproject.toml when NIXL_ROCM_REF changes fails closed.
