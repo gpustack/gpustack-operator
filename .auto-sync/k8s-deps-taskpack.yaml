@@ -58,6 +58,9 @@ spec:
       - csrc/**
       - binding/**
       - gen/binding/**
+      - .claude/**
+      - .codex/**
+      - AGENTS.md
   instructions:
     - .auto-sync/instructions/k8s-deps.md
   upstreams:

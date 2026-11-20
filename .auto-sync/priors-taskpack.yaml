@@ -44,6 +44,9 @@ spec:
       - pkg/worker/scaling/priors/resolve.go
       - pkg/worker/scaling/priors/validate.go
       - gen/priors/**
+      - .claude/**
+      - .codex/**
+      - AGENTS.md
   instructions:
     - .auto-sync/instructions/priors.md
   upstreams:

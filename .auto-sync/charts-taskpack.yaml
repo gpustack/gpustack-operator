@@ -49,6 +49,9 @@ spec:
     protected:
       - hack/staging/**
       - staging/**
+      - .claude/**
+      - .codex/**
+      - AGENTS.md
   instructions:
     - .auto-sync/instructions/charts.md
   upstreams:

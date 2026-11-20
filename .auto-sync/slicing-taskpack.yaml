@@ -47,6 +47,9 @@ spec:
       - binding/**
       - gen/binding/**
       - pkg/devicemanager/allocator/**
+      - .claude/**
+      - .codex/**
+      - AGENTS.md
   instructions:
     - .auto-sync/instructions/slicing.md
   upstreams:

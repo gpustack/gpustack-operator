@@ -57,6 +57,9 @@ spec:
       - .auto-sync/proposals/router.json
     protected:
       - pkg/worker/webhooks/**
+      - .claude/**
+      - .codex/**
+      - AGENTS.md
   instructions:
     - .auto-sync/instructions/router.md
   upstreams:
