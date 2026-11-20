@@ -53,6 +53,8 @@ if TYPE_CHECKING:
     KUBERNETES_POD_IP: str | None = None
     KUBERNETES_NODE_NAME: str | None = None
     ASCEND_RT_VISIBLE_DEVICES: str = ""
+    ASCEND_LOCAL_COMM_RES: str = ""
+    ASCEND_GLOBAL_RESOURCE_CONFIG: str = ""
     NIXL_ETCD_ENDPOINTS: str | None = None
     NIXL_TCPSTORE_ENDPOINT: str | None = None
 
@@ -309,6 +311,10 @@ _VARIABLES: dict[str, Callable[[Mapping[str, str]], Any]] = {
     ),
     "ASCEND_RT_VISIBLE_DEVICES": lambda env: (
         trim_str(getenv("ASCEND_RT_VISIBLE_DEVICES", "", env)) or ""
+    ),
+    "ASCEND_LOCAL_COMM_RES": lambda env: getenv("ASCEND_LOCAL_COMM_RES", "", env),
+    "ASCEND_GLOBAL_RESOURCE_CONFIG": lambda env: getenv(
+        "ASCEND_GLOBAL_RESOURCE_CONFIG", "", env
     ),
     "NIXL_ETCD_ENDPOINTS": lambda env: trim_str(
         getenv("NIXL_ETCD_ENDPOINTS", None, env)

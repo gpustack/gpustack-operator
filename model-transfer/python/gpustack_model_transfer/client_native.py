@@ -18,7 +18,12 @@ from gpustack_model_transfer.core.budgets import (
     hixl_allocation_bytes,
 )
 from gpustack_model_transfer.core.errors import SourceUnavailableError
-from gpustack_model_transfer.source.memory import AclBlock, TorchPinnedOwner
+from gpustack_model_transfer.source.memory import (
+    AclBlock,
+    TorchPinnedOwner,
+    allocate_roce_host_mmap_block,
+    release_roce_host_mmap_block,
+)
 
 logger = logging.getLogger("gpustack_model_transfer.client_native")
 
@@ -61,7 +66,15 @@ class BorrowedAclOwner:
             raise SourceUnavailableError("engine ACL context changed")
 
     def allocate(self, name, size):
+        if size <= 0:
+            raise ValueError(f"allocation must be positive, got {size}")
         self.ensure_current()
+        from gpustack_model_transfer.backends.hixl.runtime import (
+            uses_roce_host_protocol,
+        )
+
+        if uses_roce_host_protocol():
+            return allocate_roce_host_mmap_block(name, size, self)
         registration_bytes = align_up_2m(size)
         allocation_bytes = hixl_allocation_bytes(size)
         pointer = ctypes.c_void_p()
@@ -74,7 +87,9 @@ class BorrowedAclOwner:
             if pointer.value:
                 self.uncertain_allocations.append(pointer.value)
             raise SourceUnavailableError("ACL host allocation failed")
-        block = AclBlock(name, size, self, align_up_2m(pointer.value))
+        block = AclBlock(
+            name, size, self, align_up_2m(pointer.value), allocator_kind="acl"
+        )
         block.allocation_address = pointer.value
         block.allocation_bytes = allocation_bytes
         block.registration_bytes = registration_bytes
@@ -83,14 +98,18 @@ class BorrowedAclOwner:
         return block
 
     def release(self, block):
+        if block.address == 0:
+            return
         self.ensure_current()
-        if (
-            block.address
-            and int(self.lib.aclrtFreeHost(ctypes.c_void_p(block.allocation_address)))
-            != 0
-        ):
+        if getattr(block, "allocator_kind", "acl") == "mmap":
+            release_roce_host_mmap_block(
+                block, getattr(self, "uncertain_allocations", None)
+            )
+            return
+        if int(self.lib.aclrtFreeHost(ctypes.c_void_p(block.allocation_address))) != 0:
             raise SourceUnavailableError("ACL host free outcome unknown")
         block.address = 0
+        block.aligned_address = 0
 
 
 class TargetNative:
@@ -146,14 +165,19 @@ class TargetNative:
         binds it; each retry picks a fresh port, and a run that keeps
         losing the race is an error, not a hang.
         """
+        from gpustack_model_transfer.backends.hixl.runtime import (
+            build_hixl_init_options,
+        )
+
         hixl = self.api._require()
+        options = build_hixl_init_options()
         last_error = None
         for _ in range(3):
             with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
                 probe.bind((self.pod_ip, 0))
                 self.endpoint = f"{self.pod_ip}:{probe.getsockname()[1]}"
             self.agent = SimpleNamespace(client=hixl.Hixl())
-            status = self.agent.client.initialize(self.endpoint, {"BufferPool": "0:0"})
+            status = self.agent.client.initialize(self.endpoint, dict(options))
             if int(status) == int(hixl.SUCCESS):
                 return
             last_error = int(status)
@@ -325,10 +349,12 @@ class TargetNative:
                 self.api.revoke_registration(self.agent, self.registration)
             else:
                 self.api.deregister(self.agent, self.registration)
+            self.registration = None
         if self.backend == "hixl" and self.agent is not None:
             result = self.agent.client.finalize()
             if result is not None and int(result) != 0:
                 raise SourceUnavailableError("HIXL finalize outcome unknown")
+            self.agent = None
         if self.block is not None:
             self.owner.release(self.block)
         self.closed = True

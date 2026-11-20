@@ -448,10 +448,13 @@ class HixlSourceBackend(_PagingBackend):
         self.allocator = allocator
 
     def start(self, engine_address: str = "") -> object:
+        from gpustack_model_transfer.backends.hixl.runtime import (
+            RealHixlAPI,
+            build_hixl_init_options,
+        )
+
         engine_address = engine_address or self.engine_address
         if self._engine_factory is None:
-            from gpustack_model_transfer.backends.hixl.runtime import RealHixlAPI
-
             try:
                 self._hixl = RealHixlAPI()._require()
             except (ImportError, OSError):
@@ -463,10 +466,10 @@ class HixlSourceBackend(_PagingBackend):
             self._engine_factory = self._hixl.Hixl
         else:
             self._hixl = None
+        options = build_hixl_init_options()
         engine = self._engine_factory()
         # Keep the owner if initialize fails; the worker quarantines this backend.
         self._engine = engine
-        options = {"BufferPool": "0:0"}
         status = int(engine.initialize(engine_address, options))
         if status != 0:
             raise SourceUnavailableError(
