@@ -46,6 +46,7 @@ if TYPE_CHECKING:
     GPUSTACK_MODEL_TRANSFER_POLICY: str = "require"
     GPUSTACK_MODEL_TRANSFER_PEER_P2P: bool = False
     GPUSTACK_MODEL_TRANSFER_BROKER_ADDRESS: str | None = None
+    GPUSTACK_MODEL_TRANSFER_WORKER_ADDRESS: str | None = None
     GPUSTACK_MODEL_TRANSFER_BOOTSTRAP_FILE: str | None = None
     KUBERNETES_POD_NAMESPACE: str | None = None
     KUBERNETES_POD_NAME: str | None = None
@@ -294,6 +295,9 @@ _VARIABLES: dict[str, Callable[[Mapping[str, str]], Any]] = {
     ),
     "GPUSTACK_MODEL_TRANSFER_BROKER_ADDRESS": lambda env: (
         trim_str(getenv("GPUSTACK_MODEL_TRANSFER_BROKER_ADDRESS", "", env)) or ""
+    ),
+    "GPUSTACK_MODEL_TRANSFER_WORKER_ADDRESS": lambda env: (
+        trim_str(getenv("GPUSTACK_MODEL_TRANSFER_WORKER_ADDRESS", None, env)) or None
     ),
     "GPUSTACK_MODEL_TRANSFER_BOOTSTRAP_FILE": lambda env: (
         trim_str(getenv("GPUSTACK_MODEL_TRANSFER_BOOTSTRAP_FILE", "", env)) or ""

@@ -396,18 +396,20 @@ class TestRoceHostAnonymousMmap:
     ):
         acl = RecordingAclLib()
         owner = _make_owner(owner_kind, acl)
+        roce_owner = None
         try:
             # 1) Allocate ACL block when roce:host is False.
             acl_block = owner.allocate("acl.bin", 128)
             assert acl_block.allocator_kind == "acl"
             assert len(acl.allocations) == 1
 
-            # 2) Flip env to roce:host=True and allocate mmap block.
+            # 2) Flip env to roce:host=True and allocate mmap block from a fresh owner.
             monkeypatch.setenv(
                 "ASCEND_GLOBAL_RESOURCE_CONFIG",
                 json.dumps({"comm_resource_config": {"protocol_desc": "roce:host"}}),
             )
-            mmap_block = owner.allocate("mmap.bin", 128)
+            roce_owner = _make_owner(owner_kind, acl)
+            mmap_block = roce_owner.allocate("mmap.bin", 128)
             assert mmap_block.allocator_kind == "mmap"
             mapping = mmap_block.mapping
             assert isinstance(mapping, mmap.mmap)
@@ -425,12 +427,190 @@ class TestRoceHostAnonymousMmap:
                 "ASCEND_GLOBAL_RESOURCE_CONFIG",
                 json.dumps({"comm_resource_config.protocol_desc": ["ub_ctp:host"]}),
             )
-            owner.release(mmap_block)
+            roce_owner.release(mmap_block)
             assert mapping.closed
-            owner.release(mmap_block)
+            roce_owner.release(mmap_block)
             assert acl.calls.count("aclrtFreeHost") == free_before + 1
         finally:
+            if roce_owner is not None:
+                _dispose_owner(owner_kind, roce_owner)
             _dispose_owner(owner_kind, owner)
+
+    @pytest.mark.parametrize("owner_kind", ["source", "borrowed"])
+    @pytest.mark.parametrize("initial_roce", [True, False])
+    def test_owner_protocol_snapshot_ignores_post_init_env_mutation(
+        self, monkeypatch, owner_kind, initial_roce
+    ):
+        roce_cfg = json.dumps({"comm_resource_config.protocol_desc": ["roce:host"]})
+        ub_cfg = json.dumps({"comm_resource_config.protocol_desc": ["ub_ctp:host"]})
+        monkeypatch.setenv(
+            "ASCEND_GLOBAL_RESOURCE_CONFIG", roce_cfg if initial_roce else ub_cfg
+        )
+        acl = RecordingAclLib(forbid_malloc=initial_roce)
+        owner = _make_owner(owner_kind, acl)
+        try:
+            # Flip env to the opposite protocol after owner initialization.
+            monkeypatch.setenv(
+                "ASCEND_GLOBAL_RESOURCE_CONFIG", ub_cfg if initial_roce else roce_cfg
+            )
+            block = owner.allocate("weights.bin", 256)
+            try:
+                assert block.allocator_kind == ("mmap" if initial_roce else "acl")
+            finally:
+                owner.release(block)
+        finally:
+            _dispose_owner(owner_kind, owner)
+
+    def test_worker_idle_rebuild_and_target_native_preserve_single_protocol_snapshot(
+        self, monkeypatch, tmp_path
+    ):
+        import hashlib
+        from pathlib import Path
+
+        from gpustack_model_transfer.source.native_worker import NativeSourceWorker
+        from gpustack_model_transfer.source.workorder import parse_assignment
+
+        roce_cfg = json.dumps({"comm_resource_config.protocol_desc": ["roce:host"]})
+        ub_cfg = json.dumps({"comm_resource_config.protocol_desc": ["ub_ctp:host"]})
+        assert hixl_runtime.options_use_roce_host(
+            hixl_runtime.build_hixl_init_options(
+                {"ASCEND_GLOBAL_RESOURCE_CONFIG": roce_cfg}
+            )
+        )
+        assert not hixl_runtime.options_use_roce_host(
+            hixl_runtime.build_hixl_init_options(
+                {"ASCEND_GLOBAL_RESOURCE_CONFIG": ub_cfg}
+            )
+        )
+
+        fixture = Path(__file__).resolve().parents[3] / "contracts/fixtures/tiny_dense"
+        raw_manifest = (fixture / "manifest.json").read_bytes()
+        manifest_obj = json.loads(raw_manifest)
+        assignment = parse_assignment(
+            {
+                "generation": "gen-roce-snapshot",
+                "workerSecret": "secret",
+                "digest": "sha256:" + "a" * 64,
+                "namespace": "test",
+                "artifactUID": manifest_obj["artifact_uid"],
+                "sourceGeneration": manifest_obj["source_generation"],
+                "manifestSHA256": hashlib.sha256(raw_manifest).hexdigest(),
+                "manifestJSON": raw_manifest.decode(),
+                "treePath": str(fixture),
+                "totalBytes": sum(f["size"] for f in manifest_obj["files"]),
+                "registrations": len(manifest_obj["files"]),
+                "residentBudgetBytes": 4 << 20,
+            },
+            backend="hixl",
+        )
+        monkeypatch.setenv("ASCEND_GLOBAL_RESOURCE_CONFIG", roce_cfg)
+        acl = RecordingAclLib(forbid_malloc=True)
+        seen_opts = []
+        backend = HixlSourceBackend(
+            engine_factory=lambda: SimpleNamespace(
+                initialize=lambda addr, opts: seen_opts.append(dict(opts)) or 0,
+                register_mem=lambda desc, mtype: (0, 21),
+                deregister_mem=lambda handle: 0,
+                finalize=lambda: 0,
+            ),
+            engine_address="127.0.0.1:29800",
+        )
+
+        # Mutate env between preflight() and allocator construction/idle rebuild!
+        def flip_on_native_start():
+            monkeypatch.setenv("ASCEND_GLOBAL_RESOURCE_CONFIG", ub_cfg)
+
+        state = {"active": 0, "action": "none"}
+        control = SimpleNamespace(
+            generation="gen-roce-snapshot",
+            worker_id="pod-uid",
+            worker_instance_id="inst-snap",
+            register=lambda: "lease",
+            native_start=flip_on_native_start,
+            heartbeat=lambda **kw: {
+                "action": state["action"],
+                "activeSessions": state["active"],
+                "unknownSessions": 0,
+            },
+            filled=lambda count, descs: None,
+            drain_ack=lambda native_released: None,
+            quarantine=lambda reason: None,
+            close=lambda: None,
+        )
+        worker = NativeSourceWorker(
+            control,
+            assignment,
+            backend=lambda: backend,
+            allocator=lambda: AclHostOwner(loader=lambda _: acl),
+            worker_instance_id="inst-snap",
+            poll_interval=0.01,
+        )
+        try:
+            worker.start()
+            worker._stop_event.set()
+            if worker._control_thread is not None:
+                worker._control_thread.join(timeout=2)
+            assert worker.state == "serving"
+            assert hixl_runtime.options_use_roce_host(seen_opts[0]) is True
+            assert all(b.allocator_kind == "mmap" for b in worker.blocks.values())
+
+            worker.active_sessions = 0
+            worker.unknown_sessions = 0
+            assert worker.release_idle_blocks() is True
+            assert worker.blocks == {}
+
+            worker._rebuild_blocks()
+            assert worker.state == "serving"
+            assert worker.blocks
+            assert all(b.allocator_kind == "mmap" for b in worker.blocks.values())
+            assert "aclrtMallocHost" not in acl.calls
+        finally:
+            worker.active_sessions = 0
+            worker.unknown_sessions = 0
+            worker._drain_requested.set()
+            worker.drain()
+            worker.close()
+
+        # TargetNative also aligns owner._use_roce_host with the single build_hixl_init_options() snapshot.
+        monkeypatch.setenv("ASCEND_GLOBAL_RESOURCE_CONFIG", ub_cfg)
+        target_acl = RecordingAclLib(forbid_malloc=True)
+
+        def make_borrowed():
+            owner_inst = BorrowedAclOwner(loader=lambda _: target_acl)
+            # Flip env to roce:host AFTER BorrowedAclOwner() ran so build_hixl_init_options() sees roce:host;
+            # TargetNative must align owner._use_roce_host with the resolved init options.
+            monkeypatch.setenv("ASCEND_GLOBAL_RESOURCE_CONFIG", roce_cfg)
+            return owner_inst
+
+        target_init_opts = []
+        fake_hixl = SimpleNamespace(
+            Hixl=lambda: SimpleNamespace(
+                initialize=lambda ep, opts: target_init_opts.append(dict(opts)) or 0,
+                register_mem=lambda desc, mtype: (0, 31),
+                deregister_mem=lambda h: 0,
+                finalize=lambda: 0,
+            ),
+            SUCCESS=0,
+            MemDesc=lambda a, n: (a, n),
+            MemType=SimpleNamespace(MEM_HOST="MEM_HOST", MEM_DEVICE="MEM_DEVICE"),
+            TransferOp=SimpleNamespace(READ="READ", WRITE="WRITE"),
+            TransferStatus=SimpleNamespace(
+                COMPLETED="COMPLETED", FAILED="FAILED", TIMEOUT="TIMEOUT"
+            ),
+        )
+        real_api = hixl_runtime.RealHixlAPI()
+        real_api._hixl = fake_hixl
+        monkeypatch.setattr(client_native, "BorrowedAclOwner", make_borrowed)
+        monkeypatch.setattr(hixl_runtime, "load_runtime", lambda: real_api)
+
+        target = TargetNative("hixl", "127.0.0.1", 4 << 20)
+        target.start()
+        try:
+            assert hixl_runtime.options_use_roce_host(target_init_opts[0]) is True
+            assert target.block.allocator_kind == "mmap"
+            assert "aclrtMallocHost" not in target_acl.calls
+        finally:
+            target.close()
 
     @pytest.mark.parametrize("owner_kind", ["source", "borrowed"])
     def test_gc_safety_and_quarantine_on_live_view_buffer_error(

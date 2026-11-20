@@ -16,6 +16,8 @@ authorizes native work, and it is retried idempotently until answered.
 
 import http.client
 import json
+import os
+import socket
 import uuid
 
 from gpustack_model_transfer.core.manifest import MAX_MANIFEST_RESPONSE_BYTES
@@ -23,6 +25,41 @@ from gpustack_model_transfer.core.manifest_pages import MAX_PAGE_BYTES
 
 MAX_RESPONSE_BYTES = MAX_MANIFEST_RESPONSE_BYTES
 MAX_ASSIGNMENTS = 16
+
+
+def parse_unix_address(address: str) -> str:
+    """Validate and extract the absolute socket path from a unix:// address."""
+    if not isinstance(address, str) or not address.startswith("unix://"):
+        raise ValueError("address must use the unix:// scheme")
+    path = address[len("unix://") :]
+    if not path or "\x00" in path or not os.path.isabs(path) or path.endswith("/"):
+        raise ValueError("unix socket path must be a non-empty absolute file path")
+    return path
+
+
+class _UnixHTTPConnection(http.client.HTTPConnection):
+    """HTTP/1.1 connection over a Pod-local AF_UNIX stream socket."""
+
+    def __init__(self, unix_path: str, timeout: float = 5.0):
+        super().__init__("localhost", timeout=timeout)
+        self._unix_path = unix_path
+
+    def connect(self) -> None:
+        sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        try:
+            if self.timeout is not socket._GLOBAL_DEFAULT_TIMEOUT:
+                sock.settimeout(self.timeout)
+            sock.connect(self._unix_path)
+        except BaseException:
+            sock.close()
+            raise
+        self.sock = sock
+
+
+def _open_connection(address: str, timeout: float) -> http.client.HTTPConnection:
+    if isinstance(address, str) and address.startswith("unix://"):
+        return _UnixHTTPConnection(parse_unix_address(address), timeout=timeout)
+    return http.client.HTTPConnection(address, timeout=timeout)
 
 
 def _read_response(response, max_bytes=MAX_RESPONSE_BYTES):
@@ -89,7 +126,7 @@ class BootstrapClient:
 
     def assignments(self) -> list:
         token = self._token()
-        connection = http.client.HTTPConnection(self._address, timeout=self._timeout)
+        connection = _open_connection(self._address, timeout=self._timeout)
         try:
             connection.request(
                 "GET",
@@ -122,7 +159,7 @@ class BootstrapClient:
             "manifestSHA256": assignment["manifestSHA256"],
             "pageSHA256": page["sha256"],
         }
-        connection = http.client.HTTPConnection(self._address, timeout=self._timeout)
+        connection = _open_connection(self._address, timeout=self._timeout)
         try:
             connection.request(
                 "POST",
@@ -265,7 +302,7 @@ class ControlClient:
             workerInstanceID=self.worker_instance_id,
         )
         body = json.dumps(payload)
-        connection = http.client.HTTPConnection(self._address, timeout=self._timeout)
+        connection = _open_connection(self._address, timeout=self._timeout)
         try:
             connection.request(
                 "POST", path, body=body, headers={"Content-Type": "application/json"}

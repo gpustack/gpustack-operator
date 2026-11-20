@@ -384,9 +384,7 @@ def build_hixl_init_options(
     return options
 
 
-def uses_roce_host_protocol(env: Mapping[str, str] | None = None) -> bool:
-    """Return True iff canonicalized ASCEND_GLOBAL_RESOURCE_CONFIG selects roce:host."""
-    global_cfg = get_envs(env).ASCEND_GLOBAL_RESOURCE_CONFIG
+def _global_config_uses_roce_host(global_cfg: str) -> bool:
     if not global_cfg:
         return False
     try:
@@ -404,6 +402,40 @@ def uses_roce_host_protocol(env: Mapping[str, str] | None = None) -> bool:
             isinstance(item, str) and item == "roce:host" for item in protocol_desc
         )
     return False
+
+
+def uses_roce_host_protocol(env: Mapping[str, str] | None = None) -> bool:
+    """Return True iff canonicalized ASCEND_GLOBAL_RESOURCE_CONFIG selects roce:host."""
+    return _global_config_uses_roce_host(get_envs(env).ASCEND_GLOBAL_RESOURCE_CONFIG)
+
+
+def options_use_roce_host(options: Mapping[str, str] | None) -> bool:
+    """Return True iff resolved HIXL initialize options select roce:host."""
+    if not isinstance(options, Mapping):
+        return False
+    raw = options.get("GlobalResourceConfig", "")
+    return _global_config_uses_roce_host(raw if isinstance(raw, str) else "")
+
+
+def hixl_init_options_need_acl_context(env: Mapping[str, str] | None = None) -> bool:
+    """Return True iff build_hixl_init_options() queries the active ACL thread."""
+    cfg = get_envs(env)
+    if cfg.ASCEND_LOCAL_COMM_RES:
+        return False
+    global_cfg = cfg.ASCEND_GLOBAL_RESOURCE_CONFIG
+    if not global_cfg:
+        return False
+    try:
+        parsed = json.loads(global_cfg)
+    except (TypeError, ValueError):
+        return False
+    if not isinstance(parsed, dict):
+        return False
+    normalized = _normalize_global_resource_dict(parsed)
+    local_path = normalized.get("local_comm_res_path")
+    return bool(
+        isinstance(local_path, str) and local_path and os.path.isdir(local_path)
+    )
 
 
 def load_runtime(api=None) -> HixlAPI:
@@ -524,6 +556,34 @@ def _buffer_extent(buffer) -> tuple:
     if isinstance(buffer, bytearray):
         return len(buffer), "HOST"
     raise TypeError("registered buffer must be writable or expose data_ptr()")
+
+
+def _registered_extent(buffer, extent: int) -> int:
+    """Return verified registration byte length for owned padded blocks, else extent."""
+    if isinstance(buffer, AlignedHostBuffer):
+        return buffer.registration_bytes
+    from gpustack_model_transfer.source.memory import AclBlock
+
+    if isinstance(buffer, AclBlock):
+        aligned_offset = buffer.aligned_offset
+        reg_bytes = buffer.registration_bytes
+        alloc_bytes = buffer.allocation_bytes
+        if (
+            isinstance(aligned_offset, bool)
+            or not isinstance(aligned_offset, int)
+            or isinstance(reg_bytes, bool)
+            or not isinstance(reg_bytes, int)
+            or isinstance(alloc_bytes, bool)
+            or not isinstance(alloc_bytes, int)
+            or aligned_offset < 0
+            or reg_bytes < extent
+            or aligned_offset + reg_bytes > alloc_bytes
+        ):
+            raise ValueError(
+                "AclBlock registration bounds are inconsistent with its allocation"
+            )
+        return reg_bytes
+    return extent
 
 
 class _RealAgent:
@@ -652,11 +712,7 @@ class RealHixlAPI:
             for name, buffer in buffers.items():
                 addr = _address_of(buffer)
                 extent, memory_class = _buffer_extent(buffer)
-                registered_extent = (
-                    buffer.registration_bytes
-                    if isinstance(buffer, AlignedHostBuffer)
-                    else getattr(buffer, "registration_bytes", extent)
-                )
+                registered_extent = _registered_extent(buffer, extent)
                 mem_type = (
                     hixl.MemType.MEM_DEVICE
                     if memory_class == "DEVICE"

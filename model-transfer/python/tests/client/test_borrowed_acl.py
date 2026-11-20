@@ -78,3 +78,25 @@ def test_failed_acl_allocation_retains_any_returned_pointer():
         owner.allocate("window", 8)
     assert len(owner.uncertain_allocations) == 1
     assert owner.uncertain_allocations[0] in acl.allocations
+
+
+def test_borrowed_acl_releases_mmap_block_after_context_change(monkeypatch):
+    monkeypatch.setenv(
+        "ASCEND_GLOBAL_RESOURCE_CONFIG",
+        '{"comm_resource_config.protocol_desc":["roce:host"]}',
+    )
+    acl = ACL()
+    owner = BorrowedAclOwner(loader=lambda _: acl)
+    block = owner.allocate("window", 4096)
+    mapping = block.mapping
+    assert block.allocator_kind == "mmap"
+    assert mapping is not None and not mapping.closed
+
+    acl.context = 456
+    with pytest.raises(SourceUnavailableError):
+        owner.ensure_current()
+
+    owner.release(block)
+    assert mapping.closed
+    assert block.address == 0
+    assert "free" not in acl.calls

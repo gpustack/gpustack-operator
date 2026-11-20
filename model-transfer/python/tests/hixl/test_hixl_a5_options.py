@@ -660,3 +660,240 @@ class TestSourceAndTargetEndpointWiring:
         )
         real_api.create_agent("explicit", {"local_engine": "127.0.0.1:9999"})
         assert explicit_calls == [("127.0.0.1:9999", {})]
+
+
+class TestSourceWorkerPreflightVsQuarantine:
+    @staticmethod
+    def _assignment(generation: str = "gen-a5-preflight"):
+        import hashlib
+        from pathlib import Path
+
+        from gpustack_model_transfer.source.workorder import parse_assignment
+
+        fixture = Path(__file__).resolve().parents[3] / "contracts/fixtures/tiny_dense"
+        raw_manifest = (fixture / "manifest.json").read_bytes()
+        manifest_obj = json.loads(raw_manifest)
+        return parse_assignment(
+            {
+                "generation": generation,
+                "workerSecret": "super-secret-worker-token",
+                "digest": "sha256:" + "a" * 64,
+                "namespace": "test",
+                "artifactUID": manifest_obj["artifact_uid"],
+                "sourceGeneration": manifest_obj["source_generation"],
+                "manifestSHA256": hashlib.sha256(raw_manifest).hexdigest(),
+                "manifestJSON": raw_manifest.decode(),
+                "treePath": str(fixture),
+                "totalBytes": sum(f["size"] for f in manifest_obj["files"]),
+                "registrations": len(manifest_obj["files"]),
+                "residentBudgetBytes": 4 << 20,
+            },
+            backend="hixl",
+        )
+
+    @staticmethod
+    def _acl_runtime_lib(phy_id: int = 6):
+        class _Fn:
+            def __init__(self, fn):
+                self.fn = fn
+
+            def __call__(self, *args):
+                return self.fn(*args)
+
+        class FullFakeAcl(FakeAclLib):
+            def __init__(self):
+                super().__init__({0: phy_id}, default_dev=0)
+                self.disposed = False
+                self.aclInit = _Fn(lambda _cfg: 0)
+                self.aclrtSetDevice = _Fn(lambda _dev: 0)
+                self.aclrtCreateContext = _Fn(self._create_ctx)
+                self.aclrtSetCurrentContext = _Fn(lambda _ctx: 0)
+                self.aclrtDestroyContext = _Fn(lambda _ctx: 0)
+                self.aclrtResetDevice = _Fn(lambda _dev: 0)
+                self.aclFinalize = _Fn(self._finalize)
+                self.aclrtMallocHost = _Fn(self._malloc)
+                self.aclrtFreeHost = _Fn(lambda _ptr: 0)
+
+            def _create_ctx(self, out_ptr, _dev):
+                ctypes.cast(out_ptr, ctypes.POINTER(ctypes.c_void_p))[0] = (
+                    ctypes.c_void_p(0xCAFE)
+                )
+                return 0
+
+            def _finalize(self):
+                self.disposed = True
+                return 0
+
+            def _malloc(self, out_ptr, size):
+                raise AssertionError(
+                    "host allocation must not run on preflight or init failure"
+                )
+
+        return FullFakeAcl()
+
+    def test_missing_endpoint_file_stops_cleanly_without_quarantine_while_init_failure_quarantines(
+        self, monkeypatch, tmp_path, caplog
+    ):
+        from gpustack_model_transfer.source import memory as source_memory
+        from gpustack_model_transfer.source.backend import (
+            release_source_retained,
+            retained_source_states,
+        )
+        from gpustack_model_transfer.source.memory import AclHostOwner
+        from gpustack_model_transfer.source.native_worker import NativeSourceWorker
+        from gpustack_model_transfer.source.transfer_service import OperationRegistry
+
+        hixlep = tmp_path / "hixlep"
+        hixlep.mkdir()
+        monkeypatch.setenv(
+            "ASCEND_GLOBAL_RESOURCE_CONFIG",
+            json.dumps(
+                {
+                    "comm_resource_config.protocol_desc": ["roce:host"],
+                    "local_comm_res_path": str(hixlep),
+                }
+            ),
+        )
+        acl = self._acl_runtime_lib(phy_id=6)
+        native_starts: list[str] = []
+        quarantines: list[str] = []
+
+        def make_control(gen: str):
+            return SimpleNamespace(
+                generation=gen,
+                worker_id="pod-uid",
+                worker_instance_id="inst-1",
+                lease_id="lease-1",
+                register=lambda: "lease-1",
+                native_start=lambda: native_starts.append(gen),
+                heartbeat=lambda **kw: {
+                    "action": "none",
+                    "activeSessions": 0,
+                    "unknownSessions": 0,
+                },
+                filled=lambda count, descs: None,
+                drain_ack=lambda native_released: None,
+                quarantine=lambda reason: quarantines.append(reason),
+                close=lambda: None,
+            )
+
+        before_retained = set(retained_source_states())
+        assignment_missing = self._assignment("gen-missing-ep")
+        port_released = []
+        worker_missing = NativeSourceWorker(
+            make_control("gen-missing-ep"),
+            assignment_missing,
+            backend=lambda: self._backend_with_finalizer(port_released),
+            allocator=lambda: AclHostOwner(loader=lambda _: acl),
+            worker_instance_id="inst-1",
+            poll_interval=0.01,
+        )
+        with caplog.at_level("WARNING"):
+            worker_missing.start()
+        worker_missing.close()
+
+        assert worker_missing.state == "stopped"
+        assert worker_missing._native_attempted is False
+        assert native_starts == []
+        assert quarantines == []
+        assert set(retained_source_states()) == before_retained
+        assert source_memory._ACL_RUNTIME is None
+        assert acl.disposed is True
+        assert port_released == ["released"]
+        assert "ub_endpoint_npu_6.json" in caplog.text
+        assert "ASCEND_LOCAL_COMM_RES" in caplog.text
+        assert "super-secret-worker-token" not in caplog.text
+
+        # Unavailable ACL physical ID symbol also stops cleanly in preflight without quarantine.
+        caplog.clear()
+        acl_no_sym = self._acl_runtime_lib(phy_id=6)
+        del acl_no_sym.aclrtGetPhyDevIdByUserDevId
+        worker_no_sym = NativeSourceWorker(
+            make_control("gen-no-sym"),
+            self._assignment("gen-no-sym"),
+            backend=lambda: self._backend_with_finalizer(port_released),
+            allocator=lambda: AclHostOwner(loader=lambda _: acl_no_sym),
+            worker_instance_id="inst-1",
+            poll_interval=0.01,
+        )
+        with caplog.at_level("WARNING"):
+            worker_no_sym.start()
+        worker_no_sym.close()
+        assert worker_no_sym.state == "stopped"
+        assert worker_no_sym._native_attempted is False
+        assert native_starts == []
+        assert quarantines == []
+        assert source_memory._ACL_RUNTIME is None
+        assert acl_no_sym.disposed is True
+        assert "aclrtGetPhyDevIdByUserDevId" in caplog.text
+        assert "super-secret-worker-token" not in caplog.text
+
+        supervisor_stub = SimpleNamespace(
+            workers={"gen-missing-ep": worker_missing},
+            worker_id="pod-uid",
+            worker_instance_id="inst-1",
+            _starting=0,
+            _admission_closed=threading.Event(),
+            _lock=threading.Lock(),
+        )
+        registry = OperationRegistry(supervisor_stub)
+        registry.freeze()
+        assert registry.runtime() == {
+            "workerID": "pod-uid",
+            "workerInstanceID": "inst-1",
+            "generations": [],
+            "nativeOperations": 0,
+            "unknownOperations": 0,
+            "retainedGenerations": [],
+        }
+
+        # Now provide the endpoint file so preflight passes, and fail engine.initialize():
+        # native_start runs and the generation MUST still be quarantined.
+        (hixlep / "ub_endpoint_npu_6.json").write_text('{"phy":6}')
+        acl2 = self._acl_runtime_lib(phy_id=6)
+        assignment_init_fail = self._assignment("gen-init-fail")
+        failing_backend = HixlSourceBackend(
+            engine_factory=lambda: SimpleNamespace(
+                initialize=lambda addr, opts: 1,
+            ),
+            engine_address="127.0.0.1:29700",
+        )
+        worker_init_fail = NativeSourceWorker(
+            make_control("gen-init-fail"),
+            assignment_init_fail,
+            backend=lambda: failing_backend,
+            allocator=lambda: AclHostOwner(loader=lambda _: acl2),
+            worker_instance_id="inst-1",
+            poll_interval=0.01,
+        )
+        try:
+            worker_init_fail.start()
+            assert native_starts == ["gen-init-fail"]
+            assert worker_init_fail._native_attempted is True
+            assert worker_init_fail.state == "quarantined"
+            assert quarantines == ["SourceUnavailableError"]
+            supervisor_stub.workers["gen-init-fail"] = worker_init_fail
+            snap = registry.runtime()
+            assert snap["retainedGenerations"] == ["gen-init-fail"]
+        finally:
+            worker_init_fail._stop_event.set()
+            if worker_init_fail._control_thread is not None:
+                worker_init_fail._control_thread.join(timeout=2)
+            if worker_init_fail.allocator is not None:
+                worker_init_fail.allocator.dispose()
+            for item in retained_source_states():
+                if item not in before_retained:
+                    release_source_retained(item, external_fence="test-cleanup")
+
+    @staticmethod
+    def _backend_with_finalizer(released: list[str]) -> HixlSourceBackend:
+        backend = HixlSourceBackend(
+            engine_factory=lambda: SimpleNamespace(
+                initialize=lambda addr, opts: (_ for _ in ()).throw(
+                    AssertionError("engine must not initialize when preflight fails")
+                )
+            ),
+            engine_address="127.0.0.1:29701",
+        )
+        backend.on_finalized = lambda: released.append("released")
+        return backend

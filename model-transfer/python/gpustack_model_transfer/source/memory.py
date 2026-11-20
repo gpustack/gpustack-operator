@@ -238,7 +238,13 @@ class AclHostOwner:
     loader explicitly.
     """
 
-    def __init__(self, device_id: int = 0, loader=None):
+    def __init__(
+        self,
+        device_id: int = 0,
+        loader=None,
+        *,
+        use_roce_host: bool | None = None,
+    ):
         if (
             isinstance(device_id, bool)
             or not isinstance(device_id, int)
@@ -247,6 +253,14 @@ class AclHostOwner:
             raise ValueError(
                 f"ACL device id must be a non-negative int, got {device_id!r}"
             )
+        if use_roce_host is None:
+            from gpustack_model_transfer.backends.hixl.runtime import (
+                uses_roce_host_protocol,
+            )
+
+            self._use_roce_host = uses_roce_host_protocol()
+        else:
+            self._use_roce_host = bool(use_roce_host)
         self._device_id = device_id
         self._loader = loader
         self._uncertain_allocations = []
@@ -270,11 +284,7 @@ class AclHostOwner:
     def allocate(self, name: str, byte_size: int) -> HostBlock:
         if byte_size <= 0:
             raise ValueError(f"allocation must be positive, got {byte_size}")
-        from gpustack_model_transfer.backends.hixl.runtime import (
-            uses_roce_host_protocol,
-        )
-
-        if uses_roce_host_protocol():
+        if getattr(self, "_use_roce_host", False):
             return allocate_roce_host_mmap_block(name, byte_size, self)
         registration_bytes = align_up_2m(byte_size)
         allocation_bytes = hixl_allocation_bytes(byte_size)
@@ -291,7 +301,15 @@ class AclHostOwner:
                 f"aclrtMallocHost of {byte_size} bytes failed with status {status}"
             )
         address = align_up_2m(host_pointer.value)
-        block = AclBlock(name, byte_size, self, address, allocator_kind="acl")
+        aligned_offset = address - host_pointer.value
+        block = AclBlock(
+            name,
+            byte_size,
+            self,
+            address,
+            allocator_kind="acl",
+            aligned_offset=aligned_offset,
+        )
         block.allocation_address = host_pointer.value
         block.allocation_bytes = allocation_bytes
         block.registration_bytes = registration_bytes
@@ -320,6 +338,8 @@ class AclHostOwner:
         block.aligned_address = 0
 
     def dispose(self) -> None:
+        if self._runtime is None:
+            return
         _release_acl_runtime(self._runtime)
         self._runtime = None
 

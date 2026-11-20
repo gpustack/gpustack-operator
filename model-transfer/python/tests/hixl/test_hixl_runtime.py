@@ -292,6 +292,66 @@ class TestRealApiSurface(unittest.TestCase):
             registration.windows["w"], {"addr": 0x1111, "len": 40, "type": "HOST"}
         )
 
+    def test_register_memory_ignores_stray_registration_bytes_and_verifies_acl_block(
+        self,
+    ):
+        from gpustack_model_transfer.source.memory import (
+            AclBlock,
+            allocate_roce_host_mmap_block,
+            release_roce_host_mmap_block,
+        )
+
+        class StrayCpuTensor:
+            device = type("Device", (), {"type": "cpu"})()
+            registration_bytes = 64 << 20
+
+            def data_ptr(self):
+                return 0x4444
+
+            def numel(self):
+                return 16
+
+            def element_size(self):
+                return 4
+
+            def is_contiguous(self):
+                return True
+
+        api = self.api()
+        agent = api.create_agent("reader", {"local_engine": "reader@node-a"})
+        owned_block = allocate_roce_host_mmap_block("weights", 128, None)
+        try:
+            registration = api.register_memory(
+                agent, {"generic": StrayCpuTensor(), "owned": owned_block}
+            )
+            register_calls = [
+                call for call in agent.client.calls if call[0] == "register_mem"
+            ]
+            self.assertEqual(register_calls[0][1].len, 64)
+            self.assertEqual(registration.windows["generic"]["len"], 64)
+            self.assertEqual(register_calls[1][1].len, 2 << 20)
+            self.assertEqual(registration.windows["owned"]["len"], 128)
+        finally:
+            release_roce_host_mmap_block(owned_block)
+
+        for aligned_offset, reg_bytes, alloc_bytes in (
+            (-1, 64, 128),
+            (0, 32, 128),
+            (64, 128, 128),
+        ):
+            with self.subTest(
+                aligned_offset=aligned_offset,
+                reg_bytes=reg_bytes,
+                alloc_bytes=alloc_bytes,
+            ):
+                bad_block = AclBlock(
+                    "bad", 64, None, 2 << 20, aligned_offset=aligned_offset
+                )
+                bad_block.registration_bytes = reg_bytes
+                bad_block.allocation_bytes = alloc_bytes
+                with self.assertRaises(ValueError):
+                    api.register_memory(agent, {"bad": bad_block})
+
     def test_a_device_tensor_registers_as_device_memory(self):
         api = self.api()
 
