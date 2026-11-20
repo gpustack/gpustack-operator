@@ -482,8 +482,17 @@ for tp in taskpacks:
                 f"{rel_tp} spec.verification.localChecks[{idx}].parameters.script",
             )
             toolchains = params.get("toolchainPaths")
-            if not isinstance(toolchains, list) or not toolchains:
-                raise AssertionError(f"{rel_tp}: command.v1 should declare non-empty toolchainPaths")
+            if toolchains is not None:
+                if not isinstance(toolchains, list) or not all(
+                    isinstance(p, str) and p.strip() for p in toolchains
+                ):
+                    raise AssertionError(
+                        f"{rel_tp}: command.v1 toolchainPaths must be a list of non-empty strings"
+                    )
+                if "/usr/local/bin" in toolchains:
+                    raise AssertionError(
+                        f"{rel_tp}: command.v1 toolchainPaths must not include /usr/local/bin"
+                    )
     if not has_cmd_v1:
         raise AssertionError(f"{rel_tp}: expected at least one command.v1 check")
 

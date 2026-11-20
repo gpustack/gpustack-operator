@@ -130,9 +130,6 @@ spec:
           script: .auto-sync/checks/validate_kv_transfer.sh
           timeoutSeconds: 1800
           allowReadOnlyGitHubToken: false
-          toolchainPaths:
-            - /usr/local/bin
-            - /usr/bin
           env:
             - AUTOSYNC_STAGE_DIR
             - AUTOSYNC_FAST_SELFTEST
