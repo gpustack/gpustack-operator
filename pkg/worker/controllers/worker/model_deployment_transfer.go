@@ -18,6 +18,7 @@ import (
 	"gpustack.ai/gpustack/pkg/modelstore"
 	"gpustack.ai/gpustack/pkg/modeltransfer/authorization"
 	"gpustack.ai/gpustack/pkg/nodefeature"
+	"gpustack.ai/gpustack/pkg/worker/kvcache/inject"
 	"gpustack.ai/gpustack/pkg/worker/settings"
 )
 
@@ -243,13 +244,21 @@ type modelTransferTuple struct {
 // its backend. It is a variable so a test can install a scoped fixture.
 var modelDeploymentModelTransferQualified = modelDeploymentModelTransferDefaultQualified
 
-// modelDeploymentModelTransferDefaultQualified admits the NVIDIA NIXL tuples
-// for vLLM and SGLang after policy opt-in. This routing allowlist does not
+// modelDeploymentModelTransferDefaultQualified admits the NVIDIA NIXL and Ascend HIXL
+// tuples for vLLM and SGLang after policy opt-in. This routing allowlist does not
 // establish hardware or safety acceptance.
 func modelDeploymentModelTransferDefaultQualified(tuple modelTransferTuple) bool {
-	return tuple.Manufacturer == nodefeature.ManufacturerNVIDIA &&
-		tuple.Backend == "nixl" &&
-		modelDeploymentModelTransferEngineSupported(tuple.Engine)
+	if !modelDeploymentModelTransferEngineSupported(tuple.Engine) {
+		return false
+	}
+	switch tuple.Manufacturer {
+	case nodefeature.ManufacturerNVIDIA:
+		return tuple.Backend == "nixl"
+	case nodefeature.ManufacturerAscend:
+		return tuple.Backend == "hixl"
+	default:
+		return false
+	}
 }
 
 // modelDeploymentModelTransferNoTupleQualified is the fixture answer when no
@@ -552,6 +561,8 @@ func (a *ModelDeploymentArtifactRender) modelTransferFallbackRenderFor(
 		out := *a
 		out.Delivery = fallback
 		out.ModelTransferFallback = ""
+		out.ModelTransferAscendA5 = false
+		out.ModelTransferAscendHostRoCE = false
 
 		return &out
 	default:
@@ -559,11 +570,16 @@ func (a *ModelDeploymentArtifactRender) modelTransferFallbackRenderFor(
 	}
 }
 
+const modelDeploymentModelTransferAscendHostRoCEGlobalResourceConfig = `{"comm_resource_config.protocol_desc":["roce:host"],` +
+	`"local_comm_res_path":"/etc/hixlep"}`
+
 // applyModelTransfer decorates a rendered main container for a remote delivery: the
 // bootstrap that installs the staged wheel before the engine starts, the
 // load format that selects the model-transfer adapter, and the env the adapter reads.
 // On the nixl backend it also defaults GPUSTACK_MODEL_TRANSFER_NIXL_BACKEND to LIBFABRIC
-// when ModelTransferEFA is true and UCX otherwise. It is a no-op for every other delivery.
+// when ModelTransferEFA is true and UCX otherwise. On Ascend A5 hixl it defaults flat-key
+// ASCEND_GLOBAL_RESOURCE_CONFIG on Host RoCE or ASCEND_LOCAL_COMM_RES on UB. It is a no-op
+// for every other delivery.
 func (a *ModelDeploymentArtifactRender) applyModelTransfer(c *core.Container, engine string) {
 	if a.Delivery != workercore.ModelDeploymentModelDeliveryRemote {
 		return
@@ -600,6 +616,19 @@ func (a *ModelDeploymentArtifactRender) applyModelTransfer(c *core.Container, en
 			Name:  modelDeploymentModelTransferEnvNIXLBackend,
 			Value: nixlPlugin,
 		}})
+	}
+	if a.ModelTransferBackend == "hixl" && a.ModelTransferAscendA5 {
+		if a.ModelTransferAscendHostRoCE {
+			c.Env = appendModelDeploymentEnvIfAbsent(c.Env, []core.EnvVar{{
+				Name:  inject.AscendGlobalResourceConfigEnv,
+				Value: modelDeploymentModelTransferAscendHostRoCEGlobalResourceConfig,
+			}})
+		} else {
+			c.Env = appendModelDeploymentEnvIfAbsent(c.Env, []core.EnvVar{{
+				Name:  inject.AscendLocalCommResEnv,
+				Value: inject.AscendLocalCommResAutoGenValue,
+			}})
+		}
 	}
 }
 

@@ -66,7 +66,7 @@ func TestModelDeploymentGoldenYAML(t *testing.T) {
 	})
 
 	scenarios := buildGoldenYAMLScenarios()
-	require.Len(t, scenarios, 40)
+	require.Len(t, scenarios, 41)
 
 	goldenDir := filepath.Join("testdata", "golden-render")
 	if *legacyRenderUpdate {
@@ -1402,7 +1402,7 @@ func buildGoldenYAMLScenarios() []goldenYAMLScenario {
 			},
 		},
 
-		// 5. ModelArtifact Weight Delivery (3 scenarios)
+		// 5. ModelArtifact Weight Delivery (4 scenarios)
 		{
 			name:            "artifact-node-and-engine",
 			objects:         goldenModelArtifactFixtures(),
@@ -1477,6 +1477,47 @@ func buildGoldenYAMLScenarios() []goldenYAMLScenario {
 							Replicas:        1,
 							ReplicaSize:     1,
 							Resources:       &workercore.ModelDeploymentRoleResources{Accelerator: ptr.To(qty1)},
+						},
+					},
+				},
+			},
+		},
+		{
+			name:          "artifact-remote-ascend-a5-ub-and-host-roce",
+			objects:       goldenModelArtifactFixtures(),
+			awsEFAEnabled: true,
+			deliveryMode:  settings.ModelArtifactDeliveryNode,
+			remotePolicy:  settings.ModelArtifactRemoteDeliveryPrefer,
+			sourceReady:   true,
+			md: &workercore.ModelDeployment{
+				ObjectMeta: meta.ObjectMeta{Namespace: "default", Name: "qwen-a5"},
+				Spec: workercore.ModelDeploymentSpec{
+					Model: workercore.ModelDeploymentModel{
+						Name:        modelID,
+						ArtifactRef: &core.LocalObjectReference{Name: "qwen-72b"},
+					},
+					Engine: workercore.ModelDeploymentEngine{Name: workercore.ModelDeploymentEngineVLLM, Image: vllmAscendImage},
+					Roles: []workercore.ModelDeploymentRole{
+						{
+							Name:            "ascend-a5-ub",
+							Kind:            workercore.ModelDeploymentRoleKindServer,
+							AcceleratorType: "atlas-950",
+							Image:           vllmAscendImage,
+							Replicas:        1,
+							ReplicaSize:     1,
+							Resources:       &workercore.ModelDeploymentRoleResources{Accelerator: ptr.To(qty1)},
+						},
+						{
+							Name:            "ascend-a5-roce",
+							Kind:            workercore.ModelDeploymentRoleKindServer,
+							AcceleratorType: "atlas-950",
+							Image:           vllmAscendImage,
+							Replicas:        1,
+							ReplicaSize:     1,
+							Resources: &workercore.ModelDeploymentRoleResources{
+								Accelerator: ptr.To(qty1),
+								Interface:   ptr.To(qty1),
+							},
 						},
 					},
 				},

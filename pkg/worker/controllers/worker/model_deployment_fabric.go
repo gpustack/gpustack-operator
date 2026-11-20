@@ -47,9 +47,8 @@ func ModelDeploymentDirectPairRequestsInterfaces(md *workercore.ModelDeployment)
 // multi-member Server collective leg actually renders. On non-Ascend pools it covers NIXL remote
 // weight delivery, managed multi-Pod vLLM Server roles, and routed prefill/decode pairs on vLLM
 // and SGLang when every Prefill and Decode half requests interfaces. On Ascend A5 (Family "950")
-// it returns "rdma" (never "efa") for managed vLLM Host RoCE workloads: routed prefill/decode
-// pairs with interfaces on both halves, multi-Pod or elastic-EP Server roles, and non-Encode
-// KVCache-backed roles.
+// it returns "rdma" (never "efa") for managed vLLM KV/collective Host RoCE workloads and for
+// managed hixl remote weight delivery on Server roles and symmetric routed prefill/decode pairs.
 func ModelDeploymentDirectInterfaceProtocol(
 	md *workercore.ModelDeployment, role *workercore.ModelDeploymentRole, manufacturer, family string,
 	remoteDelivery, awsEFAEnabled bool,
@@ -58,30 +57,10 @@ func ModelDeploymentDirectInterfaceProtocol(
 		return ""
 	}
 	if manufacturer == nodefeature.ManufacturerAscend {
-		if family != nodefeature.AcceleratorFamilyAscend950 ||
-			md.Spec.Engine.Name != workercore.ModelDeploymentEngineVLLM {
-			return ""
+		if protocol := modelDeploymentAscendKVDirectProtocol(md, role, manufacturer, family); protocol != "" {
+			return protocol
 		}
-		kind := ModelDeploymentEffectiveRoleKind(role)
-		if (kind == workercore.ModelDeploymentRoleKindPrefill ||
-			kind == workercore.ModelDeploymentRoleKindDecode) &&
-			ModelDeploymentDeclaresBothHalves(md) {
-			if modelDeploymentUsesKVTransfer(md, role) && ModelDeploymentDirectPairRequestsInterfaces(md) {
-				return "rdma"
-			}
-			return ""
-		}
-		if kind == workercore.ModelDeploymentRoleKindServer &&
-			(modelDeploymentRoleSize(role) > 1 || runtimecontrol.RoleHasElasticEP(role)) {
-			return "rdma"
-		}
-		if md.Spec.KVCache != nil &&
-			(kind == workercore.ModelDeploymentRoleKindServer ||
-				kind == workercore.ModelDeploymentRoleKindPrefill ||
-				kind == workercore.ModelDeploymentRoleKindDecode) {
-			return "rdma"
-		}
-		return ""
+		return modelDeploymentAscendRemoteDirectProtocol(md, role, manufacturer, family, remoteDelivery)
 	}
 	directProtocol := "rdma"
 	if awsEFAEnabled {
@@ -152,6 +131,63 @@ func ModelDeploymentInterfaceResource(
 		width = 2
 	}
 	return mooncake.FabricDeviceResource(fabric, width), nil
+}
+
+func modelDeploymentAscendKVDirectProtocol(
+	md *workercore.ModelDeployment, role *workercore.ModelDeploymentRole, manufacturer, family string,
+) string {
+	if md == nil || role == nil || len(role.Command) > 0 ||
+		manufacturer != nodefeature.ManufacturerAscend ||
+		family != nodefeature.AcceleratorFamilyAscend950 ||
+		md.Spec.Engine.Name != workercore.ModelDeploymentEngineVLLM {
+		return ""
+	}
+	kind := ModelDeploymentEffectiveRoleKind(role)
+	if (kind == workercore.ModelDeploymentRoleKindPrefill ||
+		kind == workercore.ModelDeploymentRoleKindDecode) &&
+		ModelDeploymentDeclaresBothHalves(md) {
+		if modelDeploymentUsesKVTransfer(md, role) && ModelDeploymentDirectPairRequestsInterfaces(md) {
+			return "rdma"
+		}
+		return ""
+	}
+	if kind == workercore.ModelDeploymentRoleKindServer &&
+		(modelDeploymentRoleSize(role) > 1 || runtimecontrol.RoleHasElasticEP(role)) {
+		return "rdma"
+	}
+	if md.Spec.KVCache != nil &&
+		(kind == workercore.ModelDeploymentRoleKindServer ||
+			kind == workercore.ModelDeploymentRoleKindPrefill ||
+			kind == workercore.ModelDeploymentRoleKindDecode) {
+		return "rdma"
+	}
+	return ""
+}
+
+func modelDeploymentAscendRemoteDirectProtocol(
+	md *workercore.ModelDeployment, role *workercore.ModelDeploymentRole, manufacturer, family string,
+	remoteDelivery bool,
+) string {
+	if md == nil || role == nil || len(role.Command) > 0 || !remoteDelivery ||
+		manufacturer != nodefeature.ManufacturerAscend ||
+		family != nodefeature.AcceleratorFamilyAscend950 ||
+		modelDeploymentRoleHasConflictingLoadFormat(md.Spec.Engine.Name, role.ExtraArgs) ||
+		modelDeploymentModelTransferCandidateBackend(manufacturer, md.Spec.Engine.Name) != "hixl" {
+		return ""
+	}
+	switch ModelDeploymentEffectiveRoleKind(role) {
+	case workercore.ModelDeploymentRoleKindServer:
+		return "rdma"
+	case workercore.ModelDeploymentRoleKindPrefill, workercore.ModelDeploymentRoleKindDecode:
+		if ModelDeploymentDeclaresBothHalves(md) &&
+			modelDeploymentUsesKVTransfer(md, role) &&
+			ModelDeploymentDirectPairRequestsInterfaces(md) {
+			return "rdma"
+		}
+		return ""
+	default:
+		return ""
+	}
 }
 
 func modelDeploymentRoleRequestsInterfaces(role *workercore.ModelDeploymentRole) bool {

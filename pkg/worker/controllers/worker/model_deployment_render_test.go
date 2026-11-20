@@ -1742,7 +1742,7 @@ func TestModelDeploymentDirectInterfaceProtocol_AscendA5(t *testing.T) {
 			want:          "rdma",
 		},
 		{
-			name: "A5 vLLM single-Pod Server without KVCache returns empty even on remote delivery",
+			name: "A5 vLLM single-Pod Server without KVCache grants rdma on remote delivery even when awsEFAEnabled is true",
 			md: newRenderDeployment(func(md *workercore.ModelDeployment) {
 				md.Spec.KVCache = nil
 				md.Spec.Roles[0].Kind = workercore.ModelDeploymentRoleKindServer
@@ -1752,6 +1752,95 @@ func TestModelDeploymentDirectInterfaceProtocol_AscendA5(t *testing.T) {
 			family:         nodefeature.AcceleratorFamilyAscend950,
 			remoteDelivery: true,
 			awsEFAEnabled:  true,
+			want:           "rdma",
+		},
+		{
+			name: "A5 vLLM single-Pod Server without KVCache returns empty without remote delivery",
+			md: newRenderDeployment(func(md *workercore.ModelDeployment) {
+				md.Spec.KVCache = nil
+				md.Spec.Roles[0].Kind = workercore.ModelDeploymentRoleKindServer
+				md.Spec.Roles[0].ReplicaSize = 1
+				md.Spec.Roles[0].Resources = &workercore.ModelDeploymentRoleResources{Interface: ptr.To(qty1)}
+			}),
+			family:        nodefeature.AcceleratorFamilyAscend950,
+			awsEFAEnabled: true,
+			want:          "",
+		},
+		{
+			name: "A5 vLLM single-Pod Server with conflicting load-format returns empty on remote delivery",
+			md: newRenderDeployment(func(md *workercore.ModelDeployment) {
+				md.Spec.KVCache = nil
+				md.Spec.Roles[0].Kind = workercore.ModelDeploymentRoleKindServer
+				md.Spec.Roles[0].ReplicaSize = 1
+				md.Spec.Roles[0].ExtraArgs = []string{"--load-format=safetensors"}
+				md.Spec.Roles[0].Resources = &workercore.ModelDeploymentRoleResources{Interface: ptr.To(qty1)}
+			}),
+			family:         nodefeature.AcceleratorFamilyAscend950,
+			remoteDelivery: true,
+			want:           "",
+		},
+		{
+			name: "A5 SGLang single-Pod Server grants rdma on remote delivery even when awsEFAEnabled is true",
+			md: newRenderDeployment(func(md *workercore.ModelDeployment) {
+				md.Spec.Engine.Name = workercore.ModelDeploymentEngineSGLang
+				md.Spec.KVCache = nil
+				md.Spec.Roles[0].Kind = workercore.ModelDeploymentRoleKindServer
+				md.Spec.Roles[0].ReplicaSize = 1
+				md.Spec.Roles[0].Resources = &workercore.ModelDeploymentRoleResources{Interface: ptr.To(qty1)}
+			}),
+			family:         nodefeature.AcceleratorFamilyAscend950,
+			remoteDelivery: true,
+			awsEFAEnabled:  true,
+			want:           "rdma",
+		},
+		{
+			name:           "A5 SGLang routed symmetric P/D grants rdma on remote delivery",
+			md:             routedPair(workercore.ModelDeploymentEngineSGLang, workercore.ModelDeploymentKVTransferBackendHIXL, true, true, true, false),
+			family:         nodefeature.AcceleratorFamilyAscend950,
+			remoteDelivery: true,
+			awsEFAEnabled:  true,
+			want:           "rdma",
+		},
+		{
+			name:           "A5 vLLM asymmetric P/D returns empty even on remote delivery",
+			md:             routedPair(workercore.ModelDeploymentEngineVLLM, workercore.ModelDeploymentKVTransferBackendHIXL, true, false, false, false),
+			family:         nodefeature.AcceleratorFamilyAscend950,
+			remoteDelivery: true,
+			want:           "",
+		},
+		{
+			name:           "A5 SGLang asymmetric P/D returns empty even on remote delivery",
+			md:             routedPair(workercore.ModelDeploymentEngineSGLang, workercore.ModelDeploymentKVTransferBackendHIXL, true, false, false, false),
+			family:         nodefeature.AcceleratorFamilyAscend950,
+			remoteDelivery: true,
+			want:           "",
+		},
+		{
+			name: "A5 vLLM Encode role returns empty even on remote delivery",
+			md: func() *workercore.ModelDeployment {
+				md := routedPair(workercore.ModelDeploymentEngineVLLM, workercore.ModelDeploymentKVTransferBackendHIXL, true, true, true, true)
+				md.Spec.Roles = append([]workercore.ModelDeploymentRole{{
+					Name: "encode", Kind: workercore.ModelDeploymentRoleKindEncode,
+					Resources: &workercore.ModelDeploymentRoleResources{Interface: ptr.To(qty1)},
+				}}, md.Spec.Roles...)
+				return md
+			}(),
+			family:         nodefeature.AcceleratorFamilyAscend950,
+			remoteDelivery: true,
+			want:           "",
+		},
+		{
+			name:           "A2 910B Server returns empty even on remote delivery",
+			md:             newRenderDeployment(),
+			family:         "910B",
+			remoteDelivery: true,
+			want:           "",
+		},
+		{
+			name:           "A3 910C routed P/D returns empty even on remote delivery",
+			md:             routedPair(workercore.ModelDeploymentEngineVLLM, workercore.ModelDeploymentKVTransferBackendHIXL, true, true, true, false),
+			family:         "910C",
+			remoteDelivery: true,
 			want:           "",
 		},
 		{
@@ -5279,5 +5368,352 @@ func TestRenderModelDeploymentPod_EngineSentinel(t *testing.T) {
 		assert.Equal(t, "/gpustack/v1/live", dpFollowerPod.Spec.Containers[0].StartupProbe.HTTPGet.Path)
 		assert.Equal(t, "/gpustack/v1/ready", dpFollowerPod.Spec.Containers[0].ReadinessProbe.HTTPGet.Path)
 		assert.Equal(t, "/gpustack/v1/live", dpFollowerPod.Spec.Containers[0].LivenessProbe.HTTPGet.Path)
+	})
+}
+
+func TestRenderModelDeploymentPod_AscendA5RemoteModelTransfer(t *testing.T) {
+	qty1 := resource.MustParse("1")
+	rdmaShared := nodefeature.GetRDMAResourceName(workercore.DeviceAllocationModeShared)
+	atlas950 := newRenderAcceleratorType(func(at *worker.AcceleratorType) {
+		at.Name = "atlas-950"
+		at.Status.Entrance = "queue-for-atlas-950"
+		at.Status.Detail.Manufacturer = nodefeature.ManufacturerAscend
+		at.Status.Detail.Family = nodefeature.AcceleratorFamilyAscend950
+	})
+	atlas910b := newRenderAcceleratorType(func(at *worker.AcceleratorType) {
+		at.Name = "atlas-910b"
+		at.Status.Entrance = "queue-for-atlas-910b"
+		at.Status.Detail.Manufacturer = nodefeature.ManufacturerAscend
+		at.Status.Detail.Family = "910B"
+	})
+	remoteWeights := func() *modelArtifactWeights {
+		r := modelTransferRemoteRender()
+		r.SourceReady = true
+		return &modelArtifactWeights{Render: r}
+	}
+	storeConn := &ModelDeploymentConnectorInput{
+		Domain:              "chat",
+		Dtype:               "bfloat16",
+		MasterServerAddress: "shared-kv-master.gpustack-system.svc:50051",
+		Protocols:           []string{"ascend"},
+	}
+
+	assertNoDuplicateEnvNames := func(t *testing.T, env []core.EnvVar) {
+		t.Helper()
+		seen := make(map[string]int, len(env))
+		for _, e := range env {
+			seen[e.Name]++
+		}
+		for name, count := range seen {
+			assert.Equalf(t, 1, count, "duplicate env var %s", name)
+		}
+	}
+	countHIXLEP := func(pod *core.Pod) (int, int) {
+		var vols, mounts int
+		for _, v := range pod.Spec.Volumes {
+			if v.Name == inject.AscendHIXLEPVolumeName {
+				vols++
+			}
+		}
+		for _, m := range pod.Spec.Containers[0].VolumeMounts {
+			if m.Name == inject.AscendHIXLEPVolumeName {
+				mounts++
+			}
+		}
+		return vols, mounts
+	}
+
+	t.Run("A5 UB remote defaults ASCEND_LOCAL_COMM_RES deduplicated with KV connector and omits hixlep", func(t *testing.T) {
+		for _, engine := range []string{workercore.ModelDeploymentEngineVLLM, workercore.ModelDeploymentEngineSGLang} {
+			md := newRenderDeployment(func(md *workercore.ModelDeployment) {
+				md.Spec.Engine.Name = engine
+				md.Spec.Model.ArtifactRef = &core.LocalObjectReference{Name: "weights"}
+				md.Spec.Roles = []workercore.ModelDeploymentRole{{
+					Name: "server", Kind: workercore.ModelDeploymentRoleKindServer,
+					AcceleratorType: "atlas-950", Image: md.Spec.Engine.Image, Replicas: 1, ReplicaSize: 1,
+					Resources: &workercore.ModelDeploymentRoleResources{Accelerator: ptr.To(qty1)},
+				}}
+			})
+			cli := newModelDeploymentClient(md, atlas950)
+			r := &ModelDeploymentReconciler{Client: cli, APIReader: cli}
+			pods, err := r.renderModelDeploymentRolePods(t.Context(), md, storeConn, []string{"ascend"}, remoteWeights(), false)
+			require.NoError(t, err)
+			pod := pods["server"][0][0]
+			ctr := &pod.Spec.Containers[0]
+			assertNoDuplicateEnvNames(t, ctr.Env)
+
+			localEnv := envByName(ctr.Env, inject.AscendLocalCommResEnv)
+			require.NotNil(t, localEnv)
+			assert.Equal(t, inject.AscendLocalCommResAutoGenValue, localEnv.Value)
+			assert.Nil(t, envByName(ctr.Env, inject.AscendGlobalResourceConfigEnv))
+			volCount, mountCount := countHIXLEP(pod)
+			assert.Zero(t, volCount)
+			assert.Zero(t, mountCount)
+		}
+	})
+
+	t.Run("A5 Host RoCE weights-only vLLM Server mounts hixlep and sets flat ASCEND_GLOBAL_RESOURCE_CONFIG without KV args", func(t *testing.T) {
+		md := newRenderDeployment(func(md *workercore.ModelDeployment) {
+			md.Spec.KVCache = nil
+			md.Spec.Model.ArtifactRef = &core.LocalObjectReference{Name: "weights"}
+			md.Spec.Roles = []workercore.ModelDeploymentRole{{
+				Name: "server", Kind: workercore.ModelDeploymentRoleKindServer,
+				AcceleratorType: "atlas-950", Image: md.Spec.Engine.Image, Replicas: 1, ReplicaSize: 1,
+				Resources: &workercore.ModelDeploymentRoleResources{
+					Accelerator: ptr.To(qty1),
+					Interface:   ptr.To(qty1),
+				},
+			}}
+		})
+		cli := newModelDeploymentClient(md, atlas950)
+		r := &ModelDeploymentReconciler{Client: cli, APIReader: cli}
+		pods, err := r.renderModelDeploymentRolePods(t.Context(), md, nil, nil, remoteWeights(), true)
+		require.NoError(t, err)
+		pod := pods["server"][0][0]
+		ctr := &pod.Spec.Containers[0]
+		assertNoDuplicateEnvNames(t, ctr.Env)
+
+		assert.Equal(t, qty1, ctr.Resources.Limits[rdmaShared])
+		assert.NotContains(t, strings.Join(ctr.Command, " "), "ascend_local_comm_res_path",
+			"weights-only Host RoCE must not alter vLLM KV connector args")
+		volCount, mountCount := countHIXLEP(pod)
+		assert.Equal(t, 1, volCount)
+		assert.Equal(t, 1, mountCount)
+		vol := findVolume(pod, inject.AscendHIXLEPVolumeName)
+		require.NotNil(t, vol)
+		require.NotNil(t, vol.HostPath)
+		require.NotNil(t, vol.HostPath.Type)
+		assert.Equal(t, core.HostPathDirectory, *vol.HostPath.Type)
+		mnt := findMount(ctr, inject.AscendHIXLEPVolumeName)
+		require.NotNil(t, mnt)
+		assert.True(t, mnt.ReadOnly)
+
+		globalEnv := envByName(ctr.Env, inject.AscendGlobalResourceConfigEnv)
+		require.NotNil(t, globalEnv)
+		assert.Equal(t, `{"comm_resource_config.protocol_desc":["roce:host"],"local_comm_res_path":"/etc/hixlep"}`, globalEnv.Value)
+		assert.Nil(t, envByName(ctr.Env, inject.AscendLocalCommResEnv))
+	})
+
+	t.Run("A5 Host RoCE remote SGLang symmetric P/D mounts hixlep and preserves device_urma KV env", func(t *testing.T) {
+		md := newRenderDeployment(func(md *workercore.ModelDeployment) {
+			md.Spec.Engine.Name = workercore.ModelDeploymentEngineSGLang
+			md.Spec.KVCache = nil
+			md.Spec.Model.ArtifactRef = &core.LocalObjectReference{Name: "weights"}
+			md.Spec.Router = &workercore.ModelDeploymentRouter{Name: workercore.ModelDeploymentRouterSGLang}
+			md.Spec.KVTransfer = &workercore.ModelDeploymentKVTransfer{Backend: workercore.ModelDeploymentKVTransferBackendHIXL}
+			md.Spec.Roles = []workercore.ModelDeploymentRole{
+				{
+					Name: "prefill", Kind: workercore.ModelDeploymentRoleKindPrefill,
+					AcceleratorType: "atlas-950", Image: md.Spec.Engine.Image, Replicas: 1, ReplicaSize: 1,
+					Resources: &workercore.ModelDeploymentRoleResources{
+						Accelerator: ptr.To(qty1),
+						Interface:   ptr.To(qty1),
+					},
+				},
+				{
+					Name: "decode", Kind: workercore.ModelDeploymentRoleKindDecode,
+					AcceleratorType: "atlas-950", Image: md.Spec.Engine.Image, Replicas: 1, ReplicaSize: 1,
+					Resources: &workercore.ModelDeploymentRoleResources{
+						Accelerator: ptr.To(qty1),
+						Interface:   ptr.To(qty1),
+					},
+				},
+			}
+		})
+		cli := newModelDeploymentClient(md, atlas950)
+		r := &ModelDeploymentReconciler{Client: cli, APIReader: cli}
+		pods, err := r.renderModelDeploymentRolePods(t.Context(), md, nil, nil, remoteWeights(), true)
+		require.NoError(t, err)
+
+		for _, roleName := range []string{"prefill", "decode"} {
+			pod := pods[roleName][0][0]
+			ctr := &pod.Spec.Containers[0]
+			assertNoDuplicateEnvNames(t, ctr.Env)
+			assert.Equal(t, qty1, ctr.Resources.Limits[rdmaShared])
+			volCount, mountCount := countHIXLEP(pod)
+			assert.Equal(t, 1, volCount)
+			assert.Equal(t, 1, mountCount)
+			mfEnv := envByName(ctr.Env, inject.AscendMFTransferProtocolEnv)
+			require.NotNil(t, mfEnv)
+			assert.Equal(t, inject.AscendMFTransferProtocolDeviceURMA, mfEnv.Value)
+			globalEnv := envByName(ctr.Env, inject.AscendGlobalResourceConfigEnv)
+			require.NotNil(t, globalEnv)
+			assert.Equal(t, `{"comm_resource_config.protocol_desc":["roce:host"],"local_comm_res_path":"/etc/hixlep"}`, globalEnv.Value)
+			assert.Nil(t, envByName(ctr.Env, inject.AscendLocalCommResEnv))
+		}
+	})
+
+	t.Run("A5 Host RoCE KV plus weights mounts /etc/hixlep once and yields on exact ancestor and descendant overlaps", func(t *testing.T) {
+		overlapCases := []struct {
+			name        string
+			userPath    string
+			wantYielded bool
+		}{
+			{name: "no_user_mount", userPath: "", wantYielded: false},
+			{name: "exact_hixlep", userPath: "/etc/hixlep", wantYielded: true},
+			{name: "trailing_slash_hixlep", userPath: "/etc/hixlep/", wantYielded: true},
+			{name: "ancestor_etc", userPath: "/etc", wantYielded: true},
+			{name: "ancestor_root", userPath: "/", wantYielded: true},
+			{name: "descendant_file", userPath: "/etc/hixlep/ub_endpoint_npu_0.json", wantYielded: true},
+			{name: "sibling_non_overlapping", userPath: "/etc/hixlep2", wantYielded: false},
+		}
+		for _, oc := range overlapCases {
+			t.Run(oc.name, func(t *testing.T) {
+				var avs []workercore.ModelDeploymentAdditionalVolume
+				if oc.userPath != "" {
+					avs = []workercore.ModelDeploymentAdditionalVolume{{
+						MountPath: oc.userPath,
+						ReadOnly:  true,
+						ConfigMap: &core.LocalObjectReference{Name: "user-hixlep"},
+					}}
+				}
+				md := newRenderDeployment(func(md *workercore.ModelDeployment) {
+					md.Spec.Model.ArtifactRef = &core.LocalObjectReference{Name: "weights"}
+					md.Spec.Router = &workercore.ModelDeploymentRouter{Name: workercore.ModelDeploymentRouterLLMD}
+					md.Spec.KVTransfer = &workercore.ModelDeploymentKVTransfer{Backend: workercore.ModelDeploymentKVTransferBackendHIXL}
+					md.Spec.Roles = []workercore.ModelDeploymentRole{
+						{
+							Name: "prefill", Kind: workercore.ModelDeploymentRoleKindPrefill,
+							AcceleratorType: "atlas-950", Image: md.Spec.Engine.Image, Replicas: 1, ReplicaSize: 1,
+							AdditionalVolumes: avs,
+							Resources: &workercore.ModelDeploymentRoleResources{
+								Accelerator: ptr.To(qty1),
+								Interface:   ptr.To(qty1),
+							},
+						},
+						{
+							Name: "decode", Kind: workercore.ModelDeploymentRoleKindDecode,
+							AcceleratorType: "atlas-950", Image: md.Spec.Engine.Image, Replicas: 1, ReplicaSize: 1,
+							AdditionalVolumes: avs,
+							Resources: &workercore.ModelDeploymentRoleResources{
+								Accelerator: ptr.To(qty1),
+								Interface:   ptr.To(qty1),
+							},
+						},
+					}
+				})
+				cli := newModelDeploymentClient(md, atlas950)
+				r := &ModelDeploymentReconciler{Client: cli, APIReader: cli}
+				pods, err := r.renderModelDeploymentRolePods(t.Context(), md, storeConn, []string{"ascend"}, remoteWeights(), false)
+				require.NoError(t, err)
+
+				for _, roleName := range []string{"prefill", "decode"} {
+					pod := pods[roleName][0][0]
+					ctr := &pod.Spec.Containers[0]
+					assertNoDuplicateEnvNames(t, ctr.Env)
+					assert.Contains(t, strings.Join(ctr.Command, " "), `"ascend_local_comm_res_path":"/etc/hixlep"`)
+					globalEnv := envByName(ctr.Env, inject.AscendGlobalResourceConfigEnv)
+					require.NotNil(t, globalEnv)
+					assert.Equal(t, `{"comm_resource_config.protocol_desc":["roce:host"],"local_comm_res_path":"/etc/hixlep"}`, globalEnv.Value)
+					assert.Nil(t, envByName(ctr.Env, inject.AscendLocalCommResEnv))
+
+					volCount, mountCount := countHIXLEP(pod)
+					if oc.wantYielded {
+						assert.Zero(t, volCount, "must yield gpustack-ascend-hixlep volume when user mounts %q", oc.userPath)
+						assert.Zero(t, mountCount, "must yield gpustack-ascend-hixlep mount when user mounts %q", oc.userPath)
+						assert.NotNil(t, findVolume(pod, "additional-0"))
+					} else {
+						assert.Equal(t, 1, volCount, "must mount gpustack-ascend-hixlep once")
+						assert.Equal(t, 1, mountCount, "must mount gpustack-ascend-hixlep once")
+					}
+				}
+			})
+		}
+	})
+
+	t.Run("user role.Env overrides defaulted A5 remote env without duplicates", func(t *testing.T) {
+		customGlobal := `{"comm_resource_config.protocol_desc":["roce:host"],"local_comm_res_path":"/custom/ep.json"}`
+		md := newRenderDeployment(func(md *workercore.ModelDeployment) {
+			md.Spec.KVCache = nil
+			md.Spec.Model.ArtifactRef = &core.LocalObjectReference{Name: "weights"}
+			md.Spec.Roles = []workercore.ModelDeploymentRole{{
+				Name: "server", Kind: workercore.ModelDeploymentRoleKindServer,
+				AcceleratorType: "atlas-950", Image: md.Spec.Engine.Image, Replicas: 1, ReplicaSize: 1,
+				Env: []workercore.ModelDeploymentEnvVar{
+					{Name: inject.AscendGlobalResourceConfigEnv, Value: customGlobal},
+					{Name: inject.AscendLocalCommResEnv, Value: ""},
+				},
+				Resources: &workercore.ModelDeploymentRoleResources{
+					Accelerator: ptr.To(qty1),
+					Interface:   ptr.To(qty1),
+				},
+			}}
+		})
+		cli := newModelDeploymentClient(md, atlas950)
+		r := &ModelDeploymentReconciler{Client: cli, APIReader: cli}
+		pods, err := r.renderModelDeploymentRolePods(t.Context(), md, nil, nil, remoteWeights(), false)
+		require.NoError(t, err)
+		ctr := &pods["server"][0][0].Spec.Containers[0]
+		assertNoDuplicateEnvNames(t, ctr.Env)
+		assert.Equal(t, customGlobal, envByName(ctr.Env, inject.AscendGlobalResourceConfigEnv).Value)
+		assert.Equal(t, "", envByName(ctr.Env, inject.AscendLocalCommResEnv).Value)
+	})
+
+	t.Run("pod-spec-hash stays stable on non-A5 and non-Remote renders and moves across A5 Remote modes", func(t *testing.T) {
+		assert.Equal(t, 5, modelDeploymentRenderVersion)
+		md910 := newRenderDeployment(func(md *workercore.ModelDeployment) {
+			md.Spec.KVCache = nil
+			md.Spec.Roles[0].AcceleratorType = "atlas-910b"
+		})
+		artBase := modelTransferRemoteRender()
+		artBase.ModelTransferBackend = "hixl"
+		pod910Clean, err := renderModelDeploymentPod(t.Context(), ModelDeploymentRenderInput{
+			Deployment: md910, Role: &md910.Spec.Roles[0], AcceleratorType: atlas910b, Artifact: artBase,
+		})
+		require.NoError(t, err)
+
+		artDirty := *artBase
+		artDirty.ModelTransferAscendA5 = true
+		artDirty.ModelTransferAscendHostRoCE = true
+		pod910Dirty, err := renderModelDeploymentPod(t.Context(), ModelDeploymentRenderInput{
+			Deployment: md910, Role: &md910.Spec.Roles[0], AcceleratorType: atlas910b, Artifact: &artDirty,
+		})
+		require.NoError(t, err)
+		assert.Equal(t,
+			pod910Clean.Annotations[modelDeploymentPodSpecHashAnnotation],
+			pod910Dirty.Annotations[modelDeploymentPodSpecHashAnnotation],
+			"A2/A3 pod-spec-hash must zero A5 remote fields",
+		)
+
+		mdA5 := newRenderDeployment(func(md *workercore.ModelDeployment) {
+			md.Spec.KVCache = nil
+			md.Spec.Roles[0].AcceleratorType = "atlas-950"
+		})
+		nodeClean := testNodeArtifactRender()
+		nodeDirty := *nodeClean
+		nodeDirty.ModelTransferAscendA5 = true
+		nodeDirty.ModelTransferAscendHostRoCE = true
+		podNodeClean, err := renderModelDeploymentPod(t.Context(), ModelDeploymentRenderInput{
+			Deployment: mdA5, Role: &mdA5.Spec.Roles[0], AcceleratorType: atlas950, Artifact: nodeClean,
+		})
+		require.NoError(t, err)
+		podNodeDirty, err := renderModelDeploymentPod(t.Context(), ModelDeploymentRenderInput{
+			Deployment: mdA5, Role: &mdA5.Spec.Roles[0], AcceleratorType: atlas950, Artifact: &nodeDirty,
+		})
+		require.NoError(t, err)
+		assert.Equal(t,
+			podNodeClean.Annotations[modelDeploymentPodSpecHashAnnotation],
+			podNodeDirty.Annotations[modelDeploymentPodSpecHashAnnotation],
+			"non-Remote A5 pod-spec-hash must zero A5 remote fields",
+		)
+
+		podA5UB, err := renderModelDeploymentPod(t.Context(), ModelDeploymentRenderInput{
+			Deployment: mdA5, Role: &mdA5.Spec.Roles[0], AcceleratorType: atlas950, Artifact: artBase,
+		})
+		require.NoError(t, err)
+		mdA5RoCE := mdA5.DeepCopy()
+		mdA5RoCE.Spec.Roles[0].Resources = &workercore.ModelDeploymentRoleResources{
+			Accelerator: ptr.To(qty1),
+			Interface:   ptr.To(qty1),
+		}
+		podA5RoCE, err := renderModelDeploymentPod(t.Context(), ModelDeploymentRenderInput{
+			Deployment: mdA5RoCE, Role: &mdA5RoCE.Spec.Roles[0], AcceleratorType: atlas950,
+			InterfaceResource: rdmaShared, Artifact: artBase,
+		})
+		require.NoError(t, err)
+		assert.NotEqual(t,
+			podA5UB.Annotations[modelDeploymentPodSpecHashAnnotation],
+			podA5RoCE.Annotations[modelDeploymentPodSpecHashAnnotation],
+		)
 	})
 }

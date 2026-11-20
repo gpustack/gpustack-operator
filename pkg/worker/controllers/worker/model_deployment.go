@@ -2525,8 +2525,12 @@ func (r *ModelDeploymentReconciler) renderModelDeploymentRolePodsWithSentinel(
 		}
 		remoteDelivery := in.Artifact != nil &&
 			in.Artifact.Delivery == workercore.ModelDeploymentModelDeliveryRemote
+		remoteInterfaceEligible := remoteDelivery ||
+			(manufacturer == nodefeature.ManufacturerAscend &&
+				family == nodefeature.AcceleratorFamilyAscend950 &&
+				md.Spec.Model.ArtifactRef != nil)
 		directProtocol := ModelDeploymentDirectInterfaceProtocol(
-			md, role, manufacturer, family, remoteDelivery, efaActive,
+			md, role, manufacturer, family, remoteInterfaceEligible, efaActive,
 		)
 		var interfaceResource core.ResourceName
 		if modelDeploymentRoleRequestsInterfaces(role) {
@@ -2545,8 +2549,18 @@ func (r *ModelDeploymentReconciler) renderModelDeploymentRolePodsWithSentinel(
 			interfaceResource = resource
 			in.InterfaceResource = resource
 		}
+		if in.Artifact != nil &&
+			len(role.Command) == 0 &&
+			remoteDelivery &&
+			in.Artifact.ModelTransferBackend == "hixl" &&
+			manufacturer == nodefeature.ManufacturerAscend &&
+			family == nodefeature.AcceleratorFamilyAscend950 {
+			in.Artifact.ModelTransferAscendA5 = true
+			in.Artifact.ModelTransferAscendHostRoCE = interfaceResource != ""
+		}
+		kvDirectProtocol := modelDeploymentAscendKVDirectProtocol(md, role, manufacturer, family)
 		ascendHostRoCE := modelDeploymentAscendHostRoCE(
-			md.Spec.Engine.Name, manufacturer, family, directProtocol, role,
+			md.Spec.Engine.Name, manufacturer, family, kvDirectProtocol, role,
 		)
 		effectiveKVBackend := ModelDeploymentEffectiveKVTransferBackend(md, manufacturer)
 		kvTransferProtocol := ""

@@ -82,6 +82,17 @@ type ModelDeploymentArtifactRender struct {
 	// backend it selects the LIBFABRIC transport plugin over UCX; every other backend reads
 	// nothing from it.
 	ModelTransferEFA bool
+
+	// ModelTransferAscendA5 reports that a Remote hixl delivery targets a managed Ascend A5
+	// (Family "950") role, enabling Ascend A5 communication defaults without disturbing
+	// non-A5 or non-Remote Pod hashes.
+	ModelTransferAscendA5 bool `json:"modelTransferAscendA5,omitempty"`
+
+	// ModelTransferAscendHostRoCE reports that an Ascend A5 Remote hixl delivery also requests
+	// positive fabric interfaces, mounting /etc/hixlep read-only and defaulting flat-key
+	// ASCEND_GLOBAL_RESOURCE_CONFIG for roce:host.
+	ModelTransferAscendHostRoCE bool `json:"modelTransferAscendHostRoCE,omitempty"`
+
 	// ModelTransferConfigMap holds public source endpoints and trust anchors in
 	// the workload namespace. Its name stays stable as source Pods change.
 	ModelTransferConfigMap string

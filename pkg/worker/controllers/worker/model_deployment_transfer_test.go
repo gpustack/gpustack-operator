@@ -953,8 +953,7 @@ func TestModelDeploymentModelTransferBackendEnv(t *testing.T) {
 }
 
 // modelTransferQualifiedTuple installs a scoped qualification fixture for the
-// duration of a test, so the remote render can be exercised without a
-// production bypass. Production answers every tuple as unqualified.
+// duration of a test, isolating qualification behavior to that single tuple.
 func modelTransferQualifiedTuple(t *testing.T, tuple modelTransferTuple) {
 	t.Helper()
 
@@ -1051,6 +1050,10 @@ func TestModelDeploymentModelTransferRequireRefusesAnUnqualifiedTuple(t *testing
 // Prefer's answer: the declared fallback, identity-preserving, and no backend
 // claim on the render that lands.
 func TestModelDeploymentModelTransferPreferFallsBackForAnUnqualifiedTuple(t *testing.T) {
+	original := modelDeploymentModelTransferQualified
+	modelTransferWithdrawQualification()
+	t.Cleanup(func() { modelDeploymentModelTransferQualified = original })
+
 	md := &workercore.ModelDeployment{Spec: workercore.ModelDeploymentSpec{
 		Engine: workercore.ModelDeploymentEngine{Name: workercore.ModelDeploymentEngineVLLM},
 	}}
@@ -1079,6 +1082,10 @@ func TestModelDeploymentModelTransferPreferFallsBackForAnUnqualifiedTuple(t *tes
 // fallback changes the desired delivery, which would roll the replica that
 // already loaded, so the delivery is held instead.
 func TestModelDeploymentModelTransferUnqualifiedTupleHoldsALoadedRemoteReplica(t *testing.T) {
+	original := modelDeploymentModelTransferQualified
+	modelTransferWithdrawQualification()
+	t.Cleanup(func() { modelDeploymentModelTransferQualified = original })
+
 	md := &workercore.ModelDeployment{
 		Spec: workercore.ModelDeploymentSpec{
 			Engine: workercore.ModelDeploymentEngine{Name: workercore.ModelDeploymentEngineVLLM},
@@ -1878,6 +1885,10 @@ func TestModelDeploymentModelTransferMultiMemberReplicaRollsOnTheBaseDelivery(t 
 // the hold on the Pods alone: a replica that still serves the remote delivery
 // holds the delivery even when the deployment's own remote view names nothing.
 func TestModelDeploymentModelTransferUnqualifiedTupleHoldsALiveRemoteReplica(t *testing.T) {
+	original := modelDeploymentModelTransferQualified
+	modelTransferWithdrawQualification()
+	t.Cleanup(func() { modelDeploymentModelTransferQualified = original })
+
 	md := &workercore.ModelDeployment{
 		Spec: workercore.ModelDeploymentSpec{
 			Engine: workercore.ModelDeploymentEngine{Name: workercore.ModelDeploymentEngineVLLM},
@@ -2240,6 +2251,10 @@ func TestModelTransferPolicyPropagatesCSIDriverReadFailure(t *testing.T) {
 }
 
 func TestModelTransferFallbackIgnoresSiblingRemoteRole(t *testing.T) {
+	original := modelDeploymentModelTransferQualified
+	modelTransferWithdrawQualification()
+	t.Cleanup(func() { modelDeploymentModelTransferQualified = original })
+
 	md := mdWithModelTransferStatus()
 	modelDeploymentModelTransferBumpAttempt(md, "sibling", 0, workercore.ModelDeploymentModelDeliveryRemote)
 	role := &workercore.ModelDeploymentRole{Name: "new-role"}
@@ -2982,5 +2997,365 @@ func TestModelDeploymentDirectInterfaceProtocol_SGLangAndRemoteEFA(t *testing.T)
 		assert.Equal(t, "efa", ModelDeploymentDirectInterfaceProtocol(
 			md, &md.Spec.Roles[0], nodefeature.ManufacturerNVIDIA, "", true, true,
 		))
+	})
+}
+
+func TestModelDeploymentModelTransferDefaultQualified(t *testing.T) {
+	cases := []struct {
+		name  string
+		tuple modelTransferTuple
+		want  bool
+	}{
+		{
+			name:  "NVIDIA vLLM nixl admitted",
+			tuple: modelTransferTuple{Manufacturer: nodefeature.ManufacturerNVIDIA, Engine: workercore.ModelDeploymentEngineVLLM, Backend: "nixl"},
+			want:  true,
+		},
+		{
+			name:  "NVIDIA SGLang nixl admitted",
+			tuple: modelTransferTuple{Manufacturer: nodefeature.ManufacturerNVIDIA, Engine: workercore.ModelDeploymentEngineSGLang, Backend: "nixl"},
+			want:  true,
+		},
+		{
+			name:  "Ascend vLLM hixl admitted",
+			tuple: modelTransferTuple{Manufacturer: nodefeature.ManufacturerAscend, Engine: workercore.ModelDeploymentEngineVLLM, Backend: "hixl"},
+			want:  true,
+		},
+		{
+			name:  "Ascend SGLang hixl admitted",
+			tuple: modelTransferTuple{Manufacturer: nodefeature.ManufacturerAscend, Engine: workercore.ModelDeploymentEngineSGLang, Backend: "hixl"},
+			want:  true,
+		},
+		{
+			name:  "NVIDIA hixl rejected",
+			tuple: modelTransferTuple{Manufacturer: nodefeature.ManufacturerNVIDIA, Engine: workercore.ModelDeploymentEngineVLLM, Backend: "hixl"},
+			want:  false,
+		},
+		{
+			name:  "Ascend nixl rejected",
+			tuple: modelTransferTuple{Manufacturer: nodefeature.ManufacturerAscend, Engine: workercore.ModelDeploymentEngineVLLM, Backend: "nixl"},
+			want:  false,
+		},
+		{
+			name:  "Ascend unsupported engine rejected",
+			tuple: modelTransferTuple{Manufacturer: nodefeature.ManufacturerAscend, Engine: "mindie", Backend: "hixl"},
+			want:  false,
+		},
+		{
+			name:  "AMD nixl rejected",
+			tuple: modelTransferTuple{Manufacturer: nodefeature.ManufacturerAMD, Engine: workercore.ModelDeploymentEngineVLLM, Backend: "nixl"},
+			want:  false,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.Equal(t, tc.want, modelDeploymentModelTransferDefaultQualified(tc.tuple))
+		})
+	}
+
+	assert.Equal(t, "nixl", modelDeploymentModelTransferQualifiedBackend(
+		nodefeature.ManufacturerNVIDIA, workercore.ModelDeploymentEngineVLLM,
+	))
+	assert.Equal(t, "nixl", modelDeploymentModelTransferQualifiedBackend(
+		nodefeature.ManufacturerNVIDIA, workercore.ModelDeploymentEngineSGLang,
+	))
+	assert.Equal(t, "hixl", modelDeploymentModelTransferQualifiedBackend(
+		nodefeature.ManufacturerAscend, workercore.ModelDeploymentEngineVLLM,
+	))
+	assert.Equal(t, "hixl", modelDeploymentModelTransferQualifiedBackend(
+		nodefeature.ManufacturerAscend, workercore.ModelDeploymentEngineSGLang,
+	))
+	assert.Empty(t, modelDeploymentModelTransferQualifiedBackend(
+		nodefeature.ManufacturerAMD, workercore.ModelDeploymentEngineVLLM,
+	))
+}
+
+func TestModelDeploymentModelTransferAscendA5EnvDefaults(t *testing.T) {
+	container := func(env ...core.EnvVar) *core.Container {
+		return &core.Container{
+			Name:    modelDeploymentMainContainerName,
+			Command: []string{"vllm", "serve", "/var/lib/gpustack/model"},
+			Env:     env,
+		}
+	}
+	countEnv := func(c *core.Container, name string) (string, int) {
+		var val string
+		var count int
+		for i := range c.Env {
+			if c.Env[i].Name == name {
+				val = c.Env[i].Value
+				count++
+			}
+		}
+		return val, count
+	}
+
+	t.Run("Ascend A5 UB defaults ASCEND_LOCAL_COMM_RES and omits ASCEND_GLOBAL_RESOURCE_CONFIG", func(t *testing.T) {
+		render := modelTransferRemoteRender()
+		render.ModelTransferBackend = "hixl"
+		render.ModelTransferAscendA5 = true
+		render.ModelTransferAscendHostRoCE = false
+		c := container()
+		render.applyModelTransfer(c, workercore.ModelDeploymentEngineVLLM)
+
+		localVal, localCount := countEnv(c, "ASCEND_LOCAL_COMM_RES")
+		assert.Equal(t, 1, localCount)
+		assert.Equal(t, `{"version":"1.3"}`, localVal)
+		_, globalCount := countEnv(c, "ASCEND_GLOBAL_RESOURCE_CONFIG")
+		assert.Zero(t, globalCount)
+	})
+
+	t.Run("Ascend A5 UB deduplicates ASCEND_LOCAL_COMM_RES and yields to user value including empty", func(t *testing.T) {
+		render := modelTransferRemoteRender()
+		render.ModelTransferBackend = "hixl"
+		render.ModelTransferAscendA5 = true
+		render.ModelTransferAscendHostRoCE = false
+		c := container(core.EnvVar{Name: "ASCEND_LOCAL_COMM_RES", Value: ""})
+		render.applyModelTransfer(c, workercore.ModelDeploymentEngineVLLM)
+
+		localVal, localCount := countEnv(c, "ASCEND_LOCAL_COMM_RES")
+		assert.Equal(t, 1, localCount)
+		assert.Equal(t, "", localVal)
+	})
+
+	t.Run("Ascend A5 Host RoCE defaults flat-key ASCEND_GLOBAL_RESOURCE_CONFIG and omits ASCEND_LOCAL_COMM_RES", func(t *testing.T) {
+		render := modelTransferRemoteRender()
+		render.ModelTransferBackend = "hixl"
+		render.ModelTransferAscendA5 = true
+		render.ModelTransferAscendHostRoCE = true
+		c := container()
+		render.applyModelTransfer(c, workercore.ModelDeploymentEngineSGLang)
+
+		globalVal, globalCount := countEnv(c, "ASCEND_GLOBAL_RESOURCE_CONFIG")
+		require.Equal(t, 1, globalCount)
+		assert.Equal(t, `{"comm_resource_config.protocol_desc":["roce:host"],"local_comm_res_path":"/etc/hixlep"}`, globalVal)
+
+		var parsed map[string]any
+		require.NoError(t, json.Unmarshal([]byte(globalVal), &parsed))
+		assert.Equal(t, []any{"roce:host"}, parsed["comm_resource_config.protocol_desc"])
+		assert.NotContains(t, parsed, "comm_resource_config", "must use flat dotted key rather than nested object")
+
+		_, localCount := countEnv(c, "ASCEND_LOCAL_COMM_RES")
+		assert.Zero(t, localCount)
+	})
+
+	t.Run("Ascend A5 Host RoCE yields to existing ASCEND_GLOBAL_RESOURCE_CONFIG", func(t *testing.T) {
+		render := modelTransferRemoteRender()
+		render.ModelTransferBackend = "hixl"
+		render.ModelTransferAscendA5 = true
+		render.ModelTransferAscendHostRoCE = true
+		custom := `{"comm_resource_config.protocol_desc":["roce:host"],"local_comm_res_path":"/custom/ep.json"}`
+		c := container(core.EnvVar{Name: "ASCEND_GLOBAL_RESOURCE_CONFIG", Value: custom})
+		render.applyModelTransfer(c, workercore.ModelDeploymentEngineVLLM)
+
+		globalVal, globalCount := countEnv(c, "ASCEND_GLOBAL_RESOURCE_CONFIG")
+		assert.Equal(t, 1, globalCount)
+		assert.Equal(t, custom, globalVal)
+	})
+
+	t.Run("Non-A5 Ascend hixl emits neither ASCEND_LOCAL_COMM_RES nor ASCEND_GLOBAL_RESOURCE_CONFIG", func(t *testing.T) {
+		render := modelTransferRemoteRender()
+		render.ModelTransferBackend = "hixl"
+		render.ModelTransferAscendA5 = false
+		render.ModelTransferAscendHostRoCE = false
+		c := container()
+		render.applyModelTransfer(c, workercore.ModelDeploymentEngineVLLM)
+
+		_, localCount := countEnv(c, "ASCEND_LOCAL_COMM_RES")
+		_, globalCount := countEnv(c, "ASCEND_GLOBAL_RESOURCE_CONFIG")
+		assert.Zero(t, localCount)
+		assert.Zero(t, globalCount)
+	})
+}
+
+func TestModelDeploymentModelTransferAscendA5PreferLifecycle(t *testing.T) {
+	qty1 := resource.MustParse("1")
+	rdmaShared := nodefeature.GetRDMAResourceName(workercore.DeviceAllocationModeShared)
+
+	origMode := modelArtifactDeliveryMode
+	modelArtifactDeliveryMode = func(context.Context) string { return settings.ModelArtifactDeliveryNode }
+	t.Cleanup(func() { modelArtifactDeliveryMode = origMode })
+
+	newA5Client := func(t *testing.T, md *workercore.ModelDeployment) ctrlcli.Client {
+		t.Helper()
+		return newModelDeploymentClient(md,
+			newRenderAcceleratorType(func(it *worker.AcceleratorType) {
+				it.Status.Detail.Manufacturer = nodefeature.ManufacturerAscend
+				it.Status.Detail.Family = nodefeature.AcceleratorFamilyAscend950
+			}),
+			newRenderBinding(),
+			modelTransferFixtureArtifact(),
+			&core.Node{
+				ObjectMeta: meta.ObjectMeta{Name: "node-0"},
+				Status: core.NodeStatus{
+					Conditions: []core.NodeCondition{{Type: core.NodeReady, Status: core.ConditionTrue}},
+				},
+			},
+			&workercore.NodeModelStore{
+				ObjectMeta: meta.ObjectMeta{Name: "node-0"},
+				Status: workercore.NodeModelStoreStatus{
+					Models: []workercore.NodeModelStoreModel{{
+						Digest: modelTransferTestDigest, State: workercore.NodeModelStoreModelStateReady,
+					}},
+				},
+			},
+			&storage.CSIDriver{ObjectMeta: meta.ObjectMeta{Name: modelstore.DriverName}},
+			jointCheckObject(),
+		)
+	}
+
+	t.Run("Prefer before source ready renders Node wait while preserving RDMA grant without A5 remote mounts", func(t *testing.T) {
+		modelTransferPolicyStub(t, settings.ModelArtifactRemoteDeliveryPrefer)
+		modelTransferSourceReadyStub(t, false)
+
+		md := newRenderDeployment(func(m *workercore.ModelDeployment) {
+			m.Spec.Model.ArtifactRef = &core.LocalObjectReference{Name: "weights"}
+			m.Spec.KVCache = nil
+			m.Spec.Roles[0].Replicas = 1
+			m.Spec.Roles[0].Resources = &workercore.ModelDeploymentRoleResources{
+				Accelerator: ptr.To(qty1),
+				Interface:   ptr.To(qty1),
+			}
+		})
+		cli := newA5Client(t, md)
+
+		_, err := reconcileModelDeployment(t, cli)
+		require.NoError(t, err, "no-source Prefer wait on A5 Server with interface=1 must not fail interface reconciliation")
+
+		pods := replicaPods(t, cli)
+		require.Len(t, pods, 1)
+		ctr := &pods[0].Spec.Containers[0]
+		assert.Equal(t, string(workercore.ModelDeploymentModelDeliveryNode), pods[0].Annotations[modelDeploymentModelTransferDeliveryAnnotation])
+		assert.Equal(t, qty1, ctr.Resources.Limits[rdmaShared])
+		assert.Nil(t, findVolume(&pods[0], "gpustack-ascend-hixlep"))
+		assert.Nil(t, envByName(ctr.Env, "ASCEND_GLOBAL_RESOURCE_CONFIG"))
+		assert.Nil(t, envByName(ctr.Env, "ASCEND_LOCAL_COMM_RES"))
+	})
+
+	t.Run("Prefer remote ready then per-ordinal fallback keeps RDMA on both ordinals and scopes A5 remote Host RoCE to Remote", func(t *testing.T) {
+		modelTransferPolicyStub(t, settings.ModelArtifactRemoteDeliveryPrefer)
+		modelTransferSourceReadyStub(t, true)
+
+		md := newRenderDeployment(func(m *workercore.ModelDeployment) {
+			m.Spec.Model.ArtifactRef = &core.LocalObjectReference{Name: "weights"}
+			m.Spec.KVCache = nil
+			m.Spec.Roles[0].Replicas = 2
+			m.Spec.Roles[0].Resources = &workercore.ModelDeploymentRoleResources{
+				Accelerator: ptr.To(qty1),
+				Interface:   ptr.To(qty1),
+			}
+		})
+		cli := newA5Client(t, md)
+
+		_, err := reconcileModelDeployment(t, cli)
+		require.NoError(t, err)
+		assertReplicaUIDs(t, cli)
+		pods := replicaPods(t, cli)
+		require.Len(t, pods, 2)
+
+		var ord1RemoteHash string
+		for i := range pods {
+			pod := &pods[i]
+			ctr := &pod.Spec.Containers[0]
+			assert.Equal(t, string(workercore.ModelDeploymentModelDeliveryRemote), pod.Annotations[modelDeploymentModelTransferDeliveryAnnotation])
+			assert.Equal(t, qty1, ctr.Resources.Limits[rdmaShared])
+			hixlepVol := findVolume(pod, "gpustack-ascend-hixlep")
+			require.NotNil(t, hixlepVol)
+			require.NotNil(t, hixlepVol.HostPath)
+			require.NotNil(t, hixlepVol.HostPath.Type)
+			assert.Equal(t, core.HostPathDirectory, *hixlepVol.HostPath.Type)
+			globalEnv := envByName(ctr.Env, "ASCEND_GLOBAL_RESOURCE_CONFIG")
+			require.NotNil(t, globalEnv)
+			assert.Equal(t, `{"comm_resource_config.protocol_desc":["roce:host"],"local_comm_res_path":"/etc/hixlep"}`, globalEnv.Value)
+			assert.Nil(t, envByName(ctr.Env, "ASCEND_LOCAL_COMM_RES"))
+			backendEnv := envByName(ctr.Env, modelDeploymentModelTransferEnvBackend)
+			require.NotNil(t, backendEnv)
+			assert.Equal(t, "hixl", backendEnv.Value)
+
+			if modelDeploymentModelTransferOrdinal(pod) == 0 {
+				pod.Status.Phase = core.PodFailed
+				pod.Status.ContainerStatuses = []core.ContainerStatus{{
+					Name: modelDeploymentMainContainerName,
+					State: core.ContainerState{
+						Terminated: &core.ContainerStateTerminated{ExitCode: 1, Reason: "Error"},
+					},
+				}}
+			} else {
+				ord1RemoteHash = pod.Annotations[modelDeploymentPodSpecHashAnnotation]
+				pod.Status.Phase = core.PodRunning
+				pod.Status.ContainerStatuses = []core.ContainerStatus{{
+					Name: modelDeploymentMainContainerName, Ready: true,
+				}}
+			}
+			require.NoError(t, cli.Status().Update(context.Background(), pod))
+		}
+
+		// Reconcile sweeps failed ordinal 0 onto Node fallback and recreates it on Node while
+		// keeping healthy ordinal 1 untouched on Remote.
+		_, err = reconcileModelDeployment(t, cli)
+		require.NoError(t, err)
+
+		after := replicaPods(t, cli)
+		require.Len(t, after, 2)
+		byOrd := map[int]core.Pod{}
+		for _, p := range after {
+			byOrd[modelDeploymentModelTransferOrdinal(&p)] = p
+		}
+
+		ord0 := byOrd[0]
+		ord0Ctr := &ord0.Spec.Containers[0]
+		assert.Equal(t, string(workercore.ModelDeploymentModelDeliveryNode), ord0.Annotations[modelDeploymentModelTransferDeliveryAnnotation])
+		assert.Equal(t, qty1, ord0Ctr.Resources.Limits[rdmaShared], "fallback ordinal keeps RDMA grant")
+		assert.Nil(t, findVolume(&ord0, "gpustack-ascend-hixlep"), "fallback ordinal omits remote /etc/hixlep")
+		assert.Nil(t, envByName(ord0Ctr.Env, "ASCEND_GLOBAL_RESOURCE_CONFIG"))
+		assert.Nil(t, envByName(ord0Ctr.Env, "ASCEND_LOCAL_COMM_RES"))
+
+		ord1 := byOrd[1]
+		assert.Nil(t, ord1.DeletionTimestamp, "healthy remote ordinal must not roll")
+		assert.Equal(t, string(workercore.ModelDeploymentModelDeliveryRemote), ord1.Annotations[modelDeploymentModelTransferDeliveryAnnotation])
+		assert.Equal(t, ord1RemoteHash, ord1.Annotations[modelDeploymentPodSpecHashAnnotation])
+	})
+
+	t.Run("SGLang symmetric P/D under Prefer no-source wait keeps RDMA grant without reconcile error", func(t *testing.T) {
+		modelTransferPolicyStub(t, settings.ModelArtifactRemoteDeliveryPrefer)
+		modelTransferSourceReadyStub(t, false)
+
+		md := newRenderDeployment(func(m *workercore.ModelDeployment) {
+			m.Spec.Engine.Name = workercore.ModelDeploymentEngineSGLang
+			m.Spec.Model.ArtifactRef = &core.LocalObjectReference{Name: "weights"}
+			m.Spec.KVCache = nil
+			m.Spec.Router = &workercore.ModelDeploymentRouter{Name: workercore.ModelDeploymentRouterSGLang}
+			m.Spec.KVTransfer = &workercore.ModelDeploymentKVTransfer{Backend: workercore.ModelDeploymentKVTransferBackendHIXL}
+			m.Spec.Roles = []workercore.ModelDeploymentRole{
+				{
+					Name: "prefill", Kind: workercore.ModelDeploymentRoleKindPrefill,
+					AcceleratorType: m.Spec.Roles[0].AcceleratorType, Image: m.Spec.Engine.Image, Replicas: 1, ReplicaSize: 1,
+					Resources: &workercore.ModelDeploymentRoleResources{
+						Accelerator: ptr.To(qty1),
+						Interface:   ptr.To(qty1),
+					},
+				},
+				{
+					Name: "decode", Kind: workercore.ModelDeploymentRoleKindDecode,
+					AcceleratorType: m.Spec.Roles[0].AcceleratorType, Image: m.Spec.Engine.Image, Replicas: 1, ReplicaSize: 1,
+					Resources: &workercore.ModelDeploymentRoleResources{
+						Accelerator: ptr.To(qty1),
+						Interface:   ptr.To(qty1),
+					},
+				},
+			}
+		})
+		cli := newA5Client(t, md)
+
+		_, err := reconcileModelDeployment(t, cli)
+		require.NoError(t, err)
+		pods := replicaPods(t, cli)
+		require.Len(t, pods, 2)
+		for i := range pods {
+			assert.Equal(t, string(workercore.ModelDeploymentModelDeliveryNode), pods[i].Annotations[modelDeploymentModelTransferDeliveryAnnotation])
+			assert.Equal(t, qty1, pods[i].Spec.Containers[0].Resources.Limits[rdmaShared])
+			assert.Nil(t, findVolume(&pods[i], "gpustack-ascend-hixlep"))
+		}
 	})
 }
