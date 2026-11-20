@@ -92,6 +92,8 @@ RUN <<EOF
     set -exo pipefail
 
     go list github.com/llm-d/llm-d-router/version
+    CGO_ENABLED=0 go test ./cmd/epp/runner -run TestObserverSupportsRenderedOperatorProfiles
+    CGO_ENABLED=0 go test ./pkg/epp/observer/...
 
     COMMIT="$(cat /tmp/commit)"
     CGO_ENABLED=0 go build \

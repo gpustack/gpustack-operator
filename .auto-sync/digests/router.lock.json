@@ -10,7 +10,7 @@
     {
       "path": ".auto-sync/instructions/router.md",
       "kind": "file",
-      "sha256": "f9bf32a7531463e2c5c295be1dab17ee97af01d996be1cc6675c1cf01b8976bf"
+      "sha256": "3269e4c71c380f28040b8c5645e946f7a4d25dbbe8daf94cd137db2de498317d"
     },
     {
       "path": ".auto-sync/scripts/preflight-router.sh",

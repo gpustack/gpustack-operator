@@ -87,7 +87,7 @@ index 0000000000000000000000000000000000000000..7188e6d13c72cb0428355cb09a7acf4e
 +				t.Fatal(err)
 +			}
 +			ds := datastore.NewDatastore(t.Context(), nil)
-+			if _, err := runner.parseConfigurationPhaseTwo(t.Context(), raw, ds); err != nil {
++			if _, err := runner.parseConfigurationPhaseTwo(t.Context(), raw, ds, opts.RefreshMetricsInterval); err != nil {
 +				t.Fatal(err)
 +			}
 +			if !observer.SupportedPlugins(runner.PluginHandle) {
@@ -847,7 +847,7 @@ index 0000000000000000000000000000000000000000..47d878a7d3c74aed66fe2485d07a2569
 +			"always-disagg-pd-decider", "always-disagg-multimodal-decider",
 +			"openai-parser", "anthropic-parser", "vllmhttp-parser", "passthrough-parser",
 +			"fcfs-ordering-policy", "global-strict-fairness-policy",
-+			"static-usage-limit-policy-type", "utilization-detector":
++			"static-usage-limit-policy-type", "strict-band-selection-policy", "utilization-detector":
 +		default:
 +			return false
 +		}
@@ -1193,7 +1193,7 @@ index 0000000000000000000000000000000000000000..ebfc1f035ccfa34d776cd28ad3605393
 +		types []string
 +		want  bool
 +	}{
-+		{name: "missing", want: false}, {name: "operator default", types: []string{"single-profile-handler", "label-selector-filter", "queue-scorer", "kv-cache-utilization-scorer", "max-score-picker", "prefix-cache-scorer", "metrics-data-source", "core-metrics-extractor", "approx-prefix-cache-producer"}, want: true},
++		{name: "missing", want: false}, {name: "operator default", types: []string{"single-profile-handler", "label-selector-filter", "queue-scorer", "kv-cache-utilization-scorer", "max-score-picker", "prefix-cache-scorer", "metrics-data-source", "core-metrics-extractor", "approx-prefix-cache-producer", "strict-band-selection-policy"}, want: true},
 +		{name: "operator disaggregation", types: []string{"disagg-profile-handler", "prefix-based-pd-decider", "always-disagg-pd-decider", "always-disagg-multimodal-decider", "precise-prefix-cache-producer", "token-producer", "endpoint-notification-source"}, want: true},
 +		{name: "unknown plugin", types: []string{"single-profile-handler", "retains-private-candidates"}, want: false},
 +	} {

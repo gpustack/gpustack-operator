@@ -65,6 +65,7 @@ Stage B (`tag_promotion`) takes precedence over Stage A (`recipe_sync`): once un
 3. **Update `ARG GO_VERSION` and `ARG RUST_VERSION` when needed**: Check `toolchain.recommended_go_version_arg` in `router-preflight-report.json` (e.g., `1.27-bookworm` when `llm-d-router` `go.mod` advances to `go 1.27.*`) and update `ARG GO_VERSION=...` in `pack/llm-router/Dockerfile`.
 4. **Update router version ARGs** (`LLMD_ROUTER_VERSION`, `VLLM_ROUTER_VERSION`, `SGLANG_GATEWAY_VERSION`) in `pack/llm-router/Dockerfile` and any patch references/comments if patches were retired.
 5. Never drop `struct ObserverRouter` in `sglang-gateway` or observer/Mooncake/discovery semantics across any router.
+6. **Verify `llm-d-router` observer system-default plugin coverage**: When rebasing `pack/llm-router/patches/llm-d/0001-observer-endpoints-and-dispatch.patch` onto a newer `llm-d-router` tag, inspect `pkg/epp/config/loader/defaults.go` and `cmd/epp/runner/runner.go` for newly added system-default plugins (for example, `strict-band-selection-policy` added by `ensureFlowControlLayer` in `v1.0.0`) and any signature changes to `parseConfigurationPhaseTwo`. Update `SupportedPlugins` in `pkg/epp/observer/endpoints.go` and `cmd/epp/runner/observer_test.go` in the same patch so `epp-builder`'s `go test ./cmd/epp/runner -run TestObserverSupportsRenderedOperatorProfiles` and `go test ./pkg/epp/observer/...` build gates pass.
 
 ## 4. Proposal Artifact
 
