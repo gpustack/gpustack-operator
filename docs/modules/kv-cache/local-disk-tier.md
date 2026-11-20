@@ -67,7 +67,7 @@ object, so there is nothing to opt into.
 
 **The example configurations use `DRAM` groups.** Official `mirrored-mooncake` builds disable
 `USE_VRAM_SEGMENT` (`Host RAM` only); `VRAM` applies only to custom `USE_VRAM_SEGMENT=ON` images
-and is stated at [VRAM group accelerator access](backend.md#vram-group-accelerator-access). Read it
+and is stated at [Custom VRAM builds](backend.md#custom-vram-builds). Read it
 before writing one.
 
 ## Bucket writes

@@ -12,6 +12,7 @@ Mooncake calls the leader a master. Its flags, environment variables and metrics
 - [Image](#image)
 - [Metadata plane](#metadata-plane)
 - [Members](#members)
+- [Vendor-specific behavior](#vendor-specific-behavior)
 - [Status and conditions](#status-and-conditions)
 - [Resizing a group](#resizing-a-group)
 - [External mode](#external-mode)
@@ -293,6 +294,112 @@ The fabric privileges below render per group from the group's effective protocol
 handed the protocol of the group it matched. An engine whose constraint no group in the pool
 satisfies is refused at admission rather than started.
 
+**Two readings can mislead an instrument.** *`binding.usage`* and *`pool.usage`* lag the leader's
+counters by a reconcile tick, so a read taken immediately after a successful write can show `0`.
+The synchronous numbers are the leader's `:9003` `/metrics` and `/api/v1/tenant_quotas`.
+
+**The first write to a fresh store can answer `500`, and that is a race.** The signature is a put
+start with no matching put end in the master's counters, because the tenant ledger is not yet
+visible. Wait until the tenant is listed and retry; the store is not failing.
+
+> **Why** — one group is one `Pod` template, which cannot express a per-node transport; and promoting to
+> a host fabric would mean granting `hostNetwork` plus `IPC_LOCK` and `SYS_RESOURCE`. A privilege is
+> requested, never inferred. Naming `RDMA` or `EFA` is also what accepts the security context that
+> comes with it — which is those three things and **not** `privileged`. A `TCP` group sets none of
+> them. `privileged` is reachable, but only by writing it into
+> [Custom VRAM builds](#custom-vram-builds), never by naming a protocol.
+
+**Both host fabrics also grant the member one device, and the protocol names it.** Nothing is
+declared: an `RDMA` group asks for `device.gpustack.ai/rdma.shared`, one of
+[this operator's own RDMA keys](../rdma/network-topology.md#rdma-resource-keys);
+an `EFA` group asks for
+[the key AWS's EFA device plugin advertises](../rdma/network-topology.md#rdma-resource-keys).
+
+The renderer **derives** the RDMA resource name. The [RDMA resource-key contract](../rdma/network-topology.md#rdma-resource-keys)
+defines that name. The request is the permission (a bind mount of a device tree is
+not), so the member that gets one can `open()` the adapter and the member that gets none could not
+have.
+
+***`members[].fabricInterfaceCount`* sets how many interfaces each member asks for on `RDMA`, `EFA`,
+and `CANN`.** Left unset on `RDMA` or `EFA`, it counts as `1` (`device.gpustack.ai/rdma.shared` for
+`1`, exclusive `device.gpustack.ai/rdma` for `> 1`). On `TCP`, `Auto`, `ROCM`, `MUSA`, and `MACA`,
+it requests no device and admission warns so protocol transitions keep the field. On `CANN`, see
+[Ascend](#ascend).
+
+**On a cluster tracking the default branch, this changes what running RDMA members ask for.** No
+release has ever carried this API, so there is no upgrade path to migrate; but a development cluster
+whose `RDMA` backend predates the change will have its members re-rendered against
+`device.gpustack.ai/rdma.shared` on the next reconcile. **Confirm the Device Manager is running on
+those nodes first**, or the members roll and stay `Pending`.
+
+**The cluster therefore needs the plugin that advertises the group's resource**, and a node without
+it never runs that member: the `Pod` stays `Pending`. That refusal is the intended one. A cluster
+whose nodes cannot serve the fabric is a cluster whose backend should say `TCP`, and an operator who
+wants it back says so in *`protocol`* rather than by leaving a field empty.
+
+**No member mounts `/dev/infiniband`.** Each fabric's plugin injects the verbs character device of
+every device it grants, so mounting the tree beside that grant would add every adapter the member
+was **not** granted, visible and unopenable.
+
+**The medium and the transport are independent.** A `DRAM` group is as entitled to a fabric as a
+`VRAM` one, and this rendering reads the medium nowhere: the protocol decides the network, the
+capabilities and the device, while the medium decides only what the segment is made of and what it
+is charged to.
+
+**What a member's `Pod` requests follows the group's medium.** A `DRAM` member charges
+`capacityPerMember + localBufferSize` to Pod `requests.memory` and sets vendor visibility variables
+to `void`. A `VRAM` member charges only *`localBufferSize`* to `requests.memory` and omits `void`
+hiding; see [Custom VRAM builds](#custom-vram-builds).
+
+**The engine sharing that accelerator does not know the member took a slice of it.** Nothing in
+Kubernetes accounts for device memory, so the two are held apart by **sizing *`capacityPerMember`*
+against the engine's own memory fraction**, and by nothing else. Give the engine a
+`gpu_memory_utilization` that leaves *`capacityPerMember`* free, and expect whichever starts second to
+fail on allocation if you do not.
+
+A member group asks for **no** accelerator extended resource, because the claim would not be true: in the tested Mooncake v0.3.13.post1,
+a member allocates its whole segment on one device, so a resource request would take a whole
+accelerator away from inference to account for a slice of one.
+
+**One member's segment is therefore on one device**, whichever the container sees first. An
+eight-accelerator node keeps all eight available to inference, and one member contributes a slice of
+the first.
+
+**A writer against a disk tier must retry.** A put that fails on a full segment means eviction has
+not caught up, not that the tier is full: the offload heartbeat runs on an interval, so a writer that
+abandons on first failure reads "eviction in progress" as "cannot write".
+
+**Reachability is a port range, never a list.** The transfer engine picks its data ports at random,
+and the peer-to-peer plane is what binds them. Write firewall and `NetworkPolicy` rules between member
+nodes, and from engine clients, as a **range**. The rendered `Pod` declares no fixed data-plane
+*`containerPort`*, because a fixed list would be a false statement.
+
+**The management port is fixed, and on a host fabric it lands on the node.** A member serves its HTTP
+API on `8080 + <group index>` (`8080` for the first group, `8081` for a second). A `TCP` group
+holds that port inside its own `Pod` network namespace, whereas `RDMA`, `EFA`, and `CANN` with
+*`fabricInterfaceCount`* hold the host's, so that port must be free on selected nodes. Reserve one
+port from `8080` upward per member group.
+
+> **Why it moves per group** — two host-network groups whose node selectors both match one node place
+> two host-network `Pod`s on it. On a single fixed port only the first binds; the second runs, never
+> passes readiness, and reports nothing about why.
+
+Members advertise their `Pod` IPs for client connections. Target those addresses in data-plane
+network rules. With host networking, the `Pod` IP is the node address.
+
+Every segment mount gets a new identity and transfer port. After a member restarts, clients
+must discover its current endpoint rather than reuse a previous connection address.
+
+Platform-specific transport rules, Ascend A5 topologies, and custom VRAM access live under
+[Vendor-specific behavior](#vendor-specific-behavior).
+
+## Vendor-specific behavior
+
+Platform transports and custom accelerator images add device mounts, network grants, and environment
+defaults beyond generic Host-RAM members.
+
+### Ascend
+
 `CANN` is the one value an engine can **require**: vllm-ascend's store client currently raises on
 any other protocol (verified at vLLM-Ascend v0.23.0 and v0.26.0rc1; upstream state, not a contract,
 and it may change), so a pool serving Ascend engines declares `CANN` here, or on one member group,
@@ -314,36 +421,6 @@ serves. So a pool that may ever serve an Ascend engine declares `CANN`.
 deployed, every NPU on the nodes read `AICore 0%` and device memory at the driver baseline. The
 member registers device memory regions; it does not compute.
 
-**Two readings can mislead an instrument.** *`binding.usage`* and *`pool.usage`* lag the leader's
-counters by a reconcile tick, so a read taken immediately after a successful write can show `0`.
-The synchronous numbers are the leader's `:9003` `/metrics` and `/api/v1/tenant_quotas`.
-
-**The first write to a fresh store can answer `500`, and that is a race.** The signature is a put
-start with no matching put end in the master's counters, because the tenant ledger is not yet
-visible. Wait until the tenant is listed and retry; the store is not failing.
-
-> **Why** — one group is one `Pod` template, which cannot express a per-node transport; and promoting to
-> a host fabric would mean granting `hostNetwork` plus `IPC_LOCK` and `SYS_RESOURCE`. A privilege is
-> requested, never inferred. Naming `RDMA` or `EFA` is also what accepts the security context that
-> comes with it — which is those three things and **not** `privileged`. A `TCP` group sets none of
-> them. `privileged` is reachable, but only by writing it into
-> [`members[].securityContext`](#vram-group-accelerator-access), never by naming a protocol.
-
-**Both host fabrics also grant the member one device, and the protocol names it.** Nothing is
-declared: an `RDMA` group asks for `device.gpustack.ai/rdma.shared`, one of
-[this operator's own RDMA keys](../rdma/network-topology.md#rdma-resource-keys);
-an `EFA` group asks for
-[the key AWS's EFA device plugin advertises](../rdma/network-topology.md#rdma-resource-keys).
-
-The renderer **derives** the RDMA resource name. The [RDMA resource-key contract](../rdma/network-topology.md#rdma-resource-keys)
-defines that name. The request is the permission (a bind mount of a device tree is
-not), so the member that gets one can `open()` the adapter and the member that gets none could not
-have.
-
-***`members[].fabricInterfaceCount`* sets how many interfaces each member asks for on `RDMA`, `EFA`,
-and `CANN`.** Left unset on `RDMA` or `EFA`, it counts as `1`. On `RDMA`, `1` asks for
-`device.gpustack.ai/rdma.shared` and `> 1` asks for that many exclusive `device.gpustack.ai/rdma`.
-
 On `CANN`, leaving *`fabricInterfaceCount`* unset keeps the group off Host RDMA (Ascend A2/A3 and
 Ascend A5 UB/UBG/UBoE). Setting `fabricInterfaceCount >= 1` enables Ascend A5 Host RoCE (`roce:host`):
 
@@ -352,34 +429,125 @@ Ascend A5 UB/UBG/UBoE). Setting `fabricInterfaceCount >= 1` enables Ascend A5 Ho
 - **Defaulted env**: Injects `ASCEND_LOCAL_COMM_RES=""` and `ASCEND_GLOBAL_RESOURCE_CONFIG='{"comm_resource_config.protocol_desc":["roce:host"],"local_comm_res_path":"/etc/hixlep/ub_endpoint_npu_0.json"}'` unless declared in *`members[].extraEnv`*.
 - **Admission checks**: Suppresses the idle *`fabricInterfaceCount`* warning for `CANN`, while rejecting *`localDisks[].path`* overlapping `/etc/hixlep`.
 
-On `TCP`, `Auto`, `ROCM`, `MUSA`, and `MACA`, *`fabricInterfaceCount`* requests no device and
-admission emits a warning so protocol transitions can keep the field.
+#### Ascend A5 scenarios
 
-**On a cluster tracking the default branch, this changes what running RDMA members ask for.** No
-release has ever carried this API, so there is no upgrade path to migrate; but a development cluster
-whose `RDMA` backend predates the change will have its members re-rendered against
-`device.gpustack.ai/rdma.shared` on the next reconcile. **Confirm the Device Manager is running on
-those nodes first**, or the members roll and stay `Pending`.
+The matrix maps Ascend A2/A3 and Ascend A5 (`950PR`/`950DT`) configurations to rendered member
+behavior:
 
-**The cluster therefore needs the plugin that advertises the group's resource**, and a node without
-it never runs that member: the `Pod` stays `Pending`. That refusal is the intended one. A cluster
-whose nodes cannot serve the fabric is a cluster whose backend should say `TCP`, and an operator who
-wants it back says so in *`protocol`* rather than by leaving a field empty.
+| Scenario | Configuration | Resulting behavior |
+|---|---|---|
+| **A5 UB (`ub_ctp`)** | `protocol: CANN`, `medium: DRAM`, omit *`fabricInterfaceCount`* | On-die UB path; no Host RDMA grant, no `/etc/hixlep` mount, Mooncake defaults `ASCEND_LOCAL_COMM_RES`. |
+| **A5 UBG (`ub_rtp:device`)** | `protocol: CANN`, omit *`fabricInterfaceCount`*, set *`extraEnv`* `ASCEND_GLOBAL_RESOURCE_CONFIG` | Same non-RDMA Pod template with `'{"comm_resource_config.protocol_desc":["ub_rtp:device"]}'`. |
+| **A5 UBoE (`uboe:device`)** | `protocol: CANN`, omit *`fabricInterfaceCount`*, set *`extraEnv`* `ASCEND_GLOBAL_RESOURCE_CONFIG` | Same non-RDMA Pod template with `'{"comm_resource_config.protocol_desc":["uboe:device"]}'`. |
+| **A5 Host RoCE (`roce:host`)** | `protocol: CANN`, `medium: DRAM`, *`fabricInterfaceCount: 1`* | Grants `hostNetwork`, `IPC_LOCK`+`SYS_RESOURCE`, `rdma.shared`/`rdma`, `/etc/hixlep` RO mount, and defaulted `ASCEND_LOCAL_COMM_RES=""` + `ASCEND_GLOBAL_RESOURCE_CONFIG`. |
+| **A5 Host RoCE override** | `protocol: CANN`, *`fabricInterfaceCount >= 1`*, user *`extraEnv`* or *`hostPaths`* at `/etc/hixlep` | Keeps Host RDMA grant; yields `/etc/hixlep` mount on path overlap and yields `ASCEND_*` defaults when declared. |
+| **Non-A5 Ascend A2/A3** | `910B`/`910C`, `protocol: CANN`, `medium: DRAM`, omit *`fabricInterfaceCount`* | Unchanged legacy `ascend` rendering (`aclrtMallocHost`); no Host RDMA grant or `/etc/hixlep` mount. |
 
-**No member mounts `/dev/infiniband`.** Each fabric's plugin injects the verbs character device of
-every device it grants, so mounting the tree beside that grant would add every adapter the member
-was **not** granted, visible and unopenable.
+**Ascend A2 (`910B`)** worked example (`medium: DRAM`, `protocol: CANN`, no
+*`fabricInterfaceCount`*). For **Ascend A3 (`910C`)**, substitute a `910C`-built CANN image because
+the SoC family is compiled into the `mirrored-mooncake` CANN target at build time:
 
-**On `EFA` the mount breaks a partial grant.** A member granted fewer EFA devices than its node has
-would see the rest through the tree, and `open()` on one returns `EPERM` from the device cgroup.
-libfabric's EFA provider gives up its whole device list on the first `EPERM`, so the store reports
-`No available EFA devices` and the container restarts in a loop. Without the mount it initializes.
+```yaml
+apiVersion: worker.gpustack.ai/v1
+kind: KVCacheBackend
+metadata:
+  name: ascend-shared-cache
+spec:
+  transport:
+    protocol: CANN
+  connection:
+    managed:
+      leader: {}  # replicas, allocationStrategy and multiTenancy default
+      members:
+        - nodeSelector:
+            kvcache-ascend: "true"
+          medium: DRAM
+          image: gpustack/mirrored-mooncake:0.3.14-cann9.1-910b  # 910B build; use a 910C build for Ascend A3
+          capacityPerMember: 32Gi
+          hostPaths:
+            - path: /usr/local/Ascend/driver
+              mountPath: /usr/local/Ascend/driver
+              type: Directory
+              readOnly: true
+            - path: /usr/local/dcmi
+              mountPath: /usr/local/dcmi
+              type: Directory
+              readOnly: true
+            - path: /usr/local/bin/npu-smi
+              mountPath: /usr/local/bin/npu-smi
+              type: File
+              readOnly: true
+```
+
+**Ascend A5 Host RoCE** worked example (`medium: DRAM`, `protocol: CANN`,
+*`fabricInterfaceCount: 1`*):
+
+```yaml
+apiVersion: worker.gpustack.ai/v1
+kind: KVCacheBackend
+metadata:
+  name: ascend-a5-roce-cache
+spec:
+  transport:
+    protocol: CANN
+  connection:
+    managed:
+      leader: {}  # replicas, allocationStrategy and multiTenancy default
+      members:
+        - nodeSelector:
+            kvcache-ascend-a5: "true"
+          medium: DRAM
+          image: gpustack/mirrored-mooncake:0.3.14-cann9.2-a5  # placeholder tag for an A5 (950PR/950DT) build
+          capacityPerMember: 32Gi
+          fabricInterfaceCount: 1  # >=1 enables Host RoCE on CANN
+          hostPaths:  # plus /usr/local/dcmi and /usr/local/bin/npu-smi as above
+            - path: /usr/local/Ascend/driver
+              mountPath: /usr/local/Ascend/driver
+              type: Directory
+              readOnly: true
+```
+
+**Ascend A5 UBG** worked example (*`fabricInterfaceCount`* omitted; set *`extraEnv`* with HIXL's
+flat dotted key `"comm_resource_config.protocol_desc"` for UBG, UBoE, or custom Host RoCE topology
+overrides):
+
+```yaml
+apiVersion: worker.gpustack.ai/v1
+kind: KVCacheBackend
+metadata:
+  name: ascend-a5-ubg-cache
+spec:
+  transport:
+    protocol: CANN
+  connection:
+    managed:
+      leader: {}  # replicas, allocationStrategy and multiTenancy default
+      members:
+        - nodeSelector:
+            kvcache-ascend-a5: "true"
+          medium: DRAM
+          image: gpustack/mirrored-mooncake:0.3.14-cann9.2-a5  # placeholder tag for an A5 (950PR/950DT) build
+          capacityPerMember: 32Gi
+          extraEnv:
+            - name: ASCEND_GLOBAL_RESOURCE_CONFIG
+              value: '{"comm_resource_config.protocol_desc":["ub_rtp:device"]}'
+          hostPaths:  # plus /usr/local/dcmi and /usr/local/bin/npu-smi as above
+            - path: /usr/local/Ascend/driver
+              mountPath: /usr/local/Ascend/driver
+              type: Directory
+              readOnly: true
+```
+
+### AWS EFA
+
+**On `EFA` a `/dev/infiniband` mount breaks a partial grant.** A member granted fewer EFA devices
+than its node has would see the rest through the tree, and `open()` on one returns `EPERM` from the
+device cgroup. libfabric's EFA provider gives up its whole device list on the first `EPERM`, so the
+store reports `No available EFA devices` and the container restarts in a loop.
 
 Nothing is mounted from a host EFA install: the libfabric an `EFA` member runs on is in the image.
-
 **The engines an `EFA` group serves need an EFA build of Mooncake as well**, which no runner image
-carries. See [what an EFA path needs from the engine
-image](../rdma/operations.md#efa-engine-images).
+carries. See [what an EFA path needs from the engine image](../rdma/operations.md#efa-engine-images).
 
 EFA capability is a property of the instance size rather than of its family (the largest `i7ie`
 sizes carry it while every smaller one does not), so check the size about to run, with
@@ -387,41 +555,15 @@ sizes carry it while every smaller one does not), so check the size about to run
 
 **Cross-node EFA requires both nodes in one cluster placement group.** One availability zone is
 necessary and not sufficient. Two nodes sharing a zone but in different placement groups complete
-the libfabric handshake (the endpoint pair is reported established), and then every work request
-hangs forever with the receiving adapter's byte counters at zero and no error on either side. The
-silence is the problem: it reads as a hung probe, not as a placement fault.
+the libfabric handshake, and then every work request hangs with the receiving adapter's byte
+counters at zero and no error on either side.
 
 Where nodes sit is outside this operator, so it belongs to whoever builds the cluster. A managed
 node group typically gets a placement group of its own, which makes "members of one pool spread
-across two groups" the default outcome rather than an unusual one. A pool whose members are meant
-to reach each other should be pinned to node groups that share one.
+across two groups" the default outcome rather than an unusual one. Pin pool members that must reach
+each other to node groups sharing one placement group.
 
-**The medium and the transport are independent.** A `DRAM` group is as entitled to a fabric as a
-`VRAM` one, and this rendering reads the medium nowhere: the protocol decides the network, the
-capabilities and the device, while the medium decides only what the segment is made of and what it
-is charged to.
-
-**What a member's `Pod` requests follows the group's medium.** A `DRAM` member charges
-`capacityPerMember + localBufferSize` to Pod `requests.memory` and sets vendor visibility variables
-to `void`. A `VRAM` member (accounting-only for user-built `USE_VRAM_SEGMENT=ON` images) charges
-only *`localBufferSize`* to `requests.memory` and omits `void` hiding; the operator does not verify
-whether the image actually allocates VRAM.
-
-**The engine sharing that accelerator does not know the member took a slice of it.** Nothing in
-Kubernetes accounts for device memory, so the two are held apart by **sizing *`capacityPerMember`*
-against the engine's own memory fraction**, and by nothing else. Give the engine a
-`gpu_memory_utilization` that leaves *`capacityPerMember`* free, and expect whichever starts second to
-fail on allocation if you do not.
-
-A member group asks for **no** accelerator extended resource, because the claim would not be true: in the tested Mooncake v0.3.13.post1,
-a member allocates its whole segment on one device, so a resource request would take a whole
-accelerator away from inference to account for a slice of one.
-
-**One member's segment is therefore on one device**, whichever the container sees first. An
-eight-accelerator node keeps all eight available to inference, and one member contributes a slice of
-the first.
-
-### VRAM group accelerator access
+### Custom VRAM builds
 
 `members[].medium: VRAM` is accounting-only for user-supplied custom images compiled with
 `USE_VRAM_SEGMENT=ON`. Official `mirrored-mooncake` builds disable `USE_VRAM_SEGMENT` and run with
@@ -456,151 +598,11 @@ spec:
 `NVIDIA_VISIBLE_DEVICES` works only when `accept-nvidia-visible-devices-envvar-when-unprivileged` is
 on; otherwise set *`runtimeClassName: nvidia`*.
 
-### Ascend A5 scenarios
-
-On Ascend, official `mirrored-mooncake` `-cann` images allocate segments in Host RAM (`medium: DRAM`)
-with `protocol: CANN` and require node driver mounts. The matrix maps Ascend A2/A3 and Ascend A5
-(`950PR`/`950DT`) configurations to rendered member behavior:
-
-| Scenario | Configuration | Resulting behavior |
-|---|---|---|
-| **A5 UB (`ub_ctp`)** | `protocol: CANN`, `medium: DRAM`, omit *`fabricInterfaceCount`* | On-die UB path; no Host RDMA grant, no `/etc/hixlep` mount, Mooncake defaults `ASCEND_LOCAL_COMM_RES`. |
-| **A5 UBG (`ub_rtp:device`)** | `protocol: CANN`, omit *`fabricInterfaceCount`*, set *`extraEnv`* `ASCEND_GLOBAL_RESOURCE_CONFIG` | Same non-RDMA Pod template with `'{"comm_resource_config.protocol_desc":["ub_rtp:device"]}'`. |
-| **A5 UBoE (`uboe:device`)** | `protocol: CANN`, omit *`fabricInterfaceCount`*, set *`extraEnv`* `ASCEND_GLOBAL_RESOURCE_CONFIG` | Same non-RDMA Pod template with `'{"comm_resource_config.protocol_desc":["uboe:device"]}'`. |
-| **A5 Host RoCE (`roce:host`)** | `protocol: CANN`, `medium: DRAM`, *`fabricInterfaceCount: 1`* | Grants `hostNetwork`, `IPC_LOCK`+`SYS_RESOURCE`, `rdma.shared`/`rdma`, `/etc/hixlep` RO mount, and defaulted `ASCEND_LOCAL_COMM_RES=""` + `ASCEND_GLOBAL_RESOURCE_CONFIG`. |
-| **A5 Host RoCE override** | `protocol: CANN`, *`fabricInterfaceCount >= 1`*, user *`extraEnv`* or *`hostPaths`* at `/etc/hixlep` | Keeps Host RDMA grant; yields `/etc/hixlep` mount on path overlap and yields `ASCEND_*` defaults when declared. |
-| **Non-A5 Ascend A2/A3** | `910B`/`910C`, `protocol: CANN`, `medium: DRAM`, omit *`fabricInterfaceCount`* | Unchanged legacy `ascend` rendering (`aclrtMallocHost`); no Host RDMA grant or `/etc/hixlep` mount. |
-
-Ascend A2/A3 (`910B`/`910C`) worked example (`medium: DRAM`, `protocol: CANN`, no *`fabricInterfaceCount`*):
-
-```yaml
-apiVersion: worker.gpustack.ai/v1
-kind: KVCacheBackend
-metadata:
-  name: ascend-shared-cache
-spec:
-  transport:
-    protocol: CANN
-  connection:
-    managed:
-      leader: {}  # replicas, allocationStrategy and multiTenancy default
-      members:
-        - nodeSelector:
-            kvcache-ascend: "true"
-          medium: DRAM
-          image: gpustack/mirrored-mooncake:0.3.14-cann9.1-910b
-          capacityPerMember: 32Gi
-          hostPaths:
-            - path: /usr/local/Ascend/driver
-              mountPath: /usr/local/Ascend/driver
-              type: Directory
-              readOnly: true
-            - path: /usr/local/dcmi
-              mountPath: /usr/local/dcmi
-              type: Directory
-              readOnly: true
-            - path: /usr/local/bin/npu-smi
-              mountPath: /usr/local/bin/npu-smi
-              type: File
-              readOnly: true
-```
-
-Ascend A5 Host RoCE worked example (`medium: DRAM`, `protocol: CANN`, *`fabricInterfaceCount: 1`*):
-
-```yaml
-apiVersion: worker.gpustack.ai/v1
-kind: KVCacheBackend
-metadata:
-  name: ascend-a5-roce-cache
-spec:
-  transport:
-    protocol: CANN
-  connection:
-    managed:
-      leader: {}  # replicas, allocationStrategy and multiTenancy default
-      members:
-        - nodeSelector:
-            kvcache-ascend-a5: "true"
-          medium: DRAM
-          image: gpustack/mirrored-mooncake:0.3.14-cann9.2-a5  # placeholder tag for an A5 (950PR/950DT) build
-          capacityPerMember: 32Gi
-          fabricInterfaceCount: 1  # >=1 enables Host RoCE on CANN
-          hostPaths:
-            - path: /usr/local/Ascend/driver
-              mountPath: /usr/local/Ascend/driver
-              type: Directory
-              readOnly: true
-            - path: /usr/local/dcmi
-              mountPath: /usr/local/dcmi
-              type: Directory
-              readOnly: true
-            - path: /usr/local/bin/npu-smi
-              mountPath: /usr/local/bin/npu-smi
-              type: File
-              readOnly: true
-```
-
-For UBG or UBoE (*`fabricInterfaceCount`* omitted), or custom Host RoCE topology overrides, set
-*`extraEnv`* with HIXL's flat dotted key `"comm_resource_config.protocol_desc"`:
-
-```yaml
-apiVersion: worker.gpustack.ai/v1
-kind: KVCacheBackend
-metadata:
-  name: ascend-a5-ubg-cache
-spec:
-  transport:
-    protocol: CANN
-  connection:
-    managed:
-      leader: {}  # replicas, allocationStrategy and multiTenancy default
-      members:
-        - nodeSelector:
-            kvcache-ascend-a5: "true"
-          medium: DRAM
-          image: gpustack/mirrored-mooncake:0.3.14-cann9.2-a5  # placeholder tag for an A5 (950PR/950DT) build
-          capacityPerMember: 32Gi
-          extraEnv:
-            - name: ASCEND_GLOBAL_RESOURCE_CONFIG
-              value: '{"comm_resource_config.protocol_desc":["ub_rtp:device"]}'
-          hostPaths:  # plus /usr/local/dcmi and /usr/local/bin/npu-smi as above
-            - path: /usr/local/Ascend/driver
-              mountPath: /usr/local/Ascend/driver
-              type: Directory
-              readOnly: true
-```
-
 **A VRAM group may also carry a [local disk tier](local-disk-tier.md), and that combination is
 measured on NVIDIA.** Objects written past a 256Mi device segment left memory for the tier and read
 back with matching digests. No upstream test covers the pairing, so the reading is this project's own.
-
 **The equivalent on Ascend (`cann`) and AMD (`rocm`) is still unmeasured.** Treat the pairing as
-verified on NVIDIA and as unverified elsewhere, rather than as guaranteed everywhere.
-
-**A writer against this tier must retry.** A put that fails on a full segment means eviction has
-not caught up, not that the tier is full: the offload heartbeat runs on an interval, so a writer that
-abandons on first failure reads "eviction in progress" as "cannot write".
-
-**Reachability is a port range, never a list.** The transfer engine picks its data ports at random,
-and the peer-to-peer plane is what binds them. Write firewall and `NetworkPolicy` rules between member
-nodes, and from engine clients, as a **range**. The rendered `Pod` declares no fixed data-plane
-*`containerPort`*, because a fixed list would be a false statement.
-
-**The management port is fixed, and on a host fabric it lands on the node.** A member serves its HTTP
-API on `8080 + <group index>` (`8080` for the first group, `8081` for a second). A `TCP` group
-holds that port inside its own `Pod` network namespace, whereas `RDMA`, `EFA`, and `CANN` with
-*`fabricInterfaceCount`* hold the host's, so that port must be free on selected nodes. Reserve one
-port from `8080` upward per member group.
-
-> **Why it moves per group** — two host-network groups whose node selectors both match one node place
-> two host-network `Pod`s on it. On a single fixed port only the first binds; the second runs, never
-> passes readiness, and reports nothing about why.
-
-Members advertise their `Pod` IPs for client connections. Target those addresses in data-plane
-network rules. With host networking, the `Pod` IP is the node address.
-
-Every segment mount gets a new identity and transfer port. After a member restarts, clients
-must discover its current endpoint rather than reuse a previous connection address.
+verified on NVIDIA and unverified elsewhere.
 
 ## Status and conditions
 

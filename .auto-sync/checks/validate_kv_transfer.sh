@@ -315,15 +315,49 @@ while idx < len(cuda_lines):
         run_blocks.append(body)
     idx += 1
 
+def strip_outer_quotes(tok: str) -> str:
+    while len(tok) >= 2 and tok[0] == tok[-1] and tok[0] in ("'", '"'):
+        tok = tok[1:-1]
+    return tok
+
+
+standalone_off_re = re.compile(
+    r'^-DUSE_VRAM_SEGMENT(?::[A-Za-z_][A-Za-z0-9_]*)?=(?:"OFF"|\'OFF\'|OFF)$'
+)
+bare_off_re = re.compile(
+    r'^USE_VRAM_SEGMENT(?::[A-Za-z_][A-Za-z0-9_]*)?=(?:"OFF"|\'OFF\'|OFF)$'
+)
+standalone_var_re = re.compile(
+    r"^\$(?:\{([A-Za-z_][A-Za-z0-9_]*)\}|([A-Za-z_][A-Za-z0-9_]*))$"
+)
+
+
+def has_standalone_off(tokens: list[str]) -> bool:
+    unquoted = [strip_outer_quotes(t) for t in tokens if t]
+    for idx, tok in enumerate(unquoted):
+        if standalone_off_re.fullmatch(tok):
+            return True
+        if tok == "-D" and idx + 1 < len(unquoted) and bare_off_re.fullmatch(unquoted[idx + 1]):
+            return True
+    return False
+
+
+def standalone_var_refs(tokens: list[str]) -> set[str]:
+    refs: set[str] = set()
+    for tok in tokens:
+        m = standalone_var_re.fullmatch(strip_outer_quotes(tok))
+        if m:
+            refs.add(m.group(1) or m.group(2))
+    return refs
+
+
 assign_re = re.compile(r"^(?:(?:then|else|do|export|local)\s+)*([A-Za-z_][A-Za-z0-9_]*)=(.*)$")
 unset_re = re.compile(
     r"^(?:(?:then|else|do)\s+)*unset(?:\s+-[vf])*((?:\s+[A-Za-z_][A-Za-z0-9_]*)+)\s*$"
 )
-off_token_re = re.compile(
-    r'(?:^|[^A-Za-z0-9_])-D\s*USE_VRAM_SEGMENT(?::[A-Za-z_][A-Za-z0-9_]*)?\s*=\s*["\']?OFF(?=$|[^A-Za-z0-9_])'
+cmake_cfg_re = re.compile(
+    r"^(?:(?:then|else|do|time|exec)\s+)*(?:[A-Za-z_][A-Za-z0-9_]*=\S+\s+)*cmake\s+(?!--build\b)(.+)$"
 )
-cmake_cfg_re = re.compile(r"(?:^|\s|&&|\|\||;)cmake\s+(?!--build\b)(.+)$")
-var_ref_re = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}|\$([A-Za-z_][A-Za-z0-9_]*)\b")
 
 saw_cmake_configure = False
 for block in run_blocks:
@@ -356,22 +390,22 @@ for block in run_blocks:
             m_asgn = assign_re.match(st)
             if m_asgn:
                 var_name, rhs = m_asgn.group(1), m_asgn.group(2)
-                rhs_vars = {g1 or g2 for g1, g2 in var_ref_re.findall(rhs)}
-                if off_token_re.search(rhs):
+                rhs_val = strip_outer_quotes(rhs.strip())
+                rhs_tokens = rhs_val.split()
+                if has_standalone_off(rhs_tokens):
                     assigned_off_vars.add(var_name)
-                elif (rhs_vars & assigned_off_vars) and not cmake_cfg_re.search(st):
+                elif (standalone_var_refs(rhs_tokens) & assigned_off_vars) and not cmake_cfg_re.match(st):
                     assigned_off_vars.add(var_name)
                 else:
                     assigned_off_vars.discard(var_name)
-            m_cmake = cmake_cfg_re.search(st)
+            m_cmake = cmake_cfg_re.match(st)
             if m_cmake:
                 saw_cmake_configure = True
                 cmake_args = m_cmake.group(1)
                 cmake_cmd_only = re.split(r"(?:&&|\|\||;|\|)", cmake_args, maxsplit=1)[0]
-                direct_off = bool(off_token_re.search(cmake_cmd_only))
-                referenced_vars = {
-                    g1 or g2 for g1, g2 in var_ref_re.findall(cmake_cmd_only)
-                }
+                cmake_tokens = cmake_cmd_only.split()
+                direct_off = has_standalone_off(cmake_tokens)
+                referenced_vars = standalone_var_refs(cmake_tokens)
                 var_off = bool(referenced_vars & assigned_off_vars)
                 if not (direct_off or var_off):
                     print(
