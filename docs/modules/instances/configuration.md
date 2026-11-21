@@ -284,11 +284,20 @@ spec:
   localStorage: 200Gi  # required; positive integer with case-sensitive "Gi" suffix; immutable
 ```
 
-A custom sibling with the same (*`acceleratable`*, *`acceleratorGroup`*, *`generalGroup`*, *`os`*,
-*`arch`*) shares the pool's canonical `ClusterQueue` without interrupting running `Instance`s. When
-all `ResourceFlavor`s leave a pool and `instance-type-drain-when-no-flavors` is `true` (default),
-the queue drains before emptying and reactivates when nodes return; the `InstanceType` is never
-auto-deleted.
+- **Shared pool queue**: A custom sibling with the same (*`acceleratable`*, *`acceleratorGroup`*,
+  *`generalGroup`*, *`os`*, *`arch`*) shares the pool's canonical `ClusterQueue` without
+  interrupting running `Instance`s.
+- **CPU-only types**: Set `acceleratable: false`, omit *`acceleratorGroup`*, and set
+  `unitResources.cpu: "1"` (supply a CPU *`generalGroup`* only when
+  `instance-type-aware-cpu-manufacturer` is enabled).
+- **Inactive and drain recovery**: The backing `ClusterQueue` enters `Hold` only when every
+  `InstanceType` and `AcceleratorType` fronting that pool has `spec.inactive: true`. If all
+  `ResourceFlavor`s leave a pool and `instance-type-drain-when-no-flavors` is `true` (default),
+  the queue drains (`HoldAndDrain`) and backfills `spec.inactive: true`; the `InstanceType` is never
+  auto-deleted, and after nodes return an admin must clear `spec.inactive: false` to resume
+  admission.
+- **Deleting a sibling**: Deleting one custom `InstanceType` persists `spec.stop: true` on its own
+  `Instance`s while keeping the shared `ClusterQueue` active for remaining sibling types.
 
 ---
 
