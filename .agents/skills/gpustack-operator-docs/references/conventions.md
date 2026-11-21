@@ -909,8 +909,7 @@ page as an `##` or `###` section unless it has independent operational workflows
    - **LLM reference**: a row in the `docs/README.md` `## Reference` table and a routing row in the
      hub `reference/README.md`. Never add it to `site/data/navigation.yaml`.
    - **Contributor**: a row in the `docs/README.md` `## Contribute` table. Never add it to navigation.
-4. Add it to the routing table in the skill's `SKILL.md` and to `references/page-map.md`, saying what it
-   owns and what it must not absorb.
+4. Add it to `references/page-map.md`, saying what it owns and what it must not absorb.
 5. Link to it from the page a reader arrives from — a page reachable only through the index is a page
    nobody reads. A public page arrives from public pages; a reference page arrives from the hub and
    sibling reference pages, never from a public page.

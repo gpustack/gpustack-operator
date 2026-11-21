@@ -201,11 +201,14 @@ apiVersion: v1
 kind: Pod
 metadata:
   name: preferred-card-pod
+  labels:
+    kueue.x-k8s.io/queue-name: <local-queue-name>  # required; selects the pool LocalQueue and Pod webhook
   annotations:
     device.gpustack.ai/accelerator.preferred-index: "3,1"  # comma-separated Devices index order
     # device.gpustack.ai/accelerator.preferred-id: "GPU-...,GPU-..."  # takes precedence over preferred-index
 spec:
-  nodeName: gpu-node-0  # annotations select cards inside one node; pin the node separately
+  nodeSelector:  # optional; annotations select cards inside one node, so constrain the node separately
+    kubernetes.io/hostname: gpu-node-0
   containers:
     - name: main
       image: ubuntu:24.04
@@ -220,7 +223,8 @@ spec:
   `Devices.spec.groups[].accelerators[]` (`id` or `index`); whitespace and duplicates are ignored.
 - **Advisory intra-node hint**: Applies only inside the scheduled `Node` via
   `GetPreferredAllocation`; unavailable, cross-node, or insufficient cards fall back to other
-  eligible cards on the node.
+  node cards. For logical slices, if every card lacks the requested units, a fallback hint can still
+  be returned and `Allocate` rejects overcommitment.
 - **Selection order**: Over-specified lists take the highest-priority available cards up to the
   request size, returned in ascending hardware order.
 - **Unsupported modes**: Hardware partitioning (`Partitioned` / MIG) and SSH visibility sidecars

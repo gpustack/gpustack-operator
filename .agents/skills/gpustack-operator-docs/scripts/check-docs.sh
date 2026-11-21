@@ -719,7 +719,7 @@ heading_issues_of() {
 }
 
 # Authored-prose noise findings on public docs as "line<TAB>kind<TAB>snippet".
-# check_recorded_on=1 bans dev-journal "recorded on" version stamps in non-benchmark config guides.
+# check_recorded_on=1 bans dev-journal "recorded/verified on <version>" stamps in non-benchmark guides.
 prose_noise_issues_of() {
   awk -v check_recorded_on="${2:-0}" "$AWK_LIB"'
     BEGIN { md_prev_blank = 1 }
@@ -740,18 +740,18 @@ prose_noise_issues_of() {
     {
       line = uncomment($0)
       low = tolower(line)
-      if (low ~ /not recorded with this capture|versions? not recorded/) {
+      if (low ~ /not recorded with this capture|versions? not recorded|\|[[:space:]]*not[[:space:]]+recorded[[:space:]]*\|/) {
         printf "%d\tblank_recorded\t%s\n", FNR, line
       }
-      if (check_recorded_on && low ~ /(^|[^[:alnum:]_])recorded[[:space:]]+on([^[:alnum:]_]|$)/) {
+      if (check_recorded_on && (low ~ /(^|[^[:alnum:]_])(recorded|verified)[[:space:]]+on[[:space:]]+([[:alnum:]_-]+[[:space:]]+)?([[:alnum:]_-]+[[:space:]]+)?(v[0-9]+\.[0-9]+|[0-9]+\.[0-9]+\.[0-9]+|[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9])/ || low ~ /(^|[^[:alnum:]_])(recorded|verified)[[:space:]]+on[[:space:]]+(vllm|sglang|kubernetes|k8s|kueue|helm|cuda|rocm|cann|ubuntu|python)[[:space:]]+v?[0-9]+\.[0-9]+/)) {
         printf "%d\trecorded_on\t%s\n", FNR, line
       }
     }
   ' "$1"
 }
 
-# Extract ## Components section of docs/getting-started/architecture.md outside code fences/comments.
-arch_components_of() {
+# Extract exact inline-code tokens from ## Components of docs/getting-started/architecture.md.
+arch_component_tokens_of() {
   awk "$AWK_LIB"'
     BEGIN { md_prev_blank = 1 }
     !html_comment && !md_in_indent {
@@ -770,7 +770,14 @@ arch_components_of() {
       line = uncomment($0)
       if (line ~ /^## Components([ \t]*$)/) { in_sec = 1; next }
       if (in_sec && line ~ /^## /) { in_sec = 0 }
-      if (in_sec) print line
+      if (!in_sec) next
+      rest = line
+      while (match(rest, /`[^`]+`/)) {
+        tok = substr(rest, RSTART + 1, RLENGTH - 2)
+        gsub(/^[[:space:]]+|[[:space:]]+$/, "", tok)
+        if (tok != "") print tok
+        rest = substr(rest, RSTART + RLENGTH)
+      }
     }
   ' "$1"
 }
@@ -1372,7 +1379,7 @@ if [ "$STRICT_ZONES" -eq 1 ]; then
   done
 
   if [ -f "docs/getting-started/architecture.md" ]; then
-    arch_components_of "docs/getting-started/architecture.md" > "$WORK/arch-components"
+    arch_component_tokens_of "docs/getting-started/architecture.md" > "$WORK/arch-tokens"
     if [ -f "cmd/gpustack-operator/main.go" ]; then
       while IFS= read -r pkgname; do
         [ -n "$pkgname" ] || continue
@@ -1387,7 +1394,7 @@ if [ "$STRICT_ZONES" -eq 1 ]; then
           }
         ' "pkg/${pkgname}"/*.go 2>/dev/null || true)
         [ -n "$subcmd" ] || continue
-        if ! grep -Fq "$subcmd" "$WORK/arch-components"; then
+        if ! grep -qxF "$subcmd" "$WORK/arch-tokens"; then
           err "docs/getting-started/architecture.md: ## Components missing runtime subcommand '$subcmd' (from cmd/gpustack-operator/main.go)"
         fi
       done < <(awk '
@@ -1401,9 +1408,26 @@ if [ "$STRICT_ZONES" -eq 1 ]; then
     fi
     for pyproj in */python/pyproject.toml; do
       [ -f "$pyproj" ] || continue
-      comp="${pyproj%%/python/pyproject.toml}"
-      if ! grep -Fq "$comp" "$WORK/arch-components"; then
-        err "docs/getting-started/architecture.md: ## Components missing staged runtime component '$comp'"
+      py_dist=$(python3 - "$pyproj" <<'PY'
+import sys, tomllib
+try:
+    with open(sys.argv[1], "rb") as fh:
+        data = tomllib.load(fh)
+    proj = data.get("project")
+    name = proj.get("name") if isinstance(proj, dict) else None
+    if isinstance(name, str) and name.strip():
+        print(name.strip())
+except Exception:
+    sys.exit(1)
+PY
+      ) || py_dist=""
+      if [ -z "$py_dist" ]; then
+        err "docs/getting-started/architecture.md: unable to parse [project] name from ${pyproj}"
+        continue
+      fi
+      py_mod=$(printf '%s' "$py_dist" | tr '-' '_')
+      if ! grep -qxF "$py_dist" "$WORK/arch-tokens" && ! grep -qxF "$py_mod" "$WORK/arch-tokens"; then
+        err "docs/getting-started/architecture.md: ## Components missing staged Python package '${py_mod}' (from ${pyproj})"
       fi
     done
   fi

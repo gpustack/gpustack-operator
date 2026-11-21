@@ -290,14 +290,17 @@ spec:
 - **CPU-only types**: Set `acceleratable: false`, omit *`acceleratorGroup`*, and set
   `unitResources.cpu: "1"` (supply a CPU *`generalGroup`* only when
   `instance-type-aware-cpu-manufacturer` is enabled).
-- **Inactive and drain recovery**: The backing `ClusterQueue` enters `Hold` only when every
-  `InstanceType` and `AcceleratorType` fronting that pool has `spec.inactive: true`. If all
-  `ResourceFlavor`s leave a pool and `instance-type-drain-when-no-flavors` is `true` (default),
-  the queue drains (`HoldAndDrain`) and backfills `spec.inactive: true`; the `InstanceType` is never
-  auto-deleted, and after nodes return an admin must clear `spec.inactive: false` to resume
-  admission.
+- **Inactive and empty queues**: A new empty queue starts on `Hold` until its first flavor syncs.
+  On a populated pool, admin-driven `Hold` activates only when every `InstanceType` and
+  `AcceleratorType` fronting that pool sets `spec.inactive: true`.
+- **Drain recovery**: With `instance-type-drain-when-no-flavors=true` (default), a marked migration
+  drains before emptying and restores the saved stop policy when nodes return without backfilling
+  `spec.inactive`. Outside migration, an external `Hold` on a populated active pool clears to `None`,
+  while an external `HoldAndDrain` backfills `spec.inactive: true`. The `InstanceType` stays intact.
 - **Deleting a sibling**: Deleting one custom `InstanceType` persists `spec.stop: true` on its own
-  `Instance`s while keeping the shared `ClusterQueue` active for remaining sibling types.
+  `Instance`s. With other active siblings, the shared `ClusterQueue` stays active; with only inactive
+  siblings on an active, non-deleting queue outside migration, the controller sets `Hold`; if it was
+  the last fronting object on the pool, the controller requests `ClusterQueue` deletion.
 
 ---
 

@@ -761,7 +761,11 @@ order before returning.
 
 Unknown or cross-node IDs are skipped safely; if eligible preferred cards do not cover
 `AllocationSize`, the response fills remaining slots from unselected node cards and returns an empty
-hint when total available cards are insufficient. See
+hint when total available cards are insufficient.
+
+On `Sliced` requests, cards lacking the requested per-accelerator units also enter the unselected
+fallback list, so `GetPreferredAllocation` may still hint one when no card fits and `Allocate`
+enforces the final room check. See
 [Preferred accelerator placement](../modules/devices/requests.md#preferred-accelerator-placement) for
 the operator example.
 

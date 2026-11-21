@@ -27,8 +27,11 @@ only when needed:
 - Keep design rationale in `specs/`, not `docs/`; guides carry only brief `> **Why**` notes when
   needed to prevent operators from undoing a rule.
 - Keep `docs/README.md` labels equal to each page's H1 character for character, in navigation order.
-  Update `docs/README.md`, `docs/reference/README.md`, `site/data/navigation.yaml`, and
-  `references/page-map.md` in the same PR when adding, moving, or renaming pages.
+  Update zone registrations in the same PR when adding, moving, or renaming pages: public pages in
+  `docs/README.md`, `site/data/navigation.yaml`, and `references/page-map.md`; `docs/reference/*.md`
+  in `docs/README.md`, `docs/reference/README.md`, and `references/page-map.md` (never
+  `navigation.yaml`); `docs/contribute/*.md` in `docs/README.md` and `references/page-map.md` (never
+  `navigation.yaml`).
 
 ## Hard rules
 

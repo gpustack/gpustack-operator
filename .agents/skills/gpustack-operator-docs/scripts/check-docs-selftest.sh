@@ -639,11 +639,22 @@ Body.
 EOF
 expect_fail "public-h2-cap-exceeded" "${T}" "9 '##' sections, over the cap of 8"
 
-# Public prose noise filter: reject blank 'not recorded' rows and dev-journal 'recorded on' stamps.
+# Public prose noise filter: reject blank 'not recorded' placeholders and version-qualified stamps,
+# while allowing legitimate prose such as "The condition is recorded on the Pod" or decimals.
+T="$(clone_strict prose-recorded-on-valid)"
+cat >>"${T}/docs/getting-started/guide.md" <<'EOF'
+
+The condition is recorded on the `Pod` once admitted.
+Usage is recorded on the `Pod` in increments of 0.5 cores.
+EOF
+expect_pass "prose-recorded-on-valid" "${T}"
+
 T="$(clone_strict prose-blank-not-recorded)"
 cat >>"${T}/docs/getting-started/guide.md" <<'EOF'
 
-Software versions not recorded with this capture.
+| Property | Value |
+| --- | --- |
+| Driver | not recorded |
 EOF
 expect_fail "prose-blank-not-recorded" "${T}" "omit blank 'not recorded' placeholder rows"
 
@@ -654,17 +665,64 @@ Behavior recorded on vLLM 0.29.0.
 EOF
 expect_fail "prose-recorded-on-guide" "${T}" "avoid dev-journal 'recorded on' stamps"
 
-# Architecture component sync gate: require cmd subcommands and */python/pyproject.toml in ## Components.
-T="$(clone_strict arch-missing-component)"
-mkdir -p "${T}/engine-sentinel/python" "${T}/cmd/gpustack-operator" "${T}/pkg/worker"
-touch "${T}/engine-sentinel/python/pyproject.toml"
+T="$(clone_strict prose-verified-on-guide)"
+cat >>"${T}/docs/getting-started/guide.md" <<'EOF'
+
+Verified on v0.23.0 only.
+EOF
+expect_fail "prose-verified-on-guide" "${T}" "avoid dev-journal 'recorded on' stamps"
+
+T="$(clone_strict prose-verified-on-k8s)"
+cat >>"${T}/docs/getting-started/guide.md" <<'EOF'
+
+Verified on Kubernetes 1.32.
+EOF
+expect_fail "prose-verified-on-k8s" "${T}" "avoid dev-journal 'recorded on' stamps"
+
+T="$(clone_strict prose-recorded-on-date)"
+cat >>"${T}/docs/getting-started/guide.md" <<'EOF'
+
+Recorded on 2026-11-21.
+EOF
+expect_fail "prose-recorded-on-date" "${T}" "avoid dev-journal 'recorded on' stamps"
+
+# Architecture component sync gate: exact token matching (worker vs worker-gateway) and
+# distinct Go subcommand vs staged Python package (model-transfer vs gpustack_model_transfer).
+T="$(clone_strict arch-component-sync)"
+mkdir -p \
+  "${T}/engine-sentinel/python" \
+  "${T}/model-transfer/python" \
+  "${T}/cmd/gpustack-operator" \
+  "${T}/pkg/worker" \
+  "${T}/pkg/workergateway" \
+  "${T}/pkg/modeltransfer"
+cat >"${T}/engine-sentinel/python/pyproject.toml" <<'EOF'
+[project]
+name = "gpustack-engine-sentinel"
+EOF
+cat >"${T}/model-transfer/python/pyproject.toml" <<'EOF'
+[project]
+name = "gpustack-model-transfer"
+EOF
 cat >"${T}/cmd/gpustack-operator/main.go" <<'EOF'
 package main
-func main() { c.AddCommand(worker.NewCommand()) }
+func main() {
+  c.AddCommand(worker.NewCommand())
+  c.AddCommand(workergateway.NewCommand())
+  c.AddCommand(modeltransfer.NewCommand())
+}
 EOF
 cat >"${T}/pkg/worker/cmd.go" <<'EOF'
 package worker
 var cmd = Command{Use: "worker"}
+EOF
+cat >"${T}/pkg/workergateway/cmd.go" <<'EOF'
+package workergateway
+var cmd = Command{Use: "worker-gateway"}
+EOF
+cat >"${T}/pkg/modeltransfer/cmd.go" <<'EOF'
+package modeltransfer
+var cmd = Command{Use: "model-transfer"}
 EOF
 cat >"${T}/docs/getting-started/architecture.md" <<'EOF'
 # Architecture
@@ -677,7 +735,7 @@ Overview.
 
 ## Components
 
-Only `worker` is listed here.
+Runs `worker`, `worker-gateway`, `model-transfer` (`gpustack_model_transfer`), and `gpustack_engine_sentinel`.
 
 ---
 
@@ -692,6 +750,71 @@ awk '
   { print }
 ' "${T}/docs/README.md" >"${T}/docs/README.md.tmp"
 mv "${T}/docs/README.md.tmp" "${T}/docs/README.md"
-expect_fail "arch-missing-component" "${T}" "## Components missing staged runtime component 'engine-sentinel'"
+expect_pass "arch-component-sync-baseline" "${T}"
+
+# Removing `worker` must fail even though `worker-gateway` contains "worker" as a substring.
+T_SUB="$(clone_strict arch-missing-worker-subcmd)"
+cp -R "${T}/." "${T_SUB}/"
+cat >"${T_SUB}/docs/getting-started/architecture.md" <<'EOF'
+# Architecture
+
+Overview.
+
+## Contents
+
+- [Components](#components)
+
+## Components
+
+Runs `worker-gateway`, `model-transfer` (`gpustack_model_transfer`), and `gpustack_engine_sentinel`.
+
+---
+
+**See also** — [Operator Guide](guide.md) (guide)
+EOF
+expect_fail "arch-missing-worker-subcmd" "${T_SUB}" "## Components missing runtime subcommand 'worker'"
+
+# Removing `gpustack_model_transfer` must fail even though Go `model-transfer` remains.
+T_PY="$(clone_strict arch-missing-python-pkg)"
+cp -R "${T}/." "${T_PY}/"
+cat >"${T_PY}/docs/getting-started/architecture.md" <<'EOF'
+# Architecture
+
+Overview.
+
+## Contents
+
+- [Components](#components)
+
+## Components
+
+Runs `worker`, `worker-gateway`, `model-transfer`, and `gpustack_engine_sentinel`.
+
+---
+
+**See also** — [Operator Guide](guide.md) (guide)
+EOF
+expect_fail "arch-missing-python-pkg" "${T_PY}" "## Components missing staged Python package 'gpustack_model_transfer'"
+
+# Indented / single-quoted TOML keys and multiline descriptions must still parse [project] name.
+T_TOML="$(clone_strict arch-indented-single-quote-toml)"
+cp -R "${T_PY}/." "${T_TOML}/"
+cat >"${T_TOML}/model-transfer/python/pyproject.toml" <<'EOF'
+  [project]
+  description = """
+name = "worker"
+"""
+  name = 'gpustack-model-transfer'
+EOF
+expect_fail "arch-indented-single-quote-toml" "${T_TOML}" "## Components missing staged Python package 'gpustack_model_transfer'"
+
+# Malformed / unterminated TOML must fail closed instead of silently bypassing the check.
+T_BAD_TOML="$(clone_strict arch-malformed-toml)"
+cp -R "${T}/." "${T_BAD_TOML}/"
+cat >"${T_BAD_TOML}/model-transfer/python/pyproject.toml" <<'EOF'
+[project]
+name = "gpustack-model-transfer
+EOF
+expect_fail "arch-malformed-toml" "${T_BAD_TOML}" "unable to parse \[project\] name from model-transfer/python/pyproject.toml"
 
 echo "OK: check-docs self-test passed"

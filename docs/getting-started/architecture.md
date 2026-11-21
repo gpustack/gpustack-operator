@@ -22,7 +22,7 @@ The `gpustack-operator` binary provides five subcommands, paired with the `engin
 | `worker` | Control-plane `Deployment` | Serves APIs and reconciles workloads, queues, and supporting resources. |
 | `device-manager` | Vendor `DaemonSet` | Discovers accelerators and NICs,<br/>publishes capacity, and allocates devices. |
 | `model-manager` | Per-node `DaemonSet` | Caches verified model weights and mounts them through CSI. |
-| `model-transfer` | Vendor source `DaemonSet` | Runs the source broker and worker service for remote weight delivery. |
+| `model-transfer` | Vendor source `DaemonSet` | Runs the source broker and worker service, paired with the staged `gpustack_model_transfer` Python reader package for remote weight delivery. |
 | `worker-gateway` | Separate installation | Aggregates `InstanceType`s and capacity across clusters into one fleet view. |
 | `engine-sentinel` | Read-only host mount in engine `Pod`s | Pure-Python runtime package (`gpustack_engine_sentinel`) for live parameter tuning, unified `/gpustack/v1/{live,ready}` probes, role pause, and `PreStop` drain; see [Online Runtime Control](../modules/model-deployment/runtime-control.md). |
 
