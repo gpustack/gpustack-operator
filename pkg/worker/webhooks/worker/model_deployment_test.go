@@ -6484,6 +6484,36 @@ func TestModelDeploymentWebhook_AscendA5InterfaceCreate(t *testing.T) {
 			},
 		},
 		{
+			name:          "A5 unrouted P/D with RDMA KVCache requesting interface on both halves accepted",
+			family:        nodefeature.AcceleratorFamilyAscend950,
+			withRDMAStore: true,
+			md: func() *workercore.ModelDeployment {
+				md := modelDeployment(workercore.ModelDeploymentEngineSGLang,
+					role(func(r *workercore.ModelDeploymentRole) {
+						r.Name = "prefill"
+						r.Kind = workercore.ModelDeploymentRoleKindPrefill
+						r.AcceleratorType = "ascend-pool"
+						r.Resources = &workercore.ModelDeploymentRoleResources{
+							Accelerator: ptr.To(qty1),
+							Interface:   ptr.To(qty1),
+						}
+					}),
+					role(func(r *workercore.ModelDeploymentRole) {
+						r.Name = "decode"
+						r.Kind = workercore.ModelDeploymentRoleKindDecode
+						r.AcceleratorType = "ascend-pool"
+						r.Resources = &workercore.ModelDeploymentRoleResources{
+							Accelerator: ptr.To(qty1),
+							Interface:   ptr.To(qty1),
+						}
+					}),
+				)
+				md.Spec.KVCache.PoolRef.Name = "chat"
+				md.Spec.Router = nil
+				return md
+			},
+		},
+		{
 			name:         "A5 vLLM Encode role with ArtifactRef requesting interface still rejected",
 			family:       nodefeature.AcceleratorFamilyAscend950,
 			artifact:     hubArtifact(),
@@ -6674,6 +6704,45 @@ func TestModelDeploymentWebhook_AscendA5InterfaceUpdateRejudge(t *testing.T) {
 		newer.Spec.Roles[1].Resources.Interface = nil
 
 		_, err := w.ValidateUpdate(context.Background(), old, newer)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "spec.roles[0].resources.interface")
+		assert.Contains(t, err.Error(), "no effective RDMA or EFA")
+	})
+
+	t.Run("routed A5 SGLang RDMA-store P/D without artifactRef rejudges unchanged prefill when decode drops interface", func(t *testing.T) {
+		rdmaObjs := kvCacheFixture()
+		rdmaObjs[2].(*workercore.KVCacheBackend).Spec.Transport.Protocol = "RDMA"
+		rdmaObjs = append(rdmaObjs, ascendA5)
+		md := modelDeployment(workercore.ModelDeploymentEngineSGLang,
+			role(func(r *workercore.ModelDeploymentRole) {
+				r.Name = "prefill"
+				r.Kind = workercore.ModelDeploymentRoleKindPrefill
+				r.AcceleratorType = "atlas-950"
+				r.Resources = &workercore.ModelDeploymentRoleResources{
+					Accelerator: ptr.To(qty1),
+					Interface:   ptr.To(qty1),
+				}
+			}),
+			role(func(r *workercore.ModelDeploymentRole) {
+				r.Name = "decode"
+				r.Kind = workercore.ModelDeploymentRoleKindDecode
+				r.AcceleratorType = "atlas-950"
+				r.Resources = &workercore.ModelDeploymentRoleResources{
+					Accelerator: ptr.To(qty1),
+					Interface:   ptr.To(qty1),
+				}
+			}),
+		)
+		md.Spec.KVCache.PoolRef.Name = "chat"
+		md.Spec.Router = &workercore.ModelDeploymentRouter{Name: workercore.ModelDeploymentRouterSGLang}
+		md.Spec.KVTransfer = &workercore.ModelDeploymentKVTransfer{Backend: workercore.ModelDeploymentKVTransferBackendHIXL}
+		w := newModelDeploymentWebhookWith(rdmaObjs)
+		_, err := w.ValidateCreate(context.Background(), md)
+		require.NoError(t, err)
+
+		newer := md.DeepCopy()
+		newer.Spec.Roles[1].Resources.Interface = nil
+		_, err = w.ValidateUpdate(context.Background(), md, newer)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "spec.roles[0].resources.interface")
 		assert.Contains(t, err.Error(), "no effective RDMA or EFA")

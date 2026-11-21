@@ -664,7 +664,10 @@ func (r *ModelDeploymentWebhook) modelDeploymentRoleNeedsInterfaceRejudge(
 	if modelDeploymentRoleInterfaceInputsChanged(was, role) {
 		return true, nil
 	}
-	if kubemeta.DeepEqual(old.Spec.Model.ArtifactRef, md.Spec.Model.ArtifactRef) &&
+	pairSymChanged := workerctrl.ModelDeploymentDirectPairRequestsInterfaces(old) !=
+		workerctrl.ModelDeploymentDirectPairRequestsInterfaces(md)
+	if !pairSymChanged &&
+		kubemeta.DeepEqual(old.Spec.Model.ArtifactRef, md.Spec.Model.ArtifactRef) &&
 		modelDeploymentDirectLegProbe(old, was, awsEFAEnabled) == modelDeploymentDirectLegProbe(md, role, awsEFAEnabled) {
 		return false, nil
 	}
@@ -681,6 +684,10 @@ func (r *ModelDeploymentWebhook) modelDeploymentRoleNeedsInterfaceRejudge(
 		}
 		manufacturer = accType.Status.Detail.Manufacturer
 		family = accType.Status.Detail.Family
+	}
+	if workerctrl.ModelDeploymentAscendA5AsymmetricPair(old, was, manufacturer, family) !=
+		workerctrl.ModelDeploymentAscendA5AsymmetricPair(md, role, manufacturer, family) {
+		return true, nil
 	}
 	errPath := field.NewPath("spec", "roles").Index(i).Child("resources", "interface")
 	oldDirect, err := r.modelDeploymentResolvedDirectProtocol(

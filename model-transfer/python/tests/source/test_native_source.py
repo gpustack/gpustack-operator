@@ -972,3 +972,81 @@ def test_retired_worker_close_does_not_block_runtime_query(monkeypatch):
         polling.join(3)
         if query.ident is not None:
             query.join(3)
+
+
+def test_hixl_ephemeral_bind_oserror_translates_to_source_unavailable(monkeypatch):
+    import errno
+    import socket
+
+    from gpustack_model_transfer.core.errors import SourceUnavailableError
+    from gpustack_model_transfer.source.__main__ import build_factories
+
+    class FailingSocket:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def bind(self, _addr):
+            raise OSError(errno.EADDRNOTAVAIL, "Cannot assign requested address")
+
+    monkeypatch.setattr(socket, "socket", lambda *a, **kw: FailingSocket())
+    _, make_backend, _ = build_factories(
+        {
+            "GPUSTACK_MODEL_TRANSFER_BACKEND": "hixl",
+            "GPUSTACK_MODEL_TRANSFER_VENDOR_SCOPE": "ascend",
+            "KUBERNETES_NODE_NAME": "node",
+            "KUBERNETES_POD_IP": "127.0.0.1",
+        }
+    )
+    from gpustack_model_transfer.core.manifest import parse_manifest
+    from gpustack_model_transfer.source.workorder import (
+        registered_files,
+        resident_file_bytes,
+    )
+
+    payload = order()
+    manifest = parse_manifest(payload["manifestJSON"].encode())
+    payload["residentBudgetBytes"] = sum(
+        resident_file_bytes(f.size, "hixl") for f in registered_files(manifest)
+    )
+    with pytest.raises(SourceUnavailableError, match="bind source rendezvous address"):
+        make_backend(parse_assignment(payload, backend="hixl"))
+
+
+def test_unexpected_preflight_error_after_native_start_quarantines_instead_of_stopping():
+    from gpustack_model_transfer.core.manifest import parse_manifest
+    from gpustack_model_transfer.source.native_worker import NativeSourceWorker
+    from gpustack_model_transfer.source.workorder import (
+        registered_files,
+        resident_file_bytes,
+    )
+
+    def boom():
+        raise RuntimeError("unexpected post-native-start failure")
+
+    payload = order()
+    manifest = parse_manifest(payload["manifestJSON"].encode())
+    payload["residentBudgetBytes"] = sum(
+        resident_file_bytes(f.size, "hixl") for f in registered_files(manifest)
+    )
+    assignment = parse_assignment(payload, backend="hixl")
+    quarantines = []
+    control = Control(assignment.generation)
+    control.quarantine = lambda reason: quarantines.append(reason)
+    worker = NativeSourceWorker(
+        control,
+        assignment,
+        backend=boom,
+        allocator=lambda: Allocator(control),
+        worker_instance_id="instance-1",
+        poll_interval=0.01,
+    )
+    try:
+        worker.start()
+        assert control.start_calls == 1
+        assert worker.state == "quarantined"
+        assert quarantines == ["RuntimeError"]
+    finally:
+        worker.close()

@@ -83,6 +83,8 @@
       "maxMemoryBytes" $maxMemoryBytes
       "minMemoryBytes" $minMemoryBytes
       "extraArgs" ($root.Values.modelTransfer.extraArgs | default list)
+      "brokerResources" ($root.Values.modelTransfer.brokerResources | default dict)
+      "workerResources" $workerResources
       "env" $workerEnvHash
       "hixlep" $workerHixlep
     | toJson | sha256sum }}

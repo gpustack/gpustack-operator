@@ -200,6 +200,7 @@ func ModelDeploymentAscendA5AsymmetricPair(
 	md *workercore.ModelDeployment, role *workercore.ModelDeploymentRole, manufacturer, family string,
 ) bool {
 	if md == nil || role == nil || len(role.Command) > 0 ||
+		md.Spec.Router == nil ||
 		manufacturer != nodefeature.ManufacturerAscend ||
 		family != nodefeature.AcceleratorFamilyAscend950 ||
 		!ModelDeploymentDeclaresBothHalves(md) {

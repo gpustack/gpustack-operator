@@ -722,11 +722,20 @@ if [[ "${shadow_ascend_hash}" != "${roce_ascend_hash}" ]]; then
   exit 1
 fi
 
-# Changing broker session policy (source.maxSessions) must move config-hash so OnDelete rolls the Pod.
+# Changing broker session policy (source.maxSessions) or container resource requirements must move
+# config-hash so OnDelete rolls the Pod.
 low_sessions="$(render --set modelTransfer.source.maxSessions=3 --show-only templates/model-transfer/daemonset.yaml)"
 low_sessions_ascend="$(awk '/^---$/{on=0} /^  name: gpustack-operator-model-transfer-ascend$/{on=1} on' <<<"${low_sessions}")"
 if [[ "$(extract_config_hash "${low_sessions_ascend}")" == "${default_ascend_hash}" ]]; then
   echo 'config-hash: changing modelTransfer.source.maxSessions must change config-hash' >&2
+  exit 1
+fi
+worker_res_2g="$(render --set modelTransfer.ascend.hostRoCE.enabled=true --set modelTransfer.workerResources.limits.memory=2Gi --show-only templates/model-transfer/daemonset.yaml)"
+worker_res_4g="$(render --set modelTransfer.ascend.hostRoCE.enabled=true --set modelTransfer.workerResources.limits.memory=4Gi --show-only templates/model-transfer/daemonset.yaml)"
+worker_res_2g_ascend="$(awk '/^---$/{on=0} /^  name: gpustack-operator-model-transfer-ascend$/{on=1} on' <<<"${worker_res_2g}")"
+worker_res_4g_ascend="$(awk '/^---$/{on=0} /^  name: gpustack-operator-model-transfer-ascend$/{on=1} on' <<<"${worker_res_4g}")"
+if [[ "$(extract_config_hash "${worker_res_2g_ascend}")" == "$(extract_config_hash "${worker_res_4g_ascend}")" ]]; then
+  echo 'config-hash: changing modelTransfer.workerResources must change config-hash' >&2
   exit 1
 fi
 

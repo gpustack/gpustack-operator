@@ -76,9 +76,14 @@ def build_factories(environ):
         if backend == "hixl":
             with endpoint_lock:
                 for _ in range(64):
-                    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
-                        probe.bind((pod_ip, 0))
-                        port = probe.getsockname()[1]
+                    try:
+                        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+                            probe.bind((pod_ip, 0))
+                            port = probe.getsockname()[1]
+                    except OSError as exc:
+                        raise SourceUnavailableError(
+                            f"bind source rendezvous address {pod_ip}: {exc}"
+                        ) from exc
                     if port not in endpoints:
                         endpoints.add(port)
                         break

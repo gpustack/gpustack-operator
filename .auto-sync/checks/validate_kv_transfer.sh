@@ -407,13 +407,27 @@ def has_standalone_off(words: list[tuple[str, str]]) -> bool:
     return False
 
 
-def standalone_var_refs(words: list[tuple[str, str]]) -> set[str]:
-    refs: set[str] = set()
+def is_single_standalone_off(words: list[tuple[str, str]]) -> bool:
+    """True when words expand to a single standalone -DUSE_VRAM_SEGMENT=OFF argument."""
+    unquoted = [val for _, val in words if val]
+    return len(unquoted) == 1 and bool(standalone_off_re.fullmatch(unquoted[0]))
+
+
+def standalone_var_refs(words: list[tuple[str, str]]) -> tuple[set[str], set[str]]:
+    """Return (unquoted_refs, double_quoted_refs) for standalone shell variable words."""
+    unquoted_refs: set[str] = set()
+    double_quoted_refs: set[str] = set()
     for raw, _ in words:
-        m = standalone_var_re.fullmatch(strip_outer_double_quotes(raw))
-        if m:
-            refs.add(m.group(1) or m.group(2))
-    return refs
+        m_unquoted = standalone_var_re.fullmatch(raw)
+        if m_unquoted:
+            unquoted_refs.add(m_unquoted.group(1) or m_unquoted.group(2))
+            continue
+        stripped = strip_outer_double_quotes(raw)
+        if stripped != raw:
+            m_double = standalone_var_re.fullmatch(stripped)
+            if m_double:
+                double_quoted_refs.add(m_double.group(1) or m_double.group(2))
+    return unquoted_refs, double_quoted_refs
 
 
 assign_re = re.compile(r"^(?:(?:then|else|do|export|local)\s+)*([A-Za-z_][A-Za-z0-9_]*)=(.*)$")
@@ -441,7 +455,8 @@ for block in run_blocks:
     if cur.strip():
         logical_lines.append(cur.strip())
 
-    assigned_off_vars: set[str] = set()
+    single_off_vars: set[str] = set()
+    multi_off_vars: set[str] = set()
     for ln in logical_lines:
         for stmt in re.split(r"(?:;|&&|\|\|)", ln):
             st = stmt.strip()
@@ -450,7 +465,8 @@ for block in run_blocks:
             m_unset = unset_re.match(st)
             if m_unset:
                 for var_name in m_unset.group(1).split():
-                    assigned_off_vars.discard(var_name)
+                    single_off_vars.discard(var_name)
+                    multi_off_vars.discard(var_name)
                 continue
             m_asgn = assign_re.match(st)
             if m_asgn:
@@ -459,12 +475,19 @@ for block in run_blocks:
                 rhs_single_quoted = len(rhs_raw) >= 2 and rhs_raw[0] == "'" and rhs_raw[-1] == "'"
                 rhs_val = strip_outer_quotes(rhs_raw)
                 rhs_words = tokenize_shell_words(rhs_val)
-                if has_standalone_off(rhs_words):
-                    assigned_off_vars.add(var_name)
-                elif (not rhs_single_quoted) and (standalone_var_refs(rhs_words) & assigned_off_vars) and not cmake_cfg_re.match(st):
-                    assigned_off_vars.add(var_name)
-                else:
-                    assigned_off_vars.discard(var_name)
+                single_off_vars.discard(var_name)
+                multi_off_vars.discard(var_name)
+                if is_single_standalone_off(rhs_words):
+                    single_off_vars.add(var_name)
+                elif has_standalone_off(rhs_words):
+                    multi_off_vars.add(var_name)
+                elif (not rhs_single_quoted) and not cmake_cfg_re.match(st):
+                    u_refs, dq_refs = standalone_var_refs(rhs_words)
+                    all_refs = u_refs | dq_refs
+                    if len(rhs_words) == 1 and (all_refs & single_off_vars):
+                        single_off_vars.add(var_name)
+                    elif (u_refs & (single_off_vars | multi_off_vars)) or (dq_refs & single_off_vars):
+                        multi_off_vars.add(var_name)
             m_cmake = cmake_cfg_re.match(st)
             if m_cmake:
                 saw_cmake_configure = True
@@ -472,8 +495,11 @@ for block in run_blocks:
                 cmake_cmd_only = re.split(r"(?:&&|\|\||;|\|)", cmake_args, maxsplit=1)[0]
                 cmake_words = tokenize_shell_words(cmake_cmd_only)
                 direct_off = has_standalone_off(cmake_words)
-                referenced_vars = standalone_var_refs(cmake_words)
-                var_off = bool(referenced_vars & assigned_off_vars)
+                u_refs, dq_refs = standalone_var_refs(cmake_words)
+                var_off = bool(
+                    (u_refs & (single_off_vars | multi_off_vars))
+                    or (dq_refs & single_off_vars)
+                )
                 if not (direct_off or var_off):
                     print(
                         f"FAIL: builder-cuda cmake configure invocation in {df_path} must wire "

@@ -279,6 +279,7 @@ class NativeSourceWorker:
 
     def start(self):
         preflight_entered = False
+        native_started = False
         try:
             self._retry(self.control.register)
             self._control_thread = threading.Thread(
@@ -295,6 +296,7 @@ class NativeSourceWorker:
                 self._finish_pre_native_cancel()
                 return
             self._retry(self.control.native_start)
+            native_started = True
             if self._preflight_cancelled():
                 self._finish_pre_native_cancel()
                 return
@@ -365,9 +367,21 @@ class NativeSourceWorker:
                 self.state = "serving"
         except BaseException as exc:
             if not self._native_attempted:
-                if not self._cleanup_preflight(check_acl_broken=preflight_entered):
+                clean = self._cleanup_preflight(check_acl_broken=preflight_entered)
+                if not clean:
                     self._native_attempted = True
                     self._quarantine(type(exc).__name__)
+                elif native_started:
+                    if (
+                        self._drain_requested.is_set()
+                        and self.state != "quarantined"
+                        and not self._unknown_event.is_set()
+                        and self.registration is None
+                    ):
+                        self.state = "draining"
+                    else:
+                        self._native_attempted = True
+                        self._quarantine(type(exc).__name__)
                 else:
                     self._finish_pre_native_cancel()
                 logger.warning(
