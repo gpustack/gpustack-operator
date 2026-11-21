@@ -148,7 +148,7 @@ grep '^version=' /usr/local/Ascend/Ascend-Docker-Runtime/ascend_docker_runtime_i
 ```
 
 `gpustack-operator device-manager preflight` checks the same file and reports it as
-[`ascend-docker-runtime`](../modules/devices/preflight.md#a5-host-state-rows) on each A5 NPU.
+[`ascend-docker-runtime`](../modules/devices/preflight.md#ascend-a5-host-checks) on each A5 NPU.
 
 **A5 host ranktable** — on Atlas A5 (`950`), `/etc/hccl_rootinfo.json` must be absent (default) or at
 version `"2.0"`. Prefer `ascend-docker-runtime` `26.2+` so the runtime does not mount it
@@ -161,7 +161,7 @@ test -e /etc/hccl_rootinfo.json && grep -o '"version"[^,]*' /etc/hccl_rootinfo.j
 # "version": "1.0"   <- breaks multi-card HCCL on A5; remove or regenerate as 2.0
 ```
 
-Preflight reports this state as [`hccl-ranktable`](../modules/devices/preflight.md#a5-host-state-rows).
+Preflight reports this state as [`hccl-ranktable`](../modules/devices/preflight.md#ascend-a5-host-checks).
 
 **A5 conditional host mounts** — on Ascend A5 (`status.detail.family` `"950"`), `device-manager` inspects `/etc/hccl_rootinfo.json` (regular non-symlink file `<= 1 MiB` at version `"2.0"`) and `/lib/route.conf` (regular non-symlink file) through `/host` during `Allocate` and mounts valid files read-only.
 Absent, symlinked, invalid, or colliding paths are skipped cleanly, non-A5 hosts never receive either mount, and [`deviceManager.hostRootMount.enabled=false`](#device-manager-host-mount) disables both.

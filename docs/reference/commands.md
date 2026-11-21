@@ -305,9 +305,9 @@ removes, how to read each row).
 | `--runtime` | resolved | the host runtime to drive, overriding what was resolved. One of `docker`, `nerdctl`, `ctr`; anything else is refused before the pass starts. An escape hatch: a runtime that the host does not carry drops every container step to being emitted |
 | `--no-pci-check` | `false` | skip the PCI check |
 
-### Row states and depths
+### Check states and depths
 
-Each row carries a state, a depth and, where a container ran, the evidence it ran on.
+Each check carries a state, a depth and, where a container ran, the evidence it ran on.
 
 | State | Meaning | Exit code |
 |---|---|---|

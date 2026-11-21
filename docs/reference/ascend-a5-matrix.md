@@ -33,12 +33,12 @@ endpoint files before workloads land on the node.
   unconditionally when present; `26.2+` removed that default mount. Neither release mounts
   `/lib/route.conf`.
 
-### Preflight host-state rows
+### Preflight host checks
 
-On Atlas A5 (`950`) accelerators, `device-manager preflight` adds two node-level rows at depth
+On Atlas A5 (`950`) accelerators, `device-manager preflight` adds two node-level checks at depth
 `declared` on every accelerator and under every mode:
 
-| Row | Source | Healthy (`ok`) | Failing (`unavailable`) |
+| Check | Source | Healthy (`ok`) | Failing (`unavailable`) |
 |---|---|---|---|
 | `ascend-docker-runtime` | Installer file under `/usr/local/Ascend` | MindCluster `26.0.0` or newer | Older release or unreadable version |
 | `hccl-ranktable` | `/etc/hccl_rootinfo.json` via `/host` | File absent or JSON `"version": "2.0"` | Other version, unparseable file, symlink, or unreadable host root |
@@ -228,4 +228,4 @@ modelTransfer:
 
 ---
 
-**See also** — [Vendor Prerequisites](../getting-started/vendor-prerequisites.md#ascend) (Ascend host setup) · [Preflight Checks](../modules/devices/preflight.md#a5-host-state-rows) (A5 preflight rows) · [Prefill and Decode](../modules/model-deployment/prefill-decode.md#ascend-a5-topologies) (`ModelDeployment` A5 topologies) · [KV Cache Backend](../modules/kv-cache/backend.md#ascend) (`CANN` cache members) · [Remote Weight Delivery](../modules/model-delivery/remote.md#ascend) (Ascend remote transfer) · [Parameters](model-deployment-parameters.md#transfer-parameters) (synthesized transfer keys)
+**See also** — [Vendor Prerequisites](../getting-started/vendor-prerequisites.md#ascend) (Ascend host setup) · [Preflight Checks](../modules/devices/preflight.md#ascend-a5-host-checks) (A5 preflight checks) · [Prefill and Decode](../modules/model-deployment/prefill-decode.md#ascend-a5-topologies) (`ModelDeployment` A5 topologies) · [KV Cache Backend](../modules/kv-cache/backend.md#ascend) (`CANN` cache members) · [Remote Weight Delivery](../modules/model-delivery/remote.md#ascend) (Ascend remote transfer) · [Parameters](model-deployment-parameters.md#transfer-parameters) (synthesized transfer keys)

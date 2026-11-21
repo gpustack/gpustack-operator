@@ -224,7 +224,7 @@ runtimes, `ctr`, or `nerdctl` on Ascend. In those cases, `preflight` prints the 
 Each accelerator reports only the modes it currently offers (for example, a MIG-enabled GPU reports
 partition checks and omits logical-slice rows).
 
-| Tier | Manufacturers | Driver-read row | Capability rows | Deepest answer |
+| Tier | Manufacturers | Driver check | Capability checks | Deepest answer |
 |---|---|---|---|---|
 | **Full** | NVIDIA, Ascend, AMD, T-Head | Yes | Real container (`sidecar-visibility` simulated) | `measured` |
 | **Container probe** | Hygon | No (`note` explains why) | Real container (`sidecar-visibility` simulated) | `measured` |
@@ -243,9 +243,9 @@ Hygon runs real probe containers (`measured`) with `--probe-image` (any glibc im
 `cat`, `grep`, `awk`, `mkdir`, `sleep`, and `kill`). The probe runs `/opt/dtk` `BandwidthTest` and
 reads `kfd` vgpu sysfs because `hy-smi` always prints full physical VRAM.
 
-### Full table
+### Vendor capability matrix
 
-| Manufacturer | Detection API | Host cross-check | Driver-read row | Target mode | Container probe |
+| Manufacturer | Detection API | Host cross-check | Driver check | Target mode | Container probe |
 |---|---|---|---|---|---|
 | NVIDIA | NVML | `nvidia-smi -L` | `mig-partitioning` | `partitioned` | Yes |
 | Ascend | DCMI | `npu-smi info -l` | `container-share` | `sliced` | Yes |
@@ -259,9 +259,9 @@ reads `kfd` vgpu sysfs because `hy-smi` always prints full physical VRAM.
 
 Compare vendors by the report's `mode` field rather than vendor-specific capability names.
 
-### Driver-read rows
+### Driver checks
 
-| Row | `ok` meaning | `not-declared` meaning | `unavailable` meaning |
+| Check | `ok` meaning | `not-declared` meaning | `unavailable` meaning |
 |---|---|---|---|
 | `mig-partitioning` | Physical partition profile declared | MIG off or unsupported on card | Driver query failed |
 | `container-share` | Flag on, or toggled on and restored | Generation has no flag | DCMI missing or refused |
@@ -269,18 +269,18 @@ Compare vendors by the report's `mode` field rather than vendor-specific capabil
 | `smlu-mode` | Mode on, or toggled on and restored | Card advertises no sMLU capacity | CNDev missing sMLU API or refused |
 | `sgpu-mode` | sGPU sysfs registry readable | — | Registry unreadable |
 
-### A5 host-state rows
+### Ascend A5 host checks
 
-On Atlas A5 (`950`) NPUs, `preflight` adds two node-level `declared` rows on every card:
+On Atlas A5 (`950`) NPUs, `preflight` adds two node-level `declared` checks on every card:
 
-| Row | Reads | `ok` meaning | `unavailable` meaning |
+| Check | Reads | `ok` meaning | `unavailable` meaning |
 |---|---|---|---|
 | `ascend-docker-runtime` | `/usr/local/Ascend` version | MindCluster `26.0.0+` | Older or unreadable runtime |
 | `hccl-ranktable` | `/host/etc/hccl_rootinfo.json` | Absent or JSON version `2.0` | Wrong version, symlink, invalid JSON, or missing `/host` |
 
 See [Vendor Prerequisites](../../getting-started/vendor-prerequisites.md#ascend) for remediation.
 
-### Slice rows and probes
+### Slice probes
 
 Each slice probe requests **50%** of one card (so a `24564 MiB` card reports `12282 MiB` inside the
 probe):

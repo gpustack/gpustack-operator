@@ -209,7 +209,9 @@ Benchmark summaries use `Benefits` and `Trade-offs` for observed gains and costs
 measurement boundaries in `Limitations`; do not create competing `Limitations` headings on one page.
 
 In README and docs, exclude `what`, `where`, `when`, `how`, `which`, `why`, `who`, `whose` and
-`whom` from all headings, regardless of case. Use concise topic names instead.
+`whom` from all headings, regardless of case. Name headings after the subject or task rather than
+page layout or containers (avoid nouns such as `rows`, `table`, `columns`, or `guide` as heading
+labels). Use concise topic names instead.
 
 ### Heading depth
 
