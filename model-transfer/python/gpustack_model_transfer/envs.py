@@ -46,6 +46,7 @@ if TYPE_CHECKING:
     GPUSTACK_MODEL_TRANSFER_POLICY: str = "require"
     GPUSTACK_MODEL_TRANSFER_PEER_P2P: bool = False
     GPUSTACK_MODEL_TRANSFER_BROKER_ADDRESS: str | None = None
+    GPUSTACK_MODEL_TRANSFER_WORKER_ADDRESS: str | None = None
     GPUSTACK_MODEL_TRANSFER_BOOTSTRAP_FILE: str | None = None
     KUBERNETES_POD_NAMESPACE: str | None = None
     KUBERNETES_POD_NAME: str | None = None
@@ -53,6 +54,8 @@ if TYPE_CHECKING:
     KUBERNETES_POD_IP: str | None = None
     KUBERNETES_NODE_NAME: str | None = None
     ASCEND_RT_VISIBLE_DEVICES: str = ""
+    ASCEND_LOCAL_COMM_RES: str = ""
+    ASCEND_GLOBAL_RESOURCE_CONFIG: str = ""
     NIXL_ETCD_ENDPOINTS: str | None = None
     NIXL_TCPSTORE_ENDPOINT: str | None = None
 
@@ -293,6 +296,9 @@ _VARIABLES: dict[str, Callable[[Mapping[str, str]], Any]] = {
     "GPUSTACK_MODEL_TRANSFER_BROKER_ADDRESS": lambda env: (
         trim_str(getenv("GPUSTACK_MODEL_TRANSFER_BROKER_ADDRESS", "", env)) or ""
     ),
+    "GPUSTACK_MODEL_TRANSFER_WORKER_ADDRESS": lambda env: (
+        trim_str(getenv("GPUSTACK_MODEL_TRANSFER_WORKER_ADDRESS", None, env)) or None
+    ),
     "GPUSTACK_MODEL_TRANSFER_BOOTSTRAP_FILE": lambda env: (
         trim_str(getenv("GPUSTACK_MODEL_TRANSFER_BOOTSTRAP_FILE", "", env)) or ""
     ),
@@ -309,6 +315,10 @@ _VARIABLES: dict[str, Callable[[Mapping[str, str]], Any]] = {
     ),
     "ASCEND_RT_VISIBLE_DEVICES": lambda env: (
         trim_str(getenv("ASCEND_RT_VISIBLE_DEVICES", "", env)) or ""
+    ),
+    "ASCEND_LOCAL_COMM_RES": lambda env: getenv("ASCEND_LOCAL_COMM_RES", "", env),
+    "ASCEND_GLOBAL_RESOURCE_CONFIG": lambda env: getenv(
+        "ASCEND_GLOBAL_RESOURCE_CONFIG", "", env
     ),
     "NIXL_ETCD_ENDPOINTS": lambda env: trim_str(
         getenv("NIXL_ETCD_ENDPOINTS", None, env)

@@ -45,6 +45,8 @@ _FILL_CHUNK_BYTES = 1 << 20
 _ACL_LOCK = threading.Lock()
 _ACL_RUNTIME = None
 _ACL_BROKEN = None
+_RETAINED_MMAP_BLOCKS: list = []
+_RETAINED_MMAP_LOCK = threading.Lock()
 
 
 class HostBlock:
@@ -236,7 +238,13 @@ class AclHostOwner:
     loader explicitly.
     """
 
-    def __init__(self, device_id: int = 0, loader=None):
+    def __init__(
+        self,
+        device_id: int = 0,
+        loader=None,
+        *,
+        use_roce_host: bool | None = None,
+    ):
         if (
             isinstance(device_id, bool)
             or not isinstance(device_id, int)
@@ -245,6 +253,14 @@ class AclHostOwner:
             raise ValueError(
                 f"ACL device id must be a non-negative int, got {device_id!r}"
             )
+        if use_roce_host is None:
+            from gpustack_model_transfer.backends.hixl.runtime import (
+                uses_roce_host_protocol,
+            )
+
+            self._use_roce_host = uses_roce_host_protocol()
+        else:
+            self._use_roce_host = bool(use_roce_host)
         self._device_id = device_id
         self._loader = loader
         self._uncertain_allocations = []
@@ -268,6 +284,8 @@ class AclHostOwner:
     def allocate(self, name: str, byte_size: int) -> HostBlock:
         if byte_size <= 0:
             raise ValueError(f"allocation must be positive, got {byte_size}")
+        if getattr(self, "_use_roce_host", False):
+            return allocate_roce_host_mmap_block(name, byte_size, self)
         registration_bytes = align_up_2m(byte_size)
         allocation_bytes = hixl_allocation_bytes(byte_size)
         host_pointer = ctypes.c_void_p()
@@ -283,7 +301,15 @@ class AclHostOwner:
                 f"aclrtMallocHost of {byte_size} bytes failed with status {status}"
             )
         address = align_up_2m(host_pointer.value)
-        block = AclBlock(name, byte_size, self, address)
+        aligned_offset = address - host_pointer.value
+        block = AclBlock(
+            name,
+            byte_size,
+            self,
+            address,
+            allocator_kind="acl",
+            aligned_offset=aligned_offset,
+        )
         block.allocation_address = host_pointer.value
         block.allocation_bytes = allocation_bytes
         block.registration_bytes = registration_bytes
@@ -292,6 +318,9 @@ class AclHostOwner:
         return block
 
     def release(self, block) -> None:
+        if getattr(block, "allocator_kind", "acl") == "mmap":
+            release_roce_host_mmap_block(block, self._uncertain_allocations)
+            return
         if block.address == 0:
             return
         status = int(
@@ -306,24 +335,128 @@ class AclHostOwner:
                 "allocation stays owned"
             )
         block.address = 0
+        block.aligned_address = 0
 
     def dispose(self) -> None:
+        if self._runtime is None:
+            return
         _release_acl_runtime(self._runtime)
         self._runtime = None
 
 
+def allocate_roce_host_mmap_block(name: str, byte_size: int, owner) -> "AclBlock":
+    """Allocate a 2 MiB-aligned private anonymous mmap block for Host RoCE."""
+    if byte_size <= 0:
+        raise ValueError(f"allocation must be positive, got {byte_size}")
+    registration_bytes = align_up_2m(byte_size)
+    allocation_bytes = hixl_allocation_bytes(byte_size)
+    try:
+        if hasattr(mmap, "MAP_PRIVATE"):
+            anon_flag = getattr(mmap, "MAP_ANONYMOUS", getattr(mmap, "MAP_ANON", 0))
+            mapping = mmap.mmap(
+                -1,
+                allocation_bytes,
+                flags=mmap.MAP_PRIVATE | anon_flag,
+                prot=mmap.PROT_READ | mmap.PROT_WRITE,
+            )
+        else:
+            mapping = mmap.mmap(-1, allocation_bytes, access=mmap.ACCESS_WRITE)
+    except (OSError, MemoryError, OverflowError, ValueError) as exc:
+        raise SourceUnavailableError(
+            f"host mmap allocation of {byte_size} bytes failed: {type(exc).__name__}"
+        ) from None
+
+    raw_address = ctypes.addressof(ctypes.c_ubyte.from_buffer(mapping))
+    aligned_address = align_up_2m(raw_address)
+    aligned_offset = aligned_address - raw_address
+    if registration_bytes > byte_size:
+        ctypes.memset(aligned_address + byte_size, 0, registration_bytes - byte_size)
+    block = AclBlock(
+        name,
+        byte_size,
+        owner,
+        aligned_address,
+        allocator_kind="mmap",
+        mapping=mapping,
+        aligned_offset=aligned_offset,
+    )
+    block.allocation_address = raw_address
+    block.allocation_bytes = allocation_bytes
+    block.registration_bytes = registration_bytes
+    return block
+
+
+def release_roce_host_mmap_block(
+    block: "AclBlock", uncertain_allocations: list | None = None
+) -> None:
+    """Close an owned Host RoCE mmap block, or retain it under quarantine if refused."""
+    if block.address == 0:
+        return
+    mapping = block.mapping
+    if mapping is not None:
+        try:
+            mapping.close()
+        except Exception as exc:
+            if uncertain_allocations is not None and not any(
+                item is block for item in uncertain_allocations
+            ):
+                uncertain_allocations.append(block)
+            with _RETAINED_MMAP_LOCK:
+                if not any(item is block for item in _RETAINED_MMAP_BLOCKS):
+                    _RETAINED_MMAP_BLOCKS.append(block)
+            raise SourceUnavailableError(
+                f"host mmap close refused ({type(exc).__name__}); "
+                "the mapping stays retained in quarantine"
+            ) from None
+    block.address = 0
+    block.aligned_address = 0
+    block.mapping = None
+    if uncertain_allocations is not None:
+        uncertain_allocations[:] = [
+            item for item in uncertain_allocations if item is not block
+        ]
+    with _RETAINED_MMAP_LOCK:
+        _RETAINED_MMAP_BLOCKS[:] = [
+            item for item in _RETAINED_MMAP_BLOCKS if item is not block
+        ]
+
+
 class AclBlock(HostBlock):
-    def __init__(self, name: str, byte_size: int, owner, address: int):
+    def __init__(
+        self,
+        name: str,
+        byte_size: int,
+        owner,
+        address: int,
+        *,
+        allocator_kind: str = "acl",
+        mapping: mmap.mmap | None = None,
+        aligned_offset: int = 0,
+    ):
         super().__init__(name, byte_size, owner)
         self.address = address
+        self.aligned_address = address
         self.allocation_address = address
         self.allocation_bytes = byte_size
         self.registration_bytes = byte_size
+        self.allocator_kind = allocator_kind
+        self.mapping = mapping
+        self.aligned_offset = aligned_offset
 
     def data_ptr(self) -> int:
         if self.address == 0:
             raise RuntimeError("this pinned block was already released")
         return self.address
+
+    def view(self, offset: int, length: int):
+        if self.address == 0:
+            raise RuntimeError("this pinned block was already released")
+        if offset < 0 or length < 0 or offset + length > self.byte_size:
+            raise ValueError("buffer range exceeds allocation")
+        if self.allocator_kind == "mmap" and self.mapping is not None:
+            start = self.aligned_offset + offset
+            return memoryview(self.mapping)[start : start + length]
+        return super().view(offset, length)
 
     def write_bytes(self, offset: int, data) -> None:
         if self.address == 0:
@@ -332,11 +465,21 @@ class AclBlock(HostBlock):
             raise ValueError(
                 f"write [{offset}, {offset + len(data)}) exceeds block {self.byte_size}"
             )
+        if self.allocator_kind == "mmap" and self.mapping is not None:
+            start = self.aligned_offset + offset
+            with memoryview(self.mapping) as mv:
+                mv[start : start + len(data)] = data
+            return
         ctypes.memmove(self.address + offset, data, len(data))
 
     def read_bytes(self, offset: int, length: int) -> bytes:
         if self.address == 0:
             raise RuntimeError("this pinned block was already released")
+        if offset < 0 or length < 0 or offset + length > self.byte_size:
+            raise ValueError("buffer range exceeds allocation")
+        if self.allocator_kind == "mmap" and self.mapping is not None:
+            start = self.aligned_offset + offset
+            return self.mapping[start : start + length]
         return ctypes.string_at(self.address + offset, length)
 
 
@@ -553,7 +696,9 @@ __all__ = [
     "HostBlock",
     "TorchBlock",
     "TorchPinnedOwner",
+    "allocate_roce_host_mmap_block",
     "available_ram",
     "compute_dynamic_source_buffer",
+    "release_roce_host_mmap_block",
     "total_ram",
 ]

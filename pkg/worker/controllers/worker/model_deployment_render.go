@@ -27,6 +27,7 @@ import (
 	"gpustack.ai/gpustack/pkg/utils/stringx"
 	"gpustack.ai/gpustack/pkg/worker/kuberequest"
 	"gpustack.ai/gpustack/pkg/worker/kvcache/inject"
+	"gpustack.ai/gpustack/pkg/worker/kvcache/mooncake"
 	"gpustack.ai/gpustack/pkg/worker/runtimecontrol"
 	"gpustack.ai/gpustack/pkg/worker/settings"
 )
@@ -491,6 +492,7 @@ func renderModelDeploymentPodTemplate(ctx context.Context, in ModelDeploymentRen
 	takeOver := len(role.Command) > 0
 	sentinelConfigured := modelDeploymentRoleUsesEngineSentinel(md, role, in.AcceleratorType)
 	sentinelActive := sentinelConfigured && modelDeploymentEngineSentinelEnabled(in)
+	artifact := normalizeModelDeploymentArtifactForRole(in, takeOver)
 
 	command := role.Command
 	// READ OFF THE PROXY'S OWN FLAG, not off the transfer leg. A transfer leg renders under every
@@ -528,16 +530,16 @@ func renderModelDeploymentPodTemplate(ctx context.Context, in ModelDeploymentRen
 		// them under spec.model.name, which the defaulted served-name group keeps true when the
 		// model argument is a path or a repository rather than that name.
 		model, defaulted := md.Spec.Model.Name, in.Connector.DefaultedArgs
-		if in.Artifact != nil {
-			model = in.Artifact.model()
+		if artifact != nil {
+			model = artifact.model()
 			defaulted = append(slices.Clone(defaulted), []string{ModelDeploymentServedModelNameArg, md.Spec.Model.Name})
 		}
 		command, err = ModelDeploymentEngineCommand(md.Spec.Engine.Name, model)
 		if err != nil {
 			return nil, err
 		}
-		if in.Artifact != nil {
-			command = append(command, in.Artifact.args()...)
+		if artifact != nil {
+			command = append(command, artifact.args()...)
 		}
 		command = append(command, in.Connector.Args...)
 		command = append(command, modelDeploymentDefaultedArgs(defaulted, role.ExtraArgs)...)
@@ -582,8 +584,8 @@ func renderModelDeploymentPodTemplate(ctx context.Context, in ModelDeploymentRen
 	// A take-over role gets NEITHER, along with no synthesized argument and no client environment.
 	// The operator did not build that command line and cannot claim the container uses the cache.
 	vols, mounts := convertModelDeploymentAdditionalVolumes(role.AdditionalVolumes)
-	if in.Artifact != nil {
-		artifactVols, artifactMounts := in.Artifact.volumes(takeOver)
+	if artifact != nil {
+		artifactVols, artifactMounts := artifact.volumes(takeOver)
 		vols = append(vols, artifactVols...)
 		mounts = append(mounts, artifactMounts...)
 	}
@@ -591,7 +593,7 @@ func renderModelDeploymentPodTemplate(ctx context.Context, in ModelDeploymentRen
 	// delivery can read the same digest a mount was skipped for.
 	var compileCacheSubPath string
 	if !takeOver {
-		vols, mounts = appendModelDeploymentConnectorVolumes(vols, mounts, in.Connector)
+		vols, mounts = appendModelDeploymentConnectorVolumes(vols, mounts, in.Connector, artifact)
 		// THE COMPILATION CACHE IS MOUNTED AT ONE PATH FOR EVERY MANAGED ROLE UNLESS THE ROLE'S
 		// OWN VOLUMES ALREADY COVER IT, and each role's own subdirectory of it is what the default
 		// volume carries. The path is therefore a constant to the engine -- which is what lets one
@@ -611,7 +613,7 @@ func renderModelDeploymentPodTemplate(ctx context.Context, in ModelDeploymentRen
 						Deployment:      md,
 						Role:            role,
 						AcceleratorType: in.AcceleratorType,
-						Artifact:        in.Artifact,
+						Artifact:        artifact,
 					},
 				)
 				if err != nil {
@@ -638,7 +640,7 @@ func renderModelDeploymentPodTemplate(ctx context.Context, in ModelDeploymentRen
 	// the volume, but its identity is computed here all the same, because the digest is
 	// about the configuration and not about where the cache lives.
 	modelExpressStaged := modelDeploymentRoleUsesModelExpress(md.Spec.Engine.Name, role) &&
-		in.Artifact != nil && in.Artifact.Hub == modelDeploymentHubHuggingFace
+		artifact != nil && artifact.Hub == modelDeploymentHubHuggingFace
 	var staging *modelExpressStaging
 	if modelExpressStaged {
 		if compileCacheSubPath == "" && in.AcceleratorType != nil {
@@ -647,7 +649,7 @@ func renderModelDeploymentPodTemplate(ctx context.Context, in ModelDeploymentRen
 					Deployment:      md,
 					Role:            role,
 					AcceleratorType: in.AcceleratorType,
-					Artifact:        in.Artifact,
+					Artifact:        artifact,
 				},
 			)
 			if err != nil {
@@ -660,7 +662,7 @@ func renderModelDeploymentPodTemplate(ctx context.Context, in ModelDeploymentRen
 		if in.AcceleratorType != nil {
 			manufacturer = strings.ToLower(strings.TrimSpace(in.AcceleratorType.Status.Detail.Manufacturer))
 		}
-		staging = modelExpressStagingFor(ctx, md, role, in.Artifact,
+		staging = modelExpressStagingFor(ctx, md, role, artifact,
 			modelDeploymentModelExpressCompileConfigDigest(compileCacheSubPath),
 			scheme, enginePort, gradable,
 			// The backend the client dials when a source becomes ready later: the
@@ -713,19 +715,19 @@ func renderModelDeploymentPodTemplate(ctx context.Context, in ModelDeploymentRen
 		Command:         command,
 		Resources:       resources,
 		Ports:           ports,
-		Env:             mergeModelDeploymentEnv(md.Spec.Engine.Name, role, in.Connector, in.Artifact, takeOver),
+		Env:             mergeModelDeploymentEnv(md.Spec.Engine.Name, role, in.Connector, artifact, takeOver),
 		VolumeMounts:    mounts,
 		StartupProbe:    startupProbe,
 		ReadinessProbe:  readinessProbe,
 		LivenessProbe:   livenessProbe,
 	}
-	if in.Artifact != nil {
-		in.Artifact.raiseEphemeralStorageLimit(&mainC, takeOver)
+	if artifact != nil {
+		artifact.raiseEphemeralStorageLimit(&mainC, takeOver)
 		// A remote delivery decorates the container here: the bootstrap
 		// that installs the staged wheel before the engine starts, the
 		// load format that selects the model-transfer adapter, and the env the
 		// adapter reads.
-		in.Artifact.applyModelTransfer(&mainC, md.Spec.Engine.Name)
+		artifact.applyModelTransfer(&mainC, md.Spec.Engine.Name)
 	}
 	// The ModelExpress staging lands after the remote decoration, which defers to the
 	// role's own load format: a role that selected modelexpress keeps that selection, and
@@ -744,7 +746,7 @@ func renderModelDeploymentPodTemplate(ctx context.Context, in ModelDeploymentRen
 	}
 	if role.Privileged {
 		mainC.SecurityContext = &core.SecurityContext{Privileged: ptr.To(true)}
-	} else if modelDeploymentRoleNeedsCapabilities(md.Spec.Engine.Name, role, command, in.Artifact) ||
+	} else if modelDeploymentRoleNeedsCapabilities(md.Spec.Engine.Name, role, command, artifact) ||
 		// The ModelExpress staging registers host memory and raises the
 		// locked-memory limit from the same wheel the transfer runs, so a
 		// role that stages it carries the pair under every delivery.
@@ -971,18 +973,71 @@ func modelDeploymentStampRouterCandidate(
 	pod.Labels[modelDeploymentRouterCandidateLabel] = modelDeploymentEndpointEligibleValue
 }
 
-// appendModelDeploymentConnectorVolumes appends connector-synthesized volumes and mounts onto the
-// Pod, yielding the operator-owned /etc/hixlep mount when user additionalVolumes already cover
-// that path while leaving all other connector mounts and --kv-transfer-config intact.
+// normalizeModelDeploymentArtifactForRole returns a copy of in.Artifact with Ascend A5 remote
+// HIXL flags normalized for the rendered role, zeroing both fields on take-over, non-Remote,
+// non-hixl, or non-A5 renders and gating Host RoCE on a granted InterfaceResource so unaffected
+// Pod hashes stay unchanged.
+func normalizeModelDeploymentArtifactForRole(
+	in ModelDeploymentRenderInput, takeOver bool,
+) *ModelDeploymentArtifactRender {
+	if in.Artifact == nil {
+		return nil
+	}
+	a := *in.Artifact
+	if takeOver ||
+		a.Delivery != workercore.ModelDeploymentModelDeliveryRemote ||
+		a.ModelTransferBackend != "hixl" {
+		a.ModelTransferAscendA5 = false
+		a.ModelTransferAscendHostRoCE = false
+		return &a
+	}
+	if in.AcceleratorType != nil {
+		isAscendA5 := strings.EqualFold(
+			strings.TrimSpace(in.AcceleratorType.Status.Detail.Manufacturer),
+			nodefeature.ManufacturerAscend,
+		) && strings.TrimSpace(in.AcceleratorType.Status.Detail.Family) == nodefeature.AcceleratorFamilyAscend950
+		if !isAscendA5 {
+			a.ModelTransferAscendA5 = false
+			a.ModelTransferAscendHostRoCE = false
+			return &a
+		}
+		a.ModelTransferAscendA5 = true
+		a.ModelTransferAscendHostRoCE = in.InterfaceResource != "" &&
+			modelDeploymentAscendRemoteDirectProtocol(
+				in.Deployment, in.Role,
+				nodefeature.ManufacturerAscend, nodefeature.AcceleratorFamilyAscend950, true,
+			) != ""
+		return &a
+	}
+	a.ModelTransferAscendHostRoCE = a.ModelTransferAscendA5 && a.ModelTransferAscendHostRoCE && in.InterfaceResource != ""
+	return &a
+}
+
+// appendModelDeploymentConnectorVolumes appends connector-synthesized and Ascend A5 remote Host
+// RoCE volumes and mounts onto the Pod, mounting /etc/hixlep at most once. Legacy KV-only renders
+// preserve exact-path yielding so existing sub-mounts keep their pod-spec-hash, while Ascend A5
+// remote Host RoCE yields whenever user additionalVolumes overlap /etc/hixlep.
 func appendModelDeploymentConnectorVolumes(
-	vols []core.Volume, mounts []core.VolumeMount, connector ModelDeploymentConnectorRender,
+	vols []core.Volume, mounts []core.VolumeMount,
+	connector ModelDeploymentConnectorRender, artifact *ModelDeploymentArtifactRender,
 ) ([]core.Volume, []core.VolumeMount) {
+	remoteHostRoCE := artifact != nil && artifact.ModelTransferAscendHostRoCE
 	hixlepOverridden := slices.ContainsFunc(mounts, func(m core.VolumeMount) bool {
+		if m.MountPath == "" {
+			return false
+		}
+		if remoteHostRoCE {
+			return mooncake.PathsOverlap(m.MountPath, inject.AscendHIXLEPPath)
+		}
 		return path.Clean(m.MountPath) == inject.AscendHIXLEPPath
 	})
+	hixlepMounted := hixlepOverridden
 	for _, v := range connector.Volumes {
 		if hixlepOverridden && v.Name == inject.AscendHIXLEPVolumeName {
 			continue
+		}
+		if v.Name == inject.AscendHIXLEPVolumeName {
+			hixlepMounted = true
 		}
 		vols = append(vols, v)
 	}
@@ -991,6 +1046,23 @@ func appendModelDeploymentConnectorVolumes(
 			continue
 		}
 		mounts = append(mounts, m)
+	}
+	if !hixlepMounted && remoteHostRoCE {
+		hostPathDirectory := core.HostPathDirectory
+		vols = append(vols, core.Volume{
+			Name: inject.AscendHIXLEPVolumeName,
+			VolumeSource: core.VolumeSource{
+				HostPath: &core.HostPathVolumeSource{
+					Path: inject.AscendHIXLEPPath,
+					Type: &hostPathDirectory,
+				},
+			},
+		})
+		mounts = append(mounts, core.VolumeMount{
+			Name:      inject.AscendHIXLEPVolumeName,
+			MountPath: inject.AscendHIXLEPPath,
+			ReadOnly:  true,
+		})
 	}
 	return vols, mounts
 }
@@ -2201,6 +2273,9 @@ func modelDeploymentBindingHash(
 		if !usesModelTransferNIXL {
 			a.ModelTransferEFA = false
 		}
+		normalized := normalizeModelDeploymentArtifactForRole(in, takeOver)
+		a.ModelTransferAscendA5 = normalized.ModelTransferAscendA5
+		a.ModelTransferAscendHostRoCE = normalized.ModelTransferAscendHostRoCE
 		artifact = &a
 	}
 

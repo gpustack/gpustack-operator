@@ -976,14 +976,12 @@ func modelDeploymentScalerConnectorRender(
 				kvTransferProtocol = "hip"
 			}
 		}
-		directProtocol := ModelDeploymentDirectInterfaceProtocol(
-			target, role, manufacturer, family, target.Spec.Model.ArtifactRef != nil, false,
-		)
+		kvDirectProtocol := modelDeploymentAscendKVDirectProtocol(target, role, manufacturer, family)
 		in := ModelDeploymentConnectorInput{
 			Engine:             engine,
 			Manufacturer:       manufacturer,
 			AcceleratorFamily:  family,
-			AscendHostRoCE:     modelDeploymentAscendHostRoCE(engine, manufacturer, family, directProtocol, role),
+			AscendHostRoCE:     modelDeploymentAscendHostRoCE(engine, manufacturer, family, kvDirectProtocol, role),
 			Kind:               role.Kind,
 			Disaggregated:      ModelDeploymentDeclaresBothHalves(target),
 			Parallelism:        pair,

@@ -379,7 +379,7 @@ func (r *ModelDeploymentReconciler) convergeModelDeploymentElasticWithIsolation(
 			}
 		}
 	}
-	if !deferInitialCreation {
+	if !deferInitialCreation && (weights == nil || !weights.Blocked) {
 		for name, ordinals := range desired {
 			taken, err := r.modelDeploymentTakenGroups(ctx, md, name, false)
 			if err != nil {

@@ -21,9 +21,10 @@ so the successful remote path does not store a complete checkpoint on the target
 - [Configuration](#configuration)
 - [Source preparation](#source-preparation)
 - [Replica startup](#replica-startup)
-- [Benchmarks](#benchmarks)
 - [Require and Prefer](#require-and-prefer)
 - [Networks](#networks)
+- [Vendor-specific behavior](#vendor-specific-behavior)
+- [Benchmarks](#benchmarks)
 - [Observing status](#observing-status)
 - [Troubleshooting](#troubleshooting)
 - [Rollback](#rollback)
@@ -72,14 +73,13 @@ directly through Helm. Perform this maintenance when the affected workload is st
 it does not wait for the image-rollout drain acknowledgement.
 Host driver versions do not rewrite the map. Disk warm-up retains its independent Python Alpine image.
 
-Remote delivery targets **hub artifacts on managed roles**. The routing candidates are `nixl`
-for vLLM and SGLang on NVIDIA, and `hixl` for vLLM-Ascend and SGLang on Ascend. The current
-allowlist admits only the NVIDIA candidates; Ascend is not yet admitted. Routing admission does
-not establish production acceptance, which remains open.
+Remote delivery targets **hub artifacts on managed roles**. Default routing admits `nixl` for `vLLM`
+and `SGLang` on NVIDIA, and `hixl` for `vLLM` and `SGLang` on Ascend. Routing admission does not
+establish production acceptance, which remains open.
 
 Setting `Require` or `Prefer` starts nothing on its own. A role with its own command is never
-rewritten, and claim and image artifacts keep their existing delivery paths. On Ascend (`hixl`),
-the engine runner image must include CANN 9.2 or newer so the Python `hixl` module is present.
+rewritten, and claim and image artifacts keep their existing delivery paths. Platform runtime and
+wheel requirements live under [Vendor-specific behavior](#vendor-specific-behavior).
 
 ## Source preparation
 
@@ -136,8 +136,8 @@ Treat source Pods and their vendor images as trusted cluster infrastructure.
 
 Use the benchmark models `Qwen/Qwen3-8B` and `Qwen/Qwen3.6-35B-A3B` in namespace
 `gpustack-default`. Both sources share the `model-source-pool` store and `qwen-source` Binding.
-These are configuration examples, not captured benchmark manifests. HIXL remains outside the
-managed replica routing allowlist.
+These are configuration examples, not captured benchmark manifests; default routing admits Ascend
+`hixl` for `vLLM` and `SGLang`.
 
 #### Node and source limits
 
@@ -393,29 +393,9 @@ The reader coalesces contiguous safetensors spans into a registered transfer win
 possible. Window and concurrency budgets bound staging; retained output tensors still contribute
 to peak device memory until load completion.
 
-The target staging window uses pinned host RAM. Ascend uses `aclrtMallocHost` and HIXL `MEM_HOST`;
-NVIDIA uses pinned `DRAM` with NIXL. The source writes into the host window, then the loader copies
-to the target tensor. `GPUSTACK_MODEL_TRANSFER_TARGET_MEMORY` is no longer read. The loaders close
-the session after `load_weights`; unknown native outcomes retain resources for safety.
-
-HIXL owned host regions always use `2 MiB`-aligned addresses and registration lengths, including
-small or oddly sized requests. The allocator reserves the rounded extent plus `2 MiB` for address
-alignment and frees the original allocation. File and tensor read/write bounds keep their original
-lengths; the registered tail is zeroed and never counted as model data.
-
-Source admission, page selection and residency reports charge this complete backing allocation.
-Target window budgets round down before dividing into slots; each slot reserves `2 MiB` for address
-alignment. A direct loader window below `4 MiB` resolves to that minimum, and double buffering needs
-at least `8 MiB`. Configured environment windows retain their `1 GiB` floor. Adaptive transfer spans
-may end at an unaligned tensor boundary without changing the aligned memory registration.
-
-The exported `HixlReader` also aligns its owned host windows and charges the full backing
-allocation. Its per-window budget has a `4 MiB` minimum. Caller-owned tensor or byte-buffer
-registrations keep their actual storage bounds; the runtime never rounds them beyond their owner.
-
-NVIDIA pinned allocations of at least `2 MiB` retain their existing address alignment. NIXL window
-sizes round down and needed tensor spans round up before clamping; smaller windows can keep their
-original sizes.
+The target staging window uses pinned host RAM, and the loader closes the session after
+`load_weights`. Unknown native outcomes retain resources for safety. Platform-specific host
+allocation and alignment rules live under [Vendor-specific behavior](#vendor-specific-behavior).
 
 When available RAM backs a source window, `POST /v1/sessions` returns `sourceWindowBytes`. The
 client limits its window to the smaller of its own budget and that figure, with a `256 MiB`
@@ -441,6 +421,188 @@ raw READ, WRITE, ATOMIC and discovery exposure require backend safety qualificat
 
 A drained or quarantined generation stops admitting sessions. An already loaded replica keeps
 serving its own loaded weights.
+
+## Require and Prefer
+
+The policy names what an eligible replica may do when its source is missing, slow or fails:
+
+
+| Policy    | Allowlisted, source available | Allowlisted, source unavailable                                                                 | Outside allowlist                                                                                              | Ineligible role                                             |
+| --------- | --------------------------------- | ----------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------- |
+| `Require` | loads remote                      | holds before its load starts, visible in status, never downloads                                | blocked with `UnqualifiedTransferBackend`, no new `Pod`                                                        | blocked with `RoleIneligibleForModelTransfer`, no new `Pod` |
+| `Prefer`  | loads remote                      | uses the declared local delivery if no remote replica holds it; otherwise holds remote delivery | falls back to the declared local delivery, or is blocked when that fallback would roll a loaded remote replica | falls back to the declared local delivery                   |
+
+
+- **Require never materializes a checkpoint.** A Require deployment that cannot reach a source
+keeps waiting within its startup limits; nothing downloads behind its back.
+- **Prefer tracks fallback attempts.** The initial remote `Pod` does not mount a complete
+checkpoint, so fallback after a failed remote load recreates the replica. Each attempt increments
+*`fallbackAttempts`* for that replica. If the count exceeds three, the reason becomes
+`FallbackAttemptsSpent` and the replica still falls back.
+- **Verified artifacts keep verification on fallback.** An artifact with *`expectedDigest`*,
+*`allowPatterns`* or *`ignorePatterns`* falls back to verified Node delivery, never to an
+unrestricted engine download.
+- **The refusal reason identifies the restriction.** `RoleIneligibleForModelTransfer` means the
+role cannot use remote delivery: it has its own command, uses an unsupported engine, or runs on
+a pool whose manufacturer names no backend. `UnqualifiedTransferBackend` means the candidate is
+outside the current routing allowlist. Under `Require` both block; under `Prefer` an unqualified
+candidate falls back only if doing so would not roll a loaded remote replica.
+- **A running remote replica is protected from fallback.** Changing the desired delivery could
+roll a replica that already loaded. The controller checks running `Pod`s as well as deployment
+status, which can lag or report local delivery. It holds the operator-rendered replica's remote
+delivery even if the source disappears or the `Pod` is not `Ready`: it may already have loaded.
+A replica can fall back when every member's load failed outright. This hold does not affect an
+independent client that connects to the source itself.
+
+## Networks
+
+Control and payload endpoints are identified separately. The *control* endpoint is the broker's
+authenticated HTTP path for session negotiation. The *payload* endpoint is the backend's transfer path:
+UCX/InfiniBand or shared memory for `nixl`, and the CANN fabric for `hixl`. A capability record
+must identify both endpoints for the backend to qualify.
+
+Network device selection is checked during qualification, using node discovery or the acceptance
+configuration. No `Setting` chooses a NIC today. A payload transfer on the wrong network path
+fails acceptance; the operator does not automatically correct the selection.
+
+The source chart keeps the existing `modelTransfer.env` map and appended `modelTransfer.extraArgs`.
+Use backend environment variables there when a server needs explicit device selection. Client
+east-west network selection is owned by the RDMA selection work; this feature adds no server-client
+NIC negotiation. Platform-specific transport options, mounts, and topologies live under
+[Vendor-specific behavior](#vendor-specific-behavior).
+
+## Vendor-specific behavior
+
+Accelerator platforms and fabrics add runtime image requirements, host mounts, and topology rules
+beyond generic remote loading.
+
+### Ascend
+
+On Ascend (`hixl`), default routing admits `vLLM` and `SGLang`. The engine runner image must include
+CANN 9.2 or newer (for Python `hixl`), and Ascend A5 or Host RoCE features require rebuilt
+`model-transfer` source images beyond early `v0.1.0-cann9.2-a5` tags.
+
+The target engine bootstrap skips installing the host-staged wheel whenever
+`gpustack_model_transfer` is already preinstalled in the engine image. CANN 9.2+ engine images
+carrying an older bundled `gpustack_model_transfer` wheel must upgrade or omit that preinstalled
+wheel to pick up A5 options and `roce:host` `mmap`. HIXL Device RoCE and Host RoCE require
+separate qualification.
+
+On Ascend A5 (`Family == "950"`), `modelTransfer.ascend.hostRoCE.enabled` (default `false`) opts
+the Ascend source `DaemonSet` into Host RoCE, while `roles[].resources.interface > 0` enables Host
+RoCE on eligible `ModelDeployment` `vLLM` and `SGLang` targets (`Server` and symmetric *PD* pairs;
+`Encode` and asymmetric *PD* pairs remain rejected).
+
+- **Source Host RoCE toggle**: Setting `modelTransfer.ascend.hostRoCE.enabled: true` applies `hostNetwork: true`, `ClusterFirstWithHostNet`, read-only `/etc/hixlep` (`HostPathDirectory`), and default `ASCEND_GLOBAL_RESOURCE_CONFIG` (`roce:host` + `/etc/hixlep`) on `gpustack-operator-model-transfer-ascend` only.
+- **Broker and HIXL network ports**: With `hostNetwork: true`, the broker's HTTP/TLS listeners expose only `:9251` on the host network namespace (CSI clients dial `<sourcePodIP>:9251` and verify TLS SNI `<daemonSetName>.<namespace>.svc`); broker-worker private HTTP control uses `/run/model-transfer-sockets/{control,worker}.sock` UDS (keeping `/run/model-transfer/bootstrap` read-only on `worker`) instead of loopback `9250`/`9252`, while HIXL's native rendezvous separately binds an ephemeral port on `status.podIP`.
+- **Mixed-fleet `nodeSelector` warning**: `modelTransfer.nodeSelector` applies to all vendor source `DaemonSet`s (`nvidia`, `amd`, `ascend`), and narrowing it on a running cluster causes Kubernetes's `DaemonSet` controller to delete `Pod`s on non-matching nodes immediately (bypassing `OnDelete` drain). Stop new work and confirm release on excluded nodes before migrating, or use isolated placement when other vendor source fleets share the cluster.
+- **Same-image drained rollout**: Source `Pod` templates stamp `model-transfer.gpustack.ai/config-hash` covering image, `hostNetwork`, `dnsPolicy`, `env`, and `/etc/hixlep`, so `ModelTransferImageReconciler` drains and replaces Pods when toggling `hostRoCE.enabled` at an identical worker image.
+
+The Python SDK forwards `ASCEND_LOCAL_COMM_RES` (`LocalCommRes`) and `ASCEND_GLOBAL_RESOURCE_CONFIG`
+(`GlobalResourceConfig`) into `Hixl.initialize()` on both source and target while preserving
+`"BufferPool": "0:0"` and normalizing nested `comm_resource_config.protocol_desc` to HIXL's literal
+flat dotted key `"comm_resource_config.protocol_desc"`.
+
+When `ASCEND_LOCAL_COMM_RES` is empty and `local_comm_res_path` is a directory, the SDK resolves
+`aclrtGetDevice` and `aclrtGetPhyDevIdByUserDevId` to `<dir>/ub_endpoint_npu_<phy_id>.json` and
+fails closed with `SourceUnavailableError` on missing symbols, lookup errors, or absent files
+(never guessing NPU `0`).
+
+When `protocol_desc` selects `"roce:host"`, both source (`AclHostOwner`) and target
+(`BorrowedAclOwner`) allocate owned `2 MiB`-aligned private anonymous `mmap` buffers registered as
+`MEM_HOST`, release idempotently by recorded allocator kind, and quarantine mappings if `close()` is
+refused. Non-`roce:host` paths continue using `aclrtMallocHost`.
+
+`GPUSTACK_MODEL_TRANSFER_TARGET_MEMORY` is no longer read. HIXL owned host regions always use
+`2 MiB`-aligned addresses and registration lengths, reserving the rounded extent plus `2 MiB` for
+alignment, zeroing the tail, and charging the full backing allocation. A direct loader window below
+`4 MiB` resolves to that minimum, double buffering needs `8 MiB`, and `HixlReader` preserves
+caller-owned bounds.
+
+#### Ascend A5 scenarios
+
+| Scenario | Configuration | Resulting behavior |
+|---|---|---|
+| **A5 UB default** | `hostRoCE.enabled: false`, target `interface: 0` | Target defaults `ASCEND_LOCAL_COMM_RES='{"version":"1.3"}'`; uses `ub_ctp:device` and `aclrtMallocHost` with no `/etc/hixlep`. |
+| **A5 UB H2H** | Set `ASCEND_GLOBAL_RESOURCE_CONFIG='{"comm_resource_config.protocol_desc":["ub_ctp:host"]}'` on source and target | Pure Host-to-Host UB over `ub_ctp:host` using `aclrtMallocHost`; no `/etc/hixlep` or `hostNetwork`. |
+| **A5 UBG** | Set `ASCEND_GLOBAL_RESOURCE_CONFIG='{"comm_resource_config.protocol_desc":["ub_rtp:device"]}'` on source and target | Cross-SuperPod UBG over `ub_rtp:device` using `aclrtMallocHost`; no `/etc/hixlep` or `hostNetwork`. |
+| **A5 UBoE** | Set `ASCEND_GLOBAL_RESOURCE_CONFIG='{"comm_resource_config.protocol_desc":["uboe:device"]}'` on source and target | UBoE over `uboe:device` using `aclrtMallocHost`; no `/etc/hixlep` or `hostNetwork`. |
+| **A5 Host RoCE** | Source `hostRoCE.enabled: true` + target `interface > 0` | Grants target `device.gpustack.ai/rdma*`, mounts `/etc/hixlep` RO, fails closed on physical NPU resolution, and uses `2 MiB`-aligned `mmap`. |
+| **Non-A5 A2/A3** | `910B`/`910C`, `hostRoCE.enabled: false`, `interface: 0` | Unchanged legacy `hixl` path using `aclrtMallocHost`; no `/etc/hixlep` or `hostNetwork`. |
+
+Source Helm values for **Ascend A5 Host RoCE** on a fresh installation or post-drain migration
+(`ascend.gpustack.ai/generation: a5` is an administrator-supplied node label that operators must
+apply or replace to match their A5 nodes):
+
+```yaml
+modelTransfer:
+  nodeSelector:
+    # Administrator-supplied label matching your A5 nodes (apply or replace as needed).
+    # Applies to all vendor source DaemonSets (nvidia, amd, ascend); only narrow on
+    # fresh installs or after draining excluded nodes.
+    ascend.gpustack.ai/generation: a5
+  ascend:
+    hostRoCE:
+      enabled: true  # grants hostNetwork, RO /etc/hixlep, and flat-key roce:host default
+```
+
+Source Helm values for **UB H2H, UBG, or UBoE** keep `hostRoCE.enabled: false` and pass the flat
+dotted protocol key as a `modelTransfer.env` map entry:
+
+```yaml
+modelTransfer:
+  nodeSelector:
+    # Administrator-supplied label matching your A5 nodes (apply or replace as needed).
+    ascend.gpustack.ai/generation: a5
+  ascend:
+    hostRoCE:
+      enabled: false  # keeps hostNetwork and /etc/hixlep off for UB-family paths
+  env:
+    # Use ["ub_ctp:host"] for UB H2H, ["ub_rtp:device"] for UBG, or ["uboe:device"] for UBoE.
+    ASCEND_GLOBAL_RESOURCE_CONFIG: '{"comm_resource_config.protocol_desc":["ub_ctp:host"]}'
+```
+
+Target `ModelDeployment` for Ascend A5 Host RoCE remote weight delivery (`vLLM` or `SGLang`):
+
+```yaml
+apiVersion: worker.gpustack.ai/v1
+kind: ModelDeployment
+metadata:
+  name: qwen3-8b-a5-roce
+  namespace: gpustack-default
+spec:
+  model:
+    name: Qwen/Qwen3-8B
+    artifactRef:
+      name: qwen3-8b
+  engine:
+    name: vLLM  # vLLM or SGLang on CANN 9.2+
+    image: example/vllm-ascend:cann9.2
+  roles:
+    - name: server
+      replicas: 1
+      acceleratorType: atlas-950  # converged status.detail.family: "950"
+      resources:
+        accelerator: 1
+        interface: 1  # grants RDMA, RO /etc/hixlep, and flat-key roce:host default
+```
+
+For UB H2H, UBG, or UBoE on target `ModelDeployment` roles, omit *`resources.interface`* and set
+`ASCEND_GLOBAL_RESOURCE_CONFIG` in *`roles[].env`* with `"comm_resource_config.protocol_desc"`.
+
+### NVIDIA
+
+On NVIDIA, default routing admits `nixl` for `vLLM` and `SGLang`. NIXL selects `LIBFABRIC` when
+`aws-efa-enabled` is `true` or a bound `KVCache` pool uses EFA, and `UCX` (InfiniBand, RoCE,
+NVLink/IPC, or TCP) otherwise.
+
+For AWS EFA, supply an EFA-enabled `model-transfer` image through Helm
+`modelTransfer.images.nvidia`; default builds omit the EFA provider. NVIDIA pinned host allocations
+of at least `2 MiB` retain their alignment, with NIXL window sizes rounded down and needed tensor
+spans rounded up before clamping.
+
+For measured NIXL source-to-target numbers see [NVIDIA (NIXL)](#nvidia-nixl); for peer D2D tensor
+and compile-cache sharing see [NVIDIA (ModelExpress)](#nvidia-modelexpress).
 
 ## Benchmarks
 
@@ -476,7 +638,7 @@ remote runs cross nodes.
 
 The runs used two Ascend 910B2 nodes, vLLM-Ascend `cann9.2-910b-vllm0.30.0`, eager mode and host
 transfer buffers with pre-warmed source weights. These runs used an isolated qualification setup;
-HIXL remains outside the managed routing allowlist.
+default routing now admits Ascend `hixl` for `vLLM` and `SGLang`.
 
 The source host had 2014 GiB of total RAM and approximately 1514 GiB available. With
 *`source.maxMemoryBytes: 0`*, the default node Source budget is `2014 / 16` (`125.88 GiB`), subject
@@ -735,54 +897,6 @@ spec:
 - **Restart**: Server replacement loses in-memory registrations; existing replicas keep serving.
 - **Recovery**: A new replica loads from a ready source or an eligible local path and publishes metadata.
 - **Scale from zero**: The first replica has no ready peer.
-
-## Require and Prefer
-
-The policy names what an eligible replica may do when its source is missing, slow or fails:
-
-
-| Policy    | Allowlisted, source available | Allowlisted, source unavailable                                                                 | Outside allowlist                                                                                              | Ineligible role                                             |
-| --------- | --------------------------------- | ----------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------- |
-| `Require` | loads remote                      | holds before its load starts, visible in status, never downloads                                | blocked with `UnqualifiedTransferBackend`, no new `Pod`                                                        | blocked with `RoleIneligibleForModelTransfer`, no new `Pod` |
-| `Prefer`  | loads remote                      | uses the declared local delivery if no remote replica holds it; otherwise holds remote delivery | falls back to the declared local delivery, or is blocked when that fallback would roll a loaded remote replica | falls back to the declared local delivery                   |
-
-
-- **Require never materializes a checkpoint.** A Require deployment that cannot reach a source
-keeps waiting within its startup limits; nothing downloads behind its back.
-- **Prefer tracks fallback attempts.** The initial remote `Pod` does not mount a complete
-checkpoint, so fallback after a failed remote load recreates the replica. Each attempt increments
-*`fallbackAttempts`* for that replica. If the count exceeds three, the reason becomes
-`FallbackAttemptsSpent` and the replica still falls back.
-- **Verified artifacts keep verification on fallback.** An artifact with *`expectedDigest`*,
-*`allowPatterns`* or *`ignorePatterns`* falls back to verified Node delivery, never to an
-unrestricted engine download.
-- **The refusal reason identifies the restriction.** `RoleIneligibleForModelTransfer` means the
-role cannot use remote delivery: it has its own command, uses an unsupported engine, or runs on
-a pool whose manufacturer names no backend. `UnqualifiedTransferBackend` means the candidate is
-outside the current routing allowlist. Under `Require` both block; under `Prefer` an unqualified
-candidate falls back only if doing so would not roll a loaded remote replica.
-- **A running remote replica is protected from fallback.** Changing the desired delivery could
-roll a replica that already loaded. The controller checks running `Pod`s as well as deployment
-status, which can lag or report local delivery. It holds the operator-rendered replica's remote
-delivery even if the source disappears or the `Pod` is not `Ready`: it may already have loaded.
-A replica can fall back when every member's load failed outright. This hold does not affect an
-independent client that connects to the source itself.
-
-## Networks
-
-Control and payload endpoints are identified separately. The *control* endpoint is the broker's
-authenticated HTTP path for session negotiation. The *payload* endpoint is the backend's transfer path:
-UCX/InfiniBand or shared memory for `nixl`, and the CANN fabric for `hixl`. A capability record
-must identify both endpoints for the backend to qualify.
-
-Network device selection is checked during qualification, using node discovery or the acceptance
-configuration. No `Setting` chooses a NIC today. A payload transfer on the wrong network path
-fails acceptance; the operator does not automatically correct the selection.
-
-The source chart keeps the existing `modelTransfer.env` map and appended `modelTransfer.extraArgs`.
-Use backend environment variables there when a server needs explicit device selection. Client
-east-west network selection is owned by the RDMA selection work; this feature adds no server-client
-NIC negotiation. HIXL Device RoCE and Host RoCE require separate qualification.
 
 ## Observing status
 

@@ -668,6 +668,7 @@ var modelDeploymentDefaultedEnvNames = slices.Concat([]string{
 	inject.SGLangDisaggregationNIXLBackendEnv,
 	inject.AscendAutoConnectEnv,
 	inject.AscendLocalCommResEnv,
+	inject.AscendGlobalResourceConfigEnv,
 	inject.AscendMFTransferProtocolEnv,
 	"VLLM_CACHE_ROOT",
 	"SGLANG_CACHE_DIR",

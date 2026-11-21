@@ -12,9 +12,10 @@ member. Add local disks to that member, then size the memory segment as describe
 ## Memory segment requirement
 
 **Every member group mounts a memory segment, and a disk tier is a layer on a group that already
-holds one.** *`members[].medium`* names which memory (`DRAM` for the host's, `VRAM` for the
-accelerator's), and the disk is declared beside it in *`members[].localDisks`*, a layer on either one.
-See [Connection and medium](backend.md#connection-and-medium) for the full shape.
+holds one.** *`members[].medium`* names `DRAM` (host RAM) or `VRAM` (accounting-only for user
+`USE_VRAM_SEGMENT=ON` images; see [Custom VRAM builds](backend.md#custom-vram-builds)), and
+*`members[].localDisks`* declares the disk beside it. See
+[Connection and medium](backend.md#connection-and-medium) for the full shape.
 
 The shape is the store's own data flow: the leader routes an offload task to the client holding the
 key's **memory** replica, so a group with none is never chosen. It would still report its disk
@@ -72,6 +73,8 @@ Three things that manifest depends on and does not state:
   [The local disk tier](local-disk-tier.md).
 - **Nothing in Kubernetes accounts for what the tier writes.** Watching that filesystem is yours.
   See [unaccounted disk usage](local-disk-tier.md#unaccounted-disk-usage).
+- **Avoid reserved host mount paths** (including `/etc/hixlep` on `CANN` Host RoCE groups); see
+  [path rules](local-disk-tier.md#directory-requirements).
 
 ## Memory segment floor
 

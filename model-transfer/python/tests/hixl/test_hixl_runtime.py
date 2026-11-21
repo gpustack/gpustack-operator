@@ -292,6 +292,113 @@ class TestRealApiSurface(unittest.TestCase):
             registration.windows["w"], {"addr": 0x1111, "len": 40, "type": "HOST"}
         )
 
+    def test_register_memory_ignores_stray_registration_bytes_and_verifies_acl_block(
+        self,
+    ):
+        from gpustack_model_transfer.source.memory import (
+            AclBlock,
+            allocate_roce_host_mmap_block,
+            release_roce_host_mmap_block,
+        )
+
+        class StrayCpuTensor:
+            device = type("Device", (), {"type": "cpu"})()
+            registration_bytes = 64 << 20
+
+            def data_ptr(self):
+                return 0x4444
+
+            def numel(self):
+                return 16
+
+            def element_size(self):
+                return 4
+
+            def is_contiguous(self):
+                return True
+
+        api = self.api()
+        agent = api.create_agent("reader", {"local_engine": "reader@node-a"})
+        owned_block = allocate_roce_host_mmap_block("weights", 128, None)
+        try:
+            registration = api.register_memory(
+                agent, {"generic": StrayCpuTensor(), "owned": owned_block}
+            )
+            register_calls = [
+                call for call in agent.client.calls if call[0] == "register_mem"
+            ]
+            self.assertEqual(register_calls[0][1].len, 64)
+            self.assertEqual(registration.windows["generic"]["len"], 64)
+            self.assertEqual(register_calls[1][1].len, 2 << 20)
+            self.assertEqual(registration.windows["owned"]["len"], 128)
+        finally:
+            release_roce_host_mmap_block(owned_block)
+
+        for aligned_offset, reg_bytes, alloc_bytes in (
+            (-1, 64, 128),
+            (0, 32, 128),
+            (64, 128, 128),
+        ):
+            with self.subTest(
+                aligned_offset=aligned_offset,
+                reg_bytes=reg_bytes,
+                alloc_bytes=alloc_bytes,
+            ):
+                bad_block = AclBlock(
+                    "bad", 64, None, 2 << 20, aligned_offset=aligned_offset
+                )
+                bad_block.registration_bytes = reg_bytes
+                bad_block.allocation_bytes = alloc_bytes
+                with self.assertRaises(ValueError):
+                    api.register_memory(agent, {"bad": bad_block})
+
+        # Mismatched aligned_offset (e.g. default 0 when address > allocation_address),
+        # invalid allocation_address, or truncated mmap must fail before register_mem.
+        import mmap
+
+        before_calls = len(agent.client.calls)
+        mismatched_offset = AclBlock("sub", 64, None, 4 << 20)
+        mismatched_offset.allocation_address = 2 << 20
+        mismatched_offset.allocation_bytes = 4 << 20
+        mismatched_offset.registration_bytes = 4 << 20
+        with self.assertRaises(ValueError):
+            api.register_memory(agent, {"sub": mismatched_offset})
+
+        below_base = AclBlock("below", 64, None, 2 << 20, aligned_offset=0)
+        below_base.allocation_address = 4 << 20
+        below_base.allocation_bytes = 4 << 20
+        below_base.registration_bytes = 2 << 20
+        with self.assertRaises(ValueError):
+            api.register_memory(agent, {"below": below_base})
+
+        nonpositive_base = AclBlock("zero-base", 64, None, 2 << 20, aligned_offset=0)
+        nonpositive_base.allocation_address = 0
+        nonpositive_base.allocation_bytes = 4 << 20
+        nonpositive_base.registration_bytes = 2 << 20
+        with self.assertRaises(ValueError):
+            api.register_memory(agent, {"zero-base": nonpositive_base})
+
+        short_map = mmap.mmap(-1, 4096)
+        try:
+            truncated_map = AclBlock(
+                "trunc",
+                64,
+                None,
+                2 << 20,
+                allocator_kind="mmap",
+                mapping=short_map,
+                aligned_offset=0,
+            )
+            truncated_map.allocation_address = 2 << 20
+            truncated_map.allocation_bytes = 4 << 20
+            truncated_map.registration_bytes = 2 << 20
+            with self.assertRaises(ValueError):
+                api.register_memory(agent, {"trunc": truncated_map})
+        finally:
+            short_map.close()
+
+        self.assertEqual(len(agent.client.calls), before_calls)
+
     def test_a_device_tensor_registers_as_device_memory(self):
         api = self.api()
 

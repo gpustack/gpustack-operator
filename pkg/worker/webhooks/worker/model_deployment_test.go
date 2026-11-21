@@ -32,6 +32,7 @@ import (
 	workerctrl "gpustack.ai/gpustack/pkg/worker/controllers/worker"
 	"gpustack.ai/gpustack/pkg/worker/kvcache/inject"
 	"gpustack.ai/gpustack/pkg/worker/runtimecontrol"
+	"gpustack.ai/gpustack/pkg/worker/settings"
 )
 
 // modelDeployment builds a valid single-role deployment for the given engine, which every case then
@@ -5879,14 +5880,77 @@ func TestModelDeploymentWebhook_AscendA5InterfaceCreate(t *testing.T) {
 		objs[2].(*workercore.KVCacheBackend).Spec.Transport.Protocol = "CANN"
 		return objs
 	}
+	hubArtifact := func() *workercore.ModelArtifact {
+		return &workercore.ModelArtifact{
+			ObjectMeta: meta.ObjectMeta{Namespace: "team-a", Name: "weights"},
+			Spec: workercore.ModelArtifactSpec{
+				Source: workercore.ModelArtifactSource{
+					HuggingFace: &workercore.ModelArtifactHubSource{Repository: "Qwen/Qwen2.5-72B-Instruct"},
+				},
+			},
+		}
+	}
+	modelScopeArtifact := func() *workercore.ModelArtifact {
+		return &workercore.ModelArtifact{
+			ObjectMeta: meta.ObjectMeta{Namespace: "team-a", Name: "weights"},
+			Spec: workercore.ModelArtifactSpec{
+				Source: workercore.ModelArtifactSource{
+					ModelScope: &workercore.ModelArtifactHubSource{Repository: "Qwen/Qwen2.5-72B-Instruct"},
+				},
+			},
+		}
+	}
+	pvcArtifact := func() *workercore.ModelArtifact {
+		return &workercore.ModelArtifact{
+			ObjectMeta: meta.ObjectMeta{Namespace: "team-a", Name: "weights"},
+			Spec: workercore.ModelArtifactSpec{
+				Source: workercore.ModelArtifactSource{
+					PersistentVolumeClaim: &workercore.ModelArtifactPersistentVolumeClaimSource{ClaimName: "model-pvc"},
+				},
+			},
+		}
+	}
+	imageArtifact := func() *workercore.ModelArtifact {
+		return &workercore.ModelArtifact{
+			ObjectMeta: meta.ObjectMeta{Namespace: "team-a", Name: "weights"},
+			Spec: workercore.ModelArtifactSpec{
+				Source: workercore.ModelArtifactSource{
+					Image: &workercore.ModelArtifactImageSource{
+						Reference: "registry.example.com/models/qwen@sha256:" + strings.Repeat("a", 64),
+					},
+				},
+			},
+		}
+	}
 	qty1 := resource.MustParse("1")
 	qty2 := resource.MustParse("2")
+	singlePodA5ArtifactServer := func(engine string) func() *workercore.ModelDeployment {
+		return func() *workercore.ModelDeployment {
+			md := modelDeployment(engine,
+				role(func(r *workercore.ModelDeploymentRole) {
+					r.Name = "server"
+					r.Kind = workercore.ModelDeploymentRoleKindServer
+					r.AcceleratorType = "ascend-pool"
+					r.Resources = &workercore.ModelDeploymentRoleResources{
+						Accelerator: ptr.To(qty1),
+						Interface:   ptr.To(qty1),
+					}
+				}),
+			)
+			md.Spec.KVCache = nil
+			md.Spec.Model.ArtifactRef = &core.LocalObjectReference{Name: "weights"}
+			return md
+		}
+	}
 
 	cases := []struct {
 		name          string
 		family        string
 		awsEFAEnabled bool
+		remotePolicy  string
 		withCANNStore bool
+		withRDMAStore bool
+		artifact      *workercore.ModelArtifact
 		md            func() *workercore.ModelDeployment
 		wantErrField  string
 	}{
@@ -6234,18 +6298,340 @@ func TestModelDeploymentWebhook_AscendA5InterfaceCreate(t *testing.T) {
 				return md
 			},
 		},
+		{
+			name:          "A5 vLLM single-Pod Server without KVCache with Hub ArtifactRef under Prefer accepted even when aws-efa-enabled=true",
+			family:        nodefeature.AcceleratorFamilyAscend950,
+			awsEFAEnabled: true,
+			remotePolicy:  settings.ModelArtifactRemoteDeliveryPrefer,
+			artifact:      hubArtifact(),
+			md:            singlePodA5ArtifactServer(workercore.ModelDeploymentEngineVLLM),
+		},
+		{
+			name:         "A5 vLLM single-Pod Server without KVCache with Hub ArtifactRef under Require accepted",
+			family:       nodefeature.AcceleratorFamilyAscend950,
+			remotePolicy: settings.ModelArtifactRemoteDeliveryRequire,
+			artifact:     hubArtifact(),
+			md:           singlePodA5ArtifactServer(workercore.ModelDeploymentEngineVLLM),
+		},
+		{
+			name:         "A5 vLLM single-Pod Server without KVCache with ModelScope ArtifactRef under Prefer accepted",
+			family:       nodefeature.AcceleratorFamilyAscend950,
+			remotePolicy: settings.ModelArtifactRemoteDeliveryPrefer,
+			artifact:     modelScopeArtifact(),
+			md:           singlePodA5ArtifactServer(workercore.ModelDeploymentEngineVLLM),
+		},
+		{
+			name:          "A5 SGLang single-Pod Server with Hub ArtifactRef accepted even when aws-efa-enabled=true",
+			family:        nodefeature.AcceleratorFamilyAscend950,
+			awsEFAEnabled: true,
+			remotePolicy:  settings.ModelArtifactRemoteDeliveryPrefer,
+			artifact:      hubArtifact(),
+			md:            singlePodA5ArtifactServer(workercore.ModelDeploymentEngineSGLang),
+		},
+		{
+			name:         "A5 vLLM single-Pod Server with PVC ArtifactRef rejected",
+			family:       nodefeature.AcceleratorFamilyAscend950,
+			remotePolicy: settings.ModelArtifactRemoteDeliveryPrefer,
+			artifact:     pvcArtifact(),
+			wantErrField: "spec.roles[0].resources.interface",
+			md:           singlePodA5ArtifactServer(workercore.ModelDeploymentEngineVLLM),
+		},
+		{
+			name:         "A5 vLLM single-Pod Server with OCI Image ArtifactRef rejected",
+			family:       nodefeature.AcceleratorFamilyAscend950,
+			remotePolicy: settings.ModelArtifactRemoteDeliveryPrefer,
+			artifact:     imageArtifact(),
+			wantErrField: "spec.roles[0].resources.interface",
+			md:           singlePodA5ArtifactServer(workercore.ModelDeploymentEngineVLLM),
+		},
+		{
+			name:         "A5 vLLM single-Pod Server with missing ArtifactRef rejected",
+			family:       nodefeature.AcceleratorFamilyAscend950,
+			remotePolicy: settings.ModelArtifactRemoteDeliveryPrefer,
+			wantErrField: "spec.roles[0].resources.interface",
+			md:           singlePodA5ArtifactServer(workercore.ModelDeploymentEngineVLLM),
+		},
+		{
+			name:         "A5 vLLM single-Pod Server with Hub ArtifactRef when remote delivery policy disabled rejected",
+			family:       nodefeature.AcceleratorFamilyAscend950,
+			remotePolicy: settings.ModelArtifactRemoteDeliveryDisabled,
+			artifact:     hubArtifact(),
+			wantErrField: "spec.roles[0].resources.interface",
+			md:           singlePodA5ArtifactServer(workercore.ModelDeploymentEngineVLLM),
+		},
+		{
+			name:          "A5 SGLang symmetric P/D with Hub ArtifactRef accepted",
+			family:        nodefeature.AcceleratorFamilyAscend950,
+			awsEFAEnabled: true,
+			remotePolicy:  settings.ModelArtifactRemoteDeliveryPrefer,
+			artifact:      hubArtifact(),
+			md: func() *workercore.ModelDeployment {
+				md := modelDeployment(workercore.ModelDeploymentEngineSGLang,
+					role(func(r *workercore.ModelDeploymentRole) {
+						r.Name = "prefill"
+						r.Kind = workercore.ModelDeploymentRoleKindPrefill
+						r.AcceleratorType = "ascend-pool"
+						r.Resources = &workercore.ModelDeploymentRoleResources{
+							Accelerator: ptr.To(qty1),
+							Interface:   ptr.To(qty1),
+						}
+					}),
+					role(func(r *workercore.ModelDeploymentRole) {
+						r.Name = "decode"
+						r.Kind = workercore.ModelDeploymentRoleKindDecode
+						r.AcceleratorType = "ascend-pool"
+						r.Resources = &workercore.ModelDeploymentRoleResources{
+							Accelerator: ptr.To(qty1),
+							Interface:   ptr.To(qty1),
+						}
+					}),
+				)
+				md.Spec.KVCache = nil
+				md.Spec.Model.ArtifactRef = &core.LocalObjectReference{Name: "weights"}
+				md.Spec.Router = &workercore.ModelDeploymentRouter{Name: workercore.ModelDeploymentRouterSGLang}
+				md.Spec.KVTransfer = &workercore.ModelDeploymentKVTransfer{Backend: workercore.ModelDeploymentKVTransferBackendHIXL}
+				return md
+			},
+		},
+		{
+			name:         "A5 vLLM asymmetric P/D with ArtifactRef still rejected",
+			family:       nodefeature.AcceleratorFamilyAscend950,
+			artifact:     hubArtifact(),
+			wantErrField: "spec.roles[0].resources.interface",
+			md: func() *workercore.ModelDeployment {
+				md := modelDeployment(workercore.ModelDeploymentEngineVLLM,
+					role(func(r *workercore.ModelDeploymentRole) {
+						r.Name = "prefill"
+						r.Kind = workercore.ModelDeploymentRoleKindPrefill
+						r.AcceleratorType = "ascend-pool"
+						r.Resources = &workercore.ModelDeploymentRoleResources{
+							Accelerator: ptr.To(qty1),
+							Interface:   ptr.To(qty1),
+						}
+					}),
+					role(func(r *workercore.ModelDeploymentRole) {
+						r.Name = "decode"
+						r.Kind = workercore.ModelDeploymentRoleKindDecode
+						r.AcceleratorType = "ascend-pool"
+						r.Resources = &workercore.ModelDeploymentRoleResources{Accelerator: ptr.To(qty1)}
+					}),
+				)
+				md.Spec.KVCache = nil
+				md.Spec.Model.ArtifactRef = &core.LocalObjectReference{Name: "weights"}
+				md.Spec.Router = &workercore.ModelDeploymentRouter{Name: workercore.ModelDeploymentRouterLLMD}
+				return md
+			},
+		},
+		{
+			name:         "A5 SGLang asymmetric P/D with ArtifactRef rejected",
+			family:       nodefeature.AcceleratorFamilyAscend950,
+			artifact:     hubArtifact(),
+			wantErrField: "spec.roles[0].resources.interface",
+			md: func() *workercore.ModelDeployment {
+				md := modelDeployment(workercore.ModelDeploymentEngineSGLang,
+					role(func(r *workercore.ModelDeploymentRole) {
+						r.Name = "prefill"
+						r.Kind = workercore.ModelDeploymentRoleKindPrefill
+						r.AcceleratorType = "ascend-pool"
+						r.Resources = &workercore.ModelDeploymentRoleResources{
+							Accelerator: ptr.To(qty1),
+							Interface:   ptr.To(qty1),
+						}
+					}),
+					role(func(r *workercore.ModelDeploymentRole) {
+						r.Name = "decode"
+						r.Kind = workercore.ModelDeploymentRoleKindDecode
+						r.AcceleratorType = "ascend-pool"
+						r.Resources = &workercore.ModelDeploymentRoleResources{Accelerator: ptr.To(qty1)}
+					}),
+				)
+				md.Spec.KVCache = nil
+				md.Spec.Model.ArtifactRef = &core.LocalObjectReference{Name: "weights"}
+				md.Spec.Router = &workercore.ModelDeploymentRouter{Name: workercore.ModelDeploymentRouterSGLang}
+				md.Spec.KVTransfer = &workercore.ModelDeploymentKVTransfer{Backend: workercore.ModelDeploymentKVTransferBackendHIXL}
+				return md
+			},
+		},
+		{
+			name:          "A5 SGLang asymmetric P/D with ArtifactRef and RDMA KVCache still rejected",
+			family:        nodefeature.AcceleratorFamilyAscend950,
+			artifact:      hubArtifact(),
+			withRDMAStore: true,
+			wantErrField:  "spec.roles[0].resources.interface",
+			md: func() *workercore.ModelDeployment {
+				md := modelDeployment(workercore.ModelDeploymentEngineSGLang,
+					role(func(r *workercore.ModelDeploymentRole) {
+						r.Name = "prefill"
+						r.Kind = workercore.ModelDeploymentRoleKindPrefill
+						r.AcceleratorType = "ascend-pool"
+						r.Resources = &workercore.ModelDeploymentRoleResources{
+							Accelerator: ptr.To(qty1),
+							Interface:   ptr.To(qty1),
+						}
+					}),
+					role(func(r *workercore.ModelDeploymentRole) {
+						r.Name = "decode"
+						r.Kind = workercore.ModelDeploymentRoleKindDecode
+						r.AcceleratorType = "ascend-pool"
+						r.Resources = &workercore.ModelDeploymentRoleResources{Accelerator: ptr.To(qty1)}
+					}),
+				)
+				md.Spec.KVCache.PoolRef.Name = "chat"
+				md.Spec.Model.ArtifactRef = &core.LocalObjectReference{Name: "weights"}
+				md.Spec.Router = &workercore.ModelDeploymentRouter{Name: workercore.ModelDeploymentRouterSGLang}
+				md.Spec.KVTransfer = &workercore.ModelDeploymentKVTransfer{Backend: workercore.ModelDeploymentKVTransferBackendHIXL}
+				return md
+			},
+		},
+		{
+			name:          "A5 unrouted P/D with RDMA KVCache requesting interface on both halves accepted",
+			family:        nodefeature.AcceleratorFamilyAscend950,
+			withRDMAStore: true,
+			md: func() *workercore.ModelDeployment {
+				md := modelDeployment(workercore.ModelDeploymentEngineSGLang,
+					role(func(r *workercore.ModelDeploymentRole) {
+						r.Name = "prefill"
+						r.Kind = workercore.ModelDeploymentRoleKindPrefill
+						r.AcceleratorType = "ascend-pool"
+						r.Resources = &workercore.ModelDeploymentRoleResources{
+							Accelerator: ptr.To(qty1),
+							Interface:   ptr.To(qty1),
+						}
+					}),
+					role(func(r *workercore.ModelDeploymentRole) {
+						r.Name = "decode"
+						r.Kind = workercore.ModelDeploymentRoleKindDecode
+						r.AcceleratorType = "ascend-pool"
+						r.Resources = &workercore.ModelDeploymentRoleResources{
+							Accelerator: ptr.To(qty1),
+							Interface:   ptr.To(qty1),
+						}
+					}),
+				)
+				md.Spec.KVCache.PoolRef.Name = "chat"
+				md.Spec.Router = nil
+				return md
+			},
+		},
+		{
+			name:         "A5 vLLM Encode role with ArtifactRef requesting interface still rejected",
+			family:       nodefeature.AcceleratorFamilyAscend950,
+			artifact:     hubArtifact(),
+			wantErrField: "spec.roles[0].resources.interface",
+			md: func() *workercore.ModelDeployment {
+				pvc := &core.PersistentVolumeClaimVolumeSource{ClaimName: "ec-cache"}
+				md := modelDeployment(workercore.ModelDeploymentEngineVLLM,
+					role(func(r *workercore.ModelDeploymentRole) {
+						r.Name = "encode"
+						r.Kind = workercore.ModelDeploymentRoleKindEncode
+						r.ReplicaSize = 1
+						r.AcceleratorType = "ascend-pool"
+						r.AdditionalVolumes = []workercore.ModelDeploymentAdditionalVolume{{
+							MountPath: "/shared/ec", PersistentVolumeClaim: pvc,
+						}}
+						r.Resources = &workercore.ModelDeploymentRoleResources{
+							Accelerator: ptr.To(qty1),
+							Interface:   ptr.To(qty1),
+						}
+					}),
+					role(func(r *workercore.ModelDeploymentRole) {
+						r.Name = "prefill"
+						r.Kind = workercore.ModelDeploymentRoleKindPrefill
+						r.AcceleratorType = "ascend-pool"
+						r.AdditionalVolumes = []workercore.ModelDeploymentAdditionalVolume{{
+							MountPath: "/shared/ec", PersistentVolumeClaim: pvc,
+						}}
+						r.Resources = &workercore.ModelDeploymentRoleResources{
+							Accelerator: ptr.To(qty1),
+							Interface:   ptr.To(qty1),
+						}
+					}),
+					role(func(r *workercore.ModelDeploymentRole) {
+						r.Name = "decode"
+						r.Kind = workercore.ModelDeploymentRoleKindDecode
+						r.AcceleratorType = "ascend-pool"
+						r.Resources = &workercore.ModelDeploymentRoleResources{
+							Accelerator: ptr.To(qty1),
+							Interface:   ptr.To(qty1),
+						}
+					}),
+				)
+				md.Spec.Model.Name = "Qwen/Qwen2.5-VL-7B-Instruct"
+				md.Spec.Model.ArtifactRef = &core.LocalObjectReference{Name: "weights"}
+				md.Spec.KVCache = nil
+				md.Spec.Router = &workercore.ModelDeploymentRouter{Name: workercore.ModelDeploymentRouterLLMD}
+				md.Spec.KVTransfer = &workercore.ModelDeploymentKVTransfer{Backend: workercore.ModelDeploymentKVTransferBackendHIXL}
+				return md
+			},
+		},
+		{
+			name:         "A5 vLLM single-Pod Server with ArtifactRef and conflicting load-format rejected",
+			family:       nodefeature.AcceleratorFamilyAscend950,
+			artifact:     hubArtifact(),
+			wantErrField: "spec.roles[0].resources.interface",
+			md: func() *workercore.ModelDeployment {
+				md := modelDeployment(workercore.ModelDeploymentEngineVLLM,
+					role(func(r *workercore.ModelDeploymentRole) {
+						r.Name = "server"
+						r.Kind = workercore.ModelDeploymentRoleKindServer
+						r.AcceleratorType = "ascend-pool"
+						r.ExtraArgs = []string{"--load-format=safetensors"}
+						r.Resources = &workercore.ModelDeploymentRoleResources{
+							Accelerator: ptr.To(qty1),
+							Interface:   ptr.To(qty1),
+						}
+					}),
+				)
+				md.Spec.KVCache = nil
+				md.Spec.Model.ArtifactRef = &core.LocalObjectReference{Name: "weights"}
+				return md
+			},
+		},
+		{
+			name:         "A2 910B Server with ArtifactRef requesting interface rejected",
+			family:       "910B",
+			artifact:     hubArtifact(),
+			wantErrField: "spec.roles[0].resources.interface",
+			md: func() *workercore.ModelDeployment {
+				md := modelDeployment(workercore.ModelDeploymentEngineVLLM,
+					role(func(r *workercore.ModelDeploymentRole) {
+						r.Name = "server"
+						r.Kind = workercore.ModelDeploymentRoleKindServer
+						r.AcceleratorType = "ascend-pool"
+						r.Resources = &workercore.ModelDeploymentRoleResources{
+							Accelerator: ptr.To(qty1),
+							Interface:   ptr.To(qty1),
+						}
+					}),
+				)
+				md.Spec.KVCache = nil
+				md.Spec.Model.ArtifactRef = &core.LocalObjectReference{Name: "weights"}
+				return md
+			},
+		},
 	}
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if tc.awsEFAEnabled {
-				settingtest.MergeDelegatedSettings(t, map[string]string{"aws-efa-enabled": "true"})
-			} else {
-				settingtest.MergeDelegatedSettings(t, map[string]string{"aws-efa-enabled": "false"})
+			policy := tc.remotePolicy
+			if policy == "" {
+				policy = settings.ModelArtifactRemoteDeliveryPrefer
 			}
+			settingtest.MergeDelegatedSettings(t, map[string]string{
+				"aws-efa-enabled":                       strconv.FormatBool(tc.awsEFAEnabled),
+				"model-artifact-remote-delivery-policy": policy,
+			})
 			objs := []ctrlcli.Object{ascendType("ascend-pool", tc.family)}
 			if tc.withCANNStore {
 				objs = append(objs, cannKVCache()...)
+			}
+			if tc.withRDMAStore {
+				rdmaObjs := kvCacheFixture()
+				rdmaObjs[2].(*workercore.KVCacheBackend).Spec.Transport.Protocol = "RDMA"
+				objs = append(objs, rdmaObjs...)
+			}
+			if tc.artifact != nil {
+				objs = append(objs, tc.artifact.DeepCopy())
 			}
 			w := newModelDeploymentWebhookWith(objs)
 			_, err := w.ValidateCreate(context.Background(), tc.md())
@@ -6261,14 +6647,25 @@ func TestModelDeploymentWebhook_AscendA5InterfaceCreate(t *testing.T) {
 }
 
 func TestModelDeploymentWebhook_AscendA5InterfaceUpdateRejudge(t *testing.T) {
+	settingtest.MergeDelegatedSettings(t, map[string]string{
+		"model-artifact-remote-delivery-policy": settings.ModelArtifactRemoteDeliveryPrefer,
+	})
 	qty1 := resource.MustParse("1")
 	ascendA5 := servingInstanceType("atlas-950", 8, func(it *worker.InstanceType) {
 		it.Status.Detail.Manufacturer = nodefeature.ManufacturerAscend
 		it.Status.Detail.Family = nodefeature.AcceleratorFamilyAscend950
 	})
+	hubWeights := &workercore.ModelArtifact{
+		ObjectMeta: meta.ObjectMeta{Namespace: "team-a", Name: "weights"},
+		Spec: workercore.ModelArtifactSpec{
+			Source: workercore.ModelArtifactSource{
+				HuggingFace: &workercore.ModelArtifactHubSource{Repository: "Qwen/Qwen2.5-72B-Instruct"},
+			},
+		},
+	}
 	objs := kvCacheFixture()
 	objs[2].(*workercore.KVCacheBackend).Spec.Transport.Protocol = "CANN"
-	objs = append(objs, ascendA5)
+	objs = append(objs, ascendA5, hubWeights)
 
 	buildStored := func(t *testing.T) (*ModelDeploymentWebhook, *workercore.ModelDeployment) {
 		t.Helper()
@@ -6312,6 +6709,80 @@ func TestModelDeploymentWebhook_AscendA5InterfaceUpdateRejudge(t *testing.T) {
 		assert.Contains(t, err.Error(), "no effective RDMA or EFA")
 	})
 
+	t.Run("routed A5 SGLang RDMA-store P/D without artifactRef rejudges unchanged prefill when decode drops interface", func(t *testing.T) {
+		rdmaObjs := kvCacheFixture()
+		rdmaObjs[2].(*workercore.KVCacheBackend).Spec.Transport.Protocol = "RDMA"
+		rdmaObjs = append(rdmaObjs, ascendA5)
+		md := modelDeployment(workercore.ModelDeploymentEngineSGLang,
+			role(func(r *workercore.ModelDeploymentRole) {
+				r.Name = "prefill"
+				r.Kind = workercore.ModelDeploymentRoleKindPrefill
+				r.AcceleratorType = "atlas-950"
+				r.Resources = &workercore.ModelDeploymentRoleResources{
+					Accelerator: ptr.To(qty1),
+					Interface:   ptr.To(qty1),
+				}
+			}),
+			role(func(r *workercore.ModelDeploymentRole) {
+				r.Name = "decode"
+				r.Kind = workercore.ModelDeploymentRoleKindDecode
+				r.AcceleratorType = "atlas-950"
+				r.Resources = &workercore.ModelDeploymentRoleResources{
+					Accelerator: ptr.To(qty1),
+					Interface:   ptr.To(qty1),
+				}
+			}),
+		)
+		md.Spec.KVCache.PoolRef.Name = "chat"
+		md.Spec.Router = &workercore.ModelDeploymentRouter{Name: workercore.ModelDeploymentRouterSGLang}
+		md.Spec.KVTransfer = &workercore.ModelDeploymentKVTransfer{Backend: workercore.ModelDeploymentKVTransferBackendHIXL}
+		w := newModelDeploymentWebhookWith(rdmaObjs)
+		_, err := w.ValidateCreate(context.Background(), md)
+		require.NoError(t, err)
+
+		newer := md.DeepCopy()
+		newer.Spec.Roles[1].Resources.Interface = nil
+		_, err = w.ValidateUpdate(context.Background(), md, newer)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "spec.roles[0].resources.interface")
+		assert.Contains(t, err.Error(), "no effective RDMA or EFA")
+	})
+
+	t.Run("unrouted asymmetric A5 SGLang RDMA-store P/D rejects adding router on update", func(t *testing.T) {
+		rdmaObjs := kvCacheFixture()
+		rdmaObjs[2].(*workercore.KVCacheBackend).Spec.Transport.Protocol = "RDMA"
+		rdmaObjs = append(rdmaObjs, ascendA5)
+		md := modelDeployment(workercore.ModelDeploymentEngineSGLang,
+			role(func(r *workercore.ModelDeploymentRole) {
+				r.Name = "prefill"
+				r.Kind = workercore.ModelDeploymentRoleKindPrefill
+				r.AcceleratorType = "atlas-950"
+				r.Resources = &workercore.ModelDeploymentRoleResources{
+					Accelerator: ptr.To(qty1),
+					Interface:   ptr.To(qty1),
+				}
+			}),
+			role(func(r *workercore.ModelDeploymentRole) {
+				r.Name = "decode"
+				r.Kind = workercore.ModelDeploymentRoleKindDecode
+				r.AcceleratorType = "atlas-950"
+				r.Resources = &workercore.ModelDeploymentRoleResources{Accelerator: ptr.To(qty1)}
+			}),
+		)
+		md.Spec.KVCache.PoolRef.Name = "chat"
+		md.Spec.Router = nil
+		w := newModelDeploymentWebhookWith(rdmaObjs)
+		_, err := w.ValidateCreate(context.Background(), md)
+		require.NoError(t, err)
+
+		newer := md.DeepCopy()
+		newer.Spec.Router = &workercore.ModelDeploymentRouter{Name: workercore.ModelDeploymentRouterSGLang}
+		_, err = w.ValidateUpdate(context.Background(), md, newer)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "spec.roles[0].resources.interface")
+		assert.Contains(t, err.Error(), "no effective RDMA or EFA")
+	})
+
 	t.Run("removing spec.router under HIXL rejudges both halves even with CANN KVCache", func(t *testing.T) {
 		w, old := buildStored(t)
 		newer := old.DeepCopy()
@@ -6330,5 +6801,192 @@ func TestModelDeploymentWebhook_AscendA5InterfaceUpdateRejudge(t *testing.T) {
 
 		_, err := w.ValidateUpdate(context.Background(), old, newer)
 		require.NoError(t, err)
+	})
+
+	t.Run("adding conflicting load-format on A5 remote Server rejudges and rejects interface", func(t *testing.T) {
+		w := newModelDeploymentWebhookWith(objs)
+		old := modelDeployment(workercore.ModelDeploymentEngineVLLM,
+			role(func(r *workercore.ModelDeploymentRole) {
+				r.Name = "server"
+				r.Kind = workercore.ModelDeploymentRoleKindServer
+				r.AcceleratorType = "atlas-950"
+				r.Resources = &workercore.ModelDeploymentRoleResources{
+					Accelerator: ptr.To(qty1),
+					Interface:   ptr.To(qty1),
+				}
+			}),
+		)
+		old.Spec.KVCache = nil
+		old.Spec.Model.ArtifactRef = &core.LocalObjectReference{Name: "weights"}
+		_, err := w.ValidateCreate(context.Background(), old)
+		require.NoError(t, err)
+
+		newer := old.DeepCopy()
+		newer.Spec.Roles[0].ExtraArgs = []string{"--load-format=safetensors"}
+		_, err = w.ValidateUpdate(context.Background(), old, newer)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "spec.roles[0].resources.interface")
+		assert.Contains(t, err.Error(), "no effective RDMA or EFA")
+	})
+
+	t.Run("A5 SGLang remote symmetric P/D rejudges when sibling drops interface or router removed", func(t *testing.T) {
+		w := newModelDeploymentWebhookWith(objs)
+		old := modelDeployment(workercore.ModelDeploymentEngineSGLang,
+			role(func(r *workercore.ModelDeploymentRole) {
+				r.Name = "prefill"
+				r.Kind = workercore.ModelDeploymentRoleKindPrefill
+				r.AcceleratorType = "atlas-950"
+				r.Resources = &workercore.ModelDeploymentRoleResources{
+					Accelerator: ptr.To(qty1),
+					Interface:   ptr.To(qty1),
+				}
+			}),
+			role(func(r *workercore.ModelDeploymentRole) {
+				r.Name = "decode"
+				r.Kind = workercore.ModelDeploymentRoleKindDecode
+				r.AcceleratorType = "atlas-950"
+				r.Resources = &workercore.ModelDeploymentRoleResources{
+					Accelerator: ptr.To(qty1),
+					Interface:   ptr.To(qty1),
+				}
+			}),
+		)
+		old.Spec.KVCache = nil
+		old.Spec.Model.ArtifactRef = &core.LocalObjectReference{Name: "weights"}
+		old.Spec.Router = &workercore.ModelDeploymentRouter{Name: workercore.ModelDeploymentRouterSGLang}
+		old.Spec.KVTransfer = &workercore.ModelDeploymentKVTransfer{Backend: workercore.ModelDeploymentKVTransferBackendHIXL}
+		_, err := w.ValidateCreate(context.Background(), old)
+		require.NoError(t, err)
+
+		dropped := old.DeepCopy()
+		dropped.Spec.Roles[1].Resources.Interface = nil
+		_, err = w.ValidateUpdate(context.Background(), old, dropped)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "spec.roles[0].resources.interface")
+
+		unrouted := old.DeepCopy()
+		unrouted.Spec.Router = nil
+		_, err = w.ValidateUpdate(context.Background(), old, unrouted)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "spec.roles[0].resources.interface")
+		assert.Contains(t, err.Error(), "spec.roles[1].resources.interface")
+	})
+
+	t.Run("resizing PVC-backed A5 vLLM Server from size 2 to 1 with interface=1 rejudges and rejects", func(t *testing.T) {
+		pvcWeights := &workercore.ModelArtifact{
+			ObjectMeta: meta.ObjectMeta{Namespace: "team-a", Name: "pvc-weights"},
+			Spec: workercore.ModelArtifactSpec{
+				Source: workercore.ModelArtifactSource{
+					PersistentVolumeClaim: &workercore.ModelArtifactPersistentVolumeClaimSource{ClaimName: "model-pvc"},
+				},
+			},
+		}
+		w := newModelDeploymentWebhookWith([]ctrlcli.Object{ascendA5, pvcWeights})
+		old := modelDeployment(workercore.ModelDeploymentEngineVLLM,
+			role(func(r *workercore.ModelDeploymentRole) {
+				r.Name = "server"
+				r.Kind = workercore.ModelDeploymentRoleKindServer
+				r.AcceleratorType = "atlas-950"
+				r.ReplicaSize = 2
+				r.Resources = &workercore.ModelDeploymentRoleResources{
+					Accelerator: ptr.To(qty1),
+					Interface:   ptr.To(qty1),
+				}
+			}),
+		)
+		old.Spec.KVCache = nil
+		old.Spec.Model.ArtifactRef = &core.LocalObjectReference{Name: "pvc-weights"}
+		_, err := w.ValidateCreate(context.Background(), old)
+		require.NoError(t, err, "size=2 collective leg grants RDMA on create even with PVC artifact")
+
+		newer := old.DeepCopy()
+		newer.Spec.Roles[0].ReplicaSize = 1
+		_, err = w.ValidateUpdate(context.Background(), old, newer)
+		require.Error(t, err, "dropping size from 2 to 1 removes the collective leg and PVC artifact is ineligible")
+		assert.Contains(t, err.Error(), "spec.roles[0].resources.interface")
+		assert.Contains(t, err.Error(), "no effective RDMA or EFA")
+	})
+}
+
+func TestModelDeploymentWebhook_AscendA5RemotePolicyReadFailClosed(t *testing.T) {
+	qty1 := resource.MustParse("1")
+	ascendA5 := servingInstanceType("atlas-950", 8, func(it *worker.InstanceType) {
+		it.Status.Detail.Manufacturer = nodefeature.ManufacturerAscend
+		it.Status.Detail.Family = nodefeature.AcceleratorFamilyAscend950
+	})
+	hubWeights := &workercore.ModelArtifact{
+		ObjectMeta: meta.ObjectMeta{Namespace: "team-a", Name: "weights"},
+		Spec: workercore.ModelArtifactSpec{
+			Source: workercore.ModelArtifactSource{
+				HuggingFace: &workercore.ModelArtifactHubSource{Repository: "Qwen/Qwen2.5-72B-Instruct"},
+			},
+		},
+	}
+	objs := kvCacheFixture()
+	objs[2].(*workercore.KVCacheBackend).Spec.Transport.Protocol = "CANN"
+	objs = append(objs, ascendA5, hubWeights)
+	w := newModelDeploymentWebhookWith(objs)
+
+	origPolicyReader := modelDeploymentRemoteDeliveryPolicyValue
+	t.Cleanup(func() { modelDeploymentRemoteDeliveryPolicyValue = origPolicyReader })
+
+	t.Run("missing settings secret or key resolves default Prefer cleanly", func(t *testing.T) {
+		settingtest.MergeDelegatedSettings(t, map[string]string{"aws-efa-enabled": "false"})
+		val, err := resolveModelDeploymentRemoteDeliveryPolicy(context.Background())
+		require.NoError(t, err)
+		assert.Equal(t, settings.ModelArtifactRemoteDeliveryPrefer, val)
+	})
+
+	var policyReadCalls int
+	modelDeploymentRemoteDeliveryPolicyValue = func(context.Context) (string, error) {
+		policyReadCalls++
+		return settings.ModelArtifactRemoteDeliveryPrefer, fmt.Errorf(
+			"get value of setting %s: %w",
+			settings.ModelArtifactRemoteDeliveryPolicy.Name(),
+			kerrors.NewServiceUnavailable("settings store unavailable"),
+		)
+	}
+
+	t.Run("weight-only Ascend A5 Hub Server fails closed on transient policy read error", func(t *testing.T) {
+		policyReadCalls = 0
+		md := modelDeployment(workercore.ModelDeploymentEngineVLLM,
+			role(func(r *workercore.ModelDeploymentRole) {
+				r.Name = "server"
+				r.Kind = workercore.ModelDeploymentRoleKindServer
+				r.AcceleratorType = "atlas-950"
+				r.Resources = &workercore.ModelDeploymentRoleResources{
+					Accelerator: ptr.To(qty1),
+					Interface:   ptr.To(qty1),
+				}
+			}),
+		)
+		md.Spec.KVCache = nil
+		md.Spec.Model.ArtifactRef = &core.LocalObjectReference{Name: "weights"}
+
+		_, err := w.ValidateCreate(context.Background(), md)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "read remote delivery policy")
+		assert.Equal(t, 1, policyReadCalls)
+	})
+
+	t.Run("independent Ascend A5 KV leg succeeds without reading remote policy", func(t *testing.T) {
+		policyReadCalls = 0
+		md := modelDeployment(workercore.ModelDeploymentEngineVLLM,
+			role(func(r *workercore.ModelDeploymentRole) {
+				r.Name = "server"
+				r.Kind = workercore.ModelDeploymentRoleKindServer
+				r.AcceleratorType = "atlas-950"
+				r.Resources = &workercore.ModelDeploymentRoleResources{
+					Accelerator: ptr.To(qty1),
+					Interface:   ptr.To(qty1),
+				}
+			}),
+		)
+		md.Spec.KVCache.PoolRef.Name = "chat"
+		md.Spec.Model.ArtifactRef = &core.LocalObjectReference{Name: "weights"}
+
+		_, err := w.ValidateCreate(context.Background(), md)
+		require.NoError(t, err)
+		assert.Zero(t, policyReadCalls)
 	})
 }

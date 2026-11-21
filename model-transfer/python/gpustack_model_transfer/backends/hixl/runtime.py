@@ -11,8 +11,12 @@ native bridge a later release needs stays a version-pinned separate
 decision, never a compilation step smuggled into this package.
 """
 
+import ctypes
 import importlib.util
+import json
+import os
 import threading
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from importlib import metadata
 from typing import Protocol
@@ -23,6 +27,14 @@ from gpustack_model_transfer.backends.hixl.errors import (
     VersionMismatchError,
 )
 from gpustack_model_transfer.backends.hixl.memory import AlignedHostBuffer
+from gpustack_model_transfer.core.errors import SourceUnavailableError
+from gpustack_model_transfer.envs import get_envs
+
+_FLAT_PROTOCOL_DESC_KEY = "comm_resource_config.protocol_desc"
+_ACL_LIB_CANDIDATES = ("libacl_rt.so", "libascendcl.so")
+_COMM_RES_REMEDIATION = (
+    "set local_comm_res_path to an explicit endpoint file or set ASCEND_LOCAL_COMM_RES"
+)
 
 # Source-review provenance only; runtime admission does not compare versions.
 PINNED_VERSION = "0.0.1"
@@ -230,6 +242,202 @@ def probe_runtime() -> RuntimeReadiness:
     )
 
 
+def _normalize_global_resource_dict(raw_obj: dict) -> dict:
+    """Normalize nested comm_resource_config.protocol_desc to HIXL's flat dotted key."""
+    nested = raw_obj.get("comm_resource_config")
+    if not isinstance(nested, dict) or "protocol_desc" not in nested:
+        return dict(raw_obj)
+    nested_copy = dict(nested)
+    nested_proto = nested_copy.pop("protocol_desc")
+    has_flat = _FLAT_PROTOCOL_DESC_KEY in raw_obj
+    normalized: dict = {}
+    for key, value in raw_obj.items():
+        if key == "comm_resource_config":
+            if not has_flat:
+                normalized[_FLAT_PROTOCOL_DESC_KEY] = nested_proto
+            if nested_copy:
+                normalized["comm_resource_config"] = nested_copy
+        else:
+            normalized[key] = value
+    return normalized
+
+
+def _resolve_acl_physical_device_id(*, loader=None) -> int:
+    """Resolve the active ACL thread's physical NPU ID without guessing device 0."""
+    lib_loader = ctypes.CDLL if loader is None else loader
+    get_device = None
+    get_phy_id = None
+    for lib_name in _ACL_LIB_CANDIDATES:
+        try:
+            lib = lib_loader(lib_name)
+        except OSError:
+            continue
+        if get_device is None:
+            get_device = getattr(lib, "aclrtGetDevice", None)
+        if get_phy_id is None:
+            get_phy_id = getattr(lib, "aclrtGetPhyDevIdByUserDevId", None)
+        if get_device is not None and get_phy_id is not None:
+            break
+    if not callable(get_device) or not callable(get_phy_id):
+        raise SourceUnavailableError(
+            "cannot resolve physical NPU ID for local_comm_res_path directory: "
+            "aclrtGetDevice / aclrtGetPhyDevIdByUserDevId unavailable in "
+            f"{', '.join(_ACL_LIB_CANDIDATES)}; {_COMM_RES_REMEDIATION}"
+        )
+    if hasattr(get_device, "argtypes"):
+        get_device.argtypes = [ctypes.POINTER(ctypes.c_int32)]
+        get_device.restype = ctypes.c_int32
+    if hasattr(get_phy_id, "argtypes"):
+        get_phy_id.argtypes = [ctypes.c_int32, ctypes.POINTER(ctypes.c_int32)]
+        get_phy_id.restype = ctypes.c_int32
+
+    user_dev = ctypes.c_int32(-1)
+    status = int(get_device(ctypes.byref(user_dev)))
+    if status != 0 or user_dev.value < 0:
+        raise SourceUnavailableError(
+            f"aclrtGetDevice failed while resolving local_comm_res_path "
+            f"(status {status}, device {user_dev.value}); {_COMM_RES_REMEDIATION}"
+        )
+    phy_dev = ctypes.c_int32(-1)
+    status = int(get_phy_id(int(user_dev.value), ctypes.byref(phy_dev)))
+    if status != 0 or phy_dev.value < 0:
+        raise SourceUnavailableError(
+            f"aclrtGetPhyDevIdByUserDevId({user_dev.value}) failed while resolving "
+            f"local_comm_res_path (status {status}, physical {phy_dev.value}); "
+            f"{_COMM_RES_REMEDIATION}"
+        )
+    return int(phy_dev.value)
+
+
+def _resolve_global_resource_config(
+    global_cfg: str,
+    *,
+    has_local_comm_res: bool,
+    phy_id_resolver: Callable[[], int] | None = None,
+) -> str:
+    try:
+        parsed = json.loads(global_cfg)
+    except (TypeError, ValueError):
+        return global_cfg
+    if not isinstance(parsed, dict):
+        return global_cfg
+
+    normalized = _normalize_global_resource_dict(parsed)
+    local_path = normalized.get("local_comm_res_path")
+    if (
+        not has_local_comm_res
+        and isinstance(local_path, str)
+        and local_path
+        and os.path.isdir(local_path)
+    ):
+        resolver = phy_id_resolver or _resolve_acl_physical_device_id
+        try:
+            phy_id = resolver()
+        except SourceUnavailableError:
+            raise
+        except Exception as exc:
+            raise SourceUnavailableError(
+                f"failed to resolve physical NPU ID for {local_path!r} "
+                f"({type(exc).__name__}); {_COMM_RES_REMEDIATION}"
+            ) from None
+        if isinstance(phy_id, bool) or not isinstance(phy_id, int) or phy_id < 0:
+            raise SourceUnavailableError(
+                f"invalid physical NPU ID {phy_id!r} resolved for {local_path!r}; "
+                f"{_COMM_RES_REMEDIATION}"
+            )
+        endpoint_file = os.path.join(local_path, f"ub_endpoint_npu_{phy_id}.json")
+        if not os.path.isfile(endpoint_file):
+            raise SourceUnavailableError(
+                f"Ascend communication resource file {endpoint_file!r} does not exist "
+                f"or is not a regular file; {_COMM_RES_REMEDIATION}"
+            )
+        normalized["local_comm_res_path"] = endpoint_file
+
+    return json.dumps(normalized, separators=(",", ":"))
+
+
+def build_hixl_init_options(
+    env: Mapping[str, str] | None = None,
+    *,
+    phy_id_resolver: Callable[[], int] | None = None,
+) -> dict[str, str]:
+    """Build Hixl.initialize() options from Ascend communication env vars.
+
+    Always preserves BufferPool=0:0, normalizes nested comm_resource_config
+    protocol_desc to HIXL's literal dotted key, forwards LocalCommRes and
+    GlobalResourceConfig when set, and fail-closed resolves a directory
+    local_comm_res_path to <dir>/ub_endpoint_npu_<phy_id>.json when
+    LocalCommRes is absent.
+    """
+    cfg = get_envs(env)
+    options: dict[str, str] = {"BufferPool": "0:0"}
+    local_comm_res = cfg.ASCEND_LOCAL_COMM_RES
+    if local_comm_res:
+        options["LocalCommRes"] = local_comm_res
+    global_cfg = cfg.ASCEND_GLOBAL_RESOURCE_CONFIG
+    if global_cfg:
+        options["GlobalResourceConfig"] = _resolve_global_resource_config(
+            global_cfg,
+            has_local_comm_res=bool(local_comm_res),
+            phy_id_resolver=phy_id_resolver,
+        )
+    return options
+
+
+def _global_config_uses_roce_host(global_cfg: str) -> bool:
+    if not global_cfg:
+        return False
+    try:
+        parsed = json.loads(global_cfg)
+    except (TypeError, ValueError):
+        return False
+    if not isinstance(parsed, dict):
+        return False
+    normalized = _normalize_global_resource_dict(parsed)
+    protocol_desc = normalized.get(_FLAT_PROTOCOL_DESC_KEY)
+    if isinstance(protocol_desc, str):
+        return protocol_desc == "roce:host"
+    if isinstance(protocol_desc, list):
+        return any(
+            isinstance(item, str) and item == "roce:host" for item in protocol_desc
+        )
+    return False
+
+
+def uses_roce_host_protocol(env: Mapping[str, str] | None = None) -> bool:
+    """Return True iff canonicalized ASCEND_GLOBAL_RESOURCE_CONFIG selects roce:host."""
+    return _global_config_uses_roce_host(get_envs(env).ASCEND_GLOBAL_RESOURCE_CONFIG)
+
+
+def options_use_roce_host(options: Mapping[str, str] | None) -> bool:
+    """Return True iff resolved HIXL initialize options select roce:host."""
+    if not isinstance(options, Mapping):
+        return False
+    raw = options.get("GlobalResourceConfig", "")
+    return _global_config_uses_roce_host(raw if isinstance(raw, str) else "")
+
+
+def hixl_init_options_need_acl_context(env: Mapping[str, str] | None = None) -> bool:
+    """Return True iff build_hixl_init_options() queries the active ACL thread."""
+    cfg = get_envs(env)
+    if cfg.ASCEND_LOCAL_COMM_RES:
+        return False
+    global_cfg = cfg.ASCEND_GLOBAL_RESOURCE_CONFIG
+    if not global_cfg:
+        return False
+    try:
+        parsed = json.loads(global_cfg)
+    except (TypeError, ValueError):
+        return False
+    if not isinstance(parsed, dict):
+        return False
+    normalized = _normalize_global_resource_dict(parsed)
+    local_path = normalized.get("local_comm_res_path")
+    return bool(
+        isinstance(local_path, str) and local_path and os.path.isdir(local_path)
+    )
+
+
 def load_runtime(api=None) -> HixlAPI:
     """Return the lazy runtime without a version-number gate.
 
@@ -348,6 +556,55 @@ def _buffer_extent(buffer) -> tuple:
     if isinstance(buffer, bytearray):
         return len(buffer), "HOST"
     raise TypeError("registered buffer must be writable or expose data_ptr()")
+
+
+def _registered_extent(buffer, extent: int, addr: int) -> int:
+    """Return verified registration byte length for owned padded blocks, else extent."""
+    if isinstance(buffer, AlignedHostBuffer):
+        return buffer.registration_bytes
+    from gpustack_model_transfer.source.memory import AclBlock
+
+    if isinstance(buffer, AclBlock):
+        alloc_addr = buffer.allocation_address
+        aligned_offset = buffer.aligned_offset
+        reg_bytes = buffer.registration_bytes
+        alloc_bytes = buffer.allocation_bytes
+        if (
+            isinstance(alloc_addr, bool)
+            or not isinstance(alloc_addr, int)
+            or alloc_addr <= 0
+            or isinstance(addr, bool)
+            or not isinstance(addr, int)
+            or addr < alloc_addr
+            or isinstance(aligned_offset, bool)
+            or not isinstance(aligned_offset, int)
+            or isinstance(reg_bytes, bool)
+            or not isinstance(reg_bytes, int)
+            or isinstance(alloc_bytes, bool)
+            or not isinstance(alloc_bytes, int)
+        ):
+            raise ValueError(
+                "AclBlock registration bounds are inconsistent with its allocation"
+            )
+        actual_offset = addr - alloc_addr
+        if (
+            actual_offset != aligned_offset
+            or actual_offset < 0
+            or reg_bytes < extent
+            or actual_offset + reg_bytes > alloc_bytes
+        ):
+            raise ValueError(
+                "AclBlock registration bounds are inconsistent with its allocation"
+            )
+        if (
+            buffer.mapping is not None
+            and len(buffer.mapping) < actual_offset + reg_bytes
+        ):
+            raise ValueError(
+                "AclBlock mapping length is shorter than its registered range"
+            )
+        return reg_bytes
+    return extent
 
 
 class _RealAgent:
@@ -476,11 +733,7 @@ class RealHixlAPI:
             for name, buffer in buffers.items():
                 addr = _address_of(buffer)
                 extent, memory_class = _buffer_extent(buffer)
-                registered_extent = (
-                    buffer.registration_bytes
-                    if isinstance(buffer, AlignedHostBuffer)
-                    else extent
-                )
+                registered_extent = _registered_extent(buffer, extent, addr)
                 mem_type = (
                     hixl.MemType.MEM_DEVICE
                     if memory_class == "DEVICE"
@@ -709,6 +962,8 @@ __all__ = [
     "RealHixlAPI",
     "RuntimeReadiness",
     "TransferOutcome",
+    "build_hixl_init_options",
     "load_runtime",
     "probe_runtime",
+    "uses_roce_host_protocol",
 ]

@@ -4937,6 +4937,11 @@ func (in *ModelPrefetchTransferLimits) DeepCopy() *ModelPrefetchTransferLimits {
 func (in *ModelPrefetchTransferServing) DeepCopyInto(out *ModelPrefetchTransferServing) {
 	*out = *in
 	in.ReadyLeaseExpiresAt.DeepCopyInto(&out.ReadyLeaseExpiresAt)
+	if in.Manufacturers != nil {
+		in, out := &in.Manufacturers, &out.Manufacturers
+		*out = make([]string, len(*in))
+		copy(*out, *in)
+	}
 	return
 }
 

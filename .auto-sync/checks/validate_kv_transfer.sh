@@ -217,6 +217,370 @@ for start_line, snippet in context_blocks:
         sys.exit(1)
 PY
 
+# 2b. Official mirrored-mooncake builds must keep USE_VRAM_SEGMENT=OFF.
+python3 - "${MOONCAKE_DF}" <<'PY'
+import re
+import sys
+
+df_path = sys.argv[1]
+with open(df_path, "r", encoding="utf-8") as f:
+    lines = f.readlines()
+
+
+def strip_unquoted_comment(line: str) -> str:
+    in_single = False
+    in_double = False
+    escaped = False
+    for idx, ch in enumerate(line):
+        if escaped:
+            escaped = False
+            continue
+        if ch == "\\" and not in_single:
+            escaped = True
+            continue
+        if ch == "'" and not in_double:
+            in_single = not in_single
+            continue
+        if ch == '"' and not in_single:
+            in_double = not in_double
+            continue
+        if ch == "#" and not in_single and not in_double:
+            return line[:idx]
+    return line
+
+
+on_re = re.compile(
+    r'(?:^|[^A-Za-z0-9_])(?:-D\s*)?USE_VRAM_SEGMENT(?::[A-Za-z_][A-Za-z0-9_]*)?\s*=\s*["\']?(?:ON|TRUE|YES|1)(?:\b|$)',
+    re.IGNORECASE,
+)
+for lineno, raw_line in enumerate(lines, 1):
+    code = strip_unquoted_comment(raw_line)
+    if on_re.search(code):
+        print(
+            f"FAIL: {df_path}:{lineno} contains executable USE_VRAM_SEGMENT=ON; "
+            "official mirrored-mooncake builds must keep USE_VRAM_SEGMENT=OFF",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+stages: dict[str, list[tuple[int, str]]] = {}
+cur_stage = ""
+from_re = re.compile(r"^\s*FROM\b.*?\bAS\s+([A-Za-z0-9_.-]+)", re.IGNORECASE)
+from_bare_re = re.compile(r"^\s*FROM\b", re.IGNORECASE)
+for lineno, raw_line in enumerate(lines, 1):
+    code = strip_unquoted_comment(raw_line)
+    m_as = from_re.match(code)
+    if m_as:
+        cur_stage = m_as.group(1)
+        stages.setdefault(cur_stage, [])
+        continue
+    if from_bare_re.match(code):
+        cur_stage = ""
+        continue
+    if cur_stage:
+        stages[cur_stage].append((lineno, raw_line))
+
+# Upstream Mooncake restricts USE_VRAM_SEGMENT to CUDA builds (mooncake-common/common.cmake:266-274);
+# builder-cann and builder-rocm always allocate store segments in Host RAM, and the file-wide rule
+# above already rejects USE_VRAM_SEGMENT=ON anywhere in the Dockerfile (including those stages).
+if "builder-cuda" not in stages:
+    print(f"FAIL: missing builder-cuda stage in {df_path}", file=sys.stderr)
+    sys.exit(1)
+
+cuda_lines = stages["builder-cuda"]
+run_blocks: list[list[str]] = []
+idx = 0
+heredoc_re = re.compile(r"^\s*RUN\b.*?<<-?\s*['\"]?([A-Za-z0-9_]+)['\"]?\s*(?:#.*)?$", re.IGNORECASE)
+run_re = re.compile(r"^\s*RUN\b(.*)$", re.IGNORECASE)
+
+while idx < len(cuda_lines):
+    _, raw = cuda_lines[idx]
+    m_hd = heredoc_re.match(raw)
+    if m_hd:
+        tag = m_hd.group(1)
+        idx += 1
+        body: list[str] = []
+        while idx < len(cuda_lines):
+            _, b_raw = cuda_lines[idx]
+            if b_raw.strip() == tag:
+                idx += 1
+                break
+            body.append(b_raw)
+            idx += 1
+        run_blocks.append(body)
+        continue
+    m_run = run_re.match(raw)
+    if m_run:
+        body = [m_run.group(1)]
+        while body[-1].rstrip("\r\n").endswith("\\") and idx + 1 < len(cuda_lines):
+            idx += 1
+            body.append(cuda_lines[idx][1])
+        run_blocks.append(body)
+    idx += 1
+
+def tokenize_shell_words(text: str) -> list[tuple[str, str]]:
+    """Split shell text on unquoted whitespace, returning (raw_word, unquoted_word) pairs."""
+    words: list[tuple[str, str]] = []
+    raw_buf: list[str] = []
+    val_buf: list[str] = []
+    in_single = False
+    in_double = False
+    escaped = False
+    has_token = False
+    for ch in text:
+        if escaped:
+            raw_buf.append(ch)
+            val_buf.append(ch)
+            escaped = False
+            has_token = True
+            continue
+        if in_single:
+            raw_buf.append(ch)
+            if ch == "'":
+                in_single = False
+            else:
+                val_buf.append(ch)
+            has_token = True
+            continue
+        if in_double:
+            raw_buf.append(ch)
+            if ch == "\\":
+                escaped = True
+            elif ch == '"':
+                in_double = False
+            else:
+                val_buf.append(ch)
+            has_token = True
+            continue
+        if ch == "\\":
+            raw_buf.append(ch)
+            escaped = True
+            has_token = True
+        elif ch == "'":
+            raw_buf.append(ch)
+            in_single = True
+            has_token = True
+        elif ch == '"':
+            raw_buf.append(ch)
+            in_double = True
+            has_token = True
+        elif ch.isspace():
+            if has_token:
+                words.append(("".join(raw_buf), "".join(val_buf)))
+                raw_buf, val_buf, has_token = [], [], False
+        else:
+            raw_buf.append(ch)
+            val_buf.append(ch)
+            has_token = True
+    if has_token:
+        words.append(("".join(raw_buf), "".join(val_buf)))
+    return words
+
+
+def strip_outer_quotes(tok: str) -> str:
+    while len(tok) >= 2 and tok[0] == tok[-1] and tok[0] in ("'", '"'):
+        tok = tok[1:-1]
+    return tok
+
+
+def strip_outer_double_quotes(tok: str) -> str:
+    while len(tok) >= 2 and tok[0] == '"' and tok[-1] == '"':
+        tok = tok[1:-1]
+    return tok
+
+
+standalone_off_re = re.compile(
+    r'^-DUSE_VRAM_SEGMENT(?::[A-Za-z_][A-Za-z0-9_]*)?=(?:"OFF"|\'OFF\'|OFF)$'
+)
+bare_off_re = re.compile(
+    r'^USE_VRAM_SEGMENT(?::[A-Za-z_][A-Za-z0-9_]*)?=(?:"OFF"|\'OFF\'|OFF)$'
+)
+standalone_var_re = re.compile(
+    r"^\$(?:\{([A-Za-z_][A-Za-z0-9_]*)\}|([A-Za-z_][A-Za-z0-9_]*))$"
+)
+
+
+def has_standalone_off(words: list[tuple[str, str]]) -> bool:
+    unquoted = [val for _, val in words if val]
+    for idx, tok in enumerate(unquoted):
+        if standalone_off_re.fullmatch(tok):
+            return True
+        if tok == "-D" and idx + 1 < len(unquoted) and bare_off_re.fullmatch(unquoted[idx + 1]):
+            return True
+    return False
+
+
+def is_single_standalone_off(words: list[tuple[str, str]]) -> bool:
+    """True when words expand to a single standalone -DUSE_VRAM_SEGMENT=OFF argument."""
+    unquoted = [val for _, val in words if val]
+    return len(unquoted) == 1 and bool(standalone_off_re.fullmatch(unquoted[0]))
+
+
+def standalone_var_refs(words: list[tuple[str, str]]) -> tuple[set[str], set[str]]:
+    """Return (unquoted_refs, double_quoted_refs) for standalone shell variable words."""
+    unquoted_refs: set[str] = set()
+    double_quoted_refs: set[str] = set()
+    for raw, _ in words:
+        m_unquoted = standalone_var_re.fullmatch(raw)
+        if m_unquoted:
+            unquoted_refs.add(m_unquoted.group(1) or m_unquoted.group(2))
+            continue
+        stripped = strip_outer_double_quotes(raw)
+        if stripped != raw:
+            m_double = standalone_var_re.fullmatch(stripped)
+            if m_double:
+                double_quoted_refs.add(m_double.group(1) or m_double.group(2))
+    return unquoted_refs, double_quoted_refs
+
+
+assign_re = re.compile(r"^(?:(?:then|else|do|export|local)\s+)*([A-Za-z_][A-Za-z0-9_]*)=(.*)$")
+unset_re = re.compile(
+    r"^(?:(?:then|else|do)\s+)*unset(?:\s+-[vf])*((?:\s+[A-Za-z_][A-Za-z0-9_]*)+)\s*$"
+)
+cmake_cfg_re = re.compile(
+    r"^(?:(?:then|else|do|time|exec)\s+)*(?:[A-Za-z_][A-Za-z0-9_]*=\S+\s+)*cmake\s+(?!--build\b)(.+)$"
+)
+
+saw_cmake_configure = False
+for block in run_blocks:
+    logical_lines: list[str] = []
+    cur = ""
+    for raw_ln in block:
+        stripped = strip_unquoted_comment(raw_ln).rstrip("\r\n")
+        part = stripped.lstrip() if cur else stripped
+        if part.endswith("\\") and not part.endswith("\\\\"):
+            cur += part[:-1] + " "
+        else:
+            cur += part
+            if cur.strip():
+                logical_lines.append(cur.strip())
+            cur = ""
+    if cur.strip():
+        logical_lines.append(cur.strip())
+
+    single_off_vars: set[str] = set()
+    multi_off_vars: set[str] = set()
+    # Track simple shell if/else/fi control flow for the USE_VRAM_SEGMENT-present path.
+    # Each frame is (kind, pre_state, then_state, in_else) where kind is:
+    #   "vram_pos": condition requires USE_VRAM_SEGMENT present (only then-branch executes)
+    #   "vram_neg": condition requires USE_VRAM_SEGMENT absent (only else-branch executes)
+    #   "other":    arbitrary branch (only assignments present in BOTH then and else survive)
+    if_stack: list[list[object]] = []
+
+    def branch_active() -> bool:
+        for frame in if_stack:
+            kind, _, _, in_else = frame
+            if kind == "vram_pos" and in_else:
+                return False
+            if kind == "vram_neg" and not in_else:
+                return False
+        return True
+
+    for ln in logical_lines:
+        for stmt in re.split(r"(?:;|&&|\|\|)", ln):
+            st = stmt.strip()
+            if not st:
+                continue
+            if re.match(r"^if\s+", st):
+                cond = re.sub(r"^if\s+", "", st).strip()
+                if "USE_VRAM_SEGMENT" in cond and re.search(r"\bgrep\b", cond):
+                    kind = "vram_neg" if re.match(r"^!\s*", cond) else "vram_pos"
+                else:
+                    kind = "other"
+                if_stack.append([kind, (set(single_off_vars), set(multi_off_vars)), None, False])
+                continue
+            if st == "then":
+                continue
+            if re.match(r"^then\s+", st):
+                st = re.sub(r"^then\s+", "", st).strip()
+            if st == "else" or re.match(r"^else\s+", st):
+                if if_stack:
+                    frame = if_stack[-1]
+                    frame[2] = (set(single_off_vars), set(multi_off_vars))
+                    frame[3] = True
+                    pre_s, pre_m = frame[1]
+                    single_off_vars, multi_off_vars = set(pre_s), set(pre_m)
+                if st == "else":
+                    continue
+                st = re.sub(r"^else\s+", "", st).strip()
+            if st == "fi":
+                if if_stack:
+                    kind, pre_state, then_state, in_else = if_stack.pop()
+                    if kind == "vram_pos":
+                        if in_else and then_state is not None:
+                            single_off_vars, multi_off_vars = set(then_state[0]), set(then_state[1])
+                    elif kind == "vram_neg":
+                        if not in_else:
+                            single_off_vars, multi_off_vars = set(pre_state[0]), set(pre_state[1])
+                    else:
+                        if in_else and then_state is not None:
+                            single_off_vars = set(then_state[0]) & set(single_off_vars)
+                            multi_off_vars = set(then_state[1]) & set(multi_off_vars)
+                        else:
+                            single_off_vars = set(pre_state[0]) & set(single_off_vars)
+                            multi_off_vars = set(pre_state[1]) & set(multi_off_vars)
+                continue
+            if not branch_active():
+                continue
+            m_unset = unset_re.match(st)
+            if m_unset:
+                for var_name in m_unset.group(1).split():
+                    single_off_vars.discard(var_name)
+                    multi_off_vars.discard(var_name)
+                continue
+            m_asgn = assign_re.match(st)
+            if m_asgn:
+                var_name, rhs = m_asgn.group(1), m_asgn.group(2)
+                rhs_raw = rhs.strip()
+                rhs_single_quoted = len(rhs_raw) >= 2 and rhs_raw[0] == "'" and rhs_raw[-1] == "'"
+                rhs_val = strip_outer_quotes(rhs_raw)
+                rhs_words = tokenize_shell_words(rhs_val)
+                # Resolve right-hand side against pre-assignment state so self-references
+                # like flags="$flags -DUSE_CUDA=ON" retain prior OFF classification.
+                next_single = False
+                next_multi = False
+                if is_single_standalone_off(rhs_words):
+                    next_single = True
+                elif has_standalone_off(rhs_words):
+                    next_multi = True
+                elif (not rhs_single_quoted) and not cmake_cfg_re.match(st):
+                    u_refs, dq_refs = standalone_var_refs(rhs_words)
+                    all_refs = u_refs | dq_refs
+                    if len(rhs_words) == 1 and (all_refs & single_off_vars):
+                        next_single = True
+                    elif (u_refs & (single_off_vars | multi_off_vars)) or (dq_refs & single_off_vars):
+                        next_multi = True
+                single_off_vars.discard(var_name)
+                multi_off_vars.discard(var_name)
+                if next_single:
+                    single_off_vars.add(var_name)
+                elif next_multi:
+                    multi_off_vars.add(var_name)
+            m_cmake = cmake_cfg_re.match(st)
+            if m_cmake:
+                saw_cmake_configure = True
+                cmake_args = m_cmake.group(1)
+                cmake_cmd_only = re.split(r"(?:&&|\|\||;|\|)", cmake_args, maxsplit=1)[0]
+                cmake_words = tokenize_shell_words(cmake_cmd_only)
+                direct_off = has_standalone_off(cmake_words)
+                u_refs, dq_refs = standalone_var_refs(cmake_words)
+                var_off = bool(
+                    (u_refs & (single_off_vars | multi_off_vars))
+                    or (dq_refs & single_off_vars)
+                )
+                if not (direct_off or var_off):
+                    print(
+                        f"FAIL: builder-cuda cmake configure invocation in {df_path} must wire "
+                        "-DUSE_VRAM_SEGMENT=OFF (unused variable assignments and comments are rejected)",
+                        file=sys.stderr,
+                    )
+                    sys.exit(1)
+
+if not saw_cmake_configure:
+    print(f"FAIL: no cmake configure invocation found in builder-cuda of {df_path}", file=sys.stderr)
+    sys.exit(1)
+PY
+
 # 3. Byte-level HIXL parity with gpustack/runner & patch dry-run against staged hixl.
 KV_REPORT="$(autosync::resolve_staged_file "kv-transfer-preflight-report.json" "${STAGE_DIR}")"
 if [[ -z "${KV_REPORT}" || ! -f "${KV_REPORT}" ]]; then

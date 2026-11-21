@@ -1416,6 +1416,28 @@
     "modelTransfer": {
       "description": "Remote weight delivery (model-transfer): the source runtime's identity,\nthe per-manufacturer broker+worker DaemonSets, their serving certificates and\nheadless Services. Remote delivery policy defaults to `Prefer` via the\nworker's built-in `model-artifact-remote-delivery-policy` Setting — a cluster\nwithout a prepared `ModelPrefetch` source keeps every Pod, condition and\nstatus field unchanged, and preparing a source enables remote delivery with\nlocal fallback.",
       "properties": {
+        "ascend": {
+          "description": "Ascend-specific source DaemonSet settings.",
+          "properties": {
+            "hostRoCE": {
+              "description": "Host RoCE transport settings for the Ascend source DaemonSet.",
+              "properties": {
+                "enabled": {
+                  "default": false,
+                  "description": "Enable Host RoCE (`roce:host`) on the Ascend source DaemonSet. When true, only the\n`ascend` source DaemonSet sets `hostNetwork: true` with\n`dnsPolicy: ClusterFirstWithHostNet`, mounts `/etc/hixlep` read-only\n(`hostPath.type: Directory`) on the `worker` container, and defaults\n`ASCEND_GLOBAL_RESOURCE_CONFIG` to\n`{\"comm_resource_config.protocol_desc\":[\"roce:host\"],\"local_comm_res_path\":\"/etc/hixlep\"}`\non the `worker` container when `modelTransfer.env` does not declare it.\nWhen enabled, broker-worker private HTTP control traffic uses Unix-domain sockets inside\na dedicated Pod-private `/run/model-transfer-sockets` volume (`control.sock` /\n`worker.sock`) while `/run/model-transfer/bootstrap` remains read-only on `worker`, so\namong the broker's HTTP/TLS listeners only the TLS session port `:9251` binds on the host\nnetwork namespace; HIXL's native rendezvous separately binds an ephemeral port on the\nhost IP. Both `GPUSTACK_MODEL_TRANSFER_BROKER_ADDRESS` and\n`GPUSTACK_MODEL_TRANSFER_WORKER_ADDRESS` are chart-managed and override any user entries\nin `modelTransfer.env`.\nPrerequisite: every Ascend node matched by the DaemonSet must already have `/etc/hixlep`\npresent (`hostPath.type: Directory` fails Pod creation on pre-A5 or unprepared Ascend\nnodes rather than creating an empty directory).\nWarning: `modelTransfer.nodeSelector` applies to ALL vendor source DaemonSets\n(`nvidia`, `amd`, `ascend`), and changing it causes the Kubernetes DaemonSet\ncontroller to delete Pods on excluded nodes immediately (bypassing `OnDelete` drain);\nuse it at fresh installation or only after draining excluded nodes.",
+                  "title": "enabled",
+                  "type": "boolean"
+                }
+              },
+              "required": [],
+              "title": "hostRoCE",
+              "type": "object"
+            }
+          },
+          "required": [],
+          "title": "ascend",
+          "type": "object"
+        },
         "brokerResources": {
           "description": "The broker container's resources.",
           "properties": {
@@ -1463,7 +1485,7 @@
           "additionalProperties": {
             "type": "string"
           },
-          "description": "Environment entries on the source broker and worker, layered after image\ndefaults and before managed identity. `GPUSTACK_MODEL_TRANSFER_HIXL_RESIDENT_BUDGET_BYTES`\nsets the HIXL registration paging threshold and budget (default 16 GiB;\nnonzero values below 1 GiB resolve up to 1 GiB, while zero uses the default).\n`GPUSTACK_MODEL_TRANSFER_SOURCE_MAX_MEMORY_BYTES`\nand `GPUSTACK_MODEL_TRANSFER_SOURCE_MIN_MEMORY_BYTES` are managed by the chart\nfrom `source.maxMemoryBytes` and `source.minMemoryBytes`. The engine reader\nreads `GPUSTACK_MODEL_TRANSFER_MAX_WINDOW_BYTES` from its own environment\n(default 8 GiB; the legal range is 1 GiB through 1 TiB); this map does not\nconfigure serving engines. These windows do not replace the Binding grant or\nthe node ceiling.",
+          "description": "Environment entries on the source broker and worker, layered after image\ndefaults and before managed identity. `GPUSTACK_MODEL_TRANSFER_HIXL_RESIDENT_BUDGET_BYTES`\nsets the HIXL registration paging threshold and budget (default 16 GiB;\nnonzero values below 1 GiB resolve up to 1 GiB, while zero uses the default).\n`GPUSTACK_MODEL_TRANSFER_SOURCE_MAX_MEMORY_BYTES`,\n`GPUSTACK_MODEL_TRANSFER_SOURCE_MIN_MEMORY_BYTES`, and\n`GPUSTACK_MODEL_TRANSFER_BROKER_ADDRESS` are managed by the chart (any\n`GPUSTACK_MODEL_TRANSFER_BROKER_ADDRESS` entry here is ignored on the worker,\nand `GPUSTACK_MODEL_TRANSFER_WORKER_ADDRESS` is likewise managed and ignored\nhere when `ascend.hostRoCE.enabled` is true). The engine reader\nreads `GPUSTACK_MODEL_TRANSFER_MAX_WINDOW_BYTES` from its own environment\n(default 8 GiB; the legal range is 1 GiB through 1 TiB); this map does not\nconfigure serving engines. These windows do not replace the Binding grant or\nthe node ceiling.",
           "required": [],
           "title": "env",
           "type": "object"

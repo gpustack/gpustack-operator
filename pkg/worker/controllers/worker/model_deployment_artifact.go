@@ -5,6 +5,7 @@ import (
 
 	core "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
+	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/utils/ptr"
 
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
@@ -82,6 +83,17 @@ type ModelDeploymentArtifactRender struct {
 	// backend it selects the LIBFABRIC transport plugin over UCX; every other backend reads
 	// nothing from it.
 	ModelTransferEFA bool
+
+	// ModelTransferAscendA5 reports that a Remote hixl delivery targets a managed Ascend A5
+	// (Family "950") role, enabling Ascend A5 communication defaults without disturbing
+	// non-A5 or non-Remote Pod hashes.
+	ModelTransferAscendA5 bool `json:"modelTransferAscendA5,omitempty"`
+
+	// ModelTransferAscendHostRoCE reports that an Ascend A5 Remote hixl delivery also requests
+	// positive fabric interfaces, mounting /etc/hixlep read-only and defaulting flat-key
+	// ASCEND_GLOBAL_RESOURCE_CONFIG for roce:host.
+	ModelTransferAscendHostRoCE bool `json:"modelTransferAscendHostRoCE,omitempty"`
+
 	// ModelTransferConfigMap holds public source endpoints and trust anchors in
 	// the workload namespace. Its name stays stable as source Pods change.
 	ModelTransferConfigMap string
@@ -92,6 +104,16 @@ type ModelDeploymentArtifactRender struct {
 	// the gate a Prefer deployment reads; under Require it is information,
 	// never permission.
 	SourceReady bool
+
+	// ModelTransferSourceManufacturers lists the lowercase source vendor scopes observed
+	// serving this artifact revision. Empty means unscoped; when non-empty, Prefer only
+	// selects Remote on roles whose manufacturer matches an observed serving source.
+	ModelTransferSourceManufacturers sets.Set[string] `json:"-"`
+
+	// ModelTransferBaseRender holds the exact local Node/Engine render captured before
+	// Remote policy upgrade so a Prefer vendor mismatch reuses the original binding hash
+	// without rolling healthy local replicas.
+	ModelTransferBaseRender *ModelDeploymentArtifactRender `json:"-"`
 
 	// VerifiedNodeOnly says the artifact can only be delivered honestly by
 	// the node: it carries an expected digest or file patterns, which an

@@ -604,9 +604,12 @@ modelTransfer:
   # defaults and before managed identity. `GPUSTACK_MODEL_TRANSFER_HIXL_RESIDENT_BUDGET_BYTES`
   # sets the HIXL registration paging threshold and budget (default 16 GiB;
   # nonzero values below 1 GiB resolve up to 1 GiB, while zero uses the default).
-  # `GPUSTACK_MODEL_TRANSFER_SOURCE_MAX_MEMORY_BYTES`
-  # and `GPUSTACK_MODEL_TRANSFER_SOURCE_MIN_MEMORY_BYTES` are managed by the chart
-  # from `source.maxMemoryBytes` and `source.minMemoryBytes`. The engine reader
+  # `GPUSTACK_MODEL_TRANSFER_SOURCE_MAX_MEMORY_BYTES`,
+  # `GPUSTACK_MODEL_TRANSFER_SOURCE_MIN_MEMORY_BYTES`, and
+  # `GPUSTACK_MODEL_TRANSFER_BROKER_ADDRESS` are managed by the chart (any
+  # `GPUSTACK_MODEL_TRANSFER_BROKER_ADDRESS` entry here is ignored on the worker,
+  # and `GPUSTACK_MODEL_TRANSFER_WORKER_ADDRESS` is likewise managed and ignored
+  # here when `ascend.hostRoCE.enabled` is true). The engine reader
   # reads `GPUSTACK_MODEL_TRANSFER_MAX_WINDOW_BYTES` from its own environment
   # (default 8 GiB; the legal range is 1 GiB through 1 TiB); this map does not
   # configure serving engines. These windows do not replace the Binding grant or
@@ -641,6 +644,33 @@ modelTransfer:
   # type: object
   # @schema
   workerResources: {}
+  # -- Ascend-specific source DaemonSet settings.
+  ascend:
+    # -- Host RoCE transport settings for the Ascend source DaemonSet.
+    hostRoCE:
+      # -- Enable Host RoCE (`roce:host`) on the Ascend source DaemonSet. When true, only the
+      # `ascend` source DaemonSet sets `hostNetwork: true` with
+      # `dnsPolicy: ClusterFirstWithHostNet`, mounts `/etc/hixlep` read-only
+      # (`hostPath.type: Directory`) on the `worker` container, and defaults
+      # `ASCEND_GLOBAL_RESOURCE_CONFIG` to
+      # `{"comm_resource_config.protocol_desc":["roce:host"],"local_comm_res_path":"/etc/hixlep"}`
+      # on the `worker` container when `modelTransfer.env` does not declare it.
+      # When enabled, broker-worker private HTTP control traffic uses Unix-domain sockets inside
+      # a dedicated Pod-private `/run/model-transfer-sockets` volume (`control.sock` /
+      # `worker.sock`) while `/run/model-transfer/bootstrap` remains read-only on `worker`, so
+      # among the broker's HTTP/TLS listeners only the TLS session port `:9251` binds on the host
+      # network namespace; HIXL's native rendezvous separately binds an ephemeral port on the
+      # host IP. Both `GPUSTACK_MODEL_TRANSFER_BROKER_ADDRESS` and
+      # `GPUSTACK_MODEL_TRANSFER_WORKER_ADDRESS` are chart-managed and override any user entries
+      # in `modelTransfer.env`.
+      # Prerequisite: every Ascend node matched by the DaemonSet must already have `/etc/hixlep`
+      # present (`hostPath.type: Directory` fails Pod creation on pre-A5 or unprepared Ascend
+      # nodes rather than creating an empty directory).
+      # Warning: `modelTransfer.nodeSelector` applies to ALL vendor source DaemonSets
+      # (`nvidia`, `amd`, `ascend`), and changing it causes the Kubernetes DaemonSet
+      # controller to delete Pods on excluded nodes immediately (bypassing `OnDelete` drain);
+      # use it at fresh installation or only after draining excluded nodes.
+      enabled: false
 
 # -- Migration hook Jobs. A pre-install/pre-upgrade Job reaps a Kueue left stranded by an
 # interrupted teardown, and on an upgrade applies the vendored subcharts' CRDs, which Helm

@@ -23,11 +23,27 @@ import (
 )
 
 const (
+	transferConfigHash      = "model-transfer.gpustack.ai/config-hash"
 	transferDrainFor        = "model-transfer.gpustack.ai/drain-for"
 	transferDrainedFor      = "model-transfer.gpustack.ai/drained-for"
 	transferDrainedInstance = "model-transfer.gpustack.ai/drained-instance"
 	transferWorkerInstance  = "model-transfer.gpustack.ai/worker-instance"
 )
+
+func transferRevision(image, configHash string) string {
+	if configHash == "" {
+		return image
+	}
+	return image + "#" + configHash
+}
+
+func podWorkerRevision(pod *core.Pod) (string, bool) {
+	j := slices.IndexFunc(pod.Spec.Containers, func(c core.Container) bool { return c.Name == "worker" })
+	if j < 0 {
+		return "", false
+	}
+	return transferRevision(pod.Spec.Containers[j].Image, pod.Annotations[transferConfigHash]), true
+}
 
 // ModelTransferImageReconciler rolls OnDelete chart-prepared source fleets only after every worker
 // acknowledges release of its own native instance. Unknown release blocks replacement.
@@ -97,6 +113,7 @@ func (r *ModelTransferImageReconciler) reconcileFleet(ctx context.Context, ds *a
 	if image == "" {
 		return false, fmt.Errorf("DaemonSet %s has an empty worker image", ds.Name)
 	}
+	desired := transferRevision(image, ds.Spec.Template.Annotations[transferConfigHash])
 
 	selector, err := meta.LabelSelectorAsSelector(ds.Spec.Selector)
 	if err != nil {
@@ -125,8 +142,8 @@ func (r *ModelTransferImageReconciler) reconcileFleet(ctx context.Context, ds *a
 	}
 	changed := false
 	for i := range owned {
-		j := slices.IndexFunc(owned[i].Spec.Containers, func(c core.Container) bool { return c.Name == "worker" })
-		if j < 0 || owned[i].Spec.Containers[j].Image != image || owned[i].Annotations[transferDrainFor] != "" {
+		rev, ok := podWorkerRevision(&owned[i])
+		if !ok || rev != desired || owned[i].Annotations[transferDrainFor] != "" {
 			changed = true
 		}
 	}
@@ -139,16 +156,16 @@ func (r *ModelTransferImageReconciler) reconcileFleet(ctx context.Context, ds *a
 		int32(len(owned)) != ds.Status.DesiredNumberScheduled || ds.Status.CurrentNumberScheduled != ds.Status.DesiredNumberScheduled {
 		return false, nil
 	}
-	// A drained native boot cannot resume admission. Replace even a matching-image
+	// A drained native boot cannot resume admission. Replace even a matching-revision
 	// Pod after its exact acknowledgement; a newly created Pod starts unfrozen.
 	candidates := make([]core.Pod, 0, len(owned))
 	for i := range owned {
 		pod := &owned[i]
-		j := slices.IndexFunc(pod.Spec.Containers, func(c core.Container) bool { return c.Name == "worker" })
-		if j < 0 || pod.DeletionTimestamp != nil {
+		rev, ok := podWorkerRevision(pod)
+		if !ok || pod.DeletionTimestamp != nil {
 			return false, nil
 		}
-		if pod.Spec.Containers[j].Image == image {
+		if rev == desired {
 			if prior := pod.Annotations[transferDrainFor]; prior != "" {
 				instance := pod.Annotations[transferWorkerInstance]
 				if instance == "" || pod.Annotations[transferDrainedFor] != prior || pod.Annotations[transferDrainedInstance] != instance {
@@ -163,12 +180,12 @@ func (r *ModelTransferImageReconciler) reconcileFleet(ctx context.Context, ds *a
 			continue
 		}
 		candidates = append(candidates, *pod)
-		if pod.Annotations[transferDrainFor] != image {
+		if pod.Annotations[transferDrainFor] != desired {
 			fresh := pod.DeepCopy()
 			if fresh.Annotations == nil {
 				fresh.Annotations = map[string]string{}
 			}
-			fresh.Annotations[transferDrainFor] = image
+			fresh.Annotations[transferDrainFor] = desired
 			delete(fresh.Annotations, transferDrainedFor)
 			delete(fresh.Annotations, transferDrainedInstance)
 			if err := r.Client.Update(ctx, fresh); err != nil {
@@ -180,7 +197,7 @@ func (r *ModelTransferImageReconciler) reconcileFleet(ctx context.Context, ds *a
 	for i := range candidates {
 		p := &candidates[i]
 		instance := p.Annotations[transferWorkerInstance]
-		if instance == "" || p.Annotations[transferDrainedFor] != image || p.Annotations[transferDrainedInstance] != instance {
+		if instance == "" || p.Annotations[transferDrainedFor] != desired || p.Annotations[transferDrainedInstance] != instance {
 			return false, nil
 		}
 	}

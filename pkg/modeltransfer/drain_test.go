@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -309,4 +310,126 @@ func TestReconcileSourceAuthorityReadFailureWaitsForThreshold(t *testing.T) {
 		require.ErrorIs(t, err, broker.ErrReservationReadFailed)
 		require.Equal(t, want, generationState(t, b, generation))
 	}
+}
+
+func TestRuntimeFreezeAndInspectOverUnixAndTCP(t *testing.T) {
+	instance := strings.Repeat("c", 32)
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, "Bearer secret", r.Header.Get("Authorization"))
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/v1/runtime/drain":
+			_, _ = fmt.Fprintf(w, `{"workerID":"pod","workerInstanceID":"%s","draining":true}`, instance)
+		case r.Method == http.MethodGet && r.URL.Path == "/v1/runtime":
+			_, _ = fmt.Fprintf(w, `{"workerID":"pod","workerInstanceID":"%s","generations":[],"nativeOperations":0,"unknownOperations":0,"retainedGenerations":[]}`, instance)
+		default:
+			http.NotFound(w, r)
+		}
+	})
+
+	t.Run("unix domain socket", func(t *testing.T) {
+		sockPath := shortSocketPath(t, "worker.sock")
+		ln, err := net.Listen("unix", sockPath)
+		require.NoError(t, err)
+		t.Cleanup(func() { _ = ln.Close() })
+		srv := &http.Server{Handler: handler}
+		go func() { _ = srv.Serve(ln) }()
+		t.Cleanup(func() { _ = srv.Close() })
+
+		runtimeURL, runtimeClient := newRuntimeTransport("unix://" + sockPath)
+		cfg := &Config{
+			WorkerID:       "pod",
+			WorkerAddr:     "unix://" + sockPath,
+			bootstrapToken: "secret",
+			runtimeURL:     runtimeURL,
+			runtimeClient:  runtimeClient,
+		}
+		gotInstance, err := cfg.freezeRuntime(context.Background())
+		require.NoError(t, err)
+		assert.Equal(t, instance, gotInstance)
+
+		observed, err := cfg.inspectEmptyRuntime(context.Background(), instance)
+		require.NoError(t, err)
+		assert.Equal(t, instance, observed)
+	})
+
+	t.Run("tcp host:port and http scheme", func(t *testing.T) {
+		srv := httptest.NewServer(handler)
+		t.Cleanup(srv.Close)
+
+		for _, addr := range []string{strings.TrimPrefix(srv.URL, "http://"), srv.URL} {
+			runtimeURL, runtimeClient := newRuntimeTransport(addr)
+			cfg := &Config{
+				WorkerID:       "pod",
+				WorkerAddr:     addr,
+				bootstrapToken: "secret",
+				runtimeURL:     runtimeURL,
+				runtimeClient:  runtimeClient,
+			}
+			gotInstance, err := cfg.freezeRuntime(context.Background())
+			require.NoError(t, err)
+			assert.Equal(t, instance, gotInstance)
+
+			observed, err := cfg.inspectEmptyRuntime(context.Background(), instance)
+			require.NoError(t, err)
+			assert.Equal(t, instance, observed)
+		}
+	})
+
+	t.Run("runtime client refuses HTTP redirects and disables proxy", func(t *testing.T) {
+		var redirected bool
+		target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			redirected = true
+			_, _ = fmt.Fprintf(w, `{"workerID":"pod","workerInstanceID":"%s","draining":true}`, instance)
+		}))
+		t.Cleanup(target.Close)
+
+		redirector := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			http.Redirect(w, r, target.URL+r.URL.Path, http.StatusFound)
+		}))
+		t.Cleanup(redirector.Close)
+
+		runtimeURL, runtimeClient := newRuntimeTransport(redirector.URL)
+		require.NotNil(t, runtimeClient)
+		transport, ok := runtimeClient.Transport.(*http.Transport)
+		require.True(t, ok)
+		assert.Nil(t, transport.Proxy)
+		assert.Equal(t, 64, transport.MaxConnsPerHost)
+
+		cfg := &Config{
+			WorkerID:       "pod",
+			WorkerAddr:     redirector.URL,
+			bootstrapToken: "secret",
+			runtimeURL:     runtimeURL,
+			runtimeClient:  runtimeClient,
+		}
+		_, err := cfg.freezeRuntime(context.Background())
+		require.Error(t, err)
+		_, err = cfg.inspectEmptyRuntime(context.Background(), instance)
+		require.Error(t, err)
+		assert.False(t, redirected, "runtime client must never follow HTTP redirects")
+	})
+
+	t.Run("runtime transport fails closed for non-local worker addresses", func(t *testing.T) {
+		for _, addr := range []string{"http://10.0.0.2:9252", "example.com:9252", "https://127.0.0.1:9252"} {
+			runtimeURL, runtimeClient := newRuntimeTransport(addr)
+			assert.Empty(t, runtimeURL, "address %q should fail closed", addr)
+			assert.Nil(t, runtimeClient, "address %q should fail closed", addr)
+		}
+	})
+
+	t.Run("runtimeEndpoint rejects non-loopback URL with nil client and surfaces bad WorkerAddr", func(t *testing.T) {
+		cfgUnixNoClient := &Config{
+			runtimeURL:     "http://unix/v1/runtime",
+			bootstrapToken: "secret",
+		}
+		_, _, err := cfgUnixNoClient.runtimeEndpoint()
+		require.ErrorContains(t, err, "runtime client is required")
+
+		cfgBadAddr := &Config{
+			WorkerAddr:     "http://10.0.0.2:9252",
+			bootstrapToken: "secret",
+		}
+		_, _, err = cfgBadAddr.runtimeEndpoint()
+		require.ErrorContains(t, err, "invalid worker runtime address")
+	})
 }

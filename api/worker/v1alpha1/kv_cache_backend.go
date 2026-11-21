@@ -480,13 +480,14 @@ type KVCacheBackendMember struct {
 	// Medium is what the SEGMENT this member group mounts is made of: host memory (DRAM) or
 	// device memory (VRAM).
 	//
-	// It is a choice rather than an identity: the renderer splits on it. A DRAM member charges
-	// CapacityPerMember against the Pod's host memory; a VRAM member charges it against nothing,
-	// because its segment is device memory and claiming it is allocating it. What lets a VRAM member
-	// reach its device is declared and never inferred — SecurityContext, HostPaths and
-	// RuntimeClassName below, each on its own. The field stays immutable — a segment already mounted
-	// cannot change kind underneath the data in it — so the choice is made when the group is
-	// declared.
+	// Official mirrored-mooncake images disable USE_VRAM_SEGMENT and allocate store segments in
+	// host RAM (DRAM). VRAM remains in the enum for accounting alignment only when users supply a
+	// custom build compiled with USE_VRAM_SEGMENT=ON: a DRAM member charges CapacityPerMember
+	// against the Pod's requests.memory and hides vendor accelerators, whereas a VRAM member omits
+	// CapacityPerMember from requests.memory and skips DRAM device-visibility hiding. The operator
+	// does not verify whether an image actually allocates VRAM. What lets a VRAM member reach its
+	// device is declared and never inferred via SecurityContext, HostPaths and RuntimeClassName.
+	// The field stays immutable because a mounted segment cannot change medium underneath live data.
 	//
 	//   - A local disk, NVMe-oF, a DAX device and a distributed filesystem are NOT member groups, and
 	//     each is reached elsewhere: the first through localDisks below, NVMe-oF as a target
@@ -569,9 +570,10 @@ type KVCacheBackendMember struct {
 	//
 	// A group's NodeSelector is what makes this necessary: two groups can select nodes of different
 	// accelerator vendors or generations, and the store's client ships as one wheel per vendor, each
-	// carrying the transports it was compiled with and the runtime it links. The vendor runtime is
-	// also the medium's: a VRAM group needs a build with VRAM segments compiled in, which the stock
-	// CPU default is not.
+	// carrying the transports it was compiled with and the runtime it links. Official
+	// mirrored-mooncake images disable USE_VRAM_SEGMENT and allocate segments in host RAM (DRAM);
+	// a VRAM group requires a user-supplied custom image built with USE_VRAM_SEGMENT=ON, which the
+	// operator does not verify.
 	//
 	// +k8s:validation:maxLength=512
 	Image string `json:"image,omitempty" protobuf:"bytes,7,opt,name=image"`
@@ -614,14 +616,19 @@ type KVCacheBackendMember struct {
 
 	// FabricInterfaceCount is how many distinct host-fabric interfaces each member requires.
 	//
-	// It applies only when the group's effective protocol is RDMA or EFA, and left unset it counts as
-	// one there. Every other protocol grants no fabric device, so a count written on such a group
-	// has no effect, and admission warns rather than refuses: the update that moves a group from RDMA
-	// back to TCP usually still carries it. Zero is not a count: a written value is at least one.
+	// It applies when the group's effective protocol is RDMA, EFA, or CANN. Left unset on RDMA or
+	// EFA it counts as one interface. Left unset on CANN the group stays off Host RDMA (for Ascend
+	// A2/A3 and Ascend A5 UB/UBG/UBoE); setting fabricInterfaceCount >= 1 on a CANN member group
+	// enables Ascend A5 Host RoCE, granting Host RDMA resources, a read-only /etc/hixlep mount
+	// (yielding to overlapping hostPaths), and overridable ASCEND_LOCAL_COMM_RES and
+	// ASCEND_GLOBAL_RESOURCE_CONFIG defaults. Every other protocol grants no fabric device, so a
+	// count written on such a group has no effect, and admission warns rather than refuses: the
+	// update that moves a group back to TCP usually still carries it. Zero is not a count: a
+	// written value is at least one.
 	//
-	// An RDMA count of one asks for a shared resource; a count above one asks for exclusive
-	// resources, because a second shared token can be a second claim on the same endpoint and would
-	// otherwise satisfy a multi-interface request without an error.
+	// An RDMA count of one (including CANN Host RoCE) asks for a shared resource; a count above one
+	// asks for exclusive resources, because a second shared token can be a second claim on the same
+	// endpoint and would otherwise satisfy a multi-interface request without an error.
 	//
 	// The count changes placement density: one member can use shared-token capacity, while a count
 	// above one limits a node to its endpoint count divided by the count.

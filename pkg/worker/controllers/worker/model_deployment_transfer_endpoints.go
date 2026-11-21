@@ -73,6 +73,7 @@ func modelTransferSourcePodChanged() ctrlpredicate.Predicate {
 			return old.UID != next.UID || old.Spec.NodeName != next.Spec.NodeName ||
 				old.Status.PodIP != next.Status.PodIP || old.Status.Phase != next.Status.Phase ||
 				old.Annotations["model-transfer.gpustack.ai/drain-for"] != next.Annotations["model-transfer.gpustack.ai/drain-for"] ||
+				old.Annotations[transferConfigHash] != next.Annotations[transferConfigHash] ||
 				!kubemeta.DeepEqual(old.DeletionTimestamp, next.DeletionTimestamp) ||
 				!maps.Equal(old.Labels, next.Labels) ||
 				!kubemeta.DeepEqual(old.Spec.Containers, next.Spec.Containers) ||

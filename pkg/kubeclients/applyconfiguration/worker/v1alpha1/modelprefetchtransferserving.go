@@ -23,6 +23,10 @@ type ModelPrefetchTransferServingApplyConfiguration struct {
 	// ReadyLeaseExpiresAt bounds how long this readiness observation is usable.
 	//
 	ReadyLeaseExpiresAt *v1.Time `json:"readyLeaseExpiresAt,omitempty"`
+	// Manufacturers lists the sorted source vendor scopes (for example "nvidia", "ascend")
+	// currently serving this artifact revision so Prefer delivery only targets matching pools.
+	//
+	Manufacturers []string `json:"manufacturers,omitempty"`
 }
 
 // ModelPrefetchTransferServingApplyConfiguration constructs a declarative configuration of the ModelPrefetchTransferServing type for use with
@@ -60,5 +64,15 @@ func (b *ModelPrefetchTransferServingApplyConfiguration) WithDigest(value string
 // If called multiple times, the ReadyLeaseExpiresAt field is set to the value of the last call.
 func (b *ModelPrefetchTransferServingApplyConfiguration) WithReadyLeaseExpiresAt(value v1.Time) *ModelPrefetchTransferServingApplyConfiguration {
 	b.ReadyLeaseExpiresAt = &value
+	return b
+}
+
+// WithManufacturers adds the given value to the Manufacturers field in the declarative configuration
+// and returns the receiver, so that objects can be build by chaining "With" function invocations.
+// If called multiple times, values provided by each call will be appended to the Manufacturers field.
+func (b *ModelPrefetchTransferServingApplyConfiguration) WithManufacturers(values ...string) *ModelPrefetchTransferServingApplyConfiguration {
+	for i := range values {
+		b.Manufacturers = append(b.Manufacturers, values[i])
+	}
 	return b
 }

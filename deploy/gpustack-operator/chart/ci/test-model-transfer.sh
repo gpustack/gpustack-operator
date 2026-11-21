@@ -559,4 +559,205 @@ if grep -q 'model-transfer' <<<"${manager_off}"; then
   exit 1
 fi
 
+# Deterministic config-hash and opt-in Ascend Host RoCE wiring.
+function extract_config_hash() {
+  local doc="$1"
+  awk '/model-transfer\.gpustack\.ai\/config-hash:/ { gsub(/"/, "", $2); print $2; exit }' <<<"${doc}"
+}
+
+default_amd_doc="$(awk '/^---$/{on=0} /^  name: gpustack-operator-model-transfer-amd$/{on=1} on' <<<"${default_fleets}")"
+default_ascend_doc="$(awk '/^---$/{on=0} /^  name: gpustack-operator-model-transfer-ascend$/{on=1} on' <<<"${default_fleets}")"
+default_nvidia_doc="$(awk '/^---$/{on=0} /^  name: gpustack-operator-model-transfer-nvidia$/{on=1} on' <<<"${default_fleets}")"
+
+default_amd_hash="$(extract_config_hash "${default_amd_doc}")"
+default_ascend_hash="$(extract_config_hash "${default_ascend_doc}")"
+default_nvidia_hash="$(extract_config_hash "${default_nvidia_doc}")"
+for vendor_hash in "${default_amd_hash}" "${default_ascend_hash}" "${default_nvidia_hash}"; do
+  if [[ ! "${vendor_hash}" =~ ^[0-9a-f]{64}$ ]]; then
+    echo "config-hash: expected 64-hex sha256 config-hash on every default source DaemonSet, got '${vendor_hash}'" >&2
+    exit 1
+  fi
+done
+if grep -qE 'hostNetwork|ascend-hixlep|/etc/hixlep|ASCEND_GLOBAL_RESOURCE_CONFIG|unix:///run/model-transfer-sockets/|control-sockets|GPUSTACK_MODEL_TRANSFER_WORKER_ADDRESS|--worker-addr=' <<<"${default_fleets}"; then
+  echo 'hostRoCE default: disabled by default must omit hostNetwork, /etc/hixlep, ASCEND_GLOBAL_RESOURCE_CONFIG, and UDS control wiring' >&2
+  exit 1
+fi
+
+host_roce_on="$(render --set modelTransfer.ascend.hostRoCE.enabled=true --show-only templates/model-transfer/daemonset.yaml)"
+roce_amd_doc="$(awk '/^---$/{on=0} /^  name: gpustack-operator-model-transfer-amd$/{on=1} on' <<<"${host_roce_on}")"
+roce_ascend_doc="$(awk '/^---$/{on=0} /^  name: gpustack-operator-model-transfer-ascend$/{on=1} on' <<<"${host_roce_on}")"
+roce_nvidia_doc="$(awk '/^---$/{on=0} /^  name: gpustack-operator-model-transfer-nvidia$/{on=1} on' <<<"${host_roce_on}")"
+
+# AMD and NVIDIA stay completely isolated when Ascend Host RoCE is enabled.
+for other_doc in "${roce_amd_doc}" "${roce_nvidia_doc}"; do
+  if grep -qE 'hostNetwork|dnsPolicy|ascend-hixlep|/etc/hixlep|ASCEND_GLOBAL_RESOURCE_CONFIG|unix:///run/model-transfer-sockets/|control-sockets|GPUSTACK_MODEL_TRANSFER_WORKER_ADDRESS|--worker-addr=' <<<"${other_doc}"; then
+    echo 'hostRoCE isolation: non-ascend source DaemonSets must stay unaffected' >&2
+    exit 1
+  fi
+  if ! grep -q '^            - --control-addr=127\.0\.0\.1:9250$' <<<"${other_doc}" \
+    || ! grep -q '^              value: 127\.0\.0\.1:9250$' <<<"${other_doc}"; then
+    echo 'hostRoCE isolation: non-ascend source DaemonSets must keep loopback 127.0.0.1:9250' >&2
+    exit 1
+  fi
+done
+if [[ "$(extract_config_hash "${roce_amd_doc}")" != "${default_amd_hash}" ]] \
+  || [[ "$(extract_config_hash "${roce_nvidia_doc}")" != "${default_nvidia_hash}" ]]; then
+  echo 'hostRoCE isolation: non-ascend config-hash must not change' >&2
+  exit 1
+fi
+
+roce_ascend_hash="$(extract_config_hash "${roce_ascend_doc}")"
+if [[ ! "${roce_ascend_hash}" =~ ^[0-9a-f]{64}$ ]] || [[ "${roce_ascend_hash}" == "${default_ascend_hash}" ]]; then
+  echo 'hostRoCE enabled: ascend config-hash must change from disabled default' >&2
+  exit 1
+fi
+if ! grep -q '^      hostNetwork: true$' <<<"${roce_ascend_doc}" \
+  || ! grep -q '^      dnsPolicy: ClusterFirstWithHostNet$' <<<"${roce_ascend_doc}"; then
+  echo 'hostRoCE enabled: ascend source Pod must set hostNetwork and ClusterFirstWithHostNet' >&2
+  exit 1
+fi
+
+roce_ascend_broker="$(sed -n '/^        - name: broker$/,/^        - name: worker$/p' <<<"${roce_ascend_doc}")"
+roce_ascend_worker="$(sed -n '/^        - name: worker$/,/^      volumes:/p' <<<"${roce_ascend_doc}")"
+roce_ascend_volumes="$(sed -n '/^      volumes:/,$p' <<<"${roce_ascend_doc}")"
+if grep -qE 'ascend-hixlep|/etc/hixlep|ASCEND_GLOBAL_RESOURCE_CONFIG' <<<"${roce_ascend_broker}"; then
+  echo 'hostRoCE enabled: broker must not receive /etc/hixlep mount or default ASCEND_GLOBAL_RESOURCE_CONFIG' >&2
+  exit 1
+fi
+if ! grep -q '^            - --control-addr=unix:///run/model-transfer-sockets/control\.sock$' <<<"${roce_ascend_broker}" \
+  || ! grep -q '^            - --worker-addr=unix:///run/model-transfer-sockets/worker\.sock$' <<<"${roce_ascend_broker}" \
+  || grep -q -- '--control-addr=127\.0\.0\.1:9250' <<<"${roce_ascend_broker}"; then
+  echo 'hostRoCE enabled: ascend broker must bind and dial Unix-domain control sockets under /run/model-transfer-sockets' >&2
+  exit 1
+fi
+if [[ "$(grep -c '^            - name: GPUSTACK_MODEL_TRANSFER_BROKER_ADDRESS$' <<<"${roce_ascend_worker}")" -ne 1 ]] \
+  || ! grep -q '^              value: unix:///run/model-transfer-sockets/control\.sock$' <<<"${roce_ascend_worker}" \
+  || [[ "$(grep -c '^            - name: GPUSTACK_MODEL_TRANSFER_WORKER_ADDRESS$' <<<"${roce_ascend_worker}")" -ne 1 ]] \
+  || ! grep -q '^              value: unix:///run/model-transfer-sockets/worker\.sock$' <<<"${roce_ascend_worker}"; then
+  echo 'hostRoCE enabled: ascend worker must configure UDS broker and worker addresses without duplicates' >&2
+  exit 1
+fi
+roce_bootstrap_mount="$(grep -A2 '^            - name: bootstrap$' <<<"${roce_ascend_worker}")"
+if ! grep -q '^              readOnly: true$' <<<"${roce_bootstrap_mount}"; then
+  echo 'hostRoCE enabled: ascend worker must keep /run/model-transfer bootstrap volume readOnly: true' >&2
+  exit 1
+fi
+roce_sockets_worker_mount="$(grep -A2 '^            - name: control-sockets$' <<<"${roce_ascend_worker}")"
+roce_sockets_broker_mount="$(grep -A2 '^            - name: control-sockets$' <<<"${roce_ascend_broker}")"
+if ! grep -q '^              mountPath: /run/model-transfer-sockets$' <<<"${roce_sockets_worker_mount}" \
+  || grep -q 'readOnly: true' <<<"${roce_sockets_worker_mount}" \
+  || ! grep -q '^              mountPath: /run/model-transfer-sockets$' <<<"${roce_sockets_broker_mount}"; then
+  echo 'hostRoCE enabled: broker and worker must mount dedicated writable control-sockets volume at /run/model-transfer-sockets' >&2
+  exit 1
+fi
+if ! grep -q '^            - name: ascend-hixlep$' <<<"${roce_ascend_worker}" \
+  || ! grep -q '^              mountPath: /etc/hixlep$' <<<"${roce_ascend_worker}"; then
+  echo 'hostRoCE enabled: ascend worker must mount ascend-hixlep at /etc/hixlep' >&2
+  exit 1
+fi
+hixlep_mount_block="$(grep -A2 '^            - name: ascend-hixlep$' <<<"${roce_ascend_worker}")"
+if ! grep -q '^              readOnly: true$' <<<"${hixlep_mount_block}"; then
+  echo 'hostRoCE enabled: /etc/hixlep mount on worker must be readOnly: true' >&2
+  exit 1
+fi
+hixlep_vol_block="$(grep -A3 '^        - name: ascend-hixlep$' <<<"${roce_ascend_volumes}")"
+if ! grep -q '^            path: /etc/hixlep$' <<<"${hixlep_vol_block}" \
+  || ! grep -q '^            type: Directory$' <<<"${hixlep_vol_block}" \
+  || grep -q 'DirectoryOrCreate' <<<"${hixlep_vol_block}"; then
+  echo 'hostRoCE enabled: ascend-hixlep volume must be hostPath type Directory (never DirectoryOrCreate)' >&2
+  exit 1
+fi
+if [[ "$(grep -c '^            - name: ASCEND_GLOBAL_RESOURCE_CONFIG$' <<<"${roce_ascend_worker}")" -ne 1 ]] \
+  || ! grep -Fq '{"comm_resource_config.protocol_desc":["roce:host"],"local_comm_res_path":"/etc/hixlep"}' <<<"${roce_ascend_worker}" \
+  || grep -q 'ASCEND_LOCAL_COMM_RES' <<<"${roce_ascend_worker}"; then
+  echo 'hostRoCE enabled: ascend worker must emit default flat-key ASCEND_GLOBAL_RESOURCE_CONFIG once and leave ASCEND_LOCAL_COMM_RES unset' >&2
+  exit 1
+fi
+
+# User override of ASCEND_GLOBAL_RESOURCE_CONFIG must suppress the default and never duplicate.
+host_roce_override="$(render --values - --show-only templates/model-transfer/daemonset.yaml <<'EOF'
+modelTransfer:
+  ascend:
+    hostRoCE:
+      enabled: true
+  env:
+    ASCEND_GLOBAL_RESOURCE_CONFIG: '{"comm_resource_config.protocol_desc":["roce:host"],"local_comm_res_path":"/etc/hixlep/custom.json"}'
+EOF
+)"
+override_ascend_doc="$(awk '/^---$/{on=0} /^  name: gpustack-operator-model-transfer-ascend$/{on=1} on' <<<"${host_roce_override}")"
+override_ascend_worker="$(sed -n '/^        - name: worker$/,/^      volumes:/p' <<<"${override_ascend_doc}")"
+override_ascend_hash="$(extract_config_hash "${override_ascend_doc}")"
+if [[ "$(grep -c '^            - name: ASCEND_GLOBAL_RESOURCE_CONFIG$' <<<"${override_ascend_worker}")" -ne 1 ]] \
+  || ! grep -Fq '/etc/hixlep/custom.json' <<<"${override_ascend_worker}"; then
+  echo 'hostRoCE override: user ASCEND_GLOBAL_RESOURCE_CONFIG must replace default without duplicates' >&2
+  exit 1
+fi
+if [[ "${override_ascend_hash}" == "${roce_ascend_hash}" ]] || [[ "${override_ascend_hash}" == "${default_ascend_hash}" ]]; then
+  echo 'hostRoCE override: config-hash must reflect env override' >&2
+  exit 1
+fi
+
+# User modelTransfer.env entries for chart-managed control addresses must be filtered out so
+# worker env never duplicates GPUSTACK_MODEL_TRANSFER_BROKER_ADDRESS (always) or
+# GPUSTACK_MODEL_TRANSFER_WORKER_ADDRESS (in Host RoCE mode) and config-hash stays on effective env.
+host_roce_worker_addr_shadow="$(render --values - --show-only templates/model-transfer/daemonset.yaml <<'EOF'
+modelTransfer:
+  ascend:
+    hostRoCE:
+      enabled: true
+  env:
+    GPUSTACK_MODEL_TRANSFER_BROKER_ADDRESS: '127.0.0.1:8888'
+    GPUSTACK_MODEL_TRANSFER_WORKER_ADDRESS: '127.0.0.1:9999'
+EOF
+)"
+shadow_ascend_doc="$(awk '/^---$/{on=0} /^  name: gpustack-operator-model-transfer-ascend$/{on=1} on' <<<"${host_roce_worker_addr_shadow}")"
+shadow_ascend_worker="$(sed -n '/^        - name: worker$/,/^      volumes:/p' <<<"${shadow_ascend_doc}")"
+shadow_ascend_hash="$(extract_config_hash "${shadow_ascend_doc}")"
+if [[ "$(grep -c '^            - name: GPUSTACK_MODEL_TRANSFER_BROKER_ADDRESS$' <<<"${shadow_ascend_worker}")" -ne 1 ]] \
+  || grep -Fq '127.0.0.1:8888' <<<"${shadow_ascend_worker}" \
+  || ! grep -q '^              value: unix:///run/model-transfer-sockets/control\.sock$' <<<"${shadow_ascend_worker}" \
+  || [[ "$(grep -c '^            - name: GPUSTACK_MODEL_TRANSFER_WORKER_ADDRESS$' <<<"${shadow_ascend_worker}")" -ne 1 ]] \
+  || grep -Fq '127.0.0.1:9999' <<<"${shadow_ascend_worker}" \
+  || ! grep -q '^              value: unix:///run/model-transfer-sockets/worker\.sock$' <<<"${shadow_ascend_worker}"; then
+  echo 'hostRoCE control address filter: managed broker and worker addresses must appear once with user overrides stripped' >&2
+  exit 1
+fi
+if [[ "${shadow_ascend_hash}" != "${roce_ascend_hash}" ]]; then
+  echo 'hostRoCE control address filter: shadowed user broker/worker addresses must not alter effective config-hash' >&2
+  exit 1
+fi
+
+# Changing broker session policy (source.maxSessions) or container resource requirements must move
+# config-hash so OnDelete rolls the Pod.
+low_sessions="$(render --set modelTransfer.source.maxSessions=3 --show-only templates/model-transfer/daemonset.yaml)"
+low_sessions_ascend="$(awk '/^---$/{on=0} /^  name: gpustack-operator-model-transfer-ascend$/{on=1} on' <<<"${low_sessions}")"
+if [[ "$(extract_config_hash "${low_sessions_ascend}")" == "${default_ascend_hash}" ]]; then
+  echo 'config-hash: changing modelTransfer.source.maxSessions must change config-hash' >&2
+  exit 1
+fi
+worker_res_2g="$(render --set modelTransfer.ascend.hostRoCE.enabled=true --set modelTransfer.workerResources.limits.memory=2Gi --show-only templates/model-transfer/daemonset.yaml)"
+worker_res_4g="$(render --set modelTransfer.ascend.hostRoCE.enabled=true --set modelTransfer.workerResources.limits.memory=4Gi --show-only templates/model-transfer/daemonset.yaml)"
+worker_res_2g_ascend="$(awk '/^---$/{on=0} /^  name: gpustack-operator-model-transfer-ascend$/{on=1} on' <<<"${worker_res_2g}")"
+worker_res_4g_ascend="$(awk '/^---$/{on=0} /^  name: gpustack-operator-model-transfer-ascend$/{on=1} on' <<<"${worker_res_4g}")"
+if [[ "$(extract_config_hash "${worker_res_2g_ascend}")" == "$(extract_config_hash "${worker_res_4g_ascend}")" ]]; then
+  echo 'config-hash: changing modelTransfer.workerResources must change config-hash' >&2
+  exit 1
+fi
+alt_cache_root="$(render --set modelManager.rootPath=/var/lib/gpustack/models-alt --show-only templates/model-transfer/daemonset.yaml)"
+alt_cache_ascend="$(awk '/^---$/{on=0} /^  name: gpustack-operator-model-transfer-ascend$/{on=1} on' <<<"${alt_cache_root}")"
+if [[ "$(extract_config_hash "${alt_cache_ascend}")" == "${default_ascend_hash}" ]]; then
+  echo 'config-hash: changing modelManager.rootPath must change config-hash' >&2
+  exit 1
+fi
+alt_runtime="$(render --set global.manufacturers.nvidia.runtimeName=nvidia-alt --show-only templates/model-transfer/daemonset.yaml)"
+alt_runtime_nvidia="$(awk '/^---$/{on=0} /^  name: gpustack-operator-model-transfer-nvidia$/{on=1} on' <<<"${alt_runtime}")"
+if [[ "$(extract_config_hash "${alt_runtime_nvidia}")" == "${default_nvidia_hash}" ]]; then
+  echo 'config-hash: changing manufacturer runtimeName must change config-hash' >&2
+  exit 1
+fi
+
+expect_failure invalid-host-roce-type \
+  'got string, want boolean' \
+  --set-string modelTransfer.ascend.hostRoCE.enabled=yes
+
 echo 'model-transfer: all static renders pass'

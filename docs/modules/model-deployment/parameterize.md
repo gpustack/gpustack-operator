@@ -102,7 +102,7 @@ The operator resolves transfer parameters in two steps:
     4. **NVIDIA RDMA (`rdma`)**: When both roles request *`interface > 0`* on NVIDIA, allocates `device.gpustack.ai/rdma*` and renders `mooncake_protocol: rdma` on vLLM or `mooncake` on SGLang without `MC_FORCE_TCP`.
     5. **NVIDIA TCP fallback (`tcp`)**: Without pair *`interface > 0`* on NVIDIA, renders `mooncake_protocol: tcp` on vLLM or `mooncake_tcp` on SGLang and defaults `MC_FORCE_TCP=1` (unless a non-TCP store shares the process) to prevent unconfigured cross-host NVLink selection.
   - **NIXL**: Selects `LIBFABRIC` when the `aws-efa-enabled` `Setting` is `true` or a bound `KVCache` pool uses EFA; otherwise selects `UCX` (which negotiates InfiniBand, RoCE, NVLink/IPC, or TCP at runtime). On vLLM, both *Prefill* and *Decode* open side-channel port `8998`.
-  - **HIXL**: Mounts `/usr/local/Ascend/driver` read-only on both engines so CANN `hccn_tool` resolves NPU RoCE endpoints, and defaults `ASCEND_AUTO_CONNECT=1` on vLLM. On Ascend A2/A3 (`Family != "950"`), SGLang defaults `ASCEND_MF_TRANSFER_PROTOCOL=sdma`; on Ascend A5 (`Family == "950"`), SGLang defaults `ASCEND_MF_TRANSFER_PROTOCOL=device_urma` and never mounts `/etc/hixlep`. On Ascend A5 `vLLM` (with `HIXL` or `Mooncake`), `interface: 0` defaults `ASCEND_LOCAL_COMM_RES='{"version":"1.3"}'` without `/etc/hixlep`, while `interface > 0` mounts `/etc/hixlep` read-only and sets outer `kv_connector_extra_config.ascend_local_comm_res_path: "/etc/hixlep"`.
+  - **HIXL**: Mounts `/usr/local/Ascend/driver` read-only on both engines so CANN `hccn_tool` resolves NPU RoCE endpoints, and defaults `ASCEND_AUTO_CONNECT=1` on vLLM. On Ascend A2/A3 (`Family != "950"`), SGLang defaults `ASCEND_MF_TRANSFER_PROTOCOL=sdma`; on Ascend A5 (`Family == "950"`), SGLang defaults `ASCEND_MF_TRANSFER_PROTOCOL=device_urma` and omits `/etc/hixlep` on KV-only legs (while remote Host RoCE weight transfer mounts `/etc/hixlep` read-only when *`resources.interface > 0`*). On Ascend A5 `vLLM` (with `HIXL` or `Mooncake`), `interface: 0` defaults `ASCEND_LOCAL_COMM_RES='{"version":"1.3"}'` without `/etc/hixlep`, while `interface > 0` mounts `/etc/hixlep` read-only and sets outer `kv_connector_extra_config.ascend_local_comm_res_path: "/etc/hixlep"`.
 
 | Component | Tier | Trigger | Injected | Note |
 |---|---|---|---|---|
@@ -123,9 +123,9 @@ The operator resolves transfer parameters in two steps:
 | SGLang | Owned | HIXL, Ascend | `--disaggregation-mode=prefill` or `decode`, `--disaggregation-transfer-backend=ascend`, prefill `--disaggregation-bootstrap-port=8998`, read-only `/usr/local/Ascend/driver` mount | Operator owns disaggregation flags. |
 | SGLang | Defaulted | Mooncake TCP | `MC_FORCE_TCP=1`, `--page-size 64`, `MC_TCP_MAX_QUEUED_TRANSFERS_PER_PEER=65535`, `MC_TCP_MAX_PENDING_ADMISSIONS_PER_PEER=65535`, `MC_TCP_LANES_PER_PEER=16`, `MC_TCP_ADMISSION_TIMEOUT_MS=60000` | `MC_FORCE_TCP=1` applies on an eligible TCP path; user values win. |
 | SGLang | Defaulted | NIXL, NVIDIA/AMD | `SGLANG_DISAGGREGATION_NIXL_BACKEND=UCX` or `LIBFABRIC` on EFA | User environment wins. |
-| SGLang | Defaulted | HIXL, Ascend | `ASCEND_MF_TRANSFER_PROTOCOL=sdma` (Ascend A2/A3) or `device_urma` (Ascend A5, `Family == "950"`) | User environment wins; SGLang never mounts `/etc/hixlep` or receives `ASCEND_LOCAL_COMM_RES`. |
+| SGLang | Defaulted | HIXL, Ascend | `ASCEND_MF_TRANSFER_PROTOCOL=sdma` (Ascend A2/A3) or `device_urma` (Ascend A5, `Family == "950"`) | User environment wins; SGLang omits `/etc/hixlep` and `ASCEND_LOCAL_COMM_RES` on KV-only legs. |
 
-- **A5 exclusions**: `RoleEncode`, `SGLang`, and Ascend A2/A3 (`Family != "950"`) never receive `/etc/hixlep` or `ASCEND_LOCAL_COMM_RES`.
+- **A5 KV exclusions**: `RoleEncode`, `SGLang` KV-only legs, and Ascend A2/A3 (`Family != "950"`) never receive `/etc/hixlep` or `ASCEND_LOCAL_COMM_RES` for KV transfer.
 - **Scaler neutrality**: `ASCEND_LOCAL_COMM_RES`, `ASCEND_GLOBAL_RESOURCE_CONFIG`, and `ASCEND_MF_TRANSFER_PROTOCOL` are capacity-neutral for `ModelDeploymentScaler` priors.
 - **UBG and UBoE override**: `ASCEND_GLOBAL_RESOURCE_CONFIG` in *`roles[].env`* is accepted without owned-env refusal; see [Ascend A5 topologies](prefill-decode.md#ascend-a5-topologies).
 
@@ -161,6 +161,8 @@ lists router compatibility and [Routing](routing.md) describes routing policies.
 | Engine | Owned | ModelExpress peer delivery | `MX_SERVER_ADDRESS` (metadata sidecar), `MX_WORKER_HOST` from `status.podIP`, `MX_ARTIFACT_TRANSFER=1`, `MX_LOAD_PLUGIN=gpustack`, `MX_LOAD_PLUGIN_BEFORE`, `MX_ARTIFACT_COMPILE_CONFIG_DIGEST`, `MX_ARTIFACT_READY_URL`, `GPUSTACK_MODEL_TRANSFER_DELIVERY_POLICY=Prefer` or `Require` | See [Remote Weight Delivery](../model-delivery/remote.md) for eligibility and fallback. |
 | Engine | Defaulted | Remote `ModelArtifact` delivery | `--load-format=model-transfer` | An existing supported load format is preserved; conflicting formats are refused. |
 | Engine | Defaulted | NIXL remote delivery | `GPUSTACK_MODEL_TRANSFER_NIXL_BACKEND=UCX` or `LIBFABRIC` on EFA | User environment wins. |
+| Engine | Defaulted | Ascend A5 (`Family == "950"`), HIXL remote delivery, `interface: 0` | `ASCEND_LOCAL_COMM_RES='{"version":"1.3"}'` | Deduplicated with KV connector defaults; user `roles[].env` wins. |
+| Engine | Defaulted | Ascend A5 (`Family == "950"`), HIXL remote delivery, `interface > 0` | `ASCEND_GLOBAL_RESOURCE_CONFIG='{"comm_resource_config.protocol_desc":["roce:host"],"local_comm_res_path":"/etc/hixlep"}'` and read-only `/etc/hixlep` (`gpustack-ascend-hixlep`, `HostPathDirectory`) | `Server` and symmetric *PD* roles on `vLLM` or `SGLang`; user `roles[].env` and `additionalVolumes` win. |
 | Engine | Defaulted | Remote delivery | `GPUSTACK_MODEL_TRANSFER_TIMEOUT=1800` | User environment wins. |
 
 ---

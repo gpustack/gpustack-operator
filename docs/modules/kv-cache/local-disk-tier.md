@@ -65,10 +65,10 @@ object, so there is nothing to opt into.
 [Connection and medium](backend.md#connection-and-medium) for why the shape has to be this way, and
 [KV Cache on Disk-Heavy Nodes](disk-heavy-nodes.md) for what to write on a node that is mostly disk.
 
-**The example configurations use `DRAM` groups.** What is and is not
-measured about pairing the tier with a `VRAM` group is stated once, beside the medium it belongs to,
-at [VRAM group accelerator access](backend.md#vram-group-accelerator-access). Read it before writing
-one.
+**The example configurations use `DRAM` groups.** Official `mirrored-mooncake` builds disable
+`USE_VRAM_SEGMENT` (`Host RAM` only); `VRAM` applies only to custom `USE_VRAM_SEGMENT=ON` images
+and is stated at [Custom VRAM builds](backend.md#custom-vram-builds). Read it
+before writing one.
 
 ## Bucket writes
 
@@ -205,6 +205,8 @@ The path must satisfy the following rules, all enforced at apply time:
 - It must not be the **root directory**.
 - It **may not overlap `/dev/infiniband`** (equal to it, inside it, or containing it). A sibling such
   as `/dev/infiniband-cache` is fine.
+- On `CANN` groups with *`fabricInterfaceCount`* set, it **may not overlap `/etc/hixlep`** (equal,
+  ancestor, or descendant), because Ascend A5 Host RoCE mounts `/etc/hixlep` read-only.
 - It **may not contain a `..` component**.
 - It **may not begin or end with whitespace**, spaces and tabs alike.
 

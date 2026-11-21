@@ -26,7 +26,10 @@ from gpustack_model_transfer.source.backend import (
     real_source_allocator,
     real_source_backend,
 )
-from gpustack_model_transfer.source.control import BootstrapClient
+from gpustack_model_transfer.source.control import (
+    BootstrapClient,
+    parse_private_address,
+)
 from gpustack_model_transfer.source.supervisor import SourceSupervisor
 from gpustack_model_transfer.source.transfer_service import PrivateServer
 from gpustack_model_transfer.source.workorder import require_pod_identity
@@ -73,9 +76,14 @@ def build_factories(environ):
         if backend == "hixl":
             with endpoint_lock:
                 for _ in range(64):
-                    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
-                        probe.bind((pod_ip, 0))
-                        port = probe.getsockname()[1]
+                    try:
+                        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+                            probe.bind((pod_ip, 0))
+                            port = probe.getsockname()[1]
+                    except OSError as exc:
+                        raise SourceUnavailableError(
+                            f"bind source rendezvous address {pod_ip}: {exc}"
+                        ) from exc
                     if port not in endpoints:
                         endpoints.add(port)
                         break
@@ -121,11 +129,26 @@ def main(argv=None, environ=None, stop_event=None) -> int:
         print(f"source holder refused to start: {exc}", file=sys.stderr)
         return 2
 
-    if not address.startswith("127.0.0.1:"):
+    try:
+        parse_private_address(address)
+    except ValueError:
         print(
-            "source holder refused to start: broker must use loopback", file=sys.stderr
+            "source holder refused to start: broker must use loopback or unix://",
+            file=sys.stderr,
         )
         return 2
+    worker_address = environ.GPUSTACK_MODEL_TRANSFER_WORKER_ADDRESS
+    if worker_address is None:
+        private_address: tuple[str, int] | str = ("127.0.0.1", 9252)
+    else:
+        try:
+            private_address = parse_private_address(worker_address)
+        except ValueError:
+            print(
+                "source holder refused to start: invalid worker private address",
+                file=sys.stderr,
+            )
+            return 2
     instance_id = uuid.uuid4().hex
     bootstrap = BootstrapClient(address, bootstrap_file)
     supervisor = SourceSupervisor(
@@ -140,8 +163,10 @@ def main(argv=None, environ=None, stop_event=None) -> int:
     )
     supervisor.worker_instance_id = instance_id
     try:
-        private_server = PrivateServer(supervisor.operations, bootstrap_file)
-    except OSError:
+        private_server = PrivateServer(
+            supervisor.operations, bootstrap_file, private_address
+        )
+    except (OSError, ValueError):
         print(
             "source holder refused to start: private service unavailable",
             file=sys.stderr,
@@ -188,7 +213,7 @@ def _control_for(environ, worker_id: str, assignment, instance_id):
     from gpustack_model_transfer.source.control import ControlClient
 
     return ControlClient(
-        environ.get(_BROKER_ADDRESS_ENV, ""),
+        environ.GPUSTACK_MODEL_TRANSFER_BROKER_ADDRESS,
         worker_id=worker_id,
         generation=assignment.generation,
         secret=assignment.worker_secret,

@@ -371,7 +371,7 @@ func (r *ModelDeploymentReconciler) convergeModelDeployment(
 	if weights != nil && weights.Render != nil &&
 		weights.Render.Delivery == workercore.ModelDeploymentModelDeliveryRemote {
 		swept, err = modelDeploymentModelTransferSweep(ctx, r.Client, md, replicas,
-			modelDeploymentModelTransferPolicy(ctx), weights.Render.ModelTransferFallback)
+			weights.Render.ModelTransferPolicy, weights.Render.ModelTransferFallback)
 		if err != nil {
 			return ctrl.Result{}, errors.Join(err, r.deleteModelDeploymentGroupWorkload(ctx, md, swept))
 		}
@@ -2449,6 +2449,14 @@ func (r *ModelDeploymentReconciler) renderModelDeploymentRolePodsWithSentinel(
 	}
 
 	desired := make(map[string]map[int][]*core.Pod, len(md.Spec.Roles))
+	var (
+		remotePolicyResolved bool
+		remotePolicy         string
+	)
+	if weights != nil && weights.RemotePolicy != "" {
+		remotePolicy = weights.RemotePolicy
+		remotePolicyResolved = true
+	}
 	for i := range md.Spec.Roles {
 		role := &md.Spec.Roles[i]
 
@@ -2487,6 +2495,13 @@ func (r *ModelDeploymentReconciler) renderModelDeploymentRolePodsWithSentinel(
 		// carries the reason, instead of a render error that would say nothing.
 		if weights != nil && weights.Render != nil &&
 			weights.Render.Delivery == workercore.ModelDeploymentModelDeliveryRemote {
+			roleSourceReady := weights.Render.SourceReady &&
+				(weights.Render.ModelTransferSourceManufacturers.Len() == 0 ||
+					weights.Render.ModelTransferSourceManufacturers.Has(strings.ToLower(strings.TrimSpace(manufacturer))))
+			if weights.RoleSourceReady == nil {
+				weights.RoleSourceReady = make(map[string]bool, len(md.Spec.Roles))
+			}
+			weights.RoleSourceReady[role.Name] = roleSourceReady
 			effective, modelTransferReason, modelTransferMessage := weights.Render.modelTransferForRole(
 				md, role, manufacturer, modelDeploymentModelTransferRoleLive(weights.LiveRemoteOrdinals, role.Name),
 			)
@@ -2525,8 +2540,36 @@ func (r *ModelDeploymentReconciler) renderModelDeploymentRolePodsWithSentinel(
 		}
 		remoteDelivery := in.Artifact != nil &&
 			in.Artifact.Delivery == workercore.ModelDeploymentModelDeliveryRemote
+		kvDirectProtocol := modelDeploymentAscendKVDirectProtocol(md, role, manufacturer, family)
+		var protocols []string
+		if len(role.Command) == 0 {
+			protocols = interfaceProtocols
+		}
+		rdmaStoreCovered := len(protocols) > 0 &&
+			!slices.ContainsFunc(protocols, func(p string) bool { return p != "rdma" })
+		remoteInterfaceEligible := remoteDelivery
+		if !remoteInterfaceEligible &&
+			modelDeploymentRoleRequestsInterfaces(role) &&
+			kvDirectProtocol == "" &&
+			!rdmaStoreCovered &&
+			manufacturer == nodefeature.ManufacturerAscend &&
+			family == nodefeature.AcceleratorFamilyAscend950 &&
+			in.Artifact != nil &&
+			in.Artifact.Hub != "" &&
+			modelDeploymentAscendRemoteDirectProtocol(md, role, manufacturer, family, true) != "" {
+			if !remotePolicyResolved {
+				var err error
+				remotePolicy, err = modelDeploymentModelTransferPolicyStrict(ctx)
+				if err != nil {
+					return nil, fmt.Errorf("read remote delivery policy: %w", err)
+				}
+				remotePolicyResolved = true
+			}
+			remoteInterfaceEligible = remotePolicy == settings.ModelArtifactRemoteDeliveryPrefer ||
+				remotePolicy == settings.ModelArtifactRemoteDeliveryRequire
+		}
 		directProtocol := ModelDeploymentDirectInterfaceProtocol(
-			md, role, manufacturer, family, remoteDelivery, efaActive,
+			md, role, manufacturer, family, remoteInterfaceEligible, efaActive,
 		)
 		var interfaceResource core.ResourceName
 		if modelDeploymentRoleRequestsInterfaces(role) {
@@ -2534,19 +2577,31 @@ func (r *ModelDeploymentReconciler) renderModelDeploymentRolePodsWithSentinel(
 			if !whole {
 				return nil, fmt.Errorf("role %q requests a fractional interface count", role.Name)
 			}
-			var protocols []string
-			if len(role.Command) == 0 {
-				protocols = interfaceProtocols
+			roleProtocols := protocols
+			roleDirectProtocol := directProtocol
+			if ModelDeploymentAscendA5AsymmetricPair(md, role, manufacturer, family) {
+				roleProtocols = nil
+				roleDirectProtocol = ""
 			}
-			resource, err := ModelDeploymentInterfaceResource(protocols, directProtocol, count)
+			resource, err := ModelDeploymentInterfaceResource(roleProtocols, roleDirectProtocol, count)
 			if err != nil {
 				return nil, fmt.Errorf("role %q interface request: %w", role.Name, err)
 			}
 			interfaceResource = resource
 			in.InterfaceResource = resource
 		}
+		if in.Artifact != nil &&
+			len(role.Command) == 0 &&
+			remoteDelivery &&
+			in.Artifact.ModelTransferBackend == "hixl" &&
+			manufacturer == nodefeature.ManufacturerAscend &&
+			family == nodefeature.AcceleratorFamilyAscend950 {
+			in.Artifact.ModelTransferAscendA5 = true
+			in.Artifact.ModelTransferAscendHostRoCE = interfaceResource != "" &&
+				modelDeploymentAscendRemoteDirectProtocol(md, role, manufacturer, family, true) != ""
+		}
 		ascendHostRoCE := modelDeploymentAscendHostRoCE(
-			md.Spec.Engine.Name, manufacturer, family, directProtocol, role,
+			md.Spec.Engine.Name, manufacturer, family, kvDirectProtocol, role,
 		)
 		effectiveKVBackend := ModelDeploymentEffectiveKVTransferBackend(md, manufacturer)
 		kvTransferProtocol := ""

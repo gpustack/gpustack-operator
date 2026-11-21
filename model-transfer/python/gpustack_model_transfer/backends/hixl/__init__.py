@@ -39,8 +39,10 @@ from gpustack_model_transfer.backends.hixl.runtime import (
     RealHixlAPI,
     RuntimeReadiness,
     TransferOutcome,
+    build_hixl_init_options,
     load_runtime,
     probe_runtime,
+    uses_roce_host_protocol,
 )
 from gpustack_model_transfer.backends.hixl.safety import (
     NO_GO,
@@ -96,6 +98,7 @@ __all__ = [
     "TransportOptionRejectedError",
     "VersionMismatchError",
     "audit_credential_disclosure",
+    "build_hixl_init_options",
     "check_pre_submission_timeout",
     "check_recovery_standing",
     "check_submitted_nonterminal_quarantine",
@@ -104,4 +107,5 @@ __all__ = [
     "probe_raw_access",
     "probe_runtime",
     "probe_stale_replay_after_repair",
+    "uses_roce_host_protocol",
 ]

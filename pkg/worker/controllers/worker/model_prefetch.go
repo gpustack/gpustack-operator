@@ -426,6 +426,7 @@ func (r *ModelPrefetchReconciler) observeSource(ctx context.Context, pf *workerc
 	if err != nil {
 		return nil, err
 	}
+	servingManufacturers := map[string]struct{}{}
 	for i := range stores {
 		store := stores[i]
 		if !coverage[store.Name] {
@@ -451,6 +452,9 @@ func (r *ModelPrefetchReconciler) observeSource(ctx context.Context, pf *workerc
 			}
 			if generation.State == workercore.NodeModelStoreModelTransferGenerationStateServing &&
 				artifact.Status.ObservedGeneration == artifact.Generation {
+				if entry.NodeScope != "" {
+					servingManufacturers[entry.NodeScope] = struct{}{}
+				}
 				if obs.serving == nil || generation.LeaseExpiresAt.Before(&obs.serving.ReadyLeaseExpiresAt) {
 					obs.serving = &workercore.ModelPrefetchTransferServing{
 						ArtifactUID: string(artifact.UID), ArtifactGeneration: artifact.Generation,
@@ -464,6 +468,13 @@ func (r *ModelPrefetchReconciler) observeSource(ctx context.Context, pf *workerc
 			filtered.Status.ModelTransfer.Generations = append(filtered.Status.ModelTransfer.Generations, generation)
 		}
 		qualified = append(qualified, *filtered)
+	}
+	if obs.serving != nil && len(servingManufacturers) > 0 {
+		obs.serving.Manufacturers = make([]string, 0, len(servingManufacturers))
+		for m := range servingManufacturers {
+			obs.serving.Manufacturers = append(obs.serving.Manufacturers, m)
+		}
+		slices.Sort(obs.serving.Manufacturers)
 	}
 	for _, agg := range modelstore.AggregateModelTransferGenerations(qualified, digest) {
 		obs.generations = append(obs.generations, workercore.ModelPrefetchTransferGeneration{
@@ -520,6 +531,10 @@ func (r *ModelPrefetchReconciler) sourceRuntimePods(ctx context.Context, nodes [
 		}
 		index := slices.IndexFunc(p.Spec.Containers, func(c core.Container) bool { return c.Name == "worker" })
 		if index < 0 || p.Spec.Containers[index].Image != image {
+			continue
+		}
+		if desiredHash := sets[0].Spec.Template.Annotations[transferConfigHash]; desiredHash != "" &&
+			p.Annotations[transferConfigHash] != desiredHash {
 			continue
 		}
 		result[string(p.UID)] = p

@@ -15,7 +15,12 @@ authorizes native work, and it is retried idempotently until answered.
 """
 
 import http.client
+import ipaddress
 import json
+import os
+import posixpath
+import socket
+import urllib.parse
 import uuid
 
 from gpustack_model_transfer.core.manifest import MAX_MANIFEST_RESPONSE_BYTES
@@ -23,6 +28,109 @@ from gpustack_model_transfer.core.manifest_pages import MAX_PAGE_BYTES
 
 MAX_RESPONSE_BYTES = MAX_MANIFEST_RESPONSE_BYTES
 MAX_ASSIGNMENTS = 16
+
+
+def parse_unix_address(address: str) -> str:
+    """Validate and extract the clean absolute socket path from a unix:// address."""
+    if not isinstance(address, str) or not address.startswith("unix://"):
+        raise ValueError("address must use the unix:// scheme")
+    path = address[len("unix://") :]
+    if any(ch in path for ch in ("?", "#", "\x00")):
+        raise ValueError("unix socket path must not contain query, fragment, or NUL")
+    if not path or not os.path.isabs(path) or path.endswith("/"):
+        raise ValueError("unix socket path must be a non-empty absolute file path")
+    if any(seg in (".", "..") for seg in path.split("/")):
+        raise ValueError("unix socket path must not contain dot segments")
+    cleaned = posixpath.normpath(path)
+    if cleaned == "/":
+        raise ValueError("unix socket path must be a non-empty absolute file path")
+    return cleaned
+
+
+def parse_private_address(address: str) -> tuple[str, int] | str:
+    """Validate a local-only private address (unix:///abs/path or loopback host:port).
+
+    Matches Go's broker.ParsePrivateAddress(addr, false): accepts unix:///abs/path
+    and loopback 127.0.0.1 / localhost / [::1] with optional http:// scheme and an
+    explicit nonzero port (1..65535), rejecting paths, queries, fragments, userinfo,
+    non-loopback hosts, IPv6 zone IDs, and port 0.
+    """
+    if not isinstance(address, str) or not address or address != address.strip():
+        raise ValueError("private address must be a non-empty trimmed string")
+    if address.startswith("unix://"):
+        return f"unix://{parse_unix_address(address)}"
+    if any(ch in address for ch in ("?", "#", "\x00")):
+        raise ValueError("private address must not contain query, fragment, or NUL")
+    raw_url = address
+    if "://" in address:
+        if not address.startswith("http://"):
+            raise ValueError("private address must use http:// or unix:// scheme")
+    else:
+        raw_url = f"http://{address}"
+    parsed = urllib.parse.urlsplit(raw_url)
+    if (
+        parsed.scheme != "http"
+        or parsed.username is not None
+        or parsed.password is not None
+        or parsed.path
+        or parsed.query
+        or parsed.fragment
+        or not parsed.netloc
+    ):
+        raise ValueError("private address must be a bare loopback host:port")
+    host = parsed.hostname
+    if not host or "%" in host:
+        raise ValueError("private address must target a loopback host")
+    if host.lower() != "localhost":
+        try:
+            ip = ipaddress.ip_address(host)
+        except ValueError:
+            raise ValueError("private address must target a loopback host") from None
+        if not ip.is_loopback:
+            raise ValueError("private address must target a loopback host")
+    netloc = parsed.netloc
+    if netloc.startswith("["):
+        sep = netloc.find("]:")
+        if sep < 0:
+            raise ValueError("private address must specify an explicit port")
+        port_str = netloc[sep + 2 :]
+    else:
+        if ":" not in netloc:
+            raise ValueError("private address must specify an explicit port")
+        port_str = netloc.rsplit(":", 1)[1]
+    if not port_str.isdigit() or str(int(port_str)) != port_str:
+        raise ValueError("private address has an invalid port")
+    port = int(port_str)
+    if not 1 <= port <= 65535:
+        raise ValueError("private address port must be between 1 and 65535")
+    return (host, port)
+
+
+class _UnixHTTPConnection(http.client.HTTPConnection):
+    """HTTP/1.1 connection over a Pod-local AF_UNIX stream socket."""
+
+    def __init__(self, unix_path: str, timeout: float = 5.0):
+        super().__init__("localhost", timeout=timeout)
+        self._unix_path = unix_path
+
+    def connect(self) -> None:
+        sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        try:
+            if self.timeout is not socket._GLOBAL_DEFAULT_TIMEOUT:
+                sock.settimeout(self.timeout)
+            sock.connect(self._unix_path)
+        except BaseException:
+            sock.close()
+            raise
+        self.sock = sock
+
+
+def _open_connection(address: str, timeout: float) -> http.client.HTTPConnection:
+    parsed = parse_private_address(address)
+    if isinstance(parsed, str):
+        return _UnixHTTPConnection(parse_unix_address(parsed), timeout=timeout)
+    host, port = parsed
+    return http.client.HTTPConnection(host, port, timeout=timeout)
 
 
 def _read_response(response, max_bytes=MAX_RESPONSE_BYTES):
@@ -89,7 +197,7 @@ class BootstrapClient:
 
     def assignments(self) -> list:
         token = self._token()
-        connection = http.client.HTTPConnection(self._address, timeout=self._timeout)
+        connection = _open_connection(self._address, timeout=self._timeout)
         try:
             connection.request(
                 "GET",
@@ -122,7 +230,7 @@ class BootstrapClient:
             "manifestSHA256": assignment["manifestSHA256"],
             "pageSHA256": page["sha256"],
         }
-        connection = http.client.HTTPConnection(self._address, timeout=self._timeout)
+        connection = _open_connection(self._address, timeout=self._timeout)
         try:
             connection.request(
                 "POST",
@@ -265,7 +373,7 @@ class ControlClient:
             workerInstanceID=self.worker_instance_id,
         )
         body = json.dumps(payload)
-        connection = http.client.HTTPConnection(self._address, timeout=self._timeout)
+        connection = _open_connection(self._address, timeout=self._timeout)
         try:
             connection.request(
                 "POST", path, body=body, headers={"Content-Type": "application/json"}

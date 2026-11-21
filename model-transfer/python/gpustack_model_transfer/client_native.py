@@ -18,7 +18,12 @@ from gpustack_model_transfer.core.budgets import (
     hixl_allocation_bytes,
 )
 from gpustack_model_transfer.core.errors import SourceUnavailableError
-from gpustack_model_transfer.source.memory import AclBlock, TorchPinnedOwner
+from gpustack_model_transfer.source.memory import (
+    AclBlock,
+    TorchPinnedOwner,
+    allocate_roce_host_mmap_block,
+    release_roce_host_mmap_block,
+)
 
 logger = logging.getLogger("gpustack_model_transfer.client_native")
 
@@ -28,7 +33,15 @@ MAX_WINDOW = MAX_WINDOW_BYTES
 class BorrowedAclOwner:
     """Host allocations under the calling engine's current ACL context."""
 
-    def __init__(self, loader=None):
+    def __init__(self, loader=None, *, use_roce_host: bool | None = None):
+        if use_roce_host is None:
+            from gpustack_model_transfer.backends.hixl.runtime import (
+                uses_roce_host_protocol,
+            )
+
+            self._use_roce_host = uses_roce_host_protocol()
+        else:
+            self._use_roce_host = bool(use_roce_host)
         loader = loader or ctypes.CDLL
         try:
             self.lib = loader("libascendcl.so")
@@ -61,7 +74,11 @@ class BorrowedAclOwner:
             raise SourceUnavailableError("engine ACL context changed")
 
     def allocate(self, name, size):
+        if size <= 0:
+            raise ValueError(f"allocation must be positive, got {size}")
         self.ensure_current()
+        if getattr(self, "_use_roce_host", False):
+            return allocate_roce_host_mmap_block(name, size, self)
         registration_bytes = align_up_2m(size)
         allocation_bytes = hixl_allocation_bytes(size)
         pointer = ctypes.c_void_p()
@@ -74,7 +91,16 @@ class BorrowedAclOwner:
             if pointer.value:
                 self.uncertain_allocations.append(pointer.value)
             raise SourceUnavailableError("ACL host allocation failed")
-        block = AclBlock(name, size, self, align_up_2m(pointer.value))
+        aligned_address = align_up_2m(pointer.value)
+        aligned_offset = aligned_address - pointer.value
+        block = AclBlock(
+            name,
+            size,
+            self,
+            aligned_address,
+            allocator_kind="acl",
+            aligned_offset=aligned_offset,
+        )
         block.allocation_address = pointer.value
         block.allocation_bytes = allocation_bytes
         block.registration_bytes = registration_bytes
@@ -83,14 +109,18 @@ class BorrowedAclOwner:
         return block
 
     def release(self, block):
+        if getattr(block, "allocator_kind", "acl") == "mmap":
+            release_roce_host_mmap_block(
+                block, getattr(self, "uncertain_allocations", None)
+            )
+            return
+        if block.address == 0:
+            return
         self.ensure_current()
-        if (
-            block.address
-            and int(self.lib.aclrtFreeHost(ctypes.c_void_p(block.allocation_address)))
-            != 0
-        ):
+        if int(self.lib.aclrtFreeHost(ctypes.c_void_p(block.allocation_address))) != 0:
             raise SourceUnavailableError("ACL host free outcome unknown")
         block.address = 0
+        block.aligned_address = 0
 
 
 class TargetNative:
@@ -132,13 +162,13 @@ class TargetNative:
         self.thread_id = None
         self._pending_devices = {}
 
-    def _check_thread(self):
+    def _check_thread(self, *, require_acl_context: bool = True):
         if self.thread_id != threading.get_ident():
             raise SourceUnavailableError("native target called from a different thread")
-        if self.backend == "hixl" and self.owner is not None:
+        if require_acl_context and self.backend == "hixl" and self.owner is not None:
             self.owner.ensure_current()
 
-    def _initialize_endpoint(self):
+    def _initialize_endpoint(self, options=None):
         """Bind a loopback endpoint and initialize the HIXL target on it.
 
         Sibling TP ranks in one Pod pick ephemeral ports at the same
@@ -146,14 +176,20 @@ class TargetNative:
         binds it; each retry picks a fresh port, and a run that keeps
         losing the race is an error, not a hang.
         """
+        from gpustack_model_transfer.backends.hixl.runtime import (
+            build_hixl_init_options,
+        )
+
         hixl = self.api._require()
+        if options is None:
+            options = build_hixl_init_options()
         last_error = None
         for _ in range(3):
             with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
                 probe.bind((self.pod_ip, 0))
                 self.endpoint = f"{self.pod_ip}:{probe.getsockname()[1]}"
             self.agent = SimpleNamespace(client=hixl.Hixl())
-            status = self.agent.client.initialize(self.endpoint, {"BufferPool": "0:0"})
+            status = self.agent.client.initialize(self.endpoint, dict(options))
             if int(status) == int(hixl.SUCCESS):
                 return
             last_error = int(status)
@@ -210,12 +246,19 @@ class TargetNative:
                 self.api.agent_metadata(self.agent)
             ).decode("ascii")
         else:
-            from gpustack_model_transfer.backends.hixl.runtime import load_runtime
+            from gpustack_model_transfer.backends.hixl.runtime import (
+                build_hixl_init_options,
+                load_runtime,
+                options_use_roce_host,
+            )
 
             self.owner = BorrowedAclOwner()
+            options = build_hixl_init_options()
+            if hasattr(self.owner, "_use_roce_host"):
+                self.owner._use_roce_host = options_use_roce_host(options)
             self.block = self.owner.allocate("window", self.size)
             self.api = load_runtime()
-            self._initialize_endpoint()
+            self._initialize_endpoint(options)
             hixl = self.api._require()
             self.registration = SimpleNamespace(
                 handles={}, windows={}, buffers={"window": self.block}
@@ -316,7 +359,16 @@ class TargetNative:
     def close(self):
         if self.closed:
             return
-        self._check_thread()
+        needs_acl_context = (
+            bool(self._pending_devices)
+            or self.registration is not None
+            or self.agent is not None
+            or (
+                self.block is not None
+                and getattr(self.block, "allocator_kind", "acl") != "mmap"
+            )
+        )
+        self._check_thread(require_acl_context=needs_acl_context)
         for key, device in list(self._pending_devices.items()):
             self._synchronize_device(device)
             del self._pending_devices[key]
@@ -325,10 +377,12 @@ class TargetNative:
                 self.api.revoke_registration(self.agent, self.registration)
             else:
                 self.api.deregister(self.agent, self.registration)
+            self.registration = None
         if self.backend == "hixl" and self.agent is not None:
             result = self.agent.client.finalize()
             if result is not None and int(result) != 0:
                 raise SourceUnavailableError("HIXL finalize outcome unknown")
+            self.agent = None
         if self.block is not None:
             self.owner.release(self.block)
         self.closed = True

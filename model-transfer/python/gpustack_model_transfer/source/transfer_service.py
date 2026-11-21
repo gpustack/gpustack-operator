@@ -2,10 +2,14 @@
 
 import base64
 import binascii
+import errno
 import hashlib
 import hmac
 import ipaddress
 import json
+import os
+import socket
+import stat
 import threading
 from collections import deque
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -15,6 +19,10 @@ from gpustack_model_transfer.core.errors import ModelTransferError
 from gpustack_model_transfer.source.backend import (
     _NATIVE_STAGES,
     SourcePrePostError,
+)
+from gpustack_model_transfer.source.control import (
+    parse_private_address,
+    parse_unix_address,
 )
 
 
@@ -724,6 +732,41 @@ class OperationRegistry:
             )
 
 
+def _unlink_stale_unix_socket(sock_path: str) -> None:
+    try:
+        st = os.lstat(sock_path)
+    except FileNotFoundError:
+        return
+    if not stat.S_ISSOCK(st.st_mode):
+        raise OSError(f"refusing to unlink non-socket path {sock_path!r}")
+    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as probe:
+        probe.setblocking(False)
+        try:
+            probe.connect(sock_path)
+        except (ConnectionRefusedError, FileNotFoundError):
+            pass
+        except OSError as exc:
+            if isinstance(exc, BlockingIOError) or exc.errno in (
+                errno.EINPROGRESS,
+                errno.EAGAIN,
+                errno.EWOULDBLOCK,
+            ):
+                raise OSError(f"unix socket already active: {sock_path}") from exc
+            raise
+        else:
+            raise OSError(f"unix socket already active: {sock_path}")
+    try:
+        cur = os.lstat(sock_path)
+    except FileNotFoundError:
+        return
+    if (cur.st_dev, cur.st_ino) != (st.st_dev, st.st_ino):
+        raise OSError(f"unix socket changed during stale probe: {sock_path}")
+    try:
+        os.unlink(sock_path)
+    except FileNotFoundError:
+        return
+
+
 class PrivateServer(ThreadingHTTPServer):
     daemon_threads = True
     # Queue one bounded burst matching the existing active handler limit.
@@ -733,7 +776,61 @@ class PrivateServer(ThreadingHTTPServer):
         self.registry = registry
         self.bootstrap_file = bootstrap_file
         self.slots = threading.BoundedSemaphore(64)
-        super().__init__(address, PrivateHandler)
+        self._unix_socket_path = None
+        self._bound_unix_inode = None
+        if isinstance(address, str):
+            parsed = parse_private_address(address)
+            if isinstance(parsed, str):
+                if not hasattr(socket, "AF_UNIX"):
+                    raise OSError("AF_UNIX sockets are unavailable on this platform")
+                sock_path = parse_unix_address(parsed)
+                self.address_family = socket.AF_UNIX
+                self._unix_socket_path = sock_path
+                bind_address = sock_path
+            else:
+                host, port = parsed
+                self.address_family = socket.AF_INET6 if ":" in host else socket.AF_INET
+                bind_address = (host, port)
+        elif (
+            isinstance(address, tuple)
+            and len(address) == 2
+            and isinstance(address[0], str)
+            and not isinstance(address[1], bool)
+            and isinstance(address[1], int)
+        ):
+            self.address_family = (
+                socket.AF_INET6 if ":" in address[0] else socket.AF_INET
+            )
+            bind_address = address
+        else:
+            raise ValueError(
+                "private server address must be a (host, port) tuple, loopback host:port, or unix:///path"
+            )
+        super().__init__(bind_address, PrivateHandler)
+
+    def server_bind(self):
+        if self._unix_socket_path is not None:
+            _unlink_stale_unix_socket(self._unix_socket_path)
+            self.socket.bind(self._unix_socket_path)
+            os.chmod(self._unix_socket_path, 0o600)
+            st = os.lstat(self._unix_socket_path)
+            self._bound_unix_inode = (st.st_dev, st.st_ino)
+            self.server_address = self._unix_socket_path
+            self.server_name = "localhost"
+            self.server_port = 0
+            return
+        super().server_bind()
+
+    def server_close(self):
+        super().server_close()
+        if self._unix_socket_path is not None and self._bound_unix_inode is not None:
+            try:
+                st = os.lstat(self._unix_socket_path)
+                if (st.st_dev, st.st_ino) == self._bound_unix_inode:
+                    os.unlink(self._unix_socket_path)
+            except FileNotFoundError:
+                pass
+            self._bound_unix_inode = None
 
     def handle_error(self, request, client_address):
         # Request data may carry private descriptors; never print traceback.
@@ -760,6 +857,11 @@ class PrivateHandler(BaseHTTPRequestHandler):
     def setup(self):
         super().setup()
         self.connection.settimeout(5.0)
+
+    def address_string(self):
+        if isinstance(self.client_address, tuple) and self.client_address:
+            return str(self.client_address[0])
+        return "unix"
 
     def log_message(self, *args):
         pass

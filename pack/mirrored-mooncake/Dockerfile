@@ -78,9 +78,7 @@
 #   - 0.3.13: as 0.3.12.
 #   - 0.3.14 (the default): as 0.3.13, except the ubshmem ASCEND_SOURCES glob is wrapped onto
 #     multiple lines whose last line names ascend_direct_transport/utils.cpp -- the cann stage's
-#     fifth case block carries a 0.3.14 arm that adds context_manager.cpp beside that entry --
-#     and builder-cuda's 0.3.14 arm patches <ylt/util/tl/expected.hpp> into
-#     client_buffer_allocation.cpp for USE_VRAM_SEGMENT=ON.
+#     fifth case block carries a 0.3.14 arm that adds context_manager.cpp beside that entry.
 #
 # Build evidence exists for 0.3.10.post2 and 0.3.13.post1; 0.3.11, 0.3.12 and 0.3.14 follow from
 # reading the tags, and their first build is the check.
@@ -416,10 +414,10 @@ EOF
 
 # =============================================================================
 # Target: cuda
-# The NVIDIA variant: the store compiled with USE_CUDA on the CUDA 13.0 toolchain, plus
-# USE_VRAM_SEGMENT where the release offers it, for member groups whose segments live in
-# device memory. Dispatch with --target cuda; the default build never enters these stages
-# because the final stage stays mooncake-store.
+# The NVIDIA variant: the store compiled with USE_CUDA on the CUDA 13.0 toolchain and
+# USE_VRAM_SEGMENT=OFF so official mirrored-mooncake builds allocate store segments in Host
+# RAM (DRAM) rather than unscheduled device memory. Dispatch with --target cuda; the default
+# build never enters these stages because the final stage stays mooncake-store.
 #
 # The variant stage pairs repeat the default builder's blocks on purpose -- one Dockerfile,
 # per-variant stage pairs, no shared scripts. The repeated blocks MUST be edited in lockstep
@@ -517,16 +515,12 @@ ENV PATH=/usr/local/go/bin:$PATH
 
 # The flag set is the default builder's with the vendor axis swapped in:
 #
-#   - USE_CUDA goes ON. It is what the variant exists for: GPU buffers in the transfer engine,
-#     and the prerequisite of USE_VRAM_SEGMENT.
-#   - USE_VRAM_SEGMENT is what lands a member's segment in device memory (allocation switches
-#     to cudaMalloc under the ifdef), and it forces USE_CUDA on upstream. It exists only from
-#     0.3.13: the 0.3.10 line has neither the option nor the allocation path, so there the
-#     flag is omitted and the build is the CUDA transfer engine without VRAM segments. The
-#     decision reads the source rather than the version string, so a backport cannot go
-#     silently unflagged; passing the flag unconditionally would let cmake swallow the unknown
-#     -D with a warning and ship a DRAM-segment build under a VRAM name. When the flag IS
-#     passed, the grep on the configure log proves cmake honored it.
+#   - USE_CUDA goes ON. It is what the variant exists for: GPU buffers in the transfer engine.
+#   - USE_VRAM_SEGMENT goes OFF explicitly when mooncake-common/common.cmake declares it
+#     (from 0.3.13 onward; earlier releases predate the option and omit the flag cleanly).
+#     Official mirrored-mooncake builds allocate store segments in Host RAM (DRAM) so capacity
+#     is accounted in Pod requests.memory instead of calling cudaMalloc on GPU 0. The
+#     configure log check fails closed if "VRAM SEGMENT is ON" ever appears.
 #   - USE_INTRA_NVLINK goes ON when the store can select it. The transport itself compiles
 #     from 0.3.10, but the store's --protocol=nvlink_intra option exists only from 0.3.13,
 #     so an earlier release would carry a transport nothing can ask for. It is inert until
@@ -534,11 +528,10 @@ ENV PATH=/usr/local/go/bin:$PATH
 #     an HCA-less node still falls back to TCP. USE_MNNVL stays OFF deliberately: with it
 #     compiled in, that same HCA-less node tries to install the cross-node NVLink transport
 #     and aborts where it falls back today, and only NVL72-class hardware would benefit.
-#   - USE_EFA goes OFF. EFA is compiled into the default image only: an EFA member runs a DRAM
-#     segment, which the default image already serves, and EFA plus VRAM is a combination
-#     upstream does not test. With it off, nothing in the variant carries a DT_NEEDED on
-#     libfabric, which is why the runtime stage below installs neither libfabric1 nor the AWS
-#     installer.
+#   - USE_EFA goes OFF. EFA is compiled into the default image only, which already serves
+#     Host-RAM stores over libfabric without linking CUDA. With it off, nothing in the variant
+#     carries a DT_NEEDED on libfabric, which is why the runtime stage below installs neither
+#     libfabric1 nor the AWS installer.
 #
 # STORE_USE_K8S_LEASE stays ON, as it does in the default build: the vendor axis and the
 # leadership axis are orthogonal. On the 0.3.10 line the option does not exist and cmake
@@ -550,31 +543,17 @@ RUN <<EOF
 
     # 0.3.11 needs the same include_directories patch as the default builder; the reason and
     # the failure mode are documented there.
-    #
-    # 0.3.14's client_buffer_allocation.cpp uses tl::expected in allocate_vram_memory under
-    # #ifdef USE_VRAM_SEGMENT without including <ylt/util/tl/expected.hpp> (other mooncake-store
-    # headers include it directly). Non-CUDA targets leave USE_VRAM_SEGMENT off and compile
-    # untouched; here USE_VRAM_SEGMENT=ON exposes the missing header. The pre-check skips the
-    # edit if a 0.3.14.post* release backports the include upstream, and the trailing grep fails
-    # closed if sed matched nothing.
     case "${MOONCAKE_VERSION}" in
         0.3.11*)
             sed -i 's|^include_directories(mooncake-common/etcd)$|include_directories(mooncake-common/etcd)\ninclude_directories(mooncake-common/k8s-lease)|' \
                 /work/CMakeLists.txt
             grep -q '^include_directories(mooncake-common/k8s-lease)$' /work/CMakeLists.txt
             ;;
-        0.3.14*)
-            if ! grep -Eq '^[[:space:]]*#include [<"]ylt/util/tl/expected\.hpp[>"]' /work/mooncake-store/src/common/client_buffer_allocation.cpp; then
-                sed -i 's|^#include <glog/logging\.h>$|#include <glog/logging.h>\n#include <ylt/util/tl/expected.hpp>|' \
-                    /work/mooncake-store/src/common/client_buffer_allocation.cpp
-            fi
-            grep -Eq '^[[:space:]]*#include [<"]ylt/util/tl/expected\.hpp[>"]' /work/mooncake-store/src/common/client_buffer_allocation.cpp
-            ;;
     esac
 
     vram_flag=""
     if grep -q '^option(USE_VRAM_SEGMENT ' /work/mooncake-common/common.cmake; then
-        vram_flag="-DUSE_VRAM_SEGMENT=ON"
+        vram_flag="-DUSE_VRAM_SEGMENT=OFF"
     else
         echo "[info] this release predates USE_VRAM_SEGMENT (added in 0.3.13): building the CUDA transfer engine without VRAM segments."
     fi
@@ -599,8 +578,9 @@ RUN <<EOF
         -DBUILD_UNIT_TESTS=OFF \
         -DBUILD_EXAMPLES=ON \
         -DCMAKE_BUILD_TYPE=Release 2>&1 | tee /tmp/configure.log
-    if [[ -n "${vram_flag}" ]]; then
-        grep -q "VRAM SEGMENT is ON" /tmp/configure.log
+    if grep -q "VRAM SEGMENT is ON" /tmp/configure.log; then
+        echo "[ERROR] USE_VRAM_SEGMENT must remain OFF in official mirrored-mooncake builds." >&2
+        exit 1
     fi
     if [[ -n "${intra_nvlink_flag}" ]]; then
         grep -q "Enabled USE_INTRA_NVLINK support" /tmp/configure.log
@@ -881,10 +861,9 @@ CMD ["bash"]
 # The Ascend variant: the store compiled with one Ascend flavor on the CANN 9.1 toolkit, for
 # member groups on Ascend NPU nodes. The flavor defaults to USE_ASCEND_DIRECT, upstream's
 # recommended Ascend path -- it is what upstream's own Ascend CI and NPU release jobs
-# configure -- and with it a segment on the ascend protocol allocates in device memory, the
-# Ascend counterpart of the CUDA variant's VRAM segment; ASCEND_TRANSPORT=ubshmem builds the
-# CANN VMM shared-memory flavor for the supernode domain instead. Dispatch with
-# --target cann.
+# configure -- and allocates store segments in Host RAM (DRAM) rather than device memory;
+# ASCEND_TRANSPORT=ubshmem builds the CANN VMM shared-memory flavor for the supernode domain
+# instead. Dispatch with --target cann.
 # =============================================================================
 FROM ${CANN_BUILDER_IMAGE} AS builder-cann
 SHELL ["/bin/bash", "-c"]

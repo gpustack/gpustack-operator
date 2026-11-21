@@ -19,6 +19,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/util/sets"
 	ctrlrecord "k8s.io/client-go/tools/record"
 	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -66,7 +67,7 @@ func TestModelDeploymentGoldenYAML(t *testing.T) {
 	})
 
 	scenarios := buildGoldenYAMLScenarios()
-	require.Len(t, scenarios, 40)
+	require.Len(t, scenarios, 41)
 
 	goldenDir := filepath.Join("testdata", "golden-render")
 	if *legacyRenderUpdate {
@@ -214,11 +215,13 @@ func runGoldenYAMLScenario(
 
 	origDeliveryMode := modelArtifactDeliveryMode
 	origPolicy := modelDeploymentModelTransferPolicy
+	origPolicyStrict := modelDeploymentModelTransferPolicyStrict
 	origReady := modelDeploymentModelTransferSourceReady
 	origQualified := modelDeploymentModelTransferQualified
 	t.Cleanup(func() {
 		modelArtifactDeliveryMode = origDeliveryMode
 		modelDeploymentModelTransferPolicy = origPolicy
+		modelDeploymentModelTransferPolicyStrict = origPolicyStrict
 		modelDeploymentModelTransferSourceReady = origReady
 		modelDeploymentModelTransferQualified = origQualified
 	})
@@ -234,10 +237,11 @@ func runGoldenYAMLScenario(
 		remotePolicy = settings.ModelArtifactRemoteDeliveryDisabled
 	}
 	modelDeploymentModelTransferPolicy = func(context.Context) string { return remotePolicy }
+	modelDeploymentModelTransferPolicyStrict = func(context.Context) (string, error) { return remotePolicy, nil }
 	modelDeploymentModelTransferSourceReady = func(
 		context.Context, ctrlcli.Reader, *workercore.ModelArtifact,
-	) (bool, time.Time, error) {
-		return tc.sourceReady, time.Time{}, nil
+	) (bool, time.Time, sets.Set[string], error) {
+		return tc.sourceReady, time.Time{}, nil, nil
 	}
 	if tc.qualifyAllTuples {
 		modelDeploymentModelTransferQualified = func(modelTransferTuple) bool {
@@ -1402,7 +1406,7 @@ func buildGoldenYAMLScenarios() []goldenYAMLScenario {
 			},
 		},
 
-		// 5. ModelArtifact Weight Delivery (3 scenarios)
+		// 5. ModelArtifact Weight Delivery (4 scenarios)
 		{
 			name:            "artifact-node-and-engine",
 			objects:         goldenModelArtifactFixtures(),
@@ -1477,6 +1481,47 @@ func buildGoldenYAMLScenarios() []goldenYAMLScenario {
 							Replicas:        1,
 							ReplicaSize:     1,
 							Resources:       &workercore.ModelDeploymentRoleResources{Accelerator: ptr.To(qty1)},
+						},
+					},
+				},
+			},
+		},
+		{
+			name:          "artifact-remote-ascend-a5-ub-and-host-roce",
+			objects:       goldenModelArtifactFixtures(),
+			awsEFAEnabled: true,
+			deliveryMode:  settings.ModelArtifactDeliveryNode,
+			remotePolicy:  settings.ModelArtifactRemoteDeliveryPrefer,
+			sourceReady:   true,
+			md: &workercore.ModelDeployment{
+				ObjectMeta: meta.ObjectMeta{Namespace: "default", Name: "qwen-a5"},
+				Spec: workercore.ModelDeploymentSpec{
+					Model: workercore.ModelDeploymentModel{
+						Name:        modelID,
+						ArtifactRef: &core.LocalObjectReference{Name: "qwen-72b"},
+					},
+					Engine: workercore.ModelDeploymentEngine{Name: workercore.ModelDeploymentEngineVLLM, Image: vllmAscendImage},
+					Roles: []workercore.ModelDeploymentRole{
+						{
+							Name:            "ascend-a5-ub",
+							Kind:            workercore.ModelDeploymentRoleKindServer,
+							AcceleratorType: "atlas-950",
+							Image:           vllmAscendImage,
+							Replicas:        1,
+							ReplicaSize:     1,
+							Resources:       &workercore.ModelDeploymentRoleResources{Accelerator: ptr.To(qty1)},
+						},
+						{
+							Name:            "ascend-a5-roce",
+							Kind:            workercore.ModelDeploymentRoleKindServer,
+							AcceleratorType: "atlas-950",
+							Image:           vllmAscendImage,
+							Replicas:        1,
+							ReplicaSize:     1,
+							Resources: &workercore.ModelDeploymentRoleResources{
+								Accelerator: ptr.To(qty1),
+								Interface:   ptr.To(qty1),
+							},
 						},
 					},
 				},

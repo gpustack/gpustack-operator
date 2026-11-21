@@ -432,7 +432,14 @@ class HixlSourceBackend(_PagingBackend):
 
     backend_name = "hixl"
 
-    def __init__(self, engine_factory=None, allocator=None, engine_address=""):
+    def __init__(
+        self,
+        engine_factory=None,
+        allocator=None,
+        engine_address="",
+        *,
+        phy_id_resolver=None,
+    ):
         self.engine_address = engine_address
         self.on_finalized = None
         self._engine_factory = engine_factory
@@ -446,12 +453,49 @@ class HixlSourceBackend(_PagingBackend):
         self._peer_owners = {}
         self._uncertain_connections = set()
         self.allocator = allocator
+        self._phy_id_resolver = phy_id_resolver
+        self._init_options = None
+        self._use_roce_host = None
+
+    def needs_acl_preflight_context(self) -> bool:
+        """Return True when preflight() needs the active thread's ACL device."""
+        if self._init_options is not None or self._phy_id_resolver is not None:
+            return False
+        from gpustack_model_transfer.backends.hixl.runtime import (
+            hixl_init_options_need_acl_context,
+        )
+
+        return hixl_init_options_need_acl_context()
+
+    def preflight(self) -> dict[str, str]:
+        """Resolve and cache HIXL initialize options and protocol snapshot once."""
+        from gpustack_model_transfer.backends.hixl.runtime import (
+            _resolve_acl_physical_device_id,
+            build_hixl_init_options,
+            options_use_roce_host,
+        )
+
+        if self._init_options is None:
+            resolver = self._phy_id_resolver
+            allocator_loader = getattr(self.allocator, "_loader", None)
+            if resolver is None and allocator_loader is not None:
+
+                def _resolve_from_allocator() -> int:
+                    return _resolve_acl_physical_device_id(loader=allocator_loader)
+
+                resolver = _resolve_from_allocator
+            options = build_hixl_init_options(phy_id_resolver=resolver)
+            self._init_options = dict(options)
+            self._use_roce_host = options_use_roce_host(self._init_options)
+        if self.allocator is not None and hasattr(self.allocator, "_use_roce_host"):
+            self.allocator._use_roce_host = bool(self._use_roce_host)
+        return dict(self._init_options)
 
     def start(self, engine_address: str = "") -> object:
+        from gpustack_model_transfer.backends.hixl.runtime import RealHixlAPI
+
         engine_address = engine_address or self.engine_address
         if self._engine_factory is None:
-            from gpustack_model_transfer.backends.hixl.runtime import RealHixlAPI
-
             try:
                 self._hixl = RealHixlAPI()._require()
             except (ImportError, OSError):
@@ -463,10 +507,10 @@ class HixlSourceBackend(_PagingBackend):
             self._engine_factory = self._hixl.Hixl
         else:
             self._hixl = None
+        options = self.preflight()
         engine = self._engine_factory()
         # Keep the owner if initialize fails; the worker quarantines this backend.
         self._engine = engine
-        options = {"BufferPool": "0:0"}
         status = int(engine.initialize(engine_address, options))
         if status != 0:
             raise SourceUnavailableError(
@@ -776,6 +820,9 @@ class HixlSourceBackend(_PagingBackend):
 
     def finalize(self) -> None:
         if self._engine is None:
+            if self.on_finalized is not None:
+                self.on_finalized()
+                self.on_finalized = None
             return
         self.disconnect(None)
         status = self._engine.finalize()

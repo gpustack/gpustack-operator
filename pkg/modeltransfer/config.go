@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"net/http"
 	"os"
 	"path/filepath"
 	"sync"
@@ -58,8 +59,11 @@ type Options struct {
 	// not inside the cache root's layout.
 	BrokerRoot string
 	// ControlAddr is where the worker control service listens; the transport
-	// workers, on the same node, reach it there.
+	// workers, on the same node, reach it there (host:port or unix://<abs-path>).
 	ControlAddr string
+	// WorkerAddr is where the broker reaches the local source worker runtime
+	// (host:port, http://host:port, or unix://<abs-path>).
+	WorkerAddr string
 	// WorkerNamespace is the operator namespace containing the shared source Pod.
 	WorkerNamespace string
 
@@ -107,6 +111,7 @@ func NewOptions() *Options {
 		CacheRoot:       "/var/lib/gpustack/models",
 		BrokerRoot:      "/var/lib/gpustack/model-transfer",
 		ControlAddr:     "127.0.0.1:9250",
+		WorkerAddr:      defaultWorkerAddr,
 		WorkerNamespace: "",
 
 		PhysicalBytes:   0, // zero derives the ceiling from the node's total RAM
@@ -145,6 +150,7 @@ func (o *Options) Validate() error {
 		{o.CacheRoot == "", errors.New("cache-root is required")},
 		{o.BrokerRoot == "", errors.New("broker-root is required")},
 		{o.ControlAddr == "", errors.New("control-addr is required")},
+		{o.WorkerAddr == "", errors.New("worker-addr is required")},
 		{o.WorkerNamespace == "", errors.New("worker-namespace is required")},
 		{o.PhysicalBytes < 0, errors.New("physical-bytes must not be negative")},
 		{o.MaxGenerations < 1, errors.New("max-generations must be positive")},
@@ -161,7 +167,26 @@ func (o *Options) Validate() error {
 			return check.err
 		}
 	}
+	if err := broker.ValidatePrivateAddress(o.ControlAddr); err != nil {
+		return fmt.Errorf("control-addr: %w", err)
+	}
+	if err := broker.ValidatePrivateAddress(o.WorkerAddr); err != nil {
+		return fmt.Errorf("worker-addr: %w", err)
+	}
 	return nil
+}
+
+const defaultWorkerAddr = "127.0.0.1:9252"
+
+func newRuntimeTransport(workerAddr string) (string, *http.Client) {
+	if workerAddr == "" {
+		workerAddr = defaultWorkerAddr
+	}
+	base, client, err := broker.NewPrivateHTTPClient(workerAddr)
+	if err != nil {
+		return "", nil
+	}
+	return base + "/v1/runtime", client
 }
 
 // defaultSessions is the node's session cap when its configured value is
@@ -223,6 +248,8 @@ type Config struct {
 	WorkerLabel     labels.Selector
 	// ControlAddr is where the control service listens.
 	ControlAddr string
+	// WorkerAddr is where the broker reaches the local source worker runtime.
+	WorkerAddr string
 	// TickEvery is how often leases are swept.
 	TickEvery time.Duration
 	// SessionAddr and the TLS pair configure the engine session listener.
@@ -248,6 +275,7 @@ type Config struct {
 	snapshot         sourceSnapshot
 	bootstrapToken   string
 	runtimeURL       string
+	runtimeClient    *http.Client
 	metadataOnce     sync.Once
 	metadataSlots    chan struct{}
 	manifestPageRoot string
@@ -356,14 +384,23 @@ func (o *Options) complete(restCfg *rest.Config) (*Config, error) {
 		manifestPageRoot: manifestRoot,
 		NodeName:         o.NodeName, Store: st, Broker: b, RestConfig: cfgCopy, Client: client,
 		WorkerNamespace: o.WorkerNamespace, WorkerLabel: SourceWorkerLabel,
-		ControlAddr: o.ControlAddr, TickEvery: o.LeaseTTL / 2,
+		ControlAddr: o.ControlAddr, WorkerAddr: o.WorkerAddr, TickEvery: o.LeaseTTL / 2,
 		SessionAddr: o.SessionAddr, SessionTLSCert: o.SessionTLSCert,
 		SessionTLSKey: o.SessionTLSKey, BootstrapFile: o.BootstrapFile,
 		WorkerID: o.WorkerID, VendorScope: o.VendorScope,
 		Authorizer: authorizer,
 	}
 	b.SetAssignmentsFrozen(true)
-	cfg.runtimeURL = "http://127.0.0.1:9252/v1/runtime"
+	workerAddr := o.WorkerAddr
+	if workerAddr == "" {
+		workerAddr = defaultWorkerAddr
+	}
+	baseURL, runtimeClient, err := broker.NewPrivateHTTPClient(workerAddr)
+	if err != nil {
+		_ = b.Close()
+		return nil, fmt.Errorf("worker-addr: %w", err)
+	}
+	cfg.runtimeURL, cfg.runtimeClient = baseURL+"/v1/runtime", runtimeClient
 	cfg.snapshot = discovery
 	cfg.Intents = &kubernetesIntentSource{config: cfg, client: reader}
 	b.SetIntentValidator(cfg.validateLiveIntent)
@@ -397,12 +434,36 @@ func (c *Config) writeBootstrapCredential() (string, error) {
 		return "", fmt.Errorf("mint the bootstrap credential: %w", err)
 	}
 	token := hex.EncodeToString(buf)
-	if err := os.MkdirAll(filepath.Dir(c.BootstrapFile), 0o700); err != nil {
+	dir := filepath.Dir(c.BootstrapFile)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return "", fmt.Errorf("prepare the bootstrap directory: %w", err)
 	}
-	if err := os.WriteFile(c.BootstrapFile, []byte(token), 0o600); err != nil {
-		return "", fmt.Errorf("write the bootstrap credential: %w", err)
+	tmp, err := os.CreateTemp(dir, ".bootstrap-*")
+	if err != nil {
+		return "", fmt.Errorf("create temporary bootstrap credential: %w", err)
 	}
+	tmpPath := tmp.Name()
+	cleanup := true
+	defer func() {
+		if cleanup {
+			_ = os.Remove(tmpPath)
+		}
+	}()
+	if err := tmp.Chmod(0o600); err != nil {
+		_ = tmp.Close()
+		return "", fmt.Errorf("chmod temporary bootstrap credential: %w", err)
+	}
+	if _, err := tmp.WriteString(token); err != nil {
+		_ = tmp.Close()
+		return "", fmt.Errorf("write temporary bootstrap credential: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		return "", fmt.Errorf("close temporary bootstrap credential: %w", err)
+	}
+	if err := os.Rename(tmpPath, c.BootstrapFile); err != nil {
+		return "", fmt.Errorf("publish the bootstrap credential: %w", err)
+	}
+	cleanup = false
 	return token, nil
 }
 

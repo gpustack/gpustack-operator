@@ -9,7 +9,6 @@ import (
 	"io"
 	"net/http"
 	"strings"
-	"time"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -152,16 +151,45 @@ func (c *Config) acknowledgeDrain(ctx context.Context, src *kubernetesIntentSour
 	return errors.New("drain acknowledgement stayed contested")
 }
 
+func (c *Config) runtimeEndpoint() (string, *http.Client, error) {
+	if c.runtimeURL == "" {
+		if c.WorkerAddr == "" {
+			return "", nil, errors.New("worker runtime address is not configured")
+		}
+		baseURL, client, err := broker.NewPrivateHTTPClient(c.WorkerAddr)
+		if err != nil {
+			return "", nil, fmt.Errorf("invalid worker runtime address: %w", err)
+		}
+		return baseURL + "/v1/runtime", client, nil
+	}
+	if c.runtimeClient != nil {
+		return c.runtimeURL, c.runtimeClient, nil
+	}
+	if !strings.HasPrefix(c.runtimeURL, "http://127.0.0.1:") &&
+		!strings.HasPrefix(c.runtimeURL, "http://[::1]:") {
+		return "", nil, errors.New("runtime client is required for non-loopback runtime URL")
+	}
+	_, client, err := broker.NewPrivateHTTPClient(defaultWorkerAddr)
+	if err != nil {
+		return "", nil, err
+	}
+	return c.runtimeURL, client, nil
+}
+
 func (c *Config) freezeRuntime(ctx context.Context) (string, error) {
-	if c.runtimeURL == "" || c.bootstrapToken == "" {
+	runtimeURL, client, err := c.runtimeEndpoint()
+	if err != nil {
+		return "", fmt.Errorf("runtime freeze is unavailable: %w", err)
+	}
+	if runtimeURL == "" || client == nil || c.bootstrapToken == "" {
 		return "", errors.New("runtime freeze is unavailable")
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, strings.TrimSuffix(c.runtimeURL, "/v1/runtime")+"/v1/runtime/drain", nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, strings.TrimSuffix(runtimeURL, "/v1/runtime")+"/v1/runtime/drain", nil)
 	if err != nil {
 		return "", err
 	}
 	req.Header.Set("Authorization", "Bearer "+c.bootstrapToken)
-	resp, err := (&http.Client{Timeout: 5 * time.Second}).Do(req)
+	resp, err := client.Do(req)
 	if err != nil {
 		return "", fmt.Errorf("runtime freeze is unavailable: %w", err)
 	}
@@ -193,15 +221,18 @@ func (c *Config) observeEmptyRuntime(ctx context.Context, instance string) error
 }
 
 func (c *Config) inspectEmptyRuntime(ctx context.Context, instance string) (string, error) {
-	if c.runtimeURL == "" || c.bootstrapToken == "" {
+	runtimeURL, client, err := c.runtimeEndpoint()
+	if err != nil {
+		return "", fmt.Errorf("runtime attestation is unavailable: %w", err)
+	}
+	if runtimeURL == "" || client == nil || c.bootstrapToken == "" {
 		return "", errors.New("runtime attestation is unavailable")
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.runtimeURL, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, runtimeURL, nil)
 	if err != nil {
 		return "", err
 	}
 	req.Header.Set("Authorization", "Bearer "+c.bootstrapToken)
-	client := &http.Client{Timeout: 5 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
 		return "", fmt.Errorf("runtime attestation is unavailable: %w", err)

@@ -2,6 +2,7 @@ package worker
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sort"
 	"strconv"
@@ -18,6 +19,9 @@ import (
 	"gpustack.ai/gpustack/pkg/modelstore"
 	"gpustack.ai/gpustack/pkg/modeltransfer/authorization"
 	"gpustack.ai/gpustack/pkg/nodefeature"
+	"gpustack.ai/gpustack/pkg/setting"
+	"gpustack.ai/gpustack/pkg/worker/kvcache/inject"
+	"gpustack.ai/gpustack/pkg/worker/runtimecontrol"
 	"gpustack.ai/gpustack/pkg/worker/settings"
 )
 
@@ -137,7 +141,11 @@ func applyModelDeploymentModelTransferPolicy(
 		w.Render.Delivery != workercore.ModelDeploymentModelDeliveryEngine {
 		return nil
 	}
-	policy := modelDeploymentModelTransferPolicy(ctx)
+	policy, err := modelDeploymentModelTransferPolicyStrict(ctx)
+	if err != nil {
+		return fmt.Errorf("read remote delivery policy: %w", err)
+	}
+	w.RemotePolicy = policy
 	if policy != settings.ModelArtifactRemoteDeliveryRequire &&
 		policy != settings.ModelArtifactRemoteDeliveryPrefer {
 		return nil
@@ -160,7 +168,7 @@ func applyModelDeploymentModelTransferPolicy(
 		return nil
 	}
 
-	sourceReady, sourceReadyUntil, err := modelDeploymentModelTransferSourceReady(ctx, cli, ma)
+	sourceReady, sourceReadyUntil, sourceManufacturers, err := modelDeploymentModelTransferSourceReady(ctx, cli, ma)
 	if err != nil {
 		return err
 	}
@@ -179,6 +187,8 @@ func applyModelDeploymentModelTransferPolicy(
 	remote.Delivery = workercore.ModelDeploymentModelDeliveryRemote
 	remote.ModelTransferPolicy = policy
 	remote.SourceReady = sourceReady
+	remote.ModelTransferSourceManufacturers = sourceManufacturers
+	remote.ModelTransferBaseRender = &base
 	if policy == settings.ModelArtifactRemoteDeliveryPrefer {
 		// Only Prefer declares a fallback: Require's answer to every
 		// failure is the visible wait, and its render names no fallback a
@@ -217,6 +227,22 @@ var modelDeploymentModelTransferPolicy = func(ctx context.Context) string {
 	return settings.ModelArtifactRemoteDeliveryPolicy.ShouldValueFromRemote(ctx)
 }
 
+// modelDeploymentModelTransferPolicyStrict reads the cluster's remote delivery policy
+// from the delegated settings Secret, returning the setting's default when the Secret or
+// key is absent and surfacing transient API read errors instead of falling back to Prefer.
+var modelDeploymentModelTransferPolicyStrict = readModelDeploymentModelTransferPolicyStrict
+
+func readModelDeploymentModelTransferPolicyStrict(ctx context.Context) (string, error) {
+	val, err := settings.ModelArtifactRemoteDeliveryPolicy.ValueFromRemote(ctx)
+	if err == nil {
+		return val, nil
+	}
+	if kerrors.IsNotFound(err) || errors.Is(err, setting.ErrSettingNotFound) {
+		return val, nil
+	}
+	return "", err
+}
+
 // modelDeploymentModelTransferEngines are the engines a remote delivery qualifies: a
 // managed role whose engine loads weights through one of the local-reader
 // adapters. vLLM-Ascend is not a separate engine here — it is the vLLM
@@ -243,13 +269,21 @@ type modelTransferTuple struct {
 // its backend. It is a variable so a test can install a scoped fixture.
 var modelDeploymentModelTransferQualified = modelDeploymentModelTransferDefaultQualified
 
-// modelDeploymentModelTransferDefaultQualified admits the NVIDIA NIXL tuples
-// for vLLM and SGLang after policy opt-in. This routing allowlist does not
+// modelDeploymentModelTransferDefaultQualified admits the NVIDIA NIXL and Ascend HIXL
+// tuples for vLLM and SGLang after policy opt-in. This routing allowlist does not
 // establish hardware or safety acceptance.
 func modelDeploymentModelTransferDefaultQualified(tuple modelTransferTuple) bool {
-	return tuple.Manufacturer == nodefeature.ManufacturerNVIDIA &&
-		tuple.Backend == "nixl" &&
-		modelDeploymentModelTransferEngineSupported(tuple.Engine)
+	if !modelDeploymentModelTransferEngineSupported(tuple.Engine) {
+		return false
+	}
+	switch tuple.Manufacturer {
+	case nodefeature.ManufacturerNVIDIA:
+		return tuple.Backend == "nixl"
+	case nodefeature.ManufacturerAscend:
+		return tuple.Backend == "hixl"
+	default:
+		return false
+	}
 }
 
 // modelDeploymentModelTransferNoTupleQualified is the fixture answer when no
@@ -322,7 +356,9 @@ const (
 func modelDeploymentModelTransferRoleQualification(
 	md *workercore.ModelDeployment, role *workercore.ModelDeploymentRole, manufacturer string,
 ) modelTransferQualification {
-	if len(role.Command) > 0 || modelDeploymentRoleHasConflictingLoadFormat(md.Spec.Engine.Name, role.ExtraArgs) {
+	if len(role.Command) > 0 ||
+		modelDeploymentRoleHasConflictingLoadFormat(md.Spec.Engine.Name, role.ExtraArgs) ||
+		modelDeploymentRoleUsesEPLB(md, role) {
 		return modelTransferRoleIneligible
 	}
 	if modelDeploymentModelTransferCandidateBackend(manufacturer, md.Spec.Engine.Name) == "" {
@@ -333,6 +369,49 @@ func modelDeploymentModelTransferRoleQualification(
 	}
 
 	return modelTransferTupleQualified
+}
+
+// modelDeploymentRoleUsesEPLB reports whether a managed vLLM role enables expert load balancing
+// (either synthesized for Elastic EP or explicitly requested in extraArgs). The vLLM
+// model-transfer adapter refuses enable_eplb before loading, so such roles are ineligible.
+func modelDeploymentRoleUsesEPLB(md *workercore.ModelDeployment, role *workercore.ModelDeploymentRole) bool {
+	if md == nil || role == nil || md.Spec.Engine.Name != workercore.ModelDeploymentEngineVLLM {
+		return false
+	}
+	if runtimecontrol.RoleHasElasticEP(role) {
+		return true
+	}
+	enabled := false
+	for _, arg := range role.ExtraArgs {
+		if arg == "--" {
+			break
+		}
+		trimmed := strings.TrimSpace(arg)
+		switch trimmed {
+		case "--enable-eplb", "--enable_eplb":
+			enabled = true
+			continue
+		case "--no-enable-eplb", "--no_enable_eplb":
+			enabled = false
+			continue
+		}
+		var val string
+		switch {
+		case strings.HasPrefix(trimmed, "--enable-eplb="):
+			val = trimmed[len("--enable-eplb="):]
+		case strings.HasPrefix(trimmed, "--enable_eplb="):
+			val = trimmed[len("--enable_eplb="):]
+		default:
+			continue
+		}
+		switch strings.ToLower(strings.TrimSpace(val)) {
+		case "false", "0", "no", "off":
+			enabled = false
+		default:
+			enabled = true
+		}
+	}
+	return enabled
 }
 
 // modelDeploymentRoleHasConflictingLoadFormat reports whether args set a
@@ -416,9 +495,9 @@ func modelDeploymentModelTransferLiveRemote(pods []core.Pod) sets.Set[string] {
 }
 
 // modelDeploymentModelTransferSourceReady observes whether a prepared source serves
-// the artifact's digest. It is a variable so a test can reach the state a prepared
-// source produces; production always runs the observation.
-var modelDeploymentModelTransferSourceReady = modelDeploymentModelTransferSourceObserved
+// the artifact's digest together with the serving vendor scopes. It is a variable so a
+// test can reach the state a prepared source produces; production always runs the observation.
+var modelDeploymentModelTransferSourceReady = modelDeploymentModelTransferSourceObservedWithManufacturers
 
 // modelTransferForRole resolves a role's default weights render under a remote delivery.
 // A qualified role keeps the remote render. A role whose tuple no acceptance has
@@ -436,6 +515,30 @@ func (a *ModelDeploymentArtifactRender) modelTransferForRole(
 ) (*ModelDeploymentArtifactRender, string, string) {
 	qualification := modelDeploymentModelTransferRoleQualification(md, role, manufacturer)
 	if qualification == modelTransferTupleQualified {
+		if a.ModelTransferPolicy == settings.ModelArtifactRemoteDeliveryPrefer &&
+			!servesRemote &&
+			a.ModelTransferSourceManufacturers.Len() > 0 &&
+			!a.ModelTransferSourceManufacturers.Has(strings.ToLower(strings.TrimSpace(manufacturer))) {
+			if a.ModelTransferBaseRender != nil {
+				local := *a.ModelTransferBaseRender
+				if modelDeploymentUsesModelExpress(md) {
+					local.ModelTransferConfigMap = a.ModelTransferConfigMap
+				}
+				return &local, "", ""
+			}
+			local := a.modelTransferFallbackRender()
+			if local != nil {
+				local.ModelTransferPolicy = ""
+				local.SourceReady = false
+				local.ModelTransferBackend = ""
+				local.ModelTransferEFA = false
+				local.ModelTransferSourceManufacturers = nil
+				if !modelDeploymentUsesModelExpress(md) {
+					local.ModelTransferConfigMap = ""
+				}
+			}
+			return local, "", ""
+		}
 		remote := *a
 		return &remote, "", ""
 	}
@@ -552,6 +655,8 @@ func (a *ModelDeploymentArtifactRender) modelTransferFallbackRenderFor(
 		out := *a
 		out.Delivery = fallback
 		out.ModelTransferFallback = ""
+		out.ModelTransferAscendA5 = false
+		out.ModelTransferAscendHostRoCE = false
 
 		return &out
 	default:
@@ -559,11 +664,16 @@ func (a *ModelDeploymentArtifactRender) modelTransferFallbackRenderFor(
 	}
 }
 
+const modelDeploymentModelTransferAscendHostRoCEGlobalResourceConfig = `{"comm_resource_config.protocol_desc":["roce:host"],` +
+	`"local_comm_res_path":"/etc/hixlep"}`
+
 // applyModelTransfer decorates a rendered main container for a remote delivery: the
 // bootstrap that installs the staged wheel before the engine starts, the
 // load format that selects the model-transfer adapter, and the env the adapter reads.
 // On the nixl backend it also defaults GPUSTACK_MODEL_TRANSFER_NIXL_BACKEND to LIBFABRIC
-// when ModelTransferEFA is true and UCX otherwise. It is a no-op for every other delivery.
+// when ModelTransferEFA is true and UCX otherwise. On Ascend A5 hixl it defaults flat-key
+// ASCEND_GLOBAL_RESOURCE_CONFIG on Host RoCE or ASCEND_LOCAL_COMM_RES on UB. It is a no-op
+// for every other delivery.
 func (a *ModelDeploymentArtifactRender) applyModelTransfer(c *core.Container, engine string) {
 	if a.Delivery != workercore.ModelDeploymentModelDeliveryRemote {
 		return
@@ -600,6 +710,19 @@ func (a *ModelDeploymentArtifactRender) applyModelTransfer(c *core.Container, en
 			Name:  modelDeploymentModelTransferEnvNIXLBackend,
 			Value: nixlPlugin,
 		}})
+	}
+	if a.ModelTransferBackend == "hixl" && a.ModelTransferAscendA5 {
+		if a.ModelTransferAscendHostRoCE {
+			c.Env = appendModelDeploymentEnvIfAbsent(c.Env, []core.EnvVar{{
+				Name:  inject.AscendGlobalResourceConfigEnv,
+				Value: modelDeploymentModelTransferAscendHostRoCEGlobalResourceConfig,
+			}})
+		} else {
+			c.Env = appendModelDeploymentEnvIfAbsent(c.Env, []core.EnvVar{{
+				Name:  inject.AscendLocalCommResEnv,
+				Value: inject.AscendLocalCommResAutoGenValue,
+			}})
+		}
 	}
 }
 
@@ -768,7 +891,7 @@ func modelDeploymentModelTransferReplicaOverride(
 		}
 		for j := range remote.Roles[i].Replicas {
 			r := &remote.Roles[i].Replicas[j]
-			if int(r.Ordinal) == ordinal && r.Delivery != workercore.ModelDeploymentModelDeliveryRemote {
+			if int(r.Ordinal) == ordinal && r.Delivery != workercore.ModelDeploymentModelDeliveryRemote && r.FallbackAttempts > 0 {
 				return r.Delivery
 			}
 		}
@@ -1005,7 +1128,11 @@ func modelDeploymentModelTransferObserveStatus(
 
 	seen := map[string]map[int32]bool{}
 	for _, view := range modelDeploymentGroupPodsByReplica(pods) {
-		observed := modelDeploymentModelTransferReplicaLoad(view, sourceReady)
+		roleSourceReady := sourceReady
+		if ready, ok := weights.RoleSourceReady[view.Role]; ok {
+			roleSourceReady = ready
+		}
+		observed := modelDeploymentModelTransferReplicaLoad(view, roleSourceReady)
 		if observed.Delivery == "" {
 			continue
 		}
@@ -1158,20 +1285,25 @@ func modelDeploymentModelTransferWeightsVoice(
 		if role == nil || !view.Seated || view.Ordinal < 0 || int32(view.Ordinal) >= role.Replicas {
 			continue
 		}
-		observed := modelDeploymentModelTransferReplicaLoad(view, weights.Render.SourceReady)
+		observed := modelDeploymentModelTransferReplicaLoad(view, weights.sourceReadyForRole(view.Role))
 		if observed.Delivery != "" && observed.Load == workercore.ModelDeploymentRemoteLoadStateLoaded {
 			loaded[view.Role]++
 		}
 	}
 	var waiting int32
+	awaitingSource := false
 	for _, role := range holder.Spec.Roles {
-		waiting += max(0, role.Replicas-loaded[role.Name])
+		roleWaiting := max(0, role.Replicas-loaded[role.Name])
+		waiting += roleWaiting
+		if roleWaiting > 0 && !weights.sourceReadyForRole(role.Name) {
+			awaitingSource = true
+		}
 	}
 	switch {
 	case waiting == 0:
 		ModelDeploymentConditionWeightsReady.True(holder, modelWeightsReasonLoaded,
 			"every desired replica loaded its weights")
-	case !weights.Render.SourceReady:
+	case awaitingSource:
 		ModelDeploymentConditionWeightsReady.False(holder, modelWeightsReasonAwaitingSource, fmt.Sprintf(
 			"%d replicas have not completed loading %s and no prepared source is available", waiting, weights.Render.ManifestDigest,
 		))
