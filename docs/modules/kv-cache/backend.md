@@ -142,10 +142,8 @@ Beside the `-cpu` default, this project publishes `mirrored-mooncake` in one bui
 (`cuda`, `cann`, `rocm`). Tags carry the toolchain version: `<mooncake-version>-<variant><toolchain>`,
 such as `0.3.13.post1-cuda13.0`.
 
-All official `mirrored-mooncake` build targets (`-cpu`, `cuda`, `cann`, `rocm`) disable
+All published official `mirrored-mooncake` build targets (`-cpu`, `cuda`, `cann`, `rocm`) disable
 `USE_VRAM_SEGMENT` (`USE_VRAM_SEGMENT=OFF`) and allocate store segments in Host RAM (`DRAM`) only.
-Older published `0.3.13.post1-cuda*` tags enabled `USE_VRAM_SEGMENT=ON`, whereas normalized `0.3.14+`
-builds keep `USE_VRAM_SEGMENT=OFF` across every target.
 
 - **`-cpu` default**: Links `libibverbs` and AWS `libfabric` for TCP, RDMA, and EFA Host-RAM stores on NVIDIA and AMD nodes.
 - **`-cann` variant**: Required on Ascend because `vllm-ascend` speaks HIXL (`protocol: ascend`), allocating Host RAM via ACL/HIXL.
