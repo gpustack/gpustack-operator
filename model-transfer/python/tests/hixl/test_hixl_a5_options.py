@@ -964,7 +964,8 @@ class TestSourceWorkerPreflightVsQuarantine:
             "retainedGenerations": [],
         }
 
-        # Direct abort/close during preflight retry also stops cleanly with 0 retained state.
+        # Direct abort/close after native_start without broker drain must quarantine
+        # (preserving native_start ownership) while still releasing preflight ACL state.
         acl_abort = self._acl_runtime_lib(phy_id=6)
         worker_abort = NativeSourceWorker(
             make_control("gen-abort"),
@@ -977,16 +978,23 @@ class TestSourceWorkerPreflightVsQuarantine:
         t_abort = threading.Thread(target=worker_abort.start, daemon=True)
         t_abort.start()
         try:
-            eventually(lambda: "native_start:gen-abort" in call_order)
+            eventually(lambda: worker_abort._native_started)
             worker_abort.close()
             t_abort.join(timeout=2)
             assert not t_abort.is_alive()
-            assert worker_abort.state == "stopped"
+            assert worker_abort.state == "quarantined"
+            assert worker_abort._native_started is True
             assert worker_abort._native_attempted is False
-            assert quarantines == []
+            assert "close-with-native-state" in quarantines
             assert source_memory._ACL_RUNTIME is None
         finally:
-            worker_abort.close()
+            worker_abort._stop_event.set()
+            if worker_abort._control_thread is not None:
+                worker_abort._control_thread.join(timeout=2)
+            quarantines.clear()
+            for item in retained_source_states():
+                if item not in before_retained:
+                    release_source_retained(item, external_fence="test-cleanup")
 
         # 3) Now provide the endpoint file so preflight passes, and fail engine.initialize():
         #    native_start runs and the generation MUST still be quarantined.
