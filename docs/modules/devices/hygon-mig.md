@@ -1,21 +1,15 @@
 # Hygon MIG Operations
 
-An administrator sets the node's partitioning mode. The Device Manager reads it and publishes it
-in `Devices`; GPUStack does not change the mode. When a workload is scheduled, GPUStack creates its
-GPU and Compute Instance pair and removes the pair when the `Pod` exits.
-
-Hygon calls the feature MIG. Its management library exports NVML symbol names, and `hy-smi mig`
-mirrors `nvidia-smi mig`. Hygon therefore uses `mig` in its resource key (see [Accelerator
-Requests](requests.md#two-families-two-populations)).
-
-The mode applies to the whole node. Once partitioned, that node serves only partition requests. Read
-[Limitations](#limitations) before planning a rollout.
+Administrators toggle Hygon DCU partitioning mode **node-wide** with `hy-smi` and restart the
+Device Manager `DaemonSet` to re-detect. Once enabled, GPUStack dynamically creates and destroys GPU
+and Compute Instance pairs for scheduled workloads under `hygon.com/dcu.partitioned.mig-<profile>`
+([Accelerator Requests](requests.md#two-families-two-populations)).
 
 ## Contents
 
 - [Prerequisites](#prerequisites)
 - [Partition profile discovery](#partition-profile-discovery)
-- [Requesting a partition](#requesting-a-partition)
+- [Partition requests](#partition-requests)
 - [Limitations](#limitations)
 - [Enabling partitioning](#enabling-partitioning)
 - [Disabling partitioning](#disabling-partitioning)
@@ -24,96 +18,59 @@ The mode applies to the whole node. Once partitioned, that node serves only part
 
 ## Prerequisites
 
-**The driver must have been installed with virtualization support.** The vendor's installer takes a
-flag for it; a driver installed without it reports no partition profiles at all, and the node simply
-never advertises the family.
+- **Virtualization driver flag**: Install the Hygon driver with virtualization support enabled;
+  otherwise the driver exposes zero partition profiles.
+- **Zero `/dev/kfd` holders (including Device Manager)**: `hy-smi -mig` fails with `Set system level
+  mig mode failed. The device is exist and may be in use.` while any process (including the running
+  Device Manager `Pod`) holds `/dev/kfd` (`hymgr` holding `/dev/mkfd` does not block). Verify empty
+  output before switching:
 
-**Change the mode only on a node free of accelerator workloads, Device Manager included.** The switch
-is refused while any process holds the driver, and the Device Manager `Pod` is such a process — it
-holds `/dev/kfd` for its whole life. The vendor tool reports:
-
-```text
-Error: Set system level mig mode failed. The device is exist and may be in use.
-```
-
-which names no holder. Find them through the control node's open file descriptors:
-
-```bash
-for p in /proc/[0-9]*; do pid=${p#/proc/}; n=$(ls -l "$p"/fd 2>/dev/null | grep -c kfd); \
+  ```bash
+  for p in /proc/[0-9]*; do pid=${p#/proc/}; n=$(ls -l "$p"/fd 2>/dev/null | grep -c kfd); \
     [ "$n" -gt 0 ] 2>/dev/null && echo "pid=$pid fds=$n $(tr -d '\0' < "$p"/cmdline)"; done
-```
+  ```
 
-Empty output is the precondition. The vendor's own `hymgr` daemon holds `/dev/mkfd` permanently and
-does **not** block the switch; only `/dev/kfd` holders do.
-
-**A mode change is not noticed until the Device Manager restarts.** The re-detect trigger watches the
-device set and health, not the mode, so `hy-smi -mig` never reaches the cluster by itself. This is
-pre-existing in the shared detector, already true for [NVIDIA MIG](nvidia-mig.md); restart the node's
-Device Manager `DaemonSet` after every change.
+- **Device Manager restart**: Restart `gpustack-operator-device-manager-hygon` after every mode
+  change so `Devices` re-detects.
 
 ## Partition profile discovery
 
-**Profiles are discovered from the driver, never computed.** Where [NVIDIA's are a fixed per-product
-set](nvidia-mig.md#partition-profile-discovery), the detector here offers exactly the
-GPU-instance profiles the driver reports for the card in front of it, with the geometry and the legal
-placements the driver gives.
+Device Manager queries supported profiles and legal placements directly from the driver (computing
+full-card CU counts from `profile CUs × max instances` while MIG mode is active). Measured on a
+C-3000 "BW" DCU (`4` slices, `80` CUs, `65520 MiB`):
 
-On a C-3000 "BW" card (four GPU slices, 80 compute units, 65520 MiB) the driver reports three:
-
-| Profile | Slices | Compute units | Memory | Per card | Legal placements |
-| --- | --- | --- | --- | --- | --- |
-| `2g.15gb` | 1 | 20 | 16380 MiB | 4 | `0:1 1:1 2:1 3:1` |
-| `4g.31gb` | 2 | 40 | 32760 MiB | 2 | `0:2 2:2` |
-| `8g.63gb` | 4 | 80 | 65520 MiB | 1 | `0:4` |
-
-A card offering no profile of a given width simply has none: every card measured offers nothing
-three slices wide, and that gap is normal rather than a fault.
-
-**A card's compute-unit count comes from the profiles while the mode is on.** The HSA runtime, which
-the detector reads it from otherwise, exposes at most one partition per process once the node is
-partitioned, so it answers for one card with a partition's geometry rather than for every card with
-the card's. Each profile carries the card's real count factored as its own units times the instances
-that fill the card, and every profile of a measured card agreed.
+| Profile | Slices | Compute units | Memory | Max per card | Legal placements |
+|---|---|---|---|---|---|
+| `2g.15gb` | `1` | `20` | `16380 MiB` | `4` | `0:1 1:1 2:1 3:1` |
+| `4g.31gb` | `2` | `40` | `32760 MiB` | `2` | `0:2 2:2` |
+| `8g.63gb` | `4` | `80` | `65520 MiB` | `1` | `0:4` |
 
 ### Driver registry
 
-The driver keeps its own on-disk record of what exists, and this operator reads and depends on all
-three parts of it. It is the vendor's directory, created and populated by the driver:
+The Device Manager `DaemonSet` mounts `/etc/dmi_mig_config` **writable** so driver library calls can
+create and remove instance records, and reads `dev<N>` (PCI bus mapping) plus
+`ci/dev<N>gi<G>ci<C>.conf` (`mig_uuid:`) to bind partition handles back to physical cards.
 
-```text
-/etc/dmi_mig_config/
-├── dev0 … dev<N>     one line per physical card: its PCI address, e.g. 0000:09:00.0
-├── gi/               one file per live GPU instance
-└── ci/               one file per live compute instance, dev<N>gi<G>ci<C>.conf
-```
+## Partition requests
 
-Two of those are the only source for what they carry, because the management library does not answer
-for either:
-
-- **`dev<N>` is how a device index becomes a card.** `nvmlDeviceGetPciInfo` returns success and writes
-  an empty string, and `nvmlDeviceGetUUID` is not an exported symbol at all, so tying a Multi-Instance
-  handle back to a physical card goes through this file or nowhere.
-- **A `ci/*.conf` is where a partition's identity lives.** It is the GPU-instance block and the
-  compute-instance block concatenated, ending in a `mig_uuid:` line. The library exposes no getter for
-  it.
-
-**The Device Manager mounts this directory writable, and that is the one privilege partitioning adds.**
-It creates and destroys instances through the library from inside its own process, and the driver writes
-and removes these files as a side effect of those calls — so a read-only mount would fail the create
-rather than merely hide the record.
-
-## Requesting a partition
-
-A partition request names **both** the family and the profile, and asks for exactly one of each:
+Request both `hygon.com/dcu.partitioned: "1"` and `hygon.com/dcu.partitioned.mig-<profile>: "1"` on
+a Kueue-labeled `Pod` (or set `acceleratorPartitionedProfile` on an `Instance`):
 
 ```yaml
 apiVersion: v1
 kind: Pod
 metadata:
   name: hygon-partition
+  namespace: team-a
+  labels:
+    kueue.x-k8s.io/queue-name: <local-queue>
 spec:
   containers:
     - name: main
+      image: ubuntu:24.04
+      command:
+        - sleep
+        - "86400"
       resources:
         limits:
           hygon.com/dcu.partitioned: "1"
@@ -123,74 +80,32 @@ spec:
           hygon.com/dcu.partitioned.mig-2g.15gb: "1"
 ```
 
-Naming only the profile allocates nothing; naming only the family is refused at admission with a
-message saying a profile is required.
-
-**What the container gets.** The Device Manager reserves a GPU instance of the profile at a free
-placement, creates the whole-instance compute instance inside it, and injects:
-
-- the node's control device nodes, `/dev/kfd` and `/dev/mkfd`;
-- the card's own DRM nodes;
-- the vendor user-space runtime;
-- the instance's registry file, bound at **its own host path**, read-only;
-- `DMI_MIG_VISIBLE_DEVICE=MIG-<uuid>`.
-
-The registry file is the load-bearing one. The vendor runtime scans `/etc/dmi_mig_config/ci` by
-absolute path, so a file bound anywhere else is not found and the workload reports no devices at all.
-
-A container holding a `2g.15gb` partition sees exactly one device of 20 compute units and 16380 MiB.
+Device Manager carves the GPU/Compute Instance pair and injects `/dev/kfd`, `/dev/mkfd`, card DRM
+nodes, the user-space runtime, a read-only bind mount of `/etc/dmi_mig_config/ci/dev<N>gi<G>ci<C>.conf`
+at its exact host path, and `DMI_MIG_VISIBLE_DEVICE=MIG-<uuid>`.
 
 ## Limitations
 
-**A container can use exactly one partition.** The vendor runtime makes one partition visible
-whatever it is given: binding two registry files, passing a comma-separated list of `MIG-`-prefixed
-identifiers, and passing `all` each yield a single visible device, on two driver generations.
-
-A request granted more than one accelerator is therefore refused rather than half-served: carving on
-every card would consume quota the workload can never reach. Split such a workload into one `Pod` per
-partition.
-
-**A partitioned node serves only partitions.** With the mode on, a container given the device nodes
-but no registry file finds **no device at all** (measured on a node where five of eight cards held
-no instance whatsoever).
-
-So a partitioned node can serve neither whole-card nor logically sliced requests, and the operator
-stops advertising both: `hygon.com/dcu` and `hygon.com/dcu.sliced` go to zero while
-`hygon.com/dcu.partitioned` carries the node's whole capacity. Plan a node as partitioned or not,
-never as mixed.
-
-**The mode is node-wide.** The vendor's switch takes no device selector, and neither does the
-library's query. There is no such thing as one card of a host being partitioned while another is
-not: the mixed-population layout NVIDIA supports has no analogue here.
-
-**A directory in the registry poisons an instance id.** The driver writes plain files under
-`/etc/dmi_mig_config/ci`, and a container is given one of them as a bind mount. A container runtime
-asked to bind a source that does not exist creates it (as a directory), so an instance destroyed
-between its allocation and its container starting leaves a directory sitting on its name.
-
-The driver can then never write that name again: creating a compute instance whose id maps to it
-fails with `INSUFFICIENT_RESOURCES`, and because ids are handed back out after a destroy, the failure
-outlives everything that caused it. The Device Manager sweeps such directories away on every reclaim
-pass; if you meet one on a node running an older build, remove it with `rmdir`, which `rm` refuses.
-
-**A recreated partition is a new grant.** Unlike NVIDIA's placement-derived MIG UUIDs, this vendor
-issues a fresh identity every time an instance is created, even for the same profile at the same
-placement on the same card. An identity recorded against a destroyed partition never matches its
-replacement, which is what makes the operator's own reuse checks exact, but it also means a
-partition identity is not a durable name for a slot.
+- **Node-wide, partition-only mode**: `hy-smi -mig` takes no `-i` card flag. Once enabled, every
+  card on the `Node` requires a MIG registry file (`hygon.com/dcu` and `hygon.com/dcu.sliced` drop
+  to `0`); mixed whole-card and partitioned DCUs on one `Node` are impossible.
+- **Single partition per container**: The Hygon runtime exposes at most one partition per container
+  regardless of `DMI_MIG_VISIBLE_DEVICE`; multi-partition workloads must use one `Pod` per
+  partition.
+- **Registry directory poisoning**: If a container starts after its `.conf` file was removed, the
+  container runtime creates an empty directory at `ci/dev<N>...conf`, causing future creates to fail
+  with `INSUFFICIENT_RESOURCES`. Current Device Manager builds sweep stray directories automatically
+  (use `rmdir` manually on older builds).
+- **Ephemeral MIG UUIDs**: Hygon generates a fresh `mig_uuid` on every create, even at the same slot.
 
 ## Enabling partitioning
 
-The mode switch itself is Hygon's procedure, not this operator's: [DCU Multi-Instance
-使用手册](https://developer.sourcefind.cn/document/9169ef18-c10d-11f0-b077-0242ac150003?id=4a82aeed-e242-11f0-b9e4-0242ac150003&title=3+DCU+Multi-Instance%E4%BD%BF%E7%94%A8%E6%89%8B%E5%86%8C&version=9169ef18-c10d-11f0-b077-0242ac150003)
-is the authority on `hy-smi -mig` and on the driver support it needs.
+Consult the vendor [DCU Multi-Instance manual](https://developer.sourcefind.cn/document/9169ef18-c10d-11f0-b077-0242ac150003?id=4a82aeed-e242-11f0-b9e4-0242ac150003&title=3+DCU+Multi-Instance%E4%BD%BF%E7%94%A8%E6%89%8B%E5%86%8C&version=9169ef18-c10d-11f0-b077-0242ac150003)
+(note: the long flag is `--multi-instance-gpu`, and `-i` is not supported):
 
-Two things below correct that manual: the long option is `--multi-instance-gpu`, not the
-`--multi-instance-dcu` its screenshot shows, and the switch takes no `-i`.
-
-1. **Drain the node's accelerator workloads**, and park the Device Manager `DaemonSet` — it holds
-   `/dev/kfd` and will otherwise block the switch. Confirm with the descriptor scan above.
-2. **Turn the mode on**, node-wide:
+1. Drain accelerator `Pod`s, scale down or cordon `gpustack-operator-device-manager-hygon` on the
+   `Node`, and verify zero `/dev/kfd` holders ([Prerequisites](#prerequisites)).
+2. Enable node-wide MIG mode (do not pre-carve instances manually):
 
    ```bash
    sudo hy-smi -mig 1
@@ -202,11 +117,7 @@ Two things below correct that manual: the long option is `--multi-instance-gpu`,
    Enabled mig mode successful.
    ```
 
-3. **Carve nothing by hand.** The operator creates and destroys instances per allocation; instances
-   left over from manual experimentation are collected as unclaimed on the next partition activity.
-4. **Restart the Device Manager `DaemonSet`.** Until it restarts, the cluster still sees the node's
-   pre-change capability.
-5. **Confirm** the node advertises the family and its profiles, and no longer advertises whole cards:
+3. Restore and restart `gpustack-operator-device-manager-hygon`, then verify allocatable keys:
 
    ```bash
    kubectl get node <node> -o jsonpath='{.status.allocatable}' | tr ',' '\n' | grep hygon
@@ -220,59 +131,37 @@ Two things below correct that manual: the long option is `--multi-instance-gpu`,
    "hygon.com/dcu.sliced":"0"
    ```
 
-> **Never leave a partitioned node with no instances and expect it to work for anything else.** With
-> the mode on and nothing carved, every card is unusable — the software stack fails to initialize.
-> That is the state between step 2 and the first allocation, and it is why step 1 drains first.
-
 ## Disabling partitioning
 
-The teardown order is forced by the driver, and each step refuses if the next has not happened:
+Follow the strict teardown order required by the driver:
 
-1. **Drain the node's partition workloads.** An instance a process holds cannot be destroyed; the
-   driver refuses it, and the operator's reclaim leaves it alone and retries.
-2. **Let the operator reclaim its instances**, or destroy them by hand — compute instances first,
-   then their GPU instances:
+1. Drain all partition `Pod`s and wait for automatic reclaim (or destroy manually per card, compute
+   instances before GPU instances):
 
    ```bash
    sudo hy-smi mig -dci -i <card>
    sudo hy-smi mig -dgi -i <card>
    ```
 
-3. **Park the Device Manager `DaemonSet`**, for the same reason as enabling.
-4. **Turn the mode off:**
-
-   ```bash
-   sudo hy-smi -mig 0
-   ```
-
-   It is refused while any GPU instance survives anywhere on the node.
-5. **Restart the Device Manager `DaemonSet`**, and confirm the node advertises whole cards and logical
-   slices again.
+2. Stop `gpustack-operator-device-manager-hygon` on the `Node` so `/dev/kfd` is closed.
+3. Disable node-wide MIG mode (`sudo hy-smi -mig 0`).
+4. Start `gpustack-operator-device-manager-hygon` and confirm `hygon.com/dcu` and
+   `hygon.com/dcu.sliced` return.
 
 ## Node reboot recovery
 
-Instances do **not** survive a reboot, and neither does the registry: `/etc/dmi_mig_config` is
-recreated by the driver when the mode comes up. The mode itself is a driver setting — check it after
-a reboot rather than assuming it, and restart the Device Manager if it changed.
-
-The operator needs no recovery step of its own. Ownership records whose `Pod`s are gone are reclaimed
-on the next pass, and a record naming an instance the driver no longer has is refused rather than
-acted on.
+MIG instances and `/etc/dmi_mig_config` reset on host reboot. Verify `hy-smi` MIG mode after reboot,
+restart `gpustack-operator-device-manager-hygon` if needed, and recreate pre-reboot partition
+`Pod`s (stale ownership markers are reclaimed automatically).
 
 ## Operator boundaries
 
-- **Enable, disable or reconfigure the mode.** It is node-wide, it is refused while the Device
-  Manager is running, and turning it on with nothing carved makes every card unusable. It is a
-  provisioning action, like installing the driver.
-- **Serve a workload from more than one partition.** See [Limitations](#limitations).
-- **Mix partitioned and whole cards on one node.** The hardware does not offer it.
-- **Preserve a partition across its `Pod`.** An instance is created for an allocation and destroyed
-  when the allocation goes; nothing is kept warm.
+GPUStack creates and reclaims single-CI partition instances per `Pod`. It never toggles node-wide
+`hy-smi -mig` mode, mixes whole and partitioned DCUs on one `Node`, grants multiple partitions to
+one container, or keeps warm unclaimed partitions.
 
 ---
 
-**See also** — [Accelerator Requests](requests.md) (the request vocabulary and the
-two-family split) · [NVIDIA MIG Operations](nvidia-mig.md) (the runbook this one mirrors) · [T-Head
-MIG Operations](thead-mig.md) (the other vendor sharing the `mig` word).
+**See also** — [Accelerator Requests](requests.md) (request rules and family split) · [NVIDIA MIG Operations](nvidia-mig.md) (per-GPU MIG runbook) · [T-Head MIG Operations](thead-mig.md) (PPU MIG runbook)
 
-**Next** → [T-Head MIG Operations](thead-mig.md) — hardware partitioning on T-Head PPU nodes.
+**Next** → [T-Head MIG Operations](thead-mig.md) — enable and operate hardware partitions on T-Head PPUs.

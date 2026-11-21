@@ -649,8 +649,8 @@ CDI request appears here as well.
 
 For a partition-backed owner, the allocator reads the owner's `.partitioned.<kind>-<profile>`
 request and verifies that its durable node-local ownership record still names a live partition.
-See [NVIDIA MIG](../modules/devices/nvidia-mig.md#requesting-a-partition), [T-Head
-MIG](../modules/devices/thead-mig.md#requesting-a-partition) and [Hygon MIG](../modules/devices/hygon-mig.md#requesting-a-partition).
+See [NVIDIA MIG](../modules/devices/nvidia-mig.md#partition-requests), [T-Head
+MIG](../modules/devices/thead-mig.md#partition-requests) and [Hygon MIG](../modules/devices/hygon-mig.md#partition-requests).
 
 A responder lacking that capability, or unable to substantiate the identity, fails the admission
 closed rather than widening the grant back to the accelerator.

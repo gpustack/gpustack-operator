@@ -30,7 +30,7 @@ tables, raw captures and deterministic simulations; public guides own operator p
 | Check replica PreStop drain and retirement budgets | [Model Deployment Shutdown](model-deployment-shutdown.md) | [Configuration](../modules/model-deployment/configuration.md), [Model Deployment Scaling](../modules/model-deployment/scaling.md) |
 | Check capacity-prior math, normalization and status schemas | [Scaling Internals](model-deployment-scaling-internals.md) | [Model Deployment Scaling](../modules/model-deployment/scaling.md) |
 | Compare scaler algorithms on deterministic synthetic load | [Model Deployment Scaling Simulation](model-deployment-scaling-simulation.md) | [Model Deployment Scaling Benchmark](../modules/model-deployment/scaling-benchmark.md) |
-| Query `Instance` utilization subresource and node gauges | [Instance Metrics Reference](instances-metrics.md) | [GPU Instances](../modules/instances/_index.md) |
+| Query `Instance` utilization subresource and node gauges | [Instance Metrics Reference](instances-metrics.md) | [GPU Instance Operations](../modules/instances/operations.md) |
 
 ## Exact aliases
 
@@ -70,6 +70,7 @@ tables, raw captures and deterministic simulations; public guides own operator p
 | `EndpointEligibility`, `NotObserved` | Condition | [Model Deployment Status](model-deployment-status.md#endpointeligibility) |
 | `ElasticResize`, `ScaleRefused`, `WorldUnprovable` | Condition | [Model Deployment Status](model-deployment-status.md#elasticresize) |
 | `RuntimeControlSynced` | Condition | [Model Deployment Status](model-deployment-status.md#runtimecontrolsynced) |
+| `gpustack-engine-sentinel`, `/gpustack/v1/ready`, `gpustack_engine_sentinel.drain` | Runtime | [Model Deployment Shutdown](model-deployment-shutdown.md#drain-window), [Online Runtime Control](../modules/model-deployment/runtime-control.md) |
 | `Withdrawing`, `Draining`, `Settling`, `Aborted` | Lifecycle | [Model Deployment Shutdown](model-deployment-shutdown.md#retirement-protocol) |
 | `ModelDeploymentScalerCapacityPriorCatalog`, `compatibilityFingerprint`, `resolvedCapacityPriors` | Scaling | [Scaling Internals](model-deployment-scaling-internals.md#capacity-prior-catalog) |
 | `Proportional`, `TokenThroughput`, `Predictive` | Simulation | [Model Deployment Scaling Simulation](model-deployment-scaling-simulation.md#fixture-and-provenance) |

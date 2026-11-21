@@ -431,7 +431,7 @@ Expand–contract DAG: Wave 1 builds additive tooling and rules with zero breaka
       Acceptance: Applies the pilot-approved editorial standard across all remaining 13 walkthroughs (natural human voice, immutable inputs preserved, unreferenced hashes/Pod UIDs/long raw dumps stripped), `getting-started/` (`architecture.md <= 200` lines), and `operate/` (80% ASD-STE100, unified terminology and singular/plural forms, concise headings and footnotes).
       Verify: `make lint docs`
 
-- [ ] **T12 · Editorial rewrite: Devices, RDMA, Topology, KV Cache, Model Delivery, and GPU Instances**
+- [x] **T12 · Editorial rewrite: Devices, RDMA, Topology, KV Cache, Model Delivery, and GPU Instances**
       Blocked by: T10
       Owns: `docs/modules/devices/**`, `docs/modules/rdma/**`, `docs/modules/topology/**`, `docs/modules/kv-cache/**`, `docs/modules/model-delivery/**`, `docs/modules/instances/**`
       Acceptance: Applies the pilot-approved 80% ASD-STE100 configuration standard across all 24 retained pages in these six modules, removes residual duplication, enforces unified terminology and singular/plural rules, and verifies self-sufficient operator tasks (pending Pod, refused KV injection, missing metrics, persisted `spec.unitResources`).

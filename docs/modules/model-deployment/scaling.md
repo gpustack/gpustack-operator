@@ -269,7 +269,7 @@ spec:
 - **Admission behavior**: `CREATE` rejects unresolved priors when the target exists (warns if
   absent for GitOps ordering); `UPDATE` warns so you can suspend, switch to `Shadow` or fix fields.
   See [Suite 2: Capacity priors](scaling-benchmark.md#suite-2-capacity-priors) and
-  [Resolving a catalog prior](../../walkthroughs/model-deployment/scaling.md#resolving-a-catalog-prior).
+  [Resolving a catalog prior](../../walkthroughs/model-deployment/scaling.md#catalog-prior-resolution).
 
 ### Target eligibility
 

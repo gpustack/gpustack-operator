@@ -1,6 +1,7 @@
 # Topology
 
-GPUStack describes domains such as zones and racks. Kueue accounts for capacity within those domains.
+GPUStack models failure and fabric domains (regions, zones, racks, and network switches) so Kueue
+*topology-aware scheduling (TAS)* places multi-`Pod` replica groups inside a single domain.
 
 ## Contents
 
@@ -13,8 +14,9 @@ GPUStack describes domains such as zones and racks. Kueue accounts for capacity 
 
 ### Placement and scheduling
 
-A `TopologySource` can select an inventory path and hierarchy. Without a source, GPUStack uses the
-default profile. GPUStack publishes profiles and Kueue `Topology` resources for placement.
+A `TopologySource` selects a node inventory source and an ordered label hierarchy (without one,
+managed queues use a hostname-only default profile). The worker publishes Kueue `Topology` resources
+and binds them to `ResourceFlavor`s and `ClusterQueue`s.
 
 ![Topology discovery and placement flow](../../assets/diagrams/topology-flow.svg)
 
@@ -33,29 +35,36 @@ flowchart TD
 
 ### Topology sources
 
-Choose an inventory path in [Topology Operations](operations.md#choose-the-inventory-path), then
-configure [Node labels](operations.md#observe-existing-node-labels), a
-[ConfigMap snapshot](operations.md#publish-a-configmap-snapshot), or a
-[webhook](operations.md#publish-by-webhook). [Topology Operations](operations.md) covers verification
-and troubleshooting.
+Choose one inventory source in [Inventory path](operations.md#inventory-path), then configure
+[Topograph](operations.md#topograph-setup), [existing Node labels](operations.md#existing-node-labels),
+a [ConfigMap snapshot](operations.md#configmap-snapshot), or a
+[webhook snapshot](operations.md#webhook-snapshot).
 
 ## Operations
 
-1. **Step 1: Choose a source.** Select the inventory path that matches your cluster.
-2. **Step 2: Configure the source.** Apply the `TopologySource` manifest and any backing snapshot or webhook.
-3. **Step 3: Verify the objects.** Check the source, queue, assignment and `Pod` nodes, then [request a level](operations.md#request-a-level).
+### Step 1: Select source
 
-Use [Verification](operations.md#verification) for commands and expected status. Follow the
-[hierarchical placement walkthrough](../../walkthroughs/topology/hierarchical-placement.md) for an example.
+Pick the single inventory source that owns hierarchy labels for your `Node`s.
+
+### Step 2: Apply source
+
+Create the `TopologySource` (and any backing `ConfigMap` or HTTPS credentials).
+
+### Step 3: Verify placement
+
+Confirm profile labels, Kueue `Topology` objects, and `ClusterQueue` readiness in
+[Verification](operations.md#verification), then constrain serving roles in
+[Topology level requests](operations.md#topology-level-requests) or follow the
+[Hierarchical Placement Walkthrough](../../walkthroughs/topology/hierarchical-placement.md).
 
 ## Troubleshooting
 
-For a Pending group, follow [diagnosis](operations.md#diagnose-pending-workloads). Compare the
-requested domain with the queue, topology and available capacity.
+When replicas remain `Pending`, follow
+[Diagnose Pending workloads](operations.md#diagnose-pending-workloads) to compare requested topology
+levels, per-domain capacity, and profile alignment.
 
 ---
 
-**See also** — [RDMA Networking](../rdma/_index.md) (network endpoints) ·
-[Model Deployment](../model-deployment/_index.md) (multi-`Pod` inference)
+**See also** — [RDMA Networking](../rdma/_index.md) (NIC endpoints) · [Model Deployment](../model-deployment/_index.md) (multi-`Pod` serving roles)
 
-**Next** → [Topology-Aware Scheduling Operations](operations.md) — publish and verify a topology.
+**Next** → [Topology-Aware Scheduling Operations](operations.md) — publish domain hierarchies and diagnose TAS placement.

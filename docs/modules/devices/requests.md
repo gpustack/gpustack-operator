@@ -1,9 +1,8 @@
 # Accelerator Requests
 
-The `Pod` webhooks check these requests at creation and reject invalid ones before a container starts.
-They select `Pod`s with the `kueue.x-k8s.io/queue-name` label. Without that label, a `Pod` can still
-request device-plugin resources, but these checks and resource-unit calculations do not run.
-Pool defaults, queue quota, and Pending diagnosis are covered in [Pools and diagnosis](#pools-and-diagnosis).
+`Pod` admission webhooks validate accelerator requests and compute quota units at creation for every
+`Pod` carrying `kueue.x-k8s.io/queue-name`. Unlabeled `Pod`s bypass these checks and credit folds.
+See [Pools and diagnosis](#pools-and-diagnosis) to inspect pool capacity and `Pending` workloads.
 
 ## Contents
 
@@ -20,58 +19,47 @@ Pool defaults, queue quota, and Pending diagnosis are covered in [Pools and diag
 
 ## Two families, two populations
 
-An accelerator is shared in one of two physically incompatible ways, and GPUStack names them apart:
+GPUStack separates software slicing and hardware partitioning into disjoint resource families:
 
-| Term | Definition | Isolation | Example |
+| Family | Mechanism | Isolation | Example |
 |---|---|---|---|
-| **Logical slicing** (`.sliced*`) | software slicing of a whole accelerator | the manufacturer's own sharing facility caps compute and VRAM per container — [which facility, per manufacturer](#isolation-mode-selection) | 50% of an A10G |
-| **Physical partitioning** (`.partitioned*`) | hardware partitioning of an accelerator put into a partitioning mode | the hardware itself; the operator materializes the instance | an NVIDIA MIG `3g.40gb`, or a partition of a T-Head PPU or a Hygon DCU |
+| **Logical slicing** (`.sliced*`) | Software sharing of an unpartitioned card | Vendor runtime or preload shim caps VRAM and compute ([Isolation mode selection](#isolation-mode-selection)) | `50%` of an NVIDIA A10G |
+| **Physical partitioning** (`.partitioned*`) | Hardware instance on a MIG-enabled card | Hardware partition materialized by Device Manager | NVIDIA `mig-3g.40gb`, T-Head `mig-4g.48gb`, Hygon `mig-2g.15gb` |
 
-The two never apply to the same accelerator: one in a partitioning mode advertises **only** the partition
-family, an unpartitioned one **only** the whole-accelerator, shared and logical-slice families. Hence the
-four separate `InstanceType` views (`EX` / `SH` / `SL` / `PT`) — each accelerator feeds exactly one.
-
-`<kind>` is the manufacturer's own word for hardware partitioning, and manufacturers that offer it call it
-`mig`: `nvidia.com/gpu.partitioned.mig-3g.40gb`, `alibabacloud.com/ppu.partitioned.mig-<profile>`,
-`hygon.com/dcu.partitioned.mig-2g.15gb`. A manufacturer with no hardware partitioning has no kind, and
-no `.partitioned*` keys at all.
+A partitioned card advertises **only** `.partitioned*` keys; an unpartitioned card advertises
+**only** `<base>`, `.shared`, and `.sliced*` keys. Those populations map to the four `InstanceType`
+views (`EX`, `SH`, `SL`, and `PT`).
 
 ## Resource keys
 
-`<base>` is the manufacturer's device resource (`nvidia.com/gpu`, `huawei.com/npu`, … — see
-[Accelerator support](../../../README.md#accelerator-support)).
+`<base>` is the vendor extended resource (`nvidia.com/gpu`, `huawei.com/npu`, `amd.com/gpu`, and
+others in [Accelerator Support](../../../README.md#accelerator-support)):
 
-| Key | Served by | Eligible accelerators | Request value | `Node` value |
+| Key | Provider | Eligible cards | Request value | `Node` capacity |
 |---|---|---|---|---|
-| `<base>` | device plugin (Exclusive) | unpartitioned only | accelerator count | Σ healthy tokens |
-| `<base>.shared` | device plugin (Shared) | unpartitioned only | distinct accelerators on one node, one ownership share on each (10 per accelerator) | Σ healthy tokens |
-| `<base>.sliced` | device plugin (Sliced) | logically sliceable only | always `1` | Σ healthy tokens |
-| `<base>.sliced.units` | node capacity | logically sliceable | **webhook-derived**, per accelerator | Σ accelerators × 1,600,000 |
-| `<base>.sliced.cores-percentage` | node capacity | logically sliceable | per accelerator, `(0,100]` | Σ per-accelerator budget |
-| `<base>.sliced.memory-percentage` | node capacity | logically sliceable | per accelerator, `(0,100]` | Σ per-accelerator budget |
-| `<base>.sliced.memory-mib` | node capacity | logically sliceable | per accelerator, ≤ accelerator VRAM | Σ per-accelerator budget |
-| `<base>.partitioned` | device plugin (Partitioned) | partitioned only | always `1` | Σ healthy tokens |
-| `<base>.partitioned.units` | node capacity | partitioned | **webhook-derived** | Σ accelerators × 1,600,000 |
-| `<base>.partitioned.<kind>-<profile>` | node capacity | partitioned | always `1` | Σ (allocated + remaining) |
-| `device.gpustack.ai/<manufacturer>.visibility` | device plugin (Visibility) | every accelerator | sidecar's accelerator count | Σ tokens |
+| `<base>` | Device plugin (`Exclusive`) | Unpartitioned | Whole card count | Healthy tokens |
+| `<base>.shared` | Device plugin (`Shared`) | Unpartitioned | Distinct cards on one `Node` (`1` of `10` shares per card) | Healthy tokens |
+| `<base>.sliced` | Device plugin (`Sliced`) | Logically sliceable | Always `1` | Healthy tokens |
+| `<base>.sliced.units` | Node capacity | Logically sliceable | **Webhook-derived** (never set manually) | Cards × `1,600,000` |
+| `<base>.sliced.cores-percentage` | Node capacity | Logically sliceable | `(0, 100]` (defaults to `100`) | Sum of card budgets |
+| `<base>.sliced.memory-percentage` | Node capacity | Logically sliceable | `(0, 100]` | Sum of card budgets |
+| `<base>.sliced.memory-mib` | Node capacity | Logically sliceable | Positive MiB `<=` card VRAM | Sum of card budgets |
+| `<base>.partitioned` | Device plugin (`Partitioned`) | Partitioned | Always `1` | Healthy tokens |
+| `<base>.partitioned.units` | Node capacity | Partitioned | **Webhook-derived** (never set manually) | Cards × `1,600,000` |
+| `<base>.partitioned.<kind>-<profile>` | Node capacity | Partitioned | Always `1` | `allocated + remaining` |
+| `device.gpustack.ai/<manufacturer>.visibility` | Device plugin (`Visibility`) | Any card | Workload container's card count | Healthy tokens |
 
-Two things the table does not say:
-
-- **Never write a `.units` key by hand.** The `Pod` webhook recomputes it from the memory budget (logical)
-  or the profile's VRAM (partition), overwriting any client value. It feeds Kueue's `credits`
-  transformation, so a partition and a logical slice of the same VRAM cost the same credits.
-- **The two token shapes differ.** `<base>`, `.shared` and `.sliced` tokens are *accelerator-bound*: the
-  token the kubelet picks is the accelerator. `.partitioned` and visibility tokens are a *fungible
-  count*: the plugin picks the accelerator itself against the live partition geometry and records the
-  one it used. So a partition request never lands where its profile does not fit, and a rejection from
-  `Allocate` means the whole node has no room.
+- **Webhook-owned `.units` keys**: The `Pod` webhook overwrites `.units` from slice memory or
+  partition VRAM to charge Kueue `credits.gpustack.ai/<manufacturer>`.
+- **Token binding**: `<base>`, `.shared`, and `.sliced` tokens bind specific cards in kubelet, while
+  `.partitioned` and `.visibility` tokens are fungible counts resolved by Device Manager at
+  `Allocate`.
 
 ## Worked example per family
 
-All four are `Pod`s submitted on a pool's entrance `LocalQueue` (`kueue.x-k8s.io/queue-name`).
-Replace `<local-queue>` with the `ENTRANCE` of an available `InstanceType` in the same namespace.
+Submit `Pod`s on a pool's namespace `LocalQueue` (`ENTRANCE` on `kubectl get instancetypes`).
 
-**Exclusive** — two whole accelerators:
+**Exclusive** (two whole cards):
 
 ```yaml
 apiVersion: v1
@@ -92,7 +80,8 @@ spec:
           nvidia.com/gpu: "2"
 ```
 
-**Shared** — two accelerators on one node, one of each accelerator's 10 ownership shares:
+**Shared** (one unisolated `1/10` share on each of two distinct cards on one `Node`; for `>= 2`
+cards, the webhook injects `acceleratable.feature.gpustack.ai/<group>.count Gt N-1`):
 
 ```yaml
 apiVersion: v1
@@ -113,18 +102,7 @@ spec:
           nvidia.com/gpu.shared: "2"
 ```
 
-The value counts accelerators, never shares of one: `"2"` needs a node with two accelerators that each
-still have a free share. It is per container, and each container is one holder: two `Pod`s, or two
-containers of one `Pod`, may hold a share of the same accelerator. A share carries no memory or compute
-cap: up to 10 holders use the whole accelerator side by side; isolating them is a logical slice's job.
-
-The `Pod` webhook pins a request of two or more (its largest container's) to nodes with that many
-accelerators. It adds
-`acceleratable.feature.gpustack.ai/<group>.count Gt N-1` to every required node-affinity term, reading
-`<group>` from an `AcceleratorType` or `InstanceType` fronting the pool queue, and rejects the `Pod` when that cannot be read.
-Ten tokens per accelerator hide a node's accelerator count from Kueue and the scheduler; the label does not.
-
-**Logical slice** — half of one accelerator's VRAM, capped at 40% of its compute:
+**Logical slice** (`50%` VRAM and `40%` compute on one card):
 
 ```yaml
 apiVersion: v1
@@ -142,14 +120,12 @@ spec:
         - "3600"
       resources:
         limits:
-          nvidia.com/gpu.sliced: "1"  # always exactly 1 accelerator
-          # per accelerator; or .sliced.memory-mib, never both
-          nvidia.com/gpu.sliced.memory-percentage: "50"
-          nvidia.com/gpu.sliced.cores-percentage: "40"  # per accelerator; defaults to 100 when omitted
-          # The webhook derives nvidia.com/gpu.sliced.units; do not set it.
+          nvidia.com/gpu.sliced: "1"  # always "1"
+          nvidia.com/gpu.sliced.memory-percentage: "50"  # or .sliced.memory-mib, never both
+          nvidia.com/gpu.sliced.cores-percentage: "40"  # optional, default: "100"
 ```
 
-**Physical partition** — one MIG `3g.40gb` instance:
+**Physical partition** (one `3g.40gb` MIG instance):
 
 ```yaml
 apiVersion: v1
@@ -167,13 +143,11 @@ spec:
         - "3600"
       resources:
         limits:
-          nvidia.com/gpu.partitioned: "1"              # always exactly 1 accelerator
-          nvidia.com/gpu.partitioned.mig-3g.40gb: "1"  # always exactly 1 instance
-          # The webhook derives nvidia.com/gpu.partitioned.units; do not set it.
+          nvidia.com/gpu.partitioned: "1"  # always "1"
+          nvidia.com/gpu.partitioned.mig-3g.40gb: "1"  # always "1"
 ```
 
-**The SSH sidecar** sits outside the four families, so no family rule counts it. It requests the
-internal visibility resource for its workload container's accelerator count:
+**SSH visibility sidecar** (sits outside the four families to share `main`'s device grant):
 
 ```yaml
 apiVersion: v1
@@ -182,7 +156,8 @@ metadata:
   name: ssh-sidecar
 spec:
   containers:
-    - name: main
+    - name: sshd
+      image: gpustack/ssh-server:v1.4.0
       resources:
         limits:
           device.gpustack.ai/nvidia.visibility: "1"
@@ -190,41 +165,15 @@ spec:
 
 ## Request rules
 
-The snippets below show only the resource fields under test; include the `Pod` fields shown in
-[Worked example per family](#worked-example-per-family) before applying one.
-
-The rules are scoped by a container's lifetime group, not by the field it sits in:
-
-- the *init group* is *`spec.initContainers`* *without* `restartPolicy: Always`;
-- the *running group* is *`spec.containers`*;
-- a **native sidecar** — *`spec.initContainers`* *with* `restartPolicy: Always` — belongs to neither. It
-  starts during the init phase and keeps running, so it overlaps every later init container as well as
-  every app container.
+Admission groups containers by lifetime: standard *`spec.initContainers`* (without
+`restartPolicy: Always`), *`spec.containers`*, and **native sidecars** (*`spec.initContainers`* with
+`restartPolicy: Always`). Include full container `image` and `queue-name` labels when applying.
 
 ### Rule 1: Family and container group
 
-All accelerator requests in a `Pod` must use one family and exactly one container group.
-
-Accepted — both app containers claim the same family:
-
-```yaml
-apiVersion: v1
-kind: Pod
-metadata:
-  name: trainer-pod
-spec:
-  containers:
-    - name: trainer
-      resources:
-        limits:
-          nvidia.com/gpu: "1"
-    - name: sidecar-metrics
-      resources:
-        limits:
-          nvidia.com/gpu: "1"
-```
-
-Rejected — two families in one `Pod`:
+All accelerator requests in a `Pod` must use **one family** and sit in **one container group**
+(either init containers or app containers, never both, because kubelet holds init devices for the
+`Pod`'s life while the scheduler charges `max(init, app)`):
 
 ```yaml
 apiVersion: v1
@@ -234,10 +183,12 @@ metadata:
 spec:
   containers:
     - name: a
+      image: ubuntu:24.04
       resources:
         limits:
           nvidia.com/gpu: "1"
     - name: b
+      image: ubuntu:24.04
       resources:
         limits:
           nvidia.com/gpu.sliced: "1"
@@ -246,47 +197,11 @@ spec:
 
 > `spec: Forbidden: a Pod may request only one accelerator family, found [exclusive sliced]`
 
-Rejected — the same family claimed in both container groups:
-
-```yaml
-apiVersion: v1
-kind: Pod
-metadata:
-  name: split-group-pod
-spec:
-  initContainers:
-    - name: warmup
-      resources:
-        limits:
-          nvidia.com/gpu: "1"
-  containers:
-    - name: main
-      resources:
-        limits:
-          nvidia.com/gpu: "1"
-```
-
-> `spec.initContainers: Forbidden: a Pod's accelerator requests must all sit in one container group;
-> spec.initContainers must give up its request, because its devices are held for the Pod's whole life while
-> the scheduler charges the Pod only once`
-
-A device grant belongs to the container that requests it. An app-container request does not grant
-the device to an init container. This API does not support requesting an accelerator in both groups.
-
-> **Why** — two independent reasons, and one group makes charge and consumption agree by construction.
->
-> - *Nothing releases the earlier claim.* The kubelet holds a finished init container's devices for the
->   `Pod`'s whole life, and GPUStack's reclaimer destroys a partition on **`Pod`** deletion, not container
->   termination. The second claim coexists with the first.
-> - *The scheduler charges once.* A `Pod`'s demand for a key is `max(Σ init, Σ app)`, so two same-family
->   claims cost **one** unit of quota while consuming **two** accelerators. The node over-advertises by
->   one slot per such `Pod`, and the *next* tenant fails terminally.
-
 ### Rule 2: Logical slice count
 
-A logical slice request must set `<base>.sliced` to `1`.
-
-Accepted: `nvidia.com/gpu.sliced: "1"`. Rejected:
+A logical slice request must set `<base>.sliced` to `"1"` and specify **exactly one** of
+`.sliced.memory-percentage` (`(0, 100]`) or `.sliced.memory-mib` (`(0, card VRAM]`). Use multiple
+`Pod`s or whole cards for multi-GPU workloads:
 
 ```yaml
 apiVersion: v1
@@ -296,35 +211,19 @@ metadata:
 spec:
   containers:
     - name: main
+      image: ubuntu:24.04
       resources:
         limits:
           nvidia.com/gpu.sliced: "2"
           nvidia.com/gpu.sliced.memory-percentage: "50"
 ```
 
-> `spec.containers[0].resources.limits[nvidia.com/gpu.sliced]: Invalid value: "2": a logical slice
-> request is always a single accelerator; multi-accelerator logical slicing is not supported yet`
-
-A multi-accelerator workload asks for several `Pod`s, or for whole accelerators.
-
-> **Why** — a **deferral, not a manufacturer limit**: NVIDIA can isolate more than one accelerator. No
-> node-level key expresses "N *distinct* accelerators" — an additive scalar cannot tell "two at half
-> each" from "one in full", so a one-accelerator node would accept the request and fail it at
-> `Allocate`. Lifting the cap needs a node-level accelerator-count dimension.
-
-A logical slice must also name exactly one memory budget:
-
-- neither `.sliced.memory-percentage` nor `.sliced.memory-mib` → `Required value: a nvidia.com/gpu.sliced
-  request must set nvidia.com/gpu.sliced.memory-percentage or nvidia.com/gpu.sliced.memory-mib`;
-- both → `Forbidden: cannot set both …memory-percentage and …memory-mib`;
-- a percentage outside `(0,100]`, a non-positive MiB value, or a MiB value above the accelerator's
-  VRAM → rejected.
+> `spec.containers[0].resources.limits[nvidia.com/gpu.sliced]: Invalid value: "2": a logical slice request is always a single accelerator; multi-accelerator logical slicing is not supported yet`
 
 ### Rule 3: Partition count
 
-A partition request must set `<base>.partitioned` to `1`.
-
-Accepted: `nvidia.com/gpu.partitioned: "1"`. Rejected:
+A partition request must set `<base>.partitioned` to `"1"` and name a `.partitioned.<kind>-<profile>`
+key:
 
 ```yaml
 apiVersion: v1
@@ -334,28 +233,18 @@ metadata:
 spec:
   containers:
     - name: main
+      image: ubuntu:24.04
       resources:
         limits:
           nvidia.com/gpu.partitioned: "2"
           nvidia.com/gpu.partitioned.mig-1g.10gb: "1"
 ```
 
-> `spec.containers[0].resources.limits[nvidia.com/gpu.partitioned]: Invalid value: "2": a partition
-> request is always a single accelerator; request one Pod per instance`
-
-Unlike rule 2 this is a scope decision: the plugin picks the accelerator itself, so `N > 1` would
-be implementable. No workload needs it yet, so a multi-partition workload asks for several `Pod`s.
-
-A bare accelerator key with no profile is also rejected; there is no hardware shape to actuate.
-
-> `Required value: a nvidia.com/gpu.partitioned request must name a profile, e.g.
-> nvidia.com/gpu.partitioned.<kind>-<profile>`
+> `spec.containers[0].resources.limits[nvidia.com/gpu.partitioned]: Invalid value: "2": a partition request is always a single accelerator; request one Pod per instance`
 
 ### Rule 4: Partition profile
 
-A `Pod` must request exactly one partition profile across all containers.
-
-Accepted: one per-profile key. Rejected:
+A `Pod` may request only **one** partition profile across all containers:
 
 ```yaml
 apiVersion: v1
@@ -365,6 +254,7 @@ metadata:
 spec:
   containers:
     - name: main
+      image: ubuntu:24.04
       resources:
         limits:
           nvidia.com/gpu.partitioned: "1"
@@ -374,14 +264,9 @@ spec:
 
 > `spec: Forbidden: a Pod may request only one partition profile, found [1g.10gb 3g.40gb]`
 
-The rule is `Pod`-wide as well as per-container: two containers naming different profiles are rejected the
-same way.
-
 ### Rule 5: Profile instance count
 
-Each per-profile resource key must have a value of `1`.
-
-Accepted: `nvidia.com/gpu.partitioned.mig-3g.40gb: "1"`. Rejected:
+Each `.partitioned.<kind>-<profile>` key must equal `"1"`:
 
 ```yaml
 apiVersion: v1
@@ -391,41 +276,19 @@ metadata:
 spec:
   containers:
     - name: main
+      image: ubuntu:24.04
       resources:
         limits:
           nvidia.com/gpu.partitioned: "1"
           nvidia.com/gpu.partitioned.mig-3g.40gb: "2"
 ```
 
-> `spec.containers[0].resources.limits[nvidia.com/gpu.partitioned.mig-3g.40gb]: Invalid value: "2": a
-> partition profile request must be exactly 1 instance`
+> `spec.containers[0].resources.limits[nvidia.com/gpu.partitioned.mig-3g.40gb]: Invalid value: "2": a partition profile request must be exactly 1 instance`
 
 ### Rule 6: Slicing container count
 
-At most one container per `Pod` may request logical slicing or physical partitioning.
-The SSH sidecar is unaffected: the visibility resource sits outside the accelerator families.
-
-Accepted:
-
-```yaml
-apiVersion: v1
-kind: Pod
-metadata:
-  name: sliced-pod
-spec:
-  containers:
-    - name: main
-      resources:
-        limits:
-          nvidia.com/gpu.sliced: "1"
-          nvidia.com/gpu.sliced.memory-percentage: "50"
-    - name: sshd
-      resources:  # visibility request; separate from slicing resources
-        limits:
-          device.gpustack.ai/nvidia.visibility: "1"
-```
-
-Rejected — two containers each holding a slice:
+At most **one** container per `Pod` may request `.sliced*` or `.partitioned*` keys
+(`.visibility` sidecars are exempt):
 
 ```yaml
 apiVersion: v1
@@ -435,11 +298,13 @@ metadata:
 spec:
   containers:
     - name: a
+      image: ubuntu:24.04
       resources:
         limits:
           nvidia.com/gpu.sliced: "1"
           nvidia.com/gpu.sliced.memory-percentage: "50"
     - name: b
+      image: ubuntu:24.04
       resources:
         limits:
           nvidia.com/gpu.sliced: "1"
@@ -450,343 +315,164 @@ spec:
 
 ### Rule 7: Native sidecar requests
 
-A native sidecar is a restartable init container. It must not request accelerators.
-
-Accepted — the claim sits on an app container while the native sidecar carries none; rejected — the
-native sidecar carries the claim:
+Restartable init containers (`restartPolicy: Always`) must not request accelerators because they
+overlap both later init containers and app containers:
 
 ```yaml
 apiVersion: v1
 kind: Pod
 metadata:
-  name: accepted-sidecar-pod
-spec:  # accepted
+  name: rejected-sidecar-pod
+spec:
   initContainers:
     - name: log-shipper
+      image: ubuntu:24.04
       restartPolicy: Always
       resources:
         limits:
-          cpu: "100m"
+          nvidia.com/gpu: "1"
   containers:
     - name: main
-      resources:
-        limits:
-          nvidia.com/gpu: "1"
----
-apiVersion: v1
-kind: Pod
-metadata:
-  name: rejected-sidecar-pod
-spec:  # rejected
-  initContainers:
-    - name: log-shipper
-      restartPolicy: Always
-      resources:
-        limits:
-          nvidia.com/gpu: "1"
+      image: ubuntu:24.04
 ```
 
-> `spec.initContainers[0].resources.limits: Forbidden: a restartable init container (a native sidecar) may
-> not request an accelerator; move the request to an app container`
-
-A native sidecar belongs to neither container group, so its claim would overlap every later init
-container *and* every app container — the exact double-consumption rule 1 exists to prevent, with no
-group to move it out of.
+> `spec.initContainers[0].resources.limits: Forbidden: a restartable init container (a native sidecar) may not request an accelerator; move the request to an app container`
 
 ## RDMA keys beside families
 
-An RDMA interface is requested through three node-level keys that sit beside the accelerator
-families, not inside them: a network interface belongs to the node rather than to a manufacturer,
-so no `<base>` applies. [RDMA Operations](../rdma/operations.md#choosing-a-key) covers how many
-endpoints to ask for, selection policies, and node NUMA configuration.
-
-All three are served by the device plugin, and a request names what it wants one of:
-
-| Key | Mode | Quantity meaning | Tokens per endpoint |
-|---|---|---|---|
-| `device.gpustack.ai/rdma` | exclusive | whole interfaces | `1` |
-| `device.gpustack.ai/rdma.shared` | shared | concurrent uses of an interface | `64` |
-| `device.gpustack.ai/rdma.partitioned` | partitioned | virtual functions | `1` per virtual function |
-
-An *SR-IOV* physical function with virtual functions configured serves only `.rdma.partitioned`;
-every other interface serves `.rdma` and `.rdma.shared`.
-There are no `.units` keys on this side: nothing is webhook-derived, and the value you set is the
-value that schedules.
-
-**The keys are not an accelerator family.** The family classifier returns none for them, so the
-accelerator rules above neither apply to them nor can be violated by them: an accelerator family and an
-RDMA key in one `Pod` is legal.
-
-The same blindness reaches Kueue, which therefore meters these keys not at all. See
-[RDMA Operations](../rdma/operations.md#kueue-and-rdma-keys) for what that costs a
-fleet and what to do instead of a quota.
-
-Neither a node without an RDMA-capable interface nor an endpoint whose link the node judged
-`Failed` carries allocatable healthy tokens (see [Inspecting the NIC record](../rdma/operations.md#inspecting-the-nic-record)),
-so a request for these keys never schedules onto them.
-
-A grant injects the endpoint's own verbs character device, the node-level connection-manager device
-where the host has one, and `NCCL_IB_HCA` naming the granted devices. That set is evidenced for
-RoCE and unverified for classic InfiniBand transport libraries — see
-[Injected devices](../rdma/operations.md#injected-devices).
-
-**Shared accelerator and RDMA interface in one container**, the shape a co-located workload uses:
+Node-level RDMA keys (`device.gpustack.ai/rdma`, `rdma.shared` at `64` tokens/endpoint, and
+`rdma.partitioned` for *SR-IOV* VFs) sit outside accelerator families, carry no `.units` keys, and
+are unmetered by Kueue ([RDMA Operations](../rdma/operations.md#key-selection) and
+[NIC record inspection](../rdma/operations.md#nic-record-inspection)):
 
 ```yaml
 apiVersion: v1
 kind: Pod
 metadata:
   name: shared-rdma-pod
+  labels:
+    kueue.x-k8s.io/queue-name: <local-queue>
 spec:
   containers:
     - name: main
+      image: ubuntu:24.04
       resources:
         limits:
           nvidia.com/gpu.shared: "1"
-          device.gpustack.ai/rdma.shared: "1"  # one concurrent use of one RDMA interface
+          device.gpustack.ai/rdma.shared: "1"
 ```
 
 ## Co-location conditions
 
-A container that requests an accelerator and an RDMA interface together is granted both on one NUMA
-node (the kubelet aligns resources that publish NUMA hints, and both sides publish them) but only
-when every condition below holds. Outside these conditions nothing aligns the two, and no error
-says so.
+Kubelet aligns an accelerator and an RDMA interface onto the same *NUMA* node only when all four
+conditions hold:
 
-- **Both requests sit in the same container.** The kubelet aligns per container by default, so an
-  accelerator in one container and an RDMA interface in another are aligned by nothing.
-- **Both resources publish a hint.** The accelerator's whole-device modes do; an accelerator
-  partition token does not (it names no accelerator), so a partition profile paired with
-  `rdma.partitioned` is aligned to the RDMA side alone and is not covered, even though both are
-  allocatable in the same container. An RDMA endpoint whose affinity the kernel did not report
-  publishes none either.
-- **The node's kubelet runs `restricted` or `single-numa-node`.** It is node-level kubelet
-  configuration this operator cannot change, and what each of the four policies does with a hint is
-  in [the preflight runbook](./preflight.md#reading-the-result), which is also where you
-  read the policy a given node runs. No release sets one for you — [how to set it, and how to
-  confirm it took](../rdma/operations.md#enabling-numa-alignment).
-- **The alignment's unit is the NUMA node.** A device-plugin hint reports only the endpoint's NUMA
-  node; a shared PCIe switch is finer than TopologyManager can express.
-
-What is not guaranteed is the node itself: the scheduler selects by quantities and cannot see
-inside a node's topology, so a node whose totals suffice but whose devices sit on two NUMA nodes is
-selected and the container is then refused at admission — and a `Pod` refused that way is not
-rescheduled onto another node.
-
-`device-manager preflight` reports the node's TopologyManager policy as a *`topology`* section, read
-off the running kubelet's own command line and the configuration it names; `unknown` means no
-readable source named one, never a guess of the default. See
-[Preflight Checks](./preflight.md).
+- **Same container**: Both resource requests sit in the same container (`topologyManagerScope: container`).
+- **NUMA hints present**: Whole, shared, and logical-slice accelerator tokens publish *NUMA* hints;
+  fungible `.partitioned` tokens publish none.
+- **Enforcing kubelet policy**: The `Node` runs `restricted` or `single-numa-node`
+  ([Enabling NUMA alignment](../rdma/operations.md#enabling-numa-alignment) and
+  [Result format](./preflight.md#result-format)).
+- **Node-level capacity fit**: Kube-scheduler sees only node totals; if a `Node`'s free GPU and HCA
+  sit on different sockets, kubelet rejects the `Pod` without rescheduling.
 
 ## Instance API requests
 
-An `Instance` expresses the same request families through *`spec.resources`*, and the controller shapes them
-into the keys above:
-
-The following alternatives select whole accelerators, one logical slice, or one hardware partition.
-The slice percentages are optional.
-
-```yaml
-apiVersion: worker.gpustack.ai/v1
-kind: Instance
-metadata:
-  name: exclusive-instance
-spec:
-  type: gpustack--nvidia-h100-80gb-hbm3-linux-amd64
-  resources:
-    cpu: "8"
-    ram: 64Gi
-    localStorage: 100Gi
-    accelerator: "2"  # exclusive whole accelerators; may span devices
-```
-
-```yaml
-apiVersion: worker.gpustack.ai/v1
-kind: Instance
-metadata:
-  name: sliced-instance
-spec:
-  type: gpustack--nvidia-h100-80gb-hbm3-linux-amd64
-  resources:
-    cpu: "8"
-    ram: 64Gi
-    localStorage: 100Gi
-    accelerator: "1"  # one logical slice
-    acceleratorSlicedMemoryPercentage: 50
-    acceleratorSlicedCoresPercentage: 50
-```
+An `Instance` declares whole cards, one logical slice, or one hardware partition in
+*`spec.resources`* ([GPU Instance Configuration](../instances/configuration.md#resource-requests)):
 
 ```yaml
 apiVersion: worker.gpustack.ai/v1
 kind: Instance
 metadata:
   name: partitioned-instance
+  namespace: team-a
 spec:
   type: gpustack--nvidia-h100-80gb-hbm3-linux-amd64
+  image: ubuntu:24.04
+  command:
+    - sleep
+    - infinity
   resources:
-    cpu: "8"
-    ram: 64Gi
-    localStorage: 100Gi
-    accelerator: "1"  # one hardware partition
-    acceleratorPartitionedProfile: "3g.40gb"
+    accelerator: "1"  # integer whole cards, or "1" for sliced/partitioned requests
+    # acceleratorSlicedMemoryPercentage: 50
+    # acceleratorSlicedCoresPercentage: 50
+    acceleratorPartitionedProfile: 3g.40gb  # mutually exclusive with slice percentages
+  volume:
+    ephemeral:
+      capacity: 10Gi
 ```
 
-The webhook rejects these at admission rather than leaving the `Instance` Pending:
-
-- a profile the pool does not offer — the message lists the offered set;
-- a profile on a manufacturer with no hardware partitioning;
-- a profile **and** a slice percentage together (`a hardware partition and a logical slice percentage are
-  mutually exclusive`);
-- an `accelerator` count other than `1` for a slice or a partition request;
-- a whole-accelerator count over the pool's whole-accelerator **capacity** (*`status.accelerator.capacity`*),
-  never over what is free right now: an `Instance` submitted while every accelerator is held is admitted
-  and waits in its queue;
-- **a slice percentage against a pool that offers no logical slicing** — a tightening; such a request
-  used to be silently reshaped into a whole-accelerator one and served. On an all-partitioned pool the
-  message points at *`spec.resources.acceleratorPartitionedProfile`* instead.
-
-A partition's host CPU and RAM are sized by the profile's share of the accelerator's VRAM, so a `1g`
-instance does not ask for a whole accelerator's worth.
+Admission rejects unknown partition profiles (listing offered profiles), partitioning on unsupported
+vendors or unpartitioned pools, slice percentages on pools without logical slicing, non-`1` card
+counts on slice/partition requests, and whole-card counts exceeding *`status.accelerator.capacity`*.
+Host CPU and RAM scale by card count or slice/partition VRAM share.
 
 ## Pre-release breaks
 
-No released version is marked stable, so each of the following is a clean break with **no** translation
-layer.
+- **Legacy `.sliced.mig-*` keys removed**: Replace legacy `<base>.sliced.mig-<profile>` requests
+  with `<base>.partitioned: "1"` and `<base>.partitioned.mig-<profile>: "1"`. Remove stale capacity
+  entries on development `Node`s (`/` escaped as `~1`):
 
-**The old MIG key is gone.** A MIG profile used to be requested through the *logical* family: a
-per-profile key built from `<base>.sliced` with a `mig-<profile>` segment appended, alongside
-`<base>.sliced: 1`. It is replaced by `<base>.partitioned.<kind>-<profile>` alongside
-`<base>.partitioned: 1`.
+  ```bash
+  kubectl get node <node> -o json | jq -r '.status.capacity | keys[] | select(contains("mig-"))'
+  kubectl patch node <node> --subresource=status --type=json \
+    -p '[{"op":"remove","path":"/status/capacity/<escaped-key>"}]'
+  ```
 
-Nothing recognizes the old one — not the builders, not the parsers, not the node-capacity reconciler,
-and deliberately **not even a rejection by name**. Rewrite such a manifest; untouched, it meets two
-ordinary failures, neither naming the replacement:
-
-- its per-profile key is an extended resource no node advertises, so it never schedules;
-- the `<base>.sliced: 1` beside it is a logical slice with no memory budget, which rule 2 rejects.
-
-> **Why** — legibility would cost a legacy branch in every key path, to serve a request no
-> documentation, no `InstanceType` and no example produces.
-
-A development node an earlier build wrote those legacy capacities onto keeps them, because nothing owns
-them. List what is left and patch it off — one JSON-patch removal per stale key:
-
-```bash
-kubectl get node <node> -o json | jq -r '.status.capacity | keys[] | select(contains("mig-"))'
-kubectl patch node <node> --subresource=status --type=json \
-    -p '[{"op":"remove","path":"/status/capacity/<escaped-key>"}]'   # escape "/" in the key as "~1"
-```
-
-**The allocation annotation's value changed too, so drain a node before upgrading its Device Manager.**
-The `Pod` annotation `device.gpustack.ai/accelerator.allocated` is now a per-container map; the old flat
-shape is not read. Drain the node (or delete its accelerator `Pod`s) before rolling the Device Manager
-`DaemonSet`, then let the workloads reschedule.
-
-> **Why** — a `Pod` carrying the old shape on a restarted Device Manager **drops out of the ledger**: its
-> accelerators read *free* while its containers hold them, and the next opposite-mode `Pod` can land on an
-> occupied one. The rebuild cannot recover — the occupancy is exactly what became unreadable — so it
-> logs loudly, naming the `Pod`.
-
-**`<base>.shared: N` counts accelerators now.** It used to be read as N shares of one accelerator in
-some places and N accelerators in others; it is N distinct accelerators on one node, one share on each.
-A manifest asking `"3"` for a heavier share of one accelerator now needs a node with three.
-
-*`InstanceType.status.acceleratorShared.onceMaxRequest`* moved with it: it counts a node's accelerators
-with a free share, where it used to sum their shares. Output recorded before the change, in the
-[Walkthrough](../../walkthroughs/devices/scheduling.md) and [NVIDIA MIG Operations](./nvidia-mig.md), still shows the
-old reading under `SH` — `10/10` on one free accelerator now reads `1/10`.
+- **Per-container allocation annotation**: `device.gpustack.ai/accelerator.allocated` uses a
+  per-container map; drain accelerator `Pod`s before upgrading Device Manager from legacy flat
+  builds.
+- **`.shared: N` counts distinct cards**: `InstanceType` `SH` `onceMaxRequest` now counts cards with
+  a free share (`1/10` on one free card instead of legacy `10/10`).
 
 ## Limitations
 
-- **Media-engine and graphics profile variants are not exposed.** A profile whose name is not a valid
-  Kubernetes resource-name segment (the `+me`, `+me.all` and `+gfx` MIG variants) is **excluded** from
-  an accelerator's inventory rather than rewritten to something key-safe, so a key always maps back to
-  its profile by a plain prefix strip. Those variants cannot be requested.
-- **One accelerator per slice or partition request** (rules 2 and 3), for the different reasons given
-  above.
-- **The whole-accelerator bound is the pool's total, not one node's.** A count above the largest node's
-  accelerators but within the pool's total is admitted and then stays queued, because one `Pod`'s
-  accelerators come from one node and `InstanceType.status` carries no per-node capacity to refuse it
-  with. It applies to an `Instance` and a `ModelDeployment` role alike.
-- **Hand-carving a partition outside GPUStack is unsupported on a managed node.** Every node-level key —
-  per-profile capacity, partition token health, the admission check — comes from the `Pod` annotations the
-  device plugin writes, and an instance made with `nvidia-smi mig -cgi` produces none.
-
-  The node keeps advertising room it does not have, and unlike a transient over-advertisement this
-  **never converges**: it persists until the instance is removed. Placement reads the live hardware and
-  will not double-book it, but the accounting above stays wrong. Let GPUStack materialize the instances;
-  it reuses any already on an accelerator it manages.
-
-- **Flipping an accelerator's partitioning mode is an operational procedure, not a live switch.** An
-  accelerator advertises a family's tokens only while its reported capability backs that family, so a
-  flip removes the old tokens rather than marking them unhealthy: there is no continuity across it.
-
-  Drain the accelerator (the hardware refuses the toggle under load anyway), flip the mode with the
-  manufacturer's tool, then **restart that node's Device Manager `DaemonSet`**: the re-detect trigger
-  watches the device set and health, not the partitioning mode. Deleting the node's `Devices` object is
-  **not** required, since an existing group's capability is rewritten in place.
-
-  Full procedure: [NVIDIA MIG Operations](./nvidia-mig.md#enabling-partitioning) ·
-  [T-Head MIG Operations](./thead-mig.md#enabling-partitioning) ·
-  [Hygon MIG Operations](./hygon-mig.md#enabling-partitioning).
-- **A shared request on a node with fewer free accelerators than it names fails for good.** Each
-  accelerator advertises 10 shared tokens, so the scheduler fits `.shared: "2"` on a one-accelerator
-  node; the device plugin refuses the two tokens the kubelet picked there rather than grant one short.
-  The `Pod` ends `Failed` with `UnexpectedAdmissionError` and must be recreated.
-
-  A pool's queue holds such a request first
-  ([Diagnosing Pending workloads](#diagnosing-pending-workloads)), so a `Pod`
-  reaches this only by skipping the queue or racing another allocation.
-- **The shared card-count pin has two gaps.** Where it misses, a request placed on too few
-  accelerators retries for good ([Diagnosing Pending workloads](#diagnosing-pending-workloads)).
-  - *`Workload`s built from a template.* Kueue builds a batch `Job`'s, a JobSet's or a RayJob's `Workload`
-    from its `Pod` template before any `Pod` exists, and the webhook only sees `Pod`s, so none is pinned.
-  - *Partitioned accelerators count.* `.count` is the node's total, so a node whose accelerators are
-    mostly in a partitioning mode still passes the pin with too few left to share.
-- **A non-default `TopologyManager` policy can mis-align a partition.** The Partitioned resource reports
-  no NUMA topology (the plugin may not use the accelerator the kubelet aligned to), so under
-  `single-numa-node` the CPU and memory providers can settle on one socket while the only accelerator
-  with room is on the other. The default `none` is unaffected.
+- **Excluded MIG variants**: Profiles containing `+` (`+me`, `+me.all`, `+gfx`) are omitted because
+  Kubernetes resource names forbid `+`.
+- **Pool-wide whole-card cap**: Whole-card requests above a single `Node`'s card count but within
+  pool *`status.accelerator.capacity`* are admitted and remain queued.
+- **No manual `nvidia-smi mig -cgi` carving**: Hand-carved instances lack `Pod` annotations, skewing
+  node capacity until reclaimed when idle.
+- **Manual MIG mode toggle**: Switching hardware partitioning mode requires draining workloads,
+  running the vendor tool, and restarting the Device Manager `DaemonSet` ([NVIDIA](./nvidia-mig.md#enabling-partitioning),
+  [T-Head](./thead-mig.md#enabling-partitioning), [Hygon](./hygon-mig.md#enabling-partitioning)).
+- **Shared card-count pin gaps**: Unqueued `.shared` `Pod`s on too few cards fail with
+  `UnexpectedAdmissionError`, and template-derived `Job` / `JobSet` / `RayJob` `Workload`s or mixed
+  partitioned `Node`s are not narrowed by the `Pod` webhook's `.count` affinity.
+- **Partition NUMA alignment**: Under `single-numa-node`, CPU/memory may lock to one socket while
+  the only free MIG slot sits on another socket.
 
 ## Pools and diagnosis
 
 ### Isolation mode selection
 
-Check which modes a pool or node currently exposes before choosing a resource key:
-
 ```bash
-kubectl get instancetypes
+kubectl get instancetypes -o wide
 kubectl get devices <node> -o jsonpath='{.spec.groups[*].accelerators[*].status}'
 ```
 
 | Mode | Request key | Expected signal | Next action |
 |---|---|---|---|
-| Exclusive | `<base>` | `EX` non-zero on `InstanceType` | Request whole cards on unpartitioned nodes |
-| Shared | `<base>.shared` | `SH` non-zero (10 shares/card) | Request `N` distinct cards on one node; no memory cap |
-| Logical slice | `<base>.sliced` | `SL` non-zero; `logicalSliced` in `Devices` | Set `.sliced: "1"` and one memory budget |
-| Physical partition | `<base>.partitioned.<kind>-<profile>` | `PT` non-zero; `PARTITIONS` in `-o wide` | Set `.partitioned: "1"` and `.partitioned.<kind>-<profile>: "1"` |
+| Exclusive | `<base>` | Non-zero `EX` on `InstanceType` | Request integer cards on unpartitioned `Node`s. |
+| Shared | `<base>.shared` | Non-zero `SH` (`10` shares/card) | Request `N` distinct cards on one `Node` (no VRAM cap). |
+| Logical slice | `<base>.sliced` | Non-zero `SL`; `logicalSliced` in `Devices` | Set `.sliced: "1"` and one memory budget. |
+| Physical partition | `<base>.partitioned.<kind>-<profile>` | Non-zero `PT`; `PARTITIONS` in `-o wide` | Set `.partitioned: "1"` and `.partitioned.<kind>-<profile>: "1"`. |
 
-Unpartitioned accelerators serve Exclusive, Shared, and Logical slice together, while partitioned
-accelerators (NVIDIA, Hygon, and T-Head) serve Physical partition only. Toggle partitioning mode on
-the host using the manufacturer's MIG runbook when moving a card between families.
-
-Logical slicing isolation depends on the manufacturer:
+Logical slicing mechanism and slice limits per manufacturer:
 
 | Manufacturer | Enforcer | Compute overcommit | Max slices |
 |---|---|---|---|
-| NVIDIA, Iluvatar | HAMi-core `libvgpu.so` | Yes | 128 (100 Iluvatar) |
-| AMD | `libvrocm.so` + `HSA_CU_MASK` | Yes | 128 |
-| T-Head | `hggc_quota.so` + `hgml_dlsym_hook.so` | Yes | 128 |
-| Ascend | vcann-rt `libvruntime.so` | Yes | 63 |
-| Cambricon | cnDev sMLU profile | No | 16 |
-| MetaX | sysfs `sgpu` subdevice | No | 16 |
-| MThreads | host sGPU kmod | No | 16 |
-| Hygon | host DTK `vdev.conf` | No | 4 |
+| NVIDIA, Iluvatar | HAMi-core `libvgpu.so` | Yes | `128` (`100` Iluvatar) |
+| AMD | `libvrocm.so` + `HSA_CU_MASK` | Yes | `128` |
+| T-Head | `hggc_quota.so` + `hgml_dlsym_hook.so` | Yes | `128` |
+| Ascend | vcann-rt `libvruntime.so` | Yes | `63` |
+| Cambricon | cnDev sMLU profile | No | `16` |
+| MetaX | sysfs `sgpu` subdevice | No | `16` |
+| MThreads | Host sGPU kmod | No | `16` |
+| Hygon | Host DTK `vdev.conf` | No | `4` |
 
 ### Inspecting pools and quota
-
-Inspect pool defaults (`UNIT(CPU/RAM)/STORAGE`), namespace entrance `LocalQueue`s, `ClusterQueue`
-quota, and `ResourceFlavor` node selectors before submitting workloads:
 
 ```bash
 kubectl get instancetypes
@@ -795,27 +481,20 @@ kubectl get clusterqueue <cluster-queue> -o yaml
 kubectl get resourceflavors -l resource.gpustack.ai/type=nodes
 ```
 
-- **Expected signal**: `InstanceType` `PHASE` is `Active` with `ENTRANCE` matching a `LocalQueue` in
-  your namespace; `ClusterQueue` `spec.stopPolicy` is `None` (not `Hold` or `HoldAndDrain`),
-  `admissionChecksStrategy` lists `gpustack-node-devices`, and `resourceGroups` reports
-  `credits.gpustack.ai/<manufacturer>` (`1,600,000` credits per whole accelerator).
-- **Next action**: Submit `Pod`s with `kueue.x-k8s.io/queue-name: <entrance>`. If `ClusterQueue` is
-  on `Hold` (`empty-plan-hold` or `spec.inactive: true`) or `HoldAndDrain`, verify `ResourceFlavor`s
-  and node `gpustack.ai/managed=true` labels.
+Confirm `InstanceType` `PHASE` is `Active`, `ENTRANCE` exists in your namespace, and `ClusterQueue`
+has `spec.stopPolicy: None`, `gpustack-node-devices` in `admissionChecksStrategy`, and
+`credits.gpustack.ai/<manufacturer>` (`1,600,000` per card) in `resourceGroups`. If `ClusterQueue`
+is on `Hold` (`empty-plan-hold` or `spec.inactive: true`), verify `ResourceFlavor`s and
+`gpustack.ai/managed=true` `Node` labels.
 
 ### Diagnosing Pending workloads
 
-When a `Pod` fails to start or stays `Pending`, distinguish webhook refusal, queued demand, and
-per-device fragmentation:
-
-| Failure stage | Command | Expected signal | Next action |
+| Stage | Command | Expected signal | Next action |
 |---|---|---|---|
-| Webhook refusal | `kubectl apply` or `kubectl -n <ns> get events` | `Forbidden`, `Invalid value`, or `Required value`; no `Pod` or `Workload` created | Fix manifest per [Request rules](#request-rules) or pool profile |
-| Queued demand | `kubectl -n <ns> describe workload <name>` | `Pod` has scheduling gate `kueue.x-k8s.io/admission`; `QuotaReserved=False` (`Pending` or queue `Hold`) | Wait for quota, add nodes, or lower demand |
-| Per-device fragmentation (pinned) | `kubectl -n <ns> describe workload <name>` | `Workload` pending on `excluded: affinity` despite aggregate pool credits | Wait for an unfragmented card or request a smaller slice |
-| Per-device fragmentation (check/kubelet) | `kubectl -n <ns> get workload <name> -o jsonpath='{.status.admissionChecks}'` | `gpustack-node-devices` reports `Retry`, or `Pod` fails with `UnexpectedAdmissionError` | Inspect `Devices` `remaining` / `allocatedSlices` and `fit.gpustack.ai` labels; delete failed unmanaged `Pod`s |
-
-Inspect per-accelerator ledger occupancy and per-card fit labels on a candidate node with:
+| Webhook refusal | `kubectl apply` or `kubectl -n <ns> get events` | `Forbidden`, `Invalid value`, or `Required value` (no `Pod` created) | Fix manifest against [Request rules](#request-rules) or offered pool profiles. |
+| Queued demand | `kubectl -n <ns> describe workload <name>` | `Pod` gated by `kueue.x-k8s.io/admission`; `QuotaReserved=False` | Wait for quota, add `Node`s, or reduce requested resources. |
+| Card fragmentation (affinity) | `kubectl -n <ns> describe workload <name>` | `excluded: affinity` despite free aggregate pool credits | Wait for a contiguous card or request a smaller slice. |
+| Card fragmentation (check / kubelet) | `kubectl -n <ns> get workload <name> -o jsonpath='{.status.admissionChecks}'` | `gpustack-node-devices` in `Retry`, or `Pod` `Failed` (`UnexpectedAdmissionError`) | Inspect `Devices` `remaining` / `allocatedSlices` and `fit.gpustack.ai` labels below; delete failed unqueued `Pod`s. |
 
 ```bash
 kubectl get devices <node> -o yaml
@@ -824,13 +503,6 @@ kubectl get node <node> -o json | jq '.metadata.labels | with_entries(select(.ke
 
 ---
 
-**See also** — [NVIDIA MIG Operations](./nvidia-mig.md) (the administrator runbook for an
-accelerator's partitioning mode, plus a recorded enable → request → reclaim → disable walkthrough) ·
-[Hygon MIG Operations](./hygon-mig.md) (the same runbook for Hygon, whose mode is
-node-wide and whose partitioned nodes serve no whole-card or sliced request at all) ·
-[T-Head MIG Operations](./thead-mig.md) (the same runbook for T-Head's own
-partitioning) · [Preflight Checks](./preflight.md) (verify node detection and slicing before
-workloads arrive) · [RDMA Operations](../rdma/operations.md) (how many RDMA endpoints to ask for
-beside N accelerators, and the kubelet policy that aligns the two sides)
+**See also** — [NVIDIA MIG Operations](./nvidia-mig.md) (per-GPU MIG setup and capacity accounting) · [Hygon MIG Operations](./hygon-mig.md) (node-wide MIG on Hygon DCUs) · [T-Head MIG Operations](./thead-mig.md) (MIG partitioning on T-Head PPUs) · [Preflight Checks](./preflight.md) (bare-host detection and slicing verification) · [RDMA Operations](../rdma/operations.md) (RDMA endpoint pairing and *NUMA* alignment)
 
-**Next** → [Walkthrough](../../walkthroughs/devices/scheduling.md) — the same requests on a live cluster.
+**Next** → [Heterogeneous Devices Walkthrough](../../walkthroughs/devices/scheduling.md) — trace queued accelerator requests on a live cluster.

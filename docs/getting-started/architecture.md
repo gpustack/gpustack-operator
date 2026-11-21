@@ -18,7 +18,7 @@ memory access (RDMA)* accelerates transfers, and shared KV cache stores reusable
 
 ## Components
 
-The `gpustack-operator` binary provides five subcommands:
+The `gpustack-operator` binary provides five subcommands, paired with the `engine-sentinel` runtime package staged into managed inference `Pod`s:
 
 | Component | Deployment | Role |
 |---|---|---|
@@ -27,6 +27,7 @@ The `gpustack-operator` binary provides five subcommands:
 | `model-manager` | Per-node `DaemonSet` | Caches verified model weights and mounts them through CSI. |
 | `model-transfer` | Vendor source `DaemonSet` | Runs the source broker and worker service for remote weight delivery. |
 | `worker-gateway` | Separate installation | Aggregates `InstanceType`s and capacity across clusters into one fleet view. |
+| `engine-sentinel` | Read-only host mount in engine `Pod`s | Pure-Python runtime package (`gpustack_engine_sentinel`) for live parameter tuning, unified `/gpustack/v1/{live,ready}` probes, role pause, and `PreStop` drain; see [Online Runtime Control](../modules/model-deployment/runtime-control.md). |
 
 The Helm chart bundles [Node Feature Discovery (NFD)](https://github.com/kubernetes-sigs/node-feature-discovery),
 [Kueue](https://github.com/kubernetes-sigs/kueue), and two CSI drivers. Topograph is optional and

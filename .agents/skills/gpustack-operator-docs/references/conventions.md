@@ -866,6 +866,11 @@ dashes and bold labels.
 
 ## Adding a page
 
+Before creating a new page under `docs/modules/<module>/`, follow the standard module skeleton:
+`Overview` (`_index.md`) → `Configuration` (or core capability pages) → `Operations`. Avoid thin
+sub-150-line orphan pages; fold a single source type, tuning caveat or sub-feature into its parent
+page as an `##` or `###` section unless it has independent operational workflows.
+
 1. Choose the [zone](#documentation-zones) first, then the location. Check the module map before choosing.
    - **Public site**: the owning capability under `docs/modules/`, or `docs/getting-started/`,
      `docs/walkthroughs/` or `docs/operate/`.

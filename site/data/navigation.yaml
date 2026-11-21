@@ -53,12 +53,9 @@ order:
     - pool
     - leader
     - local-disk-tier
-    - disk-heavy-nodes
   /docs/modules/model-delivery/:
     - artifact
-    - image-source
     - prefetch
-    - node-to-node-sync
     - remote
     - operations
   /docs/modules/model-deployment/:
@@ -76,6 +73,9 @@ order:
     - scaling-benchmark
     - runtime-control
     - routing
+  /docs/modules/instances/:
+    - configuration
+    - operations
   /docs/operate/:
     - installation-modes
     - high-availability
@@ -126,11 +126,8 @@ labels:
   /docs/modules/kv-cache/pool/: Pools and Bindings
   /docs/modules/kv-cache/leader/: Leader Election
   /docs/modules/kv-cache/local-disk-tier/: Local Disk Tier
-  /docs/modules/kv-cache/disk-heavy-nodes/: Disk-Heavy Nodes
   /docs/modules/model-delivery/artifact/: Artifact
-  /docs/modules/model-delivery/image-source/: Image Source
   /docs/modules/model-delivery/prefetch/: Prefetch
-  /docs/modules/model-delivery/node-to-node-sync/: Node-to-Node Sync
   /docs/modules/model-delivery/remote/: Remote Delivery
   /docs/modules/model-delivery/operations/: Operations
   /docs/modules/model-deployment/configuration/: Configuration
@@ -145,8 +142,10 @@ labels:
   /docs/modules/model-deployment/elastic-ep-benchmark/: Benchmark
   /docs/modules/model-deployment/external-dp/: External DP
   /docs/modules/model-deployment/external-dp-benchmark/: Benchmark
-  /docs/modules/model-deployment/engine-versions/: Engine Versions
+  /docs/modules/model-deployment/engine-versions/: Compatibility
   /docs/modules/model-deployment/routing/: Routing
+  /docs/modules/instances/configuration/: Configuration
+  /docs/modules/instances/operations/: Operations
   /docs/operate/installation-modes/: Installation Modes
   /docs/operate/high-availability/: High Availability
   /docs/operate/migration/: Upgrades

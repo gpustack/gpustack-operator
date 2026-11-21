@@ -1,7 +1,8 @@
 # KV Cache
 
-A shared KV cache lets compatible inference workloads reuse cached state. A backend runs the store.
-Pools and bindings grant capacity to namespaces. Cache quota is separate from accelerator quota.
+A shared KV cache lets compatible inference workloads reuse cached prefix blocks. A `KVCacheBackend`
+runs the store, while `KVCachePool` and `KVCachePoolBinding` grant capacity to namespaces. Cache
+quota is separate from accelerator quota.
 
 ## Contents
 
@@ -24,54 +25,54 @@ flowchart TD
     PODS -> BACKEND
 -->
 
-A binding grants capacity only; read the
-[isolation limitations](pool.md#limitations) before sharing a backend between tenants.
+A `KVCachePoolBinding` provisions capacity and registers a reuse domain, not network access control.
+Review [Limitations](pool.md#limitations) before sharing one backend across distrusting tenants.
 
 ## Configuration
 
-Start with the annotated [backend example](backend.md#connection-and-medium) and its constraints.
-Configure [pools and bindings](pool.md) for quotas and reuse domains.
-[Pod injection](pool.md#pod-injection) defines the `Pod` labels, annotations, and verification checks.
+Start with the [backend manifest](backend.md#connection-and-medium) to deploy or attach a store,
+then configure [pools and bindings](pool.md) for namespace quotas and reuse domains.
+[Pod injection](pool.md#pod-injection) covers opt-in `Pod` labels, annotations, and verification.
 
-For an end-to-end configuration, follow the
+For an end-to-end deployment sequence, follow the
 [Shared Cache Walkthrough](../../walkthroughs/kv-cache/shared-cache.md).
 
 ## Operations
 
 ### Step 1: Configure storage
 
-Select memory and optional disk tiers. See [KV Cache Backend](backend.md),
-[Local Disk Tier](local-disk-tier.md) and [Disk-Heavy Nodes](disk-heavy-nodes.md).
+Choose memory segments and optional local disk offload in [KV Cache Backend](backend.md) and
+[KV Cache Local Disk Tier](local-disk-tier.md) (including
+[disk-heavy nodes](local-disk-tier.md#disk-heavy-nodes)).
 
 ### Step 2: Check status
 
-Inspect the backend and its conditions:
+Inspect backend readiness and conditions:
 
 ```bash
 kubectl get kvcb
 kubectl describe kvcb <backend-name>
 ```
 
-**Verification:** Check the phase and conditions against [Backend Status](backend.md#status-and-conditions).
-For leader health and metrics, see [KV Cache Election and Failover](leader.md#health-checks).
+**Verification:** Confirm `PHASE` is `Ready` against
+[Status and conditions](backend.md#status-and-conditions). For leader probes and failover, see
+[KV Cache Election and Failover](leader.md#health-checks).
 
 ## Troubleshooting
 
-If a workload cannot use the cache, inspect backend, pool and binding status.
+If a workload cannot attach or write to the cache, inspect the backend, pool, and binding status:
 
 | Condition | Reason | Resolution |
 |---|---|---|
-| `MembersMounted=False` | `AmbiguousMemberIdentity` | Use node selectors that place the groups on different nodes. |
-| Writes fail with `RPC_FAIL (-900)` | Possible store and client minor-line mismatch | Check [version compatibility](backend.md#version-compatibility). |
+| `MembersMounted=False` | `AmbiguousMemberIdentity` | Place host-network member groups on separate `Node`s via *`nodeSelector`*. |
+| Engine writes fail with `RPC_FAIL (-900)` | Store and client minor versions differ | Align store and engine versions in [Version compatibility](backend.md#version-compatibility). |
 
-Use [Refused engine launch](pool.md#refused-engine-launch) for webhook messages and fixes, and
-[Verify Pod binding](pool.md#verify-pod-binding) to check an admitted `Pod`.
-For quota and domain failures, see [Pool Operating Notes](pool.md#operating-notes).
-For backend failures, check [Backend Status](backend.md#status-and-conditions).
+Use [Refused engine launch](pool.md#refused-engine-launch) for admission refusals,
+[Pod binding verification](pool.md#pod-binding-verification) to inspect admitted `Pod`s, and
+[Operating notes](pool.md#operating-notes) for deletion holds.
 
 ---
 
-**See also** — [Model Deployment](../model-deployment/_index.md) (cache consumers) ·
-[RDMA Networking](../rdma/_index.md) (transport)
+**See also** — [Model Deployment](../model-deployment/_index.md) (managed serving consumers) · [RDMA Networking](../rdma/_index.md) (fabric endpoints)
 
-**Next** → [Shared Cache Walkthrough](../../walkthroughs/kv-cache/shared-cache.md) — create a shared cache.
+**Next** → [Shared Cache Walkthrough](../../walkthroughs/kv-cache/shared-cache.md) — deploy and verify a shared cache.

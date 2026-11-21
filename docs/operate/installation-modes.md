@@ -17,7 +17,7 @@ runtime. Choose one mode per cluster.
 
 The Helm chart accepts Kubernetes 1.23 and newer. Use Kubernetes 1.29 or newer for the Kueue
 scheduling chain and node model delivery; simple allocation on 1.23–1.28 is untested.
-[Model Image Source](../modules/model-delivery/image-source.md#prerequisites) requires newer
+[Model Image Source](../modules/model-delivery/artifact.md#image-prerequisites) requires newer
 Kubernetes and container-runtime versions.
 
 ## Chart and image modes
@@ -56,7 +56,7 @@ Two components sit outside `--disable-applications`:
   `node-feature-discovery.enabled=false` hands feature discovery to an existing NFD installation.
 - **Topograph**: disabled by default and configurable only in chart mode because it requires provider
   credentials and trust settings. `TopologySource` snapshots and hostname fallback work without it
-  ([Topology-Aware Scheduling Operations](../modules/topology/operations.md#choose-the-inventory-path)).
+  ([Topology-Aware Scheduling Operations](../modules/topology/operations.md#inventory-path)).
 
 ## Modes are exclusive
 

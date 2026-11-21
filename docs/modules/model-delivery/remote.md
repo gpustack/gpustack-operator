@@ -1,9 +1,9 @@
 # Remote Weight Delivery
 
-Remote weight delivery lets an engine load tensors from a prepared source node without first
-copying the complete checkpoint to the serving node. The source registers weights verified by its
-node cache, and the target mounts a metadata-only view. A cluster-wide policy enables delivery; the
-deployment's model block does not.
+Remote weight delivery streams model tensors from a prepared source `Node`'s host RAM directly into
+serving replicas without writing a full checkpoint onto the target `Node`'s disk. Sources register
+verified node-cache weights, targets mount a metadata-only CSI view, and a cluster-wide `Setting`
+governs activation.
 
 ![Remote weight transfer between nodes](../../assets/diagrams/model-delivery-remote.svg)
 
@@ -13,8 +13,8 @@ flowchart TD
     HIXL_SRC["HIXL / NIXL: node-01 source Host RAM"] -> HIXL_RAM["node-02: stream directly into Host RAM"] -> HIXL_DRAM["node-02: transfer from Host RAM into Device DRAM"]
 -->
 
-*H2H* means Host-to-Host; *H2D* means Host-to-Device. Host-memory windows are bounded and reused,
-so the successful remote path does not store a complete checkpoint on the target filesystem.
+*H2H* means Host-to-Host and *H2D* means Host-to-Device. Bounded host-memory windows are reused
+across batches so successful remote loads write zero checkpoint shards to target storage.
 
 ## Contents
 
@@ -31,50 +31,39 @@ so the successful remote path does not store a complete checkpoint on the target
 
 ## Configuration
 
-One `Setting` chooses the cluster's policy, and the chart ships it:
+The `model-artifact-remote-delivery-policy` `Setting` controls cluster-wide activation:
 
-| `Setting` | Default | Values |
+| Value | Behavior | Requirements |
 |---|---|---|
-| **`model-artifact-remote-delivery-policy`** | **`Prefer`** | `Disabled`, `Require`, `Prefer` |
+| **`Prefer`** (default) | Streams remotely when a prepared source is `SourceReady`; falls back to local delivery otherwise. | `model.csi.gpustack.ai` `CSIDriver` for metadata mounts. |
+| `Require` | Streams remotely and waits within startup limits; never downloads locally. | `model.csi.gpustack.ai` `CSIDriver` and an allowlisted role/backend. |
+| `Disabled` | Disables remote delivery, leaving `Pod` specs and status fields unchanged. | None (`modelTransfer.enabled: false` seeds `Disabled` on start). |
 
-- **`Prefer`**: Default policy; uses remote delivery when a prepared source is ready and local
-  delivery otherwise.
-- **`Disabled`**: Turns remote delivery off; leaves `Pod` specs, conditions, and status unchanged.
-- **`Require` and `Prefer`**: Require the `model.csi.gpustack.ai` `CSIDriver` for metadata mounts.
+`modelTransfer.images` configures per-vendor source `DaemonSet`s (`nvidia`, `amd`, `ascend`, matched
+by `pci-<vendor>.present` under `OnDelete`). Use cert-manager when rendering manifests offline
+(`helm template | kubectl apply`) so repeated syncs do not rotate source TLS certificates.
 
-```bash
-kubectl -n gpustack-system patch setting model-artifact-remote-delivery-policy \
-  --type merge -p '{"spec":{"value":"Disabled"}}'
-```
-
-`modelTransfer.images` configures full source-worker image references per manufacturer (`nvidia`,
-`amd`, `ascend`), rendering one `OnDelete` `DaemonSet` per configured vendor (`pci-<vendor>.present`
-`nodeSelector`). Configure cert-manager for offline GitOps rendering (`helm template | kubectl apply`)
-so repeated syncs do not rotate the source serving certificate.
-
-Remote delivery targets **hub artifacts on managed roles** (default routing admits `nixl` on NVIDIA
-and `hixl` on Ascend for `vLLM` and `SGLang`; production acceptance remains separate). Take-over
-*`roles[].command`*, claim, and image artifacts keep their existing paths. Treat source `Pod`s and
-vendor images as trusted cluster infrastructure.
+Remote delivery applies to **hub `ModelArtifact`s on managed `vLLM` and `SGLang` roles** (`nixl` on
+NVIDIA and `hixl` on Ascend). Take-over *`roles[].command`*, PVC, and OCI image artifacts keep their
+local paths. Treat source `Pod`s and vendor images as trusted cluster infrastructure.
 
 ## Source preparation
 
-A [Model Prefetch](prefetch.md) with `spec.source: {}` pins a verified disk cache and registers a
-host-memory source on nodes matched by `placement` and covered by a `ModelStoreBinding`. Disk
-readiness appears in *`status.readyNodes`*; transfer readiness appears in *`status.transfer`*.
+Add `spec.source: {}` and explicit *`placement`* on a [Model Prefetch](prefetch.md) to pin verified
+disk weights (*`status.readyNodes`*) and register a host-memory source (*`status.transfer`*).
 
-Source admission enforces the smallest of three limits: the broker's node budget, the
-per-generation resident window, and an optional shared Binding grant (`spec.sourceMemory`),
-including `10%` reservation overhead. Both NIXL and HIXL page checkpoints larger than the admitted
-window, which must fit at least `1 GiB` and the largest safetensors shard (shards are never split).
+Source admission enforces the minimum of three bounds (including `10%` reservation overhead): the
+broker's node budget, the per-generation resident window, and any shared Binding
+*`spec.sourceMemory`* grant. Checkpoints larger than the window page in batches; the window must fit
+at least `1 GiB` and the largest safetensors shard (shards are never split):
 
 ```yaml
 modelTransfer:
   source:
-    maxMemoryBytes: 0           # 0 uses 1/16 of MemTotal, floored at minMemoryBytes
+    maxMemoryBytes: 0  # 0 uses 1/16 of MemTotal, floored at minMemoryBytes
     minMemoryBytes: 1073741824  # 1 GiB floor
-    maxSessions: 64             # concurrent sessions across this source Pod
-  workerResources: {}           # explicit limits must cover non-transfer allocations too
+    maxSessions: 64  # max concurrent sessions per source Pod
+  workerResources: {}  # explicit memory limits must include non-transfer overhead
   env:
     GPUSTACK_MODEL_TRANSFER_SOURCE_RESIDENT_BUDGET_BYTES: "0"
     GPUSTACK_MODEL_TRANSFER_HIXL_RESIDENT_BUDGET_BYTES: "17179869184"  # 16 GiB HIXL default
@@ -82,8 +71,8 @@ modelTransfer:
 
 ### Source memory examples
 
-Label source nodes `gpustack.ai/model-transfer-source: "true"`, grant optional *`sourceMemory`* on
-the `ModelStoreBinding`, and enable `source: {}` on `ModelPrefetch`:
+Label source `Node`s `gpustack.ai/model-transfer-source: "true"`, optionally cap *`sourceMemory`* on
+`ModelStoreBinding`, and declare `source: {}` on `ModelPrefetch`:
 
 ```yaml
 apiVersion: worker.gpustack.ai/v1
@@ -95,12 +84,12 @@ spec:
   storeRefs:
     - name: model-source-pool
   quota:
-    bytes: 128Gi  # disk-cache quota; separate from source RAM
+    bytes: 128Gi  # disk cache budget (separate from source RAM)
   allowPinned: true
   sourceMemory:  # optional; omit to use node-derived limits
-    bytes: 64Gi  # shared across models, source nodes and manufacturers
-    registrations: 4096
-    sessions: 64
+    bytes: 64Gi  # shared across prefetches, nodes, and vendors; monotonic upward
+    registrations: 4096  # monotonic upward
+    sessions: 64  # editable in both directions
 ---
 apiVersion: worker.gpustack.ai/v1
 kind: ModelPrefetch
@@ -118,104 +107,87 @@ spec:
         gpustack.ai/model-transfer-source: "true"
   retention:
     pinned: true
-  source: {}  # register host-memory source alongside disk cache
+  source: {}  # registers host-memory source alongside disk cache
 ```
 
-| Model | Checkpoint | 16 GiB ceiling | Notes |
+| Model | Checkpoint | 16 GiB budget | Paging behavior |
 |---|---|---|---|
-| `Qwen3-8B` | 15.27 GiB | Fits in full when broker budget exceeds ~17.6 GiB | With a 16 GiB broker budget (~14.54 GiB net after 10% overhead), even 8B pages |
-| `Qwen3.6-35B-A3B` | 66.99 GiB | Pages successive resident batches | Admitted window must fit the largest shard; `64 GiB` grant cannot enlarge a `16 GiB` window |
+| `Qwen3-8B` | `15.27 GiB` | Pages (`~14.54 GiB` net after `10%` overhead) | Fits whole when broker budget exceeds `~17.6 GiB`. |
+| `Qwen3.6-35B-A3B` | `66.99 GiB` | Pages resident batches | Window must fit largest shard; `64 GiB` Binding grant cannot widen a `16 GiB` resident cap. |
 
-Keep source disk available for page-in and restore. Drain and replace source `Pod`s after chart
-argument or environment changes; Binding *`sourceMemory`* grants can grow online, and removing
-*`sourceMemory`* restores node-derived limits. Deploy the operator, source SDK, and engine SDK on
-contract version `2`.
+Keep source disk caches intact for page-in and restore. Drain and delete `OnDelete` source `Pod`s
+after chart flag or env changes, and keep operator, source SDK, and engine SDK on contract version `2`.
 
 ## Replica startup
 
-The operator renders three additions on a remote replica `Pod`: a metadata-only CSI volume
-(`model-transfer.gpustack.ai/delivery: metadata`, serving config/tokenizer/safetensors headers), a
-projected `ServiceAccount` token (`gpustack-model-transfer` audience), and the host-staged
-`gpustack_model_transfer` wheel installed offline when not already importable.
+Remote-enabled replicas mount a metadata-only CSI view (`model-transfer.gpustack.ai/delivery: metadata`),
+a `gpustack-model-transfer` token, and the host-staged wheel when absent. Tune *tensor parallelism
+(TP)* mode and target staging RAM in *`spec.roles[].env`*:
 
-Configure *TP* loading mode and target staging RAM in *`spec.roles[].env`*:
-
-```yaml
-apiVersion: worker.gpustack.ai/v1
-kind: ModelDeployment
-metadata:
-  name: qwen3-8b
-  namespace: gpustack-default
-spec:
-  roles:
-    - kind: Server
-      name: server
-      env:
-        # broadcast (or tp0): rank 0 reads remotely and broadcasts tensors
-        # all: each TP rank opens its own remote session
-        - name: GPUSTACK_MODEL_TRANSFER_TP_MODE
-          value: "broadcast"
-        # 8 GiB target staging ceiling; divided across ranks in all mode (1 GiB/rank floor)
-        - name: GPUSTACK_MODEL_TRANSFER_MAX_WINDOW_BYTES
-          value: "8589934592"
+```diff
+ apiVersion: worker.gpustack.ai/v1
+ kind: ModelDeployment
+ metadata:
+   name: qwen3-8b
+   namespace: gpustack-default
+ spec:
+   roles:
+     - kind: Server
+       name: server
++      env:
++        - name: GPUSTACK_MODEL_TRANSFER_TP_MODE
++          value: broadcast  # broadcast (or tp0): rank 0 streams and broadcasts; all: every rank opens a session
++        - name: GPUSTACK_MODEL_TRANSFER_MAX_WINDOW_BYTES
++          value: "8589934592"  # 8 GiB target staging cap (split across ranks in all mode; 1 GiB/rank floor)
 ```
 
-The loader clamps its pinned-RAM staging window to the smaller of its budget, the source's
-advertised window, and the needed tensor span, then closes the session after `load_weights`. On
-HTTP `409` session exhaustion, the client tries alternate peers and retries after `Retry-After`.
-A drained or quarantined generation stops admitting new sessions while loaded replicas keep serving.
+The client caps pinned staging RAM at the minimum of its window, the source window, and the tensor
+span. It closes the session after `load_weights`, retries peers on HTTP `409`, and leaves loaded
+replicas untouched when a source drains.
 
 ## Require and Prefer
 
 | Policy | Allowlisted, source ready | Allowlisted, source unavailable | Outside allowlist | Ineligible role |
 |---|---|---|---|---|
-| `Require` | Loads remote | Holds before load starts; never downloads | Blocked (`UnqualifiedTransferBackend`) | Blocked (`RoleIneligibleForModelTransfer`) |
-| `Prefer` | Loads remote | Uses declared local delivery unless a remote replica is running | Falls back unless fallback would roll a loaded remote replica | Falls back to declared local delivery |
+| `Require` | Loads remote | Waits within startup timeout; never downloads | Blocked (`UnqualifiedTransferBackend`) | Blocked (`RoleIneligibleForModelTransfer`) |
+| `Prefer` | Loads remote | Uses local delivery unless a remote replica is running | Falls back unless rolling a loaded replica | Falls back to local delivery |
 
-- **`Require` never downloads**: Replicas wait within startup limits rather than materializing a
-  local checkpoint.
-- **`Prefer` fallback tracking**: Failed remote loads recreate the replica and increment
-  *`fallbackAttempts`*; past three attempts the reason becomes `FallbackAttemptsSpent` and fallback
-  proceeds. Verified artifacts keep verified Node delivery on fallback.
-- **Loaded replica protection**: The controller holds remote delivery for an already-loaded replica
-  even if the source later disappears, avoiding unnecessary rollouts.
+Under `Prefer`, failed remote loads recreate the replica and increment *`fallbackAttempts`*. After
+three attempts, *`reason`* turns `FallbackAttemptsSpent` and local `Node` or `Engine` delivery runs;
+loaded remote replicas keep their spec if the source disappears.
 
 ## Networks
 
-Control (authenticated broker HTTP/TLS) and payload (UCX/InfiniBand or shared memory for `nixl`;
-CANN fabric for `hixl`) endpoints are identified separately. No `Setting` selects a NIC today; pass
-backend device environment variables via `modelTransfer.env` / `modelTransfer.extraArgs` on sources,
-and use RDMA selection policies on serving targets.
+Control traffic uses authenticated broker HTTPS, while payload traffic uses UCX/InfiniBand or shared
+memory (`nixl`) and CANN fabric (`hixl`). Pass NIC selection variables on sources via
+`modelTransfer.env` or `modelTransfer.extraArgs`, and apply
+[RDMA selection policies](../rdma/operations.md#selection-policy) on serving targets.
 
 ## Vendor-specific behavior
 
 ### Ascend
 
-Ascend (`hixl`) admits `vLLM` and `SGLang` and requires CANN `9.2+` engine images (upgrade or omit
-stale preinstalled `gpustack_model_transfer` wheels so the host-staged wheel loads). On Ascend A5
-(`status.detail.family` `"950"`):
+Ascend (`hixl`) supports `vLLM` and `SGLang` on CANN `9.2+` images (remove stale preinstalled
+`gpustack_model_transfer` wheels so the host-staged wheel loads). On Ascend A5
+(*`status.detail.family`* `"950"`):
 
 - **UB / UB H2H / UBG / UBoE**: Keep `modelTransfer.ascend.hostRoCE.enabled: false` and target
-  `interface: 0`. Pass `ASCEND_GLOBAL_RESOURCE_CONFIG` with `"comm_resource_config.protocol_desc"`
-  (`["ub_ctp:host"]`, `["ub_rtp:device"]`, or `["uboe:device"]`) in `modelTransfer.env` and
-  *`roles[].env`* when selecting a non-default UB mode.
-- **Host RoCE (`roce:host`)**: Set `modelTransfer.ascend.hostRoCE.enabled: true` on the Ascend
-  source `DaemonSet` (drains and rolls via `config-hash`) and *`roles[].resources.interface > 0`*
-  on `Server` or symmetric *PD* target roles (`Encode` and asymmetric *PD* are rejected). Provision
-  [host endpoint files](../../getting-started/vendor-prerequisites.md#a5-host-roce-endpoints) first.
-- **Mixed-fleet `nodeSelector` warning**: `modelTransfer.nodeSelector` applies to all vendor source
-  `DaemonSet`s (`nvidia`, `amd`, `ascend`). Drain excluded nodes before narrowing it, because the
-  Kubernetes `DaemonSet` controller deletes non-matching `Pod`s immediately.
-
-Example source Helm values and target `ModelDeployment` for Ascend A5 Host RoCE:
+  `interface: 0`. Set `ASCEND_GLOBAL_RESOURCE_CONFIG` (`"comm_resource_config.protocol_desc"`:
+  `["ub_ctp:host"]`, `["ub_rtp:device"]`, or `["uboe:device"]`) in `modelTransfer.env` and
+  *`roles[].env`* for non-default UB modes.
+- **Host RoCE (`roce:host`)**: Prepare
+  [Ascend host prerequisites](../../getting-started/vendor-prerequisites.md#ascend), enable
+  `modelTransfer.ascend.hostRoCE.enabled: true` on the source `DaemonSet`, and set
+  `resources.interface >= 1` on `Server` or symmetric *prefill/decode (PD)* roles (`Encode` and
+  asymmetric *PD* are refused):
 
 ```yaml
 modelTransfer:
   nodeSelector:
-    ascend.gpustack.ai/generation: a5  # admin-supplied label matching A5 nodes
+    ascend.gpustack.ai/generation: a5  # drain non-matching nodes before narrowing; applies to all vendors
   ascend:
     hostRoCE:
-      enabled: true  # enables hostNetwork, RO /etc/hixlep, and roce:host default
+      enabled: true  # mounts RO /etc/hixlep, enables hostNetwork, and defaults roce:host
 ```
 
 ```yaml
@@ -235,7 +207,7 @@ spec:
   roles:
     - name: server
       replicas: 1
-      acceleratorType: atlas-950  # converged status.detail.family: "950"
+      acceleratorType: atlas-950  # status.detail.family: "950"
       resources:
         accelerator: 1
         interface: 1  # grants RDMA, RO /etc/hixlep, and roce:host default
@@ -243,15 +215,15 @@ spec:
 
 ### NVIDIA
 
-NVIDIA admits `nixl` for `vLLM` and `SGLang`, selecting `LIBFABRIC` when `aws-efa-enabled` is
-`true` or a bound `KVCache` pool uses EFA, and `UCX` otherwise. For AWS EFA, supply an EFA-enabled
-source image via `modelTransfer.images.nvidia`; default builds omit EFA.
+NVIDIA (`nixl`) supports `vLLM` and `SGLang`, choosing `LIBFABRIC` when `aws-efa-enabled` is `true`
+or an attached `KVCachePool` uses `EFA`, and `UCX` otherwise. Supply a custom EFA-built source image
+in `modelTransfer.images.nvidia` on AWS EFA clusters.
 
 ## NVIDIA ModelExpress
 
-ModelExpress lets NVIDIA `vLLM` and `SGLang` replicas share GPU tensors over NIXL device-to-device
-(D2D) transfers and reuse `torch.compile` and Triton caches across replicas (HIXL D2D is outside
-this design; hardware qualification remains separate).
+ModelExpress streams GPU tensors peer-to-peer over NIXL device-to-device (D2D) transfers and shares
+`torch.compile` and Triton caches across NVIDIA `vLLM` and `SGLang` replicas (HIXL D2D is not
+supported).
 
 ![ModelExpress peer and source delivery](../../assets/diagrams/model-delivery-modelexpress.svg)
 
@@ -281,7 +253,7 @@ flowchart LR
 
 ### Role configuration
 
-Add `--load-format=modelexpress` (or `mx`) on a role backed by a Hugging Face `ModelArtifact`:
+Pass `--load-format=modelexpress` (or `mx`) in *`roles[].extraArgs`* on a Hugging Face-backed role:
 
 ```yaml
 apiVersion: worker.gpustack.ai/v1
@@ -293,10 +265,10 @@ spec:
   model:
     name: Qwen/Qwen3-8B  # required
     artifactRef:
-      name: qwen-weights  # required for the prepared source
+      name: qwen-weights  # required Hugging Face ModelArtifact
   engine:
-    name: vLLM  # required; vLLM or SGLang
-    image: example/engine:tag  # required; use a compatible runner image
+    name: vLLM  # required; enum: vLLM, SGLang
+    image: example/engine:tag  # required
   roles:
     - name: server
       replicas: 2
@@ -304,21 +276,20 @@ spec:
       resources:
         accelerator: 1
       extraArgs:
-        - --load-format=modelexpress  # required; mx is also accepted
+        - --load-format=modelexpress  # mx is also accepted
 ```
 
-- **Peer precedence**: Each *TP* rank tries `RdmaStrategy` (NIXL D2D from a ready peer with
-  matching *TP*/*PP* layout) before `GpustackLoadStrategy` (prefetch source), then local delivery
-  under `Prefer` only (`Require` permits no local fallback).
-- **Overrides**: Any `MX_*` entry in *`roles[].env`* overrides operator-injected defaults (set
-  `MX_ARTIFACT_TRANSFER: "0"` to disable compile-cache transfer).
+Each *TP* rank tries `RdmaStrategy` (NIXL D2D from a matching *TP*/*PP* peer) before
+`GpustackLoadStrategy` (prefetch source), falling back locally only under `Prefer`. User `MX_*`
+entries in *`roles[].env`* override defaults (`MX_ARTIFACT_TRANSFER: "0"` disables compile-cache
+sharing).
 
 ### Metadata server
 
 The operator deploys an unauthenticated in-memory gRPC metadata server and `Service`
-(`<md-name>-modelexpress`) in the deployment namespace; restrict access to trusted `Pod`s. A server
-restart clears in-memory registrations while existing replicas keep serving, and the next replica
-falls back to `GpustackLoadStrategy` and republishes descriptors. Pin or mirror the image via:
+(`<md-name>-modelexpress`) in the deployment namespace; restrict network access to trusted `Pod`s.
+Server restarts clear descriptors without interrupting running replicas; the next replica reloads via
+`GpustackLoadStrategy` and re-registers. Pin or mirror the server image via `Setting`:
 
 ```yaml
 apiVersion: gpustack.ai/v1
@@ -332,61 +303,63 @@ spec:
 
 ## Benchmarks
 
-Benchmarks compare a cold target node running `TCP peer sync + local load` (phase sum, excluding
-source preparation, scheduling, and warm-up) against cross-node remote loading and ModelExpress D2D
-scale-out. **Weight Transfer Time** is the slowest rank's load duration; **Target Storage** reports
-target checkpoint disk usage (`0 GiB` for remote rows). `TP2`, `TP4`, and `TP8` use two, four, and
-eight devices.
+Tables compare **`Weight Transfer Time`** (slowest rank load) and **`Target Storage`** (`0 GiB` on
+remote rows) against a cold **`TCP peer sync + local load` phase-sum baseline**. Source preparation,
+scheduling, and warm-up are excluded:
 
-**Decision summary:**
-
-- **Use `TP0 + broadcast`** when source RAM cannot hold the full checkpoint: it streams sequential
-  shards (`2.45×`–`4.26×` faster than baseline), whereas `TP all` thrashes a 16 GiB source window
-  (`0.28×` on 80B NVIDIA, `2.79×` vs `4.26×` on 35B Ascend).
-- **Use `TP all` with full source residency** when source RAM fits the checkpoint: `4.84×`–`16.21×`
-  faster on NVIDIA and `2.57×`–`7.69×` faster on Ascend with zero target disk usage.
-- **Use ModelExpress D2D on NVIDIA scale-out** for multi-replica serving: `16.78 s` weight load
-  (`66.82×` vs baseline, `0 GiB` host transfer RAM) plus `277.39×` faster `torch.compile`.
+- **Choose `TP0 + broadcast` when source RAM is smaller than the checkpoint**: Rank 0 streams shards
+  sequentially (`1.32×`–`4.26×` faster than the `TCP peer sync + local load` sum). **Exception**: do
+  not use `TP all` under a `16 GiB` paged window: concurrent rank paging regresses to **`0.28×`**
+  (`1380.52 s` vs `393.14 s` baseline) on 80B NVIDIA and trails `TP0 + broadcast` on 35B Ascend
+  (`2.79×` vs `4.26×`).
+- **Choose `TP all` when source RAM holds the full checkpoint**: Parallel per-rank sessions cut
+  `Weight Transfer Time` by `4.84×`–`16.21×` on NVIDIA (eager mode) and `2.57×`–`7.69×` on Ascend
+  (eager mode; **confounder**: Ascend 235B `16 GiB` paged and `256 GiB` full-resident runs used
+  different SDK builds).
+- **Choose ModelExpress D2D for multi-replica NVIDIA scale-out**: Peer D2D loads 235B weights in
+  `16.78 s` (`66.82×` vs the `1121.30 s` baseline, `0 GiB` host transfer RAM) and cuts
+  `torch.compile` from `77.67 s` to `0.28 s` (`277.39×`), **confounded** against eager-mode NIXL
+  runs because ModelExpress runs in graph mode (`296.82 s` → `90.25 s` total engine init, `3.29×`).
 
 ### Ascend (HIXL)
 
-Two Ascend 910B2 nodes, vLLM-Ascend `cann9.2-910b-vllm0.30.0`, eager mode (`8B` = `Qwen/Qwen3-8B`,
-`35B` = `Qwen/Qwen3.6-35B-A3B`, `235B` = `vllm-ascend/Qwen3-235B-A22B-W8A8`; 235B paged and
-full-resident runs used different SDK builds):
+Two Ascend 910B2 `Node`s, vLLM-Ascend `cann9.2-910b-vllm0.30.0`, eager mode (`8B` = `Qwen/Qwen3-8B`
+at *TP* = 2; `35B` = `Qwen/Qwen3.6-35B-A3B` and `235B` = `vllm-ascend/Qwen3-235B-A22B-W8A8` at
+*TP* = 8 plus *expert parallelism (EP)*; 235B `16 GiB` and `256 GiB` rows used different SDK builds):
 
 | Model | Mode | Source RAM | Target RAM | Target Storage | Weight Transfer Time |
 |---|---|---|---|---|---|
-| 8B (TP2) | TCP peer sync + local load (sum) | 0 GiB | 0 GiB | 15.27 GiB | 82.90 s (baseline) |
-| 8B (TP2) | TP0 + broadcast (16 GiB source, 8 GiB target) | 15.26 GiB | 3.72 GiB | 0 GiB | 15.31 s (5.41×, −81.5% time) |
-| 8B (TP2) | TP all (16 GiB source, 8 GiB target) | 15.26 GiB | 7.45 GiB | 0 GiB | 10.78 s (7.69×, −87.0% time) |
-| 35B (TP8 + EP) | TCP peer sync + local load (sum) | 0 GiB | 0 GiB | 66.99 GiB | 282.60 s (baseline) |
-| 35B (TP8 + EP) | TP0 + broadcast (16 GiB source, 8 GiB target) | 15.66 GiB | 3.72 GiB | 0 GiB | 66.33 s (4.26×, −76.5% time) |
-| 35B (TP8 + EP) | TP all (16 GiB source, 8 GiB target) | 15.66 GiB | 8.00 GiB | 0 GiB | 101.39 s (2.79×, −64.1% time) |
-| 35B (TP8 + EP) | TP all (80 GiB source, 64 GiB target) | 67.05 GiB | 29.81 GiB | 0 GiB | 46.39 s (6.09×, −83.6% time) |
-| 235B (TP8 + EP) | TCP peer sync + local load (sum) | 0 GiB | 0 GiB | 220.54 GiB | 599.05 s (baseline) |
-| 235B (TP8 + EP) | TP0 + broadcast (16 GiB source, 8 GiB target) | 15.99 GiB | 4.00 GiB | 0 GiB | 452.83 s (1.32×, −24.4% time) |
-| 235B (TP8 + EP) | TP0 + broadcast (256 GiB source, 32 GiB target) | 220.67 GiB | 4.00 GiB | 0 GiB | 253.58 s (2.36×, −57.7% time) |
-| 235B (TP8 + EP) | TP all (256 GiB source, 32 GiB target) | 220.67 GiB | 32.00 GiB | 0 GiB | 232.93 s (2.57×, −61.1% time) |
+| 8B (*TP* = 2) | TCP peer sync + local load (sum) | 0 GiB | 0 GiB | 15.27 GiB | 82.90 s (baseline) |
+| 8B (*TP* = 2) | TP0 + broadcast (16 GiB source, 8 GiB target) | 15.26 GiB | 3.72 GiB | 0 GiB | 15.31 s (5.41×, −81.5% time) |
+| 8B (*TP* = 2) | TP all (16 GiB source, 8 GiB target) | 15.26 GiB | 7.45 GiB | 0 GiB | 10.78 s (7.69×, −87.0% time) |
+| 35B (*TP* = 8 + *EP*) | TCP peer sync + local load (sum) | 0 GiB | 0 GiB | 66.99 GiB | 282.60 s (baseline) |
+| 35B (*TP* = 8 + *EP*) | TP0 + broadcast (16 GiB source, 8 GiB target) | 15.66 GiB | 3.72 GiB | 0 GiB | 66.33 s (4.26×, −76.5% time) |
+| 35B (*TP* = 8 + *EP*) | TP all (16 GiB source, 8 GiB target) | 15.66 GiB | 8.00 GiB | 0 GiB | 101.39 s (2.79×, −64.1% time) |
+| 35B (*TP* = 8 + *EP*) | TP all (80 GiB source, 64 GiB target) | 67.05 GiB | 29.81 GiB | 0 GiB | 46.39 s (6.09×, −83.6% time) |
+| 235B (*TP* = 8 + *EP*) | TCP peer sync + local load (sum) | 0 GiB | 0 GiB | 220.54 GiB | 599.05 s (baseline) |
+| 235B (*TP* = 8 + *EP*) | TP0 + broadcast (16 GiB source, 8 GiB target) | 15.99 GiB | 4.00 GiB | 0 GiB | 452.83 s (1.32×, −24.4% time) |
+| 235B (*TP* = 8 + *EP*) | TP0 + broadcast (256 GiB source, 32 GiB target) | 220.67 GiB | 4.00 GiB | 0 GiB | 253.58 s (2.36×, −57.7% time) |
+| 235B (*TP* = 8 + *EP*) | TP all (256 GiB source, 32 GiB target) | 220.67 GiB | 32.00 GiB | 0 GiB | 232.93 s (2.57×, −61.1% time) |
 
 ### NVIDIA (NIXL)
 
-Nebius H100 80 GB nodes, vLLM `0.30.0`, eager mode (`80B` = `Qwen/Qwen3-Next-80B-A3B-Instruct-FP8`,
-`235B` = `Qwen/Qwen3-235B-A22B-Instruct-2507-FP8`):
+Nebius H100 80 GB `Node`s, vLLM `0.30.0`, eager mode (`80B` = `Qwen/Qwen3-Next-80B-A3B-Instruct-FP8`
+at *TP* = 4; `235B` = `Qwen/Qwen3-235B-A22B-Instruct-2507-FP8` at *TP* = 8 + *EP*):
 
 | Model | Mode | Source RAM | Target RAM | Target Storage | Weight Transfer Time |
 |---|---|---|---|---|---|
-| 80B (TP4) | TCP peer sync + local load (sum) | 0 GiB | 0 GiB | 76.45 GiB | 393.14 s (baseline) |
-| 80B (TP4) | TP0 + broadcast (16 GiB source, 8 GiB target) | 16.00 GiB | 8.00 GiB | 0 GiB | 160.59 s (2.45×, −59.2% time) |
-| 80B (TP4) | TP all (16 GiB source, 8 GiB target) | 16.00 GiB | 8.00 GiB | 0 GiB | 1380.52 s (0.28×, +251.2% time) |
-| 80B (TP4) | TP all (80 GiB source, 64 GiB target) | 76.42 GiB | 40.00 GiB | 0 GiB | 81.16 s (4.84×, −79.4% time) |
-| 235B (TP8 + EP) | TCP peer sync + local load (sum) | 0 GiB | 0 GiB | 220.21 GiB | 1121.30 s (baseline) |
-| 235B (TP8 + EP) | TP0 + broadcast (16 GiB source, 8 GiB target) | 16.00 GiB | 8.00 GiB | 0 GiB | 287.97 s (3.89×, −74.3% time) |
-| 235B (TP8 + EP) | TP0 + broadcast (256 GiB source, 64 GiB target) | 220.19 GiB | 9.31 GiB | 0 GiB | 108.89 s (10.30×, −90.3% time) |
-| 235B (TP8 + EP) | TP all (256 GiB source, 32 GiB target) | 220.19 GiB | 32.00 GiB | 0 GiB | 69.16 s (16.21×, −93.8% time) |
+| 80B (*TP* = 4) | TCP peer sync + local load (sum) | 0 GiB | 0 GiB | 76.45 GiB | 393.14 s (baseline) |
+| 80B (*TP* = 4) | TP0 + broadcast (16 GiB source, 8 GiB target) | 16.00 GiB | 8.00 GiB | 0 GiB | 160.59 s (2.45×, −59.2% time) |
+| 80B (*TP* = 4) | TP all (16 GiB source, 8 GiB target) | 16.00 GiB | 8.00 GiB | 0 GiB | 1380.52 s (0.28×, +251.2% time) |
+| 80B (*TP* = 4) | TP all (80 GiB source, 64 GiB target) | 76.42 GiB | 40.00 GiB | 0 GiB | 81.16 s (4.84×, −79.4% time) |
+| 235B (*TP* = 8 + *EP*) | TCP peer sync + local load (sum) | 0 GiB | 0 GiB | 220.21 GiB | 1121.30 s (baseline) |
+| 235B (*TP* = 8 + *EP*) | TP0 + broadcast (16 GiB source, 8 GiB target) | 16.00 GiB | 8.00 GiB | 0 GiB | 287.97 s (3.89×, −74.3% time) |
+| 235B (*TP* = 8 + *EP*) | TP0 + broadcast (256 GiB source, 64 GiB target) | 220.19 GiB | 9.31 GiB | 0 GiB | 108.89 s (10.30×, −90.3% time) |
+| 235B (*TP* = 8 + *EP*) | TP all (256 GiB source, 32 GiB target) | 220.19 GiB | 32.00 GiB | 0 GiB | 69.16 s (16.21×, −93.8% time) |
 
 ### ModelExpress D2D
 
-Nebius H100 80 GB nodes, vLLM `0.30.0`, graph mode on `235B (TP8 + EP)`
+Nebius H100 80 GB `Node`s, vLLM `0.30.0`, graph mode on `235B (TP8 + EP)`
 (`Qwen/Qwen3-235B-A22B-Instruct-2507-FP8`):
 
 | Model | Mode | Source RAM | Target RAM | Target Storage | Weight Transfer Time |
@@ -396,52 +369,54 @@ Nebius H100 80 GB nodes, vLLM `0.30.0`, graph mode on `235B (TP8 + EP)`
 | 235B (TP8 + EP) | Peer replica: `RdmaStrategy` (NIXL D2D + compile cache) | 0 GiB | 0 GiB | 0 GiB | 16.78 s (66.82×, −98.5% time) |
 | 235B (TP8 + EP) | Restart fallback: `GpustackLoadStrategy` (256 GiB source, 8 GiB target) | 220.19 GiB | 8.00 GiB | 0 GiB | 109.08 s (10.28×, −90.3% time) |
 
-Restoring shared compile caches over NIXL cut `torch.compile` from `77.67 s` to `0.28 s` (`277.39×`)
-and reduced total engine initialization from `296.82 s` to `90.25 s` (`3.29×`).
-
 ## Observing status
 
-Read per-role and per-replica delivery state from *`status.model.remote`*:
+Inspect per-role and per-replica remote loading state on `ModelDeployment`:
 
 ```bash
-kubectl get modeldeployment <name> -o jsonpath='{.status.model.remote}' | jq
+kubectl -n <ns> get modeldeployment <name> -o jsonpath='{.status.model.remote}' | jq
 ```
 
-- *`policy`* echoes the active policy; *`roles[].replicas[]`* reports *`delivery`* (`Remote`,
-  `Node`, `Engine`), *`load`* (`Unknown`, `AwaitingMetadata`, `AwaitingSource`, `Loading`,
-  `Loaded`), *`reason`*, and *`fallbackAttempts`*.
-- `WeightsReady` confirms loaded weights; a loaded replica stays `Loaded` if its source later drains.
-- Source eligibility follows the owning prefetch's [serving observation](prefetch.md#status-and-views).
+*`status.model.remote`* echoes the active *`policy`* and each replica's *`delivery`* (`Remote`,
+`Node`, or `Engine`), *`load`* (`Unknown`, `AwaitingMetadata`, `AwaitingSource`, `Loading`, or
+`Loaded`), *`reason`*, and *`fallbackAttempts`*. Source readiness lives on `ModelPrefetch`
+([Status and views](prefetch.md#status-and-views)).
 
 ## Troubleshooting
 
-Start from *`status.model.remote`*, then `WeightsReady` and the replica `Pod`:
-
-| Observation | Meaning | Check |
+| Observation | Cause | Resolution |
 |---|---|---|
-| `Progressing=True`, `SourceWindowFallback` on prefetch | Grant cannot back `1 GiB` minimum under `Prefer` | Increase Binding grant; check local delivery |
-| `Progressing=False`, `SourceWindowBelowFloor` on prefetch | Grant cannot back `1 GiB` minimum under `Require` | Increase Binding grant; check source capacity |
-| `Progressing=False`, `SourceGrantMissing` on prefetch | Referenced Binding is missing | Restore `ModelStoreBinding` named by *`spec.bindingRef`* |
-| `load: AwaitingSource` | No prepared source serves the digest yet | Check prefetch *`status.transfer`* and `NodeModelStore` generations |
-| `load: AwaitingMetadata` | Metadata view not mounted yet | Check `Pod` `FailedMount` events and `CSIDriver` |
-| `load: Unknown`, `RemoteLoadFailed` | Load attempt ended; replica recreating | Check terminated container exit and *`fallbackAttempts`* |
-| `FallbackAttemptsSpent` | Fallback attempts exceeded three | Check fallback `Node` or `Engine` delivery failure |
-| `RoleIneligibleForModelTransfer` (no `Pod`) | Role has custom command, unsupported engine, or no backend | Check [Configuration](#configuration) or use `Prefer` |
-| `UnqualifiedTransferBackend` (no `Pod`) | Candidate outside routing allowlist | Check engine/backend eligibility under [Configuration](#configuration) |
-| `WeightsReady=False`, `NodeDeliveryUnavailable` | `Require` active without `model.csi.gpustack.ai` `CSIDriver` | Install/enable `model-manager` CSI plugin |
+| `SourceWindowFallback` (`Progressing=True`) on prefetch | Source grant below `1 GiB` floor under `Prefer` | Raise `ModelStoreBinding` *`sourceMemory`* or broker RAM budget. |
+| `SourceWindowBelowFloor` (`Progressing=False`) on prefetch | Source grant below `1 GiB` floor under `Require` | Raise `ModelStoreBinding` *`sourceMemory`* or broker `maxMemoryBytes`. |
+| `SourceGrantMissing` (`Progressing=False`) on prefetch | Missing `ModelStoreBinding` | Create the `ModelStoreBinding` named in *`spec.bindingRef`*. |
+| `load: AwaitingSource` | No `SourceReady` prefetch serves the digest | Inspect `ModelPrefetch` *`status.transfer`* and source `Pod` logs. |
+| `load: AwaitingMetadata` | Metadata CSI mount pending | Inspect `Pod` `FailedMount` events and `model.csi.gpustack.ai`. |
+| `RemoteLoadFailed` (`load: Unknown`) | Remote load exited; replica recreating | Inspect previous container logs and *`fallbackAttempts`*. |
+| `FallbackAttemptsSpent` | Remote load failed more than 3 times under `Prefer` | Diagnose fallback `Node` or `Engine` delivery on the recreated `Pod`. |
+| `RoleIneligibleForModelTransfer` or `UnqualifiedTransferBackend` | Custom command, unsupported engine, or unallowlisted backend under `Require` | Switch to a managed NVIDIA (`nixl`) or Ascend (`hixl`) role, or set policy to `Prefer`. |
+| `WeightsReady=False` (`NodeDeliveryUnavailable`) | `Require` active without `model.csi.gpustack.ai` | Enable `modelManager.enabled: true` or roll back remote policy. |
 
 ### Rollback
 
 Patch `model-artifact-remote-delivery-policy` to `Disabled` (or set `modelTransfer.enabled: false`
-in chart values). New replicas use `model-artifact-delivery-mode` (`Node` or `Engine`); already
-loaded replicas keep serving until their next roll.
+in Helm values):
+
+```diff
+ apiVersion: gpustack.ai/v1
+ kind: Setting
+ metadata:
+   name: model-artifact-remote-delivery-policy
+   namespace: gpustack-system
+ spec:
+-  value: Prefer
++  value: Disabled
+```
+
+New replicas revert to `model-artifact-delivery-mode` (`Node` or `Engine`) while already-loaded
+replicas continue serving until their next rollout.
 
 ---
 
-**See also** — [Model Prefetch](prefetch.md) (intent and binding grant) ·
-[Model Store Operations](operations.md) (delivery `Setting`s in operation) ·
-[Model Artifact](artifact.md) (identity a source serves) ·
-[Model Deployment Configuration](../model-deployment/configuration.md) (deployment roles and conditions) ·
-[Engine Compatibility](../model-deployment/engine-versions.md) (per-engine adapter notes)
+**See also** — [Model Prefetch](prefetch.md) (source preparation and `ModelStoreBinding` grants) · [Model Store Operations](operations.md) (delivery `Setting`s and CSI operations) · [Model Artifact](artifact.md) (digest identity) · [Model Deployment Configuration](../model-deployment/configuration.md) (serving roles) · [Engine Compatibility](../model-deployment/engine-versions.md) (supported runner versions)
 
-**Next** → [Model Artifact](artifact.md)
+**Next** → [Model Artifact](artifact.md) — review weight source contracts and resolution rules.

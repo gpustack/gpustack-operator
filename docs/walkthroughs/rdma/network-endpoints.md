@@ -21,7 +21,7 @@ interfaces to *prefill/decode (PD)* roles and KV cache backends.
 Device Manager discovers NICs from `/sys/class/net` and InfiniBand verbs devices from
 `/sys/class/infiniband`, checks link health, and advertises shared (`rdma.shared`), exclusive (`rdma`),
 and *single-root I/O virtualization (SR-IOV)* resource keys. Nodes with at least one healthy endpoint
-carry `feature.gpustack.ai/rdma.capable=true` ([RDMA Operations](../../modules/rdma/operations.md#choosing-a-key)).
+carry `feature.gpustack.ai/rdma.capable=true` ([RDMA Operations](../../modules/rdma/operations.md#key-selection)).
 
 | Object | Scope | Creator | Purpose |
 |---|---|---|---|
@@ -276,7 +276,7 @@ kubectl -n gpustack-system get setting aws-efa-enabled -o jsonpath='{.spec.value
   ([RDMA Operations](../../modules/rdma/operations.md)).
 - Kubelet *NUMA* policy trade-offs (`none`, `restricted`, `single-numa-node`) are detailed in
   [Enabling NUMA alignment](../../modules/rdma/operations.md#enabling-numa-alignment) and
-  [Reading the result](../../modules/devices/preflight.md#reading-the-result).
+  [Reading the result](../../modules/devices/preflight.md#result-format).
 
 ## Troubleshooting
 
@@ -286,7 +286,7 @@ kubectl -n gpustack-system get setting aws-efa-enabled -o jsonpath='{.spec.value
 | `Workload` admitted by Kueue, `Pod` stays `Pending` | Insufficient free node `device.gpustack.ai/rdma*` | Kueue does not meter network keys; check `Node.status.allocatable` and active `Pod` requests, then free endpoints or lower *`resources.interface`*. |
 | `Pod` fails placement with `TopologyAffinityError` | Free GPUs and NICs sit on different *NUMA* sockets | Confirm `topologyManagerPolicy: restricted` in `/var/lib/kubelet/config.yaml` and keep GPU and *RDMA* requests in the same container. |
 | Fewer `uverbs` devices mounted than `rdma.shared` count | Shared units exceed eligible HCA count | Expected round-robin behavior; switch to `device.gpustack.ai/rdma` (`interface > 1`) when each unit requires its own physical HCA. |
-| `Node` loses `feature.gpustack.ai/rdma.capable` | Every endpoint on the host is `Failed` or unbound | Check host `dmesg` and NIC carrier state ([Inspecting the NIC record](../../modules/rdma/operations.md#inspecting-the-nic-record)); Device Manager restores the label automatically once a link recovers. |
+| `Node` loses `feature.gpustack.ai/rdma.capable` | Every endpoint on the host is `Failed` or unbound | Check host `dmesg` and NIC carrier state ([Inspecting the NIC record](../../modules/rdma/operations.md#nic-record-inspection)); Device Manager restores the label automatically once a link recovers. |
 | AWS EFA `Pod` stays `Pending` | Requested `device.gpustack.ai/rdma*` on EFA host | Patch `Setting/aws-efa-enabled` to `"true"` for `ModelDeployment`, or set `transport.protocol: EFA` on `KVCacheBackend`. |
 | `ModelDeployment` rejected: `no effective RDMA or EFA transfer leg uses the requested interfaces` | *`resources.interface`* set without an active fabric leg | Pair managed *Prefill* and *Decode* roles behind a router, attach an `RDMA`/`EFA` KV cache pool, or remove *`resources.interface`*. |
 

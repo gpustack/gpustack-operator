@@ -1,21 +1,22 @@
 # GPU Instances
 
-An `Instance` is a container workspace backed by a Kubernetes `Pod`. It can use a whole, sliced
-or partitioned accelerator. With an SSH public key, the operator adds a sidecar that lets
-the user enter the workload container.
+An `Instance` runs an interactive container workspace in a Kubernetes `Pod` on whole, sliced, or
+partitioned accelerators, or on CPU-only capacity. When you attach an `InstanceSSHPublicKey`, the
+operator adds an SSH sidecar that enters the workload container.
 
 ## Contents
 
 - [Overview](#overview)
-- [Configuration](#configuration)
-- [Device access](#device-access)
-- [Service lifecycle](#service-lifecycle)
-- [Network isolation](#network-isolation)
-- [Operations](#operations)
-- [Utilization metrics](#utilization-metrics)
+- [Pool selection](#pool-selection)
+- [Unit resource sizing](#unit-resource-sizing)
+- [Quickstart](#quickstart)
 - [Troubleshooting](#troubleshooting)
 
 ## Overview
+
+`InstanceType` defines pool capacity and unit sizing, and `Instance` declares the workspace image,
+ports, and volumes. The worker reconciles the backing `Pod` through Kueue admission and maintains
+an optional NodePort `Service`.
 
 ![Instance creation and access flow](../../assets/diagrams/instances-flow.svg)
 
@@ -30,167 +31,106 @@ flowchart TD
     SERVICE -> WORKSPACE
 -->
 
-## Configuration
+## Pool selection
 
-### Instance configuration
+List available `InstanceType`s (`instype`) and read-only `InstanceTypeFlavor`s (`instypeflavor`)
+before creating a workspace:
 
-This minimal example requests one accelerator and exposes a service port. For the
-`InstanceSSHPublicKey` manifest and SSH login commands, see [Usage](../../../README.md#usage).
+```bash
+kubectl get instancetypes -o wide
+kubectl get instancetypeflavors
+```
+
+Each `InstanceType` fronts one canonical pool `ClusterQueue` and reports `onceMaxRequest/remaining`
+across four accelerator views (`EX` whole cards, `SH` shared 10-slot cards, `SL` logical VRAM
+percentages, and `PT` hardware partitions). With `-o wide`, `PARTITIONS` lists remaining counts per
+MIG profile, and `CPU` reports capacity for CPU-only types.
+
+With `instance-type-derived-from-node` enabled (default `true`), the operator creates one derived
+`InstanceType` per hardware pool (`gpustack--<group>-<os>-<arch>`). By default, accelerated nodes
+also contribute to the generic CPU pool (`instance-type-mixed-on-node: true`), and pools collapse
+CPU vendors (`instance-type-aware-cpu-manufacturer: false`).
+
+## Unit resource sizing
+
+Derived `InstanceType`s stamp *`spec.unitResources`* (*`cpu`*, *`ram`*) per whole accelerator from
+hardware presets, plus a fixed `100Gi` *`spec.localStorage`*. Unlisted accelerators fall back to
+`4` CPU and `16Gi` RAM, and CPU-only derived types use `1` CPU and `2Gi` RAM.
+
+- **Default and cap**: Omitted *`cpu`* or *`ram`* defaults from *`unitResources`* (scaled by card
+  count or VRAM share) and caps explicit requests.
+- **Storage default**: Omitted *`resources.localStorage`* defaults to `15Gi`, capped at the
+  `InstanceType`'s *`spec.localStorage`*.
+- **Overcommit**: With `instance-general-resources-overcommit` `true` (default), limits keep the
+  sized value while requests use `100m` CPU (`800m` CPU-only), `128Mi` RAM per GiB, and one-eighth
+  *`localStorage`*.
+- **Disabling overcommit**: Setting `instance-general-resources-overcommit` to `false` sets
+  container requests equal to limits.
+- **Upgrade immutability**: *`spec.unitResources`* and *`spec.localStorage`* freeze at creation;
+  derived `InstanceType`s are create-only and retain existing values across upgrades.
+- **Pool resizing**: Author a [custom sibling `InstanceType`](configuration.md#custom-instancetype)
+  to keep running `Instance`s alive; deleting a derived type stops its `Instance`s until recreated.
+
+## Quickstart
+
+### Step 1: Create workspace
+
+Select an `Active` `InstanceType` with free capacity, save this manifest as `instance.yaml`, and
+apply it in a non-reserved workload namespace:
 
 ```yaml
 apiVersion: worker.gpustack.ai/v1
-kind: Instance
+kind: Instance  # namespaced, short name inst
 metadata:
   name: workspace-demo
   namespace: team-a
 spec:
-  type: gpustack--nvidia-a10g-linux-amd64  # Select an available InstanceType.
-  image: ubuntu:24.04
+  type: gpustack--nvidia-a10g-linux-amd64  # required; Active InstanceType name
+  image: ubuntu:24.04  # required
   command:
     - sleep
     - infinity
   resources:
-    accelerator: "1"  # one accelerator; see Accelerator Requests for slice percentages
+    accelerator: "1"  # optional, default: "1" on acceleratable types
   ports:
     - name: http
-      port: 8080
-  volume:
+      port: 8080  # allocates one NodePort on the Instance Service
+  volume:  # required; permanently immutable
     ephemeral:
       capacity: 1Gi
 ```
-
-- **Type:** Select an `InstanceType` with available capacity.
-- **Resources:** Request one accelerator family. See [Accelerator Requests](../devices/requests.md#instance-api-requests).
-- **Ports:** Optional; each entry allocates a node port on the instance `Service`.
-
-### Unit resource sizing
-
-Derived `InstanceType`s stamp *`spec.unitResources`* (`cpu`, `ram`) per whole accelerator (`1` CPU
-and `2Gi` RAM for CPU-only types, `4` CPU and `16Gi` fallback for unrecognised accelerators, and
-`100Gi` `localStorage`).
-
-- **Default and cap:** An `Instance` omitting `cpu` or `ram` defaults from `unitResources` (scaled
-  by accelerator count or slice/partition VRAM share). Explicit requests are capped by it.
-- **Overcommit:** With `instance-general-resources-overcommit` enabled (default), `unitResources`
-  sets container limits while requests use `100m` CPU per core and `128Mi` RAM per GiB. Disabling
-  it sets requests equal to limits.
-- **Upgrade immutability:** `spec.unitResources` is immutable at creation, and derived types are
-  create-only. Existing derived types keep their original sizing after operator upgrades.
-- **Resizing a pool:** Author a custom sibling `InstanceType` (same `acceleratorGroup`, `os`, and
-  `arch`) to avoid disrupting running workloads. Deleting a derived type lets the operator recreate
-  it with current presets, but stops its active `Instance`s and pauses admission until recreated.
-
-## Device access
-
-The workload container owns the accelerator request. The optional SSH sidecar requests
-`device.gpustack.ai/<manufacturer>.visibility` to enter the same workspace without consuming a
-second accelerator; see [Worked example per family](../devices/requests.md#worked-example-per-family).
-[Utilization metrics](#utilization-metrics) explains how to read resource usage.
-
-## Service lifecycle
-
-An `Instance` listing *`spec.ports`* is reached through a NodePort `Service` named after it, and
-*`status.ports`* reports the node port allocated for each of them.
-
-Stopping the `Instance` (`spec.stop: true`) deletes the `Pod` but retains the `Service`, so the node ports
-a user already connected to stay allocated. Starting it again (`spec.stop: false`) builds a new `Pod`
-and reports the same node ports. The `Service` belongs to the `Instance` rather than to the `Pod`, and
-selects the `Pod` by the part-of label the two share, so it keeps routing across both the `Pod`
-replacement and a change of the `Instance`'s type.
-
-*`spec.ports`* may be edited while the `Instance` is stopped, and the changes take effect on the `Service`
-when the `Instance` starts again: ports left unchanged keep their allocated node port, a port added to
-*`spec.ports`* is allocated a new one, a port removed from *`spec.ports`* is dropped from the `Service`,
-and clearing *`spec.ports`* deletes the `Service` along with its allocations. Deleting the `Instance`
-itself also deletes the `Service`.
-
-## Network isolation
-
-The operator isolates `Instance`s of different tenants at the namespace boundary. The behavior is
-opt-in: with the `instance-isolation-pod-cidrs` Setting blank — the default — no policy is
-rendered and `Instance` networking stays untouched.
-
-When the Setting names the cluster's pod CIDRs, the operator renders one `NetworkPolicy` named
-`gpustack-instance-isolation` in every namespace that holds an `Instance`, selecting the
-instance `Pod`s by their `resource.gpustack.ai/type: instances` label.
-
-The policy allows traffic to and from `Pod`s in the same namespace and addresses outside the
-configured pod CIDRs. It permits egress to any destination on TCP or UDP port 53 for DNS.
-Other policies selecting the same `Pod`s can add permissions. Do not treat this policy alone as a
-complete tenant isolation boundary.
-
-The pod CIDRs cannot be learned reliably for every CNI — a node's pod CIDR and what the CNI's own
-IPAM allocates routinely disagree — so the Setting is the one source. Find the values with
-`kubectl get ippools.crd.projectcalico.org` on a Calico-IPAM cluster, or
-`kubectl get nodes -o jsonpath='{.items[*].spec.podCIDRs}'` where the nodes carve the pod
-addresses.
-
-The chart carries the same value as `worker.instanceIsolationPodCIDRs`; the Setting can also
-be edited at runtime through the Settings API.
-
-The object belongs to the namespace rather than to one `Instance`: deleting the last `Instance` of
-a namespace does not remove it, and the reconcile rewrites any manual edit back to the rendered
-shape. Emptying the Setting collects the policy again — but only the object the operator rendered
-itself, never a same-named one written by hand.
-
-Enforcing the policy takes a CNI that implements `NetworkPolicy`, such as Calico or Cilium; with a
-non-enforcing CNI the object renders but filters nothing. The Kubernetes policy contract always
-allows traffic from the node hosting a `Pod`, so a client inside one `Instance` can still reach
-another tenant's `Service` through the hosting node's address and node port.
-
-## Operations
-
-### Step 1: Create workspace
-
-Replace the example values. Save the manifest as `instance.yaml`, then apply it:
 
 ```bash
 kubectl apply -f instance.yaml
 ```
 
-### Step 2: Check workspace
+### Step 2: Verify workspace
+
+Wait for the `Instance` phase to reach `Ready` and inspect its assigned access address and ports:
 
 ```bash
 kubectl -n team-a wait --for=jsonpath='{.status.phase}'=Ready instance/workspace-demo --timeout=5m
-kubectl get instancetypes
+kubectl -n team-a get instance workspace-demo
 ```
 
-**Verification:** The wait completes when the `Instance` phase is `Ready`. The `InstanceType` reports remaining capacity.
-See [Utilization metrics](#utilization-metrics) to query CPU, memory, storage, and accelerator usage.
-
-## Utilization metrics
-
-Query live utilization for one `Instance` through the worker's `metrics` subresource:
-
-```bash
-kubectl get --raw "/apis/worker.gpustack.ai/v1/namespaces/<ns>/instances/<name>/metrics"
-```
-
-- **Required RBAC:** Callers need `get` on the `instances/metrics` subresource in group
-  `worker.gpustack.ai`. Permission to `get instances` alone is not sufficient.
-- **Pre-start zero:** Before any container starts (unscheduled, stopped, or `Pod` absent), the
-  subresource returns `200` with declared totals and `0` usage. Once started, `0` means idle.
-- **Unavailable sources:** If containers have started and both kubelet `nodes/proxy` stats and
-  `metrics.k8s.io` fail, the subresource returns `503 ServiceUnavailable` naming the failed source.
-- **Omitted accelerator samples:** If the Device Manager is unreachable, not `Ready`, stale (over
-  three monitor periods), or cannot measure a process, CPU/memory/storage return and `accelerators`
-  (or unmeasured `used` fields) are omitted instead of reporting `0`. The Prometheus exporter also
-  omits unmeasured `used` series.
+**Verification:** `PHASE` reports `Ready`, `ACCESS` shows the host address, and `PORT(S)` lists
+`8080:<nodePort>/TCP`. Configure SSH login, persistent storage, or node pinning in
+[GPU Instance Configuration](configuration.md).
 
 ## Troubleshooting
 
-If an `Instance` remains pending, inspect its phase message:
+If an `Instance` stays in `Starting`, read its phase message:
 
 ```bash
-kubectl -n team-a get instance workspace-demo -o jsonpath='{.status.phaseMessage}'
+kubectl -n team-a get instance workspace-demo -o jsonpath='{.status.phaseMessage}{"\n"}'
 ```
 
-For Kueue `Workload` inspection, capacity checks and admission fixes, see the
-[walkthrough troubleshooting](../../walkthroughs/devices/scheduling.md#troubleshooting).
+See [GPU Instance Operations](operations.md#troubleshooting) for admission refusals, volume waits,
+and subresource checks, or [Heterogeneous Devices Walkthrough](../../walkthroughs/devices/scheduling.md#troubleshooting)
+for Kueue `Workload` diagnosis.
 
 ---
 
-**See also** — [Heterogeneous Devices](../devices/_index.md) (resource families) ·
-[Model Delivery](../model-delivery/_index.md) (mounting model weights)
+**See also** — [GPU Instance Configuration](configuration.md) (SSH keys, volumes, node pinning, and custom types) · [GPU Instance Operations](operations.md) (stop/start lifecycle, isolation, logs, events, and metrics) · [Heterogeneous Devices](../devices/_index.md) (accelerator pools and slicing)
 
-**Next** → [Usage](../../../README.md#usage) — launch a sliced `Instance`.
+**Next** → [GPU Instance Configuration](configuration.md) — configure resources, SSH access, and workspace volumes.

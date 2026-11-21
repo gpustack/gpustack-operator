@@ -1,10 +1,11 @@
 # KV Cache Backend
 
-A `KVCacheBackend` configures shared KV cache for inference workloads. With a managed backend, the
-operator runs a leader for metadata and a member group with one store process per selected node. An
-external backend connects to an existing service.
+A `KVCacheBackend` configures shared KV cache storage for inference workloads. On a managed backend,
+the operator runs a metadata leader and one store member per selected `Node` in each member group.
+An external backend connects to an existing service.
 
-Mooncake calls the leader a master. Its flags, environment variables and metrics use that name.
+Mooncake calls the leader a `master`, and its flags, environment variables, and metrics retain that
+name.
 
 ## Contents
 
@@ -14,15 +15,14 @@ Mooncake calls the leader a master. Its flags, environment variables and metrics
 - [Members](#members)
 - [Vendor-specific behavior](#vendor-specific-behavior)
 - [Status and conditions](#status-and-conditions)
-- [Resizing a group](#resizing-a-group)
+- [Group resizing](#group-resizing)
 - [External mode](#external-mode)
 - [Operating notes](#operating-notes)
 
 ## Connection and medium
 
-`connection` chooses whether the operator manages the backend or connects to an external service.
-For managed backends, *`members[].medium`* chooses host memory (`DRAM`) or accelerator memory
-(`VRAM`).
+*`spec.connection`* selects either operator-managed workloads or an external endpoint pair. On
+managed backends, *`members[].medium`* selects host memory (`DRAM`) or device memory (`VRAM`).
 
 ```yaml
 apiVersion: worker.gpustack.ai/v1
@@ -30,134 +30,109 @@ kind: KVCacheBackend  # cluster-scoped, short name kvcb
 metadata:
   name: mooncake-dram
 spec:
-  type: Mooncake
-  image: docker.io/kvcacheai/mooncake:0.3.13
+  type: Mooncake  # required; enum: Mooncake
+  image: docker.io/kvcacheai/mooncake:0.3.13  # optional; defaults from kv-cache-backend-image Setting
   connection:
-    managed:  # exactly one of managed or external
+    managed:  # required: set exactly one of managed or external
       leader:
-        electionBackend: None  # The upstream image has no Kubernetes Lease backend.
+        electionBackend: None  # upstream image lacks Kubernetes Lease support
       members:
         - nodeSelector:
             kubernetes.io/os: linux
-          medium: DRAM  # memory segment medium: DRAM or VRAM
-          capacityPerMember: 4Gi
+          medium: DRAM  # required, immutable; enum: DRAM, VRAM
+          capacityPerMember: 4Gi  # required per-node segment size
 ```
 
-- **Connection**: Set exactly one of *`connection.managed`* or *`connection.external`*.
-- **Groups**: Multiple member groups are allowed. At most one may have a
+- **Cluster scope**: `KVCacheBackend` is cluster-scoped because it claims host memory, host paths,
+  and fabric devices. Multiple `KVCachePool`s can share one backend ([Limitations](pool.md#limitations)).
+- **Member groups**: Declare one or more groups; at most one group can configure a
   [local disk tier](local-disk-tier.md).
-- **Medium**: *`members[].medium`* is immutable. Use separate groups for host and device memory.
-- **Image**: Check [Engine Compatibility](../model-deployment/engine-versions.md) before choosing
-  *`spec.image`*.
-- **Election**: The upstream image needs *`electionBackend: None`* and one leader.
+- **Medium immutability**: *`members[].medium`* cannot change in place; add a separate group to mix
+  host and device memory.
 
 | Value | Meaning | Constraints |
 |---|---|---|
-| `DRAM` | Host memory segment | `Pod` `requests.memory` includes *`capacityPerMember`*; hides vendor accelerators (`void`). |
-| `VRAM` | Device memory segment | Accounting-only for custom `USE_VRAM_SEGMENT=ON` images; omits *`capacityPerMember`* and `void` hiding. |
-
-All official `mirrored-mooncake` builds compile with `USE_VRAM_SEGMENT=OFF` and allocate Host RAM
-(`DRAM`) only. `KVCacheBackend` is cluster-scoped because it selects nodes, host memory, host
-paths, and fabric privileges. Several `KVCachePool`s can reference one backend; see
-[KV Cache Pools and Bindings](pool.md#limitations) for tenancy boundaries.
+| `DRAM` | Host RAM segment | Adds `capacityPerMember + localBufferSize` to `Pod` `requests.memory` and sets `void` device visibility. |
+| `VRAM` | Device memory segment | Accounting-only for custom `USE_VRAM_SEGMENT=ON` images; charges only *`localBufferSize`* and omits `void` hiding. |
 
 ## Image
 
-*`spec.image`* falls back to the `kv-cache-backend-image` `Setting` (defaulting to the project's
-`-cpu` build). Admission rejects an empty image when both are unset, though clearing the `Setting`
-does not block unrelated updates or finalizer removal.
+*`members[].image`* overrides *`spec.image`*, which falls back to the `kv-cache-backend-image`
+`Setting` (defaulting to the project's `-cpu` build). Admission refuses create when all three are
+empty; clearing the `Setting` later does not block unrelated updates or deletion.
 
-The master needs no accelerator runtime; each member needs the runtime for its transport (`-cpu`
-carries `libibverbs` and AWS `libfabric` for `TCP`/`RDMA`/`EFA`; `-cann` carries CANN for `ascend`).
-[High availability](leader.md#high-availability) requires a project build supporting Kubernetes
-`Lease` election.
+Set *`spec.imagePullSecrets`* and *`spec.imagePullPolicy`* on the backend to apply registry pull
+settings across the leader and all member groups.
 
 ### GPUStack build variants
 
-Beside the `-cpu` default, GPUStack publishes `mirrored-mooncake` per vendor (`cuda`, `cann`,
-`rocm`) tagged `<mooncake-version>-<variant><toolchain>` (such as `0.3.13.post1-cuda13.0`). All
-official variants disable `USE_VRAM_SEGMENT` and allocate Host RAM (`DRAM`) only.
+GPUStack publishes `mirrored-mooncake` variants tagged `<mooncake-version>-<variant><toolchain>`
+(such as `0.3.13.post1-cuda13.0`). All official builds set `USE_VRAM_SEGMENT=OFF`, allocate Host RAM
+(`DRAM`) only, and compile Kubernetes `Lease` [high availability](leader.md#high-availability):
 
-- **`-cpu` default**: Links `libibverbs` and AWS `libfabric` for `TCP`, `RDMA`, and `EFA` Host-RAM
-  stores on NVIDIA and AMD nodes.
-- **`-cann` variant**: Required on Ascend because `vllm-ascend` speaks HIXL (`protocol: ascend`),
-  allocating Host RAM via ACL/HIXL.
-- **`0.3.10.post2` variant**: Serves engines below the
-  [supported minimum](../model-deployment/engine-versions.md); set `leader.electionBackend: None`
-  and `leader.multiTenancy: false`.
-
-*`members[].image`* overrides *`spec.image`*, which overrides the `Setting`. For private registries,
-set *`spec.imagePullSecrets`* and *`spec.imagePullPolicy`* on the backend; both apply to the leader
-and every member group.
+- **`-cpu` default**: Bundles `libibverbs` and AWS `libfabric` for `TCP`, `RDMA`, and `EFA` Host-RAM
+  stores on NVIDIA and AMD `Node`s.
+- **`-cann` variant**: Required on Ascend because `vllm-ascend` uses HIXL (`protocol: ascend`) over
+  ACL/HIXL Host RAM.
+- **`-rocm` variant**: Adds ROCm transport support alongside Host-RAM storage.
+- **`0.3.10.post2` variant**: Supports legacy engines below the
+  [supported floor](../model-deployment/engine-versions.md); set `leader.electionBackend: None` and
+  `leader.multiTenancy: false`.
 
 ### Version compatibility
 
-**A store and an engine-embedded Mooncake client interoperate only within one minor line.** The
-handshake reports `2.0.0` across 0.3.x releases, so mismatched minor lines (such as `0.3.12` versus
-`0.3.13`) pass probes and fail transfers with `RPC_FAIL (-900)`. Match your store image to the
-engine runner in [Engine Compatibility](../model-deployment/engine-versions.md).
+**Match the store image and the engine's embedded Mooncake client to the same minor line.** The wire
+handshake reports `2.0.0` across `0.3.x` releases, so mismatched lines (such as `0.3.12` and
+`0.3.13`) pass probes and fail transfers with `RPC_FAIL (-900)`. Check runner pairings in
+[Engine Compatibility](../model-deployment/engine-versions.md).
 
-Direct *prefill/decode (PD)* transfer (`MooncakeConnector` without *`spec.kvCache`*) is engine to
-engine and exempt from store version matching. High availability requires a master from `0.3.12`
-onward; see [High availability](leader.md#high-availability).
+Direct *prefill/decode (PD)* transfer (`MooncakeConnector` without *`spec.kvCache`*) runs engine to
+engine and does not use a store. Leader `Lease` election requires Mooncake `0.3.12` or newer.
 
 ## Metadata plane
 
-The metadata plane is unconditionally peer-to-peer (`P2PHANDSHAKE`) and requires no etcd, Redis, or
-CR configuration (`spec.metadata` does not exist). Leader election is configured separately via
-[`leader.electionBackend`](leader.md#high-availability) and defaults to a Kubernetes `Lease`.
+The metadata plane always uses peer-to-peer handshakes (`P2PHANDSHAKE`) and needs no external etcd
+or Redis service (*`spec.metadata`* does not exist). Configure leader election separately through
+[`leader.electionBackend`](leader.md#high-availability) (default `Kubernetes`).
 
 ## Members
 
-Each `members[]` entry renders one `OnDelete` `DaemonSet` over *`members[].nodeSelector`*. Two
-groups can select the same node (such as one `DRAM` group and one `VRAM` group) and each renders
-its own `DaemonSet`.
+Each *`members[]`* entry reconciles one `OnDelete` `DaemonSet` matching *`members[].nodeSelector`*.
+Two groups can select the same `Node` when their network identities do not collide.
 
-*`spec.transport.protocol`* accepts `Auto`, `TCP`, `RDMA`, `EFA`, `CANN`, `ROCM`, `MUSA` and `MACA`
-(default `Auto`, which resolves to `TCP`). *`members[].transport.protocol`* overrides the protocol
-for one group. See [Engine Compatibility](../model-deployment/engine-versions.md#transport-compatibility)
-for engine-to-transport support.
+*`spec.transport.protocol`* accepts `Auto` (default, resolving to `TCP`), `TCP`, `RDMA`, `EFA`,
+`CANN`, `ROCM`, `MUSA`, and `MACA`. *`members[].transport.protocol`* overrides the protocol for one
+group; see [Engine Compatibility](../model-deployment/engine-versions.md#transport-compatibility).
 
-- **TCP**: Complete and requires no host privileges, but transfers traverse the kernel stack and use
-  higher host CPU than `RDMA`.
-- **Host fabrics (`RDMA`, `EFA`)**: Grant `hostNetwork: true`, `IPC_LOCK`, `SYS_RESOURCE`, and the
-  fabric device resource (`device.gpustack.ai/rdma.shared` for 1 interface, `device.gpustack.ai/rdma`
-  for `> 1`, or `vpc.amazonaws.com/efa`), controlled by *`members[].fabricInterfaceCount`* (default
-  `1`). Never mount `/dev/infiniband`; the device plugin injects granted devices.
-- **Memory accounting**: `DRAM` charges `capacityPerMember + localBufferSize` to `requests.memory`
-  and hides accelerators (`void`); `VRAM` charges only *`localBufferSize`* and omits `void` hiding.
-  Neither requests an accelerator extended resource.
-- **Ports**: Each group serves HTTP on `8080 + <group index>` (`8080`, `8081`, …), bound on the host
-  network for host-fabric groups. Data-plane ports are random ephemeral ports negotiated via
-  `P2PHANDSHAKE`, so firewall and `NetworkPolicy` rules must allow a port range.
-- **Extra arguments**: *`members[].extraArgs`* renders into argv (`-D key=value`) and
-  *`leader.extraArgs`* renders as `-key=value`. Never place credentials in *`extraArgs`*.
-- **Disk tier retries**: Writers against a [local disk tier](local-disk-tier.md) must retry when a
-  put hits a full memory segment while async eviction catches up.
+- **TCP**: Needs no host privileges, but copies payloads through the kernel network stack.
+- **Host fabrics (`RDMA`, `EFA`)**: Enable `hostNetwork: true`, `IPC_LOCK`, `SYS_RESOURCE`, and
+  fabric resource requests (`device.gpustack.ai/rdma.shared` for `1`, `device.gpustack.ai/rdma` for
+  `> 1`, or `vpc.amazonaws.com/efa`) sized by *`members[].fabricInterfaceCount`* (default `1`). Do
+  not mount `/dev/infiniband` manually.
+- **Ports**: Group `<i>` serves HTTP on `8080 + <i>` (bound on the host network when `hostNetwork`
+  is active). Data transfers use ephemeral ports negotiated via `P2PHANDSHAKE`, so open ephemeral
+  port ranges in firewalls and `NetworkPolicy` rules.
+- **Extra flags**: *`members[].extraArgs`* renders as `-D key=value` and *`leader.extraArgs`*
+  renders as `-key=value`; CXL flags are refused. Never place secrets in *`extraArgs`*.
+- **Disk offload retries**: Clients writing to a [local disk tier](local-disk-tier.md) must retry
+  when a memory segment fills ahead of asynchronous bucket eviction.
 
 ## Vendor-specific behavior
 
-Platform transports and custom accelerator images add host mounts, fabric grants and environment
-defaults beyond generic Host-RAM members.
-
 ### Ascend
 
-`vllm-ascend` requires `protocol: CANN` (verified at `v0.23.0` and `v0.26.0rc1`) and a `-cann`
-member image (`USE_ASCEND_DIRECT`), which allocates Host RAM (`medium: DRAM`) via ACL/HIXL.
-Running a `-cann` image over `TCP` or `RDMA` fails at startup with
-`cannot allocate local segment, ret: -1`. Idle `CANN` members consume zero AICore compute.
+`vllm-ascend` requires `protocol: CANN` (verified on `v0.23.0` and `v0.26.0rc1`) and a `-cann`
+member image (`USE_ASCEND_DIRECT`) with `medium: DRAM`. Starting a `-cann` image on `TCP` or `RDMA`
+fails with `cannot allocate local segment, ret: -1`. Idle `CANN` members use zero AICore compute.
 
-- **Ascend A2/A3 and A5 UB/UBG/UBoE**: Leave *`fabricInterfaceCount`* unset. For A5 UBG or UBoE,
-  set `ASCEND_GLOBAL_RESOURCE_CONFIG` in *`members[].extraEnv`* with
-  `"comm_resource_config.protocol_desc"` (`["ub_rtp:device"]` or `["uboe:device"]`).
-- **Ascend A5 Host RoCE (`roce:host`)**: Set *`fabricInterfaceCount >= 1`* on `protocol: CANN`. The
-  operator grants `hostNetwork`, `IPC_LOCK`, `SYS_RESOURCE`, `device.gpustack.ai/rdma*`, read-only
-  `/etc/hixlep`, and defaulted `ASCEND_LOCAL_COMM_RES=""` + `ASCEND_GLOBAL_RESOURCE_CONFIG` (user
-  *`extraEnv`* or *`hostPaths`* at `/etc/hixlep` yields the corresponding default). Provision
-  [host endpoint files](../../getting-started/vendor-prerequisites.md#a5-host-roce-endpoints) first.
-
-Worked `CANN` example (substitute a `910C` or A5 image tag for your SoC; add
-`fabricInterfaceCount: 1` for Ascend A5 Host RoCE):
+- **Ascend A2/A3 and A5 UB/UBG/UBoE**: Omit *`fabricInterfaceCount`*. For A5 UBG or UBoE, set
+  `ASCEND_GLOBAL_RESOURCE_CONFIG` in *`members[].extraEnv`* with `"comm_resource_config.protocol_desc"`
+  set to `["ub_rtp:device"]` or `["uboe:device"]`.
+- **Ascend A5 Host RoCE (`roce:host`)**: Set `fabricInterfaceCount: 1` (or higher) on
+  `protocol: CANN` after preparing
+  [Ascend host prerequisites](../../getting-started/vendor-prerequisites.md#ascend). The operator
+  grants `hostNetwork`, `IPC_LOCK`, `SYS_RESOURCE`, `device.gpustack.ai/rdma*`, read-only
+  `/etc/hixlep`, and defaulted `ASCEND_LOCAL_COMM_RES=""` plus `ASCEND_GLOBAL_RESOURCE_CONFIG`.
 
 ```yaml
 apiVersion: worker.gpustack.ai/v1
@@ -169,14 +144,14 @@ spec:
     protocol: CANN
   connection:
     managed:
-      leader: {}  # replicas, allocationStrategy and multiTenancy default
+      leader: {}  # uses default replicas, allocationStrategy, and multiTenancy
       members:
         - nodeSelector:
             kvcache-ascend: "true"
           medium: DRAM
-          image: gpustack/mirrored-mooncake:0.3.14-cann9.1-910b  # use 910C or A5 build for those SoCs
+          image: gpustack/mirrored-mooncake:0.3.14-cann9.1-910b  # match 910B, 910C, or A5 SoC
           capacityPerMember: 32Gi
-          # fabricInterfaceCount: 1  # uncomment for Ascend A5 Host RoCE (roce:host)
+          # fabricInterfaceCount: 1  # enable for Ascend A5 Host RoCE (roce:host)
           hostPaths:
             - path: /usr/local/Ascend/driver
               mountPath: /usr/local/Ascend/driver
@@ -194,17 +169,16 @@ spec:
 
 ### AWS EFA
 
-Check instance-size EFA support with `fi_info -p efa` before deploying an `EFA` group. Never mount
-`/dev/infiniband`: a partial EFA grant causes `libfabric` to fail with `No available EFA devices`.
-Place all communicating members and engines in one AWS cluster placement group (one availability
-zone alone allows the handshake to complete while work requests hang), and supply an EFA-enabled
-engine image per [RDMA Operations](../rdma/operations.md#efa-engine-images).
+Verify EFA support on the instance type with `fi_info -p efa` before deploying an `EFA` group, and
+never mount `/dev/infiniband` (partial device visibility causes `No available EFA devices`). Place
+all members and engines in one AWS cluster placement group and build an EFA-capable engine image per
+[RDMA Operations](../rdma/operations.md#efa-engine-images).
 
 ### Custom VRAM builds
 
-`members[].medium: VRAM` is accounting-only for custom images built with `USE_VRAM_SEGMENT=ON`.
-Supply user-space driver access via *`runtimeClassName`*, *`extraEnv`*, or *`hostPaths`*, and size
-*`capacityPerMember`* against the engine's `gpu_memory_utilization` so both fit on the device.
+`medium: VRAM` is accounting-only for user-built `USE_VRAM_SEGMENT=ON` images. Grant user-space
+driver access via *`runtimeClassName`*, *`extraEnv`*, or *`hostPaths`*, and deduct
+*`capacityPerMember`* from the engine's `gpu_memory_utilization` budget:
 
 ```yaml
 apiVersion: worker.gpustack.ai/v1
@@ -214,25 +188,24 @@ metadata:
 spec:
   connection:
     managed:
-      leader: {}  # replicas, allocationStrategy and multiTenancy default
+      leader: {}
       members:
         - nodeSelector:
             kvcache-vram: "true"
-          medium: VRAM  # accounting-only for custom USE_VRAM_SEGMENT=ON images
+          medium: VRAM  # custom USE_VRAM_SEGMENT=ON image required
           image: custom-registry.example/mooncake-vram:0.3.14-cuda13.0
-          capacityPerMember: 8Gi  # leave this memory free in the engine's GPU budget
+          capacityPerMember: 8Gi
           extraEnv:
             - name: NVIDIA_VISIBLE_DEVICES
-              value: all
+              value: all  # requires accept-nvidia-visible-devices-envvar-when-unprivileged or runtimeClassName: nvidia
 ```
 
-`NVIDIA_VISIBLE_DEVICES` requires `accept-nvidia-visible-devices-envvar-when-unprivileged`;
-otherwise set *`runtimeClassName: nvidia`*. Pairing a custom `VRAM` group with a
-[local disk tier](local-disk-tier.md) is measured on NVIDIA and unmeasured on Ascend and AMD.
+Pairing a custom `VRAM` group with a [local disk tier](local-disk-tier.md) is verified on NVIDIA
+and unmeasured on Ascend and AMD.
 
 ## Status and conditions
 
-Inspect backend phase, endpoint, observed capacity and conditions:
+Inspect backend phase, client endpoint, observed capacity, and conditions:
 
 ```bash
 kubectl get kvcb
@@ -246,70 +219,61 @@ NAME            TYPE       PHASE   ENDPOINT                                     
 mooncake-dram   Mooncake   Ready   mooncake-dram-leader.gpustack-system.svc:50051  12Gi
 ```
 
-Phases are `Provisioning`, `Ready`, `Degraded`, `Error` and `Deleting`. Status polls the leader
-every `15 s`; *`status.capacity`* is **observed** from the leader's metrics (never multiplied from
-*`capacityPerMember`*) and appears once `service_ready` is true.
+Phases are `Provisioning`, `Ready`, `Degraded`, `Error`, and `Deleting`. Status polls the leader
+every `15 s`; *`status.capacity`* comes from live leader metrics once `service_ready` is `true`,
+never from multiplying *`capacityPerMember`*.
 
 | Condition | Moves phase | Meaning and action |
 |---|---|---|
 | `LeaderAvailable` | Yes | Leader health check passed. If `False`, inspect leader `Deployment` `Pod`s or external `Admin` reachability. |
-| `MembersMounted` | Yes | Ready member `Pod`s match listed segments. Check `NoSegments`, `ListingFailed`, `ListingTooLarge`, or `AmbiguousMemberIdentity` (separate host-network groups onto distinct nodes). Pre-0.3.12 masters report `Unknown/SegmentListingNotServed`. |
-| `CapacityObserved` | Yes | Leader `/metrics` scraped while ready. Clears on scrape failure; inspect leader `:9003/metrics`. |
-| `PoolWrites` | Yes | `True` after a put end or positive `allocator_used_bytes`; `False` if puts revoke with zero bytes allocated. A first write on a fresh store can answer `500` until the tenant ledger propagates — retry once listed. |
-| `Deletable` | Yes | `False` while *`status.usedBy`* lists live `KVCachePool` or `KVCachePoolBinding` consumers. |
-| `RolloutComplete` | No | Informational: `False` while an `OnDelete` member rollout is in progress. |
-| `ElectionObserved` | No | Informational (when `electionBackend: Kubernetes`): confirms `Lease` observation. |
-| `TierWasEmpty` | No | Informational (when `localDisks` is set): reports whether the disk tier started empty. |
+| `MembersMounted` | Yes | Ready member `Pod`s match listed segments. On `AmbiguousMemberIdentity`, move host-network groups onto disjoint `Node`s; pre-`0.3.12` masters report `Unknown/SegmentListingNotServed`. |
+| `CapacityObserved` | Yes | Leader `:9003/metrics` scraped while ready. If `False`, check leader admin port reachability. |
+| `PoolWrites` | Yes | `True` after a put completes or `allocator_used_bytes > 0`; `False` if puts revoke with zero allocated bytes (retry initial writes after tenant ledger propagation). |
+| `Deletable` | Yes | `False` while *`status.usedBy`* names live `KVCachePool` or `KVCachePoolBinding` objects; delete those consumers first. |
+| `RolloutComplete` | No | Informational: `False` while an `OnDelete` member `DaemonSet` rollout is incomplete. |
+| `ElectionObserved` | No | Informational (under `electionBackend: Kubernetes`): confirms `Lease` holder observation. |
+| `TierWasEmpty` | No | Informational (when *`localDisks`* is set): records whether the disk directory started empty. |
 
-*`binding.usage`* and *`pool.usage`* lag synchronous leader `:9003/metrics` and
-`/api/v1/tenant_quotas` by one reconcile tick. To inspect disk-tier data, see
-[Bucket writes](local-disk-tier.md#bucket-writes).
+Pool and binding usage fields lag leader `:9003/metrics` and `/api/v1/tenant_quotas` by one
+reconcile pass. For disk-tier write checks, see [Bucket writes](local-disk-tier.md#bucket-writes).
 
-## Resizing a group
+## Group resizing
 
-Widening *`members[].nodeSelector`* adds members on matching nodes without restarting existing
-`Pod`s; existing cached keys are not rebalanced (`allocationStrategy: FreeRatioFirst` biases new
-writes toward emptier members). Changing image, argv, environment, resources, or fabric recreates
-members under `OnDelete`.
+Widening *`members[].nodeSelector`* adds member `Pod`s without restarting existing ones; existing keys
+do not rebalance (`allocationStrategy: FreeRatioFirst` steers new writes toward emptier members).
+Editing image, argv, environment, resources, or fabric settings updates the `OnDelete` `DaemonSet`,
+requiring manual `Pod` deletion to roll each `Node`.
 
-Shrinking a group or narrowing *`nodeSelector`* **immediately discards** the cache held by removed
-members; the operator does not migrate cached data. Member groups are identified by list index:
+Shrinking a group or narrowing *`nodeSelector`* **discards** cached keys on removed `Node`s. Member
+groups are indexed by list position:
 
 | Edit | Outcome |
 |---|---|
-| Swapping two entries or removing ahead of others | Refused |
-| Appending or removing from the end | Allowed |
-| Editing in place (including narrowing *`nodeSelector`* to match zero nodes) | Allowed |
+| Reordering entries or deleting an entry before the tail | Refused at admission |
+| Appending or removing at the end of *`members`* | Allowed |
+| Editing in place (including narrowing *`nodeSelector`* to zero `Node`s) | Allowed |
 
-To retire a middle group without rebuilding later groups, narrow its *`nodeSelector`* until it
-matches zero nodes. On a group with a [local disk tier](local-disk-tier.md), set
-*`scaleIn.gracePeriodSeconds`* (`0` to `3600`; derives `Pod` termination grace as
-`gracePeriodSeconds + 60`) and wait for member recreation before shrinking so the `preStop` hook
-deregisters the tier cleanly:
+To retire a middle group without shifting later indices, narrow its *`nodeSelector`* to match zero
+`Node`s. Before shrinking a group with *`localDisks`*, set *`scaleIn.gracePeriodSeconds`* (`0` to
+`3600`, setting `Pod` termination grace to `gracePeriodSeconds + 60`) and roll the `Pod`s so the
+`preStop` hook deregisters segments cleanly:
 
-```yaml
-apiVersion: worker.gpustack.ai/v1
-kind: KVCacheBackend
-metadata:
-  name: mooncake-dram
-spec:
-  connection:
-    managed:
-      leader: {}  # replicas, allocationStrategy and multiTenancy default
-      members:
-        - nodeSelector:
-            kvcache-dram: "true"
-          medium: DRAM
-          capacityPerMember: 64Gi
-      scaleIn:
-        gracePeriodSeconds: 30  # 0 to 3600 seconds; applies to localDisks groups only
+```diff
+ apiVersion: worker.gpustack.ai/v1
+ kind: KVCacheBackend
+ metadata:
+   name: mooncake-dram
+ spec:
+   connection:
+     managed:
++      scaleIn:
++        gracePeriodSeconds: 30  # 0..3600; applies to localDisks groups
 ```
 
 ## External mode
 
-*`connection.external`* connects to a backend managed outside GPUStack; the operator creates no
-workloads and only observes. Both `Client` (for inference engines) and `Admin` (for operator health,
-metrics, and segment listing) endpoints are required as `host:port`:
+*`connection.external`* attaches to an existing Mooncake service without creating workloads. Supply
+both `Client` and `Admin` endpoints as `host:port`:
 
 ```yaml
 apiVersion: worker.gpustack.ai/v1
@@ -320,36 +284,29 @@ spec:
   connection:
     external:
       endpoints:
-        - name: Client
+        - name: Client  # engine RPC endpoint
           address: mooncake.example:50051
-        - name: Admin
+        - name: Admin  # operator health, metrics, and tenant API endpoint
           address: mooncake.example:9003
 ```
 
-- An unreachable external endpoint reports `phase: Error` immediately (never `Provisioning`), and
-  HTTP `3xx` redirects from `Admin` are refused.
-- Do not point two `KVCacheBackend` objects at the same external leader with Bindings sharing a
-  *`domain.name`*: quota ceilings oscillate, excess writes silently evict older keys, and differing
-  *`blockSize`* or `dtype` values corrupt shared blocks.
+- **Immediate error state**: Unreachable external endpoints report `phase: Error` immediately (never
+  `Provisioning`), and HTTP `3xx` redirects from `Admin` are refused.
+- **Single-backend ownership**: Never point two `KVCacheBackend` objects at the same external leader
+  with overlapping *`domain.name`* bindings; ceilings will oscillate and mismatched *`blockSize`* or
+  *`dtype`* values corrupt tensors.
 
 ## Operating notes
 
-- **Benign startup log**: `E transfer_metadata.cpp:991] Local segment descriptor not found` appears
-  on every client start and is harmless.
-- **Metrics variable**: `MC_TE_METRIC=1` is rendered and reserved on every member group; do not
-  redeclare it in *`members[].extraEnv`*. `replica_num` is configured on the engine client, not on
-  `KVCacheBackend`.
-- **Consumer guards**: A backend with non-empty *`status.usedBy`* cannot be deleted (stays in
-  `phase: Deleting` while workloads keep serving) and cannot turn *`leader.multiTenancy`* off until
-  all consumers are removed.
-- **Teardown order**: Deleting a backend deletes owned workloads first (bounded by each workload's
-  termination grace plus a few minutes) and removes the finalizer last.
+- **Benign client warning**: `E transfer_metadata.cpp:991] Local segment descriptor not found` logs
+  once on engine startup and is harmless.
+- **Reserved metrics env**: `MC_TE_METRIC=1` is rendered on every member group and refused in
+  *`members[].extraEnv`*. Configure `replica_num` on the engine client, not on `KVCacheBackend`.
+- **Consumer holds**: While *`status.usedBy`* is non-empty, deletion waits in `Deleting` (leaving
+  workloads running) and disabling *`leader.multiTenancy`* is refused.
 
 ---
 
-**See also** — [KV Cache Election and Failover](leader.md) (metadata process, probes and `Lease`
-election) · [KV Cache Local Disk Tier](local-disk-tier.md) (disk buckets and eviction) ·
-[KV Cache Pools and Bindings](pool.md) (namespace grants and quota ceilings) ·
-[Installation Modes](../../operate/installation-modes.md) (chart versus worker CRD ownership)
+**See also** — [KV Cache Election and Failover](leader.md) (metadata leader, probes, and `Lease` election) · [KV Cache Local Disk Tier](local-disk-tier.md) (disk buckets, cleanup, and disk-heavy `Node`s) · [KV Cache Pools and Bindings](pool.md) (namespace grants and reuse domains) · [Installation Modes](../../operate/installation-modes.md) (chart and worker CRD ownership)
 
-**Next** → [KV Cache Local Disk Tier](local-disk-tier.md) — optional local disk offload for a member group.
+**Next** → [KV Cache Local Disk Tier](local-disk-tier.md) — add local NVMe offload to a member group.

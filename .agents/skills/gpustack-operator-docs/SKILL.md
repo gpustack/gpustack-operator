@@ -66,14 +66,12 @@ the owning deep page, then link to it. Add a deep page when no existing page own
 | A `KVCacheBackend`'s workloads, its admin surface, its phase or capacity | `docs/modules/kv-cache/backend.md` |
 | `KVCacheBackend` rendering internals, Mooncake env/argv mapping, full condition catalog and teardown mechanics | `docs/reference/kv-cache-backend-internals.md` |
 | The leader process itself: its Deployment, Service, probes, health document and Lease election | `docs/modules/kv-cache/leader.md` |
-| The local disk tier itself: what it renders, its bucket, its eviction, its host directory | `docs/modules/kv-cache/local-disk-tier.md` |
-| Configuring a node that is mostly disk: why a group is never disk alone, the thin-segment shape, the memory floor | `docs/modules/kv-cache/disk-heavy-nodes.md` |
+| The local disk tier (`members[].localDisks`) and disk-heavy node sizing: bucket bounds, eviction, host directory, thin-segment shape and memory floor | `docs/modules/kv-cache/local-disk-tier.md` |
 | A `KVCachePool` or `KVCachePoolBinding`: the grant, the reuse domain, a quota ceiling or grant, what a full quota does | `docs/modules/kv-cache/pool.md` |
 | Standing a cache up end to end, or which object comes first: the pasteable four-object sequence | `docs/walkthroughs/kv-cache/shared-cache.md` |
 | How a **Pod** consumes a pool: the inject label and annotations, the injected keys per engine, a refusal, the isolation record | `docs/reference/kv-cache-injection.md` |
-| A `ModelArtifact`: its sources, resolution and revalidation, the manifest digest, how a `ModelDeployment` or an `Instance` mounts or downloads it, claim placement, the weight identity in KV keys | `docs/modules/model-delivery/artifact.md` |
-| The `image` source of a `ModelArtifact`: the digest contract, building weights into an image, image-volume delivery, the version floors, double storage, kubelet image GC, registry mirrors | `docs/modules/model-delivery/image-source.md` |
-| A `ModelStore`, `ModelStoreBinding` or `ModelPrefetch`: the grant, the budget, pinning, TTL expiry, the warm-up pod and why it is label-free | `docs/modules/model-delivery/prefetch.md` |
+| A `ModelArtifact`: its sources (Hugging Face, ModelScope, PVC, and OCI `image` digest contract, image-volume delivery, version floors and kubelet GC), resolution, manifest digest, and mount or download delivery | `docs/modules/model-delivery/artifact.md` |
+| A `ModelStore`, `ModelStoreBinding` or `ModelPrefetch` (budget, pinning, TTL, warm-up pod) and node-to-node peer sync (peer port, token auth, NetworkPolicy, checkpoint resume and peer metrics) | `docs/modules/model-delivery/prefetch.md` |
 | The public APIs for `ModelArtifact` and `NodeModelStore`, the `progress` subresource and who may read it, the GPUStack server capability map | `docs/reference/model-delivery-artifact-api.md` |
 | A `NodeModelStore` or the `model-manager` plugin: a field and its writer, the status guard, mount authorization, materialization, a failure reason, collection, a metric | `docs/reference/model-delivery-node-store.md` |
 | Running node delivery: the chart values, where the node's configuration comes from, reading a node, the watermark cap, switching delivery, where replicas land and turning the preference off, upgrading, removing the cache | `docs/modules/model-delivery/operations.md` |
@@ -113,7 +111,9 @@ the owning deep page, then link to it. Add a deep page when no existing page own
 | An upgrade path between versions | `docs/operate/migration/*.md` |
 | Recovery from a wedged upgrade or a stuck namespace deletion | `docs/operate/migration/troubleshooting.md` |
 | A per-product preset value | `docs/reference/instance-type-unit-resources.md` |
-| Instance resource-use metrics | `docs/reference/instances-metrics.md` |
+| GPU Instance configuration: resource requests, node pinning, `InstanceSSHPublicKey`, `InstanceImagePullSecret`, persistent/additional/model volumes and custom `InstanceType`s | `docs/modules/instances/configuration.md` |
+| GPU Instance operations: `spec.stop` and `Service` lifecycle, tenant `NetworkPolicy` isolation, `metrics`/`log`/`events` subresources and Pending troubleshooting | `docs/modules/instances/operations.md` |
+| Instance resource-use metrics schema and Prometheus exporter internals | `docs/reference/instances-metrics.md` |
 | A subcommand, one of its flags, its exit codes, its invocation | `docs/reference/commands.md` |
 | A user-visible capability, a vendor's slicing support, the install flow | `README.md` |
 | Vendor prerequisites, third-party dependencies, vendor GPU Operator coexistence | `docs/getting-started/vendor-prerequisites.md` |
@@ -306,6 +306,7 @@ These pages are not free text. Changing one side without the other breaks a buil
 
 | Doc | Pinned to | How it breaks |
 |---|---|---|
+| `docs/getting-started/architecture.md` `## Components` | top-level runtime subcommands and staged packages (`cmd/`, `engine-sentinel/`, `model-transfer/`, `csrc/`) | nothing fails; a newly shipped component disappears from the front-door architecture overview. Update `## Components` in the same PR whenever a runtime component is added or changes role |
 | `docs/reference/instance-type-unit-resources.md` | `pkg/nodefeature/unit_resources_preset.yaml` | compare the product rows with the preset data when either changes; no Go documentation test pins this table |
 | `deploy/gpustack-operator/chart/README.md`, `values.schema.json` | `values.yaml` + `README.md.gotmpl` via `make generate chart` | generated — never hand-edit; a doc path quoted in a `values.yaml` comment needs a regenerate, and `chart.yml` fails on drift |
 | `README.md` accelerator matrix | `pkg/nodefeature/knowns.go` (resource names, `SharedResourceMaxSize`, `_ManufacturerPartitionKindMap`) and **whether** each `pkg/devicemanager/detector/<mfr>/device.go` sets `LogicalSliced` at all | nothing fails; the table silently lies about what a vendor can do. The matrix is deliberately Yes/— only — per-card slice counts and the per-vendor isolation mechanism live in `docs/reference/devices-discovery.md`, not on the front page |

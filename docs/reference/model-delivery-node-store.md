@@ -323,13 +323,13 @@ downloads from this port for live bytes between the status thresholds.
   [a node-delivered model prefers the nodes holding
   it](topology-scheduling.md#node-delivered-model-placement).
 - **A download comes from the Hub**, directly or through the proxy, or, when
-  [node-to-node sync](../modules/model-delivery/node-to-node-sync.md) is on, from a peer node that already holds
+  [node-to-node sync](../modules/model-delivery/prefetch.md#node-to-node-sync) is on, from a peer node that already holds
   the tree.
 
 ---
 
 **See also** — [Model Artifact](../modules/model-delivery/artifact.md) for the artifact and its other
 deliveries · [Model Artifact API](model-delivery-artifact-api.md) for resource status and
-`progress` · [Node-to-Node Sync](../modules/model-delivery/node-to-node-sync.md) for where a node's bytes come from ·
+`progress` · [Node-to-Node Sync](../modules/model-delivery/prefetch.md#node-to-node-sync) for where a node's bytes come from ·
 [Model Store Operations](../modules/model-delivery/operations.md) for enabling, configuring and upgrading ·
 [Settings](settings.md#settings) for the `Setting`s *`spec`* is built from.

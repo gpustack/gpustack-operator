@@ -155,23 +155,13 @@ links here. The leader page owns the leader configuration and operational limits
 
 ## `docs/modules/kv-cache/local-disk-tier.md`
 
-**Owns** — the `members[].localDisks` layer end to end: the two halves admission pairs, the rendering
-table, the bucket that is the tier's write unit and the three bounds that follow from it, the
-eviction algebra and its four refusals, the five path rules and the host directory's ownership, the
-tier's immutability and its one exit, and the `hostPath` cost nothing accounts for.
+**Owns** — the `members[].localDisks` layer and disk-heavy node sizing end to end: the two halves
+admission pairs, the rendering table, the bucket write unit and three bounds, eviction algebra and
+refusals, host directory rules, immutability, the thin-segment/thick-tier manifest, and the
+one-bucket `capacityPerMember` memory floor.
 
 **Never** — the object the tier sits on. The leader, the member groups, the transport, the status
 algebra and the growing/shrinking rules are `backend.md`'s.
-
-## `docs/modules/kv-cache/disk-heavy-nodes.md`
-
-**Owns** — the configuration a node whose capacity is disk rather than memory needs: that no member
-group is disk alone and what that costs if attempted, the thin-segment/thick-tier manifest, and the
-one-bucket floor on `capacityPerMember` together with what that floor is and is not evidence of.
-
-**Never** — how the tier itself behaves. Its rendering table, its eviction algebra, its five path
-rules, its failure modes and the one exit that removes it belong to `local-disk-tier.md`; this page
-links to that contract.
 
 ## `docs/modules/kv-cache/pool.md`
 
@@ -199,28 +189,22 @@ and this page should link to it instead.
 
 ## `docs/modules/model-delivery/artifact.md`
 
-**Owns** — the `ModelArtifact` contract: sources, resolution and revalidation, the manifest digest and
-its patterns, how a `ModelDeployment` or an `Instance` consumes it under each delivery, claim
-placement, and the weight identity in KV keys.
+**Owns** — the `ModelArtifact` contract across all sources (`huggingFace`, `modelScope`,
+`persistentVolumeClaim`, and OCI `image`): resolution and revalidation, the manifest digest and its
+patterns, image-volume delivery, version floors, double storage, kubelet image GC, registry mirrors,
+how a `ModelDeployment` or an `Instance` consumes it under each delivery mode, claim placement, and
+the weight identity in KV keys.
 
 **Never** — anything about the deployment that mounts the artifact (that is
 `docs/modules/model-deployment/configuration.md`, which keeps one pointer here and states nothing about the artifact
 itself), or the node plugin's internals (`docs/reference/model-delivery-node-store.md`).
 
-## `docs/modules/model-delivery/image-source.md`
-
-**Owns** — the `image` source of a `ModelArtifact`: the digest contract and what it does and does not
-promise, building weights into an image, image-volume delivery to a `ModelDeployment` or an
-`Instance`, the version floors, double storage, kubelet image GC, and registry mirrors.
-
-**Never** — the other sources or the delivery modes they share (`artifact.md` owns those); this page
-is the deep dive on one source.
-
 ## `docs/modules/model-delivery/prefetch.md`
 
-**Owns** — the prefetch family: `ModelStore` (pool policy, selector overlap), `ModelStoreBinding`
-(budget grant, allowPinned, immutability), `ModelPrefetch` (placement, warm-up `Pod` configuration, the
-queue-name-label fact, budget projection and accounting, pin union, TTL).
+**Owns** — the prefetch family and node-to-node peer sync: `ModelStore` (pool policy, selector
+overlap), `ModelStoreBinding` (budget grant, allowPinned, immutability), `ModelPrefetch` (placement,
+warm-up `Pod` configuration, queue-name-label fact, budget projection, pin union, TTL), peer port,
+token authentication, peer `NetworkPolicy`, in-stream checkpoint resume, and peer `source` metrics.
 
 **Never** — the node plugin's field reference (`docs/reference/model-delivery-node-store.md`), the artifact sources
 (`artifact.md`), or the pool layer's operational settings (`operations.md`).
@@ -233,15 +217,6 @@ metrics.
 
 **Never** — the administrator's procedure (values, Settings, watermarks, switching delivery,
 upgrading, removing). That is `docs/modules/model-delivery/operations.md` (which keeps operator inspection and failure triage public without linking back into `docs/reference/`).
-
-## `docs/modules/model-delivery/node-to-node-sync.md`
-
-**Owns** — the peer port a node's published trees are served on, the token authentication and
-NetworkPolicy that bound it, how a cold node pulls with in-stream checkpoints, and the `source` field
-and metrics that tell peer bytes from hub bytes.
-
-**Never** — how a tree is materialized or verified in the first place (`docs/reference/model-delivery-node-store.md`); this page
-owns the node-to-node path only.
 
 ## `docs/reference/model-delivery-artifact-api.md`
 
@@ -496,6 +471,21 @@ wrong.
 
 **Rule** — a migration page is written once and then only corrected. It describes a historical
 transition, so do not "modernize" its version numbers.
+
+## `docs/modules/instances/{_index,configuration,operations}.md`
+
+**Owns** — the user-facing `Instance` workspace lifecycle split along the standard module skeleton:
+`_index.md` owns overview, flow diagram, `InstanceType` / `InstanceTypeFlavor` pool selection,
+`spec.unitResources` sizing/overcommit/upgrade immutability, and quickstart; `configuration.md` owns
+resource requests, node pinning (`spec.nodeName`), `InstanceSSHPublicKey` + SSH visibility sidecar,
+`InstanceImagePullSecret`, `ephemeral` / `InstancePersistentVolume` (StorageClass, NFS, S3) /
+`additionalVolumes` / `ModelArtifact` (`PVC`, `Node`, `Image`) volumes, and custom `InstanceType`
+authoring; `operations.md` owns `spec.stop` + persistent NodePort `Service` lifecycle,
+`instance-isolation-pod-cidrs` `NetworkPolicy` isolation, `metrics`/`log`/`events` subresources, and
+Pending troubleshooting.
+
+**Never** — exhaustive Prometheus exporter gauge definitions or 12-vendor preset tables (those belong
+to `docs/reference/instances-metrics.md` and `docs/reference/instance-type-unit-resources.md`).
 
 ## `docs/reference/*.md`
 

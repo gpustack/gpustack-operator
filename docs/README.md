@@ -82,7 +82,7 @@
 - ID: `instances`
 - Use for: launch accelerator-backed container workspaces, configure SSH access, pin nodes, and read instance metrics
 - Aliases: `Instance`, `InstanceType`, `SSH`, `workspace`
-- Guides: [GPU Instances](modules/instances/_index.md), [Accelerator Requests](modules/devices/requests.md), [Instance Metrics Reference](reference/instances-metrics.md)
+- Guides: [GPU Instances](modules/instances/_index.md), [GPU Instance Configuration](modules/instances/configuration.md), [GPU Instance Operations](modules/instances/operations.md), [Accelerator Requests](modules/devices/requests.md), [Instance Metrics Reference](reference/instances-metrics.md)
 - Specs: [SSH instance slicing](../specs/2026-07-04-ssh-instance-accelerator-slicing.md), [Sidecar partition visibility](../specs/2026-07-26-ssh-sidecar-partition-visibility.md), [Node pinning and additional volumes](../specs/2026-07-31-instance-node-pinning-and-additional-volumes.md), [Utilization metrics](../specs/2026-08-07-instance-utilization-metrics.md), [Service preserved across stop](../specs/2026-10-19-preserve-instance-service-across-stop.md)
 - Code: [pkg/worker/controllers/worker](../pkg/worker/controllers/worker/), [pkg/worker/extensionapis/worker](../pkg/worker/extensionapis/worker/), [pkg/devicemanager/exporter](../pkg/devicemanager/exporter/), [pkg/kubemetrics](../pkg/kubemetrics/)
 - Related: [Heterogeneous Devices](#heterogeneous-devices), [Model Delivery](#model-delivery)
@@ -181,18 +181,15 @@
 | [KV Cache Backend](modules/kv-cache/backend.md) | Configure Mooncake cache backends and capacity |
 | [KV Cache Pools and Bindings](modules/kv-cache/pool.md) | Grant cache reuse domains and enforce pool quotas |
 | [KV Cache Election and Failover](modules/kv-cache/leader.md) | Operate leader election, probes, and failover |
-| [KV Cache Local Disk Tier](modules/kv-cache/local-disk-tier.md) | Configure local disk cache buckets and eviction |
-| [KV Cache on Disk-Heavy Nodes](modules/kv-cache/disk-heavy-nodes.md) | Size memory floors on disk-heavy nodes |
+| [KV Cache Local Disk Tier](modules/kv-cache/local-disk-tier.md) | Configure local disk cache buckets, eviction, and disk-heavy nodes |
 
 ### Model Delivery
 
 | Page | Description |
 | --- | --- |
 | [Model Delivery](modules/model-delivery/_index.md) | Select how model weights reach workloads |
-| [Model Artifact](modules/model-delivery/artifact.md) | Resolve, verify, and mount model weight artifacts |
-| [Model Image Source](modules/model-delivery/image-source.md) | Package and deliver weights as OCI image volumes |
-| [Model Prefetch](modules/model-delivery/prefetch.md) | Warm model weights on target nodes before launch |
-| [Node-to-Node Sync](modules/model-delivery/node-to-node-sync.md) | Transfer cached weights between cluster nodes |
+| [Model Artifact](modules/model-delivery/artifact.md) | Resolve, verify, and mount weights from Hub, PVC, or OCI images |
+| [Model Prefetch](modules/model-delivery/prefetch.md) | Warm weights ahead of launch and sync cached trees between nodes |
 | [Remote Weight Delivery](modules/model-delivery/remote.md) | Load weights over the network from prepared sources |
 | [Model Store Operations](modules/model-delivery/operations.md) | Operate node cache watermarks, placement, and cleanup |
 
@@ -220,7 +217,9 @@
 
 | Page | Description |
 | --- | --- |
-| [GPU Instances](modules/instances/_index.md) | Launch accelerator-backed container workspaces |
+| [GPU Instances](modules/instances/_index.md) | Launch accelerator-backed container workspaces and size unit resources |
+| [GPU Instance Configuration](modules/instances/configuration.md) | Configure SSH access, volumes, node pinning, and custom instance types |
+| [GPU Instance Operations](modules/instances/operations.md) | Operate stop/start lifecycles, network isolation, metrics, and logs |
 
 ### Operations
 

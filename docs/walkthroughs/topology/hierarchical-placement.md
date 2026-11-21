@@ -129,7 +129,7 @@ replica `Pending` instead of stranding half-scheduled `Pod`s.
 ## Step 3: Publish an inventory snapshot
 
 Changing ordered hierarchy `levels` triggers `HoldAndDrain` queue migration; review
-[Change a live hierarchy](../../modules/topology/operations.md#change-a-live-hierarchy) before running
+[Change a live hierarchy](../../modules/topology/operations.md#live-hierarchy-changes) before running
 this step on shared clusters. Delete `cloud-zones` first so two sources do not claim the same `Node`s:
 
 ```bash
@@ -260,12 +260,12 @@ kubectl get node worker-b \
 
 Because `spec.levels` did not change, the profile hash stays identical and no `HoldAndDrain` queue
 migration occurs. Editing `spec.levels` changes the profile hash and drains queues; see
-[Change a live hierarchy](../../modules/topology/operations.md#change-a-live-hierarchy).
+[Change a live hierarchy](../../modules/topology/operations.md#live-hierarchy-changes).
 
 ## Limitations
 
 - Each `Node` must match at most one Ready `TopologySource`; zero or multiple matches fall back to the
-  hostname-only profile ([Choose the inventory path](../../modules/topology/operations.md#choose-the-inventory-path)).
+  hostname-only profile ([Choose the inventory path](../../modules/topology/operations.md#inventory-path)).
 - Domain capacity fragmentation and multi-role gang holds are covered in
   [Diagnose Pending workloads](../../modules/topology/operations.md#diagnose-pending-workloads).
 

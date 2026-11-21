@@ -7,7 +7,6 @@ older engine release.
 ## Contents
 
 - [Minimum versions](#minimum-versions)
-- [Column guide](#column-guide)
 - [Transport compatibility](#transport-compatibility)
 - [Remote weight loading](#remote-weight-loading)
 - [Limitations](#limitations)
@@ -38,7 +37,7 @@ vLLM *EPD*, NVIDIA SGLang *EPD* (run on `0.5.18`), and Ascend 910B2 vLLM-Ascend 
 AMD *EPD* and SGLang Ascend rows are admitted but unverified on hardware
 ([#763](https://github.com/gpustack/gpustack-operator/issues/763)).
 
-## Column guide
+### Version rules
 
 - **Image floor**: There is no *`engine.version`* field. Roles run *`roles[].image`* or
   *`spec.engine.image`* ([Role images](configuration.md#role-images)), and admission never checks

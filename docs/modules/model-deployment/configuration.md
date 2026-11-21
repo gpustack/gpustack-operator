@@ -217,7 +217,7 @@ managed role:
 | `SGLang` | `--hicache-storage-backend`, `--hicache-storage-backend-extra-config`, `--disaggregation-mode`, `--disaggregation-transfer-backend`, `--disaggregation-bootstrap-port` (including unique prefixes) | `SGLANG_HICACHE_MOONCAKE_CONFIG_PATH`, `MOONCAKE_MASTER`, `MOONCAKE_TE_META_DATA_SERVER`, `MOONCAKE_PROTOCOL`, `MOONCAKE_DEVICE`, `MOONCAKE_GLOBAL_SEGMENT_SIZE`, `MOONCAKE_LOCAL_HOSTNAME`, **`MOONCAKE_TENANT_ID`** |
 
 - Encoder-stage keys (including vLLM `--ec-transfer-config` and SGLang encoder flags) are also owned
-  per engine; see [Keys the operator owns](encode-prefill-decode.md#keys-the-operator-owns).
+  per engine; see [Keys the operator owns](encode-prefill-decode.md#operator-owned-keys).
 - `--kv-cache-dtype` is owned on both engines while *`spec.kvCache`* is set and
   `model-deployment-kv-cache-dtype-owned` is `true` ([Engine dtype](../kv-cache/pool.md#engine-dtype)).
 - These keys are defaulted, so a user entry wins without refusal: `MC_TE_METRIC=1`, `MC_FORCE_TCP=1`
