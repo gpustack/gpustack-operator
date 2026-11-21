@@ -93,9 +93,9 @@ Admission matches *`spec.router.name`* to *`spec.engine.name`* and rejects cross
 
 | Router | Engines | Rendered configuration | Routing policy |
 |---|---|---|---|
-| `llm-d-router` | `vLLM`, `SGLang` | Endpoint picker behind a proxy with a mounted config file | [Fixed scoring profile](routing.md#no-policy-flag) |
-| `vllm-router` | `vLLM` | Single process configured by CLI flags | [`cache_aware`, or `--policy`](routing.md#switching-to-round-robin) |
-| `sglang-gateway` | `SGLang` | Single process configured by CLI flags | [`cache_aware`, or `--policy`](routing.md#switching-to-round-robin) |
+| `llm-d-router` | `vLLM`, `SGLang` | Endpoint picker behind a proxy with a mounted config file | [Fixed scoring profile](routing.md#fixed-scoring-profile) |
+| `vllm-router` | `vLLM` | Single process configured by CLI flags | [`cache_aware`, or `--policy`](routing.md#policy-overrides) |
+| `sglang-gateway` | `SGLang` | Single process configured by CLI flags | [`cache_aware`, or `--policy`](routing.md#policy-overrides) |
 
 - **Router replicas**: *`spec.router.replicas`* defaults to `1`. Running `> 1` trades prefix-cache
   hit rate for availability (upstream reports unsynchronized radix trees and a 10%–20% hit-rate

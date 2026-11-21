@@ -8,10 +8,9 @@ which replicas receive traffic.
 
 - [Traffic targets](#traffic-targets)
 - [Encode stage routing](#encode-stage-routing)
-- [Each router's default](#each-routers-default)
+- [Default routing policies](#default-routing-policies)
 - [Prefix affinity](#prefix-affinity)
-- [Switching to round robin](#switching-to-round-robin)
-- [No policy flag](#no-policy-flag)
+- [Policy overrides](#policy-overrides)
 - [Serving observations](#serving-observations)
 - [Per-worker routing metrics](#per-worker-routing-metrics)
 - [Troubleshooting](#troubleshooting)
@@ -41,7 +40,7 @@ those candidates.
 
 Where even spread matters (multi-replica *Server* or *External DP*), choose `vllm-router` for vLLM
 or `sglang-gateway` for SGLang because `llm-d-router` has no policy switch
-([No policy flag](#no-policy-flag)). Counts above were recorded on vLLM `0.29.0` and SGLang
+([Fixed scoring profile](#fixed-scoring-profile)). Counts above were recorded on vLLM `0.29.0` and SGLang
 `0.5.18` behind `gpustack/llm-router:v0.3.1`.
 
 - **External selectors**: Qualified *External* *Server* roles omit `member-index=0` while keeping
@@ -90,7 +89,7 @@ Under `llm-d-router` + vLLM, the `encode` profile omits queue, KV-cache and pref
 media requests through *Encode* first, and routes text-only requests straight to *Prefill* and
 *Decode*. See [Admitted matrix](encode-prefill-decode.md#admitted-matrix) for verified combinations.
 
-## Each router's default
+## Default routing policies
 
 `vllm-router` and `sglang-gateway` default to `cache_aware` (logging
 `policy: CacheAware { cache_threshold: 0.3, ... }`); `llm-d-router` uses its fixed scoring profile
@@ -118,7 +117,7 @@ Measured on two single-GPU *Server* replicas with serial 500-character shared-pr
 | `llm-d-router` | vLLM `0.29.0` | 187 and 170 |
 | `llm-d-router` | SGLang `0.5.18` | 375 and 0 |
 
-## Switching to round robin
+## Policy overrides
 
 Add `--policy round_robin` to *`spec.router.extraArgs`* on `vllm-router` or `sglang-gateway` to
 spread requests evenly across replicas:
@@ -156,10 +155,10 @@ Admission does not validate `--policy` values; an unknown value stops the router
 Only `round_robin` was live-tested; `cache_aware` thresholds, `--prefill-policy` and
 `--decode-policy` pass through *`extraArgs`* untested.
 
-## No policy flag
+### Fixed scoring profile
 
 `llm-d-router` cannot switch policies through *`extraArgs`* because the operator owns
-`--config-file` and exposes no weight fields.
+`--config-file` and exposes no scorer weight fields.
 
 ## Serving observations
 
