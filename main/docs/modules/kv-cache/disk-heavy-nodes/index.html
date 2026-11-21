@@ -1517,9 +1517,11 @@ member. Add local disks to that member, then size the memory segment as describe
 </ul>
 <h2 id="memory-segment-requirement">Memory segment requirement</h2>
 <p><strong>Every member group mounts a memory segment, and a disk tier is a layer on a group that already
-holds one.</strong> <em><code>members[].medium</code></em> names which memory (<code>DRAM</code> for the host&rsquo;s, <code>VRAM</code> for the
-accelerator&rsquo;s), and the disk is declared beside it in <em><code>members[].localDisks</code></em>, a layer on either one.
-See <a href="/gpustack-operator/main/docs/modules/kv-cache/backend/#connection-and-medium">Connection and medium</a>
+holds one.</strong> <em><code>members[].medium</code></em> names <code>DRAM</code> (host RAM) or <code>VRAM</code> (accounting-only for user
+<code>USE_VRAM_SEGMENT=ON</code> images; see <a href="/gpustack-operator/main/docs/modules/kv-cache/backend/#custom-vram-builds">Custom VRAM builds</a>
+), and
+<em><code>members[].localDisks</code></em> declares the disk beside it. See
+<a href="/gpustack-operator/main/docs/modules/kv-cache/backend/#connection-and-medium">Connection and medium</a>
  for the full shape.</p>
 <p>The shape is the store&rsquo;s own data flow: the leader routes an offload task to the client holding the
 key&rsquo;s <strong>memory</strong> replica, so a group with none is never chosen. It would still report its disk
@@ -1575,6 +1577,9 @@ one, or repathing it are each refused; the tier&rsquo;s other settings stay edit
 .</li>
 <li><strong>Nothing in Kubernetes accounts for what the tier writes.</strong> Watching that filesystem is yours.
 See <a href="/gpustack-operator/main/docs/modules/kv-cache/local-disk-tier/#unaccounted-disk-usage">unaccounted disk usage</a>
+.</li>
+<li><strong>Avoid reserved host mount paths</strong> (including <code>/etc/hixlep</code> on <code>CANN</code> Host RoCE groups); see
+<a href="/gpustack-operator/main/docs/modules/kv-cache/local-disk-tier/#directory-requirements">path rules</a>
 .</li>
 </ul>
 <h2 id="memory-segment-floor">Memory segment floor</h2>

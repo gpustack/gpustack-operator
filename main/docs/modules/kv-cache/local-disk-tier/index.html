@@ -1597,11 +1597,11 @@ object, so there is nothing to opt into.</p>
  for why the shape has to be this way, and
 <a href="/gpustack-operator/main/docs/modules/kv-cache/disk-heavy-nodes/">KV Cache on Disk-Heavy Nodes</a>
  for what to write on a node that is mostly disk.</p>
-<p><strong>The example configurations use <code>DRAM</code> groups.</strong> What is and is not
-measured about pairing the tier with a <code>VRAM</code> group is stated once, beside the medium it belongs to,
-at <a href="/gpustack-operator/main/docs/modules/kv-cache/backend/#vram-group-accelerator-access">VRAM group accelerator access</a>
-. Read it before writing
-one.</p>
+<p><strong>The example configurations use <code>DRAM</code> groups.</strong> Official <code>mirrored-mooncake</code> builds disable
+<code>USE_VRAM_SEGMENT</code> (<code>Host RAM</code> only); <code>VRAM</code> applies only to custom <code>USE_VRAM_SEGMENT=ON</code> images
+and is stated at <a href="/gpustack-operator/main/docs/modules/kv-cache/backend/#custom-vram-builds">Custom VRAM builds</a>
+. Read it
+before writing one.</p>
 <h2 id="bucket-writes">Bucket writes</h2>
 <p>The store does not write an offloaded object on its own. It <strong>assembles objects into a bucket and
 writes nothing until that bucket is full</strong> (by bytes or by object count), and what is short of the
@@ -1771,6 +1771,8 @@ content needs no uid. Emptying is a switch, and it is
 <li>It must not be the <strong>root directory</strong>.</li>
 <li>It <strong>may not overlap <code>/dev/infiniband</code></strong> (equal to it, inside it, or containing it). A sibling such
 as <code>/dev/infiniband-cache</code> is fine.</li>
+<li>On <code>CANN</code> groups with <em><code>fabricInterfaceCount</code></em> set, it <strong>may not overlap <code>/etc/hixlep</code></strong> (equal,
+ancestor, or descendant), because Ascend A5 Host RoCE mounts <code>/etc/hixlep</code> read-only.</li>
 <li>It <strong>may not contain a <code>..</code> component</strong>.</li>
 <li>It <strong>may not begin or end with whitespace</strong>, spaces and tabs alike.</li>
 </ul>

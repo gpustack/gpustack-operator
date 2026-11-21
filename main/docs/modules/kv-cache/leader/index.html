@@ -1655,7 +1655,7 @@ availability is a compile-time switch and every option ships <strong>off</strong
       </tr>
   </tbody>
 </table>
-<p>Use an image built from <a href="https://github.com/gpustack/gpustack-operator/blob/13e808dcc7b0ae056bd46369b8c77dc0ccb33261/pack/mirrored-mooncake/Dockerfile"><code>pack/mirrored-mooncake</code></a>
+<p>Use an image built from <a href="https://github.com/gpustack/gpustack-operator/blob/319b3981090fab03a29fd454c632286b3f73665f/pack/mirrored-mooncake/Dockerfile"><code>pack/mirrored-mooncake</code></a>
  for
 <em><code>spec.image</code></em> <strong>and for every <em><code>members[].image</code></em></strong>, on Mooncake 0.3.12 or later: an electing leader is
 also rendered <code>-pod_name</code> and <code>-pod_namespace</code> to label the winner, and a 0.3.11 master exits on both.</p>
@@ -1665,10 +1665,12 @@ selects <code>Kubernetes</code> and renders election flags that the image cannot
 <p>A member group on <code>RDMA</code>, <code>ROCM</code> or <code>CANN</code> runs under high availability on the build that carries
 its transport: every <code>mirrored-mooncake</code> target (the default build and the <code>cuda</code>, <code>cann</code> and
 <code>rocm</code> variants alike) compiles the <code>Lease</code> backend in. Transport support and leader election support are independent.</p>
-<p>The matching rule is unchanged from <a href="/gpustack-operator/main/docs/modules/kv-cache/backend/#image">the backend page</a>
-: the default build
-covers <code>RDMA</code> over DRAM (the transport has no compile switch to leave off, and rdma-core is
-installed), and a <code>ROCM</code> or <code>CANN</code> group names its variant.</p>
+<p>The matching rule is unchanged from <a href="/gpustack-operator/main/docs/modules/kv-cache/backend/#gpustack-build-variants">the backend page</a>
+: all
+official <code>mirrored-mooncake</code> builds (<code>-cpu</code>, <code>cuda</code>, <code>cann</code>, <code>rocm</code>) disable <code>USE_VRAM_SEGMENT</code> and
+allocate store segments in Host RAM (<code>DRAM</code>) only. The <code>-cpu</code> build ships <em>RDMA</em> (<code>libibverbs</code>) and
+EFA (<code>libfabric</code>) for NVIDIA and AMD Host-RAM stores, while <code>-cann</code> is required on Ascend because
+<code>vllm-ascend</code> speaks HIXL (<code>protocol: ascend</code>), and <code>-rocm</code> adds ROCm transport support.</p>
 <p>What none of those three has is a real-machine run under an election: the <code>Lease</code> backend&rsquo;s
 presence is asserted per build target, the fabric data path is not.</p>
 <p><code>MUSA</code> and <code>MACA</code> keep their own rule because this project builds no variant for either, by

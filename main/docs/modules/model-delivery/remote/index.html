@@ -1524,11 +1524,13 @@ so the successful remote path does not store a complete checkpoint on the target
 </li>
 <li><a href="#replica-startup">Replica startup</a>
 </li>
-<li><a href="#benchmarks">Benchmarks</a>
-</li>
 <li><a href="#require-and-prefer">Require and Prefer</a>
 </li>
 <li><a href="#networks">Networks</a>
+</li>
+<li><a href="#vendor-specific-behavior">Vendor-specific behavior</a>
+</li>
+<li><a href="#benchmarks">Benchmarks</a>
 </li>
 <li><a href="#observing-status">Observing status</a>
 </li>
@@ -1585,13 +1587,13 @@ is drained and replaced only after its current runtime instance proves release.<
 directly through Helm. Perform this maintenance when the affected workload is stable;
 it does not wait for the image-rollout drain acknowledgement.
 Host driver versions do not rewrite the map. Disk warm-up retains its independent Python Alpine image.</p>
-<p>Remote delivery targets <strong>hub artifacts on managed roles</strong>. The routing candidates are <code>nixl</code>
-for vLLM and SGLang on NVIDIA, and <code>hixl</code> for vLLM-Ascend and SGLang on Ascend. The current
-allowlist admits only the NVIDIA candidates; Ascend is not yet admitted. Routing admission does
-not establish production acceptance, which remains open.</p>
+<p>Remote delivery targets <strong>hub artifacts on managed roles</strong>. Default routing admits <code>nixl</code> for <code>vLLM</code>
+and <code>SGLang</code> on NVIDIA, and <code>hixl</code> for <code>vLLM</code> and <code>SGLang</code> on Ascend. Routing admission does not
+establish production acceptance, which remains open.</p>
 <p>Setting <code>Require</code> or <code>Prefer</code> starts nothing on its own. A role with its own command is never
-rewritten, and claim and image artifacts keep their existing delivery paths. On Ascend (<code>hixl</code>),
-the engine runner image must include CANN 9.2 or newer so the Python <code>hixl</code> module is present.</p>
+rewritten, and claim and image artifacts keep their existing delivery paths. Platform runtime and
+wheel requirements live under <a href="#vendor-specific-behavior">Vendor-specific behavior</a>
+.</p>
 <h2 id="source-preparation">Source preparation</h2>
 <p>A <a href="/gpustack-operator/main/docs/modules/model-delivery/prefetch/">Model Prefetch</a>
  pins a verified disk cache and prepares its host-memory source.
@@ -1641,8 +1643,8 @@ Treat source Pods and their vendor images as trusted cluster infrastructure.</p>
 <h3 id="source-memory-examples">Source memory examples</h3>
 <p>Use the benchmark models <code>Qwen/Qwen3-8B</code> and <code>Qwen/Qwen3.6-35B-A3B</code> in namespace
 <code>gpustack-default</code>. Both sources share the <code>model-source-pool</code> store and <code>qwen-source</code> Binding.
-These are configuration examples, not captured benchmark manifests. HIXL remains outside the
-managed replica routing allowlist.</p>
+These are configuration examples, not captured benchmark manifests; default routing admits Ascend
+<code>hixl</code> for <code>vLLM</code> and <code>SGLang</code>.</p>
 <h4 id="node-and-source-limits">Node and source limits</h4>
 <p>Set the broker&rsquo;s total ceiling to <code>128 GiB</code> and each HIXL generation&rsquo;s ceiling to <code>16 GiB</code>:</p>
 <div class="code-block">
@@ -1823,7 +1825,7 @@ version <code>1</code> readers and manifests are refused.</p>
 <code>4 MiB</code>, with at most <code>512 MiB</code> of pages and <code>1,048,576</code> tensors overall. Load and source journals
 cap operations at <code>1,048,576</code>; byte limits can refuse work sooner. Proven acknowledgements can
 be compacted; unknown receipts remain charged.</p>
-<p>See <a href="https://github.com/gpustack/gpustack-operator/blob/13e808dcc7b0ae056bd46369b8c77dc0ccb33261/specs/2026-10-28-model-artifact-remote-weight-loading.md#source-budget-calculations">source budget calculations</a>
+<p>See <a href="https://github.com/gpustack/gpustack-operator/blob/319b3981090fab03a29fd454c632286b3f73665f/specs/2026-10-28-model-artifact-remote-weight-loading.md#source-budget-calculations">source budget calculations</a>
 
 for admission arithmetic and available-memory sizing.</p>
 <h2 id="replica-startup">Replica startup</h2>
@@ -1888,25 +1890,10 @@ when supplying it through a command-line argument, encode the object as JSON:</p
 <p>The reader coalesces contiguous safetensors spans into a registered transfer window where
 possible. Window and concurrency budgets bound staging; retained output tensors still contribute
 to peak device memory until load completion.</p>
-<p>The target staging window uses pinned host RAM. Ascend uses <code>aclrtMallocHost</code> and HIXL <code>MEM_HOST</code>;
-NVIDIA uses pinned <code>DRAM</code> with NIXL. The source writes into the host window, then the loader copies
-to the target tensor. <code>GPUSTACK_MODEL_TRANSFER_TARGET_MEMORY</code> is no longer read. The loaders close
-the session after <code>load_weights</code>; unknown native outcomes retain resources for safety.</p>
-<p>HIXL owned host regions always use <code>2 MiB</code>-aligned addresses and registration lengths, including
-small or oddly sized requests. The allocator reserves the rounded extent plus <code>2 MiB</code> for address
-alignment and frees the original allocation. File and tensor read/write bounds keep their original
-lengths; the registered tail is zeroed and never counted as model data.</p>
-<p>Source admission, page selection and residency reports charge this complete backing allocation.
-Target window budgets round down before dividing into slots; each slot reserves <code>2 MiB</code> for address
-alignment. A direct loader window below <code>4 MiB</code> resolves to that minimum, and double buffering needs
-at least <code>8 MiB</code>. Configured environment windows retain their <code>1 GiB</code> floor. Adaptive transfer spans
-may end at an unaligned tensor boundary without changing the aligned memory registration.</p>
-<p>The exported <code>HixlReader</code> also aligns its owned host windows and charges the full backing
-allocation. Its per-window budget has a <code>4 MiB</code> minimum. Caller-owned tensor or byte-buffer
-registrations keep their actual storage bounds; the runtime never rounds them beyond their owner.</p>
-<p>NVIDIA pinned allocations of at least <code>2 MiB</code> retain their existing address alignment. NIXL window
-sizes round down and needed tensor spans round up before clamping; smaller windows can keep their
-original sizes.</p>
+<p>The target staging window uses pinned host RAM, and the loader closes the session after
+<code>load_weights</code>. Unknown native outcomes retain resources for safety. Platform-specific host
+allocation and alignment rules live under <a href="#vendor-specific-behavior">Vendor-specific behavior</a>
+.</p>
 <p>When available RAM backs a source window, <code>POST /v1/sessions</code> returns <code>sourceWindowBytes</code>. The
 client limits its window to the smaller of its own budget and that figure, with a <code>256 MiB</code>
 adaptive floor and a further bound by the needed tensor span. Larger client windows transfer in
@@ -1926,6 +1913,220 @@ metadata at the control interface. That interface alone does not establish hardw
 raw READ, WRITE, ATOMIC and discovery exposure require backend safety qualification.</p>
 <p>A drained or quarantined generation stops admitting sessions. An already loaded replica keeps
 serving its own loaded weights.</p>
+<h2 id="require-and-prefer">Require and Prefer</h2>
+<p>The policy names what an eligible replica may do when its source is missing, slow or fails:</p>
+<table>
+  <thead>
+      <tr>
+          <th>Policy</th>
+          <th>Allowlisted, source available</th>
+          <th>Allowlisted, source unavailable</th>
+          <th>Outside allowlist</th>
+          <th>Ineligible role</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td><code>Require</code></td>
+          <td>loads remote</td>
+          <td>holds before its load starts, visible in status, never downloads</td>
+          <td>blocked with <code>UnqualifiedTransferBackend</code>, no new <code>Pod</code></td>
+          <td>blocked with <code>RoleIneligibleForModelTransfer</code>, no new <code>Pod</code></td>
+      </tr>
+      <tr>
+          <td><code>Prefer</code></td>
+          <td>loads remote</td>
+          <td>uses the declared local delivery if no remote replica holds it; otherwise holds remote delivery</td>
+          <td>falls back to the declared local delivery, or is blocked when that fallback would roll a loaded remote replica</td>
+          <td>falls back to the declared local delivery</td>
+      </tr>
+  </tbody>
+</table>
+<ul>
+<li><strong>Require never materializes a checkpoint.</strong> A Require deployment that cannot reach a source
+keeps waiting within its startup limits; nothing downloads behind its back.</li>
+<li><strong>Prefer tracks fallback attempts.</strong> The initial remote <code>Pod</code> does not mount a complete
+checkpoint, so fallback after a failed remote load recreates the replica. Each attempt increments
+<em><code>fallbackAttempts</code></em> for that replica. If the count exceeds three, the reason becomes
+<code>FallbackAttemptsSpent</code> and the replica still falls back.</li>
+<li><strong>Verified artifacts keep verification on fallback.</strong> An artifact with <em><code>expectedDigest</code></em>,
+<em><code>allowPatterns</code></em> or <em><code>ignorePatterns</code></em> falls back to verified Node delivery, never to an
+unrestricted engine download.</li>
+<li><strong>The refusal reason identifies the restriction.</strong> <code>RoleIneligibleForModelTransfer</code> means the
+role cannot use remote delivery: it has its own command, uses an unsupported engine, or runs on
+a pool whose manufacturer names no backend. <code>UnqualifiedTransferBackend</code> means the candidate is
+outside the current routing allowlist. Under <code>Require</code> both block; under <code>Prefer</code> an unqualified
+candidate falls back only if doing so would not roll a loaded remote replica.</li>
+<li><strong>A running remote replica is protected from fallback.</strong> Changing the desired delivery could
+roll a replica that already loaded. The controller checks running <code>Pod</code>s as well as deployment
+status, which can lag or report local delivery. It holds the operator-rendered replica&rsquo;s remote
+delivery even if the source disappears or the <code>Pod</code> is not <code>Ready</code>: it may already have loaded.
+A replica can fall back when every member&rsquo;s load failed outright. This hold does not affect an
+independent client that connects to the source itself.</li>
+</ul>
+<h2 id="networks">Networks</h2>
+<p>Control and payload endpoints are identified separately. The <em>control</em> endpoint is the broker&rsquo;s
+authenticated HTTP path for session negotiation. The <em>payload</em> endpoint is the backend&rsquo;s transfer path:
+UCX/InfiniBand or shared memory for <code>nixl</code>, and the CANN fabric for <code>hixl</code>. A capability record
+must identify both endpoints for the backend to qualify.</p>
+<p>Network device selection is checked during qualification, using node discovery or the acceptance
+configuration. No <code>Setting</code> chooses a NIC today. A payload transfer on the wrong network path
+fails acceptance; the operator does not automatically correct the selection.</p>
+<p>The source chart keeps the existing <code>modelTransfer.env</code> map and appended <code>modelTransfer.extraArgs</code>.
+Use backend environment variables there when a server needs explicit device selection. Client
+east-west network selection is owned by the RDMA selection work; this feature adds no server-client
+NIC negotiation. Platform-specific transport options, mounts, and topologies live under
+<a href="#vendor-specific-behavior">Vendor-specific behavior</a>
+.</p>
+<h2 id="vendor-specific-behavior">Vendor-specific behavior</h2>
+<p>Accelerator platforms and fabrics add runtime image requirements, host mounts, and topology rules
+beyond generic remote loading.</p>
+<h3 id="ascend">Ascend</h3>
+<p>On Ascend (<code>hixl</code>), default routing admits <code>vLLM</code> and <code>SGLang</code>. The engine runner image must include
+CANN 9.2 or newer (for Python <code>hixl</code>), and Ascend A5 or Host RoCE features require rebuilt
+<code>model-transfer</code> source images beyond early <code>v0.1.0-cann9.2-a5</code> tags.</p>
+<p>The target engine bootstrap skips installing the host-staged wheel whenever
+<code>gpustack_model_transfer</code> is already preinstalled in the engine image. CANN 9.2+ engine images
+carrying an older bundled <code>gpustack_model_transfer</code> wheel must upgrade or omit that preinstalled
+wheel to pick up A5 options and <code>roce:host</code> <code>mmap</code>. HIXL Device RoCE and Host RoCE require
+separate qualification.</p>
+<p>On Ascend A5 (<code>Family == &quot;950&quot;</code>), <code>modelTransfer.ascend.hostRoCE.enabled</code> (default <code>false</code>) opts
+the Ascend source <code>DaemonSet</code> into Host RoCE, while <code>roles[].resources.interface &gt; 0</code> enables Host
+RoCE on eligible <code>ModelDeployment</code> <code>vLLM</code> and <code>SGLang</code> targets (<code>Server</code> and symmetric <em>PD</em> pairs;
+<code>Encode</code> and asymmetric <em>PD</em> pairs remain rejected).</p>
+<ul>
+<li><strong>Source Host RoCE toggle</strong>: Setting <code>modelTransfer.ascend.hostRoCE.enabled: true</code> applies <code>hostNetwork: true</code>, <code>ClusterFirstWithHostNet</code>, read-only <code>/etc/hixlep</code> (<code>HostPathDirectory</code>), and default <code>ASCEND_GLOBAL_RESOURCE_CONFIG</code> (<code>roce:host</code> + <code>/etc/hixlep</code>) on <code>gpustack-operator-model-transfer-ascend</code> only.</li>
+<li><strong>Broker and HIXL network ports</strong>: With <code>hostNetwork: true</code>, the broker&rsquo;s HTTP/TLS listeners expose only <code>:9251</code> on the host network namespace (CSI clients dial <code>&lt;sourcePodIP&gt;:9251</code> and verify TLS SNI <code>&lt;daemonSetName&gt;.&lt;namespace&gt;.svc</code>); broker-worker private HTTP control uses <code>/run/model-transfer-sockets/{control,worker}.sock</code> UDS (keeping <code>/run/model-transfer/bootstrap</code> read-only on <code>worker</code>) instead of loopback <code>9250</code>/<code>9252</code>, while HIXL&rsquo;s native rendezvous separately binds an ephemeral port on <code>status.podIP</code>.</li>
+<li><strong>Mixed-fleet <code>nodeSelector</code> warning</strong>: <code>modelTransfer.nodeSelector</code> applies to all vendor source <code>DaemonSet</code>s (<code>nvidia</code>, <code>amd</code>, <code>ascend</code>), and narrowing it on a running cluster causes Kubernetes&rsquo;s <code>DaemonSet</code> controller to delete <code>Pod</code>s on non-matching nodes immediately (bypassing <code>OnDelete</code> drain). Stop new work and confirm release on excluded nodes before migrating, or use isolated placement when other vendor source fleets share the cluster.</li>
+<li><strong>Same-image drained rollout</strong>: Source <code>Pod</code> templates stamp <code>model-transfer.gpustack.ai/config-hash</code> covering image, <code>hostNetwork</code>, <code>dnsPolicy</code>, <code>env</code>, and <code>/etc/hixlep</code>, so <code>ModelTransferImageReconciler</code> drains and replaces Pods when toggling <code>hostRoCE.enabled</code> at an identical worker image.</li>
+</ul>
+<p>The Python SDK forwards <code>ASCEND_LOCAL_COMM_RES</code> (<code>LocalCommRes</code>) and <code>ASCEND_GLOBAL_RESOURCE_CONFIG</code>
+(<code>GlobalResourceConfig</code>) into <code>Hixl.initialize()</code> on both source and target while preserving
+<code>&quot;BufferPool&quot;: &quot;0:0&quot;</code> and normalizing nested <code>comm_resource_config.protocol_desc</code> to HIXL&rsquo;s literal
+flat dotted key <code>&quot;comm_resource_config.protocol_desc&quot;</code>.</p>
+<p>When <code>ASCEND_LOCAL_COMM_RES</code> is empty and <code>local_comm_res_path</code> is a directory, the SDK resolves
+<code>aclrtGetDevice</code> and <code>aclrtGetPhyDevIdByUserDevId</code> to <code>&lt;dir&gt;/ub_endpoint_npu_&lt;phy_id&gt;.json</code> and
+fails closed with <code>SourceUnavailableError</code> on missing symbols, lookup errors, or absent files
+(never guessing NPU <code>0</code>).</p>
+<p>When <code>protocol_desc</code> selects <code>&quot;roce:host&quot;</code>, both source (<code>AclHostOwner</code>) and target
+(<code>BorrowedAclOwner</code>) allocate owned <code>2 MiB</code>-aligned private anonymous <code>mmap</code> buffers registered as
+<code>MEM_HOST</code>, release idempotently by recorded allocator kind, and quarantine mappings if <code>close()</code> is
+refused. Non-<code>roce:host</code> paths continue using <code>aclrtMallocHost</code>.</p>
+<p><code>GPUSTACK_MODEL_TRANSFER_TARGET_MEMORY</code> is no longer read. HIXL owned host regions always use
+<code>2 MiB</code>-aligned addresses and registration lengths, reserving the rounded extent plus <code>2 MiB</code> for
+alignment, zeroing the tail, and charging the full backing allocation. A direct loader window below
+<code>4 MiB</code> resolves to that minimum, double buffering needs <code>8 MiB</code>, and <code>HixlReader</code> preserves
+caller-owned bounds.</p>
+<h4 id="ascend-a5-scenarios">Ascend A5 scenarios</h4>
+<table>
+  <thead>
+      <tr>
+          <th>Scenario</th>
+          <th>Configuration</th>
+          <th>Resulting behavior</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td><strong>A5 UB default</strong></td>
+          <td><code>hostRoCE.enabled: false</code>, target <code>interface: 0</code></td>
+          <td>Target defaults <code>ASCEND_LOCAL_COMM_RES='{&quot;version&quot;:&quot;1.3&quot;}'</code>; uses <code>ub_ctp:device</code> and <code>aclrtMallocHost</code> with no <code>/etc/hixlep</code>.</td>
+      </tr>
+      <tr>
+          <td><strong>A5 UB H2H</strong></td>
+          <td>Set <code>ASCEND_GLOBAL_RESOURCE_CONFIG='{&quot;comm_resource_config.protocol_desc&quot;:[&quot;ub_ctp:host&quot;]}'</code> on source and target</td>
+          <td>Pure Host-to-Host UB over <code>ub_ctp:host</code> using <code>aclrtMallocHost</code>; no <code>/etc/hixlep</code> or <code>hostNetwork</code>.</td>
+      </tr>
+      <tr>
+          <td><strong>A5 UBG</strong></td>
+          <td>Set <code>ASCEND_GLOBAL_RESOURCE_CONFIG='{&quot;comm_resource_config.protocol_desc&quot;:[&quot;ub_rtp:device&quot;]}'</code> on source and target</td>
+          <td>Cross-SuperPod UBG over <code>ub_rtp:device</code> using <code>aclrtMallocHost</code>; no <code>/etc/hixlep</code> or <code>hostNetwork</code>.</td>
+      </tr>
+      <tr>
+          <td><strong>A5 UBoE</strong></td>
+          <td>Set <code>ASCEND_GLOBAL_RESOURCE_CONFIG='{&quot;comm_resource_config.protocol_desc&quot;:[&quot;uboe:device&quot;]}'</code> on source and target</td>
+          <td>UBoE over <code>uboe:device</code> using <code>aclrtMallocHost</code>; no <code>/etc/hixlep</code> or <code>hostNetwork</code>.</td>
+      </tr>
+      <tr>
+          <td><strong>A5 Host RoCE</strong></td>
+          <td>Source <code>hostRoCE.enabled: true</code> + target <code>interface &gt; 0</code></td>
+          <td>Grants target <code>device.gpustack.ai/rdma*</code>, mounts <code>/etc/hixlep</code> RO, fails closed on physical NPU resolution, and uses <code>2 MiB</code>-aligned <code>mmap</code>.</td>
+      </tr>
+      <tr>
+          <td><strong>Non-A5 A2/A3</strong></td>
+          <td><code>910B</code>/<code>910C</code>, <code>hostRoCE.enabled: false</code>, <code>interface: 0</code></td>
+          <td>Unchanged legacy <code>hixl</code> path using <code>aclrtMallocHost</code>; no <code>/etc/hixlep</code> or <code>hostNetwork</code>.</td>
+      </tr>
+  </tbody>
+</table>
+<p>Source Helm values for <strong>Ascend A5 Host RoCE</strong> on a fresh installation or post-drain migration
+(<code>ascend.gpustack.ai/generation: a5</code> is an administrator-supplied node label that operators must
+apply or replace to match their A5 nodes):</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">modelTransfer</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">nodeSelector</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="c"># Administrator-supplied label matching your A5 nodes (apply or replace as needed).</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="c"># Applies to all vendor source DaemonSets (nvidia, amd, ascend); only narrow on</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="c"># fresh installs or after draining excluded nodes.</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">ascend.gpustack.ai/generation</span><span class="p">:</span><span class="w"> </span><span class="l">a5</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">ascend</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">hostRoCE</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">enabled</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="w">  </span><span class="c"># grants hostNetwork, RO /etc/hixlep, and flat-key roce:host default</span></span></span></code></pre></div>
+</div>
+<p>Source Helm values for <strong>UB H2H, UBG, or UBoE</strong> keep <code>hostRoCE.enabled: false</code> and pass the flat
+dotted protocol key as a <code>modelTransfer.env</code> map entry:</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">modelTransfer</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">nodeSelector</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="c"># Administrator-supplied label matching your A5 nodes (apply or replace as needed).</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">ascend.gpustack.ai/generation</span><span class="p">:</span><span class="w"> </span><span class="l">a5</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">ascend</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">hostRoCE</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">enabled</span><span class="p">:</span><span class="w"> </span><span class="kc">false</span><span class="w">  </span><span class="c"># keeps hostNetwork and /etc/hixlep off for UB-family paths</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">env</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="c"># Use [&#34;ub_ctp:host&#34;] for UB H2H, [&#34;ub_rtp:device&#34;] for UBG, or [&#34;uboe:device&#34;] for UBoE.</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">ASCEND_GLOBAL_RESOURCE_CONFIG</span><span class="p">:</span><span class="w"> </span><span class="s1">&#39;{&#34;comm_resource_config.protocol_desc&#34;:[&#34;ub_ctp:host&#34;]}&#39;</span></span></span></code></pre></div>
+</div>
+<p>Target <code>ModelDeployment</code> for Ascend A5 Host RoCE remote weight delivery (<code>vLLM</code> or <code>SGLang</code>):</p>
+<div class="code-block">
+  <div class="code-toolbar"><span>yaml</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
+  <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="line"><span class="cl"><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">worker.gpustack.ai/v1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">ModelDeployment</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">metadata</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">qwen3-8b-a5-roce</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">namespace</span><span class="p">:</span><span class="w"> </span><span class="l">gpustack-default</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">model</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">Qwen/Qwen3-8B</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">artifactRef</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">qwen3-8b</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">engine</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">vLLM </span><span class="w"> </span><span class="c"># vLLM or SGLang on CANN 9.2+</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">image</span><span class="p">:</span><span class="w"> </span><span class="l">example/vllm-ascend:cann9.2</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">roles</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">server</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">replicas</span><span class="p">:</span><span class="w"> </span><span class="m">1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">acceleratorType: atlas-950  # converged status.detail.family</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;950&#34;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">resources</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">accelerator</span><span class="p">:</span><span class="w"> </span><span class="m">1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">interface</span><span class="p">:</span><span class="w"> </span><span class="m">1</span><span class="w">  </span><span class="c"># grants RDMA, RO /etc/hixlep, and flat-key roce:host default</span></span></span></code></pre></div>
+</div>
+<p>For UB H2H, UBG, or UBoE on target <code>ModelDeployment</code> roles, omit <em><code>resources.interface</code></em> and set
+<code>ASCEND_GLOBAL_RESOURCE_CONFIG</code> in <em><code>roles[].env</code></em> with <code>&quot;comm_resource_config.protocol_desc&quot;</code>.</p>
+<h3 id="nvidia">NVIDIA</h3>
+<p>On NVIDIA, default routing admits <code>nixl</code> for <code>vLLM</code> and <code>SGLang</code>. NIXL selects <code>LIBFABRIC</code> when
+<code>aws-efa-enabled</code> is <code>true</code> or a bound <code>KVCache</code> pool uses EFA, and <code>UCX</code> (InfiniBand, RoCE,
+NVLink/IPC, or TCP) otherwise.</p>
+<p>For AWS EFA, supply an EFA-enabled <code>model-transfer</code> image through Helm
+<code>modelTransfer.images.nvidia</code>; default builds omit the EFA provider. NVIDIA pinned host allocations
+of at least <code>2 MiB</code> retain their alignment, with NIXL window sizes rounded down and needed tensor
+spans rounded up before clamping.</p>
+<p>For measured NIXL source-to-target numbers see <a href="#nvidia-nixl">NVIDIA (NIXL)</a>
+; for peer D2D tensor
+and compile-cache sharing see <a href="#nvidia-modelexpress">NVIDIA (ModelExpress)</a>
+.</p>
 <h2 id="benchmarks">Benchmarks</h2>
 <h3 id="case-scope">Case scope</h3>
 <p>The benchmark covers <strong>Ascend/HIXL</strong> (<code>Qwen3-8B</code>, <code>Qwen3.6-35B-A3B</code> and <code>Qwen3-235B-A22B-W8A8</code>),
@@ -1950,7 +2151,7 @@ remote runs cross nodes.</p>
 <h3 id="ascend-hixl">Ascend (HIXL)</h3>
 <p>The runs used two Ascend 910B2 nodes, vLLM-Ascend <code>cann9.2-910b-vllm0.30.0</code>, eager mode and host
 transfer buffers with pre-warmed source weights. These runs used an isolated qualification setup;
-HIXL remains outside the managed routing allowlist.</p>
+default routing now admits Ascend <code>hixl</code> for <code>vLLM</code> and <code>SGLang</code>.</p>
 <p>The source host had 2014 GiB of total RAM and approximately 1514 GiB available. With
 <em><code>source.maxMemoryBytes: 0</code></em>, the default node Source budget is <code>2014 / 16</code> (<code>125.88 GiB</code>), subject
 to available RAM and 10% reservation overhead.</p>
@@ -2072,12 +2273,12 @@ sequential shards with 3.72–4.00 GiB of target RAM (66.33 s on 35B, 452.83 s o
 paging and makes <code>TP all</code> fastest again: 46.39 s (<code>6.09×</code>) on 35B and 232.93 s (<code>2.57×</code>) on 235B
 (versus 253.58 s for full-resident broadcast; the 235B paged and full-resident samples used
 different SDK builds). Detailed sweeps and lifecycle checks are in the
-<a href="https://github.com/gpustack/gpustack-operator/blob/13e808dcc7b0ae056bd46369b8c77dc0ccb33261/specs/2026-10-28-model-artifact-remote-weight-loading.md#ascend-memory-and-loading">acceptance record</a>
+<a href="https://github.com/gpustack/gpustack-operator/blob/319b3981090fab03a29fd454c632286b3f73665f/specs/2026-10-28-model-artifact-remote-weight-loading.md#ascend-memory-and-loading">acceptance record</a>
 .</p>
 <h3 id="nvidia-nixl">NVIDIA (NIXL)</h3>
 <p>The runs used Nebius H100 80 GB nodes and vLLM 0.30.0 in eager mode with pre-warmed source weights.
 Every case below reached <code>Ready</code> and passed inference probes. The
-<a href="https://github.com/gpustack/gpustack-operator/blob/13e808dcc7b0ae056bd46369b8c77dc0ccb33261/specs/2026-11-09-modelexpress-peer-d2d-and-cache-sharing.md#benchmarks-and-verification-results">NVIDIA evidence record</a>
+<a href="https://github.com/gpustack/gpustack-operator/blob/319b3981090fab03a29fd454c632286b3f73665f/specs/2026-11-09-modelexpress-peer-d2d-and-cache-sharing.md#benchmarks-and-verification-results">NVIDIA evidence record</a>
 
 retains the tested artifacts and measurement limits.</p>
 <p>The source host reported 1574.84 GiB of total RAM and approximately 1554.06 GiB available. With
@@ -2212,7 +2413,7 @@ H2H and H2D. ModelExpress peer D2D over HIXL is outside this design.</p>
 H100 80 GB nodes with vLLM 0.30.0 in graph mode, comparing the NIXL <code>TCP peer sync + local load</code>
 baseline against the seed replica, a scale-out peer replica, and a replica launched after a
 metadata-server restart (detailed sweeps and verification logs are in the
-<a href="https://github.com/gpustack/gpustack-operator/blob/13e808dcc7b0ae056bd46369b8c77dc0ccb33261/specs/2026-11-09-modelexpress-peer-d2d-and-cache-sharing.md#benchmarks-and-verification-results">ModelExpress benchmark record</a>
+<a href="https://github.com/gpustack/gpustack-operator/blob/319b3981090fab03a29fd454c632286b3f73665f/specs/2026-11-09-modelexpress-peer-d2d-and-cache-sharing.md#benchmarks-and-verification-results">ModelExpress benchmark record</a>
 ):</p>
 <table>
   <thead>
@@ -2403,69 +2604,6 @@ trusted Pods.</p>
 <li><strong>Recovery</strong>: A new replica loads from a ready source or an eligible local path and publishes metadata.</li>
 <li><strong>Scale from zero</strong>: The first replica has no ready peer.</li>
 </ul>
-<h2 id="require-and-prefer">Require and Prefer</h2>
-<p>The policy names what an eligible replica may do when its source is missing, slow or fails:</p>
-<table>
-  <thead>
-      <tr>
-          <th>Policy</th>
-          <th>Allowlisted, source available</th>
-          <th>Allowlisted, source unavailable</th>
-          <th>Outside allowlist</th>
-          <th>Ineligible role</th>
-      </tr>
-  </thead>
-  <tbody>
-      <tr>
-          <td><code>Require</code></td>
-          <td>loads remote</td>
-          <td>holds before its load starts, visible in status, never downloads</td>
-          <td>blocked with <code>UnqualifiedTransferBackend</code>, no new <code>Pod</code></td>
-          <td>blocked with <code>RoleIneligibleForModelTransfer</code>, no new <code>Pod</code></td>
-      </tr>
-      <tr>
-          <td><code>Prefer</code></td>
-          <td>loads remote</td>
-          <td>uses the declared local delivery if no remote replica holds it; otherwise holds remote delivery</td>
-          <td>falls back to the declared local delivery, or is blocked when that fallback would roll a loaded remote replica</td>
-          <td>falls back to the declared local delivery</td>
-      </tr>
-  </tbody>
-</table>
-<ul>
-<li><strong>Require never materializes a checkpoint.</strong> A Require deployment that cannot reach a source
-keeps waiting within its startup limits; nothing downloads behind its back.</li>
-<li><strong>Prefer tracks fallback attempts.</strong> The initial remote <code>Pod</code> does not mount a complete
-checkpoint, so fallback after a failed remote load recreates the replica. Each attempt increments
-<em><code>fallbackAttempts</code></em> for that replica. If the count exceeds three, the reason becomes
-<code>FallbackAttemptsSpent</code> and the replica still falls back.</li>
-<li><strong>Verified artifacts keep verification on fallback.</strong> An artifact with <em><code>expectedDigest</code></em>,
-<em><code>allowPatterns</code></em> or <em><code>ignorePatterns</code></em> falls back to verified Node delivery, never to an
-unrestricted engine download.</li>
-<li><strong>The refusal reason identifies the restriction.</strong> <code>RoleIneligibleForModelTransfer</code> means the
-role cannot use remote delivery: it has its own command, uses an unsupported engine, or runs on
-a pool whose manufacturer names no backend. <code>UnqualifiedTransferBackend</code> means the candidate is
-outside the current routing allowlist. Under <code>Require</code> both block; under <code>Prefer</code> an unqualified
-candidate falls back only if doing so would not roll a loaded remote replica.</li>
-<li><strong>A running remote replica is protected from fallback.</strong> Changing the desired delivery could
-roll a replica that already loaded. The controller checks running <code>Pod</code>s as well as deployment
-status, which can lag or report local delivery. It holds the operator-rendered replica&rsquo;s remote
-delivery even if the source disappears or the <code>Pod</code> is not <code>Ready</code>: it may already have loaded.
-A replica can fall back when every member&rsquo;s load failed outright. This hold does not affect an
-independent client that connects to the source itself.</li>
-</ul>
-<h2 id="networks">Networks</h2>
-<p>Control and payload endpoints are identified separately. The <em>control</em> endpoint is the broker&rsquo;s
-authenticated HTTP path for session negotiation. The <em>payload</em> endpoint is the backend&rsquo;s transfer path:
-UCX/InfiniBand or shared memory for <code>nixl</code>, and the CANN fabric for <code>hixl</code>. A capability record
-must identify both endpoints for the backend to qualify.</p>
-<p>Network device selection is checked during qualification, using node discovery or the acceptance
-configuration. No <code>Setting</code> chooses a NIC today. A payload transfer on the wrong network path
-fails acceptance; the operator does not automatically correct the selection.</p>
-<p>The source chart keeps the existing <code>modelTransfer.env</code> map and appended <code>modelTransfer.extraArgs</code>.
-Use backend environment variables there when a server needs explicit device selection. Client
-east-west network selection is owned by the RDMA selection work; this feature adds no server-client
-NIC negotiation. HIXL Device RoCE and Host RoCE require separate qualification.</p>
 <h2 id="observing-status">Observing status</h2>
 <p>The deployment reports remote delivery per role and replica in <em><code>status.model.remote</code></em>, beside
 the ordinary conditions:</p>
@@ -2598,6 +2736,14 @@ on disk.</p>
         <li><a href="#credentials">Credentials</a></li>
       </ul>
     </li>
+    <li><a href="#require-and-prefer">Require and Prefer</a></li>
+    <li><a href="#networks">Networks</a></li>
+    <li><a href="#vendor-specific-behavior">Vendor-specific behavior</a>
+      <ul>
+        <li><a href="#ascend">Ascend</a></li>
+        <li><a href="#nvidia">NVIDIA</a></li>
+      </ul>
+    </li>
     <li><a href="#benchmarks">Benchmarks</a>
       <ul>
         <li><a href="#case-scope">Case scope</a></li>
@@ -2607,8 +2753,6 @@ on disk.</p>
         <li><a href="#nvidia-modelexpress">NVIDIA (ModelExpress)</a></li>
       </ul>
     </li>
-    <li><a href="#require-and-prefer">Require and Prefer</a></li>
-    <li><a href="#networks">Networks</a></li>
     <li><a href="#observing-status">Observing status</a></li>
     <li><a href="#troubleshooting">Troubleshooting</a></li>
     <li><a href="#rollback">Rollback</a></li>

@@ -1783,7 +1783,7 @@ flowchart TD
 </ol>
 </li>
 <li><strong>NIXL</strong>: Selects <code>LIBFABRIC</code> when the <code>aws-efa-enabled</code> <code>Setting</code> is <code>true</code> or a bound <code>KVCache</code> pool uses EFA; otherwise selects <code>UCX</code> (which negotiates InfiniBand, RoCE, NVLink/IPC, or TCP at runtime). On vLLM, both <em>Prefill</em> and <em>Decode</em> open side-channel port <code>8998</code>.</li>
-<li><strong>HIXL</strong>: Mounts <code>/usr/local/Ascend/driver</code> read-only on both engines so CANN <code>hccn_tool</code> resolves NPU RoCE endpoints, and defaults <code>ASCEND_AUTO_CONNECT=1</code> on vLLM. On Ascend A2/A3 (<code>Family != &quot;950&quot;</code>), SGLang defaults <code>ASCEND_MF_TRANSFER_PROTOCOL=sdma</code>; on Ascend A5 (<code>Family == &quot;950&quot;</code>), SGLang defaults <code>ASCEND_MF_TRANSFER_PROTOCOL=device_urma</code> and never mounts <code>/etc/hixlep</code>. On Ascend A5 <code>vLLM</code> (with <code>HIXL</code> or <code>Mooncake</code>), <code>interface: 0</code> defaults <code>ASCEND_LOCAL_COMM_RES='{&quot;version&quot;:&quot;1.3&quot;}'</code> without <code>/etc/hixlep</code>, while <code>interface &gt; 0</code> mounts <code>/etc/hixlep</code> read-only and sets outer <code>kv_connector_extra_config.ascend_local_comm_res_path: &quot;/etc/hixlep&quot;</code>.</li>
+<li><strong>HIXL</strong>: Mounts <code>/usr/local/Ascend/driver</code> read-only on both engines so CANN <code>hccn_tool</code> resolves NPU RoCE endpoints, and defaults <code>ASCEND_AUTO_CONNECT=1</code> on vLLM. On Ascend A2/A3 (<code>Family != &quot;950&quot;</code>), SGLang defaults <code>ASCEND_MF_TRANSFER_PROTOCOL=sdma</code>; on Ascend A5 (<code>Family == &quot;950&quot;</code>), SGLang defaults <code>ASCEND_MF_TRANSFER_PROTOCOL=device_urma</code> and omits <code>/etc/hixlep</code> on KV-only legs (while remote Host RoCE weight transfer mounts <code>/etc/hixlep</code> read-only when <em><code>resources.interface &gt; 0</code></em>). On Ascend A5 <code>vLLM</code> (with <code>HIXL</code> or <code>Mooncake</code>), <code>interface: 0</code> defaults <code>ASCEND_LOCAL_COMM_RES='{&quot;version&quot;:&quot;1.3&quot;}'</code> without <code>/etc/hixlep</code>, while <code>interface &gt; 0</code> mounts <code>/etc/hixlep</code> read-only and sets outer <code>kv_connector_extra_config.ascend_local_comm_res_path: &quot;/etc/hixlep&quot;</code>.</li>
 </ul>
 </li>
 </ul>
@@ -1922,12 +1922,12 @@ flowchart TD
           <td>Defaulted</td>
           <td>HIXL, Ascend</td>
           <td><code>ASCEND_MF_TRANSFER_PROTOCOL=sdma</code> (Ascend A2/A3) or <code>device_urma</code> (Ascend A5, <code>Family == &quot;950&quot;</code>)</td>
-          <td>User environment wins; SGLang never mounts <code>/etc/hixlep</code> or receives <code>ASCEND_LOCAL_COMM_RES</code>.</td>
+          <td>User environment wins; SGLang omits <code>/etc/hixlep</code> and <code>ASCEND_LOCAL_COMM_RES</code> on KV-only legs.</td>
       </tr>
   </tbody>
 </table>
 <ul>
-<li><strong>A5 exclusions</strong>: <code>RoleEncode</code>, <code>SGLang</code>, and Ascend A2/A3 (<code>Family != &quot;950&quot;</code>) never receive <code>/etc/hixlep</code> or <code>ASCEND_LOCAL_COMM_RES</code>.</li>
+<li><strong>A5 KV exclusions</strong>: <code>RoleEncode</code>, <code>SGLang</code> KV-only legs, and Ascend A2/A3 (<code>Family != &quot;950&quot;</code>) never receive <code>/etc/hixlep</code> or <code>ASCEND_LOCAL_COMM_RES</code> for KV transfer.</li>
 <li><strong>Scaler neutrality</strong>: <code>ASCEND_LOCAL_COMM_RES</code>, <code>ASCEND_GLOBAL_RESOURCE_CONFIG</code>, and <code>ASCEND_MF_TRANSFER_PROTOCOL</code> are capacity-neutral for <code>ModelDeploymentScaler</code> priors.</li>
 <li><strong>UBG and UBoE override</strong>: <code>ASCEND_GLOBAL_RESOURCE_CONFIG</code> in <em><code>roles[].env</code></em> is accepted without owned-env refusal; see <a href="/gpustack-operator/main/docs/modules/model-deployment/prefill-decode/#ascend-a5-topologies">Ascend A5 topologies</a>
 .</li>
@@ -2084,6 +2084,20 @@ lists router compatibility and <a href="/gpustack-operator/main/docs/modules/mod
           <td>NIXL remote delivery</td>
           <td><code>GPUSTACK_MODEL_TRANSFER_NIXL_BACKEND=UCX</code> or <code>LIBFABRIC</code> on EFA</td>
           <td>User environment wins.</td>
+      </tr>
+      <tr>
+          <td>Engine</td>
+          <td>Defaulted</td>
+          <td>Ascend A5 (<code>Family == &quot;950&quot;</code>), HIXL remote delivery, <code>interface: 0</code></td>
+          <td><code>ASCEND_LOCAL_COMM_RES='{&quot;version&quot;:&quot;1.3&quot;}'</code></td>
+          <td>Deduplicated with KV connector defaults; user <code>roles[].env</code> wins.</td>
+      </tr>
+      <tr>
+          <td>Engine</td>
+          <td>Defaulted</td>
+          <td>Ascend A5 (<code>Family == &quot;950&quot;</code>), HIXL remote delivery, <code>interface &gt; 0</code></td>
+          <td><code>ASCEND_GLOBAL_RESOURCE_CONFIG='{&quot;comm_resource_config.protocol_desc&quot;:[&quot;roce:host&quot;],&quot;local_comm_res_path&quot;:&quot;/etc/hixlep&quot;}'</code> and read-only <code>/etc/hixlep</code> (<code>gpustack-ascend-hixlep</code>, <code>HostPathDirectory</code>)</td>
+          <td><code>Server</code> and symmetric <em>PD</em> roles on <code>vLLM</code> or <code>SGLang</code>; user <code>roles[].env</code> and <code>additionalVolumes</code> win.</td>
       </tr>
       <tr>
           <td>Engine</td>
