@@ -13,6 +13,7 @@ import (
 
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
 	"gpustack.ai/gpustack/pkg/kubeclients/kubernetes/scheme"
+	"gpustack.ai/gpustack/pkg/worker/runtimecontrol"
 )
 
 // modelDeploymentScaler builds a scaler that plans for one role of one deployment, which every
@@ -411,7 +412,12 @@ func TestModelDeploymentScalerWebhookValidatesAgainstTheTarget(t *testing.T) {
 		{
 			name: "a role that runs the elastic-EP profile is refused",
 			target: modelDeploymentScalerTarget(workercore.ModelDeploymentRole{
-				Name: "server", Replicas: 1, ElasticEP: &workercore.ModelDeploymentRoleElasticEP{Width: 2},
+				Name: "server", Replicas: 1,
+				RuntimeControl: &workercore.ModelDeploymentRoleRuntimeControl{
+					Parameters: map[string]string{
+						runtimecontrol.ParamElasticDataParallelWidth: "2",
+					},
+				},
 			}),
 			scaler:  modelDeploymentScaler(),
 			refused: true,

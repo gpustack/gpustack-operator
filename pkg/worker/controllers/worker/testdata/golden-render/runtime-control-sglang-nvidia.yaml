@@ -1,0 +1,36 @@
+apiVersion: worker.gpustack.ai/v1
+kind: ModelDeployment
+metadata:
+  name: qwen
+  namespace: default
+spec:
+  engine:
+    image: lmsysorg/sglang:v0.5.18
+    name: SGLang
+  model:
+    name: Qwen/Qwen2.5-72B-Instruct
+  roles:
+  - acceleratorType: h20-8x
+    extraArgs:
+    - --max-running-requests=64
+    - --chunked-prefill-size=8192
+    image: lmsysorg/sglang:v0.5.18
+    kind: Server
+    name: main
+    replicas: 1
+    resources:
+      accelerator: "1"
+    runtimeControl:
+      parameters:
+        scheduling.maxActiveRequests: "32"
+        scheduling.maxBatchedTokens: "4096"
+        scheduling.prefillDecodeInterval: "2"
+        scheduling.prefillMaxRequests: "16"
+        scheduling.scheduleConservativeness: "0.8"
+        speculative.acceptThresholdAcc: "0.7"
+        speculative.acceptThresholdSingle: "0.5"
+        speculative.draftBudgetFraction: "0.8"
+    size: 1
+  router:
+    name: sglang-gateway
+status: {}

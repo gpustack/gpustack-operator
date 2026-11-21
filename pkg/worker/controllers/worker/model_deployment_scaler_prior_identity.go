@@ -16,6 +16,7 @@ import (
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
 	"gpustack.ai/gpustack/pkg/nodefeature"
 	"gpustack.ai/gpustack/pkg/worker/kvcache/inject"
+	"gpustack.ai/gpustack/pkg/worker/runtimecontrol"
 	"gpustack.ai/gpustack/pkg/worker/scaling/priors"
 )
 
@@ -83,7 +84,8 @@ func modelDeploymentScalerPriorDeclarationOf(
 	// THE REPLICA IS HELD BEFORE THE SHAPE IS READ, because a deployment the
 	// operator cannot manage has no shape a measurement applies to, and the
 	// reader of the shape reports the parallelism it could not read.
-	if len(role.Command) != 0 || role.ReplicaSize > 1 || role.ElasticEP != nil {
+	if _, hasElastic, elasticErr := runtimecontrol.ParseElasticWidth(role); elasticErr != nil || hasElastic ||
+		len(role.Command) != 0 || role.ReplicaSize > 1 {
 		return declaration, modelDeploymentScalerPriorRefusal(role.Name, "Catalog requires a managed single-serving-Pod replica")
 	}
 	topology, err := modelDeploymentScalerPriorTopology(target.Spec.Engine.Name, role)

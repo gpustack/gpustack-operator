@@ -11,8 +11,6 @@ spec:
     name: Qwen/Qwen2.5-72B-Instruct
   roles:
   - acceleratorType: h20-8x
-    elasticEp:
-      width: 2
     extraArgs:
     - --tensor-parallel-size=1
     - --enable-expert-parallel
@@ -23,5 +21,8 @@ spec:
     resources:
       accelerator: "1"
       interface: "1"
+    runtimeControl:
+      parameters:
+        elastic.dataParallelWidth: "2"
     size: 1
 status: {}

@@ -6,12 +6,6 @@ declares external data parallelism without *`spec.router`*, naming the rule `Rou
 the vLLM captured commands and results, follow the
 [External DP Walkthrough](../../walkthroughs/model-deployment/external-dp.md).
 
-The recorded runs apply to two combinations, and they are the two the engine-match rule
-admits: vLLM `v0.30.0` on NVIDIA *H100* behind the `vllm-router` binary of
-`gpustack/llm-router:v0.3.1` under `--policy round_robin`, and SGLang `0.5.22` behind the
-`sglang-gateway` binary of `gpustack/llm-router:v0.3.1`. Other versions must be re-verified
-before they inherit a claim on this page.
-
 ![External DP router and rank endpoints](../../assets/diagrams/model-deployment-external-dp.svg)
 
 <!--
@@ -60,7 +54,7 @@ The serving configurations compare as follows:
 | Configuration | Collective | HTTP ingress | Resize contract |
 |---|---|---|---|
 | Monolithic *TP* | one engine process group, one master | one endpoint (the master) | replica replacement, not in-place |
-| *Elastic EP* | Ray *Internal LB*, one instance | one endpoint (the master) | online *`elasticEp.width`* scale-up |
+| *Elastic EP* | Ray *Internal LB*, one instance | one endpoint (the master) | online `elastic.dataParallelWidth` scale-up |
 | *vLLM External DP* | fixed ranks, `--data-parallel-rank` each | one endpoint **per rank**, Router-balanced | fixed; world-size changes recreate |
 | *SGLang External DP* | one distributed launch over `size` members, *FFN* tensor-parallel across them | one endpoint **per member**, Router-balanced | fixed; replica count changes recreate groups |
 
@@ -397,8 +391,8 @@ Admission enforces these boundaries on managed roles:
 - *Prefill* and *Decode* roles beside *External DP* are not refused, but the combination is unvalidated
   and tracked in [issue #754](https://github.com/gpustack/gpustack-operator/issues/754).
 - *Elastic EP* and *External DP* are mutually exclusive configurations: the engine rejects its native *Elastic EP*
-  mode combined with External or *hybrid load balancing (Hybrid LB)*, and the *`elasticEp`* profile admits exactly one *Server*
-  role with `size: 1` — its *`width`*, not *DP* ranks, sizes the collective.
+  mode combined with External or *hybrid load balancing (Hybrid LB)*, and the *Elastic EP* profile (`elastic.dataParallelWidth`) admits exactly one *Server*
+  role with `size: 1` — its `elastic.dataParallelWidth` parameter, not *DP* ranks, sizes the collective.
 
 *`size`* is a fate-sharing group, not a resize control: changing it replaces whole replicas instead of
 resizing a running *DP* group (see [Rollout behavior](configuration.md#rollout-behavior)). Growing or

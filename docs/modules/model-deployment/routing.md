@@ -218,6 +218,10 @@ in `smg_worker_selection_total{policy="round_robin"}`, 120 in all.
 running deployment can switch as well. The router `Pod` is then replaced, and the new one starts with
 no record of earlier prefixes. Only a flag set at creation has been run.
 
+Managed routers enforce a shared method/path inference allowlist (including `vllm-omni` and `sglang-omni` multimodal routes) whenever any managed accelerated non-*Encode* role exists. `vllm-router` and `sglang-gateway` front the loopback router with an Envoy allowlist sidecar and a `:9091` observer listener.
+
+Editing mutable *`spec.router`* subfields updates only the router `Deployment`; see [Online Runtime Control](runtime-control.md#router-hash-decoupling) for the full list.
+
 **The value is each project's own, and the router checks it, not admission**, so a misspelled one
 stops the router at startup:
 

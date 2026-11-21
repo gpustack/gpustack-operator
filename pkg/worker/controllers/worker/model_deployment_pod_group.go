@@ -339,7 +339,9 @@ func modelDeploymentMembersExternalDP(members []*core.Pod, engine string) (exter
 		// with. A managed replica's parallelism is declared as extra arguments and rendered onto the
 		// command line, so reading the arguments alone would report every replica as leader-served
 		// and expose the followers of an External-DP group.
-		argv := slices.Concat(container.Command, container.Args)
+		argv := stripModelDeploymentRuntimeControlCommandWrappers(
+			slices.Concat(container.Command, container.Args),
+		)
 		reading, err := scanModelDeploymentParallelism(engine, argv,
 			modelDeploymentDeclaredEnv(container.Env))
 		if err != nil {
@@ -354,6 +356,18 @@ func modelDeploymentMembersExternalDP(members []*core.Pod, engine string) (exter
 	}
 
 	return false, !consulted
+}
+
+// stripModelDeploymentRuntimeControlCommandWrappers removes leading shell wrappers used by
+// model-transfer and elastic-serve so scanModelDeploymentParallelism inspects engine flags.
+func stripModelDeploymentRuntimeControlCommandWrappers(argv []string) []string {
+	for len(argv) >= 4 && (argv[0] == "sh" || argv[0] == "/bin/sh") && argv[1] == "-c" {
+		if argv[3] != "sh" && argv[3] != "elastic-serve" {
+			break
+		}
+		argv = argv[4:]
+	}
+	return argv
 }
 
 // modelDeploymentDeclaredEnv reads a container's environment back into the declared form the

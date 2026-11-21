@@ -75,8 +75,8 @@ the owning deep page, then link to it. Add a deep page when no existing page own
 | The measured replica-scaling comparison across algorithms and engines, its latency and throughput, scale-out timing, retirement observations and failure limits | `docs/modules/model-deployment/scaling-benchmark.md` |
 | The synthetic three-algorithm scaler comparison on identical seeds, its measured request outcomes, adjustment-dynamics timelines and true per-token latencies | `docs/modules/model-deployment/scaling-simulation.md` |
 | Configuring and observing `ModelDeploymentScaler`, Shadow and Active modes, algorithm selection, EPD ratios and retirement | `docs/walkthroughs/model-deployment/scaling.md` |
-| How an `elasticEp` profile resizes a serving instance's expert-parallel collective in place without replacing surviving pods | `docs/modules/model-deployment/elastic-ep.md` |
-| The measured comparison of an expert-parallel collective before, during, and after a live `elasticEp.width` resize | `docs/modules/model-deployment/elastic-ep-benchmark.md` |
+| How an Elastic EP (`runtimeControl.parameters["elastic.dataParallelWidth"]`) profile resizes a serving instance's expert-parallel collective in place without replacing surviving pods | `docs/modules/model-deployment/elastic-ep.md` |
+| The measured comparison of an expert-parallel collective before, during, and after a live `elastic.dataParallelWidth` resize | `docs/modules/model-deployment/elastic-ep-benchmark.md` |
 | A recorded Elastic EP expansion, its captured CR output and inference checks | `docs/walkthroughs/model-deployment/elastic-ep.md` |
 | A recorded model prefetch sequence and captured artifact, prefetch and node-store output | `docs/walkthroughs/model-delivery/prefetch.md` |
 | How External DP runs one fixed data-parallel collective with an HTTP endpoint on every rank behind `vllm-router` or `sglang-gateway` | `docs/modules/model-deployment/external-dp.md` |
@@ -90,6 +90,7 @@ the owning deep page, then link to it. Add a deep page when no existing page own
 | The measured comparison of aggregated, prefill/decode and EPD serving: latency and throughput at each concurrency, the hardware and workload behind it, and the conditions under which EPD does not help | `docs/modules/model-deployment/encode-prefill-decode-benchmark.md` |
 | A recorded three-role EPD deployment (`Encode` + `Prefill` + `Decode` + `llm-d-router`), its captured CR/Pod output and multimodal inference check | `docs/walkthroughs/model-deployment/encode-prefill-decode.md` |
 | Which replica a managed router picks, its default routing policy, switching it through `spec.router.extraArgs`, the router's own per-replica series | `docs/modules/model-deployment/routing.md` |
+| `runtimeControl.parameters`, `pause`, `gpustack-engine-sentinel`, reserved `loraAdapters`, router inference allowlist, and router hash decoupling | `docs/modules/model-deployment/runtime-control.md` |
 | What a `ModelDeployment` replica does between its Pod's delete and its engine's exit: the drain hook, its timings, what it does not cover | `docs/modules/model-deployment/shutdown.md` |
 | The lowest engine release a deployment configuration runs on, the Mooncake client its runner image carries, the store line it needs, which transport each engine can use on each path | `docs/modules/model-deployment/engine-versions.md` |
 | A resource key, a request rule, a request example | `docs/modules/devices/requests.md` |

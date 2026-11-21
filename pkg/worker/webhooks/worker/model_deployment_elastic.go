@@ -25,7 +25,7 @@ import (
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
 	"gpustack.ai/gpustack/pkg/kubemeta"
 	workerctrl "gpustack.ai/gpustack/pkg/worker/controllers/worker"
-	"gpustack.ai/gpustack/pkg/worker/elasticprofile"
+	"gpustack.ai/gpustack/pkg/worker/runtimecontrol"
 )
 
 // modelDeploymentElasticOwnedFlags are the engine flags the elastic renderer writes itself.
@@ -61,23 +61,49 @@ var modelDeploymentElasticOwnedEnv = sets.New(
 	"RAY_OVERRIDE_LABELS",
 )
 
+// modelDeploymentElasticWidthPath returns the field path for elastic.dataParallelWidth on rolePath.
+func modelDeploymentElasticWidthPath(rolePath *field.Path) *field.Path {
+	return rolePath.Child("runtimeControl", "parameters").Key(runtimecontrol.ParamElasticDataParallelWidth)
+}
+
 // ValidateModelDeploymentElasticEP validates the elastic-EP profile of a deployment against
 // its previous state. A nil old is a create. The check runs on every create and update; the
 // immutability half only fires when the profile existed before.
 func (r *ModelDeploymentWebhook) ValidateModelDeploymentElasticEP(
-	ctx context.Context, md, old *workercore.ModelDeployment,
+	_ context.Context, md, old *workercore.ModelDeployment,
 ) field.ErrorList {
+	var errs field.ErrorList
+
 	elasticRoles := modelDeploymentElasticRoles(md)
 	if len(elasticRoles) == 0 {
-		if old != nil && elasticRoleOf(old) != nil {
-			return field.ErrorList{field.Forbidden(
-				field.NewPath("spec", "roles").Child("elasticEp"), modelDeploymentIdentityMessage,
-			)}
+		if old != nil {
+			if oldElastic := elasticRoleOf(old); oldElastic != nil {
+				rolePath := field.NewPath("spec", "roles")
+				matched := false
+				for i := range md.Spec.Roles {
+					if md.Spec.Roles[i].Name == oldElastic.Name {
+						rolePath = rolePath.Index(i)
+						matched = true
+						break
+					}
+				}
+				if !matched {
+					for i := range old.Spec.Roles {
+						if old.Spec.Roles[i].Name == oldElastic.Name {
+							rolePath = rolePath.Index(i)
+							break
+						}
+					}
+				}
+				errs = append(errs, field.Forbidden(
+					modelDeploymentElasticWidthPath(rolePath), modelDeploymentIdentityMessage,
+				))
+			}
 		}
-		return nil
+		return errs
 	}
 
-	errs := validateModelDeploymentElasticShape(md, elasticRoles)
+	errs = append(errs, validateModelDeploymentElasticShape(md, elasticRoles)...)
 	if old != nil {
 		errs = append(errs, validateModelDeploymentElasticIdentity(md, old)...)
 	}
@@ -88,7 +114,7 @@ func (r *ModelDeploymentWebhook) ValidateModelDeploymentElasticEP(
 // elasticRoleOf returns the single elastic role of the deployment, or nil.
 func elasticRoleOf(md *workercore.ModelDeployment) *workercore.ModelDeploymentRole {
 	for i := range md.Spec.Roles {
-		if md.Spec.Roles[i].ElasticEP != nil {
+		if runtimecontrol.RoleHasElasticEP(&md.Spec.Roles[i]) {
 			return &md.Spec.Roles[i]
 		}
 	}
@@ -98,7 +124,7 @@ func elasticRoleOf(md *workercore.ModelDeployment) *workercore.ModelDeploymentRo
 func modelDeploymentElasticRoles(md *workercore.ModelDeployment) []*workercore.ModelDeploymentRole {
 	var roles []*workercore.ModelDeploymentRole
 	for i := range md.Spec.Roles {
-		if md.Spec.Roles[i].ElasticEP != nil {
+		if runtimecontrol.RoleHasElasticEP(&md.Spec.Roles[i]) {
 			roles = append(roles, &md.Spec.Roles[i])
 		}
 	}
@@ -134,41 +160,57 @@ func validateModelDeploymentElasticShape(
 	}
 	if len(elasticRoles) > 1 {
 		errs = append(errs, field.Forbidden(
-			rolesPath, "at most one role may carry spec.roles[].elasticEp: the profile is one managed vLLM Server role",
+			rolesPath,
+			fmt.Sprintf(
+				"at most one role may carry runtimeControl.parameters[%q]: the profile is one managed vLLM Server role",
+				runtimecontrol.ParamElasticDataParallelWidth,
+			),
 		))
 	}
 	if len(elasticRoles) > 0 && len(md.Spec.Roles) > 1 {
 		errs = append(errs, field.Forbidden(
-			rolesPath, "spec.roles[].elasticEp is the deployment's ONLY role: one managed vLLM Server role, "+
-				"whose width -- not a second role -- sizes the collective",
+			rolesPath,
+			fmt.Sprintf(
+				"runtimeControl.parameters[%q] is the deployment's ONLY role: one managed vLLM Server role, "+
+					"whose width -- not a second role -- sizes the collective",
+				runtimecontrol.ParamElasticDataParallelWidth,
+			),
 		))
 	}
 
 	for i := range md.Spec.Roles {
 		role := &md.Spec.Roles[i]
-		if role.ElasticEP == nil {
+		if !runtimecontrol.RoleHasElasticEP(role) {
 			continue
 		}
 		rolePath := rolesPath.Index(i)
+		widthPath := modelDeploymentElasticWidthPath(rolePath)
+		rawWidth := role.RuntimeControl.Parameters[runtimecontrol.ParamElasticDataParallelWidth]
 
 		if role.AcceleratorType == "" {
 			errs = append(errs, field.Required(rolePath.Child("acceleratorType"), "the elastic-EP profile requires an acceleratorType"))
 		}
 
-		if role.ElasticEP.Width < elasticprofile.WidthMin || role.ElasticEP.Width > elasticprofile.WidthMax {
-			errs = append(errs, field.Invalid(
-				rolePath.Child("elasticEp", "width"), role.ElasticEP.Width,
-				fmt.Sprintf("total GPU engines including the reserved master must be between %d and %d",
-					elasticprofile.WidthMin, elasticprofile.WidthMax),
-			))
+		width, _, widthErr := runtimecontrol.ParseElasticWidth(role)
+		if widthErr != nil {
+			errs = append(errs, field.Invalid(widthPath, rawWidth, widthErr.Error()))
 		}
+
 		declared, err := workerctrl.ParseModelDeploymentDeclaredParallelism(md.Spec.Engine.Name, role.ExtraArgs, role.Env)
 		if err != nil {
 			errs = append(errs, field.Invalid(rolePath.Child("extraArgs"), role.ExtraArgs, err.Error()))
 		} else {
-			if declared.ElasticEPMaxDataParallel > 0 && int64(role.ElasticEP.Width) > int64(declared.ElasticEPMaxDataParallel) {
-				errs = append(errs, field.Invalid(rolePath.Child("elasticEp", "width"), role.ElasticEP.Width,
-					fmt.Sprintf("must not exceed the startup --elastic-ep-max-dp-size (%d)", declared.ElasticEPMaxDataParallel)))
+			maxDP := int32(declared.ElasticEPMaxDataParallel)
+			if maxDP == 0 {
+				if ceilings := runtimecontrol.ParseExtraArgsBootCeilings(md.Spec.Engine.Name, role.ExtraArgs); ceilings.ElasticMaxDataParallel != nil {
+					maxDP = *ceilings.ElasticMaxDataParallel
+				}
+			}
+			if widthErr == nil && maxDP > 0 && width > maxDP {
+				errs = append(errs, field.Invalid(
+					widthPath, rawWidth,
+					fmt.Sprintf("must not exceed the startup --elastic-ep-max-dp-size (%d)", maxDP),
+				))
 			}
 			if declared.PipelineParallel != 1 || declared.PrefillContextParallel != 1 {
 				errs = append(errs, field.Invalid(rolePath.Child("extraArgs"), role.ExtraArgs,
@@ -290,8 +332,8 @@ func validateModelDeploymentElasticOwnedKeys(
 }
 
 // validateModelDeploymentElasticIdentity enforces the frozen half of the profile: presence,
-// head placement, the role's pool and card shape, and the declared TP and width ceiling are
-// identity; width is the running state. The profile must also stay on the role that carried it.
+// the role's pool and card shape, and the declared TP and width ceiling are identity;
+// elastic.dataParallelWidth is the running state. The profile must also stay on the role that carried it.
 func validateModelDeploymentElasticIdentity(
 	md, old *workercore.ModelDeployment,
 ) field.ErrorList {
@@ -300,29 +342,34 @@ func validateModelDeploymentElasticIdentity(
 	oldElastic := elasticRoleOf(old)
 	newElastic := elasticRoleOf(md)
 	if oldElastic == nil || newElastic == nil {
+		rolePath := field.NewPath("spec", "roles")
+		if newElastic != nil {
+			rolePath = modelDeploymentElasticRolePath(md, newElastic)
+		}
 		errs = append(errs, field.Forbidden(
-			field.NewPath("spec", "roles").Child("elasticEp"), modelDeploymentIdentityMessage,
+			modelDeploymentElasticWidthPath(rolePath), modelDeploymentIdentityMessage,
 		))
 		return errs
 	}
 
+	newRolePath := modelDeploymentElasticRolePath(md, newElastic)
 	oldParallel, oldErr := workerctrl.ParseModelDeploymentDeclaredParallelism(old.Spec.Engine.Name, oldElastic.ExtraArgs, oldElastic.Env)
 	newParallel, newErr := workerctrl.ParseModelDeploymentDeclaredParallelism(md.Spec.Engine.Name, newElastic.ExtraArgs, newElastic.Env)
 	if oldErr != nil || newErr != nil || oldParallel.TensorParallel != newParallel.TensorParallel {
 		errs = append(errs, field.Invalid(
-			modelDeploymentElasticRolePath(md, newElastic).Child("extraArgs"),
+			newRolePath.Child("extraArgs"),
 			newElastic.ExtraArgs, "tensor parallel size is fixed at creation; "+modelDeploymentIdentityMessage,
 		))
 	}
 	if oldErr == nil && newErr == nil && oldParallel.ElasticEPMaxDataParallel != newParallel.ElasticEPMaxDataParallel {
 		errs = append(errs, field.Forbidden(
-			modelDeploymentElasticRolePath(md, newElastic).Child("extraArgs"),
+			newRolePath.Child("extraArgs"),
 			"--elastic-ep-max-dp-size is fixed at creation; "+modelDeploymentIdentityMessage,
 		))
 	}
 	if oldElastic.Name != newElastic.Name {
 		errs = append(errs, field.Forbidden(
-			modelDeploymentElasticRolePath(md, newElastic).Child("name"),
+			newRolePath.Child("name"),
 			"the elastic profile must stay on the role it was created with: "+modelDeploymentIdentityMessage,
 		))
 	}
@@ -331,21 +378,24 @@ func validateModelDeploymentElasticIdentity(
 	// a command stays forbidden through the shape rules.
 	if newElastic.AcceleratorType != oldElastic.AcceleratorType {
 		errs = append(errs, field.Invalid(
-			modelDeploymentElasticRolePath(md, newElastic).Child("acceleratorType"),
+			newRolePath.Child("acceleratorType"),
 			newElastic.AcceleratorType,
 			"the elastic-EP profile pins the pool the members were admitted against: "+modelDeploymentIdentityMessage,
 		))
 	}
 	if !kubemeta.DeepEqual(newElastic.Resources, oldElastic.Resources) {
 		errs = append(errs, field.Invalid(
-			modelDeploymentElasticRolePath(md, newElastic).Child("resources"),
+			newRolePath.Child("resources"),
 			newElastic.Resources,
 			"the elastic-EP profile pins the members' accelerator shape: "+modelDeploymentIdentityMessage,
 		))
 	}
-	if newElastic.ElasticEP.Width < oldElastic.ElasticEP.Width {
+
+	oldWidth, oldOK, oldWidthErr := runtimecontrol.ParseElasticWidth(oldElastic)
+	newWidth, newOK, newWidthErr := runtimecontrol.ParseElasticWidth(newElastic)
+	if oldOK && newOK && oldWidthErr == nil && newWidthErr == nil && newWidth < oldWidth {
 		errs = append(errs, field.Forbidden(
-			modelDeploymentElasticRolePath(md, newElastic).Child("elasticEp", "width"),
+			modelDeploymentElasticWidthPath(newRolePath),
 			"elastic-EP scale-down is not supported in this release; keep width unchanged or increase it",
 		))
 	}

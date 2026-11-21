@@ -1,0 +1,593 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  annotations:
+    kueue.x-k8s.io/pod-group-serving: "true"
+    kueue.x-k8s.io/pod-group-total-count: "1"
+    kueue.x-k8s.io/role-hash: main
+    modeldeployment.gpustack.ai/pod-spec-hash: 734d57a6d488328baa9998ceda4c478b46576e3e6c3fac63590256641d97abfa
+    modeldeployment.gpustack.ai/render-version: "6"
+    note.gpustack.ai/role: main
+    prometheus.io/path: /metrics
+    prometheus.io/port: "8000"
+    prometheus.io/scheme: http
+    prometheus.io/scrape: "true"
+  generateName: qwen-main-
+  labels:
+    app.kubernetes.io/component: main
+    app.kubernetes.io/instance: qwen
+    app.kubernetes.io/name: model-deployment
+    app.kubernetes.io/part-of: gpustack-operator-worker
+    kueue.x-k8s.io/pod-group-name: gpustack-fnv64-782503a2fb4f6cc3
+    kueue.x-k8s.io/queue-name: queue-for-h20-8x
+    modeldeployment.gpustack.ai/member-index: "0"
+    modeldeployment.gpustack.ai/pod-ordinal: "0"
+    modeldeployment.gpustack.ai/role-kind: server
+    resource.gpustack.ai/type: modeldeployments
+  name: qwen-main-0-0
+  namespace: default
+  ownerReferences:
+  - apiVersion: worker.gpustack.ai/v1alpha1
+    blockOwnerDeletion: false
+    controller: true
+    kind: ModelDeployment
+    name: qwen
+    uid: md-uid
+spec:
+  automountServiceAccountToken: false
+  containers:
+  - command:
+    - vllm
+    - serve
+    - Qwen/Qwen2.5-72B-Instruct
+    - --max-num-seqs=64
+    - --max-num-batched-tokens=8192
+    - --host
+    - 0.0.0.0
+    - --port
+    - "8000"
+    env:
+    - name: VLLM_CACHE_ROOT
+      value: /var/lib/gpustack/cache
+    - name: HF_HUB_CACHE
+      value: /var/lib/gpustack/cache/hf-hub
+    - name: HF_XET_CACHE
+      value: /var/lib/gpustack/cache/xet
+    - name: PIP_CACHE_DIR
+      value: /var/lib/gpustack/cache/pip
+    - name: TORCH_HOME
+      value: /var/lib/gpustack/cache/torch
+    - name: FLASHINFER_WORKSPACE_BASE
+      value: /var/lib/gpustack/cache/flashinfer
+    - name: TORCHINDUCTOR_CACHE_DIR
+      value: /var/lib/gpustack/cache/inductor
+    - name: TRITON_CACHE_DIR
+      value: /var/lib/gpustack/cache/triton
+    - name: PYTHONPATH
+      value: /var/lib/gpustack/operator/lib/engine-sentinel
+    - name: GPUSTACK_ENGINE_SENTINEL_ENABLE
+      value: "1"
+    - name: GPUSTACK_ENGINE_SENTINEL_ENGINE
+      value: vllm
+    image: vllm/vllm-openai:v0.19.0
+    lifecycle:
+      preStop:
+        exec:
+          command:
+          - python3
+          - -m
+          - gpustack_engine_sentinel.drain
+          - --engine
+          - vLLM
+          - --port
+          - "8000"
+          - --scheme
+          - http
+          - --settle
+          - "5"
+          - --deadline
+          - "25"
+    livenessProbe:
+      failureThreshold: 6
+      httpGet:
+        path: /gpustack/v1/live
+        port: 8000
+        scheme: HTTP
+      periodSeconds: 10
+      timeoutSeconds: 5
+    name: main
+    ports:
+    - containerPort: 8000
+      name: http
+      protocol: TCP
+    readinessProbe:
+      failureThreshold: 3
+      httpGet:
+        path: /gpustack/v1/ready
+        port: 8000
+        scheme: HTTP
+      periodSeconds: 10
+      timeoutSeconds: 5
+    resources:
+      limits:
+        nvidia.com/gpu: "1"
+      requests:
+        nvidia.com/gpu: "1"
+    startupProbe:
+      failureThreshold: 180
+      httpGet:
+        path: /gpustack/v1/live
+        port: 8000
+        scheme: HTTP
+      periodSeconds: 10
+      timeoutSeconds: 5
+    volumeMounts:
+    - mountPath: /var/lib/gpustack/cache
+      name: gpustack-compile-cache
+    - mountPath: /dev/shm
+      name: model-shm
+    - mountPath: /var/lib/gpustack/operator/lib/engine-sentinel
+      name: gpustack-engine-sentinel
+      readOnly: true
+  enableServiceLinks: false
+  restartPolicy: Always
+  runtimeClassName: nvidia
+  terminationGracePeriodSeconds: 30
+  volumes:
+  - hostPath:
+      path: /var/lib/gpustack/cache/nvidia-vllm/m-1a67e1afa7075ef35646bfd3ee97d8de/tp1-pp1-dp1-ep1-cp1_1-f7c2ae1c
+      type: DirectoryOrCreate
+    name: gpustack-compile-cache
+  - emptyDir:
+      medium: Memory
+      sizeLimit: 16Gi
+    name: model-shm
+  - hostPath:
+      path: /var/lib/gpustack/operator/lib/engine-sentinel
+      type: DirectoryOrCreate
+    name: gpustack-engine-sentinel
+status: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  annotations:
+    note.gpustack.ai/role: main
+  labels:
+    app.kubernetes.io/component: main
+    app.kubernetes.io/instance: qwen
+    app.kubernetes.io/name: model-deployment
+    resource.gpustack.ai/type: modeldeployments
+  name: qwen
+  namespace: default
+  ownerReferences:
+  - apiVersion: worker.gpustack.ai/v1alpha1
+    blockOwnerDeletion: false
+    controller: true
+    kind: ModelDeployment
+    name: qwen
+    uid: md-uid
+spec:
+  ports:
+  - name: http
+    port: 8000
+    protocol: TCP
+    targetPort: 8000
+  selector:
+    app.kubernetes.io/component: main
+    app.kubernetes.io/instance: qwen
+    app.kubernetes.io/name: model-deployment
+    modeldeployment.gpustack.ai/endpoint-eligible: "true"
+  type: ClusterIP
+status:
+  loadBalancer: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  annotations:
+    note.gpustack.ai/role: main
+  labels:
+    app.kubernetes.io/component: main
+    app.kubernetes.io/instance: qwen
+    app.kubernetes.io/name: model-deployment
+    resource.gpustack.ai/type: modeldeployments
+  name: qwen-main
+  namespace: default
+  ownerReferences:
+  - apiVersion: worker.gpustack.ai/v1alpha1
+    blockOwnerDeletion: false
+    controller: true
+    kind: ModelDeployment
+    name: qwen
+    uid: md-uid
+spec:
+  ports:
+  - name: http
+    port: 8000
+    protocol: TCP
+    targetPort: 8000
+  selector:
+    app.kubernetes.io/component: main
+    app.kubernetes.io/instance: qwen
+    app.kubernetes.io/name: model-deployment
+    modeldeployment.gpustack.ai/endpoint-eligible: "true"
+  type: ClusterIP
+status:
+  loadBalancer: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  annotations:
+    note.gpustack.ai/router: vllm-router
+  labels:
+    app.kubernetes.io/instance: qwen
+    app.kubernetes.io/name: model-deployment
+    modeldeployment.gpustack.ai/router: vllm-router
+    resource.gpustack.ai/type: modeldeployments
+  name: qwen-router
+  namespace: default
+  ownerReferences:
+  - apiVersion: worker.gpustack.ai/v1alpha1
+    blockOwnerDeletion: false
+    controller: true
+    kind: ModelDeployment
+    name: qwen
+    uid: md-uid
+spec:
+  ports:
+  - name: http
+    port: 8000
+    targetPort: 8000
+  selector:
+    app.kubernetes.io/instance: qwen
+    app.kubernetes.io/name: model-deployment
+    modeldeployment.gpustack.ai/router: vllm-router
+status:
+  loadBalancer: {}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  annotations:
+    note.gpustack.ai/router: vllm-router
+  labels:
+    app.kubernetes.io/instance: qwen
+    app.kubernetes.io/name: model-deployment
+    modeldeployment.gpustack.ai/router: vllm-router
+    resource.gpustack.ai/type: modeldeployments
+  name: qwen-router
+  namespace: default
+  ownerReferences:
+  - apiVersion: worker.gpustack.ai/v1alpha1
+    blockOwnerDeletion: false
+    controller: true
+    kind: ModelDeployment
+    name: qwen
+    uid: md-uid
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/instance: qwen
+      app.kubernetes.io/name: model-deployment
+      modeldeployment.gpustack.ai/router: vllm-router
+  strategy: {}
+  template:
+    metadata:
+      annotations:
+        modeldeployment.gpustack.ai/router-config-hash: eaffc83a25eda1f82adbe6a69ac6d008b8e0881ad9dd2f39ea5ba96e0353e86d
+        prometheus.io/path: /metrics
+        prometheus.io/port: "9090"
+        prometheus.io/scheme: http
+        prometheus.io/scrape: "true"
+      labels:
+        app.kubernetes.io/instance: qwen
+        app.kubernetes.io/name: model-deployment
+        modeldeployment.gpustack.ai/router: vllm-router
+    spec:
+      containers:
+      - args:
+        - -c
+        - /config/envoy.yaml
+        image: gpustack/mirrored-envoy:distroless-v1.33.2
+        imagePullPolicy: IfNotPresent
+        name: envoy
+        ports:
+        - containerPort: 8000
+          name: http
+        readinessProbe:
+          tcpSocket:
+            port: 8000
+        resources: {}
+        volumeMounts:
+        - mountPath: /config
+          name: config
+          readOnly: true
+      - args:
+        - --host=127.0.0.1
+        - --port=8001
+        - --prometheus-host=0.0.0.0
+        - --prometheus-port=9090
+        - --kv-connector=mooncake
+        - --service-discovery
+        - --service-discovery-namespace=default
+        - --service-discovery-port=8000
+        - --selector
+        - app.kubernetes.io/instance=qwen
+        - app.kubernetes.io/name=model-deployment
+        - modeldeployment.gpustack.ai/endpoint-eligible=true
+        - modeldeployment.gpustack.ai/member-index=0
+        command:
+        - vllm-router
+        image: gpustack/llm-router:v0.5.0
+        imagePullPolicy: IfNotPresent
+        name: router
+        ports:
+        - containerPort: 8001
+          name: http-upstream
+        - containerPort: 9090
+          name: metrics
+        readinessProbe:
+          httpGet:
+            path: /observer/endpoints
+            port: 9091
+        resources: {}
+      serviceAccountName: qwen-router
+      volumes:
+      - configMap:
+          name: qwen-router
+        name: config
+status: {}
+---
+apiVersion: v1
+data:
+  envoy.yaml: |
+    static_resources:
+      listeners:
+      - name: http
+        address:
+          socket_address: {address: 0.0.0.0, port_value: 8000}
+        filter_chains:
+        - filters:
+          - name: envoy.filters.network.http_connection_manager
+            typed_config:
+              "@type": type.googleapis.com/envoy.extensions.filters.network.http_connection_manager.v3.HttpConnectionManager
+              stat_prefix: router
+              normalize_path: true
+              merge_slashes: true
+              path_with_escaped_slashes_action: REJECT_REQUEST
+              route_config:
+                name: router
+                virtual_hosts:
+                - name: model
+                  domains: ["*"]
+                  routes:
+                  - match:
+                      path: "/v1/chat/completions"
+                      headers:
+                      - name: ":method"
+                        string_match: {exact: "POST"}
+                    route: {cluster: router_upstream, timeout: 86400s}
+                  - match:
+                      path: "/v1/completions"
+                      headers:
+                      - name: ":method"
+                        string_match: {exact: "POST"}
+                    route: {cluster: router_upstream, timeout: 86400s}
+                  - match:
+                      path: "/v1/embeddings"
+                      headers:
+                      - name: ":method"
+                        string_match: {exact: "POST"}
+                    route: {cluster: router_upstream, timeout: 86400s}
+                  - match:
+                      path: "/v1/responses"
+                      headers:
+                      - name: ":method"
+                        string_match: {exact: "POST"}
+                    route: {cluster: router_upstream, timeout: 86400s}
+                  - match:
+                      path: "/v1/rerank"
+                      headers:
+                      - name: ":method"
+                        string_match: {exact: "POST"}
+                    route: {cluster: router_upstream, timeout: 86400s}
+                  - match:
+                      path: "/v1/score"
+                      headers:
+                      - name: ":method"
+                        string_match: {exact: "POST"}
+                    route: {cluster: router_upstream, timeout: 86400s}
+                  - match:
+                      path: "/v1/classify"
+                      headers:
+                      - name: ":method"
+                        string_match: {exact: "POST"}
+                    route: {cluster: router_upstream, timeout: 86400s}
+                  - match:
+                      path: "/v1/audio/transcriptions"
+                      headers:
+                      - name: ":method"
+                        string_match: {exact: "POST"}
+                    route: {cluster: router_upstream, timeout: 86400s}
+                  - match:
+                      path: "/v1/messages"
+                      headers:
+                      - name: ":method"
+                        string_match: {exact: "POST"}
+                    route: {cluster: router_upstream, timeout: 86400s}
+                  - match:
+                      path: "/v1/messages/count_tokens"
+                      headers:
+                      - name: ":method"
+                        string_match: {exact: "POST"}
+                    route: {cluster: router_upstream, timeout: 86400s}
+                  - match:
+                      path: "/v1/models"
+                      headers:
+                      - name: ":method"
+                        string_match: {exact: "GET"}
+                    route: {cluster: router_upstream, timeout: 86400s}
+                  - match:
+                      prefix: "/v1/models/"
+                      headers:
+                      - name: ":method"
+                        string_match: {exact: "GET"}
+                    route: {cluster: router_upstream, timeout: 86400s}
+                  - match:
+                      path: "/tokenize"
+                      headers:
+                      - name: ":method"
+                        string_match: {exact: "POST"}
+                    route: {cluster: router_upstream, timeout: 86400s}
+                  - match:
+                      path: "/v1/tokenize"
+                      headers:
+                      - name: ":method"
+                        string_match: {exact: "POST"}
+                    route: {cluster: router_upstream, timeout: 86400s}
+                  - match:
+                      path: "/detokenize"
+                      headers:
+                      - name: ":method"
+                        string_match: {exact: "POST"}
+                    route: {cluster: router_upstream, timeout: 86400s}
+                  - match:
+                      path: "/v1/detokenize"
+                      headers:
+                      - name: ":method"
+                        string_match: {exact: "POST"}
+                    route: {cluster: router_upstream, timeout: 86400s}
+                  - match:
+                      path: "/v1/chat/completions/render"
+                      headers:
+                      - name: ":method"
+                        string_match: {exact: "POST"}
+                    route: {cluster: router_upstream, timeout: 86400s}
+                  - match:
+                      path: "/health"
+                      headers:
+                      - name: ":method"
+                        string_match: {exact: "GET"}
+                    route: {cluster: router_upstream, timeout: 86400s}
+                  - match:
+                      path: "/v1/audio/speech"
+                      headers:
+                      - name: ":method"
+                        string_match: {exact: "POST"}
+                    route: {cluster: router_upstream, timeout: 86400s}
+                  - match:
+                      path: "/v1/images/generations"
+                      headers:
+                      - name: ":method"
+                        string_match: {exact: "POST"}
+                    route: {cluster: router_upstream, timeout: 86400s}
+                  - match:
+                      path: "/v1/images/edits"
+                      headers:
+                      - name: ":method"
+                        string_match: {exact: "POST"}
+                    route: {cluster: router_upstream, timeout: 86400s}
+                  - match:
+                      path: "/v1/videos"
+                      headers:
+                      - name: ":method"
+                        string_match: {exact: "POST"}
+                    route: {cluster: router_upstream, timeout: 86400s}
+                  - match:
+                      prefix: "/v1/videos/"
+                      headers:
+                      - name: ":method"
+                        string_match: {exact: "GET"}
+                    route: {cluster: router_upstream, timeout: 86400s}
+                  - match: {prefix: "/"}
+                    direct_response: {status: 403}
+              # ONE ACCESS LOG, AND IT IS NOT A FIELD. The gap it fills is that nothing is logged at
+              # all, so there is no value a user would choose; what a reader needs is the endpoint the
+              # picker selected beside the outcome, which is the pair no other log on this Pod carries.
+              # The upstream host is that endpoint, and the response flags and code details are what
+              # separate "the model refused" from "the proxy never reached one".
+              access_log:
+              - name: envoy.access_loggers.stdout
+                typed_config:
+                  "@type": type.googleapis.com/envoy.extensions.access_loggers.stream.v3.StdoutAccessLog
+                  log_format:
+                    json_format:
+                      start_time: "%START_TIME%"
+                      method: "%REQ(:METHOD)%"
+                      path: "%REQ(X-ENVOY-ORIGINAL-PATH?:PATH)%"
+                      protocol: "%PROTOCOL%"
+                      response_code: "%RESPONSE_CODE%"
+                      response_flags: "%RESPONSE_FLAGS%"
+                      response_code_details: "%RESPONSE_CODE_DETAILS%"
+                      duration: "%DURATION%"
+                      upstream_host: "%UPSTREAM_HOST%"
+                      request_id: "%REQ(X-REQUEST-ID)%"
+                      bytes_received: "%BYTES_RECEIVED%"
+                      bytes_sent: "%BYTES_SENT%"
+              http_filters:
+              - name: envoy.filters.http.router
+                typed_config:
+                  "@type": type.googleapis.com/envoy.extensions.filters.http.router.v3.Router
+      - name: observer
+        address:
+          socket_address: {address: 0.0.0.0, port_value: 9091}
+        filter_chains:
+        - filters:
+          - name: envoy.filters.network.http_connection_manager
+            typed_config:
+              "@type": type.googleapis.com/envoy.extensions.filters.network.http_connection_manager.v3.HttpConnectionManager
+              stat_prefix: router_observer
+              normalize_path: true
+              merge_slashes: true
+              path_with_escaped_slashes_action: REJECT_REQUEST
+              route_config:
+                name: router_observer
+                virtual_hosts:
+                - name: observer
+                  domains: ["*"]
+                  routes:
+                  - match:
+                      path: "/observer/endpoints"
+                      headers:
+                      - name: ":method"
+                        string_match: {exact: "GET"}
+                    route: {cluster: router_upstream, timeout: 5s}
+                  - match: {prefix: "/"}
+                    direct_response: {status: 403}
+              http_filters:
+              - name: envoy.filters.http.router
+                typed_config:
+                  "@type": type.googleapis.com/envoy.extensions.filters.http.router.v3.Router
+      clusters:
+      - name: router_upstream
+        type: STATIC
+        connect_timeout: 1s
+        lb_policy: ROUND_ROBIN
+        load_assignment:
+          cluster_name: router_upstream
+          endpoints:
+          - lb_endpoints:
+            - endpoint:
+                address:
+                  socket_address: {address: 127.0.0.1, port_value: 8001}
+kind: ConfigMap
+metadata:
+  annotations:
+    note.gpustack.ai/router: vllm-router
+  labels:
+    app.kubernetes.io/instance: qwen
+    app.kubernetes.io/name: model-deployment
+    modeldeployment.gpustack.ai/router: vllm-router
+    resource.gpustack.ai/type: modeldeployments
+  name: qwen-router
+  namespace: default
+  ownerReferences:
+  - apiVersion: worker.gpustack.ai/v1alpha1
+    blockOwnerDeletion: false
+    controller: true
+    kind: ModelDeployment
+    name: qwen
+    uid: md-uid

@@ -112,7 +112,7 @@ func TestRenderModelDeploymentRouterObjects_ExternalDPShapeRendersDPAware(t *tes
 	objects, err := renderModelDeploymentRouterObjects(context.Background(), md, nil, false)
 	require.NoError(t, err)
 
-	assert.Contains(t, objects.Deployment.Spec.Template.Spec.Containers[0].Args, "--dp-aware",
+	assert.Contains(t, routerContainerArgs(objects.Deployment.Spec.Template.Spec.Containers), "--dp-aware",
 		"the recorded shape declares --attn-dp-size 2 and no --dp-size; the attention width is what the gate reads")
 }
 
@@ -865,7 +865,7 @@ func TestRenderModelDeploymentRouterObjects_PrefillDecodeRendersUnchanged(t *tes
 		wantSelector = "app.kubernetes.io/name=model-deployment," +
 			"app.kubernetes.io/instance=qwen,modeldeployment.gpustack.ai/member-index=0," +
 			"!modeldeployment.gpustack.ai/router"
-		wantHash = "b3009d0233730081bcfeb308d7e3900e371ff5b151787cf076d8fe9641f76258"
+		wantHash = "6fce1f080c753d1bc668fb542a4538c9b9603ff2c9626f8fea657a80eb1ccbe3"
 	)
 	// Decided as well as dormant, because a decided condition is the only thing that could move
 	// this shape and the assertion that it does not is the whole claim.
@@ -907,7 +907,9 @@ func TestRenderModelDeploymentRouterObjects_PrefillDecodeRendersUnchanged(t *tes
 				md.Spec.Router.Name = routerName
 			}), nil, false)
 		require.NoError(t, err)
-		assert.Nil(t, objects.ConfigMap, "%s publishes no ConfigMap", routerName)
+		require.NotNil(t, objects.ConfigMap, "%s renders the Envoy allowlist ConfigMap for sentinel-capable roles", routerName)
+		assert.Equal(t, []string{modelDeploymentRouterEnvoyConfigKey}, slices.Collect(maps.Keys(objects.ConfigMap.Data)),
+			"%s publishes only the Envoy allowlist document, never picker discovery files", routerName)
 		narrowed := 0
 		for _, container := range objects.Deployment.Spec.Template.Spec.Containers {
 			for _, arg := range container.Args {
@@ -994,7 +996,7 @@ const (
 	mixedServerCandidateSelector = "app.kubernetes.io/name=model-deployment," +
 		"app.kubernetes.io/instance=qwen,modeldeployment.gpustack.ai/router-candidate=true," +
 		"!modeldeployment.gpustack.ai/router"
-	mixedServerCandidateHash = "9023938cb8e616a0317354e4465b8a9ca4e7e9b3f90da50f365d5eb009b4bc72"
+	mixedServerCandidateHash = "bc2b19fd4e4b9bc9d7f0841ad6f1f19daf6c8045b0d007074594d4f57056c6e3"
 )
 
 func TestRenderModelDeploymentRouterObjects_MixedServerRolesRenderTheCandidateUnion(t *testing.T) {
@@ -1352,8 +1354,8 @@ func TestRenderModelDeploymentRouterObjects_CarriesRuntimeIdentityAndStreamingTr
 		"HttpConnectionManager declares no such field, and a route-level removal would run after ext_proc")
 	assert.Contains(t, envoy, "- remove: x-gateway-destination-endpoint")
 	assert.Less(t,
-		strings.Index(envoy, "envoy.filters.http.header_mutation"),
-		strings.Index(envoy, "envoy.filters.http.ext_proc"),
+		strings.Index(envoy, "- name: envoy.filters.http.header_mutation"),
+		strings.Index(envoy, "- name: envoy.filters.http.ext_proc"),
 		"the client's copy must be dropped before the EPP is consulted, and filters run in order")
 }
 
@@ -1657,13 +1659,14 @@ func TestRenderModelDeploymentRouterObjects_SerializedOutputIsPinnedToThePreSpli
 		// They moved again when a managed protected group began to name the eligible endpoints from
 		// the first enable: every case whose roles are managed carries the term, and the sole
 		// single-member Server, which keeps its existing behavior, does not move at all. They moved
-		// once more when the default router image advanced to v0.4.0, and again at v0.5.0: every
-		// case running the default moved together, and the case naming its own image did not.
-		"a prefill and decode pair": "e9a1cfe0d153ce913fde72331b4d43206d11787e09ebb77705c5cce408503b71",
-		"a sole server role":        "a7b98cd46b83829d0e04d4feb5e7222031339322c8fcf5469a45fd78bf4072ec",
-		"a router declaring its own image, policy, replicas and extra arguments": "79a13fe3afffc0896e22d1b01cff9ad87f7c9be22aa04356838731d18d41645f",
-		"a role whose command the user took over, so it publishes no events":     "50799366ff91b6be2c7be3bb38267d1cdeaef2b44e0b7fc2f2ad8c742eda279b",
-		"an sglang engine, whose metrics contract differs":                       "d893abf69818defa85c53f2869462abb4d9e092c2afd039a6dab5b94408676ee",
+		// once more when the default router image advanced to v0.4.0, again at v0.5.0, again
+		// when Envoy replaced its catch-all route with the explicit inference allowlist, and
+		// again when multimodal inference routes were added to that allowlist.
+		"a prefill and decode pair": "993d24783ee7eb8b2723128b83449e4c245764e421a42a2ffff1790dbd3b3d7b",
+		"a sole server role":        "6027867ad79c60c17a77245152808089706917fad34e828bef4f8ac8b4bfa04e",
+		"a router declaring its own image, policy, replicas and extra arguments": "780a89f271a8de5b00e0111b861ebb176b194eac54143664c0fd868acb9498eb",
+		"a role whose command the user took over, so it publishes no events":     "4a8d95d2f122997bab1dd8e49f5d03fc2868d552835e496438e5c49a38a6c8ca",
+		"an sglang engine, whose metrics contract differs":                       "af51a8dd3dfad66334f2120f280cbd7578c2cfc0c0a5a652578b30199ae101cc",
 	}
 
 	soleServerRole := func() *workercore.ModelDeployment {
@@ -1786,18 +1789,34 @@ func TestRenderModelDeploymentRouterWorkload_ConfigurationBelongsToTheBranchThat
 	assert.Len(t, picker.Containers, 2, "the picker and the proxy that fronts it")
 	assert.Len(t, picker.Volumes, 1, "the mounted document, and nothing else")
 
+	derivedWithProxy := derived
+	derivedWithProxy.RequireAllowlistProxy = true
+	argvWithProxy, err := renderModelDeploymentRouterWorkload(context.Background(),
+		routedModelDeployment(func(md *workercore.ModelDeployment) {
+			md.Spec.Router.Name = workercore.ModelDeploymentRouterVLLM
+		}), derivedWithProxy)
+	require.NoError(t, err)
+	assert.Equal(t, []string{modelDeploymentRouterEnvoyConfigKey}, slices.Collect(maps.Keys(argvWithProxy.Config)),
+		"an argv router fronting sentinel-capable roles carries only the Envoy allowlist config")
+	assert.Len(t, argvWithProxy.Containers, 2, "the Envoy allowlist proxy and the router")
+	assert.Len(t, argvWithProxy.Volumes, 1, "the mounted Envoy document")
+
 	argv, err := renderModelDeploymentRouterWorkload(context.Background(),
 		routedModelDeployment(func(md *workercore.ModelDeployment) {
 			md.Spec.Router.Name = workercore.ModelDeploymentRouterVLLM
+			for i := range md.Spec.Roles {
+				md.Spec.Roles[i].Command = []string{"/bin/custom-serve"}
+			}
 		}), derived)
 	require.NoError(t, err)
-	assert.Empty(t, argv.Config, "a router configured by argv reads no configuration object")
+	assert.Empty(t, argv.Config, "a router configured by argv with no allowlist proxy reads no configuration object")
 	assert.Len(t, argv.Containers, 1, "one process, no proxy")
 	assert.Empty(t, argv.Volumes, "nothing to mount")
 }
 
 // TestRenderModelDeploymentRouterObjects_ArgvRouterRendersNoConfigMap states what the case above
-// implies about the object set: no configuration means no object, rather than an empty one.
+// implies about the object set when no allowlist proxy is needed: no configuration means no object,
+// rather than an empty one.
 //
 // An empty ConfigMap would be indistinguishable from one whose content was dropped, and the Pod
 // would carry a configuration hash taken over nothing -- a value that never moves, on an annotation
@@ -1805,6 +1824,9 @@ func TestRenderModelDeploymentRouterWorkload_ConfigurationBelongsToTheBranchThat
 func TestRenderModelDeploymentRouterObjects_ArgvRouterRendersNoConfigMap(t *testing.T) {
 	md := routedModelDeployment(func(md *workercore.ModelDeployment) {
 		md.Spec.Router.Name = workercore.ModelDeploymentRouterVLLM
+		for i := range md.Spec.Roles {
+			md.Spec.Roles[i].Command = []string{"/bin/custom-serve"}
+		}
 	})
 
 	objects, err := renderModelDeploymentRouterObjects(context.Background(), md, nil, false)
@@ -1861,8 +1883,9 @@ func TestRenderModelDeploymentRouterObjects_TheGatewayAndTheEngineReadOneField(t
 	// for one answer.
 	objects, err := renderModelDeploymentRouterObjects(context.Background(), md, nil, false)
 	require.NoError(t, err)
-	require.Len(t, objects.Deployment.Spec.Template.Spec.Containers, 1)
-	for _, arg := range objects.Deployment.Spec.Template.Spec.Containers[0].Args {
+	routerArgs := routerContainerArgs(objects.Deployment.Spec.Template.Spec.Containers)
+	require.NotEmpty(t, routerArgs)
+	for _, arg := range routerArgs {
 		assert.NotContains(t, arg, model,
 			"the gateway is told no model name; it routes by the id each worker reports")
 	}
@@ -1980,8 +2003,7 @@ func TestRenderModelDeploymentRouterObjects_TimeoutAndThresholdReachTheirOwnRout
 
 		objects, err := renderModelDeploymentRouterObjects(context.Background(), md, nil, false)
 		require.NoError(t, err)
-		require.Len(t, objects.Deployment.Spec.Template.Spec.Containers, 1)
-		assert.Contains(t, objects.Deployment.Spec.Template.Spec.Containers[0].Args,
+		assert.Contains(t, routerContainerArgs(objects.Deployment.Spec.Template.Spec.Containers),
 			"--request-timeout-secs=90")
 	})
 
@@ -1992,7 +2014,7 @@ func TestRenderModelDeploymentRouterObjects_TimeoutAndThresholdReachTheirOwnRout
 
 		objects, err := renderModelDeploymentRouterObjects(context.Background(), md, nil, false)
 		require.NoError(t, err)
-		for _, arg := range objects.Deployment.Spec.Template.Spec.Containers[0].Args {
+		for _, arg := range routerContainerArgs(objects.Deployment.Spec.Template.Spec.Containers) {
 			assert.NotContains(t, arg, "--request-timeout-secs",
 				"absence is what leaves this router on its own default, which differs from the proxy's")
 		}
@@ -2526,7 +2548,7 @@ func TestRenderModelDeploymentRouterObjects_VLLMRouterHandshakeFollowsTheBackend
 				map[string]string{"prefill": nodefeature.ManufacturerNVIDIA, "decode": nodefeature.ManufacturerNVIDIA}, false)
 			require.NoError(t, err)
 
-			args := objects.Deployment.Spec.Template.Spec.Containers[0].Args
+			args := routerContainerArgs(objects.Deployment.Spec.Template.Spec.Containers)
 			assert.Contains(t, args, tc.want)
 			assert.NotContains(t, args, "--kv-connector=mooncake="+tc.want,
 				"the connector argument is one flag, not a value of another")
@@ -2565,6 +2587,677 @@ func TestRenderModelDeploymentRoutingSidecar_VLLMHandshakeFollowsTheBackend(t *t
 			} else {
 				assert.Contains(t, sidecar.Args,
 					fmt.Sprintf("--mooncake-bootstrap-port=%d", inject.VLLMMooncakeBootstrapPort))
+			}
+		})
+	}
+}
+
+type parsedEnvoyBootstrap struct {
+	StaticResources struct {
+		Listeners []struct {
+			Name    string `json:"name"`
+			Address struct {
+				SocketAddress struct {
+					Address   string `json:"address"`
+					PortValue int32  `json:"port_value"`
+				} `json:"socket_address"`
+			} `json:"address"`
+			FilterChains []struct {
+				Filters []struct {
+					Name        string              `json:"name"`
+					TypedConfig parsedEnvoyHCMBlock `json:"typed_config"`
+				} `json:"filters"`
+			} `json:"filter_chains"`
+		} `json:"listeners"`
+		Clusters []struct {
+			Name           string `json:"name"`
+			Type           string `json:"type"`
+			LoadAssignment *struct {
+				ClusterName string `json:"cluster_name"`
+				Endpoints   []struct {
+					LBEndpoints []struct {
+						Endpoint struct {
+							Address struct {
+								SocketAddress struct {
+									Address   string `json:"address"`
+									PortValue int32  `json:"port_value"`
+								} `json:"socket_address"`
+							} `json:"address"`
+						} `json:"endpoint"`
+					} `json:"lb_endpoints"`
+				} `json:"endpoints"`
+			} `json:"load_assignment"`
+		} `json:"clusters"`
+	} `json:"static_resources"`
+}
+
+type parsedEnvoyHCMBlock struct {
+	Type                         string `json:"@type"`
+	StatPrefix                   string `json:"stat_prefix"`
+	NormalizePath                bool   `json:"normalize_path"`
+	MergeSlashes                 bool   `json:"merge_slashes"`
+	PathWithEscapedSlashesAction string `json:"path_with_escaped_slashes_action"`
+	RouteConfig                  struct {
+		Name         string `json:"name"`
+		VirtualHosts []struct {
+			Name    string   `json:"name"`
+			Domains []string `json:"domains"`
+			Routes  []struct {
+				Match struct {
+					Path    string `json:"path"`
+					Prefix  string `json:"prefix"`
+					Headers []struct {
+						Name        string `json:"name"`
+						StringMatch struct {
+							Exact string `json:"exact"`
+						} `json:"string_match"`
+					} `json:"headers"`
+				} `json:"match"`
+				Route *struct {
+					Cluster string `json:"cluster"`
+					Timeout string `json:"timeout"`
+				} `json:"route"`
+				DirectResponse *struct {
+					Status int `json:"status"`
+				} `json:"direct_response"`
+				TypedPerFilterConfig map[string]map[string]any `json:"typed_per_filter_config"`
+			} `json:"routes"`
+		} `json:"virtual_hosts"`
+	} `json:"route_config"`
+	AccessLog []struct {
+		Name string `json:"name"`
+	} `json:"access_log"`
+	HTTPFilters []struct {
+		Name string `json:"name"`
+	} `json:"http_filters"`
+}
+
+type simulatedEnvoyMatch struct {
+	Forwarded bool
+	Status    int
+	Cluster   string
+	Timeout   string
+}
+
+// removeRFC3986DotSegments implements RFC 3986 section 5.2.4 path normalization so route
+// simulation mirrors Envoy normalize_path behavior, including preserving trailing slashes.
+func removeRFC3986DotSegments(input string) string {
+	var output []string
+	trailingSlash := strings.HasSuffix(input, "/") || strings.HasSuffix(input, "/.") || strings.HasSuffix(input, "/..")
+	for _, seg := range strings.Split(input, "/") {
+		switch seg {
+		case "", ".":
+		case "..":
+			if len(output) > 0 {
+				output = output[:len(output)-1]
+			}
+		default:
+			output = append(output, seg)
+		}
+	}
+	if len(output) == 0 {
+		return "/"
+	}
+	res := "/" + strings.Join(output, "/")
+	if trailingSlash && !strings.HasSuffix(res, "/") {
+		res += "/"
+	}
+
+	return res
+}
+
+func simulateEnvoyRoute(t *testing.T, hcm parsedEnvoyHCMBlock, method, rawPath string) simulatedEnvoyMatch {
+	t.Helper()
+
+	pathOnly, _, _ := strings.Cut(rawPath, "?")
+	if hcm.PathWithEscapedSlashesAction == "REJECT_REQUEST" {
+		lower := strings.ToLower(pathOnly)
+		if strings.Contains(lower, "%2f") || strings.Contains(lower, "%5c") {
+			return simulatedEnvoyMatch{Status: 400}
+		}
+	}
+	if hcm.MergeSlashes {
+		for strings.Contains(pathOnly, "//") {
+			pathOnly = strings.ReplaceAll(pathOnly, "//", "/")
+		}
+	}
+	if hcm.NormalizePath {
+		pathOnly = removeRFC3986DotSegments(pathOnly)
+	}
+
+	require.Len(t, hcm.RouteConfig.VirtualHosts, 1)
+	for _, route := range hcm.RouteConfig.VirtualHosts[0].Routes {
+		if route.Match.Path != "" && pathOnly != route.Match.Path {
+			continue
+		}
+		if route.Match.Prefix != "" && !strings.HasPrefix(pathOnly, route.Match.Prefix) {
+			continue
+		}
+		headersMatch := true
+		for _, hdr := range route.Match.Headers {
+			if hdr.Name == ":method" && method != hdr.StringMatch.Exact {
+				headersMatch = false
+				break
+			}
+		}
+		if !headersMatch {
+			continue
+		}
+		if route.Route != nil {
+			return simulatedEnvoyMatch{
+				Forwarded: true,
+				Status:    200,
+				Cluster:   route.Route.Cluster,
+				Timeout:   route.Route.Timeout,
+			}
+		}
+		if route.DirectResponse != nil {
+			return simulatedEnvoyMatch{
+				Forwarded: false,
+				Status:    route.DirectResponse.Status,
+			}
+		}
+	}
+
+	return simulatedEnvoyMatch{Status: 404}
+}
+
+func TestRenderModelDeploymentRouterObjects_InferenceAllowlistAcrossProfiles(t *testing.T) {
+	allowlistedRequests := []struct {
+		method string
+		path   string
+	}{
+		{method: "POST", path: "/v1/chat/completions"},
+		{method: "POST", path: "/v1/completions"},
+		{method: "POST", path: "/v1/embeddings"},
+		{method: "POST", path: "/v1/responses"},
+		{method: "POST", path: "/v1/rerank"},
+		{method: "POST", path: "/v1/score"},
+		{method: "POST", path: "/v1/classify"},
+		{method: "POST", path: "/v1/audio/transcriptions"},
+		{method: "POST", path: "/v1/messages"},
+		{method: "POST", path: "/v1/messages/count_tokens"},
+		{method: "GET", path: "/v1/models"},
+		{method: "GET", path: "/v1/models?limit=10"},
+		{method: "GET", path: "/v1/models/"},
+		{method: "GET", path: "/v1/models/Qwen/Qwen3-8B"},
+		{method: "POST", path: "/tokenize"},
+		{method: "POST", path: "/v1/tokenize"},
+		{method: "POST", path: "/detokenize"},
+		{method: "POST", path: "/v1/detokenize"},
+		{method: "POST", path: "/v1/chat/completions/render"},
+		{method: "GET", path: "/health"},
+		{method: "POST", path: "/v1/audio/speech"},
+		{method: "POST", path: "/v1/images/generations"},
+		{method: "POST", path: "/v1/images/edits"},
+		{method: "POST", path: "/v1/videos"},
+		{method: "GET", path: "/v1/videos/"},
+		{method: "GET", path: "/v1/videos/vid-123"},
+		{method: "GET", path: "/v1/videos/vid-123/content"},
+		{method: "GET", path: "/v1/videos/vid-123?format=mp4"},
+	}
+
+	deniedRequests := []struct {
+		method     string
+		path       string
+		wantStatus int
+	}{
+		{method: "POST", path: "/sleep", wantStatus: 403},
+		{method: "POST", path: "/wake_up", wantStatus: 403},
+		{method: "POST", path: "/release_kv_cache_memory", wantStatus: 403},
+		{method: "GET", path: "/is_sleeping", wantStatus: 403},
+		{method: "POST", path: "/pause", wantStatus: 403},
+		{method: "POST", path: "/resume", wantStatus: 403},
+		{method: "GET", path: "/is_paused", wantStatus: 403},
+		{method: "POST", path: "/abort_requests", wantStatus: 403},
+		{method: "POST", path: "/pause_generation", wantStatus: 403},
+		{method: "POST", path: "/continue_generation", wantStatus: 403},
+		{method: "POST", path: "/release_memory_occupation", wantStatus: 403},
+		{method: "POST", path: "/resume_memory_occupation", wantStatus: 403},
+		{method: "POST", path: "/set_internal_state", wantStatus: 403},
+		{method: "GET", path: "/server_info", wantStatus: 403},
+		{method: "POST", path: "/v1/load_lora_adapter", wantStatus: 403},
+		{method: "POST", path: "/v1/unload_lora_adapter", wantStatus: 403},
+		{method: "POST", path: "/load_lora_adapter", wantStatus: 403},
+		{method: "POST", path: "/unload_lora_adapter", wantStatus: 403},
+		{method: "POST", path: "/scale_elastic_ep", wantStatus: 403},
+		{method: "POST", path: "/is_scaling_elastic_ep", wantStatus: 403},
+		{method: "POST", path: "/gpustack/v1/pause", wantStatus: 403},
+		{method: "GET", path: "/gpustack/v1/runtime_config", wantStatus: 403},
+		{method: "POST", path: "/gpustack/v1/runtime_config", wantStatus: 403},
+		{method: "POST", path: "/gpustack/v1/ack", wantStatus: 403},
+		{method: "GET", path: "/gpustack/v1/ready", wantStatus: 403},
+		{method: "GET", path: "/gpustack/v1/live", wantStatus: 403},
+		{method: "GET", path: "/metrics", wantStatus: 403},
+		{method: "POST", path: "/v1/models", wantStatus: 403},
+		{method: "DELETE", path: "/v1/models/foo", wantStatus: 403},
+		{method: "GET", path: "/v1/chat/completions", wantStatus: 403},
+		{method: "POST", path: "/v1/models/../../sleep", wantStatus: 403},
+		{method: "GET", path: "/v1/models/../../sleep", wantStatus: 403},
+		{method: "GET", path: "/v1/models-other", wantStatus: 403},
+		{method: "POST", path: "/v1/models/..%2F..%2Fsleep", wantStatus: 400},
+		{method: "GET", path: "/v1/audio/speech", wantStatus: 403},
+		{method: "GET", path: "/v1/images/generations", wantStatus: 403},
+		{method: "GET", path: "/v1/images/edits", wantStatus: 403},
+		{method: "GET", path: "/v1/videos", wantStatus: 403},
+		{method: "POST", path: "/v1/videos/123", wantStatus: 403},
+		{method: "DELETE", path: "/v1/videos/123", wantStatus: 403},
+		{method: "GET", path: "/v1/videos-other", wantStatus: 403},
+		{method: "GET", path: "/v1/videos/../../sleep", wantStatus: 403},
+		{method: "POST", path: "/v1/videos/../../sleep", wantStatus: 403},
+		{method: "GET", path: "/v1/videos/..%2F..%2Fsleep", wantStatus: 400},
+	}
+
+	profiles := []struct {
+		name                  string
+		routerName            string
+		engineName            string
+		requireAllowlistProxy bool
+		timeout               *int32
+		wantCluster           string
+		wantTimeout           string
+		wantFilters           []string
+		wantExtProcDisabled   bool
+	}{
+		{
+			name:                "llm-d-router default timeout",
+			routerName:          workercore.ModelDeploymentRouterLLMD,
+			engineName:          workercore.ModelDeploymentEngineVLLM,
+			wantCluster:         modelDeploymentRouterEnvoyOriginalDstCluster,
+			wantTimeout:         "86400s",
+			wantFilters:         []string{"envoy.filters.http.header_mutation", "envoy.filters.http.ext_proc", "envoy.filters.http.router"},
+			wantExtProcDisabled: true,
+		},
+		{
+			name:                  "vllm-router with allowlist sidecar",
+			routerName:            workercore.ModelDeploymentRouterVLLM,
+			engineName:            workercore.ModelDeploymentEngineVLLM,
+			requireAllowlistProxy: true,
+			timeout:               ptr.To(int32(90)),
+			wantCluster:           modelDeploymentRouterEnvoyLoopbackCluster,
+			wantTimeout:           "90s",
+			wantFilters:           []string{"envoy.filters.http.router"},
+		},
+		{
+			name:                  "sglang-gateway with allowlist sidecar",
+			routerName:            workercore.ModelDeploymentRouterSGLang,
+			engineName:            workercore.ModelDeploymentEngineSGLang,
+			requireAllowlistProxy: true,
+			wantCluster:           modelDeploymentRouterEnvoyLoopbackCluster,
+			wantTimeout:           "86400s",
+			wantFilters:           []string{"envoy.filters.http.router"},
+		},
+	}
+
+	for _, profile := range profiles {
+		t.Run(profile.name, func(t *testing.T) {
+			md := routedModelDeployment(func(md *workercore.ModelDeployment) {
+				md.Spec.Router.Name = profile.routerName
+				md.Spec.Router.RequestTimeoutSeconds = profile.timeout
+				md.Spec.Engine.Name = profile.engineName
+			})
+
+			objects, err := renderModelDeploymentRouterObjectsWithProxy(
+				context.Background(), md, nil, false, profile.requireAllowlistProxy,
+			)
+			require.NoError(t, err)
+			require.NotNil(t, objects.ConfigMap)
+
+			rawEnvoy := objects.ConfigMap.Data[modelDeploymentRouterEnvoyConfigKey]
+			require.NotEmpty(t, rawEnvoy)
+			assert.NotContains(t, rawEnvoy, "<")
+			assert.NotContains(t, rawEnvoy, "admin:")
+
+			var parsed parsedEnvoyBootstrap
+			require.NoError(t, yaml.Unmarshal([]byte(rawEnvoy), &parsed))
+			wantListeners := 1
+			if !profile.wantExtProcDisabled {
+				wantListeners = 2
+			}
+			require.Len(t, parsed.StaticResources.Listeners, wantListeners)
+			listener := parsed.StaticResources.Listeners[0]
+			assert.Equal(t, "0.0.0.0", listener.Address.SocketAddress.Address)
+			assert.Equal(t, modelDeploymentRouterHTTPPort, listener.Address.SocketAddress.PortValue)
+
+			require.Len(t, listener.FilterChains, 1)
+			require.Len(t, listener.FilterChains[0].Filters, 1)
+			hcm := listener.FilterChains[0].Filters[0].TypedConfig
+			assert.True(t, hcm.NormalizePath)
+			assert.True(t, hcm.MergeSlashes)
+			assert.Equal(t, "REJECT_REQUEST", hcm.PathWithEscapedSlashesAction)
+			require.Len(t, hcm.AccessLog, 1)
+			assert.Equal(t, "envoy.access_loggers.stdout", hcm.AccessLog[0].Name)
+
+			gotFilters := make([]string, 0, len(hcm.HTTPFilters))
+			for _, f := range hcm.HTTPFilters {
+				gotFilters = append(gotFilters, f.Name)
+			}
+			assert.Equal(t, profile.wantFilters, gotFilters)
+
+			routes := hcm.RouteConfig.VirtualHosts[0].Routes
+			require.NotEmpty(t, routes)
+			lastRoute := routes[len(routes)-1]
+			require.NotNil(t, lastRoute.DirectResponse)
+			assert.Equal(t, 403, lastRoute.DirectResponse.Status)
+			if profile.wantExtProcDisabled {
+				cfg, ok := lastRoute.TypedPerFilterConfig["envoy.filters.http.ext_proc"]
+				require.True(t, ok, "catch-all 403 route must disable ext_proc on llm-d-router")
+				assert.Equal(t, true, cfg["disabled"])
+			} else {
+				assert.Empty(t, lastRoute.TypedPerFilterConfig)
+				require.Len(t, parsed.StaticResources.Clusters, 1)
+				cluster := parsed.StaticResources.Clusters[0]
+				assert.Equal(t, modelDeploymentRouterEnvoyLoopbackCluster, cluster.Name)
+				assert.Equal(t, "STATIC", cluster.Type)
+				addr := cluster.LoadAssignment.Endpoints[0].LBEndpoints[0].Endpoint.Address.SocketAddress
+				assert.Equal(t, modelDeploymentRouterUpstreamLoopbackHost, addr.Address)
+				assert.Equal(t, modelDeploymentRouterUpstreamLoopbackPort, addr.PortValue)
+
+				obsListener := parsed.StaticResources.Listeners[1]
+				assert.Equal(t, "0.0.0.0", obsListener.Address.SocketAddress.Address)
+				assert.Equal(t, modelDeploymentRouterObserverProxyPort, obsListener.Address.SocketAddress.PortValue)
+				obsHCM := obsListener.FilterChains[0].Filters[0].TypedConfig
+				obsAllowed := simulateEnvoyRoute(t, obsHCM, "GET", "/observer/endpoints")
+				assert.True(t, obsAllowed.Forwarded)
+				assert.Equal(t, modelDeploymentRouterEnvoyLoopbackCluster, obsAllowed.Cluster)
+				for _, deniedObs := range []struct {
+					method string
+					path   string
+				}{
+					{method: "POST", path: "/observer/endpoints"},
+					{method: "POST", path: "/add_worker"},
+					{method: "POST", path: "/sleep"},
+					{method: "GET", path: "/v1/models"},
+				} {
+					res := simulateEnvoyRoute(t, obsHCM, deniedObs.method, deniedObs.path)
+					assert.False(t, res.Forwarded)
+					assert.Equal(t, 403, res.Status)
+				}
+			}
+
+			for _, req := range allowlistedRequests {
+				got := simulateEnvoyRoute(t, hcm, req.method, req.path)
+				assert.True(t, got.Forwarded, "expected %s %s to be forwarded", req.method, req.path)
+				assert.Equal(t, profile.wantCluster, got.Cluster, "%s %s cluster", req.method, req.path)
+				assert.Equal(t, profile.wantTimeout, got.Timeout, "%s %s timeout", req.method, req.path)
+			}
+
+			for _, req := range deniedRequests {
+				got := simulateEnvoyRoute(t, hcm, req.method, req.path)
+				assert.False(t, got.Forwarded, "expected %s %s to be blocked", req.method, req.path)
+				assert.Equal(t, req.wantStatus, got.Status, "%s %s status", req.method, req.path)
+			}
+		})
+	}
+}
+
+func TestRenderModelDeploymentRouterObjects_ArgvAllowlistSidecarOptIn(t *testing.T) {
+	testCases := []struct {
+		name          string
+		routerName    string
+		engineName    string
+		binary        string
+		customImage   string
+		pullPolicy    core.PullPolicy
+		timeout       *int32
+		requireProxy  bool
+		wantImage     string
+		wantConfigMap bool
+	}{
+		{
+			name:          "vllm single container without proxy",
+			routerName:    workercore.ModelDeploymentRouterVLLM,
+			engineName:    workercore.ModelDeploymentEngineVLLM,
+			binary:        "vllm-router",
+			requireProxy:  false,
+			wantImage:     "gpustack/llm-router:v0.5.0",
+			wantConfigMap: false,
+		},
+		{
+			name:          "vllm envoy-fronted preserves custom router image",
+			routerName:    workercore.ModelDeploymentRouterVLLM,
+			engineName:    workercore.ModelDeploymentEngineVLLM,
+			binary:        "vllm-router",
+			customImage:   "registry.example/team/vllm-router:custom",
+			pullPolicy:    core.PullAlways,
+			timeout:       ptr.To(int32(120)),
+			requireProxy:  true,
+			wantImage:     "registry.example/team/vllm-router:custom",
+			wantConfigMap: true,
+		},
+		{
+			name:          "sglang single container without proxy",
+			routerName:    workercore.ModelDeploymentRouterSGLang,
+			engineName:    workercore.ModelDeploymentEngineSGLang,
+			binary:        "sgl-model-gateway",
+			requireProxy:  false,
+			wantImage:     "gpustack/llm-router:v0.5.0",
+			wantConfigMap: false,
+		},
+		{
+			name:          "sglang envoy-fronted preserves custom router image",
+			routerName:    workercore.ModelDeploymentRouterSGLang,
+			engineName:    workercore.ModelDeploymentEngineSGLang,
+			binary:        "sgl-model-gateway",
+			customImage:   "registry.example/team/sglang-gateway:custom",
+			pullPolicy:    core.PullIfNotPresent,
+			requireProxy:  true,
+			wantImage:     "registry.example/team/sglang-gateway:custom",
+			wantConfigMap: true,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			md := routedModelDeployment(func(md *workercore.ModelDeployment) {
+				md.Spec.Router.Name = tc.routerName
+				md.Spec.Router.Image = tc.customImage
+				md.Spec.Router.ImagePullPolicy = tc.pullPolicy
+				md.Spec.Router.RequestTimeoutSeconds = tc.timeout
+				md.Spec.Engine.Name = tc.engineName
+			})
+			assert.True(t, modelDeploymentRouterRequiresAllowlistProxy(md))
+
+			objects, err := renderModelDeploymentRouterObjectsWithProxy(
+				context.Background(), md, nil, false, tc.requireProxy,
+			)
+			require.NoError(t, err)
+
+			pod := objects.Deployment.Spec.Template
+			assert.Equal(t, "9090", pod.Annotations["prometheus.io/port"])
+			assert.Equal(t, intstr.FromInt32(modelDeploymentRouterHTTPPort), objects.Service.Spec.Ports[0].TargetPort)
+
+			if !tc.wantConfigMap {
+				assert.Nil(t, objects.ConfigMap)
+				assert.NotContains(t, pod.Annotations, modelDeploymentRouterConfigHash)
+				assert.Empty(t, pod.Spec.Volumes)
+				require.Len(t, pod.Spec.Containers, 1)
+				ctr := pod.Spec.Containers[0]
+				assert.Equal(t, "router", ctr.Name)
+				assert.Equal(t, tc.wantImage, ctr.Image)
+				assert.Equal(t, []string{tc.binary}, ctr.Command)
+				assert.Contains(t, ctr.Args, "--host=0.0.0.0")
+				assert.Contains(t, ctr.Args, "--port=8000")
+				assert.Contains(t, ctr.Args, "--prometheus-host=0.0.0.0")
+				assert.Contains(t, ctr.Args, "--prometheus-port=9090")
+				assert.Equal(t, intstr.FromInt32(8000), ctr.ReadinessProbe.TCPSocket.Port)
+				return
+			}
+
+			require.NotNil(t, objects.ConfigMap)
+			assert.Equal(t, []string{modelDeploymentRouterEnvoyConfigKey},
+				slices.Collect(maps.Keys(objects.ConfigMap.Data)))
+			assert.Equal(t, hashRouterConfig(objects.ConfigMap.Data),
+				pod.Annotations[modelDeploymentRouterConfigHash])
+			require.Len(t, pod.Spec.Volumes, 1)
+			assert.Equal(t, objects.ConfigMap.Name, pod.Spec.Volumes[0].ConfigMap.Name)
+
+			require.Len(t, pod.Spec.Containers, 2)
+			envoyCtr := pod.Spec.Containers[0]
+			assert.Equal(t, "envoy", envoyCtr.Name)
+			assert.Equal(t, "gpustack/mirrored-envoy:distroless-v1.33.2", envoyCtr.Image)
+			assert.Equal(t, tc.pullPolicy, envoyCtr.ImagePullPolicy)
+			assert.Equal(t, []string{"-c", "/config/" + modelDeploymentRouterEnvoyConfigKey}, envoyCtr.Args)
+			assert.Equal(t, []core.ContainerPort{{Name: "http", ContainerPort: 8000}}, envoyCtr.Ports)
+			assert.Equal(t, intstr.FromInt32(8000), envoyCtr.ReadinessProbe.TCPSocket.Port)
+			assert.Equal(t, []core.VolumeMount{{Name: "config", MountPath: "/config", ReadOnly: true}},
+				envoyCtr.VolumeMounts)
+
+			routerCtr := pod.Spec.Containers[1]
+			assert.Equal(t, "router", routerCtr.Name)
+			assert.Equal(t, tc.wantImage, routerCtr.Image)
+			assert.Equal(t, tc.pullPolicy, routerCtr.ImagePullPolicy)
+			assert.Equal(t, []string{tc.binary}, routerCtr.Command)
+			assert.Contains(t, routerCtr.Args, "--host=127.0.0.1")
+			assert.Contains(t, routerCtr.Args, "--port=8001")
+			assert.Contains(t, routerCtr.Args, "--prometheus-host=0.0.0.0")
+			assert.Contains(t, routerCtr.Args, "--prometheus-port=9090")
+			assert.Equal(t, []core.ContainerPort{
+				{Name: "http-upstream", ContainerPort: 8001},
+				{Name: "metrics", ContainerPort: 9090},
+			}, routerCtr.Ports)
+			assert.Nil(t, routerCtr.ReadinessProbe.TCPSocket)
+			require.NotNil(t, routerCtr.ReadinessProbe.HTTPGet)
+			assert.Equal(t, observerURLPath, routerCtr.ReadinessProbe.HTTPGet.Path)
+			assert.Equal(t, intstr.FromInt32(modelDeploymentRouterObserverProxyPort), routerCtr.ReadinessProbe.HTTPGet.Port)
+
+			// Verify config hash moves when Envoy timeout changes.
+			mdChanged := md.DeepCopy()
+			mdChanged.Spec.Router.RequestTimeoutSeconds = ptr.To(int32(300))
+			updated, err := renderModelDeploymentRouterObjectsWithProxy(
+				context.Background(), mdChanged, nil, false, true,
+			)
+			require.NoError(t, err)
+			assert.NotEqual(t,
+				pod.Annotations[modelDeploymentRouterConfigHash],
+				updated.Deployment.Spec.Template.Annotations[modelDeploymentRouterConfigHash],
+			)
+		})
+	}
+}
+
+func TestRenderModelDeploymentRouterObjects_AutoAllowlistSidecarOnRuntimeControl(t *testing.T) {
+	testCases := []struct {
+		name           string
+		routerName     string
+		engineName     string
+		mutateRole     func(*workercore.ModelDeploymentRole)
+		wantAllowlist  bool
+		wantContainers int
+	}{
+		{
+			name:           "vllm-router on managed accelerated role renders Envoy allowlist sidecar by default",
+			routerName:     workercore.ModelDeploymentRouterVLLM,
+			engineName:     workercore.ModelDeploymentEngineVLLM,
+			wantAllowlist:  true,
+			wantContainers: 2,
+		},
+		{
+			name:       "vllm-router with pause and runtimeControl parameters renders Envoy allowlist sidecar",
+			routerName: workercore.ModelDeploymentRouterVLLM,
+			engineName: workercore.ModelDeploymentEngineVLLM,
+			mutateRole: func(role *workercore.ModelDeploymentRole) {
+				role.Pause = true
+				role.RuntimeControl = &workercore.ModelDeploymentRoleRuntimeControl{
+					Parameters: map[string]string{
+						"scheduling.maxActiveRequests": "32",
+					},
+				}
+			},
+			wantAllowlist:  true,
+			wantContainers: 2,
+		},
+		{
+			name:           "sglang-gateway on managed accelerated role renders Envoy allowlist sidecar by default",
+			routerName:     workercore.ModelDeploymentRouterSGLang,
+			engineName:     workercore.ModelDeploymentEngineSGLang,
+			wantAllowlist:  true,
+			wantContainers: 2,
+		},
+		{
+			name:       "CPU-only role without acceleratorType stays single-container",
+			routerName: workercore.ModelDeploymentRouterVLLM,
+			engineName: workercore.ModelDeploymentEngineVLLM,
+			mutateRole: func(role *workercore.ModelDeploymentRole) {
+				role.AcceleratorType = ""
+			},
+			wantAllowlist:  false,
+			wantContainers: 1,
+		},
+		{
+			name:       "Encode role paired with takeover prefill/decode stays single-container",
+			routerName: workercore.ModelDeploymentRouterVLLM,
+			engineName: workercore.ModelDeploymentEngineVLLM,
+			mutateRole: func(role *workercore.ModelDeploymentRole) {
+				role.Name = "encode"
+				role.Kind = workercore.ModelDeploymentRoleKindEncode
+			},
+			wantAllowlist:  false,
+			wantContainers: 1,
+		},
+		{
+			name:       "takeover role with command set stays single-container",
+			routerName: workercore.ModelDeploymentRouterVLLM,
+			engineName: workercore.ModelDeploymentEngineVLLM,
+			mutateRole: func(role *workercore.ModelDeploymentRole) {
+				role.Command = []string{"/bin/custom-serve"}
+			},
+			wantAllowlist:  false,
+			wantContainers: 1,
+		},
+		{
+			name:       "SGLang multi-node Ray role stays single-container",
+			routerName: workercore.ModelDeploymentRouterSGLang,
+			engineName: workercore.ModelDeploymentEngineSGLang,
+			mutateRole: func(role *workercore.ModelDeploymentRole) {
+				role.ReplicaSize = 2
+				role.ExtraArgs = []string{"--distributed-executor-backend=ray", "--nnodes", "2"}
+			},
+			wantAllowlist:  false,
+			wantContainers: 1,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			md := routedModelDeployment(func(md *workercore.ModelDeployment) {
+				md.Spec.Router.Name = tc.routerName
+				md.Spec.Engine.Name = tc.engineName
+				md.Spec.Roles = md.Spec.Roles[:1]
+				md.Spec.Roles[0].Name = "server"
+				md.Spec.Roles[0].Kind = workercore.ModelDeploymentRoleKindServer
+				if tc.mutateRole != nil {
+					tc.mutateRole(&md.Spec.Roles[0])
+				}
+				if md.Spec.Roles[0].Kind == workercore.ModelDeploymentRoleKindEncode {
+					p := *md.Spec.Roles[0].DeepCopy()
+					p.Name = "prefill"
+					p.Kind = workercore.ModelDeploymentRoleKindPrefill
+					p.Command = []string{"/bin/custom-prefill"}
+					d := *md.Spec.Roles[0].DeepCopy()
+					d.Name = "decode"
+					d.Kind = workercore.ModelDeploymentRoleKindDecode
+					d.Command = []string{"/bin/custom-decode"}
+					md.Spec.Roles = append(md.Spec.Roles, p, d)
+				}
+			})
+
+			assert.Equal(t, tc.wantAllowlist, modelDeploymentRouterRequiresAllowlistProxy(md))
+			objects, err := renderModelDeploymentRouterObjects(context.Background(), md, nil, false)
+			require.NoError(t, err)
+			require.Len(t, objects.Deployment.Spec.Template.Spec.Containers, tc.wantContainers)
+			if tc.wantAllowlist {
+				require.NotNil(t, objects.ConfigMap)
+				assert.Equal(t, "envoy", objects.Deployment.Spec.Template.Spec.Containers[0].Name)
+				assert.Equal(t, "router", objects.Deployment.Spec.Template.Spec.Containers[1].Name)
+				assert.Contains(t, objects.Deployment.Spec.Template.Spec.Containers[1].Args, "--host=127.0.0.1")
+				assert.Contains(t, objects.Deployment.Spec.Template.Spec.Containers[1].Args, "--port=8001")
+				assert.Contains(t, objects.Deployment.Spec.Template.Annotations, modelDeploymentRouterConfigHash)
+			} else {
+				assert.Nil(t, objects.ConfigMap)
+				assert.Equal(t, "router", objects.Deployment.Spec.Template.Spec.Containers[0].Name)
+				assert.Contains(t, objects.Deployment.Spec.Template.Spec.Containers[0].Args, "--host=0.0.0.0")
+				assert.Contains(t, objects.Deployment.Spec.Template.Spec.Containers[0].Args, "--port=8000")
 			}
 		})
 	}

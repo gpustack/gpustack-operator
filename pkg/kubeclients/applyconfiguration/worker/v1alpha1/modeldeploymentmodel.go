@@ -39,6 +39,11 @@ type ModelDeploymentModelApplyConfiguration struct {
 	// identity in its store key prefix, so different weights never share KV blocks.
 	//
 	ArtifactRef *v1.LocalObjectReferenceApplyConfiguration `json:"artifactRef,omitempty"`
+	// LoRAAdapters is a reserved entry point for deployment-level LoRA adapters backed by
+	// ModelArtifact. Non-empty adapter lists are rejected until ModelArtifact supports LoRA
+	// weight delivery and digest verification.
+	//
+	LoRAAdapters []ModelDeploymentLoRAAdapterApplyConfiguration `json:"loraAdapters,omitempty"`
 }
 
 // ModelDeploymentModelApplyConfiguration constructs a declarative configuration of the ModelDeploymentModel type for use with
@@ -60,5 +65,18 @@ func (b *ModelDeploymentModelApplyConfiguration) WithName(value string) *ModelDe
 // If called multiple times, the ArtifactRef field is set to the value of the last call.
 func (b *ModelDeploymentModelApplyConfiguration) WithArtifactRef(value *v1.LocalObjectReferenceApplyConfiguration) *ModelDeploymentModelApplyConfiguration {
 	b.ArtifactRef = value
+	return b
+}
+
+// WithLoRAAdapters adds the given value to the LoRAAdapters field in the declarative configuration
+// and returns the receiver, so that objects can be build by chaining "With" function invocations.
+// If called multiple times, values provided by each call will be appended to the LoRAAdapters field.
+func (b *ModelDeploymentModelApplyConfiguration) WithLoRAAdapters(values ...*ModelDeploymentLoRAAdapterApplyConfiguration) *ModelDeploymentModelApplyConfiguration {
+	for i := range values {
+		if values[i] == nil {
+			panic("nil value passed to WithLoRAAdapters")
+		}
+		b.LoRAAdapters = append(b.LoRAAdapters, *values[i])
+	}
 	return b
 }

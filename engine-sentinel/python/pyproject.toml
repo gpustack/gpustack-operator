@@ -1,0 +1,32 @@
+[build-system]
+requires = ["hatchling", "hatch-vcs"]
+build-backend = "hatchling.build"
+
+[project]
+name = "gpustack-engine-sentinel"
+description = "Zero-intrusion host-staged online runtime control, ASGI pause gate, readiness latch, and PreStop drain for vLLM and SGLang."
+readme = "README.md"
+requires-python = ">=3.10"
+authors = [{name = "GPUStack Authors", email = "contact@gpustack.ai"}]
+license = "Apache-2.0"
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+]
+dependencies = []
+dynamic = ["version"]
+
+[project.urls]
+"Homepage" = "https://github.com/gpustack/gpustack"
+"Bug Tracker" = "https://github.com/gpustack/gpustack/issues"
+
+[dependency-groups]
+dev = [
+    "pytest==9.0.3",
+    "ruff>=0.6.0",
+    "hatchling",
+    "hatch-vcs",
+]

@@ -91,7 +91,7 @@ type ModelDeploymentRoleApplyConfiguration struct {
 	// not guaranteed -- a one-replica role stops for the length of its swap. Scaling WITHOUT
 	// replacement is what replicas is for.
 	//
-	// THE ELASTIC-EP PROFILE PINS THIS NUMBER AT ONE; see ElasticEP.
+	// THE ELASTIC-EP PROFILE PINS THIS NUMBER AT ONE; see runtimeControl.
 	//
 	// ABOVE ONE, THE PODS OF AN INSTANCE NEED EACH OTHER'S ADDRESSES, so an instance of several Pods
 	// is rendered with stable names and publishes the first Pod's address, this instance's size and
@@ -213,26 +213,19 @@ type ModelDeploymentRoleApplyConfiguration struct {
 	// one does.
 	//
 	TerminationGracePeriodSeconds *int64 `json:"terminationGracePeriodSeconds,omitempty"`
-	// ElasticEP opts this role into the managed elastic-EP profile: the operator then renders
-	// one dedicated logical Ray cluster for the deployment, with a CPU-only control-plane head
-	// and one whole-GPU TP group per DP engine rank. PRESENCE IS THE PROFILE DISCRIMINANT: a role
-	// without it renders exactly as it did before this field existed, and a profile that is
-	// turned on and off again describes a different deployment. The field's presence is frozen
-	// at creation. Width is editable for scale-up; scale-down is
-	// refused by admission in this release.
-	//
-	// The profile admits exactly one such role per deployment, running the vLLM engine as a
-	// single Server role of one instance of one Pod. Every member -- the reserved API/DP-master
-	// and every Ray-only worker -- takes a complete TP group declared through ExtraArgs.
-	// All GPUs are whole, unsliced and unpartitioned. Admission binds the resource count to TP.
-	// The auxiliary head requests no container resources and never counts toward Width.
-	//
-	ElasticEP *ModelDeploymentRoleElasticEPApplyConfiguration `json:"elasticEp,omitempty"`
 	// StartupTimeoutSeconds is the maximum time in seconds that a role replica's main container
 	// is given to pass its startup probe before kubelet restarts it. Unset defaults to 1800
 	// (30 minutes), which renders a startupProbe with periodSeconds 10 and failureThreshold 180.
 	//
 	StartupTimeoutSeconds *int32 `json:"startupTimeoutSeconds,omitempty"`
+	// Pause withdraws this role from inference traffic, drains in-flight work, and holds scaler
+	// and elastic resizes without rolling Pods.
+	//
+	Pause *bool `json:"pause,omitempty"`
+	// RuntimeControl defines live-reconciled engine control parameters applied without rolling
+	// worker Pods.
+	//
+	RuntimeControl *ModelDeploymentRoleRuntimeControlApplyConfiguration `json:"runtimeControl,omitempty"`
 }
 
 // ModelDeploymentRoleApplyConfiguration constructs a declarative configuration of the ModelDeploymentRole type for use with
@@ -409,18 +402,26 @@ func (b *ModelDeploymentRoleApplyConfiguration) WithTerminationGracePeriodSecond
 	return b
 }
 
-// WithElasticEP sets the ElasticEP field in the declarative configuration to the given value
-// and returns the receiver, so that objects can be built by chaining "With" function invocations.
-// If called multiple times, the ElasticEP field is set to the value of the last call.
-func (b *ModelDeploymentRoleApplyConfiguration) WithElasticEP(value *ModelDeploymentRoleElasticEPApplyConfiguration) *ModelDeploymentRoleApplyConfiguration {
-	b.ElasticEP = value
-	return b
-}
-
 // WithStartupTimeoutSeconds sets the StartupTimeoutSeconds field in the declarative configuration to the given value
 // and returns the receiver, so that objects can be built by chaining "With" function invocations.
 // If called multiple times, the StartupTimeoutSeconds field is set to the value of the last call.
 func (b *ModelDeploymentRoleApplyConfiguration) WithStartupTimeoutSeconds(value int32) *ModelDeploymentRoleApplyConfiguration {
 	b.StartupTimeoutSeconds = &value
+	return b
+}
+
+// WithPause sets the Pause field in the declarative configuration to the given value
+// and returns the receiver, so that objects can be built by chaining "With" function invocations.
+// If called multiple times, the Pause field is set to the value of the last call.
+func (b *ModelDeploymentRoleApplyConfiguration) WithPause(value bool) *ModelDeploymentRoleApplyConfiguration {
+	b.Pause = &value
+	return b
+}
+
+// WithRuntimeControl sets the RuntimeControl field in the declarative configuration to the given value
+// and returns the receiver, so that objects can be built by chaining "With" function invocations.
+// If called multiple times, the RuntimeControl field is set to the value of the last call.
+func (b *ModelDeploymentRoleApplyConfiguration) WithRuntimeControl(value *ModelDeploymentRoleRuntimeControlApplyConfiguration) *ModelDeploymentRoleApplyConfiguration {
+	b.RuntimeControl = value
 	return b
 }

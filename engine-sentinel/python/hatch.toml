@@ -1,0 +1,28 @@
+[version]
+source = "vcs"
+fallback-version = "0.1.0"
+
+[version.raw-options]
+root = "../.."
+# setuptools_scm reads SETUPTOOLS_SCM_PRETEND_VERSION_FOR_GPUSTACK_ENGINE_SENTINEL only when
+# it knows this project's dist name; without it a build outside a .git checkout
+# silently falls back to fallback-version even on a tagged release.
+dist_name = "gpustack-engine-sentinel"
+version_scheme = "guess-next-dev"
+local_scheme = "no-local-version"
+
+[build.targets.sdist]
+exclude = [
+    "/.venv",
+    "/dist",
+]
+
+[build.targets.sdist.force-include]
+"sitecustomize.py" = "sitecustomize.py"
+
+[build.targets.wheel]
+macos-max-compat = true
+packages = ["gpustack_engine_sentinel"]
+
+[build.targets.wheel.force-include]
+"sitecustomize.py" = "sitecustomize.py"

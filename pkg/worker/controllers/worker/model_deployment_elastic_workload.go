@@ -15,10 +15,12 @@
 package worker
 
 import (
+	"fmt"
 	"strconv"
 
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
 	"gpustack.ai/gpustack/pkg/worker/elasticprofile"
+	"gpustack.ai/gpustack/pkg/worker/runtimecontrol"
 )
 
 // ModelDeploymentElasticBootWidthAnnotation records the bootstrap width on the master Pod.
@@ -35,8 +37,11 @@ const ModelDeploymentElasticHeadCommand = "ray start --head --include-dashboard=
 
 // ModelDeploymentElasticRole returns the role that requests the managed elastic profile.
 func ModelDeploymentElasticRole(md *workercore.ModelDeployment) *workercore.ModelDeploymentRole {
+	if md == nil {
+		return nil
+	}
 	for i := range md.Spec.Roles {
-		if md.Spec.Roles[i].ElasticEP != nil {
+		if runtimecontrol.RoleHasElasticEP(&md.Spec.Roles[i]) {
 			return &md.Spec.Roles[i]
 		}
 	}
@@ -58,10 +63,37 @@ func ModelDeploymentElasticBootstrapFromMaster(masterUID, raw string, md *worker
 		}
 		width = parsed
 	} else if role := ModelDeploymentElasticRole(md); role != nil {
-		width = int64(role.ElasticEP.Width)
+		parsed, ok, err := runtimecontrol.ParseElasticWidth(role)
+		if err != nil || !ok {
+			return 0, false
+		}
+		width = int64(parsed)
 	}
 	if width < elasticprofile.WidthMin || width > elasticprofile.WidthMax {
 		return 0, false
 	}
 	return int32(width), true
+}
+
+// modelDeploymentElasticRuntimeControlBlocksResize reports whether the elastic role has a desired
+// or observed paused state that blocks elastic EP resize.
+func modelDeploymentElasticRuntimeControlBlocksResize(md *workercore.ModelDeployment) (bool, string) {
+	role := ModelDeploymentElasticRole(md)
+	if role == nil {
+		return false, ""
+	}
+	if role.Pause {
+		return true, fmt.Sprintf("elastic resize is held while role %q desired pause is true", role.Name)
+	}
+	for i := range md.Status.Roles {
+		if md.Status.Roles[i].Name != role.Name {
+			continue
+		}
+		rc := md.Status.Roles[i].RuntimeControl
+		if rc != nil && rc.Paused {
+			return true, fmt.Sprintf("elastic resize is held while role %q observed paused is true", role.Name)
+		}
+		break
+	}
+	return false, ""
 }

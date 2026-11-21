@@ -9,6 +9,7 @@ accelerators (GPU/NPU/TPU), built on Node Feature Discovery (NFD) + Kueue.
 - `pkg/` — implementation: `worker` (control plane), `devicemanager` (per-node DaemonSet), `nodefeature` (label algebra), `modelmanager` (node cache and CSI), `modeltransfer` (per-node remote-weight source broker), and supporting packages.
 - `api/` — API types: CRDs + aggregated extension APIs.
 - `model-transfer/` — shared transfer contracts and portable Python `gpustack_model_transfer` package.
+- `engine-sentinel/` — zero-intrusion pure-Python `gpustack_engine_sentinel` package staged read-only for online runtime control, probes, pause, and PreStop drain.
 - `binding/` — generated CGO bindings to vendor GPU runtime/management libraries.
 - `csrc/` — hand-written C sources for the vendor preload libraries injected into sliced workload containers (`thead/ppu-slicing-shim`, `amd/rocm-slicing-shim`).
 - `gen/` — code generators (`api`, `binding`).
@@ -75,7 +76,7 @@ when needed. `hack/check/hook-dispatch.sh` tests its routing:
 
 - Markdown → `make lint docs`
 - the chart → `make lint chart`
-- Python under `model-transfer/python/` → `make lint python` (`uv run ruff check` + `uv run ruff format --check`)
+- Python under `model-transfer/python/` or `engine-sentinel/python/` → `make lint python` (`uv run ruff check` + `uv run ruff format --check`)
 - shell under `.agents/skills/` and nothing else non-markdown → `make lint agents-shell`, the
   `.agents` shell gate plus the symbol check, the two steps that read such files
 - every other source, Go and shell included → `make lint`

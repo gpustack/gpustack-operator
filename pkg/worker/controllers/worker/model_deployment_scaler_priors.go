@@ -19,6 +19,7 @@ import (
 	ctrlcli "sigs.k8s.io/controller-runtime/pkg/client"
 
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
+	"gpustack.ai/gpustack/pkg/worker/runtimecontrol"
 	"gpustack.ai/gpustack/pkg/worker/scaling/priors"
 )
 
@@ -535,7 +536,8 @@ func modelDeploymentScalerValidateEncodeRole(
 	defer func() {
 		err = modelDeploymentScalerRedactPriorRefusal(err, role, nil)
 	}()
-	if len(role.Command) != 0 || role.ReplicaSize > 1 || role.ElasticEP != nil {
+	if _, hasElastic, elasticErr := runtimecontrol.ParseElasticWidth(role); elasticErr != nil || hasElastic ||
+		len(role.Command) != 0 || role.ReplicaSize > 1 {
 		return modelDeploymentScalerPriorRefusal(role.Name, "Catalog requires a managed single-serving-Pod replica")
 	}
 	manufacturer, family := "", ""

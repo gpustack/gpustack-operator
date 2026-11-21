@@ -119,6 +119,11 @@ type Input struct {
 	// and does not restart the router. Nil on a deployment with no Encode role.
 	EncoderURLs []string
 
+	// ListenHost is the address the router binds its own API listener to. Empty defaults to
+	// 0.0.0.0; metrics remain bound to 0.0.0.0 so cluster scraping stays reachable when the API
+	// listener is restricted to loopback behind a sidecar proxy.
+	ListenHost string
+
 	// ListenPort is the port the router serves its own API on, which is what the Service in front
 	// of it targets.
 	ListenPort int32

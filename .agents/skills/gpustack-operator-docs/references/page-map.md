@@ -342,7 +342,7 @@ guarantee, and a row the run did not exercise stays unverified wherever it is al
 
 ## `docs/modules/model-deployment/elastic-ep.md`
 
-**Owns** — the `elasticEp` profile contract: how an expert-parallel collective resizes its data-parallel
+**Owns** — the Elastic EP (`runtimeControl.parameters["elastic.dataParallelWidth"]`) profile contract: how an expert-parallel collective resizes its data-parallel
 width in place, the master/worker Ray topology, status conditions during resize, and when a spec change
 falls back to a rolling replacement.
 
@@ -355,7 +355,7 @@ measured pre/during/post-resize latency and throughput tables (`elastic-ep-bench
 (`width=4`) performance of an expert-parallel collective, including resize phase durations, surviving
 pod stability, and the interconnect conditions under which widening EP helps or hurts.
 
-**Never** — the `elasticEp` field contract (`elastic-ep.md` owns that).
+**Never** — the `elastic.dataParallelWidth` field contract (`elastic-ep.md` owns that).
 
 ## `docs/modules/model-deployment/external-dp.md`
 

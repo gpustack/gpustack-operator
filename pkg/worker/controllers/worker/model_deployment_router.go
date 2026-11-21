@@ -29,20 +29,24 @@ import (
 )
 
 const (
-	modelDeploymentRouterConfigKey            = "epp.yaml"
-	modelDeploymentRouterEnvoyConfigKey       = "envoy.yaml"
-	modelDeploymentRouterSelectorKey          = "endpoint-selector"
-	modelDeploymentRouterTargetPortsKey       = "endpoint-target-ports"
-	modelDeploymentRouterExtraArgsKey         = "extra-args.json"
-	modelDeploymentRouterConfigHash           = "modeldeployment.gpustack.ai/router-config-hash"
-	modelDeploymentRouterLabelKey             = "modeldeployment.gpustack.ai/router"
-	modelDeploymentRouterHTTPPort       int32 = 8000
-	modelDeploymentRouterEPPPort        int32 = 9002
+	modelDeploymentRouterConfigKey                  = "epp.yaml"
+	modelDeploymentRouterEnvoyConfigKey             = "envoy.yaml"
+	modelDeploymentRouterSelectorKey                = "endpoint-selector"
+	modelDeploymentRouterTargetPortsKey             = "endpoint-target-ports"
+	modelDeploymentRouterExtraArgsKey               = "extra-args.json"
+	modelDeploymentRouterConfigHash                 = "modeldeployment.gpustack.ai/router-config-hash"
+	modelDeploymentRouterLabelKey                   = "modeldeployment.gpustack.ai/router"
+	modelDeploymentRouterHTTPPort             int32 = 8000
+	modelDeploymentRouterUpstreamLoopbackHost       = "127.0.0.1"
+	modelDeploymentRouterUpstreamLoopbackPort int32 = 8001
+	modelDeploymentRouterEPPPort              int32 = 9002
 	// modelDeploymentRouterMetricsPort is where every router serves Prometheus metrics, so that one
 	// scrape configuration reaches all of them. The llm-d picker listens here by default; the
 	// routers configured by argv are told to, because their own default is elsewhere.
-	modelDeploymentRouterMetricsPort  int32 = 9090
-	modelDeploymentResourceNoteRouter       = "router"
+	modelDeploymentRouterMetricsPort        int32 = 9090
+	modelDeploymentRouterObserverProxyPort  int32 = 9091
+	modelDeploymentRouterEnvoyContainerName       = "envoy"
+	modelDeploymentResourceNoteRouter             = "router"
 )
 
 // ModelDeploymentRouterObjects carries the complete namespaced object set one managed router needs
@@ -103,9 +107,192 @@ func modelDeploymentVLLMRouterKVConnector(md *workercore.ModelDeployment, manufa
 	return "mooncake"
 }
 
+// modelDeploymentRouterRequiresAllowlistProxy reports whether argv-configured routers
+// (vllm-router and sglang-gateway) require an Envoy inference-allowlist sidecar in front of
+// their API listener.
+func modelDeploymentRouterRequiresAllowlistProxy(md *workercore.ModelDeployment) bool {
+	if md == nil {
+		return false
+	}
+	for i := range md.Spec.Roles {
+		if ModelDeploymentRoleSupportsEngineSentinel(md, &md.Spec.Roles[i]) {
+			return true
+		}
+	}
+	return false
+}
+
+// modelDeploymentRouterIsolationReady reports whether a deployment's managed router has converged
+// onto the allowlist-enforcing revision before worker Pods activate runtime-control routes.
+func modelDeploymentRouterIsolationReady(
+	ctx context.Context,
+	reader ctrlcli.Reader,
+	md *workercore.ModelDeployment,
+	routerObjects ModelDeploymentRouterObjects,
+) (bool, string, error) {
+	if md == nil || md.Spec.Router == nil || !modelDeploymentRouterRequiresAllowlistProxy(md) {
+		return true, "", nil
+	}
+	if routerObjects.Deployment == nil {
+		return false, "router deployment template is not ready", nil
+	}
+	wantHash := routerObjects.Deployment.Spec.Template.Annotations[modelDeploymentRouterConfigHash]
+	if wantHash == "" {
+		return false, "router allowlist configuration hash is empty", nil
+	}
+
+	if routerObjects.ConfigMap != nil {
+		cm := new(core.ConfigMap)
+		if cmErr := reader.Get(ctx, ctrlcli.ObjectKey{
+			Namespace: md.Namespace,
+			Name:      routerObjects.ConfigMap.Name,
+		}, cm); cmErr != nil {
+			if apierrors.IsNotFound(cmErr) {
+				return false, fmt.Sprintf("waiting for router configmap %q to be created", routerObjects.ConfigMap.Name), nil
+			}
+			return false, "", cmErr
+		}
+		if !modelDeploymentOwns(cm, md) {
+			return false, "", fmt.Errorf("configmap %s/%s is not owned by this deployment", cm.Namespace, cm.Name)
+		}
+		if hashRouterConfig(cm.Data) != wantHash {
+			return false, fmt.Sprintf("waiting for router configmap %q to adopt allowlist config", cm.Name), nil
+		}
+	}
+
+	dep := new(app.Deployment)
+	err := reader.Get(ctx, ctrlcli.ObjectKey{
+		Namespace: md.Namespace,
+		Name:      routerObjects.Deployment.Name,
+	}, dep)
+	if err != nil {
+		if apierrors.IsNotFound(err) {
+			return false, fmt.Sprintf("waiting for router deployment %q to be created", routerObjects.Deployment.Name), nil
+		}
+		return false, "", err
+	}
+	if !modelDeploymentOwns(dep, md) {
+		return false, "", fmt.Errorf("router deployment %s/%s is not owned by this deployment", dep.Namespace, dep.Name)
+	}
+	if dep.Spec.Template.Annotations[modelDeploymentRouterConfigHash] != wantHash {
+		return false, fmt.Sprintf("waiting for router deployment %q to adopt allowlist config", dep.Name), nil
+	}
+	hasEnvoy := false
+	for i := range dep.Spec.Template.Spec.Containers {
+		if dep.Spec.Template.Spec.Containers[i].Name == modelDeploymentRouterEnvoyContainerName {
+			hasEnvoy = true
+			break
+		}
+	}
+	if !hasEnvoy {
+		return false, fmt.Sprintf("waiting for router deployment %q to include envoy sidecar", dep.Name), nil
+	}
+
+	desired := int32(1)
+	if dep.Spec.Replicas != nil {
+		desired = *dep.Spec.Replicas
+	}
+	if desired <= 0 {
+		return false, fmt.Sprintf("router deployment %q has zero desired replicas", dep.Name), nil
+	}
+	if dep.Status.ReadyReplicas <= 0 {
+		return false, fmt.Sprintf(
+			"waiting for router deployment %q rollout (observedGeneration=%d/%d, replicas=%d, updated=%d/%d, ready=%d/%d)",
+			dep.Name,
+			dep.Status.ObservedGeneration,
+			dep.Generation,
+			dep.Status.Replicas,
+			dep.Status.UpdatedReplicas,
+			desired,
+			dep.Status.ReadyReplicas,
+			desired,
+		), nil
+	}
+	// Verify that every non-terminated router Pod (including terminating legacy Pods) enforces the
+	// Envoy sidecar with the desired router config hash before trusting Deployment status counts.
+	if dep.Spec.Selector == nil || len(dep.Spec.Selector.MatchLabels) == 0 {
+		return false, fmt.Sprintf("router deployment %q has empty selector", dep.Name), nil
+	}
+	var routerPods core.PodList
+	listOpts := []ctrlcli.ListOption{
+		ctrlcli.InNamespace(md.Namespace),
+		ctrlcli.MatchingLabels(dep.Spec.Selector.MatchLabels),
+	}
+	if listErr := reader.List(ctx, &routerPods, listOpts...); listErr != nil {
+		return false, "", listErr
+	}
+	liveRouterPods := 0
+	readyEnvoyPods := 0
+	allEnforceEnvoy := true
+	for i := range routerPods.Items {
+		p := &routerPods.Items[i]
+		if p.Status.Phase == core.PodSucceeded || p.Status.Phase == core.PodFailed {
+			continue
+		}
+		liveRouterPods++
+		podHasEnvoy := false
+		for j := range p.Spec.Containers {
+			if p.Spec.Containers[j].Name == modelDeploymentRouterEnvoyContainerName {
+				podHasEnvoy = true
+				break
+			}
+		}
+		if !podHasEnvoy || p.Annotations[modelDeploymentRouterConfigHash] != wantHash {
+			allEnforceEnvoy = false
+			break
+		}
+		if p.DeletionTimestamp == nil && podIsReady(p) {
+			readyEnvoyPods++
+		}
+	}
+	if liveRouterPods > 0 {
+		if allEnforceEnvoy && readyEnvoyPods > 0 {
+			return true, "", nil
+		}
+		return false, fmt.Sprintf(
+			"waiting for router deployment %q rollout (observedGeneration=%d/%d, replicas=%d, updated=%d/%d, ready=%d/%d)",
+			dep.Name,
+			dep.Status.ObservedGeneration,
+			dep.Generation,
+			dep.Status.Replicas,
+			dep.Status.UpdatedReplicas,
+			desired,
+			dep.Status.ReadyReplicas,
+			desired,
+		), nil
+	}
+	// When no router Pod objects exist (for example in unit tests driving Deployment status
+	// directly), fall back to Deployment status counts once every replica matches the latest revision.
+	if dep.Status.ObservedGeneration == dep.Generation &&
+		dep.Status.Replicas > 0 &&
+		dep.Status.UpdatedReplicas == dep.Status.Replicas {
+		return true, "", nil
+	}
+	return false, fmt.Sprintf(
+		"waiting for router deployment %q rollout (observedGeneration=%d/%d, replicas=%d, updated=%d/%d, ready=%d/%d)",
+		dep.Name,
+		dep.Status.ObservedGeneration,
+		dep.Generation,
+		dep.Status.Replicas,
+		dep.Status.UpdatedReplicas,
+		desired,
+		dep.Status.ReadyReplicas,
+		desired,
+	), nil
+}
+
 func renderModelDeploymentRouterObjects(
 	ctx context.Context, md *workercore.ModelDeployment, manufacturers map[string]string,
 	retainedEligibility bool,
+) (ModelDeploymentRouterObjects, error) {
+	return renderModelDeploymentRouterObjectsWithProxy(
+		ctx, md, manufacturers, retainedEligibility, modelDeploymentRouterRequiresAllowlistProxy(md),
+	)
+}
+
+func renderModelDeploymentRouterObjectsWithProxy(
+	ctx context.Context, md *workercore.ModelDeployment, manufacturers map[string]string,
+	retainedEligibility, requireAllowlistProxy bool,
 ) (ModelDeploymentRouterObjects, error) {
 	name := md.Name + "-router"
 	labels := map[string]string{
@@ -299,9 +486,12 @@ func renderModelDeploymentRouterObjects(
 		// discovered, so the index has nothing left to say.
 		delete(endpointLabels, modelDeploymentMemberIndexLabel)
 		markerBacked = true
-	case endpointActivatable && !stageFiltered &&
+	case (endpointActivatable && !stageFiltered &&
 		(modelDeploymentEligibilityDecided(md) || retainedEligibility ||
-			(everyActivatable && modelDeploymentRouterProtectedRole(md))):
+			(everyActivatable && (modelDeploymentRouterProtectedRole(md) ||
+				modelDeploymentAnyRoleDeclaresPauseOrRuntimeControl(md) ||
+				modelDeploymentAnyRoleHasObservedRuntimeControl(md))))) ||
+		(unjudgeable == 0 && modelDeploymentAnyRolePaused(md)):
 		endpointLabels[modelDeploymentLabelKeyEndpointEligible] = modelDeploymentEndpointEligibleValue
 		for i := range md.Spec.Roles {
 			if modelDeploymentRoleExternalDP(md, &md.Spec.Roles[i]) {
@@ -347,13 +537,22 @@ func renderModelDeploymentRouterObjects(
 		}
 	}
 	endpointSelector := strings.Join(endpointSelectorTerms, ",")
+	listenHost := ""
+	listenPort := modelDeploymentRouterHTTPPort
+	if requireAllowlistProxy &&
+		(md.Spec.Router.Name == workercore.ModelDeploymentRouterVLLM ||
+			md.Spec.Router.Name == workercore.ModelDeploymentRouterSGLang) {
+		listenHost = modelDeploymentRouterUpstreamLoopbackHost
+		listenPort = modelDeploymentRouterUpstreamLoopbackPort
+	}
 	routerInput := router.Input{
 		Roles: roles, Metrics: metrics, ModelName: md.Spec.Model.Name,
 		TokenizerEndpoint: modelDeploymentRoleEndpoint(md, modelDeploymentTokenizerRole(md)),
 		Namespace:         md.Namespace, EndpointSelector: endpointSelector,
 		EndpointLabels:          endpointLabels,
 		EncoderURLs:             encoderURLs,
-		ListenPort:              modelDeploymentRouterHTTPPort,
+		ListenHost:              listenHost,
+		ListenPort:              listenPort,
 		MetricsPort:             modelDeploymentRouterMetricsPort,
 		DiscoveryPort:           ports[0],
 		RequestTimeoutSeconds:   md.Spec.Router.RequestTimeoutSeconds,
@@ -411,11 +610,12 @@ func renderModelDeploymentRouterObjects(
 		return ModelDeploymentRouterObjects{}, fmt.Errorf("render router extra arguments: %w", err)
 	}
 	workload, err := renderModelDeploymentRouterWorkload(ctx, md, modelDeploymentRouterDerived{
-		Name:             name,
-		Rendered:         rendered,
-		EndpointSelector: endpointSelector,
-		TargetPorts:      joinInt32s(ports),
-		ExtraArgs:        string(extraArgs),
+		Name:                  name,
+		Rendered:              rendered,
+		EndpointSelector:      endpointSelector,
+		TargetPorts:           joinInt32s(ports),
+		ExtraArgs:             string(extraArgs),
+		RequireAllowlistProxy: requireAllowlistProxy,
 	})
 	if err != nil {
 		return ModelDeploymentRouterObjects{}, err
@@ -534,6 +734,10 @@ type modelDeploymentRouterDerived struct {
 	EndpointSelector string
 	TargetPorts      string
 	ExtraArgs        string
+
+	// RequireAllowlistProxy fronts argv-configured routers with the shared Envoy inference
+	// allowlist sidecar while binding the router process to loopback.
+	RequireAllowlistProxy bool
 }
 
 func renderModelDeploymentRouterWorkload(
@@ -543,22 +747,19 @@ func renderModelDeploymentRouterWorkload(
 	case workercore.ModelDeploymentRouterLLMD:
 		return renderModelDeploymentLLMDRouterWorkload(ctx, md, in), nil
 	case workercore.ModelDeploymentRouterVLLM, workercore.ModelDeploymentRouterSGLang:
-		return renderModelDeploymentArgvRouterWorkload(ctx, md, in.Rendered), nil
+		return renderModelDeploymentArgvRouterWorkload(ctx, md, in), nil
 	default:
 		return modelDeploymentRouterWorkload{},
 			fmt.Errorf("router %q renders no workload", md.Spec.Router.Name)
 	}
 }
 
-// renderModelDeploymentArgvRouterWorkload renders a router that is one process configured entirely
-// by its command line.
-//
-// IT CONTRIBUTES NO CONFIGURATION AT ALL, which is why the caller renders no ConfigMap for it. The
-// selector and the target port do reach this router, but as arguments -- writing them into an
-// object as well would put a second copy of the same derivation where nothing reads it, and leave a
-// reader of the ConfigMap unable to tell which copy the process is actually using.
+// renderModelDeploymentArgvRouterWorkload renders a router configured by its command line.
+// When RequireAllowlistProxy is false, it renders a single container on port 8000 with no
+// ConfigMap. When RequireAllowlistProxy is true, it fronts the loopback router process on port
+// 8001 with an Envoy sidecar on port 8000 enforcing the shared inference allowlist.
 func renderModelDeploymentArgvRouterWorkload(
-	ctx context.Context, md *workercore.ModelDeployment, rendered router.Output,
+	ctx context.Context, md *workercore.ModelDeployment, in modelDeploymentRouterDerived,
 ) modelDeploymentRouterWorkload {
 	image := md.Spec.Router.Image
 	if image == "" {
@@ -568,26 +769,81 @@ func renderModelDeploymentArgvRouterWorkload(
 	// The user's arguments land AFTER the derived ones, which is the order the refusal in admission
 	// is written against: a key the operator owns is refused there, so anything surviving to here
 	// names something the operator did not set.
-	args := slices.Concat(rendered.Arguments, md.Spec.Router.ExtraArgs)
+	args := slices.Concat(in.Rendered.Arguments, md.Spec.Router.ExtraArgs)
+
+	if !in.RequireAllowlistProxy {
+		return modelDeploymentRouterWorkload{
+			Containers: []core.Container{{
+				// The command comes from the render beside the arguments, because the image holds three
+				// programs and declares no entrypoint. Arguments without it are handed to the image's
+				// own CMD position, where the first flag is read as the program name.
+				Name: "router", Image: image, Command: in.Rendered.Command, Args: args,
+				ImagePullPolicy: kvcache.ResolvePullPolicy(md.Spec.Router.ImagePullPolicy, image),
+				Ports: []core.ContainerPort{
+					{Name: "http", ContainerPort: modelDeploymentRouterHTTPPort},
+					{Name: "metrics", ContainerPort: modelDeploymentRouterMetricsPort},
+				},
+				// The router answers on the port the Service targets, so a TCP probe on it is the same
+				// question the Service asks. There is no second process to gate on, unlike the picker
+				// whose readiness is its own gRPC health server behind a proxy.
+				ReadinessProbe: &core.Probe{ProbeHandler: core.ProbeHandler{
+					TCPSocket: &core.TCPSocketAction{Port: intstr.FromInt32(modelDeploymentRouterHTTPPort)},
+				}},
+			}},
+		}
+	}
 
 	return modelDeploymentRouterWorkload{
-		Containers: []core.Container{{
-			// The command comes from the render beside the arguments, because the image holds three
-			// programs and declares no entrypoint. Arguments without it are handed to the image's
-			// own CMD position, where the first flag is read as the program name.
-			Name: "router", Image: image, Command: rendered.Command, Args: args,
-			ImagePullPolicy: kvcache.ResolvePullPolicy(md.Spec.Router.ImagePullPolicy, image),
-			Ports: []core.ContainerPort{
-				{Name: "http", ContainerPort: modelDeploymentRouterHTTPPort},
-				{Name: "metrics", ContainerPort: modelDeploymentRouterMetricsPort},
+		Config: map[string]string{
+			modelDeploymentRouterEnvoyConfigKey: renderModelDeploymentRouterLoopbackEnvoyConfig(
+				md.Spec.Router.RequestTimeoutSeconds,
+			),
+		},
+		Containers: []core.Container{
+			renderModelDeploymentRouterEnvoyContainer(ctx, md),
+			{
+				Name: "router", Image: image, Command: in.Rendered.Command, Args: args,
+				ImagePullPolicy: kvcache.ResolvePullPolicy(md.Spec.Router.ImagePullPolicy, image),
+				Ports: []core.ContainerPort{
+					{Name: "http-upstream", ContainerPort: modelDeploymentRouterUpstreamLoopbackPort},
+					{Name: "metrics", ContainerPort: modelDeploymentRouterMetricsPort},
+				},
+				// The router binds 127.0.0.1:8001 behind the Envoy allowlist sidecar, so a bare TCP probe on
+				// 8001 dials <PodIP>:8001 from kubelet and always fails with connection refused. Probe
+				// GET /observer/endpoints through Envoy's :9091 observer listener, which forwards straight to
+				// 127.0.0.1:8001 and returns 503 until the loopback router serves HTTP (and 200 even before
+				// any worker endpoints register).
+				ReadinessProbe: &core.Probe{ProbeHandler: core.ProbeHandler{
+					HTTPGet: &core.HTTPGetAction{
+						Path: observerURLPath,
+						Port: intstr.FromInt32(modelDeploymentRouterObserverProxyPort),
+					},
+				}},
 			},
-			// The router answers on the port the Service targets, so a TCP probe on it is the same
-			// question the Service asks. There is no second process to gate on, unlike the picker
-			// whose readiness is its own gRPC health server behind a proxy.
-			ReadinessProbe: &core.Probe{ProbeHandler: core.ProbeHandler{
-				TCPSocket: &core.TCPSocketAction{Port: intstr.FromInt32(modelDeploymentRouterHTTPPort)},
-			}},
+		},
+		Volumes: []core.Volume{{Name: "config", VolumeSource: core.VolumeSource{
+			ConfigMap: &core.ConfigMapVolumeSource{LocalObjectReference: core.LocalObjectReference{Name: in.Name}},
+		}}},
+	}
+}
+
+func renderModelDeploymentRouterEnvoyContainer(
+	ctx context.Context, md *workercore.ModelDeployment,
+) core.Container {
+	proxyImage := redirectedImage(ctx,
+		settings.ModelDeploymentRouterProxyImage.ShouldValue(ctx))
+
+	return core.Container{
+		Name: modelDeploymentRouterEnvoyContainerName, Image: proxyImage,
+		// Resolved rather than passed through so an empty policy does not drift against
+		// API server defaulting on subsequent reconciles.
+		ImagePullPolicy: kvcache.ResolvePullPolicy(md.Spec.Router.ImagePullPolicy, proxyImage),
+		Args:            []string{"-c", "/config/" + modelDeploymentRouterEnvoyConfigKey},
+		Ports:           []core.ContainerPort{{Name: "http", ContainerPort: modelDeploymentRouterHTTPPort}},
+		ReadinessProbe: &core.Probe{ProbeHandler: core.ProbeHandler{
+			TCPSocket: &core.TCPSocketAction{Port: intstr.FromInt32(modelDeploymentRouterHTTPPort)},
 		}},
+		VolumeMounts: []core.VolumeMount{{Name: "config", MountPath: "/config", ReadOnly: true}},
 	}
 }
 
@@ -602,8 +858,6 @@ func renderModelDeploymentLLMDRouterWorkload(
 		image = redirectedImage(ctx,
 			settings.ModelDeploymentRouterImage.ShouldValue(ctx))
 	}
-	proxyImage := redirectedImage(ctx,
-		settings.ModelDeploymentRouterProxyImage.ShouldValue(ctx))
 
 	args := make([]string, 0, 5+len(md.Spec.Router.ExtraArgs))
 	// TWO OF THESE TURN OFF A DEFAULT THAT IS ON UPSTREAM, and that is the design rather than an
@@ -647,25 +901,7 @@ func renderModelDeploymentLLMDRouterWorkload(
 			modelDeploymentRouterExtraArgsKey:   in.ExtraArgs,
 		},
 		Containers: []core.Container{
-			{
-				Name: "envoy", Image: proxyImage,
-				// The same policy as the container below, for the same reason: this image
-				// is resolved through the redirect too, so it is as replaceable as the
-				// other one, and a mutable tag left on the default policy goes stale on
-				// a node that already has it.
-				//
-				// RESOLVED rather than passed through, because the field is optional and
-				// nothing defaults it: an empty value rendered here is one the API server
-				// fills in on write, which the aligner then reads back as a difference and
-				// corrects on every pass, updating the Deployment forever.
-				ImagePullPolicy: kvcache.ResolvePullPolicy(md.Spec.Router.ImagePullPolicy, proxyImage),
-				Args:            []string{"-c", "/config/" + modelDeploymentRouterEnvoyConfigKey},
-				Ports:           []core.ContainerPort{{Name: "http", ContainerPort: modelDeploymentRouterHTTPPort}},
-				ReadinessProbe: &core.Probe{ProbeHandler: core.ProbeHandler{
-					TCPSocket: &core.TCPSocketAction{Port: intstr.FromInt32(modelDeploymentRouterHTTPPort)},
-				}},
-				VolumeMounts: []core.VolumeMount{{Name: "config", MountPath: "/config", ReadOnly: true}},
-			},
+			renderModelDeploymentRouterEnvoyContainer(ctx, md),
 			{
 				// As above: this container runs one of the three programs the image carries, and
 				// the image names none of them itself.
@@ -799,22 +1035,21 @@ func (r *ModelDeploymentReconciler) syncModelDeploymentRouter(
 	}
 
 	wanted := md.Spec.Router != nil
-	if err := r.syncModelDeploymentOwnedChildren(ctx, md, objectIfPresent(rendered.Deployment, wanted),
-		func() ctrlcli.Object { return new(app.Deployment) }, new(app.DeploymentList),
-		func(actual, expected ctrlcli.Object) bool {
-			return alignModelDeploymentRouterDeployment(actual.(*app.Deployment), expected.(*app.Deployment))
-		}, modelDeploymentResourceNoteRouter, "deployment"); err != nil {
-		return err
-	}
-	// A router configured entirely by argv renders no ConfigMap, so the desired list is empty for it
-	// and the prune path removes one a previous shape left behind. The typed nil is tested for
-	// rather than the interface, which would be non-nil while holding it.
+	// Sync ConfigMap before Deployment so any newly scheduled router Pod boots against the
+	// current allowlist policy rather than a stale ConfigMap revision.
 	if err := r.syncModelDeploymentOwnedChildren(ctx, md,
 		objectIfPresent(rendered.ConfigMap, wanted && rendered.ConfigMap != nil),
 		func() ctrlcli.Object { return new(core.ConfigMap) }, new(core.ConfigMapList),
 		func(actual, expected ctrlcli.Object) bool {
 			return alignModelDeploymentRouterConfigMap(actual.(*core.ConfigMap), expected.(*core.ConfigMap))
 		}, modelDeploymentResourceNoteRouter, "configmap"); err != nil {
+		return err
+	}
+	if err := r.syncModelDeploymentOwnedChildren(ctx, md, objectIfPresent(rendered.Deployment, wanted),
+		func() ctrlcli.Object { return new(app.Deployment) }, new(app.DeploymentList),
+		func(actual, expected ctrlcli.Object) bool {
+			return alignModelDeploymentRouterDeployment(actual.(*app.Deployment), expected.(*app.Deployment))
+		}, modelDeploymentResourceNoteRouter, "deployment"); err != nil {
 		return err
 	}
 	if err := r.syncModelDeploymentOwnedChildren(ctx, md, objectIfPresent(rendered.Service, wanted),
@@ -979,20 +1214,130 @@ const (
 	// day, which is the value this proxy has always carried; the two routers configured by argv
 	// keep their own half hour, and the field is what makes the three agree.
 	modelDeploymentRouterDefaultRouteTimeout int32 = 86400
+
+	modelDeploymentRouterEnvoyOriginalDstCluster = "original_destination_cluster"
+	modelDeploymentRouterEnvoyLoopbackCluster    = "router_upstream"
 )
 
-// renderModelDeploymentRouterEnvoyConfig fills the one value the proxy template takes.
+type modelDeploymentRouterEnvoyRoute struct {
+	Method string
+	Path   string
+	Prefix bool
+}
+
+// modelDeploymentRouterInferenceRoutes is the single allowlist shared by all Envoy-fronted
+// router profiles. Any request not matching an entry falls through to a 403 direct_response.
+var modelDeploymentRouterInferenceRoutes = []modelDeploymentRouterEnvoyRoute{
+	{Method: "POST", Path: "/v1/chat/completions"},
+	{Method: "POST", Path: "/v1/completions"},
+	{Method: "POST", Path: "/v1/embeddings"},
+	{Method: "POST", Path: "/v1/responses"},
+	{Method: "POST", Path: "/v1/rerank"},
+	{Method: "POST", Path: "/v1/score"},
+	{Method: "POST", Path: "/v1/classify"},
+	{Method: "POST", Path: "/v1/audio/transcriptions"},
+	{Method: "POST", Path: "/v1/messages"},
+	{Method: "POST", Path: "/v1/messages/count_tokens"},
+	{Method: "GET", Path: "/v1/models"},
+	{Method: "GET", Path: "/v1/models/", Prefix: true},
+	{Method: "POST", Path: "/tokenize"},
+	{Method: "POST", Path: "/v1/tokenize"},
+	{Method: "POST", Path: "/detokenize"},
+	{Method: "POST", Path: "/v1/detokenize"},
+	{Method: "POST", Path: "/v1/chat/completions/render"},
+	{Method: "GET", Path: "/health"},
+	// Multimodal inference routes for vllm-omni and sglang-omni compatibility.
+	{Method: "POST", Path: "/v1/audio/speech"},
+	{Method: "POST", Path: "/v1/images/generations"},
+	{Method: "POST", Path: "/v1/images/edits"},
+	{Method: "POST", Path: "/v1/videos"},
+	{Method: "GET", Path: "/v1/videos/", Prefix: true},
+}
+
+// renderModelDeploymentRouterEnvoyConfig renders the Envoy configuration for llm-d-router,
+// enforcing the shared inference allowlist ahead of ext_proc and original_destination_cluster.
 func renderModelDeploymentRouterEnvoyConfig(timeoutSeconds *int32) string {
+	return buildModelDeploymentRouterEnvoyConfig(
+		modelDeploymentRouterEnvoyOriginalDstCluster,
+		timeoutSeconds,
+		true,
+		false,
+		modelDeploymentRouterEnvoyLLMDHTTPFilters,
+		modelDeploymentRouterEnvoyLLMDClusters,
+	)
+}
+
+// renderModelDeploymentRouterLoopbackEnvoyConfig renders the Envoy sidecar configuration that
+// fronts vllm-router and sglang-gateway on 0.0.0.0:8000 and forwards only the shared inference
+// allowlist to the loopback router listener on 127.0.0.1:8001, plus an unexposed Pod-internal
+// observer listener on 0.0.0.0:9091 forwarding only GET /observer/endpoints.
+func renderModelDeploymentRouterLoopbackEnvoyConfig(timeoutSeconds *int32) string {
+	return buildModelDeploymentRouterEnvoyConfig(
+		modelDeploymentRouterEnvoyLoopbackCluster,
+		timeoutSeconds,
+		false,
+		true,
+		modelDeploymentRouterEnvoyLoopbackHTTPFilters,
+		modelDeploymentRouterEnvoyLoopbackClusters,
+	)
+}
+
+func buildModelDeploymentRouterEnvoyConfig(
+	cluster string, timeoutSeconds *int32, disableExtProcOnDeny, includeObserverListener bool, httpFilters, clusters string,
+) string {
 	timeout := modelDeploymentRouterDefaultRouteTimeout
 	if timeoutSeconds != nil {
 		timeout = *timeoutSeconds
 	}
 
-	return strings.ReplaceAll(modelDeploymentRouterEnvoyConfig,
+	var b strings.Builder
+	b.WriteString(modelDeploymentRouterEnvoyConfigPrefix)
+	b.WriteString(renderModelDeploymentRouterEnvoyRoutes(cluster, disableExtProcOnDeny))
+	b.WriteString(modelDeploymentRouterEnvoyAccessLog)
+	b.WriteString("          http_filters:\n")
+	b.WriteString(httpFilters)
+	if includeObserverListener {
+		b.WriteString(strings.ReplaceAll(
+			modelDeploymentRouterEnvoyObserverListener,
+			"__OBSERVER_PROXY_PORT__",
+			strconvx.Itoa(modelDeploymentRouterObserverProxyPort),
+		))
+	}
+	b.WriteString("  clusters:\n")
+	b.WriteString(clusters)
+
+	return strings.ReplaceAll(b.String(),
 		modelDeploymentRouterEnvoyTimeoutPlaceholder, strconvx.Itoa(timeout))
 }
 
-const modelDeploymentRouterEnvoyConfig = `static_resources:
+func renderModelDeploymentRouterEnvoyRoutes(cluster string, disableExtProcOnDeny bool) string {
+	var b strings.Builder
+	for _, route := range modelDeploymentRouterInferenceRoutes {
+		b.WriteString("              - match:\n")
+		if route.Prefix {
+			fmt.Fprintf(&b, "                  prefix: %q\n", route.Path)
+		} else {
+			fmt.Fprintf(&b, "                  path: %q\n", route.Path)
+		}
+		b.WriteString("                  headers:\n")
+		b.WriteString("                  - name: \":method\"\n")
+		fmt.Fprintf(&b, "                    string_match: {exact: %q}\n", route.Method)
+		fmt.Fprintf(&b, "                route: {cluster: %s, timeout: %ss}\n",
+			cluster, modelDeploymentRouterEnvoyTimeoutPlaceholder)
+	}
+	b.WriteString("              - match: {prefix: \"/\"}\n")
+	b.WriteString("                direct_response: {status: 403}\n")
+	if disableExtProcOnDeny {
+		b.WriteString("                typed_per_filter_config:\n")
+		b.WriteString("                  envoy.filters.http.ext_proc:\n")
+		b.WriteString("                    \"@type\": type.googleapis.com/envoy.extensions.filters.http.ext_proc.v3.ExtProcPerRoute\n")
+		b.WriteString("                    disabled: true\n")
+	}
+
+	return b.String()
+}
+
+const modelDeploymentRouterEnvoyConfigPrefix = `static_resources:
   listeners:
   - name: http
     address:
@@ -1003,15 +1348,18 @@ const modelDeploymentRouterEnvoyConfig = `static_resources:
         typed_config:
           "@type": type.googleapis.com/envoy.extensions.filters.network.http_connection_manager.v3.HttpConnectionManager
           stat_prefix: router
+          normalize_path: true
+          merge_slashes: true
+          path_with_escaped_slashes_action: REJECT_REQUEST
           route_config:
             name: router
             virtual_hosts:
             - name: model
               domains: ["*"]
               routes:
-              - match: {prefix: "/"}
-                route: {cluster: original_destination_cluster, timeout: <ROUTE-TIMEOUT>s}
-          # ONE ACCESS LOG, AND IT IS NOT A FIELD. The gap it fills is that nothing is logged at
+`
+
+const modelDeploymentRouterEnvoyAccessLog = `          # ONE ACCESS LOG, AND IT IS NOT A FIELD. The gap it fills is that nothing is logged at
           # all, so there is no value a user would choose; what a reader needs is the endpoint the
           # picker selected beside the outcome, which is the pair no other log on this Pod carries.
           # The upstream host is that endpoint, and the response flags and code details are what
@@ -1034,8 +1382,9 @@ const modelDeploymentRouterEnvoyConfig = `static_resources:
                   request_id: "%REQ(X-REQUEST-ID)%"
                   bytes_received: "%BYTES_RECEIVED%"
                   bytes_sent: "%BYTES_SENT%"
-          http_filters:
-          # The original-destination cluster routes on x-gateway-destination-endpoint, and
+`
+
+const modelDeploymentRouterEnvoyLLMDHTTPFilters = `          # The original-destination cluster routes on x-gateway-destination-endpoint, and
           # failure_mode_allow lets a request through when the EPP -- the only legitimate
           # writer of that header -- is down. A client-supplied copy must never reach the
           # cluster, or the caller picks the upstream instead of the endpoint selector.
@@ -1071,8 +1420,9 @@ const modelDeploymentRouterEnvoyConfig = `static_resources:
           - name: envoy.filters.http.router
             typed_config:
               "@type": type.googleapis.com/envoy.extensions.filters.http.router.v3.Router
-  clusters:
-  - name: original_destination_cluster
+`
+
+const modelDeploymentRouterEnvoyLLMDClusters = `  - name: original_destination_cluster
     type: ORIGINAL_DST
     connect_timeout: 1s
     lb_policy: CLUSTER_PROVIDED
@@ -1094,4 +1444,57 @@ const modelDeploymentRouterEnvoyConfig = `static_resources:
         - endpoint:
             address:
               socket_address: {address: 127.0.0.1, port_value: 9002}
+`
+
+const modelDeploymentRouterEnvoyLoopbackHTTPFilters = `          - name: envoy.filters.http.router
+            typed_config:
+              "@type": type.googleapis.com/envoy.extensions.filters.http.router.v3.Router
+`
+
+// modelDeploymentRouterEnvoyObserverListener binds 0.0.0.0:__OBSERVER_PROXY_PORT__ inside the
+// router Pod for kubelet readiness probes and cluster-internal controller observation (not exposed
+// on the router Service).
+const modelDeploymentRouterEnvoyObserverListener = `  - name: observer
+    address:
+      socket_address: {address: 0.0.0.0, port_value: __OBSERVER_PROXY_PORT__}
+    filter_chains:
+    - filters:
+      - name: envoy.filters.network.http_connection_manager
+        typed_config:
+          "@type": type.googleapis.com/envoy.extensions.filters.network.http_connection_manager.v3.HttpConnectionManager
+          stat_prefix: router_observer
+          normalize_path: true
+          merge_slashes: true
+          path_with_escaped_slashes_action: REJECT_REQUEST
+          route_config:
+            name: router_observer
+            virtual_hosts:
+            - name: observer
+              domains: ["*"]
+              routes:
+              - match:
+                  path: "/observer/endpoints"
+                  headers:
+                  - name: ":method"
+                    string_match: {exact: "GET"}
+                route: {cluster: router_upstream, timeout: 5s}
+              - match: {prefix: "/"}
+                direct_response: {status: 403}
+          http_filters:
+          - name: envoy.filters.http.router
+            typed_config:
+              "@type": type.googleapis.com/envoy.extensions.filters.http.router.v3.Router
+`
+
+const modelDeploymentRouterEnvoyLoopbackClusters = `  - name: router_upstream
+    type: STATIC
+    connect_timeout: 1s
+    lb_policy: ROUND_ROBIN
+    load_assignment:
+      cluster_name: router_upstream
+      endpoints:
+      - lb_endpoints:
+        - endpoint:
+            address:
+              socket_address: {address: 127.0.0.1, port_value: 8001}
 `

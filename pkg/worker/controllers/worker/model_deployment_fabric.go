@@ -10,6 +10,7 @@ import (
 	"gpustack.ai/gpustack/pkg/nodefeature"
 	"gpustack.ai/gpustack/pkg/worker/kvcache/inject"
 	"gpustack.ai/gpustack/pkg/worker/kvcache/mooncake"
+	"gpustack.ai/gpustack/pkg/worker/runtimecontrol"
 )
 
 func modelDeploymentRequestsInterfaces(md *workercore.ModelDeployment) bool {
@@ -47,7 +48,7 @@ func ModelDeploymentDirectPairRequestsInterfaces(md *workercore.ModelDeployment)
 // weight delivery, managed multi-Pod vLLM Server roles, and routed prefill/decode pairs on vLLM
 // and SGLang when every Prefill and Decode half requests interfaces. On Ascend A5 (Family "950")
 // it returns "rdma" (never "efa") for managed vLLM Host RoCE workloads: routed prefill/decode
-// pairs with interfaces on both halves, multi-Pod or elasticEp Server roles, and non-Encode
+// pairs with interfaces on both halves, multi-Pod or elastic-EP Server roles, and non-Encode
 // KVCache-backed roles.
 func ModelDeploymentDirectInterfaceProtocol(
 	md *workercore.ModelDeployment, role *workercore.ModelDeploymentRole, manufacturer, family string,
@@ -71,7 +72,7 @@ func ModelDeploymentDirectInterfaceProtocol(
 			return ""
 		}
 		if kind == workercore.ModelDeploymentRoleKindServer &&
-			(modelDeploymentRoleSize(role) > 1 || role.ElasticEP != nil) {
+			(modelDeploymentRoleSize(role) > 1 || runtimecontrol.RoleHasElasticEP(role)) {
 			return "rdma"
 		}
 		if md.Spec.KVCache != nil &&
@@ -95,12 +96,12 @@ func ModelDeploymentDirectInterfaceProtocol(
 		md.Spec.Engine.Name != workercore.ModelDeploymentEngineSGLang {
 		return ""
 	}
-	// Managed multi-Pod Server collective legs (size > 1 or elasticEp) select the direct
+	// Managed multi-Pod Server collective legs (size > 1 or elastic-EP) select the direct
 	// fabric device key; SGLang multi-member Server roles are not a leg this answer grants
 	// devices for, so they fall through to the pair check and stop there.
 	if md.Spec.Engine.Name == workercore.ModelDeploymentEngineVLLM &&
 		ModelDeploymentEffectiveRoleKind(role) == workercore.ModelDeploymentRoleKindServer &&
-		(modelDeploymentRoleSize(role) > 1 || role.ElasticEP != nil) {
+		(modelDeploymentRoleSize(role) > 1 || runtimecontrol.RoleHasElasticEP(role)) {
 		return directProtocol
 	}
 	if !modelDeploymentUsesKVTransfer(md, role) || !ModelDeploymentDirectPairRequestsInterfaces(md) {

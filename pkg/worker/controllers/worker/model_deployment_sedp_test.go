@@ -282,7 +282,7 @@ func TestSGLangExternalDPRoutingSelectsEveryMember(t *testing.T) {
 				require.NoError(t, err)
 				role := &md.Spec.Roles[0]
 
-				discovery := routingDiscoverySelector(t, objects.Deployment.Spec.Template.Spec.Containers[0].Args, objects.ConfigMap)
+				discovery := routingDiscoverySelector(t, routerContainerArgs(objects.Deployment.Spec.Template.Spec.Containers), objects.ConfigMap)
 				published := labels.SelectorFromSet(objects.Contract.Roles[0].Selector)
 				service := labels.SelectorFromSet(renderModelDeploymentRoleService(md, role, nil, nil, false).Spec.Selector)
 

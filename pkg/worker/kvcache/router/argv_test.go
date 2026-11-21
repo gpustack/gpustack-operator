@@ -115,6 +115,75 @@ func TestRenderVLLM_NamesItsOwnPortsAndTheOneItDials(t *testing.T) {
 	}
 }
 
+func TestRenderArgv_ListenHostOverridesAPIBindOnly(t *testing.T) {
+	testCases := []struct {
+		name           string
+		router         string
+		roles          []Role
+		listenHost     string
+		listenPort     int32
+		wantHostArg    string
+		wantPortArg    string
+		wantMetricsArg []string
+	}{
+		{
+			name:           "vllm default bind host",
+			router:         VLLM,
+			roles:          []Role{serverRole()},
+			listenPort:     8000,
+			wantHostArg:    "--host=0.0.0.0",
+			wantPortArg:    "--port=8000",
+			wantMetricsArg: []string{"--prometheus-host=0.0.0.0", "--prometheus-port=9090"},
+		},
+		{
+			name:           "vllm loopback api with external metrics",
+			router:         VLLM,
+			roles:          []Role{prefillRole(), decodeRole()},
+			listenHost:     "127.0.0.1",
+			listenPort:     8001,
+			wantHostArg:    "--host=127.0.0.1",
+			wantPortArg:    "--port=8001",
+			wantMetricsArg: []string{"--prometheus-host=0.0.0.0", "--prometheus-port=9090"},
+		},
+		{
+			name:           "sglang default bind host",
+			router:         SGLang,
+			roles:          []Role{serverRole()},
+			listenPort:     8000,
+			wantHostArg:    "--host=0.0.0.0",
+			wantPortArg:    "--port=8000",
+			wantMetricsArg: []string{"--prometheus-host=0.0.0.0", "--prometheus-port=9090"},
+		},
+		{
+			name:           "sglang loopback api with external metrics",
+			router:         SGLang,
+			roles:          []Role{prefillRole(), decodeRole()},
+			listenHost:     "127.0.0.1",
+			listenPort:     8001,
+			wantHostArg:    "--host=127.0.0.1",
+			wantPortArg:    "--port=8001",
+			wantMetricsArg: []string{"--prometheus-host=0.0.0.0", "--prometheus-port=9090"},
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			in := vllmInput(tc.roles...)
+			in.ListenHost = tc.listenHost
+			in.ListenPort = tc.listenPort
+
+			output, err := Render(tc.router, in)
+			require.NoError(t, err)
+
+			assert.Contains(t, output.Arguments, tc.wantHostArg)
+			assert.Contains(t, output.Arguments, tc.wantPortArg)
+			for _, metricArg := range tc.wantMetricsArg {
+				assert.Contains(t, output.Arguments, metricArg)
+			}
+		})
+	}
+}
+
 // TestRenderSGLang_RendersDPAwareOnlyForTheExternalDPShape pins the flag's shape gate.
 //
 // --dp-aware is what makes the gateway register one worker per dp member instead of one per

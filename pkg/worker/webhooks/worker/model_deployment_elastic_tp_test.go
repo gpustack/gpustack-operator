@@ -10,6 +10,7 @@ import (
 	ctrlcli "sigs.k8s.io/controller-runtime/pkg/client"
 
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
+	"gpustack.ai/gpustack/pkg/worker/runtimecontrol"
 )
 
 func TestElasticTensorParallelShape(t *testing.T) {
@@ -71,7 +72,7 @@ func TestElasticTensorParallelIdentity(t *testing.T) {
 			old, md := elasticMD(), elasticMD()
 			old.Spec.Roles[0].ExtraArgs = tc.oldArgs
 			md.Spec.Roles[0].ExtraArgs = tc.newArgs
-			md.Spec.Roles[0].ElasticEP.Width = 4
+			runtimecontrol.SetElasticWidth(&md.Spec.Roles[0], 4)
 			assert.Equal(t, tc.valid, len(validateModelDeploymentElasticIdentity(md, old)) == 0)
 		})
 	}

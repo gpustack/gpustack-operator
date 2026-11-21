@@ -5,8 +5,8 @@ metadata:
     kueue.x-k8s.io/pod-group-serving: "true"
     kueue.x-k8s.io/pod-group-total-count: "1"
     kueue.x-k8s.io/role-hash: main
-    modeldeployment.gpustack.ai/pod-spec-hash: e5a7cedabd1d9bb1ef3f7a5358c8830b4f3ff8109bd11e3be7cc1b6c08d0d051
-    modeldeployment.gpustack.ai/render-version: "5"
+    modeldeployment.gpustack.ai/pod-spec-hash: 92f968b546da07ea8c76502c489e08633bf4f9e7528adbb2ffe0d000026e0eb5
+    modeldeployment.gpustack.ai/render-version: "6"
     note.gpustack.ai/role: main
     prometheus.io/path: /metrics
     prometheus.io/port: "8000"
@@ -85,6 +85,12 @@ spec:
       value: info
     - name: RAY_BACKEND_LOG_LEVEL
       value: info
+    - name: PYTHONPATH
+      value: /var/lib/gpustack/operator/lib/engine-sentinel
+    - name: GPUSTACK_ENGINE_SENTINEL_ENABLE
+      value: "1"
+    - name: GPUSTACK_ENGINE_SENTINEL_ENGINE
+      value: vllm
     - name: GPUSTACK_ELASTIC_POD_UID
       valueFrom:
         fieldRef:
@@ -103,38 +109,18 @@ spec:
         exec:
           command:
           - python3
-          - -c
-          - |
-            import socket, ssl, sys, time, urllib.request
-            start = time.monotonic()
-            time.sleep(5)
-            names = ["vllm:num_requests_running", "vllm:num_requests_waiting"]
-            context = ssl.create_default_context()
-            context.check_hostname = False
-            context.verify_mode = ssl.CERT_NONE
-            idle = 0
-            while time.monotonic() - start < 25:
-                try:
-                    body = urllib.request.urlopen("http://127.0.0.1:8000/metrics", timeout=1, context=context).read().decode()
-                except Exception as err:
-                    if not isinstance(getattr(err, "reason", err), (TimeoutError, socket.timeout)):
-                        sys.exit(0)
-                    body = None
-                busy = 1.0 if body is None else 0.0
-                for line in (body or "").splitlines():
-                    name = line.split("{", 1)[0].split(" ", 1)[0]
-                    if name not in names:
-                        continue
-                    sample = line.rsplit("}", 1)[1] if "{" in line else line[len(name):]
-                    try:
-                        busy += float(sample.split()[0])
-                    except (IndexError, ValueError):
-                        busy += 1.0
-                idle = idle + 1 if busy == 0 else 0
-                if idle == 2:
-                    sys.exit(0)
-                time.sleep(1)
-            sys.exit(0)
+          - -m
+          - gpustack_engine_sentinel.drain
+          - --engine
+          - vLLM
+          - --port
+          - "8000"
+          - --scheme
+          - http
+          - --settle
+          - "5"
+          - --deadline
+          - "25"
     livenessProbe:
       exec:
         command:
@@ -165,7 +151,7 @@ spec:
     readinessProbe:
       failureThreshold: 3
       httpGet:
-        path: /health
+        path: /gpustack/v1/ready
         port: 8000
         scheme: HTTP
       periodSeconds: 10
@@ -184,7 +170,7 @@ spec:
     startupProbe:
       failureThreshold: 180
       httpGet:
-        path: /health
+        path: /gpustack/v1/live
         port: 8000
         scheme: HTTP
       periodSeconds: 10
@@ -194,6 +180,9 @@ spec:
       name: gpustack-compile-cache
     - mountPath: /dev/shm
       name: model-shm
+    - mountPath: /var/lib/gpustack/operator/lib/engine-sentinel
+      name: gpustack-engine-sentinel
+      readOnly: true
   enableServiceLinks: false
   restartPolicy: Always
   runtimeClassName: nvidia
@@ -207,6 +196,10 @@ spec:
       medium: Memory
       sizeLimit: 16Gi
     name: model-shm
+  - hostPath:
+      path: /var/lib/gpustack/operator/lib/engine-sentinel
+      type: DirectoryOrCreate
+    name: gpustack-engine-sentinel
 status: {}
 ---
 apiVersion: v1
@@ -216,8 +209,8 @@ metadata:
     kueue.x-k8s.io/pod-group-serving: "true"
     kueue.x-k8s.io/pod-group-total-count: "1"
     kueue.x-k8s.io/role-hash: main
-    modeldeployment.gpustack.ai/pod-spec-hash: cf82c68010a9e4354e29abc998e0a9aaaa84aa4e53bb244761f471303dca2e27
-    modeldeployment.gpustack.ai/render-version: "5"
+    modeldeployment.gpustack.ai/pod-spec-hash: f897571ea9feea000545419d0f5b437b599d12d44b2f7159c106770fb6d0ea34
+    modeldeployment.gpustack.ai/render-version: "6"
     note.gpustack.ai/role: main
     prometheus.io/path: /metrics
     prometheus.io/port: "8000"
@@ -275,6 +268,12 @@ spec:
       value: info
     - name: RAY_BACKEND_LOG_LEVEL
       value: info
+    - name: PYTHONPATH
+      value: /var/lib/gpustack/operator/lib/engine-sentinel
+    - name: GPUSTACK_ENGINE_SENTINEL_ENABLE
+      value: "1"
+    - name: GPUSTACK_ENGINE_SENTINEL_ENGINE
+      value: vllm
     - name: GPUSTACK_ELASTIC_POD_UID
       valueFrom:
         fieldRef:
@@ -309,6 +308,9 @@ spec:
       name: gpustack-compile-cache
     - mountPath: /dev/shm
       name: model-shm
+    - mountPath: /var/lib/gpustack/operator/lib/engine-sentinel
+      name: gpustack-engine-sentinel
+      readOnly: true
   enableServiceLinks: false
   restartPolicy: Always
   runtimeClassName: nvidia
@@ -322,6 +324,10 @@ spec:
       medium: Memory
       sizeLimit: 16Gi
     name: model-shm
+  - hostPath:
+      path: /var/lib/gpustack/operator/lib/engine-sentinel
+      type: DirectoryOrCreate
+    name: gpustack-engine-sentinel
 status: {}
 ---
 apiVersion: v1
@@ -329,7 +335,7 @@ kind: Pod
 metadata:
   annotations:
     modeldeployment.gpustack.ai/pod-spec-hash: c82456074238f7c36155728507e4adda1653f05a876bd8739396efeb5de8f6c7
-    modeldeployment.gpustack.ai/render-version: "5"
+    modeldeployment.gpustack.ai/render-version: "6"
     note.gpustack.ai/role: qwen-elastic-head
   generateName: qwen-qwen-elastic-head-
   labels:

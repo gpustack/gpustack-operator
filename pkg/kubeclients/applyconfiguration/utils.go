@@ -1546,6 +1546,8 @@ func ForKind(kind schema.GroupVersionKind) interface{} {
 		return &applyconfigurationworkerv1alpha1.ModelDeploymentKVCacheStatusApplyConfiguration{}
 	case workerv1alpha1.SchemeGroupVersion.WithKind("ModelDeploymentKVTransfer"):
 		return &applyconfigurationworkerv1alpha1.ModelDeploymentKVTransferApplyConfiguration{}
+	case workerv1alpha1.SchemeGroupVersion.WithKind("ModelDeploymentLoRAAdapter"):
+		return &applyconfigurationworkerv1alpha1.ModelDeploymentLoRAAdapterApplyConfiguration{}
 	case workerv1alpha1.SchemeGroupVersion.WithKind("ModelDeploymentModel"):
 		return &applyconfigurationworkerv1alpha1.ModelDeploymentModelApplyConfiguration{}
 	case workerv1alpha1.SchemeGroupVersion.WithKind("ModelDeploymentModelRemoteStatus"):
@@ -1566,14 +1568,16 @@ func ForKind(kind schema.GroupVersionKind) interface{} {
 		return &applyconfigurationworkerv1alpha1.ModelDeploymentRetirementStatusApplyConfiguration{}
 	case workerv1alpha1.SchemeGroupVersion.WithKind("ModelDeploymentRole"):
 		return &applyconfigurationworkerv1alpha1.ModelDeploymentRoleApplyConfiguration{}
-	case workerv1alpha1.SchemeGroupVersion.WithKind("ModelDeploymentRoleElasticEP"):
-		return &applyconfigurationworkerv1alpha1.ModelDeploymentRoleElasticEPApplyConfiguration{}
 	case workerv1alpha1.SchemeGroupVersion.WithKind("ModelDeploymentRoleEndpointsStatus"):
 		return &applyconfigurationworkerv1alpha1.ModelDeploymentRoleEndpointsStatusApplyConfiguration{}
 	case workerv1alpha1.SchemeGroupVersion.WithKind("ModelDeploymentRoleParallelismStatus"):
 		return &applyconfigurationworkerv1alpha1.ModelDeploymentRoleParallelismStatusApplyConfiguration{}
 	case workerv1alpha1.SchemeGroupVersion.WithKind("ModelDeploymentRoleResources"):
 		return &applyconfigurationworkerv1alpha1.ModelDeploymentRoleResourcesApplyConfiguration{}
+	case workerv1alpha1.SchemeGroupVersion.WithKind("ModelDeploymentRoleRuntimeControl"):
+		return &applyconfigurationworkerv1alpha1.ModelDeploymentRoleRuntimeControlApplyConfiguration{}
+	case workerv1alpha1.SchemeGroupVersion.WithKind("ModelDeploymentRoleRuntimeControlStatus"):
+		return &applyconfigurationworkerv1alpha1.ModelDeploymentRoleRuntimeControlStatusApplyConfiguration{}
 	case workerv1alpha1.SchemeGroupVersion.WithKind("ModelDeploymentRoleStatus"):
 		return &applyconfigurationworkerv1alpha1.ModelDeploymentRoleStatusApplyConfiguration{}
 	case workerv1alpha1.SchemeGroupVersion.WithKind("ModelDeploymentRoleTopology"):

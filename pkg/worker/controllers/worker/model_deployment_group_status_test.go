@@ -19,6 +19,7 @@ import (
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
 	"gpustack.ai/gpustack/pkg/kubemeta"
 	"gpustack.ai/gpustack/pkg/utils/strconvx"
+	"gpustack.ai/gpustack/pkg/worker/runtimecontrol"
 )
 
 // THE CASES CALL THREE THINGS THE PROJECTION OWNS, AND THE ORDER IS THE ORDER THE STATUS IS
@@ -1133,7 +1134,7 @@ func TestModelDeploymentGroupStateVocabularyCarriesTheBarrierHold(t *testing.T) 
 func collectiveStatusDeployment(width int32) *workercore.ModelDeployment {
 	md := newRenderDeployment()
 	md.Spec.Roles[0].Replicas = 1
-	md.Spec.Roles[0].ElasticEP = &workercore.ModelDeploymentRoleElasticEP{Width: width}
+	runtimecontrol.SetElasticWidth(&md.Spec.Roles[0], width)
 
 	return md
 }

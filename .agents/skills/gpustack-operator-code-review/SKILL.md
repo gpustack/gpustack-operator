@@ -35,7 +35,7 @@ scheduling chain.
 - Check changed runtime behavior has tests; a bug fix without a regression test is a finding. Documentation uses
   existing lint checks; do not require tests that read Markdown.
 - Check Go `*_test.go` uses declarative table-driven cases, a shared loop and fixture helpers. Check Python
-  `model-transfer/python/tests/` with `uv run pytest -W error::ResourceWarning` for deterministic fixtures and zero
+  `model-transfer/python/tests/` and `engine-sentinel/python/tests/` with `uv run pytest -W error::ResourceWarning` for deterministic fixtures and zero
   leaked handles.
 - Check tests use fake clients, assert observable final state, avoid time, order and randomness dependence, and
   would catch a regression if implementation changed.
@@ -51,7 +51,7 @@ scheduling chain.
 - `Devices` ledger accounting stays consistent — every allocation path has a matching release path; nothing reads
   or writes allocation state outside the ledger.
 - Edge cases: nil/empty inputs, boundary values, not-found objects, requeue behavior.
-- Python (`model-transfer/python/**`) correctness and boundary handling:
+- Python (`model-transfer/python/**`, `engine-sentinel/python/**`) correctness and boundary handling:
   - Mutable default arguments (`def f(x=[])`, `def f(x={})`), unintended class-level mutable attributes, or
     module-level mutable globals mutated across sessions or threads.
   - Empty inputs assumed non-empty (`xs[0]`, `max()`/`min()` on empty iterables), off-by-one slice bounds, `None`
@@ -81,10 +81,18 @@ scheduling chain.
 
 - The change lives in the layer that owns the concept: label algebra in `pkg/nodefeature`, device
   detection/allocation in `pkg/devicemanager`, scheduling-chain materialization in `pkg/worker` controllers,
+  online runtime-control translation/client/ledger/drain in `pkg/worker/runtimecontrol`,
   admission rules in the webhooks / AdmissionCheck controllers, per-node remote-weight source broker in
-  `pkg/modeltransfer`, shared wire schemas in `model-transfer/contracts`, and portable Python
-  reader/adapters/backends in `model-transfer/python`. Flag feature logic leaking into shared or general-purpose
+  `pkg/modeltransfer`, shared wire schemas in `model-transfer/contracts`, portable Python
+  reader/adapters/backends in `model-transfer/python`, and the zero-intrusion runtime-control sentinel in
+  `engine-sentinel/python`. Flag feature logic leaking into shared or general-purpose
   packages.
+- `engine-sentinel/python` packaging & runtime contract: `gpustack_engine_sentinel` ships unpacked and read-only
+  at `/etc/gpustack/lib/engine-sentinel` -> `/var/lib/gpustack/operator/lib/engine-sentinel`, loaded via
+  `PYTHONPATH` + `sitecustomize.py` with `dependencies = []` and lazy engine imports. Never mutate `VLLM_PLUGINS`,
+  wrap container `argv`, or add operator-managed API keys / auth Secrets; verify `(rank_id, boot_id)` and
+  `applied_digest` across multi-rank apply and boot-keyed rollback, and keep `drain.py` fail-closed on missing or
+  malformed base gauges.
 - `model-transfer/python` packaging contract: `gpustack_model_transfer` ships as a single universal pure-Python
   wheel (`py3-none-any.whl`) staged from `/etc/gpustack/lib/model-transfer` to
   `/var/lib/gpustack/operator/lib/model-transfer` by the `model-transfer` source DaemonSet's `stage-libs`
@@ -114,7 +122,7 @@ scheduling chain.
 - No secrets in code, logs, or fixtures.
 - CGO boundaries (`binding/`, `csrc/` callers) handle C-returned memory and error codes correctly; injected preload
   shims keep paths and values quoted/escaped.
-- Python (`model-transfer/python/**`) security: no `eval`/`exec`/`compile` on untrusted input, no `subprocess` with
+- Python (`model-transfer/python/**`, `engine-sentinel/python/**`) security: no `eval`/`exec`/`compile` on untrusted input, no `subprocess` with
   `shell=True` on unsanitized input, no `pickle`/`marshal`/`yaml.load` without `SafeLoader` on untrusted data, and
   no unvalidated file path joins that permit path traversal (`..` or symlink escape outside the verified tree).
 
@@ -124,7 +132,7 @@ scheduling chain.
   proportional to cluster size in a per-object reconcile.
 - Watches/informers are scoped to resources that actually affect desired state; flag broad watches that would
   trigger reconcile storms.
-- Python (`model-transfer/python/**`) scale and hot paths: flag check-then-act races on shared state without a
+- Python (`model-transfer/python/**`, `engine-sentinel/python/**`) scale and hot paths: flag check-then-act races on shared state without a
   `Lock`, blocking synchronous I/O or `time.sleep` inside `async def`, unawaited `asyncio` tasks, CPU-bound loops
   parallelized with `threading` under the GIL, repeated `list` membership scans where a `set`/`dict` turns O(n)
   into O(1), string `+=` in loops, and eager f-strings in `logging` calls on hot paths.
@@ -142,7 +150,7 @@ Each of these is a **required** finding, not a judgement call:
 - Doc changes that break the docs contract (page header, Contents list, footer, `docs/README.md` index)
   — `make lint docs` must pass.
 - `model-transfer/contracts/` wire format or schema changes without matching updates in `pkg/modeltransfer/protocol`
-  and `model-transfer/python/gpustack_model_transfer/core` (fixture-only regeneration does not require both), or `model-transfer/python/` changes that fail
+  and `model-transfer/python/gpustack_model_transfer/core` (fixture-only regeneration does not require both), or `model-transfer/python/` / `engine-sentinel/python/` changes that fail
   `uv run ruff check .`, `uv run ruff format --check .`, or `uv run pytest -W error::ResourceWarning`.
 
 ### 5. Over-engineering pass

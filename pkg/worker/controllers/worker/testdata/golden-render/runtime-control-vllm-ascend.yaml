@@ -1,0 +1,29 @@
+apiVersion: worker.gpustack.ai/v1
+kind: ModelDeployment
+metadata:
+  name: qwen
+  namespace: default
+spec:
+  engine:
+    image: quay.io/ascend/vllm-ascend:v0.19.0
+    name: vLLM
+  model:
+    name: Qwen/Qwen2.5-72B-Instruct
+  roles:
+  - acceleratorType: atlas-910b
+    extraArgs:
+    - --max-num-seqs=64
+    - --max-num-batched-tokens=8192
+    image: quay.io/ascend/vllm-ascend:v0.19.0
+    kind: Server
+    name: main
+    pause: true
+    replicas: 1
+    resources:
+      accelerator: "1"
+    runtimeControl:
+      parameters:
+        scheduling.maxActiveRequests: "32"
+        scheduling.maxBatchedTokens: "4096"
+    size: 1
+status: {}

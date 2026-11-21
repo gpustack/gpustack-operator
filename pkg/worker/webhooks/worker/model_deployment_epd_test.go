@@ -17,6 +17,7 @@ import (
 	"gpustack.ai/gpustack/pkg/nodefeature"
 	workerctrl "gpustack.ai/gpustack/pkg/worker/controllers/worker"
 	"gpustack.ai/gpustack/pkg/worker/kvcache/inject"
+	"gpustack.ai/gpustack/pkg/worker/runtimecontrol"
 )
 
 // epdAcceleratorType builds an AcceleratorType reporting one manufacturer, so a case names
@@ -454,7 +455,7 @@ func TestModelDeploymentWebhook_EncoderAdmission(t *testing.T) {
 		{
 			name: "an encoder carrying the elastic-EP profile is refused",
 			mutate: func(md *workercore.ModelDeployment) {
-				epdRoleByName(md, "encode").ElasticEP = &workercore.ModelDeploymentRoleElasticEP{Width: 2}
+				runtimecontrol.SetElasticWidth(epdRoleByName(md, "encode"), 2)
 			},
 			wantRefuse: `role "encode" cannot carry the elastic-EP profile`,
 		},

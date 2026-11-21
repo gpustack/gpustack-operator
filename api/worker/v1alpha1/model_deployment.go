@@ -147,6 +147,15 @@ type ModelDeploymentModel struct {
 	//
 	// +optional
 	ArtifactRef *core.LocalObjectReference `json:"artifactRef,omitempty" protobuf:"bytes,2,opt,name=artifactRef"`
+
+	// LoRAAdapters is a reserved entry point for deployment-level LoRA adapters backed by
+	// ModelArtifact. Non-empty adapter lists are rejected until ModelArtifact supports LoRA
+	// weight delivery and digest verification.
+	//
+	// +optional
+	// +listType=map
+	// +listMapKey=name
+	LoRAAdapters []ModelDeploymentLoRAAdapter `json:"loraAdapters,omitempty" protobuf:"bytes,3,rep,name=loraAdapters"`
 }
 
 // ModelDeploymentEngine is the engine a deployment runs and the image it runs in.
@@ -354,7 +363,7 @@ type ModelDeploymentRole struct {
 	// not guaranteed -- a one-replica role stops for the length of its swap. Scaling WITHOUT
 	// replacement is what replicas is for.
 	//
-	// THE ELASTIC-EP PROFILE PINS THIS NUMBER AT ONE; see ElasticEP.
+	// THE ELASTIC-EP PROFILE PINS THIS NUMBER AT ONE; see runtimeControl.
 	//
 	// ABOVE ONE, THE PODS OF AN INSTANCE NEED EACH OTHER'S ADDRESSES, so an instance of several Pods
 	// is rendered with stable names and publishes the first Pod's address, this instance's size and
@@ -523,23 +532,6 @@ type ModelDeploymentRole struct {
 	// +k8s:validation:maximum=3600
 	TerminationGracePeriodSeconds *int64 `json:"terminationGracePeriodSeconds,omitempty" protobuf:"varint,17,opt,name=terminationGracePeriodSeconds"` // nolint: lll
 
-	// ElasticEP opts this role into the managed elastic-EP profile: the operator then renders
-	// one dedicated logical Ray cluster for the deployment, with a CPU-only control-plane head
-	// and one whole-GPU TP group per DP engine rank. PRESENCE IS THE PROFILE DISCRIMINANT: a role
-	// without it renders exactly as it did before this field existed, and a profile that is
-	// turned on and off again describes a different deployment. The field's presence is frozen
-	// at creation. Width is editable for scale-up; scale-down is
-	// refused by admission in this release.
-	//
-	// The profile admits exactly one such role per deployment, running the vLLM engine as a
-	// single Server role of one instance of one Pod. Every member -- the reserved API/DP-master
-	// and every Ray-only worker -- takes a complete TP group declared through ExtraArgs.
-	// All GPUs are whole, unsliced and unpartitioned. Admission binds the resource count to TP.
-	// The auxiliary head requests no container resources and never counts toward Width.
-	//
-	// +optional
-	ElasticEP *ModelDeploymentRoleElasticEP `json:"elasticEp,omitempty" protobuf:"bytes,18,opt,name=elasticEp"`
-
 	// StartupTimeoutSeconds is the maximum time in seconds that a role replica's main container
 	// is given to pass its startup probe before kubelet restarts it. Unset defaults to 1800
 	// (30 minutes), which renders a startupProbe with periodSeconds 10 and failureThreshold 180.
@@ -549,27 +541,52 @@ type ModelDeploymentRole struct {
 	// +k8s:validation:minimum=10
 	// +k8s:validation:maximum=86400
 	StartupTimeoutSeconds *int32 `json:"startupTimeoutSeconds,omitempty" protobuf:"varint,20,opt,name=startupTimeoutSeconds"` // nolint: lll
+
+	// Pause withdraws this role from inference traffic, drains in-flight work, and holds scaler
+	// and elastic resizes without rolling Pods.
+	//
+	// +optional
+	Pause bool `json:"pause,omitempty" protobuf:"varint,22,opt,name=pause"`
+
+	// RuntimeControl defines live-reconciled engine control parameters applied without rolling
+	// worker Pods.
+	//
+	// +optional
+	RuntimeControl *ModelDeploymentRoleRuntimeControl `json:"runtimeControl,omitempty" protobuf:"bytes,23,opt,name=runtimeControl"` // nolint: lll
 }
 
-// ModelDeploymentRoleElasticEP is the elastic-EP profile of one role.
-//
-// Width is the only mutable field: it answers how large the collective currently should be,
-// which is a running-state question. This release accepts increases and unchanged values;
-// admission refuses a decrease until Elastic EP scale-down support is complete.
-// The role cannot enable or disable this profile after creation.
-// Its tensor parallel size comes from ExtraArgs and cannot change after creation.
-// The ordinary role fields' editability does not reach this role: acceleratorType, resources and
-// command are frozen with the profile, and replicas and size stay at one.
-type ModelDeploymentRoleElasticEP struct {
-	// Width is the total number of GPU engines in the elastic collective, INCLUDING the
-	// reserved API/DP-master member; width-1 of them are Ray-only workers. It is the total
-	// engine world the engine is told to run, not a Pod count and not a rank mapping: which
-	// member holds which rank is the engine's own runtime fact and is never implied by this
-	// number.
+// ModelDeploymentRoleRuntimeControl defines live-reconciled engine control parameters applied
+// without changing pod-spec-hash or restarting worker containers.
+type ModelDeploymentRoleRuntimeControl struct {
+	// Parameters holds loosely-coupled canonical runtime parameter overrides (such as
+	// scheduling.*, speculative.*, and elastic.dataParallelWidth) translated per engine.
 	//
-	// +k8s:validation:minimum=2
-	// +k8s:validation:maximum=64
-	Width int32 `json:"width" protobuf:"varint,1,name=width"`
+	// +optional
+	Parameters map[string]string `json:"parameters,omitempty" protobuf:"bytes,1,rep,name=parameters"`
+}
+
+// ModelDeploymentLoRAAdapter defines one deployment-level LoRA adapter backed by a ModelArtifact.
+type ModelDeploymentLoRAAdapter struct {
+	// Name is the unique adapter name exposed to inference clients.
+	//
+	// +required
+	// +k8s:validation:minLength=1
+	Name string `json:"name" protobuf:"bytes,1,name=name"`
+
+	// ArtifactRef names a ModelArtifact in this namespace holding the LoRA adapter weights.
+	//
+	// +required
+	ArtifactRef core.LocalObjectReference `json:"artifactRef" protobuf:"bytes,2,name=artifactRef"`
+
+	// SubPath selects a subdirectory within the referenced ModelArtifact containing the adapter weights.
+	//
+	// +optional
+	SubPath string `json:"subPath,omitempty" protobuf:"bytes,3,opt,name=subPath"`
+
+	// Pinned marks the adapter as preferred for retention under slot pressure.
+	//
+	// +optional
+	Pinned bool `json:"pinned,omitempty" protobuf:"varint,4,opt,name=pinned"`
 }
 
 // ModelDeploymentRoleTopology is the topology request for one independent replica group.
@@ -905,7 +922,7 @@ type ModelDeploymentStatus struct {
 
 	// Conditions is the finer view, one condition per axis: DomainRegistered, QuotaReserved,
 	// CacheAttached, ReplicasUpToDate, RoleKindsReady, KVEventsPublishing, RouterReady,
-	// WeightsReady. They are independent —
+	// WeightsReady, RuntimeControlSynced. They are independent —
 	// "quota reserved but cache not attached" is a real and actionable state — which is what a single
 	// phase string cannot carry.
 	//
@@ -1393,6 +1410,54 @@ type ModelDeploymentRoleStatus struct {
 	// +optional
 	// +listType=atomic
 	Groups []ModelDeploymentGroupStatus `json:"groups,omitempty" protobuf:"bytes,10,rep,name=groups"`
+
+	// RuntimeControl reports the latest live runtime-control convergence state for this role.
+	//
+	// +optional
+	RuntimeControl *ModelDeploymentRoleRuntimeControlStatus `json:"runtimeControl,omitempty" protobuf:"bytes,11,opt,name=runtimeControl"` // nolint: lll
+}
+
+// ModelDeploymentRoleRuntimeControlStatus reports live runtime-control convergence for one role.
+type ModelDeploymentRoleRuntimeControlStatus struct {
+	// ObservedGeneration is the metadata generation last evaluated for runtime control on this role.
+	//
+	// +optional
+	ObservedGeneration int64 `json:"observedGeneration,omitempty" protobuf:"varint,1,opt,name=observedGeneration"`
+
+	// Synced reports whether all answering instances of the role have converged to the desired runtime control.
+	Synced bool `json:"synced" protobuf:"varint,2,name=synced"`
+
+	// Reason summarizes the current runtime-control convergence state.
+	//
+	// +optional
+	Reason string `json:"reason,omitempty" protobuf:"bytes,3,opt,name=reason"`
+
+	// Message provides human-readable details about the runtime-control convergence state.
+	//
+	// +optional
+	Message string `json:"message,omitempty" protobuf:"bytes,4,opt,name=message"`
+
+	// Paused reports whether this role has completed withdrawal, drain, and pause enforcement.
+	//
+	// +optional
+	Paused bool `json:"paused,omitempty" protobuf:"varint,5,opt,name=paused"`
+
+	// AppliedConfigDigest is the canonical digest of the runtime-control configuration confirmed across converged instances.
+	//
+	// +optional
+	AppliedConfigDigest string `json:"appliedConfigDigest,omitempty" protobuf:"bytes,6,opt,name=appliedConfigDigest"`
+
+	// ConvergedPods is the number of answering Pods confirmed at the desired runtime-control digest and pause state.
+	ConvergedPods int32 `json:"convergedPods" protobuf:"varint,7,name=convergedPods"`
+
+	// TotalAnsweringPods is the total number of API-answering Pods evaluated for runtime control in this role.
+	TotalAnsweringPods int32 `json:"totalAnsweringPods" protobuf:"varint,8,name=totalAnsweringPods"`
+
+	// UnsupportedFields lists runtime-control fields rejected as unsupported by the running engine version.
+	//
+	// +optional
+	// +listType=atomic
+	UnsupportedFields []string `json:"unsupportedFields,omitempty" protobuf:"bytes,9,rep,name=unsupportedFields"`
 }
 
 // ModelDeploymentGroupStatus is one group's qualification, as published.

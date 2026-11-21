@@ -2,6 +2,7 @@ package worker
 
 import (
 	"context"
+	"slices"
 	"strconv"
 	"testing"
 
@@ -568,6 +569,136 @@ func TestReplacementRenderVersion_PartialGroupAndSlotCurrency(t *testing.T) {
 		progress, err := r.resolveReplacementSlot(ctx, getModelDeployment(t, cli), slot, &md.Spec.Roles[0], want)
 		require.NoError(t, err)
 		assert.Equal(t, modelDeploymentReplacementCleanup, progress.slot.Phase)
+		assert.True(t, progress.requeue)
+	})
+}
+
+func TestModelDeploymentReplacementSlot_DualHashRouterCurrency(t *testing.T) {
+	ctx := context.Background()
+	md := newRenderDeployment(func(md *workercore.ModelDeployment) {
+		md.Spec.Router = &workercore.ModelDeploymentRouter{
+			Name:                          workercore.ModelDeploymentRouterLLMD,
+			Replicas:                      ptr.To[int32](2),
+			Image:                         "registry.example/llmd-router:v1",
+			ImagePullPolicy:               core.PullIfNotPresent,
+			ImagePullSecrets:              []core.LocalObjectReference{{Name: "router-pull"}},
+			ExtraArgs:                     []string{"--v=2"},
+			RequestTimeoutSeconds:         ptr.To[int32](90),
+			DisaggregationThresholdTokens: ptr.To[int32](256),
+		}
+		md.Spec.Roles[0].ReplicaSize = 2
+	})
+
+	want := replicaMembersAt(t, md, "server", 0)
+	require.Len(t, want, 2)
+
+	legacyHashes := make([]string, len(want))
+	preUpgradeMembers := make([]*core.Pod, len(want))
+	for i := range want {
+		seat := modelDeploymentPodMemberIndex(want[i])
+		legacyHash := modelDeploymentDesiredPodLegacyRouterHash(md, &md.Spec.Roles[0], 0, seat, want[i])
+		require.NotEmpty(t, legacyHash)
+		require.NotEqual(t, want[i].Annotations[modelDeploymentPodSpecHashAnnotation], legacyHash)
+		legacyHashes[seat] = legacyHash
+
+		pre := want[i].DeepCopy()
+		pre.Annotations[modelDeploymentPodSpecHashAnnotation] = legacyHash
+		pre.Annotations[modelDeploymentRenderVersionAnnotation] = strconv.Itoa(modelDeploymentRenderVersion)
+		preUpgradeMembers[i] = pre
+	}
+
+	t.Run("partial-group adoption accepts pre-upgrade legacy router hash and rejects stale hash", func(t *testing.T) {
+		standingLegacy := preUpgradeMembers[0].DeepCopy()
+		cli := newModelDeploymentClient(md.DeepCopy(), newRenderAcceleratorType(), standingLegacy)
+		r := &ModelDeploymentReconciler{Client: cli, APIReader: cli}
+		slot := modelDeploymentReplacementSlot{Role: "server", Ordinal: 0}
+
+		missing, fillable, err := r.modelDeploymentPartialGroupMembers(ctx, md, slot, want)
+		require.NoError(t, err)
+		assert.True(t, fillable, "standing member with pre-upgrade full-router hash must be fillable")
+		require.Len(t, missing, 1)
+		assert.Equal(t, want[1].Name, missing[0].Name)
+
+		standingStale := preUpgradeMembers[0].DeepCopy()
+		standingStale.Annotations[modelDeploymentPodSpecHashAnnotation] = "stale-unrelated-hash"
+		cliStale := newModelDeploymentClient(md.DeepCopy(), newRenderAcceleratorType(), standingStale)
+		rStale := &ModelDeploymentReconciler{Client: cliStale, APIReader: cliStale}
+
+		missing, fillable, err = rStale.modelDeploymentPartialGroupMembers(ctx, md, slot, want)
+		require.NoError(t, err)
+		assert.False(t, fillable, "non-matching hash must not be adopted into a partial group")
+		assert.Empty(t, missing)
+	})
+
+	t.Run("replacementAdmitted accepts pre-upgrade legacy router members and rejects non-matching hash", func(t *testing.T) {
+		m0 := preUpgradeMembers[0].DeepCopy()
+		m1 := preUpgradeMembers[1].DeepCopy()
+		m0.Annotations[modelDeploymentRenderVersionAnnotation] = strconv.Itoa(modelDeploymentRenderVersion - 1)
+		m1.Annotations[modelDeploymentRenderVersionAnnotation] = strconv.Itoa(modelDeploymentRenderVersion - 1)
+		wl := admit(composeReplicaGroup(md, "server", 0, []*core.Pod{m0, m1}))
+		cli := newModelDeploymentClient(md.DeepCopy(), newRenderAcceleratorType(), m0, m1, wl)
+		r := &ModelDeploymentReconciler{Client: cli, APIReader: cli}
+		slot := modelDeploymentReplacementSlot{Role: "server", Ordinal: 0}
+
+		admitted, why, err := r.replacementAdmitted(ctx, md, slot, want)
+		require.NoError(t, err)
+		assert.True(t, admitted, "expected pre-upgrade legacy router group to be admitted, got reason: %s", why)
+		assert.Empty(t, why)
+
+		m1Stale := m1.DeepCopy()
+		m1Stale.Annotations[modelDeploymentPodSpecHashAnnotation] = "stale-unrelated-hash"
+		require.NoError(t, cli.Update(ctx, m1Stale))
+
+		admitted, why, err = r.replacementAdmitted(ctx, md, slot, want)
+		require.NoError(t, err)
+		assert.False(t, admitted)
+		assert.Contains(t, why, "does not carry the render")
+	})
+
+	t.Run("resolveReplacementSlot preserves pre-upgrade slot MemberHashes and supersedes stale hashes", func(t *testing.T) {
+		assert.False(t, replacementSuperseded(modelDeploymentReplacementSlot{
+			MemberHashes: replacementRenderHashes(want),
+		}, want))
+		assert.True(t, replacementSuperseded(modelDeploymentReplacementSlot{
+			MemberHashes: slices.Clone(legacyHashes),
+		}, want), "without legacy hashes only projected fingerprints match")
+		assert.False(t, replacementSupersededWithLegacy(modelDeploymentReplacementSlot{
+			MemberHashes: slices.Clone(legacyHashes),
+		}, want, legacyHashes), "with legacy hashes pre-upgrade slot MemberHashes remain current")
+
+		m0 := preUpgradeMembers[0].DeepCopy()
+		m1 := preUpgradeMembers[1].DeepCopy()
+		wl := admit(composeReplicaGroup(md, "server", 0, []*core.Pod{m0, m1}))
+		slot := modelDeploymentReplacementSlot{
+			Role:               "server",
+			Ordinal:            0,
+			Phase:              modelDeploymentReplacementWaitingForAdmission,
+			MemberHashes:       slices.Clone(legacyHashes),
+			CurrentMemberUIDs:  []types.UID{m0.UID, m1.UID},
+			CurrentWorkloadUID: wl.UID,
+		}
+		cli := newModelDeploymentClient(md.DeepCopy(), newRenderAcceleratorType(), m0, m1, wl)
+		r := &ModelDeploymentReconciler{Client: cli, APIReader: cli}
+
+		progress, err := r.resolveReplacementSlot(ctx, getModelDeployment(t, cli), slot, &md.Spec.Roles[0], want)
+		require.NoError(t, err)
+		assert.True(t, progress.cleared, "admitted pre-upgrade replacement with legacy MemberHashes must clear cleanly")
+
+		staleSlot := modelDeploymentReplacementSlot{
+			Role:              "server",
+			Ordinal:           0,
+			Phase:             modelDeploymentReplacementWaitingForAdmission,
+			MemberHashes:      []string{"stale-0", "stale-1"},
+			CurrentMemberUIDs: []types.UID{m0.UID, m1.UID},
+		}
+		cliStale := newModelDeploymentClient(md.DeepCopy(), newRenderAcceleratorType(), m0.DeepCopy(), m1.DeepCopy())
+		rStale := &ModelDeploymentReconciler{Client: cliStale, APIReader: cliStale}
+
+		progress, err = rStale.resolveReplacementSlot(ctx, getModelDeployment(t, cliStale), staleSlot, &md.Spec.Roles[0], want)
+		require.NoError(t, err)
+		assert.False(t, progress.cleared)
+		assert.Equal(t, modelDeploymentReplacementCleanup, progress.slot.Phase,
+			"slot carrying stale MemberHashes matching neither projected nor legacy must supersede")
 		assert.True(t, progress.requeue)
 	})
 }

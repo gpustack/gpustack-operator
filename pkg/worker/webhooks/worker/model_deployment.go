@@ -32,6 +32,7 @@ import (
 	"gpustack.ai/gpustack/pkg/worker/kvcache/inject"
 	"gpustack.ai/gpustack/pkg/worker/kvcache/mooncake"
 	"gpustack.ai/gpustack/pkg/worker/kvcache/router"
+	"gpustack.ai/gpustack/pkg/worker/runtimecontrol"
 	"gpustack.ai/gpustack/pkg/worker/settings"
 )
 
@@ -986,7 +987,8 @@ func (r *ModelDeploymentWebhook) ValidateDelete(
 func validateModelDeployment(
 	md *workercore.ModelDeployment, existingRoles sets.Set[string],
 ) field.ErrorList {
-	errs := validateModelDeploymentRoles(md)
+	errs := validateModelDeploymentModel(md)
+	errs = append(errs, validateModelDeploymentRoles(md)...)
 	errs = append(errs, validateModelDeploymentKVCache(md)...)
 	errs = append(errs, validateModelDeploymentRolesCount(md)...)
 	errs = append(errs, validateModelDeploymentRoleNames(md)...)
@@ -1112,15 +1114,22 @@ func validateModelDeploymentRouter(md *workercore.ModelDeployment) field.ErrorLi
 
 	var errs field.ErrorList
 	argsPath := field.NewPath("spec", "router", "extraArgs")
+	hasIsolation := modelDeploymentRequiresRouterIsolation(md)
 	for i, arg := range md.Spec.Router.ExtraArgs {
 		name := workerctrl.ModelDeploymentArgName(arg)
-		if !slices.Contains(modelDeploymentRouterOwnedArgs[md.Spec.Router.Name], name) {
+		if slices.Contains(modelDeploymentRouterOwnedArgs[md.Spec.Router.Name], name) {
+			errs = append(errs, field.Invalid(argsPath.Index(i), arg, fmt.Sprintf(
+				"%q is set by the operator for router %q and must not be supplied here, because two "+
+					"values for it cannot be told apart", name, md.Spec.Router.Name,
+			)))
 			continue
 		}
-		errs = append(errs, field.Invalid(argsPath.Index(i), arg, fmt.Sprintf(
-			"%q is set by the operator for router %q and must not be supplied here, because two "+
-				"values for it cannot be told apart", name, md.Spec.Router.Name,
-		)))
+		if hasIsolation && modelDeploymentRouterRuntimeControlForbiddenArgs.Has(name) {
+			errs = append(errs, field.Invalid(argsPath.Index(i), arg, fmt.Sprintf(
+				"%q is incompatible with runtimeControl/engine-sentinel router isolation and must not be supplied",
+				name,
+			)))
+		}
 	}
 
 	// THE THRESHOLD IS REFUSED RATHER THAN IGNORED on the routers that have no concept for it. A
@@ -1783,6 +1792,7 @@ func validateModelDeploymentRoles(md *workercore.ModelDeployment) field.ErrorLis
 		// refuses against are not all the router's: SGLang's bootstrap registry follows the role
 		// and renders on an unrouted prefiller, and the router-gated walk never runs for one.
 		errs = append(errs, validateModelDeploymentRolePorts(md, role, rolePath)...)
+		errs = append(errs, validateModelDeploymentRoleRuntimeControl(md, role, rolePath)...)
 	}
 
 	return errs
@@ -2030,27 +2040,38 @@ func validateModelDeploymentKVCacheDtype(md *workercore.ModelDeployment, owned b
 	return errs
 }
 
-// validateModelDeploymentRoleReservedMountPaths refuses, while spec.model.artifactRef is set, a
-// role volume at, inside or around the paths the weights are mounted at: one inside would shadow
-// part of the weights, one around them would shadow all of them.
+// validateModelDeploymentRoleReservedMountPaths refuses a role volume at, inside or around the
+// operator-owned mount paths (artifact weights/cache when spec.model.artifactRef is set, and the
+// read-only engine-sentinel mount path on sentinel-injected roles).
 func validateModelDeploymentRoleReservedMountPaths(
 	md *workercore.ModelDeployment, role *workercore.ModelDeploymentRole, rolePath *field.Path,
 ) field.ErrorList {
-	if md.Spec.Model.ArtifactRef == nil {
-		return nil
-	}
-
 	var errs field.ErrorList
+	sentinelInjected := workerctrl.ModelDeploymentRoleSupportsEngineSentinel(md, role)
 	for i, av := range role.AdditionalVolumes {
-		for _, reserved := range []string{workerctrl.ModelDeploymentModelMountPath, workerctrl.ModelDeploymentModelCachePath} {
-			if !pathsOverlap(av.MountPath, reserved) {
+		if md.Spec.Model.ArtifactRef != nil {
+			matched := false
+			for _, reserved := range []string{workerctrl.ModelDeploymentModelMountPath, workerctrl.ModelDeploymentModelCachePath} {
+				if !pathsOverlap(av.MountPath, reserved) {
+					continue
+				}
+				errs = append(errs, field.Invalid(rolePath.Child("additionalVolumes").Index(i).Child("mountPath"),
+					av.MountPath, fmt.Sprintf(
+						"overlaps %q, where the operator mounts the weights spec.model.artifactRef names", reserved,
+					)))
+				matched = true
+				break
+			}
+			if matched {
 				continue
 			}
+		}
+		if sentinelInjected && pathsOverlap(av.MountPath, workerctrl.ModelDeploymentEngineSentinelMountPath) {
 			errs = append(errs, field.Invalid(rolePath.Child("additionalVolumes").Index(i).Child("mountPath"),
 				av.MountPath, fmt.Sprintf(
-					"overlaps %q, where the operator mounts the weights spec.model.artifactRef names", reserved,
+					"overlaps %q, where the operator mounts the read-only engine sentinel package",
+					workerctrl.ModelDeploymentEngineSentinelMountPath,
 				)))
-			break
 		}
 	}
 
@@ -2506,7 +2527,8 @@ func (r *ModelDeploymentWebhook) validateRoleResourcesAgainstAcceleratorTypes(
 				roleInPair = false
 			}
 		}
-		if role.AcceleratorType == "" || (role.Resources == nil && !roleInPair) {
+		roleNeedsRuntimeControl := role.RuntimeControl != nil
+		if role.AcceleratorType == "" || (role.Resources == nil && !roleInPair && !roleNeedsRuntimeControl) {
 			continue
 		}
 
@@ -2585,6 +2607,7 @@ func (r *ModelDeploymentWebhook) validateRoleResourcesAgainstAcceleratorTypes(
 	}
 
 	errs = append(errs, validateModelDeploymentKVTransferBackendAgainstAcceleratorTypes(md, seen)...)
+	errs = append(errs, validateModelDeploymentRuntimeControlAgainstAcceleratorTypes(md, seen)...)
 
 	return append(errs, validateModelDeploymentPairCannotShareOneAccelerator(md, seen, rolesPath)...), nil
 }
@@ -3278,5 +3301,198 @@ func modelDeploymentScalerReplicaCountsChanged(old, md *workercore.ModelDeployme
 		}
 	}
 
+	return false
+}
+
+// modelDeploymentRouterRuntimeControlForbiddenArgs are router arguments that expose transparent
+// passthrough or unauthenticated admin listeners, breaking the inference-only router allowlist
+// required when router isolation is active.
+var modelDeploymentRouterRuntimeControlForbiddenArgs = sets.New(
+	"--enable-igw",
+	"--admin-port",
+	"--admin-host",
+	"--control-plane-port",
+	"--control-plane-host",
+	"--enable-admin-api",
+	"--enable-control-plane",
+)
+
+// modelDeploymentEngineSentinelOwnedEnv are operator-managed engine sentinel environment
+// variables that must not be supplied directly on a managed role using runtimeControl.
+var modelDeploymentEngineSentinelOwnedEnv = sets.New(
+	"GPUSTACK_ENGINE_SENTINEL_ENABLE",
+	"GPUSTACK_ENGINE_SENTINEL_REQUIRE_ACK",
+	"GPUSTACK_ENGINE_SENTINEL_ENGINE",
+)
+
+// validateModelDeploymentModel rejects reserved model-level fields not yet enabled.
+func validateModelDeploymentModel(md *workercore.ModelDeployment) field.ErrorList {
+	if len(md.Spec.Model.LoRAAdapters) == 0 {
+		return nil
+	}
+	return field.ErrorList{field.Forbidden(
+		field.NewPath("spec", "model", "loraAdapters"),
+		"dynamic spec.model.loraAdapters is reserved for a future release pending ModelArtifact LoRA support",
+	)}
+}
+
+// modelDeploymentRequiresRouterIsolation reports whether the deployment has any role that
+// configures runtimeControl or runs the default managed engine sentinel.
+func modelDeploymentRequiresRouterIsolation(md *workercore.ModelDeployment) bool {
+	for i := range md.Spec.Roles {
+		role := &md.Spec.Roles[i]
+		if role.RuntimeControl != nil || workerctrl.ModelDeploymentRoleSupportsEngineSentinel(md, role) {
+			return true
+		}
+	}
+	return false
+}
+
+// validateModelDeploymentRoleRuntimeControlScope enforces role eligibility for runtimeControl.
+// Role pause has no scope restriction and is valid on any role.
+func validateModelDeploymentRoleRuntimeControlScope(
+	md *workercore.ModelDeployment,
+	role *workercore.ModelDeploymentRole,
+	rolePath *field.Path,
+) field.ErrorList {
+	if role.RuntimeControl == nil {
+		return nil
+	}
+
+	engine := md.Spec.Engine.Name
+	ctrlPath := rolePath.Child("runtimeControl")
+
+	var errs field.ErrorList
+	if len(role.Command) > 0 {
+		errs = append(errs, field.Forbidden(ctrlPath, "not supported on unmanaged roles that specify spec.roles[].command"))
+	}
+	if workerctrl.ModelDeploymentEffectiveRoleKind(role) == workercore.ModelDeploymentRoleKindEncode {
+		errs = append(errs, field.Forbidden(ctrlPath, "not supported on Encode roles"))
+	}
+	if role.AcceleratorType == "" {
+		errs = append(errs, field.Forbidden(ctrlPath, "requires spec.roles[].acceleratorType; CPU-only roles are not supported"))
+	}
+	if engine != workercore.ModelDeploymentEngineVLLM && engine != workercore.ModelDeploymentEngineSGLang {
+		errs = append(errs, field.Forbidden(ctrlPath, fmt.Sprintf(
+			"not supported for engine %q; supported engines are vLLM and SGLang", engine,
+		)))
+	}
+	if workerctrl.ModelDeploymentRoleUsesSGLangRay(engine, role) {
+		errs = append(errs, field.Forbidden(ctrlPath, "not supported on SGLang Ray roles"))
+	}
+	return errs
+}
+
+// validateModelDeploymentRoleRuntimeControl enforces role eligibility and engine sentinel env
+// ownership for sentinel-injected roles and runtimeControl.
+func validateModelDeploymentRoleRuntimeControl(
+	md *workercore.ModelDeployment,
+	role *workercore.ModelDeploymentRole,
+	rolePath *field.Path,
+) field.ErrorList {
+	var errs field.ErrorList
+	if role.RuntimeControl != nil {
+		errs = append(errs, validateModelDeploymentRoleRuntimeControlScope(md, role, rolePath)...)
+	}
+
+	if role.RuntimeControl != nil || workerctrl.ModelDeploymentRoleSupportsEngineSentinel(md, role) {
+		for i := range role.Env {
+			name := role.Env[i].Name
+			if !modelDeploymentEngineSentinelOwnedEnv.Has(name) {
+				continue
+			}
+			errs = append(errs, field.Invalid(rolePath.Child("env").Index(i), name, fmt.Sprintf(
+				"%q is managed by the operator engine sentinel and must not be supplied here",
+				name,
+			)))
+		}
+	}
+
+	return errs
+}
+
+// validateModelDeploymentRuntimeControlAgainstAcceleratorTypes validates runtimeControl.parameters
+// through the shared translator registry once AcceleratorTypes have been resolved.
+func validateModelDeploymentRuntimeControlAgainstAcceleratorTypes(
+	md *workercore.ModelDeployment, seen map[string]*worker.AcceleratorType,
+) field.ErrorList {
+	var errs field.ErrorList
+	rolesPath := field.NewPath("spec", "roles")
+	for i := range md.Spec.Roles {
+		role := &md.Spec.Roles[i]
+		if role.RuntimeControl == nil || len(role.RuntimeControl.Parameters) == 0 {
+			continue
+		}
+		rolePath := rolesPath.Index(i)
+		if len(validateModelDeploymentRoleRuntimeControlScope(md, role, rolePath)) > 0 {
+			continue
+		}
+
+		manufacturer := ""
+		if accType := seen[role.AcceleratorType]; accType != nil {
+			manufacturer = accType.Status.Detail.Manufacturer
+		}
+
+		vctx := runtimecontrol.ValidationContext{
+			Engine:         md.Spec.Engine.Name,
+			Manufacturer:   manufacturer,
+			ExtraArgs:      role.ExtraArgs,
+			HasKVConnector: modelDeploymentRoleHasKVConnector(md, role),
+		}
+		paramErrs := runtimecontrol.ValidateParameters(vctx, role.RuntimeControl.Parameters)
+		paramsPath := rolePath.Child("runtimeControl", "parameters")
+		hasElasticEP := runtimecontrol.RoleHasElasticEP(role)
+		for _, pErr := range paramErrs {
+			// Elastic EP width syntax, bounds, and --elastic-ep-max-dp-size ceiling are
+			// reported by ValidateModelDeploymentElasticEP when elastic.dataParallelWidth is
+			// non-empty; skip duplicate Invalid entries on the same key path.
+			if pErr.Key == runtimecontrol.ParamElasticDataParallelWidth &&
+				hasElasticEP &&
+				pErr.Reason == runtimecontrol.ParameterErrorInvalid {
+				continue
+			}
+			keyPath := paramsPath.Key(pErr.Key)
+			switch pErr.Reason {
+			case runtimecontrol.ParameterErrorForbidden:
+				errs = append(errs, field.Forbidden(keyPath, pErr.Message))
+			default:
+				errs = append(errs, field.Invalid(keyPath, pErr.Value, pErr.Message))
+			}
+		}
+	}
+	return errs
+}
+
+func normalizeRuntimeControlArgName(engine, arg string) string {
+	name := workerctrl.ModelDeploymentArgName(arg)
+	if engine != workercore.ModelDeploymentEngineVLLM || !strings.HasPrefix(name, "--") {
+		return name
+	}
+	head, tail, dotted := strings.Cut(name, ".")
+	head = strings.ReplaceAll(head, "_", "-")
+	if !dotted {
+		return head
+	}
+	return head + "." + tail
+}
+
+func modelDeploymentRoleHasKVConnector(
+	md *workercore.ModelDeployment, role *workercore.ModelDeploymentRole,
+) bool {
+	if md.Spec.KVCache != nil || md.Spec.KVTransfer != nil {
+		return true
+	}
+	if workerctrl.ModelDeploymentDeclaresBothHalves(md) && md.Spec.Router != nil {
+		return true
+	}
+	for _, arg := range role.ExtraArgs {
+		if arg == "--" {
+			break
+		}
+		name := normalizeRuntimeControlArgName(md.Spec.Engine.Name, arg)
+		if name == "--kv-transfer-config" || strings.HasPrefix(name, "--kv-transfer-config.") {
+			return true
+		}
+	}
 	return false
 }

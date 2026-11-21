@@ -17,6 +17,7 @@ import (
 	"gpustack.ai/gpustack/pkg/kubeclients/kubernetes/scheme"
 	"gpustack.ai/gpustack/pkg/nodefeature"
 	"gpustack.ai/gpustack/pkg/utils/strconvx"
+	"gpustack.ai/gpustack/pkg/worker/runtimecontrol"
 )
 
 // deployedMember builds one member of a replica, carrying only what the deployed reader reads: the
@@ -480,7 +481,7 @@ func TestActualElasticRenderCarriesExecutionFacts(t *testing.T) {
 		Accelerator: resource.NewQuantity(1, resource.DecimalSI),
 		Interface:   resource.NewQuantity(2, resource.DecimalSI),
 	}
-	md.Spec.Roles[0].ElasticEP = &workercore.ModelDeploymentRoleElasticEP{Width: 2}
+	runtimecontrol.SetElasticWidth(&md.Spec.Roles[0], 2)
 	md.ResourceVersion = "1"
 	require.NotNil(t, ModelDeploymentElasticRole(md), "the dispatcher takes the elastic path")
 

@@ -5,10 +5,9 @@
 # Recursively stage the contents of <src> into <dst>:
 #   - create <dst> (and any missing parents) when absent;
 #   - for every regular file, copy only when the destination is missing or its
-#     sha256 checksum differs from the source.
-#
-# The checksum guard keeps the copy idempotent and avoids rewriting (and thus
-# clobbering) a library file that a running container may already be mmap-ing.
+#     sha256 checksum differs from the source;
+#   - stage into a sibling temporary file and atomically rename over <dst> so
+#     running containers reading or mmap-ing mounted files never see a partial write.
 #
 set -euo pipefail
 
@@ -22,6 +21,14 @@ fi
 
 mkdir -p "${dst}"
 
+if command -v flock >/dev/null 2>&1; then
+    exec 9>"${dst}/.copy-dir.lock"
+    flock 9
+fi
+
+# Sweep any orphaned staging temp files left behind by an interrupted copy.
+find "${dst}" -type f -name '.*.stage-*' -delete 2>/dev/null || true
+
 # Walk regular files under <src>, relative to <src>, NUL-separated for safety.
 while IFS= read -r -d '' rel; do
     s="${src}/${rel}"
@@ -33,6 +40,13 @@ while IFS= read -r -d '' rel; do
             continue
         fi
     fi
-    mkdir -p "$(dirname "${d}")"
-    cp -f --preserve=mode,timestamps "${s}" "${d}"
+    d_dir="$(dirname "${d}")"
+    mkdir -p "${d_dir}"
+    tmp="$(mktemp "${d_dir}/.$(basename "${d}").stage-XXXXXX")"
+    if cp --preserve=mode,timestamps "${s}" "${tmp}" && mv -f "${tmp}" "${d}"; then
+        continue
+    else
+        rm -f "${tmp}"
+        exit 1
+    fi
 done < <(cd "${src}" && find . -type f -printf '%P\0')

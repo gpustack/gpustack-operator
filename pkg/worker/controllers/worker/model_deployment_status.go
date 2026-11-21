@@ -242,6 +242,8 @@ func (r *ModelDeploymentReconciler) syncModelDeploymentStatus(
 		desired, md.Status.Roles, meta.NewTime(r.modelDeploymentNow()), collective,
 	)
 
+	applyModelDeploymentRuntimeControlStatus(desired, md, observation.RuntimeControl)
+
 	// kubemeta.DeepEqual covers LastTransitionTime too, and that is correct rather than incidental:
 	// the condition accessors move it only when the condition's value changes, so an unchanged pass
 	// leaves it alone and compares equal.

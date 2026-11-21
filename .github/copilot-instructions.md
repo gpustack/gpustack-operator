@@ -101,7 +101,7 @@ repository content-exclusion policy must be updated independently.
   plain and short, without emoji, decorative symbols or circled digits; never put spec task IDs in Go comments.
 - Flag unsafe shared mutable state and needless complexity.
 
-## Python conventions (`model-transfer/python`)
+## Python conventions (`model-transfer/python` and `engine-sentinel/python`)
 
 - Favor precision over recall: only raise a finding when you can name a concrete input or runtime
   scenario that causes a wrong result, resource leak, security hole, or scale failure.
@@ -126,6 +126,16 @@ repository content-exclusion policy must be updated independently.
     `model-transfer` servers: flag removed/renamed wire fields or endpoints, changed derived-digest
     preimages within a contract version, required request fields without server defaults, or
     rejected unknown additive response fields.
+- Enforce `gpustack_engine_sentinel` (`engine-sentinel/python`) domain invariants:
+  - Staged flat and read-only via `PYTHONPATH` + `sitecustomize.py` with `dependencies = []` and
+    lazy engine imports; never mutate `VLLM_PLUGINS`, wrap container `argv`, or introduce
+    operator-managed API keys or auth Secrets.
+  - Guard `sitecustomize.py` chaining against symlink loops and duplicate `sys.path` entries;
+    keep the ASGI pause gate outermost so paused pods reject inference with 503 while preserving
+    `/gpustack/v1/*`, health, and `/metrics`.
+  - Verify `(rank_id, boot_id)` and `applied_digest` on multi-rank apply and boot-keyed rollback
+    (including apply/readback exceptions), preserve adaptive tracker state on clean validation
+    refusals, and treat missing or malformed base Prometheus gauges in `drain.py` as busy.
 - Flag security hazards on untrusted input (`eval`/`exec`/`compile`, `shell=True`, unsafe
   `pickle`/`marshal`/`yaml.load`, unvalidated path joins) and over-engineering (`delete:`, `reuse:`,
   `stdlib:`, `yagni:`, `merge:`, `shrink:`) when code duplicates helpers or adds single-caller layers.

@@ -295,6 +295,23 @@ func modelDeploymentRouterObserverPort(profile string) int32 {
 	return modelDeploymentRouterHTTPPort
 }
 
+// modelDeploymentRouterObserverPortForPod returns the observer port for a concrete router Pod.
+// When vllm-router or sglang-gateway runs behind the Envoy allowlist sidecar, its HTTP server is
+// bound to loopback and Envoy exposes GET /observer/endpoints on the dedicated observer port.
+func modelDeploymentRouterObserverPortForPod(profile string, routerPod *corev1.Pod) int32 {
+	if profile == workercore.ModelDeploymentRouterLLMD {
+		return modelDeploymentRouterMetricsPort
+	}
+	if routerPod != nil {
+		for i := range routerPod.Spec.Containers {
+			if routerPod.Spec.Containers[i].Name == modelDeploymentRouterEnvoyContainerName {
+				return modelDeploymentRouterObserverProxyPort
+			}
+		}
+	}
+	return modelDeploymentRouterObserverPort(profile)
+}
+
 // modelDeploymentObserverMaxBodyBytes caps one observer body. It is generous for a membership view
 // of a few hundred workers and small enough that a Router misbehaving cannot grow the response into
 // the reconciler's memory.
@@ -769,6 +786,9 @@ type modelDeploymentPassObservation struct {
 	// IT IS THE ALREADY-FETCHED, OWNER-CHECKED LIST, so populating it costs no second fetch and no
 	// probe.
 	CollectiveMembers []corev1.Pod
+	// RuntimeControl holds the pass's runtime-control reconciliation outcome, eligibility gates,
+	// and per-role status projection.
+	RuntimeControl *modelDeploymentRuntimeControlObservation
 }
 
 // modelDeploymentServingUnobserved is the answer a path that made no observation publishes.
@@ -1484,11 +1504,6 @@ func (r *ModelDeploymentReconciler) collectModelDeploymentRouterObservationsWith
 		fetch = defaultServingViewFetch
 	}
 
-	// The observer is served on the listener the owning profile already runs. llm-d serves it on
-	// its management listener, which is where its metrics and admin endpoints already are; the
-	// other two serve it on the request port their Service targets. The port comes from the
-	// profile, never from an arbitrary Pod port, because a Pod port is not a contract.
-	port := modelDeploymentRouterObserverPort(md.Spec.Router.Name)
 	// The dispatch journal is read only from the profile that publishes it. The other two publish
 	// the gateway's own last_job shape under that key, which this operator does not interpret.
 	journal := md.Spec.Router.Name == workercore.ModelDeploymentRouterLLMD
@@ -1516,11 +1531,12 @@ func (r *ModelDeploymentReconciler) collectModelDeploymentRouterObservationsWith
 
 			continue
 		}
+		podObserverPort := modelDeploymentRouterObserverPortForPod(md.Spec.Router.Name, routerPod)
 		observation, err := collectRouterServingView(collectCtx, func(
 			callCtx context.Context, path string,
 		) ([]byte, error) {
 			return fetch(callCtx, fmt.Sprintf("http://%s:%d%s",
-				routerPod.Status.PodIP, port, path))
+				routerPod.Status.PodIP, podObserverPort, path))
 		}, routerPod.UID)
 		if err != nil {
 			observations = append(observations, observation)

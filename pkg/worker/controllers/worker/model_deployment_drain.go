@@ -103,15 +103,36 @@ var modelDeploymentInFlightMetrics = map[string][]string{
 // admission refused that shape can carry, leaves nothing on the declared port, and the hook then
 // returns after the settle.
 //
-// It is an exec of the image's own python3, as the KV cache member's hook is: both engines are
-// Python programs, so the interpreter is there. An httpGet hook is not an option, because neither
-// engine has a route that answers only once it is idle.
+// It is an exec of the image's own python3, invoking gpustack_engine_sentinel.drain when the
+// version-pinned engine sentinel package is mounted on PYTHONPATH and falling back to an inline
+// stdlib script on non-sentinel roles (such as CPU-only, Encode, or SGLang Ray). An httpGet hook
+// is not an option, because neither engine has a route that answers only once it is idle.
 func modelDeploymentDrainHook(
-	engine string, port int32, scheme core.URIScheme, graceSeconds int64,
+	engine string, port int32, scheme core.URIScheme, graceSeconds int64, useEngineSentinel bool,
 ) *core.LifecycleHandler {
-	url := fmt.Sprintf("%s://127.0.0.1:%d/metrics", strings.ToLower(string(scheme)), port)
+	if scheme == "" {
+		scheme = core.URISchemeHTTP
+	}
+	schemeLower := strings.ToLower(string(scheme))
+	deadlineSeconds := modelDeploymentDrainDeadlineSeconds(graceSeconds)
+	if useEngineSentinel {
+		return &core.LifecycleHandler{
+			Exec: &core.ExecAction{
+				Command: []string{
+					"python3", "-m", "gpustack_engine_sentinel.drain",
+					"--engine", engine,
+					"--port", strconv.Itoa(int(port)),
+					"--scheme", schemeLower,
+					"--settle", strconv.Itoa(int(modelDeploymentDrainSettleSeconds)),
+					"--deadline", strconv.Itoa(int(deadlineSeconds)),
+				},
+			},
+		}
+	}
+
+	url := fmt.Sprintf("%s://127.0.0.1:%d/metrics", schemeLower, port)
 	script := modelDeploymentDrainScript(url, modelDeploymentInFlightMetrics[engine],
-		modelDeploymentDrainSettleSeconds, modelDeploymentDrainDeadlineSeconds(graceSeconds))
+		modelDeploymentDrainSettleSeconds, deadlineSeconds)
 
 	return &core.LifecycleHandler{
 		Exec: &core.ExecAction{Command: []string{"python3", "-c", script}},

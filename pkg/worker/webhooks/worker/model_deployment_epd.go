@@ -13,6 +13,7 @@ import (
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
 	workerctrl "gpustack.ai/gpustack/pkg/worker/controllers/worker"
 	"gpustack.ai/gpustack/pkg/worker/kvcache/inject"
+	"gpustack.ai/gpustack/pkg/worker/runtimecontrol"
 )
 
 // modelDeploymentDeclaresEncode reports whether the deployment declares an Encode role, which is
@@ -207,8 +208,8 @@ func validateModelDeploymentEPDEncodeShape(md *workercore.ModelDeployment, encod
 			)))
 	}
 
-	if role.ElasticEP != nil {
-		errs = append(errs, field.Forbidden(rolePath.Child("elasticEp"),
+	if runtimecontrol.RoleHasElasticEP(role) {
+		errs = append(errs, field.Forbidden(modelDeploymentElasticWidthPath(rolePath),
 			fmt.Sprintf(
 				"role %q cannot carry the elastic-EP profile: that profile admits a single Server "+
 					"role of one instance of one Pod, and scales the group holding it, while an "+

@@ -31,6 +31,7 @@ import (
 	"gpustack.ai/gpustack/pkg/setting/settingtest"
 	workerctrl "gpustack.ai/gpustack/pkg/worker/controllers/worker"
 	"gpustack.ai/gpustack/pkg/worker/kvcache/inject"
+	"gpustack.ai/gpustack/pkg/worker/runtimecontrol"
 )
 
 // modelDeployment builds a valid single-role deployment for the given engine, which every case then
@@ -326,7 +327,7 @@ func TestModelDeploymentWebhook_InterfaceCreate(t *testing.T) {
 			r.Kind = workercore.ModelDeploymentRoleKindServer
 			r.Replicas = 1
 			r.ReplicaSize = 1
-			r.ElasticEP = &workercore.ModelDeploymentRoleElasticEP{Width: 2}
+			runtimecontrol.SetElasticWidth(r, 2)
 			r.ExtraArgs = []string{"--tensor-parallel-size", "2"}
 			r.Resources = &workercore.ModelDeploymentRoleResources{
 				Accelerator: ptr.To(resource.MustParse("2")),
@@ -4902,6 +4903,31 @@ func TestModelDeploymentWebhookScalerFenceHoldsTheSingleWriterRule(t *testing.T)
 			},
 		},
 		{
+			name: "a user may edit runtimeControl on a bound deployment",
+			mutate: func(old, md *workercore.ModelDeployment) {
+				md.Spec.Roles[0].RuntimeControl = &workercore.ModelDeploymentRoleRuntimeControl{
+					Parameters: map[string]string{
+						runtimecontrol.ParamSchedulingMaxActiveRequests: "32",
+					},
+				}
+			},
+		},
+		{
+			name: "a user may toggle pause on a bound deployment",
+			mutate: func(old, md *workercore.ModelDeployment) {
+				md.Spec.Roles[0].Pause = true
+			},
+		},
+		{
+			name: "a user may edit router settings on a bound deployment",
+			mutate: func(old, md *workercore.ModelDeployment) {
+				md.Spec.Router = &workercore.ModelDeploymentRouter{
+					Name:     workercore.ModelDeploymentRouterLLMD,
+					Replicas: ptr.To[int32](2),
+				}
+			},
+		},
+		{
 			name: "a user cannot add a binding",
 			mutate: func(old, md *workercore.ModelDeployment) {
 				md.Annotations[workercore.ModelDeploymentScalerBindingAnnotationKey] = `{"scalerName":"other","scalerUID":"uid-2","term":1}`
@@ -5556,13 +5582,15 @@ func TestModelDeploymentWebhook_CPUOnlyRole(t *testing.T) {
 			wantMsg:    "hardware partitioning cannot be requested when acceleratorType is omitted",
 		},
 		{
-			name: "rejected when elasticEp is set",
+			name: "rejected when elastic.dataParallelWidth is set",
 			role: workercore.ModelDeploymentRole{
 				Name:            "server",
 				Replicas:        1,
 				AcceleratorType: "",
-				ElasticEP: &workercore.ModelDeploymentRoleElasticEP{
-					Width: 2,
+				RuntimeControl: &workercore.ModelDeploymentRoleRuntimeControl{
+					Parameters: map[string]string{
+						runtimecontrol.ParamElasticDataParallelWidth: "2",
+					},
 				},
 			},
 			wantFields: []string{"spec.roles[0].acceleratorType"},
@@ -5975,7 +6003,7 @@ func TestModelDeploymentWebhook_AscendA5InterfaceCreate(t *testing.T) {
 						r.AcceleratorType = "ascend-pool"
 						r.Replicas = 1
 						r.ReplicaSize = 1
-						r.ElasticEP = &workercore.ModelDeploymentRoleElasticEP{Width: 2}
+						runtimecontrol.SetElasticWidth(r, 2)
 						r.ExtraArgs = []string{"--tensor-parallel-size", "2"}
 						r.Resources = &workercore.ModelDeploymentRoleResources{
 							Accelerator: ptr.To(qty2),
