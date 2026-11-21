@@ -191,6 +191,42 @@ vendors or unpartitioned pools, slice percentages on pools without logical slici
 counts on slice/partition requests, and whole-card counts exceeding *`status.accelerator.capacity`*.
 Host CPU and RAM scale by card count or slice/partition VRAM share.
 
+### Preferred accelerator placement
+
+Steer kubelet's intra-node device selection to specific cards by setting a `Pod` annotation for
+whole, shared, or logical-slice requests:
+
+```yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: preferred-card-pod
+  annotations:
+    device.gpustack.ai/accelerator.preferred-index: "3,1"  # comma-separated Devices index order
+    # device.gpustack.ai/accelerator.preferred-id: "GPU-...,GPU-..."  # takes precedence over preferred-index
+spec:
+  nodeName: gpu-node-0  # annotations select cards inside one node; pin the node separately
+  containers:
+    - name: main
+      image: ubuntu:24.04
+      resources:
+        limits:
+          nvidia.com/gpu: "2"
+```
+
+- **Annotation precedence**: Presence of `device.gpustack.ai/accelerator.preferred-id` (even when
+  empty) overrides `device.gpustack.ai/accelerator.preferred-index`.
+- **Value matching**: Match comma-separated IDs or indices against the node's
+  `Devices.spec.groups[].accelerators[]` (`id` or `index`); whitespace and duplicates are ignored.
+- **Advisory intra-node hint**: Applies only inside the scheduled `Node` via
+  `GetPreferredAllocation`; unavailable, cross-node, or insufficient cards fall back to other
+  eligible cards on the node.
+- **Selection order**: Over-specified lists take the highest-priority available cards up to the
+  request size, returned in ascending hardware order.
+- **Unsupported modes**: Hardware partitioning (`Partitioned` / MIG) and SSH visibility sidecars
+  ignore preferred-card annotations.
+- **Pod scope**: Both annotations apply at `Pod` scope across all containers requesting accelerators.
+
 ## Request rules
 
 Admission groups containers by lifetime: standard *`spec.initContainers`* (without

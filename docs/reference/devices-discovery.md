@@ -743,6 +743,28 @@ does (see [Container identification](#container-identification)). The call
 is advisory by API contract, so under a restrictive TopologyManager policy the kubelet allocates the
 NUMA-aligned set before consulting the plugin at all.
 
+### Preferred card annotations
+
+`GetPreferredAllocation` reads two optional `Pod`-level annotations for `Exclusive`, `Shared`, and
+`Sliced` requests (`Partitioned` and `Visibility` return an empty response):
+
+- `device.gpustack.ai/accelerator.preferred-id`: comma-separated `Devices.spec.groups[].accelerators[].id`
+  values in priority order (trimmed and deduplicated). When this key is present on
+  `Pod.metadata.annotations` — even with an empty value — `preferred-index` is ignored.
+- `device.gpustack.ai/accelerator.preferred-index`: comma-separated
+  `Devices.spec.groups[].accelerators[].index` integers resolved to `acc.ID` in declared order when
+  `preferred-id` is absent.
+
+Matching accelerators are ranked with kubelet `must-include` tokens first and declared preference
+order second, truncated to `AllocationSize`, and sorted in ascending `Devices.spec.groups` hardware
+order before returning.
+
+Unknown or cross-node IDs are skipped safely; if eligible preferred cards do not cover
+`AllocationSize`, the response fills remaining slots from unselected node cards and returns an empty
+hint when total available cards are insufficient. See
+[Preferred accelerator placement](../modules/devices/requests.md#preferred-accelerator-placement) for
+the operator example.
+
 ### Fungible partition tokens
 
 The `Partitioned` family is the one exception to accelerator-bound tokens. Its allocation treats the

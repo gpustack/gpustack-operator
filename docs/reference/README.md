@@ -42,6 +42,7 @@ tables, raw captures and deterministic simulations; public guides own operator p
 | `ascend-docker-runtime`, `hccl-ranktable`, `/etc/hccl_rootinfo.json`, `/lib/route.conf`, `/etc/hixlep` | Ascend A5 | [Ascend A5 Matrix](ascend-a5-matrix.md#conditional-host-mounts) |
 | `ASCEND_LOCAL_COMM_RES`, `ASCEND_GLOBAL_RESOURCE_CONFIG`, `roce:host`, `ub_ctp`, `ub_rtp:device`, `uboe:device` | Ascend A5 | [Ascend A5 Matrix](ascend-a5-matrix.md#modeldeployment-matrix) |
 | `Devices`, `gpustack-cpu-info`, `LogicalSliced`, `GetPreferredAllocation` | API / Ledger | [Device Discovery](devices-discovery.md#stage-2-device-manager-dm) |
+| `device.gpustack.ai/accelerator.preferred-id`, `device.gpustack.ai/accelerator.preferred-index` | Placement | [Device Discovery](devices-discovery.md#preferred-card-annotations) |
 | `AcceleratorType`, `InstanceType`, `ResourceFlavor`, `ClusterQueue`, `LocalQueue` | Scheduling | [Scheduling Chain](devices-scheduling.md#stage-4-kueue-chain) |
 | `gpustack-node-devices`, `OnceMaxRequest`, `EX` / `SH` / `SL` / `PT` | Admission | [Admission](devices-admission.md#four-view-status) |
 | `nvidia.com/gpu.partitioned.mig-*`, `mig-3g.40gb`, `device.gpustack.ai/accelerator.allocated` | Capture | [NVIDIA MIG Transcripts](devices-mig-transcripts.md#all-physical-configuration) |
