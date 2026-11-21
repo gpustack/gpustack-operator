@@ -314,4 +314,4 @@ Cross-node behavior, other models and other collective backends remain unmeasure
 [Model Deployment Routing](routing.md) (router policies and discovery) ·
 [Elastic EP Benchmark](elastic-ep-benchmark.md) (live collective expansion)
 
-**Next** → [Model Deployment Status](status.md)
+**Next** → [Model Deployment Scaling](scaling.md) — scale serving replicas from live engine signals.

@@ -203,7 +203,7 @@ global.certmanager.enabled=false` keeps every component, worker included, self-m
 Naming an existing issuer (`global.certmanager.issuer.name`) now covers Kueue's certificates as well
 as the worker's, and no self-signed `Issuer` is created for either.
 
-#### Disabling cert-manager
+### Disabling cert-manager
 
 After the migration, turning cert-manager on later needs no flags: everything that `--set
 global.certmanager.enabled=auto` (or `true`) once changed (`insecureSkipTLSVerify` on the
@@ -326,4 +326,4 @@ transfer) · [High Availability Operations](../high-availability.md) (the replic
 `values.yaml`) · [Migrating from v0.5.x](from-v0.5.md) · [Migration Troubleshooting](troubleshooting.md)
 (when the transfer wedges)
 
-**Next** → [Settings](../../reference/settings.md) — the configuration surface the transfer unifies.
+**Next** → [Installation Modes](../installation-modes.md) — configure chart values and runtime settings.

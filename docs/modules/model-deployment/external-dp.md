@@ -351,7 +351,7 @@ the recorded single-replica, four-rank configuration, `eligible` read `1` (one r
 
 The Router's registry and per-worker counters are the end-to-end evidence; a successful response
 through the Router alone does not prove all ranks are selected.
-See [Status](status.md) and [Routing](routing.md).
+See [Serving observations](routing.md#serving-observations).
 
 ## Probe and health
 
@@ -450,4 +450,4 @@ scale-down is unverified.
 [External DP Benchmark](external-dp-benchmark.md) (the measured crossover against a
 monolithic wide tensor-parallel group)
 
-**Next** → [Model Deployment Status](status.md) — read *`parallelism.loadBalance`* and the endpoint gate.
+**Next** → [External DP Benchmark](external-dp-benchmark.md) — compare per-rank serving with wide tensor parallelism.

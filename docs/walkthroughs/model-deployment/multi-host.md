@@ -250,4 +250,4 @@ the role stops serving while its replacement is rebuilt.
 [Elastic EP Walkthrough](elastic-ep.md) (collective expansion) ·
 [External DP Walkthrough](external-dp.md) (fixed per-rank serving)
 
-**Next** → [Model Deployment Status](../../modules/model-deployment/status.md) — observe status conditions and phases.
+**Next** → [Model Deployment Scaling Walkthrough](scaling.md) — plan and commit replica counts from live metrics.

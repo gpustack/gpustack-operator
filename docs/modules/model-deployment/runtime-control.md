@@ -19,6 +19,7 @@ flowchart LR
 - [Configuration](#configuration)
 - [Supported parameters](#supported-parameters)
 - [Isolation and safety](#isolation-and-safety)
+- [Pause and retirement](#pause-and-retirement)
 - [Step 1: Configure boot ceilings](#step-1-configure-boot-ceilings)
 - [Step 2: Tune or pause roles](#step-2-tune-or-pause-roles)
 - [Step 3: Verify convergence status](#step-3-verify-convergence-status)
@@ -156,6 +157,39 @@ Every sentinel-injected engine mints a fresh `boot_id` UUID at startup and fails
 
 A `ModelDeploymentScaler` coexists with *`pause`* and *`runtimeControl`* because `scaler-binding` restricts only *`spec.roles[].replicas`*. The scaler holds all replica writes (`Blocked=True`, reason `RolePaused`) while desired or current-generation observed pause state is `true`.
 
+## Pause and retirement
+
+Role pause, spec-driven replica retirement, and `Pod` deletion drain use distinct lifecycles:
+
+| Mode | Trigger | Capacity and quota | Signal and recovery |
+|---|---|---|---|
+| **Paused** | *`roles[].pause: true`* | Keeps `Pod`s, loaded weights, and Kueue `Workload` quota in place | `RuntimeControlSynced=True`, `paused: true`, `/ready=503`, `/live=200`, scaler `RolePaused`; set `pause: false` to resume |
+| **Retiring** | *`replicas`* decrease, surplus shed, or dropped role | Holds `Pod`s and `Workload` until drain succeeds, then deletes both to release quota | *`status.retirement.state`* progresses through protocol steps; re-declaring the ordinal before `Deleting` adopts it (`RetirementAdopted`) |
+| **`Pod` drain** | Rollout, eviction, or post-retirement `Pod` delete | Holds node devices up to *`terminationGracePeriodSeconds`* (`G`, default `30` s) | `preStop` hook drains in-flight work before `SIGTERM` |
+
+### Retirement budgets
+
+At most one retirement operation runs per deployment (*`status.retirement`*); unscheduled, unadmitted replicas skip the protocol and delete immediately.
+
+| Retirement step | Budget | Behavior |
+|---|---|---|
+| `Withdrawing` | `30` s | Revokes `endpoint-eligible` and waits for Router withdrawal confirmation (requires *`spec.router`*) |
+| `Draining` | `240` s | Waits `60` s on disaggregated (*Prefill*/*Decode* or external *DP*) replicas, then requires two consecutive idle `pods/exec` `/metrics` reads |
+| `Settling` | `30` s | Commits `Deleting` on UID-preconditioned `Pod`s and `Workload` within a `300` s total operation ceiling |
+
+Exhausting any budget before `Deleting` sets `state: Aborted` and retains the replica's `Pod`s and quota. Inspect active or stalled retirement with:
+
+```bash
+kubectl -n <namespace> get modeldeployment <name> -o json \
+  | jq '{retirement: .status.retirement, roles: [.status.roles[] | {name, ready, desired, runtimeControl}]}'
+```
+
+### Drain window and grace
+
+On `Pod` deletion, the `preStop` hook serves normally for `0`–`5` s so late-routed requests land, polls engine in-flight gauges (`vllm:num_requests_running` + `vllm:num_requests_waiting`, or SGLang running, queue, bootstrap, and transfer gauges) from `5` s to `G - 5` (`15`–`3600` s allowed for `G`), and exits on two consecutive idle reads so `SIGTERM` arrives by `G - 3`.
+
+Set *`roles[].terminationGracePeriodSeconds: 45`* on SGLang *Prefill* and *Decode* roles because SGLang's split-role scheduler waits ~15 s after `SIGTERM` even when idle. Take-over *`roles[].command`* roles receive no `preStop` hook.
+
 ## Step 1: Configure boot ceilings
 
 Apply a `ModelDeployment` declaring any static ceilings in *`roles[].extraArgs`*. If a managed router is present, wait for the router `Deployment` to converge onto its Envoy allowlist.
@@ -217,10 +251,12 @@ Operations that require static restart orchestration or cluster-level GPU reclai
 | `AmbiguousOperation` reported | Control-plane `POST` timed out mid-transition | Check worker `Pod` logs and `/gpustack/v1/runtime_config` state |
 | `Pod` stays unready after restart | Engine failed startup replay or `/gpustack/v1/ack` | Inspect operator worker logs and `Pod` `/gpustack/v1/ready` response |
 | `RolePaused` blocks scaler | Desired or observed `pause` state is `true` | Set `spec.roles[*].pause: false` and wait for `RuntimeControlSynced` |
+| Retirement ends `Aborted` after 30 s | Deployment omits *`spec.router`*, so direct `Service` withdrawal cannot be proved | Configure *`spec.router`* when scaling down active serving replicas, or scale down before admission |
+| Disaggregated retirement stays `Draining` | Normal `60` s *PD*/external-*DP* handoff grace window or busy/restarting/unmanaged member | Inspect `status.retirement.reason` and member `/metrics`; raise *`replicas`* before `Deleting` to cancel (`RetirementAdopted`) if needed |
 | Admission rejects `loraAdapters` | Dynamic LoRA execution is not yet supported | Omit `spec.model.loraAdapters` until `ModelArtifact` LoRA support lands |
 
 ---
 
-**See also** — [Online Runtime Control Walkthrough](../../walkthroughs/model-deployment/runtime-control.md) (recorded NVIDIA H200 run) · [Configuration](configuration.md) (role fields and rollout hash) · [Routing](routing.md) (router policies and allowlist isolation) · [Status](status.md) (deployment conditions) · [Scaling](scaling.md) (`ModelDeploymentScaler` behavior) · [Elastic EP](elastic-ep.md) (collective resize serialization)
+**See also** — [Online Runtime Control Walkthrough](../../walkthroughs/model-deployment/runtime-control.md) (recorded NVIDIA H200 run) · [Configuration](configuration.md) (role fields, readiness, and rollout hash) · [Routing](routing.md) (router policies and endpoint eligibility) · [Scaling](scaling.md) (`ModelDeploymentScaler` behavior) · [Elastic EP](elastic-ep.md) (collective resize serialization)
 
 **Next** → [Model Deployment Routing](routing.md) — inspect router policies and traffic targets.

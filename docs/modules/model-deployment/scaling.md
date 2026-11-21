@@ -53,24 +53,6 @@ spec:
       roleTargets:
         - name: server  # unique scaled role name
           target: "8"   # required positive quantity; requests per ready replica
-    # Alternative for a Server role; replace type and proportional above.
-    # type: TokenThroughput
-    # tokenThroughput:
-    #   serverTargetTokensPerSecond: "2000"  # required for a Server role
-    # Alternative with a forecast; replace type and proportional above.
-    # type: Predictive
-    # predictive:
-    #   tokenThroughput:
-    #     serverTargetTokensPerSecond: "2000"  # fallback capacity
-    #   serverTokenCapacityPerReplica: "2000"  # forecast capacity
-    # Optional offline catalog resolution for missing TokenThroughput or Predictive
-    # capacities. An absent capacityPrior is manual; a present one resolves missing
-    # fields from the catalog (explicit fields always win; failures fail closed).
-    # capacityPrior:
-    #   catalogRef:
-    #     name: llm-serving-priors  # optional ConfigMap in this namespace
-    #     key: priors.yaml          # default when catalogRef is present; YAML or JSON
-    #   headroom: "0.75"  # default; (0, 1], applies only to catalog-derived fields
   behavior:
     scaleUp:
       stabilizationWindowSeconds: 0  # default; 0 to 600, zero disables the wait
@@ -120,9 +102,7 @@ The three algorithms differ in the signal they read and the timescale they react
 averages token rates over two windows, and `Predictive` forecasts those rates ahead of the peak. The workload decides which one fits: a request count that tracks GPU load, a
 compute load that request counts misstate, or traffic that climbs before the capacity arrives.
 
-A deterministic local simulation compares all three on identical synthetic traffic and records replica adjustments, request outcomes and true per-token latencies in [Model
-Deployment Scaling Simulation](scaling-simulation.md). For H100 and H200 hardware results and practical tuning guidance, see [Scaling Benchmark](scaling-benchmark.md) and [Step
-3: Choose an algorithm](../../walkthroughs/model-deployment/scaling.md#step-3-choose-an-algorithm).
+A deterministic **synthetic simulation** (not a hardware measurement) compares all three algorithms on identical open-loop seeds: on the synthetic `ramp` seed, `Predictive` reached `99.4%` true SLO compliance versus `76.1%` for reactive algorithms, while `quota-shortfall` verified `pendingTimeoutSeconds` rollback. For live H100 and H200 GPU measurements and tuning guidance, see [Scaling Benchmark](scaling-benchmark.md) and [Step 3: Choose an algorithm](../../walkthroughs/model-deployment/scaling.md#step-3-choose-an-algorithm).
 
 | Algorithm | Mechanism | Suitable workload | Main constraint |
 |---|---|---|---|
@@ -215,10 +195,20 @@ The window design draws on [AIBrix KPA](https://github.com/vllm-project/aibrix/b
 - **Prompt rate**: Uses rank-0 effective-prefill deltas when available. Otherwise, it subtracts prefix-cache hits from prompt deltas.
 - **Generation rate**: Uses rank-0 generation counter deltas without subtracting cache hits.
 - **Latency**: Reads histogram bucket deltas at the configured quantile. When buckets are absent or the quantile lands in `+Inf`, the reading is unavailable without mean fallback.
-- **KV usage**: Averages *`kvCacheUsage`*. See [Model Deployment Metrics](metrics.md).
+- **KV usage**: Averages *`kvCacheUsage`*.
 
-SGLang reports *`sglang:prefill_effective_tokens_total`* with an `input` mode. Its hit modes are
-`device_hit`, `host_hit` and `storage_hit`.
+SGLang reports *`sglang:prefill_effective_tokens_total`* with an `input` mode and hit modes `device_hit`, `host_hit` and `storage_hit`.
+
+Inspect live engine and router gauge coverage, partial samples, and missing metric sources through the `ModelDeployment` `/metrics` subresource (requires `get` on `modeldeployments/metrics`):
+
+```bash
+kubectl get --raw "/apis/worker.gpustack.ai/v1/namespaces/<namespace>/modeldeployments/<name>/metrics" \
+  | jq '{partial, missing, processing, queueing, latency}'
+```
+
+The subresource scrapes up to 64 owned `Pod`s (`prometheus.io/scrape: "true"`, `prometheus.io/port`, `prometheus.io/scheme`; unmanaged *`roles[].command`* roles receive no scrape annotations) and returns `503 Service Unavailable` when no owned `Pod` answers.
+
+`partial: true` marks unreadable or TLS-untrusted endpoints, first counter reads, counter resets, absent *TTFT* histograms, or `> 64` `Pod`s. Unincremented error counters, idle sampling windows, and unconfigured cache tiers appear in *`missing[]`* while leaving `partial` `false`.
 
 ### Predictive
 
@@ -465,38 +455,17 @@ refused. The pins — source URLs, capture dates, artifact digests and refusal r
 
 ### Identity normalization
 
-One yardstick normalizes identity on both sides — when importing any public source into
-*`priors.yaml`* and when matching a `ModelDeployment` at runtime.
+One yardstick normalizes identity both when importing public sources into *`priors.yaml`* and when matching a `ModelDeployment` at runtime. Canonical model names trim whitespace, preserve organization and variant suffixes (`-Instruct`, `-0528`, `-Thinking`, `70B`), and compare case-insensitively without merging distinct variants or sizes.
 
-The canonical model name trims whitespace, preserves organization and variant suffixes (`-Instruct`, `-0528`, `-Thinking`, a parameter size such as `70B`) and compares
-case-insensitively; distinct model variants or parameter sizes are never merged.
+*`priors.yaml`* records verified Hugging Face `<org>/<repo>` IDs (such as `deepseek-ai/DeepSeek-R1-0528`, `Qwen/Qwen3.5-397B-A17B`, `meta-llama/Llama-3.3-70B-Instruct`, `openai/gpt-oss-120b`, `moonshotai/Kimi-K2.5`, `moonshotai/Kimi-K3`, `MiniMaxAI/MiniMax-M2.5`, `MiniMaxAI/MiniMax-M3`, `zai-org/GLM-5`, `zai-org/GLM-5.2`, `deepseek-ai/DeepSeek-V4-Pro` and `Qwen/Qwen3.8-Flash-Next`).
 
-The canonical model identity recorded in *`priors.yaml`* is the verified Hugging Face `<org>/<repo>` repository —
-`deepseek-ai/DeepSeek-R1-0528`, `Qwen/Qwen3.5-397B-A17B`, `meta-llama/Llama-3.3-70B-Instruct`, `openai/gpt-oss-120b`,
-`moonshotai/Kimi-K2.5`, `moonshotai/Kimi-K3`, `MiniMaxAI/MiniMax-M2.5`, `MiniMaxAI/MiniMax-M3`, `zai-org/GLM-5`,
-`zai-org/GLM-5.2`, `deepseek-ai/DeepSeek-V4-Pro` and `Qwen/Qwen3.8-Flash-Next` are examples.
+Source slugs (`dsr1`, `qwen3.5`, `llama70b`), ModelScope mirrors (`ZhipuAI/`, `MiniMax/`, `LLM-Research/`), and vendor-repackaged checkpoints (`amd/DeepSeek-R1-0528-MXFP4`, `nvidia/Llama-3.3-70B-Instruct-FP8`) map to the canonical Hugging Face ID while recording precision in the quantization token; unverified repositories are refused.
 
-Source-internal slugs (`dsr1`, `qwen3.5`, `llama70b`), ModelScope mirror orgs (`ZhipuAI/`, `MiniMax/`, `LLM-Research/`) and vendor-repackaged checkpoint names
-(`amd/DeepSeek-R1-0528-MXFP4`, `nvidia/Llama-3.3-70B-Instruct-FP8`) are automatically adapted to that canonical Hugging Face ID; a vendor repackaging shows up in the quantization
-token, not the model name. A source with no verified upstream repository is refused rather than guessed.
+Precision labels fold into canonical lowercase tokens: `fp8` (`fp8_e4m3`, `fp8-e4m3`, `w8a8-fp8`), `bf16` (`bfloat16`), `fp16` (`float16`, `half`), `fp4` (`nvfp4`, `mxfp4`), `int8` (`w8a8`, `smoothquant`), with `int4`, `awq` and `gptq` kept distinct. Unpinned revisions resolve as `unspecified`, and omitted tokenizers default to the model name.
 
-Source-specific precision labels fold into canonical lowercase tokens: `fp8` (also `fp8_e4m3`,
-`fp8-e4m3`, `w8a8-fp8`), `bf16` (`bfloat16`), `fp16` (`float16`, `half`), `fp4` (`nvfp4`,
-`mxfp4`), `int8` (`w8a8`, `smoothquant`), and `int4`, `awq` and `gptq` kept distinct. An unpinned
-revision resolves as `unspecified`; an omitted tokenizer defaults to the model name.
+`hardware-id` normalization reuses the accelerator `Family` rules in `pkg/nodefeature/unit_resources_preset.yaml`: product strings tokenize on `-`, `_` and `.`, strip leading marketing tokens (`tesla`, `geforce`, `quadro`, `radeon`, `instinct`), match whole-token vendor prefixes, and keep capacity tokens (`80gb`, `40gb`, `32gb`) distinct (`nvidia-a100-80gb` versus `nvidia-a100-40gb`).
 
-`hardware-id` normalization reuses the accelerator `Family` rules and table from
-[Instance Type Unit Resources](../../reference/instance-type-unit-resources.md)
-(`pkg/nodefeature/unit_resources_preset.yaml`).
-
-Product strings tokenize on `-`, `_` and `.`, leading vendor and marketing tokens (`tesla`, `geforce`, `quadro`,
-`radeon`, `instinct`) are stripped, whole-token prefixes are matched per vendor, and capacity tokens (`80gb`, `40gb`,
-`32gb`) refine multi-capacity families such as `nvidia-a100-80gb` versus `nvidia-a100-40gb`.
-
-At runtime the same yardstick applies: the `worker.gpustack.ai/model-id` and
-`worker.gpustack.ai/hardware-id` annotations accept the natural names above and are inferred from
-*`spec.model`*, the engine flags and the role's `AcceleratorType` when omitted. See
-[Target eligibility](#target-eligibility) for the full resolution order.
+At runtime, `worker.gpustack.ai/model-id` and `worker.gpustack.ai/hardware-id` accept these natural names and are inferred from *`spec.model`*, engine flags, and the role's `AcceleratorType` when omitted (see [Target eligibility](#target-eligibility)).
 
 ### Prior lifecycle
 
@@ -570,9 +539,9 @@ Without an upward *`stepPolicy`*, one pass can add the larger of *`maxStepReplic
 latter ranges from `0` to `1000`. Omission or zero stores defaults of `4` and `100`, respectively.
 Setting one to zero does not disable that bound. Use a step policy to select one unit alone.
 
-A *`stepPolicy`* under either *`scaleUp`* or *`scaleDown`* requires *`type`* (`Pods` or `Percent`)
-and a nonnegative *`value`*. `Pods` counts serving replicas, even when each replica has several
-`Pod`s. `Percent` uses the current replica count and rounds up. Zero prevents movement in that
+A *`stepPolicy`* under either *`scaleUp`* or *`scaleDown`* requires *`type`* (`type: Pods` or `type: Percent`)
+and a nonnegative *`value`*. `type: Pods` counts serving replicas, even when each replica has several
+`Pod`s. `type: Percent` uses the current replica count and rounds up. Zero prevents movement in that
 direction. Without a downward policy, a pass removes at most one replica per role.
 
 The downward *`stabilizationWindowSeconds`*, *`cooldownAfterAbortSeconds`* and
@@ -593,9 +562,9 @@ Scale-down also waits when any of these conditions holds:
 A pending unadmitted workload prevents further growth. While a committed scale-up cohort is pending, that ceiling applies across the target. If any added ordinal remains
 unadmitted past *`sampling.pendingTimeoutSeconds`*, the scaler restores the whole cohort's baseline vector in one write and reports `ResourceExhausted`.
 
-If a removed ordinal's retirement ends as `Aborted`, the scaler restores the pre-scale-down vector.
-It reports `ScaleDownAborted`, cancels any associated donor transaction, and starts
-*`cooldownAfterAbortSeconds`*. This cooldown prevents further scale-down across the target.
+If a removed ordinal's retirement ends as `Aborted`, the scaler restores the pre-scale-down vector, reports `ScaleDownAborted`, cancels any donor transaction, and starts *`cooldownAfterAbortSeconds`*.
+
+Unlike *`roles[].pause: true`* (which holds `Pod`s and quota in place under `RolePaused`), retirement withdraws `endpoint-eligible` (`Withdrawing`, `30` s), drains in-flight work (`Draining`, `240` s, after a `60` s handoff grace window on *Prefill*/*Decode* or external *DP* roles), and deletes the `Pod`s and `Workload` (`Settling`, `30` s; `300` s total ceiling). Re-declaring the ordinal before `Deleting` cancels retirement (`RetirementAdopted`); see [Pause and retirement](runtime-control.md#pause-and-retirement).
 
 ## Resource rebalancing
 
@@ -967,12 +936,9 @@ that maximum cannot be represented.
 The sampler reads at most 64 ready answering engine `Pod`s per role. Above that cap, coverage is incomplete and scale-down is held. New token and latency windows also need
 successive valid samples; a first observation alone cannot establish rates.
 
-A disaggregated scale-down follows the [Retirement protocol](shutdown.md#retirement-protocol) and [Disaggregated replicas](shutdown.md#disaggregated-replicas) handoff window.
-That window bounds the handoff wait; it does not wait indefinitely for every prefill request to finish.
+A disaggregated scale-down waits a `60` s handoff window inside the `240` s `Draining` budget before checking two consecutive idle `pods/exec` `/metrics` reads; see [Pause and retirement](runtime-control.md#pause-and-retirement). Unrouted deployments without *`spec.router`* cannot prove direct `Service` withdrawal and end retirement as `Aborted` after `30` s; on SGLang *Prefill* or *Decode* roles, set *`terminationGracePeriodSeconds: 45`* for clean post-`SIGTERM` scheduler exit.
 
-If a prefill lasts longer than the handoff window, a *decode* replica can leave while that prefill
-is still running, losing its request. For workloads with prefills that run for minutes, keep the
-*decode* *`minReplicas`* high enough to preserve the required serving capacity.
+If a prefill lasts longer than the `60` s handoff window, a *decode* replica can leave while that prefill is still running, losing its request. For workloads with multi-minute prefills, keep *decode* *`minReplicas`* high enough to preserve serving capacity.
 
 Both resource webhooks use `failurePolicy: Fail`. If the webhook `Pod` is unavailable, writes that require it fail and are retried. Existing replicas keep serving. A webhook
 outage does not allow unchecked writes through the binding fence.
@@ -982,18 +948,16 @@ outage does not allow unchecked writes through the binding fence.
 | Symptom | Signal | Check & Mitigation |
 |---|---|---|
 | Counts never change | Condition: `Active` | Use `Active` mode and clear suspension when ready to commit. Resolve missing, replaced or already-owned targets. |
-| Counts never change | Condition: `MetricsReady`, Status: role `signalState` | Check engine metrics and allow a valid sampling window to form. |
+| Counts never change | Condition: `MetricsReady` (`WaitingForMetrics`), role `signalState` (`Missing`/`Stale`) | Run `kubectl get --raw "/apis/worker.gpustack.ai/v1/namespaces/<ns>/modeldeployments/<name>/metrics" \| jq '{partial,missing}'` to check `partial: true` or unreadable/unscraped `Pod`s, and allow two samples to form a rate window. |
 | Counts never change | Condition: `CapacityPriorsReady` | Verify `catalogRef`, the target identity (annotations or inferred model/hardware identity), engine-family image, single-`Pod` topology and explicit latency targets, or supply explicit capacities / remove *`capacityPrior`*. |
-| Counts never change | Condition: `Blocked`, Status: role `reason` | Correct bounds or ratios, or wait for the named pacing or retirement guard. |
+| Counts never change | Condition: `Blocked`, Status: role `reason` | Correct bounds or ratios, clear *`roles[].pause`* (`RolePaused`), or wait for the named pacing or retirement guard. |
 | Recommendation differs from counts | Status: *`rawRecommendedReplicas`* and *`constrainedReplicas`* | Check the role bounds, ratios and pacing limits that changed the request. |
 | Counts return to a baseline | Status: *`pendingCohort`*, Reason: `ResourceExhausted` | Check admission and available quota before retrying growth. |
-| Counts return after shrinking | Status: *`lastScaleDown`* | Resolve the aborted retirement before its cooldown expires. |
+| Counts return after shrinking | Status: *`lastScaleDown`* (`Aborted`), target *`status.retirement`* | Inspect `kubectl -n <ns> get md <name> -o json \| jq '.status.retirement'`: configure *`spec.router`* if withdrawal aborted at `30` s, or resolve busy/restarting/unmanaged members before *`cooldownAfterAbortSeconds`* expires. |
 | A write is refused | Admission message | Check [Binding fence](#binding-fence) and [GitOps sync](#gitops-sync). An orphan recovery requires the named scaler to be gone or replaced. |
 
 ---
 
-**See also** — [Configuration](configuration.md) (roles and counts) · [Benchmark](scaling-benchmark.md) (H100 and H200 results) ·
-[Simulation](scaling-simulation.md) (synthetic comparison) · [Walkthrough](../../walkthroughs/model-deployment/scaling.md) (configure and observe) · [Status](status.md) (phase
-and conditions) · [Shutdown](shutdown.md) (retirement) · [Metrics](metrics.md) (engine signals).
+**See also** — [Configuration](configuration.md) (role fields, readiness, and rollout behavior) · [Benchmark](scaling-benchmark.md) (H100 and H200 measurements) · [Walkthrough](../../walkthroughs/model-deployment/scaling.md) (configure and observe) · [Online Runtime Control](runtime-control.md) (role pause guard, retirement budgets, and drain window) · [Routing](routing.md) (router withdrawal and endpoint eligibility).
 
-**Next** → [Model Deployment Status](status.md) — the target's status and scaler annotations.
+**Next** → [Model Deployment Scaling Benchmark](scaling-benchmark.md) — review H100 and H200 scaling measurements.

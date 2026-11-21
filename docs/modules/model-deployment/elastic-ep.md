@@ -311,9 +311,8 @@ number of deployments present says nothing about routing.
 1. Read the deployment's `ElasticResize` condition: `False` with `ScaleRefused` means the engine's
    refusals spent the retry bound and the message carries the last refusal; `Unknown` with
    `WorldUnprovable` means the operation record is gone and the live world cannot be proved, so the
-   corrective scale waits for observation to prove it. [Model Deployment Status](status.md) gives
-   the condition vocabulary; read the rest of the status for admission, startup and serving
-   failures.
+   corrective scale waits for observation to prove it. Read the remaining deployment conditions (see
+   [Readiness and status](configuration.md#readiness-and-status)) for quota, startup and rollout holds.
 2. Read the deployment-owned observation `ConfigMap`. Its *`reason`* names an elastic hold.
    A layer with `Known` false carries its own `Reason`. Check the observed generation against the deployment.
 3. Compare the layers. A width that never became effective, with Ray holding the target width,
@@ -358,11 +357,10 @@ The operator retains existing elastic `Pod`s, so an env edit does not change the
 
 ---
 
-**See also** — [Model Deployment Configuration](configuration.md) for the role contract ·
-[Prefill and Decode](prefill-decode.md) for the other way to split a deployment ·
-[Routing](routing.md) for how replicas are selected and observed ·
-[Shutdown](shutdown.md) for retirement and drain ·
-[Model Deployment Status](status.md) for the published fields ·
-[Elastic EP Benchmark](elastic-ep-benchmark.md) for a measured width change under load.
+**See also** — [Model Deployment Configuration](configuration.md) (role contract and status conditions) ·
+[Prefill and Decode](prefill-decode.md) (disaggregated role pairing) ·
+[Routing](routing.md) (replica selection and observations) ·
+[Online Runtime Control](runtime-control.md) (live parameter replay, role pause, and drain) ·
+[Elastic EP Benchmark](elastic-ep-benchmark.md) (measured width change under load).
 
 **Next** → [Model Deployment Configuration](configuration.md)

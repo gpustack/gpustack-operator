@@ -593,8 +593,8 @@ kubectl -n gpustack-bench get pods,workloads
 
 The protocol withdraws the selected replica, enters `Draining`, then commits deletion with state
 `Deleting`. Kubernetes may display its deleting `Pod` as `Terminating`.
-Read [Shutdown](../../modules/model-deployment/shutdown.md#retirement-protocol) for the complete protocol
-and its bounded handoff wait. On `Aborted`, inspect *`lastScaleDown`* and the restored vector.
+Read [Pause and retirement](../../modules/model-deployment/runtime-control.md#pause-and-retirement) for the retirement budgets
+and bounded handoff wait. On `Aborted`, inspect *`lastScaleDown`* and the restored vector.
 
 If a shorter test window is needed, choose a positive downward stabilization window longer than the
 sampling interval. Zero stores the default 300 s. Keep *`maxReplicas`* at least as high as the current
@@ -765,12 +765,12 @@ Keep shared prefetched artifacts and `default/bench-driver` when other procedure
 | Scale-down ends aborted | Reason: `ScaleDownAborted` | Read the retirement reason and *`lastScaleDown`*; resolve the drain failure and wait through the abort cooldown. |
 | Cooldown outlives its window | Reason: `PacingBounded` | Check stabilization, grace and coverage; continue observation, since a configured cooldown phase does not bypass guards. |
 | Router failures during growth | Log: Router logs and client errors | Preserve evidence; the recorded keep-alive setting did not prevent all failures. |
-| SGLang KV transfer failures | Log: engine logs and TCP port reuse | Follow the [documented setting](../../reference/settings.md#sglang-time-wait-reuse) and verify kubelet prerequisites. |
+| SGLang KV transfer failures | Log: engine logs and TCP port reuse | Enable [`model-deployment-tcp-tw-reuse`](../../modules/model-deployment/engine-versions.md#limitations) after allowing `net.ipv4.tcp_tw_reuse` on eligible kubelets. |
 
 ---
 
 **See also** — [Model Deployment Scaling](../../modules/model-deployment/scaling.md) (public field contracts) ·
 [Scaling Benchmark](../../modules/model-deployment/scaling-benchmark.md) (H100 and H200 measurements and limits) ·
-[Model Deployment Shutdown](../../modules/model-deployment/shutdown.md) (retirement behavior)
+[Online Runtime Control](../../modules/model-deployment/runtime-control.md) (pause guard and retirement lifecycle)
 
-**Next** → [Model Deployment Status](../../modules/model-deployment/status.md)
+**Next** → [Online Runtime Control Walkthrough](runtime-control.md) — tune serving parameters live and test role pause.

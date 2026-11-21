@@ -309,6 +309,6 @@ hardware and when *EPD* helps.
 
 ---
 
-**See also** — [Model Deployment Configuration](configuration.md) (base fields and admission rules) · [Prefill and Decode](prefill-decode.md) (pairing *prefill* and *decode* roles) · [Encode, Prefill and Decode Benchmark](encode-prefill-decode-benchmark.md) (measured latency and throughput across three configurations) · [Engine Compatibility](engine-versions.md) (supported version floors) · [Model Deployment Routing](routing.md) (router selection and deciders) · [Model Deployment Status](status.md) (status conditions and role summaries) · [EPD Walkthrough](../../walkthroughs/model-deployment/encode-prefill-decode.md) (a recorded live run).
+**See also** — [Model Deployment Configuration](configuration.md) (base fields and admission rules) · [Prefill and Decode](prefill-decode.md) (pairing *prefill* and *decode* roles) · [Encode, Prefill and Decode Benchmark](encode-prefill-decode-benchmark.md) (measured latency and throughput across three configurations) · [Engine Compatibility](engine-versions.md) (supported version floors) · [Model Deployment Routing](routing.md) (router selection and endpoint eligibility) · [EPD Walkthrough](../../walkthroughs/model-deployment/encode-prefill-decode.md) (a recorded live run).
 
 **Next** → [Model Deployment Routing](routing.md) — choose a routing policy and inspect candidate endpoints.

@@ -230,7 +230,7 @@ Older vLLM images below [the documented floor](#counting-engine-tokens) predate 
 flag, so adding it to them can make the engine reject its command line.
 The operator does not choose between these cases from the image tag.
 
-#### Version and configuration limits
+### Version and configuration limits
 
 For each configuration, name an image that meets the documented floor and add the engine-specific arguments
 it needs.
@@ -273,12 +273,11 @@ under EFA, `hip` on AMD ROCm, `rdma` when both roles request `resources.interfac
 pool uses EFA, and `UCX` otherwise.
 
 Platform-specific mounts, topologies, and image requirements live under
-[Vendor-specific behavior](#vendor-specific-behavior) and
-[Transfer parameters](parameterize.md#transfer-parameters).
+[Vendor-specific behavior](#vendor-specific-behavior).
 
 The engine image must support its chosen transport. [Engine Compatibility](engine-versions.md)
 lists existing compatibility evidence; these rendered combinations require their own validation.
-[Parameters](parameterize.md) lists synthesized parameters and defaults.
+[Operator-owned keys](configuration.md#operator-owned-keys) lists owned and defaulted parameters.
 Changing transfer settings rolls the roles; transfers can fail until both ends converge.
 
 ### Pair connections
@@ -295,8 +294,7 @@ the shape's own contract, including its Router requirement, is on [External DP](
 With a managed router, the direct connector depends on the engine, platform and `spec.kvTransfer.backend`. On
 vLLM pairs with a shared `spec.kvCache` pool, *Prefill* wraps the direct connector first in `MultiConnector`
 alongside the store connector, while *Decode* runs the direct connector alone and keeps pool dtype and
-block-size alignment. See [Transfer parameters](parameterize.md#transfer-parameters) for connector and
-environment mappings.
+block-size alignment.
 
 A pair needs no shared pool to hand blocks over. With `llm-d-router`, the decode `Pod` runs a
 routing-proxy sidecar. vLLM NIXL and Ascend use `--kv-connector=nixlv2`; vLLM Mooncake uses
@@ -357,20 +355,14 @@ On Ascend A5 (`AcceleratorType` *`status.detail.family`* `"950"`, `Ascend950PR` 
 `ModelDeployment` selects communication resources from the engine and *`roles[].resources.interface`*.
 Ascend A2 and A3 (`family` other than `"950"`) retain legacy rendering unchanged.
 
-#### UB versus Host RoCE
-
 Ascend A5 distinguishes on-die UnifiedBus (*UB*) / Unified Remote Memory Access (*URMA*) from
 Linux Host RDMA (*Host RoCE*):
 
-- **UB and URMA (`interface: 0`)**: Nodes publish `fabric.kind=ub` ([Scale-up fabric](../rdma/network-topology.md#scale-up-fabric)); workloads omit *`resources.interface`* and request no Linux RDMA devices.
+- **UB and URMA (`interface: 0`)**: `Node`s publish `fabric.kind=ub` (see [RDMA Operations](../rdma/operations.md)); workloads omit *`resources.interface`* and request no Linux RDMA devices.
 - **Host RoCE (`interface > 0`)**: Workloads set *`roles[].resources.interface > 0`* on `vLLM` roles with converged `family` `"950"`.
 - **RDMA resource keys**: Operator grants `device.gpustack.ai/rdma.shared` (`1`) or `device.gpustack.ai/rdma` (`> 1`), never AWS EFA.
 
-#### Six A5 scenarios
-
-The table below maps each Ascend A5 topology to its selection trigger; exact injected variables,
-connector fields, and mounts are owned by [Transfer parameters](parameterize.md#transfer-parameters)
-and [Shared cache parameters](parameterize.md#shared-cache-parameters):
+The table below maps each Ascend A5 topology to its interface request and operator behavior:
 
 | Scenario | Interface | Operator selection | User requirement |
 |---|---|---|---|
@@ -445,7 +437,7 @@ never going to share a `Workload`, on two *`acceleratorType`*s or on one. The se
 admission check rather than by Kueue's intra-group rule.
 
 See [One group per replica](configuration.md#one-group-per-replica) for what that costs an edit, and
-[Authoring the InstanceType](../../reference/settings.md#authoring-the-instancetype) for which
+[Deployed and applied resources](../../operate/installation-modes.md#deployed-and-applied-resources) for which
 queues carry the check.
 
 **Adding a second manufacturer uses the same mechanism.** A queue's accelerator quota is
@@ -455,11 +447,10 @@ refuses a second resource group repeating a covered resource within one queue. R
 A mixed Ascend/non-Ascend pair is refused once both manufacturers are observed. Two non-Ascend
 roles can name different manufacturers, but their direct transfer interoperability is unmeasured
 here. A pair needs no shared pool for [direct transfer](#pair-connections); a vLLM-Ascend role
-using a pool has separate [store transport requirements](../kv-cache/injection.md#binding-transport-support).
+using a pool has separate [store transport requirements](engine-versions.md#transport-compatibility).
 
-[Kueue assigns a ResourceFlavor per
-PodSet](../devices/scheduling.md#stage-4-kueue-chain), so a role still takes whatever
-its own pool assigns; what selects the hardware is the *`acceleratorType`* the role names.
+Kueue assigns a `ResourceFlavor` per PodSet, so a role still takes whatever its own pool assigns;
+what selects the hardware is the *`acceleratorType`* the role names (see [Accelerator Requests](../devices/requests.md)).
 
 ### Addressing a role
 
@@ -470,15 +461,10 @@ debugging.
 
 With *`spec.router`*, the operator renders resources named `<deployment>-router`: a `Deployment`,
 `ConfigMap`, `Service`, `ServiceAccount`, `Role` and `RoleBinding`. Removing *`spec.router`* prunes these resources.
-What *`status.endpoint`* publishes in each configuration is under [Status](status.md#status).
+*`status.endpoint`* stays empty until the router has a ready replica, then publishes `http://<deployment>-router.<namespace>.svc:<port>`.
 
 ---
 
-**See also** — [Model Deployment](configuration.md) for the role fields, the owned-key
-table and what admission refuses · [Model Deployment Routing](routing.md) for which replica each
-router picks · [Engine Compatibility](engine-versions.md) for which transport each engine can use on
-each path · [Model Deployment Status](status.md) for what *`status.endpoint`* publishes ·
-[Prefill and Decode Benchmark](prefill-decode-benchmark.md) for the measured
-comparison of a disaggregated pair with an aggregated group on equal GPUs.
+**See also** — [Model Deployment Configuration](configuration.md) (role fields, owned keys, and admission refusals) · [Model Deployment Routing](routing.md) (replica selection and endpoint eligibility) · [Engine Compatibility](engine-versions.md) (supported versions and transports) · [Prefill and Decode Benchmark](prefill-decode-benchmark.md) (measured comparison against an aggregated group on equal GPUs).
 
 **Next** → [Model Deployment Routing](routing.md)

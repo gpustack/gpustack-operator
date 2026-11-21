@@ -173,8 +173,8 @@ kubectl get nodes -o json | grep -oE '"[^"]*(\.z-[a-z]+|generic-ln-x64)[^"]*"' |
 ---
 
 **See also** — [Migrating to Bundled Subcharts](bundled-subcharts.md) (the other one-time upgrade, from
-v0.7.x or earlier) · [Scheduling Chain](../../modules/devices/scheduling.md#naming-and-grouping) (the
-object names this upgrade moves to) · [Migration Troubleshooting](troubleshooting.md) (recovering from
+v0.7.x or earlier) · [Accelerator Requests](../../modules/devices/requests.md) (resource keys and pool
+capacity views) · [Migration Troubleshooting](troubleshooting.md) (recovering from
 a wedged upgrade or a stuck namespace)
 
 **Next** → [Architecture](../../getting-started/architecture.md) — what the new object set means.

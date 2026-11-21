@@ -28,8 +28,7 @@ flowchart TD
 ## Deployment configuration
 
 [Model Deployment Configuration](configuration.md) starts with a minimal manifest and explains
-the role contract. [Parameters](parameterize.md) catalogs generated parameters
-and overrides.
+role fields, override tiers, and operator-owned keys.
 
 [Prefill and Decode](prefill-decode.md) covers split roles, and
 [Encode, Prefill and Decode](encode-prefill-decode.md) covers multimodal disaggregation.
@@ -48,12 +47,11 @@ for distributed multi-node serving.
 
 ## Service operations
 
-[Online Runtime Control](runtime-control.md), [Status](status.md), [Metrics](metrics.md) and
-[Routing](routing.md) explain live parameter tuning, what the running service reports, and how requests
-are directed.
+[Online Runtime Control](runtime-control.md) and [Routing](routing.md) explain live parameter tuning,
+role pause, endpoint eligibility, and request routing.
 
-[Scaling](scaling.md) plans the replica count of a deployment from the signals it publishes, and
-[Shutdown](shutdown.md) explains the retirement protocol a scale-down runs.
+[Scaling](scaling.md) plans replica counts from live engine signals and coordinates graceful
+replica retirement during scale-down.
 The [Scaling Walkthrough](../../walkthroughs/model-deployment/scaling.md) configures observation and
 active scaling. The [Scaling Benchmark](scaling-benchmark.md) records H100 and H200 measurements
 and the limits observed during scale-out and retirement.
@@ -82,7 +80,7 @@ If a deployment does not become ready, inspect its phase, conditions and role st
 kubectl -n <namespace> get modeldeployment <name> -o yaml
 ```
 
-Compare the result with [Model Deployment Status](status.md). For scaling problems, see the
+Check *`status.phase`*, conditions, and role status against [Readiness and status](configuration.md#readiness-and-status) and [Model Deployment Routing](routing.md#troubleshooting). For scaling problems, see the
 [Scaling Walkthrough](../../walkthroughs/model-deployment/scaling.md#troubleshooting).
 
 ---

@@ -10,6 +10,7 @@ the operator chart's `values.yaml`.
 - [Chart and image modes](#chart-and-image-modes)
 - [Modes are exclusive](#modes-are-exclusive)
 - [Configuration](#configuration)
+- [Settings and precedence](#settings-and-precedence)
 - [Deployed and applied resources](#deployed-and-applied-resources)
 
 ## Prerequisites
@@ -97,6 +98,35 @@ These switches change what a mode installs:
   [Remote Weight Delivery](../modules/model-delivery/remote.md#configuration).
 - `worker.enabled=false` — the chart deploys only the applications, what image mode's overlay sets.
 
+## Settings and precedence
+
+Runtime `Setting` objects (`gpustack.ai/v1`, short name `set`, stored in the `gpustack-settings` `Secret` in `gpustack-system`) can be edited with `kubectl -n gpustack-system patch setting <name> --type merge -p '{"spec":{"value":"..."}}'`. On every worker start (restart, drain, or upgrade), the worker aligns each `Setting` in four ordered rules:
+
+| Rule | Precedence | Behavior |
+| --- | --- | --- |
+| 1. `Backfill` | Missing key only | Seeds an absent key from `GPUSTACK_<UPPER_SNAKE_NAME>` when set, else the built-in default. |
+| 2. `env-declared` | Wins on every start | Any non-blank `GPUSTACK_*` variable on the worker `Deployment` (from chart values such as `global.imageRegistry`, `global.imagePullPolicy`, `modelManager.enabled`, `modelTransfer.enabled`, or `worker.env`) overwrites the stored `Setting`. |
+| 3. `default-tracked` | Wins when no env claims it | If `settings-default-tracking` names the `Setting` (built-in image `Setting`s are tracked by default), the operator's built-in default overwrites the stored value on every start. |
+| 4. Administrator-owned | Preserved | Every other `Setting` keeps its stored value across worker restarts and upgrades. |
+
+### Reverted setting after restart
+
+If a runtime `Setting` edit reverts after a worker restart or upgrade, check which startup rule overwrote it:
+
+```bash
+# 1. Inspect worker startup override logs (names rule="env-declared" or rule="default-tracked" and envName):
+kubectl -n gpustack-system logs deploy/gpustack-operator-worker | grep 'setting overridden on start'
+
+# 2. Check non-blank GPUSTACK_* variables rendered on the worker Deployment:
+kubectl -n gpustack-system get deploy gpustack-operator-worker -o yaml | grep -A1 'GPUSTACK_'
+
+# 3. Check whether settings-default-tracking lists the Setting:
+kubectl -n gpustack-system get setting settings-default-tracking -o yaml
+```
+
+- **`rule="env-declared"`**: Update or clear the owning Helm chart value (an empty string `""` claims nothing and hands ownership back) or `worker.env` entry, then run `helm upgrade`.
+- **`rule="default-tracked"`**: Remove that `Setting` name from `settings-default-tracking` with `kubectl -n gpustack-system patch setting settings-default-tracking --type merge -p '{"spec":{"value":"<remaining-comma-separated-names>"}}'`, then apply your `Setting` pin.
+
 ## Deployed and applied resources
 
 A chart cannot own a custom resource whose CRD it does not ship. Helm REST-maps the *entire*
@@ -136,7 +166,6 @@ Kueue's CRDs; `files/cleanup.sh` deletes the `NodeFeatureRule`, but only while i
 **See also** — [Migrating to Bundled Subcharts](migration/bundled-subcharts.md) (the ownership
 transfer out of the pre-subchart layout) · [High Availability Operations](high-availability.md) (more
 than one replica per control-plane component) · [Topology-Aware Scheduling
-Operations](../modules/topology/operations.md) (Topograph and generic inventory) ·
-[Development](../contribute/development.md#vendored--patched-dependencies)
+Operations](../modules/topology/operations.md) (Topograph and generic inventory)
 
-**Next** → [Internals](../contribute/internals.md) — startup ordering and the invariants a contributor must keep.
+**Next** → [High Availability Operations](high-availability.md) — configure control-plane replicas and disruption budgets.

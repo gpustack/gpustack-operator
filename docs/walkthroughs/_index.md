@@ -24,10 +24,11 @@ The [Model Deployment guides](../modules/model-deployment/_index.md) explain the
 | Model Deployment | [Preparation and choices](model-deployment/_index.md) | Choose a serving configuration and follow its hardware, model and `AcceleratorType` requirements. |
 | Model Deployment | [Prefill and Decode](model-deployment/prefill-decode.md) | Disaggregate *prefill* and *decode* roles fronted by a router. |
 | Model Deployment | [Encode, Prefill and Decode](model-deployment/encode-prefill-decode.md) | Separate multimodal *encode*, *prefill* and *decode* roles. |
+| Model Deployment | [Scaling](model-deployment/scaling.md) | Observe and activate scaling for a deployment. |
+| Model Deployment | [Online Runtime Control](model-deployment/runtime-control.md) | Tune serving parameters live, pause roles, and verify restart replay on NVIDIA H200. |
 | Model Deployment | [Elastic EP](model-deployment/elastic-ep.md) | Grow *DP* width 2 → 4 with *TP* = 2. |
 | Model Deployment | [External DP](model-deployment/external-dp.md) | Deploy four fixed H100 *DP* ranks and verify captured per-rank inference and Router coverage. |
 | Model Deployment | [Multi-Host](model-deployment/multi-host.md) | Deploy distributed model instances across multiple GPU hosts. |
-| Model Deployment | [Scaling](model-deployment/scaling.md) | Observe and activate scaling for a deployment. |
 
 ## Connect configurations
 

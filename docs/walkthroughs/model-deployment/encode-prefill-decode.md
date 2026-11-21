@@ -428,4 +428,4 @@ when the window ends fails at the client.
 [Prefill and Decode Walkthrough](prefill-decode.md) (two-role disaggregation) ·
 [External DP Walkthrough](external-dp.md) (fixed per-rank serving)
 
-**Next** → [Model Deployment Status](../../modules/model-deployment/status.md) — read a deployment's conditions when a role misbehaves.
+**Next** → [Model Deployment Scaling Walkthrough](scaling.md) — observe and activate replica scaling.

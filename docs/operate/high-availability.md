@@ -228,9 +228,7 @@ kubectl uncordon <node>
 
 **See also** — [Installation Modes](installation-modes.md) (these settings need chart mode; image
 mode has no user-values channel) ·
-[Internals](../contribute/internals.md#worker-startup-order) · [Settings](../reference/settings.md) ·
-[KV Cache Backend](../modules/kv-cache/leader.md#high-availability) — a `KVCacheBackend`'s leader elects the
-same way but is **not** a chart component: it is a custom resource, so its replica count is a field on
-the object rather than a value here
+[KV Cache Backend](../modules/kv-cache/leader.md#high-availability) (a `KVCacheBackend`'s leader elects the
+same way as a custom resource rather than a chart value)
 
 **Next** → [NVIDIA MIG Operations](../modules/devices/nvidia-mig.md).

@@ -124,8 +124,8 @@ and accelerator requests are rejected.
 An optional *`resources.interface`* requests a whole number of fabric interfaces per engine `Pod`.
 
 One RDMA interface uses `device.gpustack.ai/rdma.shared`; more than one uses that count of
-`device.gpustack.ai/rdma` devices. EFA uses
-[the EFA device plugin's own key](../rdma/network-topology.md#rdma-resource-keys).
+`device.gpustack.ai/rdma` devices. EFA uses `vpc.amazonaws.com/efa` (see
+[RDMA Operations](../rdma/operations.md)).
 An unset or zero count adds no device request. Both vLLM and SGLang prefill/decode roles can
 request interfaces for RDMA or EFA transfer paths.
 
@@ -251,8 +251,7 @@ breaks while nothing errors.
 ## Topology placement
 
 *`roles[].topology.requiredLevel`* is an optional Kubernetes label key. It requires the *`size`* `Pod`s in
-each replica group to fit within one domain at that level. See [per-replica request
-semantics](../topology/scheduling.md#per-replica-topology-requests).
+each replica group to fit within one domain at that level.
 
 The value names a configured level, not a domain value. Region, zone, a GPUStack rack key, an
 administrator-owned key, and selected Topograph labels all use the same field. The syntax is
@@ -260,11 +259,8 @@ validated at admission; availability in the chosen queue is resolved dynamically
 
 Omit *`topology`* or leave *`requiredLevel`* empty for unconstrained topology-aware placement.
 `kubernetes.io/hostname` is implicit and is rejected as an explicit required level. Changing or
-removing the request changes the role render hash and rolls only that role's replicas.
-
-The full discovery, profile, capacity, and diagnostic contract is in [Topology-Aware
-Scheduling](../topology/scheduling.md); setup examples are in [Topology-Aware
-Scheduling Operations](../topology/operations.md).
+removing the request changes the role render hash and rolls only that role's replicas. See
+[Topology-Aware Scheduling Operations](../topology/operations.md) for inventory setup and diagnostics.
 
 ## Inherited reuse domain
 
@@ -297,14 +293,19 @@ A rendered tenant identifier does not by itself prove isolation. The operator re
 rendered, never what the container did with it: whether the build inside the image reads the value
 is decided by the image, not by the render.
 
-Users who require tenant isolation must select a compatible engine image and verify it themselves; see [Tenant compatibility](../kv-cache/injection.md#tenant-compatibility) for
-what the image must consume. The API states the requested boundary, while the engine enforces it (the same caveat [KV Cache Pools and Bindings](../kv-cache/pool.md#limitations)
-states for capacity).
+Users who require tenant isolation must select a compatible engine image and verify that it consumes
+the rendered tenant identifier. The API states the requested boundary, while the engine enforces it;
+see [KV Cache Pools and Bindings](../kv-cache/pool.md#limitations).
 
 ## Three override tiers
 
-The engine command line is the fastest-moving thing in this design, so it has three escape tiers.
-Without one, users patch the rendered `Pod` and the reconcile loop silently overwrites them.
+The engine command line has three parameter tiers so you never need to patch a rendered `Pod` directly:
+
+| Tier | Trigger | Behavior |
+|---|---|---|
+| **Owned** | Managed role and operator-owned key | Admission rejects duplicate *`roles[].extraArgs`* or *`roles[].env`* (including prefixes, underscores and dotted members); use *`roles[].command`* to own the line. |
+| **Defaulted** | Managed role and absent user value | Operator injects `--host 0.0.0.0`, `--port`, `--served-model-name`, compile caches, transfer defaults and tuning variables; user *`extraArgs`* or *`env`* wins without refusal. |
+| **Take-over** | Non-empty *`roles[].command`* | User owns the full argv; operator skips CLI synthesis, KV/transfer client env, default cache mounts and health probes, and sets *`status.roles[].unmanaged: true`*. |
 
 ```yaml
 apiVersion: worker.gpustack.ai/v1
@@ -502,14 +503,16 @@ not in the table because it is conditional:
 Transfer defaults add several defaulted environment variables (including `ASCEND_LOCAL_COMM_RES` on
 Ascend A5 `vLLM` UB/UBG/UBoE and `ASCEND_MF_TRANSFER_PROTOCOL` on `SGLang` `HIXL`);
 `ASCEND_GLOBAL_RESOURCE_CONFIG` is accepted in *`roles[].env`* without refusal. See
-[Parameters](parameterize.md#transfer-parameters) for the complete table.
+[Prefill and Decode](prefill-decode.md#direct-transfer-transport) for backend and fabric selection.
 
 **Defaulted** is the other case, and `MC_TE_METRIC` is the one that matters: the operator sets it to
 `1`, and a user's own value wins with no refusal. It turns on the transfer engine's metrics, without
 which the hit rate this design rests on cannot be measured at all.
 
 So are `MC_FORCE_TCP` [on a `tcp` path](prefill-decode.md#direct-transfer-transport),
-[SGLang's two cache switches](../kv-cache/injection.md#sglang-host-memory-tier), and the compilation
+SGLang's hierarchical-cache and garbage-collection defaults (`--enable-hierarchical-cache` or
+`--disaggregation-decode-retraction-backup cpu_tensor`, `SGLANG_ENABLE_OVERLAP_PLAN_STREAM=1`,
+`SGLANG_HICACHE_ENABLE_GARBAGE_COLLECTION=1`), and the compilation
 cache root (`VLLM_CACHE_ROOT` on `vLLM`, `SGLANG_CACHE_DIR` on `SGLang`).
 
 So are the seven runtime cache names (`HF_HUB_CACHE`, `HF_XET_CACHE`, `PIP_CACHE_DIR`,
@@ -638,7 +641,6 @@ members.
 - **Elastic EP**: A role with `elastic.dataParallelWidth` pins its member configuration and only resizes width.
   See [Elastic EP](elastic-ep.md#changing-the-width).
 - **Departure**: A departing replica drops its block heartbeat and emits `ReplicaEvicted`, `ReplicaLeaving` or `ReplicaRestarted`.
-  See [Workload impact](../kv-cache/injection.md#workload-impact).
 
 ### Render version and upgrades
 
@@ -653,8 +655,7 @@ rendering changes are evaluated separately:
 
 Live fields in *`roles[].runtimeControl.parameters`*, *`roles[].pause`*, and the mutable *`spec.router`* subfields do not roll worker `Pod`s; see [Online Runtime Control](runtime-control.md#router-hash-decoupling) for the full list.
 
-Set `modeldeployment.gpustack.ai/min-render-version` on the `ModelDeployment` to roll running replicas onto a newer rendering baseline on your own schedule; see [Model Deployment
-Status](status.md#status) for how `ReplicasUpToDate` reports older compatible replicas:
+Set `modeldeployment.gpustack.ai/min-render-version` on the `ModelDeployment` to roll running replicas onto a newer rendering baseline on your own schedule (`ReplicasUpToDate` notes older compatible replicas in its message; see [Readiness and status](#readiness-and-status)):
 
 ```yaml
 apiVersion: worker.gpustack.ai/v1
@@ -907,8 +908,7 @@ half and the validating half alike. Such a rule refuses when the type is absent,
 would let a deleted `AcceleratorType` block the very update that clears the deployment's finalizer, an
 object its own teardown could never release.
 
-The price is named rather than hidden: an edit made while a deployment is being deleted can move a role onto a mode its type does not offer, and nothing renders the result. Why
-that trade is necessary rather than merely tidy is in [Update validation on deletion](../devices/admission.md#update-validation-on-deletion).
+The price is named rather than hidden: an edit made while a deployment is being deleted can move a role onto a mode its type does not offer, and nothing renders the result.
 
 The render, not admission, is where a not-yet-converged `AcceleratorType` shows up. Rendering an accelerated replica needs the `AcceleratorType`'s observed detail, and `AcceleratorType.status` has not
 converged on a freshly created object, so the render fails rather than admission refusing a perfectly legal deployment for losing a race against the `AcceleratorType` reconciler.
@@ -918,10 +918,8 @@ own message, because a pass that cannot build a replica aborts before writing an
 
 ## Operating notes
 
-**Two notes apply to every workload on a pool, replicas included, and are stated once under**
-[Workload impact](../kv-cache/injection.md#workload-impact): the transfer engine binds ports nobody configured, so a `NetworkPolicy` or port reservation has to be a range rather
-than a list; and the "Local segment descriptor not found" line the transfer engine logs at startup is an `ERROR` that is benign on a client mounting no segment of its own, which
-is what every replica here is.
+**Two notes apply to every pool-attached workload, replicas included:** the transfer engine binds ports nobody configured, so a `NetworkPolicy` or port reservation must allow a range rather
+than a fixed list; and the `"Local segment descriptor not found"` `ERROR` line logged at startup is benign on a client mounting no segment of its own.
 
 **A replica serves on port 8000** unless the role names its own container port. The
 `Service` and *`status.endpoint`* keep that external port. On a managed native-vLLM decoder the routing
@@ -955,15 +953,23 @@ know the window's position. Images can use different rules.
 Parallelism and card count are not inputs to this calculation. Neither identifies the physical device
 and therefore neither locates its window.
 
+### Readiness and status
+
+Inspect phase, `ROLES` summary (`1R2S`, `1R1E1P1D`), conditions, and per-role readiness with `kubectl -n <namespace> get modeldeployment <name> -o yaml`.
+
+Managed roles probe `GET /health` (or sentinel `/gpustack/v1/live` and `/gpustack/v1/ready`), so `ready` counts replicas whose engine answered across all *`size`* members. Probes are omitted only on take-over *`roles[].command`*, custom `--host`, conflicting `--port`, client-cert `--ssl-cert-reqs` outside `0` or `1`, or `UDP`/`SCTP` ports.
+
+| Condition | Key reasons | Action |
+|---|---|---|
+| `QuotaReserved` | `Pending`, `PodGroupIncomplete`, `PreemptedInPart`, `Parked`, `NoQueueInReservedNamespace` | Check pool `ClusterQueue` capacity and `Workload` status; recreate or reactivate `Parked` sets, or free capacity when `PreemptedInPart` holds surviving accelerators. |
+| `ReplicasUpToDate` | `UpToDate`, `RolloutInProgress`, `ReplacementInProgress`, `RolloutHeldByCache`, `RolloutHeldByWeights` | Wait for one-per-pass turnover, or repair the `KVCachePoolBinding` / `ModelArtifact` (`WeightsReady`) holding a rollout in place. |
+| `RoleKindsReady` | `AllKindsReady`, `KindsNotReady` | Inspect `Pod` logs and events for any role kind (`Encode`, `Prefill`, `Decode`, `Server`) with zero ready replicas. |
+| `CacheAttached` | `CacheActive`, `CacheOperationsFailing`, `NoObservationAvailable`, `Unmanaged` | On `CacheOperationsFailing`, inspect engine and `KVCacheBackend` logs; `NoObservationAvailable` is normal while idle. |
+
+For `RouterReady`, `EndpointEligibility`, and per-group router qualification, see [Model Deployment Routing](routing.md#troubleshooting).
+
 ---
 
-**See also** — [KV Cache Pools and Bindings](../kv-cache/pool.md) for the Binding that grants the quota and declares
-the domain · [Elastic EP](elastic-ep.md) for the profile that resizes one serving instance's collective
-instead of adding replicas · [Prefill and Decode](prefill-decode.md) for
-what pairs a *prefill* role with a *decode* role · [Accelerator Requests](../devices/requests.md) for the request fields
-*`roles[].resources`* mirrors · [Admission](../devices/admission.md) for the gates a replica passes
-as an ordinary `Pod` · [Model Deployment Status](status.md) for what each condition
-and published field means · [Model Deployment Metrics](metrics.md) for the
-structured snapshot and `Pod` scrape endpoints.
+**See also** — [KV Cache Pools and Bindings](../kv-cache/pool.md) (namespace Binding grants and reuse domains) · [Elastic EP](elastic-ep.md) (in-place collective expansion) · [Prefill and Decode](prefill-decode.md) (pairing *prefill* and *decode* roles) · [Accelerator Requests](../devices/requests.md) (request fields mirrored in *`roles[].resources`*) · [Model Deployment Routing](routing.md) (endpoint eligibility and router policies) · [Online Runtime Control](runtime-control.md) (live parameter tuning and role pause) · [Model Deployment Scaling](scaling.md) (`ModelDeploymentScaler` and graceful retirement).
 
 **Next** → [Accelerator Requests](../devices/requests.md)

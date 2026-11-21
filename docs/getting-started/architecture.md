@@ -31,7 +31,7 @@ The `gpustack-operator` binary provides these subcommands:
 The chart also includes [Node Feature Discovery (NFD)](https://github.com/kubernetes-sigs/node-feature-discovery),
 [Kueue](https://github.com/kubernetes-sigs/kueue) and two CSI drivers. Topograph is optional and remains
 disabled until an administrator selects a provider. See [Installation Modes](../operate/installation-modes.md)
-for the deployment choices and [Internals](../contribute/internals.md) for contributor details.
+for deployment choices and runtime settings.
 
 ## Workload flow
 
@@ -68,10 +68,10 @@ Device scheduling follows this chain:
 4. The Worker derives an `AcceleratorType` for each accelerated pool (and `InstanceType`s when enabled), sharing
    the canonical pool `ClusterQueue` while topology and admission checks constrain placement.
 
-[Device Discovery](../modules/devices/discovery.md) covers node labeling and device discovery.
-[Scheduling Chain](../modules/devices/scheduling.md) covers capacity, queues and workload pool selection.
+[Heterogeneous Devices](../modules/devices/_index.md) and [Preflight Checks](../modules/devices/preflight.md) cover node readiness and isolation modes.
+[Accelerator Requests](../modules/devices/requests.md) covers capacity views, queues and workload pool selection.
 [RDMA Operations](../modules/rdma/operations.md) explains network resource requests, while
-[Topology-Aware Scheduling](../modules/topology/scheduling.md) explains placement domains.
+[Topology-Aware Scheduling Operations](../modules/topology/operations.md) explains placement domains.
 
 ## Model delivery
 
@@ -105,8 +105,7 @@ containers and SSH access using the same accelerator allocation.
 
 The `Pod` webhook validates an accelerator request before Kueue reserves quota. Admission checks
 confirm that devices can satisfy it, and the scheduler, kubelet and allocator complete the
-allocation. [Admission](../modules/devices/admission.md#gates) owns the gate sequence and
-its failure behavior.
+allocation; see [Accelerator Requests](../modules/devices/requests.md) for request rules and troubleshooting.
 
 `AcceleratorType` and `InstanceType` status report the remaining capacity as workloads allocate and release
 devices. Use `kubectl get acctype,instancetype -w` to watch those changes. The
@@ -120,16 +119,16 @@ devices. Use `kubectl get acctype,instancetype -w` to watch those changes. The
 | `AcceleratorType` | Cluster-scoped serving and prefetch accelerator pool; short name `acctype`. |
 | `InstanceType` | Workspace sizing and available capacity for an `Instance`. |
 | Allocation mode | Whole accelerators, shared accelerators, logical slices or hardware partitions. |
-| Credits | [Quota accounting units](../modules/devices/admission.md#gate-2-kueue-credits). |
-| Four capacity views | [Available allocation modes](../modules/devices/admission.md#four-view-status) reported by an `AcceleratorType` or `InstanceType`. |
+| Credits | Quota accounting units (`credits.gpustack.ai/<manufacturer>`) tracked on a pool's `ClusterQueue`. |
+| Four capacity views | Exclusive (`EX`), shared (`SH`), sliced (`SL`) and partitioned (`PT`) capacities reported on `AcceleratorType` and `InstanceType` status. |
 | `Devices` ledger | The per-node inventory and record of accelerator allocations. |
 | `LocalQueue` | The namespace queue through which a workload enters its pool. |
 | `ModelArtifact` | A namespaced model source and resolved weight identity referenced by workloads. |
 | `NodeModelStore` | The configuration and observed cache state maintained for one node. |
 | `ModelPrefetch` | A request to cache weights before a workload mounts them, authorized by a model-store binding. |
 
-The hardware terms Device, Accelerator and Resource are defined in
-[Device Discovery](../modules/devices/discovery.md#device-accelerator-resource).
+A physical card or module is a *device*, each schedulable compute unit on it is an *accelerator*, and
+the Kubernetes extended resource key a container requests is a *resource*.
 
 ## Related documentation
 
@@ -142,7 +141,7 @@ The hardware terms Device, Accelerator and Resource are defined in
 
 ---
 
-**See also** — [Accelerator Requests](../modules/devices/requests.md) ·
-[Settings](../reference/settings.md) · [All documentation](../README.md)
+**See also** — [Accelerator Requests](../modules/devices/requests.md) (resource keys and request rules) ·
+[Vendor Prerequisites](vendor-prerequisites.md) (host drivers and third-party components)
 
 **Next** → [Walkthrough](../walkthroughs/devices/scheduling.md) — follow a workload from submission to allocation.

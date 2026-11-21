@@ -223,4 +223,4 @@ Two lifecycle edge cases were verified on the same H200 cluster:
 **See also** — [Online Runtime Control](../../modules/model-deployment/runtime-control.md) (parameter contract and status reasons) ·
 [Elastic EP Walkthrough](elastic-ep.md) (recorded eight-GPU H100 expansion)
 
-**Next** → [Model Deployment Status](../../modules/model-deployment/status.md)
+**Next** → [Elastic EP Walkthrough](elastic-ep.md) — expand an eight-GPU collective under live traffic.

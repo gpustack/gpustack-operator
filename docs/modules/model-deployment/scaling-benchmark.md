@@ -273,8 +273,8 @@ Configuration: `vllm-epd-predictive`.
 The SGLang failure signature was `Failed to get kvcache from prefill instance, it might be dead`.
 Its error-heavy phases do not establish healthy serving capacity. The recorded investigation
 associated the failures with the documented [TCP port exhaustion](engine-versions.md#limitations)
-limitation. The [TIME-WAIT reuse setting](../../reference/settings.md#sglang-time-wait-reuse) needs
-kubelet configuration before use; a successful rerun with that setting was not captured.
+limitation; enabling `model-deployment-tcp-tw-reuse` requires kubelet unsafe-sysctl configuration
+first, and a successful rerun with that setting was not captured.
 
 ## Suite 2: Capacity priors
 
@@ -384,10 +384,12 @@ ms (`catalog`), `194.733` ms (`frozen-manual`) and `206.453` ms (`tuned-manual`)
 
 ### Algorithm sensitivity
 
-A longer 360-second wave (`baseline` 60 s at `c = 2`, `ramp` 90 s at `c = 24`, `sustain` 90 s at
+A longer 360-second hardware wave (`baseline` 60 s at `c = 2`, `ramp` 90 s at `c = 24`, `sustain` 90 s at
 `c = 24`, `cooldown` 120 s at `c = 0`, `maxReplicas: 4`) compared `Proportional` (`RunningRequests`
 target `8`), `TokenThroughput` (`14000` tok/s) and catalog-backed `Predictive` (`12851.37`
-effective tok/s) against the [Scaling Simulation](scaling-simulation.md) metrics (*TTFT* <= `2000` ms, *ITL* <= `33` ms):
+effective tok/s) using `True SLO` (*TTFT* <= `2000` ms and adjacent *ITL* <= `33` ms) and `Goodput`.
+
+Those scoring definitions match the deterministic **synthetic simulation** (where `Predictive` reached `99.4%` true SLO on a five-step synthetic `ramp` seed against `76.1%` for reactive configurations; synthetic simulation figures are model outputs, not GPU hardware runs):
 
 | Algorithm | Phase | Requests | Failed | True SLO | Goodput (`req/s`) | *TTFT* p50 / p90 / p99 (ms) | *ITL* p50 / p90 / p99 (ms) | Output (`tok/s`) |
 |---|---|---:|---:|---:|---:|---|---|---:|
@@ -505,10 +507,10 @@ The benchmark configuration timelines sampled `Disqualified` for the proportiona
 *PD* configurations. Predictive *PD* also sampled `Admitted` and `Aborted`.
 The *EPD* timeline captured no retirement state. These sets do not establish complete retirement sequences.
 
-The [retirement protocol](shutdown.md#retirement-protocol) uses `Draining` followed by `Deleting`
-before release completes. Kubernetes can display a deleting `Pod` as `Terminating`.
-`Terminating` is not a retirement state. The captures do not include every transition, and zero client
-errors in the two scale-down phases do not prove every in-flight request survives every retirement.
+The [retirement protocol](runtime-control.md#pause-and-retirement) uses `Draining` followed by `Deleting`
+before release completes. Kubernetes can display a deleting `Pod` as `Terminating`, which is not a retirement state. The captures do not include every transition, and zero client errors in the two scale-down phases do not prove every in-flight request survives every retirement.
+
+Before trusting live scaler recommendations on a cluster, check `kubectl get --raw "/apis/worker.gpustack.ai/v1/namespaces/<ns>/modeldeployments/<name>/metrics"` for `partial: false` and inspect *`missing[]`* alongside `ModelDeploymentScaler` `MetricsReady` (see [Engine signals](scaling.md#engine-signals)).
 
 A later runtime-acceptance run scaled a *vLLM* multi-Server deployment by hand through one to two
 to one replicas. The Router's worker set followed every edit, the pinned `round_robin` policy
@@ -586,8 +588,8 @@ examples from captured lifecycle evidence.
 
 ---
 
-**See also** — [Model Deployment Scaling](scaling.md) (algorithm and guard contracts) ·
+**See also** — [Model Deployment Scaling](scaling.md) (algorithm, metrics, and guard contracts) ·
 [Scaling Walkthrough](../../walkthroughs/model-deployment/scaling.md) (configuration and observation) ·
-[Model Deployment Shutdown](shutdown.md) (retirement and drain limits)
+[Online Runtime Control](runtime-control.md) (retirement budgets, drain window, and role pause)
 
 **Next** → [Scaling Walkthrough](../../walkthroughs/model-deployment/scaling.md)

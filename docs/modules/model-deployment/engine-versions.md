@@ -22,7 +22,7 @@ The table covers aggregated serving, *prefill/decode (PD)* and *encode/prefill/d
 |---|---|---|---|---|
 | vLLM | alone | `0.29.0`; behind `llm-d-router`, `--enable-scale-out` is also required on `0.30.0`+ | `0.3.13.post1`, on the `cuda12.9` and the `cuda13.0` tag | — |
 | vLLM | *prefill/decode*, direct transfer over `tcp` | `0.29.0`; behind `llm-d-router`, `--enable-scale-out` is also required on `0.30.0`+ | `0.3.13.post1` | — |
-| vLLM | with a Mooncake store, alone or as a pair | `0.29.0`; behind `llm-d-router`, `--enable-scale-out` is also required on `0.30.0`+ | `0.3.13.post1` | the 0.3.13 line; the [default image](../../reference/settings.md) is one |
+| vLLM | with a Mooncake store, alone or as a pair | `0.29.0`; behind `llm-d-router`, `--enable-scale-out` is also required on `0.30.0`+ | `0.3.13.post1` | the 0.3.13 line; the [default store image](../kv-cache/backend.md#image) is one |
 | vLLM-Ascend | alone | `0.23.0`; behind `llm-d-router`, `--enable-scale-out` is also required on `0.30.0rc1`+ | `0.3.11.post1`, the NPU build | — |
 | vLLM-Ascend | *prefill/decode*, direct transfer | `0.23.0`, behind `llm-d-router`; `--enable-scale-out` is also required on `0.30.0rc1`+ | `0.3.11.post1`, the NPU build | — |
 | vLLM-Ascend | with a Mooncake store | not verified | `0.3.11.post1`, the NPU build | not verified |
@@ -96,21 +96,21 @@ id is `cmpl-` + the request's `request_id`) and `0.5.18`/`0.5.21` for SGLang (th
 
 On any other version the probe still runs and its outcome still decides: `Verified` admits a
 member, `Unknown` grants nothing new and withdraws nothing already granted. Only a failed health
-check of the same [qualification](status.md) withdraws an eligible member. Neither probe outcome is an
+check of the same [qualification](routing.md#serving-observations) withdraws an eligible member. Neither probe outcome is an
 admission refusal.
 
 ## Transport compatibility
 
 The store path uses `KVCacheBackend.spec.transport.protocol`. The direct prefill/decode path
 selects `Mooncake`, `NIXL`, or `HIXL` through `spec.kvTransfer.backend`; see
-[Transfer parameters](parameterize.md#transfer-parameters) for fabric selection.
+[Direct transfer transport](prefill-decode.md#direct-transfer-transport) for fabric selection.
 
 The store compatibility observations below apply to the named images.
 
 | Transport (API/Mooncake) | Engine | Store path |
 |---|---|---|
 | `TCP` / `tcp` | vLLM | **Works**, default images; beside a direct path it keeps its store connections open too and did not [run out of ports](#limitations) where measured |
-| `TCP` / `tcp` | SGLang | **Works**, with a published store image on [its client's line](#minimum-versions), named by hand; beside a direct path, [it runs out of ports](#limitations) unless [`model-deployment-tcp-tw-reuse`](../../reference/settings.md#sglang-time-wait-reuse) is on |
+| `TCP` / `tcp` | SGLang | **Works**, with a published store image on [its client's line](#minimum-versions), named by hand; beside a direct path, [it runs out of ports](#limitations) unless [`model-deployment-tcp-tw-reuse`](#limitations) is on |
 | `TCP` / `tcp` | vLLM-Ascend | **Not supported**: refused at admission, its store client accepts `CANN` only |
 | `RDMA` / `rdma` | vLLM | **Not verified** |
 | `RDMA` / `rdma` | SGLang | **Not verified** |
@@ -174,9 +174,7 @@ images install only `llm_datadist` and C++ `libcann_hixl.so`, so `load_runtime()
 
 ## Limitations
 
-- **SGLang with a store** holds a pinned host pool and needs the node's available memory above a
-  fixed reserve plus that pool; see [SGLang's host-memory
-  tier](../kv-cache/injection.md#sglang-host-memory-tier).
+- **SGLang with a store** enables `--enable-hierarchical-cache` (or `--disaggregation-decode-retraction-backup cpu_tensor` on *Decode*) and allocates a pinned host-memory pool; size node RAM above the engine heap plus that host pool (see [KV Cache Pools and Bindings](../kv-cache/pool.md)).
 - **SGLang *prefill/decode* over `TCP` runs out of local ports under sustained load, with or without
   a store.** The *prefill* half opens a new connection for every transfer, to the *decode* half and to
   each store member, all from the same ephemeral ports of its container. Connections left in
@@ -184,10 +182,13 @@ images install only `llm_datadist` and C++ `libcann_hixl.so`, so `load_runtime()
   until the engine `Pod`s are restarted. On the measured pair without a store, the gateway then
   answered `503` with `No available prefill workers`.
 
-  **Turning on [`model-deployment-tcp-tw-reuse`](../../reference/settings.md#sglang-time-wait-reuse)
-  prevented failure in a measured SGLang 0.5.18 pair with a store**: it answered 1905 sequential
-  requests without failure, with about 19,500 `TIME-WAIT` sockets. It needs a kubelet change on
-  every eligible node.
+  **Turning on `model-deployment-tcp-tw-reuse` prevented failure in a measured SGLang 0.5.18 pair
+  with a store**: it answered 1905 sequential requests without failure, with about 19,500 `TIME-WAIT`
+  sockets.
+
+  First allow `allowedUnsafeSysctls: ["net.ipv4.tcp_tw_reuse"]` in `KubeletConfiguration` on every
+  eligible node (otherwise *Prefill* `Pod`s fail with `SysctlForbidden`), then run
+  `kubectl -n gpustack-system patch setting model-deployment-tcp-tw-reuse --type merge -p '{"spec":{"value":"true"}}'`.
 
   The pair without a store was not tested with this setting. Widening `net.ipv4.ip_local_port_range`
   only delays exhaustion; whether a fabric transport avoids it remains unverified.
@@ -204,4 +205,4 @@ images install only `llm_datadist` and C++ `libcann_hixl.so`, so `load_runtime()
 [KV Cache Backend](../kv-cache/backend.md) (the store a client needs) ·
 [RDMA Operations](../rdma/operations.md) (fabric devices and the engine image they need).
 
-**Next** → [Model Deployment Status](status.md)
+**Next** → [Prefill and Decode](prefill-decode.md) — pair *prefill* and *decode* roles behind a router.

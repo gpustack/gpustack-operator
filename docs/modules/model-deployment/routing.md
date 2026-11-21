@@ -13,6 +13,7 @@ endpoint selection and SGLang's tested DP routing modes.
 - [No policy flag](#no-policy-flag)
 - [Serving observations](#serving-observations)
 - [Per-worker routing metrics](#per-worker-routing-metrics)
+- [Troubleshooting](#troubleshooting)
 
 ## Traffic targets
 
@@ -64,7 +65,7 @@ member's one physical serving listener — the suffix is a rank, not a port.
 
 That registration is the gateway patch this project ships: it is carried by
 `gpustack/llm-router:v0.4.0` and later releases (including the default
-[`model-deployment-router-image`](../../reference/settings.md)), so a deployment that names no
+`model-deployment-router-image` `Setting`), so a deployment that names no
 image of its own registers per rank out of the box. An older default or a named image that
 predates the patch runs the gateway without the fan-out.
 
@@ -242,32 +243,23 @@ router at another one, is refused there. No field sets them either.
 
 ## Serving observations
 
-**Which replicas a Router can reach is not the same question as which replicas it is serving, and
-the operator reports both.** The first is the qualification list, and the second is an observation
-of the Router itself; they are published separately in
-[`status.roles[].endpoints`](status.md#status) and never collapse into one number.
+**Which replicas a Router can reach differs from which replicas it is actively serving, and the operator reports both.** *`status.roles[].endpoints.eligible`* counts qualified endpoints (`null` when never observed, `0` when observed empty), while *`status.roles[].endpoints.serving.state`* reports the Router union (`Confirmed` with *`serving.value`*, `NotConverged`, `Unknown`, or `NotConfigured`).
 
-**A group adds a third surface, and the operator publishes three related answers without collapsing
-them.** The role's counts, the group's own entry in
-[`status.roles[].groups[]`](status.md#group-status), and the Router's serving confirmation are three
-readings of one deployment, and the group entry answers a question the counts cannot: which members
-the group holds, and what holds it.
+Each protected replica group must pass five criteria to hold `modeldeployment.gpustack.ai/endpoint-eligible: "true"`:
 
-`AwaitingObservation` names a group whose qualification passed and whose restoration the Router's
-observation blocks. A group that was already eligible and whose fresh membership is complete,
-unchanged, safe and current stays `Eligible` through an observation loss, with its serving
-confirmation `Unknown`. The group's reason and the Router's reason name different facts, so a lost
-Router view never reads as an engine fault.
+| Criterion | Meaning | Failure effect |
+|---|---|---|
+| `MemberSetComplete` | Every declared member `Pod` exists | Revokes `endpoint-eligible` immediately; `Unknown` holds prior state |
+| `MembersReady` | Every member passes its readiness probe (`GET /health` or `/gpustack/v1/ready`) | Revokes `endpoint-eligible` immediately |
+| `GroupForward` | Forward generation probe succeeds across the group collective | Revokes `endpoint-eligible` immediately; `Unknown` holds prior state |
+| `NoPlannedRetirement` | No active retirement reservation holds the ordinal | Revokes `endpoint-eligible` during withdrawal and drain |
+| `NoPendingReplacement` | No replacement is already queued for the ordinal | Revokes `endpoint-eligible` immediately |
 
-Retained eligibility requires the [Group status](status.md#group-status) membership checks.
+*`status.roles[].groups[]`* publishes per-group membership, sorted member UID `generation`, `state` (`Eligible`, `Withdrawn`, `AwaitingMembers`, `AwaitingReady`, `AwaitingProbe`, `AwaitingObservation`, `Unsupported`, or `Unknown`), and `serving` confirmation.
 
-**A Router process health result is not an engine group's health.** The Router answers for its own
-process; the group answers for the engine's members.
+`AwaitingObservation` marks a group that passed all five criteria and waits on a fresh Router view. An already-`Eligible` group whose uncached member UID set remains complete, unchanged, and `Ready=True` stays `Eligible` through a transient Router observation loss, while *`endpoints.serving.state`* moves to `Unknown`.
 
-The observation is a plain HTTP GET with a short timeout against each Router `Pod`'s own address. It
-deliberately does not go through the Router `Service`, which would load balance across the Router's
-replicas and report one of them as the whole Router. What `Confirmed` then means is the
-serving-observation contract [`status.roles[].endpoints`](status.md#status) defines once.
+**A Router process health result is not an engine group's health.** The operator queries each Router `Pod` directly over HTTP rather than through the Router `Service`, so every Router replica must agree before *`serving.state`* reports `Confirmed`.
 
 **Three bounds apply, and they serve different purposes.**
 
@@ -288,9 +280,7 @@ other Routers share.
 
 ## Per-worker routing metrics
 
-The deployment's [metrics snapshot](metrics.md) does not say which replica served a
-request. Each router's own `/metrics` does, for the series below, all seen exported in runs. A
-`worker` label is the worker's URL, which carries its `Pod` address.
+The deployment's `/metrics` subresource (`/apis/worker.gpustack.ai/v1/namespaces/<ns>/modeldeployments/<name>/metrics`) aggregates role and router counters without per-replica attribution. Each router's own `/metrics` endpoint exposes the per-worker series below; a `worker` label carries the worker URL and `Pod` address.
 
 | *`spec.router.name`* | Series | Meaning |
 |---|---|---|
@@ -314,8 +304,27 @@ kept its `1`.
 Count the healthy series, not the lines, on a scaled deployment. The same run's four content
 classes served through the gateway with zero failures.
 
+## Troubleshooting
+
+Inspect router readiness, endpoint eligibility, and per-group status on the `ModelDeployment`:
+
+```bash
+kubectl -n <namespace> get modeldeployment <name> -o json \
+  | jq '{phase: .status.phase, endpoint: .status.endpoint,
+         conditions: [.status.conditions[] | select(.type | IN("RouterReady","RoleKindsReady","EndpointEligibility"))],
+         roles: [.status.roles[] | {name, ready, desired, endpoints, groups}]}'
+```
+
+| Symptom | Signal | Action |
+|---|---|---|
+| *`status.endpoint`* is empty | `RouterReady=False` (`RenderFailed` or `NoReadyReplicas`) or `Unknown` (`NotDeployed`) | Read the `RouterReady` message; fix refused *`spec.router`* flags or inspect `<deployment>-router` `Pod` logs and events. |
+| `Pod` is `Running` (`0/1` `Ready`) | `groups[].state: AwaitingReady` or `RoleKindsReady=False` | Engine is loading weights (`startupTimeoutSeconds`, default `1800` s) or failing `/health` / `/gpustack/v1/ready`; check engine logs and *`roles[].pause`*. |
+| `Pod` is `1/1` `Ready` without `endpoint-eligible` | `groups[].state: AwaitingMembers`, `AwaitingProbe`, or `Withdrawn` | Check `groups[].reason` for missing peer `Pod`s, failed collective forward probe, active *`status.retirement`*, or *`roles[].pause: true`*. |
+| *`endpoints.eligible`* is `null` | `EndpointEligibility=Unknown` (`NotObserved`) | Wait for the qualification pass to evaluate the role, or check operator worker logs if status never updates. |
+| Qualified group receives no traffic | `groups[].state: AwaitingObservation` or `serving.state: Unknown` / `NotConverged` | Inspect `<deployment>-router` `Pod`s and `:9091/observer/endpoints` (`:9090` on `llm-d-router`); verify all router replicas report fresh views within 15 s. |
+
 ---
 
-**See also** — [Prefill and Decode](prefill-decode.md) for *`spec.router`* and the flags each router refuses · [Encode, Prefill and Decode](encode-prefill-decode.md) for *EPD* disaggregation and connector options · [Model Deployment Metrics](metrics.md) for the router counters a deployment's snapshot reads.
+**See also** — [Prefill and Decode](prefill-decode.md) (*`spec.router`* pairing and refused router flags) · [Encode, Prefill and Decode](encode-prefill-decode.md) (*EPD* disaggregation and connector options) · [Model Deployment Configuration](configuration.md) (role readiness probes and rollout behavior) · [Online Runtime Control](runtime-control.md) (router hash decoupling and role pause).
 
-**Next** → [Model Deployment Status](status.md)
+**Next** → [Model Deployment Scaling](scaling.md) — scale serving replicas and observe graceful retirement.

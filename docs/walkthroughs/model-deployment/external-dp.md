@@ -343,4 +343,4 @@ or placement across GPU nodes. Those configurations need separate compatibility 
 [Routing](../../modules/model-deployment/routing.md) (backend selection) ·
 [Elastic EP Walkthrough](elastic-ep.md) (captured collective expansion)
 
-**Next** → [Model Deployment Status](../../modules/model-deployment/status.md)
+**Next** → [Multi-Host Serving Walkthrough](multi-host.md) — deploy distributed instances across multiple GPU hosts.
