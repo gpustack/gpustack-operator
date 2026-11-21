@@ -257,6 +257,14 @@ type ModelPrefetchTransferServing struct {
 	//
 	// +required
 	ReadyLeaseExpiresAt meta.Time `json:"readyLeaseExpiresAt" protobuf:"bytes,4,name=readyLeaseExpiresAt"`
+
+	// Manufacturers lists the sorted source vendor scopes (for example "nvidia", "ascend")
+	// currently serving this artifact revision so Prefer delivery only targets matching pools.
+	//
+	// +optional
+	// +listType=set
+	// +k8s:validation:maxItems=8
+	Manufacturers []string `json:"manufacturers,omitempty" protobuf:"bytes,5,rep,name=manufacturers"`
 }
 
 // ModelPrefetchTransferLimits is the applied source policy, echoed where it was admitted so a

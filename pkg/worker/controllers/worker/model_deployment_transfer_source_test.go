@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
+	apps "k8s.io/api/apps/v1"
 	core "k8s.io/api/core/v1"
 	storage "k8s.io/api/storage/v1"
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -242,6 +243,32 @@ func TestModelPrefetchSourceObservationReusesDaemonSetInventory(t *testing.T) {
 	require.Equal(t, 1, counter.lists["*v1.DaemonSetList"])
 	got := getPrefetch(t, cli, pf.Namespace, pf.Name)
 	require.NotNil(t, got.Status.Transfer.Serving)
+	require.Equal(t, []string{"nvidia"}, got.Status.Transfer.Serving.Manufacturers)
+}
+
+func TestModelPrefetchSourceRuntimePodsExcludesMismatchedConfigHash(t *testing.T) {
+	r, cli, pf, pod, _, _ := testSourceAuthorityFixture(t)
+	owner := meta.GetControllerOf(pod)
+	require.NotNil(t, owner)
+	ds := new(apps.DaemonSet)
+	require.NoError(t, cli.Get(t.Context(), ctrlcli.ObjectKey{Namespace: pod.Namespace, Name: owner.Name}, ds))
+	if ds.Spec.Template.Annotations == nil {
+		ds.Spec.Template.Annotations = map[string]string{}
+	}
+	ds.Spec.Template.Annotations[transferConfigHash] = "hash-new"
+	require.NoError(t, cli.Update(t.Context(), ds))
+
+	freshPod := pod.DeepCopy()
+	if freshPod.Annotations == nil {
+		freshPod.Annotations = map[string]string{}
+	}
+	freshPod.Annotations[transferConfigHash] = "hash-old"
+	require.NoError(t, cli.Update(t.Context(), freshPod))
+
+	reconcileModelPrefetch(t, r, pf.Namespace, pf.Name)
+	got := getPrefetch(t, cli, pf.Namespace, pf.Name)
+	require.Nil(t, got.Status.Transfer.Serving,
+		"a source Pod carrying a stale config-hash must not publish SourceReady on same-image rollout")
 }
 
 func TestModelTransferSourceReadFailureDoesNotDecideDelivery(t *testing.T) {

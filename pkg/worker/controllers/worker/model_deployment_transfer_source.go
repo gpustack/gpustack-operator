@@ -3,9 +3,11 @@ package worker
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/util/sets"
 	ctrl "sigs.k8s.io/controller-runtime"
 	ctrlcli "sigs.k8s.io/controller-runtime/pkg/client"
 	ctrlevent "sigs.k8s.io/controller-runtime/pkg/event"
@@ -88,6 +90,42 @@ func modelDeploymentModelTransferSourceObserved(
 	return !until.IsZero(), until, nil
 }
 
+func modelDeploymentModelTransferSourceObservedManufacturers(
+	ctx context.Context, cli ctrlcli.Reader, artifact *workercore.ModelArtifact,
+) (sets.Set[string], error) {
+	if cli == nil || artifact == nil || artifact.UID == "" || artifact.Generation < 1 || artifact.Status.Resolved == nil ||
+		artifact.Status.ObservedGeneration != artifact.Generation || artifact.Status.Resolved.ManifestDigest == "" {
+		return nil, nil
+	}
+	prefetches := new(workercore.ModelPrefetchList)
+	if err := cli.List(ctx, prefetches, ctrlcli.InNamespace(artifact.Namespace),
+		ctrlcli.MatchingFields{modelPrefetchArtifactIndex: artifact.Name}); err != nil {
+		return nil, fmt.Errorf("read source prefetch observations: %w", err)
+	}
+	now := time.Now()
+	manufacturers := sets.New[string]()
+	for i := range prefetches.Items {
+		pf := &prefetches.Items[i]
+		if pf.Namespace != artifact.Namespace || pf.Spec.ArtifactRef.Name != artifact.Name {
+			continue
+		}
+		proof := modelPrefetchPublishedServing(pf, now)
+		if proof == nil || proof.ArtifactUID != string(artifact.UID) || proof.ArtifactGeneration != artifact.Generation ||
+			proof.Digest != artifact.Status.Resolved.ManifestDigest {
+			continue
+		}
+		for _, m := range proof.Manufacturers {
+			if trimmed := strings.ToLower(strings.TrimSpace(m)); trimmed != "" {
+				manufacturers.Insert(trimmed)
+			}
+		}
+	}
+	if manufacturers.Len() == 0 {
+		return nil, nil
+	}
+	return manufacturers, nil
+}
+
 func modelTransferSourceLeaseRequeue(result ctrl.Result, until, now time.Time) ctrl.Result {
 	if until.IsZero() || result.Requeue {
 		return result
@@ -100,9 +138,9 @@ func modelTransferSourceLeaseRequeue(result ctrl.Result, until, now time.Time) c
 }
 
 type modelPrefetchSourceReadinessKey struct {
-	artifact, uid, artifactUID, digest string
-	generation, artifactGeneration     int64
-	enabled, deleting, ready           bool
+	artifact, uid, artifactUID, digest, manufacturers string
+	generation, artifactGeneration                    int64
+	enabled, deleting, ready                          bool
 }
 
 func modelPrefetchSourceKey(pf *workercore.ModelPrefetch, now time.Time) modelPrefetchSourceReadinessKey {
@@ -117,6 +155,7 @@ func modelPrefetchSourceKey(pf *workercore.ModelPrefetch, now time.Time) modelPr
 	if pf.Status.Transfer != nil && pf.Status.Transfer.Serving != nil {
 		proof := pf.Status.Transfer.Serving
 		key.artifactUID, key.artifactGeneration, key.digest = proof.ArtifactUID, proof.ArtifactGeneration, proof.Digest
+		key.manufacturers = strings.Join(proof.Manufacturers, ",")
 	}
 	return key
 }

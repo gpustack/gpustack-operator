@@ -9435,6 +9435,18 @@ func crd_gpustack_api_worker_v1alpha1_ModelPrefetch() *v1.CustomResourceDefiniti
 															Type:        "string",
 															MinLength:   ptr.To[int64](1),
 														},
+														"manufacturers": {
+															Description: "Manufacturers lists the sorted source vendor scopes (for example \"nvidia\", \"ascend\")\ncurrently serving this artifact revision so Prefer delivery only targets matching pools.",
+															Type:        "array",
+															MaxItems:    ptr.To[int64](8),
+															Items: &v1.JSONSchemaPropsOrArray{
+																Schema: &v1.JSONSchemaProps{
+																	Type: "string",
+																},
+															},
+															Nullable:  true,
+															XListType: ptr.To[string]("set"),
+														},
 														"readyLeaseExpiresAt": {
 															Description: "ReadyLeaseExpiresAt bounds how long this readiness observation is usable.",
 															Type:        "string",

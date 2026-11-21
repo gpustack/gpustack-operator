@@ -6683,6 +6683,14 @@ message ModelPrefetchTransferServing {
   //
   // +required
   optional .k8s.io.apimachinery.pkg.apis.meta.v1.Time readyLeaseExpiresAt = 4;
+
+  // Manufacturers lists the sorted source vendor scopes (for example "nvidia", "ascend")
+  // currently serving this artifact revision so Prefer delivery only targets matching pools.
+  //
+  // +optional
+  // +listType=set
+  // +k8s:validation:maxItems=8
+  repeated string manufacturers = 5;
 }
 
 // ModelPrefetchTransferStatus is the transfer half of a source-preparing prefetch, aggregated

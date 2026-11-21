@@ -5,6 +5,7 @@ import (
 
 	core "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
+	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/utils/ptr"
 
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
@@ -103,6 +104,11 @@ type ModelDeploymentArtifactRender struct {
 	// the gate a Prefer deployment reads; under Require it is information,
 	// never permission.
 	SourceReady bool
+
+	// ModelTransferSourceManufacturers lists the lowercase source vendor scopes observed
+	// serving this artifact revision. Empty means unscoped; when non-empty, Prefer only
+	// selects Remote on roles whose manufacturer matches an observed serving source.
+	ModelTransferSourceManufacturers sets.Set[string] `json:"-"`
 
 	// VerifiedNodeOnly says the artifact can only be delivered honestly by
 	// the node: it carries an expected digest or file patterns, which an

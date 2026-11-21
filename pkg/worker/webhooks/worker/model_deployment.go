@@ -664,8 +664,14 @@ func (r *ModelDeploymentWebhook) modelDeploymentRoleNeedsInterfaceRejudge(
 	if modelDeploymentRoleInterfaceInputsChanged(was, role) {
 		return true, nil
 	}
+	oldAsymA5 := workerctrl.ModelDeploymentAscendA5AsymmetricPair(
+		old, was, nodefeature.ManufacturerAscend, nodefeature.AcceleratorFamilyAscend950,
+	)
+	newAsymA5 := workerctrl.ModelDeploymentAscendA5AsymmetricPair(
+		md, role, nodefeature.ManufacturerAscend, nodefeature.AcceleratorFamilyAscend950,
+	)
 	pairSymChanged := workerctrl.ModelDeploymentDirectPairRequestsInterfaces(old) !=
-		workerctrl.ModelDeploymentDirectPairRequestsInterfaces(md)
+		workerctrl.ModelDeploymentDirectPairRequestsInterfaces(md) || oldAsymA5 != newAsymA5
 	if !pairSymChanged &&
 		kubemeta.DeepEqual(old.Spec.Model.ArtifactRef, md.Spec.Model.ArtifactRef) &&
 		modelDeploymentDirectLegProbe(old, was, awsEFAEnabled) == modelDeploymentDirectLegProbe(md, role, awsEFAEnabled) {

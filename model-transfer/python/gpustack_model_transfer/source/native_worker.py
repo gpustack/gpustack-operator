@@ -85,6 +85,7 @@ class NativeSourceWorker:
         self._lock = threading.Lock()
         self._release_done = False
         self._drain_started = False
+        self._native_started = False
         self._native_attempted = False
         self._retention = None
         self._blocks_idle = False
@@ -159,18 +160,25 @@ class NativeSourceWorker:
         return True
 
     def _finish_pre_native_cancel(self) -> None:
-        if (
-            self._drain_requested.is_set()
-            and self.state != "quarantined"
-            and not self._unknown_event.is_set()
-            and self.registration is None
-        ):
-            self.state = "draining"
-            return
-        if self.state != "quarantined":
-            self.state = "stopped"
-            self._stop_event.set()
-            self._wake_event.set()
+        with self._lock:
+            if (
+                self._drain_requested.is_set()
+                and self.state != "quarantined"
+                and not self._unknown_event.is_set()
+                and self.registration is None
+            ):
+                self.state = "draining"
+                return
+            must_retain = (
+                self._native_attempted or self._native_started
+            ) and not self._release_done
+            if not must_retain:
+                if self.state != "quarantined":
+                    self.state = "stopped"
+                    self._stop_event.set()
+                    self._wake_event.set()
+                return
+        self._quarantine("cancelled-after-native-start")
 
     def _redact_secret(self, text: str) -> str:
         for candidate in (
@@ -279,7 +287,6 @@ class NativeSourceWorker:
 
     def start(self):
         preflight_entered = False
-        native_started = False
         try:
             self._retry(self.control.register)
             self._control_thread = threading.Thread(
@@ -296,7 +303,9 @@ class NativeSourceWorker:
                 self._finish_pre_native_cancel()
                 return
             self._retry(self.control.native_start)
-            native_started = True
+            with self._lock:
+                if not self._preflight_cancelled() and not self._unknown_event.is_set():
+                    self._native_started = True
             if self._preflight_cancelled():
                 self._finish_pre_native_cancel()
                 return
@@ -371,7 +380,7 @@ class NativeSourceWorker:
                 if not clean:
                     self._native_attempted = True
                     self._quarantine(type(exc).__name__)
-                elif native_started:
+                elif self._native_started:
                     if (
                         self._drain_requested.is_set()
                         and self.state != "quarantined"
@@ -659,7 +668,9 @@ class NativeSourceWorker:
         with self._lock:
             self._unknown_event.set()
             self._abort_fill_requested.set()
-            retain = self._native_attempted and not self._release_done
+            retain = (
+                self._native_attempted or self._native_started
+            ) and not self._release_done
             if retain and self._retention is None:
                 handles = getattr(self.registration, "handles", {})
                 self._retention = retain_source_state(
@@ -719,7 +730,11 @@ class NativeSourceWorker:
         return self.state
 
     def close(self):
-        if self._native_attempted and not self._release_done:
+        with self._lock:
+            must_retain = (
+                self._native_attempted or self._native_started
+            ) and not self._release_done
+        if must_retain:
             self._quarantine("close-with-native-state")
             return
         self._stop_event.set()

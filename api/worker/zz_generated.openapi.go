@@ -15043,6 +15043,26 @@ func schema_gpustack_api_worker_v1alpha1_ModelPrefetchTransferServing(ref common
 							Ref:         ref(metav1.Time{}.OpenAPIModelName()),
 						},
 					},
+					"manufacturers": {
+						VendorExtensible: spec.VendorExtensible{
+							Extensions: spec.Extensions{
+								"x-kubernetes-list-type": "set",
+							},
+						},
+						SchemaProps: spec.SchemaProps{
+							Description: "Manufacturers lists the sorted source vendor scopes (for example \"nvidia\", \"ascend\") currently serving this artifact revision so Prefer delivery only targets matching pools.",
+							MaxItems:    ptr.To[int64](8),
+							Type:        []string{"array"},
+							Items: &spec.SchemaOrArray{
+								Schema: &spec.Schema{
+									SchemaProps: spec.SchemaProps{
+										Type:   []string{"string"},
+										Format: "",
+									},
+								},
+							},
+						},
+					},
 				},
 				Required: []string{"artifactUID", "artifactGeneration", "digest", "readyLeaseExpiresAt"},
 			},

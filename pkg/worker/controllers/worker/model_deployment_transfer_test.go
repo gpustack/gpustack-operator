@@ -3563,4 +3563,23 @@ func TestModelDeploymentModelTransferAscendA5PreferLifecycle(t *testing.T) {
 		assert.Equal(t, modelTransferTupleQualified,
 			modelDeploymentModelTransferRoleQualification(disabledEPLBMD, &disabledEPLBMD.Spec.Roles[0], nodefeature.ManufacturerAscend))
 	})
+
+	t.Run("NVIDIA-only serving proof falls back Ascend role under Prefer while serving NVIDIA remotely", func(t *testing.T) {
+		md := newRenderDeployment(func(m *workercore.ModelDeployment) {
+			m.Spec.Engine.Name = workercore.ModelDeploymentEngineVLLM
+		})
+		render := modelTransferRemoteRender()
+		render.ModelTransferPolicy = settings.ModelArtifactRemoteDeliveryPrefer
+		render.ModelTransferSourceManufacturers = sets.New("nvidia")
+
+		ascendEff, reason, _ := render.modelTransferForRole(md, &md.Spec.Roles[0], nodefeature.ManufacturerAscend, false)
+		require.Empty(t, reason)
+		assert.Equal(t, workercore.ModelDeploymentModelDeliveryNode, ascendEff.Delivery,
+			"Ascend role must fall back when only NVIDIA sources serve the digest")
+
+		nvidiaEff, reason, _ := render.modelTransferForRole(md, &md.Spec.Roles[0], nodefeature.ManufacturerNVIDIA, false)
+		require.Empty(t, reason)
+		assert.Equal(t, workercore.ModelDeploymentModelDeliveryRemote, nvidiaEff.Delivery,
+			"NVIDIA role must keep Remote delivery when NVIDIA source serves the digest")
+	})
 }

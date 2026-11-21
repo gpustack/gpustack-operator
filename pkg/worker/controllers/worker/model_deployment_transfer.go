@@ -170,6 +170,13 @@ func applyModelDeploymentModelTransferPolicy(
 	if err != nil {
 		return err
 	}
+	var sourceManufacturers sets.Set[string]
+	if sourceReady {
+		sourceManufacturers, err = modelDeploymentModelTransferSourceObservedManufacturers(ctx, cli, ma)
+		if err != nil {
+			return err
+		}
+	}
 	w.sourceReadyUntil = sourceReadyUntil
 	if policy == settings.ModelArtifactRemoteDeliveryPrefer && !sourceReady && !remoteState.remoteHeld() {
 		// Nothing is prepared and no replica holds the delivery remotely:
@@ -185,6 +192,7 @@ func applyModelDeploymentModelTransferPolicy(
 	remote.Delivery = workercore.ModelDeploymentModelDeliveryRemote
 	remote.ModelTransferPolicy = policy
 	remote.SourceReady = sourceReady
+	remote.ModelTransferSourceManufacturers = sourceManufacturers
 	if policy == settings.ModelArtifactRemoteDeliveryPrefer {
 		// Only Prefer declares a fallback: Require's answer to every
 		// failure is the visible wait, and its render names no fallback a
@@ -512,6 +520,12 @@ func (a *ModelDeploymentArtifactRender) modelTransferForRole(
 ) (*ModelDeploymentArtifactRender, string, string) {
 	qualification := modelDeploymentModelTransferRoleQualification(md, role, manufacturer)
 	if qualification == modelTransferTupleQualified {
+		if a.ModelTransferPolicy == settings.ModelArtifactRemoteDeliveryPrefer &&
+			!servesRemote &&
+			a.ModelTransferSourceManufacturers.Len() > 0 &&
+			!a.ModelTransferSourceManufacturers.Has(strings.ToLower(strings.TrimSpace(manufacturer))) {
+			return a.modelTransferFallbackRender(), "", ""
+		}
 		remote := *a
 		return &remote, "", ""
 	}

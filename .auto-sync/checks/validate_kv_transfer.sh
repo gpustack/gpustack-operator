@@ -457,10 +457,63 @@ for block in run_blocks:
 
     single_off_vars: set[str] = set()
     multi_off_vars: set[str] = set()
+    # Track simple shell if/else/fi control flow for the USE_VRAM_SEGMENT-present path.
+    # Each frame is (kind, pre_state, then_state, in_else) where kind is:
+    #   "vram_pos": condition requires USE_VRAM_SEGMENT present (only then-branch executes)
+    #   "vram_neg": condition requires USE_VRAM_SEGMENT absent (only else-branch executes)
+    #   "other":    arbitrary branch (only assignments present in BOTH then and else survive)
+    if_stack: list[list[object]] = []
+
+    def branch_active() -> bool:
+        for frame in if_stack:
+            kind, _, _, in_else = frame
+            if kind == "vram_pos" and in_else:
+                return False
+            if kind == "vram_neg" and not in_else:
+                return False
+        return True
+
     for ln in logical_lines:
         for stmt in re.split(r"(?:;|&&|\|\|)", ln):
             st = stmt.strip()
             if not st:
+                continue
+            if re.match(r"^if\s+", st):
+                cond = re.sub(r"^if\s+", "", st).strip()
+                if "USE_VRAM_SEGMENT" in cond and re.search(r"\bgrep\b", cond):
+                    kind = "vram_neg" if re.match(r"^!\s*", cond) else "vram_pos"
+                else:
+                    kind = "other"
+                if_stack.append([kind, (set(single_off_vars), set(multi_off_vars)), None, False])
+                continue
+            if st == "then":
+                continue
+            if st == "else":
+                if if_stack:
+                    frame = if_stack[-1]
+                    frame[2] = (set(single_off_vars), set(multi_off_vars))
+                    frame[3] = True
+                    pre_s, pre_m = frame[1]
+                    single_off_vars, multi_off_vars = set(pre_s), set(pre_m)
+                continue
+            if st == "fi":
+                if if_stack:
+                    kind, pre_state, then_state, in_else = if_stack.pop()
+                    if kind == "vram_pos":
+                        if in_else and then_state is not None:
+                            single_off_vars, multi_off_vars = set(then_state[0]), set(then_state[1])
+                    elif kind == "vram_neg":
+                        if not in_else:
+                            single_off_vars, multi_off_vars = set(pre_state[0]), set(pre_state[1])
+                    else:
+                        if in_else and then_state is not None:
+                            single_off_vars = set(then_state[0]) & set(single_off_vars)
+                            multi_off_vars = set(then_state[1]) & set(multi_off_vars)
+                        else:
+                            single_off_vars = set(pre_state[0]) & set(single_off_vars)
+                            multi_off_vars = set(pre_state[1]) & set(multi_off_vars)
+                continue
+            if not branch_active():
                 continue
             m_unset = unset_re.match(st)
             if m_unset:
@@ -475,19 +528,27 @@ for block in run_blocks:
                 rhs_single_quoted = len(rhs_raw) >= 2 and rhs_raw[0] == "'" and rhs_raw[-1] == "'"
                 rhs_val = strip_outer_quotes(rhs_raw)
                 rhs_words = tokenize_shell_words(rhs_val)
-                single_off_vars.discard(var_name)
-                multi_off_vars.discard(var_name)
+                # Resolve right-hand side against pre-assignment state so self-references
+                # like flags="$flags -DUSE_CUDA=ON" retain prior OFF classification.
+                next_single = False
+                next_multi = False
                 if is_single_standalone_off(rhs_words):
-                    single_off_vars.add(var_name)
+                    next_single = True
                 elif has_standalone_off(rhs_words):
-                    multi_off_vars.add(var_name)
+                    next_multi = True
                 elif (not rhs_single_quoted) and not cmake_cfg_re.match(st):
                     u_refs, dq_refs = standalone_var_refs(rhs_words)
                     all_refs = u_refs | dq_refs
                     if len(rhs_words) == 1 and (all_refs & single_off_vars):
-                        single_off_vars.add(var_name)
+                        next_single = True
                     elif (u_refs & (single_off_vars | multi_off_vars)) or (dq_refs & single_off_vars):
-                        multi_off_vars.add(var_name)
+                        next_multi = True
+                single_off_vars.discard(var_name)
+                multi_off_vars.discard(var_name)
+                if next_single:
+                    single_off_vars.add(var_name)
+                elif next_multi:
+                    multi_off_vars.add(var_name)
             m_cmake = cmake_cfg_re.match(st)
             if m_cmake:
                 saw_cmake_configure = True

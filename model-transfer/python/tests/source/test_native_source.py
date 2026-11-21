@@ -1050,3 +1050,57 @@ def test_unexpected_preflight_error_after_native_start_quarantines_instead_of_st
         assert quarantines == ["RuntimeError"]
     finally:
         worker.close()
+
+
+def test_rejected_heartbeat_during_hixl_preflight_after_native_start_retains_generation():
+    from gpustack_model_transfer.core.errors import SourceUnavailableError
+    from gpustack_model_transfer.core.manifest import parse_manifest
+    from gpustack_model_transfer.source.native_worker import NativeSourceWorker
+    from gpustack_model_transfer.source.workorder import (
+        registered_files,
+        resident_file_bytes,
+    )
+
+    payload = order()
+    manifest = parse_manifest(payload["manifestJSON"].encode())
+    payload["residentBudgetBytes"] = sum(
+        resident_file_bytes(f.size, "hixl") for f in registered_files(manifest)
+    )
+    assignment = parse_assignment(payload, backend="hixl")
+    preflight_entered = threading.Event()
+    heartbeat_refused = threading.Event()
+
+    class RefusingControl(Control):
+        def heartbeat(self, **kwargs):
+            if preflight_entered.wait(2):
+                heartbeat_refused.set()
+                raise ControlError(503, "source-unavailable", "lease write failed")
+            return super().heartbeat(**kwargs)
+
+    class BlockingPreflightBackend:
+        def preflight(self):
+            preflight_entered.set()
+            heartbeat_refused.wait(2)
+            raise SourceUnavailableError("temporary hixl preflight refusal")
+
+        def finalize(self):
+            pass
+
+    control = RefusingControl(assignment.generation)
+    worker = NativeSourceWorker(
+        control,
+        assignment,
+        backend=BlockingPreflightBackend,
+        allocator=lambda: Allocator(control),
+        worker_instance_id="instance-1",
+        poll_interval=0.01,
+    )
+    try:
+        worker.start()
+        assert control.start_calls == 1
+        assert heartbeat_refused.is_set()
+        eventually(lambda: worker.state == "quarantined")
+    finally:
+        worker._stop_event.set()
+        if worker._control_thread is not None:
+            worker._control_thread.join(timeout=2)

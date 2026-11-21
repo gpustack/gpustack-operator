@@ -6748,6 +6748,41 @@ func TestModelDeploymentWebhook_AscendA5InterfaceUpdateRejudge(t *testing.T) {
 		assert.Contains(t, err.Error(), "no effective RDMA or EFA")
 	})
 
+	t.Run("unrouted asymmetric A5 SGLang RDMA-store P/D rejects adding router on update", func(t *testing.T) {
+		rdmaObjs := kvCacheFixture()
+		rdmaObjs[2].(*workercore.KVCacheBackend).Spec.Transport.Protocol = "RDMA"
+		rdmaObjs = append(rdmaObjs, ascendA5)
+		md := modelDeployment(workercore.ModelDeploymentEngineSGLang,
+			role(func(r *workercore.ModelDeploymentRole) {
+				r.Name = "prefill"
+				r.Kind = workercore.ModelDeploymentRoleKindPrefill
+				r.AcceleratorType = "atlas-950"
+				r.Resources = &workercore.ModelDeploymentRoleResources{
+					Accelerator: ptr.To(qty1),
+					Interface:   ptr.To(qty1),
+				}
+			}),
+			role(func(r *workercore.ModelDeploymentRole) {
+				r.Name = "decode"
+				r.Kind = workercore.ModelDeploymentRoleKindDecode
+				r.AcceleratorType = "atlas-950"
+				r.Resources = &workercore.ModelDeploymentRoleResources{Accelerator: ptr.To(qty1)}
+			}),
+		)
+		md.Spec.KVCache.PoolRef.Name = "chat"
+		md.Spec.Router = nil
+		w := newModelDeploymentWebhookWith(rdmaObjs)
+		_, err := w.ValidateCreate(context.Background(), md)
+		require.NoError(t, err)
+
+		newer := md.DeepCopy()
+		newer.Spec.Router = &workercore.ModelDeploymentRouter{Name: workercore.ModelDeploymentRouterSGLang}
+		_, err = w.ValidateUpdate(context.Background(), md, newer)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "spec.roles[0].resources.interface")
+		assert.Contains(t, err.Error(), "no effective RDMA or EFA")
+	})
+
 	t.Run("removing spec.router under HIXL rejudges both halves even with CANN KVCache", func(t *testing.T) {
 		w, old := buildStored(t)
 		newer := old.DeepCopy()

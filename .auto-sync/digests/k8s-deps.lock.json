@@ -5,7 +5,7 @@
     {
       "path": ".auto-sync/checks",
       "kind": "directory",
-      "sha256": "b6ce7646f7ad0fdf1d2be3f1530fd385743c4fc991ee129ce4b9e3213044f3c0"
+      "sha256": "3f8fd4877d6a7e691024d547f4b68273f41b80e160ba3b2843c6dacef923db2d"
     },
     {
       "path": ".auto-sync/instructions/k8s-deps.md",

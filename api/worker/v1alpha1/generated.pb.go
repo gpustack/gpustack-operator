@@ -11328,6 +11328,15 @@ func (m *ModelPrefetchTransferServing) MarshalToSizedBuffer(dAtA []byte) (int, e
 	_ = i
 	var l int
 	_ = l
+	if len(m.Manufacturers) > 0 {
+		for iNdEx := len(m.Manufacturers) - 1; iNdEx >= 0; iNdEx-- {
+			i -= len(m.Manufacturers[iNdEx])
+			copy(dAtA[i:], m.Manufacturers[iNdEx])
+			i = encodeVarintGenerated(dAtA, i, uint64(len(m.Manufacturers[iNdEx])))
+			i--
+			dAtA[i] = 0x2a
+		}
+	}
 	{
 		size, err := m.ReadyLeaseExpiresAt.MarshalToSizedBuffer(dAtA[:i])
 		if err != nil {
@@ -17070,6 +17079,12 @@ func (m *ModelPrefetchTransferServing) Size() (n int) {
 	n += 1 + l + sovGenerated(uint64(l))
 	l = m.ReadyLeaseExpiresAt.Size()
 	n += 1 + l + sovGenerated(uint64(l))
+	if len(m.Manufacturers) > 0 {
+		for _, s := range m.Manufacturers {
+			l = len(s)
+			n += 1 + l + sovGenerated(uint64(l))
+		}
+	}
 	return n
 }
 
@@ -20721,6 +20736,7 @@ func (this *ModelPrefetchTransferServing) String() string {
 		`ArtifactGeneration:` + fmt.Sprintf("%v", this.ArtifactGeneration) + `,`,
 		`Digest:` + fmt.Sprintf("%v", this.Digest) + `,`,
 		`ReadyLeaseExpiresAt:` + strings.Replace(strings.Replace(fmt.Sprintf("%v", this.ReadyLeaseExpiresAt), "Time", "v1.Time", 1), `&`, ``, 1) + `,`,
+		`Manufacturers:` + fmt.Sprintf("%v", this.Manufacturers) + `,`,
 		`}`,
 	}, "")
 	return s
@@ -56375,6 +56391,38 @@ func (m *ModelPrefetchTransferServing) Unmarshal(dAtA []byte) error {
 			if err := m.ReadyLeaseExpiresAt.Unmarshal(dAtA[iNdEx:postIndex]); err != nil {
 				return err
 			}
+			iNdEx = postIndex
+		case 5:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Manufacturers", wireType)
+			}
+			var stringLen uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowGenerated
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				stringLen |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			intStringLen := int(stringLen)
+			if intStringLen < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			postIndex := iNdEx + intStringLen
+			if postIndex < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.Manufacturers = append(m.Manufacturers, string(dAtA[iNdEx:postIndex]))
 			iNdEx = postIndex
 		default:
 			iNdEx = preIndex

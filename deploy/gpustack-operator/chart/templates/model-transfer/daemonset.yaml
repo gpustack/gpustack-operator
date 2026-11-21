@@ -75,6 +75,7 @@
 {{- $configHash := dict
       "image" $image
       "brokerImage" $brokerImage
+      "cacheRoot" $cacheRoot
       "hostNetwork" $ascendHostRoCE
       "dnsPolicy" $workerDNSPolicy
       "controlAddr" $controlAddr

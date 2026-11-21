@@ -738,6 +738,12 @@ if [[ "$(extract_config_hash "${worker_res_2g_ascend}")" == "$(extract_config_ha
   echo 'config-hash: changing modelTransfer.workerResources must change config-hash' >&2
   exit 1
 fi
+alt_cache_root="$(render --set modelManager.rootPath=/var/lib/gpustack/models-alt --show-only templates/model-transfer/daemonset.yaml)"
+alt_cache_ascend="$(awk '/^---$/{on=0} /^  name: gpustack-operator-model-transfer-ascend$/{on=1} on' <<<"${alt_cache_root}")"
+if [[ "$(extract_config_hash "${alt_cache_ascend}")" == "${default_ascend_hash}" ]]; then
+  echo 'config-hash: changing modelManager.rootPath must change config-hash' >&2
+  exit 1
+fi
 
 expect_failure invalid-host-roce-type \
   'got string, want boolean' \
