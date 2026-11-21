@@ -280,6 +280,9 @@ for lineno, raw_line in enumerate(lines, 1):
     if cur_stage:
         stages[cur_stage].append((lineno, raw_line))
 
+# Upstream Mooncake restricts USE_VRAM_SEGMENT to CUDA builds (mooncake-common/common.cmake:266-274);
+# builder-cann and builder-rocm always allocate store segments in Host RAM, and the file-wide rule
+# above already rejects USE_VRAM_SEGMENT=ON anywhere in the Dockerfile (including those stages).
 if "builder-cuda" not in stages:
     print(f"FAIL: missing builder-cuda stage in {df_path}", file=sys.stderr)
     sys.exit(1)

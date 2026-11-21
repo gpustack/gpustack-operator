@@ -73,6 +73,7 @@
 {{-   end }}
 {{-   $_ = set $workerEnvHash "GPUSTACK_MODEL_TRANSFER_WORKER_ADDRESS" $workerAddr }}
 {{- end }}
+{{- $_ = set $workerEnvHash "GPUSTACK_MODEL_TRANSFER_BROKER_ADDRESS" $controlAddr }}
 {{- $_ = set $workerEnvHash "GPUSTACK_MODEL_TRANSFER_VENDOR_SCOPE" $manufacturer }}
 {{- $_ = set $workerEnvHash "GPUSTACK_MODEL_TRANSFER_SOURCE_MAX_MEMORY_BYTES" (toString $maxMemoryBytes) }}
 {{- $_ = set $workerEnvHash "GPUSTACK_MODEL_TRANSFER_SOURCE_MIN_MEMORY_BYTES" (toString $minMemoryBytes) }}
@@ -306,7 +307,7 @@ spec:
           {{- end }}
           env:
             {{- range $key, $value := $mtEnv }}
-            {{- if not (and $ascendHostRoCE (eq $key "GPUSTACK_MODEL_TRANSFER_WORKER_ADDRESS")) }}
+            {{- if and (ne $key "GPUSTACK_MODEL_TRANSFER_BROKER_ADDRESS") (not (and $ascendHostRoCE (eq $key "GPUSTACK_MODEL_TRANSFER_WORKER_ADDRESS"))) }}
             - name: {{ $key }}
               value: {{ $value | quote }}
             {{- end }}

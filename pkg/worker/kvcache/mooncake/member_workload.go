@@ -928,12 +928,11 @@ func renderMemberArgs(member workercore.KVCacheBackendMember, group int) []strin
 // identifies a group everywhere else (its DaemonSet name and its selector labels), so a group's port
 // is as durable as its identity, and no state has to be kept to remember which port went where.
 //
-// Why the collision was SILENT is worth keeping, because it is what makes this worth deriving rather
-// than documenting: nothing here declares a containerPort or a hostPort. A hostPort would have been
-// caught by the scheduler, which treats it as a node-level resource and leaves the second Pod
-// Pending with the conflict named. hostNetwork plus a port the manifest never mentions is invisible
-// to that check — the Pod is placed, the process fails to bind, and the only evidence is a container
-// log. So the port cannot be allowed to collide in the first place.
+// Why the collision would otherwise be SILENT is worth keeping, because it is what makes this worth
+// deriving rather than documenting: applyMemberFabric now declares this hostPort on host-network
+// members so the scheduler catches cross-backend collisions on shared nodes and leaves a second
+// overlapping Pod Pending with the conflict named, while group-index derivation keeps in-backend
+// groups collision-free. Without both, hostNetwork plus an undeclared port fails only at bind time.
 func memberRESTPort(group int) int32 {
 	return memberRESTPortBase + int32(group)
 }

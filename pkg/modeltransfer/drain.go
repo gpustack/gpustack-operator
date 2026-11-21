@@ -151,19 +151,36 @@ func (c *Config) acknowledgeDrain(ctx context.Context, src *kubernetesIntentSour
 	return errors.New("drain acknowledgement stayed contested")
 }
 
-func (c *Config) runtimeEndpoint() (string, *http.Client) {
-	if c.runtimeURL == "" && c.WorkerAddr != "" {
-		return newRuntimeTransport(c.WorkerAddr)
+func (c *Config) runtimeEndpoint() (string, *http.Client, error) {
+	if c.runtimeURL == "" {
+		if c.WorkerAddr == "" {
+			return "", nil, errors.New("worker runtime address is not configured")
+		}
+		baseURL, client, err := broker.NewPrivateHTTPClient(c.WorkerAddr)
+		if err != nil {
+			return "", nil, fmt.Errorf("invalid worker runtime address: %w", err)
+		}
+		return baseURL + "/v1/runtime", client, nil
 	}
-	client := c.runtimeClient
-	if client == nil {
-		_, client, _ = broker.NewPrivateHTTPClient(defaultWorkerAddr)
+	if c.runtimeClient != nil {
+		return c.runtimeURL, c.runtimeClient, nil
 	}
-	return c.runtimeURL, client
+	if !strings.HasPrefix(c.runtimeURL, "http://127.0.0.1:") &&
+		!strings.HasPrefix(c.runtimeURL, "http://[::1]:") {
+		return "", nil, errors.New("runtime client is required for non-loopback runtime URL")
+	}
+	_, client, err := broker.NewPrivateHTTPClient(defaultWorkerAddr)
+	if err != nil {
+		return "", nil, err
+	}
+	return c.runtimeURL, client, nil
 }
 
 func (c *Config) freezeRuntime(ctx context.Context) (string, error) {
-	runtimeURL, client := c.runtimeEndpoint()
+	runtimeURL, client, err := c.runtimeEndpoint()
+	if err != nil {
+		return "", fmt.Errorf("runtime freeze is unavailable: %w", err)
+	}
 	if runtimeURL == "" || client == nil || c.bootstrapToken == "" {
 		return "", errors.New("runtime freeze is unavailable")
 	}
@@ -204,7 +221,10 @@ func (c *Config) observeEmptyRuntime(ctx context.Context, instance string) error
 }
 
 func (c *Config) inspectEmptyRuntime(ctx context.Context, instance string) (string, error) {
-	runtimeURL, client := c.runtimeEndpoint()
+	runtimeURL, client, err := c.runtimeEndpoint()
+	if err != nil {
+		return "", fmt.Errorf("runtime attestation is unavailable: %w", err)
+	}
 	if runtimeURL == "" || client == nil || c.bootstrapToken == "" {
 		return "", errors.New("runtime attestation is unavailable")
 	}

@@ -19,6 +19,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/util/sets"
 	ctrlrecord "k8s.io/client-go/tools/record"
 	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -239,8 +240,8 @@ func runGoldenYAMLScenario(
 	modelDeploymentModelTransferPolicyStrict = func(context.Context) (string, error) { return remotePolicy, nil }
 	modelDeploymentModelTransferSourceReady = func(
 		context.Context, ctrlcli.Reader, *workercore.ModelArtifact,
-	) (bool, time.Time, error) {
-		return tc.sourceReady, time.Time{}, nil
+	) (bool, time.Time, sets.Set[string], error) {
+		return tc.sourceReady, time.Time{}, nil, nil
 	}
 	if tc.qualifyAllTuples {
 		modelDeploymentModelTransferQualified = func(modelTransferTuple) bool {

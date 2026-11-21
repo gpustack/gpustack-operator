@@ -2,6 +2,7 @@ package setting
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strconv"
 	"time"
@@ -15,6 +16,9 @@ import (
 	"gpustack.ai/gpustack/pkg/system"
 	"gpustack.ai/gpustack/pkg/utils/funcx"
 )
+
+// ErrSettingNotFound reports that a setting key is not yet stored in the delegated Secret.
+var ErrSettingNotFound = errors.New("not found")
 
 // Prop represents the properties of a setting, which can be a combination of editable, private and sensitive.
 type Prop uint8
@@ -160,7 +164,7 @@ func (s Setting) ValueFromRemote(ctx context.Context) (string, error) {
 	}
 
 	if sec.Data == nil || sec.Data[s.name] == nil {
-		return s.defVal, fmt.Errorf("get value of setting %s: not found", s.name)
+		return s.defVal, fmt.Errorf("get value of setting %s: %w", s.name, ErrSettingNotFound)
 	}
 
 	ret := string(sec.Data[s.name])
@@ -219,7 +223,7 @@ func (s Setting) Value(ctx context.Context) (string, error) {
 	}
 
 	if sec.Data == nil || sec.Data[s.name] == nil {
-		return s.defVal, fmt.Errorf("get value of setting %s: not found", s.name)
+		return s.defVal, fmt.Errorf("get value of setting %s: %w", s.name, ErrSettingNotFound)
 	}
 
 	ret := string(sec.Data[s.name])

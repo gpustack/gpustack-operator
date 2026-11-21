@@ -697,28 +697,33 @@ if [[ "${override_ascend_hash}" == "${roce_ascend_hash}" ]] || [[ "${override_as
   exit 1
 fi
 
-# User modelTransfer.env.GPUSTACK_MODEL_TRANSFER_WORKER_ADDRESS must be filtered out in Host RoCE
-# mode so worker env never duplicates the managed UDS key and config-hash stays on the effective env.
+# User modelTransfer.env entries for chart-managed control addresses must be filtered out so
+# worker env never duplicates GPUSTACK_MODEL_TRANSFER_BROKER_ADDRESS (always) or
+# GPUSTACK_MODEL_TRANSFER_WORKER_ADDRESS (in Host RoCE mode) and config-hash stays on effective env.
 host_roce_worker_addr_shadow="$(render --values - --show-only templates/model-transfer/daemonset.yaml <<'EOF'
 modelTransfer:
   ascend:
     hostRoCE:
       enabled: true
   env:
+    GPUSTACK_MODEL_TRANSFER_BROKER_ADDRESS: '127.0.0.1:8888'
     GPUSTACK_MODEL_TRANSFER_WORKER_ADDRESS: '127.0.0.1:9999'
 EOF
 )"
 shadow_ascend_doc="$(awk '/^---$/{on=0} /^  name: gpustack-operator-model-transfer-ascend$/{on=1} on' <<<"${host_roce_worker_addr_shadow}")"
 shadow_ascend_worker="$(sed -n '/^        - name: worker$/,/^      volumes:/p' <<<"${shadow_ascend_doc}")"
 shadow_ascend_hash="$(extract_config_hash "${shadow_ascend_doc}")"
-if [[ "$(grep -c '^            - name: GPUSTACK_MODEL_TRANSFER_WORKER_ADDRESS$' <<<"${shadow_ascend_worker}")" -ne 1 ]] \
+if [[ "$(grep -c '^            - name: GPUSTACK_MODEL_TRANSFER_BROKER_ADDRESS$' <<<"${shadow_ascend_worker}")" -ne 1 ]] \
+  || grep -Fq '127.0.0.1:8888' <<<"${shadow_ascend_worker}" \
+  || ! grep -q '^              value: unix:///run/model-transfer-sockets/control\.sock$' <<<"${shadow_ascend_worker}" \
+  || [[ "$(grep -c '^            - name: GPUSTACK_MODEL_TRANSFER_WORKER_ADDRESS$' <<<"${shadow_ascend_worker}")" -ne 1 ]] \
   || grep -Fq '127.0.0.1:9999' <<<"${shadow_ascend_worker}" \
   || ! grep -q '^              value: unix:///run/model-transfer-sockets/worker\.sock$' <<<"${shadow_ascend_worker}"; then
-  echo 'hostRoCE worker address filter: managed UDS worker address must appear once with user TCP override stripped' >&2
+  echo 'hostRoCE control address filter: managed broker and worker addresses must appear once with user overrides stripped' >&2
   exit 1
 fi
 if [[ "${shadow_ascend_hash}" != "${roce_ascend_hash}" ]]; then
-  echo 'hostRoCE worker address filter: shadowed user worker address must not alter effective config-hash' >&2
+  echo 'hostRoCE control address filter: shadowed user broker/worker addresses must not alter effective config-hash' >&2
   exit 1
 fi
 

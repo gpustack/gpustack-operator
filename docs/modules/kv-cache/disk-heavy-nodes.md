@@ -13,8 +13,8 @@ member. Add local disks to that member, then size the memory segment as describe
 
 **Every member group mounts a memory segment, and a disk tier is a layer on a group that already
 holds one.** *`members[].medium`* names `DRAM` (host RAM) or `VRAM` (accounting-only for user
-`USE_VRAM_SEGMENT=ON` images), and *`members[].localDisks`* declares the disk beside it. Official
-`mirrored-mooncake` builds disable `USE_VRAM_SEGMENT` and allocate segments in `DRAM` only. See
+`USE_VRAM_SEGMENT=ON` images; see [Custom VRAM builds](backend.md#custom-vram-builds)), and
+*`members[].localDisks`* declares the disk beside it. See
 [Connection and medium](backend.md#connection-and-medium) for the full shape.
 
 The shape is the store's own data flow: the leader routes an offload task to the client holding the
@@ -73,8 +73,8 @@ Three things that manifest depends on and does not state:
   [The local disk tier](local-disk-tier.md).
 - **Nothing in Kubernetes accounts for what the tier writes.** Watching that filesystem is yours.
   See [unaccounted disk usage](local-disk-tier.md#unaccounted-disk-usage).
-- **Avoid `/etc/hixlep` on CANN Host RoCE groups.** Admission rejects *`localDisks[].path`*
-  overlapping `/etc/hixlep` when `protocol: CANN` sets *`fabricInterfaceCount`*.
+- **Avoid reserved host mount paths** (including `/etc/hixlep` on `CANN` Host RoCE groups); see
+  [path rules](local-disk-tier.md#directory-requirements).
 
 ## Memory segment floor
 

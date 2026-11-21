@@ -1308,8 +1308,8 @@ func modelTransferSourceReadyStub(t *testing.T, ready bool) func(bool) {
 	current := ready
 	modelDeploymentModelTransferSourceReady = func(
 		context.Context, ctrlcli.Reader, *workercore.ModelArtifact,
-	) (bool, time.Time, error) {
-		return current, time.Time{}, nil
+	) (bool, time.Time, sets.Set[string], error) {
+		return current, time.Time{}, nil, nil
 	}
 
 	return func(next bool) { current = next }

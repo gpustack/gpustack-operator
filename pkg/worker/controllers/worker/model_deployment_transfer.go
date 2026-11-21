@@ -2,12 +2,11 @@ package worker
 
 import (
 	"context"
+	"errors"
 	"fmt"
-	"reflect"
 	"sort"
 	"strconv"
 	"strings"
-	"time"
 
 	core "k8s.io/api/core/v1"
 	storage "k8s.io/api/storage/v1"
@@ -20,6 +19,7 @@ import (
 	"gpustack.ai/gpustack/pkg/modelstore"
 	"gpustack.ai/gpustack/pkg/modeltransfer/authorization"
 	"gpustack.ai/gpustack/pkg/nodefeature"
+	"gpustack.ai/gpustack/pkg/setting"
 	"gpustack.ai/gpustack/pkg/worker/kvcache/inject"
 	"gpustack.ai/gpustack/pkg/worker/runtimecontrol"
 	"gpustack.ai/gpustack/pkg/worker/settings"
@@ -168,17 +168,7 @@ func applyModelDeploymentModelTransferPolicy(
 		return nil
 	}
 
-	var (
-		sourceReady         bool
-		sourceReadyUntil    time.Time
-		sourceManufacturers sets.Set[string]
-	)
-	if reflect.ValueOf(modelDeploymentModelTransferSourceReady).Pointer() ==
-		reflect.ValueOf(modelDeploymentModelTransferSourceObserved).Pointer() {
-		sourceReady, sourceReadyUntil, sourceManufacturers, err = modelDeploymentModelTransferSourceObservedWithManufacturers(ctx, cli, ma)
-	} else {
-		sourceReady, sourceReadyUntil, err = modelDeploymentModelTransferSourceReady(ctx, cli, ma)
-	}
+	sourceReady, sourceReadyUntil, sourceManufacturers, err := modelDeploymentModelTransferSourceReady(ctx, cli, ma)
 	if err != nil {
 		return err
 	}
@@ -247,8 +237,7 @@ func readModelDeploymentModelTransferPolicyStrict(ctx context.Context) (string, 
 	if err == nil {
 		return val, nil
 	}
-	notFoundMsg := fmt.Sprintf("get value of setting %s: not found", settings.ModelArtifactRemoteDeliveryPolicy.Name())
-	if kerrors.IsNotFound(err) || err.Error() == notFoundMsg {
+	if kerrors.IsNotFound(err) || errors.Is(err, setting.ErrSettingNotFound) {
 		return val, nil
 	}
 	return "", err
@@ -506,9 +495,9 @@ func modelDeploymentModelTransferLiveRemote(pods []core.Pod) sets.Set[string] {
 }
 
 // modelDeploymentModelTransferSourceReady observes whether a prepared source serves
-// the artifact's digest. It is a variable so a test can reach the state a prepared
-// source produces; production always runs the observation.
-var modelDeploymentModelTransferSourceReady = modelDeploymentModelTransferSourceObserved
+// the artifact's digest together with the serving vendor scopes. It is a variable so a
+// test can reach the state a prepared source produces; production always runs the observation.
+var modelDeploymentModelTransferSourceReady = modelDeploymentModelTransferSourceObservedWithManufacturers
 
 // modelTransferForRole resolves a role's default weights render under a remote delivery.
 // A qualified role keeps the remote render. A role whose tuple no acceptance has

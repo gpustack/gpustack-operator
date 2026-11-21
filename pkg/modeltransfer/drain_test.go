@@ -416,4 +416,20 @@ func TestRuntimeFreezeAndInspectOverUnixAndTCP(t *testing.T) {
 			assert.Nil(t, runtimeClient, "address %q should fail closed", addr)
 		}
 	})
+
+	t.Run("runtimeEndpoint rejects non-loopback URL with nil client and surfaces bad WorkerAddr", func(t *testing.T) {
+		cfgUnixNoClient := &Config{
+			runtimeURL:     "http://unix/v1/runtime",
+			bootstrapToken: "secret",
+		}
+		_, _, err := cfgUnixNoClient.runtimeEndpoint()
+		require.ErrorContains(t, err, "runtime client is required")
+
+		cfgBadAddr := &Config{
+			WorkerAddr:     "http://10.0.0.2:9252",
+			bootstrapToken: "secret",
+		}
+		_, _, err = cfgBadAddr.runtimeEndpoint()
+		require.ErrorContains(t, err, "invalid worker runtime address")
+	})
 }
