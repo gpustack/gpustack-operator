@@ -359,9 +359,9 @@ Expand–contract DAG: Wave 1 builds additive tooling and rules with zero breaka
       Acceptance: Rewrites relative links in `docs/reference/*.md` outside fences, inline code, and HTML/Mermaid comments across all target classes (public regular pages, `_index.md`, sibling references, `../assets/diagrams/`, repo/`contribute/` → GitHub `sourceRef` URLs) while preserving queries, `#anchors`, multiline links, and footnotes; mirrors into a target staging directory and removes deleted files; supports both version-local (`../docs`) and Pages-root (`<latest>/docs`) prefixes.
       Verify: `python3 -m unittest -v hack/site/test_rewrite_reference.py`
 
-- [ ] **T2 · Pages publication root `/reference/` sync and immutable retry guard**
+- [x] **T2 · Pages publication root `/reference/` sync and immutable retry guard**
       Blocked by: T1
-      Owns: `hack/site/publish.py`, `hack/site/verify.py`, `hack/site/test_publish_verify.py`
+      Owns: `hack/site/publish.py`, `hack/site/verify.py`, `hack/site/test_publish_verify.py`, `.github/workflows/site.yml`
       Gate: review
       Acceptance: `publish.py` mirrors root `/reference/*.md` exclusively from the selected `latest` version (rewriting root links under `<root_url><latest>/docs/...`), deletes stale root `/reference/` when `latest` is a legacy stable release, replaces root `/reference/` atomically on promotion, treats same-tag/commit with identical inventory as an idempotent retry, and rejects same-tag/commit with changed bytes before mutating snapshot, root, manifest, or charts. `verify.py` validates both expected root/version bytes and absence of obsolete root aliases. Local fixture tests cover all four scenarios with `/charts/` byte-identical.
       Verify: `python3 -m unittest -v hack/site/test_publish_verify.py`

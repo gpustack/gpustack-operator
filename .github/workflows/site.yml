@@ -94,7 +94,8 @@ jobs:
       - name: Compose versioned documentation
         run: |
           python3 tools/hack/site/publish.py --build source/site/public --pages pages \
-            --ref "${REQUESTED_REF}" --commit "${SOURCE_COMMIT}" --root-url "${SITE_ROOT_URL}"
+            --ref "${REQUESTED_REF}" --commit "${SOURCE_COMMIT}" --root-url "${SITE_ROOT_URL}" \
+            --obsolete-manifest obsolete-paths.json
         env:
           SOURCE_COMMIT: ${{ steps.source.outputs.commit }}
       - name: Setup Helm for release charts
@@ -175,4 +176,5 @@ jobs:
             await require('./tools/hack/site/deploy.cjs')({github, context, core});
       - name: Verify public publication
         run: |
-          python3 tools/hack/site/verify.py --pages pages --ref "${REQUESTED_REF}" --root-url "${SITE_ROOT_URL}"
+          python3 tools/hack/site/verify.py --pages pages --ref "${REQUESTED_REF}" \
+            --root-url "${SITE_ROOT_URL}" --obsolete-manifest obsolete-paths.json
