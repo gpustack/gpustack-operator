@@ -337,7 +337,7 @@ class AgentIndexAndSiteLinksTests(unittest.TestCase):
             (CHECK_DIR / "site-links.py").resolve(),
         )
         self.assertEqual(agent_index.RETIRED_MODULE_SLUGS, site_links.RETIRED_MODULE_SLUGS)
-        self.assertEqual(len(site_links.RETIRED_MODULE_SLUGS), 14)
+        self.assertEqual(len(site_links.RETIRED_MODULE_SLUGS), 17)
 
     def test_strict_happy_path_root_and_versioned_base_url(self) -> None:
         for base_url in ("/", "https://docs.gpustack.ai/gpustack-operator/main/"):

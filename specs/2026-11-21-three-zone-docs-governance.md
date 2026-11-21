@@ -45,7 +45,7 @@ Each zone has one visibility contract, one link policy, and one audience:
 
 | Zone | Source paths | Site HTML & search | `/llms.txt` & Markdown | Outbound relative link policy |
 | --- | --- | --- | --- | --- |
-| Public Human Site | `getting-started/`, `walkthroughs/`, curated `modules/`, `operate/` | Included (61 pages + 4 section wrappers = 65 search entries) | Listed under topic sections via `/docs/.../index.md` | Public site, `docs/assets/`, and non-`docs/` repo files (rendered as source-revision GitHub URLs); **never** `docs/reference/` or `docs/contribute/` |
+| Public Human Site | `getting-started/`, `walkthroughs/`, curated `modules/`, `operate/` | Included (60 pages + 4 section wrappers = 64 search entries) | Listed under topic sections via `/docs/.../index.md` | Public site, `docs/assets/`, and non-`docs/` repo files (rendered as source-revision GitHub URLs); **never** `docs/reference/` or `docs/contribute/` |
 | LLM Reference | `docs/reference/*.md` (flat, zero subdirectories) | Excluded (zero HTML, sidebar, sitemap, or `index.json`) | Listed under `## Reference` via public static `/reference/*.md` URLs | Sibling `reference/*.md`, public site pages (rewritten to `.md`), `docs/assets/`, and repo/`contribute/` paths rewritten to source-revision GitHub URLs |
 | Repo Contributor | `docs/contribute/*.md` | Excluded (zero HTML, sidebar, sitemap, or `index.json`) | Source-revision GitHub links under `## Optional` only | Any repository path |
 
@@ -73,7 +73,7 @@ As a repository maintainer, I want automated lint, preview, and publication gate
 #### 1. 81-Page Disposition Map and Public Operating Coverage
 
 Every one of the 81 baseline content pages (`main` @ `30f3c1a32`, excluding `docs/README.md`) maps to one zone.
-Seven extracted appendices and one flat navigation index (`docs/reference/README.md`) form a final target of **61 public + 25 flat reference + 3 contributor = 89 authored files** (excluding root `docs/README.md`; gates derive exact counts dynamically from `docs/README.md`).
+Seven extracted appendices, one flat navigation index (`docs/reference/README.md`), and the Wave 5 module skeleton consolidation (`GPU Instances` expanded `1 → 3`; `KV Cache` folded `disk-heavy-nodes.md` into `local-disk-tier.md`; `Model Delivery` folded `image-source.md` into `artifact.md` and `node-to-node-sync.md` into `prefetch.md`) form a final target of **60 public + 25 flat reference + 3 contributor = 88 authored files** (excluding root `docs/README.md`; gates derive exact counts dynamically from `docs/README.md`).
 
 - **Existing `docs/reference/` retained and excluded from site (3)**: `commands.md`, `settings.md`, `instance-type-unit-resources.md`.
 - **Whole-page moves from `docs/modules/` into flat `docs/reference/` (14)**:
@@ -100,16 +100,16 @@ Seven extracted appendices and one flat navigation index (`docs/reference/README
   - `reference/model-delivery-remote-internals.md` — Source-memory arithmetic examples, ModelExpress sidecar/env internals, and raw sweep details extracted from `modules/model-delivery/remote.md`.
   - `reference/model-deployment-internals.md` — Operator-owned key matrices, render-version upgrade rules, and exhaustive refusal catalog extracted from `modules/model-deployment/configuration.md`.
   - `reference/model-deployment-scaling-internals.md` — Capacity-prior qualification, normalization, and predictor internals extracted from `modules/model-deployment/scaling.md`.
-- **Public Human Site retained and refined (61 pages across 10 sidebar groups)**:
+- **Public Human Site retained and refined (60 pages across 10 sidebar groups)**:
   - `Getting Started` (2): `architecture.md`, `vendor-prerequisites.md`.
-  - `Walkthroughs` (14): `_index.md` (add `runtime-control.md`), `devices/scheduling.md`, `rdma/network-endpoints.md`, `topology/hierarchical-placement.md`, `kv-cache/shared-cache.md`, `model-delivery/prefetch.md`, `model-deployment/_index.md`, `prefill-decode.md`, `encode-prefill-decode.md`, `scaling.md`, `runtime-control.md`, `elastic-ep.md`, `external-dp.md`, `multi-host.md`.
+  - `Walkthroughs` (14): `_index.md` (add `runtime-control.md`), `devices/scheduling.md`, `rdma/network-endpoints.md`, `topology/hierarchical-placement.md`, `kv-cache/shared-cache.md`, `model-delivery/prefetch.md`, `model-deployment/_index.md`, `prefill-decode.md`, `encode-prefill-decode.md`, `elastic-ep.md`, `external-dp.md`, `scaling.md`, `runtime-control.md`, `multi-host.md`.
   - `Heterogeneous Devices` (6): `_index.md`, `preflight.md`, `requests.md`, `nvidia-mig.md`, `hygon-mig.md`, `thead-mig.md`.
   - `RDMA Networking` (2): `_index.md`, `operations.md`.
   - `Topology` (2): `_index.md`, `operations.md`.
-  - `KV Cache` (6): `_index.md`, `backend.md`, `pool.md`, `leader.md`, `local-disk-tier.md`, `disk-heavy-nodes.md`.
-  - `Model Delivery` (7): `_index.md`, `artifact.md`, `image-source.md`, `prefetch.md`, `node-to-node-sync.md`, `remote.md`, `operations.md`.
-  - `Model Deployment` (15): `_index.md`, `configuration.md`, `engine-versions.md`, `prefill-decode.md`, `prefill-decode-benchmark.md`, `encode-prefill-decode.md`, `encode-prefill-decode-benchmark.md`, `elastic-ep.md`, `elastic-ep-benchmark.md`, `external-dp.md`, `external-dp-benchmark.md`, `scaling.md`, `scaling-benchmark.md`, `runtime-control.md`, `routing.md`.
-  - `GPU Instances` (1): `_index.md`.
+  - `KV Cache` (5): `_index.md`, `backend.md`, `pool.md`, `leader.md`, `local-disk-tier.md` (absorbs `disk-heavy-nodes.md`).
+  - `Model Delivery` (5): `_index.md`, `artifact.md` (absorbs `image-source.md`), `prefetch.md` (absorbs `node-to-node-sync.md`), `remote.md`, `operations.md`.
+  - `Model Deployment` (15): `_index.md`, `configuration.md`, `engine-versions.md` (sidebar label: `Compatibility`), `prefill-decode.md`, `prefill-decode-benchmark.md`, `encode-prefill-decode.md`, `encode-prefill-decode-benchmark.md`, `elastic-ep.md`, `elastic-ep-benchmark.md`, `external-dp.md`, `external-dp-benchmark.md`, `scaling.md`, `scaling-benchmark.md`, `runtime-control.md`, `routing.md`.
+  - `GPU Instances` (3): `_index.md`, `configuration.md`, `operations.md`.
   - `Operations` (6): `installation-modes.md`, `high-availability.md`, `migration/from-v0.5.md`, `migration/bundled-subcharts.md`, `migration/enforced-binding-dtype.md`, `migration/troubleshooting.md`.
 - **Repo-only `docs/contribute/` (3)**: `development.md`, `local-cluster-setup.md`, `internals.md`.
 
@@ -123,14 +123,14 @@ Seven extracted appendices and one flat navigation index (`docs/reference/README
 | `model-delivery/artifact-api.md`, `node-store.md` | `modules/model-delivery/artifact.md`, `operations.md` | State required RBAC for `progress`; show where to inspect failed mounts; distinguish namespace/UID/digest refusal from transient unavailability. |
 | `model-deployment/parameterize.md`, `status.md`, `shutdown.md` | `modules/model-deployment/configuration.md`, `routing.md`, `scaling.md`, `runtime-control.md` | Keep owned/defaulted/take-over rules; diagnose readiness and endpoint eligibility; explain withdrawal, grace window, stalled retirement, and paused-vs-retiring lifecycle. |
 | `model-deployment/metrics.md`, `scaling-simulation.md` | `modules/model-deployment/scaling.md`, `scaling-benchmark.md` | Inspect partial samples and missing sources; label synthetic simulation figures clearly whenever cited beside hardware runs. |
-| `instances/metrics.md` | `modules/instances/_index.md` | Show one utilization query, required subresource RBAC, legitimate pre-start zero, unavailable-source response, and omitted accelerator sample. |
+| `instances/metrics.md` | `modules/instances/operations.md` | Show one utilization query, required subresource RBAC, legitimate pre-start zero, unavailable-source response, and omitted accelerator sample. |
 | `reference/settings.md`, `commands.md` | `operate/installation-modes.md`, `modules/devices/preflight.md`, `modules/model-delivery/operations.md` | Explain `Setting` vs env-var precedence and restart-revert inspection command; keep day-1 `preflight` and cache commands inline. |
 | `reference/instance-type-unit-resources.md` | `modules/instances/_index.md`, `walkthroughs/devices/scheduling.md` | Explain default/cap CPU and RAM sizing, create-time immutability of `spec.unitResources`, overcommit effects, and choosing between a custom sibling vs recreating a derived type (keeping the 12-vendor table in reference). |
 
 #### 2. Single-Source Indexing, Link Rewriting, Preview Parity, and Versioned Publication
 
 - **Single authoritative index in `docs/README.md`**:
-  - Maintain three distinct inventory tables in [docs/README.md](../docs/README.md): `## All pages` (61 public pages), `## Reference` (flat `docs/reference/*.md` including `reference/README.md`), and `## Contribute` (3 repo-only pages).
+  - Maintain three distinct inventory tables in [docs/README.md](../docs/README.md): `## All pages` (60 public pages), `## Reference` (flat `docs/reference/*.md` including `reference/README.md`), and `## Contribute` (3 repo-only pages).
   - [site/layouts/home.llms.txt](../site/layouts/home.llms.txt) reads all three tables from the mounted `assets/doc-index/README.md`: resolves `All pages` via `site.GetPage` → `.OutputFormats.Get "Markdown"`, derives versioned `/reference/<file>.md` URLs directly from `## Reference` (zero duplicate summaries across two READMEs), and renders `## Contribute` as source-revision GitHub URLs under `## Optional`.
 - **Hugo mounts, wrappers, and navigation cleanup**:
   - In [site/hugo.toml](../site/hugo.toml), exclude `"README.md"`, `"assets/**"`, `"reference/**"`, and `"contribute/**"` from `content/docs`, preserve existing `layouts`, `assets`, and `data` mounts, and mount the staged directory `site/resources/reference` → `static/reference` with `includeFiles = ["*.md"]` as the sole source of published reference files.
@@ -183,20 +183,20 @@ Seven extracted appendices and one flat navigation index (`docs/reference/README
   - Add an authored-prose singular/plural checker that specifically catches malformed code-annotated kind plurals (such as `` `Pods` ``, `` `Nodes` ``, `` `Instances` ``, `` `Topology`s ``) while exempting literal tokens, CLI flags, API paths, fences, and captured output, backed by positive and negative selftests.
   - Keep the six 900+ line pages as review triggers for reference extraction rather than imposing an artificial line cap.
 - **Updated `agent-index.py` and `site-links.py`**:
-  - Assert zero `site/public/docs/reference/`, `site/public/docs/contribute/`, or retired moved-module HTML outputs (all 22 retired URLs) and zero excluded entries in `index.json` or `sitemap.xml`.
+  - Assert zero `site/public/docs/reference/`, `site/public/docs/contribute/`, or retired moved/consolidated module HTML outputs (all 25 retired URLs, including the 3 folded routes `kv-cache/disk-heavy-nodes`, `model-delivery/image-source`, and `model-delivery/node-to-node-sync`) and zero excluded entries in `index.json` or `sitemap.xml`.
   - Validate `/llms.txt` bi-directionally against actual outputs (origin, multiplicity, H1/description, `Reference`, and GitHub `Optional`), plus verify every `/reference/*.md` export's body/code integrity and `#anchor` resolution (including duplicate slugs, multiline links, footnotes, and code-block lookalikes).
 - **Repo-wide consumer audit**:
   - Update all references to moved/excluded paths across Markdown, Python, Go comments, and JSON review rules (`README.md`, `.agents/skills/gpustack-operator-benchmark/scripts/{autoscaling_qualification.py,test_autoscaling_qualification.py}`, `.opencodereview/rule.json`, `pkg/device/doc.go`, and `pkg/devicemanager/detector/hygon/process.go`).
   - Keep `docs/reference/settings.md` and `docs/modules/model-delivery/remote.md` at their existing paths so `.auto-sync/*` and `pkg/nodefeature/unit_resources_preset.yaml` keep working without disruption.
 - **Pilot calibration and editorial-taste review (`gpt-6.2-astra`)**:
-  - Before bulk-rewriting all 61 public pages, apply the editorial standards to one Walkthrough, one Configuration guide, and one Benchmark page, verify operator-task pass/fail, and run an independent Codex (`--model gpt-6.2-astra --effort high`) review to approve the style baseline.
+  - Before bulk-rewriting all 60 public pages, apply the editorial standards to one Walkthrough, one Configuration guide, and one Benchmark page, verify operator-task pass/fail, and run an independent Codex (`--model gpt-6.2-astra --effort high`) review to approve the style baseline.
 
 #### Consolidated Acceptance Table
 
 | Area | Verification criterion |
 | --- | --- |
 | Public operator journeys | Starting from public entry points, an operator resolves pending Pod, refused KV injection, missing metrics, reverted setting, and persisted `spec.unitResources` using public pages and site search alone. |
-| Zone isolation | `site/public` has zero HTML, sidebar, sitemap, or `index.json` entries across all 22 retired paths (`reference/`, `contribute/`, and 14 moved module paths); 65 docs search entries (61 public + 4 wrappers); zero public links into excluded zones. |
+| Zone isolation | `site/public` has zero HTML, sidebar, sitemap, or `index.json` entries across all 25 retired paths (`reference/`, `contribute/`, 14 moved module paths, and 3 consolidated module paths `kv-cache/disk-heavy-nodes`, `model-delivery/image-source`, `model-delivery/node-to-node-sync`); 64 docs search entries (60 public + 4 wrappers); zero public links into excluded zones. |
 | Reference & `/llms.txt` | All 25 flat `docs/reference/*.md` files export via `site/resources/reference/` to `/reference/*.md` with valid rewritten links and `#anchors`, match `/llms.txt` bi-directionally, and serve identically under `make site` and `make site-serve`. |
 | Publication fixtures | Local `publish.py` + `verify.py` fixtures pass for legacy-stable default + new `main`, new-stable promotion (asserting obsolete root alias removal), idempotent same-tag/commit retry, and rejection of same-tag/commit retry with changed bytes, with `/charts/` unchanged. |
 | Style & depth gates | `make lint docs` passes with zero `H4+` headings in `docs/**`, zero nested dirs in `docs/reference/`, singular/plural selftests passing, and zero stale consumers in Markdown, Python, Go, or JSON rules. |
@@ -206,7 +206,7 @@ Seven extracted appendices and one flat navigation index (`docs/reference/README
 
 - **Toolchain & environment**: Local macOS/Linux workspace (`Python 3.11.9`, macOS `onetrueawk 20200816`, repository-pinned `.sbin/hugo v0.152.2+extended`), Bash/awk (`check-docs.sh`), and Python (`agent-index.py`, `site-links.py`, `publish.py`, `verify.py`). No Kubernetes cluster, Node.js runtime, or live GitHub Pages push is required during implementation.
 - **Spec status gate**: [check-specs.sh](../.agents/skills/gpustack-operator-docs/scripts/check-specs.sh) checks every file under `specs/` without a branch check: line 3 must be `Status: <Shipped|Building|Planned|Built>`, and non-`Shipped` states require a non-empty `Blocked on:` on line 4. Set `Status: Shipped` before opening the PR to `main`.
-- **Retired HTML URLs (resolved)**: Removing 14 moved `modules/` pages, 3 `reference/` pages, 3 `contribute/` pages, and 2 section landings retires **22 HTML URLs** cleanly on new builds with no redirect stubs. Document the URL retirement in release notes; older published tags remain immutable on `github-pages`.
+- **Retired HTML URLs (resolved)**: Removing 14 moved `modules/` pages, 3 consolidated `modules/` pages (`kv-cache/disk-heavy-nodes`, `model-delivery/image-source`, `model-delivery/node-to-node-sync`), 3 `reference/` pages, 3 `contribute/` pages, and 2 section landings retires **25 HTML URLs** cleanly on new builds with no redirect stubs. Document all 25 retired URLs in release notes; older published tags remain immutable on `github-pages`.
 - **Benchmark sweep tables (resolved)**: Public benchmark pages retain their key matched per-concurrency comparison tables directly beneath the scenario decision summary and labeled SVG charts; only verbose raw access-log counts or uncondensed secondary dumps move to `docs/reference/`.
 
 ### Boundaries
@@ -231,7 +231,7 @@ Seven extracted appendices and one flat navigation index (`docs/reference/README
 - **Broken root `/reference/` when `latest` is an older stable release or on mutated same-tag retries** → Gate root `/reference/` sync on `latest`, reject mutated same-tag/commit bytes, and assert stale alias absence in local `publish.py` + `verify.py` fixtures.
 - **Silent drift between `make site` and `make site-serve`** → Fresh-mirror rewritten reference Markdown into `site/resources/reference/` via `hack/site/rewrite_reference.py` before Hugo builds or serves.
 - **Hidden non-Markdown consumers breaking after moves** → Audit and update Python scripts/tests (`autoscaling_qualification.py`), Go doc comments (`pkg/device/doc.go`, `pkg/devicemanager/detector/hygon/process.go`), and `.opencodereview/rule.json` in the same cutover task (T8), and verify `.auto-sync` via `autosync-selftest.sh`.
-- **Mechanical rewriting degrading readability** → Calibrate editorial rules on a three-page pilot (T10) and pass `gpt-6.2-astra` review before sweeping all 61 public pages in parallel.
+- **Mechanical rewriting degrading readability** → Calibrate editorial rules on a three-page pilot (T10) and pass `gpt-6.2-astra` review before sweeping all 60 public pages in parallel.
 
 ## Design Details
 
@@ -261,18 +261,18 @@ bash .agents/skills/gpustack-operator-docs/scripts/check-crossrefs-selftest.sh .
 bash .agents/skills/gpustack-operator-docs/scripts/check-specs-selftest.sh .
 bash hack/check/autosync-selftest.sh .
 python3 -m unittest -v hack/site/test_rewrite_reference.py hack/site/test_publish_verify.py hack/check/test_agent_index.py
-python3 -m unittest -v .agents/skills/gpustack-operator-benchmark/scripts/test_autoscaling_qualification.py
+python3 -m unittest discover -s .agents/skills/gpustack-operator-benchmark/scripts -p 'test_autoscaling_qualification.py' -v
 ```
 
 ### Project Structure
 
 ```text
 docs/
-├── README.md                    # Single source of truth: Reading paths, Module map, All pages (61), Reference (25), Contribute (3)
+├── README.md                    # Single source of truth: Reading paths, Module map, All pages (60), Reference (25), Contribute (3)
 ├── assets/diagrams/             # SVG diagrams and benchmark charts (paired with hidden Mermaid where applicable)
 ├── getting-started/             # Public Site (2)
 ├── walkthroughs/                # Public Site (14)
-├── modules/                     # Public Site (39 curated pages across 7 modules)
+├── modules/                     # Public Site (38 curated pages across 7 modules)
 ├── operate/                     # Public Site (6)
 ├── reference/                   # Flat LLM Reference (25 .md files, zero subdirs, <= H3, exported via /llms.txt)
 │   ├── README.md                # Flat LLM navigation hub with aliases and evidence types
@@ -288,7 +288,7 @@ site/
 ├── resources/reference/         # Gitignored fresh-mirrored rewritten reference/*.md staged by hack/site/rewrite_reference.py
 ├── data/navigation.yaml         # 10 human sidebar groups (no Reference, no Contribute, obsolete entries removed)
 ├── layouts/home.llms.txt        # Reads All pages + Reference + Contribute from assets/doc-index/README.md
-└── layouts/index.json           # Indexes 65 public docs entries (61 pages + 4 wrappers)
+└── layouts/index.json           # Indexes 64 public docs entries (60 pages + 4 wrappers)
 
 hack/
 ├── site.sh                      # Runs rewrite_reference.py into site/resources/reference, Hugo build/serve, site-links.py, agent-index.py
@@ -450,7 +450,7 @@ Expand–contract DAG: Wave 1 builds additive tooling and rules with zero breaka
       Owns: `specs/2026-11-21-three-zone-docs-governance.md`
       Gate: review
       Acceptance: All lint, unit, publication fixture, and auto-sync self-tests pass; `make site-serve` HTTP response for `/reference/README.md` matches `make site` output byte-for-byte; all five operator-journey exercises pass on the rendered site and search index alone; final Codex (`--model gpt-6.2-astra --effort high`) editorial-taste review approves the full diff; spec tasks are checked off and `Status:` is updated to `Shipped`.
-      Verify: `make lint docs && SITE_BASE_URL=https://docs.gpustack.ai/gpustack-operator/main/ make site && bash hack/check/autosync-selftest.sh . && python3 -m unittest -v hack/site/test_rewrite_reference.py hack/site/test_publish_verify.py hack/check/test_agent_index.py .agents/skills/gpustack-operator-benchmark/scripts/test_autoscaling_qualification.py`
+      Verify: `make lint docs && SITE_BASE_URL=https://docs.gpustack.ai/gpustack-operator/main/ make site && bash hack/check/autosync-selftest.sh . && python3 -m unittest -v hack/site/test_rewrite_reference.py hack/site/test_publish_verify.py hack/check/test_agent_index.py && python3 -m unittest discover -s .agents/skills/gpustack-operator-benchmark/scripts -p 'test_autoscaling_qualification.py' -v`
 
 ### Test Plan
 
@@ -463,14 +463,14 @@ Expand–contract DAG: Wave 1 builds additive tooling and rules with zero breaka
 
 #### Unit tests
 
-- `hack/site/test_rewrite_reference.py`: `2026-11-21` - target 100% branch coverage across all 6 link rewrite classes (public regular page, `_index.md`, sibling reference, `docs/assets/` diagram, repo/`contribute/` → GitHub `sourceRef`, external/mailto passthrough), query/fragment preservation, code-fence/inline-code/HTML-comment exemptions, multiline links, footnotes, version-local vs Pages-root prefixes, and fresh-mirror deletion of removed files.
+- `hack/site/test_rewrite_reference.py`: `2026-11-21` - target 100% branch coverage across all 6 link rewrite classes (public regular page, `_index.md`, sibling reference, `docs/assets/` diagram, repo/`contribute/` → GitHub `sourceRef`, external/mailto passthrough), query/fragment preservation, code-fence/inline-code/HTML-comment exemptions, multiline links, footnotes, version-local vs Pages-root prefixes, overlapping source/destination tree rejection, and fresh-mirror deletion of removed files.
 - `hack/site/test_publish_verify.py`: `2026-11-21` - target 100% branch coverage across legacy-stable default + new `main` (root `/reference/` absent/cleaned), new-stable promotion (atomic replacement + stale root alias removed), idempotent same-tag/commit retry (identical bytes pass), mutated same-tag/commit retry (rejected before any write), different-commit tag rejection, `/charts/` byte-identity, and `verify.py` negative stale-alias check.
-- `hack/check/test_agent_index.py`: `2026-11-21` - target 100% branch coverage across zero excluded HTML/search/sitemap leaks, 65 docs search entries, bi-directional `/llms.txt` parity (origin, multiplicity, H1/description, `Reference`, GitHub `Optional`), `/reference/*.md` body/code integrity, and Markdown `#anchor` resolution (including duplicate slugs, multiline links, footnotes, and code-block lookalikes).
+- `hack/check/test_agent_index.py`: `2026-11-21` - target 100% branch coverage across zero excluded HTML/search/sitemap leaks, 64 docs search entries, bi-directional `/llms.txt` parity (origin, multiplicity, H1/description, `Reference`, GitHub `Optional`), `/reference/*.md` body/code integrity, and Markdown `#anchor` resolution (including duplicate slugs, multiline links, footnotes, and code-block lookalikes).
 - `.agents/skills/gpustack-operator-benchmark/scripts/test_autoscaling_qualification.py`: `2026-11-21` - regression pass confirming updated `docs/reference/model-deployment-scaling-simulation.md` path.
 
 #### Integration tests
 
-- **Local Hugo production-prefix build**: `SITE_BASE_URL=https://docs.gpustack.ai/gpustack-operator/main/ make site` verifying `site-links.py` + `agent-index.py` across all 61 public pages, 4 wrappers, 25 static `/reference/*.md` exports, and `/llms.txt` under a non-root repository prefix.
+- **Local Hugo production-prefix build**: `SITE_BASE_URL=https://docs.gpustack.ai/gpustack-operator/main/ make site` verifying `site-links.py` + `agent-index.py` across all 60 public pages, 4 wrappers, 25 static `/reference/*.md` exports, and `/llms.txt` under a non-root repository prefix.
 - **Local preview parity check**: Start `make site-serve` against an ephemeral port in a smoke script and assert HTTP GET `/reference/README.md` and `/llms.txt` match `site/public/` bytes identically.
 - **Full repository lint & auto-sync integration**: `make lint docs` (running `check-docs`, `check-specs`, `check-crossrefs`, `skills.sh`, and `make site` under macOS `onetrueawk`) plus `bash hack/check/autosync-selftest.sh .` confirming `.auto-sync/*` invariants for `docs/reference/settings.md` and `docs/modules/model-delivery/remote.md`.
 - **Five public operator-journey checks**: Manual/scripted walkthrough starting from public entry points and `index.json` search alone to resolve (1) pending Pod, (2) refused KV cache injection, (3) missing `ModelDeployment`/`Instance` metrics, (4) reverted `Setting` on restart, and (5) persisted `spec.unitResources` after upgrade.
@@ -486,7 +486,7 @@ Expand–contract DAG: Wave 1 builds additive tooling and rules with zero breaka
 3. **Conservative slimming (~8 pure lookup pages moved)**: Rejected because leaving 9 dense internal/telemetry guides on the public site (~65 public pages total) keeps controller internals mixed into human navigation.
 4. **Allow public HTML pages to link directly to `/reference/*.md`**: Rejected because humans browsing the styled site would drop into unstyled raw Markdown and public pages would couple to hidden reference paths.
 5. **Infrastructure + single-module pilot spec only**: Rejected because maintaining dual writing and layout standards across a half-migrated corpus adds temporary lint exemptions and ongoing drift.
-6. **Add HTML `<meta refresh>` redirect stubs for the 22 retired HTML URLs**: Rejected because 22 permanent stub files add ongoing maintenance and exemption debt in `site-links.py`/`agent-index.py` and cannot cleanly redirect split-owner pages, while older published tags already remain immutable on `github-pages`.
+6. **Add HTML `<meta refresh>` redirect stubs for the 25 retired HTML URLs**: Rejected because 25 permanent stub files add ongoing maintenance and exemption debt in `site-links.py`/`agent-index.py` and cannot cleanly redirect split-owner pages, while older published tags already remain immutable on `github-pages`.
 7. **Move all benchmark per-concurrency tables into `docs/reference/*-benchmark-data.md`**: Rejected because separating supporting numbers from benchmark trade-off conclusions creates dual-file drift on reruns and forces human evaluators off the site to verify concurrency inflection points.
 
 ## Open Questions

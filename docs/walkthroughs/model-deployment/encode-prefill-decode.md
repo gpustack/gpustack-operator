@@ -232,7 +232,31 @@ Captured output:
 http://epd-arm3-epd-router.gpustack-bench.svc:8000
 ```
 
+Build a small multimodal chat-completion payload containing a 1×1 PNG `image_url` part beside a
+text prompt, then send it to the router from inside the cluster:
+
 ```bash
+cat <<'EOF' > request.json
+{
+  "model": "qwen2-5-vl-7b-instruct",
+  "max_tokens": 32,
+  "messages": [
+    {
+      "role": "user",
+      "content": [
+        {"type": "text", "text": "Describe this image briefly."},
+        {
+          "type": "image_url",
+          "image_url": {
+            "url": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aF9cAAAAASUVORK5CYII="
+          }
+        }
+      ]
+    }
+  ]
+}
+EOF
+
 kubectl run curl-probe -n gpustack-bench --rm -i --restart=Never --image=curlimages/curl -- \
   curl -fsS -H 'Content-Type: application/json' \
   --data-binary @- \

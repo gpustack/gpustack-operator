@@ -62,14 +62,17 @@ hardware presets, plus a fixed `100Gi` *`spec.localStorage`*. Unlisted accelerat
 - **Storage default**: Omitted *`resources.localStorage`* defaults to `15Gi`, capped at the
   `InstanceType`'s *`spec.localStorage`*.
 - **Overcommit**: With `instance-general-resources-overcommit` `true` (default), limits keep the
-  sized value while requests use `100m` CPU (`800m` CPU-only), `128Mi` RAM per GiB, and one-eighth
-  *`localStorage`*.
+  sized value while requests scale per unit: `100m` CPU per rounded-up core on acceleratable types
+  (`800m` per core on CPU-only types, capped at the limit — for example, a `4`-core CPU-only limit
+  requests `3200m`), `128Mi` RAM per GiB, and one-eighth *`localStorage`*.
 - **Disabling overcommit**: Setting `instance-general-resources-overcommit` to `false` sets
   container requests equal to limits.
 - **Upgrade immutability**: *`spec.unitResources`* and *`spec.localStorage`* freeze at creation;
   derived `InstanceType`s are create-only and retain existing values across upgrades.
 - **Pool resizing**: Author a [custom sibling `InstanceType`](configuration.md#custom-instancetype)
-  to keep running `Instance`s alive; deleting a derived type stops its `Instance`s until recreated.
+  to keep running `Instance`s alive. Deleting a derived type persists *`spec.stop: true`* on its
+  `Instance`s so they remain `Stopped` even after the type is recreated; once the replacement type
+  is `Active`, restart each workspace using [Start workspace](operations.md#step-3-start-workspace).
 
 ## Quickstart
 

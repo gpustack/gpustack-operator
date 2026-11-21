@@ -655,6 +655,19 @@ class StageReferenceDirAndCLITest(unittest.TestCase):
             with self.assertRaises(ValueError):
                 rewrite_reference.stage_reference_dir(src, src)
 
+            # Destination containing source must be rejected before cleanup mutates source
+            (src / "preserve.md").write_text("# Keep\n", encoding="utf-8")
+            with self.assertRaises(ValueError):
+                rewrite_reference.stage_reference_dir(src, root)
+            self.assertEqual((src / "preserve.md").read_text(encoding="utf-8"), "# Keep\n")
+
+            # Destination nested inside source must also be rejected without mutating source
+            with self.assertRaises(ValueError):
+                rewrite_reference.stage_reference_dir(src, src / "child-dst")
+            self.assertEqual((src / "preserve.md").read_text(encoding="utf-8"), "# Keep\n")
+            self.assertFalse((src / "child-dst").exists())
+            (src / "preserve.md").unlink()
+
             # Destination exists as a regular file
             not_a_dir = root / "file.txt"
             not_a_dir.write_text("x", encoding="utf-8")

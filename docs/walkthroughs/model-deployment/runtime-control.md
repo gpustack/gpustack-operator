@@ -186,8 +186,10 @@ Recorded pause, resume, and drain behavior:
 
 ## Step 4: Tune SGLang parameters
 
-On an `SGLang 0.5.22` deployment (`qwen-sglang-rc` behind `sglang-gateway`), patch all five scheduling
-parameters live:
+This step uses a separate recorded `SGLang 0.5.22` deployment (`qwen-sglang-rc` behind
+`sglang-gateway`), distinct from the `vLLM` deployment (`qwen-vllm-rc`) in Steps 1–3. Create an
+`Active` `SGLang` `ModelDeployment` with `spec.roles[0].engine: SGLang` (or substitute your own
+SGLang deployment name), then patch all five scheduling parameters live:
 
 ```bash
 kubectl -n default patch modeldeployment qwen-sglang-rc --type=json -p '[

@@ -240,14 +240,30 @@ spec:
 
 ### Image build and delivery
 
-Place weight files at the **image root** (no `subPath` is supported). Verified recipe (measured
-SHA-256 identical to LFS blobs on Kubernetes `1.35.7` / containerd `2.2.6`):
+Place all required weight shards, shard index (`model.safetensors.index.json`), tokenizer, and
+config files at the **image root** (no `subPath` is supported), then pin the resulting manifest
+digest in *`spec.source.image.reference`*.
+
+Build one mountable OCI image from a local model directory (copying shards and metadata to `/`) and
+capture its immutable `@sha256:...` digest:
 
 ```bash
-for f in *.safetensors tokenizer.json tokenizer_config.json config.json generation_config.json; do
-  oras push "$IMAGE" --artifact-type application/vnd.gpustack.weights "$f:application/octet-stream"
-done
+cat <<'EOF' > Dockerfile
+FROM scratch
+COPY model.safetensors.index.json config.json generation_config.json tokenizer.json tokenizer_config.json /
+COPY *.safetensors /
+EOF
+
+docker buildx build --platform linux/amd64 --push \
+  --iidfile /tmp/model.iid \
+  -t registry.example.com/team/qwen:v1 .
+docker buildx imagetools inspect registry.example.com/team/qwen:v1 --format '{{.Manifest.Digest}}'
 ```
+
+Separately, end-to-end verification on Kubernetes `1.35.7` / containerd `2.2.6` with a 16-file
+`Qwen/Qwen2.5-7B-Instruct` image (built one `.safetensors` shard per layer) confirmed every mounted
+file matched the Hub LFS SHA-256 checksum byte for byte. The operator does not inspect registry
+contents; build integrity is owned by the image producer.
 
 Image sources always deliver as read-only Kubernetes `image` volumes at `/var/lib/gpustack/model`
 without `model.csi.gpustack.ai` or `ephemeral-storage` adjustments. Pull errors surface on `Pod`

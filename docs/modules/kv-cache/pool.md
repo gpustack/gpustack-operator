@@ -267,7 +267,8 @@ kubectl -n <namespace> logs <pod-name> -c <container-name>
 | Invalid role or target container | Refusal naming `Server`, missing `container`, or init container | Omit `role` on standard servers (`Server` is refused); name an app container in `kvcache.gpustack.ai/container`. |
 | Pool or ledger not ready | Refusal naming `QuotaLedgerAvailable` or `status.clientEndpoint` | Restore the `KVCacheBackend` leader and wait for `KVCachePool` *`status.clientEndpoint`*. |
 | Conflicting flag, env, or mount | Refusal naming `--kv-transfer-config`, `MOONCAKE_CONFIG_PATH`, `--hicache-storage-backend`, `--kv-cache-dtype`, or `/etc/gpustack/kvcache` | Remove the duplicate flag, env var, or mount from the `Pod` spec so it matches *`spec.domain.dtype`*. |
-| Unrecognized entrypoint | Refusal rejecting bare `args`, `sh -c`, `env -S`, or `.sh` wrapper | Put the engine binary in *`command`* and flags in *`args`*, or set `kvcache.gpustack.ai/launch-args-forwarded: "true"`. |
+| Shell `-c` or `env -S` launch | Refusal rejecting `sh -c`, `bash -c`, or `env -S` | Put the engine binary in *`command`* and its flags in *`args`*; the forwarding annotation does not override shell `-c` refusals. |
+| Wrapper script or bare `args` | Refusal rejecting bare `args` or a `.sh` wrapper | Launch the engine binary directly, or set `kvcache.gpustack.ai/launch-args-forwarded: "true"` only when the wrapper forwards appended arguments (`"$@"`). |
 | Transport mismatch | Admission `NotSupportedTransport` or vLLM-Ascend `NotImplementedError` for `tcp` | Set `spec.transport.protocol: CANN` on Ascend backends or align member group protocols. |
 
 ### Pod binding verification

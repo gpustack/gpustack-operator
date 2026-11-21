@@ -207,9 +207,9 @@ set.
 ### Peer authentication and network
 
 Pulling plugins send a projected `ServiceAccount` token (`gpustack-model-peer` audience). Serving
-plugins verify it via `TokenReview`, caching valid tokens until expiry and never caching refusals.
-Peer clients skip TLS verification on the plugin's self-signed certificate; use trusted `Pod`
-networks or set `modelManager.port: 0`.
+plugins verify it via `TokenReview`, caching positive answers until the earlier of 2 minutes and
+token expiry, and never caching refusals. Peer clients skip TLS verification on the plugin's
+self-signed certificate; use trusted `Pod` networks or set `modelManager.port: 0`.
 
 The default `NetworkPolicy` limits plugin ingress to the worker and peer `model-manager` `Pod`s. On
 CNIs where `hostNetwork` bypasses `podSelector` rules, `TokenReview` still blocks unauthorized
@@ -222,7 +222,8 @@ Before pulling bytes, a cold `Node` verifies the peer's manifest against the art
 peer and checkpoint hashes every `64 MiB`, resuming on another peer or the hub if a seed fails.
 
 - **Source tracking**: `NodeModelStore.status.models[].source` reports `Hub` or `Peer` (majority
-  bytes), and plugin `:32444/metrics` splits `download_bytes_total` by `hub` and `peer`.
+  bytes), and plugin `:32444/metrics` exposes `gpustack_model_manager_download_bytes_total` split by
+  the `source` label (`hub` or `peer`).
 - **Trade-offs**: Peer sync cuts hub egress and hub dependency rather than fan-out time on slower
   east-west fabrics. Each concurrent puller uses `~0.25 vCPU` on seed `Node`s (measured on 2-vCPU
   `Node`s).

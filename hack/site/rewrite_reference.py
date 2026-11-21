@@ -563,8 +563,14 @@ def stage_reference_dir(
     dst = Path(destination_dir)
     if not src.is_dir():
         raise ValueError(f"source directory does not exist: {src}")
-    if src.resolve() == dst.resolve():
-        raise ValueError("source and destination directories must differ")
+    src_resolved = src.resolve()
+    dst_resolved = dst.resolve()
+    if (
+        src_resolved == dst_resolved
+        or src_resolved.is_relative_to(dst_resolved)
+        or dst_resolved.is_relative_to(src_resolved)
+    ):
+        raise ValueError("source and destination directories must not overlap")
     if dst.exists() and not dst.is_dir():
         raise ValueError(f"destination path is not a directory: {dst}")
 

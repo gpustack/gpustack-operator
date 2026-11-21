@@ -261,21 +261,26 @@ to derive `12851.37` tok/s, crossing measured throughput between `c = 16` (`1147
 ### Capacity-arm rounds
 
 Eighteen serial rounds (3 alternating repeats × 6 arms) compared `frozen-manual` (`20000` tok/s),
-`tuned-manual` (`17135.159` tok/s) and `catalog` (`12851.37` tok/s) across `baseline` (30 s, `c = 2`),
-`ramp` (45 s, `c = 24`), `sustain` (45 s, `c = 24`) and `cooldown` (30 s, `c = 0`). All 18 rounds
-finished with **zero failed requests**, verified UID-preconditioned cleanup and return to 1 replica.
+`tuned-manual` (`17135.159` tok/s) and `catalog` (`12851.37` tok/s) across nominal phase windows
+`baseline` (30 s, `c = 2`), `ramp` (45 s, `c = 24`), `sustain` (45 s, `c = 24`) and `cooldown`
+(30 s, `c = 0`). All 18 rounds finished with **zero failed requests**, verified UID-preconditioned
+cleanup and return to 1 replica.
 
 ![Suite 2 H200 capacity-arm rawRecommendedReplicas and Ready replicas across checkpoints B1 to C3](../../assets/diagrams/scaling-benchmark-capacity-arms.svg)
 
+Checkpoints (`B1`–`C3`) record phase progress, while scale-up elapsed times track wall clock from
+ramp start (in-flight drain and harness transitions extend actual wall time past the nominal `45` s
+`ramp` + `45` s `sustain` windows).
+
 Starting from one replica on H200, unmargined `TokenThroughput` manual arms stayed at 1 replica
 (`~14.5k` tok/s at `c = 24` sat below `17135.159` tok/s). `TokenThroughput` `catalog` triggered at
-`R2`, but ~76 s vLLM startup (`99.6–105.6` s from ramp start) delayed readiness until `S3`, costing
+`R2`, and after ~76 s of vLLM startup became Ready at `S3` (`99.6–105.6` s from ramp start), costing
 `+33.7%` median `readyReplicaSeconds` (`317.04` versus `237.094` s) with no `sustain` *TTFT* win
 (`343.842` versus `321.352` ms).
 
-`Predictive` scaled earlier (`15.1–21.9` s from ramp start; Ready at `R3`, `81.9–94.6` s), cutting
-`sustain` *TTFT* p50 to **189.511 ms** (`catalog`), `194.733` ms (`frozen-manual`) and `206.453` ms
-(`tuned-manual`).
+`Predictive` triggered earlier (`15.1–21.9` s from ramp start) and reached Ready by checkpoint `R3`
+(`81.9–94.6` s elapsed from ramp start), cutting `sustain` *TTFT* p50 to **189.511 ms** (`catalog`),
+`194.733` ms (`frozen-manual`) and `206.453` ms (`tuned-manual`).
 
 Latency columns show p50 / p99:
 
