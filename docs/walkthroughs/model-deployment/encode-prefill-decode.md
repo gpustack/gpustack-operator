@@ -232,8 +232,8 @@ Captured output:
 http://epd-arm3-epd-router.gpustack-bench.svc:8000
 ```
 
-Build a small multimodal chat-completion payload containing a 1×1 PNG `image_url` part beside a
-text prompt, then send it to the router from inside the cluster:
+Build a small multimodal chat-completion payload containing a 56×56 RGB PNG `image_url` part beside
+a text prompt, then send it to the router from inside the cluster:
 
 ```bash
 cat <<'EOF' > request.json
@@ -248,7 +248,7 @@ cat <<'EOF' > request.json
         {
           "type": "image_url",
           "image_url": {
-            "url": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aF9cAAAAASUVORK5CYII="
+            "url": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAADgAAAA4CAIAAAAn5KxJAAAARElEQVR42u3OQQkAAAgEsItmNKMZzYcphMECLNXzQkRFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRc8CbIRhD2BnZn0AAAAASUVORK5CYII="
           }
         }
       ]
