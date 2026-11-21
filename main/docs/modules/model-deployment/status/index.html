@@ -279,7 +279,12 @@
   
   
 
+  
+  
 
+
+
+  
 
   
 
@@ -327,6 +332,16 @@
         
         
           <a title="Model Deployment Scaling Walkthrough" href="/gpustack-operator/main/docs/walkthroughs/model-deployment/scaling/" >Scaling</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Online Runtime Control Walkthrough" href="/gpustack-operator/main/docs/walkthroughs/model-deployment/runtime-control/" >Online Runtime Control</a>
           
           
         
@@ -936,6 +951,9 @@
   
   
 
+  
+  
+
 
 
   
@@ -1000,6 +1018,8 @@
         
       
     
+  
+
   
 
   
@@ -1178,6 +1198,16 @@
       
     
       
+      
+    
+      
+      
+        
+        
+          <a title="Online Runtime Control" href="/gpustack-operator/main/docs/modules/model-deployment/runtime-control/" >Online Runtime Control</a>
+          
+          
+        
       
     
       
@@ -2143,7 +2173,7 @@ saw, and no pass that reports this has seen any.</p>
 </table>
 <h4 id="elasticresize">ElasticResize</h4>
 <p>Whether an elastic scale stands blocked or terminally refused. It is
-written only for a deployment with an <em><code>elasticEp</code></em> role; <a href="/gpustack-operator/main/docs/modules/model-deployment/elastic-ep/">Elastic EP</a>
+written only for a deployment with an <code>elastic.dataParallelWidth</code> role; <a href="/gpustack-operator/main/docs/modules/model-deployment/elastic-ep/">Elastic EP</a>
  owns the
 resize lifecycle it reports on.</p>
 <table>
@@ -2174,6 +2204,9 @@ resize lifecycle it reports on.</p>
 </table>
 <p>A refusal still inside its retry bound stays <code>True</code>: it is not terminal yet. <code>WorldUnprovable</code>
 levels back to <code>True</code> on its own once a later pass proves the live world again.</p>
+<h4 id="runtimecontrolsynced">RuntimeControlSynced</h4>
+<p>Reports live convergence across answering <code>Pod</code>s and per-role status (<code>observedGeneration</code>, <code>synced</code>, <code>reason</code>, <code>message</code>, <code>paused</code>, <code>appliedConfigDigest</code>, <code>convergedPods</code>, <code>totalAnsweringPods</code>, <code>unsupportedFields</code>) in <em><code>status.roles[*].runtimeControl</code></em>; see <a href="/gpustack-operator/main/docs/modules/model-deployment/runtime-control/#step-3-verify-convergence-status">Online Runtime Control</a>
+ for condition reasons and troubleshooting.</p>
 <h2 id="scaler-annotations">Scaler annotations</h2>
 <p>Two annotations on the <code>ModelDeployment</code> — <code>modeldeployment.gpustack.ai/scaler-binding</code> and
 <code>modeldeployment.gpustack.ai/scaler-decision</code> — record which <code>ModelDeploymentScaler</code> owns the

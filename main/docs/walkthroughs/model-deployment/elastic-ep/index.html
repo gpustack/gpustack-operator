@@ -279,7 +279,12 @@
   
   
 
+  
+  
 
+
+
+  
 
   
 
@@ -327,6 +332,16 @@
         
         
           <a title="Model Deployment Scaling Walkthrough" href="/gpustack-operator/main/docs/walkthroughs/model-deployment/scaling/" >Scaling</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Online Runtime Control Walkthrough" href="/gpustack-operator/main/docs/walkthroughs/model-deployment/runtime-control/" >Online Runtime Control</a>
           
           
         
@@ -936,6 +951,9 @@
   
   
 
+  
+  
+
 
 
   
@@ -1000,6 +1018,8 @@
         
       
     
+  
+
   
 
   
@@ -1178,6 +1198,16 @@
       
     
       
+      
+    
+      
+      
+        
+        
+          <a title="Online Runtime Control" href="/gpustack-operator/main/docs/modules/model-deployment/runtime-control/" >Online Runtime Control</a>
+          
+          
+        
       
     
       
@@ -1499,7 +1529,7 @@
 It uses Ray and <em>internal load balancing (Internal LB)</em>. Only the serving master accepts inference requests.
 The CPU-only Ray head coordinates the cluster and claims no GPU.</p>
 <p>The role keeps <em><code>replicas: 1</code></em>, <em><code>size: 1</code></em> and two GPUs per member.
-The <em><code>elasticEp.width</code></em> field controls member count: width 2 uses four GPUs; width 4 uses eight.
+The <code>elastic.dataParallelWidth</code> key under <em><code>roles[].runtimeControl.parameters</code></em> controls member count: width <code>&quot;2&quot;</code> uses four GPUs; width <code>&quot;4&quot;</code> uses eight.
 Increasing ordinary <em><code>replicas</code></em> creates separate complete instances and does not expand this collective.</p>
 <p>Hold <em>TP</em> = 2 and expand <em>DP</em> width 2 → 4, increasing the <em>EP</em> world size from 4 to 8.
 The captured load completed <strong>439/439 client requests with zero errors</strong> during expansion.</p>
@@ -1621,8 +1651,9 @@ Save the manifest as <code>elastic-ep.yaml</code>:</p>
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">imagePullPolicy</span><span class="p">:</span><span class="w"> </span><span class="l">IfNotPresent</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">resources</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">accelerator</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;2&#34;</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">elasticEp</span><span class="p">:</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">width</span><span class="p">:</span><span class="w"> </span><span class="m">2</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">runtimeControl</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">parameters</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">          </span><span class="nt">elastic.dataParallelWidth</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;2&#34;</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">extraArgs</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">        </span>- --<span class="l">tensor-parallel-size</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">        </span>- <span class="s2">&#34;2&#34;</span><span class="w">
@@ -1672,7 +1703,7 @@ The ordinary role status reports one replica group even when the collective has 
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">kubectl -n gpustack-bench get modeldeployment b2-elastic-ep -o json &gt; baseline-cr.json
 </span></span><span class="line"><span class="cl">kubectl -n gpustack-bench get pods <span class="se">\
 </span></span></span><span class="line"><span class="cl"><span class="se"></span>  -l app.kubernetes.io/instance<span class="o">=</span>b2-elastic-ep -o json &gt; baseline-pods.json
-</span></span><span class="line"><span class="cl">jq <span class="s1">&#39;{name: .metadata.name, width: .spec.roles[0].elasticEp.width,
+</span></span><span class="line"><span class="cl">jq <span class="s1">&#39;{name: .metadata.name, width: .spec.roles[0].runtimeControl.parameters[&#34;elastic.dataParallelWidth&#34;],
 </span></span></span><span class="line"><span class="cl"><span class="s1">     phase: .status.phase, desired: .status.roles[0].desired,
 </span></span></span><span class="line"><span class="cl"><span class="s1">     ready: .status.roles[0].ready}&#39;</span> baseline-cr.json</span></span></code></pre></div>
 </div>
@@ -1681,7 +1712,7 @@ The ordinary role status reports one replica group even when the collective has 
   <div class="code-toolbar"><span>json</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-json" data-lang="json"><span class="line"><span class="cl"><span class="p">{</span>
 </span></span><span class="line"><span class="cl">  <span class="nt">&#34;name&#34;</span><span class="p">:</span> <span class="s2">&#34;b2-elastic-ep&#34;</span><span class="p">,</span>
-</span></span><span class="line"><span class="cl">  <span class="nt">&#34;width&#34;</span><span class="p">:</span> <span class="mi">2</span><span class="p">,</span>
+</span></span><span class="line"><span class="cl">  <span class="nt">&#34;width&#34;</span><span class="p">:</span> <span class="s2">&#34;2&#34;</span><span class="p">,</span>
 </span></span><span class="line"><span class="cl">  <span class="nt">&#34;phase&#34;</span><span class="p">:</span> <span class="s2">&#34;Ready&#34;</span><span class="p">,</span>
 </span></span><span class="line"><span class="cl">  <span class="nt">&#34;desired&#34;</span><span class="p">:</span> <span class="mi">1</span><span class="p">,</span>
 </span></span><span class="line"><span class="cl">  <span class="nt">&#34;ready&#34;</span><span class="p">:</span> <span class="mi">1</span>
@@ -1719,9 +1750,9 @@ A health response does not exercise generation. Keep these new checks distinct f
 </span></span></span><span class="line"><span class="cl"><span class="s1">     containers: [.status.containerStatuses[] | {name, restartCount}]}&#39;</span> baseline-pods.json
 </span></span><span class="line"><span class="cl">
 </span></span><span class="line"><span class="cl">kubectl -n gpustack-bench patch modeldeployment b2-elastic-ep --type<span class="o">=</span>json <span class="se">\
-</span></span></span><span class="line"><span class="cl"><span class="se"></span>  -p <span class="s1">&#39;[{&#34;op&#34;:&#34;test&#34;,&#34;path&#34;:&#34;/spec/roles/0/elasticEp/width&#34;,&#34;value&#34;:2},{&#34;op&#34;:&#34;replace&#34;,&#34;path&#34;:&#34;/spec/roles/0/elasticEp/width&#34;,&#34;value&#34;:4}]&#39;</span></span></span></code></pre></div>
+</span></span></span><span class="line"><span class="cl"><span class="se"></span>  -p <span class="s1">&#39;[{&#34;op&#34;:&#34;test&#34;,&#34;path&#34;:&#34;/spec/roles/0/runtimeControl/parameters/elastic.dataParallelWidth&#34;,&#34;value&#34;:&#34;2&#34;},{&#34;op&#34;:&#34;replace&#34;,&#34;path&#34;:&#34;/spec/roles/0/runtimeControl/parameters/elastic.dataParallelWidth&#34;,&#34;value&#34;:&#34;4&#34;}]&#39;</span></span></span></code></pre></div>
 </div>
-<p>The patch changes the target width and tests that its previous value is still 2:</p>
+<p>The patch changes the target width and tests that its previous value is still <code>&quot;2&quot;</code>:</p>
 <div class="code-block">
   <div class="code-toolbar"><span>diff</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-diff" data-lang="diff"><span class="line"><span class="cl"> apiVersion: worker.gpustack.ai/v1
@@ -1732,9 +1763,10 @@ A health response does not exercise generation. Keep these new checks distinct f
 </span></span><span class="line"><span class="cl"> spec:
 </span></span><span class="line"><span class="cl">   roles:
 </span></span><span class="line"><span class="cl">     - name: server
-</span></span><span class="line"><span class="cl">       elasticEp:
-</span></span><span class="line"><span class="cl"><span class="gd">-        width: 2
-</span></span></span><span class="line"><span class="cl"><span class="gd"></span><span class="gi">+        width: 4
+</span></span><span class="line"><span class="cl">       runtimeControl:
+</span></span><span class="line"><span class="cl">         parameters:
+</span></span><span class="line"><span class="cl"><span class="gd">-          elastic.dataParallelWidth: &#34;2&#34;
+</span></span></span><span class="line"><span class="cl"><span class="gd"></span><span class="gi">+          elastic.dataParallelWidth: &#34;4&#34;
 </span></span></span></code></pre></div>
 </div>
 <p>Wait for the current generation&rsquo;s effective width. A spec edit or four running <code>Pod</code>s alone does not prove a native resize.
@@ -1765,7 +1797,7 @@ If the check fails, inspect the hold reason before changing the width again.</p>
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-bash" data-lang="bash"><span class="line"><span class="cl">kubectl -n gpustack-bench get modeldeployment b2-elastic-ep -o json &gt; scaled-cr.json
 </span></span><span class="line"><span class="cl">kubectl -n gpustack-bench get pods <span class="se">\
 </span></span></span><span class="line"><span class="cl"><span class="se"></span>  -l app.kubernetes.io/instance<span class="o">=</span>b2-elastic-ep -o json &gt; scaled-pods.json
-</span></span><span class="line"><span class="cl">jq <span class="s1">&#39;{name: .metadata.name, width: .spec.roles[0].elasticEp.width,
+</span></span><span class="line"><span class="cl">jq <span class="s1">&#39;{name: .metadata.name, width: .spec.roles[0].runtimeControl.parameters[&#34;elastic.dataParallelWidth&#34;],
 </span></span></span><span class="line"><span class="cl"><span class="s1">     phase: .status.phase, desired: .status.roles[0].desired,
 </span></span></span><span class="line"><span class="cl"><span class="s1">     ready: .status.roles[0].ready}&#39;</span> scaled-cr.json</span></span></code></pre></div>
 </div>
@@ -1774,7 +1806,7 @@ If the check fails, inspect the hold reason before changing the width again.</p>
   <div class="code-toolbar"><span>json</span><button class="copy-code" type="button" aria-label="Copy code">Copy</button></div>
   <div class="highlight"><pre tabindex="0" class="chroma"><code class="language-json" data-lang="json"><span class="line"><span class="cl"><span class="p">{</span>
 </span></span><span class="line"><span class="cl">  <span class="nt">&#34;name&#34;</span><span class="p">:</span> <span class="s2">&#34;b2-elastic-ep&#34;</span><span class="p">,</span>
-</span></span><span class="line"><span class="cl">  <span class="nt">&#34;width&#34;</span><span class="p">:</span> <span class="mi">4</span><span class="p">,</span>
+</span></span><span class="line"><span class="cl">  <span class="nt">&#34;width&#34;</span><span class="p">:</span> <span class="s2">&#34;4&#34;</span><span class="p">,</span>
 </span></span><span class="line"><span class="cl">  <span class="nt">&#34;phase&#34;</span><span class="p">:</span> <span class="s2">&#34;Ready&#34;</span><span class="p">,</span>
 </span></span><span class="line"><span class="cl">  <span class="nt">&#34;desired&#34;</span><span class="p">:</span> <span class="mi">1</span><span class="p">,</span>
 </span></span><span class="line"><span class="cl">  <span class="nt">&#34;ready&#34;</span><span class="p">:</span> <span class="mi">1</span>

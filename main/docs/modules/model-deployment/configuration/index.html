@@ -279,7 +279,12 @@
   
   
 
+  
+  
 
+
+
+  
 
   
 
@@ -327,6 +332,16 @@
         
         
           <a title="Model Deployment Scaling Walkthrough" href="/gpustack-operator/main/docs/walkthroughs/model-deployment/scaling/" >Scaling</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Online Runtime Control Walkthrough" href="/gpustack-operator/main/docs/walkthroughs/model-deployment/runtime-control/" >Online Runtime Control</a>
           
           
         
@@ -936,6 +951,9 @@
   
   
 
+  
+  
+
 
 
   
@@ -1000,6 +1018,8 @@
         
       
     
+  
+
   
 
   
@@ -1178,6 +1198,16 @@
       
     
       
+      
+    
+      
+      
+        
+        
+          <a title="Online Runtime Control" href="/gpustack-operator/main/docs/modules/model-deployment/runtime-control/" >Online Runtime Control</a>
+          
+          
+        
       
     
       
@@ -2116,7 +2146,7 @@ members.</p>
 See <a href="/gpustack-operator/main/docs/modules/model-deployment/prefill-decode/#direct-transfer-transport">Prefill and Decode</a>
 .</li>
 <li><strong>Admission</strong>: Interface and pool-transport checks run again only when a role&rsquo;s interface, type, command, router or transfer path changes.</li>
-<li><strong>Elastic EP</strong>: A role with <em><code>elasticEp</code></em> pins its member configuration and only resizes width.
+<li><strong>Elastic EP</strong>: A role with <code>elastic.dataParallelWidth</code> pins its member configuration and only resizes width.
 See <a href="/gpustack-operator/main/docs/modules/model-deployment/elastic-ep/#changing-the-width">Elastic EP</a>
 .</li>
 <li><strong>Departure</strong>: A departing replica drops its block heartbeat and emits <code>ReplicaEvicted</code>, <code>ReplicaLeaving</code> or <code>ReplicaRestarted</code>.
@@ -2156,6 +2186,8 @@ rendering changes are evaluated separately:</p>
       </tr>
   </tbody>
 </table>
+<p>Live fields in <em><code>roles[].runtimeControl.parameters</code></em>, <em><code>roles[].pause</code></em>, and the mutable <em><code>spec.router</code></em> subfields do not roll worker <code>Pod</code>s; see <a href="/gpustack-operator/main/docs/modules/model-deployment/runtime-control/#router-hash-decoupling">Online Runtime Control</a>
+ for the full list.</p>
 <p>Set <code>modeldeployment.gpustack.ai/min-render-version</code> on the <code>ModelDeployment</code> to roll running replicas onto a newer rendering baseline on your own schedule; see <a href="/gpustack-operator/main/docs/modules/model-deployment/status/#status">Model Deployment
 Status</a>
  for how <code>ReplicasUpToDate</code> reports older compatible replicas:</p>
@@ -2249,6 +2281,7 @@ role set cannot be edited at all; admission refuses it.</p>
 </span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="nt">spec</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">model</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">Qwen/Qwen3-8B </span><span class="w"> </span><span class="c"># Frozen.</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">loraAdapters</span><span class="p">:</span><span class="w"> </span><span class="p">[]</span><span class="w">  </span><span class="c"># Reserved; non-empty values are currently rejected by admission.</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">engine</span><span class="p">:</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">vLLM    </span><span class="w"> </span><span class="c"># Frozen.</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">image</span><span class="p">:</span><span class="w"> </span><span class="l">example/engine:tag </span><span class="w"> </span><span class="c"># Editable.</span><span class="w">
@@ -2258,16 +2291,19 @@ role set cannot be edited at all; admission refuses it.</p>
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">kvTransfer</span><span class="p">:</span><span class="w"> </span>{}<span class="w">   </span><span class="c"># Editable.</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">router</span><span class="p">:</span><span class="w">          </span><span class="c"># The block may be added or removed.</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">llm-d-router </span><span class="w"> </span><span class="c"># Frozen in place.</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">replicas</span><span class="p">:</span><span class="w"> </span><span class="m">1</span><span class="w">    </span><span class="c"># Editable.</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">extraArgs</span><span class="p">:</span><span class="w"> </span><span class="p">[]</span><span class="w">  </span><span class="c"># Editable.</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">replicas</span><span class="p">:</span><span class="w"> </span><span class="m">1</span><span class="w">    </span><span class="c"># Editable without rolling worker Pods.</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="nt">extraArgs</span><span class="p">:</span><span class="w"> </span><span class="p">[]</span><span class="w">  </span><span class="c"># Editable without rolling worker Pods.</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">roles</span><span class="p">:</span><span class="w">           </span><span class="c"># The role set is frozen.</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">    </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">server</span><span class="w"> </span><span class="c"># Frozen.</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">Server</span><span class="w"> </span><span class="c"># Frozen.</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">replicas</span><span class="p">:</span><span class="w"> </span><span class="m">1</span><span class="w">  </span><span class="c"># Editable.</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">size</span><span class="p">:</span><span class="w"> </span><span class="m">1</span><span class="w">  </span><span class="c"># Editable, except on an elasticEp role.</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">acceleratorType</span><span class="p">:</span><span class="w"> </span><span class="l">gpu-pool </span><span class="w"> </span><span class="c"># Editable, except on an elasticEp role.</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">resources</span><span class="p">:</span><span class="w"> </span>{}<span class="w">  </span><span class="c"># Editable, except on an elasticEp role.</span><span class="w">
-</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">command</span><span class="p">:</span><span class="w"> </span><span class="p">[]</span><span class="w">  </span><span class="c"># Editable, except on an elasticEp role.</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">pause</span><span class="p">:</span><span class="w"> </span><span class="kc">false</span><span class="w">  </span><span class="c"># Editable on any role without rolling worker Pods.</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">size</span><span class="p">:</span><span class="w"> </span><span class="m">1</span><span class="w">  </span><span class="c"># Editable, except on an Elastic EP role.</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">acceleratorType</span><span class="p">:</span><span class="w"> </span><span class="l">gpu-pool </span><span class="w"> </span><span class="c"># Editable, except on an Elastic EP role.</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">resources</span><span class="p">:</span><span class="w"> </span>{}<span class="w">  </span><span class="c"># Editable, except on an Elastic EP role.</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">command</span><span class="p">:</span><span class="w"> </span><span class="p">[]</span><span class="w">  </span><span class="c"># Editable, except on an Elastic EP role.</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">runtimeControl</span><span class="p">:</span><span class="w">  </span><span class="c"># Editable without rolling Pods; elastic.dataParallelWidth presence is frozen.</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="nt">parameters</span><span class="p">:</span><span class="w"> </span>{}<span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">extraArgs</span><span class="p">:</span><span class="w"> </span><span class="p">[]</span><span class="w">  </span><span class="c"># Editable.</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">env</span><span class="p">:</span><span class="w"> </span><span class="p">[]</span><span class="w">  </span><span class="c"># Editable.</span><span class="w">
 </span></span></span><span class="line"><span class="cl"><span class="w">      </span><span class="nt">image</span><span class="p">:</span><span class="w"> </span><span class="l">example/engine:tag </span><span class="w"> </span><span class="c"># Editable Pod field.</span><span class="w">

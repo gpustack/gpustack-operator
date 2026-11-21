@@ -279,7 +279,12 @@
   
   
 
+  
+  
 
+
+
+  
 
   
 
@@ -327,6 +332,16 @@
         
         
           <a title="Model Deployment Scaling Walkthrough" href="/gpustack-operator/main/docs/walkthroughs/model-deployment/scaling/" >Scaling</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Online Runtime Control Walkthrough" href="/gpustack-operator/main/docs/walkthroughs/model-deployment/runtime-control/" >Online Runtime Control</a>
           
           
         
@@ -936,6 +951,9 @@
   
   
 
+  
+  
+
 
 
   
@@ -1000,6 +1018,8 @@
         
       
     
+  
+
   
 
   
@@ -1178,6 +1198,16 @@
       
     
       
+      
+    
+      
+      
+        
+        
+          <a title="Online Runtime Control" href="/gpustack-operator/main/docs/modules/model-deployment/runtime-control/" >Online Runtime Control</a>
+          
+          
+        
       
     
       
@@ -1518,6 +1548,12 @@ With <em>internal load balancing (Internal LB)</em>, the master distributes requ
           <td>Independent replicas managed by <code>ModelDeploymentScaler</code></td>
           <td>Shadow and Active configuration, algorithm selection, role ratios, and observation of scale-out and retirement; links the measured H100 <a href="/gpustack-operator/main/docs/modules/model-deployment/scaling-benchmark/">benchmark</a>
 .</td>
+      </tr>
+      <tr>
+          <td><a href="/gpustack-operator/main/docs/walkthroughs/model-deployment/runtime-control/">Online Runtime Control</a>
+</td>
+          <td>Live parameter tuning, role pause, and Elastic EP</td>
+          <td>Recorded NVIDIA H200 run covering vLLM and SGLang live tuning, auto-reset, Envoy allowlist, <code>ModelDeploymentScaler</code> <code>RolePaused</code>, same-UID restart latch replay, and folded Elastic EP expansion.</td>
       </tr>
       <tr>
           <td><a href="/gpustack-operator/main/docs/walkthroughs/model-deployment/elastic-ep/">Elastic EP</a>

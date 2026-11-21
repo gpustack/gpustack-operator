@@ -33,7 +33,7 @@ flowchart TD
 
 ## Profile contract
 
-*`roles[].elasticEp`* selects this mode for a role. Its only field sets the target width:
+*`roles[].runtimeControl.parameters["elastic.dataParallelWidth"]`* selects this mode for a role. Its string value sets the target width (`"2"` to `"64"`):
 
 ```yaml
 apiVersion: worker.gpustack.ai/v1
@@ -49,20 +49,21 @@ spec:
   roles:
     - name: server
       acceleratorType: elastic-gpu
-      elasticEp:
-        width: 4  # Mutable target GPU engines, including the reserved master; 2 to 64.
+      runtimeControl:
+        parameters:
+          elastic.dataParallelWidth: "4"  # Target GPU engines ("2" to "64"), including the reserved master.
 ```
 
-*`width`* counts *data parallelism (DP)* engines, including the master. Each member has its own GPU `Pod`.
+`elastic.dataParallelWidth` counts *data parallelism (DP)* engines, including the master. Each member has its own GPU `Pod`.
 Set *tensor parallelism (TP)* through the role's *`extraArgs`*, using the engine's `--tensor-parallel-size` argument.
-Omitting it uses *TP* = 1. Total GPU demand is *`width`* × *TP*.
+Omitting it uses *TP* = 1. Total GPU demand is width × *TP*.
 For *TP* = 2, width 2 needs four GPUs; width 4 needs eight GPUs.
 
 Change the width to grow the collective; do not use *`replicas`* or *`size`* for this.
 This release accepts scale-up and unchanged width only. The admission webhook rejects a width decrease;
 safe scale-down is tracked in [issue #741](https://github.com/gpustack/gpustack-operator/issues/741).
 
-Once a role carries *`elasticEp`*, the profile is fixed for that deployment and the admission webhook
+Once a role sets `elastic.dataParallelWidth`, the profile is fixed for that deployment and the admission webhook
 enforces the rest:
 
 - the deployment has exactly one role, and it is a Server role;
@@ -141,8 +142,9 @@ spec:
       acceleratorType: elastic-gpu
       resources:
         accelerator: "1"  # defaults to the TP size (1 here) on an accelerated AcceleratorType when omitted
-      elasticEp:
-        width: 2
+      runtimeControl:
+        parameters:
+          elastic.dataParallelWidth: "2"
       extraArgs:
         - --elastic-ep-max-dp-size
         - "4"
@@ -191,7 +193,7 @@ Older vLLM releases do not accept this argument.
 
 ## Changing the width
 
-Change only *`width`*. Starting at 2, this patch requests 4. Wait for the resize to complete before
+Change only `elastic.dataParallelWidth`. Starting at `"2"`, this patch requests `"4"`. Wait for the resize to complete before
 submitting another change. A patch that lowers the current width is rejected by the admission
 webhook in this release; it does not reach the engine.
 
@@ -204,14 +206,15 @@ webhook in this release; it does not reach the engine.
  spec:
    roles:
      - name: server
-       elasticEp:
--        width: 2
-+        width: 4
+       runtimeControl:
+         parameters:
+-          elastic.dataParallelWidth: "2"
++          elastic.dataParallelWidth: "4"
 ```
 
 ```bash
 kubectl patch modeldeployment qwen3-ep -n gpustack --type=json \
-  -p '[{"op":"replace","path":"/spec/roles/0/elasticEp/width","value":4}]'
+  -p '[{"op":"replace","path":"/spec/roles/0/runtimeControl/parameters/elastic.dataParallelWidth","value":"4"}]'
 ```
 
 The operator keeps the master. It keeps the master's command, its UID and its bootstrap width

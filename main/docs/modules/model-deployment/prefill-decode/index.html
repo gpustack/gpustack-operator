@@ -279,7 +279,12 @@
   
   
 
+  
+  
 
+
+
+  
 
   
 
@@ -327,6 +332,16 @@
         
         
           <a title="Model Deployment Scaling Walkthrough" href="/gpustack-operator/main/docs/walkthroughs/model-deployment/scaling/" >Scaling</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Online Runtime Control Walkthrough" href="/gpustack-operator/main/docs/walkthroughs/model-deployment/runtime-control/" >Online Runtime Control</a>
           
           
         
@@ -936,6 +951,9 @@
   
   
 
+  
+  
+
 
 
   
@@ -1000,6 +1018,8 @@
         
       
     
+  
+
   
 
   
@@ -1178,6 +1198,16 @@
       
     
       
+      
+    
+      
+      
+        
+        
+          <a title="Online Runtime Control" href="/gpustack-operator/main/docs/modules/model-deployment/runtime-control/" >Online Runtime Control</a>
+          
+          
+        
       
     
       
@@ -1478,8 +1508,6 @@
 operator connects them through a router and a transfer path. <a href="/gpustack-operator/main/docs/modules/model-deployment/configuration/#prefill-and-decode">Prefill and
 decode</a>
  describes the role fields and admission rules.</p>
-<p>The recorded runs apply to vLLM <code>v0.30.0</code> and SGLang <code>0.5.22</code>. Other versions must be re-verified
-before they inherit a claim on this page.</p>
 <p><span class="diagram-scroll"><img src="/gpustack-operator/main/docs/assets/diagrams/model-deployment-pd.svg" alt="Prefill and decode request and KV transfer flow" decoding="async"></span></p>
 <!--
 flowchart LR
@@ -1919,9 +1947,9 @@ and <a href="/gpustack-operator/main/docs/modules/model-deployment/parameterize/
       </tr>
       <tr>
           <td><strong>Aggregated <code>Server</code></strong> (no KV connector)</td>
-          <td><code>0</code>, or <code>&gt; 0</code> on multi-Pod/<code>elasticEp</code> <code>vLLM</code></td>
+          <td><code>0</code>, or <code>&gt; 0</code> on multi-Pod/Elastic EP <code>vLLM</code></td>
           <td>Renders no KV connector or A5 transfer resources.</td>
-          <td>Set <code>interface &gt; 0</code> only on multi-Pod or <code>elasticEp</code> <code>vLLM</code> <code>Server</code> roles.</td>
+          <td>Set <code>interface &gt; 0</code> only on multi-Pod or Elastic EP <code>vLLM</code> <code>Server</code> roles.</td>
       </tr>
       <tr>
           <td><strong>Constrained static-UB fallback</strong></td>

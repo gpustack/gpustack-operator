@@ -279,7 +279,12 @@
   
   
 
+  
+  
 
+
+
+  
 
   
 
@@ -327,6 +332,16 @@
         
         
           <a title="Model Deployment Scaling Walkthrough" href="/gpustack-operator/main/docs/walkthroughs/model-deployment/scaling/" >Scaling</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Online Runtime Control Walkthrough" href="/gpustack-operator/main/docs/walkthroughs/model-deployment/runtime-control/" >Online Runtime Control</a>
           
           
         
@@ -936,6 +951,9 @@
   
   
 
+  
+  
+
 
 
   
@@ -1002,6 +1020,8 @@
         
       
     
+  
+
   
 
   
@@ -1180,6 +1200,16 @@
       
     
       
+      
+    
+      
+      
+        
+        
+          <a title="Online Runtime Control" href="/gpustack-operator/main/docs/modules/model-deployment/runtime-control/" >Online Runtime Control</a>
+          
+          
+        
       
     
       
@@ -1568,7 +1598,7 @@ The crossover at concurrency 64 concerns median first-token latency; total reque
   </tbody>
 </table>
 <p>The deployment used one <em>Server</em> role with <em><code>replicas: 1</code></em> and <em><code>size: 1</code></em>.
-Only <em><code>elasticEp.width</code></em> changed. The CPU-only Ray head remained outside the GPU allocation.
+Only <code>elastic.dataParallelWidth</code> under <em><code>runtimeControl.parameters</code></em> changed. The CPU-only Ray head remained outside the GPU allocation.
 The head and all GPU members ran on the same GPU node.
 The <a href="/gpustack-operator/main/docs/walkthroughs/model-deployment/elastic-ep/">walkthrough</a>
  provides the manifest and verification commands.</p>
@@ -1981,8 +2011,9 @@ The diff uses current interface allocation; the recorded run used manual device 
 </span></span><span class="line"><span class="cl">       resources:
 </span></span><span class="line"><span class="cl">         accelerator: &#34;2&#34;
 </span></span><span class="line"><span class="cl"><span class="gi">+        interface: &#34;2&#34;
-</span></span></span><span class="line"><span class="cl"><span class="gi"></span>       elasticEp:
-</span></span><span class="line"><span class="cl">         width: 2
+</span></span></span><span class="line"><span class="cl"><span class="gi"></span>       runtimeControl:
+</span></span><span class="line"><span class="cl">         parameters:
+</span></span><span class="line"><span class="cl">           elastic.dataParallelWidth: &#34;2&#34;
 </span></span><span class="line"><span class="cl">       extraArgs:
 </span></span><span class="line"><span class="cl">         - --gpu-memory-utilization
 </span></span><span class="line"><span class="cl"><span class="gd">-        - &#34;0.90&#34;

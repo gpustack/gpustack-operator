@@ -48,8 +48,8 @@ for distributed multi-node serving.
 
 ## Service operations
 
-[Status](/gpustack-operator/main/docs/modules/model-deployment/status/index.md), [Metrics](/gpustack-operator/main/docs/modules/model-deployment/metrics/index.md) and
-[Routing](/gpustack-operator/main/docs/modules/model-deployment/routing/index.md) explain what the running service reports and how requests
+[Online Runtime Control](/gpustack-operator/main/docs/modules/model-deployment/runtime-control/index.md), [Status](/gpustack-operator/main/docs/modules/model-deployment/status/index.md), [Metrics](/gpustack-operator/main/docs/modules/model-deployment/metrics/index.md) and
+[Routing](/gpustack-operator/main/docs/modules/model-deployment/routing/index.md) explain live parameter tuning, what the running service reports, and how requests
 are directed.
 
 [Scaling](/gpustack-operator/main/docs/modules/model-deployment/scaling/index.md) plans the replica count of a deployment from the signals it publishes, and

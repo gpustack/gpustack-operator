@@ -279,7 +279,12 @@
   
   
 
+  
+  
 
+
+
+  
 
   
 
@@ -327,6 +332,16 @@
         
         
           <a title="Model Deployment Scaling Walkthrough" href="/gpustack-operator/main/docs/walkthroughs/model-deployment/scaling/" >Scaling</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Online Runtime Control Walkthrough" href="/gpustack-operator/main/docs/walkthroughs/model-deployment/runtime-control/" >Online Runtime Control</a>
           
           
         
@@ -936,6 +951,9 @@
   
   
 
+  
+  
+
 
 
   
@@ -1000,6 +1018,8 @@
         
       
     
+  
+
   
 
   
@@ -1178,6 +1198,16 @@
       
     
       
+      
+    
+      
+      
+        
+        
+          <a title="Online Runtime Control" href="/gpustack-operator/main/docs/modules/model-deployment/runtime-control/" >Online Runtime Control</a>
+          
+          
+        
       
     
       
@@ -1480,11 +1510,6 @@ declares external data parallelism without <em><code>spec.router</code></em>, na
 the vLLM captured commands and results, follow the
 <a href="/gpustack-operator/main/docs/walkthroughs/model-deployment/external-dp/">External DP Walkthrough</a>
 .</p>
-<p>The recorded runs apply to two combinations, and they are the two the engine-match rule
-admits: vLLM <code>v0.30.0</code> on NVIDIA <em>H100</em> behind the <code>vllm-router</code> binary of
-<code>gpustack/llm-router:v0.3.1</code> under <code>--policy round_robin</code>, and SGLang <code>0.5.22</code> behind the
-<code>sglang-gateway</code> binary of <code>gpustack/llm-router:v0.3.1</code>. Other versions must be re-verified
-before they inherit a claim on this page.</p>
 <p><span class="diagram-scroll"><img src="/gpustack-operator/main/docs/assets/diagrams/model-deployment-external-dp.svg" alt="External DP router and rank endpoints" decoding="async"></span></p>
 <!--
 flowchart TD
@@ -1554,7 +1579,7 @@ rank; the SGLang shape runs one distributed launch over the members
           <td><em>Elastic EP</em></td>
           <td>Ray <em>Internal LB</em>, one instance</td>
           <td>one endpoint (the master)</td>
-          <td>online <em><code>elasticEp.width</code></em> scale-up</td>
+          <td>online <code>elastic.dataParallelWidth</code> scale-up</td>
       </tr>
       <tr>
           <td><em>vLLM External DP</em></td>
@@ -1947,8 +1972,8 @@ and one output key, so there is no per-member endpoint to balance across.</li>
 and tracked in <a href="https://github.com/gpustack/gpustack-operator/issues/754">issue #754</a>
 .</li>
 <li><em>Elastic EP</em> and <em>External DP</em> are mutually exclusive configurations: the engine rejects its native <em>Elastic EP</em>
-mode combined with External or <em>hybrid load balancing (Hybrid LB)</em>, and the <em><code>elasticEp</code></em> profile admits exactly one <em>Server</em>
-role with <code>size: 1</code> — its <em><code>width</code></em>, not <em>DP</em> ranks, sizes the collective.</li>
+mode combined with External or <em>hybrid load balancing (Hybrid LB)</em>, and the <em>Elastic EP</em> profile (<code>elastic.dataParallelWidth</code>) admits exactly one <em>Server</em>
+role with <code>size: 1</code> — its <code>elastic.dataParallelWidth</code> parameter, not <em>DP</em> ranks, sizes the collective.</li>
 </ul>
 <p><em><code>size</code></em> is a fate-sharing group, not a resize control: changing it replaces whole replicas instead of
 resizing a running <em>DP</em> group (see <a href="/gpustack-operator/main/docs/modules/model-deployment/configuration/#rollout-behavior">Rollout behavior</a>

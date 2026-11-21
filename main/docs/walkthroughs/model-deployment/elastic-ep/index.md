@@ -20,7 +20,7 @@ It uses Ray and *internal load balancing (Internal LB)*. Only the serving master
 The CPU-only Ray head coordinates the cluster and claims no GPU.
 
 The role keeps *`replicas: 1`*, *`size: 1`* and two GPUs per member.
-The *`elasticEp.width`* field controls member count: width 2 uses four GPUs; width 4 uses eight.
+The `elastic.dataParallelWidth` key under *`roles[].runtimeControl.parameters`* controls member count: width `"2"` uses four GPUs; width `"4"` uses eight.
 Increasing ordinary *`replicas`* creates separate complete instances and does not expand this collective.
 
 Hold *TP* = 2 and expand *DP* width 2 → 4, increasing the *EP* world size from 4 to 8.
@@ -91,8 +91,9 @@ spec:
       imagePullPolicy: IfNotPresent
       resources:
         accelerator: "2"
-      elasticEp:
-        width: 2
+      runtimeControl:
+        parameters:
+          elastic.dataParallelWidth: "2"
       extraArgs:
         - --tensor-parallel-size
         - "2"
@@ -146,7 +147,7 @@ Save a baseline CR and `Pod` snapshot before changing the width:
 kubectl -n gpustack-bench get modeldeployment b2-elastic-ep -o json > baseline-cr.json
 kubectl -n gpustack-bench get pods \
   -l app.kubernetes.io/instance=b2-elastic-ep -o json > baseline-pods.json
-jq '{name: .metadata.name, width: .spec.roles[0].elasticEp.width,
+jq '{name: .metadata.name, width: .spec.roles[0].runtimeControl.parameters["elastic.dataParallelWidth"],
      phase: .status.phase, desired: .status.roles[0].desired,
      ready: .status.roles[0].ready}' baseline-cr.json
 ```
@@ -156,7 +157,7 @@ Captured projection:
 ```json
 {
   "name": "b2-elastic-ep",
-  "width": 2,
+  "width": "2",
   "phase": "Ready",
   "desired": 1,
   "ready": 1
@@ -200,10 +201,10 @@ jq '.items[] |
      containers: [.status.containerStatuses[] | {name, restartCount}]}' baseline-pods.json
 
 kubectl -n gpustack-bench patch modeldeployment b2-elastic-ep --type=json \
-  -p '[{"op":"test","path":"/spec/roles/0/elasticEp/width","value":2},{"op":"replace","path":"/spec/roles/0/elasticEp/width","value":4}]'
+  -p '[{"op":"test","path":"/spec/roles/0/runtimeControl/parameters/elastic.dataParallelWidth","value":"2"},{"op":"replace","path":"/spec/roles/0/runtimeControl/parameters/elastic.dataParallelWidth","value":"4"}]'
 ```
 
-The patch changes the target width and tests that its previous value is still 2:
+The patch changes the target width and tests that its previous value is still `"2"`:
 
 ```diff
  apiVersion: worker.gpustack.ai/v1
@@ -214,9 +215,10 @@ The patch changes the target width and tests that its previous value is still 2:
  spec:
    roles:
      - name: server
-       elasticEp:
--        width: 2
-+        width: 4
+       runtimeControl:
+         parameters:
+-          elastic.dataParallelWidth: "2"
++          elastic.dataParallelWidth: "4"
 ```
 
 Wait for the current generation's effective width. A spec edit or four running `Pod`s alone does not prove a native resize.
@@ -249,7 +251,7 @@ Save the final CR and compare `Pod` identities with the baseline:
 kubectl -n gpustack-bench get modeldeployment b2-elastic-ep -o json > scaled-cr.json
 kubectl -n gpustack-bench get pods \
   -l app.kubernetes.io/instance=b2-elastic-ep -o json > scaled-pods.json
-jq '{name: .metadata.name, width: .spec.roles[0].elasticEp.width,
+jq '{name: .metadata.name, width: .spec.roles[0].runtimeControl.parameters["elastic.dataParallelWidth"],
      phase: .status.phase, desired: .status.roles[0].desired,
      ready: .status.roles[0].ready}' scaled-cr.json
 ```
@@ -259,7 +261,7 @@ Captured projection:
 ```json
 {
   "name": "b2-elastic-ep",
-  "width": 4,
+  "width": "4",
   "phase": "Ready",
   "desired": 1,
   "ready": 1

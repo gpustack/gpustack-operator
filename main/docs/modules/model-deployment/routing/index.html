@@ -279,7 +279,12 @@
   
   
 
+  
+  
 
+
+
+  
 
   
 
@@ -327,6 +332,16 @@
         
         
           <a title="Model Deployment Scaling Walkthrough" href="/gpustack-operator/main/docs/walkthroughs/model-deployment/scaling/" >Scaling</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Online Runtime Control Walkthrough" href="/gpustack-operator/main/docs/walkthroughs/model-deployment/runtime-control/" >Online Runtime Control</a>
           
           
         
@@ -936,6 +951,9 @@
   
   
 
+  
+  
+
 
 
   
@@ -1000,6 +1018,8 @@
         
       
     
+  
+
   
 
   
@@ -1178,6 +1198,16 @@
       
     
       
+      
+    
+      
+      
+        
+        
+          <a title="Online Runtime Control" href="/gpustack-operator/main/docs/modules/model-deployment/runtime-control/" >Online Runtime Control</a>
+          
+          
+        
       
     
       
@@ -1807,6 +1837,9 @@ in <code>smg_worker_selection_total{policy=&quot;round_robin&quot;}</code>, 120 
 , so a
 running deployment can switch as well. The router <code>Pod</code> is then replaced, and the new one starts with
 no record of earlier prefixes. Only a flag set at creation has been run.</p>
+<p>Managed routers enforce a shared method/path inference allowlist (including <code>vllm-omni</code> and <code>sglang-omni</code> multimodal routes) whenever any managed accelerated non-<em>Encode</em> role exists. <code>vllm-router</code> and <code>sglang-gateway</code> front the loopback router with an Envoy allowlist sidecar and a <code>:9091</code> observer listener.</p>
+<p>Editing mutable <em><code>spec.router</code></em> subfields updates only the router <code>Deployment</code>; see <a href="/gpustack-operator/main/docs/modules/model-deployment/runtime-control/#router-hash-decoupling">Online Runtime Control</a>
+ for the full list.</p>
 <p><strong>The value is each project&rsquo;s own, and the router checks it, not admission</strong>, so a misspelled one
 stops the router at startup:</p>
 <table>

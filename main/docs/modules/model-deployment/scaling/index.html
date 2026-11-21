@@ -279,7 +279,12 @@
   
   
 
+  
+  
 
+
+
+  
 
   
 
@@ -327,6 +332,16 @@
         
         
           <a title="Model Deployment Scaling Walkthrough" href="/gpustack-operator/main/docs/walkthroughs/model-deployment/scaling/" >Scaling</a>
+          
+          
+        
+      
+    
+      
+      
+        
+        
+          <a title="Online Runtime Control Walkthrough" href="/gpustack-operator/main/docs/walkthroughs/model-deployment/runtime-control/" >Online Runtime Control</a>
           
           
         
@@ -936,6 +951,9 @@
   
   
 
+  
+  
+
 
 
   
@@ -1000,6 +1018,8 @@
         
       
     
+  
+
   
 
   
@@ -1178,6 +1198,16 @@
       
     
       
+      
+    
+      
+      
+        
+        
+          <a title="Online Runtime Control" href="/gpustack-operator/main/docs/modules/model-deployment/runtime-control/" >Online Runtime Control</a>
+          
+          
+        
       
     
       
@@ -1947,7 +1977,7 @@ The optional model and hardware annotations cross-check the resolved identities;
 family (<code>vllm</code> / <code>sglang</code>); registry or model aliases are never inferred.</p>
 <p>Catalog resolution supports a single <code>Server</code>, PD <code>Prefill</code> / <code>Decode</code>, and EPD <code>Encode</code> / <code>Prefill</code> / <code>Decode</code> targets with managed <em><code>spec.router</code></em> and <em><code>spec.kvTransfer</code></em>.
 Each catalog-backed role needs a managed single-serving-<code>Pod</code> replica and explicit whole-accelerator resources without slicing.</p>
-<p>External <em><code>spec.kvCache</code></em>, <code>elasticEp</code>, external DP and custom commands remain gated unless the profile explicitly matches the configuration.
+<p>External <em><code>spec.kvCache</code></em>, Elastic EP (<code>elastic.dataParallelWidth</code>), external DP and custom commands remain gated unless the profile explicitly matches the configuration.
 Unknown injected environment variables fail closed. Supported engines use internal load balance, <code>DP = 1</code>, <code>localDP &lt;= 1</code>, and a complete single-<code>Pod</code> metric denominator.</p>
 <h3 id="catalog-qualification">Catalog qualification</h3>
 <p>All prior acquisition and qualification is offline. Admission and reconciliation read only the embedded catalog or the referenced same-namespace <code>ConfigMap</code> (<code>ModelDeploymentScalerCapacityPriorCatalog</code>, up to 4 MiB, 2048 profiles and 128 points per profile) plus live engine metrics. The operator never calls external benchmark services or profiles live traffic to create a prior.</p>
@@ -2044,7 +2074,7 @@ specs, identity annotations, effective algorithm, catalog digest, latency target
 prior quantities by semantic <code>Quantity</code> equality, keep the 256-sample <code>RingBuffer</code> in memory, and
 suppress <code>status</code> writes until control-plane state changes or a predictor advances by 16 samples.</p>
 <h3 id="local-evaluation">Local evaluation</h3>
-<p>The <a href="https://github.com/gpustack/gpustack-operator/blob/2822f3a0ae7ac4a1f281b31c043f5d6fdaa37d71/specs/2026-10-26-inferencex-model-deployment-scaling.md">capacity priors and local evaluation spec</a>
+<p>The <a href="https://github.com/gpustack/gpustack-operator/blob/13e808dcc7b0ae056bd46369b8c77dc0ccb33261/specs/2026-10-26-inferencex-model-deployment-scaling.md">capacity priors and local evaluation spec</a>
  records 48 deterministic synthetic result rows across eight
 tuning traces (<code>manual</code>, <code>resolved</code> and one <code>passive</code> candidate at seed factor <code>1</code>) plus two open-loop versus closed-loop examples.</p>
 <p>It also evaluates two held-out traces (<code>heldout_bursts</code> and <code>heldout_length_cache_shift</code>, 11 rows each across <code>manual</code> at factor <code>1</code> plus <code>resolved</code> and one <code>passive</code> candidate
@@ -2479,18 +2509,20 @@ constraints. Inspect each condition&rsquo;s generation because early exits can l
       <tr>
           <td><code>Blocked</code></td>
           <td><code>Ready</code> (<code>False</code>)</td>
-          <td><code>BoundsConflict</code>, <code>RatioConflict</code>, <code>PacingBounded</code>, <code>ResourceExhausted</code>, <code>ScaleDownAborted</code>, <code>RebalanceNotApplicable</code>, <code>RebalanceBlocked</code>, <code>CapacityPriorUnresolved</code>, <code>InsufficientLoadCoverage</code>, <code>IncompatibleMetric</code></td>
+          <td><code>BoundsConflict</code>, <code>RatioConflict</code>, <code>PacingBounded</code>, <code>ResourceExhausted</code>, <code>ScaleDownAborted</code>, <code>RebalanceNotApplicable</code>, <code>RebalanceBlocked</code>, <code>CapacityPriorUnresolved</code>, <code>InsufficientLoadCoverage</code>, <code>IncompatibleMetric</code>, <code>RolePaused</code></td>
       </tr>
   </tbody>
 </table>
 <p><code>BoundsConflict</code> means bounds are missing, inconsistent or exclude the current vector.
 <code>RatioConflict</code> means the current vector violates a ratio band or no feasible projection was found.
-<code>PacingBounded</code> means a step limit or guard held the recommendation.</p>
+<code>PacingBounded</code> means a step limit or guard held the recommendation.
+<code>RolePaused</code> holds replica writes while a target role&rsquo;s desired or observed pause state is <code>true</code>; see <a href="/gpustack-operator/main/docs/modules/model-deployment/runtime-control/#scaler-pause-guard">Online Runtime Control</a>
+.</p>
 <p><code>WaitingForMetrics</code> means required readings or complete coverage are unavailable, and
 <code>PredictorWarmingUp</code> is a role reason. <code>CapacityPriorUnresolved</code>, <code>InsufficientLoadCoverage</code> and
 <code>IncompatibleMetric</code> report why a catalog prior could not be resolved.</p>
 <h2 id="limitations">Limitations</h2>
-<p>Admission refuses roles with a custom <em><code>command</code></em> because their serving signals are unmanaged. It also refuses <em><code>elasticEp</code></em> roles, whose width grows one collective rather than
+<p>Admission refuses roles with a custom <em><code>command</code></em> because their serving signals are unmanaged. It also refuses roles setting <code>elastic.dataParallelWidth</code>, whose width grows one collective rather than
 adding independent replicas. At <em><code>maxReplicas</code></em>, generated group and member names must still fit the 63-character Kubernetes label limit. Shorten the deployment or role name if
 that maximum cannot be represented.</p>
 <p>The sampler reads at most 64 ready answering engine <code>Pod</code>s per role. Above that cap, coverage is incomplete and scale-down is held. New token and latency windows also need
