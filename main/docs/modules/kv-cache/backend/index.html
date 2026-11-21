@@ -1687,10 +1687,8 @@ image is set.</p>
 <p>Beside the <code>-cpu</code> default, this project publishes <code>mirrored-mooncake</code> in one build target per vendor
 (<code>cuda</code>, <code>cann</code>, <code>rocm</code>). Tags carry the toolchain version: <code>&lt;mooncake-version&gt;-&lt;variant&gt;&lt;toolchain&gt;</code>,
 such as <code>0.3.13.post1-cuda13.0</code>.</p>
-<p>All official <code>mirrored-mooncake</code> build targets (<code>-cpu</code>, <code>cuda</code>, <code>cann</code>, <code>rocm</code>) disable
-<code>USE_VRAM_SEGMENT</code> (<code>USE_VRAM_SEGMENT=OFF</code>) and allocate store segments in Host RAM (<code>DRAM</code>) only.
-Older published <code>0.3.13.post1-cuda*</code> tags enabled <code>USE_VRAM_SEGMENT=ON</code>, whereas normalized <code>0.3.14+</code>
-builds keep <code>USE_VRAM_SEGMENT=OFF</code> across every target.</p>
+<p>All published official <code>mirrored-mooncake</code> build targets (<code>-cpu</code>, <code>cuda</code>, <code>cann</code>, <code>rocm</code>) disable
+<code>USE_VRAM_SEGMENT</code> (<code>USE_VRAM_SEGMENT=OFF</code>) and allocate store segments in Host RAM (<code>DRAM</code>) only.</p>
 <ul>
 <li><strong><code>-cpu</code> default</strong>: Links <code>libibverbs</code> and AWS <code>libfabric</code> for TCP, RDMA, and EFA Host-RAM stores on NVIDIA and AMD nodes.</li>
 <li><strong><code>-cann</code> variant</strong>: Required on Ascend because <code>vllm-ascend</code> speaks HIXL (<code>protocol: ascend</code>), allocating Host RAM via ACL/HIXL.</li>
