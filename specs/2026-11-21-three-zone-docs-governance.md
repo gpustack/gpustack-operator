@@ -352,7 +352,7 @@ Expand–contract DAG: Wave 1 builds additive tooling and rules with zero breaka
 
 #### Wave 1 — Tooling, Publication Hardening, and Style Contract (Expand)
 
-- [ ] **T1 · Reference link rewriter and fresh-mirror stager**
+- [x] **T1 · Reference link rewriter and fresh-mirror stager**
       Blocked by: None
       Owns: `hack/site/rewrite_reference.py`, `hack/site/test_rewrite_reference.py`
       Gate: review
