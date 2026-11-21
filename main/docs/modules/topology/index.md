@@ -1,6 +1,7 @@
 # Topology
 
-GPUStack describes domains such as zones and racks. Kueue accounts for capacity within those domains.
+GPUStack models failure and fabric domains (regions, zones, racks, and network switches) so Kueue
+*topology-aware scheduling (TAS)* places multi-`Pod` replica groups inside a single domain.
 
 ## Contents
 
@@ -13,8 +14,9 @@ GPUStack describes domains such as zones and racks. Kueue accounts for capacity 
 
 ### Placement and scheduling
 
-A `TopologySource` can select an inventory path and hierarchy. Without a source, GPUStack uses the
-default profile. GPUStack publishes profiles and Kueue `Topology` resources for placement.
+A `TopologySource` selects a node inventory source and an ordered label hierarchy (without one,
+managed queues use a hostname-only default profile). The worker publishes Kueue `Topology` resources
+and binds them to `ResourceFlavor`s and `ClusterQueue`s.
 
 ![Topology discovery and placement flow](/gpustack-operator/main/docs/assets/diagrams/topology-flow.svg)
 
@@ -33,28 +35,36 @@ flowchart TD
 
 ### Topology sources
 
-Choose an inventory path in [Topology Operations](/gpustack-operator/main/docs/modules/topology/operations/index.md#choose-the-inventory-path), then
-configure [Node labels](/gpustack-operator/main/docs/modules/topology/operations/index.md#observe-existing-node-labels), a
-[ConfigMap snapshot](/gpustack-operator/main/docs/modules/topology/operations/index.md#publish-a-configmap-snapshot), or a
-[webhook](/gpustack-operator/main/docs/modules/topology/operations/index.md#publish-by-webhook). [Topology-Aware Scheduling](/gpustack-operator/main/docs/modules/topology/scheduling/index.md) defines the placement contract.
+Choose one inventory source in [Topology inventory sources](/gpustack-operator/main/docs/modules/topology/operations/index.md#topology-inventory-sources), then configure
+[Topograph](/gpustack-operator/main/docs/modules/topology/operations/index.md#topograph-setup), [existing Node labels](/gpustack-operator/main/docs/modules/topology/operations/index.md#existing-node-labels),
+a [ConfigMap snapshot](/gpustack-operator/main/docs/modules/topology/operations/index.md#configmap-snapshot), or a
+[webhook snapshot](/gpustack-operator/main/docs/modules/topology/operations/index.md#webhook-snapshot).
 
 ## Operations
 
-1. **Step 1: Choose a source.** Select the inventory path that matches your cluster.
-2. **Step 2: Configure the source.** Apply the `TopologySource` manifest and any backing snapshot or webhook.
-3. **Step 3: Verify the objects.** Check the source, queue, assignment and `Pod` nodes, then [request a level](/gpustack-operator/main/docs/modules/topology/operations/index.md#request-a-level).
+### Step 1: Select source
 
-Use [Verification](/gpustack-operator/main/docs/modules/topology/operations/index.md#verification) for commands and expected status. Follow the
-[hierarchical placement walkthrough](/gpustack-operator/main/docs/walkthroughs/topology/hierarchical-placement/index.md) for an example.
+Pick the single inventory source that owns hierarchy labels for your `Node`s.
+
+### Step 2: Apply source
+
+Create the `TopologySource` (and any backing `ConfigMap` or HTTPS credentials).
+
+### Step 3: Verify placement
+
+Confirm profile labels, Kueue `Topology` objects, and `ClusterQueue` readiness in
+[Verification](/gpustack-operator/main/docs/modules/topology/operations/index.md#verification), then constrain serving roles in
+[Topology level requests](/gpustack-operator/main/docs/modules/topology/operations/index.md#topology-level-requests) or follow the
+[Hierarchical Placement Walkthrough](/gpustack-operator/main/docs/walkthroughs/topology/hierarchical-placement/index.md).
 
 ## Troubleshooting
 
-For a Pending group, follow [diagnosis](/gpustack-operator/main/docs/modules/topology/operations/index.md#diagnose-pending-workloads). Compare the
-requested domain with the queue, topology and available capacity.
+When replicas remain `Pending`, follow
+[Diagnose Pending workloads](/gpustack-operator/main/docs/modules/topology/operations/index.md#diagnose-pending-workloads) to compare requested topology
+levels, per-domain capacity, and profile alignment.
 
 ---
 
-**See also** — [RDMA Networking](/gpustack-operator/main/docs/modules/rdma/index.md) (network endpoints) ·
-[Model Deployment](/gpustack-operator/main/docs/modules/model-deployment/index.md) (multi-`Pod` inference)
+**See also** — [RDMA Networking](/gpustack-operator/main/docs/modules/rdma/index.md) (NIC endpoints) · [Model Deployment](/gpustack-operator/main/docs/modules/model-deployment/index.md) (multi-`Pod` serving roles)
 
-**Next** → [Topology-Aware Scheduling Operations](/gpustack-operator/main/docs/modules/topology/operations/index.md) — publish and verify a topology.
+**Next** → [Topology-Aware Scheduling Operations](/gpustack-operator/main/docs/modules/topology/operations/index.md) — publish domain hierarchies and diagnose TAS placement.

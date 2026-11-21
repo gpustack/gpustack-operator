@@ -2,21 +2,11 @@
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"
   xmlns:xhtml="http://www.w3.org/1999/xhtml">
   <url>
-    <loc>https://docs.gpustack.ai/gpustack-operator/main/docs/contribute/development/</loc>
-  </url><url>
-    <loc>https://docs.gpustack.ai/gpustack-operator/main/docs/contribute/internals/</loc>
-  </url><url>
-    <loc>https://docs.gpustack.ai/gpustack-operator/main/docs/contribute/local-cluster-setup/</loc>
-  </url><url>
     <loc>https://docs.gpustack.ai/gpustack-operator/main/docs/getting-started/architecture/</loc>
   </url><url>
     <loc>https://docs.gpustack.ai/gpustack-operator/main/docs/getting-started/vendor-prerequisites/</loc>
   </url><url>
     <loc>https://docs.gpustack.ai/gpustack-operator/main/docs/modules/devices/</loc>
-  </url><url>
-    <loc>https://docs.gpustack.ai/gpustack-operator/main/docs/modules/devices/admission/</loc>
-  </url><url>
-    <loc>https://docs.gpustack.ai/gpustack-operator/main/docs/modules/devices/discovery/</loc>
   </url><url>
     <loc>https://docs.gpustack.ai/gpustack-operator/main/docs/modules/devices/hygon-mig/</loc>
   </url><url>
@@ -26,21 +16,17 @@
   </url><url>
     <loc>https://docs.gpustack.ai/gpustack-operator/main/docs/modules/devices/requests/</loc>
   </url><url>
-    <loc>https://docs.gpustack.ai/gpustack-operator/main/docs/modules/devices/scheduling/</loc>
-  </url><url>
     <loc>https://docs.gpustack.ai/gpustack-operator/main/docs/modules/devices/thead-mig/</loc>
   </url><url>
     <loc>https://docs.gpustack.ai/gpustack-operator/main/docs/modules/instances/</loc>
   </url><url>
-    <loc>https://docs.gpustack.ai/gpustack-operator/main/docs/modules/instances/metrics/</loc>
+    <loc>https://docs.gpustack.ai/gpustack-operator/main/docs/modules/instances/configuration/</loc>
+  </url><url>
+    <loc>https://docs.gpustack.ai/gpustack-operator/main/docs/modules/instances/operations/</loc>
   </url><url>
     <loc>https://docs.gpustack.ai/gpustack-operator/main/docs/modules/kv-cache/</loc>
   </url><url>
     <loc>https://docs.gpustack.ai/gpustack-operator/main/docs/modules/kv-cache/backend/</loc>
-  </url><url>
-    <loc>https://docs.gpustack.ai/gpustack-operator/main/docs/modules/kv-cache/disk-heavy-nodes/</loc>
-  </url><url>
-    <loc>https://docs.gpustack.ai/gpustack-operator/main/docs/modules/kv-cache/injection/</loc>
   </url><url>
     <loc>https://docs.gpustack.ai/gpustack-operator/main/docs/modules/kv-cache/leader/</loc>
   </url><url>
@@ -50,15 +36,7 @@
   </url><url>
     <loc>https://docs.gpustack.ai/gpustack-operator/main/docs/modules/model-delivery/</loc>
   </url><url>
-    <loc>https://docs.gpustack.ai/gpustack-operator/main/docs/modules/model-delivery/artifact-api/</loc>
-  </url><url>
     <loc>https://docs.gpustack.ai/gpustack-operator/main/docs/modules/model-delivery/artifact/</loc>
-  </url><url>
-    <loc>https://docs.gpustack.ai/gpustack-operator/main/docs/modules/model-delivery/image-source/</loc>
-  </url><url>
-    <loc>https://docs.gpustack.ai/gpustack-operator/main/docs/modules/model-delivery/node-store/</loc>
-  </url><url>
-    <loc>https://docs.gpustack.ai/gpustack-operator/main/docs/modules/model-delivery/node-to-node-sync/</loc>
   </url><url>
     <loc>https://docs.gpustack.ai/gpustack-operator/main/docs/modules/model-delivery/operations/</loc>
   </url><url>
@@ -84,10 +62,6 @@
   </url><url>
     <loc>https://docs.gpustack.ai/gpustack-operator/main/docs/modules/model-deployment/external-dp/</loc>
   </url><url>
-    <loc>https://docs.gpustack.ai/gpustack-operator/main/docs/modules/model-deployment/metrics/</loc>
-  </url><url>
-    <loc>https://docs.gpustack.ai/gpustack-operator/main/docs/modules/model-deployment/parameterize/</loc>
-  </url><url>
     <loc>https://docs.gpustack.ai/gpustack-operator/main/docs/modules/model-deployment/prefill-decode-benchmark/</loc>
   </url><url>
     <loc>https://docs.gpustack.ai/gpustack-operator/main/docs/modules/model-deployment/prefill-decode/</loc>
@@ -98,25 +72,15 @@
   </url><url>
     <loc>https://docs.gpustack.ai/gpustack-operator/main/docs/modules/model-deployment/scaling-benchmark/</loc>
   </url><url>
-    <loc>https://docs.gpustack.ai/gpustack-operator/main/docs/modules/model-deployment/scaling-simulation/</loc>
-  </url><url>
     <loc>https://docs.gpustack.ai/gpustack-operator/main/docs/modules/model-deployment/scaling/</loc>
   </url><url>
-    <loc>https://docs.gpustack.ai/gpustack-operator/main/docs/modules/model-deployment/shutdown/</loc>
-  </url><url>
-    <loc>https://docs.gpustack.ai/gpustack-operator/main/docs/modules/model-deployment/status/</loc>
-  </url><url>
     <loc>https://docs.gpustack.ai/gpustack-operator/main/docs/modules/rdma/</loc>
-  </url><url>
-    <loc>https://docs.gpustack.ai/gpustack-operator/main/docs/modules/rdma/network-topology/</loc>
   </url><url>
     <loc>https://docs.gpustack.ai/gpustack-operator/main/docs/modules/rdma/operations/</loc>
   </url><url>
     <loc>https://docs.gpustack.ai/gpustack-operator/main/docs/modules/topology/</loc>
   </url><url>
     <loc>https://docs.gpustack.ai/gpustack-operator/main/docs/modules/topology/operations/</loc>
-  </url><url>
-    <loc>https://docs.gpustack.ai/gpustack-operator/main/docs/modules/topology/scheduling/</loc>
   </url><url>
     <loc>https://docs.gpustack.ai/gpustack-operator/main/docs/operate/high-availability/</loc>
   </url><url>
@@ -129,12 +93,6 @@
     <loc>https://docs.gpustack.ai/gpustack-operator/main/docs/operate/migration/from-v0.5/</loc>
   </url><url>
     <loc>https://docs.gpustack.ai/gpustack-operator/main/docs/operate/migration/troubleshooting/</loc>
-  </url><url>
-    <loc>https://docs.gpustack.ai/gpustack-operator/main/docs/reference/commands/</loc>
-  </url><url>
-    <loc>https://docs.gpustack.ai/gpustack-operator/main/docs/reference/instance-type-unit-resources/</loc>
-  </url><url>
-    <loc>https://docs.gpustack.ai/gpustack-operator/main/docs/reference/settings/</loc>
   </url><url>
     <loc>https://docs.gpustack.ai/gpustack-operator/main/docs/walkthroughs/</loc>
   </url><url>
@@ -164,8 +122,6 @@
   </url><url>
     <loc>https://docs.gpustack.ai/gpustack-operator/main/docs/walkthroughs/topology/hierarchical-placement/</loc>
   </url><url>
-    <loc>https://docs.gpustack.ai/gpustack-operator/main/docs/contribute/</loc>
-  </url><url>
     <loc>https://docs.gpustack.ai/gpustack-operator/main/docs/</loc>
   </url><url>
     <loc>https://docs.gpustack.ai/gpustack-operator/main/docs/getting-started/</loc>
@@ -173,8 +129,6 @@
     <loc>https://docs.gpustack.ai/gpustack-operator/main/</loc>
   </url><url>
     <loc>https://docs.gpustack.ai/gpustack-operator/main/docs/operate/</loc>
-  </url><url>
-    <loc>https://docs.gpustack.ai/gpustack-operator/main/docs/reference/</loc>
   </url><url>
     <loc>https://docs.gpustack.ai/gpustack-operator/main/search/</loc>
   </url><url>

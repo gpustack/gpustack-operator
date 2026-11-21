@@ -1,13 +1,13 @@
 # Model Deployment
 
-A `ModelDeployment` describes the model, engine and roles of a serving workload. Each role can have
-its own replicas and resources.
+A `ModelDeployment` declares the model, engine and serving roles of an inference workload. Each
+role sets its own replicas and accelerator resources.
 
 ## Contents
 
 - [Overview](#overview)
-- [Deployment configuration](#deployment-configuration)
-- [Service operations](#service-operations)
+- [Configuration](#configuration)
+- [Operations](#operations)
 - [Troubleshooting](#troubleshooting)
 
 ## Overview
@@ -25,54 +25,40 @@ flowchart TD
     ROUTER -> PODS
 -->
 
-## Deployment configuration
+## Configuration
 
-[Model Deployment Configuration](/gpustack-operator/main/docs/modules/model-deployment/configuration/index.md) starts with a minimal manifest and explains
-the role contract. [Parameters](/gpustack-operator/main/docs/modules/model-deployment/parameterize/index.md) catalogs generated parameters
-and overrides.
+- [Model Deployment Configuration](/gpustack-operator/main/docs/modules/model-deployment/configuration/index.md) defines the base manifest, role fields,
+  override tiers and operator-owned keys.
+- [Engine Compatibility](/gpustack-operator/main/docs/modules/model-deployment/engine-versions/index.md) lists minimum engine releases, Mooncake versions,
+  supported transports and known limits.
+- [Prefill and Decode](/gpustack-operator/main/docs/modules/model-deployment/prefill-decode/index.md) pairs split *prefill/decode (PD)* roles;
+  [Prefill and Decode Benchmark](/gpustack-operator/main/docs/modules/model-deployment/prefill-decode-benchmark/index.md) compares *PD* against an equal-GPU
+  aggregated group.
+- [Encode, Prefill and Decode](/gpustack-operator/main/docs/modules/model-deployment/encode-prefill-decode/index.md) adds multimodal disaggregation;
+  [Encode, Prefill and Decode Benchmark](/gpustack-operator/main/docs/modules/model-deployment/encode-prefill-decode-benchmark/index.md) compares
+  *encode/prefill/decode (EPD)* against *PD* and aggregated serving.
+- Follow [Prefill and Decode Walkthrough](/gpustack-operator/main/docs/walkthroughs/model-deployment/prefill-decode/index.md),
+  [Encode, Prefill and Decode Walkthrough](/gpustack-operator/main/docs/walkthroughs/model-deployment/encode-prefill-decode/index.md)
+  and [Multi-Host Serving Walkthrough](/gpustack-operator/main/docs/walkthroughs/model-deployment/multi-host/index.md) for
+  step-by-step runs.
 
-[Prefill and Decode](/gpustack-operator/main/docs/modules/model-deployment/prefill-decode/index.md) covers split roles, and
-[Encode, Prefill and Decode](/gpustack-operator/main/docs/modules/model-deployment/encode-prefill-decode/index.md) covers multimodal disaggregation.
-[Engine Compatibility](/gpustack-operator/main/docs/modules/model-deployment/engine-versions/index.md) lists minimum releases, client and store requirements,
-transport support and known failures.
+## Operations
 
-[Encode, Prefill and Decode Benchmark](/gpustack-operator/main/docs/modules/model-deployment/encode-prefill-decode-benchmark/index.md) measures that
-disaggregation against an aggregated instance.
-[Prefill and Decode Benchmark](/gpustack-operator/main/docs/modules/model-deployment/prefill-decode-benchmark/index.md) measures a text-only
-*prefill/decode* pair against an aggregated group on equal GPUs.
-
-Follow [Prefill and Decode Walkthrough](/gpustack-operator/main/docs/walkthroughs/model-deployment/prefill-decode/index.md) for
-disaggregated serving, [Encode, Prefill and Decode Walkthrough](/gpustack-operator/main/docs/walkthroughs/model-deployment/encode-prefill-decode/index.md) for
-multimodal disaggregation, and [Multi-Host Serving Walkthrough](/gpustack-operator/main/docs/walkthroughs/model-deployment/multi-host/index.md)
-for distributed multi-node serving.
-
-## Service operations
-
-[Online Runtime Control](/gpustack-operator/main/docs/modules/model-deployment/runtime-control/index.md), [Status](/gpustack-operator/main/docs/modules/model-deployment/status/index.md), [Metrics](/gpustack-operator/main/docs/modules/model-deployment/metrics/index.md) and
-[Routing](/gpustack-operator/main/docs/modules/model-deployment/routing/index.md) explain live parameter tuning, what the running service reports, and how requests
-are directed.
-
-[Scaling](/gpustack-operator/main/docs/modules/model-deployment/scaling/index.md) plans the replica count of a deployment from the signals it publishes, and
-[Shutdown](/gpustack-operator/main/docs/modules/model-deployment/shutdown/index.md) explains the retirement protocol a scale-down runs.
-The [Scaling Walkthrough](/gpustack-operator/main/docs/walkthroughs/model-deployment/scaling/index.md) configures observation and
-active scaling. The [Scaling Benchmark](/gpustack-operator/main/docs/modules/model-deployment/scaling-benchmark/index.md) records H100 and H200 measurements
-and the limits observed during scale-out and retirement.
-
-[Elastic EP](/gpustack-operator/main/docs/modules/model-deployment/elastic-ep/index.md) keeps one serving instance and changes its collective while it runs.
-[Elastic EP Walkthrough](/gpustack-operator/main/docs/walkthroughs/model-deployment/elastic-ep/index.md) follows prefetch, startup with
-*tensor parallelism (TP)* = 2 and *data parallelism (DP)* = 2, and *DP* width 2 → 4 expansion.
-It includes captured resource output and completed inference requests.
-
-[Elastic EP Benchmark](/gpustack-operator/main/docs/modules/model-deployment/elastic-ep-benchmark/index.md) measures the same width change under a live request
-stream.
-
-[External DP](/gpustack-operator/main/docs/modules/model-deployment/external-dp/index.md) runs one fixed *DP* group with an HTTP endpoint on every rank and
-Router-balanced traffic across all of them.
-The [External DP Walkthrough](/gpustack-operator/main/docs/walkthroughs/model-deployment/external-dp/index.md) runs a fixed group
-with one HTTP endpoint per rank and checks managed Router coverage.
-
-[External DP Benchmark](/gpustack-operator/main/docs/modules/model-deployment/external-dp-benchmark/index.md) compares that group with a
-monolithic wide tensor-parallel group on the same GPUs.
+- [Online Runtime Control](/gpustack-operator/main/docs/modules/model-deployment/runtime-control/index.md) covers live parameter tuning, role pause and
+  retirement windows.
+- [Model Deployment Routing](/gpustack-operator/main/docs/modules/model-deployment/routing/index.md) covers endpoint eligibility, router defaults and
+  per-worker metrics.
+- [Model Deployment Scaling](/gpustack-operator/main/docs/modules/model-deployment/scaling/index.md) plans replica counts from engine metrics and coordinates
+  graceful retirement. Pair it with
+  [Scaling Walkthrough](/gpustack-operator/main/docs/walkthroughs/model-deployment/scaling/index.md) and
+  [Scaling Benchmark](/gpustack-operator/main/docs/modules/model-deployment/scaling-benchmark/index.md).
+- [Elastic EP](/gpustack-operator/main/docs/modules/model-deployment/elastic-ep/index.md) grows one running collective in place. Pair it with
+  [Elastic EP Walkthrough](/gpustack-operator/main/docs/walkthroughs/model-deployment/elastic-ep/index.md) (*tensor parallelism
+  (TP)* = 2, *data parallelism (DP)* width 2 → 4) and
+  [Elastic EP Benchmark](/gpustack-operator/main/docs/modules/model-deployment/elastic-ep-benchmark/index.md).
+- [External DP](/gpustack-operator/main/docs/modules/model-deployment/external-dp/index.md) exposes one HTTP endpoint per rank behind a managed router. Pair it
+  with [External DP Walkthrough](/gpustack-operator/main/docs/walkthroughs/model-deployment/external-dp/index.md) and
+  [External DP Benchmark](/gpustack-operator/main/docs/modules/model-deployment/external-dp-benchmark/index.md).
 
 ## Troubleshooting
 
@@ -82,7 +68,10 @@ If a deployment does not become ready, inspect its phase, conditions and role st
 kubectl -n <namespace> get modeldeployment <name> -o yaml
 ```
 
-Compare the result with [Model Deployment Status](/gpustack-operator/main/docs/modules/model-deployment/status/index.md). For scaling problems, see the
+Match *`status.phase`*, conditions and role status against
+[Readiness and status](/gpustack-operator/main/docs/modules/model-deployment/configuration/index.md#readiness-and-status) and
+[Model Deployment Routing](/gpustack-operator/main/docs/modules/model-deployment/routing/index.md#troubleshooting). For scaling holds, inspect the
+`ModelDeploymentScaler` using
 [Scaling Walkthrough](/gpustack-operator/main/docs/walkthroughs/model-deployment/scaling/index.md#troubleshooting).
 
 ---

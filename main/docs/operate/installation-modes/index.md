@@ -1,23 +1,24 @@
 # Installation Modes
 
-The operator installs its dependencies in chart or image mode. Chart mode renders them as subcharts in one Helm
-release; image mode has the worker install them at runtime. Choose one mode per cluster; both read
-the operator chart's `values.yaml`.
+GPUStack Operator installs its dependencies in chart mode or image mode. Chart mode renders bundled
+subcharts inside one Helm release; image mode lets an external worker install its packaged chart at
+runtime. Choose one mode per cluster.
 
 ## Contents
 
 - [Prerequisites](#prerequisites)
 - [Chart and image modes](#chart-and-image-modes)
-- [Modes are exclusive](#modes-are-exclusive)
+- [Installation ownership conflicts](#installation-ownership-conflicts)
 - [Configuration](#configuration)
-- [Deployed and applied resources](#deployed-and-applied-resources)
+- [Settings and precedence](#settings-and-precedence)
+- [Worker-managed resources](#worker-managed-resources)
 
 ## Prerequisites
 
 The Helm chart accepts Kubernetes 1.23 and newer. Use Kubernetes 1.29 or newer for the Kueue
-scheduling chain and node model delivery. Simple allocation on 1.23–1.28 is untested.
-[Image-based model delivery](/gpustack-operator/main/docs/modules/model-delivery/image-source/index.md#prerequisites) has a higher
-version requirement for Kubernetes and the container runtime.
+scheduling chain and node model delivery; simple allocation on 1.23–1.28 is untested.
+[Model Image Source](/gpustack-operator/main/docs/modules/model-delivery/artifact/index.md#image-prerequisites) requires newer
+Kubernetes and container-runtime versions.
 
 ## Chart and image modes
 
@@ -32,111 +33,121 @@ flowchart TD
     IMAGE -> COMMON
 -->
 
-
-Kueue, NFD, Topograph and the two CSI drivers are vendored subcharts of the operator chart
-(`deploy/gpustack-operator/chart/charts/`), each behind an `enabled` switch. Their one configuration
-surface is the chart's `values.yaml`, reachable through:
+Kueue, NFD, Topograph, and the NFS and S3 CSI drivers ship under `deploy/gpustack-operator/chart/charts/`
+behind per-subchart `enabled` switches:
 
 | Mode | Installation |
-| --- | --- |
-| **Chart mode** | **Default.** Helm renders the worker, Device Manager `DaemonSet`s and four subcharts in one release. The worker starts with `--disable-applications=*` (`worker.disableApplications`, default `["*"]`) and installs nothing at runtime. |
-| Image mode | No Helm release deploys the worker. It runs from a checkout or outside the cluster and installs the chart packaged in its own image (`${GPUSTACK_CONF_DIR:-/etc/gpustack}/charts/gpustack-operator-<version>.tgz`) as release `gpustack-operator-device-manager`. |
+|---|---|
+| **Chart mode** | **Default.** Helm renders the worker, Device Manager `DaemonSet`s, and enabled subcharts in one release. The worker runs with `--disable-applications=*` (`worker.disableApplications`, default `["*"]`) and installs no Helm release at runtime. |
+| Image mode | No Helm release deploys the worker. An external worker installs `${GPUSTACK_CONF_DIR:-/etc/gpustack}/charts/gpustack-operator-<version>.tgz` as release `gpustack-operator-device-manager`[^1]. |
 
-In image mode, the overlay is the whole values surface, so an override like
-`kueue.controllerManager.replicas` cannot be expressed. The overlay comes from the worker's flags
-and settings: `worker.enabled=false`, `fullnameOverride: gpustack-operator`, one `enabled` per
-component, and the manufacturer map.
+[^1]: Image mode retains the historical `gpustack-operator-device-manager` release name so existing image-mode clusters upgrade in place.
 
-> **Why that release name** — earlier versions gave it to the release that deployed only the Device Manager; keeping it
-> spares existing clusters a release migration.
+In image mode, the worker generates its values overlay (`worker.enabled=false`,
+`fullnameOverride: gpustack-operator`, component switches, and manufacturer map) from flags and
+settings, so subchart fields such as `kueue.controllerManager.replicas` cannot be customized there.
 
-`--disable-applications` accepts `*` plus `kueue`, `node-feature-discovery`, `csi-driver-nfs`,
-`csi-driver-s3`, `device-manager`, `model-manager`, `model-transfer`, validated at flag-parse against `pkg/worker/kuberess`'s map, which
-also renders the overlay's switches.
+`--disable-applications` accepts `*`, `kueue`, `node-feature-discovery`, `csi-driver-nfs`,
+`csi-driver-s3`, `device-manager`, `model-manager`, and `model-transfer`.
 
-`gpustack-cpu-info` is in neither set: that `NodeFeatureRule` has **no `enabled` switch**, since the chain
-starts at it. Every mode needs it, including `node-feature-discovery.enabled=false`, the supported way
-to run against the cluster's own NFD. That is why the worker applies it rather than the chart (see
-[below](#deployed-and-applied-resources)).
+Two components sit outside `--disable-applications`:
 
-Topograph is also absent from the image-mode application map. It is an optional provider stack,
-defaults off, and requires provider credentials and security choices that an image-mode overlay must
-not invent. The default chart renders no Topograph object and pulls no Topograph image.
+- **`gpustack-cpu-info`**: the worker always applies this `NodeFeatureRule`, including when
+  `node-feature-discovery.enabled=false` hands feature discovery to an existing NFD installation.
+- **Topograph**: disabled by default and configurable only in chart mode because it requires provider
+  credentials and trust settings. `TopologySource` snapshots and hostname fallback work without it
+  ([Topology-Aware Scheduling Operations](/gpustack-operator/main/docs/modules/topology/operations/index.md#topology-inventory-sources)).
 
-Enable Topograph through a chart-mode release. Generic `TopologySource` discovery and the hostname-only
-fallback remain available without it. See [Topology-Aware Scheduling
-Operations](../modules/topology/operations.md#choose-the-inventory-path).
+## Installation ownership conflicts
 
-## Modes are exclusive
+Both modes render the same chart under `fullnameOverride: gpustack-operator`. Enabling a component in
+both modes creates identically named objects, and Helm rejects adoption with
+`invalid ownership metadata`, blocking worker startup.
 
-Both installs render the same chart under the same `fullnameOverride`, so a component enabled on both
-sides produces identically named objects, and Helm refuses to import an object another release owns. The
-worker's install fails on the first one and it never starts: startup is gated on that install.
-
-> **Why** — measured: `ServiceAccount "csi-nfs-controller-sa" ... invalid ownership metadata`; Helm
-> names whichever shared object it maps first.
-
-Splitting components across the sides does not work either. The switches are independent, so it means
-disabling a component here and in `worker.disableApplications` in step, at every upgrade, with nothing
-checking it. Wherever this chart deploys the worker, `worker.disableApplications` keeps the `*`; image
-mode is for clusters where no chart deploys it.
+Do not split components across chart mode and image mode either; keeping `enabled` flags and
+`worker.disableApplications` synchronized across upgrades has no safeguard. Keep
+`worker.disableApplications: ["*"]` whenever Helm deploys the worker.
 
 ## Configuration
 
-These switches change what a mode installs:
+Use these chart switches to scope what chart mode deploys:
 
-- `deviceManager.enabled=false` — the chart renders no Device Manager `DaemonSet`s, nothing more. It
-  does **not** hand that install to the worker: with the wildcard the worker installs nothing, so the
-  cluster has no Device Managers (useful for control-plane-only). Before chart mode covered them, this
-  switch was how the worker came to install them.
-- `modelManager.enabled=false` — no Model Manager `DaemonSet` and no `CSIDriver`, and the worker
-  then seeds no `Node` delivery; see [Model Store Operations](/gpustack-operator/main/docs/modules/model-delivery/operations/index.md#prerequisites).
-- `modelTransfer.enabled=false` — no remote weight delivery source `DaemonSet`s, `Service`s, RBAC or
-  TLS `Secret`s, the Model Manager omits the source ledger mount and CSI token request, and the chart
-  declares `GPUSTACK_MODEL_ARTIFACT_REMOTE_DELIVERY_POLICY=Disabled` on the worker; see
-  [Remote Weight Delivery](/gpustack-operator/main/docs/modules/model-delivery/remote/index.md#configuration).
-- `worker.enabled=false` — the chart deploys only the applications, what image mode's overlay sets.
+- **`deviceManager.enabled=false`**: omits Device Manager `DaemonSet`s (for control-plane-only
+  installs). With `worker.disableApplications: ["*"]`, the worker does not install them at runtime.
+- **`modelManager.enabled=false`**: omits the Model Manager `DaemonSet`, `CSIDriver`, and `Node`
+  delivery defaults ([Model Store Operations](/gpustack-operator/main/docs/modules/model-delivery/operations/index.md#prerequisites)).
+- **`modelTransfer.enabled=false`**: omits remote-delivery `DaemonSet`s, `Service`s, RBAC, TLS
+  `Secret`s, and source-ledger mounts, and sets
+  `GPUSTACK_MODEL_ARTIFACT_REMOTE_DELIVERY_POLICY=Disabled` on the worker
+  ([Remote Weight Delivery](/gpustack-operator/main/docs/modules/model-delivery/remote/index.md#configuration)).
+- **`worker.enabled=false`**: deploys only node and subchart components (used by image mode's runtime
+  overlay).
 
-## Deployed and applied resources
+## Settings and precedence
 
-A chart cannot own a custom resource whose CRD it does not ship. Helm REST-maps the *entire*
-manifest before creating anything, so an unserved kind fails the whole install rather than degrading.
-The worker applies these resources after their CRDs become available:
+Runtime `Setting` objects (`gpustack.ai/v1`, short name `set`, backed by `Secret/gpustack-settings` in
+`gpustack-system`) can be patched live with
+`kubectl -n gpustack-system patch setting <name> --type merge -p '{"spec":{"value":"..."}}'`. On every
+worker start, restart, or upgrade, the worker reconciles each `Setting` in four ordered rules:
 
-- the `gpustack-node-devices` and `gpustack-model-deployment-joint` `AdmissionCheck`s. Their CRD belongs
-  to Kueue, which templates its CRDs, so nothing can order it ahead of a custom resource in the same
-  render;
-- the `gpustack-cpu-info` `NodeFeatureRule`, whose CRD belongs to NFD. The rule is required even
-  when `node-feature-discovery.enabled=false`; that install ships no NFD CRD, so a chart-owned rule
-  fails outright: `resource mapping not found ... no matches for kind "NodeFeatureRule"`.
+| Rule | Precedence | Behavior |
+|---|---|---|
+| 1. `Backfill` | Missing key only | Seeds an absent `Setting` from `GPUSTACK_<UPPER_SNAKE_NAME>` if set, else the built-in default. |
+| 2. `env-declared` | Wins on every start | Any non-blank `GPUSTACK_*` variable on the worker `Deployment` (from `global.imageRegistry`, `global.imagePullPolicy`, `modelManager.enabled`, `modelTransfer.enabled`, or `worker.env`) overwrites the stored `Setting`. |
+| 3. `default-tracked` | Wins if unclaimed by env | If `settings-default-tracking` lists the `Setting` (built-in image `Setting`s are tracked by default), the built-in default overwrites the stored value on start. |
+| 4. Administrator-owned | Preserved | Every other `Setting` keeps its stored value across restarts and upgrades. |
 
-Both `AdmissionCheck`s are created in chart mode and image mode, including when applications are
-disabled. You do not create them manually. The worker installs them at startup; their controllers
-mark them `Active` before queues reference them.
+### Reverted setting after restart
+
+If a patched `Setting` reverts after a worker restart or upgrade, inspect which startup rule overwrote
+it:
+
+```bash
+# 1. Read worker startup override logs (prints rule="env-declared" or rule="default-tracked" and envName):
+kubectl -n gpustack-system logs deploy/gpustack-operator-worker | grep 'setting overridden on start'
+
+# 2. Inspect non-blank GPUSTACK_* variables on the worker Deployment:
+kubectl -n gpustack-system get deploy gpustack-operator-worker -o yaml | grep -A1 'GPUSTACK_'
+
+# 3. Inspect settings-default-tracking:
+kubectl -n gpustack-system get setting settings-default-tracking -o yaml
+```
+
+- **`rule="env-declared"`**: update or clear the owning Helm value (an empty string `""` releases env
+  ownership) or `worker.env` entry, then run `helm upgrade`.
+- **`rule="default-tracked"`**: remove that `Setting` name from `settings-default-tracking` with
+  `kubectl -n gpustack-system patch setting settings-default-tracking --type merge -p '{"spec":{"value":"<remaining-comma-separated-names>"}}'`,
+  then re-apply your `Setting` value.
+
+## Worker-managed resources
+
+Helm validates REST mappings for the entire render before creating objects, so a chart cannot render a
+custom resource whose CRD is templated in the same install or supplied externally. Instead, the worker
+applies these objects after their CRDs become established:
+
+- **`gpustack-node-devices` and `gpustack-model-deployment-joint` `AdmissionCheck`s**: created in
+  both modes once Kueue's templated CRDs exist, and marked `Active` before queues reference them.
+- **`gpustack-cpu-info` `NodeFeatureRule`**: applied once NFD's CRD exists, including when
+  `node-feature-discovery.enabled=false` omits bundled NFD CRDs.
 
 | `AdmissionCheck` | Purpose | Referencing queues |
-| --- | --- | --- |
-| `gpustack-node-devices` | Checks whether individual accelerators can satisfy a request | Accelerated queues while `instance-type-derived-from-node` is enabled |
-| `gpustack-model-deployment-joint` | Coordinates admission across a `ModelDeployment`'s roles | Every operator-managed queue, including CPU queues and queues for administrator-authored `InstanceType`s |
+|---|---|---|
+| `gpustack-node-devices` | Verifies per-accelerator fit before placement | Accelerated queues while `instance-type-derived-from-node` is `true` |
+| `gpustack-model-deployment-joint` | Holds multi-role `ModelDeployment` replicas for atomic gang admission | Every operator-managed queue, including CPU and custom `InstanceType` queues |
 
-The joint check immediately passes workloads outside a multi-role `ModelDeployment`, including
-single-role deployments. The table above describes when each queue references a check.
+`gpustack-model-deployment-joint` passes single-role deployments and standalone workloads immediately.
 
-The chart deploys workloads and configuration; the worker applies the custom resources whose CRDs
-the chart cannot order. The worker's own CRDs, aggregated `APIService`s and webhook configurations
-are also installed by the worker. `helm template` therefore does not show them. Repeated startup
-updates their desired configuration and preserves controller-owned status.
-
-No release owns them either, so `helm uninstall` leaves them behind. Both `AdmissionCheck`s go with
-Kueue's CRDs; `files/cleanup.sh` deletes the `NodeFeatureRule`, but only while it carries the
-`app.kubernetes.io/part-of: gpustack-operator` label the worker puts on it.
+The worker also installs and updates its own CRDs, aggregated `APIService`s, and webhook
+configurations at startup while preserving `status`, so `helm template` omits them and
+`helm uninstall` leaves them behind. Kueue's `AdmissionCheck`s are removed with Kueue's CRDs, and
+`deploy/gpustack-operator/chart/files/cleanup.sh` deletes `gpustack-cpu-info` while it retains
+`app.kubernetes.io/part-of: gpustack-operator`.
 
 ---
 
-**See also** — [Migrating to Bundled Subcharts](/gpustack-operator/main/docs/operate/migration/bundled-subcharts/index.md) (the ownership
-transfer out of the pre-subchart layout) · [High Availability Operations](/gpustack-operator/main/docs/operate/high-availability/index.md) (more
-than one replica per control-plane component) · [Topology-Aware Scheduling
-Operations](../modules/topology/operations.md) (Topograph and generic inventory) ·
-[Development](/gpustack-operator/main/docs/contribute/development/index.md#vendored--patched-dependencies)
+**See also** — [Migrating to Bundled Subcharts](/gpustack-operator/main/docs/operate/migration/bundled-subcharts/index.md) (transferring ownership
+from legacy runtime releases) · [High Availability Operations](/gpustack-operator/main/docs/operate/high-availability/index.md) (multi-replica
+control-plane configuration) · [Topology-Aware Scheduling Operations](/gpustack-operator/main/docs/modules/topology/operations/index.md)
+(Topograph and generic topology sources)
 
-**Next** → [Internals](/gpustack-operator/main/docs/contribute/internals/index.md) — startup ordering and the invariants a contributor must keep.
+**Next** → [High Availability Operations](/gpustack-operator/main/docs/operate/high-availability/index.md) — configure control-plane replicas and disruption budgets.

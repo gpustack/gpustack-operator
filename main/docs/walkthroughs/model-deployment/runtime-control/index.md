@@ -1,32 +1,32 @@
 # Online Runtime Control Walkthrough
 
-Tune live vLLM and SGLang serving parameters, pause individual roles, and resize Elastic EP on NVIDIA H200 GPUs without restarting worker `Pod`s.
+Tune live vLLM and SGLang serving parameters, pause and resume roles safely beside an active scaler,
+and verify restart replay and Elastic EP expansion without restarting worker `Pod`s.
 
 ## Contents
 
 - [Summary](#summary)
-- [Environment](#environment)
-- [Step 1: Deploy routed vLLM](#step-1-deploy-routed-vllm)
-- [Step 2: Tune and reset vLLM](#step-2-tune-and-reset-vllm)
-- [Step 3: Pause with a scaler](#step-3-pause-with-a-scaler)
-- [Step 4: Tune SGLang parameters](#step-4-tune-sglang-parameters)
-- [Step 5: Verify restart and resize](#step-5-verify-restart-and-resize)
+- [vLLM runtime changes](#vllm-runtime-changes)
+- [SGLang runtime changes](#sglang-runtime-changes)
+- [Verification](#verification)
 - [Limitations](#limitations)
+- [Troubleshooting](#troubleshooting)
 
 ## Summary
 
-`ModelDeployment` injects `gpustack-engine-sentinel` into managed accelerated non-*Encode* roles through a read-only `PYTHONPATH` mount.
-There are no operator-managed API keys or per-deployment auth `Secret`s; managed routers enforce a shared Envoy inference allowlist on port `8000` and expose `/observer/endpoints` internally.
+`ModelDeployment` mounts `gpustack-engine-sentinel` read-only via `PYTHONPATH` on managed accelerated
+non-*Encode* roles without API-key `Secret`s. Managed routers enforce an Envoy inference allowlist on
+port `8000` and serve `/observer/endpoints` on pod-internal port `9091`:
 
-| Capability | Engine and router | H200 outcome |
+| Capability | Engine and router | Verified behavior |
 |---|---|---|
-| Envoy allowlist and router hash decoupling | `vLLM 0.32.0` + `vllm-router`, `SGLang 0.5.22` + `sglang-gateway` | `200` on `/v1/chat/completions`, `403` on control routes; `requestTimeoutSeconds` rolled router only (worker UID unchanged) |
-| Live parameter tuning and auto-reset | `vLLM 0.32.0`, `SGLang 0.5.22` (including NGRAM speculative) | Applied live via `/gpustack/v1/runtime_config`; key removal restored `boot_defaults` with zero `Pod` restart |
-| Version-gated unsupported parameters | `vLLM 0.32.0`, `SGLang 0.5.22` | Reported `UnsupportedEngineVersion` with `unsupportedFields`; removal recovered `Synced` without restart |
-| Role pause and `ModelDeploymentScaler` guard | `vLLM 0.32.0` + Active scaler, `SGLang 0.5.22`, `1P+1D` `llm-d-router` | `/live=200`, `/ready=503`, direct inference `503`, scaler `Blocked=True (RolePaused)`; resume restored `200` |
-| Same-UID restart latch and Elastic EP resize | `vLLM 0.32.0` (`Qwen3-8B`, `DeepSeek-V2-Lite-Chat`) | Container restart rotated `boot_id` and replayed digest; Elastic EP grew `2 -> 3` while keeping master UID |
+| Envoy allowlist and router hash decoupling | `vLLM 0.32.0` + `vllm-router`, `SGLang 0.5.22` + `sglang-gateway` | `200` on `/v1/chat/completions`, `403` on control routes; editing *`requestTimeoutSeconds`* rolls only the router |
+| Live parameter tuning and auto-reset | `vLLM 0.32.0`, `SGLang 0.5.22` (including NGRAM speculative) | Applies live via `/gpustack/v1/runtime_config`; removing keys restores `boot_defaults` with zero `Pod` restarts |
+| Version-gated unsupported parameters | `vLLM 0.32.0`, `SGLang 0.5.22` | Reports `UnsupportedEngineVersion` (`unsupportedFields`); removing keys recovers `Synced` |
+| Role pause and scaler guard | `vLLM 0.32.0` + `Active` scaler, `SGLang 0.5.22`, `1P+1D` `llm-d-router` | `/live=200`, `/ready=503`, direct inference `503`, scaler `Blocked=True (RolePaused)`; resume restores `200` |
+| Same-UID restart latch and Elastic EP resize | `vLLM 0.32.0` (`Qwen3-8B`, `DeepSeek-V2-Lite-Chat`) | Container restart rotates `boot_id` and replays parameters before readiness; Elastic EP grows `2 → 3` keeping master `Pod` UID |
 
-## Environment
+### Environment
 
 | Item | Value |
 |---|---|
@@ -36,8 +36,9 @@ There are no operator-managed API keys or per-deployment auth `Secret`s; managed
 | Models | `Qwen/Qwen3-8B` (`ModelArtifact` `qwen3-8b`), `deepseek-ai/DeepSeek-V2-Lite-Chat` (`deepseek-v2-lite-chat`) |
 | Routers | `vllm-router`, `sglang-gateway`, `llm-d-router` (`gpustack/llm-router:v0.5.0`) |
 
-Enable [node model delivery](/gpustack-operator/main/docs/modules/model-delivery/operations/index.md) and complete [model prefetch](/gpustack-operator/main/docs/walkthroughs/model-delivery/prefetch/index.md) for `qwen3-8b` and `deepseek-v2-lite-chat` before running these steps.
-Confirm the cluster profile before deploying:
+Enable [node model delivery](/gpustack-operator/main/docs/modules/model-delivery/operations/index.md) and complete
+[Model Prefetch](/gpustack-operator/main/docs/walkthroughs/model-delivery/prefetch/index.md) for `qwen3-8b` and `deepseek-v2-lite-chat`, then check
+cluster capacity:
 
 ```bash
 kubectl get nodes
@@ -45,7 +46,7 @@ kubectl get acceleratortypes
 kubectl get nodemodelstores
 ```
 
-Captured cluster snapshot:
+Captured output:
 
 ```text
 NAME                                 STATUS   ROLES    AGE    VERSION
@@ -58,9 +59,11 @@ NAME                                ENTRANCE                          ACCELERATO
 gpustack--nvidia-h200-linux-amd64   gpustack-fnv64-1bdcbb48b860c5ed   1/3 1/30 100/300 0/0       Active
 ```
 
-## Step 1: Deploy routed vLLM
+## vLLM runtime changes
 
-Save the manifest as `vllm-runtime-control.yaml` and apply it:
+### Step 1: Deploy routed vLLM
+
+Save `vllm-runtime-control.yaml` and wait for `qwen-vllm-rc` to reach `Ready`:
 
 ```yaml
 apiVersion: worker.gpustack.ai/v1
@@ -99,24 +102,31 @@ kubectl apply -f vllm-runtime-control.yaml
 kubectl -n default wait --for=jsonpath='{.status.phase}'=Ready modeldeployment/qwen-vllm-rc --timeout=600s
 ```
 
-Verify the default sentinel injection, zero runtime-control `Secret`s, and Envoy allowlist:
+Record the initial worker `Pod` UID, patch *`spec.router.requestTimeoutSeconds`* to `90`, and verify
+router hash decoupling:
 
 ```bash
-kubectl -n default get secrets | grep runtime-control || echo "zero runtime-control secrets"
-kubectl -n default get pod -l app.kubernetes.io/instance=qwen-vllm-rc,app.kubernetes.io/component=server \
-  -o jsonpath='{.items[0].metadata.uid}{"\n"}'
+BEFORE_UID=$(kubectl -n default get pod -l app.kubernetes.io/instance=qwen-vllm-rc,app.kubernetes.io/component=server \
+  -o jsonpath='{.items[0].metadata.uid}')
+kubectl -n default patch modeldeployment qwen-vllm-rc --type=merge \
+  -p '{"spec":{"router":{"requestTimeoutSeconds":90}}}'
+AFTER_UID=$(kubectl -n default get pod -l app.kubernetes.io/instance=qwen-vllm-rc,app.kubernetes.io/component=server \
+  -o jsonpath='{.items[0].metadata.uid}')
+test "$BEFORE_UID" = "$AFTER_UID" && echo "worker UID unchanged"
 ```
 
-On the live H200 run (`c134-13614-vllm`, worker UID `88e10b33-0b25-4541-8f37-38066677f982`):
+Expected behavior:
 
-- `POST http://<router-service>:8000/v1/chat/completions` returned `200`.
-- `GET`/`POST` to `/gpustack/v1/ready`, `/gpustack/v1/runtime_config`, `/gpustack/v1/pause`, `/scale_elastic_ep`, and `/observer/endpoints` on port `8000` all returned `403`.
-- Pod-internal `GET http://<router-pod-ip>:9091/observer/endpoints` returned `200`.
-- Patching *`spec.router.requestTimeoutSeconds`* from `60` to `90` rolled only the router `Deployment`, leaving worker UID `88e10b33-0b25-4541-8f37-38066677f982` unchanged with `restartCount: 0`.
+- Zero runtime-control `Secret`s are created in `default`.
+- Router port `:8000` returns `200` on `POST /v1/chat/completions` and `403` on `/gpustack/v1/ready`,
+  `/gpustack/v1/runtime_config`, `/gpustack/v1/pause`, `/scale_elastic_ep`, and `/observer/endpoints`,
+  while pod-internal `:9091/observer/endpoints` returns `200`.
+- Updating *`requestTimeoutSeconds`* from `60` to `90` rolls only the router `Deployment`, keeping
+  the worker `Pod` UID identical with `restartCount: 0`.
 
-## Step 2: Tune and reset vLLM
+### Step 2: Tune and reset vLLM
 
-Patch *`spec.roles[0].runtimeControl.parameters`* to lower the active request ceiling, batched tokens, and long-prefill threshold:
+Patch *`spec.roles[0].runtimeControl.parameters`* live and inspect `RuntimeControlSynced`:
 
 ```bash
 kubectl -n default patch modeldeployment qwen-vllm-rc --type=json -p '[
@@ -130,16 +140,23 @@ kubectl -n default get modeldeployment qwen-vllm-rc \
   -o jsonpath='{.status.conditions[?(@.type=="RuntimeControlSynced")]}{"\n"}{.status.roles[0].runtimeControl}{"\n"}'
 ```
 
-Observed behavior on `vLLM 0.32.0`:
+Expected convergence, parameter reset, and version-gating behavior:
 
-- `RuntimeControlSynced` converged to `True` (`Reason: Synced`) with `appliedConfigDigest: sha256:9f5cad1b...` and zero worker restart.
-- Removing `scheduling.longPrefillTokenThreshold` restored only that field to its `boot_defaults` value while preserving `maxActiveRequests=24` and `maxBatchedTokens=4096` (`appliedConfigDigest: sha256:e5b20f38...`).
-- Adding `scheduling.cacheAwareWindow` and `scheduling.cacheAwareThreshold` (absent from `vllm0.32.0`) reported `RuntimeControlSynced=False` (`Reason: UnsupportedEngineVersion`, `unsupportedFields: [scheduling.cacheAwareThreshold, scheduling.cacheAwareWindow]`) without restarting the `Pod`. Removing those keys recovered `True` (`Reason: Synced`) with the same worker UID.
-- On a `1P+1D` `vLLM 0.32.0` deployment (`llm-d-router`), setting `scheduling.maxInflightKVLoads` and `scheduling.maxAsyncKVLoadsPerStep` on `decode` similarly reported `UnsupportedEngineVersion` and recovered cleanly on removal.
+- `RuntimeControlSynced` converges to `True` (`Reason: Synced`) with a non-empty *`appliedConfigDigest`*
+  and zero worker restarts.
+- Removing `scheduling.longPrefillTokenThreshold` resets only that parameter to its `boot_defaults`
+  value while keeping `maxActiveRequests=24` and `maxBatchedTokens=4096` active under a new config
+  digest.
+- Setting version-gated keys absent from `vllm0.32.0` (`scheduling.cacheAwareWindow` and
+  `scheduling.cacheAwareThreshold`, or `scheduling.maxInflightKVLoads` and
+  `scheduling.maxAsyncKVLoadsPerStep` on a `1P+1D` `decode` role) reports
+  `RuntimeControlSynced=False` (`Reason: UnsupportedEngineVersion`) with *`unsupportedFields`*
+  populated and zero `Pod` restarts. Removing the unsupported keys restores `Synced` on the same
+  worker `Pod` UID.
 
-## Step 3: Pause with a scaler
+### Step 3: Pause scaled role
 
-Attach an Active `ModelDeploymentScaler` targeting `qwen-vllm-rc` and set *`spec.roles[0].pause: true`*:
+With an `Active` `ModelDeploymentScaler` bound to `qwen-vllm-rc`, pause the `server` role:
 
 ```bash
 kubectl -n default patch modeldeployment qwen-vllm-rc --type=json \
@@ -148,18 +165,29 @@ kubectl -n default get modeldeploymentscaler \
   -o jsonpath='{range .items[*]}{.metadata.name}{"\t"}{.status.conditions[?(@.type=="Blocked")]}{"\n"}{end}'
 ```
 
-Observed pause and resume lifecycle:
+Expected pause, resume, and drain behavior:
 
-- The operator withdrew `modeldeployment.gpustack.ai/endpoint-eligible`, drained in-flight traffic, and toggled sentinel pause mode (`paused: true`, `Reason: Synced`).
-- Worker `/gpustack/v1/live` remained `200`, while `/gpustack/v1/ready` and direct `POST /v1/chat/completions` returned `503`.
-- The Active `ModelDeploymentScaler` reported `Blocked=True` (`Reason: RolePaused`) and withheld replica writes.
-- On a `1P+1D` `vLLM` deployment behind `llm-d-router`, pausing `decode` returned `decode /ready=503` while `prefill /ready` stayed `200`, and `:9090/observer/endpoints` removed only `decode` (`registry_revision` advanced `3 -> 6`).
-- Clearing `pause: false` and removing `runtimeControl` restored all parameters to `boot_defaults`, deleted the role ledger `ConfigMap`, returned `RuntimeControlSynced=True` (`Reason: NotConfigured`), and restored router inference `200`.
-- Deleting the worker `Pod` ran `python3 -m gpustack_engine_sentinel.drain` cleanly with zero `FailedPreStopHook` events.
+- The operator removes `modeldeployment.gpustack.ai/endpoint-eligible`, drains active requests, and
+  sets sentinel `paused: true` (`Reason: Synced`).
+- Worker `/gpustack/v1/live` returns `200`, while `/gpustack/v1/ready` and direct
+  `POST /v1/chat/completions` return `503`.
+- The bound `Active` `ModelDeploymentScaler` sets `Blocked=True` (`Reason: RolePaused`) and suspends
+  replica writes.
+- On a `1P+1D` deployment behind `llm-d-router`, pausing `decode` turns only `decode` `/ready` to
+  `503` (`prefill` stays `200`) and evicts only `decode` from `/observer/endpoints`
+  (`registry_revision` `3 → 6`).
+- Setting `pause: false` and removing *`runtimeControl`* restores `boot_defaults`, removes the role
+  ledger `ConfigMap`, sets `RuntimeControlSynced=True` (`Reason: NotConfigured`), and restores router
+  `200` responses.
+- Deleting the worker `Pod` executes `python3 -m gpustack_engine_sentinel.drain` with zero
+  `FailedPreStopHook` events.
 
-## Step 4: Tune SGLang parameters
+## SGLang runtime changes
 
-Deploy `SGLang 0.5.22` behind `sglang-gateway` and tune its five core scheduling knobs:
+SGLang parameter tuning uses a separate `SGLang 0.5.22` deployment (`qwen-sglang-rc` behind
+`sglang-gateway`), distinct from `qwen-vllm-rc` in Steps 1–3. Start from a `Ready` `ModelDeployment`
+configured with `spec.engine.name: SGLang` and a compatible `spec.engine.image` (substituting your
+deployment name if different), then patch all five scheduling parameters live:
 
 ```bash
 kubectl -n default patch modeldeployment qwen-sglang-rc --type=json -p '[
@@ -173,7 +201,7 @@ kubectl -n default patch modeldeployment qwen-sglang-rc --type=json -p '[
 ]'
 ```
 
-Captured `/gpustack/v1/runtime_config` readback from `wt-sglang-server-7wwdr` (`gpustack/runner:cuda13.0-sglang0.5.22`):
+Captured output (`/gpustack/v1/runtime_config` readback from `wt-sglang-server-7wwdr`):
 
 ```json
 {
@@ -200,27 +228,50 @@ Captured `/gpustack/v1/runtime_config` readback from `wt-sglang-server-7wwdr` (`
 }
 ```
 
-On a separate `SGLang 0.5.22` deployment with `--speculative-algorithm=NGRAM`:
+On a separate `SGLang 0.5.22` deployment launched with `--speculative-algorithm=NGRAM`,
+`speculative.acceptThresholdSingle: "0.85"` and `speculative.acceptThresholdAcc: "0.75"` applied live
+with zero restarts, whereas `speculative.draftBudgetFraction` (DFlash/DSpark only) reported
+`UnsupportedEngineVersion` and recovered cleanly when removed.
 
-- `speculative.acceptThresholdSingle: "0.85"` and `speculative.acceptThresholdAcc: "0.75"` applied live and read back from `/gpustack/v1/runtime_config` without restarting the `Pod`.
-- `speculative.draftBudgetFraction` (requiring DFlash or DSpark) cleanly reported `UnsupportedEngineVersion` and recovered on removal.
+## Verification
 
-## Step 5: Verify restart and resize
+Verify `ModelDeployment` sentinel replay across container restarts and Elastic EP width changes:
 
-Two lifecycle edge cases were verified on the same H200 cluster:
-
-- **Same-UID container restart latch replay (`wt-latch-replay`)**: Killing vLLM's `EngineCore` process (`pid=160`) triggered an in-place restart (`restartCount: 0 -> 1`) on the same `Pod` UID (`426fc922-49ab-403c-8234-f3eb7f3c161e`). The restarted sentinel minted a fresh `boot_id` (`1f4bed32-...` → `bb55ae70-...`), stayed fail-closed until the controller replayed `appliedConfigDigest` (`maxActiveRequests=24`, `maxBatchedTokens=4096`) and sent `/gpustack/v1/ack`, then returned `/gpustack/v1/ready=200`.
-- **Folded Elastic EP expansion (`DeepSeek-V2-Lite-Chat`)**: Expanding `runtimeControl.parameters["elastic.dataParallelWidth"]` from `"2"` to `"3"` preserved master `Pod` UID `df3459d5-9a45-41d7-95e4-be12cd5ed7ed`, converged `ElasticResize=True` (`Reason: NoRefusal`), advanced `/gpustack/v1/runtime_config` to `ranks=3`, `membership_epoch=2`, and replayed `scheduling.maxActiveRequests=16` across all three ranks.
+- **Same-UID container restart latch replay**: killing vLLM's `EngineCore` process triggered an
+  in-place container restart (`restartCount: 0 → 1`) on the same `Pod` UID. The restarted sentinel
+  generated a fresh `boot_id`, held `/gpustack/v1/ready` fail-closed until the controller replayed
+  `maxActiveRequests=24` and `maxBatchedTokens=4096` and sent `/gpustack/v1/ack`, and only then
+  returned `200` on `/gpustack/v1/ready`.
+- **Folded Elastic EP expansion (`DeepSeek-V2-Lite-Chat`)**: widening
+  `runtimeControl.parameters["elastic.dataParallelWidth"]` from `"2"` to `"3"` preserved the master
+  `Pod` UID, converged `ElasticResize=True` (`Reason: NoRefusal`), advanced `/gpustack/v1/runtime_config`
+  to `ranks=3` and `membership_epoch=2`, and replayed `scheduling.maxActiveRequests=16` across all
+  three ranks.
 
 ## Limitations
 
-- `scheduling.ppMaxMicroBatchSize` requires `--pp-size > 1` with at least two GPUs per member on a single node (`resources.accelerator >= 2`); it was admission-checked only on the 1-GPU-per-node H200 cluster.
-- Version-gated parameters absent from `vllm0.32.0` (`cacheAware*`, `maxInflightKVLoads`, `maxAsyncKVLoadsPerStep`) and `sglang0.5.22` NGRAM (`draftBudgetFraction`) were verified through the `UnsupportedEngineVersion` contract rather than live mutation.
-- This recording covers NVIDIA H200 GPUs with `vLLM 0.32.0` and `SGLang 0.5.22`; behavior on other accelerator vendors or engine builds follows the parameter contract in [Online Runtime Control](/gpustack-operator/main/docs/modules/model-deployment/runtime-control/index.md).
+- `scheduling.ppMaxMicroBatchSize` requires `--pp-size > 1` with `resources.accelerator >= 2` per
+  member and was admission-tested only on this 1-GPU-per-node H200 cluster.
+- Parameters absent from `vllm0.32.0` (`cacheAware*`, `maxInflightKVLoads`, `maxAsyncKVLoadsPerStep`)
+  and `sglang0.5.22` NGRAM (`draftBudgetFraction`) were verified through the `UnsupportedEngineVersion`
+  rejection and recovery path.
+- Behavior on other engines or hardware follows
+  [Online Runtime Control](/gpustack-operator/main/docs/modules/model-deployment/runtime-control/index.md).
+
+## Troubleshooting
+
+| Symptom | Signal | Resolution |
+|---|---|---|
+| `RuntimeControlSynced=False` | `Reason: UnsupportedEngineVersion` | Inspect *`status.roles[].runtimeControl.unsupportedFields`* on `ModelDeployment`, then remove those keys or upgrade the runner image. |
+| Control routes return `403` on router `:8000` | Envoy inference allowlist active | Expected security boundary; query `/observer/endpoints` on the router pod's internal port (`:9091` or `:9090`) rather than `:8000`. |
+| `ModelDeploymentScaler` stops scaling | `Blocked=True` (`Reason: RolePaused`) | Expected while any target role sets `pause: true`; set `pause: false` on `ModelDeployment` to resume autoscaling. |
+| Restarted container stays unready briefly | `/gpustack/v1/ready` returns `503` after container restart | Sentinel holds readiness fail-closed on a new `boot_id` until the worker replays *`runtimeControl.parameters`* and `/gpustack/v1/ack`; check worker connectivity if it does not clear. |
+| Router fails to render | `RouterReady=False/RenderFailed` | No Router `Pod` exists when rendering fails; inspect `RouterReady` on `ModelDeployment` and fix *`spec.router`*. |
 
 ---
 
-**See also** — [Online Runtime Control](/gpustack-operator/main/docs/modules/model-deployment/runtime-control/index.md) (parameter contract and status reasons) ·
-[Elastic EP Walkthrough](/gpustack-operator/main/docs/walkthroughs/model-deployment/elastic-ep/index.md) (recorded eight-GPU H100 expansion)
+**See also** — [Online Runtime Control](/gpustack-operator/main/docs/modules/model-deployment/runtime-control/index.md) (parameter
+catalog and status reasons) · [Elastic EP Walkthrough](/gpustack-operator/main/docs/walkthroughs/model-deployment/elastic-ep/index.md) (eight-GPU H100 collective
+expansion)
 
-**Next** → [Model Deployment Status](/gpustack-operator/main/docs/modules/model-deployment/status/index.md)
+**Next** → [Multi-Host Serving Walkthrough](/gpustack-operator/main/docs/walkthroughs/model-deployment/multi-host/index.md) — span a serving group across multiple GPU hosts.

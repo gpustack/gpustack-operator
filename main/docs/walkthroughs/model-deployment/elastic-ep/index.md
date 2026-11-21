@@ -1,71 +1,62 @@
 # Elastic EP Walkthrough
 
-Grow one vLLM serving collective on an eight-GPU H100 SXM5 node, widen it while it serves, and verify that requests keep completing across the resize.
+Start a four-GPU vLLM Ray *expert parallelism (EP)* collective on an eight-GPU H100 SXM5 node, expand
+it live to eight GPUs without replacing surviving `Pod`s, and verify uninterrupted client streaming.
 
 ## Contents
 
 - [Summary](#summary)
-- [Environment](#environment)
 - [Step 1: Start the elastic deployment](#step-1-start-the-elastic-deployment)
 - [Step 2: Verify baseline inference](#step-2-verify-baseline-inference)
 - [Step 3: Expand and verify inference](#step-3-expand-and-verify-inference)
-- [Step 4: Release the application](#step-4-release-the-application)
+- [Cleanup](#cleanup)
 - [Limitations](#limitations)
 - [Troubleshooting](#troubleshooting)
 
 ## Summary
 
-*Elastic EP* expands a running *mixture-of-experts (MoE)* collective without replacing surviving GPU `Pod`s.
-It uses Ray and *internal load balancing (Internal LB)*. Only the serving master accepts inference requests.
-The CPU-only Ray head coordinates the cluster and claims no GPU.
+*Elastic EP* resizes a running *mixture of experts (MoE)* collective in place using Ray and *internal
+load balancing (Internal LB)*. Only the master (`pod-ordinal=0`) serves HTTP requests, while a
+CPU-only Ray head coordinates membership without claiming GPUs.
 
-The role keeps *`replicas: 1`*, *`size: 1`* and two GPUs per member.
-The `elastic.dataParallelWidth` key under *`roles[].runtimeControl.parameters`* controls member count: width `"2"` uses four GPUs; width `"4"` uses eight.
-Increasing ordinary *`replicas`* creates separate complete instances and does not expand this collective.
-
-Hold *TP* = 2 and expand *DP* width 2 → 4, increasing the *EP* world size from 4 to 8.
-The captured load completed **439/439 client requests with zero errors** during expansion.
+Keep *`replicas: 1`*, *`size: 1`*, and `accelerator: "2"` (*TP* = 2), and scale *data parallelism (DP)*
+width `2 → 4` (*EP* world size `4 → 8`) via `runtimeControl.parameters["elastic.dataParallelWidth"]`:
 
 | Object | Scope | Creator | Purpose |
 |---|---|---|---|
-| `ModelArtifact` | namespace | user, via the prefetch procedure | the DeepSeek V2 Lite weights the deployment serves |
-| `ModelDeployment` | namespace | user | the elastic vLLM collective that expands in place |
-| `AcceleratorType` | cluster | operator | the whole-GPU H100 type each member requests |
+| `ModelArtifact` | namespace | user | Resolves `deepseek-v2-lite-chat` weights via node model delivery |
+| `AcceleratorType` | cluster | operator | Whole-GPU H100 pool requested by each two-GPU Ray member |
+| `ModelDeployment` | namespace | user | Elastic vLLM collective resized live through `elastic.dataParallelWidth` |
 
-At concurrency 64, width 4 reduced *time to first token (TTFT)* p50 to **2,598.867 ms** from width 2's **6,509.231 ms**, or **2.50× lower**.
-Width growth suits high-concurrency first-token targets when process retention matters.
-It used twice the GPUs and lowered output throughput at every tested concurrency.
-Single-request *inter-token latency (ITL)* p50 rose from 8.566 to 15.675 ms.
-Use [Elastic EP Benchmark](/gpustack-operator/main/docs/modules/model-deployment/elastic-ep-benchmark/index.md) to assess generation latency and GPU cost before widening.
+During the live *DP* width 2 → 4 expansion, **439/439 client requests completed with zero errors**. In
+the steady-state benchmark at concurrency 64, width 4 cut *time to first token (TTFT)* p50 by
+**2.50×** (`2,598.867 ms` vs `6,509.231 ms`) while using twice the GPUs, lowering total output
+throughput at every concurrency, and raising concurrency-1 *inter-token latency (ITL)* p50 from
+`8.566 ms` to `15.675 ms`; see [Elastic EP Benchmark](/gpustack-operator/main/docs/modules/model-deployment/elastic-ep-benchmark/index.md).
 
-## Environment
+### Environment
 
 | Item | Value |
 |---|---|
-| Cluster | Kubernetes v1.35.7; one CPU node and one GPU node (`gpu-node-0`) |
-| Hardware | 8 × NVIDIA H100 80 GB HBM3 SXM5; physical NVLink bandwidth 900 GB/s |
-| Operator | GPUStack Operator v0.9.1 |
-| Runner | `gpustack/runner:cuda13.0-vllm0.30.0` |
-| Model | `deepseek-ai/DeepSeek-V2-Lite-Chat`, `ModelArtifact` `deepseek-v2-lite-chat` |
-| Captured `InstanceType` | Custom `bench-gpu`, selecting the H100 accelerator group |
-| Initial allocation | Two GPU members × 2 GPUs = 4 GPUs, plus one CPU-only Ray head |
-| Expanded allocation | Four GPU members × 2 GPUs = 8 GPUs, plus the retained Ray head |
+| Cluster | Kubernetes v1.35.7; 1 CPU node and 1 GPU node (`gpu-node-0`) |
+| Hardware | 8 × NVIDIA H100 80 GB HBM3 SXM5 (900 GB/s physical NVLink) |
+| Operator and runner | GPUStack Operator v0.9.1; `gpustack/runner:cuda13.0-vllm0.30.0` |
+| Model | `deepseek-ai/DeepSeek-V2-Lite-Chat` (`ModelArtifact` `deepseek-v2-lite-chat`) |
+| Pool | Captured on custom `InstanceType` `bench-gpu`; reusable manifest uses `gpustack--nvidia-h100-80gb-hbm3-linux-amd64` |
+| Allocation | Initial: 2 GPU members × 2 GPUs (4 GPUs) + 1 CPU Ray head; expanded: 4 GPU members × 2 GPUs (8 GPUs) |
 
-Each GPU `Pod` exposed only its assigned two GPUs, with private IPC and `/dev/shm`.
-*`hostIPC`* was disabled, and no remote direct memory access (*RDMA*) interface was attached.
-NVLink carried *TP* traffic within each `Pod`.
-**The *EP* collective between GPU `Pod`s used TCP sockets over `eth0`.**
+Each GPU `Pod` ran with private IPC, private `/dev/shm`, *`hostIPC`* disabled, and no *remote direct
+memory access (RDMA)* interface. Intra-`Pod` *TP* = 2 used NVLink, while **cross-`Pod` *EP*
+collectives ran over TCP sockets on `eth0`**.
 
-Enable [node model delivery](/gpustack-operator/main/docs/modules/model-delivery/operations/index.md).
-Follow [model prefetch](/gpustack-operator/main/docs/walkthroughs/model-delivery/prefetch/index.md) with namespace `gpustack-bench` and the H100 node's hostname label.
-Keep the DeepSeek artifact name and revision from that procedure. Confirm the artifact is ready before serving.
-The store and binding names can differ; they must grant this namespace access to the selected node.
+Before starting, enable [node model delivery](/gpustack-operator/main/docs/modules/model-delivery/operations/index.md) and warm
+`deepseek-v2-lite-chat` in namespace `gpustack-bench` via
+[Model Prefetch](/gpustack-operator/main/docs/walkthroughs/model-delivery/prefetch/index.md). Keep all eight H100 GPUs free so Step 3 can admit two
+additional two-GPU members.
 
 ## Step 1: Start the elastic deployment
 
-Keep all eight GPUs available so expansion can reserve its additional members.
-The reusable manifest uses the discovered H100 `AcceleratorType`.
-Save the manifest as `elastic-ep.yaml`:
+Save `elastic-ep.yaml` (keep `--elastic-ep-max-dp-size 4` so vLLM reserves capacity up to width 4):
 
 ```yaml
 apiVersion: worker.gpustack.ai/v1
@@ -124,35 +115,30 @@ spec:
           value: "0"
 ```
 
+Apply `elastic-ep.yaml` and wait for the Ray head and two initial GPU members to run:
+
 ```bash
 kubectl apply -f elastic-ep.yaml
 kubectl -n gpustack-bench get modeldeployment b2-elastic-ep
-kubectl -n gpustack-bench get pods \
-  -l app.kubernetes.io/instance=b2-elastic-ep -o wide
+kubectl -n gpustack-bench get pods -l app.kubernetes.io/instance=b2-elastic-ep -o wide
 ```
 
-The two GPU members and CPU head ran on `gpu-node-0` in the capture.
-The head has no GPU allocation; namespace admission rules can still add CPU and memory requests.
-The captured command includes `--elastic-ep-max-dp-size 4`, which reserves the tested engine's maximum width.
-Keep it when reproducing this runner configuration.
-
-No Router is declared. The serving `Service` selects the master; the remaining members participate through Ray.
-The ordinary role status reports one replica group even when the collective has several GPU members.
+`Service/b2-elastic-ep` selects only the serving master (`pod-ordinal=0`), and *`status.roles[0]`*
+reports `desired: 1, ready: 1` for the single elastic collective.
 
 ## Step 2: Verify baseline inference
 
-Save a baseline CR and `Pod` snapshot before changing the width:
+Snapshot baseline deployment and `Pod` state before resizing:
 
 ```bash
 kubectl -n gpustack-bench get modeldeployment b2-elastic-ep -o json > baseline-cr.json
-kubectl -n gpustack-bench get pods \
-  -l app.kubernetes.io/instance=b2-elastic-ep -o json > baseline-pods.json
+kubectl -n gpustack-bench get pods -l app.kubernetes.io/instance=b2-elastic-ep -o json > baseline-pods.json
 jq '{name: .metadata.name, width: .spec.roles[0].runtimeControl.parameters["elastic.dataParallelWidth"],
      phase: .status.phase, desired: .status.roles[0].desired,
      ready: .status.roles[0].ready}' baseline-cr.json
 ```
 
-Captured projection:
+Captured output:
 
 ```json
 {
@@ -164,18 +150,13 @@ Captured projection:
 }
 ```
 
-The captured role declared *TP* = 2 and *Internal LB*.
-Its `ReplicasUpToDate` condition was `Unknown`, with reason `RolloutNotObserved`.
-**A `Ready` phase does not establish that every condition is true.**
-Declared arguments also do not prove the effective runtime width.
-
-Forward the serving endpoint in another terminal:
+`ReplicasUpToDate` can remain `Unknown/RolloutNotObserved` while `phase` reads `Ready`, so verify
+actual token generation in addition to `phase`. Forward `Service/b2-elastic-ep` in a second terminal
+and run a streaming completion check:
 
 ```bash
 kubectl -n gpustack-bench port-forward service/b2-elastic-ep 8000:8000
 ```
-
-Send a streaming generation request and preserve its response:
 
 ```bash
 curl --fail-with-body --no-buffer --max-time 60 \
@@ -183,28 +164,19 @@ curl --fail-with-body --no-buffer --max-time 60 \
   -H 'Content-Type: application/json' \
   -d '{"model":"deepseek-v2-lite-chat","messages":[{"role":"user","content":"Explain GPU scheduling briefly."}],"max_tokens":64,"temperature":0,"stream":true,"stream_options":{"include_usage":true}}' \
   -o baseline-stream.txt
-cat baseline-stream.txt
+grep -q 'data: \[DONE\]' baseline-stream.txt && echo "baseline stream OK"
 ```
 
-Require nonempty generated text, positive completion tokens, and the final `data: [DONE]` event.
-A health response does not exercise generation. Keep these new checks distinct from the captured load results below.
+Confirm non-empty completion tokens and `data: [DONE]` before expanding.
 
 ## Step 3: Expand and verify inference
 
-Record the master's UID and restart count. The master has *`pod-ordinal`* zero in the *Server* role:
+Patch `elastic.dataParallelWidth` from `"2"` to `"4"` with a JSON `test` guard:
 
 ```bash
-jq '.items[] |
-    select(.metadata.labels["app.kubernetes.io/component"] == "server") |
-    select(.metadata.labels["modeldeployment.gpustack.ai/pod-ordinal"] == "0") |
-    {name: .metadata.name, uid: .metadata.uid,
-     containers: [.status.containerStatuses[] | {name, restartCount}]}' baseline-pods.json
-
 kubectl -n gpustack-bench patch modeldeployment b2-elastic-ep --type=json \
   -p '[{"op":"test","path":"/spec/roles/0/runtimeControl/parameters/elastic.dataParallelWidth","value":"2"},{"op":"replace","path":"/spec/roles/0/runtimeControl/parameters/elastic.dataParallelWidth","value":"4"}]'
 ```
-
-The patch changes the target width and tests that its previous value is still `"2"`:
 
 ```diff
  apiVersion: worker.gpustack.ai/v1
@@ -221,8 +193,8 @@ The patch changes the target width and tests that its previous value is still `"
 +          elastic.dataParallelWidth: "4"
 ```
 
-Wait for the current generation's effective width. A spec edit or four running `Pod`s alone does not prove a native resize.
-Read the diagnostic observation belonging to this deployment:
+Confirm native runtime width `4` for the current deployment `uid` and `generation` (four running `Pod`s
+alone do not prove collective re-rendezvous):
 
 ```bash
 kubectl -n gpustack-bench get modeldeployment b2-elastic-ep -o json > current-cr.json
@@ -240,23 +212,27 @@ jq -e --argjson generation "$MD_GENERATION" '
    all(.Known == true and .Value == 4))' observation.json
 ```
 
-The `ConfigMap` is diagnostic state, not a public CR status contract.
-The captured observation reported generation 2, stable width 4, and all five width observations known at 4.
-Its reason was `native ranks and forwards agree`.
-If the check fails, inspect the hold reason before changing the width again.
+`observation.json` (diagnostic state rather than a public CR schema) reports `observedGeneration: 2`,
+all five width stages at `4`, and reason `native ranks and forwards agree`. If this check fails,
+inspect `ElasticResize` on `ModelDeployment` in [Troubleshooting](#troubleshooting) before issuing
+another width edit.
 
-Save the final CR and compare `Pod` identities with the baseline:
+Snapshot the expanded deployment and verify that the Ray head and both baseline GPU `Pod`s kept their
+original `Pod` UIDs with zero container restarts:
 
 ```bash
 kubectl -n gpustack-bench get modeldeployment b2-elastic-ep -o json > scaled-cr.json
-kubectl -n gpustack-bench get pods \
-  -l app.kubernetes.io/instance=b2-elastic-ep -o json > scaled-pods.json
-jq '{name: .metadata.name, width: .spec.roles[0].runtimeControl.parameters["elastic.dataParallelWidth"],
-     phase: .status.phase, desired: .status.roles[0].desired,
-     ready: .status.roles[0].ready}' scaled-cr.json
+kubectl -n gpustack-bench get pods -l app.kubernetes.io/instance=b2-elastic-ep -o json > scaled-pods.json
+jq -n --slurpfile base baseline-pods.json --slurpfile scaled scaled-pods.json '
+  ($base[0].items | map({key: .metadata.name, value: .metadata.uid}) | from_entries) as $b |
+  [$scaled[0].items[] | select($b[.metadata.name] != null) | {
+    name: .metadata.name,
+    sameUID: (.metadata.uid == $b[.metadata.name]),
+    restarts: ([.status.containerStatuses[].restartCount] | add)
+  }]'
 ```
 
-Captured projection:
+Captured output (`scaled-cr.json` projection):
 
 ```json
 {
@@ -268,92 +244,63 @@ Captured projection:
 }
 ```
 
-`ReplicasUpToDate` remained `Unknown/RolloutNotObserved` after expansion.
-The captured `Pod`s were all running on `gpu-node-0`:
-
 | Captured `Pod` | Role | Ready | UID across resize | Restarts |
 |---|---|---|---|---:|
 | `b2-elastic-ep-b2-elastic-ep-elastic-head-95n5k` | CPU Ray head | 1/1 | Retained | 0 |
-| `b2-elastic-ep-server-tsc8r` | Serving master | 1/1 | Retained | 0 |
-| `b2-elastic-ep-server-vzdtc` | Existing GPU member | 1/1 | Retained | 0 |
+| `b2-elastic-ep-server-tsc8r` | Serving master (`pod-ordinal=0`) | 1/1 | Retained | 0 |
+| `b2-elastic-ep-server-vzdtc` | Baseline GPU member | 1/1 | Retained | 0 |
 | `b2-elastic-ep-server-6nvwx` | Added GPU member | 1/1 | New | 0 |
 | `b2-elastic-ep-server-z22ml` | Added GPU member | 1/1 | New | 0 |
 
-The captured load used concurrency 8 with target 1,024 input and 256 output tokens per request.
-It completed **439/439 requests in 264.227 seconds (264.23 s) with zero errors** across the resize window.
-Surviving `Pod`s retained their UIDs and restart counts.
-The master's access log contained 1,320 completion requests, including warm-up and calibration.
+Traffic and probe behavior during expansion:
 
-The harness's `wait_ready` returned after **12 seconds**, before collective re-rendezvous.
-At that point, *`status.phase`* remained `Ready` while serving continued online.
-This phase-only check did not require current-generation effective width.
+- Continuous concurrency-8 load (`1024` input / `256` output tokens) completed **439/439 client
+  requests in 264.23 s with zero errors** and zero client-facing HTTP `503` responses (1,320 total
+  completion lines in master logs including warm-up and calibration).
+- Patch submission at `08:16:11Z` converged `RoleKindsReady=True` and `EndpointEligibility=True` at
+  `08:19:20Z` (**~189 s** for member startup and Ray collective join).
+- During collective re-rendezvous, the master returned **10 `/health` HTTP `503` probes**, and a
+  16–21 s watch log briefly observed `Starting 0S` at `08:19:09Z` between `Ready 1S` samples at
+  `08:18:50Z` and `08:19:30Z`. Re-run the Step 2 `curl` stream after `observation.json` confirms
+  effective width `4`.
 
-The patch was submitted at 08:16:11Z.
-In `scaled-cr.json`, `RoleKindsReady` and `EndpointEligibility` transitioned to `True` at 08:19:20Z, **about 189 seconds later**.
-This interval covers initialization and Ray collective joining for the two added GPU `Pod`s.
-The final `observation.json` separately confirmed effective width 4 without a convergence timestamp.
+## Cleanup
 
-The `scaling-refusals-503.txt` capture recorded zero client-facing HTTP 503 responses.
-The master recorded **10 `/health` responses with HTTP 503** during collective re-rendezvous.
-The `elastic-watch-timeline.txt` capture sampled approximately every **16–21 seconds**, with occasional intervals up to 28 seconds.
-
-It recorded `Ready 1S` at 08:18:50Z, **`Starting 0S` at 08:19:09Z**, and `Ready 1S` at 08:19:30Z.
-The exact readiness withdrawal duration is unknown.
-Repeat the streaming request after the width observation passes; resizing can withdraw readiness or return 503.
-
-## Step 4: Release the application
-
-Stop the port-forward and delete the serving application:
+Stop `port-forward`, delete `b2-elastic-ep`, and confirm all eight H100 GPUs return to
+`remaining: 1600000`:
 
 ```bash
 kubectl -n gpustack-bench delete modeldeployment b2-elastic-ep --wait=true
-kubectl -n gpustack-bench get pods,services,deployments,workloads \
-  -l app.kubernetes.io/instance=b2-elastic-ep
-kubectl get devices -o json
+kubectl -n gpustack-bench get pods,services,deployments,workloads -l app.kubernetes.io/instance=b2-elastic-ep
+kubectl get devices -o json | jq '[.items[].status.groups[].accelerators[].remaining]'
 ```
 
-Verify deletion of the Ray head, GPU members and owned resources. Confirm the application's GPU claims are released.
-The post-deletion `Devices` snapshot recorded all eight accelerators with *`remaining`* = `1600000`.
-This establishes released accelerator claims within that snapshot's scope.
-Deleting the application retains the prefetched model and cluster infrastructure.
-See [Model Prefetch](/gpustack-operator/main/docs/modules/model-delivery/prefetch/index.md) for cache retention and collection.
+Deleting `ModelDeployment` preserves prefetched weights in `NodeModelStore`
+([Model Prefetch](/gpustack-operator/main/docs/modules/model-delivery/prefetch/index.md)).
 
 ## Limitations
 
-The capture covers one model, one runner and one H100 node, with width 2 → 4 at *TP* = 2.
-It does not establish other widths, cross-node resizing or zero interruption under other traffic.
-Only the master serves HTTP. Width decreases are refused by this release.
-
-These observations cover intra-`Pod` NVLink and cross-`Pod` TCP.
-They do not establish *EP* performance over cross-`Pod` NVLink or *RDMA*.
-
-The 439-request run verifies client completion during this expansion.
-It does not prove that every token gap stayed unchanged, or that every CR condition became true.
-Use [Elastic EP Benchmark](/gpustack-operator/main/docs/modules/model-deployment/elastic-ep-benchmark/index.md) for the separately scoped performance comparison.
+- Measurements cover single-node cross-`Pod` TCP (*DP* width 2 → 4, *TP* = 2); cross-node resizing,
+  *RDMA* *EP* collectives, and other models or widths were not tested.
+- Only the master serves HTTP (`Internal LB`), and width shrink (`4 → 2`) is refused in this release.
+- See [Elastic EP Benchmark](/gpustack-operator/main/docs/modules/model-deployment/elastic-ep-benchmark/index.md) for steady-state
+  latency and throughput trade-offs.
 
 ## Troubleshooting
 
-| Symptom | Signal | Check & Mitigation |
+| Symptom | Signal | Resolution |
 |---|---|---|
-| Added members stay Pending | Status: member `Pod` phase `Pending` | Read Kueue `Workload`s, queue quota, `Pod` events and free `Devices` capacity. Width 4 with *TP* = 2 needs eight GPUs. |
-| Four members run but effective width is unknown | Status: `effective.Known` false in the diagnostic observation | Read the diagnostic observation and master logs. Allocated GPU capacity alone does not establish native width. |
-| `ElasticResize=False/ScaleRefused` | Condition: `ElasticResize=False`, Reason: `ScaleRefused` | Read the last engine refusal and the [resize hold rules](/gpustack-operator/main/docs/modules/model-deployment/elastic-ep/index.md#resize-hold-conditions). |
-| `ElasticResize=Unknown/WorldUnprovable` | Condition: `ElasticResize=Unknown`, Reason: `WorldUnprovable` | Keep observing the current operation. An unanswered resize must not be resent manually. |
-| Inference stalls | Streaming requests stop returning tokens | Inspect the master and Ray worker logs, actual GPU visibility, `/dev/shm` capacity and node memory. |
-
-```bash
-kubectl -n gpustack-bench get modeldeployment b2-elastic-ep -o yaml
-kubectl -n gpustack-bench get pods,events
-kubectl -n gpustack-bench logs b2-elastic-ep-server-tsc8r -c main --tail=200
-```
-
-Replace the captured `Pod` name with the live master name.
-The manifest keeps Ray logging at `info` and disables log deduplication.
-Environment changes apply to newly created `Pod`s; preserve logs before replacing a failing deployment.
+| Added GPU members stay `Pending` | Member `Pod` phase `Pending` | Inspect `kubectl -n gpustack-bench get workloads,events` and `Devices` capacity; width `4` at *TP* = 2 requires 8 free GPUs. |
+| Four GPU members run, `effective` width still `< 4` | `observation.json` shows `effective.Known=false` or `Value=2` | Wait for Ray initialization (~3 min on H100) and inspect master container logs (`kubectl -n gpustack-bench logs <master-pod> -c main --tail=200`). |
+| `ElasticResize=False/ScaleRefused` | Engine rejected resize request | Read the condition message on `ModelDeployment` and check [Resize hold conditions](/gpustack-operator/main/docs/modules/model-deployment/elastic-ep/index.md#resize-hold-conditions). |
+| `ElasticResize=Unknown/WorldUnprovable` | In-flight resize awaiting engine proof | Keep observing without patching `elastic.dataParallelWidth` again; never resend an unanswered resize manually. |
+| Streaming requests stall | No tokens returned on `:8000` | Check master and Ray worker logs, GPU visibility, `/dev/shm` usage, and host RAM; capture logs before deleting the deployment. |
 
 ---
 
-**See also** — [Elastic EP](/gpustack-operator/main/docs/modules/model-deployment/elastic-ep/index.md) (profile contract) ·
-[External DP Walkthrough](/gpustack-operator/main/docs/walkthroughs/model-deployment/external-dp/index.md) (recorded four-rank H100 deployment)
+**See also** — [Elastic EP](/gpustack-operator/main/docs/modules/model-deployment/elastic-ep/index.md) (profile contract and resize
+holds) · [Elastic EP Benchmark](/gpustack-operator/main/docs/modules/model-deployment/elastic-ep-benchmark/index.md) (H100 width
+2 vs 4 measurements) · [External DP Walkthrough](/gpustack-operator/main/docs/walkthroughs/model-deployment/external-dp/index.md) (fixed four-rank *External LB*
+collective)
 
-**Next** → [Model Deployment Status](/gpustack-operator/main/docs/modules/model-deployment/status/index.md)
+**Next** → [External DP Walkthrough](/gpustack-operator/main/docs/walkthroughs/model-deployment/external-dp/index.md) — deploy four fixed data-parallel ranks behind a router.

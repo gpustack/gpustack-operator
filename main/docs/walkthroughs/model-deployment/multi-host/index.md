@@ -1,71 +1,48 @@
 # Multi-Host Serving Walkthrough
 
-Deploy large language models across multiple physical GPU nodes in a single coordinated serving group.
-When a model exceeds the memory of a single machine, an instance spans multiple `Pod`s with gang admission.
-The operator coordinates leader discovery and environment variable injection across all group members.
+Span a single serving instance across multiple physical GPU hosts when a model's memory footprint
+exceeds one node, using gang admission and operator-injected leader coordinates.
 
 ## Contents
 
 - [Summary](#summary)
-- [Environment](#environment)
-- [Step 1: Define the deployment](#step-1-define-the-deployment)
-- [Step 2: Verify gang admission](#step-2-verify-gang-admission)
-- [Step 3: Verify distributed inference](#step-3-verify-distributed-inference)
-- [Step 4: Change replicas and size](#step-4-change-replicas-and-size)
-- [Step 5: Release the application](#step-5-release-the-application)
+- [Step 1: Deploy distributed model](#step-1-deploy-distributed-model)
+- [Verification](#verification)
+- [Step 4: Scale replica groups](#step-4-scale-replica-groups)
+- [Cleanup](#cleanup)
 - [Limitations](#limitations)
 - [Troubleshooting](#troubleshooting)
 
 ## Summary
 
-Multi-host serving runs a model whose *tensor parallelism (TP)* and *pipeline parallelism (PP)*
-require more GPUs than one node provides. One serving instance spans multiple hosts as one
-collective unit, admitted as a gang and served through its leader `m0`.
-
-A multi-host serving role configures *`spec.roles[].size`* greater than one.
-Each serving replica forms a collective unit composed of *`size`* distinct member `Pod`s.
-All member `Pod`s in a group live and die together under gang scheduling.
-
-Member `m0` acts as the primary master replica and receives all incoming `Service` traffic.
-Subordinate members (`m1`, `m2`, etc.) run auxiliary parallel workers and synchronize with `m0`.
-The operator injects cluster discovery environment variables into each container automatically.
+Setting *`spec.roles[].size`* above `1` groups *`size`* fate-sharing member `Pod`s into each serving
+replica under Kueue gang scheduling. Member `m0` runs the Ray head and receives all `Service` HTTP
+traffic, while subordinate members (`m1`..`mN`) join `m0` using injected discovery variables:
 
 | Object | Scope | Creator | Purpose |
 |---|---|---|---|
-| `ModelArtifact` | namespace | user | the `deepseek-v2-lite-chat` weights each member mounts |
-| `AcceleratorType` | cluster | operator | the discovered H100 whole-GPU type the role requests |
-| `ModelDeployment` | namespace | user | one multi-host serving instance spanning two nodes |
+| `ModelArtifact` | namespace | user | Resolves `deepseek-v2-lite-chat` weights warmed onto both GPU hosts |
+| `AcceleratorType` | cluster | operator | Discovered whole-GPU H100 pool requested by every member |
+| `ModelDeployment` | namespace | user | Two-node (`size: 2`, 16-GPU) Ray serving group |
 
-Complete [cluster preparation](/gpustack-operator/main/docs/walkthroughs/model-deployment/index.md#prepare-the-cluster) and
-[model prefetch](/gpustack-operator/main/docs/walkthroughs/model-delivery/prefetch/index.md).
-*TP* spans the GPUs inside each host. *PP* spans the two hosts.
+This 16-GPU layout (*tensor parallelism (TP)* = 8 within each node, *pipeline parallelism (PP)* = 2 across two nodes) is an illustrative configuration example.
+Complete [Cluster preparation](/gpustack-operator/main/docs/walkthroughs/model-deployment/index.md#cluster-preparation), [GPU pool selection](/gpustack-operator/main/docs/walkthroughs/model-deployment/index.md#gpu-pool-selection), and [Model Prefetch](/gpustack-operator/main/docs/walkthroughs/model-delivery/prefetch/index.md) in namespace `gpustack-elastic` with `minReady: 2` across both GPU hosts so both `m0` and `m1` mount warm local weights.
 
-This sixteen-GPU layout is a configuration example without measured runtime results. Unlike the
-recorded H100 walkthroughs in `gpustack-bench`, it uses the `gpustack-elastic` namespace and a
-`deepseek-v2-lite-chat` `ModelArtifact` in that namespace. The manifest requests the same
-discovered H100 `AcceleratorType` as the other reusable manifests; see
-[Prepare the GPU AcceleratorType](/gpustack-operator/main/docs/walkthroughs/model-deployment/index.md#prepare-the-gpu-acceleratortype).
-
-When running [model prefetch](/gpustack-operator/main/docs/walkthroughs/model-delivery/prefetch/index.md), warm the artifact onto **both**
-physical GPU nodes (`minReady: 2` across the GPU node pool rather than pinning a single
-`kubernetes.io/hostname`) so both `m0` and `m1` mount cached weights locally.
-
-## Environment
+### Environment
 
 | Item | Value |
 |---|---|
-| Nodes | two physical GPU nodes with identical accelerator counts |
-| GPUs | eight per node, sixteen total |
-| Fabric | inter-node high-speed network such as RoCE, InfiniBand or AWS EFA |
-| `AcceleratorType` | the discovered `gpustack--nvidia-h100-80gb-hbm3-linux-amd64` |
-| Namespace | `gpustack-elastic` |
-| Model | `deepseek-v2-lite-chat` `ModelArtifact` in that namespace |
+| Nodes | Two physical GPU hosts (`8` GPUs each, `16` GPUs total) |
+| Fabric | High-speed inter-node network (InfiniBand, RoCE, or AWS EFA) |
+| `AcceleratorType` | `gpustack--nvidia-h100-80gb-hbm3-linux-amd64` |
+| Namespace and model | `gpustack-elastic` with `ModelArtifact` `deepseek-v2-lite-chat` |
 
-## Step 1: Define the deployment
+## Step 1: Deploy distributed model
 
-Save the following multi-host definition as `multi-host.yaml`.
-The specification declares `replicas: 1` and `size: 2`, allocating sixteen whole GPUs across two `Pod`s.
-The launch script sets *TP* = 8 across local GPUs and *PP* = 2 across the two hosts.
+Because the operator does not synthesize multi-node Ray startup commands, multi-host roles use the
+take-over tier (*`roles[].command`*, which sets `status.roles[].unmanaged: true`; see
+[Engine overrides](/gpustack-operator/main/docs/modules/model-deployment/configuration/index.md#engine-overrides)). Save
+`multi-host.yaml`:
 
 ```yaml
 apiVersion: worker.gpustack.ai/v1
@@ -107,76 +84,65 @@ spec:
           fi
 ```
 
-The operator does not compose multi-node arguments. A multi-host role takes over the command line with
-*`command`*, and the script reads the three variables the operator injects into every member.
-This snippet illustrates how the operator wires member coordinates to the entrypoint script.
-
-Production multi-host engines typically use Ray (`--distributed-executor-backend ray`).
-Member `m0` initializes the Ray head cluster and serves the API; subordinate members join the Ray cluster
-with `ray start --address=... --block`. A role with *`command`* reports `status.roles[].unmanaged: true`,
-because the operator renders no engine argument for it. See
-[Three override tiers](/gpustack-operator/main/docs/modules/model-deployment/configuration/index.md#three-override-tiers).
-
-Apply the deployment manifest:
+Apply `multi-host.yaml`:
 
 ```bash
 kubectl apply -f multi-host.yaml
 kubectl -n gpustack-elastic get modeldeployment deepseek-multi-host
 ```
 
-## Step 2: Verify gang admission
+## Verification
 
-Gang admission places the two members of the group together, and the operator injects the leader
-address, the member index and the replica size into each member container.
+### Step 2: Verify gang admission
 
-Check the member `Pod`s:
-
-```bash
-kubectl -n gpustack-elastic get pods -l app.kubernetes.io/instance=deepseek-multi-host
-```
-
-Verify that two member `Pod`s have the expected member index suffixes:
-`deepseek-multi-host-server-r0-m0` and `deepseek-multi-host-server-r0-m1`.
-Inspect the injected environment variables in the secondary worker `m1`:
+Confirm that Kueue admitted both members (`deepseek-multi-host-server-r0-m0` and `r0-m1`) together and
+inspect the injected `GPUSTACK_*` coordinates on `m1`:
 
 ```bash
-kubectl -n gpustack-elastic exec deepseek-multi-host-server-r0-m1 -- env | grep GPUSTACK_
+kubectl -n gpustack-elastic get pods -l app.kubernetes.io/instance=deepseek-multi-host -o wide
+kubectl -n gpustack-elastic exec deepseek-multi-host-server-r0-m1 -- env | grep '^GPUSTACK_' | sort
 ```
 
-The operator automatically populates:
-- `GPUSTACK_REPLICA_LEADER_ADDRESS`: the DNS name of member `m0`, `deepseek-multi-host-server-r0-m0.deepseek-multi-host-server-r0`.
-- `GPUSTACK_REPLICA_SIZE`: total member count (`2`).
-- `GPUSTACK_MEMBER_INDEX`: the zero-based index of this specific member (`1`).
+Example output (illustrative):
 
-Inspect the Kubernetes `Service` created for the role:
+```text
+GPUSTACK_MEMBER_INDEX=1
+GPUSTACK_REPLICA_LEADER_ADDRESS=deepseek-multi-host-server-r0-m0.deepseek-multi-host-server-r0
+GPUSTACK_REPLICA_SIZE=2
+```
+
+Verify that `Service/deepseek-multi-host-server` selects only leader `m0` (`member-index: "0"`):
 
 ```bash
-kubectl -n gpustack-elastic get svc deepseek-multi-host-server -o yaml
+kubectl -n gpustack-elastic get svc deepseek-multi-host-server -o jsonpath='{.spec.selector}{"\n"}'
 ```
 
-The `Service` selector targets only member `m0`. External traffic lands on the primary replica.
+If either member stays `Pending`, inspect `QuotaReserved` and `Workload` conditions in
+[Troubleshooting](#troubleshooting).
 
-## Step 3: Verify distributed inference
+### Step 3: Verify distributed inference
 
-Once both member `Pod`s reach the `Ready` condition, query the server `Service`:
+Once `m0` is serving on `:8000` (take-over roles omit operator health probes unless configured in your
+entrypoint), send a completion request to `Service/deepseek-multi-host-server`:
 
 ```bash
 kubectl -n gpustack-elastic run test-client --rm -i --restart=Never \
   --image=curlimages/curl -- \
-  curl -s http://deepseek-multi-host-server:8000/v1/chat/completions \
+  curl -fsS http://deepseek-multi-host-server:8000/v1/chat/completions \
   -H "Content-Type: application/json" \
   -d '{
     "model": "deepseek-v2-lite-chat",
     "messages": [{"role": "user", "content": "Hello distributed inference!"}],
     "max_tokens": 16
-  }' | jq .
+  }' | jq '{model, finish_reason: .choices[0].finish_reason, tokens: .usage.completion_tokens}'
 ```
 
-The master rank coordinates distributed collective operations with the secondary worker and returns tokens.
+Confirm `"model": "deepseek-v2-lite-chat"` and positive `tokens`. If `curl` fails to connect, inspect
+`m0` and `m1` container logs to confirm `m1` joined the Ray head on `:6379`.
 
-## Step 4: Change replicas and size
+## Step 4: Scale replica groups
 
-To scale serving throughput, increase *`replicas`* to launch additional multi-host groups:
+Increase *`replicas`* to add a second independent 16-GPU two-node group (requiring 32 GPUs total):
 
 ```diff
  apiVersion: worker.gpustack.ai/v1
@@ -192,62 +158,47 @@ To scale serving throughput, increase *`replicas`* to launch additional multi-ho
        size: 2
 ```
 
-Scaling to `replicas: 2` creates another complete two-host group (`m0` and `m1`), reserving sixteen additional GPUs.
+Editing *`size`*, *`resources`*, or *`acceleratorType`* replaces whole replica groups one slot per pass
+rather than resizing Ray in place: the operator deletes an old replica and its `Workload` before
+admitting its replacement, so a `replicas: 1` deployment experiences downtime during replacement
+([Rollout behavior](/gpustack-operator/main/docs/modules/model-deployment/configuration/index.md#rollout-behavior)). Keep
+`--tensor-parallel-size` aligned with per-member `resources.accelerator`.
 
-To change the member topology of each instance, you can also update *`size`*, *`resources`* or *`acceleratorType`*.
-These edits do not resize a running collective engine in place.
+## Cleanup
 
-The operator deletes each old instance and its `Workload` first.
-It then creates the replacement in that slot and waits for fresh Kueue gang admission.
-The next old instance is deleted only after the replacement is admitted.
-A role with one replica therefore stops serving during the replacement.
-
-The script reads `GPUSTACK_REPLICA_SIZE`, so the *PP* size follows *`size`*.
-The *TP* size is fixed at 8, so it must still match the accelerators per member.
-See [Rollout behavior](/gpustack-operator/main/docs/modules/model-deployment/configuration/index.md#rollout-behavior).
-
-## Step 5: Release the application
-
-Remove the deployment and verify that all GPU allocations are freed:
+Delete `deepseek-multi-host` and verify all 16 GPUs return full `remaining` credits:
 
 ```bash
 kubectl -n gpustack-elastic delete modeldeployment deepseek-multi-host
 kubectl -n gpustack-elastic get pods -l app.kubernetes.io/instance=deepseek-multi-host
-```
-
-Confirm that the accelerators on both host nodes are free again. Each card reports `remaining`:
-
-```bash
 kubectl get devices -o json | jq '[.items[].status.groups[].accelerators[] |
   {mode, remaining, allocatedSlices: (.allocatedSlices // 0)}]'
 ```
 
 ## Limitations
 
-Gang scheduling is all-or-nothing: all *`size`* members of an instance need placement at once, or the
-whole instance waits.
-
-HTTP ingress is leader-only under *internal load balancing (Internal LB)*: the `Service` targets
-member `m0`, and subordinate members expose no serving endpoint.
-
-Changing *`size`* replaces whole replicas rather than resizing a running collective. With one replica,
-the role stops serving while its replacement is rebuilt.
+- **All-or-nothing gang scheduling**: all *`size`* members must reserve pool capacity together, or the
+  entire replica waits `Pending`.
+- **Leader-only HTTP ingress**: under *internal load balancing (Internal LB)*, only `m0` serves HTTP
+  traffic.
+- **Full-replica replacement on *`size`* edits**: changing *`size`* tears down and recreates each
+  replica group rather than expanding live.
 
 ## Troubleshooting
 
-| Symptom | Signal | Check & Mitigation |
+| Symptom | Signal | Resolution |
 |---|---|---|
-| `ModelDeployment` stuck in `Starting`, Kueue composes no `Workload` | Condition: `QuotaReserved=False/PodGroupIncomplete` | Fewer instances exist than the role declares. Read the message for the counts, then check the `Pod`s that are missing or unschedulable |
-| An instance was lost and is being rebuilt | Condition: `ReplicasUpToDate=False/ReplacementInProgress` | A replica disappeared for a reason outside the spec: a drained node, Kueue reclaiming quota, an eviction or a manual delete. The `Pod`s of an instance share one lifecycle, so the whole instance is rebuilt. Check the node and Kueue events |
-| Replicas wait for quota | Condition: `QuotaReserved=False/Pending` | The `ClusterQueue` has insufficient capacity to admit the replica. Free capacity, raise the pool quota, or reduce per-member accelerator requests |
-| Secondary worker cannot reach the leader | Log: engine logs on `m1` | Check that the headless `Service` resolves `GPUSTACK_REPLICA_LEADER_ADDRESS` and that no `NetworkPolicy` blocks the engine's distributed port |
-| Engine errors on parallel size | Log: engine startup log | Check that `--tensor-parallel-size` matches the accelerators per member (*TP* size) and that `--pipeline-parallel-size` equals *`size`* (*PP* size) |
+| `ModelDeployment` stuck in `Starting`, missing `Workload` | `QuotaReserved=False/PodGroupIncomplete` | Read `QuotaReserved` on `ModelDeployment` and inspect missing or rejected member `Pod`s. |
+| Entire replica tears down and rebuilds | `ReplicasUpToDate=False/ReplacementInProgress` | One member `Pod` was evicted, drained, or deleted; because members share fate, the operator rebuilds the whole `size`-member replica. Check node and Kueue events. |
+| Replica stays `Pending` for quota | `QuotaReserved=False/Pending` | `ClusterQueue` lacks `size × accelerator` free GPUs across distinct hosts; free capacity or reduce *`replicas`* / *`size`*. |
+| `m1` cannot join `m0` Ray head | Connection errors in `m1` logs | Verify headless `Service` DNS resolution for `GPUSTACK_REPLICA_LEADER_ADDRESS` and allow port `6379` plus Ray/NCCL ephemeral ports in `NetworkPolicy`. |
+| vLLM exits on invalid parallel world size | Startup error in `m0` logs | Ensure `--tensor-parallel-size` equals per-member `resources.accelerator` (`8`) and `--pipeline-parallel-size` equals `GPUSTACK_REPLICA_SIZE` (`2`). |
 
 ---
 
-**See also** — [Model Deployment Configuration](/gpustack-operator/main/docs/modules/model-deployment/configuration/index.md) (role fields and scaling) ·
-[Prefill and Decode Walkthrough](/gpustack-operator/main/docs/walkthroughs/model-deployment/prefill-decode/index.md) (disaggregated serving) ·
-[Elastic EP Walkthrough](/gpustack-operator/main/docs/walkthroughs/model-deployment/elastic-ep/index.md) (collective expansion) ·
+**See also** — [Configuration](/gpustack-operator/main/docs/modules/model-deployment/configuration/index.md) (multi-member roles and
+override tiers) · [Prefill and Decode Walkthrough](/gpustack-operator/main/docs/walkthroughs/model-deployment/prefill-decode/index.md) (disaggregated serving) ·
+[Elastic EP Walkthrough](/gpustack-operator/main/docs/walkthroughs/model-deployment/elastic-ep/index.md) (in-place collective expansion) ·
 [External DP Walkthrough](/gpustack-operator/main/docs/walkthroughs/model-deployment/external-dp/index.md) (fixed per-rank serving)
 
-**Next** → [Model Deployment Status](/gpustack-operator/main/docs/modules/model-deployment/status/index.md) — observe status conditions and phases.
+**Next** → [Model Deployment](/gpustack-operator/main/docs/modules/model-deployment/index.md) — review serving contracts, routers, and benchmarks.

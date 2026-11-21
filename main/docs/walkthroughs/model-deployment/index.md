@@ -1,46 +1,44 @@
 # Model Deployment Walkthroughs
 
-Choose a serving configuration, then use its cluster profile and deployment manifest.
-The H100 walkthroughs distinguish recorded deployments from configuration examples.
+Select a serving topology, verify cluster capacity and cached weights, and run the deployment
+manifest. Each walkthrough pairs reusable manifests with verification checks and captured outputs.
 
 ## Contents
 
-- [Choose an example](#choose-an-example)
-- [Prepare the cluster](#prepare-the-cluster)
-- [Prepare the GPU AcceleratorType](#prepare-the-gpu-acceleratortype)
+- [Serving walkthroughs by task](#serving-walkthroughs-by-task)
+- [Cluster preparation](#cluster-preparation)
+- [GPU pool selection](#gpu-pool-selection)
 
-## Choose an example
+## Serving walkthroughs by task
 
-*Tensor parallelism (TP)*, *data parallelism (DP)* and *expert parallelism (EP)* describe the parallel groups below.
-The *DP* width counts data-parallel ranks; the *EP* world size counts GPU workers in the expert-parallel collective.
-With *internal load balancing (Internal LB)*, the master distributes requests to its *DP* ranks.
+Serving topologies below combine *tensor parallelism (TP)*, *data parallelism (DP)*, and *expert
+parallelism (EP)*. *DP* width counts data-parallel ranks, *EP* world size counts GPU workers in the
+expert collective, and *internal load balancing (Internal LB)* vs *external load balancing (External LB)*
+decides whether only the master or every *DP* rank serves HTTP requests.
 
 | Walkthrough | Serving configuration | Scope |
 |---|---|---|
-| [Prefill and Decode](/gpustack-operator/main/docs/walkthroughs/model-deployment/prefill-decode/index.md) | Disaggregated roles fronted by Router | Recorded H100 deployment with one *Prefill* and two *Decode* replicas, *TP* = 2, TCP KV transfer, and a linked [benchmark](/gpustack-operator/main/docs/modules/model-deployment/prefill-decode-benchmark/index.md). |
-| [Encode, Prefill and Decode](/gpustack-operator/main/docs/walkthroughs/model-deployment/encode-prefill-decode/index.md) | Disaggregated multimodal roles fronted by Router | Recorded H100 deployment with one *Encode*, one *Prefill* and one *Decode* replica, NIXL encoder transfer, and a linked [benchmark](/gpustack-operator/main/docs/modules/model-deployment/encode-prefill-decode-benchmark/index.md). |
-| [Scaling](/gpustack-operator/main/docs/walkthroughs/model-deployment/scaling/index.md) | Independent replicas managed by `ModelDeploymentScaler` | Shadow and Active configuration, algorithm selection, role ratios, and observation of scale-out and retirement; links the measured H100 [benchmark](/gpustack-operator/main/docs/modules/model-deployment/scaling-benchmark/index.md). |
-| [Online Runtime Control](/gpustack-operator/main/docs/walkthroughs/model-deployment/runtime-control/index.md) | Live parameter tuning, role pause, and Elastic EP | Recorded NVIDIA H200 run covering vLLM and SGLang live tuning, auto-reset, Envoy allowlist, `ModelDeploymentScaler` `RolePaused`, same-UID restart latch replay, and folded Elastic EP expansion. |
-| [Elastic EP](/gpustack-operator/main/docs/walkthroughs/model-deployment/elastic-ep/index.md) | One *Internal LB* instance on Ray | Recorded H100 expansion: *TP* = 2, *DP* width 2 → 4, *EP* world size 4 → 8; 439 client requests with zero errors. |
-| [External DP](/gpustack-operator/main/docs/walkthroughs/model-deployment/external-dp/index.md) | Four fixed *DP* ranks using multiprocessing | Recorded H100 deployment: *TP* = 2, *DP* = 4, *EP* world size 8; captured per-rank inference and Router coverage. |
-| [Multi-Host](/gpustack-operator/main/docs/walkthroughs/model-deployment/multi-host/index.md) | Coordinated instance spanning multiple hosts | Not measured here. `size: 2`, sixteen GPUs across two physical nodes, leader `m0` routing, and gang admission. |
+| [Prefill and Decode](/gpustack-operator/main/docs/walkthroughs/model-deployment/prefill-decode/index.md) | Disaggregated *Prefill* and *Decode* roles behind `llm-d-router` | 1 *Prefill* + 2 *Decode* replicas, *TP* = 2, TCP Mooncake transfer ([Prefill and Decode Benchmark](/gpustack-operator/main/docs/modules/model-deployment/prefill-decode-benchmark/index.md)). |
+| [Encode, Prefill and Decode](/gpustack-operator/main/docs/walkthroughs/model-deployment/encode-prefill-decode/index.md) | Disaggregated multimodal *Encode*, *Prefill*, and *Decode* roles | 1 *Encode* + 1 *Prefill* + 1 *Decode* replica, NIXL encoder-cache transfer ([Encode, Prefill and Decode Benchmark](/gpustack-operator/main/docs/modules/model-deployment/encode-prefill-decode-benchmark/index.md)). |
+| [Elastic EP](/gpustack-operator/main/docs/walkthroughs/model-deployment/elastic-ep/index.md) | Single *Internal LB* Ray collective resized in place | *TP* = 2, *DP* width 2 → 4, *EP* world size 4 → 8; 439/439 requests succeeded ([Elastic EP Benchmark](/gpustack-operator/main/docs/modules/model-deployment/elastic-ep-benchmark/index.md)). |
+| [External DP](/gpustack-operator/main/docs/walkthroughs/model-deployment/external-dp/index.md) | Four fixed *External LB* *DP* ranks behind `vllm-router` | *TP* = 2, *DP* = 4, *EP* world size 8; per-rank endpoints and router distribution ([External DP Benchmark](/gpustack-operator/main/docs/modules/model-deployment/external-dp-benchmark/index.md)). |
+| [Scaling](/gpustack-operator/main/docs/walkthroughs/model-deployment/scaling/index.md) | Replica autoscaling via `ModelDeploymentScaler` | `Shadow` and `Active` modes, `Proportional` / `TokenThroughput` / `Predictive` algorithms, catalog priors, *EPD* ratios, and retirement ([Model Deployment Scaling Benchmark](/gpustack-operator/main/docs/modules/model-deployment/scaling-benchmark/index.md)). |
+| [Online Runtime Control](/gpustack-operator/main/docs/walkthroughs/model-deployment/runtime-control/index.md) | Live parameter tuning, role pause, and restart replay | vLLM and SGLang live mutations, Envoy allowlist, `RolePaused` scaler guard, same-UID restart latch, and Elastic EP resize. |
+| [Multi-Host](/gpustack-operator/main/docs/walkthroughs/model-deployment/multi-host/index.md) | Single collective instance spanning two GPU hosts | Configuration example: `size: 2` (16 GPUs across two nodes), leader `m0` ingress, and gang admission. |
 
-A Router can front the *Internal LB* and *External LB* configurations.
-The engine's *load-balancing* mode determines which `Pod`s accept inference requests.
-Increasing *`roles[].replicas`* adds complete groups; see [role scaling](/gpustack-operator/main/docs/modules/model-deployment/configuration/index.md#rollout-behavior).
-The [Scaling Walkthrough](/gpustack-operator/main/docs/walkthroughs/model-deployment/scaling/index.md) links a recorded single-role lifecycle check and distinguishes
-its observed replica changes from reusable configuration examples.
+Increasing *`roles[].replicas`* adds independent replica groups rather than widening one collective;
+see [Rollout behavior](/gpustack-operator/main/docs/modules/model-deployment/configuration/index.md#rollout-behavior).
 
-## Prepare the cluster
+## Cluster preparation
 
-Install the operator and enable node model delivery using the
-[installation guide](/gpustack-operator/main/docs/operate/installation-modes/index.md) and
-[model-store operations](/gpustack-operator/main/docs/modules/model-delivery/operations/index.md).
-Use `kubectl`, `jq`, `curl`, and a kubeconfig for the intended cluster.
+Install GPUStack Operator and enable node model delivery using
+[Installation Modes](/gpustack-operator/main/docs/operate/installation-modes/index.md) and
+[Model Store Operations](/gpustack-operator/main/docs/modules/model-delivery/operations/index.md). Ensure `kubectl`, `jq`, and
+`curl` are installed locally.
 
-The H100 recordings use one CPU node and one GPU node with eight NVIDIA H100 80 GB HBM3 SXM5 GPUs.
-Read each walkthrough's environment section for its allocation and evidence limits.
-The *Multi-Host* example instead needs two GPU nodes.
+Single-node serving walkthroughs use one CPU node and one 8-GPU NVIDIA H100 80 GB HBM3 SXM5 node
+(`Multi-Host` uses two 8-GPU nodes; `Online Runtime Control` uses three 1-GPU H200 nodes). Inspect
+node and cache readiness before deploying:
 
 ```bash
 kubectl get nodes
@@ -49,23 +47,20 @@ kubectl get acceleratortypes
 kubectl get nodemodelstores -o json
 ```
 
-Confirm Model Manager readiness and free GPUs before creating a serving workload.
-*External DP* needs eight free cards. *Elastic EP* needs four initially and eight after expansion.
-Complete [model prefetch](/gpustack-operator/main/docs/walkthroughs/model-delivery/prefetch/index.md) with the artifact, namespace and node selection
-specified by the serving walkthrough.
+Confirm sufficient free GPUs (*External DP* needs 8 GPUs; *Elastic EP* starts at 4 and expands to 8)
+and warm the walkthrough's `ModelArtifact` with
+[Model Prefetch](/gpustack-operator/main/docs/walkthroughs/model-delivery/prefetch/index.md) before starting serving pods.
 
-## Prepare the GPU AcceleratorType
+## GPU pool selection
 
-The H100 manifests use the discovered whole-GPU type
-`gpustack--nvidia-h100-80gb-hbm3-linux-amd64`. The recordings used the custom type `bench-gpu`.
-Captured queue output retains the recorded name; current manifests use the discovered `AcceleratorType`.
-Confirm the selected type's capacity before applying a manifest.
-
-Select another whole-GPU type when using different hardware, and verify model compatibility.
+H100 manifests specify the derived pool `gpustack--nvidia-h100-80gb-hbm3-linux-amd64` (benchmark
+captures used a custom sibling `bench-gpu` over the same H100 group). On other hardware, substitute an
+`Active` whole-GPU `AcceleratorType` from `kubectl get acctype` and verify VRAM capacity and engine
+compatibility first.
 
 ---
 
-**See also** — [Model Deployment](/gpustack-operator/main/docs/modules/model-deployment/index.md) (configuration guides) ·
-[Model Prefetch Walkthrough](/gpustack-operator/main/docs/walkthroughs/model-delivery/prefetch/index.md)
+**See also** — [Model Deployment](/gpustack-operator/main/docs/modules/model-deployment/index.md) (serving configuration
+guides) · [Model Prefetch Walkthrough](/gpustack-operator/main/docs/walkthroughs/model-delivery/prefetch/index.md) (warming weights onto GPU nodes)
 
-**Next** → [Prefill and Decode Walkthrough](/gpustack-operator/main/docs/walkthroughs/model-deployment/prefill-decode/index.md) — disaggregated serving with router.
+**Next** → [Prefill and Decode Walkthrough](/gpustack-operator/main/docs/walkthroughs/model-deployment/prefill-decode/index.md) — deploy disaggregated prefill and decode roles behind a router.

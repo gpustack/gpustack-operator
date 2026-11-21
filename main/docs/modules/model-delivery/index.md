@@ -1,7 +1,8 @@
 # Model Delivery
 
-`ModelArtifact` gives model weights a stable identity. Delivery uses an engine, node cache,
-`PersistentVolumeClaim` or image. A workload can reference the artifact instead of repeating its source.
+`ModelArtifact` gives model weights a stable, content-addressed or volume-backed identity. Workloads
+consume weights via engine download, verified node cache (`NodeModelStore`), `PersistentVolumeClaim`,
+OCI image volume, or remote host-memory transfer without repeating URIs or tokens.
 
 ## Contents
 
@@ -24,61 +25,59 @@ flowchart TD
     ARTIFACT -> OTHER["Engine, PVC or image delivery"]
 -->
 
-[Model Artifact](/gpustack-operator/main/docs/modules/model-delivery/artifact/index.md) defines the sources and delivery choices.
-[Remote Weight Delivery](/gpustack-operator/main/docs/modules/model-delivery/remote/index.md) describes loading from a prepared source node.
+[Model Artifact](/gpustack-operator/main/docs/modules/model-delivery/artifact/index.md) defines weight sources, resolution, and workload mounts.
+[Remote Weight Delivery](/gpustack-operator/main/docs/modules/model-delivery/remote/index.md) covers streaming tensors from prepared source `Node`s.
 
 ## Configuration
 
-Use the annotated [artifact example](/gpustack-operator/main/docs/modules/model-delivery/artifact/index.md#resource) to select a source and filters.
-[Model Image Source](/gpustack-operator/main/docs/modules/model-delivery/image-source/index.md) defines image-backed weights.
-[Model Prefetch](/gpustack-operator/main/docs/modules/model-delivery/prefetch/index.md) defines cache grants and warm-up requests.
+Start with the [artifact manifest](/gpustack-operator/main/docs/modules/model-delivery/artifact/index.md#configuration) to declare hub, PVC, or
+[OCI image](/gpustack-operator/main/docs/modules/model-delivery/artifact/index.md#image-source) weights. Configure [Model Prefetch](/gpustack-operator/main/docs/modules/model-delivery/prefetch/index.md) for namespace
+cache budgets, warm-up placement, and [node-to-node peer sync](/gpustack-operator/main/docs/modules/model-delivery/prefetch/index.md#node-to-node-sync).
 
-For a complete example, follow the
+For an end-to-end cache run, follow the
 [Model Prefetch Walkthrough](/gpustack-operator/main/docs/walkthroughs/model-delivery/prefetch/index.md).
 
 ## Operations
 
 ### Step 1: Configure cache
 
-Follow [Model Store Operations](/gpustack-operator/main/docs/modules/model-delivery/operations/index.md#configuration) to configure node delivery.
-[Node Model Store](/gpustack-operator/main/docs/modules/model-delivery/node-store/index.md) defines node cache state and the plugin.
+Set deploy-time and runtime cache policies in [Model Store Operations](/gpustack-operator/main/docs/modules/model-delivery/operations/index.md#configuration),
+and inspect per-node state in [Node cache inspection](/gpustack-operator/main/docs/modules/model-delivery/operations/index.md#node-cache-inspection).
 
 ### Step 2: Inspect delivery
 
-Inspect the artifact and node stores:
+Check artifact resolution and node cache status:
 
 ```bash
 kubectl -n <namespace> get modelartifact <artifact-name> -o yaml
 kubectl get nodemodelstores
 ```
 
-**Verification:** Check the artifact's `Resolved` condition and the node cache status.
-See [Model Artifact Status](/gpustack-operator/main/docs/modules/model-delivery/artifact/index.md#status) and [Node Model Store](/gpustack-operator/main/docs/modules/model-delivery/node-store/index.md#resource).
-The [Model Artifact API](/gpustack-operator/main/docs/modules/model-delivery/artifact-api/index.md) describes progress views.
-[Node-to-Node Sync](/gpustack-operator/main/docs/modules/model-delivery/node-to-node-sync/index.md) describes peer status and metrics.
+**Verification:** Confirm `Resolved=True` on the `ModelArtifact` ([Status](/gpustack-operator/main/docs/modules/model-delivery/artifact/index.md#status)) and
+`Ready=True` on target `NodeModelStore` objects. See
+[Progress subresource](/gpustack-operator/main/docs/modules/model-delivery/artifact/index.md#progress-subresource) for live download progress and RBAC.
 
 ## Troubleshooting
 
-If weights do not reach a deployment, inspect the artifact and deployment conditions:
+If weights do not reach a `ModelDeployment`, inspect the artifact, deployment conditions, and `Pod`
+events:
 
 ```bash
 kubectl -n <namespace> describe modelartifact <artifact-name>
 kubectl -n <namespace> get modeldeployment <deployment-name> -o yaml
+kubectl -n <namespace> describe pod <pod-name>
 ```
-
-If a serving `Pod` exists, inspect its events with `kubectl -n <namespace> describe pod <pod-name>`.
 
 | Condition | Reason | Resolution |
 |---|---|---|
-| `WeightsReady=False` | `NodeDeliveryUnavailable` | Check `modelManager.enabled` and the `model.csi.gpustack.ai` `CSIDriver`. |
-| `WeightsReady=False` | `FilterNeedsNodeDelivery` | Check the delivery setting and artifact patterns. |
+| `WeightsReady=False` | `NodeDeliveryUnavailable` | Enable `modelManager.enabled` and verify the `model.csi.gpustack.ai` `CSIDriver`. |
+| `WeightsReady=False` | `FilterNeedsNodeDelivery` | Switch `model-artifact-delivery-mode` to `Node` or remove file patterns. |
 
-Use [Model Store Troubleshooting](/gpustack-operator/main/docs/modules/model-delivery/operations/index.md#troubleshooting) for more symptoms and recovery checks.
-For remote loading failures, see [Remote Weight Delivery](/gpustack-operator/main/docs/modules/model-delivery/remote/index.md#troubleshooting).
+Use [Model Store Operations](/gpustack-operator/main/docs/modules/model-delivery/operations/index.md#troubleshooting) for CSI mount diagnosis and
+[Remote Weight Delivery](/gpustack-operator/main/docs/modules/model-delivery/remote/index.md#troubleshooting) for remote transfer failures.
 
 ---
 
-**See also** — [Model Deployment](/gpustack-operator/main/docs/modules/model-deployment/index.md) (serving a model) ·
-[GPU Instances](/gpustack-operator/main/docs/modules/instances/index.md) (using weights in an `Instance`)
+**See also** — [Model Deployment](/gpustack-operator/main/docs/modules/model-deployment/index.md) (serving workloads) · [GPU Instances](/gpustack-operator/main/docs/modules/instances/index.md) (mounting weights in workspaces)
 
-**Next** → [Model Artifact](/gpustack-operator/main/docs/modules/model-delivery/artifact/index.md) — choose a source and delivery.
+**Next** → [Model Artifact](/gpustack-operator/main/docs/modules/model-delivery/artifact/index.md) — configure weight sources, digests, and workload delivery.

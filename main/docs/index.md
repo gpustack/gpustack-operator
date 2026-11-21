@@ -1,6 +1,6 @@
 # Documentation
 
-Install the operator, configure a capability, or find the reference for a running workload.
+Install the operator, configure a capability, or troubleshoot a running workload.
 
 ## Getting started
 
@@ -18,7 +18,6 @@ Install the operator, configure a capability, or find the reference for a runnin
 - [Model Deployment](/gpustack-operator/main/docs/modules/model-deployment/index.md)
 - [GPU Instances](/gpustack-operator/main/docs/modules/instances/index.md)
 
-## Operations and reference
+## Operations
 
 - [Operations](/gpustack-operator/main/docs/operate/index.md) covers installation, availability and upgrades.
-- [Reference](/gpustack-operator/main/docs/reference/index.md) lists commands, settings and resource presets.

@@ -1,0 +1,312 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 1216" role="img" aria-labelledby="title desc">
+<title id="title">External DP over TCP vs InfiniBand RDMA and Wide TP</title>
+<desc id="desc">Six-panel line chart comparing Wide TP (NVLink), External DP over TCP and External DP over InfiniBand RDMA across concurrency 1 to 64 on 1024/256 and 4096/128 shapes for TTFT p50 (ms, log scale), ITL p99 (ms, log scale) and output throughput (tok/s). Over InfiniBand RDMA at concurrency 64, External DP exceeds Wide TP output on both shapes (3,921.562 vs 2,314.155 tok/s; 2,033.762 vs 1,491.536 tok/s) and lowers median TTFT by 16.13x and 10.44x, while Wide TP retains higher throughput at concurrencies 1 to 32 and lower ITL p99 in all 12 cells.</desc>
+<style>
+:root{color-scheme:light dark;--bg:#f8fbff;--card:#fff;--ink:#12233d;--muted:#52677f;--line:#c9d9e7;--grid:#e4edf5;--axis:#8aa0b6;--c1:#2563eb;--c2:#c2410c;--c3:#0f766e;--c4:#7c3aed}
+@media(prefers-color-scheme:dark){:root{--bg:#101d30;--card:#1a2c43;--ink:#f1f6ff;--muted:#bdcde0;--line:#526b83;--grid:#2a4058;--axis:#7f97ae;--c1:#80adff;--c2:#ffa36b;--c3:#58d6c8;--c4:#c4b5fd}}
+text{font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;fill:var(--ink)}
+.eyebrow{font-size:12px;font-weight:700;letter-spacing:1.2px;fill:var(--muted)}
+.title{font-size:26px;font-weight:750;letter-spacing:-.3px}
+.sub{font-size:14px;fill:var(--muted)}
+.legend{font-size:13px;font-weight:600}
+.panel{fill:var(--card);stroke:var(--line);stroke-width:1.2}
+.shape{font-size:15px;font-weight:700}
+.cap{font-size:11px;fill:var(--muted)}
+.val{font:600 11.5px ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-variant-numeric:tabular-nums}
+.tick{font:11px ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;fill:var(--muted)}
+.axis-title{font-size:13px;font-weight:700;fill:var(--ink)}
+.x-title{font-size:12px;fill:var(--muted)}
+.note{font-size:12px;fill:var(--muted)}
+.grid{stroke:var(--grid);stroke-width:1}
+.base{stroke:var(--axis);stroke-width:1.2}
+.s1{stroke:var(--c1);fill:none;stroke-width:2.4;stroke-linejoin:round}
+.s2{stroke:var(--c2);fill:none;stroke-width:2.4;stroke-linejoin:round}
+.s3{stroke:var(--c3);fill:none;stroke-width:2.4;stroke-linejoin:round;stroke-dasharray:7 4}
+.s3-solid{stroke:var(--c3);fill:none;stroke-width:2.4;stroke-linejoin:round}
+.s4{stroke:var(--c4);fill:none;stroke-width:2.4;stroke-linejoin:round;stroke-dasharray:4 3}
+.s1-dash{stroke:var(--c1);fill:none;stroke-width:2.2;stroke-linejoin:round;stroke-dasharray:6 4}
+.s2-dash{stroke:var(--c2);fill:none;stroke-width:2.2;stroke-linejoin:round;stroke-dasharray:6 4}
+.m1{fill:var(--card);stroke:var(--c1);stroke-width:2.1}
+.m2{fill:var(--c2);stroke:var(--card);stroke-width:1}
+.m3{fill:var(--card);stroke:var(--c3);stroke-width:2.0;stroke-linejoin:miter}
+.m4{fill:var(--c4);stroke:var(--card);stroke-width:1}
+.v1{fill:var(--c1)}
+.v2{fill:var(--c2)}
+.v3{fill:var(--c3)}
+.v4{fill:var(--c4)}
+</style>
+<rect width="1200" height="1216" fill="var(--bg)"/>
+<text class="eyebrow" x="40" y="42">MODEL DEPLOYMENT · EXTERNAL DP BENCHMARK · RDMA FOLLOW-UP</text>
+<text class="title" x="40" y="78">External DP over TCP vs InfiniBand RDMA and Wide TP</text>
+<text class="sub" x="40" y="104">One 8 × H100 SXM5 node with 8 × ConnectX-7 InfiniBand adapters; DP = 4, TP = 2 per Pod, round_robin routing.</text>
+<line class="s1" x1="40" y1="136" x2="74" y2="136"/>
+<circle class="m1" cx="57.0" cy="136.0" r="4.8"/>
+<text class="legend" x="84" y="141">Wide TP (1 Pod, NVLink, baseline)</text>
+<line class="s2" x1="360" y1="136" x2="394" y2="136"/>
+<rect class="m2" x="374.5" y="133.5" width="5.0" height="5.0"/>
+<text class="legend" x="404" y="141">External DP over TCP (4 Pods)</text>
+<line class="s3" x1="670" y1="136" x2="704" y2="136"/>
+<path class="m3" d="M687.0 128.9L694.1 136.0L687.0 143.1L679.9 136.0Z"/>
+<text class="legend" x="714" y="141">External DP over InfiniBand RDMA (4 Pods)</text>
+<rect class="panel" x="112.0" y="166.0" width="518.0" height="292.0" rx="12"/>
+<text class="shape" x="126.0" y="190.0">1024/256</text>
+<text class="cap" x="616.0" y="189.0" text-anchor="end">at concurrency 64</text>
+<circle class="m1" cx="132.0" cy="205.0" r="4.0"/>
+<text class="val v1" x="146.0" y="209.0">Wide TP: 4,798.411 ms</text>
+<rect class="m2" x="129.9" y="220.9" width="4.2" height="4.2"/>
+<text class="val v2" x="146.0" y="227.0">External DP TCP: 1,863.100 ms</text>
+<path class="m3" d="M132.0 235.1L137.9 241.0L132.0 246.9L126.1 241.0Z"/>
+<text class="val v3" x="146.0" y="245.0">External DP RDMA: 297.546 ms</text>
+<line class="grid" x1="126.0" y1="399.4" x2="616.0" y2="399.4"/>
+<text class="tick" x="104.0" y="403.4" text-anchor="end">100</text>
+<line class="grid" x1="126.0" y1="337.7" x2="616.0" y2="337.7"/>
+<text class="tick" x="104.0" y="341.7" text-anchor="end">1,000</text>
+<line class="grid" x1="126.0" y1="276.0" x2="616.0" y2="276.0"/>
+<text class="tick" x="104.0" y="280.0" text-anchor="end">10,000</text>
+<line class="base" x1="126.0" y1="424.0" x2="616.0" y2="424.0"/>
+<text class="tick" x="132.0" y="442.0" text-anchor="middle">1</text>
+<text class="tick" x="291.3" y="442.0" text-anchor="middle">4</text>
+<text class="tick" x="371.0" y="442.0" text-anchor="middle">8</text>
+<text class="tick" x="450.7" y="442.0" text-anchor="middle">16</text>
+<text class="tick" x="530.3" y="442.0" text-anchor="middle">32</text>
+<text class="tick" x="610.0" y="442.0" text-anchor="middle">64</text>
+<path class="s1" d="M132.0 413.9L291.3 397.4L371.0 390.7L450.7 395.6L530.3 328.6L610.0 295.7"/>
+<path class="s2" d="M132.0 379.9L291.3 375.5L371.0 350.8L450.7 340.9L530.3 325.1L610.0 321.0"/>
+<path class="s3" d="M132.0 403.2L291.3 402.1L371.0 389.2L450.7 386.7L530.3 380.1L610.0 370.2"/>
+<path class="m3" d="M132.0 395.8L139.4 403.2L132.0 410.6L124.6 403.2Z"/>
+<path class="m3" d="M291.3 394.7L298.7 402.1L291.3 409.5L283.9 402.1Z"/>
+<path class="m3" d="M371.0 381.8L378.4 389.2L371.0 396.6L363.6 389.2Z"/>
+<path class="m3" d="M450.7 379.3L458.1 386.7L450.7 394.1L443.3 386.7Z"/>
+<path class="m3" d="M530.3 372.7L537.7 380.1L530.3 387.5L522.9 380.1Z"/>
+<path class="m3" d="M610.0 362.8L617.4 370.2L610.0 377.6L602.6 370.2Z"/>
+<circle class="m1" cx="132.0" cy="413.9" r="5.0"/>
+<circle class="m1" cx="291.3" cy="397.4" r="5.0"/>
+<circle class="m1" cx="371.0" cy="390.7" r="5.0"/>
+<circle class="m1" cx="450.7" cy="395.6" r="5.0"/>
+<circle class="m1" cx="530.3" cy="328.6" r="5.0"/>
+<circle class="m1" cx="610.0" cy="295.7" r="5.0"/>
+<rect class="m2" x="129.4" y="377.3" width="5.2" height="5.2"/>
+<rect class="m2" x="288.7" y="372.9" width="5.2" height="5.2"/>
+<rect class="m2" x="368.4" y="348.2" width="5.2" height="5.2"/>
+<rect class="m2" x="448.1" y="338.3" width="5.2" height="5.2"/>
+<rect class="m2" x="527.7" y="322.5" width="5.2" height="5.2"/>
+<rect class="m2" x="607.4" y="318.4" width="5.2" height="5.2"/>
+<rect class="panel" x="654.0" y="166.0" width="518.0" height="292.0" rx="12"/>
+<text class="shape" x="668.0" y="190.0">4096/128</text>
+<text class="cap" x="1158.0" y="189.0" text-anchor="end">at concurrency 64</text>
+<circle class="m1" cx="674.0" cy="205.0" r="4.0"/>
+<text class="val v1" x="688.0" y="209.0">Wide TP: 3,814.139 ms</text>
+<rect class="m2" x="671.9" y="220.9" width="4.2" height="4.2"/>
+<text class="val v2" x="688.0" y="227.0">External DP TCP: 3,094.017 ms</text>
+<path class="m3" d="M674.0 235.1L679.9 241.0L674.0 246.9L668.1 241.0Z"/>
+<text class="val v3" x="688.0" y="245.0">External DP RDMA: 365.352 ms</text>
+<line class="grid" x1="668.0" y1="399.4" x2="1158.0" y2="399.4"/>
+<line class="grid" x1="668.0" y1="337.7" x2="1158.0" y2="337.7"/>
+<line class="grid" x1="668.0" y1="276.0" x2="1158.0" y2="276.0"/>
+<line class="base" x1="668.0" y1="424.0" x2="1158.0" y2="424.0"/>
+<text class="tick" x="674.0" y="442.0" text-anchor="middle">1</text>
+<text class="tick" x="833.3" y="442.0" text-anchor="middle">4</text>
+<text class="tick" x="913.0" y="442.0" text-anchor="middle">8</text>
+<text class="tick" x="992.7" y="442.0" text-anchor="middle">16</text>
+<text class="tick" x="1072.3" y="442.0" text-anchor="middle">32</text>
+<text class="tick" x="1152.0" y="442.0" text-anchor="middle">64</text>
+<path class="s1" d="M674.0 409.7L833.3 407.0L913.0 390.5L992.7 393.1L1072.3 330.3L1152.0 301.8"/>
+<path class="s2" d="M674.0 355.8L833.3 358.6L913.0 342.9L992.7 326.8L1072.3 322.0L1152.0 307.4"/>
+<path class="s3" d="M674.0 398.7L833.3 398.6L913.0 391.2L992.7 386.8L1072.3 380.2L1152.0 364.7"/>
+<path class="m3" d="M674.0 391.3L681.4 398.7L674.0 406.1L666.6 398.7Z"/>
+<path class="m3" d="M833.3 391.2L840.7 398.6L833.3 406.0L825.9 398.6Z"/>
+<path class="m3" d="M913.0 383.8L920.4 391.2L913.0 398.6L905.6 391.2Z"/>
+<path class="m3" d="M992.7 379.4L1000.1 386.8L992.7 394.2L985.3 386.8Z"/>
+<path class="m3" d="M1072.3 372.8L1079.7 380.2L1072.3 387.6L1064.9 380.2Z"/>
+<path class="m3" d="M1152.0 357.3L1159.4 364.7L1152.0 372.1L1144.6 364.7Z"/>
+<circle class="m1" cx="674.0" cy="409.7" r="5.0"/>
+<circle class="m1" cx="833.3" cy="407.0" r="5.0"/>
+<circle class="m1" cx="913.0" cy="390.5" r="5.0"/>
+<circle class="m1" cx="992.7" cy="393.1" r="5.0"/>
+<circle class="m1" cx="1072.3" cy="330.3" r="5.0"/>
+<circle class="m1" cx="1152.0" cy="301.8" r="5.0"/>
+<rect class="m2" x="671.4" y="353.2" width="5.2" height="5.2"/>
+<rect class="m2" x="830.7" y="356.0" width="5.2" height="5.2"/>
+<rect class="m2" x="910.4" y="340.3" width="5.2" height="5.2"/>
+<rect class="m2" x="990.1" y="324.2" width="5.2" height="5.2"/>
+<rect class="m2" x="1069.7" y="319.4" width="5.2" height="5.2"/>
+<rect class="m2" x="1149.4" y="304.8" width="5.2" height="5.2"/>
+<text class="axis-title" transform="translate(30 340.0) rotate(-90)" text-anchor="middle">TTFT p50 (ms, log scale)</text>
+<text class="x-title" x="642.0" y="476.0" text-anchor="middle">Concurrency (requests in flight, log scale)</text>
+<rect class="panel" x="112.0" y="498.0" width="518.0" height="292.0" rx="12"/>
+<text class="shape" x="126.0" y="522.0">1024/256</text>
+<text class="cap" x="616.0" y="521.0" text-anchor="end">at concurrency 64</text>
+<circle class="m1" cx="132.0" cy="537.0" r="4.0"/>
+<text class="val v1" x="146.0" y="541.0">Wide TP: 53.361 ms</text>
+<rect class="m2" x="129.9" y="552.9" width="4.2" height="4.2"/>
+<text class="val v2" x="146.0" y="559.0">External DP TCP: 326.941 ms</text>
+<path class="m3" d="M132.0 567.1L137.9 573.0L132.0 578.9L126.1 573.0Z"/>
+<text class="val v3" x="146.0" y="577.0">External DP RDMA: 74.152 ms</text>
+<line class="grid" x1="126.0" y1="723.4" x2="616.0" y2="723.4"/>
+<text class="tick" x="104.0" y="727.4" text-anchor="end">10</text>
+<line class="grid" x1="126.0" y1="676.8" x2="616.0" y2="676.8"/>
+<text class="tick" x="104.0" y="680.8" text-anchor="end">100</text>
+<line class="grid" x1="126.0" y1="630.2" x2="616.0" y2="630.2"/>
+<text class="tick" x="104.0" y="634.2" text-anchor="end">1,000</text>
+<line class="base" x1="126.0" y1="756.0" x2="616.0" y2="756.0"/>
+<text class="tick" x="132.0" y="774.0" text-anchor="middle">1</text>
+<text class="tick" x="291.3" y="774.0" text-anchor="middle">4</text>
+<text class="tick" x="371.0" y="774.0" text-anchor="middle">8</text>
+<text class="tick" x="450.7" y="774.0" text-anchor="middle">16</text>
+<text class="tick" x="530.3" y="774.0" text-anchor="middle">32</text>
+<text class="tick" x="610.0" y="774.0" text-anchor="middle">64</text>
+<path class="s1" d="M132.0 750.6L291.3 745.2L371.0 735.3L450.7 689.6L530.3 689.5L610.0 689.5"/>
+<path class="s2" d="M132.0 710.9L291.3 708.9L371.0 704.0L450.7 669.7L530.3 666.9L610.0 652.9"/>
+<path class="s3" d="M132.0 729.5L291.3 720.1L371.0 685.6L450.7 685.1L530.3 683.1L610.0 682.9"/>
+<path class="m3" d="M132.0 722.1L139.4 729.5L132.0 736.9L124.6 729.5Z"/>
+<path class="m3" d="M291.3 712.7L298.7 720.1L291.3 727.5L283.9 720.1Z"/>
+<path class="m3" d="M371.0 678.2L378.4 685.6L371.0 693.0L363.6 685.6Z"/>
+<path class="m3" d="M450.7 677.7L458.1 685.1L450.7 692.5L443.3 685.1Z"/>
+<path class="m3" d="M530.3 675.7L537.7 683.1L530.3 690.5L522.9 683.1Z"/>
+<path class="m3" d="M610.0 675.5L617.4 682.9L610.0 690.3L602.6 682.9Z"/>
+<circle class="m1" cx="132.0" cy="750.6" r="5.0"/>
+<circle class="m1" cx="291.3" cy="745.2" r="5.0"/>
+<circle class="m1" cx="371.0" cy="735.3" r="5.0"/>
+<circle class="m1" cx="450.7" cy="689.6" r="5.0"/>
+<circle class="m1" cx="530.3" cy="689.5" r="5.0"/>
+<circle class="m1" cx="610.0" cy="689.5" r="5.0"/>
+<rect class="m2" x="129.4" y="708.3" width="5.2" height="5.2"/>
+<rect class="m2" x="288.7" y="706.3" width="5.2" height="5.2"/>
+<rect class="m2" x="368.4" y="701.4" width="5.2" height="5.2"/>
+<rect class="m2" x="448.1" y="667.1" width="5.2" height="5.2"/>
+<rect class="m2" x="527.7" y="664.3" width="5.2" height="5.2"/>
+<rect class="m2" x="607.4" y="650.3" width="5.2" height="5.2"/>
+<rect class="panel" x="654.0" y="498.0" width="518.0" height="292.0" rx="12"/>
+<text class="shape" x="668.0" y="522.0">4096/128</text>
+<text class="cap" x="1158.0" y="521.0" text-anchor="end">at concurrency 64</text>
+<circle class="m1" cx="674.0" cy="537.0" r="4.0"/>
+<text class="val v1" x="688.0" y="541.0">Wide TP: 55.619 ms</text>
+<rect class="m2" x="671.9" y="552.9" width="4.2" height="4.2"/>
+<text class="val v2" x="688.0" y="559.0">External DP TCP: 1,953.899 ms</text>
+<path class="m3" d="M674.0 567.1L679.9 573.0L674.0 578.9L668.1 573.0Z"/>
+<text class="val v3" x="688.0" y="577.0">External DP RDMA: 182.693 ms</text>
+<line class="grid" x1="668.0" y1="723.4" x2="1158.0" y2="723.4"/>
+<line class="grid" x1="668.0" y1="676.8" x2="1158.0" y2="676.8"/>
+<line class="grid" x1="668.0" y1="630.2" x2="1158.0" y2="630.2"/>
+<line class="base" x1="668.0" y1="756.0" x2="1158.0" y2="756.0"/>
+<text class="tick" x="674.0" y="774.0" text-anchor="middle">1</text>
+<text class="tick" x="833.3" y="774.0" text-anchor="middle">4</text>
+<text class="tick" x="913.0" y="774.0" text-anchor="middle">8</text>
+<text class="tick" x="992.7" y="774.0" text-anchor="middle">16</text>
+<text class="tick" x="1072.3" y="774.0" text-anchor="middle">32</text>
+<text class="tick" x="1152.0" y="774.0" text-anchor="middle">64</text>
+<path class="s1" d="M674.0 749.9L833.3 688.9L913.0 688.6L992.7 688.5L1072.3 688.5L1152.0 688.7"/>
+<path class="s2" d="M674.0 711.3L833.3 648.5L913.0 648.9L992.7 637.4L1072.3 625.5L1152.0 616.7"/>
+<path class="s3" d="M674.0 729.2L833.3 685.5L913.0 683.8L992.7 681.8L1072.3 669.4L1152.0 664.6"/>
+<path class="m3" d="M674.0 721.8L681.4 729.2L674.0 736.6L666.6 729.2Z"/>
+<path class="m3" d="M833.3 678.1L840.7 685.5L833.3 692.9L825.9 685.5Z"/>
+<path class="m3" d="M913.0 676.4L920.4 683.8L913.0 691.2L905.6 683.8Z"/>
+<path class="m3" d="M992.7 674.4L1000.1 681.8L992.7 689.2L985.3 681.8Z"/>
+<path class="m3" d="M1072.3 662.0L1079.7 669.4L1072.3 676.8L1064.9 669.4Z"/>
+<path class="m3" d="M1152.0 657.2L1159.4 664.6L1152.0 672.0L1144.6 664.6Z"/>
+<circle class="m1" cx="674.0" cy="749.9" r="5.0"/>
+<circle class="m1" cx="833.3" cy="688.9" r="5.0"/>
+<circle class="m1" cx="913.0" cy="688.6" r="5.0"/>
+<circle class="m1" cx="992.7" cy="688.5" r="5.0"/>
+<circle class="m1" cx="1072.3" cy="688.5" r="5.0"/>
+<circle class="m1" cx="1152.0" cy="688.7" r="5.0"/>
+<rect class="m2" x="671.4" y="708.7" width="5.2" height="5.2"/>
+<rect class="m2" x="830.7" y="645.9" width="5.2" height="5.2"/>
+<rect class="m2" x="910.4" y="646.3" width="5.2" height="5.2"/>
+<rect class="m2" x="990.1" y="634.8" width="5.2" height="5.2"/>
+<rect class="m2" x="1069.7" y="622.9" width="5.2" height="5.2"/>
+<rect class="m2" x="1149.4" y="614.1" width="5.2" height="5.2"/>
+<text class="axis-title" transform="translate(30 672.0) rotate(-90)" text-anchor="middle">ITL p99 (ms, log scale)</text>
+<text class="x-title" x="642.0" y="808.0" text-anchor="middle">Concurrency (requests in flight, log scale)</text>
+<rect class="panel" x="112.0" y="830.0" width="518.0" height="292.0" rx="12"/>
+<text class="shape" x="126.0" y="854.0">1024/256</text>
+<text class="cap" x="616.0" y="853.0" text-anchor="end">at concurrency 64</text>
+<circle class="m1" cx="132.0" cy="869.0" r="4.0"/>
+<text class="val v1" x="146.0" y="873.0">Wide TP: 2,314.155 tok/s</text>
+<rect class="m2" x="129.9" y="884.9" width="4.2" height="4.2"/>
+<text class="val v2" x="146.0" y="891.0">External DP TCP: 1,017.434 tok/s</text>
+<path class="m3" d="M132.0 899.1L137.9 905.0L132.0 910.9L126.1 905.0Z"/>
+<text class="val v3" x="146.0" y="909.0">External DP RDMA: 3,921.562 tok/s</text>
+<line class="base" x1="126.0" y1="1088.0" x2="616.0" y2="1088.0"/>
+<text class="tick" x="104.0" y="1092.0" text-anchor="end">0</text>
+<line class="grid" x1="126.0" y1="1051.0" x2="616.0" y2="1051.0"/>
+<text class="tick" x="104.0" y="1055.0" text-anchor="end">1,000</text>
+<line class="grid" x1="126.0" y1="1014.0" x2="616.0" y2="1014.0"/>
+<text class="tick" x="104.0" y="1018.0" text-anchor="end">2,000</text>
+<line class="grid" x1="126.0" y1="977.0" x2="616.0" y2="977.0"/>
+<text class="tick" x="104.0" y="981.0" text-anchor="end">3,000</text>
+<line class="grid" x1="126.0" y1="940.0" x2="616.0" y2="940.0"/>
+<text class="tick" x="104.0" y="944.0" text-anchor="end">4,000</text>
+<text class="tick" x="132.0" y="1106.0" text-anchor="middle">1</text>
+<text class="tick" x="291.3" y="1106.0" text-anchor="middle">4</text>
+<text class="tick" x="371.0" y="1106.0" text-anchor="middle">8</text>
+<text class="tick" x="450.7" y="1106.0" text-anchor="middle">16</text>
+<text class="tick" x="530.3" y="1106.0" text-anchor="middle">32</text>
+<text class="tick" x="610.0" y="1106.0" text-anchor="middle">64</text>
+<path class="s1" d="M132.0 1073.8L291.3 1047.7L371.0 1021.9L450.7 990.1L530.3 990.4L610.0 1002.4"/>
+<path class="s2" d="M132.0 1085.9L291.3 1080.6L371.0 1076.3L450.7 1071.8L530.3 1063.1L610.0 1050.4"/>
+<path class="s3" d="M132.0 1082.9L291.3 1070.4L371.0 1057.2L450.7 1034.3L530.3 1008.5L610.0 942.9"/>
+<path class="m3" d="M132.0 1075.5L139.4 1082.9L132.0 1090.3L124.6 1082.9Z"/>
+<path class="m3" d="M291.3 1063.0L298.7 1070.4L291.3 1077.8L283.9 1070.4Z"/>
+<path class="m3" d="M371.0 1049.8L378.4 1057.2L371.0 1064.6L363.6 1057.2Z"/>
+<path class="m3" d="M450.7 1026.9L458.1 1034.3L450.7 1041.7L443.3 1034.3Z"/>
+<path class="m3" d="M530.3 1001.1L537.7 1008.5L530.3 1015.9L522.9 1008.5Z"/>
+<path class="m3" d="M610.0 935.5L617.4 942.9L610.0 950.3L602.6 942.9Z"/>
+<circle class="m1" cx="132.0" cy="1073.8" r="5.0"/>
+<circle class="m1" cx="291.3" cy="1047.7" r="5.0"/>
+<circle class="m1" cx="371.0" cy="1021.9" r="5.0"/>
+<circle class="m1" cx="450.7" cy="990.1" r="5.0"/>
+<circle class="m1" cx="530.3" cy="990.4" r="5.0"/>
+<circle class="m1" cx="610.0" cy="1002.4" r="5.0"/>
+<rect class="m2" x="129.4" y="1083.3" width="5.2" height="5.2"/>
+<rect class="m2" x="288.7" y="1078.0" width="5.2" height="5.2"/>
+<rect class="m2" x="368.4" y="1073.7" width="5.2" height="5.2"/>
+<rect class="m2" x="448.1" y="1069.2" width="5.2" height="5.2"/>
+<rect class="m2" x="527.7" y="1060.5" width="5.2" height="5.2"/>
+<rect class="m2" x="607.4" y="1047.8" width="5.2" height="5.2"/>
+<rect class="panel" x="654.0" y="830.0" width="518.0" height="292.0" rx="12"/>
+<text class="shape" x="668.0" y="854.0">4096/128</text>
+<text class="cap" x="1158.0" y="853.0" text-anchor="end">at concurrency 64</text>
+<circle class="m1" cx="674.0" cy="869.0" r="4.0"/>
+<text class="val v1" x="688.0" y="873.0">Wide TP: 1,491.536 tok/s</text>
+<rect class="m2" x="671.9" y="884.9" width="4.2" height="4.2"/>
+<text class="val v2" x="688.0" y="891.0">External DP TCP: 290.025 tok/s</text>
+<path class="m3" d="M674.0 899.1L679.9 905.0L674.0 910.9L668.1 905.0Z"/>
+<text class="val v3" x="688.0" y="909.0">External DP RDMA: 2,033.762 tok/s</text>
+<line class="base" x1="668.0" y1="1088.0" x2="1158.0" y2="1088.0"/>
+<line class="grid" x1="668.0" y1="1051.0" x2="1158.0" y2="1051.0"/>
+<line class="grid" x1="668.0" y1="1014.0" x2="1158.0" y2="1014.0"/>
+<line class="grid" x1="668.0" y1="977.0" x2="1158.0" y2="977.0"/>
+<line class="grid" x1="668.0" y1="940.0" x2="1158.0" y2="940.0"/>
+<text class="tick" x="674.0" y="1106.0" text-anchor="middle">1</text>
+<text class="tick" x="833.3" y="1106.0" text-anchor="middle">4</text>
+<text class="tick" x="913.0" y="1106.0" text-anchor="middle">8</text>
+<text class="tick" x="992.7" y="1106.0" text-anchor="middle">16</text>
+<text class="tick" x="1072.3" y="1106.0" text-anchor="middle">32</text>
+<text class="tick" x="1152.0" y="1106.0" text-anchor="middle">64</text>
+<path class="s1" d="M674.0 1075.8L833.3 1058.8L913.0 1041.8L992.7 1037.0L1072.3 1031.8L1152.0 1032.8"/>
+<path class="s2" d="M674.0 1086.3L833.3 1083.6L913.0 1081.3L992.7 1080.2L1072.3 1078.6L1152.0 1077.3"/>
+<path class="s3" d="M674.0 1083.2L833.3 1073.0L913.0 1061.9L992.7 1051.0L1072.3 1034.4L1152.0 1012.8"/>
+<path class="m3" d="M674.0 1075.8L681.4 1083.2L674.0 1090.6L666.6 1083.2Z"/>
+<path class="m3" d="M833.3 1065.6L840.7 1073.0L833.3 1080.4L825.9 1073.0Z"/>
+<path class="m3" d="M913.0 1054.5L920.4 1061.9L913.0 1069.3L905.6 1061.9Z"/>
+<path class="m3" d="M992.7 1043.6L1000.1 1051.0L992.7 1058.4L985.3 1051.0Z"/>
+<path class="m3" d="M1072.3 1027.0L1079.7 1034.4L1072.3 1041.8L1064.9 1034.4Z"/>
+<path class="m3" d="M1152.0 1005.4L1159.4 1012.8L1152.0 1020.2L1144.6 1012.8Z"/>
+<circle class="m1" cx="674.0" cy="1075.8" r="5.0"/>
+<circle class="m1" cx="833.3" cy="1058.8" r="5.0"/>
+<circle class="m1" cx="913.0" cy="1041.8" r="5.0"/>
+<circle class="m1" cx="992.7" cy="1037.0" r="5.0"/>
+<circle class="m1" cx="1072.3" cy="1031.8" r="5.0"/>
+<circle class="m1" cx="1152.0" cy="1032.8" r="5.0"/>
+<rect class="m2" x="671.4" y="1083.7" width="5.2" height="5.2"/>
+<rect class="m2" x="830.7" y="1081.0" width="5.2" height="5.2"/>
+<rect class="m2" x="910.4" y="1078.7" width="5.2" height="5.2"/>
+<rect class="m2" x="990.1" y="1077.6" width="5.2" height="5.2"/>
+<rect class="m2" x="1069.7" y="1076.0" width="5.2" height="5.2"/>
+<rect class="m2" x="1149.4" y="1074.7" width="5.2" height="5.2"/>
+<text class="axis-title" transform="translate(30 1004.0) rotate(-90)" text-anchor="middle">Output (tok/s)</text>
+<text class="x-title" x="642.0" y="1140.0" text-anchor="middle">Concurrency (requests in flight, log scale)</text>
+<text class="note" x="40" y="1180">RDMA follow-up used NCCL GDRDMA on 8 × ConnectX-7 InfiniBand (1,088/1,088 requests, 0 errors); Wide TP was not rerun in this follow-up.</text>
+<text class="note" x="40" y="1198">RDMA External DP led output at c=64; Wide TP led c=1–32 output and all ITL p99 cells. At 1024/256 c=8, RDMA ITL p99 rose vs TCP (64.911 vs 26.162 ms).</text>
+</svg>

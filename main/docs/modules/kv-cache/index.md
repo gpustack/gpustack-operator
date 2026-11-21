@@ -1,7 +1,8 @@
 # KV Cache
 
-A shared KV cache lets compatible inference workloads reuse cached state. A backend runs the store.
-Pools and bindings grant capacity to namespaces. Cache quota is separate from accelerator quota.
+A shared KV cache lets compatible inference workloads reuse cached prefix blocks. A `KVCacheBackend`
+runs the store, while `KVCachePool` and `KVCachePoolBinding` grant capacity to namespaces. Cache
+quota is separate from accelerator quota.
 
 ## Contents
 
@@ -24,53 +25,54 @@ flowchart TD
     PODS -> BACKEND
 -->
 
-A binding grants capacity only; read the
-[isolation limitations](/gpustack-operator/main/docs/modules/kv-cache/pool/index.md#limitations) before sharing a backend between tenants.
+A `KVCachePoolBinding` provisions capacity and registers a reuse domain, not network access control.
+Review [Limitations](/gpustack-operator/main/docs/modules/kv-cache/pool/index.md#limitations) before sharing one backend across distrusting tenants.
 
 ## Configuration
 
-Start with the annotated [backend example](/gpustack-operator/main/docs/modules/kv-cache/backend/index.md#connection-and-medium) and its constraints.
-Configure [pools and bindings](/gpustack-operator/main/docs/modules/kv-cache/pool/index.md) for quotas and reuse domains.
-[KV Cache Injection](/gpustack-operator/main/docs/modules/kv-cache/injection/index.md) defines the Pod labels, annotations and engine settings.
+Start with the [backend manifest](/gpustack-operator/main/docs/modules/kv-cache/backend/index.md#connections-and-storage-media) to deploy or attach a store,
+then configure [pools and bindings](/gpustack-operator/main/docs/modules/kv-cache/pool/index.md) for namespace quotas and reuse domains.
+[Pod injection](/gpustack-operator/main/docs/modules/kv-cache/pool/index.md#pod-injection) covers opt-in `Pod` labels, annotations, and verification.
 
-For an end-to-end configuration, follow the
+For an end-to-end deployment sequence, follow the
 [Shared Cache Walkthrough](/gpustack-operator/main/docs/walkthroughs/kv-cache/shared-cache/index.md).
 
 ## Operations
 
 ### Step 1: Configure storage
 
-Select memory and optional disk tiers. See [KV Cache Backend](/gpustack-operator/main/docs/modules/kv-cache/backend/index.md),
-[Local Disk Tier](/gpustack-operator/main/docs/modules/kv-cache/local-disk-tier/index.md) and [Disk-Heavy Nodes](/gpustack-operator/main/docs/modules/kv-cache/disk-heavy-nodes/index.md).
+Choose memory segments and optional local disk offload in [KV Cache Backend](/gpustack-operator/main/docs/modules/kv-cache/backend/index.md) and
+[KV Cache Local Disk Tier](/gpustack-operator/main/docs/modules/kv-cache/local-disk-tier/index.md) (including
+[disk and memory sizing](/gpustack-operator/main/docs/modules/kv-cache/local-disk-tier/index.md#disk-and-memory-sizing)).
 
-### Step 2: Check status
+### Step 2: Verify backend readiness
 
-Inspect the backend and its conditions:
+Inspect backend readiness and conditions:
 
 ```bash
 kubectl get kvcb
 kubectl describe kvcb <backend-name>
 ```
 
-**Verification:** Check the phase and conditions against [Backend Status](/gpustack-operator/main/docs/modules/kv-cache/backend/index.md#status-and-conditions).
-For leader health and metrics, see [KV Cache Election and Failover](/gpustack-operator/main/docs/modules/kv-cache/leader/index.md#health-checks).
+**Verification:** Confirm `PHASE` is `Ready` against
+[Status and conditions](/gpustack-operator/main/docs/modules/kv-cache/backend/index.md#status-and-conditions). For leader probes and failover, see
+[KV Cache Election and Failover](/gpustack-operator/main/docs/modules/kv-cache/leader/index.md#health-checks).
 
 ## Troubleshooting
 
-If a workload cannot use the cache, inspect backend, pool and binding status.
+If a workload cannot attach or write to the cache, inspect the backend, pool, and binding status:
 
 | Condition | Reason | Resolution |
 |---|---|---|
-| `MembersMounted=False` | `AmbiguousMemberIdentity` | Use node selectors that place the groups on different nodes. |
-| Writes fail with `RPC_FAIL (-900)` | Possible store and client minor-line mismatch | Check [version compatibility](/gpustack-operator/main/docs/modules/kv-cache/backend/index.md#version-compatibility). |
+| `MembersMounted=False` | `AmbiguousMemberIdentity` | Place host-network member groups on separate `Node`s via *`nodeSelector`*. |
+| Engine writes fail with `RPC_FAIL (-900)` | Store and client minor versions differ | Align store and engine versions in [Version compatibility](/gpustack-operator/main/docs/modules/kv-cache/backend/index.md#version-compatibility). |
 
-Use [Injection Refusals](/gpustack-operator/main/docs/modules/kv-cache/injection/index.md#refusals-and-fixes) for webhook messages and fixes.
-For quota and domain failures, see [Pool Operating Notes](/gpustack-operator/main/docs/modules/kv-cache/pool/index.md#operating-notes).
-For backend failures, check [Backend Status](/gpustack-operator/main/docs/modules/kv-cache/backend/index.md#status-and-conditions).
+Use [Refused engine launch](/gpustack-operator/main/docs/modules/kv-cache/pool/index.md#refused-engine-launch) for admission refusals,
+[Pod binding verification](/gpustack-operator/main/docs/modules/kv-cache/pool/index.md#pod-binding-verification) to inspect admitted `Pod`s, and
+[Quota and deletion checks](/gpustack-operator/main/docs/modules/kv-cache/pool/index.md#quota-and-deletion-checks) for deletion holds.
 
 ---
 
-**See also** — [Model Deployment](/gpustack-operator/main/docs/modules/model-deployment/index.md) (cache consumers) ·
-[RDMA Networking](/gpustack-operator/main/docs/modules/rdma/index.md) (transport)
+**See also** — [Model Deployment](/gpustack-operator/main/docs/modules/model-deployment/index.md) (managed serving consumers) · [RDMA Networking](/gpustack-operator/main/docs/modules/rdma/index.md) (fabric endpoints)
 
-**Next** → [Shared Cache Walkthrough](/gpustack-operator/main/docs/walkthroughs/kv-cache/shared-cache/index.md) — create a shared cache.
+**Next** → [Shared Cache Walkthrough](/gpustack-operator/main/docs/walkthroughs/kv-cache/shared-cache/index.md) — deploy and verify a shared cache.

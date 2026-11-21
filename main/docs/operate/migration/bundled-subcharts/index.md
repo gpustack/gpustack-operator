@@ -1,32 +1,35 @@
 # Migrating to Bundled Subcharts
 
-Through v0.7.x the chart deployed only the worker and Device Managers; the worker installed
-Kueue, Node Feature Discovery and the two CSI drivers at runtime, each its own Helm release:
+Through v0.7.x, the Helm chart deployed only the worker and Device Managers while the worker installed
+four separate Helm releases at runtime:
 
-| Runtime release | Becomes |
+| Legacy runtime release | Bundled subchart |
 |---|---|
-| `gpustack-kueue` | the `kueue` subchart of the operator release |
-| `gpustack-node-feature-discovery` | the `node-feature-discovery` subchart |
-| `gpustack-csi-driver-nfs` | the `csi-driver-nfs` subchart |
-| `gpustack-csi-driver-s3` | the `csi-driver-s3` subchart |
+| `gpustack-kueue` | `kueue` |
+| `gpustack-node-feature-discovery` | `node-feature-discovery` |
+| `gpustack-csi-driver-nfs` | `csi-driver-nfs` |
+| `gpustack-csi-driver-s3` | `csi-driver-s3` |
 
-They are now subcharts of the operator release, sharing its `values.yaml`; the worker installs
-nothing at runtime by default (`worker.disableApplications` contains only `*`).
-
-Nothing is torn down: Helm's ownership transfer adopts those objects in place, so your
-`ClusterQueue`s, `Workload`s, `ResourceFlavor`s, node labels and mounted volumes survive.
+Current releases bundle all four as subcharts under one `values.yaml` with
+`worker.disableApplications: ["*"]`. Helm adopts existing resources in place, preserving live
+`ClusterQueue`s, `Workload`s, `ResourceFlavor`s, `Node` labels, and mounted volumes.
 
 ## Contents
 
-- [One-time upgrade](#one-time-upgrade)
+- [Helm ownership transfer](#helm-ownership-transfer)
 - [Upgrade hooks](#upgrade-hooks)
 - [Automatic image-mode migration](#automatic-image-mode-migration)
 - [Troubleshooting](#troubleshooting)
-- [Permanent changes](#permanent-changes)
+- [Chart configuration and cleanup](#chart-configuration-and-cleanup)
 - [Rollback data loss](#rollback-data-loss)
 - [Verification](#verification)
 
-## One-time upgrade
+## Helm ownership transfer
+
+Before upgrading, snapshot your scheduling chain (see [Rollback data loss](#rollback-data-loss)), then
+upgrade with **Helm 3.21+** and `--take-ownership`[^1]:
+
+[^1]: `--take-ownership` requires Helm 3.21+, matching the client version pinned in `hack/lib/helm.sh`.
 
 ```bash
 helm repo add gpustack https://docs.gpustack.ai/gpustack-operator/charts
@@ -36,87 +39,53 @@ helm upgrade gpustack-operator gpustack/gpustack-operator \
   --take-ownership
 ```
 
-`--take-ownership` legalizes the adoption: Helm otherwise refuses every object carrying another
-release's ownership metadata. Needed **once**: drop it afterwards, since it adopts *any* live
-object the render names, hand-created ones included.
+Pass `--take-ownership` **only once** so Helm can import objects owned by the four legacy releases.
+Omit the flag on subsequent upgrades so Helm does not adopt unrelated hand-created resources.
 
-Helm 3.21+ only: that is the version this migration was validated with, the one `hack/lib/helm.sh`
-pins, and older clients have no such flag.
+### Release and namespace identity
 
-### Preserve release and namespace
+Keep release name **`gpustack-operator`** and your existing namespace (**`gpustack-system`** by
+default):
 
-Keep the install instructions' release name **`gpustack-operator`** and namespace
-**`gpustack-system`**. Both are load-bearing:
-
-- The release name bases `gpustack-operator-worker` and
-  `gpustack-operator-device-manager-<manufacturer>`, which the docs, the chart's `files/cleanup.sh`
-  fallback and the e2e suites assume; the subcharts pin their own through `fullnameOverride`.
-  Renaming the release renames the worker and its Device Managers, which is a rollout rather than
-  an adoption.
-- The namespace is where your install is, and an upgrade cannot move a release. Nothing in the
-  chart requires this one: Kueue's `managedJobsNamespaceSelector`, which keeps Kueue off the
-  operator's own `Job`s (migration hooks included), renders from the release namespace, so a fresh
-  install can go anywhere. The only rule is Kueue's own: it refuses to start when it matches its
-  own namespace.
+- **Release name**: `gpustack-operator-worker` and `gpustack-operator-device-manager-<manufacturer>`
+  derive their names from the release, whereas bundled subcharts pin fixed names via `fullnameOverride`.
+- **Namespace**: Helm cannot move an installed release across namespaces. Fresh installs can use any
+  namespace except one matched by Kueue's `managedJobsNamespaceSelector`.
 
 ## Upgrade hooks
 
-Two hook `Job`s run the operator image, which bundles `helm`, `kubectl`, `jq` and the packaged chart.
-Both are idempotent and no-ops on a healthy cluster.
+Two idempotent hook `Job`s run during `helm upgrade` (skipped only if you pass `--no-hooks`):
 
-**Before** the upgrade (`pre-upgrade`, and `pre-install` too):
+1. **`pre-upgrade` / `pre-install`**: clears any `Terminating` Kueue CRD deadlock (deleting Kueue
+   webhook configurations before stripping `kueue.x-k8s.io/resource-in-use` finalizers) and applies
+   subchart `crds/` updates that Helm normally skips on upgrade.
+2. **`post-upgrade`**: deletes the four legacy Helm release `Secret`s (`kubectl delete secret -l owner=helm,name=<release>`)
+   without uninstalling their adopted objects, then prunes obsolete legacy objects while preserving
+   CRDs, `PersistentVolume`s, and `PersistentVolumeClaim`s.
 
-1. Reap a stranded Kueue. Custom resources still holding `kueue.x-k8s.io/resource-in-use` when
-   their controller is torn down strand Kueue's CRDs `Terminating` forever, failing every install of
-   this chart. The `Job` deletes the Kueue webhook configurations first (`failurePolicy: Fail` would
-   reject the finalizer-clearing patch), strips the finalizers, and drains the CRDs. It runs on
-   fresh installs too, which is the only way onto such a cluster.
-2. Apply the subcharts' `crds/`. Helm applies `crds/` on install only; without this NFD's CRD
-   schema changes never land and a newly enabled NFD has no CRD for the chart's `NodeFeatureRule`.
-
-**After** it (`post-upgrade`, upgrades only):
-
-3. Retire the four legacy release records (`kubectl delete secret -l owner=helm,name=<release>`),
-   and never `helm uninstall` them: that deletes the objects just adopted. Left in place, a later
-   `helm uninstall gpustack-kueue` destroys them.
-4. Prune what the legacy releases created and the new render does not contain. Adoption rewrites
-   `app.kubernetes.io/instance` on everything the render resolves, so a surviving legacy instance
-   label marks what the render never mentions: unowned, and invisible to `helm uninstall`. Excluded:
-   CRDs (a deleted CRD takes its custom resources), `PersistentVolume`s, `PersistentVolumeClaim`s.
-
-`helm upgrade --no-hooks` skips both, to do this by hand. Afterwards `helm list` must show one
-release, not five:
+Never run `helm uninstall gpustack-kueue` manually; uninstalling a legacy release deletes the objects
+the operator release just adopted. Confirm that only one release remains:
 
 ```bash
-helm list -n gpustack-system     # expect: gpustack-operator only
+helm list -n gpustack-system
 ```
 
 ## Automatic image-mode migration
 
-Installing the bundled chart from inside its own image, the worker detects its own legacy release
-and sets the transfer for that install only, never unconditionally, so there is nothing to run.
+In image mode, the worker detects its own legacy runtime release `Secret`s and enables ownership
+transfer automatically for that single upgrade. No manual command is required.
 
 ## Troubleshooting
 
-Everything above assumes Helm releases. Kueue and NFD that Helm did not install come from raw
-manifests, kustomize, or another operator bundling them; nothing adopts those, and image-mode
-detection (a `Secret` labelled `owner=helm,name=…`) never sees them.
+Helm hooks adopt only prior Helm releases. If Kueue or NFD was installed from raw manifests, kustomize,
+or another operator, choose one of two paths:
 
-- **Kueue collides, on its CRDs.** This chart templates them under API-group names, not
-  release-derived ones, and Helm refuses *missing* ownership metadata as firmly as another release's:
-  `invalid ownership metadata`, for the absent `app.kubernetes.io/managed-by: Helm` label and
-  `meta.helm.sh/release-name` annotation.
-- **NFD's CRDs do not collide.** Its `crds/` are applied on install, skipped when present, never
-  recorded: no ownership metadata, never checked.
-- **The namespaced objects not colliding is the real hazard.** A manifest-installed Kueue lives in
-  `kueue-system`, this chart's in the release namespace: no conflict, no error, and a forced install
-  then leaves two Kueue controllers reconciling the same `Workload`s cluster-wide.
+- **Collision symptoms**: Helm rejects unowned Kueue CRDs with `invalid ownership metadata` (NFD's
+  `crds/` skip when present). Worse, a manifest-installed Kueue in `kueue-system` does not collide on
+  namespaced objects, so forcing `--take-ownership` leaves two Kueue controllers reconciling the same
+  `Workload`s.
 
-`--take-ownership` gets past that error, but adopting a foreign Kueue that way leaves the
-two-controllers hazard above. Pick a
-starting point instead.
-
-Keep what you have when something else depends on that Kueue:
+**Option 1: Keep the external Kueue and NFD** when other workloads depend on them:
 
 ```bash
 helm upgrade --install gpustack-operator gpustack/gpustack-operator \
@@ -124,32 +93,29 @@ helm upgrade --install gpustack-operator gpustack/gpustack-operator \
   --set kueue.enabled=false --set node-feature-discovery.enabled=false
 ```
 
-Both switches are supported paths, not workarounds; NFD off still leaves the `gpustack-cpu-info`
-`NodeFeatureRule` the scheduling chain starts from, applied unconditionally by the worker against
-whichever NFD is present. You then keep both at operator-compatible versions.
+The worker still applies `gpustack-cpu-info` against your existing NFD. Keep both components at
+operator-compatible versions.
 
-Or hand them over: delete the non-Helm install's workloads, `Service`s, RBAC and, importantly,
-its webhook configurations, whose `failurePolicy: Fail` would reject every `Workload` write once their
-`Service` is gone. Leave the CRDs alone (deleting one deletes every custom resource of that kind) and
-give them the ownership Helm looks for:
+**Option 2: Hand Kueue over to the chart** by deleting the external Kueue's `Deployment`s, `Service`s,
+RBAC, and webhook configurations (`failurePolicy: Fail`), keep its CRDs intact, and stamp Helm
+ownership on those CRDs before installing:
 
 ```bash
 for crd in $(kubectl get crd -o name | grep 'kueue\.x-k8s\.io'); do
-  kubectl label    "$crd" app.kubernetes.io/managed-by=Helm --overwrite
+  kubectl label "$crd" app.kubernetes.io/managed-by=Helm --overwrite
   kubectl annotate "$crd" meta.helm.sh/release-name=gpustack-operator \
                           meta.helm.sh/release-namespace=gpustack-system --overwrite
 done
 ```
 
-then install normally: this is `--take-ownership`'s adoption, narrowed to what needs it. Read [Do not roll
-back](#rollback-data-loss) first, because the release then owns those CRDs.
+Review [Rollback data loss](#rollback-data-loss) first, because the chart release then owns Kueue's CRDs.
 
-## Permanent changes
+## Chart configuration and cleanup
 
 ### Manufacturer configuration
 
-The top-level `manufacturers` map is now `global.manufacturers`, each entry carrying
-a manufacturer's whole identity, not only its PCI vendor ID:
+Top-level `manufacturers` moved to `global.manufacturers` so both the operator chart and bundled Kueue
+read one identity map:
 
 ```yaml
 global:
@@ -162,168 +128,117 @@ global:
       partitionKind: mig
 ```
 
-The bundled Kueue subchart reads the value too, so it moved under `global` to share it with both
-charts. If you left it unset, no change is needed; the defaults moved with it. Convert an override
-to a row and remove the old key: nothing reads top-level `manufacturers` any more, so leaving it
-there makes the Device Managers fall back to the default vendor IDs.
+Default values moved automatically. If you customized top-level `manufacturers`, migrate those entries
+under `global.manufacturers` and delete the old key so Device Managers do not fall back to defaults.
 
-The chart now creates **`ascend`, `iluvatar`, `mthreads` and `nvidia`**, and no longer `amd`, whose
-allocator injects its own device nodes. Neither is a consequence of this migration.
-
-Creation still happens only where the class is absent or already belongs to this release.
-`runtimeName`, which most rows state, names the class the operator will *use*; creating one is gated
-on the narrower `runtimeInjectsDriver` or `runtimeInjectsDevices`, where the runtime is certainly
-installed. `deviceManager.createRuntimeClasses=false` remains the opt-out.
+The chart creates `RuntimeClass` objects only where `runtimeInjectsDriver` or `runtimeInjectsDevices`
+is true (`ascend`, `iluvatar`, `mthreads`, `nvidia`, and no longer `amd`). Set
+`deviceManager.createRuntimeClasses=false` to opt out.
 
 ### Certificate configuration
 
-The block that sat under `worker` is `global.certmanager`, same keys, same `auto` default:
+`worker.certmanager` moved to `global.certmanager` (default `enabled: auto`) and now governs both the
+worker and bundled Kueue:
 
 ```yaml
 global:
   certmanager:
-    enabled: auto
+    enabled: auto  # enum: auto, true, false
     issuer:
-      name: ""
+      name: ""     # optional; covers both worker and Kueue without creating self-signed Issuers
       kind: Issuer
 ```
 
-It moved for the reason `manufacturers` did: the bundled Kueue reads it, ending a split where the
-worker decided cert-manager for itself while Kueue, defaulting off upstream, never saw `auto`'s CRD
-detection.
+On clusters with cert-manager installed, `auto` switches Kueue from self-managed webhook certificates
+to cert-manager `Certificate`s and `cainjector` CA bundles. To keep self-managed certificates across
+all components, pass `--set global.certmanager.enabled=false` in the migration `helm upgrade` (legacy
+`worker.certmanager` values are ignored).
 
-On a cluster that has cert-manager, this upgrade therefore moves Kueue onto it. Kueue stops
-generating and rotating its own webhook certificate and consumes a `Certificate` this chart creates,
-and cainjector fills the CA bundles its webhooks and CRD conversion carry.
+### Disabling cert-manager
 
-Decide before upgrading, and pass it **in the same `helm upgrade`**: `--set
-global.certmanager.enabled=false` keeps every component, worker included, self-managing. A
-`worker.certmanager` left in your values is ignored.
+Enabling cert-manager later requires no extra steps. Disabling cert-manager after it was active fails
+a plain `helm upgrade` twice: Helm rejects `Secret/kueue-webhook-server-cert` on missing ownership
+metadata, and `visibility.kueue.x-k8s.io` `APIService`s reject `insecureSkipTLSVerify: true` while
+`cainjector`'s `caBundle` remains set.
 
-Naming an existing issuer (`global.certmanager.issuer.name`) now covers Kueue's certificates as well
-as the worker's, and no self-signed `Issuer` is created for either.
-
-#### Disabling cert-manager
-
-After the migration, turning cert-manager on later needs no flags: everything that `--set
-global.certmanager.enabled=auto` (or `true`) once changed (`insecureSkipTLSVerify` on the
-visibility `APIService`s, Kueue's self-managed `Secret`) was written by Helm and is known to Helm,
-which removes it.
-
-The other way unwinds what cert-manager wrote, which Helm never recorded, and fails twice:
-
-- `Secret "kueue-webhook-server-cert" ... cannot be imported into the current release: invalid
-  ownership metadata`. Kueue's chart templates that `Secret` when self-managing, cert-manager creates
-  it otherwise: same name, no Helm ownership. Checked **before** any hook runs, and deleting it by
-  hand fails too, because the live `Certificate` is reissued within seconds.
-- Past that, `spec.insecureSkipTLSVerify: Invalid value: true: may not be true if caBundle is
-  present` on both `visibility.kueue.x-k8s.io` `APIService`s: self-management sets that field while
-  the live object carries cainjector's CA bundle. **Not atomic**: the release lands in `failed`
-  with the visibility API `FailedDiscoveryCheck`.
-
-The sequence that completes cleanly, verified on a cluster:
+Switch cleanly from cert-manager to self-managed certificates in two steps:
 
 ```bash
-# 1. Drop the two APIServices carrying cert-manager's CA bundle. The release recreates them.
+# 1. Delete Kueue visibility APIServices carrying cainjector CA bundles (recreated by the upgrade):
 kubectl delete apiservice v1beta1.visibility.kueue.x-k8s.io v1beta2.visibility.kueue.x-k8s.io
 
-# 2. --take-ownership lets Helm adopt the Secret cert-manager owns (Helm 3.21+).
+# 2. Adopt kueue-webhook-server-cert with Helm 3.21+:
 helm upgrade gpustack-operator <chart> --namespace gpustack-system --reset-then-reuse-values \
   --set global.certmanager.enabled=false --take-ownership --wait
 ```
 
-It also recovers the release if you have already hit the second failure.
-
-The same happens if cert-manager is uninstalled while `global.certmanager.enabled` is `auto`:
-the answer flips with nobody editing a value, and the next upgrade, even an image bump, fails
-identically. Where cert-manager comes and goes, state `"true"` or `"false"` rather than `auto`.
+If cert-manager may be installed or removed independently, pin `global.certmanager.enabled` to `true`
+or `false` rather than `auto`.
 
 ### Kueue removal on uninstall
 
-Kueue used to be its own release and outlived an operator uninstall. The release now owns Kueue
-and its CRDs, and a deleted CRD takes every custom resource of that kind, so
-`helm uninstall gpustack-operator` deletes **every `ClusterQueue`, `LocalQueue`, `ResourceFlavor`,
-`AdmissionCheck` and `Workload` in the cluster**, not only the operator's.
-
-If something else depends on Kueue, keep it and disable the subcharts with
-`--set kueue.enabled=false`,
-whether or not your Kueue came from Helm ([the not-installed-by-Helm
-case](#troubleshooting) needs extra steps). The chart prints the uninstall
-notes at install time, so you need not remember this.
+Because the operator release now templates Kueue's CRDs, `helm uninstall gpustack-operator` deletes
+**every `ClusterQueue`, `LocalQueue`, `ResourceFlavor`, `AdmissionCheck`, and `Workload` in the
+cluster**. Set `--set kueue.enabled=false` if other workloads share Kueue.
 
 ### Leftover certificate Secrets
 
-Older workers cached certificates in `Secret`s named by `generateName: gpustack-cert-`, one per
-restart. The cache is now a fixed `gpustack-cert-<hash>` derived from content, so the churn stops
-and the randomly named ones go unread. They are inert, never Helm-owned, and nothing removes them:
+Older workers created one `gpustack-cert-<5-char-random>` `Secret` per restart instead of the current
+content-hashed `gpustack-cert-<16-hex>` `Secret`. Inspect and optionally delete unused 5-character
+`Secret`s:
 
 ```bash
-# Inspect first — these are Secrets, and a hand-created one could match.
 kubectl -n gpustack-system get secret | grep '^gpustack-cert-'
 ```
 
-The live one has a 16-character hex hash; the others carry Kubernetes' 5-character random suffix.
-Delete them at your leisure, or leave them.
-
 ## Rollback data loss
 
-`helm rollback` is destructive here, more so than the upgrade was. It deletes every resource the
-current revision contains and the target does not, and the target, predating the subchart layout,
-contains no Kueue. So the Kueue objects just adopted go, **including Kueue's CRDs** (shipped
-as templates, not under `crds/`), and with them every `ClusterQueue`, `LocalQueue`, `ResourceFlavor`,
-`AdmissionCheck` and `Workload`. The legacy release records are gone, so nothing hands them back.
+**Do not run `helm rollback` across the subchart migration.** Because pre-v0.8 revisions contain no
+Kueue templates and legacy release records were retired, `helm rollback` deletes Kueue's templated
+CRDs along with every `ClusterQueue`, `LocalQueue`, `ResourceFlavor`, `AdmissionCheck`, and queued
+`Workload` (plus any custom `InstanceType`s if full cleanup follows).
 
-To return to the split-release layout, do it deliberately: uninstall and reinstall the version you
-want, following Path A of [Migrating from v0.5.x](/gpustack-operator/main/docs/operate/migration/from-v0.5/index.md) unchanged.
-
-So snapshot the chain first; it is the only thing that makes a mistake recoverable:
+Snapshot your scheduling objects before upgrading:
 
 ```bash
 kubectl get clusterqueues,resourceflavors,admissionchecks,instancetypes,localqueues -A -o yaml \
   > gpustack-chain.yaml
 ```
 
-Running `Pod`s are never touched. A bad rollback costs the chain's own objects; the worker
-re-materializes most from the nodes on its next reconcile, but not `InstanceType`s an administrator
-authored or edited by hand, nor any queued (not yet admitted) `Workload`.
+If you must return to a pre-subchart version, uninstall and reinstall cleanly via
+[Path A in Migrating from v0.5.x](/gpustack-operator/main/docs/operate/migration/from-v0.5/index.md#path-a-uninstall-and-reinstall).
 
 ## Verification
+
+Confirm single-release ownership, clean legacy labels, and intact scheduling resources:
 
 ```bash
 NS=gpustack-system
 
-# One release, and the four runtime ones are gone.
+# 1. Only gpustack-operator remains in Helm:
 helm list -n "$NS"
 
-# The worker is up on the new version.
+# 2. Worker and adopted workloads are healthy under gpustack-operator:
 kubectl -n "$NS" rollout status deploy/gpustack-operator-worker
+kubectl -n "$NS" get deploy,daemonset -l app.kubernetes.io/instance=gpustack-operator -o name
 
-# Kueue, NFD and the CSI drivers now belong to the operator release.
-kubectl -n "$NS" get deploy,daemonset \
-  -l app.kubernetes.io/instance=gpustack-operator -o name
-
-# Nothing still carries a legacy release's instance label (expect empty for both).
+# 3. Zero objects retain legacy release instance labels (expect empty output for both):
 LEGACY='app.kubernetes.io/instance in (gpustack-kueue,gpustack-node-feature-discovery,gpustack-csi-driver-nfs,gpustack-csi-driver-s3)'
 kubectl get deploy,daemonset,svc,sa,cm,role,rolebinding -n "$NS" -o name -l "$LEGACY"
 kubectl get clusterrole,clusterrolebinding,csidriver,storageclass -o name -l "$LEGACY"
 
-# The scheduling chain survived: same counts as before the upgrade.
-kubectl get clusterqueues,resourceflavors,instancetypes
-kubectl get admissioncheck                    # expect: gpustack-node-devices
-kubectl get workloads -A                       # admitted workloads still admitted
-
-# NFD node labels survived.
+# 4. Scheduling chain, Node labels, and Kueue CRDs remain healthy:
+kubectl get clusterqueues,resourceflavors,instancetypes,admissioncheck
+kubectl get workloads -A
 kubectl get nodes -o json | grep -c 'feature.gpustack.ai/'
-
-# No Kueue CRD is wedged Terminating (DELETING is <none> for every row).
 kubectl get crd -o custom-columns=NAME:.metadata.name,DELETING:.metadata.deletionTimestamp | grep kueue
 ```
 
 ---
 
-**See also** — [Installation Modes](/gpustack-operator/main/docs/operate/installation-modes/index.md) (what the installation modes own after the
-transfer) · [High Availability Operations](/gpustack-operator/main/docs/operate/high-availability/index.md) (the replica settings now live in one
-`values.yaml`) · [Migrating from v0.5.x](/gpustack-operator/main/docs/operate/migration/from-v0.5/index.md) · [Migration Troubleshooting](/gpustack-operator/main/docs/operate/migration/troubleshooting/index.md)
-(when the transfer wedges)
+**See also** — [Installation Modes](/gpustack-operator/main/docs/operate/installation-modes/index.md) (mode ownership and runtime settings) ·
+[High Availability Operations](/gpustack-operator/main/docs/operate/high-availability/index.md) (replica configuration in `values.yaml`) ·
+[Migrating from v0.5.x](/gpustack-operator/main/docs/operate/migration/from-v0.5/index.md) (v0.5.x pool rename) ·
+[Migration Troubleshooting](/gpustack-operator/main/docs/operate/migration/troubleshooting/index.md) (recovering wedged upgrades)
 
-**Next** → [Settings](/gpustack-operator/main/docs/reference/settings/index.md) — the configuration surface the transfer unifies.
+**Next** → [Installation Modes](/gpustack-operator/main/docs/operate/installation-modes/index.md) — configure chart values and runtime settings.

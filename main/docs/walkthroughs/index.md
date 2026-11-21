@@ -1,58 +1,62 @@
 # Walkthroughs
 
-Follow a complete example, then compare the resource output with the observed result.
-Each module has its own directory. Configuration contracts remain in the capability guides.
+Run a complete end-to-end procedure and compare live cluster state against captured or illustrative
+outputs. Capability guides own full field and admission contracts; walkthroughs connect resources
+across modules in working order.
 
 ## Contents
 
-- [Choose a walkthrough](#choose-a-walkthrough)
-- [Connect configurations](#connect-configurations)
-- [Read the evidence](#read-the-evidence)
+- [Walkthrough selection](#walkthrough-selection)
+- [Cross-module configurations](#cross-module-configurations)
+- [Captured and illustrative output](#captured-and-illustrative-output)
 
-## Choose a walkthrough
+## Walkthrough selection
 
-Serving configurations use *tensor parallelism (TP)*, *data parallelism (DP)* and *expert parallelism (EP)*.
-The [Model Deployment guides](/gpustack-operator/main/docs/modules/model-deployment/index.md) explain their configuration contracts.
+Serving examples below use *tensor parallelism (TP)*, *data parallelism (DP)*, and *expert
+parallelism (EP)*. See [Model Deployment](/gpustack-operator/main/docs/modules/model-deployment/index.md) for serving
+contracts and benchmarks.
 
 | Module | Walkthrough | Task |
 |---|---|---|
-| Heterogeneous Devices | [Heterogeneous Devices](/gpustack-operator/main/docs/walkthroughs/devices/scheduling/index.md) | Follow detection, queues, admission, and accelerator allocation. |
-| RDMA Networking | [RDMA Networking](/gpustack-operator/main/docs/walkthroughs/rdma/network-endpoints/index.md) | Request and verify shared and exclusive RDMA endpoints with NUMA alignment. |
-| Topology | [Hierarchical Placement](/gpustack-operator/main/docs/walkthroughs/topology/hierarchical-placement/index.md) | Publish zone and rack hierarchies and constrain replicas to a topology domain. |
-| KV Cache | [Shared Cache](/gpustack-operator/main/docs/walkthroughs/kv-cache/shared-cache/index.md) | Create a backend, pool, namespace grant, and serving workload. |
-| Model Delivery | [Model Prefetch](/gpustack-operator/main/docs/walkthroughs/model-delivery/prefetch/index.md) | Cache and verify model weights before inference. |
-| Model Deployment | [Preparation and choices](/gpustack-operator/main/docs/walkthroughs/model-deployment/index.md) | Choose a serving configuration and follow its hardware, model and `AcceleratorType` requirements. |
-| Model Deployment | [Prefill and Decode](/gpustack-operator/main/docs/walkthroughs/model-deployment/prefill-decode/index.md) | Disaggregate *prefill* and *decode* roles fronted by a router. |
-| Model Deployment | [Encode, Prefill and Decode](/gpustack-operator/main/docs/walkthroughs/model-deployment/encode-prefill-decode/index.md) | Separate multimodal *encode*, *prefill* and *decode* roles. |
-| Model Deployment | [Elastic EP](/gpustack-operator/main/docs/walkthroughs/model-deployment/elastic-ep/index.md) | Grow *DP* width 2 → 4 with *TP* = 2. |
-| Model Deployment | [External DP](/gpustack-operator/main/docs/walkthroughs/model-deployment/external-dp/index.md) | Deploy four fixed H100 *DP* ranks and verify captured per-rank inference and Router coverage. |
-| Model Deployment | [Multi-Host](/gpustack-operator/main/docs/walkthroughs/model-deployment/multi-host/index.md) | Deploy distributed model instances across multiple GPU hosts. |
-| Model Deployment | [Scaling](/gpustack-operator/main/docs/walkthroughs/model-deployment/scaling/index.md) | Observe and activate scaling for a deployment. |
+| Heterogeneous Devices | [Heterogeneous Devices](/gpustack-operator/main/docs/walkthroughs/devices/scheduling/index.md) | Inspect pool derivation, node opt-out, logical slicing, custom `InstanceType`s, CPU awareness, and node pinning. |
+| RDMA Networking | [RDMA Networking](/gpustack-operator/main/docs/walkthroughs/rdma/network-endpoints/index.md) | Request shared and exclusive *RDMA* endpoints, align *NUMA* with kubelet, and attach fabric to KV cache or *PD* roles. |
+| Topology | [Hierarchical Placement](/gpustack-operator/main/docs/walkthroughs/topology/hierarchical-placement/index.md) | Publish zone and rack hierarchies and constrain multi-`Pod` replicas to one failure domain. |
+| KV Cache | [Shared Cache](/gpustack-operator/main/docs/walkthroughs/kv-cache/shared-cache/index.md) | Stand up a backend, pool, namespace binding, HA leader, local disk tier, and attached serving workload. |
+| Model Delivery | [Model Prefetch](/gpustack-operator/main/docs/walkthroughs/model-delivery/prefetch/index.md) | Prefetch verified Hugging Face weights onto a GPU node and pin them against eviction. |
+| Model Deployment | [Preparation and choices](/gpustack-operator/main/docs/walkthroughs/model-deployment/index.md) | Compare serving topologies and prepare cluster prerequisites and GPU `AcceleratorType`s. |
+| Model Deployment | [Prefill and Decode](/gpustack-operator/main/docs/walkthroughs/model-deployment/prefill-decode/index.md) | Deploy disaggregated *Prefill* and *Decode* roles behind `llm-d-router`. |
+| Model Deployment | [Encode, Prefill and Decode](/gpustack-operator/main/docs/walkthroughs/model-deployment/encode-prefill-decode/index.md) | Deploy multimodal *Encode*, *Prefill*, and *Decode* roles with NIXL encoder-cache transfer. |
+| Model Deployment | [Elastic EP](/gpustack-operator/main/docs/walkthroughs/model-deployment/elastic-ep/index.md) | Expand a live Ray *EP* collective from *DP* width 2 → 4 (*EP* world size 4 → 8) without replacing surviving `Pod`s. |
+| Model Deployment | [External DP](/gpustack-operator/main/docs/walkthroughs/model-deployment/external-dp/index.md) | Deploy four fixed *DP* ranks (*TP* = 2, *EP* world size 8) behind `vllm-router` and verify all-rank coverage. |
+| Model Deployment | [Scaling](/gpustack-operator/main/docs/walkthroughs/model-deployment/scaling/index.md) | Observe a `ModelDeploymentScaler` in `Shadow` mode, select an algorithm or catalog prior, and activate scaling. |
+| Model Deployment | [Online Runtime Control](/gpustack-operator/main/docs/walkthroughs/model-deployment/runtime-control/index.md) | Tune vLLM and SGLang parameters live, pause roles safely with an active scaler, and verify restart replay. |
+| Model Deployment | [Multi-Host](/gpustack-operator/main/docs/walkthroughs/model-deployment/multi-host/index.md) | Span one 16-GPU serving instance across two physical GPU hosts with gang admission. |
 
-## Connect configurations
+## Cross-module configurations
 
-These walkthroughs connect resources from more than one module. Follow each page's prerequisites and
-limitations; its example does not establish that other combinations have been tested.
+Multi-module sequences converge here so capability guides stay focused on single-module contracts.
+Verify each page's prerequisites and limitations before adapting a manifest to other hardware or
+transports.
 
 | Configuration | Walkthrough | Linkage |
 |---|---|---|
-| Model delivery and serving | [Model Prefetch](/gpustack-operator/main/docs/walkthroughs/model-delivery/prefetch/index.md) | A store binding grants cache access; a deployment references the artifact. |
-| Shared cache and serving | [Shared Cache](/gpustack-operator/main/docs/walkthroughs/kv-cache/shared-cache/index.md) | A backend supplies a pool; a namespace binding grants a deployment access. |
-| RDMA and shared cache | [RDMA Networking](/gpustack-operator/main/docs/walkthroughs/rdma/network-endpoints/index.md#step-4-kv-cache-over-rdma) | The cache backend uses an RDMA fabric and requests interfaces. |
-| Delivery, serving and scaling | [Scaling](/gpustack-operator/main/docs/walkthroughs/model-deployment/scaling/index.md) | A deployment references an artifact; a scaler controls its replica counts. |
-| Topology and serving | [Hierarchical Placement](/gpustack-operator/main/docs/walkthroughs/topology/hierarchical-placement/index.md) | Topology inventory supplies domains that constrain replica placement. |
+| Model delivery and serving | [Model Prefetch](/gpustack-operator/main/docs/walkthroughs/model-delivery/prefetch/index.md) | `ModelStoreBinding` grants cache quota; `ModelDeployment` mounts the resolved `ModelArtifact`. |
+| Shared cache and serving | [Shared Cache](/gpustack-operator/main/docs/walkthroughs/kv-cache/shared-cache/index.md) | `KVCacheBackend` backs a `KVCachePool`; `KVCachePoolBinding` injects client config into workloads. |
+| RDMA and shared cache | [RDMA Networking](/gpustack-operator/main/docs/walkthroughs/rdma/network-endpoints/index.md#step-4-configure-rdma-cache) | `KVCacheBackend` switches transport to `RDMA` and claims fabric interfaces per member. |
+| Delivery, serving, and scaling | [Scaling](/gpustack-operator/main/docs/walkthroughs/model-deployment/scaling/index.md) | `ModelDeployment` serves a prefetched `ModelArtifact` while `ModelDeploymentScaler` drives replica counts. |
+| Topology and serving | [Hierarchical Placement](/gpustack-operator/main/docs/walkthroughs/topology/hierarchical-placement/index.md) | `TopologySource` publishes zone or rack domains enforced by *`roles[].topology.requiredLevel`*. |
 
-## Read the evidence
+## Captured and illustrative output
 
-Commands sit beside captured output or the checks needed to interpret it.
-A CR's declared configuration does not prove runtime parallelism or successful inference.
-Recorded model-serving walkthroughs pair CR snapshots with completed requests and runtime observations.
-*Multi-Host* provides a configuration example and checks without captured runtime results.
-Confirm each claim against the walkthrough's stated evidence and the live CR status and `Pod` output.
+Each step pairs commands with `Captured output` from a live cluster run or `Example output
+(illustrative)` showing the expected signal. A resource reaching `Ready` does not by itself prove
+active parallelism, all-rank routing, or successful token generation; run the inference and endpoint
+checks included in each walkthrough. *Multi-Host* provides illustrative configuration examples and
+verification checks.
 
 ---
 
-**See also** — [Architecture](/gpustack-operator/main/docs/getting-started/architecture/index.md) ·
-[Model Deployment](/gpustack-operator/main/docs/modules/model-deployment/index.md)
+**See also** — [Architecture](/gpustack-operator/main/docs/getting-started/architecture/index.md) (scheduling chain and vocabulary) ·
+[Model Deployment](/gpustack-operator/main/docs/modules/model-deployment/index.md) (serving capability guides)
 
-**Next** → [Heterogeneous Devices Walkthrough](/gpustack-operator/main/docs/walkthroughs/devices/scheduling/index.md)
+**Next** → [Heterogeneous Devices Walkthrough](/gpustack-operator/main/docs/walkthroughs/devices/scheduling/index.md) — follow a recorded accelerator scheduling run.

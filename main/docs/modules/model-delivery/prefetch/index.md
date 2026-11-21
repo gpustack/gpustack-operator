@@ -1,17 +1,14 @@
 # Model Prefetch
 
-Warming is declared, not performed: a tenant names an artifact and a target set, and the operator
-lands the weights through the node cache's ordinary delivery. These resources divide the responsibilities:
+Declare model cache policies, namespace byte budgets, and warm-up targets across `ModelStore`,
+`ModelStoreBinding`, and `ModelPrefetch`. Once one `Node` caches a digest, peer `model-manager`
+plugins distribute it over TCP without repeating upstream hub downloads.
 
-| Object | Scope | Author | Carries |
+| Resource | Scope | Owner | Purpose |
 |---|---|---|---|
-| `ModelStore` | cluster | admin | one node pool's cache policy: watermarks and download limits that override only the fields they state |
-| `ModelStoreBinding` | namespaced | admin | a namespace's byte budget and its right to pin, over named stores |
-| `ModelPrefetch` | namespaced | tenant | one artifact's residency intent: a target set, how many nodes make it available, and its retention |
-
-The node's effective configuration is still `NodeModelStore`: the store layer merges above the
-cluster defaults under [Model Store Operations](/gpustack-operator/main/docs/modules/model-delivery/operations/index.md), and the plugin side of
-every field is in the [Node Model Store](/gpustack-operator/main/docs/modules/model-delivery/node-store/index.md).
+| `ModelStore` | Cluster | Administrator | Overrides cache watermarks and download limits on matched `Node`s. |
+| `ModelStoreBinding` | Namespaced | Administrator | Grants a namespace a byte budget, pinning rights, and optional source RAM over named stores. |
+| `ModelPrefetch` | Namespaced | Tenant | Warms an artifact onto target `Node`s, manages retention, and optionally prepares remote sources. |
 
 ![Model prefetch peer sync and external download flow](/gpustack-operator/main/docs/assets/diagrams/model-delivery-prefetch.svg)
 
@@ -27,210 +24,126 @@ flowchart TD
 ## Contents
 
 - [Cache resources](#cache-resources)
-- [Placement](#placement)
-- [Warm-up Pod](#warm-up-pod)
-- [Budgets and admission](#budgets-and-admission)
-- [Pinning and expiry](#pinning-and-expiry)
-- [Status and views](#status-and-views)
+- [Prefetch placement](#prefetch-placement)
+- [Cache quota and retention](#cache-quota-and-retention)
+- [Prefetch status](#prefetch-status)
+- [Node-to-node sync](#node-to-node-sync)
 
 ## Cache resources
 
-A `ModelStore` selects its pool with *`spec.nodeSelector`* and states watermarks and download
-limits as overrides field by field; the [pool layer](/gpustack-operator/main/docs/modules/model-delivery/operations/index.md#pool-layer)
-defines the override semantics, the overlap condition and the tie-break.
+A `ModelStore` selects cache `Node`s via *`spec.nodeSelector`* and overrides cluster `Setting`s
+field by field. `kubectl get modelstores` shows policy watermarks; check kubelet-capped watermarks on
+[`NodeModelStore`](/gpustack-operator/main/docs/modules/model-delivery/operations/index.md#node-cache-inspection).
 
-`kubectl get modelstores` prints the pool's configured `High` and `Low` watermarks. A
-pool that states *`spec.watermarks`* shows its own values; a pool that states none shows the cluster
-`Setting`s' `model-store-high-watermark` and `model-store-low-watermark`, falling back to their
-defaults when the `Setting`s carry no value.
-
-The columns are the pool's policy, not what a node has already applied: a node's own kubelet
-thresholds can cap the high watermark lower, which only that node's
-[NodeModelStore](/gpustack-operator/main/docs/modules/model-delivery/node-store/index.md) shows. `Setting`s changes appear on the next `kubectl get`.
-A `Setting`s-only change does not trigger an update in an existing `kubectl get --watch`.
-
-A `ModelStoreBinding` is the provisioning point: creating one in a namespace is what grants that
-namespace a *`quota.bytes`* budget and, with *`allowPinned`*, the right to pin. The grant is explicit
-(there is no default pool a binding falls back to) and frozen: *`storeRefs`* cannot move, the budget
-can only grow, and *`allowPinned`* only turns on.
-
-Optional *`spec.sourceMemory`* caps source reservations shared by this Binding's prefetches
-across nodes and manufacturers. Omit or remove it to use node limits. While present, bytes and
-registrations can only grow; sessions can change in either direction.
-
-The following store and binding use the same shape as the
-[Model Prefetch Walkthrough](/gpustack-operator/main/docs/walkthroughs/model-delivery/prefetch/index.md). Create the
-`gpustack-elastic` namespace first. Replace the hostname with the target node's label.
+A `ModelStoreBinding` grants store access, a monotonic *`quota.bytes`* budget, optional
+*`allowPinned`*, and optional *`sourceMemory`* ([Source preparation](/gpustack-operator/main/docs/modules/model-delivery/remote/index.md#source-preparation)):
 
 ```yaml
 apiVersion: worker.gpustack.ai/v1
-kind: ModelStore
+kind: ModelStore  # cluster-scoped
 metadata:
   name: rtx6000-models
 spec:
-  nodeSelector:  # Required; selects the cache nodes.
+  nodeSelector:  # required; avoid overlapping selectors across ModelStores
     matchLabels:
       kubernetes.io/hostname: gpu-node
-  # Optional overrides; omitted fields use cluster settings.
-  # watermarks:
+  # watermarks:  # optional overrides; omitted fields inherit cluster Settings
   #   highPercent: 80
   #   lowPercent: 70
   # download:
   #   concurrency: 8
-  #   bytesPerSecond: 0  # Zero means unlimited.
+  #   bytesPerSecond: 0  # 0 means unlimited on this pool
 ---
 apiVersion: worker.gpustack.ai/v1
-kind: ModelStoreBinding
+kind: ModelStoreBinding  # namespaced
 metadata:
   name: rtx6000-models
   namespace: gpustack-elastic
 spec:
-  storeRefs:  # Required; immutable store grant.
+  storeRefs:  # required; 1..8 ModelStore names, immutable
     - name: rtx6000-models
   quota:
-    bytes: 64Gi  # Required; the budget may grow but cannot shrink.
+    bytes: 64Gi  # required; can grow, cannot shrink
+  allowPinned: false  # optional, default: false; can turn true, cannot turn false
 ```
-
-- **Selector**: A store selects nodes. Avoid overlapping store selectors.
-- **Overrides**: Omitted watermarks and download limits use cluster settings.
-- **Store references**: Grant one to eight stores. The list is immutable.
-- **Quota**: Set a positive byte budget. It can grow, but cannot shrink.
-- **Pinning**: *`allowPinned`* defaults to false. It can be enabled, but not disabled later.
 
 | Condition | Reason | Resolution |
 |---|---|---|
-| Stores select the same node | Their policies overlap | Change the selectors to avoid overlap. |
-| A prefetch targets nodes outside the grant | No granted store covers those nodes | Adjust placement or create another binding. |
-| A quota update reduces the budget | Admitted prefetches may depend on the grant | Keep or increase the budget. |
+| Multiple `ModelStore`s match one `Node` | `SelectorOverlap` | Make *`spec.nodeSelector`* sets disjoint across stores. |
+| `ModelPrefetch` targets ungranted `Node`s | Target outside *`storeRefs`* | Restrict prefetch placement or create a Binding covering those stores. |
+| Update shrinks *`quota.bytes`* or clears *`allowPinned`* | Monotonic grant rule | Keep or increase *`quota.bytes`* (recreate the Binding to reduce it). |
 
-The [source-memory examples](/gpustack-operator/main/docs/modules/model-delivery/remote/index.md#source-memory-examples) use `Qwen3-8B` and
-`Qwen3.6-35B-A3B` to distinguish node capacity, per-model windows and a shared Binding grant.
+Deleting a `ModelPrefetch` deletes its warm-up `Pod`s, clears its pins on the next union pass, and
+leaves cached bytes to ordinary watermark collection.
 
-> **Why** — a grant that shrank under consumption would retroactively make an admitted prefetch
-> over budget, and a re-pointed grant would strand the accounting of everything admitted before the
-> edit. Both rules are admission-time refusals, so the namespace sees the refusal at the moment of
-> the edit, not as drift later.
+## Prefetch placement
 
-A `ModelPrefetch` names an *`artifactRef`* and a *`bindingRef`* in its own namespace. Deleting it
-revokes the intent: the warm-up `Pod`s go with their owner references, the pins leave on the next
-union pass, and the bytes are reclaimed by the node cache's own collection once the content is
-unreferenced and past grace.
-
-## Placement
-
-*`spec.placement`* picks the target set using the options below, and admission and delivery share one
-expansion, so the two can never disagree about what a prefetch would warm:
+*`spec.placement`* selects `Node`s via *`acceleratorTypes`* or *`nodeSelector`* (mutually exclusive).
+Omitting both inherits accelerated pools from same-namespace `ModelDeployment`s referencing the
+artifact (CPU-only roles excluded):
 
 ```yaml
 apiVersion: worker.gpustack.ai/v1
 kind: ModelPrefetch
 metadata:
   name: qwen-prefetch
+  namespace: gpustack-elastic
 spec:
-  artifactRef:  # Required; the artifact is in this namespace.
+  artifactRef:  # required; ModelArtifact in this namespace
     name: qwen-7b
-  bindingRef:  # Required; the binding is in this namespace.
-    name: store-binding
-  placement:
-    acceleratorTypes:  # Optional; every node carrying a named AcceleratorType's flavor.
+  bindingRef:  # required; ModelStoreBinding in this namespace
+    name: rtx6000-models
+  placement:  # set at most one of acceleratorTypes or nodeSelector
+    acceleratorTypes:
       - gpu-pool
+    # nodeSelector:
+    #   matchLabels:
+    #     accelerator: "true"
 ```
 
-- **Artifact**: Reference a `ModelArtifact` in the same namespace.
-- **Binding**: Reference a `ModelStoreBinding` that covers the target nodes.
-- **Placement**: Set either *`acceleratorTypes`* or *`nodeSelector`*, or omit both.
+Explicit *`placement`* is required whenever *`spec.source`* is set for
+[remote weight delivery](/gpustack-operator/main/docs/modules/model-delivery/remote/index.md#source-preparation).
 
-```yaml
-apiVersion: worker.gpustack.ai/v1
-kind: ModelPrefetch
-metadata:
-  name: qwen-prefetch
-spec:
-  artifactRef:  # Required; the artifact is in this namespace.
-    name: qwen-7b
-  bindingRef:  # Required; the binding is in this namespace.
-    name: store-binding
-  placement:
-    nodeSelector:  # Optional; every node matching this selector.
-      matchLabels:
-        accelerator: "true"
-```
+### Warm-up Pod
 
-- **Node selector**: Select nodes with labels that are present in the cluster.
-- **Default placement**: Omit both fields to derive accelerator types from same-namespace deployments referencing the artifact; CPU-only roles are ignored.
-- **Source preparation**: Explicit placement is required when *`source`* is set.
+The prefetch controller creates one restricted warm-up `Pod` per target `Node` using the
+`model-prefetch-warmup-image` `Setting` (requires `sh`, `find`, and `sha256sum`). Each `Pod` mounts
+the artifact's CSI volume, verifies files, and exits once the `Node` publishes the digest.
 
-| Condition | Reason | Resolution |
-|---|---|---|
-| Both placement fields are set | The choices are mutually exclusive | Keep one placement field. |
-| Source preparation has no explicit placement | Source memory needs a fixed target selection | Set one placement field. |
+Warm-up `Pod`s omit `kueue.x-k8s.io/queue-name` so Kueue and accelerator `Pod` webhooks never hold
+cache warming behind compute quota.
 
-## Warm-up Pod
+## Cache quota and retention
 
-Delivery is one warm-up `Pod` per target node, rendered by the prefetch controller. It mounts the
-artifact's own CSI volume (the same volume a consumer mounts, with the same artifact, UID and
-digest attributes) under a restricted `Pod` security context, reads every file back, and exits. The
-node cache downloads, verifies and publishes exactly once per node; the `Pod` is the delivery
-operation, and there is no separate job state machine.
+A Binding's budget charges the full resolved byte size per distinct digest on every target `Node`
+(shared digests across namespaces charge each namespace independently). On `ModelStoreBinding`:
 
-A warm-up `Pod` never carries a `kueue.x-k8s.io/queue-name` label: a labeled `Pod` is held by Kueue's
-admission and topology gates and never scheduled, and this operator's own `Pod` webhook ignores
-unlabeled `Pod`s.
+- *`status.usedBytes`* reports measured usage (omitted while any referenced artifact is unresolved).
+- `OverQuota` turns `True` when measured usage exceeds *`quota.bytes`* (`Unknown` while unresolved).
 
-The image is a [Setting](/gpustack-operator/main/docs/reference/settings/index.md): the `Pod` needs only a shell,
-`find` and `sha256sum`, and the one thing the default cannot guarantee is that a given cluster's
-registry has it.
+Admission rejects missing artifacts or Bindings, ungranted target `Node`s, and unauthorized pins. It
+also rejects projected footprints (`resolved size × widest node count` per digest) above
+*`quota.bytes`*.
 
-## Budgets and admission
+### Pinning and expiry
 
-A grant's budget counts filesystem usage: each distinct digest at its full size, for every node
-holding it, whatever the entry's state. A tree two namespaces share counts fully against each of
-them; that is conservative, and impossible to game by warming what another tenant already warmed.
-The measured footprint lands on the binding's status:
+*`spec.retention.pinned`* (requires `allowPinned: true`) protects digests from eviction while still
+counting toward disk usage ([Cache collection rules](/gpustack-operator/main/docs/modules/model-delivery/operations/index.md#cache-collection-rules)). The
+controller merges pins across all namespaces into each `NodeModelStore.spec.pinned` list.
 
-- *`status.usedBytes`*: the measured figure, absent while any referenced artifact has not resolved
-  (an absent figure was not measured; zero is a measurement).
-- `OverQuota`: True when the footprint passed the grant, Unknown when it could not be counted.
+*`spec.retention.ttlAfterLastUse`* unpins a `Node`'s copy once unmounted past that duration
+(evaluated at the 1-hour granularity of *`lastUsedTime`*).
 
-Admission refuses the shapes that cannot work: a missing artifact or grant, a target set outside
-every store the grant names, pinning without the grant's permission, and a projection past the
-budget.
+## Prefetch status
 
-The projection is the accounting at admission time: per distinct digest, the resolved size times
-the widest node count asked of it. An artifact that has not resolved yet contributes no size, and
-the accounting reports the drift that projection could not see.
+`ModelPrefetch` reports *`desiredNodes`*, *`readyNodes`*, *`downloadingNodes`*, and conditions
+`Progressing`, `Available`, `Degraded`, and `Lapsed`. `Available` checks *`readyNodes >= minReady`*
+(`0` means all desired `Node`s); `Lapsed` indicates *`ttlAfterLastUse`* unpinned copies below
+*`minReady`*.
 
-## Pinning and expiry
-
-*`spec.retention.pinned`* keeps the content on every target node against collection: a pinned digest
-is never a collection candidate, though it still counts toward usage, so a cache full of pinned
-content reports its saturation exactly as a cache full of references does.
-
-Pinning requires the grant. The nodes' pin lists are written as one union by the prefetch
-controller, the field's single writer, so two namespaces pinning one node keep both digests. See
-[Node Model Store](/gpustack-operator/main/docs/modules/model-delivery/node-store/index.md#references-restart-collection) for how a pinned digest behaves
-under collection.
-
-*`spec.retention.ttlAfterLastUse`* unpins a node's copy once nothing mounted it for that long. It is
-enforced at the hour granularity the node already reports in *`lastUsedTime`*.
-
-> **Why** — retention does not need finer precision, and finer recording would multiply the node's
-> status writes for a decision that cannot tell the difference.
-
-## Status and views
-
-The prefetch's status aggregates the target nodes' own reports: *`desiredNodes`*, *`readyNodes`*,
-*`downloadingNodes`*, and `Progressing` / `Available` / `Degraded` / `Lapsed`, where `Available`
-means *`readyNodes`* reached *`minReady`* (0 = all of them).
-
-`Lapsed` turns True when a shortfall below that bar is the retention TTL's doing: the copies that
-would close the gap lapsed past *`ttlAfterLastUse`*, were unpinned and are not re-warmed, and the
-message says how many. It stays False while the shortfall has any other cause, so a lapse never
-masks a warm-up still running or a delivery that failed.
-
-A source prefetch also publishes `SourceReady` for its current revision. Its serving observation
-binds the artifact UID, artifact revision and digest to an unexpired source lease. Missing or expired
-proof provides no source readiness. The broker checks authorization live when a client connects.
+With *`spec.source`* set, `SourceReady` (`SourceServing`) and *`status.transfer`* track active
+host-memory source leases. Up to 16 generations display (`SourceSummaryTruncated=True` when capped),
+while full observations drive readiness and *`reservedBytes`*:
 
 ```yaml
 apiVersion: worker.gpustack.ai/v1
@@ -240,9 +153,7 @@ metadata:
   namespace: team-a
 status:
   transfer:
-    # Display summary: at most 16 generations, serving entries first, then by identity.
-    generations: []
-    # Readiness and reservedBytes use the full observation, even when the summary is truncated.
+    generations: []  # capped at 16 display entries
     serving:
       artifactUID: artifact-uid
       artifactGeneration: 1
@@ -253,18 +164,69 @@ status:
       status: "True"
       observedGeneration: 2
       reason: SourceServing
-    # True means some generation entries were omitted from the display summary.
     - type: SourceSummaryTruncated
       status: "False"
       observedGeneration: 2
       reason: CompleteSummary
 ```
 
-The [ModelPrefetch API](/gpustack-operator/main/docs/modules/model-delivery/artifact-api/index.md#resources) supports resource operations and adds no subresource: the per-node
-facts already live on the nodes' reports, and the table prints who warms what and how far.
+## Node-to-node sync
+
+With `modelManager.enabled: true`, plugins serve published cache trees to cold peers over TCP port
+`32445`. One seed `Node` downloads from the hub, and cold `Node`s pull from peers even during hub
+outages.
+
+![Node-to-node peer sync over TCP](/gpustack-operator/main/docs/assets/diagrams/model-delivery-peer-sync.svg)
+
+<!--
+flowchart TD
+    HUB["Upstream model hub (1x download)"]
+    SEED["node-01: seed cache"]
+    PEER2["node-02: peer cache over TCP :32445"]
+    PEER3["node-03: peer cache over TCP :32445"]
+    HUB -> SEED
+    SEED -> PEER2
+    SEED -> PEER3
+    PEER2 -> PEER3
+-->
+
+```yaml
+modelManager:
+  port: 32445  # peer TCP port; 0 disables peer serving and pulling
+  peerSync:
+    maxServingStreams: 8  # concurrent outbound file streams per seed node
+    streamsPerSource: 4  # concurrent inbound range streams per puller
+```
+
+The `model-store-peer-sync` `Setting` defaults to `true`; set `false` to pull from the hub without
+restarting plugins. Standalone `model-manager` keeps peer sync off until port and peer auth flags are
+set.
+
+### Peer authentication and network
+
+Pulling plugins send a projected `ServiceAccount` token (`gpustack-model-peer` audience). Serving
+plugins verify it via `TokenReview`, caching positive answers until the earlier of 2 minutes and
+token expiry, and never caching refusals. Peer clients skip TLS verification on the plugin's
+self-signed certificate; use trusted `Pod` networks or set `modelManager.port: 0`.
+
+The default `NetworkPolicy` limits plugin ingress to the worker and peer `model-manager` `Pod`s. On
+CNIs where `hostNetwork` bypasses `podSelector` rules, `TokenReview` still blocks unauthorized
+callers; add scrapers under `modelManager.networkPolicy.scrapers`.
+
+### Checkpoint resume and metrics
+
+Before pulling bytes, a cold `Node` verifies the peer's manifest against the artifact's
+*`manifestDigest`* (skipping older manifestless trees). Downloads stream HTTP byte ranges from one
+peer and checkpoint hashes every `64 MiB`, resuming on another peer or the hub if a seed fails.
+
+- **Source tracking**: `NodeModelStore.status.models[].source` reports `Hub` or `Peer` (majority
+  bytes), and plugin `:32444/metrics` exposes `gpustack_model_manager_download_bytes_total` split by
+  the `source` label (`hub` or `peer`).
+- **Trade-offs**: Peer sync cuts hub egress and hub dependency rather than fan-out time on slower
+  east-west fabrics. Each concurrent puller uses `~0.25 vCPU` on 2-vCPU seed `Node`s.
 
 ---
 
-**See also** — [Model Artifact](/gpustack-operator/main/docs/modules/model-delivery/artifact/index.md) (what a prefetch warms) · [Node Model Store](/gpustack-operator/main/docs/modules/model-delivery/node-store/index.md) (the node side of every field named here) · [Model Store Operations](/gpustack-operator/main/docs/modules/model-delivery/operations/index.md) (the pool layer's settings in operation)
+**See also** — [Model Artifact](/gpustack-operator/main/docs/modules/model-delivery/artifact/index.md) (artifact digests and `progress` subresource) · [Model Store Operations](/gpustack-operator/main/docs/modules/model-delivery/operations/index.md) (settings, node status, and watermark collection) · [Remote Weight Delivery](/gpustack-operator/main/docs/modules/model-delivery/remote/index.md) (host-memory sources prepared via `ModelPrefetch`)
 
-**Next** → [Node Model Store](/gpustack-operator/main/docs/modules/model-delivery/node-store/index.md) — the node object the plugin serves.
+**Next** → [Model Store Operations](/gpustack-operator/main/docs/modules/model-delivery/operations/index.md) — configure node cache settings and inspect `NodeModelStore` state.

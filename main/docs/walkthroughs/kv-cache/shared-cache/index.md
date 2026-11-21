@@ -1,54 +1,47 @@
 # Shared Cache Walkthrough
 
-Create a store, a pool, a namespace grant and a workload in that order. Replace the node selector,
-namespace, accelerator type and model name in the manifests below. The serving replicas can then reuse
-prefix KV blocks.
+Stand up a Mooncake cache backend, pool, namespace binding, and serving deployment in dependency
+order, then add leader high availability, a local disk tier, and multi-tenant bindings.
 
 ## Contents
 
 - [Summary](#summary)
-- [Environment](#environment)
-- [Step 1: Create the store](#step-1-create-the-store)
-- [Step 2: Create pool and binding](#step-2-create-pool-and-binding)
-- [Step 3: Create the workload](#step-3-create-the-workload)
-- [Step 4: Enable high availability](#step-4-enable-high-availability)
-- [Step 5: Add a disk tier](#step-5-add-a-disk-tier)
-- [Step 6: Add a second team](#step-6-add-a-second-team)
+- [Cache deployment](#cache-deployment)
+- [Cache operations](#cache-operations)
 - [Limitations](#limitations)
 - [Troubleshooting](#troubleshooting)
 
 ## Summary
 
-A shared Mooncake cache pool lets serving replicas reuse prefix KV blocks. It can spill blocks
-across DRAM and local-disk tiers. Reuse avoids recomputing blocks another replica already processed.
+A shared Mooncake cache lets serving replicas reuse prefix KV blocks across DRAM and local disk tiers.
+Create the four objects in order because each resource references the one above it
+([Pools and bindings](/gpustack-operator/main/docs/modules/kv-cache/pool/index.md#pools-and-bindings)):
 
 | Object | Scope | Creator | Purpose |
 |---|---|---|---|
-| `KVCacheBackend` | cluster | administrator | which nodes contribute memory, and how much |
-| `KVCachePool` | cluster | administrator | how much of that store may be handed out at all |
-| `KVCachePoolBinding` | namespace | administrator | that THIS namespace may draw on it, and up to what |
-| `ModelDeployment` | namespace | user | a workload that attaches to the grant |
+| `KVCacheBackend` | cluster | administrator | Deploys Mooncake leader and per-node memory/disk members |
+| `KVCachePool` | cluster | administrator | Caps total cache capacity exposed from one backend |
+| `KVCachePoolBinding` | namespace | administrator | Grants one namespace a reuse domain and quota ceiling |
+| `ModelDeployment` | namespace | user | Attaches serving roles to the namespace `KVCachePoolBinding` |
 
-Create the objects in order. Each object names the one above it. Otherwise, its reference cannot
-resolve. [KV Cache Pools and Bindings](/gpustack-operator/main/docs/modules/kv-cache/pool/index.md#two-kinds-by-scope) explains
-the scope of each object.
+Workloads always set *`kvCache.poolRef.name`* to the namespace `KVCachePoolBinding`, never the
+cluster-scoped `KVCachePool`.
 
-**The binding grants access.** An administrator creates a binding in the namespace. The workload's
-*`poolRef`* names that binding, not the pool.
-
-## Environment
+### Environment
 
 | Item | Value |
 |---|---|
 | Cluster | Kubernetes with GPUStack installed |
-| Contributing nodes | selected by the backend's *`nodeSelector`*; Step 5's disk tier selects nodes labeled `kvcache: "true"` |
-| `AcceleratorType` | one from `kubectl get acctype` |
-| Model | `Qwen/Qwen2.5-7B-Instruct` |
-| Engine | vLLM `gpustack/runner:cuda13.0-vllm0.29.0` |
+| Contributing nodes | Matched by *`members[].nodeSelector`* (`kubernetes.io/os: linux` in Step 1; `kvcache: "true"` in Step 5) |
+| `AcceleratorType` | An `Active` pool from `kubectl get acctype` |
+| Model and engine | `Qwen/Qwen2.5-7B-Instruct` on vLLM `gpustack/runner:cuda13.0-vllm0.29.0` |
 
-## Step 1: Create the store
+## Cache deployment
 
-Replace the `kubernetes.io/os: linux` selector with the labels of the nodes that should contribute memory.
+### Step 1: Create cache backend
+
+Save `mooncake-dram.yaml`, replacing `kubernetes.io/os: linux` with labels selecting the nodes that
+should contribute DRAM:
 
 ```yaml
 apiVersion: worker.gpustack.ai/v1
@@ -59,30 +52,23 @@ spec:
   type: Mooncake
   connection:
     managed:
-      leader: {}
+      leader: {}  # multiTenancy defaults to true; spec.image uses Setting kv-cache-backend-image
       members:
         - nodeSelector:
             kubernetes.io/os: linux
           medium: DRAM
-          capacityPerMember: 8Gi
+          capacityPerMember: 8Gi  # requested from node host memory per matched node
 ```
 
-*`spec.image`* is left unset on purpose: the cluster-wide `kv-cache-backend-image`
-[Setting](/gpustack-operator/main/docs/reference/settings/index.md) supplies this project's own build, which is the one that can elect a leader
-later. Naming a published upstream image here works until Step 4 and then does not. See
-[High availability](/gpustack-operator/main/docs/modules/kv-cache/leader/index.md#high-availability).
+Keep *`spec.image`* unset so `Setting/kv-cache-backend-image` supplies GPUStack's Mooncake build,
+which supports `Lease` leader election in Step 4 ([High availability](/gpustack-operator/main/docs/modules/kv-cache/leader/index.md#high-availability))
+and per-tenant quota ledgers (`multiTenancy: true`, supported from Mooncake 0.3.12; see
+[GPUStack build variants](/gpustack-operator/main/docs/modules/kv-cache/backend/index.md#gpustack-build-variants)).
 
-*`capacityPerMember`* is charged to each member `Pod`'s host memory request, so it is a claim on the node
-and not a hint. One member `Pod` runs per node the selector matches.
-
-`leader: {}` takes the field defaults, *`multiTenancy`* included (it defaults on), so this master keeps
-a per-tenant quota ledger and Steps 2 and 3 read against it. A backend pinned to a store image from
-before Mooncake 0.3.12 is the one exception and declares `multiTenancy: false` out loud. See
-[GPUStack build variants](/gpustack-operator/main/docs/modules/kv-cache/backend/index.md#gpustack-build-variants).
-
-Wait for it, then read what it reports:
+Apply `mooncake-dram.yaml` and wait for `PHASE=Ready`:
 
 ```bash
+kubectl apply -f mooncake-dram.yaml
 kubectl get kvcb mooncake-dram -w
 ```
 
@@ -93,12 +79,13 @@ NAME            TYPE       PHASE   ENDPOINT                                     
 mooncake-dram   Mooncake   Ready   mooncake-dram-leader.gpustack-system.svc:50051   16Gi
 ```
 
-**`CAPACITY` is read from the store, never derived from the spec.** Two nodes at `8Gi` show `16Gi`
-because both members registered their segments, so this figure is the evidence that the store is
-really assembled. A number smaller than expected means a member has not registered yet, whatever the
-phase says: `kubectl describe kvcb mooncake-dram` and its `MembersMounted` condition name which.
+`CAPACITY` reflects live member registrations reported by the Mooncake master (`2 × 8Gi = 16Gi` here).
+If `CAPACITY` is smaller than expected or `PHASE` stays `Degraded`, run `kubectl describe kvcb mooncake-dram`
+and inspect `MembersMounted` in [Troubleshooting](#troubleshooting).
 
-## Step 2: Create pool and binding
+### Step 2: Create pool and binding
+
+Create namespace `team-a` if needed, then apply `pool-and-binding.yaml`:
 
 ```yaml
 apiVersion: worker.gpustack.ai/v1
@@ -106,7 +93,7 @@ kind: KVCachePool
 metadata:
   name: shared-dram
 spec:
-  backends:  # exactly one
+  backends:  # exactly one backend; immutable
     - mooncake-dram
   quota:
     total: 16Gi
@@ -120,36 +107,38 @@ spec:
   poolRef:
     name: shared-dram
   quota:
-    ceiling: 8Gi
-  domain:  # every field here is immutable
+    ceiling: 8Gi  # cap on concurrent cached bytes, not a static reservation
+  domain:  # immutable compatibility key; omitted domain.name defaults to "default"
     blockSize: 64
     dtype: bfloat16
 ```
 
-**The `domain` is the cache's compatibility key, and it is immutable for the reason it exists.** Two
-workloads sharing a domain share cached blocks, so a domain that could be edited would let a running
-workload start reading blocks another tokenizer wrote. Pick it to match the model and engine
-settings the deployments in this namespace will run; a second, different model gets a second Binding.
+```bash
+kubectl apply -f pool-and-binding.yaml
+kubectl -n team-a get kvcachepoolbinding team-a \
+  -o jsonpath='{.status.effectiveQuota}{"\t"}{.status.conditions[?(@.type=="QuotaGranted")].status}{"\n"}'
+```
 
-***`domain.name`* is left out, so it is `default`.** The backend from Step 1 runs with multi-tenancy
-(*`leader.multiTenancy`* defaults on), so the engines are handed the tenant id `default`, which is also
-the tenant the store uses for a writer that names none. Name each domain once a second Binding shares
-the master; the name is what keeps the two apart.
+Example output (illustrative):
 
-**A quota ceiling is not a reservation.** It is the most this namespace may hold at once, and going
-over it does not fail a write. See
-[Full-quota behavior](/gpustack-operator/main/docs/modules/kv-cache/pool/index.md#full-quota-behavior).
+```text
+8Gi	True
+```
 
-**The ceiling is enforced because the Step-1 leader carries its tenant ledger, which the default
-gave it.** A backend declared `leader.multiTenancy: false` holds no ledger instead: its pool is
-admitted with a warning, the Binding reports `QuotaGranted=True` with reason `Unenforced` and no
-`EFFECTIVE` figure, and every write lands in the store's default tenant.
+Key constraints on *`domain`* and *`quota`*:
 
-**A multi-tenant master refuses a tenant name absent from its ledger.** An engine that ignores the
-injected tenant then needs a second Binding whose domain is `default`, or that leaves `name` out.
-See [Tenant compatibility](/gpustack-operator/main/docs/modules/kv-cache/injection/index.md#tenant-compatibility).
+- **Immutable reuse domain**: workloads sharing one Binding share KV blocks, so `name`, *`blockSize`*,
+  and `dtype` cannot be edited in place. Create a separate Binding for a different model or `dtype`.
+- **Quota ceiling**: reaching *`ceiling`* evicts older entries rather than failing writes
+  ([Full-quota behavior](/gpustack-operator/main/docs/modules/kv-cache/pool/index.md#full-quota-behavior)). If a backend sets
+  `leader.multiTenancy: false`, `QuotaGranted=True/Unenforced` warns that quotas are unledgered.
+- **Tenant compatibility**: a multi-tenant master rejects unregistered tenant IDs, so engines must
+  honor injected tenant settings (for non-`default` domains, `mooncake-transfer-engine >= 0.3.13`; see
+  [Tenant compatibility](/gpustack-operator/main/docs/modules/kv-cache/pool/index.md#tenant-compatibility)).
 
-## Step 3: Create the workload
+### Step 3: Deploy cached workload
+
+Substitute an `Active` `AcceleratorType` from `kubectl get acctype` and apply `qwen-chat.yaml`:
 
 ```yaml
 apiVersion: worker.gpustack.ai/v1
@@ -162,11 +151,10 @@ spec:
     name: Qwen/Qwen2.5-7B-Instruct
   engine:
     name: vLLM
-    # matches the store version used by the default backend image
-    image: gpustack/runner:cuda13.0-vllm0.29.0
+    image: gpustack/runner:cuda13.0-vllm0.29.0  # Mooncake client minor version must match backend store
   kvCache:
     poolRef:
-      name: team-a  # KVCachePoolBinding in this namespace
+      name: team-a  # KVCachePoolBinding in team-a
   roles:
     - name: server
       replicas: 2
@@ -175,29 +163,50 @@ spec:
         accelerator: "1"
 ```
 
-*`kvCache`* is optional. Omit it and the deployment runs with no shared cache at all, which is the
-useful comparison to have run once before attributing anything to the pool.
-
-**The engine is configured by injection, not by anything you write here.** The operator resolves the
-Binding, reads the backend's endpoint and the domain, and injects the store's environment into every
-role's `Pod`. What is injected per engine, and every refusal, is on
-[KV Cache Injection](/gpustack-operator/main/docs/modules/kv-cache/injection/index.md).
-
-**The store version must match the engine's client.** The engine version above decides the client,
-and Step 1's unset *`spec.image`* leaves the store on the `Setting`s default. A pair on different lines
-starts healthy and then fails every write, so the version above is a choice. See
-[Version compatibility](/gpustack-operator/main/docs/modules/kv-cache/backend/index.md#version-compatibility).
-
-Check the attachment from the deployment's own status rather than from the `Pod`s:
-
 ```bash
-kubectl -n team-a get md qwen-chat -o jsonpath='{.status.conditions[?(@.type=="CacheAttached")]}'
+kubectl apply -f qwen-chat.yaml
+kubectl -n team-a get md qwen-chat -o json |
+  jq '{binding: .status.kvCache.binding, pool: .status.kvCache.pool,
+       attached: (.status.conditions[] | select(.type=="CacheAttached") | {status, reason})}'
 ```
 
-## Step 4: Enable high availability
+Example output (illustrative):
 
-Everything so far runs one leader process that already holds a Kubernetes `Lease`. An update or a node
-failure takes the store's metadata with it. Add standbys with one edit:
+```json
+{
+  "binding": "team-a",
+  "pool": "shared-dram",
+  "attached": {
+    "status": "True",
+    "reason": "CacheActive"
+  }
+}
+```
+
+Confirm *`status.kvCache.binding`* equals `"team-a"` and `CacheAttached` is `True` (or `Unknown/NoObservationAvailable`
+before traffic arrives). On a standalone `Pod` using webhook injection
+([Pod injection](/gpustack-operator/main/docs/modules/kv-cache/pool/index.md#pod-injection)), verify the injected binding identity
+on the admitted `Pod`:
+
+```bash
+kubectl -n team-a get pod <pod-name> -o jsonpath='{.metadata.annotations.kvcache\.gpustack\.ai/injected}{"\n"}'
+```
+
+On vLLM, confirm the runner image carries the Mooncake store connector:
+
+```bash
+kubectl -n team-a exec <pod-name> -- python3 -c \
+  "import vllm.distributed.kv_transfer.kv_connector.v1.mooncake.store.worker; print('reader present')"
+```
+
+If creation fails with `FailedCreate` or `TypeError` at startup, match the symptom in
+[Troubleshooting](#troubleshooting) ([Version compatibility](/gpustack-operator/main/docs/modules/kv-cache/backend/index.md#version-compatibility)).
+
+## Cache operations
+
+### Step 4: Enable high availability
+
+Scale the Mooncake leader from one replica to three without rolling existing member `DaemonSet` `Pod`s:
 
 ```diff
  apiVersion: worker.gpustack.ai/v1
@@ -218,46 +227,38 @@ failure takes the store's metadata with it. Add standbys with one edit:
            capacityPerMember: 8Gi
 ```
 
-**The healthy steady state now reads `3 desired / 1 ready`, and that is not a broken `Deployment`.**
-Exactly one leader serves; the other two are standbys, deliberately not ready so the leader `Service`'s
-endpoints never include a process that cannot serve. During a healthy failover `2` are briefly ready
-as the old leader steps down. Both readings are normal.
+Verify election and rollout conditions after applying the change:
 
-**Scaling from one to three keeps the first leader `Pod` and the member templates** because the `Lease`
-election and accounts were already present at one replica. See
-[the leader Deployment](/gpustack-operator/main/docs/modules/kv-cache/leader/index.md#health-checks) for the
-cost of changing *`leader.electionBackend`*.
+```bash
+kubectl get kvcb mooncake-dram \
+  -o jsonpath='{range .status.conditions[*]}{.type}={.status} {.reason}{"\n"}{end}'
+```
 
-***`leader.memberAddressing`* chooses how members find the master**, and defaults to
-`Service`. An explicit `Lease` value uses the member's API access to read the current holder. See
-[High availability](/gpustack-operator/main/docs/modules/kv-cache/leader/index.md#high-availability) for the measured failover limits.
+In steady state, `Deployment/mooncake-dram-leader` shows **`1/3` Ready** intentionally: only the
+active `Lease` holder reports Ready so the leader `Service` never routes traffic to standbys. Watch
+two conditions ([Health checks](/gpustack-operator/main/docs/modules/kv-cache/leader/index.md#health-checks)):
 
-These conditions apply at one replica too; the phase does not summarize them:
-
-| Condition | True | False |
+| Condition | `True` meaning | `False` meaning |
 |---|---|---|
-| `ElectionObserved` | the `Lease` names a holder, so an election happened | a ready leader and a holderless `Lease` — the image, the role binding, or a first campaign still running |
-| `RolloutComplete` | every replica runs the current template and none of the previous one is left | a rollout in flight, or one that has stalled |
+| `ElectionObserved` | Active `Lease` names a holder | Ready leader with empty `Lease` (wrong image, missing RBAC, or initial election in flight) |
+| `RolloutComplete` | All replicas run the current template | Rollout in progress or stalled |
 
-`RolloutComplete` exists because this workload disables the deployment deadline that would normally
-answer it: that deadline requires every replica to be available, and only one ever is here.
+Standby leaders hold no in-memory index. After a leader restart or failover, members remount their
+segments automatically (~30 s), and cached blocks start cold ([High availability](/gpustack-operator/main/docs/modules/kv-cache/leader/index.md#high-availability)).
+Master snapshot flags are refused in *`leader.extraArgs`* to prevent stale key collisions.
 
-### Failover behavior
+### Step 5: Add a disk tier
 
-**A failover keeps nothing in memory.** A standby holds no data, so the replica that takes over knows
-none of the objects held in member memory and rebuilds from member remounts alone; a single leader
-that restarts does the same. High availability shortens the outage, and every one of those objects
-misses afterwards. Plan for a cold cache after every failover and every leader restart.
+Admission rejects adding *`localDisks`* to an existing member group in place. Prepare the host
+directory on every `kvcache: "true"` node first (owned by UID `65532` for the default image; see
+[Host directory requirements](/gpustack-operator/main/docs/modules/kv-cache/local-disk-tier/index.md#host-directory-requirements)):
 
-**The store's snapshot is not offered, and its flags are refused in *`leader.extraArgs`***, because
-restoring a snapshot can make the cache serve another key's bytes instead of a miss.
-[High availability](/gpustack-operator/main/docs/modules/kv-cache/leader/index.md#high-availability) says why.
+```bash
+install -d -o 65532 -g 0 -m 0750 /var/lib/kvcache
+```
 
-## Step 5: Add a disk tier
-
-A running member group cannot gain a local disk tier. Admission refuses the edit, because the members
-would have to restart to mount the directory. Declare the tier when you create a backend. This diff
-turns Step 1's manifest into a second backend that selects the nodes carrying the disk:
+Then create a new `KVCacheBackend` (along with its own `KVCachePool` and `KVCachePoolBinding`, since
+*`pool.spec.backends`* is immutable):
 
 ```diff
  apiVersion: worker.gpustack.ai/v1
@@ -281,22 +282,13 @@ turns Step 1's manifest into a second backend that selects the nodes carrying th
 +              capacity: 100Gi
 ```
 
-Create the directory on every selected node before you apply the backend. The published store image
-runs as uid 65532, so give the directory to that uid. The uid depends on the image; see
-[Directory requirements](/gpustack-operator/main/docs/modules/kv-cache/local-disk-tier/index.md#directory-requirements).
+Verify `kubectl get kvcb mooncake-disk` reaches `Ready` with combined DRAM + disk `CAPACITY`. Because
+the disk tier flushes in buckets, small workloads may keep disk usage at zero initially
+([Bucket writes](/gpustack-operator/main/docs/modules/kv-cache/local-disk-tier/index.md#bucket-writes)).
 
-```bash
-install -d -o 65532 -g 0 -m 0750 /var/lib/kvcache
-```
+### Step 6: Add a second team
 
-A pool names exactly one backend and cannot be re-pointed. Serving workloads from `mooncake-disk`
-therefore takes its own `KVCachePool` and Binding. The tier writes in buckets, so a small cache can
-show an empty tier while it works; see [Bucket writes](/gpustack-operator/main/docs/modules/kv-cache/local-disk-tier/index.md#bucket-writes).
-
-## Step 6: Add a second team
-
-Each Binding is one ceiling and one reuse domain. To give a second team cache capacity, create a
-Binding in its namespace:
+Grant `team-b` an isolated reuse domain on `shared-dram`:
 
 ```yaml
 apiVersion: worker.gpustack.ai/v1
@@ -310,14 +302,13 @@ spec:
   quota:
     ceiling: 8Gi
   domain:
-    name: llama-8b-v1
+    name: llama-8b-v1  # unique per master
     blockSize: 16
     dtype: bfloat16
 ```
 
-A namespace that runs a different dtype needs a second Binding, because a domain is immutable and
-holds one dtype. Mixing dtypes in one domain can return wrong blocks silently. The Binding below
-serves an `fp8_e4m3` deployment in `team-a`. Replace the accelerator type as in Step 3.
+To run an `fp8_e4m3` model in `team-a`, create a second Binding with its own *`domain.name`* and
+`dtype`:
 
 ```yaml
 apiVersion: worker.gpustack.ai/v1
@@ -357,52 +348,50 @@ spec:
         accelerator: "1"
 ```
 
-The operator renders `--kv-cache-dtype fp8_e4m3` from the Binding onto every role. A role that sets
-that flag itself is refused. See [Engine dtype](/gpustack-operator/main/docs/modules/kv-cache/pool/index.md#engine-dtype).
+The operator injects `--kv-cache-dtype fp8_e4m3` onto `qwen-chat-fp8` and rejects manual
+`--kv-cache-dtype` overrides ([Engine cache precision](/gpustack-operator/main/docs/modules/kv-cache/pool/index.md#engine-cache-precision)).
 
-**The three ceilings ask for 20Gi against a pool *`quota.total`* of 16Gi.** The pool reports
-`QuotaWithinTotal=False` with reason `Oversubscribed`. That is not a fault: a ceiling is an ask, and
-the store recuts each grant against the capacity it can serve, in proportion to what each Binding
-asked. *`status.effectiveQuota`* on each Binding shows the grant. See
-[Ceiling and grant](/gpustack-operator/main/docs/modules/kv-cache/pool/index.md#ceiling-and-grant).
+Because the three ceilings (`8Gi + 8Gi + 4Gi = 20Gi`) exceed `shared-dram`'s `16Gi` total, `shared-dram`
+reports `QuotaWithinTotal=False/Oversubscribed` and scales each Binding's *`status.effectiveQuota`*
+proportionally ([Requested and effective quota](/gpustack-operator/main/docs/modules/kv-cache/pool/index.md#requested-and-effective-quota)).
 
 ## Limitations
 
-- Domain reuse boundaries and tenant-ledger requirements are covered in
+- Reuse-domain isolation, engine client floors, and `dtype` / *`blockSize`* matching are covered in
   [Limitations](/gpustack-operator/main/docs/modules/kv-cache/pool/index.md#limitations) and
-  [Tenant compatibility](/gpustack-operator/main/docs/modules/kv-cache/injection/index.md#tenant-compatibility).
-- Binding deletion holds (`Releasable=False`, including `HeldByWorkloads`) are covered in
-  [Operating notes](/gpustack-operator/main/docs/modules/kv-cache/pool/index.md#operating-notes).
-- Engine-version and *`blockSize`* / `dtype` compatibility across workloads sharing a domain are
-  covered in [Tenant compatibility](/gpustack-operator/main/docs/modules/kv-cache/injection/index.md#tenant-compatibility).
+  [Tenant compatibility](/gpustack-operator/main/docs/modules/kv-cache/pool/index.md#tenant-compatibility).
+- Active workloads hold a finalizer on their `KVCachePoolBinding` (`Releasable=False/HeldByWorkloads`)
+  until deleted ([Quota and deletion checks](/gpustack-operator/main/docs/modules/kv-cache/pool/index.md#quota-and-deletion-checks)).
 
 ## Troubleshooting
 
-| Symptom | Signal | Check & Mitigation |
+| Symptom | Signal | Resolution |
 |---|---|---|
-| `KVCacheBackend` stuck in `Provisioning` or `Error` | Condition: `LeaderAvailable=False` | Leader `Deployment` unready, image missing election backend, or external endpoint address unreachable |
-| `KVCacheBackend` shows `Degraded` | Condition: `MembersMounted` shortfall (`SegmentsShort`, `NoSegments`) | `DaemonSet` member `Pod`s failing to mount or allocate memory/disk segments; check node capacity and daemon logs |
-| `KVCachePool` shows `Error` | Condition: `BackendResolved=False` / `CapacityAllocatable=False` | Referenced backend does not exist or has zero allocatable capacity |
-| `KVCachePool` `QuotaLedgerAvailable=False` | Reason: `MultiTenancyDisabled` | Backend explicitly set `multiTenancy: false`; ceiling quotas are intentionally not enforced |
-| `KVCachePoolBinding` `effectiveQuota: 0` | Condition: `QuotaGranted=False/ZeroGranted` | The master grants this domain nothing. Read the pool's `CapacityAllocatable`: `NothingToAllocate` means no member has mounted yet, and a restarted master can take roughly 30 s to remount its segments. Otherwise a proportional recut left this domain no share |
-| Pool reports oversubscribed | Condition: `QuotaWithinTotal=False/Oversubscribed` | The Bindings' ceilings sum past the pool's *`quota.total`*. This is not a fault: grants are recut in proportion and shown in each *`status.effectiveQuota`*. Lower a ceiling or raise *`quota.total`* for full grants |
-| Binding refused at apply | Reason: `Duplicate` on *`spec.domain.name`* — the domain is already registered on the same master | Another Binding holds the name; an omitted name is `default`. Give each Binding a unique *`domain.name`* |
-| Two Bindings report one domain | Condition: `DomainExclusive=False/DomainClaimedByMultipleBindings` | Two creates raced past admission; delete one of them |
-| Member `Pod` stuck | Event: `FailedMount ... hostPath type check failed` | The tier directory does not exist on that node; create it as in Step 5 |
-| Member `Pod` runs but never becomes Ready | Condition: `MembersMounted=False` (`NoSegments`, or `MemberCrashLooping` if the container exits), or a `CAPACITY` below the expected figure | The directory exists but the image's user cannot write it; the container log says `no write permission on directory`. Run `install -d -o 65532 -g 0 -m 0750 <path>` for the default image. See [Directory requirements](/gpustack-operator/main/docs/modules/kv-cache/local-disk-tier/index.md#directory-requirements) |
-| Member init container restarts | Condition: `MembersMounted=False/MemberInitCrashLooping` | The directory-survey init container restarted; the condition message gives the restart count, exit code and termination message. The survey runs `sh -c`, so the member image needs a shell. An unwritable directory does not cause this |
-| Local disk tier reports preexisting content | Condition: `TierWasEmpty=False/PreexistingContent` | The directory held files from an earlier backend. Nothing was removed; empty it yourself. `cleanAfterDelete: true` empties it only when this backend is deleted |
-| HA Leader shows `3 desired / 1 ready` | Status: expected steady state | Only elected active leader is Ready; 2 standby leader replicas remain unready until failover |
-| Deletion of `KVCachePoolBinding` blocked | Condition: `Releasable=False/HeldByWorkloads` | Active `ModelDeployment`s or `Pod`s reference this binding; delete client workloads first |
+| `Pod` or `ReplicaSet` injection refused | Event `FailedCreate` naming `binding`, `engine`, flag collision, or `QuotaLedgerAvailable` | Update the owning `Deployment` or `Pod` spec: fix the `kvcache.gpustack.ai/binding` annotation, remove owned `--kv-transfer-config` / `--kv-cache-dtype` flags, or wait for pool readiness ([Refused engine launch](/gpustack-operator/main/docs/modules/kv-cache/pool/index.md#refused-engine-launch)). |
+| `vllm-ascend` fails on startup | `NotImplementedError: MooncakeBackend does not support protocol 'tcp'` | Patch `KVCacheBackend` *`spec.transport.protocol`* to `CANN`. |
+| Engine fails on `setup()` | `TypeError: setup(): incompatible function arguments` | Runner image has `mooncake-transfer-engine < 0.3.13`; upgrade the runner image or use a Binding with `domain.name: default`. |
+| Cache writes fail with `TENANT_NOT_REGISTERED` | Engine log error or missing connector `ImportError` | Confirm the `KVCachePoolBinding` is `QuotaGranted=True` in the workload's namespace and the runner carries `MooncakeStoreConnector`. |
+| `KVCacheBackend` stuck in `Provisioning` or `Error` | `LeaderAvailable=False` | Inspect `Deployment/<name>-leader` logs and image, or verify external endpoint reachability. |
+| `KVCacheBackend` stays `Degraded` | `MembersMounted=False` (`SegmentsShort` or `NoSegments`) | Check node memory capacity and member `DaemonSet` logs on matched nodes. |
+| `KVCachePool` reports `Error` | `BackendResolved=False` or `CapacityAllocatable=False` | Create or repair the referenced `KVCacheBackend` so its `CAPACITY` is non-zero. |
+| `KVCachePool` `QuotaLedgerAvailable=False` | `Reason: MultiTenancyDisabled` | Expected when `KVCacheBackend` sets `leader.multiTenancy: false`; enable `multiTenancy` to enforce ceilings. |
+| `KVCachePoolBinding` shows `effectiveQuota: 0` | `QuotaGranted=False/ZeroGranted` | Wait ~30 s if the leader just restarted (`NothingToAllocate`), or raise pool *`quota.total`* / lower sibling ceilings. |
+| Pool reports `Oversubscribed` | `QuotaWithinTotal=False/Oversubscribed` | Expected proportional recut when ceilings exceed *`quota.total`*; inspect *`status.effectiveQuota`* on each Binding. |
+| Binding apply rejected on `domain.name` | `Duplicate` on *`spec.domain.name`* | Another Binding on the same backend already claims that domain (`default` when omitted); set a unique *`domain.name`*. |
+| Two Bindings claim one domain | `DomainExclusive=False/DomainClaimedByMultipleBindings` | Delete one of the racing `KVCachePoolBinding` objects. |
+| Disk-tier member stuck or unready | `FailedMount` or `no write permission on directory` | Create the host directory on every matched node with `install -d -o 65532 -g 0 -m 0750 <path>` ([Host directory requirements](/gpustack-operator/main/docs/modules/kv-cache/local-disk-tier/index.md#host-directory-requirements)). |
+| Disk-tier init container crash-loops | `MembersMounted=False/MemberInitCrashLooping` | Use a member image that includes `sh` for the directory survey init container. |
+| Disk tier warns of preexisting files | `TierWasEmpty=False/PreexistingContent` | Empty stale files from the host path manually (`cleanAfterDelete: true` cleans only on backend deletion). |
+| HA leader `Deployment` shows `1/3` Ready | Expected leader-election steady state | No action needed; two standbys remain intentionally unready until failover. |
+| `KVCachePoolBinding` deletion hangs | `Releasable=False/HeldByWorkloads` | Delete attached `ModelDeployment`s and injected `Pod`s before deleting the Binding. |
 
 ---
 
-**See also** — [KV Cache Backend](/gpustack-operator/main/docs/modules/kv-cache/backend/index.md) (every field of the store, and what status reports) ·
-[KV Cache Election and Failover](/gpustack-operator/main/docs/modules/kv-cache/leader/index.md) (the election, why there is no snapshot, and the member addressing choice in full) ·
-[KV Cache Pools and Bindings](/gpustack-operator/main/docs/modules/kv-cache/pool/index.md) (quota, domains and what a full quota does) ·
-[KV Cache Local Disk Tier](/gpustack-operator/main/docs/modules/kv-cache/local-disk-tier/index.md) (directory, bucket and cleanup rules) ·
-[Model Deployment](/gpustack-operator/main/docs/modules/model-deployment/configuration/index.md) (roles, *prefill*/*decode*, rollout) ·
-[Prefill and Decode](/gpustack-operator/main/docs/modules/model-deployment/prefill-decode/index.md) (router, transfer) ·
-[KV Cache Injection](/gpustack-operator/main/docs/modules/kv-cache/injection/index.md) (what a `Pod` actually receives)
+**See also** — [KV Cache Backend](/gpustack-operator/main/docs/modules/kv-cache/backend/index.md) (backend fields and status) ·
+[KV Cache Election and Failover](/gpustack-operator/main/docs/modules/kv-cache/leader/index.md) (leader election and member
+addressing) · [KV Cache Pools and Bindings](/gpustack-operator/main/docs/modules/kv-cache/pool/index.md) (quotas, domains, and
+injection) · [KV Cache Local Disk Tier](/gpustack-operator/main/docs/modules/kv-cache/local-disk-tier/index.md) (disk directory and
+bucket rules) · [Configuration](/gpustack-operator/main/docs/modules/model-deployment/configuration/index.md) (`ModelDeployment`
+role configuration)
 
 **Next** → [Model Prefetch Walkthrough](/gpustack-operator/main/docs/walkthroughs/model-delivery/prefetch/index.md) — cache weights on GPU nodes before serving.
