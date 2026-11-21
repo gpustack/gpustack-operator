@@ -1,7 +1,8 @@
 # Model Deployment Routing
 
-A managed router selects among serving endpoints, then its policy chooses among them. This page covers
-endpoint selection and SGLang's tested DP routing modes.
+A managed router selects among qualified serving endpoints using its configured routing policy.
+Endpoint selection, per-router defaults, SGLang *DP* registration and qualification checks govern
+which replicas receive traffic.
 
 ## Contents
 
@@ -17,167 +18,98 @@ endpoint selection and SGLang's tested DP routing modes.
 
 ## Traffic targets
 
-The serving mode decides which `Pod`s are candidates; the router decides which candidate a
-request lands on, and a policy such as `round_robin` never changes the selector.
+The serving mode decides which `Pod`s are HTTP candidates; the router policy chooses only among
+those candidates.
 
 | Serving mode | HTTP candidates |
 |---|---|
-| Internal *Server* group | Member 0 of each replica. |
-| Qualified External *Server* group | Every qualified member; each member serves one *data parallelism (DP)* rank. |
-| *Prefill* or *Decode* group | Member 0 of each replica, including groups with `size > 1`. |
-| *Elastic EP* collective | The collective's one endpoint, its master. |
-| *Encode* group | Excluded from answering candidates and the deployment-wide `Service`. |
+| Internal *Server* group | Member 0 of each replica |
+| Qualified External *Server* group | Every qualified member (one *data parallelism (DP)* rank per member) |
+| *Prefill* or *Decode* group | Member 0 of each replica, even when `size > 1` |
+| *Elastic EP* collective | Master endpoint only |
+| *Encode* group | Excluded from answering candidates and deployment `Service` |
 
-The table below records how each router forwards traffic within a mode. `vllm-router` serves vLLM
-deployments only and `sglang-gateway` SGLang only, so each of their cells is that engine's own
-pairing:
+`vllm-router` pairs only with vLLM and `sglang-gateway` only with SGLang:
 
 | Mode | `llm-d-router` | `vllm-router` | `sglang-gateway` |
 |---|---|---|---|
-| Multi-replica *Server* | One fixed scoring profile — prefix match, queue depth, KV utilization — with no policy switch; measured 187/170 on vLLM and 375/0, every request on one replica, on SGLang | `cache_aware` by default; `--policy round_robin` spreads evenly, measured 60 per replica | The same policies as `vllm-router`; `round_robin` measured 60 per replica |
-| *PD* pair | The disaggregated pairing's own router: the token-counted prefill/decode split, per-role connector documents, the decode sidecar | Its own *PD* mode over the pair | Native `--pd-disaggregation`; combining it with `--dp-aware` produced an invalid *decode* destination in the recorded container run, so the operator never renders the two together |
-| *EPD* | An `encode` scheduling profile beside the pair; the decode sidecar coordinates the encoder transfer | Drives encode, prefill and decode itself through operator-owned `--epd-config`, no sidecar | Routes the pair natively; the prefiller reaches the encoder through `--encoder-urls` |
-| *Elastic EP* | The engine's own internal load balancing spreads work inside the collective, and the deployment publishes one endpoint, so a router is not how this mode balances | Same | Same |
-| *External DP* | Admitted, but no `--policy` to spread the ranks evenly and no recorded run — use the engine's own router | Every rank endpoint behind `--policy round_robin` (recorded) | Per-member endpoints; the registration boundary is the paragraph below |
+| Multi-replica *Server* | Fixed scoring profile (prefix, queue, KV); measured 187/170 on vLLM and 375/0 on SGLang | `cache_aware` default; `--policy round_robin` measured 60/60 | Same policies; `round_robin` measured 60/60 |
+| *PD* pair | Token-counted *PD* split, connector docs and decode sidecar | Native *PD* mode | Native `--pd-disaggregation` (never combined with `--dp-aware`) |
+| *EPD* | `encode` profile + decode sidecar transfer | Operator-owned `--epd-config`, no sidecar | Native pair; *Prefill* dials `--encoder-urls` |
+| *Elastic EP* | Engine internal load balancing; single endpoint | Same | Same |
+| *External DP* | Admitted, but no `--policy` flag; prefer engine router | Per-rank endpoints with `--policy round_robin` (recorded) | Per-member endpoints (`--dp-aware` fan-out below) |
 
-`llm-d-router`'s profile is not configurable — no policy flag, no settable weights
-([No policy flag](#no-policy-flag)) — so where even spread matters, above all multi-replica *Server*
-and *External DP*, prefer the engine's own router: `vllm-router` on vLLM and `sglang-gateway` on
-SGLang. The matrix's counts were recorded on vLLM `0.29.0` and SGLang `0.5.18` behind the routers
-of `gpustack/llm-router:v0.3.1`; newer builds must be re-verified before they inherit a claim.
+Where even spread matters (multi-replica *Server* or *External DP*), choose `vllm-router` for vLLM
+or `sglang-gateway` for SGLang because `llm-d-router` has no policy switch
+([No policy flag](#no-policy-flag)). Counts above were recorded on vLLM `0.29.0` and SGLang
+`0.5.18` behind `gpustack/llm-router:v0.3.1`.
 
-*Encode* `Pod`s are never part of the deployment's answering set. Under `llm-d-router` they are
-discovered for stage routing, and under `vllm-router` their `Service` endpoint is passed through
-`--epd-config`, while the deployment `Service` never targets them. The supported routers (`llm-d-router`,
-`vllm-router` and `sglang-gateway`) are admitted with an *Encode* role for their supported engine
-and platform combinations. See [Encode stage routing](#encode-stage-routing).
-
-For an eligible External Server role the selectors carry no member-index term at all, so every
-qualified rank is discovered; the leader restriction applies only to a shape whose subordinate members
-expose no HTTP endpoint. The selectors keep the endpoint eligibility requirement, so an unhealthy
-group cannot receive new traffic.
-The replica's headless `Service` always publishes every member for peer communication.
-
-On the SGLang External DP shape the operator renders `--dp-aware` for the gateway. With the flag,
-the gateway registers one worker per attention-DP rank: each rank is a logical worker whose URL
-carries a rank suffix (`http://host:port@0`, `http://host:port@1`), and every suffix dials the
-member's one physical serving listener — the suffix is a rank, not a port.
-
-That registration is the gateway patch this project ships: it is carried by
-`gpustack/llm-router:v0.4.0` and later releases (including the default
-`model-deployment-router-image` `Setting`), so a deployment that names no
-image of its own registers per rank out of the box. An older default or a named image that
-predates the patch runs the gateway without the fan-out.
-
-No runtime run has exercised the flag: the render gate and the patched fan-out are verified in
-source and unit tests on the recorded shape.
-
-Without the flag the gateway registers at most one worker per group — recorded on
-`gpustack/llm-router:v0.3.1`, and on the `v0.4.0` gateway build with the flag withheld. Each
-group's subordinate member times out inside the gateway's 10 s discovery step and never enters
-the worker registry, and under load a group's registered worker can miss its registration too:
-a two-group, four-member deployment presented two healthy workers in one run and one in another.
-
-Known non-Internal modes follow the External selector rule. Status retains the engine's distinct mode name.
-Hybrid GPU behavior remains untested. See [Prefill and Decode](prefill-decode.md) for *PD* limitations.
-
-Managed roles expose one fixed HTTP port per `Pod`, defaulting to 8000.
-All routed roles must use the same serving port. A shared custom port remains supported.
-Admission rejects vLLM's MultiPort mode because it starts endpoints on additional, incremented ports.
-A decoder proxy's internal backend port remains separate from its published HTTP port.
-See the [External DP walkthrough](../../walkthroughs/model-deployment/external-dp.md) for a minimal per-rank configuration.
+- **External selectors**: Qualified *External* *Server* roles omit `member-index=0` while keeping
+  the `endpoint-eligible` selector; the headless `Service` always publishes all members for peer
+  communication. Hybrid GPU behavior is untested.
+- **Shared serving port**: Managed roles expose one HTTP port (`8000` default; all routed roles must
+  match). Admission rejects vLLM `MultiPort`. See
+  [External DP Walkthrough](../../walkthroughs/model-deployment/external-dp.md).
+- **SGLang `--dp-aware` registration**: For SGLang *External DP*, the operator renders `--dp-aware`
+  on `sglang-gateway` so `gpustack/llm-router:v0.4.0`+ registers one logical worker per attention-DP
+  rank (`http://host:port@0`, `http://host:port@1`) pointing at each member's single listener. This
+  render gate and fan-out are unit-tested (no live runtime capture yet). Without `--dp-aware` (for
+  example on `v0.3.1`), subordinate members time out in the gateway's 10 s discovery step, leaving
+  at most one registered worker per group.
 
 ### Group exclusion
 
-A managed protected group is excluded through its `Pod` set, not through a selector that loses a term.
-The requirement stays in the selector from the first enable, decided or not, and only the members whose
-group is qualified carry the matching label.
+Protected groups are gated by `Pod` labels, never by dropping selector terms. Both the Router and
+the role `Service` enforce the same rule:
 
-| Group class | Exclusion |
+| Group class | Selector rule |
 |---|---|
-| Managed protected group: multi-member ordinary, External DP, or *Prefill*/*Decode* | The selector carries the endpoint-eligibility requirement from the first enable, decided or not. Only the members whose group is qualified carry the matching label, so only they are discovered. |
-| Unsupported custom route, or an engine outside the capability matrix | The compatibility carve-out: the existing leader restriction, and no claim of qualification. |
-| Ordinary single-member Server | The leader restriction, with no eligibility requirement in the selector. |
-
-The Router and the ordinary `Service` take the same decision, so a request cannot reach an endpoint the
-`Service` does not front.
+| Managed protected group (multi-member ordinary, *External DP*, *PD*) | Requires `endpoint-eligible: "true"` from first enable; only qualified groups receive the label |
+| Unsupported custom route or engine outside capability matrix | Keeps leader restriction with no qualification claim |
+| Ordinary single-member *Server* | Leader restriction, no eligibility label required |
 
 ### Managed and custom roles
 
-A deployment whose roles do not all carry the same requirement needs one deployment-wide selector to
-express their union, and the operator names that union through an internal candidate label,
-`modeldeployment.gpustack.ai/router-candidate`. The label says membership, not qualification: a
-candidate is a member that may be discovered, and the label is no proof that its group qualifies.
-
-Actual discovery is the intersection of the deployment-wide selector with the router's native role and
-member filters, so a candidate the native filter excludes is not discovered. A per-kind filter admits
-that kind's union, because two roles of one kind share the filter and a filter demanding one role's
-requirement would withhold the other's members.
+When roles in one deployment carry mixed requirements, the operator labels eligible discovery
+members with `modeldeployment.gpustack.ai/router-candidate` to form a deployment-wide union. That
+label marks membership only; actual routing intersects it with native role and member filters.
 
 ## Encode stage routing
 
-How the encoder is reached depends on the engine and router. Send requests to
-*`status.endpoint`* in every case.
+Send all client requests to *`status.endpoint`*. *Encode* `Pod`s stay excluded from the deployment
+`Service` and KV-event discovery:
 
 | Router | Engine | Encoder routing |
 |---|---|---|
-| `llm-d-router` | `vLLM` | The router picks an encoder for requests with media, then the *decode* sidecar coordinates the transfer |
-| `vllm-router` | `vLLM` | The router receives the encoder `Service` URL via `--epd-config` and drives *encode*, *prefill* and *decode* directly without a *decode* sidecar |
-| `llm-d-router` | `SGLang` | The *Prefill* role calls the *Encode* role directly through `--encoder-urls`; the router has no *encode* stage |
-| `sglang-gateway` | `SGLang` | The gateway routes the pair natively; the *Prefill* role calls the *Encode* role directly |
+| `llm-d-router` | `vLLM` | `encode` profile picks an encoder for media requests; decode sidecar (`--ec-connector=ec-nixl` or `ec-example`) coordinates transfer |
+| `vllm-router` | `vLLM` | Operator renders `--epd-config` (owned, refused in *`extraArgs`*); router drives *Encode* → *Prefill* (NIXL) → *Decode* without a sidecar |
+| `llm-d-router` | `SGLang` | Router splits every request to *Prefill*/*Decode* (no `--ec-connector`); *Prefill* dials *Encode* via `--encoder-urls` |
+| `sglang-gateway` | `SGLang` | Gateway routes *Prefill*/*Decode* natively; *Prefill* dials *Encode* via `--encoder-urls` |
 
-With `llm-d-router` and `vLLM`, the router defines an `encode` scheduling profile over the `Pod`s
-labelled `modeldeployment.gpustack.ai/role-kind: encode`. The profile applies no queue, KV cache or
-prefix scorers, because an encoder keeps no KV cache and tracks no tokens. A multimodal-aware
-decider sends a request with media through an encoder first. A text-only request goes straight to
-*prefill* and *decode*.
-
-On the Ascend *encode/prefill/decode (EPD)* configuration (`llm-d-router` + `vLLM-Ascend` + `ECExampleConnector`), the `encode`
-role answers requests that carry media and stays idle for text-only traffic. The connector hands
-the result to *Prefill* through the shared volume both roles mount; the router is not in that path.
-
-The operator keeps a vLLM encoder in the router's candidate set on every platform. Its
-address-based encoder path applies only to SGLang.
-
-The *decode* sidecar's `--ec-connector` follows the admitted row: `ec-example` on Ascend and `ec-nixl`
-on NVIDIA and AMD. See [Admitted matrix](encode-prefill-decode.md#admitted-matrix).
-
-With `vllm-router` and `vLLM` (on NVIDIA and AMD), the operator passes `--epd-config={"encoder_urls":["http://<md>-<encode-role>.<ns>.svc:<port>"]}` to the router. The router calls the encoder `Service` first, forwards `ec_transfer_params` to the *prefill* worker so it pulls the embeddings over NIXL (`ECCPUConnector`), and strips `ec_transfer_params` before forwarding to *decode*. `--epd-config` is operator-owned and refused in *`spec.router.extraArgs`*.
-
-With `llm-d-router` and `SGLang`, the router splits every request between *prefill* and *decode*,
-because an SGLang *decode* role cannot *prefill*. The sidecar runs without `--ec-connector`, since this
-engine uses no encoder-cache connector.
-
-Encoders are also excluded from KV cache event discovery, because they produce no cache blocks.
+Under `llm-d-router` + vLLM, the `encode` profile omits queue, KV-cache and prefix scorers, sends
+media requests through *Encode* first, and routes text-only requests straight to *Prefill* and
+*Decode*. See [Admitted matrix](encode-prefill-decode.md#admitted-matrix) for verified combinations.
 
 ## Each router's default
 
-**`vllm-router` and `sglang-gateway` route by `cache_aware`, and `llm-d-router` scores every
-candidate for each request.** The operator renders no policy flag for the first two, so each runs its
-upstream default. The table describes the bundled vLLM router `v0.1.16.1` and the `sglang-gateway` binary of
-`gpustack/llm-router:v0.3.1`; the llm-d row describes the operator's scoring profile.
+`vllm-router` and `sglang-gateway` default to `cache_aware` (logging
+`policy: CacheAware { cache_threshold: 0.3, ... }`); `llm-d-router` uses its fixed scoring profile
+(recorded on bundled `vllm-router` `v0.1.16.1` and `sglang-gateway` in `gpustack/llm-router:v0.3.1`):
 
-| *`spec.router.name`* | Default | Replica selection |
+| Router | Default | Replica selection |
 |---|---|---|
-| `vllm-router` | `cache_aware` | The replica whose past requests share the longest prefix with this one, when that share is above `--cache-threshold` (`0.3`); below it, the replica with the smallest record. Once the busiest replica has more than `--balance-abs-threshold` (`64`) requests over the idlest and more than `--balance-rel-threshold` (`1.5`) times as many, the least-loaded replica instead |
-| `sglang-gateway` | `cache_aware` | The same algorithm, with the same three defaults |
-| `llm-d-router` | A fixed scoring profile | The highest total of prefix-cache match (weight `3`, not scored on a *decode* half), queue depth (`2`) and KV-cache utilization (`2`) |
-
-Both `cache_aware` routers log the policy once at startup, as `policy: CacheAware { cache_threshold:
-0.3, … }`.
+| `vllm-router` | `cache_aware` | Longest matching prefix above `--cache-threshold` (`0.3`), else smallest tree; switches to least-loaded when load gap exceeds `--balance-abs-threshold` (`64`) and `--balance-rel-threshold` (`1.5×`) |
+| `sglang-gateway` | `cache_aware` | Same algorithm and three defaults |
+| `llm-d-router` | Fixed profile | Highest sum of prefix match (weight `3`, omitted on *Decode*), queue depth (`2`) and KV utilization (`2`) |
 
 ## Prefix affinity
 
-**Under `cache_aware`, requests that share a long prefix and arrive one after another all go to one
-replica, and the others stay idle.** That is the policy working, not a fault: the replica that served
-the prefix holds it in its prefix cache, so the next request sharing it does not recompute it.
+**Under `cache_aware`, serial requests sharing a long prefix land on one replica while peers stay
+idle.** This is expected prefix reuse, not a fault; traffic spills over only when the load gap
+exceeds the thresholds above.
 
-Such a request only goes elsewhere once the load gap above opens, and traffic that sends one
-request at a time never has more than one in flight to open it.
-
-Measured on two server replicas, each on its own GPU, with serial chat requests that open with the
-same text of about 500 characters and end in a question of their own, streaming and non-streaming in
-turn. No request failed:
+Measured on two single-GPU *Server* replicas with serial 500-character shared-prefix chat requests
+(zero errors; concurrent spread unmeasured):
 
 | Router | Engine | Requests per replica |
 |---|---|---|
@@ -186,127 +118,103 @@ turn. No request failed:
 | `llm-d-router` | vLLM `0.29.0` | 187 and 170 |
 | `llm-d-router` | SGLang `0.5.18` | 375 and 0 |
 
-How any of the three spreads concurrent traffic is not measured.
-
 ## Switching to round robin
 
-**Add `--policy round_robin` to *`spec.router.extraArgs`* on `vllm-router` or `sglang-gateway`** to
-send each request to the next replica in turn, whatever it shares with earlier ones:
+Add `--policy round_robin` to *`spec.router.extraArgs`* on `vllm-router` or `sglang-gateway` to
+spread requests evenly across replicas:
 
 ```diff
  apiVersion: worker.gpustack.ai/v1
  kind: ModelDeployment
  metadata:
    name: round-robin-serving
+   namespace: team-a
  spec:
    router:
-     name: vllm-router                    # or sglang-gateway
+     name: vllm-router  # or sglang-gateway
 +    extraArgs:
 +      - --policy
 +      - round_robin
 ```
 
-`--policy` is in neither router's [refused list](prefill-decode.md#router-configuration), so admission
-passes it and the operator appends it to the command line it renders. The router then logs
-`Starting router … | policy: RoundRobin`.
+`--policy` is accepted by admission ([Router configuration](prefill-decode.md#router-configuration));
+the router logs `Starting router ... | policy: RoundRobin`. On the same two-replica test at
+creation, 120 requests split `60 / 60` on both routers with zero errors.
 
-Measured on the same two replicas and the same kind of traffic, with the flag set at creation:
-under each router, 120 requests with none failing, 60 on each replica. `vllm-router` counted them
-in `vllm_router_policy_decisions_total{policy="round_robin"}`, 60 per replica, and `sglang-gateway`
-in `smg_worker_selection_total{policy="round_robin"}`, 120 in all.
+Editing *`router.extraArgs`* replaces only the router `Deployment` without rolling worker `Pod`s
+([Router hash decoupling](runtime-control.md#router-hash-decoupling)); the new router starts with
+an empty prefix table. Both routers also run behind the shared Envoy inference allowlist sidecar
+with a `:9091` observer when managed accelerated non-*Encode* roles exist.
 
-*`router.extraArgs`* is [editable](configuration.md#deployment-identity-fields), so a
-running deployment can switch as well. The router `Pod` is then replaced, and the new one starts with
-no record of earlier prefixes. Only a flag set at creation has been run.
+Admission does not validate `--policy` values; an unknown value stops the router at startup:
 
-Managed routers enforce a shared method/path inference allowlist (including `vllm-omni` and `sglang-omni` multimodal routes) whenever any managed accelerated non-*Encode* role exists. `vllm-router` and `sglang-gateway` front the loopback router with an Envoy allowlist sidecar and a `:9091` observer listener.
-
-Editing mutable *`spec.router`* subfields updates only the router `Deployment`; see [Online Runtime Control](runtime-control.md#router-hash-decoupling) for the full list.
-
-**The value is each project's own, and the router checks it, not admission**, so a misspelled one
-stops the router at startup:
-
-| *`spec.router.name`* | `--policy` values |
+| Router | Accepted `--policy` values |
 |---|---|
 | `vllm-router` | `random`, `round_robin`, `cache_aware`, `power_of_two`, `consistent_hash`, `rendezvous_hash` |
 | `sglang-gateway` | `random`, `round_robin`, `cache_aware`, `power_of_two`, `prefix_hash`, `manual` |
 
-Only `round_robin` has been run. The three `cache_aware` thresholds pass through *`extraArgs`* the same
-way, as do both routers' `--prefill-policy` and `--decode-policy` for a *prefill/decode* pair; none of
-those has been run either.
+Only `round_robin` was live-tested; `cache_aware` thresholds, `--prefill-policy` and
+`--decode-policy` pass through *`extraArgs`* untested.
 
 ## No policy flag
 
-**`llm-d-router` cannot be switched through *`extraArgs`*.** Its scorers and their weights are in the
-configuration document the operator renders and mounts, and `--config-file`, which would point the
-router at another one, is refused there. No field sets them either.
+`llm-d-router` cannot switch policies through *`extraArgs`* because the operator owns
+`--config-file` and exposes no weight fields.
 
 ## Serving observations
 
-**Which replicas a Router can reach differs from which replicas it is actively serving, and the operator reports both.** *`status.roles[].endpoints.eligible`* counts qualified endpoints (`null` when never observed, `0` when observed empty), while *`status.roles[].endpoints.serving.state`* reports the Router union (`Confirmed` with *`serving.value`*, `NotConverged`, `Unknown`, or `NotConfigured`).
+*`status.roles[].endpoints.eligible`* counts operator-qualified endpoints (`null` before first
+observation, `0` when empty), while *`status.roles[].endpoints.serving.state`* reports the direct
+per-Router union (`Confirmed` with *`serving.value`*, `NotConverged`, `Unknown` or `NotConfigured`).
 
-Each protected replica group must pass five criteria to hold `modeldeployment.gpustack.ai/endpoint-eligible: "true"`:
+Protected groups must pass all five criteria to hold `modeldeployment.gpustack.ai/endpoint-eligible: "true"`:
 
-| Criterion | Meaning | Failure effect |
+| Criterion | Requirement | Failure effect |
 |---|---|---|
-| `MemberSetComplete` | Every declared member `Pod` exists | Revokes `endpoint-eligible` immediately; `Unknown` holds prior state |
-| `MembersReady` | Every member passes its readiness probe (`GET /health` or `/gpustack/v1/ready`) | Revokes `endpoint-eligible` immediately |
-| `GroupForward` | Forward generation probe succeeds across the group collective | Revokes `endpoint-eligible` immediately; `Unknown` holds prior state |
-| `NoPlannedRetirement` | No active retirement reservation holds the ordinal | Revokes `endpoint-eligible` during withdrawal and drain |
-| `NoPendingReplacement` | No replacement is already queued for the ordinal | Revokes `endpoint-eligible` immediately |
+| `MemberSetComplete` | Every declared member `Pod` exists | Revokes `endpoint-eligible`; `Unknown` keeps prior state |
+| `MembersReady` | Every member passes readiness (`/health` or `/gpustack/v1/ready`) | Revokes `endpoint-eligible` immediately |
+| `GroupForward` | Collective forward generation probe succeeds | Revokes `endpoint-eligible`; `Unknown` keeps prior state |
+| `NoPlannedRetirement` | No active retirement holds the ordinal | Revokes `endpoint-eligible` during withdrawal and drain |
+| `NoPendingReplacement` | No replacement is queued for the ordinal | Revokes `endpoint-eligible` immediately |
 
-*`status.roles[].groups[]`* publishes per-group membership, sorted member UID `generation`, `state` (`Eligible`, `Withdrawn`, `AwaitingMembers`, `AwaitingReady`, `AwaitingProbe`, `AwaitingObservation`, `Unsupported`, or `Unknown`), and `serving` confirmation.
+*`status.roles[].groups[]`* publishes member UID `generation`, `state` (`Eligible`, `Withdrawn`,
+`AwaitingMembers`, `AwaitingReady`, `AwaitingProbe`, `AwaitingObservation`, `Unsupported`,
+`Unknown`) and `serving` confirmation. An already-`Eligible` group with unchanged ready members
+stays `Eligible` during a transient Router scrape loss while *`serving.state`* turns `Unknown`.
 
-`AwaitingObservation` marks a group that passed all five criteria and waits on a fresh Router view. An already-`Eligible` group whose uncached member UID set remains complete, unchanged, and `Ready=True` stays `Eligible` through a transient Router observation loss, while *`endpoints.serving.state`* moves to `Unknown`.
-
-**A Router process health result is not an engine group's health.** The operator queries each Router `Pod` directly over HTTP rather than through the Router `Service`, so every Router replica must agree before *`serving.state`* reports `Confirmed`.
-
-**Three bounds apply, and they serve different purposes.**
+The operator queries every Router `Pod` directly under three timeouts (all Router replicas must
+agree for `Confirmed`):
 
 | Bound | Value | Scope |
 |---|---|---|
-| Fetch deadline | 2 seconds | one read of one Router's view |
-| Collection budget | 14 seconds | one collection, across every Router it reads |
-| Freshness policy | 15 seconds | how long a collected view informs the answer |
-
-**A collected view informs the answer for fifteen seconds.** Past that the answer becomes `Unknown`,
-so a Router that stops being reachable is reported as unobserved and never as serving whatever it
-served last. The fetch deadline keeps one unreachable Router from consuming the collection budget the
-other Routers share.
-
-> The freshness bound is what keeps a stopped Router from reading as a healthy one. A view that
-> outlived its evidence would report a serving count for a process that is gone, and the only way
-> back would be an edit to the deployment.
+| Fetch deadline | `2 s` | Single Router `Pod` read |
+| Collection budget | `14 s` | One collection across all Router `Pod`s |
+| Freshness policy | `15 s` | Validity of a collected view before falling back to `Unknown` |
 
 ## Per-worker routing metrics
 
-The deployment's `/metrics` subresource (`/apis/worker.gpustack.ai/v1/namespaces/<ns>/modeldeployments/<name>/metrics`) aggregates role and router counters without per-replica attribution. Each router's own `/metrics` endpoint exposes the per-worker series below; a `worker` label carries the worker URL and `Pod` address.
+The `ModelDeployment` `/metrics` subresource aggregates role and router counters without per-replica
+labels. Scrape each router's own `/metrics` for per-worker attribution (`worker` carries the worker
+URL/`Pod` address):
 
-| *`spec.router.name`* | Series | Meaning |
+| Router | Series | Meaning |
 |---|---|---|
-| `vllm-router` | `vllm_router_processed_requests_total{worker}` | requests sent to each worker, in both modes |
-| `vllm-router` | `vllm_router_policy_decisions_total{policy,worker}` | picks each policy made, per worker |
-| `vllm-router` | `vllm_router_pd_prefill_requests_total{worker}`, `vllm_router_pd_decode_requests_total{worker}` | in *PD* mode, requests sent to each *prefill* and each *decode* worker |
-| `sglang-gateway` | `smg_worker_requests_active{worker}` | requests in flight to each worker at the scrape |
-| `sglang-gateway` | `smg_worker_selection_total{worker_type,policy}` | picks per policy and per `regular`, `prefill` or `decode` worker type, not per worker |
-| `llm-d-router` | `llm_d_epp_per_endpoint_queue_size{model_server_endpoint}` | requests queued at each endpoint at the scrape |
-| `llm-d-router` | `llm_d_epp_disagg_decision_total{decision_type}` | requests sent through a *prefill* replica (`prefill-decode`) or straight to *decode* (`decode-only`) |
+| `vllm-router` | `vllm_router_processed_requests_total{worker}` | Requests sent to each worker |
+| `vllm-router` | `vllm_router_policy_decisions_total{policy,worker}` | Policy picks per worker |
+| `vllm-router` | `vllm_router_pd_prefill_requests_total{worker}`, `vllm_router_pd_decode_requests_total{worker}` | *PD* requests per *Prefill* and *Decode* worker |
+| `sglang-gateway` | `smg_worker_requests_active{worker}` | Active in-flight requests per worker |
+| `sglang-gateway` | `smg_worker_selection_total{worker_type,policy}` | Picks by policy and `regular`/`prefill`/`decode` type |
+| `llm-d-router` | `llm_d_epp_per_endpoint_queue_size{model_server_endpoint}` | Queued requests per endpoint |
+| `llm-d-router` | `llm_d_epp_disagg_decision_total{decision_type}` | `prefill-decode` versus `decode-only` split counts |
 
-Neither `sglang-gateway` nor `llm-d-router` keeps a running count per replica. Behind them, compare
-the engine `Pod`s' own counts instead, such as each `Pod`'s *time to first token (TTFT)* histogram `_count`.
-
-A scale event is visible in these series. On a *SGLang* multi-Server deployment scaled one to two,
-the gateway's worker set grew to two `smg_worker_health` series at `1`; on the scale back, the
-withdrawn worker's series stayed in the exposition at `-1` while
-`smg_discovery_deregistrations_total{reason="pod_deleted"}` incremented, and the surviving worker
-kept its `1`.
-
-Count the healthy series, not the lines, on a scaled deployment. The same run's four content
-classes served through the gateway with zero failures.
+Neither `sglang-gateway` nor `llm-d-router` exposes cumulative per-worker request totals; compare
+each engine `Pod`'s *time to first token (TTFT)* histogram `_count` instead. On `sglang-gateway`
+after scale-down, retired workers remain in `smg_worker_health` with value `-1` while
+`smg_discovery_deregistrations_total{reason="pod_deleted"}` increments; count series equal to `1`.
 
 ## Troubleshooting
 
-Inspect router readiness, endpoint eligibility, and per-group status on the `ModelDeployment`:
+Inspect router readiness, endpoint eligibility and per-group status on the `ModelDeployment`:
 
 ```bash
 kubectl -n <namespace> get modeldeployment <name> -o json \
@@ -315,16 +223,19 @@ kubectl -n <namespace> get modeldeployment <name> -o json \
          roles: [.status.roles[] | {name, ready, desired, endpoints, groups}]}'
 ```
 
-| Symptom | Signal | Action |
+| Symptom | Signal | Owner & action |
 |---|---|---|
-| *`status.endpoint`* is empty | `RouterReady=False` (`RenderFailed` or `NoReadyReplicas`) or `Unknown` (`NotDeployed`) | Read the `RouterReady` message; fix refused *`spec.router`* flags or inspect `<deployment>-router` `Pod` logs and events. |
-| `Pod` is `Running` (`0/1` `Ready`) | `groups[].state: AwaitingReady` or `RoleKindsReady=False` | Engine is loading weights (`startupTimeoutSeconds`, default `1800` s) or failing `/health` / `/gpustack/v1/ready`; check engine logs and *`roles[].pause`*. |
-| `Pod` is `1/1` `Ready` without `endpoint-eligible` | `groups[].state: AwaitingMembers`, `AwaitingProbe`, or `Withdrawn` | Check `groups[].reason` for missing peer `Pod`s, failed collective forward probe, active *`status.retirement`*, or *`roles[].pause: true`*. |
-| *`endpoints.eligible`* is `null` | `EndpointEligibility=Unknown` (`NotObserved`) | Wait for the qualification pass to evaluate the role, or check operator worker logs if status never updates. |
-| Qualified group receives no traffic | `groups[].state: AwaitingObservation` or `serving.state: Unknown` / `NotConverged` | Inspect `<deployment>-router` `Pod`s and `:9091/observer/endpoints` (`:9090` on `llm-d-router`); verify all router replicas report fresh views within 15 s. |
+| *`status.endpoint`* is empty | `RouterReady=False` (`RenderFailed`, `NoReadyReplicas`) or `Unknown` (`NotDeployed`) | Fix refused *`spec.router`* flags on the `ModelDeployment` or inspect `<deployment>-router` `Pod` logs and events. |
+| `Pod` `Running` (`0/1` `Ready`) | `groups[].state: AwaitingReady` or `RoleKindsReady=False` | Wait for weight load (`startupTimeoutSeconds`, default `1800 s`), or check worker `Pod` logs, `/gpustack/v1/ready` and *`roles[].pause`*. |
+| `Pod` `1/1` `Ready` without `endpoint-eligible` | `groups[].state: AwaitingMembers`, `AwaitingProbe` or `Withdrawn` | Read `groups[].reason` on the `ModelDeployment` for missing peer `Pod`s, failed forward probe, *`status.retirement`* or *`roles[].pause: true`*. |
+| *`endpoints.eligible`* is `null` | `EndpointEligibility=Unknown` (`NotObserved`) | Wait for qualification pass or inspect operator worker logs if status stalls. |
+| Qualified group gets no traffic | `AwaitingObservation` or `serving.state: Unknown` / `NotConverged` | Inspect `<deployment>-router` `Pod`s and `:9091/observer/endpoints` (`:9090` on `llm-d-router`) so all Router replicas report fresh views within `15 s`. |
 
 ---
 
-**See also** — [Prefill and Decode](prefill-decode.md) (*`spec.router`* pairing and refused router flags) · [Encode, Prefill and Decode](encode-prefill-decode.md) (*EPD* disaggregation and connector options) · [Model Deployment Configuration](configuration.md) (role readiness probes and rollout behavior) · [Online Runtime Control](runtime-control.md) (router hash decoupling and role pause).
+**See also** — [Prefill and Decode](prefill-decode.md) (*`spec.router`* pairing and refused flags) ·
+[Encode, Prefill and Decode](encode-prefill-decode.md) (*EPD* disaggregation and connectors) ·
+[Model Deployment Configuration](configuration.md) (readiness probes and rollout behavior) ·
+[Online Runtime Control](runtime-control.md) (router hash decoupling and role pause)
 
 **Next** → [Model Deployment Scaling](scaling.md) — scale serving replicas and observe graceful retirement.

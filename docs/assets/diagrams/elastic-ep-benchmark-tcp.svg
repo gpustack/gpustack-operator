@@ -1,0 +1,161 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 566" role="img" aria-labelledby="title desc">
+<title id="title">Elastic EP width 2 vs width 4 over TCP, concurrency sweep</title>
+<desc id="desc">Three-panel line chart comparing Elastic EP width 2 (4 GPUs) and width 4 (8 GPUs) over TCP across concurrency 1, 4, 8, 16, 32 and 64 on DeepSeek-V2-Lite-Chat (1,024/256 shape) for TTFT p50 (ms, log scale), ITL p50 (ms) and output throughput (tok/s). Width 4 lowers TTFT p50 only at concurrency 64 (6,509.231 to 2,598.867 ms, 2.50x), while increasing ITL p50 (8.566 to 15.675 ms at c=1; 16.522 to 30.270 ms at c=64) and reducing output throughput in all six cells.</desc>
+<style>
+:root{color-scheme:light dark;--bg:#f8fbff;--card:#fff;--ink:#12233d;--muted:#52677f;--line:#c9d9e7;--grid:#e4edf5;--axis:#8aa0b6;--c1:#2563eb;--c2:#c2410c;--c3:#0f766e;--c4:#7c3aed}
+@media(prefers-color-scheme:dark){:root{--bg:#101d30;--card:#1a2c43;--ink:#f1f6ff;--muted:#bdcde0;--line:#526b83;--grid:#2a4058;--axis:#7f97ae;--c1:#80adff;--c2:#ffa36b;--c3:#58d6c8;--c4:#c4b5fd}}
+text{font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;fill:var(--ink)}
+.eyebrow{font-size:12px;font-weight:700;letter-spacing:1.2px;fill:var(--muted)}
+.title{font-size:26px;font-weight:750;letter-spacing:-.3px}
+.sub{font-size:14px;fill:var(--muted)}
+.legend{font-size:13px;font-weight:600}
+.panel{fill:var(--card);stroke:var(--line);stroke-width:1.2}
+.shape{font-size:15px;font-weight:700}
+.cap{font-size:11px;fill:var(--muted)}
+.val{font:600 11.5px ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-variant-numeric:tabular-nums}
+.tick{font:11px ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;fill:var(--muted)}
+.axis-title{font-size:13px;font-weight:700;fill:var(--ink)}
+.x-title{font-size:12px;fill:var(--muted)}
+.note{font-size:12px;fill:var(--muted)}
+.grid{stroke:var(--grid);stroke-width:1}
+.base{stroke:var(--axis);stroke-width:1.2}
+.s1{stroke:var(--c1);fill:none;stroke-width:2.4;stroke-linejoin:round}
+.s2{stroke:var(--c2);fill:none;stroke-width:2.4;stroke-linejoin:round}
+.s3{stroke:var(--c3);fill:none;stroke-width:2.4;stroke-linejoin:round;stroke-dasharray:7 4}
+.s3-solid{stroke:var(--c3);fill:none;stroke-width:2.4;stroke-linejoin:round}
+.s4{stroke:var(--c4);fill:none;stroke-width:2.4;stroke-linejoin:round;stroke-dasharray:4 3}
+.s1-dash{stroke:var(--c1);fill:none;stroke-width:2.2;stroke-linejoin:round;stroke-dasharray:6 4}
+.s2-dash{stroke:var(--c2);fill:none;stroke-width:2.2;stroke-linejoin:round;stroke-dasharray:6 4}
+.m1{fill:var(--card);stroke:var(--c1);stroke-width:2.1}
+.m2{fill:var(--c2);stroke:var(--card);stroke-width:1}
+.m3{fill:var(--card);stroke:var(--c3);stroke-width:2.0;stroke-linejoin:miter}
+.m4{fill:var(--c4);stroke:var(--card);stroke-width:1}
+.v1{fill:var(--c1)}
+.v2{fill:var(--c2)}
+.v3{fill:var(--c3)}
+.v4{fill:var(--c4)}
+</style>
+<rect width="1200" height="566" fill="var(--bg)"/>
+<text class="eyebrow" x="40" y="42">MODEL DEPLOYMENT · ELASTIC EP BENCHMARK · TCP BASELINE</text>
+<text class="title" x="40" y="78">Elastic EP width 2 vs width 4 over TCP, concurrency sweep</text>
+<text class="sub" x="40" y="104">In-place expansion from 4 to 8 GPUs (TP = 2 per Pod, allgather_reducescatter over TCP); 439/439 live-resize requests succeeded.</text>
+<line class="s1" x1="40" y1="136" x2="74" y2="136"/>
+<circle class="m1" cx="57.0" cy="136.0" r="4.8"/>
+<text class="legend" x="84" y="141">Width 2 (4 GPUs, 2 × TP = 2) over TCP</text>
+<line class="s2" x1="420" y1="136" x2="454" y2="136"/>
+<rect class="m2" x="434.5" y="133.5" width="5.0" height="5.0"/>
+<text class="legend" x="464" y="141">Width 4 (8 GPUs, 4 × TP = 2) over TCP</text>
+<rect class="panel" x="98.0" y="166.0" width="310.0" height="326.0" rx="12"/>
+<text class="shape" x="112.0" y="190.0">TTFT p50 (ms, log)</text>
+<text class="cap" x="394.0" y="189.0" text-anchor="end">at c = 64</text>
+<circle class="m1" cx="118.0" cy="205.0" r="4.0"/>
+<text class="val v1" x="132.0" y="209.0">6,509.231 ms</text>
+<rect class="m2" x="115.9" y="220.9" width="4.2" height="4.2"/>
+<text class="val v2" x="132.0" y="227.0">2,598.867 ms</text>
+<line class="grid" x1="112.0" y1="448.8" x2="394.0" y2="448.8"/>
+<text class="tick" x="90.0" y="452.8" text-anchor="end">100</text>
+<line class="grid" x1="112.0" y1="353.4" x2="394.0" y2="353.4"/>
+<text class="tick" x="90.0" y="357.4" text-anchor="end">1,000</text>
+<line class="grid" x1="112.0" y1="258.0" x2="394.0" y2="258.0"/>
+<text class="tick" x="90.0" y="262.0" text-anchor="end">10,000</text>
+<line class="base" x1="112.0" y1="458.0" x2="394.0" y2="458.0"/>
+<text class="tick" x="118.0" y="476.0" text-anchor="middle">1</text>
+<text class="tick" x="208.0" y="476.0" text-anchor="middle">4</text>
+<text class="tick" x="253.0" y="476.0" text-anchor="middle">8</text>
+<text class="tick" x="298.0" y="476.0" text-anchor="middle">16</text>
+<text class="tick" x="343.0" y="476.0" text-anchor="middle">32</text>
+<text class="tick" x="388.0" y="476.0" text-anchor="middle">64</text>
+<path class="s1" d="M118.0 445.2L208.0 430.9L253.0 408.6L298.0 393.0L343.0 370.6L388.0 275.8"/>
+<path class="s2" d="M118.0 427.5L208.0 416.2L253.0 399.5L298.0 381.9L343.0 349.6L388.0 313.8"/>
+<circle class="m1" cx="118.0" cy="445.2" r="5.0"/>
+<circle class="m1" cx="208.0" cy="430.9" r="5.0"/>
+<circle class="m1" cx="253.0" cy="408.6" r="5.0"/>
+<circle class="m1" cx="298.0" cy="393.0" r="5.0"/>
+<circle class="m1" cx="343.0" cy="370.6" r="5.0"/>
+<circle class="m1" cx="388.0" cy="275.8" r="5.0"/>
+<rect class="m2" x="115.4" y="424.9" width="5.2" height="5.2"/>
+<rect class="m2" x="205.4" y="413.6" width="5.2" height="5.2"/>
+<rect class="m2" x="250.4" y="396.9" width="5.2" height="5.2"/>
+<rect class="m2" x="295.4" y="379.3" width="5.2" height="5.2"/>
+<rect class="m2" x="340.4" y="347.0" width="5.2" height="5.2"/>
+<rect class="m2" x="385.4" y="311.2" width="5.2" height="5.2"/>
+<rect class="panel" x="476.0" y="166.0" width="310.0" height="326.0" rx="12"/>
+<text class="shape" x="490.0" y="190.0">ITL p50 (ms)</text>
+<text class="cap" x="772.0" y="189.0" text-anchor="end">at c = 64</text>
+<circle class="m1" cx="496.0" cy="205.0" r="4.0"/>
+<text class="val v1" x="510.0" y="209.0">16.522 ms</text>
+<rect class="m2" x="493.9" y="220.9" width="4.2" height="4.2"/>
+<text class="val v2" x="510.0" y="227.0">30.270 ms</text>
+<line class="base" x1="490.0" y1="458.0" x2="772.0" y2="458.0"/>
+<text class="tick" x="468.0" y="462.0" text-anchor="end">0</text>
+<line class="grid" x1="490.0" y1="400.9" x2="772.0" y2="400.9"/>
+<text class="tick" x="468.0" y="404.9" text-anchor="end">10</text>
+<line class="grid" x1="490.0" y1="343.7" x2="772.0" y2="343.7"/>
+<text class="tick" x="468.0" y="347.7" text-anchor="end">20</text>
+<line class="grid" x1="490.0" y1="286.6" x2="772.0" y2="286.6"/>
+<text class="tick" x="468.0" y="290.6" text-anchor="end">30</text>
+<line class="grid" x1="490.0" y1="258.0" x2="772.0" y2="258.0"/>
+<text class="tick" x="468.0" y="262.0" text-anchor="end">35</text>
+<text class="tick" x="496.0" y="476.0" text-anchor="middle">1</text>
+<text class="tick" x="586.0" y="476.0" text-anchor="middle">4</text>
+<text class="tick" x="631.0" y="476.0" text-anchor="middle">8</text>
+<text class="tick" x="676.0" y="476.0" text-anchor="middle">16</text>
+<text class="tick" x="721.0" y="476.0" text-anchor="middle">32</text>
+<text class="tick" x="766.0" y="476.0" text-anchor="middle">64</text>
+<path class="s1" d="M496.0 409.1L586.0 408.6L631.0 393.5L676.0 371.3L721.0 365.9L766.0 363.6"/>
+<path class="s2" d="M496.0 368.4L586.0 366.9L631.0 329.8L676.0 324.8L721.0 290.6L766.0 285.0"/>
+<circle class="m1" cx="496.0" cy="409.1" r="5.0"/>
+<circle class="m1" cx="586.0" cy="408.6" r="5.0"/>
+<circle class="m1" cx="631.0" cy="393.5" r="5.0"/>
+<circle class="m1" cx="676.0" cy="371.3" r="5.0"/>
+<circle class="m1" cx="721.0" cy="365.9" r="5.0"/>
+<circle class="m1" cx="766.0" cy="363.6" r="5.0"/>
+<rect class="m2" x="493.4" y="365.8" width="5.2" height="5.2"/>
+<rect class="m2" x="583.4" y="364.3" width="5.2" height="5.2"/>
+<rect class="m2" x="628.4" y="327.2" width="5.2" height="5.2"/>
+<rect class="m2" x="673.4" y="322.2" width="5.2" height="5.2"/>
+<rect class="m2" x="718.4" y="288.0" width="5.2" height="5.2"/>
+<rect class="m2" x="763.4" y="282.4" width="5.2" height="5.2"/>
+<rect class="panel" x="854.0" y="166.0" width="310.0" height="326.0" rx="12"/>
+<text class="shape" x="868.0" y="190.0">Output (tok/s)</text>
+<text class="cap" x="1150.0" y="189.0" text-anchor="end">at c = 64</text>
+<circle class="m1" cx="874.0" cy="205.0" r="4.0"/>
+<text class="val v1" x="888.0" y="209.0">1,145.131 tok/s</text>
+<rect class="m2" x="871.9" y="220.9" width="4.2" height="4.2"/>
+<text class="val v2" x="888.0" y="227.0">1,121.379 tok/s</text>
+<line class="base" x1="868.0" y1="458.0" x2="1150.0" y2="458.0"/>
+<text class="tick" x="846.0" y="462.0" text-anchor="end">0</text>
+<line class="grid" x1="868.0" y1="418.0" x2="1150.0" y2="418.0"/>
+<text class="tick" x="846.0" y="422.0" text-anchor="end">250</text>
+<line class="grid" x1="868.0" y1="378.0" x2="1150.0" y2="378.0"/>
+<text class="tick" x="846.0" y="382.0" text-anchor="end">500</text>
+<line class="grid" x1="868.0" y1="338.0" x2="1150.0" y2="338.0"/>
+<text class="tick" x="846.0" y="342.0" text-anchor="end">750</text>
+<line class="grid" x1="868.0" y1="298.0" x2="1150.0" y2="298.0"/>
+<text class="tick" x="846.0" y="302.0" text-anchor="end">1,000</text>
+<line class="grid" x1="868.0" y1="258.0" x2="1150.0" y2="258.0"/>
+<text class="tick" x="846.0" y="262.0" text-anchor="end">1,250</text>
+<text class="tick" x="874.0" y="476.0" text-anchor="middle">1</text>
+<text class="tick" x="964.0" y="476.0" text-anchor="middle">4</text>
+<text class="tick" x="1009.0" y="476.0" text-anchor="middle">8</text>
+<text class="tick" x="1054.0" y="476.0" text-anchor="middle">16</text>
+<text class="tick" x="1099.0" y="476.0" text-anchor="middle">32</text>
+<text class="tick" x="1144.0" y="476.0" text-anchor="middle">64</text>
+<path class="s1" d="M874.0 440.5L964.0 401.6L1009.0 374.1L1054.0 337.8L1099.0 275.5L1144.0 274.8"/>
+<path class="s2" d="M874.0 448.2L964.0 423.7L1009.0 408.8L1054.0 382.7L1099.0 342.6L1144.0 278.6"/>
+<circle class="m1" cx="874.0" cy="440.5" r="5.0"/>
+<circle class="m1" cx="964.0" cy="401.6" r="5.0"/>
+<circle class="m1" cx="1009.0" cy="374.1" r="5.0"/>
+<circle class="m1" cx="1054.0" cy="337.8" r="5.0"/>
+<circle class="m1" cx="1099.0" cy="275.5" r="5.0"/>
+<circle class="m1" cx="1144.0" cy="274.8" r="5.0"/>
+<rect class="m2" x="871.4" y="445.6" width="5.2" height="5.2"/>
+<rect class="m2" x="961.4" y="421.1" width="5.2" height="5.2"/>
+<rect class="m2" x="1006.4" y="406.2" width="5.2" height="5.2"/>
+<rect class="m2" x="1051.4" y="380.1" width="5.2" height="5.2"/>
+<rect class="m2" x="1096.4" y="340.0" width="5.2" height="5.2"/>
+<rect class="m2" x="1141.4" y="276.0" width="5.2" height="5.2"/>
+<text class="x-title" x="620.0" y="514.0" text-anchor="middle">Concurrency (requests in flight, log scale)</text>
+<text class="note" x="40" y="530">DeepSeek-V2-Lite-Chat on one 8 × H100 SXM5 node; 1,024/256 shape, 416 measured requests per state, 0 errors. One API server, no managed Router.</text>
+<text class="note" x="40" y="548">Width 4 reduced TTFT p50 by 2.50× at concurrency 64 (6,509.231 to 2,598.867 ms) while slowing ITL p50 and lowering output at all six concurrencies.</text>
+</svg>

@@ -1,0 +1,223 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 566" role="img" aria-labelledby="title desc">
+<title id="title">Suite 1 (H100): vLLM PD feedback, Ready replicas and TTFT p50</title>
+<desc id="desc">Three-panel line chart for Suite 1 H100 vLLM PD comparing Proportional, TokenThroughput and Predictive scaling across checkpoints B1 to C3 for rawRecommendedReplicas and readyReplicas, and across baseline, ramp, sustain and cooldown for TTFT p50 (ms). Because manual token targets sat below baseline traffic, Predictive entered ramp (R1) with two Ready replicas and held ramp TTFT p50 to 467.906 ms vs 2,325.222 ms for TokenThroughput and 2,540.853 ms for Proportional.</desc>
+<style>
+:root{color-scheme:light dark;--bg:#f8fbff;--card:#fff;--ink:#12233d;--muted:#52677f;--line:#c9d9e7;--grid:#e4edf5;--axis:#8aa0b6;--c1:#2563eb;--c2:#c2410c;--c3:#0f766e;--c4:#7c3aed}
+@media(prefers-color-scheme:dark){:root{--bg:#101d30;--card:#1a2c43;--ink:#f1f6ff;--muted:#bdcde0;--line:#526b83;--grid:#2a4058;--axis:#7f97ae;--c1:#80adff;--c2:#ffa36b;--c3:#58d6c8;--c4:#c4b5fd}}
+text{font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;fill:var(--ink)}
+.eyebrow{font-size:12px;font-weight:700;letter-spacing:1.2px;fill:var(--muted)}
+.title{font-size:26px;font-weight:750;letter-spacing:-.3px}
+.sub{font-size:14px;fill:var(--muted)}
+.legend{font-size:13px;font-weight:600}
+.panel{fill:var(--card);stroke:var(--line);stroke-width:1.2}
+.shape{font-size:15px;font-weight:700}
+.cap{font-size:11px;fill:var(--muted)}
+.val{font:600 11.5px ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-variant-numeric:tabular-nums}
+.tick{font:11px ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;fill:var(--muted)}
+.axis-title{font-size:13px;font-weight:700;fill:var(--ink)}
+.x-title{font-size:12px;fill:var(--muted)}
+.note{font-size:12px;fill:var(--muted)}
+.grid{stroke:var(--grid);stroke-width:1}
+.base{stroke:var(--axis);stroke-width:1.2}
+.s1{stroke:var(--c1);fill:none;stroke-width:2.4;stroke-linejoin:round}
+.s2{stroke:var(--c2);fill:none;stroke-width:2.4;stroke-linejoin:round}
+.s3{stroke:var(--c3);fill:none;stroke-width:2.4;stroke-linejoin:round;stroke-dasharray:7 4}
+.s3-solid{stroke:var(--c3);fill:none;stroke-width:2.4;stroke-linejoin:round}
+.s4{stroke:var(--c4);fill:none;stroke-width:2.4;stroke-linejoin:round;stroke-dasharray:4 3}
+.s1-dash{stroke:var(--c1);fill:none;stroke-width:2.2;stroke-linejoin:round;stroke-dasharray:6 4}
+.s2-dash{stroke:var(--c2);fill:none;stroke-width:2.2;stroke-linejoin:round;stroke-dasharray:6 4}
+.m1{fill:var(--card);stroke:var(--c1);stroke-width:2.1}
+.m2{fill:var(--c2);stroke:var(--card);stroke-width:1}
+.m3{fill:var(--card);stroke:var(--c3);stroke-width:2.0;stroke-linejoin:miter}
+.m4{fill:var(--c4);stroke:var(--card);stroke-width:1}
+.v1{fill:var(--c1)}
+.v2{fill:var(--c2)}
+.v3{fill:var(--c3)}
+.v4{fill:var(--c4)}
+</style>
+<rect width="1200" height="566" fill="var(--bg)"/>
+<text class="eyebrow" x="40" y="42">MODEL DEPLOYMENT · SCALING BENCHMARK · SUITE 1 (H100)</text>
+<text class="title" x="40" y="78">Suite 1 (H100): vLLM PD feedback, Ready replicas and TTFT p50</text>
+<text class="sub" x="40" y="104">Qwen3-8B disaggregated PD on one 8 × H100 node; concurrency 2 (baseline/cooldown) and 24 (ramp/sustain).</text>
+<line class="s1" x1="40" y1="136" x2="74" y2="136"/>
+<circle class="m1" cx="57.0" cy="136.0" r="4.8"/>
+<text class="legend" x="84" y="141">vllm-pd-proportional</text>
+<line class="s2" x1="280" y1="136" x2="314" y2="136"/>
+<rect class="m2" x="294.5" y="133.5" width="5.0" height="5.0"/>
+<text class="legend" x="324" y="141">vllm-pd-token-throughput</text>
+<line class="s3" x1="560" y1="136" x2="594" y2="136"/>
+<path class="m3" d="M577.0 128.9L584.1 136.0L577.0 143.1L569.9 136.0Z"/>
+<text class="legend" x="604" y="141">vllm-pd-predictive</text>
+<rect class="panel" x="82.0" y="166.0" width="336.0" height="326.0" rx="12"/>
+<text class="shape" x="96.0" y="190.0">rawRecommendedReplicas</text>
+<text class="cap" x="404.0" y="189.0" text-anchor="end">ramp peak</text>
+<circle class="m1" cx="102.0" cy="205.0" r="4.0"/>
+<text class="val v1" x="116.0" y="209.0">Prop: 2</text>
+<rect class="m2" x="99.9" y="220.9" width="4.2" height="4.2"/>
+<text class="val v2" x="116.0" y="227.0">TT: 25</text>
+<path class="m3" d="M102.0 235.1L107.9 241.0L102.0 246.9L96.1 241.0Z"/>
+<text class="val v3" x="116.0" y="245.0">Pred: 75</text>
+<line class="base" x1="96.0" y1="458.0" x2="404.0" y2="458.0"/>
+<text class="tick" x="74.0" y="462.0" text-anchor="end">0</text>
+<line class="grid" x1="96.0" y1="412.5" x2="404.0" y2="412.5"/>
+<text class="tick" x="74.0" y="416.5" text-anchor="end">20</text>
+<line class="grid" x1="96.0" y1="367.0" x2="404.0" y2="367.0"/>
+<text class="tick" x="74.0" y="371.0" text-anchor="end">40</text>
+<line class="grid" x1="96.0" y1="321.5" x2="404.0" y2="321.5"/>
+<text class="tick" x="74.0" y="325.5" text-anchor="end">60</text>
+<line class="grid" x1="96.0" y1="276.0" x2="404.0" y2="276.0"/>
+<text class="tick" x="74.0" y="280.0" text-anchor="end">80</text>
+<text class="tick" x="102.0" y="476.0" text-anchor="middle">B1</text>
+<text class="tick" x="131.6" y="476.0" text-anchor="middle">B2</text>
+<text class="tick" x="161.2" y="476.0" text-anchor="middle">R1</text>
+<text class="tick" x="190.8" y="476.0" text-anchor="middle">R2</text>
+<text class="tick" x="220.4" y="476.0" text-anchor="middle">R3</text>
+<text class="tick" x="250.0" y="476.0" text-anchor="middle">S1</text>
+<text class="tick" x="279.6" y="476.0" text-anchor="middle">S2</text>
+<text class="tick" x="309.2" y="476.0" text-anchor="middle">S3</text>
+<text class="tick" x="338.8" y="476.0" text-anchor="middle">C1</text>
+<text class="tick" x="368.4" y="476.0" text-anchor="middle">C2</text>
+<text class="tick" x="398.0" y="476.0" text-anchor="middle">C3</text>
+<path class="s1" d="M102.0 455.7L131.6 455.7L161.2 455.7L190.8 453.4L220.4 453.4L250.0 453.4L279.6 453.4L309.2 453.4L338.8 455.7L368.4 455.7L398.0 455.7"/>
+<path class="s2" d="M102.0 455.7L131.6 453.4L161.2 453.4L190.8 430.7L220.4 401.1L250.0 401.1L279.6 405.7L309.2 405.7L338.8 414.8L368.4 455.7L398.0 455.7"/>
+<path class="s3" d="M102.0 455.7L131.6 442.1L161.2 455.7L190.8 351.1L220.4 287.4L250.0 407.9L279.6 407.9L309.2 403.4L338.8 451.2L368.4 455.7L398.0 455.7"/>
+<path class="m3" d="M102.0 449.2L108.5 455.7L102.0 462.2L95.5 455.7Z"/>
+<path class="m3" d="M131.6 435.6L138.1 442.1L131.6 448.6L125.1 442.1Z"/>
+<path class="m3" d="M161.2 449.2L167.7 455.7L161.2 462.2L154.7 455.7Z"/>
+<path class="m3" d="M190.8 344.6L197.3 351.1L190.8 357.6L184.3 351.1Z"/>
+<path class="m3" d="M220.4 280.9L226.9 287.4L220.4 293.9L213.9 287.4Z"/>
+<path class="m3" d="M250.0 401.4L256.5 407.9L250.0 414.5L243.5 407.9Z"/>
+<path class="m3" d="M279.6 401.4L286.1 407.9L279.6 414.5L273.1 407.9Z"/>
+<path class="m3" d="M309.2 396.9L315.7 403.4L309.2 409.9L302.7 403.4Z"/>
+<path class="m3" d="M338.8 444.7L345.3 451.2L338.8 457.7L332.3 451.2Z"/>
+<path class="m3" d="M368.4 449.2L374.9 455.7L368.4 462.2L361.9 455.7Z"/>
+<path class="m3" d="M398.0 449.2L404.5 455.7L398.0 462.2L391.5 455.7Z"/>
+<circle class="m1" cx="102.0" cy="455.7" r="4.4"/>
+<circle class="m1" cx="131.6" cy="455.7" r="4.4"/>
+<circle class="m1" cx="161.2" cy="455.7" r="4.4"/>
+<circle class="m1" cx="190.8" cy="453.4" r="4.4"/>
+<circle class="m1" cx="220.4" cy="453.4" r="4.4"/>
+<circle class="m1" cx="250.0" cy="453.4" r="4.4"/>
+<circle class="m1" cx="279.6" cy="453.4" r="4.4"/>
+<circle class="m1" cx="309.2" cy="453.4" r="4.4"/>
+<circle class="m1" cx="338.8" cy="455.7" r="4.4"/>
+<circle class="m1" cx="368.4" cy="455.7" r="4.4"/>
+<circle class="m1" cx="398.0" cy="455.7" r="4.4"/>
+<rect class="m2" x="99.7" y="453.4" width="4.6" height="4.6"/>
+<rect class="m2" x="129.3" y="451.2" width="4.6" height="4.6"/>
+<rect class="m2" x="158.9" y="451.2" width="4.6" height="4.6"/>
+<rect class="m2" x="188.5" y="428.4" width="4.6" height="4.6"/>
+<rect class="m2" x="218.1" y="398.8" width="4.6" height="4.6"/>
+<rect class="m2" x="247.7" y="398.8" width="4.6" height="4.6"/>
+<rect class="m2" x="277.3" y="403.4" width="4.6" height="4.6"/>
+<rect class="m2" x="306.9" y="403.4" width="4.6" height="4.6"/>
+<rect class="m2" x="336.5" y="412.5" width="4.6" height="4.6"/>
+<rect class="m2" x="366.1" y="453.4" width="4.6" height="4.6"/>
+<rect class="m2" x="395.7" y="453.4" width="4.6" height="4.6"/>
+<rect class="panel" x="476.0" y="166.0" width="316.0" height="326.0" rx="12"/>
+<text class="shape" x="490.0" y="190.0">Ready replicas</text>
+<text class="cap" x="778.0" y="189.0" text-anchor="end">at R1 (ramp start)</text>
+<circle class="m1" cx="496.0" cy="205.0" r="4.0"/>
+<text class="val v1" x="510.0" y="209.0">Prop: 1</text>
+<rect class="m2" x="493.9" y="220.9" width="4.2" height="4.2"/>
+<text class="val v2" x="510.0" y="227.0">TT: 1</text>
+<path class="m3" d="M496.0 235.1L501.9 241.0L496.0 246.9L490.1 241.0Z"/>
+<text class="val v3" x="510.0" y="245.0">Pred: 2</text>
+<line class="base" x1="490.0" y1="458.0" x2="778.0" y2="458.0"/>
+<text class="tick" x="468.0" y="462.0" text-anchor="end">0</text>
+<line class="grid" x1="490.0" y1="397.3" x2="778.0" y2="397.3"/>
+<text class="tick" x="468.0" y="401.3" text-anchor="end">1</text>
+<line class="grid" x1="490.0" y1="336.7" x2="778.0" y2="336.7"/>
+<text class="tick" x="468.0" y="340.7" text-anchor="end">2</text>
+<line class="grid" x1="490.0" y1="276.0" x2="778.0" y2="276.0"/>
+<text class="tick" x="468.0" y="280.0" text-anchor="end">3</text>
+<text class="tick" x="496.0" y="476.0" text-anchor="middle">B1</text>
+<text class="tick" x="523.6" y="476.0" text-anchor="middle">B2</text>
+<text class="tick" x="551.2" y="476.0" text-anchor="middle">R1</text>
+<text class="tick" x="578.8" y="476.0" text-anchor="middle">R2</text>
+<text class="tick" x="606.4" y="476.0" text-anchor="middle">R3</text>
+<text class="tick" x="634.0" y="476.0" text-anchor="middle">S1</text>
+<text class="tick" x="661.6" y="476.0" text-anchor="middle">S2</text>
+<text class="tick" x="689.2" y="476.0" text-anchor="middle">S3</text>
+<text class="tick" x="716.8" y="476.0" text-anchor="middle">C1</text>
+<text class="tick" x="744.4" y="476.0" text-anchor="middle">C2</text>
+<text class="tick" x="772.0" y="476.0" text-anchor="middle">C3</text>
+<path class="s1" d="M496.0 397.3L523.6 397.3L551.2 397.3L578.8 397.3L606.4 336.7L634.0 336.7L661.6 336.7L689.2 336.7L716.8 336.7L744.4 336.7L772.0 336.7"/>
+<path class="s2" d="M496.0 397.3L523.6 397.3L551.2 397.3L578.8 336.7L606.4 336.7L634.0 336.7L661.6 336.7L689.2 336.7L716.8 336.7L744.4 336.7L772.0 336.7"/>
+<path class="s3" d="M496.0 397.3L523.6 397.3L551.2 336.7L578.8 336.7L606.4 336.7L634.0 336.7L661.6 336.7L689.2 336.7L716.8 336.7L744.4 336.7L772.0 336.7"/>
+<path class="m3" d="M496.0 390.8L502.5 397.3L496.0 403.8L489.5 397.3Z"/>
+<path class="m3" d="M523.6 390.8L530.1 397.3L523.6 403.8L517.1 397.3Z"/>
+<path class="m3" d="M551.2 330.2L557.7 336.7L551.2 343.2L544.7 336.7Z"/>
+<path class="m3" d="M578.8 330.2L585.3 336.7L578.8 343.2L572.3 336.7Z"/>
+<path class="m3" d="M606.4 330.2L612.9 336.7L606.4 343.2L599.9 336.7Z"/>
+<path class="m3" d="M634.0 330.2L640.5 336.7L634.0 343.2L627.5 336.7Z"/>
+<path class="m3" d="M661.6 330.2L668.1 336.7L661.6 343.2L655.1 336.7Z"/>
+<path class="m3" d="M689.2 330.2L695.7 336.7L689.2 343.2L682.7 336.7Z"/>
+<path class="m3" d="M716.8 330.2L723.3 336.7L716.8 343.2L710.3 336.7Z"/>
+<path class="m3" d="M744.4 330.2L750.9 336.7L744.4 343.2L737.9 336.7Z"/>
+<path class="m3" d="M772.0 330.2L778.5 336.7L772.0 343.2L765.5 336.7Z"/>
+<circle class="m1" cx="496.0" cy="397.3" r="4.4"/>
+<circle class="m1" cx="523.6" cy="397.3" r="4.4"/>
+<circle class="m1" cx="551.2" cy="397.3" r="4.4"/>
+<circle class="m1" cx="578.8" cy="397.3" r="4.4"/>
+<circle class="m1" cx="606.4" cy="336.7" r="4.4"/>
+<circle class="m1" cx="634.0" cy="336.7" r="4.4"/>
+<circle class="m1" cx="661.6" cy="336.7" r="4.4"/>
+<circle class="m1" cx="689.2" cy="336.7" r="4.4"/>
+<circle class="m1" cx="716.8" cy="336.7" r="4.4"/>
+<circle class="m1" cx="744.4" cy="336.7" r="4.4"/>
+<circle class="m1" cx="772.0" cy="336.7" r="4.4"/>
+<rect class="m2" x="493.7" y="395.0" width="4.6" height="4.6"/>
+<rect class="m2" x="521.3" y="395.0" width="4.6" height="4.6"/>
+<rect class="m2" x="548.9" y="395.0" width="4.6" height="4.6"/>
+<rect class="m2" x="576.5" y="334.4" width="4.6" height="4.6"/>
+<rect class="m2" x="604.1" y="334.4" width="4.6" height="4.6"/>
+<rect class="m2" x="631.7" y="334.4" width="4.6" height="4.6"/>
+<rect class="m2" x="659.3" y="334.4" width="4.6" height="4.6"/>
+<rect class="m2" x="686.9" y="334.4" width="4.6" height="4.6"/>
+<rect class="m2" x="714.5" y="334.4" width="4.6" height="4.6"/>
+<rect class="m2" x="742.1" y="334.4" width="4.6" height="4.6"/>
+<rect class="m2" x="769.7" y="334.4" width="4.6" height="4.6"/>
+<rect class="panel" x="868.0" y="166.0" width="304.0" height="326.0" rx="12"/>
+<text class="shape" x="882.0" y="190.0">TTFT p50 (ms)</text>
+<text class="cap" x="1158.0" y="189.0" text-anchor="end">in ramp phase</text>
+<circle class="m1" cx="888.0" cy="205.0" r="4.0"/>
+<text class="val v1" x="902.0" y="209.0">2,540.853 ms</text>
+<rect class="m2" x="885.9" y="220.9" width="4.2" height="4.2"/>
+<text class="val v2" x="902.0" y="227.0">2,325.222 ms</text>
+<path class="m3" d="M888.0 235.1L893.9 241.0L888.0 246.9L882.1 241.0Z"/>
+<text class="val v3" x="902.0" y="245.0">467.906 ms</text>
+<line class="base" x1="882.0" y1="458.0" x2="1158.0" y2="458.0"/>
+<text class="tick" x="860.0" y="462.0" text-anchor="end">0</text>
+<line class="grid" x1="882.0" y1="412.5" x2="1158.0" y2="412.5"/>
+<text class="tick" x="860.0" y="416.5" text-anchor="end">700</text>
+<line class="grid" x1="882.0" y1="367.0" x2="1158.0" y2="367.0"/>
+<text class="tick" x="860.0" y="371.0" text-anchor="end">1,400</text>
+<line class="grid" x1="882.0" y1="321.5" x2="1158.0" y2="321.5"/>
+<text class="tick" x="860.0" y="325.5" text-anchor="end">2,100</text>
+<line class="grid" x1="882.0" y1="276.0" x2="1158.0" y2="276.0"/>
+<text class="tick" x="860.0" y="280.0" text-anchor="end">2,800</text>
+<text class="tick" x="888.0" y="476.0" text-anchor="middle">baseline</text>
+<text class="tick" x="976.0" y="476.0" text-anchor="middle">ramp</text>
+<text class="tick" x="1064.0" y="476.0" text-anchor="middle">sustain</text>
+<text class="tick" x="1152.0" y="476.0" text-anchor="middle">cooldown</text>
+<path class="s1" d="M888.0 438.6L976.0 292.8L1064.0 425.1L1152.0 445.8"/>
+<path class="s2" d="M888.0 439.5L976.0 306.9L1064.0 426.8L1152.0 446.2"/>
+<path class="s3" d="M888.0 447.3L976.0 427.6L1064.0 428.9L1152.0 454.0"/>
+<path class="m3" d="M888.0 440.8L894.5 447.3L888.0 453.8L881.5 447.3Z"/>
+<path class="m3" d="M976.0 421.1L982.5 427.6L976.0 434.1L969.5 427.6Z"/>
+<path class="m3" d="M1064.0 422.4L1070.5 428.9L1064.0 435.4L1057.5 428.9Z"/>
+<path class="m3" d="M1152.0 447.5L1158.5 454.0L1152.0 460.6L1145.5 454.0Z"/>
+<circle class="m1" cx="888.0" cy="438.6" r="4.4"/>
+<circle class="m1" cx="976.0" cy="292.8" r="4.4"/>
+<circle class="m1" cx="1064.0" cy="425.1" r="4.4"/>
+<circle class="m1" cx="1152.0" cy="445.8" r="4.4"/>
+<rect class="m2" x="885.7" y="437.2" width="4.6" height="4.6"/>
+<rect class="m2" x="973.7" y="304.6" width="4.6" height="4.6"/>
+<rect class="m2" x="1061.7" y="424.5" width="4.6" height="4.6"/>
+<rect class="m2" x="1149.7" y="443.9" width="4.6" height="4.6"/>
+<text class="x-title" x="456.0" y="514.0" text-anchor="middle">Phase checkpoints (B = baseline, R = ramp, S = sustain, C = cooldown)</text>
+<text class="x-title" x="1020.0" y="514.0" text-anchor="middle">Load phase</text>
+<text class="note" x="40" y="530">Suite 1 hardware run on one 8 × H100 node (Qwen3-8B, bounds 1–2 per role, 0 errors across all three vLLM PD runs).</text>
+<text class="note" x="40" y="548">Manual token targets sat below baseline load, so TokenThroughput (raw=2) and Predictive (raw=7) scaled at B2; Predictive entered R1 with 2 Ready replicas.</text>
+</svg>

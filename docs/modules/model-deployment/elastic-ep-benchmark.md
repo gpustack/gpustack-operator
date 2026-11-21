@@ -1,12 +1,12 @@
 # Elastic EP Benchmark
 
-On one H100 SXM5 node, an *expert parallelism (EP)* collective expanded from four GPUs to eight.
-At concurrency 64, *time to first token (TTFT)* p50 fell from 6,509.231 ms to
-**2,598.867 ms**, a **2.50× reduction**. Single-request token generation became slower.
-The live expansion load completed **439/439 requests with zero errors**.
+On one H100 SXM5 node, an *expert parallelism (EP)* collective expanded in place from four GPUs to
+eight. At concurrency 64 over TCP, *time to first token (TTFT)* p50 fell **2.50×** (6,509.231 ms to
+**2,598.867 ms**), while single-request generation slowed and output throughput fell in all six
+cells. The live expansion stream completed **439/439 requests with zero errors**.
 
-The initial suites describe cross-`Pod` TCP.
-The separate [InfiniBand RDMA comparison](#infiniband-rdma-comparison) records the follow-up.
+The initial suites describe cross-`Pod` TCP. The separate
+[InfiniBand RDMA comparison](#infiniband-rdma-comparison) records the matched follow-up.
 
 ## Contents
 
@@ -22,18 +22,18 @@ The separate [InfiniBand RDMA comparison](#infiniband-rdma-comparison) records t
 
 ## Summary
 
-One `ModelDeployment`, `b2-elastic-ep` in namespace `gpustack-bench`, kept
-*tensor parallelism (TP)* = 2 per member. Its *data parallelism (DP)* width grew from 2 to 4.
-The *EP* world size grew from 4 to 8 GPUs. Existing `Pod`s retained their UIDs and restart counts.
-[Elastic EP](elastic-ep.md) defines the profile and resize contract.
+One `ModelDeployment` (`b2-elastic-ep` in `gpustack-bench`) kept *tensor parallelism (TP)* = 2 per
+member while *data parallelism (DP)* width grew from 2 to 4 (*EP* world size 4 → 8 GPUs). Existing
+`Pod`s kept their UIDs and zero restart counts. [Elastic EP](elastic-ep.md) defines the profile and
+resize contract.
 
-The wider collective reduced first-token queueing at concurrency 64, but output throughput
-remained lower at every measured concurrency. **Doubling the GPU allocation did not double throughput.**
-Only one API server accepted requests in both states.
+**Doubling the GPU count over TCP did not raise throughput.** Only one API server accepted requests
+in both states.
 
-Choose online width growth when retaining serving processes and reducing high-concurrency first-token delay justify the extra GPUs.
-For this TCP collective, width 2 favored lower concurrency, throughput and token-generation latency.
-The crossover at concurrency 64 concerns median first-token latency; total request latency still increased at width 4.
+- **Choose online width growth** when process continuity and concurrency-64 first-token relief
+  justify extra GPUs (especially over InfiniBand RDMA, where width 4 also led concurrency-64 output).
+- **Choose width 2** on TCP for lower concurrency, throughput and token-generation latency. Even at
+  concurrency 64 on TCP, end-to-end p50 rose at width 4 (11,487.169 to 12,154.350 ms).
 
 ## Environment
 
@@ -50,15 +50,13 @@ The crossover at concurrency 64 concerns median first-token latency; total reque
 | Collective | `--all2all-backend allgather_reducescatter`, `--elastic-ep-max-dp-size 4` |
 | Serving | `--api-server-count 1`; no managed Router |
 
-The deployment used one *Server* role with *`replicas: 1`* and *`size: 1`*.
-Only `elastic.dataParallelWidth` under *`runtimeControl.parameters`* changed. The CPU-only Ray head remained outside the GPU allocation.
-The head and all GPU members ran on the same GPU node.
-The [walkthrough](../../walkthroughs/model-deployment/elastic-ep.md) provides the manifest and verification commands.
+The deployment used one *Server* role (*`replicas: 1`*, *`size: 1`*). Only
+`elastic.dataParallelWidth` changed. The CPU Ray head and all GPU members shared one GPU node. See
+the [walkthrough](../../walkthroughs/model-deployment/elastic-ep.md) for the manifest and checks.
 
-The captured GPU `Pod`s exposed only their two assigned GPUs and used private IPC namespaces.
-Each had its own `/dev/shm`, with *`hostIPC`* disabled and no remote direct memory access (*RDMA*) interface.
-NVLink carried *TP* traffic within each `Pod`.
-**All cross-`Pod` communication, including the *EP* collective, used TCP sockets over `eth0`.**
+Each GPU `Pod` exposed only its two assigned GPUs with private IPC and `/dev/shm`, *`hostIPC`*
+disabled and no *remote direct memory access (RDMA)* interface. NVLink carried intra-`Pod` *TP*
+traffic; **all cross-`Pod` *EP* collective traffic used TCP sockets over `eth0`.**
 
 | State | Width | GPU members | GPUs | *TP* | *EP* world size |
 |---|---:|---:|---:|---:|---:|
@@ -68,17 +66,24 @@ NVLink carried *TP* traffic within each `Pod`.
 
 ## Suite 1: Width comparison
 
-Each state ran one sweep of target 1,024-input / 256-output-token requests.
-Concurrency 1, 4 and 8 used 32 measured requests; concurrency 16 used 64; concurrency 32 and 64 used 128.
-Each cell excluded four warm-up requests. **All 416 measured requests per state completed with zero errors.**
+Each state ran one sweep of target 1,024-input / 256-output-token requests (observed prompts
+1,021–1,025 tokens). Concurrency 1, 4 and 8 used 32 requests; concurrency 16 used 64; concurrency 32
+and 64 used 128, each excluding four warm-up requests. **All 416 measured requests per state
+completed with zero errors.** Output throughput divides actual generated tokens by cell wall time.
 
-Observed prompt lengths ranged from 1,021 to 1,025 tokens. Output lengths were caps;
-some requests ended earlier. Throughput uses actual generated tokens divided by cell wall time.
-The same deployment ran State 1, a live expansion, then State 3.
+![TTFT p50, ITL p50 and output throughput by concurrency for Elastic EP width 2 and width 4 over TCP](../../assets/diagrams/elastic-ep-benchmark-tcp.svg)
 
-*Time per output token (TPOT)* measures per-request generation time per token.
-*Inter-token latency (ITL)* measures gaps between streamed tokens.
-Values retain the JSON precision. Bold values mark the lower latency or higher throughput within each matched pair.
+Over TCP with one API server, width 4 (8 GPUs) beat width 2 (4 GPUs) on *TTFT* only at concurrency
+64 (**2.50×** lower *TTFT* p50: 6,509.231 to **2,598.867 ms**; *TTFT* p95 8,708.596 to
+**4,789.148 ms**), with *ITL* p99 nearly flat (157.753 versus **155.538 ms**).
+
+Across all six concurrencies, width 4 slowed *ITL* p50 (up **83.0%** at concurrency 1: 8.566 to
+15.675 ms) and lowered output throughput, and end-to-end p50 still rose at concurrency 64
+(11,487.169 to 12,154.350 ms).
+
+*Time per output token (TPOT)* measures per-request generation time per token; *inter-token latency
+(ITL)* measures streamed-token gaps. Bold values mark lower latency or higher throughput within each
+matched pair.
 
 | Concurrency | Width | GPUs | Requests | *TTFT* p50 (ms) | *TTFT* p95 (ms) | *TPOT* p50 (ms) | *ITL* p50 (ms) | *ITL* p99 (ms) | Output (tok/s) |
 |---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
@@ -97,10 +102,10 @@ Values retain the JSON precision. Bold values mark the lower latency or higher t
 
 ## Live resize
 
-A concurrency-8 stream ran during the width 2 → 4 change, using the same 1,024/256 target shape.
-It completed **439/439 requests in 264.227 seconds (264.23 s), with zero client errors**.
-The `scaling-refusals-503.txt` capture recorded **zero client-facing HTTP 503 responses**.
-The serving master recorded **10 `/health` responses with HTTP 503** during collective re-rendezvous.
+A concurrency-8 stream (`1,024/256` shape) ran across the width 2 → 4 patch and completed
+**439/439 requests in 264.227 seconds (264.23 s) with zero client errors**. The capture recorded
+**zero client-facing HTTP 503 responses** and **10 `/health` HTTP 503 responses** on the master
+during re-rendezvous.
 
 | Observation | Captured result |
 |---|---|
@@ -113,16 +118,12 @@ The serving master recorded **10 `/health` responses with HTTP 503** during coll
 | Added members | 2 GPU `Pod`s, each with 2 GPUs |
 | Client completion | 439/439; 0 errors |
 
-**The 12-second timer measured a phase-only check, not effective-width convergence.**
-The harness's `wait_ready` returned before collective re-rendezvous, while *`status.phase`* remained `Ready` and serving continued.
-It did not require the current generation's effective width.
+**The 12-second timer checked phase only, not effective-width convergence.** The patch arrived at
+08:16:11Z, and `RoleKindsReady` and `EndpointEligibility` became `True` at 08:19:20Z (**about 189
+seconds later**), covering startup and Ray join for the two new GPU `Pod`s. Final `observation.json`
+confirmed effective width 4 without a convergence timestamp.
 
-The patch was submitted at 08:16:11Z.
-In `scaled-cr.json`, `RoleKindsReady` and `EndpointEligibility` transitioned to `True` at 08:19:20Z, **about 189 seconds later**.
-This interval covers initialization and Ray collective joining for the two added GPU `Pod`s.
-The final `observation.json` separately confirmed effective width 4; it contains no timestamp for that convergence.
-
-The `elastic-watch-timeline.txt` capture sampled approximately every **16–21 seconds**, with occasional intervals up to 28 seconds.
+The watch capture polled every **16–21 seconds** (up to 28 seconds):
 
 | Time (UTC) | Phase | Role summary |
 |---|---|---|
@@ -130,33 +131,22 @@ The `elastic-watch-timeline.txt` capture sampled approximately every **16–21 s
 | 08:19:09Z | `Starting` | `0S` |
 | 08:19:30Z | `Ready` | `1S` |
 
-The `Starting` sample occurred during collective re-rendezvous, between `Ready` samples **40 seconds apart**.
-The exact readiness withdrawal duration is unknown.
-The observed client requests completed despite this transition.
-
-The [walkthrough](../../walkthroughs/model-deployment/elastic-ep.md#step-3-expand-and-verify-inference)
-checks effective width before accepting expansion.
+The `Starting` sample fell between `Ready` samples **40 seconds apart**, so the exact withdrawal
+duration is unknown. See the
+[walkthrough](../../walkthroughs/model-deployment/elastic-ep.md#step-3-expand-and-verify-inference)
+for effective-width verification.
 
 ## Verification
 
-The final observation reported generation 2 and stable width 4, with reason
-`native ranks and forwards agree`. The observation is diagnostic `ConfigMap` data;
-ordinary role status still reports one replica group. `ReplicasUpToDate` remained
-`Unknown/RolloutNotObserved` before and after expansion.
+Final observation reported generation 2, stable width 4 and reason
+`native ranks and forwards agree`. `ReplicasUpToDate` stayed `Unknown/RolloutNotObserved`. The
+master, CPU head and original GPU worker kept their UIDs and zero restart counts.
 
-The serving master's UID and zero restart count matched across both `Pod` snapshots.
-The CPU Ray head and original GPU worker also retained their identities.
-These observations establish retention of surviving processes; they do not count internal engine weight-loading operations.
+Master completion access logs rose from **880** before State 3 to **1,320** at finish (including
+warm-up and calibration). No Router was configured; client JSON establishes completion and errors.
+After deletion, `Devices` reported all eight H100 GPUs with *`remaining`* = `1600000`.
 
-The master's completion access-log count grew from **880** in the pre-State-3 capture to **1,320**
-in the final capture. Counts include measured requests, warm-up and calibration.
-No Router was configured; the collection script's missing-Router diagnostic is not a serving failure.
-Client JSON establishes request completion and errors.
-
-After deletion, the `Devices` snapshot recorded all eight H100 accelerators with *`remaining`* = `1600000`.
-This records released accelerator claims; it does not prove removal of model-cache or cluster infrastructure.
-
-A later runtime-acceptance run measured the same expansion on an eight-GPU *H100* node:
+A later runtime-acceptance run repeated width 2 → 4 on an eight-GPU H100 node:
 
 | Observation | Captured result |
 |---|---|
@@ -169,49 +159,39 @@ A later runtime-acceptance run measured the same expansion on an eight-GPU *H100
 | ElasticResize condition | `True` / `NoRefusal` |
 | State-3 sweep | six concurrency cells at width 4, zero errors |
 
-The operator deletes the operation record when the operation ends, so the terminal state reads from
-the condition and the observation. An earlier attempt on the same image did not converge and remains
-an open observation; this run does not explain it.
+The operator deletes the operation record after completion, leaving terminal state in the condition
+and observation. An earlier attempt on the same image did not converge and remains unexplained.
 
 ## Benefits
 
-- The deployment expanded from **4 to 8 GPUs** while retaining its serving master and existing GPU worker.
-  The concurrent load completed **439/439 requests with zero errors**.
-- At concurrency 64, width 4 had **2.50× lower TTFT p50** than width 2: **2,598.867 ms** against **6,509.231 ms**.
-  *TTFT* p95 fell from 8,708.596 ms to **4,789.148 ms**.
+- Expanded **4 → 8 GPUs** in place while keeping the serving master and original GPU worker; live
+  load completed **439/439 requests with zero errors**.
+- Cut concurrency-64 *TTFT* p50 **2.50×** (6,509.231 to **2,598.867 ms**) and *TTFT* p95
+  (8,708.596 to **4,789.148 ms**).
 
-The first-token improvement appears at the highest tested concurrency.
-It does not establish lower total request latency: end-to-end p50 rose from 11,487.169 ms to 12,154.350 ms there.
+End-to-end p50 still rose from 11,487.169 to 12,154.350 ms at concurrency 64.
 
 ## Trade-offs
 
-**Single-request *ITL* p50 rose from 8.566 ms to 15.675 ms, an 83.0% increase.**
-With one request, queueing relief is limited.
-The eight-GPU `allgather_reducescatter` collective spans four *TP* = 2 `Pod`s.
-Communication between those `Pod`s used TCP over `eth0`.
-The higher token cost is consistent with collective and TCP overhead; their individual contributions were not isolated.
+- Single-request *ITL* p50 rose **83.0%** (8.566 to 15.675 ms), and concurrency-64 *ITL* p50 rose
+  from 16.522 to **30.270 ms** across the four-`Pod` TCP collective.
+- Output throughput fell in all six TCP cells (109.586 to 61.020 tok/s at concurrency 1; 1,145.131
+  versus 1,121.379 tok/s at concurrency 64).
 
-**Output throughput fell at all six concurrencies.** At concurrency 1, it fell from 109.586 to 61.020 tok/s.
-At concurrency 64, it was 1,145.131 versus 1,121.379 tok/s despite the doubled GPU allocation.
-The single API server and selected collective remain part of both configurations.
-The measurement does not isolate the API server as a bottleneck.
-
-At concurrency 64, *ITL* p50 rose from 16.522 ms to **30.270 ms**.
-The lower first-token queueing delay came with slower token generation.
-Choose width from the workload's latency targets and GPU cost, rather than assuming wider always means faster.
+The capture does not isolate collective, TCP and single-API-server overhead separately.
 
 ## InfiniBand RDMA comparison
 
-A follow-up on the same ConnectX-7 InfiniBand node setup described in
-[Prefill and Decode Benchmark](prefill-decode-benchmark.md#infiniband-rdma-comparison) expanded the
-*TP* = 2 member layout from width 2 to width 4. The final selected cells completed **416/416
-requests per width, with zero errors**.
+A follow-up on the ConnectX-7 InfiniBand node from
+[Prefill and Decode Benchmark](prefill-decode-benchmark.md#infiniband-rdma-comparison) expanded
+width 2 → 4 at *TP* = 2. Selected final cells completed **416/416 requests per width with zero
+errors**.
 
 ### Transport verification
 
 Update `elastic-ep.yaml` from the
-[TCP walkthrough](../../walkthroughs/model-deployment/elastic-ep.md#step-1-start-the-elastic-deployment):
-The diff uses current interface allocation; the recorded run used manual device exposure.
+[TCP walkthrough](../../walkthroughs/model-deployment/elastic-ep.md#step-1-start-the-elastic-deployment)
+(the diff shows current interface allocation; the capture used manual device exposure):
 
 ```diff
  apiVersion: worker.gpustack.ai/v1
@@ -236,17 +216,27 @@ The diff uses current interface allocation; the recorded run used manual device 
 +        - "0.85"
 ```
 
-NCCL logs reported `Using network IB` and GPU Direct RDMA enabled.
-The cross-`Pod` `allgather_reducescatter` collective used InfiniBand instead of TCP over `eth0`.
-Intra-`Pod` *TP* still used NVLink. Ray, HTTP and bootstrap control traffic are separate from collective transport.
-
-GPU memory utilization also changed, so the runs do not isolate transport alone.
+NCCL logged `Using network IB` with GPU Direct RDMA enabled, moving the cross-`Pod`
+`allgather_reducescatter` collective onto InfiniBand while intra-`Pod` *TP* stayed on NVLink.
+Because `--gpu-memory-utilization` also changed (`0.90` → `0.85`), the runs do not isolate
+transport alone.
 
 ### Width comparison
 
-Bold values mark lower latency or higher throughput within each TCP/RDMA pair at the same width.
-Each cell used the same target shape, concurrency and measured request count as its TCP baseline.
-The width-4 sweep ran twice; the selected final JSON files contain the second pass.
+![TTFT p50, output throughput, ITL p50 and ITL p99 for Elastic EP width 2 and width 4 over TCP and InfiniBand RDMA](../../assets/diagrams/elastic-ep-benchmark-rdma.svg)
+
+In this separate InfiniBand follow-up (`--gpu-memory-utilization 0.85`), RDMA cut width-4
+concurrency-64 *TTFT* p50 **6.96×** (2,598.867 to **373.486 ms**), raised output **3.35×**
+(1,121.379 to **3,755.290 tok/s**) and cut *ITL* p50 (30.270 to **10.838 ms**). Within RDMA at
+concurrency 64, width 4 beat width 2 by **8.23×** on *TTFT* p50 and **1.64×** on output, reversing
+TCP.
+
+Exceptions remain: width 2 kept higher RDMA output at concurrencies 1–32 and lower single-request
+*ITL* p50 (**6.111** versus 6.979 ms), and RDMA width 2, concurrency 4 regressed *ITL* p99 from
+**12.290** to 68.396 ms.
+
+Bold values mark lower latency or higher throughput within each matched TCP/RDMA pair at the same
+width. The width-4 sweep ran twice; the table records the second pass.
 
 | Width | Concurrency | TCP *TTFT* p50 (ms) | RDMA *TTFT* p50 (ms) | TCP *ITL* p50 (ms) | RDMA *ITL* p50 (ms) | TCP *ITL* p99 (ms) | RDMA *ITL* p99 (ms) | TCP output (tok/s) | RDMA output (tok/s) |
 |---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
@@ -263,20 +253,11 @@ The width-4 sweep ran twice; the selected final JSON files contain the second pa
 | 4 | 32 | 1,096.666 | **185.406** | 29.288 | **10.088** | 156.532 | **76.300** | 721.243 | **2,000.530** |
 | 4 | 64 | 2,598.867 | **373.486** | 30.270 | **10.838** | 155.538 | **81.544** | 1,121.379 | **3,755.290** |
 
-At width 4, concurrency 64, RDMA reduced median *TTFT* from 2,598.867 to **373.486 ms**, a **6.96× reduction**.
-Output throughput rose from 1,121.379 to **3,755.290 tok/s**, a **3.35× increase**.
-Median *ITL* fell from 30.270 to **10.838 ms**.
-
-Within the RDMA follow-up, width 4 had **8.23× lower median TTFT** than width 2 at concurrency 64.
-The values were **373.486 versus 3,073.825 ms**; output throughput was **1.64× higher** at width 4.
-This reverses the TCP result in which width 4 had lower output throughput at every tested concurrency.
-
 ### Resize verification
 
-The expansion load completed **813/813 requests in 261.794 seconds, with zero errors**.
-The serving master, original GPU member and CPU Ray head retained their UIDs.
-Two GPU `Pod`s joined; all five final `Pod`s had zero container restarts.
-The final generation-2 observation confirmed known effective width and stable width 4.
+Live expansion load completed **813/813 requests in 261.794 seconds with zero errors**. Surviving
+`Pod`s kept their UIDs with zero restarts across all five final `Pod`s, and generation-2
+observation confirmed effective and stable width 4.
 
 | Observation | Captured interval |
 |---|---|
@@ -285,34 +266,34 @@ The final generation-2 observation confirmed known effective width and stable wi
 | `RoleKindsReady` and `EndpointEligibility` became `True` | About 167 seconds after the patch |
 | Final observation | Effective width 4; exact convergence time not recorded |
 
-Ray registration does not establish that the expanded collective is ready.
-The retained harness timer polled a missing `current_width` field, so its 748-second value is not a convergence measurement.
-The observation records width under *`effective.Value`* and *`stableWidth`*.
-The final **2,134** completion lines span width 2, expansion load and both width-4 sweeps, including warm-up and calibration.
+Ray registration does not prove collective readiness. The harness timer polled a missing
+`current_width` field, so its 748-second value is not a convergence time; read *`effective.Value`*
+and *`stableWidth`* instead. The **2,134** total completion lines span width 2, expansion load and
+both width-4 passes.
 
 ### Remaining trade-offs
 
-RDMA did not make width 4 faster for every workload.
-Single-request *ITL* p50 remained higher at width 4: **6.979 versus 6.111 ms** at width 2.
-Width 2 retained higher output throughput at concurrencies 1–32; width 4 led at concurrency 64.
-At width 2, concurrency 4, *ITL* p99 worsened from **12.290 to 68.396 ms** despite better median latency and throughput.
+- **Choose RDMA width 4** for high-concurrency peaks (concurrency 64), where it led both *TTFT* and
+  output throughput.
+- **Choose RDMA width 2** for concurrencies 1–32 or lowest single-request *ITL* p50.
 
-Choose width from observed demand and token-latency targets.
-The follow-up supports high-concurrency width growth over InfiniBand; it does not establish linear scaling or transport-only causality.
+The follow-up supports high-concurrency InfiniBand expansion without proving linear scaling or
+transport-only causality.
 
 ## Limitations
 
-- The TCP baseline measured one model, one H100 SXM5 node, one runner configuration and one sweep per width.
-  No confidence intervals or repeated trials establish the size of small differences.
-- State 1 used four GPUs; State 3 used eight. This is an in-place capacity comparison, not an equal-GPU efficiency comparison.
-- Only width 2 → 4 at *TP* = 2 was captured. Cross-node expansion, other collectives and scale-down were not tested.
-- The initial recording used intra-`Pod` NVLink and cross-`Pod` TCP; the follow-up verified InfiniBand collective transport.
-  Neither measures cross-`Pod` NVLink or isolates transport cost from collective size and configuration changes.
-- Single-API-server *internal load balancing (Internal LB)* was used. Per-rank HTTP serving was not measured here.
-- The 12-second phase check is not an effective-width convergence timer.
-  Zero client errors do not establish uninterrupted readiness or unchanged token gaps during every resize.
-- Retained UIDs and restart counts prove `Pod` continuity, not unchanged internal engine state.
-  Final `Ready` does not mean every status condition was true.
+- Single-node H100 captures with one sweep per width give no confidence intervals for small deltas.
+- State 1 used four GPUs and State 3 used eight (in-place capacity growth, not equal-GPU efficiency).
+- Only width 2 → 4 at *TP* = 2 ran; cross-node expansion, other collectives and scale-down were not
+  tested.
+- Neither capture measures cross-`Pod` NVLink or isolates transport cost from collective size and
+  memory-utilization changes.
+- Single-API-server *internal load balancing (Internal LB)* ran; per-rank HTTP serving was not
+  measured here.
+- The 12-second phase check is not an effective-width timer; zero client errors do not guarantee
+  uninterrupted readiness or stable token gaps during every resize.
+- Retained UIDs and restart counts prove `Pod` continuity, not unchanged engine internals; `Ready`
+  does not imply every condition was true.
 
 ---
 

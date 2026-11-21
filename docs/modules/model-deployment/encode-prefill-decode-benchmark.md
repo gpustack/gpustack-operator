@@ -1,17 +1,16 @@
 # Encode, Prefill and Decode Benchmark
 
-On one H100 SXM5 node, *encode/prefill/decode (EPD)* reduced long-prompt generation stalls and
-repeated-image latency compared with aggregated serving and *prefill/decode (PD)*.
-Aggregated serving, *PD* and *EPD* used **one, two and three GPUs**, respectively.
-These results compare deployed configurations with unequal GPU budgets.
+On one H100 SXM5 node, *encode/prefill/decode (EPD)* cut long-prompt generation stalls and
+repeated-image latency relative to aggregated serving and *prefill/decode (PD)*. Aggregated serving,
+*PD* and *EPD* used **one, two and three GPUs**, respectively, so these results compare unequal GPU
+budgets.
 
-At `8k` and concurrency 8, *EPD* reduced *inter-token latency (ITL)* p99 from `296.710 ms` to
-**13.607 ms**, or **21.8× lower**, compared with aggregated serving.
-Its *time to first token (TTFT)* p50 was higher: `4,182.324 ms` against `3,963.085 ms`.
-[Encode, Prefill and Decode](encode-prefill-decode.md) describes the role contract.
+At `8k` and concurrency 8 over TCP, *EPD* cut *inter-token latency (ITL)* p99 by **21.8×**
+(296.710 ms to **13.607 ms**) while raising *time to first token (TTFT)* p50 (3,963.085 to
+4,182.324 ms). [Encode, Prefill and Decode](encode-prefill-decode.md) defines the role contract.
 
-The initial capture used cross-`Pod` TCP. The separate [InfiniBand RDMA comparison](#infiniband-rdma-comparison)
-adds matched follow-up measurements while retaining the TCP results and conclusions.
+The initial suites describe cross-`Pod` TCP. The separate
+[InfiniBand RDMA comparison](#infiniband-rdma-comparison) records the matched follow-up.
 
 ## Contents
 
@@ -27,8 +26,8 @@ adds matched follow-up measurements while retaining the TCP results and conclusi
 
 ## Configuration
 
-Each configuration used one `ModelDeployment`, with one replica per role and one GPU per `Pod`.
-All serving roles ran on the same GPU node, `gpu-node-0`.
+Each configuration ran one `ModelDeployment` on `gpu-node-0` with one replica per role and one GPU
+per `Pod`.
 
 | Configuration | Roles | GPUs | KV connector | Encoder connector |
 |---|---|---:|---|---|
@@ -36,10 +35,10 @@ All serving roles ran on the same GPU node, `gpu-node-0`.
 | *PD* | 1 *Prefill* + 1 *Decode* | 2 | `MooncakeConnector`, TCP | None |
 | *EPD* | 1 *Encode* + 1 *Prefill* + 1 *Decode* | 3 | `MooncakeConnector`, TCP | `ECCPUConnector`, NIXL |
 
-Each `Pod` exposed only its assigned GPU, with a private `/dev/shm` and IPC namespace.
-*`hostIPC`* was disabled, and no remote direct memory access (*RDMA*) interface was attached.
-**All cross-`Pod` NIXL encoder-cache and Mooncake KV transfers used container TCP sockets over `eth0`.**
-The host's NVLink fabric was not used between roles.
+Each `Pod` exposed only its assigned GPU with a private `/dev/shm` and IPC namespace. *`hostIPC`*
+was disabled, and no *remote direct memory access (RDMA)* interface was attached. **All cross-`Pod`
+NIXL encoder-cache and Mooncake KV transfers used TCP sockets over `eth0`.** Host NVLink carried no
+cross-role traffic.
 
 ## Hardware, model and workload
 
@@ -56,15 +55,14 @@ The host's NVLink fabric was not used between roles.
 | Engine limits | `--max-model-len 16384`, `--gpu-memory-utilization 0.85` |
 | Parallelism | *Tensor parallelism (TP)* = 1 per role |
 
-The operator added `--enforce-eager` and `--no-enable-prefix-caching` only to *Encode*.
-*Prefill* and *Decode* retained CUDA graphs.
-Aggregated serving and *PD* also set `--enable-scale-out` for router token rendering; *EPD* did not.
+The operator added `--enforce-eager` and `--no-enable-prefix-caching` only to *Encode*. *Prefill*
+and *Decode* retained CUDA graphs. Aggregated serving and *PD* set `--enable-scale-out` for router
+token rendering; *EPD* did not.
 
 ### Suite 1 workload
 
-Suite 1 varied image and text length with a `128`-token completion limit.
-Image dimensions are pixels; text-token values are generator targets.
-Measured prompt lengths include the model's multimodal request formatting.
+Suite 1 varied image and text length with a `128`-token completion limit. Image dimensions are
+pixels; text-token values are generator targets. Measured prompts include multimodal formatting.
 
 | Context | Image | Text target | Measured prompt tokens |
 |---|---|---:|---|
@@ -77,30 +75,39 @@ Concurrency 1, 4 and 8 used 8, 12 and 24 measured requests per context, respecti
 
 ### Suite 2 workload
 
-Two streams ran concurrently, with four workers and twelve requests each.
-The small stream used unique `560 × 560` images, a `624`-token text target and `max_tokens=256`.
-The heavy-vision stream used unique `1792 × 1792` images, a `400`-token text target and `max_tokens=64`.
-Measured prompt lengths were 1,048–1,051 and 4,520–4,523 tokens, respectively.
+Two streams ran concurrently, with four workers and twelve requests each. The small stream used
+unique `560 × 560` images, a `624`-token text target and `max_tokens=256`. The heavy-vision stream
+used unique `1792 × 1792` images, a `400`-token text target and `max_tokens=64`. Measured prompt
+lengths were 1,048–1,051 and 4,520–4,523 tokens, respectively.
 
 ### Suite 3 workload
 
-Suite 3 reused one `1792 × 1792` image with a different question per request.
-It used a `400`-token text target and `max_tokens=64`; measured prompts contained 4,518–4,522 tokens.
-Concurrency 4 and 8 used 12 and 24 measured requests.
+Suite 3 reused one `1792 × 1792` image with a different question per request. It used a `400`-token
+text target and `max_tokens=64`; measured prompts held 4,518–4,522 tokens. Concurrency 4 and 8 used
+12 and 24 measured requests.
 
 ### Method
 
-The load generator ran inside the cluster. Each configuration ran once, sequentially on the same node.
-Two warm-up requests preceded every Suite 1 and Suite 3 cell and were excluded from latency summaries.
-The 45 result files contain 36 Suite 1 cells, three mixed-load runs and six repeated-image cells.
-Each mixed-load file reports both streams separately.
+The in-cluster load generator ran each configuration once, sequentially, on the same node. Two
+warm-up requests preceded every Suite 1 and Suite 3 cell and were excluded from latency summaries.
+The 45 result files hold 36 Suite 1 cells, three mixed-load runs and six repeated-image cells.
 
-**All 708 measured requests succeeded with zero errors**, 236 per configuration.
-Each configuration also issued 28 warm-up requests.
-*Time per output token (TPOT)* measures per-request generation time per token; *ITL* measures streamed-token gaps.
-Bold table values mark lower latency or higher throughput within each matched workload and concurrency.
+**All 708 measured requests succeeded with zero errors**, 236 per configuration, plus 28 warm-up
+requests each. *Time per output token (TPOT)* measures per-request generation time per token; *ITL*
+measures gaps between streamed tokens. Bold values mark lower latency or higher throughput within
+each matched workload and concurrency.
 
 ## Suite 1: Multimodal context scaling
+
+![ITL p99, TTFT p50 and output throughput by concurrency for aggregated serving, PD and EPD over TCP, four multimodal contexts](../../assets/diagrams/encode-prefill-decode-benchmark-tcp.svg)
+
+Over TCP with unequal GPU budgets (1, 2 and 3 GPUs), *EPD* cut *ITL* p99 by **15.1×–21.8×** against
+aggregated serving at `4k` and `8k`, concurrency 8 (231.453 to **15.352 ms**; 296.710 to
+**13.607 ms**).
+
+*EPD* has no universal latency win: 1-GPU aggregated serving kept lower *TTFT* p50 in every `1k`
+cell, lower *TTFT* p95 in every `2k` cell, and lower *TTFT* p50 at `8k`, concurrency 8 (3,963.085
+versus 4,182.324 ms), while `8k`, concurrency 4 lowered *EPD* median *TTFT* but worsened *TTFT* p95.
 
 | Workload | Concurrency | Configuration | Requests | *TTFT* p50 (ms) | *TTFT* p95 (ms) | *TPOT* p50 (ms) | *ITL* p99 (ms) | Output (tok/s) | Throughput (req/s) |
 |---|---:|---|---:|---:|---:|---:|---:|---:|---:|
@@ -141,16 +148,13 @@ Bold table values mark lower latency or higher throughput within each matched wo
 | `8k` | 8 | *PD* | 24/24 | 4,895.645 | 8,582.882 | **8.180** | 13.822 | 105.850 | 1.162 |
 | `8k` | 8 | *EPD* | 24/24 | 4,182.324 | 5,839.159 | 8.357 | **13.607** | **144.753** | 1.434 |
 
-At `4k` and concurrency 8, *EPD* reduced *ITL* p99 from `231.453 ms` to **15.352 ms**, or **15.1×**.
-*TTFT* p50 also fell from `1,972.504 ms` to `1,690.166 ms`.
-At `8k` and concurrency 8, *ITL* p99 improved **21.8×**, but *TTFT* p50 increased by `219.239 ms`.
-Separating generation from prompt processing improved token-gap tails without consistently improving first-token latency.
-
-Aggregated serving had the lowest *TTFT* p50 for every `1k` cell and the lowest *TTFT* p95 for every `2k` cell.
-At `8k` and concurrency 4, *EPD* improved median *TTFT* but worsened its p95 against aggregated serving.
-The recorded medians and tails support different choices; *EPD* has no universal latency advantage.
-
 ## Suite 2: Mixed vision and decode
+
+The mixed windows lasted 8.473 s (aggregated), 9.608 s (*PD*) and **5.217 s** (*EPD*). Each
+stream's throughput divides by its configuration's full mixed window; combined output throughput was
+267.093 tok/s, 238.130 tok/s and **388.320 tok/s**. Against 1-GPU aggregated serving, 3-GPU *EPD*
+cut small-stream *ITL* p99 by **18.4×** (296.566 to **16.130 ms**) and lowered *TTFT* p50 on both
+streams (1,214.046 to **647.387 ms**; 2,215.441 to **959.134 ms**).
 
 | Workload | Concurrency | Configuration | Requests | *TTFT* p50 (ms) | *TTFT* p95 (ms) | *TPOT* p50 (ms) | *ITL* p99 (ms) | Output (tok/s) | Throughput (req/s) |
 |---|---:|---|---:|---:|---:|---:|---:|---:|---:|
@@ -161,16 +165,13 @@ The recorded medians and tails support different choices; *EPD* has no universal
 | `heavy_vision_4k` | 4 | *PD* | 12/12 | 2,379.965 | 3,770.445 | 7.138 | **16.348** | 79.932 | 1.249 |
 | `heavy_vision_4k` | 4 | *EPD* | 12/12 | **959.134** | **1,971.796** | 8.625 | 16.845 | **147.201** | **2.300** |
 
-The mixed windows lasted `8.473 s`, `9.608 s` and **5.217 s** for aggregated serving, *PD* and *EPD*.
-Each stream's output and request throughput uses its configuration's full mixed window as the denominator.
-Combined output throughput was `267.093 tok/s`, `238.130 tok/s` and **388.320 tok/s**, respectively.
-
-For small requests, *EPD* reduced *TTFT* p50 from `1,214.046 ms` to **647.387 ms** against aggregated serving.
-Their *ITL* p99 fell from `296.566 ms` to **16.130 ms**, or **18.4× lower**.
-For heavy-vision requests, *TTFT* p50 fell from `2,215.441 ms` to **959.134 ms**.
-The isolated roles improved these mixed-load outcomes while using three GPUs instead of one.
-
 ## Suite 3: Encoder-cache reuse
+
+At concurrency 8 on repeated `1792 × 1792` images, *EPD* cut *TTFT* p50 **5.9×** (2,196.771 to
+**371.850 ms**) and raised output throughput **2.86×** (187.667 to **536.280 tok/s**) over 1-GPU
+aggregated serving, while *PD* kept the lowest *ITL* p99 (14.864 versus 15.744 ms). Metrics are
+cumulative across suites, so these numbers do not isolate encoder-cache hits from prefix caching,
+batching or the extra GPUs.
 
 | Workload | Concurrency | Configuration | Requests | *TTFT* p50 (ms) | *TTFT* p95 (ms) | *TPOT* p50 (ms) | *ITL* p99 (ms) | Output (tok/s) | Throughput (req/s) |
 |---|---:|---|---:|---:|---:|---:|---:|---:|---:|
@@ -181,18 +182,10 @@ The isolated roles improved these mixed-load outcomes while using three GPUs ins
 | `repeated_4k_c8` | 8 | *PD* | 24/24 | 2,596.832 | 2,685.146 | **6.430** | **14.864** | 170.026 | 2.657 |
 | `repeated_4k_c8` | 8 | *EPD* | 24/24 | **371.850** | **753.291** | 7.272 | 15.744 | **536.280** | **8.379** |
 
-At concurrency 8, *EPD* reduced *TTFT* p50 from `2,196.771 ms` to **371.850 ms**, or **5.9× lower**.
-Output throughput rose from `187.667 tok/s` to **536.280 tok/s**, or **2.86× higher**.
-*PD* retained the lowest *ITL* p99 in that cell: `14.864 ms` against *EPD*'s `15.744 ms`.
-
-These results establish a repeated-image advantage for the captured *EPD* configuration.
-They do not isolate encoder-cache hits from prefix caching, batching or the extra GPU allocation.
-The captured metrics are cumulative across suites, without a per-suite encoder-cache hit-rate delta.
-
 ## Stage execution verification
 
-The stage capture separates completion access lines from token-render calls.
-It includes warm-up traffic and is broader than the 236 measured requests per configuration.
+Stage counts separate completion lines from token-render calls and include warm-up traffic, so they
+exceed the 236 measured requests per configuration.
 
 | Configuration | Role | Completion lines | Render lines |
 |---|---|---:|---:|
@@ -203,43 +196,43 @@ It includes warm-up traffic and is broader than the 236 measured requests per co
 | *EPD* | *Prefill* | 264 | 0 |
 | *EPD* | *Decode* | 264 | 0 |
 
-The *EPD* *Decode* sidecar also logged **264 multimodal-item events**.
-Each configuration's router access capture contained 280 lines.
-These counts establish traffic at every *EPD* stage, but are not request-ID correlation or byte-transfer measurements.
-The *PD* *Prefill* count is eighteen below its *Decode* count; the capture does not establish the reason.
-
-The aggregated and *PD* render counts are separate from completion counts.
-A successful response or matching aggregate counts alone cannot prove that every request traversed every intended stage.
-See [Counting engine tokens](prefill-decode.md#counting-engine-tokens) for the router's token-render requirement.
+The *EPD* *Decode* sidecar logged **264 multimodal-item events**, and each router capture held 280
+access lines. These counts confirm traffic at every *EPD* stage without per-request ID correlation
+or byte-transfer logs. The *PD* *Prefill* count is 18 below *Decode* for an unestablished reason;
+see [Counting engine tokens](prefill-decode.md#counting-engine-tokens).
 
 ## Summary
 
+- **Choose *EPD*** when three GPUs are available and large-image generation isolation,
+  repeated-image reuse or mixed vision/decode latency matters most.
+- **Choose aggregated** when one GPU or small-prompt first-token latency matters most; cross-role
+  TCP transfers and unequal GPU budgets prevent an equal-cost claim.
+
 ### Benefits
 
-- Long-prompt generation tails improved: *EPD* had **15.1×–21.8× lower ITL p99** at `4k`/`8k`, concurrency 8, than aggregated serving.
-- Repeated-image traffic reached **536.280 tok/s** at concurrency 8, with **5.9× lower TTFT p50** than aggregated serving.
-- Mixed traffic completed in **5.217 s**, against `8.473 s` for aggregated serving, with lower first-token and token-gap tails.
+- Long-prompt *ITL* p99 fell **15.1×–21.8×** at `4k` and `8k`, concurrency 8, against aggregated
+  serving.
+- Repeated-image traffic reached **536.280 tok/s** at concurrency 8 with **5.9× lower *TTFT* p50**.
+- Mixed traffic finished in **5.217 s** versus 8.473 s for aggregated serving, with lower *TTFT*
+  and *ITL* tails.
 
 ### Trade-offs
 
-- *EPD* used **three GPUs**, compared with one for aggregated serving and two for *PD*.
-- Small prompts often favored aggregated serving on first-token latency.
-- The `8k`, concurrency-8 *EPD* median *TTFT* remained higher than aggregated serving despite much lower *ITL* p99.
-
-Choose *EPD* for large-image generation isolation, repeated-image workloads or the measured mixed-traffic benefits when three GPUs are available.
-Small-prompt first-token latency can favor aggregated serving.
-The cross-role TCP transfers and unequal GPU budgets prevent a universal latency or equal-cost efficiency claim.
+- *EPD* allocated **three GPUs**, versus one for aggregated serving and two for *PD*.
+- Small prompts (`1k`) favored aggregated serving on first-token latency in every cell.
+- Over TCP at `8k`, concurrency 8, *EPD* *TTFT* p50 stayed higher than aggregated serving despite
+  much lower *ITL* p99.
 
 ## InfiniBand RDMA comparison
 
-A follow-up on the same ConnectX-7 InfiniBand node setup described in
+A follow-up on the ConnectX-7 InfiniBand node from
 [Prefill and Decode Benchmark](prefill-decode-benchmark.md#infiniband-rdma-comparison) ran the
-three-role `epd-arm3-epd` allocation with one GPU per role. **All 16 measured cells completed:
-236/236 requests, with zero errors.**
+three-role `epd-arm3-epd` layout with one GPU per role. **All 16 measured cells completed: 236/236
+requests with zero errors.**
 
 ### Transport verification
 
-Update `epd-deployment.yaml` from the
+Add interface requests to `epd-deployment.yaml` from the
 [TCP walkthrough](../../walkthroughs/model-deployment/encode-prefill-decode.md#step-1-start-three-role-serving):
 
 ```diff
@@ -266,20 +259,25 @@ Update `epd-deployment.yaml` from the
 +        interface: "1"
 ```
 
-*Prefill* bound `mlx5_5` with LID `21818`; *Decode* bound `mlx5_3` with LID `21813`.
-Both Mooncake workers logged protocol `rdma` and registered their KV caches.
-The receive log recorded `Received RDMA ready ACK`; the captured logs contained no failed-transfer entries.
+*Prefill* bound `mlx5_5` (LID `21818`) and *Decode* bound `mlx5_3` (LID `21813`). Both Mooncake
+workers logged protocol `rdma`, registered KV caches and logged `Received RDMA ready ACK` with zero
+failed transfers.
 
-This verifies **Mooncake KV transfer over InfiniBand RDMA** between *Prefill* and *Decode*.
-NIXL `ECCPUConnector` still carried multimodal features between *Encode* and *Prefill*.
-The capture does not establish RDMA for that separate encoder-cache path.
-Each role used one GPU, so these cross-role transfers did not use NVLink.
+This confirms **Mooncake KV transfer over InfiniBand RDMA** between *Prefill* and *Decode*. NIXL
+`ECCPUConnector` remained separate between *Encode* and *Prefill*; this capture does not establish
+RDMA for the encoder-cache path.
 
 ### Context scaling
 
-The matched cells below retain the TCP baseline and add the RDMA follow-up.
-Both runs used the same context targets, concurrency and request counts.
-Bold values mark lower median first-token latency or higher output throughput within each pair.
+![TTFT p50 and output throughput by concurrency for aggregated serving, EPD over TCP and EPD over InfiniBand RDMA, four multimodal contexts](../../assets/diagrams/encode-prefill-decode-benchmark-rdma.svg)
+
+In this separate 3-GPU follow-up, RDMA *EPD* cut *TTFT* p50 and raised throughput over TCP *EPD*
+in all 12 cells, reversing the `8k`, concurrency-8 *TTFT* regression against 1-GPU aggregated
+serving (**3.46×** lower than TCP, **3.28×** lower than aggregated; **2.49×** and **2.51×** higher
+output). Unequal GPU budgets (3 versus 1 GPU) and separate runs prevent equal-cost or
+transport-only causal claims; single-request *ITL* p99 also rose slightly in all four contexts.
+
+Bold values mark lower median *TTFT* or higher output throughput within each TCP/RDMA pair.
 
 | Context | Concurrency | TCP *TTFT* p50 (ms) | RDMA *TTFT* p50 (ms) | *TTFT* reduction | TCP output (tok/s) | RDMA output (tok/s) |
 |---|---:|---:|---:|---:|---:|---:|
@@ -296,61 +294,52 @@ Bold values mark lower median first-token latency or higher output throughput wi
 | `8k` | 4 | 1,572.574 | **605.871** | **2.60×** | 134.224 | **226.206** |
 | `8k` | 8 | 4,182.324 | **1,207.904** | **3.46×** | 144.753 | **360.029** |
 
-At `4k`, concurrency 8, RDMA reduced *EPD* median *TTFT* **3.82×** and raised output throughput **2.08×**.
-At `8k`, concurrency 8, median *TTFT* fell **3.46×** while output throughput rose **2.49×**.
-The TCP *EPD* first-token regression against aggregated serving at `8k`, concurrency 8, reversed with RDMA.
+Against the 1-GPU aggregated baseline at concurrency 8, RDMA *EPD* had **4.46×** lower *TTFT* p50
+and **2.29×** higher output at `4k`, and **3.28×** lower *TTFT* p50 and **2.51×** higher output at
+`8k` (still 3 GPUs versus 1 GPU).
 
 | Context, concurrency 8 | Aggregated *TTFT* p50 (ms) | RDMA EPD *TTFT* p50 (ms) | Aggregated output (tok/s) | RDMA EPD output (tok/s) |
 |---|---:|---:|---:|---:|
 | `4k` | 1,972.504 | **442.003** | 231.845 | **531.323** |
 | `8k` | 3,963.085 | **1,207.904** | 143.211 | **360.029** |
 
-Against the recorded aggregated configuration, RDMA *EPD* had **4.46× lower median TTFT** at `4k` and **3.28× lower** at `8k`.
-Output throughput was **2.29×** and **2.51× higher**, respectively.
-These comparisons still allocate three GPUs to *EPD* and one to aggregated serving.
-
 ### Mixed traffic
+
+Both streams shared a 3.677 s mixed window on RDMA versus 5.217 s on TCP. RDMA lowered median
+*TTFT* **3.00×** on `concurrent_decode_1k` (output **1.94×** higher; *ITL* p99 **9.894 ms** versus
+296.566 ms aggregated) and **2.02×** on `heavy_vision_4k` (output **1.42×** higher).
 
 | Stream | TCP *TTFT* p50 (ms) | RDMA *TTFT* p50 (ms) | TCP *ITL* p99 (ms) | RDMA *ITL* p99 (ms) | TCP output (tok/s) | RDMA output (tok/s) |
 |---|---:|---:|---:|---:|---:|---:|
 | `concurrent_decode_1k` | 647.387 | **215.522** | 16.130 | **9.894** | 241.119 | **466.705** |
 | `heavy_vision_4k` | 959.134 | **474.237** | 16.845 | **10.119** | 147.201 | **208.875** |
 
-The concurrent decode stream had **3.00× lower median TTFT** and **1.94× higher output throughput**.
-Its *ITL* p99 fell to **9.894 ms**, against TCP *EPD* at 16.130 ms and aggregated serving at 296.566 ms.
-Heavy-vision median *TTFT* fell **2.02×**, with output throughput **1.42× higher**.
-Both streams shared the mixed window: 3.677 s with RDMA, against 5.217 s with TCP.
-
 ### Encoder-cache reuse
+
+RDMA kept the repeated-image gain and lowered median *TTFT* in both cells. The captures still do
+not isolate encoder-cache hits from prefix caching, batching or GPU count.
 
 | Concurrency | TCP *TTFT* p50 (ms) | RDMA *TTFT* p50 (ms) | TCP output (tok/s) | RDMA output (tok/s) |
 |---:|---:|---:|---:|---:|
 | 4 | 298.825 | **246.151** | 367.278 | **390.899** |
 | 8 | 371.850 | **286.294** | 536.280 | **700.762** |
 
-The RDMA follow-up retained the repeated-image benefit and improved median *TTFT* in both measured cells.
-The captures still do not separate encoder-cache hits from prefix caching, batching or GPU allocation.
-
 ### Scope and trade-offs
 
-RDMA reversed the `8k`, concurrency-8 first-token disadvantage while retaining separate generation resources.
-It required InfiniBand interfaces on both KV-transfer roles; declaring `RDMA` alone does not establish a working transport.
-The TCP and RDMA measurements are separate runs on the same GPU model, not repeated transport-only trials.
-
-Model, role counts and GPU budgets remained unchanged.
-Neither capture measures cross-node placement or RDMA encoder-cache transfer.
-
-Single-request *ITL* p99 rose slightly in all four context shapes, despite lower median *TTFT* and higher throughput.
+RDMA reversed the `8k`, concurrency-8 *TTFT* penalty while requiring InfiniBand interfaces on both
+KV-transfer roles. Separate runs, unchanged 1/2/3 GPU budgets, and slight single-request *ITL* p99
+increases across all four contexts limit causal attribution. Neither capture measures cross-node
+placement or RDMA encoder-cache transfer.
 
 ## Limitations
 
-- One run per configuration, with 8–24 requests per stream or cell. Tail percentiles have limited sample support.
-- Unequal GPU allocations prevent an equal-cost throughput or per-GPU efficiency conclusion.
-- All serving roles shared one GPU node. Cross-node placement and bandwidth were not measured.
-- The initial capture used cross-`Pod` TCP over `eth0`; the follow-up verified InfiniBand KV transfer. Neither establishes cross-`Pod` NVLink.
-- The configurations ran sequentially with warmed model weights. Cache state and execution order were not independently controlled.
+- One pass per configuration, with 8–24 requests per stream or cell, limits tail-percentile support.
+- Unequal GPU budgets (1, 2 and 3 GPUs) prevent equal-cost throughput or per-GPU efficiency claims.
+- All roles shared one GPU node; cross-node placement and bandwidth were not measured.
+- Neither the TCP baseline nor the InfiniBand follow-up measures cross-`Pod` NVLink.
+- Configurations ran sequentially with warmed weights; cache state and run order were not isolated.
 - Encoder-cache, prefix-cache and compute-isolation effects were not measured separately.
-- Completion limits were fixed, but early stopping produced different output-token totals. Output throughput uses actual generated tokens.
+- Early stopping varied output-token totals; output throughput uses actual generated tokens.
 
 ---
 

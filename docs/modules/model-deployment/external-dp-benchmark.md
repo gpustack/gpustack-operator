@@ -1,17 +1,17 @@
 # External DP Benchmark
 
 On one eight-GPU H100 SXM5 node, wide *tensor parallelism (TP)* delivered **2.27×–6.99× higher
-output throughput** than *External DP* across twelve matched workloads.
-*External DP* had lower median first-token latency at concurrency 64 for both prompt shapes.
-Both configurations used eight GPUs and completed **1,088/1,088 measured requests with zero errors**.
+output throughput** than *External DP* over TCP across all twelve matched cells. *External DP* had
+lower median first-token latency at concurrency 64 on both shapes, while both eight-GPU
+configurations completed **1,088/1,088 measured requests with zero errors**.
 
-The model was `deepseek-ai/DeepSeek-V2-Lite-Chat`, a *mixture of experts (MoE)* model.
-Wide *TP* kept all eight GPUs inside one `Pod` and used intra-`Pod` NVLink.
-*External DP* used four two-GPU `Pod`s: local *TP* used NVLink, while cross-`Pod` expert collectives used TCP.
-[External DP](external-dp.md) describes the serving contract.
+Both ran `deepseek-ai/DeepSeek-V2-Lite-Chat`, a *mixture of experts (MoE)* model. Wide *TP* kept
+all eight GPUs inside one NVLink `Pod`; *External DP* ran four two-GPU `Pod`s with NVLink for local
+*TP* and TCP for the cross-`Pod` expert collective. [External DP](external-dp.md) defines the
+serving contract.
 
-The initial suites and conclusions describe cross-`Pod` TCP.
-The separate [InfiniBand RDMA comparison](#infiniband-rdma-comparison) records the follow-up.
+The initial suites describe cross-`Pod` TCP. The separate
+[InfiniBand RDMA comparison](#infiniband-rdma-comparison) records the matched follow-up.
 
 ## Contents
 
@@ -25,25 +25,21 @@ The separate [InfiniBand RDMA comparison](#infiniband-rdma-comparison) records t
 
 ## Configuration
 
-Each configuration used one `ModelDeployment` on the same GPU node, `gpu-node-0`.
+Each configuration ran one `ModelDeployment` on `gpu-node-0`.
 
 | Configuration | Roles | `Pod`s | GPUs per `Pod` | Router |
 |---|---|---:|---:|---|
 | Wide *TP* | 1 *Server* | 1 | 8 | None; direct engine HTTP |
 | *External DP* | 1 *Server* group | 4 | 2 | `vllm-router`, `round_robin` |
 
-Wide *TP* set `--tensor-parallel-size 8` without `--enable-expert-parallel`.
-Attention and expert layers used *TP* across the eight GPUs within that `Pod`.
+Wide *TP* set `--tensor-parallel-size 8` without `--enable-expert-parallel`. *External DP* set
+*data parallelism (DP)* = 4, local *TP* = 2 and *expert parallelism (EP)* enabled
+(`--all2all-backend allgather_reducescatter`), with one API server and local attention KV cache per
+rank and no cross-rank KV transfer.
 
-*External DP* set *data parallelism (DP)* to 4, local *TP* to 2, and enabled *expert parallelism (EP)*.
-Each rank exposed its own API server and used `--all2all-backend allgather_reducescatter`.
-The four ranks shared an eight-GPU expert collective; each rank kept its own attention KV cache.
-There was no cross-rank KV-block transfer.
-
-**NVLink was used only inside a `Pod`.** Each `Pod` exposed only its assigned GPUs, with private
-IPC and `/dev/shm`, *`hostIPC`* disabled and no *remote direct memory access (RDMA)* interface.
-Cross-`Pod` *EP* communication, including `allgather_reducescatter`, used TCP sockets over `eth0`.
-The host's NVLink fabric did not provide a cross-`Pod` transport in this recording.
+**NVLink carried intra-`Pod` traffic only.** Each `Pod` had private IPC and `/dev/shm`, *`hostIPC`*
+disabled and no *remote direct memory access (RDMA)* interface, so cross-`Pod` *EP* communication
+used TCP sockets over `eth0`.
 
 ## Hardware, model and workload
 
@@ -65,34 +61,44 @@ The host's NVLink fabric did not provide a cross-`Pod` transport in this recordi
 
 ### Port allocation
 
-The captured deployment set `VLLM_PORT=19500` on every rank, and the successful run selected port
-`19502` for collective initialization (an observed runtime choice rather than a fixed base-plus-two
-offset). See [Port allocation](external-dp.md#port-allocation) for vLLM's port-probing,
-candidate-broadcast and retry behavior, and the recorded bootstrap-port race that motivates a fixed
-`VLLM_PORT`, and the [walkthrough manifest](../../walkthroughs/model-deployment/external-dp.md#step-1-start-the-fixed-group) for the setting.
+Every *External DP* rank set `VLLM_PORT=19500`, and the run initialized on port `19502` (an
+observed choice, not a fixed offset). See [Port allocation](external-dp.md#port-allocation) for
+vLLM port probing and the bootstrap-port race, and the
+[walkthrough manifest](../../walkthroughs/model-deployment/external-dp.md#step-1-start-the-fixed-group).
 
 ### Workload
 
-Prompt/output targets were `1024/256` and `4096/128`, at concurrency 1, 4, 8, 16, 32 and 64.
-The request counts were 32, 32, 32, 64, 128 and 256 per shape, respectively.
-Each cell had four excluded warm-up requests. One calibration request preceded each configuration.
-Prompts used unique request markers; early stopping produced different output-token totals.
+Target prompt/output shapes were `1024/256` and `4096/128` at concurrency 1, 4, 8, 16, 32 and 64
+(32, 32, 32, 64, 128 and 256 measured requests per shape, plus four excluded warm-ups per cell and
+one calibration request per configuration). Prompts carried unique markers, and early stopping
+varied output-token totals.
 
 ### Method
 
-The streaming load generator ran inside the cluster and called the cluster-internal endpoint.
-Each configuration ran once, sequentially on the same node with warmed model weights.
-The 24 result files contain 12 cells per configuration and **2,176 measured requests in total**.
-Output throughput uses actual generated tokens divided by each cell's wall time.
+The in-cluster streaming generator ran each configuration once, sequentially, with warmed weights
+(**2,176 measured requests** across 24 result files). Output throughput divides actual generated
+tokens by cell wall time.
 
-Latency columns report *time to first token (TTFT)*, *time per output token (TPOT)* and
-*inter-token latency (ITL)*. *TPOT* is a per-request average; *ITL* measures streamed-token gaps.
-Bold values mark lower latency or higher throughput within each matched workload and concurrency.
-They do not establish statistical significance.
+*Time to first token (TTFT)*, *time per output token (TPOT)* and *inter-token latency (ITL)* use
+captured millisecond precision. Bold values mark lower latency or higher throughput within each
+matched pair without claiming statistical significance.
 
 ## Prompt lengths and concurrency
 
-Every cell completed its requested count with zero errors.
+Every cell completed with **zero errors**.
+
+![TTFT p50, ITL p99 and output throughput by concurrency for Wide TP and External DP over TCP, two prompt shapes](../../assets/diagrams/external-dp-benchmark-tcp.svg)
+
+Over TCP against single-`Pod` NVLink wide *TP*, wide *TP* won output throughput in all 12 cells by
+**2.27×–6.99×** (peaking at **2,647.004 tok/s** versus 436.861 tok/s at `1024/256`, concurrency 16;
+*External DP* peaked at **1,017.434 tok/s** at concurrency 64) and kept **6.9×–7.3×** lower *TPOT*
+p50 at concurrency 1.
+
+*External DP* beat wide *TP* on *TTFT* p50 only at concurrency 64 (**2.58×** lower at `1024/256`:
+**1,863.100** versus 4,798.411 ms; **1.23×** lower at `4096/128`: **3,094.017** versus
+3,814.139 ms), where `4096/128` tails degraded (*TTFT* p95 **17,594.349** versus 4,057.352 ms;
+*ITL* p99 **1,953.899** versus 55.619 ms). Parallelism, transport, routing and API-server count
+changed together, so individual causes are not isolated.
 
 | Workload | Prompt tokens | Concurrency | Configuration | Requests | *TTFT* p50 (ms) | *TTFT* p95 (ms) | *TPOT* p50 (ms) | *ITL* p99 (ms) | Output (tok/s) | Throughput (req/s) |
 |---|---|---:|---|---:|---:|---:|---:|---:|---:|---:|
@@ -121,28 +127,10 @@ Every cell completed its requested count with zero errors.
 | `4096/128` | 4,094–4,099 | 64 | Wide *TP* | 256/256 | 3,814.139 | **4,057.352** | **10.136** | **55.619** | **1,491.536** | **12.761** |
 | `4096/128` | 4,094–4,098 | 64 | *External DP* | 256/256 | **3,094.017** | 17,594.349 | 193.557 | 1,953.899 | 290.025 | 2.537 |
 
-Wide *TP* delivered higher output throughput in all twelve matched cells.
-Its peak was **2,647.004 tok/s** at `1024/256`, concurrency 16, against `436.861 tok/s` for *External DP*.
-*External DP* peaked at **1,017.434 tok/s** at `1024/256`, concurrency 64.
-
-At concurrency 1, *External DP* had **6.9×–7.3× higher TPOT p50** across the two shapes.
-The configurations differ in expert sharding, transport, router path and API-server count.
-The measurements do not isolate the contribution of each difference.
-
-At `1024/256`, concurrency 64, *External DP* reduced *TTFT* p50 from `4,798.411 ms` to
-**1,863.100 ms**, or **2.58× lower**. Its *TTFT* p95 was also lower, `4,921.601 ms` against `5,215.017 ms`.
-Wide *TP* still delivered **2.27× higher output throughput**, with lower *TPOT* and *ITL* tails.
-
-At `4096/128`, concurrency 64, *External DP* reduced median *TTFT* from `3,814.139 ms` to
-**3,094.017 ms**, or **1.23× lower**.
-Its tail worsened: *TTFT* p95 reached **17,594.349 ms**, and *ITL* p99 reached **1,953.899 ms**.
-Wide *TP* recorded `4,057.352 ms` and `55.619 ms`, respectively.
-A lower first-token median did not imply better generation latency or throughput.
-
 ## Per-rank registration
 
-The final capture combines operator status, the Router registry, per-worker counters and engine access logs.
-The role reported one ready replica group with four confirmed serving endpoints:
+Operator status confirmed one ready replica group (`eligible: 1`) and four serving HTTP endpoints
+(`serving.value: 4`):
 
 ```json
 {
@@ -163,9 +151,8 @@ The role reported one ready replica group with four confirmed serving endpoints:
 }
 ```
 
-*`eligible`* counts the replica group. *`serving.value`* counts the HTTP endpoints confirmed by the Router.
-All four endpoints were registered, healthy, in selection and had closed circuits.
-The rank names below replace endpoint IPs with their corresponding member identities.
+All four endpoints were registered, healthy, in selection and had closed circuits (rank names
+replace endpoint IPs):
 
 | Rank | Registered | Healthy | In selection | Router requests | Engine completion lines |
 |---|---|---|---|---:|---:|
@@ -174,42 +161,41 @@ The rank names below replace endpoint IPs with their corresponding member identi
 | `server-r0-m2` | true | true | true | **284** | **284** |
 | `server-r0-m3` | true | true | true | **284** | **284** |
 
-The counters total **1,137 requests**: 1,088 measured requests, 48 warm-ups and one calibration request.
-The wide *TP* engine also logged 1,137 completion lines.
-Router counters matched every rank's engine completion count, establishing traffic on all four ranks.
-The generic router-access-line capture reported zero; it is separate from these nonzero per-worker counters.
+Totals match **1,137 requests** (1,088 measured, 48 warm-ups, one calibration), matching wide *TP*'s
+1,137 engine completions. Generic router-access-line counts read zero separately from these
+per-worker counters.
 
 ## Summary
 
+- **Choose wide *TP*** on single-node NVLink when throughput and token-generation latency dominate.
+- **Choose *External DP*** when per-rank HTTP ingress or concurrency-64 first-token latency fits the
+  workload (especially with InfiniBand RDMA, where it also led concurrency-64 output).
+
 ### Benefits
 
-- *External DP* registered **four healthy serving endpoints** and spread requests evenly: **285 + 284 × 3**.
-- At `1024/256`, concurrency 64, *External DP* had **2.58× lower TTFT p50** than wide *TP*.
-- At `4096/128`, concurrency 64, its *TTFT* p50 was **1.23× lower**, despite worse tail latency.
-- Both configurations completed **1,088/1,088 measured requests**, with zero errors.
+- Registered **four healthy endpoints** and balanced traffic evenly (**285 + 284 × 3**).
+- Lowered concurrency-64 *TTFT* p50 by **2.58×** at `1024/256` and **1.23×** at `4096/128`.
+- Completed **1,088/1,088 measured requests** in both configurations with zero errors.
 
 ### Trade-offs
 
-- Wide *TP* delivered **2.27×–6.99× higher output throughput** across all matched cells.
-- Cross-`Pod` *EP* used TCP, while the wide configuration kept its full collective inside one NVLink-connected `Pod`.
-- At `4096/128`, concurrency 64, *External DP* had lower median *TTFT* but much higher first-token and token-gap tails.
-
-Choose the fixed four-rank group when per-rank ingress or lower median *TTFT* at concurrency 64 fits the workload.
-Choose wide *TP* when output throughput and generation latency dominate on this single-node NVLink setup.
-The crossover does not establish a general advantage for multi-node or *RDMA* deployments.
+- Over TCP, wide *TP* delivered **2.27×–6.99× higher output throughput** in all twelve cells.
+- Cross-`Pod` *EP* used TCP versus single-`Pod` NVLink for wide *TP*.
+- At `4096/128`, concurrency 64 over TCP, *External DP* suffered severe *TTFT* p95 and *ITL* p99
+  tails.
 
 ## InfiniBand RDMA comparison
 
-A follow-up on the same ConnectX-7 InfiniBand node setup described in
-[Prefill and Decode Benchmark](prefill-decode-benchmark.md#infiniband-rdma-comparison) retained
-*DP* = 4, *TP* = 2 per `Pod`, one API server per rank and `round_robin` routing. All twelve measured
-cells completed **1,088/1,088 requests with zero errors**.
+A follow-up on the ConnectX-7 InfiniBand node from
+[Prefill and Decode Benchmark](prefill-decode-benchmark.md#infiniband-rdma-comparison) kept
+*DP* = 4, *TP* = 2 per `Pod`, one API server per rank and `round_robin` routing. All twelve cells
+completed **1,088/1,088 requests with zero errors**.
 
 ### Transport verification
 
 Update `external-dp.yaml` from the
-[TCP walkthrough](../../walkthroughs/model-deployment/external-dp.md#step-1-start-the-fixed-group):
-The diff uses current interface allocation; the recorded run used manual device exposure.
+[TCP walkthrough](../../walkthroughs/model-deployment/external-dp.md#step-1-start-the-fixed-group)
+(the diff shows current interface allocation; the capture used manual device exposure):
 
 ```diff
  apiVersion: worker.gpustack.ai/v1
@@ -227,17 +213,24 @@ The diff uses current interface allocation; the recorded run used manual device 
 +        interface: "2"
 ```
 
-NCCL logged `Using network IB` and channel transfers `via NET/IB/.../GDRDMA`.
-This establishes InfiniBand transport for the cross-`Pod` expert collective.
-Intra-`Pod` *TP* still used NVLink; HTTP and bootstrap traffic remained separate from collective transport.
-
-The model, engine limits and collective backend matched the TCP run.
-Keep **`VLLM_PORT=19500`** on every rank; InfiniBand does not fix the [bootstrap-port race](#port-allocation).
+NCCL logged `Using network IB` and `via NET/IB/.../GDRDMA`, confirming InfiniBand for the cross-`Pod`
+expert collective while intra-`Pod` *TP* stayed on NVLink. Keep **`VLLM_PORT=19500`** on every rank;
+InfiniBand does not remove the [bootstrap-port race](#port-allocation).
 
 ### TCP and RDMA
 
-Bold values mark lower latency or higher throughput within each matched *External DP* pair.
-The target shapes, concurrencies and measured request counts matched the TCP sweep.
+![TTFT p50, ITL p99 and output throughput by concurrency for Wide TP, External DP over TCP and External DP over InfiniBand RDMA](../../assets/diagrams/external-dp-benchmark-rdma.svg)
+
+In this separate InfiniBand follow-up (where wide *TP* was not rerun), RDMA *External DP* cut
+concurrency-64 *TTFT* p50 by **6.26×** (`1024/256`) and **8.47×** (`4096/128`) over TCP, raised
+output **3.85×** and **7.01×**, and cut `4096/128` tails (*TTFT* p95 **17,594.349 → 1,477.799 ms**;
+*ITL* p99 **1,953.899 → 182.693 ms**).
+
+Exceptions remain: wide *TP* kept higher output at concurrencies 1–32 (10 of 12 cells) and lower
+*TPOT* p50 and *ITL* p99 in all 12 cells, and RDMA regressed *ITL* p99 versus TCP at `1024/256`,
+concurrency 8 (**26.162** to 64.911 ms).
+
+Bold values mark lower latency or higher throughput within each matched *External DP* TCP/RDMA pair.
 
 | Shape | Concurrency | TCP *TTFT* p50 (ms) | RDMA *TTFT* p50 (ms) | TCP *ITL* p99 (ms) | RDMA *ITL* p99 (ms) | TCP output (tok/s) | RDMA output (tok/s) |
 |---|---:|---:|---:|---:|---:|---:|---:|
@@ -254,58 +247,46 @@ The target shapes, concurrencies and measured request counts matched the TCP swe
 | `4096/128` | 32 | 1,794.637 | **205.085** | 1,262.285 | **144.559** | 253.940 | **1,448.982** |
 | `4096/128` | 64 | 3,094.017 | **365.352** | 1,953.899 | **182.693** | 290.025 | **2,033.762** |
 
-At `1024/256`, concurrency 64, median *TTFT* fell **6.26×**, with **3.85× higher output throughput** than TCP.
-At `4096/128`, concurrency 64, median *TTFT* fell **8.47×**, with **7.01× higher output throughput**.
-The long-prompt *TTFT* p95 fell from **17,594.349 to 1,477.799 ms**.
-Its *ITL* p99 fell from **1,953.899 to 182.693 ms**, reducing the severe TCP generation stalls.
-
 ### Wide TP comparison
 
-At concurrency 64, RDMA *External DP* exceeded the recorded wide-*TP* output throughput for both shapes.
-Wide *TP* kept all eight GPUs inside one NVLink-connected `Pod` and was not rerun for this follow-up.
-Both configurations allocated eight GPUs; the measurements are separate runs.
+At concurrency 64 (separate runs, eight GPUs each), RDMA *External DP* beat the recorded wide-*TP*
+output throughput on both shapes (**1.69×** at `1024/256` and **1.36×** at `4096/128`) and cut
+*TTFT* p50 **16.13×** and **10.44×**. Wide *TP* still kept lower *ITL* p99 in both cells.
 
 | Shape, concurrency 64 | Wide *TTFT* p50 (ms) | RDMA *TTFT* p50 (ms) | Wide *ITL* p99 (ms) | RDMA *ITL* p99 (ms) | Wide output (tok/s) | RDMA output (tok/s) |
 |---|---:|---:|---:|---:|---:|---:|
 | `1024/256` | 4,798.411 | **297.546** | **53.361** | 74.152 | 2,314.155 | **3,921.562** |
 | `4096/128` | 3,814.139 | **365.352** | **55.619** | 182.693 | 1,491.536 | **2,033.762** |
 
-RDMA *External DP* had **16.13× lower median TTFT** and **1.69× higher output throughput** at `1024/256`, concurrency 64.
-At `4096/128`, the corresponding gains were **10.44× lower median TTFT** and **1.36× higher output throughput**.
-This reverses the TCP throughput disadvantage at the highest tested concurrency.
-
 ### Routing verification
 
-The captured role status confirmed **four serving endpoints** for one replica group.
-Engine completion counts were **285 + 284 + 284 + 284 = 1,137** across the four ranks.
-These include 1,088 measured requests, 48 warm-ups and one calibration request.
-The counts establish traffic on every rank; the generic Router access-line capture is a separate counter.
+Role status confirmed **four serving endpoints** for one replica group. Engine completion counts
+matched **285 + 284 + 284 + 284 = 1,137** (1,088 measured, 48 warm-ups, one calibration), proving
+traffic reached every rank.
 
 ### Remaining trade-offs
 
-Wide *TP* still had higher output throughput in **ten of twelve** matched cells, covering concurrencies 1–32.
-It retained lower *TPOT* p50 and *ITL* p99 in all twelve cells.
-At `4096/128`, concurrency 64, RDMA *External DP* still had **182.693 ms ITL p99**, versus **55.619 ms** for wide *TP*.
+- **Choose RDMA *External DP*** when high-concurrency ingress (concurrency 64) and first-token
+  latency outweigh smoother token generation.
+- **Choose wide *TP*** on single-node NVLink for concurrencies 1–32 throughput and the lowest *TPOT*
+  p50 and *ITL* p99 across every concurrency (including 55.619 versus 182.693 ms at `4096/128`,
+  concurrency 64).
 
-RDMA also regressed one TCP tail metric: at `1024/256`, concurrency 8, *ITL* p99 rose from **26.162 to 64.911 ms**.
-The faster first-token median and higher aggregate throughput do not establish uniformly smoother token generation.
-No repeated trials isolate the cause of that tail difference.
-
-Choose RDMA *External DP* when high-concurrency ingress and first-token latency justify a distributed expert collective.
-Wide *TP* remains the measured choice for lower-concurrency throughput and token-generation latency on this single-node setup.
-Cross-node behavior, other models and other collective backends remain unmeasured.
+No repeated trials isolate the `1024/256`, concurrency-8 RDMA *ITL* p99 regression (64.911 versus
+26.162 ms TCP). Cross-node behavior, other models and other backends remain unmeasured.
 
 ## Limitations
 
-- One run per configuration, with 32–256 requests per cell. There are no repeated-run confidence intervals.
-- Both configurations used eight GPUs, but batching limits were per engine. Four rank API servers differ from one wide API server.
-- Parallelism, transport and routing changed together. No isolated collective or Router-overhead measurement was captured.
-- The initial cross-`Pod` *EP* capture used TCP over `eth0`; the follow-up verified InfiniBand collective transport.
-  Cross-`Pod` NVLink was not measured, and the separate runs do not isolate transport from run-to-run variation.
-- All ranks shared one GPU node. Cross-node placement, other *DP* widths and online resizing were not measured.
-- Only one *MoE* model and two prompt/output targets were measured. Dense-model behavior cannot be inferred from these results.
-- Prompt markers and early stopping produced small prompt-length differences and different generated-token totals.
-- Direct nonstreaming probes to each rank and a final released-device snapshot were not part of the TCP capture.
+- One run per configuration (32–256 requests per cell) provides no repeated-run confidence intervals.
+- Batching limits were per engine: four rank API servers differ from one wide API server.
+- Parallelism, transport and routing changed together; no single overhead term was isolated.
+- Neither capture measures cross-`Pod` NVLink, and separate runs do not isolate transport from
+  run-to-run variation.
+- All ranks shared one GPU node; cross-node placement, other *DP* widths and online resizing were
+  not measured.
+- Only one *MoE* model and two prompt shapes ran; dense-model behavior cannot be inferred.
+- Unique prompt markers and early stopping varied prompt and generated-token totals slightly.
+- Direct nonstreaming rank probes and a released-device snapshot were omitted from the TCP capture.
 
 ---
 

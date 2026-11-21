@@ -1,8 +1,7 @@
 # Elastic EP
 
-An *elastic expert parallelism (Elastic EP)* deployment keeps one vLLM serving instance and changes its GPU collective
-while it runs. The operator adds GPU members inside one Ray cluster.
-The engine reconfigures while Kubernetes, Kueue, Ray and accelerator accounting converge.
+An *elastic expert parallelism (Elastic EP)* deployment keeps one vLLM serving instance and expands
+its GPU collective in place inside one Ray cluster without restarting surviving `Pod`s.
 
 ![Elastic EP collective expansion](../../assets/diagrams/model-deployment-elastic-ep.svg)
 
@@ -24,7 +23,7 @@ flowchart TD
 - [Prerequisites](#prerequisites)
 - [Shared memory](#shared-memory)
 - [Configuration](#configuration)
-- [Changing the width](#changing-the-width)
+- [Width changes](#width-changes)
 - [Resize observations](#resize-observations)
 - [Resize hold conditions](#resize-hold-conditions)
 - [Interruption scope](#interruption-scope)
@@ -33,88 +32,65 @@ flowchart TD
 
 ## Profile contract
 
-*`roles[].runtimeControl.parameters["elastic.dataParallelWidth"]`* selects this mode for a role. Its string value sets the target width (`"2"` to `"64"`):
+Set *`roles[].runtimeControl.parameters["elastic.dataParallelWidth"]`* to a string integer from
+`"2"` to `"64"` to select *Elastic EP*:
 
 ```yaml
 apiVersion: worker.gpustack.ai/v1
 kind: ModelDeployment
 metadata:
   name: deepseek-ep
+  namespace: gpustack
 spec:
   model:
     name: deepseek-ai/DeepSeek-R1
   engine:
-    name: vLLM
+    name: vLLM  # required; SGLang is not supported
     image: gpustack/runner:cuda13.0-vllm0.30.0
   roles:
     - name: server
       acceleratorType: elastic-gpu
       runtimeControl:
         parameters:
-          elastic.dataParallelWidth: "4"  # Target GPU engines ("2" to "64"), including the reserved master.
+          elastic.dataParallelWidth: "4"  # target DP engines ("2".."64"), including master
 ```
 
-`elastic.dataParallelWidth` counts *data parallelism (DP)* engines, including the master. Each member has its own GPU `Pod`.
-Set *tensor parallelism (TP)* through the role's *`extraArgs`*, using the engine's `--tensor-parallel-size` argument.
-Omitting it uses *TP* = 1. Total GPU demand is width × *TP*.
-For *TP* = 2, width 2 needs four GPUs; width 4 needs eight GPUs.
+`elastic.dataParallelWidth` counts *data parallelism (DP)* engines (one GPU `Pod` each, including
+the HTTP master). Total GPU demand is `width × TP`, where *tensor parallelism (TP)* comes from
+`--tensor-parallel-size` in *`extraArgs`* (default `1`).
 
-Change the width to grow the collective; do not use *`replicas`* or *`size`* for this.
-This release accepts scale-up and unchanged width only. The admission webhook rejects a width decrease;
-safe scale-down is tracked in [issue #741](https://github.com/gpustack/gpustack-operator/issues/741).
+Admission freezes and enforces these profile rules once created:
 
-Once a role sets `elastic.dataParallelWidth`, the profile is fixed for that deployment and the admission webhook
-enforces the rest:
-
-- the deployment has exactly one role, and it is a Server role;
-- *`replicas`* and *`size`* are both 1, because each member is exactly one `Pod`;
-- every member asks for exactly *TP* whole unsliced GPUs;
-- each member's *TP* group stays inside one `Pod` and one Ray node;
-- pipeline and *prefill* context parallel sizes stay 1;
-- you cannot supply *`command`*, because the renderer owns the command line of the managed role.
-
-The role's *`size`*, *`acceleratorType`* and *`resources`* are frozen with the profile: the ordinary role
-fields' editability does not reach it, and width is the only configuration setting it offers.
-
-Adding or removing the profile on an existing role is refused.
-The effective *TP* value is fixed after creation.
-Equivalent *TP* argument spellings are accepted. Omitting *TP* and explicitly setting *TP* = 1 are equivalent.
-A width change adjusts *DP* and *expert parallelism (EP)* while preserving *TP*. Online *TP* changes are refused.
-
-Only the master serves HTTP. The other members join the Ray cluster and hold collective state. That
-is why the master is counted inside *`width`* and is never retired.
+- **Single managed role**: Exactly one *Server* role with `replicas: 1`, `size: 1`, and no custom
+  *`command`*.
+- **Whole-GPU members**: Each member requests *TP* whole unsliced GPUs inside one `Pod` and one Ray
+  node; pipeline and *prefill* context parallel sizes stay `1`.
+- **Frozen fields**: Profile presence, effective *TP*, *`size`*, *`acceleratorType`* and
+  *`resources`* cannot change after creation. Only `elastic.dataParallelWidth` changes (scale-up or
+  unchanged only; width decreases are refused, tracked in
+  [#741](https://github.com/gpustack/gpustack-operator/issues/741)).
+- **Master HTTP ingress**: Only member 0 serves HTTP; workers join Ray and hold *expert parallelism
+  (EP)* collective state.
 
 ## Prerequisites
 
-Use a vLLM image with a full Ray installation. Check the installed engine and Ray versions
-before starting the profile.
-
-The *TP* size must fit the selected *mixture of experts (MoE)* model, engine kernels, and GPUs available on one node.
-The operator does not limit *TP* to the size used by a particular test.
-
-For a step-by-step live expansion example (`2 → 4`) and measured latency/throughput figures under load, see the [Elastic EP Walkthrough](../../walkthroughs/model-deployment/elastic-ep.md) and the [Elastic EP Benchmark](elastic-ep-benchmark.md#live-resize). Admission of *TP* = 2, 4 or 8 does not by itself establish dynamic inference support across arbitrary models or engine builds.
-
-The operator directly manages a separate CPU Ray head `Pod` and its `Service`.
-The head has no `AcceleratorType` or `LocalQueue` dependency and does not count toward GPU width.
-Its `Pod` template declares no container or `Pod` resource requests or limits.
-Kubernetes schedules it using the namespace's normal admission rules.
-A LimitRange or another webhook can still inject resources at admission.
-
-GPU master and worker `Pod`s retain their GPU requests and device allocations.
-Their `ray start` commands let Ray discover container-visible GPUs.
-The CPU head uses `--num-gpus=0` to exclude it from GPU tasks.
-The existing readiness check requires each live GPU Ray node's capacity to equal *TP*.
-Ray's logical count does not replace the allocated-device and `Pod` identity checks.
-
-The profile increases the number of GPU members. It does not resize the underlying nodes or claim
-cloud node elasticity, and it does not patch anything upstream in the engine. It drives the engine
-through the resize interface the engine already exposes.
+- **Engine image**: Use a vLLM image with a full Ray installation matching your *mixture of experts
+  (MoE)* model and single-node *TP* width. See
+  [Elastic EP Walkthrough](../../walkthroughs/model-deployment/elastic-ep.md) and
+  [Elastic EP Benchmark](elastic-ep-benchmark.md#live-resize) for verified `2 → 4` runs.
+- **CPU Ray head**: The operator creates a CPU-only Ray head `Pod` (`--num-gpus=0`) and `Service`
+  with no `AcceleratorType`, `LocalQueue` or container resource requests (namespace `LimitRange`
+  rules still apply).
+- **GPU workers**: Master and worker `Pod`s keep whole-GPU allocations; readiness verifies every
+  live GPU Ray node matches *TP* plus allocated-device and `Pod` identity checks.
+- **Node scope**: The profile adds GPU `Pod`s on existing cluster capacity; it does not provision
+  cloud nodes.
 
 ## Shared memory
 
-The CPU head, master and GPU workers each get a separate memory-backed `EmptyDir` at `/dev/shm`.
-Changing the role's *`shmSize`* affects new or replacement members; existing members keep their mounts.
-See [Shared memory](configuration.md#shared-memory) for configuration, precedence and memory budgeting.
+The CPU head, master and each GPU worker mount a separate `/dev/shm` `EmptyDir`. Changing
+*`roles[].shmSize`* affects new or replacement `Pod`s only; see
+[Shared memory](configuration.md#shared-memory).
 
 ## Configuration
 
@@ -141,61 +117,36 @@ spec:
       size: 1
       acceleratorType: elastic-gpu
       resources:
-        accelerator: "1"  # defaults to the TP size (1 here) on an accelerated AcceleratorType when omitted
+        accelerator: "1"  # defaults to declared TP size (1 here) when omitted
       runtimeControl:
         parameters:
           elastic.dataParallelWidth: "2"
       extraArgs:
         - --elastic-ep-max-dp-size
-        - "4"
+        - "4"  # required on vLLM 0.30.0+ to allow expansion up to width 4
       ports:
         - name: http
           port: 8000
           protocol: TCP
 ```
 
-Weights reach the members through the same artifact and cache as any other deployment. See
-[Model Delivery](../model-delivery/_index.md).
-
-To use *TP* = 2, pass `--tensor-parallel-size 2` in *`extraArgs`* and request *`resources.accelerator`* `"2"`.
-When *`resources.accelerator`* is omitted on an accelerated `AcceleratorType`, the mutating admission
-webhook defaults it to the declared *TP* size (1 when `--tensor-parallel-size` is omitted).
-Explicit accelerator quantities must equal the *TP* size. CPU and memory are supplied explicitly
-through role resources and do not scale automatically with GPU count.
+- **Weights**: Delivered through standard `ModelArtifact` and node cache paths
+  ([Model Delivery](../model-delivery/_index.md)).
+- **Explicit *TP* and resources**: For *TP* = 2, set `--tensor-parallel-size 2` and
+  `resources.accelerator: "2"` (or omit `accelerator` to default to *TP*). Explicit values must
+  equal *TP*; CPU and RAM never auto-scale.
+- **Fabric**: Optional *`resources.interface`* enables RDMA or EFA; see
+  [InfiniBand RDMA comparison](elastic-ep-benchmark.md#infiniband-rdma-comparison).
 
 ### Maximum width
 
-Starting with vLLM 0.30.0, set the largest planned width through *`extraArgs`* when creating the deployment:
+On vLLM `0.30.0`+, declare `--elastic-ep-max-dp-size` in *`extraArgs`* at creation to permit future
+expansion (immutable after creation; omitting it blocks growth past the initial width, and older
+vLLM releases reject the flag).
 
-```yaml
-apiVersion: worker.gpustack.ai/v1
-kind: ModelDeployment
-metadata:
-  name: deepseek-ep
-spec:
-  model:
-    name: deepseek-ai/DeepSeek-V3
-  engine:
-    name: vLLM
-    image: gpustack/runner:cuda13.0-vllm0.30.0  # the 0.30.0 line this feature starts at
-  roles:
-    - name: server
-      acceleratorType: gpustack--nvidia-h200-sxm-linux-amd64
-      extraArgs:
-        - --elastic-ep-max-dp-size
-        - "4"
-```
+## Width changes
 
-This example permits widths up to 4. The maximum is fixed after creation.
-Create a new deployment to change it.
-In vLLM 0.30.0 and later, omitting this argument prevents expansion beyond the initial width.
-Older vLLM releases do not accept this argument.
-
-## Changing the width
-
-Change only `elastic.dataParallelWidth`. Starting at `"2"`, this patch requests `"4"`. Wait for the resize to complete before
-submitting another change. A patch that lowers the current width is rejected by the admission
-webhook in this release; it does not reach the engine.
+Patch only `elastic.dataParallelWidth` and wait for convergence before submitting another change:
 
 ```diff
  apiVersion: worker.gpustack.ai/v1
@@ -217,150 +168,87 @@ kubectl patch modeldeployment qwen3-ep -n gpustack --type=json \
   -p '[{"op":"replace","path":"/spec/roles/0/runtimeControl/parameters/elastic.dataParallelWidth","value":"4"}]'
 ```
 
-The operator keeps the master. It keeps the master's command, its UID and its bootstrap width
-annotation, so the running instance is not replaced. In this release it grows the Ray worker
-members around that master; it does not shrink them.
-
-Scaling up is refused while the capacity it needs is missing. If Kueue has no quota for the extra
-members, or the members are admitted but hold no GPU allocation, or they have not joined Ray yet,
-the resize holds and the already-serving master keeps serving. An independent width change can wait
-without interrupting what is already running.
+The operator retains the master's command, UID and bootstrap width while adding GPU workers around
+it. If quota, GPU allocation or Ray membership is incomplete, the resize holds while the running
+master keeps serving.
 
 ## Resize observations
 
-The operator observes these values separately:
+The operator tracks five layers independently in a deployment-owned diagnostic `ConfigMap`
+(`observation.json`, each layer carrying `Known`, `Value` and `Reason`):
 
 | Observation | Meaning |
 |---|---|
-| desired | What width the spec asks for |
-| admitted | How many members Kubernetes admitted |
-| allocated | How many members hold a verified whole GPU allocation |
-| Ray | How many members joined the Ray cluster |
-| effective | What width runtime identities and successful rank requests prove |
+| `desired` | Width requested in spec |
+| `admitted` | Members admitted by Kubernetes and Kueue |
+| `allocated` | Members holding verified whole-GPU allocations |
+| `Ray` | Members joined to the Ray cluster |
+| `effective` | Width proved by runtime identities and rank forwards |
 
-They legitimately disagree during a resize. More members admitted does not mean more Ray members,
-and a wider engine does not mean more admitted `Pod`s. A layer that was not read is reported as
-unknown rather than as a number borrowed from a neighbour.
-
-The operator writes these into an internal `ConfigMap` owned by the deployment, whose data key is
-`observation.json`. Its top-level fields are lower case and each layer object carries `Known`,
-`Value` and `Reason`. This is diagnostic internal state that the operator writes for its own
-reconciliation. It is not a new public status API, and it is not a field on the deployment's
-status.
-
-Native resize makes the engine answer 503 on its endpoints for the length of the window. The master
-`Pod`'s liveness probe accepts 200 and 503 so the kubelet does not restart an engine that is
-mid-resize. Readiness still withdraws, which is how traffic is kept away from the window.
+Layers legitimately diverge mid-resize; unreadable layers report `Known: false` rather than copying
+a neighbor. During native resize, the engine returns HTTP `503`: liveness accepts `200` and `503`
+to avoid restarts, while readiness withdraws to shield traffic.
 
 ## Resize hold conditions
 
-The operator records its intent before it sends one request to the engine. After that, a `500`, a
-`408`, a timeout or a controller restart is not a reason to send another. An unanswered request and
-a request that was never sent look identical from outside, and resending against an engine that
-already applied the change is how a resize gets applied twice.
+The operator records intent before sending a resize request to the engine:
 
-A definite refusal is a different answer. When the engine answers and declines — a `408`, a `5xx`,
-its own busy `503`, or a command it rejected — the record keeps that refusal and the operator
-re-issues the command with backoff: the first retry waits 15 seconds, each later one doubles up to
-a 4-minute ceiling, and the bound is five attempts. A retry goes only to an engine that answered it
-is not mid-resize.
-
-When the bound is spent the operation is abandoned, and the deployment's `ElasticResize` condition
-turns `False` with reason `ScaleRefused`, carrying the engine's own last refusal. An answer that
-never arrived is still never resent: it consumes none of the bound, and the outcome is decided by
-observation.
-
-A resize can therefore stay unresolved. Common reasons:
-
-- capacity for a wider target is not admitted, allocated or joined to Ray;
-- a member's actor state cannot be read, so no member is proven free to remove;
-- a later spec generation arrived while the earlier operation was still unresolved;
-- the sent intent is ambiguous, so the operator waits rather than guessing.
-
-A changed generation first triggers fresh native and resource observations. An unsent record can
-clear after its old width is proved, while the desired target remains the same. A sent record clears
-only after its target and any resource return are proved. This observation pass sends no new resize
-and deletes no members. Missing proof keeps the record and capacity. Inspect the observation
-`ConfigMap` to identify the missing proof and its cause.
-
-Two stale states recover on their own. A narrower spec arriving behind an unresolved widening
-retires the stale record instead of parking behind it. A node loss that takes every captured
-member — replacement `Pod`s carrying identities the record can never match — is re-derived from the
-live world once the spec has moved on, with the native width proved over live members before any
-record moves.
-
-A partial survival still holds, because the captured member that lived may still have retirement
-work pending. A same-generation replacement keeps the hold for sent or upward records, which may
-still describe an in-flight operation. An unsent downward record with no captured members can
-recover after the live world proves the current width.
+- **Ambiguous send (timeout / controller restart)**: Never resent automatically, preventing double
+  application. Recovery waits for live observation proof.
+- **Definite refusal (`408`, `5xx`, busy `503`, rejected command)**: Retried with exponential
+  backoff (`15 s` initial, doubling up to `4 min`, max `5` attempts) only when the engine reports
+  it is not mid-resize. After five refusals, `ElasticResize` turns `False` (`ScaleRefused`) with
+  the engine's last refusal.
+- **Common holds**: Pending quota/allocation/Ray join, unreadable actor state, a newer spec
+  generation arriving over an unresolved operation, or an ambiguous send.
+- **Automatic recovery**: A narrower spec retires a stale widening hold, and full member loss
+  re-derives state once the spec advances and live native width is proved. Partial survival holds
+  until live proof clears.
 
 ## Interruption scope
 
-New scale-down requests are not available in this release. The API rejects a width decrease before
-reconciliation. An in-flight narrowing operation carried over from an earlier accepted request may
-still complete through the controller. The safe withdrawal, actor-free retirement and
-accelerator-return flow remains tracked in [issue #741](https://github.com/gpustack/gpustack-operator/issues/741).
-
-The scope of the interruption is the deployment you patched. It does not extend to a separate
-deployment. A second deployment keeps serving its own traffic while the first is resizing, but only
-requests actually observed on the second deployment's own endpoint are evidence of that. The
-number of deployments present says nothing about routing.
+Scale-down is rejected at admission in this release ([#741](https://github.com/gpustack/gpustack-operator/issues/741));
+only a pre-existing in-flight narrowing can complete. A resize affects only the patched
+`ModelDeployment`; sibling deployments keep serving their own endpoints.
 
 ## Troubleshooting
 
-1. Read the deployment's `ElasticResize` condition: `False` with `ScaleRefused` means the engine's
-   refusals spent the retry bound and the message carries the last refusal; `Unknown` with
-   `WorldUnprovable` means the operation record is gone and the live world cannot be proved, so the
-   corrective scale waits for observation to prove it. Read the remaining deployment conditions (see
-   [Readiness and status](configuration.md#readiness-and-status)) for quota, startup and rollout holds.
-2. Read the deployment-owned observation `ConfigMap`. Its *`reason`* names an elastic hold.
-   A layer with `Known` false carries its own `Reason`. Check the observed generation against the deployment.
-3. Compare the layers. A width that never became effective, with Ray holding the target width,
-   points at the engine. An admitted count that never moved points at quota or scheduling. A Ray
-   count that never moved points at members that have not joined.
-4. On a hold after an ambiguous send, do not resend. Confirm the engine's own reported width first.
+| Signal | Owner | Action |
+|---|---|---|
+| `ElasticResize=False` (`ScaleRefused`) | `ModelDeployment` / engine | Read the condition message for the engine's last refusal, inspect master `Pod` logs and fix the engine/flag constraint. |
+| `ElasticResize=Unknown` (`WorldUnprovable`) | `ModelDeployment` / observation | Inspect the deployment-owned `observation.json` `ConfigMap` and verify master/Ray reachability so live width can be proved. |
+| `admitted` lags `desired` | Kueue / `ClusterQueue` | Inspect `QuotaReserved` ([Readiness and status](configuration.md#readiness-and-status)) and pool queue capacity. |
+| `Ray` lags `allocated` | Ray worker `Pod`s | Check joining worker `Pod` logs (`kubectl logs`) for Ray head connection errors. |
+| `effective` lags `Ray` | vLLM master `Pod` | Do not resend after an ambiguous timeout; inspect master logs and `/gpustack/v1/ready` to confirm reported width. |
 
 ### Ray logs
 
-The Ray head and every GPU member send Ray system logs to container stdout and stderr by default.
-Read them with `kubectl logs` on each `Pod`. The default level is `info`.
-Set these variables in the elastic role's *`env`*; the operator also passes them to the CPU head:
+The Ray head and GPU workers stream Ray logs to stdout/stderr at `info` level (`kubectl logs`). Set
+these variables in *`roles[].env`* before creation (edits apply only to new `Pod`s, not existing
+elastic `Pod`s):
 
 | Variable | Default | Scope |
 |---|---|---|
-| `RAY_LOG_TO_STDERR` | `1` | Ray system logs. Set `0` to keep Ray's log files instead. |
-| `RAY_LOGGER_LEVEL` | `info` | Ray Python components, including the dashboard and runtime environment agents. |
-| `RAY_BACKEND_LOG_LEVEL` | `info` | Ray C++ components, including GCS, raylet and the core worker. |
-| `RAY_DEDUP_LOGS` | Ray's default | Set `0` to disable deduplication of logs forwarded to a driver. |
+| `RAY_LOG_TO_STDERR` | `1` | Ray system logs (`0` writes Ray log files instead) |
+| `RAY_LOGGER_LEVEL` | `info` | Python components (`debug`, `info`, `warning`, `error`, `critical`) |
+| `RAY_BACKEND_LOG_LEVEL` | `info` | C++ components (`trace`, `debug`, `info`, `warning`, `error`, `fatal`) |
+| `RAY_DEDUP_LOGS` | Ray default | Set `0` to disable driver log deduplication |
 
-For more detail, set both level variables to `debug`. Ray's Python components accept
-`debug`, `info`, `warning`, `error` and `critical`. The C++ components accept
-`trace`, `debug`, `info`, `warning`, `error` and `fatal`.
-
-Use `VLLM_LOGGING_LEVEL` separately for vLLM logs; it stays on the GPU members.
-
-Set the variables before creating the deployment. Changes apply when new `Pod`s are created.
-The operator retains existing elastic `Pod`s, so an env edit does not change their running loggers.
+Set `VLLM_LOGGING_LEVEL` separately for vLLM logs on GPU members.
 
 ## Limitations
 
-- This managed Elastic profile supports vLLM with a full Ray installation.
-  SGLang supports ordinary replica scaling; its native elastic protocol is not integrated.
-- Width is bounded to 2 through 64.
-- The profile cannot be added to or removed from an existing role.
-- There is one serving instance per deployment. *`replicas`* and *`size`* are not a width mechanism.
-- Only the master serves HTTP.
-- An RDMA or EFA fabric (*`resources.interface`*) is optional on the `Server` role; see the [Elastic EP Benchmark](elastic-ep-benchmark.md#infiniband-rdma-comparison) for a measured InfiniBand comparison.
-- The ordinary role fields' editability does not apply: the configuration fields are frozen with the
-  profile, as described above.
-- Scale-down is not supported. A width decrease is rejected by admission; see [issue #741](https://github.com/gpustack/gpustack-operator/issues/741).
+- Supports managed vLLM with a full Ray installation only; SGLang uses ordinary replica scaling.
+- Width range is `2`–`64`; scale-down is unsupported ([#741](https://github.com/gpustack/gpustack-operator/issues/741)).
+- Profile presence, *TP*, *`size`*, *`acceleratorType`* and *`resources`* are frozen after creation.
+- One serving instance per deployment (`replicas: 1`, `size: 1`); only member 0 serves HTTP.
 
 ---
 
 **See also** — [Model Deployment Configuration](configuration.md) (role contract and status conditions) ·
 [Prefill and Decode](prefill-decode.md) (disaggregated role pairing) ·
-[Routing](routing.md) (replica selection and observations) ·
-[Online Runtime Control](runtime-control.md) (live parameter replay, role pause, and drain) ·
-[Elastic EP Benchmark](elastic-ep-benchmark.md) (measured width change under load).
+[Model Deployment Routing](routing.md) (replica selection and observations) ·
+[Online Runtime Control](runtime-control.md) (live parameter replay, role pause and drain) ·
+[Elastic EP Benchmark](elastic-ep-benchmark.md) (measured width change under load)
 
 **Next** → [Model Deployment Configuration](configuration.md)

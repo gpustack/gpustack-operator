@@ -437,7 +437,7 @@ Expand–contract DAG: Wave 1 builds additive tooling and rules with zero breaka
       Acceptance: Applies the pilot-approved 80% ASD-STE100 configuration standard across all 24 retained pages in these six modules, removes residual duplication, enforces unified terminology and singular/plural rules, and verifies self-sufficient operator tasks (pending Pod, refused KV injection, missing metrics, persisted `spec.unitResources`).
       Verify: `make lint docs`
 
-- [ ] **T13 · Editorial rewrite & SVG charts: Model Deployment guides and remaining 4 Benchmarks**
+- [x] **T13 · Editorial rewrite & SVG charts: Model Deployment guides and remaining 4 Benchmarks**
       Blocked by: T10
       Owns: `docs/modules/model-deployment/{_index.md,engine-versions.md,prefill-decode.md,encode-prefill-decode.md,encode-prefill-decode-benchmark.md,elastic-ep.md,elastic-ep-benchmark.md,external-dp.md,external-dp-benchmark.md,scaling.md,scaling-benchmark.md,runtime-control.md,routing.md}`, `docs/assets/diagrams/{encode-prefill-decode,elastic-ep,external-dp,scaling}-benchmark-*.svg`
       Acceptance: Applies the pilot-approved 80% ASD-STE100 standard across all remaining Model Deployment guides and adds labeled SVG sweep charts + concise per-scenario delta takeaways beside matched comparison tables on `encode-prefill-decode-benchmark.md`, `elastic-ep-benchmark.md`, `external-dp-benchmark.md`, and `scaling-benchmark.md`, preserving all counterexamples, failed runs, and sample scope.
