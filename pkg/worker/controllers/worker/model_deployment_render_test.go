@@ -5705,7 +5705,7 @@ func TestRenderModelDeploymentPod_AscendA5RemoteModelTransfer(t *testing.T) {
 	})
 
 	t.Run("pod-spec-hash stays stable on non-A5 and non-Remote renders and moves across A5 Remote modes", func(t *testing.T) {
-		assert.Equal(t, 5, modelDeploymentRenderVersion)
+		assert.Equal(t, 6, modelDeploymentRenderVersion)
 		md910 := newRenderDeployment(func(md *workercore.ModelDeployment) {
 			md.Spec.KVCache = nil
 			md.Spec.Roles[0].AcceleratorType = "atlas-910b"
