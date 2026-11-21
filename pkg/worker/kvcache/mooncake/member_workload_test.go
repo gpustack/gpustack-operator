@@ -2564,4 +2564,33 @@ func TestMemberWorkload_AscendA5HostRoCE(t *testing.T) {
 			RenderMemberDaemonSet(cannRoCE, 0, "mooncake:v0.3.14").Spec.Template.Annotations[MemberPodSpecHashAnnotation],
 			"enabling CANN Host RoCE must move the pod spec hash")
 	})
+
+	t.Run("CANN Host RoCE reserves management REST hostPort while plain CANN declares no ports", func(t *testing.T) {
+		cannUB := testMemberBackend(func(k *workercore.KVCacheBackend) {
+			k.Spec.Transport.Protocol = "CANN"
+		})
+		assert.Empty(t, memberContainer(t, cannUB, "mooncake:v0.3.14").Ports)
+
+		cannRoCE := testMemberBackend(func(k *workercore.KVCacheBackend) {
+			k.Spec.Transport.Protocol = "CANN"
+			k.Spec.Connection.Managed.Members = []workercore.KVCacheBackendMember{
+				{
+					CapacityPerMember:    resource.MustParse("8Gi"),
+					LocalBufferSize:      resource.MustParse("1Gi"),
+					FabricInterfaceCount: ptr.To[int32](1),
+				},
+				{
+					CapacityPerMember:    resource.MustParse("8Gi"),
+					LocalBufferSize:      resource.MustParse("1Gi"),
+					FabricInterfaceCount: ptr.To[int32](1),
+				},
+			}
+		})
+		ds0 := RenderMemberDaemonSet(cannRoCE, 0, "mooncake:v0.3.14")
+		ds1 := RenderMemberDaemonSet(cannRoCE, 1, "mooncake:v0.3.14")
+		assert.Equal(t, []core.ContainerPort{{Name: "http", ContainerPort: 8080, HostPort: 8080, Protocol: core.ProtocolTCP}},
+			ds0.Spec.Template.Spec.Containers[0].Ports)
+		assert.Equal(t, []core.ContainerPort{{Name: "http", ContainerPort: 8081, HostPort: 8081, Protocol: core.ProtocolTCP}},
+			ds1.Spec.Template.Spec.Containers[0].Ports)
+	})
 }

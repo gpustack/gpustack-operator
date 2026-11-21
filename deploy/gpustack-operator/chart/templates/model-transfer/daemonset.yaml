@@ -63,8 +63,11 @@
 {{- else if eq $manufacturer "nvidia" }}
 {{-   $_ = set $workerEnvHash "NVIDIA_VISIBLE_DEVICES" "all" }}
 {{-   $_ = set $workerEnvHash "NVIDIA_DRIVER_CAPABILITIES" "compute,utility" }}
-{{- else if and $ascendHostRoCE (not $hasAscendGlobalResCfg) }}
-{{-   $_ = set $workerEnvHash "ASCEND_GLOBAL_RESOURCE_CONFIG" $defaultAscendGlobalResourceConfig }}
+{{- else if $ascendHostRoCE }}
+{{-   if not $hasAscendGlobalResCfg }}
+{{-     $_ = set $workerEnvHash "ASCEND_GLOBAL_RESOURCE_CONFIG" $defaultAscendGlobalResourceConfig }}
+{{-   end }}
+{{-   $_ = set $workerEnvHash "GPUSTACK_MODEL_TRANSFER_WORKER_ADDRESS" $workerAddr }}
 {{- end }}
 {{- $_ = set $workerEnvHash "GPUSTACK_MODEL_TRANSFER_VENDOR_SCOPE" $manufacturer }}
 {{- $_ = set $workerEnvHash "GPUSTACK_MODEL_TRANSFER_SOURCE_MAX_MEMORY_BYTES" (toString $maxMemoryBytes) }}
@@ -286,8 +289,10 @@ spec:
           {{- end }}
           env:
             {{- range $key, $value := $mtEnv }}
+            {{- if not (and $ascendHostRoCE (eq $key "GPUSTACK_MODEL_TRANSFER_WORKER_ADDRESS")) }}
             - name: {{ $key }}
               value: {{ $value | quote }}
+            {{- end }}
             {{- end }}
             {{- if eq $manufacturer "amd" }}
             - name: AMD_VISIBLE_DEVICES

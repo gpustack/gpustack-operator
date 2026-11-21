@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -264,8 +265,20 @@ func listenControl(addr string) (net.Listener, error) {
 			_ = conn.Close()
 			return nil, fmt.Errorf("control socket %s already has an active listener", sockPath)
 		}
-		if err := os.Remove(sockPath); err != nil && !errors.Is(err, os.ErrNotExist) {
-			return nil, fmt.Errorf("remove stale control socket %s: %w", sockPath, err)
+		if !errors.Is(dialErr, syscall.ECONNREFUSED) && !errors.Is(dialErr, syscall.ENOENT) {
+			return nil, fmt.Errorf("probe existing control socket %s: %w", sockPath, dialErr)
+		}
+		curInfo, statErr := os.Lstat(sockPath)
+		switch {
+		case statErr == nil:
+			if !os.SameFile(fi, curInfo) {
+				return nil, fmt.Errorf("control socket %s changed during stale probe", sockPath)
+			}
+			if err := os.Remove(sockPath); err != nil && !errors.Is(err, os.ErrNotExist) {
+				return nil, fmt.Errorf("remove stale control socket %s: %w", sockPath, err)
+			}
+		case !errors.Is(statErr, os.ErrNotExist):
+			return nil, fmt.Errorf("re-stat control socket %s: %w", sockPath, statErr)
 		}
 	case !os.IsNotExist(err):
 		return nil, fmt.Errorf("stat control socket %s: %w", sockPath, err)

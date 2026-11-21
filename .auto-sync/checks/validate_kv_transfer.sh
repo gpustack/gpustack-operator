@@ -342,10 +342,16 @@ def has_standalone_off(tokens: list[str]) -> bool:
     return False
 
 
+def strip_outer_double_quotes(tok: str) -> str:
+    while len(tok) >= 2 and tok[0] == '"' and tok[-1] == '"':
+        tok = tok[1:-1]
+    return tok
+
+
 def standalone_var_refs(tokens: list[str]) -> set[str]:
     refs: set[str] = set()
     for tok in tokens:
-        m = standalone_var_re.fullmatch(strip_outer_quotes(tok))
+        m = standalone_var_re.fullmatch(strip_outer_double_quotes(tok))
         if m:
             refs.add(m.group(1) or m.group(2))
     return refs
@@ -390,11 +396,13 @@ for block in run_blocks:
             m_asgn = assign_re.match(st)
             if m_asgn:
                 var_name, rhs = m_asgn.group(1), m_asgn.group(2)
-                rhs_val = strip_outer_quotes(rhs.strip())
+                rhs_raw = rhs.strip()
+                rhs_single_quoted = len(rhs_raw) >= 2 and rhs_raw[0] == "'" and rhs_raw[-1] == "'"
+                rhs_val = strip_outer_quotes(rhs_raw)
                 rhs_tokens = rhs_val.split()
                 if has_standalone_off(rhs_tokens):
                     assigned_off_vars.add(var_name)
-                elif (standalone_var_refs(rhs_tokens) & assigned_off_vars) and not cmake_cfg_re.match(st):
+                elif (not rhs_single_quoted) and (standalone_var_refs(rhs_tokens) & assigned_off_vars) and not cmake_cfg_re.match(st):
                     assigned_off_vars.add(var_name)
                 else:
                     assigned_off_vars.discard(var_name)

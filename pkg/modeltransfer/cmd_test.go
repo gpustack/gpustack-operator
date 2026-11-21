@@ -159,6 +159,25 @@ func TestListenControlUnixAndTCP(t *testing.T) {
 		}
 	})
 
+	t.Run("unix preserves existing socket when probe fails without ECONNREFUSED", func(t *testing.T) {
+		sockPath := shortSocketPath(t, "noaccess.sock")
+		live, err := net.Listen("unix", sockPath)
+		require.NoError(t, err)
+		t.Cleanup(func() {
+			_ = os.Chmod(sockPath, 0o600)
+			_ = live.Close()
+		})
+		require.NoError(t, os.Chmod(sockPath, 0o000))
+
+		ln, err := listenControl("unix://" + sockPath)
+		require.Error(t, err)
+		assert.Nil(t, ln)
+
+		fi, statErr := os.Lstat(sockPath)
+		require.NoError(t, statErr, "non-refused socket must remain intact")
+		assert.NotZero(t, fi.Mode()&os.ModeSocket)
+	})
+
 	t.Run("tcp preserves default TCP listen behavior", func(t *testing.T) {
 		ln, err := listenControl("127.0.0.1:0")
 		require.NoError(t, err)

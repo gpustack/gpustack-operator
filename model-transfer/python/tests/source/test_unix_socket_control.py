@@ -7,6 +7,7 @@ import ctypes
 import hashlib
 import json
 import os
+import socket
 import socketserver
 import stat
 import tempfile
@@ -527,3 +528,61 @@ def test_source_main_accepts_uds_broker_and_worker_addresses(
         thread.join(timeout=3)
         if control_sock.exists():
             control_sock.unlink()
+
+
+def test_parse_private_address_aligns_loopback_and_rejects_port_zero():
+    from gpustack_model_transfer.source.control import parse_private_address
+
+    assert parse_private_address("127.0.0.1:9252") == ("127.0.0.1", 9252)
+    assert parse_private_address("http://127.0.0.1:9252") == ("127.0.0.1", 9252)
+    assert parse_private_address("localhost:9252") == ("localhost", 9252)
+    assert parse_private_address("http://localhost:9252") == ("localhost", 9252)
+    assert parse_private_address("[::1]:9252") == ("::1", 9252)
+    assert parse_private_address("http://[::1]:9252") == ("::1", 9252)
+    assert parse_private_address("unix:///run/mt/worker.sock") == (
+        "unix:///run/mt/worker.sock"
+    )
+
+    for bad in (
+        "127.0.0.1:0",
+        "http://127.0.0.1:0",
+        "localhost:0",
+        "[::1]:0",
+        "127.0.0.1:09252",
+        "127.0.0.1:9252/path",
+        "https://127.0.0.1:9252",
+        "10.0.0.1:9252",
+        "example.com:9252",
+        "unix://relative.sock",
+    ):
+        with pytest.raises(ValueError):
+            parse_private_address(bad)
+
+
+def test_source_main_rejects_port_zero_and_private_server_accepts_http_loopback(
+    short_sock_dir,
+):
+    bootstrap_file = short_sock_dir / "bootstrap"
+    bootstrap_file.write_text("loopback-token")
+
+    env = {
+        "KUBERNETES_POD_UID": "pod-loop-uid",
+        "KUBERNETES_NODE_NAME": "node-a",
+        "KUBERNETES_POD_IP": "10.0.0.5",
+        "GPUSTACK_MODEL_TRANSFER_BACKEND": "hixl",
+        "GPUSTACK_MODEL_TRANSFER_VENDOR_SCOPE": "ascend",
+        "GPUSTACK_MODEL_TRANSFER_BROKER_ADDRESS": "127.0.0.1:9250",
+        "GPUSTACK_MODEL_TRANSFER_WORKER_ADDRESS": "127.0.0.1:0",
+        "GPUSTACK_MODEL_TRANSFER_BOOTSTRAP_FILE": str(bootstrap_file),
+    }
+    assert source_main.main(environ=env) == 2
+
+    # Reserve a free port briefly, then bind PrivateServer via http://127.0.0.1:<port>.
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+        probe.bind(("127.0.0.1", 0))
+        port = probe.getsockname()[1]
+    srv = PrivateServer(None, str(bootstrap_file), f"http://127.0.0.1:{port}")
+    try:
+        assert srv.server_address == ("127.0.0.1", port)
+    finally:
+        srv.server_close()

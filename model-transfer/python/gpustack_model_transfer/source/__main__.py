@@ -26,7 +26,10 @@ from gpustack_model_transfer.source.backend import (
     real_source_allocator,
     real_source_backend,
 )
-from gpustack_model_transfer.source.control import BootstrapClient, parse_unix_address
+from gpustack_model_transfer.source.control import (
+    BootstrapClient,
+    parse_private_address,
+)
 from gpustack_model_transfer.source.supervisor import SourceSupervisor
 from gpustack_model_transfer.source.transfer_service import PrivateServer
 from gpustack_model_transfer.source.workorder import require_pod_identity
@@ -121,37 +124,26 @@ def main(argv=None, environ=None, stop_event=None) -> int:
         print(f"source holder refused to start: {exc}", file=sys.stderr)
         return 2
 
-    if address.startswith("unix://"):
-        try:
-            parse_unix_address(address)
-        except ValueError:
-            print(
-                "source holder refused to start: broker unix socket path must be absolute",
-                file=sys.stderr,
-            )
-            return 2
-    elif not address.startswith("127.0.0.1:"):
+    try:
+        parse_private_address(address)
+    except ValueError:
         print(
-            "source holder refused to start: broker must use loopback", file=sys.stderr
+            "source holder refused to start: broker must use loopback or unix://",
+            file=sys.stderr,
         )
         return 2
     worker_address = environ.GPUSTACK_MODEL_TRANSFER_WORKER_ADDRESS
     if worker_address is None:
         private_address: tuple[str, int] | str = ("127.0.0.1", 9252)
-    elif worker_address.startswith("127.0.0.1:"):
+    else:
         try:
-            port = int(worker_address.split(":", 1)[1])
-            if not 0 <= port <= 65535:
-                raise ValueError
+            private_address = parse_private_address(worker_address)
         except ValueError:
             print(
-                "source holder refused to start: invalid worker loopback port",
+                "source holder refused to start: invalid worker private address",
                 file=sys.stderr,
             )
             return 2
-        private_address = ("127.0.0.1", port)
-    else:
-        private_address = worker_address
     instance_id = uuid.uuid4().hex
     bootstrap = BootstrapClient(address, bootstrap_file)
     supervisor = SourceSupervisor(

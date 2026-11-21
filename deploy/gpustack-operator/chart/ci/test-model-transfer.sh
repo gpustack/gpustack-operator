@@ -689,6 +689,31 @@ if [[ "${override_ascend_hash}" == "${roce_ascend_hash}" ]] || [[ "${override_as
   exit 1
 fi
 
+# User modelTransfer.env.GPUSTACK_MODEL_TRANSFER_WORKER_ADDRESS must be filtered out in Host RoCE
+# mode so worker env never duplicates the managed UDS key and config-hash stays on the effective env.
+host_roce_worker_addr_shadow="$(render --values - --show-only templates/model-transfer/daemonset.yaml <<'EOF'
+modelTransfer:
+  ascend:
+    hostRoCE:
+      enabled: true
+  env:
+    GPUSTACK_MODEL_TRANSFER_WORKER_ADDRESS: '127.0.0.1:9999'
+EOF
+)"
+shadow_ascend_doc="$(awk '/^---$/{on=0} /^  name: gpustack-operator-model-transfer-ascend$/{on=1} on' <<<"${host_roce_worker_addr_shadow}")"
+shadow_ascend_worker="$(sed -n '/^        - name: worker$/,/^      volumes:/p' <<<"${shadow_ascend_doc}")"
+shadow_ascend_hash="$(extract_config_hash "${shadow_ascend_doc}")"
+if [[ "$(grep -c '^            - name: GPUSTACK_MODEL_TRANSFER_WORKER_ADDRESS$' <<<"${shadow_ascend_worker}")" -ne 1 ]] \
+  || grep -Fq '127.0.0.1:9999' <<<"${shadow_ascend_worker}" \
+  || ! grep -q '^              value: unix:///run/model-transfer/worker\.sock$' <<<"${shadow_ascend_worker}"; then
+  echo 'hostRoCE worker address filter: managed UDS worker address must appear once with user TCP override stripped' >&2
+  exit 1
+fi
+if [[ "${shadow_ascend_hash}" != "${roce_ascend_hash}" ]]; then
+  echo 'hostRoCE worker address filter: shadowed user worker address must not alter effective config-hash' >&2
+  exit 1
+fi
+
 expect_failure invalid-host-roce-type \
   'got string, want boolean' \
   --set-string modelTransfer.ascend.hostRoCE.enabled=yes

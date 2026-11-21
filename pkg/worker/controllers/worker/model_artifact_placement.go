@@ -76,6 +76,9 @@ type modelArtifactWeights struct {
 	// own remote view: that view is a report of an earlier pass and can name no
 	// replica while one still serves.
 	LiveRemoteOrdinals sets.Set[string]
+	// RemotePolicy is the error-checked cluster remote delivery policy snapshot read when
+	// resolving this pass, reused by fallback sweeps and Ascend A5 fabric eligibility.
+	RemotePolicy string
 	// sourceReadyUntil schedules a fresh observation before its lease proof expires.
 	sourceReadyUntil time.Time
 }

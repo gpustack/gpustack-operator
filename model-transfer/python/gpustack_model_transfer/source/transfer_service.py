@@ -20,7 +20,10 @@ from gpustack_model_transfer.source.backend import (
     _NATIVE_STAGES,
     SourcePrePostError,
 )
-from gpustack_model_transfer.source.control import parse_unix_address
+from gpustack_model_transfer.source.control import (
+    parse_private_address,
+    parse_unix_address,
+)
 
 
 def _extract_native_stage(exc):
@@ -753,6 +756,12 @@ def _unlink_stale_unix_socket(sock_path: str) -> None:
         else:
             raise OSError(f"unix socket already active: {sock_path}")
     try:
+        cur = os.lstat(sock_path)
+    except FileNotFoundError:
+        return
+    if (cur.st_dev, cur.st_ino) != (st.st_dev, st.st_ino):
+        raise OSError(f"unix socket changed during stale probe: {sock_path}")
+    try:
         os.unlink(sock_path)
     except FileNotFoundError:
         return
@@ -770,12 +779,18 @@ class PrivateServer(ThreadingHTTPServer):
         self._unix_socket_path = None
         self._bound_unix_inode = None
         if isinstance(address, str):
-            if not hasattr(socket, "AF_UNIX"):
-                raise OSError("AF_UNIX sockets are unavailable on this platform")
-            sock_path = parse_unix_address(address)
-            self.address_family = socket.AF_UNIX
-            self._unix_socket_path = sock_path
-            bind_address = sock_path
+            parsed = parse_private_address(address)
+            if isinstance(parsed, str):
+                if not hasattr(socket, "AF_UNIX"):
+                    raise OSError("AF_UNIX sockets are unavailable on this platform")
+                sock_path = parse_unix_address(parsed)
+                self.address_family = socket.AF_UNIX
+                self._unix_socket_path = sock_path
+                bind_address = sock_path
+            else:
+                host, port = parsed
+                self.address_family = socket.AF_INET6 if ":" in host else socket.AF_INET
+                bind_address = (host, port)
         elif (
             isinstance(address, tuple)
             and len(address) == 2
@@ -783,10 +798,13 @@ class PrivateServer(ThreadingHTTPServer):
             and not isinstance(address[1], bool)
             and isinstance(address[1], int)
         ):
+            self.address_family = (
+                socket.AF_INET6 if ":" in address[0] else socket.AF_INET
+            )
             bind_address = address
         else:
             raise ValueError(
-                "private server address must be a (host, port) tuple or unix:///path"
+                "private server address must be a (host, port) tuple, loopback host:port, or unix:///path"
             )
         super().__init__(bind_address, PrivateHandler)
 

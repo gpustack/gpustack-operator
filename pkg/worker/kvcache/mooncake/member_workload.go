@@ -566,6 +566,19 @@ func RenderMemberDaemonSet(
 	applyMemberHostPaths(ds, member)
 	if cannHostRoCE {
 		applyMemberAscendHIXLEP(ds, member)
+		// Reserve the host-network management port on the Pod spec so the scheduler rejects
+		// co-locating two CANN Host RoCE backends sharing an RDMA interface on the same node
+		// instead of letting a second Pod pass TCP readiness against the first Pod's listener.
+		port := memberRESTPort(group)
+		ds.Spec.Template.Spec.Containers[0].Ports = append(
+			ds.Spec.Template.Spec.Containers[0].Ports,
+			core.ContainerPort{
+				Name:          "http",
+				ContainerPort: port,
+				HostPort:      port,
+				Protocol:      core.ProtocolTCP,
+			},
+		)
 	}
 	// Last, because it merges onto whatever the fabric path put there and so has to see the
 	// finished context rather than race it.

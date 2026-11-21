@@ -371,7 +371,7 @@ func (r *ModelDeploymentReconciler) convergeModelDeployment(
 	if weights != nil && weights.Render != nil &&
 		weights.Render.Delivery == workercore.ModelDeploymentModelDeliveryRemote {
 		swept, err = modelDeploymentModelTransferSweep(ctx, r.Client, md, replicas,
-			modelDeploymentModelTransferPolicy(ctx), weights.Render.ModelTransferFallback)
+			weights.Render.ModelTransferPolicy, weights.Render.ModelTransferFallback)
 		if err != nil {
 			return ctrl.Result{}, errors.Join(err, r.deleteModelDeploymentGroupWorkload(ctx, md, swept))
 		}
@@ -2453,6 +2453,10 @@ func (r *ModelDeploymentReconciler) renderModelDeploymentRolePodsWithSentinel(
 		remotePolicyResolved bool
 		remotePolicy         string
 	)
+	if weights != nil && weights.RemotePolicy != "" {
+		remotePolicy = weights.RemotePolicy
+		remotePolicyResolved = true
+	}
 	for i := range md.Spec.Roles {
 		role := &md.Spec.Roles[i]
 

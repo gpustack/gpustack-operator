@@ -214,11 +214,13 @@ func runGoldenYAMLScenario(
 
 	origDeliveryMode := modelArtifactDeliveryMode
 	origPolicy := modelDeploymentModelTransferPolicy
+	origPolicyStrict := modelDeploymentModelTransferPolicyStrict
 	origReady := modelDeploymentModelTransferSourceReady
 	origQualified := modelDeploymentModelTransferQualified
 	t.Cleanup(func() {
 		modelArtifactDeliveryMode = origDeliveryMode
 		modelDeploymentModelTransferPolicy = origPolicy
+		modelDeploymentModelTransferPolicyStrict = origPolicyStrict
 		modelDeploymentModelTransferSourceReady = origReady
 		modelDeploymentModelTransferQualified = origQualified
 	})
@@ -234,6 +236,7 @@ func runGoldenYAMLScenario(
 		remotePolicy = settings.ModelArtifactRemoteDeliveryDisabled
 	}
 	modelDeploymentModelTransferPolicy = func(context.Context) string { return remotePolicy }
+	modelDeploymentModelTransferPolicyStrict = func(context.Context) (string, error) { return remotePolicy, nil }
 	modelDeploymentModelTransferSourceReady = func(
 		context.Context, ctrlcli.Reader, *workercore.ModelArtifact,
 	) (bool, time.Time, error) {

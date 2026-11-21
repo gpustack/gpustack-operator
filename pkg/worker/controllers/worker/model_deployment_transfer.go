@@ -19,6 +19,7 @@ import (
 	"gpustack.ai/gpustack/pkg/modeltransfer/authorization"
 	"gpustack.ai/gpustack/pkg/nodefeature"
 	"gpustack.ai/gpustack/pkg/worker/kvcache/inject"
+	"gpustack.ai/gpustack/pkg/worker/runtimecontrol"
 	"gpustack.ai/gpustack/pkg/worker/settings"
 )
 
@@ -138,7 +139,11 @@ func applyModelDeploymentModelTransferPolicy(
 		w.Render.Delivery != workercore.ModelDeploymentModelDeliveryEngine {
 		return nil
 	}
-	policy := modelDeploymentModelTransferPolicy(ctx)
+	policy, err := modelDeploymentModelTransferPolicyStrict(ctx)
+	if err != nil {
+		return fmt.Errorf("read remote delivery policy: %w", err)
+	}
+	w.RemotePolicy = policy
 	if policy != settings.ModelArtifactRemoteDeliveryRequire &&
 		policy != settings.ModelArtifactRemoteDeliveryPrefer {
 		return nil
@@ -348,7 +353,9 @@ const (
 func modelDeploymentModelTransferRoleQualification(
 	md *workercore.ModelDeployment, role *workercore.ModelDeploymentRole, manufacturer string,
 ) modelTransferQualification {
-	if len(role.Command) > 0 || modelDeploymentRoleHasConflictingLoadFormat(md.Spec.Engine.Name, role.ExtraArgs) {
+	if len(role.Command) > 0 ||
+		modelDeploymentRoleHasConflictingLoadFormat(md.Spec.Engine.Name, role.ExtraArgs) ||
+		modelDeploymentRoleUsesEPLB(md, role) {
 		return modelTransferRoleIneligible
 	}
 	if modelDeploymentModelTransferCandidateBackend(manufacturer, md.Spec.Engine.Name) == "" {
@@ -359,6 +366,49 @@ func modelDeploymentModelTransferRoleQualification(
 	}
 
 	return modelTransferTupleQualified
+}
+
+// modelDeploymentRoleUsesEPLB reports whether a managed vLLM role enables expert load balancing
+// (either synthesized for Elastic EP or explicitly requested in extraArgs). The vLLM
+// model-transfer adapter refuses enable_eplb before loading, so such roles are ineligible.
+func modelDeploymentRoleUsesEPLB(md *workercore.ModelDeployment, role *workercore.ModelDeploymentRole) bool {
+	if md == nil || role == nil || md.Spec.Engine.Name != workercore.ModelDeploymentEngineVLLM {
+		return false
+	}
+	if runtimecontrol.RoleHasElasticEP(role) {
+		return true
+	}
+	enabled := false
+	for _, arg := range role.ExtraArgs {
+		if arg == "--" {
+			break
+		}
+		trimmed := strings.TrimSpace(arg)
+		switch trimmed {
+		case "--enable-eplb", "--enable_eplb":
+			enabled = true
+			continue
+		case "--no-enable-eplb", "--no_enable_eplb":
+			enabled = false
+			continue
+		}
+		var val string
+		switch {
+		case strings.HasPrefix(trimmed, "--enable-eplb="):
+			val = trimmed[len("--enable-eplb="):]
+		case strings.HasPrefix(trimmed, "--enable_eplb="):
+			val = trimmed[len("--enable_eplb="):]
+		default:
+			continue
+		}
+		switch strings.ToLower(strings.TrimSpace(val)) {
+		case "false", "0", "no", "off":
+			enabled = false
+		default:
+			enabled = true
+		}
+	}
+	return enabled
 }
 
 // modelDeploymentRoleHasConflictingLoadFormat reports whether args set a

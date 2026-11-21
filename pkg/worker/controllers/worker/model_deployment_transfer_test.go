@@ -3462,8 +3462,7 @@ func TestModelDeploymentModelTransferAscendA5PreferLifecycle(t *testing.T) {
 		})
 	})
 
-	t.Run("transient remote policy read error fails closed on weight-only A5 Hub Server while independent A5 KV leg succeeds", func(t *testing.T) {
-		modelTransferSourceReadyStub(t, false)
+	t.Run("transient remote policy read error fails closed on A5 Hub Server with or without prepared source while non-Hub A5 KV leg succeeds", func(t *testing.T) {
 		setting.InvalidateCache()
 		defaultPolicy, err := readModelDeploymentModelTransferPolicyStrict(context.Background())
 		require.NoError(t, err, "missing settings secret must resolve default Prefer cleanly")
@@ -3484,23 +3483,28 @@ func TestModelDeploymentModelTransferAscendA5PreferLifecycle(t *testing.T) {
 			return false, nil, nil
 		})
 
-		weightOnlyMD := newRenderDeployment(func(m *workercore.ModelDeployment) {
-			m.Spec.Model.ArtifactRef = &core.LocalObjectReference{Name: "weights"}
-			m.Spec.KVCache = nil
-			m.Spec.Roles[0].Replicas = 1
-			m.Spec.Roles[0].Resources = &workercore.ModelDeploymentRoleResources{
-				Accelerator: ptr.To(qty1),
-				Interface:   ptr.To(qty1),
-			}
-		})
-		weightOnlyCli := newA5Client(t, weightOnlyMD)
-		_, err = reconcileModelDeployment(t, weightOnlyCli)
-		require.Error(t, err, "transient remote policy read error must fail closed instead of granting RDMA")
-		assert.Contains(t, err.Error(), "read remote delivery policy")
-		assert.Empty(t, replicaPods(t, weightOnlyCli))
+		for _, ready := range []bool{false, true} {
+			t.Run(fmt.Sprintf("sourceReady=%t", ready), func(t *testing.T) {
+				modelTransferSourceReadyStub(t, ready)
+				weightOnlyMD := newRenderDeployment(func(m *workercore.ModelDeployment) {
+					m.Spec.Model.ArtifactRef = &core.LocalObjectReference{Name: "weights"}
+					m.Spec.KVCache = nil
+					m.Spec.Roles[0].Replicas = 1
+					m.Spec.Roles[0].Resources = &workercore.ModelDeploymentRoleResources{
+						Accelerator: ptr.To(qty1),
+						Interface:   ptr.To(qty1),
+					}
+				})
+				weightOnlyCli := newA5Client(t, weightOnlyMD)
+				_, err = reconcileModelDeployment(t, weightOnlyCli)
+				require.Error(t, err, "transient remote policy read error must fail closed instead of defaulting to Prefer")
+				assert.Contains(t, err.Error(), "read remote delivery policy")
+				assert.Empty(t, replicaPods(t, weightOnlyCli))
+			})
+		}
 
 		kvCoveredMD := newRenderDeployment(func(m *workercore.ModelDeployment) {
-			m.Spec.Model.ArtifactRef = &core.LocalObjectReference{Name: "weights"}
+			m.Spec.Model.ArtifactRef = nil
 			m.Spec.Roles[0].Replicas = 1
 			m.Spec.Roles[0].Resources = &workercore.ModelDeploymentRoleResources{
 				Accelerator: ptr.To(qty1),
@@ -3513,9 +3517,42 @@ func TestModelDeploymentModelTransferAscendA5PreferLifecycle(t *testing.T) {
 		require.NoError(t, kvCoveredCli.Create(context.Background(), newRenderPool()))
 		require.NoError(t, kvCoveredCli.Create(context.Background(), cannBackend))
 		_, err = reconcileModelDeployment(t, kvCoveredCli)
-		require.NoError(t, err, "independent A5 KV leg must succeed without reading remote policy")
+		require.NoError(t, err, "independent non-Hub A5 KV leg must succeed without reading remote policy")
 		pods := replicaPods(t, kvCoveredCli)
 		require.Len(t, pods, 1)
 		assert.Equal(t, qty1, pods[0].Spec.Containers[0].Resources.Limits[rdmaShared])
+	})
+
+	t.Run("vLLM Elastic EP and explicit enable-eplb roles are ineligible for model-transfer", func(t *testing.T) {
+		elasticMD := newRenderDeployment(func(m *workercore.ModelDeployment) {
+			m.Spec.Engine.Name = workercore.ModelDeploymentEngineVLLM
+			m.Spec.Roles[0].RuntimeControl = &workercore.ModelDeploymentRoleRuntimeControl{
+				Parameters: map[string]string{
+					"elastic.dataParallelWidth": "2",
+				},
+			}
+		})
+		assert.Equal(t, modelTransferRoleIneligible,
+			modelDeploymentModelTransferRoleQualification(elasticMD, &elasticMD.Spec.Roles[0], nodefeature.ManufacturerAscend))
+		assert.Equal(t, modelTransferRoleIneligible,
+			modelDeploymentModelTransferRoleQualification(elasticMD, &elasticMD.Spec.Roles[0], nodefeature.ManufacturerNVIDIA))
+
+		explicitEPLBMD := newRenderDeployment(func(m *workercore.ModelDeployment) {
+			m.Spec.Engine.Name = workercore.ModelDeploymentEngineVLLM
+			m.Spec.Roles[0].ExtraArgs = []string{"--enable-eplb"}
+		})
+		assert.Equal(t, modelTransferRoleIneligible,
+			modelDeploymentModelTransferRoleQualification(explicitEPLBMD, &explicitEPLBMD.Spec.Roles[0], nodefeature.ManufacturerAscend))
+		assert.Empty(t, modelDeploymentAscendRemoteDirectProtocol(
+			explicitEPLBMD, &explicitEPLBMD.Spec.Roles[0],
+			nodefeature.ManufacturerAscend, nodefeature.AcceleratorFamilyAscend950, true,
+		))
+
+		disabledEPLBMD := newRenderDeployment(func(m *workercore.ModelDeployment) {
+			m.Spec.Engine.Name = workercore.ModelDeploymentEngineVLLM
+			m.Spec.Roles[0].ExtraArgs = []string{"--enable-eplb", "--no-enable-eplb"}
+		})
+		assert.Equal(t, modelTransferTupleQualified,
+			modelDeploymentModelTransferRoleQualification(disabledEPLBMD, &disabledEPLBMD.Spec.Roles[0], nodefeature.ManufacturerAscend))
 	})
 }

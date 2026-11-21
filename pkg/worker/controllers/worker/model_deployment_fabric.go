@@ -172,6 +172,7 @@ func modelDeploymentAscendRemoteDirectProtocol(
 		manufacturer != nodefeature.ManufacturerAscend ||
 		family != nodefeature.AcceleratorFamilyAscend950 ||
 		modelDeploymentRoleHasConflictingLoadFormat(md.Spec.Engine.Name, role.ExtraArgs) ||
+		modelDeploymentRoleUsesEPLB(md, role) ||
 		modelDeploymentModelTransferCandidateBackend(manufacturer, md.Spec.Engine.Name) != "hixl" {
 		return ""
 	}
