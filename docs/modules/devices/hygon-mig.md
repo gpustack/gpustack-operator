@@ -273,7 +273,6 @@ acted on.
 
 **See also** — [Accelerator Requests](requests.md) (the request vocabulary and the
 two-family split) · [NVIDIA MIG Operations](nvidia-mig.md) (the runbook this one mirrors) · [T-Head
-MIG Operations](thead-mig.md) (the other vendor sharing the `mig` word) · [Device
-Discovery](discovery.md) (how a card's capability reaches the cluster).
+MIG Operations](thead-mig.md) (the other vendor sharing the `mig` word).
 
 **Next** → [T-Head MIG Operations](thead-mig.md) — hardware partitioning on T-Head PPU nodes.

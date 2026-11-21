@@ -34,8 +34,7 @@ flowchart TD
 ### Accelerator requests
 
 Choose a resource family in [Accelerator Requests](requests.md#resource-keys). The guide includes
-request examples and validation rules. [Device Discovery](discovery.md) explains the inventory and
-allocation boundary.
+request examples, isolation mode selection, and validation rules.
 
 ## Operations
 
@@ -46,11 +45,13 @@ allocation boundary.
 3. **Step 3: Verify allocation.** Check the `Workload`, `Pod` and device inventory in the walkthrough.
 
 For physical partitions, use the [NVIDIA](nvidia-mig.md), [T-Head](thead-mig.md), or
-[Hygon](hygon-mig.md) runbook. The [scheduling chain](scheduling.md) describes queue status.
+[Hygon](hygon-mig.md) runbook. Check queue quota and pool status in
+[Accelerator Requests](requests.md#pools-and-diagnosis).
 
 ## Troubleshooting
 
-For a rejected request, check the [admission gates](admission.md#gates) and request rules.
+For a rejected or Pending request, check [Diagnosing Pending workloads](requests.md#diagnosing-pending-workloads)
+and [request rules](requests.md#request-rules).
 For node checks and their results, see [Preflight Checks](preflight.md#reading-the-result).
 For partition recovery, use the runbook for the manufacturer.
 

@@ -23,8 +23,7 @@ shared, exclusive and *single-root I/O virtualization (SR-IOV)* partitioned reso
 A workload can request network fabric beside its accelerators.
 
 When at least one endpoint is active, the node carries `feature.gpustack.ai/rdma.capable=true` (see
-[Network Topology](../../modules/rdma/network-topology.md) and
-[RDMA resource keys](../../modules/rdma/network-topology.md#rdma-resource-keys)).
+[RDMA Operations](../../modules/rdma/operations.md#choosing-a-key)).
 
 The steps verify interface discovery, container injection, *NUMA* alignment, and deployment
 integration.
@@ -246,14 +245,14 @@ Enable the `aws-efa-enabled` Setting for `ModelDeployment` and specify custom ru
 | `Workload` admitted by Kueue but `Pod` remains `Pending` | Over-admission: Kueue does not meter network resources | Inspect cluster allocatable *RDMA* keys (`device.gpustack.ai/rdma*`); add nodes or wait for active `Pod`s to finish |
 | `Pod` rejected at placement | Reason: `TopologyAffinityError` — free GPUs and NICs reside on mismatched *NUMA* nodes | Ensure kubelet has `topologyManagerPolicy: restricted`; verify GPU and NIC requests are declared in the same container |
 | Fewer `uverbs` devices inside container than requested shared units | Request exceeds eligible HCA count, or policy excludes granted endpoints | `GetPreferredAllocation` spreads `rdma.shared` tokens across distinct eligible HCAs first, then repeats HCAs. Check eligible capacity and [policy status](../../modules/rdma/operations.md#selection-policy). Use `device.gpustack.ai/rdma` for whole-endpoint ownership within the exclusive family |
-| `Node` unexpectedly loses `feature.gpustack.ai/rdma.capable` | Status: every endpoint on the node reports `Failed` or lacks a bound *RDMA* device | Check kernel dmesg and interface carrier status; operator removes the label when every endpoint reports `Failed` or lacks a bound *RDMA* device. See [Network Topology](../../modules/rdma/network-topology.md#three-node-labels) |
+| `Node` unexpectedly loses `feature.gpustack.ai/rdma.capable` | Status: every endpoint on the node reports `Failed` or lacks a bound *RDMA* device | Check kernel dmesg and interface carrier status; operator removes the label when every endpoint reports `Failed` or lacks a bound *RDMA* device. See [Inspecting the NIC record](../../modules/rdma/operations.md#inspecting-the-nic-record) |
 | AWS EFA workload remains `Pending` indefinitely | `Workload` requested `device.gpustack.ai/rdma` instead of EFA | EFA nodes expose 0 allocatable for standard *RDMA* keys; configure `transport.protocol: EFA` or `TCP` |
 | `ModelDeployment` rejected with `no effective RDMA or EFA transfer leg uses the requested interfaces` | Interface requested with no *RDMA* or EFA path | Request interfaces on both roles of a managed *prefill* and *decode* pair, or use a `KVCacheBackend` on that transport. A role with its own *`command`* has no managed direct path |
 
 ---
 
-**See also** — [Network Topology](../../modules/rdma/network-topology.md) (discovery and link states) ·
-[RDMA Operations](../../modules/rdma/operations.md) (resource keys, limits, and EFA configuration) ·
+**See also** — [RDMA Operations](../../modules/rdma/operations.md) (resource keys, limits, and EFA configuration) ·
+[Accelerator Requests](../../modules/devices/requests.md#rdma-keys-beside-families) (the request contract beside accelerators) ·
 [Heterogeneous Devices Walkthrough](../devices/scheduling.md)
 
 **Next** → [Hierarchical Placement Walkthrough](../topology/hierarchical-placement.md)

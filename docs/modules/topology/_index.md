@@ -36,7 +36,8 @@ flowchart TD
 Choose an inventory path in [Topology Operations](operations.md#choose-the-inventory-path), then
 configure [Node labels](operations.md#observe-existing-node-labels), a
 [ConfigMap snapshot](operations.md#publish-a-configmap-snapshot), or a
-[webhook](operations.md#publish-by-webhook). [Topology-Aware Scheduling](scheduling.md) defines the placement contract.
+[webhook](operations.md#publish-by-webhook). [Topology Operations](operations.md) covers verification
+and troubleshooting.
 
 ## Operations
 

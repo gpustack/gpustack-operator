@@ -2,7 +2,12 @@
 
 Run preflight on a bare host to check which accelerators the node can serve and what an allocation
 would require. It needs no cluster, CRDs, NFD labels or running Device Manager.
-[Discovery](discovery.md#preflight-checks) explains the states, depths and reuse of allocator checks.
+Preflight drives each manufacturer's allocator responder with a synthetic request, so its answers
+match production allocation.
+
+Unlike the read-only `detect` and `monitor` one-shot commands, `preflight` stages preload libraries,
+asks off-state drivers to toggle sharing modes unless `--dry-run` is set, and starts non-privileged
+probe containers.
 
 ## Contents
 
@@ -580,14 +585,14 @@ topology:  # what this node's kubelet does with a NUMA hint
 
 Each `accelerators` group carries the time it was read, the detection answer, and a row per
 accelerator per capability — each row carrying
-[the state and the depth](discovery.md#preflight-checks)
+[the state and the depth](#states-and-depths)
 it reached, the driver's or the container's own words, and the container command where one was
 involved.
 
 The `network` section carries one row per RDMA-capable interface — and per RDMA-capable virtual
 function, named `<interface>/<vf bus id>`, since on an SR-IOV node those are every RDMA device there
 is. Each row gives the name, the RDMA device and the
-[link verdict](../rdma/network-topology.md#rdma-link-check).
+[link verdict](../rdma/operations.md#inspecting-the-nic-record).
 
 The rows come from the same pass that produces the node's published record, so the two judge a link
 the same way. Preflight reads the links when invoked, so its network results can reflect changes
@@ -603,8 +608,29 @@ read off the same command line and out of the same configuration the CRI endpoin
 It matters because the policy decides what the kubelet does with the NUMA hint a device plugin
 publishes: `single-numa-node` and `restricted` gate admission on it, `best-effort` admits a
 misaligned placement anyway, and `none` discards it. So a request pairing an accelerator with an
-[RDMA interface](../rdma/network-topology.md#rdma-resource-keys)
+[RDMA interface](requests.md#rdma-keys-beside-families)
 lands them on one NUMA node only where the policy enforces it.
+
+### States and depths
+
+Every capability row reports one mutually exclusive state and one evidence depth:
+
+| State | Meaning | Exit code |
+|---|---|---|
+| `ok` | the capability works, at the depth stated | `0` |
+| `not-declared` | the accelerator does not offer it, so there is nothing to check | `0` |
+| `unavailable` | it is offered and this pass did not establish it | non-zero |
+
+| Depth | Method | Establishes |
+|---|---|---|
+| `declared` | read from the driver | what the host claims |
+| `simulated` | the allocator produced the injection, and nothing ran | what the allocation would emit |
+| `measured` | a container ran with that injection and its output was read | the behavior itself |
+
+`unavailable` does not prove a broken driver: a probe container that failed to start lands beside a
+driver refusal, so read the row's *`reason`* to tell them apart. `sidecar-visibility` stops at
+`simulated` (probe containers exit before a second container runs), and partition management stops at
+`declared`.
 
 A node nobody configured runs `none` — [how to set a policy, and how to confirm the kubelet took
 it](../rdma/operations.md#enabling-numa-alignment).
@@ -751,11 +777,9 @@ accelerator rather than in one allocation mode.
 
 ---
 
-**See also** — [Device
-Discovery](discovery.md#preflight-checks)
-(what preflight reads and what the states and depths mean) · [Vendor
-Prerequisites](../../getting-started/vendor-prerequisites.md) (the driver and toolkit paths per manufacturer) ·
-[Accelerator Requests](requests.md) (the modes these answers guard)
+**See also** — [Vendor Prerequisites](../../getting-started/vendor-prerequisites.md) (the driver and
+toolkit paths per manufacturer) · [Accelerator Requests](requests.md) (the modes these answers
+guard) · [RDMA Operations](../rdma/operations.md) (aligning RDMA adapters with accelerators)
 
 **Next** → [NVIDIA MIG Operations](nvidia-mig.md) — the runbook for the one mode preflight reads and
 never creates.

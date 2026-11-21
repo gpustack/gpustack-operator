@@ -3,7 +3,7 @@
 The `Pod` webhooks check these requests at creation and reject invalid ones before a container starts.
 They select `Pod`s with the `kueue.x-k8s.io/queue-name` label. Without that label, a `Pod` can still
 request device-plugin resources, but these checks and resource-unit calculations do not run.
-Pool selection and shared queues are covered in [Scheduling Chain](scheduling.md#naming-and-grouping).
+Pool defaults, queue quota, and Pending diagnosis are covered in [Pools and diagnosis](#pools-and-diagnosis).
 
 ## Contents
 
@@ -16,6 +16,7 @@ Pool selection and shared queues are covered in [Scheduling Chain](scheduling.md
 - [Instance API requests](#instance-api-requests)
 - [Pre-release breaks](#pre-release-breaks)
 - [Limitations](#limitations)
+- [Pools and diagnosis](#pools-and-diagnosis)
 
 ## Two families, two populations
 
@@ -23,7 +24,7 @@ An accelerator is shared in one of two physically incompatible ways, and GPUStac
 
 | Term | Definition | Isolation | Example |
 |---|---|---|---|
-| **Logical slicing** (`.sliced*`) | software slicing of a whole accelerator | the manufacturer's own sharing facility caps compute and VRAM per container — [which facility, per manufacturer](discovery.md#sliced-logical-slicing) | 50% of an A10G |
+| **Logical slicing** (`.sliced*`) | software slicing of a whole accelerator | the manufacturer's own sharing facility caps compute and VRAM per container — [which facility, per manufacturer](#isolation-mode-selection) | 50% of an A10G |
 | **Physical partitioning** (`.partitioned*`) | hardware partitioning of an accelerator put into a partitioning mode | the hardware itself; the operator materializes the instance | an NVIDIA MIG `3g.40gb`, or a partition of a T-Head PPU or a Hygon DCU |
 
 The two never apply to the same accelerator: one in a partitioning mode advertises **only** the partition
@@ -496,24 +497,19 @@ group to move it out of.
 
 An RDMA interface is requested through three node-level keys that sit beside the accelerator
 families, not inside them: a network interface belongs to the node rather than to a manufacturer,
-so no `<base>` applies. The mechanism (which interface serves which key, and what a grant hands
-the container) is described in
-[Network Topology](../rdma/network-topology.md#rdma-resource-keys); the request rules are here.
-
-[RDMA Operations](../rdma/operations.md) covers how many to ask for and how to configure a node so
-the request lands well.
+so no `<base>` applies. [RDMA Operations](../rdma/operations.md#choosing-a-key) covers how many
+endpoints to ask for, selection policies, and node NUMA configuration.
 
 All three are served by the device plugin, and a request names what it wants one of:
 
-| Key | Quantity meaning |
-|---|---|
-| `device.gpustack.ai/rdma` | whole interfaces |
-| `device.gpustack.ai/rdma.shared` | concurrent uses of an interface |
-| `device.gpustack.ai/rdma.partitioned` | virtual functions |
+| Key | Mode | Quantity meaning | Tokens per endpoint |
+|---|---|---|---|
+| `device.gpustack.ai/rdma` | exclusive | whole interfaces | `1` |
+| `device.gpustack.ai/rdma.shared` | shared | concurrent uses of an interface | `64` |
+| `device.gpustack.ai/rdma.partitioned` | partitioned | virtual functions | `1` per virtual function |
 
-What a quantity of each key means, how many tokens an endpoint carries, and which allocation mode
-each key belongs to, are stated once with the mechanism:
-[the RDMA resource keys](../rdma/network-topology.md#rdma-resource-keys).
+An *SR-IOV* physical function with virtual functions configured serves only `.rdma.partitioned`;
+every other interface serves `.rdma` and `.rdma.shared`.
 There are no `.units` keys on this side: nothing is webhook-derived, and the value you set is the
 value that schedules.
 
@@ -526,14 +522,13 @@ The same blindness reaches Kueue, which therefore meters these keys not at all. 
 fleet and what to do instead of a quota.
 
 Neither a node without an RDMA-capable interface nor an endpoint whose link the node judged
-`failed` carries allocatable tokens (what each one advertises is on
-[the mechanism page](../rdma/network-topology.md#rdma-resource-keys)),
+`Failed` carries allocatable healthy tokens (see [Inspecting the NIC record](../rdma/operations.md#inspecting-the-nic-record)),
 so a request for these keys never schedules onto them.
 
 A grant injects the endpoint's own verbs character device, the node-level connection-manager device
 where the host has one, and `NCCL_IB_HCA` naming the granted devices. That set is evidenced for
-RoCE and for nothing else — see
-[what an allocation hands over](../rdma/network-topology.md#allocation-response).
+RoCE and unverified for classic InfiniBand transport libraries — see
+[Injected devices](../rdma/operations.md#injected-devices).
 
 **Shared accelerator and RDMA interface in one container**, the shape a co-located workload uses:
 
@@ -570,9 +565,8 @@ says so.
   in [the preflight runbook](./preflight.md#reading-the-result), which is also where you
   read the policy a given node runs. No release sets one for you — [how to set it, and how to
   confirm it took](../rdma/operations.md#enabling-numa-alignment).
-- **The alignment's unit is the NUMA node.** See
-  [the RDMA resource keys](../rdma/network-topology.md#rdma-resource-keys)
-  for why a shared PCIe switch is finer than a hint can express.
+- **The alignment's unit is the NUMA node.** A device-plugin hint reports only the endpoint's NUMA
+  node; a shared PCIe switch is finer than TopologyManager can express.
 
 What is not guaranteed is the node itself: the scheduler selects by quantities and cannot see
 inside a node's topology, so a node whose totals suffice but whose devices sit on two NUMA nodes is
@@ -741,10 +735,10 @@ old reading under `SH` — `10/10` on one free accelerator now reads `1/10`.
   The `Pod` ends `Failed` with `UnexpectedAdmissionError` and must be recreated.
 
   A pool's queue holds such a request first
-  ([Admission](./admission.md#gate-3-per-accelerator-admissioncheck)), so a `Pod`
+  ([Diagnosing Pending workloads](#diagnosing-pending-workloads)), so a `Pod`
   reaches this only by skipping the queue or racing another allocation.
 - **The shared card-count pin has two gaps.** Where it misses, a request placed on too few
-  accelerators retries for good ([Admission](./admission.md#gate-3-per-accelerator-admissioncheck)).
+  accelerators retries for good ([Diagnosing Pending workloads](#diagnosing-pending-workloads)).
   - *`Workload`s built from a template.* Kueue builds a batch `Job`'s, a JobSet's or a RayJob's `Workload`
     from its `Pod` template before any `Pod` exists, and the webhook only sees `Pod`s, so none is pinned.
   - *Partitioned accelerators count.* `.count` is the node's total, so a node whose accelerators are
@@ -754,6 +748,80 @@ old reading under `SH` — `10/10` on one free accelerator now reads `1/10`.
   `single-numa-node` the CPU and memory providers can settle on one socket while the only accelerator
   with room is on the other. The default `none` is unaffected.
 
+## Pools and diagnosis
+
+### Isolation mode selection
+
+Check which modes a pool or node currently exposes before choosing a resource key:
+
+```bash
+kubectl get instancetypes
+kubectl get devices <node> -o jsonpath='{.spec.groups[*].accelerators[*].status}'
+```
+
+| Mode | Request key | Expected signal | Next action |
+|---|---|---|---|
+| Exclusive | `<base>` | `EX` non-zero on `InstanceType` | Request whole cards on unpartitioned nodes |
+| Shared | `<base>.shared` | `SH` non-zero (10 shares/card) | Request `N` distinct cards on one node; no memory cap |
+| Logical slice | `<base>.sliced` | `SL` non-zero; `logicalSliced` in `Devices` | Set `.sliced: "1"` and one memory budget |
+| Physical partition | `<base>.partitioned.<kind>-<profile>` | `PT` non-zero; `PARTITIONS` in `-o wide` | Set `.partitioned: "1"` and `.partitioned.<kind>-<profile>: "1"` |
+
+Unpartitioned accelerators serve Exclusive, Shared, and Logical slice together, while partitioned
+accelerators (NVIDIA, Hygon, and T-Head) serve Physical partition only. Toggle partitioning mode on
+the host using the manufacturer's MIG runbook when moving a card between families.
+
+Logical slicing isolation depends on the manufacturer:
+
+| Manufacturer | Enforcer | Compute overcommit | Max slices |
+|---|---|---|---|
+| NVIDIA, Iluvatar | HAMi-core `libvgpu.so` | Yes | 128 (100 Iluvatar) |
+| AMD | `libvrocm.so` + `HSA_CU_MASK` | Yes | 128 |
+| T-Head | `hggc_quota.so` + `hgml_dlsym_hook.so` | Yes | 128 |
+| Ascend | vcann-rt `libvruntime.so` | Yes | 63 |
+| Cambricon | cnDev sMLU profile | No | 16 |
+| MetaX | sysfs `sgpu` subdevice | No | 16 |
+| MThreads | host sGPU kmod | No | 16 |
+| Hygon | host DTK `vdev.conf` | No | 4 |
+
+### Inspecting pools and quota
+
+Inspect pool defaults (`UNIT(CPU/RAM)/STORAGE`), namespace entrance `LocalQueue`s, `ClusterQueue`
+quota, and `ResourceFlavor` node selectors before submitting workloads:
+
+```bash
+kubectl get instancetypes
+kubectl -n <namespace> get localqueues
+kubectl get clusterqueue <cluster-queue> -o yaml
+kubectl get resourceflavors -l resource.gpustack.ai/type=nodes
+```
+
+- **Expected signal**: `InstanceType` `PHASE` is `Active` with `ENTRANCE` matching a `LocalQueue` in
+  your namespace; `ClusterQueue` `spec.stopPolicy` is `None` (not `Hold` or `HoldAndDrain`),
+  `admissionChecksStrategy` lists `gpustack-node-devices`, and `resourceGroups` reports
+  `credits.gpustack.ai/<manufacturer>` (`1,600,000` credits per whole accelerator).
+- **Next action**: Submit `Pod`s with `kueue.x-k8s.io/queue-name: <entrance>`. If `ClusterQueue` is
+  on `Hold` (`empty-plan-hold` or `spec.inactive: true`) or `HoldAndDrain`, verify `ResourceFlavor`s
+  and node `gpustack.ai/managed=true` labels.
+
+### Diagnosing Pending workloads
+
+When a `Pod` fails to start or stays `Pending`, distinguish webhook refusal, queued demand, and
+per-device fragmentation:
+
+| Failure stage | Command | Expected signal | Next action |
+|---|---|---|---|
+| Webhook refusal | `kubectl apply` or `kubectl -n <ns> get events` | `Forbidden`, `Invalid value`, or `Required value`; no `Pod` or `Workload` created | Fix manifest per [Request rules](#request-rules) or pool profile |
+| Queued demand | `kubectl -n <ns> describe workload <name>` | `Pod` has scheduling gate `kueue.x-k8s.io/admission`; `QuotaReserved=False` (`Pending` or queue `Hold`) | Wait for quota, add nodes, or lower demand |
+| Per-device fragmentation (pinned) | `kubectl -n <ns> describe workload <name>` | `Workload` pending on `excluded: affinity` despite aggregate pool credits | Wait for an unfragmented card or request a smaller slice |
+| Per-device fragmentation (check/kubelet) | `kubectl -n <ns> get workload <name> -o jsonpath='{.status.admissionChecks}'` | `gpustack-node-devices` reports `Retry`, or `Pod` fails with `UnexpectedAdmissionError` | Inspect `Devices` `remaining` / `allocatedSlices` and `fit.gpustack.ai` labels; delete failed unmanaged `Pod`s |
+
+Inspect per-accelerator ledger occupancy and per-card fit labels on a candidate node with:
+
+```bash
+kubectl get devices <node> -o yaml
+kubectl get node <node> -o json | jq '.metadata.labels | with_entries(select(.key | contains("fit.gpustack.ai")))'
+```
+
 ---
 
 **See also** — [NVIDIA MIG Operations](./nvidia-mig.md) (the administrator runbook for an
@@ -761,9 +829,8 @@ accelerator's partitioning mode, plus a recorded enable → request → reclaim 
 [Hygon MIG Operations](./hygon-mig.md) (the same runbook for Hygon, whose mode is
 node-wide and whose partitioned nodes serve no whole-card or sliced request at all) ·
 [T-Head MIG Operations](./thead-mig.md) (the same runbook for T-Head's own
-partitioning) · [Admission](./admission.md) (where these keys are checked) ·
-[Device Discovery](./discovery.md#device-plugin-allocator) (where they are
-served) · [RDMA Operations](../rdma/operations.md) (how many RDMA endpoints to ask for beside N
-accelerators, and the kubelet policy that aligns the two sides)
+partitioning) · [Preflight Checks](./preflight.md) (verify node detection and slicing before
+workloads arrive) · [RDMA Operations](../rdma/operations.md) (how many RDMA endpoints to ask for
+beside N accelerators, and the kubelet policy that aligns the two sides)
 
 **Next** → [Walkthrough](../../walkthroughs/devices/scheduling.md) — the same requests on a live cluster.

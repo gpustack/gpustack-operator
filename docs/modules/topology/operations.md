@@ -17,8 +17,8 @@ Queues created by a previously published version are outside that transition pat
 
 ## Choose the inventory path
 
-Use one source of truth for each selected `Node`. See [profile selection](scheduling.md#hierarchy-profiles)
-for how overlapping Ready sources are handled.
+Use one source of truth for each selected `Node`. Zero or multiple matching Ready sources fall back
+to a hostname-only profile so conflicting hierarchies are never merged.
 
 | Situation | Inventory path |
 |---|---|
@@ -35,8 +35,7 @@ accelerator partition, are not an ordered hierarchy merely because both are labe
 
 Topograph is silently disabled by default: the chart renders no Topograph workload or `ServiceAccount`
 and pulls no Topograph image. A private deployment may stay in that state and use `TopologySource`;
-with no source at all, the [default profile](scheduling.md#hierarchy-profiles)
-applies. Enable Topograph only on
+with no source at all, the hostname-only default profile applies. Enable Topograph only on
 Kubernetes 1.27 or later, with a production provider and the `k8s` engine:
 
 ```yaml
@@ -96,8 +95,9 @@ spec:
 - **Inventory**: *`nodeLabels`* reads existing labels without modifying them.
 
 Do not copy a tier list from another cluster; inspect the labels actually published on these `Node`s.
-The [profile rules](scheduling.md#hierarchy-profiles)
-define tier normalization.
+The worker takes the longest populated prefix of levels, normalizes contiguous Topograph fabric
+tiers coarsest-to-finest, appends `kubernetes.io/hostname`, and hashes the key list into
+`topology.gpustack.ai/profile`.
 
 ## Observe existing Node labels
 
@@ -183,8 +183,8 @@ described `Node`; NFD publishes its writable labels onto the `Node`. On read fai
 `NodeFeature` remains until *`maxStaleness`*; after expiry it is removed.
 
 For a cloud cluster, use *`nodeLabels`* to consume the existing standard region and zone keys.
-If a snapshot includes those keys as parents of a private rack, follow the [standard-label
-boundary](scheduling.md#topologysource-contract).
+If a snapshot repeats `topology.kubernetes.io/region` or `zone` as read-only parents of a private
+rack, those values must already match each `Node`; differing or missing values reject the snapshot.
 Use the private region and zone keys above when the inventory itself owns those facts.
 
 Use *`additionalWritePrefix`* when the data center owns another DNS prefix. It must be one DNS prefix
@@ -320,27 +320,30 @@ from a previous release is not adopted; use fresh managed objects.
 
 ### Diagnose Pending workloads
 
-Pending is the safe result when no single domain satisfies the full PodSet. Check in this order:
+Pending is the safe result when no single domain satisfies the full PodSet. Inspect the deployment,
+generated `Workload`, `ClusterQueue`, flavors, and node labels:
 
-1. Read the `ModelDeployment` progress message for the role and replica.
-2. Read the generated `Workload` conditions and topology request/assignment.
-3. Check the `ClusterQueue` `TopologyReady` condition and resource-group flavor count.
-4. Check every referenced `ResourceFlavor`'s profile label and `topologyName`.
-5. Compare the requested level with each Kueue `Topology` and the actual `Node` labels.
-6. Count CPU, memory, and requested extended resources inside one domain, not cluster-wide.
+```sh
+kubectl -n <ns> get modeldeployments.worker.gpustack.ai <name> -o jsonpath='{.status}' | jq
+kubectl -n <ns> get workloads.kueue.x-k8s.io -o yaml
+kubectl get clusterqueues.kueue.x-k8s.io <cq> -o jsonpath='{.status.conditions}' | jq
+kubectl get nodes -L topology.gpustack.ai/profile
+```
+
+| Symptom | Signal | Next action |
+|---|---|---|
+| Replica stays Pending | `Workload` `QuotaReserved=False` and `topologyRequest.required` names a level | Free capacity in one domain at that level, or relax `requiredLevel` |
+| Aggregate quota looks sufficient | `Workload` has no assignment across mixed `topology.gpustack.ai/profile` nodes | Align `TopologySource` selectors so all target nodes share one profile |
+| One role reserved, `Pod` unbound | `Workload` `QuotaReserved=True`, joint check `Pending` (or `Parked` after 30m) | Check sibling roles' capacity and domains, or delete the deployment |
+| Queue blocks admission | `ClusterQueue` `TopologyReady=False` or `Unknown` (`AwaitingQueueStatus`) | Check flavor profiles, Kueue `Active` status, and the 64-flavor group limit |
+| Source blocks profile assignment | `TopologySource` `Ready=False` (`Valid` or `OwnershipConflict`) | Fix the invalid hierarchy, snapshot syntax, or overlapping `nodeSelector` |
 
 A four-node cluster with two `Node`s per zone can admit a three-`Pod` request cluster-wide but cannot
 admit it at zone level. Likewise, capacity split between a zone profile and a hostname-only profile
 cannot satisfy one zone-constrained PodSet.
 
-A multi-role deployment can show one `Workload` with `QuotaReserved=True` and a topology assignment,
-counted in the queue's *`status.reservingWorkloads`*, while its joint check reads `Pending` and no role
-`Pod` is bound. That group fits and is [held for its set](scheduling.md#per-replica-topology-requests);
-the other roles are the ones short of a domain. Free their capacity or delete the deployment.
-
-If the [flavor limit](scheduling.md#capacity-and-lifecycle-limits)
-is exceeded, reduce profile fragmentation or hardware identity variants, then let reconciliation
-retry the complete plan.
+If the 64-flavor limit per resource group is exceeded, reduce profile fragmentation or hardware
+identity variants, then let reconciliation retry the complete plan.
 
 ### Temporary EKS validation
 
@@ -359,8 +362,8 @@ before leaving the cluster running. The test does not prove an upgrade of previo
 
 ---
 
-**See also** — [Topology-Aware Scheduling](scheduling.md) (mechanism
-and boundaries) · [Model Deployment](../model-deployment/configuration.md) (field contract) ·
+**See also** — [Hierarchical Placement Walkthrough](../../walkthroughs/topology/hierarchical-placement.md)
+(zones, racks, and live changes) · [Model Deployment](../model-deployment/configuration.md) (field contract) ·
 [Installation Modes](../../operate/installation-modes.md) (chart ownership)
 
 **Next** → [Model Deployment](../model-deployment/configuration.md) — configure the serving

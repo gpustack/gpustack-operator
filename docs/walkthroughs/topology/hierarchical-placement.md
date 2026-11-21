@@ -121,8 +121,7 @@ Remove `cloud-zones` before selecting the same nodes with the snapshot source:
 kubectl delete topologysource cloud-zones
 ```
 
-Without a single Ready source, nodes fall back to the
-[hostname-only profile](../../modules/topology/scheduling.md#hierarchy-profiles).
+Without a single Ready source, nodes fall back to the hostname-only profile.
 In private data centers without cloud labels, publish a versioned rack snapshot in a `ConfigMap`.
 Save this manifest as `topology-inventory.yaml`. Replace the node names and labels with your inventory:
 
@@ -238,16 +237,16 @@ unlike the revision-only change shown above. See
 ## Limitations
 
 - Single-source node ownership and the hostname-only profile fallback are covered in
-  [Hierarchy profiles](../../modules/topology/scheduling.md#hierarchy-profiles).
+  [Choose the inventory path](../../modules/topology/operations.md#choose-the-inventory-path).
 - Domain capacity packing and multi-role gang holds are covered in
-  [Troubleshooting](../../modules/topology/scheduling.md#troubleshooting).
+  [Diagnose Pending workloads](../../modules/topology/operations.md#diagnose-pending-workloads).
 - Changing the ordered `levels` list on a live hierarchy triggers `HoldAndDrain` migration; see
   [Change a live hierarchy](../../modules/topology/operations.md#change-a-live-hierarchy).
 
 ## Troubleshooting
 
 For general failure surfaces (including `AwaitingQueueStatus`, `HoldAndDrain` flavor migration, and
-domain capacity fragmentation), see [Topology-Aware Scheduling Failure Surfaces](../../modules/topology/scheduling.md#troubleshooting)
+domain capacity fragmentation), see [Diagnose Pending workloads](../../modules/topology/operations.md#diagnose-pending-workloads)
 and [Change a live hierarchy](../../modules/topology/operations.md#change-a-live-hierarchy).
 
 | Symptom | Signal | Check & Mitigation |
@@ -260,7 +259,7 @@ and [Change a live hierarchy](../../modules/topology/operations.md#change-a-live
 
 ---
 
-**See also** — [Topology-Aware Scheduling](../../modules/topology/scheduling.md) (levels and profiles) ·
+**See also** — [Topology](../../modules/topology/_index.md) (overview and workflow) ·
 [Topology-Aware Scheduling Operations](../../modules/topology/operations.md) (`ConfigMap` and Webhook sources) ·
 [Model Deployment Configuration](../../modules/model-deployment/configuration.md)
 

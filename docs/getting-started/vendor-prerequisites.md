@@ -171,7 +171,7 @@ grep '^version=' /usr/local/Ascend/Ascend-Docker-Runtime/ascend_docker_runtime_i
 [`ascend-docker-runtime` check](../modules/devices/preflight.md#a5-host-state-rows) on each A5 accelerator,
 so a node too old to serve them is named before a workload lands on it.
 
-#### A5 host ranktable requirement
+### A5 host ranktable requirement
 
 The host ranktable must be absent or version 2.0. `/etc/hccl_rootinfo.json` is optional host state
 owned by no package. Install
@@ -204,7 +204,7 @@ test -e /etc/hccl_rootinfo.json && grep -o '"version"[^,]*' /etc/hccl_rootinfo.j
 `gpustack-operator device-manager preflight` reports this as the [`hccl-ranktable`
 check](../modules/devices/preflight.md#a5-host-state-rows) on each A5 accelerator.
 
-#### A5 conditional host mounts
+### A5 conditional host mounts
 
 On Ascend A5 (`AcceleratorType` *`status.detail.family`* equal to `"950"`), `device-manager`
 inspects host files through `/host` at `Allocate` time and conditionally mounts them read-only. This
@@ -220,7 +220,7 @@ supports `SGLang` MemFabric (`device_urma`) and legacy multi-node UB HCCL across
 - **Collision handling**: Containers already declaring a mount at the same path receive no duplicate mount.
 - **Unavailable host root**: Disabling [`deviceManager.hostRootMount.enabled`](#device-manager-host-mount) skips both mounts without failing allocations.
 
-#### A5 Host RoCE endpoints
+### A5 Host RoCE endpoints
 
 For Ascend A5 *Host RoCE* (`roce:host`) `vLLM` workloads, provision per-NPU endpoint JSON files at
 `/etc/hixlep/ub_endpoint_npu_<physical_id>.json` on each Host RoCE node. Operator-managed Host RoCE
@@ -594,19 +594,16 @@ partition allocation is always carried by the variable, never by a CDI request.
 > in none of them, so a partition request has nothing to resolve against.
 
 **Device injection channel.** Prefer `auto`, set through
-[`GPUSTACK_NVIDIA_DEVICE_INJECTION_STRATEGY`](../reference/settings.md#per-manufacturer-overrides), over naming a
-channel yourself. It answers per container, independently of the switch above.
+`GPUSTACK_NVIDIA_DEVICE_INJECTION_STRATEGY`, over naming a channel yourself.
+It answers per container, independently of the switch above.
 
 > **Why** — two channels exist, and which one a node uses is what decides whether it needs the vendor
 > runtime at all: the default names the accelerator in `NVIDIA_VISIBLE_DEVICES`, which only
-> `nvidia-container-runtime` reads, while the other requests it as a CDI device the container engine
-> resolves by itself under plain `runc`. Whether a node can use the second is a property of its
-> container engine, which is what `auto` reads and a human would otherwise have to. It uses CDI only
-> where the vendor's own specifications already name the exact accelerator being granted, and writes
-> no specification of its own. [Device
-> Discovery](../modules/devices/discovery.md#exclusive-and-shared) has the mechanism, and
-> [Settings](../reference/settings.md#per-manufacturer-overrides) what it checks, when it declines, and the one
-> engine that has to be told.
+> `nvidia-container-runtime` reads, while `cdi-annotations` requests a CDI device the container
+> engine resolves under plain `runc`. Under `auto`, the allocator selects CDI only when the `Pod` sets
+> no *`runtimeClassName`*, the engine config is readable with CDI enabled and a non-vendor default
+> runtime, and `/etc/cdi` or `/var/run/cdi` names every granted accelerator; otherwise it falls back
+> to `envvar`.
 
 `auto` leaves a `Pod` that names a *`runtimeClassName`* to that handler, whose configuration it cannot
 read — correctly, since the handler is what injects. Whether that covers the `Instance`s this operator
@@ -628,8 +625,9 @@ compatible with the v2 API.
 
 Per [Allocator injection](#allocator-injection), GPUStack's allocator injects T-Head accelerators as `/dev`
 nodes directly, which is the mechanism the vendor's own container guide uses — it isolates a
-container by passing those nodes to `docker run --device`, with no vendor runtime in the path. Which
-nodes a container receives is in [Device Discovery](../modules/devices/discovery.md).
+container by passing those nodes to `docker run --device`, with no vendor runtime in the path. Each
+allocated container receives `/dev/alixpu`, `/dev/alixpu_ctl`, and `/dev/alixpu_ppu<N>` (plus
+partition capability nodes for MIG).
 
 ## Shared coexistence rules
 
@@ -746,9 +744,10 @@ Set `deviceManager.hostRootMount.enabled=false` in either situation:
 
 ---
 
-**See also** — [Device Discovery](../modules/devices/discovery.md) (how the allocator and
-`runtimeInjects*` decide what a `Pod`'s container receives) · [Settings & Environment
-Variables](../reference/settings.md) (per-manufacturer overrides and toolkit paths)
+**See also** — [Preflight Checks](../modules/devices/preflight.md) (verify driver paths and runtime
+isolation on a node) · [Heterogeneous Devices](../modules/devices/_index.md) (device families and
+requests) · [NVIDIA MIG Operations](../modules/devices/nvidia-mig.md) (MIG prerequisites and mode
+lifecycle)
 
 **Next** → [Installation Modes](../operate/installation-modes.md) — what the chart owns, what the
 worker applies.

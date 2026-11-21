@@ -12,6 +12,7 @@ the user enter the workload container.
 - [Service lifecycle](#service-lifecycle)
 - [Network isolation](#network-isolation)
 - [Operations](#operations)
+- [Utilization metrics](#utilization-metrics)
 - [Troubleshooting](#troubleshooting)
 
 ## Overview
@@ -62,12 +63,29 @@ spec:
 - **Resources:** Request one accelerator family. See [Accelerator Requests](../devices/requests.md#instance-api-requests).
 - **Ports:** Optional; each entry allocates a node port on the instance `Service`.
 
+### Unit resource sizing
+
+Derived `InstanceType`s stamp *`spec.unitResources`* (`cpu`, `ram`) per whole accelerator (`1` CPU
+and `2Gi` RAM for CPU-only types, `4` CPU and `16Gi` fallback for unrecognised accelerators, and
+`100Gi` `localStorage`).
+
+- **Default and cap:** An `Instance` omitting `cpu` or `ram` defaults from `unitResources` (scaled
+  by accelerator count or slice/partition VRAM share). Explicit requests are capped by it.
+- **Overcommit:** With `instance-general-resources-overcommit` enabled (default), `unitResources`
+  sets container limits while requests use `100m` CPU per core and `128Mi` RAM per GiB. Disabling
+  it sets requests equal to limits.
+- **Upgrade immutability:** `spec.unitResources` is immutable at creation, and derived types are
+  create-only. Existing derived types keep their original sizing after operator upgrades.
+- **Resizing a pool:** Author a custom sibling `InstanceType` (same `acceleratorGroup`, `os`, and
+  `arch`) to avoid disrupting running workloads. Deleting a derived type lets the operator recreate
+  it with current presets, but stops its active `Instance`s and pauses admission until recreated.
+
 ## Device access
 
-The workload container owns the accelerator request. The optional SSH sidecar uses a separate
-visibility resource to enter the same workspace without acquiring a second accelerator. See
-[Device Discovery](../devices/discovery.md#ssh-instances-and-visibility).
-[Instance Metrics](metrics.md) explains the reported utilization.
+The workload container owns the accelerator request. The optional SSH sidecar requests
+`device.gpustack.ai/<manufacturer>.visibility` to enter the same workspace without consuming a
+second accelerator; see [Worked example per family](../devices/requests.md#worked-example-per-family).
+[Utilization metrics](#utilization-metrics) explains how to read resource usage.
 
 ## Service lifecycle
 
@@ -138,7 +156,26 @@ kubectl get instancetypes
 ```
 
 **Verification:** The wait completes when the `Instance` phase is `Ready`. The `InstanceType` reports remaining capacity.
-See [Instance Metrics](metrics.md) for utilization.
+See [Utilization metrics](#utilization-metrics) to query CPU, memory, storage, and accelerator usage.
+
+## Utilization metrics
+
+Query live utilization for one `Instance` through the worker's `metrics` subresource:
+
+```bash
+kubectl get --raw "/apis/worker.gpustack.ai/v1/namespaces/<ns>/instances/<name>/metrics"
+```
+
+- **Required RBAC:** Callers need `get` on the `instances/metrics` subresource in group
+  `worker.gpustack.ai`. Permission to `get instances` alone is not sufficient.
+- **Pre-start zero:** Before any container starts (unscheduled, stopped, or `Pod` absent), the
+  subresource returns `200` with declared totals and `0` usage. Once started, `0` means idle.
+- **Unavailable sources:** If containers have started and both kubelet `nodes/proxy` stats and
+  `metrics.k8s.io` fail, the subresource returns `503 ServiceUnavailable` naming the failed source.
+- **Omitted accelerator samples:** If the Device Manager is unreachable, not `Ready`, stale (over
+  three monitor periods), or cannot measure a process, CPU/memory/storage return and `accelerators`
+  (or unmeasured `used` fields) are omitted instead of reporting `0`. The Prometheus exporter also
+  omits unmeasured `used` series.
 
 ## Troubleshooting
 

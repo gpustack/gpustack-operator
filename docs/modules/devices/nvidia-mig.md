@@ -172,7 +172,7 @@ per-GPU `AdmissionCheck` admits a `Pod` only while the requested profile has a f
 hard-rejects) while the ledger is unpopulated.
 
 > **Why both terms** — publishing only what is free would make the scheduler subtract every live
-> instance twice; see [Scheduling Chain](scheduling.md#hardware-partitioning-capacities).
+> instance twice; see [Capacity accounting](#capacity-accounting).
 
 **Reclaim.** When the `Pod` exits, the operator destroys its compute instance then its GPU instance, and the
 profile's `Remaining` restores within one reclaim cycle. A destroy racing a residual process returns
@@ -369,8 +369,8 @@ One column to keep in mind: `kubectl get instancetypes` shows the accelerator fo
 from the first three groups to the fourth rather than adding to it. The first three are credit-based (each
 GPU's credit budget); `PT` counts hardware instances the GPUs can still host.
 
-The captured `PT` first values reflect an older calculation; see
-[Four-view status](admission.md#four-view-status) for the current *`onceMaxRequest`* rule.
+The captured `PT` first values reflect an older calculation; current rules set *`onceMaxRequest`* to
+`1` while any GPU can host an instance, else `0`.
 
 ### All-logical configuration
 
@@ -443,7 +443,7 @@ Captured output:
 
 ### All-physical configuration
 
-#### Step 1: Enable MIG, re-detect
+**Step 1: Enable MIG, re-detect.**
 
 Following the [runbook](#enabling-partitioning), flip the mode with `nvidia-smi` on the node itself (Hopper
 needs no reset). GPUStack never runs this:
@@ -490,7 +490,7 @@ daemon set "gpustack-operator-device-manager-nvidia" successfully rolled out
 > `UnexpectedAdmissionError`. Wait for the new `Pod` to be Ready **and** the `.partitioned` key to appear,
 > then give the kubelet a moment.
 
-#### Verification
+**Verification.**
 
 All three logical views drop to zero and the partition view takes over. Not cosmetic: an exclusive tenant on
 a MIG-mode GPU would get a device CUDA cannot use, so the views report what is servable.
@@ -552,7 +552,7 @@ group NVIDIA H100 80GB HBM3: 8 GPU(s); logically sliceable indices -; partitione
   …                  (GPUs 1-7 identical)
 ```
 
-#### Step 2: Request a MIG instance
+**Step 2: Request a MIG instance.**
 
 Submit a `Pod` on the pool's entrance `LocalQueue` (an `Instance` with
 `acceleratorPartitionedProfile: 3g.40gb` gives the same two keys):
@@ -605,7 +605,7 @@ GPU 0: NVIDIA H100 80GB HBM3 (UUID: GPU-950792bf-a01c-3f1a-e122-3473e67f54b2)
   MIG 3g.40gb     Device  0: (UUID: MIG-b3061c09-2a4c-5026-a575-79f86a5bb12c)
 ```
 
-#### Capacity cost
+**Capacity cost.**
 
 One `3g.40gb` occupies memory slices 0–3 of **one** GPU, so only that GPU's arithmetic changes, per profile:
 
@@ -662,7 +662,7 @@ Deleting the `Pod` releases the credits immediately; the hardware and the profil
 > dies on the reclaimer's debounce, so a replacement submitted in that gap can be handed an instance about
 > to disappear — see [Limitations](#limitations).
 
-#### Capacity accounting
+### Capacity accounting
 
 Different numbers count that one carved GPU, and they disagree, deliberately.
 
@@ -708,7 +708,7 @@ placements of the others. One GPU holds three `1g.10gb`, or fewer larger ones, n
 
 **The capability snapshot does not move at all.** *`status.detail.slicedDetail`* still reports
 `physical.count: 56` and `4g.40gb: 8` after the carve, unchanged from
-[Verification](#verification): it derives only from the `Devices` **spec**, the detector's
+[All-physical configuration](#all-physical-configuration): it derives only from the `Devices` **spec**, the detector's
 record of what these GPUs could host when empty, and never reads the runtime ledger. Every number in the
 table above joins that spec capability with the `Devices` **status** ledger.
 
@@ -801,7 +801,7 @@ group NVIDIA H100 80GB HBM3: 8 GPU(s); logically sliceable indices [3, 4, 5, 6, 
   …                      (GPUs 4-7 identical)
 ```
 
-#### Workload placement
+**Workload placement.**
 
 A partition request and a logical-slice request submitted together land on **different** GPUs: their
 resource names come from disjoint populations, and the scheduler cannot consider a GPU that lacks the key:
@@ -940,7 +940,8 @@ gpustack--nvidia-h100-80gb-hbm3-linux-amd64   gpustack-fnv64-e4768a65ca0ce96b   
 ---
 
 **See also** — [Accelerator Requests](requests.md) (keys and request rules) ·
-[Admission](admission.md#capability-versus-availability) (status fields for available capacity) · [Device Discovery](discovery.md#fungible-partition-tokens)
-(how a partition is placed and reclaimed)
+[Hygon MIG Operations](hygon-mig.md) (node-wide MIG on Hygon DCUs) ·
+[T-Head MIG Operations](thead-mig.md) (hardware partitioning on T-Head PPUs) ·
+[Preflight Checks](preflight.md) (verify MIG preconditions before workloads arrive)
 
 **Next** → [Walkthrough](../../walkthroughs/devices/scheduling.md) — the logical-slicing counterpart on a live cluster.

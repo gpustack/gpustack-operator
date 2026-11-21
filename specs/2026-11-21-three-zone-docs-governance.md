@@ -381,7 +381,7 @@ Expand–contract DAG: Wave 1 builds additive tooling and rules with zero breaka
 
 #### Wave 2 — Public Operating Coverage and H4 Flattening (Parallel Disjoint Batches)
 
-- [ ] **T5 · Devices, RDMA, Topology, Instances & Vendor Prerequisites: public task retention and H4 flattening**
+- [x] **T5 · Devices, RDMA, Topology, Instances & Vendor Prerequisites: public task retention and H4 flattening**
       Blocked by: T3
       Owns: `docs/modules/devices/{_index.md,preflight.md,requests.md,nvidia-mig.md,hygon-mig.md,thead-mig.md}`, `docs/modules/rdma/{_index.md,operations.md}`, `docs/modules/topology/{_index.md,operations.md}`, `docs/modules/instances/_index.md`, `docs/getting-started/vendor-prerequisites.md`, `docs/walkthroughs/devices/scheduling.md`, `docs/walkthroughs/rdma/network-endpoints.md`, `docs/walkthroughs/topology/hierarchical-placement.md`
       Acceptance: Retains every assigned minimum operator task from the Public Operating Coverage Matrix (`discovery`, `scheduling`, `admission`, `network-topology`, `topology/scheduling`, `instances/metrics`, `commands`, `instance-type-unit-resources`) inside the named public owners; flattens all `H4` headings in `vendor-prerequisites.md` and `nvidia-mig.md` to `<= H3`; removes all outbound relative links to `docs/reference/**`, `docs/contribute/**`, and the 14 moving module pages.

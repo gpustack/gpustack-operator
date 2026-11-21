@@ -1,9 +1,9 @@
 # RDMA Operations
 
 Choose a *remote direct memory access (RDMA)* resource key, set the kubelet's
-*non-uniform memory access (NUMA)* policy, and check the `Pod`'s
-placement. [Network Topology](network-topology.md) explains how endpoints become available;
-[Accelerator Requests](../devices/requests.md) lists the admission rules.
+*non-uniform memory access (NUMA)* policy, and check the `Pod`'s placement. The Device Manager
+records kernel interfaces and verbs devices in `Devices`, checks link states, and advertises
+RDMA keys; [Accelerator Requests](../devices/requests.md) lists the admission rules.
 
 ## Contents
 
@@ -20,20 +20,18 @@ placement. [Network Topology](network-topology.md) explains how endpoints become
 ## Choosing a key
 
 The three keys differ in allocation mode, in what a quantity of a key means, and in how many tokens
-one endpoint carries. [Network
-Topology](network-topology.md#rdma-resource-keys) describes those
-differences. Choose the key for your workload:
+one endpoint carries:
 
-| Key | Target scenario |
-|---|---|
-| `device.gpustack.ai/rdma` | each requested token must name a different endpoint within this family |
-| `device.gpustack.ai/rdma.shared` | everything else |
-| `device.gpustack.ai/rdma.partitioned` | the node's adapters are physical functions with virtual functions configured |
+| Key | Mode | Request unit | Tokens |
+|---|---|---|---|
+| `device.gpustack.ai/rdma` | exclusive | one whole interface | `1` per endpoint |
+| `device.gpustack.ai/rdma.shared` | shared | one concurrent use of one interface | `64` per endpoint |
+| `device.gpustack.ai/rdma.partitioned` | partitioned | one *SR-IOV* virtual function | `1` per virtual function |
 
 **Each interface's configuration determines which families it serves.** A *single-root I/O virtualization (SR-IOV)* physical
 function with virtual functions configured serves the partitioned key **only**; every other
-interface serves the exclusive and shared keys ([which interface serves
-what](network-topology.md#rdma-resource-keys)).
+interface serves the exclusive and shared keys. AWS EFA devices are advertised by the AWS EFA plugin
+under `vpc.amazonaws.com/efa` rather than these keys.
 Read the fleet before writing the manifest:
 
 ```bash
@@ -87,8 +85,8 @@ that needs that pins itself to a machine shape it has verified and pairs the dev
 the granted names below.
 
 The operator's own `rdma.distance` and `rdma.numa` labels cannot close the gap either. Both describe
-the whole node, so neither can say which accelerator ended up beside which adapter in this
-container ([what a label can carry](network-topology.md#three-node-labels)).
+the whole node as informational summaries, while `feature.gpustack.ai/rdma.capable=true` is the
+node-level link gate; see [Inspecting the NIC record](#inspecting-the-nic-record).
 
 ## Injected devices
 
@@ -136,8 +134,8 @@ These values apply to new allocation responses; existing containers and cached r
 rewritten. Generic grant variables do not configure HIXL, NIXL or another consumer automatically.
 Each consumer needs a supported startup adapter and separate runtime qualification.
 
-The injected set is evidenced for RoCE and for nothing else; what that leaves open on a classic
-InfiniBand fabric is [what an allocation hands over](network-topology.md#allocation-response).
+The injected set is evidenced for RoCE and unverified for classic InfiniBand transport libraries;
+a container on classic InfiniBand can receive an endpoint and still fail inside its transport library.
 
 ## Selection policy
 
@@ -455,6 +453,26 @@ tell a node that was configured from one that was left alone.
 The two therefore differ in exactly one case, and it is not a contradiction: on a node nobody
 configured, `configz` says `none` and preflight says `unknown`.
 
+### Inspecting the NIC record
+
+When a node loses `feature.gpustack.ai/rdma.capable` or stops scheduling RDMA workloads, inspect the
+node labels and the `Devices` NIC record:
+
+```bash
+kubectl get nodes -l feature.gpustack.ai/rdma.capable=true
+kubectl get devices <node> -o json |
+  jq '[.spec.interfaces[] | (., (.virtualFunctions // [])[])]
+      | map(select(.rdma or .link)) | map({name, pciBusId, rdmaDevice, link})'
+```
+
+- **Expected signal (`rdma.capable` present)**: At least one physical interface or nested VF carries
+  `link.state` `OK` or `Unverified` (or `rdma: true` with no link verdict).
+- **Expected signal (`rdma.capable` absent)**: Every endpoint carries `link.state: Failed` (with the
+  port state and `firstSeen` timestamp) or lacks a bound `rdmaDevice`.
+- **Next action**: Fix the physical link, transceiver, or subnet manager for `Failed` ports, verify
+  verbs driver binding when `rdmaDevice` is missing, and run `device-manager preflight` for a live
+  sysfs check.
+
 ## Kueue and RDMA keys
 
 Do not read a queue's admission as an *RDMA* reservation. The *RDMA* keys sit outside every accelerator
@@ -473,8 +491,8 @@ Three things to do instead of a quota:
   that is the count to ask for.
 - **Watch Pending `Pod`s belonging to admitted `Workload`s**, not queue depth. That pair is where the
   over-subscription becomes visible; queue depth stays at zero throughout.
-- **Remember which key runs out first.** An endpoint carries one exclusive token and many more
-  shared ones ([how many of each](network-topology.md#rdma-resource-keys)),
+- **Remember which key runs out first.** An endpoint carries one exclusive token and 64
+  shared ones ([Choosing a key](#choosing-a-key)),
   so a fleet exhausts the exclusive key long before the shared one on the same hardware.
 
 ## EFA engine images
@@ -585,18 +603,18 @@ verbs path fails creating its completion queue, as above.
 | Symptom | Signal | Check & Mitigation |
 |---|---|---|
 | no node advertises the key at all | Status: the key is absent from every node's allocatable | The node has no *RDMA*-capable interface, or that family is switched off on the Device Manager. Run the allocatable read above, and check the `--no-shared` and `--no-partitioned` switches |
-| the key is advertised, every token unhealthy | Status: endpoint link `Failed` or HCA unselected | Check link verdicts and the [selection policy status](#selection-policy). Failed or unselected endpoints retain their tokens but report `Unhealthy`. [Read the inventory](network-topology.md#inspecting-the-record) |
+| the key is advertised, every token unhealthy | Status: endpoint link `Failed` or HCA unselected | Check link verdicts and the [selection policy status](#selection-policy). Failed or unselected endpoints retain their tokens but report `Unhealthy`. [Inspect the NIC record](#inspecting-the-nic-record) |
 | the `Workload` is admitted and its `Pod` stays `Pending` | Status: `Pod` phase `Pending` | Over-subscription: nothing meters these keys. See [the section above](#kueue-and-rdma-keys) |
 | the `Pod` is scheduled, then refused on the node and not rescheduled | The kubelet refuses the `Pod` on the node | The node's totals sufficed but its devices sit on two *NUMA* nodes. Check the node's policy, and that both requests sit in one container |
 | the container starts with fewer devices than expected | Fewer `uverbs` entries than granted endpoints | One `rdma_cm` is correct — count the `uverbs` entries. See [the injected set](#injected-devices) |
-| a node drops out of scheduling without changing | Status: the node's link state in its `Devices` record | The hardware stays, the label does not. [Read it yourself](network-topology.md#inspecting-the-record) |
+| a node drops out of scheduling without changing | Status: `rdma.capable` label removed from `Node` | The hardware stays, the label does not. [Inspect the NIC record](#inspecting-the-nic-record) |
 
 ---
 
 **See also** — [Accelerator Requests](../devices/requests.md) (the normative request contract
 these keys sit beside, and the rules they are exempt from) ·
-[Network Topology](network-topology.md) (what the keys are, which endpoint serves
-each, and what an allocation resolves) · [Preflight Checks](../devices/preflight.md) (reading a node's link
+[RDMA Networking Walkthrough](../../walkthroughs/rdma/network-endpoints.md) (end-to-end endpoint
+request and NUMA alignment) · [Preflight Checks](../devices/preflight.md) (reading a node's link
 verdicts and its topology policy before anything is installed)
 
 **Next** → [Preflight Checks](../devices/preflight.md) — what a node can detect, slice and manage, read on

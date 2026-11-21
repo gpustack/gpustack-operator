@@ -195,8 +195,8 @@ large and unlike the instance ids (229632, its compute instance 229633), determi
 promised by no contract; a read costs one file.
 
 PPU selection, the fungible-token `Partitioned` family, the placement-aware `Remaining` ledger, `credits` quota
-and reclaim on `Pod` deletion work as for NVIDIA — see [Requesting a partition](nvidia-mig.md#requesting-a-partition)
-and [Device Discovery](discovery.md#fungible-partition-tokens), including
+and reclaim on `Pod` deletion work as for NVIDIA. See [Requesting a partition](nvidia-mig.md#requesting-a-partition)
+and [Resource keys](requests.md#resource-keys), including
 the SSH sidecar seeing the partition rather than the parent PPU, and the reclaim race a same-profile
 replacement can hit.
 
@@ -348,8 +348,7 @@ A capability change reaches the cluster **only** through Device Manager restart 
 ---
 
 **See also** — [NVIDIA MIG Operations](nvidia-mig.md) (the sibling runbook) ·
-[Accelerator Requests](requests.md) (the full key set and request rules) ·
-[Device Discovery](discovery.md#fungible-partition-tokens) (how a
-partition is placed and reclaimed)
+[Hygon MIG Operations](hygon-mig.md) (node-wide MIG on Hygon DCUs) ·
+[Accelerator Requests](requests.md) (the full key set and request rules)
 
 **Next** → [Accelerator Requests](requests.md) — the normative request contract.

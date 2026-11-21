@@ -37,7 +37,7 @@ before-and-after `kubectl get instancetypes` output. `Node` names are genericize
 
 Watch three columns: **UNIT(CPU/RAM)/STORAGE**, the per-unit request the `InstanceType` charges; **CPU**, the collapsed
 CPU pool's `remaining/capacity` cores; **ACCELERATOR(EX/SH/SL/PT)**, the `onceMaxRequest/remaining` of each
-[four-view](../../modules/devices/admission.md#four-view-status) projection. This run predates the shared card-count
+projection (exclusive whole cards, shared slots, logical slices, and physical partitions). This run predates the shared card-count
 reading, so its `SH` once-max figures are shares, not accelerators ([Pre-release breaks](../../modules/devices/requests.md#pre-release-breaks)).
 
 Each accelerator counts in exactly one of `EX`/`SH`/`SL` (unpartitioned) or `PT` (partitioned), so `0/0`
@@ -385,8 +385,8 @@ gpustack--nvidia-a10g-linux-amd64       gpustack-fnv64-c4680bb149644f1c   8/64Gi
 gpustack--nvidia-tesla-t4-linux-amd64   gpustack-fnv64-6b371caa2da0b799   8/32Gi/100Gi            4/5 40/50 100/500 0/0      0/0     Active
 ```
 
-The worker writes one `NodeFeature` per node, in `gpustack-system`, named `<node>-gpustack-worker`
-(see [Device Scheduling](../../modules/devices/scheduling.md)). This is the one for `node-a10g`,
+The worker writes one `NodeFeature` per node, in `gpustack-system`, named `<node>-gpustack-worker`.
+This is the one for `node-a10g`,
 which carries the managed label and the CPU keys from the `Node` above:
 
 ```yaml
@@ -569,9 +569,16 @@ other `InstanceType`s for the same pool. The output below records an earlier run
 queue entrances; current siblings publish the same canonical pool entrance.
 
 A derived pool is sized from a **per-product preset**: 8 CPU / 64 GiB for this A10G, 4 CPU / 16 GiB for
-an unrecognised accelerator ([preset reference](../../reference/instance-type-unit-resources.md)). For
-another size, an admin authors an `InstanceType` referencing a catalog flavor by its *`acceleratorGroup`*,
-with a unit spec of its own:
+an unrecognised accelerator ([Unit resource sizing](../../modules/instances/_index.md#unit-resource-sizing)).
+`spec.unitResources` defaults omitted `cpu`/`ram` and caps explicit requests.
+
+With `instance-general-resources-overcommit` enabled (default), scheduler requests use `100m` CPU per core
+and `128Mi` RAM per GiB (disabled: request equals limit). Because `spec.unitResources` is immutable at
+creation, existing derived types keep their sizing across operator upgrades.
+
+To resize without stopping active `Instance`s or losing the pool, author a custom sibling `InstanceType`
+referencing the catalog flavor by its *`acceleratorGroup`* rather than deleting and letting the
+operator recreate the derived type:
 
 ```yaml
 apiVersion: worker.gpustack.ai/v1
@@ -876,7 +883,7 @@ spec:
   `persistent` entry follow the [claim placement rules](../../modules/model-delivery/artifact.md#claim-delivery-and-placement):
   a node-local volume pins the `Instance` to its node and that node's capacity; network or `ReadWriteMany`
   storage avoids the pin. A claim nothing binds creates no `Pod` and says why in *`status.phaseMessage`*;
-  [`instance-persistent-volume-placement`](../../reference/settings.md#settings) turns this off.
+  `instance-persistent-volume-placement` turns this off.
 - **Both new fields are immutable while the `Instance` runs**, editable while stopped — the rule the rest
   of *`spec`* follows.
 
@@ -889,7 +896,7 @@ kept separate so node-path mounts can be allowed without a container escape:
 | `instance-host-path-volume-allowed` | *`spec.additionalVolumes[*].hostPath`* — reaches the node's filesystem, but not its devices or kernel. |
 
 Each gates taking its escape, so turning one off stops new grants without stranding an `Instance`
-that already holds one; [Settings](../../reference/settings.md#settings) has the exact terms.
+that already holds one.
 
 Both govern the **node** boundary, not the namespace one: a `persistent`, *`configMap`* or `secret`
 source names an object in the `Instance`'s own namespace and may always be mounted, the same reach a `Pod`
@@ -902,10 +909,8 @@ This recorded session uses four unpartitioned nodes (`PT` reads `0/0` throughout
 [three-configuration walkthrough](../../modules/devices/nvidia-mig.md#three-mig-configurations)
 for hardware partitioning.
 
-Pool isolation (`ClusterQueue` without cross-pool borrowing), flavor grouping, and per-card view
-exclusion are covered in [Stage 4: Kueue chain](../../modules/devices/scheduling.md#stage-4-kueue-chain),
-[Naming and grouping](../../modules/devices/scheduling.md#naming-and-grouping), and
-[Four-view status](../../modules/devices/admission.md#four-view-status).
+Pool isolation (`ClusterQueue` without cross-pool borrowing), queue inspection, and Pending diagnosis
+are covered in [Pools and diagnosis](../../modules/devices/requests.md#pools-and-diagnosis).
 
 ## Troubleshooting
 
@@ -916,7 +921,7 @@ exclusion are covered in [Stage 4: Kueue chain](../../modules/devices/scheduling
 | `Pod` rejected: `at most one container may request a slicing family, found N` | More than one container requests a slice or a partition | Keep one claiming container. See [rule 6](../../modules/devices/requests.md#rule-6-slicing-container-count) |
 | `Pod` rejected: `a restartable init container (a native sidecar) may not request an accelerator` | A native sidecar carries the accelerator request | Move the request to an app container. See [rule 7](../../modules/devices/requests.md#rule-7-native-sidecar-requests) |
 | A node's accelerators are missing from the `InstanceType` pool | The node's `NodeFeature` carries `gpustack.ai/managed: "false"`, or `node-management-manual` is `true` and no one labeled the node | Run `kubectl -n gpustack-system get nodefeature <node>-gpustack-worker -o yaml` and read *`spec.labels`*. See [Step 2](#step-2-remove-a-managed-node) |
-| `Instance` rejected: `privileged mode is not allowed: enable the "instance-privileged-allowed" setting to allow it` | The `instance-privileged-allowed` setting is `false` | Allow it only if the node boundary is acceptable; update the setting as shown below. See [Settings](../../reference/settings.md) |
+| `Instance` rejected: `privileged mode is not allowed: enable the "instance-privileged-allowed" setting to allow it` | The `instance-privileged-allowed` setting is `false` | Allow it only if the node boundary is acceptable; update the `Setting` as shown below |
 
 If the privileged-mode gate is disabled, the mitigation above changes it as follows:
 
@@ -933,6 +938,6 @@ If the privileged-mode gate is disabled, the mitigation above changes it as foll
 
 ---
 
-**See also** — [Accelerator Requests](../../modules/devices/requests.md) (the contract behind Step 3) · [NVIDIA MIG Operations](../../modules/devices/nvidia-mig.md#three-mig-configurations) (hardware partitioning) · [Settings](../../reference/settings.md#settings) (the relevant gates)
+**See also** — [Accelerator Requests](../../modules/devices/requests.md) (the contract behind Step 3) · [NVIDIA MIG Operations](../../modules/devices/nvidia-mig.md#three-mig-configurations) (hardware partitioning) · [GPU Instances](../../modules/instances/_index.md) (unit resource sizing and metrics)
 
 **Next** → [RDMA Networking Walkthrough](../rdma/network-endpoints.md) — request and verify RDMA endpoints with NUMA alignment.

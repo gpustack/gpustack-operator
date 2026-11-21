@@ -33,8 +33,8 @@ flowchart TD
 ### RDMA requests
 
 Choose a key and endpoint count in [RDMA Operations](operations.md#choosing-a-key). Configure an
-optional [selection policy](operations.md#selection-policy) to filter adapters. See
-[Network Topology](network-topology.md) for inventory and link states.
+optional [selection policy](operations.md#selection-policy) to filter adapters. Inspect link states and
+`Devices` NIC records in [RDMA Operations](operations.md#inspecting-the-nic-record).
 
 ## Operations
 
