@@ -79,8 +79,23 @@ type modelArtifactWeights struct {
 	// RemotePolicy is the error-checked cluster remote delivery policy snapshot read when
 	// resolving this pass, reused by fallback sweeps and Ascend A5 fabric eligibility.
 	RemotePolicy string
+	// RoleSourceReady records per-role prepared source readiness after matching observed
+	// source manufacturers against each role's AcceleratorType manufacturer.
+	RoleSourceReady map[string]bool
 	// sourceReadyUntil schedules a fresh observation before its lease proof expires.
 	sourceReadyUntil time.Time
+}
+
+func (w *modelArtifactWeights) sourceReadyForRole(role string) bool {
+	if w == nil || w.Render == nil {
+		return false
+	}
+	if w.RoleSourceReady != nil {
+		if ready, ok := w.RoleSourceReady[role]; ok {
+			return ready
+		}
+	}
+	return w.Render.SourceReady
 }
 
 // liveRemoteReplica says a live Pod still renders a replica on the remote delivery.

@@ -3,9 +3,11 @@ package worker
 import (
 	"context"
 	"fmt"
+	"reflect"
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	core "k8s.io/api/core/v1"
 	storage "k8s.io/api/storage/v1"
@@ -166,16 +168,19 @@ func applyModelDeploymentModelTransferPolicy(
 		return nil
 	}
 
-	sourceReady, sourceReadyUntil, err := modelDeploymentModelTransferSourceReady(ctx, cli, ma)
+	var (
+		sourceReady         bool
+		sourceReadyUntil    time.Time
+		sourceManufacturers sets.Set[string]
+	)
+	if reflect.ValueOf(modelDeploymentModelTransferSourceReady).Pointer() ==
+		reflect.ValueOf(modelDeploymentModelTransferSourceObserved).Pointer() {
+		sourceReady, sourceReadyUntil, sourceManufacturers, err = modelDeploymentModelTransferSourceObservedWithManufacturers(ctx, cli, ma)
+	} else {
+		sourceReady, sourceReadyUntil, err = modelDeploymentModelTransferSourceReady(ctx, cli, ma)
+	}
 	if err != nil {
 		return err
-	}
-	var sourceManufacturers sets.Set[string]
-	if sourceReady {
-		sourceManufacturers, err = modelDeploymentModelTransferSourceObservedManufacturers(ctx, cli, ma)
-		if err != nil {
-			return err
-		}
 	}
 	w.sourceReadyUntil = sourceReadyUntil
 	if policy == settings.ModelArtifactRemoteDeliveryPrefer && !sourceReady && !remoteState.remoteHeld() {
@@ -193,6 +198,7 @@ func applyModelDeploymentModelTransferPolicy(
 	remote.ModelTransferPolicy = policy
 	remote.SourceReady = sourceReady
 	remote.ModelTransferSourceManufacturers = sourceManufacturers
+	remote.ModelTransferBaseRender = &base
 	if policy == settings.ModelArtifactRemoteDeliveryPrefer {
 		// Only Prefer declares a fallback: Require's answer to every
 		// failure is the visible wait, and its render names no fallback a
@@ -524,7 +530,25 @@ func (a *ModelDeploymentArtifactRender) modelTransferForRole(
 			!servesRemote &&
 			a.ModelTransferSourceManufacturers.Len() > 0 &&
 			!a.ModelTransferSourceManufacturers.Has(strings.ToLower(strings.TrimSpace(manufacturer))) {
-			return a.modelTransferFallbackRender(), "", ""
+			if a.ModelTransferBaseRender != nil {
+				local := *a.ModelTransferBaseRender
+				if modelDeploymentUsesModelExpress(md) {
+					local.ModelTransferConfigMap = a.ModelTransferConfigMap
+				}
+				return &local, "", ""
+			}
+			local := a.modelTransferFallbackRender()
+			if local != nil {
+				local.ModelTransferPolicy = ""
+				local.SourceReady = false
+				local.ModelTransferBackend = ""
+				local.ModelTransferEFA = false
+				local.ModelTransferSourceManufacturers = nil
+				if !modelDeploymentUsesModelExpress(md) {
+					local.ModelTransferConfigMap = ""
+				}
+			}
+			return local, "", ""
 		}
 		remote := *a
 		return &remote, "", ""
@@ -878,7 +902,7 @@ func modelDeploymentModelTransferReplicaOverride(
 		}
 		for j := range remote.Roles[i].Replicas {
 			r := &remote.Roles[i].Replicas[j]
-			if int(r.Ordinal) == ordinal && r.Delivery != workercore.ModelDeploymentModelDeliveryRemote {
+			if int(r.Ordinal) == ordinal && r.Delivery != workercore.ModelDeploymentModelDeliveryRemote && r.FallbackAttempts > 0 {
 				return r.Delivery
 			}
 		}
@@ -1115,7 +1139,11 @@ func modelDeploymentModelTransferObserveStatus(
 
 	seen := map[string]map[int32]bool{}
 	for _, view := range modelDeploymentGroupPodsByReplica(pods) {
-		observed := modelDeploymentModelTransferReplicaLoad(view, sourceReady)
+		roleSourceReady := sourceReady
+		if ready, ok := weights.RoleSourceReady[view.Role]; ok {
+			roleSourceReady = ready
+		}
+		observed := modelDeploymentModelTransferReplicaLoad(view, roleSourceReady)
 		if observed.Delivery == "" {
 			continue
 		}
@@ -1268,20 +1296,25 @@ func modelDeploymentModelTransferWeightsVoice(
 		if role == nil || !view.Seated || view.Ordinal < 0 || int32(view.Ordinal) >= role.Replicas {
 			continue
 		}
-		observed := modelDeploymentModelTransferReplicaLoad(view, weights.Render.SourceReady)
+		observed := modelDeploymentModelTransferReplicaLoad(view, weights.sourceReadyForRole(view.Role))
 		if observed.Delivery != "" && observed.Load == workercore.ModelDeploymentRemoteLoadStateLoaded {
 			loaded[view.Role]++
 		}
 	}
 	var waiting int32
+	awaitingSource := false
 	for _, role := range holder.Spec.Roles {
-		waiting += max(0, role.Replicas-loaded[role.Name])
+		roleWaiting := max(0, role.Replicas-loaded[role.Name])
+		waiting += roleWaiting
+		if roleWaiting > 0 && !weights.sourceReadyForRole(role.Name) {
+			awaitingSource = true
+		}
 	}
 	switch {
 	case waiting == 0:
 		ModelDeploymentConditionWeightsReady.True(holder, modelWeightsReasonLoaded,
 			"every desired replica loaded its weights")
-	case !weights.Render.SourceReady:
+	case awaitingSource:
 		ModelDeploymentConditionWeightsReady.False(holder, modelWeightsReasonAwaitingSource, fmt.Sprintf(
 			"%d replicas have not completed loading %s and no prepared source is available", waiting, weights.Render.ManifestDigest,
 		))

@@ -2495,6 +2495,13 @@ func (r *ModelDeploymentReconciler) renderModelDeploymentRolePodsWithSentinel(
 		// carries the reason, instead of a render error that would say nothing.
 		if weights != nil && weights.Render != nil &&
 			weights.Render.Delivery == workercore.ModelDeploymentModelDeliveryRemote {
+			roleSourceReady := weights.Render.SourceReady &&
+				(weights.Render.ModelTransferSourceManufacturers.Len() == 0 ||
+					weights.Render.ModelTransferSourceManufacturers.Has(strings.ToLower(strings.TrimSpace(manufacturer))))
+			if weights.RoleSourceReady == nil {
+				weights.RoleSourceReady = make(map[string]bool, len(md.Spec.Roles))
+			}
+			weights.RoleSourceReady[role.Name] = roleSourceReady
 			effective, modelTransferReason, modelTransferMessage := weights.Render.modelTransferForRole(
 				md, role, manufacturer, modelDeploymentModelTransferRoleLive(weights.LiveRemoteOrdinals, role.Name),
 			)

@@ -110,6 +110,11 @@ type ModelDeploymentArtifactRender struct {
 	// selects Remote on roles whose manufacturer matches an observed serving source.
 	ModelTransferSourceManufacturers sets.Set[string] `json:"-"`
 
+	// ModelTransferBaseRender holds the exact local Node/Engine render captured before
+	// Remote policy upgrade so a Prefer vendor mismatch reuses the original binding hash
+	// without rolling healthy local replicas.
+	ModelTransferBaseRender *ModelDeploymentArtifactRender `json:"-"`
+
 	// VerifiedNodeOnly says the artifact can only be delivered honestly by
 	// the node: it carries an expected digest or file patterns, which an
 	// engine download can neither anchor-verify nor filter. A Remote

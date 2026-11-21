@@ -62,17 +62,28 @@ func modelPrefetchPublishedServing(pf *workercore.ModelPrefetch, now time.Time) 
 func modelDeploymentModelTransferSourceObserved(
 	ctx context.Context, cli ctrlcli.Reader, artifact *workercore.ModelArtifact,
 ) (bool, time.Time, error) {
-	if artifact == nil || artifact.UID == "" || artifact.Generation < 1 || artifact.Status.Resolved == nil ||
+	ready, until, _, err := modelDeploymentModelTransferSourceObservedWithManufacturers(ctx, cli, artifact)
+	return ready, until, err
+}
+
+// modelDeploymentModelTransferSourceObservedWithManufacturers evaluates readiness, lease
+// deadline, and serving vendor scopes from a single ModelPrefetch list at a single timestamp
+// so lease expiry between calls can never turn a scoped observation into an unrestricted one.
+func modelDeploymentModelTransferSourceObservedWithManufacturers(
+	ctx context.Context, cli ctrlcli.Reader, artifact *workercore.ModelArtifact,
+) (bool, time.Time, sets.Set[string], error) {
+	if cli == nil || artifact == nil || artifact.UID == "" || artifact.Generation < 1 || artifact.Status.Resolved == nil ||
 		artifact.Status.ObservedGeneration != artifact.Generation || artifact.Status.Resolved.ManifestDigest == "" {
-		return false, time.Time{}, nil
+		return false, time.Time{}, nil, nil
 	}
 	prefetches := new(workercore.ModelPrefetchList)
 	if err := cli.List(ctx, prefetches, ctrlcli.InNamespace(artifact.Namespace),
 		ctrlcli.MatchingFields{modelPrefetchArtifactIndex: artifact.Name}); err != nil {
-		return false, time.Time{}, fmt.Errorf("read source prefetch observations: %w", err)
+		return false, time.Time{}, nil, fmt.Errorf("read source prefetch observations: %w", err)
 	}
 	now := time.Now()
 	var until time.Time
+	manufacturers := sets.New[string]()
 	for i := range prefetches.Items {
 		pf := &prefetches.Items[i]
 		if pf.Namespace != artifact.Namespace || pf.Spec.ArtifactRef.Name != artifact.Name {
@@ -86,44 +97,19 @@ func modelDeploymentModelTransferSourceObserved(
 		if until.IsZero() || proof.ReadyLeaseExpiresAt.Before(&meta.Time{Time: until}) {
 			until = proof.ReadyLeaseExpiresAt.Time
 		}
-	}
-	return !until.IsZero(), until, nil
-}
-
-func modelDeploymentModelTransferSourceObservedManufacturers(
-	ctx context.Context, cli ctrlcli.Reader, artifact *workercore.ModelArtifact,
-) (sets.Set[string], error) {
-	if cli == nil || artifact == nil || artifact.UID == "" || artifact.Generation < 1 || artifact.Status.Resolved == nil ||
-		artifact.Status.ObservedGeneration != artifact.Generation || artifact.Status.Resolved.ManifestDigest == "" {
-		return nil, nil
-	}
-	prefetches := new(workercore.ModelPrefetchList)
-	if err := cli.List(ctx, prefetches, ctrlcli.InNamespace(artifact.Namespace),
-		ctrlcli.MatchingFields{modelPrefetchArtifactIndex: artifact.Name}); err != nil {
-		return nil, fmt.Errorf("read source prefetch observations: %w", err)
-	}
-	now := time.Now()
-	manufacturers := sets.New[string]()
-	for i := range prefetches.Items {
-		pf := &prefetches.Items[i]
-		if pf.Namespace != artifact.Namespace || pf.Spec.ArtifactRef.Name != artifact.Name {
-			continue
-		}
-		proof := modelPrefetchPublishedServing(pf, now)
-		if proof == nil || proof.ArtifactUID != string(artifact.UID) || proof.ArtifactGeneration != artifact.Generation ||
-			proof.Digest != artifact.Status.Resolved.ManifestDigest {
-			continue
-		}
 		for _, m := range proof.Manufacturers {
 			if trimmed := strings.ToLower(strings.TrimSpace(m)); trimmed != "" {
 				manufacturers.Insert(trimmed)
 			}
 		}
 	}
-	if manufacturers.Len() == 0 {
-		return nil, nil
+	if until.IsZero() {
+		return false, time.Time{}, nil, nil
 	}
-	return manufacturers, nil
+	if manufacturers.Len() == 0 {
+		return true, until, nil, nil
+	}
+	return true, until, manufacturers, nil
 }
 
 func modelTransferSourceLeaseRequeue(result ctrl.Result, until, now time.Time) ctrl.Result {

@@ -744,6 +744,12 @@ if [[ "$(extract_config_hash "${alt_cache_ascend}")" == "${default_ascend_hash}"
   echo 'config-hash: changing modelManager.rootPath must change config-hash' >&2
   exit 1
 fi
+alt_runtime="$(render --set global.manufacturers.nvidia.runtimeName=nvidia-alt --show-only templates/model-transfer/daemonset.yaml)"
+alt_runtime_nvidia="$(awk '/^---$/{on=0} /^  name: gpustack-operator-model-transfer-nvidia$/{on=1} on' <<<"${alt_runtime}")"
+if [[ "$(extract_config_hash "${alt_runtime_nvidia}")" == "${default_nvidia_hash}" ]]; then
+  echo 'config-hash: changing manufacturer runtimeName must change config-hash' >&2
+  exit 1
+fi
 
 expect_failure invalid-host-roce-type \
   'got string, want boolean' \

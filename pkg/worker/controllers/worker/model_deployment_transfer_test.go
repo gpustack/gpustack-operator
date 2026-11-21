@@ -3568,18 +3568,72 @@ func TestModelDeploymentModelTransferAscendA5PreferLifecycle(t *testing.T) {
 		md := newRenderDeployment(func(m *workercore.ModelDeployment) {
 			m.Spec.Engine.Name = workercore.ModelDeploymentEngineVLLM
 		})
+		baseLocal := testNodeArtifactRender()
 		render := modelTransferRemoteRender()
 		render.ModelTransferPolicy = settings.ModelArtifactRemoteDeliveryPrefer
+		render.ModelTransferConfigMap = "model-transfer-cm"
 		render.ModelTransferSourceManufacturers = sets.New("nvidia")
+		render.ModelTransferBaseRender = baseLocal
 
 		ascendEff, reason, _ := render.modelTransferForRole(md, &md.Spec.Roles[0], nodefeature.ManufacturerAscend, false)
 		require.Empty(t, reason)
 		assert.Equal(t, workercore.ModelDeploymentModelDeliveryNode, ascendEff.Delivery,
 			"Ascend role must fall back when only NVIDIA sources serve the digest")
+		assert.Equal(t, *baseLocal, *ascendEff,
+			"vendor mismatch fallback must preserve exact local render so binding hash does not drift")
 
 		nvidiaEff, reason, _ := render.modelTransferForRole(md, &md.Spec.Roles[0], nodefeature.ManufacturerNVIDIA, false)
 		require.Empty(t, reason)
 		assert.Equal(t, workercore.ModelDeploymentModelDeliveryRemote, nvidiaEff.Delivery,
 			"NVIDIA role must keep Remote delivery when NVIDIA source serves the digest")
+
+		// An initially local ordinal (FallbackAttempts == 0) must not lock out future remote upgrades.
+		md.Status.Model = &workercore.ModelDeploymentModelStatus{
+			Remote: &workercore.ModelDeploymentModelRemoteStatus{
+				Roles: []workercore.ModelDeploymentRemoteRoleStatus{{
+					Role: "server",
+					Replicas: []workercore.ModelDeploymentRemoteReplicaStatus{
+						{Ordinal: 0, Delivery: workercore.ModelDeploymentModelDeliveryNode, FallbackAttempts: 0},
+						{Ordinal: 1, Delivery: workercore.ModelDeploymentModelDeliveryNode, FallbackAttempts: 1},
+					},
+				}},
+			},
+		}
+		assert.Empty(t, modelDeploymentModelTransferReplicaOverride(md, "server", 0))
+		assert.Equal(t, workercore.ModelDeploymentModelDeliveryNode,
+			modelDeploymentModelTransferReplicaOverride(md, "server", 1))
+
+		// Under Require with only NVIDIA serving, Ascend pending replicas and WeightsReady report AwaitingSource.
+		reqWeights := &modelArtifactWeights{
+			Render:          modelTransferRemoteRender(),
+			RoleSourceReady: map[string]bool{"server": false},
+		}
+		reqWeights.Render.ModelTransferPolicy = settings.ModelArtifactRemoteDeliveryRequire
+		reqWeights.Render.SourceReady = true
+		pendingPod := core.Pod{
+			ObjectMeta: meta.ObjectMeta{
+				Name: "pending-ascend-0-0",
+				Labels: map[string]string{
+					modelDeploymentLabelKeyComponent:   "server",
+					modelDeploymentReplicaOrdinalLabel: "0",
+					modelDeploymentMemberIndexLabel:    "0",
+				},
+				Annotations: map[string]string{
+					modelDeploymentModelTransferDeliveryAnnotation: string(workercore.ModelDeploymentModelDeliveryRemote),
+				},
+			},
+			Status: core.PodStatus{Phase: core.PodPending},
+		}
+		holder := md.DeepCopy()
+		holder.Status.Model = &workercore.ModelDeploymentModelStatus{}
+		modelDeploymentModelTransferObserveStatus(holder, []core.Pod{pendingPod}, reqWeights, nil, true)
+		require.NotNil(t, holder.Status.Model.Remote)
+		require.Len(t, holder.Status.Model.Remote.Roles, 1)
+		assert.Equal(t, workercore.ModelDeploymentRemoteLoadStateAwaitingSource,
+			holder.Status.Model.Remote.Roles[0].Replicas[0].Load)
+		modelDeploymentModelTransferWeightsVoice(holder, []core.Pod{pendingPod}, reqWeights)
+		weightsCond := testCondition(holder.Status.Conditions, string(ModelDeploymentConditionWeightsReady))
+		require.NotNil(t, weightsCond)
+		assert.Equal(t, modelWeightsReasonAwaitingSource, weightsCond.Reason)
 	})
 }

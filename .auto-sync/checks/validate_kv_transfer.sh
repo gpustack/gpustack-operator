@@ -488,14 +488,18 @@ for block in run_blocks:
                 continue
             if st == "then":
                 continue
-            if st == "else":
+            if re.match(r"^then\s+", st):
+                st = re.sub(r"^then\s+", "", st).strip()
+            if st == "else" or re.match(r"^else\s+", st):
                 if if_stack:
                     frame = if_stack[-1]
                     frame[2] = (set(single_off_vars), set(multi_off_vars))
                     frame[3] = True
                     pre_s, pre_m = frame[1]
                     single_off_vars, multi_off_vars = set(pre_s), set(pre_m)
-                continue
+                if st == "else":
+                    continue
+                st = re.sub(r"^else\s+", "", st).strip()
             if st == "fi":
                 if if_stack:
                     kind, pre_state, then_state, in_else = if_stack.pop()

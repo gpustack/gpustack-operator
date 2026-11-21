@@ -49,6 +49,10 @@
 {{- $controlAddr := "127.0.0.1:9250" }}
 {{- $workerAddr := "127.0.0.1:9252" }}
 {{- $workerDNSPolicy := "" }}
+{{- $workerRuntimeClass := "" }}
+{{- if $identity.runtimeInjectsDriver }}
+{{-   $workerRuntimeClass = $identity.runtimeName }}
+{{- end }}
 {{- $workerHixlep := dict }}
 {{- if $ascendHostRoCE }}
 {{-   $controlAddr = "unix:///run/model-transfer-sockets/control.sock" }}
@@ -76,6 +80,7 @@
       "image" $image
       "brokerImage" $brokerImage
       "cacheRoot" $cacheRoot
+      "runtimeClassName" $workerRuntimeClass
       "hostNetwork" $ascendHostRoCE
       "dnsPolicy" $workerDNSPolicy
       "controlAddr" $controlAddr
